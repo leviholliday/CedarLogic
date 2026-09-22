@@ -20,6 +20,9 @@
 #ifdef WITH_SKIA
 #include "render/SkiaProbe.h"   // headless --skia-probe (no Skia headers leak here)
 #include "render/RendererHealth.h"
+#ifdef __APPLE__
+#include "MacAppearance.h"
+#endif
 #endif
 #include "wx/fileconf.h"
 #include "wx/settings.h"   // wxSystemSettings::GetAppearance(), for ThemeMode::System
@@ -777,6 +780,16 @@ bool MainApp::OnInit()
     // create the main application window
     MainFrame *frame = new MainFrame(VERSION_TITLE(), cmdFilename);
 
+    // A headless render still has to realize its window, but nobody should see
+    // it: the app spawns these to draw version previews while the real window
+    // is in use, and a window flashing to the front each time is maddening.
+    if (renderMode().headlessRender) {
+#ifdef __APPLE__
+        MacSetBackgroundApp();
+#endif
+        frame->Move(-30000, -30000);
+    }
+
     if (renderMode().headlessRender && (wireShape || wireDrag)) {
         // Wire-router test path: two gates + a wire, dump the routed segment map
         // (--wire-shape) or the map after a programmatic segment drag (--wire-drag).
@@ -964,6 +977,10 @@ void MainApp::loadSettings() {
 	conf->Read("LastDirectory", &str, "");
 	appConfig().appSettings.lastDir = str;
 	conf->Read("ExportInfoEnabled", &appConfig().appSettings.exportInfoEnabled, true);
+	conf->Read("ToolbarStyle", &appConfig().appSettings.toolbarStyle, 0);
+	conf->Read("ToolbarHidden", &appConfig().appSettings.toolbarHidden, 0);
+	conf->Read("LastLibraryDoc", &str, "");
+	appConfig().appSettings.lastLibraryDoc = str.ToStdString();
 	conf->Read("StudentName", &str, "");
 	appConfig().appSettings.studentName = str.ToStdString();
 

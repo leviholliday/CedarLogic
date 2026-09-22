@@ -52,6 +52,9 @@
 #include "OscopeFrame.h"
 #include "PreferencesWindow.h"
 #include "TruthTableDialog.h"
+#include "ModernToolbar.h"
+#include "CircuitLibrary.h"
+#include "LibraryDialogs.h"
 #include <wx/progdlg.h>
 #include <algorithm>
 #ifdef __APPLE__
@@ -172,15 +175,22 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     // create a menu bar
 	//////////////////////////////////////////////////////////////////////////
     wxMenu *fileMenu = new wxMenu; // FILE MENU
-	fileMenu->Append(wxID_NEW, "&New\tCtrl+N", "Create new circuit");
-	fileMenu->Append(wxID_OPEN, "&Open\tCtrl+O", "Open circuit");
-	fileMenu->Append(wxID_SAVE, "&Save\tCtrl+S", "Save circuit");
-	fileMenu->Append(wxID_SAVEAS, "Save &As\tCtrl+Shift+S", "Save circuit");
+	// Circuits live in the app's library and save themselves (see
+	// CircuitLibrary.h); files on disk come in through Import and go out
+	// through Export.
+	fileMenu->Append(wxID_NEW, "&New\tCtrl+N", "Start a new circuit");
+	fileMenu->Append(wxID_OPEN, "&Open...\tCtrl+O", "Open one of your circuits");
+	fileMenu->Append(File_Import, "&Import File...\tCtrl+Shift+O", "Bring a .cdl file into your circuits");
+	fileMenu->Append(wxID_SAVE, "&Save\tCtrl+S", "Save now and keep a version");
+	fileMenu->Append(File_Rename, "&Rename...", "Rename this circuit");
+	fileMenu->Append(File_VersionHistory, "&Version History...", "See and restore earlier versions");
+	fileMenu->Append(File_CloseCircuit, "Close &Circuit\tCtrl+Shift+W", "Close this circuit (it stays in your circuits)");
 	fileMenu->AppendSeparator();
 	// Tabs are documents, not edits -- they belong beside New and Open.
 	fileMenu->Append(Tool_NewTab, "New &Tab\tCtrl+T", "Open a new tab");
 	fileMenu->Append(Tool_CloseTab, "&Close Tab\tCtrl+W", "Close the current tab");
 	fileMenu->AppendSeparator();
+	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+S", "Save a .cdl copy anywhere, to share or submit");
 	fileMenu->Append(File_Export, "Export as Image...\tCtrl+E", "Export or copy circuit image");
 	fileMenu->Append(File_ExportV2, "Export as V2 (legacy XML)...", "Save a copy in the pre-V3 XML format");
 	fileMenu->Append(File_ExportLegacy, "Export as V1.x Compatible...", "Save a copy in the oldest format");
@@ -499,6 +509,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	}, Edit_Duplicate);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);
 	Bind(wxEVT_MENU, &MainFrame::OnTruthTable, this, View_TruthTable);
+	Bind(wxEVT_MENU, &MainFrame::OnImport, this, File_Import);
+	Bind(wxEVT_MENU, &MainFrame::OnRenameCircuit, this, File_Rename);
+	Bind(wxEVT_MENU, &MainFrame::OnVersionHistory, this, File_VersionHistory);
+	Bind(wxEVT_MENU, &MainFrame::OnCloseCircuit, this, File_CloseCircuit);
 	Bind(wxEVT_TOOL, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, Tool_SimView);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->animateZoomTo(DEFAULT_ZOOM);
@@ -553,7 +567,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	mainSizer->Add( sidePanelSash, wxSizerFlags(0).Expand() );
 	mainSizer->Add( rightSplitter, wxSizerFlags(1).Expand().Border(wxALL, 0) );
 
-	SetSizer( mainSizer);
+	modernBar = new ModernToolbar(this, this);
+	rootSizer = new wxBoxSizer(wxVERTICAL);
+	rootSizer->Add(modernBar, 0, wxEXPAND);
+	rootSizer->Add(mainSizer, 1, wxEXPAND);
+	SetSizer( rootSizer );
 	ApplySidePanelWidth();
 		
 	threadLogic *thread = CreateThread();
@@ -600,6 +618,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	// Everything it touches -- canvases, minimap, oscope panel, macOS chrome --
 	// exists by now, unlike earlier in this constructor.
 	ApplyTheme();
+	ApplyToolbarStyle();
 
 	// Show the main window
 	Show(true);
@@ -610,6 +629,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 
 	doOpenFile = (cmdFilename.size() > 0);
 	this->openedFilename = cmdFilename;
+	// Reopen whatever was open at quit (unless a file was handed to us).
+	if (!doOpenFile && library::exists(appConfig().appSettings.lastLibraryDoc))
+		pendingLibraryOpen = appConfig().appSettings.lastLibraryDoc;
+	updateDocumentTitle();
 
 	offerRecovery();
 
@@ -740,25 +763,12 @@ void MainFrame::OnClose(wxCloseEvent& event) {
 	
 	pauseTimers();
 
-	// Allow the user to save the file, unless we are in the midst of terminating the app!!, KAS 4/26/07	
-	if (fileIsDirty() && !destroy) {
-		wxMessageDialog dialog( this, "Circuit has not been saved.  Would you like to save it?", "Save Circuit", wxYES_DEFAULT|wxYES_NO|wxCANCEL|wxICON_QUESTION);
-		switch (dialog.ShowModal()) {
-		case wxID_YES:
-			OnSave(*((wxCommandEvent*)(&event)));
-			destroy = true;  // postpone destruction until wxWidgets cleans up, KAS 4/26/07
-			break;
-		case wxID_NO:
-			destroy = true;  // postpone destruction until wxWidgets cleans up, KAS 4/26/07
-			break;
-		case wxID_CANCEL:
-			if (event.CanVeto()) event.Veto(); else destroy = true;
-			break;
-		}			
-	} else {
-		destroy = true;      // postpone destruction until wxWidgets cleans up, KAS 4/26/07
-	}
-	
+	// No "save?" prompt: the circuit saves itself into the library, with a
+	// version for this session.
+	if (!destroy && fileIsDirty()) saveToLibrary(false);
+	if (!destroy && !libraryId.empty()) library::snapshot(libraryId);
+	destroy = true;      // postpone destruction until wxWidgets cleans up, KAS 4/26/07
+
 	resumeTimers(TIMER_POLL_MS);
 
 	if (destroy)
@@ -799,19 +809,13 @@ void MainFrame::OnAbout(wxCommandEvent& WXUNUSED(event)) {
     wxMessageBox(msg, "About", wxOK | wxICON_INFORMATION, this);
 }
 
-void MainFrame::OnNew(wxCommandEvent& event) {
+void MainFrame::OnNew(wxCommandEvent& WXUNUSED(event)) {
+	// Nothing to ask: the current circuit is saved in the library.
+	if (fileIsDirty()) saveToLibrary(false);
+	clearToNewCircuit();
+}
 
-	if (fileIsDirty()) {
-		wxMessageDialog dialog( this, "Circuit has not been saved.  Would you like to save it?", "Save Circuit", wxYES_DEFAULT|wxYES_NO|wxCANCEL|wxICON_QUESTION);
-		switch (dialog.ShowModal()) {
-		case wxID_YES:
-			OnSave(event);
-			break;
-		case wxID_CANCEL:
-			return;
-		}			
-	}
-
+void MainFrame::clearToNewCircuit() {
 	pauseTimers();
 
 	// Clear the message queues under the lock -- the logic thread drains
@@ -843,7 +847,6 @@ void MainFrame::OnNew(wxCommandEvent& event) {
 	currentCanvas->setMinimap(miniMap);
 
 	currentCanvas->Update(); // Render();
-	this->SetTitle(VERSION_TITLE()); // KAS
 	removeTempFile();
 	currentTempNum++;
     openedFilename = "";
@@ -851,46 +854,128 @@ void MainFrame::OnNew(wxCommandEvent& event) {
 	recoveredUnsaved = false;
 	loadedFileFormat = 3;  // a fresh circuit saves as v3
 	saveFormatDecided = false;
+	libraryId.clear();
+	appConfig().appSettings.lastLibraryDoc.clear();
+	updateDocumentTitle();
 
 	resumeTimers(TIMER_POLL_MS);
 
 }
 
 void MainFrame::OnOpen(wxCommandEvent& event) {
-	
-
-	currentCanvas->getCircuit()->setSimulate(false);
-	if (fileIsDirty()) {
-		wxMessageDialog dialog( this, "Circuit has not been saved.  Would you like to save it?", "Save Circuit", wxYES_DEFAULT|wxYES_NO|wxCANCEL|wxICON_QUESTION);
-		switch (dialog.ShowModal()) {
-		case wxID_YES:
-			OnSave(event);
-			break;
-		case wxID_CANCEL:
-			currentCanvas->getCircuit()->setSimulate(true);
-			return;
-		}			
-	}
-	
-	pauseTimers();
-
-	wxString caption = "Open a circuit";
-	wxString wildcard = "Circuit files (*.cdl)|*.cdl";
-	wxString defaultFilename = "";
-	wxFileDialog dialog(this, caption, wxEmptyString, defaultFilename, wildcard, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-	dialog.SetDirectory(lastDirectory);
-	
-	
-	if (dialog.ShowModal() == wxID_OK) {
-		lastDirectory = dialog.GetDirectory();
-		loadCircuitFile(dialog.GetPath().ToStdString());
-	}
-    currentCanvas->Update(); // Render();
-	currentCanvas->getCircuit()->setSimulate(true);
-
-	resumeTimers(TIMER_POLL_MS);
-
+	const LibraryChoice choice = ShowLibraryDialog(this, libraryId);
+	if (choice.action == LibraryChoice::Import) OnImport(event);
+	else if (choice.action == LibraryChoice::Open && choice.id != libraryId) openLibraryCircuit(choice.id);
+	updateDocumentTitle();   // it may have been renamed in there
 }
+
+void MainFrame::OnImport(wxCommandEvent& WXUNUSED(event)) {
+	wxFileDialog dialog(this, "Import a circuit", wxEmptyString, wxEmptyString,
+	                    "Circuit files (*.cdl)|*.cdl", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	dialog.SetDirectory(lastDirectory);
+	if (dialog.ShowModal() != wxID_OK) return;
+	lastDirectory = dialog.GetDirectory();
+	importCircuitFile(dialog.GetPath());
+}
+
+bool MainFrame::importCircuitFile(const wxString& path) {
+	cl::LoadResult check;
+	std::string error;
+	if (!CircuitParse::readCircuit(path.ToStdString(), check, error)) {
+		if (!renderMode().headlessRender)
+			wxMessageBox(wxString(error), "Import Error", wxOK | wxICON_ERROR, this);
+		return false;
+	}
+	// A copy: the file on disk is never touched again.
+	const std::string id = library::create(wxFileName(path).GetName());
+	if (!wxCopyFile(path, library::circuitPath(id), true)) {
+		library::remove(id);
+		wxMessageBox("Couldn't copy that file into your circuits.", "Import Error", wxOK | wxICON_ERROR, this);
+		return false;
+	}
+	library::snapshot(id);   // the original, as it came in
+	return openLibraryCircuit(id);
+}
+
+bool MainFrame::openLibraryCircuit(const std::string& id) {
+	if (!library::exists(id)) return false;
+	if (fileIsDirty()) saveToLibrary(false);
+	currentCanvas->getCircuit()->setSimulate(false);
+	pauseTimers();
+	const bool ok = loadCircuitFile(library::circuitPath(id).ToStdString(), false);
+	if (ok) {
+		libraryId = id;
+		lastSnapshotMs = 0;
+		appConfig().appSettings.lastLibraryDoc = id;
+	}
+	currentCanvas->Update();
+	currentCanvas->getCircuit()->setSimulate(true);
+	resumeTimers(TIMER_POLL_MS);
+	updateDocumentTitle();
+	return ok;
+}
+
+bool MainFrame::saveToLibrary(bool explicitSave) {
+	// A new circuit gets its library entry the first time there's something
+	// to keep.
+	if (libraryId.empty() || !library::exists(libraryId)) {
+		const wxString name = recoveredFrom.empty() ? library::nextUntitledName()
+		                                            : wxFileName(recoveredFrom).GetName();
+		libraryId = library::create(name);
+		openedFilename = library::circuitPath(libraryId);
+		documentLock.acquire(openedFilename.ToStdString());
+	}
+	if (!save(openedFilename.ToStdString(), 3)) {
+		if (explicitSave)
+			wxMessageBox("Couldn't save:\n\n" + lastSaveError, "Save Error", wxOK | wxICON_ERROR, this);
+		return false;
+	}
+	commandProcessor->MarkAsSaved();
+	recoveredUnsaved = false;
+	removeTempFile();
+	// A version on every Cmd+S, and every few minutes of autosaving.
+	const wxLongLong now = wxGetLocalTimeMillis();
+	if (explicitSave || now - lastSnapshotMs > 5 * 60 * 1000) {
+		library::snapshot(libraryId);
+		lastSnapshotMs = now;
+	}
+	appConfig().appSettings.lastLibraryDoc = libraryId;
+	updateDocumentTitle();
+	return true;
+}
+
+void MainFrame::updateDocumentTitle() {
+	SetTitle(libraryId.empty() ? wxString("Untitled") : library::name(libraryId));
+}
+
+void MainFrame::OnRenameCircuit(wxCommandEvent& WXUNUSED(event)) {
+	if (libraryId.empty() && !saveToLibrary(true)) return;
+	wxTextEntryDialog ask(this, "Name:", "Rename Circuit", library::name(libraryId));
+	if (ask.ShowModal() != wxID_OK || ask.GetValue().Strip(wxString::both).empty()) return;
+	library::rename(libraryId, ask.GetValue());
+	updateDocumentTitle();
+}
+
+void MainFrame::OnVersionHistory(wxCommandEvent& WXUNUSED(event)) {
+	if (libraryId.empty() && !saveToLibrary(true)) return;
+	const wxString version = ShowVersionHistoryDialog(this, libraryId);
+	if (version.empty()) return;
+	// Keep what's on screen as a version first, so restoring loses nothing.
+	saveToLibrary(true);
+	const std::string id = libraryId;
+	wxCopyFile(version, library::circuitPath(id), true);
+	commandProcessor->MarkAsSaved();   // don't save the old contents back over it
+	loadCircuitFile(library::circuitPath(id).ToStdString(), false);
+	libraryId = id;
+	updateDocumentTitle();
+	SetStatusText("Restored the version from " + wxFileName(version).GetName());
+}
+
+void MainFrame::OnCloseCircuit(wxCommandEvent& WXUNUSED(event)) {
+	if (fileIsDirty()) saveToLibrary(false);
+	clearToNewCircuit();   // it stays in the library, but won't reopen at launch
+}
+
 //Edit by Joshua Lansford 2/15/07
 //Purpose of edit:  by obstracting the loading of
 //circuit files out of the onOpen rutine,
@@ -908,16 +993,20 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	// Someone else editing this? Advisory only -- we can still open it, and
 	// still save over it. The point is that both people find out now rather
 	// than by losing an afternoon's work to whoever saves last.
-	const std::string holder = asCopy ? std::string() : FileLock::heldBy(fileName);
+	// Reopening the file we already have open -- restoring a version, say --
+	// would otherwise find our own lock and warn about ourselves.
+	const bool reopeningOurs = (path == openedFilename);
+	const std::string holder = (asCopy || reopeningOurs) ? std::string() : FileLock::heldBy(fileName);
 	if (!holder.empty() && !renderMode().headlessRender) {
 		wxMessageDialog dialog(this,
-			"This circuit is already open elsewhere:\n\n    " + wxString(holder) +
-			"\n\nIf you both save it, whoever saves last wins and the other's "
-			"work is lost.\n\nOpen a copy instead? (Save will then ask where to "
-			"put it, leaving the original alone.)",
-			"Circuit Already Open",
-			wxYES_NO | wxCANCEL | wxYES_DEFAULT | wxICON_EXCLAMATION);
-		dialog.SetYesNoCancelLabels("Open a Copy", "Open Anyway", "Cancel");
+			"Someone else is editing this circuit right now.",
+			"Open a Copy?", wxYES_NO | wxCANCEL | wxYES_DEFAULT | wxICON_QUESTION);
+		dialog.SetExtendedMessage(
+			wxString(holder) + " has it open.\n\n"
+			"Working on a copy is the safe choice: your changes save separately "
+			"and their work stays untouched. Opening the original means whoever "
+			"saves last overwrites the other.");
+		dialog.SetYesNoCancelLabels("Open a Copy", "Open the Original", "Cancel");
 		const int answer = dialog.ShowModal();
 		if (answer == wxID_CANCEL) return false;
 		if (answer == wxID_YES) {
@@ -1002,7 +1091,8 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	// leaves it undecided, so the same choice is offered again when they save.
 	// A recovery snapshot is always current-format, so this never fires for one.
 	if ((loadedFileFormat == 1 || loadedFileFormat == 2)
-	    && !renderMode().headlessRender) {
+	    && !renderMode().headlessRender
+	    && !path.StartsWith(library::root())) {   // library copies always save as V3
 		wxString v = (loadedFileFormat == 1) ? "V1" : "V2";
 		wxMessageDialog dialog(this,
 			"This circuit was saved in an older file format (" + v + ").\n\n"
@@ -1025,31 +1115,8 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	return true;
 }
 
-void MainFrame::OnSave(wxCommandEvent& event) {
-	if (openedFilename == "") OnSaveAs(event);
-	else {
-		int format = chooseSaveFormat();
-		if (format == -1) return;  // user cancelled
-		bool success = save((string)openedFilename, format);
-		// The work is on disk under its own name, so the snapshot is now the
-		// older copy of the two. Dropping it keeps a later crash from offering
-		// to "recover" something staler than the file they already have.
-		if (success) {
-			removeTempFile();
-			commandProcessor->MarkAsSaved();
-			recoveredUnsaved = false;   // it has a home now
-		} else if (lastSaveError.rfind("Warning:", 0) == 0) {
-			// The file was written, but with a caveat (e.g. bus features can't be
-			// represented in v1.x). Treat it as saved.
-			wxMessageBox(lastSaveError, "Save Warning", wxOK | wxICON_WARNING, this);
-			removeTempFile();
-			commandProcessor->MarkAsSaved();
-			recoveredUnsaved = false;
-		} else {
-			wxString errorMsg = "Failed to save file:\n\n" + lastSaveError;
-			wxMessageBox(errorMsg, "Save Error", wxOK | wxICON_ERROR, this);
-		}
-	}
+void MainFrame::OnSave(wxCommandEvent& WXUNUSED(event)) {
+	if (saveToLibrary(true)) SetStatusText("Saved. A version was added to Version History.");
 }
 
 // Ask which format to write an old-format file in. v3/new circuits save as v3
@@ -1073,41 +1140,16 @@ int MainFrame::chooseSaveFormat() {
 	return loadedFileFormat;  // keep the original format
 }
 
+// File > Export as CedarLogic File: a .cdl copy anywhere on disk, to share or
+// hand in. The circuit itself stays in the library.
 void MainFrame::OnSaveAs(wxCommandEvent& WXUNUSED(event)) {
-
-	// After a recovery the circuit has no path of its own; suggest the name of
-	// the document it was recovered from rather than making them retype it.
-	wxString caption = "Save circuit";
-	wxString wildcard = "Circuit files (*.cdl)|*.cdl";
-	wxString defaultFilename = recoveredFrom.empty()
-		? wxString("") : wxFileName(recoveredFrom).GetFullName();
-	wxFileDialog dialog(this, caption, wxEmptyString, defaultFilename, wildcard, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
-	// Where it came from beats where they last were: the point of a recovery is
-	// to put the work back roughly where they lost it.
-	dialog.SetDirectory(recoveredFrom.empty()
-		? lastDirectory : wxFileName(recoveredFrom).GetPath());
-	if (dialog.ShowModal() == wxID_OK) {
-		wxString path = dialog.GetPath();
-		int format = chooseSaveFormat();
-		if (format == -1) return;  // user cancelled
-		bool success = save((string)path, format);
-		if (success || lastSaveError.rfind("Warning:", 0) == 0) {
-			if (!success)
-				wxMessageBox(lastSaveError, "Save Warning", wxOK | wxICON_WARNING, this);
-			removeTempFile();
-			openedFilename = path;
-			recoveredFrom = "";   // it has a home of its own now
-			recoveredUnsaved = false;
-			// The document moved, so the lock follows it: drop the old one and
-			// mark the new file as ours.
-			documentLock.acquire(path.ToStdString());
-			this->SetTitle(VERSION_TITLE() + " - " + path );
-			commandProcessor->MarkAsSaved();
-		} else {
-			wxString errorMsg = "Failed to save file:\n\n" + lastSaveError;
-			wxMessageBox(errorMsg, "Save Error", wxOK | wxICON_ERROR, this);
-		}
-	}
+	wxFileDialog dialog(this, "Export as CedarLogic File", wxEmptyString, GetDocumentTitle() + ".cdl",
+	                    "Circuit files (*.cdl)|*.cdl", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+	dialog.SetDirectory(lastDirectory);
+	if (dialog.ShowModal() != wxID_OK) return;
+	lastDirectory = dialog.GetDirectory();
+	if (!save(dialog.GetPath().ToStdString(), 3))
+		wxMessageBox("Couldn't export:\n\n" + lastSaveError, "Export Error", wxOK | wxICON_ERROR, this);
 }
 
 void MainFrame::OnOscope(wxCommandEvent& WXUNUSED(event)) {
@@ -1163,6 +1205,7 @@ void MainFrame::ApplyTheme() {
 	const bool dark = renderMode().darkMode;
 
 	if (wxMenuBar* mb = GetMenuBar()) mb->Check(View_DarkMode, dark);
+	if (modernBar) ApplyToolbarStyle();
 	if (toolBar->FindById(Tool_ThemeToggle) != nullptr) {
 		if (toolBar->GetToolState(Tool_ThemeToggle) != dark)
 			toolBar->ToggleTool(Tool_ThemeToggle, dark);
@@ -1251,6 +1294,7 @@ void MainFrame::OnPreferences(wxCommandEvent& event) {
 void MainFrame::ApplyPreferences() {
 	applyAutosaveInterval();
 	ApplyStatusInfoVisibility();
+	ApplyToolbarStyle();
 	gatePalette->ApplyGateSize();
 	ApplyThemeShortcutLabel();
 	ApplyThemeToggleVisibility();
@@ -1404,8 +1448,11 @@ void MainFrame::drainLogicMessages() {
 	
 	if ( doOpenFile ) {
 		doOpenFile = false;
-		load((string)openedFilename);
-		this->SetTitle(VERSION_TITLE() + " - " + openedFilename );
+		importCircuitFile(openedFilename);   // a copy, into the library
+	} else if (!pendingLibraryOpen.empty()) {
+		const std::string id = pendingLibraryOpen;
+		pendingLibraryOpen.clear();
+		openLibraryCircuit(id);
 	}
 	
 	if ( gCircuit->panic ) {
@@ -1665,6 +1712,7 @@ void MainFrame::SetSimView(bool on) {
 	GetMenuBar()->Check(View_SimView, on);
 	if (toolBar->GetToolState(Tool_SimView) != on) toolBar->ToggleTool(Tool_SimView, on);
 	for (GUICanvas* c : canvases) if (c) c->Refresh();
+	if (modernBar) ApplyToolbarStyle();   // Seamless follows the canvas color
 	currentCanvas->SetFocus();
 }
 
@@ -1724,7 +1772,50 @@ void MainFrame::ApplyStatusInfoVisibility() {
 	statusZoom.clear(); statusPos.clear(); statusCounts.clear();
 }
 
+bool MainFrame::IsLockToolOn() { return toolBar->GetToolState(Tool_Lock); }
+
+void MainFrame::SetLockTool(bool on) {
+	if (IsLockToolOn() == on) return;
+	toolBar->ToggleTool(Tool_Lock, on);
+	wxCommandEvent ev(wxEVT_TOOL, Tool_Lock);
+	ProcessWindowEvent(ev);   // OnLock reads the toggle state
+}
+
+bool MainFrame::CanUndoCommand() { return commandProcessor && commandProcessor->CanUndo(); }
+bool MainFrame::CanRedoCommand() { return commandProcessor && commandProcessor->CanRedo(); }
+
+int MainFrame::GetZoomPercent() {
+	if (currentCanvas == nullptr || currentCanvas->getZoom() <= 0) return 100;
+	return (int)(100.0 * DEFAULT_ZOOM / currentCanvas->getZoom() + 0.5);
+}
+
+wxString MainFrame::GetDocumentTitle() {
+	return GetTitle();   // the library name, kept current by updateDocumentTitle
+}
+
+wxString MainFrame::GetDocumentSubtitle() {
+	wxString page = "Page 1";
+	const int sel = canvasBook->GetSelection();
+	if (sel != wxNOT_FOUND) page = canvasBook->GetPageText(sel);
+	return page + wxString::FromUTF8(" \u00B7 ") + (fileIsDirty() ? "Edited" : "Saved");
+}
+
+void MainFrame::ApplyToolbarStyle() {
+	const int style = appConfig().appSettings.toolbarStyle;
+	const bool classic = style == cl::tb::Classic;
+	if (toolBar->IsShown() != classic) toolBar->Show(classic);
+	if (modernBar->IsShown() == classic) modernBar->Show(!classic);
+	if (!classic) modernBar->Reconfigure();
+#ifdef __APPLE__
+	// The custom bar takes over the title bar row; Classic gives it back.
+	MacSetCustomTitlebar(MacGetTopLevelWindowRef(), !classic, ModernToolbar::BarHeight());
+#endif
+	Layout();
+	SendSizeEvent();   // the content area just grew into (or out of) the title bar
+}
+
 void MainFrame::UpdateStatusInfo() {
+	if (modernBar) modernBar->Poll();
 	wxStatusBar* sb = GetStatusBar();
 	if (sb == nullptr || sb->GetFieldsCount() < 4 || currentCanvas == nullptr) return;
 
@@ -1973,7 +2064,7 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	exportDialog.SetSizer(mainSizer);
 
 	wxString fileLabel;
-	if (!openedFilename.empty()) fileLabel = wxFileName(openedFilename).GetFullName();
+	fileLabel = GetDocumentTitle();
 	auto currentInfo = [&]() {
 		ExportInfo info;
 		info.enabled = infoCheck->GetValue();
@@ -2344,8 +2435,11 @@ void MainFrame::saveSettings() {
 	conf->Write("RefreshRate", settings.refreshRate);
 	conf->Write("AutosaveSeconds", settings.autosaveSeconds);
 	conf->Write("LastDirectory", lastDirectory);
+	conf->Write("LastLibraryDoc", wxString(appConfig().appSettings.lastLibraryDoc));
 	conf->Write("StudentName", wxString::FromUTF8(settings.studentName.c_str()));
 	conf->Write("ExportInfoEnabled", settings.exportInfoEnabled);
+	conf->Write("ToolbarStyle", settings.toolbarStyle);
+	conf->Write("ToolbarHidden", settings.toolbarHidden);
 	conf->Write("WireConnRadius", settings.wireConnRadius);
 	conf->Write("WireConnVisible", settings.wireConnVisible);
 	conf->Write("GridlineVisible", settings.gridlineVisible);
@@ -2444,9 +2538,9 @@ int MainFrame::autosaveIntervalMs() {
 // startup and whenever Preferences is accepted.
 void MainFrame::applyAutosaveInterval() {
 	if (!autosaveTimer) return;
-	const int ms = autosaveIntervalMs();
+	// Always on: every few seconds, whatever changed goes into the library.
 	autosaveTimer->Stop();
-	if (ms > 0) autosaveTimer->Start(ms);
+	autosaveTimer->Start(4000);
 }
 
 // Offer back anything a session that died left behind. Each entry names the
@@ -2514,7 +2608,8 @@ void MainFrame::offerRecovery() {
 // way through an edit here, so the circuit is safe to walk.
 void MainFrame::OnAutosaveTimer(wxTimerEvent& WXUNUSED(event)) {
 	if (!fileIsDirty()) return;
-	autosave();
+	if (wxGetMouseState().LeftIsDown()) return;   // mid-drag: next tick
+	saveToLibrary(false);
 }
 
 void MainFrame::autosave() {

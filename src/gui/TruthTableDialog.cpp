@@ -182,5 +182,11 @@ void ShowTruthTableDialog(wxWindow* parent, TruthTableData& data) {
 
 	dlg.SetSizerAndFit(top);
 	dlg.CentreOnParent();
+	// Escape closes it, like every other window in the app. ("Done" is a
+	// wxID_OK button, which Escape would not otherwise reach.)
+	dlg.Bind(wxEVT_CHAR_HOOK, [&dlg](wxKeyEvent& e) {
+		if (e.GetKeyCode() == WXK_ESCAPE) dlg.EndModal(wxID_OK);
+		else e.Skip();
+	});
 	dlg.ShowModal();
 }

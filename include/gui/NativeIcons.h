@@ -15,6 +15,13 @@
 // Returns wxNullBitmap if the symbol name is not found.
 wxBitmap NativeIcon_GetSFSymbol(const char* symbolName, int pointSize);
 
+// An SF Symbol drawn in a solid colour (for custom-drawn UI, where AppKit
+// doesn't tint template images). `scale` is the display's backing scale.
+// Returns wxNullBitmap if the symbol doesn't exist.
+wxBitmap NativeIcon_TintedSFSymbol(const char* symbolName, double pointSize,
+                                   unsigned char r, unsigned char g, unsigned char b,
+                                   unsigned char a, double scale);
+
 // Updates a toolbar item's image to an SF Symbol, bypassing wxWidgets'
 // broken alternate-image generation for toggle tools.
 void NativeIcon_SetToolbarSFSymbol(wxToolBar* toolbar, int toolId,

@@ -49,9 +49,15 @@ enum class ThemeMode {
 struct ApplicationSettings {
 	std::string helpFile;
 	std::string lastDir;
+	// The library circuit that was open at quit, reopened on the next launch.
+	std::string lastLibraryDoc;
 	// Printed under exported circuits (see MainFrame::ExportInfo).
 	std::string studentName;
-	bool exportInfoEnabled = true;   // Export dialog's "Name and result" box, as last left
+	bool exportInfoEnabled = true;
+	// Toolbar: style (see cl::tb::Style; 0 = the native Classic toolbar) and
+	// which tool groups are hidden (bit per cl::tb::Group).
+	int toolbarStyle = 0;
+	int toolbarHidden = 0;   // Export dialog's "Name and result" box, as last left
 	int mainFrameWidth;
 	int mainFrameHeight;
 	int mainFrameLeft;

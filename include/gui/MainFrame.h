@@ -31,6 +31,7 @@
 #include "GUICircuit.h"
 //#include "OscopeFrame.h"
 class OscopeFrame;
+class ModernToolbar;
 #include "klsMiniMap.h"
 #include <thread>
 #include <atomic>
@@ -55,6 +56,10 @@ enum
 	Edit_Duplicate,
 	View_SimView,
 	View_TruthTable,
+	File_Import,
+	File_Rename,
+	File_VersionHistory,
+	File_CloseCircuit,
 	Tool_SimView,
 	Tool_ThemeToggle,
 
@@ -173,6 +178,19 @@ public:
 	void StepSimOnce();
 	int GetStepMs() const;
 	void SetStepMs(int ms);
+
+	// For the custom toolbar (ModernToolbar), which draws and drives the same
+	// controls as the native one.
+	bool IsLockToolOn();
+	void SetLockTool(bool on);
+	bool CanUndoCommand();
+	bool CanRedoCommand();
+	int GetZoomPercent();
+	wxString GetDocumentTitle();
+	wxString GetDocumentSubtitle();
+	// Classic (native) or one of the custom styles; also re-tints the macOS
+	// title bar for Seamless.
+	void ApplyToolbarStyle();
 
 	// Build a truth table from the page's switches (inputs) and lights
 	// (outputs) -- the selected ones if any are selected -- by trying every
@@ -373,6 +391,22 @@ private:
 	bool doOpenFile;
 	wxString lastDirectory;
 	wxString openedFilename;
+
+	// The circuit's home in the app's library (see CircuitLibrary.h); empty for
+	// a new circuit that hasn't been saved yet. openedFilename then points at
+	// its circuit.cdl.
+	std::string libraryId;
+	wxLongLong lastSnapshotMs = 0;
+	std::string pendingLibraryOpen;   // reopen at startup, once the pump runs
+	bool saveToLibrary(bool explicitSave);
+	bool openLibraryCircuit(const std::string& id);
+	bool importCircuitFile(const wxString& path);
+	void clearToNewCircuit();
+	void updateDocumentTitle();
+	void OnImport(wxCommandEvent& event);
+	void OnRenameCircuit(wxCommandEvent& event);
+	void OnVersionHistory(wxCommandEvent& event);
+	void OnCloseCircuit(wxCommandEvent& event);
 	int loadedFileFormat = 3;  // format the current circuit was opened from (1/2/3); 3 for new
 	bool saveFormatDecided = false;  // user has answered the keep-or-migrate prompt for this file
 	unsigned int currentTempNum;
@@ -397,6 +431,8 @@ private:
 	wxSplitterWindow* rightSplitter;
 	OscopeFrame* oscopePanel;
 	wxBoxSizer* mainSizer;
+	wxBoxSizer* rootSizer = nullptr;   // custom toolbar above mainSizer
+	ModernToolbar* modernBar = nullptr;
 	
     // any class wishing to process wxWidgets events must use this macro
     DECLARE_EVENT_TABLE()

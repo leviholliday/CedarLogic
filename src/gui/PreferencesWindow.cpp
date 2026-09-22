@@ -20,6 +20,10 @@
 #include <wx/spinctrl.h>
 #include <wx/textctrl.h>
 #include <wx/slider.h>
+#include <wx/radiobut.h>
+#include <wx/statbmp.h>
+#include "ModernToolbar.h"
+#include "RenderMode.h"
 #include <wx/settings.h>
 #include <memory>
 
@@ -30,6 +34,10 @@ namespace {
 // Shared layout and apply plumbing: a two-column grid (right-aligned label,
 // control) with a line of gray help text under each control, like the
 // settings panes in macOS apps.
+// True while the Shortcuts page is waiting for a key combination, so Escape
+// cancels that instead of closing the window out from under it.
+bool g_capturingShortcut = false;
+
 class PrefsPanel : public wxPanel {
 public:
 	explicit PrefsPanel(wxWindow* parent) : wxPanel(parent) {
@@ -38,6 +46,19 @@ public:
 		wxBoxSizer* outer = new wxBoxSizer(wxVERTICAL);
 		outer->Add(grid, 1, wxALL | wxEXPAND, 20);
 		SetSizer(outer);
+		// Escape closes this window, the way it closes every other one -- but
+		// only once it has nothing nearer to back out of first: a shortcut
+		// being recorded, or a field being typed in.
+		Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& e) {
+			if (e.GetKeyCode() != WXK_ESCAPE) { e.Skip(); return; }
+			if (g_capturingShortcut) { e.Skip(); return; }
+			wxWindow* focus = wxWindow::FindFocus();
+			if (dynamic_cast<wxTextCtrl*>(focus) && focus->IsDescendant(this)) {
+				focus->Navigate();   // step out of the field; a second Escape closes
+				return;
+			}
+			wxTheApp->CallAfter([] { DismissPreferencesWindow(); });
+		});
 	}
 
 	// Windows/Linux show OK/Cancel: OK lands here.
@@ -91,12 +112,6 @@ public:
 	explicit GeneralPanel(wxWindow* parent) : PrefsPanel(parent) {
 		auto& s = appConfig().appSettings;
 
-		autosave = new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(80, -1),
-			wxSP_ARROW_KEYS, 0, 60, (s.autosaveSeconds + 59) / 60);
-		autosave->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent&) { changed(); });
-		addRow("Autosave every:", withUnit(autosave, "minutes"),
-			"How often a backup of your open circuit is saved. 0 turns it off.");
-
 		int fps = (s.refreshRate > 0) ? 1000 / s.refreshRate : 60;
 		refresh = new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(80, -1),
 			wxSP_ARROW_KEYS, 10, 1000, fps);
@@ -121,7 +136,6 @@ protected:
 		auto& s = appConfig().appSettings;
 		s.showStatusInfo = statusInfo->GetValue();
 		s.studentName = std::string(name->GetValue().Strip(wxString::both).ToUTF8());
-		s.autosaveSeconds = autosave->GetValue() * 60;
 		int fps = refresh->GetValue();
 		s.refreshRate = (fps > 0) ? 1000 / fps : 16;
 		pushLive();
@@ -139,7 +153,6 @@ private:
 		return box;
 	}
 
-	wxSpinCtrl* autosave;
 	wxSpinCtrl* refresh;
 	wxCheckBox* statusInfo;
 	wxTextCtrl* name;
@@ -305,6 +318,74 @@ private:
 	wxCheckBox* reverseTrackpad = nullptr;
 };
 
+// ---- Toolbar ---------------------------------------------------------------
+
+// Pick a toolbar style from pictures of each (drawn by the toolbar's own
+// code, so they always match), and choose which tools it shows.
+class ToolbarPanel : public wxPanel {
+public:
+	explicit ToolbarPanel(wxWindow* parent) : wxPanel(parent) {
+		auto& s = appConfig().appSettings;
+		wxBoxSizer* outer = new wxBoxSizer(wxVERTICAL);
+
+		const double scale = GetContentScaleFactor();
+		const int previewW = 520;
+		for (int st = 0; st < cl::tb::StyleCount; st++) {
+			wxRadioButton* rb = new wxRadioButton(this, wxID_ANY, cl::tb::styleName(st), wxDefaultPosition,
+				wxDefaultSize, st == 0 ? wxRB_GROUP : 0);
+			rb->SetValue(s.toolbarStyle == st);
+			wxFont f = rb->GetFont();
+			f.SetWeight(wxFONTWEIGHT_BOLD);
+			rb->SetFont(f);
+			rb->Bind(wxEVT_RADIOBUTTON, [this, st](wxCommandEvent&) { appConfig().appSettings.toolbarStyle = st; changed(); });
+			outer->Add(rb, 0, wxLEFT | wxRIGHT | wxTOP, 16);
+
+			wxStaticText* blurb = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(cl::tb::styleBlurb(st)));
+			blurb->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+			outer->Add(blurb, 0, wxLEFT | wxRIGHT, 38);
+
+			wxStaticBitmap* pic = new wxStaticBitmap(this, wxID_ANY,
+				ModernToolbar::RenderPreview(st, renderMode().darkMode, previewW, scale));
+			// Clicking the picture picks the style too.
+			pic->Bind(wxEVT_LEFT_DOWN, [rb, st, this](wxMouseEvent&) {
+				rb->SetValue(true);
+				appConfig().appSettings.toolbarStyle = st;
+				changed();
+			});
+			outer->Add(pic, 0, wxLEFT | wxRIGHT | wxTOP, 38 - 22);
+			outer->AddSpacer(6);
+		}
+
+		wxStaticText* showLabel = new wxStaticText(this, wxID_ANY, "Show in the toolbar:");
+		wxFont bf = showLabel->GetFont();
+		bf.SetWeight(wxFONTWEIGHT_BOLD);
+		showLabel->SetFont(bf);
+		outer->Add(showLabel, 0, wxLEFT | wxRIGHT | wxTOP, 16);
+		wxGridSizer* grid = new wxGridSizer(3, 6, 18);
+		for (int g = 0; g < cl::tb::GroupCount; g++) {
+			wxCheckBox* cb = new wxCheckBox(this, wxID_ANY, cl::tb::groupName(g));
+			cb->SetValue(!(s.toolbarHidden & (1 << g)));
+			cb->Bind(wxEVT_CHECKBOX, [this, g](wxCommandEvent& e) {
+				int& mask = appConfig().appSettings.toolbarHidden;
+				mask = e.IsChecked() ? (mask & ~(1 << g)) : (mask | (1 << g));
+				changed();
+			});
+			grid->Add(cb);
+		}
+		outer->Add(grid, 0, wxALL, 16);
+		wxStaticText* note = new wxStaticText(this, wxID_ANY,
+			"Applies to the custom styles. Hidden tools are still in the menus and keep their shortcuts.");
+		note->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+		outer->Add(note, 0, wxLEFT | wxRIGHT | wxBOTTOM, 16);
+		SetSizerAndFit(outer);
+	}
+	bool TransferDataFromWindow() override { apply(); return true; }
+
+private:
+	void changed() { if (wxPreferencesEditor::ShouldApplyChangesImmediately()) apply(); }
+	void apply() { if (wxGetApp().mainframe) wxGetApp().mainframe->ApplyPreferences(); }
+};
+
 // ---- Shortcuts -------------------------------------------------------------
 
 class ShortcutsPanel : public PrefsPanel {
@@ -324,8 +405,10 @@ public:
 		capture = new wxTextCtrl(this, wxID_ANY, formatThemeShortcut(mods, keyCode),
 			wxDefaultPosition, wxSize(180, -1), wxTE_CENTRE | wxTE_PROCESS_TAB);
 		capture->SetToolTip("Click, then press the new key combination");
-		capture->Bind(wxEVT_SET_FOCUS, [this](wxFocusEvent& e) { listening = true; showLabel(); e.Skip(); });
-		capture->Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent& e) { listening = false; showLabel(); e.Skip(); });
+		capture->Bind(wxEVT_SET_FOCUS, [this](wxFocusEvent& e) {
+			listening = g_capturingShortcut = true; showLabel(); e.Skip(); });
+		capture->Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent& e) {
+			listening = g_capturingShortcut = false; showLabel(); e.Skip(); });
 		capture->Bind(wxEVT_KEY_DOWN, &ShortcutsPanel::OnCaptureKey, this);
 		capture->Bind(wxEVT_CHAR, [](wxKeyEvent&) {});
 		addRow("Shortcut:", capture,
@@ -348,7 +431,7 @@ private:
 		if (!listening) { event.Skip(); return; }
 		const int k = event.GetKeyCode();
 		if (k == WXK_ESCAPE) {
-			listening = false;
+			listening = g_capturingShortcut = false;
 			showLabel();
 			capture->Navigate();   // move focus off so a second Escape isn't swallowed here
 			return;
@@ -362,7 +445,7 @@ private:
 		if (m == 0) return;   // a bare letter would fight with typing elsewhere
 		keyCode = k;
 		mods = m;
-		listening = false;
+		listening = g_capturingShortcut = false;
 		showLabel();
 		changed();
 	}
@@ -408,6 +491,7 @@ void ShowPreferencesWindow(wxWindow* parent) {
 		g_editor->AddPage(new Page<GeneralPanel>("General", "gearshape"));
 		g_editor->AddPage(new Page<AppearancePanel>("Appearance", "paintpalette"));
 		g_editor->AddPage(new Page<CanvasPanel>("Canvas", "cursorarrow.rays"));
+		g_editor->AddPage(new Page<ToolbarPanel>("Toolbar", "menubar.rectangle"));
 		g_editor->AddPage(new Page<ShortcutsPanel>("Shortcuts", "keyboard"));
 	}
 	g_editor->Show(parent);

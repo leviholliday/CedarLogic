@@ -30,6 +30,27 @@ void MacSetViewAppearance(void* nsView, int mode);
 // for that view, since a view's own appearance always overrides the app's.
 void MacSetApplicationAppearance(int mode);
 
+// The Seamless toolbar style: make the window's title bar transparent and give
+// the window this background, so title bar, toolbar and canvas read as one
+// surface. on = false restores the standard title bar.
+void MacSetSeamlessTitlebar(void* nsWindow, bool on, unsigned char r, unsigned char g, unsigned char b);
+
+// For the custom toolbar styles: let the window's content run up under a
+// transparent, title-less title bar, and move the red/yellow/green buttons so
+// they sit centered in a `barHeight`-tall bar. on = false puts it all back.
+// Kept in place across resizes and full screen.
+void MacSetCustomTitlebar(void* nsWindow, bool on, double barHeight);
+
+// Clicking an empty spot on the custom toolbar moves the window, and a double
+// click does whatever the user set in System Settings (zoom or minimize), as
+// with a real title bar.
+// Run without a Dock icon and without ever taking focus. Used by the headless
+// one-shot renders the app spawns for itself, so they never steal the screen.
+void MacSetBackgroundApp();
+
+void MacDragWindow(void* nsWindow);
+void MacTitlebarDoubleClick(void* nsWindow);
+
 #endif // __APPLE__
 
 #endif // MACAPPEARANCE_H
