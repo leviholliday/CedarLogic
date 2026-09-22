@@ -53,6 +53,8 @@ enum
 	View_ZoomActual,
 	View_FocusMode,
 	Edit_Duplicate,
+	View_SimView,
+	Tool_SimView,
 	Tool_ThemeToggle,
 
     TIMER_ID,
@@ -159,6 +161,17 @@ public:
 	// shortcut, toolbar switch, View menu checkmarks, canvas redraw). The
 	// Preferences window calls this after each change.
 	void ApplyPreferences();
+
+	// Simulation View (see RenderMode::simView) and the controls its bottom
+	// bar drives. These go through the same toolbar state as the Pause/Step
+	// buttons and the step slider, so everything stays in step.
+	bool IsSimView() const;
+	void SetSimView(bool on);
+	bool IsSimPaused();
+	void SetSimPaused(bool paused);
+	void StepSimOnce();
+	int GetStepMs() const;
+	void SetStepMs(int ms);
 
 	void ResumeExecution ( void );
 	

@@ -226,6 +226,7 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 
 	Stroke s;
 	s.width = (isBus ? 4.0f : 1.0f) * style.wireScale;
+	bool simLit = false;   // Simulation View: this wire is on, so it glows
 	if (!style.colorOutput || !style.showLiveState) {
 		// Print/topology: black, weight carries bus vs net (state ignored).
 		s = style.wire(WireState::Low, isBus);
@@ -244,7 +245,14 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 		}
 		double denom = pow(2.0, (double)state.size()) - 1;
 		if (denom > 0) redness /= denom;
-		if (conflict)      s.color = Color(0.0f, 1.0f, 1.0f);
+		if (style.simView) {
+			// Neon when any bit is on, dim slate when off; problems stand out.
+			if (conflict)            s.color = style.simError();
+			else if (unknown || hiz) s.color = style.simWarn();
+			else if (redness > 0)    { s.color = style.simOn(); simLit = true; }
+			else                     s.color = style.simOff();
+		}
+		else if (conflict) s.color = Color(0.0f, 1.0f, 1.0f);
 		else if (unknown)  s.color = Color(0.3f, 0.3f, 1.0f);
 		else if (hiz)      s.color = Color(0.0f, 0.78f, 0.0f);
 		else {
@@ -272,6 +280,11 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 		// stroke color carries real state meaning, so selection can't just
 		// recolor it; the glow adds the same "this is selected" read as the
 		// gate halo without losing that.
+		// Simulation View: a soft neon glow under wires that are on.
+		if (simLit) {
+			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.10f), s.width + 7.0f));
+			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.22f), s.width + 3.0f));
+		}
 		if (isSelectedNow) {
 			const Color ac = style.accent();
 			scene.lines(&pts[0], pts.size(), Stroke(Color(ac.r, ac.g, ac.b, 0.30f * style.selectionFade), s.width + 4.0f));

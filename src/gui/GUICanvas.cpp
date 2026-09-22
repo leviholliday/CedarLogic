@@ -14,6 +14,7 @@
 #include "Settings.h"
 #include "GateLibrary.h"
 #include "MainApp.h"
+#include "MainFrame.h"
 #include "paramDialog.h"
 #include "QuickAddDialog.h"
 #include "klsClipboard.h"
@@ -30,6 +31,7 @@
 
 // Included to use the min() and max() templates:
 #include <algorithm>
+#include <queue>
 #include <iostream>
 using namespace std;
 
@@ -266,6 +268,7 @@ static cl::render::RenderStyle liveStyle(bool dark) {
 	const auto& a = appConfig().appSettings;
 	s.showGrid = a.gridlineVisible;
 	s.accentIndex = a.accentColor;
+	s.simView = renderMode().simView;
 	static const float wireScales[3] = {0.7f, 1.0f, 1.6f};
 	s.wireScale = wireScales[(a.wireThickness >= 0 && a.wireThickness < 3) ? a.wireThickness : 1];
 	return s;
@@ -486,6 +489,7 @@ bool GUICanvas::renderSkiaLive() {
 	unsigned long long sceneKey = renderContentKey() ^ (style.darkMode ? 0x9E3779B97F4A7C15ULL : 0ULL);
 	// Accent (selection halos) and wire thickness are baked into the picture too.
 	sceneKey ^= (unsigned long long)(style.accentIndex + 1) * 0xC2B2AE3D27D4EB4FULL;
+	if (style.simView) sceneKey ^= 0x94D049BB133111EBULL;
 	sceneKey ^= (unsigned long long)(style.wireScale * 16.0f) * 0x165667B19E3779F9ULL;
 	if (style.selectionFade < 1.0f)
 		sceneKey ^= ((unsigned long long)(style.selectionFade * 64.0f) * 0x2545F4914F6CDD1DULL);
@@ -510,6 +514,7 @@ bool GUICanvas::renderSkiaLive() {
 		s.setViewport(t);
 		self->drawOverlaysInto(s);
 		self->drawEmptyHintInto(s, style, screenT, logicalW, logicalH);
+		if (renderMode().simView) self->drawSimBarInto(s, screenT, logicalW, logicalH);
 	};
 	const cl::render::Color bg = style.background();
 	const unsigned int clearARGB =
@@ -547,6 +552,19 @@ float GUICanvas::appearProgress() const {
 
 void GUICanvas::OnOverlayFadeTimer(wxTimerEvent& WXUNUSED(event)) {
 	const auto now = std::chrono::steady_clock::now();
+	// Simulation View animates (dashes, the LIVE light) while running.
+	const bool flowing = renderMode().simView && !simPaused();
+	if (flowing) {
+		const double dt = std::min(0.05, std::chrono::duration<double>(now - flowLastTick).count());
+		// Dash speed follows the simulation speed slider: 40 px/s at 25 ms per
+		// step, faster as steps get shorter (square-root curve so the ends of
+		// the 1-500 ms range stay watchable).
+		MainFrame* mf = wxGetApp().mainframe;
+		const double ms = std::max(1, mf ? mf->GetStepMs() : 25);
+		const double pxPerSec = std::min(240.0, std::max(8.0, 40.0 * std::sqrt(25.0 / ms)));
+		flowPhasePx += dt * pxPerSec;
+	}
+	flowLastTick = now;
 	if (appearing && std::chrono::duration_cast<std::chrono::milliseconds>(now - appearStart).count() >= APPEAR_ANIM_MS)
 		appearing = false;
 	if (dragSelectFading) {
@@ -555,7 +573,7 @@ void GUICanvas::OnOverlayFadeTimer(wxTimerEvent& WXUNUSED(event)) {
 	}
 	const long selMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - selectionChangedAt).count();
 	Refresh();
-	if (!dragSelectFading && !appearing && selMs >= SELECTION_FADE_MS) overlayFadeTimer->Stop();
+	if (!dragSelectFading && !appearing && !flowing && selMs >= SELECTION_FADE_MS) overlayFadeTimer->Stop();
 }
 
 #ifdef WITH_SKIA
@@ -571,6 +589,12 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 		                 Point(x + rad, y - rad), Point(x - rad, y - rad) };
 		scene.polyline(pts, 4, Stroke(c, 1.0f), true);
 	};
+
+	drawSignalFlowInto(scene);
+	if (renderMode().simView && !simPaused() && !overlayFadeTimer->IsRunning()) {
+		flowLastTick = std::chrono::steady_clock::now();
+		overlayFadeTimer->Start(OVERLAY_FADE_TIMER_RATE_MS);
+	}
 
 	// Hovered gate pin -- the red bulb you drag a wire out from.
 	if (guiGate *hovered = hotspotHighlight.size() > 0 ? getGate(hotspotGate) : nullptr) {
@@ -645,6 +669,364 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 	}
 }
 
+void GUICanvas::drawSignalFlowInto(cl::render::Scene& scene) {
+	using cl::render::Point;
+	using cl::render::Color;
+	using cl::render::Stroke;
+	flowDrewSomething = false;
+	if (!renderMode().simView) return;
+
+	const float z = (float)getZoom();            // world units per screen px
+	const float period = 16.0f * z;              // dash + gap
+	const float dashLen = 7.0f * z;
+	const float phase = (float)std::fmod(flowPhasePx, 16.0) * z;
+	const cl::render::RenderStyle style = liveStyle(true);
+	const Color on = style.simOn();
+	Stroke glow(Color(on.r, on.g, on.b, 0.35f), 5.0f * style.wireScale);
+	glow.cap = cl::render::Cap::Round;
+	Stroke core(Color(0.88f, 1.0f, 1.0f, 0.95f), 1.8f * style.wireScale);
+	core.cap = cl::render::Cap::Round;
+
+	GLPoint2f tl, br;
+	getViewport(tl, br);
+	klsBBox view;
+	view.addPoint(tl);
+	view.addPoint(br);
+	view.extendTop(4 * z); view.extendBottom(4 * z); view.extendLeft(4 * z); view.extendRight(4 * z);
+
+	// Lit lights bloom. Drawn first so the dashes sit on top of any overlap.
+	for (auto& ge : gateList) {
+		guiGateLED* led = dynamic_cast<guiGateLED*>(ge.second);
+		if (led == nullptr || !led->getBBox().overlaps(view)) continue;
+		bool lit = false;
+		for (auto& hs : led->getHotspotList()) {
+			if (!led->isConnected(hs.first)) continue;
+			const std::vector<StateType>& st = led->getConnection(hs.first)->getState();
+			lit = !st.empty() && st[0] == ONE;
+			break;
+		}
+		if (!lit) continue;
+		float gx, gy;
+		led->getGLcoords(gx, gy);
+		scene.fillCircle(Point(gx, gy), 2.8f, Color(on.r, on.g, on.b, 0.07f));
+		scene.fillCircle(Point(gx, gy), 1.9f, Color(on.r, on.g, on.b, 0.12f));
+		scene.fillCircle(Point(gx, gy), 1.25f, Color(on.r, on.g, on.b, 0.20f));
+	}
+
+	std::vector<Point> glowPts, corePts;
+	int budget = 6000;   // dashes per frame, so a huge circuit can't stall painting
+
+	for (auto& we : wireList) {
+		guiWire* w = we.second;
+		if (w == nullptr || budget <= 0) continue;
+		const std::vector<StateType>& st = w->getState();
+		bool anyOn = false;
+		for (StateType v : st) if (v == ONE) { anyOn = true; break; }
+		if (!anyOn) continue;
+		if (!w->getBBox().overlaps(view)) continue;
+
+		// The pin driving this wire: the one that's a gate output.
+		wireConnection driver;
+		bool haveDriver = false;
+		for (const wireConnection& c : w->getConnections()) {
+			guiGate* g = getGate(c.gid);
+			if (g != nullptr && !g->isConnectionInput(c.connection)) { driver = c; haveDriver = true; break; }
+		}
+		if (!haveDriver) continue;
+		float px, py;
+		getGate(driver.gid)->getHotspotCoords(driver.connection, px, py);
+
+		const std::map<long, wireSegment> segs = w->getSegmentMap();
+		long start = -1;
+		for (const auto& se : segs) {
+			for (const wireConnection& c : se.second.connections)
+				if (c.gid == driver.gid && c.connection == driver.connection) { start = se.first; break; }
+			if (start >= 0) break;
+		}
+		if (start < 0) continue;
+
+		// Distance along the wire from the driver to where each segment is
+		// first reached (shortest path through the junctions).
+		auto axisOf = [](const wireSegment& sg, const GLPoint2f& p) { return sg.isHorizontal() ? p.x : p.y; };
+		std::map<long, float> dist;
+		std::map<long, float> entry;   // entry position along the segment's own axis
+		typedef std::pair<float, long> QItem;
+		std::priority_queue<QItem, std::vector<QItem>, std::greater<QItem>> q;
+		{
+			const wireSegment& s0 = segs.at(start);
+			const float a0 = axisOf(s0, s0.begin), a1 = axisOf(s0, s0.end);
+			const float pinAxis = s0.isHorizontal() ? px : py;
+			entry[start] = std::min(std::max(pinAxis, std::min(a0, a1)), std::max(a0, a1));
+			dist[start] = 0.0f;
+			q.push(QItem(0.0f, start));
+		}
+		while (!q.empty()) {
+			const QItem top = q.top(); q.pop();
+			if (top.first > dist[top.second] + 1e-5f) continue;
+			const wireSegment& sg = segs.at(top.second);
+			for (const auto& ix : sg.intersects) {
+				const float d = top.first + std::fabs(ix.first - entry[top.second]);
+				const float otherAxis = sg.isHorizontal() ? sg.begin.y : sg.begin.x;
+				for (long o : ix.second) {
+					if (segs.find(o) == segs.end()) continue;
+					auto it = dist.find(o);
+					if (it != dist.end() && it->second <= d + 1e-5f) continue;
+					dist[o] = d;
+					entry[o] = otherAxis;
+					q.push(QItem(d, o));
+				}
+			}
+		}
+
+		// Dashes cover wherever (distance - phase) mod period < dashLen, so as
+		// phase grows they march away from the driver, splitting at branches.
+		for (const auto& de : dist) {
+			const wireSegment& sg = segs.at(de.first);
+			const bool horiz = sg.isHorizontal();
+			const float a0 = std::min(axisOf(sg, sg.begin), axisOf(sg, sg.end));
+			const float a1 = std::max(axisOf(sg, sg.begin), axisOf(sg, sg.end));
+			const float fixed = horiz ? sg.begin.y : sg.begin.x;
+			const float e = entry[de.first], D = de.second;
+			auto at = [&](float a) { return horiz ? Point(a, fixed) : Point(fixed, a); };
+			for (int dir = -1; dir <= 1; dir += 2) {
+				const float len = dir < 0 ? e - a0 : a1 - e;
+				if (len <= 0.0f) continue;
+				// First dash start at or before u = 0.
+				float u = std::fmod(phase - D, period);
+				if (u > 0) u -= period;
+				for (; u < len && budget > 0; u += period, budget--) {
+					const float u0 = std::max(0.0f, u), u1 = std::min(len, u + dashLen);
+					if (u1 <= u0) continue;
+					const Point p0 = at(e + dir * u0), p1 = at(e + dir * u1);
+					glowPts.push_back(p0); glowPts.push_back(p1);
+					corePts.push_back(p0); corePts.push_back(p1);
+				}
+			}
+		}
+		flowDrewSomething = true;
+	}
+	if (!glowPts.empty()) scene.lines(&glowPts[0], glowPts.size(), glow);
+	if (!corePts.empty()) scene.lines(&corePts[0], corePts.size(), core);
+}
+
+bool GUICanvas::simPaused() const {
+	MainFrame* mf = wxGetApp().mainframe;
+	return mf != nullptr && mf->IsSimPaused();
+}
+
+// The speed slider runs fast on the right: the step time (the toolbar's
+// 1-500 ms slider) mapped logarithmically, so the useful fast end isn't
+// crammed into a few pixels.
+static const float SIM_MS_MIN = 1.0f, SIM_MS_MAX = 500.0f;
+static float simSpeedFraction(int ms) {
+	const float t = std::log(std::max(SIM_MS_MIN, (float)ms) / SIM_MS_MIN) / std::log(SIM_MS_MAX / SIM_MS_MIN);
+	return 1.0f - std::min(1.0f, std::max(0.0f, t));
+}
+
+void GUICanvas::simSetSpeedFromX(float x) {
+	MainFrame* mf = wxGetApp().mainframe;
+	if (mf == nullptr || simSpeedRect.w <= 0) return;
+	const float f = std::min(1.0f, std::max(0.0f, (x - simSpeedRect.x) / simSpeedRect.w));
+	mf->SetStepMs((int)std::lround(SIM_MS_MIN * std::pow(SIM_MS_MAX / SIM_MS_MIN, 1.0f - f)));
+}
+
+void GUICanvas::simBarClick(float x, float y) {
+	MainFrame* mf = wxGetApp().mainframe;
+	if (mf == nullptr) return;
+	if (simPlayRect.contains(x, y))      mf->SetSimPaused(!mf->IsSimPaused());
+	else if (simStepRect.contains(x, y)) mf->StepSimOnce();
+	else if (simDoneRect.contains(x, y)) mf->SetSimView(false);
+	else if (simSpeedRect.contains(x, y)) {
+		simSpeedDragging = true;
+		simSetSpeedFromX(x);
+	}
+	Refresh();
+}
+
+void GUICanvas::drawSimBarInto(cl::render::Scene& scene, const cl::render::Transform& screenT,
+                               float W, float H) {
+	using cl::render::Point;
+	using cl::render::Color;
+	using cl::render::Stroke;
+	using cl::render::measuredTextWidth;
+	scene.setViewport(screenT);
+	// Everything below is laid out top-down in logical px; flip for the scene.
+	auto P = [H](float x, float y) { return Point(x, H - y); };
+	auto roundRect = [&](float x, float y, float w, float h, float r) {
+		// Corners in order around the rectangle (top-right, bottom-right,
+		// bottom-left, top-left), each a quarter circle in 15-degree steps.
+		std::vector<Point> pts;
+		const float cx[4] = { x + w - r, x + w - r, x + r, x + r };
+		const float cy[4] = { y + r, y + h - r, y + h - r, y + r };
+		for (int c = 0; c < 4; c++)
+			for (int i = 0; i <= 6; i++) {
+				const float a = (-90.0f + 90.0f * c + 15.0f * i) * 3.14159265f / 180.0f;
+				pts.push_back(P(cx[c] + r * std::cos(a), cy[c] + r * std::sin(a)));
+			}
+		return pts;
+	};
+	auto fillRound = [&](float x, float y, float w, float h, float r, const Color& c) {
+		std::vector<Point> pts = roundRect(x, y, w, h, r);
+		scene.fillPolygon(&pts[0], pts.size(), c);
+	};
+	auto strokeRound = [&](float x, float y, float w, float h, float r, const Color& c) {
+		std::vector<Point> pts = roundRect(x, y, w, h, r);
+		scene.polyline(&pts[0], pts.size(), Stroke(c, 1.0f), true);
+	};
+	auto text = [&](float x, float y, const char* str, float px, const Color& c) {
+		scene.text(P(x, y), str, px, c);
+	};
+
+	MainFrame* mf = wxGetApp().mainframe;
+	const bool paused = simPaused();
+	const cl::render::RenderStyle style = liveStyle(true);
+	const Color on = style.simOn();
+	const Color ink(0.86f, 0.93f, 1.0f, 1.0f);
+	const Color dim(0.48f, 0.58f, 0.68f, 1.0f);
+	const Color faint(1.0f, 1.0f, 1.0f, 0.07f);
+	const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+
+	const float barH = 52.0f, margin = 14.0f;
+	const float barW = std::min(W - 2 * margin, 1040.0f);
+	const float bx = (W - barW) * 0.5f, by = H - margin - barH;
+	simBarRect = { bx, by, barW, barH };
+	const float midY = by + barH * 0.5f;
+
+	// Glass-dark panel with a hairline cyan edge and a faint top highlight.
+	fillRound(bx, by + 3, barW, barH, 14, Color(0, 0, 0, 0.35f));   // soft shadow
+	fillRound(bx, by, barW, barH, 14, Color(0.055f, 0.070f, 0.090f, 0.94f));
+	strokeRound(bx, by, barW, barH, 14, Color(on.r, on.g, on.b, 0.22f));
+	{
+		const Point hl[2] = { P(bx + 16, by + 1.5f), P(bx + barW - 16, by + 1.5f) };
+		scene.lines(hl, 2, Stroke(Color(1, 1, 1, 0.06f), 1.0f));
+	}
+
+	float x = bx + 18;
+
+	// Status: a breathing light while live, a steady amber one when paused.
+	{
+		const Color live(0.36f, 1.0f, 0.62f, 1.0f), amber(1.0f, 0.72f, 0.25f, 1.0f);
+		const Color c = paused ? amber : live;
+		const float breathe = paused ? 1.0f : (float)(0.6 + 0.4 * std::sin(secs * 3.2));
+		scene.fillCircle(P(x + 5, midY), 9.0f, Color(c.r, c.g, c.b, 0.12f * breathe));
+		scene.fillCircle(P(x + 5, midY), 4.0f, Color(c.r, c.g, c.b, 0.55f + 0.45f * breathe));
+		text(x + 18, midY - 12, "SIMULATION", 9.0f, dim);
+		text(x + 18, midY + 1, paused ? "PAUSED" : "LIVE", 13.0f, paused ? amber : ink);
+		x += 18 + 86;
+	}
+	auto divider = [&]() {
+		const Point d[2] = { P(x, by + 12), P(x, by + barH - 12) };
+		scene.lines(d, 2, Stroke(Color(1, 1, 1, 0.08f), 1.0f));
+		x += 16;
+	};
+	divider();
+
+	// Play/pause and step.
+	const float btn = 32.0f;
+	simPlayRect = { x, midY - btn / 2, btn, btn };
+	fillRound(x, midY - btn / 2, btn, btn, 9, paused ? Color(on.r, on.g, on.b, 0.18f) : faint);
+	strokeRound(x, midY - btn / 2, btn, btn, 9, Color(1, 1, 1, 0.08f));
+	{
+		const float cx = x + btn / 2, cy = midY;
+		if (paused) {
+			const Point tri[3] = { P(cx - 4, cy - 7), P(cx + 7, cy), P(cx - 4, cy + 7) };
+			scene.fillPolygon(tri, 3, on);
+		} else {
+			scene.fillRect(P(cx - 6, cy - 7), P(cx - 2, cy + 7), ink);
+			scene.fillRect(P(cx + 2, cy - 7), P(cx + 6, cy + 7), ink);
+		}
+	}
+	x += btn + 8;
+	simStepRect = { x, midY - btn / 2, btn, btn };
+	fillRound(x, midY - btn / 2, btn, btn, 9, faint);
+	strokeRound(x, midY - btn / 2, btn, btn, 9, Color(1, 1, 1, 0.08f));
+	{
+		const float cx = x + btn / 2, cy = midY;
+		const Point tri[3] = { P(cx - 6, cy - 6), P(cx + 3, cy), P(cx - 6, cy + 6) };
+		scene.fillPolygon(tri, 3, ink);
+		scene.fillRect(P(cx + 4, cy - 6), P(cx + 6.5f, cy + 6), ink);
+	}
+	x += btn + 16;
+	divider();
+
+	// Speed slider (fast on the right) with its step time.
+	{
+		const float trackW = 150.0f;
+		text(x, midY - 14, "SPEED", 9.0f, dim);
+		const float ty = midY + 6;
+		simSpeedRect = { x - 6, ty - 12, trackW + 12, 24 };
+		const int ms = mf ? mf->GetStepMs() : 25;
+		const float f = simSpeedFraction(ms);
+		const float kx = x + f * trackW;
+		fillRound(x, ty - 2, trackW, 4, 2, Color(1, 1, 1, 0.12f));
+		if (kx - x > 4) fillRound(x, ty - 2, kx - x, 4, 2, Color(on.r, on.g, on.b, 0.75f));
+		scene.fillCircle(P(kx, ty), 10.0f, Color(on.r, on.g, on.b, 0.14f));
+		scene.fillCircle(P(kx, ty), 6.0f, Color(0.92f, 1.0f, 1.0f, 1.0f));
+		char buf[32];
+		std::snprintf(buf, sizeof buf, "%d ms / step", ms);
+		text(x + trackW + 14, midY - 5, buf, 11.0f, ink);
+		x += trackW + 14 + measuredTextWidth(buf, 11.0f) + 16;
+	}
+	divider();
+
+	// Done, pinned right.
+	const float doneW = 76.0f, doneH = 30.0f;
+	const float dx = bx + barW - 16 - doneW;
+	simDoneRect = { dx, midY - doneH / 2, doneW, doneH };
+	fillRound(dx, midY - doneH / 2, doneW, doneH, 9, faint);
+	strokeRound(dx, midY - doneH / 2, doneW, doneH, 9, Color(1, 1, 1, 0.10f));
+	text(dx + 13, midY - 5, "Done", 12.0f, ink);
+	text(dx + 13 + measuredTextWidth("Done", 12.0f) + 7, midY - 3, "esc", 9.0f, dim);
+
+	// Live readout of every switch (IN) and light (OUT) as small chips,
+	// ordered top-to-bottom, left-to-right like the drawing, in whatever
+	// room is left between the controls and Done.
+	struct Chip { float y, x; bool lit; };
+	std::vector<Chip> ins, outs;
+	for (auto& ge : gateList) {
+		guiGate* g = ge.second;
+		const bool isIn = dynamic_cast<guiGateTOGGLE*>(g) != nullptr;
+		const bool isOut = dynamic_cast<guiGateLED*>(g) != nullptr;
+		if (!isIn && !isOut) continue;
+		bool lit = false;
+		for (auto& hs : g->getHotspotList()) {
+			if (!g->isConnected(hs.first)) continue;
+			const std::vector<StateType>& st = g->getConnection(hs.first)->getState();
+			lit = !st.empty() && st[0] == ONE;
+			break;
+		}
+		if (isIn && !lit) lit = g->getLogicParam("OUTPUT_NUM") == "1";
+		float gx, gy;
+		g->getGLcoords(gx, gy);
+		(isIn ? ins : outs).push_back({ gy, gx, lit });
+	}
+	auto byPlace = [](const Chip& a, const Chip& b) { return a.y != b.y ? a.y > b.y : a.x < b.x; };
+	std::sort(ins.begin(), ins.end(), byPlace);
+	std::sort(outs.begin(), outs.end(), byPlace);
+	const float chip = 10.0f, gap = 5.0f;
+	float room = dx - 16 - x;
+	auto chipRow = [&](const char* label, const std::vector<Chip>& chips) {
+		if (chips.empty() || room < 60) return;
+		const float lw = measuredTextWidth(label, 9.0f) + 8;
+		int fit = (int)((room - lw) / (chip + gap));
+		if (fit <= 0) return;
+		const int n = std::min<int>(fit, (int)chips.size());
+		text(x, midY - 4, label, 9.0f, dim);
+		float cx = x + lw;
+		for (int i = 0; i < n; i++) {
+			const bool lit = chips[i].lit;
+			if (lit) fillRound(cx - 3, midY - chip / 2 - 3, chip + 6, chip + 6, 5, Color(on.r, on.g, on.b, 0.16f));
+			fillRound(cx, midY - chip / 2, chip, chip, 3, lit ? on : Color(1, 1, 1, 0.10f));
+			cx += chip + gap;
+		}
+		const float used = (cx - x) + 14;
+		x += used;
+		room -= used;
+	};
+	chipRow("IN", ins);
+	chipRow("OUT", outs);
+}
+
 void GUICanvas::drawEmptyHintInto(cl::render::Scene& scene, const cl::render::RenderStyle& style,
                                   const cl::render::Transform& screenT, float logicalW, float logicalH) {
 	using namespace cl::render;
@@ -676,6 +1058,23 @@ void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
 		currentDragState = DRAG_NONE;
 		SetCursor(wxCursor(wxCURSOR_ARROW));
 		Refresh();
+		return;
+	}
+	if (renderMode().simView) {
+		// No editing here: the bar's controls, clickable parts (switches,
+		// keypads), and otherwise drag to pan.
+		const wxPoint sp = event.GetPosition();
+		if (simBarRect.contains((float)sp.x, (float)sp.y)) { simBarClick((float)sp.x, (float)sp.y); return; }
+		const GLPoint2f wm = getMouseCoords();
+		for (auto& ge : gateList) {
+			if (klsMessage::Message_SET_GATE_PARAM* msg = ge.second->checkClick(wm.x, wm.y)) {
+				gCircuit->sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM, msg));
+				return;
+			}
+		}
+		currentDragState = DRAG_PAN;
+		beginDrag(BUTTON_MIDDLE);
+		SetCursor(wxCursor(wxCURSOR_HAND));
 		return;
 	}
 	if (spaceHeld && currentDragState == DRAG_NONE && !isWithinPaste) {
@@ -850,6 +1249,7 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 	GLPoint2f m = getMouseCoords();
 	vector < unsigned long >::iterator sGate;
 
+	if (renderMode().simView) return;
 	if (isWithinPaste || (currentDragState != DRAG_NONE)) return; // Left mouse up is the next event we are looking for
 
 	// Update the mouse collision object
@@ -1006,6 +1406,13 @@ void GUICanvas::OnMouseMove( GLdouble glX, GLdouble glY, bool ShiftDown, bool Ct
 	// got called at all, mid-pan, instead of being skipped like a "pure"
 	// middle-drag is) -- nothing here should also try to hover/select/move.
 	if (currentDragState == DRAG_PAN) return;
+	if (renderMode().simView) {
+		if (simSpeedDragging) {
+			simSetSpeedFromX((float)ScreenToClient(wxGetMousePosition()).x);
+			Refresh();
+		}
+		return;   // no hover highlights or editing in Simulation View
+	}
 
 	// Handle gate dragging from palette (especially needed for macOS where OnMouseEnter
 	// may not fire correctly when mouse is captured)
@@ -1235,6 +1642,11 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 		endDrag(BUTTON_MIDDLE);
 		currentDragState = DRAG_NONE;
 		SetCursor(wxCursor(wxCURSOR_ARROW));
+		return;
+	}
+	if (renderMode().simView) {
+		simSpeedDragging = false;
+		currentDragState = DRAG_NONE;
 		return;
 	}
 	GLPoint2f m = getMouseCoords();
@@ -1637,6 +2049,21 @@ void GUICanvas::cancelDrag() {
 }
 
 void GUICanvas::OnKeyDown(wxKeyEvent& event) {
+	if (renderMode().simView) {
+		MainFrame* mf = wxGetApp().mainframe;
+		switch (event.GetKeyCode()) {
+		case WXK_ESCAPE: if (mf) mf->SetSimView(false); break;
+		case WXK_SPACE:  if (mf) mf->SetSimPaused(!mf->IsSimPaused()); break;
+		case WXK_RIGHT: case WXK_NUMPAD_RIGHT: translatePan(+PAN_STEP * getZoom(), 0.0); break;
+		case 43: case 61: case WXK_NUMPAD_ADD: zoomIn(); break;
+		case 45: case WXK_NUMPAD_SUBTRACT:     zoomOut(); break;
+		case WXK_LEFT: case WXK_NUMPAD_LEFT:   translatePan(-PAN_STEP * getZoom(), 0.0); break;
+		case WXK_UP: case WXK_NUMPAD_UP:       translatePan(0.0, PAN_STEP * getZoom()); break;
+		case WXK_DOWN: case WXK_NUMPAD_DOWN:   translatePan(0.0, -PAN_STEP * getZoom()); break;
+		default: break;
+		}
+		return;
+	}
 	switch (event.GetKeyCode()) {
 	case WXK_DELETE:
 	case WXK_BACK:  // macOS "delete" key (backspace)

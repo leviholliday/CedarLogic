@@ -66,12 +66,20 @@ struct RenderStyle {
 	// which accent() color, and a multiplier on live wire widths.
 	int accentIndex;
 	float wireScale;
+	// Simulation View palette (see RenderMode::simView): near-black canvas,
+	// steel gate outlines, dim wires that are off, neon cyan wires that are on.
+	bool simView;
 	TitleBlock titleBlock;
 
 	RenderStyle()
 		: showGrid(true), showSelection(true),
 		  showLiveState(true), colorOutput(true), darkMode(false), selectionFade(1.0f),
-		  accentIndex(0), wireScale(1.0f) {}
+		  accentIndex(0), wireScale(1.0f), simView(false) {}
+
+	Color simOn() const    { return Color(0.28f, 0.93f, 1.00f, 1); }
+	Color simOff() const   { return Color(0.20f, 0.26f, 0.32f, 1); }
+	Color simWarn() const  { return Color(1.00f, 0.70f, 0.22f, 1); }   // unknown / hi-Z
+	Color simError() const { return Color(1.00f, 0.25f, 0.75f, 1); }   // conflict
 
 	// Paint for a wire of the given state. On screen, color by state and widen
 	// buses; on paper, always solid black with weight carrying the bus/net
@@ -111,6 +119,7 @@ struct RenderStyle {
 	// screen, near-white on a dark screen.
 	Color gateStroke(GateKind /*kind*/) const {
 		if (!colorOutput) return Color(0, 0, 0, 1);
+		if (simView) return Color(0.52f, 0.62f, 0.72f, 1);
 		return darkMode ? Color(0.90f, 0.90f, 0.92f, 1) : Color(0.05f, 0.05f, 0.05f, 1);
 	}
 
@@ -120,6 +129,7 @@ struct RenderStyle {
 	// themes, which reads as designed rather than just "inverted white."
 	Color background() const {
 		if (!colorOutput) return Color(1, 1, 1, 1);
+		if (simView) return Color(0.030f, 0.038f, 0.050f, 1);
 		return darkMode ? Color(0.075f, 0.082f, 0.098f, 1) : Color(1, 1, 1, 1);
 	}
 
@@ -147,6 +157,7 @@ struct RenderStyle {
 	// vanishing on dark (a fixed dark-blue-on-white value reads as near-black
 	// on dark).
 	Color gridColor(float intensity) const {
+		if (simView) return Color(0.25f, 0.80f, 1.0f, intensity * 0.55f);
 		return darkMode ? Color(1.0f, 1.0f, 1.0f, intensity)
 		                : Color(0.0f, 0.0f, intensity, intensity);
 	}

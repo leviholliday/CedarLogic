@@ -237,6 +237,13 @@ public:
     // boxes/lines, wire hover, collision boxes) drawn only in the live Skia path
     // -- not in renderToScene, which is shared with PNG/SVG export.
     void drawOverlaysInto(cl::render::Scene& scene);
+    // Signal flow: comet-like pulses along every wire that's on, moving away
+    // from the output that drives it. Part of the live overlay, so it never
+    // reaches print/export and doesn't invalidate the cached circuit picture.
+    void drawSignalFlowInto(cl::render::Scene& scene);
+    // Simulation View's bottom control bar, in screen space (logical px).
+    void drawSimBarInto(cl::render::Scene& scene, const cl::render::Transform& screenT,
+                        float logicalW, float logicalH);
     // A centered "drag a gate here to start" hint, screen-space (not affected
     // by pan/zoom) so it always reads at the same size -- shown only while the
     // page has nothing on it. `screenT` maps LOGICAL pixel coords 1:1 to
@@ -397,6 +404,23 @@ private:
 	// Hold Space and drag to pan; a tap (no drag) zooms to fit instead.
 	bool spaceHeld = false;
 	bool spacePanned = false;
+	// Signal flow animation clock: phase (screen px travelled) advances only
+	// while the simulation runs, so pausing freezes the pulses in place.
+	double flowPhasePx = 0.0;
+	std::chrono::steady_clock::time_point flowLastTick;
+	bool flowDrewSomething = false;   // last frame had pulses -> keep ticking
+
+	// Simulation View control bar hit areas, in logical px (top-down), as
+	// laid out by the last drawSimBarInto.
+	struct SimRect {
+		float x = 0, y = 0, w = 0, h = 0;
+		bool contains(float px, float py) const { return px >= x && px <= x + w && py >= y && py <= y + h; }
+	};
+	SimRect simBarRect, simPlayRect, simStepRect, simSpeedRect, simDoneRect;
+	bool simSpeedDragging = false;
+	void simBarClick(float x, float y);
+	void simSetSpeedFromX(float x);
+	bool simPaused() const;
 	bool appearing = false;
 	std::chrono::steady_clock::time_point appearStart;
 	float appearProgress() const;   // 0..1, eased; 1 when not animating

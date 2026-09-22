@@ -1075,6 +1075,17 @@ void guiGateLED::drawToScene(cl::render::Scene& scene,
 		// theme's own dim foreground rather than pure black -- on a dark
 		// background pure black is indistinguishable from the canvas itself.
 		Color c(0, 0, 0, 1);
+		if (style.simView) {
+			switch (outputState) {
+				case ONE:      c = Color(0.80f, 0.98f, 1.0f); break;   // lit: near-white cyan (bloom is an overlay)
+				case CONFLICT: c = style.simError(); break;
+				case UNKNOWN: case HI_Z: c = style.simWarn(); break;
+				default:       c = Color(0.08f, 0.11f, 0.14f); break;
+			}
+			scene.fillRect(Point(x1, y1), Point(x2, y2), c);
+			scene.popTransform();
+			return;
+		}
 		switch (outputState) {
 			case ONE:      c = Color(1.0f, 0.0f, 0.0f); break;
 			case HI_Z:     c = Color(0.0f, 0.78f, 0.0f); break;

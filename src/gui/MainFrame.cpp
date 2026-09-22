@@ -205,6 +205,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     // ApplyThemeShortcutLabel) rather than a static "\tCtrl+Shift+D", since the
     // shortcut itself is user-configurable from Preferences.
     viewMenu->AppendCheckItem(View_DarkMode, "&Dark Mode", "Toggle dark mode");
+    viewMenu->AppendCheckItem(View_SimView, "&Simulation View\tCtrl+R", "Watch the circuit run: live, animated wires and a control bar");
     viewMenu->AppendSeparator();
     viewMenu->Append(View_Oscope, "&Oscope\tCtrl+G", "Show the Oscope");
 
@@ -372,6 +373,13 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	playIcon = icon("play.fill", "play");
 	lockedIcon = icon("lock.fill", "locked");
 	unlockedIcon = icon("lock.open.fill", "unlocked");
+	toolBar->AddTool(Tool_SimView, "Run", icon("waveform.path.ecg", "play"), "Simulation View (" + wxString(
+#ifdef __WXOSX__
+		"Cmd"
+#else
+		"Ctrl"
+#endif
+		) + "+R)", wxITEM_CHECK);
 	toolBar->AddTool(Tool_Pause, "Pause/Resume", pauseIcon, "Pause/Resume", wxITEM_CHECK);
 	toolBar->AddTool(Tool_Step, "Step", icon("forward.frame.fill", "step"), "Step");
 	timeStepModSlider = new wxSlider(toolBar, wxID_ANY, appConfig().timeStepMod, 1, 500, wxDefaultPosition, wxSize(125,-1), wxSL_HORIZONTAL);
@@ -486,6 +494,8 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->duplicateSelection();
 	}, Edit_Duplicate);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);
+	Bind(wxEVT_TOOL, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, Tool_SimView);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->animateZoomTo(DEFAULT_ZOOM);
 	}, View_ZoomActual);
@@ -1509,6 +1519,51 @@ void MainFrame::showCanvasIndex(int idx) {
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	noteCanvasUsed(currentCanvas);
+}
+
+bool MainFrame::IsSimView() const { return renderMode().simView; }
+
+void MainFrame::SetSimView(bool on) {
+	if (on == renderMode().simView || currentCanvas == nullptr) return;
+	if (on) {
+		currentCanvas->cancelDrag();
+		currentCanvas->unselectAllGates();
+		currentCanvas->unselectAllWires();
+		if (IsSimPaused()) SetSimPaused(false);   // "Run" means run
+	}
+	renderMode().simView = on;
+	GetMenuBar()->Check(View_SimView, on);
+	if (toolBar->GetToolState(Tool_SimView) != on) toolBar->ToggleTool(Tool_SimView, on);
+	for (GUICanvas* c : canvases) if (c) c->Refresh();
+	currentCanvas->SetFocus();
+}
+
+bool MainFrame::IsSimPaused() { return toolBar->GetToolState(Tool_Pause); }
+
+void MainFrame::SetSimPaused(bool paused) {
+	if (IsSimPaused() == paused) return;
+	toolBar->ToggleTool(Tool_Pause, paused);
+	PauseSim();
+	if (currentCanvas) currentCanvas->Refresh();
+}
+
+void MainFrame::StepSimOnce() {
+	// Stepping only means something while paused; otherwise the running
+	// simulation swallows it. So a step pauses first.
+	if (!IsSimPaused()) SetSimPaused(true);
+	wxCommandEvent e(wxEVT_TOOL, Tool_Step);
+	ProcessWindowEvent(e);
+}
+
+int MainFrame::GetStepMs() const { return appConfig().timeStepMod; }
+
+void MainFrame::SetStepMs(int ms) {
+	ms = wxMax(timeStepModSlider->GetMin(), wxMin(timeStepModSlider->GetMax(), ms));
+	timeStepModSlider->SetValue(ms);
+	appConfig().timeStepMod = ms;
+	wxString oss;
+	oss << ms << "ms";
+	timeStepModVal->SetLabel(oss);
 }
 
 void MainFrame::ApplySidePanelWidth() {
@@ -2662,6 +2717,7 @@ void MainFrame::OnKeyboardShortcuts(wxCommandEvent& event) {
 	addRow(grid, "Shift+Scroll", "Move Sideways");
 	addRow(grid, "Arrow Keys", "Move Around (nothing selected)");
 	addRow(grid, mod + "+.", "Focus Mode (hide side panel)");
+	addRow(grid, mod + "+R", "Simulation View (Esc to leave, Space to pause)");
 	addRow(grid, mod + "+G", "Show Oscilloscope");
 
 	addHeader(grid, "Gates");

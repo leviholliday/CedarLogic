@@ -21,6 +21,10 @@ public:
 	bool doingBitmapExport = false;
 	bool headlessRender = false;
 	bool darkMode = false;
+	// Simulation View: the dark, live-circuit presentation mode (marching
+	// dashes on wires that are on, a control bar). Screen only; export and
+	// print never see it. Toggled by MainFrame::SetSimView.
+	bool simView = false;
 };
 
 RenderMode& renderMode();
