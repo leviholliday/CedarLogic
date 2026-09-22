@@ -64,7 +64,7 @@ public:
     // G3: render the waveforms through Skia's Ganesh backend instead of GL.
     bool OnRenderSkia();
     void drawOscopeScene(cl::render::Scene& scene, const cl::render::Transform& t,
-                         unsigned int numberOfWires);
+                         unsigned int numberOfWires, bool dark);
 #endif
     wxImage generateImage();
     

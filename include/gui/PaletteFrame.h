@@ -27,6 +27,13 @@ public:
 
 	void OnListSelect( wxCommandEvent& evt );
 	void OnPaint( wxPaintEvent& evt );
+	// Re-theme every section's panel, visible or not (all of them are built up
+	// front; see the ctor).
+	void ApplyTheme();
+	// Jump straight to the idx-th section (0-based, matching the dropdown's
+	// order) -- for the Shift+1..9 shortcut in MainFrame. No-op if idx is out
+	// of range (fewer than idx+1 sections in the library).
+	void SelectSectionByIndex(unsigned int idx);
 
 private:
 	wxBoxSizer* paletteSizer;

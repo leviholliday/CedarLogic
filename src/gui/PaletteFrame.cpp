@@ -62,6 +62,21 @@ void PaletteFrame::OnListSelect( wxCommandEvent& evt ) {
 	}
 }
 
+void PaletteFrame::SelectSectionByIndex(unsigned int idx) {
+	if (idx >= strings.GetCount() || currentPalette == nullptr) return;
+	sectionChoice->SetSelection((int)idx);
+	paletteSizer->Hide( currentPalette );
+	currentPalette = pcanvases[strings[idx]];
+	paletteSizer->Show( currentPalette );
+	paletteSizer->Layout();
+	currentPalette->Activate();
+}
+
+void PaletteFrame::ApplyTheme() {
+	for (map<wxString, PaletteCanvas*>::iterator it = pcanvases.begin(); it != pcanvases.end(); ++it)
+		it->second->ApplyTheme();
+}
+
 PaletteFrame::~PaletteFrame() {
 	map < wxString, PaletteCanvas* >::iterator canvasWalk = pcanvases.begin();
 	while (canvasWalk != pcanvases.end()) {

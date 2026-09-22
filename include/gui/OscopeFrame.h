@@ -48,6 +48,10 @@ public:
 
 	void UpdateData(void);
 	void UpdateMenu(void);
+	// Repaint the waveform canvas outside its own dataDirty-gated timer -- for a
+	// dark-mode toggle, which changes how it should look without changing any
+	// data, so the normal "only repaint on new data" gate would leave it stale.
+	void RefreshCanvas();
 
 	void OnPauseToggle( wxCommandEvent& event );
 	void OnExport( wxCommandEvent& event );

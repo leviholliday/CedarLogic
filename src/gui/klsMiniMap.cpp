@@ -10,6 +10,7 @@
 
 #include "klsMiniMap.h"
 #include "Settings.h"
+#include "RenderMode.h"
 
 #include "guiGate.h"
 #include "guiWire.h"
@@ -116,6 +117,9 @@ void klsMiniMap::setViewport() {
 	// Connection-dot settings affect the thumbnail too.
 	mix(appConfig().appSettings.wireConnVisible ? 1u : 0u);
 	mixf((float)appConfig().appSettings.wireConnRadius);
+	// The theme is baked into the cached thumbnail (background/stroke colors),
+	// so a toggle has to invalidate it like any other appearance change.
+	mix(renderMode().darkMode ? 1u : 0u);
 	contentSig = sig;
 }
 
@@ -138,10 +142,15 @@ bool klsMiniMap::generateImageSkia() {
 	t.b = 0; t.d = -scale; t.f = (float)( minCorner.y * scale);
 
 	klsMiniMap* self = this;
-	RenderStyle style = RenderStyle::print();   // black outlines, no grid, no live state
+	const bool dark = renderMode().darkMode;
+	// Topology only (no grid, no live state), like a gate-library thumbnail --
+	// but themed, so the minimap doesn't stay a stark white square once
+	// everything else around it goes dark.
+	RenderStyle style = RenderStyle::thumbnail(dark);
 	// Hairline strokes: the whole circuit is shrunk to a thumbnail, so full-weight
 	// lines would collapse dense clusters into a black blob.
 	const float strokeScale = 0.5f;
+	const unsigned int clearARGB = dark ? 0xFF131519u : 0xFFFFFFFFu;
 
 	// Static layer: the circuit thumbnail. Cached by contentSig, so panning the
 	// main canvas (which only moves the viewport rect) re-blits instead of
@@ -169,7 +178,7 @@ bool klsMiniMap::generateImageSkia() {
 	};
 
 	const bool ok = skiaRenderWindowCached(w, h, 0, contentSig,
-	                                       drawCircuit, drawViewportRect, strokeScale);
+	                                       drawCircuit, drawViewportRect, strokeScale, clearARGB);
 	if (ok) SwapBuffers();
 	return ok;
 }

@@ -25,6 +25,11 @@ virtual	~PaletteCanvas();
     void OnPaint( wxPaintEvent &event );
     void OnSize( wxSizeEvent &event );
 	void Activate( void );
+	// Re-theme this section's panel background and every already-built tile in
+	// it (built lazily on first view, see OnPaint's `init` flag -- an
+	// unbuilt/never-viewed section needs no call here, its tiles pick up the
+	// current theme when they're first constructed).
+	void ApplyTheme();
 	
 private:
 	wxGridSizer* gateSizer;

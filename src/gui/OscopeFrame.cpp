@@ -93,6 +93,10 @@ void OscopeFrame::UpdateMenu(void){
 	theCanvas->UpdateMenu();
 }
 
+void OscopeFrame::RefreshCanvas(void){
+	theCanvas->Refresh();
+}
+
 void OscopeFrame::OnPauseToggle( wxCommandEvent& event ){
 	paused = oscopeToolBar->GetToolState(ID_OSCOPE_PAUSE);
 	if (!paused) {

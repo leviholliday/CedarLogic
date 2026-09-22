@@ -11,6 +11,7 @@
 #include "PaletteCanvas.h"
 #include "GateLibrary.h"
 #include "logic_values.h"
+#include "RenderMode.h"
 #include <wx/settings.h>
 #ifdef __APPLE__
 #include "MacAppearance.h"
@@ -35,17 +36,17 @@ static int columnsForWidth( int width ) {
 
 PaletteCanvas::PaletteCanvas( wxWindow *parent, wxWindowID id, wxString &libName, const wxPoint &pos, const wxSize &size )
 	: wxScrolledWindow( parent, id, pos, size, wxSUNKEN_BORDER|wxVSCROLL|wxFULL_REPAINT_ON_RESIZE ) {
-    SetBackgroundColour(* wxWHITE);
+    SetBackgroundColour(renderMode().darkMode ? wxColour(19, 21, 25) : *wxWHITE);
     SetCursor(wxCursor(wxCURSOR_ARROW));
 
 #ifdef __APPLE__
-	// The palette is a white surface by construction: the thumbnails are
-	// black-on-white print art, so the panel can't follow the system into dark
-	// mode. Its scrollbar is a native NSScroller though, and that DOES follow --
-	// under dark mode macOS gives it the light knob meant for a dark background,
-	// which on this white panel is white on white. Pin the panel (and so the
-	// scroller inside it) to the appearance it actually paints.
-	MacForceLightAppearance(GetHandle());
+	// The palette's native scrollbar is an NSScroller, which follows whatever
+	// appearance this view has. Pin it explicitly to match the panel's OWN
+	// background (light or dark, per the theme right now) rather than letting
+	// it inherit the app-wide appearance -- those can briefly disagree (e.g. a
+	// tile still mid-redraw right after a toggle), and a mismatched scroller
+	// knob is a light-on-light or dark-on-dark invisible one either way.
+	MacSetViewAppearance(GetHandle(), renderMode().darkMode ? 2 : 1);
 #endif
 
 #ifdef __WXMSW__
@@ -133,4 +134,13 @@ void PaletteCanvas::OnSize( wxSizeEvent &event ) {
 
 void PaletteCanvas::Activate() {
 	activate = true;
+}
+
+void PaletteCanvas::ApplyTheme() {
+	SetBackgroundColour(renderMode().darkMode ? wxColour(19, 21, 25) : *wxWHITE);
+#ifdef __APPLE__
+	MacSetViewAppearance(GetHandle(), renderMode().darkMode ? 2 : 1);
+#endif
+	for (unsigned int i = 0; i < gates.size(); i++) gates[i]->ApplyTheme();
+	Refresh();
 }

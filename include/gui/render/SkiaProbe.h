@@ -41,18 +41,29 @@ bool skiaRenderToPng(const char* path, int width, int height,
 // the clipboard, palette thumbnails) get pixels without a temporary file and
 // without pulling in Skia headers. Returns false if the surface or readback
 // failed.
+// `clearColorARGB` is a packed 0xAARRGGBB, opaque white by default -- see
+// skiaRenderWindow's comment. The gate-library palette thumbnails are the one
+// caller that themes this (RenderStyle::thumbnail()); every export/clipboard
+// caller leaves it white.
 bool skiaRenderToRGB(int width, int height,
                      const std::function<void(Scene&)>& draw,
-                     unsigned char* outRgb);
+                     unsigned char* outRgb,
+                     unsigned int clearColorARGB = 0xFFFFFFFFu);
 
 // Render a scene straight into the currently-bound window framebuffer via Skia's
 // Ganesh GL backend, then flush (the caller presents with SwapBuffers). The GL
 // context must be current. `fboId` is the target framebuffer (0 = window).
 // This is the live on-screen path (Workstream G3); returns false if Skia could
 // not adopt the GL context or wrap the framebuffer.
+// `clearColorARGB` is a packed 0xAARRGGBB (Skia's SkColor layout) used to clear
+// the frame before drawing -- opaque white by default. The live canvases pass
+// the current theme's background here; every offscreen export path above stays
+// hardcoded white regardless of theme, since printed/exported circuits must
+// stay legible and cheap to print in black-and-white.
 bool skiaRenderWindow(int width, int height, int fboId,
                       const std::function<void(Scene&)>& draw,
-                      float strokeScale = 1.0f);
+                      float strokeScale = 1.0f,
+                      unsigned int clearColorARGB = 0xFFFFFFFFu);
 
 // Like skiaRenderWindow, but caches the `drawStatic` layer as an image keyed by
 // `contentKey`: when the key (and size) are unchanged the cached image is
@@ -64,7 +75,8 @@ bool skiaRenderWindowCached(int width, int height, int fboId,
                             unsigned long long contentKey,
                             const std::function<void(Scene&)>& drawStatic,
                             const std::function<void(Scene&)>& drawOverlay,
-                            float strokeScale = 1.0f);
+                            float strokeScale = 1.0f,
+                            unsigned int clearColorARGB = 0xFFFFFFFFu);
 
 // The live main-canvas path with retained rendering. The circuit (drawScene) is
 // recorded once into an SkPicture in world coordinates and re-recorded only when
@@ -86,7 +98,8 @@ bool skiaRenderWindowScene(int width, int height, int fboId,
                            const Transform& camera,
                            const std::function<void(Scene&)>& drawGrid,
                            const std::function<void(Scene&)>& drawScene,
-                           const std::function<void(Scene&)>& drawOverlay = {});
+                           const std::function<void(Scene&)>& drawOverlay = {},
+                           unsigned int clearColorARGB = 0xFFFFFFFFu);
 
 // Render a scene into a vector SVG at `path`. Same callback contract as
 // skiaRenderToPng; output is resolution-independent through the same Scene seam

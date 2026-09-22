@@ -208,27 +208,42 @@ void guiGate::drawToScene(cl::render::Scene& scene,
 	t.e = (float)mModel[12]; t.f = (float)mModel[13];
 	scene.pushTransform(t);
 
+	// Selected: a soft accent-colored halo behind the outline (drawn as the
+	// same path, wider and translucent -- a cheap glow with no blur support
+	// needed) plus a solid accent outline, replacing the old dashed
+	// near-black/white line. Figma/Sketch-style: selection reads as a color,
+	// not a line-pattern squint.
+	const bool isSelectedNow = selected && style.showSelection;
 	Stroke s(style.gateStroke(GateKind::Generic), 1.0f);
-	s.dashed = selected && style.showSelection;
-
-	if (!vertices.empty()) {
-		std::vector<Point> pts;
-		pts.reserve(vertices.size());
-		for (size_t i = 0; i < vertices.size(); i++)
-			pts.push_back(Point(vertices[i].x, vertices[i].y));
-		scene.lines(&pts[0], pts.size(), s);
+	Stroke halo;
+	if (isSelectedNow) {
+		const Color a = style.accent();
+		s.color = a;
+		halo = Stroke(Color(a.r, a.g, a.b, 0.30f * style.selectionFade), 5.0f);
 	}
 
-	// Structured arcs stroke as true curves here -- crisp at any zoom, no chording.
-	for (size_t a = 0; a < arcs.size(); a++) {
-		const GateArc& arc = arcs[a];
-		scene.arc(Point(arc.cx, arc.cy), arc.r, arc.startDeg, arc.sweepDeg, s);
-	}
-	// Structured circles stroke as true circles (smooth inversion bubbles).
-	for (size_t c = 0; c < circles.size(); c++) {
-		const GateCircle& circ = circles[c];
-		scene.strokeCircle(Point(circ.cx, circ.cy), circ.r, s);
-	}
+	auto strokeBody = [&](const Stroke& st) {
+		if (!vertices.empty()) {
+			std::vector<Point> pts;
+			pts.reserve(vertices.size());
+			for (size_t i = 0; i < vertices.size(); i++)
+				pts.push_back(Point(vertices[i].x, vertices[i].y));
+			scene.lines(&pts[0], pts.size(), st);
+		}
+		// Structured arcs stroke as true curves here -- crisp at any zoom, no chording.
+		for (size_t a = 0; a < arcs.size(); a++) {
+			const GateArc& arc = arcs[a];
+			scene.arc(Point(arc.cx, arc.cy), arc.r, arc.startDeg, arc.sweepDeg, st);
+		}
+		// Structured circles stroke as true circles (smooth inversion bubbles).
+		for (size_t c = 0; c < circles.size(); c++) {
+			const GateCircle& circ = circles[c];
+			scene.strokeCircle(Point(circ.cx, circ.cy), circ.r, st);
+		}
+	};
+
+	if (isSelectedNow) strokeBody(halo);
+	strokeBody(s);
 
 	// Captions ride round with the gate but stay upright: each one is undone by
 	// the inverse of the model's linear part about its own pivot, so the model
@@ -780,10 +795,11 @@ void guiGateKEYPAD::drawToScene(cl::render::Scene& scene,
 		t.c = (float)mModel[4];  t.d = (float)mModel[5];
 		t.e = (float)mModel[12]; t.f = (float)mModel[13];
 		scene.pushTransform(t);
+		const Color accent = style.accent();
 		scene.fillRect(
 			Point(renderInfo_valueBox.begin.x, renderInfo_valueBox.begin.y),
 			Point(renderInfo_valueBox.end.x, renderInfo_valueBox.end.y),
-			Color(0.0f, 0.4f, 1.0f, 0.3f));
+			Color(accent.r, accent.g, accent.b, 0.3f));
 		scene.popTransform();
 	}
 	guiGate::drawToScene(scene, style);   // digit grid + outline, on top
@@ -1055,14 +1071,18 @@ void guiGateLED::drawToScene(cl::render::Scene& scene,
 			scene.lines(hz, 2, s);
 		}
 	} else {
-		// Screen: filled, state-coloured box.
+		// Screen: filled, state-coloured box. ZERO ("off") is drawn as the
+		// theme's own dim foreground rather than pure black -- on a dark
+		// background pure black is indistinguishable from the canvas itself.
 		Color c(0, 0, 0, 1);
 		switch (outputState) {
 			case ONE:      c = Color(1.0f, 0.0f, 0.0f); break;
 			case HI_Z:     c = Color(0.0f, 0.78f, 0.0f); break;
 			case UNKNOWN:  c = Color(0.3f, 0.3f, 1.0f); break;
 			case CONFLICT: c = Color(0.0f, 1.0f, 1.0f); break;
-			case ZERO: default: c = Color(0.0f, 0.0f, 0.0f); break;
+			case ZERO: default:
+				c = style.darkMode ? Color(0.32f, 0.32f, 0.34f, 1) : Color(0.0f, 0.0f, 0.0f);
+				break;
 		}
 		scene.fillRect(Point(x1, y1), Point(x2, y2), c);
 	}

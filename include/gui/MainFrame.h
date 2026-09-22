@@ -45,7 +45,9 @@ enum
 	View_Oscope,
 	View_Gridline,
 	View_WireConn,
-	
+	View_DarkMode,
+	Tool_ThemeToggle,
+
     TIMER_ID,
     IDLETIMER_ID,
     AUTOSAVE_TIMER_ID,
@@ -106,6 +108,7 @@ public:
 	void OnOscope(wxCommandEvent& event);
 	void OnViewGridline(wxCommandEvent& event);
 	void OnViewWireConn(wxCommandEvent& event);
+	void OnViewDarkMode(wxCommandEvent& event);
 	void OnPreferences(wxCommandEvent& event);
 	void OnPause(wxCommandEvent& event);
 	void OnStep(wxCommandEvent& event);
@@ -125,6 +128,26 @@ public:
 	void OnKeyboardShortcuts(wxCommandEvent& event);
 	
 	void saveSettings( void );
+
+	// Flip renderMode().darkMode, repaint every canvas/dialog to match, and (on
+	// macOS) push the choice to the whole app's native chrome. Shared by the
+	// View menu item, the toolbar switch, the configurable keyboard shortcut,
+	// and startup (via ApplyTheme, which paints the CURRENT state instead of
+	// flipping it).
+	void ToggleDarkMode();
+	// Paint the window chrome/canvases for whatever renderMode().darkMode is
+	// right now, without changing it -- called once at startup (after MainApp
+	// resolves the launch theme) and after ToggleDarkMode flips the flag.
+	void ApplyTheme();
+	// Re-bind the CHAR_HOOK shortcut match to the current
+	// ThemeShortcut{Enabled,KeyCode,Modifiers} settings, and refresh the View
+	// menu item's label to show it. Called at startup and whenever the
+	// Preferences dialog changes the shortcut.
+	void ApplyThemeShortcutLabel();
+	// Add/remove the toolbar's dark-mode switch per
+	// showThemeToggleButton, for anyone who'd rather not stare at it while
+	// working. Called at startup and from Preferences.
+	void ApplyThemeToggleVisibility();
 	
 	void ResumeExecution ( void );
 	
@@ -236,6 +259,8 @@ private:
 	wxBitmapBundle playIcon;
 	wxBitmapBundle lockedIcon;
 	wxBitmapBundle unlockedIcon;
+	wxBitmapBundle sunIcon;
+	wxBitmapBundle moonIcon;
 
 	//Julian: Re-added timers to fix refresh error
 	wxTimer* simTimer;

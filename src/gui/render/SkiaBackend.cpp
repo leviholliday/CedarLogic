@@ -315,11 +315,11 @@ bool skiaProbeToPng(const char* path, int width, int height) {
 
 bool skiaRenderToRGB(int width, int height,
                      const std::function<void(Scene&)>& draw,
-                     unsigned char* outRgb) {
+                     unsigned char* outRgb, unsigned int clearColorARGB) {
 	if (width <= 0 || height <= 0 || !outRgb) return false;
 	sk_sp<SkSurface> surface = SkiaBackend::get().rasterSurface(width, height);
 	if (!surface) return false;
-	surface->getCanvas()->clear(SK_ColorWHITE);
+	surface->getCanvas()->clear((SkColor)clearColorARGB);
 
 	SkiaScene scene(surface->getCanvas(), SkiaBackend::get().defaultFont());
 	draw(scene);
@@ -426,12 +426,13 @@ private:
 };
 
 bool skiaRenderWindow(int width, int height, int fboId,
-                      const std::function<void(Scene&)>& draw, float strokeScale) {
+                      const std::function<void(Scene&)>& draw, float strokeScale,
+                      unsigned int clearColorARGB) {
 	SkiaBackend& backend = SkiaBackend::get();
 	WindowFrame frame(width, height, fboId);
 	if (!frame.valid()) return false;
 	SkCanvas* canvas = frame.canvas();
-	canvas->clear(SK_ColorWHITE);
+	canvas->clear((SkColor)clearColorARGB);
 	SkiaScene scene(canvas, backend.defaultFont(), strokeScale);
 	draw(scene);
 	return frame.present();
@@ -467,12 +468,13 @@ bool skiaRenderWindowScene(int width, int height, int fboId,
                            const Transform& camera,
                            const std::function<void(Scene&)>& drawGrid,
                            const std::function<void(Scene&)>& drawScene,
-                           const std::function<void(Scene&)>& drawOverlay) {
+                           const std::function<void(Scene&)>& drawOverlay,
+                           unsigned int clearColorARGB) {
 	SkiaBackend& backend = SkiaBackend::get();
 	WindowFrame frame(width, height, fboId);
 	if (!frame.valid()) return false;
 	SkCanvas* canvas = frame.canvas();
-	canvas->clear(SK_ColorWHITE);
+	canvas->clear((SkColor)clearColorARGB);
 
 	// Grid: camera-dependent (fills the viewport), so drawn live every frame.
 	{
@@ -518,12 +520,13 @@ bool skiaRenderWindowCached(int width, int height, int fboId,
                             unsigned long long contentKey,
                             const std::function<void(Scene&)>& drawStatic,
                             const std::function<void(Scene&)>& drawOverlay,
-                            float strokeScale) {
+                            float strokeScale,
+                            unsigned int clearColorARGB) {
 	SkiaBackend& backend = SkiaBackend::get();
 	WindowFrame frame(width, height, fboId);
 	if (!frame.valid()) return false;
 	SkCanvas* canvas = frame.canvas();
-	canvas->clear(SK_ColorWHITE);
+	canvas->clear((SkColor)clearColorARGB);
 
 	if (backend.minimapCacheHit(contentKey, width, height)) {
 		// Re-blit the cached circuit thumbnail (device space) -- no redraw.

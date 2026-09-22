@@ -12,6 +12,7 @@
 #include "MainApp.h"
 #include "GUICanvas.h"
 #include "OscopeFrame.h"
+#include "RenderMode.h"
 #include "guiWire.h"
 
 #include "render/Scene.h"
@@ -83,18 +84,21 @@ bool OscopeCanvas::OnRenderSkia() {
 	t.a = scaleX; t.c = 0; t.e = 0;
 	t.b = 0; t.d = scaleY; t.f = 0.25f * scaleY;   // world y=-0.25 -> device 0
 	OscopeCanvas* self = this;
-	return skiaRenderWindow(w, h, 0, [self, &t, numberOfWires](Scene& scene) {
-		self->drawOscopeScene(scene, t, numberOfWires);
-	});
+	const bool dark = renderMode().darkMode;
+	const unsigned int clearARGB = dark ? 0xFF131519u : 0xFFFFFFFFu;
+	return skiaRenderWindow(w, h, 0, [self, &t, numberOfWires, dark](Scene& scene) {
+		self->drawOscopeScene(scene, t, numberOfWires, dark);
+	}, 1.0f, clearARGB);
 }
 
 void OscopeCanvas::drawOscopeScene(cl::render::Scene& scene,
                                    const cl::render::Transform& t,
-                                   unsigned int numberOfWires) {
+                                   unsigned int numberOfWires, bool dark) {
 	using namespace cl::render;
 	scene.setViewport(t);
-	const Stroke gridStroke(Color(0.0f, 0.0f, (float)GRID_INTENSITY,
-	                              (float)GRID_INTENSITY), 1.0f);
+	const Stroke gridStroke(dark ? Color(1.0f, 1.0f, 1.0f, (float)GRID_INTENSITY)
+	                             : Color(0.0f, 0.0f, (float)GRID_INTENSITY,
+	                                    (float)GRID_INTENSITY), 1.0f);
 
 	// Ten vertical division lines (x = 0 and OSCOPE_HORIZONTAL/10 * 1..9).
 	std::vector<Point> vlines;
@@ -159,7 +163,11 @@ void OscopeCanvas::drawOscopeScene(cl::render::Scene& scene,
 		}
 	}
 
-	if (!segZero.empty()) scene.lines(&segZero[0], segZero.size(), Stroke(Color(0, 0, 0), 1.0f));
+	// ZERO is drawn near the theme's foreground, not fixed black -- pure black
+	// vanishes against a dark scope background.
+	if (!segZero.empty())
+		scene.lines(&segZero[0], segZero.size(),
+		            Stroke(dark ? Color(0.85f, 0.85f, 0.88f) : Color(0, 0, 0), 1.0f));
 	if (!segOne.empty())  scene.lines(&segOne[0],  segOne.size(),  Stroke(Color(1, 0, 0), 1.0f));
 	if (!segHiZ.empty())  scene.lines(&segHiZ[0],  segHiZ.size(),  Stroke(Color(0, 0.78f, 0), 1.0f));
 }
@@ -412,7 +420,7 @@ wxImage OscopeCanvas::generateImage(){
 
 	OscopeCanvas* self = this;
 	skiaRenderToRGB(w, h, [self, &t, numberOfWires](Scene& scene) {
-			self->drawOscopeScene(scene, t, numberOfWires);
+			self->drawOscopeScene(scene, t, numberOfWires, false);
 		}, img.GetData());
 	return img;
 }

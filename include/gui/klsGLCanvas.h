@@ -27,6 +27,7 @@ class klsGLCanvas;
 #include <sstream>
 #include <string>
 #include <deque>
+#include <chrono>
 using namespace std;
 
 #define MIN_ZOOM 1.0/120.0
@@ -47,6 +48,13 @@ using namespace std;
 #define SCROLL_STEP 30
 #define SCROLL_TIMER_RATE 30
 #define SCROLL_TIMER_ID 1
+
+// Eased animation for a discrete zoom step (toolbar +/- buttons, keyboard
+// shortcut) -- NOT the wheel/pinch paths, which are already continuous
+// gestures and would fight with an eased animation layered on top.
+#define ZOOM_ANIM_TIMER_ID 2
+#define ZOOM_ANIM_RATE_MS 12
+#define ZOOM_ANIM_DURATION_MS 140
 
 #define GRID_INTENSITY 0.08
 #define MIN_GRID_SCREEN_SPACING 13
@@ -82,6 +90,10 @@ public:
 
     void wxOnMouseEvent(wxMouseEvent& event);
     void wxOnMouseWheel(wxMouseEvent& event);
+    // Trackpad pinch gesture (macOS; other platforms never generate this) --
+    // continuous zoom centered at the gesture location, separate from the
+    // wheel/scroll path so a two-finger pan gesture never also zooms.
+    void wxOnMagnify(wxMouseEvent& event);
 
     void wxKeyDown(wxKeyEvent& event);
 	void wxKeyUp(wxKeyEvent& event);
@@ -156,6 +168,16 @@ public:
 	GLdouble getZoom() { return viewZoom; };
 	void setZoom(GLdouble newZoom);
 	void zoomToMouse(long); //Julian
+	// Continuous version of zoomToMouse for the pinch gesture: `factor`
+	// multiplies the current zoom directly (>1 zooms in, <1 zooms out) instead
+	// of stepping by a fixed ZOOM_STEP per discrete wheel notch.
+	void zoomToMouseByFactor(double factor);
+	// Ease from the current zoom to `targetZoom` over ZOOM_ANIM_DURATION_MS
+	// instead of jumping there in one setZoom -- for the toolbar zoom buttons
+	// and keyboard +/-, which are one-shot presses where a smooth settle reads
+	// as intentional rather than a jarring snap.
+	void animateZoomTo(GLdouble targetZoom);
+	void OnZoomAnimTimer(wxTimerEvent& event);
 	GLPoint2f getCenter(); //Julian
 
 	// Grid background:
@@ -237,6 +259,12 @@ private:
 	// window:
 	wxTimer* scrollTimer;
 	bool autoScrollActive;
+
+	// Eased zoom-step animation; see animateZoomTo.
+	wxTimer* zoomAnimTimer;
+	GLdouble zoomAnimStartZoom = 0.0;
+	GLdouble zoomAnimTargetZoom = 0.0;
+	std::chrono::steady_clock::time_point zoomAnimStartTime;
 
 	// A variable to describe whether or not the mouse cursor is outside of the window:
 	bool mouseOutOfWindow;

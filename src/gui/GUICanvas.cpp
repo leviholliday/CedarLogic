@@ -86,6 +86,9 @@ GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 	dragselectbox = new klsCollisionObject( COLL_SELBOX );
 	collisionChecker.addObject( dragselectbox );
 
+	overlayFadeTimer = new wxTimer(this);
+	Bind(wxEVT_TIMER, &GUICanvas::OnOverlayFadeTimer, this, overlayFadeTimer->GetId());
+
 	SetDropTarget(new DnDText(this));
 
 #ifdef __WXOSX__
@@ -103,6 +106,8 @@ GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 }
 
 GUICanvas::~GUICanvas() {
+	overlayFadeTimer->Stop();
+	delete overlayFadeTimer;
 	delete snapMouse;
 	delete mouse;
 	delete dragselectbox;
@@ -254,8 +259,10 @@ void GUICanvas::renderToScene(cl::render::Scene& scene,
 // g{Min,Max}{X,Y} bounds are the visible world rectangle for the grid.
 // The background grid, matching klsGLCanvas: the base world spacing snaps to an
 // integer (>=1), then grows so on-screen lines stay at least
-// MIN_GRID_SCREEN_SPACING px apart when zoomed out. Faint translucent blue
-// (GRID_INTENSITY as both blue and alpha). Assumes the viewport is already set;
+// MIN_GRID_SCREEN_SPACING px apart when zoomed out. Every MAJOR_GRID_EVERY-th
+// line is drawn brighter -- a CAD-ruler convention (Illustrator, Figma, KiCad
+// all do this) that makes it possible to judge distance and alignment at a
+// glance instead of counting hairlines. Assumes the viewport is already set;
 // it is camera-dependent so the live path draws it fresh every frame.
 void GUICanvas::drawGridInto(cl::render::Scene& scene,
                              const cl::render::RenderStyle& style, float scale,
@@ -267,17 +274,32 @@ void GUICanvas::drawGridInto(cl::render::Scene& scene,
 	                             (long)(MIN_GRID_SCREEN_SPACING * viewZoom));
 	const long spaceY = std::max(std::max((long)(vertSpacing + 0.5f), 1L),
 	                             (long)(MIN_GRID_SCREEN_SPACING * viewZoom));
-	Stroke grid;
-	grid.color = Color(0.0f, 0.0f, (float)GRID_INTENSITY, (float)GRID_INTENSITY);
-	grid.width = 1.0f;
-	std::vector<Point> gl;
-	for (long x = (long)std::floor(gMinX / spaceX) * spaceX; x <= gMaxX; x += spaceX) {
-		gl.push_back(Point((float)x, gMinY)); gl.push_back(Point((float)x, gMaxY));
+	const long MAJOR_GRID_EVERY = 5;
+	auto isMajor = [MAJOR_GRID_EVERY](long idx) {
+		return ((idx % MAJOR_GRID_EVERY) + MAJOR_GRID_EVERY) % MAJOR_GRID_EVERY == 0;
+	};
+
+	Stroke minor, major;
+	minor.color = style.gridColor((float)GRID_INTENSITY);
+	minor.width = 1.0f;
+	major.color = style.gridColor((float)GRID_INTENSITY * 2.5f);
+	major.width = 1.0f;
+
+	std::vector<Point> minorLines, majorLines;
+	const long xStartIdx = (long)std::floor(gMinX / spaceX);
+	for (long idx = xStartIdx; (float)(idx * spaceX) <= gMaxX; idx++) {
+		const float x = (float)(idx * spaceX);
+		std::vector<Point>& target = isMajor(idx) ? majorLines : minorLines;
+		target.push_back(Point(x, gMinY)); target.push_back(Point(x, gMaxY));
 	}
-	for (long y = (long)std::floor(gMinY / spaceY) * spaceY; y <= gMaxY; y += spaceY) {
-		gl.push_back(Point(gMinX, (float)y)); gl.push_back(Point(gMaxX, (float)y));
+	const long yStartIdx = (long)std::floor(gMinY / spaceY);
+	for (long idx = yStartIdx; (float)(idx * spaceY) <= gMaxY; idx++) {
+		const float y = (float)(idx * spaceY);
+		std::vector<Point>& target = isMajor(idx) ? majorLines : minorLines;
+		target.push_back(Point(gMinX, y)); target.push_back(Point(gMaxX, y));
 	}
-	if (!gl.empty()) scene.lines(&gl[0], gl.size(), grid);
+	if (!minorLines.empty()) scene.lines(&minorLines[0], minorLines.size(), minor);
+	if (!majorLines.empty()) scene.lines(&majorLines[0], majorLines.size(), major);
 }
 
 // The circuit itself: wires then gates. Assumes the viewport/matrix is already
@@ -378,17 +400,31 @@ bool GUICanvas::renderSkiaLive() {
 	const float gMaxY = (float)py;
 
 	GUICanvas* self = this;
-	RenderStyle style = RenderStyle::screen();
+	RenderStyle style = RenderStyle::screen(renderMode().darkMode);
 	// View > Display Gridlines. The screen style defaults the grid on and the
 	// export paths set showGrid themselves, so without this the live canvas was
 	// the one renderer that never consulted the setting.
 	style.showGrid = appConfig().appSettings.gridlineVisible;
+	// Selection halo fade-in (see markSelectionChanged): 0 right after a
+	// selection change, ramping to 1 over SELECTION_FADE_MS.
+	{
+		const long selMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - selectionChangedAt).count();
+		style.selectionFade = std::min(1.0f, std::max(0.0f, (float)selMs / SELECTION_FADE_MS));
+	}
 	// Key the cached circuit picture on the circuit CONTENT only. The interactive
 	// overlays (hover bulb, drag box, wire hover, ...) are drawn live on top each
 	// frame via drawOverlay below, so they follow the mouse WITHOUT invalidating
 	// the picture -- otherwise every mouse move re-recorded the whole scene, which
 	// is what let fast mouse movement starve the sim (see perf notes).
-	unsigned long long sceneKey = renderContentKey();
+	// The theme is folded in too: it rebakes wire/gate stroke colors into the
+	// cached picture, so toggling dark mode must invalidate it like any other
+	// appearance change. selectionFade is folded in ONLY while its own fade is
+	// still running (quantized, so it's stable -- and so the cache hits again
+	// -- once the fade settles at 1.0).
+	unsigned long long sceneKey = renderContentKey() ^ (style.darkMode ? 0x9E3779B97F4A7C15ULL : 0ULL);
+	if (style.selectionFade < 1.0f)
+		sceneKey ^= ((unsigned long long)(style.selectionFade * 64.0f) * 0x2545F4914F6CDD1DULL);
 	auto drawGrid = [self, style, t, scale, gMinX, gMinY, gMaxX, gMaxY](Scene& s) {
 		s.setViewport(t);
 		self->drawGridInto(s, style, scale, gMinX, gMinY, gMaxX, gMaxY);
@@ -396,14 +432,49 @@ bool GUICanvas::renderSkiaLive() {
 	auto drawScene = [self, style](Scene& s) {
 		self->drawCircuitInto(s, style);
 	};
-	auto drawOverlay = [self, t](Scene& s) {
+	// Logical pixel -> device pixel, no camera. Y is flipped (like the world
+	// transform `t` above) even though logical-pixel space has no real "up" --
+	// SkiaScene::text() unconditionally un-flips Y around the glyph origin to
+	// compensate for the world convention, so a NON-flipped viewport here
+	// left text rendering upside down; matching the sign is what text() needs
+	// to draw right-side up, not an actual coordinate-space requirement.
+	const float logicalW = (float)sz.GetWidth(), logicalH = (float)sz.GetHeight();
+	Transform screenT;
+	screenT.a = (float)sf; screenT.b = 0; screenT.c = 0; screenT.d = -(float)sf;
+	screenT.e = 0; screenT.f = logicalH * (float)sf;
+	auto drawOverlay = [self, t, style, screenT, logicalW, logicalH](Scene& s) {
 		s.setViewport(t);
 		self->drawOverlaysInto(s);
+		self->drawEmptyHintInto(s, style, screenT, logicalW, logicalH);
 	};
-	return skiaRenderWindowScene(w, h, 0, sceneKey, t, drawGrid, drawScene, drawOverlay);
+	const cl::render::Color bg = style.background();
+	const unsigned int clearARGB =
+		0xFF000000u | ((unsigned int)(bg.r * 255.0f + 0.5f) << 16) |
+		((unsigned int)(bg.g * 255.0f + 0.5f) << 8) | (unsigned int)(bg.b * 255.0f + 0.5f);
+	return skiaRenderWindowScene(w, h, 0, sceneKey, t, drawGrid, drawScene, drawOverlay, clearARGB);
 #else
 	return false;
 #endif
+}
+
+void GUICanvas::markSelectionChanged() {
+	selectionChangedAt = std::chrono::steady_clock::now();
+	if (!overlayFadeTimer->IsRunning()) overlayFadeTimer->Start(OVERLAY_FADE_TIMER_RATE_MS);
+}
+
+// Drives repaints for the drag-select and selection-halo fades; idle (and the
+// timer stopped) once both have settled. Nothing else keeps the canvas
+// repainting between mouse/sim events, so without this the fades would just
+// freeze at whatever alpha the next unrelated repaint happened to catch them at.
+void GUICanvas::OnOverlayFadeTimer(wxTimerEvent& WXUNUSED(event)) {
+	const auto now = std::chrono::steady_clock::now();
+	if (dragSelectFading) {
+		const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - dragSelectFadeStart).count();
+		if (ms >= DRAGSELECT_FADE_MS) dragSelectFading = false;
+	}
+	const long selMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - selectionChangedAt).count();
+	Refresh();
+	if (!dragSelectFading && selMs >= SELECTION_FADE_MS) overlayFadeTimer->Stop();
 }
 
 #ifdef WITH_SKIA
@@ -412,6 +483,7 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 	using cl::render::Color;
 	using cl::render::Stroke;
 	const float r = HOTSPOT_SCREEN_RADIUS * (float)getZoom();
+	const Color accent = cl::render::RenderStyle::screen(renderMode().darkMode).accent();
 
 	auto box = [&scene](float x, float y, float rad, const Color& c) {
 		Point pts[4] = { Point(x - rad, y + rad), Point(x + rad, y + rad),
@@ -439,8 +511,8 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 	if (currentDragState == DRAG_SELECT) {
 		GLPoint2f s = getDragStartCoords(), e = getMouseCoords();
 		Point pts[4] = { Point(s.x, s.y), Point(s.x, e.y), Point(e.x, e.y), Point(e.x, s.y) };
-		scene.polyline(pts, 4, Stroke(Color(0.0f, 0.4f, 1.0f, 1.0f), 1.0f), true);
-		scene.fillRect(Point(s.x, s.y), Point(e.x, e.y), Color(0.0f, 0.4f, 1.0f, 0.3f));
+		scene.polyline(pts, 4, Stroke(accent, 1.0f), true);
+		scene.fillRect(Point(s.x, s.y), Point(e.x, e.y), Color(accent.r, accent.g, accent.b, 0.25f));
 	} else if (currentDragState == DRAG_CONNECT) {
 		// Anchor the preview line at the source pin, not the click point.
 		GLPoint2f s = getDragStartCoords();
@@ -452,13 +524,26 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 		Point ln[2] = { Point(s.x, s.y), Point(e.x, e.y) };
 		scene.lines(ln, 2, Stroke(Color(0.0f, 0.78f, 0.0f, 1.0f), 1.0f));
 	} else if (currentDragState == DRAG_NEWGATE && newDragGate != nullptr) {
-		newDragGate->drawToScene(scene, cl::render::RenderStyle::screen());
+		newDragGate->drawToScene(scene, cl::render::RenderStyle::screen(renderMode().darkMode));
+	}
+
+	// The just-released drag-select box, fading out (see OnMouseUp) -- drawn
+	// independently of currentDragState, which is already back to DRAG_NONE by
+	// the time this runs.
+	if (dragSelectFading) {
+		const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - dragSelectFadeStart).count();
+		const float fade = std::max(0.0f, 1.0f - (float)ms / DRAGSELECT_FADE_MS);
+		const Point lo(dragSelectFadeBox.getLeft(), dragSelectFadeBox.getBottom());
+		const Point hi(dragSelectFadeBox.getRight(), dragSelectFadeBox.getTop());
+		Point fadePts[4] = { lo, Point(lo.x, hi.y), hi, Point(hi.x, lo.y) };
+		scene.polyline(fadePts, 4, Stroke(Color(accent.r, accent.g, accent.b, fade), 1.0f), true);
+		scene.fillRect(lo, hi, Color(accent.r, accent.g, accent.b, 0.25f * fade));
 	}
 
 	// Potential connection hotspots -- where a dragged wire could snap.
 	for (size_t i = 0; i < potentialConnectionHotspots.size(); i++)
-		box(potentialConnectionHotspots[i].x, potentialConnectionHotspots[i].y, r,
-		    Color(0.3f, 0.3f, 1.0f));
+		box(potentialConnectionHotspots[i].x, potentialConnectionHotspots[i].y, r, accent);
 
 	// Collision overlaps -- translucent boxes where two gates overlap.
 	for (std::map<klsCollisionObjectType, CollisionGroup>::iterator ov = collisionChecker.overlaps.begin();
@@ -477,6 +562,23 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 			}
 		}
 	}
+}
+
+void GUICanvas::drawEmptyHintInto(cl::render::Scene& scene, const cl::render::RenderStyle& style,
+                                  const cl::render::Transform& screenT, float logicalW, float logicalH) {
+	using namespace cl::render;
+	if (!gateList.empty() || !wireList.empty()) return;
+	scene.setViewport(screenT);
+	const char* msg = "Drag a gate here to start";
+	const float textPx = 16.0f;
+	const float textW = measuredTextWidth(msg, textPx);
+	const Color c = style.darkMode ? Color(1.0f, 1.0f, 1.0f, 0.22f) : Color(0.0f, 0.0f, 0.0f, 0.22f);
+	// text()'s origin is the top of the capitals, in the Y-UP space screenT
+	// establishes -- convert from the top-down logical position we actually
+	// want (vertical center, nudged up half a cap-height so the glyphs
+	// themselves sit centered rather than their top edge).
+	const float topDownY = logicalH * 0.5f - textPx * 0.5f;
+	scene.text(Point(logicalW * 0.5f - textW * 0.5f, logicalH - topDownY), msg, textPx, c);
 }
 #endif
 
@@ -589,8 +691,21 @@ void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
 		unselectAllGates();
 		unselectAllWires();
 	}
-	
-	if (!handled) { // Otherwise initialize drag select
+	// A gate or wire was just clicked/selected above -- fade its halo in
+	// rather than snap it to full opacity (see RenderStyle::selectionFade).
+	if (handled) markSelectionChanged();
+
+	if (!handled && event.ControlDown()) {
+		// Cmd(/Ctrl)+drag on empty background pans instead of rubber-band
+		// selecting -- GeoGebra-style navigation. Not gated on isLocked(): like
+		// the existing middle-button pan, this is navigation, not an edit.
+		// Piggyback on that same middle-button drag-pan machinery
+		// (klsGLCanvas::wxOnMouseEvent) rather than re-deriving the pan math;
+		// DRAG_PAN just tells OnMouseMove/OnMouseUp to stand aside while it runs.
+		currentDragState = DRAG_PAN;
+		beginDrag(BUTTON_MIDDLE);
+		SetCursor(wxCursor(wxCURSOR_HAND));
+	} else if (!handled) { // Otherwise initialize drag select
 		currentDragState = DRAG_SELECT;
 	}
 	
@@ -707,6 +822,12 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 }
 
 void GUICanvas::OnMouseMove( GLdouble glX, GLdouble glY, bool ShiftDown, bool CtrlDown ) {
+	// Cmd(/Ctrl)+drag pan: the actual panning already happened in
+	// klsGLCanvas::wxOnMouseEvent's BUTTON_MIDDLE handling (which is why this
+	// got called at all, mid-pan, instead of being skipped like a "pure"
+	// middle-drag is) -- nothing here should also try to hover/select/move.
+	if (currentDragState == DRAG_PAN) return;
+
 	// Handle gate dragging from palette (especially needed for macOS where OnMouseEnter
 	// may not fire correctly when mouse is captured)
 	if (paletteDrag().newGateToDrag.size() > 0 && currentDragState == DRAG_NONE && !(this->isLocked())) {
@@ -927,6 +1048,16 @@ void GUICanvas::OnMouseMove( GLdouble glX, GLdouble glY, bool ShiftDown, bool Ct
 }
 
 void GUICanvas::OnMouseUp(wxMouseEvent& event) {
+	if (currentDragState == DRAG_PAN) {
+		// Nothing fires a real MiddleUp for this synthetic middle-drag (it was
+		// never a real middle-button press), so end it explicitly here --
+		// otherwise isDragging(BUTTON_MIDDLE) would stay stuck true and the
+		// canvas would keep "panning" on every subsequent mouse move.
+		endDrag(BUTTON_MIDDLE);
+		currentDragState = DRAG_NONE;
+		SetCursor(wxCursor(wxCURSOR_ARROW));
+		return;
+	}
 	GLPoint2f m = getMouseCoords();
 	SetCursor(wxCursor(wxCURSOR_ARROW));
 	unordered_map < unsigned long, guiGate* >::iterator thisGate;
@@ -1143,8 +1274,28 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 		autoScrollEnable(); // Re-enable auto scrolling
 	}
 	
+	if (currentDragState == DRAG_SELECT) {
+		// Release the rubber-band box with a fade instead of it just vanishing
+		// -- same box drawOverlaysInto was drawing live, one last time at
+		// falling alpha. Skip the flash for a box too small to have been a
+		// real drag (a plain click that never moved).
+		GLPoint2f fs = getDragStartCoords(), fe = getMouseCoords();
+		klsBBox fadeBox;
+		fadeBox.addPoint(fs); fadeBox.addPoint(fe);
+		if (!fadeBox.empty() &&
+		    (fadeBox.getRight() - fadeBox.getLeft() > DRAG_START_SCREEN_DELTA * getZoom() ||
+		     fadeBox.getTop() - fadeBox.getBottom() > DRAG_START_SCREEN_DELTA * getZoom())) {
+			dragSelectFadeBox = fadeBox;
+			dragSelectFadeStart = std::chrono::steady_clock::now();
+			dragSelectFading = true;
+			if (!overlayFadeTimer->IsRunning()) overlayFadeTimer->Start(OVERLAY_FADE_TIMER_RATE_MS);
+		}
+		// The box may well have just picked something up -- fade its halo in too.
+		markSelectionChanged();
+	}
+
 	currentDragState = DRAG_NONE;
-	
+
 	Update();
 }
 
@@ -1518,14 +1669,14 @@ void GUICanvas::Update() {
 void GUICanvas::zoomIn() {
 	//Only zoom when not dragging
 	if (currentDragState == DRAG_NONE) {
-		setZoom(getZoom() * ZOOM_STEP);
+		animateZoomTo(getZoom() * ZOOM_STEP);
 	}
 }
 
 void GUICanvas::zoomOut() {
 	//Only zoom when not dragging
 	if (currentDragState == DRAG_NONE) {
-		setZoom(getZoom() / ZOOM_STEP);
+		animateZoomTo(getZoom() / ZOOM_STEP);
 	}
 }
 

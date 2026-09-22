@@ -22,6 +22,7 @@
 #include "render/RendererHealth.h"
 #endif
 #include "wx/fileconf.h"
+#include "wx/settings.h"   // wxSystemSettings::GetAppearance(), for ThemeMode::System
 
 // Crash reporter: portable pieces (report path, URL helpers, the next-launch
 // dialog) compile everywhere; the trace writer is per-platform below.
@@ -975,6 +976,30 @@ void MainApp::loadSettings() {
 	conf->Read("WireConnVisible", &appConfig().appSettings.wireConnVisible, true);
 	conf->Read("GridlineVisible", &appConfig().appSettings.gridlineVisible, true);
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
+
+	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);
+	conf->Read("ThemeLastDark", &appConfig().appSettings.lastDarkMode, false);
+	conf->Read("ThemeShortcutEnabled", &appConfig().appSettings.themeShortcutEnabled, true);
+	conf->Read("ThemeShortcutKeyCode", &appConfig().appSettings.themeShortcutKeyCode,
+	           appConfig().appSettings.themeShortcutKeyCode);
+	conf->Read("ThemeShortcutModifiers", &appConfig().appSettings.themeShortcutModifiers,
+	           appConfig().appSettings.themeShortcutModifiers);
+	conf->Read("ThemeToggleButtonVisible", &appConfig().appSettings.showThemeToggleButton, true);
+
+	// Resolve tonight's theme from the launch policy. This is the single place
+	// renderMode().darkMode gets its startup value; MainFrame reads it back once
+	// it's built to paint the window chrome and canvases to match.
+	switch ((ThemeMode)appConfig().appSettings.themeMode) {
+		case ThemeMode::Light: renderMode().darkMode = false; break;
+		case ThemeMode::Dark:  renderMode().darkMode = true; break;
+		case ThemeMode::RememberLast:
+			renderMode().darkMode = appConfig().appSettings.lastDarkMode;
+			break;
+		case ThemeMode::System:
+		default:
+			renderMode().darkMode = wxSystemSettings::GetAppearance().IsDark();
+			break;
+	}
 
 	// check screen coords
 	wxScreenDC sdc;

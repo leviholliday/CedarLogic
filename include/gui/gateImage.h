@@ -53,6 +53,14 @@ public:
 
 	string getGateName() { return gateName; };
 
+	// Re-theme this tile: background colour plus a forced re-render of the
+	// thumbnail (RenderStyle::thumbnail() bakes the theme into the bitmap, so a
+	// toggle can't just recolor pixels -- it has to redraw). Called by
+	// PaletteCanvas::ApplyTheme for every already-constructed tile; a tile
+	// created after the toggle picks up the current theme at construction and
+	// needs no call here.
+	void ApplyTheme();
+
 private:
 	void update();
 	
@@ -61,6 +69,7 @@ private:
 	wxImage gImage;
 	wxBitmap gBitmap;   // gImage at the display's scale factor
 	int renderedPx;     // device-pixel size gBitmap was drawn at
+	bool renderedDark = false;   // theme gBitmap was drawn in
 	
 	wxDragImage* m_dragImage;
 	bool m_init;

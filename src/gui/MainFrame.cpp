@@ -18,6 +18,9 @@
 #endif
 #include "SimBridge.h"
 #include "Settings.h"
+#ifdef __APPLE__
+#include "MacAppearance.h"
+#endif
 #include "EmbeddedRes.h"
 #include "ToolbarIcons.h"
 #include "GateLibrary.h"
@@ -107,6 +110,8 @@ BEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_MENU(View_Oscope, MainFrame::OnOscope)
     EVT_MENU(View_Gridline, MainFrame::OnViewGridline)
     EVT_MENU(View_WireConn, MainFrame::OnViewWireConn)
+    EVT_MENU(View_DarkMode, MainFrame::OnViewDarkMode)
+    EVT_TOOL(Tool_ThemeToggle, MainFrame::OnViewDarkMode)
     EVT_MENU(wxID_PREFERENCES, MainFrame::OnPreferences)
     
 	EVT_TOOL(Tool_Pause, MainFrame::OnPause)
@@ -188,6 +193,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     viewMenu->AppendCheckItem(View_Gridline, "Display &Gridlines", "Toggle gridline display");
     viewMenu->AppendCheckItem(View_WireConn, "Display &Wire Connection Points", "Toggle wire connection points");
     viewMenu->AppendSeparator();
+    // Label carries the current shortcut as text (set/refreshed by
+    // ApplyThemeShortcutLabel) rather than a static "\tCtrl+Shift+D", since the
+    // shortcut itself is user-configurable from Preferences.
+    viewMenu->AppendCheckItem(View_DarkMode, "&Dark Mode", "Toggle dark mode");
+    viewMenu->AppendSeparator();
     viewMenu->Append(View_Oscope, "&Oscope\tCtrl+G", "Show the Oscope");
 
     wxMenu *helpMenu = new wxMenu; // HELP MENU
@@ -235,6 +245,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     // set checkmarks on the view toggles
     menuBar->Check(View_Gridline, appConfig().appSettings.gridlineVisible);
     menuBar->Check(View_WireConn, appConfig().appSettings.wireConnVisible);
+    menuBar->Check(View_DarkMode, renderMode().darkMode);
     
     // ... and attach this menu bar to the frame
     SetMenuBar(menuBar);
@@ -248,8 +259,29 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     //   Redo: Ctrl+Shift+Z and Ctrl+Y (Windows convention).
     //   Cut / Copy / Paste: Ctrl+X / Ctrl+C / Ctrl+V.
     Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent &e) {
+        // The dark-mode toggle shortcut, matched with themeModsFromKeyEvent so
+        // this agrees with what SettingsDialog's capture button recorded (see
+        // its definition in Settings.cpp for why a direct MetaDown() check is
+        // wrong on macOS).
+        const auto &ts = appConfig().appSettings;
+        if (ts.themeShortcutEnabled && e.GetKeyCode() == ts.themeShortcutKeyCode) {
+            const int mods = themeModsFromKeyEvent(e);
+            if (mods != 0 && mods == ts.themeShortcutModifiers) {
+                ToggleDarkMode();
+                return;
+            }
+        }
         const int k = e.GetKeyCode();
         const bool ctrl = e.ControlDown() || e.CmdDown();
+        // Shift+1..9: jump straight to the Nth palette section (Basic Gates,
+        // Input/Output, ...) without reaching for the mouse and the dropdown.
+        // GetKeyCode() is the unmodified key even with Shift held (same as the
+        // Ctrl+Shift+Z check below relies on), so this doesn't need the digit
+        // row's shifted symbols ('!', '@', ...).
+        if (e.ShiftDown() && !ctrl && !e.AltDown() && k >= '1' && k <= '9' && gatePalette) {
+            gatePalette->SelectSectionByIndex((unsigned int)(k - '1'));
+            return;
+        }
         int cmd = 0;
         if (ctrl && !e.AltDown()) {
             if (e.ShiftDown()) {
@@ -329,6 +361,15 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	toolBar->AddSeparator();
 	toolBar->AddTool(Tool_Lock, "Lock state", unlockedIcon, "Lock state", wxITEM_CHECK);
 	toolBar->AddSeparator();
+	// A visible on-canvas switch for dark mode, in addition to the View menu
+	// item and the configurable shortcut -- so it can be flipped without
+	// leaving the drawing. Hideable from Preferences (showThemeToggleButton)
+	// for anyone who'd rather not have it in view; see ApplyThemeToggleVisibility.
+	sunIcon = icon("sun.max.fill", "sun");
+	moonIcon = icon("moon.fill", "moon");
+	toolBar->AddTool(Tool_ThemeToggle, "Dark Mode", renderMode().darkMode ? moonIcon : sunIcon,
+	                 "Toggle dark mode", wxITEM_CHECK);
+	toolBar->AddSeparator();
 	toolBar->AddTool(wxID_ABOUT, "About", icon("info.circle", "about"), "About");
 	toolBar->AddSeparator();
 	toolBar->AddTool(Tool_NewTab, "New Tab", icon("plus.square", "newtab"), "New Tab");
@@ -339,6 +380,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 #endif
 	SetToolBar(toolBar);
 	toolBar->Show(true);
+	toolBar->ToggleTool(Tool_ThemeToggle, renderMode().darkMode);
+	ApplyThemeToggleVisibility();
+	ApplyThemeShortcutLabel();
+	// ApplyTheme() itself waits until the end of the constructor -- it touches
+	// the canvases, minimap and oscope panel, none of which exist yet here.
 
     // One flat field, keeping the default resize grip. Two artifacts fixed:
     //   - the old second field (never written) left a divider down the middle,
@@ -447,6 +493,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	canvasBook->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnNotebookPage, this);
 	Bind(wxEVT_MENU, &MainFrame::OnCloseTab, this, Tool_CloseTab);
 #endif
+
+	// Paint the theme MainApp resolved at launch (see MainApp::loadSettings).
+	// Everything it touches -- canvases, minimap, oscope panel, macOS chrome --
+	// exists by now, unlike earlier in this constructor.
+	ApplyTheme();
 
 	// Show the main window
 	Show(true);
@@ -973,6 +1024,80 @@ void MainFrame::OnViewWireConn(wxCommandEvent& event) {
 	if (currentCanvas != NULL) currentCanvas->Update();
 }
 
+void MainFrame::OnViewDarkMode(wxCommandEvent& event) {
+	// Fires from both the View menu item and the toolbar switch; either one
+	// already flipped its OWN visual state before sending this, so read that as
+	// the intent and let ApplyTheme sync the other control to match.
+	renderMode().darkMode = event.IsChecked();
+	ApplyTheme();
+}
+
+void MainFrame::ToggleDarkMode() {
+	renderMode().darkMode = !renderMode().darkMode;
+	ApplyTheme();
+}
+
+void MainFrame::ApplyTheme() {
+	const bool dark = renderMode().darkMode;
+
+	if (wxMenuBar* mb = GetMenuBar()) mb->Check(View_DarkMode, dark);
+	if (toolBar->FindById(Tool_ThemeToggle) != nullptr) {
+		if (toolBar->GetToolState(Tool_ThemeToggle) != dark)
+			toolBar->ToggleTool(Tool_ThemeToggle, dark);
+		setToolIcon(Tool_ThemeToggle, dark ? moonIcon : sunIcon, dark ? "moon.fill" : "sun.max.fill");
+	}
+	// A little tonal separation between the toolbar and the (near-)white canvas
+	// under it -- left at native default the two were nearly indistinguishable
+	// in light mode. Dark mode gets the same treatment for consistency, a shade
+	// lighter than the canvas rather than matching it exactly.
+	toolBar->SetBackgroundColour(dark ? wxColour(28, 31, 38) : wxColour(237, 238, 240));
+	toolBar->Refresh();
+
+#ifdef __APPLE__
+	// Pin the WHOLE app's native chrome (menus, dialogs, scrollbars) to match --
+	// always an explicit light/dark, never "follow system", because a manual
+	// toggle here is the person overriding the OS setting for this session.
+	MacSetApplicationAppearance(dark ? 2 : 1);
+#endif
+
+	// Repaint every live view: all canvas tabs (only one is visible, but a
+	// background tab must be correct when its tab is picked), the minimap, and
+	// the oscilloscope, which sits outside the sceneKey cache these share.
+	for (GUICanvas* c : canvases) if (c) c->Refresh();
+	if (miniMap) miniMap->Refresh();
+	if (oscopePanel) oscopePanel->RefreshCanvas();
+	if (gatePalette) gatePalette->ApplyTheme();
+	Refresh();
+}
+
+void MainFrame::ApplyThemeShortcutLabel() {
+	wxMenuBar* mb = GetMenuBar();
+	if (!mb) return;
+	wxMenuItem* item = mb->FindItem(View_DarkMode);
+	if (!item) return;
+	const auto& s = appConfig().appSettings;
+	wxString label = "&Dark Mode";
+	if (s.themeShortcutEnabled) {
+		label += "\t" + wxString(formatThemeShortcut(s.themeShortcutModifiers, s.themeShortcutKeyCode));
+	}
+	item->SetItemLabel(label);
+}
+
+void MainFrame::ApplyThemeToggleVisibility() {
+	const bool want = appConfig().appSettings.showThemeToggleButton;
+	const bool have = toolBar->FindById(Tool_ThemeToggle) != nullptr;
+	if (want == have) return;
+	if (want) {
+		toolBar->AddTool(Tool_ThemeToggle, "Dark Mode",
+		                 renderMode().darkMode ? moonIcon : sunIcon,
+		                 "Toggle dark mode", wxITEM_CHECK);
+		toolBar->Realize();
+		toolBar->ToggleTool(Tool_ThemeToggle, renderMode().darkMode);
+	} else {
+		toolBar->DeleteTool(Tool_ThemeToggle);
+	}
+}
+
 void MainFrame::OnPreferences(wxCommandEvent& event) {
 	SettingsDialog dlg(this);
 	if (dlg.ShowModal() == wxID_OK) {
@@ -983,6 +1108,14 @@ void MainFrame::OnPreferences(wxCommandEvent& event) {
 		appConfig().appSettings.refreshRate = dlg.getRefreshRate();
 		appConfig().appSettings.autosaveSeconds = dlg.getAutosaveSeconds();
 		applyAutosaveInterval();
+
+		appConfig().appSettings.themeMode = (int)dlg.getThemeMode();
+		appConfig().appSettings.themeShortcutEnabled = dlg.getThemeShortcutEnabled();
+		appConfig().appSettings.themeShortcutKeyCode = dlg.getThemeShortcutKeyCode();
+		appConfig().appSettings.themeShortcutModifiers = dlg.getThemeShortcutModifiers();
+		appConfig().appSettings.showThemeToggleButton = dlg.getShowThemeToggleButton();
+		ApplyThemeShortcutLabel();
+		ApplyThemeToggleVisibility();
 
 		// The same two settings are reachable from the View menu; keep its
 		// checkmarks in step with what the dialog just wrote.
@@ -1623,6 +1756,16 @@ void MainFrame::saveSettings() {
 	conf->Write("WireConnVisible", settings.wireConnVisible);
 	conf->Write("GridlineVisible", settings.gridlineVisible);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
+
+	conf->Write("ThemeMode", settings.themeMode);
+	// The CURRENT theme, not whatever settings.lastDarkMode still holds from
+	// launch -- so ThemeMode::RememberLast reopens in whatever this session
+	// ended up in, including a mid-session toggle.
+	conf->Write("ThemeLastDark", renderMode().darkMode);
+	conf->Write("ThemeShortcutEnabled", settings.themeShortcutEnabled);
+	conf->Write("ThemeShortcutKeyCode", settings.themeShortcutKeyCode);
+	conf->Write("ThemeShortcutModifiers", settings.themeShortcutModifiers);
+	conf->Write("ThemeToggleButtonVisible", settings.showThemeToggleButton);
 }
 
 void MainFrame::ResumeExecution() {

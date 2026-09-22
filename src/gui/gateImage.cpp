@@ -43,10 +43,11 @@ gateImage::gateImage( string gateName, wxWindow *parent, wxWindowID id,
 	inImage = false;
 	renderedPx = 0;
 
-	// The palette is a white surface by construction (see PaletteCanvas), and
+	// The palette follows the app's theme (see PaletteCanvas::ApplyTheme), and
 	// erasing is suppressed below, so the tile has to know what to paint under
-	// its thumbnail.
-	SetBackgroundColour(*wxWHITE);
+	// its thumbnail. A tile created after a theme toggle picks up the current
+	// theme right here; one that already existed is repainted via ApplyTheme().
+	SetBackgroundColour(renderMode().darkMode ? wxColour(19, 21, 25) : *wxWHITE);
 
 	this->gateName = gateName;
 	update();
@@ -80,7 +81,9 @@ void gateImage::OnPaint(wxPaintEvent &event) {
 	if (inImage) {
 		dc.SetPen(wxPen(*wxBLUE, 2, wxPENSTYLE_SOLID));
 	} else {
-		dc.SetPen(wxPen(*wxWHITE, 2, wxPENSTYLE_SOLID));
+		// Invisible border at rest: matches the tile's own background so it
+		// only appears (in blue) on hover, in either theme.
+		dc.SetPen(wxPen(GetBackgroundColour(), 2, wxPENSTYLE_SOLID));
 	}
 	dc.SetBrush(wxBrush(*wxTRANSPARENT_BRUSH));
 	const wxSize sz = GetClientSize();   // the tile is sized by the palette, not fixed
@@ -202,24 +205,36 @@ bool gateImage::generateImageSkia() {
 	// picture, so redraw on a genuine change of size and not on each pass.
 	// The bitmap has to be checked too: renderedPx records the size we last drew
 	// *successfully*, so a tile that failed once is retried rather than being
-	// skipped here and left blank for the rest of the session.
-	if (px == renderedPx && gBitmap.IsOk()) return true;
+	// skipped here and left blank for the rest of the session. renderedDark
+	// catches the other reason to redraw: a theme toggle repaints the tile at
+	// the same size but needs the opposite stroke/background colors baked in.
+	const bool dark = renderMode().darkMode;
+	if (px == renderedPx && dark == renderedDark && gBitmap.IsOk()) return true;
 
 	wxImage img(px, px);
 	cl::render::Transform t = thumbnailTransform(gate, px);
-	const cl::render::RenderStyle style = cl::render::RenderStyle::print();
+	const cl::render::RenderStyle style = cl::render::RenderStyle::thumbnail(dark);
+	const unsigned int clearARGB = dark ? 0xFF131519u : 0xFFFFFFFFu;
 	const bool ok = cl::render::skiaRenderToRGB(px, px,
 			[gate, &t, &style](cl::render::Scene &scene) {
 				scene.setViewport(t);
 				gate->drawToScene(scene, style);
 			},
-			img.GetData());
+			img.GetData(), clearARGB);
 	if (!ok) return false;
 
 	gImage = img;
 	gBitmap = wxBitmap(img, -1, scale);
 	renderedPx = px;
+	renderedDark = dark;
 	return true;
+}
+
+void gateImage::ApplyTheme() {
+	SetBackgroundColour(renderMode().darkMode ? wxColour(19, 21, 25) : *wxWHITE);
+	renderedPx = 0;   // force generateImageSkia to redraw at the new theme
+	update();
+	Refresh();
 }
 
 void gateImage::update() {

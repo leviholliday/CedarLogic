@@ -247,9 +247,18 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 		if (conflict)      s.color = Color(0.0f, 1.0f, 1.0f);
 		else if (unknown)  s.color = Color(0.3f, 0.3f, 1.0f);
 		else if (hiz)      s.color = Color(0.0f, 0.78f, 0.0f);
-		else               s.color = Color((float)redness, 0.0f, 0.0f);
+		else {
+			// Black-to-red gradient by "how many bits are high". Pure black at
+			// redness=0 vanishes against a dark canvas, so dark mode lifts the
+			// floor to a visible grey and fades it out as redness climbs to red.
+			const float floorC = style.darkMode ? 0.35f : 0.0f;
+			const float r = floorC + (float)redness * (1.0f - floorC);
+			const float gb = floorC * (1.0f - (float)redness);
+			s.color = Color(r, gb, gb);
+		}
 	}
-	s.dashed = selected && style.showSelection;
+	const bool isSelectedNow = selected && style.showSelection;
+	s.dashed = isSelectedNow;
 
 	const std::vector<GLLine2f>& segs = renderInfo.lineSegments;
 	if (!segs.empty()) {
@@ -258,6 +267,14 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 		for (size_t i = 0; i < segs.size(); i++) {
 			pts.push_back(Point(segs[i].begin.x, segs[i].begin.y));
 			pts.push_back(Point(segs[i].end.x, segs[i].end.y));
+		}
+		// A soft accent halo behind the dash -- unlike a gate outline, a wire's
+		// stroke color carries real state meaning, so selection can't just
+		// recolor it; the glow adds the same "this is selected" read as the
+		// gate halo without losing that.
+		if (isSelectedNow) {
+			const Color ac = style.accent();
+			scene.lines(&pts[0], pts.size(), Stroke(Color(ac.r, ac.g, ac.b, 0.30f * style.selectionFade), s.width + 4.0f));
 		}
 		scene.lines(&pts[0], pts.size(), s);
 	}

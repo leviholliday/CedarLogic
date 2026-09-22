@@ -34,6 +34,7 @@ BEGIN_EVENT_TABLE(klsGLCanvas, wxGLCanvas)
     EVT_ERASE_BACKGROUND(klsGLCanvas::wxOnEraseBackground)
 
 	EVT_MOUSEWHEEL(klsGLCanvas::wxOnMouseWheel)
+	EVT_MAGNIFY(klsGLCanvas::wxOnMagnify)
     EVT_MOUSE_EVENTS(klsGLCanvas::wxOnMouseEvent)
     EVT_MOUSE_CAPTURE_LOST(klsGLCanvas::wxOnCaptureLost)
 
@@ -41,6 +42,7 @@ BEGIN_EVENT_TABLE(klsGLCanvas, wxGLCanvas)
     EVT_KEY_UP(klsGLCanvas::wxKeyUp)
 
    	EVT_TIMER(SCROLL_TIMER_ID, klsGLCanvas::OnScrollTimer)
+   	EVT_TIMER(ZOOM_ANIM_TIMER_ID, klsGLCanvas::OnZoomAnimTimer)
 END_EVENT_TABLE()
 
 
@@ -80,6 +82,8 @@ klsGLCanvas::klsGLCanvas(wxWindow *parent, const wxString& name, wxWindowID id,
 	scrollTimer = new wxTimer(this, SCROLL_TIMER_ID);
 	scrollTimer->Stop();
 
+	zoomAnimTimer = new wxTimer(this, ZOOM_ANIM_TIMER_ID);
+
 	setHorizGrid( 1 );
 	setHorizGridColor( 0, 0, (GLfloat) GRID_INTENSITY, (GLfloat) GRID_INTENSITY );
 	disableHorizGrid();
@@ -101,6 +105,8 @@ klsGLCanvas::klsGLCanvas(wxWindow *parent, const wxString& name, wxWindowID id,
 klsGLCanvas::~klsGLCanvas() {
 	scrollTimer->Stop();
 	delete scrollTimer;
+	zoomAnimTimer->Stop();
+	delete zoomAnimTimer;
 	return;
 }
 
@@ -474,43 +480,28 @@ void klsGLCanvas::wxOnMouseWheel(wxMouseEvent& event) {
 	if (rotationLines != 0) {
 		GLdouble panAmount = PAN_STEP * getZoom() * rotationLines;
 
+		// The professional-tool convention (Figma, Sketch, and friends): a
+		// plain scroll -- trackpad two-finger swipe OR an ordinary mouse wheel,
+		// wx hands us both through the same event -- PANS. Zooming is a
+		// deliberate, separate gesture: a pinch (see wxOnMagnify, trackpad
+		// only) or the primary-modifier+scroll fallback every mouse user has.
+		// This used to default a plain vertical swipe to ZOOM, which is why
+		// trackpad navigation felt wrong: every other app on the system pans
+		// on that gesture.
 #ifdef __WXOSX__
-		// On macOS: Cmd + scroll/swipe = pan in scroll direction
-		// Trackpad: two-finger swipe naturally pans in both directions with Cmd
-		if (event.CmdDown()) {
-			if (event.GetWheelAxis() == wxMOUSE_WHEEL_HORIZONTAL) {
-				translatePan(panAmount, 0.0);
-			} else {
-				translatePan(0.0, panAmount);
-			}
-		} else if (event.ShiftDown()) {
-			// Shift + scroll = horizontal pan (for mouse users)
-			translatePan(panAmount, 0.0);
-		} else if (event.ControlDown()) {
-			// Ctrl + scroll = vertical pan (for mouse users)
-			translatePan(0.0, panAmount);
-		} else {
-			// Default scroll = zoom
-			OnMouseWheel(rotationLines / abs(rotationLines));
-		}
+		const bool zoomModifier = event.CmdDown();   // the physical Cmd key
 #else
-		// On Windows/Linux: Natural trackpad scrolling + modifier keys for mouse
-		// Trackpad: two-finger horizontal swipe = horizontal pan, vertical swipe with Ctrl = vertical pan
-		// Mouse: Shift + scroll = horizontal pan, Ctrl + scroll = vertical pan
-		if (event.GetWheelAxis() == wxMOUSE_WHEEL_HORIZONTAL) {
-			// Natural horizontal scrolling from trackpad
-			translatePan(panAmount, 0.0);
-		} else if (event.ShiftDown()) {
-			// Shift + vertical scroll = horizontal pan (for mouse users)
-			translatePan(panAmount, 0.0);
-		} else if (event.ControlDown()) {
-			// Ctrl + vertical scroll = vertical pan (trackpad or mouse)
-			translatePan(0.0, panAmount);
-		} else {
-			// Default vertical scroll = zoom
-			OnMouseWheel(rotationLines / abs(rotationLines));
-		}
+		const bool zoomModifier = event.ControlDown();   // the physical Ctrl key
 #endif
+		if (zoomModifier) {
+			OnMouseWheel(rotationLines / abs(rotationLines));
+		} else if (event.GetWheelAxis() == wxMOUSE_WHEEL_HORIZONTAL || event.ShiftDown()) {
+			// Horizontal swipe, or Shift+scroll for a mouse with no horizontal
+			// wheel -- both pan horizontally.
+			translatePan(panAmount, 0.0);
+		} else {
+			translatePan(0.0, panAmount);
+		}
 	}
 
 	// Update the drag-pan event here if needed:
@@ -523,6 +514,31 @@ void klsGLCanvas::wxOnMouseWheel(wxMouseEvent& event) {
 
 	updateMiniMap();
 	event.Skip(); // Send the event on to wxOnMouseEvent, so that the gl coordinates get updated.
+}
+
+// Trackpad pinch (macOS only -- wx never generates this from a plain wheel or
+// a two-finger pan, so it can't fight with wxOnMouseWheel's pan default).
+// GetMagnification() is the fractional size change since the last event (0.02
+// for a 2% pinch-out, negative for pinch-in), already scaled for a natural
+// per-frame feel.
+//
+// getZoom()/setZoom() are in this codebase's own "viewZoom" units, where
+// SMALLER means more zoomed in (see zoomToMouse: ZOOM_STEP is 0.75, and
+// zooming in multiplies BY it) -- the opposite of the everyday sense of
+// "zoom factor." So a pinch-out (positive magnification, fingers spreading,
+// which should zoom IN) has to shrink getZoom(), i.e. divide by (1+magnification)
+// rather than multiply by it. Multiplying, as an earlier version of this did,
+// zoomed out on pinch-out -- backwards from every other Mac app.
+void klsGLCanvas::wxOnMagnify(wxMouseEvent& event) {
+	setMouseScreenCoords(event.GetPosition());
+	setMouseCoords();
+	double magFactor = 1.0 + event.GetMagnification();
+	// Guard against a degenerate/inverted zoom from an extreme or malformed
+	// event; a real pinch's per-event magnification is nowhere near this.
+	if (magFactor < 0.1) magFactor = 0.1;
+	if (magFactor > 10.0) magFactor = 10.0;
+	zoomToMouseByFactor(1.0 / magFactor);
+	updateMiniMap();
 }
 
 
@@ -614,11 +630,11 @@ void klsGLCanvas::wxKeyDown(wxKeyEvent& event) {
 	case 43: // + key (Shift+=)
 	case 61: // = key (for zoom in without shift on Mac)
 	case WXK_NUMPAD_ADD:
-		setZoom( getZoom() * ZOOM_STEP );
+		animateZoomTo( getZoom() * ZOOM_STEP );
 		break;
 	case 45: // - key on top row (Works for both '-' and '_')
 	case WXK_NUMPAD_SUBTRACT:
-		setZoom( getZoom() / ZOOM_STEP );
+		animateZoomTo( getZoom() / ZOOM_STEP );
 		break;
 	default:
 		handled = false;
@@ -683,6 +699,15 @@ void klsGLCanvas::setMouseCoords() {
 //Julian: Added to allow for zoom to mouse
 void klsGLCanvas::zoomToMouse(long numLines)
 {
+	zoomToMouseByFactor(numLines > 0 ? pow(ZOOM_STEP, numLines) : 1.0 / pow(ZOOM_STEP, -numLines));
+}
+
+// Shared by the stepped wheel zoom above and the continuous pinch gesture
+// (wxOnMagnify): re-centers the camera on `factor * getZoom()` so whatever
+// world point is under the cursor/gesture stays under it, instead of zooming
+// around the viewport center.
+void klsGLCanvas::zoomToMouseByFactor(double factor)
+{
 	GLPoint2f center = getCenter();
 	GLPoint2f mouse = getMouseCoords();
 
@@ -695,11 +720,7 @@ void klsGLCanvas::zoomToMouse(long numLines)
 	// instead of flashing the intermediate (center-fixed) frame before the
 	// mouse-fixed correction.
 	deferPaint = true;
-	if (numLines > 0) {
-		setZoom(getZoom() * (pow(ZOOM_STEP, numLines)));
-	} else {
-		setZoom(getZoom() / (pow(ZOOM_STEP, -numLines)));
-	}
+	setZoom(getZoom() * factor);
 
 	centerToMouse.x *= getZoom();
 	centerToMouse.y *= getZoom();
@@ -709,6 +730,34 @@ void klsGLCanvas::zoomToMouse(long numLines)
 
 	Refresh();
 	wxWindow::Update();
+}
+
+void klsGLCanvas::animateZoomTo(GLdouble targetZoom) {
+	targetZoom = max(targetZoom, (GLdouble)MIN_ZOOM);
+	targetZoom = min(targetZoom, (GLdouble)MAX_ZOOM);
+	// Restart from wherever the last animation (or a plain setZoom) left off,
+	// not from the in-flight animation's own target -- so mashing the zoom
+	// button repeatedly accelerates smoothly instead of queuing up stale steps.
+	zoomAnimStartZoom = viewZoom;
+	zoomAnimTargetZoom = targetZoom;
+	zoomAnimStartTime = std::chrono::steady_clock::now();
+	if (!zoomAnimTimer->IsRunning()) zoomAnimTimer->Start(ZOOM_ANIM_RATE_MS);
+}
+
+void klsGLCanvas::OnZoomAnimTimer(wxTimerEvent& WXUNUSED(event)) {
+	const long elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - zoomAnimStartTime).count();
+	const double t = (double)elapsedMs / ZOOM_ANIM_DURATION_MS;
+	if (t >= 1.0) {
+		setZoom(zoomAnimTargetZoom);
+		zoomAnimTimer->Stop();
+		return;
+	}
+	// Ease-out cubic: starts at full speed and settles gently, which reads as
+	// a responsive snap rather than a sluggish drift (an ease-in, or linear,
+	// both feel laggy for a one-shot button press).
+	const double eased = 1.0 - pow(1.0 - t, 3.0);
+	setZoom(zoomAnimStartZoom + (zoomAnimTargetZoom - zoomAnimStartZoom) * eased);
 }
 
 GLPoint2f klsGLCanvas::getCenter() {

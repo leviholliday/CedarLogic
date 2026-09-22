@@ -101,6 +101,12 @@ struct ConnectionSource {
 #define GRID_INTENSITY 0.08
 #define MIN_GRID_SCREEN_SPACING 13
 
+// Fast, barely-there fades -- long enough to read as intentional, short
+// enough that nobody's waiting on them. See dragSelectFading/selectionChangedAt.
+#define DRAGSELECT_FADE_MS 180
+#define SELECTION_FADE_MS 130
+#define OVERLAY_FADE_TIMER_RATE_MS 16
+
 #define ZOOM_ALL_MARGIN 0.25
 
 // DragStates
@@ -110,7 +116,12 @@ enum DragState {
 	DRAG_SELECT,
 	DRAG_SELECTION,
 	DRAG_NEWGATE,
-	DRAG_WIRESEG
+	DRAG_WIRESEG,
+	// Cmd/Ctrl + left-drag on empty background, GeoGebra-style. The actual pan
+	// math is the EXISTING, already-correct BUTTON_MIDDLE drag-pan in
+	// klsGLCanvas -- this state just marks OnMouseMove/OnMouseUp to get out of
+	// its way (see their tops) rather than also trying to rubber-band-select.
+	DRAG_PAN
 };
 
 // Engine-neutral rendering seam (Workstream G); defined in gui/render/.
@@ -181,6 +192,13 @@ public:
     // boxes/lines, wire hover, collision boxes) drawn only in the live Skia path
     // -- not in renderToScene, which is shared with PNG/SVG export.
     void drawOverlaysInto(cl::render::Scene& scene);
+    // A centered "drag a gate here to start" hint, screen-space (not affected
+    // by pan/zoom) so it always reads at the same size -- shown only while the
+    // page has nothing on it. `screenT` maps LOGICAL pixel coords 1:1 to
+    // device pixels (see renderSkiaLive); logicalW/H are the canvas's own
+    // logical (not device) client size.
+    void drawEmptyHintInto(cl::render::Scene& scene, const cl::render::RenderStyle& style,
+                           const cl::render::Transform& screenT, float logicalW, float logicalH);
 #endif
 
 	// Update the collision checker and refresh
@@ -288,6 +306,25 @@ private:
 	// When hover work (collision pass + highlight) last ran, to throttle it to
 	// ~60Hz on a flood of raw mouse-motion events (see OnMouseMove).
 	std::chrono::steady_clock::time_point lastHoverTime;
+
+	// Drag-select box fade-out: released rather than just vanishing (see
+	// OnMouseUp, where a real drag finalizes it, and drawOverlaysInto, where it
+	// keeps being drawn -- at falling alpha -- after currentDragState is back
+	// to DRAG_NONE).
+	bool dragSelectFading = false;
+	klsBBox dragSelectFadeBox;
+	std::chrono::steady_clock::time_point dragSelectFadeStart;
+	// Selection halo fade-in: a single timestamp for "the selection last
+	// changed", not per-object, so a plain click (which usually replaces the
+	// whole selection anyway) fades the new halo in instead of it snapping to
+	// full opacity. See markSelectionChanged() and RenderStyle::selectionFade.
+	std::chrono::steady_clock::time_point selectionChangedAt;
+	// Drives repaints for both fades above while either is active; idle
+	// otherwise (unlike simTimer/idleTimer, nothing else keeps the canvas
+	// repainting on its own between mouse/sim events).
+	wxTimer* overlayFadeTimer;
+	void markSelectionChanged();
+	void OnOverlayFadeTimer(wxTimerEvent& event);
 	
 	bool isWithinPaste; // If we are in paste then drag_selection is enabled until drop
 	DragState currentDragState;
