@@ -52,6 +52,7 @@ enum
 	View_ZoomFit,
 	View_ZoomActual,
 	View_FocusMode,
+	Edit_Duplicate,
 	Tool_ThemeToggle,
 
     TIMER_ID,

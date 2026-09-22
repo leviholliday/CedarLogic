@@ -1812,9 +1812,32 @@ void GUICanvas::cutSelectionToClipboard () {
 
 void GUICanvas::pasteBlockFromClipboard () {
 	if (this->isLocked()) return;
-	
 	klsClipboard myClipboard;
-	pasteCommand = myClipboard.pasteBlock( gCircuit, this );
+	startPaste( myClipboard.pasteBlock( gCircuit, this ) );
+}
+
+void GUICanvas::duplicateSelection() {
+	if (this->isLocked() || currentDragState != DRAG_NONE || isWithinPaste) return;
+	// The selection vectors can lag the selection flags; read the flags.
+	vector<unsigned long> gates, wires;
+	for (auto& g : gateList) if (g.second->isSelected()) gates.push_back(g.first);
+	for (auto& w : wireList) if (w.second->isSelected()) wires.push_back(w.first);
+	if (gates.empty()) return;
+	selectedGates = gates;
+	selectedWires = wires;
+	if (appConfig().appSettings.duplicateUsesClipboard) {
+		copyBlockToClipboard();
+		pasteBlockFromClipboard();
+		return;
+	}
+	klsClipboard cb;
+	const string text = cb.serializeBlock( gCircuit, this, gates, wires );
+	if (!text.empty()) startPaste( cb.pasteText( gCircuit, this, text, false ) );
+}
+
+// The pasted gates follow the mouse until the next click drops them.
+void GUICanvas::startPaste( cmdPasteBlock* cmd ) {
+	pasteCommand = cmd;
 	if (pasteCommand == NULL) return;
 	currentDragState = DRAG_SELECTION; // drag until dropped
 	isWithinPaste = true;

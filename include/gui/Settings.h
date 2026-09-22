@@ -81,6 +81,9 @@ struct ApplicationSettings {
 	// Target edge of a gate tile in the palette, in pixels. Tiles stretch a
 	// little past it to fill the panel's width exactly.
 	int paletteGateSize = 48;
+	// Cmd+D: false = duplicate without touching the clipboard; true = copy to
+	// the clipboard then paste, like Cmd+C, Cmd+V.
+	bool duplicateUsesClipboard = false;
 	bool rightClickRotate;
 
 	// Dark mode. themeMode picks the launch behavior (see ThemeMode); lastDarkMode

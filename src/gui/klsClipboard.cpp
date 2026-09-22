@@ -44,7 +44,7 @@ public:
 // don't collide, and rewrite the clipboard so the next paste keeps counting.
 // Skipped when the block holds more than one gate, or when Shift is held.
 // Mutates `line` (the setparams command text) in place.
-static void autoIncrementJunctionId(string &line, const string &pasteText) {
+static void autoIncrementJunctionId(string &line, const string &pasteText, bool rewriteClipboard) {
 	// More than one creategate in the block, or Shift held -> leave it alone.
 	if (pasteText.find("creategate", pasteText.find("creategate") + 1) != string::npos ||
 		wxGetKeyState(WXK_SHIFT)) {
@@ -67,7 +67,7 @@ static void autoIncrementJunctionId(string &line, const string &pasteText) {
 	string s = to_string(stoi(numEnd) + 1) + "\t"; // the point of it all: bump the trailing number by 1
 	line += s;
 	newPasteText += s + "\n";
-	wxTheClipboard->AddData(new wxTextDataObject(newPasteText));
+	if (rewriteClipboard) wxTheClipboard->AddData(new wxTextDataObject(newPasteText));
 }
 
 cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanvas ) {
@@ -75,11 +75,15 @@ cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanva
 	if ( !clipboard.valid || !wxTheClipboard->IsSupported(wxDF_UNICODETEXT) ) {
 		return NULL;
 	}
+	wxTextDataObject text;
+	if ( !wxTheClipboard->GetData(text) ) return NULL;
+	// Still open: the JUNCTION_ID bump in pasteText may rewrite it.
+	return pasteText( gCircuit, gCanvas, text.GetText().ToStdString(), true );
+}
 
-    wxTextDataObject text;
+cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& pasteText, bool useClipboard ) {
     vector < klsCommand* > cmdList;
-    if ( wxTheClipboard->GetData(text) ) {
-    	string pasteText = text.GetText().ToStdString();
+    {
     	if (pasteText.find('\n',0) == string::npos) return NULL;
     	istringstream iss(pasteText);
     	string temp;
@@ -91,7 +95,7 @@ cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanva
     		// bumped before the command is rebuilt (this also rewrites the
     		// clipboard so the next paste keeps counting).
     		if (cmdser::keyword(temp) == "setparams")
-    			autoIncrementJunctionId(temp, pasteText);
+    			autoIncrementJunctionId(temp, pasteText, useClipboard);
 
     		// The registry picks the concrete command from the line's keyword.
     		// An unrecognized keyword ends the block, as the old chain did.
@@ -124,7 +128,15 @@ cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanva
 }
 
 void klsClipboard::copyBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires ) {
-	if (gates.size() == 0) return;
+	const string text = serializeBlock( gCircuit, gCanvas, gates, wires );
+	if (text.empty()) return;
+	if (!wxTheClipboard->Open()) return;
+	wxTheClipboard->AddData(new wxTextDataObject(text));
+	wxTheClipboard->Close();
+}
+
+string klsClipboard::serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires ) {
+	if (gates.size() == 0) return "";
 	ostringstream oss;
 	klsCommand* cmdTemp;
 	map < unsigned long, unsigned long > connectWireList;
@@ -204,7 +216,5 @@ void klsClipboard::copyBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector <
 		oss << cmdTemp->toString() << endl;
 		delete cmdTemp;
 	}
-	if (!wxTheClipboard->Open()) return;
-	wxTheClipboard->AddData(new wxTextDataObject(oss.str()));
-	wxTheClipboard->Close();
+	return oss.str();
 }

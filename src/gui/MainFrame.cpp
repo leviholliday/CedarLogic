@@ -236,6 +236,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	editMenu->Append(wxID_CUT, "Cut\tCtrl+X", "Cut selection to clipboard");
 	editMenu->Append(wxID_COPY, "Copy\tCtrl+C", "Copy selection to clipboard");
 	editMenu->Append(wxID_PASTE, "Paste\tCtrl+V", "Paste selection from clipboard");
+	editMenu->Append(Edit_Duplicate, "Duplicate\tCtrl+D", "Copy the selection and place it with the mouse");
 	editMenu->AppendSeparator();
 	// wxID_PREFERENCES, not an id of our own: that is what makes macOS lift this
 	// into the application menu as "Settings..." with its usual Cmd+, -- which
@@ -482,6 +483,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) { currentCanvas->setZoomAll(); currentCanvas->Refresh(); }
 	}, View_ZoomFit);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		if (currentCanvas) currentCanvas->duplicateSelection();
+	}, Edit_Duplicate);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->animateZoomTo(DEFAULT_ZOOM);
 	}, View_ZoomActual);
@@ -2039,6 +2043,7 @@ void MainFrame::saveSettings() {
 	conf->Write("ReverseWheelZoom", settings.reverseWheelZoom);
 	conf->Write("SidePanelWidth", settings.sidePanelWidth);
 	conf->Write("PaletteGateSize", settings.paletteGateSize);
+	conf->Write("DuplicateUsesClipboard", settings.duplicateUsesClipboard);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
 
 	conf->Write("ThemeMode", settings.themeMode);
@@ -2642,6 +2647,7 @@ void MainFrame::OnKeyboardShortcuts(wxCommandEvent& event) {
 	addRow(grid, mod + "+Shift+Z", "Redo");
 	addRow(grid, mod + "+C", "Copy");
 	addRow(grid, mod + "+V", "Paste");
+	addRow(grid, mod + "+D", "Duplicate");
 	addRow(grid, "Delete", "Delete Selection");
 	addRow(grid, "Escape", "Clear Selection");
 

@@ -25,6 +25,13 @@ public:
 	
 	cmdPasteBlock* pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanvas );
 	void copyBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires );
+
+	// The two halves of copy/paste without the system clipboard -- for
+	// Duplicate, which shouldn't overwrite what the user last copied.
+	// `useClipboard` lets paste keep its JUNCTION_ID auto-increment, which
+	// rewrites the clipboard text so the next paste keeps counting.
+	string serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires );
+	cmdPasteBlock* pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& pasteText, bool useClipboard );
 };
 
 #endif /*KLSCLIPBOARD_H_*/

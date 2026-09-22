@@ -298,6 +298,11 @@ public:
 	// Cut: copy the selection to the clipboard, then delete it (one undoable
 	// deletion; the clipboard contents survive the undo).
 	void cutSelectionToClipboard( void );
+	// Cmd+D: a copy of the selection that follows the mouse until dropped,
+	// like a paste. Leaves the clipboard alone unless the
+	// duplicateUsesClipboard setting says to go through it.
+	void duplicateSelection();
+	void startPaste( cmdPasteBlock* cmd );
 
 	// Tell the canvas which minimap it should use; sets the minimaps pointers and lists
 	void setMinimap(klsMiniMap* minimap) {

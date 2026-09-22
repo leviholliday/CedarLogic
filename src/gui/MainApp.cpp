@@ -986,6 +986,7 @@ void MainApp::loadSettings() {
 	conf->Read("ReverseWheelZoom", &appConfig().appSettings.reverseWheelZoom, true);
 	conf->Read("SidePanelWidth", &appConfig().appSettings.sidePanelWidth, 0);
 	conf->Read("PaletteGateSize", &appConfig().appSettings.paletteGateSize, 48);
+	conf->Read("DuplicateUsesClipboard", &appConfig().appSettings.duplicateUsesClipboard, false);
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
 
 	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);

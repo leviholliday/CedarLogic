@@ -254,12 +254,21 @@ public:
 
 		rightClickRotate = addCheck("Right-click:", "Rotates the gate", s.rightClickRotate,
 			"Off: right-clicking a gate opens a menu with Rotate and Delete instead.");
+
+		duplicate = new wxChoice(this, wxID_ANY);
+		duplicate->Append("Leaves the clipboard alone");   // false
+		duplicate->Append("Copies to the clipboard too");   // true
+		duplicate->SetSelection(s.duplicateUsesClipboard ? 1 : 0);
+		duplicate->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		addRow("Duplicate (Cmd+D):", duplicate,
+			"Second option: the copy stays on the clipboard, so Cmd+V pastes more of it.");
 		GetSizer()->SetSizeHints(this);
 	}
 
 protected:
 	void apply() override {
 		appConfig().appSettings.rightClickRotate = rightClickRotate->GetValue();
+		appConfig().appSettings.duplicateUsesClipboard = duplicate->GetSelection() == 1;
 		auto& s = appConfig().appSettings;
 		s.mouseWheelAction = mouseAction->GetSelection();
 		s.reverseWheelZoom = reverseWheel->GetValue();
@@ -281,6 +290,7 @@ private:
 		return c;
 	}
 
+	wxChoice* duplicate;
 	wxChoice* mouseAction;
 	wxCheckBox* reverseWheel;
 	wxChoice* trackpadAction = nullptr;
