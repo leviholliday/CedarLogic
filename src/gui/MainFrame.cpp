@@ -50,7 +50,7 @@
 #include "CircuitParse.h"
 #include "migrate.hpp"   // cl::LoadResult, held across the validate/apply split
 #include "OscopeFrame.h"
-#include "SettingsDialog.h"
+#include "PreferencesWindow.h"
 #include "wx/docview.h"
 #include "commands.h"
 #include "../version.h"
@@ -260,7 +260,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     //   Cut / Copy / Paste: Ctrl+X / Ctrl+C / Ctrl+V.
     Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent &e) {
         // The dark-mode toggle shortcut, matched with themeModsFromKeyEvent so
-        // this agrees with what SettingsDialog's capture button recorded (see
+        // this agrees with what the Preferences window's shortcut field recorded (see
         // its definition in Settings.cpp for why a direct MetaDown() check is
         // wrong on macOS).
         const auto &ts = appConfig().appSettings;
@@ -661,6 +661,7 @@ void MainFrame::OnClose(wxCloseEvent& event) {
 
 	if (destroy)
 	{
+		DismissPreferencesWindow();
 		removeTempFile();
 	}
 	else
@@ -1099,31 +1100,20 @@ void MainFrame::ApplyThemeToggleVisibility() {
 }
 
 void MainFrame::OnPreferences(wxCommandEvent& event) {
-	SettingsDialog dlg(this);
-	if (dlg.ShowModal() == wxID_OK) {
-		appConfig().appSettings.wireConnVisible = dlg.getWireConnVisible();
-		appConfig().appSettings.wireConnRadius = (float)dlg.getWireConnRadius();
-		appConfig().appSettings.gridlineVisible = dlg.getGridlineVisible();
-		appConfig().appSettings.rightClickRotate = dlg.getRightClickRotate();
-		appConfig().appSettings.refreshRate = dlg.getRefreshRate();
-		appConfig().appSettings.autosaveSeconds = dlg.getAutosaveSeconds();
-		applyAutosaveInterval();
+	ShowPreferencesWindow(this);
+}
 
-		appConfig().appSettings.themeMode = (int)dlg.getThemeMode();
-		appConfig().appSettings.themeShortcutEnabled = dlg.getThemeShortcutEnabled();
-		appConfig().appSettings.themeShortcutKeyCode = dlg.getThemeShortcutKeyCode();
-		appConfig().appSettings.themeShortcutModifiers = dlg.getThemeShortcutModifiers();
-		appConfig().appSettings.showThemeToggleButton = dlg.getShowThemeToggleButton();
-		ApplyThemeShortcutLabel();
-		ApplyThemeToggleVisibility();
+void MainFrame::ApplyPreferences() {
+	applyAutosaveInterval();
+	ApplyThemeShortcutLabel();
+	ApplyThemeToggleVisibility();
 
-		// The same two settings are reachable from the View menu; keep its
-		// checkmarks in step with what the dialog just wrote.
-		GetMenuBar()->Check(View_Gridline, appConfig().appSettings.gridlineVisible);
-		GetMenuBar()->Check(View_WireConn, appConfig().appSettings.wireConnVisible);
+	// The same two settings are reachable from the View menu; keep its
+	// checkmarks in step with Preferences.
+	GetMenuBar()->Check(View_Gridline, appConfig().appSettings.gridlineVisible);
+	GetMenuBar()->Check(View_WireConn, appConfig().appSettings.wireConnVisible);
 
-		if (currentCanvas != NULL) currentCanvas->Update();
-	}
+	if (currentCanvas != NULL) currentCanvas->Update();
 }
 
 // Cadence pump event (posted from simPumpThread). Runs the same work the two

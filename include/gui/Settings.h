@@ -22,7 +22,7 @@
 // instead. Meta here means "the Cmd key on macOS, the Windows key elsewhere" --
 // use themeModsFromKeyEvent() below to read it correctly rather than calling
 // MetaDown()/ControlDown() directly, on either the capture button
-// (SettingsDialog) or the live shortcut match (MainFrame's CHAR_HOOK).
+// (PreferencesWindow) or the live shortcut match (MainFrame's CHAR_HOOK).
 namespace ThemeShortcutMod {
 	const int Shift = 1;
 	const int Alt   = 2;
@@ -35,7 +35,7 @@ class wxKeyEvent;
 // Reads the four ThemeShortcutMod bits off a live key event, correctly for the
 // platform (see the namespace comment above for why this isn't just four
 // direct .*Down() calls). Shared by MainFrame's shortcut match and
-// SettingsDialog's capture button so they can never disagree on what a given
+// the Preferences window's shortcut field so they can never disagree on what a given
 // keystroke means.
 int themeModsFromKeyEvent(const wxKeyEvent& event);
 
@@ -92,6 +92,6 @@ public:
 Settings& appConfig();
 
 // Human-readable form of a theme-toggle shortcut ("Ctrl+Shift+D", "Cmd+Shift+D"),
-// for the View menu item and the SettingsDialog's capture button. Shared so the
+// for the View menu item and the the Preferences window's shortcut field. Shared so the
 // two stay in sync without duplicating the modifier-name logic.
 std::string formatThemeShortcut(int modifiers, int keyCode);

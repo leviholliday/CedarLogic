@@ -148,7 +148,11 @@ public:
 	// showThemeToggleButton, for anyone who'd rather not stare at it while
 	// working. Called at startup and from Preferences.
 	void ApplyThemeToggleVisibility();
-	
+	// Push every appSettings value into the live app (autosave timer, theme
+	// shortcut, toolbar switch, View menu checkmarks, canvas redraw). The
+	// Preferences window calls this after each change.
+	void ApplyPreferences();
+
 	void ResumeExecution ( void );
 	
 	void PauseSim( void );
