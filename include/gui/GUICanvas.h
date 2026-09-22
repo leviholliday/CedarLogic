@@ -119,6 +119,8 @@ struct ConnectionSource {
 #define DRAGSELECT_FADE_MS 180
 #define SELECTION_FADE_MS 130
 #define OVERLAY_FADE_TIMER_RATE_MS 16
+// A new page's grid and hint fade in (and the hint drifts up) over this long.
+#define APPEAR_ANIM_MS 320
 
 #define ZOOM_ALL_MARGIN 0.25
 
@@ -188,9 +190,8 @@ public:
 	// and second-nearest candidates are too close to call (see
 	// HOTSPOT_CONNECT_AMBIGUITY_RATIO). Meant to be called mid-drag (without
 	// releasing the mouse) as well as when nothing is being dragged; mid-drag
-	// it bundles the new wire(s) with a checkpoint move command so undo takes
-	// it back one coherent step at a time. Returns the number of new
-	// connections made.
+	// the new wires wait in pendingConnects and go on the undo stack at the
+	// drop, above the move. Returns the number of new connections made.
 	int connectNearbyHotspots();
 
 	// The search behind connectNearbyHotspots (and the forgiving connect on
@@ -244,6 +245,9 @@ public:
 	// user last saw on it), for the Ctrl+Tab switcher. A page that has never
 	// been laid out falls back to fitting the whole circuit.
 	wxImage renderThumbnail(int w, int h, bool dark);
+
+	// Fade this page's grid and empty-page hint in, for a freshly opened tab.
+	void playAppearAnimation();
 
 	// Update the collision checker and refresh
 	void Update();
@@ -380,6 +384,9 @@ private:
 	wxTimer* overlayFadeTimer;
 	void markSelectionChanged();
 	void OnOverlayFadeTimer(wxTimerEvent& event);
+	bool appearing = false;
+	std::chrono::steady_clock::time_point appearStart;
+	float appearProgress() const;   // 0..1, eased; 1 when not animating
 	
 	bool isWithinPaste; // If we are in paste then drag_selection is enabled until drop
 	DragState currentDragState;

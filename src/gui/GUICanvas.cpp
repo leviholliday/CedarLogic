@@ -324,9 +324,10 @@ void GUICanvas::drawGridInto(cl::render::Scene& scene,
 	};
 
 	Stroke minor, major;
-	minor.color = style.gridColor((float)GRID_INTENSITY);
+	const float fade = appearProgress();
+	minor.color = style.gridColor((float)GRID_INTENSITY * fade);
 	minor.width = 1.0f;
-	major.color = style.gridColor((float)GRID_INTENSITY * 2.5f);
+	major.color = style.gridColor((float)GRID_INTENSITY * 2.5f * fade);
 	major.width = 1.0f;
 
 	std::vector<Point> minorLines, majorLines;
@@ -346,8 +347,8 @@ void GUICanvas::drawGridInto(cl::render::Scene& scene,
 		// Dots at the intersections instead of lines; a dot on two darker
 		// lines is drawn larger and stronger.
 		const float r = 1.1f * viewZoom, rMajor = 1.7f * viewZoom;
-		const Color dot = style.gridColor((float)GRID_INTENSITY * 3.0f);
-		const Color dotMajor = style.gridColor((float)GRID_INTENSITY * 5.0f);
+		const Color dot = style.gridColor((float)GRID_INTENSITY * 3.0f * fade);
+		const Color dotMajor = style.gridColor((float)GRID_INTENSITY * 5.0f * fade);
 		for (long ix = xStartIdx; (float)(ix * spaceX) <= gMaxX; ix++)
 			for (long iy = yStartIdx; (float)(iy * spaceY) <= gMaxY; iy++) {
 				const bool m = isMajor(ix) && isMajor(iy);
@@ -523,15 +524,32 @@ void GUICanvas::markSelectionChanged() {
 // timer stopped) once both have settled. Nothing else keeps the canvas
 // repainting between mouse/sim events, so without this the fades would just
 // freeze at whatever alpha the next unrelated repaint happened to catch them at.
+void GUICanvas::playAppearAnimation() {
+	appearing = true;
+	appearStart = std::chrono::steady_clock::now();
+	if (!overlayFadeTimer->IsRunning()) overlayFadeTimer->Start(OVERLAY_FADE_TIMER_RATE_MS);
+	Refresh();
+}
+
+float GUICanvas::appearProgress() const {
+	if (!appearing) return 1.0f;
+	const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - appearStart).count();
+	const float t = std::min(1.0f, std::max(0.0f, (float)ms / APPEAR_ANIM_MS));
+	return 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);   // ease-out cubic
+}
+
 void GUICanvas::OnOverlayFadeTimer(wxTimerEvent& WXUNUSED(event)) {
 	const auto now = std::chrono::steady_clock::now();
+	if (appearing && std::chrono::duration_cast<std::chrono::milliseconds>(now - appearStart).count() >= APPEAR_ANIM_MS)
+		appearing = false;
 	if (dragSelectFading) {
 		const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - dragSelectFadeStart).count();
 		if (ms >= DRAGSELECT_FADE_MS) dragSelectFading = false;
 	}
 	const long selMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - selectionChangedAt).count();
 	Refresh();
-	if (!dragSelectFading && selMs >= SELECTION_FADE_MS) overlayFadeTimer->Stop();
+	if (!dragSelectFading && !appearing && selMs >= SELECTION_FADE_MS) overlayFadeTimer->Stop();
 }
 
 #ifdef WITH_SKIA
@@ -629,12 +647,14 @@ void GUICanvas::drawEmptyHintInto(cl::render::Scene& scene, const cl::render::Re
 	const char* msg = "Drag a gate here to start";
 	const float textPx = 16.0f;
 	const float textW = measuredTextWidth(msg, textPx);
-	const Color c = style.darkMode ? Color(1.0f, 1.0f, 1.0f, 0.22f) : Color(0.0f, 0.0f, 0.0f, 0.22f);
+	const float p = appearProgress();
+	const float a = 0.22f * p;
+	const Color c = style.darkMode ? Color(1.0f, 1.0f, 1.0f, a) : Color(0.0f, 0.0f, 0.0f, a);
 	// text()'s origin is the top of the capitals, in the Y-UP space screenT
 	// establishes -- convert from the top-down logical position we actually
 	// want (vertical center, nudged up half a cap-height so the glyphs
 	// themselves sit centered rather than their top edge).
-	const float topDownY = logicalH * 0.5f - textPx * 0.5f;
+	const float topDownY = logicalH * 0.5f - textPx * 0.5f + (1.0f - p) * 14.0f;   // drifts up into place
 	scene.text(Point(logicalW * 0.5f - textW * 0.5f, logicalH - topDownY), msg, textPx, c);
 }
 #endif

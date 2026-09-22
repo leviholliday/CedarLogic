@@ -1157,11 +1157,17 @@ void MainFrame::ApplyThemeToggleVisibility() {
 	const bool have = toolBar->FindById(Tool_ThemeToggle) != nullptr;
 	if (want == have) return;
 	if (want) {
-		toolBar->AddTool(Tool_ThemeToggle, "Dark Mode",
-		                 renderMode().darkMode ? moonIcon : sunIcon,
-		                 "Toggle dark mode", wxITEM_CHECK);
+		const bool dark = renderMode().darkMode;
+		// Back in its original slot, between the separators before About --
+		// AddTool would put it at the far end of the bar.
+		const int aboutPos = toolBar->GetToolPos(wxID_ABOUT);
+		const size_t pos = aboutPos > 0 ? (size_t)(aboutPos - 1) : toolBar->GetToolsCount();
+		toolBar->InsertTool(pos, Tool_ThemeToggle, "Dark Mode", dark ? moonIcon : sunIcon,
+		                    wxNullBitmap, wxITEM_CHECK, "Toggle dark mode");
 		toolBar->Realize();
-		toolBar->ToggleTool(Tool_ThemeToggle, renderMode().darkMode);
+		toolBar->ToggleTool(Tool_ThemeToggle, dark);
+		// Same native symbol ApplyTheme uses, or it comes back tinted wrong.
+		setToolIcon(Tool_ThemeToggle, dark ? moonIcon : sunIcon, dark ? "moon.fill" : "sun.max.fill");
 	} else {
 		toolBar->DeleteTool(Tool_ThemeToggle);
 	}
@@ -2377,7 +2383,10 @@ void MainFrame::OnNewTab(wxCommandEvent& event) {
 	if (canSize < 42) {
 		gCircuit->GetCommandProcessor()->Submit((wxCommand*)new cmdAddTab(gCircuit, canvasBook, &canvases));
 		// Go to the new tab. SetSelection fires OnNotebookPage, which does the rest.
-		if ((int)canvases.size() > canSize) canvasBook->SetSelection(canvases.size() - 1);
+		if ((int)canvases.size() > canSize) {
+			canvasBook->SetSelection(canvases.size() - 1);
+			canvases.back()->playAppearAnimation();
+		}
 	}
 	else {
 		wxMessageBox("You have reached the maximum number of tabs.", "Close", wxOK);
