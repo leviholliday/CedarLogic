@@ -963,6 +963,9 @@ void MainApp::loadSettings() {
 
 	conf->Read("LastDirectory", &str, "");
 	appConfig().appSettings.lastDir = str;
+	conf->Read("ExportInfoEnabled", &appConfig().appSettings.exportInfoEnabled, true);
+	conf->Read("StudentName", &str, "");
+	appConfig().appSettings.studentName = str.ToStdString();
 
 	conf->Read("FrameWidth", &appConfig().appSettings.mainFrameWidth, 600);
 	conf->Read("FrameHeight", &appConfig().appSettings.mainFrameHeight, 600);

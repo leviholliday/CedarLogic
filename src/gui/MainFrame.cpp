@@ -1763,6 +1763,32 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	gridCheck->SetValue(false);
 	mainSizer->Add(gridCheck, 0, wxLEFT | wxRIGHT, 15);
 
+	// Name and result: printed in a strip under the circuit.
+	mainSizer->AddSpacer(10);
+	wxStaticBoxSizer* infoBox = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, "Name and result");
+	wxCheckBox* infoCheck = new wxCheckBox(&exportDialog, wxID_ANY, "Add my name and whether the circuit works");
+	infoCheck->SetValue(appConfig().appSettings.exportInfoEnabled);
+	infoBox->Add(infoCheck, 0, wxALL, 5);
+	wxBoxSizer* nameRow = new wxBoxSizer(wxHORIZONTAL);
+	nameRow->Add(new wxStaticText(&exportDialog, wxID_ANY, "Your name:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+	wxTextCtrl* nameCtrl = new wxTextCtrl(&exportDialog, wxID_ANY,
+		wxString::FromUTF8(appConfig().appSettings.studentName.c_str()));
+	nameCtrl->SetHint("First and last name");
+	nameRow->Add(nameCtrl, 1, wxALIGN_CENTER_VERTICAL);
+	infoBox->Add(nameRow, 0, wxALL | wxEXPAND, 5);
+	wxRadioButton* worksRadio = new wxRadioButton(&exportDialog, wxID_ANY, "My circuit works properly",
+		wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
+	wxRadioButton* brokenRadio = new wxRadioButton(&exportDialog, wxID_ANY, "My circuit does not work because...");
+	worksRadio->SetValue(lastExportInfo.works);
+	brokenRadio->SetValue(!lastExportInfo.works);
+	infoBox->Add(worksRadio, 0, wxLEFT | wxRIGHT | wxTOP, 5);
+	infoBox->Add(brokenRadio, 0, wxLEFT | wxRIGHT | wxTOP, 5);
+	wxTextCtrl* whyCtrl = new wxTextCtrl(&exportDialog, wxID_ANY, lastExportInfo.why,
+		wxDefaultPosition, wxSize(-1, 56), wxTE_MULTILINE);
+	whyCtrl->SetHint("Explain what doesn't work (required)");
+	infoBox->Add(whyCtrl, 0, wxALL | wxEXPAND, 5);
+	mainSizer->Add(infoBox, 0, wxLEFT | wxRIGHT | wxEXPAND, 15);
+
 	// Horizontal sizer for output style and resolution side-by-side
 	mainSizer->AddSpacer(10);
 	wxBoxSizer* optionsSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -1816,6 +1842,29 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 
 	exportDialog.SetSizer(mainSizer);
 
+	wxString fileLabel;
+	if (!openedFilename.empty()) fileLabel = wxFileName(openedFilename).GetFullName();
+	auto currentInfo = [&]() {
+		ExportInfo info;
+		info.enabled = infoCheck->GetValue();
+		info.name = nameCtrl->GetValue();
+		info.works = worksRadio->GetValue();
+		info.why = whyCtrl->GetValue();
+		info.fileName = fileLabel;
+		return info;
+	};
+	// A "does not work" answer needs its reason before anything can go out.
+	auto updateInfoState = [&]() {
+		const bool on = infoCheck->GetValue();
+		nameCtrl->Enable(on);
+		worksRadio->Enable(on);
+		brokenRadio->Enable(on);
+		whyCtrl->Enable(on && brokenRadio->GetValue());
+		const bool ok = !on || worksRadio->GetValue() || !whyCtrl->GetValue().Strip(wxString::both).empty();
+		saveBtn->Enable(ok);
+		copyBtn->Enable(ok);
+	};
+
 	// Preview update helper — renders at full canvas resolution and downscales for crisp preview
 	double contentScaleFactor = exportDialog.GetContentScaleFactor();
 	auto updatePreview = [&]() {
@@ -1823,7 +1872,8 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 		bool noColor = bwRadio->GetValue();
 
 		// Render at native canvas size (1:1 with what the user sees)
-		wxBitmap bmp = getBitmap(showGrid, noColor, 1);
+		const ExportInfo info = currentInfo();
+		wxBitmap bmp = getBitmap(showGrid, noColor, 1, &info);
 		wxImage img = bmp.ConvertToImage();
 
 		// Compute logical thumbnail size preserving aspect ratio
@@ -1852,6 +1902,13 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	gridCheck->Bind(wxEVT_CHECKBOX, onOptionChange);
 	colorRadio->Bind(wxEVT_RADIOBUTTON, onOptionChange);
 	bwRadio->Bind(wxEVT_RADIOBUTTON, onOptionChange);
+	auto onInfoChange = [&](wxCommandEvent&) { updateInfoState(); updatePreview(); };
+	infoCheck->Bind(wxEVT_CHECKBOX, onInfoChange);
+	worksRadio->Bind(wxEVT_RADIOBUTTON, onInfoChange);
+	brokenRadio->Bind(wxEVT_RADIOBUTTON, onInfoChange);
+	nameCtrl->Bind(wxEVT_TEXT, onInfoChange);
+	whyCtrl->Bind(wxEVT_TEXT, onInfoChange);
+	updateInfoState();
 
 	// Generate initial preview and size dialog to fit
 	updatePreview();
@@ -1859,7 +1916,12 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	exportDialog.Centre();
 
 	int result = exportDialog.ShowModal();
+	// Remember the answers (and the name, for good) even on Cancel.
+	lastExportInfo = currentInfo();
+	appConfig().appSettings.exportInfoEnabled = lastExportInfo.enabled;
+	appConfig().appSettings.studentName = std::string(nameCtrl->GetValue().Strip(wxString::both).ToUTF8());
 	if (result == wxID_CANCEL) return;
+	const ExportInfo info = lastExportInfo;
 
 	// Get user choices
 	bool showGrid = gridCheck->GetValue();
@@ -1867,7 +1929,7 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	int multiplier = screen2x->GetValue() ? 2 : (print4x->GetValue() ? 4 : 6);
 
 	// Generate bitmap
-	wxBitmap bitmap = getBitmap(showGrid, useNoColor, multiplier);
+	wxBitmap bitmap = getBitmap(showGrid, useNoColor, multiplier, &info);
 
 	// Handle action
 	if (result == wxID_APPLY) {
@@ -1895,7 +1957,7 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 				wxSize sz = currentCanvas->GetClientSize();
 				bool success = renderToSvgSkia(path, sz.GetWidth() * multiplier,
 				                               sz.GetHeight() * multiplier,
-				                               showGrid, useNoColor);
+				                               showGrid, useNoColor, &info);
 				if (!success) {
 					wxMessageBox("Failed to export SVG file.", "Export Error", wxOK | wxICON_ERROR);
 				}
@@ -1981,7 +2043,71 @@ void MainFrame::OnCopyToClipboard(wxCommandEvent& event) {
 	OnExportBitmap(event);
 }
 
-wxBitmap MainFrame::getBitmap(bool withGrid, bool noColor, int multiplier) {
+#ifdef WITH_SKIA
+// Lays out the name-and-result strip that goes under an exported circuit and,
+// when `scene` is given, draws it with its top edge at `yTop` of a `totalH`
+// tall page. Returns the strip's height. Black on white so it prints in B&W.
+// `m` scales it with the export resolution.
+static float exportInfoStrip(cl::render::Scene* scene, const MainFrame::ExportInfo& info,
+                             float W, float yTop, float totalH, float m) {
+	using namespace cl::render;
+	// Sized to be read at a glance by a grader flipping through printouts.
+	const float pad = 22.0f * m, bodyPx = 17.0f * m, smallPx = 11.0f * m, lineGap = 8.0f * m;
+	const float maxW = W - 2 * pad;
+
+	// The statement, word-wrapped to the page width.
+	const std::string statement = info.works
+		? std::string("My circuit works properly.")
+		: "My circuit does not work because " + std::string(info.why.Strip(wxString::both).ToUTF8());
+	std::vector<std::string> lines;
+	{
+		std::istringstream words(statement);
+		std::string word, line;
+		while (words >> word) {
+			const std::string trial = line.empty() ? word : line + " " + word;
+			if (!line.empty() && measuredTextWidth(trial.c_str(), bodyPx) > maxW) {
+				lines.push_back(line);
+				line = word;
+			} else {
+				line = trial;
+			}
+		}
+		if (!line.empty()) lines.push_back(line);
+	}
+	const float height = pad + bodyPx + lineGap * 1.6f + lines.size() * (bodyPx + lineGap) + pad * 0.5f;
+	if (scene == nullptr) return height;
+
+	Transform t;   // top-down page px; text() wants the Y-up flip
+	t.a = 1; t.b = 0; t.c = 0; t.d = -1; t.e = 0; t.f = totalH;
+	scene->setViewport(t);
+	auto at = [totalH](float x, float y) { return Point(x, totalH - y); };
+	const Color ink(0, 0, 0, 1), gray(0.40f, 0.40f, 0.40f, 1);
+
+	const Point rule[2] = { at(pad, yTop + 0.5f * m), at(W - pad, yTop + 0.5f * m) };
+	scene->lines(rule, 2, Stroke(ink, 1.0f * m));
+
+	float y = yTop + pad;
+	const std::string label = "Name:";
+	scene->text(at(pad, y), label.c_str(), bodyPx, gray);
+	const std::string name = info.name.Strip(wxString::both).empty()
+		? std::string("________________") : std::string(info.name.Strip(wxString::both).ToUTF8());
+	scene->text(at(pad + measuredTextWidth(label.c_str(), bodyPx) + 8 * m, y), name.c_str(), bodyPx, ink);
+
+	std::string meta = std::string(wxDateTime::Now().FormatDate().ToUTF8());
+	if (!info.fileName.empty()) meta = std::string(info.fileName.ToUTF8()) + "   " + meta;
+	scene->text(at(W - pad - measuredTextWidth(meta.c_str(), smallPx), y + (bodyPx - smallPx)),
+	            meta.c_str(), smallPx, gray);
+
+	y += bodyPx + lineGap * 1.6f;
+	for (const std::string& l : lines) {
+		scene->text(at(pad, y), l.c_str(), bodyPx, ink);
+		y += bodyPx + lineGap;
+	}
+	return height;
+}
+#endif
+
+wxBitmap MainFrame::getBitmap(bool withGrid, bool noColor, int multiplier, const ExportInfo* info) {
 	bool gridlineVisible = appConfig().appSettings.gridlineVisible;
 	appConfig().appSettings.gridlineVisible = withGrid;
 	renderMode().doingBitmapExport = true;
@@ -1993,15 +2119,19 @@ wxBitmap MainFrame::getBitmap(bool withGrid, bool noColor, int multiplier) {
 	wxSize imageSize = currentCanvas->GetClientSize();
 	const int w = imageSize.GetWidth() * multiplier;
 	const int h = imageSize.GetHeight() * multiplier;
-	wxImage circuitImage(w, h);
+	const bool strip = info != nullptr && info->enabled;
+	const float stripH = strip ? exportInfoStrip(nullptr, *info, (float)w, (float)h, 0, (float)multiplier) : 0.0f;
+	const int totalH = h + (int)std::ceil(stripH);
+	wxImage circuitImage(w, totalH);
 	{
 		GUICanvas *canvas = currentCanvas;
 		cl::render::RenderStyle style = noColor ? cl::render::RenderStyle::print()
 		                                        : cl::render::RenderStyle::screen();
 		style.showGrid = withGrid;
-		if (!cl::render::skiaRenderToRGB(w, h,
-				[canvas, &style, w, h](cl::render::Scene &scene) {
+		if (!cl::render::skiaRenderToRGB(w, totalH,
+				[canvas, &style, w, h, strip, info, totalH, multiplier](cl::render::Scene &scene) {
 					canvas->renderToScene(scene, style, w, h);
+					if (strip) exportInfoStrip(&scene, *info, (float)w, (float)h, (float)totalH, (float)multiplier);
 				},
 				circuitImage.GetData())) {
 			circuitImage.Clear(0xFF);   // white, so a failure exports blank not garbage
@@ -2084,6 +2214,8 @@ void MainFrame::saveSettings() {
 	conf->Write("RefreshRate", settings.refreshRate);
 	conf->Write("AutosaveSeconds", settings.autosaveSeconds);
 	conf->Write("LastDirectory", lastDirectory);
+	conf->Write("StudentName", wxString::FromUTF8(settings.studentName.c_str()));
+	conf->Write("ExportInfoEnabled", settings.exportInfoEnabled);
 	conf->Write("WireConnRadius", settings.wireConnRadius);
 	conf->Write("WireConnVisible", settings.wireConnVisible);
 	conf->Write("GridlineVisible", settings.gridlineVisible);
@@ -2505,18 +2637,23 @@ static cl::render::RenderStyle exportStyle(bool showGrid, bool noColor) {
 #endif
 
 bool MainFrame::renderToSvgSkia(const wxString &path, int width, int height,
-                                bool showGrid, bool noColor) {
+                                bool showGrid, bool noColor, const ExportInfo* info) {
 #ifdef WITH_SKIA
 	if (currentCanvas == NULL) return false;
 	GUICanvas *canvas = currentCanvas;
 	cl::render::RenderStyle style = exportStyle(showGrid, noColor);
+	const bool strip = info != nullptr && info->enabled;
+	const float m = width / (float)std::max(1, currentCanvas->GetClientSize().GetWidth());
+	const float stripH = strip ? exportInfoStrip(nullptr, *info, (float)width, (float)height, 0, m) : 0.0f;
+	const int totalH = height + (int)std::ceil(stripH);
 	return cl::render::skiaRenderToSvg(
-		path.ToStdString().c_str(), width, height,
-		[canvas, &style, width, height](cl::render::Scene &scene) {
+		path.ToStdString().c_str(), width, totalH,
+		[canvas, &style, width, height, strip, info, totalH, m](cl::render::Scene &scene) {
 			canvas->renderToScene(scene, style, width, height);
+			if (strip) exportInfoStrip(&scene, *info, (float)width, (float)height, (float)totalH, m);
 		});
 #else
-	(void)path; (void)width; (void)height; (void)showGrid; (void)noColor;
+	(void)path; (void)width; (void)height; (void)showGrid; (void)noColor; (void)info;
 	return false;
 #endif
 }

@@ -223,8 +223,16 @@ public:
 	// raster surface). This is the headless --render path. Returns false if
 	// built without WITH_SKIA.
 	bool renderToPngSkia(const wxString &path, int width, int height);
+	// The name-and-result strip added under an exported/printed circuit.
+	struct ExportInfo {
+		bool enabled = true;
+		wxString name;
+		bool works = true;
+		wxString why;        // required when !works
+		wxString fileName;   // shown in small print; may be empty
+	};
 	bool renderToSvgSkia(const wxString &path, int width, int height,
-	                     bool showGrid, bool noColor);
+	                     bool showGrid, bool noColor, const ExportInfo* info = nullptr);
 	bool renderToPdfSkia(const wxString &path, int width, int height,
 	                     bool showGrid, bool noColor);
 
@@ -259,7 +267,10 @@ public:
 	void PreGateDrag();
 
 	//Julian: Added to simplify exporting and copying to clipboard
-	wxBitmap getBitmap(bool withGrid, bool noColor = false, int multiplier = 2);
+	wxBitmap getBitmap(bool withGrid, bool noColor = false, int multiplier = 2,
+	                   const ExportInfo* info = nullptr);
+	// The works/why answer from the last export this session.
+	ExportInfo lastExportInfo;
 	
 private:
     // helper function - creates a new thread (but doesn't run it)

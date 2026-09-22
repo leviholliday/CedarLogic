@@ -104,6 +104,12 @@ public:
 		addRow("Refresh rate:", withUnit(refresh, "frames per second"),
 			"How often the canvas redraws while the simulation runs.");
 
+		name = new wxTextCtrl(this, wxID_ANY, wxString::FromUTF8(s.studentName.c_str()),
+			wxDefaultPosition, wxSize(220, -1));
+		name->SetHint("First and last name");
+		name->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { changed(); });
+		addRow("Your name:", name, "Printed under your circuit when you export it (File > Export as Image).");
+
 		statusInfo = addCheck("Status bar:", "Show zoom, cursor position, and counts", s.showStatusInfo,
 			"The readout in the bottom-right corner of the window.");
 
@@ -114,6 +120,7 @@ protected:
 	void apply() override {
 		auto& s = appConfig().appSettings;
 		s.showStatusInfo = statusInfo->GetValue();
+		s.studentName = std::string(name->GetValue().Strip(wxString::both).ToUTF8());
 		s.autosaveSeconds = autosave->GetValue() * 60;
 		int fps = refresh->GetValue();
 		s.refreshRate = (fps > 0) ? 1000 / fps : 16;
@@ -135,6 +142,7 @@ private:
 	wxSpinCtrl* autosave;
 	wxSpinCtrl* refresh;
 	wxCheckBox* statusInfo;
+	wxTextCtrl* name;
 };
 
 // ---- Appearance ------------------------------------------------------------

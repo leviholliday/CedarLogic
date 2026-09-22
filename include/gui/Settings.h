@@ -49,6 +49,9 @@ enum class ThemeMode {
 struct ApplicationSettings {
 	std::string helpFile;
 	std::string lastDir;
+	// Printed under exported circuits (see MainFrame::ExportInfo).
+	std::string studentName;
+	bool exportInfoEnabled = true;   // Export dialog's "Name and result" box, as last left
 	int mainFrameWidth;
 	int mainFrameHeight;
 	int mainFrameLeft;
