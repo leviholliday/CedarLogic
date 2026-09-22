@@ -51,6 +51,10 @@
 #include "migrate.hpp"   // cl::LoadResult, held across the validate/apply split
 #include "OscopeFrame.h"
 #include "PreferencesWindow.h"
+#include <algorithm>
+#ifdef __APPLE__
+#include "TabSwitcherMac.h"
+#endif
 #include "wx/docview.h"
 #include "commands.h"
 #include "../version.h"
@@ -273,6 +277,21 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
         }
         const int k = e.GetKeyCode();
         const bool ctrl = e.ControlDown() || e.CmdDown();
+        // Ctrl+Tab / Ctrl+Shift+Tab: the page switcher. On macOS that's the
+        // real Control key (RawControlDown); ControlDown() there means Cmd.
+#ifdef __WXOSX__
+        const bool switcherMod = e.RawControlDown() && !e.CmdDown();
+#else
+        const bool switcherMod = e.ControlDown();
+#endif
+        if (k == WXK_TAB && switcherMod && !e.AltDown()) {
+            handleTabSwitchKey(e.ShiftDown());
+            return;
+        }
+        if (tabSwitchActive && k == WXK_ESCAPE) {
+            cancelTabSwitch();
+            return;
+        }
         // Shift+1..9: jump straight to the Nth palette section (Basic Gates,
         // Input/Output, ...) without reaching for the mouse and the dropdown.
         // GetKeyCode() is the unmodified key even with Shift held (same as the
@@ -447,6 +466,23 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
+	noteCanvasUsed(currentCanvas);
+
+	tabSwitchTimer = new wxTimer(this, wxWindow::NewControlId());
+	Bind(wxEVT_TIMER, &MainFrame::OnTabSwitchTimer, this, tabSwitchTimer->GetId());
+#ifdef __APPLE__
+	MacTabSwitcher_InstallKeyMonitor(
+		[this](bool shift) {
+			if (!IsActive()) return false;
+			handleTabSwitchKey(shift);
+			return true;
+		},
+		[this]() {
+			if (!tabSwitchActive) return false;
+			cancelTabSwitch();
+			return true;
+		});
+#endif
 
 	// Initialize splitter showing only canvasBook (oscope hidden)
 	rightSplitter->Initialize(canvasBook);
@@ -662,6 +698,7 @@ void MainFrame::OnClose(wxCloseEvent& event) {
 	if (destroy)
 	{
 		DismissPreferencesWindow();
+		cancelTabSwitch();
 		removeTempFile();
 	}
 	else
@@ -1025,7 +1062,23 @@ void MainFrame::OnViewWireConn(wxCommandEvent& event) {
 	if (currentCanvas != NULL) currentCanvas->Update();
 }
 
+// The theme shortcut is both a menu accelerator and a CHAR_HOOK match (the
+// hook covers focus cases the menu misses). If one key press reaches both,
+// only the first counts.
+static bool themeToggleIsRepeat() {
+	static wxLongLong last = 0;
+	const wxLongLong now = wxGetLocalTimeMillis();
+	const bool repeat = now - last < 150;
+	if (!repeat) last = now;
+	return repeat;
+}
+
 void MainFrame::OnViewDarkMode(wxCommandEvent& event) {
+	if (themeToggleIsRepeat()) {
+		// The menu item / toolbar switch already flipped its own check.
+		ApplyTheme();
+		return;
+	}
 	// Fires from both the View menu item and the toolbar switch; either one
 	// already flipped its OWN visual state before sending this, so read that as
 	// the intent and let ApplyTheme sync the other control to match.
@@ -1034,6 +1087,7 @@ void MainFrame::OnViewDarkMode(wxCommandEvent& event) {
 }
 
 void MainFrame::ToggleDarkMode() {
+	if (themeToggleIsRepeat()) return;
 	renderMode().darkMode = !renderMode().darkMode;
 	ApplyTheme();
 }
@@ -1077,11 +1131,25 @@ void MainFrame::ApplyThemeShortcutLabel() {
 	wxMenuItem* item = mb->FindItem(View_DarkMode);
 	if (!item) return;
 	const auto& s = appConfig().appSettings;
-	wxString label = "&Dark Mode";
-	if (s.themeShortcutEnabled) {
-		label += "\t" + wxString(formatThemeShortcut(s.themeShortcutModifiers, s.themeShortcutKeyCode));
-	}
-	item->SetItemLabel(label);
+	// No "\t..." text: wx's accelerator parser doesn't know "Cmd", so the text
+	// "Shift+Cmd+D" registered a second, bare Shift+D shortcut. Build the
+	// entry from flags instead.
+	item->SetItemLabel("&Dark Mode");
+	if (!s.themeShortcutEnabled) return;
+	const int m = s.themeShortcutModifiers;
+	int flags = 0;
+	if (m & ThemeShortcutMod::Shift) flags |= wxACCEL_SHIFT;
+	if (m & ThemeShortcutMod::Alt)   flags |= wxACCEL_ALT;
+#ifdef __WXOSX__
+	if (m & ThemeShortcutMod::Ctrl)  flags |= wxACCEL_RAW_CTRL;
+	if (m & ThemeShortcutMod::Meta)  flags |= wxACCEL_CTRL;   // wx's Ctrl is Cmd on macOS
+#else
+	if (m & ThemeShortcutMod::Ctrl)  flags |= wxACCEL_CTRL;
+	// The Windows key can't be a menu accelerator; CHAR_HOOK still handles it.
+	if (m & ThemeShortcutMod::Meta) return;
+#endif
+	wxAcceleratorEntry accel(flags, s.themeShortcutKeyCode, View_DarkMode);
+	item->SetAccel(&accel);
 }
 
 void MainFrame::ApplyThemeToggleVisibility() {
@@ -1323,6 +1391,7 @@ void MainFrame::OnNotebookPage(wxAuiNotebookEvent& event) {
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
 	currentCanvas->Update();
+	noteCanvasUsed(currentCanvas);
 }
 
 void MainFrame::OnUndo(wxCommandEvent& event) {
@@ -1374,6 +1443,109 @@ void MainFrame::showCanvasIndex(int idx) {
 	currentCanvas = target;
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
+	noteCanvasUsed(currentCanvas);
+}
+
+void MainFrame::noteCanvasUsed(GUICanvas* canvas) {
+	if (canvas == nullptr) return;
+	canvasMRU.erase(std::remove(canvasMRU.begin(), canvasMRU.end(), canvas), canvasMRU.end());
+	canvasMRU.insert(canvasMRU.begin(), canvas);
+}
+
+void MainFrame::handleTabSwitchKey(bool backwards) {
+	if (tabSwitchActive) {
+		const int n = (int)tabSwitchList.size();
+		tabSwitchSel = (tabSwitchSel + (backwards ? n - 1 : 1)) % n;
+#ifdef __APPLE__
+		if (tabSwitchShown) MacTabSwitcher_Select(tabSwitchSel);
+#endif
+		return;
+	}
+
+	// Current page first, then the rest by how recently they were used;
+	// pages never visited go last, in tab order.
+	auto has = [](const vector<GUICanvas*>& v, GUICanvas* c) {
+		return std::find(v.begin(), v.end(), c) != v.end();
+	};
+	tabSwitchList.clear();
+	if (currentCanvas) tabSwitchList.push_back(currentCanvas);
+	for (GUICanvas* c : canvasMRU)
+		if (has(canvases, c) && !has(tabSwitchList, c)) tabSwitchList.push_back(c);
+	for (GUICanvas* c : canvases)
+		if (!has(tabSwitchList, c)) tabSwitchList.push_back(c);
+	if (tabSwitchList.size() > 10) tabSwitchList.resize(10);
+	if (tabSwitchList.size() < 2) { tabSwitchList.clear(); return; }
+
+	tabSwitchActive = true;
+	tabSwitchShown = false;
+	tabSwitchSel = backwards ? (int)tabSwitchList.size() - 1 : 1;
+	tabSwitchStart = wxGetLocalTimeMillis();
+	tabSwitchTimer->Start(15);
+}
+
+void MainFrame::OnTabSwitchTimer(wxTimerEvent& WXUNUSED(event)) {
+	if (!tabSwitchActive) { tabSwitchTimer->Stop(); return; }
+#ifdef __APPLE__
+	const bool held = MacControlKeyDown();
+#else
+	const bool held = wxGetKeyState(WXK_CONTROL);
+#endif
+	if (!held) {
+		commitTabSwitch(tabSwitchSel);
+		return;
+	}
+	// Only show the panel if Ctrl is still down after a moment -- a quick
+	// Ctrl+Tab just flips to the previous page.
+	if (!tabSwitchShown && wxGetLocalTimeMillis() - tabSwitchStart >= 180) showTabSwitcher();
+}
+
+void MainFrame::showTabSwitcher() {
+	tabSwitchShown = true;
+#ifdef __APPLE__
+	const bool dark = renderMode().darkMode;
+	const double sf = GetContentScaleFactor();
+	// Matches the card size in TabSwitcherMac.mm (208 x 130 points).
+	const int tw = (int)(208 * sf), th = (int)(130 * sf);
+	std::vector<TabSwitcherCard> cards;
+	for (GUICanvas* c : tabSwitchList) {
+		TabSwitcherCard card;
+		for (size_t i = 0; i < canvases.size(); i++)
+			if (canvases[i] == c) card.title = canvasBook->GetPageText(i);
+		card.thumbnail = wxBitmap(c->renderThumbnail(tw, th, dark), -1, sf);
+		cards.push_back(card);
+	}
+	MacTabSwitcher_Show(this, cards, tabSwitchSel, dark,
+		[this](int i) {
+			tabSwitchSel = i;
+			MacTabSwitcher_Select(i);
+		},
+		// Deferred: switching tears the panel down, and this runs inside its
+		// own mouse handler.
+		[this](int i) { CallAfter([this, i]() { commitTabSwitch(i); }); });
+#endif
+}
+
+void MainFrame::commitTabSwitch(int index) {
+	if (!tabSwitchActive) return;
+	GUICanvas* target = (index >= 0 && index < (int)tabSwitchList.size()) ? tabSwitchList[index] : nullptr;
+	cancelTabSwitch();
+	if (target == nullptr || target == currentCanvas) return;
+	for (size_t i = 0; i < canvases.size(); i++) {
+		if (canvases[i] == target) {
+			canvasBook->SetSelection(i);   // fires OnNotebookPage, which does the rest
+			break;
+		}
+	}
+}
+
+void MainFrame::cancelTabSwitch() {
+	if (tabSwitchTimer) tabSwitchTimer->Stop();
+#ifdef __APPLE__
+	if (tabSwitchShown) MacTabSwitcher_Hide();
+#endif
+	tabSwitchActive = false;
+	tabSwitchShown = false;
+	tabSwitchList.clear();
 }
 
 void MainFrame::switchToCanvas(GUICanvas *canvas) {
@@ -1745,6 +1917,7 @@ void MainFrame::saveSettings() {
 	conf->Write("WireConnRadius", settings.wireConnRadius);
 	conf->Write("WireConnVisible", settings.wireConnVisible);
 	conf->Write("GridlineVisible", settings.gridlineVisible);
+	conf->Write("MajorGridVisible", settings.majorGridVisible);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
 
 	conf->Write("ThemeMode", settings.themeMode);
@@ -2200,6 +2373,8 @@ void MainFrame::OnNewTab(wxCommandEvent& event) {
 
 	if (canSize < 42) {
 		gCircuit->GetCommandProcessor()->Submit((wxCommand*)new cmdAddTab(gCircuit, canvasBook, &canvases));
+		// Go to the new tab. SetSelection fires OnNotebookPage, which does the rest.
+		if ((int)canvases.size() > canSize) canvasBook->SetSelection(canvases.size() - 1);
 	}
 	else {
 		wxMessageBox("You have reached the maximum number of tabs.", "Close", wxOK);

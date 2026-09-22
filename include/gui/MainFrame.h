@@ -249,6 +249,24 @@ private:
 	vector< GUICanvas* > canvases;
 	GUICircuit* gCircuit;
 	GUICanvas* currentCanvas;
+
+	// Ctrl+Tab page switcher. Hold Ctrl: each Tab steps through pages in
+	// most-recently-used order and the snapshot panel appears after a moment;
+	// letting go of Ctrl (or clicking a card) switches. A quick tap just goes
+	// back to the previous page without showing anything.
+	vector< GUICanvas* > canvasMRU;          // most recently used first
+	vector< GUICanvas* > tabSwitchList;      // this session's cards, <= 10
+	int tabSwitchSel = 0;
+	bool tabSwitchActive = false;
+	bool tabSwitchShown = false;
+	wxLongLong tabSwitchStart;
+	wxTimer* tabSwitchTimer = nullptr;
+	void noteCanvasUsed(GUICanvas* canvas);
+	void handleTabSwitchKey(bool backwards);
+	void showTabSwitcher();
+	void commitTabSwitch(int index);
+	void cancelTabSwitch();
+	void OnTabSwitchTimer(wxTimerEvent& event);
 	klsMiniMap* miniMap;
 	
 	wxCommandProcessor* commandProcessor;

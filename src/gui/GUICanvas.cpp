@@ -254,6 +254,38 @@ void GUICanvas::renderToScene(cl::render::Scene& scene,
 	drawSceneContents(scene, style, t, scale, gMinX, gMinY, gMaxX, gMaxY);
 }
 
+wxImage GUICanvas::renderThumbnail(int w, int h, bool dark) {
+	wxImage img(w, h);
+#ifdef WITH_SKIA
+	using namespace cl::render;
+	RenderStyle style = RenderStyle::screen(dark);
+	style.showGrid = appConfig().appSettings.gridlineVisible;
+	const unsigned int bg = dark ? 0xFF131519u : 0xFFFFFFFFu;
+
+	wxSize sz = GetClientSize();
+	GLdouble px, py; getPan(px, py);
+	const double vz = getZoom();
+	if (sz.GetWidth() < 50 || sz.GetHeight() < 50 || vz <= 0) {
+		skiaRenderToRGB(w, h, [&](Scene& s) { renderToScene(s, style, w, h); }, img.GetData(), bg);
+		return img;
+	}
+	// Same center and zoom as the live view, scaled so the whole visible area
+	// fits the thumbnail (a little extra world shows if the aspects differ).
+	const double viewW = sz.GetWidth() * vz, viewH = sz.GetHeight() * vz;
+	const float scale = (float)std::min(w / viewW, h / viewH);
+	const double cx = px + viewW * 0.5, cy = py - viewH * 0.5;
+	const float minX = (float)(cx - w / scale * 0.5), maxX = (float)(cx + w / scale * 0.5);
+	const float minY = (float)(cy - h / scale * 0.5), maxY = (float)(cy + h / scale * 0.5);
+	Transform t;
+	t.a = scale; t.c = 0; t.e = -minX * scale;
+	t.b = 0; t.d = -scale; t.f = maxY * scale;
+	skiaRenderToRGB(w, h, [&](Scene& s) {
+		drawSceneContents(s, style, t, scale, minX, minY, maxX, maxY);
+	}, img.GetData(), bg);
+#endif
+	return img;
+}
+
 // Draw the grid + wires + gates into `scene` under an already-computed viewport
 // transform. Shared by the bbox-fit export path (renderToScene) and the live
 // camera path (renderLiveToScene). `scale` is device px per world unit; the
@@ -276,8 +308,9 @@ void GUICanvas::drawGridInto(cl::render::Scene& scene,
 	const long spaceY = std::max(std::max((long)(vertSpacing + 0.5f), 1L),
 	                             (long)(MIN_GRID_SCREEN_SPACING * viewZoom));
 	const long MAJOR_GRID_EVERY = 5;
-	auto isMajor = [MAJOR_GRID_EVERY](long idx) {
-		return ((idx % MAJOR_GRID_EVERY) + MAJOR_GRID_EVERY) % MAJOR_GRID_EVERY == 0;
+	const bool majorOn = appConfig().appSettings.majorGridVisible;
+	auto isMajor = [MAJOR_GRID_EVERY, majorOn](long idx) {
+		return majorOn && ((idx % MAJOR_GRID_EVERY) + MAJOR_GRID_EVERY) % MAJOR_GRID_EVERY == 0;
 	};
 
 	Stroke minor, major;

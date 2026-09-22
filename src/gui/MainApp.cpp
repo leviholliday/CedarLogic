@@ -975,6 +975,7 @@ void MainApp::loadSettings() {
 	conf->Read("WireConnRadius", &appConfig().appSettings.wireConnRadius, 0.18f);
 	conf->Read("WireConnVisible", &appConfig().appSettings.wireConnVisible, true);
 	conf->Read("GridlineVisible", &appConfig().appSettings.gridlineVisible, true);
+	conf->Read("MajorGridVisible", &appConfig().appSettings.majorGridVisible, true);
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
 
 	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);

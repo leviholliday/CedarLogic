@@ -155,6 +155,9 @@ public:
 		grid_ = addCheck("Canvas:", "Show the grid", s.gridlineVisible,
 			"The background grid gates snap to. Printing never includes it.");
 
+		majorGrid = addCheck("", "Darker line every 5 squares", s.majorGridVisible,
+			"Makes distances easy to judge at a glance. Off: every grid line looks the same.");
+
 		wireConn = addCheck("", "Show dots at wire bends", s.wireConnVisible,
 			"Marks every corner of a wire. Junctions where wires join always get a dot.");
 
@@ -172,6 +175,7 @@ protected:
 		s.themeMode = themeMode->GetSelection();
 		s.showThemeToggleButton = showToggle->GetValue();
 		s.gridlineVisible = grid_->GetValue();
+		s.majorGridVisible = majorGrid->GetValue();
 		s.wireConnVisible = wireConn->GetValue();
 		s.wireConnRadius = (float)wireRadius->GetValue();
 		pushLive();
@@ -181,6 +185,7 @@ private:
 	wxChoice* themeMode;
 	wxCheckBox* showToggle;
 	wxCheckBox* grid_;
+	wxCheckBox* majorGrid;
 	wxCheckBox* wireConn;
 	wxSpinCtrlDouble* wireRadius;
 };

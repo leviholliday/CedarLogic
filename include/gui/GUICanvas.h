@@ -240,6 +240,11 @@ public:
                            const cl::render::Transform& screenT, float logicalW, float logicalH);
 #endif
 
+	// A w x h pixel snapshot of this page at its current pan/zoom (what the
+	// user last saw on it), for the Ctrl+Tab switcher. A page that has never
+	// been laid out falls back to fitting the whole circuit.
+	wxImage renderThumbnail(int w, int h, bool dark);
+
 	// Update the collision checker and refresh
 	void Update();
 

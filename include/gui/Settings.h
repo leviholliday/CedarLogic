@@ -59,6 +59,8 @@ struct ApplicationSettings {
 	float wireConnRadius;
 	bool wireConnVisible;
 	bool gridlineVisible;
+	// Draw every 5th grid line darker (a ruler-style guide).
+	bool majorGridVisible = true;
 	bool rightClickRotate;
 
 	// Dark mode. themeMode picks the launch behavior (see ThemeMode); lastDarkMode

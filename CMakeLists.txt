@@ -275,6 +275,7 @@ if(APPLE)
         "${PROJECT_SOURCE_DIR}/src/gui/SparkleUpdater.mm"
         "${PROJECT_SOURCE_DIR}/src/gui/NativeIcons.mm"
         "${PROJECT_SOURCE_DIR}/src/gui/MacAppearance.mm"
+        "${PROJECT_SOURCE_DIR}/src/gui/TabSwitcherMac.mm"
     )
 endif()
 
