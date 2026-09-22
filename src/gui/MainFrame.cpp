@@ -51,6 +51,8 @@
 #include "migrate.hpp"   // cl::LoadResult, held across the validate/apply split
 #include "OscopeFrame.h"
 #include "PreferencesWindow.h"
+#include "TruthTableDialog.h"
+#include <wx/progdlg.h>
 #include <algorithm>
 #ifdef __APPLE__
 #include "TabSwitcherMac.h"
@@ -205,6 +207,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     // ApplyThemeShortcutLabel) rather than a static "\tCtrl+Shift+D", since the
     // shortcut itself is user-configurable from Preferences.
     viewMenu->AppendCheckItem(View_DarkMode, "&Dark Mode", "Toggle dark mode");
+    viewMenu->Append(View_TruthTable, "&Truth Table...\tCtrl+Shift+T", "Make a truth table from the switches and lights");
     viewMenu->AppendCheckItem(View_SimView, "&Simulation View\tCtrl+R", "Watch the circuit run: live, animated wires and a control bar");
     viewMenu->AppendSeparator();
     viewMenu->Append(View_Oscope, "&Oscope\tCtrl+G", "Show the Oscope");
@@ -495,6 +498,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 		if (currentCanvas) currentCanvas->duplicateSelection();
 	}, Edit_Duplicate);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);
+	Bind(wxEVT_MENU, &MainFrame::OnTruthTable, this, View_TruthTable);
 	Bind(wxEVT_TOOL, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, Tool_SimView);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->animateZoomTo(DEFAULT_ZOOM);
@@ -1519,6 +1523,132 @@ void MainFrame::showCanvasIndex(int idx) {
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	noteCanvasUsed(currentCanvas);
+}
+
+void MainFrame::OnTruthTable(wxCommandEvent& WXUNUSED(event)) {
+	if (currentCanvas == nullptr) return;
+	auto* gates = currentCanvas->getGateList();
+
+	// The selected switches and lights if any are selected, else the page's.
+	bool useSelection = false;
+	for (auto& g : *gates)
+		if (g.second->isSelected() &&
+		    (dynamic_cast<guiGateTOGGLE*>(g.second) || dynamic_cast<guiGateLED*>(g.second)))
+			useSelection = true;
+	std::vector<guiGate*> ins, outs;
+	bool sequential = false;
+	for (auto& g : *gates) {
+		const std::string type = g.second->getLibraryGateName();
+		for (const char* seq : { "CLOCK", "FF", "LATCH", "REGISTER", "COUNTER", "RAM", "ROM" })
+			if (type.find(seq) != std::string::npos) sequential = true;
+		if (useSelection && !g.second->isSelected()) continue;
+		if (dynamic_cast<guiGateTOGGLE*>(g.second)) ins.push_back(g.second);
+		else if (dynamic_cast<guiGateLED*>(g.second)) outs.push_back(g.second);
+	}
+	if (ins.empty() || outs.empty()) {
+		wxMessageBox("A truth table needs at least one switch (an input) and one light (an output)"
+		             + wxString(useSelection ? " in the selection." : " on this page."),
+		             "Truth Table", wxOK | wxICON_INFORMATION, this);
+		return;
+	}
+	if (ins.size() > 8) {
+		wxMessageBox(wxString::Format("That's %zu switches -- %s rows. Select up to 8 switches "
+		             "(and the lights you care about) and try again.", ins.size(),
+		             ins.size() > 16 ? "far too many" : wxString::Format("%lu", 1UL << ins.size())),
+		             "Truth Table", wxOK | wxICON_INFORMATION, this);
+		return;
+	}
+
+	// Columns in drawing order: top to bottom, then left to right. The first
+	// input is the most significant bit.
+	auto pos = [](guiGate* g) { float x, y; g->getGLcoords(x, y); return std::make_pair(x, y); };
+	auto byPlace = [&](guiGate* a, guiGate* b) {
+		const auto pa = pos(a), pb = pos(b);
+		return pa.second != pb.second ? pa.second > pb.second : pa.first < pb.first;
+	};
+	std::sort(ins.begin(), ins.end(), byPlace);
+	std::sort(outs.begin(), outs.end(), byPlace);
+
+	// Names: the nearest unused text label, if one is close; otherwise A, B,
+	// C... for inputs and Y (or Y1, Y2...) for outputs.
+	std::vector<guiGate*> labels;
+	for (auto& g : *gates)
+		if (dynamic_cast<guiLabel*>(g.second) && !g.second->getGUIParam("LABEL_TEXT").empty())
+			labels.push_back(g.second);
+	std::vector<bool> labelUsed(labels.size(), false);
+	auto nameFor = [&](guiGate* port, const wxString& fallback) {
+		const auto p = pos(port);
+		int best = -1;
+		float bestD = 8.0f;   // world units: a couple of gate widths
+		for (size_t i = 0; i < labels.size(); i++) {
+			if (labelUsed[i]) continue;
+			const std::string text = labels[i]->getGUIParam("LABEL_TEXT");
+			if (text.size() > 16) continue;   // a note, not a name
+			const auto q = pos(labels[i]);
+			const float d = std::hypot(q.first - p.first, q.second - p.second);
+			if (d < bestD) { bestD = d; best = (int)i; }
+		}
+		if (best < 0) return fallback;
+		labelUsed[best] = true;
+		return wxString::FromUTF8(labels[best]->getGUIParam("LABEL_TEXT").c_str());
+	};
+	TruthTableData data;
+	data.sequential = sequential;
+	for (size_t i = 0; i < ins.size(); i++) data.inputNames.push_back(nameFor(ins[i], wxString((char)('A' + i))));
+	for (size_t i = 0; i < outs.size(); i++)
+		data.outputNames.push_back(nameFor(outs[i], outs.size() == 1 ? wxString("Y") : wxString::Format("Y%zu", i + 1)));
+
+	auto setSwitch = [&](guiGate* g, const std::string& v) {
+		g->setLogicParam("OUTPUT_NUM", v);
+		gCircuit->sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM,
+			new klsMessage::Message_SET_GATE_PARAM(g->getID(), "OUTPUT_NUM", v)));
+	};
+	auto readLight = [](guiGate* g) {
+		for (auto& hs : g->getHotspotList()) {
+			if (!g->isConnected(hs.first)) continue;
+			const std::vector<StateType>& st = g->getConnection(hs.first)->getState();
+			if (st.empty()) return 'X';
+			switch (st[0]) {
+				case ONE: return '1';
+				case ZERO: return '0';
+				case HI_Z: return 'Z';
+				case CONFLICT: return '!';
+				default: return 'X';
+			}
+		}
+		return '-';
+	};
+
+	std::vector<std::string> original;
+	for (guiGate* g : ins) original.push_back(g->getLogicParam("OUTPUT_NUM"));
+
+	const int n = (int)ins.size();
+	const int rows = 1 << n;
+	std::unique_ptr<wxProgressDialog> progress;
+	if (rows > 16)
+		progress.reset(new wxProgressDialog("Truth Table", "Trying every combination...", rows, this,
+		                                     wxPD_APP_MODAL | wxPD_AUTO_HIDE));
+	for (int r = 0; r < rows; r++) {
+		std::vector<char> row;
+		for (int i = 0; i < n; i++) {
+			const bool bit = (r >> (n - 1 - i)) & 1;
+			setSwitch(ins[i], bit ? "1" : "0");
+			row.push_back(bit ? '1' : '0');
+		}
+		if (!settleSimulation()) data.unsettledRows++;
+		for (guiGate* g : outs) row.push_back(readLight(g));
+		data.rows.push_back(row);
+		if (progress) progress->Update(r + 1);
+	}
+	progress.reset();
+
+	// Put the switches back the way they were.
+	for (size_t i = 0; i < ins.size(); i++) setSwitch(ins[i], original[i].empty() ? "0" : original[i]);
+	settleSimulation();
+	resumeTimers(TIMER_POLL_MS);
+	currentCanvas->Refresh();
+
+	ShowTruthTableDialog(this, data);
 }
 
 bool MainFrame::IsSimView() const { return renderMode().simView; }
@@ -2855,6 +2985,7 @@ void MainFrame::OnKeyboardShortcuts(wxCommandEvent& event) {
 	addRow(grid, "Arrow Keys", "Move Around (nothing selected)");
 	addRow(grid, mod + "+.", "Focus Mode (hide side panel)");
 	addRow(grid, mod + "+R", "Simulation View (Esc to leave, Space to pause)");
+	addRow(grid, mod + "+Shift+T", "Truth Table");
 	addRow(grid, mod + "+G", "Show Oscilloscope");
 
 	addHeader(grid, "Gates");

@@ -54,6 +54,7 @@ enum
 	View_FocusMode,
 	Edit_Duplicate,
 	View_SimView,
+	View_TruthTable,
 	Tool_SimView,
 	Tool_ThemeToggle,
 
@@ -172,6 +173,11 @@ public:
 	void StepSimOnce();
 	int GetStepMs() const;
 	void SetStepMs(int ms);
+
+	// Build a truth table from the page's switches (inputs) and lights
+	// (outputs) -- the selected ones if any are selected -- by trying every
+	// combination and letting the circuit settle each time.
+	void OnTruthTable(wxCommandEvent& event);
 
 	void ResumeExecution ( void );
 	
