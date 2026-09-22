@@ -413,9 +413,14 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     //     (wxWidgets#25521; real dark-mode support is 3.3+). wxSB_FLAT drops the
     //     border -- and it was the border, not the grip, so the grip stays.
     // Field 0 still carries wx's automatic menu-hover help text.
-    CreateStatusBar(1);
-    const int fieldStyles[1] = { wxSB_FLAT };
-    GetStatusBar()->SetStatusStyles(1, fieldStyles);
+    // Fields 1-3 (zoom, cursor position, counts) are filled by UpdateStatusInfo.
+    // Every field is wxSB_FLAT: wx 3.2's native bar draws white borders
+    // between fields in dark mode otherwise (wxWidgets#25521).
+    CreateStatusBar(4);
+    const int fieldStyles[4] = { wxSB_FLAT, wxSB_FLAT, wxSB_FLAT, wxSB_FLAT };
+    GetStatusBar()->SetStatusStyles(4, fieldStyles);
+    const int fieldWidths[4] = { -1, 90, 150, 190 };
+    GetStatusBar()->SetStatusWidths(4, fieldWidths);
     SetStatusText("");
 
 	mainSizer = new wxBoxSizer( wxHORIZONTAL );
@@ -467,6 +472,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
 	noteCanvasUsed(currentCanvas);
+
+	statusTimer = new wxTimer(this, wxWindow::NewControlId());
+	Bind(wxEVT_TIMER, [this](wxTimerEvent&) { UpdateStatusInfo(); }, statusTimer->GetId());
+	statusTimer->Start(100);
 
 	tabSwitchTimer = new wxTimer(this, wxWindow::NewControlId());
 	Bind(wxEVT_TIMER, &MainFrame::OnTabSwitchTimer, this, tabSwitchTimer->GetId());
@@ -698,6 +707,7 @@ void MainFrame::OnClose(wxCloseEvent& event) {
 	if (destroy)
 	{
 		DismissPreferencesWindow();
+		if (statusTimer) statusTimer->Stop();
 		cancelTabSwitch();
 		removeTempFile();
 	}
@@ -1450,6 +1460,28 @@ void MainFrame::showCanvasIndex(int idx) {
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	noteCanvasUsed(currentCanvas);
+}
+
+void MainFrame::UpdateStatusInfo() {
+	wxStatusBar* sb = GetStatusBar();
+	if (sb == nullptr || sb->GetFieldsCount() < 4 || currentCanvas == nullptr) return;
+
+	const double z = currentCanvas->getZoom();
+	const wxString zoom = wxString::Format("%d%%", z > 0 ? (int)(100.0 * DEFAULT_ZOOM / z + 0.5) : 100);
+
+	const GLPoint2f m = currentCanvas->getMouseCoords();
+	const wxString pos = wxString::Format("x %.1f   y %.1f", m.x, m.y);
+
+	int selected = 0;
+	for (auto& g : *currentCanvas->getGateList()) if (g.second && g.second->isSelected()) selected++;
+	for (auto& w : *currentCanvas->getWireList()) if (w.second && w.second->isSelected()) selected++;
+	const size_t gates = currentCanvas->getGateList()->size();
+	wxString counts = wxString::Format("%zu gate%s", gates, gates == 1 ? "" : "s");
+	if (selected > 0) counts += wxString::Format(L" \u00B7 %d selected", selected);
+
+	if (zoom != statusZoom)     { statusZoom = zoom;     sb->SetStatusText(zoom, 1); }
+	if (pos != statusPos)       { statusPos = pos;       sb->SetStatusText(pos, 2); }
+	if (counts != statusCounts) { statusCounts = counts; sb->SetStatusText(counts, 3); }
 }
 
 void MainFrame::noteCanvasUsed(GUICanvas* canvas) {

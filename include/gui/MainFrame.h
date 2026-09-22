@@ -267,6 +267,13 @@ private:
 	void commitTabSwitch(int index);
 	void cancelTabSwitch();
 	void OnTabSwitchTimer(wxTimerEvent& event);
+
+	// Status bar fields 1-3: zoom, cursor position, gate/selection counts.
+	// Polled (see statusTimer) rather than hooked into every zoom, pan, edit
+	// and undo path; only rewritten when the text changes.
+	wxTimer* statusTimer = nullptr;
+	wxString statusZoom, statusPos, statusCounts;
+	void UpdateStatusInfo();
 	klsMiniMap* miniMap;
 	
 	wxCommandProcessor* commandProcessor;
