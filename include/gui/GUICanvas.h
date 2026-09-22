@@ -193,6 +193,13 @@ public:
 	// connections made.
 	int connectNearbyHotspots();
 
+	// The search behind connectNearbyHotspots (and the forgiving connect on
+	// drop): for each unconnected pin on a selected gate, the nearest
+	// unconnected pin on an unselected gate within range, unless it's a
+	// near-tie with another.
+	struct NearbyConnection { unsigned long srcGate; string srcHS; unsigned long dstGate; string dstHS; float dist; };
+	vector<NearbyConnection> findNearbyConnections();
+
 	// If a brand-new gate is being dragged in from the palette (DRAG_NEWGATE,
 	// which just follows the cursor and isn't a real circuit gate yet),
 	// create it right now at its current position and switch to a normal

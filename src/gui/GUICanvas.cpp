@@ -1357,6 +1357,29 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 		}
 	}
 
+	// Forgiving connect on drop: pins that are close (not only touching)
+	// connect too, by the same rule as 'C'. Only after a real move or a new
+	// gate -- a plain click on a gate shouldn't wire it to its neighbors.
+	if (!isLocked() && (currentDragState == DRAG_NEWGATE || (currentDragState == DRAG_SELECTION && saveMove))) {
+		collisionChecker.update();
+		for (auto &c : findNearbyConnections()) {
+			cmdCreateWire* createwire = (cmdCreateWire *)createGateConnectionCommand(c.srcGate, c.srcHS, c.dstGate, c.dstHS);
+			if (createwire == nullptr) continue;
+			createwire->Do();
+			if (currentDragState == DRAG_NEWGATE && creategatecommand != nullptr) {
+				creategatecommand->getConnections()->push_back(std::unique_ptr<klsCommand>(createwire));
+			} else if (pendingCreateGate != nullptr) {
+				pendingCreateGate->getConnections()->push_back(std::unique_ptr<klsCommand>(createwire));
+			} else {
+				if (movecommand == NULL) {
+					movecommand = new cmdMoveSelection(gCircuit, preMove, preMoveWire, 0, 0, 0, 0);
+					if (!isWithinPaste) submitCommand(movecommand);
+				}
+				movecommand->getConnections()->push_back(std::unique_ptr<klsCommand>(createwire));
+			}
+		}
+	}
+
 	// Drop a paste block with the proper move coords
 	if (isWithinPaste) {
 		pasteCommand->addCommand( movecommand );
@@ -2055,9 +2078,8 @@ bool GUICanvas::commitNewDragGate() {
 	return true;
 }
 
-int GUICanvas::connectNearbyHotspots() {
-	struct Candidate { guiGate* src; string srcHS; guiGate* dst; string dstHS; };
-	vector<Candidate> candidates;
+vector<GUICanvas::NearbyConnection> GUICanvas::findNearbyConnections() {
+	vector<NearbyConnection> candidates;
 
 	float radius = HOTSPOT_CONNECT_SCREEN_RADIUS * getZoom();
 
@@ -2101,10 +2123,31 @@ int GUICanvas::connectNearbyHotspots() {
 			// the best one (a near-tie), so don't guess which pin was meant.
 			if (secondDist >= 0.0f && secondDist < bestDist * HOTSPOT_CONNECT_AMBIGUITY_RATIO) continue;
 
-			candidates.push_back({src, srcHS.first, bestGate, bestHSName});
+			candidates.push_back({src->getID(), srcHS.first, bestGate->getID(), bestHSName, bestDist});
 		}
 	}
 
+	// Same tie rule from the target's side: if several dragged pins picked
+	// the same target pin (an output sitting between two inputs), only a
+	// clearly-closest one gets it; on a near-tie, none do.
+	vector<NearbyConnection> result;
+	for (size_t i = 0; i < candidates.size(); i++) {
+		bool keep = true;
+		for (size_t j = 0; j < candidates.size() && keep; j++) {
+			if (i == j) continue;
+			if (candidates[j].dstGate != candidates[i].dstGate || candidates[j].dstHS != candidates[i].dstHS) continue;
+			// Another pin wants this target: drop i unless it's clearly closer.
+			if (candidates[j].dist * HOTSPOT_CONNECT_AMBIGUITY_RATIO > candidates[i].dist &&
+			    candidates[i].dist * HOTSPOT_CONNECT_AMBIGUITY_RATIO > candidates[j].dist) keep = false; // near-tie
+			else if (candidates[j].dist < candidates[i].dist) keep = false;                            // j is clearly closer
+		}
+		if (keep) result.push_back(candidates[i]);
+	}
+	return result;
+}
+
+int GUICanvas::connectNearbyHotspots() {
+	vector<NearbyConnection> candidates = findNearbyConnections();
 	if (candidates.empty()) return 0;
 
 	int madeCount = 0;
@@ -2114,7 +2157,7 @@ int GUICanvas::connectNearbyHotspots() {
 		// off the undo stack until the drop so it lands ABOVE the move --
 		// undo then removes the connection first, then the move.
 		for (auto &c : candidates) {
-			klsCommand *cmd = createGateConnectionCommand(c.src->getID(), c.srcHS, c.dst->getID(), c.dstHS);
+			klsCommand *cmd = createGateConnectionCommand(c.srcGate, c.srcHS, c.dstGate, c.dstHS);
 			if (cmd == nullptr) continue;
 			cmd->setCanvas(this);
 			cmd->Do();
@@ -2125,7 +2168,7 @@ int GUICanvas::connectNearbyHotspots() {
 		// Not mid-drag -- nothing to bundle into, so each connection is its
 		// own undo step.
 		for (auto &c : candidates) {
-			if (klsCommand *cmd = createGateConnectionCommand(c.src->getID(), c.srcHS, c.dst->getID(), c.dstHS)) {
+			if (klsCommand *cmd = createGateConnectionCommand(c.srcGate, c.srcHS, c.dstGate, c.dstHS)) {
 				submitCommand(cmd);
 				madeCount++;
 			}
