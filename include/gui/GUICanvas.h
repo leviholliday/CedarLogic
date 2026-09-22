@@ -23,6 +23,7 @@
 using namespace std;
 
 class cmdPasteBlock;
+class cmdCreateGate;
 
 #include "MainApp.h"
 #include "klsGLCanvas.h"
@@ -98,6 +99,18 @@ struct ConnectionSource {
 // a few pixels while the button is down still selects rather than nudging.
 #define DRAG_START_TIME_MS 85
 
+// "Connect nearby" (the 'C' shortcut): a pin doesn't have to exactly touch
+// another to connect, just be within this screen-pixel radius (scaled by
+// getZoom(), like HOTSPOT_SCREEN_DELTA) of the closest unconnected candidate.
+#define HOTSPOT_CONNECT_SCREEN_RADIUS 20.0
+// ...but only pick it if it's unambiguously the closest thing around: skip
+// the connect entirely if a second candidate is within this ratio of the
+// closest one's distance (1.1 = reject only when they're within ~10% of each
+// other -- a near-tie), rather than guess which pin the user meant. Densely
+// packed gates (an 8-input AND, say) still resolve fine as long as one pin is
+// clearly nearer than its neighbors.
+#define HOTSPOT_CONNECT_AMBIGUITY_RATIO 1.1
+
 #define GRID_INTENSITY 0.08
 #define MIN_GRID_SCREEN_SPACING 13
 
@@ -168,6 +181,25 @@ public:
 
 	// Rotates the currently selected gates, gates being pasted, or gate being placed by 90 degrees
 	void rotateSelection();
+
+	// The 'C' shortcut: connect every unconnected hotspot on a currently
+	// selected gate to the nearest unconnected hotspot on some other gate,
+	// within HOTSPOT_CONNECT_SCREEN_RADIUS -- skipping any pin whose nearest
+	// and second-nearest candidates are too close to call (see
+	// HOTSPOT_CONNECT_AMBIGUITY_RATIO). Meant to be called mid-drag (without
+	// releasing the mouse) as well as when nothing is being dragged; mid-drag
+	// it bundles the new wire(s) with a checkpoint move command so undo takes
+	// it back one coherent step at a time. Returns the number of new
+	// connections made.
+	int connectNearbyHotspots();
+
+	// If a brand-new gate is being dragged in from the palette (DRAG_NEWGATE,
+	// which just follows the cursor and isn't a real circuit gate yet),
+	// create it right now at its current position and switch to a normal
+	// in-progress move (DRAG_SELECTION) -- without letting go of the mouse --
+	// so connectNearbyHotspots() has a real gate to work with. Returns
+	// whether it did (false if nothing was being dragged in).
+	bool commitNewDragGate();
 
     // Render the whole page into the engine-neutral Scene (Workstream G): fits
     // the circuit to a device-sized viewport, draws the grid, then every gate
@@ -300,6 +332,17 @@ private:
 	bool drawWireHover; // Whether or not to draw a wire hover X value.
 	unsigned long wireHoverID;
 	ConnectionSource currentConnectionSource;
+	// True once a click-and-release on a pin (rather than a press-drag-release)
+	// has started a "sticky" connect: currentDragState stays DRAG_CONNECT with
+	// the button up, the preview line follows the mouse, and the next click
+	// finishes (or, on empty space, cancels) it. See mouseLeftDown/OnMouseUp.
+	bool connectSticky = false;
+	// Finish a DRAG_CONNECT: turn whatever's currently hovered (hotspotHighlight
+	// / drawWireHover+wireHoverID) into a connection command from
+	// currentConnectionSource. Returns whether it made one. Shared by the old
+	// press-drag-release path (OnMouseUp) and the sticky click-to-connect path
+	// (mouseLeftDown).
+	bool tryFinishConnection();
 
 	// When the left button was last pressed, for the click-vs-drag time dead zone.
 	std::chrono::steady_clock::time_point dragPressTime;
@@ -335,6 +378,17 @@ private:
 	vector < GateState > preMove;
 	vector < WireState > preMoveWire;
 	bool saveMove;
+
+	// Mid-drag 'C' results, already applied (Do()) but not yet on the undo
+	// stack: they're stored when the drag is dropped (OnMouseUp) -- after the
+	// move/creation, so undo removes the connection first -- or undone and
+	// discarded if the drag is cancelled (cancelDrag).
+	vector<klsCommand*> pendingConnects;
+	// A palette gate that 'C' created mid-drag (commitNewDragGate). Stored on
+	// drop with its final position, so one undo deletes it outright.
+	cmdCreateGate* pendingCreateGate = nullptr;
+	void storeCommand(klsCommand *cmd);
+	void discardPendingDragCommands();
 
 	// Pointer to the new gate in DRAG_NEWGATE mode until the gate is dropped
 	// The preview gate that follows the cursor from the palette. The canvas owns

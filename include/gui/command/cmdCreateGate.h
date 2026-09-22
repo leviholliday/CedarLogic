@@ -25,6 +25,9 @@ public:
 	// it (adopting into unique_ptr) after construction.
 	std::vector<std::unique_ptr<klsCommand>> * getConnections();
 
+	// Where Do() (i.e. redo) places the gate.
+	void setPosition(float nx, float ny) { x = nx; y = ny; }
+
 protected:
 	float x;
 	float y;

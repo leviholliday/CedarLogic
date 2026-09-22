@@ -96,6 +96,7 @@ GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 	Bind(wxEVT_CHAR, [](wxKeyEvent& evt) {
 		int key = evt.GetKeyCode();
 		if (key == 'a' || key == 'A' || key == 'r' || key == 'R' ||
+			key == 'c' || key == 'C' ||
 			key == WXK_SPACE || key == '+' || key == '=' || key == '-') {
 			// Swallow — already handled in OnKeyDown
 		} else {
@@ -583,6 +584,18 @@ void GUICanvas::drawEmptyHintInto(cl::render::Scene& scene, const cl::render::Re
 #endif
 
 void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
+	if (connectSticky && currentDragState == DRAG_CONNECT) {
+		// Finishing click of a sticky click-to-connect. Whatever's hovered is
+		// the target -- OnMouseMove runs unthrottled while DRAG_CONNECT is
+		// active, so hotspotHighlight/drawWireHover are already current for
+		// this cursor position. A click on empty space just cancels.
+		tryFinishConnection();
+		connectSticky = false;
+		currentDragState = DRAG_NONE;
+		SetCursor(wxCursor(wxCURSOR_ARROW));
+		Refresh();
+		return;
+	}
 	GLPoint2f m = getMouseCoords();
 	bool handled = false;
 	dragPressTime = std::chrono::steady_clock::now(); // for the click-vs-drag time dead zone
@@ -641,7 +654,10 @@ void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
 				else if (!((event.ShiftDown()||event.ControlDown()))) {
 					wireHoverID = hitWire->getID();
 					if (hitWire->startSegDrag(snapMouse) && !(this->isLocked())) currentDragState = DRAG_WIRESEG;
-					hitWire->unselect();
+					// Leave the wire selected after a plain click (not just a
+					// drag) so a single click + Delete removes it -- previously
+					// this unselected unconditionally, so only a shift-click or
+					// a full drag-select box could leave a wire deletable.
 				}
 				handled = true;	
 			} else if (wasSelected && hitThings.size() > 1) hitWire->select(); // probably dragging a selection
@@ -780,31 +796,92 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 			else submitCommand( new cmdDeleteWire( gCircuit, this, hotWire->getID() ) );
 		}
 		currentDragState = DRAG_NONE;
-	} else if (currentDragState == DRAG_NONE && appConfig().appSettings.rightClickRotate) {
-		// Not on a hotspot, so check if it's on a gate:
-		// Loop through all objects hit by the mouse
-		CollisionGroup hitThings = mouse->getOverlaps();
-		CollisionGroup::iterator hit = hitThings.begin();
-		unselectAllGates();
-		unselectAllWires();
-		while( hit != hitThings.end()) {
-			if ((*hit)->getType() == COLL_GATE) {
-				guiGate* hitGate = ((guiGate*)(*hit));
-				// BEGIN WORKAROUND
-				//	Gates that have connections cannot be rotated without sacrificing wire sanity
-				map < string, GLPoint2f > gateHotspots = hitGate->getHotspotList();
-				map < string, GLPoint2f >::iterator ghsWalk = gateHotspots.begin();
-				bool gateConnected = false;
-				while ( ghsWalk !=  gateHotspots.end() ) {
-					if ( hitGate->isConnected( ghsWalk->first ) ) {
-						gateConnected = true;
-						break;
-					}
-					ghsWalk++;
-				}
-				if ( gateConnected ) { hit++; continue; }
-				// END WORKAROUND
-				map < string, string > newParams(*(hitGate->getAllGUIParams()));
+		Refresh();
+		return;
+	}
+
+	if (currentDragState != DRAG_NONE) { Refresh(); return; }
+
+	// Not on a hotspot -- favor a wire body under the cursor (same hover()
+	// test mouseLeftDown uses; a plain bbox check is too loose for an
+	// L-shaped wire, which would then catch clicks on its empty corner).
+	CollisionGroup hitThings = mouse->getOverlaps();
+	CollisionGroup::iterator hit = hitThings.begin();
+	guiWire* menuWire = nullptr;
+	while (hit != hitThings.end()) {
+		if ((*hit)->getType() == COLL_WIRE) {
+			guiWire* w = (guiWire*)(*hit);
+			if (w->hover(m.x, m.y, WIRE_HOVER_SCREEN_DELTA * getZoom())) { menuWire = w; break; }
+		}
+		hit++;
+	}
+
+	if (menuWire != nullptr) {
+		menuWire->select();
+		Refresh();
+		enum { ID_CTX_DELETE_WIRE = 7000 };
+		wxMenu menu;
+		menu.Append(ID_CTX_DELETE_WIRE, "Delete Wire");
+		const int chosen = GetPopupMenuSelectionFromUser(menu, event.GetPosition());
+		if (chosen == ID_CTX_DELETE_WIRE) submitCommand( new cmdDeleteWire( gCircuit, this, menuWire->getID() ) );
+		else unselectAllWires();
+		Refresh();
+		return;
+	}
+
+	// Otherwise check for a gate under the cursor.
+	guiGate* menuGate = nullptr;
+	hit = hitThings.begin();
+	while (hit != hitThings.end()) {
+		if ((*hit)->getType() == COLL_GATE) { menuGate = (guiGate*)(*hit); break; }
+		hit++;
+	}
+	if (menuGate == nullptr) { Refresh(); return; }
+
+	if (appConfig().appSettings.rightClickRotate) {
+		// BEGIN WORKAROUND
+		//	Gates that have connections cannot be rotated without sacrificing wire sanity
+		map < string, GLPoint2f > gateHotspots = menuGate->getHotspotList();
+		map < string, GLPoint2f >::iterator ghsWalk = gateHotspots.begin();
+		bool gateConnected = false;
+		while ( ghsWalk !=  gateHotspots.end() ) {
+			if ( menuGate->isConnected( ghsWalk->first ) ) {
+				gateConnected = true;
+				break;
+			}
+			ghsWalk++;
+		}
+		// END WORKAROUND
+		if (!gateConnected) {
+			map < string, string > newParams(*(menuGate->getAllGUIParams()));
+			istringstream issAngle(newParams["angle"]);
+			GLfloat angle;
+			issAngle >> angle;
+			angle += 90.0;
+			if (angle >= 360.0) angle -= 360.0;
+			ostringstream ossAngle;
+			ossAngle << angle;
+			newParams["angle"] = ossAngle.str();
+			submitCommand( new cmdSetParams(gCircuit, menuGate->getID(), paramSet(&newParams, NULL) ) );
+		}
+	} else {
+		menuGate->select();
+		Refresh();
+		enum { ID_CTX_ROTATE_GATE = 7001, ID_CTX_DELETE_GATE = 7002 };
+		wxMenu menu;
+		menu.Append(ID_CTX_ROTATE_GATE, "Rotate");
+		menu.Append(ID_CTX_DELETE_GATE, "Delete");
+		const int chosen = GetPopupMenuSelectionFromUser(menu, event.GetPosition());
+		if (chosen == ID_CTX_ROTATE_GATE) {
+			map < string, GLPoint2f > gateHotspots = menuGate->getHotspotList();
+			map < string, GLPoint2f >::iterator ghsWalk = gateHotspots.begin();
+			bool gateConnected = false;
+			while ( ghsWalk !=  gateHotspots.end() ) {
+				if ( menuGate->isConnected( ghsWalk->first ) ) { gateConnected = true; break; }
+				ghsWalk++;
+			}
+			if (!gateConnected) {
+				map < string, string > newParams(*(menuGate->getAllGUIParams()));
 				istringstream issAngle(newParams["angle"]);
 				GLfloat angle;
 				issAngle >> angle;
@@ -813,10 +890,14 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 				ostringstream ossAngle;
 				ossAngle << angle;
 				newParams["angle"] = ossAngle.str();
-				submitCommand( new cmdSetParams(gCircuit, hitGate->getID(), paramSet(&newParams, NULL) ) );
+				submitCommand( new cmdSetParams(gCircuit, menuGate->getID(), paramSet(&newParams, NULL) ) );
 			}
-			hit++;
-		}				
+		} else if (chosen == ID_CTX_DELETE_GATE) {
+			vector<unsigned long> gates{menuGate->getID()}, wires;
+			submitCommand( new cmdDeleteSelection(gCircuit, this, gates, wires) );
+		} else {
+			unselectAllGates();
+		}
 	}
 	Refresh();
 }
@@ -985,11 +1066,11 @@ void GUICanvas::OnMouseMove( GLdouble glX, GLdouble glY, bool ShiftDown, bool Ct
 		while( hit != selThings.end()) {
 			if ((*hit)->getType() == COLL_GATE) {
 				guiGate* hitGate = ((guiGate*)(*hit));
-				if (dBox.contains((*hit)->getBBox())) hitGate->select();
+				if (dBox.overlaps((*hit)->getBBox())) hitGate->select();
 			}
 			if ((*hit)->getType() == COLL_WIRE) {
 				guiWire* hitWire = ((guiWire*)(*hit));
-				if (dBox.contains((*hit)->getBBox())) hitWire->select();
+				if (dBox.overlaps((*hit)->getBBox())) hitWire->select();
 			}
 			hit++;
 		}
@@ -1074,8 +1155,20 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 	dBox.extendRight( delta );
 	dragselectbox->setBBox( dBox );
 
+	// A palette gate that 'C' created mid-drag: record its creation at the
+	// final drop position instead of creation + a separate move, so a single
+	// undo deletes it.
+	if (pendingCreateGate != nullptr && currentDragState == DRAG_SELECTION) {
+		if (guiGate *g = preMove.size() > 0 ? getGate(preMove[0].id) : nullptr) {
+			float gX, gY;
+			g->getGLcoords(gX, gY);
+			g->updateConnectionMerges();
+			pendingCreateGate->setPosition(gX, gY);
+		}
+		storeCommand(pendingCreateGate);
+	}
 	// If moving a selection then save the move as a command
-	if (saveMove && currentDragState == DRAG_SELECTION) {
+	else if (saveMove && currentDragState == DRAG_SELECTION) {
 		float gX, gY;
 		guiGate *anchor = preMove.size() > 0 ? getGate(preMove[0].id) : nullptr;
 		if (anchor != nullptr) {
@@ -1183,34 +1276,29 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 		}
 
 		// If we are dragging something...
-		if (currentDragState == DRAG_CONNECT) {
-
-			// Oh yeah, we only drag from gates...
-			if (currentConnectionSource.isGate) {
-
-				wxCommand *command = nullptr;
-
-				// Target is a wire...
-				if (drawWireHover) {
-					command = createGateWireConnectionCommand(
-						currentConnectionSource.objectID,
-						currentConnectionSource.connection, wireHoverID);
-				}
-				else {
-
-					// Target is a gate...
-					if (hotspotHighlight.size() > 0) {
-						command = createGateConnectionCommand(
-							currentConnectionSource.objectID,
-							currentConnectionSource.connection,
-							hotspotGate, hotspotHighlight);
-					}
-				}
-
-				if (command != nullptr) {
-					submitCommand((klsCommand *)command);
-				}
+		if (currentDragState == DRAG_CONNECT && !connectSticky) {
+			GLPoint2f connStart = getDragStartCoords(BUTTON_LEFT);
+			bool barelyMoved = fabs(m.x - connStart.x) < DRAG_START_SCREEN_DELTA * getZoom() &&
+			                    fabs(m.y - connStart.y) < DRAG_START_SCREEN_DELTA * getZoom();
+			// hotspotHighlight is still the SOURCE pin right after a plain click
+			// (OnMouseMove last ran while hovering it to click it, and nothing
+			// moved since to overwrite it) -- exclude that pin from "there's a
+			// target" or a stationary click on a pin could never enter sticky mode.
+			bool hoveringSelf = currentConnectionSource.isGate &&
+			                    hotspotGate == currentConnectionSource.objectID &&
+			                    hotspotHighlight == currentConnectionSource.connection;
+			bool hasTarget = (!hotspotHighlight.empty() && !hoveringSelf) || drawWireHover;
+			if (event.LeftUp() && currentConnectionSource.isGate && !hasTarget && barelyMoved) {
+				// Pressed a pin and released again without dragging anywhere --
+				// rather than cancelling, start a sticky connect: the preview
+				// line keeps following the mouse with the button up, and the
+				// next click (mouseLeftDown, top) finishes or cancels it.
+				connectSticky = true;
+				SetCursor(wxCursor(wxCURSOR_CROSS));
+				Refresh();
+				return;
 			}
+			tryFinishConnection();
 		}
 
 		collisionChecker.update();
@@ -1245,7 +1333,10 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 							if (createwire != nullptr) {
 								createwire->Do();
 								//collisionChecker.update();
-								if (currentDragState == DRAG_SELECTION) {
+								if (currentDragState == DRAG_SELECTION && pendingCreateGate != nullptr) {
+									pendingCreateGate->getConnections()->push_back(std::unique_ptr<klsCommand>(createwire));
+								}
+								else if (currentDragState == DRAG_SELECTION) {
 									if (movecommand == NULL) {
 										movecommand = new cmdMoveSelection(gCircuit, preMove, preMoveWire, 0, 0, 0, 0);
 										if (!isWithinPaste) submitCommand(movecommand);
@@ -1294,9 +1385,37 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 		markSelectionChanged();
 	}
 
+	// Mid-drag 'C' connections go on the undo stack last, above the move or
+	// creation, so the first undo removes just the connection.
+	for (klsCommand *cmd : pendingConnects) storeCommand(cmd);
+	pendingConnects.clear();
+	pendingCreateGate = nullptr;
+
 	currentDragState = DRAG_NONE;
+	connectSticky = false;
 
 	Update();
+}
+
+void GUICanvas::storeCommand(klsCommand *cmd) {
+	cmd->setCanvas(this);
+	gCircuit->GetCommandProcessor()->Store((wxCommand *)cmd);
+}
+
+void GUICanvas::discardPendingDragCommands() {
+	for (auto it = pendingConnects.rbegin(); it != pendingConnects.rend(); ++it) {
+		(*it)->Undo();
+		delete *it;
+	}
+	pendingConnects.clear();
+	if (pendingCreateGate != nullptr) {
+		pendingCreateGate->Undo();
+		delete pendingCreateGate;
+		pendingCreateGate = nullptr;
+		preMove.clear();
+		preMoveWire.clear();
+	}
+	collisionChecker.update();
 }
 
 // Add a gate from a drag and drop operation.
@@ -1367,6 +1486,9 @@ void GUICanvas::cancelDrag() {
 		preMoveWire.clear();
 		collisionChecker.update();
 	} else {
+		// Unwind any mid-drag 'C' connections (and a gate 'C' created from
+		// the palette) before putting the moved gates back.
+		discardPendingDragCommands();
 		if (preMove.size() > 0) {
 			saveMove = false;
 			for (unsigned int i = 0; i < preMove.size(); i++) {
@@ -1387,6 +1509,8 @@ void GUICanvas::cancelDrag() {
 		}
 	}
 	currentDragState = DRAG_NONE;
+	connectSticky = false;
+	SetCursor(wxCursor(wxCURSOR_ARROW));
 	endDrag(BUTTON_LEFT);
 	Refresh();
 }
@@ -1398,7 +1522,19 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 		if (currentDragState == DRAG_NONE && !(this->isLocked())) deleteSelection();
 		break;
 	case WXK_ESCAPE:
-		cancelDrag();
+		// Mid-drag with 'C' connections pending: take back just those and
+		// keep dragging. A second Escape then cancels the drag itself.
+		if (currentDragState == DRAG_SELECTION && !pendingConnects.empty()) {
+			for (auto it = pendingConnects.rbegin(); it != pendingConnects.rend(); ++it) {
+				(*it)->Undo();
+				delete *it;
+			}
+			pendingConnects.clear();
+			collisionChecker.update();
+			Refresh();
+		} else {
+			cancelDrag();
+		}
 		break;
 	case WXK_LEFT:
 	case WXK_NUMPAD_LEFT:
@@ -1454,6 +1590,18 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 		if (!event.ControlDown() && !event.AltDown() && !event.CmdDown() && !this->isLocked()) {
 			rotateSelection();
 			Refresh();
+		}
+		break;
+	case 'C':
+	case 'c':
+		// Connect a gate to whatever's unambiguously nearby -- works while
+		// still holding the mouse down mid-drag (Ctrl/Cmd+C, copy, never
+		// reaches here: MainFrame's CHAR_HOOK claims it first). A gate still
+		// being dragged in from the palette isn't a real gate yet, so create
+		// it in place first (without letting go), then connect.
+		if (!event.ControlDown() && !event.AltDown() && !event.CmdDown() && !this->isLocked()) {
+			if (currentDragState == DRAG_NEWGATE) commitNewDragGate();
+			connectNearbyHotspots();
 		}
 		break;
 	}
@@ -1680,6 +1828,28 @@ void GUICanvas::zoomOut() {
 	}
 }
 
+bool GUICanvas::tryFinishConnection() {
+	// Only a gate-sourced DRAG_CONNECT ever finishes here (matching the
+	// pre-existing press-drag-release behavior this was extracted from).
+	if (!currentConnectionSource.isGate) return false;
+
+	wxCommand *command = nullptr;
+	if (drawWireHover) {
+		command = createGateWireConnectionCommand(
+			currentConnectionSource.objectID,
+			currentConnectionSource.connection, wireHoverID);
+	} else if (hotspotHighlight.size() > 0) {
+		command = createGateConnectionCommand(
+			currentConnectionSource.objectID,
+			currentConnectionSource.connection,
+			hotspotGate, hotspotHighlight);
+	}
+
+	if (command == nullptr) return false;
+	submitCommand((klsCommand *)command);
+	return true;
+}
+
 klsCommand * GUICanvas::createGateWireConnectionCommand(IDType gateId, const string &hotspot, IDType wireId) {
 
 	guiGate *gate = getGate(gateId);
@@ -1836,4 +2006,135 @@ void GUICanvas::rotateSelection() {
 		}
 		gateWalk++;
 	}
+}
+
+bool GUICanvas::commitNewDragGate() {
+	if (currentDragState != DRAG_NEWGATE || newDragGate == nullptr) return false;
+
+	// Create the real gate at its current (ghost) position -- the same thing
+	// OnMouseUp does on a real drop.
+	int newGID = gCircuit->getNextAvailableGateID();
+	float nx, ny;
+	newDragGate->getGLcoords(nx, ny);
+	// Applied now but only put on the undo stack at drop (OnMouseUp), with
+	// its final position -- or undone if the drag is cancelled.
+	cmdCreateGate* creategatecommand = new cmdCreateGate(this, gCircuit, newGID, newDragGate->getLibraryGateName(), nx, ny);
+	creategatecommand->Do();
+	collisionChecker.removeObject(newDragGate.get());
+	collisionChecker.update();
+
+	guiGate *created = gCircuit->getGate(newGID);
+	newDragGate.reset();
+	if (created == nullptr) { delete creategatecommand; currentDragState = DRAG_NONE; return false; }
+	pendingCreateGate = creategatecommand;
+
+	cmdSetParams setgateparams(gCircuit, newGID, paramSet(created->getAllGUIParams(), created->getAllLogicParams()));
+	setgateparams.Do();
+	unselectAllGates();
+	unselectAllWires();
+	created->select();
+
+	// Switch from "follow the cursor" (DRAG_NEWGATE) to the normal
+	// delta-from-press-point move model (DRAG_SELECTION) without letting go
+	// of the mouse: back-solve a baseline so preMove[0]+diffSnap lands on the
+	// gate's just-created position right now, so only movement from here
+	// forward (not the whole palette drag so far) gets added as the user
+	// keeps dragging.
+	GLPoint2f m = getMouseCoords();
+	GLPoint2f dStart = getDragStartCoords(BUTTON_LEFT);
+	GLPoint2f mSnap = getSnappedPoint(m);
+	GLPoint2f dStartSnap = getSnappedPoint(dStart);
+	GLPoint2f diffSnap(mSnap.x - dStartSnap.x, mSnap.y - dStartSnap.y);
+
+	preMove.clear();
+	preMove.push_back(GateState(newGID, nx - diffSnap.x, ny - diffSnap.y, true));
+	preMoveWire.clear();
+	saveMove = true;
+
+	currentDragState = DRAG_SELECTION;
+	return true;
+}
+
+int GUICanvas::connectNearbyHotspots() {
+	struct Candidate { guiGate* src; string srcHS; guiGate* dst; string dstHS; };
+	vector<Candidate> candidates;
+
+	float radius = HOTSPOT_CONNECT_SCREEN_RADIUS * getZoom();
+
+	for (auto &srcEntry : gateList) {
+		guiGate* src = srcEntry.second;
+		if (!src->isSelected()) continue;
+
+		for (auto &srcHS : src->getHotspotList()) {
+			if (src->isConnected(srcHS.first)) continue;
+			GLPoint2f sp = srcHS.second;
+
+			guiGate* bestGate = nullptr;
+			string bestHSName;
+			float bestDist = -1.0f, secondDist = -1.0f;
+
+			for (auto &dstEntry : gateList) {
+				guiGate* dst = dstEntry.second;
+				// Only connect to a stationary gate -- if it's also selected
+				// (and so moving with src) their relative position won't change.
+				if (dst == src || dst->isSelected()) continue;
+
+				for (auto &dstHS : dst->getHotspotList()) {
+					if (dst->isConnected(dstHS.first)) continue;
+					float dx = dstHS.second.x - sp.x, dy = dstHS.second.y - sp.y;
+					float d = sqrtf(dx * dx + dy * dy);
+					if (d > radius) continue;
+
+					if (bestDist < 0.0f || d < bestDist) {
+						secondDist = bestDist;
+						bestDist = d;
+						bestGate = dst;
+						bestHSName = dstHS.first;
+					} else if (secondDist < 0.0f || d < secondDist) {
+						secondDist = d;
+					}
+				}
+			}
+
+			if (bestGate == nullptr) continue;
+			// Ambiguous -- a second candidate is within a hair of as close as
+			// the best one (a near-tie), so don't guess which pin was meant.
+			if (secondDist >= 0.0f && secondDist < bestDist * HOTSPOT_CONNECT_AMBIGUITY_RATIO) continue;
+
+			candidates.push_back({src, srcHS.first, bestGate, bestHSName});
+		}
+	}
+
+	if (candidates.empty()) return 0;
+
+	int madeCount = 0;
+
+	if (currentDragState == DRAG_SELECTION && preMove.size() > 0) {
+		// Mid-drag (button still down): apply the connection now, but hold it
+		// off the undo stack until the drop so it lands ABOVE the move --
+		// undo then removes the connection first, then the move.
+		for (auto &c : candidates) {
+			klsCommand *cmd = createGateConnectionCommand(c.src->getID(), c.srcHS, c.dst->getID(), c.dstHS);
+			if (cmd == nullptr) continue;
+			cmd->setCanvas(this);
+			cmd->Do();
+			pendingConnects.push_back(cmd);
+			madeCount++;
+		}
+	} else {
+		// Not mid-drag -- nothing to bundle into, so each connection is its
+		// own undo step.
+		for (auto &c : candidates) {
+			if (klsCommand *cmd = createGateConnectionCommand(c.src->getID(), c.srcHS, c.dst->getID(), c.dstHS)) {
+				submitCommand(cmd);
+				madeCount++;
+			}
+		}
+	}
+
+	if (madeCount > 0) {
+		collisionChecker.update();
+		Refresh();
+	}
+	return madeCount;
 }
