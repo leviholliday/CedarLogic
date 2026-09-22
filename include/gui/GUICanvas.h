@@ -376,6 +376,10 @@ private:
 	// press-drag-release path (OnMouseUp) and the sticky click-to-connect path
 	// (mouseLeftDown).
 	bool tryFinishConnection();
+	// Straighten Route that won't lay a wire along another one: route it
+	// fresh, and if any part runs over another wire, slide its trunk to the
+	// nearest grid position that doesn't (or overlaps least).
+	void straightenWireAvoiding(guiWire* wire);
 
 	// When the left button was last pressed, for the click-vs-drag time dead zone.
 	std::chrono::steady_clock::time_point dragPressTime;

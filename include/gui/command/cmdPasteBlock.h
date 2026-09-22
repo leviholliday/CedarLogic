@@ -8,7 +8,9 @@
 class cmdPasteBlock : public klsCommand {
 public:
 	// Adopts the sub-commands (raw pointers in, owned as unique_ptr).
-	cmdPasteBlock(std::vector<klsCommand*> &cmdList);
+	// `name` is what Edit > Undo shows; this also groups non-paste batches
+	// (e.g. straightening several wires) into one undo step.
+	cmdPasteBlock(std::vector<klsCommand*> &cmdList, const char* name = "Paste");
 
 	bool Do();
 

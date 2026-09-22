@@ -1,8 +1,8 @@
 
 #include "cmdPasteBlock.h"
 
-cmdPasteBlock::cmdPasteBlock(std::vector<klsCommand *> &cmdList) :
-		klsCommand(true, "Paste") {
+cmdPasteBlock::cmdPasteBlock(std::vector<klsCommand *> &cmdList, const char* name) :
+		klsCommand(true, name) {
 
 	// Adopt each sub-command. This command exclusively owns them (unique_ptr), so
 	// a paste and its slot in the undo history free cleanly with no manual delete.

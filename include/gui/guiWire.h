@@ -139,6 +139,15 @@ public:
 	// Throw away any hand-edited shape and route the wire fresh from its
 	// current pins, as when it was first connected.
 	void straightenRoute() { setVerticalBar = true; calcShape(); }
+	// Route fresh with the trunk (the long middle run) at `pos` instead of
+	// halfway -- to move it off another wire.
+	void routeWithTrunkAt(float pos) { setVerticalBar = false; trunkHint = pos; calcShape(); }
+	// Where the last routing put the trunk, and the range it could move in
+	// (between the outermost pins). False for an L-bend, which has no trunk.
+	bool trunkRange(float& pos, float& lo, float& hi) const {
+		pos = lastTrunk; lo = trunkLo; hi = trunkHi;
+		return hasTrunk;
+	}
 
 	// Manual wire routing functionality
 	//	Takes a mouse pointer and finds the segment in question.
@@ -200,6 +209,9 @@ private:
 	// Instance vars
 	bool selected;
 	bool setVerticalBar;
+	float trunkHint = 0.0f;
+	float lastTrunk = 0.0f, trunkLo = 0.0f, trunkHi = 0.0f;
+	bool hasTrunk = false;
 	long headSegment; // reference segment
 	
 	// The wire ids for each wire in the bus.

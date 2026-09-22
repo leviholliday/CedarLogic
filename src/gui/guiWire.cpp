@@ -611,10 +611,28 @@ void guiWire::calcShape() {
 	// addConnection always sets setVerticalBar before calling calcShape, so this
 	// is effectively always a snap; trunkPos is only consulted when it isn't.
 	in.snapTrunk = setVerticalBar;
-	in.trunkPos = 0.0f;
+	in.trunkPos = trunkHint;
 	in.nextId = nextSegID;
 
 	cl::route::RouteResult routed = cl::route::TrunkRouter().route(in);
+
+	// Record the trunk for straightenRoute's overlap avoidance, mirroring the
+	// router's cases: an L-bend (pins facing different ways) has none; two
+	// up/down pins at different heights get a horizontal trunk; otherwise it's
+	// vertical.
+	{
+		float minx = FLT_MAX, maxx = -FLT_MAX, miny = FLT_MAX, maxy = -FLT_MAX;
+		for (const cl::route::Pin &p : in.pins) {
+			minx = std::min(minx, p.x); maxx = std::max(maxx, p.x);
+			miny = std::min(miny, p.y); maxy = std::max(maxy, p.y);
+		}
+		const bool v0 = in.pins[0].verticalHotspot, v1 = in.pins[1].verticalHotspot;
+		hasTrunk = (v0 == v1);
+		const bool horizontalTrunk = v0 && v1 && miny != maxy;
+		lastTrunk = routed.trunkPos;
+		trunkLo = horizontalTrunk ? miny : minx;
+		trunkHi = horizontalTrunk ? maxy : maxx;
+	}
 
 	// Translate the routed topology back into the segment map: one wireSegment per
 	// routed segment, its connections resolved from pin indices and its junctions

@@ -1267,7 +1267,11 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 	// all of the objects involved in any collisions.
 	collisionChecker.update();
 
-	// Go ahead and remove all selection since this is the right mouse button
+	// Remember the selection -- right-clicking a wire that's part of it acts
+	// on the whole selection -- then clear it as right-click always has.
+	std::vector<unsigned long> selGates, selWires;
+	for (auto& g : gateList) if (g.second->isSelected()) selGates.push_back(g.first);
+	for (auto& w : wireList) if (w.second->isSelected()) selWires.push_back(w.first);
 	unselectAllGates();
 	unselectAllWires();
 
@@ -1307,22 +1311,43 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 	}
 
 	if (menuWire != nullptr) {
-		menuWire->select();
+		// Part of a selection with other things in it: the menu acts on all of it.
+		const bool inSelection = std::find(selWires.begin(), selWires.end(), menuWire->getID()) != selWires.end()
+		                         && selWires.size() + selGates.size() > 1;
+		std::vector<unsigned long> targets = inSelection ? selWires : std::vector<unsigned long>{ menuWire->getID() };
+		if (inSelection) {
+			for (unsigned long id : selGates) if (guiGate* g = getGate(id)) g->select();
+			for (unsigned long id : selWires) if (guiWire* w = getWire(id)) w->select();
+		} else {
+			menuWire->select();
+		}
 		Refresh();
 		enum { ID_CTX_DELETE_WIRE = 7000, ID_CTX_STRAIGHTEN = 7003 };
 		wxMenu menu;
-		menu.Append(ID_CTX_STRAIGHTEN, "Straighten Route");
+		menu.Append(ID_CTX_STRAIGHTEN, targets.size() > 1
+			? wxString::Format("Straighten %zu Wires", targets.size()) : wxString("Straighten Route"));
 		menu.AppendSeparator();
-		menu.Append(ID_CTX_DELETE_WIRE, "Delete Wire");
+		menu.Append(ID_CTX_DELETE_WIRE, inSelection ? "Delete Selection" : "Delete Wire");
 		const int chosen = GetPopupMenuSelectionFromUser(menu, event.GetPosition());
-		if (chosen == ID_CTX_DELETE_WIRE) submitCommand( new cmdDeleteWire( gCircuit, this, menuWire->getID() ) );
+		if (chosen == ID_CTX_DELETE_WIRE) {
+			if (inSelection) submitCommand( new cmdDeleteSelection( gCircuit, this, selGates, selWires ) );
+			else submitCommand( new cmdDeleteWire( gCircuit, this, menuWire->getID() ) );
+		}
 		else if (chosen == ID_CTX_STRAIGHTEN) {
-			const auto before = menuWire->getSegmentMap();
-			menuWire->straightenRoute();
-			submitCommand( new cmdWireSegDrag( gCircuit, this, menuWire->getID(), before, menuWire->getSegmentMap() ) );
+			// Every selected wire (gates are skipped), as one undo step.
+			std::vector<klsCommand*> steps;
+			for (unsigned long id : targets) {
+				guiWire* w = getWire(id);
+				if (w == nullptr) continue;
+				const auto before = w->getSegmentMap();
+				straightenWireAvoiding(w);
+				steps.push_back( new cmdWireSegDrag( gCircuit, this, id, before, w->getSegmentMap() ) );
+			}
+			if (steps.size() == 1) submitCommand(steps[0]);
+			else if (!steps.empty()) submitCommand( new cmdPasteBlock( steps, "Straighten Wires" ) );
 			collisionChecker.update();
 		}
-		else unselectAllWires();
+		else if (!inSelection) unselectAllWires();
 		Refresh();
 		return;
 	}
@@ -2445,6 +2470,58 @@ void GUICanvas::zoomOut() {
 	if (currentDragState == DRAG_NONE) {
 		animateZoomTo(getZoom() / ZOOM_STEP);
 	}
+}
+
+void GUICanvas::straightenWireAvoiding(guiWire* wire) {
+	// Every other wire's segments, gathered once.
+	std::vector<wireSegment> others;
+	for (auto& we : wireList)
+		if (we.second != wire)
+			for (const auto& s : we.second->getSegmentMap()) others.push_back(s.second);
+
+	// How crowded this wire is: length it runs alongside other wires, weighted
+	// by closeness -- fully on top counts in full, fading to nothing at
+	// CLEARANCE apart -- so wires end up with real space between them, not
+	// just technically not touching. Crossings don't count; those are readable.
+	const float CLEARANCE = 2.0f;   // world units (4 grid squares)
+	auto overlap = [&]() {
+		float total = 0.0f;
+		for (const auto& me : wire->getSegmentMap()) {
+			const wireSegment& a = me.second;
+			const bool ah = a.isHorizontal();
+			for (const wireSegment& b : others) {
+				if (b.isHorizontal() != ah) continue;
+				const float gap = ah ? std::fabs(a.begin.y - b.begin.y) : std::fabs(a.begin.x - b.begin.x);
+				if (gap >= CLEARANCE) continue;
+				const float along = ah
+					? std::min(a.end.x, b.end.x) - std::max(a.begin.x, b.begin.x)
+					: std::min(a.end.y, b.end.y) - std::max(a.begin.y, b.begin.y);
+				if (along > 0.0f) total += along * (1.0f - gap / CLEARANCE);
+			}
+		}
+		return total;
+	};
+
+	wire->straightenRoute();
+	float best = overlap();
+	float pos, lo, hi;
+	if (best <= 1e-3f || !wire->trunkRange(pos, lo, hi)) return;
+
+	// Nearest grid positions first, alternating sides, strictly between the
+	// outermost pins so every branch keeps a real length.
+	float bestPos = pos;
+	const float step = 0.5f;
+	for (int k = 1; k * step < (hi - lo); k++) {
+		for (int side = 1; side >= -1; side -= 2) {
+			const float p = pos + side * k * step;
+			if (p <= lo + 1e-3f || p >= hi - 1e-3f) continue;
+			wire->routeWithTrunkAt(p);
+			const float o = overlap();
+			if (o < best - 1e-3f) { best = o; bestPos = p; }
+			if (best <= 1e-3f) return;
+		}
+	}
+	wire->routeWithTrunkAt(bestPos);
 }
 
 bool GUICanvas::tryFinishConnection() {
