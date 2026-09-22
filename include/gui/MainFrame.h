@@ -274,6 +274,8 @@ private:
 	wxTimer* statusTimer = nullptr;
 	wxString statusZoom, statusPos, statusCounts;
 	void UpdateStatusInfo();
+	// Four fields with the info on, one (just messages) with it off.
+	void ApplyStatusInfoVisibility();
 	klsMiniMap* miniMap;
 	
 	wxCommandProcessor* commandProcessor;

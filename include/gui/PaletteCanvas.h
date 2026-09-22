@@ -31,6 +31,13 @@ virtual	~PaletteCanvas();
 	// current theme when they're first constructed).
 	void ApplyTheme();
 	
+protected:
+	// The panel's width comes from the section dropdown above it and the tiles
+	// fill whatever that is. Without this the tiles' own sizes fed back into
+	// the width wx asks for, so every full relayout of the window (re-showing
+	// a toolbar button, say) grew the panel -- and the tiles -- a little more.
+	wxSize DoGetBestSize() const override { return wxSize(IMAGESIZE, IMAGESIZE); }
+
 private:
 	wxGridSizer* gateSizer;
 	int tileSide;   // current tile edge in logical px; see OnSize

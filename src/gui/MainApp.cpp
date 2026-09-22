@@ -979,6 +979,7 @@ void MainApp::loadSettings() {
 	conf->Read("GridStyle", &appConfig().appSettings.gridStyle, 0);
 	conf->Read("AccentColor", &appConfig().appSettings.accentColor, 0);
 	conf->Read("WireThickness", &appConfig().appSettings.wireThickness, 1);
+	conf->Read("ShowStatusInfo", &appConfig().appSettings.showStatusInfo, true);
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
 
 	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);

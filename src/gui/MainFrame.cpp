@@ -416,11 +416,8 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     // Fields 1-3 (zoom, cursor position, counts) are filled by UpdateStatusInfo.
     // Every field is wxSB_FLAT: wx 3.2's native bar draws white borders
     // between fields in dark mode otherwise (wxWidgets#25521).
-    CreateStatusBar(4);
-    const int fieldStyles[4] = { wxSB_FLAT, wxSB_FLAT, wxSB_FLAT, wxSB_FLAT };
-    GetStatusBar()->SetStatusStyles(4, fieldStyles);
-    const int fieldWidths[4] = { -1, 90, 150, 190 };
-    GetStatusBar()->SetStatusWidths(4, fieldWidths);
+    CreateStatusBar(1);
+    ApplyStatusInfoVisibility();
     SetStatusText("");
 
 	mainSizer = new wxBoxSizer( wxHORIZONTAL );
@@ -1189,6 +1186,7 @@ void MainFrame::OnPreferences(wxCommandEvent& event) {
 
 void MainFrame::ApplyPreferences() {
 	applyAutosaveInterval();
+	ApplyStatusInfoVisibility();
 	ApplyThemeShortcutLabel();
 	ApplyThemeToggleVisibility();
 
@@ -1460,6 +1458,24 @@ void MainFrame::showCanvasIndex(int idx) {
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	noteCanvasUsed(currentCanvas);
+}
+
+void MainFrame::ApplyStatusInfoVisibility() {
+	wxStatusBar* sb = GetStatusBar();
+	if (sb == nullptr) return;
+	const int n = appConfig().appSettings.showStatusInfo ? 4 : 1;
+	if (sb->GetFieldsCount() == n && n == 1) {
+		const int style = wxSB_FLAT;
+		sb->SetStatusStyles(1, &style);
+		return;
+	}
+	if (sb->GetFieldsCount() == n) return;
+	const int styles[4] = { wxSB_FLAT, wxSB_FLAT, wxSB_FLAT, wxSB_FLAT };
+	const int widths[4] = { -1, 90, 150, 190 };
+	sb->SetFieldsCount(n, widths);
+	sb->SetStatusStyles(n, styles);
+	// Force a rewrite next tick -- the fields just came back empty.
+	statusZoom.clear(); statusPos.clear(); statusCounts.clear();
 }
 
 void MainFrame::UpdateStatusInfo() {
@@ -1959,6 +1975,7 @@ void MainFrame::saveSettings() {
 	conf->Write("GridStyle", settings.gridStyle);
 	conf->Write("AccentColor", settings.accentColor);
 	conf->Write("WireThickness", settings.wireThickness);
+	conf->Write("ShowStatusInfo", settings.showStatusInfo);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
 
 	conf->Write("ThemeMode", settings.themeMode);

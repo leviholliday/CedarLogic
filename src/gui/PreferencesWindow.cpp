@@ -103,12 +103,16 @@ public:
 		addRow("Refresh rate:", withUnit(refresh, "frames per second"),
 			"How often the canvas redraws while the simulation runs.");
 
+		statusInfo = addCheck("Status bar:", "Show zoom, cursor position, and counts", s.showStatusInfo,
+			"The readout in the bottom-right corner of the window.");
+
 		GetSizer()->SetSizeHints(this);
 	}
 
 protected:
 	void apply() override {
 		auto& s = appConfig().appSettings;
+		s.showStatusInfo = statusInfo->GetValue();
 		s.autosaveSeconds = autosave->GetValue() * 60;
 		int fps = refresh->GetValue();
 		s.refreshRate = (fps > 0) ? 1000 / fps : 16;
@@ -129,6 +133,7 @@ private:
 
 	wxSpinCtrl* autosave;
 	wxSpinCtrl* refresh;
+	wxCheckBox* statusInfo;
 };
 
 // ---- Appearance ------------------------------------------------------------
