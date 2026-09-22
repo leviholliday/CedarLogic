@@ -1918,6 +1918,9 @@ void MainFrame::saveSettings() {
 	conf->Write("WireConnVisible", settings.wireConnVisible);
 	conf->Write("GridlineVisible", settings.gridlineVisible);
 	conf->Write("MajorGridVisible", settings.majorGridVisible);
+	conf->Write("GridStyle", settings.gridStyle);
+	conf->Write("AccentColor", settings.accentColor);
+	conf->Write("WireThickness", settings.wireThickness);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
 
 	conf->Write("ThemeMode", settings.themeMode);

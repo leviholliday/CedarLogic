@@ -976,6 +976,9 @@ void MainApp::loadSettings() {
 	conf->Read("WireConnVisible", &appConfig().appSettings.wireConnVisible, true);
 	conf->Read("GridlineVisible", &appConfig().appSettings.gridlineVisible, true);
 	conf->Read("MajorGridVisible", &appConfig().appSettings.majorGridVisible, true);
+	conf->Read("GridStyle", &appConfig().appSettings.gridStyle, 0);
+	conf->Read("AccentColor", &appConfig().appSettings.accentColor, 0);
+	conf->Read("WireThickness", &appConfig().appSettings.wireThickness, 1);
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
 
 	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);

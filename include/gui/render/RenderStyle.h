@@ -62,17 +62,22 @@ struct RenderStyle {
 	// opacity. Screen only; print/export have no selection to begin with.
 	// Set by GUICanvas::renderSkiaLive from its selectionChangedAt timestamp.
 	float selectionFade;
+	// User appearance choices, screen only (print/export keep the defaults):
+	// which accent() color, and a multiplier on live wire widths.
+	int accentIndex;
+	float wireScale;
 	TitleBlock titleBlock;
 
 	RenderStyle()
 		: showGrid(true), showSelection(true),
-		  showLiveState(true), colorOutput(true), darkMode(false), selectionFade(1.0f) {}
+		  showLiveState(true), colorOutput(true), darkMode(false), selectionFade(1.0f),
+		  accentIndex(0), wireScale(1.0f) {}
 
 	// Paint for a wire of the given state. On screen, color by state and widen
 	// buses; on paper, always solid black with weight carrying the bus/net
 	// hierarchy and state ignored (topology only).
 	Stroke wire(WireState state, bool isBus) const {
-		const float netWidth = isBus ? 3.0f : 1.0f;
+		const float netWidth = (isBus ? 3.0f : 1.0f) * wireScale;
 		if (!colorOutput || !showLiveState) {
 			// Print/thumbnail: topology only, hierarchy by weight. True paper
 			// print (colorOutput false) is always black; a themed thumbnail
@@ -123,8 +128,18 @@ struct RenderStyle {
 	// above, which carry meaning and stay put. A single shared azure instead of
 	// each call site inventing its own blue keeps that chrome visually
 	// coherent across the canvas.
+	// accentIndex picks one of the Preferences choices, each with a lighter
+	// variant for dark backgrounds: Blue, Purple, Pink, Orange, Green, Graphite.
 	Color accent() const {
-		return darkMode ? Color(0.42f, 0.62f, 1.0f, 1) : Color(0.20f, 0.48f, 0.98f, 1);
+		static const float light[6][3] = {
+			{0.20f, 0.48f, 0.98f}, {0.55f, 0.32f, 0.93f}, {0.93f, 0.25f, 0.55f},
+			{0.96f, 0.50f, 0.10f}, {0.16f, 0.66f, 0.33f}, {0.42f, 0.45f, 0.50f}};
+		static const float dark[6][3] = {
+			{0.42f, 0.62f, 1.00f}, {0.70f, 0.55f, 1.00f}, {1.00f, 0.48f, 0.70f},
+			{1.00f, 0.66f, 0.32f}, {0.36f, 0.82f, 0.50f}, {0.66f, 0.69f, 0.74f}};
+		const int i = (accentIndex >= 0 && accentIndex < 6) ? accentIndex : 0;
+		const float* c = darkMode ? dark[i] : light[i];
+		return Color(c[0], c[1], c[2], 1);
 	}
 
 	// Grid line color -- a faint tint of the theme's foreground against its

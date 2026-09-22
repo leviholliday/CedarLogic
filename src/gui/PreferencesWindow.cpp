@@ -152,11 +152,34 @@ public:
 		showToggle = addCheck("Toolbar:", "Show the dark mode switch", s.showThemeToggleButton,
 			"Hide it if you only switch themes with the shortcut or the View menu.");
 
+		accent = new wxChoice(this, wxID_ANY);
+		// Order matches RenderStyle::accent()'s table.
+		for (const char* name : {"Blue", "Purple", "Pink", "Orange", "Green", "Graphite"}) accent->Append(name);
+		accent->SetSelection(s.accentColor);
+		accent->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		addRow("Accent color:", accent,
+			"Used for selections and highlights. Wire colors that show signal state never change.");
+
 		grid_ = addCheck("Canvas:", "Show the grid", s.gridlineVisible,
 			"The background grid gates snap to. Printing never includes it.");
 
+		gridStyle = new wxChoice(this, wxID_ANY);
+		gridStyle->Append("Lines");
+		gridStyle->Append("Dots");
+		gridStyle->SetSelection(s.gridStyle);
+		gridStyle->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		addRow("Grid style:", gridStyle, "Dots are quieter; lines make alignment easier to see.");
+
 		majorGrid = addCheck("", "Darker line every 5 squares", s.majorGridVisible,
 			"Makes distances easy to judge at a glance. Off: every grid line looks the same.");
+
+		wireThickness = new wxChoice(this, wxID_ANY);
+		wireThickness->Append("Thin");
+		wireThickness->Append("Normal");
+		wireThickness->Append("Thick");
+		wireThickness->SetSelection(s.wireThickness);
+		wireThickness->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		addRow("Wire thickness:", wireThickness, "On screen only. Printouts always use the standard weight.");
 
 		wireConn = addCheck("", "Show dots at wire bends", s.wireConnVisible,
 			"Marks every corner of a wire. Junctions where wires join always get a dot.");
@@ -176,6 +199,9 @@ protected:
 		s.showThemeToggleButton = showToggle->GetValue();
 		s.gridlineVisible = grid_->GetValue();
 		s.majorGridVisible = majorGrid->GetValue();
+		s.accentColor = accent->GetSelection();
+		s.gridStyle = gridStyle->GetSelection();
+		s.wireThickness = wireThickness->GetSelection();
 		s.wireConnVisible = wireConn->GetValue();
 		s.wireConnRadius = (float)wireRadius->GetValue();
 		pushLive();
@@ -186,6 +212,9 @@ private:
 	wxCheckBox* showToggle;
 	wxCheckBox* grid_;
 	wxCheckBox* majorGrid;
+	wxChoice* accent;
+	wxChoice* gridStyle;
+	wxChoice* wireThickness;
 	wxCheckBox* wireConn;
 	wxSpinCtrlDouble* wireRadius;
 };

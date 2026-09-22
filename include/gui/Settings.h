@@ -61,6 +61,9 @@ struct ApplicationSettings {
 	bool gridlineVisible;
 	// Draw every 5th grid line darker (a ruler-style guide).
 	bool majorGridVisible = true;
+	int gridStyle = 0;       // 0 = lines, 1 = dots
+	int accentColor = 0;     // index into RenderStyle::accent()'s choices
+	int wireThickness = 1;   // 0 = thin, 1 = normal, 2 = thick (screen only)
 	bool rightClickRotate;
 
 	// Dark mode. themeMode picks the launch behavior (see ThemeMode); lastDarkMode

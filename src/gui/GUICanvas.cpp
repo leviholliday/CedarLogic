@@ -254,12 +254,22 @@ void GUICanvas::renderToScene(cl::render::Scene& scene,
 	drawSceneContents(scene, style, t, scale, gMinX, gMinY, gMaxX, gMaxY);
 }
 
+// The on-screen style with the user's Appearance choices applied.
+static cl::render::RenderStyle liveStyle(bool dark) {
+	cl::render::RenderStyle s = cl::render::RenderStyle::screen(dark);
+	const auto& a = appConfig().appSettings;
+	s.showGrid = a.gridlineVisible;
+	s.accentIndex = a.accentColor;
+	static const float wireScales[3] = {0.7f, 1.0f, 1.6f};
+	s.wireScale = wireScales[(a.wireThickness >= 0 && a.wireThickness < 3) ? a.wireThickness : 1];
+	return s;
+}
+
 wxImage GUICanvas::renderThumbnail(int w, int h, bool dark) {
 	wxImage img(w, h);
 #ifdef WITH_SKIA
 	using namespace cl::render;
-	RenderStyle style = RenderStyle::screen(dark);
-	style.showGrid = appConfig().appSettings.gridlineVisible;
+	RenderStyle style = liveStyle(dark);
 	const unsigned int bg = dark ? 0xFF131519u : 0xFFFFFFFFu;
 
 	wxSize sz = GetClientSize();
@@ -331,6 +341,19 @@ void GUICanvas::drawGridInto(cl::render::Scene& scene,
 		const float y = (float)(idx * spaceY);
 		std::vector<Point>& target = isMajor(idx) ? majorLines : minorLines;
 		target.push_back(Point(gMinX, y)); target.push_back(Point(gMaxX, y));
+	}
+	if (appConfig().appSettings.gridStyle == 1) {
+		// Dots at the intersections instead of lines; a dot on two darker
+		// lines is drawn larger and stronger.
+		const float r = 1.1f * viewZoom, rMajor = 1.7f * viewZoom;
+		const Color dot = style.gridColor((float)GRID_INTENSITY * 3.0f);
+		const Color dotMajor = style.gridColor((float)GRID_INTENSITY * 5.0f);
+		for (long ix = xStartIdx; (float)(ix * spaceX) <= gMaxX; ix++)
+			for (long iy = yStartIdx; (float)(iy * spaceY) <= gMaxY; iy++) {
+				const bool m = isMajor(ix) && isMajor(iy);
+				scene.fillCircle(Point((float)(ix * spaceX), (float)(iy * spaceY)), m ? rMajor : r, m ? dotMajor : dot);
+			}
+		return;
 	}
 	if (!minorLines.empty()) scene.lines(&minorLines[0], minorLines.size(), minor);
 	if (!majorLines.empty()) scene.lines(&majorLines[0], majorLines.size(), major);
@@ -434,11 +457,8 @@ bool GUICanvas::renderSkiaLive() {
 	const float gMaxY = (float)py;
 
 	GUICanvas* self = this;
-	RenderStyle style = RenderStyle::screen(renderMode().darkMode);
-	// View > Display Gridlines. The screen style defaults the grid on and the
-	// export paths set showGrid themselves, so without this the live canvas was
-	// the one renderer that never consulted the setting.
-	style.showGrid = appConfig().appSettings.gridlineVisible;
+	// Includes View > Display Gridlines and the Appearance preferences.
+	RenderStyle style = liveStyle(renderMode().darkMode);
 	// Selection halo fade-in (see markSelectionChanged): 0 right after a
 	// selection change, ramping to 1 over SELECTION_FADE_MS.
 	{
@@ -457,6 +477,9 @@ bool GUICanvas::renderSkiaLive() {
 	// still running (quantized, so it's stable -- and so the cache hits again
 	// -- once the fade settles at 1.0).
 	unsigned long long sceneKey = renderContentKey() ^ (style.darkMode ? 0x9E3779B97F4A7C15ULL : 0ULL);
+	// Accent (selection halos) and wire thickness are baked into the picture too.
+	sceneKey ^= (unsigned long long)(style.accentIndex + 1) * 0xC2B2AE3D27D4EB4FULL;
+	sceneKey ^= (unsigned long long)(style.wireScale * 16.0f) * 0x165667B19E3779F9ULL;
 	if (style.selectionFade < 1.0f)
 		sceneKey ^= ((unsigned long long)(style.selectionFade * 64.0f) * 0x2545F4914F6CDD1DULL);
 	auto drawGrid = [self, style, t, scale, gMinX, gMinY, gMaxX, gMaxY](Scene& s) {
@@ -517,7 +540,7 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 	using cl::render::Color;
 	using cl::render::Stroke;
 	const float r = HOTSPOT_SCREEN_RADIUS * (float)getZoom();
-	const Color accent = cl::render::RenderStyle::screen(renderMode().darkMode).accent();
+	const Color accent = liveStyle(renderMode().darkMode).accent();
 
 	auto box = [&scene](float x, float y, float rad, const Color& c) {
 		Point pts[4] = { Point(x - rad, y + rad), Point(x + rad, y + rad),
@@ -558,7 +581,7 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 		Point ln[2] = { Point(s.x, s.y), Point(e.x, e.y) };
 		scene.lines(ln, 2, Stroke(Color(0.0f, 0.78f, 0.0f, 1.0f), 1.0f));
 	} else if (currentDragState == DRAG_NEWGATE && newDragGate != nullptr) {
-		newDragGate->drawToScene(scene, cl::render::RenderStyle::screen(renderMode().darkMode));
+		newDragGate->drawToScene(scene, liveStyle(renderMode().darkMode));
 	}
 
 	// The just-released drag-select box, fading out (see OnMouseUp) -- drawn

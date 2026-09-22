@@ -225,7 +225,7 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 	const bool isBus = ids.size() != 1;
 
 	Stroke s;
-	s.width = isBus ? 4.0f : 1.0f;
+	s.width = (isBus ? 4.0f : 1.0f) * style.wireScale;
 	if (!style.colorOutput || !style.showLiveState) {
 		// Print/topology: black, weight carries bus vs net (state ignored).
 		s = style.wire(WireState::Low, isBus);
