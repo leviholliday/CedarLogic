@@ -18,6 +18,16 @@ cmdWireSegDrag::cmdWireSegDrag(GUICircuit* gCircuit, GUICanvas* gCanvas,
 	newSegMap = wire->getSegmentMap();
 }
 
+cmdWireSegDrag::cmdWireSegDrag(GUICircuit* gCircuit, GUICanvas* gCanvas, IDType wireID,
+		const std::map<long, wireSegment>& before, const std::map<long, wireSegment>& after) :
+			klsCommand(true, "Wire Shape") {
+	this->gCircuit = gCircuit;
+	this->gCanvas = gCanvas;
+	this->wireID = wireID;
+	oldSegMap = before;
+	newSegMap = after;
+}
+
 bool cmdWireSegDrag::Do() {
 
 	guiWire *wire = gCircuit->getWire(wireID);

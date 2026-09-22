@@ -136,6 +136,9 @@ public:
 	//	As segments are created, they are merged with segments
 	//	following the same path, and duplicates are removed.
 	void calcShape();  // TODO
+	// Throw away any hand-edited shape and route the wire fresh from its
+	// current pins, as when it was first connected.
+	void straightenRoute() { setVerticalBar = true; calcShape(); }
 
 	// Manual wire routing functionality
 	//	Takes a mouse pointer and finds the segment in question.

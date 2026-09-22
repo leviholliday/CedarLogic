@@ -909,11 +909,19 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 	if (menuWire != nullptr) {
 		menuWire->select();
 		Refresh();
-		enum { ID_CTX_DELETE_WIRE = 7000 };
+		enum { ID_CTX_DELETE_WIRE = 7000, ID_CTX_STRAIGHTEN = 7003 };
 		wxMenu menu;
+		menu.Append(ID_CTX_STRAIGHTEN, "Straighten Route");
+		menu.AppendSeparator();
 		menu.Append(ID_CTX_DELETE_WIRE, "Delete Wire");
 		const int chosen = GetPopupMenuSelectionFromUser(menu, event.GetPosition());
 		if (chosen == ID_CTX_DELETE_WIRE) submitCommand( new cmdDeleteWire( gCircuit, this, menuWire->getID() ) );
+		else if (chosen == ID_CTX_STRAIGHTEN) {
+			const auto before = menuWire->getSegmentMap();
+			menuWire->straightenRoute();
+			submitCommand( new cmdWireSegDrag( gCircuit, this, menuWire->getID(), before, menuWire->getSegmentMap() ) );
+			collisionChecker.update();
+		}
 		else unselectAllWires();
 		Refresh();
 		return;
