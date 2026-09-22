@@ -634,32 +634,24 @@ void klsGLCanvas::wxKeyDown(wxKeyEvent& event) {
 	// If the subclassed handler took the event, then don't handle it:
 	if( event.GetSkipped() ) return;
 
+	// GUICanvas::OnKeyDown already acted on these (pan/nudge, zoom). They used
+	// to be acted on again here, so every arrow press panned twice and every
+	// +/- zoomed twice. Just claim them, so macOS doesn't beep at them.
 	bool handled = true;
 	switch (event.GetKeyCode()) {
 	case WXK_LEFT:
 	case WXK_NUMPAD_LEFT:
-		translatePan(-PAN_STEP * getZoom(), 0.0);
-		break;
 	case WXK_RIGHT:
 	case WXK_NUMPAD_RIGHT:
-		translatePan(+PAN_STEP * getZoom(), 0.0);
-		break;
 	case WXK_UP:
 	case WXK_NUMPAD_UP:
-		translatePan(0.0, PAN_STEP * getZoom());
-		break;
 	case WXK_DOWN:
 	case WXK_NUMPAD_DOWN:
-		translatePan(0.0, -PAN_STEP * getZoom());
-		break;
 	case 43: // + key (Shift+=)
 	case 61: // = key (for zoom in without shift on Mac)
 	case WXK_NUMPAD_ADD:
-		animateZoomTo( getZoom() * ZOOM_STEP );
-		break;
 	case 45: // - key on top row (Works for both '-' and '_')
 	case WXK_NUMPAD_SUBTRACT:
-		animateZoomTo( getZoom() / ZOOM_STEP );
 		break;
 	default:
 		handled = false;

@@ -49,6 +49,9 @@ enum
 	View_Gridline,
 	View_WireConn,
 	View_DarkMode,
+	View_ZoomFit,
+	View_ZoomActual,
+	View_FocusMode,
 	Tool_ThemeToggle,
 
     TIMER_ID,

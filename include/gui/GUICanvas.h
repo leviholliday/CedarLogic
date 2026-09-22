@@ -171,6 +171,7 @@ public:
     void OnMouseEnter(wxMouseEvent& event);
 
     void OnKeyDown(wxKeyEvent& event);
+    void OnKeyUp(wxKeyEvent& event) override;
     void cancelDrag() override;   // cancel an in-progress drag (Escape / lost capture)
 	
 	void OnSize( void ) { Update(); };
@@ -193,6 +194,10 @@ public:
 	// the new wires wait in pendingConnects and go on the undo stack at the
 	// drop, above the move. Returns the number of new connections made.
 	int connectNearbyHotspots();
+
+	// Arrow-key nudge: move the selected gates (and selected wires) by
+	// (dx, dy) world units as one undoable move. False if nothing selected.
+	bool nudgeSelection(float dx, float dy);
 
 	// The search behind connectNearbyHotspots (and the forgiving connect on
 	// drop): for each unconnected pin on a selected gate, the nearest
@@ -384,6 +389,9 @@ private:
 	wxTimer* overlayFadeTimer;
 	void markSelectionChanged();
 	void OnOverlayFadeTimer(wxTimerEvent& event);
+	// Hold Space and drag to pan; a tap (no drag) zooms to fit instead.
+	bool spaceHeld = false;
+	bool spacePanned = false;
 	bool appearing = false;
 	std::chrono::steady_clock::time_point appearStart;
 	float appearProgress() const;   // 0..1, eased; 1 when not animating

@@ -193,6 +193,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     // commands through the same event, so the existing handlers pick these up.
     viewMenu->Append(Tool_ZoomIn, "Zoom &In\tCtrl+=", "Zoom in");
     viewMenu->Append(Tool_ZoomOut, "Zoom &Out\tCtrl+-", "Zoom out");
+    viewMenu->Append(View_ZoomFit, "Zoom to &Fit\tCtrl+0", "Show the whole circuit");
+    viewMenu->Append(View_ZoomActual, "&Actual Size\tCtrl+1", "Zoom to 100%");
+    viewMenu->AppendSeparator();
+    viewMenu->AppendCheckItem(View_FocusMode, "&Focus Mode\tCtrl+.", "Hide the side panel to give the canvas the whole window");
     viewMenu->AppendSeparator();
     viewMenu->AppendCheckItem(View_Gridline, "Display &Gridlines", "Toggle gridline display");
     viewMenu->AppendCheckItem(View_WireConn, "Display &Wire Connection Points", "Toggle wire connection points");
@@ -290,6 +294,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
         }
         if (tabSwitchActive && k == WXK_ESCAPE) {
             cancelTabSwitch();
+            return;
+        }
+        if (!ctrl && !e.AltDown() && (k == '?' || (k == '/' && e.ShiftDown()))) {
+            wxCommandEvent evt(wxEVT_MENU, Help_KeyboardShortcuts);
+            ProcessWindowEvent(evt);
             return;
         }
         // Shift+1..9: jump straight to the Nth palette section (Basic Gates,
@@ -469,6 +478,21 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
 	noteCanvasUsed(currentCanvas);
+
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		if (currentCanvas) { currentCanvas->setZoomAll(); currentCanvas->Refresh(); }
+	}, View_ZoomFit);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		if (currentCanvas) currentCanvas->animateZoomTo(DEFAULT_ZOOM);
+	}, View_ZoomActual);
+	Bind(wxEVT_MENU, [this](wxCommandEvent& e) {
+		// Focus mode: the canvas gets the whole window.
+		const bool show = !e.IsChecked();
+		gatePalette->Show(show);
+		miniMap->Show(show);
+		sidePanelSash->Show(show);
+		Layout();
+	}, View_FocusMode);
 
 	statusTimer = new wxTimer(this, wxWindow::NewControlId());
 	Bind(wxEVT_TIMER, [this](wxTimerEvent&) { UpdateStatusInfo(); }, statusTimer->GetId());
@@ -2622,27 +2646,32 @@ void MainFrame::OnKeyboardShortcuts(wxCommandEvent& event) {
 	addRow(grid, "Escape", "Clear Selection");
 
 	addHeader(grid, "View");
-	addRow(grid, "+/=", "Zoom In");
-	addRow(grid, "-", "Zoom Out");
-	addRow(grid, "Scroll", "Zoom In/Out");
-	addRow(grid, "Space", "Zoom to Fit");
-	addRow(grid, "Arrow Keys", "Pan View");
-#ifdef __WXOSX__
-	addRow(grid, "Cmd+Scroll/Swipe", "Pan View");
-#else
-	addRow(grid, "Trackpad Swipe", "Pan Horizontally (natural)");
-#endif
-	addRow(grid, "Shift+Scroll", "Pan Horizontally");
-	addRow(grid, "Ctrl+Scroll", "Pan Vertically");
+	addRow(grid, "+ / -", "Zoom In / Out");
+	addRow(grid, mod + "+0", "Zoom to Fit");
+	addRow(grid, mod + "+1", "Actual Size (100%)");
+	addRow(grid, "Space", "Zoom to Fit (tap)");
+	addRow(grid, "Space+Drag", "Move Around (hold)");
+	addRow(grid, mod + "+Drag", "Move Around");
+	addRow(grid, mod + "+Scroll", "Zoom");
+	addRow(grid, "Shift+Scroll", "Move Sideways");
+	addRow(grid, "Arrow Keys", "Move Around (nothing selected)");
+	addRow(grid, mod + "+.", "Focus Mode (hide side panel)");
 	addRow(grid, mod + "+G", "Show Oscilloscope");
 
 	addHeader(grid, "Gates");
 	addRow(grid, "A", "Quick Add Gate");
 	addRow(grid, "R", "Rotate Selection");
+	addRow(grid, "C", "Connect to Nearby Pins (works mid-drag)");
+	addRow(grid, "Arrow Keys", "Nudge Selection (Shift: 5 squares)");
+	addRow(grid, "Shift+1-9", "Jump to Gate Category");
 
 	addHeader(grid, "Tabs");
 	addRow(grid, mod + "+T", "New Tab");
 	addRow(grid, mod + "+W", "Close Tab");
+	addRow(grid, "Ctrl+Tab", "Switch Tabs (hold Ctrl to see all)");
+
+	addHeader(grid, "Help");
+	addRow(grid, "?", "This List");
 
 	topSizer->Add(grid, 1, wxALL | wxEXPAND, 16);
 	topSizer->Add(dlg.CreateButtonSizer(wxOK), 0, wxALIGN_CENTER | wxBOTTOM, 12);

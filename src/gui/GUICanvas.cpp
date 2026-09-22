@@ -88,6 +88,12 @@ GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 
 	overlayFadeTimer = new wxTimer(this);
 	Bind(wxEVT_TIMER, &GUICanvas::OnOverlayFadeTimer, this, overlayFadeTimer->GetId());
+	// A Space released while another window had focus never reaches OnKeyUp.
+	Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent& e) {
+		if (spaceHeld && currentDragState != DRAG_PAN) SetCursor(wxCursor(wxCURSOR_ARROW));
+		spaceHeld = false;
+		e.Skip();
+	});
 
 	SetDropTarget(new DnDText(this));
 
@@ -670,6 +676,14 @@ void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
 		currentDragState = DRAG_NONE;
 		SetCursor(wxCursor(wxCURSOR_ARROW));
 		Refresh();
+		return;
+	}
+	if (spaceHeld && currentDragState == DRAG_NONE && !isWithinPaste) {
+		// Same pan machinery as Cmd+drag (DRAG_PAN, ended in OnMouseUp).
+		spacePanned = true;
+		currentDragState = DRAG_PAN;
+		beginDrag(BUTTON_MIDDLE);
+		SetCursor(wxCursor(wxCURSOR_HAND));
 		return;
 	}
 	GLPoint2f m = getMouseCoords();
@@ -1637,20 +1651,24 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 		break;
 	case WXK_LEFT:
 	case WXK_NUMPAD_LEFT:
-		translatePan(-PAN_STEP * getZoom(), 0.0);
-		break;
 	case WXK_RIGHT:
 	case WXK_NUMPAD_RIGHT:
-		translatePan(+PAN_STEP * getZoom(), 0.0);
-		break;
 	case WXK_UP:
 	case WXK_NUMPAD_UP:
-		translatePan(0.0, PAN_STEP * getZoom());
-		break;
 	case WXK_DOWN:
-	case WXK_NUMPAD_DOWN:
-		translatePan(0.0, -PAN_STEP * getZoom());
+	case WXK_NUMPAD_DOWN: {
+		const int k = event.GetKeyCode();
+		const float sx = (k == WXK_LEFT || k == WXK_NUMPAD_LEFT) ? -1.0f
+		               : (k == WXK_RIGHT || k == WXK_NUMPAD_RIGHT) ? 1.0f : 0.0f;
+		const float sy = (k == WXK_UP || k == WXK_NUMPAD_UP) ? 1.0f
+		               : (k == WXK_DOWN || k == WXK_NUMPAD_DOWN) ? -1.0f : 0.0f;
+		// With something selected, arrows nudge it a grid square (Shift: 5).
+		// Otherwise they pan, as before.
+		const float step = horizSpacing * (event.ShiftDown() ? 5.0f : 1.0f);
+		if (!nudgeSelection(sx * step, sy * step))
+			translatePan(sx * PAN_STEP * getZoom(), sy * PAN_STEP * getZoom());
 		break;
+	}
 	case 43: // + key (Shift+=)
 	case 61: // = key (for zoom in without shift on Mac)
 	case WXK_NUMPAD_ADD:
@@ -1661,7 +1679,12 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 		zoomOut();
 		break;
 	case WXK_SPACE:
-		setZoomAll();
+		// Tap: zoom to fit (on release, in OnKeyUp). Hold + drag: pan.
+		if (!spaceHeld) {
+			spaceHeld = true;
+			spacePanned = false;
+			if (currentDragState == DRAG_NONE) SetCursor(wxCursor(wxCURSOR_HAND));
+		}
 		break;
 	case 'A':
 	case 'a':
@@ -1704,6 +1727,45 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 		}
 		break;
 	}
+}
+
+void GUICanvas::OnKeyUp(wxKeyEvent& event) {
+	if (event.GetKeyCode() == WXK_SPACE && spaceHeld) {
+		spaceHeld = false;
+		if (currentDragState != DRAG_PAN) SetCursor(wxCursor(wxCURSOR_ARROW));
+		if (!spacePanned && currentDragState == DRAG_NONE) setZoomAll();
+		return;
+	}
+	event.Skip();
+}
+
+bool GUICanvas::nudgeSelection(float dx, float dy) {
+	if (currentDragState != DRAG_NONE || isLocked() || isWithinPaste) return false;
+	vector<GateState> moved;
+	vector<WireState> movedWires;
+	for (auto& g : gateList) {
+		if (!g.second->isSelected()) continue;
+		float x, y;
+		g.second->getGLcoords(x, y);
+		moved.push_back(GateState(g.first, x, y, true));
+	}
+	if (moved.empty()) return false;
+	for (auto& w : wireList)
+		if (w.second->isSelected())
+			movedWires.push_back(WireState(w.first, w.second->getCenter(), w.second->getSegmentMap()));
+
+	// Same steps as a mouse drag (OnMouseMove) and its drop (OnMouseUp).
+	const GLPoint2f delta(dx, dy);
+	for (auto& ws : movedWires) if (guiWire* w = getWire(ws.id)) w->move(ws.point, delta);
+	for (auto& gs : moved) if (guiGate* g = getGate(gs.id)) g->setGLcoords(gs.x + dx, gs.y + dy);
+	cmdMoveSelection* mc = new cmdMoveSelection(gCircuit, moved, movedWires,
+		moved[0].x, moved[0].y, moved[0].x + dx, moved[0].y + dy);
+	for (auto& gs : moved) if (guiGate* g = getGate(gs.id)) g->updateConnectionMerges();
+	submitCommand(mc);
+	mc->Undo();   // see OnMouseUp: the gates already moved, so cancel Submit's extra Do()
+	collisionChecker.update();
+	Refresh();
+	return true;
 }
 
 void GUICanvas::deleteSelection() {
