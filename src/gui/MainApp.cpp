@@ -980,6 +980,12 @@ void MainApp::loadSettings() {
 	conf->Read("AccentColor", &appConfig().appSettings.accentColor, 0);
 	conf->Read("WireThickness", &appConfig().appSettings.wireThickness, 1);
 	conf->Read("ShowStatusInfo", &appConfig().appSettings.showStatusInfo, true);
+	conf->Read("MouseWheelAction", &appConfig().appSettings.mouseWheelAction, 0);
+	conf->Read("TrackpadScrollAction", &appConfig().appSettings.trackpadScrollAction, 1);
+	conf->Read("ReverseTrackpadZoom", &appConfig().appSettings.reverseTrackpadZoom, false);
+	conf->Read("ReverseWheelZoom", &appConfig().appSettings.reverseWheelZoom, true);
+	conf->Read("SidePanelWidth", &appConfig().appSettings.sidePanelWidth, 0);
+	conf->Read("PaletteGateSize", &appConfig().appSettings.paletteGateSize, 48);
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
 
 	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);

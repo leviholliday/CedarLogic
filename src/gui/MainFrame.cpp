@@ -492,9 +492,27 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 
 	// Initialize splitter showing only canvasBook (oscope hidden)
 	rightSplitter->Initialize(canvasBook);
+	// A thin divider to drag the side panel wider or narrower.
+	sidePanelSash = new wxWindow(this, wxID_ANY, wxDefaultPosition, wxSize(5, -1));
+	sidePanelSash->SetCursor(wxCursor(wxCURSOR_SIZEWE));
+	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { sidePanelSash->CaptureMouse(); });
+	sidePanelSash->Bind(wxEVT_LEFT_UP, [this](wxMouseEvent&) {
+		if (sidePanelSash->HasCapture()) sidePanelSash->ReleaseMouse();
+	});
+	sidePanelSash->Bind(wxEVT_MOUSE_CAPTURE_LOST, [](wxMouseCaptureLostEvent&) {});
+	sidePanelSash->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
+		if (!sidePanelSash->HasCapture() || !e.LeftIsDown()) return;
+		const int x = ScreenToClient(wxGetMousePosition()).x - gatePalette->GetPosition().x;
+		const int w = wxMax(SIDE_PANEL_MIN_WIDTH, wxMin(SIDE_PANEL_MAX_WIDTH, x));
+		if (w == appConfig().appSettings.sidePanelWidth) return;
+		appConfig().appSettings.sidePanelWidth = w;
+		ApplySidePanelWidth();
+	});
+	mainSizer->Add( sidePanelSash, wxSizerFlags(0).Expand() );
 	mainSizer->Add( rightSplitter, wxSizerFlags(1).Expand().Border(wxALL, 0) );
 
 	SetSizer( mainSizer);
+	ApplySidePanelWidth();
 		
 	threadLogic *thread = CreateThread();
 	
@@ -1129,6 +1147,10 @@ void MainFrame::ApplyTheme() {
 	if (miniMap) miniMap->Refresh();
 	if (oscopePanel) oscopePanel->RefreshCanvas();
 	if (gatePalette) gatePalette->ApplyTheme();
+	if (sidePanelSash) {
+		sidePanelSash->SetBackgroundColour(dark ? wxColour(40, 43, 50) : wxColour(218, 220, 224));
+		sidePanelSash->Refresh();
+	}
 	Refresh();
 }
 
@@ -1187,6 +1209,7 @@ void MainFrame::OnPreferences(wxCommandEvent& event) {
 void MainFrame::ApplyPreferences() {
 	applyAutosaveInterval();
 	ApplyStatusInfoVisibility();
+	gatePalette->ApplyGateSize();
 	ApplyThemeShortcutLabel();
 	ApplyThemeToggleVisibility();
 
@@ -1458,6 +1481,16 @@ void MainFrame::showCanvasIndex(int idx) {
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	noteCanvasUsed(currentCanvas);
+}
+
+void MainFrame::ApplySidePanelWidth() {
+	int& w = appConfig().appSettings.sidePanelWidth;
+	if (w <= 0) w = gatePalette->GetBestSize().x;   // first launch: its natural width
+	w = wxMax(SIDE_PANEL_MIN_WIDTH, wxMin(SIDE_PANEL_MAX_WIDTH, w));
+	gatePalette->SetMinSize(wxSize(w, -1));
+	gatePalette->SetMaxSize(wxSize(w, -1));
+	miniMap->SetMinSize(wxSize(w, miniMap->GetMinSize().y));
+	Layout();
 }
 
 void MainFrame::ApplyStatusInfoVisibility() {
@@ -1976,6 +2009,12 @@ void MainFrame::saveSettings() {
 	conf->Write("AccentColor", settings.accentColor);
 	conf->Write("WireThickness", settings.wireThickness);
 	conf->Write("ShowStatusInfo", settings.showStatusInfo);
+	conf->Write("MouseWheelAction", settings.mouseWheelAction);
+	conf->Write("TrackpadScrollAction", settings.trackpadScrollAction);
+	conf->Write("ReverseTrackpadZoom", settings.reverseTrackpadZoom);
+	conf->Write("ReverseWheelZoom", settings.reverseWheelZoom);
+	conf->Write("SidePanelWidth", settings.sidePanelWidth);
+	conf->Write("PaletteGateSize", settings.paletteGateSize);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
 
 	conf->Write("ThemeMode", settings.themeMode);

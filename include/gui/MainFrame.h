@@ -35,6 +35,9 @@ class OscopeFrame;
 #include <thread>
 #include <atomic>
 
+#define SIDE_PANEL_MIN_WIDTH 150
+#define SIDE_PANEL_MAX_WIDTH 480
+
 enum
 {
 	File_Export = 5901, // out of range of wxWidgets constants
@@ -276,6 +279,11 @@ private:
 	void UpdateStatusInfo();
 	// Four fields with the info on, one (just messages) with it off.
 	void ApplyStatusInfoVisibility();
+	// Pin the palette/minimap column to appSettings.sidePanelWidth. Pinned,
+	// its width can't drift when the window relays out.
+	void ApplySidePanelWidth();
+	// The draggable divider between the side panel and the canvas.
+	wxWindow* sidePanelSash = nullptr;
 	klsMiniMap* miniMap;
 	
 	wxCommandProcessor* commandProcessor;

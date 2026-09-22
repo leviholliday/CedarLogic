@@ -28,8 +28,12 @@ BEGIN_EVENT_TABLE(PaletteCanvas, wxScrolledWindow)
 END_EVENT_TABLE()
 
 // How many tiles fit across `width` pixels of client area, at least one.
+static int gateSizeSetting() {
+	return wxMax(32, wxMin(128, appConfig().appSettings.paletteGateSize));
+}
+
 static int columnsForWidth( int width ) {
-	int cols = width / ( IMAGESIZE + 2 );
+	int cols = width / gateSizeSetting();
 	return cols > 0 ? cols : 1;
 }
 
@@ -63,7 +67,7 @@ PaletteCanvas::PaletteCanvas( wxWindow *parent, wxWindowID id, wxString &libName
 
 	libraryName = libName.ToStdString();
 	gateSizer = NULL;
-	tileSide = IMAGESIZE;
+	tileSide = -1;   // forces the first UpdateTileLayout to size the tiles
 	
 	init = false;
 	activate = true;
@@ -94,7 +98,9 @@ void PaletteCanvas::OnPaint( wxPaintEvent &event ) {
 		// under the last row instead of being shared out between the rows (which
 		// stretches the tiles and pushes their art off centre).
 		wxBoxSizer* outer = new wxBoxSizer( wxVERTICAL );
-		outer->Add( gateSizer, wxSizerFlags(0).Expand() );
+		// Centered, not stretched: tiles are exactly the Gate size setting, so
+		// the slider scales them smoothly instead of in whole-column jumps.
+		outer->Add( gateSizer, wxSizerFlags(0).CenterHorizontal() );
 		outer->AddStretchSpacer( 1 );
 		this->SetSizer( outer );
 		// Fine scroll rate: the scroll unit is the smallest step the wheel and
@@ -104,6 +110,7 @@ void PaletteCanvas::OnPaint( wxPaintEvent &event ) {
 		this->SetScrollRate(0, 16);
 		Layout();          // the window's sizer, which now wraps the grid
 		init = true;
+		UpdateTileLayout();
 	}
 	if (activate) {
 		this->FitInside();
@@ -116,20 +123,23 @@ void PaletteCanvas::OnPaint( wxPaintEvent &event ) {
 // between its columns, and each tile's height has to follow that width or the
 // cells stop being square and the art letterboxes inside them.
 void PaletteCanvas::OnSize( wxSizeEvent &event ) {
-	if ( gateSizer != NULL && !gates.empty() ) {
-		const int width = GetClientSize().x;
-		const int cols = columnsForWidth( width );
-		const int side = wxMax( IMAGESIZE, width / cols );
-		if ( cols != gateSizer->GetCols() || side != tileSide ) {
-			tileSide = side;
-			gateSizer->SetCols( cols );
-			for ( unsigned int i = 0; i < gates.size(); i++ )
-				gates[i]->SetMinSize( wxSize( side, side ) );
-			Layout();
-			FitInside();
-		}
-	}
+	UpdateTileLayout();
 	event.Skip();
+}
+
+void PaletteCanvas::UpdateTileLayout() {
+	if ( gateSizer == NULL || gates.empty() ) return;
+	const int width = GetClientSize().x;
+	const int cols = columnsForWidth( width );
+	const int side = gateSizeSetting();
+	if ( cols != gateSizer->GetCols() || side != tileSide ) {
+		tileSide = side;
+		gateSizer->SetCols( cols );
+		for ( unsigned int i = 0; i < gates.size(); i++ )
+			gates[i]->SetMinSize( wxSize( side, side ) );
+		Layout();
+		FitInside();
+	}
 }
 
 void PaletteCanvas::Activate() {

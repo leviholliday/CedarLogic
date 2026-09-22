@@ -34,6 +34,8 @@ public:
 	// order) -- for the Shift+1..9 shortcut in MainFrame. No-op if idx is out
 	// of range (fewer than idx+1 sections in the library).
 	void SelectSectionByIndex(unsigned int idx);
+	// Apply a new paletteGateSize to every section.
+	void ApplyGateSize();
 
 private:
 	wxBoxSizer* paletteSizer;

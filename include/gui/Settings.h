@@ -65,6 +65,22 @@ struct ApplicationSettings {
 	int accentColor = 0;     // index into RenderStyle::accent()'s choices
 	int wireThickness = 1;   // 0 = thin, 1 = normal, 2 = thick (screen only)
 	bool showStatusInfo = true;   // zoom / position / counts in the status bar
+	// What a plain scroll does on the canvas, per device (0 = zoom, 1 = move
+	// around). Only macOS can tell a trackpad from a wheel; elsewhere every
+	// scroll uses the mouse setting. Cmd/Ctrl+scroll always zooms and
+	// Shift+scroll always pans sideways.
+	int mouseWheelAction = 0;
+	int trackpadScrollAction = 1;
+	// Flip which way scrolling zooms, per device. The mouse one is on by
+	// default: tools like Scroll Reverser change the direction the app sees.
+	bool reverseWheelZoom = true;
+	bool reverseTrackpadZoom = false;
+	// Width of the gate palette / minimap column, in pixels. 0 = not chosen
+	// yet; MainFrame measures the natural width on first launch.
+	int sidePanelWidth = 0;
+	// Target edge of a gate tile in the palette, in pixels. Tiles stretch a
+	// little past it to fill the panel's width exactly.
+	int paletteGateSize = 48;
 	bool rightClickRotate;
 
 	// Dark mode. themeMode picks the launch behavior (see ThemeMode); lastDarkMode

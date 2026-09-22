@@ -15,6 +15,9 @@
 #include "paramDialog.h"
 #include "render/RendererHealth.h"
 #include "wx/msgdlg.h"
+#ifdef __APPLE__
+#include "MacScrollDevice.h"
+#endif
 #include <cstdio>
 
 // Included to use the min() and max() templates:
@@ -471,6 +474,36 @@ void klsGLCanvas::wxOnMouseEvent(wxMouseEvent& event) {
 
 
 void klsGLCanvas::wxOnMouseWheel(wxMouseEvent& event) {
+	const auto& settings = appConfig().appSettings;
+#ifdef __APPLE__
+	const bool trackpad = MacCurrentScrollIsPrecise();
+#else
+	const bool trackpad = false;   // can't tell; everything uses the mouse setting
+#endif
+#ifdef __WXOSX__
+	const bool zoomModifier = event.CmdDown();   // the physical Cmd key
+#else
+	const bool zoomModifier = event.ControlDown();   // the physical Ctrl key
+#endif
+	const bool plainVertical = !zoomModifier && !event.ShiftDown() &&
+	                           event.GetWheelAxis() == wxMOUSE_WHEEL_VERTICAL;
+	const bool zooms = trackpad ? settings.trackpadScrollAction == 0
+	                            : settings.mouseWheelAction == 0;
+	// Which way is "in": physical up/away. macOS "natural scrolling" flips the
+	// reported direction, so undo that, then apply the user's own flip.
+	const bool reverse = trackpad ? settings.reverseTrackpadZoom : settings.reverseWheelZoom;
+	const double inSign = (event.IsWheelInverted() ? -1.0 : 1.0) * (reverse ? -1.0 : 1.0);
+
+	// A trackpad sends a stream of small deltas; zoom by them continuously
+	// rather than in whole wheel-notch steps, which would lurch.
+	if (trackpad && zooms && plainVertical) {
+		const double notches = (double)event.GetWheelRotation() / event.GetWheelDelta();
+		zoomToMouseByFactor(pow(ZOOM_STEP, 0.35 * notches * inSign));
+		updateMiniMap();
+		event.Skip();
+		return;
+	}
+
 	// Accumulate mouse wheel events until they amount
 	// to one "line", and then take them line at a time:
 	wheelRotation += event.GetWheelRotation();
@@ -480,21 +513,13 @@ void klsGLCanvas::wxOnMouseWheel(wxMouseEvent& event) {
 	if (rotationLines != 0) {
 		GLdouble panAmount = PAN_STEP * getZoom() * rotationLines;
 
-		// The professional-tool convention (Figma, Sketch, and friends): a
-		// plain scroll -- trackpad two-finger swipe OR an ordinary mouse wheel,
-		// wx hands us both through the same event -- PANS. Zooming is a
-		// deliberate, separate gesture: a pinch (see wxOnMagnify, trackpad
-		// only) or the primary-modifier+scroll fallback every mouse user has.
-		// This used to default a plain vertical swipe to ZOOM, which is why
-		// trackpad navigation felt wrong: every other app on the system pans
-		// on that gesture.
-#ifdef __WXOSX__
-		const bool zoomModifier = event.CmdDown();   // the physical Cmd key
-#else
-		const bool zoomModifier = event.ControlDown();   // the physical Ctrl key
-#endif
+		// Per-device choice (see Preferences > Canvas): by default a mouse
+		// wheel zooms (a mouse has no pinch) and a trackpad moves around like
+		// every other Mac app. Cmd/Ctrl+scroll always zooms.
 		if (zoomModifier) {
 			OnMouseWheel(rotationLines / abs(rotationLines));
+		} else if (zooms && plainVertical) {
+			OnMouseWheel((rotationLines > 0 ? 1 : -1) * (inSign > 0 ? 1 : -1));
 		} else if (event.GetWheelAxis() == wxMOUSE_WHEEL_HORIZONTAL || event.ShiftDown()) {
 			// Horizontal swipe, or Shift+scroll for a mouse with no horizontal
 			// wheel -- both pan horizontally.

@@ -19,6 +19,7 @@
 #include <wx/choice.h>
 #include <wx/spinctrl.h>
 #include <wx/textctrl.h>
+#include <wx/slider.h>
 #include <wx/settings.h>
 #include <memory>
 
@@ -194,6 +195,12 @@ public:
 		wireRadius->Bind(wxEVT_SPINCTRLDOUBLE, [this](wxSpinDoubleEvent&) { changed(); });
 		addRow("Wire dot size:", wireRadius, "Radius of the dots on wires, in grid units.");
 
+		gateSize = new wxSlider(this, wxID_ANY, s.paletteGateSize, 32, 110,
+			wxDefaultPosition, wxSize(220, -1));
+		gateSize->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) { changed(); });
+		addRow("Gate size:", gateSize,
+			"How big the gates in the side panel are. Drag the divider next to the panel to change its width.");
+
 		GetSizer()->SetSizeHints(this);
 	}
 
@@ -209,6 +216,7 @@ protected:
 		s.wireThickness = wireThickness->GetSelection();
 		s.wireConnVisible = wireConn->GetValue();
 		s.wireConnRadius = (float)wireRadius->GetValue();
+		s.paletteGateSize = gateSize->GetValue();
 		pushLive();
 	}
 
@@ -222,6 +230,7 @@ private:
 	wxChoice* wireThickness;
 	wxCheckBox* wireConn;
 	wxSpinCtrlDouble* wireRadius;
+	wxSlider* gateSize;
 };
 
 // ---- Canvas ----------------------------------------------------------------
@@ -230,6 +239,19 @@ class CanvasPanel : public PrefsPanel {
 public:
 	explicit CanvasPanel(wxWindow* parent) : PrefsPanel(parent) {
 		auto& s = appConfig().appSettings;
+		mouseAction = actionChoice(s.mouseWheelAction);
+		addRow("Mouse wheel:", mouseAction, "");
+		reverseWheel = addCheck("", "Reverse zoom direction", s.reverseWheelZoom,
+			"Flip this if rolling the wheel up zooms out. Apps like Scroll Reverser change the direction.");
+
+#ifdef __APPLE__
+		trackpadAction = actionChoice(s.trackpadScrollAction);
+		addRow("Trackpad scroll:", trackpadAction, "Pinching always zooms.");
+		reverseTrackpad = addCheck("", "Reverse zoom direction", s.reverseTrackpadZoom,
+			"Only matters when trackpad scrolling is set to zoom.");
+#endif
+		addHelp("Cmd+scroll always zooms. Shift+scroll always moves sideways.");
+
 		rightClickRotate = addCheck("Right-click:", "Rotates the gate", s.rightClickRotate,
 			"Off: right-clicking a gate opens a menu with Rotate and Delete instead.");
 		GetSizer()->SetSizeHints(this);
@@ -238,11 +260,31 @@ public:
 protected:
 	void apply() override {
 		appConfig().appSettings.rightClickRotate = rightClickRotate->GetValue();
+		auto& s = appConfig().appSettings;
+		s.mouseWheelAction = mouseAction->GetSelection();
+		s.reverseWheelZoom = reverseWheel->GetValue();
+#ifdef __APPLE__
+		s.trackpadScrollAction = trackpadAction->GetSelection();
+		s.reverseTrackpadZoom = reverseTrackpad->GetValue();
+#endif
 		pushLive();
 	}
 
 private:
 	wxCheckBox* rightClickRotate;
+	wxChoice* actionChoice(int value) {
+		wxChoice* c = new wxChoice(this, wxID_ANY);
+		c->Append("Zooms");   // order matches the settings: 0 = zoom, 1 = move
+		c->Append("Moves around");
+		c->SetSelection(value);
+		c->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		return c;
+	}
+
+	wxChoice* mouseAction;
+	wxCheckBox* reverseWheel;
+	wxChoice* trackpadAction = nullptr;
+	wxCheckBox* reverseTrackpad = nullptr;
 };
 
 // ---- Shortcuts -------------------------------------------------------------

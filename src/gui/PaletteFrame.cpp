@@ -72,6 +72,11 @@ void PaletteFrame::SelectSectionByIndex(unsigned int idx) {
 	currentPalette->Activate();
 }
 
+void PaletteFrame::ApplyGateSize() {
+	for (map<wxString, PaletteCanvas*>::iterator it = pcanvases.begin(); it != pcanvases.end(); ++it)
+		it->second->UpdateTileLayout();
+}
+
 void PaletteFrame::ApplyTheme() {
 	for (map<wxString, PaletteCanvas*>::iterator it = pcanvases.begin(); it != pcanvases.end(); ++it)
 		it->second->ApplyTheme();
