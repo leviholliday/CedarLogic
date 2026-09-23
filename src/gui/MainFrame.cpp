@@ -2057,8 +2057,12 @@ wxString MainFrame::GetDocumentSubtitle() {
 void MainFrame::ApplyToolbarStyle() {
 	const int style = appConfig().appSettings.toolbarStyle;
 	const bool classic = style == cl::tb::Classic;
-	if (toolBar->IsShown() != classic) toolBar->Show(classic);
-	if (modernBar->IsShown() == classic) modernBar->Show(!classic);
+	// Focus mode keeps both bars away. Sim view restyles the bar through here,
+	// and showing it unconditionally brought it back mid-focus mode.
+	wxMenuBar* mb = GetMenuBar();
+	const bool focus = mb != nullptr && mb->IsChecked(View_FocusMode);
+	if (toolBar->IsShown() != (classic && !focus)) toolBar->Show(classic && !focus);
+	if (modernBar->IsShown() != (!classic && !focus)) modernBar->Show(!classic && !focus);
 	if (!classic) modernBar->Reconfigure();
 	// Whoever ends up in the top row sets the title bar up for itself -- in
 	// focus mode that is the tab strip, not either toolbar.
