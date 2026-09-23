@@ -33,11 +33,12 @@ GUICircuit::~GUICircuit() {
 }
 
 void GUICircuit::reInitializeLogicCircuit() {
-	// do not wait to send messages to the core for reinit
-	bool iswaiting = waitToSendMessage;
+	// REINITIALIZE must bypass a step that was in flight in the old circuit.
+	// MainFrame first waits for that core batch to finish and clears both bridge
+	// queues; this local queue is the third place an old edit can be waiting.
 	waitToSendMessage = false;
 	sendMessageToCore(klsMessage::Message(klsMessage::MT_REINITIALIZE));
-	waitToSendMessage = iswaiting;
+	messageQueue.clear();
 	// Indexes first, then the owners. buslineToWire only borrows, and leaving it
 	// populated past the wires it points at is exactly the SIGSEGV in issue #100:
 	// syncWireStates() walked it on the next step after a file open and wrote
@@ -54,8 +55,12 @@ void GUICircuit::reInitializeLogicCircuit() {
 	gateListVersion++;
 	wireList.clear();
 	nextGateID = nextWireID = 0;
-	waitToSendMessage = false;
+	waitToSendMessage = true;
 	simulate = true;
+	stepTimingExempt = false;
+	catchingUp = false;
+	lateSteps = 0;
+	lastLogicTime = lastTime = lastTimeMod = lastNumSteps = 0;
 }
 
 guiGate* GUICircuit::createGate(string gateName, long id, bool noOscope) {
@@ -238,11 +243,18 @@ void GUICircuit::Render() {
 }
 
 void GUICircuit::syncWireStates() {
-	wxMutexLocker lock(simBridge().wireStateMutex);
-	for (auto& entry : simBridge().wireStateBuffer) {
-		if (buslineToWire.find(entry.first) != buslineToWire.end()) {
-			buslineToWire[entry.first]->setSubState(entry.first, entry.second);
-		}
+	// These are updates, not durable state. Leaving them in the shared map let
+	// a deleted wire ID apply its old value to a later wire that reused the ID.
+	// Taking the batch also keeps the cross-thread mutex out of rendering code.
+	std::unordered_map<IDType, StateType> updates;
+	{
+		wxMutexLocker lock(simBridge().wireStateMutex);
+		updates.swap(simBridge().wireStateBuffer);
+	}
+	for (const auto& entry : updates) {
+		auto wire = buslineToWire.find(entry.first);
+		if (wire != buslineToWire.end() && wire->second != nullptr)
+			wire->second->setSubState(entry.first, entry.second);
 	}
 }
 
@@ -266,9 +278,11 @@ void GUICircuit::parseMessage(klsMessage::Message message) {
 			// Keep a 3ms buffer. A step that was making up for a stall is exempt:
 			// it was handed a pile of work on purpose and being slow is the point.
 			lastLogicTime = logicTime;
-			const bool late = (logicTime > lastTime + 3) && !catchingUp;
+			const bool late = (logicTime > lastTime + 3) &&
+			                  !catchingUp && !stepTimingExempt;
 			lateSteps = late ? lateSteps + 1 : 0;
 			catchingUp = false;
+			stepTimingExempt = false;
 			// Only call it an overload once the core has been late repeatedly.
 			// A single slow step is noise, and the old check fired on the first
 			// one, which is why waking a sleeping laptop raised an alert.

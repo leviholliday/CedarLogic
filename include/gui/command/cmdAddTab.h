@@ -10,6 +10,7 @@ class cmdAddTab : public klsCommand {
 public:
 	cmdAddTab(GUICircuit* gCircuit, wxBookCtrlBase* book,
 		std::vector<GUICanvas *> *canvases);
+	~cmdAddTab() override;
 
 	bool Do();
 
@@ -28,4 +29,5 @@ private:
 	// all of them pointing at freed memory. cmdDeleteTab already works this
 	// way: take the page out of the notebook and hide it, keep the object.
 	GUICanvas* addedCanvas = nullptr;
+	bool attached = false;
 };

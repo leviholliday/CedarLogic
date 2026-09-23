@@ -116,6 +116,10 @@ public:
 	
 	void setSimulate(bool state) { simulate = state; };
 	bool getSimulate() { return simulate; };
+	// Manual steps and deterministic settling have no wall-clock budget. Mark
+	// their next DONESTEP so overload detection does not compare it with timing
+	// data from an unrelated automatic step.
+	void exemptNextStepFromTiming() { stepTimingExempt = true; }
 	
 	void printState();
 	
@@ -127,9 +131,9 @@ public:
 	
 	bool panic;
 	bool pausing;
-	int lastTimeMod;
-	int lastNumSteps;
-	int lastTime;
+	int lastTimeMod = 0;
+	int lastNumSteps = 0;
+	int lastTime = 0;
 	// The step now in flight is making up for a stall (the app was in the
 	// background, or the machine slept), so it is expected to be slow and is not
 	// evidence that the circuit is too heavy to simulate.
@@ -169,6 +173,7 @@ private:
 	bool drawingWire;
 	bool simulate;			// Simulation state
 	bool waitToSendMessage; // If false, then message is sent immediately
+	bool stepTimingExempt = false;
 		
     long           m_Key;
     unsigned long  m_StartTime;

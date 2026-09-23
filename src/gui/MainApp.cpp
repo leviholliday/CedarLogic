@@ -1035,6 +1035,11 @@ void MainApp::loadSettings() {
 	conf->Read("RefreshRate", &appConfig().appSettings.refreshRate, 16); // ms (~60 FPS)
 	conf->Read("AutosaveSeconds", &appConfig().appSettings.autosaveSeconds, 180);
 	conf->Read("TimeStep", &appConfig().appSettings.timePerStep, 25); // ms
+	// The toolbar exposes 1..500ms. Old or hand-edited config files can contain
+	// zero/negative values; zero reaches elapsed / timeStepMod in the simulation
+	// pump and is undefined behaviour.
+	if (appConfig().appSettings.timePerStep < 1) appConfig().appSettings.timePerStep = 1;
+	if (appConfig().appSettings.timePerStep > 500) appConfig().appSettings.timePerStep = 500;
 	appConfig().timeStepMod = appConfig().appSettings.timePerStep;
 	conf->Read("WireConnRadius", &appConfig().appSettings.wireConnRadius, 0.18f);
 	conf->Read("WireConnVisible", &appConfig().appSettings.wireConnVisible, true);

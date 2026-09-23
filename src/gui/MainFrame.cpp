@@ -878,21 +878,25 @@ void MainFrame::OnNew(wxCommandEvent& WXUNUSED(event)) {
 void MainFrame::clearToNewCircuit() {
 	pauseTimers();
 
-	// Clear the message queues under the lock -- the logic thread drains
-	// dGUItoLOGIC on its own (waking on msgForLogic) and pauseTimers() only stops
-	// the GUI timers, not that thread, so an unlocked clear() races it.
+	// Wait for any batch the logic thread already swapped out of dGUItoLOGIC,
+	// then replace the GUI and core state while that thread is excluded. Merely
+	// clearing the deques is insufficient: an old step can be running locally
+	// and otherwise publish DONESTEP/wire states after IDs are reused.
 	{
-		wxMutexLocker lock(simBridge().mexMessages);
-		simBridge().dGUItoLOGIC.clear();
-		simBridge().dLOGICtoGUI.clear();
-	}
+		wxCriticalSectionLocker quiesce(simBridge().m_critsect);
+		{
+			wxMutexLocker lock(simBridge().mexMessages);
+			simBridge().dGUItoLOGIC.clear();
+			simBridge().dLOGICtoGUI.clear();
+		}
 
-	for (unsigned int i = 0; i < canvases.size(); i++) canvases[i]->clearCircuit();
-	gCircuit->reInitializeLogicCircuit();
-	commandProcessor->ClearCommands();
-	commandProcessor->SetMenuStrings();
-	//JV - Added so that new starts with one tab
-	dropExtraTabs();
+		for (GUICanvas* canvas : canvases) canvas->clearCircuit();
+		gCircuit->reInitializeLogicCircuit();
+		commandProcessor->ClearCommands();
+		commandProcessor->SetMenuStrings();
+		// New starts with one tab.
+		dropExtraTabs();
+	}
 
 	// DeletePage destroys those canvas windows, and three things were still
 	// pointing at them: this frame's current canvas, the circuit's idea of the
@@ -1136,19 +1140,33 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	if (!asCopy && !renderMode().headlessRender) documentLock.acquire(fileName);
 	this->SetTitle(VERSION_TITLE() + " - " +
 	               (asCopy ? wxFileName(path).GetFullName() + " (copy)" : path));
-	// Clear the queues under the lock -- the logic thread drains dGUItoLOGIC
-	// concurrently, so an unlocked flush races it.
+
+	// Preserve the caller's exact timer state. Normal opens arrive with both
+	// timers running, recovery happens before they start, and headless rendering
+	// deliberately stops them; load must not silently change any of those modes.
+	const bool restartSimTimer = simTimer && simTimer->IsRunning();
+	const bool restartIdleTimer = idleTimer && idleTimer->IsRunning();
+	simBridge().appSystemTime.Pause();
+	stopTimers();
+
+	// Exclude a batch already being processed by the logic thread before
+	// throwing away the old GUI/core state. Once REINITIALIZE is queued, the
+	// lock can be released: all subsequently loaded create/connect messages are
+	// ordered behind it, and no old reply remains to cross the boundary.
 	{
-		wxMutexLocker lock(simBridge().mexMessages);
-		simBridge().dGUItoLOGIC.clear();
-		simBridge().dLOGICtoGUI.clear();
+		wxCriticalSectionLocker quiesce(simBridge().m_critsect);
+		{
+			wxMutexLocker lock(simBridge().mexMessages);
+			simBridge().dGUItoLOGIC.clear();
+			simBridge().dLOGICtoGUI.clear();
+		}
+		for (GUICanvas* canvas : canvases) canvas->clearCircuit();
+		gCircuit->reInitializeLogicCircuit();
+		commandProcessor->ClearCommands();
+		commandProcessor->SetMenuStrings();
+		// Delete all but the first tab before the parsed pages are built.
+		dropExtraTabs();
 	}
-	for (unsigned int i = 0; i < canvases.size(); i++) canvases[i]->clearCircuit();
-	gCircuit->reInitializeLogicCircuit();
-	commandProcessor->ClearCommands();
-	commandProcessor->SetMenuStrings();
-	//JV - Delete all but the first tab
-	dropExtraTabs();
 	
     CircuitParse cirp(path.ToStdString(), canvases);
 	canvases = cirp.applyLoaded(loaded);
@@ -1168,6 +1186,12 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	mainSizer->Show(rightSplitter);
 	currentCanvas->SetFocus();
 	RenumberTabs();   // the loaded pages are new tabs
+
+	if (restartSimTimer) {
+		simBridge().appSystemTime.Start(0);
+		simTimer->Start(TIMER_POLL_MS);
+	}
+	if (restartIdleTimer) idleTimer->Start(TIMER_POLL_MS);
 
 	removeTempFile();
 
@@ -1517,9 +1541,13 @@ bool MainFrame::settleSimulation(int maxSteps) {
 	// that is also what applies the step's wire states, so it marks the point
 	// where the step is fully visible here.
 	auto stepOnce = [&]() {
-		gCircuit->setSimulate(false);
+		gCircuit->exemptNextStepFromTiming();
 		gCircuit->sendMessageToCore(klsMessage::Message(
 			klsMessage::MT_STEPSIM, new klsMessage::Message_STEPSIM(1)));
+		// Queue the step while simulate is still true. Otherwise the normal
+		// in-flight edit gate holds the step in messageQueue waiting for the very
+		// DONESTEP this step was supposed to produce.
+		gCircuit->setSimulate(false);
 		const wxLongLong deadline =
 			wxGetLocalTimeMillis() + SETTLE_STEP_TIMEOUT_MS;
 		while (!gCircuit->getSimulate() && wxGetLocalTimeMillis() < deadline) {
@@ -2060,13 +2088,22 @@ void MainFrame::noteCanvasUsed(GUICanvas* canvas) {
 // tracks that order for the Ctrl+Tab switcher, so reuse it: take the most
 // recently used tab that is still open, and fall back to the neighbour if
 // nothing in the history survives (a fresh session, say).
-void MainFrame::selectTabAfterClosing(GUICanvas* closed) {
+void MainFrame::selectTabAfterClosing(GUICanvas* closed, int closedIndex) {
 	canvasMRU.erase(std::remove(canvasMRU.begin(), canvasMRU.end(), closed), canvasMRU.end());
 	for (GUICanvas* c : canvasMRU) {
 		if (std::find(canvases.begin(), canvases.end(), c) == canvases.end()) continue;
 		if (PaneIndexOf(c) < 0) continue;
 		SelectCanvas(c);
 		return;
+	}
+	// A freshly loaded multi-page circuit may have no MRU entry beyond its
+	// first page. If that page is closed, leaving currentCanvas on the parked
+	// window makes the minimap, shortcuts and the next simulation tick operate
+	// on a hidden tab. Choose the tab that shifted into its slot, or the previous
+	// one when the closed tab was last.
+	if (!canvases.empty()) {
+		const int neighbor = std::max(0, std::min(closedIndex, (int)canvases.size() - 1));
+		SelectCanvas(canvases[neighbor]);
 	}
 }
 
@@ -2097,7 +2134,7 @@ void MainFrame::finishCloseTab(GUICanvas* canvas) {
 	if (canvasID < 0) return;   // already gone
 	gCircuit->GetCommandProcessor()->Submit(
 		(wxCommand*)(new cmdDeleteTab(gCircuit, canvas, canvasBook, &canvases, canvasID)));
-	selectTabAfterClosing(canvas);
+	selectTabAfterClosing(canvas, canvasID);
 }
 
 void MainFrame::flushPendingClose() {
@@ -2421,6 +2458,20 @@ void MainFrame::DetachCanvasPage(GUICanvas* canvas) {
 	// with it while the undo history still holds it.
 	if (canvasParking) canvas->Reparent(canvasParking);
 	collapsePaneIfEmpty(pane);
+}
+
+void MainFrame::DiscardDetachedCanvas(GUICanvas* canvas) {
+	if (canvas == nullptr) return;
+	// Command destructors must never be able to destroy a live tab. A canvas is
+	// disposable only after both sources of document ownership have released
+	// it: it is absent from the canonical list and from both pane books.
+	if (std::find(canvases.begin(), canvases.end(), canvas) != canvases.end() ||
+	    PaneIndexOf(canvas) >= 0) {
+		wxFAIL_MSG("attempted to discard an attached canvas");
+		return;
+	}
+	forgetCanvas(canvas);
+	canvas->Destroy();
 }
 
 // Put it back, in its place in the canvas order. It always returns to the
@@ -3109,6 +3160,7 @@ void MainFrame::OnStep(wxCommandEvent& event) {
 	if (!(currentCanvas->getCircuit()->getSimulate())) {
 		return;
 	}
+	gCircuit->exemptNextStepFromTiming();
 	gCircuit->sendMessageToCore(klsMessage::Message(klsMessage::MT_STEPSIM, new klsMessage::Message_STEPSIM(1)));
 	currentCanvas->getCircuit()->setSimulate(false);
 }
@@ -3745,4 +3797,3 @@ void MainFrame::OnKeyboardShortcuts(wxCommandEvent& WXUNUSED(event)) {
 	// was here grew taller than the screen and ran under its own OK button.
 	ShowShortcutsSheet(this);
 }
-

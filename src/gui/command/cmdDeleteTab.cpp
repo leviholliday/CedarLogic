@@ -47,6 +47,16 @@ cmdDeleteTab::~cmdDeleteTab() {
 	while (!(cmdList.empty())) {
 		cmdList.pop();
 	}
+	// An applied Delete Tab leaves the canvas parked so Undo can restore the
+	// same object. If this command is now leaving history, Undo is no longer
+	// possible and the command is the final owner of that hidden window.
+	if (deleted && gCanvas != nullptr) {
+		if (MainFrame* frame = wxGetApp().mainframe)
+			frame->DiscardDetachedCanvas(gCanvas);
+		else
+			gCanvas->Destroy();
+		gCanvas = nullptr;
+	}
 }
 
 bool cmdDeleteTab::Do() {
@@ -61,6 +71,7 @@ bool cmdDeleteTab::Do() {
 	renumberTabs();
 	//TODO fix canvases not refreshing
 	gCanvas->Hide();
+	deleted = true;
 	return true;
 }
 bool cmdDeleteTab::Undo() {
@@ -72,6 +83,7 @@ bool cmdDeleteTab::Undo() {
 		cmdList.top()->Undo();
 		cmdList.pop();
 	}
+	deleted = false;
 	return true;
 }
 

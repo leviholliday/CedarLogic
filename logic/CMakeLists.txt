@@ -95,6 +95,7 @@ if(BUILD_TESTING)
 
 	if(ENABLE_SANITIZERS AND NOT MSVC)
 		target_compile_options(XMLParser PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+		target_compile_options(UpdateInfo PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
 		target_compile_options(test_logic PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
 		target_link_options(test_logic PRIVATE -fsanitize=address,undefined)
 	endif()

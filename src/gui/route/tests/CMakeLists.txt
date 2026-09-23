@@ -25,6 +25,12 @@ if(BUILD_TESTING)
 		"${PROJECT_SOURCE_DIR}/src/gui/route/TrunkRouter.cpp")
 	target_include_directories(test_route PRIVATE "${PROJECT_SOURCE_DIR}/include/gui")
 	target_link_libraries(test_route PRIVATE doctest::doctest)
+	if(ENABLE_SANITIZERS AND NOT MSVC)
+		target_compile_options(test_route PRIVATE
+			-fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
+		target_link_options(test_route PRIVATE
+			-fsanitize=address,undefined -fno-sanitize=vptr)
+	endif()
 
 	enable_testing()
 	add_test(NAME route_tests COMMAND test_route)

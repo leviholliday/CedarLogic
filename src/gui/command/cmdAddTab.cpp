@@ -17,6 +17,20 @@ cmdAddTab::cmdAddTab(GUICircuit* gCircuit, wxBookCtrlBase* book,
 	this->canvases = canvases;
 }
 
+cmdAddTab::~cmdAddTab() {
+	// If Add Tab is currently undone, its canvas is hidden in MainFrame's
+	// parking panel. Once this command is discarded there is no route by which
+	// redo can reattach it, so keeping the window leaks the canvas (including
+	// its GL state and timers) for the rest of the session.
+	if (!attached && addedCanvas != nullptr) {
+		if (MainFrame* frame = wxGetApp().mainframe)
+			frame->DiscardDetachedCanvas(addedCanvas);
+		else
+			addedCanvas->Destroy();
+		addedCanvas = nullptr;
+	}
+}
+
 bool cmdAddTab::Do() {
 	MainFrame* frame = wxGetApp().mainframe;
 	// Reuse the canvas from the first Do, so a redo restores the very object
@@ -33,6 +47,7 @@ bool cmdAddTab::Do() {
 		addedCanvas->Show();
 		canvasBook->AddPage(addedCanvas, "Page", false);
 	}
+	attached = true;
 	return true;
 }
 
@@ -44,6 +59,7 @@ bool cmdAddTab::Undo() {
 		wxGetApp().mainframe->DetachCanvasPage(addedCanvas);
 		wxGetApp().mainframe->RenumberTabs();
 	}
+	attached = false;
 	return true;
 }
 

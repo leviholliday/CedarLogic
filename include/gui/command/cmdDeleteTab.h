@@ -28,5 +28,9 @@ protected:
 	wxBookCtrlBase* canvasBook;
 	std::vector< GUICanvas* >* canvases;
 	unsigned long canvasID;
+	// True while this command's canvas is detached and therefore owned by the
+	// command rather than by the visible document. Its destructor releases the
+	// hidden window if the command leaves history in this state.
+	bool deleted = false;
 
 };

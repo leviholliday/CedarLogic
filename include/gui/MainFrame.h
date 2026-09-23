@@ -315,7 +315,7 @@ private:
 	vector< GUICanvas* > canvasMRU;          // most recently used first
 	// After closing a tab, go back to the one used before it rather than to
 	// whichever tab happens to sit next door.
-	void selectTabAfterClosing(GUICanvas* closed);
+	void selectTabAfterClosing(GUICanvas* closed, int closedIndex);
 
 public:
 	// Tab titles follow the canvas order, so anything that adds or removes one
@@ -347,6 +347,11 @@ public:
 	// lives in any particular pane (undo can run long after it moved).
 	void DetachCanvasPage(GUICanvas* canvas);
 	void AttachCanvasPage(GUICanvas* canvas, int canvasIndex);
+	// A tab command owns a detached canvas while that command remains in the
+	// undo history. When wxCommandProcessor discards the command (redo branch
+	// replaced, history cleared, or document shutdown), release the hidden
+	// window and remove every borrowed pointer the frame still keeps for it.
+	void DiscardDetachedCanvas(GUICanvas* canvas);
 	void NewTabInPane(int pane);
 	int TabNumber(GUICanvas* canvas);
 	// How far the first tab has to start from the left edge. With the toolbar
