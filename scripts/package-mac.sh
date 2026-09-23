@@ -37,7 +37,26 @@ if osascript -e "tell application \"Finder\" to make alias file to POSIX file \"
 else
   ln -s /Applications "$STAGING/Applications"
 fi
-hdiutil create -volname "CedarLogic $VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
+# The window dressing upstream designed for CPack: a background with an arrow
+# and "Drag CedarLogic into your Applications folder", and a script that places
+# the two icons on it. Finder only records that layout on a writable image, so
+# build read-write, lay it out, then compress.
+mkdir "$STAGING/.background"
+cp res/macos/dmg-background.tiff "$STAGING/.background/background.tiff"
+
+VOLNAME="CedarLogic $VERSION"
+if [ -d "/Volumes/$VOLNAME" ]; then
+  echo "Eject \"$VOLNAME\" first, so the new image can mount under that name." >&2
+  exit 1
+fi
+RW="$STAGING-rw.dmg"
+hdiutil create -volname "$VOLNAME" -srcfolder "$STAGING" -ov -format UDRW "$RW" >/dev/null
+hdiutil attach "$RW" -readwrite -noautoopen >/dev/null
+osascript res/macos/dmg-setup.applescript "$VOLNAME"
+sync
+hdiutil detach "/Volumes/$VOLNAME" -quiet
+hdiutil convert "$RW" -format UDZO -ov -o "$DMG" >/dev/null
+rm -f "$RW"
 
 echo "Made $DMG"
 shasum -a 256 "$DMG"
