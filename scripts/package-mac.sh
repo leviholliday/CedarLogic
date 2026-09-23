@@ -23,10 +23,18 @@ codesign --verify --deep --strict "$APP"
 STAGING=$(mktemp -d)
 trap 'rm -rf "$STAGING"' EXIT
 cp -a "$APP" "$STAGING/"
-# A Finder alias rather than a plain symlink: recent macOS draws a symlink to
-# /Applications inside a disk image as a blank square, while an alias gets the
-# real folder icon. Fall back to the symlink if Finder can't be scripted.
-if ! osascript -e "tell application \"Finder\" to make alias file to POSIX file \"/Applications\" at POSIX file \"$STAGING\"" >/dev/null 2>&1; then
+# A Finder alias rather than a plain symlink, with the Applications folder icon
+# stamped on it as a custom icon. Recent macOS draws both a symlink and a bare
+# alias to /Applications inside a disk image as a blank square; a custom icon
+# lives in the file itself, so Finder has nothing to look up.
+APPS_ICON=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/ApplicationsFolderIcon.icns
+if osascript -e "tell application \"Finder\" to make alias file to POSIX file \"/Applications\" at POSIX file \"$STAGING\"" >/dev/null 2>&1; then
+  osascript -l JavaScript -e "
+    ObjC.import('AppKit');
+    const img = $.NSImage.alloc.initWithContentsOfFile('$APPS_ICON');
+    $.NSWorkspace.sharedWorkspace.setIconForFileOptions(img, '$STAGING/Applications', 0);
+  " >/dev/null
+else
   ln -s /Applications "$STAGING/Applications"
 fi
 hdiutil create -volname "CedarLogic $VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
