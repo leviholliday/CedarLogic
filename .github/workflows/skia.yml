@@ -14,6 +14,14 @@ on:
   # the same run and can't be missing or expired. The build itself is skipped on
   # a cache hit -- only the dist upload always runs.
   workflow_call:
+    inputs:
+      # JSON list of the matrix entries to build. A caller that only ships one
+      # platform (windows.yml) passes just that one, so it does not also pay for
+      # a macOS Skia build it will never use. Empty means all three.
+      platforms:
+        type: string
+        required: false
+        default: ''
   push:
     paths:
       - '.github/workflows/skia.yml'
@@ -39,10 +47,9 @@ jobs:
       # validator; macOS the least certain).
       fail-fast: false
       matrix:
-        include:
-          - { name: linux,   os: ubuntu-22.04, args: linux }
-          - { name: windows, os: windows-2022, args: windows }
-          - { name: macos,   os: macos-14,     args: macos }
+        # inputs.platforms is only set when called from another workflow; a push
+        # or manual run builds everything.
+        include: ${{ fromJSON(inputs.platforms || '[{"name":"linux","os":"ubuntu-22.04","args":"linux"},{"name":"windows","os":"windows-2022","args":"windows"},{"name":"macos","os":"macos-14","args":"macos"}]') }}
     steps:
       - name: Checkout CedarLogic (GN args only)
         uses: actions/checkout@v7

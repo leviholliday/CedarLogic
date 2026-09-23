@@ -75,6 +75,7 @@
 #include "NativeIcons.h"
 #endif
 #ifdef _WIN32
+#include "WinAppearance.h"
 #include "WinSparkleUpdater.h"
 #endif
 #include "UpdateInfo.h"   // cl::update::checksDisabled, for managed deployments
@@ -1371,6 +1372,10 @@ void MainFrame::ApplyTheme() {
 	// always an explicit light/dark, never "follow system", because a manual
 	// toggle here is the person overriding the OS setting for this session.
 	MacSetApplicationAppearance(dark ? 2 : 1);
+#elif defined(_WIN32)
+	// Windows draws the caption itself; without this it stays white over a
+	// dark app. Dialogs opened later pick it up in MainApp::FilterEvent.
+	WinSetDarkTitlebars(dark);
 #endif
 
 	// Repaint every live view: all canvas tabs (only one is visible, but a

@@ -54,6 +54,10 @@ public:
 	MainApp();
 	virtual bool OnInit();
 	virtual int OnExit();
+#ifdef _WIN32
+	// Gives each window a caption that matches the theme as it is shown.
+	virtual int FilterEvent(wxEvent& event);
+#endif
 	void SetCurrentCanvas(wxGLCanvas *canvas);
 #ifdef __WXOSX__
 	virtual void MacOpenFile(const wxString& fileName);

@@ -11,6 +11,8 @@
 #include "../version.h"
 #include "CedarLogic.h"   // update feed and download URLs
 
+#include <wx/msgdlg.h>
+
 #include <cstring>
 #include <string>
 
@@ -37,9 +39,16 @@ int __cdecl configRead(const char *name, wchar_t *buf, size_t len, void *) {
     return 1;
 }
 
+bool initialized = false;
+
 }  // namespace
 
 void WinSparkleUpdater_Initialize() {
+    // With no public key compiled in, WinSparkle logs "Using unsigned updates!"
+    // and runs whatever installer the feed names. Leave it off instead, the
+    // same as the macOS build does without a key.
+    if (!CEDARLOGIC_UPDATES_SIGNED) return;
+
     // Set app metadata
     win_sparkle_set_app_details(L"Cedarville University", L"CedarLogic", VERSION_NUMBER_W().c_str());
 
@@ -53,14 +62,24 @@ void WinSparkleUpdater_Initialize() {
 
     // Initialize WinSparkle (starts background update checks)
     win_sparkle_init();
+    initialized = true;
 }
 
 void WinSparkleUpdater_CheckForUpdates() {
-    win_sparkle_check_update_with_ui();
+    if (initialized) {
+        win_sparkle_check_update_with_ui();
+        return;
+    }
+    // Asked for explicitly in a build with no updater. Say so, rather than
+    // having the menu item do nothing at all.
+    wxMessageBox("This copy of CedarLogic was built without an update signing "
+                 "key, so it cannot verify or install updates.",
+                 "Updates are not available in this build.",
+                 wxOK | wxICON_INFORMATION);
 }
 
 void WinSparkleUpdater_Cleanup() {
-    win_sparkle_cleanup();
+    if (initialized) win_sparkle_cleanup();
 }
 
 #endif // _WIN32

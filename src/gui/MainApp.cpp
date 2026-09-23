@@ -54,6 +54,7 @@
 #include "SparkleUpdater.h"
 #endif
 #ifdef _WIN32
+#include "WinAppearance.h"
 #include "WinSparkleUpdater.h"
 #include <windows.h>
 #include <mmsystem.h>
@@ -538,6 +539,19 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
     remove(logPath.c_str()); // only prompt once per crash
     return choseUpdate;
 }
+
+#ifdef _WIN32
+// Every dialog and panel is a window of its own, with a caption Windows draws
+// white unless told otherwise. MainFrame::ApplyTheme handles the ones already
+// open; this catches each new one as it first appears.
+int MainApp::FilterEvent(wxEvent& event) {
+	if (event.GetEventType() == wxEVT_SHOW && static_cast<wxShowEvent&>(event).IsShown()) {
+		if (wxTopLevelWindow* tlw = wxDynamicCast(event.GetEventObject(), wxTopLevelWindow))
+			WinSetDarkTitlebar(tlw, renderMode().darkMode);
+	}
+	return Event_Skip;
+}
+#endif
 
 static const wxCmdLineEntryDesc g_cmdLineDesc[] =
 {

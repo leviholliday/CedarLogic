@@ -1,0 +1,141 @@
+name: Windows build
+
+# Builds the Windows version: a 32-bit exe, its NSIS installer and a portable
+# zip, plus a few headless renders so the result can be looked at without a
+# Windows machine. The full signed release still goes through release.yml; this
+# is the everyday "does it build and start on Windows" run.
+#
+# Runs on pushes to windows/** branches, or by hand once this file is on the
+# default branch (workflow_dispatch only works from there).
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'windows/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Windows only: this run has no use for the Linux or macOS Skia builds, and a
+  # macOS runner costs ten times the minutes. A cache hit makes this seconds.
+  skia:
+    uses: ./.github/workflows/skia.yml
+    with:
+      platforms: '[{"name":"windows","os":"windows-2022","args":"windows"}]'
+
+  build:
+    needs: skia
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          # choco sometimes exits 0 having installed nothing; check for the
+          # compiler itself so a miss fails here, not at cpack.
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          foreach ($attempt in 1..3) {
+            choco install nsis -y --no-progress
+            if (Test-Path $makensis) { break }
+            Write-Host "::warning::NSIS missing after attempt $attempt; retrying"
+            if ($attempt -lt 3) { Start-Sleep -Seconds (20 * $attempt) }
+          }
+          if (-not (Test-Path $makensis)) { throw "NSIS did not install: $makensis is missing" }
+
+      # wxWidgets is built from source here (see CMakeLists.txt for why a
+      # prebuilt one cannot be used), which is most of a cold build.
+      - name: Cache wxWidgets
+        uses: actions/cache@v6
+        with:
+          path: build/_deps
+          key: wxwidgets-windows-port-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            wxwidgets-windows-port-
+
+      - name: Download Skia dist
+        uses: actions/download-artifact@v8
+        with:
+          name: skia-windows
+          path: skia-dist
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -B build -A Win32 \
+            -DBUILD_TESTING=OFF \
+            -DUSE_SYSTEM_SKIA=OFF -DSKIA_ROOT="$PWD/skia-dist"
+
+      - name: Build
+        run: cmake --build build --config Release -- /m
+
+      # --render-gate builds the main window, parses the embedded gate library
+      # and renders one gate: the path that crashed at startup in upstream
+      # 3.1.0/3.1.1 when CI built the exe but never ran it.
+      - name: Smoke test (launch and render a gate)
+        shell: bash
+        run: |
+          EXE=$(find build -name CedarLogic.exe -path '*Release*' | head -1)
+          if [ -z "$EXE" ]; then echo "::error::no CedarLogic.exe under build/"; exit 1; fi
+          echo "EXE=$EXE" >> "$GITHUB_ENV"
+          "$EXE" --render-gate AA_AND2 0 smoke.png
+          if [ ! -s smoke.png ]; then
+            echo "::error::--render-gate produced no output; the exe likely crashed at startup"
+            exit 1
+          fi
+
+      # Pictures of the Windows build, for checking layout and fonts from a Mac.
+      # Best effort: a hang or a miss here should not fail the build.
+      - name: Headless renders
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders/ui
+          timeout 120 "$EXE" --render-ui renders/ui || echo "--render-ui exit $?"
+          timeout 120 "$EXE" --render "format/tests/fixtures/Lab5.cdl" renders/Lab5.png 1200 800 \
+            || echo "--render exit $?"
+          cp smoke.png renders/
+          ls -R renders
+
+      - name: Package
+        shell: bash
+        run: |
+          cmake --install build --config Release --prefix "$PWD/dist/CedarLogic"
+          cd build
+          cpack -G NSIS -C Release
+          ls CedarLogic-*-win32.exe
+
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $ver = (Get-ChildItem build -Filter 'CedarLogic-*-win32.exe' | Select-Object -First 1).BaseName -replace '^CedarLogic-','' -replace '-win32$',''
+          Compress-Archive -Path dist/CedarLogic -DestinationPath "build/CedarLogic-$ver-win32-portable.zip" -Force
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-windows-installer
+          path: build/CedarLogic-*-win32.exe
+          if-no-files-found: error
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-windows-portable
+          path: build/CedarLogic-*-win32-portable.zip
+          if-no-files-found: error
+
+      - name: Upload renders
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-windows-renders
+          path: renders
+          if-no-files-found: warn
