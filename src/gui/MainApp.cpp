@@ -20,12 +20,12 @@
 #include <sstream>
 #include "migrate.hpp"   // cl::loadCircuit, to validate a file before the GUI load
 #include "wx/stdpaths.h"
+#include "CircuitLibrary.h"   // seedSamples, for the first-run practice circuit
 #ifdef WITH_SKIA
 #include "render/SkiaProbe.h"   // headless --skia-probe (no Skia headers leak here)
 #include "render/RendererHealth.h"
 #ifdef __APPLE__
 #include "MacAppearance.h"
-#include "CircuitLibrary.h"
 #endif
 #endif
 #include "wx/fileconf.h"
