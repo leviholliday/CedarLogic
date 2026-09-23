@@ -259,7 +259,7 @@ void TabStrip::OnPaint(wxPaintEvent&) {
 		gc->GetTextExtent(label, &tw, &th);
 		const double room = r.width - 26 - 24;
 		while (tw > room && label.length() > 1) {
-			label = label.Left(label.length() - 2) + "…";
+			label = label.Left(label.length() - 2) + wxString::FromUTF8("\u2026");
 			gc->GetTextExtent(label, &tw, &th);
 		}
 		gc->DrawText(label, r.x + 24, r.y + (r.height - th) / 2);

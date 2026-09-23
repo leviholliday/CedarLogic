@@ -65,7 +65,11 @@ string VERSION_TITLE() {
 string VERSION_ABOUT_TEXT() {
 	return
 		VERSION_TITLE() + "\n\n"
+#ifdef __APPLE__
 		"A digital logic simulator, redesigned for the Mac by "
+#else
+		"A digital logic simulator, redesigned by "
+#endif
 		CEDARLOGIC_PUBLISHER ".\n"
 		"Based on CedarLogic by Cedarville University, and on\n"
 		"Kieran Klukas's modernized CedarLogic.\n\n"

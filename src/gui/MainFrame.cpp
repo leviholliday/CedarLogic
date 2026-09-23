@@ -78,6 +78,7 @@
 #include "WinAppearance.h"
 #include "WinSparkleUpdater.h"
 #endif
+#include "UiKit.h"
 #include "UpdateInfo.h"   // cl::update::checksDisabled, for managed deployments
 
 DECLARE_APP(MainApp)
@@ -193,9 +194,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	fileMenu->Append(Tool_NewTab, "New &Tab\tCtrl+T", "Open a new tab");
 	fileMenu->Append(Tool_CloseTab, "&Close Tab\tCtrl+W", "Close the current tab");
 	fileMenu->Append(Tool_ReopenTab, "&Reopen Closed Tab\tCtrl+Shift+T", "Bring back the tab you just closed");
-	fileMenu->Append(Tool_SplitRight, "Split &View\tCtrl+Alt+S", "Show another tab beside this one (Cmd+Option+S)");
-	fileMenu->Append(Tool_SplitClose, "Close Split\tCtrl+Alt+W", "Put the split tab back in the tab strip (Cmd+Option+W)");
-	fileMenu->Append(Tool_FocusOtherPane, "Switch Pane\tCtrl+Alt+Right", "Work in the other side of the split (Cmd+Option+Right)");
+	fileMenu->Append(Tool_SplitRight, "Split &View\tCtrl+Alt+S", ui::platformKeys("Show another tab beside this one (Cmd+Option+S)"));
+	fileMenu->Append(Tool_SplitClose, "Close Split\tCtrl+Alt+W", ui::platformKeys("Put the split tab back in the tab strip (Cmd+Option+W)"));
+	fileMenu->Append(Tool_FocusOtherPane, "Switch Pane\tCtrl+Alt+Right", ui::platformKeys("Work in the other side of the split (Cmd+Option+Right)"));
 	fileMenu->AppendSeparator();
 	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+S", "Save a .cdl copy anywhere, to share or submit");
 	fileMenu->Append(File_Export, "Export as Image...\tCtrl+E", "Export or copy circuit image");
@@ -871,7 +872,11 @@ void MainFrame::OnAbout(wxCommandEvent& WXUNUSED(event)) {
     wxAboutDialogInfo info;
     info.SetName("CedarLogic");
     info.SetVersion(VERSION_NUMBER(), "Version " + VERSION_NUMBER_STRING());
+#ifdef __WXOSX__
     info.SetDescription("A digital logic simulator, redesigned for the Mac.");
+#else
+    info.SetDescription("A digital logic simulator, redesigned by " CEDARLOGIC_PUBLISHER ".");
+#endif
     info.SetCopyright(wxString::FromUTF8("\u00A9 2026 " CEDARLOGIC_PUBLISHER
         ". Based on CedarLogic by Cedarville University\n"
         "and Kieran Klukas's modernized CedarLogic."));
@@ -1575,6 +1580,21 @@ bool MainFrame::settleSimulation(int maxSteps) {
 		drainLogicMessages();   // anything queued behind the DONESTEP
 		return gCircuit->getSimulate();
 	};
+
+	// A step the sim timer sent before stopTimers() may still be running.
+	// getSimulate() is false until its DONESTEP arrives, and stepOnce reads the
+	// next DONESTEP as its own -- so that stray one would pass for the answer to
+	// ours, and a truth-table row could be read before our step had run. Let it
+	// land first.
+	{
+		const wxLongLong deadline = wxGetLocalTimeMillis() + SETTLE_STEP_TIMEOUT_MS;
+		drainLogicMessages();
+		while (!gCircuit->getSimulate() && wxGetLocalTimeMillis() < deadline) {
+			wxMilliSleep(1);
+			drainLogicMessages();
+		}
+		if (!gCircuit->getSimulate()) return false;   // the core stopped answering
+	}
 
 	// Apply anything the load left in flight, then let the first synchronized
 	// step set the baseline. Comparing against the state as loaded would mean
@@ -2455,7 +2475,14 @@ void MainFrame::dropExtraTabs() {
 	tabNumbers.clear();
 	tabNames.clear();
 	canvasMRU.clear();
-	if (!canvases.empty()) noteCanvasUsed(canvases[0]);
+	if (!canvases.empty()) {
+		noteCanvasUsed(canvases[0]);
+		// currentCanvas may have been one of the tabs just destroyed. Callers go
+		// on to show modal dialogs (the migration notices) whose event loop runs
+		// paint and timer handlers, so it must not dangle even for a moment.
+		currentCanvas = canvases[0];
+		gCircuit->setCurrentCanvas(currentCanvas);
+	}
 	RenumberTabs();
 }
 
@@ -3314,6 +3341,10 @@ void MainFrame::stopTimers() {
 void MainFrame::startTimers(int at) {
 	if (!(toolBar->GetToolState(Tool_Pause)))
 	{
+		// The stopwatch too: a load paused it (startup recovery loads before
+		// the timers first start), and stepSimulation only steps once it has
+		// accrued a step's worth of time, so a paused one froze the circuit.
+		simBridge().appSystemTime.Start(0);
 		simTimer->Start(at);
 	}
 	idleTimer->Start(at);

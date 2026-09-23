@@ -300,15 +300,32 @@ public:
 			}
 			const double keysX = r.rect.x + 8;
 			ui::drawKeys(gc.get(), keysX, r.rect.y + (ROW_H - KEY_H) / 2.0, KEY_H, r.item->keys);
-			gc->SetFont(wxFont(wxFontInfo(12.5)), ink);
-			double tw, th;
-			gc->GetTextExtent(r.item->what, &tw, &th);
 			const double textX = keysX + std::max(keyColW[r.col], 60.0) + 16;
-			gc->DrawText(r.item->what, textX, r.rect.y + (ROW_H - th) / 2);
+			const double room = r.rect.GetRight() - 8 - textX;
+			// Fonts differ per platform: a line that fits on a Mac can run into
+			// the next column on Windows. Step the size down first, and only
+			// then cut it short.
+			wxString what = r.item->what;
+			double tw, th;
+			gc->SetFont(wxFont(wxFontInfo(12.5)), ink);
+			gc->GetTextExtent(what, &tw, &th);
+			if (tw > room) {
+				gc->SetFont(wxFont(wxFontInfo(11)), ink);
+				gc->GetTextExtent(what, &tw, &th);
+			}
+			while (tw > room && what.length() > 1) {
+				what = what.Left(what.length() - 2) + wxString::FromUTF8("\u2026");
+				gc->GetTextExtent(what, &tw, &th);
+			}
+			gc->DrawText(what, textX, r.rect.y + (ROW_H - th) / 2);
 			// A runnable row says so when you point at it.
 			if (runnable && (hot || sel)) {
 				gc->SetFont(wxFont(wxFontInfo(10.5)), ui::dim());
+				#ifdef __WXOSX__
 				const wxString go = hot ? "Click to do it" : "Return to do it";
+#else
+				const wxString go = hot ? "Click to do it" : "Enter to do it";
+#endif
 				double gw, gh;
 				gc->GetTextExtent(go, &gw, &gh);
 				if (textX + tw + 16 + gw < r.rect.GetRight() - 8)

@@ -24,6 +24,7 @@
 #include <wx/statbmp.h>
 #include "ModernToolbar.h"
 #include "RenderMode.h"
+#include "UiKit.h"
 #include <wx/settings.h>
 #include <memory>
 
@@ -282,7 +283,7 @@ public:
 		reverseTrackpad = addCheck("", "Reverse zoom direction", s.reverseTrackpadZoom,
 			"Only matters when trackpad scrolling is set to zoom.");
 #endif
-		addHelp("Cmd+scroll always zooms. Shift+scroll always moves sideways.");
+		addHelp(ui::platformKeys("Cmd+scroll always zooms. Shift+scroll always moves sideways."));
 
 		rightClickRotate = addCheck("Right-click:", "Rotates the gate", s.rightClickRotate,
 			"Off: right-clicking a gate opens a menu with Rotate and Delete instead.");
@@ -292,8 +293,8 @@ public:
 		duplicate->Append("Copies to the clipboard too");   // true
 		duplicate->SetSelection(s.duplicateUsesClipboard ? 1 : 0);
 		duplicate->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
-		addRow("Duplicate (Cmd+D):", duplicate,
-			"Second option: the copy stays on the clipboard, so Cmd+V pastes more of it.");
+		addRow(ui::platformKeys("Duplicate (Cmd+D):"), duplicate,
+			ui::platformKeys("Second option: the copy stays on the clipboard, so Cmd+V pastes more of it."));
 		GetSizer()->SetSizeHints(this);
 	}
 
@@ -436,7 +437,11 @@ public:
 		capture->Bind(wxEVT_KEY_DOWN, &ShortcutsPanel::OnCaptureKey, this);
 		capture->Bind(wxEVT_CHAR, [](wxKeyEvent&) {});
 		addRow("Shortcut:", capture,
+#ifdef __WXOSX__
 			"Click the field, then press the keys you want. Needs at least one modifier (Cmd, Shift, Option, Control).");
+#else
+			"Click the field, then press the keys you want. Needs at least one modifier (Ctrl, Shift, Alt, Win).");
+#endif
 
 		GetSizer()->SetSizeHints(this);
 	}
