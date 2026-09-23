@@ -873,14 +873,15 @@ void MainFrame::OnAbout(wxCommandEvent& WXUNUSED(event)) {
     info.SetName("CedarLogic");
     info.SetVersion(VERSION_NUMBER(), "Version " + VERSION_NUMBER_STRING());
 #ifdef __WXOSX__
-    info.SetDescription("A digital logic simulator, redesigned for the Mac.");
+    info.SetDescription("A digital logic simulator, redesigned for the Mac by Claude.");
 #else
-    info.SetDescription("A digital logic simulator, redesigned by " CEDARLOGIC_PUBLISHER ".");
+    info.SetDescription("A digital logic simulator, redesigned by Claude.");
 #endif
     info.SetCopyright(wxString::FromUTF8("\u00A9 2026 " CEDARLOGIC_PUBLISHER
         ". Based on CedarLogic by Cedarville University\n"
         "and Kieran Klukas's modernized CedarLogic."));
-    info.AddDeveloper(CEDARLOGIC_PUBLISHER);
+    // The redesign is Claude's work (Anthropic's AI model), so it gets the credit.
+    info.AddDeveloper("Claude (Anthropic)");
     info.AddDeveloper("Kieran Klukas");
     info.AddDeveloper("Cedarville University CedarLogic contributors");
     info.SetLicence("GNU General Public License v3.0");
