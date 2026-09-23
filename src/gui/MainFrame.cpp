@@ -9,6 +9,8 @@
 *****************************************************************************/
 
 #include "MainApp.h"
+#include "CedarLogic.h"     // publisher name for the About panel
+#include "wx/aboutdlg.h"
 #include "PaletteDrag.h"
 #include "RenderMode.h"
 #ifdef WITH_SKIA
@@ -863,10 +865,20 @@ void MainFrame::OnQuit(wxCommandEvent& WXUNUSED(event)) {
 }
 
 void MainFrame::OnAbout(wxCommandEvent& WXUNUSED(event)) {
-    wxString msg;
-    msg.Printf(VERSION_ABOUT_TEXT().c_str());
-
-    wxMessageBox(msg, "About", wxOK | wxICON_INFORMATION, this);
+    // The native About panel on macOS: app icon, name, version and credits
+    // laid out the way every other Mac app shows them.
+    wxAboutDialogInfo info;
+    info.SetName("CedarLogic");
+    info.SetVersion(VERSION_NUMBER(), "Version " + VERSION_NUMBER_STRING());
+    info.SetDescription("A digital logic simulator, redesigned for the Mac.");
+    info.SetCopyright(wxString::FromUTF8("\u00A9 2026 " CEDARLOGIC_PUBLISHER
+        ". Based on CedarLogic by Cedarville University\n"
+        "and Kieran Klukas's modernized CedarLogic."));
+    info.AddDeveloper(CEDARLOGIC_PUBLISHER);
+    info.AddDeveloper("Kieran Klukas");
+    info.AddDeveloper("Cedarville University CedarLogic contributors");
+    info.SetLicence("GNU General Public License v3.0");
+    wxAboutBox(info, this);
 }
 
 void MainFrame::OnNew(wxCommandEvent& WXUNUSED(event)) {

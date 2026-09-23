@@ -59,15 +59,15 @@ wstring VERSION_NUMBER_W() {
 #endif
 
 string VERSION_TITLE() {
-	return "Cedar Logic " + VERSION_NUMBER();
+	return "CedarLogic " + VERSION_NUMBER();
 }
 
 string VERSION_ABOUT_TEXT() {
-
 	return
-		VERSION_TITLE() + "\n"
-		R"===(
-Protected under the GNU General Public License v3.0.
-See https://github.com/CedarvilleCS/CedarLogic for more information.
-)===";
+		VERSION_TITLE() + "\n\n"
+		"A digital logic simulator, redesigned for the Mac by "
+		CEDARLOGIC_PUBLISHER ".\n"
+		"Based on CedarLogic by Cedarville University, and on\n"
+		"Kieran Klukas's modernized CedarLogic.\n\n"
+		"Licensed under the GNU General Public License v3.0.";
 }

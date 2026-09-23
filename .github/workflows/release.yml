@@ -3,10 +3,12 @@ name: Release Build
 # Releases are cut by pushing a tag (`task release` does the bump, tag, and
 # push). Everything after that -- builds, changelog, GitHub release, appcast,
 # npm -- happens here.
+#
+# Mac version: tag pushes no longer trigger this. It needs upstream's Apple
+# signing, Sparkle and npm secrets, none of which this repo has, so a tag would
+# only burn macOS runner minutes on a failing run. Build a local DMG with
+# scripts/package-mac.sh instead (see docs/Releasing-Mac.md).
 on:
-  push:
-    tags:
-      - v*.*.*
   workflow_dispatch:
     inputs:
       tag:

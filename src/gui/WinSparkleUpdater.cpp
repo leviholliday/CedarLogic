@@ -9,6 +9,7 @@
 #include "winsparkle.h"
 #include "UpdateInfo.h"
 #include "../version.h"
+#include "CedarLogic.h"   // update feed and download URLs
 
 #include <cstring>
 #include <string>
@@ -48,7 +49,7 @@ void WinSparkleUpdater_Initialize() {
     win_sparkle_set_config_methods(&configMethods);
 
     // Set the appcast URL
-    win_sparkle_set_appcast_url("https://taciturnaxolotl.github.io/CedarLogic/appcast.xml");
+    win_sparkle_set_appcast_url(CEDARLOGIC_APPCAST_URL);
 
     // Initialize WinSparkle (starts background update checks)
     win_sparkle_init();

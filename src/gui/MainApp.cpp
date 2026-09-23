@@ -14,6 +14,7 @@
 #include "ShortcutsSheet.h"
 #include "wx/cmdline.h"
 #include "../version.h"
+#include "CedarLogic.h"   // update feed and download URLs
 #include <cstdlib>   // std::_Exit for the headless --render one-shot
 #include <fstream>
 #include <sstream>
@@ -180,7 +181,7 @@ static std::string crashIssueUrl(const std::string &trace) {
     std::string firstFrame = crashTraceBody(trace);
     std::string title = "Crash: " + firstFrame.substr(0, firstFrame.find('\n'));
     if (body.size() > 6000) body.resize(6000);
-    return "https://github.com/taciturnaxolotl/CedarLogic/issues/new?title=" +
+    return std::string(CEDARLOGIC_ISSUES_URL) + "?title=" +
            urlEncode(title) + "&body=" + urlEncode(body);
 }
 
@@ -480,8 +481,7 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
         // runs, and the thread never has to touch a wx object. The flags are
         // atomic because two threads see them; join() below is what makes
         // `newest` safe to read on this thread.
-        static const char *kAppcastUrl =
-            "https://taciturnaxolotl.github.io/CedarLogic/appcast.xml";
+        static const char *kAppcastUrl = CEDARLOGIC_APPCAST_URL;
         std::atomic<bool> done(false);
         std::atomic<bool> ok(false);
         std::thread fetcher([&]() {
@@ -794,8 +794,7 @@ bool MainApp::OnInit()
             // named the exact version, so the releases page is one click. Then
             // step aside instead of continuing into the same crash; the marker
             // stays, so if the download does not fix it the dialog returns.
-            wxLaunchDefaultBrowser(
-                "https://github.com/taciturnaxolotl/CedarLogic/releases/latest");
+            wxLaunchDefaultBrowser(CEDARLOGIC_RELEASES_URL);
             return false;
         }
         // "Continue anyway": fall through and try to start normally.

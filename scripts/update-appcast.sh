@@ -61,7 +61,7 @@ cat > docs/appcast.xml << APPCAST_EOF
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>CedarLogic Updates</title>
-    <link>https://taciturnaxolotl.github.io/CedarLogic/appcast.xml</link>
+    <link>${APPCAST_URL:-https://raw.githubusercontent.com/leviholliday/CedarLogic-Releases/main/appcast.xml}</link>
     <description>Most recent updates to CedarLogic</description>
     <language>en</language>
     <!-- macOS -->

@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.11)
 
 # Name project, and set version. If updating version, change it here, and then re-generate your Visual
 # Studio solution.
-project(CedarLogic VERSION 3.2.1)
+project(CedarLogic VERSION 4.0.0)
 
 # The Windows build ships 32-bit and the Skia dist is built target_cpu="x86". A
 # 64-bit configure succeeds and only fails at link, with a wall of unresolved
@@ -30,6 +30,17 @@ endif()
 # This file is not considered part of the source code and it's stored in the build directory
 # It is made visible as an external header when we add CMAKE_CURRENT_BINARY_DIR (build) in 
 # include_directories. This may seem odd, but it's how they do it in the official cmake tutorial.
+# Where this build looks for updates and sends people for downloads and bug
+# reports. This is the Mac version's own feed, never upstream's: pointing at
+# upstream would let its updater replace this app with an older design.
+# The updater stays off until a release sets SPARKLE_ED_PUBLIC_KEY.
+set(CEDARLOGIC_PUBLISHER "Levi Holliday" CACHE STRING "Shown in the About window")
+set(CEDARLOGIC_RELEASES_REPO "leviholliday/CedarLogic-Releases" CACHE STRING
+    "Public GitHub repo holding release downloads and the update feed")
+set(CEDARLOGIC_APPCAST_URL
+    "https://raw.githubusercontent.com/${CEDARLOGIC_RELEASES_REPO}/main/appcast.xml"
+    CACHE STRING "Sparkle/WinSparkle update feed")
+set(CEDARLOGIC_BUNDLE_ID "com.leviholliday.cedarlogic" CACHE STRING "macOS bundle identifier")
 configure_file(CedarLogic.h.in CedarLogic.h)
 
 # CMake modules, that is, files specifying functions we can use in CMake
@@ -477,7 +488,7 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_NAME "CedarLogic"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "edu.cedarville.cedarlogic"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${CEDARLOGIC_BUNDLE_ID}"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/res/macos/Info.plist.in"
     )
 

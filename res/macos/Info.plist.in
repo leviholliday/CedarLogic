@@ -21,7 +21,9 @@
     <key>CFBundleVersion</key>
     <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.15</string>
+    <string>11.0</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 ${CEDARLOGIC_PUBLISHER}. Based on CedarLogic by Cedarville University and Kieran Klukas. GPL v3.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSPrincipalClass</key>
@@ -42,7 +44,7 @@
         </dict>
     </array>
     <key>SUFeedURL</key>
-    <string>https://taciturnaxolotl.github.io/CedarLogic/appcast.xml</string>
+    <string>${CEDARLOGIC_APPCAST_URL}</string>
     <key>SUPublicEDKey</key>
     <string>${SPARKLE_ED_PUBLIC_KEY}</string>
     <key>SUEnableAutomaticChecks</key>
