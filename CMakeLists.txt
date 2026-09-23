@@ -287,7 +287,7 @@ set_source_files_properties(${SKIA_SRC_FILES} PROPERTIES
 # include/gui/EmbeddedRes.h); everything else in res/ is still read from disk.
 file(GLOB EMBED_ICONS RELATIVE "${PROJECT_SOURCE_DIR}/res" "${PROJECT_SOURCE_DIR}/res/icons/*.svg")
 embed_resources(EMBEDDED_RES_CPP "${PROJECT_SOURCE_DIR}/res"
-    cl_gatedefs.xml ${EMBED_ICONS})
+    cl_gatedefs.xml samples/practice.cdl ${EMBED_ICONS})
 list(APPEND SRC_FILES "${EMBEDDED_RES_CPP}")
 
 # macOS: Add Objective-C++ sources

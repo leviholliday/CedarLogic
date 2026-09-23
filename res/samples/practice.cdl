@@ -1,0 +1,954 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.0.0")
+  (page 0
+    (name "XOR + ANDs")
+    (gate "AA_LABEL"
+      (uuid "1")
+      (at -24 20)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Flip A, B, C")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_TOGGLE"
+      (uuid "2")
+      (at -30 14)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "3")
+      (at -24 14)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "AA_TOGGLE"
+      (uuid "4")
+      (at -30 10)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "5")
+      (at -24 10)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "AA_TOGGLE"
+      (uuid "6")
+      (at -30 6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "7")
+      (at -24 6)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "AI_XOR3"
+      (uuid "8")
+      (at 10 14)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "DA_FROM"
+      (uuid "9")
+      (at 2 16)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "10")
+      (at 2 14)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DA_FROM"
+      (uuid "11")
+      (at 2 12)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "GA_LED"
+      (uuid "12")
+      (at 17 14)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "13")
+      (at 10 4)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "14")
+      (at 2 5)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "15")
+      (at 2 3)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "GA_LED"
+      (uuid "16")
+      (at 17 4)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "17")
+      (at 10 -2)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "18")
+      (at 2 -1)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "19")
+      (at 2 -3)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "GA_LED"
+      (uuid "20")
+      (at 17 -2)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "21")
+      (at 10 -8)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "22")
+      (at 2 -7)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DA_FROM"
+      (uuid "23")
+      (at 2 -9)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "GA_LED"
+      (uuid "24")
+      (at 17 -8)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (wire
+      (ids "1001")
+      (seg "0" h
+        (pts -28 14 -26 14)
+        (connect "2" "OUT_0")
+        (connect "3" "IN_0")))
+    (wire
+      (ids "1002")
+      (seg "0" h
+        (pts -28 10 -26 10)
+        (connect "4" "OUT_0")
+        (connect "5" "IN_0")))
+    (wire
+      (ids "1003")
+      (seg "0" h
+        (pts -28 6 -26 6)
+        (connect "6" "OUT_0")
+        (connect "7" "IN_0")))
+    (wire
+      (ids "1004")
+      (seg "0" h
+        (pts 4 16 7 16)
+        (connect "9" "IN_0")
+        (connect "8" "IN_0")))
+    (wire
+      (ids "1005")
+      (seg "0" h
+        (pts 4 14 7 14)
+        (connect "10" "IN_0")
+        (connect "8" "IN_1")))
+    (wire
+      (ids "1006")
+      (seg "0" h
+        (pts 4 12 7 12)
+        (connect "11" "IN_0")
+        (connect "8" "IN_2")))
+    (wire
+      (ids "1007")
+      (seg "0" h
+        (pts 13 14 16 14)
+        (connect "8" "OUT")
+        (connect "12" "N_in0")))
+    (wire
+      (ids "1008")
+      (seg "0" h
+        (pts 4 5 7 5)
+        (connect "14" "IN_0")
+        (connect "13" "IN_0")))
+    (wire
+      (ids "1009")
+      (seg "0" h
+        (pts 4 3 7 3)
+        (connect "15" "IN_0")
+        (connect "13" "IN_1")))
+    (wire
+      (ids "1010")
+      (seg "0" h
+        (pts 13 4 16 4)
+        (connect "13" "OUT")
+        (connect "16" "N_in0")))
+    (wire
+      (ids "1011")
+      (seg "0" h
+        (pts 4 -1 7 -1)
+        (connect "18" "IN_0")
+        (connect "17" "IN_0")))
+    (wire
+      (ids "1012")
+      (seg "0" h
+        (pts 4 -3 7 -3)
+        (connect "19" "IN_0")
+        (connect "17" "IN_1")))
+    (wire
+      (ids "1013")
+      (seg "0" h
+        (pts 13 -2 16 -2)
+        (connect "17" "OUT")
+        (connect "20" "N_in0")))
+    (wire
+      (ids "1014")
+      (seg "0" h
+        (pts 4 -7 7 -7)
+        (connect "22" "IN_0")
+        (connect "21" "IN_0")))
+    (wire
+      (ids "1015")
+      (seg "0" h
+        (pts 4 -9 7 -9)
+        (connect "23" "IN_0")
+        (connect "21" "IN_1")))
+    (wire
+      (ids "1016")
+      (seg "0" h
+        (pts 13 -8 16 -8)
+        (connect "21" "OUT")
+        (connect "24" "N_in0"))))
+  (page 1
+    (name "Two Sets")
+    (gate "AA_LABEL"
+      (uuid "25")
+      (at -24 20)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Flip A-F")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_TOGGLE"
+      (uuid "26")
+      (at -30 14)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "27")
+      (at -24 14)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "AA_TOGGLE"
+      (uuid "28")
+      (at -30 10)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "29")
+      (at -24 10)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "AA_TOGGLE"
+      (uuid "30")
+      (at -30 6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "31")
+      (at -24 6)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "AA_TOGGLE"
+      (uuid "32")
+      (at -30 -24)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "33")
+      (at -24 -24)
+      (angle 0)
+      (lparam "JUNCTION_ID" "D"))
+    (gate "AA_TOGGLE"
+      (uuid "34")
+      (at -30 -28)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "35")
+      (at -24 -28)
+      (angle 0)
+      (lparam "JUNCTION_ID" "E"))
+    (gate "AA_TOGGLE"
+      (uuid "36")
+      (at -30 -32)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DE_TO"
+      (uuid "37")
+      (at -24 -32)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "AI_XOR3"
+      (uuid "38")
+      (at 10 14)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "DA_FROM"
+      (uuid "39")
+      (at 2 16)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "40")
+      (at 2 14)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DA_FROM"
+      (uuid "41")
+      (at 2 12)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "GA_LED"
+      (uuid "42")
+      (at 17 14)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "43")
+      (at 10 4)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "44")
+      (at 2 5)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "45")
+      (at 2 3)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "GA_LED"
+      (uuid "46")
+      (at 17 4)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "47")
+      (at 10 -2)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "48")
+      (at 2 -1)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "49")
+      (at 2 -3)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "GA_LED"
+      (uuid "50")
+      (at 17 -2)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "51")
+      (at 10 -8)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "52")
+      (at 2 -7)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DA_FROM"
+      (uuid "53")
+      (at 2 -9)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "GA_LED"
+      (uuid "54")
+      (at 17 -8)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AI_XOR3"
+      (uuid "55")
+      (at 10 -24)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "DA_FROM"
+      (uuid "56")
+      (at 2 -22)
+      (angle 0)
+      (lparam "JUNCTION_ID" "D"))
+    (gate "DA_FROM"
+      (uuid "57")
+      (at 2 -24)
+      (angle 0)
+      (lparam "JUNCTION_ID" "E"))
+    (gate "DA_FROM"
+      (uuid "58")
+      (at 2 -26)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "GA_LED"
+      (uuid "59")
+      (at 17 -24)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "60")
+      (at 10 -34)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "61")
+      (at 2 -33)
+      (angle 0)
+      (lparam "JUNCTION_ID" "D"))
+    (gate "DA_FROM"
+      (uuid "62")
+      (at 2 -35)
+      (angle 0)
+      (lparam "JUNCTION_ID" "E"))
+    (gate "GA_LED"
+      (uuid "63")
+      (at 17 -34)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "64")
+      (at 10 -40)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "65")
+      (at 2 -39)
+      (angle 0)
+      (lparam "JUNCTION_ID" "D"))
+    (gate "DA_FROM"
+      (uuid "66")
+      (at 2 -41)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "GA_LED"
+      (uuid "67")
+      (at 17 -40)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_AND2"
+      (uuid "68")
+      (at 10 -46)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "69")
+      (at 2 -45)
+      (angle 0)
+      (lparam "JUNCTION_ID" "E"))
+    (gate "DA_FROM"
+      (uuid "70")
+      (at 2 -47)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "GA_LED"
+      (uuid "71")
+      (at 17 -46)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (wire
+      (ids "1017")
+      (seg "0" h
+        (pts -28 14 -26 14)
+        (connect "26" "OUT_0")
+        (connect "27" "IN_0")))
+    (wire
+      (ids "1018")
+      (seg "0" h
+        (pts -28 10 -26 10)
+        (connect "28" "OUT_0")
+        (connect "29" "IN_0")))
+    (wire
+      (ids "1019")
+      (seg "0" h
+        (pts -28 6 -26 6)
+        (connect "30" "OUT_0")
+        (connect "31" "IN_0")))
+    (wire
+      (ids "1020")
+      (seg "0" h
+        (pts -28 -24 -26 -24)
+        (connect "32" "OUT_0")
+        (connect "33" "IN_0")))
+    (wire
+      (ids "1021")
+      (seg "0" h
+        (pts -28 -28 -26 -28)
+        (connect "34" "OUT_0")
+        (connect "35" "IN_0")))
+    (wire
+      (ids "1022")
+      (seg "0" h
+        (pts -28 -32 -26 -32)
+        (connect "36" "OUT_0")
+        (connect "37" "IN_0")))
+    (wire
+      (ids "1023")
+      (seg "0" h
+        (pts 4 16 7 16)
+        (connect "39" "IN_0")
+        (connect "38" "IN_0")))
+    (wire
+      (ids "1024")
+      (seg "0" h
+        (pts 4 14 7 14)
+        (connect "40" "IN_0")
+        (connect "38" "IN_1")))
+    (wire
+      (ids "1025")
+      (seg "0" h
+        (pts 4 12 7 12)
+        (connect "41" "IN_0")
+        (connect "38" "IN_2")))
+    (wire
+      (ids "1026")
+      (seg "0" h
+        (pts 13 14 16 14)
+        (connect "38" "OUT")
+        (connect "42" "N_in0")))
+    (wire
+      (ids "1027")
+      (seg "0" h
+        (pts 4 5 7 5)
+        (connect "44" "IN_0")
+        (connect "43" "IN_0")))
+    (wire
+      (ids "1028")
+      (seg "0" h
+        (pts 4 3 7 3)
+        (connect "45" "IN_0")
+        (connect "43" "IN_1")))
+    (wire
+      (ids "1029")
+      (seg "0" h
+        (pts 13 4 16 4)
+        (connect "43" "OUT")
+        (connect "46" "N_in0")))
+    (wire
+      (ids "1030")
+      (seg "0" h
+        (pts 4 -1 7 -1)
+        (connect "48" "IN_0")
+        (connect "47" "IN_0")))
+    (wire
+      (ids "1031")
+      (seg "0" h
+        (pts 4 -3 7 -3)
+        (connect "49" "IN_0")
+        (connect "47" "IN_1")))
+    (wire
+      (ids "1032")
+      (seg "0" h
+        (pts 13 -2 16 -2)
+        (connect "47" "OUT")
+        (connect "50" "N_in0")))
+    (wire
+      (ids "1033")
+      (seg "0" h
+        (pts 4 -7 7 -7)
+        (connect "52" "IN_0")
+        (connect "51" "IN_0")))
+    (wire
+      (ids "1034")
+      (seg "0" h
+        (pts 4 -9 7 -9)
+        (connect "53" "IN_0")
+        (connect "51" "IN_1")))
+    (wire
+      (ids "1035")
+      (seg "0" h
+        (pts 13 -8 16 -8)
+        (connect "51" "OUT")
+        (connect "54" "N_in0")))
+    (wire
+      (ids "1036")
+      (seg "0" h
+        (pts 4 -22 7 -22)
+        (connect "56" "IN_0")
+        (connect "55" "IN_0")))
+    (wire
+      (ids "1037")
+      (seg "0" h
+        (pts 4 -24 7 -24)
+        (connect "57" "IN_0")
+        (connect "55" "IN_1")))
+    (wire
+      (ids "1038")
+      (seg "0" h
+        (pts 4 -26 7 -26)
+        (connect "58" "IN_0")
+        (connect "55" "IN_2")))
+    (wire
+      (ids "1039")
+      (seg "0" h
+        (pts 13 -24 16 -24)
+        (connect "55" "OUT")
+        (connect "59" "N_in0")))
+    (wire
+      (ids "1040")
+      (seg "0" h
+        (pts 4 -33 7 -33)
+        (connect "61" "IN_0")
+        (connect "60" "IN_0")))
+    (wire
+      (ids "1041")
+      (seg "0" h
+        (pts 4 -35 7 -35)
+        (connect "62" "IN_0")
+        (connect "60" "IN_1")))
+    (wire
+      (ids "1042")
+      (seg "0" h
+        (pts 13 -34 16 -34)
+        (connect "60" "OUT")
+        (connect "63" "N_in0")))
+    (wire
+      (ids "1043")
+      (seg "0" h
+        (pts 4 -39 7 -39)
+        (connect "65" "IN_0")
+        (connect "64" "IN_0")))
+    (wire
+      (ids "1044")
+      (seg "0" h
+        (pts 4 -41 7 -41)
+        (connect "66" "IN_0")
+        (connect "64" "IN_1")))
+    (wire
+      (ids "1045")
+      (seg "0" h
+        (pts 13 -40 16 -40)
+        (connect "64" "OUT")
+        (connect "67" "N_in0")))
+    (wire
+      (ids "1046")
+      (seg "0" h
+        (pts 4 -45 7 -45)
+        (connect "69" "IN_0")
+        (connect "68" "IN_0")))
+    (wire
+      (ids "1047")
+      (seg "0" h
+        (pts 4 -47 7 -47)
+        (connect "70" "IN_0")
+        (connect "68" "IN_1")))
+    (wire
+      (ids "1048")
+      (seg "0" h
+        (pts 13 -46 16 -46)
+        (connect "68" "OUT")
+        (connect "71" "N_in0"))))
+  (page 2
+    (name "Full Adder")
+    (gate "AA_LABEL"
+      (uuid "72")
+      (at -22 20)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Counter drives A, B, C")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_REGISTER4"
+      (uuid "73")
+      (at -20 5)
+      (angle 0)
+      (gparam "VALUE_BOX" "-0.8,-0.8,0.8,1.8")
+      (lparam "INPUT_BITS" "4")
+      (lparam "MAX_COUNT" "7")
+      (lparam "SYNC_CLEAR" "true")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "CURRENT_VALUE" "0"))
+    (gate "AA_TOGGLE"
+      (uuid "74")
+      (at -25 14)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "BB_CLOCK"
+      (uuid "75")
+      (at -30 -3)
+      (angle 0)
+      (lparam "HALF_CYCLE" "50"))
+    (gate "DE_TO"
+      (uuid "76")
+      (at -10 9)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DE_TO"
+      (uuid "77")
+      (at -10 5)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DE_TO"
+      (uuid "78")
+      (at -10 1)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "AI_XOR3"
+      (uuid "79")
+      (at 10 10)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "DA_FROM"
+      (uuid "80")
+      (at 2 12)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "81")
+      (at 2 10)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DA_FROM"
+      (uuid "82")
+      (at 2 8)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "DE_TO"
+      (uuid "83")
+      (at 18 10)
+      (angle 0)
+      (lparam "JUNCTION_ID" "Sum"))
+    (gate "AA_AND2"
+      (uuid "84")
+      (at 6 0)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "85")
+      (at -2 1)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "86")
+      (at -2 -1)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "AA_AND2"
+      (uuid "87")
+      (at 6 -6)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "88")
+      (at -2 -5)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DA_FROM"
+      (uuid "89")
+      (at -2 -7)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "AA_AND2"
+      (uuid "90")
+      (at 6 -12)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "91")
+      (at -2 -11)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DA_FROM"
+      (uuid "92")
+      (at -2 -13)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "AE_OR3"
+      (uuid "93")
+      (at 16 -6)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "DE_TO"
+      (uuid "94")
+      (at 23 -6)
+      (angle 0)
+      (lparam "JUNCTION_ID" "Carry"))
+    (wire
+      (ids "1049")
+      (seg "0" h
+        (pts -23 14 -19 14)
+        (connect "74" "OUT_0")
+        (cross -20 "1")
+        (cross -19 "2"))
+      (seg "1" v
+        (pts -20 10 -20 14)
+        (connect "73" "count_enable")
+        (cross 14 "0"))
+      (seg "2" v
+        (pts -19 10 -19 14)
+        (connect "73" "count_up")
+        (cross 14 "0")))
+    (wire
+      (ids "1050")
+      (seg "0" h
+        (pts -26 -3 -21 -3)
+        (connect "75" "CLK")
+        (cross -21 "1"))
+      (seg "1" v
+        (pts -21 -3 -21 1)
+        (connect "73" "clock")
+        (cross -3 "0")))
+    (wire
+      (ids "1051")
+      (seg "0" h
+        (pts -16 6 -14 6)
+        (connect "73" "OUT_2")
+        (cross -14 "1"))
+      (seg "1" v
+        (pts -14 6 -14 9)
+        (cross 6 "0")
+        (cross 9 "2"))
+      (seg "2" h
+        (pts -14 9 -12 9)
+        (connect "76" "IN_0")
+        (cross -14 "1")))
+    (wire
+      (ids "1052")
+      (seg "0" h
+        (pts -16 5 -12 5)
+        (connect "73" "OUT_1")
+        (connect "77" "IN_0")))
+    (wire
+      (ids "1053")
+      (seg "0" h
+        (pts -16 4 -14 4)
+        (connect "73" "OUT_0")
+        (cross -14 "1"))
+      (seg "1" v
+        (pts -14 1 -14 4)
+        (cross 4 "0")
+        (cross 1 "2"))
+      (seg "2" h
+        (pts -14 1 -12 1)
+        (connect "78" "IN_0")
+        (cross -14 "1")))
+    (wire
+      (ids "1054")
+      (seg "0" h
+        (pts 4 12 7 12)
+        (connect "80" "IN_0")
+        (connect "79" "IN_0")))
+    (wire
+      (ids "1055")
+      (seg "0" h
+        (pts 4 10 7 10)
+        (connect "81" "IN_0")
+        (connect "79" "IN_1")))
+    (wire
+      (ids "1056")
+      (seg "0" h
+        (pts 4 8 7 8)
+        (connect "82" "IN_0")
+        (connect "79" "IN_2")))
+    (wire
+      (ids "1057")
+      (seg "0" h
+        (pts 13 10 16 10)
+        (connect "79" "OUT")
+        (connect "83" "IN_0")))
+    (wire
+      (ids "1058")
+      (seg "0" h
+        (pts 0 1 3 1)
+        (connect "85" "IN_0")
+        (connect "84" "IN_0")))
+    (wire
+      (ids "1059")
+      (seg "0" h
+        (pts 0 -1 3 -1)
+        (connect "86" "IN_0")
+        (connect "84" "IN_1")))
+    (wire
+      (ids "1060")
+      (seg "0" h
+        (pts 0 -5 3 -5)
+        (connect "88" "IN_0")
+        (connect "87" "IN_0")))
+    (wire
+      (ids "1061")
+      (seg "0" h
+        (pts 0 -7 3 -7)
+        (connect "89" "IN_0")
+        (connect "87" "IN_1")))
+    (wire
+      (ids "1062")
+      (seg "0" h
+        (pts 0 -11 3 -11)
+        (connect "91" "IN_0")
+        (connect "90" "IN_0")))
+    (wire
+      (ids "1063")
+      (seg "0" h
+        (pts 0 -13 3 -13)
+        (connect "92" "IN_0")
+        (connect "90" "IN_1")))
+    (wire
+      (ids "1064")
+      (seg "0" h
+        (pts 9 0 11 0)
+        (connect "84" "OUT")
+        (cross 11 "1"))
+      (seg "1" v
+        (pts 11 -4 11 0)
+        (cross 0 "0")
+        (cross -4 "2"))
+      (seg "2" h
+        (pts 11 -4 13 -4)
+        (connect "93" "IN_0")
+        (cross 11 "1")))
+    (wire
+      (ids "1065")
+      (seg "0" h
+        (pts 9 -6 13 -6)
+        (connect "87" "OUT")
+        (connect "93" "IN_1")))
+    (wire
+      (ids "1066")
+      (seg "0" h
+        (pts 9 -12 11 -12)
+        (connect "90" "OUT")
+        (cross 11 "1"))
+      (seg "1" v
+        (pts 11 -12 11 -8)
+        (cross -12 "0")
+        (cross -8 "2"))
+      (seg "2" h
+        (pts 11 -8 13 -8)
+        (connect "93" "IN_2")
+        (cross 11 "1")))
+    (wire
+      (ids "1067")
+      (seg "0" h
+        (pts 19 -6 21 -6)
+        (connect "93" "OUT")
+        (connect "94" "IN_0")))))

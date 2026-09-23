@@ -25,6 +25,7 @@
 #include "render/RendererHealth.h"
 #ifdef __APPLE__
 #include "MacAppearance.h"
+#include "CircuitLibrary.h"
 #endif
 #endif
 #include "wx/fileconf.h"
@@ -815,6 +816,9 @@ bool MainApp::OnInit()
     }
 
     // create the main application window
+    // Before the window, so the welcome screen and Open list already show it.
+    if (!renderMode().headlessRender) library::seedSamples();
+
     MainFrame *frame = new MainFrame(VERSION_TITLE(), cmdFilename);
 
     // A headless render still has to realize its window, but nobody should see
