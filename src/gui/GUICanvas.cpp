@@ -1362,7 +1362,7 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 		// Part of a selection with other things in it: the menu acts on all of it.
 		const bool inSelection = std::find(selWires.begin(), selWires.end(), menuWire->getID()) != selWires.end()
 		                         && selWires.size() + selGates.size() > 1;
-		std::vector<unsigned long> targets = inSelection ? selWires : std::vector<unsigned long>{ menuWire->getID() };
+		std::vector<unsigned long> targets = inSelection ? selWires : std::vector<unsigned long>{ static_cast<unsigned long>(menuWire->getID()) };
 		if (inSelection) {
 			for (unsigned long id : selGates) if (guiGate* g = getGate(id)) g->select();
 			for (unsigned long id : selWires) if (guiWire* w = getWire(id)) w->select();

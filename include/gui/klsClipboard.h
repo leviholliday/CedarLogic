@@ -11,6 +11,7 @@
 #ifndef KLSCLIPBOARD_H_
 #define KLSCLIPBOARD_H_
 
+#include <string>
 #include <vector>
 using namespace std;
 

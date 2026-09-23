@@ -623,8 +623,9 @@ void guiWire::calcShape() {
 	{
 		float minx = FLT_MAX, maxx = -FLT_MAX, miny = FLT_MAX, maxy = -FLT_MAX;
 		for (const cl::route::Pin &p : in.pins) {
-			minx = std::min(minx, p.x); maxx = std::max(maxx, p.x);
-			miny = std::min(miny, p.y); maxy = std::max(maxy, p.y);
+			// Parenthesized: windows.h defines min and max as macros.
+			minx = (std::min)(minx, p.x); maxx = (std::max)(maxx, p.x);
+			miny = (std::min)(miny, p.y); maxy = (std::max)(maxy, p.y);
 		}
 		const bool v0 = in.pins[0].verticalHotspot, v1 = in.pins[1].verticalHotspot;
 		hasTrunk = (v0 == v1);
