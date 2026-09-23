@@ -14,6 +14,7 @@
 #include "GateLibrary.h"
 #include "OscopeFrame.h"
 #include "MainApp.h"
+#include "MainFrame.h"
 #include <fstream>
 #include <wx/file.h>
 #include <sstream>
@@ -214,6 +215,8 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 			                                  wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS));
 		}
 		gCanvas = gCanvases[pg.index];
+		if (!pg.name.empty() && wxGetApp().mainframe)
+			wxGetApp().mainframe->SetTabName(gCanvas, wxString::FromUTF8(pg.name.c_str()));
 
 		// A gate's pin connections live on the wires; collect them per gate so a
 		// gate is created with the same (pin -> wire ids) list the old gate-side
@@ -510,6 +513,9 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 	for (unsigned int i = 0; i < glc.size(); i++) {
 		cl::Page pg;
 		pg.index = (int)i;
+		// Carry the tab's name, if the user gave it one.
+		if (wxGetApp().mainframe)
+			pg.name = wxGetApp().mainframe->SavedTabName(glc[i]).ToStdString();
 		for (const auto &entry : *glc[i]->getGateList())
 			pg.gates.push_back(buildGate(entry.second));
 		for (const auto &entry : *glc[i]->getWireList())

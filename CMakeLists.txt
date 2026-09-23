@@ -310,6 +310,54 @@ else()
     endif()
 endif()
 
+# ENABLE_SANITIZERS (see logic/CMakeLists.txt and format/CMakeLists.txt, which
+# already instrument Logic and CircuitFile this way) was only ever wired up to
+# the headless doctest executables -- the app itself silently ignored it. Wire
+# it up here too, so `cmake --preset asan` gives you a real ASan/UBSan-
+# instrumented CedarLogic.app to run normally, not just the unit tests.
+# wxWidgets/Skia stay uninstrumented (they're vendored, and ASan's malloc/free
+# interception is process-wide regardless -- it still catches a use-after-free
+# of one of our own gates or wires even if the freeing call happens to pass
+# through a wx callback), so this adds no extra wx/Skia build cost.
+if(ENABLE_SANITIZERS AND NOT MSVC)
+    # -fno-sanitize=vptr, for two separate reasons -- both found by actually
+    # linking and running this, not guessed:
+    #
+    # 1. UBSan's vptr check needs an RTTI typeinfo symbol for every
+    #    polymorphic type it sees a virtual call on -- including Skia's
+    #    (SkCanvas, GrDirectContext, ...), which SkiaBackend.cpp calls into.
+    #    The prebuilt Skia dist doesn't export those (Skia builds with RTTI
+    #    off), so the app fails to LINK with "undefined symbols: typeinfo for
+    #    SkCanvas" the moment vptr is in the check list and Skia is on the
+    #    link line.
+    #
+    # 2. vptr also needs every TU that instantiates the same template to
+    #    agree on whether it's instrumented -- Logic and CircuitFile are
+    #    separate static libraries linked into this same executable, and
+    #    leaving vptr ON for them while OFF here (for reason 1) split the
+    #    std::stringstream instantiation legacy_cdl.cpp uses into two
+    #    differently-instrumented copies, one per library. The linker keeps
+    #    one arbitrarily, so vptr's own type-metadata table stopped agreeing
+    #    with what actually got called: opening any legacy (v1/v2) circuit,
+    #    which goes through legacy_cdl.cpp's std::stringstream parsing,
+    #    reported "invalid vptr" on a stringstream that was never touched by
+    #    Skia and had nothing wrong with it. Confirmed by reproducing it only
+    #    inside the app (where the split existed) and not in a standalone
+    #    single-TU build of the exact same construct.
+    #
+    #    So Logic and CircuitFile (see their own CMakeLists.txt) drop vptr
+    #    too, for the same NOT MSVC / ENABLE_SANITIZERS condition, to stay
+    #    consistent with whatever links them. Their own solo test executables
+    #    (test_logic, test_format) never mix a second differently-flagged
+    #    copy of the same library, so they lose nothing by this other than
+    #    vptr coverage itself.
+    #
+    # Every other UBSan check (alignment, overflow, null, bounds, shift, ...)
+    # and all of ASan still run everywhere.
+    target_compile_options(CedarLogic PRIVATE -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
+    target_link_options(CedarLogic PRIVATE -fsanitize=address,undefined -fno-sanitize=vptr)
+endif()
+
 # Add the external libraries for CedarLogic
 target_link_libraries(CedarLogic PRIVATE
     Logic

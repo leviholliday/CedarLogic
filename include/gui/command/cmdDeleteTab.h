@@ -5,22 +5,13 @@
 #include <memory>
 #include <vector>
 
-#ifdef __WXOSX__
-class wxNotebook;
-#else
-class wxAuiNotebook;
-#endif
+class wxBookCtrlBase;
 
 //JV - cmdDeleteTab - delete a tab from canvasBook
 class cmdDeleteTab : public klsCommand {
 public:
-#ifdef __WXOSX__
-	cmdDeleteTab(GUICircuit* gCircuit, GUICanvas* gCanvas, wxNotebook* book,
+	cmdDeleteTab(GUICircuit* gCircuit, GUICanvas* gCanvas, wxBookCtrlBase* book,
 		std::vector<GUICanvas *> *canvases, unsigned long ID);
-#else
-	cmdDeleteTab(GUICircuit* gCircuit, GUICanvas* gCanvas, wxAuiNotebook* book,
-		std::vector<GUICanvas *> *canvases, unsigned long ID);
-#endif
 
 	virtual ~cmdDeleteTab();
 
@@ -34,11 +25,7 @@ protected:
 	std::vector < unsigned long > gates;
 	std::vector < unsigned long > wires;
 	std::stack<std::unique_ptr<klsCommand>> cmdList;
-#ifdef __WXOSX__
-	wxNotebook* canvasBook;
-#else
-	wxAuiNotebook* canvasBook;
-#endif
+	wxBookCtrlBase* canvasBook;
 	std::vector< GUICanvas* >* canvases;
 	unsigned long canvasID;
 

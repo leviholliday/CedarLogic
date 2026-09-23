@@ -114,12 +114,30 @@ void guiGate::updateBBoxes( bool noUpdateWires ) {
 		hs++;
 	}
 
-	// Convert bbox to world-space:
+	// Convert bbox to world-space. A gate with no shape geometry at all (an
+	// unrecognized library type falls back to a bare guiGate with none --
+	// see GUICircuit::createGate) leaves modelBBox at its reset() sentinel
+	// (min = FLT_MAX, max = -FLT_MAX). Transforming those four corners
+	// anyway, as this used to, feeds worldBBox both a huge-positive and a
+	// huge-negative coordinate directly via addPoint -- which doesn't check
+	// emptiness the way addBBox does -- so worldBBox itself comes out
+	// spanning the full float range rather than empty. That poisoned box is
+	// then what getBBox() and setBBox() hand out for this gate from here on,
+	// and it stays a false "huge but not empty" box no matter what later
+	// checks modelBBox.empty() (klsBBox::addBBox, GUICanvas::renderToScene's
+	// world accumulation): whatever a caller folds it into gets its width
+	// blown up past FLT_MAX, which overflows a float to infinity, which is
+	// UB the moment anything casts a value derived from it to an integer
+	// type (found via the zoom/render scale computation). Stay empty here
+	// instead, so every caller's own empty() check -- which already exists,
+	// and is already correct -- actually sees the truth.
 	klsBBox worldBBox;
-	worldBBox.addPoint( modelToWorld( modelBBox.getTopLeft()     ) );
-	worldBBox.addPoint( modelToWorld( modelBBox.getTopRight()    ) );
-	worldBBox.addPoint( modelToWorld( modelBBox.getBottomLeft()  ) );
-	worldBBox.addPoint( modelToWorld( modelBBox.getBottomRight() ) );
+	if (!modelBBox.empty()) {
+		worldBBox.addPoint( modelToWorld( modelBBox.getTopLeft()     ) );
+		worldBBox.addPoint( modelToWorld( modelBBox.getTopRight()    ) );
+		worldBBox.addPoint( modelToWorld( modelBBox.getBottomLeft()  ) );
+		worldBBox.addPoint( modelToWorld( modelBBox.getBottomRight() ) );
+	}
 	// Body-only box for selection, captured before setBBox->makeValidBBox grows
 	// the collision box to enclose the hotspot pins.
 	selectionBBox = worldBBox;
@@ -521,7 +539,8 @@ std::string guiGate::getHotspotPal(const std::string &hotspot) {
 }
 
 bool guiGate::isVerticalHotspot( string hsName ) {
-	float x, y;
+	// Zeroed: getHotspotCoords leaves them untouched for a pin that isn't there.
+	float x = 0.0f, y = 0.0f;
 	getHotspotCoords( hsName, x, y );
 	return ( min( getBBox().getTop()-y, y-getBBox().getBottom() ) < min( getBBox().getRight()-x, x-getBBox().getLeft() ) );
 }

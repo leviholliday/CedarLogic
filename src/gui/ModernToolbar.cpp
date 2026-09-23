@@ -526,7 +526,9 @@ wxBitmap ModernToolbar::RenderPreview(int style, bool dark, int width, double sc
 	s.canvas = dark ? wxColour(19, 21, 25) : *wxWHITE;
 	s.canRedo = false;
 	const int H = BarHeight();
-	const std::vector<Item> items = layout(style, 0, s, width, H);
+	// The preview shows the toolbar you would actually get, hidden tools and
+	// all -- it used to ignore the checkboxes below it and draw every tool.
+	const std::vector<Item> items = layout(style, appConfig().appSettings.toolbarHidden, s, width, H);
 	wxBitmap bmp((int)std::lround(width * scale), (int)std::lround(H * scale), 24);
 	{
 		wxMemoryDC dc(bmp);

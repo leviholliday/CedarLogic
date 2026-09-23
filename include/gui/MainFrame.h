@@ -18,13 +18,12 @@
 #include "wx/thread.h"
 #include "wx/toolbar.h"
 #include "wx/gbsizer.h"
-#ifdef __WXOSX__
+// The classic tabs are a wxNotebook on every platform now (the Windows build
+// used to have a wxAuiNotebook), and our own tabs sit over a wxSimplebook.
 #include "wx/notebook.h"
-#else
-#include "wx/aui/auibook.h"
-#endif
 #include "wx/slider.h"
 #include "wx/splitter.h"
+#include "wx/simplebook.h"
 #include "threadLogic.h"
 #include "GUICanvas.h"
 #include "FileLock.h"
@@ -35,6 +34,7 @@ class ModernToolbar;
 #include "klsMiniMap.h"
 #include <thread>
 #include <atomic>
+#include <map>
 
 #define SIDE_PANEL_MIN_WIDTH 150
 #define SIDE_PANEL_MAX_WIDTH 480
@@ -77,14 +77,25 @@ enum
 	Tool_NewTab,
 	Tool_DeleteTab,
 	Tool_CloseTab,
+	Tool_ReopenTab,
+	Tool_SplitRight,
+	Tool_SplitClose,
+	Tool_FocusOtherPane,
+	Tool_SplitWider,
+	Tool_SplitNarrower,
 
 	Help_ReportABug,
 	Help_RequestAFeature,
 	Help_DownloadLatestVersion,
 	Help_KeyboardShortcuts,
+	Help_Welcome,
+	Help_SetUp,
+	Help_Tour,
 
 	ID_SIM_PUMP
 };
+
+class TabStrip;
 
 class MainFrame : public wxFrame {
 public:
@@ -109,11 +120,7 @@ public:
 	void OnIdle(wxTimerEvent& event);
 	void OnAutosaveTimer(wxTimerEvent& event);
 	void OnSize(wxSizeEvent& event);
-#ifdef __WXOSX__
 	void OnNotebookPage(wxBookCtrlEvent& event);
-#else
-	void OnNotebookPage(wxAuiNotebookEvent& event);
-#endif
 	void OnMaximize(wxMaximizeEvent& event);
 	void OnUndo(wxCommandEvent& event);
 	void OnRedo(wxCommandEvent& event);
@@ -132,11 +139,7 @@ public:
 	void OnTimeStepModSlider(wxScrollEvent& event);
 	void OnLock(wxCommandEvent& event);
 	void OnNewTab(wxCommandEvent& event);
-#ifdef __WXOSX__
 	void OnCloseTab(wxCommandEvent& event);
-#else
-	void OnDeleteTab(wxAuiNotebookEvent& event);
-#endif
 	void OnReportABug(wxCommandEvent& event);
 	void OnRequestAFeature(wxCommandEvent& event);
 	void OnDownloadLatestVersion(wxCommandEvent& event);
@@ -310,12 +313,93 @@ private:
 	// letting go of Ctrl (or clicking a card) switches. A quick tap just goes
 	// back to the previous page without showing anything.
 	vector< GUICanvas* > canvasMRU;          // most recently used first
+	// After closing a tab, go back to the one used before it rather than to
+	// whichever tab happens to sit next door.
+	void selectTabAfterClosing(GUICanvas* closed);
+
+public:
+	// Tab titles follow the canvas order, so anything that adds or removes one
+	// calls this afterwards.
+	void RenumberTabs();
+	// A Yes/No prompt that also takes Y, N and Escape.
+	bool AskYesNo(const wxString& title, const wxString& message);
+
+	// Split view, the way Arc does it: two panes, each with its own tab strip.
+	// Tabs drag between them; a pane closes when its last tab leaves.
+	void SplitWith(GUICanvas* canvas, bool onRight);
+
+	// What TabStrip needs from us.
+	const vector<GUICanvas*>& Canvases() const { return canvases; }
+	GUICanvas* CurrentCanvas() const { return currentCanvas; }
+	void SelectCanvas(GUICanvas* canvas);
+	void CloseTabCanvas(GUICanvas* canvas);
+	void NewTabFromStrip();
+	void MoveTab(int from, int to);
+	void CloseSplit();                  // the second pane's tabs come back
+	bool IsSplit() const { return PaneCount() > 1; }
+	int PaneCount() const;
+	int PaneIndexOf(GUICanvas* canvas) const;
+	vector<GUICanvas*> PaneCanvases(int pane) const;
+	int PaneAtScreen(const wxPoint& screenPos) const;
+	wxRect PaneScreenRect(int pane) const;
+	void MoveCanvasToPane(GUICanvas* canvas, int pane, int slot, bool onRight = true);
+	// Page bookkeeping for the tab commands, which must not assume a canvas
+	// lives in any particular pane (undo can run long after it moved).
+	void DetachCanvasPage(GUICanvas* canvas);
+	void AttachCanvasPage(GUICanvas* canvas, int canvasIndex);
+	void NewTabInPane(int pane);
+	int TabNumber(GUICanvas* canvas);
+	// How far the first tab has to start from the left edge. With the toolbar
+	// hidden the strip is the top row of the window, where the red/yellow/green
+	// buttons live -- unless the window is full screen, which has none.
+	int TabStripLeftInset() const;
+	bool tabStripIsTopRow() const;
+	void applyTitlebarForTopRow();
+	// What a tab is called: the user's own name for it, or "Page N".
+	wxString TabLabel(GUICanvas* canvas);
+	void RenameTab(GUICanvas* canvas);
+	// The user's own name for a tab, empty when it is still "Page N". Saved
+	// with the circuit, so tabs keep their names between sessions.
+	wxString SavedTabName(GUICanvas* canvas) const;
+	void SetTabName(GUICanvas* canvas, const wxString& name);
+	void FocusCanvas(GUICanvas* canvas);   // make this the canvas being worked in
+	void NudgeSplitSash(int dx);
+	// How many times Save has been used this session (the guided tour
+	// watches for one).
+	int ExplicitSaveCount() const { return explicitSaves; }
+
+private:
+	int explicitSaves = 0;
+public:
+
+private:
+	void OnNewTabHere(wxCommandEvent& event);
+	void OnSplitRight(wxCommandEvent& event);
+	void OnSplitClose(wxCommandEvent& event);
+	void OnFocusOtherPane(wxCommandEvent& event);
+	// The canvas a new split should show: the one used most recently that is
+	// not the current one, or a brand new tab when there is nothing else.
+	GUICanvas* pickSplitPartner();
+	// Close a tab: dim it, then actually remove it. Only one tab is ever on
+	// its way out; starting another close finishes the first straight away.
+	void beginCloseTab(GUICanvas* canvas);
+	void finishCloseTab(GUICanvas* canvas);
+	// Finish a close that is still dimming, now -- before anything counts
+	// the tabs, saves them, or closes another.
+	void flushPendingClose();
+	// Forget a close that is still dimming, without doing it: for when the
+	// whole circuit is being replaced anyway.
+	void cancelPendingClose();
+	void OnReopenTab(wxCommandEvent& event);
 	vector< GUICanvas* > tabSwitchList;      // this session's cards, <= 10
 	int tabSwitchSel = 0;
 	bool tabSwitchActive = false;
 	bool tabSwitchShown = false;
 	wxLongLong tabSwitchStart;
 	wxTimer* tabSwitchTimer = nullptr;
+	wxSplitterWindow* canvasSplit = nullptr;   // the two panes sit in here
+	wxTimer* closeTabTimer = nullptr;   // lets a closing tab finish dimming
+	GUICanvas* pendingCloseCanvas = nullptr;   // dimming its way out
 	void noteCanvasUsed(GUICanvas* canvas);
 	void handleTabSwitchKey(bool backwards);
 	void showTabSwitcher();
@@ -379,12 +463,46 @@ private:
 	void stepSimulation();
 	void drainLogicMessages();
 
-#ifdef __WXOSX__
-	wxNotebook* canvasBook;
-#else
-	//JV - Changed to AuiNoteBook to allow for close tab button
-	wxAuiNotebook* canvasBook;
-#endif
+	// A book with no tabs of its own: TabStrip draws them, so the same code
+	// runs on every platform and a tab can be dragged.
+	// One side of the window: a tab strip over a book of canvases.
+	struct CanvasPane {
+		wxPanel* host = nullptr;
+		TabStrip* strip = nullptr;      // null with the classic tabs
+		wxBookCtrlBase* book = nullptr;
+	};
+	CanvasPane panes[2];
+	// Where a closed (or undone) tab's canvas waits, hidden, while the undo
+	// history still holds it. RemovePage leaves a window parented to its old
+	// book, so without this, a split pane or a rebuilt tab bar took every
+	// such canvas down with it and the next undo reached freed memory.
+	wxWindow* canvasParking = nullptr;
+	// wxSimplebook under our own tab strip, or a plain wxNotebook when the
+	// user asks for the classic tabs. Both are wxBookCtrlBase, so nothing
+	// else has to care which is in there.
+	wxBookCtrlBase* canvasBook;   // panes[0].book, which the tab commands use
+	bool usingClassicTabs = false;
+	std::map<GUICanvas*, int> tabNumbers;
+	std::map<GUICanvas*, wxString> tabNames;
+	int pendingNewTabPane = 0;
+	void buildPane(int index);
+	void collapsePaneIfEmpty(int pane);
+	// Down to one tab for a new or freshly opened circuit. Only called once
+	// the undo history has been cleared: it destroys the closed tabs that
+	// history was keeping, and forgets every tab's number and name.
+	void dropExtraTabs();
+	// Focus mode: slide the side panel out of the window rather than making
+	// it vanish. See MainFrame::animateSidePanel.
+	void animateSidePanel(bool show);
+	void stepSidePanelAnim();
+	wxTimer* sidePanelTimer = nullptr;
+	wxRect panelRect, miniRect, sashRect, splitRect, barRect;   // where they sit when open
+	int barTravel = 0;              // how far the toolbar has to rise to leave
+	double panelAnimT = 1.0;        // 0 fully out, 1 fully in
+	bool panelAnimShowing = true;
+	// Swap between our tab strip and the system one, keeping every tab.
+	void rebuildTabUi();
+	void forgetCanvas(GUICanvas* canvas);
 	
 	// Instance variables
 	bool sizeChanged;
@@ -399,6 +517,12 @@ private:
 	wxLongLong lastSnapshotMs = 0;
 	std::string pendingLibraryOpen;   // reopen at startup, once the pump runs
 	bool saveToLibrary(bool explicitSave);
+	// Save before the circuit on screen is replaced, or the app quits. True
+	// when it is safe to carry on: nothing to save, saved, or -- if saving
+	// failed -- the user chose to discard the changes rather than stay.
+	bool saveBeforeLeaving();
+	// Autosave failing is reported once per run of failures, not every tick.
+	bool autosaveFailing = false;
 	bool openLibraryCircuit(const std::string& id);
 	bool importCircuitFile(const wxString& path);
 	void clearToNewCircuit();

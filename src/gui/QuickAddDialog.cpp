@@ -1,21 +1,55 @@
+/*****************************************************************************
+   Project: CEDAR Logic Simulator
+   QuickAddDialog: the gate picker the A key opens.
+
+   A search field over a list of results, each drawn with the gate's own
+   shape. Built like the Your Circuits window so the app has one idea of what
+   a picker looks like.
+*****************************************************************************/
+
 #include "QuickAddDialog.h"
 #include "GateLibrary.h"
-#include "wx/listbox.h"
-#include "wx/textctrl.h"
-#include "wx/statbmp.h"
+#include "Settings.h"
+#include "RenderMode.h"
+#include "render/RenderStyle.h"
+#include "wx/srchctrl.h"
+#include "wx/scrolwin.h"
+#include "wx/dcbuffer.h"
 #include "wx/dcmemory.h"
 #include "wx/sizer.h"
+#include "wx/stattext.h"
 #include "wx/graphics.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cfloat>
+#include <functional>
 
 DECLARE_APP(MainApp)
 
-#define ID_SEARCH_FIELD 7770
-#define ID_RESULT_LIST 7771
-#define PREVIEW_SIZE 128
+namespace {
+
+const int ROW_H = 54, THUMB = 40;
+
+bool isDark() { return renderMode().darkMode; }
+
+wxColour accentColour() {
+	cl::render::RenderStyle rs;
+	rs.darkMode = isDark();
+	rs.accentIndex = appConfig().appSettings.accentColor;
+	const cl::render::Color c = rs.accent();
+	return wxColour((unsigned char)(c.r * 255), (unsigned char)(c.g * 255), (unsigned char)(c.b * 255));
+}
+
+wxColour withAlpha(const wxColour& c, double a) {
+	return wxColour(c.Red(), c.Green(), c.Blue(), (unsigned char)std::lround(255 * a));
+}
+
+wxColour paperColour() { return isDark() ? wxColour(28, 31, 37) : wxColour(250, 250, 252); }
+wxColour inkColour()   { return isDark() ? wxColour(226, 230, 238) : wxColour(30, 33, 40); }
+wxColour dimColour()   { return withAlpha(inkColour(), 0.55); }
+
+}  // namespace
 
 // A white-cleared bitmap. Two gotchas rolled into one helper: plain
 // `wxBitmap(w,h)` is uninitialized (garbage, often black), and the default depth
@@ -25,16 +59,160 @@ DECLARE_APP(MainApp)
 static wxBitmap blankPreview(int width, int height) {
 	wxBitmap bmp(width, height, 24);
 	wxMemoryDC dc(bmp);
-	dc.SetBackground(*wxWHITE_BRUSH);
+	dc.SetBackground(wxBrush(paperColour()));
 	dc.Clear();
 	return bmp;
 }
 
+// The results, drawn by hand: the gate's picture, its name, and where it
+// lives in the library.
+class GateResultList : public wxScrolledCanvas {
+public:
+	struct Row {
+		wxString caption;
+		wxString detail;      // the gate's own name and library
+		std::string gateName;
+	};
+
+	GateResultList(wxWindow* parent, QuickAddDialog* owner)
+		: wxScrolledCanvas(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+		                   wxBORDER_NONE | wxVSCROLL), owner(owner) {
+		SetBackgroundStyle(wxBG_STYLE_PAINT);
+		SetBackgroundColour(paperColour());
+		SetScrollRate(0, 1);
+		Bind(wxEVT_PAINT, &GateResultList::OnPaint, this);
+		Bind(wxEVT_MOTION, &GateResultList::OnMotion, this);
+		Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) { hover = -1; Refresh(); });
+		Bind(wxEVT_LEFT_DOWN, &GateResultList::OnDown, this);
+		Bind(wxEVT_LEFT_DCLICK, [this](wxMouseEvent& e) {
+			const int i = RowAt(e.GetPosition());
+			if (i >= 0) { Select(i); if (onActivate) onActivate(); }
+		});
+		glide.Bind(wxEVT_TIMER, [this](wxTimerEvent&) { Step(); });
+		Bind(wxEVT_MOUSEWHEEL, [this](wxMouseEvent& e) {
+			if (e.GetWheelAxis() != wxMOUSE_WHEEL_VERTICAL) { e.Skip(); return; }
+			const double lines = (double)e.GetWheelRotation() /
+			                     (e.GetWheelDelta() ? e.GetWheelDelta() : 120);
+			GlideTo(target - lines * 3 * 18);
+		});
+	}
+
+	void SetRows(std::vector<Row> r) {
+		rows = std::move(r);
+		selection = rows.empty() ? -1 : 0;
+		SetVirtualSize(0, (int)rows.size() * ROW_H);
+		glide.Stop();
+		here = target = 0;
+		Scroll(0, 0);
+		Refresh();
+	}
+	int Count() const { return (int)rows.size(); }
+	int Selection() const { return selection; }
+	std::string SelectedGate() const {
+		return (selection >= 0 && selection < (int)rows.size()) ? rows[selection].gateName : std::string();
+	}
+	void Select(int i) {
+		if (rows.empty()) return;
+		selection = std::max(0, std::min((int)rows.size() - 1, i));
+		ScrollIntoView();
+		Refresh();
+	}
+	void Move(int delta) { Select(selection + delta); }
+
+	std::function<void()> onActivate;
+
+private:
+	int MaxScroll() const { return std::max(0, (int)rows.size() * ROW_H - GetClientSize().y); }
+	void GlideTo(double y) {
+		target = std::max(0.0, std::min((double)MaxScroll(), y));
+		if (!glide.IsRunning()) glide.Start(16);
+	}
+	void Step() {
+		const double d = target - here;
+		if (std::fabs(d) < 0.5) { here = target; glide.Stop(); }
+		else here += d * 0.28;
+		Scroll(0, (int)std::lround(here));
+	}
+	void ScrollIntoView() {
+		const int h = GetClientSize().y;
+		const int top = selection * ROW_H, bottom = top + ROW_H;
+		if (top < target) GlideTo(top - 4);
+		else if (bottom > target + h) GlideTo(bottom - h + 4);
+	}
+	int RowAt(const wxPoint& p) const {
+		const int y = p.y + GetViewStart().y;
+		const int i = y / ROW_H;
+		return (y >= 0 && i < (int)rows.size()) ? i : -1;
+	}
+	void OnMotion(wxMouseEvent& e) {
+		const int h = RowAt(e.GetPosition());
+		if (h != hover) { hover = h; Refresh(); }
+	}
+	void OnDown(wxMouseEvent& e) {
+		const int i = RowAt(e.GetPosition());
+		if (i >= 0) Select(i);
+	}
+
+	void OnPaint(wxPaintEvent&) {
+		wxAutoBufferedPaintDC dc(this);
+		dc.SetBackground(wxBrush(paperColour()));
+		dc.Clear();
+		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+		if (!gc) return;
+		gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
+
+		const int top = GetViewStart().y;
+		const int w = GetClientSize().x;
+		const wxColour accent = accentColour(), ink = inkColour();
+
+		if (rows.empty()) {
+			gc->SetFont(wxFont(wxFontInfo(13)), dimColour());
+			const wxString msg = "No gates match that.";
+			double tw, th;
+			gc->GetTextExtent(msg, &tw, &th);
+			gc->DrawText(msg, (w - tw) / 2.0, 30);
+			return;
+		}
+
+		gc->Translate(0, -top);
+		const int first = std::max(0, top / ROW_H);
+		const int last = std::min((int)rows.size() - 1, (top + GetClientSize().y) / ROW_H);
+		for (int i = first; i <= last; i++) {
+			const Row& row = rows[i];
+			const int y = i * ROW_H;
+			const bool sel = (i == selection), hot = (i == hover);
+
+			if (sel || hot) {
+				gc->SetBrush(wxBrush(sel ? withAlpha(accent, isDark() ? 0.26 : 0.16)
+				                         : withAlpha(ink, 0.06)));
+				gc->SetPen(*wxTRANSPARENT_PEN);
+				gc->DrawRoundedRectangle(8, y + 3, w - 16, ROW_H - 6, 11);
+			}
+
+			const wxBitmap thumb = owner->previewFor(row.gateName, THUMB);
+			if (thumb.IsOk()) gc->DrawBitmap(thumb, 20, y + (ROW_H - THUMB) / 2.0, THUMB, THUMB);
+
+			gc->SetFont(wxFont(wxFontInfo(13).Bold()), ink);
+			gc->DrawText(row.caption, 76, y + 10);
+			gc->SetFont(wxFont(wxFontInfo(10.5)), dimColour());
+			gc->DrawText(row.detail, 76, y + 29);
+		}
+	}
+
+	QuickAddDialog* owner;
+	std::vector<Row> rows;
+	int selection = -1, hover = -1;
+	wxTimer glide;
+	double here = 0, target = 0;
+};
+
 QuickAddDialog::QuickAddDialog(wxWindow* parent)
-	: wxDialog(parent, wxID_ANY, "Add Component", wxDefaultPosition, wxSize(480, 400),
+	: wxDialog(parent, wxID_ANY, "Add a Gate", wxDefaultPosition, wxSize(520, 520),
 		wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
 
-	// Collect all gates from all libraries
+	SetBackgroundColour(paperColour());
+
+	// Every gate in every library.
 	auto& libraries = gateLibrary().libraries;
 	for (auto& libPair : libraries) {
 		for (auto& gatePair : libPair.second) {
@@ -48,33 +226,56 @@ QuickAddDialog::QuickAddDialog(wxWindow* parent)
 
 	wxBoxSizer* topSizer = new wxBoxSizer(wxVERTICAL);
 
-	searchField = new wxTextCtrl(this, ID_SEARCH_FIELD, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER);
-	topSizer->Add(searchField, 0, wxEXPAND | wxALL, 16);
+	wxStaticText* head = new wxStaticText(this, wxID_ANY, "Add a Gate");
+	head->SetFont(wxFont(wxFontInfo(19).Bold()));
+	head->SetForegroundColour(inkColour());
+	topSizer->Add(head, 0, wxLEFT | wxRIGHT | wxTOP, 22);
 
-	wxBoxSizer* contentSizer = new wxBoxSizer(wxHORIZONTAL);
+	wxStaticText* hint = new wxStaticText(this, wxID_ANY,
+		"Type to search, then press Return. The gate follows your mouse onto the canvas.");
+	hint->SetForegroundColour(dimColour());
+	topSizer->Add(hint, 0, wxLEFT | wxRIGHT | wxTOP, 22);
 
-	resultList = new wxListBox(this, ID_RESULT_LIST, wxDefaultPosition, wxDefaultSize, 0, NULL, wxLB_SINGLE);
-	contentSizer->Add(resultList, 1, wxEXPAND | wxRIGHT, 12);
+	searchField = new wxSearchCtrl(this, wxID_ANY);
+	searchField->ShowCancelButton(true);
+	searchField->SetDescriptiveText("Search gates");
+	topSizer->Add(searchField, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);
 
-	// Preview image on the right
-	wxBitmap blank = blankPreview(PREVIEW_SIZE, PREVIEW_SIZE);
-	previewImage = new wxGenericStaticBitmap(this, wxID_ANY, blank, wxDefaultPosition, wxSize(PREVIEW_SIZE, PREVIEW_SIZE));
-	contentSizer->Add(previewImage, 0, wxALIGN_TOP);
-
-	topSizer->Add(contentSizer, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 16);
+	resultList = new GateResultList(this, this);
+	topSizer->Add(resultList, 1, wxALL | wxEXPAND, 14);
 
 	SetSizer(topSizer);
 
-	// Populate with all gates initially
 	updateList("");
 
-	// Bind events
-	searchField->Bind(wxEVT_TEXT, &QuickAddDialog::OnTextChanged, this);
-	searchField->Bind(wxEVT_KEY_DOWN, &QuickAddDialog::OnTextKey, this);
-	resultList->Bind(wxEVT_LISTBOX_DCLICK, &QuickAddDialog::OnListDClick, this);
-	resultList->Bind(wxEVT_LISTBOX, &QuickAddDialog::OnListSelect, this);
+	resultList->onActivate = [this]() { confirm(); };
+	searchField->Bind(wxEVT_TEXT, [this](wxCommandEvent&) {
+		updateList(searchField->GetValue().ToStdString());
+	});
 
+	// Arrows move the highlight while you keep typing; Return picks.
+	Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& e) {
+		switch (e.GetKeyCode()) {
+			case WXK_DOWN:     resultList->Move(1); return;
+			case WXK_UP:       resultList->Move(-1); return;
+			case WXK_PAGEDOWN: resultList->Move(8); return;
+			case WXK_PAGEUP:   resultList->Move(-8); return;
+			case WXK_RETURN:
+			case WXK_NUMPAD_ENTER: confirm(); return;
+			case WXK_ESCAPE:   EndModal(wxID_CANCEL); return;
+			default: e.Skip();
+		}
+	});
+
+	CentreOnParent();
 	searchField->SetFocus();
+}
+
+wxBitmap QuickAddDialog::previewFor(const string& gateName, int size) {
+	auto it = previewCache.find(gateName);
+	if (it == previewCache.end())
+		it = previewCache.emplace(gateName, renderGatePreview(gateName, size, size)).first;
+	return it->second;
 }
 
 wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, int height) {
@@ -152,12 +353,12 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 
 	wxBitmap big(W, H, 24);  // 24-bit: no alpha channel (see blankPreview)
 	wxMemoryDC dc(big);
-	dc.SetBackground(*wxWHITE_BRUSH);
+	dc.SetBackground(wxBrush(paperColour()));
 	dc.Clear();
 
 	wxGraphicsContext* gc = wxGraphicsContext::Create(dc);
 	if (gc) {
-		gc->SetPen(wxPen(*wxBLACK, 2.0 * SS));  // ~2px once downscaled
+		gc->SetPen(wxPen(inkColour(), 2.0 * SS));  // ~2px once downscaled
 		wxGraphicsPath path = gc->CreatePath();
 		for (auto& s : segs) {
 			path.MoveToPoint(offsetX + (s.x1 - minX) * scale, offsetY + (maxY - s.y1) * scale);
@@ -166,7 +367,7 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 		gc->StrokePath(path);
 		delete gc;  // flush the drawing into the bitmap before it's read back
 	} else {
-		dc.SetPen(wxPen(*wxBLACK, 2 * SS));
+		dc.SetPen(wxPen(inkColour(), 2 * SS));
 		for (auto& s : segs) {
 			dc.DrawLine((int)(offsetX + (s.x1 - minX) * scale), (int)(offsetY + (maxY - s.y1) * scale),
 			            (int)(offsetX + (s.x2 - minX) * scale), (int)(offsetY + (maxY - s.y2) * scale));
@@ -178,30 +379,14 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 	return wxBitmap(img);
 }
 
-void QuickAddDialog::updatePreview() {
-	int sel = resultList->GetSelection();
-	if (sel == wxNOT_FOUND) {
-		previewImage->SetBitmap(blankPreview(PREVIEW_SIZE, PREVIEW_SIZE));
-		return;
-	}
-
-	wxStringClientData* data = (wxStringClientData*)resultList->GetClientObject(sel);
-	if (!data) return;
-	string gateName = data->GetData().ToStdString();
-
-	auto it = previewCache.find(gateName);
-	if (it == previewCache.end()) {
-		it = previewCache.emplace(gateName, renderGatePreview(gateName, PREVIEW_SIZE, PREVIEW_SIZE)).first;
-	}
-	previewImage->SetBitmap(it->second);
-}
-
 int QuickAddDialog::fuzzyScore(const string& query, const string& target) {
 	if (query.empty()) return 0;
 
+	// Through unsigned char: tolower() of a negative char (any byte of a
+	// non-ASCII character someone types) is undefined.
 	string lowerQuery, lowerTarget;
-	for (char c : query) lowerQuery += tolower(c);
-	for (char c : target) lowerTarget += tolower(c);
+	for (char c : query) lowerQuery += (char)tolower((unsigned char)c);
+	for (char c : target) lowerTarget += (char)tolower((unsigned char)c);
 
 	// Exact substring match gets highest score
 	if (lowerTarget.find(lowerQuery) != string::npos) {
@@ -232,13 +417,11 @@ int QuickAddDialog::fuzzyScore(const string& query, const string& target) {
 	return score;
 }
 
-void QuickAddDialog::updateList(const string& query) {
-	resultList->Clear();
 
+void QuickAddDialog::updateList(const string& query) {
 	struct ScoredEntry {
 		int score;
-		string displayText;
-		string gateName;
+		GateEntry entry;
 	};
 	vector<ScoredEntry> scored;
 
@@ -247,74 +430,31 @@ void QuickAddDialog::updateList(const string& query) {
 		int captionScore = fuzzyScore(query, entry.caption);
 		int nameScore = fuzzyScore(query, entry.gateName);
 		int bestScore = max(captionScore, nameScore);
-
-		if (query.empty() || bestScore > 0) {
-			string display = entry.caption;
-			if (entry.caption != entry.gateName) {
-				display += "  [" + entry.gateName + "]";
-			}
-			scored.push_back({bestScore, display, entry.gateName});
-		}
+		if (query.empty() || bestScore > 0) scored.push_back({bestScore, entry});
 	}
 
-	// Sort by score descending
-	sort(scored.begin(), scored.end(), [](const ScoredEntry& a, const ScoredEntry& b) {
+	// Stable, so equal scores keep library order -- with nothing typed every
+	// score is 0, and a plain sort shuffled the whole list.
+	stable_sort(scored.begin(), scored.end(), [](const ScoredEntry& a, const ScoredEntry& b) {
 		return a.score > b.score;
 	});
 
+	vector<GateResultList::Row> rows;
 	for (auto& s : scored) {
-		resultList->Append(s.displayText, new wxStringClientData(s.gateName));
+		GateResultList::Row row;
+		row.caption = s.entry.caption.empty() ? s.entry.gateName : s.entry.caption;
+		row.detail = s.entry.libraryName;
+		if (s.entry.caption != s.entry.gateName && !s.entry.caption.empty())
+			row.detail = wxString(s.entry.gateName) + wxString::FromUTF8("  ·  ") + s.entry.libraryName;
+		row.gateName = s.entry.gateName;
+		rows.push_back(row);
 	}
-
-	if (resultList->GetCount() > 0) {
-		resultList->SetSelection(0);
-	}
-
-	updatePreview();
-}
-
-void QuickAddDialog::OnTextChanged(wxCommandEvent& evt) {
-	updateList(searchField->GetValue().ToStdString());
-}
-
-void QuickAddDialog::OnTextKey(wxKeyEvent& evt) {
-	int key = evt.GetKeyCode();
-	if (key == WXK_DOWN) {
-		int sel = resultList->GetSelection();
-		if (sel < (int)resultList->GetCount() - 1) {
-			resultList->SetSelection(sel + 1);
-			updatePreview();
-		}
-	} else if (key == WXK_UP) {
-		int sel = resultList->GetSelection();
-		if (sel > 0) {
-			resultList->SetSelection(sel - 1);
-			updatePreview();
-		}
-	} else if (key == WXK_RETURN || key == WXK_NUMPAD_ENTER) {
-		confirm();
-	} else if (key == WXK_ESCAPE) {
-		EndModal(wxID_CANCEL);
-	} else {
-		evt.Skip();
-	}
-}
-
-void QuickAddDialog::OnListDClick(wxCommandEvent& evt) {
-	confirm();
-}
-
-void QuickAddDialog::OnListSelect(wxCommandEvent& evt) {
-	updatePreview();
+	resultList->SetRows(rows);
 }
 
 void QuickAddDialog::confirm() {
-	int sel = resultList->GetSelection();
-	if (sel != wxNOT_FOUND) {
-		wxStringClientData* data = (wxStringClientData*)resultList->GetClientObject(sel);
-		if (data) {
-			selectedGate = data->GetData().ToStdString();
-		}
-		EndModal(wxID_OK);
-	}
+	const string gate = resultList->SelectedGate();
+	if (gate.empty()) return;
+	selectedGate = gate;
+	EndModal(wxID_OK);
 }

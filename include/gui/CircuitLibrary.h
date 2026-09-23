@@ -5,7 +5,7 @@
    Each circuit is a folder under <user data>/Library/<id>/:
      circuit.cdl        the current version (what's opened and autosaved)
      name.txt           its display name
-     versions/*.cdl     snapshots, named by the time they were taken
+     versions/<t>.cdl   snapshots, named by the time <t> they were taken
    Deleting moves the folder to Library/.Trash rather than erasing it.
 *****************************************************************************/
 

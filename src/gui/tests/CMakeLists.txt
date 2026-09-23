@@ -37,10 +37,11 @@ target_include_directories(test_collision PRIVATE
 target_link_libraries(test_collision PRIVATE doctest::doctest)
 
 # Force-include the GLfloat shim so both the test and klsCollisionChecker.cpp
-# compile without the real GL/OS headers.
+# compile without the real GL/OS headers. The path is quoted inside SHELL: so a
+# checkout under a directory with a space in its name doesn't split it in two.
 target_compile_options(test_collision PRIVATE
 	"$<$<CXX_COMPILER_ID:MSVC>:/FI${_shim}>"
-	"$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:SHELL:-include ${_shim}>"
+	"$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:SHELL:-include \"${_shim}\">"
 )
 
 if(ENABLE_SANITIZERS AND NOT MSVC)

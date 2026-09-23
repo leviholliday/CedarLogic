@@ -10,6 +10,8 @@
 
 #include "MainApp.h"
 #include "MainFrame.h"
+#include "Welcome.h"
+#include "ShortcutsSheet.h"
 #include "wx/cmdline.h"
 #include "../version.h"
 #include <cstdlib>   // std::_Exit for the headless --render one-shot
@@ -556,6 +558,18 @@ MainApp::MainApp()
 #endif
 }
 
+// The help book, parsed the first time it is actually wanted. Loading it at
+// startup cost every launch a delay that only a Help click ever needed.
+void MainApp::ensureHelpBookLoaded() {
+	if (helpBookLoaded || helpController == nullptr) return;
+	helpBookLoaded = true;
+#ifndef _WIN32
+	if (!wxFileExists(appConfig().appSettings.helpFile)) return;
+	if (!helpController->AddBook(appConfig().appSettings.helpFile))
+		wxLogWarning("Failed to load help file: %s", appConfig().appSettings.helpFile);
+#endif
+}
+
 bool MainApp::OnInit()
 {
     installCrashHandler();
@@ -563,8 +577,15 @@ bool MainApp::OnInit()
     // Arm the startup marker before anything can fail, so a crash below is
     // recognisable as a startup crash on the next launch rather than merely "a
     // crash". Cleared once the main window exists.
-    const int previousStartupFailures = startupAttempt();
-    writeMarker(previousStartupFailures + 1);
+    //
+    // Not for the one-shot command-line runs (--render, --skia-probe,
+    // --update-status, ...). They never get as far as clearing it -- they end
+    // in std::_Exit -- and the app spawns --render itself for every Version
+    // History preview, so each one left a marker behind and the next real
+    // launch counted it as a failed start.
+    const bool oneShotRun = argc >= 2 && wxString(argv[1]).StartsWith("--");
+    const int previousStartupFailures = oneShotRun ? 0 : startupAttempt();
+    if (!oneShotRun) writeMarker(previousStartupFailures + 1);
 #ifdef _WIN32
     // Windows' default timer resolution (~15.6 ms) rounds wxTimer waits up to
     // the next system tick, so the 20 ms render/sim timers actually fire at
@@ -589,12 +610,8 @@ bool MainApp::OnInit()
 	// HTML the .chm is built from. Linux used to be pointed at the .chm too,
 	// which wx cannot open without libmspack, so help there did nothing at all.
 	helpController = new wxHtmlHelpController(wxHF_DEFAULT_STYLE | wxHF_OPEN_FILES);
-	// Only load help if the file exists to avoid blocking
-	if (wxFileExists(appConfig().appSettings.helpFile)) {
-		if (!helpController->AddBook(appConfig().appSettings.helpFile)) {
-			wxLogWarning("Failed to load help file: %s", appConfig().appSettings.helpFile);
-		}
-	}
+	// The book itself is loaded the first time Help is opened, not here: see
+	// MainApp::ensureHelpBookLoaded.
 #endif
 
 
@@ -695,6 +712,7 @@ bool MainApp::OnInit()
     bool renderGate = false;   // --render-gate renders one library gate
     bool wireShape = false;    // --wire-shape dumps a routed wire's segment map
     bool wireDrag = false;     // --wire-drag dumps a wire's segment map after a seg drag
+    bool renderUi = false;     // --render-ui draws the welcome/tour/shortcuts windows
     std::string gateName, gateAngle;
     std::string wsGateA, wsGateB, wsAngleA, wsAngleB;
     if (argc >= 7 && (wxString(argv[1]) == "--wire-shape" ||
@@ -718,6 +736,12 @@ bool MainApp::OnInit()
         gateAngle = argv[3].ToStdString();
         renderOutput = argv[4].ToStdString();
         if (argc >= 7) { renderW = wxAtoi(argv[5]); renderH = wxAtoi(argv[6]); }
+    } else if (argc >= 3 && wxString(argv[1]) == "--render-ui") {
+        // --render-ui <dir>: the hand-drawn windows (welcome, tour, shortcuts)
+        // as PNGs, for checking their layout without driving the app.
+        renderMode().headlessRender = true;
+        renderUi = true;
+        renderOutput = argv[2].ToStdString();
     } else if (argc >= 4 && (wxString(argv[1]) == "--render" ||
                       wxString(argv[1]) == "--render-skia" ||
                       wxString(argv[1]) == "--render-svg" ||
@@ -803,6 +827,22 @@ bool MainApp::OnInit()
         std::_Exit(ok ? 0 : 1);
     }
 
+    if (renderMode().headlessRender && renderUi) {
+        frame->SetSize(1200, 800);
+        frame->Show(true);
+        wxYield();
+        wxFileName::Mkdir(renderOutput, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        bool ok = RenderWelcomeSnapshots(frame, renderOutput);
+        renderMode().darkMode = false;
+        ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-light.png", 860, 600, "");
+        ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-search.png", 860, 600, "tab");
+        ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-narrow.png", 520, 600, "");
+        renderMode().darkMode = true;
+        ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-dark.png", 860, 600, "");
+        fflush(nullptr);
+        std::_Exit(ok ? 0 : 1);
+    }
+
     if (renderMode().headlessRender && renderGate) {
         // Single-gate golden path: no file to load. Realize the frame so the
         // canvas has a client size + render geometry, place one gate, render,
@@ -881,12 +921,16 @@ bool MainApp::OnInit()
     clearMarker();
 
 #ifdef __APPLE__
-    // Initialize Sparkle auto-updater
-    SparkleUpdater_Initialize();
-    // Then, if this copy is somewhere it should not be run from, say so. After
-    // MainFrame's crash recovery prompt on purpose: getting the last session's
-    // work back on screen is the more urgent of the two.
-    SparkleUpdater_WarnIfReadOnlyLocation();
+    // Both of these are deferred until the window is up: macOS keeps the
+    // launch cursor spinning until the app finishes launching, and neither
+    // the updater nor the location check is worth holding that for.
+    CallAfter([] {
+        SparkleUpdater_Initialize();
+        // If this copy is somewhere it should not be run from, say so. After
+        // MainFrame's crash recovery prompt on purpose: getting the last
+        // session's work back on screen is the more urgent of the two.
+        SparkleUpdater_WarnIfReadOnlyLocation();
+    });
 #endif
 #ifdef _WIN32
     // Initialize WinSparkle auto-updater, unless an administrator has turned
@@ -996,6 +1040,8 @@ void MainApp::loadSettings() {
 	conf->Read("WireConnVisible", &appConfig().appSettings.wireConnVisible, true);
 	conf->Read("GridlineVisible", &appConfig().appSettings.gridlineVisible, true);
 	conf->Read("MajorGridVisible", &appConfig().appSettings.majorGridVisible, true);
+	conf->Read("ClassicTabs", &appConfig().appSettings.classicTabs, false);
+	conf->Read("HasSeenWelcome", &appConfig().appSettings.hasSeenWelcome, false);
 	conf->Read("GridStyle", &appConfig().appSettings.gridStyle, 0);
 	conf->Read("AccentColor", &appConfig().appSettings.accentColor, 0);
 	conf->Read("WireThickness", &appConfig().appSettings.wireThickness, 1);

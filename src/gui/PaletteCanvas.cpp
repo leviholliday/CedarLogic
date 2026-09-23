@@ -89,9 +89,15 @@ void PaletteCanvas::OnPaint( wxPaintEvent &event ) {
 		// drawings, so they gain detail rather than just scale up.
 		gateSizer = new wxGridSizer( columnsForWidth( GetClientSize().x ), 0, 0 );
 		while (gateWalk != gateLibrary().libraries[libraryName].end()) {
-			gateImage* newGate = new gateImage((gateWalk->first), this, wxID_ANY, wxDefaultPosition, wxSize(IMAGESIZE, IMAGESIZE));
+			const int side = gateSizeSetting();
+			gateImage* newGate = new gateImage((gateWalk->first), this, wxID_ANY, wxDefaultPosition, wxSize(side, side));
 			gates.push_back(newGate);
-			gateSizer->Add( newGate, wxSizerFlags(1).Expand() );
+			// Centred at a fixed size, not stretched to fill its cell. A tile
+			// that expands is at the mercy of every relayout -- hiding a
+			// toolbar button changed the width the grid had to share out, and
+			// the art grew with it. The Gate size setting is now the only
+			// thing that decides how big a tile is.
+			gateSizer->Add( newGate, wxSizerFlags().Centre() );
 			gateWalk++;
 		}
 		// The grid takes only the height its rows need; anything left over collects
@@ -135,8 +141,11 @@ void PaletteCanvas::UpdateTileLayout() {
 	if ( cols != gateSizer->GetCols() || side != tileSide ) {
 		tileSide = side;
 		gateSizer->SetCols( cols );
-		for ( unsigned int i = 0; i < gates.size(); i++ )
+		for ( unsigned int i = 0; i < gates.size(); i++ ) {
 			gates[i]->SetMinSize( wxSize( side, side ) );
+			gates[i]->SetMaxSize( wxSize( side, side ) );   // pinned both ways
+			gates[i]->SetSize( side, side );
+		}
 		Layout();
 		FitInside();
 	}

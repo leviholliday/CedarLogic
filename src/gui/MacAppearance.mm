@@ -116,6 +116,62 @@ void MacSetCustomTitlebar(void* nsWindow, bool on, double barHeight) {
     layoutTrafficLights(w);
 }
 
+// The system alert, with the keys this app wants added to it. NSAlert is the
+// real thing -- the app's own icon, the platform's metrics and behaviour --
+// and the one reason not to use it, that its buttons swallow key presses, is
+// answered by a local event monitor, which sees those keys first.
+bool MacAskYesNo(const char* titleUtf8, const char* messageUtf8, bool dark) {
+	NSAlert* alert = [[NSAlert alloc] init];
+	alert.messageText = [NSString stringWithUTF8String:titleUtf8 ?: ""];
+	alert.informativeText = [NSString stringWithUTF8String:messageUtf8 ?: ""];
+	alert.alertStyle = NSAlertStyleWarning;
+	alert.window.appearance = [NSAppearance appearanceNamed:
+		(dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua)];
+
+	NSButton* yes = [alert addButtonWithTitle:@"Yes"];   // first button is the default
+	NSButton* no = [alert addButtonWithTitle:@"No"];
+	yes.keyEquivalent = @"\r";
+	no.keyEquivalent = @"\033";                           // Escape, handled by AppKit
+
+	// Y and N, caught before the buttons can eat them.
+	id monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+	                                                   handler:^NSEvent*(NSEvent* e) {
+		NSString* k = [[e charactersIgnoringModifiers] lowercaseString];
+		if ([k isEqualToString:@"y"]) {
+			[NSApp stopModalWithCode:NSAlertFirstButtonReturn];
+			return nil;
+		}
+		if ([k isEqualToString:@"n"]) {
+			[NSApp stopModalWithCode:NSAlertSecondButtonReturn];
+			return nil;
+		}
+		return e;
+	}];
+
+	const NSModalResponse response = [alert runModal];
+	[NSEvent removeMonitor:monitor];
+	[alert release];
+	return response == NSAlertFirstButtonReturn;
+}
+
+// macOS moves you to wherever a window already lives. A window that belongs to
+// no space in particular therefore yanks a full-screen app back to the desktop
+// when it opens -- which is what Preferences did. Marking these windows as
+// full-screen auxiliary lets them appear over the full-screen window instead.
+void MacKeepPanelsOnActiveSpace(void* mainNSWindowPtr) {
+	NSWindow* main = (NSWindow*)mainNSWindowPtr;
+	for (NSWindow* w in [NSApp windows]) {
+		if (w == main) continue;                       // the document window owns its space
+		if (![w isVisible]) continue;
+		if (w.styleMask & NSWindowStyleMaskFullScreen) continue;
+		NSWindowCollectionBehavior b = w.collectionBehavior;
+		b |= NSWindowCollectionBehaviorFullScreenAuxiliary;
+		b |= NSWindowCollectionBehaviorMoveToActiveSpace;
+		b &= ~NSWindowCollectionBehaviorFullScreenPrimary;
+		w.collectionBehavior = b;
+	}
+}
+
 void MacSetBackgroundApp() {
 	// Accessory: no Dock tile, no menu bar, never becomes the active app. The
 	// render window still draws, it just does not come to the front.

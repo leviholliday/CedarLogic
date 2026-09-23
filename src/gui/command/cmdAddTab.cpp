@@ -1,21 +1,16 @@
 
 #include "cmdAddTab.h"
-#ifdef __WXOSX__
-#include "wx/notebook.h"
-#else
-#include "wx/aui/auibook.h"
-#endif
+#include "wx/simplebook.h"
 #include "../GUICanvas.h"
+#include "../MainApp.h"
+#include "../MainFrame.h"
 
-#ifdef __WXOSX__
-cmdAddTab::cmdAddTab(GUICircuit* gCircuit, wxNotebook* book,
+DECLARE_APP(MainApp)
+#include <algorithm>
+
+cmdAddTab::cmdAddTab(GUICircuit* gCircuit, wxBookCtrlBase* book,
 		std::vector<GUICanvas *> *canvases) :
 			klsCommand(true, "Add Tab") {
-#else
-cmdAddTab::cmdAddTab(GUICircuit* gCircuit, wxAuiNotebook* book,
-		std::vector<GUICanvas *> *canvases) :
-			klsCommand(true, "Add Tab") {
-#endif
 
 	this->gCircuit = gCircuit;
 	this->canvasBook = book;
@@ -23,25 +18,32 @@ cmdAddTab::cmdAddTab(GUICircuit* gCircuit, wxAuiNotebook* book,
 }
 
 bool cmdAddTab::Do() {
+	MainFrame* frame = wxGetApp().mainframe;
 	// Reuse the canvas from the first Do, so a redo restores the very object
-	// the rest of the undo history is still pointing at.
+	// the rest of the undo history is still pointing at. The book is only
+	// good for that first Do: by a redo the tab bar may have been rebuilt.
 	if (addedCanvas == nullptr) {
 		addedCanvas = new GUICanvas(canvasBook, gCircuit, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS);
 	}
 	canvases->push_back(addedCanvas);
-	wxString oss;
-	oss << "Page " << canvases->size();
-	addedCanvas->Show();
-	canvasBook->AddPage(addedCanvas, oss, (false));
+	if (frame) {
+		// Back into the tab strip from wherever an undo left it waiting.
+		frame->AttachCanvasPage(addedCanvas, (int)canvases->size() - 1);
+	} else {
+		addedCanvas->Show();
+		canvasBook->AddPage(addedCanvas, "Page", false);
+	}
 	return true;
 }
 
 bool cmdAddTab::Undo() {
-	canvases->erase(canvases->end() - 1);
-	// RemovePage, not DeletePage: the latter destroys the window, and commands
-	// still in the undo history hold pointers to it.
-	canvasBook->RemovePage(canvasBook->GetPageCount() - 1);
-	if (addedCanvas != nullptr) addedCanvas->Hide();
+	canvases->erase(std::remove(canvases->begin(), canvases->end(), addedCanvas), canvases->end());
+	// The page is removed, not deleted: destroying the window would leave every
+	// command still in the undo history pointing at freed memory.
+	if (wxGetApp().mainframe) {
+		wxGetApp().mainframe->DetachCanvasPage(addedCanvas);
+		wxGetApp().mainframe->RenumberTabs();
+	}
 	return true;
 }
 

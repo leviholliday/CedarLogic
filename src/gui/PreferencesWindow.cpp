@@ -179,6 +179,15 @@ public:
 		showToggle = addCheck("Toolbar:", "Show the dark mode switch", s.showThemeToggleButton,
 			"Hide it if you only switch themes with the shortcut or the View menu.");
 
+		tabBar = new wxChoice(this, wxID_ANY);
+		tabBar->Append("Modern");          // index 0 == classicTabs false
+		tabBar->Append("Classic");
+		tabBar->SetSelection(s.classicTabs ? 1 : 0);
+		tabBar->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		addRow("Tabs:", tabBar,
+			"Modern tabs can be dragged to reorder, renamed by double-clicking, and dragged "
+			"aside to open a split view. Classic uses the plain system tabs, which do none of that.");
+
 		accent = new wxChoice(this, wxID_ANY);
 		// Order matches RenderStyle::accent()'s table.
 		for (const char* name : {"Blue", "Purple", "Pink", "Orange", "Green", "Graphite"}) accent->Append(name);
@@ -230,6 +239,7 @@ protected:
 		auto& s = appConfig().appSettings;
 		s.themeMode = themeMode->GetSelection();
 		s.showThemeToggleButton = showToggle->GetValue();
+		s.classicTabs = (tabBar->GetSelection() == 1);
 		s.gridlineVisible = grid_->GetValue();
 		s.majorGridVisible = majorGrid->GetValue();
 		s.accentColor = accent->GetSelection();
@@ -244,6 +254,7 @@ protected:
 private:
 	wxChoice* themeMode;
 	wxCheckBox* showToggle;
+	wxChoice* tabBar;
 	wxCheckBox* grid_;
 	wxCheckBox* majorGrid;
 	wxChoice* accent;
@@ -346,6 +357,7 @@ public:
 
 			wxStaticBitmap* pic = new wxStaticBitmap(this, wxID_ANY,
 				ModernToolbar::RenderPreview(st, renderMode().darkMode, previewW, scale));
+			previews.push_back(pic);
 			// Clicking the picture picks the style too.
 			pic->Bind(wxEVT_LEFT_DOWN, [rb, st, this](wxMouseEvent&) {
 				rb->SetValue(true);
@@ -368,6 +380,7 @@ public:
 			cb->Bind(wxEVT_CHECKBOX, [this, g](wxCommandEvent& e) {
 				int& mask = appConfig().appSettings.toolbarHidden;
 				mask = e.IsChecked() ? (mask & ~(1 << g)) : (mask | (1 << g));
+				refreshPreviews();   // the pictures show the tools you chose
 				changed();
 			});
 			grid->Add(cb);
@@ -382,8 +395,19 @@ public:
 	bool TransferDataFromWindow() override { apply(); return true; }
 
 private:
+	// Redraw every style's picture: they are rendered by the toolbar's own
+	// code, so they have to be rebuilt whenever what it would draw changes.
+	void refreshPreviews() {
+		const double scale = GetContentScaleFactor();
+		for (size_t i = 0; i < previews.size(); i++)
+			previews[i]->SetBitmap(ModernToolbar::RenderPreview((int)i, renderMode().darkMode, 520, scale));
+		Refresh();
+	}
+
 	void changed() { if (wxPreferencesEditor::ShouldApplyChangesImmediately()) apply(); }
 	void apply() { if (wxGetApp().mainframe) wxGetApp().mainframe->ApplyPreferences(); }
+
+	std::vector<wxStaticBitmap*> previews;
 };
 
 // ---- Shortcuts -------------------------------------------------------------

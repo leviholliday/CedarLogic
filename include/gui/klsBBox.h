@@ -57,8 +57,25 @@ public:
 		}
 	};
 
-	// Insert a bbox into this box, to build an overall group bbox:
+	// Insert a bbox into this box, to build an overall group bbox: an empty
+	// inBox (reset() and never given a point -- a gate with no shape geometry
+	// yet) contributes nothing, the same way empty() already makes contains()
+	// and overlaps() above answer false rather than trust its corners.
+	//
+	// Skipping this check let one empty child poison the whole accumulation:
+	// addPoint(inBox.getBottomLeft()) pulls this box's min corner out to
+	// (-FLT_MAX, -FLT_MAX) since that is inBox's *max* corner in its empty
+	// (min>max) state, and addPoint(inBox.getTopRight()) does the same to this
+	// box's max corner at (FLT_MAX, FLT_MAX) -- so this box now spans the
+	// entire representable float range instead of staying empty. Callers that
+	// go on to compute a width (maxX - minX) then get 2*FLT_MAX, which
+	// overflows a float to infinity, which turns into a `(long)` cast of
+	// infinity -- undefined behavior -- the first time anything (a render
+	// scale, a zoom-to-fit) divides by that width. Found via
+	// GUICanvas::renderToScene -> drawGridInto when the circuit held one gate
+	// whose shape never got populated.
 	void addBBox( klsBBox inBox ) {
+		if (inBox.empty()) return;
 		this->addPoint( inBox.getBottomLeft() );
 		this->addPoint( inBox.getTopRight() );
 	};

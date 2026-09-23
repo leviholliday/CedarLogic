@@ -80,10 +80,12 @@ struct WireInstance {
 
 struct Page {
 	int index = 0;
+	// What the user named this tab; empty means it is still "Page N".
+	std::string name;
 	std::vector<GateInstance> gates;
 	std::vector<WireInstance> wires;
 	bool operator==(const Page &o) const {
-		return index == o.index && gates == o.gates && wires == o.wires;
+		return index == o.index && name == o.name && gates == o.gates && wires == o.wires;
 	}
 };
 

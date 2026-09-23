@@ -29,8 +29,16 @@ Gate_RAM::Gate_RAM( ) : Gate() {
 	// Set the RAM's default size:	
 	setParameter( "ADDRESS_BITS", "0" );
 	setParameter( "DATA_BITS", "0" );
-	
+
 	lastRead = (unsigned long)-1;
+	// Never initialized before: a fresh RAM gate's flushGuiMemory held
+	// whatever garbage byte happened to be at that address, and reading an
+	// uninitialized bool is undefined behavior in its own right (caught by
+	// UBSan the moment the first gateProcess() checked it: "load of value
+	// 190, which is not a valid value for type 'bool'"). Nothing to flush
+	// yet -- memory is empty -- so false is also the correct starting value,
+	// not just a defined one.
+	flushGuiMemory = false;
 }
 
 

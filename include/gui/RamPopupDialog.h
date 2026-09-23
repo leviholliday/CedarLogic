@@ -21,6 +21,8 @@ class GUICircuit;
 //when a RAM chip is double clicked.
 class RamPopupDialog : public wxDialog{
 public:
+	// Repaint the grid for the current light/dark theme.
+	void applyTheme();
  	/** Constructor. Creates a new RamPopupDialog */
 	RamPopupDialog( guiGateRAM* newM_ramGuiGate, unsigned long bitsInAddress,
 	                GUICircuit* newGUICircuit );

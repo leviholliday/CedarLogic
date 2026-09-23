@@ -41,13 +41,21 @@ void MacSetSeamlessTitlebar(void* nsWindow, bool on, unsigned char r, unsigned c
 // Kept in place across resizes and full screen.
 void MacSetCustomTitlebar(void* nsWindow, bool on, double barHeight);
 
-// Clicking an empty spot on the custom toolbar moves the window, and a double
-// click does whatever the user set in System Settings (zoom or minimize), as
-// with a real title bar.
 // Run without a Dock icon and without ever taking focus. Used by the headless
 // one-shot renders the app spawns for itself, so they never steal the screen.
 void MacSetBackgroundApp();
 
+// Let auxiliary windows (Preferences, pickers) open on top of a full-screen
+// window instead of throwing the user back to the desktop space.
+void MacKeepPanelsOnActiveSpace(void* mainNSWindow);
+
+// A Yes/No prompt: the system alert, which also answers to Y and N (and to
+// Return and Escape, as it always does). Returns true for Yes.
+bool MacAskYesNo(const char* title, const char* message, bool dark);
+
+// Clicking an empty spot on the custom toolbar moves the window, and a double
+// click does whatever the user set in System Settings (zoom or minimize), as
+// with a real title bar.
 void MacDragWindow(void* nsWindow);
 void MacTitlebarDoubleClick(void* nsWindow);
 

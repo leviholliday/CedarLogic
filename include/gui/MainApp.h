@@ -72,6 +72,10 @@ public:
 #else
     wxHtmlHelpController* helpController;
 #endif
+    // The book is parsed on first use rather than at launch; see
+    // MainApp::ensureHelpBookLoaded.
+    void ensureHelpBookLoaded();
+    bool helpBookLoaded = false;
     
 	// Palette drag state (newGateToDrag / showDragImage) moved to the PaletteDrag
 	// service, and the render-mode flags (doingBitmapExport / headlessRender) to

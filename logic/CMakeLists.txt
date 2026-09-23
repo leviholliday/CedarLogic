@@ -28,8 +28,13 @@ option(ENABLE_SANITIZERS "Build tests with ASan/UBSan (GCC/Clang only)" OFF)
 option(ENABLE_COVERAGE "Build tests with gcov coverage instrumentation (GCC/Clang only)" OFF)
 
 if(ENABLE_SANITIZERS AND NOT MSVC)
-	target_compile_options(Logic PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-	target_link_options(Logic PUBLIC -fsanitize=address,undefined)
+	# vptr off to match the app target -- see the long comment on CedarLogic's
+	# own sanitizer flags in the top-level CMakeLists.txt (a vptr mismatch
+	# between two statically-linked libraries in the same binary is what broke
+	# CircuitFile's std::stringstream use; Logic doesn't need to prove the same
+	# failure to be worth the same consistency).
+	target_compile_options(Logic PRIVATE -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
+	target_link_options(Logic PUBLIC -fsanitize=address,undefined -fno-sanitize=vptr)
 endif()
 
 if(ENABLE_COVERAGE AND NOT MSVC)

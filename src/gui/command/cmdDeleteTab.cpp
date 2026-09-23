@@ -1,26 +1,26 @@
 
 #include "cmdDeleteTab.h"
-#ifdef __WXOSX__
-#include "wx/notebook.h"
-#else
-#include "wx/aui/auibook.h"
-#endif
+#include "wx/simplebook.h"
 #include "GUICanvas.h"
+#include "MainApp.h"
+#include "MainFrame.h"
+
+DECLARE_APP(MainApp)
+#include <algorithm>
+
+// Tab titles are "Page 1", "Page 2", ... in canvas order; after any add or
+// delete they all have to be rewritten.
+static void renumberTabs() {
+	if (wxGetApp().mainframe) wxGetApp().mainframe->RenumberTabs();
+}
 
 class guiGate;
 class guiWire;
 
-#ifdef __WXOSX__
 cmdDeleteTab::cmdDeleteTab(GUICircuit* gCircuit, GUICanvas* gCanvas,
-		wxNotebook* book, std::vector< GUICanvas* >* canvases,
+		wxBookCtrlBase* book, std::vector< GUICanvas* >* canvases,
 		unsigned long ID) :
 			klsCommand(true, "Delete Tab") {
-#else
-cmdDeleteTab::cmdDeleteTab(GUICircuit* gCircuit, GUICanvas* gCanvas,
-		wxAuiNotebook* book, std::vector< GUICanvas* >* canvases,
-		unsigned long ID) :
-			klsCommand(true, "Delete Tab") {
-#endif
 
 	this->gCircuit = gCircuit;
 	this->gCanvas = gCanvas;
@@ -53,33 +53,21 @@ bool cmdDeleteTab::Do() {
 	cmdList.push(std::unique_ptr<klsCommand>(new cmdDeleteSelection(gCircuit, gCanvas, gates, wires)));
 	cmdList.top()->Do();
 
-	unsigned int canSize = canvases->size();
-	//canvases->erase(canvases->begin() + canvasID);
-	remove(canvases->begin(), canvases->end(), gCanvas);
-	canvases->pop_back();
-	if (canvasID < (canSize - 1)) {
-		for (unsigned int i = canvasID; i < canSize; i++) {
-			std::string text = "Page " + to_string(i);
-			canvasBook->SetPageText(i, text);
-		}
-	}
-	canvasBook->RemovePage(canvasID);
+	canvases->erase(std::remove(canvases->begin(), canvases->end(), gCanvas), canvases->end());
+	// The frame takes it off whichever pane is showing it: a tab dragged into
+	// a split is not a page of the main strip any more, and this command may
+	// be undone long after that move.
+	if (wxGetApp().mainframe) wxGetApp().mainframe->DetachCanvasPage(gCanvas);
+	renumberTabs();
 	//TODO fix canvases not refreshing
 	gCanvas->Hide();
 	return true;
 }
 bool cmdDeleteTab::Undo() {
-	unsigned int canSize = canvases->size();
 	canvases->insert(canvases->begin() + canvasID, gCanvas);
-	wxString oss;
-	oss << "Page " << canvasID + 1;
-	canvasBook->InsertPage(canvasID, gCanvas, oss, false);
-	if (canvasID < (canSize)) {
-		for (unsigned int i = canvasID + 1; i < canSize + 1; i++) {
-			std::string text = "Page " + to_string(i + 1);
-			canvasBook->SetPageText(i, text);
-		}
-	}
+	if (wxGetApp().mainframe)
+		wxGetApp().mainframe->AttachCanvasPage(gCanvas, (int)canvasID);
+	renumberTabs();
 	while (!(cmdList.empty())) {
 		cmdList.top()->Undo();
 		cmdList.pop();

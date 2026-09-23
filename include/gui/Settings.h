@@ -57,7 +57,7 @@ struct ApplicationSettings {
 	// Toolbar: style (see cl::tb::Style; 0 = the native Classic toolbar) and
 	// which tool groups are hidden (bit per cl::tb::Group).
 	int toolbarStyle = 0;
-	int toolbarHidden = 0;   // Export dialog's "Name and result" box, as last left
+	int toolbarHidden = 0;
 	int mainFrameWidth;
 	int mainFrameHeight;
 	int mainFrameLeft;
@@ -70,6 +70,13 @@ struct ApplicationSettings {
 	bool gridlineVisible;
 	// Draw every 5th grid line darker (a ruler-style guide).
 	bool majorGridVisible = true;
+
+	// The tab bar: our own, with dragging and split view, or the plain system
+	// one this app used to have.
+	bool classicTabs = false;
+
+	// The first-run welcome has been through once.
+	bool hasSeenWelcome = false;
 	int gridStyle = 0;       // 0 = lines, 1 = dots
 	int accentColor = 0;     // index into RenderStyle::accent()'s choices
 	int wireThickness = 1;   // 0 = thin, 1 = normal, 2 = thick (screen only)

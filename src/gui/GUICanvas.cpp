@@ -536,10 +536,36 @@ void GUICanvas::markSelectionChanged() {
 // repainting between mouse/sim events, so without this the fades would just
 // freeze at whatever alpha the next unrelated repaint happened to catch them at.
 void GUICanvas::playAppearAnimation() {
+	closing = false;   // a reopened tab must not come back still dimmed
 	appearing = true;
 	appearStart = std::chrono::steady_clock::now();
 	if (!overlayFadeTimer->IsRunning()) overlayFadeTimer->Start(OVERLAY_FADE_TIMER_RATE_MS);
 	Refresh();
+}
+
+void GUICanvas::playCloseAnimation() {
+	closing = true;
+	appearing = false;
+	closeStart = std::chrono::steady_clock::now();
+	if (!overlayFadeTimer->IsRunning()) overlayFadeTimer->Start(OVERLAY_FADE_TIMER_RATE_MS);
+	Refresh();
+}
+
+void GUICanvas::cancelCloseAnimation() {
+	if (!closing) return;
+	closing = false;   // the fade timer stops itself on its next tick
+	Refresh();
+}
+
+int GUICanvas::closeAnimationMs() { return CLOSE_ANIM_MS; }
+
+// 0 while the tab is staying, heading to 1 as it goes.
+float GUICanvas::closeProgress() const {
+	if (!closing) return 0.0f;
+	const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - closeStart).count();
+	const float t = std::min(1.0f, std::max(0.0f, (float)ms / CLOSE_ANIM_MS));
+	return t * t;   // ease-in: slow to let go, then gone
 }
 
 float GUICanvas::appearProgress() const {
@@ -552,8 +578,11 @@ float GUICanvas::appearProgress() const {
 
 void GUICanvas::OnOverlayFadeTimer(wxTimerEvent& WXUNUSED(event)) {
 	const auto now = std::chrono::steady_clock::now();
-	// Simulation View animates (dashes, the LIVE light) while running.
-	const bool flowing = renderMode().simView && !simPaused();
+	// Simulation View animates (dashes, the LIVE light) while running -- but
+	// only on a canvas you can see. A tab left behind would otherwise keep
+	// repainting 60 times a second until the mode ended; drawing it again
+	// (drawOverlaysInto) restarts this timer when it comes back.
+	const bool flowing = renderMode().simView && !simPaused() && IsShownOnScreen();
 	if (flowing) {
 		const double dt = std::min(0.05, std::chrono::duration<double>(now - flowLastTick).count());
 		// Dash speed follows the simulation speed slider: 40 px/s at 25 ms per
@@ -573,7 +602,7 @@ void GUICanvas::OnOverlayFadeTimer(wxTimerEvent& WXUNUSED(event)) {
 	}
 	const long selMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - selectionChangedAt).count();
 	Refresh();
-	if (!dragSelectFading && !appearing && !flowing && selMs >= SELECTION_FADE_MS) overlayFadeTimer->Stop();
+	if (!dragSelectFading && !appearing && !closing && !flowing && selMs >= SELECTION_FADE_MS) overlayFadeTimer->Stop();
 }
 
 #ifdef WITH_SKIA
@@ -583,6 +612,20 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 	using cl::render::Stroke;
 	const float r = HOTSPOT_SCREEN_RADIUS * (float)getZoom();
 	const Color accent = liveStyle(renderMode().darkMode).accent();
+
+	// A tab on its way out dims towards the window background, so it reads as
+	// leaving rather than blinking off. Over the whole visible area, so it
+	// covers the circuit as well as the grid.
+	if (closing) {
+		const float p = closeProgress();
+		wxSize sz = GetClientSize();
+		GLdouble px, py; getPan(px, py);
+		const double vz = getZoom() > 0 ? getZoom() : 1.0;
+		const Color bg = liveStyle(renderMode().darkMode).background();
+		scene.fillRect(Point((float)px, (float)(py - sz.GetHeight() * vz)),
+		               Point((float)(px + sz.GetWidth() * vz), (float)py),
+		               Color(bg.r, bg.g, bg.b, p));
+	}
 
 	auto box = [&scene](float x, float y, float rad, const Color& c) {
 		Point pts[4] = { Point(x - rad, y + rad), Point(x + rad, y + rad),
@@ -1048,6 +1091,11 @@ void GUICanvas::drawEmptyHintInto(cl::render::Scene& scene, const cl::render::Re
 #endif
 
 void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
+	// In a split, clicking a pane is how you say which side you are working
+	// in -- the menus, toolbar and keyboard all follow the focused canvas.
+	if (MainFrame* mf = wxGetApp().mainframe)
+		if (mf->IsSplit()) mf->FocusCanvas(this);
+
 	if (connectSticky && currentDragState == DRAG_CONNECT) {
 		// Finishing click of a sticky click-to-connect. Whatever's hovered is
 		// the target -- OnMouseMove runs unthrottled while DRAG_CONNECT is
@@ -1334,18 +1382,7 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 			else submitCommand( new cmdDeleteWire( gCircuit, this, menuWire->getID() ) );
 		}
 		else if (chosen == ID_CTX_STRAIGHTEN) {
-			// Every selected wire (gates are skipped), as one undo step.
-			std::vector<klsCommand*> steps;
-			for (unsigned long id : targets) {
-				guiWire* w = getWire(id);
-				if (w == nullptr) continue;
-				const auto before = w->getSegmentMap();
-				straightenWireAvoiding(w);
-				steps.push_back( new cmdWireSegDrag( gCircuit, this, id, before, w->getSegmentMap() ) );
-			}
-			if (steps.size() == 1) submitCommand(steps[0]);
-			else if (!steps.empty()) submitCommand( new cmdPasteBlock( steps, "Straighten Wires" ) );
-			collisionChecker.update();
+			straightenWires(targets);
 		}
 		else if (!inSelection) unselectAllWires();
 		Refresh();
@@ -1878,7 +1915,7 @@ void GUICanvas::OnMouseUp(wxMouseEvent& event) {
 									}
 									movecommand->getConnections()->push_back(std::unique_ptr<klsCommand>(createwire));
 								}
-								else if (currentDragState == DRAG_NEWGATE) creategatecommand->getConnections()->push_back(std::unique_ptr<klsCommand>(createwire));
+								else if (currentDragState == DRAG_NEWGATE && creategatecommand != nullptr) creategatecommand->getConnections()->push_back(std::unique_ptr<klsCommand>(createwire));
 								else delete createwire;
 							}
 						}
@@ -2176,17 +2213,55 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 		break;
 	case 'C':
 	case 'c':
-		// Connect a gate to whatever's unambiguously nearby -- works while
-		// still holding the mouse down mid-drag (Ctrl/Cmd+C, copy, never
-		// reaches here: MainFrame's CHAR_HOOK claims it first). A gate still
-		// being dragged in from the palette isn't a real gate yet, so create
-		// it in place first (without letting go), then connect.
-		if (!event.ControlDown() && !event.AltDown() && !event.CmdDown() && !this->isLocked()) {
-			if (currentDragState == DRAG_NEWGATE) commitNewDragGate();
-			connectNearbyHotspots();
+		// Mid-drag this connects a gate to whatever is unambiguously nearby,
+		// which is the whole point of having it on a bare key -- you press it
+		// without letting go of the mouse. With nothing being dragged there is
+		// nothing to connect, so it copies instead, the way C reads everywhere
+		// else. (Cmd+C never reaches here: MainFrame's CHAR_HOOK claims it.)
+		if (!event.ControlDown() && !event.AltDown() && !event.CmdDown()) {
+			if (currentDragState == DRAG_NONE) {
+				copyBlockToClipboard();
+			} else if (!this->isLocked()) {
+				if (currentDragState == DRAG_NEWGATE) commitNewDragGate();
+				connectNearbyHotspots();
+			}
+		}
+		break;
+	case 'D':
+	case 'd':
+		if (bareKey(event) && !this->isLocked()) duplicateSelection();
+		break;
+	case 'V':
+	case 'v':
+		if (bareKey(event) && !this->isLocked()) pasteBlockFromClipboard();
+		break;
+	case 'X':
+	case 'x':
+		if (bareKey(event) && !this->isLocked()) cutSelectionToClipboard();
+		break;
+	case 'S':
+	case 's':
+		// Straighten whatever wires are selected.
+		if (bareKey(event) && !this->isLocked()) {
+			const std::vector<unsigned long> ids = selectedWireIds();
+			if (!ids.empty()) straightenWires(ids);
+		}
+		break;
+	case 'T':
+	case 't':
+		if (bareKey(event)) {
+			wxCommandEvent evt(wxEVT_MENU, View_TruthTable);
+			if (MainFrame* mf = wxGetApp().mainframe) mf->ProcessWindowEvent(evt);
 		}
 		break;
 	}
+}
+
+// A letter pressed on its own: no Cmd, Ctrl or Option. Shift is allowed --
+// it makes no difference to these, and capitals arrive with it held.
+bool GUICanvas::bareKey(const wxKeyEvent& event) const {
+	return !event.ControlDown() && !event.AltDown() && !event.CmdDown() &&
+	       currentDragState == DRAG_NONE && !isWithinPaste;
 }
 
 void GUICanvas::OnKeyUp(wxKeyEvent& event) {
@@ -2470,6 +2545,31 @@ void GUICanvas::zoomOut() {
 	if (currentDragState == DRAG_NONE) {
 		animateZoomTo(getZoom() / ZOOM_STEP);
 	}
+}
+
+// Straighten every wire in `ids` as one undo step. Shared by the right-click
+// menu and the S key.
+void GUICanvas::straightenWires(const std::vector<unsigned long>& ids) {
+	std::vector<klsCommand*> steps;
+	for (unsigned long id : ids) {
+		guiWire* w = getWire(id);
+		if (w == nullptr) continue;
+		const auto before = w->getSegmentMap();
+		straightenWireAvoiding(w);
+		steps.push_back( new cmdWireSegDrag( gCircuit, this, id, before, w->getSegmentMap() ) );
+	}
+	if (steps.size() == 1) submitCommand(steps[0]);
+	else if (!steps.empty()) submitCommand( new cmdPasteBlock( steps, "Straighten Wires" ) );
+	collisionChecker.update();
+	Refresh();
+}
+
+// Every wire currently selected.
+std::vector<unsigned long> GUICanvas::selectedWireIds() const {
+	std::vector<unsigned long> ids;
+	for (const auto& w : wireList)
+		if (w.second != nullptr && w.second->isSelected()) ids.push_back(w.first);
+	return ids;
 }
 
 void GUICanvas::straightenWireAvoiding(guiWire* wire) {

@@ -27,6 +27,11 @@
 #include "guiWire.h"
 #include <fstream>
 #include "MainFrame.h"
+#include "TabStrip.h"
+#include "Welcome.h"
+#include "ShortcutsSheet.h"
+#include <wx/dcbuffer.h>
+#include <wx/graphics.h>
 #include "AutosaveStore.h"
 #include "FileLock.h"
 #include "wx/filedlg.h"
@@ -142,11 +147,6 @@ BEGIN_EVENT_TABLE(MainFrame, wxFrame)
 	EVT_TIMER(IDLETIMER_ID, MainFrame::OnIdle)
 	EVT_TIMER(AUTOSAVE_TIMER_ID, MainFrame::OnAutosaveTimer)
 
-#ifndef __WXOSX__
-	EVT_AUINOTEBOOK_PAGE_CHANGED(NOTEBOOK_ID, MainFrame::OnNotebookPage)
-	EVT_AUINOTEBOOK_PAGE_CLOSE(NOTEBOOK_ID, MainFrame::OnDeleteTab)
-#endif
-	
 	EVT_CLOSE(MainFrame::OnClose)
 END_EVENT_TABLE()
 
@@ -189,6 +189,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	// Tabs are documents, not edits -- they belong beside New and Open.
 	fileMenu->Append(Tool_NewTab, "New &Tab\tCtrl+T", "Open a new tab");
 	fileMenu->Append(Tool_CloseTab, "&Close Tab\tCtrl+W", "Close the current tab");
+	fileMenu->Append(Tool_ReopenTab, "&Reopen Closed Tab\tCtrl+Shift+T", "Bring back the tab you just closed");
+	fileMenu->Append(Tool_SplitRight, "Split &View\tCtrl+Alt+S", "Show another tab beside this one (Cmd+Option+S)");
+	fileMenu->Append(Tool_SplitClose, "Close Split\tCtrl+Alt+W", "Put the split tab back in the tab strip (Cmd+Option+W)");
+	fileMenu->Append(Tool_FocusOtherPane, "Switch Pane\tCtrl+Alt+Right", "Work in the other side of the split (Cmd+Option+Right)");
 	fileMenu->AppendSeparator();
 	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+S", "Save a .cdl copy anywhere, to share or submit");
 	fileMenu->Append(File_Export, "Export as Image...\tCtrl+E", "Export or copy circuit image");
@@ -208,7 +212,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     viewMenu->Append(View_ZoomFit, "Zoom to &Fit\tCtrl+0", "Show the whole circuit");
     viewMenu->Append(View_ZoomActual, "&Actual Size\tCtrl+1", "Zoom to 100%");
     viewMenu->AppendSeparator();
-    viewMenu->AppendCheckItem(View_FocusMode, "&Focus Mode\tCtrl+.", "Hide the side panel to give the canvas the whole window");
+    viewMenu->AppendCheckItem(View_FocusMode, "&Focus Mode\tCtrl+.", "Slide the side panel and toolbar away, leaving just the canvas");
     viewMenu->AppendSeparator();
     viewMenu->AppendCheckItem(View_Gridline, "Display &Gridlines", "Toggle gridline display");
     viewMenu->AppendCheckItem(View_WireConn, "Display &Wire Connection Points", "Toggle wire connection points");
@@ -217,7 +221,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     // ApplyThemeShortcutLabel) rather than a static "\tCtrl+Shift+D", since the
     // shortcut itself is user-configurable from Preferences.
     viewMenu->AppendCheckItem(View_DarkMode, "&Dark Mode", "Toggle dark mode");
-    viewMenu->Append(View_TruthTable, "&Truth Table...\tCtrl+Shift+T", "Make a truth table from the switches and lights");
+    // No Ctrl+Shift+T here: that is Reopen Closed Tab, as in a browser. The
+    // canvas opens the truth table on a bare T (GUICanvas::OnKeyDown).
+    viewMenu->Append(View_TruthTable, "&Truth Table...", "Make a truth table from the switches and lights (T)");
     viewMenu->AppendCheckItem(View_SimView, "&Simulation View\tCtrl+R", "Watch the circuit run: live, animated wires and a control bar");
     viewMenu->AppendSeparator();
     viewMenu->Append(View_Oscope, "&Oscope\tCtrl+G", "Show the Oscope");
@@ -225,6 +231,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     wxMenu *helpMenu = new wxMenu; // HELP MENU
     helpMenu->Append(wxID_HELP_CONTENTS, "&Contents...\tF1", "Show Help system");
 	helpMenu->Append(Help_KeyboardShortcuts, "&Keyboard Shortcuts...", "Show keyboard shortcuts");
+	helpMenu->AppendSeparator();
+	helpMenu->Append(Help_Welcome, "Welcome to CedarLogic...", "The first-run introduction, again");
+	helpMenu->Append(Help_SetUp, "Set Up CedarLogic...", "Walk through the settings one at a time");
+	helpMenu->Append(Help_Tour, "Guided Tour", "Build a working circuit step by step");
 	helpMenu->AppendSeparator();
 	//helpMenu->Append(Help_ReportABug, "Report a bug...");
 	//helpMenu->Append(Help_RequestAFeature, "Request a feature...");
@@ -324,6 +334,13 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
         if (e.ShiftDown() && !ctrl && !e.AltDown() && k >= '1' && k <= '9' && gatePalette) {
             gatePalette->SelectSectionByIndex((unsigned int)(k - '1'));
             return;
+        }
+        // Cmd+Shift+Left/Right resize the split, the way Arc does it.
+        if (ctrl && e.ShiftDown() && !e.AltDown() && (k == WXK_LEFT || k == WXK_RIGHT)) {
+            if (IsSplit()) {
+                NudgeSplitSash(k == WXK_RIGHT ? 60 : -60);
+                return;
+            }
         }
         int cmd = 0;
         if (ctrl && !e.AltDown()) {
@@ -474,18 +491,18 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	rightSplitter = new wxSplitterWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxSP_3D | wxSP_LIVE_UPDATE);
 	rightSplitter->SetMinimumPaneSize(100);
 
-#ifdef __WXOSX__
-	canvasBook = new wxNotebook(rightSplitter, NOTEBOOK_ID, wxDefaultPosition, wxSize(400,400), wxNB_TOP);
-#else
-	canvasBook = new wxAuiNotebook(rightSplitter, NOTEBOOK_ID, wxDefaultPosition, wxSize(400,400), wxAUI_NB_CLOSE_ON_ACTIVE_TAB| wxAUI_NB_SCROLL_BUTTONS);
-	// wx 3.2's wxAuiNotebook measures its tab strip once and never again, so
-	// after a DPI change the tab text scales but the strip keeps its old height
-	// and clips the tabs. SetTabCtrlHeight(-1) is the public way to re-measure.
-	canvasBook->Bind(wxEVT_DPI_CHANGED, [this](wxDPIChangedEvent& event) {
-		canvasBook->SetTabCtrlHeight(-1);
-		event.Skip();
-	});
-#endif
+	// The tab strip lives inside a splitter, so a second canvas can sit beside
+	// it without the rest of the window knowing anything changed.
+	canvasSplit = new wxSplitterWindow(rightSplitter, wxID_ANY, wxDefaultPosition,
+	                                   wxDefaultSize, wxSP_LIVE_UPDATE | wxSP_3DSASH);
+	canvasSplit->SetMinimumPaneSize(220);
+	canvasSplit->SetSashGravity(0.5);
+	usingClassicTabs = appConfig().appSettings.classicTabs;
+	buildPane(0);
+	canvasBook = panes[0].book;
+	// Hidden for good; see the member's comment.
+	canvasParking = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(1, 1));
+	canvasParking->Hide();
 
 	//add 1 tab: Left loop to allow for different default
 	for (int i = 0; i < 1; i++) {
@@ -518,12 +535,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 		if (currentCanvas) currentCanvas->animateZoomTo(DEFAULT_ZOOM);
 	}, View_ZoomActual);
 	Bind(wxEVT_MENU, [this](wxCommandEvent& e) {
-		// Focus mode: the canvas gets the whole window.
-		const bool show = !e.IsChecked();
-		gatePalette->Show(show);
-		miniMap->Show(show);
-		sidePanelSash->Show(show);
-		Layout();
+		// Focus mode: the canvas gets the whole window, and the side panel
+		// slides out of the way rather than blinking out of existence.
+		animateSidePanel(!e.IsChecked());
 	}, View_FocusMode);
 
 	statusTimer = new wxTimer(this, wxWindow::NewControlId());
@@ -532,6 +546,8 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 
 	tabSwitchTimer = new wxTimer(this, wxWindow::NewControlId());
 	Bind(wxEVT_TIMER, &MainFrame::OnTabSwitchTimer, this, tabSwitchTimer->GetId());
+	closeTabTimer = new wxTimer(this, wxWindow::NewControlId());
+	Bind(wxEVT_TIMER, [this](wxTimerEvent&) { flushPendingClose(); }, closeTabTimer->GetId());
 #ifdef __APPLE__
 	MacTabSwitcher_InstallKeyMonitor(
 		[this](bool shift) {
@@ -547,7 +563,8 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 #endif
 
 	// Initialize splitter showing only canvasBook (oscope hidden)
-	rightSplitter->Initialize(canvasBook);
+	canvasSplit->Initialize(panes[0].host);
+	rightSplitter->Initialize(canvasSplit);
 	// A thin divider to drag the side panel wider or narrower.
 	sidePanelSash = new wxWindow(this, wxID_ANY, wxDefaultPosition, wxSize(5, -1));
 	sidePanelSash->SetCursor(wxCursor(wxCURSOR_SIZEWE));
@@ -609,16 +626,34 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	
 	this->SetSize( appConfig().appSettings.mainFrameLeft, appConfig().appSettings.mainFrameTop, appConfig().appSettings.mainFrameWidth, appConfig().appSettings.mainFrameHeight );
 
-#ifdef __WXOSX__
-	canvasBook->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnNotebookPage, this);
+	// Page changes are bound per book, in buildPane. Close and Reopen are on
+	// every platform: no tab bar here has a close button of the system's own.
 	Bind(wxEVT_MENU, &MainFrame::OnCloseTab, this, Tool_CloseTab);
-#endif
+	Bind(wxEVT_MENU, &MainFrame::OnReopenTab, this, Tool_ReopenTab);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWelcome(this, false); }, Help_Welcome);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWelcome(this, true); }, Help_SetUp);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { StartTutorial(this); }, Help_Tour);
+	Bind(wxEVT_MENU, &MainFrame::OnSplitRight, this, Tool_SplitRight);
+	Bind(wxEVT_MENU, &MainFrame::OnSplitClose, this, Tool_SplitClose);
+	Bind(wxEVT_MENU, &MainFrame::OnFocusOtherPane, this, Tool_FocusOtherPane);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { NudgeSplitSash(60); }, Tool_SplitWider);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { NudgeSplitSash(-60); }, Tool_SplitNarrower);
+	// The split-resize keys go through the frame's CHAR_HOOK like every other
+	// shortcut here. They used to be an accelerator table, which on this frame
+	// replaces the menu accelerators wholesale -- taking Cmd+Z with it.
 
 	// Paint the theme MainApp resolved at launch (see MainApp::loadSettings).
 	// Everything it touches -- canvases, minimap, oscope panel, macOS chrome --
 	// exists by now, unlike earlier in this constructor.
 	ApplyTheme();
 	ApplyToolbarStyle();
+	RenumberTabs();   // first paint of the tab strip
+
+	// First launch: the welcome, once the window is actually on screen so it
+	// has something to sit in front of.
+	if (!appConfig().appSettings.hasSeenWelcome && !renderMode().headlessRender) {
+		CallAfter([this] { ShowWelcome(this, false); });
+	}
 
 	// Show the main window
 	Show(true);
@@ -627,10 +662,15 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	NativeWindow_ConfigureTitleBar(this);
 #endif
 
-	doOpenFile = (cmdFilename.size() > 0);
+	// A headless render (--render and friends) loads its file itself and must
+	// leave the library alone. Handing it the file here as well had the pump
+	// import it: every Version History preview added the version it drew to
+	// Your Circuits as a new circuit.
+	doOpenFile = (cmdFilename.size() > 0) && !renderMode().headlessRender;
 	this->openedFilename = cmdFilename;
 	// Reopen whatever was open at quit (unless a file was handed to us).
-	if (!doOpenFile && library::exists(appConfig().appSettings.lastLibraryDoc))
+	if (cmdFilename.empty() && !renderMode().headlessRender &&
+	    library::exists(appConfig().appSettings.lastLibraryDoc))
 		pendingLibraryOpen = appConfig().appSettings.lastLibraryDoc;
 	updateDocumentTitle();
 
@@ -667,6 +707,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 }
 
 MainFrame::~MainFrame() {
+#ifdef __APPLE__
+	// The app-wide key monitor outlives this window, and its callbacks point
+	// into it. Empty callbacks let every key through untouched from here on.
+	MacTabSwitcher_InstallKeyMonitor(nullptr, nullptr);
+#endif
 
 	saveSettings();
 
@@ -760,13 +805,25 @@ void MainFrame::OnClose(wxCloseEvent& event) {
 	// termination seems to allow time for whatever needs to clean up
 	// so that the application terminates normally.  KAS 4/26/07
 	static bool destroy = false;
-	
+
 	pauseTimers();
 
+	// A tab still dimming on its way out is closed for real first, so it
+	// is not saved -- and reopened next launch -- after the user closed it.
+	flushPendingClose();
+
 	// No "save?" prompt: the circuit saves itself into the library, with a
-	// version for this session.
-	if (!destroy && fileIsDirty()) saveToLibrary(false);
-	if (!destroy && !libraryId.empty()) library::snapshot(libraryId);
+	// version for this session. Only if that save fails is there anything to
+	// ask -- and then staying keeps the work on screen, unless the system is
+	// shutting down and will not wait.
+	if (!destroy) {
+		if (!saveBeforeLeaving() && event.CanVeto()) {
+			resumeTimers(TIMER_POLL_MS);
+			event.Veto();
+			return;
+		}
+		if (!libraryId.empty()) library::snapshot(libraryId);
+	}
 	destroy = true;      // postpone destruction until wxWidgets cleans up, KAS 4/26/07
 
 	resumeTimers(TIMER_POLL_MS);
@@ -774,7 +831,10 @@ void MainFrame::OnClose(wxCloseEvent& event) {
 	if (destroy)
 	{
 		DismissPreferencesWindow();
+		// These timers belong to this frame and would fire into it after it
+		// is gone.
 		if (statusTimer) statusTimer->Stop();
+		if (closeTabTimer) closeTabTimer->Stop();
 		cancelTabSwitch();
 		removeTempFile();
 	}
@@ -811,7 +871,7 @@ void MainFrame::OnAbout(wxCommandEvent& WXUNUSED(event)) {
 
 void MainFrame::OnNew(wxCommandEvent& WXUNUSED(event)) {
 	// Nothing to ask: the current circuit is saved in the library.
-	if (fileIsDirty()) saveToLibrary(false);
+	if (!saveBeforeLeaving()) return;
 	clearToNewCircuit();
 }
 
@@ -832,10 +892,7 @@ void MainFrame::clearToNewCircuit() {
 	commandProcessor->ClearCommands();
 	commandProcessor->SetMenuStrings();
 	//JV - Added so that new starts with one tab
-	for (unsigned int j = canvases.size() - 1; j > 0; j--) {
-		canvasBook->DeletePage(j);
-		canvases.erase(canvases.end() - 1);
-	}
+	dropExtraTabs();
 
 	// DeletePage destroys those canvas windows, and three things were still
 	// pointing at them: this frame's current canvas, the circuit's idea of the
@@ -845,6 +902,7 @@ void MainFrame::clearToNewCircuit() {
 	currentCanvas = canvases[0];
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
+	RenumberTabs();
 
 	currentCanvas->Update(); // Render();
 	removeTempFile();
@@ -879,6 +937,9 @@ void MainFrame::OnImport(wxCommandEvent& WXUNUSED(event)) {
 }
 
 bool MainFrame::importCircuitFile(const wxString& path) {
+	// A headless render is a read-only pass; nothing it does belongs in the
+	// user's library.
+	if (renderMode().headlessRender) return false;
 	cl::LoadResult check;
 	std::string error;
 	if (!CircuitParse::readCircuit(path.ToStdString(), check, error)) {
@@ -899,7 +960,7 @@ bool MainFrame::importCircuitFile(const wxString& path) {
 
 bool MainFrame::openLibraryCircuit(const std::string& id) {
 	if (!library::exists(id)) return false;
-	if (fileIsDirty()) saveToLibrary(false);
+	if (!saveBeforeLeaving()) return false;
 	currentCanvas->getCircuit()->setSimulate(false);
 	pauseTimers();
 	const bool ok = loadCircuitFile(library::circuitPath(id).ToStdString(), false);
@@ -916,6 +977,14 @@ bool MainFrame::openLibraryCircuit(const std::string& id) {
 }
 
 bool MainFrame::saveToLibrary(bool explicitSave) {
+	// A headless render shares the user's library folder but is only there to
+	// draw a picture; it never writes to it.
+	if (renderMode().headlessRender) return false;
+
+	// A tab the user just closed is still on screen for a moment while it
+	// dims. It is gone as far as they are concerned, so it goes before the save.
+	flushPendingClose();
+
 	// A new circuit gets its library entry the first time there's something
 	// to keep.
 	if (libraryId.empty() || !library::exists(libraryId)) {
@@ -944,6 +1013,20 @@ bool MainFrame::saveToLibrary(bool explicitSave) {
 	return true;
 }
 
+bool MainFrame::saveBeforeLeaving() {
+	if (!fileIsDirty()) return true;
+	if (saveToLibrary(false)) return true;
+	if (renderMode().headlessRender) return true;   // nobody to ask
+	wxMessageDialog ask(this,
+		"Your latest changes to this circuit couldn't be saved.",
+		"Couldn't Save", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
+	ask.SetExtendedMessage(wxString(lastSaveError) +
+		"\n\nCancel keeps them on screen, so you can free up space and try again, "
+		"or use File > Export as CedarLogic File to save a copy somewhere else.");
+	ask.SetYesNoLabels("Discard Changes", "Cancel");
+	return ask.ShowModal() == wxID_YES;
+}
+
 void MainFrame::updateDocumentTitle() {
 	SetTitle(libraryId.empty() ? wxString("Untitled") : library::name(libraryId));
 }
@@ -960,10 +1043,27 @@ void MainFrame::OnVersionHistory(wxCommandEvent& WXUNUSED(event)) {
 	if (libraryId.empty() && !saveToLibrary(true)) return;
 	const wxString version = ShowVersionHistoryDialog(this, libraryId);
 	if (version.empty()) return;
-	// Keep what's on screen as a version first, so restoring loses nothing.
-	saveToLibrary(true);
+	// Keep what's on screen as a version first, so restoring loses nothing --
+	// and if that cannot be done, do not restore over it. (saveToLibrary has
+	// already said why.)
+	if (!saveToLibrary(true)) return;
 	const std::string id = libraryId;
-	wxCopyFile(version, library::circuitPath(id), true);
+	// Check the version reads before it replaces the circuit: a copy that then
+	// fails to load would leave the library holding something that can't open.
+	{
+		cl::LoadResult check;
+		std::string error;
+		if (!CircuitParse::readCircuit(version.ToStdString(), check, error)) {
+			wxMessageBox("That version can't be opened:\n\n" + wxString(error),
+			             "Restore Version", wxOK | wxICON_ERROR, this);
+			return;
+		}
+	}
+	if (!wxCopyFile(version, library::circuitPath(id), true)) {
+		wxMessageBox("Couldn't restore that version: it could not be copied back into your circuits.",
+		             "Restore Version", wxOK | wxICON_ERROR, this);
+		return;
+	}
 	commandProcessor->MarkAsSaved();   // don't save the old contents back over it
 	loadCircuitFile(library::circuitPath(id).ToStdString(), false);
 	libraryId = id;
@@ -972,7 +1072,7 @@ void MainFrame::OnVersionHistory(wxCommandEvent& WXUNUSED(event)) {
 }
 
 void MainFrame::OnCloseCircuit(wxCommandEvent& WXUNUSED(event)) {
-	if (fileIsDirty()) saveToLibrary(false);
+	if (!saveBeforeLeaving()) return;
 	clearToNewCircuit();   // it stays in the library, but won't reopen at launch
 }
 
@@ -1048,10 +1148,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	commandProcessor->ClearCommands();
 	commandProcessor->SetMenuStrings();
 	//JV - Delete all but the first tab
-	for (unsigned int j = canvases.size() - 1; j > 0; j--) {
-		canvasBook->DeletePage(j);
-		canvases.erase(canvases.end()-1);
-	}
+	dropExtraTabs();
 	
     CircuitParse cirp(path.ToStdString(), canvases);
 	canvases = cirp.applyLoaded(loaded);
@@ -1070,6 +1167,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	currentCanvas->setMinimap(miniMap);
 	mainSizer->Show(rightSplitter);
 	currentCanvas->SetFocus();
+	RenumberTabs();   // the loaded pages are new tabs
 
 	removeTempFile();
 
@@ -1116,7 +1214,10 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 }
 
 void MainFrame::OnSave(wxCommandEvent& WXUNUSED(event)) {
-	if (saveToLibrary(true)) SetStatusText("Saved. A version was added to Version History.");
+	if (saveToLibrary(true)) {
+		explicitSaves++;
+		SetStatusText("Saved. A version was added to Version History.");
+	}
 }
 
 // Ask which format to write an old-format file in. v3/new circuits save as v3
@@ -1157,7 +1258,9 @@ void MainFrame::OnOscope(wxCommandEvent& WXUNUSED(event)) {
 		rightSplitter->Unsplit(oscopePanel);
 	} else {
 		oscopePanel->Show();
-		rightSplitter->SplitHorizontally(canvasBook, oscopePanel, -250);
+		// canvasSplit, not the book: the book lives inside a pane now, and a
+		// splitter will only split its own children.
+		rightSplitter->SplitHorizontally(canvasSplit, oscopePanel, -250);
 	}
 }
 
@@ -1203,6 +1306,15 @@ void MainFrame::ToggleDarkMode() {
 
 void MainFrame::ApplyTheme() {
 	const bool dark = renderMode().darkMode;
+
+	// The tab strip and the panel behind it are drawn by us, so they only
+	// follow the theme if we tell them to.
+	for (CanvasPane& p : panes) {
+		if (p.host == nullptr) continue;
+		p.host->SetBackgroundColour(dark ? wxColour(22, 24, 28) : wxColour(233, 234, 238));
+		p.host->Refresh();
+		if (p.strip) p.strip->Refresh();
+	}
 
 	if (wxMenuBar* mb = GetMenuBar()) mb->Check(View_DarkMode, dark);
 	if (modernBar) ApplyToolbarStyle();
@@ -1289,12 +1401,20 @@ void MainFrame::ApplyThemeToggleVisibility() {
 
 void MainFrame::OnPreferences(wxCommandEvent& event) {
 	ShowPreferencesWindow(this);
+#ifdef __APPLE__
+	// Preferences is a window of its own, and macOS follows a window to
+	// whatever space it lives in -- which dropped a full-screen session back
+	// onto the desktop. Let it join the space we are already in instead. It
+	// has to happen after the window exists, hence here rather than at setup.
+	CallAfter([this] { MacKeepPanelsOnActiveSpace(MacGetTopLevelWindowRef()); });
+#endif
 }
 
 void MainFrame::ApplyPreferences() {
 	applyAutosaveInterval();
 	ApplyStatusInfoVisibility();
 	ApplyToolbarStyle();
+	rebuildTabUi();   // no-op unless the tab bar setting actually changed
 	gatePalette->ApplyGateSize();
 	ApplyThemeShortcutLabel();
 	ApplyThemeToggleVisibility();
@@ -1495,13 +1615,15 @@ void MainFrame::OnMaximize(wxMaximizeEvent& event) {
 	sizeChanged = true;
 }
 
-#ifdef __WXOSX__
 void MainFrame::OnNotebookPage(wxBookCtrlEvent& event) {
-#else
-void MainFrame::OnNotebookPage(wxAuiNotebookEvent& event) {
-#endif
-	long canvasID = event.GetSelection();
-	if (currentCanvas == NULL || canvases[canvasID] == currentCanvas) return;
+	const int page = event.GetSelection();
+	if (page == wxNOT_FOUND || currentCanvas == NULL) return;
+	// The book that changed, which with a split open is not always the first
+	// pane's: its page number means nothing in any other book.
+	wxBookCtrlBase* book = wxDynamicCast(event.GetEventObject(), wxBookCtrlBase);
+	if (book == nullptr || page >= (int)book->GetPageCount()) return;
+	GUICanvas* chosen = static_cast<GUICanvas*>(book->GetPage(page));
+	if (chosen == nullptr || chosen == currentCanvas) return;
 	//**********************************
 	//Edit by Joshua Lansford 4/9/07
 	//This edit is to make the minimap
@@ -1512,7 +1634,7 @@ void MainFrame::OnNotebookPage(wxAuiNotebookEvent& event) {
 	//resized
 	currentCanvas->setMinimap( NULL );
 	//End of Edit*********************
-	currentCanvas = canvases[canvasID];
+	currentCanvas = chosen;
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
@@ -1527,6 +1649,9 @@ void MainFrame::OnUndo(wxCommandEvent& event) {
 	// concurrently syncing wire state and repainting (MT_DONESTEP), and the two
 	// race and crash. Pausing the sim by hand avoids it, and so does this.
 	pauseTimers();
+	// A tab closed a moment ago is closed: finish it, so this undo is the one
+	// that brings it back rather than whatever came before it.
+	flushPendingClose();
 	// Switch to the page this command affects, so an undo on another tab is shown
 	// where it happens instead of silently changing an off-screen page.
 	klsCommand *cmd = (klsCommand *)commandProcessor->GetCurrentCommand();
@@ -1540,6 +1665,7 @@ void MainFrame::OnUndo(wxCommandEvent& event) {
 
 void MainFrame::OnRedo(wxCommandEvent& event) {
 	pauseTimers();
+	flushPendingClose();   // see OnUndo
 	// The redo target is the command just after the current position; switch to
 	// its page before re-doing it (see OnUndo).
 	wxList &cmds = commandProcessor->GetCommands();
@@ -1564,12 +1690,17 @@ void MainFrame::showCanvasIndex(int idx) {
 	// ChangeSelection switches without firing a page-changed event (which would
 	// re-enter mid-undo); mirror the state OnNotebookPage would set, by hand.
 	// currentCanvas may be a just-removed (hidden) page here, so guard it.
-	canvasBook->ChangeSelection(idx);
+	const int pane = PaneIndexOf(target);
+	if (pane >= 0) {
+		const int page = panes[pane].book->FindPage(target);
+		if (page != wxNOT_FOUND) panes[pane].book->ChangeSelection(page);
+	}
 	if (currentCanvas != NULL && currentCanvas != target) currentCanvas->setMinimap(NULL);
 	currentCanvas = target;
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	noteCanvasUsed(currentCanvas);
+	RenumberTabs();
 }
 
 void MainFrame::OnTruthTable(wxCommandEvent& WXUNUSED(event)) {
@@ -1744,6 +1875,91 @@ void MainFrame::SetStepMs(int ms) {
 	timeStepModVal->SetLabel(oss);
 }
 
+// The side panel leaves the way a browser's sidebar does: it slides out past
+// the left edge while the canvas grows into the space, instead of vanishing
+// and letting everything else jump sideways.
+//
+// The windows are placed by hand for the length of the animation rather than
+// re-laid-out: shrinking the palette would re-flow its gate tiles into fewer
+// columns on every frame, which is the jumping all over again, only slower.
+// Sliding keeps it at its full width and lets the window edge clip it.
+void MainFrame::animateSidePanel(bool show) {
+	if (gatePalette == nullptr || sidePanelSash == nullptr || rightSplitter == nullptr) return;
+
+	if (sidePanelTimer == nullptr) {
+		sidePanelTimer = new wxTimer(this, wxWindow::NewControlId());
+		Bind(wxEVT_TIMER, [this](wxTimerEvent&) { stepSidePanelAnim(); }, sidePanelTimer->GetId());
+	}
+
+	// Focus mode takes the toolbar as well as the side panel: the canvas gets
+	// the window. The custom bar rises out of the top; the native one has no
+	// geometry of ours to animate, so it simply goes.
+	const bool customBar = modernBar != nullptr &&
+	                       appConfig().appSettings.toolbarStyle != cl::tb::Classic;
+
+	if (show) {
+		// Put them back first, so a real layout can say where they belong,
+		// then start the animation from off-screen.
+		gatePalette->Show();
+		miniMap->Show();
+		sidePanelSash->Show();
+		if (customBar) modernBar->Show();
+		else if (toolBar) { toolBar->Show(true); SendSizeEvent(); }
+		Layout();
+	} else if (!customBar && toolBar) {
+		toolBar->Show(false);
+		SendSizeEvent();
+	}
+	panelRect = gatePalette->GetRect();
+	miniRect  = miniMap->GetRect();
+	sashRect  = sidePanelSash->GetRect();
+	splitRect = rightSplitter->GetRect();
+	barRect   = customBar ? modernBar->GetRect() : wxRect();
+	barTravel = customBar ? barRect.height : 0;
+	// A hidden panel reports a stale rect; recover the travel from the sash.
+	if (panelRect.width <= 0) panelRect.width = appConfig().appSettings.sidePanelWidth;
+
+	panelAnimShowing = show;
+	panelAnimT = show ? 0.0 : 1.0;
+	sidePanelTimer->Start(16);
+	stepSidePanelAnim();
+}
+
+void MainFrame::stepSidePanelAnim() {
+	const double step = 1.0 / 12.0;              // ~190ms at 16ms a frame
+	panelAnimT += panelAnimShowing ? step : -step;
+	const bool done = panelAnimShowing ? (panelAnimT >= 1.0) : (panelAnimT <= 0.0);
+	panelAnimT = std::max(0.0, std::min(1.0, panelAnimT));
+
+	// Ease out: quick to leave, gentle to land.
+	const double e = 1.0 - std::pow(1.0 - panelAnimT, 3.0);
+	const int travel = sashRect.GetRight() > 0 ? sashRect.GetRight() : panelRect.width;
+	const int offset = (int)std::lround((1.0 - e) * travel);      // sideways
+	const int rise = (int)std::lround((1.0 - e) * barTravel);     // and upwards
+
+	if (barTravel > 0 && modernBar)
+		modernBar->SetSize(barRect.x, barRect.y - rise, barRect.width, barRect.height);
+
+	gatePalette->SetSize(panelRect.x - offset, panelRect.y - rise, panelRect.width, panelRect.height);
+	miniMap->SetSize(miniRect.x - offset, miniRect.y - rise, miniRect.width, miniRect.height);
+	sidePanelSash->SetSize(sashRect.x - offset, sashRect.y - rise, sashRect.width, sashRect.height);
+	// The canvas takes the room the other two give up.
+	rightSplitter->SetSize(splitRect.x - offset, splitRect.y - rise,
+	                       splitRect.width + offset, splitRect.height + rise);
+
+	if (!done) return;
+	sidePanelTimer->Stop();
+	if (!panelAnimShowing) {
+		gatePalette->Hide();
+		miniMap->Hide();
+		sidePanelSash->Hide();
+		if (barTravel > 0 && modernBar) modernBar->Hide();
+	}
+	applyTitlebarForTopRow();
+	Layout();   // hand the geometry back to the sizer
+	RenumberTabs();   // the strip may have just inherited the title bar row
+}
+
 void MainFrame::ApplySidePanelWidth() {
 	int& w = appConfig().appSettings.sidePanelWidth;
 	if (w <= 0) w = gatePalette->GetBestSize().x;   // first launch: its natural width
@@ -1794,9 +2010,7 @@ wxString MainFrame::GetDocumentTitle() {
 }
 
 wxString MainFrame::GetDocumentSubtitle() {
-	wxString page = "Page 1";
-	const int sel = canvasBook->GetSelection();
-	if (sel != wxNOT_FOUND) page = canvasBook->GetPageText(sel);
+	const wxString page = currentCanvas ? TabLabel(currentCanvas) : wxString("Page 1");
 	return page + wxString::FromUTF8(" \u00B7 ") + (fileIsDirty() ? "Edited" : "Saved");
 }
 
@@ -1806,10 +2020,9 @@ void MainFrame::ApplyToolbarStyle() {
 	if (toolBar->IsShown() != classic) toolBar->Show(classic);
 	if (modernBar->IsShown() == classic) modernBar->Show(!classic);
 	if (!classic) modernBar->Reconfigure();
-#ifdef __APPLE__
-	// The custom bar takes over the title bar row; Classic gives it back.
-	MacSetCustomTitlebar(MacGetTopLevelWindowRef(), !classic, ModernToolbar::BarHeight());
-#endif
+	// Whoever ends up in the top row sets the title bar up for itself -- in
+	// focus mode that is the tab strip, not either toolbar.
+	applyTitlebarForTopRow();
 	Layout();
 	SendSizeEvent();   // the content area just grew into (or out of) the title bar
 }
@@ -1843,6 +2056,524 @@ void MainFrame::noteCanvasUsed(GUICanvas* canvas) {
 	canvasMRU.insert(canvasMRU.begin(), canvas);
 }
 
+// Closing a tab should land you where you just were. `canvasMRU` already
+// tracks that order for the Ctrl+Tab switcher, so reuse it: take the most
+// recently used tab that is still open, and fall back to the neighbour if
+// nothing in the history survives (a fresh session, say).
+void MainFrame::selectTabAfterClosing(GUICanvas* closed) {
+	canvasMRU.erase(std::remove(canvasMRU.begin(), canvasMRU.end(), closed), canvasMRU.end());
+	for (GUICanvas* c : canvasMRU) {
+		if (std::find(canvases.begin(), canvases.end(), c) == canvases.end()) continue;
+		if (PaneIndexOf(c) < 0) continue;
+		SelectCanvas(c);
+		return;
+	}
+}
+
+// Closing in two halves so the tab can dim on its way out: start the
+// animation, then remove the page once it has played.
+void MainFrame::beginCloseTab(GUICanvas* canvas) {
+	if (canvas == nullptr || canvas == pendingCloseCanvas) return;
+	// One at a time. Restarting the timer for a second tab used to strand the
+	// first one: dimmed, never closed, and repainting forever.
+	flushPendingClose();
+	if (canvases.size() < 2 ||
+	    std::find(canvases.begin(), canvases.end(), canvas) == canvases.end()) return;
+	// Hold the canvas itself, not its index: the list can shift while the
+	// animation plays, and closing the wrong tab is unrecoverable.
+	pendingCloseCanvas = canvas;
+	canvas->playCloseAnimation();
+	closeTabTimer->StartOnce(GUICanvas::closeAnimationMs());
+}
+
+void MainFrame::finishCloseTab(GUICanvas* canvas) {
+	if (canvas == nullptr) return;
+	// Whatever happens next, the dimming is over. A canvas left dimmed comes
+	// back blank if the close is undone.
+	canvas->cancelCloseAnimation();
+	if (canvases.size() < 2) return;
+	int canvasID = -1;
+	for (size_t i = 0; i < canvases.size(); i++) if (canvases[i] == canvas) canvasID = (int)i;
+	if (canvasID < 0) return;   // already gone
+	gCircuit->GetCommandProcessor()->Submit(
+		(wxCommand*)(new cmdDeleteTab(gCircuit, canvas, canvasBook, &canvases, canvasID)));
+	selectTabAfterClosing(canvas);
+}
+
+void MainFrame::flushPendingClose() {
+	if (pendingCloseCanvas == nullptr) return;
+	if (closeTabTimer) closeTabTimer->Stop();
+	GUICanvas* closing = pendingCloseCanvas;
+	pendingCloseCanvas = nullptr;   // before finishing, so nothing re-enters it
+	finishCloseTab(closing);
+}
+
+void MainFrame::cancelPendingClose() {
+	if (pendingCloseCanvas == nullptr) return;
+	if (closeTabTimer) closeTabTimer->Stop();
+	pendingCloseCanvas->cancelCloseAnimation();
+	pendingCloseCanvas = nullptr;
+}
+
+// Cmd+Shift+T, the way a browser does it. Undo still undoes -- this only
+// reaches for a tab close, and only while it is the most recent thing done.
+void MainFrame::OnReopenTab(wxCommandEvent& event) {
+	// Caught while it is still dimming: it simply stays.
+	if (GUICanvas* staying = pendingCloseCanvas) {
+		cancelPendingClose();
+		SelectCanvas(staying);
+		SetStatusText("Reopened the closed tab.");
+		return;
+	}
+	wxCommandProcessor* cp = gCircuit->GetCommandProcessor();
+	if (dynamic_cast<cmdDeleteTab*>(cp->GetCurrentCommand()) == nullptr) {
+		SetStatusText("No closed tab to reopen.");
+		wxBell();
+		return;
+	}
+	// Through OnUndo, not straight to the command processor: that is where
+	// the sim timers are held off while an undo rebuilds gates and wires.
+	OnUndo(event);
+	if (currentCanvas) currentCanvas->playAppearAnimation();
+	RenumberTabs();
+	SetStatusText("Reopened the closed tab.");
+}
+
+// A Yes/No prompt that answers to Y, N and Escape as well as Return, which is
+// what you want when it interrupts you mid-keyboard. On macOS wxMessageDialog
+// is a system alert whose buttons swallow those keys, so there it is an
+// NSAlert with a key monitor (MacAskYesNo). Elsewhere it is the stock dialog.
+bool MainFrame::AskYesNo(const wxString& title, const wxString& message) {
+#ifdef __APPLE__
+	return MacAskYesNo(title.utf8_str(), message.utf8_str(), renderMode().darkMode);
+#else
+	wxMessageDialog ask(this, message, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+	return ask.ShowModal() == wxID_YES;
+#endif
+}
+
+wxString MainFrame::TabLabel(GUICanvas* canvas) {
+	auto it = tabNames.find(canvas);
+	if (it != tabNames.end() && !it->second.empty()) return it->second;
+	return wxString::Format("Page %d", TabNumber(canvas));
+}
+
+wxString MainFrame::SavedTabName(GUICanvas* canvas) const {
+	auto it = tabNames.find(canvas);
+	return it == tabNames.end() ? wxString() : it->second;
+}
+
+void MainFrame::SetTabName(GUICanvas* canvas, const wxString& name) {
+	if (canvas == nullptr) return;
+	if (name.empty()) tabNames.erase(canvas);
+	else tabNames[canvas] = name;
+	RenumberTabs();   // our strip, or the classic tabs' page text
+}
+
+void MainFrame::RenameTab(GUICanvas* canvas) {
+	if (canvas == nullptr || canvas == pendingCloseCanvas) return;
+	wxTextEntryDialog ask(this, "Name this tab:", "Rename Tab", TabLabel(canvas));
+	if (ask.ShowModal() != wxID_OK) return;
+	// The dialog is modal, not frozen: a close that was already dimming can
+	// finish underneath it. Naming a tab that has gone would only leave a
+	// stale entry keyed by its address.
+	if (std::find(canvases.begin(), canvases.end(), canvas) == canvases.end()) return;
+	const wxString name = ask.GetValue().Strip(wxString::both);
+	SetTabName(canvas, name);
+	if (commandProcessor) commandProcessor->SetMenuStrings();
+	saveToLibrary(false);   // the name is part of the circuit now
+}
+
+int MainFrame::TabNumber(GUICanvas* canvas) {
+	auto it = tabNumbers.find(canvas);
+	if (it != tabNumbers.end()) return it->second;
+	int n = 1;
+	for (bool taken = true; taken; ) {
+		taken = false;
+		for (const auto& kv : tabNumbers) if (kv.second == n) { taken = true; n++; break; }
+	}
+	tabNumbers[canvas] = n;
+	return n;
+}
+
+void MainFrame::RenumberTabs() {
+	for (GUICanvas* c : canvases) TabNumber(c);
+	for (CanvasPane& p : panes) {
+		if (p.strip) { p.strip->Rebuild(); continue; }
+		if (p.book == nullptr) continue;
+		for (size_t i = 0; i < p.book->GetPageCount(); i++)
+			p.book->SetPageText(i, TabLabel(static_cast<GUICanvas*>(p.book->GetPage(i))));
+	}
+}
+
+int MainFrame::PaneCount() const { return panes[1].host != nullptr ? 2 : 1; }
+
+// True when no toolbar of either kind is on screen, so the tab strip is the
+// top row of the window.
+bool MainFrame::tabStripIsTopRow() const {
+	const bool modernShown = modernBar != nullptr && modernBar->IsShown();
+	const bool classicShown = toolBar != nullptr && toolBar->IsShown();
+	return !modernShown && !classicShown;
+}
+
+int MainFrame::TabStripLeftInset() const {
+#ifdef __APPLE__
+	// The toolbar styles leave room for the window's red/yellow/green buttons.
+	// Take the toolbar away -- focus mode -- and the tab strip inherits that
+	// row, so it has to leave the same room. Full screen has no buttons.
+	if (tabStripIsTopRow() && !IsFullScreen()) return 86;
+#endif
+	return 8;
+}
+
+// Whoever owns the top row decides how the title bar behaves. With a toolbar
+// there, that is the toolbar's business; with the tab strip there, the window
+// title has to be hidden or macOS draws "Untitled" straight across the tabs.
+void MainFrame::applyTitlebarForTopRow() {
+#ifdef __APPLE__
+	const bool classic = appConfig().appSettings.toolbarStyle == cl::tb::Classic;
+	if (tabStripIsTopRow())
+		MacSetCustomTitlebar(MacGetTopLevelWindowRef(), true, TabStrip::BarHeight());
+	else
+		MacSetCustomTitlebar(MacGetTopLevelWindowRef(), !classic, ModernToolbar::BarHeight());
+#endif
+}
+
+int MainFrame::PaneIndexOf(GUICanvas* canvas) const {
+	for (int i = 0; i < 2; i++)
+		if (panes[i].book && panes[i].book->FindPage(canvas) != wxNOT_FOUND) return i;
+	return -1;
+}
+
+std::vector<GUICanvas*> MainFrame::PaneCanvases(int pane) const {
+	std::vector<GUICanvas*> out;
+	if (pane < 0 || pane > 1 || panes[pane].book == nullptr) return out;
+	for (size_t i = 0; i < panes[pane].book->GetPageCount(); i++)
+		out.push_back(static_cast<GUICanvas*>(panes[pane].book->GetPage(i)));
+	return out;
+}
+
+// Which pane a screen point is over, for a tab dragged from the other side.
+int MainFrame::PaneAtScreen(const wxPoint& p) const {
+	for (int i = 0; i < 2; i++) {
+		if (panes[i].host == nullptr) continue;
+		const wxRect r(panes[i].host->GetScreenPosition(), panes[i].host->GetSize());
+		if (r.Contains(p)) return i;
+	}
+	return -1;
+}
+
+wxRect MainFrame::PaneScreenRect(int pane) const {
+	if (pane < 0 || pane > 1 || panes[pane].host == nullptr) return wxRect();
+	return wxRect(panes[pane].host->GetScreenPosition(), panes[pane].host->GetSize());
+}
+
+// Build a pane: its own tab strip over its own pageless book.
+void MainFrame::buildPane(int index) {
+	CanvasPane& p = panes[index];
+	const wxWindowID bookId = index == 0 ? NOTEBOOK_ID : wxID_ANY;
+	p.host = new wxPanel(canvasSplit);
+	p.host->SetBackgroundColour(renderMode().darkMode ? wxColour(22, 24, 28) : wxColour(233, 234, 238));
+	wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
+
+	if (usingClassicTabs) {
+		// The system's own tabs: it draws them, so there is no strip of ours
+		// and no dragging.
+		p.book = new wxNotebook(p.host, bookId, wxDefaultPosition, wxDefaultSize, wxNB_TOP);
+		p.strip = nullptr;
+	} else {
+		p.book = new wxSimplebook(p.host, bookId);
+		p.strip = new TabStrip(p.host, this, index);
+		sizer->Add(p.strip, 0, wxEXPAND);
+	}
+	// Either kind of book reports its page changes the same way -- the
+	// classic tabs when clicked, and both when a page is inserted or removed
+	// with the selection on it -- so every pane's book is watched.
+	p.book->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnNotebookPage, this);
+	sizer->Add(p.book, 1, wxEXPAND);
+	p.host->SetSizer(sizer);
+}
+
+// Switching tab bars keeps every tab: the pages move to a freshly built pane
+// and the old one goes away under them.
+void MainFrame::rebuildTabUi() {
+	const bool classic = appConfig().appSettings.classicTabs;
+	if (classic == usingClassicTabs) return;
+	CloseSplit();   // the classic tabs cannot be dragged between panes
+
+	GUICanvas* keep = currentCanvas;
+	std::vector<GUICanvas*> order = PaneCanvases(0);
+	wxPanel* oldHost = panes[0].host;
+	// Emptying the old book moves its selection page by page; none of that
+	// is the user switching tabs, so it must not reach OnNotebookPage.
+	panes[0].book->SetEvtHandlerEnabled(false);
+	while (panes[0].book->GetPageCount() > 0) panes[0].book->RemovePage(0);
+
+	usingClassicTabs = classic;
+	buildPane(0);
+	canvasBook = panes[0].book;
+	for (GUICanvas* c : order) {
+		c->Reparent(panes[0].book);
+		panes[0].book->AddPage(c, "", c == keep);
+	}
+	if (!canvasSplit->ReplaceWindow(oldHost, panes[0].host))
+		canvasSplit->Initialize(panes[0].host);
+	oldHost->Destroy();
+	canvasSplit->Refresh();
+	RenumberTabs();
+	if (keep) { currentCanvas = nullptr; FocusCanvas(keep); }
+}
+
+// Put `canvas` in `pane` at `slot`, splitting the window first if the second
+// pane does not exist yet. This is the one path everything else goes through.
+void MainFrame::MoveCanvasToPane(GUICanvas* canvas, int pane, int slot, bool onRight) {
+	if (canvas == nullptr || pane < 0 || pane > 1) return;
+	// Only a tab that is open: this can run a moment after the drag that
+	// asked for it, and a tab closed in between is not coming back.
+	if (std::find(canvases.begin(), canvases.end(), canvas) == canvases.end()) return;
+	const int from = PaneIndexOf(canvas);
+	if (from < 0) return;
+	if (pane == 1 && panes[1].host == nullptr) {
+		// The last tab of pane 0 cannot leave it empty.
+		if (from == 0 && panes[0].book->GetPageCount() < 2) {
+			gCircuit->GetCommandProcessor()->Submit(
+				(wxCommand*)new cmdAddTab(gCircuit, canvasBook, &canvases));
+		}
+		buildPane(1);
+		const int width = canvasSplit->GetClientSize().x;
+		if (onRight) canvasSplit->SplitVertically(panes[0].host, panes[1].host, width / 2);
+		else         canvasSplit->SplitVertically(panes[1].host, panes[0].host, width / 2);
+	}
+	{
+		const int page = panes[from].book->FindPage(canvas);
+		if (page != wxNOT_FOUND) panes[from].book->RemovePage(page);
+	}
+	canvas->Reparent(panes[pane].book);
+	const size_t count = panes[pane].book->GetPageCount();
+	const size_t at = (slot < 0 || (size_t)slot > count) ? count : (size_t)slot;
+	panes[pane].book->InsertPage(at, canvas, "", true);
+	canvas->Show();
+
+	// Emptying a pane closes it: that is how you leave a split, by moving or
+	// closing its last tab.
+	if (from != pane) collapsePaneIfEmpty(from);
+	RenumberTabs();
+	FocusCanvas(canvas);
+	canvasSplit->Refresh();
+}
+
+// Take a canvas out of whichever pane is showing it. Undo and redo run long
+// after the drag that moved it, so nothing may assume which pane that is.
+// Starting or opening a circuit throws away every tab but the first. The page
+// to destroy has to be found by identity: with a split open, or after tabs
+// have been dragged about, a canvas's place in the list is not its page
+// number, and deleting by number destroyed the wrong tab and left the right
+// one dangling.
+void MainFrame::dropExtraTabs() {
+	// The circuit is being replaced: a tab dimming its way out has nothing
+	// left to close, and a Ctrl+Tab list names tabs about to be destroyed.
+	cancelPendingClose();
+	cancelTabSwitch();
+	CloseSplit();   // one strip again before any page is torn down
+	while (canvases.size() > 1) {
+		GUICanvas* doomed = canvases.back();
+		canvases.pop_back();
+		forgetCanvas(doomed);
+		const int page = panes[0].book->FindPage(doomed);
+		if (page != wxNOT_FOUND) panes[0].book->DeletePage(page);
+		else doomed->Destroy();
+	}
+	// Closed tabs were kept only for the undo history, which our callers have
+	// just cleared. Nothing refers to them any more.
+	if (canvasParking) {
+		const wxWindowList parked = canvasParking->GetChildren();
+		for (wxWindow* w : parked) {
+			forgetCanvas(static_cast<GUICanvas*>(w));
+			w->Destroy();
+		}
+	}
+	// A new circuit starts from Page 1 with no names: the tab that stays was
+	// "Page 3" or "Adder" in the circuit it belonged to, not in this one.
+	tabNumbers.clear();
+	tabNames.clear();
+	canvasMRU.clear();
+	if (!canvases.empty()) noteCanvasUsed(canvases[0]);
+	RenumberTabs();
+}
+
+// A destroyed canvas must not stay in any of our tables: a later canvas can
+// land on the same address and inherit its name.
+void MainFrame::forgetCanvas(GUICanvas* canvas) {
+	tabNumbers.erase(canvas);
+	tabNames.erase(canvas);
+	canvasMRU.erase(std::remove(canvasMRU.begin(), canvasMRU.end(), canvas), canvasMRU.end());
+	if (pendingCloseCanvas == canvas) pendingCloseCanvas = nullptr;
+}
+
+void MainFrame::DetachCanvasPage(GUICanvas* canvas) {
+	const int pane = PaneIndexOf(canvas);
+	if (pane < 0) return;
+	const int page = panes[pane].book->FindPage(canvas);
+	if (page != wxNOT_FOUND) panes[pane].book->RemovePage(page);
+	canvas->Hide();
+	// Out of the book's children as well as its pages, before that book can
+	// go: emptying a split pane destroys it, and it would destroy this canvas
+	// with it while the undo history still holds it.
+	if (canvasParking) canvas->Reparent(canvasParking);
+	collapsePaneIfEmpty(pane);
+}
+
+// Put it back, in its place in the canvas order. It always returns to the
+// tab strip rather than to a split pane: the pane it came from may be long
+// gone, and a reopened tab appearing in the main strip is what you expect.
+void MainFrame::AttachCanvasPage(GUICanvas* canvas, int canvasIndex) {
+	if (canvas == nullptr) return;
+	if (PaneIndexOf(canvas) >= 0) { FocusCanvas(canvas); return; }   // already showing
+	int at = 0;
+	for (int i = 0; i < canvasIndex && i < (int)canvases.size(); i++)
+		if (panes[0].book->FindPage(canvases[i]) != wxNOT_FOUND) at++;
+	canvas->Reparent(panes[0].book);
+	canvas->Show();
+	panes[0].book->InsertPage(at, canvas, "", true);
+	RenumberTabs();
+	FocusCanvas(canvas);
+}
+
+void MainFrame::collapsePaneIfEmpty(int pane) {
+	if (pane < 0 || pane > 1 || panes[pane].host == nullptr) return;
+	if (panes[pane].book->GetPageCount() > 0) return;
+	if (PaneCount() < 2) return;
+
+	if (pane == 0) {
+		// Pane 0 is the one everything else holds a pointer to, so the other
+		// pane's tabs move into it rather than the other way round.
+		for (GUICanvas* c : PaneCanvases(1)) {
+			panes[1].book->RemovePage(panes[1].book->FindPage(c));
+			c->Reparent(panes[0].book);
+			panes[0].book->AddPage(c, "", true);
+		}
+	}
+	canvasSplit->Unsplit(panes[1].host);
+	panes[1].host->Destroy();
+	panes[1] = CanvasPane();
+	RenumberTabs();
+	if (panes[0].book->GetSelection() != wxNOT_FOUND)
+		FocusCanvas(static_cast<GUICanvas*>(panes[0].book->GetPage(panes[0].book->GetSelection())));
+}
+
+// The canvas to show in a new split: whatever was used most recently other
+// than the one in front, or a new tab if this is the only one.
+GUICanvas* MainFrame::pickSplitPartner() {
+	flushPendingClose();   // a tab on its way out is no partner
+	for (GUICanvas* c : canvasMRU)
+		if (c != currentCanvas && std::find(canvases.begin(), canvases.end(), c) != canvases.end())
+			return c;
+	for (GUICanvas* c : canvases)
+		if (c != currentCanvas) return c;
+	gCircuit->GetCommandProcessor()->Submit((wxCommand*)new cmdAddTab(gCircuit, canvasBook, &canvases));
+	RenumberTabs();
+	return canvases.empty() ? nullptr : canvases.back();
+}
+
+void MainFrame::SplitWith(GUICanvas* canvas, bool onRight) {
+	if (canvas == nullptr) return;
+	MoveCanvasToPane(canvas, 1, -1, onRight);
+	SetStatusText("Split view. Drag tabs between the two sides; the split closes when a side runs out.");
+}
+
+void MainFrame::CloseSplit() {
+	if (PaneCount() < 2) return;
+	for (GUICanvas* c : PaneCanvases(1)) {
+		panes[1].book->RemovePage(panes[1].book->FindPage(c));
+		c->Reparent(panes[0].book);
+		panes[0].book->AddPage(c, "", true);
+	}
+	canvasSplit->Unsplit(panes[1].host);
+	panes[1].host->Destroy();
+	panes[1] = CanvasPane();
+	RenumberTabs();
+	if (panes[0].book->GetSelection() != wxNOT_FOUND)
+		FocusCanvas(static_cast<GUICanvas*>(panes[0].book->GetPage(panes[0].book->GetSelection())));
+}
+
+// Clicking in either pane makes that canvas the one everything else acts on.
+void MainFrame::FocusCanvas(GUICanvas* canvas) {
+	if (canvas == nullptr) return;
+	if (canvas != currentCanvas) {
+		if (currentCanvas != nullptr) currentCanvas->setMinimap(NULL);
+		currentCanvas = canvas;
+		gCircuit->setCurrentCanvas(currentCanvas);
+		currentCanvas->setMinimap(miniMap);
+		currentCanvas->SetFocus();
+		noteCanvasUsed(currentCanvas);
+		UpdateStatusInfo();
+	}
+	for (CanvasPane& p : panes) if (p.strip) p.strip->Refresh();
+}
+
+void MainFrame::SelectCanvas(GUICanvas* canvas) {
+	if (canvas == nullptr) return;
+	const int pane = PaneIndexOf(canvas);
+	if (pane >= 0) {
+		const int page = panes[pane].book->FindPage(canvas);
+		if (page != wxNOT_FOUND && page != panes[pane].book->GetSelection())
+			panes[pane].book->SetSelection(page);
+	}
+	FocusCanvas(canvas);
+}
+
+void MainFrame::CloseTabCanvas(GUICanvas* canvas) {
+	if (canvas == nullptr || canvas == pendingCloseCanvas) return;   // already going
+	// Settle a close still in progress first, so the count below is true.
+	flushPendingClose();
+	if (canvases.size() < 2 ||
+	    std::find(canvases.begin(), canvases.end(), canvas) == canvases.end()) { wxBell(); return; }
+	if (!canvas->getGateList()->empty() &&
+	    !AskYesNo("Close Tab", "All work on this tab will be lost. Would you like to close it?"))
+		return;
+	beginCloseTab(canvas);
+}
+
+void MainFrame::NewTabInPane(int pane) {
+	pendingNewTabPane = pane;
+	wxCommandEvent dummy;
+	OnNewTab(dummy);
+	pendingNewTabPane = 0;
+}
+
+void MainFrame::OnNewTabHere(wxCommandEvent&) { NewTabInPane(PaneIndexOf(currentCanvas)); }
+
+void MainFrame::NewTabFromStrip() { NewTabInPane(0); }
+
+// Dragging a tab along its own strip.
+void MainFrame::MoveTab(int from, int to) {
+	const std::vector<GUICanvas*> inPane = PaneCanvases(PaneIndexOf(currentCanvas));
+	if (from < 0 || from >= (int)inPane.size()) return;
+	MoveCanvasToPane(inPane[from], PaneIndexOf(inPane[from]), to, true);
+}
+
+void MainFrame::NudgeSplitSash(int dx) {
+	if (!IsSplit()) return;
+	canvasSplit->SetSashPosition(canvasSplit->GetSashPosition() + dx);
+}
+
+void MainFrame::OnSplitRight(wxCommandEvent& WXUNUSED(event)) {
+	if (IsSplit()) { CloseSplit(); return; }   // the command toggles
+	SplitWith(pickSplitPartner(), /*onRight=*/true);
+}
+
+void MainFrame::OnSplitClose(wxCommandEvent& WXUNUSED(event)) {
+	if (!IsSplit()) { wxBell(); return; }
+	CloseSplit();
+}
+
+void MainFrame::OnFocusOtherPane(wxCommandEvent& WXUNUSED(event)) {
+	if (!IsSplit()) { wxBell(); return; }
+	const int other = PaneIndexOf(currentCanvas) == 0 ? 1 : 0;
+	const int sel = panes[other].book->GetSelection();
+	if (sel != wxNOT_FOUND) FocusCanvas(static_cast<GUICanvas*>(panes[other].book->GetPage(sel)));
+}
+
 void MainFrame::handleTabSwitchKey(bool backwards) {
 	if (tabSwitchActive) {
 		const int n = (int)tabSwitchList.size();
@@ -1852,6 +2583,9 @@ void MainFrame::handleTabSwitchKey(bool backwards) {
 #endif
 		return;
 	}
+
+	// A tab still dimming from a close is not one to switch to.
+	flushPendingClose();
 
 	// Current page first, then the rest by how recently they were used;
 	// pages never visited go last, in tab order.
@@ -1900,8 +2634,7 @@ void MainFrame::showTabSwitcher() {
 	std::vector<TabSwitcherCard> cards;
 	for (GUICanvas* c : tabSwitchList) {
 		TabSwitcherCard card;
-		for (size_t i = 0; i < canvases.size(); i++)
-			if (canvases[i] == c) card.title = canvasBook->GetPageText(i);
+		card.title = TabLabel(c);
 		card.thumbnail = wxBitmap(c->renderThumbnail(tw, th, dark), -1, sf);
 		cards.push_back(card);
 	}
@@ -1921,12 +2654,7 @@ void MainFrame::commitTabSwitch(int index) {
 	GUICanvas* target = (index >= 0 && index < (int)tabSwitchList.size()) ? tabSwitchList[index] : nullptr;
 	cancelTabSwitch();
 	if (target == nullptr || target == currentCanvas) return;
-	for (size_t i = 0; i < canvases.size(); i++) {
-		if (canvases[i] == target) {
-			canvasBook->SetSelection(i);   // fires OnNotebookPage, which does the rest
-			break;
-		}
-	}
+	SelectCanvas(target);   // finds its pane and page; focuses it
 }
 
 void MainFrame::cancelTabSwitch() {
@@ -1941,19 +2669,22 @@ void MainFrame::cancelTabSwitch() {
 
 void MainFrame::switchToCanvas(GUICanvas *canvas) {
 	if (canvas == NULL || canvas == currentCanvas) return;
-	for (size_t i = 0; i < canvases.size(); i++) {
-		if (canvases[i] == canvas) {
-			// ChangeSelection switches the tab WITHOUT firing a page-changed
-			// event -- SetSelection would, re-entering the GUI mid-undo. Mirror
-			// the parts of OnNotebookPage we actually need, by hand.
-			canvasBook->ChangeSelection(i);
-			currentCanvas->setMinimap(NULL);
-			currentCanvas = canvas;
-			gCircuit->setCurrentCanvas(currentCanvas);
-			currentCanvas->setMinimap(miniMap);
-			break;
-		}
-	}
+	// Which pane is showing it, and which page it is there -- a tab dragged
+	// into a split is no longer page N of the strip, and selecting by its
+	// place in the canvas list landed on a different tab or on nothing.
+	const int pane = PaneIndexOf(canvas);
+	if (pane < 0) return;   // not on screen (an undone tab), nothing to show
+	const int page = panes[pane].book->FindPage(canvas);
+	// ChangeSelection switches the tab WITHOUT firing a page-changed event --
+	// SetSelection would, re-entering the GUI mid-undo. Mirror the parts of
+	// OnNotebookPage we actually need, by hand.
+	if (page != wxNOT_FOUND) panes[pane].book->ChangeSelection(page);
+	if (currentCanvas != NULL) currentCanvas->setMinimap(NULL);
+	currentCanvas = canvas;
+	gCircuit->setCurrentCanvas(currentCanvas);
+	currentCanvas->setMinimap(miniMap);
+	noteCanvasUsed(currentCanvas);
+	RenumberTabs();
 }
 
 void MainFrame::OnCut(wxCommandEvent& event) {
@@ -2202,8 +2933,10 @@ void MainFrame::OnExportLegacy(wxCommandEvent& event) {
 	if (dialog.ShowModal() == wxID_OK) {
 		wxString path = dialog.GetPath();
 
-		// Pause system during save
+		// Pause system during save (restoring the step-in-flight flag after,
+		// not forcing it on -- see save())
 		lock();
+		const bool wasSimulating = gCircuit->getSimulate();
 		gCircuit->setSimulate(false);
 
 		// Save in legacy format
@@ -2211,7 +2944,7 @@ void MainFrame::OnExportLegacy(wxCommandEvent& event) {
 		bool success = cirp.saveCircuitLegacy((string)path, canvases);
 
 		// Resume system
-		gCircuit->setSimulate(true);
+		gCircuit->setSimulate(wasSimulating);
 		if (!(toolBar->GetToolState(Tool_Lock))) {
 			unlock();
 		}
@@ -2244,12 +2977,13 @@ void MainFrame::OnExportV2(wxCommandEvent& event) {
 		wxString path = dialog.GetPath();
 
 		lock();
+		const bool wasSimulating = gCircuit->getSimulate();   // see save()
 		gCircuit->setSimulate(false);
 
 		CircuitParse cirp(currentCanvas);
 		bool success = cirp.saveCircuit((string)path, canvases);
 
-		gCircuit->setSimulate(true);
+		gCircuit->setSimulate(wasSimulating);
 		if (!(toolBar->GetToolState(Tool_Lock))) unlock();
 
 		if (!success) {
@@ -2410,6 +3144,7 @@ void MainFrame::OnZoomOut(wxCommandEvent& event) {
 }
 
 void MainFrame::OnHelpContents(wxCommandEvent& event) {
+	wxGetApp().ensureHelpBookLoaded();   // parsed on demand, not at launch
 	wxGetApp().helpController->DisplayContents();
 }
 
@@ -2444,6 +3179,8 @@ void MainFrame::saveSettings() {
 	conf->Write("WireConnVisible", settings.wireConnVisible);
 	conf->Write("GridlineVisible", settings.gridlineVisible);
 	conf->Write("MajorGridVisible", settings.majorGridVisible);
+	conf->Write("ClassicTabs", settings.classicTabs);
+	conf->Write("HasSeenWelcome", settings.hasSeenWelcome);
 	conf->Write("GridStyle", settings.gridStyle);
 	conf->Write("AccentColor", settings.accentColor);
 	conf->Write("WireThickness", settings.wireThickness);
@@ -2601,15 +3338,32 @@ void MainFrame::offerRecovery() {
 		// autosave refreshes it even if they never touch a gate.
 		autosaveStore::adopt(entry);
 		recoveredUnsaved = true;
+		// They asked for this back, so it stays in front: reopening the last
+		// library circuit now would save it away and put something else up.
+		pendingLibraryOpen.clear();
 	}
 }
 
 // Fires on the GUI thread every AUTOSAVE_INTERVAL_MS. Nothing else can be part
 // way through an edit here, so the circuit is safe to walk.
 void MainFrame::OnAutosaveTimer(wxTimerEvent& WXUNUSED(event)) {
-	if (!fileIsDirty()) return;
+	if (renderMode().headlessRender || !fileIsDirty()) return;
 	if (wxGetMouseState().LeftIsDown()) return;   // mid-drag: next tick
-	saveToLibrary(false);
+	if (saveToLibrary(false)) {
+		if (autosaveFailing) SetStatusText("Saved.");
+		autosaveFailing = false;
+		return;
+	}
+	// The app promises that work saves itself, so a save that doesn't is
+	// worth interrupting for -- once. After that the status bar keeps saying
+	// so, and it is tried again every tick until it works.
+	SetStatusText("Couldn't save automatically: " + wxString(lastSaveError));
+	if (autosaveFailing || renderMode().headlessRender) return;
+	autosaveFailing = true;
+	wxMessageBox("Your circuit couldn't be saved automatically:\n\n" + wxString(lastSaveError) +
+	             "\n\nIt is still on screen, and saving will be retried every few seconds. "
+	             "File > Export as CedarLogic File saves a copy somewhere else.",
+	             "Couldn't Save", wxOK | wxICON_WARNING, this);
 }
 
 void MainFrame::autosave() {
@@ -2634,6 +3388,13 @@ void MainFrame::autosave() {
 bool MainFrame::save(string filename, int format) {
 	//Pause system so that user can't modify during save
 	lock();
+	// Put back whatever it was, rather than forcing it on afterwards. `simulate`
+	// is false while a step is in flight, and that is what holds new messages
+	// back for the core (GUICircuit::sendMessageToCore) until the step's
+	// MT_DONESTEP flushes them in order. Switching it on mid-step let later
+	// messages overtake held ones -- and autosave runs every few seconds, so
+	// mid-step is not rare.
+	const bool wasSimulating = gCircuit->getSimulate();
 	gCircuit->setSimulate(false);
 
 	// Disabling timers from autosave thread caused an assertion fail.
@@ -2655,7 +3416,7 @@ bool MainFrame::save(string filename, int format) {
 	//Resume system
 	//resumeTimers(20);
 
-	gCircuit->setSimulate(true);
+	gCircuit->setSimulate(wasSimulating);
 	if (!(toolBar->GetToolState(Tool_Lock))) {
 		unlock();
 	}
@@ -2918,8 +3679,11 @@ void MainFrame::OnNewTab(wxCommandEvent& event) {
 		gCircuit->GetCommandProcessor()->Submit((wxCommand*)new cmdAddTab(gCircuit, canvasBook, &canvases));
 		// Go to the new tab. SetSelection fires OnNotebookPage, which does the rest.
 		if ((int)canvases.size() > canSize) {
-			canvasBook->SetSelection(canvases.size() - 1);
-			canvases.back()->playAppearAnimation();
+			GUICanvas* added = canvases.back();
+			if (pendingNewTabPane == 1 && PaneCount() > 1) MoveCanvasToPane(added, 1, -1);
+			else SelectCanvas(added);
+			added->playAppearAnimation();
+			RenumberTabs();
 		}
 	}
 	else {
@@ -2933,55 +3697,14 @@ void MainFrame::OnNewTab(wxCommandEvent& event) {
 
 }
 
-#ifdef __WXOSX__
-//macOS: Close current tab via Edit > Close Tab (Cmd+W)
-void MainFrame::OnCloseTab(wxCommandEvent& event) {
-	int canvasID = canvasBook->GetSelection();
-	int canSize = canvases.size();
-
-	if (canSize > 1) {
-		if (!canvases[canvasID]->getGateList()->empty()) {
-			wxMessageDialog dialog(this, "All work on this tab will be lost. Would you like to close it?", "Close Tab", wxYES_DEFAULT | wxYES_NO | wxICON_QUESTION);
-			switch (dialog.ShowModal()) {
-				case wxID_YES:
-					break;
-				case wxID_NO:
-					return;
-			}
-		}
-		gCircuit->GetCommandProcessor()->Submit((wxCommand*)(new cmdDeleteTab(gCircuit, canvases[canvasID], canvasBook, &canvases, canvasID)));
-	}
-	else {
-		wxBell();
-	}
+// File > Close Tab (Cmd/Ctrl+W). The tab being worked in -- with a split
+// open, that is not necessarily a page of the first pane at all.
+void MainFrame::OnCloseTab(wxCommandEvent& WXUNUSED(event)) {
+	// A second Cmd+W while the first tab is still dimming closes the next
+	// one, as in a browser, rather than being swallowed by the first.
+	flushPendingClose();
+	CloseTabCanvas(currentCanvas);
 }
-#else
-//JV - Handle deletetab event. Remove tab and decrement all following tabs numbers
-void MainFrame::OnDeleteTab(wxAuiNotebookEvent& event) {
-	int canvasID = event.GetSelection();
-	int canSize = canvases.size();
-
-
-	if (canSize > 1) {
-		if (!canvases[canvasID]->getGateList()->empty()) {
-			wxMessageDialog dialog(this, "All work on this tab will be lost. Would you like to close it?", "Close Tab", wxYES_DEFAULT | wxYES_NO | wxICON_QUESTION);
-			switch (dialog.ShowModal()) {
-				case wxID_YES:
-					break;
-				case wxID_NO:
-					event.Veto();
-					return;
-			}
-		}
-		gCircuit->GetCommandProcessor()->Submit((wxCommand*)(new cmdDeleteTab(gCircuit, currentCanvas, canvasBook, &canvases, canvasID)));
-		event.Veto();
-	}
-	else {
-		wxMessageBox("Tab cannot be closed", "Close", wxOK);
-		event.Veto();
-	}
-}
-#endif
 
 void MainFrame::OnReportABug(wxCommandEvent& event) {
 	// Tyler Drake can remap the url using cedar.to/create
@@ -3017,91 +3740,9 @@ void MainFrame::OnDownloadLatestVersion(wxCommandEvent& event) {
 #endif
 }
 
-void MainFrame::OnKeyboardShortcuts(wxCommandEvent& event) {
-#ifdef __WXOSX__
-	wxString mod = "Cmd";
-#else
-	wxString mod = "Ctrl";
-#endif
-
-	wxDialog dlg(this, wxID_ANY, "Keyboard Shortcuts", wxDefaultPosition, wxDefaultSize,
-				 wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
-
-	wxBoxSizer* topSizer = new wxBoxSizer(wxVERTICAL);
-
-	// Helper to add a section header
-	auto addHeader = [&](wxFlexGridSizer* grid, const wxString& title) {
-		wxStaticText* header = new wxStaticText(&dlg, wxID_ANY, title);
-		wxFont headerFont = header->GetFont();
-		headerFont.SetWeight(wxFONTWEIGHT_BOLD);
-		header->SetFont(headerFont);
-		grid->Add(header, 0, wxTOP | wxBOTTOM, 4);
-		grid->Add(new wxStaticText(&dlg, wxID_ANY, ""), 0); // empty cell
-	};
-
-	// Helper to add a shortcut row
-	auto addRow = [&](wxFlexGridSizer* grid, const wxString& key, const wxString& desc) {
-		wxStaticText* keyText = new wxStaticText(&dlg, wxID_ANY, key);
-		wxFont keyFont = keyText->GetFont();
-		keyFont.SetFamily(wxFONTFAMILY_TELETYPE);
-		keyText->SetFont(keyFont);
-		grid->Add(keyText, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 12);
-		grid->Add(new wxStaticText(&dlg, wxID_ANY, desc), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
-	};
-
-	wxFlexGridSizer* grid = new wxFlexGridSizer(2, 6, 4);
-	grid->AddGrowableCol(1, 1);
-
-	addHeader(grid, "File Operations");
-	addRow(grid, mod + "+N", "New Circuit");
-	addRow(grid, mod + "+O", "Open Circuit");
-	addRow(grid, mod + "+S", "Save Circuit");
-	addRow(grid, mod + "+Shift+S", "Save As");
-	addRow(grid, mod + "+E", "Export as Image");
-
-	addHeader(grid, "Edit");
-	addRow(grid, mod + "+Z", "Undo");
-	addRow(grid, mod + "+Shift+Z", "Redo");
-	addRow(grid, mod + "+C", "Copy");
-	addRow(grid, mod + "+V", "Paste");
-	addRow(grid, mod + "+D", "Duplicate");
-	addRow(grid, "Delete", "Delete Selection");
-	addRow(grid, "Escape", "Clear Selection");
-
-	addHeader(grid, "View");
-	addRow(grid, "+ / -", "Zoom In / Out");
-	addRow(grid, mod + "+0", "Zoom to Fit");
-	addRow(grid, mod + "+1", "Actual Size (100%)");
-	addRow(grid, "Space", "Zoom to Fit (tap)");
-	addRow(grid, "Space+Drag", "Move Around (hold)");
-	addRow(grid, mod + "+Drag", "Move Around");
-	addRow(grid, mod + "+Scroll", "Zoom");
-	addRow(grid, "Shift+Scroll", "Move Sideways");
-	addRow(grid, "Arrow Keys", "Move Around (nothing selected)");
-	addRow(grid, mod + "+.", "Focus Mode (hide side panel)");
-	addRow(grid, mod + "+R", "Simulation View (Esc to leave, Space to pause)");
-	addRow(grid, mod + "+Shift+T", "Truth Table");
-	addRow(grid, mod + "+G", "Show Oscilloscope");
-
-	addHeader(grid, "Gates");
-	addRow(grid, "A", "Quick Add Gate");
-	addRow(grid, "R", "Rotate Selection");
-	addRow(grid, "C", "Connect to Nearby Pins (works mid-drag)");
-	addRow(grid, "Arrow Keys", "Nudge Selection (Shift: 5 squares)");
-	addRow(grid, "Shift+1-9", "Jump to Gate Category");
-
-	addHeader(grid, "Tabs");
-	addRow(grid, mod + "+T", "New Tab");
-	addRow(grid, mod + "+W", "Close Tab");
-	addRow(grid, "Ctrl+Tab", "Switch Tabs (hold Ctrl to see all)");
-
-	addHeader(grid, "Help");
-	addRow(grid, "?", "This List");
-
-	topSizer->Add(grid, 1, wxALL | wxEXPAND, 16);
-	topSizer->Add(dlg.CreateButtonSizer(wxOK), 0, wxALIGN_CENTER | wxBOTTOM, 12);
-
-	dlg.SetSizerAndFit(topSizer);
-	dlg.CentreOnParent();
-	dlg.ShowModal();
+void MainFrame::OnKeyboardShortcuts(wxCommandEvent& WXUNUSED(event)) {
+	// A searchable, scrolling sheet (ShortcutsSheet.cpp). The plain grid that
+	// was here grew taller than the screen and ran under its own OK button.
+	ShowShortcutsSheet(this);
 }
+

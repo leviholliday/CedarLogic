@@ -12,6 +12,7 @@
 #include "RamPopupDialog.h"
 #include "guiGate.h"
 #include "GUICircuit.h"
+#include "RenderMode.h"
 
 //#define LIST_ID (wxID_HIGHEST + 1)
 #define ID_CHECKBOX (wxID_HIGHEST + 1)
@@ -69,8 +70,30 @@ RamPopupDialog::RamPopupDialog( guiGateRAM* newM_guiGateRAM,
 	SetSizer( topSizer );
 	topSizer->SetSizeHints( this );
 
+	applyTheme();
 	notifyAllChanged();
 	memContents->AutoSizeColumns(true);
+}
+
+// The memory grid follows the app's theme. Every colour here used to be left
+// at its default except a hard-coded white cell background, so in dark mode
+// the window came up with light text on white and nothing could be read.
+void RamPopupDialog::applyTheme() {
+	const bool dark = renderMode().darkMode;
+	const wxColour paper = dark ? wxColour(30, 33, 39) : *wxWHITE;
+	const wxColour ink = dark ? wxColour(228, 232, 240) : wxColour(20, 22, 28);
+	const wxColour label = dark ? wxColour(44, 48, 56) : wxColour(238, 239, 242);
+	const wxColour lines = dark ? wxColour(64, 69, 78) : wxColour(200, 202, 208);
+
+	SetBackgroundColour(dark ? wxColour(38, 41, 47) : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+	if (hexOrDecCB) hexOrDecCB->SetForegroundColour(ink);
+	if (memContents == nullptr) return;
+	memContents->SetDefaultCellBackgroundColour(paper);
+	memContents->SetDefaultCellTextColour(ink);
+	memContents->SetLabelBackgroundColour(label);
+	memContents->SetLabelTextColour(ink);
+	memContents->SetGridLineColour(lines);
+	memContents->ForceRefresh();
 }
 
 void RamPopupDialog::OnBtnClose( wxCommandEvent& event ){
@@ -213,16 +236,25 @@ wxGridCellAttr* virtualGrid::GetAttr(int row, int col, wxGridCellAttr::wxAttrKin
 	int writtenRow = writtenAddress / 16;
 	
 	
+	const bool dark = renderMode().darkMode;
+	const wxColour paper = dark ? wxColour(30, 33, 39) : *wxWHITE;
+	const wxColour ink = dark ? wxColour(228, 232, 240) : wxColour(20, 22, 28);
+	// Deep green/red behind light text in the dark theme; the bright pair only
+	// works under black text.
+	const wxColour readBg = dark ? wxColour(22, 82, 52) : *wxGREEN;
+	const wxColour writeBg = dark ? wxColour(104, 34, 38) : *wxRED;
+
 	wxGridCellAttr* returnValue = new wxGridCellAttr();
-	
+	returnValue->SetTextColour( dark ? ink : *wxBLACK );
+
 	if( row == readRow && col == readCol ){
-		returnValue->SetBackgroundColour( *wxGREEN ); 
+		returnValue->SetBackgroundColour( readBg );
 	}else if( row == writtenRow && col == writtenCol ){
-		returnValue->SetBackgroundColour( *wxRED );
+		returnValue->SetBackgroundColour( writeBg );
 	}else{
-		returnValue->SetBackgroundColour( *wxWHITE );	
+		returnValue->SetBackgroundColour( paper );
 	}
-	
+
 	return returnValue;
 }
 

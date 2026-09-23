@@ -99,6 +99,8 @@ std::string writeCircuitFile(const CircuitFile &cf) {
 		SNode pn = SNode::list();
 		pn.add(SNode::sym("page"));
 		pn.add(num(pg.index));
+		// Written only when there is one, so untouched files do not change.
+		if (!pg.name.empty()) pn.add(kv("name", SNode::str(pg.name)));
 		for (const GateInstance &g : pg.gates) pn.add(gateNode(g));
 		for (const WireInstance &w : pg.wires) pn.add(wireNode(w));
 		root.add(std::move(pn));
@@ -203,7 +205,8 @@ CircuitFile readCircuitFile(const std::string &text) {
 		pg.index = static_cast<int>(parseLong(item(c, 1), "(page ...)"));
 		for (const SNode &e : c.items) {
 			if (!e.isList()) continue;
-			if (e.head() == "gate") pg.gates.push_back(readGate(e));
+			if (e.head() == "name") pg.name = item(e, 1);
+			else if (e.head() == "gate") pg.gates.push_back(readGate(e));
 			else if (e.head() == "wire") pg.wires.push_back(readWire(e));
 		}
 		cf.pages.push_back(std::move(pg));

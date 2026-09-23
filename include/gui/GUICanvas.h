@@ -121,6 +121,7 @@ struct ConnectionSource {
 #define OVERLAY_FADE_TIMER_RATE_MS 16
 // A new page's grid and hint fade in (and the hint drifts up) over this long.
 #define APPEAR_ANIM_MS 320
+#define CLOSE_ANIM_MS 140
 
 #define ZOOM_ALL_MARGIN 0.25
 
@@ -260,6 +261,13 @@ public:
 
 	// Fade this page's grid and empty-page hint in, for a freshly opened tab.
 	void playAppearAnimation();
+	// The mirror of it: dim away over CLOSE_ANIM_MS. The caller closes the tab
+	// once that time is up, and must then call cancelCloseAnimation: the dim
+	// holds at full until told otherwise, so a close that is undone -- or
+	// never happens -- would otherwise leave the tab blank.
+	void playCloseAnimation();
+	void cancelCloseAnimation();
+	static int closeAnimationMs();
 
 	// Update the collision checker and refresh
 	void Update();
@@ -380,6 +388,9 @@ private:
 	// fresh, and if any part runs over another wire, slide its trunk to the
 	// nearest grid position that doesn't (or overlaps least).
 	void straightenWireAvoiding(guiWire* wire);
+	void straightenWires(const std::vector<unsigned long>& ids);
+	std::vector<unsigned long> selectedWireIds() const;
+	bool bareKey(const wxKeyEvent& event) const;
 
 	// When the left button was last pressed, for the click-vs-drag time dead zone.
 	std::chrono::steady_clock::time_point dragPressTime;
@@ -427,6 +438,9 @@ private:
 	bool simPaused() const;
 	bool appearing = false;
 	std::chrono::steady_clock::time_point appearStart;
+	bool closing = false;
+	std::chrono::steady_clock::time_point closeStart;
+	float closeProgress() const;
 	float appearProgress() const;   // 0..1, eased; 1 when not animating
 	
 	bool isWithinPaste; // If we are in paste then drag_selection is enabled until drop

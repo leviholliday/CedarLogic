@@ -316,7 +316,10 @@ public:
 		shown = wxBitmap();
 		busy = true;
 		Refresh();
-		Render(cdlPath);
+		// One render at a time. Each is a whole copy of the app, and arrowing
+		// down a long history started one per row, all at once. The one that
+		// is running picks up whatever is wanted by the time it finishes.
+		if (!rendering) Render(cdlPath);
 	}
 
 private:
@@ -331,20 +334,30 @@ private:
 		const wxString cmd = wxString::Format("\"%s\" --render \"%s\" \"%s\" 1200 820",
 			wxStandardPaths::Get().GetExecutablePath(), cdlPath, png);
 
-		wxProcess* proc = new wxProcess(this);
+		// No parent: this can finish after the window is gone, and a wxProcess
+		// hands its end event on to its parent -- which would be freed memory.
+		wxProcess* proc = new wxProcess();
 		auto flag = alive;
 		proc->Bind(wxEVT_END_PROCESS, [this, flag, cdlPath, png](wxProcessEvent& e) {
+			// Left unhandled on purpose: an unhandled end event is what makes a
+			// wxProcess delete itself. Handling it leaked one per preview.
+			e.Skip();
 			if (!*flag) return;
+			rendering = false;
 			wxImage img;
 			if (e.GetExitCode() == 0 && wxFileName::FileExists(png) && img.LoadFile(png, wxBITMAP_TYPE_PNG))
 				shots[cdlPath] = wxBitmap(img);
 			else
 				shots[cdlPath] = wxBitmap();   // remember the failure; don't retry in a loop
 			if (want == cdlPath) { shown = shots[cdlPath]; busy = false; Refresh(); }
+			else if (shots.find(want) == shots.end()) Render(want);   // moved on meanwhile
 		});
+		rendering = true;
 		if (wxExecute(cmd, wxEXEC_ASYNC, proc) <= 0) {
 			delete proc;
-			busy = false;
+			rendering = false;
+			shots[cdlPath] = wxBitmap();
+			if (want == cdlPath) busy = false;
 			Refresh();
 		}
 	}
@@ -382,6 +395,7 @@ private:
 	wxBitmap shown;
 	wxString want, tempDir;
 	bool busy = false;
+	bool rendering = false;        // a render process is running
 	std::shared_ptr<bool> alive;   // the renders outlive a closed window
 };
 
@@ -631,7 +645,9 @@ wxString ShowVersionHistoryDialog(wxWindow* parent, const std::string& id) {
 		wxFileDialog save(p.dlg, "Export Version", wxEmptyString,
 			library::name(id) + " (" + versions[i].when.Format("%b %d %H-%M") + ").cdl",
 			"Circuit files (*.cdl)|*.cdl", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
-		if (save.ShowModal() == wxID_OK) wxCopyFile(versions[i].path, save.GetPath(), true);
+		if (save.ShowModal() == wxID_OK && !wxCopyFile(versions[i].path, save.GetPath(), true))
+			wxMessageBox("Couldn't save a copy there. Try another folder.",
+			             "Export Version", wxOK | wxICON_ERROR, p.dlg);
 	};
 
 	p.list->onActivate = restore;

@@ -3,22 +3,13 @@
 #include "klsCommand.h"
 #include <vector>
 
-#ifdef __WXOSX__
-class wxNotebook;
-#else
-class wxAuiNotebook;
-#endif
+class wxBookCtrlBase;
 
 //JV - cmdAddTab - add a new tab into canvasBook
 class cmdAddTab : public klsCommand {
 public:
-#ifdef __WXOSX__
-	cmdAddTab(GUICircuit* gCircuit, wxNotebook* book,
+	cmdAddTab(GUICircuit* gCircuit, wxBookCtrlBase* book,
 		std::vector<GUICanvas *> *canvases);
-#else
-	cmdAddTab(GUICircuit* gCircuit, wxAuiNotebook* book,
-		std::vector<GUICanvas *> *canvases);
-#endif
 
 	bool Do();
 
@@ -27,11 +18,7 @@ public:
 	int pageToShow(bool isUndo) const override;
 
 private:
-#ifdef __WXOSX__
-	wxNotebook* canvasBook;
-#else
-	wxAuiNotebook* canvasBook;
-#endif
+	wxBookCtrlBase* canvasBook;
 	std::vector<GUICanvas *>* canvases;
 
 	// The canvas this command added, kept across an undo rather than destroyed.

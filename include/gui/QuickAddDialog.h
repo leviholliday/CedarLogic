@@ -7,34 +7,32 @@
 #include <string>
 #include <map>
 #include <wx/bitmap.h>
-#include <wx/generic/statbmpg.h>
 
 using namespace std;
 
+class wxSearchCtrl;
+class GateResultList;
+
+// The "A" picker: type a few letters, arrow to the gate you want, Enter to
+// pick it up. Each result carries a drawing of the gate, so you can recognise
+// one without knowing its name.
 class QuickAddDialog : public wxDialog {
 public:
 	QuickAddDialog(wxWindow* parent);
 
 	string getSelectedGate() const { return selectedGate; }
 
+	// The gate's drawing at this size, rendered once and kept.
+	wxBitmap previewFor(const string& gateName, int size);
+
 private:
-	void OnTextChanged(wxCommandEvent& evt);
-	void OnTextKey(wxKeyEvent& evt);
-	void OnListDClick(wxCommandEvent& evt);
-	void OnListSelect(wxCommandEvent& evt);
 	void updateList(const string& query);
-	void updatePreview();
 	void confirm();
 	int fuzzyScore(const string& query, const string& target);
 	wxBitmap renderGatePreview(const string& gateName, int width, int height);
 
-	wxTextCtrl* searchField;
-	wxListBox* resultList;
-	// Owner-drawn (generic) static bitmap, NOT the native wxStaticBitmap: on MSW
-	// the native STATIC control won't re-blit a bitmap handle it previously held
-	// and swapped away from, so a cached preview shown once never repainted when
-	// you navigated back to it. The generic control paints via wxDC every time.
-	wxGenericStaticBitmap* previewImage;
+	wxSearchCtrl* searchField;
+	GateResultList* resultList;
 	string selectedGate;
 
 	struct GateEntry {
