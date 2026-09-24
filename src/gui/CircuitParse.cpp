@@ -579,7 +579,11 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 }
 
 bool CircuitParse::saveCircuitV3(string filename, vector< GUICanvas* > glc, unsigned int currPage) {
-	return writeToFile(filename, cl::writeCircuitFile(buildCircuitFile(glc)));
+	return writeToFile(filename, textV3(glc));
+}
+
+string CircuitParse::textV3(vector< GUICanvas* > glc) {
+	return cl::writeCircuitFile(buildCircuitFile(glc));
 }
 
 bool CircuitParse::saveCircuit(string filename, vector< GUICanvas* > glc, unsigned int currPage) {

@@ -24,6 +24,7 @@ struct CircuitWindow: View {
     @EnvironmentObject private var look: LookStore
     @AppStorage("layout") private var layout = AppLayout.native.rawValue
     @StateObject private var canvas = CanvasController()
+    @Environment(\.undoManager) private var undoManager
     @State private var page = 0
     @State private var notices: [(text: String, warning: Bool)] = []
     @State private var showNotices = false
@@ -40,7 +41,9 @@ struct CircuitWindow: View {
         }
         .focusedSceneObject(canvas)
         .tint(theme.accent.color)
+        .onChange(of: undoManager) { _, um in canvas.undoManager = um }
         .onAppear {
+            canvas.undoManager = undoManager
             notices = document.loadNotices
             showNotices = !notices.isEmpty
         }
@@ -76,9 +79,7 @@ private struct NativeLayout: View {
                 if showParts {
                     PaletteView(controller: canvas, dark: false)
                 } else {
-                    List(0..<document.pageCount, id: \.self, selection: Binding(get: { page }, set: { page = $0 ?? page })) { index in
-                        Label(document.pageName(index), systemImage: "square.on.square.dashed")
-                    }
+                    PageList(document: document, canvas: canvas, page: $page)
                 }
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 230)
@@ -121,7 +122,7 @@ private struct ClassicLayout: View {
                 .background(.background.secondary)
             Divider()
             VStack(spacing: 0) {
-                PageTabs(document: document, page: $page)
+                PageTabs(document: document, canvas: canvas, page: $page)
                 Divider()
                 CanvasView(document: document, page: page, theme: theme, controller: canvas)
                     .overlay(alignment: .top) { TidyBanner(canvas: canvas) }
@@ -158,26 +159,121 @@ private struct ClassicLayout: View {
 
 /// Page tabs across the top of the canvas, as in the wx app.
 private struct PageTabs: View {
-    let document: CoreDocument
+    @ObservedObject var document: CoreDocument
+    let canvas: CanvasController
     @Binding var page: Int
+    @StateObject private var pages = PageActions()
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(0..<document.pageCount, id: \.self) { i in
-                    Button { page = i } label: {
-                        Text(document.pageName(i))
-                            .font(.callout.weight(page == i ? .semibold : .regular))
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 6)
-                                .fill(page == i ? Color.accentColor.opacity(0.16) : Color.clear))
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(0..<document.pageCount, id: \.self) { i in
+                        Button { page = i } label: {
+                            Text(document.pageName(i))
+                                .font(.callout.weight(page == i ? .semibold : .regular))
+                                .padding(.horizontal, 14).padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: 6)
+                                    .fill(page == i ? Color.accentColor.opacity(0.16) : Color.clear))
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { pages.menu(for: i, document: document, canvas: canvas, page: $page) }
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 8).padding(.vertical, 4)
             }
-            .padding(.horizontal, 8).padding(.vertical, 4)
+            Button { pages.add(document: document, canvas: canvas, page: $page) } label: { Image(systemName: "plus") }
+                .buttonStyle(.borderless)
+                .help("Add a page")
+                .padding(.horizontal, 10)
         }
         .background(.bar)
+        .modifier(PageSheets(pages: pages, document: document, canvas: canvas, page: $page))
+    }
+}
+
+/// The pages in the Native sidebar.
+private struct PageList: View {
+    @ObservedObject var document: CoreDocument
+    let canvas: CanvasController
+    @Binding var page: Int
+    @StateObject private var pages = PageActions()
+
+    var body: some View {
+        List(0..<document.pageCount, id: \.self, selection: Binding(get: { page }, set: { page = $0 ?? page })) { index in
+            Label(document.pageName(index), systemImage: "square.on.square.dashed")
+                .contextMenu { pages.menu(for: index, document: document, canvas: canvas, page: $page) }
+        }
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Button { pages.add(document: document, canvas: canvas, page: $page) } label: { Label("Add Page", systemImage: "plus") }
+                    .buttonStyle(.borderless)
+                Spacer()
+            }
+            .padding(8)
+        }
+        .modifier(PageSheets(pages: pages, document: document, canvas: canvas, page: $page))
+    }
+}
+
+/// Adding, renaming and removing pages, shared by the tabs and the sidebar.
+/// None of these are undo steps; each marks the document changed.
+@MainActor
+private final class PageActions: ObservableObject {
+    @Published var renaming: Int?
+    @Published var newName = ""
+    @Published var deleting: Int?
+
+    func add(document: CoreDocument, canvas: CanvasController, page: Binding<Int>) {
+        page.wrappedValue = document.addPage()
+        document.objectWillChange.send()
+        canvas.markEdited()
+    }
+
+    @ViewBuilder
+    func menu(for i: Int, document: CoreDocument, canvas: CanvasController, page: Binding<Int>) -> some View {
+        Button("Rename…") { self.newName = document.pageName(i); self.renaming = i }
+        Button("Delete Page…") { self.deleting = i }
+            .disabled(document.pageCount < 2)
+    }
+}
+
+private struct PageSheets: ViewModifier {
+    @ObservedObject var pages: PageActions
+    let document: CoreDocument
+    let canvas: CanvasController
+    @Binding var page: Int
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Rename Page", isPresented: Binding(get: { pages.renaming != nil }, set: { if !$0 { pages.renaming = nil } })) {
+                TextField("Name", text: $pages.newName)
+                Button("Rename") {
+                    if let i = pages.renaming {
+                        document.renamePage(i, to: pages.newName.trimmingCharacters(in: .whitespaces))
+                        document.objectWillChange.send()
+                        canvas.markEdited()
+                    }
+                    pages.renaming = nil
+                }
+                Button("Cancel", role: .cancel) { pages.renaming = nil }
+            }
+            .alert("Delete this page?", isPresented: Binding(get: { pages.deleting != nil }, set: { if !$0 { pages.deleting = nil } })) {
+                Button("Delete", role: .destructive) {
+                    if let i = pages.deleting {
+                        canvas.selectNone()
+                        document.deletePage(i)
+                        page = min(page, document.pageCount - 1)
+                        document.objectWillChange.send()
+                        canvas.markEdited()
+                        canvas.edited()
+                    }
+                    pages.deleting = nil
+                }
+                Button("Cancel", role: .cancel) { pages.deleting = nil }
+            } message: {
+                Text("Everything on it goes too, and this can't be undone (earlier undo steps are cleared as well).")
+            }
     }
 }
 

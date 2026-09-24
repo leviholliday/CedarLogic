@@ -26,6 +26,22 @@ CLDocument *cl_document_open(const char *path, char *error, int errorLen);
 // The same, from a file's contents already in memory.
 CLDocument *cl_document_open_text(const char *text, long length, char *error, int errorLen);
 void cl_document_close(CLDocument *doc);
+// Whether opening runs the simulation until it settles (on by default). The
+// save round-trip check turns it off: settling moves counters and clocks on,
+// which a saved file rightly records.
+void cl_set_settle_on_open(bool settle);
+// A new, empty circuit with one page.
+CLDocument *cl_document_new(void);
+// The circuit as .cdl text (the current v3 format), as the wx app saves it.
+// Valid until the next call.
+const char *cl_document_save_text(CLDocument *doc);
+
+// ---- Pages ---------------------------------------------------------------
+int cl_document_add_page(CLDocument *doc);               // returns its index
+void cl_document_rename_page(CLDocument *doc, int page, const char *name);
+// Remove a page and everything on it. Clears the undo history (its steps
+// could refer to the page).
+void cl_document_delete_page(CLDocument *doc, int page);
 
 int cl_document_page_count(const CLDocument *doc);
 // The page's name as the user set it, or "" for an unnamed one. Valid until
@@ -105,6 +121,9 @@ const char *cl_edit_copy(CLDocument *doc, int page);
 bool cl_edit_paste(CLDocument *doc, int page, const char *text, double x, double y, bool shift,
                    const char **clipboardOut);
 
+// How many steps are on the undo stack (the app mirrors each into macOS's
+// undo manager, so the window knows it's edited and autosaves).
+int cl_edit_undo_count(const CLDocument *doc);
 bool cl_edit_undo(CLDocument *doc);
 bool cl_edit_redo(CLDocument *doc);
 bool cl_edit_can_undo(const CLDocument *doc);

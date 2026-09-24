@@ -14,6 +14,7 @@
 #include "guiWire.h"
 #include "klsBBox.h"
 #include "render/RenderStyle.h"
+#include "command/cmdDeleteSelection.h"
 
 #include <algorithm>
 #include <cstring>
@@ -24,6 +25,8 @@
 #include <vector>
 
 namespace {
+
+bool settleOnOpen = true;
 
 bool readFile(const char* path, std::string& out) {
 	std::ifstream in(path, std::ios::binary);
@@ -78,12 +81,65 @@ CLDocument* cl_document_open_text(const char* data, long length, char* error, in
 		doc->notices.push_back(n.detail.empty() ? n.summary : n.summary + "\n" + n.detail);
 		doc->noticeWarnings.push_back(n.severity == cl::Severity::Warning);
 	}
-	// Open settled, as the wx app does, so the first frame shows real states.
-	doc->sim->settle();
+	// Open settled, so the first frame shows real states.
+	if (settleOnOpen) doc->sim->settle();
 	return doc.release();
 }
 
 void cl_document_close(CLDocument* doc) { delete doc; }
+
+void cl_set_settle_on_open(bool settle) { settleOnOpen = settle; }
+
+CLDocument* cl_document_new(void) {
+	CLDocument* doc = new CLDocument();
+	doc->pages.emplace_back(new GUICanvas(&doc->circuit));
+	return doc;
+}
+
+const char* cl_document_save_text(CLDocument* doc) {
+	static std::string text;
+	text.clear();
+	if (doc == nullptr) return "";
+	std::vector<GUICanvas*> pages;
+	for (auto& p : doc->pages) pages.push_back(p.get());
+	CircuitParse writer(pages);
+	text = writer.textV3(pages);
+	doc->edited = false;
+	return text.c_str();
+}
+
+int cl_document_add_page(CLDocument* doc) {
+	if (doc == nullptr) return -1;
+	doc->pages.emplace_back(new GUICanvas(&doc->circuit));
+	doc->edited = true;
+	return (int)doc->pages.size() - 1;
+}
+
+void cl_document_rename_page(CLDocument* doc, int page, const char* name) {
+	GUICanvas* p = doc ? doc->page(page) : nullptr;
+	if (p == nullptr || name == nullptr) return;
+	p->name = name;
+	doc->edited = true;
+}
+
+void cl_document_delete_page(CLDocument* doc, int page) {
+	GUICanvas* p = doc ? doc->page(page) : nullptr;
+	if (p == nullptr || doc->pages.size() < 2) return;
+	if (doc->tidy.active) cl_edit_tidy_end(doc, true);
+	doc->gesture = EditGesture();
+	// Delete what's on it through the usual command (it tells the simulator),
+	// then drop the page and the history that might point at it.
+	std::vector<unsigned long> gates, wires;
+	for (auto& g : *p->getGateList()) gates.push_back(g.first);
+	for (auto& w : *p->getWireList()) wires.push_back(w.first);
+	if (!gates.empty() || !wires.empty()) {
+		cmdDeleteSelection del(&doc->circuit, p, gates, wires);
+		del.Do();
+	}
+	doc->circuit.GetCommandProcessor()->ClearCommands();
+	doc->pages.erase(doc->pages.begin() + page);
+	doc->edited = true;
+}
 
 int cl_document_page_count(const CLDocument* doc) { return doc ? (int)doc->pages.size() : 0; }
 
@@ -127,8 +183,16 @@ void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
 	cl::mac::CGScene scene(ctx);
 	scene.setViewport(t);
 	const cl::render::RenderStyle style = cl::render::RenderStyle::screen(dark);
-	for (auto& w : *p->getWireList()) if (w.second) w.second->drawToScene(scene, style);
-	for (auto& g : *p->getGateList()) if (g.second) g.second->drawToScene(scene, style);
+	// In id order: the page's lists are hash maps, whose order depends on how
+	// they were built, and where things overlap the order shows.
+	std::vector<unsigned long> ids;
+	for (auto& w : *p->getWireList()) if (w.second) ids.push_back(w.first);
+	std::sort(ids.begin(), ids.end());
+	for (unsigned long id : ids) (*p->getWireList())[id]->drawToScene(scene, style);
+	ids.clear();
+	for (auto& g : *p->getGateList()) if (g.second) ids.push_back(g.first);
+	std::sort(ids.begin(), ids.end());
+	for (unsigned long id : ids) (*p->getGateList())[id]->drawToScene(scene, style);
 	CGContextRestoreGState(ctx);
 }
 

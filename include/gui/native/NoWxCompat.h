@@ -65,6 +65,8 @@ public:
 		return true;
 	}
 	bool CanUndo() const { return !undoStack.empty(); }
+	size_t UndoCount() const { return undoStack.size(); }
+	size_t RedoCount() const { return redoStack.size(); }
 	bool CanRedo() const { return !redoStack.empty(); }
 	wxString GetUndoName() const { return undoStack.empty() ? wxString() : undoStack.back()->GetName(); }
 	wxString GetRedoName() const { return redoStack.empty() ? wxString() : redoStack.back()->GetName(); }

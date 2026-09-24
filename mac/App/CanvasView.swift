@@ -383,7 +383,61 @@ final class CanvasController: ObservableObject {
     func redraw() { view?.needsDisplay = true }
     func selectionChanged() { selectionVersion += 1 }
     func editsChanged() { editVersion += 1 }
-    func edited() { redraw(); selectionChanged(); editsChanged(); syncTidy() }
+    func edited() { redraw(); selectionChanged(); editsChanged(); syncTidy(); mirrorNewSteps() }
+
+    // MARK: macOS undo
+    // The engine keeps the real undo stack (the wx app's commands). Each step
+    // it gains is mirrored into the window's UndoManager, whose undo and redo
+    // call back into the engine -- so Cmd-Z, the Edit menu, the edited dot and
+    // autosave are all macOS's own.
+
+    weak var undoManager: UndoManager?
+    private var mirrored = 0   // engine steps registered with the undo manager
+
+    private func mirrorNewSteps() {
+        guard let document else { return }
+        let n = document.undoCount
+        if n < mirrored {
+            // The engine dropped history (a page was deleted): so must macOS.
+            undoManager?.removeAllActions()
+            mirrored = n
+        }
+        while mirrored < n {
+            let name = document.undoName
+            undoManager?.registerUndo(withTarget: self) { $0.engineUndo() }
+            undoManager?.setActionName(name)
+            mirrored += 1
+        }
+    }
+
+    private func engineUndo() {
+        guard let document, document.undo() else { return }
+        mirrored -= 1
+        let name = document.redoName
+        undoManager?.registerUndo(withTarget: self) { $0.engineRedo() }
+        undoManager?.setActionName(name)
+        refreshAfterHistory()
+    }
+
+    private func engineRedo() {
+        guard let document, document.redo() else { return }
+        mirrored += 1
+        let name = document.undoName
+        undoManager?.registerUndo(withTarget: self) { $0.engineUndo() }
+        undoManager?.setActionName(name)
+        refreshAfterHistory()
+    }
+
+    private func refreshAfterHistory() { redraw(); selectionChanged(); editsChanged(); syncTidy() }
+
+    /// For changes that aren't undo steps (pages added, renamed or removed):
+    /// tell the document it changed so it's saved.
+    func markEdited() {
+        if let window = view?.window, let doc = NSDocumentController.shared.document(for: window) {
+            doc.updateChangeCount(.changeDone)
+        }
+        editsChanged()
+    }
 
     // Camera
     func zoomIn() { view?.zoomAtCenter(by: 1.25) }
@@ -393,13 +447,11 @@ final class CanvasController: ObservableObject {
     // Editing
     var hasSelection: Bool { document?.hasSelection(page: page) ?? false }
     var hasGateSelection: Bool { document?.hasGateSelection(page: page) ?? false }
-    var canUndo: Bool { document?.canUndo ?? false }
-    var canRedo: Bool { document?.canRedo ?? false }
-    var undoTitle: String { let n = document?.undoName ?? ""; return n.isEmpty ? "Undo" : "Undo \(n)" }
-    var redoTitle: String { let n = document?.redoName ?? ""; return n.isEmpty ? "Redo" : "Redo \(n)" }
+    var canUndo: Bool { undoManager?.canUndo ?? false }
+    var canRedo: Bool { undoManager?.canRedo ?? false }
 
-    func undo() { if document?.undo() == true { edited() } }
-    func redo() { if document?.redo() == true { edited() } }
+    func undo() { undoManager?.undo() }
+    func redo() { undoManager?.redo() }
     func selectAll() { document?.selectAll(page: page); redraw(); selectionChanged() }
     func selectNone() { document?.selectNone(page: page); redraw(); selectionChanged() }
     func deleteSelection() { document?.deleteSelection(page: page); edited() }

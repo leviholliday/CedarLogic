@@ -522,6 +522,10 @@ bool cl_edit_paste(CLDocument* doc, int pageIndex, const char* text, double x, d
 	return true;
 }
 
+int cl_edit_undo_count(const CLDocument* doc) {
+	return doc ? (int)const_cast<GUICircuit&>(doc->circuit).GetCommandProcessor()->UndoCount() : 0;
+}
+
 bool cl_edit_undo(CLDocument* doc) {
 	if (doc == nullptr) return false;
 	settleTidy(doc);

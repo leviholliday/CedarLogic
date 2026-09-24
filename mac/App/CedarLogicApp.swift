@@ -12,7 +12,7 @@ struct CedarLogicApp: App {
     }
 
     var body: some Scene {
-        DocumentGroup(viewing: CircuitDocument.self) { file in
+        DocumentGroup(newDocument: { CircuitDocument() }) { file in
             CircuitWindow(document: file.document.core)
                 .environmentObject(look)
         }
@@ -20,6 +20,13 @@ struct CedarLogicApp: App {
             EditCommands()
             ViewCommands()
             SimulationCommands()
+        }
+
+        Window("Your Circuits", id: "library") {
+            LibraryView()
+        }
+        .commands {
+            LibraryCommands()
         }
 
         Settings {
@@ -91,18 +98,6 @@ struct EditCommands: Commands {
     private func textAction(_ selector: Selector) { NSApp.sendAction(selector, to: nil, from: nil) }
 
     var body: some Commands {
-        CommandGroup(replacing: .undoRedo) {
-            Button(typing ? "Undo" : (canvas?.undoTitle ?? "Undo")) {
-                if typing { textAction(Selector(("undo:"))) } else { canvas?.undo() }
-            }
-            .keyboardShortcut("z", modifiers: .command)
-            .disabled(!typing && canvas?.canUndo != true)
-            Button(typing ? "Redo" : (canvas?.redoTitle ?? "Redo")) {
-                if typing { textAction(Selector(("redo:"))) } else { canvas?.redo() }
-            }
-            .keyboardShortcut("z", modifiers: [.command, .shift])
-            .disabled(!typing && canvas?.canRedo != true)
-        }
         CommandGroup(replacing: .pasteboard) {
             Button("Cut") { if typing { textAction(#selector(NSText.cut(_:))) } else { canvas?.cut() } }
                 .keyboardShortcut("x", modifiers: .command)
@@ -124,6 +119,17 @@ struct EditCommands: Commands {
             Button(tidyTitle(defaultMode)) { canvas?.tidy(mode: defaultMode) }
                 .help("Shift-S. Lines parts up and reroutes their wires (the selection, or the whole page).")
             Button(tidyTitle(1 - defaultMode)) { canvas?.tidy(mode: 1 - defaultMode) }
+        }
+    }
+}
+
+struct LibraryCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("Your Circuits…") { openWindow(id: "library") }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
         }
     }
 }

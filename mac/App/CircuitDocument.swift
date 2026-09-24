@@ -11,7 +11,7 @@ extension UTType {
 }
 
 /// The engine's copy of an open circuit.
-final class CoreDocument {
+final class CoreDocument: ObservableObject {
     let handle: OpaquePointer
 
     init(data: Data) throws {
@@ -26,7 +26,19 @@ final class CoreDocument {
         handle = opened
     }
 
+    /// A new, empty circuit.
+    init() { handle = cl_document_new() }
+
     deinit { cl_document_close(handle) }
+
+    /// The circuit as .cdl text, for saving.
+    func saveText() -> String { String(cString: cl_document_save_text(handle)) }
+
+    // Pages.
+    func addPage() -> Int { Int(cl_document_add_page(handle)) }
+    func renamePage(_ page: Int, to name: String) { cl_document_rename_page(handle, Int32(page), name) }
+    func deletePage(_ page: Int) { cl_document_delete_page(handle, Int32(page)) }
+    var undoCount: Int { Int(cl_edit_undo_count(handle)) }
 
     var pageCount: Int { Int(cl_document_page_count(handle)) }
 
@@ -170,11 +182,19 @@ final class CoreDocument {
     }
 }
 
-/// Stage 0 opens circuits to look at; saving arrives with editing.
-struct CircuitDocument: FileDocument {
+/// A circuit file. Opening builds the engine's copy; saving asks the engine
+/// for the file text, written exactly as the wx app writes it. macOS's own
+/// document handling supplies autosave, the edited dot and version history.
+final class CircuitDocument: ReferenceFileDocument {
+    typealias Snapshot = Data
+
     static var readableContentTypes: [UTType] { [.cedarLogicCircuit] }
+    static var writableContentTypes: [UTType] { [.cedarLogicCircuit] }
 
     let core: CoreDocument
+
+    /// A new, empty circuit.
+    init() { core = CoreDocument() }
 
     init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
@@ -183,8 +203,12 @@ struct CircuitDocument: FileDocument {
         core = try CoreDocument(data: data)
     }
 
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        throw CocoaError(.featureUnsupported)
+    func snapshot(contentType: UTType) throws -> Data {
+        Data(core.saveText().utf8)
+    }
+
+    func fileWrapper(snapshot: Data, configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: snapshot)
     }
 }
 

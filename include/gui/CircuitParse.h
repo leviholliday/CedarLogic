@@ -73,6 +73,8 @@ public:
 	bool saveCircuit(string, vector< GUICanvas* >, unsigned int currPage = 0);
 	// Save the v3 S-expression format (built from the GUI via the format model).
 	bool saveCircuitV3(string, vector< GUICanvas* >, unsigned int currPage = 0);
+	// What saveCircuitV3 writes, as text (for callers that write it themselves).
+	string textV3(vector< GUICanvas* >);
 	// Save in v1.x compatible format (no version tag, no sentinel, single wire IDs)
 	bool saveCircuitLegacy(string, vector< GUICanvas* >, unsigned int currPage = 0);
 	// Get detailed error message from last save operation
