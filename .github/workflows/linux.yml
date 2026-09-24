@@ -30,6 +30,8 @@ jobs:
 
   build:
     needs: skia
+    permissions:
+      contents: write   # the linux-testing pre-release
     # The oldest runner, as glibc and GTK only work forwards: an AppImage built
     # here starts on Ubuntu 22.04, Debian 12, Fedora 36 and anything newer.
     runs-on: ubuntu-22.04
@@ -131,6 +133,30 @@ jobs:
           name: CedarLogic-linux-appimage
           path: build/CedarLogic-*-x86_64.AppImage
           if-no-files-found: error
+
+      # A public download for testers without a GitHub account: one rolling
+      # pre-release, replaced on every push to linux/port.
+      - name: Publish the test build
+        if: github.ref == 'refs/heads/linux/port'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=linux-testing
+          NOTES="Linux test build from linux/port (${GITHUB_SHA::7}). Not a release: expect bugs.
+
+          Download the AppImage, make it executable (chmod +x, or Properties > Allow executing) and run it. Needs Ubuntu 22.04, Debian 12, Fedora 36 or newer."
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease --title "Linux test build" --notes "$NOTES"
+          else
+            gh release create "$TAG" --prerelease --title "Linux test build" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" "$APPIMAGE" --clobber
+          # Drop builds of older versions so only the current one is offered.
+          for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
+            [ "$a" = "$(basename "$APPIMAGE")" ] || gh release delete-asset "$TAG" "$a" -y
+          done
 
       - name: Upload renders
         if: always()
