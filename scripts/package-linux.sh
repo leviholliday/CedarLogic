@@ -4,7 +4,9 @@
 #
 #   scripts/package-linux.sh [build-dir]
 #
-# Output: <build-dir>/CedarLogic-<version>-x86_64.AppImage
+# Output: <build-dir>/CedarLogic-<version>-<arch>.AppImage, where <arch> is the
+# machine it was built on: x86_64 or aarch64. An AppImage holds native code, so
+# each CPU needs its own; build on that CPU (CI uses an arm64 runner).
 #
 # Configure the build with -DUSE_SYSTEM_WXWIDGETS=OFF first. That links a static
 # wxWidgets with no JPEG/TIFF, so the only shared libraries left are the desktop
@@ -16,11 +18,17 @@
 # Build on the oldest distro you want to support (CI uses Ubuntu 22.04), since
 # glibc and GTK only work forwards.
 #
-# Needs linuxdeploy on PATH, or LINUXDEPLOY=/path/to/linuxdeploy-x86_64.AppImage.
+# Needs linuxdeploy for the same CPU on PATH, or
+# LINUXDEPLOY=/path/to/linuxdeploy-<arch>.AppImage.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BUILD=${1:-build}
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64|aarch64) ;;
+    *) echo "unsupported CPU for the AppImage: $ARCH" >&2; exit 1 ;;
+esac
 LINUXDEPLOY=${LINUXDEPLOY:-linuxdeploy}
 
 cmake --build "$BUILD" --target CedarLogic -j"$(nproc)"
@@ -55,10 +63,10 @@ do
     EXCLUDES+=(--exclude-library "$lib")
 done
 
-rm -f "$BUILD"/CedarLogic-*-x86_64.AppImage
+rm -f "$BUILD"/CedarLogic-*-"$ARCH".AppImage
 (
     cd "$BUILD"
-    export ARCH=x86_64
+    export ARCH
     export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
     # Runs linuxdeploy in place of mounting it, so this works in containers
     # and on CI runners that have no FUSE.
@@ -71,7 +79,7 @@ rm -f "$BUILD"/CedarLogic-*-x86_64.AppImage
         --output appimage
 )
 
-OUT=$(ls "$BUILD"/CedarLogic-*-x86_64.AppImage 2>/dev/null | head -1)
+OUT=$(ls "$BUILD"/CedarLogic-*-"$ARCH".AppImage 2>/dev/null | head -1)
 [ -n "$OUT" ] || { echo "linuxdeploy did not produce an AppImage" >&2; exit 1; }
 chmod +x "$OUT"
 echo "$OUT"

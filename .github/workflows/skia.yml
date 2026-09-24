@@ -124,7 +124,7 @@ jobs:
           echo "remaining SYSTEM_ZLIB refs (expect none):" && grep -c FT_CONFIG_OPTION_SYSTEM_ZLIB "$f" || true
 
       - name: Linux GL dev headers
-        if: matrix.name == 'linux' && steps.cache.outputs.cache-hit != 'true'
+        if: startsWith(matrix.name, 'linux') && steps.cache.outputs.cache-hit != 'true'
         run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev
 
       - name: Pin LLVM (Windows)

@@ -22,19 +22,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Linux only. A cache hit makes this seconds.
+  # Linux only, both CPUs. A cache hit makes this seconds.
   skia:
     uses: ./.github/workflows/skia.yml
     with:
-      platforms: '[{"name":"linux","os":"ubuntu-22.04","args":"linux"}]'
+      platforms: >-
+        [{"name":"linux","os":"ubuntu-22.04","args":"linux"},
+         {"name":"linux-arm64","os":"ubuntu-22.04-arm","args":"linux-arm64"}]
 
   build:
     needs: skia
-    permissions:
-      contents: write   # the linux-testing pre-release
-    # The oldest runner, as glibc and GTK only work forwards: an AppImage built
+    name: build (${{ matrix.arch }})
+    strategy:
+      # One CPU failing says nothing about the other.
+      fail-fast: false
+      matrix:
+        include:
+          # PCs and laptops (Intel/AMD).
+          - { arch: x86_64,  os: ubuntu-22.04,     skia: linux }
+          # Raspberry Pi 4/5 on a 64-bit OS, ARM laptops. Built natively on
+          # GitHub's arm64 runners, not cross-compiled.
+          - { arch: aarch64, os: ubuntu-22.04-arm, skia: linux-arm64 }
+    # The oldest runners, as glibc and GTK only work forwards: an AppImage built
     # here starts on Ubuntu 22.04, Debian 12, Fedora 36 and anything newer.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
@@ -49,7 +60,7 @@ jobs:
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
-          key: linux-appimage-gcc
+          key: linux-appimage-gcc-${{ matrix.arch }}
 
       # wxWidgets is built from source (static, no JPEG/TIFF; see CMakeLists.txt),
       # which is most of a cold build. Ubuntu 22.04 only ships wx 3.0 anyway.
@@ -57,14 +68,14 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/_deps
-          key: wxwidgets-linux-port-${{ hashFiles('CMakeLists.txt') }}
+          key: wxwidgets-linux-port-${{ matrix.arch }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
-            wxwidgets-linux-port-
+            wxwidgets-linux-port-${{ matrix.arch }}-
 
       - name: Download Skia dist
         uses: actions/download-artifact@v8
         with:
-          name: skia-linux
+          name: skia-${{ matrix.skia }}
           path: skia-dist
 
       - name: Configure
@@ -94,7 +105,7 @@ jobs:
       - name: Package AppImage
         run: |
           curl -fsSL -o linuxdeploy \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
           chmod +x linuxdeploy
           OUT=$(LINUXDEPLOY="$PWD/linuxdeploy" scripts/package-linux.sh build | tail -1)
           echo "APPIMAGE=$OUT" >> "$GITHUB_ENV"
@@ -130,21 +141,53 @@ jobs:
       - name: Upload AppImage
         uses: actions/upload-artifact@v7
         with:
-          name: CedarLogic-linux-appimage
-          path: build/CedarLogic-*-x86_64.AppImage
+          name: CedarLogic-linux-appimage-${{ matrix.arch }}
+          path: build/CedarLogic-*-${{ matrix.arch }}.AppImage
           if-no-files-found: error
 
-      # A public download for testers without a GitHub account: one rolling
-      # pre-release, replaced on every push to linux/port.
+      - name: Upload renders
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-linux-renders-${{ matrix.arch }}
+          path: renders
+          if-no-files-found: warn
+
+  # A public download for testers without a GitHub account: one rolling
+  # pre-release, replaced on every push to linux/port. Its own job, after both
+  # builds, so the release only ever holds a matching pair.
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/linux/port'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download both AppImages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: CedarLogic-linux-appimage-*
+          path: appimages
+          merge-multiple: true
+
       - name: Publish the test build
-        if: github.ref == 'refs/heads/linux/port'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls -la appimages
           TAG=linux-testing
-          NOTES="Linux test build from linux/port (${GITHUB_SHA::7}). Not a release: expect bugs.
+          NOTES=$(cat <<EOT
+          Linux test build from linux/port (${GITHUB_SHA::7}). Not a release: expect bugs.
 
-          Download the AppImage, make it executable (chmod +x, or Properties > Allow executing) and run it. Needs Ubuntu 22.04, Debian 12, Fedora 36 or newer."
+          Pick the file for your computer:
+          - x86_64: ordinary PCs and laptops (Intel/AMD)
+          - aarch64: Raspberry Pi 4/5 on 64-bit Raspberry Pi OS, ARM laptops (check with uname -m)
+
+          Make it executable (chmod +x, or Properties > Allow executing) and run it. Needs Ubuntu 22.04, Debian 12, Fedora 36 or newer. If it won't open on Ubuntu, Kali or Raspberry Pi OS, install FUSE once: sudo apt install libfuse2
+          EOT
+          )
           git tag -f "$TAG" "$GITHUB_SHA"
           git push -f origin "refs/tags/$TAG"
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -152,16 +195,10 @@ jobs:
           else
             gh release create "$TAG" --prerelease --title "Linux test build" --notes "$NOTES"
           fi
-          gh release upload "$TAG" "$APPIMAGE" --clobber
-          # Drop builds of older versions so only the current one is offered.
+          gh release upload "$TAG" appimages/*.AppImage --clobber
+          # Drop anything this run didn't make (older versions), so only the
+          # current pair is offered.
+          keep=$(cd appimages && ls *.AppImage)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
-            [ "$a" = "$(basename "$APPIMAGE")" ] || gh release delete-asset "$TAG" "$a" -y
+            echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done
-
-      - name: Upload renders
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: CedarLogic-linux-renders
-          path: renders
-          if-no-files-found: warn

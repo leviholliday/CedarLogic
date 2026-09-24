@@ -97,7 +97,8 @@ cmake -B build-appimage -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF 
 LINUXDEPLOY=/path/to/linuxdeploy-x86_64.AppImage scripts/package-linux.sh build-appimage
 ```
 
-That leaves `build-appimage/CedarLogic-<version>-x86_64.AppImage`. glibc and GTK
+That leaves `build-appimage/CedarLogic-<version>-<arch>.AppImage`, for the CPU it
+was built on (x86_64 or aarch64). glibc and GTK
 only work forwards, so build on the oldest distro you want it to run on; the
 `Linux build` workflow (`.github/workflows/linux.yml`) uses Ubuntu 22.04.
 

@@ -42,11 +42,20 @@ All improvements, especially to stability, are welcome. Please see [Contributing
 
 ## Linux
 
-The Linux version ships as an AppImage: download `CedarLogic-<version>-x86_64.AppImage`,
-make it executable (`chmod +x`, or Properties > Permissions > "Allow executing"),
+The Linux version ships as an AppImage, one file that runs without
+installing anything. There are two, one per kind of processor:
+
+- `CedarLogic-<version>-x86_64.AppImage` for ordinary PCs and laptops (Intel/AMD)
+- `CedarLogic-<version>-aarch64.AppImage` for a Raspberry Pi 4/5 on 64-bit
+  Raspberry Pi OS, and ARM laptops (`uname -m` prints `aarch64`)
+
+Make it executable (`chmod +x`, or Properties > Permissions > "Allow executing")
 and run it. It needs Ubuntu 22.04, Debian 12, Fedora 36 or anything newer, with
-GTK 3 (every mainstream desktop has it). The `linux/port` branch builds one on
-every push; it's under the run's artifacts in GitHub Actions.
+GTK 3. If it won't open on Ubuntu, Kali or Raspberry Pi OS, install FUSE once:
+`sudo apt install libfuse2`.
+
+Test builds from the `linux/port` branch are published at
+[Linux test build](https://github.com/leviholliday/CedarLogic-Mac/releases/tag/linux-testing).
 
 ## Building
 

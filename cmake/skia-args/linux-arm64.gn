@@ -1,0 +1,4 @@
+# Linux arm64 Skia args (Raspberry Pi 4/5 on 64-bit OS, ARM laptops). Built
+# natively on an arm64 runner; otherwise the same as linux.gn.
+target_cpu = "arm64"
+skia_use_fontconfig = true
