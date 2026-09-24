@@ -532,11 +532,11 @@ public:
 		groups->SetSizer(inCard);
 		outer->Add(groups, 0, wxEXPAND | wxBOTTOM, FromDIP(6));
 
-		wxStaticText* note = new wxStaticText(this, wxID_ANY,
+		wxStaticText* footnote = new wxStaticText(this, wxID_ANY,
 			"Applies to the custom styles. Hidden tools are still in the menu and keep their shortcuts.");
-		note->SetFont(wxFont(wxFontInfo(9)));
-		note->SetForegroundColour(ui::dim());
-		outer->Add(note, 0, wxALL, FromDIP(6));
+		footnote->SetFont(wxFont(wxFontInfo(9)));
+		footnote->SetForegroundColour(ui::dim());
+		outer->Add(footnote, 0, wxALL, FromDIP(6));
 		SetSizerAndFit(outer);
 		return;
 #endif

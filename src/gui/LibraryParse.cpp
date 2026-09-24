@@ -8,6 +8,7 @@
    LibraryParse: Uses XMLParser to parse library files
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "LibraryParse.h"
 #include "GateLibrary.h"
 #include "wx/msgdlg.h"
@@ -20,7 +21,7 @@ DECLARE_APP(MainApp)
 
 LibraryParse::LibraryParse(const string& xml) {
 	if (xml.empty()) {
-		wxMessageBox("The gate library is missing from this build.",
+		ui::Message("The gate library is missing from this build.",
 		             "Error - Missing Gate Library", wxOK | wxICON_ERROR, NULL);
 		return;
 	}

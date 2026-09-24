@@ -20,8 +20,11 @@
 #include <sstream>
 #include "migrate.hpp"   // cl::loadCircuit, to validate a file before the GUI load
 #include "wx/stdpaths.h"
-#include "CircuitLibrary.h"
-#include "ModernToolbar.h"   // cl::tb::GTheme   // seedSamples, for the first-run practice circuit
+#include "CircuitLibrary.h"   // seedSamples, for the first-run practice circuit
+#include "PreferencesWindow.h"
+#include "UiControls.h"
+#include "QuickAddDialog.h"
+#include "ModernToolbar.h"     // cl::tb::GTheme
 #ifdef WITH_SKIA
 #include "render/SkiaProbe.h"   // headless --skia-probe (no Skia headers leak here)
 #include "render/RendererHealth.h"
@@ -909,6 +912,49 @@ bool MainApp::OnInit()
         frame->SetSimView(true);
         shoot("main-sim-dark.png");
         frame->SetSimView(false);
+
+        // Every Settings page, dark then light.
+        ShowPreferencesWindow(frame);
+        auto shootSettings = [&](const char* theme) {
+            for (int page = 0; page < 5; page++) {
+                wxWindow* w = PreferencesWindowForCapture(page);
+                if (!w) { ok = false; return; }
+                settle();
+                ok &= WinCaptureWindow(w, renderOutput + wxString::Format("/settings-%s-%d.png", theme, page));
+            }
+        };
+        shootSettings("dark");
+        renderMode().darkMode = false;
+        frame->ApplyTheme();
+        shootSettings("light");
+        DismissPreferencesWindow();
+
+        // A question, the kind that interrupts you most, light and dark.
+        for (int dark = 0; dark < 2; dark++) {
+            renderMode().darkMode = dark != 0;
+            frame->ApplyTheme();
+            ui::MessageDialog ask(frame,
+                "Your changes to this circuit haven't been saved.",
+                "Discard changes?", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
+            ask.SetExtendedMessage("A version is kept each time you save, so nothing you saved before is lost.");
+            ask.SetYesNoLabels("Discard Changes", "Cancel");
+            ask.Prepare();
+            ask.Show();
+            settle();
+            ok &= WinCaptureWindow(&ask, renderOutput + (dark ? "/message-dark.png" : "/message-light.png"));
+            ask.Hide();
+        }
+
+        // The gate search (A), light and dark.
+        for (int dark = 0; dark < 2; dark++) {
+            renderMode().darkMode = dark != 0;
+            frame->ApplyTheme();
+            QuickAddDialog add(frame);
+            add.Show();
+            settle();
+            ok &= WinCaptureWindow(&add, renderOutput + (dark ? "/gatesearch-dark.png" : "/gatesearch-light.png"));
+            add.Hide();
+        }
 #endif
         fflush(nullptr);
         std::_Exit(ok ? 0 : 1);

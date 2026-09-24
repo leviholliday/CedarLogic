@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 
+#include "UiControls.h"
 #include "WinSparkleUpdater.h"
 #include "winsparkle.h"
 #include "UpdateInfo.h"
@@ -72,7 +73,7 @@ void WinSparkleUpdater_CheckForUpdates() {
     }
     // Asked for explicitly in a build with no updater. Say so, rather than
     // having the menu item do nothing at all.
-    wxMessageBox("This copy of CedarLogic was built without an update signing "
+    ui::Message("This copy of CedarLogic was built without an update signing "
                  "key, so it cannot verify or install updates.",
                  "Updates are not available in this build.",
                  wxOK | wxICON_INFORMATION);

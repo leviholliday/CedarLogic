@@ -8,6 +8,7 @@
    paramDialog: Generates and handles parameters dialog for a gate
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "MainApp.h"
 #include "GateLibrary.h"
 #include "paramDialog.h"
@@ -192,7 +193,7 @@ void paramDialog::OnOK( wxCommandEvent &evt ) {
 				((wxSpinCtrl*)(paramVals[i]))->GetValue() > (int)(gateDef->dlgParams[i].Rmax)) {
 				// ERROR
 				msg << "ERROR: Parameter " << gateDef->dlgParams[i].textLabel << " is out of range.";
-				wxMessageBox(msg, "Error", wxOK | wxICON_ERROR, NULL);
+				ui::Message(msg, "Error", wxOK | wxICON_ERROR, NULL);
 				return;
 			}
 			// Retrieve the integer value
@@ -210,7 +211,7 @@ void paramDialog::OnOK( wxCommandEvent &evt ) {
 			if (fVal < gateDef->dlgParams[i].Rmin || fVal > gateDef->dlgParams[i].Rmax) {
 				// ERROR
 				msg << "ERROR: Parameter " << gateDef->dlgParams[i].textLabel << " is out of range.";
-				wxMessageBox(msg, "Error", wxOK | wxICON_ERROR, NULL);
+				ui::Message(msg, "Error", wxOK | wxICON_ERROR, NULL);
 				return;
 			}
 		} else if ( gateDef->dlgParams[i].type == "BOOL" ) {

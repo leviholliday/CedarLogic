@@ -8,6 +8,7 @@
    MainFrame: Main frame object
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "MainApp.h"
 #include "CedarLogic.h"     // publisher name for the About panel
 #include "wx/aboutdlg.h"
@@ -1106,14 +1107,14 @@ bool MainFrame::importCircuitFile(const wxString& path) {
 	std::string error;
 	if (!CircuitParse::readCircuit(path.ToStdString(), check, error)) {
 		if (!renderMode().headlessRender)
-			wxMessageBox(wxString(error), "Import Error", wxOK | wxICON_ERROR, this);
+			ui::Message(wxString(error), "Import Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 	// A copy: the file on disk is never touched again.
 	const std::string id = library::create(wxFileName(path).GetName());
 	if (!wxCopyFile(path, library::circuitPath(id), true)) {
 		library::remove(id);
-		wxMessageBox("Couldn't copy that file into your circuits.", "Import Error", wxOK | wxICON_ERROR, this);
+		ui::Message("Couldn't copy that file into your circuits.", "Import Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 	library::snapshot(id);   // the original, as it came in
@@ -1158,7 +1159,7 @@ bool MainFrame::saveToLibrary(bool explicitSave) {
 	}
 	if (!save(openedFilename.ToStdString(), 3)) {
 		if (explicitSave)
-			wxMessageBox("Couldn't save:\n\n" + lastSaveError, "Save Error", wxOK | wxICON_ERROR, this);
+			ui::Message("Couldn't save:\n\n" + lastSaveError, "Save Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 	commandProcessor->MarkAsSaved();
@@ -1179,7 +1180,7 @@ bool MainFrame::saveBeforeLeaving() {
 	if (!fileIsDirty()) return true;
 	if (saveToLibrary(false)) return true;
 	if (renderMode().headlessRender) return true;   // nobody to ask
-	wxMessageDialog ask(this,
+	ui::MessageDialog ask(this,
 		"Your latest changes to this circuit couldn't be saved.",
 		"Couldn't Save", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
 	ask.SetExtendedMessage(wxString(lastSaveError) +
@@ -1216,13 +1217,13 @@ void MainFrame::OnVersionHistory(wxCommandEvent& WXUNUSED(event)) {
 		cl::LoadResult check;
 		std::string error;
 		if (!CircuitParse::readCircuit(version.ToStdString(), check, error)) {
-			wxMessageBox("That version can't be opened:\n\n" + wxString(error),
+			ui::Message("That version can't be opened:\n\n" + wxString(error),
 			             "Restore Version", wxOK | wxICON_ERROR, this);
 			return;
 		}
 	}
 	if (!wxCopyFile(version, library::circuitPath(id), true)) {
-		wxMessageBox("Couldn't restore that version: it could not be copied back into your circuits.",
+		ui::Message("Couldn't restore that version: it could not be copied back into your circuits.",
 		             "Restore Version", wxOK | wxICON_ERROR, this);
 		return;
 	}
@@ -1260,7 +1261,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	const bool reopeningOurs = (path == openedFilename);
 	const std::string holder = (asCopy || reopeningOurs) ? std::string() : FileLock::heldBy(fileName);
 	if (!holder.empty() && !renderMode().headlessRender) {
-		wxMessageDialog dialog(this,
+		ui::MessageDialog dialog(this,
 			"Someone else is editing this circuit right now.",
 			"Open a Copy?", wxYES_NO | wxCANCEL | wxYES_DEFAULT | wxICON_QUESTION);
 		dialog.SetExtendedMessage(
@@ -1286,7 +1287,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	string loadError;
 	if (!CircuitParse::readCircuit(path.ToStdString(), loaded, loadError)) {
 		if (!renderMode().headlessRender)
-			wxMessageBox(wxString(loadError), "Load Error", wxOK | wxICON_ERROR, this);
+			ui::Message(wxString(loadError), "Load Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 
@@ -1374,7 +1375,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	    && !renderMode().headlessRender
 	    && !path.StartsWith(library::root())) {   // library copies always save as V3
 		wxString v = (loadedFileFormat == 1) ? "V1" : "V2";
-		wxMessageDialog dialog(this,
+		ui::MessageDialog dialog(this,
 			"This circuit was saved in an older file format (" + v + ").\n\n"
 			"Convert it to V3 now? If not, you can convert it later when you save.",
 			"Older File Format", wxYES_NO | wxICON_QUESTION);
@@ -1386,7 +1387,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 				saveFormatDecided = true;
 				commandProcessor->MarkAsSaved();
 			} else {
-				wxMessageBox("Could not convert the file:\n\n" + saver.getLastError(),
+				ui::Message("Could not convert the file:\n\n" + saver.getLastError(),
 					"Save Error", wxOK | wxICON_ERROR, this);
 			}
 		}
@@ -1409,7 +1410,7 @@ int MainFrame::chooseSaveFormat() {
 	if (saveFormatDecided) return loadedFileFormat;  // already answered for this file
 
 	wxString v = (loadedFileFormat == 1) ? "V1" : "V2";
-	wxMessageDialog dialog(this,
+	ui::MessageDialog dialog(this,
 		"This circuit was opened in an older file format (" + v + ").\n\n"
 		"Convert it to V3, or keep " + v + "?\n\n"
 		"V3 files cannot be opened by older versions of CedarLogic.",
@@ -1432,7 +1433,7 @@ void MainFrame::OnSaveAs(wxCommandEvent& WXUNUSED(event)) {
 	if (dialog.ShowModal() != wxID_OK) return;
 	lastDirectory = dialog.GetDirectory();
 	if (!save(dialog.GetPath().ToStdString(), 3))
-		wxMessageBox("Couldn't export:\n\n" + lastSaveError, "Export Error", wxOK | wxICON_ERROR, this);
+		ui::Message("Couldn't export:\n\n" + lastSaveError, "Export Error", wxOK | wxICON_ERROR, this);
 }
 
 void MainFrame::OnOscope(wxCommandEvent& WXUNUSED(event)) {
@@ -1949,13 +1950,13 @@ void MainFrame::OnTruthTable(wxCommandEvent& WXUNUSED(event)) {
 		else if (dynamic_cast<guiGateLED*>(g.second)) outs.push_back(g.second);
 	}
 	if (ins.empty() || outs.empty()) {
-		wxMessageBox("A truth table needs at least one switch (an input) and one light (an output)"
+		ui::Message("A truth table needs at least one switch (an input) and one light (an output)"
 		             + wxString(useSelection ? " in the selection." : " on this page."),
 		             "Truth Table", wxOK | wxICON_INFORMATION, this);
 		return;
 	}
 	if (ins.size() > 8) {
-		wxMessageBox(wxString::Format("That's %zu switches -- %s rows. Select up to 8 switches "
+		ui::Message(wxString::Format("That's %zu switches -- %s rows. Select up to 8 switches "
 		             "(and the lights you care about) and try again.", ins.size(),
 		             ins.size() > 16 ? "far too many" : wxString::Format("%lu", 1UL << ins.size())),
 		             "Truth Table", wxOK | wxICON_INFORMATION, this);
@@ -2413,14 +2414,14 @@ void MainFrame::OnReopenTab(wxCommandEvent& event) {
 }
 
 // A Yes/No prompt that answers to Y, N and Escape as well as Return, which is
-// what you want when it interrupts you mid-keyboard. On macOS wxMessageDialog
+// what you want when it interrupts you mid-keyboard. On macOS ui::MessageDialog
 // is a system alert whose buttons swallow those keys, so there it is an
 // NSAlert with a key monitor (MacAskYesNo). Elsewhere it is the stock dialog.
 bool MainFrame::AskYesNo(const wxString& title, const wxString& message) {
 #ifdef __APPLE__
 	return MacAskYesNo(title.utf8_str(), message.utf8_str(), renderMode().darkMode);
 #else
-	wxMessageDialog ask(this, message, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+	ui::MessageDialog ask(this, message, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
 	return ask.ShowModal() == wxID_YES;
 #endif
 }
@@ -3217,7 +3218,7 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 				                               sz.GetHeight() * multiplier,
 				                               showGrid, useNoColor, &info);
 				if (!success) {
-					wxMessageBox("Failed to export SVG file.", "Export Error", wxOK | wxICON_ERROR);
+					ui::Message("Failed to export SVG file.", "Export Error", wxOK | wxICON_ERROR);
 				}
 			} else {
 				// Export as bitmap (PNG default; BMP when explicitly chosen).
@@ -3262,11 +3263,11 @@ void MainFrame::OnExportLegacy(wxCommandEvent& event) {
 
 			if (errorMsg.find("Warning:") == 0) {
 				// This is a bus features warning, file was saved successfully
-				wxMessageBox(errorMsg, "Export Warning", wxOK | wxICON_WARNING);
+				ui::Message(errorMsg, "Export Warning", wxOK | wxICON_WARNING);
 			} else {
 				// This is an I/O error
 				wxString fullMsg = "Failed to export file:\n\n" + errorMsg;
-				wxMessageBox(fullMsg, "Export Error", wxOK | wxICON_ERROR);
+				ui::Message(fullMsg, "Export Error", wxOK | wxICON_ERROR);
 			}
 		}
 	}
@@ -3293,7 +3294,7 @@ void MainFrame::OnExportV2(wxCommandEvent& event) {
 		if (!(toolBar->GetToolState(Tool_Lock))) unlock();
 
 		if (!success) {
-			wxMessageBox("Failed to export file:\n\n" + cirp.getLastError(),
+			ui::Message("Failed to export file:\n\n" + cirp.getLastError(),
 			             "Export Error", wxOK | wxICON_ERROR);
 		}
 	}
@@ -3627,7 +3628,7 @@ void MainFrame::offerRecovery() {
 			"CedarLogic closed unexpectedly with unsaved work.\n\n"
 			"Recover " + of + "?\n"
 			"Last autosaved " + entry.takenAt + ".";
-		wxMessageDialog dialog(this, message, "Recover Work",
+		ui::MessageDialog dialog(this, message, "Recover Work",
 		                       wxYES_DEFAULT | wxYES_NO | wxICON_QUESTION);
 		if (dialog.ShowModal() != wxID_YES) {
 			autosaveStore::discard(entry);   // they have seen it and said no
@@ -3680,7 +3681,7 @@ void MainFrame::OnAutosaveTimer(wxTimerEvent& WXUNUSED(event)) {
 	SetStatusText("Couldn't save automatically: " + wxString(lastSaveError));
 	if (autosaveFailing || renderMode().headlessRender) return;
 	autosaveFailing = true;
-	wxMessageBox("Your circuit couldn't be saved automatically:\n\n" + wxString(lastSaveError) +
+	ui::Message("Your circuit couldn't be saved automatically:\n\n" + wxString(lastSaveError) +
 	             "\n\nIt is still on screen, and saving will be retried every few seconds. "
 	             "File > Export as CedarLogic File saves a copy somewhere else.",
 	             "Couldn't Save", wxOK | wxICON_WARNING, this);
@@ -4007,7 +4008,7 @@ void MainFrame::OnNewTab(wxCommandEvent& event) {
 		}
 	}
 	else {
-		wxMessageBox("You have reached the maximum number of tabs.", "Close", wxOK);
+		ui::Message("You have reached the maximum number of tabs.", "Close", wxOK);
 	}
 	 
 /*	canvases.push_back(new GUICanvas(canvasBook, gCircuit, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS));
@@ -4030,14 +4031,14 @@ void MainFrame::OnReportABug(wxCommandEvent& event) {
 	// Tyler Drake can remap the url using cedar.to/create
 	// Don't change the url here!
 	//wxLaunchDefaultBrowser("https://cedar.to/XoQJpX", 0);
-	wxMessageBox("Feature temporarily unavailable!");
+	ui::Message("Feature temporarily unavailable!");
 }
 
 void MainFrame::OnRequestAFeature(wxCommandEvent& event) {
 	// Tyler Drake can remap the url using cedar.to/create
 	// Don't change the url here!
 	//wxLaunchDefaultBrowser("https://cedar.to/6IlP8c", 0);
-	wxMessageBox("Feature temporarily unavailable!");
+	ui::Message("Feature temporarily unavailable!");
 }
 
 void MainFrame::OnDownloadLatestVersion(wxCommandEvent& event) {
@@ -4045,7 +4046,7 @@ void MainFrame::OnDownloadLatestVersion(wxCommandEvent& event) {
 	// accelerator or a programmatic menu event can still reach this handler,
 	// and it would otherwise put a request on the wire.
 	if (cl::update::checksDisabled()) {
-		wxMessageBox("Updates for CedarLogic are managed by your administrator.",
+		ui::Message("Updates for CedarLogic are managed by your administrator.",
 		             "Updates are managed", wxOK | wxICON_INFORMATION, this);
 		return;
 	}

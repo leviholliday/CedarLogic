@@ -3,6 +3,7 @@
    ShortcutsSheet: every keyboard shortcut, searchable. See ShortcutsSheet.h.
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "ShortcutsSheet.h"
 #include "MainFrame.h"
 #include "MainApp.h"
@@ -418,7 +419,7 @@ void ShowShortcutsSheet(MainFrame* frame) {
 	headRow->Add(titles, 1, wxALIGN_CENTER_VERTICAL);
 	top->Add(headRow, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);
 
-	wxSearchCtrl* search = new wxSearchCtrl(&dlg, wxID_ANY);
+	ui::SearchBox* search = new ui::SearchBox(&dlg, wxID_ANY);
 	search->ShowCancelButton(true);
 	search->SetDescriptiveText("Search shortcuts (try \"zoom\" or \"tab\")");
 	top->Add(search, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);

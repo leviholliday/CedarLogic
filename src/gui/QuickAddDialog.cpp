@@ -30,7 +30,9 @@ DECLARE_APP(MainApp)
 
 namespace {
 
-const int ROW_H = 54, THUMB = 40;
+// Big enough to tell a 3-input AND from a 4-input one and to see a NAND's
+// bubble, which 40px was not -- this is how people learn the gates' names.
+const int ROW_H = 84, THUMB = 66;
 
 bool isDark() { return renderMode().darkMode; }
 
@@ -190,13 +192,21 @@ private:
 				gc->DrawRoundedRectangle(8, y + 3, w - 16, ROW_H - 6, 11);
 			}
 
-			const wxBitmap thumb = owner->previewFor(row.gateName, THUMB);
-			if (thumb.IsOk()) gc->DrawBitmap(thumb, 20, y + (ROW_H - THUMB) / 2.0, THUMB, THUMB);
+			// The picture on a small tile of its own, drawn at the screen's
+			// real resolution so it stays sharp on a high-DPI display.
+			const double tx = 18, ty = y + (ROW_H - THUMB) / 2.0;
+			gc->SetBrush(wxBrush(paperColour()));
+			gc->SetPen(wxPen(withAlpha(ink, 0.10), 1));
+			gc->DrawRoundedRectangle(tx - 0.5, ty - 0.5, THUMB + 1, THUMB + 1, 9);
+			const double scale = GetContentScaleFactor();
+			const wxBitmap thumb = owner->previewFor(row.gateName, (int)std::lround(THUMB * scale));
+			if (thumb.IsOk()) gc->DrawBitmap(thumb, tx, ty, THUMB, THUMB);
 
+			const double textX = tx + THUMB + 16;
 			gc->SetFont(wxFont(wxFontInfo(13).Bold()), ink);
-			gc->DrawText(row.caption, 76, y + 10);
+			gc->DrawText(row.caption, textX, y + ROW_H / 2.0 - 20);
 			gc->SetFont(wxFont(wxFontInfo(10.5)), dimColour());
-			gc->DrawText(row.detail, 76, y + 29);
+			gc->DrawText(row.detail, textX, y + ROW_H / 2.0 + 2);
 		}
 	}
 
@@ -208,7 +218,7 @@ private:
 };
 
 QuickAddDialog::QuickAddDialog(wxWindow* parent)
-	: wxDialog(parent, wxID_ANY, "Add a Gate", wxDefaultPosition, wxSize(520, 520),
+	: wxDialog(parent, wxID_ANY, "Add a Gate", wxDefaultPosition, wxSize(560, 640),
 		wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
 
 	SetBackgroundColour(paperColour());
@@ -237,7 +247,7 @@ QuickAddDialog::QuickAddDialog(wxWindow* parent)
 	hint->SetForegroundColour(dimColour());
 	topSizer->Add(hint, 0, wxLEFT | wxRIGHT | wxTOP, 22);
 
-	searchField = new wxSearchCtrl(this, wxID_ANY);
+	searchField = new ui::SearchBox(this, wxID_ANY);
 	searchField->ShowCancelButton(true);
 	searchField->SetDescriptiveText("Search gates");
 	topSizer->Add(searchField, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);
@@ -344,7 +354,10 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 	// edges), then downscale with a high-quality filter -- crisp AND smooth.
 	const int SS = 3;
 	const int W = width * SS, H = height * SS;
-	const int margin = 12 * SS;
+	// Margin and stroke in proportion to the size asked for: the same picture
+	// at 66px or at 132px on a 2x screen.
+	const int margin = std::max(6, width / 8) * SS;
+	const double stroke = std::max(2.0, width / 30.0) * SS;
 	const int drawW = W - 2 * margin;
 	const int drawH = H - 2 * margin;
 
@@ -359,7 +372,7 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 
 	wxGraphicsContext* gc = wxGraphicsContext::Create(dc);
 	if (gc) {
-		gc->SetPen(wxPen(inkColour(), 2.0 * SS));  // ~2px once downscaled
+		gc->SetPen(wxPen(inkColour(), stroke));
 		wxGraphicsPath path = gc->CreatePath();
 		for (auto& s : segs) {
 			path.MoveToPoint(offsetX + (s.x1 - minX) * scale, offsetY + (maxY - s.y1) * scale);
@@ -368,7 +381,7 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 		gc->StrokePath(path);
 		delete gc;  // flush the drawing into the bitmap before it's read back
 	} else {
-		dc.SetPen(wxPen(inkColour(), 2 * SS));
+		dc.SetPen(wxPen(inkColour(), (int)stroke));
 		for (auto& s : segs) {
 			dc.DrawLine((int)(offsetX + (s.x1 - minX) * scale), (int)(offsetY + (maxY - s.y1) * scale),
 			            (int)(offsetX + (s.x2 - minX) * scale), (int)(offsetY + (maxY - s.y2) * scale));

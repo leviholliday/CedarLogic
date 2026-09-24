@@ -6,6 +6,7 @@
    each with a small preview tile, a name and a quiet second line.
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "LibraryDialogs.h"
 #include "CircuitLibrary.h"
 #include "MainApp.h"
@@ -404,7 +405,7 @@ private:
 struct Picker {
 	wxDialog* dlg = nullptr;
 	RowList* list = nullptr;
-	wxSearchCtrl* search = nullptr;
+	ui::SearchBox* search = nullptr;
 	wxBoxSizer* buttons = nullptr;
 };
 
@@ -426,7 +427,7 @@ Picker buildPicker(wxWindow* parent, const wxString& title, const wxString& head
 	top->Add(sub, 0, wxLEFT | wxRIGHT | wxTOP, 22);
 
 	if (withSearch) {
-		p.search = new wxSearchCtrl(p.dlg, wxID_ANY);
+		p.search = new ui::SearchBox(p.dlg, wxID_ANY);
 		p.search->ShowCancelButton(true);
 		p.search->SetDescriptiveText(searchHint);
 		top->Add(p.search, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);
@@ -518,11 +519,11 @@ LibraryChoice ShowLibraryDialog(wxWindow* parent, const std::string& currentId) 
 		const int i = p.list->Selection();
 		if (i < 0 || i >= (int)shown.size()) return;
 		if (shown[i].id == currentId) {
-			wxMessageBox("That circuit is open. Open a different one first, then delete it.",
+			ui::Message("That circuit is open. Open a different one first, then delete it.",
 			             "Delete Circuit", wxOK | wxICON_INFORMATION, p.dlg);
 			return;
 		}
-		wxMessageDialog confirm(p.dlg, "Delete \"" + shown[i].name + "\" and all its versions?",
+		ui::MessageDialog confirm(p.dlg, "Delete \"" + shown[i].name + "\" and all its versions?",
 		                        "Delete Circuit", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
 		confirm.SetYesNoLabels("Delete", "Cancel");
 		if (confirm.ShowModal() != wxID_YES) return;
@@ -573,7 +574,7 @@ wxString ShowVersionHistoryDialog(wxWindow* parent, const std::string& id) {
 	wxString restorePath;
 	const std::vector<library::Version> versions = library::versions(id);
 	if (versions.empty()) {
-		wxMessageBox(ui::platformKeys("No earlier versions yet. A version is kept each time you save (Cmd+S), "
+		ui::Message(ui::platformKeys("No earlier versions yet. A version is kept each time you save (Cmd+S), "
 		             "and every few minutes while you work."), "Version History",
 		             wxOK | wxICON_INFORMATION, parent);
 		return restorePath;
@@ -658,7 +659,7 @@ wxString ShowVersionHistoryDialog(wxWindow* parent, const std::string& id) {
 			library::name(id) + " (" + versions[i].when.Format("%b %d %H-%M") + ").cdl",
 			"Circuit files (*.cdl)|*.cdl", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
 		if (save.ShowModal() == wxID_OK && !wxCopyFile(versions[i].path, save.GetPath(), true))
-			wxMessageBox("Couldn't save a copy there. Try another folder.",
+			ui::Message("Couldn't save a copy there. Try another folder.",
 			             "Export Version", wxOK | wxICON_ERROR, p.dlg);
 	};
 

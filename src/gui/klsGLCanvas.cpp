@@ -8,6 +8,7 @@
    klsGLCanvas: Generic implementation of OpenGL canvas
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "klsGLCanvas.h"
 #include <cstdlib>
 #include "Settings.h"
@@ -222,7 +223,7 @@ void klsGLCanvas::announceRendererFailure() {
 	announced = true;
 	const wxString msg = cl::render::rendererFailureMessage();
 	CallAfter([msg] {
-		wxMessageBox(msg, "Rendering issue", wxOK | wxICON_WARNING);
+		ui::Message(msg, "Rendering issue", wxOK | wxICON_WARNING);
 	});
 }
 

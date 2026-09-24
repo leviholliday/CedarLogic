@@ -10,7 +10,7 @@
 
 using namespace std;
 
-class wxSearchCtrl;
+#include "UiControls.h"
 class GateResultList;
 
 // The "A" picker: type a few letters, arrow to the gate you want, Enter to
@@ -31,7 +31,7 @@ private:
 	int fuzzyScore(const string& query, const string& target);
 	wxBitmap renderGatePreview(const string& gateName, int width, int height);
 
-	wxSearchCtrl* searchField;
+	ui::SearchBox* searchField;
 	GateResultList* resultList;
 	string selectedGate;
 
