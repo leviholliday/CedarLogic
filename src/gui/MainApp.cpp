@@ -897,13 +897,13 @@ bool MainApp::OnInit()
             }
             ok &= sheet.SaveFile(renderOutput + "/gate-previews.png", wxBITMAP_TYPE_PNG);
             // And at the size of the big picture beside the list.
-            wxBitmap big(2 * 210 + 30, 230, 24);
+            wxBitmap big(2 * 170 + 30, 190, 24);
             {
                 wxMemoryDC dc(big);
                 dc.SetBackground(*wxWHITE_BRUSH);
                 dc.Clear();
-                dc.DrawBitmap(picker.previewFor("AA_AND2", 210), 10, 10);
-                dc.DrawBitmap(picker.previewFor("BA_NAND2", 210), 230, 10);
+                dc.DrawBitmap(picker.previewFor("AA_AND2", 170), 10, 10);
+                dc.DrawBitmap(picker.previewFor("BA_NAND2", 170), 190, 10);
             }
             ok &= big.SaveFile(renderOutput + "/gate-previews-big.png", wxBITMAP_TYPE_PNG);
         }
