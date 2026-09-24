@@ -11,6 +11,12 @@
 #ifndef GUICANVAS_H_
 #define GUICANVAS_H_
 
+#ifdef CL_NO_WX
+// The native Mac front end has no wx canvas; the commands that edit a page
+// talk to its page model instead, which answers to the same name.
+#include "native/PageModel.h"
+#else
+
 #include <set>
 #include <map>
 #include <memory>
@@ -36,25 +42,7 @@ class cmdCreateGate;
 class klsCommand;
 class guiWire;
 
-// Struct GateState
-//		stores the position and id of a gate so we know where we moved from
-struct GateState {
-	GateState( unsigned int nID, float nX, float nY, bool nSel ) : id(nID), x(nX), y(nY), selected(nSel) {}
-	unsigned int id;
-	float x;
-	float y;
-	bool selected;
-};
-
-// Struct WireState
-//		stores the relative position (to itself) of a wire so we know where we moved from
-struct WireState {
-	WireState( unsigned int nID, GLPoint2f nPoint, map < long, wireSegment > nTree ) : 
-		id(nID), point(nPoint), oldWireTree(nTree) {}
-	unsigned int id;
-	GLPoint2f point;
-	map < long, wireSegment > oldWireTree;
-};
+#include "CanvasTypes.h"
 
 // Struct ConnectionSource
 //		stores the source of a drag connect operation
@@ -509,4 +497,5 @@ private:
 	
 };
 
+#endif  // CL_NO_WX
 #endif /*TESTGLCANVAS_H_*/

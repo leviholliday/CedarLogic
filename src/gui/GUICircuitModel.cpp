@@ -18,6 +18,8 @@
 
 GUICircuit::GUICircuit() {
 	nextGateID = nextWireID = 0;
+	myOscope = nullptr;
+	gCanvas = nullptr;
 	simulate = true;
 	waitToSendMessage = true;
 	panic = false;
@@ -116,7 +118,7 @@ guiGate* GUICircuit::createGate(string gateName, long id, bool noOscope) {
 	
 	// Update the OScope with the new info:
 	if(ggt == "TO" && !noOscope) {
-		gateTypesChanged();
+		oscopeSignalsChanged();
 	}
 	
 	return newGate;
@@ -150,7 +152,7 @@ void GUICircuit::deleteGate(unsigned long gid, bool waitToUpdate) {
 	//Call Update Oscope
 	if(updateMenu)
 	{
-		gateTypesChanged();
+		oscopeSignalsChanged();
 	}		
 }
 

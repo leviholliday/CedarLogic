@@ -21,6 +21,8 @@
 #include <unordered_map>
 #ifndef CL_NO_WX
 #include "wx/docview.h"
+#else
+#include "native/NoWxCompat.h"
 #endif
 #include "gl_wrapper.h"
 #include "klsMessage.h"
@@ -43,9 +45,14 @@ class GUICircuit : public wxDocument
 {
     DECLARE_DYNAMIC_CLASS(GUICircuit)
 #else
-// Without wxWidgets (the native Mac front end) the circuit is a plain model.
+// Without wxWidgets (the native Mac front end) the circuit is a plain model,
+// with its own undo stack in place of wxDocument's.
 class GUICircuit
 {
+public:
+	wxCommandProcessor* GetCommandProcessor() { return &commandProcessor; }
+private:
+	wxCommandProcessor commandProcessor;
 #endif
 	
 public:
@@ -155,10 +162,12 @@ public:
 	// was grinding (overloaded) or nothing was running at all (stalled).
 	int lastLogicTime = 0;
 	
+	// A TO gate came, went or was renamed, so the oscope's list of signals is
+	// stale. Each front end supplies its own (the wx app refreshes the oscope
+	// window, when there is one).
+	void oscopeSignalsChanged();
+
 private:
-	// A TO gate came or went, so the oscope's list of signals is stale. The
-	// wx app refreshes the oscope; each front end supplies its own.
-	void gateTypesChanged();
 
 	GateMap gateList;
 	WireMap wireList;

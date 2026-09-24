@@ -19,16 +19,22 @@ MIN=14.0
 mkdir -p "$OBJ"
 
 CORE=(
+	# the model, drawing, routing and loading/saving, shared with the wx app
 	src/gui/guiGate.cpp src/gui/guiWire.cpp src/gui/wireSegment.cpp
 	src/gui/klsCollisionChecker.cpp src/gui/GateLibrary.cpp src/gui/LibraryParse.cpp
 	src/gui/XMLParser.cpp src/gui/GUICircuitModel.cpp src/gui/RenderMode.cpp
-	src/gui/PaletteDrag.cpp src/gui/Settings.cpp src/gui/gl_defs.cpp
+	src/gui/PaletteDrag.cpp src/gui/Settings.cpp src/gui/gl_defs.cpp src/gui/CircuitParse.cpp
 	src/gui/route/TrunkRouter.cpp src/gui/route/GridRouter.cpp src/gui/route/Layout.cpp
+	# the editing commands (undo/redo), minus the two that manage wx tabs
+	$(ls src/gui/command/*.cpp | grep -v -e cmdAddTab -e cmdDeleteTab)
+	# the logic engine and the file format library
+	logic/src/*.cpp
 	format/circuit_file_io.cpp format/legacy_cdl.cpp format/migrate.cpp format/numeric.cpp format/sexpr.cpp
-	mac/CedarCore/CGScene.cpp mac/CedarCore/Document.cpp mac/CedarCore/Glue.cpp
+	# the native side
+	mac/CedarCore/*.cpp
 )
 CXXFLAGS=(-std=c++17 -O2 -arch "$ARCH" -mmacosx-version-min=$MIN -DCL_NO_WX
-	-Wno-deprecated-declarations -Wno-inconsistent-missing-override -Iinclude/gui -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include)
+	-Wno-deprecated-declarations -Wno-inconsistent-missing-override -D_PRODUCTION_ -Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include)
 
 echo "Engine..."
 OBJS=()

@@ -50,8 +50,8 @@ void GUICircuit::reInitializeLogicCircuit() {
 	lastLogicTime = lastTime = lastTimeMod = lastNumSteps = 0;
 }
 
-void GUICircuit::gateTypesChanged() {
-	myOscope->UpdateMenu();
+void GUICircuit::oscopeSignalsChanged() {
+	if (myOscope != nullptr) myOscope->UpdateMenu();
 }
 
 void GUICircuit::Render() {

@@ -18,6 +18,7 @@ struct CedarLogicApp: App {
         }
         .commands {
             ViewCommands()
+            SimulationCommands()
         }
 
         Settings {
@@ -57,6 +58,21 @@ struct ViewCommands: Commands {
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(canvas == nil)
             Divider()
+        }
+    }
+}
+
+struct SimulationCommands: Commands {
+    @FocusedObject private var canvas: CanvasController?
+
+    var body: some Commands {
+        CommandMenu("Simulation") {
+            Button(canvas?.isRunning == false ? "Run" : "Pause") { canvas?.toggleRunning() }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(canvas == nil)
+            Button("Step") { canvas?.stepOnce() }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(canvas == nil)
         }
     }
 }

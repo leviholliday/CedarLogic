@@ -4,12 +4,16 @@
 #include "../GUICircuit.h"
 #include "../GUICanvas.h"
 #include "../guiGate.h"
+#ifndef CL_NO_WX
 #include "../MainApp.h"
+#endif
 #include "cmdSetParams.h"
 #include "cmdSerialize.h"
 #include "cmdRegistry.h"
 
+#ifndef CL_NO_WX
 DECLARE_APP(MainApp)
+#endif
 
 // Self-register so the paste dispatcher can rebuild a "creategate ..." line
 // without naming this type. See cmdRegistry.h.

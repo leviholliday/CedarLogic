@@ -12,11 +12,17 @@
 #include "PaletteDrag.h"
 #include "RenderMode.h"
 #include "GateLibrary.h"
+#ifndef CL_NO_WX
 #include "OscopeFrame.h"
 #include "MainApp.h"
 #include "MainFrame.h"
-#include <fstream>
 #include <wx/file.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#endif
+#include <fstream>
 #include <sstream>
 #include <cerrno>
 #include <cstring>
@@ -34,6 +40,7 @@
 #include "GUICircuit.h"
 #include "GUICanvas.h"
 #include "command/cmdSetParams.h"
+#include "command/cmdConnectWire.h"
 #include <algorithm>
 #include <map>
 #include <set>
@@ -43,13 +50,21 @@
 #include "migrate.hpp"          // cl::loadCircuit: format detection + migration notices
 #include "circuit_file_io.hpp"  // cl::writeCircuitFile: the v3 serializer
 
+#ifndef CL_NO_WX
 DECLARE_APP(MainApp)
+#endif
 
 CircuitParse::CircuitParse(GUICanvas* glc) {
 	// this constructor did not initialiize all its data members, I corrected that
 	// note:  gCanvases and fileName are initialized by base class default constructors   KAS
 	mParse = nullptr;
 	gCanvas = glc;
+}
+
+CircuitParse::CircuitParse(vector< GUICanvas* > glc) {
+	mParse = nullptr;
+	gCanvases = glc;
+	gCanvas = glc.empty() ? nullptr : glc[0];
 }
 
 CircuitParse::CircuitParse(string fileName, vector< GUICanvas* > glc) {
@@ -99,6 +114,9 @@ static bool hasBreakingVersion(const string& fileVersion, const string& currentV
 // Present the migration notices (gate renames, the decoder-width fix) from a
 // load in one dialog, instead of a modal popup per affected gate.
 static void showMigrationNotices(const std::vector<cl::MigrationNotice> &notices) {
+#ifdef CL_NO_WX
+	(void)notices;   // the native front end shows loadNotices itself
+#else
 	if (notices.empty()) return;
 
 	bool anyWarning = false;
@@ -113,6 +131,7 @@ static void showMigrationNotices(const std::vector<cl::MigrationNotice> &notices
 	}
 	wxMessageBox(msg, wxT("Circuit Updated"),
 	             wxOK | (anyWarning ? wxICON_EXCLAMATION : wxICON_INFORMATION));
+#endif
 }
 
 // The application version written into a v2 export: the last release whose Save
@@ -138,8 +157,10 @@ bool CircuitParse::readCircuit(const string &path, cl::LoadResult &out, string &
 	ifstream in(path.c_str(), ios::in | ios::binary);
 	ostringstream buf;
 	buf << in.rdbuf();
-	string text = buf.str();
+	return readCircuitText(buf.str(), out, error);
+}
 
+bool CircuitParse::readCircuitText(const string &text, cl::LoadResult &out, string &error) {
 	// Keep old builds of Cedar Logic from opening newer, incompatible files.
 	string version = extractVersion(text);
 	if (!version.empty() && hasBreakingVersion(version, VERSION_NUMBER_STRING()) &&
@@ -176,6 +197,7 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 	applyCircuitFile(loaded.file);
 	std::vector<cl::MigrationNotice> all = loaded.notices;
 	all.insert(all.end(), applyNotices.begin(), applyNotices.end());
+	loadNotices = all;
 	if (renderMode().headlessRender) {
 		// A one-shot render has no one to show a dialog to, but the notices are
 		// the only record that the file lost something on the way in. Print them
@@ -187,7 +209,7 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 		showMigrationNotices(all);
 	}
 
-	gCanvas->getCircuit()->getOscope()->UpdateMenu();
+	gCanvas->getCircuit()->oscopeSignalsChanged();
 	return gCanvases;
 }
 
@@ -210,13 +232,21 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 		// at a time regardless of the index put page 5 of a {0,5} file onto page
 		// 1: the content silently moved. Honor what the file says instead.
 		while (pg.index > (int)(gCanvases.size() - 1)) {
+#ifdef CL_NO_WX
+			gCanvases.push_back(new GUICanvas(gCanvases[0]->getCircuit()));
+#else
 			gCanvases.push_back(new GUICanvas(gCanvases[0]->GetParent(),
 			                                  gCanvases[0]->getCircuit(), wxID_ANY,
 			                                  wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS));
+#endif
 		}
 		gCanvas = gCanvases[pg.index];
+#ifdef CL_NO_WX
+		gCanvas->name = pg.name;
+#else
 		if (!pg.name.empty() && wxGetApp().mainframe)
 			wxGetApp().mainframe->SetTabName(gCanvas, wxString::FromUTF8(pg.name.c_str()));
+#endif
 
 		// A gate's pin connections live on the wires; collect them per gate so a
 		// gate is created with the same (pin -> wire ids) list the old gate-side
@@ -514,8 +544,12 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 		cl::Page pg;
 		pg.index = (int)i;
 		// Carry the tab's name, if the user gave it one.
+#ifdef CL_NO_WX
+		pg.name = glc[i]->name;
+#else
 		if (wxGetApp().mainframe)
 			pg.name = wxGetApp().mainframe->SavedTabName(glc[i]).ToStdString();
+#endif
 		for (const auto &entry : *glc[i]->getGateList())
 			pg.gates.push_back(buildGate(entry.second));
 		for (const auto &entry : *glc[i]->getWireList())
@@ -893,6 +927,46 @@ bool CircuitParse::writeToFile(const string &filename, const string &text) {
 		}
 	};
 
+#ifdef CL_NO_WX
+	// The same atomic write with POSIX calls: a temporary beside the target,
+	// fsync, then rename over it.
+	const string tmp = filename + ".saving-XXXXXX";
+	std::vector<char> tmpl(tmp.begin(), tmp.end());
+	tmpl.push_back(0);
+	errno = 0;
+	const int fd = mkstemp(tmpl.data());
+	if (fd < 0) { describe(errno, "Cannot open file for writing"); return false; }
+	struct stat st;
+	if (stat(filename.c_str(), &st) == 0) fchmod(fd, st.st_mode & 07777);   // keep the original's permissions
+	else fchmod(fd, 0644);
+	const char* p = text.data();
+	size_t left = text.size();
+	while (left > 0) {
+		errno = 0;
+		const ssize_t n = write(fd, p, left);
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			describe(errno, "Write operation failed");
+			close(fd); unlink(tmpl.data());
+			return false;
+		}
+		p += n; left -= (size_t)n;
+	}
+	errno = 0;
+	if (fsync(fd) != 0) {
+		describe(errno, "Could not flush the file to disk");
+		close(fd); unlink(tmpl.data());
+		return false;
+	}
+	close(fd);
+	errno = 0;
+	if (rename(tmpl.data(), filename.c_str()) != 0) {
+		describe(errno, "Could not replace the existing file");
+		unlink(tmpl.data());
+		return false;
+	}
+	return true;
+#else
 	errno = 0;
 	wxTempFile out;
 	if (!out.Open(filename)) {
@@ -927,4 +1001,5 @@ bool CircuitParse::writeToFile(const string &filename, const string &text) {
 	}
 
 	return true;
+#endif
 }

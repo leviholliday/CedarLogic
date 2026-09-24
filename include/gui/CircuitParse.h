@@ -43,6 +43,9 @@ class CircuitParse {
 public:
 	CircuitParse(string, vector< GUICanvas* >);
 	CircuitParse(GUICanvas*);
+	// For applyLoaded() and saving, with no file to read (the model came from
+	// readCircuitText).
+	explicit CircuitParse(vector< GUICanvas* >);
 	virtual ~CircuitParse();
 	
 	void loadFile(string);
@@ -52,6 +55,8 @@ public:
 	// that will not parse) both land here, before anything is cleared. Returns
 	// false and fills `error` with a message fit to show the user.
 	static bool readCircuit(const string &path, cl::LoadResult &out, string &error);
+	// The same, from a file's contents already in memory.
+	static bool readCircuitText(const string &text, cl::LoadResult &out, string &error);
 
 	// Build the canvases from an already-read circuit. Destructive: the caller
 	// must have cleared the open document first.
@@ -62,6 +67,9 @@ public:
 	// not be attached. These were silent until now, which is how a circuit could
 	// come back missing a wire with nothing said about it.
 	const std::vector<cl::MigrationNotice> &getApplyNotices() const { return applyNotices; }
+	// Everything the last applyLoaded() had to say: format migration notes and
+	// what couldn't be loaded. The wx app shows them in a dialog as it loads.
+	const std::vector<cl::MigrationNotice> &getLoadNotices() const { return loadNotices; }
 	bool saveCircuit(string, vector< GUICanvas* >, unsigned int currPage = 0);
 	// Save the v3 S-expression format (built from the GUI via the format model).
 	bool saveCircuitV3(string, vector< GUICanvas* >, unsigned int currPage = 0);
@@ -82,6 +90,7 @@ private:
 	vector< GUICanvas* > gCanvases;
 	GUICanvas* gCanvas;
 	std::vector<cl::MigrationNotice> applyNotices;
+	std::vector<cl::MigrationNotice> loadNotices;
 
 	// Takes the pieces of gate info found in parseFile and implements them
 	void parseGateToSend(string type, string ID, string position, vector < gateConnector > &inputs, vector < gateConnector > &outputs, vector < parameter > &params);

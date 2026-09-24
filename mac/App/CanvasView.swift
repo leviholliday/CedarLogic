@@ -7,6 +7,7 @@
 // World y points up; the view is flipped, so screen y points down.
 
 import AppKit
+import QuartzCore
 import SwiftUI
 
 final class CircuitCanvasNSView: NSView {
@@ -134,9 +135,31 @@ final class CircuitCanvasNSView: NSView {
     // Nothing to edit yet, so a drag on the canvas moves around.
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        dragStart = convert(event.locationInWindow, from: nil)
+        let p = convert(event.locationInWindow, from: nil)
+        // A switch, keypad or other part takes the click; anywhere else, a
+        // drag moves around and a double-click fits.
+        if let document, document.click(page: page, at: worldPoint(p)) {
+            dragStart = nil
+            needsDisplay = true
+            return
+        }
+        dragStart = p
         if event.clickCount == 2 { zoomToFit() }
     }
+
+    func worldPoint(_ p: CGPoint) -> CGPoint {
+        CGPoint(x: origin.x + p.x * unitsPerPoint, y: origin.y - p.y * unitsPerPoint)
+    }
+
+    // Space runs and pauses the simulation, as in the wx app.
+    override func keyDown(with event: NSEvent) {
+        if event.charactersIgnoringModifiers == " " && event.modifierFlags.intersection([.command, .option, .control]).isEmpty {
+            onSpace?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+    var onSpace: (() -> Void)?
 
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
@@ -163,13 +186,70 @@ final class CircuitCanvasNSView: NSView {
     }
 }
 
-/// Lets menu commands reach the canvas of the window that's in front.
+/// One window's canvas and simulation: lets menu commands and the toolbar reach
+/// the canvas in front, and runs the simulation clock while the window is open.
 @MainActor
 final class CanvasController: ObservableObject {
-    weak var view: CircuitCanvasNSView?
+    weak var view: CircuitCanvasNSView? {
+        didSet { view?.onSpace = { [weak self] in self?.toggleRunning() } }
+    }
+    private(set) var document: CoreDocument?
+    @Published private(set) var isRunning = true
+    @Published var stepMs = 25 { didSet { document?.stepMs = stepMs } }
+
+    private var timer: Timer?
+    private var lastTick = CACurrentMediaTime()
+
+    func attach(_ document: CoreDocument) {
+        guard self.document !== document else { return }
+        self.document = document
+        isRunning = document.isRunning
+        stepMs = document.stepMs
+        startClock()
+    }
+
     func zoomIn() { view?.zoomAtCenter(by: 1.25) }
     func zoomOut() { view?.zoomAtCenter(by: 0.8) }
     func zoomToFit() { view?.zoomToFit() }
+
+    func toggleRunning() { setRunning(!isRunning) }
+
+    func setRunning(_ running: Bool) {
+        document?.isRunning = running
+        isRunning = running
+        lastTick = CACurrentMediaTime()
+    }
+
+    /// One step; pauses first, since stepping a running circuit means little.
+    func stepOnce() {
+        if isRunning { setRunning(false) }
+        document?.stepOnce()
+        view?.needsDisplay = true
+    }
+
+    /// 60 times a second, hand the engine the time that passed. The engine
+    /// turns it into steps at the chosen speed and says if anything changed.
+    private func startClock() {
+        timer?.invalidate()
+        lastTick = CACurrentMediaTime()
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(t, forMode: .common)   // keeps running during scrolls and drags
+        timer = t
+    }
+
+    private func tick() {
+        let now = CACurrentMediaTime()
+        let elapsed = (now - lastTick) * 1000
+        lastTick = now
+        guard let document, isRunning else { return }
+        let result = document.tick(elapsedMs: elapsed)
+        if result.changed { view?.needsDisplay = true }
+        if result.paused { isRunning = false }
+    }
+
+    deinit { timer?.invalidate() }
 }
 
 struct CanvasView: NSViewRepresentable {
@@ -184,6 +264,7 @@ struct CanvasView: NSViewRepresentable {
         view.page = page
         view.theme = theme
         controller.view = view
+        controller.attach(document)
         return view
     }
 
@@ -191,6 +272,7 @@ struct CanvasView: NSViewRepresentable {
         if view.document !== document { view.document = document }
         view.page = page
         view.theme = theme
-        controller.view = view
+        if controller.view !== view { controller.view = view }
+        controller.attach(document)
     }
 }

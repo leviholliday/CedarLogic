@@ -3,8 +3,6 @@
 #include "../GateLibrary.h"
 #include "../GUICircuit.h"
 #include "../guiGate.h"
-#include "../OscopeFrame.h"
-#include "../MainApp.h"
 #include "cmdSerialize.h"
 #include "cmdRegistry.h"
 
@@ -15,7 +13,7 @@ static const bool s_registered_cmdSetParams =
 		return new cmdSetParams(def);
 	});
 
-DECLARE_APP(MainApp);
+
 
 paramSet::paramSet(ParameterMap *g, ParameterMap* l) {
 	gParams = g;
@@ -97,7 +95,7 @@ bool cmdSetParams::Do() {
 		gate->setGUIParam(paramWalk->first, paramWalk->second);
 		paramWalk++;
 	}
-	if (!fromString && gate->getGUIType() == "TO" && gCircuit->getOscope() != NULL) gCircuit->getOscope()->UpdateMenu();
+	if (!fromString && gate->getGUIType() == "TO") gCircuit->oscopeSignalsChanged();
 	return true;
 }
 
@@ -126,7 +124,7 @@ bool cmdSetParams::Undo() {
 		gate->setGUIParam(paramWalk->first, paramWalk->second);
 		paramWalk++;
 	}
-	if (!fromString && gate->getGUIType() == "TO") gCircuit->getOscope()->UpdateMenu();
+	if (!fromString && gate->getGUIType() == "TO") gCircuit->oscopeSignalsChanged();
 	return true;
 }
 

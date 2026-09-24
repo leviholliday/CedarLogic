@@ -3,7 +3,11 @@
 
 #include <string>
 #include <unordered_map>
+#ifdef CL_NO_WX
+#include "native/NoWxCompat.h"
+#else
 #include "wx/cmdproc.h"
+#endif
 #include "logic_values.h"
 
 class GUICircuit;

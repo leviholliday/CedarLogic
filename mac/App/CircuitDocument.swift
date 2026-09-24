@@ -35,6 +35,32 @@ final class CoreDocument {
         return name.isEmpty ? "Page \(page + 1)" : name
     }
 
+    // Simulation.
+    /// Advance by wall time; returns whether anything changed and whether a
+    /// part asked to pause.
+    func tick(elapsedMs: Double) -> (changed: Bool, paused: Bool) {
+        let f = Int(cl_document_tick(handle, elapsedMs))
+        return (f & CL_TICK_CHANGED != 0, f & CL_TICK_PAUSED != 0)
+    }
+    var isRunning: Bool {
+        get { cl_document_is_running(handle) }
+        set { cl_document_set_running(handle, newValue) }
+    }
+    var stepMs: Int {
+        get { Int(cl_document_step_ms(handle)) }
+        set { cl_document_set_step_ms(handle, Int32(newValue)) }
+    }
+    func stepOnce() { cl_document_step(handle) }
+    /// A click at a world point; true when a switch, keypad or the like took it.
+    func click(page: Int, at p: CGPoint) -> Bool { cl_document_click(handle, Int32(page), p.x, p.y) }
+
+    /// What loading had to say, warnings flagged.
+    var loadNotices: [(text: String, warning: Bool)] {
+        (0..<Int(cl_document_notice_count(handle))).map {
+            (String(cString: cl_document_notice(handle, Int32($0))), cl_document_notice_is_warning(handle, Int32($0)))
+        }
+    }
+
     /// World-space extent of a page, y up; nil when the page is empty.
     func bounds(ofPage page: Int) -> CGRect? {
         var l = 0.0, b = 0.0, r = 0.0, t = 0.0
