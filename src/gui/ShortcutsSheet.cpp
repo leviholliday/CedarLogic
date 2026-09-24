@@ -65,7 +65,7 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "Cmd", "O" }, "Open one of your circuits", wxID_OPEN);
 	add({ "Cmd", "S" }, "Save now and keep a version", wxID_SAVE);
 	add({ "Cmd", "Shift", "O" }, "Import a .cdl file", File_Import);
-	add({ "Cmd", "Shift", "S" }, "Export as a CedarLogic file", wxID_SAVEAS);
+	add({ "Cmd", "Shift", "E" }, "Export as a CedarLogic file", wxID_SAVEAS);
 	add({ "Cmd", "E" }, "Export as an image", File_Export);
 	add({ "Cmd", "Shift", "W" }, "Close this circuit", File_CloseCircuit);
 
@@ -76,6 +76,7 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "Cmd", "C" }, "Copy", wxID_COPY);
 	add({ "Cmd", "V" }, "Paste", wxID_PASTE);
 	add({ "Cmd", "D" }, "Duplicate the selection", Edit_Duplicate);
+	add({ "Cmd", "A" }, "Select everything on the page", wxID_SELECTALL);
 	add({ "Delete" }, "Delete the selection");
 	add({ "Escape" }, "Cancel a drag, paste or connection");
 	add({ "Shift", "click" }, "Add to or remove from the selection");
@@ -87,7 +88,7 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "Up", "Down", "Left", "Right" }, "Nudge the selection (Shift: 5 squares)");
 	add({ "click a pin, then another" }, "Connect them");
 	add({ "C", "while dragging" }, "Connect to pins nearby");
-	add({ "S" }, "Straighten the selected wires");
+	add({ "S" }, "Straighten the selected wires (Cmd+A first for all)");
 	add({ "right-click a wire" }, "Straighten or delete it");
 	add({ "double-click a gate" }, "Change its settings");
 

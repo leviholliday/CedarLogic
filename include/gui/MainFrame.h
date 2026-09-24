@@ -449,6 +449,9 @@ private:
 	// Three minutes, as the retired autosave thread used; CEDAR_AUTOSAVE_SECONDS
 	// overrides it, which is how the recovery flow gets tested without waiting.
 	wxTimer* autosaveTimer;
+	// Frees a mouse grab nothing is using any more (see releaseStaleCapture).
+	wxTimer* captureWatchdog = nullptr;
+	void releaseStaleCapture();
 	static int autosaveIntervalMs();
 	void applyAutosaveInterval();
 

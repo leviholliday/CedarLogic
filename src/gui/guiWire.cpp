@@ -1035,8 +1035,13 @@ void guiWire::mergeSegments() {
 			else { hsMin = min(hsMin, hsPoint.y); hsMax = max(hsMax, hsPoint.y); }
 		}
 		if (nSeg->intersects.size() > 0) { hsMin = min(hsMin, nSeg->intersects.begin()->first); hsMax = max(hsMax, nSeg->intersects.rbegin()->first); }
-		if (nSeg->isVertical()) { nSeg->begin.y = hsMin; nSeg->end.y = hsMax; }
-		else { nSeg->begin.x = hsMin; nSeg->end.x = hsMax; }
+		// A segment with no pin and no junction has nothing to trim to; trimming
+		// anyway threw it to +/-FLT_MAX, where it still carried the signal but
+		// never drew. Leave its ends where they are.
+		if (hsMin <= hsMax) {
+			if (nSeg->isVertical()) { nSeg->begin.y = hsMin; nSeg->end.y = hsMax; }
+			else { nSeg->begin.x = hsMin; nSeg->end.x = hsMax; }
+		}
 		// now set the intersects
 		map < GLfloat, vector< long > >::iterator isectWalk = (segWalk->second).intersects.begin();
 		while (isectWalk != (segWalk->second).intersects.end()) {

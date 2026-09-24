@@ -198,7 +198,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	fileMenu->Append(Tool_SplitClose, "Close Split\tCtrl+Alt+W", ui::platformKeys("Put the split tab back in the tab strip (Cmd+Option+W)"));
 	fileMenu->Append(Tool_FocusOtherPane, "Switch Pane\tCtrl+Alt+Right", ui::platformKeys("Work in the other side of the split (Cmd+Option+Right)"));
 	fileMenu->AppendSeparator();
-	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+S", "Save a .cdl copy anywhere, to share or submit");
+	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+E", "Save a .cdl copy anywhere, to share or submit");
 	fileMenu->Append(File_Export, "Export as Image...\tCtrl+E", "Export or copy circuit image");
 	fileMenu->Append(File_ExportV2, "Export as V2 (legacy XML)...", "Save a copy in the pre-V3 XML format");
 	fileMenu->Append(File_ExportLegacy, "Export as V1.x Compatible...", "Save a copy in the oldest format");
@@ -265,6 +265,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	editMenu->Append(wxID_COPY, "Copy\tCtrl+C", "Copy selection to clipboard");
 	editMenu->Append(wxID_PASTE, "Paste\tCtrl+V", "Paste selection from clipboard");
 	editMenu->Append(Edit_Duplicate, "Duplicate\tCtrl+D", "Copy the selection and place it with the mouse");
+	editMenu->Append(wxID_SELECTALL, "Select All\tCtrl+A", "Select every gate and wire on this page");
 	editMenu->AppendSeparator();
 	// wxID_PREFERENCES, not an id of our own: that is what makes macOS lift this
 	// into the application menu as "Settings..." with its usual Cmd+, -- which
@@ -528,6 +529,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->duplicateSelection();
 	}, Edit_Duplicate);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		// A text field with focus (a search box, a name) keeps its own Select All.
+		if (wxTextEntry* text = dynamic_cast<wxTextEntry*>(wxWindow::FindFocus())) { text->SelectAll(); return; }
+		if (currentCanvas) currentCanvas->selectAll();
+	}, wxID_SELECTALL);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);
 	Bind(wxEVT_MENU, &MainFrame::OnTruthTable, this, View_TruthTable);
 	Bind(wxEVT_MENU, &MainFrame::OnImport, this, File_Import);
@@ -572,7 +578,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	// A thin divider to drag the side panel wider or narrower.
 	sidePanelSash = new wxWindow(this, wxID_ANY, wxDefaultPosition, wxSize(5, -1));
 	sidePanelSash->SetCursor(wxCursor(wxCURSOR_SIZEWE));
-	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { sidePanelSash->CaptureMouse(); });
+	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { if (!sidePanelSash->HasCapture()) sidePanelSash->CaptureMouse(); });
 	sidePanelSash->Bind(wxEVT_LEFT_UP, [this](wxMouseEvent&) {
 		if (sidePanelSash->HasCapture()) sidePanelSash->ReleaseMouse();
 	});
@@ -587,6 +593,14 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	});
 	mainSizer->Add( sidePanelSash, wxSizerFlags(0).Expand() );
 	mainSizer->Add( rightSplitter, wxSizerFlags(1).Expand().Border(wxALL, 0) );
+
+	// Whichever window holds the mouse grab gets every click in the app. One
+	// left behind makes the toolbar, the Oscope and Preferences all ignore
+	// clicks until a relaunch, so check for one regularly and on activation.
+	captureWatchdog = new wxTimer(this);
+	Bind(wxEVT_TIMER, [this](wxTimerEvent&) { releaseStaleCapture(); }, captureWatchdog->GetId());
+	captureWatchdog->Start(1000);
+	Bind(wxEVT_ACTIVATE, [this](wxActivateEvent& e) { releaseStaleCapture(); e.Skip(); });
 
 	modernBar = new ModernToolbar(this, this);
 	rootSizer = new wxBoxSizer(wxVERTICAL);
@@ -725,6 +739,7 @@ MainFrame::~MainFrame() {
 
 	stopTimers();
 	if (autosaveTimer) autosaveTimer->Stop();
+	if (captureWatchdog) captureWatchdog->Stop();
 	// Ours no longer: a lock outliving the session that took it is the thing
 	// everyone else's users complain about.
 	documentLock.release();
@@ -3382,6 +3397,7 @@ void MainFrame::applyAutosaveInterval() {
 	if (!autosaveTimer) return;
 	// Always on: every few seconds, whatever changed goes into the library.
 	autosaveTimer->Stop();
+	if (captureWatchdog) captureWatchdog->Stop();
 	autosaveTimer->Start(4000);
 }
 
@@ -3849,4 +3865,25 @@ void MainFrame::OnKeyboardShortcuts(wxCommandEvent& WXUNUSED(event)) {
 	// A searchable, scrolling sheet (ShortcutsSheet.cpp). The plain grid that
 	// was here grew taller than the screen and ran under its own OK button.
 	ShowShortcutsSheet(this);
+}
+
+void MainFrame::releaseStaleCapture() {
+	wxWindow* holder = wxWindow::GetCapture();
+	if (holder == nullptr) return;
+	// A button still down means a real drag -- leave it alone.
+	const wxMouseState ms = wxGetMouseState();
+	if (ms.LeftIsDown() || ms.RightIsDown() || ms.MiddleIsDown()) return;
+	// A canvas may hold the mouse with the button up on purpose: a paste or a
+	// new gate following the pointer, or a click-to-connect line.
+	if (GUICanvas* canvas = dynamic_cast<GUICanvas*>(holder)) {
+		if (!canvas->isIdleForCapture()) return;
+		// Clear its drag flags too, so the next drag starts cleanly.
+		canvas->endDrag(BUTTON_LEFT);
+		canvas->endDrag(BUTTON_MIDDLE);
+		canvas->endDrag(BUTTON_RIGHT);
+	}
+	while (wxWindow* w = wxWindow::GetCapture()) {
+		w->ReleaseMouse();
+		if (wxWindow::GetCapture() == w) break;   // don't spin if it won't let go
+	}
 }
