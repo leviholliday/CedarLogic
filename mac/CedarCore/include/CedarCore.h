@@ -62,6 +62,88 @@ int cl_document_step_ms(const CLDocument *doc);
 // true when a part took the click.
 bool cl_document_click(CLDocument *doc, int page, double x, double y);
 
+// ---- Editing -------------------------------------------------------------
+// Pointer gestures, in world coordinates. `unitsPerPoint` is the current zoom,
+// so "close enough to a wire" and "far enough to be a drag" stay the same on
+// screen at any zoom. Every change goes on the document's undo stack.
+
+enum { CL_MOD_SHIFT = 1, CL_MOD_COMMAND = 2, CL_MOD_OPTION = 4 };
+enum { CL_PRESS_NOTHING = 0, CL_PRESS_PART = 1, CL_PRESS_BOX = 2 };
+
+// A press: selects what's under it (shift adds or removes). Returns
+// CL_PRESS_BOX when it landed on empty canvas (a drag draws a selection box).
+int cl_edit_press(CLDocument *doc, int page, double x, double y, int modifiers, double unitsPerPoint);
+void cl_edit_drag(CLDocument *doc, double x, double y);
+// A release. A press and release in place on a switch or keypad operates it.
+void cl_edit_release(CLDocument *doc, double x, double y);
+void cl_edit_cancel(CLDocument *doc);
+// The selection box being drawn, if any (world coordinates).
+bool cl_edit_box(const CLDocument *doc, double *left, double *bottom, double *right, double *top);
+
+void cl_edit_select_all(CLDocument *doc, int page);
+void cl_edit_select_none(CLDocument *doc, int page);
+int cl_edit_selected_gate_count(const CLDocument *doc, int page);
+int cl_edit_selected_wire_count(const CLDocument *doc, int page);
+
+void cl_edit_delete(CLDocument *doc, int page);
+// Turn the selected gates a quarter turn clockwise (gates with wires attached
+// stay put, as in the wx app).
+void cl_edit_rotate(CLDocument *doc, int page);
+// Move the selection by whole grid steps.
+void cl_edit_nudge(CLDocument *doc, int page, double dx, double dy);
+// Place a new gate from the library, centred on a world point; it becomes
+// the selection.
+bool cl_edit_add_gate(CLDocument *doc, int page, const char *libGateName, double x, double y);
+
+// The selection as clipboard text (the wx app's copy format), or "" when
+// nothing is selected. Valid until the next call.
+const char *cl_edit_copy(CLDocument *doc, int page);
+// Paste clipboard text with its top-left gate at a world point. Returns false
+// when the text isn't a CedarLogic block. `shift` stops junction ids counting
+// up. When it returns true, *clipboardOut is text to put back on the
+// clipboard (or "" for none), valid until the next call.
+bool cl_edit_paste(CLDocument *doc, int page, const char *text, double x, double y, bool shift,
+                   const char **clipboardOut);
+
+bool cl_edit_undo(CLDocument *doc);
+bool cl_edit_redo(CLDocument *doc);
+bool cl_edit_can_undo(const CLDocument *doc);
+bool cl_edit_can_redo(const CLDocument *doc);
+// "Move", "Delete Selection"... for the Edit menu. Valid until the next call.
+const char *cl_edit_undo_name(const CLDocument *doc);
+const char *cl_edit_redo_name(const CLDocument *doc);
+// Whether the circuit changed since it was opened or last saved.
+bool cl_document_is_edited(const CLDocument *doc);
+
+// ---- Gate settings (the inspector) -----------------------------------------
+// The one selected gate on a page, or -1 when it isn't exactly one.
+long cl_edit_single_gate(const CLDocument *doc, int page);
+// What the library calls it ("AND 2-input") and its settings, in the order the
+// library lists them. Strings are valid until the next call.
+const char *cl_gate_caption(const CLDocument *doc, long gate);
+int cl_gate_setting_count(const CLDocument *doc, long gate);
+typedef struct {
+	const char *label;   // shown to the user
+	const char *name;    // the parameter
+	const char *type;    // STRING, INT, BOOL, FLOAT, MULTI_STRING, FILE_IN, FILE_OUT
+	const char *value;   // current value
+	double min, max;     // for numbers
+} CLGateSetting;
+bool cl_gate_setting(const CLDocument *doc, long gate, int index, CLGateSetting *out);
+// Change one setting (undoable).
+bool cl_gate_set_setting(CLDocument *doc, long gate, const char *name, const char *value);
+
+// ---- The gate library (the palette) ----------------------------------------
+int cl_library_category_count(void);
+const char *cl_library_category(int index);
+int cl_library_gate_count(int category);
+const char *cl_library_gate(int category, int index);
+const char *cl_library_gate_caption(const char *libGateName);
+// Draw one gate type fitted into a rectangle of `width` x `height` points
+// (y down), for palette tiles.
+void cl_library_draw_gate(const char *libGateName, CGContextRef ctx, double width, double height,
+                          double backingScale, bool dark);
+
 // ---- Load notes ----------------------------------------------------------
 
 // What loading had to say (an older format was converted, a gate type the

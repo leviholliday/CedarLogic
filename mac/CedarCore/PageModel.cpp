@@ -34,3 +34,11 @@ void GUICanvas::removeWire(unsigned long wireId) {
 	collisionChecker.update();
 	for (IDType busLineId : wire->getIDs()) wireList.erase(busLineId);
 }
+
+void GUICanvas::unselectAllGates() {
+	for (auto& g : gateList) if (g.second) g.second->unselect();
+}
+
+void GUICanvas::unselectAllWires() {
+	for (auto& w : wireList) if (w.second) w.second->unselect();
+}

@@ -10,12 +10,13 @@
 
 #include <memory>
 #include "klsClipboard.h"
-#include "OscopeFrame.h"
 #include <fstream>
 #include <map>
 #include <unordered_map>   // removed .h  KAS
 
+#ifndef CL_NO_WX
 #include "MainApp.h"
+#endif
 #include "commands.h"
 #include "cmdSerialize.h"
 #include "cmdRegistry.h"
@@ -23,6 +24,7 @@
 #include "GUICircuit.h"
 #include "guiGate.h"
 #include "guiWire.h"
+#ifndef CL_NO_WX
 #include "wx/clipbrd.h"
 #include "wx/dataobj.h"
 
@@ -38,6 +40,12 @@ public:
 		if (valid) wxTheClipboard->Close();
 	}
 };
+#else
+// The native front end moves the text on and off the system clipboard itself
+// and says whether Shift is down.
+bool klsClipboard::shiftHeld = false;
+string klsClipboard::rewrittenText;
+#endif
 
 // Paste-specific tweak (Colin Broberg, 10/6/16): when a single gate is pasted,
 // auto-increment a trailing number on its JUNCTION_ID param so repeated pastes
@@ -46,8 +54,12 @@ public:
 // Mutates `line` (the setparams command text) in place.
 static void autoIncrementJunctionId(string &line, const string &pasteText, bool rewriteClipboard) {
 	// More than one creategate in the block, or Shift held -> leave it alone.
-	if (pasteText.find("creategate", pasteText.find("creategate") + 1) != string::npos ||
-		wxGetKeyState(WXK_SHIFT)) {
+#ifdef CL_NO_WX
+	const bool shift = klsClipboard::shiftHeld;
+#else
+	const bool shift = wxGetKeyState(WXK_SHIFT);
+#endif
+	if (pasteText.find("creategate", pasteText.find("creategate") + 1) != string::npos || shift) {
 		return;
 	}
 
@@ -67,9 +79,14 @@ static void autoIncrementJunctionId(string &line, const string &pasteText, bool 
 	string s = to_string(stoi(numEnd) + 1) + "\t"; // the point of it all: bump the trailing number by 1
 	line += s;
 	newPasteText += s + "\n";
+#ifdef CL_NO_WX
+	if (rewriteClipboard) klsClipboard::rewrittenText = newPasteText;
+#else
 	if (rewriteClipboard) wxTheClipboard->AddData(new wxTextDataObject(newPasteText));
+#endif
 }
 
+#ifndef CL_NO_WX
 cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanvas ) {
 	clipboardCtx clipboard;
 	if ( !clipboard.valid || !wxTheClipboard->IsSupported(wxDF_UNICODETEXT) ) {
@@ -80,6 +97,7 @@ cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanva
 	// Still open: the JUNCTION_ID bump in pasteText may rewrite it.
 	return pasteText( gCircuit, gCanvas, text.GetText().ToStdString(), true );
 }
+#endif
 
 cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& pasteText, bool useClipboard ) {
     vector < klsCommand* > cmdList;
@@ -120,13 +138,14 @@ cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas
 			}
 			wireWalk++;
 		}
-		gCircuit->getOscope()->UpdateMenu();
+		gCircuit->oscopeSignalsChanged();
     }
 
 	if (cmdList.size() > 0) return new cmdPasteBlock ( cmdList );
 	return NULL;
 }
 
+#ifndef CL_NO_WX
 void klsClipboard::copyBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires ) {
 	const string text = serializeBlock( gCircuit, gCanvas, gates, wires );
 	if (text.empty()) return;
@@ -134,6 +153,7 @@ void klsClipboard::copyBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector <
 	wxTheClipboard->AddData(new wxTextDataObject(text));
 	wxTheClipboard->Close();
 }
+#endif
 
 string klsClipboard::serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires ) {
 	if (gates.size() == 0) return "";

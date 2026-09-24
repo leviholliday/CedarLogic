@@ -5,6 +5,8 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         TabView {
+            LayoutSettingsView()
+                .tabItem { Label("Layout", systemImage: "rectangle.3.group") }
             LookSettingsView()
                 .tabItem { Label("Look", systemImage: "paintpalette") }
         }
@@ -138,5 +140,24 @@ private struct PresetCard: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Which window arrangement to use; either works with any look.
+struct LayoutSettingsView: View {
+    @AppStorage("layout") private var layout = AppLayout.native.rawValue
+
+    var body: some View {
+        Form {
+            Picker("Layout", selection: $layout) {
+                ForEach(AppLayout.allCases) { Text($0.name).tag($0.rawValue) }
+            }
+            .pickerStyle(.radioGroup)
+            Text(AppLayout(rawValue: layout)?.summary ?? "")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .formStyle(.grouped)
+        .padding(.vertical, 8)
     }
 }

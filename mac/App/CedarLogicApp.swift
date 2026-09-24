@@ -17,6 +17,7 @@ struct CedarLogicApp: App {
                 .environmentObject(look)
         }
         .commands {
+            EditCommands()
             ViewCommands()
             SimulationCommands()
         }
@@ -73,6 +74,48 @@ struct SimulationCommands: Commands {
             Button("Step") { canvas?.stepOnce() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(canvas == nil)
+        }
+    }
+}
+
+/// Edit menu. While a text field has the keyboard (the palette search, an
+/// inspector field), the usual text commands go to it instead.
+struct EditCommands: Commands {
+    @FocusedObject private var canvas: CanvasController?
+
+    private var typing: Bool { NSApp.keyWindow?.firstResponder is NSText }
+
+    private func textAction(_ selector: Selector) { NSApp.sendAction(selector, to: nil, from: nil) }
+
+    var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            Button(typing ? "Undo" : (canvas?.undoTitle ?? "Undo")) {
+                if typing { textAction(Selector(("undo:"))) } else { canvas?.undo() }
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            .disabled(!typing && canvas?.canUndo != true)
+            Button(typing ? "Redo" : (canvas?.redoTitle ?? "Redo")) {
+                if typing { textAction(Selector(("redo:"))) } else { canvas?.redo() }
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!typing && canvas?.canRedo != true)
+        }
+        CommandGroup(replacing: .pasteboard) {
+            Button("Cut") { if typing { textAction(#selector(NSText.cut(_:))) } else { canvas?.cut() } }
+                .keyboardShortcut("x", modifiers: .command)
+            Button("Copy") { if typing { textAction(#selector(NSText.copy(_:))) } else { canvas?.copy() } }
+                .keyboardShortcut("c", modifiers: .command)
+            Button("Paste") { if typing { textAction(#selector(NSText.paste(_:))) } else { canvas?.paste() } }
+                .keyboardShortcut("v", modifiers: .command)
+            Button("Duplicate") { canvas?.duplicate() }
+                .keyboardShortcut("d", modifiers: .command)
+                .disabled(canvas?.hasGateSelection != true)
+            Button("Delete") { if typing { textAction(#selector(NSText.delete(_:))) } else { canvas?.deleteSelection() } }
+            Button("Select All") { if typing { textAction(#selector(NSText.selectAll(_:))) } else { canvas?.selectAll() } }
+                .keyboardShortcut("a", modifiers: .command)
+            Divider()
+            Button("Rotate") { canvas?.rotate() }
+                .disabled(canvas?.hasGateSelection != true)
         }
     }
 }

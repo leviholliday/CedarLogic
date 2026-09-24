@@ -2,7 +2,7 @@
 // (CircuitParse::applyLoaded) into the shared gate and wire model, one page
 // model per page, with a LogicHost running its simulation.
 
-#include "CedarCore.h"
+#include "DocumentImpl.h"
 #include "CGScene.h"
 #include "CircuitParse.h"
 #include "GUICanvas.h"
@@ -22,27 +22,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-struct CLDocument {
-	GUICircuit circuit;
-	std::unique_ptr<LogicHost> sim;
-	std::vector<std::unique_ptr<GUICanvas>> pages;   // destroyed before the circuit
-	std::vector<std::string> notices;
-	std::vector<bool> noticeWarnings;
-	bool running = true;
-	int stepMs = 25;
-	double carryMs = 0;
-
-	CLDocument() : sim(new LogicHost(circuit)) { registerLogicHost(&circuit, sim.get()); }
-	~CLDocument() {
-		pages.clear();
-		registerLogicHost(&circuit, nullptr);
-	}
-
-	GUICanvas* page(int i) const {
-		return (i >= 0 && i < (int)pages.size()) ? pages[i].get() : nullptr;
-	}
-};
 
 namespace {
 

@@ -33,6 +33,13 @@ public:
 	// rewrites the clipboard text so the next paste keeps counting.
 	string serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires );
 	cmdPasteBlock* pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& pasteText, bool useClipboard );
+#ifdef CL_NO_WX
+	// The native front end's side of the system clipboard: whether Shift is
+	// down during a paste, and the text a paste wants put back on the
+	// clipboard (the JUNCTION_ID count), empty when none.
+	static bool shiftHeld;
+	static string rewrittenText;
+#endif
 };
 
 #endif /*KLSCLIPBOARD_H_*/

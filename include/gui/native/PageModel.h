@@ -32,6 +32,8 @@ public:
 	void removeWire(unsigned long id);
 
 	GUICircuit* getCircuit() { return gCircuit; }
+	void unselectAllGates();
+	void unselectAllWires();
 	void collisionUpdate() { collisionChecker.update(); }
 
 	// Asked of a page by the wx canvas's callers; a page model has no window.

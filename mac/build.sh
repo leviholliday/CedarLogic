@@ -24,6 +24,7 @@ CORE=(
 	src/gui/klsCollisionChecker.cpp src/gui/GateLibrary.cpp src/gui/LibraryParse.cpp
 	src/gui/XMLParser.cpp src/gui/GUICircuitModel.cpp src/gui/RenderMode.cpp
 	src/gui/PaletteDrag.cpp src/gui/Settings.cpp src/gui/gl_defs.cpp src/gui/CircuitParse.cpp
+	src/gui/klsClipboard.cpp
 	src/gui/route/TrunkRouter.cpp src/gui/route/GridRouter.cpp src/gui/route/Layout.cpp
 	# the editing commands (undo/redo), minus the two that manage wx tabs
 	$(ls src/gui/command/*.cpp | grep -v -e cmdAddTab -e cmdDeleteTab)
