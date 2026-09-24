@@ -295,6 +295,14 @@ public:
 		duplicate->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
 		addRow(ui::platformKeys("Duplicate (Cmd+D):"), duplicate,
 			ui::platformKeys("Second option: the copy stays on the clipboard, so Cmd+V pastes more of it."));
+
+		tidy = new wxChoice(this, wxID_ANY);
+		tidy->Append("Keeps my layout");       // 0
+		tidy->Append("Rearranges everything"); // 1
+		tidy->SetSelection(s.tidyMode == 1 ? 1 : 0);
+		tidy->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		addRow("Tidy Up (Shift+S):", tidy,
+			"Keeps my layout: lines gates up where they are. Rearranges everything: lays the circuit out by signal flow. The Edit menu always has the other one.");
 		GetSizer()->SetSizeHints(this);
 	}
 
@@ -302,6 +310,7 @@ protected:
 	void apply() override {
 		appConfig().appSettings.rightClickRotate = rightClickRotate->GetValue();
 		appConfig().appSettings.duplicateUsesClipboard = duplicate->GetSelection() == 1;
+		appConfig().appSettings.tidyMode = tidy->GetSelection() == 1 ? 1 : 0;
 		auto& s = appConfig().appSettings;
 		s.mouseWheelAction = mouseAction->GetSelection();
 		s.reverseWheelZoom = reverseWheel->GetValue();
@@ -324,6 +333,7 @@ private:
 	}
 
 	wxChoice* duplicate;
+	wxChoice* tidy;
 	wxChoice* mouseAction;
 	wxCheckBox* reverseWheel;
 	wxChoice* trackpadAction = nullptr;

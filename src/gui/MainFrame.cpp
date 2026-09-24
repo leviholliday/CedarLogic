@@ -267,6 +267,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	editMenu->Append(Edit_Duplicate, "Duplicate\tCtrl+D", "Copy the selection and place it with the mouse");
 	editMenu->Append(wxID_SELECTALL, "Select All\tCtrl+A", "Select every gate and wire on this page");
 	editMenu->AppendSeparator();
+	editMenu->Append(Edit_TidyDefault, "Tidy Up", "");
+	editMenu->Append(Edit_TidyOther, "Tidy Up", "");
+	editMenu->AppendSeparator();
 	// wxID_PREFERENCES, not an id of our own: that is what makes macOS lift this
 	// into the application menu as "Settings..." with its usual Cmd+, -- which
 	// is where a Mac user looks for it, rather than under View. Windows and GTK
@@ -287,6 +290,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     
     // ... and attach this menu bar to the frame
     SetMenuBar(menuBar);
+    UpdateTidyMenu();
 
     // The canvas holds keyboard focus, and menu-bar accelerators don't reach it;
     // meanwhile wxMSW compiles every menu accelerator into the frame's
@@ -544,6 +548,12 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 		if (text && text->IsEditable() && focus->IsShownOnScreen()) { text->SelectAll(); return; }
 		if (currentCanvas) currentCanvas->selectAll();
 	}, wxID_SELECTALL);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		if (currentCanvas) currentCanvas->startTidy(appConfig().appSettings.tidyMode);
+	}, Edit_TidyDefault);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		if (currentCanvas) currentCanvas->startTidy(1 - appConfig().appSettings.tidyMode);
+	}, Edit_TidyOther);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);
 	Bind(wxEVT_MENU, &MainFrame::OnTruthTable, this, View_TruthTable);
 	Bind(wxEVT_MENU, &MainFrame::OnImport, this, File_Import);
@@ -1490,6 +1500,7 @@ void MainFrame::ApplyPreferences() {
 	gatePalette->ApplyGateSize();
 	ApplyThemeShortcutLabel();
 	ApplyThemeToggleVisibility();
+	UpdateTidyMenu();
 
 	// The same two settings are reachable from the View menu; keep its
 	// checkmarks in step with Preferences.
@@ -2205,6 +2216,9 @@ void MainFrame::finishCloseTab(GUICanvas* canvas) {
 }
 
 void MainFrame::flushPendingClose() {
+	// A Tidy Up preview is kept by anything else that happens, undo and saving
+	// included.
+	for (GUICanvas* c : canvases) if (c && c->isTidyPreviewing()) c->finishTidy(true);
 	if (pendingCloseCanvas == nullptr) return;
 	if (closeTabTimer) closeTabTimer->Stop();
 	GUICanvas* closing = pendingCloseCanvas;
@@ -3318,6 +3332,7 @@ void MainFrame::saveSettings() {
 	conf->Write("SidePanelWidth", settings.sidePanelWidth);
 	conf->Write("PaletteGateSize", settings.paletteGateSize);
 	conf->Write("DuplicateUsesClipboard", settings.duplicateUsesClipboard);
+	conf->Write("TidyMode", settings.tidyMode);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
 
 	conf->Write("ThemeMode", settings.themeMode);
@@ -3895,5 +3910,35 @@ void MainFrame::releaseStaleCapture() {
 	while (wxWindow* w = wxWindow::GetCapture()) {
 		w->ReleaseMouse();
 		if (wxWindow::GetCapture() == w) break;   // don't spin if it won't let go
+	}
+}
+
+void MainFrame::arrangeForRender(const std::string& what) {
+	if (currentCanvas == nullptr) return;
+	if (what == "straighten") currentCanvas->straightenAll();
+	else if (what == "tidy") currentCanvas->startTidy(0, false);
+	else if (what == "tidy-full") currentCanvas->startTidy(1, false);
+}
+
+void MainFrame::showPageForRender(int page) {
+	if (page < 1 || page > (int)canvasBook->GetPageCount()) return;
+	canvasBook->SetSelection(page - 1);
+}
+
+// The Edit menu's two Tidy Up items: the one Shift+S does (chosen in
+// Preferences), then the other.
+void MainFrame::UpdateTidyMenu() {
+	wxMenuBar* bar = GetMenuBar();
+	if (bar == nullptr) return;
+	const bool rearrange = appConfig().appSettings.tidyMode == 1;
+	const wxString keep = "Tidy Up: Keep My Layout", full = "Tidy Up: Full Rearrange";
+	if (wxMenuItem* a = bar->FindItem(Edit_TidyDefault)) {
+		a->SetItemLabel(rearrange ? full : keep);
+		a->SetHelp("Shift+S. Lines gates up in columns and reroutes their wires (the selection, or the whole page)");
+	}
+	if (wxMenuItem* b = bar->FindItem(Edit_TidyOther)) {
+		b->SetItemLabel(rearrange ? keep : full);
+		b->SetHelp(rearrange ? "Lines gates up where they are and reroutes their wires"
+		                     : "Rearranges gates by signal flow, inputs to outputs, and reroutes their wires");
 	}
 }

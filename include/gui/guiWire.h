@@ -20,6 +20,7 @@
 
 // Engine-neutral rendering seam (Workstream G); defined in gui/render/.
 namespace cl { namespace render { class Scene; struct RenderStyle; } }
+namespace cl { namespace route { struct RouteResult; } }
 
 class guiGate;
 class GUICircuit;
@@ -142,6 +143,9 @@ public:
 	// Route fresh with the trunk (the long middle run) at `pos` instead of
 	// halfway -- to move it off another wire.
 	void routeWithTrunkAt(float pos) { setVerticalBar = false; trunkHint = pos; calcShape(); }
+	// Take a shape laid out elsewhere (the page-wide GridRouter). Pin indices
+	// in `routed` are positions in getConnections().
+	void adoptRoute(const cl::route::RouteResult &routed);
 	// Where the last routing put the trunk, and the range it could move in
 	// (between the outermost pins). False for an L-bend, which has no trunk.
 	bool trunkRange(float& pos, float& lo, float& hi) const {
@@ -194,6 +198,7 @@ private:
 	// Take existing segments and merge concurrent segments
 	void mergeSegments();
 	void generateRenderInfo();  // TODO
+	void buildFromRoute(const cl::route::RouteResult &routed);
 
 
 

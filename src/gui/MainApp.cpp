@@ -910,6 +910,10 @@ bool MainApp::OnInit()
         // the simulation wherever the logic thread happened to have got to, so
         // the same file could render two different images. See settleSimulation.
         frame->settleSimulation();
+        // Check the layout tools without clicking: CEDARLOGIC_RENDER_ARRANGE set to
+        // straighten, tidy or tidy-full runs that on the whole page first.
+        if (const char *page = getenv("CEDARLOGIC_RENDER_PAGE")) { frame->showPageForRender(atoi(page)); wxYield(); }
+        if (const char *arrange = getenv("CEDARLOGIC_RENDER_ARRANGE")) frame->arrangeForRender(arrange);
         bool ok = renderPdf
             ? frame->renderToPdfSkia(renderOutput, renderW, renderH,
                                      /*showGrid=*/true, /*noColor=*/false)
@@ -1075,6 +1079,8 @@ void MainApp::loadSettings() {
 	conf->Read("SidePanelWidth", &appConfig().appSettings.sidePanelWidth, 0);
 	conf->Read("PaletteGateSize", &appConfig().appSettings.paletteGateSize, 48);
 	conf->Read("DuplicateUsesClipboard", &appConfig().appSettings.duplicateUsesClipboard, false);
+	conf->Read("TidyMode", &appConfig().appSettings.tidyMode, 0);
+	if (appConfig().appSettings.tidyMode != 1) appConfig().appSettings.tidyMode = 0;
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
 
 	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);

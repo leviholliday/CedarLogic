@@ -89,6 +89,7 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "click a pin, then another" }, "Connect them");
 	add({ "C", "while dragging" }, "Connect to pins nearby");
 	add({ "S" }, "Straighten the selected wires (Cmd+A first for all)");
+	add({ "Shift", "S" }, "Tidy up: line gates up and reroute (preview first)");
 	add({ "right-click a wire" }, "Straighten or delete it");
 	add({ "double-click a gate" }, "Change its settings");
 

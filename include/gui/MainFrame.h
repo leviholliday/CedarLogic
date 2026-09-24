@@ -54,6 +54,8 @@ enum
 	View_ZoomActual,
 	View_FocusMode,
 	Edit_Duplicate,
+	Edit_TidyDefault,
+	Edit_TidyOther,
 	View_SimView,
 	View_TruthTable,
 	File_Import,
@@ -452,6 +454,12 @@ private:
 	// Frees a mouse grab nothing is using any more (see releaseStaleCapture).
 	wxTimer* captureWatchdog = nullptr;
 	void releaseStaleCapture();
+public:
+	// Headless check of Straighten / Tidy (see MainApp --render).
+	void arrangeForRender(const std::string& what);
+	void showPageForRender(int page);
+	void UpdateTidyMenu();
+private:
 	static int autosaveIntervalMs();
 	void applyAutosaveInterval();
 

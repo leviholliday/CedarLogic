@@ -635,21 +635,34 @@ void guiWire::calcShape() {
 		trunkHi = horizontalTrunk ? maxy : maxx;
 	}
 
-	// Translate the routed topology back into the segment map: one wireSegment per
-	// routed segment, its connections resolved from pin indices and its junctions
-	// copied into the intersects map.
+	// Make sure the vertical bar is not reset unless I want it to be
+	setVerticalBar = false;
+	buildFromRoute(routed);
+}
+
+void guiWire::adoptRoute(const cl::route::RouteResult &routed) {
+	this->detachSubObjects(); // prevent coll checker pointers from invalidating
+	segMap.clear();
+	// A shape from the page-wide router has no single trunk to slide.
+	hasTrunk = false;
+	setVerticalBar = false;
+	buildFromRoute(routed);
+}
+
+// Translate a routed topology into the segment map: one wireSegment per routed
+// segment, its connections resolved from pin indices and its junctions copied
+// into the intersects map.
+void guiWire::buildFromRoute(const cl::route::RouteResult &routed) {
 	for (const cl::route::Segment &rs : routed.segments) {
 		wireSegment ws(GLPoint2f(rs.bx, rs.by), GLPoint2f(rs.ex, rs.ey), rs.vertical, rs.id);
-		for (int pinIdx : rs.pins) ws.connections.push_back(connectPoints[pinIdx]);
+		for (int pinIdx : rs.pins)
+			if (pinIdx >= 0 && pinIdx < (int)connectPoints.size()) ws.connections.push_back(connectPoints[pinIdx]);
 		for (const std::pair<float, long> &cr : rs.crossings)
 			ws.intersects[cr.first].push_back(cr.second);
 		ws.calcBBox();
 		segMap[rs.id] = ws;
 	}
 	nextSegID = routed.nextId;
-
-	// Make sure the vertical bar is not reset unless I want it to be
-	setVerticalBar = false;
 
 	// Create the bounding box for collision checking
 	mergeSegments();
