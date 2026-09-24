@@ -9,6 +9,7 @@
 
 #include <wx/bitmap.h>
 #include <wx/dc.h>
+#include <cstdio>
 #include <cstring>
 
 #include "render/RasterPresent.h"
@@ -29,6 +30,14 @@ void DcRasterPaint::paint(wxDC& dc, double contentScale) const {
 	if (!frame.IsOk()) return;
 	const wxBitmap bmp(frame, -1, contentScale > 0 ? contentScale : 1.0);
 	dc.DrawBitmap(bmp, 0, 0, false);
+	// Once, so a report from a machine where the canvas stays blank shows
+	// whether this path ran at all.
+	static bool told = false;
+	if (!told) {
+		told = true;
+		std::fprintf(stderr, "CedarLogic: painted a %dx%d processor frame with the window's own drawing (scale %.2f, bitmap %s)\n",
+		             frame.GetWidth(), frame.GetHeight(), contentScale, bmp.IsOk() ? "ok" : "BAD");
+	}
 }
 
 #endif // __WXGTK__

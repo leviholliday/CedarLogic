@@ -125,11 +125,37 @@ bool SkiaBackend::ensureContext() {
 	// graphics are fine. See RendererHealth.h.
 	if (forceGLFailure()) return false;
 	fInterface = GrGLMakeNativeInterface();
+	const bool nativeFound = fInterface != nullptr;
 #ifdef __linux__
 	// GLX found nothing; this is a Wayland session. See makeEGLInterface.
 	if (!fInterface) fInterface = makeEGLInterface();
 #endif
 	fContext = GrDirectContexts::MakeGL(fInterface);
+
+	// Say once, on stderr, which step refused. "No GL context for Ganesh" alone
+	// can't tell a missing context from a driver Skia turns down, and those need
+	// different fixes; this is what a report from a machine we don't have needs.
+	static bool explained = false;
+	if (!fContext && !explained) {
+		explained = true;
+		std::fprintf(stderr, "CedarLogic GL: native interface %s, %s interface %s",
+		             nativeFound ? "found" : "missing",
+		             nativeFound ? "using the native" : "EGL",
+		             fInterface ? "assembled" : "missing");
+		if (fInterface) {
+			std::fprintf(stderr, ", validate() %s",
+			             fInterface->validate() ? "passed" : "FAILED");
+			if (fInterface->fFunctions.fGetString) {
+				const char* ver = reinterpret_cast<const char*>(
+					fInterface->fFunctions.fGetString(0x1F02 /*GL_VERSION*/));
+				const char* sl = reinterpret_cast<const char*>(
+					fInterface->fFunctions.fGetString(0x8B8C /*GL_SHADING_LANGUAGE_VERSION*/));
+				std::fprintf(stderr, ", GL \"%s\", GLSL \"%s\"",
+				             ver ? ver : "?", sl ? sl : "?");
+			}
+		}
+		std::fprintf(stderr, "; MakeGL refused it\n");
+	}
 	return fContext != nullptr;
 }
 
