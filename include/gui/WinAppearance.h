@@ -8,6 +8,9 @@
 
 #ifdef _WIN32
 
+#include <wx/colour.h>
+#include <wx/string.h>
+
 class wxTopLevelWindow;
 class wxWindow;
 

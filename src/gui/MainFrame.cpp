@@ -1524,6 +1524,7 @@ void MainFrame::ApplyTheme() {
 	WinSetAppDarkMode(dark);          // right-click and dropdown menus
 	WinThemeControls(this, dark);     // scrollbars and the palette's dropdown
 	applyTitlebarForTopRow();         // the title bar takes the new colours
+	PreferencesThemeChanged();        // an open Settings window follows
 #endif
 
 	// Repaint every live view: all canvas tabs (only one is visible, but a

@@ -11,6 +11,9 @@
 #include <wx/choice.h>
 #include <wx/combobox.h>
 #include <wx/glcanvas.h>
+#include <wx/textctrl.h>
+#include <wx/spinctrl.h>
+#include <wx/slider.h>
 #include <wx/dcmemory.h>
 #include <wx/bitmap.h>
 #include <wx/msw/wrapwin.h>
@@ -69,6 +72,17 @@ void themeOne(wxWindow* w, bool dark) {
 		w->SetBackgroundColour(dark ? wxColour(38, 41, 48) : wxNullColour);
 		w->SetForegroundColour(dark ? wxColour(228, 232, 240) : wxNullColour);
 	}
+	// Fields you type in: a dark field with light text. The stock edit
+	// control has no dark theme of its own for its face.
+	const bool field = wxDynamicCast(w, wxTextCtrl) || wxDynamicCast(w, wxSpinCtrl) ||
+	                   wxDynamicCast(w, wxSpinCtrlDouble);
+	if (field) {
+		w->SetBackgroundColour(dark ? wxColour(30, 33, 39) : wxNullColour);
+		w->SetForegroundColour(dark ? wxColour(228, 232, 240) : wxNullColour);
+	}
+	// A slider paints its own background: make it whatever it sits on.
+	if (wxDynamicCast(w, wxSlider) && w->GetParent())
+		w->SetBackgroundColour(w->GetParent()->GetBackgroundColour());
 	::SendMessageW(hwnd, WM_THEMECHANGED, 0, 0);
 }
 
