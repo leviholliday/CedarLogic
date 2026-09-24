@@ -100,6 +100,9 @@ struct ApplicationSettings {
 	// Cmd+D: false = duplicate without touching the clipboard; true = copy to
 	// the clipboard then paste, like Cmd+C, Cmd+V.
 	bool duplicateUsesClipboard = false;
+	// Tidy Up (Shift+S): 0 = keep my layout, 1 = full rearrange. The Edit menu
+	// offers the other one.
+	int tidyMode = 0;
 	bool rightClickRotate;
 
 	// Dark mode. themeMode picks the launch behavior (see ThemeMode); lastDarkMode

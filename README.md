@@ -5,7 +5,7 @@ CedarLogic is a digital logic simulator made for university classroom instructio
 
 ## What's new in the Mac version
 
-This fork reworks CedarLogic for macOS. It builds on [Kieran Klukas's modernized CedarLogic](https://github.com/taciturnaxolotl/CedarLogic) (which brought the Skia renderer, the Sparkle updater and much more) and on the original from Cedarville University, and adds these changes on top.
+This fork reworks CedarLogic for macOS, and now Windows too. The redesign was done by Claude, Anthropic's AI model. It builds on [Kieran Klukas's modernized CedarLogic](https://github.com/taciturnaxolotl/CedarLogic) (which brought the Skia renderer, the Sparkle updater and much more) and on the original from Cedarville University, and adds these changes on top.
 
 **Look and feel**
 - Dark mode, an accent color, a dot grid, and a wire thickness setting

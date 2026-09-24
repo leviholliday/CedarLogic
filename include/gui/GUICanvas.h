@@ -11,6 +11,7 @@
 #ifndef GUICANVAS_H_
 #define GUICANVAS_H_
 
+#include <set>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -30,6 +31,7 @@ class cmdCreateGate;
 #include "GUICircuit.h"
 #include "klsCollisionChecker.h"
 #include "wireSegment.h"
+#include "command/cmdTidy.h"
 
 class klsCommand;
 class guiWire;
@@ -317,6 +319,22 @@ public:
 	// like a paste. Leaves the clipboard alone unless the
 	// duplicateUsesClipboard setting says to go through it.
 	void duplicateSelection();
+	// Select every gate and wire on the page.
+	void selectAll();
+	// Straighten every wire on the page as one undo step.
+	void straightenAll();
+	// Tidy Up (Shift+S): move the selected gates (or the page's) into clean
+	// columns and reroute their wires. mode 0 keeps the layout's shape, 1
+	// rearranges by signal flow. With preview the result shows over a ghost of
+	// the old layout until Return keeps it or Esc puts it back (anything else
+	// keeps it too); without, it applies straight away as one undo step.
+	void startTidy(int mode, bool preview = true);
+	void finishTidy(bool keep);
+	bool isTidyPreviewing() const { return tidy.active; }
+	void collisionUpdate() { collisionChecker.update(); }
+	// Nothing in progress that should be holding the mouse (a drag, a paste
+	// or new gate following the pointer, a click-to-connect line).
+	bool isIdleForCapture() const { return currentDragState == DRAG_NONE && !isWithinPaste && !connectSticky; }
 	void startPaste( cmdPasteBlock* cmd );
 
 	// Tell the canvas which minimap it should use; sets the minimaps pointers and lists
@@ -390,6 +408,24 @@ private:
 	void straightenWireAvoiding(guiWire* wire);
 	void straightenWires(const std::vector<unsigned long>& ids);
 	std::vector<unsigned long> selectedWireIds() const;
+	std::vector<unsigned long> wiresOfSelectedGates() const;
+	// Route these wires together around every gate and the other wires, and
+	// return the undo steps (already applied). See route/GridRouter.h.
+	std::vector<klsCommand*> routeWiresTogether(const std::vector<unsigned long>& ids);
+	// The same, returning each wire's before/after shape instead of commands.
+	// movedGates: gates that just moved (Tidy Up); their wires are always
+	// rerouted, others keep their shape when the new route is far longer.
+	std::vector<WireReshape> rerouteWires(const std::vector<unsigned long>& ids,
+	                                      const std::set<unsigned long>* movedGates = nullptr);
+	struct TidyState {
+		bool active = false;
+		int mode = 0;
+		std::vector<cmdTidy::GateMove> moves;
+		std::vector<WireReshape> wires;
+		std::vector<float> ghostLines;   // x0, y0, x1, y1 per old wire segment
+		std::vector<float> ghostRects;   // l, b, r, t per moved gate's old spot
+	} tidy;
+	void drawTidyBannerInto(cl::render::Scene& scene, const cl::render::Transform& screenT, float W, float H);
 	bool bareKey(const wxKeyEvent& event) const;
 
 	// When the left button was last pressed, for the click-vs-drag time dead zone.

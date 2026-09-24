@@ -23,7 +23,17 @@ endif()
 # macOS: Set deployment target (arm64 only for now)
 if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
-    set(SPARKLE_ED_PUBLIC_KEY "" CACHE STRING "Sparkle EdDSA public key for auto-updates")
+endif()
+
+# One Ed25519 key signs updates for both Sparkle (macOS) and WinSparkle
+# (Windows). A build without it has its updater switched off: on macOS Sparkle
+# refuses to start keyless, and on Windows WinSparkle would install whatever
+# the feed pointed at without checking a signature.
+set(SPARKLE_ED_PUBLIC_KEY "" CACHE STRING "Sparkle EdDSA public key for auto-updates")
+if(SPARKLE_ED_PUBLIC_KEY)
+    set(CEDARLOGIC_UPDATES_SIGNED 1)
+else()
+    set(CEDARLOGIC_UPDATES_SIGNED 0)
 endif()
 
 # This configure file is where we store version info that's auto-populated by cmake configure.
@@ -277,7 +287,7 @@ set_source_files_properties(${SKIA_SRC_FILES} PROPERTIES
 # include/gui/EmbeddedRes.h); everything else in res/ is still read from disk.
 file(GLOB EMBED_ICONS RELATIVE "${PROJECT_SOURCE_DIR}/res" "${PROJECT_SOURCE_DIR}/res/icons/*.svg")
 embed_resources(EMBEDDED_RES_CPP "${PROJECT_SOURCE_DIR}/res"
-    cl_gatedefs.xml ${EMBED_ICONS})
+    cl_gatedefs.xml samples/practice.cdl ${EMBED_ICONS})
 list(APPEND SRC_FILES "${EMBEDDED_RES_CPP}")
 
 # macOS: Add Objective-C++ sources
@@ -400,6 +410,8 @@ if(WIN32)
     # offer. Linked explicitly rather than relying on wininet.h's self-link
     # pragma, so the Windows build cannot turn on a missing-library surprise.
     target_link_libraries(CedarLogic PRIVATE wininet)
+    # WinAppearance.cpp sets the dark title bar through DWM.
+    target_link_libraries(CedarLogic PRIVATE dwmapi)
     # Stage the DLL beside the exe. It was only handled by install(), so a plain
     # build produced a binary that could not start ("error while loading shared
     # libraries") until the DLL was copied by hand.

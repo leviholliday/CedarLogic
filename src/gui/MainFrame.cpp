@@ -75,8 +75,10 @@
 #include "NativeIcons.h"
 #endif
 #ifdef _WIN32
+#include "WinAppearance.h"
 #include "WinSparkleUpdater.h"
 #endif
+#include "UiKit.h"
 #include "UpdateInfo.h"   // cl::update::checksDisabled, for managed deployments
 
 DECLARE_APP(MainApp)
@@ -192,11 +194,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	fileMenu->Append(Tool_NewTab, "New &Tab\tCtrl+T", "Open a new tab");
 	fileMenu->Append(Tool_CloseTab, "&Close Tab\tCtrl+W", "Close the current tab");
 	fileMenu->Append(Tool_ReopenTab, "&Reopen Closed Tab\tCtrl+Shift+T", "Bring back the tab you just closed");
-	fileMenu->Append(Tool_SplitRight, "Split &View\tCtrl+Alt+S", "Show another tab beside this one (Cmd+Option+S)");
-	fileMenu->Append(Tool_SplitClose, "Close Split\tCtrl+Alt+W", "Put the split tab back in the tab strip (Cmd+Option+W)");
-	fileMenu->Append(Tool_FocusOtherPane, "Switch Pane\tCtrl+Alt+Right", "Work in the other side of the split (Cmd+Option+Right)");
+	fileMenu->Append(Tool_SplitRight, "Split &View\tCtrl+Alt+S", ui::platformKeys("Show another tab beside this one (Cmd+Option+S)"));
+	fileMenu->Append(Tool_SplitClose, "Close Split\tCtrl+Alt+W", ui::platformKeys("Put the split tab back in the tab strip (Cmd+Option+W)"));
+	fileMenu->Append(Tool_FocusOtherPane, "Switch Pane\tCtrl+Alt+Right", ui::platformKeys("Work in the other side of the split (Cmd+Option+Right)"));
 	fileMenu->AppendSeparator();
-	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+S", "Save a .cdl copy anywhere, to share or submit");
+	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+E", "Save a .cdl copy anywhere, to share or submit");
 	fileMenu->Append(File_Export, "Export as Image...\tCtrl+E", "Export or copy circuit image");
 	fileMenu->Append(File_ExportV2, "Export as V2 (legacy XML)...", "Save a copy in the pre-V3 XML format");
 	fileMenu->Append(File_ExportLegacy, "Export as V1.x Compatible...", "Save a copy in the oldest format");
@@ -263,6 +265,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	editMenu->Append(wxID_COPY, "Copy\tCtrl+C", "Copy selection to clipboard");
 	editMenu->Append(wxID_PASTE, "Paste\tCtrl+V", "Paste selection from clipboard");
 	editMenu->Append(Edit_Duplicate, "Duplicate\tCtrl+D", "Copy the selection and place it with the mouse");
+	editMenu->Append(wxID_SELECTALL, "Select All\tCtrl+A", "Select every gate and wire on this page");
+	editMenu->AppendSeparator();
+	editMenu->Append(Edit_TidyDefault, "Tidy Up", "");
+	editMenu->Append(Edit_TidyOther, "Tidy Up", "");
 	editMenu->AppendSeparator();
 	// wxID_PREFERENCES, not an id of our own: that is what makes macOS lift this
 	// into the application menu as "Settings..." with its usual Cmd+, -- which
@@ -284,6 +290,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     
     // ... and attach this menu bar to the frame
     SetMenuBar(menuBar);
+    UpdateTidyMenu();
 
     // The canvas holds keyboard focus, and menu-bar accelerators don't reach it;
     // meanwhile wxMSW compiles every menu accelerator into the frame's
@@ -518,6 +525,12 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
+	// Focus set before the window shows can end up in the palette's search
+	// field instead, so keys like Cmd+A missed the canvas on launch.
+	Bind(wxEVT_SHOW, [this](wxShowEvent& e) {
+		if (e.IsShown()) CallAfter([this]() { if (currentCanvas) currentCanvas->SetFocus(); });
+		e.Skip();
+	});
 	noteCanvasUsed(currentCanvas);
 
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
@@ -526,6 +539,21 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->duplicateSelection();
 	}, Edit_Duplicate);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		// A text field with focus (a search box, a name) keeps its own Select All.
+		// A read-only or hidden one (focus can land there at launch) doesn't
+		// count -- Cmd+A then seemed to do nothing.
+		wxWindow* focus = wxWindow::FindFocus();
+		wxTextEntry* text = dynamic_cast<wxTextEntry*>(focus);
+		if (text && text->IsEditable() && focus->IsShownOnScreen()) { text->SelectAll(); return; }
+		if (currentCanvas) currentCanvas->selectAll();
+	}, wxID_SELECTALL);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		if (currentCanvas) currentCanvas->startTidy(appConfig().appSettings.tidyMode);
+	}, Edit_TidyDefault);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		if (currentCanvas) currentCanvas->startTidy(1 - appConfig().appSettings.tidyMode);
+	}, Edit_TidyOther);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);
 	Bind(wxEVT_MENU, &MainFrame::OnTruthTable, this, View_TruthTable);
 	Bind(wxEVT_MENU, &MainFrame::OnImport, this, File_Import);
@@ -570,7 +598,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	// A thin divider to drag the side panel wider or narrower.
 	sidePanelSash = new wxWindow(this, wxID_ANY, wxDefaultPosition, wxSize(5, -1));
 	sidePanelSash->SetCursor(wxCursor(wxCURSOR_SIZEWE));
-	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { sidePanelSash->CaptureMouse(); });
+	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { if (!sidePanelSash->HasCapture()) sidePanelSash->CaptureMouse(); });
 	sidePanelSash->Bind(wxEVT_LEFT_UP, [this](wxMouseEvent&) {
 		if (sidePanelSash->HasCapture()) sidePanelSash->ReleaseMouse();
 	});
@@ -585,6 +613,14 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	});
 	mainSizer->Add( sidePanelSash, wxSizerFlags(0).Expand() );
 	mainSizer->Add( rightSplitter, wxSizerFlags(1).Expand().Border(wxALL, 0) );
+
+	// Whichever window holds the mouse grab gets every click in the app. One
+	// left behind makes the toolbar, the Oscope and Preferences all ignore
+	// clicks until a relaunch, so check for one regularly and on activation.
+	captureWatchdog = new wxTimer(this);
+	Bind(wxEVT_TIMER, [this](wxTimerEvent&) { releaseStaleCapture(); }, captureWatchdog->GetId());
+	captureWatchdog->Start(1000);
+	Bind(wxEVT_ACTIVATE, [this](wxActivateEvent& e) { releaseStaleCapture(); e.Skip(); });
 
 	modernBar = new ModernToolbar(this, this);
 	rootSizer = new wxBoxSizer(wxVERTICAL);
@@ -723,6 +759,7 @@ MainFrame::~MainFrame() {
 
 	stopTimers();
 	if (autosaveTimer) autosaveTimer->Stop();
+	if (captureWatchdog) captureWatchdog->Stop();
 	// Ours no longer: a lock outliving the session that took it is the thing
 	// everyone else's users complain about.
 	documentLock.release();
@@ -870,11 +907,16 @@ void MainFrame::OnAbout(wxCommandEvent& WXUNUSED(event)) {
     wxAboutDialogInfo info;
     info.SetName("CedarLogic");
     info.SetVersion(VERSION_NUMBER(), "Version " + VERSION_NUMBER_STRING());
-    info.SetDescription("A digital logic simulator, redesigned for the Mac.");
+#ifdef __WXOSX__
+    info.SetDescription("A digital logic simulator, redesigned for the Mac by Claude.");
+#else
+    info.SetDescription("A digital logic simulator, redesigned by Claude.");
+#endif
     info.SetCopyright(wxString::FromUTF8("\u00A9 2026 " CEDARLOGIC_PUBLISHER
         ". Based on CedarLogic by Cedarville University\n"
         "and Kieran Klukas's modernized CedarLogic."));
-    info.AddDeveloper(CEDARLOGIC_PUBLISHER);
+    // The redesign is Claude's work (Anthropic's AI model), so it gets the credit.
+    info.AddDeveloper("Claude (Anthropic)");
     info.AddDeveloper("Kieran Klukas");
     info.AddDeveloper("Cedarville University CedarLogic contributors");
     info.SetLicence("GNU General Public License v3.0");
@@ -1371,6 +1413,10 @@ void MainFrame::ApplyTheme() {
 	// always an explicit light/dark, never "follow system", because a manual
 	// toggle here is the person overriding the OS setting for this session.
 	MacSetApplicationAppearance(dark ? 2 : 1);
+#elif defined(_WIN32)
+	// Windows draws the caption itself; without this it stays white over a
+	// dark app. Dialogs opened later pick it up in MainApp::FilterEvent.
+	WinSetDarkTitlebars(dark);
 #endif
 
 	// Repaint every live view: all canvas tabs (only one is visible, but a
@@ -1454,6 +1500,7 @@ void MainFrame::ApplyPreferences() {
 	gatePalette->ApplyGateSize();
 	ApplyThemeShortcutLabel();
 	ApplyThemeToggleVisibility();
+	UpdateTidyMenu();
 
 	// The same two settings are reachable from the View menu; keep its
 	// checkmarks in step with Preferences.
@@ -1570,6 +1617,21 @@ bool MainFrame::settleSimulation(int maxSteps) {
 		drainLogicMessages();   // anything queued behind the DONESTEP
 		return gCircuit->getSimulate();
 	};
+
+	// A step the sim timer sent before stopTimers() may still be running.
+	// getSimulate() is false until its DONESTEP arrives, and stepOnce reads the
+	// next DONESTEP as its own -- so that stray one would pass for the answer to
+	// ours, and a truth-table row could be read before our step had run. Let it
+	// land first.
+	{
+		const wxLongLong deadline = wxGetLocalTimeMillis() + SETTLE_STEP_TIMEOUT_MS;
+		drainLogicMessages();
+		while (!gCircuit->getSimulate() && wxGetLocalTimeMillis() < deadline) {
+			wxMilliSleep(1);
+			drainLogicMessages();
+		}
+		if (!gCircuit->getSimulate()) return false;   // the core stopped answering
+	}
 
 	// Apply anything the load left in flight, then let the first synchronized
 	// step set the baseline. Comparing against the state as loaded would mean
@@ -2057,8 +2119,12 @@ wxString MainFrame::GetDocumentSubtitle() {
 void MainFrame::ApplyToolbarStyle() {
 	const int style = appConfig().appSettings.toolbarStyle;
 	const bool classic = style == cl::tb::Classic;
-	if (toolBar->IsShown() != classic) toolBar->Show(classic);
-	if (modernBar->IsShown() == classic) modernBar->Show(!classic);
+	// Focus mode keeps both bars away. Sim view restyles the bar through here,
+	// and showing it unconditionally brought it back mid-focus mode.
+	wxMenuBar* mb = GetMenuBar();
+	const bool focus = mb != nullptr && mb->IsChecked(View_FocusMode);
+	if (toolBar->IsShown() != (classic && !focus)) toolBar->Show(classic && !focus);
+	if (modernBar->IsShown() != (!classic && !focus)) modernBar->Show(!classic && !focus);
 	if (!classic) modernBar->Reconfigure();
 	// Whoever ends up in the top row sets the title bar up for itself -- in
 	// focus mode that is the tab strip, not either toolbar.
@@ -2150,6 +2216,9 @@ void MainFrame::finishCloseTab(GUICanvas* canvas) {
 }
 
 void MainFrame::flushPendingClose() {
+	// A Tidy Up preview is kept by anything else that happens, undo and saving
+	// included.
+	for (GUICanvas* c : canvases) if (c && c->isTidyPreviewing()) c->finishTidy(true);
 	if (pendingCloseCanvas == nullptr) return;
 	if (closeTabTimer) closeTabTimer->Stop();
 	GUICanvas* closing = pendingCloseCanvas;
@@ -2446,7 +2515,14 @@ void MainFrame::dropExtraTabs() {
 	tabNumbers.clear();
 	tabNames.clear();
 	canvasMRU.clear();
-	if (!canvases.empty()) noteCanvasUsed(canvases[0]);
+	if (!canvases.empty()) {
+		noteCanvasUsed(canvases[0]);
+		// currentCanvas may have been one of the tabs just destroyed. Callers go
+		// on to show modal dialogs (the migration notices) whose event loop runs
+		// paint and timer handlers, so it must not dangle even for a moment.
+		currentCanvas = canvases[0];
+		gCircuit->setCurrentCanvas(currentCanvas);
+	}
 	RenumberTabs();
 }
 
@@ -3256,6 +3332,7 @@ void MainFrame::saveSettings() {
 	conf->Write("SidePanelWidth", settings.sidePanelWidth);
 	conf->Write("PaletteGateSize", settings.paletteGateSize);
 	conf->Write("DuplicateUsesClipboard", settings.duplicateUsesClipboard);
+	conf->Write("TidyMode", settings.tidyMode);
 	conf->Write("RightClickRotate", settings.rightClickRotate);
 
 	conf->Write("ThemeMode", settings.themeMode);
@@ -3305,6 +3382,10 @@ void MainFrame::stopTimers() {
 void MainFrame::startTimers(int at) {
 	if (!(toolBar->GetToolState(Tool_Pause)))
 	{
+		// The stopwatch too: a load paused it (startup recovery loads before
+		// the timers first start), and stepSimulation only steps once it has
+		// accrued a step's worth of time, so a paused one froze the circuit.
+		simBridge().appSystemTime.Start(0);
 		simTimer->Start(at);
 	}
 	idleTimer->Start(at);
@@ -3341,6 +3422,7 @@ void MainFrame::applyAutosaveInterval() {
 	if (!autosaveTimer) return;
 	// Always on: every few seconds, whatever changed goes into the library.
 	autosaveTimer->Stop();
+	if (captureWatchdog) captureWatchdog->Stop();
 	autosaveTimer->Start(4000);
 }
 
@@ -3808,4 +3890,55 @@ void MainFrame::OnKeyboardShortcuts(wxCommandEvent& WXUNUSED(event)) {
 	// A searchable, scrolling sheet (ShortcutsSheet.cpp). The plain grid that
 	// was here grew taller than the screen and ran under its own OK button.
 	ShowShortcutsSheet(this);
+}
+
+void MainFrame::releaseStaleCapture() {
+	wxWindow* holder = wxWindow::GetCapture();
+	if (holder == nullptr) return;
+	// A button still down means a real drag -- leave it alone.
+	const wxMouseState ms = wxGetMouseState();
+	if (ms.LeftIsDown() || ms.RightIsDown() || ms.MiddleIsDown()) return;
+	// A canvas may hold the mouse with the button up on purpose: a paste or a
+	// new gate following the pointer, or a click-to-connect line.
+	if (GUICanvas* canvas = dynamic_cast<GUICanvas*>(holder)) {
+		if (!canvas->isIdleForCapture()) return;
+		// Clear its drag flags too, so the next drag starts cleanly.
+		canvas->endDrag(BUTTON_LEFT);
+		canvas->endDrag(BUTTON_MIDDLE);
+		canvas->endDrag(BUTTON_RIGHT);
+	}
+	while (wxWindow* w = wxWindow::GetCapture()) {
+		w->ReleaseMouse();
+		if (wxWindow::GetCapture() == w) break;   // don't spin if it won't let go
+	}
+}
+
+void MainFrame::arrangeForRender(const std::string& what) {
+	if (currentCanvas == nullptr) return;
+	if (what == "straighten") currentCanvas->straightenAll();
+	else if (what == "tidy") currentCanvas->startTidy(0, false);
+	else if (what == "tidy-full") currentCanvas->startTidy(1, false);
+}
+
+void MainFrame::showPageForRender(int page) {
+	if (page < 1 || page > (int)canvasBook->GetPageCount()) return;
+	canvasBook->SetSelection(page - 1);
+}
+
+// The Edit menu's two Tidy Up items: the one Shift+S does (chosen in
+// Preferences), then the other.
+void MainFrame::UpdateTidyMenu() {
+	wxMenuBar* bar = GetMenuBar();
+	if (bar == nullptr) return;
+	const bool rearrange = appConfig().appSettings.tidyMode == 1;
+	const wxString keep = "Tidy Up: Keep My Layout", full = "Tidy Up: Full Rearrange";
+	if (wxMenuItem* a = bar->FindItem(Edit_TidyDefault)) {
+		a->SetItemLabel(rearrange ? full : keep);
+		a->SetHelp("Shift+S. Lines gates up in columns and reroutes their wires (the selection, or the whole page)");
+	}
+	if (wxMenuItem* b = bar->FindItem(Edit_TidyOther)) {
+		b->SetItemLabel(rearrange ? keep : full);
+		b->SetHelp(rearrange ? "Lines gates up where they are and reroutes their wires"
+		                     : "Rearranges gates by signal flow, inputs to outputs, and reroutes their wires");
+	}
 }

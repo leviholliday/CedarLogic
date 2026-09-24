@@ -20,6 +20,7 @@
 #include <sstream>
 #include "migrate.hpp"   // cl::loadCircuit, to validate a file before the GUI load
 #include "wx/stdpaths.h"
+#include "CircuitLibrary.h"   // seedSamples, for the first-run practice circuit
 #ifdef WITH_SKIA
 #include "render/SkiaProbe.h"   // headless --skia-probe (no Skia headers leak here)
 #include "render/RendererHealth.h"
@@ -54,6 +55,7 @@
 #include "SparkleUpdater.h"
 #endif
 #ifdef _WIN32
+#include "WinAppearance.h"
 #include "WinSparkleUpdater.h"
 #include <windows.h>
 #include <mmsystem.h>
@@ -539,6 +541,19 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
     return choseUpdate;
 }
 
+#ifdef _WIN32
+// Every dialog and panel is a window of its own, with a caption Windows draws
+// white unless told otherwise. MainFrame::ApplyTheme handles the ones already
+// open; this catches each new one as it first appears.
+int MainApp::FilterEvent(wxEvent& event) {
+	if (event.GetEventType() == wxEVT_SHOW && static_cast<wxShowEvent&>(event).IsShown()) {
+		if (wxTopLevelWindow* tlw = wxDynamicCast(event.GetEventObject(), wxTopLevelWindow))
+			WinSetDarkTitlebar(tlw, renderMode().darkMode);
+	}
+	return Event_Skip;
+}
+#endif
+
 static const wxCmdLineEntryDesc g_cmdLineDesc[] =
 {
 	{ wxCMD_LINE_PARAM, NULL, NULL, "input file", wxCMD_LINE_VAL_STRING, wxCMD_LINE_PARAM_OPTIONAL },
@@ -801,6 +816,9 @@ bool MainApp::OnInit()
     }
 
     // create the main application window
+    // Before the window, so the welcome screen and Open list already show it.
+    if (!renderMode().headlessRender) library::seedSamples();
+
     MainFrame *frame = new MainFrame(VERSION_TITLE(), cmdFilename);
 
     // A headless render still has to realize its window, but nobody should see
@@ -892,6 +910,10 @@ bool MainApp::OnInit()
         // the simulation wherever the logic thread happened to have got to, so
         // the same file could render two different images. See settleSimulation.
         frame->settleSimulation();
+        // Check the layout tools without clicking: CEDARLOGIC_RENDER_ARRANGE set to
+        // straighten, tidy or tidy-full runs that on the whole page first.
+        if (const char *page = getenv("CEDARLOGIC_RENDER_PAGE")) { frame->showPageForRender(atoi(page)); wxYield(); }
+        if (const char *arrange = getenv("CEDARLOGIC_RENDER_ARRANGE")) frame->arrangeForRender(arrange);
         bool ok = renderPdf
             ? frame->renderToPdfSkia(renderOutput, renderW, renderH,
                                      /*showGrid=*/true, /*noColor=*/false)
@@ -1057,6 +1079,8 @@ void MainApp::loadSettings() {
 	conf->Read("SidePanelWidth", &appConfig().appSettings.sidePanelWidth, 0);
 	conf->Read("PaletteGateSize", &appConfig().appSettings.paletteGateSize, 48);
 	conf->Read("DuplicateUsesClipboard", &appConfig().appSettings.duplicateUsesClipboard, false);
+	conf->Read("TidyMode", &appConfig().appSettings.tidyMode, 0);
+	if (appConfig().appSettings.tidyMode != 1) appConfig().appSettings.tidyMode = 0;
 	conf->Read("RightClickRotate", &appConfig().appSettings.rightClickRotate, true);
 
 	conf->Read("ThemeMode", &appConfig().appSettings.themeMode, (int)ThemeMode::System);

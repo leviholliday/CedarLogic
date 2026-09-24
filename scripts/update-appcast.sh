@@ -22,7 +22,7 @@ if [ -z "$WINSPARKLE_SIGNATURE" ]; then
 fi
 
 PUBDATE=$(date -R)
-DMG_URL="https://github.com/${REPO}/releases/download/${TAG}/CedarLogic-${VERSION}-Darwin.dmg"
+DMG_URL="https://github.com/${REPO}/releases/download/${TAG}/CedarLogic-${VERSION}-mac.dmg"   # what scripts/package-mac.sh makes
 EXE_URL="https://github.com/${REPO}/releases/download/${TAG}/CedarLogic-${VERSION}-win32.exe"
 
 # Convert markdown release notes to HTML

@@ -37,9 +37,13 @@ const char* styleName(int s) {
 
 const char* styleBlurb(int s) {
 	switch (s) {
+#ifdef __WXOSX__
 		case Classic:   return "The standard macOS toolbar.";
+#else
+		case Classic:   return "The standard Windows toolbar.";
+#endif
 		case Segmented: return "Tools in tidy rounded groups, everything in reach.";
-		case Minimal:   return "Just the essentials and your file name; the rest is behind the ••• menu.";
+		case Minimal:   return "Just the essentials and your file name; the rest is behind the \u2022\u2022\u2022 menu.";
 		case Seamless:  return "Blends into the canvas like one surface. Tools stay quiet until you point at them.";
 	}
 	return "";
@@ -521,8 +525,8 @@ wxBitmap ModernToolbar::RenderPreview(int style, bool dark, int width, double sc
 	State s;
 	s.dark = dark;
 	s.accent = appConfig().appSettings.accentColor;
-	s.title = "Lab 5 — Full Adder";
-	s.subtitle = "Page 1 · Saved";
+	s.title = wxString::FromUTF8("Lab 5 \u2014 Full Adder");
+	s.subtitle = wxString::FromUTF8("Page 1 \u00B7 Saved");
 	s.canvas = dark ? wxColour(19, 21, 25) : *wxWHITE;
 	s.canRedo = false;
 	const int H = BarHeight();

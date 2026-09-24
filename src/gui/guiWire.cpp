@@ -623,8 +623,9 @@ void guiWire::calcShape() {
 	{
 		float minx = FLT_MAX, maxx = -FLT_MAX, miny = FLT_MAX, maxy = -FLT_MAX;
 		for (const cl::route::Pin &p : in.pins) {
-			minx = std::min(minx, p.x); maxx = std::max(maxx, p.x);
-			miny = std::min(miny, p.y); maxy = std::max(maxy, p.y);
+			// Parenthesized: windows.h defines min and max as macros.
+			minx = (std::min)(minx, p.x); maxx = (std::max)(maxx, p.x);
+			miny = (std::min)(miny, p.y); maxy = (std::max)(maxy, p.y);
 		}
 		const bool v0 = in.pins[0].verticalHotspot, v1 = in.pins[1].verticalHotspot;
 		hasTrunk = (v0 == v1);
@@ -634,21 +635,34 @@ void guiWire::calcShape() {
 		trunkHi = horizontalTrunk ? maxy : maxx;
 	}
 
-	// Translate the routed topology back into the segment map: one wireSegment per
-	// routed segment, its connections resolved from pin indices and its junctions
-	// copied into the intersects map.
+	// Make sure the vertical bar is not reset unless I want it to be
+	setVerticalBar = false;
+	buildFromRoute(routed);
+}
+
+void guiWire::adoptRoute(const cl::route::RouteResult &routed) {
+	this->detachSubObjects(); // prevent coll checker pointers from invalidating
+	segMap.clear();
+	// A shape from the page-wide router has no single trunk to slide.
+	hasTrunk = false;
+	setVerticalBar = false;
+	buildFromRoute(routed);
+}
+
+// Translate a routed topology into the segment map: one wireSegment per routed
+// segment, its connections resolved from pin indices and its junctions copied
+// into the intersects map.
+void guiWire::buildFromRoute(const cl::route::RouteResult &routed) {
 	for (const cl::route::Segment &rs : routed.segments) {
 		wireSegment ws(GLPoint2f(rs.bx, rs.by), GLPoint2f(rs.ex, rs.ey), rs.vertical, rs.id);
-		for (int pinIdx : rs.pins) ws.connections.push_back(connectPoints[pinIdx]);
+		for (int pinIdx : rs.pins)
+			if (pinIdx >= 0 && pinIdx < (int)connectPoints.size()) ws.connections.push_back(connectPoints[pinIdx]);
 		for (const std::pair<float, long> &cr : rs.crossings)
 			ws.intersects[cr.first].push_back(cr.second);
 		ws.calcBBox();
 		segMap[rs.id] = ws;
 	}
 	nextSegID = routed.nextId;
-
-	// Make sure the vertical bar is not reset unless I want it to be
-	setVerticalBar = false;
 
 	// Create the bounding box for collision checking
 	mergeSegments();
@@ -1034,8 +1048,13 @@ void guiWire::mergeSegments() {
 			else { hsMin = min(hsMin, hsPoint.y); hsMax = max(hsMax, hsPoint.y); }
 		}
 		if (nSeg->intersects.size() > 0) { hsMin = min(hsMin, nSeg->intersects.begin()->first); hsMax = max(hsMax, nSeg->intersects.rbegin()->first); }
-		if (nSeg->isVertical()) { nSeg->begin.y = hsMin; nSeg->end.y = hsMax; }
-		else { nSeg->begin.x = hsMin; nSeg->end.x = hsMax; }
+		// A segment with no pin and no junction has nothing to trim to; trimming
+		// anyway threw it to +/-FLT_MAX, where it still carried the signal but
+		// never drew. Leave its ends where they are.
+		if (hsMin <= hsMax) {
+			if (nSeg->isVertical()) { nSeg->begin.y = hsMin; nSeg->end.y = hsMax; }
+			else { nSeg->begin.x = hsMin; nSeg->end.x = hsMax; }
+		}
 		// now set the intersects
 		map < GLfloat, vector< long > >::iterator isectWalk = (segWalk->second).intersects.begin();
 		while (isectWalk != (segWalk->second).intersects.end()) {
