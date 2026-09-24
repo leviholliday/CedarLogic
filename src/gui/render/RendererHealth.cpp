@@ -80,6 +80,13 @@ const std::string& rendererFailureReason() { return gFailure; }
 std::string rendererFailureMessage() {
 	if (gFailure.empty()) return std::string();
 
+	// The Raspberry Pi's V3D offers OpenGL 3.1, short of what the engine needs,
+	// so the processor always draws there. That is how the Pi works, not a fault
+	// to report or fix, and a warning on every launch would only train people
+	// to click past it. Nothing to say; the reason still goes to stderr.
+	if (containsNoCase(gRenderer, "v3d") || containsNoCase(gRenderer, "videocore"))
+		return std::string();
+
 	// Two very different situations end up here and they want opposite advice.
 	// Guessing between them is how someone with a perfectly good graphics card
 	// gets sent off to reinstall a driver that was never at fault, so decide

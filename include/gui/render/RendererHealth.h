@@ -50,7 +50,9 @@ bool rendererFailed();
 const std::string& rendererFailureReason();
 
 // The same news written for a person, naming the driver and what to do about
-// it. Empty while healthy.
+// it. Empty while healthy, and empty on a driver where the processor fallback
+// is simply how things work (the Raspberry Pi's V3D), so there is nothing to
+// warn about.
 std::string rendererFailureMessage();
 
 // Test hook: with CEDAR_FORCE_GL_FAILURE set in the environment, the engine

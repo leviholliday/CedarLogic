@@ -7,6 +7,13 @@
 namespace cl {
 namespace render {
 
+namespace {
+RasterSink gSink;
+}
+
+void setRasterSink(RasterSink sink) { gSink = std::move(sink); }
+const RasterSink& rasterSink() { return gSink; }
+
 void presentRGB(int width, int height, const unsigned char* rgbBottomUp) {
 	if (width <= 0 || height <= 0 || rgbBottomUp == nullptr) return;
 

@@ -8,14 +8,18 @@
 // software fallback driver, which is the whole point.
 //
 // This needs a compatibility GL context, since a core profile removes the fixed
-// pipeline this uses. That costs nothing: a driver modern enough to be core-only
-// is modern enough that this path never runs.
+// pipeline this uses. That is not always there: the Raspberry Pi's V3D driver
+// offers OpenGL 3.1, too little for the engine and too new for glDrawPixels to
+// reach the screen, so the canvas stayed blank. A window can therefore take the
+// finished frame itself and show it without OpenGL (see setRasterSink).
 //
 // Kept in its own file with no Skia headers, because the GL headers drag in
 // windows.h and Skia does not get along with it.
 
 #ifndef CL_RENDER_RASTERPRESENT_H
 #define CL_RENDER_RASTERPRESENT_H
+
+#include <functional>
 
 namespace cl {
 namespace render {
@@ -24,6 +28,13 @@ namespace render {
 // filling it. Rows run bottom to top, the order OpenGL reads them in. The caller
 // presents with SwapBuffers as usual.
 void presentRGB(int width, int height, const unsigned char* rgbBottomUp);
+
+// Where a CPU-drawn frame goes instead of presentRGB, while one is set: a
+// tightly packed RGB image, rows top to bottom. A window installs a sink around
+// its paint and shows the image with its own drawing; see DcRasterPaint.
+using RasterSink = std::function<void(int width, int height, const unsigned char* rgbTopDown)>;
+void setRasterSink(RasterSink sink);
+const RasterSink& rasterSink();
 
 }  // namespace render
 }  // namespace cl

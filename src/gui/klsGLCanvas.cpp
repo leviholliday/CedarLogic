@@ -19,6 +19,9 @@
 #include "MacScrollDevice.h"
 #endif
 #include <cstdio>
+#ifdef __WXGTK__
+#include "DcRasterPaint.h"
+#endif
 
 // Included to use the min() and max() templates:
 #include <algorithm>
@@ -194,6 +197,11 @@ void klsGLCanvas::wxOnPaint(wxPaintEvent& event) {
 	// No GL state to set up here: Skia owns the pipeline and sets clear colour,
 	// blending, and pixel store per draw. (The old fixed-function setup would
 	// also be invalid under the core profile macOS now asks for.)
+#ifdef __WXGTK__
+	// Catches the frame if Skia has fallen back to the processor; see
+	// DcRasterPaint.h for why GTK shows it without OpenGL.
+	DcRasterPaint cpuFrame;
+#endif
 	if (!renderSkiaLive()) {
 		// Neither the graphics driver nor the processor fallback could produce a
 		// frame. Clear anyway: an untouched back buffer swaps in as black, and a
@@ -206,6 +214,12 @@ void klsGLCanvas::wxOnPaint(wxPaintEvent& event) {
 	// the speed is exactly what wants saying.
 	announceRendererFailure();
 
+#ifdef __WXGTK__
+	if (cpuFrame.captured()) {
+		cpuFrame.paint(dc, GetContentScaleFactor());
+		return;
+	}
+#endif
 	// Show the new buffer:
 	glFlush();
 	SwapBuffers();
@@ -220,6 +234,7 @@ void klsGLCanvas::announceRendererFailure() {
 	if (announced || !cl::render::rendererFailed()) return;
 	announced = true;
 	const wxString msg = cl::render::rendererFailureMessage();
+	if (msg.empty()) return;   // expected on this driver; see rendererFailureMessage
 	CallAfter([msg] {
 		wxMessageBox(msg, "Rendering issue", wxOK | wxICON_WARNING);
 	});

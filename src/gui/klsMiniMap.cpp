@@ -22,6 +22,10 @@
 #include "render/RenderStyle.h"
 #ifdef WITH_SKIA
 #include "render/SkiaProbe.h"
+#ifdef __WXGTK__
+#include "DcRasterPaint.h"
+#include <wx/dcclient.h>
+#endif
 #endif
 
 // Enable access to objects in the main application
@@ -177,8 +181,20 @@ bool klsMiniMap::generateImageSkia() {
 		scene.polyline(box, 4, Stroke(Color(1.0f, 0.0f, 0.0f, 1.0f), 2.0f), true);
 	};
 
+#ifdef __WXGTK__
+	// See DcRasterPaint.h: a processor-drawn frame goes through the window's
+	// own drawing, not OpenGL.
+	DcRasterPaint cpuFrame;
+#endif
 	const bool ok = skiaRenderWindowCached(w, h, 0, contentSig,
 	                                       drawCircuit, drawViewportRect, strokeScale, clearARGB);
+#ifdef __WXGTK__
+	if (ok && cpuFrame.captured()) {
+		wxClientDC dc(this);
+		cpuFrame.paint(dc, sf);
+		return ok;
+	}
+#endif
 	if (ok) SwapBuffers();
 	return ok;
 }

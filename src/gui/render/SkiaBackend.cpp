@@ -406,16 +406,20 @@ public:
 		dst.resize((size_t)fHeight * dstRow);
 		if (!fSurface->readPixels(info, src.data(), srcRow, 0, 0)) return false;
 
+		// A window showing the frame itself wants it top-down; OpenGL wants it
+		// bottom-up. See RasterPresent.h.
+		const RasterSink& sink = rasterSink();
 		for (int y = 0; y < fHeight; y++) {
 			const unsigned char* s = src.data() + (size_t)y * srcRow;
-			unsigned char* d = dst.data() + (size_t)(fHeight - 1 - y) * dstRow;
+			unsigned char* d = dst.data() + (size_t)(sink ? y : fHeight - 1 - y) * dstRow;
 			for (int x = 0; x < fWidth; x++) {
 				d[x * 3 + 0] = s[x * 4 + 0];
 				d[x * 3 + 1] = s[x * 4 + 1];
 				d[x * 3 + 2] = s[x * 4 + 2];
 			}
 		}
-		presentRGB(fWidth, fHeight, dst.data());
+		if (sink) sink(fWidth, fHeight, dst.data());
+		else presentRGB(fWidth, fHeight, dst.data());
 		return true;
 	}
 

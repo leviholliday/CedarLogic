@@ -24,6 +24,9 @@
 // Included to use the min() and max() templates:
 #include <algorithm>
 #include <vector>
+#ifdef __WXGTK__
+#include "DcRasterPaint.h"
+#endif
 using namespace std;
 
 DECLARE_APP(MainApp)
@@ -177,7 +180,18 @@ void OscopeCanvas::OnPaint(wxPaintEvent& event){
 	wxPaintDC dc(this);
 	wxGetApp().SetCurrentCanvas(this);
 	// Skia sets its own GL state; nothing to initialise here.
+#ifdef __WXGTK__
+	// See DcRasterPaint.h: a processor-drawn frame goes through the window's
+	// own drawing, not OpenGL.
+	DcRasterPaint cpuFrame;
+#endif
 	OnRenderSkia();
+#ifdef __WXGTK__
+	if (cpuFrame.captured()) {
+		cpuFrame.paint(dc, GetContentScaleFactor());
+		return;
+	}
+#endif
 
 	// Show the new buffer:
 	glFlush();
