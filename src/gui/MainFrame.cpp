@@ -40,6 +40,8 @@
 #include "wx/timer.h"
 #include "wx/wfstream.h"
 #include "wx/image.h"
+#include "wx/mstream.h"
+#include "wx/imagpng.h"
 #include "wx/thread.h"
 #include "wx/toolbar.h"
 #include "wx/clipbrd.h"
@@ -77,6 +79,9 @@
 #ifdef _WIN32
 #include "WinAppearance.h"
 #include "WinSparkleUpdater.h"
+#endif
+#ifdef __WXGTK__
+#include "LinuxAppearance.h"
 #endif
 #include "UiKit.h"
 #include "UpdateInfo.h"   // cl::update::checksDisabled, for managed deployments
@@ -165,9 +170,29 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 {
 #ifdef __WXMSW__
     // Frame icon (title bar, taskbar button, Alt-Tab). Loaded by name from the
-    // resource compiled in via icon.rc. macOS takes it from the bundle and Linux
-    // from the .desktop file, so neither needs this.
+    // resource compiled in via icon.rc. macOS takes it from the bundle, so it
+    // doesn't need this.
     SetIcon(wxICON(appicon));
+#elif defined(__WXGTK__)
+    // A desktop that matches the window to an installed .desktop file finds the
+    // icon there, but an AppImage run straight from Downloads has none, and the
+    // window list would show a generic icon. The PNG is compiled in.
+    {
+        const cl::res::Blob png = cl::res::find("linux/CedarLogic.png");
+        // wxInitAllImageHandlers runs at the end of this constructor; the icon
+        // is needed before then. AddHandler ignores a second copy of a handler.
+        if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr)
+            wxImage::AddHandler(new wxPNGHandler);
+        if (png.ok()) {
+            wxMemoryInputStream in(png.data, png.size);
+            wxImage img(in, wxBITMAP_TYPE_PNG);
+            if (img.IsOk()) {
+                wxIcon icon;
+                icon.CopyFromBitmap(wxBitmap(img));
+                SetIcon(icon);
+            }
+        }
+    }
 #endif
 	currentCanvas = nullptr;
 
@@ -656,7 +681,21 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	// First launch: the welcome, once the window is actually on screen so it
 	// has something to sit in front of.
 	if (!appConfig().appSettings.hasSeenWelcome && !renderMode().headlessRender) {
+#ifdef __WXGTK__
+		// "On screen" means mapped by the window manager here, which can come
+		// well after the first idle tick (see GtkIsMappedOnScreen). A modal
+		// opened before that ends up underneath the frame. The try limit (two
+		// seconds) is for a window manager that never answers, not a wait.
+		welcomeWaitTimer = new wxTimer(this, wxWindow::NewControlId());
+		Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+			if (!GtkIsMappedOnScreen(this) && ++welcomeWaitTries < 40) return;
+			welcomeWaitTimer->Stop();
+			CallAfter([this] { ShowWelcome(this, false); });
+		}, welcomeWaitTimer->GetId());
+		welcomeWaitTimer->Start(50);
+#else
 		CallAfter([this] { ShowWelcome(this, false); });
+#endif
 	}
 
 	// Show the main window
@@ -839,6 +878,7 @@ void MainFrame::OnClose(wxCloseEvent& event) {
 		// is gone.
 		if (statusTimer) statusTimer->Stop();
 		if (closeTabTimer) closeTabTimer->Stop();
+		if (welcomeWaitTimer) welcomeWaitTimer->Stop();
 		cancelTabSwitch();
 		removeTempFile();
 	}
@@ -1382,6 +1422,11 @@ void MainFrame::ApplyTheme() {
 	// Windows draws the caption itself; without this it stays white over a
 	// dark app. Dialogs opened later pick it up in MainApp::FilterEvent.
 	WinSetDarkTitlebars(dark);
+#elif defined(__WXGTK__)
+	// Menus, dialogs and scrollbars are GTK's; ask for the matching variant.
+	// The toolbar goes with them, so its icons need the other stroke colour.
+	GtkSetPreferDarkTheme(dark);
+	refreshToolbarIcons();
 #endif
 
 	// Repaint every live view: all canvas tabs (only one is visible, but a
@@ -3224,6 +3269,48 @@ void MainFrame::setToolIcon(int toolId, const wxBitmapBundle& icon, const char* 
 #endif
 }
 
+#ifdef __WXGTK__
+void MainFrame::refreshToolbarIcons() {
+	if (toolBar == nullptr) return;
+	auto icon = [&](const char* sfSymbol, const char* svgName) {
+		return cl::toolbarIcon(toolBar, sfSymbol, 18, svgName, wxSize(24, 24));
+	};
+	// The fixed-image tools, as the constructor adds them.
+	static const struct { int id; const char* sfSymbol; const char* svgName; } tools[] = {
+		{ wxID_NEW,     "doc.badge.plus",        "new" },
+		{ wxID_OPEN,    "folder",                "open" },
+		{ wxID_SAVE,    "square.and.arrow.down", "save" },
+		{ wxID_UNDO,    "arrow.uturn.backward",  "undo" },
+		{ wxID_REDO,    "arrow.uturn.forward",   "redo" },
+		{ wxID_COPY,    "doc.on.doc",            "copy" },
+		{ wxID_PASTE,   "clipboard",             "paste" },
+		{ Tool_ZoomIn,  "plus.magnifyingglass",  "zoomin" },
+		{ Tool_ZoomOut, "minus.magnifyingglass", "zoomout" },
+		{ Tool_SimView, "waveform.path.ecg",     "play" },
+		{ Tool_Step,    "forward.frame.fill",    "step" },
+		{ wxID_ABOUT,   "info.circle",           "about" },
+		{ Tool_NewTab,  "plus.square",           "newtab" },
+	};
+	for (const auto& t : tools)
+		if (toolBar->FindById(t.id) != nullptr)
+			toolBar->SetToolNormalBitmap(t.id, icon(t.sfSymbol, t.svgName));
+
+	// The swapped ones, redrawn and put back in whichever state they are in.
+	pauseIcon = icon("pause.fill", "pause");
+	playIcon = icon("play.fill", "play");
+	lockedIcon = icon("lock.fill", "locked");
+	unlockedIcon = icon("lock.open.fill", "unlocked");
+	sunIcon = icon("sun.max.fill", "sun");
+	moonIcon = icon("moon.fill", "moon");
+	if (toolBar->FindById(Tool_Pause) != nullptr)
+		setToolIcon(Tool_Pause, toolBar->GetToolState(Tool_Pause) ? playIcon : pauseIcon, "");
+	if (toolBar->FindById(Tool_Lock) != nullptr)
+		setToolIcon(Tool_Lock, toolBar->GetToolState(Tool_Lock) ? lockedIcon : unlockedIcon, "");
+	if (toolBar->FindById(Tool_ThemeToggle) != nullptr)
+		setToolIcon(Tool_ThemeToggle, renderMode().darkMode ? moonIcon : sunIcon, "");
+}
+#endif
+
 void MainFrame::OnLock(wxCommandEvent& event) {
 	if (toolBar->GetToolState(Tool_Lock)) {
 		lock();
@@ -3839,9 +3926,10 @@ void MainFrame::OnDownloadLatestVersion(wxCommandEvent& event) {
 #elif defined(_WIN32)
 	WinSparkleUpdater_CheckForUpdates();
 #else
-	// Tyler Drake can remap the url using cedar.to/create
-	// Don't change the url here!
-	wxLaunchDefaultBrowser("https://cedar.to/vjyQw7", 0);
+	// No auto-updater on Linux: open this fork's releases page, where the
+	// AppImage is published. (Upstream's cedar.to link leads to the original
+	// Cedarville builds, not this version.)
+	wxLaunchDefaultBrowser(CEDARLOGIC_RELEASES_URL, 0);
 #endif
 }
 

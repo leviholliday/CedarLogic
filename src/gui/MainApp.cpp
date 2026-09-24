@@ -50,6 +50,11 @@
 #include "wx/font.h"
 #include "wx/filename.h"
 #include "wx/utils.h"
+#ifdef __WXGTK__
+#include <glib.h>
+#include "wx/html/htmlwin.h"
+#include "wx/html/htmlfilt.h"
+#endif
 
 #ifdef __APPLE__
 #include "SparkleUpdater.h"
@@ -560,6 +565,36 @@ static const wxCmdLineEntryDesc g_cmdLineDesc[] =
 	{ wxCMD_LINE_NONE }
 };
 
+#ifdef __WXGTK__
+namespace {
+// See the AddFilter call in MainApp::OnInit. wx's own HTML filter isn't
+// exported, so this reads the page itself: the help book is ASCII declared as
+// windows-1252, so UTF-8 with a windows-1252 fallback covers it.
+class XhtmlAsHtmlFilter : public wxHtmlFilter {
+public:
+	bool CanRead(const wxFSFile& file) const override {
+		return file.GetMimeType().Lower().StartsWith("application/xhtml+xml");
+	}
+	wxString ReadFile(const wxFSFile& file) const override {
+		wxInputStream* in = file.GetStream();
+		if (in == nullptr) return wxEmptyString;
+		wxMemoryBuffer bytes;
+		char chunk[4096];
+		while (in->CanRead()) {
+			in->Read(chunk, sizeof chunk);
+			if (in->LastRead() == 0) break;
+			bytes.AppendData(chunk, in->LastRead());
+		}
+		const char* data = static_cast<const char*>(bytes.GetData());
+		wxString page = wxString::FromUTF8(data, bytes.GetDataLen());
+		if (page.empty() && bytes.GetDataLen() > 0)
+			page = wxString(data, wxCSConv("windows-1252"), bytes.GetDataLen());
+		return page;
+	}
+};
+}  // namespace
+#endif
+
 MainApp::MainApp()
 {
     paletteDrag().showDragImage = false;
@@ -570,6 +605,12 @@ MainApp::MainApp()
 	// On Linux with wayland, wxGTK doesn't position glCanvas frames correctly.
 	// This env var has to be set explicitly to instruct gtk to only use X11.
 	::setenv("GDK_BACKEND", "x11", /* replace */ true);
+	// wx and GTK both name the app after argv[0], which inside an AppImage is
+	// "AppRun". wx then looks for resources under share/AppRun, and GTK gives
+	// the window class AppRun, which no .desktop file matches. Name it before
+	// either of them looks: this runs ahead of gtk_init.
+	SetAppName("CedarLogic");
+	g_set_prgname("CedarLogic");
 #endif
 }
 
@@ -627,6 +668,12 @@ bool MainApp::OnInit()
 	helpController = new wxHtmlHelpController(wxHF_DEFAULT_STYLE | wxHF_OPEN_FILES);
 	// The book itself is loaded the first time Help is opened, not here: see
 	// MainApp::ensureHelpBookLoaded.
+#ifdef __WXGTK__
+	// wx asks the freedesktop MIME database what a .htm is, and on current
+	// distros the answer is application/xhtml+xml. wx only renders text/html,
+	// so every help page came up as its source. Read those as HTML too.
+	wxHtmlWindow::AddFilter(new XhtmlAsHtmlFilter);
+#endif
 #endif
 
 
@@ -983,7 +1030,7 @@ bool MainApp::OnInit()
 // build root, which is the executable's own directory for a single-config build
 // and its parent for a multi-config one.
 static wxString findResourcesDir(const wxStandardPathsBase& stdp) {
-	wxString candidates[3];
+	wxString candidates[4];
 	candidates[0] = stdp.GetResourcesDir();
 
 	wxFileName exeDir(stdp.GetExecutablePath());
@@ -991,6 +1038,12 @@ static wxString findResourcesDir(const wxStandardPathsBase& stdp) {
 	candidates[1] = exeDir.GetPath();
 	exeDir.RemoveLastDir();
 	candidates[2] = exeDir.GetPath();
+#ifndef _WIN32
+	// An installed layout (<prefix>/bin + <prefix>/share/CedarLogic), found
+	// from the executable itself, so it holds wherever the prefix is -- an
+	// AppImage mounts at a new path every run.
+	candidates[3] = exeDir.GetPath() + "/share/CedarLogic";
+#endif
 
 	for (const wxString& dir : candidates) {
 		if (dir.empty()) continue;
@@ -1103,12 +1156,32 @@ void MainApp::loadSettings() {
 
 	// check screen coords
 	wxScreenDC sdc;
+	bool resetFrame = !conf->HasEntry("FrameWidth");
 	if ( appConfig().appSettings.mainFrameLeft + appConfig().appSettings.mainFrameWidth > sdc.GetSize().GetWidth() ||
 		appConfig().appSettings.mainFrameTop + appConfig().appSettings.mainFrameHeight > sdc.GetSize().GetHeight() ) {
 
 		appConfig().appSettings.mainFrameWidth = appConfig().appSettings.mainFrameHeight = 600;
 		appConfig().appSettings.mainFrameLeft = appConfig().appSettings.mainFrameTop = 20;
+		resetFrame = true;
 	}
+#ifdef __WXGTK__
+	// First launch, or a saved size that no longer fits: open most of the way
+	// across the desktop's work area (inside panels and docks), centred, rather
+	// than as a 600x600 window in the corner that the welcome can't fit over.
+	if (resetFrame) {
+		const wxRect work = wxGetClientDisplayRect();
+		if (work.width >= 800 && work.height >= 600) {
+			const int w = std::min(1400, work.width * 4 / 5);
+			const int h = std::min(900, work.height * 5 / 6);
+			appConfig().appSettings.mainFrameWidth = w;
+			appConfig().appSettings.mainFrameHeight = h;
+			appConfig().appSettings.mainFrameLeft = work.x + (work.width - w) / 2;
+			appConfig().appSettings.mainFrameTop = work.y + (work.height - h) / 2;
+		}
+	}
+#else
+	(void)resetFrame;
+#endif
 }
 
 int MainApp::OnExit() {

@@ -227,6 +227,11 @@ public:
 	// Swap the image on a toggle tool as its state changes. Named both ways for
 	// the same reason cl::toolbarIcon is, and it defers to that for the sizes.
 	void setToolIcon(int toolId, const wxBitmapBundle& icon, const char* sfSymbol);
+#ifdef __WXGTK__
+	// Redraw every toolbar icon for the bar's current colour. GTK takes the
+	// toolbar dark along with the theme, unlike Windows' native toolbar.
+	void refreshToolbarIcons();
+#endif
 	// format: 1 = v1 XML, 2 = v2 XML, 3 = v3 S-expression (the default).
 	bool save(string filename, int format = 3);
 	void load(string filename);
@@ -404,6 +409,8 @@ private:
 	wxTimer* tabSwitchTimer = nullptr;
 	wxSplitterWindow* canvasSplit = nullptr;   // the two panes sit in here
 	wxTimer* closeTabTimer = nullptr;   // lets a closing tab finish dimming
+	wxTimer* welcomeWaitTimer = nullptr;   // GTK: holds the first-run welcome until the frame is mapped
+	int welcomeWaitTries = 0;
 	GUICanvas* pendingCloseCanvas = nullptr;   // dimming its way out
 	void noteCanvasUsed(GUICanvas* canvas);
 	void handleTabSwitchKey(bool backwards);

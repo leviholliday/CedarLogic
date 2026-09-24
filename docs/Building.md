@@ -82,6 +82,53 @@ If the window comes up with a blank canvas, run it from a terminal: a renderer
 that cannot get at the window says so on stderr. That means the GL context or
 the Skia build is at fault, not the circuit.
 
+### Build an AppImage
+
+An AppImage is one file that runs on most distros without installing anything.
+Configure a separate build with the bundled (static) wxWidgets, so the only
+shared libraries left are the ones every desktop already has, then package it
+with [linuxdeploy](https://github.com/linuxdeploy/linuxdeploy):
+
+```bash
+cmake -B build-appimage -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DUSE_SYSTEM_WXWIDGETS=OFF \
+    -DUSE_SYSTEM_SKIA=OFF -DSKIA_ROOT="$PWD/build/skia-dist"
+
+LINUXDEPLOY=/path/to/linuxdeploy-x86_64.AppImage scripts/package-linux.sh build-appimage
+```
+
+That leaves `build-appimage/CedarLogic-<version>-x86_64.AppImage`. glibc and GTK
+only work forwards, so build on the oldest distro you want it to run on; the
+`Linux build` workflow (`.github/workflows/linux.yml`) uses Ubuntu 22.04.
+
+### Skia without Google's servers
+
+Skia's own dependency script fetches from `*.googlesource.com`. Where that host
+is blocked, Skia can instead be built against the distro's libraries:
+`sudo apt install generate-ninja libfreetype-dev libharfbuzz-dev libexpat1-dev
+libpng-dev libjpeg-turbo8-dev libwebp-dev zlib1g-dev libfontconfig1-dev`, clone
+`https://github.com/aseprite/skia` at `aseprite-m124`, and run `gn gen` with the
+args from `cmake/skia-args/` plus:
+
+```
+skia_use_icu = false
+skia_use_wuffs = false
+skia_use_dng_sdk = false
+skia_use_piex = false
+skia_use_system_expat = true
+skia_use_system_freetype2 = true
+skia_use_system_harfbuzz = true
+skia_use_system_libjpeg_turbo = true
+skia_use_system_libpng = true
+skia_use_system_libwebp = true
+skia_use_system_zlib = true
+extra_cflags = [ "-I/usr/include/harfbuzz" ]
+```
+
+Build with `ninja -C out/Release skia` and assemble a dist the way
+`.github/workflows/skia.yml` does. A Skia built like this links the system
+libraries, so an AppImage made from it expects them on the host.
+
 ## macOS
 
 ### Required Programs

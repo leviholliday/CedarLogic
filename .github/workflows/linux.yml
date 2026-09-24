@@ -1,0 +1,141 @@
+name: Linux build
+
+# Builds the Linux version as an AppImage, starts it on a virtual display, and
+# takes a few headless renders so the result can be looked at without a Linux
+# machine. This is the everyday "does it build and start on Linux" run; the
+# full Linux build + ctest stays in ci.yml.
+#
+# Runs on pushes to linux/** branches, or by hand once this file is on the
+# default branch (workflow_dispatch only works from there).
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'linux/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Linux only. A cache hit makes this seconds.
+  skia:
+    uses: ./.github/workflows/skia.yml
+    with:
+      platforms: '[{"name":"linux","os":"ubuntu-22.04","args":"linux"}]'
+
+  build:
+    needs: skia
+    # The oldest runner, as glibc and GTK only work forwards: an AppImage built
+    # here starts on Ubuntu 22.04, Debian 12, Fedora 36 and anything newer.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build ccache \
+            libgtk-3-dev libglu1-mesa-dev libgl1-mesa-dev libfontconfig1-dev \
+            xvfb xauth fonts-dejavu-core
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: linux-appimage-gcc
+
+      # wxWidgets is built from source (static, no JPEG/TIFF; see CMakeLists.txt),
+      # which is most of a cold build. Ubuntu 22.04 only ships wx 3.0 anyway.
+      - name: Cache wxWidgets
+        uses: actions/cache@v6
+        with:
+          path: build/_deps
+          key: wxwidgets-linux-port-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            wxwidgets-linux-port-
+
+      - name: Download Skia dist
+        uses: actions/download-artifact@v8
+        with:
+          name: skia-linux
+          path: skia-dist
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+          -DUSE_SYSTEM_WXWIDGETS=OFF
+          -DUSE_SYSTEM_SKIA=OFF -DSKIA_ROOT="$PWD/skia-dist"
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build
+
+      # --render-gate builds the main window, parses the embedded gate library
+      # and renders one gate.
+      - name: Smoke test (launch and render a gate)
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            build/CedarLogic --render-gate AA_AND2 0 smoke.png
+          if [ ! -s smoke.png ]; then
+            echo "::error::--render-gate produced no output; the app likely crashed at startup"
+            exit 1
+          fi
+
+      - name: Package AppImage
+        run: |
+          curl -fsSL -o linuxdeploy \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          OUT=$(LINUXDEPLOY="$PWD/linuxdeploy" scripts/package-linux.sh build | tail -1)
+          echo "APPIMAGE=$OUT" >> "$GITHUB_ENV"
+          ls -la "$OUT"
+
+      # The same smoke test against the packaged app, which is what catches a
+      # library the bundle forgot.
+      - name: Smoke test the AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            "$APPIMAGE" --render-gate AA_AND2 0 smoke-appimage.png
+          if [ ! -s smoke-appimage.png ]; then
+            echo "::error::the AppImage did not start"
+            exit 1
+          fi
+
+      # Pictures of the Linux build, for checking layout and fonts from a Mac.
+      # Best effort: a hang or a miss here should not fail the build.
+      - name: Headless renders
+        continue-on-error: true
+        run: |
+          mkdir -p renders/ui
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 120 build/CedarLogic --render-ui renders/ui || echo "--render-ui exit $?"
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 120 build/CedarLogic --render format/tests/fixtures/Lab5.cdl renders/Lab5.png 1200 800 \
+            || echo "--render exit $?"
+          cp smoke.png smoke-appimage.png renders/
+          ls -R renders
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-linux-appimage
+          path: build/CedarLogic-*-x86_64.AppImage
+          if-no-files-found: error
+
+      - name: Upload renders
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-linux-renders
+          path: renders
+          if-no-files-found: warn

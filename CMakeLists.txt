@@ -286,6 +286,11 @@ set_source_files_properties(${SKIA_SRC_FILES} PROPERTIES
 # The gate library and toolbar icons are compiled into the executable (see
 # include/gui/EmbeddedRes.h); everything else in res/ is still read from disk.
 file(GLOB EMBED_ICONS RELATIVE "${PROJECT_SOURCE_DIR}/res" "${PROJECT_SOURCE_DIR}/res/icons/*.svg")
+# Linux: the window icon. Windows compiles its own in through icon.rc and macOS
+# takes it from the bundle; GTK has to be handed one.
+if(UNIX AND NOT APPLE)
+    list(APPEND EMBED_ICONS linux/CedarLogic.png)
+endif()
 embed_resources(EMBEDDED_RES_CPP "${PROJECT_SOURCE_DIR}/res"
     cl_gatedefs.xml samples/practice.cdl ${EMBED_ICONS})
 list(APPEND SRC_FILES "${EMBEDDED_RES_CPP}")
@@ -454,6 +459,11 @@ target_compile_definitions(CedarLogic PRIVATE "_PRODUCTION_")
 # Linux: Define GL_GLEXT_PROTOTYPES for OpenGL extension functions
 if(UNIX AND NOT APPLE)
     target_compile_definitions(CedarLogic PRIVATE "GL_GLEXT_PROTOTYPES")
+    # LinuxAppearance.cpp talks to GTK directly for the dark theme variant. wxGTK
+    # already links GTK 3; this only adds its headers.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
+    target_link_libraries(CedarLogic PRIVATE PkgConfig::GTK3)
 endif()
 
 if (WIN32)
@@ -574,6 +584,7 @@ else()
     install(FILES res/CedarLogic.desktop DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
     install(FILES res/mime.xml DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/mime/packages RENAME CedarLogic.xml)
     install(FILES res/icon.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps RENAME CedarLogic.png)
+    install(FILES res/linux/CedarLogic.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps)
     install_resources(res)
 endif()
 

@@ -16,7 +16,11 @@ function(install_resources resDir)
     if (WIN32)
         install(DIRECTORY "${CMAKE_SOURCE_DIR}/${resDir}" DESTINATION ".")
     else()
-        install(DIRECTORY "${CMAKE_SOURCE_DIR}/${resDir}" DESTINATION "${CMAKE_INSTALL_DATADIR}/CedarLogic")
+        # The macOS bundle art has no use here; the Linux icon is installed to
+        # the icon theme separately.
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/${resDir}" DESTINATION "${CMAKE_INSTALL_DATADIR}/CedarLogic"
+            PATTERN "macos" EXCLUDE
+            PATTERN "linux" EXCLUDE)
     endif()
 endfunction()
 
