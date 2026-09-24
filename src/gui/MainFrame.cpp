@@ -79,6 +79,9 @@
 #include "WinSparkleUpdater.h"
 #endif
 #include "UiKit.h"
+#ifdef __WXMSW__
+#include <wx/msw/wrapwin.h>   // DeferWindowPos, for the focus-mode slide
+#endif
 #include "UpdateInfo.h"   // cl::update::checksDisabled, for managed deployments
 
 DECLARE_APP(MainApp)
@@ -2084,15 +2087,34 @@ void MainFrame::stepSidePanelAnim() {
 	const int offset = (int)std::lround((1.0 - e) * travel);      // sideways
 	const int rise = (int)std::lround((1.0 - e) * barTravel);     // and upwards
 
+	std::vector<std::pair<wxWindow*, wxRect>> moves;
 	if (barTravel > 0 && modernBar)
-		modernBar->SetSize(barRect.x, barRect.y - rise, barRect.width, barRect.height);
-
-	gatePalette->SetSize(panelRect.x - offset, panelRect.y - rise, panelRect.width, panelRect.height);
-	miniMap->SetSize(miniRect.x - offset, miniRect.y - rise, miniRect.width, miniRect.height);
-	sidePanelSash->SetSize(sashRect.x - offset, sashRect.y - rise, sashRect.width, sashRect.height);
+		moves.push_back({ modernBar, wxRect(barRect.x, barRect.y - rise, barRect.width, barRect.height) });
+	moves.push_back({ gatePalette, wxRect(panelRect.x - offset, panelRect.y - rise, panelRect.width, panelRect.height) });
+	moves.push_back({ miniMap, wxRect(miniRect.x - offset, miniRect.y - rise, miniRect.width, miniRect.height) });
+	moves.push_back({ sidePanelSash, wxRect(sashRect.x - offset, sashRect.y - rise, sashRect.width, sashRect.height) });
 	// The canvas takes the room the other two give up.
-	rightSplitter->SetSize(splitRect.x - offset, splitRect.y - rise,
-	                       splitRect.width + offset, splitRect.height + rise);
+	moves.push_back({ rightSplitter, wxRect(splitRect.x - offset, splitRect.y - rise,
+	                                        splitRect.width + offset, splitRect.height + rise) });
+#ifdef __WXMSW__
+	// All in one go, and without SWP's default of carrying each window's old
+	// pixels to its new spot. The canvas is OpenGL, whose pixels GDI cannot
+	// copy: what got carried along was garbage, and nothing ever repainted it
+	// -- the white and black lines focus mode left behind. NOCOPYBITS makes
+	// each moved window repaint itself instead.
+	bool moved = false;
+	if (HDWP batch = ::BeginDeferWindowPos((int)moves.size())) {
+		for (const auto& m : moves) {
+			batch = ::DeferWindowPos(batch, (HWND)m.first->GetHWND(), nullptr,
+			                         m.second.x, m.second.y, m.second.width, m.second.height,
+			                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOCOPYBITS);
+			if (!batch) break;
+		}
+		moved = batch && ::EndDeferWindowPos(batch);
+	}
+	if (!moved)
+#endif
+	for (const auto& m : moves) m.first->SetSize(m.second);
 
 	if (!done) return;
 	sidePanelTimer->Stop();
