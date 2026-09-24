@@ -262,7 +262,7 @@ private:
 		saveName();
 		beat.Stop();
 		appConfig().appSettings.hasSeenWelcome = true;
-		MainFrame* f = frame;
+		MainFrame* f = frame;   // ApplyPreferences below also saves it to disk
 		if (f) f->ApplyPreferences();
 		EndModal(wxID_OK);
 		// This window is a local of ShowWelcome and gone by the time these run,

@@ -8,6 +8,7 @@
 #include "MainApp.h"
 #include "Settings.h"
 #include "UiKit.h"
+#include "GUICanvas.h"
 
 #include <wx/dialog.h>
 #include <wx/scrolwin.h>
@@ -31,7 +32,7 @@ struct Shortcut {
 	wxString section;
 	std::vector<wxString> keys;   // "Cmd", "Shift", "T"; lower case = a gesture
 	wxString what;
-	int command = 0;              // a menu command it runs, or 0
+	int command = 0;              // a menu command it runs, a canvas key (keyCommand), or 0
 };
 
 // "Cmd Shift D" for the dark-mode shortcut the user set in Preferences.
@@ -56,6 +57,9 @@ std::vector<wxString> themeShortcutKeys() {
 std::vector<Shortcut> allShortcuts() {
 	std::vector<Shortcut> v;
 	wxString section;
+	// A bare-key action the canvas handles itself (A, R, ...) has no menu
+	// command; running it from here presses the key on the canvas instead.
+	auto keyCommand = [](int key) { return -key; };
 	auto add = [&](std::vector<wxString> keys, const wxString& what, int command = 0) {
 		v.push_back({ section, std::move(keys), what, command });
 	};
@@ -82,9 +86,9 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "Shift", "click" }, "Add to or remove from the selection");
 
 	section = "Building";
-	add({ "A" }, "Add a gate by name");
-	add({ "Shift", "1-9" }, "Jump to a gate category");
-	add({ "R" }, "Rotate the selection");
+	add({ "A" }, "Add a gate by name", keyCommand('A'));
+	add({ "Shift", "1-0" }, "Jump to a gate category (0 is the tenth)");
+	add({ "R" }, "Rotate the selection", keyCommand('R'));
 	add({ "Up", "Down", "Left", "Right" }, "Nudge the selection (Shift: 5 squares)");
 	add({ "click a pin, then another" }, "Connect them");
 	add({ "C", "while dragging" }, "Connect to pins nearby");
@@ -93,10 +97,10 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "double-click a gate" }, "Change its settings");
 
 	section = "Quick keys";
-	add({ "C" }, "Copy");
-	add({ "V" }, "Paste");
-	add({ "X" }, "Cut");
-	add({ "D" }, "Duplicate");
+	add({ "C" }, "Copy", wxID_COPY);
+	add({ "V" }, "Paste", wxID_PASTE);
+	add({ "X" }, "Cut", wxID_CUT);
+	add({ "D" }, "Duplicate", Edit_Duplicate);
 	add({ "T" }, "Truth table", View_TruthTable);
 
 	section = "Moving around";
@@ -293,7 +297,7 @@ public:
 			if (r.rect.GetBottom() < top || r.rect.y > top + GetClientSize().y) continue;
 			const bool runnable = r.item->command != 0;
 			const bool sel = ((int)i == selected), hot = ((int)i == hover);
-			if (sel || (hot && runnable)) {
+			if (sel || hot) {
 				gc->SetPen(*wxTRANSPARENT_PEN);
 				gc->SetBrush(wxBrush(sel ? ui::withAlpha(accent, ui::isDark() ? 0.24 : 0.14)
 				                         : ui::withAlpha(ink, 0.06)));
@@ -319,14 +323,16 @@ public:
 				gc->GetTextExtent(what, &tw, &th);
 			}
 			gc->DrawText(what, textX, r.rect.y + (ROW_H - th) / 2);
-			// A runnable row says so when you point at it.
-			if (runnable && (hot || sel)) {
+			// A runnable row says so when you point at it; a gesture row says
+			// where to do it instead, so clicking one doesn't look broken.
+			if (hot || sel) {
 				gc->SetFont(wxFont(wxFontInfo(10.5)), ui::dim());
-				#ifdef __WXOSX__
-				const wxString go = hot ? "Click to do it" : "Return to do it";
+#ifdef __WXOSX__
+				const wxString run = hot ? "Click to do it" : "Return to do it";
 #else
-				const wxString go = hot ? "Click to do it" : "Enter to do it";
+				const wxString run = hot ? "Click to do it" : "Enter to do it";
 #endif
+				const wxString go = runnable ? run : wxString("Try it on the canvas");
 				double gw, gh;
 				gc->GetTextExtent(go, &gw, &gh);
 				if (textX + tw + 16 + gw < r.rect.GetRight() - 8)
@@ -350,6 +356,16 @@ private:
 // menu click would.
 void runCommand(MainFrame* frame, int id) {
 	if (id == View_DarkMode) { frame->ToggleDarkMode(); return; }
+	if (id < 0) {   // a canvas key: press it there, so it does exactly what the key does
+		GUICanvas* canvas = frame->CurrentCanvas();
+		if (canvas == nullptr) return;
+		canvas->SetFocus();
+		wxKeyEvent key(wxEVT_KEY_DOWN);
+		key.m_keyCode = -id;
+		key.SetEventObject(canvas);
+		canvas->ProcessWindowEvent(key);
+		return;
+	}
 	wxCommandEvent evt(wxEVT_MENU, id);
 	if (wxMenuBar* mb = frame->GetMenuBar()) {
 		if (wxMenuItem* item = mb->FindItem(id)) {

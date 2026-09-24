@@ -62,6 +62,7 @@ struct ApplicationSettings {
 	int mainFrameHeight;
 	int mainFrameLeft;
 	int mainFrameTop;
+	bool mainFrameMaximized = false;
 	int timePerStep;
 	int refreshRate;
 	int autosaveSeconds;   // 0 disables autosave entirely
@@ -87,9 +88,14 @@ struct ApplicationSettings {
 	// Shift+scroll always pans sideways.
 	int mouseWheelAction = 0;
 	int trackpadScrollAction = 1;
-	// Flip which way scrolling zooms, per device. The mouse one is on by
-	// default: tools like Scroll Reverser change the direction the app sees.
+	// Flip which way scrolling zooms, per device. On a Mac the mouse one is on
+	// by default: tools like Scroll Reverser change the direction the app sees.
+	// Windows keeps wheel and touchpad directions apart itself, so it is off.
+#ifdef __APPLE__
 	bool reverseWheelZoom = true;
+#else
+	bool reverseWheelZoom = false;
+#endif
 	bool reverseTrackpadZoom = false;
 	// Width of the gate palette / minimap column, in pixels. 0 = not chosen
 	// yet; MainFrame measures the natural width on first launch.

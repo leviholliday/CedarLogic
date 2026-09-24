@@ -69,9 +69,9 @@ protected:
 	// Write this page's controls into appSettings and push them live.
 	virtual void apply() = 0;
 
-	void changed() {
-		if (wxPreferencesEditor::ShouldApplyChangesImmediately()) apply();
-	}
+	// Every platform applies as you go. wx says Windows and Linux should wait
+	// for OK, but that meant OK, look, reopen, adjust -- over and over.
+	void changed() { apply(); }
 
 	void pushLive() {
 		if (wxGetApp().mainframe) wxGetApp().mainframe->ApplyPreferences();
@@ -177,9 +177,6 @@ public:
 		addRow("Theme at launch:", themeMode,
 			"Which theme the app opens in. You can still switch any time from the toolbar or View menu.");
 
-		showToggle = addCheck("Toolbar:", "Show the dark mode switch", s.showThemeToggleButton,
-			"Hide it if you only switch themes with the shortcut or the View menu.");
-
 		tabBar = new wxChoice(this, wxID_ANY);
 		tabBar->Append("Modern");          // index 0 == classicTabs false
 		tabBar->Append("Classic");
@@ -239,7 +236,6 @@ protected:
 	void apply() override {
 		auto& s = appConfig().appSettings;
 		s.themeMode = themeMode->GetSelection();
-		s.showThemeToggleButton = showToggle->GetValue();
 		s.classicTabs = (tabBar->GetSelection() == 1);
 		s.gridlineVisible = grid_->GetValue();
 		s.majorGridVisible = majorGrid->GetValue();
@@ -254,7 +250,6 @@ protected:
 
 private:
 	wxChoice* themeMode;
-	wxCheckBox* showToggle;
 	wxChoice* tabBar;
 	wxCheckBox* grid_;
 	wxCheckBox* majorGrid;
@@ -275,7 +270,11 @@ public:
 		mouseAction = actionChoice(s.mouseWheelAction);
 		addRow("Mouse wheel:", mouseAction, "");
 		reverseWheel = addCheck("", "Reverse zoom direction", s.reverseWheelZoom,
+#ifdef __APPLE__
 			"Flip this if rolling the wheel up zooms out. Apps like Scroll Reverser change the direction.");
+#else
+			"Flip this if rolling the wheel up zooms out.");
+#endif
 
 #ifdef __APPLE__
 		trackpadAction = actionChoice(s.trackpadScrollAction);
@@ -405,7 +404,7 @@ private:
 		Refresh();
 	}
 
-	void changed() { if (wxPreferencesEditor::ShouldApplyChangesImmediately()) apply(); }
+	void changed() { apply(); }   // as you go, on every platform (see above)
 	void apply() { if (wxGetApp().mainframe) wxGetApp().mainframe->ApplyPreferences(); }
 
 	std::vector<wxStaticBitmap*> previews;

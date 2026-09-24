@@ -336,8 +336,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
         // GetKeyCode() is the unmodified key even with Shift held (same as the
         // Ctrl+Shift+Z check below relies on), so this doesn't need the digit
         // row's shifted symbols ('!', '@', ...).
-        if (e.ShiftDown() && !ctrl && !e.AltDown() && k >= '1' && k <= '9' && gatePalette) {
-            gatePalette->SelectSectionByIndex((unsigned int)(k - '1'));
+        // Shift+0 is the tenth, the way the digit row reads.
+        if (e.ShiftDown() && !ctrl && !e.AltDown() && k >= '0' && k <= '9' && gatePalette) {
+            gatePalette->SelectSectionByIndex(k == '0' ? 9u : (unsigned int)(k - '1'));
             return;
         }
         // Cmd+Shift+Left/Right resize the split, the way Arc does it.
@@ -591,6 +592,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { if (!sidePanelSash->HasCapture()) sidePanelSash->CaptureMouse(); });
 	sidePanelSash->Bind(wxEVT_LEFT_UP, [this](wxMouseEvent&) {
 		if (sidePanelSash->HasCapture()) sidePanelSash->ReleaseMouse();
+		saveSettings();   // the width you dragged to is the one you get next time
 	});
 	sidePanelSash->Bind(wxEVT_MOUSE_CAPTURE_LOST, [](wxMouseCaptureLostEvent&) {});
 	sidePanelSash->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
@@ -683,8 +685,36 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 		CallAfter([this] { ShowWelcome(this, false); });
 	}
 
-	// Show the main window
+	if (appConfig().appSettings.mainFrameMaximized && !renderMode().headlessRender) Maximize();
+
+	// Show the main window. On Windows it fades in: the first few layout passes
+	// (toolbar, tab strip, side panel, the circuit framing itself) happen after
+	// Show, and without a fade you watch them happen. macOS animates a new
+	// window itself.
+#ifdef __WXMSW__
+	const bool fadeIn = !renderMode().headlessRender && CanSetTransparent();
+	if (fadeIn) SetTransparent(0);
+#endif
 	Show(true);
+#ifdef __WXMSW__
+	if (fadeIn) {
+		wxTimer* fade = new wxTimer(this, wxWindow::NewControlId());
+		const wxLongLong start = wxGetLocalTimeMillis() + 60;   // let layout settle
+		Bind(wxEVT_TIMER, [this, fade, start](wxTimerEvent&) {
+			const double t = (wxGetLocalTimeMillis() - start).ToDouble() / 180.0;
+			if (t < 0) return;
+			if (t >= 1.0) {
+				fade->Stop();
+				SetTransparent(255);   // back to a plain, unlayered window
+				CallAfter([fade] { delete fade; });
+				return;
+			}
+			const double e = 1.0 - std::pow(1.0 - t, 3.0);   // ease out
+			SetTransparent((wxByte)std::lround(e * 254));
+		}, fade->GetId());
+		fade->Start(15);
+	}
+#endif
 
 #ifdef __WXOSX__
 	NativeWindow_ConfigureTitleBar(this);
@@ -1451,7 +1481,11 @@ void MainFrame::ApplyThemeShortcutLabel() {
 }
 
 void MainFrame::ApplyThemeToggleVisibility() {
-	const bool want = appConfig().appSettings.showThemeToggleButton;
+	// The same "Dark mode" group the modern toolbars show or hide, so one
+	// checkbox in the Toolbar settings covers every style.
+	auto& settings = appConfig().appSettings;
+	settings.showThemeToggleButton = !(settings.toolbarHidden & (1 << cl::tb::GTheme));
+	const bool want = settings.showThemeToggleButton;
 	const bool have = toolBar->FindById(Tool_ThemeToggle) != nullptr;
 	if (want == have) return;
 	if (want) {
@@ -1496,7 +1530,19 @@ void MainFrame::ApplyPreferences() {
 	GetMenuBar()->Check(View_Gridline, appConfig().appSettings.gridlineVisible);
 	GetMenuBar()->Check(View_WireConn, appConfig().appSettings.wireConnVisible);
 
-	if (currentCanvas != NULL) currentCanvas->Update();
+	// Repaint everything a setting can colour or resize -- the accent is the
+	// dot on the active tab, the selection glow and the palette's highlight.
+	// Update() alone only flushes a repaint that is already pending, so the
+	// tab dot kept its old colour until you switched tabs.
+	for (CanvasPane& p : panes) {
+		if (p.host) p.host->Refresh();
+		if (p.strip) p.strip->Refresh();
+	}
+	for (GUICanvas* c : canvases) if (c) c->Refresh();
+	if (miniMap) miniMap->Refresh();
+	if (gatePalette) gatePalette->Refresh();
+	if (modernBar) modernBar->Refresh();
+	saveSettings();   // a change made in Preferences is on disk right away
 }
 
 // Cadence pump event (posted from simPumpThread). Runs the same work the two
@@ -2053,7 +2099,10 @@ void MainFrame::stepSidePanelAnim() {
 
 void MainFrame::ApplySidePanelWidth() {
 	int& w = appConfig().appSettings.sidePanelWidth;
-	if (w <= 0) w = gatePalette->GetBestSize().x;   // first launch: its natural width
+	// First launch: roomy enough that the gate names and the section list read
+	// in full. Its natural width was the narrowest that fit, which cut names
+	// short with "..." until you dragged it wider.
+	if (w <= 0) w = wxMax(gatePalette->GetBestSize().x, FromDIP(270));
 	w = wxMax(SIDE_PANEL_MIN_WIDTH, wxMin(SIDE_PANEL_MAX_WIDTH, w));
 	gatePalette->SetMinSize(wxSize(w, -1));
 	gatePalette->SetMaxSize(wxSize(w, -1));
@@ -2603,7 +2652,6 @@ GUICanvas* MainFrame::pickSplitPartner() {
 void MainFrame::SplitWith(GUICanvas* canvas, bool onRight) {
 	if (canvas == nullptr) return;
 	MoveCanvasToPane(canvas, 1, -1, onRight);
-	SetStatusText("Split view. Drag tabs between the two sides; the split closes when a side runs out.");
 }
 
 void MainFrame::CloseSplit() {
@@ -3288,10 +3336,15 @@ void MainFrame::saveSettings() {
 	wxConfigBase *conf = wxConfigBase::Get();
 	auto settings = appConfig().appSettings;
 
-	conf->Write("FrameWidth", GetSize().GetWidth());
-	conf->Write("FrameHeight", GetSize().GetHeight());
-	conf->Write("FrameLeft", GetPosition().x);
-	conf->Write("FrameTop", GetPosition().y);
+	// A maximized or minimized window's rect is not the one to come back to:
+	// keep the last normal one and remember the state beside it.
+	conf->Write("FrameMaximized", IsMaximized());
+	if (!IsMaximized() && !IsIconized() && !IsFullScreen()) {
+		conf->Write("FrameWidth", GetSize().GetWidth());
+		conf->Write("FrameHeight", GetSize().GetHeight());
+		conf->Write("FrameLeft", GetPosition().x);
+		conf->Write("FrameTop", GetPosition().y);
+	}
 	conf->Write("TimeStep", appConfig().timeStepMod);
 	conf->Write("RefreshRate", settings.refreshRate);
 	conf->Write("AutosaveSeconds", settings.autosaveSeconds);
@@ -3329,6 +3382,9 @@ void MainFrame::saveSettings() {
 	conf->Write("ThemeShortcutKeyCode", settings.themeShortcutKeyCode);
 	conf->Write("ThemeShortcutModifiers", settings.themeShortcutModifiers);
 	conf->Write("ThemeToggleButtonVisible", settings.showThemeToggleButton);
+	// To disk now rather than whenever wx deletes the config: a crash, a forced
+	// quit or the Windows _Exit in MainApp::OnExit would otherwise lose it all.
+	conf->Flush();
 }
 
 void MainFrame::ResumeExecution() {

@@ -20,7 +20,8 @@
 #include <sstream>
 #include "migrate.hpp"   // cl::loadCircuit, to validate a file before the GUI load
 #include "wx/stdpaths.h"
-#include "CircuitLibrary.h"   // seedSamples, for the first-run practice circuit
+#include "CircuitLibrary.h"
+#include "ModernToolbar.h"   // cl::tb::GTheme   // seedSamples, for the first-run practice circuit
 #ifdef WITH_SKIA
 #include "render/SkiaProbe.h"   // headless --skia-probe (no Skia headers leak here)
 #include "render/RendererHealth.h"
@@ -29,6 +30,7 @@
 #endif
 #endif
 #include "wx/fileconf.h"
+#include "wx/display.h"
 #include "wx/settings.h"   // wxSystemSettings::GetAppearance(), for ThemeMode::System
 
 // Crash reporter: portable pieces (report path, URL helpers, the next-launch
@@ -1045,10 +1047,12 @@ void MainApp::loadSettings() {
 	conf->Read("StudentName", &str, "");
 	appConfig().appSettings.studentName = str.ToStdString();
 
-	conf->Read("FrameWidth", &appConfig().appSettings.mainFrameWidth, 600);
-	conf->Read("FrameHeight", &appConfig().appSettings.mainFrameHeight, 600);
-	conf->Read("FrameLeft", &appConfig().appSettings.mainFrameLeft, 20);
-	conf->Read("FrameTop", &appConfig().appSettings.mainFrameTop, 20);
+	// -1: never saved, so placeWindow below picks a spot.
+	conf->Read("FrameWidth", &appConfig().appSettings.mainFrameWidth, -1);
+	conf->Read("FrameHeight", &appConfig().appSettings.mainFrameHeight, -1);
+	conf->Read("FrameLeft", &appConfig().appSettings.mainFrameLeft, -1);
+	conf->Read("FrameTop", &appConfig().appSettings.mainFrameTop, -1);
+	conf->Read("FrameMaximized", &appConfig().appSettings.mainFrameMaximized, false);
 	conf->Read("RefreshRate", &appConfig().appSettings.refreshRate, 16); // ms (~60 FPS)
 	conf->Read("AutosaveSeconds", &appConfig().appSettings.autosaveSeconds, 180);
 	conf->Read("TimeStep", &appConfig().appSettings.timePerStep, 25); // ms
@@ -1071,7 +1075,8 @@ void MainApp::loadSettings() {
 	conf->Read("MouseWheelAction", &appConfig().appSettings.mouseWheelAction, 0);
 	conf->Read("TrackpadScrollAction", &appConfig().appSettings.trackpadScrollAction, 1);
 	conf->Read("ReverseTrackpadZoom", &appConfig().appSettings.reverseTrackpadZoom, false);
-	conf->Read("ReverseWheelZoom", &appConfig().appSettings.reverseWheelZoom, true);
+	conf->Read("ReverseWheelZoom", &appConfig().appSettings.reverseWheelZoom,
+	           appConfig().appSettings.reverseWheelZoom);   // per-platform default
 	conf->Read("SidePanelWidth", &appConfig().appSettings.sidePanelWidth, 0);
 	conf->Read("PaletteGateSize", &appConfig().appSettings.paletteGateSize, 48);
 	conf->Read("DuplicateUsesClipboard", &appConfig().appSettings.duplicateUsesClipboard, false);
@@ -1085,6 +1090,10 @@ void MainApp::loadSettings() {
 	conf->Read("ThemeShortcutModifiers", &appConfig().appSettings.themeShortcutModifiers,
 	           appConfig().appSettings.themeShortcutModifiers);
 	conf->Read("ThemeToggleButtonVisible", &appConfig().appSettings.showThemeToggleButton, true);
+	// The switch is one of the toolbar's own groups now (Toolbar > Show in the
+	// toolbar > Dark mode), not a separate checkbox. Carry an old "hidden" over.
+	if (!appConfig().appSettings.showThemeToggleButton)
+		appConfig().appSettings.toolbarHidden |= (1 << cl::tb::GTheme);
 
 	// Resolve tonight's theme from the launch policy. This is the single place
 	// renderMode().darkMode gets its startup value; MainFrame reads it back once
@@ -1101,14 +1110,32 @@ void MainApp::loadSettings() {
 			break;
 	}
 
-	// check screen coords
-	wxScreenDC sdc;
-	if ( appConfig().appSettings.mainFrameLeft + appConfig().appSettings.mainFrameWidth > sdc.GetSize().GetWidth() ||
-		appConfig().appSettings.mainFrameTop + appConfig().appSettings.mainFrameHeight > sdc.GetSize().GetHeight() ) {
+	placeWindow();
+}
 
-		appConfig().appSettings.mainFrameWidth = appConfig().appSettings.mainFrameHeight = 600;
-		appConfig().appSettings.mainFrameLeft = appConfig().appSettings.mainFrameTop = 20;
+// Where the main window opens. The saved spot if most of it is still on some
+// screen; otherwise -- first launch, or the monitor it was on is gone -- a
+// generous window centred on the screen the mouse is on. It used to fall back
+// to 600x600 at (20,20): a small box jammed into the top-left corner.
+void MainApp::placeWindow() {
+	auto& s = appConfig().appSettings;
+	const wxRect saved(s.mainFrameLeft, s.mainFrameTop, s.mainFrameWidth, s.mainFrameHeight);
+	if (saved.width >= 400 && saved.height >= 300) {
+		for (unsigned i = 0; i < wxDisplay::GetCount(); i++) {
+			const wxRect seen = saved.Intersect(wxDisplay(i).GetClientArea());
+			// Enough of it to grab and drag back, title bar included.
+			if (seen.width >= 200 && seen.height >= 120 && seen.y <= saved.y + 40) return;
+		}
 	}
+	int d = wxDisplay::GetFromPoint(wxGetMousePosition());
+	if (d == wxNOT_FOUND) d = 0;
+	const wxRect area = wxDisplay(d).GetClientArea();
+	const int w = std::min(1440, area.width * 85 / 100);
+	const int h = std::min(940, area.height * 85 / 100);
+	s.mainFrameWidth = w;
+	s.mainFrameHeight = h;
+	s.mainFrameLeft = area.x + (area.width - w) / 2;
+	s.mainFrameTop = area.y + (area.height - h) / 2;
 }
 
 int MainApp::OnExit() {
@@ -1131,7 +1158,14 @@ int MainApp::OnExit() {
 	// post-OnExit framework teardown then spins forever winding down the detached
 	// threads, so the process never terminates even though nothing is left to do.
 	// Exit now rather than return into that teardown -- the same approach the
-	// headless --render one-shot already takes. All persistent state is flushed.
+	// headless --render one-shot already takes.
+	//
+	// The settings file is the exception: wxFileConfig writes itself out when
+	// it is deleted, and wx only deletes it in CleanUp(), after OnExit returns
+	// -- which _Exit never reaches. So on Windows no setting ever reached disk,
+	// and "has seen the welcome tour" among them, which is why the tour opened
+	// on every launch. Write it out here.
+	delete wxConfigBase::Set(nullptr);
 	std::fflush(nullptr);
 	std::_Exit(rc);
 #endif
