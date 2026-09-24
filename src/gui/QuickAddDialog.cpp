@@ -85,7 +85,10 @@ public:
 		SetScrollRate(0, 1);
 		Bind(wxEVT_PAINT, &GateResultList::OnPaint, this);
 		Bind(wxEVT_MOTION, &GateResultList::OnMotion, this);
-		Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) { hover = -1; Refresh(); });
+		Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) {
+			hover = -1; Refresh();
+			if (onSelectionChanged) onSelectionChanged();
+		});
 		Bind(wxEVT_LEFT_DOWN, &GateResultList::OnDown, this);
 		Bind(wxEVT_LEFT_DCLICK, [this](wxMouseEvent& e) {
 			const int i = RowAt(e.GetPosition());
@@ -108,8 +111,15 @@ public:
 		here = target = 0;
 		Scroll(0, 0);
 		Refresh();
+		if (onSelectionChanged) onSelectionChanged();
 	}
 	int Count() const { return (int)rows.size(); }
+	// The row the big picture beside the list shows: the one under the mouse
+	// while you point, otherwise the highlighted one.
+	const Row* ShownRow() const {
+		const int i = (hover >= 0 && hover < (int)rows.size()) ? hover : selection;
+		return (i >= 0 && i < (int)rows.size()) ? &rows[i] : nullptr;
+	}
 	int Selection() const { return selection; }
 	std::string SelectedGate() const {
 		return (selection >= 0 && selection < (int)rows.size()) ? rows[selection].gateName : std::string();
@@ -119,10 +129,12 @@ public:
 		selection = std::max(0, std::min((int)rows.size() - 1, i));
 		ScrollIntoView();
 		Refresh();
+		if (onSelectionChanged) onSelectionChanged();
 	}
 	void Move(int delta) { Select(selection + delta); }
 
 	std::function<void()> onActivate;
+	std::function<void()> onSelectionChanged;   // also fires as the mouse moves over rows
 
 private:
 	int MaxScroll() const { return std::max(0, (int)rows.size() * ROW_H - GetClientSize().y); }
@@ -149,7 +161,10 @@ private:
 	}
 	void OnMotion(wxMouseEvent& e) {
 		const int h = RowAt(e.GetPosition());
-		if (h != hover) { hover = h; Refresh(); }
+		if (h != hover) {
+			hover = h; Refresh();
+			if (onSelectionChanged) onSelectionChanged();
+		}
 	}
 	void OnDown(wxMouseEvent& e) {
 		const int i = RowAt(e.GetPosition());
@@ -199,7 +214,7 @@ private:
 			gc->SetPen(wxPen(withAlpha(ink, 0.10), 1));
 			gc->DrawRoundedRectangle(tx - 0.5, ty - 0.5, THUMB + 1, THUMB + 1, 9);
 			const double scale = GetContentScaleFactor();
-			const wxBitmap thumb = owner->previewFor(row.gateName, (int)std::lround(THUMB * scale));
+			const wxBitmap thumb = owner->previewFor(row.gateName, THUMB, scale);
 			if (thumb.IsOk()) gc->DrawBitmap(thumb, tx, ty, THUMB, THUMB);
 
 			const double textX = tx + THUMB + 16;
@@ -217,8 +232,64 @@ private:
 	double here = 0, target = 0;
 };
 
+// The gate you are about to pick, drawn big beside the list with its name.
+// The list's pictures are small enough to scan; this one is big enough to
+// learn from -- to see a NAND's bubble or count a gate's inputs.
+class GatePreviewPane : public wxPanel {
+public:
+	GatePreviewPane(wxWindow* parent, QuickAddDialog* owner) : wxPanel(parent), owner(owner) {
+		SetBackgroundStyle(wxBG_STYLE_PAINT);
+		SetMinSize(wxSize(PANE_W, -1));
+		Bind(wxEVT_PAINT, &GatePreviewPane::OnPaint, this);
+	}
+	void Show(const GateResultList::Row* row) {
+		if (row) { gate = row->gateName; caption = row->caption; detail = row->detail; }
+		else { gate.clear(); caption.clear(); detail.clear(); }
+		Refresh();
+	}
+
+private:
+	static const int PANE_W = 250, PIC = 210;
+
+	void OnPaint(wxPaintEvent&) {
+		wxAutoBufferedPaintDC dc(this);
+		dc.SetBackground(wxBrush(GetParent()->GetBackgroundColour()));
+		dc.Clear();
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
+		if (!gc || gate.empty()) return;
+		const wxColour ink = inkColour();
+		const double x = (GetClientSize().x - PIC) / 2.0, y = 8;
+		gc->SetBrush(wxBrush(paperColour()));
+		gc->SetPen(wxPen(withAlpha(ink, 0.12), 1));
+		gc->DrawRoundedRectangle(x - 0.5, y - 0.5, PIC + 1, PIC + 1, 14);
+		const double scale = GetContentScaleFactor();
+		const wxBitmap pic = owner->previewFor(gate, PIC, scale);
+		if (pic.IsOk()) gc->DrawBitmap(pic, x, y, PIC, PIC);
+
+		double ty = y + PIC + 14;
+		gc->SetFont(wxFont(wxFontInfo(15).Bold()), ink);
+		for (const wxString& line : ui::wrap(gc.get(), caption, PIC)) {
+			double w, h;
+			gc->GetTextExtent(line, &w, &h);
+			gc->DrawText(line, (GetClientSize().x - w) / 2.0, ty);
+			ty += h + 2;
+		}
+		gc->SetFont(wxFont(wxFontInfo(10.5)), dimColour());
+		for (const wxString& line : ui::wrap(gc.get(), detail, PIC)) {
+			double w, h;
+			gc->GetTextExtent(line, &w, &h);
+			gc->DrawText(line, (GetClientSize().x - w) / 2.0, ty + 4);
+			ty += h + 2;
+		}
+	}
+
+	QuickAddDialog* owner;
+	std::string gate;
+	wxString caption, detail;
+};
+
 QuickAddDialog::QuickAddDialog(wxWindow* parent)
-	: wxDialog(parent, wxID_ANY, "Add a Gate", wxDefaultPosition, wxSize(560, 640),
+	: wxDialog(parent, wxID_ANY, "Add a Gate", wxDefaultPosition, wxSize(820, 640),
 		wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
 
 	SetBackgroundColour(paperColour());
@@ -253,7 +324,12 @@ QuickAddDialog::QuickAddDialog(wxWindow* parent)
 	topSizer->Add(searchField, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);
 
 	resultList = new GateResultList(this, this);
-	topSizer->Add(resultList, 1, wxALL | wxEXPAND, 14);
+	GatePreviewPane* pane = new GatePreviewPane(this, this);
+	wxBoxSizer* body = new wxBoxSizer(wxHORIZONTAL);
+	body->Add(resultList, 1, wxEXPAND);
+	body->Add(pane, 0, wxEXPAND | wxLEFT, 12);
+	topSizer->Add(body, 1, wxALL | wxEXPAND, 14);
+	resultList->onSelectionChanged = [this, pane]() { pane->Show(resultList->ShownRow()); };
 
 	SetSizer(topSizer);
 
@@ -282,14 +358,18 @@ QuickAddDialog::QuickAddDialog(wxWindow* parent)
 	searchField->SetFocus();
 }
 
-wxBitmap QuickAddDialog::previewFor(const string& gateName, int size) {
-	auto it = previewCache.find(gateName);
+wxBitmap QuickAddDialog::previewFor(const string& gateName, int points, double scale) {
+	// Keyed by size too: the list and the big picture beside it want the
+	// same gate at two sizes.
+	const string key = gateName + "@" + std::to_string(points) + "x" + std::to_string(scale);
+	auto it = previewCache.find(key);
 	if (it == previewCache.end())
-		it = previewCache.emplace(gateName, renderGatePreview(gateName, size, size)).first;
+		it = previewCache.emplace(key, renderGatePreview(gateName, points, scale)).first;
 	return it->second;
 }
 
-wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, int height) {
+wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int points, double dpi) {
+	const int width = (int)std::lround(points * dpi), height = width;
 	string libName = gateLibrary().gateNameToLibrary[gateName];
 	if (libName.empty()) return blankPreview(width, height);
 
@@ -369,10 +449,11 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 	// edges), then downscale with a high-quality filter -- crisp AND smooth.
 	const int SS = 3;
 	const int W = width * SS, H = height * SS;
-	// Margin and stroke in proportion to the size asked for: the same picture
-	// at 66px or at 132px on a 2x screen.
-	const int margin = std::max(6, width / 8) * SS;
-	const double stroke = std::max(2.0, width / 30.0) * SS;
+	// Sized in points, then made pixels for this screen: lines a little
+	// heavier on a bigger picture but never thick, and a margin to match.
+	const double strokePt = std::max(2.0, std::min(3.2, points / 30.0));
+	const double stroke = strokePt * dpi * SS;
+	const int margin = (int)std::lround(std::max(6, points / 8) * dpi * SS);
 	const int drawW = W - 2 * margin;
 	const int drawH = H - 2 * margin;
 
@@ -395,8 +476,9 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 		}
 		gc->StrokePath(path);
 
-		// Each bubble at least a readable size, hollow, sitting on the body.
-		const double minR = width * 0.085 * SS;
+		// Each bubble at least a readable size, hollow, sitting on the body:
+		// three line-widths across, however big the picture is.
+		const double minR = 3.0 * stroke;
 		gc->SetBrush(wxBrush(paperColour()));
 		for (const Bubble& b : bubbles) {
 			const double r = std::max((double)b.r * scale, minR);

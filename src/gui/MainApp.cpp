@@ -896,6 +896,16 @@ bool MainApp::OnInit()
                                   pad + (i % cols) * (cell + pad), pad + (i / cols) * (cell + pad));
             }
             ok &= sheet.SaveFile(renderOutput + "/gate-previews.png", wxBITMAP_TYPE_PNG);
+            // And at the size of the big picture beside the list.
+            wxBitmap big(2 * 210 + 30, 230, 24);
+            {
+                wxMemoryDC dc(big);
+                dc.SetBackground(*wxWHITE_BRUSH);
+                dc.Clear();
+                dc.DrawBitmap(picker.previewFor("AA_AND2", 210), 10, 10);
+                dc.DrawBitmap(picker.previewFor("BA_NAND2", 210), 230, 10);
+            }
+            ok &= big.SaveFile(renderOutput + "/gate-previews-big.png", wxBITMAP_TYPE_PNG);
         }
         fflush(nullptr);
         std::_Exit(ok ? 0 : 1);

@@ -22,14 +22,15 @@ public:
 
 	string getSelectedGate() const { return selectedGate; }
 
-	// The gate's drawing at this size, rendered once and kept.
-	wxBitmap previewFor(const string& gateName, int size);
+	// The gate's drawing, `points` square on a screen of `scale` pixels per
+	// point, rendered once and kept.
+	wxBitmap previewFor(const string& gateName, int points, double scale = 1.0);
 
 private:
 	void updateList(const string& query);
 	void confirm();
 	int fuzzyScore(const string& query, const string& target);
-	wxBitmap renderGatePreview(const string& gateName, int width, int height);
+	wxBitmap renderGatePreview(const string& gateName, int points, double scale);
 
 	ui::SearchBox* searchField;
 	GateResultList* resultList;
