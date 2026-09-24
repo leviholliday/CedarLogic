@@ -2141,8 +2141,14 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 		case WXK_RETURN: case WXK_NUMPAD_ENTER: finishTidy(true); return;
 		case WXK_ESCAPE: finishTidy(false); return;
 		case WXK_TAB: { const int other = 1 - tidy.mode; finishTidy(false); startTidy(other); return; }
-		case WXK_SHIFT: case WXK_CONTROL: case WXK_ALT: case WXK_RAW_CONTROL: event.Skip(); return;
-		default: finishTidy(true); break;   // anything else keeps it, then carries on
+		default: {
+			// A modifier on its own doesn't count. (Not case labels: off the Mac,
+			// WXK_RAW_CONTROL is WXK_CONTROL, and a switch can't list it twice.)
+			const int k = event.GetKeyCode();
+			if (k == WXK_SHIFT || k == WXK_CONTROL || k == WXK_ALT || k == WXK_RAW_CONTROL) { event.Skip(); return; }
+			finishTidy(true);   // anything else keeps it, then carries on
+			break;
+		}
 		}
 	}
 	if (renderMode().simView) {
