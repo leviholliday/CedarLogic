@@ -1437,6 +1437,8 @@ void MainFrame::ApplyTheme() {
 	// Windows draws the caption itself; without this it stays white over a
 	// dark app. Dialogs opened later pick it up in MainApp::FilterEvent.
 	WinSetDarkTitlebars(dark);
+	WinSetAppDarkMode(dark);          // right-click and dropdown menus
+	WinThemeControls(this, dark);     // scrollbars and the palette's dropdown
 #endif
 
 	// Repaint every live view: all canvas tabs (only one is visible, but a
@@ -2058,13 +2060,21 @@ void MainFrame::animateSidePanel(bool show) {
 
 	panelAnimShowing = show;
 	panelAnimT = show ? 0.0 : 1.0;
+	panelAnimFrom = panelAnimT;
+	panelAnimStart = wxGetLocalTimeMillis();
 	sidePanelTimer->Start(16);
 	stepSidePanelAnim();
 }
 
 void MainFrame::stepSidePanelAnim() {
-	const double step = 1.0 / 12.0;              // ~190ms at 16ms a frame
-	panelAnimT += panelAnimShowing ? step : -step;
+	// Progress by the clock, not by ticks. It used to add a twelfth per timer
+	// tick, and Windows delivers timer ticks only when nothing else is queued:
+	// with the simulation running and the canvas repainting, ticks came late
+	// and the slide crawled -- sometimes for seconds. Late ticks now just mean
+	// fewer frames of the same ~190ms slide.
+	const double kSlideMs = 190.0;
+	const double elapsed = (wxGetLocalTimeMillis() - panelAnimStart).ToDouble() / kSlideMs;
+	panelAnimT = panelAnimShowing ? panelAnimFrom + elapsed : panelAnimFrom - elapsed;
 	const bool done = panelAnimShowing ? (panelAnimT >= 1.0) : (panelAnimT <= 0.0);
 	panelAnimT = std::max(0.0, std::min(1.0, panelAnimT));
 
@@ -2095,6 +2105,11 @@ void MainFrame::stepSidePanelAnim() {
 	applyTitlebarForTopRow();
 	Layout();   // hand the geometry back to the sizer
 	RenumberTabs();   // the strip may have just inherited the title bar row
+	// One clean repaint of everything the slide moved. Mid-slide frames only
+	// repaint what each resize invalidated, and on Windows a strip the canvas
+	// had just grown into could stay unpainted: the white lines along the edge.
+	Refresh();
+	Update();
 }
 
 void MainFrame::ApplySidePanelWidth() {

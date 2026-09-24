@@ -12,11 +12,19 @@
 #include <wx/colour.h>
 #include <wx/gdicmn.h>
 #include <wx/string.h>
+#include <memory>
 #include <vector>
 
+class wxDC;
 class wxGraphicsContext;
 
 namespace ui {
+
+// A graphics context for painting one of our own windows into `dc`. On Windows
+// it is Direct2D where available: hardware-drawn, with proper antialiasing,
+// where the default GDI+ is software-only and drew these windows slowly
+// enough to flicker. Elsewhere it is the platform default.
+std::unique_ptr<wxGraphicsContext> graphics(wxDC& dc);
 
 bool isDark();
 wxColour withAlpha(const wxColour& c, double alpha);

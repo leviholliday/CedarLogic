@@ -549,8 +549,13 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
 // open; this catches each new one as it first appears.
 int MainApp::FilterEvent(wxEvent& event) {
 	if (event.GetEventType() == wxEVT_SHOW && static_cast<wxShowEvent&>(event).IsShown()) {
-		if (wxTopLevelWindow* tlw = wxDynamicCast(event.GetEventObject(), wxTopLevelWindow))
+		if (wxTopLevelWindow* tlw = wxDynamicCast(event.GetEventObject(), wxTopLevelWindow)) {
 			WinSetDarkTitlebar(tlw, renderMode().darkMode);
+			// Our own-drawn windows (they set their own background) get dark
+			// scrollbars too. Stock ones like Preferences stay native until
+			// they are redrawn: dark controls on a light page look broken.
+			if (tlw->UseBgCol()) WinThemeControls(tlw, renderMode().darkMode);
+		}
 	}
 	return Event_Skip;
 }

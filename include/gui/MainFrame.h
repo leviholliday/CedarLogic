@@ -508,6 +508,8 @@ private:
 	int barTravel = 0;              // how far the toolbar has to rise to leave
 	double panelAnimT = 1.0;        // 0 fully out, 1 fully in
 	bool panelAnimShowing = true;
+	double panelAnimFrom = 1.0;     // panelAnimT when this slide started
+	wxLongLong panelAnimStart = 0;  // wall-clock start, ms
 	// Swap between our tab strip and the system one, keeping every tab.
 	void rebuildTabUi();
 	void forgetCanvas(GUICanvas* canvas);

@@ -3,6 +3,7 @@
    ModernToolbar: the custom-drawn toolbar and its styles.
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "ModernToolbar.h"
 #include "MainFrame.h"
 #include "MainApp.h"
@@ -396,7 +397,7 @@ void ModernToolbar::OnSize(wxSizeEvent& e) {
 
 void ModernToolbar::OnPaint(wxPaintEvent&) {
 	wxAutoBufferedPaintDC dc(this);
-	std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+	std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 	if (!gc) return;
 	const wxSize sz = GetClientSize();
 	paint(gc.get(), appConfig().appSettings.toolbarStyle, items, state, sz.x, sz.y, hover, pressed,
@@ -536,7 +537,7 @@ wxBitmap ModernToolbar::RenderPreview(int style, bool dark, int width, double sc
 	wxBitmap bmp((int)std::lround(width * scale), (int)std::lround(H * scale), 24);
 	{
 		wxMemoryDC dc(bmp);
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 		if (gc) {
 			gc->Scale(scale, scale);
 			paint(gc.get(), style, items, s, width, H, -1, -1, scale);

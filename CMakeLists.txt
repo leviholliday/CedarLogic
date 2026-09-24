@@ -411,7 +411,7 @@ if(WIN32)
     # pragma, so the Windows build cannot turn on a missing-library surprise.
     target_link_libraries(CedarLogic PRIVATE wininet)
     # WinAppearance.cpp sets the dark title bar through DWM.
-    target_link_libraries(CedarLogic PRIVATE dwmapi)
+    target_link_libraries(CedarLogic PRIVATE dwmapi uxtheme)
     # Stage the DLL beside the exe. It was only handled by install(), so a plain
     # build produced a binary that could not start ("error while loading shared
     # libraries") until the DLL was copied by hand.

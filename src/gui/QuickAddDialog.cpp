@@ -158,7 +158,7 @@ private:
 		wxAutoBufferedPaintDC dc(this);
 		dc.SetBackground(wxBrush(paperColour()));
 		dc.Clear();
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 		if (!gc) return;
 		gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
 

@@ -3,6 +3,7 @@
    TabStrip: the row of tabs above the canvas, drawn by hand.
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "TabStrip.h"
 #include "MainFrame.h"
 #include "MainApp.h"
@@ -63,7 +64,7 @@ public:
 			const wxSize sz = GetClientSize();
 			dc.SetBackground(wxBrush(isDark() ? wxColour(18, 20, 24) : *wxWHITE));
 			dc.Clear();
-			std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+			std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 			if (!gc) return;
 			const wxColour accent = accentColour();
 			gc->SetBrush(wxBrush(withAlpha(accent, 0.30)));
@@ -173,7 +174,7 @@ void TabStrip::OnPaint(wxPaintEvent&) {
 	wxAutoBufferedPaintDC dc(this);
 	dc.SetBackground(wxBrush(barColour()));
 	dc.Clear();
-	std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+	std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 	if (!gc) return;
 	gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
 

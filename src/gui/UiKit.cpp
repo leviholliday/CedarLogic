@@ -16,6 +16,17 @@
 
 namespace ui {
 
+std::unique_ptr<wxGraphicsContext> graphics(wxDC& dc) {
+#if defined(__WXMSW__) && wxUSE_GRAPHICS_DIRECT2D
+	// Null where Direct2D is missing or will not take this kind of DC; the
+	// default renderer below still draws it, just more slowly.
+	if (wxGraphicsRenderer* d2d = wxGraphicsRenderer::GetDirect2DRenderer())
+		if (wxGraphicsContext* gc = d2d->CreateContextFromUnknownDC(dc))
+			return std::unique_ptr<wxGraphicsContext>(gc);
+#endif
+	return std::unique_ptr<wxGraphicsContext>(wxGraphicsContext::CreateFromUnknownDC(dc));
+}
+
 bool isDark() { return renderMode().darkMode; }
 
 wxColour withAlpha(const wxColour& c, double a) {

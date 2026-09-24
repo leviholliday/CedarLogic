@@ -18,6 +18,9 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "UiKit.h"
+#ifdef __WXMSW__
+#include "WinAppearance.h"
+#endif
 
 #include <wx/dialog.h>
 #include <wx/frame.h>
@@ -218,7 +221,10 @@ public:
 
 		CentreOnParent();
 		started = Clock::now();
-		beat.Bind(wxEVT_TIMER, [this](wxTimerEvent&) { face->Refresh(); });
+		// Repaint only while something moves. Redrawing the whole window every
+		// 30ms whether or not anything changed is what made it flicker on
+		// Windows.
+		beat.Bind(wxEVT_TIMER, [this](wxTimerEvent&) { if (animating()) face->Refresh(); });
 		beat.Start(30);
 
 		Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent&) { finish(Ending::Close); });
@@ -245,6 +251,16 @@ private:
 	}
 
 	double slide() const { return easeOut(secondsSince(pageChanged) / 0.32); }
+
+	// The hello and ready pages carry a live circuit; the keys page glows a
+	// card for a moment after its key is pressed; any page slides in.
+	bool animating() const {
+		if (slide() < 1.0 || page == P_HELLO || page == P_READY) return true;
+		if (page == P_KEYS)
+			for (size_t i = 0; i < sizeof(pressedAt) / sizeof(pressedAt[0]); i++)
+				if (pressedAt[i] && secondsSince(pressedWhen[i]) < 1.0) return true;
+		return false;
+	}
 
 	void layoutPage() {
 		if (page != P_NAME) { name->Hide(); return; }
@@ -300,7 +316,7 @@ private:
 	void paintAll(wxDC& dc, bool live) {
 		dc.SetBackground(wxBrush(ui::paper()));
 		dc.Clear();
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 		if (!gc) return;
 		gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
 
@@ -997,7 +1013,11 @@ class TutorialCoach : public wxFrame {
 public:
 	TutorialCoach(MainFrame* frame, GUICanvas* canvas, bool offscreen = false)
 		: wxFrame(frame, wxID_ANY, "Guided Tour", wxDefaultPosition, wxSize(CARD_W, 200),
-		          wxFRAME_NO_TASKBAR | wxFRAME_FLOAT_ON_PARENT | wxBORDER_NONE | wxFRAME_SHAPED),
+		          wxFRAME_NO_TASKBAR | wxFRAME_FLOAT_ON_PARENT | wxBORDER_NONE
+#ifndef __WXMSW__
+		          | wxFRAME_SHAPED
+#endif
+		          ),
 		  steps(buildTour()) {
 		state.frame = frame;
 		state.canvas = canvas;
@@ -1010,6 +1030,12 @@ public:
 		Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) { hot = 0; Refresh(); });
 		ticker.Bind(wxEVT_TIMER, [this](wxTimerEvent&) { tick(); });
 		if (offscreen) return;   // snapshot() only
+#ifdef __WXMSW__
+		// Rounded by Windows 11 itself, antialiased and with its shadow. A
+		// window shape (what macOS uses) is a hard-edged region on Windows,
+		// and re-setting it as the card changed size flashed the card.
+		WinRoundCorners(this);
+#endif
 		ticker.Start(40);
 		enterStep();
 		fitToContent();
@@ -1051,6 +1077,11 @@ private:
 	bool celebrating = false;
 	Clock::time_point celebrateStart, stepStart = Clock::now();
 	int height = 200;
+	// The only part of the card that moves on its own: the waiting pulse, or
+	// the check mark and its line while a step completes. Ticks repaint just
+	// this, not the whole card -- which on Windows redrew every 40ms and
+	// flickered.
+	wxRect animRect;
 
 	// Where the card sits, relative to the main window's top-right corner. It
 	// can be dragged anywhere and stays put relative to the window after.
@@ -1078,7 +1109,7 @@ private:
 			Finish();
 			return;
 		}
-		Refresh();   // the waiting pulse and the check animate
+		if (!animRect.IsEmpty()) RefreshRect(animRect, false);   // pulse / check
 		if (++tickCount % 6 != 0 && !celebrating) return;
 
 		if (celebrating) {
@@ -1196,7 +1227,10 @@ private:
 		y += 16;
 
 		// Status: waiting, or done.
+		animRect = wxRect();
 		if (s.done) {
+			animRect = celebrating ? wxRect(pad - 4, (int)y - 4, CARD_W - 2 * pad + 8, 30)
+			                       : wxRect(pad - 4, (int)y - 4, 26, 26);
 			if (celebrating) {
 				const double p = easeOut(secondsSince(celebrateStart) / 0.35);
 				if (paint) {
@@ -1247,7 +1281,7 @@ private:
 	void fitToContent() {
 		wxBitmap scratch(1, 1);
 		wxMemoryDC mdc(scratch);
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(mdc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(mdc));
 		if (!gc) return;
 		// Measure with the celebration line in place, so the card doesn't
 		// change height as a step completes.
@@ -1255,10 +1289,13 @@ private:
 		if (h != height || GetClientSize().y != h) {
 			height = h;
 			SetSize(CARD_W, height);
+#ifndef __WXMSW__
 			wxGraphicsPath shape = wxGraphicsRenderer::GetDefaultRenderer()->CreatePath();
 			shape.AddRoundedRectangle(0, 0, CARD_W, height, 16);
 			SetShape(shape);
+#endif
 			reposition();
+			Refresh();
 		}
 	}
 
@@ -1270,13 +1307,15 @@ private:
 	void paintCard(wxDC& dc) {
 		dc.SetBackground(wxBrush(ui::paper()));
 		dc.Clear();
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 		if (!gc) return;
 		gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
+#ifndef __WXMSW__
 		const wxSize sz(CARD_W, height);
 		gc->SetBrush(wxBrush(ui::paper()));
 		gc->SetPen(wxPen(ui::withAlpha(ui::ink(), 0.18), 1));
 		gc->DrawRoundedRectangle(0.5, 0.5, sz.x - 1, sz.y - 1, 16);
+#endif   // Windows draws the card's edge and corners (WinRoundCorners)
 		gc->SetPen(wxPen(ui::withAlpha(ui::accent(), 0.9), 3));
 		gc->StrokeLine(16, 1.5, 64, 1.5);   // a small accent tab at the top
 		layout(gc.get(), true);

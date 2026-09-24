@@ -267,7 +267,7 @@ public:
 	void paint(wxDC& dc) {
 		dc.SetBackground(wxBrush(ui::paper()));
 		dc.Clear();
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 		if (!gc) return;
 		gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
 		if (dirty) layout(gc.get());
