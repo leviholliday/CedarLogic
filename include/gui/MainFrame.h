@@ -109,6 +109,7 @@ public:
 	// what was picked. It is the app's only menu on Windows, where the bar is
 	// hidden; `quick` puts the everyday commands above the submenus.
 	void ShowAppMenu(wxWindow* from, const wxPoint& at, bool quick = false);
+	bool usesNativeToolbar() const;
 #ifdef __WXMSW__
 	// The status bar is ours to paint on Windows; see StatusStrip.h.
 	wxStatusBar* OnCreateStatusBar(int number, long style, wxWindowID id,

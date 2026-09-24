@@ -28,6 +28,10 @@ const char* styleName(int style);
 const char* styleBlurb(int style);
 const char* groupName(int group);
 
+// One of res/icons in colour `c`, `px` points square at `scale`, cached --
+// the toolbar's own icons, for other bars that should match it.
+wxBitmap ToolIcon(const char* name, const wxColour& c, int px, double scale);
+
 // Everything the bar shows that comes from the app. Filled live by
 // ModernToolbar, or with sample values for a Preferences preview.
 struct State {
@@ -67,7 +71,12 @@ public:
 
 	// Same height as a macOS unified title bar + toolbar; the bar sits in the
 	// title bar row, with the window buttons centered on its left.
+	// Windows has a title bar of its own above it, so less height there.
+#ifdef __WXMSW__
+	static int BarHeight() { return 46; }
+#else
 	static int BarHeight() { return 52; }
+#endif
 	// The bar drawn off-screen with sample content, for Preferences.
 	static wxBitmap RenderPreview(int style, bool dark, int width, double scale);
 	// The bar's colour as it is drawn right now, and the colour of its text,

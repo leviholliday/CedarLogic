@@ -22,8 +22,113 @@
 #include <fstream>
 #include <iomanip>
 
+#include "UiKit.h"
+#include "ModernToolbar.h"
+#include <wx/dcbuffer.h>
+#include <wx/graphics.h>
+#include <memory>
 #ifdef __APPLE__
 #include "NativeIcons.h"
+#endif
+
+#ifdef __WXMSW__
+namespace {
+
+// The oscilloscope's header on Windows: its name and its tools as quiet icon
+// buttons, drawn like the main toolbar. The stock toolbar there was a strip
+// of tiny grey Windows 95 buttons. Each button sends the same wxEVT_TOOL the
+// stock one did, so the handlers are unchanged.
+class OscopeBar : public wxPanel {
+public:
+	struct Tool { int id; const char* icon; const char* tip; bool toggle; wxRect rect; };
+
+	OscopeBar(wxWindow* parent, wxToolBar* stock) : wxPanel(parent), stock(stock) {
+		SetBackgroundStyle(wxBG_STYLE_PAINT);
+		SetMinSize(wxSize(-1, FromDIP(38)));
+		tools = {
+			{ ID_OSCOPE_PAUSE,  "pause", "Pause (click again to reset)", true, wxRect() },
+			{ ID_OSCOPE_ADD,    "plus",  "Add a signal", false, wxRect() },
+			{ ID_OSCOPE_REMOVE, "minus", "Remove the selected signal", false, wxRect() },
+			{ ID_OSCOPE_EXPORT, "copy",  "Copy the trace as a picture", false, wxRect() },
+			{ ID_OSCOPE_LOAD,   "open",  "Load a saved layout", false, wxRect() },
+			{ ID_OSCOPE_SAVE,   "save",  "Save this layout", false, wxRect() },
+		};
+		Bind(wxEVT_PAINT, &OscopeBar::OnPaint, this);
+		Bind(wxEVT_SIZE, [this](wxSizeEvent& e) { Refresh(); e.Skip(); });
+		Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
+			const int h = at(e.GetPosition());
+			if (h != hot) {
+				hot = h;
+				SetCursor(h >= 0 ? wxCursor(wxCURSOR_HAND) : wxNullCursor);
+				UnsetToolTip();
+				if (h >= 0) SetToolTip(tools[h].tip);
+				Refresh();
+			}
+		});
+		Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) { hot = -1; Refresh(); });
+		Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
+			const int i = at(e.GetPosition());
+			if (i < 0) return;
+			const Tool& t = tools[i];
+			// The stock bar still holds the pause state the handlers read.
+			if (t.toggle) this->stock->ToggleTool(t.id, !this->stock->GetToolState(t.id));
+			wxCommandEvent ev(wxEVT_TOOL, t.id);
+			ev.SetEventObject(this);
+			GetParent()->ProcessWindowEvent(ev);
+			Refresh();
+		});
+	}
+
+private:
+	int at(const wxPoint& p) const {
+		for (size_t i = 0; i < tools.size(); i++) if (tools[i].rect.Contains(p)) return (int)i;
+		return -1;
+	}
+
+	void OnPaint(wxPaintEvent&) {
+		wxAutoBufferedPaintDC dc(this);
+		dc.SetBackground(wxBrush(GetParent()->GetBackgroundColour()));
+		dc.Clear();
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
+		if (!gc) return;
+		const wxSize sz = GetClientSize();
+		const wxColour in = ui::ink();
+		gc->SetPen(wxPen(ui::withAlpha(in, 0.08), 1));
+		gc->StrokeLine(0, 0.5, sz.x, 0.5);
+		gc->SetFont(wxFont(wxFontInfo(10).Bold()), in);
+		double tw, th;
+		gc->GetTextExtent("Oscilloscope", &tw, &th);
+		gc->DrawText("Oscilloscope", FromDIP(12), (sz.y - th) / 2);
+
+		const int b = FromDIP(30);
+		int x = FromDIP(12) + (int)tw + FromDIP(16);
+		const double scale = GetContentScaleFactor();
+		for (size_t i = 0; i < tools.size(); i++) {
+			Tool& t = tools[i];
+			if (i == 1 || i == 3) x += FromDIP(10);   // pause | signals | files
+			t.rect = wxRect(x, (sz.y - b) / 2, b, b);
+			x += b + FromDIP(2);
+			const bool on = t.toggle && stock->GetToolState(t.id);
+			if ((int)i == hot || on) {
+				gc->SetPen(*wxTRANSPARENT_PEN);
+				gc->SetBrush(wxBrush(on ? ui::withAlpha(ui::accent(), 0.22) : ui::withAlpha(in, 0.08)));
+				gc->DrawRoundedRectangle(t.rect.x, t.rect.y, t.rect.width, t.rect.height, FromDIP(6));
+			}
+			const char* name = (t.toggle && on) ? "play" : t.icon;
+			const wxBitmap ic = cl::tb::ToolIcon(name, on ? ui::accent() : ui::withAlpha(in, 0.85), 16, scale);
+			if (ic.IsOk()) {
+				const double s = FromDIP(16);
+				gc->DrawBitmap(ic, t.rect.x + (b - s) / 2, t.rect.y + (b - s) / 2, s, s);
+			}
+		}
+	}
+
+	wxToolBar* stock;
+	std::vector<Tool> tools;
+	int hot = -1;
+};
+
+}  // namespace
 #endif
 
 OscopeFrame::OscopeFrame(wxWindow *parent, GUICircuit* gCircuit)
@@ -60,15 +165,30 @@ OscopeFrame::OscopeFrame(wxWindow *parent, GUICircuit* gCircuit)
 	NativeIcon_ConfigureEmbeddedToggleTool(oscopeToolBar, ID_OSCOPE_PAUSE,
 		"pause.fill", "arrow.trianglehead.counterclockwise", 15);
 #endif
+#ifdef __WXMSW__
+	oscopeToolBar->Hide();   // kept for its pause state; OscopeBar is the face
+	oSizer->Add(new OscopeBar(this, oscopeToolBar), wxSizerFlags(0).Expand());
+#else
 	oSizer->Add(oscopeToolBar, wxSizerFlags(0).Expand());
+#endif
 
 	// Create horizontal sizer for signal list + canvas
 	wxBoxSizer* contentSizer = new wxBoxSizer( wxHORIZONTAL );
 
+#ifdef __WXMSW__
+	signalList = new wxListBox(this, wxID_ANY, wxDefaultPosition, wxSize(140, -1), 0, nullptr,
+	                           wxLB_SINGLE | wxBORDER_NONE);
+#else
 	signalList = new wxListBox(this, wxID_ANY, wxDefaultPosition, wxSize(120, -1), 0, nullptr, wxLB_SINGLE);
+#endif
 	contentSizer->Add(signalList, wxSizerFlags(0).Expand().Border(wxALL, 2));
 
+#ifdef __WXMSW__
+	// No sunken 3-D edge: that border is the most Windows 95 thing there is.
+	theCanvas = new OscopeCanvas(this, gCircuit, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS | wxBORDER_NONE);
+#else
 	theCanvas = new OscopeCanvas(this, gCircuit, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS|wxSUNKEN_BORDER);
+#endif
 	contentSizer->Add(theCanvas, wxSizerFlags(1).Expand());
 
 	oSizer->Add(contentSizer, wxSizerFlags(1).Expand());
@@ -81,6 +201,17 @@ OscopeFrame::OscopeFrame(wxWindow *parent, GUICircuit* gCircuit)
 	Bind(wxEVT_TOOL, &OscopeFrame::OnExport, this, ID_OSCOPE_EXPORT);
 	Bind(wxEVT_TOOL, &OscopeFrame::OnLoad, this, ID_OSCOPE_LOAD);
 	Bind(wxEVT_TOOL, &OscopeFrame::OnSave, this, ID_OSCOPE_SAVE);
+	ApplyTheme();
+}
+
+void OscopeFrame::ApplyTheme() {
+#ifdef __WXMSW__
+	const bool dark = ui::isDark();
+	SetBackgroundColour(dark ? wxColour(22, 24, 28) : wxColour(233, 234, 238));
+	signalList->SetBackgroundColour(dark ? wxColour(28, 31, 37) : wxColour(250, 250, 252));
+	signalList->SetForegroundColour(ui::ink());
+	Refresh();
+#endif
 }
 
 void OscopeFrame::UpdateData(void){

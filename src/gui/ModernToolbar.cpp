@@ -41,7 +41,7 @@ const char* styleBlurb(int s) {
 #ifdef __WXOSX__
 		case Classic:   return "The standard macOS toolbar.";
 #else
-		case Classic:   return "The standard Windows toolbar.";
+		case Classic:   return "Every tool in view, in rounded groups, the traditional way.";
 #endif
 		case Segmented: return "Tools in tidy rounded groups, everything in reach.";
 		case Minimal:   return "Just the essentials and your file name; the rest is behind the \u2022\u2022\u2022 menu.";
@@ -330,6 +330,10 @@ void paint(wxGraphicsContext* gc, int style, const std::vector<Item>& items, con
 		if (name == nullptr) continue;
 		drawIcon(gc, icon(name, fg, 17, scale), r);
 	}
+}
+
+wxBitmap ToolIcon(const char* name, const wxColour& c, int px, double scale) {
+	return icon(name, c, px, scale);
 }
 
 }  // namespace tb

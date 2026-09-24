@@ -80,6 +80,7 @@
 #include "WinSparkleUpdater.h"
 #endif
 #include "UiKit.h"
+#include <functional>
 #include "StatusStrip.h"
 #ifdef __WXMSW__
 #include <wx/msw/wrapwin.h>   // DeferWindowPos, for the focus-mode slide
@@ -1533,7 +1534,7 @@ void MainFrame::ApplyTheme() {
 	// the oscilloscope, which sits outside the sceneKey cache these share.
 	for (GUICanvas* c : canvases) if (c) c->Refresh();
 	if (miniMap) miniMap->Refresh();
-	if (oscopePanel) oscopePanel->RefreshCanvas();
+	if (oscopePanel) { oscopePanel->ApplyTheme(); oscopePanel->RefreshCanvas(); }
 	if (gatePalette) gatePalette->ApplyTheme();
 	if (sidePanelSash) {
 		sidePanelSash->SetBackgroundColour(dark ? wxColour(40, 43, 50) : wxColour(218, 220, 224));
@@ -2120,8 +2121,7 @@ void MainFrame::animateSidePanel(bool show) {
 	// Focus mode takes the toolbar as well as the side panel: the canvas gets
 	// the window. The custom bar rises out of the top; the native one has no
 	// geometry of ours to animate, so it simply goes.
-	const bool customBar = modernBar != nullptr &&
-	                       appConfig().appSettings.toolbarStyle != cl::tb::Classic;
+	const bool customBar = modernBar != nullptr && !usesNativeToolbar();
 
 	if (show) {
 		// Put them back first, so a real layout can say where they belong,
@@ -2275,9 +2275,20 @@ wxString MainFrame::GetDocumentSubtitle() {
 	return page + wxString::FromUTF8(" \u00B7 ") + (fileIsDirty() ? "Edited" : "Saved");
 }
 
+// Whether the Classic style is the system's own toolbar. On Windows it is not:
+// the stock toolbar there is Windows 95 -- sunken boxes, a grey slider, icons
+// that never follow the theme -- so ours draws the Classic look instead, the
+// same one Settings shows as its picture.
+bool MainFrame::usesNativeToolbar() const {
+#ifdef __WXMSW__
+	return false;
+#else
+	return appConfig().appSettings.toolbarStyle == cl::tb::Classic;
+#endif
+}
+
 void MainFrame::ApplyToolbarStyle() {
-	const int style = appConfig().appSettings.toolbarStyle;
-	const bool classic = style == cl::tb::Classic;
+	const bool classic = usesNativeToolbar();
 	// Focus mode keeps both bars away. Sim view restyles the bar through here,
 	// and showing it unconditionally brought it back mid-focus mode.
 	wxMenuBar* mb = GetMenuBar();
@@ -3010,6 +3021,38 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	// Create unified export dialog with horizontal layout
 	wxDialog exportDialog(this, wxID_ANY, "Export as Image", wxDefaultPosition, wxDefaultSize);
 	wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
+#ifdef __WXMSW__
+	exportDialog.SetBackgroundColour(ui::pageColour());
+#endif
+
+	// A titled group of options: a rounded card on Windows, where the etched
+	// group box is one of the oldest-looking things the system has, and the
+	// platform's framed box elsewhere. Controls go in `parent`, rows in `sizer`,
+	// and the group itself into the dialog with add().
+	struct Group {
+		wxWindow* parent; wxSizer* sizer; wxWindow* card;
+		void add(wxSizer* into, int proportion, int flags, int border) const {
+			if (card) into->Add(card, proportion, flags, border);
+			else into->Add(sizer, proportion, flags, border);
+		}
+	};
+	auto group = [&](const wxString& title) -> Group {
+#ifdef __WXMSW__
+		ui::Card* card = new ui::Card(&exportDialog);
+		wxBoxSizer* inner = new wxBoxSizer(wxVERTICAL);
+		wxStaticText* head = new wxStaticText(card, wxID_ANY, title);
+		head->SetFont(wxFont(wxFontInfo(10).Bold()));
+		head->SetForegroundColour(ui::ink());
+		inner->Add(head, 0, wxLEFT | wxRIGHT | wxTOP, FromDIP(12));
+		wxBoxSizer* rows = new wxBoxSizer(wxVERTICAL);
+		inner->Add(rows, 1, wxALL | wxEXPAND, FromDIP(7));
+		card->SetSizer(inner);
+		return { card, rows, card };
+#else
+		wxStaticBoxSizer* box = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, title);
+		return { box->GetStaticBox(), box, nullptr };
+#endif
+	};
 
 	// Preview panel — sized dynamically on first render
 	const int previewMaxW = 560, previewMaxH = 220;
@@ -3024,56 +3067,58 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 
 	// Name and result: printed in a strip under the circuit.
 	mainSizer->AddSpacer(10);
-	wxStaticBoxSizer* infoBox = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, "Name and result");
-	wxCheckBox* infoCheck = new wxCheckBox(&exportDialog, wxID_ANY, "Add my name and whether the circuit works");
+	const Group infoGroup = group("Name and result");
+	wxSizer* infoBox = infoGroup.sizer;
+	wxCheckBox* infoCheck = new wxCheckBox(infoGroup.parent, wxID_ANY, "Add my name and whether the circuit works");
 	infoCheck->SetValue(appConfig().appSettings.exportInfoEnabled);
 	infoBox->Add(infoCheck, 0, wxALL, 5);
 	wxBoxSizer* nameRow = new wxBoxSizer(wxHORIZONTAL);
-	nameRow->Add(new wxStaticText(&exportDialog, wxID_ANY, "Your name:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
-	wxTextCtrl* nameCtrl = new wxTextCtrl(&exportDialog, wxID_ANY,
+	nameRow->Add(new wxStaticText(infoGroup.parent, wxID_ANY, "Your name:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+	wxTextCtrl* nameCtrl = new wxTextCtrl(infoGroup.parent, wxID_ANY,
 		wxString::FromUTF8(appConfig().appSettings.studentName.c_str()));
 	nameCtrl->SetHint("First and last name");
 	nameRow->Add(nameCtrl, 1, wxALIGN_CENTER_VERTICAL);
 	infoBox->Add(nameRow, 0, wxALL | wxEXPAND, 5);
-	wxRadioButton* worksRadio = new wxRadioButton(&exportDialog, wxID_ANY, "My circuit works properly",
+	wxRadioButton* worksRadio = new wxRadioButton(infoGroup.parent, wxID_ANY, "My circuit works properly",
 		wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-	wxRadioButton* brokenRadio = new wxRadioButton(&exportDialog, wxID_ANY, "My circuit does not work because...");
+	wxRadioButton* brokenRadio = new wxRadioButton(infoGroup.parent, wxID_ANY, "My circuit does not work because...");
 	worksRadio->SetValue(lastExportInfo.works);
 	brokenRadio->SetValue(!lastExportInfo.works);
 	infoBox->Add(worksRadio, 0, wxLEFT | wxRIGHT | wxTOP, 5);
 	infoBox->Add(brokenRadio, 0, wxLEFT | wxRIGHT | wxTOP, 5);
-	wxTextCtrl* whyCtrl = new wxTextCtrl(&exportDialog, wxID_ANY, lastExportInfo.why,
+	wxTextCtrl* whyCtrl = new wxTextCtrl(infoGroup.parent, wxID_ANY, lastExportInfo.why,
 		wxDefaultPosition, wxSize(-1, 56), wxTE_MULTILINE);
 	whyCtrl->SetHint("Explain what doesn't work (required)");
 	infoBox->Add(whyCtrl, 0, wxALL | wxEXPAND, 5);
-	mainSizer->Add(infoBox, 0, wxLEFT | wxRIGHT | wxEXPAND, 15);
+	infoGroup.add(mainSizer, 0, wxLEFT | wxRIGHT | wxEXPAND, 15);
 
 	// Horizontal sizer for output style and resolution side-by-side
 	mainSizer->AddSpacer(10);
 	wxBoxSizer* optionsSizer = new wxBoxSizer(wxHORIZONTAL);
 
 	// Output style box with better spacing
-	wxStaticBoxSizer* styleBox = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, "Output style");
-	wxRadioButton* colorRadio = new wxRadioButton(&exportDialog, wxID_ANY, "Color", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-	wxRadioButton* bwRadio = new wxRadioButton(&exportDialog, wxID_ANY, "Black && White");
+	const Group style = group("Output style");
+	wxRadioButton* colorRadio = new wxRadioButton(style.parent, wxID_ANY, "Color", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
+	wxRadioButton* bwRadio = new wxRadioButton(style.parent, wxID_ANY, "Black && White");
 	colorRadio->SetValue(true);
-	styleBox->Add(colorRadio, 0, wxALL, 5);
-	styleBox->Add(bwRadio, 0, wxALL, 5);
-	optionsSizer->Add(styleBox, 1, wxRIGHT | wxEXPAND, 10);
+	style.sizer->Add(colorRadio, 0, wxALL, 5);
+	style.sizer->Add(bwRadio, 0, wxALL, 5);
+	style.add(optionsSizer, 1, wxRIGHT | wxEXPAND, 10);
 
 	// Resolution box with better spacing
-	wxStaticBoxSizer* resBox = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, "Resolution");
+	const Group res = group("Resolution");
+	wxSizer* resBox = res.sizer;
 	// The multiplication sign goes in as a \u escape in a wide literal. Written
 	// as raw UTF-8 bytes in a narrow literal it gets re-read one byte at a time
 	// under the Windows ANSI code page and reaches the dialog as mojibake.
-	wxRadioButton* screen2x = new wxRadioButton(&exportDialog, wxID_ANY, L"Screen (2\u00d7)", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-	wxRadioButton* print4x = new wxRadioButton(&exportDialog, wxID_ANY, L"Print (4\u00d7)");
-	wxRadioButton* high6x = new wxRadioButton(&exportDialog, wxID_ANY, L"High Quality (6\u00d7)");
+	wxRadioButton* screen2x = new wxRadioButton(res.parent, wxID_ANY, L"Screen (2\u00d7)", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
+	wxRadioButton* print4x = new wxRadioButton(res.parent, wxID_ANY, L"Print (4\u00d7)");
+	wxRadioButton* high6x = new wxRadioButton(res.parent, wxID_ANY, L"High Quality (6\u00d7)");
 	print4x->SetValue(true); // Default to Print
 	resBox->Add(screen2x, 0, wxALL, 5);
 	resBox->Add(print4x, 0, wxALL, 5);
 	resBox->Add(high6x, 0, wxALL, 5);
-	optionsSizer->Add(resBox, 1, wxLEFT | wxEXPAND, 10);
+	res.add(optionsSizer, 1, wxLEFT | wxEXPAND, 10);
 
 	mainSizer->Add(optionsSizer, 0, wxLEFT | wxRIGHT | wxEXPAND, 15);
 
@@ -3168,6 +3213,23 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	nameCtrl->Bind(wxEVT_TEXT, onInfoChange);
 	whyCtrl->Bind(wxEVT_TEXT, onInfoChange);
 	updateInfoState();
+
+#ifdef __WXMSW__
+	// Text in the theme's ink (wx then draws the checkboxes and radio buttons
+	// itself, which is the only way their labels follow dark mode), and the
+	// buttons and fields in the system's dark theme when the app is dark.
+	std::function<void(wxWindow*)> ink = [&](wxWindow* w) {
+		for (wxWindowList::compatibility_iterator n = w->GetChildren().GetFirst(); n; n = n->GetNext()) {
+			wxWindow* c = n->GetData();
+			if (wxDynamicCast(c, wxStaticText) || wxDynamicCast(c, wxCheckBox) || wxDynamicCast(c, wxRadioButton))
+				c->SetForegroundColour(ui::ink());
+			ink(c);
+		}
+	};
+	ink(&exportDialog);
+	WinThemeControls(&exportDialog, renderMode().darkMode);
+	WinSetDarkTitlebar(&exportDialog, renderMode().darkMode);
+#endif
 
 	// Generate initial preview and size dialog to fit
 	updatePreview();
