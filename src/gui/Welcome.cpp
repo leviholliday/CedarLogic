@@ -383,6 +383,22 @@ private:
 			{ "It shows its work", "Live wires, a truth table on one key, and an oscilloscope." },
 			{ "It stays out of the way", "Nearly everything has a key. You won't need the menus." },
 		};
+		// The cards are sized for the Mac's system font. Wider faces (DejaVu
+		// Sans on many Linux desktops) ran the longest title past the edge, so
+		// step the size down until every title fits -- one size for all three,
+		// so the cards still match.
+		const double titleRoom = 210 - 32 - 12;
+		double titlePt = 13;
+		for (; titlePt > 9; titlePt -= 0.5) {
+			gc->SetFont(wxFont(wxFontInfo(titlePt).Bold()), ui::ink());
+			double widest = 0;
+			for (const Point& p : points) {
+				double tw, th;
+				gc->GetTextExtent(p.title, &tw, &th);
+				widest = std::max(widest, tw);
+			}
+			if (widest <= titleRoom) break;
+		}
 		for (int i = 0; i < 3; i++) {
 			const double x = 60 + i * 226, y = 372;
 			gc->SetPen(*wxTRANSPARENT_PEN);
@@ -390,7 +406,7 @@ private:
 			gc->DrawRoundedRectangle(x, y, 210, 96, 14);
 			gc->SetBrush(wxBrush(accent));
 			gc->DrawEllipse(x + 16, y + 20, 8, 8);
-			gc->SetFont(wxFont(wxFontInfo(13).Bold()), ui::ink());
+			gc->SetFont(wxFont(wxFontInfo(titlePt).Bold()), ui::ink());
 			gc->DrawText(points[i].title, x + 32, y + 14);
 			gc->SetFont(wxFont(wxFontInfo(11.5)), ui::dim());
 			double yy = y + 40;
