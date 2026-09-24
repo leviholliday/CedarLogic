@@ -11,7 +11,6 @@
 #ifndef GUICANVAS_H_
 #define GUICANVAS_H_
 
-#include "command/cmdTidy.h"
 #include <set>
 #include <map>
 #include <memory>
@@ -32,6 +31,7 @@ class cmdCreateGate;
 #include "GUICircuit.h"
 #include "klsCollisionChecker.h"
 #include "wireSegment.h"
+#include "command/cmdTidy.h"
 
 class klsCommand;
 class guiWire;
