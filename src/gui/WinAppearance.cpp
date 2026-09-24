@@ -16,6 +16,8 @@
 #include <wx/slider.h>
 #include <wx/dcmemory.h>
 #include <wx/bitmap.h>
+#include <wx/image.h>
+#include <wx/crt.h>
 #include <wx/msw/wrapwin.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
@@ -138,14 +140,40 @@ bool WinCaptureWindow(wxWindow* window, const wxString& pngPath) {
 	if (hwnd == nullptr || !::GetWindowRect(hwnd, &rc)) return false;
 	const int w = rc.right - rc.left, h = rc.bottom - rc.top;
 	if (w <= 0 || h <= 0) return false;
-	wxBitmap bmp(w, h, 24);
-	{
-		wxMemoryDC dc(bmp);
-		// PW_RENDERFULLCONTENT (2): what DWM composes, so the OpenGL canvas and
-		// the title bar come along, not just what GDI drew.
-		if (!::PrintWindow(hwnd, static_cast<HDC>(dc.GetHDC()), 2)) return false;
+
+	// Nothing but black is a capture that did not happen.
+	auto blank = [](const wxBitmap& bmp) {
+		const wxImage img = bmp.ConvertToImage();
+		const unsigned char* px = img.GetData();
+		for (size_t i = 0, n = (size_t)img.GetWidth() * img.GetHeight() * 3; i < n; i += 97)
+			if (px[i] > 8) return false;
+		return true;
+	};
+	// Three ways, best first. PW_RENDERFULLCONTENT (2) is what DWM composed,
+	// OpenGL canvas included -- but a machine that composes nothing, like a CI
+	// runner, hands back black. Plain PrintWindow has every window paint
+	// itself into our bitmap. Last, whatever is on the screen there.
+	for (int method = 0; method < 3; method++) {
+		wxBitmap bmp(w, h, 24);
+		bool ok;
+		{
+			wxMemoryDC dc(bmp);
+			HDC to = static_cast<HDC>(dc.GetHDC());
+			if (method == 0) ok = ::PrintWindow(hwnd, to, 2) != 0;
+			else if (method == 1) ok = ::PrintWindow(hwnd, to, 0) != 0;
+			else {
+				HDC screen = ::GetDC(nullptr);
+				ok = ::BitBlt(to, 0, 0, w, h, screen, rc.left, rc.top, SRCCOPY) != 0;
+				::ReleaseDC(nullptr, screen);
+			}
+		}
+		if (ok && !blank(bmp)) {
+			wxPrintf("captured %s (method %d)\n", pngPath, method);
+			return bmp.SaveFile(pngPath, wxBITMAP_TYPE_PNG);
+		}
 	}
-	return bmp.SaveFile(pngPath, wxBITMAP_TYPE_PNG);
+	wxPrintf("capture of %s came back blank every way\n", pngPath);
+	return false;
 }
 
 void WinRoundCorners(wxTopLevelWindow* window) {
