@@ -87,12 +87,12 @@ std::vector<Shortcut> allShortcuts() {
 
 	section = "Building";
 	add({ "A" }, "Add a gate by name", keyCommand('A'));
-	add({ "Shift", "1-0" }, "Jump to a gate category (0 is the tenth)");
+	add({ "Shift", "1-0" }, "Jump to a gate category (0 = 10th)");
 	add({ "R" }, "Rotate the selection", keyCommand('R'));
-	add({ "Up", "Down", "Left", "Right" }, "Nudge the selection (Shift: 5 squares)");
+	add({ "Up", "Down", "Left", "Right" }, "Nudge (Shift: 5 squares)");
 	add({ "click a pin, then another" }, "Connect them");
 	add({ "C", "while dragging" }, "Connect to pins nearby");
-	add({ "S" }, "Straighten the selected wires (Cmd+A first for all)");
+	add({ "S" }, "Straighten selected wires");
 	add({ "right-click a wire" }, "Straighten or delete it");
 	add({ "double-click a gate" }, "Change its settings");
 
