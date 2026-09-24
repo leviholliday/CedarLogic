@@ -8,6 +8,7 @@
    PaletteCanvas: Renders the gateImage objects in a palette
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "PaletteCanvas.h"
 #include "GateLibrary.h"
 #include "logic_values.h"
@@ -39,7 +40,7 @@ static int columnsForWidth( int width ) {
 
 
 PaletteCanvas::PaletteCanvas( wxWindow *parent, wxWindowID id, wxString &libName, const wxPoint &pos, const wxSize &size )
-	: wxScrolledWindow( parent, id, pos, size, wxSUNKEN_BORDER|wxVSCROLL|wxFULL_REPAINT_ON_RESIZE ) {
+	: wxScrolledWindow( parent, id, pos, size, CL_CANVAS_EDGE|wxVSCROLL|wxFULL_REPAINT_ON_RESIZE ) {
     SetBackgroundColour(renderMode().darkMode ? wxColour(19, 21, 25) : *wxWHITE);
     SetCursor(wxCursor(wxCURSOR_ARROW));
 

@@ -18,6 +18,14 @@
 class wxDC;
 class wxGraphicsContext;
 
+// The edge round a canvas or panel: none on Windows, where the sunken 3-D
+// border draws a white frame in dark mode and looks like 1995 in light.
+#ifdef __WXMSW__
+#define CL_CANVAS_EDGE wxBORDER_NONE
+#else
+#define CL_CANVAS_EDGE wxSUNKEN_BORDER
+#endif
+
 namespace ui {
 
 // A graphics context for painting one of our own windows into `dc`. On Windows

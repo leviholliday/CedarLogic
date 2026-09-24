@@ -8,6 +8,7 @@
    GUICanvas: Contains rendering and input functions for a page
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "GUICanvas.h"
 #include "PaletteDrag.h"
 #include "RenderMode.h"
@@ -66,7 +67,7 @@ private:
 // GUICanvas constructor - defaults grid size to 1 unit square
 GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
     const wxPoint& pos, const wxSize& size, long style, const wxString& name)
-    : klsGLCanvas(parent, name, id, pos, size, style|wxSUNKEN_BORDER ) {
+    : klsGLCanvas(parent, name, id, pos, size, style|CL_CANVAS_EDGE ) {
 
 	this->gCircuit = gCircuit;
 	isWithinPaste = false;

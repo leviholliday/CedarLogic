@@ -343,7 +343,7 @@ int MessageDialog::layout(bool paint, wxGraphicsContext* gc) {
 	// The buttons, right-aligned along the foot.
 	const int bh = FromDIP(34);
 	double x = W - pad;
-	gc->SetFont(wxFont(wxFontInfo(10.5)), in);
+	gc->SetFont(wxFont(wxFontInfo(13).Bold()), in);   // drawButton's font, at its widest
 	for (int i = (int)buttons.size() - 1; i >= 0; i--) {
 		double lw, lh;
 		gc->GetTextExtent(buttons[i].label, &lw, &lh);

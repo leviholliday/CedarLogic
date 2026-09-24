@@ -589,6 +589,19 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	                                   wxDefaultSize, wxSP_LIVE_UPDATE | wxSP_3DSASH);
 	canvasSplit->SetMinimumPaneSize(220);
 	canvasSplit->SetSashGravity(0.5);
+#ifdef __WXMSW__
+	// The divider between the canvas and the oscilloscope (or the split's two
+	// sides) in the window's own colour. Windows draws it as a raised grey
+	// bar, a white stripe across a dark window.
+	for (wxSplitterWindow* sp : { rightSplitter, canvasSplit }) {
+		sp->Bind(wxEVT_PAINT, [sp](wxPaintEvent&) {
+			wxPaintDC dc(sp);
+			dc.SetBackground(wxBrush(renderMode().darkMode ? wxColour(22, 24, 28) : wxColour(233, 234, 238)));
+			dc.Clear();
+		});
+		sp->Bind(wxEVT_ERASE_BACKGROUND, [](wxEraseEvent&) {});
+	}
+#endif
 	usingClassicTabs = appConfig().appSettings.classicTabs;
 	buildPane(0);
 	canvasBook = panes[0].book;

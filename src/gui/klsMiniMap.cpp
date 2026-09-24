@@ -8,6 +8,7 @@
    klsMiniMap: Renders as a bitmap the whole circuit
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "klsMiniMap.h"
 #include "Settings.h"
 #include "RenderMode.h"
@@ -35,7 +36,7 @@ END_EVENT_TABLE()
 klsMiniMap::klsMiniMap(wxWindow *parent, wxWindowID id,
         const wxPoint& pos, const wxSize& size,
         long style, const wxString& name)
-		: wxGLCanvas(parent, glCanvasAttributes(), id, pos, size, style|wxSUNKEN_BORDER, name) {
+		: wxGLCanvas(parent, glCanvasAttributes(), id, pos, size, style|CL_CANVAS_EDGE, name) {
 	currentCanvas = NULL;
 }
 

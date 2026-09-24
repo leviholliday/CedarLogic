@@ -254,11 +254,19 @@ void TabStrip::OnPaint(wxPaintEvent&) {
 		gc->DrawEllipse(dx - 3, dy - 3, 6, 6);
 
 		// The label, clipped to leave room for the close button.
+		// Points are bigger on Windows (96 per inch, not 72), so the same
+		// label there needs a smaller number to be the same size.
+#ifdef __WXMSW__
+		gc->SetFont(wxFont(wxFontInfo(9).Bold(active)), active ? ink : withAlpha(ink, 0.7));
+#else
 		gc->SetFont(wxFont(wxFontInfo(11.5).Bold(active)), active ? ink : withAlpha(ink, 0.7));
+#endif
 		wxString label = t.label;
 		double tw, th;
 		gc->GetTextExtent(label, &tw, &th);
-		const double room = r.width - 26 - 24;
+		// Only the tab showing a close button gives up room for one.
+		const bool closing = tabs.size() > 1 && (active || hot);
+		const double room = r.width - 24 - (closing ? 26 : 8);
 		while (tw > room && label.length() > 1) {
 			label = label.Left(label.length() - 2) + wxString::FromUTF8("\u2026");
 			gc->GetTextExtent(label, &tw, &th);

@@ -216,10 +216,14 @@ std::vector<Item> layout(int style, int hidden, const State& s, int W, int H) {
 	add(Item::More, 0, "more", "Menu", 14, r, MORE_W, false);
 	r -= GROUP_GAP;
 #endif
-	if (shown(GTab))   { add(Item::Button, Tool_NewTab, "newtab", "New tab (" + mod + "T)", 13, r, BTN_W, false); r -= GROUP_GAP; }
-	if (shown(GTheme)) { add(Item::Toggle, Tool_ThemeToggle, nullptr, "Dark mode", 12, r, BTN_W, false); r -= GROUP_GAP; }
-	if (shown(GLock))  { add(Item::Toggle, Tool_Lock, nullptr, "Lock the circuit so it can't be edited", 11, r, BTN_W, false); r -= GROUP_GAP; }
-	if (shown(GRun))   { add(Item::Run, Tool_SimView, "run", "Simulation View (" + mod + "R)", 10, r, RUN_W, false); r -= GROUP_GAP; }
+	// Right-hand groups step aside, rather than draw over the left-hand ones,
+	// when the window is too narrow for both. What they did is still in the
+	// menu and on its shortcut.
+	auto fits = [&](int w) { return r - w - GROUP_GAP > x; };
+	if (shown(GTab) && fits(BTN_W))   { add(Item::Button, Tool_NewTab, "newtab", "New tab (" + mod + "T)", 13, r, BTN_W, false); r -= GROUP_GAP; }
+	if (shown(GTheme) && fits(BTN_W)) { add(Item::Toggle, Tool_ThemeToggle, nullptr, "Dark mode", 12, r, BTN_W, false); r -= GROUP_GAP; }
+	if (shown(GLock) && fits(BTN_W))  { add(Item::Toggle, Tool_Lock, nullptr, "Lock the circuit so it can't be edited", 11, r, BTN_W, false); r -= GROUP_GAP; }
+	if (shown(GRun) && fits(RUN_W))   { add(Item::Run, Tool_SimView, "run", "Simulation View (" + mod + "R)", 10, r, RUN_W, false); r -= GROUP_GAP; }
 	if (shown(GSim) && r - SPEED_W - 2 * BTN_W > x) {
 		add(Item::Speed, 0, "speed", "Simulation speed", 6, r, SPEED_W, false);
 		add(Item::Button, Tool_Step, "step", "Step once", 6, r, BTN_W, false);

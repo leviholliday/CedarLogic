@@ -8,6 +8,7 @@
    OscopeCanvas: renders the waveform for the oscope
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "OscopeCanvas.h"
 #include "MainApp.h"
 #include "GUICanvas.h"
@@ -39,7 +40,7 @@ END_EVENT_TABLE()
 
 OscopeCanvas::OscopeCanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 	const wxPoint& pos, const wxSize& size, long style, const wxString& name)
-	: wxGLCanvas( parent, glCanvasAttributes(), id, pos, size, style|wxFULL_REPAINT_ON_RESIZE|wxSUNKEN_BORDER ) {
+	: wxGLCanvas( parent, glCanvasAttributes(), id, pos, size, style|wxFULL_REPAINT_ON_RESIZE|CL_CANVAS_EDGE ) {
 
 	this->gCircuit = gCircuit;
 	parentFrame = (OscopeFrame*) parent;

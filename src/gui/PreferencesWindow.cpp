@@ -152,11 +152,24 @@ protected:
 		grid->Add(t, 0, wxBOTTOM, 6);
 	}
 
+	// Where to create the next row's control. On Windows that is the card it
+	// will sit on: a number box there is two windows under the hood, and
+	// moving it onto a card after the fact left it invisible.
+	wxWindow* host() {
+#ifdef __WXMSW__
+		if (!pendingCard) pendingCard = new ui::Card(this);
+		return pendingCard;
+#else
+		return this;
+#endif
+	}
+
 #ifdef __WXMSW__
 	// One setting: what it is and what it does on the left, its control on
 	// the right, on a rounded card.
 	void addCard(const wxString& title, const wxString& help, wxWindow* ctrl) {
-		ui::Card* card = new ui::Card(this);
+		ui::Card* card = pendingCard ? pendingCard : new ui::Card(this);
+		pendingCard = nullptr;
 		wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
 		wxBoxSizer* texts = new wxBoxSizer(wxVERTICAL);
 		wxStaticText* t = new wxStaticText(card, wxID_ANY, title);
@@ -171,7 +184,7 @@ protected:
 			texts->Add(h, 0, wxTOP, FromDIP(2));
 		}
 		row->Add(texts, 1, wxALIGN_CENTER_VERTICAL | wxALL, FromDIP(14));
-		ctrl->Reparent(card);
+		if (ctrl->GetParent() != card) ctrl->Reparent(card);
 		onCard(ctrl);
 		row->Add(ctrl, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, FromDIP(14));
 		card->SetSizer(row);
@@ -189,6 +202,7 @@ protected:
 	}
 
 	wxBoxSizer* column = nullptr;
+	ui::Card* pendingCard = nullptr;
 #endif
 	wxFlexGridSizer* grid = nullptr;
 };
@@ -201,11 +215,15 @@ public:
 		auto& s = appConfig().appSettings;
 
 		int fps = (s.refreshRate > 0) ? 1000 / s.refreshRate : 60;
-		refresh = new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(80, -1),
+		refresh = new wxSpinCtrl(host(), wxID_ANY, "", wxDefaultPosition, wxSize(80, -1),
 			wxSP_ARROW_KEYS, 10, 1000, fps);
 		refresh->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent&) { changed(); });
 		addRow("Refresh rate:", withUnit(refresh, "frames per second"),
+#ifdef __WXMSW__
+			"Frames per second: how often the canvas redraws while the simulation runs.");
+#else
 			"How often the canvas redraws while the simulation runs.");
+#endif
 
 		name = new wxTextCtrl(this, wxID_ANY, wxString::FromUTF8(s.studentName.c_str()),
 			wxDefaultPosition, wxSize(220, -1));
@@ -231,6 +249,11 @@ protected:
 
 private:
 	wxWindow* withUnit(wxWindow* ctrl, const wxString& unit) {
+#ifdef __WXMSW__
+		// The card says what the number is; see the help line.
+		(void)unit;
+		return ctrl;
+#endif
 		// Put the control and its unit label side by side in one grid cell.
 		wxPanel* box = new wxPanel(this);
 		ctrl->Reparent(box);
@@ -305,7 +328,7 @@ public:
 		wireConn = addCheck("", "Show dots at wire bends", s.wireConnVisible,
 			"Marks every corner of a wire. Junctions where wires join always get a dot.");
 
-		wireRadius = new wxSpinCtrlDouble(this, wxID_ANY, "", wxDefaultPosition, wxSize(80, -1),
+		wireRadius = new wxSpinCtrlDouble(host(), wxID_ANY, "", wxDefaultPosition, wxSize(80, -1),
 			wxSP_ARROW_KEYS, 0.05, 1.0, s.wireConnRadius, 0.01);
 		wireRadius->Bind(wxEVT_SPINCTRLDOUBLE, [this](wxSpinDoubleEvent&) { changed(); });
 		addRow("Wire dot size:", wireRadius, "Radius of the dots on wires, in grid units.");
