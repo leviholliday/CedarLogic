@@ -2,8 +2,10 @@
 #include "Settings.h"
 #include "gl_defs.h"
 
+#ifndef CL_NO_WX
 #include "MainApp.h"
 DECLARE_APP(MainApp)
+#endif
 
 GLPoint2f GLPoint2f::operator+(const GLPoint2f &other) const {
 	return GLPoint2f(x + other.x, y + other.y);

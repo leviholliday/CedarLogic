@@ -26,8 +26,10 @@
 #include "XMLParser.h"
 #include "gl_defs.h"
 
+#ifndef CL_NO_WX
 class MainApp;
 DECLARE_APP(MainApp)
+#endif
 
 // Returns distance from p1 to p2
 float lineMagnitude(GLPoint2f p1, GLPoint2f p2) {

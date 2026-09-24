@@ -10,18 +10,24 @@
 
 #include "LibraryParse.h"
 #include "GateLibrary.h"
+#ifndef CL_NO_WX
 #include "wx/msgdlg.h"
 #include "MainApp.h"
+#endif
 
 // Included for sin and cos in <circle> tags:
 #include <cmath>
 
+#ifndef CL_NO_WX
 DECLARE_APP(MainApp)
+#endif
 
 LibraryParse::LibraryParse(const string& xml) {
 	if (xml.empty()) {
+#ifndef CL_NO_WX
 		wxMessageBox("The gate library is missing from this build.",
 		             "Error - Missing Gate Library", wxOK | wxICON_ERROR, NULL);
+#endif
 		return;
 	}
 	// The parser lives only as long as this call: once the gates are read it has

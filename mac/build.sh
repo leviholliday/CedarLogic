@@ -1,0 +1,59 @@
+#!/bin/bash
+# Build the native Mac app (no Xcode needed -- the Command Line Tools will do).
+#
+#   mac/build.sh            build mac/build/CedarLogic Native.app
+#   CLEAN=1 mac/build.sh    rebuild everything (after changing a header)
+#   OPEN=1 mac/build.sh     then launch it
+#
+# The engine (C++ shared with the wx app, built with CL_NO_WX) becomes
+# libCedarCore.a; the Swift app links it through CedarCore.h.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+OUT=mac/build
+OBJ=$OUT/obj
+APP="$OUT/CedarLogic Native.app"
+ARCH=$(uname -m)
+MIN=14.0
+[ "${CLEAN:-0}" = 1 ] && rm -rf "$OUT"
+mkdir -p "$OBJ"
+
+CORE=(
+	src/gui/guiGate.cpp src/gui/guiWire.cpp src/gui/wireSegment.cpp
+	src/gui/klsCollisionChecker.cpp src/gui/GateLibrary.cpp src/gui/LibraryParse.cpp
+	src/gui/XMLParser.cpp src/gui/GUICircuitModel.cpp src/gui/RenderMode.cpp
+	src/gui/PaletteDrag.cpp src/gui/Settings.cpp src/gui/gl_defs.cpp
+	src/gui/route/TrunkRouter.cpp src/gui/route/GridRouter.cpp src/gui/route/Layout.cpp
+	format/circuit_file_io.cpp format/legacy_cdl.cpp format/migrate.cpp format/numeric.cpp format/sexpr.cpp
+	mac/CedarCore/CGScene.cpp mac/CedarCore/Document.cpp mac/CedarCore/Glue.cpp
+)
+CXXFLAGS=(-std=c++17 -O2 -arch "$ARCH" -mmacosx-version-min=$MIN -DCL_NO_WX
+	-Wno-deprecated-declarations -Wno-inconsistent-missing-override -Iinclude/gui -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include)
+
+echo "Engine..."
+OBJS=()
+for f in "${CORE[@]}"; do
+	o="$OBJ/$(echo "$f" | tr / _).o"
+	OBJS+=("$o")
+	if [ ! -f "$o" ] || [ "$f" -nt "$o" ]; then
+		clang++ "${CXXFLAGS[@]}" -c "$f" -o "$o"
+	fi
+done
+rm -f "$OUT/libCedarCore.a"
+ar rcs "$OUT/libCedarCore.a" "${OBJS[@]}"
+
+echo "App..."
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+swiftc -O -parse-as-library -target "$ARCH-apple-macos$MIN" \
+	-import-objc-header mac/CedarCore/include/CedarCore.h \
+	mac/App/*.swift "$OUT/libCedarCore.a" -lc++ \
+	-framework CoreText -framework OpenGL \
+	-o "$APP/Contents/MacOS/CedarLogic"
+
+cp mac/App/Info.plist "$APP/Contents/Info.plist"
+cp res/cl_gatedefs.xml "$APP/Contents/Resources/"
+cp res/macos/CedarLogic.icns "$APP/Contents/Resources/"
+codesign --force --sign - "$APP" >/dev/null 2>&1
+echo "Built $APP"
+[ "${OPEN:-0}" = 1 ] && open "$APP"
+exit 0

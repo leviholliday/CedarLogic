@@ -5,13 +5,16 @@
 *****************************************************************************/
 
 #include "Settings.h"
+#ifndef CL_NO_WX
 #include <wx/event.h>
+#endif
 
 Settings& appConfig() {
 	static Settings instance;
 	return instance;
 }
 
+#ifndef CL_NO_WX
 int themeModsFromKeyEvent(const wxKeyEvent& e) {
 	int mods = 0;
 	if (e.ShiftDown()) mods |= ThemeShortcutMod::Shift;
@@ -27,6 +30,7 @@ int themeModsFromKeyEvent(const wxKeyEvent& e) {
 #endif
 	return mods;
 }
+#endif
 
 std::string formatThemeShortcut(int modifiers, int keyCode) {
 	std::string s;

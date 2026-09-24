@@ -49,3 +49,4 @@ crashfile.temp
 # open, never to the repository -- and opening a test fixture deletes any that
 # was committed.
 ~*.lck
+mac/build/

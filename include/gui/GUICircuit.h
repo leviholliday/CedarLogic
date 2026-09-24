@@ -19,7 +19,9 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#ifndef CL_NO_WX
 #include "wx/docview.h"
+#endif
 #include "gl_wrapper.h"
 #include "klsMessage.h"
 #include "logic_values.h"
@@ -36,9 +38,15 @@ class OscopeFrame;
 class guiGate;
 class guiWire;
 
+#ifndef CL_NO_WX
 class GUICircuit : public wxDocument
 {
     DECLARE_DYNAMIC_CLASS(GUICircuit)
+#else
+// Without wxWidgets (the native Mac front end) the circuit is a plain model.
+class GUICircuit
+{
+#endif
 	
 public:
     GUICircuit();
@@ -148,6 +156,10 @@ public:
 	int lastLogicTime = 0;
 	
 private:
+	// A TO gate came or went, so the oscope's list of signals is stale. The
+	// wx app refreshes the oscope; each front end supplies its own.
+	void gateTypesChanged();
+
 	GateMap gateList;
 	WireMap wireList;
 

@@ -13,16 +13,20 @@
 #include <iomanip>
 #include <cmath>
 #include <cstring>
+#ifndef CL_NO_WX
 #include "wx/wx.h"
 #include "MainApp.h"
-#include "klsCollisionChecker.h"
 #include "paramDialog.h"
+#endif
+#include "klsCollisionChecker.h"
 #include "guiWire.h"
 #include "render/Scene.h"
 #include "render/RenderStyle.h"
 #include "render/SkiaProbe.h"    // measuredTextWidth -- size text hit boxes to what renders
 
+#ifndef CL_NO_WX
 DECLARE_APP(MainApp)
+#endif
 
 guiGate::guiGate() : klsCollisionObject(COLL_GATE) {
 	myX = 1.0;
@@ -689,6 +693,9 @@ void guiGate::saveGateLegacy(XMLParser* xparse) {
 }
 
 void guiGate::doParamsDialog( void* gc, wxCommandProcessor* wxcmd ) {
+#ifdef CL_NO_WX
+	(void)gc; (void)wxcmd;   // the native front end has its own inspector
+#else
 	if (gateLibrary().libraries[libName][libGateName].dlgParams.size() == 0) return;
 #ifdef __WXOSX__
 	paramDialog* myDialog = new paramDialog("Parameters", gc, this, wxcmd);
@@ -700,6 +707,7 @@ void guiGate::doParamsDialog( void* gc, wxCommandProcessor* wxcmd ) {
 	paramDialog myDialog("Parameters", gc, this, wxcmd);
 	myDialog.SetFocus();
 	myDialog.ShowModal();
+#endif
 #endif
 }
 
@@ -1344,11 +1352,15 @@ guiGateRAM::~guiGateRAM(){
 
 
 void guiGateRAM::doParamsDialog( void* gc, wxCommandProcessor* wxcmd ){
+#ifdef CL_NO_WX
+	(void)gc; (void)wxcmd;
+#else
 	if( ramPopupDialog == NULL ){
 		ramPopupDialog = new RamPopupDialog( this, addressBits, (GUICircuit*)gc );
 		ramPopupDialog->updateGridDisplay();
 	}
 	ramPopupDialog->Show( true );
+#endif
 }
 
 //Saves the ram contents to the circuit file

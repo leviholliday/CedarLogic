@@ -23,14 +23,32 @@ class guiWire;
 #include <sstream>
 #include <string>
 #include <fstream>
+#ifndef CL_NO_WX
 #include "wx/glcanvas.h"
+#else
+// The native Mac front end builds the model without wxWidgets; the GL types
+// the geometry uses come from the plain OpenGL header.
+#include "gl_wrapper.h"
+#endif
 #include "logic_values.h"
 #include "XMLParser.h"
 #include "klsCollisionChecker.h"
 #include "klsMessage.h"
+#ifndef CL_NO_WX
 #include "wx/docview.h"
-
 #include "RamPopupDialog.h"
+#else
+class wxCommandProcessor;
+// No RAM editor window in the native front end yet: a stand-in the RAM gate
+// can talk to that does nothing.
+class RamPopupDialog {
+public:
+	void updateGridDisplay() {}
+	void notifyAllChanged() {}
+	void Destroy() {}
+	void Show(bool) {}
+};
+#endif
 
 using namespace std;
 
