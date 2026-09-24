@@ -9,7 +9,14 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "klsClipboard.h"
+#include "CGScene.h"
+#include "CircuitEdits.h"
+#include "render/Scene.h"
 #include "command/cmdCreateGate.h"
+#include "command/cmdDeleteWire.h"
+#include "command/cmdDisconnectWire.h"
+#include "command/cmdTidy.h"
+#include "command/cmdWireSegDrag.h"
 #include "command/cmdDeleteSelection.h"
 #include "command/cmdMoveGate.h"
 #include "command/cmdMoveSelection.h"
@@ -27,6 +34,8 @@ namespace {
 const float kGrid = 0.5f;                 // gates snap to half a grid square
 const float kHoverPoints = 5.0f;          // how near a wire counts (WIRE_HOVER_SCREEN_DELTA)
 const float kDragPoints = 6.0f;           // how far before a press is a drag (DRAG_START_SCREEN_DELTA)
+const float kPinPoints = 5.0f;            // how near a pin counts (HOTSPOT_SCREEN_DELTA)
+const float kPinBoxPoints = 3.0f;         // the pin highlight's half-size (HOTSPOT_SCREEN_RADIUS)
 
 GLPoint2f snap(GLPoint2f p) {
 	return GLPoint2f(kGrid * std::floor(p.x / kGrid + 0.5f), kGrid * std::floor(p.y / kGrid + 0.5f));
@@ -99,6 +108,50 @@ void snapshotSelection(CLDocument* doc, GUICanvas* page, std::vector<GateState>&
 
 std::string scratch;   // backs returned strings until the next call
 
+// A pin within `delta` of a point: the gate and pin name, or false.
+bool pinAt(GUICanvas* page, float x, float y, float delta, unsigned long& gate, std::string& pin) {
+	for (auto& g : *page->getGateList()) {
+		if (!g.second) continue;
+		klsBBox b = g.second->getBBox();
+		b.extendTop(delta); b.extendBottom(delta); b.extendLeft(delta); b.extendRight(delta);
+		if (!b.contains(GLPoint2f(x, y))) continue;
+		const std::string hs = g.second->checkHotspots(x, y, delta);
+		if (!hs.empty()) { gate = g.first; pin = hs; return true; }
+	}
+	return false;
+}
+
+// A pinned-down point for the wire code's segment hit tests (the wx canvas's
+// snapMouse).
+struct PointObject : klsCollisionObject {
+	explicit PointObject(GLPoint2f p) : klsCollisionObject(COLL_MOUSEBOX) {
+		klsBBox b; b.addPoint(p); setBBox(b);
+	}
+};
+
+// Any edit keeps a Tidy Up on show, as it does in the wx app.
+void settleTidy(CLDocument* doc) {
+	if (doc && doc->tidy.active) cl_edit_tidy_end(doc, true);
+}
+
+// Finish a connection at a point: to a pin there, or to a wire. Returns
+// whether one was made.
+bool finishConnection(CLDocument* doc, GUICanvas* page, float x, float y) {
+	EditGesture& g = doc->gesture;
+	klsCommand* cmd = nullptr;
+	unsigned long gate = 0;
+	std::string pin;
+	if (pinAt(page, x, y, g.hoverDelta, gate, pin) && !(gate == g.srcGate && pin == g.srcPin)) {
+		cmd = edits::gateConnection(&doc->circuit, page, g.srcGate, g.srcPin, gate, pin);
+	} else if (guiWire* w = wireAt(page, x, y, g.hoverDelta)) {
+		cmd = edits::gateWireConnection(&doc->circuit, page, g.srcGate, g.srcPin, w->getID());
+	}
+	if (cmd == nullptr) return false;
+	submit(doc, page, cmd);
+	page->collisionUpdate();
+	return true;
+}
+
 }  // namespace
 
 extern "C" {
@@ -107,11 +160,35 @@ int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifi
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return CL_PRESS_NOTHING;
 	EditGesture& g = doc->gesture;
+	// The click that ends a click-started connection: connect to what's
+	// there, or cancel on nothing.
+	if (g.mode == EditGesture::Connect && g.sticky) {
+		if (GUICanvas* p = doc->page(g.page)) finishConnection(doc, p, (float)x, (float)y);
+		g = EditGesture();
+		return CL_PRESS_PART;
+	}
+	settleTidy(doc);
 	g = EditGesture();
 	g.page = pageIndex;
 	g.start = GLPoint2f((float)x, (float)y);
 	g.dragSlop = (float)(kDragPoints * unitsPerPoint);
+	g.hoverDelta = (float)(kPinPoints * unitsPerPoint);
+	g.current = g.start;
 	const bool shift = modifiers & CL_MOD_SHIFT;
+
+	// A pin: start a wire from it.
+	{
+		unsigned long gate = 0;
+		std::string pin;
+		if (!shift && pinAt(page, (float)x, (float)y, g.hoverDelta, gate, pin)) {
+			page->unselectAllGates();
+			page->unselectAllWires();
+			g.mode = EditGesture::Connect;
+			g.srcGate = gate;
+			g.srcPin = pin;
+			return CL_PRESS_PART;
+		}
+	}
 
 	if (guiGate* gate = gateAt(page, (float)x, (float)y)) {
 		g.onGate = true;
@@ -131,12 +208,28 @@ int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifi
 		if (shift) {
 			if (wire->isSelected()) { wire->unselect(); g.toggledOff = true; }
 			else wire->select();
-		} else if (!wire->isSelected()) {
-			page->unselectAllGates();
-			page->unselectAllWires();
-			wire->select();
+			g.mode = g.toggledOff ? EditGesture::None : EditGesture::Pressed;
+			return CL_PRESS_PART;
 		}
-		g.mode = g.toggledOff ? EditGesture::None : EditGesture::Pressed;
+		// Part of a bigger selection: a drag moves all of it. Otherwise the
+		// press picks the wire, and a drag reshapes the segment under it.
+		int selected = 0;
+		for (auto& e : *page->getGateList()) if (e.second && e.second->isSelected()) selected++;
+		for (auto& e : *page->getWireList()) if (e.second && e.second->isSelected()) selected++;
+		if (wire->isSelected() && selected > 1) {
+			g.mode = EditGesture::Pressed;
+			return CL_PRESS_PART;
+		}
+		page->unselectAllGates();
+		page->unselectAllWires();
+		wire->select();
+		PointObject at(snap(g.start));
+		if (wire->startSegDrag(&at)) {
+			g.mode = EditGesture::WireSeg;
+			g.wire = wire->getID();
+		} else {
+			g.mode = EditGesture::Pressed;
+		}
 		return CL_PRESS_PART;
 	}
 	if (!shift) {
@@ -154,6 +247,18 @@ void cl_edit_drag(CLDocument* doc, double x, double y) {
 	GUICanvas* page = doc->page(g.page);
 	if (page == nullptr) return;
 	const GLPoint2f m((float)x, (float)y);
+	g.current = m;
+
+	if (g.mode == EditGesture::Connect) return;   // the overlay draws the line
+	if (g.mode == EditGesture::WireSeg) {
+		if (!g.moved && std::fabs(m.x - g.start.x) < g.dragSlop && std::fabs(m.y - g.start.y) < g.dragSlop) return;
+		if (guiWire* w = doc->circuit.getWire(g.wire)) {
+			PointObject at(snap(m));
+			w->updateSegDrag(&at);
+			g.moved = true;
+		}
+		return;
+	}
 
 	if (g.mode == EditGesture::Pressed) {
 		if (std::fabs(m.x - g.start.x) < g.dragSlop && std::fabs(m.y - g.start.y) < g.dragSlop) return;
@@ -197,6 +302,30 @@ void cl_edit_release(CLDocument* doc, double x, double y) {
 	EditGesture& g = doc->gesture;
 	GUICanvas* page = doc->page(g.page);
 	if (page != nullptr) {
+		if (g.mode == EditGesture::Connect) {
+			const bool barelyMoved = std::fabs((float)x - g.start.x) < g.dragSlop &&
+			                         std::fabs((float)y - g.start.y) < g.dragSlop;
+			if (finishConnection(doc, page, (float)x, (float)y) || !barelyMoved) { g = EditGesture(); return; }
+			// Pressed and let go on the pin: the line follows the pointer
+			// until the next click.
+			g.sticky = true;
+			g.current = GLPoint2f((float)x, (float)y);
+			return;
+		}
+		if (g.mode == EditGesture::WireSeg) {
+			if (guiWire* w = doc->circuit.getWire(g.wire)) {
+				if (g.moved) {
+					w->endSegDrag();
+					w->select();
+					submit(doc, page, new cmdWireSegDrag(&doc->circuit, page, g.wire));
+				} else {
+					w->setSegmentMap(w->getOldSegmentMap());   // a click, not a reshape
+				}
+			}
+			page->collisionUpdate();
+			g = EditGesture();
+			return;
+		}
 		if (g.mode == EditGesture::Moving) {
 			if (g.lastDelta.x != 0 || g.lastDelta.y != 0) {
 				commitMove(doc, page, g.preMove, g.preMoveWire, g.lastDelta);
@@ -218,6 +347,8 @@ void cl_edit_release(CLDocument* doc, double x, double y) {
 void cl_edit_cancel(CLDocument* doc) {
 	if (doc == nullptr) return;
 	EditGesture& g = doc->gesture;
+	if (g.mode == EditGesture::WireSeg)
+		if (guiWire* w = doc->circuit.getWire(g.wire)) w->setSegmentMap(w->getOldSegmentMap());
 	if (g.mode == EditGesture::Moving) {
 		// Put everything back where it was: gates first, then each wire's old
 		// shape, so it's trimmed to where its pins really are.
@@ -267,6 +398,7 @@ int cl_edit_selected_wire_count(const CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_delete(CLDocument* doc, int pageIndex) {
+	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
 	std::vector<unsigned long> gates, wires;
@@ -277,6 +409,7 @@ void cl_edit_delete(CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_rotate(CLDocument* doc, int pageIndex) {
+	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
 	std::vector<klsCommand*> steps;
@@ -305,6 +438,7 @@ void cl_edit_rotate(CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
+	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
 	std::vector<GateState> moved;
@@ -318,6 +452,7 @@ void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
 }
 
 bool cl_edit_add_gate(CLDocument* doc, int pageIndex, const char* libGateName, double x, double y) {
+	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr || libGateName == nullptr) return false;
 	const GLPoint2f at = snap(GLPoint2f((float)x, (float)y));
@@ -353,6 +488,7 @@ bool cl_edit_paste(CLDocument* doc, int pageIndex, const char* text, double x, d
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (clipboardOut) *clipboardOut = "";
 	if (page == nullptr || text == nullptr) return false;
+	settleTidy(doc);
 	klsClipboard::shiftHeld = shift;
 	klsClipboard::rewrittenText.clear();
 	klsClipboard cb;
@@ -388,6 +524,7 @@ bool cl_edit_paste(CLDocument* doc, int pageIndex, const char* text, double x, d
 
 bool cl_edit_undo(CLDocument* doc) {
 	if (doc == nullptr) return false;
+	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Undo();
 	if (ok) doc->edited = true;
 	for (auto& p : doc->pages) p->collisionUpdate();
@@ -396,6 +533,7 @@ bool cl_edit_undo(CLDocument* doc) {
 
 bool cl_edit_redo(CLDocument* doc) {
 	if (doc == nullptr) return false;
+	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Redo();
 	if (ok) doc->edited = true;
 	for (auto& p : doc->pages) p->collisionUpdate();
@@ -478,6 +616,7 @@ bool cl_gate_set_setting(CLDocument* doc, long gate, const char* name, const cha
 	if (lg == nullptr || name == nullptr || value == nullptr) return false;
 	for (const lgDlgParam& p : lg->dlgParams) {
 		if (p.name != name) continue;
+		settleTidy(doc);
 		ParameterMap m;
 		m[name] = value;
 		klsCommand* cmd = p.isGui
@@ -490,6 +629,178 @@ bool cl_gate_set_setting(CLDocument* doc, long gate, const char* name, const cha
 		return true;
 	}
 	return false;
+}
+
+// ---- Wires -------------------------------------------------------------------
+
+bool cl_edit_hover(CLDocument* doc, int pageIndex, double x, double y, double unitsPerPoint) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return false;
+	EditGesture& g = doc->gesture;
+	bool redraw = false;
+	if (g.mode == EditGesture::Connect && g.sticky) {
+		g.current = GLPoint2f((float)x, (float)y);
+		redraw = true;
+	}
+	unsigned long gate = 0;
+	std::string pin;
+	const bool onPin = pinAt(page, (float)x, (float)y, (float)(kPinPoints * unitsPerPoint), gate, pin);
+	GLPoint2f at;
+	if (onPin) doc->circuit.getGate(gate)->getHotspotCoords(pin, at.x, at.y);
+	if (onPin != doc->hoverPin || (onPin && (at.x != doc->hoverPinAt.x || at.y != doc->hoverPinAt.y))) redraw = true;
+	doc->hoverPin = onPin;
+	doc->hoverPinAt = at;
+	return redraw;
+}
+
+bool cl_edit_is_connecting(const CLDocument* doc) {
+	return doc && doc->gesture.mode == EditGesture::Connect && doc->gesture.sticky;
+}
+
+int cl_edit_context(CLDocument* doc, int pageIndex, double x, double y, double unitsPerPoint) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return CL_CONTEXT_NOTHING;
+	settleTidy(doc);
+	doc->gesture = EditGesture();
+	unsigned long gate = 0;
+	std::string pin;
+	if (pinAt(page, (float)x, (float)y, (float)(kPinPoints * unitsPerPoint), gate, pin)) {
+		guiGate* g = doc->circuit.getGate(gate);
+		if (g->isConnected(pin)) return CL_CONTEXT_PIN;
+	}
+	auto pick = [&](bool selected, auto select) {
+		// Right-clicking something already in the selection keeps the
+		// selection, so its menu acts on all of it.
+		if (!selected) { page->unselectAllGates(); page->unselectAllWires(); select(); }
+	};
+	if (guiWire* w = wireAt(page, (float)x, (float)y, (float)(kHoverPoints * unitsPerPoint))) {
+		pick(w->isSelected(), [&] { w->select(); });
+		return CL_CONTEXT_WIRE;
+	}
+	if (guiGate* g = gateAt(page, (float)x, (float)y)) {
+		pick(g->isSelected(), [&] { g->select(); });
+		return CL_CONTEXT_GATE;
+	}
+	return CL_CONTEXT_NOTHING;
+}
+
+void cl_edit_disconnect_pin(CLDocument* doc, int pageIndex, double x, double y, double unitsPerPoint) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return;
+	unsigned long gate = 0;
+	std::string pin;
+	if (!pinAt(page, (float)x, (float)y, (float)(kPinPoints * unitsPerPoint), gate, pin)) return;
+	guiGate* g = doc->circuit.getGate(gate);
+	if (!g->isConnected(pin)) return;
+	guiWire* w = g->getConnection(pin);
+	// As the wx canvas does it: off the pin, or the whole wire when this was
+	// one of its only two ends.
+	if (w->numConnections() > 2) submit(doc, page, new cmdDisconnectWire(&doc->circuit, w->getID(), gate, pin));
+	else submit(doc, page, new cmdDeleteWire(&doc->circuit, page, w->getID()));
+	page->collisionUpdate();
+}
+
+void cl_edit_straighten(CLDocument* doc, int pageIndex) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return;
+	settleTidy(doc);
+	std::vector<unsigned long> ids;
+	for (auto& w : *page->getWireList()) if (w.second && w.second->isSelected()) ids.push_back(w.first);
+	if (ids.empty()) {
+		std::set<unsigned long> fromGates;
+		for (auto& g : *page->getGateList()) {
+			if (!g.second || !g.second->isSelected()) continue;
+			for (const auto& c : g.second->getConnections()) if (c.second) fromGates.insert(c.second->getID());
+		}
+		ids.assign(fromGates.begin(), fromGates.end());
+	}
+	std::sort(ids.begin(), ids.end());
+	std::vector<klsCommand*> steps;
+	for (WireReshape& w : edits::rerouteWires(page, ids))
+		steps.push_back(new cmdWireSegDrag(&doc->circuit, page, w.id, w.before, w.after));
+	if (steps.size() == 1) submit(doc, page, steps[0]);
+	else if (!steps.empty()) submit(doc, page, new cmdPasteBlock(steps, "Straighten Wires"));
+	page->collisionUpdate();
+}
+
+bool cl_edit_tidy_begin(CLDocument* doc, int pageIndex, int mode) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return false;
+	if (doc->tidy.active) cl_edit_tidy_end(doc, false);
+	doc->gesture = EditGesture();
+	edits::TidyPlan plan = edits::applyTidy(page, mode);
+	page->collisionUpdate();
+	if (plan.empty()) return false;
+	doc->tidy.active = true;
+	doc->tidy.mode = mode;
+	doc->tidy.page = pageIndex;
+	doc->tidy.plan = std::move(plan);
+	return true;
+}
+
+void cl_edit_tidy_end(CLDocument* doc, bool keep) {
+	if (doc == nullptr || !doc->tidy.active) return;
+	GUICanvas* page = doc->page(doc->tidy.page);
+	edits::TidyPlan plan = std::move(doc->tidy.plan);
+	doc->tidy = CLDocument::TidyPreview();
+	if (keep) submit(doc, page, new cmdTidy(&doc->circuit, page, plan.moves, plan.wires));
+	else edits::revertTidy(&doc->circuit, plan);
+	if (page) page->collisionUpdate();
+}
+
+bool cl_edit_tidy_active(const CLDocument* doc) { return doc && doc->tidy.active; }
+int cl_edit_tidy_mode(const CLDocument* doc) { return doc ? doc->tidy.mode : 0; }
+
+void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, double backingScale,
+                          double originX, double originY, double unitsPerPoint,
+                          double ar, double ag, double ab) {
+	if (doc == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
+	using cl::render::Color;
+	using cl::render::Point;
+	using cl::render::Stroke;
+	CGContextSaveGState(ctx);
+	CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	const float scale = (float)(backingScale / unitsPerPoint);
+	cl::render::Transform t;
+	t.a = scale; t.d = -scale;
+	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
+	cl::mac::CGScene scene(ctx);
+	scene.setViewport(t);
+	const float px = (float)backingScale;   // one point, in the device pixels strokes use
+
+	// Tidy Up: where things were, faintly.
+	if (doc->tidy.active && doc->tidy.page == pageIndex) {
+		const Color ghost((float)ar, (float)ag, (float)ab, 0.35f);
+		const std::vector<float>& r = doc->tidy.plan.ghostRects;
+		for (size_t i = 0; i + 3 < r.size(); i += 4) {
+			Point pts[4] = { Point(r[i], r[i + 1]), Point(r[i], r[i + 3]), Point(r[i + 2], r[i + 3]), Point(r[i + 2], r[i + 1]) };
+			scene.polyline(pts, 4, Stroke(ghost, px), true);
+		}
+		std::vector<Point> segs;
+		const std::vector<float>& l = doc->tidy.plan.ghostLines;
+		for (size_t i = 0; i + 3 < l.size(); i += 4) { segs.push_back(Point(l[i], l[i + 1])); segs.push_back(Point(l[i + 2], l[i + 3])); }
+		if (!segs.empty()) scene.lines(&segs[0], segs.size(), Stroke(Color((float)ar, (float)ag, (float)ab, 0.22f), px));
+	}
+
+	// A connection being made: a line from its pin to the pointer.
+	const EditGesture& g = doc->gesture;
+	if (g.mode == EditGesture::Connect && g.page == pageIndex) {
+		if (guiGate* src = doc->circuit.getGate(g.srcGate)) {
+			float sx, sy;
+			src->getHotspotCoords(g.srcPin, sx, sy);
+			Point ln[2] = { Point(sx, sy), Point(g.current.x, g.current.y) };
+			scene.lines(ln, 2, Stroke(Color(0.0f, 0.72f, 0.0f, 1.0f), 1.5f * px));
+		}
+	}
+
+	// The pin under the pointer: the red box you drag a wire out of.
+	if (doc->hoverPin) {
+		const float r = (float)(kPinBoxPoints * unitsPerPoint);
+		const GLPoint2f c = doc->hoverPinAt;
+		Point pts[4] = { Point(c.x - r, c.y + r), Point(c.x + r, c.y + r), Point(c.x + r, c.y - r), Point(c.x - r, c.y - r) };
+		scene.polyline(pts, 4, Stroke(Color(1.0f, 0.0f, 0.0f, 1.0f), px), true);
+	}
+	CGContextRestoreGState(ctx);
 }
 
 }  // extern "C"

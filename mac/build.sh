@@ -24,7 +24,7 @@ CORE=(
 	src/gui/klsCollisionChecker.cpp src/gui/GateLibrary.cpp src/gui/LibraryParse.cpp
 	src/gui/XMLParser.cpp src/gui/GUICircuitModel.cpp src/gui/RenderMode.cpp
 	src/gui/PaletteDrag.cpp src/gui/Settings.cpp src/gui/gl_defs.cpp src/gui/CircuitParse.cpp
-	src/gui/klsClipboard.cpp
+	src/gui/klsClipboard.cpp src/gui/CircuitEdits.cpp
 	src/gui/route/TrunkRouter.cpp src/gui/route/GridRouter.cpp src/gui/route/Layout.cpp
 	# the editing commands (undo/redo), minus the two that manage wx tabs
 	$(ls src/gui/command/*.cpp | grep -v -e cmdAddTab -e cmdDeleteTab)
@@ -41,9 +41,21 @@ echo "Engine..."
 OBJS=()
 for f in "${CORE[@]}"; do
 	o="$OBJ/$(echo "$f" | tr / _).o"
+	d="${o%.o}.d"
 	OBJS+=("$o")
-	if [ ! -f "$o" ] || [ "$f" -nt "$o" ]; then
-		clang++ "${CXXFLAGS[@]}" -c "$f" -o "$o"
+	# Recompile when the source or any header it includes changed (the .d
+	# file clang writes lists them). Missing that once let two files disagree
+	# about a struct's layout.
+	stale=0
+	if [ ! -f "$o" ] || [ ! -f "$d" ] || [ "$f" -nt "$o" ]; then
+		stale=1
+	else
+		for h in $(sed -e 's/^[^:]*://' -e 's/\\$//' "$d"); do
+			if [ "$h" -nt "$o" ]; then stale=1; break; fi
+		done
+	fi
+	if [ $stale = 1 ]; then
+		clang++ "${CXXFLAGS[@]}" -MMD -MF "$d" -c "$f" -o "$o"
 	fi
 done
 rm -f "$OUT/libCedarCore.a"

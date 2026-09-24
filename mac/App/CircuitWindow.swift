@@ -85,6 +85,7 @@ private struct NativeLayout: View {
         } detail: {
             CanvasView(document: document, page: page, theme: theme, controller: canvas)
                 .ignoresSafeArea()
+                .overlay(alignment: .top) { TidyBanner(canvas: canvas) }
                 .inspector(isPresented: $showInspector) {
                     InspectorView(document: document, controller: canvas)
                         .inspectorColumnWidth(min: 220, ideal: 260, max: 360)
@@ -123,6 +124,7 @@ private struct ClassicLayout: View {
                 PageTabs(document: document, page: $page)
                 Divider()
                 CanvasView(document: document, page: page, theme: theme, controller: canvas)
+                    .overlay(alignment: .top) { TidyBanner(canvas: canvas) }
             }
         }
         .toolbar {
@@ -226,5 +228,29 @@ struct SpeedControl: View {
             Text("\(stepMs) ms").monospacedDigit().foregroundStyle(.secondary).frame(width: 48, alignment: .leading)
         }
         .help("Simulation speed: milliseconds per step")
+    }
+}
+
+/// While a Tidy Up is on show: what it is and how to finish it.
+private struct TidyBanner: View {
+    @ObservedObject var canvas: CanvasController
+
+    var body: some View {
+        if canvas.tidyActive {
+            HStack(spacing: 12) {
+                Text("Tidy Up preview").fontWeight(.semibold)
+                Button("Keep") { canvas.endTidy(keep: true) }
+                    .keyboardShortcut(.defaultAction)
+                Button("Put Back") { canvas.endTidy(keep: false) }
+                Button(canvas.tidyMode == 1 ? "Keep My Layout Instead" : "Full Rearrange Instead") { canvas.switchTidyMode() }
+                    .help("Tab")
+            }
+            .font(.callout)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 6, y: 2)
+            .padding(.top, 12)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
     }
 }

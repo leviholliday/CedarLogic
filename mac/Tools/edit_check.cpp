@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <map>
+#include <string>
 
 static int fails = 0;
 #define CHECK(c, what) do { if (c) printf("  ok   %s\n", what); else { printf("  FAIL %s\n", what); fails++; } } while (0)
@@ -94,6 +96,96 @@ int main(int argc, char** argv) {
 	CHECK(cl_edit_box(doc, &bl, &bb, &br, &btop), "box reported while dragging");
 	cl_edit_release(doc, r + 5, bt - 5);
 	CHECK(cl_edit_selected_gate_count(doc, page) == (int)gates0 + 1, "box selects every gate");
+
+	printf("connect two pins by dragging\n");
+	cl_edit_select_none(doc, page);
+	cl_edit_add_gate(doc, page, "AA_AND2", 80, -80);
+	guiGate* ga = doc->circuit.getGate((unsigned long)cl_edit_single_gate(doc, page));
+	cl_edit_add_gate(doc, page, "AA_AND2", 92, -80);
+	guiGate* gb = doc->circuit.getGate((unsigned long)cl_edit_single_gate(doc, page));
+	std::string outPin, inPin;
+	for (auto& hs : ga->getHotspotList()) if (!ga->isConnectionInput(hs.first)) outPin = hs.first;
+	for (auto& hs : gb->getHotspotList()) if (gb->isConnectionInput(hs.first)) { inPin = hs.first; break; }
+	float ox, oy, ix, iy;
+	ga->getHotspotCoords(outPin, ox, oy);
+	gb->getHotspotCoords(inPin, ix, iy);
+	const size_t wires0 = doc->page(page)->getWireList()->size();
+	CHECK(cl_edit_press(doc, page, ox, oy, 0, upp) == CL_PRESS_PART, "press on an output pin");
+	cl_edit_drag(doc, (ox + ix) / 2, (oy + iy) / 2);
+	cl_edit_drag(doc, ix, iy);
+	cl_edit_release(doc, ix, iy);
+	CHECK(doc->page(page)->getWireList()->size() == wires0 + 1, "a wire joins them");
+	CHECK(ga->isConnected(outPin) && gb->isConnected(inPin), "both pins connected");
+	printf("  undo name: %s\n", cl_edit_undo_name(doc));
+	cl_edit_undo(doc);
+	CHECK(doc->page(page)->getWireList()->size() == wires0 && !ga->isConnected(outPin), "undo removes the wire");
+
+	printf("click a pin, then click the target\n");
+	cl_edit_press(doc, page, ox, oy, 0, upp);
+	cl_edit_release(doc, ox, oy);
+	CHECK(cl_edit_is_connecting(doc), "line follows the pointer");
+	cl_edit_hover(doc, page, ix, iy, upp);
+	cl_edit_press(doc, page, ix, iy, 0, upp);
+	cl_edit_release(doc, ix, iy);
+	CHECK(ga->isConnected(outPin) && gb->isConnected(inPin), "click-click connects");
+	CHECK(!cl_edit_is_connecting(doc), "and stops following");
+
+	printf("drag a wire segment\n");
+	guiWire* w = ga->getConnection(outPin);
+	const auto shape0 = w->getSegmentMap();
+	wireSegment seg = shape0.begin()->second;
+	for (auto& e : shape0) if (e.second.isVertical() || (e.second.end.x - e.second.begin.x) > 2) { seg = e.second; break; }
+	const float mx = (seg.begin.x + seg.end.x) / 2, my = (seg.begin.y + seg.end.y) / 2;
+	CHECK(cl_edit_press(doc, page, mx, my, 0, upp) == CL_PRESS_PART, "press on the wire");
+	cl_edit_drag(doc, mx + 2, my + 2);
+	cl_edit_drag(doc, mx + 3, my + 3);
+	cl_edit_release(doc, mx + 3, my + 3);
+	bool changed = w->getSegmentMap().size() != shape0.size();
+	for (auto& e : w->getSegmentMap()) {
+		auto it = shape0.find(e.first);
+		if (it == shape0.end() || it->second.begin.x != e.second.begin.x || it->second.begin.y != e.second.begin.y) changed = true;
+	}
+	CHECK(changed, "the wire's shape changed");
+	printf("  undo name: %s\n", cl_edit_undo_name(doc));
+	cl_edit_undo(doc);
+
+	printf("straighten\n");
+	cl_edit_select_none(doc, page);
+	w->select();
+	cl_edit_straighten(doc, page);
+	printf("  undo name: %s\n", cl_edit_undo_name(doc));
+	CHECK(cl_edit_can_undo(doc), "straighten is undoable");
+	CHECK(ga->isConnected(outPin) && gb->isConnected(inPin), "still connected");
+
+	printf("disconnect a pin (right-click)\n");
+	CHECK(cl_edit_context(doc, page, ix, iy, upp) == CL_CONTEXT_PIN, "right-click finds the connected pin");
+	cl_edit_disconnect_pin(doc, page, ix, iy, upp);
+	CHECK(!gb->isConnected(inPin), "pin disconnected");
+	cl_edit_undo(doc);
+	CHECK(gb->isConnected(inPin), "undo reconnects");
+
+	printf("tidy up\n");
+	cl_edit_select_none(doc, page);
+	std::map<unsigned long, std::pair<float, float>> pos;
+	for (auto& e : *doc->page(page)->getGateList()) { float x, y; e.second->getGLcoords(x, y); pos[e.first] = {x, y}; }
+	auto samePlaces = [&] {
+		for (auto& e : *doc->page(page)->getGateList()) { float x, y; e.second->getGLcoords(x, y); if (pos[e.first] != std::make_pair(x, y)) return false; }
+		return true;
+	};
+	const bool began = cl_edit_tidy_begin(doc, page, 1);
+	CHECK(began && cl_edit_tidy_active(doc), "full rearrange shows a preview");
+	CHECK(!samePlaces(), "gates moved in the preview");
+	cl_edit_tidy_end(doc, false);
+	CHECK(samePlaces(), "revert puts every gate back");
+	cl_edit_tidy_begin(doc, page, 1);
+	cl_edit_tidy_end(doc, true);
+	printf("  undo name: %s\n", cl_edit_undo_name(doc));
+	CHECK(!samePlaces(), "kept");
+	cl_edit_undo(doc);
+	CHECK(samePlaces(), "one undo puts it all back");
+	cl_edit_tidy_begin(doc, page, 0);
+	cl_edit_delete(doc, page);   // any other edit keeps the preview
+	CHECK(!cl_edit_tidy_active(doc), "another edit keeps the preview");
 
 	printf("simulation keeps running\n");
 	const int before = (int)doc->sim->stepsRun();

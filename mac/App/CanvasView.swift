@@ -37,6 +37,14 @@ final class CircuitCanvasNSView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes([.string])
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard let document else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        if document.hover(page: page, at: worldPoint(p), unitsPerPoint: unitsPerPoint) { needsDisplay = true }
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
@@ -52,6 +60,8 @@ final class CircuitCanvasNSView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         cl_document_draw(document.handle, Int32(page), ctx, scale, origin.x, origin.y,
                          unitsPerPoint, theme.darkCircuit)
+        cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
+                             theme.accent.r, theme.accent.g, theme.accent.b)
         if let box = document.selectionBox {
             let r = viewRect(box)
             ctx.setFillColor(theme.accent.cgColor.copy(alpha: 0.12)!)
@@ -204,8 +214,7 @@ final class CircuitCanvasNSView: NSView {
         let p = convert(event.locationInWindow, from: nil)
         if case .edit = drag {
             document?.release(at: worldPoint(p))
-            controller?.selectionChanged()
-            controller?.editsChanged()
+            controller?.edited()
         }
         drag = .none
         NSCursor.arrow.set()
@@ -216,9 +225,44 @@ final class CircuitCanvasNSView: NSView {
     override func otherMouseDown(with event: NSEvent) { drag = .pan(last: convert(event.locationInWindow, from: nil)) }
     override func otherMouseDragged(with event: NSEvent) { mouseDragged(with: event) }
     override func otherMouseUp(with event: NSEvent) { drag = .none }
-    override func rightMouseDown(with event: NSEvent) { drag = .pan(last: convert(event.locationInWindow, from: nil)) }
-    override func rightMouseDragged(with event: NSEvent) { mouseDragged(with: event) }
-    override func rightMouseUp(with event: NSEvent) { drag = .none }
+    // Right-click: a menu for what's under the pointer, as in the wx app
+    // (a connected pin's disconnect, a wire's straighten, a gate's settings).
+    override func rightMouseDown(with event: NSEvent) {
+        guard let document, let controller else { return }
+        let p = worldPoint(convert(event.locationInWindow, from: nil))
+        let menu = NSMenu()
+        func item(_ title: String, _ action: @escaping () -> Void) {
+            let i = NSMenuItem(title: title, action: #selector(MenuAction.run), keyEquivalent: "")
+            let target = MenuAction(action)
+            i.target = target
+            i.representedObject = target
+            menu.addItem(i)
+        }
+        switch document.contextTarget(page: page, at: p, unitsPerPoint: unitsPerPoint) {
+        case .pin:
+            item("Disconnect") { [weak self] in
+                guard let self else { return }
+                document.disconnectPin(page: self.page, at: p, unitsPerPoint: self.unitsPerPoint)
+                controller.edited()
+            }
+        case .wire:
+            item("Straighten Route") { controller.straighten() }
+            menu.addItem(.separator())
+            item("Delete") { controller.deleteSelection() }
+        case .gate:
+            item("Settings…") { controller.showSettings() }
+            item("Rotate") { controller.rotate() }
+            item("Straighten Its Wires") { controller.straighten() }
+            menu.addItem(.separator())
+            item("Delete") { controller.deleteSelection() }
+        case .nothing:
+            item("Select All") { controller.selectAll() }
+            item("Paste") { controller.paste() }
+        }
+        controller.selectionChanged()
+        needsDisplay = true
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
 
     // MARK: Keys
 
@@ -226,6 +270,19 @@ final class CircuitCanvasNSView: NSView {
         let plain = event.modifierFlags.intersection([.command, .option, .control]).isEmpty
         let shift = event.modifierFlags.contains(.shift)
         guard plain, let controller else { return super.keyDown(with: event) }
+        // Tidy Up on show: Return keeps it, Escape puts it back, Tab tries the
+        // other mode. Anything else keeps it and carries on.
+        if controller.tidyActive {
+            switch event.keyCode {
+            case 36, 76: controller.endTidy(keep: true); return
+            case 53: controller.endTidy(keep: false); return
+            case 48: controller.switchTidyMode(); return
+            default: controller.endTidy(keep: true)
+            }
+        }
+        if event.keyCode == 53, document?.isConnecting == true {
+            document?.cancelGesture(); needsDisplay = true; return
+        }
         switch event.keyCode {
         case 49:   // space: held, it pans with a drag; tapped, it runs/pauses
             if !event.isARepeat { spaceDown = true; pannedWhileSpaceDown = false; NSCursor.openHand.set() }
@@ -241,6 +298,7 @@ final class CircuitCanvasNSView: NSView {
         default:
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r": controller.rotate()
+            case "s": if shift { controller.tidy() } else { controller.straighten() }
             default: super.keyDown(with: event)
             }
         }
@@ -282,6 +340,13 @@ final class CircuitCanvasNSView: NSView {
     }
 }
 
+/// Runs a closure from an NSMenuItem.
+final class MenuAction: NSObject {
+    private let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    @objc func run() { action() }
+}
+
 /// What a palette tile puts on the drag pasteboard.
 enum GatePayload {
     static let prefix = "cedarlogic-gate:"
@@ -318,7 +383,7 @@ final class CanvasController: ObservableObject {
     func redraw() { view?.needsDisplay = true }
     func selectionChanged() { selectionVersion += 1 }
     func editsChanged() { editVersion += 1 }
-    private func edited() { redraw(); selectionChanged(); editsChanged() }
+    func edited() { redraw(); selectionChanged(); editsChanged(); syncTidy() }
 
     // Camera
     func zoomIn() { view?.zoomAtCenter(by: 1.25) }
@@ -340,6 +405,30 @@ final class CanvasController: ObservableObject {
     func deleteSelection() { document?.deleteSelection(page: page); edited() }
     func rotate() { document?.rotateSelection(page: page); edited() }
     func nudge(dx: CGFloat, dy: CGFloat) { document?.nudge(page: page, dx: dx, dy: dy); edited() }
+    func straighten() { document?.straighten(page: page); edited() }
+
+    // Tidy Up. Which mode Shift-S uses is a setting; the menu offers both.
+    @Published private(set) var tidyActive = false
+    @Published private(set) var tidyMode = 0
+    var defaultTidyMode: Int { UserDefaults.standard.integer(forKey: "tidyMode") }
+    func tidy(mode: Int? = nil) {
+        document?.beginTidy(page: page, mode: mode ?? defaultTidyMode)
+        edited()
+    }
+    func endTidy(keep: Bool) { document?.endTidy(keep: keep); edited() }
+    func switchTidyMode() {
+        let other = 1 - tidyMode
+        document?.endTidy(keep: false)
+        document?.beginTidy(page: page, mode: other)
+        edited()
+    }
+    private func syncTidy() {
+        let active = document?.tidyActive ?? false
+        if active != tidyActive { tidyActive = active }
+        let mode = document?.tidyMode ?? 0
+        if mode != tidyMode { tidyMode = mode }
+    }
+
     func showSettings() { if document?.singleSelectedGate(page: page) != nil { settingsRequested = true } }
 
     func addGate(_ name: String, at world: CGPoint? = nil) {

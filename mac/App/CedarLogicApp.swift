@@ -82,6 +82,9 @@ struct SimulationCommands: Commands {
 /// inspector field), the usual text commands go to it instead.
 struct EditCommands: Commands {
     @FocusedObject private var canvas: CanvasController?
+    @AppStorage("tidyMode") private var defaultMode = 0
+
+    private func tidyTitle(_ mode: Int) -> String { mode == 1 ? "Tidy Up: Full Rearrange" : "Tidy Up: Keep My Layout" }
 
     private var typing: Bool { NSApp.keyWindow?.firstResponder is NSText }
 
@@ -116,6 +119,11 @@ struct EditCommands: Commands {
             Divider()
             Button("Rotate") { canvas?.rotate() }
                 .disabled(canvas?.hasGateSelection != true)
+            Button("Straighten Wires") { canvas?.straighten() }
+                .help("S: the selected wires, or the wires of the selected parts")
+            Button(tidyTitle(defaultMode)) { canvas?.tidy(mode: defaultMode) }
+                .help("Shift-S. Lines parts up and reroutes their wires (the selection, or the whole page).")
+            Button(tidyTitle(1 - defaultMode)) { canvas?.tidy(mode: 1 - defaultMode) }
         }
     }
 }

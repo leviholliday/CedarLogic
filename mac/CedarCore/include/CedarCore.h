@@ -115,6 +115,45 @@ const char *cl_edit_redo_name(const CLDocument *doc);
 // Whether the circuit changed since it was opened or last saved.
 bool cl_document_is_edited(const CLDocument *doc);
 
+// ---- Wires -------------------------------------------------------------------
+// Pressing on a pin starts a connection: drag to another pin or a wire and
+// let go, or click the pin, then click the target (Escape or a click on
+// nothing cancels). Pressing on a wire drags that segment.
+
+// Update what's under the pointer as it moves (no button down), for the pin
+// highlight, and move a click-started connection's line. Returns true when
+// the canvas should redraw.
+bool cl_edit_hover(CLDocument *doc, int page, double x, double y, double unitsPerPoint);
+// A connection is following the pointer (after a click on a pin).
+bool cl_edit_is_connecting(const CLDocument *doc);
+
+// Right-click: what's under the point. A pin with a wire on it, a wire, a
+// gate, or nothing; the wire or gate becomes the selection (unless it already
+// was part of it).
+enum { CL_CONTEXT_NOTHING = 0, CL_CONTEXT_PIN = 1, CL_CONTEXT_WIRE = 2, CL_CONTEXT_GATE = 3 };
+int cl_edit_context(CLDocument *doc, int page, double x, double y, double unitsPerPoint);
+// Take the wire off the pin the last cl_edit_context found (the whole wire,
+// when that pin was one of its only two ends).
+void cl_edit_disconnect_pin(CLDocument *doc, int page, double x, double y, double unitsPerPoint);
+
+// Straighten (S): the selected wires, or the wires of the selected gates.
+void cl_edit_straighten(CLDocument *doc, int page);
+
+// Tidy Up (Shift-S): applies at once as a preview over a ghost of the old
+// layout; end it by keeping or reverting. Any other edit keeps it.
+// mode 0 keeps the layout's shape, 1 rearranges by signal flow.
+bool cl_edit_tidy_begin(CLDocument *doc, int page, int mode);
+void cl_edit_tidy_end(CLDocument *doc, bool keep);
+bool cl_edit_tidy_active(const CLDocument *doc);
+int cl_edit_tidy_mode(const CLDocument *doc);
+
+// Draw what goes over the circuit: the Tidy ghost, a connection being made,
+// and the pin under the pointer. Same camera as cl_document_draw; the accent
+// is 0..1 RGB.
+void cl_edit_draw_overlay(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+                          double originX, double originY, double unitsPerPoint,
+                          double accentR, double accentG, double accentB);
+
 // ---- Gate settings (the inspector) -----------------------------------------
 // The one selected gate on a page, or -1 when it isn't exactly one.
 long cl_edit_single_gate(const CLDocument *doc, int page);

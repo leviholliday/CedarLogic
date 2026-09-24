@@ -146,6 +146,7 @@ private struct PresetCard: View {
 /// Which window arrangement to use; either works with any look.
 struct LayoutSettingsView: View {
     @AppStorage("layout") private var layout = AppLayout.native.rawValue
+    @AppStorage("tidyMode") private var tidyMode = 0
 
     var body: some View {
         Form {
@@ -156,6 +157,15 @@ struct LayoutSettingsView: View {
             Text(AppLayout(rawValue: layout)?.summary ?? "")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            Section("Tidy Up (Shift-S)") {
+                Picker("Shift-S", selection: $tidyMode) {
+                    Text("Keeps my layout").tag(0)
+                    Text("Rearranges everything").tag(1)
+                }
+                Text("Keeps my layout lines parts up where they are. Rearranges everything lays the circuit out by signal flow. The Edit menu always has both.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(.vertical, 8)

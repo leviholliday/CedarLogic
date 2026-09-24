@@ -6,6 +6,7 @@
 
 #include "CedarCore.h"
 #include "CanvasTypes.h"
+#include "CircuitEdits.h"
 #include "GUICanvas.h"
 #include "GUICircuit.h"
 #include "LogicHost.h"
@@ -17,7 +18,17 @@
 
 // A drag in progress on the canvas (see Editor.cpp).
 struct EditGesture {
-	enum Mode { None, Pressed, Moving, BoxSelect } mode = None;
+	enum Mode { None, Pressed, Moving, BoxSelect, Connect, WireSeg } mode = None;
+	// Connect: from this gate's pin; sticky once a click (no drag) started it,
+	// so the line follows the pointer until the next click.
+	unsigned long srcGate = 0;
+	std::string srcPin;
+	bool sticky = false;
+	GLPoint2f current;
+	// WireSeg: the wire whose segment is being dragged.
+	unsigned long wire = 0;
+	bool moved = false;
+	float hoverDelta = 0.25f;
 	int page = 0;
 	GLPoint2f start;
 	unsigned long gate = 0;       // pressed on this gate (when onGate)
@@ -47,6 +58,16 @@ struct CLDocument {
 	}
 
 	EditGesture gesture;
+	// A Tidy Up on show: applied, not yet recorded (see Editor.cpp).
+	struct TidyPreview {
+		bool active = false;
+		int mode = 0;
+		int page = 0;
+		edits::TidyPlan plan;
+	} tidy;
+	// What's under the pointer, for the overlay: a pin (red box) or nothing.
+	bool hoverPin = false;
+	GLPoint2f hoverPinAt;
 	bool edited = false;          // changed since opened or last saved
 
 	GUICanvas* page(int i) const {

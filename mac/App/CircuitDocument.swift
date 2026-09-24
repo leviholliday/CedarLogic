@@ -107,6 +107,32 @@ final class CoreDocument {
     var redoName: String { String(cString: cl_edit_redo_name(handle)) }
     var isEdited: Bool { cl_document_is_edited(handle) }
 
+    // Wires.
+    /// Pointer moved (no button): updates the pin highlight and a click-started
+    /// connection's line. True when the canvas should redraw.
+    func hover(page: Int, at p: CGPoint, unitsPerPoint: CGFloat) -> Bool {
+        cl_edit_hover(handle, Int32(page), p.x, p.y, unitsPerPoint)
+    }
+    var isConnecting: Bool { cl_edit_is_connecting(handle) }
+    enum ContextTarget { case nothing, pin, wire, gate }
+    func contextTarget(page: Int, at p: CGPoint, unitsPerPoint: CGFloat) -> ContextTarget {
+        switch Int(cl_edit_context(handle, Int32(page), p.x, p.y, unitsPerPoint)) {
+        case CL_CONTEXT_PIN: return .pin
+        case CL_CONTEXT_WIRE: return .wire
+        case CL_CONTEXT_GATE: return .gate
+        default: return .nothing
+        }
+    }
+    func disconnectPin(page: Int, at p: CGPoint, unitsPerPoint: CGFloat) {
+        cl_edit_disconnect_pin(handle, Int32(page), p.x, p.y, unitsPerPoint)
+    }
+    func straighten(page: Int) { cl_edit_straighten(handle, Int32(page)) }
+    @discardableResult
+    func beginTidy(page: Int, mode: Int) -> Bool { cl_edit_tidy_begin(handle, Int32(page), Int32(mode)) }
+    func endTidy(keep: Bool) { cl_edit_tidy_end(handle, keep) }
+    var tidyActive: Bool { cl_edit_tidy_active(handle) }
+    var tidyMode: Int { Int(cl_edit_tidy_mode(handle)) }
+
     // The inspector.
     struct Setting: Identifiable {
         let label: String, name: String, type: String, value: String
