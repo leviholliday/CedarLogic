@@ -912,6 +912,9 @@ bool MainApp::OnInit()
         frame->SetSimView(true);
         shoot("main-sim-dark.png");
         frame->SetSimView(false);
+        frame->RunMenuCommand(View_Oscope);   // the oscilloscope under the circuit
+        shoot("main-oscope-dark.png");
+        frame->RunMenuCommand(View_Oscope);
 
         // Every Settings page, dark then light.
         ShowPreferencesWindow(frame);
