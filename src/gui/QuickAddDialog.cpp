@@ -321,7 +321,15 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 		}
 	}
 
+	// Inversion bubbles are drawn on their own, below, at a size that reads.
+	// At preview scale a real bubble (radius 0.35 on a gate six units wide) is
+	// about 5px across under a 2px stroke: it fills in, and a NAND looks like an
+	// AND with a slightly longer output. Other circles stay in the outline.
+	struct Bubble { float cx, cy, r; };
+	vector<Bubble> bubbles;
+	const float kBubbleMaxR = 0.5f;
 	for (auto& c : gateDef.circles) {
+		if (c.r <= kBubbleMaxR) { bubbles.push_back({ c.cx, c.cy, c.r }); continue; }
 		int N = c.segs > 0 ? c.segs : 12;
 		float px = c.cx, py = c.cy + c.r;  // start at the top, as the GL path does
 		for (int i = 1; i <= N; i++) {
@@ -332,7 +340,7 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 		}
 	}
 
-	if (segs.empty()) return blankPreview(width, height);
+	if (segs.empty() && bubbles.empty()) return blankPreview(width, height);
 
 	// Frame by the true extent of every stroke, not just the lines.
 	float minX = FLT_MAX, minY = FLT_MAX, maxX = -FLT_MAX, maxY = -FLT_MAX;
@@ -341,6 +349,13 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 		minY = min({minY, s.y1, s.y2});
 		maxX = max({maxX, s.x1, s.x2});
 		maxY = max({maxY, s.y1, s.y2});
+	}
+	// The body's middle, which each bubble is pushed away from as it grows so
+	// it still just touches the gate instead of swallowing its edge.
+	const float bodyX = (minX + maxX) / 2.0f, bodyY = (minY + maxY) / 2.0f;
+	for (auto& b : bubbles) {
+		minX = min(minX, b.cx - b.r); maxX = max(maxX, b.cx + b.r);
+		minY = min(minY, b.cy - b.r); maxY = max(maxY, b.cy + b.r);
 	}
 
 	float shapeW = maxX - minX;
@@ -379,6 +394,20 @@ wxBitmap QuickAddDialog::renderGatePreview(const string& gateName, int width, in
 			path.AddLineToPoint(offsetX + (s.x2 - minX) * scale, offsetY + (maxY - s.y2) * scale);
 		}
 		gc->StrokePath(path);
+
+		// Each bubble at least a readable size, hollow, sitting on the body.
+		const double minR = width * 0.085 * SS;
+		gc->SetBrush(wxBrush(paperColour()));
+		for (const Bubble& b : bubbles) {
+			const double r = std::max((double)b.r * scale, minR);
+			double dx = b.cx - bodyX, dy = b.cy - bodyY;
+			const double len = std::sqrt(dx * dx + dy * dy);
+			if (len > 1e-4) { dx /= len; dy /= len; } else { dx = 1; dy = 0; }
+			const double grow = r - b.r * scale;   // in pixels
+			const double cx = offsetX + (b.cx - minX) * scale + dx * grow;
+			const double cy = offsetY + (maxY - b.cy) * scale - dy * grow;
+			gc->DrawEllipse(cx - r, cy - r, 2 * r, 2 * r);
+		}
 		delete gc;  // flush the drawing into the bitmap before it's read back
 	} else {
 		dc.SetPen(wxPen(inkColour(), (int)stroke));

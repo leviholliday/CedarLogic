@@ -876,6 +876,27 @@ bool MainApp::OnInit()
         ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-narrow.png", 520, 600, "");
         renderMode().darkMode = true;
         ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-dark.png", 860, 600, "");
+        // The gate search's pictures side by side, pairs that are easy to
+        // confuse next to each other (AND / NAND, OR / NOR ...), at the size
+        // the list shows them.
+        {
+            renderMode().darkMode = false;
+            QuickAddDialog picker(frame);
+            const char* names[] = { "AA_AND2", "BA_NAND2", "AA_AND3", "BA_NAND3",
+                                    "AE_OR2", "BE_NOR2", "AI_XOR2", "AO_XNOR2",
+                                    "AA_AND4", "BA_NAND4", "DD_KEYPAD_HEX", "AA_TOGGLE" };
+            const int cell = 66, cols = 4, pad = 10;
+            wxBitmap sheet(cols * (cell + pad) + pad, 3 * (cell + pad) + pad, 24);
+            {
+                wxMemoryDC dc(sheet);
+                dc.SetBackground(*wxWHITE_BRUSH);
+                dc.Clear();
+                for (int i = 0; i < 12; i++)
+                    dc.DrawBitmap(picker.previewFor(names[i], cell),
+                                  pad + (i % cols) * (cell + pad), pad + (i / cols) * (cell + pad));
+            }
+            ok &= sheet.SaveFile(renderOutput + "/gate-previews.png", wxBITMAP_TYPE_PNG);
+        }
         fflush(nullptr);
         std::_Exit(ok ? 0 : 1);
     }
