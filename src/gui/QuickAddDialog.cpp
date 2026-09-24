@@ -249,7 +249,7 @@ public:
 	}
 
 private:
-	static const int PANE_W = 210, PIC = 170;
+	static const int PANE_W = 230, PIC = 190;
 
 	void OnPaint(wxPaintEvent&) {
 		wxAutoBufferedPaintDC dc(this);
@@ -289,7 +289,7 @@ private:
 };
 
 QuickAddDialog::QuickAddDialog(wxWindow* parent)
-	: wxDialog(parent, wxID_ANY, "Add a Gate", wxDefaultPosition, wxSize(770, 640),
+	: wxDialog(parent, wxID_ANY, "Add a Gate", wxDefaultPosition, wxSize(795, 640),
 		wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
 
 	SetBackgroundColour(paperColour());
