@@ -211,6 +211,11 @@ std::vector<Item> layout(int style, int hidden, const State& s, int W, int H) {
 	}
 
 	int r = W - EDGE;
+#ifdef __WXMSW__
+	// Windows has no menu bar (see MainFrame::ShowAppMenu): this is the menu.
+	add(Item::More, 0, "more", "Menu", 14, r, MORE_W, false);
+	r -= GROUP_GAP;
+#endif
 	if (shown(GTab))   { add(Item::Button, Tool_NewTab, "newtab", "New tab (" + mod + "T)", 13, r, BTN_W, false); r -= GROUP_GAP; }
 	if (shown(GTheme)) { add(Item::Toggle, Tool_ThemeToggle, nullptr, "Dark mode", 12, r, BTN_W, false); r -= GROUP_GAP; }
 	if (shown(GLock))  { add(Item::Toggle, Tool_Lock, nullptr, "Lock the circuit so it can't be edited", 11, r, BTN_W, false); r -= GROUP_GAP; }
@@ -350,6 +355,12 @@ ModernToolbar::ModernToolbar(wxWindow* parent, MainFrame* frame)
 	state = readState();
 }
 
+wxColour ModernToolbar::BarColour() const {
+	return barColour(appConfig().appSettings.toolbarStyle, readState());
+}
+
+wxColour ModernToolbar::InkColour() const { return inkColour(readState()); }
+
 State ModernToolbar::readState() const {
 	State s;
 	s.dark = renderMode().darkMode;
@@ -483,6 +494,12 @@ void ModernToolbar::activate(const Item& it) {
 	switch (it.kind) {
 		case Item::Run:  frame->SetSimView(!renderMode().simView); break;
 		case Item::More: {
+#ifdef __WXMSW__
+			// The whole menu bar lives here on Windows, where the bar is hidden.
+			frame->ShowAppMenu(this, it.rect.GetBottomLeft(),
+			                   appConfig().appSettings.toolbarStyle == cl::tb::Minimal);
+			break;
+#endif
 			wxMenu menu;
 			menu.Append(wxID_NEW, "New");
 			menu.Append(wxID_OPEN, "Open...");

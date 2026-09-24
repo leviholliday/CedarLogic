@@ -70,6 +70,10 @@ public:
 	static int BarHeight() { return 52; }
 	// The bar drawn off-screen with sample content, for Preferences.
 	static wxBitmap RenderPreview(int style, bool dark, int width, double scale);
+	// The bar's colour as it is drawn right now, and the colour of its text,
+	// so the Windows title bar above can match it.
+	wxColour BarColour() const;
+	wxColour InkColour() const;
 
 private:
 	cl::tb::State readState() const;

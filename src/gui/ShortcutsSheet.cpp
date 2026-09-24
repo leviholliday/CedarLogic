@@ -355,7 +355,6 @@ private:
 // (Focus Mode, Dark Mode) carry their new state in the event, as a real
 // menu click would.
 void runCommand(MainFrame* frame, int id) {
-	if (id == View_DarkMode) { frame->ToggleDarkMode(); return; }
 	if (id < 0) {   // a canvas key: press it there, so it does exactly what the key does
 		GUICanvas* canvas = frame->CurrentCanvas();
 		if (canvas == nullptr) return;
@@ -366,18 +365,7 @@ void runCommand(MainFrame* frame, int id) {
 		canvas->ProcessWindowEvent(key);
 		return;
 	}
-	wxCommandEvent evt(wxEVT_MENU, id);
-	if (wxMenuBar* mb = frame->GetMenuBar()) {
-		if (wxMenuItem* item = mb->FindItem(id)) {
-			if (!item->IsEnabled()) { wxBell(); return; }
-			if (item->IsCheckable()) {
-				item->Check(!item->IsChecked());
-				evt.SetInt(item->IsChecked() ? 1 : 0);
-			}
-		}
-	}
-	evt.SetEventObject(frame);
-	frame->ProcessWindowEvent(evt);
+	frame->RunMenuCommand(id);
 }
 
 }  // namespace

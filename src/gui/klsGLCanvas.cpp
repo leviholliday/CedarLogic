@@ -217,7 +217,8 @@ void klsGLCanvas::wxOnPaint(wxPaintEvent& event) {
 // paint handler repaints the window it came from.
 void klsGLCanvas::announceRendererFailure() {
 	static bool announced = false;
-	if (announced || !cl::render::rendererFailed()) return;
+	// Nobody to tell in a headless run, and a modal box would hang it.
+	if (announced || !cl::render::rendererFailed() || renderMode().headlessRender) return;
 	announced = true;
 	const wxString msg = cl::render::rendererFailureMessage();
 	CallAfter([msg] {

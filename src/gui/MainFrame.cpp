@@ -79,6 +79,7 @@
 #include "WinSparkleUpdater.h"
 #endif
 #include "UiKit.h"
+#include "StatusStrip.h"
 #ifdef __WXMSW__
 #include <wx/msw/wrapwin.h>   // DeferWindowPos, for the focus-mode slide
 #endif
@@ -162,6 +163,72 @@ END_EVENT_TABLE()
 // Global print data object:
 wxPrintData *g_printData = (wxPrintData*) NULL;
 
+
+namespace {
+
+// A copy of `from` for use as a popup: a menu can only belong to one menu bar
+// or popup at a time, so the bar's own menus cannot be shown directly.
+wxMenu* cloneMenu(const wxMenu* from) {
+	wxMenu* to = new wxMenu;
+	for (const wxMenuItem* item : from->GetMenuItems()) {
+		if (item->IsSeparator()) { to->AppendSeparator(); continue; }
+		if (item->IsSubMenu()) {
+			to->AppendSubMenu(cloneMenu(item->GetSubMenu()), item->GetItemLabel());
+			continue;
+		}
+		wxMenuItem* copy = to->Append(item->GetId(), item->GetItemLabel(), item->GetHelp(), item->GetKind());
+		if (item->IsCheckable()) copy->Check(item->IsChecked());
+		copy->Enable(item->IsEnabled());
+	}
+	return to;
+}
+
+}  // namespace
+
+void MainFrame::RunMenuCommand(int id) {
+	if (id == View_DarkMode) { ToggleDarkMode(); return; }
+	wxCommandEvent evt(wxEVT_MENU, id);
+	if (wxMenuBar* mb = GetMenuBar()) {
+		if (wxMenuItem* item = mb->FindItem(id)) {
+			if (!item->IsEnabled()) { wxBell(); return; }
+			if (item->IsCheckable()) {
+				item->Check(!item->IsChecked());
+				evt.SetInt(item->IsChecked() ? 1 : 0);
+			}
+		}
+	}
+	evt.SetEventObject(this);
+	ProcessWindowEvent(evt);
+}
+
+void MainFrame::ShowAppMenu(wxWindow* from, const wxPoint& at, bool quick) {
+	wxMenuBar* mb = GetMenuBar();
+	if (mb == nullptr || from == nullptr) return;
+	mb->UpdateMenus();   // enabled and checked states as of now
+	wxMenu menu;
+	if (quick) {
+		menu.Append(wxID_NEW, "New");
+		menu.Append(wxID_OPEN, "Open...");
+		menu.Append(wxID_SAVE, "Save");
+		menu.AppendSeparator();
+		menu.Append(View_TruthTable, "Truth Table...");
+		menu.Append(Tool_NewTab, "New Tab");
+		menu.AppendSeparator();
+	}
+	for (size_t i = 0; i < mb->GetMenuCount(); i++)
+		menu.AppendSubMenu(cloneMenu(mb->GetMenu(i)), mb->GetMenuLabel(i));
+	const int chosen = from->GetPopupMenuSelectionFromUser(menu, at);
+	if (chosen != wxID_NONE) RunMenuCommand(chosen);
+}
+
+#ifdef __WXMSW__
+wxStatusBar* MainFrame::OnCreateStatusBar(int number, long style, wxWindowID id,
+                                          const wxString& name) {
+	StatusStrip* bar = new StatusStrip(this, id, style, name);
+	bar->SetFieldsCount(number);
+	return bar;
+}
+#endif
 
 MainFrame::MainFrame(const wxString& title, string cmdFilename)
        : wxFrame(NULL, wxID_ANY, title, wxDefaultPosition, wxSize(1800,900))
@@ -290,6 +357,13 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     
     // ... and attach this menu bar to the frame
     SetMenuBar(menuBar);
+#ifdef __WXMSW__
+    // Hidden, so the top of the window is one bar rather than a title bar, a
+    // menu bar and a toolbar stacked up. Everything in it is behind the
+    // toolbar's menu button (ShowAppMenu). Its shortcuts keep working: wxMSW
+    // translates accelerators from the bar's own table, attached or not.
+    ::SetMenu(GetHWND(), nullptr);
+#endif
 
     // The canvas holds keyboard focus, and menu-bar accelerators don't reach it;
     // meanwhile wxMSW compiles every menu accelerator into the frame's
@@ -449,6 +523,13 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	toolBar->AddTool(wxID_ABOUT, "About", icon("info.circle", "about"), "About");
 	toolBar->AddSeparator();
 	toolBar->AddTool(Tool_NewTab, "New Tab", icon("plus.square", "newtab"), "New Tab");
+#ifdef __WXMSW__
+	toolBar->AddSeparator();
+	toolBar->AddTool(Tool_AppMenu, "Menu", icon("ellipsis.circle", "more"), "Menu");
+	Bind(wxEVT_TOOL, [this](wxCommandEvent&) {
+		ShowAppMenu(toolBar, toolBar->ScreenToClient(wxGetMousePosition()));
+	}, Tool_AppMenu);
+#endif
 #ifdef __WXOSX__
 	// Keeps the tools left-aligned under the unified title bar, which otherwise
 	// spreads them across the full window width.
@@ -1442,6 +1523,7 @@ void MainFrame::ApplyTheme() {
 	WinSetDarkTitlebars(dark);
 	WinSetAppDarkMode(dark);          // right-click and dropdown menus
 	WinThemeControls(this, dark);     // scrollbars and the palette's dropdown
+	applyTitlebarForTopRow();         // the title bar takes the new colours
 #endif
 
 	// Repaint every live view: all canvas tabs (only one is visible, but a
@@ -2420,6 +2502,19 @@ int MainFrame::TabStripLeftInset() const {
 // there, that is the toolbar's business; with the tab strip there, the window
 // title has to be hidden or macOS draws "Untitled" straight across the tabs.
 void MainFrame::applyTitlebarForTopRow() {
+#ifdef __WXMSW__
+	// Windows 11 draws the title bar in whatever colour the row under it is,
+	// so the top of the window reads as one bar, the way the Mac's does.
+	const bool dark = renderMode().darkMode;
+	if (tabStripIsTopRow())
+		WinSetCaptionColour(this, dark ? wxColour(22, 24, 28) : wxColour(233, 234, 238),
+		                    dark ? wxColour(228, 232, 240) : wxColour(32, 35, 42));
+	else if (modernBar && modernBar->IsShown())
+		WinSetCaptionColour(this, modernBar->BarColour(), modernBar->InkColour());
+	else
+		WinSetCaptionColour(this, toolBar->GetBackgroundColour(),
+		                    dark ? wxColour(228, 232, 240) : wxColour(32, 35, 42));
+#endif
 #ifdef __APPLE__
 	const bool classic = appConfig().appSettings.toolbarStyle == cl::tb::Classic;
 	if (tabStripIsTopRow())

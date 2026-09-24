@@ -11,6 +11,8 @@
 #include <wx/choice.h>
 #include <wx/combobox.h>
 #include <wx/glcanvas.h>
+#include <wx/dcmemory.h>
+#include <wx/bitmap.h>
 #include <wx/msw/wrapwin.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
@@ -100,6 +102,36 @@ void WinSetDarkTitlebar(wxTopLevelWindow* window, bool dark) {
 		SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
 		             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
 		             SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
+void WinSetCaptionColour(wxTopLevelWindow* window, const wxColour& bar, const wxColour& text) {
+	if (window == nullptr) return;
+	HWND hwnd = static_cast<HWND>(window->GetHWND());
+	if (hwnd == nullptr) return;
+	// DWMWA_BORDER_COLOR 34, DWMWA_CAPTION_COLOR 35, DWMWA_TEXT_COLOR 36:
+	// Windows 11 only, named from the 10.0.22000 SDK. Windows 10 refuses them.
+	const COLORREF caption = RGB(bar.Red(), bar.Green(), bar.Blue());
+	const COLORREF ink = RGB(text.Red(), text.Green(), text.Blue());
+	DwmSetWindowAttribute(hwnd, 35, &caption, sizeof(caption));
+	DwmSetWindowAttribute(hwnd, 36, &ink, sizeof(ink));
+	DwmSetWindowAttribute(hwnd, 34, &caption, sizeof(caption));
+}
+
+bool WinCaptureWindow(wxWindow* window, const wxString& pngPath) {
+	if (window == nullptr) return false;
+	HWND hwnd = static_cast<HWND>(window->GetHWND());
+	RECT rc;
+	if (hwnd == nullptr || !::GetWindowRect(hwnd, &rc)) return false;
+	const int w = rc.right - rc.left, h = rc.bottom - rc.top;
+	if (w <= 0 || h <= 0) return false;
+	wxBitmap bmp(w, h, 24);
+	{
+		wxMemoryDC dc(bmp);
+		// PW_RENDERFULLCONTENT (2): what DWM composes, so the OpenGL canvas and
+		// the title bar come along, not just what GDI drew.
+		if (!::PrintWindow(hwnd, static_cast<HDC>(dc.GetHDC()), 2)) return false;
+	}
+	return bmp.SaveFile(pngPath, wxBITMAP_TYPE_PNG);
 }
 
 void WinRoundCorners(wxTopLevelWindow* window) {

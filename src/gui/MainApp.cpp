@@ -735,6 +735,7 @@ bool MainApp::OnInit()
     bool wireShape = false;    // --wire-shape dumps a routed wire's segment map
     bool wireDrag = false;     // --wire-drag dumps a wire's segment map after a seg drag
     bool renderUi = false;     // --render-ui draws the welcome/tour/shortcuts windows
+    bool renderWindows = false;   // --render-windows captures real windows (Windows only)
     std::string gateName, gateAngle;
     std::string wsGateA, wsGateB, wsAngleA, wsAngleB;
     if (argc >= 7 && (wxString(argv[1]) == "--wire-shape" ||
@@ -764,6 +765,15 @@ bool MainApp::OnInit()
         renderMode().headlessRender = true;
         renderUi = true;
         renderOutput = argv[2].ToStdString();
+    } else if (argc >= 3 && wxString(argv[1]) == "--render-windows") {
+        // --render-windows <dir> [circuit.cdl]: the real main window, native
+        // parts and all, captured as PNGs in light, dark and sim view. The
+        // one way to see what a Windows build looks like without a Windows
+        // machine. Needs a desktop; CI's Windows runners have one.
+        renderMode().headlessRender = true;
+        renderWindows = true;
+        renderOutput = argv[2].ToStdString();
+        if (argc >= 4) cmdFilename = argv[3].ToStdString();
     } else if (argc >= 4 && (wxString(argv[1]) == "--render" ||
                       wxString(argv[1]) == "--render-skia" ||
                       wxString(argv[1]) == "--render-svg" ||
@@ -835,7 +845,7 @@ bool MainApp::OnInit()
 #ifdef __APPLE__
         MacSetBackgroundApp();
 #endif
-        frame->Move(-30000, -30000);
+        if (!renderWindows) frame->Move(-30000, -30000);
     }
 
     if (renderMode().headlessRender && (wireShape || wireDrag)) {
@@ -863,6 +873,43 @@ bool MainApp::OnInit()
         ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-narrow.png", 520, 600, "");
         renderMode().darkMode = true;
         ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-dark.png", 860, 600, "");
+        fflush(nullptr);
+        std::_Exit(ok ? 0 : 1);
+    }
+
+    if (renderMode().headlessRender && renderWindows) {
+        bool ok = true;
+#ifdef _WIN32
+        wxFileName::Mkdir(renderOutput, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        frame->SetSize(1280, 820);
+        frame->Centre();
+        frame->Show(true);
+        frame->Raise();
+        frame->stopTimers();
+        if (!cmdFilename.empty()) frame->load(cmdFilename);
+        auto settle = [frame] {
+            for (int i = 0; i < 20; i++) { wxYield(); wxMilliSleep(25); }
+            frame->Refresh();
+            frame->Update();
+            for (int i = 0; i < 10; i++) { wxYield(); wxMilliSleep(25); }
+        };
+        auto shoot = [&](const char* name) {
+            settle();
+            ok &= WinCaptureWindow(frame, renderOutput + "/" + name);
+        };
+        renderMode().darkMode = false;
+        frame->ApplyTheme();
+        shoot("main-light.png");
+        frame->SetSimView(true);
+        shoot("main-sim-light.png");
+        frame->SetSimView(false);
+        renderMode().darkMode = true;
+        frame->ApplyTheme();
+        shoot("main-dark.png");
+        frame->SetSimView(true);
+        shoot("main-sim-dark.png");
+        frame->SetSimView(false);
+#endif
         fflush(nullptr);
         std::_Exit(ok ? 0 : 1);
     }

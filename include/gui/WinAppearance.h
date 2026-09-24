@@ -27,6 +27,14 @@ void WinSetDarkTitlebars(bool dark);
 void WinSetAppDarkMode(bool dark);
 void WinThemeControls(wxWindow* root, bool dark);
 
+// Paint the title bar `bar` with `text` on it (Windows 11), so it reads as
+// one surface with whatever sits under it. Windows 10 keeps its own colours.
+void WinSetCaptionColour(wxTopLevelWindow* window, const wxColour& bar, const wxColour& text);
+
+// The window as it looks on screen, children and all, saved as a PNG. For
+// --render-windows, which is how a Windows build gets looked at from a Mac.
+bool WinCaptureWindow(wxWindow* window, const wxString& pngPath);
+
 // Round a borderless popup's corners the Windows 11 way: antialiased, with
 // the system's thin border and shadow. Does nothing on Windows 10.
 void WinRoundCorners(wxTopLevelWindow* window);

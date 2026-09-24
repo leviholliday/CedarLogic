@@ -75,6 +75,7 @@ enum
     Tool_ZoomOut,
     Tool_Lock,
 	Tool_NewTab,
+	Tool_AppMenu,   // Windows: the menu button standing in for the hidden menu bar
 	Tool_DeleteTab,
 	Tool_CloseTab,
 	Tool_ReopenTab,
@@ -101,6 +102,18 @@ class MainFrame : public wxFrame {
 public:
     // ctor(s)
     MainFrame(const wxString& title, string cmdFilename = "");
+	// Run a menu command as if it had been picked from the menu bar, check
+	// items toggling as they would there.
+	void RunMenuCommand(int id);
+	// The whole menu bar as one popup, at `at` in `from`'s coordinates, then run
+	// what was picked. It is the app's only menu on Windows, where the bar is
+	// hidden; `quick` puts the everyday commands above the submenus.
+	void ShowAppMenu(wxWindow* from, const wxPoint& at, bool quick = false);
+#ifdef __WXMSW__
+	// The status bar is ours to paint on Windows; see StatusStrip.h.
+	wxStatusBar* OnCreateStatusBar(int number, long style, wxWindowID id,
+	                               const wxString& name) override;
+#endif
 	virtual ~MainFrame();
 	
     // event handlers (these functions should _not_ be virtual)
