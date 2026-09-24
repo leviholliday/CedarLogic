@@ -47,6 +47,13 @@ struct CircuitWindow: View {
             notices = document.loadNotices
             showNotices = !notices.isEmpty
         }
+        .sheet(item: $canvas.truthTable) { TruthTableView(table: $0) }
+        .alert("No Truth Table", isPresented: Binding(get: { canvas.truthTableProblem != nil },
+                                                      set: { if !$0 { canvas.truthTableProblem = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(canvas.truthTableProblem ?? "")
+        }
         .alert(notices.contains { $0.warning } ? "Some of this circuit couldn't be loaded" : "This circuit was updated",
                isPresented: $showNotices) {
             Button("OK", role: .cancel) {}
@@ -84,9 +91,8 @@ private struct NativeLayout: View {
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 230)
         } detail: {
-            CanvasView(document: document, page: page, theme: theme, controller: canvas)
+            CanvasWithScope(document: document, page: page, theme: theme, canvas: canvas)
                 .ignoresSafeArea()
-                .overlay(alignment: .top) { TidyBanner(canvas: canvas) }
                 .inspector(isPresented: $showInspector) {
                     InspectorView(document: document, controller: canvas)
                         .inspectorColumnWidth(min: 220, ideal: 260, max: 360)
@@ -124,8 +130,7 @@ private struct ClassicLayout: View {
             VStack(spacing: 0) {
                 PageTabs(document: document, canvas: canvas, page: $page)
                 Divider()
-                CanvasView(document: document, page: page, theme: theme, controller: canvas)
-                    .overlay(alignment: .top) { TidyBanner(canvas: canvas) }
+                CanvasWithScope(document: document, page: page, theme: theme, canvas: canvas)
             }
         }
         .toolbar {
@@ -347,6 +352,26 @@ private struct TidyBanner: View {
             .shadow(radius: 6, y: 2)
             .padding(.top, 12)
             .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+}
+
+/// The canvas, and the oscilloscope under it when it's shown (Cmd-G).
+private struct CanvasWithScope: View {
+    let document: CoreDocument
+    let page: Int
+    let theme: Theme
+    @ObservedObject var canvas: CanvasController
+
+    var body: some View {
+        VSplitView {
+            CanvasView(document: document, page: page, theme: theme, controller: canvas)
+                .overlay(alignment: .top) { TidyBanner(canvas: canvas) }
+                .frame(minHeight: 200)
+            if canvas.showScope {
+                ScopeView(document: document, canvas: canvas)
+                    .frame(minHeight: 140, idealHeight: 220)
+            }
         }
     }
 }

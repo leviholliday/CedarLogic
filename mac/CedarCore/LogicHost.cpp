@@ -140,12 +140,13 @@ int LogicHost::step(int steps) {
 		cir->step(&changedWires);
 		stepCount++;
 		applyResults(&changedWires);
+		if (afterStep) afterStep();
 		if (pauseRequested) { ran++; break; }
 	}
 	return ran;
 }
 
-void LogicHost::settle(int maxSteps) {
+bool LogicHost::settle(int maxSteps) {
 	int quiet = 0;
 	for (int i = 0; i < maxSteps && quiet < 3; i++) {
 		ID_SET<IDType> changedWires;
@@ -154,4 +155,5 @@ void LogicHost::settle(int maxSteps) {
 		quiet = applyResults(&changedWires) == 0 ? quiet + 1 : 0;
 	}
 	pauseRequested = false;
+	return quiet >= 3;
 }

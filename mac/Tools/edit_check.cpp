@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <map>
+#include <vector>
 #include <string>
 
 static int fails = 0;
@@ -191,6 +192,28 @@ int main(int argc, char** argv) {
 	const int before = (int)doc->sim->stepsRun();
 	cl_document_tick(doc, 500);
 	CHECK((int)doc->sim->stepsRun() > before, "steps ran");
+
+	printf("oscilloscope\n");
+	cl_scope_clear(doc);
+	cl_document_set_running(doc, true);
+	for (int i = 0; i < 40; i++) cl_document_tick(doc, 100);
+	const int nsig = cl_scope_signal_count(doc);
+	const long long len = cl_scope_length(doc);
+	printf("  %d signals, %lld samples\n", nsig, len);
+	CHECK(nsig > 0, "TO labels become signals");
+	CHECK(len > 0, "samples recorded as it runs");
+	int changing = 0;
+	for (int sgi = 0; sgi < nsig; sgi++) {
+		std::vector<unsigned char> buf((size_t)len);
+		cl_scope_samples(doc, sgi, 0, (int)len, buf.data());
+		bool changes = false;
+		for (size_t i = 1; i < buf.size(); i++) if (buf[i] != buf[0]) changes = true;
+		if (changes) changing++;
+		printf("  %-10s", cl_scope_signal(doc, sgi));
+		for (size_t i = 0; i < buf.size() && i < 60; i++) printf("%c", "01Z!?"[buf[i] < 5 ? buf[i] : 4]);
+		printf("\n");
+	}
+	CHECK(changing > 0, "a clocked signal changes over time");
 
 	cl_document_close(doc);
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);

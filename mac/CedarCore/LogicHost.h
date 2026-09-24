@@ -11,6 +11,7 @@
 #include "klsMessage.h"
 #include "logic_defaults.h"
 #include "logic_values.h"
+#include <functional>
 #include <map>
 #include <memory>
 
@@ -31,12 +32,16 @@ public:
 
 	// Step until the wires stop changing, so a circuit opens settled (what the
 	// wx app's settleSimulation does). Capped for circuits that never settle.
-	void settle(int maxSteps = 400);
+	// Returns false when it never stopped changing (a clock, an oscillator).
+	bool settle(int maxSteps = 400);
 
 	// A gate asked to pause (the PAUSE_SIM parameter); cleared when read.
 	bool takePauseRequest() { bool p = pauseRequested; pauseRequested = false; return p; }
 
 	unsigned long long stepsRun() const { return stepCount; }
+
+	// Called after every step (the oscilloscope records here).
+	std::function<void()> afterStep;
 
 private:
 	// Push a step's results into the model; returns how many wires changed.

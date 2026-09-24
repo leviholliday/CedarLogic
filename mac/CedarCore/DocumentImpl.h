@@ -51,7 +51,10 @@ struct CLDocument {
 	int stepMs = 25;
 	double carryMs = 0;
 
-	CLDocument() : sim(new LogicHost(circuit)) { registerLogicHost(&circuit, sim.get()); }
+	CLDocument() : sim(new LogicHost(circuit)) {
+		registerLogicHost(&circuit, sim.get());
+		sim->afterStep = [this] { recordScope(); };
+	}
 	~CLDocument() {
 		pages.clear();
 		registerLogicHost(&circuit, nullptr);
@@ -65,6 +68,19 @@ struct CLDocument {
 		int page = 0;
 		edits::TidyPlan plan;
 	} tidy;
+	// The oscilloscope's recording: one sample per step for every signal a TO
+	// label names (its JUNCTION_ID), from the wire on the label's pin -- what
+	// the wx oscope samples. All traces have the same length; samples[i][0]
+	// is step firstStep.
+	struct Scope {
+		std::vector<std::string> names;                 // sorted
+		std::vector<std::vector<unsigned char>> samples; // parallel to names
+		unsigned long long firstStep = 0;
+		size_t length = 0;
+		unsigned long gateVersion = (unsigned long)-1;
+	} scope;
+	void recordScope();
+
 	// What's under the pointer, for the overlay: a pin (red box) or nothing.
 	bool hoverPin = false;
 	GLPoint2f hoverPinAt;

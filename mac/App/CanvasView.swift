@@ -299,6 +299,7 @@ final class CircuitCanvasNSView: NSView {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r": controller.rotate()
             case "s": if shift { controller.tidy() } else { controller.straighten() }
+            case "t" where !shift: controller.makeTruthTable()
             default: super.keyDown(with: event)
             }
         }
@@ -368,6 +369,11 @@ final class CanvasController: ObservableObject {
     /// Bumped after every edit (menus re-read undo names).
     @Published private(set) var editVersion = 0
     @Published var settingsRequested = false
+    /// Bumped as the oscilloscope records (throttled), so its panel redraws.
+    @Published private(set) var scopeVersion = 0
+    @Published var showScope = false
+    private var lastScopeBump = CACurrentMediaTime()
+    func scopeChanged() { scopeVersion += 1 }
 
     private var timer: Timer?
     private var lastTick = CACurrentMediaTime()
@@ -459,6 +465,39 @@ final class CanvasController: ObservableObject {
     func nudge(dx: CGFloat, dy: CGFloat) { document?.nudge(page: page, dx: dx, dy: dy); edited() }
     func straighten() { document?.straighten(page: page); edited() }
 
+    // MARK: Truth tables, export, print
+
+    @Published var truthTable: TruthTable?
+    @Published var truthTableProblem: String?
+
+    func makeTruthTable() {
+        guard let document else { return }
+        var error = ""
+        if let table = TruthTable(document: document, page: page, error: &error) {
+            truthTable = table
+        } else {
+            truthTableProblem = error.isEmpty ? "A truth table couldn't be made for this page." : error
+        }
+        redraw()   // it leaves the switches as they were, but the circuit settles again
+    }
+
+    private var documentTitle: String {
+        let name = document.map { $0.pageCount > 1 ? " - \($0.pageName(page))" : "" } ?? ""
+        let title = (view?.window?.representedURL?.deletingPathExtension().lastPathComponent
+            ?? view?.window?.title ?? "Circuit")
+        return title + name
+    }
+
+    func export() {
+        guard let document else { return }
+        PageExport.run(document, page: page, suggestedName: documentTitle, window: view?.window)
+    }
+
+    func printPage() {
+        guard let document else { return }
+        PagePrintView.print(document, page: page, window: view?.window)
+    }
+
     // Tidy Up. Which mode Shift-S uses is a setting; the menu offers both.
     @Published private(set) var tidyActive = false
     @Published private(set) var tidyMode = 0
@@ -534,6 +573,7 @@ final class CanvasController: ObservableObject {
         if isRunning { setRunning(false) }
         document?.stepOnce()
         redraw()
+        scopeChanged()
     }
 
     /// 60 times a second, hand the engine the time that passed. The engine
@@ -554,7 +594,10 @@ final class CanvasController: ObservableObject {
         lastTick = now
         guard let document, isRunning else { return }
         let result = document.tick(elapsedMs: elapsed)
-        if result.changed { redraw() }
+        if result.changed {
+            redraw()
+            if showScope && now - lastScopeBump > 1.0 / 15 { lastScopeBump = now; scopeChanged() }
+        }
         if result.paused { isRunning = false }
     }
 

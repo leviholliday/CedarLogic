@@ -59,6 +59,14 @@ void cl_document_draw(CLDocument *doc, int page, CGContextRef ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark);
 
+// A whole page scaled to fit a width x height area (points, y down) with a
+// margin, centered -- for export and printing. PRINT is black line drawings
+// on white. False for an empty page.
+enum { CL_STYLE_LIGHT = 0, CL_STYLE_DARK = 1, CL_STYLE_PRINT = 2 };
+bool cl_document_draw_fitted(CLDocument *doc, int page, CGContextRef ctx,
+                             double width, double height, double margin,
+                             double backingScale, int style);
+
 // ---- Simulation --------------------------------------------------------
 
 // Advance the simulation by the wall time that has passed (called every frame
@@ -201,6 +209,34 @@ const char *cl_library_gate_caption(const char *libGateName);
 // (y down), for palette tiles.
 void cl_library_draw_gate(const char *libGateName, CGContextRef ctx, double width, double height,
                           double backingScale, bool dark);
+
+// ---- Oscilloscope ------------------------------------------------------------
+// One sample per simulation step for each signal a TO label names. Values
+// are the engine's states: 0 low, 1 high, 2 high-Z, 3 conflict, 4 unknown,
+// 255 no data yet (the signal didn't exist then).
+int cl_scope_signal_count(const CLDocument *doc);
+const char *cl_scope_signal(const CLDocument *doc, int index);
+long long cl_scope_length(const CLDocument *doc);        // samples held (same for every signal)
+long long cl_scope_first_step(const CLDocument *doc);    // step number of sample 0
+// Copy `count` samples starting at index `from` (from 0 to length-1); indices
+// outside the recording read as 255. Returns how many were written.
+int cl_scope_samples(const CLDocument *doc, int signal, long long from, int count, unsigned char *out);
+void cl_scope_clear(CLDocument *doc);
+
+// ---- Truth tables ------------------------------------------------------------
+// Every combination of a page's switches (or the selected ones), with its
+// lights read once the circuit settles -- as the wx app builds it. Cells are
+// '0', '1', or 'X' unknown, 'Z' floating, '!' conflict, '-' not connected.
+typedef struct CLTruthTable CLTruthTable;
+CLTruthTable *cl_truth_table(CLDocument *doc, int page, char *error, int errorLen);
+void cl_tt_free(CLTruthTable *tt);
+int cl_tt_inputs(const CLTruthTable *tt);    // the first columns are inputs
+int cl_tt_columns(const CLTruthTable *tt);
+int cl_tt_rows(const CLTruthTable *tt);
+const char *cl_tt_name(const CLTruthTable *tt, int column);
+char cl_tt_cell(const CLTruthTable *tt, int row, int column);
+bool cl_tt_sequential(const CLTruthTable *tt);   // clocks or flip-flops on the page
+int cl_tt_unsettled(const CLTruthTable *tt);     // rows that never stopped changing
 
 // ---- Load notes ----------------------------------------------------------
 

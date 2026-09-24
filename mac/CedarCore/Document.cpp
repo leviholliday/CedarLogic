@@ -167,9 +167,9 @@ bool cl_document_page_bounds(const CLDocument* doc, int page,
 	return true;
 }
 
-void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
-                      double backingScale, double originX, double originY,
-                      double unitsPerPoint, bool dark) {
+static void drawPage(CLDocument* doc, int page, CGContextRef ctx,
+                     double backingScale, double originX, double originY,
+                     double unitsPerPoint, const cl::render::RenderStyle& style) {
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
 	if (p == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	// Work in physical pixels, as the wx app's device space does, so stroke
@@ -182,7 +182,6 @@ void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
 	cl::mac::CGScene scene(ctx);
 	scene.setViewport(t);
-	const cl::render::RenderStyle style = cl::render::RenderStyle::screen(dark);
 	// In id order: the page's lists are hash maps, whose order depends on how
 	// they were built, and where things overlap the order shows.
 	std::vector<unsigned long> ids;
@@ -194,6 +193,32 @@ void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
 	std::sort(ids.begin(), ids.end());
 	for (unsigned long id : ids) (*p->getGateList())[id]->drawToScene(scene, style);
 	CGContextRestoreGState(ctx);
+}
+
+void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
+                      double backingScale, double originX, double originY,
+                      double unitsPerPoint, bool dark) {
+	drawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint,
+	         cl::render::RenderStyle::screen(dark));
+}
+
+bool cl_document_draw_fitted(CLDocument* doc, int page, CGContextRef ctx,
+                             double width, double height, double margin,
+                             double backingScale, int style) {
+	double l, b, r, t;
+	if (width <= 2 * margin || height <= 2 * margin ||
+	    !cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return false;
+	const double w = std::max(r - l, 1.0), h = std::max(t - b, 1.0);
+	const double upp = std::max(w / (width - 2 * margin), h / (height - 2 * margin));
+	// Centered: the world point at the top-left corner of the area.
+	const double originX = (l + r) / 2 - upp * width / 2;
+	const double originY = (b + t) / 2 + upp * height / 2;
+	cl::render::RenderStyle rs = style == CL_STYLE_PRINT
+		? cl::render::RenderStyle::print()
+		: cl::render::RenderStyle::screen(style == CL_STYLE_DARK);
+	rs.showSelection = false;
+	drawPage(doc, page, ctx, backingScale, originX, originY, upp, rs);
+	return true;
 }
 
 int cl_document_tick(CLDocument* doc, double elapsedMs) {

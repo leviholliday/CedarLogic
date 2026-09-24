@@ -1,12 +1,15 @@
 // Headless check of the native renderer: draw one page of a .cdl to a PNG
 // through CedarCore, fitted to the image.
 //   render_png <cl_gatedefs.xml> <in.cdl> <page> <out.png> [width height]
+// With CL_RENDER_FITTED=light|dark|print it draws through the export path
+// (cl_document_draw_fitted) instead.
 #include "CedarCore.h"
 #include <CoreGraphics/CoreGraphics.h>
 #include <ImageIO/ImageIO.h>
 #include <CoreServices/CoreServices.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <algorithm>
 
 int main(int argc, char** argv) {
@@ -30,7 +33,12 @@ int main(int argc, char** argv) {
 	// A flipped view in points: y down, scaled by the backing factor.
 	CGContextTranslateCTM(ctx, 0, H);
 	CGContextScaleCTM(ctx, sf, -sf);
-	cl_document_draw(doc, page, ctx, sf, ox, oy, upp, false);
+	if (const char* fitted = getenv("CL_RENDER_FITTED")) {
+		const int style = !strcmp(fitted, "print") ? CL_STYLE_PRINT : !strcmp(fitted, "dark") ? CL_STYLE_DARK : CL_STYLE_LIGHT;
+		if (!cl_document_draw_fitted(doc, page, ctx, wPts, hPts, 12, sf, style)) printf("empty page\n");
+	} else {
+		cl_document_draw(doc, page, ctx, sf, ox, oy, upp, false);
+	}
 	CGImageRef img = CGBitmapContextCreateImage(ctx);
 	CFURLRef url = CFURLCreateFromFileSystemRepresentation(nullptr, (const UInt8*)argv[4], strlen(argv[4]), false);
 	CGImageDestinationRef dest = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, nullptr);

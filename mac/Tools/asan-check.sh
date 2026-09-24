@@ -12,8 +12,12 @@ SRC=$(sed -n '/^CORE=(/,/^)/p' mac/build.sh | grep -v '^CORE=(\|^)\|^\s*#')
 SRC=$(eval echo $SRC)
 OBJS=()
 for f in $SRC mac/Tools/edit_check.cpp; do
-	o="$OBJ/$(echo "$f" | tr / _).o"; OBJS+=("$o")
-	if [ ! -f "$o" ] || [ "$f" -nt "$o" ]; then clang++ "${FLAGS[@]}" -c "$f" -o "$o"; fi
+	o="$OBJ/$(echo "$f" | tr / _).o"; d="${o%.o}.d"; OBJS+=("$o")
+	# Rebuild when the source or a header it includes changed (as build.sh does).
+	stale=0
+	if [ ! -f "$o" ] || [ ! -f "$d" ] || [ "$f" -nt "$o" ]; then stale=1
+	else for h in $(sed -e 's/^[^:]*://' -e 's/\\$//' "$d"); do [ "$h" -nt "$o" ] && { stale=1; break; }; done; fi
+	if [ $stale = 1 ]; then clang++ "${FLAGS[@]}" -MMD -MF "$d" -c "$f" -o "$o"; fi
 done
 clang++ -fsanitize=address "${OBJS[@]}" -framework CoreGraphics -framework CoreText -framework ImageIO \
 	-framework CoreServices -framework CoreFoundation -framework OpenGL -o mac/build/edit_check_asan

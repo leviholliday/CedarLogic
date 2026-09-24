@@ -1,5 +1,5 @@
-// CedarLogic for Mac: the native front end. Stage 0 opens circuits and shows
-// them; the engine underneath is the same C++ the wx app runs.
+// CedarLogic for Mac: the native front end. The engine underneath is the same
+// C++ the wx app runs.
 
 import SwiftUI
 
@@ -20,6 +20,7 @@ struct CedarLogicApp: App {
             EditCommands()
             ViewCommands()
             SimulationCommands()
+            FileCommands()
         }
 
         Window("Your Circuits", id: "library") {
@@ -66,6 +67,10 @@ struct ViewCommands: Commands {
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(canvas == nil)
             Divider()
+            Button(canvas?.showScope == true ? "Hide Oscilloscope" : "Show Oscilloscope") { canvas?.showScope.toggle() }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled(canvas == nil)
+            Divider()
         }
     }
 }
@@ -80,6 +85,10 @@ struct SimulationCommands: Commands {
                 .disabled(canvas == nil)
             Button("Step") { canvas?.stepOnce() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(canvas == nil)
+            Divider()
+            Button("Truth Table…") { canvas?.makeTruthTable() }
+                .help("T: every combination of the page's switches (or the selected ones) and what the lights show")
                 .disabled(canvas == nil)
         }
     }
@@ -119,6 +128,23 @@ struct EditCommands: Commands {
             Button(tidyTitle(defaultMode)) { canvas?.tidy(mode: defaultMode) }
                 .help("Shift-S. Lines parts up and reroutes their wires (the selection, or the whole page).")
             Button(tidyTitle(1 - defaultMode)) { canvas?.tidy(mode: 1 - defaultMode) }
+        }
+    }
+}
+
+struct FileCommands: Commands {
+    @FocusedObject private var canvas: CanvasController?
+
+    var body: some Commands {
+        CommandGroup(after: .saveItem) {
+            Button("Export…") { canvas?.export() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(canvas == nil)
+        }
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") { canvas?.printPage() }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(canvas == nil)
         }
     }
 }
