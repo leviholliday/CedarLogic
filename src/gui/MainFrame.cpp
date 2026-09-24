@@ -521,6 +521,12 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
+	// Focus set before the window shows can end up in the palette's search
+	// field instead, so keys like Cmd+A missed the canvas on launch.
+	Bind(wxEVT_SHOW, [this](wxShowEvent& e) {
+		if (e.IsShown()) CallAfter([this]() { if (currentCanvas) currentCanvas->SetFocus(); });
+		e.Skip();
+	});
 	noteCanvasUsed(currentCanvas);
 
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
@@ -531,7 +537,11 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	}, Edit_Duplicate);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		// A text field with focus (a search box, a name) keeps its own Select All.
-		if (wxTextEntry* text = dynamic_cast<wxTextEntry*>(wxWindow::FindFocus())) { text->SelectAll(); return; }
+		// A read-only or hidden one (focus can land there at launch) doesn't
+		// count -- Cmd+A then seemed to do nothing.
+		wxWindow* focus = wxWindow::FindFocus();
+		wxTextEntry* text = dynamic_cast<wxTextEntry*>(focus);
+		if (text && text->IsEditable() && focus->IsShownOnScreen()) { text->SelectAll(); return; }
 		if (currentCanvas) currentCanvas->selectAll();
 	}, wxID_SELECTALL);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);

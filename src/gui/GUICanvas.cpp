@@ -102,10 +102,10 @@ GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 #ifdef __WXOSX__
 	// Suppress macOS bonk sound for keys handled in OnKeyDown
 	Bind(wxEVT_CHAR, [](wxKeyEvent& evt) {
+		// Every bare key OnKeyDown's switch handles; add new ones here too.
+		static const wxString handled = "aAcCdDrRsStTvVxX +=-";
 		int key = evt.GetKeyCode();
-		if (key == 'a' || key == 'A' || key == 'r' || key == 'R' ||
-			key == 'c' || key == 'C' ||
-			key == WXK_SPACE || key == '+' || key == '=' || key == '-') {
+		if (!evt.CmdDown() && !evt.AltDown() && key < 128 && handled.Find((wxChar)key) != wxNOT_FOUND) {
 			// Swallow — already handled in OnKeyDown
 		} else {
 			evt.Skip();
