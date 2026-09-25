@@ -137,7 +137,10 @@ def cmd_add(rel, version, mode, base_url, manifest, notes_path):
         "<p>CedarLogic %s</p>" % html.escape(short)
     wx, native = [], []
     for line in open(manifest, encoding="utf-8"):
-        name, os_, arch, sig, sha, length = line.rstrip("\n").split("\t")
+        cols = line.rstrip("\n").split("\t") + ["", ""]
+        name, os_, arch, sig, sha, length, own_v, own_short = cols[:8]
+        v_item = own_v or version
+        short_item = (own_short + (" beta" if mode == "beta" else "")) if own_short else short
         is_native = os_ == "native"
         if is_native:
             os_ = "macos"
@@ -145,10 +148,10 @@ def cmd_add(rel, version, mode, base_url, manifest, notes_path):
             sys.exit("appcast.py: %s has no signature; the app would refuse it" % name)
         if os_ == "linux" and len(sha) != 64:
             sys.exit("appcast.py: %s has no SHA-256" % name)
-        blk = item_block(version, short, name, os_, arch, sig, sha, length,
+        blk = item_block(v_item, short_item, name, os_, arch, sig, sha, length,
                          "%s/%s" % (base_url, name), notes)
         key = os_ if not arch else "%s-%s" % (os_, arch)
-        (native if is_native else wx).append((key, version, blk))
+        (native if is_native else wx).append((key, v_item, blk))
 
     for items, is_native in ((wx, False), (native, True)):
         if not items:
@@ -180,15 +183,14 @@ def cmd_promote(rel, version):
     for is_native in (False, True):
         normal, beta = feed_names(is_native)
         title = "CedarLogic Native updates" if is_native else "CedarLogic updates"
-        src = [it for it in read_items(os.path.join(rel, beta)) if it[1] == version]
+        src = [it for it in read_items(os.path.join(rel, beta))
+               if it[1] == version or "/v%s/" % version in it[2]]
         if not src:
             continue
         final = []
         for k, v, blk in src:
-            blk = blk.replace("%s beta</sparkle:shortVersionString>" % v,
-                              "%s</sparkle:shortVersionString>" % v)
-            blk = blk.replace("<title>CedarLogic %s beta</title>" % v,
-                              "<title>CedarLogic %s</title>" % v)
+            blk = blk.replace(" beta</sparkle:shortVersionString>", "</sparkle:shortVersionString>")
+            blk = re.sub(r"(<title>CedarLogic .*?) beta</title>", r"\1</title>", blk)
             final.append((k, v, blk))
         upsert(os.path.join(rel, normal), final, title)
         upsert(os.path.join(rel, beta), final, title + " (beta testers)")

@@ -103,11 +103,13 @@ if [ "$USE_CI" = 1 ]; then
     fetch_ci "Linux build" "$LINUX_BRANCH" "CedarLogic-linux-appimage-*"
 fi
 
-NATIVE_ZIP=""
+NATIVE_ZIP="" NATIVE_BUILD="" NATIVE_SHORT=""
 if [ -n "$NATIVE" ]; then
     [ -d "$NATIVE" ] || die "no app at $NATIVE"
-    NV=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$NATIVE/Contents/Info.plist")
-    [ "$NV" = "$VERSION" ] || die "$NATIVE is version $NV, not $VERSION (bump mac/App/Info.plist)"
+    # The native app counts its own builds (CFBundleVersion = commit count,
+    # set by mac/build.sh); Sparkle compares that, so it goes in the feed.
+    NATIVE_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$NATIVE/Contents/Info.plist")
+    NATIVE_SHORT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$NATIVE/Contents/Info.plist")
     NATIVE_ZIP="$DIST/CedarLogic-Native-$VERSION-mac.zip"
     rm -f "$NATIVE_ZIP"
     ditto -c -k --sequesterRsrc --keepParent "$NATIVE" "$NATIVE_ZIP"
@@ -152,7 +154,9 @@ for f in "${FILES[@]}"; do
         sig=$(echo "$out" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
         [ -n "$sig" ] || die "no signature for $name: $out"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$os" "$arch" "$sig" "$sha" "$len" >> "$MANIFEST"
+    fv="" fs=""
+    [ "$os" = native ] && { fv="$NATIVE_BUILD"; fs="$NATIVE_SHORT (build $NATIVE_BUILD)"; }
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$os" "$arch" "$sig" "$sha" "$len" "$fv" "$fs" >> "$MANIFEST"
     echo "ready: $name ($os${arch:+ $arch})"
 done
 
