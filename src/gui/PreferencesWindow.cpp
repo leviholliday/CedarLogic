@@ -7,6 +7,8 @@
 #include "MainApp.h"
 #include "MainFrame.h"
 #include "Settings.h"
+#include "Updater.h"
+#include <wx/config.h>
 #ifdef __APPLE__
 #include "NativeIcons.h"
 #endif
@@ -129,6 +131,16 @@ public:
 		statusInfo = addCheck("Status bar:", "Show zoom, cursor position, and counts", s.showStatusInfo,
 			"The readout in the bottom-right corner of the window.");
 
+		channel = new wxChoice(host(), wxID_ANY);
+		channel->Append("Normal tester");
+		channel->Append("Beta tester");
+		channel->SetSelection(s.updateChannel == 1 ? 1 : 0);
+		channel->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { changed(); });
+		addRow("Testing group:", channel,
+			"Beta testers get new versions first, before they're ready for everyone. "
+			"Normal testers get them once they're settled. Updates install from inside the app "
+			"(Help > Check for Updates...).");
+
 		GetSizer()->SetSizeHints(this);
 	}
 
@@ -139,6 +151,15 @@ protected:
 		s.studentName = std::string(name->GetValue().Strip(wxString::both).ToUTF8());
 		int fps = refresh->GetValue();
 		s.refreshRate = (fps > 0) ? 1000 / fps : 16;
+		const int newChannel = channel->GetSelection() == 1 ? 1 : 0;
+		if (newChannel != s.updateChannel) {
+			s.updateChannel = newChannel;
+			if (wxConfigBase* conf = wxConfigBase::Get()) {   // don't lose it to a crash
+				conf->Write("UpdateChannel", newChannel);
+				conf->Flush();
+			}
+			Updater_ChannelChanged();
+		}
 		pushLive();
 	}
 
@@ -157,6 +178,7 @@ private:
 	wxSpinCtrl* refresh;
 	wxCheckBox* statusInfo;
 	wxTextCtrl* name;
+	wxChoice* channel;
 };
 
 // ---- Appearance ------------------------------------------------------------

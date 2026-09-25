@@ -84,6 +84,7 @@
 #include "LinuxAppearance.h"
 #endif
 #include "UiKit.h"
+#include "Updater.h"
 #include "UpdateInfo.h"   // cl::update::checksDisabled, for managed deployments
 
 DECLARE_APP(MainApp)
@@ -267,11 +268,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	helpMenu->AppendSeparator();
 	//helpMenu->Append(Help_ReportABug, "Report a bug...");
 	//helpMenu->Append(Help_RequestAFeature, "Request a feature...");
-#if defined(__APPLE__) || defined(_WIN32)
 	helpMenu->Append(Help_DownloadLatestVersion, "Check for Updates...");
-#else
-	helpMenu->Append(Help_DownloadLatestVersion, "Download latest version...");
-#endif
 	// An administrator can turn update checking off for a managed deployment, so
 	// the organisation owns the installed version. Leave the item visible but
 	// disabled: a greyed-out entry explains why nothing happens, where a missing
@@ -3361,6 +3358,7 @@ void MainFrame::saveSettings() {
 	conf->Write("LastLibraryDoc", wxString(appConfig().appSettings.lastLibraryDoc));
 	conf->Write("StudentName", wxString::FromUTF8(settings.studentName.c_str()));
 	conf->Write("ExportInfoEnabled", settings.exportInfoEnabled);
+	conf->Write("UpdateChannel", settings.updateChannel);
 	conf->Write("ToolbarStyle", settings.toolbarStyle);
 	conf->Write("ToolbarHidden", settings.toolbarHidden);
 	conf->Write("WireConnRadius", settings.wireConnRadius);
@@ -3921,16 +3919,7 @@ void MainFrame::OnDownloadLatestVersion(wxCommandEvent& event) {
 		             "Updates are managed", wxOK | wxICON_INFORMATION, this);
 		return;
 	}
-#ifdef __APPLE__
-	SparkleUpdater_CheckForUpdates();
-#elif defined(_WIN32)
-	WinSparkleUpdater_CheckForUpdates();
-#else
-	// No auto-updater on Linux: open this fork's releases page, where the
-	// AppImage is published. (Upstream's cedar.to link leads to the original
-	// Cedarville builds, not this version.)
-	wxLaunchDefaultBrowser(CEDARLOGIC_RELEASES_URL, 0);
-#endif
+	Updater_CheckNow();
 }
 
 void MainFrame::OnKeyboardShortcuts(wxCommandEvent& WXUNUSED(event)) {

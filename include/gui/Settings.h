@@ -80,7 +80,8 @@ struct ApplicationSettings {
 	int gridStyle = 0;       // 0 = lines, 1 = dots
 	int accentColor = 0;     // index into RenderStyle::accent()'s choices
 	int wireThickness = 1;   // 0 = thin, 1 = normal, 2 = thick (screen only)
-	bool showStatusInfo = true;   // zoom / position / counts in the status bar
+	bool showStatusInfo = true;
+	int updateChannel = 0;   // 0 = normal tester, 1 = beta tester (see Updater.h)   // zoom / position / counts in the status bar
 	// What a plain scroll does on the canvas, per device (0 = zoom, 1 = move
 	// around). Only macOS can tell a trackpad from a wheel; elsewhere every
 	// scroll uses the mouse setting. Cmd/Ctrl+scroll always zooms and

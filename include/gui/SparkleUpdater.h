@@ -19,6 +19,10 @@ void SparkleUpdater_WarnIfReadOnlyLocation();
 // Check for updates (shows UI)
 void SparkleUpdater_CheckForUpdates();
 
+// The testing group changed: the delegate now answers with the other feed, so
+// look there in the background straight away.
+void SparkleUpdater_ChannelChanged();
+
 #endif // __APPLE__
 
 #endif // SPARKLEUPDATER_H

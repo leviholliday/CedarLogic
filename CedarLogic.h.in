@@ -4,6 +4,7 @@
 #define CedarLogic_VERSION_PATCH @CedarLogic_VERSION_PATCH@
 #define CEDARLOGIC_PUBLISHER "@CEDARLOGIC_PUBLISHER@"
 #define CEDARLOGIC_APPCAST_URL "@CEDARLOGIC_APPCAST_URL@"
+#define CEDARLOGIC_APPCAST_BETA_URL "@CEDARLOGIC_APPCAST_BETA_URL@"
 #define CEDARLOGIC_RELEASES_URL "https://github.com/@CEDARLOGIC_RELEASES_REPO@/releases/latest"
 #define CEDARLOGIC_ISSUES_URL "https://github.com/@CEDARLOGIC_RELEASES_REPO@/issues/new"
 // 1 when the build carries the update signing key; the updater stays off otherwise.

@@ -42,6 +42,7 @@
 #include "wx/dialog.h"
 #include "wx/sizer.h"
 #include "UpdateInfo.h"
+#include "Updater.h"
 #include "wx/stattext.h"
 #include "wx/textctrl.h"
 #include "wx/button.h"
@@ -488,7 +489,7 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
         // runs, and the thread never has to touch a wx object. The flags are
         // atomic because two threads see them; join() below is what makes
         // `newest` safe to read on this thread.
-        static const char *kAppcastUrl = CEDARLOGIC_APPCAST_URL;
+        const char *kAppcastUrl = updateFeedUrl();
         std::atomic<bool> done(false);
         std::atomic<bool> ok(false);
         std::thread fetcher([&]() {
@@ -498,7 +499,7 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
 #elif defined(__APPLE__)
             ok.store(!xml.empty() && cl::update::appcastLatest(xml, "macos", newest));
 #else
-            ok.store(false);
+            ok.store(!xml.empty() && cl::update::appcastLatest(xml, "linux", newest));
 #endif
             done.store(true);
         });
@@ -1006,6 +1007,9 @@ bool MainApp::OnInit()
         WinSparkleUpdater_Initialize();
     }
 #endif
+#if !defined(__APPLE__) && !defined(_WIN32)
+    if (!cl::update::checksDisabled()) LinuxUpdater_Initialize();
+#endif
 
     // success: wxApp::OnRun() will be called which will enter the main message
     // loop and the application will run. If we returned false here, the
@@ -1091,6 +1095,7 @@ void MainApp::loadSettings() {
 	conf->Read("LastDirectory", &str, "");
 	appConfig().appSettings.lastDir = str;
 	conf->Read("ExportInfoEnabled", &appConfig().appSettings.exportInfoEnabled, true);
+	conf->Read("UpdateChannel", &appConfig().appSettings.updateChannel, 0);
 	conf->Read("ToolbarStyle", &appConfig().appSettings.toolbarStyle, 0);
 	conf->Read("ToolbarHidden", &appConfig().appSettings.toolbarHidden, 0);
 	conf->Read("LastLibraryDoc", &str, "");
@@ -1185,6 +1190,7 @@ void MainApp::loadSettings() {
 }
 
 int MainApp::OnExit() {
+	Updater_OnExit();   // relaunches the Linux AppImage after an update
 #ifdef _WIN32
 	// Stop the WinSparkle updater's background thread. Symmetric with the
 	// win_sparkle_init() in OnInit -- it was never called, so the updater thread

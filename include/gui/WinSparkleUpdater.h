@@ -14,6 +14,10 @@ void WinSparkleUpdater_Initialize();
 // Check for updates (shows UI)
 void WinSparkleUpdater_CheckForUpdates();
 
+// The testing group changed: restart WinSparkle on the other feed (the URL can
+// only be set before win_sparkle_init) and check it quietly.
+void WinSparkleUpdater_ChannelChanged();
+
 // Cleanup WinSparkle (call before app exit)
 void WinSparkleUpdater_Cleanup();
 

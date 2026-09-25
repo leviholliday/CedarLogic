@@ -29,7 +29,10 @@ endif()
 # (Windows). A build without it has its updater switched off: on macOS Sparkle
 # refuses to start keyless, and on Windows WinSparkle would install whatever
 # the feed pointed at without checking a signature.
-set(SPARKLE_ED_PUBLIC_KEY "" CACHE STRING "Sparkle EdDSA public key for auto-updates")
+# The public half of the key: safe to publish, so it is the default and a local
+# build can update itself too. The private half is in the Mac keychain (account
+# "cedarlogic") and in the SPARKLE_ED_PRIVATE_KEY repository secret.
+set(SPARKLE_ED_PUBLIC_KEY "yxLh+j07mcolZ462R1sZtniQPJ+hjvkKSgtNG6dY700=" CACHE STRING "Sparkle EdDSA public key for auto-updates")
 if(SPARKLE_ED_PUBLIC_KEY)
     set(CEDARLOGIC_UPDATES_SIGNED 1)
 else()
@@ -50,6 +53,11 @@ set(CEDARLOGIC_RELEASES_REPO "leviholliday/CedarLogic-Releases" CACHE STRING
 set(CEDARLOGIC_APPCAST_URL
     "https://raw.githubusercontent.com/${CEDARLOGIC_RELEASES_REPO}/main/appcast.xml"
     CACHE STRING "Sparkle/WinSparkle update feed")
+# Beta testers follow this feed instead (Settings > General > Testing group).
+# It carries every normal release as well as the beta builds.
+set(CEDARLOGIC_APPCAST_BETA_URL
+    "https://raw.githubusercontent.com/${CEDARLOGIC_RELEASES_REPO}/main/appcast-beta.xml"
+    CACHE STRING "Update feed for beta testers")
 set(CEDARLOGIC_BUNDLE_ID "com.leviholliday.cedarlogic" CACHE STRING "macOS bundle identifier")
 configure_file(CedarLogic.h.in CedarLogic.h)
 
