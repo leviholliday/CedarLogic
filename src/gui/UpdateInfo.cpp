@@ -9,6 +9,9 @@
 #include <cctype>
 #include <cstdlib>
 #include <cwchar>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <string>
 
 #ifdef _WIN32
@@ -193,11 +196,168 @@ std::string fetchAppcast(const std::string &url) {
 #elif defined(__APPLE__)
     return cl_update_fetch_appcast_mac(url);
 #else
-    // Linux builds have no auto-updater, so nothing consumes this.
-    (void)host;
-    (void)path;
+    // Linux: curl, or wget where curl is missing (a stock Ubuntu desktop has
+    // only wget). The URL is ours and quoted, and a quote in it is refused.
+    if (url.find('\'') != std::string::npos) return std::string();
+    std::string body;
+    const std::string cmds[] = {
+        "curl -fsSL --max-time 15 '" + url + "' 2>/dev/null",
+        "wget -q -T 15 -O - '" + url + "' 2>/dev/null",
+    };
+    for (const std::string &cmd : cmds) {
+        FILE *p = popen(cmd.c_str(), "r");
+        if (!p) continue;
+        body.clear();
+        char chunk[8192];
+        size_t got;
+        while (body.size() < (1u << 20) && (got = fread(chunk, 1, sizeof(chunk), p)) > 0)
+            body.append(chunk, got);
+        if (pclose(p) == 0 && !body.empty()) return body;
+    }
     return std::string();
 #endif
+}
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+bool downloadFile(const std::string &url, const std::string &dest) {
+    if (url.find('\'') != std::string::npos || dest.find('\'') != std::string::npos)
+        return false;
+    const std::string cmds[] = {
+        "curl -fsSL --max-time 600 -o '" + dest + "' '" + url + "' 2>/dev/null",
+        "wget -q -T 60 -O '" + dest + "' '" + url + "' 2>/dev/null",
+    };
+    for (const std::string &cmd : cmds) {
+        if (std::system(cmd.c_str()) == 0) return true;
+        std::remove(dest.c_str());
+    }
+    return false;
+}
+#endif
+
+bool appcastLatestItem(const std::string &xml, const std::string &os,
+                       const std::string &arch, FeedItem &out) {
+    bool found = false;
+    size_t at = 0;
+    while ((at = xml.find("<item", at)) != std::string::npos) {
+        size_t itemEnd = xml.find("</item>", at);
+        if (itemEnd == std::string::npos) itemEnd = xml.size();
+        std::string item = xml.substr(at, itemEnd - at);
+        at = itemEnd;
+
+        size_t enc = item.find("<enclosure");
+        if (enc == std::string::npos) continue;
+        size_t encEnd = item.find('>', enc);
+        std::string tag = item.substr(enc, encEnd == std::string::npos
+                                                 ? std::string::npos : encEnd - enc + 1);
+        if (attrOf(tag, "sparkle:os") != os) continue;
+        if (!arch.empty() && attrOf(tag, "cedarlogic:arch") != arch) continue;
+
+        FeedItem it;
+        it.version = parseVersion(attrOf(tag, "sparkle:version"));
+        if (!it.version.valid)
+            it.version = parseVersion(elemText(item, 0, item.size(), "sparkle:version"));
+        if (!it.version.valid) continue;
+        it.url = attrOf(tag, "url");
+        it.sha256 = attrOf(tag, "cedarlogic:sha256");
+        it.length = std::atoll(attrOf(tag, "length").c_str());
+        it.shortVersion = elemText(item, 0, item.size(), "sparkle:shortVersionString");
+        if (it.url.empty()) continue;
+        if (!found || newerThan(it.version, out.version)) {
+            out = it;
+            found = true;
+        }
+    }
+    return found;
+}
+
+// ---- SHA-256 (FIPS 180-4), small and dependency-free ------------------------
+
+namespace {
+
+struct Sha256 {
+    uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    unsigned char buf[64];
+    size_t bufLen = 0;
+    uint64_t total = 0;
+
+    static uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+
+    void block(const unsigned char *p) {
+        static const uint32_t k[64] = {
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+        uint32_t w[64];
+        for (int i = 0; i < 16; i++)
+            w[i] = (uint32_t)p[4 * i] << 24 | (uint32_t)p[4 * i + 1] << 16 |
+                   (uint32_t)p[4 * i + 2] << 8 | (uint32_t)p[4 * i + 3];
+        for (int i = 16; i < 64; i++) {
+            uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; i++) {
+            uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            uint32_t ch = (e & f) ^ (~e & g);
+            uint32_t t1 = hh + S1 + ch + k[i] + w[i];
+            uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            uint32_t t2 = S0 + maj;
+            hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+    }
+
+    void update(const unsigned char *p, size_t n) {
+        total += n;
+        while (n > 0) {
+            size_t take = 64 - bufLen < n ? 64 - bufLen : n;
+            for (size_t i = 0; i < take; i++) buf[bufLen + i] = p[i];
+            bufLen += take; p += take; n -= take;
+            if (bufLen == 64) { block(buf); bufLen = 0; }
+        }
+    }
+
+    std::string hex() {
+        uint64_t bits = total * 8;
+        unsigned char pad = 0x80;
+        update(&pad, 1);
+        unsigned char zero = 0;
+        while (bufLen != 56) update(&zero, 1);
+        unsigned char len[8];
+        for (int i = 0; i < 8; i++) len[i] = (unsigned char)(bits >> (56 - 8 * i));
+        update(len, 8);
+        static const char *digits = "0123456789abcdef";
+        std::string out;
+        for (uint32_t v : h)
+            for (int s = 28; s >= 0; s -= 4) out += digits[(v >> s) & 0xf];
+        return out;
+    }
+};
+
+}  // namespace
+
+std::string sha256Hex(const std::string &data) {
+    Sha256 s;
+    s.update(reinterpret_cast<const unsigned char *>(data.data()), data.size());
+    return s.hex();
+}
+
+std::string sha256File(const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return std::string();
+    Sha256 s;
+    char chunk[65536];
+    while (in.read(chunk, sizeof(chunk)) || in.gcount() > 0)
+        s.update(reinterpret_cast<const unsigned char *>(chunk), (size_t)in.gcount());
+    return s.hex();
 }
 
 #ifdef _WIN32

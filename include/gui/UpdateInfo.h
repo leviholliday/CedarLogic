@@ -45,9 +45,35 @@ bool splitUrl(const std::string &url, std::string &host, std::string &path);
 // caller must treat as "unknown", never as "up to date".
 bool appcastLatest(const std::string &xml, const std::string &os, Version &out);
 
+// One downloadable build in the feed, for the updaters we run ourselves (the
+// Linux AppImage; Sparkle and WinSparkle read the feed on their own).
+struct FeedItem {
+    Version version;
+    std::string shortVersion;   // what people see, e.g. "4.0.2 beta"
+    std::string url;
+    std::string sha256;         // lowercase hex, from cedarlogic:sha256
+    long long length = 0;
+};
+
+// The newest item for one platform and, when `arch` is non-empty, one CPU
+// ("x86_64", "aarch64", from cedarlogic:arch). False when there is none.
+bool appcastLatestItem(const std::string &xml, const std::string &os,
+                       const std::string &arch, FeedItem &out);
+
+// SHA-256 of a byte string, and of a file, as lowercase hex. The file form
+// returns empty if the file cannot be read.
+std::string sha256Hex(const std::string &data);
+std::string sha256File(const std::string &path);
+
 // The body of the appcast feed, empty on any failure. Blocking, with its own
 // timeout, so it belongs on a worker thread.
 std::string fetchAppcast(const std::string &url);
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+// Download `url` to `dest` with curl (or wget), following redirects. Blocking,
+// for a worker thread. False on any failure, leaving no partial file behind.
+bool downloadFile(const std::string &url, const std::string &dest);
+#endif
 
 // True when an administrator has turned update checking off for this machine,
 // for deployments where the organisation owns the installed version (campus
