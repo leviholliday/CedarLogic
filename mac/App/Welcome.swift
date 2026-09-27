@@ -8,6 +8,23 @@ import SwiftUI
 
 // MARK: - Welcome
 
+/// Help > Set Up CedarLogic…: opens the welcome window straight to the setup
+/// page (wx: Help_SetUp -> ShowWelcome(this, true)). If it's already open,
+/// opening the Window scene again wouldn't re-run onAppear, so this notifies
+/// it directly.
+extension Notification.Name {
+    static let clStartAtSetup = Notification.Name("clStartAtSetup")
+}
+@MainActor
+enum WelcomeRequest {
+    /// Read once, by whichever welcome window appears next.
+    static var startAtSetup = false
+    static func setup() {
+        startAtSetup = true
+        NotificationCenter.default.post(name: .clStartAtSetup, object: nil)
+    }
+}
+
 struct WelcomeView: View {
     @ObservedObject private var prefs = Prefs.shared
     @Environment(\.dismiss) private var dismiss
@@ -68,8 +85,13 @@ struct WelcomeView: View {
         .background(paper)
         .preferredColorScheme(prefs.dark ? .dark : .light)
         .onAppear {
-            if startAtSetup { page = 1 }
+            if startAtSetup || WelcomeRequest.startAtSetup { withAnimation { page = 1 } }
+            WelcomeRequest.startAtSetup = false
             installKeys()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clStartAtSetup)) { _ in
+            forward = page < 1
+            withAnimation { page = 1 }
         }
         .onDisappear { if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil } }
     }

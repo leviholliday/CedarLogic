@@ -271,6 +271,12 @@ struct NewOpenCommands: Commands {
                 Button("Split View") { canvas?.perform(.splitView) }
                     .keyboardShortcut(keys.menu(.splitView))
                     .disabled(canvas == nil)
+                Button("Close Split") { canvas?.perform(.closeSplit) }
+                    .keyboardShortcut(keys.menu(.closeSplit))
+                    .disabled(canvas == nil)
+                Button("Switch Pane") { canvas?.perform(.switchPane) }
+                    .keyboardShortcut(keys.menu(.switchPane))
+                    .disabled(canvas == nil)
             } else {
                 Button("Your Circuits…") { openWindow(id: "library") }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -546,6 +552,7 @@ struct HelpCommands: Commands {
                 Button("Keyboard Shortcuts") { (canvas ?? CanvasController.front)?.showShortcuts = true }
                 Divider()
                 Button("Welcome to CedarLogic…") { openWindow(id: "welcome") }
+                Button("Set Up CedarLogic…") { WelcomeRequest.setup(); openWindow(id: "welcome") }
                 Button("Guided Tour") { TourModel.shared.start() }
             } else {
                 Button("Use the CedarLogic Interface") { Prefs.shared.interface = .cedarlogic }

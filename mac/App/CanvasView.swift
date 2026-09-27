@@ -636,6 +636,8 @@ final class CanvasController: ObservableObject {
             if (document?.pageCount ?? 1) > 1 { closePage(page) } else { view?.window?.performClose(nil) }
         case .reopenTab: reopenPage()
         case .splitView: NotificationCenter.default.post(name: .clSplit, object: self)
+        case .switchPane: NotificationCenter.default.post(name: .clSwitchPane, object: self)
+        case .closeSplit: NotificationCenter.default.post(name: .clCloseSplit, object: self)
         case .nextTab: cyclePage(1)
         case .previousTab: cyclePage(-1)
         case .shortcuts: sheetHost.showShortcuts = true

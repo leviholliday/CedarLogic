@@ -23,6 +23,7 @@ struct KeyCombo: Codable, Hashable {
         switch key {
         case "tab": "⇥"
         case "-": "−"
+        case "right": "→"
         default: key.uppercased()
         }
     }
@@ -41,7 +42,7 @@ struct KeyCombo: Codable, Hashable {
 
     var swiftUI: KeyboardShortcut? {
         guard isMenuShortcut else { return nil }
-        let k: KeyEquivalent = key == "tab" ? .tab : KeyEquivalent(Character(key))
+        let k: KeyEquivalent = key == "tab" ? .tab : key == "right" ? .rightArrow : KeyEquivalent(Character(key))
         var m: EventModifiers = []
         if mods & Self.shift != 0 { m.insert(.shift) }
         if mods & Self.option != 0 { m.insert(.option) }
@@ -59,6 +60,7 @@ struct KeyCombo: Codable, Hashable {
         if f.contains(.control) { m |= Self.control }
         if f.contains(.command) { m |= Self.command }
         if e.keyCode == 48 { self.init(key: "tab", mods: m); return }
+        if e.keyCode == 124 { self.init(key: "right", mods: m); return }
         // The unshifted key: ⇧1 is "1" with shift, not "!".
         guard let k = e.charactersIgnoringModifiers?.lowercased(), let c = k.first else { return nil }
         let shiftedDigits: [Character: String] = ["!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0", "?": "/", "+": "=", "_": "-", ">": ".", "<": ","]
@@ -79,7 +81,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Simulation
     case simView, step, truthTable, scope, lock
     // Tabs
-    case newTab, closeTab, reopenTab, splitView, nextTab, previousTab
+    case newTab, closeTab, reopenTab, splitView, switchPane, closeSplit, nextTab, previousTab
     // App
     case shortcuts, darkMode
 
@@ -92,7 +94,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .addGate, .rotate, .straighten, .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate: "Building"
         case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode: "Moving around"
         case .simView, .step, .truthTable, .scope, .lock: "Simulation"
-        case .newTab, .closeTab, .reopenTab, .splitView, .nextTab, .previousTab: "Tabs and split view"
+        case .newTab, .closeTab, .reopenTab, .splitView, .switchPane, .closeSplit, .nextTab, .previousTab: "Tabs and split view"
         case .shortcuts, .darkMode: "App"
         }
     }
@@ -135,6 +137,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .closeTab: "Close tab"
         case .reopenTab: "Reopen the tab you closed"
         case .splitView: "Split view"
+        case .switchPane: "Switch pane (in a split view)"
+        case .closeSplit: "Close split view"
         case .nextTab: "Next tab"
         case .previousTab: "Previous tab"
         case .shortcuts: "Every shortcut (this list)"
@@ -181,6 +185,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .closeTab: return KeyCombo(key: "w", mods: c)
         case .reopenTab: return KeyCombo(key: "t", mods: c | s)
         case .splitView: return KeyCombo(key: "s", mods: c | o)
+        case .switchPane: return KeyCombo(key: "right", mods: c | o)
+        case .closeSplit: return KeyCombo(key: "w", mods: c | o)
         case .nextTab: return KeyCombo(key: "tab", mods: ctl)
         case .previousTab: return KeyCombo(key: "tab", mods: ctl | s)
         case .shortcuts: return KeyCombo(key: "/", mods: s)

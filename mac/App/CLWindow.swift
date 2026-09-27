@@ -139,11 +139,7 @@ struct CLLayout: View {
         .onReceive(NotificationCenter.default.publisher(for: .clToggleFocusMode)) { n in
             if (n.object as? CanvasController) === canvas || (n.object as? CanvasController) === split.controller { focusMode.toggle() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .clSplit)) { n in
-            guard (n.object as? CanvasController) === canvas || (n.object as? CanvasController) === split.controller else { return }
-            guard !prefs.classicTabs else { NSSound.beep(); return }
-            split.toggle(document, leftPage: $page)
-        }
+        .splitPaneCommands(canvas: canvas, split: split, document: document, page: $page, classicTabs: prefs.classicTabs)
         .sheet(isPresented: $canvas.showQuickAdd) {
             QuickAddView { name in (canvas.quickAddTarget ?? canvas).addGateOnNextMove(name) }
         }
@@ -245,6 +241,40 @@ struct RamRef: Identifiable { let id: Int }
 extension Notification.Name {
     static let clToggleFocusMode = Notification.Name("clToggleFocusMode")
     static let clSplit = Notification.Name("clSplit")
+    static let clSwitchPane = Notification.Name("clSwitchPane")
+    static let clCloseSplit = Notification.Name("clCloseSplit")
+}
+
+/// Split View, Switch Pane and Close Split, wherever the command comes from
+/// (the menus, their shortcuts). Split out of CLLayout.body: three
+/// .onReceive calls in that one already-large expression were too much for
+/// the type checker.
+extension View {
+    fileprivate func splitPaneCommands(canvas: CanvasController, split: SplitState, document: CoreDocument,
+                                       page: Binding<Int>, classicTabs: Bool) -> some View {
+        func isOurs(_ n: Notification) -> Bool {
+            (n.object as? CanvasController) === canvas || (n.object as? CanvasController) === split.controller
+        }
+        return self
+            .onReceive(NotificationCenter.default.publisher(for: .clSplit)) { n in
+                guard isOurs(n) else { return }
+                guard !classicTabs else { NSSound.beep(); return }
+                split.toggle(document, leftPage: page)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .clSwitchPane)) { n in
+                guard isOurs(n) else { return }
+                // wx: FocusOtherPane -- a bell if there's nothing to switch to.
+                guard split.isOpen else { NSSound.beep(); return }
+                let other = canvas.splitFocus ? canvas : split.controller
+                other.onActivate?()
+                other.view?.window?.makeFirstResponder(other.view)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .clCloseSplit)) { n in
+                guard isOurs(n) else { return }
+                guard split.isOpen else { NSSound.beep(); return }
+                split.close(document, leftPage: page)
+            }
+    }
 }
 
 // MARK: - The title bar
@@ -1589,8 +1619,6 @@ struct CLTabStrip: View {
                 if pt.x > x0 + tw - 28 && pt.x < x0 + tw - 4 { close = k }
                 break
             }
-            let px = x(pages.count, tw)
-            if h == nil && pt.x >= px && pt.x < px + plusW { h = -2 }
         }
         if hover != h { hover = h }
         if hoverClose != close { hoverClose = close }
@@ -1637,18 +1665,19 @@ struct CLTabStrip: View {
         }
     }
 
+    /// A BarClickArea, not plain SwiftUI hover/tap: in focus mode this strip
+    /// is the window's top row, where AppKit tells no view about the pointer
+    /// entering or leaving (see BarHover) -- neither the "+" lighting up nor
+    /// its tooltip would otherwise ever show there.
     private var plus: some View {
         Image(systemName: "plus").font(.system(size: 12, weight: .medium))
             .foregroundStyle(chrome.tabInk.opacity(0.75))
             .frame(width: plusW, height: tabH)
             .background(RoundedRectangle(cornerRadius: 9).fill(chrome.tabInk.opacity(hover == -2 ? 0.08 : 0)))
-            .contentShape(Rectangle())
-            .onHover { h in
-                guard !titleRow else { return }
-                if h { hover = -2 } else if hover == -2 { hover = nil }
-            }
-            .onTapGesture { controller.onActivate?(); controller.newPage() }
-            .help("New tab")
+            .overlay(BarClickArea(
+                tip: "New tab",
+                onHover: { h in withAnimation(.easeOut(duration: 0.12)) { hover = h ? -2 : (hover == -2 ? nil : hover) } },
+                onClick: { controller.onActivate?(); controller.newPage() }))
     }
 
     @ViewBuilder private func tab(_ k: Int, _ p: Int, id: UInt64, pages: [Int], tw: CGFloat) -> some View {
