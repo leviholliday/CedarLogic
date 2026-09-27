@@ -69,7 +69,7 @@ struct CLLayout: View {
                     Rectangle().fill(chrome.sash).frame(width: 1)
                 }
                 CLCanvasArea(document: document, canvas: canvas, page: $page, split: split,
-                             leftInset: focusMode ? 86 : 8)
+                             leftInset: focusMode ? 86 : 8, titleRow: focusMode)
                     .overlay {
                         if covered {
                             OpeningCard(start: opening ?? .distantFuture, title: windowTitle, detail: openingDetail, dark: prefs.dark,
@@ -325,6 +325,15 @@ final class TitlebarManager {
             st.observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.forget(id) }
             })
+            // And whenever AppKit puts the title bar or its buttons back its
+            // own way, at once, before that's ever drawn or clicked: a title
+            // bar left full width takes the toolbar's presses (see layout).
+            for v in [container] + b {
+                v.postsFrameChangedNotifications = true
+                st.observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: v, queue: nil) { [weak self, weak w] _ in
+                    MainActor.assumeIsolated { if let w { self?.reassert(w) } }
+                })
+            }
             states[id] = st
         }
         states[id]?.custom = custom
@@ -341,7 +350,12 @@ final class TitlebarManager {
             }
         }
         if custom {
-            w.isMovable = true
+            // The window server is told the whole title bar height across the
+            // window is somewhere to drag it from -- the toolbar's buttons
+            // included, since SwiftUI can't say they aren't -- and it moved
+            // the window when a click on one wobbled. So it isn't to move this
+            // window by itself: the bar's background does (WindowDragArea).
+            w.isMovable = false
             w.styleMask.insert(.fullSizeContentView)
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
@@ -363,6 +377,21 @@ final class TitlebarManager {
         }
         layout(w)
     }
+
+    /// The layout put back straight after AppKit changed it. (Not in a loop:
+    /// should AppKit keep answering, it's left to the next notification.)
+    private func reassert(_ w: NSWindow) {
+        guard !reasserting, states[ObjectIdentifier(w)]?.custom == true else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - burst.start > 1 { burst = (now, 0) }
+        burst.count += 1
+        guard burst.count <= 40 else { return }
+        reasserting = true
+        defer { reasserting = false }
+        layout(w)
+    }
+    private var reasserting = false
+    private var burst: (start: TimeInterval, count: Int) = (0, 0)
 
     /// Now, and again once AppKit has finished its own pass.
     private func relayoutSoon(_ w: NSWindow) {
@@ -389,29 +418,34 @@ final class TitlebarManager {
     }
 
     /// layoutTrafficLights: the title bar made as tall as the toolbar, and the
-    /// buttons centred in it.
+    /// buttons centred in it -- and no wider than them. AppKit's title bar
+    /// decides what a press over it is before the toolbar under it hears of
+    /// it: with the bar full width, most of each toolbar button was a place
+    /// to drag or zoom the window from (its bottom edge alone clicked it), or
+    /// a click that wobbled a pixel moved the window instead. Beside the
+    /// buttons, the drawn toolbar handles its own presses, background
+    /// included (WindowDragArea).
     func layout(_ w: NSWindow) {
         guard let st = states[ObjectIdentifier(w)], let b = buttons(w), let container = b[0].superview?.superview else { return }
         if !st.custom {
             container.frame = NSRect(x: st.origContainer.origin.x, y: w.frame.height - st.origContainer.height,
-                                     width: container.frame.width, height: st.origContainer.height)
+                                     width: w.frame.width, height: st.origContainer.height)
             for (i, btn) in b.enumerated() { btn.setFrameOrigin(st.origButtons[i]) }
             systemBits(in: container, hidden: false)
             return
         }
         systemBits(in: container, hidden: true)
         if w.styleMask.contains(.fullScreen) { return }
-        var f = container.frame
-        f.size.height = st.barHeight
-        f.origin.y = w.frame.height - st.barHeight
         let spacing = st.origButtons[1].x - st.origButtons[0].x
-        // In focus mode the tab strip is this row: the title bar layer (which
-        // takes presses over plain SwiftUI as window drags) covers only the
-        // red, yellow and green buttons, so the tabs are clear of it.
-        f.size.width = st.barHeight < 52 ? 18 + 2 * spacing + 14 + 12 : w.frame.width
-        container.frame = f
+        // Just around the buttons, with room past the green one for a plain
+        // bit of title bar (WindowDragArea's double-click lands there); left
+        // of the red one is the bar's, to drag by.
+        let f = NSRect(x: 16, y: w.frame.height - st.barHeight,
+                       width: 2 + 2 * spacing + b[2].frame.width + 6, height: st.barHeight)
+        if container.frame != f { container.frame = f }
         for (i, btn) in b.enumerated() {
-            btn.setFrameOrigin(NSPoint(x: 18 + CGFloat(i) * spacing, y: ((st.barHeight - btn.frame.height) / 2).rounded()))
+            let o = NSPoint(x: 2 + CGFloat(i) * spacing, y: ((st.barHeight - btn.frame.height) / 2).rounded())
+            if btn.frame.origin != o { btn.setFrameOrigin(o) }
         }
     }
 }
@@ -447,16 +481,58 @@ extension TitlebarManager {
     }
 }
 
-/// A control's click target in the bar, handled natively. The bar sits in
-/// the window's title bar, where macOS decides what a press is: over plain
-/// SwiftUI it could take a press that wobbled a pixel as a window drag, and
-/// the button never heard it (the "missed" clicks). This view says it isn't
-/// title bar, takes the first click even when the window is in the
-/// background, and handles the press itself: pressed while held, the click
-/// on release inside (with some slack), or the position as it's dragged
-/// (the speed slider). The circuit's name works the same way.
+// MARK: - The bar's controls
+
+/// A control in the bar, as a real view of its own. The bar is the window's
+/// title bar row, and up there macOS decides what a press is before SwiftUI
+/// hears of it, and keeps hover to itself (BarHover). This view says it isn't
+/// title bar, takes the first click even when the window is at the back, and
+/// is lit, with its tip showing (BarTip), while the pointer is on it.
+class BarControl: NSView {
+    var onHover: (Bool) -> Void = { _ in }
+    /// What it is, as its tooltip says.
+    var tip: String?
+    /// Held down: lit, wherever the pointer goes, until it's let go.
+    var held = false
+    private(set) var lit = false
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    func light(_ on: Bool) {
+        guard on != lit else { return }
+        lit = on
+        onHover(on)
+    }
+
+    // Below the title bar's height macOS's own hover does reach the view (in
+    // a window at the back too), and has the pointer looked up. Asking for
+    // the moves also has them sent for the whole window, title bar included.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with event: NSEvent) { BarHover.refresh(near: true) }
+    override func mouseExited(with event: NSEvent) { BarHover.refresh(near: true) }
+    override func mouseMoved(with event: NSEvent) { BarHover.refresh(near: true) }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        BarHover.install()
+        guard window == nil else { return }
+        held = false
+        light(false)
+        // Gone (its window closed, the bar changed): the tip goes with it.
+        DispatchQueue.main.async { BarHover.refresh() }
+    }
+}
+
+/// A tool's click target: pressed while held, the click on release inside
+/// (with some slack), or the position as it's dragged (the speed slider).
+/// The circuit's name has its own (TitleClickArea).
 struct BarClickArea: NSViewRepresentable {
-    /// The control's tooltip (SwiftUI's own can't show through this view).
     var tip: String? = nil
     var onHover: (Bool) -> Void = { _ in }
     var onPress: (Bool) -> Void = { _ in }
@@ -464,31 +540,17 @@ struct BarClickArea: NSViewRepresentable {
     /// For a slider: where along the control the press is (0...1).
     var onDrag: ((CGFloat) -> Void)? = nil
 
-    final class Area: NSView {
-        var onHover: (Bool) -> Void = { _ in }
+    final class Area: BarControl {
         var onPress: (Bool) -> Void = { _ in }
         var onClick: () -> Void = {}
         var onDrag: ((CGFloat) -> Void)?
-        private var down = false
-
-        override var isFlipped: Bool { true }
-        override var mouseDownCanMoveWindow: Bool { false }
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            trackingAreas.forEach(removeTrackingArea)
-            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                           owner: self, userInfo: nil))
-        }
-        override func mouseEntered(with event: NSEvent) { onHover(true) }
-        override func mouseExited(with event: NSEvent) { if !down { onHover(false) } }
 
         private func point(_ e: NSEvent) -> NSPoint { convert(e.locationInWindow, from: nil) }
         private func inside(_ p: NSPoint) -> Bool { bounds.insetBy(dx: -14, dy: -14).contains(p) }
         private func fraction(_ p: NSPoint) -> CGFloat { min(1, max(0, p.x / max(1, bounds.width))) }
 
         override func mouseDown(with e: NSEvent) {
-            down = true
+            held = true
             onPress(true)
             onDrag?(fraction(point(e)))
         }
@@ -497,17 +559,16 @@ struct BarClickArea: NSViewRepresentable {
             if let onDrag { onDrag(fraction(p)) } else { onPress(inside(p)) }
         }
         override func mouseUp(with e: NSEvent) {
-            let p = point(e)
-            down = false
+            held = false
             onPress(false)
-            if onDrag == nil && inside(p) { onClick() }
-            if !bounds.contains(p) { onHover(false) }
+            if onDrag == nil && inside(point(e)) { onClick() }
+            BarHover.refresh()
         }
     }
 
     func makeNSView(context: Context) -> Area { Area() }
     func updateNSView(_ v: Area, context: Context) {
-        if v.toolTip != tip { v.toolTip = tip }
+        v.tip = tip
         v.onHover = onHover
         v.onPress = onPress
         v.onClick = onClick
@@ -515,50 +576,259 @@ struct BarClickArea: NSViewRepresentable {
     }
 }
 
-/// A patch of toolbar background that drags the window (a double-click zooms
-/// it), since the drawn toolbar covers the title bar.
+/// Which bar control is under the pointer. In the top 32 points of a window
+/// (the title bar's height) macOS keeps the pointer's comings and goings to
+/// itself: the views under the title bar never hear of them, which left the
+/// tools lighting up only along their bottom edge. The pointer's moves do
+/// still come to the app, so on each one the control under it is looked up,
+/// as the wx app's toolbar does from its mouse motion. A tab strip that's the
+/// top row (focus mode) is told where the pointer is, for the same reason.
+@MainActor
+enum BarHover {
+    private static var monitor: Any?
+    private(set) static weak var lit: BarControl?
+    private static var watch: Timer?
+    private struct Follower { weak var view: WindowDragArea.DragView?; var last: CGPoint? }
+    private static var followers: [ObjectIdentifier: Follower] = [:]
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseUp, .leftMouseDown, .rightMouseDown,
+                                                              .otherMouseDown, .scrollWheel, .keyDown]) { e in
+            MainActor.assumeIsolated {
+                switch e.type {
+                case .mouseMoved, .leftMouseUp: refresh()
+                default: BarTip.dismiss()
+                }
+            }
+            return e
+        }
+    }
+
+    static func follow(_ v: WindowDragArea.DragView) {
+        install()
+        followers[ObjectIdentifier(v)] = Follower(view: v, last: nil)
+    }
+    static func unfollow(_ v: WindowDragArea.DragView) { followers[ObjectIdentifier(v)] = nil }
+
+    /// What's under the pointer now: the control there lit, the one before
+    /// not. (`near`: it's known to be by a control.)
+    static func refresh(near: Bool = false) {
+        let m = NSEvent.mouseLocation
+        let following = followers.values.contains { $0.last != nil }
+        // Nowhere near a window's top rows, with nothing lit: nothing to do.
+        let atTop = near || NSApp.windows.contains { $0.isVisible && $0.frame.contains(m) && m.y > $0.frame.maxY - 96 }
+        guard atTop || lit != nil || following else { stopWatching(); return }
+        let w = NSApp.window(withWindowNumber: NSWindow.windowNumber(at: m, belowWindowWithWindowNumber: 0))
+        var found: BarControl?
+        if let w, w.attachedSheet == nil, let frame = w.contentView?.superview {
+            var v = frame.hitTest(w.convertPoint(fromScreen: m))
+            while let x = v, found == nil { found = x as? BarControl; v = x.superview }
+        }
+        if lit?.held != true, found !== lit {
+            lit?.light(false)
+            lit = found
+            found?.light(true)
+            BarTip.follow(found)
+        }
+        for (id, f) in followers {
+            guard let view = f.view else { followers[id] = nil; continue }
+            var p: CGPoint?
+            if let vw = view.window, vw === w {
+                let q = view.convert(vw.convertPoint(fromScreen: m), from: nil)
+                if view.bounds.contains(q) { p = q }
+            }
+            if p != f.last {
+                followers[id]?.last = p
+                view.onPointer?(p)
+            }
+        }
+        // Off the window, or over to another app, no moves come: a look now
+        // and then puts the lights out.
+        if lit != nil || followers.values.contains(where: { $0.last != nil }) {
+            if watch == nil {
+                watch = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { _ in MainActor.assumeIsolated { refresh() } }
+            }
+        } else {
+            stopWatching()
+        }
+    }
+
+    private static func stopWatching() {
+        watch?.invalidate()
+        watch = nil
+    }
+}
+
+/// A bar control's tooltip, shown the way macOS shows one: after a moment's
+/// hover, straight away when moving on from one that's showing, gone on a
+/// click or a key. (macOS's own come with its hover, which it keeps to itself
+/// up there.)
+@MainActor
+enum BarTip {
+    private static var panel: NSPanel?
+    private static var label: NSTextField?
+    private static var pending: DispatchWorkItem?
+    private static weak var shownFor: BarControl?
+    /// Clicked while lit: no tip again until the pointer moves on.
+    private static weak var quiet: BarControl?
+    private static var hiddenAt: TimeInterval = 0
+
+    static func follow(_ c: BarControl?) {
+        pending?.cancel()
+        pending = nil
+        let showing = shownFor != nil
+        if c !== shownFor { hide() }
+        if c !== quiet { quiet = nil }
+        guard let c, c !== quiet, let text = c.tip, !text.isEmpty else { return }
+        let soon = showing || ProcessInfo.processInfo.systemUptime - hiddenAt < 0.5
+        let work = DispatchWorkItem { MainActor.assumeIsolated { show(text, for: c) } }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (soon ? 0.05 : 1.0), execute: work)
+    }
+
+    static func dismiss() {
+        pending?.cancel()
+        pending = nil
+        if let c = BarHover.lit { quiet = c }
+        hide()
+    }
+
+    private static func show(_ text: String, for c: BarControl) {
+        guard c.lit, let w = c.window, w.isVisible, NSApp.isActive else { return }
+        let (p, l) = make()
+        l.stringValue = text
+        p.appearance = w.effectiveAppearance
+        let size = l.fittingSize
+        let box = NSSize(width: ceil(size.width) + 14, height: ceil(size.height) + 6)
+        l.frame = NSRect(x: 7, y: 3, width: ceil(size.width), height: ceil(size.height))
+        let m = NSEvent.mouseLocation
+        var f = NSRect(x: m.x - 4, y: m.y - 22 - box.height, width: box.width, height: box.height)
+        if let s = (NSScreen.screens.first { $0.frame.contains(m) } ?? w.screen)?.visibleFrame {
+            f.origin.x = min(max(f.minX, s.minX + 2), s.maxX - f.width - 2)
+            if f.minY < s.minY + 2 { f.origin.y = m.y + 8 }
+        }
+        p.setFrame(f, display: true)
+        p.invalidateShadow()
+        p.orderFront(nil)
+        shownFor = c
+    }
+
+    private static func hide() {
+        shownFor = nil
+        guard let p = panel, p.isVisible else { return }
+        p.orderOut(nil)
+        hiddenAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    private static func make() -> (NSPanel, NSTextField) {
+        if let panel, let label { return (panel, label) }
+        let p = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        p.ignoresMouseEvents = true
+        p.level = .popUpMenu
+        p.hidesOnDeactivate = true
+        p.isReleasedWhenClosed = false
+        p.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
+        let fx = NSVisualEffectView()
+        fx.material = .toolTip
+        fx.blendingMode = .behindWindow
+        fx.state = .active
+        let corners = NSImage(size: NSSize(width: 13, height: 13), flipped: false) { r in
+            NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
+            return true
+        }
+        corners.capInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        corners.resizingMode = .stretch
+        fx.maskImage = corners
+        let l = NSTextField(labelWithString: "")
+        l.font = .toolTipsFont(ofSize: 0)
+        l.textColor = .labelColor
+        fx.addSubview(l)
+        p.contentView = fx
+        panel = p
+        label = l
+        return (p, l)
+    }
+}
+
+/// The toolbar's background, doing what a title bar does: it drags the
+/// window, and a double-click does the System Settings action. (macOS isn't
+/// left to move this window by itself -- see TitlebarManager -- so this is
+/// what moves it.) A tab strip that's the top row has one too.
 struct WindowDragArea: NSViewRepresentable {
+    /// A press, before the window drags (a tab strip: its side comes forward).
+    var onPress: (() -> Void)? = nil
+    /// Instead of the title bar's double-click (a tab strip: a new tab).
+    var onDoubleClick: (() -> Void)? = nil
+    /// Where the pointer is over this, or nil (BarHover).
+    var onPointer: ((CGPoint?) -> Void)? = nil
+
     final class DragView: NSView {
-        /// Not a place the window server may start moving the window from by
-        /// itself: then the whole bar would be, the buttons on it included,
-        /// and a click that wobbled a pixel moved the window instead of
-        /// pressing the button. Presses here are passed on (below).
+        var onPress: (() -> Void)?
+        var onDoubleClick: (() -> Void)?
+        var onPointer: ((CGPoint?) -> Void)? {
+            didSet { if (onPointer == nil) != (oldValue == nil) { refollow() } }
+        }
+
+        override var isFlipped: Bool { true }
+        /// Presses here are this view's own (below), never the window
+        /// server's to start moving the window by itself.
         override var mouseDownCanMoveWindow: Bool { false }
         /// A title bar moves its window on the first click, even in the
         /// background.
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            refollow()
+        }
+        private func refollow() {
+            if window != nil && onPointer != nil { BarHover.follow(self) } else { BarHover.unfollow(self) }
+        }
+
         override func mouseDown(with event: NSEvent) {
             guard let w = window else { return }
             if event.clickCount >= 2 {
-                Self.titlebarDoubleClick(w, at: event.locationInWindow)
+                if let onDoubleClick { onDoubleClick() } else { Self.titlebarDoubleClick(w) }
                 return
             }
+            onPress?()
             // The system's own window drag: to other screens and Spaces, and
             // a filled or tiled window goes back to its size as it's dragged.
             w.performDrag(with: event)
         }
 
         /// Whatever a title bar's double-click does in System Settings (Fill,
-        /// Zoom, Minimize or nothing), done by AppKit itself: it's handed the
-        /// double-click as if it had landed on a plain title bar. (Nothing
-        /// public performs Fill; AppKit's title bar does.)
-        static func titlebarDoubleClick(_ w: NSWindow, at p: NSPoint) {
-            guard !forwarding else { return }
-            forwarding = true
-            defer { forwarding = false }
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                              windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 1) {
-                    w.sendEvent(e)
-                }
+        /// Zoom, Minimize or nothing), done by AppKit itself: the window's
+        /// frame (the title bar's own handler) is handed the double-click as
+        /// if it had landed on the plain title bar just past the green button.
+        /// Straight to it: sent through the window, a second click goes back
+        /// to the view that had the first. (Nothing public performs Fill.)
+        static func titlebarDoubleClick(_ w: NSWindow) {
+            guard let zoom = w.standardWindowButton(.zoomButton), let bar = zoom.superview,
+                  let frame = w.contentView?.superview else { return }
+            let z = zoom.convert(zoom.bounds, to: nil)
+            let b = bar.convert(bar.bounds, to: nil)
+            let p = NSPoint(x: min(z.maxX + 3, b.maxX - 1), y: b.maxY - 8)
+            func event(_ type: NSEvent.EventType) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 1)
             }
+            guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return }
+            frame.mouseDown(with: down)
+            frame.mouseUp(with: up)
         }
-        @MainActor private static var forwarding = false
-
     }
-    func makeNSView(context: Context) -> NSView { DragView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    func makeNSView(context: Context) -> DragView { DragView() }
+    func updateNSView(_ v: DragView, context: Context) {
+        v.onPress = onPress
+        v.onDoubleClick = onDoubleClick
+        v.onPointer = onPointer
+    }
 }
 
 // MARK: - Toolbar
@@ -784,25 +1054,16 @@ private struct TitleMenu: View {
 private struct TitleClickArea: NSViewRepresentable {
     @Binding var hover: Bool
 
-    final class Area: NSView {
-        var onHover: (Bool) -> Void = { _ in }
-        override var isFlipped: Bool { true }
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override var mouseDownCanMoveWindow: Bool { false }
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            trackingAreas.forEach(removeTrackingArea)
-            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                           owner: self, userInfo: nil))
+    final class Area: BarControl {
+        override func mouseDown(with event: NSEvent) {
+            TitleActions.popUp(in: self)
+            BarHover.refresh()
         }
-        override func mouseEntered(with event: NSEvent) { onHover(true) }
-        override func mouseExited(with event: NSEvent) { onHover(false) }
-        override func mouseDown(with event: NSEvent) { TitleActions.popUp(in: self) }
     }
 
     func makeNSView(context: Context) -> Area {
         let a = Area()
-        a.toolTip = "Rename, duplicate or look back through this circuit"
+        a.tip = "Rename, duplicate or look back through this circuit"
         return a
     }
     func updateNSView(_ v: Area, context: Context) {
@@ -1192,6 +1453,9 @@ struct CLTabStrip: View {
     let pane: Int
     @Binding var page: Int
     let leftInset: CGFloat
+    /// The window's top row (focus mode): its background drags the window,
+    /// and the hover comes from BarHover, SwiftUI's own not reaching up there.
+    var titleRow = false
     @ObservedObject private var prefs = Prefs.shared
     @State private var hover: Int?          // a place in the strip; -2: the plus
     @State private var hoverClose: Int?
@@ -1241,10 +1505,17 @@ struct CLTabStrip: View {
         let accent = prefs.accentColor(dark: prefs.dark)
         return ZStack(alignment: .topLeading) {
             // Glass: a gentle gradient with a bright hairline along the top.
-            LinearGradient(colors: [chrome.tabBarTop, chrome.tabBar], startPoint: .top, endPoint: .bottom)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { controller.newPage() }
-                .onTapGesture { activate() }
+            if titleRow {
+                LinearGradient(colors: [chrome.tabBarTop, chrome.tabBar], startPoint: .top, endPoint: .bottom)
+                    .allowsHitTesting(false)
+                WindowDragArea(onPress: { activate() }, onDoubleClick: { controller.newPage() },
+                               onPointer: { pointer($0, pages, tw) })
+            } else {
+                LinearGradient(colors: [chrome.tabBarTop, chrome.tabBar], startPoint: .top, endPoint: .bottom)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { controller.newPage() }
+                    .onTapGesture { activate() }
+            }
             Rectangle().fill(Color.white.opacity(prefs.dark ? 0.07 : 0.9)).frame(height: 1)
                 .allowsHitTesting(false)
             dropGap(pages, tw)
@@ -1275,6 +1546,8 @@ struct CLTabStrip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(GeometryReader { g in Color.clear.onAppear { stripWidth = g.size.width }
             .onChange(of: g.size.width) { _, w in stripWidth = w } })
+        // In or out of the title row, the hover starts over.
+        .onChange(of: titleRow) { _, _ in hover = nil; hoverClose = nil }
         .clipped()
         .animation(.easeOut(duration: 0.14), value: hover)
         .animation(.easeOut(duration: 0.14), value: shown)
@@ -1295,7 +1568,32 @@ struct CLTabStrip: View {
             }
         }
         .padding(.leading, leftInset).padding(.trailing, 10).frame(height: Self.height)
-        .background(chrome.tabBar)
+        .background {
+            ZStack {
+                chrome.tabBar
+                if titleRow { WindowDragArea(onPress: { activate() }) }
+            }
+        }
+    }
+
+    /// The hover in the title row, from where the pointer is: the tab under
+    /// it (and its close button), or the plus.
+    private func pointer(_ pt: CGPoint?, _ pages: [Int], _ tw: CGFloat) {
+        var h: Int?
+        var close: Int?
+        if let pt, abs(pt.y - Self.height / 2) <= tabH / 2 {
+            for k in pages.indices {
+                let x0 = x(k, tw) + makeRoom(k, pages, tw)
+                guard pt.x >= x0 && pt.x < x0 + tw else { continue }
+                h = k
+                if pt.x > x0 + tw - 28 && pt.x < x0 + tw - 4 { close = k }
+                break
+            }
+            let px = x(pages.count, tw)
+            if h == nil && pt.x >= px && pt.x < px + plusW { h = -2 }
+        }
+        if hover != h { hover = h }
+        if hoverClose != close { hoverClose = close }
     }
 
     private func activate() {
@@ -1345,7 +1643,10 @@ struct CLTabStrip: View {
             .frame(width: plusW, height: tabH)
             .background(RoundedRectangle(cornerRadius: 9).fill(chrome.tabInk.opacity(hover == -2 ? 0.08 : 0)))
             .contentShape(Rectangle())
-            .onHover { h in if h { hover = -2 } else if hover == -2 { hover = nil } }
+            .onHover { h in
+                guard !titleRow else { return }
+                if h { hover = -2 } else if hover == -2 { hover = nil }
+            }
             .onTapGesture { controller.onActivate?(); controller.newPage() }
             .help("New tab")
     }
@@ -1410,6 +1711,7 @@ struct CLTabStrip: View {
         .shadow(color: moving ? .black.opacity(0.3) : .clear, radius: 6, y: 2)
         .scaleEffect(moving ? 1.03 : 1)
         .onContinuousHover { phase in
+            guard !titleRow else { return }
             switch phase {
             case .active(let pt):
                 if hover != k { hover = k }
@@ -1555,6 +1857,8 @@ struct CLCanvasArea: View {
     @Binding var page: Int
     @ObservedObject var split: SplitState
     let leftInset: CGFloat
+    /// Focus mode: the tab strips are the window's top row, its title bar.
+    var titleRow = false
     @ObservedObject private var prefs = Prefs.shared
     @State private var sashStart: CGFloat?
     @State private var sashHover = false
@@ -1625,7 +1929,8 @@ struct CLCanvasArea: View {
         let c = p == 0 ? canvas : split.controller
         let shown = p == 0 ? page : (split.sidePage(document) ?? 0)
         VStack(spacing: 0) {
-            CLTabStrip(document: document, canvas: canvas, split: split, pane: p, page: $page, leftInset: inset)
+            CLTabStrip(document: document, canvas: canvas, split: split, pane: p, page: $page, leftInset: inset,
+                       titleRow: titleRow)
             if shown < document.pageCount {
                 CLCanvasHost(document: document, page: shown, controller: c)
                     .overlay(alignment: .top) { TidyBanner(canvas: c) }
