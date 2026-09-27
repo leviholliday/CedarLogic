@@ -76,7 +76,20 @@ void CGScene::popTransform() {
 	if (!stack.empty()) stack.erase(stack.begin());
 }
 
-void CGScene::stroke(CGPathRef path, const render::Stroke& s) {
+bool CGScene::remapLowWire = false;
+render::Color CGScene::lowWire(0.62f, 0.67f, 0.76f, 1);
+
+render::Color CGScene::mapped(const render::Color& c) const {
+	if (!wiresPhase || !remapLowWire) return c;
+	const float g = 0.35f, e = 0.004f;
+	if (std::fabs(c.r - g) < e && std::fabs(c.g - g) < e && std::fabs(c.b - g) < e)
+		return render::Color(lowWire.r, lowWire.g, lowWire.b, c.a);
+	return c;
+}
+
+void CGScene::stroke(CGPathRef path, const render::Stroke& s0) {
+	render::Stroke s = s0;
+	s.color = mapped(s0.color);
 	CGContextSaveGState(ctx);
 	CGContextAddPath(ctx, path);
 	CGContextSetLineWidth(ctx, s.width);   // device pixels, like the wx app
@@ -90,7 +103,8 @@ void CGScene::stroke(CGPathRef path, const render::Stroke& s) {
 	CGContextRestoreGState(ctx);
 }
 
-void CGScene::fill(CGPathRef path, const render::Color& c) {
+void CGScene::fill(CGPathRef path, const render::Color& c0) {
+	const render::Color c = mapped(c0);
 	CGContextSaveGState(ctx);
 	CGContextAddPath(ctx, path);
 	CGContextSetRGBFillColor(ctx, c.r, c.g, c.b, c.a);

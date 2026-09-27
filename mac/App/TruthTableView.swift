@@ -43,6 +43,7 @@ struct TruthTableView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Color.clear.frame(height: 0).onEscape { dismiss() }
             Text("Truth Table").font(.title2.weight(.semibold))
             if table.sequential {
                 Label("This page has clocks or flip-flops, so outputs can depend on what happened before. Each row is read after the circuit settles from the row above it.",

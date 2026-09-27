@@ -13,6 +13,12 @@ extension UTType {
 /// The engine's copy of an open circuit.
 final class CoreDocument: ObservableObject {
     let handle: OpaquePointer
+    /// Engine undo steps mirrored into the window's UndoManager (CanvasController).
+    var mirroredUndo = 0
+    /// The page count the window last showed (see CanvasController).
+    var shownPageCount = 1
+    /// Where each page was last looked at (centre, units per point), by page id.
+    var cameras: [UInt64: (CGPoint, CGFloat)] = [:]
 
     init(data: Data) throws {
         var error = [CChar](repeating: 0, count: 512)
@@ -41,6 +47,13 @@ final class CoreDocument: ObservableObject {
     var undoCount: Int { Int(cl_edit_undo_count(handle)) }
 
     var pageCount: Int { Int(cl_document_page_count(handle)) }
+    /// A page's lasting identity (it survives pages moving, closing and
+    /// reopening), and the page that has it now, if it's open.
+    func pageID(_ page: Int) -> UInt64 { UInt64(cl_document_page_id(handle, Int32(page))) }
+    func pageIndex(of id: UInt64) -> Int? {
+        let i = Int(cl_document_page_index(handle, id))
+        return i >= 0 ? i : nil
+    }
 
     func pageName(_ page: Int) -> String {
         let name = String(cString: cl_document_page_name(handle, Int32(page)))

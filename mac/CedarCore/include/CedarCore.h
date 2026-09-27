@@ -246,6 +246,87 @@ int cl_document_notice_count(const CLDocument *doc);
 const char *cl_document_notice(const CLDocument *doc, int index);
 bool cl_document_notice_is_warning(const CLDocument *doc, int index);
 
+// ---- The CedarLogic interface (the wx app's look and extras) ----------------
+
+// How a page is drawn: the screen style with the Appearance settings, the
+// Simulation View palette, or a themed thumbnail (the minimap).
+typedef struct {
+	bool dark;
+	int accent;          // 0..5: Blue, Purple, Pink, Orange, Green, Graphite
+	double wireScale;    // 0.7 thin, 1 normal, 1.6 thick
+	bool simView;
+	bool thumbnail;      // topology only, hairline, themed by `dark`
+	bool showSelection;
+	double selectionFade;  // 0..1: a new selection's halo fades in
+} CLDrawOptions;
+void cl_document_draw_ex(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+                         double originX, double originY, double unitsPerPoint,
+                         const CLDrawOptions *options);
+// The accent colour for an index, light or dark variant (0..1 RGB).
+void cl_accent_color(int index, bool dark, double *r, double *g, double *b);
+// The dots drawn on wires: at every bend (or only where wires join), and
+// their radius in grid units. Shared by every document.
+void cl_set_wire_dots(bool atBends, double radius);
+// On the dark canvas, low wires (and their dots) in this colour instead of
+// the engine's grey, which sits too close to the grid. Off: the grey.
+void cl_set_low_wire_color(bool on, double r, double g, double b);
+
+// Simulation View: dashes marching away from each wire's driver along wires
+// that are on, and a bloom around lit lights. `phasePoints` grows with time.
+void cl_simview_draw_flow(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+                          double originX, double originY, double unitsPerPoint, double phasePoints,
+                          double wireScale);
+// The switches and lights on a page, top to bottom, left to right, for the
+// control bar's chips. Returns how many there are (fills up to `max`).
+typedef struct { bool isInput; bool lit; } CLSimChip;
+int cl_simview_chips(CLDocument *doc, int page, CLSimChip *out, int max);
+
+int cl_document_gate_count(const CLDocument *doc, int page);
+
+// Pages, undoably: closing takes the page and what's on it off (undo brings
+// it back); Reopen is an undo of the last close. Moving reorders.
+bool cl_document_close_page(CLDocument *doc, int page);
+bool cl_edit_undo_is_close_page(const CLDocument *doc);
+// After an undo or redo that added or removed a page: the page to show.
+int cl_document_page_to_show(const CLDocument *doc);
+void cl_document_move_page(CLDocument *doc, int from, int to);
+// A page's identity, which survives other pages opening, closing and moving
+// (0 for none), and the page with an identity now (-1 when it's gone).
+unsigned long long cl_document_page_id(const CLDocument *doc, int page);
+int cl_document_page_index(const CLDocument *doc, unsigned long long id);
+
+// A paste, duplicate or new gate that follows the pointer until a click
+// drops it (the selection floats). The anchor is where the pointer is now.
+bool cl_edit_float_begin(CLDocument *doc, int page, double x, double y);
+bool cl_edit_is_floating(const CLDocument *doc);
+// Connect the selected gates' free pins to unambiguously close free pins
+// (the C key while dragging). Returns how many connections were made.
+// C while something is being moved (dragged, or floating on the pointer):
+// connect its free pins to what's unambiguously close, and keep moving. The
+// connections go on the undo stack at the drop, above the move. Returns how
+// many, or -1 when nothing is being moved on that page.
+int cl_edit_connect_while_moving(CLDocument *doc, int page, double unitsPerPoint);
+// Escape mid-move: take back just those connections. Returns how many.
+int cl_edit_take_back_connects(CLDocument *doc);
+int cl_edit_connect_nearby(CLDocument *doc, int page, double unitsPerPoint);
+
+// RAM and ROM contents (the wx app's memory editor).
+bool cl_ram_info(const CLDocument *doc, long gate, int *addressBits, int *dataBits);
+unsigned long cl_ram_value(CLDocument *doc, long gate, unsigned long address);
+long cl_ram_last_read(CLDocument *doc, long gate);
+long cl_ram_last_written(CLDocument *doc, long gate);
+void cl_ram_set(CLDocument *doc, long gate, unsigned long address, unsigned long value);
+void cl_ram_load_file(CLDocument *doc, long gate, const char *path);
+void cl_ram_save_file(CLDocument *doc, long gate, const char *path);
+
+// What the guided tour watches for on a page.
+typedef struct {
+	int switches, switchesOn, lights;
+	bool hasAnd, lightWired, lightOn;
+	int andInputsWired;
+} CLTourStatus;
+void cl_tour_status(CLDocument *doc, int page, CLTourStatus *out);
+
 #ifdef __cplusplus
 }
 #endif

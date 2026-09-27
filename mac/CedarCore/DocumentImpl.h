@@ -11,6 +11,7 @@
 #include "GUICircuit.h"
 #include "LogicHost.h"
 #include "klsBBox.h"
+#include "render/RenderStyle.h"
 
 #include <memory>
 #include <string>
@@ -24,6 +25,10 @@ struct EditGesture {
 	unsigned long srcGate = 0;
 	std::string srcPin;
 	bool sticky = false;
+	// Moving: a paste or new gate following the pointer (no button down)
+	// until a click drops it.
+	bool floating = false;
+	float unitsPerPoint = 0.05f;
 	GLPoint2f current;
 	// WireSeg: the wire whose segment is being dragged.
 	unsigned long wire = 0;
@@ -39,6 +44,10 @@ struct EditGesture {
 	std::vector<WireState> preMoveWire;
 	GLPoint2f lastDelta;
 	klsBBox box;
+	// Moving: connections C made mid-move (wx pendingConnects). Applied at
+	// once, but held off the undo stack until the drop, where they go above
+	// the move; Escape takes back just these. Owned (see Editor.cpp).
+	std::vector<klsCommand*> pendingConnects;
 };
 
 struct CLDocument {
@@ -56,6 +65,9 @@ struct CLDocument {
 		sim->afterStep = [this] { recordScope(); };
 	}
 	~CLDocument() {
+		// History first: a closed page is kept by its command (Extras.cpp),
+		// and goes with it while the circuit is still whole.
+		circuit.GetCommandProcessor()->ClearCommands();
 		pages.clear();
 		registerLogicHost(&circuit, nullptr);
 	}
@@ -84,12 +96,20 @@ struct CLDocument {
 	// What's under the pointer, for the overlay: a pin (red box) or nothing.
 	bool hoverPin = false;
 	GLPoint2f hoverPinAt;
+	int hoverPage = -1;   // the page the pin box belongs to
 	bool edited = false;          // changed since opened or last saved
+	int pageToShow = -1;          // set when an undo or redo adds or removes a page
 
 	GUICanvas* page(int i) const {
 		return (i >= 0 && i < (int)pages.size()) ? pages[i].get() : nullptr;
 	}
 };
 
+
+// Draw a page's wires and gates in a style (Document.cpp). The camera is
+// cl_document_draw's.
+extern "C" void clDrawPage(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+                           double originX, double originY, double unitsPerPoint,
+                           const cl::render::RenderStyle& style);
 
 #endif  // CL_MAC_DOCUMENTIMPL_H

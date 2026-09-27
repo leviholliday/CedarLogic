@@ -152,6 +152,125 @@ bool finishConnection(CLDocument* doc, GUICanvas* page, float x, float y) {
 	return true;
 }
 
+// Runs a group of commands as one undo step.
+class CommandGroup : public klsCommand {
+public:
+	explicit CommandGroup(const char* name) : klsCommand(true, name) {}
+	std::vector<std::unique_ptr<klsCommand>> parts;
+	bool done = true;   // the parts arrive already applied
+	bool Do() override {
+		if (!done) for (auto& c : parts) c->Do();
+		done = true;
+		return true;
+	}
+	bool Undo() override {
+		for (auto it = parts.rbegin(); it != parts.rend(); ++it) (*it)->Undo();
+		done = false;
+		return true;
+	}
+};
+
+// GUICanvas::findNearbyConnections: each free pin of a selected gate that has
+// exactly one clearly-closest free pin on a gate that isn't moving, within
+// 20 points. Near ties connect nothing.
+struct Nearby { unsigned long srcGate; std::string srcPin; unsigned long dstGate; std::string dstPin; float dist; };
+std::vector<Nearby> findNearby(GUICanvas* page, float radius) {
+	const float tie = 1.1f;
+	std::vector<Nearby> cands;
+	for (auto& se : *page->getGateList()) {
+		guiGate* src = se.second;
+		if (src == nullptr || !src->isSelected()) continue;
+		for (auto& shs : src->getHotspotList()) {
+			if (src->isConnected(shs.first)) continue;
+			float sx, sy;
+			src->getHotspotCoords(shs.first, sx, sy);
+			guiGate* best = nullptr;
+			std::string bestPin;
+			float bestDist = -1, second = -1;
+			for (auto& de : *page->getGateList()) {
+				guiGate* dst = de.second;
+				if (dst == nullptr || dst == src || dst->isSelected()) continue;
+				for (auto& dhs : dst->getHotspotList()) {
+					if (dst->isConnected(dhs.first)) continue;
+					float dx, dy;
+					dst->getHotspotCoords(dhs.first, dx, dy);
+					const float d = std::sqrt((dx - sx) * (dx - sx) + (dy - sy) * (dy - sy));
+					if (d > radius) continue;
+					if (bestDist < 0 || d < bestDist) { second = bestDist; bestDist = d; best = dst; bestPin = dhs.first; }
+					else if (second < 0 || d < second) second = d;
+				}
+			}
+			if (best == nullptr) continue;
+			if (second >= 0 && second < bestDist * tie) continue;
+			cands.push_back({ src->getID(), shs.first, best->getID(), bestPin, bestDist });
+		}
+	}
+	std::vector<Nearby> out;
+	for (size_t i = 0; i < cands.size(); i++) {
+		bool keep = true;
+		for (size_t j = 0; j < cands.size() && keep; j++) {
+			if (i == j || cands[j].dstGate != cands[i].dstGate || cands[j].dstPin != cands[i].dstPin) continue;
+			if (cands[j].dist * tie > cands[i].dist && cands[i].dist * tie > cands[j].dist) keep = false;
+			else if (cands[j].dist < cands[i].dist) keep = false;
+		}
+		if (keep) out.push_back(cands[i]);
+	}
+	return out;
+}
+
+// Make those connections as one undo step. Returns how many.
+int connectNearby(CLDocument* doc, GUICanvas* page, float unitsPerPoint) {
+	page->collisionUpdate();
+	std::vector<Nearby> found = findNearby(page, 20.0f * unitsPerPoint);
+	if (found.empty()) return 0;
+	CommandGroup* group = new CommandGroup("Connect");
+	for (const Nearby& n : found) {
+		klsCommand* cmd = edits::gateConnection(&doc->circuit, page, n.srcGate, n.srcPin, n.dstGate, n.dstPin);
+		if (cmd == nullptr) continue;
+		cmd->setCanvas(page);
+		cmd->Do();
+		group->parts.emplace_back(cmd);
+	}
+	const int made = (int)group->parts.size();
+	if (made == 0) { delete group; return 0; }
+	submit(doc, page, group);
+	page->collisionUpdate();
+	return made;
+}
+
+// Mid-move C connections, onto the undo stack as one step (above the move,
+// so the first undo takes back just the connection).
+void flushPendingConnects(CLDocument* doc, GUICanvas* page, EditGesture& g) {
+	if (g.pendingConnects.empty()) return;
+	CommandGroup* group = new CommandGroup("Connect");
+	for (klsCommand* c : g.pendingConnects) group->parts.emplace_back(c);
+	g.pendingConnects.clear();
+	submit(doc, page, group);
+}
+
+// Take them back, newest first (Escape, or the whole move cancelled).
+int discardPendingConnects(CLDocument* doc, EditGesture& g) {
+	const int n = (int)g.pendingConnects.size();
+	for (auto it = g.pendingConnects.rbegin(); it != g.pendingConnects.rend(); ++it) {
+		(*it)->Undo();
+		delete *it;
+	}
+	g.pendingConnects.clear();
+	if (n > 0) if (GUICanvas* p = doc->page(g.page)) p->collisionUpdate();
+	return n;
+}
+
+// Drop what's being moved: record the move, then connect what landed next
+// to a free pin (the wx canvas's forgiving connect on drop).
+void finishMove(CLDocument* doc, GUICanvas* page, EditGesture& g) {
+	if (g.lastDelta.x != 0 || g.lastDelta.y != 0 || g.floating) {
+		if (g.lastDelta.x != 0 || g.lastDelta.y != 0)
+			commitMove(doc, page, g.preMove, g.preMoveWire, g.lastDelta);
+		connectNearby(doc, page, g.unitsPerPoint);
+	}
+	flushPendingConnects(doc, page, g);
+}
+
 }  // namespace
 
 extern "C" {
@@ -162,8 +281,25 @@ int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifi
 	EditGesture& g = doc->gesture;
 	// The click that ends a click-started connection: connect to what's
 	// there, or cancel on nothing.
+	// A gesture belongs to its page. In a split view the other side is
+	// another page whose points mean nothing to it: a click there leaves a
+	// floating gate where it was, drops an unfinished wire, and then acts on
+	// that side as usual.
+	if (g.page != pageIndex && (g.mode == EditGesture::Moving || g.mode == EditGesture::Connect)) {
+		if (g.mode == EditGesture::Moving && g.floating) {
+			if (GUICanvas* p = doc->page(g.page)) { finishMove(doc, p, g); p->collisionUpdate(); }
+		}
+		g = EditGesture();
+	}
 	if (g.mode == EditGesture::Connect && g.sticky) {
 		if (GUICanvas* p = doc->page(g.page)) finishConnection(doc, p, (float)x, (float)y);
+		g = EditGesture();
+		return CL_PRESS_PART;
+	}
+	// The click that drops a floating paste or gate.
+	if (g.mode == EditGesture::Moving && g.floating) {
+		cl_edit_drag(doc, x, y);
+		if (GUICanvas* p = doc->page(g.page)) { finishMove(doc, p, g); p->collisionUpdate(); }
 		g = EditGesture();
 		return CL_PRESS_PART;
 	}
@@ -173,6 +309,7 @@ int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifi
 	g.start = GLPoint2f((float)x, (float)y);
 	g.dragSlop = (float)(kDragPoints * unitsPerPoint);
 	g.hoverDelta = (float)(kPinPoints * unitsPerPoint);
+	g.unitsPerPoint = (float)unitsPerPoint;
 	g.current = g.start;
 	const bool shift = modifiers & CL_MOD_SHIFT;
 
@@ -249,7 +386,18 @@ void cl_edit_drag(CLDocument* doc, double x, double y) {
 	const GLPoint2f m((float)x, (float)y);
 	g.current = m;
 
-	if (g.mode == EditGesture::Connect) return;   // the overlay draws the line
+	if (g.mode == EditGesture::Connect) {
+		// The overlay draws the line; the box shows the pin it would join.
+		unsigned long gate = 0;
+		std::string pin;
+		const float upp = g.unitsPerPoint > 0 ? g.unitsPerPoint : 0.05f;
+		const bool onPin = pinAt(page, m.x, m.y, kPinPoints * upp, gate, pin) &&
+		                   !(gate == g.srcGate && pin == g.srcPin);
+		doc->hoverPin = onPin;
+		doc->hoverPage = g.page;
+		if (onPin) doc->circuit.getGate(gate)->getHotspotCoords(pin, doc->hoverPinAt.x, doc->hoverPinAt.y);
+		return;
+	}
 	if (g.mode == EditGesture::WireSeg) {
 		if (!g.moved && std::fabs(m.x - g.start.x) < g.dragSlop && std::fabs(m.y - g.start.y) < g.dragSlop) return;
 		if (guiWire* w = doc->circuit.getWire(g.wire)) {
@@ -327,9 +475,8 @@ void cl_edit_release(CLDocument* doc, double x, double y) {
 			return;
 		}
 		if (g.mode == EditGesture::Moving) {
-			if (g.lastDelta.x != 0 || g.lastDelta.y != 0) {
-				commitMove(doc, page, g.preMove, g.preMoveWire, g.lastDelta);
-			}
+			if (g.floating) return;   // it drops on the next click
+			finishMove(doc, page, g);
 		} else if (g.mode == EditGesture::Pressed && g.onGate) {
 			// Pressed and let go in place: a switch or keypad gets the click.
 			if (guiGate* gate = doc->circuit.getGate(g.gate)) {
@@ -347,6 +494,7 @@ void cl_edit_release(CLDocument* doc, double x, double y) {
 void cl_edit_cancel(CLDocument* doc) {
 	if (doc == nullptr) return;
 	EditGesture& g = doc->gesture;
+	discardPendingConnects(doc, g);
 	if (g.mode == EditGesture::WireSeg)
 		if (guiWire* w = doc->circuit.getWire(g.wire)) w->setSegmentMap(w->getOldSegmentMap());
 	if (g.mode == EditGesture::Moving) {
@@ -642,6 +790,16 @@ bool cl_edit_hover(CLDocument* doc, int pageIndex, double x, double y, double un
 	if (page == nullptr) return false;
 	EditGesture& g = doc->gesture;
 	bool redraw = false;
+	// Floating gates and click-started wires follow the pointer only over
+	// their own page (not over the other side of a split).
+	if ((g.mode == EditGesture::Moving && g.floating) || (g.mode == EditGesture::Connect && g.sticky)) {
+		if (g.page != pageIndex) return false;
+	}
+	if (g.mode == EditGesture::Moving && g.floating) {
+		g.unitsPerPoint = (float)unitsPerPoint;
+		cl_edit_drag(doc, x, y);
+		return true;
+	}
 	if (g.mode == EditGesture::Connect && g.sticky) {
 		g.current = GLPoint2f((float)x, (float)y);
 		redraw = true;
@@ -652,9 +810,59 @@ bool cl_edit_hover(CLDocument* doc, int pageIndex, double x, double y, double un
 	GLPoint2f at;
 	if (onPin) doc->circuit.getGate(gate)->getHotspotCoords(pin, at.x, at.y);
 	if (onPin != doc->hoverPin || (onPin && (at.x != doc->hoverPinAt.x || at.y != doc->hoverPinAt.y))) redraw = true;
+	if (doc->hoverPage != pageIndex) redraw = true;
 	doc->hoverPin = onPin;
 	doc->hoverPinAt = at;
+	doc->hoverPage = pageIndex;
 	return redraw;
+}
+
+bool cl_edit_float_begin(CLDocument* doc, int pageIndex, double x, double y) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return false;
+	EditGesture& g = doc->gesture;
+	const float upp = g.unitsPerPoint > 0 ? g.unitsPerPoint : 0.05f;
+	g = EditGesture();
+	g.page = pageIndex;
+	g.start = g.current = GLPoint2f((float)x, (float)y);
+	g.unitsPerPoint = upp;
+	snapshotSelection(doc, page, g.preMove, g.preMoveWire);
+	if (g.preMove.empty()) return false;
+	g.mode = EditGesture::Moving;
+	g.floating = true;
+	return true;
+}
+
+bool cl_edit_is_floating(const CLDocument* doc) {
+	return doc && doc->gesture.mode == EditGesture::Moving && doc->gesture.floating;
+}
+
+int cl_edit_connect_while_moving(CLDocument* doc, int pageIndex, double unitsPerPoint) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	EditGesture* g = doc ? &doc->gesture : nullptr;
+	if (page == nullptr || g->mode != EditGesture::Moving || g->page != pageIndex) return -1;
+	page->collisionUpdate();
+	int made = 0;
+	for (const Nearby& n : findNearby(page, 20.0f * (float)unitsPerPoint)) {
+		klsCommand* cmd = edits::gateConnection(&doc->circuit, page, n.srcGate, n.srcPin, n.dstGate, n.dstPin);
+		if (cmd == nullptr) continue;
+		cmd->setCanvas(page);
+		cmd->Do();
+		g->pendingConnects.push_back(cmd);
+		made++;
+	}
+	if (made > 0) page->collisionUpdate();
+	return made;
+}
+
+int cl_edit_take_back_connects(CLDocument* doc) {
+	return doc ? discardPendingConnects(doc, doc->gesture) : 0;
+}
+
+int cl_edit_connect_nearby(CLDocument* doc, int pageIndex, double unitsPerPoint) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return 0;
+	return connectNearby(doc, page, (float)unitsPerPoint);
 }
 
 bool cl_edit_is_connecting(const CLDocument* doc) {
@@ -798,7 +1006,7 @@ void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, doub
 	}
 
 	// The pin under the pointer: the red box you drag a wire out of.
-	if (doc->hoverPin) {
+	if (doc->hoverPin && doc->hoverPage == pageIndex) {
 		const float r = (float)(kPinBoxPoints * unitsPerPoint);
 		const GLPoint2f c = doc->hoverPinAt;
 		Point pts[4] = { Point(c.x - r, c.y + r), Point(c.x + r, c.y + r), Point(c.x + r, c.y - r), Point(c.x - r, c.y - r) };

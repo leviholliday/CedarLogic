@@ -61,18 +61,46 @@ done
 rm -f "$OUT/libCedarCore.a"
 ar rcs "$OUT/libCedarCore.a" "${OBJS[@]}"
 
+# Sparkle.framework: the copy the wx build downloads (configure it once).
+SPARKLE_DIR="${SPARKLE_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/build/_deps/sparkle-src}"
+[ -d "$SPARKLE_DIR/Sparkle.framework" ] || { echo "Sparkle.framework not found in $SPARKLE_DIR (set SPARKLE_DIR)"; exit 1; }
+
 echo "App..."
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -parse-as-library -target "$ARCH-apple-macos$MIN" \
 	-import-objc-header mac/CedarCore/include/CedarCore.h \
 	mac/App/*.swift "$OUT/libCedarCore.a" -lc++ \
 	-framework CoreText -framework OpenGL \
+	-F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
 	-o "$APP/Contents/MacOS/CedarLogic"
+# Sparkle, for updates (see App/Updates.swift).
+rm -rf "$APP/Contents/Frameworks"; mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 
 cp mac/App/Info.plist "$APP/Contents/Info.plist"
+# The build number is the commit count, and About shows the commit too, so
+# two copies of the app can be told apart ("+" means uncommitted changes).
+BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+[ -n "$(git status --porcelain -- mac src include logic format 2>/dev/null)" ] && COMMIT="$COMMIT+"
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" mac/App/Info.plist)
+/usr/libexec/PlistBuddy -c "Set CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add CFBundleGetInfoString string CedarLogic Native $VERSION (build $BUILD, $COMMIT)" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add CLCommit string $COMMIT" "$APP/Contents/Info.plist"
 cp res/cl_gatedefs.xml "$APP/Contents/Resources/"
-cp res/macos/CedarLogic.icns "$APP/Contents/Resources/"
-codesign --force --sign - "$APP" >/dev/null 2>&1
+cp mac/App/CedarLogicNative.icns "$APP/Contents/Resources/"
+# The launch screen's icon (the artwork without the NATIVE badge), and the
+# original CedarLogic help pages for Help > Classic Help.
+sips -c 1086 1086 res/macos/icon-artwork.png --out "$OUT/launch-icon.png" >/dev/null   # just the rounded tile
+sips -Z 512 "$OUT/launch-icon.png" --out "$APP/Contents/Resources/LaunchIcon.png" >/dev/null
+rm -rf "$APP/Contents/Resources/ClassicHelp"
+ditto res/help "$APP/Contents/Resources/ClassicHelp"
+rm -f "$APP/Contents/Resources/CedarLogic.icns"
+# The update key's public half (private half: keychain account "cedarlogic").
+/usr/libexec/PlistBuddy -c "Add SUPublicEDKey string yxLh+j07mcolZ462R1sZtniQPJ+hjvkKSgtNG6dY700=" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add SUFeedURL string https://raw.githubusercontent.com/leviholliday/CedarLogic-Releases/main/appcast-native.xml" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add SUEnableAutomaticChecks bool true" "$APP/Contents/Info.plist"
+codesign --force --deep --sign - "$APP" >/dev/null 2>&1
 echo "Built $APP"
 [ "${OPEN:-0}" = 1 ] && open "$APP"
 exit 0

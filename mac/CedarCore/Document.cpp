@@ -10,6 +10,7 @@
 #include "GateLibrary.h"
 #include "LibraryParse.h"
 #include "LogicHost.h"
+#include "Settings.h"
 #include "guiGate.h"
 #include "guiWire.h"
 #include "klsBBox.h"
@@ -48,6 +49,15 @@ void setError(char* error, int len, const std::string& msg) {
 extern "C" {
 
 bool cl_library_load(const char* xmlPath) {
+	// The wx app's defaults for what the drawing reads from its settings
+	// (MainApp::loadSettings); the app changes them with cl_set_wire_dots.
+	static bool defaults = false;
+	if (!defaults) {
+		defaults = true;
+		cl_set_wire_dots(true, 0.18);
+		appConfig().appSettings.gridlineVisible = true;
+		appConfig().appSettings.majorGridVisible = true;
+	}
 	std::string xml;
 	if (!readFile(xmlPath, xml)) return false;
 	LibraryParse lib(xml);
@@ -167,9 +177,9 @@ bool cl_document_page_bounds(const CLDocument* doc, int page,
 	return true;
 }
 
-static void drawPage(CLDocument* doc, int page, CGContextRef ctx,
-                     double backingScale, double originX, double originY,
-                     double unitsPerPoint, const cl::render::RenderStyle& style) {
+void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
+               double backingScale, double originX, double originY,
+               double unitsPerPoint, const cl::render::RenderStyle& style) {
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
 	if (p == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	// Work in physical pixels, as the wx app's device space does, so stroke
@@ -187,7 +197,10 @@ static void drawPage(CLDocument* doc, int page, CGContextRef ctx,
 	std::vector<unsigned long> ids;
 	for (auto& w : *p->getWireList()) if (w.second) ids.push_back(w.first);
 	std::sort(ids.begin(), ids.end());
+	// Live dark screen only: paper, thumbnails and Simulation View keep theirs.
+	scene.wiresPhase = style.darkMode && style.colorOutput && style.showLiveState && !style.simView;
 	for (unsigned long id : ids) (*p->getWireList())[id]->drawToScene(scene, style);
+	scene.wiresPhase = false;
 	ids.clear();
 	for (auto& g : *p->getGateList()) if (g.second) ids.push_back(g.first);
 	std::sort(ids.begin(), ids.end());
@@ -198,8 +211,8 @@ static void drawPage(CLDocument* doc, int page, CGContextRef ctx,
 void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark) {
-	drawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint,
-	         cl::render::RenderStyle::screen(dark));
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint,
+	           cl::render::RenderStyle::screen(dark));
 }
 
 bool cl_document_draw_fitted(CLDocument* doc, int page, CGContextRef ctx,
@@ -217,7 +230,7 @@ bool cl_document_draw_fitted(CLDocument* doc, int page, CGContextRef ctx,
 		? cl::render::RenderStyle::print()
 		: cl::render::RenderStyle::screen(style == CL_STYLE_DARK);
 	rs.showSelection = false;
-	drawPage(doc, page, ctx, backingScale, originX, originY, upp, rs);
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, upp, rs);
 	return true;
 }
 

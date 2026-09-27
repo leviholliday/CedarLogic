@@ -33,8 +33,16 @@ public:
 	void fillRect(render::Point lo, render::Point hi, const render::Color&) override;
 	void text(render::Point origin, const char* utf8, float pixelHeight, const render::Color&) override;
 
+	// A wire colour swapped on the way to the screen: the dark canvas's low
+	// wire grey (guiWire's 0.35 floor) reads too close to the grid, so the Mac
+	// app can paint it in another colour. Only while wires are drawn.
+	static bool remapLowWire;
+	static render::Color lowWire;
+	bool wiresPhase = false;
+
 private:
 	CGContextRef ctx;
+	render::Color mapped(const render::Color& c) const;
 	CGAffineTransform viewport = CGAffineTransformIdentity;
 	std::vector<CGAffineTransform> stack;   // world transforms, innermost last
 
