@@ -90,8 +90,6 @@ struct CLLayout: View {
             let url = NSDocumentController.shared.document(for: w)?.fileURL
             let t = Library.displayName(for: url) ?? w.title
             if windowTitle != t { DispatchQueue.main.async { windowTitle = t } }
-            // The Window menu, Mission Control and the Dock say so too.
-            if Library.displayName(for: url) != nil && w.title != t { w.title = t }
         })
         .preferredColorScheme(prefs.dark ? .dark : .light)
         .tint(prefs.accentColor(dark: prefs.dark))
@@ -292,6 +290,7 @@ final class TitlebarManager {
         var origButtons: [NSPoint]
         var observers: [NSObjectProtocol] = []
         var toolbarWatch: NSKeyValueObservation?
+        var titleWatch: NSKeyValueObservation?
     }
     private var states: [ObjectIdentifier: State] = [:]
 
@@ -332,6 +331,15 @@ final class TitlebarManager {
         states[id]?.barHeight = barHeight
         w.isRestorable = false
         LastCircuit.note(w)
+        // A circuit from Your Circuits is called by its name there (in the
+        // Window menu, Mission Control, the Dock), not "circuit.cdl" -- and
+        // stays so when SwiftUI sets the title again later.
+        Self.nameFromLibrary(w)
+        if states[id]?.titleWatch == nil {
+            states[id]?.titleWatch = w.observe(\.title, options: [.new]) { w, _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { Self.nameFromLibrary(w) } }
+            }
+        }
         if custom {
             w.isMovable = true
             w.styleMask.insert(.fullSizeContentView)
@@ -367,6 +375,12 @@ final class TitlebarManager {
         guard states[ObjectIdentifier(w)]?.custom == true, let tb = w.toolbar, tb.isVisible else { return }
         tb.isVisible = false
         layout(w)
+    }
+
+    static func nameFromLibrary(_ w: NSWindow) {
+        guard let name = Library.displayName(for: NSDocumentController.shared.document(for: w)?.fileURL),
+              w.title != name else { return }
+        w.title = name
     }
 
     private func forget(_ id: ObjectIdentifier) {

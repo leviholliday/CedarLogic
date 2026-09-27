@@ -98,6 +98,11 @@ final class Splash: ObservableObject {
         guard !active, panel == nil, !args.contains("--render-ui"), env["CL_SNAPSHOT"] == nil,
               env["CL_NO_SPLASH"] == nil else { return }
         active = true
+        // Timed to the frame, so no App Nap until it's done: an app launched
+        // in the background (behind another app, in Stage Manager's strip)
+        // would otherwise have its timers held back for seconds.
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
+                                                         reason: "The launch screen")
         if Self.reduceMotion { dissolveAt = 1.1 }
         let size = NSSize(width: 560, height: 372)
         // Where you're looking: the screen with the pointer on it.
@@ -157,6 +162,7 @@ final class Splash: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.begin() }
     }
     private var observers: [NSObjectProtocol] = []
+    private var activity: NSObjectProtocol?
 
     /// A window arriving while the panel is up: hidden before it's seen.
     func holdEarly(_ w: NSWindow, from: String = "sweep") {
@@ -249,6 +255,7 @@ final class Splash: ObservableObject {
         observers = []
         let windows = held
         held = []
+        SplashDebug.log("finish: \(windows.count) window(s) coming in")
         // The canvases fade their grid in with the windows (their own appear
         // played while they were hidden).
         NotificationCenter.default.post(name: .clSplashDone, object: nil)
@@ -257,12 +264,17 @@ final class Splash: ObservableObject {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             for w in windows { w.animator().alphaValue = 1 }
             panel?.animator().alphaValue = 0
-        } completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                self?.panel?.orderOut(nil)
-                self?.panel = nil
-                windows.first(where: { NSDocumentController.shared.document(for: $0) != nil })?.makeKeyAndOrderFront(nil)
-            }
+        }
+        // Done on a clock of its own, not the animation's completion: when
+        // macOS doesn't run the fade (the windows in Stage Manager's strip,
+        // say), that never comes. Every window it held ends fully visible.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.dissolveTime + 0.05) { [weak self] in
+            for w in windows where w.alphaValue < 1 { w.alphaValue = 1 }
+            SplashDebug.log("dissolved")
+            self?.panel?.orderOut(nil)
+            self?.panel = nil
+            if let a = self?.activity { ProcessInfo.processInfo.endActivity(a); self?.activity = nil }
+            windows.first(where: { NSDocumentController.shared.document(for: $0) != nil })?.makeKeyAndOrderFront(nil)
         }
     }
 }
