@@ -12,6 +12,34 @@ import QuartzCore
 import SwiftUI
 
 final class CircuitCanvasNSView: NSView {
+    /// Whether anyone can see this canvas: the window isn't covered,
+    /// minimized, on another Space or in Stage Manager's strip. A running
+    /// clock redraws 60 times a second; drawing a canvas nobody can see was
+    /// most of the app's CPU. The simulation runs on regardless.
+    var seen: Bool { window?.occlusionState.contains(.visible) ?? false }
+
+    /// A redraw for the clock and animations: only when seen, and drawn up
+    /// to date as soon as the window can be seen again (below).
+    func redrawIfSeen() {
+        if seen { needsDisplay = true } else { missedDraw = true }
+    }
+    private var missedDraw = false
+    private var occlusionWatch: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let o = occlusionWatch { NotificationCenter.default.removeObserver(o); occlusionWatch = nil }
+        guard let w = window else { return }
+        occlusionWatch = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
+                                                                object: w, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.missedDraw, self.seen else { return }
+                self.missedDraw = false
+                self.needsDisplay = true
+            }
+        }
+    }
+
     var document: CoreDocument? { didSet { needsFit = true; needsDisplay = true } }
     var page = 0 { didSet { if page != oldValue { needsDisplay = true } } }
     /// Which page this is showing (CoreDocument.pageID): its index changes
@@ -865,7 +893,7 @@ final class CanvasController: ObservableObject {
         markEdited()
     }
 
-    func redraw() { view?.needsDisplay = true; partner?.view?.needsDisplay = true }
+    func redraw() { view?.redrawIfSeen(); partner?.view?.redrawIfSeen() }
 
     /// A new selection's halo fades in; clicking what's already selected
     /// doesn't restart it.
@@ -1012,6 +1040,32 @@ final class CanvasController: ObservableObject {
     func export() {
         guard let document else { return }
         PageExport.run(document, page: page, suggestedName: documentTitle, window: view?.window)
+    }
+
+    /// A copy for an older CedarLogic (wx: Export as V2 / V1.x Compatible):
+    /// 2 is the v2 XML, 1 the v1.x compatible format. The circuit you're in
+    /// stays as it is.
+    func exportOlder(_ format: Int32) {
+        guard let document, let w = view?.window else { return }
+        let panel = NSSavePanel()
+        let name = (w.title as NSString).deletingPathExtension
+        panel.nameFieldStringValue = "\(name) (\(format == 1 ? "v1.x" : "v2")).cdl"
+        panel.allowedContentTypes = [.init(filenameExtension: "cdl") ?? .data]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.message = format == 1 ? "A copy the oldest CedarLogic (v1.x) can open."
+                                    : "A copy CedarLogic versions before 3 can open."
+        panel.beginSheetModal(for: w) { r in
+            guard r == .OK, let url = panel.url else { return }
+            var why = [CChar](repeating: 0, count: 512)
+            let rc = cl_document_export_legacy(document.handle, url.path, format, &why, Int32(why.count))
+            guard rc != 0 else { return }
+            let a = NSAlert()
+            a.messageText = rc > 0 ? "Exported, with one thing left out" : "The circuit couldn't be exported"
+            a.informativeText = String(cString: why)
+            a.alertStyle = rc > 0 ? .informational : .warning
+            a.beginSheetModal(for: w)
+        }
     }
 
     func printPage() {

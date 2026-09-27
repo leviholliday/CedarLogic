@@ -118,6 +118,19 @@ const char* cl_document_save_text(CLDocument* doc) {
 	return text.c_str();
 }
 
+int cl_document_export_legacy(CLDocument* doc, const char* path, int format, char* error, int errorLen) {
+	if (doc == nullptr || path == nullptr) return -1;
+	std::vector<GUICanvas*> pages;
+	for (auto& p : doc->pages) pages.push_back(p.get());
+	CircuitParse writer(pages);
+	const bool ok = format == 1 ? writer.saveCircuitLegacy(path, pages) : writer.saveCircuit(path, pages);
+	const std::string why = writer.getLastError();
+	if (ok) return 0;
+	setError(error, errorLen, why);
+	// The v1.x writer still writes the file when all it has is a warning.
+	return why.rfind("Warning:", 0) == 0 ? 1 : -1;
+}
+
 int cl_document_add_page(CLDocument* doc) {
 	if (doc == nullptr) return -1;
 	doc->pages.emplace_back(new GUICanvas(&doc->circuit));

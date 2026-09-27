@@ -35,6 +35,11 @@ CLDocument *cl_document_new(void);
 // The circuit as .cdl text (the current v3 format), as the wx app saves it.
 // Valid until the next call.
 const char *cl_document_save_text(CLDocument *doc);
+// A copy in an older format, for older CedarLogic (wx: Export as V2 / V1.x):
+// format 2 is the v2 XML, 1 the v1.x compatible one. Returns 0 when written,
+// 1 when written but with something the format can't hold (the reason in
+// `error`), -1 when it couldn't be written (the reason in `error`).
+int cl_document_export_legacy(CLDocument *doc, const char *path, int format, char *error, int errorLen);
 
 // ---- Pages ---------------------------------------------------------------
 int cl_document_add_page(CLDocument *doc);               // returns its index

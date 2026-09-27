@@ -383,7 +383,7 @@ struct HeroCircuit: View {
         let lampOn = Color(.sRGB, red: 1, green: 196 / 255, blue: 64 / 255)
         let cx = size.width / 2, cy = size.height / 2
         let k = min(size.width / 520, size.height / 200)
-        let state = Int(t / 1.3) % 4
+        let state = Int(t / 0.95) % 4
         let a = state & 2 != 0, b = state & 1 != 0, out = a && b
         let bodyL = cx - 30 * k, bodyR = cx + 30 * k, hh = 44 * k, nose = bodyR + 44 * k
 
@@ -403,7 +403,7 @@ struct HeroCircuit: View {
             var len = 0.0
             for i in 1..<pts.count { len += hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) }
             let spacing = 34 * k
-            var d = (t * 70 * k).truncatingRemainder(dividingBy: spacing)
+            var d = (t * 95 * k).truncatingRemainder(dividingBy: spacing)
             while d < len {
                 let q = along(pts, d)
                 ctx.fill(Path(ellipseIn: CGRect(x: q.x - 2.6 * k, y: q.y - 2.6 * k, width: 5.2 * k, height: 5.2 * k)), with: .color(.white))

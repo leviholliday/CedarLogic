@@ -526,6 +526,12 @@ struct FileCommands: Commands {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(canvas == nil)
             }
+            // As in wx's File menu: copies an older CedarLogic can open
+            // (a school's lab computers, say).
+            Button("Export as V2 (legacy XML)…") { canvas?.exportOlder(2) }
+                .disabled(canvas == nil)
+            Button("Export as V1.x Compatible…") { canvas?.exportOlder(1) }
+                .disabled(canvas == nil)
         }
         CommandGroup(replacing: .printItem) {
             Button("Print…") { canvas?.printPage() }

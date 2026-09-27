@@ -1619,6 +1619,10 @@ struct CLTabStrip: View {
                 if pt.x > x0 + tw - 28 && pt.x < x0 + tw - 4 { close = k }
                 break
             }
+            // The "+" lights itself (BarClickArea), but this runs on every
+            // move over the strip too: it must agree, not put the light out.
+            let px = x(pages.count, tw)
+            if h == nil && pt.x >= px && pt.x < px + plusW { h = -2 }
         }
         if hover != h { hover = h }
         if hoverClose != close { hoverClose = close }
