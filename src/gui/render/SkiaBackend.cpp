@@ -5,6 +5,7 @@
 #include "render/SkiaBackend.h"
 
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -124,11 +125,38 @@ bool SkiaBackend::ensureContext() {
 	// The test hook, so the blank-canvas path can be walked on a machine whose
 	// graphics are fine. See RendererHealth.h.
 	if (forceGLFailure()) return false;
+	// Drivers where Ganesh comes up and draws but nothing reaches the window.
+	// Decided once; the answer does not change within a run.
+	static bool gpuRefused = false;
+	if (gpuRefused) return false;
+
 	fInterface = GrGLMakeNativeInterface();
 	const bool nativeFound = fInterface != nullptr;
 #ifdef __linux__
 	// GLX found nothing; this is a Wayland session. See makeEGLInterface.
 	if (!fInterface) fInterface = makeEGLInterface();
+
+	// The Raspberry Pi's V3D (Pi 4 and 5): Skia accepts its OpenGL 3.1 context
+	// and every frame "succeeds", but the window stays black -- in light mode
+	// too, so nothing is reaching it at all. The processor path shows the same
+	// frames correctly there (tested on a Pi 5), so go straight to it.
+	// CEDAR_TRY_GPU=1 tries the GPU anyway, for checking a newer driver.
+	if (fInterface && fInterface->fFunctions.fGetString && !std::getenv("CEDAR_TRY_GPU")) {
+		const char* renderer = reinterpret_cast<const char*>(
+			fInterface->fFunctions.fGetString(0x1F01 /*GL_RENDERER*/));
+		const std::string r = renderer ? renderer : "";
+		std::string lower(r);
+		for (char& c : lower) c = (char)std::tolower((unsigned char)c);
+		if (lower.find("v3d") != std::string::npos ||
+		    lower.find("videocore") != std::string::npos) {
+			gpuRefused = true;
+			fInterface.reset();
+			std::fprintf(stderr, "CedarLogic GL: %s shows nothing drawn through Skia's GPU "
+			             "backend, so the processor draws instead (CEDAR_TRY_GPU=1 to override)\n",
+			             r.c_str());
+			return false;
+		}
+	}
 #endif
 	fContext = GrDirectContexts::MakeGL(fInterface);
 
