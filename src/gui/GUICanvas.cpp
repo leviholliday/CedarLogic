@@ -8,6 +8,7 @@
    GUICanvas: Contains rendering and input functions for a page
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "GUICanvas.h"
 #include "PaletteDrag.h"
 #include "RenderMode.h"
@@ -66,7 +67,7 @@ private:
 // GUICanvas constructor - defaults grid size to 1 unit square
 GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
     const wxPoint& pos, const wxSize& size, long style, const wxString& name)
-    : klsGLCanvas(parent, name, id, pos, size, style|wxSUNKEN_BORDER ) {
+    : klsGLCanvas(parent, name, id, pos, size, style|CL_CANVAS_EDGE ) {
 
 	this->gCircuit = gCircuit;
 	isWithinPaste = false;
@@ -102,10 +103,10 @@ GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 #ifdef __WXOSX__
 	// Suppress macOS bonk sound for keys handled in OnKeyDown
 	Bind(wxEVT_CHAR, [](wxKeyEvent& evt) {
+		// Every bare key OnKeyDown's switch handles; add new ones here too.
+		static const wxString handled = "aAcCdDrRsStTvVxX +=-";
 		int key = evt.GetKeyCode();
-		if (key == 'a' || key == 'A' || key == 'r' || key == 'R' ||
-			key == 'c' || key == 'C' ||
-			key == WXK_SPACE || key == '+' || key == '=' || key == '-') {
+		if (!evt.CmdDown() && !evt.AltDown() && key < 128 && handled.Find((wxChar)key) != wxNOT_FOUND) {
 			// Swallow — already handled in OnKeyDown
 		} else {
 			evt.Skip();
@@ -2370,6 +2371,16 @@ void GUICanvas::duplicateSelection() {
 	if (!text.empty()) startPaste( cb.pasteText( gCircuit, this, text, false ) );
 }
 
+void GUICanvas::selectAll() {
+	if (currentDragState != DRAG_NONE || isWithinPaste) return;
+	selectedGates.clear();
+	selectedWires.clear();
+	for (auto& g : gateList) if (g.second) { g.second->select(); selectedGates.push_back(g.first); }
+	for (auto& w : wireList) if (w.second) { w.second->select(); selectedWires.push_back(w.first); }
+	markSelectionChanged();
+	Refresh();
+}
+
 // The pasted gates follow the mouse until the next click drops them.
 void GUICanvas::startPaste( cmdPasteBlock* cmd ) {
 	pasteCommand = cmd;
@@ -2400,25 +2411,20 @@ void GUICanvas::startPaste( cmdPasteBlock* cmd ) {
 		thisGate++;
 	}
 	ref = false;
-	// Try to drag by the top-left-most gate
+	// Drag by the gate nearest the top-left corner. gateList is unordered, so
+	// ties go to the lower id -- otherwise the anchor (and where the block
+	// lands under the mouse) could change from one paste to the next.
 	double minMagnitude = 0.0;
 	thisGate = gateList.begin();
 	while (thisGate != gateList.end()) {
-		GLPoint2f temp;
 		if ((thisGate->second)->isSelected()) {
-			if (ref) {
-				(thisGate->second)->getGLcoords(temp.x, temp.y);
-				float diffx = gatecoord.x - minPoint.x, diffy = gatecoord.y - minPoint.y;
-				double newMag = (diffx * diffx) + (diffy * diffy);
-				if (newMag < minMagnitude) {
-					minMagnitude = newMag;
-					gatecoord = temp;
-					snapToGateID = (thisGate->first);
-				}
-			} else {
-				(thisGate->second)->getGLcoords(gatecoord.x, gatecoord.y);
-				float diffx = gatecoord.x - minPoint.x, diffy = gatecoord.y - minPoint.y;
-				minMagnitude = (diffx * diffx) + (diffy * diffy);
+			GLPoint2f temp;
+			(thisGate->second)->getGLcoords(temp.x, temp.y);
+			float diffx = temp.x - minPoint.x, diffy = temp.y - minPoint.y;
+			double mag = (diffx * diffx) + (diffy * diffy);
+			if (!ref || mag < minMagnitude || (mag == minMagnitude && thisGate->first < snapToGateID)) {
+				minMagnitude = mag;
+				gatecoord = temp;
 				snapToGateID = (thisGate->first);
 				ref = true;
 			}
@@ -2605,7 +2611,9 @@ void GUICanvas::straightenWireAvoiding(guiWire* wire) {
 	wire->straightenRoute();
 	float best = overlap();
 	float pos, lo, hi;
-	if (best <= 1e-3f || !wire->trunkRange(pos, lo, hi)) return;
+	// Only a two-pin wire has one trunk to slide; a wire with more pins is
+	// left on its fresh route.
+	if (best <= 1e-3f || wire->getConnections().size() != 2 || !wire->trunkRange(pos, lo, hi)) return;
 
 	// Nearest grid positions first, alternating sides, strictly between the
 	// outermost pins so every branch keeps a real length.

@@ -3,6 +3,7 @@
    ModernToolbar: the custom-drawn toolbar and its styles.
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "ModernToolbar.h"
 #include "MainFrame.h"
 #include "MainApp.h"
@@ -40,7 +41,7 @@ const char* styleBlurb(int s) {
 #ifdef __WXOSX__
 		case Classic:   return "The standard macOS toolbar.";
 #else
-		case Classic:   return "The standard Windows toolbar.";
+		case Classic:   return "Every tool in view, in rounded groups, the traditional way.";
 #endif
 		case Segmented: return "Tools in tidy rounded groups, everything in reach.";
 		case Minimal:   return "Just the essentials and your file name; the rest is behind the \u2022\u2022\u2022 menu.";
@@ -210,10 +211,19 @@ std::vector<Item> layout(int style, int hidden, const State& s, int W, int H) {
 	}
 
 	int r = W - EDGE;
-	if (shown(GTab))   { add(Item::Button, Tool_NewTab, "newtab", "New tab (" + mod + "T)", 13, r, BTN_W, false); r -= GROUP_GAP; }
-	if (shown(GTheme)) { add(Item::Toggle, Tool_ThemeToggle, nullptr, "Dark mode", 12, r, BTN_W, false); r -= GROUP_GAP; }
-	if (shown(GLock))  { add(Item::Toggle, Tool_Lock, nullptr, "Lock the circuit so it can't be edited", 11, r, BTN_W, false); r -= GROUP_GAP; }
-	if (shown(GRun))   { add(Item::Run, Tool_SimView, "run", "Simulation View (" + mod + "R)", 10, r, RUN_W, false); r -= GROUP_GAP; }
+#ifdef __WXMSW__
+	// Windows has no menu bar (see MainFrame::ShowAppMenu): this is the menu.
+	add(Item::More, 0, "more", "Menu", 14, r, MORE_W, false);
+	r -= GROUP_GAP;
+#endif
+	// Right-hand groups step aside, rather than draw over the left-hand ones,
+	// when the window is too narrow for both. What they did is still in the
+	// menu and on its shortcut.
+	auto fits = [&](int w) { return r - w - GROUP_GAP > x; };
+	if (shown(GTab) && fits(BTN_W))   { add(Item::Button, Tool_NewTab, "newtab", "New tab (" + mod + "T)", 13, r, BTN_W, false); r -= GROUP_GAP; }
+	if (shown(GTheme) && fits(BTN_W)) { add(Item::Toggle, Tool_ThemeToggle, nullptr, "Dark mode", 12, r, BTN_W, false); r -= GROUP_GAP; }
+	if (shown(GLock) && fits(BTN_W))  { add(Item::Toggle, Tool_Lock, nullptr, "Lock the circuit so it can't be edited", 11, r, BTN_W, false); r -= GROUP_GAP; }
+	if (shown(GRun) && fits(RUN_W))   { add(Item::Run, Tool_SimView, "run", "Simulation View (" + mod + "R)", 10, r, RUN_W, false); r -= GROUP_GAP; }
 	if (shown(GSim) && r - SPEED_W - 2 * BTN_W > x) {
 		add(Item::Speed, 0, "speed", "Simulation speed", 6, r, SPEED_W, false);
 		add(Item::Button, Tool_Step, "step", "Step once", 6, r, BTN_W, false);
@@ -326,6 +336,10 @@ void paint(wxGraphicsContext* gc, int style, const std::vector<Item>& items, con
 	}
 }
 
+wxBitmap ToolIcon(const char* name, const wxColour& c, int px, double scale) {
+	return icon(name, c, px, scale);
+}
+
 }  // namespace tb
 }  // namespace cl
 
@@ -348,6 +362,12 @@ ModernToolbar::ModernToolbar(wxWindow* parent, MainFrame* frame)
 	Bind(wxEVT_MOUSE_CAPTURE_LOST, [this](wxMouseCaptureLostEvent&) { draggingSpeed = false; pressed = -1; });
 	state = readState();
 }
+
+wxColour ModernToolbar::BarColour() const {
+	return barColour(appConfig().appSettings.toolbarStyle, readState());
+}
+
+wxColour ModernToolbar::InkColour() const { return inkColour(readState()); }
 
 State ModernToolbar::readState() const {
 	State s;
@@ -396,7 +416,7 @@ void ModernToolbar::OnSize(wxSizeEvent& e) {
 
 void ModernToolbar::OnPaint(wxPaintEvent&) {
 	wxAutoBufferedPaintDC dc(this);
-	std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+	std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 	if (!gc) return;
 	const wxSize sz = GetClientSize();
 	paint(gc.get(), appConfig().appSettings.toolbarStyle, items, state, sz.x, sz.y, hover, pressed,
@@ -482,6 +502,12 @@ void ModernToolbar::activate(const Item& it) {
 	switch (it.kind) {
 		case Item::Run:  frame->SetSimView(!renderMode().simView); break;
 		case Item::More: {
+#ifdef __WXMSW__
+			// The whole menu bar lives here on Windows, where the bar is hidden.
+			frame->ShowAppMenu(this, it.rect.GetBottomLeft(),
+			                   appConfig().appSettings.toolbarStyle == cl::tb::Minimal);
+			break;
+#endif
 			wxMenu menu;
 			menu.Append(wxID_NEW, "New");
 			menu.Append(wxID_OPEN, "Open...");
@@ -536,7 +562,7 @@ wxBitmap ModernToolbar::RenderPreview(int style, bool dark, int width, double sc
 	wxBitmap bmp((int)std::lround(width * scale), (int)std::lround(H * scale), 24);
 	{
 		wxMemoryDC dc(bmp);
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 		if (gc) {
 			gc->Scale(scale, scale);
 			paint(gc.get(), style, items, s, width, H, -1, -1, scale);

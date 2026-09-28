@@ -8,6 +8,7 @@
    klsGLCanvas: Generic implementation of OpenGL canvas
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "klsGLCanvas.h"
 #include <cstdlib>
 #include "Settings.h"
@@ -231,12 +232,13 @@ void klsGLCanvas::wxOnPaint(wxPaintEvent& event) {
 // paint handler repaints the window it came from.
 void klsGLCanvas::announceRendererFailure() {
 	static bool announced = false;
-	if (announced || !cl::render::rendererFailed()) return;
+	// Nobody to tell in a headless run, and a modal box would hang it.
+	if (announced || !cl::render::rendererFailed() || renderMode().headlessRender) return;
 	announced = true;
 	const wxString msg = cl::render::rendererFailureMessage();
 	if (msg.empty()) return;   // expected on this driver; see rendererFailureMessage
 	CallAfter([msg] {
-		wxMessageBox(msg, "Rendering issue", wxOK | wxICON_WARNING);
+		ui::Message(msg, "Rendering issue", wxOK | wxICON_WARNING);
 	});
 }
 

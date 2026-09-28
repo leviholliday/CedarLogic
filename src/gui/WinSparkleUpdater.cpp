@@ -5,11 +5,13 @@
 
 #ifdef _WIN32
 
+#include "UiControls.h"
 #include "WinSparkleUpdater.h"
 #include "winsparkle.h"
 #include "UpdateInfo.h"
 #include "../version.h"
 #include "CedarLogic.h"   // update feed and download URLs
+#include "Updater.h"      // updateFeedUrl()
 
 #include <wx/msgdlg.h>
 
@@ -57,8 +59,8 @@ void WinSparkleUpdater_Initialize() {
     configMethods.config_read = &configRead;
     win_sparkle_set_config_methods(&configMethods);
 
-    // Set the appcast URL
-    win_sparkle_set_appcast_url(CEDARLOGIC_APPCAST_URL);
+    // The feed for this copy's testing group (normal or beta).
+    win_sparkle_set_appcast_url(updateFeedUrl());
 
     // Initialize WinSparkle (starts background update checks)
     win_sparkle_init();
@@ -72,10 +74,18 @@ void WinSparkleUpdater_CheckForUpdates() {
     }
     // Asked for explicitly in a build with no updater. Say so, rather than
     // having the menu item do nothing at all.
-    wxMessageBox("This copy of CedarLogic was built without an update signing "
+    ui::Message("This copy of CedarLogic was built without an update signing "
                  "key, so it cannot verify or install updates.",
                  "Updates are not available in this build.",
                  wxOK | wxICON_INFORMATION);
+}
+
+void WinSparkleUpdater_ChannelChanged() {
+    if (!initialized) return;
+    win_sparkle_cleanup();
+    initialized = false;
+    WinSparkleUpdater_Initialize();
+    if (initialized) win_sparkle_check_update_without_ui();
 }
 
 void WinSparkleUpdater_Cleanup() {

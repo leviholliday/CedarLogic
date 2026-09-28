@@ -8,6 +8,7 @@
    CircuitParse: uses XMLParser to load and save user circuit files.
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "CircuitParse.h"
 #include "PaletteDrag.h"
 #include "RenderMode.h"
@@ -111,7 +112,7 @@ static void showMigrationNotices(const std::vector<cl::MigrationNotice> &notices
 			msg << wxT("    ") << wxString::FromUTF8(n.detail.c_str()) << wxT("\n");
 		msg << wxT("\n");
 	}
-	wxMessageBox(msg, wxT("Circuit Updated"),
+	ui::Message(msg, wxT("Circuit Updated"),
 	             wxOK | (anyWarning ? wxICON_EXCLAMATION : wxICON_INFORMATION));
 }
 

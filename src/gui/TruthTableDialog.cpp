@@ -3,6 +3,7 @@
    TruthTableDialog: shows a truth table generated from the circuit.
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "TruthTableDialog.h"
 #include "RenderMode.h"
 
@@ -173,7 +174,7 @@ void ShowTruthTableDialog(wxWindow* parent, TruthTableData& data) {
 		                  "CSV (*.csv)|*.csv", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
 		if (save.ShowModal() != wxID_OK) return;
 		wxFileOutputStream file(save.GetPath());
-		if (!file.IsOk()) { wxMessageBox("Couldn't write that file.", "Truth Table", wxOK | wxICON_ERROR, &dlg); return; }
+		if (!file.IsOk()) { ui::Message("Couldn't write that file.", "Truth Table", wxOK | wxICON_ERROR, &dlg); return; }
 		wxTextOutputStream out(file);
 		wxString text = asTabbedText(data);
 		text.Replace("\t", ",");

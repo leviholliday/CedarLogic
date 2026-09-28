@@ -317,6 +317,11 @@ public:
 	// like a paste. Leaves the clipboard alone unless the
 	// duplicateUsesClipboard setting says to go through it.
 	void duplicateSelection();
+	// Select every gate and wire on the page.
+	void selectAll();
+	// Nothing in progress that should be holding the mouse (a drag, a paste
+	// or new gate following the pointer, a click-to-connect line).
+	bool isIdleForCapture() const { return currentDragState == DRAG_NONE && !isWithinPaste && !connectSticky; }
 	void startPaste( cmdPasteBlock* cmd );
 
 	// Tell the canvas which minimap it should use; sets the minimaps pointers and lists

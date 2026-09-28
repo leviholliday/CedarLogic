@@ -3,11 +3,13 @@
    ShortcutsSheet: every keyboard shortcut, searchable. See ShortcutsSheet.h.
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "ShortcutsSheet.h"
 #include "MainFrame.h"
 #include "MainApp.h"
 #include "Settings.h"
 #include "UiKit.h"
+#include "GUICanvas.h"
 
 #include <wx/dialog.h>
 #include <wx/scrolwin.h>
@@ -31,7 +33,7 @@ struct Shortcut {
 	wxString section;
 	std::vector<wxString> keys;   // "Cmd", "Shift", "T"; lower case = a gesture
 	wxString what;
-	int command = 0;              // a menu command it runs, or 0
+	int command = 0;              // a menu command it runs, a canvas key (keyCommand), or 0
 };
 
 // "Cmd Shift D" for the dark-mode shortcut the user set in Preferences.
@@ -56,6 +58,9 @@ std::vector<wxString> themeShortcutKeys() {
 std::vector<Shortcut> allShortcuts() {
 	std::vector<Shortcut> v;
 	wxString section;
+	// A bare-key action the canvas handles itself (A, R, ...) has no menu
+	// command; running it from here presses the key on the canvas instead.
+	auto keyCommand = [](int key) { return -key; };
 	auto add = [&](std::vector<wxString> keys, const wxString& what, int command = 0) {
 		v.push_back({ section, std::move(keys), what, command });
 	};
@@ -65,7 +70,7 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "Cmd", "O" }, "Open one of your circuits", wxID_OPEN);
 	add({ "Cmd", "S" }, "Save now and keep a version", wxID_SAVE);
 	add({ "Cmd", "Shift", "O" }, "Import a .cdl file", File_Import);
-	add({ "Cmd", "Shift", "S" }, "Export as a CedarLogic file", wxID_SAVEAS);
+	add({ "Cmd", "Shift", "E" }, "Export as a CedarLogic file", wxID_SAVEAS);
 	add({ "Cmd", "E" }, "Export as an image", File_Export);
 	add({ "Cmd", "Shift", "W" }, "Close this circuit", File_CloseCircuit);
 
@@ -76,26 +81,27 @@ std::vector<Shortcut> allShortcuts() {
 	add({ "Cmd", "C" }, "Copy", wxID_COPY);
 	add({ "Cmd", "V" }, "Paste", wxID_PASTE);
 	add({ "Cmd", "D" }, "Duplicate the selection", Edit_Duplicate);
+	add({ "Cmd", "A" }, "Select everything on the page", wxID_SELECTALL);
 	add({ "Delete" }, "Delete the selection");
 	add({ "Escape" }, "Cancel a drag, paste or connection");
 	add({ "Shift", "click" }, "Add to or remove from the selection");
 
 	section = "Building";
-	add({ "A" }, "Add a gate by name");
-	add({ "Shift", "1-9" }, "Jump to a gate category");
-	add({ "R" }, "Rotate the selection");
-	add({ "Up", "Down", "Left", "Right" }, "Nudge the selection (Shift: 5 squares)");
+	add({ "A" }, "Add a gate by name", keyCommand('A'));
+	add({ "Shift", "1-0" }, "Jump to a gate category (0 = 10th)");
+	add({ "R" }, "Rotate the selection", keyCommand('R'));
+	add({ "Up", "Down", "Left", "Right" }, "Nudge (Shift: 5 squares)");
 	add({ "click a pin, then another" }, "Connect them");
 	add({ "C", "while dragging" }, "Connect to pins nearby");
-	add({ "S" }, "Straighten the selected wires");
+	add({ "S" }, "Straighten selected wires");
 	add({ "right-click a wire" }, "Straighten or delete it");
 	add({ "double-click a gate" }, "Change its settings");
 
 	section = "Quick keys";
-	add({ "C" }, "Copy");
-	add({ "V" }, "Paste");
-	add({ "X" }, "Cut");
-	add({ "D" }, "Duplicate");
+	add({ "C" }, "Copy", wxID_COPY);
+	add({ "V" }, "Paste", wxID_PASTE);
+	add({ "X" }, "Cut", wxID_CUT);
+	add({ "D" }, "Duplicate", Edit_Duplicate);
 	add({ "T" }, "Truth table", View_TruthTable);
 
 	section = "Moving around";
@@ -262,7 +268,7 @@ public:
 	void paint(wxDC& dc) {
 		dc.SetBackground(wxBrush(ui::paper()));
 		dc.Clear();
-		std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
+		std::unique_ptr<wxGraphicsContext> gc(ui::graphics(dc));
 		if (!gc) return;
 		gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
 		if (dirty) layout(gc.get());
@@ -292,7 +298,7 @@ public:
 			if (r.rect.GetBottom() < top || r.rect.y > top + GetClientSize().y) continue;
 			const bool runnable = r.item->command != 0;
 			const bool sel = ((int)i == selected), hot = ((int)i == hover);
-			if (sel || (hot && runnable)) {
+			if (sel || hot) {
 				gc->SetPen(*wxTRANSPARENT_PEN);
 				gc->SetBrush(wxBrush(sel ? ui::withAlpha(accent, ui::isDark() ? 0.24 : 0.14)
 				                         : ui::withAlpha(ink, 0.06)));
@@ -318,14 +324,16 @@ public:
 				gc->GetTextExtent(what, &tw, &th);
 			}
 			gc->DrawText(what, textX, r.rect.y + (ROW_H - th) / 2);
-			// A runnable row says so when you point at it.
-			if (runnable && (hot || sel)) {
+			// A runnable row says so when you point at it; a gesture row says
+			// where to do it instead, so clicking one doesn't look broken.
+			if (hot || sel) {
 				gc->SetFont(wxFont(wxFontInfo(10.5)), ui::dim());
-				#ifdef __WXOSX__
-				const wxString go = hot ? "Click to do it" : "Return to do it";
+#ifdef __WXOSX__
+				const wxString run = hot ? "Click to do it" : "Return to do it";
 #else
-				const wxString go = hot ? "Click to do it" : "Enter to do it";
+				const wxString run = hot ? "Click to do it" : "Enter to do it";
 #endif
+				const wxString go = runnable ? run : wxString("Try it on the canvas");
 				double gw, gh;
 				gc->GetTextExtent(go, &gw, &gh);
 				if (textX + tw + 16 + gw < r.rect.GetRight() - 8)
@@ -348,19 +356,17 @@ private:
 // (Focus Mode, Dark Mode) carry their new state in the event, as a real
 // menu click would.
 void runCommand(MainFrame* frame, int id) {
-	if (id == View_DarkMode) { frame->ToggleDarkMode(); return; }
-	wxCommandEvent evt(wxEVT_MENU, id);
-	if (wxMenuBar* mb = frame->GetMenuBar()) {
-		if (wxMenuItem* item = mb->FindItem(id)) {
-			if (!item->IsEnabled()) { wxBell(); return; }
-			if (item->IsCheckable()) {
-				item->Check(!item->IsChecked());
-				evt.SetInt(item->IsChecked() ? 1 : 0);
-			}
-		}
+	if (id < 0) {   // a canvas key: press it there, so it does exactly what the key does
+		GUICanvas* canvas = frame->CurrentCanvas();
+		if (canvas == nullptr) return;
+		canvas->SetFocus();
+		wxKeyEvent key(wxEVT_KEY_DOWN);
+		key.m_keyCode = -id;
+		key.SetEventObject(canvas);
+		canvas->ProcessWindowEvent(key);
+		return;
 	}
-	evt.SetEventObject(frame);
-	frame->ProcessWindowEvent(evt);
+	frame->RunMenuCommand(id);
 }
 
 }  // namespace
@@ -413,7 +419,7 @@ void ShowShortcutsSheet(MainFrame* frame) {
 	headRow->Add(titles, 1, wxALIGN_CENTER_VERTICAL);
 	top->Add(headRow, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);
 
-	wxSearchCtrl* search = new wxSearchCtrl(&dlg, wxID_ANY);
+	ui::SearchBox* search = new ui::SearchBox(&dlg, wxID_ANY);
 	search->ShowCancelButton(true);
 	search->SetDescriptiveText("Search shortcuts (try \"zoom\" or \"tab\")");
 	top->Add(search, 0, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 22);

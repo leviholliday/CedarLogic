@@ -15,4 +15,12 @@ void ShowPreferencesWindow(wxWindow* parent);
 // Close it if open -- call before the main frame goes away.
 void DismissPreferencesWindow();
 
+// The app's theme changed: repaint the window in the new colours, if open.
+void PreferencesThemeChanged();
+
+#ifdef __WXMSW__
+// --render-windows: the open Settings window showing page `page`.
+wxWindow* PreferencesWindowForCapture(int page);
+#endif
+
 #endif

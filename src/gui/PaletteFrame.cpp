@@ -11,6 +11,7 @@
 #include "PaletteFrame.h"
 #include "GateLibrary.h"
 #include "wx/choice.h"
+#include "RenderMode.h"
 
 using namespace std;
 
@@ -78,6 +79,12 @@ void PaletteFrame::ApplyGateSize() {
 }
 
 void PaletteFrame::ApplyTheme() {
+	// The strip around the section dropdown. Left to the system it stayed
+	// light grey beside a dark palette on Windows.
+#ifdef __WXMSW__
+	SetBackgroundColour(renderMode().darkMode ? wxColour(19, 21, 25) : wxNullColour);
+	Refresh();
+#endif
 	for (map<wxString, PaletteCanvas*>::iterator it = pcanvases.begin(); it != pcanvases.end(); ++it)
 		it->second->ApplyTheme();
 }

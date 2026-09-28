@@ -21,6 +21,10 @@
 #include "migrate.hpp"   // cl::loadCircuit, to validate a file before the GUI load
 #include "wx/stdpaths.h"
 #include "CircuitLibrary.h"   // seedSamples, for the first-run practice circuit
+#include "PreferencesWindow.h"
+#include "UiControls.h"
+#include "QuickAddDialog.h"
+#include "ModernToolbar.h"     // cl::tb::GTheme
 #ifdef WITH_SKIA
 #include "render/SkiaProbe.h"   // headless --skia-probe (no Skia headers leak here)
 #include "render/RendererHealth.h"
@@ -29,6 +33,7 @@
 #endif
 #endif
 #include "wx/fileconf.h"
+#include "wx/display.h"
 #include "wx/settings.h"   // wxSystemSettings::GetAppearance(), for ThemeMode::System
 
 // Crash reporter: portable pieces (report path, URL helpers, the next-launch
@@ -42,6 +47,7 @@
 #include "wx/dialog.h"
 #include "wx/sizer.h"
 #include "UpdateInfo.h"
+#include "Updater.h"
 #include "wx/stattext.h"
 #include "wx/textctrl.h"
 #include "wx/button.h"
@@ -488,7 +494,7 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
         // runs, and the thread never has to touch a wx object. The flags are
         // atomic because two threads see them; join() below is what makes
         // `newest` safe to read on this thread.
-        static const char *kAppcastUrl = CEDARLOGIC_APPCAST_URL;
+        const char *kAppcastUrl = updateFeedUrl();
         std::atomic<bool> done(false);
         std::atomic<bool> ok(false);
         std::thread fetcher([&]() {
@@ -498,7 +504,7 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
 #elif defined(__APPLE__)
             ok.store(!xml.empty() && cl::update::appcastLatest(xml, "macos", newest));
 #else
-            ok.store(false);
+            ok.store(!xml.empty() && cl::update::appcastLatest(xml, "linux", newest));
 #endif
             done.store(true);
         });
@@ -552,8 +558,13 @@ static bool showPendingCrashReport(wxWindow *parent, bool duringStartup) {
 // open; this catches each new one as it first appears.
 int MainApp::FilterEvent(wxEvent& event) {
 	if (event.GetEventType() == wxEVT_SHOW && static_cast<wxShowEvent&>(event).IsShown()) {
-		if (wxTopLevelWindow* tlw = wxDynamicCast(event.GetEventObject(), wxTopLevelWindow))
+		if (wxTopLevelWindow* tlw = wxDynamicCast(event.GetEventObject(), wxTopLevelWindow)) {
 			WinSetDarkTitlebar(tlw, renderMode().darkMode);
+			// Our own-drawn windows (they set their own background) get dark
+			// scrollbars too. Stock ones like Preferences stay native until
+			// they are redrawn: dark controls on a light page look broken.
+			if (tlw->UseBgCol()) WinThemeControls(tlw, renderMode().darkMode);
+		}
 	}
 	return Event_Skip;
 }
@@ -775,6 +786,7 @@ bool MainApp::OnInit()
     bool wireShape = false;    // --wire-shape dumps a routed wire's segment map
     bool wireDrag = false;     // --wire-drag dumps a wire's segment map after a seg drag
     bool renderUi = false;     // --render-ui draws the welcome/tour/shortcuts windows
+    bool renderWindows = false;   // --render-windows captures real windows (Windows only)
     std::string gateName, gateAngle;
     std::string wsGateA, wsGateB, wsAngleA, wsAngleB;
     if (argc >= 7 && (wxString(argv[1]) == "--wire-shape" ||
@@ -804,6 +816,15 @@ bool MainApp::OnInit()
         renderMode().headlessRender = true;
         renderUi = true;
         renderOutput = argv[2].ToStdString();
+    } else if (argc >= 3 && wxString(argv[1]) == "--render-windows") {
+        // --render-windows <dir> [circuit.cdl]: the real main window, native
+        // parts and all, captured as PNGs in light, dark and sim view. The
+        // one way to see what a Windows build looks like without a Windows
+        // machine. Needs a desktop; CI's Windows runners have one.
+        renderMode().headlessRender = true;
+        renderWindows = true;
+        renderOutput = argv[2].ToStdString();
+        if (argc >= 4) cmdFilename = argv[3].ToStdString();
     } else if (argc >= 4 && (wxString(argv[1]) == "--render" ||
                       wxString(argv[1]) == "--render-skia" ||
                       wxString(argv[1]) == "--render-svg" ||
@@ -875,7 +896,7 @@ bool MainApp::OnInit()
 #ifdef __APPLE__
         MacSetBackgroundApp();
 #endif
-        frame->Move(-30000, -30000);
+        if (!renderWindows) frame->Move(-30000, -30000);
     }
 
     if (renderMode().headlessRender && (wireShape || wireDrag)) {
@@ -903,6 +924,120 @@ bool MainApp::OnInit()
         ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-narrow.png", 520, 600, "");
         renderMode().darkMode = true;
         ok &= RenderShortcutsSnapshot(frame, renderOutput + "/shortcuts-dark.png", 860, 600, "");
+        // The gate search's pictures side by side, pairs that are easy to
+        // confuse next to each other (AND / NAND, OR / NOR ...), at the size
+        // the list shows them.
+        {
+            renderMode().darkMode = false;
+            QuickAddDialog picker(frame);
+            const char* names[] = { "AA_AND2", "BA_NAND2", "AA_AND3", "BA_NAND3",
+                                    "AE_OR2", "BE_NOR2", "AI_XOR2", "AO_XNOR2",
+                                    "AA_AND4", "BA_NAND4", "DD_KEYPAD_HEX", "AA_TOGGLE" };
+            const int cell = 66, cols = 4, pad = 10;
+            wxBitmap sheet(cols * (cell + pad) + pad, 3 * (cell + pad) + pad, 24);
+            {
+                wxMemoryDC dc(sheet);
+                dc.SetBackground(*wxWHITE_BRUSH);
+                dc.Clear();
+                for (int i = 0; i < 12; i++)
+                    dc.DrawBitmap(picker.previewFor(names[i], cell),
+                                  pad + (i % cols) * (cell + pad), pad + (i / cols) * (cell + pad));
+            }
+            ok &= sheet.SaveFile(renderOutput + "/gate-previews.png", wxBITMAP_TYPE_PNG);
+            // And at the size of the big picture beside the list.
+            wxBitmap big(2 * 170 + 30, 190, 24);
+            {
+                wxMemoryDC dc(big);
+                dc.SetBackground(*wxWHITE_BRUSH);
+                dc.Clear();
+                dc.DrawBitmap(picker.previewFor("AA_AND2", 170), 10, 10);
+                dc.DrawBitmap(picker.previewFor("BA_NAND2", 170), 190, 10);
+            }
+            ok &= big.SaveFile(renderOutput + "/gate-previews-big.png", wxBITMAP_TYPE_PNG);
+        }
+        fflush(nullptr);
+        std::_Exit(ok ? 0 : 1);
+    }
+
+    if (renderMode().headlessRender && renderWindows) {
+        bool ok = true;
+#ifdef _WIN32
+        wxFileName::Mkdir(renderOutput, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        frame->SetSize(1280, 820);
+        frame->Centre();
+        frame->Show(true);
+        frame->Raise();
+        frame->stopTimers();
+        if (!cmdFilename.empty()) frame->load(cmdFilename);
+        auto settle = [frame] {
+            for (int i = 0; i < 20; i++) { wxYield(); wxMilliSleep(25); }
+            frame->Refresh();
+            frame->Update();
+            for (int i = 0; i < 10; i++) { wxYield(); wxMilliSleep(25); }
+        };
+        auto shoot = [&](const char* name) {
+            settle();
+            ok &= WinCaptureWindow(frame, renderOutput + "/" + name);
+        };
+        renderMode().darkMode = false;
+        frame->ApplyTheme();
+        shoot("main-light.png");
+        frame->SetSimView(true);
+        shoot("main-sim-light.png");
+        frame->SetSimView(false);
+        renderMode().darkMode = true;
+        frame->ApplyTheme();
+        shoot("main-dark.png");
+        frame->SetSimView(true);
+        shoot("main-sim-dark.png");
+        frame->SetSimView(false);
+        frame->RunMenuCommand(View_Oscope);   // the oscilloscope under the circuit
+        shoot("main-oscope-dark.png");
+        frame->RunMenuCommand(View_Oscope);
+
+        // Every Settings page, dark then light.
+        ShowPreferencesWindow(frame);
+        auto shootSettings = [&](const char* theme) {
+            for (int page = 0; page < 5; page++) {
+                wxWindow* w = PreferencesWindowForCapture(page);
+                if (!w) { ok = false; return; }
+                settle();
+                ok &= WinCaptureWindow(w, renderOutput + wxString::Format("/settings-%s-%d.png", theme, page));
+            }
+        };
+        shootSettings("dark");
+        renderMode().darkMode = false;
+        frame->ApplyTheme();
+        shootSettings("light");
+        DismissPreferencesWindow();
+
+        // A question, the kind that interrupts you most, light and dark.
+        for (int dark = 0; dark < 2; dark++) {
+            renderMode().darkMode = dark != 0;
+            frame->ApplyTheme();
+            ui::MessageDialog ask(frame,
+                "Your changes to this circuit haven't been saved.",
+                "Discard changes?", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
+            ask.SetExtendedMessage("A version is kept each time you save, so nothing you saved before is lost.");
+            ask.SetYesNoLabels("Discard Changes", "Cancel");
+            ask.Prepare();
+            ask.Show();
+            settle();
+            ok &= WinCaptureWindow(&ask, renderOutput + (dark ? "/message-dark.png" : "/message-light.png"));
+            ask.Hide();
+        }
+
+        // The gate search (A), light and dark.
+        for (int dark = 0; dark < 2; dark++) {
+            renderMode().darkMode = dark != 0;
+            frame->ApplyTheme();
+            QuickAddDialog add(frame);
+            add.Show();
+            settle();
+            ok &= WinCaptureWindow(&add, renderOutput + (dark ? "/gatesearch-dark.png" : "/gatesearch-light.png"));
+            add.Hide();
+        }
+#endif
         fflush(nullptr);
         std::_Exit(ok ? 0 : 1);
     }
@@ -1006,6 +1141,9 @@ bool MainApp::OnInit()
         WinSparkleUpdater_Initialize();
     }
 #endif
+#if !defined(__APPLE__) && !defined(_WIN32)
+    if (!cl::update::checksDisabled()) LinuxUpdater_Initialize();
+#endif
 
     // success: wxApp::OnRun() will be called which will enter the main message
     // loop and the application will run. If we returned false here, the
@@ -1091,6 +1229,7 @@ void MainApp::loadSettings() {
 	conf->Read("LastDirectory", &str, "");
 	appConfig().appSettings.lastDir = str;
 	conf->Read("ExportInfoEnabled", &appConfig().appSettings.exportInfoEnabled, true);
+	conf->Read("UpdateChannel", &appConfig().appSettings.updateChannel, 0);
 	conf->Read("ToolbarStyle", &appConfig().appSettings.toolbarStyle, 0);
 	conf->Read("ToolbarHidden", &appConfig().appSettings.toolbarHidden, 0);
 	conf->Read("LastLibraryDoc", &str, "");
@@ -1098,10 +1237,12 @@ void MainApp::loadSettings() {
 	conf->Read("StudentName", &str, "");
 	appConfig().appSettings.studentName = str.ToStdString();
 
-	conf->Read("FrameWidth", &appConfig().appSettings.mainFrameWidth, 600);
-	conf->Read("FrameHeight", &appConfig().appSettings.mainFrameHeight, 600);
-	conf->Read("FrameLeft", &appConfig().appSettings.mainFrameLeft, 20);
-	conf->Read("FrameTop", &appConfig().appSettings.mainFrameTop, 20);
+	// -1: never saved, so placeWindow below picks a spot.
+	conf->Read("FrameWidth", &appConfig().appSettings.mainFrameWidth, -1);
+	conf->Read("FrameHeight", &appConfig().appSettings.mainFrameHeight, -1);
+	conf->Read("FrameLeft", &appConfig().appSettings.mainFrameLeft, -1);
+	conf->Read("FrameTop", &appConfig().appSettings.mainFrameTop, -1);
+	conf->Read("FrameMaximized", &appConfig().appSettings.mainFrameMaximized, false);
 	conf->Read("RefreshRate", &appConfig().appSettings.refreshRate, 16); // ms (~60 FPS)
 	conf->Read("AutosaveSeconds", &appConfig().appSettings.autosaveSeconds, 180);
 	conf->Read("TimeStep", &appConfig().appSettings.timePerStep, 25); // ms
@@ -1124,7 +1265,8 @@ void MainApp::loadSettings() {
 	conf->Read("MouseWheelAction", &appConfig().appSettings.mouseWheelAction, 0);
 	conf->Read("TrackpadScrollAction", &appConfig().appSettings.trackpadScrollAction, 1);
 	conf->Read("ReverseTrackpadZoom", &appConfig().appSettings.reverseTrackpadZoom, false);
-	conf->Read("ReverseWheelZoom", &appConfig().appSettings.reverseWheelZoom, true);
+	conf->Read("ReverseWheelZoom", &appConfig().appSettings.reverseWheelZoom,
+	           appConfig().appSettings.reverseWheelZoom);   // per-platform default
 	conf->Read("SidePanelWidth", &appConfig().appSettings.sidePanelWidth, 0);
 	conf->Read("PaletteGateSize", &appConfig().appSettings.paletteGateSize, 48);
 	conf->Read("DuplicateUsesClipboard", &appConfig().appSettings.duplicateUsesClipboard, false);
@@ -1138,6 +1280,10 @@ void MainApp::loadSettings() {
 	conf->Read("ThemeShortcutModifiers", &appConfig().appSettings.themeShortcutModifiers,
 	           appConfig().appSettings.themeShortcutModifiers);
 	conf->Read("ThemeToggleButtonVisible", &appConfig().appSettings.showThemeToggleButton, true);
+	// The switch is one of the toolbar's own groups now (Toolbar > Show in the
+	// toolbar > Dark mode), not a separate checkbox. Carry an old "hidden" over.
+	if (!appConfig().appSettings.showThemeToggleButton)
+		appConfig().appSettings.toolbarHidden |= (1 << cl::tb::GTheme);
 
 	// Resolve tonight's theme from the launch policy. This is the single place
 	// renderMode().darkMode gets its startup value; MainFrame reads it back once
@@ -1154,37 +1300,36 @@ void MainApp::loadSettings() {
 			break;
 	}
 
-	// check screen coords
-	wxScreenDC sdc;
-	bool resetFrame = !conf->HasEntry("FrameWidth");
-	if ( appConfig().appSettings.mainFrameLeft + appConfig().appSettings.mainFrameWidth > sdc.GetSize().GetWidth() ||
-		appConfig().appSettings.mainFrameTop + appConfig().appSettings.mainFrameHeight > sdc.GetSize().GetHeight() ) {
+	placeWindow();
+}
 
-		appConfig().appSettings.mainFrameWidth = appConfig().appSettings.mainFrameHeight = 600;
-		appConfig().appSettings.mainFrameLeft = appConfig().appSettings.mainFrameTop = 20;
-		resetFrame = true;
-	}
-#ifdef __WXGTK__
-	// First launch, or a saved size that no longer fits: open most of the way
-	// across the desktop's work area (inside panels and docks), centred, rather
-	// than as a 600x600 window in the corner that the welcome can't fit over.
-	if (resetFrame) {
-		const wxRect work = wxGetClientDisplayRect();
-		if (work.width >= 800 && work.height >= 600) {
-			const int w = std::min(1400, work.width * 4 / 5);
-			const int h = std::min(900, work.height * 5 / 6);
-			appConfig().appSettings.mainFrameWidth = w;
-			appConfig().appSettings.mainFrameHeight = h;
-			appConfig().appSettings.mainFrameLeft = work.x + (work.width - w) / 2;
-			appConfig().appSettings.mainFrameTop = work.y + (work.height - h) / 2;
+// Where the main window opens. The saved spot if most of it is still on some
+// screen; otherwise -- first launch, or the monitor it was on is gone -- a
+// generous window centred on the screen the mouse is on. It used to fall back
+// to 600x600 at (20,20): a small box jammed into the top-left corner.
+void MainApp::placeWindow() {
+	auto& s = appConfig().appSettings;
+	const wxRect saved(s.mainFrameLeft, s.mainFrameTop, s.mainFrameWidth, s.mainFrameHeight);
+	if (saved.width >= 400 && saved.height >= 300) {
+		for (unsigned i = 0; i < wxDisplay::GetCount(); i++) {
+			const wxRect seen = saved.Intersect(wxDisplay(i).GetClientArea());
+			// Enough of it to grab and drag back, title bar included.
+			if (seen.width >= 200 && seen.height >= 120 && seen.y <= saved.y + 40) return;
 		}
 	}
-#else
-	(void)resetFrame;
-#endif
+	int d = wxDisplay::GetFromPoint(wxGetMousePosition());
+	if (d == wxNOT_FOUND) d = 0;
+	const wxRect area = wxDisplay(d).GetClientArea();
+	const int w = std::min(1440, area.width * 85 / 100);
+	const int h = std::min(940, area.height * 85 / 100);
+	s.mainFrameWidth = w;
+	s.mainFrameHeight = h;
+	s.mainFrameLeft = area.x + (area.width - w) / 2;
+	s.mainFrameTop = area.y + (area.height - h) / 2;
 }
 
 int MainApp::OnExit() {
+	Updater_OnExit();   // relaunches the Linux AppImage after an update
 #ifdef _WIN32
 	// Stop the WinSparkle updater's background thread. Symmetric with the
 	// win_sparkle_init() in OnInit -- it was never called, so the updater thread
@@ -1204,7 +1349,14 @@ int MainApp::OnExit() {
 	// post-OnExit framework teardown then spins forever winding down the detached
 	// threads, so the process never terminates even though nothing is left to do.
 	// Exit now rather than return into that teardown -- the same approach the
-	// headless --render one-shot already takes. All persistent state is flushed.
+	// headless --render one-shot already takes.
+	//
+	// The settings file is the exception: wxFileConfig writes itself out when
+	// it is deleted, and wx only deletes it in CleanUp(), after OnExit returns
+	// -- which _Exit never reaches. So on Windows no setting ever reached disk,
+	// and "has seen the welcome tour" among them, which is why the tour opened
+	// on every launch. Write it out here.
+	delete wxConfigBase::Set(nullptr);
 	std::fflush(nullptr);
 	std::_Exit(rc);
 #endif

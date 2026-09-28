@@ -12,11 +12,27 @@
 #include <wx/colour.h>
 #include <wx/gdicmn.h>
 #include <wx/string.h>
+#include <memory>
 #include <vector>
 
+class wxDC;
 class wxGraphicsContext;
 
+// The edge round a canvas or panel: none on Windows, where the sunken 3-D
+// border draws a white frame in dark mode and looks like 1995 in light.
+#ifdef __WXMSW__
+#define CL_CANVAS_EDGE wxBORDER_NONE
+#else
+#define CL_CANVAS_EDGE wxSUNKEN_BORDER
+#endif
+
 namespace ui {
+
+// A graphics context for painting one of our own windows into `dc`. On Windows
+// it is Direct2D where available: hardware-drawn, with proper antialiasing,
+// where the default GDI+ is software-only and drew these windows slowly
+// enough to flicker. Elsewhere it is the platform default.
+std::unique_ptr<wxGraphicsContext> graphics(wxDC& dc);
 
 bool isDark();
 wxColour withAlpha(const wxColour& c, double alpha);

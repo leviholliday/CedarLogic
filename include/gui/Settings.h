@@ -62,6 +62,7 @@ struct ApplicationSettings {
 	int mainFrameHeight;
 	int mainFrameLeft;
 	int mainFrameTop;
+	bool mainFrameMaximized = false;
 	int timePerStep;
 	int refreshRate;
 	int autosaveSeconds;   // 0 disables autosave entirely
@@ -80,16 +81,22 @@ struct ApplicationSettings {
 	int gridStyle = 0;       // 0 = lines, 1 = dots
 	int accentColor = 0;     // index into RenderStyle::accent()'s choices
 	int wireThickness = 1;   // 0 = thin, 1 = normal, 2 = thick (screen only)
-	bool showStatusInfo = true;   // zoom / position / counts in the status bar
+	bool showStatusInfo = true;
+	int updateChannel = 0;   // 0 = normal tester, 1 = beta tester (see Updater.h)   // zoom / position / counts in the status bar
 	// What a plain scroll does on the canvas, per device (0 = zoom, 1 = move
 	// around). Only macOS can tell a trackpad from a wheel; elsewhere every
 	// scroll uses the mouse setting. Cmd/Ctrl+scroll always zooms and
 	// Shift+scroll always pans sideways.
 	int mouseWheelAction = 0;
 	int trackpadScrollAction = 1;
-	// Flip which way scrolling zooms, per device. The mouse one is on by
-	// default: tools like Scroll Reverser change the direction the app sees.
+	// Flip which way scrolling zooms, per device. On a Mac the mouse one is on
+	// by default: tools like Scroll Reverser change the direction the app sees.
+	// Windows keeps wheel and touchpad directions apart itself, so it is off.
+#ifdef __APPLE__
 	bool reverseWheelZoom = true;
+#else
+	bool reverseWheelZoom = false;
+#endif
 	bool reverseTrackpadZoom = false;
 	// Width of the gate palette / minimap column, in pixels. 0 = not chosen
 	// yet; MainFrame measures the natural width on first launch.

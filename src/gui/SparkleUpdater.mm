@@ -12,7 +12,22 @@
 
 #include <string>
 
+#include "Updater.h"   // updateFeedUrl(): the feed for the chosen testing group
+
+// Answers Sparkle's "which feed?" every time it checks, so switching between
+// normal and beta testing takes effect without a restart. SUFeedURL in
+// Info.plist is only the fallback.
+@interface CLUpdaterDelegate : NSObject <SPUUpdaterDelegate>
+@end
+
+@implementation CLUpdaterDelegate
+- (nullable NSString *)feedURLStringForUpdater:(SPUUpdater *)updater {
+    return [NSString stringWithUTF8String:updateFeedUrl()];
+}
+@end
+
 static SPUStandardUpdaterController *updaterController = nil;
+static CLUpdaterDelegate *updaterDelegate = nil;
 
 // Sparkle authenticates every update against the EdDSA public key in Info.plist
 // (SUPublicEDKey, filled from the SPARKLE_ED_PUBLIC_KEY cache variable). Only
@@ -82,10 +97,18 @@ void SparkleUpdater_Initialize() {
     if (updaterController != nil || !updaterConfigured()) return;
     if (runningFromReadOnlyLocation()) return;
 
+    updaterDelegate = [[CLUpdaterDelegate alloc] init];
     updaterController = [[SPUStandardUpdaterController alloc]
         initWithStartingUpdater:YES
-        updaterDelegate:nil
+        updaterDelegate:updaterDelegate
         userDriverDelegate:nil];
+}
+
+void SparkleUpdater_ChannelChanged() {
+    if (updaterController == nil) return;
+    SPUUpdater *updater = updaterController.updater;
+    if (updater.sessionInProgress) return;
+    [updater checkForUpdatesInBackground];
 }
 
 // Updates are the smaller half of the problem. The app's code pages are backed

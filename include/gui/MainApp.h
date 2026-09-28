@@ -93,6 +93,7 @@ public:
 
 private:
 	void loadSettings( void );
+	void placeWindow();
 
 	// opengl context used for all rendering
 	wxGLContext *glContext;

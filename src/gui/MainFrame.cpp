@@ -8,6 +8,7 @@
    MainFrame: Main frame object
 *****************************************************************************/
 
+#include "UiControls.h"
 #include "MainApp.h"
 #include "CedarLogic.h"     // publisher name for the About panel
 #include "wx/aboutdlg.h"
@@ -84,6 +85,12 @@
 #include "LinuxAppearance.h"
 #endif
 #include "UiKit.h"
+#include "Updater.h"
+#include <functional>
+#include "StatusStrip.h"
+#ifdef __WXMSW__
+#include <wx/msw/wrapwin.h>   // DeferWindowPos, for the focus-mode slide
+#endif
 #include "UpdateInfo.h"   // cl::update::checksDisabled, for managed deployments
 
 DECLARE_APP(MainApp)
@@ -165,6 +172,72 @@ END_EVENT_TABLE()
 wxPrintData *g_printData = (wxPrintData*) NULL;
 
 
+namespace {
+
+// A copy of `from` for use as a popup: a menu can only belong to one menu bar
+// or popup at a time, so the bar's own menus cannot be shown directly.
+wxMenu* cloneMenu(const wxMenu* from) {
+	wxMenu* to = new wxMenu;
+	for (const wxMenuItem* item : from->GetMenuItems()) {
+		if (item->IsSeparator()) { to->AppendSeparator(); continue; }
+		if (item->IsSubMenu()) {
+			to->AppendSubMenu(cloneMenu(item->GetSubMenu()), item->GetItemLabel());
+			continue;
+		}
+		wxMenuItem* copy = to->Append(item->GetId(), item->GetItemLabel(), item->GetHelp(), item->GetKind());
+		if (item->IsCheckable()) copy->Check(item->IsChecked());
+		copy->Enable(item->IsEnabled());
+	}
+	return to;
+}
+
+}  // namespace
+
+void MainFrame::RunMenuCommand(int id) {
+	if (id == View_DarkMode) { ToggleDarkMode(); return; }
+	wxCommandEvent evt(wxEVT_MENU, id);
+	if (wxMenuBar* mb = GetMenuBar()) {
+		if (wxMenuItem* item = mb->FindItem(id)) {
+			if (!item->IsEnabled()) { wxBell(); return; }
+			if (item->IsCheckable()) {
+				item->Check(!item->IsChecked());
+				evt.SetInt(item->IsChecked() ? 1 : 0);
+			}
+		}
+	}
+	evt.SetEventObject(this);
+	ProcessWindowEvent(evt);
+}
+
+void MainFrame::ShowAppMenu(wxWindow* from, const wxPoint& at, bool quick) {
+	wxMenuBar* mb = GetMenuBar();
+	if (mb == nullptr || from == nullptr) return;
+	mb->UpdateMenus();   // enabled and checked states as of now
+	wxMenu menu;
+	if (quick) {
+		menu.Append(wxID_NEW, "New");
+		menu.Append(wxID_OPEN, "Open...");
+		menu.Append(wxID_SAVE, "Save");
+		menu.AppendSeparator();
+		menu.Append(View_TruthTable, "Truth Table...");
+		menu.Append(Tool_NewTab, "New Tab");
+		menu.AppendSeparator();
+	}
+	for (size_t i = 0; i < mb->GetMenuCount(); i++)
+		menu.AppendSubMenu(cloneMenu(mb->GetMenu(i)), mb->GetMenuLabel(i));
+	const int chosen = from->GetPopupMenuSelectionFromUser(menu, at);
+	if (chosen != wxID_NONE) RunMenuCommand(chosen);
+}
+
+#ifdef __WXMSW__
+wxStatusBar* MainFrame::OnCreateStatusBar(int number, long style, wxWindowID id,
+                                          const wxString& name) {
+	StatusStrip* bar = new StatusStrip(this, id, style, name);
+	bar->SetFieldsCount(number);
+	return bar;
+}
+#endif
+
 MainFrame::MainFrame(const wxString& title, string cmdFilename)
        : wxFrame(NULL, wxID_ANY, title, wxDefaultPosition, wxSize(1800,900))
 {
@@ -223,7 +296,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	fileMenu->Append(Tool_SplitClose, "Close Split\tCtrl+Alt+W", ui::platformKeys("Put the split tab back in the tab strip (Cmd+Option+W)"));
 	fileMenu->Append(Tool_FocusOtherPane, "Switch Pane\tCtrl+Alt+Right", ui::platformKeys("Work in the other side of the split (Cmd+Option+Right)"));
 	fileMenu->AppendSeparator();
-	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+S", "Save a .cdl copy anywhere, to share or submit");
+	fileMenu->Append(wxID_SAVEAS, "Export as CedarLogic File...\tCtrl+Shift+E", "Save a .cdl copy anywhere, to share or submit");
 	fileMenu->Append(File_Export, "Export as Image...\tCtrl+E", "Export or copy circuit image");
 	fileMenu->Append(File_ExportV2, "Export as V2 (legacy XML)...", "Save a copy in the pre-V3 XML format");
 	fileMenu->Append(File_ExportLegacy, "Export as V1.x Compatible...", "Save a copy in the oldest format");
@@ -267,11 +340,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	helpMenu->AppendSeparator();
 	//helpMenu->Append(Help_ReportABug, "Report a bug...");
 	//helpMenu->Append(Help_RequestAFeature, "Request a feature...");
-#if defined(__APPLE__) || defined(_WIN32)
 	helpMenu->Append(Help_DownloadLatestVersion, "Check for Updates...");
-#else
-	helpMenu->Append(Help_DownloadLatestVersion, "Download latest version...");
-#endif
 	// An administrator can turn update checking off for a managed deployment, so
 	// the organisation owns the installed version. Leave the item visible but
 	// disabled: a greyed-out entry explains why nothing happens, where a missing
@@ -290,6 +359,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	editMenu->Append(wxID_COPY, "Copy\tCtrl+C", "Copy selection to clipboard");
 	editMenu->Append(wxID_PASTE, "Paste\tCtrl+V", "Paste selection from clipboard");
 	editMenu->Append(Edit_Duplicate, "Duplicate\tCtrl+D", "Copy the selection and place it with the mouse");
+	editMenu->Append(wxID_SELECTALL, "Select All\tCtrl+A", "Select every gate and wire on this page");
 	editMenu->AppendSeparator();
 	// wxID_PREFERENCES, not an id of our own: that is what makes macOS lift this
 	// into the application menu as "Settings..." with its usual Cmd+, -- which
@@ -311,6 +381,13 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
     
     // ... and attach this menu bar to the frame
     SetMenuBar(menuBar);
+#ifdef __WXMSW__
+    // Hidden, so the top of the window is one bar rather than a title bar, a
+    // menu bar and a toolbar stacked up. Everything in it is behind the
+    // toolbar's menu button (ShowAppMenu). Its shortcuts keep working: wxMSW
+    // translates accelerators from the bar's own table, attached or not.
+    ::SetMenu(GetHWND(), nullptr);
+#endif
 
     // The canvas holds keyboard focus, and menu-bar accelerators don't reach it;
     // meanwhile wxMSW compiles every menu accelerator into the frame's
@@ -360,8 +437,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
         // GetKeyCode() is the unmodified key even with Shift held (same as the
         // Ctrl+Shift+Z check below relies on), so this doesn't need the digit
         // row's shifted symbols ('!', '@', ...).
-        if (e.ShiftDown() && !ctrl && !e.AltDown() && k >= '1' && k <= '9' && gatePalette) {
-            gatePalette->SelectSectionByIndex((unsigned int)(k - '1'));
+        // Shift+0 is the tenth, the way the digit row reads.
+        if (e.ShiftDown() && !ctrl && !e.AltDown() && k >= '0' && k <= '9' && gatePalette) {
+            gatePalette->SelectSectionByIndex(k == '0' ? 9u : (unsigned int)(k - '1'));
             return;
         }
         // Cmd+Shift+Left/Right resize the split, the way Arc does it.
@@ -469,6 +547,13 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	toolBar->AddTool(wxID_ABOUT, "About", icon("info.circle", "about"), "About");
 	toolBar->AddSeparator();
 	toolBar->AddTool(Tool_NewTab, "New Tab", icon("plus.square", "newtab"), "New Tab");
+#ifdef __WXMSW__
+	toolBar->AddSeparator();
+	toolBar->AddTool(Tool_AppMenu, "Menu", icon("ellipsis.circle", "more"), "Menu");
+	Bind(wxEVT_TOOL, [this](wxCommandEvent&) {
+		ShowAppMenu(toolBar, toolBar->ScreenToClient(wxGetMousePosition()));
+	}, Tool_AppMenu);
+#endif
 #ifdef __WXOSX__
 	// Keeps the tools left-aligned under the unified title bar, which otherwise
 	// spreads them across the full window width.
@@ -526,6 +611,19 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	                                   wxDefaultSize, wxSP_LIVE_UPDATE | wxSP_3DSASH);
 	canvasSplit->SetMinimumPaneSize(220);
 	canvasSplit->SetSashGravity(0.5);
+#ifdef __WXMSW__
+	// The divider between the canvas and the oscilloscope (or the split's two
+	// sides) in the window's own colour. Windows draws it as a raised grey
+	// bar, a white stripe across a dark window.
+	for (wxSplitterWindow* sp : { rightSplitter, canvasSplit }) {
+		sp->Bind(wxEVT_PAINT, [sp](wxPaintEvent&) {
+			wxPaintDC dc(sp);
+			dc.SetBackground(wxBrush(renderMode().darkMode ? wxColour(22, 24, 28) : wxColour(233, 234, 238)));
+			dc.Clear();
+		});
+		sp->Bind(wxEVT_ERASE_BACKGROUND, [](wxEraseEvent&) {});
+	}
+#endif
 	usingClassicTabs = appConfig().appSettings.classicTabs;
 	buildPane(0);
 	canvasBook = panes[0].book;
@@ -545,6 +643,12 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	gCircuit->setCurrentCanvas(currentCanvas);
 	currentCanvas->setMinimap(miniMap);
 	currentCanvas->SetFocus();
+	// Focus set before the window shows can end up in the palette's search
+	// field instead, so keys like Cmd+A missed the canvas on launch.
+	Bind(wxEVT_SHOW, [this](wxShowEvent& e) {
+		if (e.IsShown()) CallAfter([this]() { if (currentCanvas) currentCanvas->SetFocus(); });
+		e.Skip();
+	});
 	noteCanvasUsed(currentCanvas);
 
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
@@ -553,6 +657,15 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
 		if (currentCanvas) currentCanvas->duplicateSelection();
 	}, Edit_Duplicate);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+		// A text field with focus (a search box, a name) keeps its own Select All.
+		// A read-only or hidden one (focus can land there at launch) doesn't
+		// count -- Cmd+A then seemed to do nothing.
+		wxWindow* focus = wxWindow::FindFocus();
+		wxTextEntry* text = dynamic_cast<wxTextEntry*>(focus);
+		if (text && text->IsEditable() && focus->IsShownOnScreen()) { text->SelectAll(); return; }
+		if (currentCanvas) currentCanvas->selectAll();
+	}, wxID_SELECTALL);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SetSimView(!IsSimView()); }, View_SimView);
 	Bind(wxEVT_MENU, &MainFrame::OnTruthTable, this, View_TruthTable);
 	Bind(wxEVT_MENU, &MainFrame::OnImport, this, File_Import);
@@ -597,9 +710,10 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	// A thin divider to drag the side panel wider or narrower.
 	sidePanelSash = new wxWindow(this, wxID_ANY, wxDefaultPosition, wxSize(5, -1));
 	sidePanelSash->SetCursor(wxCursor(wxCURSOR_SIZEWE));
-	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { sidePanelSash->CaptureMouse(); });
+	sidePanelSash->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) { if (!sidePanelSash->HasCapture()) sidePanelSash->CaptureMouse(); });
 	sidePanelSash->Bind(wxEVT_LEFT_UP, [this](wxMouseEvent&) {
 		if (sidePanelSash->HasCapture()) sidePanelSash->ReleaseMouse();
+		saveSettings();   // the width you dragged to is the one you get next time
 	});
 	sidePanelSash->Bind(wxEVT_MOUSE_CAPTURE_LOST, [](wxMouseCaptureLostEvent&) {});
 	sidePanelSash->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
@@ -612,6 +726,14 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	});
 	mainSizer->Add( sidePanelSash, wxSizerFlags(0).Expand() );
 	mainSizer->Add( rightSplitter, wxSizerFlags(1).Expand().Border(wxALL, 0) );
+
+	// Whichever window holds the mouse grab gets every click in the app. One
+	// left behind makes the toolbar, the Oscope and Preferences all ignore
+	// clicks until a relaunch, so check for one regularly and on activation.
+	captureWatchdog = new wxTimer(this);
+	Bind(wxEVT_TIMER, [this](wxTimerEvent&) { releaseStaleCapture(); }, captureWatchdog->GetId());
+	captureWatchdog->Start(1000);
+	Bind(wxEVT_ACTIVATE, [this](wxActivateEvent& e) { releaseStaleCapture(); e.Skip(); });
 
 	modernBar = new ModernToolbar(this, this);
 	rootSizer = new wxBoxSizer(wxVERTICAL);
@@ -698,8 +820,36 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 #endif
 	}
 
-	// Show the main window
+	if (appConfig().appSettings.mainFrameMaximized && !renderMode().headlessRender) Maximize();
+
+	// Show the main window. On Windows it fades in: the first few layout passes
+	// (toolbar, tab strip, side panel, the circuit framing itself) happen after
+	// Show, and without a fade you watch them happen. macOS animates a new
+	// window itself.
+#ifdef __WXMSW__
+	const bool fadeIn = !renderMode().headlessRender && CanSetTransparent();
+	if (fadeIn) SetTransparent(0);
+#endif
 	Show(true);
+#ifdef __WXMSW__
+	if (fadeIn) {
+		wxTimer* fade = new wxTimer(this, wxWindow::NewControlId());
+		const wxLongLong start = wxGetLocalTimeMillis() + 60;   // let layout settle
+		Bind(wxEVT_TIMER, [this, fade, start](wxTimerEvent&) {
+			const double t = (wxGetLocalTimeMillis() - start).ToDouble() / 180.0;
+			if (t < 0) return;
+			if (t >= 1.0) {
+				fade->Stop();
+				SetTransparent(255);   // back to a plain, unlayered window
+				CallAfter([fade] { delete fade; });
+				return;
+			}
+			const double e = 1.0 - std::pow(1.0 - t, 3.0);   // ease out
+			SetTransparent((wxByte)std::lround(e * 254));
+		}, fade->GetId());
+		fade->Start(15);
+	}
+#endif
 
 #ifdef __WXOSX__
 	NativeWindow_ConfigureTitleBar(this);
@@ -764,6 +914,7 @@ MainFrame::~MainFrame() {
 
 	stopTimers();
 	if (autosaveTimer) autosaveTimer->Stop();
+	if (captureWatchdog) captureWatchdog->Stop();
 	// Ours no longer: a lock outliving the session that took it is the thing
 	// everyone else's users complain about.
 	documentLock.release();
@@ -1007,14 +1158,14 @@ bool MainFrame::importCircuitFile(const wxString& path) {
 	std::string error;
 	if (!CircuitParse::readCircuit(path.ToStdString(), check, error)) {
 		if (!renderMode().headlessRender)
-			wxMessageBox(wxString(error), "Import Error", wxOK | wxICON_ERROR, this);
+			ui::Message(wxString(error), "Import Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 	// A copy: the file on disk is never touched again.
 	const std::string id = library::create(wxFileName(path).GetName());
 	if (!wxCopyFile(path, library::circuitPath(id), true)) {
 		library::remove(id);
-		wxMessageBox("Couldn't copy that file into your circuits.", "Import Error", wxOK | wxICON_ERROR, this);
+		ui::Message("Couldn't copy that file into your circuits.", "Import Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 	library::snapshot(id);   // the original, as it came in
@@ -1059,7 +1210,7 @@ bool MainFrame::saveToLibrary(bool explicitSave) {
 	}
 	if (!save(openedFilename.ToStdString(), 3)) {
 		if (explicitSave)
-			wxMessageBox("Couldn't save:\n\n" + lastSaveError, "Save Error", wxOK | wxICON_ERROR, this);
+			ui::Message("Couldn't save:\n\n" + lastSaveError, "Save Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 	commandProcessor->MarkAsSaved();
@@ -1080,7 +1231,7 @@ bool MainFrame::saveBeforeLeaving() {
 	if (!fileIsDirty()) return true;
 	if (saveToLibrary(false)) return true;
 	if (renderMode().headlessRender) return true;   // nobody to ask
-	wxMessageDialog ask(this,
+	ui::MessageDialog ask(this,
 		"Your latest changes to this circuit couldn't be saved.",
 		"Couldn't Save", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
 	ask.SetExtendedMessage(wxString(lastSaveError) +
@@ -1117,13 +1268,13 @@ void MainFrame::OnVersionHistory(wxCommandEvent& WXUNUSED(event)) {
 		cl::LoadResult check;
 		std::string error;
 		if (!CircuitParse::readCircuit(version.ToStdString(), check, error)) {
-			wxMessageBox("That version can't be opened:\n\n" + wxString(error),
+			ui::Message("That version can't be opened:\n\n" + wxString(error),
 			             "Restore Version", wxOK | wxICON_ERROR, this);
 			return;
 		}
 	}
 	if (!wxCopyFile(version, library::circuitPath(id), true)) {
-		wxMessageBox("Couldn't restore that version: it could not be copied back into your circuits.",
+		ui::Message("Couldn't restore that version: it could not be copied back into your circuits.",
 		             "Restore Version", wxOK | wxICON_ERROR, this);
 		return;
 	}
@@ -1161,7 +1312,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	const bool reopeningOurs = (path == openedFilename);
 	const std::string holder = (asCopy || reopeningOurs) ? std::string() : FileLock::heldBy(fileName);
 	if (!holder.empty() && !renderMode().headlessRender) {
-		wxMessageDialog dialog(this,
+		ui::MessageDialog dialog(this,
 			"Someone else is editing this circuit right now.",
 			"Open a Copy?", wxYES_NO | wxCANCEL | wxYES_DEFAULT | wxICON_QUESTION);
 		dialog.SetExtendedMessage(
@@ -1187,7 +1338,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	string loadError;
 	if (!CircuitParse::readCircuit(path.ToStdString(), loaded, loadError)) {
 		if (!renderMode().headlessRender)
-			wxMessageBox(wxString(loadError), "Load Error", wxOK | wxICON_ERROR, this);
+			ui::Message(wxString(loadError), "Load Error", wxOK | wxICON_ERROR, this);
 		return false;
 	}
 
@@ -1275,7 +1426,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 	    && !renderMode().headlessRender
 	    && !path.StartsWith(library::root())) {   // library copies always save as V3
 		wxString v = (loadedFileFormat == 1) ? "V1" : "V2";
-		wxMessageDialog dialog(this,
+		ui::MessageDialog dialog(this,
 			"This circuit was saved in an older file format (" + v + ").\n\n"
 			"Convert it to V3 now? If not, you can convert it later when you save.",
 			"Older File Format", wxYES_NO | wxICON_QUESTION);
@@ -1287,7 +1438,7 @@ bool MainFrame::loadCircuitFile( string fileName, bool asCopy ){
 				saveFormatDecided = true;
 				commandProcessor->MarkAsSaved();
 			} else {
-				wxMessageBox("Could not convert the file:\n\n" + saver.getLastError(),
+				ui::Message("Could not convert the file:\n\n" + saver.getLastError(),
 					"Save Error", wxOK | wxICON_ERROR, this);
 			}
 		}
@@ -1310,7 +1461,7 @@ int MainFrame::chooseSaveFormat() {
 	if (saveFormatDecided) return loadedFileFormat;  // already answered for this file
 
 	wxString v = (loadedFileFormat == 1) ? "V1" : "V2";
-	wxMessageDialog dialog(this,
+	ui::MessageDialog dialog(this,
 		"This circuit was opened in an older file format (" + v + ").\n\n"
 		"Convert it to V3, or keep " + v + "?\n\n"
 		"V3 files cannot be opened by older versions of CedarLogic.",
@@ -1333,7 +1484,7 @@ void MainFrame::OnSaveAs(wxCommandEvent& WXUNUSED(event)) {
 	if (dialog.ShowModal() != wxID_OK) return;
 	lastDirectory = dialog.GetDirectory();
 	if (!save(dialog.GetPath().ToStdString(), 3))
-		wxMessageBox("Couldn't export:\n\n" + lastSaveError, "Export Error", wxOK | wxICON_ERROR, this);
+		ui::Message("Couldn't export:\n\n" + lastSaveError, "Export Error", wxOK | wxICON_ERROR, this);
 }
 
 void MainFrame::OnOscope(wxCommandEvent& WXUNUSED(event)) {
@@ -1422,6 +1573,10 @@ void MainFrame::ApplyTheme() {
 	// Windows draws the caption itself; without this it stays white over a
 	// dark app. Dialogs opened later pick it up in MainApp::FilterEvent.
 	WinSetDarkTitlebars(dark);
+	WinSetAppDarkMode(dark);          // right-click and dropdown menus
+	WinThemeControls(this, dark);     // scrollbars and the palette's dropdown
+	applyTitlebarForTopRow();         // the title bar takes the new colours
+	PreferencesThemeChanged();        // an open Settings window follows
 #elif defined(__WXGTK__)
 	// Menus, dialogs and scrollbars are GTK's; ask for the matching variant.
 	// The toolbar goes with them, so its icons need the other stroke colour.
@@ -1434,7 +1589,7 @@ void MainFrame::ApplyTheme() {
 	// the oscilloscope, which sits outside the sceneKey cache these share.
 	for (GUICanvas* c : canvases) if (c) c->Refresh();
 	if (miniMap) miniMap->Refresh();
-	if (oscopePanel) oscopePanel->RefreshCanvas();
+	if (oscopePanel) { oscopePanel->ApplyTheme(); oscopePanel->RefreshCanvas(); }
 	if (gatePalette) gatePalette->ApplyTheme();
 	if (sidePanelSash) {
 		sidePanelSash->SetBackgroundColour(dark ? wxColour(40, 43, 50) : wxColour(218, 220, 224));
@@ -1471,7 +1626,11 @@ void MainFrame::ApplyThemeShortcutLabel() {
 }
 
 void MainFrame::ApplyThemeToggleVisibility() {
-	const bool want = appConfig().appSettings.showThemeToggleButton;
+	// The same "Dark mode" group the modern toolbars show or hide, so one
+	// checkbox in the Toolbar settings covers every style.
+	auto& settings = appConfig().appSettings;
+	settings.showThemeToggleButton = !(settings.toolbarHidden & (1 << cl::tb::GTheme));
+	const bool want = settings.showThemeToggleButton;
 	const bool have = toolBar->FindById(Tool_ThemeToggle) != nullptr;
 	if (want == have) return;
 	if (want) {
@@ -1516,7 +1675,19 @@ void MainFrame::ApplyPreferences() {
 	GetMenuBar()->Check(View_Gridline, appConfig().appSettings.gridlineVisible);
 	GetMenuBar()->Check(View_WireConn, appConfig().appSettings.wireConnVisible);
 
-	if (currentCanvas != NULL) currentCanvas->Update();
+	// Repaint everything a setting can colour or resize -- the accent is the
+	// dot on the active tab, the selection glow and the palette's highlight.
+	// Update() alone only flushes a repaint that is already pending, so the
+	// tab dot kept its old colour until you switched tabs.
+	for (CanvasPane& p : panes) {
+		if (p.host) p.host->Refresh();
+		if (p.strip) p.strip->Refresh();
+	}
+	for (GUICanvas* c : canvases) if (c) c->Refresh();
+	if (miniMap) miniMap->Refresh();
+	if (gatePalette) gatePalette->Refresh();
+	if (modernBar) modernBar->Refresh();
+	saveSettings();   // a change made in Preferences is on disk right away
 }
 
 // Cadence pump event (posted from simPumpThread). Runs the same work the two
@@ -1835,13 +2006,13 @@ void MainFrame::OnTruthTable(wxCommandEvent& WXUNUSED(event)) {
 		else if (dynamic_cast<guiGateLED*>(g.second)) outs.push_back(g.second);
 	}
 	if (ins.empty() || outs.empty()) {
-		wxMessageBox("A truth table needs at least one switch (an input) and one light (an output)"
+		ui::Message("A truth table needs at least one switch (an input) and one light (an output)"
 		             + wxString(useSelection ? " in the selection." : " on this page."),
 		             "Truth Table", wxOK | wxICON_INFORMATION, this);
 		return;
 	}
 	if (ins.size() > 8) {
-		wxMessageBox(wxString::Format("That's %zu switches -- %s rows. Select up to 8 switches "
+		ui::Message(wxString::Format("That's %zu switches -- %s rows. Select up to 8 switches "
 		             "(and the lights you care about) and try again.", ins.size(),
 		             ins.size() > 16 ? "far too many" : wxString::Format("%lu", 1UL << ins.size())),
 		             "Truth Table", wxOK | wxICON_INFORMATION, this);
@@ -2005,8 +2176,7 @@ void MainFrame::animateSidePanel(bool show) {
 	// Focus mode takes the toolbar as well as the side panel: the canvas gets
 	// the window. The custom bar rises out of the top; the native one has no
 	// geometry of ours to animate, so it simply goes.
-	const bool customBar = modernBar != nullptr &&
-	                       appConfig().appSettings.toolbarStyle != cl::tb::Classic;
+	const bool customBar = modernBar != nullptr && !usesNativeToolbar();
 
 	if (show) {
 		// Put them back first, so a real layout can say where they belong,
@@ -2032,13 +2202,21 @@ void MainFrame::animateSidePanel(bool show) {
 
 	panelAnimShowing = show;
 	panelAnimT = show ? 0.0 : 1.0;
+	panelAnimFrom = panelAnimT;
+	panelAnimStart = wxGetLocalTimeMillis();
 	sidePanelTimer->Start(16);
 	stepSidePanelAnim();
 }
 
 void MainFrame::stepSidePanelAnim() {
-	const double step = 1.0 / 12.0;              // ~190ms at 16ms a frame
-	panelAnimT += panelAnimShowing ? step : -step;
+	// Progress by the clock, not by ticks. It used to add a twelfth per timer
+	// tick, and Windows delivers timer ticks only when nothing else is queued:
+	// with the simulation running and the canvas repainting, ticks came late
+	// and the slide crawled -- sometimes for seconds. Late ticks now just mean
+	// fewer frames of the same ~190ms slide.
+	const double kSlideMs = 190.0;
+	const double elapsed = (wxGetLocalTimeMillis() - panelAnimStart).ToDouble() / kSlideMs;
+	panelAnimT = panelAnimShowing ? panelAnimFrom + elapsed : panelAnimFrom - elapsed;
 	const bool done = panelAnimShowing ? (panelAnimT >= 1.0) : (panelAnimT <= 0.0);
 	panelAnimT = std::max(0.0, std::min(1.0, panelAnimT));
 
@@ -2048,15 +2226,34 @@ void MainFrame::stepSidePanelAnim() {
 	const int offset = (int)std::lround((1.0 - e) * travel);      // sideways
 	const int rise = (int)std::lround((1.0 - e) * barTravel);     // and upwards
 
+	std::vector<std::pair<wxWindow*, wxRect>> moves;
 	if (barTravel > 0 && modernBar)
-		modernBar->SetSize(barRect.x, barRect.y - rise, barRect.width, barRect.height);
-
-	gatePalette->SetSize(panelRect.x - offset, panelRect.y - rise, panelRect.width, panelRect.height);
-	miniMap->SetSize(miniRect.x - offset, miniRect.y - rise, miniRect.width, miniRect.height);
-	sidePanelSash->SetSize(sashRect.x - offset, sashRect.y - rise, sashRect.width, sashRect.height);
+		moves.push_back({ modernBar, wxRect(barRect.x, barRect.y - rise, barRect.width, barRect.height) });
+	moves.push_back({ gatePalette, wxRect(panelRect.x - offset, panelRect.y - rise, panelRect.width, panelRect.height) });
+	moves.push_back({ miniMap, wxRect(miniRect.x - offset, miniRect.y - rise, miniRect.width, miniRect.height) });
+	moves.push_back({ sidePanelSash, wxRect(sashRect.x - offset, sashRect.y - rise, sashRect.width, sashRect.height) });
 	// The canvas takes the room the other two give up.
-	rightSplitter->SetSize(splitRect.x - offset, splitRect.y - rise,
-	                       splitRect.width + offset, splitRect.height + rise);
+	moves.push_back({ rightSplitter, wxRect(splitRect.x - offset, splitRect.y - rise,
+	                                        splitRect.width + offset, splitRect.height + rise) });
+#ifdef __WXMSW__
+	// All in one go, and without SWP's default of carrying each window's old
+	// pixels to its new spot. The canvas is OpenGL, whose pixels GDI cannot
+	// copy: what got carried along was garbage, and nothing ever repainted it
+	// -- the white and black lines focus mode left behind. NOCOPYBITS makes
+	// each moved window repaint itself instead.
+	bool moved = false;
+	if (HDWP batch = ::BeginDeferWindowPos((int)moves.size())) {
+		for (const auto& m : moves) {
+			batch = ::DeferWindowPos(batch, (HWND)m.first->GetHWND(), nullptr,
+			                         m.second.x, m.second.y, m.second.width, m.second.height,
+			                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOCOPYBITS);
+			if (!batch) break;
+		}
+		moved = batch && ::EndDeferWindowPos(batch);
+	}
+	if (!moved)
+#endif
+	for (const auto& m : moves) m.first->SetSize(m.second);
 
 	if (!done) return;
 	sidePanelTimer->Stop();
@@ -2069,11 +2266,19 @@ void MainFrame::stepSidePanelAnim() {
 	applyTitlebarForTopRow();
 	Layout();   // hand the geometry back to the sizer
 	RenumberTabs();   // the strip may have just inherited the title bar row
+	// One clean repaint of everything the slide moved. Mid-slide frames only
+	// repaint what each resize invalidated, and on Windows a strip the canvas
+	// had just grown into could stay unpainted: the white lines along the edge.
+	Refresh();
+	Update();
 }
 
 void MainFrame::ApplySidePanelWidth() {
 	int& w = appConfig().appSettings.sidePanelWidth;
-	if (w <= 0) w = gatePalette->GetBestSize().x;   // first launch: its natural width
+	// First launch: roomy enough that the gate names and the section list read
+	// in full. Its natural width was the narrowest that fit, which cut names
+	// short with "..." until you dragged it wider.
+	if (w <= 0) w = wxMax(gatePalette->GetBestSize().x, FromDIP(270));
 	w = wxMax(SIDE_PANEL_MIN_WIDTH, wxMin(SIDE_PANEL_MAX_WIDTH, w));
 	gatePalette->SetMinSize(wxSize(w, -1));
 	gatePalette->SetMaxSize(wxSize(w, -1));
@@ -2125,9 +2330,20 @@ wxString MainFrame::GetDocumentSubtitle() {
 	return page + wxString::FromUTF8(" \u00B7 ") + (fileIsDirty() ? "Edited" : "Saved");
 }
 
+// Whether the Classic style is the system's own toolbar. On Windows it is not:
+// the stock toolbar there is Windows 95 -- sunken boxes, a grey slider, icons
+// that never follow the theme -- so ours draws the Classic look instead, the
+// same one Settings shows as its picture.
+bool MainFrame::usesNativeToolbar() const {
+#ifdef __WXMSW__
+	return false;
+#else
+	return appConfig().appSettings.toolbarStyle == cl::tb::Classic;
+#endif
+}
+
 void MainFrame::ApplyToolbarStyle() {
-	const int style = appConfig().appSettings.toolbarStyle;
-	const bool classic = style == cl::tb::Classic;
+	const bool classic = usesNativeToolbar();
 	// Focus mode keeps both bars away. Sim view restyles the bar through here,
 	// and showing it unconditionally brought it back mid-focus mode.
 	wxMenuBar* mb = GetMenuBar();
@@ -2264,14 +2480,14 @@ void MainFrame::OnReopenTab(wxCommandEvent& event) {
 }
 
 // A Yes/No prompt that answers to Y, N and Escape as well as Return, which is
-// what you want when it interrupts you mid-keyboard. On macOS wxMessageDialog
+// what you want when it interrupts you mid-keyboard. On macOS ui::MessageDialog
 // is a system alert whose buttons swallow those keys, so there it is an
 // NSAlert with a key monitor (MacAskYesNo). Elsewhere it is the stock dialog.
 bool MainFrame::AskYesNo(const wxString& title, const wxString& message) {
 #ifdef __APPLE__
 	return MacAskYesNo(title.utf8_str(), message.utf8_str(), renderMode().darkMode);
 #else
-	wxMessageDialog ask(this, message, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+	ui::MessageDialog ask(this, message, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
 	return ask.ShowModal() == wxID_YES;
 #endif
 }
@@ -2354,6 +2570,19 @@ int MainFrame::TabStripLeftInset() const {
 // there, that is the toolbar's business; with the tab strip there, the window
 // title has to be hidden or macOS draws "Untitled" straight across the tabs.
 void MainFrame::applyTitlebarForTopRow() {
+#ifdef __WXMSW__
+	// Windows 11 draws the title bar in whatever colour the row under it is,
+	// so the top of the window reads as one bar, the way the Mac's does.
+	const bool dark = renderMode().darkMode;
+	if (tabStripIsTopRow())
+		WinSetCaptionColour(this, dark ? wxColour(22, 24, 28) : wxColour(233, 234, 238),
+		                    dark ? wxColour(228, 232, 240) : wxColour(32, 35, 42));
+	else if (modernBar && modernBar->IsShown())
+		WinSetCaptionColour(this, modernBar->BarColour(), modernBar->InkColour());
+	else
+		WinSetCaptionColour(this, toolBar->GetBackgroundColour(),
+		                    dark ? wxColour(228, 232, 240) : wxColour(32, 35, 42));
+#endif
 #ifdef __APPLE__
 	const bool classic = appConfig().appSettings.toolbarStyle == cl::tb::Classic;
 	if (tabStripIsTopRow())
@@ -2623,7 +2852,6 @@ GUICanvas* MainFrame::pickSplitPartner() {
 void MainFrame::SplitWith(GUICanvas* canvas, bool onRight) {
 	if (canvas == nullptr) return;
 	MoveCanvasToPane(canvas, 1, -1, onRight);
-	SetStatusText("Split view. Drag tabs between the two sides; the split closes when a side runs out.");
 }
 
 void MainFrame::CloseSplit() {
@@ -2848,6 +3076,38 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	// Create unified export dialog with horizontal layout
 	wxDialog exportDialog(this, wxID_ANY, "Export as Image", wxDefaultPosition, wxDefaultSize);
 	wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
+#ifdef __WXMSW__
+	exportDialog.SetBackgroundColour(ui::pageColour());
+#endif
+
+	// A titled group of options: a rounded card on Windows, where the etched
+	// group box is one of the oldest-looking things the system has, and the
+	// platform's framed box elsewhere. Controls go in `parent`, rows in `sizer`,
+	// and the group itself into the dialog with add().
+	struct Group {
+		wxWindow* parent; wxSizer* sizer; wxWindow* card;
+		void add(wxSizer* into, int proportion, int flags, int border) const {
+			if (card) into->Add(card, proportion, flags, border);
+			else into->Add(sizer, proportion, flags, border);
+		}
+	};
+	auto group = [&](const wxString& title) -> Group {
+#ifdef __WXMSW__
+		ui::Card* card = new ui::Card(&exportDialog);
+		wxBoxSizer* inner = new wxBoxSizer(wxVERTICAL);
+		wxStaticText* head = new wxStaticText(card, wxID_ANY, title);
+		head->SetFont(wxFont(wxFontInfo(10).Bold()));
+		head->SetForegroundColour(ui::ink());
+		inner->Add(head, 0, wxLEFT | wxRIGHT | wxTOP, FromDIP(12));
+		wxBoxSizer* rows = new wxBoxSizer(wxVERTICAL);
+		inner->Add(rows, 1, wxALL | wxEXPAND, FromDIP(7));
+		card->SetSizer(inner);
+		return { card, rows, card };
+#else
+		wxStaticBoxSizer* box = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, title);
+		return { box->GetStaticBox(), box, nullptr };
+#endif
+	};
 
 	// Preview panel — sized dynamically on first render
 	const int previewMaxW = 560, previewMaxH = 220;
@@ -2862,56 +3122,58 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 
 	// Name and result: printed in a strip under the circuit.
 	mainSizer->AddSpacer(10);
-	wxStaticBoxSizer* infoBox = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, "Name and result");
-	wxCheckBox* infoCheck = new wxCheckBox(&exportDialog, wxID_ANY, "Add my name and whether the circuit works");
+	const Group infoGroup = group("Name and result");
+	wxSizer* infoBox = infoGroup.sizer;
+	wxCheckBox* infoCheck = new wxCheckBox(infoGroup.parent, wxID_ANY, "Add my name and whether the circuit works");
 	infoCheck->SetValue(appConfig().appSettings.exportInfoEnabled);
 	infoBox->Add(infoCheck, 0, wxALL, 5);
 	wxBoxSizer* nameRow = new wxBoxSizer(wxHORIZONTAL);
-	nameRow->Add(new wxStaticText(&exportDialog, wxID_ANY, "Your name:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
-	wxTextCtrl* nameCtrl = new wxTextCtrl(&exportDialog, wxID_ANY,
+	nameRow->Add(new wxStaticText(infoGroup.parent, wxID_ANY, "Your name:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+	wxTextCtrl* nameCtrl = new wxTextCtrl(infoGroup.parent, wxID_ANY,
 		wxString::FromUTF8(appConfig().appSettings.studentName.c_str()));
 	nameCtrl->SetHint("First and last name");
 	nameRow->Add(nameCtrl, 1, wxALIGN_CENTER_VERTICAL);
 	infoBox->Add(nameRow, 0, wxALL | wxEXPAND, 5);
-	wxRadioButton* worksRadio = new wxRadioButton(&exportDialog, wxID_ANY, "My circuit works properly",
+	wxRadioButton* worksRadio = new wxRadioButton(infoGroup.parent, wxID_ANY, "My circuit works properly",
 		wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-	wxRadioButton* brokenRadio = new wxRadioButton(&exportDialog, wxID_ANY, "My circuit does not work because...");
+	wxRadioButton* brokenRadio = new wxRadioButton(infoGroup.parent, wxID_ANY, "My circuit does not work because...");
 	worksRadio->SetValue(lastExportInfo.works);
 	brokenRadio->SetValue(!lastExportInfo.works);
 	infoBox->Add(worksRadio, 0, wxLEFT | wxRIGHT | wxTOP, 5);
 	infoBox->Add(brokenRadio, 0, wxLEFT | wxRIGHT | wxTOP, 5);
-	wxTextCtrl* whyCtrl = new wxTextCtrl(&exportDialog, wxID_ANY, lastExportInfo.why,
+	wxTextCtrl* whyCtrl = new wxTextCtrl(infoGroup.parent, wxID_ANY, lastExportInfo.why,
 		wxDefaultPosition, wxSize(-1, 56), wxTE_MULTILINE);
 	whyCtrl->SetHint("Explain what doesn't work (required)");
 	infoBox->Add(whyCtrl, 0, wxALL | wxEXPAND, 5);
-	mainSizer->Add(infoBox, 0, wxLEFT | wxRIGHT | wxEXPAND, 15);
+	infoGroup.add(mainSizer, 0, wxLEFT | wxRIGHT | wxEXPAND, 15);
 
 	// Horizontal sizer for output style and resolution side-by-side
 	mainSizer->AddSpacer(10);
 	wxBoxSizer* optionsSizer = new wxBoxSizer(wxHORIZONTAL);
 
 	// Output style box with better spacing
-	wxStaticBoxSizer* styleBox = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, "Output style");
-	wxRadioButton* colorRadio = new wxRadioButton(&exportDialog, wxID_ANY, "Color", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-	wxRadioButton* bwRadio = new wxRadioButton(&exportDialog, wxID_ANY, "Black && White");
+	const Group style = group("Output style");
+	wxRadioButton* colorRadio = new wxRadioButton(style.parent, wxID_ANY, "Color", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
+	wxRadioButton* bwRadio = new wxRadioButton(style.parent, wxID_ANY, "Black && White");
 	colorRadio->SetValue(true);
-	styleBox->Add(colorRadio, 0, wxALL, 5);
-	styleBox->Add(bwRadio, 0, wxALL, 5);
-	optionsSizer->Add(styleBox, 1, wxRIGHT | wxEXPAND, 10);
+	style.sizer->Add(colorRadio, 0, wxALL, 5);
+	style.sizer->Add(bwRadio, 0, wxALL, 5);
+	style.add(optionsSizer, 1, wxRIGHT | wxEXPAND, 10);
 
 	// Resolution box with better spacing
-	wxStaticBoxSizer* resBox = new wxStaticBoxSizer(wxVERTICAL, &exportDialog, "Resolution");
+	const Group res = group("Resolution");
+	wxSizer* resBox = res.sizer;
 	// The multiplication sign goes in as a \u escape in a wide literal. Written
 	// as raw UTF-8 bytes in a narrow literal it gets re-read one byte at a time
 	// under the Windows ANSI code page and reaches the dialog as mojibake.
-	wxRadioButton* screen2x = new wxRadioButton(&exportDialog, wxID_ANY, L"Screen (2\u00d7)", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-	wxRadioButton* print4x = new wxRadioButton(&exportDialog, wxID_ANY, L"Print (4\u00d7)");
-	wxRadioButton* high6x = new wxRadioButton(&exportDialog, wxID_ANY, L"High Quality (6\u00d7)");
+	wxRadioButton* screen2x = new wxRadioButton(res.parent, wxID_ANY, L"Screen (2\u00d7)", wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
+	wxRadioButton* print4x = new wxRadioButton(res.parent, wxID_ANY, L"Print (4\u00d7)");
+	wxRadioButton* high6x = new wxRadioButton(res.parent, wxID_ANY, L"High Quality (6\u00d7)");
 	print4x->SetValue(true); // Default to Print
 	resBox->Add(screen2x, 0, wxALL, 5);
 	resBox->Add(print4x, 0, wxALL, 5);
 	resBox->Add(high6x, 0, wxALL, 5);
-	optionsSizer->Add(resBox, 1, wxLEFT | wxEXPAND, 10);
+	res.add(optionsSizer, 1, wxLEFT | wxEXPAND, 10);
 
 	mainSizer->Add(optionsSizer, 0, wxLEFT | wxRIGHT | wxEXPAND, 15);
 
@@ -3007,6 +3269,23 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 	whyCtrl->Bind(wxEVT_TEXT, onInfoChange);
 	updateInfoState();
 
+#ifdef __WXMSW__
+	// Text in the theme's ink (wx then draws the checkboxes and radio buttons
+	// itself, which is the only way their labels follow dark mode), and the
+	// buttons and fields in the system's dark theme when the app is dark.
+	std::function<void(wxWindow*)> ink = [&](wxWindow* w) {
+		for (wxWindowList::compatibility_iterator n = w->GetChildren().GetFirst(); n; n = n->GetNext()) {
+			wxWindow* c = n->GetData();
+			if (wxDynamicCast(c, wxStaticText) || wxDynamicCast(c, wxCheckBox) || wxDynamicCast(c, wxRadioButton))
+				c->SetForegroundColour(ui::ink());
+			ink(c);
+		}
+	};
+	ink(&exportDialog);
+	WinThemeControls(&exportDialog, renderMode().darkMode);
+	WinSetDarkTitlebar(&exportDialog, renderMode().darkMode);
+#endif
+
 	// Generate initial preview and size dialog to fit
 	updatePreview();
 	exportDialog.Fit();
@@ -3056,7 +3335,7 @@ void MainFrame::OnExportBitmap(wxCommandEvent& event) {
 				                               sz.GetHeight() * multiplier,
 				                               showGrid, useNoColor, &info);
 				if (!success) {
-					wxMessageBox("Failed to export SVG file.", "Export Error", wxOK | wxICON_ERROR);
+					ui::Message("Failed to export SVG file.", "Export Error", wxOK | wxICON_ERROR);
 				}
 			} else {
 				// Export as bitmap (PNG default; BMP when explicitly chosen).
@@ -3101,11 +3380,11 @@ void MainFrame::OnExportLegacy(wxCommandEvent& event) {
 
 			if (errorMsg.find("Warning:") == 0) {
 				// This is a bus features warning, file was saved successfully
-				wxMessageBox(errorMsg, "Export Warning", wxOK | wxICON_WARNING);
+				ui::Message(errorMsg, "Export Warning", wxOK | wxICON_WARNING);
 			} else {
 				// This is an I/O error
 				wxString fullMsg = "Failed to export file:\n\n" + errorMsg;
-				wxMessageBox(fullMsg, "Export Error", wxOK | wxICON_ERROR);
+				ui::Message(fullMsg, "Export Error", wxOK | wxICON_ERROR);
 			}
 		}
 	}
@@ -3132,7 +3411,7 @@ void MainFrame::OnExportV2(wxCommandEvent& event) {
 		if (!(toolBar->GetToolState(Tool_Lock))) unlock();
 
 		if (!success) {
-			wxMessageBox("Failed to export file:\n\n" + cirp.getLastError(),
+			ui::Message("Failed to export file:\n\n" + cirp.getLastError(),
 			             "Export Error", wxOK | wxICON_ERROR);
 		}
 	}
@@ -3350,10 +3629,15 @@ void MainFrame::saveSettings() {
 	wxConfigBase *conf = wxConfigBase::Get();
 	auto settings = appConfig().appSettings;
 
-	conf->Write("FrameWidth", GetSize().GetWidth());
-	conf->Write("FrameHeight", GetSize().GetHeight());
-	conf->Write("FrameLeft", GetPosition().x);
-	conf->Write("FrameTop", GetPosition().y);
+	// A maximized or minimized window's rect is not the one to come back to:
+	// keep the last normal one and remember the state beside it.
+	conf->Write("FrameMaximized", IsMaximized());
+	if (!IsMaximized() && !IsIconized() && !IsFullScreen()) {
+		conf->Write("FrameWidth", GetSize().GetWidth());
+		conf->Write("FrameHeight", GetSize().GetHeight());
+		conf->Write("FrameLeft", GetPosition().x);
+		conf->Write("FrameTop", GetPosition().y);
+	}
 	conf->Write("TimeStep", appConfig().timeStepMod);
 	conf->Write("RefreshRate", settings.refreshRate);
 	conf->Write("AutosaveSeconds", settings.autosaveSeconds);
@@ -3361,6 +3645,7 @@ void MainFrame::saveSettings() {
 	conf->Write("LastLibraryDoc", wxString(appConfig().appSettings.lastLibraryDoc));
 	conf->Write("StudentName", wxString::FromUTF8(settings.studentName.c_str()));
 	conf->Write("ExportInfoEnabled", settings.exportInfoEnabled);
+	conf->Write("UpdateChannel", settings.updateChannel);
 	conf->Write("ToolbarStyle", settings.toolbarStyle);
 	conf->Write("ToolbarHidden", settings.toolbarHidden);
 	conf->Write("WireConnRadius", settings.wireConnRadius);
@@ -3391,6 +3676,9 @@ void MainFrame::saveSettings() {
 	conf->Write("ThemeShortcutKeyCode", settings.themeShortcutKeyCode);
 	conf->Write("ThemeShortcutModifiers", settings.themeShortcutModifiers);
 	conf->Write("ThemeToggleButtonVisible", settings.showThemeToggleButton);
+	// To disk now rather than whenever wx deletes the config: a crash, a forced
+	// quit or the Windows _Exit in MainApp::OnExit would otherwise lose it all.
+	conf->Flush();
 }
 
 void MainFrame::ResumeExecution() {
@@ -3469,6 +3757,7 @@ void MainFrame::applyAutosaveInterval() {
 	if (!autosaveTimer) return;
 	// Always on: every few seconds, whatever changed goes into the library.
 	autosaveTimer->Stop();
+	if (captureWatchdog) captureWatchdog->Stop();
 	autosaveTimer->Start(4000);
 }
 
@@ -3499,7 +3788,7 @@ void MainFrame::offerRecovery() {
 			"CedarLogic closed unexpectedly with unsaved work.\n\n"
 			"Recover " + of + "?\n"
 			"Last autosaved " + entry.takenAt + ".";
-		wxMessageDialog dialog(this, message, "Recover Work",
+		ui::MessageDialog dialog(this, message, "Recover Work",
 		                       wxYES_DEFAULT | wxYES_NO | wxICON_QUESTION);
 		if (dialog.ShowModal() != wxID_YES) {
 			autosaveStore::discard(entry);   // they have seen it and said no
@@ -3552,7 +3841,7 @@ void MainFrame::OnAutosaveTimer(wxTimerEvent& WXUNUSED(event)) {
 	SetStatusText("Couldn't save automatically: " + wxString(lastSaveError));
 	if (autosaveFailing || renderMode().headlessRender) return;
 	autosaveFailing = true;
-	wxMessageBox("Your circuit couldn't be saved automatically:\n\n" + wxString(lastSaveError) +
+	ui::Message("Your circuit couldn't be saved automatically:\n\n" + wxString(lastSaveError) +
 	             "\n\nIt is still on screen, and saving will be retried every few seconds. "
 	             "File > Export as CedarLogic File saves a copy somewhere else.",
 	             "Couldn't Save", wxOK | wxICON_WARNING, this);
@@ -3879,7 +4168,7 @@ void MainFrame::OnNewTab(wxCommandEvent& event) {
 		}
 	}
 	else {
-		wxMessageBox("You have reached the maximum number of tabs.", "Close", wxOK);
+		ui::Message("You have reached the maximum number of tabs.", "Close", wxOK);
 	}
 	 
 /*	canvases.push_back(new GUICanvas(canvasBook, gCircuit, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS));
@@ -3902,14 +4191,14 @@ void MainFrame::OnReportABug(wxCommandEvent& event) {
 	// Tyler Drake can remap the url using cedar.to/create
 	// Don't change the url here!
 	//wxLaunchDefaultBrowser("https://cedar.to/XoQJpX", 0);
-	wxMessageBox("Feature temporarily unavailable!");
+	ui::Message("Feature temporarily unavailable!");
 }
 
 void MainFrame::OnRequestAFeature(wxCommandEvent& event) {
 	// Tyler Drake can remap the url using cedar.to/create
 	// Don't change the url here!
 	//wxLaunchDefaultBrowser("https://cedar.to/6IlP8c", 0);
-	wxMessageBox("Feature temporarily unavailable!");
+	ui::Message("Feature temporarily unavailable!");
 }
 
 void MainFrame::OnDownloadLatestVersion(wxCommandEvent& event) {
@@ -3917,24 +4206,36 @@ void MainFrame::OnDownloadLatestVersion(wxCommandEvent& event) {
 	// accelerator or a programmatic menu event can still reach this handler,
 	// and it would otherwise put a request on the wire.
 	if (cl::update::checksDisabled()) {
-		wxMessageBox("Updates for CedarLogic are managed by your administrator.",
+		ui::Message("Updates for CedarLogic are managed by your administrator.",
 		             "Updates are managed", wxOK | wxICON_INFORMATION, this);
 		return;
 	}
-#ifdef __APPLE__
-	SparkleUpdater_CheckForUpdates();
-#elif defined(_WIN32)
-	WinSparkleUpdater_CheckForUpdates();
-#else
-	// No auto-updater on Linux: open this fork's releases page, where the
-	// AppImage is published. (Upstream's cedar.to link leads to the original
-	// Cedarville builds, not this version.)
-	wxLaunchDefaultBrowser(CEDARLOGIC_RELEASES_URL, 0);
-#endif
+	Updater_CheckNow();
 }
 
 void MainFrame::OnKeyboardShortcuts(wxCommandEvent& WXUNUSED(event)) {
 	// A searchable, scrolling sheet (ShortcutsSheet.cpp). The plain grid that
 	// was here grew taller than the screen and ran under its own OK button.
 	ShowShortcutsSheet(this);
+}
+
+void MainFrame::releaseStaleCapture() {
+	wxWindow* holder = wxWindow::GetCapture();
+	if (holder == nullptr) return;
+	// A button still down means a real drag -- leave it alone.
+	const wxMouseState ms = wxGetMouseState();
+	if (ms.LeftIsDown() || ms.RightIsDown() || ms.MiddleIsDown()) return;
+	// A canvas may hold the mouse with the button up on purpose: a paste or a
+	// new gate following the pointer, or a click-to-connect line.
+	if (GUICanvas* canvas = dynamic_cast<GUICanvas*>(holder)) {
+		if (!canvas->isIdleForCapture()) return;
+		// Clear its drag flags too, so the next drag starts cleanly.
+		canvas->endDrag(BUTTON_LEFT);
+		canvas->endDrag(BUTTON_MIDDLE);
+		canvas->endDrag(BUTTON_RIGHT);
+	}
+	while (wxWindow* w = wxWindow::GetCapture()) {
+		w->ReleaseMouse();
+		if (wxWindow::GetCapture() == w) break;   // don't spin if it won't let go
+	}
 }

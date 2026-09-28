@@ -101,9 +101,11 @@ add_executable(test_gatelibrary
 	"${PROJECT_SOURCE_DIR}/src/gui/GateLibrary.cpp"
 	"${PROJECT_SOURCE_DIR}/src/gui/XMLParser.cpp"
 )
-# stub/ comes first so its MainApp.h wins over the real one.
+# stub/ comes first (BEFORE: ahead of the project-wide include/gui too) so its
+# UiControls.h wins over the real one.
+target_include_directories(test_gatelibrary BEFORE PRIVATE
+	"${CMAKE_CURRENT_SOURCE_DIR}/stub")
 target_include_directories(test_gatelibrary PRIVATE
-	"${CMAKE_CURRENT_SOURCE_DIR}/stub"
 	"${PROJECT_SOURCE_DIR}/include/gui"
 	"${PROJECT_SOURCE_DIR}/logic/include"
 )

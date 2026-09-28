@@ -101,6 +101,9 @@ jobs:
           timeout 120 "$EXE" --render-ui renders/ui || echo "--render-ui exit $?"
           timeout 120 "$EXE" --render "format/tests/fixtures/Lab5.cdl" renders/Lab5.png 1200 800 \
             || echo "--render exit $?"
+          # The real main window, native parts included (see --render-windows).
+          timeout 180 "$EXE" --render-windows renders/windows "format/tests/fixtures/Lab5.cdl" \
+            || echo "--render-windows exit $?"
           cp smoke.png renders/
           ls -R renders
 

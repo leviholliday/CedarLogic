@@ -636,3 +636,48 @@ TEST_CASE("UpdateInfo reads the appcast, [UpdateInfo]") {
         CHECK(v.parts[2] == 1);
     }
 }
+
+// The Linux updater picks its download from the feed by platform and CPU, and
+// checks it against the SHA-256 the feed carries.
+TEST_CASE("UpdateInfo picks the Linux item for this CPU, [UpdateInfo]") {
+    using cl::update::appcastLatestItem;
+    using cl::update::FeedItem;
+
+    const std::string feed =
+        "<rss><channel>"
+        "<item><sparkle:version>4.0.2</sparkle:version>"
+        "<sparkle:shortVersionString>4.0.2 beta</sparkle:shortVersionString>"
+        "<enclosure url=\"https://example/a-x86_64.AppImage\" length=\"123\"\n"
+        "  sparkle:os=\"linux\" cedarlogic:arch=\"x86_64\" cedarlogic:sha256=\"abc\"/></item>"
+        "<item><sparkle:version>4.0.3</sparkle:version>"
+        "<enclosure url=\"https://example/a-aarch64.AppImage\" length=\"9\""
+        " sparkle:os=\"linux\" cedarlogic:arch=\"aarch64\" cedarlogic:sha256=\"def\"/></item>"
+        "<item><sparkle:version>9.0.0</sparkle:version>"
+        "<enclosure url=\"https://example/a.dmg\" sparkle:os=\"macos\"/></item>"
+        "</channel></rss>";
+
+    FeedItem it;
+    REQUIRE(appcastLatestItem(feed, "linux", "x86_64", it));
+    REQUIRE(it.url == "https://example/a-x86_64.AppImage");
+    REQUIRE(it.sha256 == "abc");
+    REQUIRE(it.length == 123);
+    REQUIRE(it.shortVersion == "4.0.2 beta");
+    REQUIRE(it.version.parts[2] == 2);
+
+    REQUIRE(appcastLatestItem(feed, "linux", "aarch64", it));
+    REQUIRE(it.url == "https://example/a-aarch64.AppImage");
+
+    REQUIRE_FALSE(appcastLatestItem(feed, "linux", "riscv64", it));
+    REQUIRE_FALSE(appcastLatestItem(feed, "windows", "", it));
+}
+
+TEST_CASE("UpdateInfo SHA-256, [UpdateInfo]") {
+    using cl::update::sha256Hex;
+    REQUIRE(sha256Hex("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    REQUIRE(sha256Hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    // Crosses a block boundary.
+    REQUIRE(sha256Hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") ==
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+    REQUIRE(sha256Hex(std::string(1000, 'a')) ==
+            "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3");
+}
