@@ -12,6 +12,29 @@ namespace {
 
 GMenu* gRecentMenu = nullptr;
 bool gLibraryLoaded = false;
+// --screenshot <out.png>: once the window is up, draw it to a PNG and quit
+// (a check that a build really starts, drawing and all; used by CI).
+std::string gScreenshot;
+int gExitCode = 0;
+
+gboolean screenshotCb(gpointer app) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	gExitCode = 1;
+	if (w) {
+		GtkWidget* top = GTK_WIDGET(w->window());
+		const int width = gtk_widget_get_allocated_width(top), height = gtk_widget_get_allocated_height(top);
+		cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, std::max(1, width), std::max(1, height));
+		cairo_t* cr = cairo_create(s);
+		gtk_widget_draw(top, cr);
+		cairo_destroy(cr);
+		if (cairo_surface_write_to_png(s, gScreenshot.c_str()) == CAIRO_STATUS_SUCCESS) gExitCode = 0;
+		cairo_surface_destroy(s);
+		fprintf(stderr, "%s %s (%dx%d)\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str(), width, height);
+	}
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
+	g_application_quit(G_APPLICATION(app));
+	return G_SOURCE_REMOVE;
+}
 
 std::string samplesDir() { return resourcesDir() + "/samples"; }
 
@@ -250,12 +273,13 @@ bool libraryOrComplain() {
 }
 
 void activateCb(GApplication* gapp, gpointer) {
-	if (!libraryOrComplain()) { g_application_quit(gapp); return; }
+	if (!libraryOrComplain()) { gExitCode = 1; g_application_quit(gapp); return; }
 	newCircuitWindow(GTK_APPLICATION(gapp));
+	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
 }
 
 void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpointer) {
-	if (!libraryOrComplain()) { g_application_quit(gapp); return; }
+	if (!libraryOrComplain()) { gExitCode = 1; g_application_quit(gapp); return; }
 	bool any = false;
 	for (gint i = 0; i < n; i++) {
 		gchar* path = g_file_get_path(files[i]);
@@ -264,6 +288,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		g_free(path);
 	}
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
+	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
 }
 
 }  // namespace
@@ -370,6 +395,16 @@ void rebuildRecentMenus() {
 }
 
 int main(int argc, char** argv) {
+	// Our own options, taken out before GTK sees the rest (files to open).
+	std::vector<char*> args;
+	for (int i = 0; i < argc; i++) {
+		if (strcmp(argv[i], "--version") == 0) { printf("CedarLogic %s (native Linux)\n", CL_VERSION); return 0; }
+		if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) { gScreenshot = argv[++i]; continue; }
+		args.push_back(argv[i]);
+	}
+	args.push_back(nullptr);
+	argc = (int)args.size() - 1;
+	argv = args.data();
 	// The window class and the name the desktop shows.
 	g_set_prgname("CedarLogic");
 	g_set_application_name("CedarLogic");
@@ -382,5 +417,5 @@ int main(int argc, char** argv) {
 	const int status = g_application_run(G_APPLICATION(app), argc, argv);
 	prefs().save();
 	g_object_unref(app);
-	return status;
+	return status ? status : gExitCode;
 }

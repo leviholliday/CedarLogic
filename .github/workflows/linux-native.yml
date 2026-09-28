@@ -1,0 +1,162 @@
+name: Linux native build
+
+# The native Linux app (linux/): GTK 3 and Cairo on the shared engine, no
+# OpenGL. Builds it for both CPUs, runs the engine's headless checks, packages
+# an AppImage, starts it on a virtual display, and publishes the pair as a
+# rolling test build on pushes to linux/native.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'linux/native'
+      - 'linux/native-**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      # One CPU failing says nothing about the other.
+      fail-fast: false
+      matrix:
+        include:
+          # PCs and laptops (Intel/AMD).
+          - { arch: x86_64,  os: ubuntu-22.04 }
+          # Raspberry Pi 4/5 on a 64-bit OS, ARM laptops. Built natively on
+          # GitHub's arm64 runners, not cross-compiled.
+          - { arch: aarch64, os: ubuntu-22.04-arm }
+    # The oldest runners, as glibc and GTK only work forwards: an AppImage built
+    # here starts on Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm),
+    # Fedora 36 and anything newer.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev \
+            xvfb xauth fonts-dejavu-core fonts-liberation
+
+      - name: Build
+        run: |
+          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build linux/build
+
+      # The engine through the C interface the app uses: editing, wires,
+      # simulation, truth tables, and saving without changing a circuit.
+      # (jmSGTZM is left out of save_check: it reopens identical, but two
+      # overlapping dots on one wire draw in the standard library's hash
+      # order, a one-shade difference in one pixel.)
+      - name: Engine checks
+        run: |
+          L=res/cl_gatedefs.xml
+          B=linux/build
+          $B/cl_check $L
+          $B/edit_check $L res/samples/practice.cdl 0
+          $B/tt_check $L res/samples/practice.cdl 0
+          $B/sim_check $L format/tests/fixtures/lab6.cdl 0 before.png after.png
+          $B/save_check $L format/tests/fixtures/Broadcast.cdl format/tests/fixtures/Lab5.cdl \
+            "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
+
+      - name: Package AppImage
+        run: |
+          curl -fsSL -o linuxdeploy \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
+          chmod +x linuxdeploy
+          OUT=$(LINUXDEPLOY="$PWD/linuxdeploy" linux/package.sh linux/build-release | tail -1)
+          echo "APPIMAGE=$OUT" >> "$GITHUB_ENV"
+          ls -la "$OUT"
+
+      # Start the packaged app on a virtual display, open a circuit and take a
+      # picture of the whole window: catches anything the AppImage forgot.
+      - name: Smoke test the AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          mkdir -p renders
+          "$APPIMAGE" --version
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --screenshot renders/window-Lab5.png format/tests/fixtures/Lab5.cdl
+          test -s renders/window-Lab5.png
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --screenshot renders/window-new.png
+          test -s renders/window-new.png
+          linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
+          cp before.png after.png renders/
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Native-linux-appimage-${{ matrix.arch }}
+          path: linux/build-release/CedarLogic-Native-*-${{ matrix.arch }}.AppImage
+          if-no-files-found: error
+
+      - name: Upload renders
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
+          path: renders
+          if-no-files-found: warn
+
+  # A public download for testers without a GitHub account: one rolling
+  # pre-release, replaced on every push to linux/native. Its own job, after
+  # both builds, so the release only ever holds a matching pair.
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/linux/native'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download both AppImages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: CedarLogic-Native-linux-appimage-*
+          path: appimages
+          merge-multiple: true
+
+      - name: Publish the test build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la appimages
+          TAG=linux-native-testing
+          NOTES=$(cat <<EOT
+          Native Linux test build from linux/native (${GITHUB_SHA::7}). Not a release: expect missing pieces.
+
+          This is CedarLogic rebuilt natively for Linux, the way the Mac app was: GTK and Cairo on the same engine as every other CedarLogic, with no OpenGL at all, so it draws the same on a Raspberry Pi as on a PC.
+
+          Pick the file for your computer:
+          - x86_64: ordinary PCs and laptops (Intel/AMD)
+          - aarch64: Raspberry Pi 4/5 on 64-bit Raspberry Pi OS, ARM laptops (check with uname -m)
+
+          Make it executable (chmod +x, or Properties > Allow executing) and run it. Needs Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm), Fedora 36 or newer. If it won't open, install FUSE once: sudo apt install libfuse2 (or run it with --appimage-extract-and-run).
+          EOT
+          )
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
+          else
+            gh release create "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" appimages/*.AppImage --clobber
+          # Drop anything this run didn't make (older versions), so only the
+          # current pair is offered.
+          keep=$(cd appimages && ls *.AppImage)
+          for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
+            echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
+          done
