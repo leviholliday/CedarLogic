@@ -755,7 +755,7 @@ void ScopeWindow::zoomOutCb(GtkButton*, gpointer self) {
 }
 
 gboolean ScopeWindow::drawCb(GtkWidget*, cairo_t* cr, gpointer self) {
-	static_cast<ScopeWindow*>(self)->draw(cr);
+	guarded("drawing the oscilloscope", [&] { static_cast<ScopeWindow*>(self)->draw(cr); });
 	return TRUE;
 }
 

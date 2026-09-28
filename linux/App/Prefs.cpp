@@ -331,6 +331,17 @@ bool askYesNo(GtkWindow* parent, const std::string& title, const std::string& te
 	return r == GTK_RESPONSE_YES;
 }
 
+void reportException(const char* where, const char* what) {
+	g_critical("CedarLogic: %s failed: %s", where, what);
+	// Tell the user once a minute at most, in every window's status bar.
+	static gint64 lastTold = 0;
+	const gint64 now = g_get_monotonic_time();
+	if (lastTold && now - lastTold < 60 * G_USEC_PER_SEC) return;
+	lastTold = now;
+	for (CircuitWindow* w : circuitWindows())
+		w->note(format("Something went wrong (%s). CedarLogic kept going; saving a copy is a good idea.", where));
+}
+
 void openExternally(GtkWindow* parent, const std::string& uri) {
 	GError* e = nullptr;
 	if (!gtk_show_uri_on_window(parent, uri.c_str(), GDK_CURRENT_TIME, &e)) {

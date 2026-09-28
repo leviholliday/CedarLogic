@@ -10,6 +10,7 @@
 
 #include "CedarCore.h"
 #include <gtk/gtk.h>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -101,5 +102,22 @@ void rebuildRecentMenus();
 
 // Open a URL or a file in the desktop's default app.
 void openExternally(GtkWindow* parent, const std::string& uri);
+
+// ---- Staying up ------------------------------------------------------------------
+// Every place GTK calls into the app runs through guarded(): if the engine
+// throws, the app says so and carries on (with autosave, nothing is lost),
+// where an exception left to reach GTK would end the process.
+void reportException(const char* where, const char* what);
+template <class F>
+auto guarded(const char* where, F&& f) -> decltype(f()) {
+	try {
+		return f();
+	} catch (const std::exception& e) {
+		reportException(where, e.what());
+	} catch (...) {
+		reportException(where, "an unknown error");
+	}
+	return decltype(f())();
+}
 
 #endif  // CL_LINUX_APP_H

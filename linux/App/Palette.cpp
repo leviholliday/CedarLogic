@@ -152,14 +152,16 @@ void GatePalette::activatedCb(GtkFlowBox*, GtkFlowBoxChild* child, gpointer self
 	GatePalette* p = static_cast<GatePalette*>(self);
 	GtkWidget* box = gtk_bin_get_child(GTK_BIN(child));
 	std::string* name = box ? static_cast<std::string*>(g_object_get_data(G_OBJECT(box), "gate")) : nullptr;
-	if (name) p->win->addGateOnNextMove(*name);
+	if (name) guarded("choosing a gate", [&] { p->win->addGateOnNextMove(*name); });
 }
 
 gboolean GatePalette::drawTileCb(GtkWidget* w, cairo_t* cr, gpointer data) {
 	const std::string* name = static_cast<const std::string*>(data);
 	const double scale = std::max(1, gtk_widget_get_scale_factor(w));
-	cl_library_draw_gate(name->c_str(), cr, gtk_widget_get_allocated_width(w),
-	                     gtk_widget_get_allocated_height(w), scale, prefs().dark);
+	guarded("drawing the palette", [&] {
+		cl_library_draw_gate(name->c_str(), cr, gtk_widget_get_allocated_width(w),
+		                     gtk_widget_get_allocated_height(w), scale, prefs().dark);
+	});
 	return FALSE;
 }
 

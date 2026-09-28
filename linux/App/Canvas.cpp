@@ -114,7 +114,7 @@ bool Canvas::pointerWorld(double& wx, double& wy) const {
 // ---- Drawing -------------------------------------------------------------------
 
 gboolean Canvas::drawCb(GtkWidget*, cairo_t* cr, gpointer self) {
-	static_cast<Canvas*>(self)->draw(cr);
+	guarded("drawing", [&] { static_cast<Canvas*>(self)->draw(cr); });
 	return TRUE;
 }
 
@@ -379,12 +379,24 @@ void Canvas::onSizeChanged(int oldW, int oldH, int w, int h) {
 
 // ---- Pointer -------------------------------------------------------------------
 
-gboolean Canvas::pressCb(GtkWidget*, GdkEventButton* e, gpointer self) { return static_cast<Canvas*>(self)->onPress(e); }
-gboolean Canvas::releaseCb(GtkWidget*, GdkEventButton* e, gpointer self) { return static_cast<Canvas*>(self)->onRelease(e); }
-gboolean Canvas::motionCb(GtkWidget*, GdkEventMotion* e, gpointer self) { return static_cast<Canvas*>(self)->onMotion(e); }
-gboolean Canvas::scrollCb(GtkWidget*, GdkEventScroll* e, gpointer self) { return static_cast<Canvas*>(self)->onScroll(e); }
-gboolean Canvas::keyPressCb(GtkWidget*, GdkEventKey* e, gpointer self) { return static_cast<Canvas*>(self)->onKeyPress(e); }
-gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) { return static_cast<Canvas*>(self)->onKeyRelease(e); }
+gboolean Canvas::pressCb(GtkWidget*, GdkEventButton* e, gpointer self) {
+	return guarded("a click", [&] { return static_cast<Canvas*>(self)->onPress(e); });
+}
+gboolean Canvas::releaseCb(GtkWidget*, GdkEventButton* e, gpointer self) {
+	return guarded("a click", [&] { return static_cast<Canvas*>(self)->onRelease(e); });
+}
+gboolean Canvas::motionCb(GtkWidget*, GdkEventMotion* e, gpointer self) {
+	return guarded("moving the pointer", [&] { return static_cast<Canvas*>(self)->onMotion(e); });
+}
+gboolean Canvas::scrollCb(GtkWidget*, GdkEventScroll* e, gpointer self) {
+	return guarded("scrolling", [&] { return static_cast<Canvas*>(self)->onScroll(e); });
+}
+gboolean Canvas::keyPressCb(GtkWidget*, GdkEventKey* e, gpointer self) {
+	return guarded("a key", [&] { return static_cast<Canvas*>(self)->onKeyPress(e); });
+}
+gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
+	return guarded("a key", [&] { return static_cast<Canvas*>(self)->onKeyRelease(e); });
+}
 
 gboolean Canvas::crossingCb(GtkWidget*, GdkEventCrossing* e, gpointer self) {
 	static_cast<Canvas*>(self)->pointerInside = e->type == GDK_ENTER_NOTIFY;
@@ -394,7 +406,7 @@ gboolean Canvas::crossingCb(GtkWidget*, GdkEventCrossing* e, gpointer self) {
 gboolean Canvas::grabBrokenCb(GtkWidget*, GdkEventGrabBroken*, gpointer self) {
 	// Something took the pointer mid-drag (a menu, another window): finish
 	// the gesture where it is, so nothing is left half-done.
-	static_cast<Canvas*>(self)->cancelDrag();
+	guarded("a drag", [&] { static_cast<Canvas*>(self)->cancelDrag(); });
 	return FALSE;
 }
 
@@ -406,7 +418,7 @@ gboolean Canvas::focusOutCb(GtkWidget*, GdkEventFocus*, gpointer self) {
 
 gboolean Canvas::eventCb(GtkWidget*, GdkEvent* e, gpointer self) {
 	if (e->type == GDK_TOUCHPAD_PINCH) {
-		static_cast<Canvas*>(self)->onPinch(&e->touchpad_pinch);
+		guarded("a pinch", [&] { static_cast<Canvas*>(self)->onPinch(&e->touchpad_pinch); });
 		return TRUE;
 	}
 	return FALSE;
@@ -752,7 +764,7 @@ void Canvas::dragReceivedCb(GtkWidget*, GdkDragContext* ctx, gint x, gint y, Gtk
 	const guchar* raw = gtk_selection_data_get_data(data);
 	const gint len = gtk_selection_data_get_length(data);
 	bool ok = false;
-	if (raw && len > 0 && c->win->canEdit()) {
+	if (raw && len > 0 && c->win->canEdit()) guarded("dropping a gate", [&] {
 		const std::string name((const char*)raw, (size_t)len);
 		double wx, wy;
 		c->worldPoint(x, y, wx, wy);
@@ -762,6 +774,6 @@ void Canvas::dragReceivedCb(GtkWidget*, GdkDragContext* ctx, gint x, gint y, Gtk
 			c->win->edited();
 			gtk_widget_grab_focus(c->area);
 		}
-	}
+	});
 	gtk_drag_finish(ctx, ok, FALSE, time);
 }

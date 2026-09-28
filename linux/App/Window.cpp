@@ -4,6 +4,7 @@
 #include "Canvas.h"
 #include "Dialogs.h"
 #include "Palette.h"
+#include "Recovery.h"
 
 #include <cairo-pdf.h>
 #include <cairo-svg.h>
@@ -91,7 +92,7 @@ struct Binding {
 
 void runCommandCb(GSimpleAction*, GVariant*, gpointer data) {
 	Binding* b = static_cast<Binding*>(data);
-	b->command->run(b->window);
+	guarded(b->command->name, [&] { b->command->run(b->window); });
 }
 
 GSimpleAction* findAction(GtkWidget* win, const char* name) {
@@ -124,6 +125,7 @@ CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const s
 	syncTabs();
 	appearStart = g_get_monotonic_time();
 	lastTick = g_get_monotonic_time();
+	lastRecovery = lastTick;
 	timer = g_timeout_add(16, tickCb, this);
 	updateTitle();
 	updateActions();
@@ -146,6 +148,8 @@ CircuitWindow::~CircuitWindow() {
 	delete palette;
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
+	// Closed on purpose (saved, or the changes let go): no copy to offer back.
+	recovery::remove(recoveryBase);
 	if (doc) cl_document_close(doc);
 }
 
@@ -315,9 +319,9 @@ static gboolean tabPressCb(GtkWidget*, GdkEventButton* e, gpointer data) {
 	CircuitWindow* w = windowOf(c);
 	const int p = c->page();
 	if (w == nullptr || p < 0) return FALSE;
-	if (e->type == GDK_2BUTTON_PRESS && e->button == 1) { w->renamePage(p); return TRUE; }
+	if (e->type == GDK_2BUTTON_PRESS && e->button == 1) { guarded("renaming a tab", [&] { w->renamePage(p); }); return TRUE; }
 	// A middle click closes the tab, as in browsers.
-	if (e->type == GDK_BUTTON_PRESS && e->button == 2) { w->closePage(p); return TRUE; }
+	if (e->type == GDK_BUTTON_PRESS && e->button == 2) { guarded("closing a tab", [&] { w->closePage(p); }); return TRUE; }
 	return FALSE;
 }
 
@@ -325,7 +329,7 @@ static void tabCloseCb(GtkButton*, gpointer data) {
 	Canvas* c = static_cast<Canvas*>(data);
 	CircuitWindow* w = windowOf(c);
 	const int p = c->page();
-	if (w && p >= 0) w->closePage(p);
+	if (w && p >= 0) guarded("closing a tab", [&] { w->closePage(p); });
 }
 
 GtkWidget* CircuitWindow::tabLabel(Canvas* c) {
@@ -446,6 +450,7 @@ void CircuitWindow::reorderCb(GtkNotebook*, GtkWidget* child, guint to, gpointer
 	if (moved == nullptr) return;
 	const int from = moved->page();
 	if (from < 0 || from == (int)to) return;
+	guarded("moving a tab", [&] {
 	// A tab without a name of its own is called by its place ("Page 2"): pin
 	// those names first, so moving a tab doesn't rename the others.
 	for (int i = 0; i < cl_document_page_count(w->doc); i++) {
@@ -453,14 +458,16 @@ void CircuitWindow::reorderCb(GtkNotebook*, GtkWidget* child, guint to, gpointer
 		if (n == nullptr || *n == 0) cl_document_rename_page(w->doc, i, w->pageName(i).c_str());
 	}
 	cl_document_move_page(w->doc, from, (int)to);
+	w->changes++;
 	w->syncTabs();
 	w->updateTitle();
+	});
 }
 
 // ---- The clock -------------------------------------------------------------------
 
 gboolean CircuitWindow::tickCb(gpointer self) {
-	static_cast<CircuitWindow*>(self)->tick();
+	guarded("the simulation", [&] { static_cast<CircuitWindow*>(self)->tick(); });
 	return G_SOURCE_CONTINUE;
 }
 
@@ -498,6 +505,8 @@ void CircuitWindow::tick() {
 	}
 	if (statusDirty && (t - lastStatus) > 100000) { statusDirty = false; lastStatus = t; updateStatus(); }
 	if ((t - lastTitle) > 500000) { lastTitle = t; updateTitle(); }
+	// A recovery copy of unsaved work, at most every 20 seconds.
+	if (changes != changesAtRecovery && (t - lastRecovery) > 20 * G_USEC_PER_SEC) writeRecovery();
 	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; gtk_label_set_text(GTK_LABEL(statusMessage), ""); }
 }
 
@@ -550,6 +559,7 @@ void CircuitWindow::selectionChanged() {
 }
 
 void CircuitWindow::edited() {
+	changes++;
 	if (cl_document_page_count(doc) != lastPageCount) syncTabs();
 	redraw();
 	selectionChanged();
@@ -571,7 +581,29 @@ void CircuitWindow::lockNudge() {
 	gtk_widget_error_bell(win);
 }
 
-std::string CircuitWindow::displayName() const { return path.empty() ? "Untitled" : baseName(path); }
+std::string CircuitWindow::displayName() const {
+	if (!path.empty()) return baseName(path);
+	return recoveredName.empty() ? "Untitled" : recoveredName;
+}
+
+void CircuitWindow::markRecovered(const std::string& name) {
+	recoveredName = name;
+	forceDirty = true;
+	changes++;
+	updateTitle();
+	note("Brought back from the copy kept when CedarLogic closed. Save it to keep it.");
+}
+
+void CircuitWindow::writeRecovery() {
+	lastRecovery = g_get_monotonic_time();
+	changesAtRecovery = changes;
+	if (!isDirty()) { recovery::remove(recoveryBase); return; }
+	// Writing the text marks the engine's copy saved; it isn't, so say so.
+	const std::string text = cl_document_save_text(doc);
+	forceDirty = true;
+	if (recoveryBase.empty()) recoveryBase = recovery::newBase();
+	recovery::write(recoveryBase, text, path, displayName());
+}
 
 bool CircuitWindow::isDirty() const { return forceDirty || cl_document_is_edited(doc); }
 
@@ -760,6 +792,9 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	doc = newDoc;
 	path = newPath;
 	forceDirty = false;
+	recovery::remove(recoveryBase);
+	recoveredName.clear();
+	changesAtRecovery = changes;
 	pendingGate.clear();
 	selectionSignature.clear();
 	seenPages.clear();
@@ -789,6 +824,10 @@ bool CircuitWindow::writeTo(const std::string& file) {
 	}
 	forceDirty = false;
 	path = file;
+	recoveredName.clear();
+	// Saved: the recovery copy isn't needed until the next change.
+	recovery::remove(recoveryBase);
+	changesAtRecovery = changes;
 	prefs().noteRecent(file);
 	updateTitle();
 	note("Saved.");
@@ -1036,7 +1075,7 @@ void CircuitWindow::clipboardCb(GtkClipboard*, const gchar* text, gpointer data)
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	if (std::find(all.begin(), all.end(), req->window) == all.end()) return;   // closed meanwhile
 	if (text == nullptr) { req->window->note("Nothing to paste."); return; }
-	req->window->pasteText(text, true, req->shift);
+	guarded("pasting", [&] { req->window->pasteText(text, true, req->shift); });
 }
 
 void CircuitWindow::paste() {
@@ -1155,8 +1194,10 @@ static void disconnectCb(GtkMenuItem*, gpointer data) {
 	if (std::find(all.begin(), all.end(), mp->w) == all.end()) return;
 	Canvas* c = mp->w->currentCanvas();
 	if (c == nullptr) return;
-	cl_edit_disconnect_pin(mp->w->document(), mp->w->currentPage(), mp->x, mp->y, c->unitsPerPoint());
-	mp->w->edited();
+	guarded("disconnecting", [&] {
+		cl_edit_disconnect_pin(mp->w->document(), mp->w->currentPage(), mp->x, mp->y, c->unitsPerPoint());
+		mp->w->edited();
+	});
 }
 
 void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventButton* e) {
@@ -1306,6 +1347,7 @@ void CircuitWindow::renamePage(int page) {
 	if (!askText(GTK_WINDOW(win), "Rename Tab", "The tab's name:", name)) return;
 	if (name.empty()) return;
 	cl_document_rename_page(doc, page, name.c_str());
+	changes++;
 	updateTabLabels();
 	updateTitle();
 }

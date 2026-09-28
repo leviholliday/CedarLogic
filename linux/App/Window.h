@@ -31,6 +31,8 @@ public:
 
 	// Replace the circuit shown (open over an untouched new one).
 	void replaceDocument(CLDocument* newDoc, const std::string& newPath);
+	// A circuit brought back from a recovery copy: unsaved, under its name.
+	void markRecovered(const std::string& name);
 
 	// ---- For the canvas ----
 	Canvas* currentCanvas() const;
@@ -126,7 +128,14 @@ private:
 	GtkApplication* app;
 	CLDocument* doc;
 	std::string path;
-	bool forceDirty = false;          // a save to disk failed after the engine thought it was saved
+	bool forceDirty = false;          // unsaved, though the engine's copy says otherwise (a failed save, a recovery copy)
+	// The recovery copy (Recovery.cpp): written now and then while there are
+	// unsaved changes, removed on a clean close.
+	std::string recoveryBase;
+	std::string recoveredName;
+	unsigned changes = 0, changesAtRecovery = 0;
+	gint64 lastRecovery = 0;
+	void writeRecovery();
 
 	GtkWidget* notebook = nullptr;
 	GtkWidget* paned = nullptr;

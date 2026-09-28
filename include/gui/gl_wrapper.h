@@ -4,7 +4,25 @@
 #ifndef GLWRAPPER_H
 #define GLWRAPPER_H
 
-#ifdef __APPLE__
+#if defined(CL_NO_WX) && defined(__linux__)
+// The native Linux app (linux/) never draws with OpenGL: the shared model
+// only needs its type names, so it doesn't need OpenGL's headers to build.
+typedef unsigned int GLenum;
+typedef unsigned char GLboolean;
+typedef unsigned int GLbitfield;
+typedef void GLvoid;
+typedef signed char GLbyte;
+typedef short GLshort;
+typedef int GLint;
+typedef unsigned char GLubyte;
+typedef unsigned short GLushort;
+typedef unsigned int GLuint;
+typedef int GLsizei;
+typedef float GLfloat;
+typedef float GLclampf;
+typedef double GLdouble;
+typedef double GLclampd;
+#elif defined(__APPLE__)
 #include <OpenGL/gl.h>
 #include <OpenGL/glu.h>
 #else

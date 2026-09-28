@@ -3,6 +3,7 @@
 
 #include "App.h"
 #include "Canvas.h"
+#include "Recovery.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -272,10 +273,19 @@ bool libraryOrComplain() {
 	return false;
 }
 
+// Once the first window is up, offer back work a CedarLogic that stopped
+// unexpectedly left behind.
+gboolean offerRecoveryCb(gpointer app) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().front();
+	guarded("recovering work", [&] { recovery::offer(GTK_APPLICATION(app), w); });
+	return G_SOURCE_REMOVE;
+}
+
 void activateCb(GApplication* gapp, gpointer) {
 	if (!libraryOrComplain()) { gExitCode = 1; g_application_quit(gapp); return; }
 	newCircuitWindow(GTK_APPLICATION(gapp));
 	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
+	else g_idle_add(offerRecoveryCb, gapp);
 }
 
 void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpointer) {
@@ -289,6 +299,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 	}
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
 	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
+	else g_idle_add(offerRecoveryCb, gapp);
 }
 
 }  // namespace
