@@ -108,7 +108,7 @@ struct CLDocument {
 
 // Draw a page's wires and gates in a style (Document.cpp). The camera is
 // cl_document_draw's.
-extern "C" void clDrawPage(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+extern "C" void clDrawPage(CLDocument* doc, int page, CLContext ctx, double backingScale,
                            double originX, double originY, double unitsPerPoint,
                            const cl::render::RenderStyle& style);
 

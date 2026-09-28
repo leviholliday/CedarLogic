@@ -3,7 +3,8 @@
 // wires and a rendering against the original.
 //   save_check <cl_gatedefs.xml> <file.cdl>...
 #include "DocumentImpl.h"
-#include <CoreGraphics/CoreGraphics.h>
+#include "Bitmap.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -11,16 +12,13 @@
 
 static std::vector<unsigned char> pixels(CLDocument* doc, int page) {
 	const int W = 600, H = 400;
-	std::vector<unsigned char> buf((size_t)W * H * 4, 0);
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return buf;
-	CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-	CGContextRef ctx = CGBitmapContextCreate(buf.data(), W, H, 8, W * 4, cs, kCGImageAlphaPremultipliedLast);
-	CGContextTranslateCTM(ctx, 0, H); CGContextScaleCTM(ctx, 1, -1);
+	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return std::vector<unsigned char>((size_t)W * H * 4, 0);
+	Bitmap bitmap(W, H, false);
+	bitmap.flip(1);
 	const double upp = std::max((r - l + 4) / W, (t - b + 4) / H);
-	cl_document_draw(doc, page, ctx, 1, (l + r) / 2 - W * upp / 2, (b + t) / 2 + H * upp / 2, upp, false);
-	CGContextRelease(ctx); CGColorSpaceRelease(cs);
-	return buf;
+	cl_document_draw(doc, page, bitmap.ctx(), 1, (l + r) / 2 - W * upp / 2, (b + t) / 2 + H * upp / 2, upp, false);
+	return bitmap.pixels();
 }
 
 int main(int argc, char** argv) {

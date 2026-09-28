@@ -7,7 +7,7 @@
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
-#include <CoreGraphics/CoreGraphics.h>
+#include "Bitmap.h"
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -112,19 +112,17 @@ int main(int argc, char** argv) {
 	CHECK(n == 3 && chips[0].isInput && chips[1].isInput && !chips[2].isInput, "inputs first");
 	CHECK(n == 3 && chips[0].lit && chips[1].lit && chips[2].lit, "all lit");
 	{
-		CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-		CGContextRef ctx = CGBitmapContextCreate(nullptr, 400, 300, 8, 0, cs, kCGImageAlphaPremultipliedLast);
+		Bitmap bitmap(400, 300, false);
+		CLContext ctx = bitmap.ctx();
 		CLDrawOptions o = { true, 3, 1.0, true, false, false, 1.0 };
 		cl_document_draw_ex(doc, 0, ctx, 2, -5, 12, 0.1, &o);
 		cl_simview_draw_flow(doc, 0, ctx, 2, -5, 12, 0.1, 7.0, 1.0);
 		o.simView = false; o.thumbnail = true;
 		cl_document_draw_ex(doc, 0, ctx, 2, -5, 12, 0.1, &o);
-		const unsigned char* px = (const unsigned char*)CGBitmapContextGetData(ctx);
+		const std::vector<unsigned char> px = bitmap.pixels();
 		int inked = 0;
 		for (int i = 0; i < 400 * 300; i++) if (px[i * 4 + 3] != 0) inked++;
 		CHECK(inked > 200, "styled, flow and thumbnail drawing put ink down");
-		CGContextRelease(ctx);
-		CGColorSpaceRelease(cs);
 	}
 
 	printf("connect nearby (C)\n");

@@ -3,7 +3,7 @@
 // model per page, with a LogicHost running its simulation.
 
 #include "DocumentImpl.h"
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "CircuitParse.h"
 #include "GUICanvas.h"
 #include "GUICircuit.h"
@@ -190,20 +190,19 @@ bool cl_document_page_bounds(const CLDocument* doc, int page,
 	return true;
 }
 
-void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
+void clDrawPage(CLDocument* doc, int page, CLContext ctx,
                double backingScale, double originX, double originY,
                double unitsPerPoint, const cl::render::RenderStyle& style) {
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
 	if (p == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	// Work in physical pixels, as the wx app's device space does, so stroke
 	// widths (device pixels) match it exactly.
-	CGContextSaveGState(ctx);
-	CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	cl::native::DevicePixels device(ctx, backingScale);
 	const float scale = (float)(backingScale / unitsPerPoint);
 	cl::render::Transform t;
 	t.a = scale; t.b = 0; t.c = 0; t.d = -scale;
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(t);
 	// In id order: the page's lists are hash maps, whose order depends on how
 	// they were built, and where things overlap the order shows.
@@ -218,17 +217,16 @@ void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
 	for (auto& g : *p->getGateList()) if (g.second) ids.push_back(g.first);
 	std::sort(ids.begin(), ids.end());
 	for (unsigned long id : ids) (*p->getGateList())[id]->drawToScene(scene, style);
-	CGContextRestoreGState(ctx);
 }
 
-void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
+void cl_document_draw(CLDocument* doc, int page, CLContext ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark) {
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint,
 	           cl::render::RenderStyle::screen(dark));
 }
 
-bool cl_document_draw_fitted(CLDocument* doc, int page, CGContextRef ctx,
+bool cl_document_draw_fitted(CLDocument* doc, int page, CLContext ctx,
                              double width, double height, double margin,
                              double backingScale, int style) {
 	double l, b, r, t;

@@ -3,7 +3,7 @@
 // type drawn into a tile, the way gateImage renders the wx palette's tiles.
 
 #include "CedarCore.h"
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "GUICircuit.h"
 #include "GateLibrary.h"
 #include "guiGate.h"
@@ -74,7 +74,7 @@ const char* cl_library_gate_caption(const char* name) {
 	return scratchText.c_str();
 }
 
-void cl_library_draw_gate(const char* name, CGContextRef ctx, double width, double height,
+void cl_library_draw_gate(const char* name, CLContext ctx, double width, double height,
                           double backingScale, bool dark) {
 	if (name == nullptr || ctx == nullptr || width <= 0 || height <= 0) return;
 	guiGate* g = sample(name);
@@ -86,17 +86,15 @@ void cl_library_draw_gate(const char* name, CGContextRef ctx, double width, doub
 	const double w = box.getRight() - box.getLeft() + 2 * pad, h = box.getTop() - box.getBottom() + 2 * pad;
 	const double scalePts = std::min(width / w, height / h);
 	const double cx = (box.getLeft() + box.getRight()) / 2, cy = (box.getBottom() + box.getTop()) / 2;
-	CGContextSaveGState(ctx);
-	CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	cl::native::DevicePixels device(ctx, backingScale);
 	const float s = (float)(scalePts * backingScale);
 	cl::render::Transform t;
 	t.a = s; t.d = -s;
 	t.e = (float)(width * backingScale / 2 - cx * s);
 	t.f = (float)(height * backingScale / 2 + cy * s);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(t);
 	g->drawToScene(scene, cl::render::RenderStyle::thumbnail(dark));
-	CGContextRestoreGState(ctx);
 }
 
 }  // extern "C"

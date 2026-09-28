@@ -1,4 +1,4 @@
-// CedarCore -- what the native Mac app asks of the shared C++ engine.
+// CedarCore -- what the native Mac and Linux apps ask of the shared C++ engine.
 //
 // A plain C interface on purpose: Swift imports it directly, with no C++
 // interop settings, and nothing of the engine's C++ types leaks into Swift.
@@ -7,8 +7,17 @@
 #ifndef CEDARCORE_H
 #define CEDARCORE_H
 
-#include <CoreGraphics/CoreGraphics.h>
 #include <stdbool.h>
+
+// What the drawing calls draw into: a Core Graphics context on the Mac, a
+// Cairo one on Linux. Either way its units are points, y down.
+#if defined(__APPLE__)
+#include <CoreGraphics/CoreGraphics.h>
+typedef CGContextRef CLContext;
+#else
+#include <cairo.h>
+typedef cairo_t *CLContext;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,7 +69,7 @@ bool cl_document_page_bounds(const CLDocument *doc, int page,
 // Draw a page's gates and wires. `ctx` is in view points, y down (a flipped
 // NSView); `backingScale` is points to pixels (2 on Retina). The camera: the
 // world point at the view's top-left corner, and world units per point.
-void cl_document_draw(CLDocument *doc, int page, CGContextRef ctx,
+void cl_document_draw(CLDocument *doc, int page, CLContext ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark);
 
@@ -68,7 +77,7 @@ void cl_document_draw(CLDocument *doc, int page, CGContextRef ctx,
 // margin, centered -- for export and printing. PRINT is black line drawings
 // on white. False for an empty page.
 enum { CL_STYLE_LIGHT = 0, CL_STYLE_DARK = 1, CL_STYLE_PRINT = 2 };
-bool cl_document_draw_fitted(CLDocument *doc, int page, CGContextRef ctx,
+bool cl_document_draw_fitted(CLDocument *doc, int page, CLContext ctx,
                              double width, double height, double margin,
                              double backingScale, int style);
 
@@ -182,7 +191,7 @@ int cl_edit_tidy_mode(const CLDocument *doc);
 // Draw what goes over the circuit: the Tidy ghost, a connection being made,
 // and the pin under the pointer. Same camera as cl_document_draw; the accent
 // is 0..1 RGB.
-void cl_edit_draw_overlay(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_edit_draw_overlay(CLDocument *doc, int page, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint,
                           double accentR, double accentG, double accentB);
 
@@ -212,7 +221,7 @@ const char *cl_library_gate(int category, int index);
 const char *cl_library_gate_caption(const char *libGateName);
 // Draw one gate type fitted into a rectangle of `width` x `height` points
 // (y down), for palette tiles.
-void cl_library_draw_gate(const char *libGateName, CGContextRef ctx, double width, double height,
+void cl_library_draw_gate(const char *libGateName, CLContext ctx, double width, double height,
                           double backingScale, bool dark);
 
 // ---- Oscilloscope ------------------------------------------------------------
@@ -264,7 +273,7 @@ typedef struct {
 	bool showSelection;
 	double selectionFade;  // 0..1: a new selection's halo fades in
 } CLDrawOptions;
-void cl_document_draw_ex(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_document_draw_ex(CLDocument *doc, int page, CLContext ctx, double backingScale,
                          double originX, double originY, double unitsPerPoint,
                          const CLDrawOptions *options);
 // The accent colour for an index, light or dark variant (0..1 RGB).
@@ -278,7 +287,7 @@ void cl_set_low_wire_color(bool on, double r, double g, double b);
 
 // Simulation View: dashes marching away from each wire's driver along wires
 // that are on, and a bloom around lit lights. `phasePoints` grows with time.
-void cl_simview_draw_flow(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_simview_draw_flow(CLDocument *doc, int page, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, double phasePoints,
                           double wireScale);
 // The switches and lights on a page, top to bottom, left to right, for the

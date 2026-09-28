@@ -9,7 +9,7 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "klsClipboard.h"
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "CircuitEdits.h"
 #include "render/Scene.h"
 #include "command/cmdCreateGate.h"
@@ -963,20 +963,19 @@ void cl_edit_tidy_end(CLDocument* doc, bool keep) {
 bool cl_edit_tidy_active(const CLDocument* doc) { return doc && doc->tidy.active; }
 int cl_edit_tidy_mode(const CLDocument* doc) { return doc ? doc->tidy.mode : 0; }
 
-void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, double backingScale,
+void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint,
                           double ar, double ag, double ab) {
 	if (doc == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	using cl::render::Color;
 	using cl::render::Point;
 	using cl::render::Stroke;
-	CGContextSaveGState(ctx);
-	CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	cl::native::DevicePixels device(ctx, backingScale);
 	const float scale = (float)(backingScale / unitsPerPoint);
 	cl::render::Transform t;
 	t.a = scale; t.d = -scale;
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(t);
 	const float px = (float)backingScale;   // one point, in the device pixels strokes use
 
@@ -1012,7 +1011,6 @@ void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, doub
 		Point pts[4] = { Point(c.x - r, c.y + r), Point(c.x + r, c.y + r), Point(c.x + r, c.y - r), Point(c.x - r, c.y - r) };
 		scene.polyline(pts, 4, Stroke(Color(1.0f, 0.0f, 0.0f, 1.0f), px), true);
 	}
-	CGContextRestoreGState(ctx);
 }
 
 }  // extern "C"

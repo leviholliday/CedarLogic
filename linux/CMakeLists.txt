@@ -1,0 +1,66 @@
+# CedarLogic for Linux (native): a GTK 3 front end on the same C++ engine the
+# wx app and the native Mac app use. A project of its own, apart from the main
+# CMake build (which builds the wx app):
+#
+#   cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+#   cmake --build linux/build
+#
+# Drawing is Cairo on the processor, so nothing here needs OpenGL.
+cmake_minimum_required(VERSION 3.16)
+project(CedarLogicNative VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+if(NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE Release)
+endif()
+
+get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo cairo-ft fontconfig freetype2)
+
+# ---- The engine --------------------------------------------------------------
+# The model, drawing, routing and loading/saving, shared with the wx app; the
+# editing commands (minus the two that manage wx tabs); the logic engine; the
+# file format library; and CedarCore, the plain C interface the apps call.
+file(GLOB CL_COMMANDS "${ROOT}/src/gui/command/*.cpp")
+list(FILTER CL_COMMANDS EXCLUDE REGEX "cmd(AddTab|DeleteTab)\\.cpp$")
+file(GLOB CL_LOGIC "${ROOT}/logic/src/*.cpp")
+file(GLOB CL_CEDARCORE "${ROOT}/mac/CedarCore/*.cpp")
+list(FILTER CL_CEDARCORE EXCLUDE REGEX "CGScene\\.cpp$")
+
+add_library(CedarCore STATIC
+	${ROOT}/src/gui/guiGate.cpp ${ROOT}/src/gui/guiWire.cpp ${ROOT}/src/gui/wireSegment.cpp
+	${ROOT}/src/gui/klsCollisionChecker.cpp ${ROOT}/src/gui/GateLibrary.cpp ${ROOT}/src/gui/LibraryParse.cpp
+	${ROOT}/src/gui/XMLParser.cpp ${ROOT}/src/gui/GUICircuitModel.cpp ${ROOT}/src/gui/RenderMode.cpp
+	${ROOT}/src/gui/PaletteDrag.cpp ${ROOT}/src/gui/Settings.cpp ${ROOT}/src/gui/gl_defs.cpp
+	${ROOT}/src/gui/CircuitParse.cpp ${ROOT}/src/gui/klsClipboard.cpp ${ROOT}/src/gui/CircuitEdits.cpp
+	${ROOT}/src/gui/route/TrunkRouter.cpp ${ROOT}/src/gui/route/GridRouter.cpp ${ROOT}/src/gui/route/Layout.cpp
+	${CL_COMMANDS}
+	${CL_LOGIC}
+	${ROOT}/format/circuit_file_io.cpp ${ROOT}/format/legacy_cdl.cpp ${ROOT}/format/migrate.cpp
+	${ROOT}/format/numeric.cpp ${ROOT}/format/sexpr.cpp
+	${CL_CEDARCORE}
+	CedarCore/CairoScene.cpp
+)
+target_compile_definitions(CedarCore PUBLIC CL_NO_WX _PRODUCTION_)
+target_include_directories(CedarCore PUBLIC
+	${ROOT}/include ${ROOT}/include/gui ${ROOT}/include/gui/command ${ROOT}/logic/include ${ROOT}/format
+	${ROOT}/mac/CedarCore ${ROOT}/mac/CedarCore/include ${CMAKE_CURRENT_SOURCE_DIR}/CedarCore)
+target_compile_options(CedarCore PRIVATE -Wno-deprecated-declarations)
+target_link_libraries(CedarCore PUBLIC PkgConfig::CAIRO)
+
+# ---- The checks (no window needed) -------------------------------------------
+option(CL_BUILD_TOOLS "Build the headless check tools" ON)
+if(CL_BUILD_TOOLS)
+	foreach(t render_png sim_check edit_check save_check tt_check cl_check)
+		if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Tools/${t}.cpp")
+			add_executable(${t} Tools/${t}.cpp)
+		else()
+			add_executable(${t} ${ROOT}/mac/Tools/${t}.cpp)
+		endif()
+		target_link_libraries(${t} PRIVATE CedarCore)
+	endforeach()
+endif()

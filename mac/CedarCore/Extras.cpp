@@ -5,7 +5,7 @@
 // wx code it's named after (GUICanvas, cmdDeleteTab, RamPopupDialog, Welcome).
 
 #include "DocumentImpl.h"
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "Settings.h"
 #include "guiGate.h"
 #include "guiWire.h"
@@ -25,16 +25,14 @@ namespace {
 
 // The camera cl_document_draw uses: device pixels, world y up.
 struct Camera {
-	CGContextRef ctx;
+	cl::native::DevicePixels device;
 	cl::render::Transform t;
-	Camera(CGContextRef ctx, double backingScale, double originX, double originY, double unitsPerPoint) : ctx(ctx) {
-		CGContextSaveGState(ctx);
-		CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	Camera(CLContext ctx, double backingScale, double originX, double originY, double unitsPerPoint)
+		: device(ctx, backingScale) {
 		const float scale = (float)(backingScale / unitsPerPoint);
 		t.a = scale; t.b = 0; t.c = 0; t.d = -scale;
 		t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
 	}
-	~Camera() { CGContextRestoreGState(ctx); }
 };
 
 bool firstPinLit(guiGate* g) {
@@ -52,7 +50,7 @@ extern "C" {
 
 // ---- Drawing ----------------------------------------------------------------
 
-void cl_document_draw_ex(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+void cl_document_draw_ex(CLDocument* doc, int page, CLContext ctx, double backingScale,
                          double originX, double originY, double unitsPerPoint,
                          const CLDrawOptions* o) {
 	if (o == nullptr) return;
@@ -84,8 +82,8 @@ void cl_set_wire_dots(bool atBends, double radius) {
 }
 
 void cl_set_low_wire_color(bool on, double r, double g, double b) {
-	cl::mac::CGScene::remapLowWire = on;
-	cl::mac::CGScene::lowWire = cl::render::Color((float)r, (float)g, (float)b, 1);
+	cl::native::PlatformScene::remapLowWire = on;
+	cl::native::PlatformScene::lowWire = cl::render::Color((float)r, (float)g, (float)b, 1);
 }
 
 int cl_document_gate_count(const CLDocument* doc, int page) {
@@ -98,7 +96,7 @@ int cl_document_gate_count(const CLDocument* doc, int page) {
 // driving pin - phase) mod period is under the dash length, so as the phase
 // grows they march away from the driver, splitting at branches.
 
-void cl_simview_draw_flow(CLDocument* doc, int pageIndex, CGContextRef ctx, double backingScale,
+void cl_simview_draw_flow(CLDocument* doc, int pageIndex, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, double phasePoints,
                           double wireScale) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
@@ -107,7 +105,7 @@ void cl_simview_draw_flow(CLDocument* doc, int pageIndex, CGContextRef ctx, doub
 	using cl::render::Point;
 	using cl::render::Stroke;
 	Camera cam(ctx, backingScale, originX, originY, unitsPerPoint);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(cam.t);
 
 	const float z = (float)unitsPerPoint;
