@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=CedarLogic
+GenericName=Logic Simulator
+Comment=Build and simulate digital logic circuits
+Type=Application
+Exec=cedarlogic %F
+Icon=cedarlogic
+Terminal=false
+MimeType=application/x-cedarlogic-circuit;
+StartupWMClass=CedarLogic
+Categories=Education;Development;Electronics;
+Keywords=logic;simulator;circuit;gates;

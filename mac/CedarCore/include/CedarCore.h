@@ -85,8 +85,10 @@ bool cl_document_draw_fitted(CLDocument *doc, int page, CLContext ctx,
 
 // Advance the simulation by the wall time that has passed (called every frame
 // while the window is up). Steps at the document's step length, at most a
-// frame's worth of catch-up. Returns CL_TICK_* flags.
-enum { CL_TICK_CHANGED = 1, CL_TICK_PAUSED = 2 };
+// frame's worth of catch-up. Returns CL_TICK_* flags: CHANGED when it
+// stepped, SHOWN when a step changed something on screen (a wire's or a
+// part's state) -- a canvas need only redraw then.
+enum { CL_TICK_CHANGED = 1, CL_TICK_PAUSED = 2, CL_TICK_SHOWN = 4 };
 int cl_document_tick(CLDocument *doc, double elapsedMs);
 void cl_document_set_running(CLDocument *doc, bool running);
 bool cl_document_is_running(const CLDocument *doc);

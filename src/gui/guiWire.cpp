@@ -582,6 +582,9 @@ void guiWire::commitSegMap(map < long, wireSegment > newSegMap) {
 }
 
 void guiWire::setSegmentMap(map < long, wireSegment > newSegMap) {
+	// An empty shape has no head segment to read (begin() and rbegin() below
+	// would be undefined): keep whatever routing the wire already has.
+	if (newSegMap.empty()) return;
 	commitSegMap(std::move(newSegMap));
 	headSegment = ((segMap.begin())->first);
 	nextSegID = ((segMap.rbegin())->first) + 1;

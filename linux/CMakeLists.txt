@@ -52,6 +52,26 @@ target_include_directories(CedarCore PUBLIC
 target_compile_options(CedarCore PRIVATE -Wno-deprecated-declarations)
 target_link_libraries(CedarCore PUBLIC PkgConfig::CAIRO)
 
+# ---- The app -------------------------------------------------------------------
+option(CL_BUILD_APP "Build the GTK app" ON)
+if(CL_BUILD_APP)
+	pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
+	file(GLOB CL_APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/App/*.cpp")
+	add_executable(CedarLogic ${CL_APP_SOURCES})
+	target_link_libraries(CedarLogic PRIVATE CedarCore PkgConfig::GTK3)
+	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}")
+	target_compile_options(CedarLogic PRIVATE -Wall -Wno-deprecated-declarations -Wno-missing-field-initializers)
+	set_target_properties(CedarLogic PROPERTIES OUTPUT_NAME cedarlogic)
+
+	include(GNUInstallDirs)
+	install(TARGETS CedarLogic RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+	install(FILES ${ROOT}/res/cl_gatedefs.xml res/cedarlogic.png DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
+	install(DIRECTORY ${ROOT}/res/help ${ROOT}/res/samples DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
+	install(FILES res/cedarlogic.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+	install(FILES res/cedarlogic.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
+	install(FILES res/cedarlogic-mime.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages)
+endif()
+
 # ---- The checks (no window needed) -------------------------------------------
 option(CL_BUILD_TOOLS "Build the headless check tools" ON)
 if(CL_BUILD_TOOLS)

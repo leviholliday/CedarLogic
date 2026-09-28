@@ -39,6 +39,8 @@ public:
 	bool takePauseRequest() { bool p = pauseRequested; pauseRequested = false; return p; }
 
 	unsigned long long stepsRun() const { return stepCount; }
+	// What the last step() changed that shows: wires and parts' states.
+	int changesInLastRun() const { return lastRunChanges; }
 
 	// Called after every step (the oscilloscope records here).
 	std::function<void()> afterStep;
@@ -52,6 +54,7 @@ private:
 	std::map<IDType, IDType> logicIDs;
 	bool pauseRequested = false;
 	unsigned long long stepCount = 0;
+	int lastRunChanges = 0;
 };
 
 // Which host runs a circuit's logic, for GUICircuit::sendMessageToCore.

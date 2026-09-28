@@ -8,6 +8,7 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "Bitmap.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -248,6 +249,30 @@ int main(int argc, char** argv) {
 		float nx, ny;
 		led2->getGLcoords(nx, ny);
 		CHECK(!sw->isConnected(opin) && std::fabs(nx - (lx + (ox - px) + 3)) < 1e-3, "the first undo takes back the connection, not the move");
+	}
+
+	printf("a paste dropped where it already sits\n");
+	{
+		// Duplicating onto the very spot moves the copy by nothing; that
+		// used to install an empty wire shape and crash.
+		cl_edit_select_all(doc, 0);
+		float minX = 1e9f, maxY = -1e9f;
+		for (auto& g : *doc->page(0)->getGateList()) {
+			float gx, gy;
+			g.second->getGLcoords(gx, gy);
+			minX = std::min(minX, gx);
+			maxY = std::max(maxY, gy);
+		}
+		const std::string copied = cl_edit_copy(doc, 0);
+		const size_t wiresBefore = doc->page(0)->getWireList()->size();
+		const char* back = nullptr;
+		const bool pasted = cl_edit_paste(doc, 0, copied.c_str(), minX, maxY, false, &back);
+		CHECK(pasted && doc->page(0)->getWireList()->size() == 2 * wiresBefore, "pasted in place, wires and all");
+		bool shaped = true;
+		for (auto& w : *doc->page(0)->getWireList()) shaped = shaped && !w.second->getSegmentMap().empty();
+		CHECK(shaped, "every wire keeps its shape");
+		cl_edit_undo(doc);
+		CHECK(doc->page(0)->getWireList()->size() == wiresBefore, "undo takes the paste back");
 	}
 
 	printf("save round trip keeps it all\n");

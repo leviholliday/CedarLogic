@@ -257,6 +257,7 @@ int cl_document_tick(CLDocument* doc, double elapsedMs) {
 	if (steps > kMaxCatchUp) { steps = kMaxCatchUp; doc->carryMs = 0; }
 	doc->sim->step(steps);
 	int flags = CL_TICK_CHANGED;
+	if (doc->sim->changesInLastRun() > 0) flags |= CL_TICK_SHOWN;
 	if (doc->sim->takePauseRequest()) { doc->running = false; flags |= CL_TICK_PAUSED; }
 	return flags;
 }

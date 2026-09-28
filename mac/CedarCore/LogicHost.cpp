@@ -135,11 +135,12 @@ int LogicHost::applyResults(const ID_SET<IDType>* changedWires) {
 
 int LogicHost::step(int steps) {
 	int ran = 0;
+	lastRunChanges = 0;
 	for (; ran < steps; ran++) {
 		ID_SET<IDType> changedWires;
 		cir->step(&changedWires);
 		stepCount++;
-		applyResults(&changedWires);
+		lastRunChanges += applyResults(&changedWires);
 		if (afterStep) afterStep();
 		if (pauseRequested) { ran++; break; }
 	}
