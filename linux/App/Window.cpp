@@ -730,6 +730,11 @@ void CircuitWindow::destroyCb(GtkWidget*, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
 	prefs().paletteWidth = gtk_paned_get_position(GTK_PANED(w->paned));
 	prefs().save();
+	// GTK takes the widgets apart after this handler; the tabs switching
+	// page on the way out mustn't reach a window that's gone.
+	g_signal_handlers_disconnect_by_data(w->notebook, w);
+	g_signal_handlers_disconnect_by_data(w->stepSpin, w);
+	g_signal_handlers_disconnect_by_data(w->win, w);
 	delete w;
 }
 

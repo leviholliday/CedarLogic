@@ -15,6 +15,7 @@ class CircuitWindow;
 class GatePalette {
 public:
 	explicit GatePalette(CircuitWindow* window);
+	~GatePalette();
 	GtkWidget* widget() const { return root; }
 	void showCategory(int index);
 	void focusSearch();

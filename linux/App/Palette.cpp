@@ -71,6 +71,28 @@ GatePalette::GatePalette(CircuitWindow* window) : win(window) {
 	if (!categories.empty()) gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
 }
 
+GatePalette::~GatePalette() {
+	// The widgets outlive this (GTK takes the window apart afterwards).
+	g_signal_handlers_disconnect_by_data(search, this);
+	g_signal_handlers_disconnect_by_data(combo, this);
+	g_signal_handlers_disconnect_by_data(flow, this);
+	GList* kids = gtk_container_get_children(GTK_CONTAINER(flow));
+	for (GList* k = kids; k; k = k->next) {
+		GtkWidget* box = gtk_bin_get_child(GTK_BIN(k->data));
+		if (box == nullptr) continue;
+		void* name = g_object_get_data(G_OBJECT(box), "gate");
+		g_signal_handlers_disconnect_by_data(box, name);
+		if (GtkWidget* v = gtk_bin_get_child(GTK_BIN(box))) {
+			GList* parts = gtk_container_get_children(GTK_CONTAINER(v));
+			for (GList* p = parts; p; p = p->next) g_signal_handlers_disconnect_by_data(p->data, name);
+			g_list_free(parts);
+		}
+	}
+	g_list_free(kids);
+	for (std::string* s : tileNames) delete s;
+	tileNames.clear();
+}
+
 void GatePalette::showCategory(int index) {
 	if (index < 0 || index >= (int)categories.size()) return;
 	gtk_entry_set_text(GTK_ENTRY(search), "");
