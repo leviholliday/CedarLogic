@@ -33,6 +33,11 @@ public:
 	double unitsPerPoint() const { return upp; }
 	// The middle of the view, in the world.
 	void center(double& wx, double& wy) const;
+	// The top-left world point the camera is at (for the minimap).
+	void origin(double& ox, double& oy) const { ox = originX; oy = originY; }
+	// Jump the camera to centre on a world point, keeping the current zoom
+	// (the minimap's click-to-go-there; no easing, unlike animateZoom).
+	void panTo(double wx, double wy);
 	// Where the pointer is over this canvas, in the world; false when it's
 	// somewhere else.
 	bool pointerWorld(double& wx, double& wy) const;

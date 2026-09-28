@@ -3,6 +3,7 @@
 #include "Window.h"
 #include "Canvas.h"
 #include "Dialogs.h"
+#include "MiniMap.h"
 #include "Palette.h"
 #include "Recovery.h"
 
@@ -146,6 +147,7 @@ CircuitWindow::~CircuitWindow() {
 	for (Canvas* c : canvases) delete c;
 	canvases.clear();
 	delete palette;
+	delete miniMap;
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
@@ -182,11 +184,19 @@ void CircuitWindow::build() {
 
 	paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_box_pack_start(GTK_BOX(v), paned, TRUE, TRUE, 0);
+	GtkWidget* leftBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	palette = new GatePalette(this);
-	paletteBox = palette->widget();
-	gtk_widget_set_size_request(paletteBox, 120, -1);
-	gtk_paned_pack1(GTK_PANED(paned), paletteBox, FALSE, FALSE);
+	paletteBox = leftBox;
+	gtk_widget_set_size_request(leftBox, 120, -1);
+	gtk_box_pack_start(GTK_BOX(leftBox), palette->widget(), TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(leftBox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
+	miniMap = new MiniMap(this);
+	gtk_box_pack_start(GTK_BOX(leftBox), miniMap->widget(), FALSE, FALSE, 0);
+	gtk_paned_pack1(GTK_PANED(paned), leftBox, FALSE, FALSE);
 	gtk_paned_set_position(GTK_PANED(paned), prefs().paletteWidth);
+	// A wider, themed grip: the default handle is a thin strip that's easy
+	// to miss (GTK 3.16+; ignored harmlessly on older GTK).
+	g_object_set(paned, "wide-handle", TRUE, nullptr);
 
 	notebook = gtk_notebook_new();
 	gtk_notebook_set_scrollable(GTK_NOTEBOOK(notebook), TRUE);
@@ -401,6 +411,7 @@ void CircuitWindow::syncTabs() {
 	lastPageCount = n;
 	updateTabLabels();
 	syncing = false;
+	redrawMiniMap();
 }
 
 Canvas* CircuitWindow::currentCanvas() const {
@@ -536,6 +547,10 @@ void CircuitWindow::fadeOutDragBox(double l, double b, double r, double t) {
 
 void CircuitWindow::redraw() {
 	if (Canvas* c = currentCanvas()) c->redraw();
+}
+
+void CircuitWindow::redrawMiniMap() {
+	if (miniMap) miniMap->queueDraw();
 }
 
 void CircuitWindow::pointerMoved(double wx, double wy) {
@@ -706,6 +721,7 @@ void CircuitWindow::themeChanged() {
 	updateActions();
 	if (palette) palette->themeChanged();
 	for (Canvas* c : canvases) c->redraw();
+	redrawMiniMap();
 	if (scope) scope->update();
 }
 

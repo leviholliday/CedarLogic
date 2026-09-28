@@ -37,6 +37,10 @@ public:
 	// ---- For the canvas ----
 	Canvas* currentCanvas() const;
 	int currentPage() const;                // the engine's index of the page in front
+	// Bumped on every edit (undo history, page changes...); the minimap's
+	// cache key, so it regenerates only when the picture could have changed.
+	unsigned editStamp() const { return changes; }
+	void redrawMiniMap();
 	bool simView() const { return simViewOn; }
 	bool locked() const { return lockedOn; }
 	bool canEdit() const { return !lockedOn && !simViewOn; }
@@ -151,6 +155,7 @@ private:
 	GtkWidget* bannerButtons = nullptr;
 	GMenu* recentMenu = nullptr;
 	GatePalette* palette = nullptr;
+	class MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
 	std::vector<Canvas*> canvases;    // in tab order
 	bool syncing = false;             // rebuilding the tabs; ignore the notebook's signals

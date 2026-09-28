@@ -59,7 +59,13 @@ if(CL_BUILD_APP)
 	file(GLOB CL_APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/App/*.cpp")
 	add_executable(CedarLogic ${CL_APP_SOURCES})
 	target_link_libraries(CedarLogic PRIVATE CedarCore PkgConfig::GTK3)
-	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}")
+	execute_process(COMMAND git -C "${ROOT}" rev-parse HEAD
+	                OUTPUT_VARIABLE CL_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
+	                RESULT_VARIABLE CL_GIT_RC ERROR_QUIET)
+	if(NOT CL_GIT_RC EQUAL 0 OR CL_GIT_COMMIT STREQUAL "")
+		set(CL_GIT_COMMIT "unknown")
+	endif()
+	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}")
 	target_compile_options(CedarLogic PRIVATE -Wall -Wno-deprecated-declarations -Wno-missing-field-initializers)
 	set_target_properties(CedarLogic PROPERTIES OUTPUT_NAME cedarlogic)
 

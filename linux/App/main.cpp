@@ -4,6 +4,7 @@
 #include "App.h"
 #include "Canvas.h"
 #include "Recovery.h"
+#include "Updater.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -134,6 +135,7 @@ GMenuModel* buildMenubar() {
 	GMenu* help = g_menu_new();
 	g_menu_append(help, "_Keyboard Shortcuts", "win.shortcuts");
 	g_menu_append(help, "CedarLogic _Help", "win.help");
+	g_menu_append(help, "Check for _Updates…", "app.check-updates");
 	g_menu_append(help, "_About CedarLogic", "win.about");
 	g_menu_append_submenu(bar, "_Help", G_MENU_MODEL(help));
 	return G_MENU_MODEL(bar);
@@ -209,22 +211,25 @@ void openSampleCb(GSimpleAction*, GVariant*, gpointer app) {
 	else new CircuitWindow(GTK_APPLICATION(app), doc, "");
 }
 
-void quitCb(GSimpleAction*, GVariant*, gpointer app) {
-	// Each window asks about its own changes; stop at the first "Cancel".
-	std::vector<CircuitWindow*> all = circuitWindows();
-	for (CircuitWindow* w : all) {
-		gtk_window_present(w->window());
-		if (!w->confirmClose()) return;
-	}
-	for (CircuitWindow* w : all) gtk_widget_destroy(GTK_WIDGET(w->window()));
-	g_application_quit(G_APPLICATION(app));
-}
+void quitCb(GSimpleAction*, GVariant*, gpointer app) { quitApp(GTK_APPLICATION(app)); }
 
 void loadCss() {
 	GtkCssProvider* css = gtk_css_provider_new();
 	gtk_css_provider_load_from_data(css,
 		"#status label { font-size: 0.9em; }\n"
-		"#palette flowboxchild { padding: 2px; border-radius: 6px; }\n",
+		"#palette flowboxchild { padding: 2px; border-radius: 6px; }\n"
+		// A wide, unmistakable grip between the palette and the canvas,
+		// whatever the system theme draws by default (some draw it a single
+		// pixel wide). wide-handle (set in code) widens the hit area; this
+		// gives it a visible strip and a grip of dots, brighter on hover so
+		// it reads as draggable before the cursor even changes.
+		"paned > separator, paned.wide > separator {\n"
+		"  min-width: 10px;\n"
+		"  background-color: alpha(currentColor, 0.06);\n"
+		"}\n"
+		"paned > separator:hover, paned.wide > separator:hover {\n"
+		"  background-color: alpha(@theme_selected_bg_color, 0.35);\n"
+		"}\n",
 		-1, nullptr);
 	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css),
 	                                          GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -238,6 +243,22 @@ void setIcon() {
 	}
 	gtk_window_set_default_icon_name("cedarlogic");
 }
+
+}  // namespace
+
+// Each window asks about its own changes; stop at the first "Cancel".
+bool quitApp(GtkApplication* app) {
+	std::vector<CircuitWindow*> all = circuitWindows();
+	for (CircuitWindow* w : all) {
+		gtk_window_present(w->window());
+		if (!w->confirmClose()) return false;
+	}
+	for (CircuitWindow* w : all) gtk_widget_destroy(GTK_WIDGET(w->window()));
+	g_application_quit(G_APPLICATION(app));
+	return true;
+}
+
+namespace {
 
 void startupCb(GApplication* gapp, gpointer) {
 	GtkApplication* app = GTK_APPLICATION(gapp);
@@ -256,6 +277,8 @@ void startupCb(GApplication* gapp, gpointer) {
 		{ "open-recent", openRecentCb, "s", nullptr, nullptr, { 0 } },
 		{ "open-sample", openSampleCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "quit", quitCb, nullptr, nullptr, nullptr, { 0 } },
+		{ "check-updates", [](GSimpleAction*, GVariant*, gpointer app) { Updater_CheckNow(GTK_APPLICATION(app)); },
+		  nullptr, nullptr, nullptr, { 0 } },
 	};
 	g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
 	setAccels(app);
@@ -263,6 +286,7 @@ void startupCb(GApplication* gapp, gpointer) {
 	gtk_application_set_menubar(app, bar);
 	g_object_unref(bar);
 	rebuildRecentMenus();
+	Updater_Initialize(app);
 }
 
 bool libraryOrComplain() {

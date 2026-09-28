@@ -90,6 +90,9 @@ void showMessage(GtkWindow* parent, GtkMessageType type, const std::string& titl
 bool askYesNo(GtkWindow* parent, const std::string& title, const std::string& text);
 
 class CircuitWindow;
+// Close every window (asking about unsaved work in each) and quit the app.
+// Returns false, leaving the app open, if any window's confirmClose refused.
+bool quitApp(GtkApplication* app);
 // Open a circuit in a new window (or the current empty one). Returns false
 // (after saying why) when it couldn't be opened.
 bool openCircuit(GtkApplication* app, const std::string& path, CircuitWindow* from);

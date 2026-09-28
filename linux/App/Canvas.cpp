@@ -85,7 +85,10 @@ void Canvas::dropBuffers() {
 
 int Canvas::page() const { return cl_document_page_index(win->document(), key); }
 
-void Canvas::redraw() { gtk_widget_queue_draw(area); }
+void Canvas::redraw() {
+	gtk_widget_queue_draw(area);
+	win->redrawMiniMap();
+}
 
 double Canvas::width() const { return gtk_widget_get_allocated_width(area); }
 double Canvas::height() const { return gtk_widget_get_allocated_height(area); }
@@ -358,6 +361,14 @@ void Canvas::pan(double dx, double dy) {
 	zooming = false;
 	originX -= dx * upp;
 	originY += dy * upp;
+	redraw();
+	win->statusDirty = true;
+}
+
+void Canvas::panTo(double wx, double wy) {
+	zooming = false;
+	originX = wx - width() / 2 * upp;
+	originY = wy + height() / 2 * upp;
 	redraw();
 	win->statusDirty = true;
 }
