@@ -246,6 +246,7 @@ private struct Page<C: View>: View {
 }
 
 struct GeneralSettingsView: View {
+    @AppStorage(CrashReports.key) private var crashReports = false
     @ObservedObject private var prefs = Prefs.shared
 
     var body: some View {
@@ -278,6 +279,12 @@ struct GeneralSettingsView: View {
                     }
                     .labelsHidden().fixedSize()
                     Button("Check Now") { Updates.shared.checkNow() }
+                }
+            }
+            if CrashReports.available {
+                Row("Crash reports", hint: "If CedarLogic crashes, a report of where it went wrong goes to its developer. Never your circuits, files or name.") {
+                    Toggle("Send crash reports", isOn: $crashReports)
+                        .onChange(of: crashReports) { _, on in CrashReports.set(on) }
                 }
             }
         }

@@ -90,7 +90,16 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
 
     /// The launch screen goes up before any window, so they can wait for it.
     func applicationWillFinishLaunching(_ notification: Notification) {
+        CrashReports.start()
         Splash.shared.showIfLaunching()
+        // Asked once, once the circuit is there to ask over.
+        if Splash.shared.active {
+            NotificationCenter.default.addObserver(forName: .clSplashDone, object: nil, queue: .main) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainActor.assumeIsolated { CrashReports.askOnce() } }
+            }
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { CrashReports.askOnce() } }
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

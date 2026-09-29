@@ -65,17 +65,32 @@ ar rcs "$OUT/libCedarCore.a" "${OBJS[@]}"
 SPARKLE_DIR="${SPARKLE_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/build/_deps/sparkle-src}"
 [ -d "$SPARKLE_DIR/Sparkle.framework" ] || { echo "Sparkle.framework not found in $SPARKLE_DIR (set SPARKLE_DIR)"; exit 1; }
 
+# Sentry.framework, for crash reports (App/CrashReports.swift): the Mac part
+# of getsentry/sentry-cocoa's Sentry-Dynamic.xcframework, unpacked beside
+# Sparkle. Without it the app builds with crash reports left out.
+SENTRY_DIR="${SENTRY_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/build/_deps/sentry-cocoa/mac}"
+SENTRY_FLAGS=()
+[ -d "$SENTRY_DIR/Sentry.framework" ] && SENTRY_FLAGS=(-F "$SENTRY_DIR" -framework Sentry)
+# Where reports go: the Sentry project's DSN (Settings > Client Keys).
+SENTRY_DSN="${SENTRY_DSN:-}"
+
 echo "App..."
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -parse-as-library -target "$ARCH-apple-macos$MIN" \
 	-import-objc-header mac/CedarCore/include/CedarCore.h \
 	mac/App/*.swift "$OUT/libCedarCore.a" -lc++ \
 	-framework CoreText -framework OpenGL \
-	-F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
+	-F "$SPARKLE_DIR" -framework Sparkle ${SENTRY_FLAGS[@]+"${SENTRY_FLAGS[@]}"} -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
 	-o "$APP/Contents/MacOS/CedarLogic"
 # Sparkle, for updates (see App/Updates.swift).
 rm -rf "$APP/Contents/Frameworks"; mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+if [ ${#SENTRY_FLAGS[@]} -gt 0 ]; then
+	# Just what runs, for this Mac's architecture (it's 29 MB whole).
+	ditto --arch "$ARCH" "$SENTRY_DIR/Sentry.framework" "$APP/Contents/Frameworks/Sentry.framework"
+	rm -rf "$APP/Contents/Frameworks/Sentry.framework/Versions/A/"{Headers,PrivateHeaders,Modules} \
+		"$APP/Contents/Frameworks/Sentry.framework/"{Headers,PrivateHeaders,Modules}
+fi
 
 cp mac/App/Info.plist "$APP/Contents/Info.plist"
 # The build number is the commit count, and About shows the commit too, so
@@ -100,6 +115,7 @@ rm -f "$APP/Contents/Resources/CedarLogic.icns"
 /usr/libexec/PlistBuddy -c "Add SUPublicEDKey string yxLh+j07mcolZ462R1sZtniQPJ+hjvkKSgtNG6dY700=" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add SUFeedURL string https://raw.githubusercontent.com/leviholliday/CedarLogic-Releases/main/appcast-native.xml" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add SUEnableAutomaticChecks bool true" "$APP/Contents/Info.plist"
+[ -n "$SENTRY_DSN" ] && /usr/libexec/PlistBuddy -c "Add SentryDSN string $SENTRY_DSN" "$APP/Contents/Info.plist"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1
 echo "Built $APP"
 [ "${OPEN:-0}" = 1 ] && open "$APP"
