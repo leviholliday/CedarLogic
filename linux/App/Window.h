@@ -37,6 +37,11 @@ public:
 	// ---- For the canvas ----
 	Canvas* currentCanvas() const;
 	int currentPage() const;                // the engine's index of the page in front
+	// For the guided tour, to point a bubble at each: the palette, the run
+	// button, the tab strip. currentCanvas()->widget() is the fourth.
+	GtkWidget* paletteWidgetForTour() const { return paletteBox; }
+	GtkWidget* runButtonForTour() const { return runButton; }
+	GtkWidget* tabStripForTour() const { return notebook; }
 	// Bumped on every edit (undo history, page changes...); the minimap's
 	// cache key, so it regenerates only when the picture could have changed.
 	unsigned editStamp() const { return changes; }

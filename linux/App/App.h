@@ -44,6 +44,7 @@ struct Prefs {
 	bool showStatus = true;
 	bool showGateNames = true;
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
+	bool hasSeenWelcome = false;
 	int windowWidth = 1180, windowHeight = 780;
 	bool windowMaximized = false;
 	int paletteWidth = 236;

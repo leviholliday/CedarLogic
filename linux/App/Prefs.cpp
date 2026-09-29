@@ -87,6 +87,7 @@ void Prefs::load() {
 		showStatus = readBool(k, "showStatus", showStatus);
 		showGateNames = readBool(k, "showGateNames", showGateNames);
 		tidyMode = readInt(k, "tidyMode", tidyMode, 0, 1);
+		hasSeenWelcome = readBool(k, "hasSeenWelcome", hasSeenWelcome);
 		windowWidth = readInt(k, "windowWidth", windowWidth, 400, 20000);
 		windowHeight = readInt(k, "windowHeight", windowHeight, 300, 20000);
 		windowMaximized = readBool(k, "windowMaximized", windowMaximized);
@@ -130,6 +131,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "showStatus", showStatus);
 	g_key_file_set_boolean(k, kGroup, "showGateNames", showGateNames);
 	g_key_file_set_integer(k, kGroup, "tidyMode", tidyMode);
+	g_key_file_set_boolean(k, kGroup, "hasSeenWelcome", hasSeenWelcome);
 	g_key_file_set_integer(k, kGroup, "windowWidth", windowWidth);
 	g_key_file_set_integer(k, kGroup, "windowHeight", windowHeight);
 	g_key_file_set_boolean(k, kGroup, "windowMaximized", windowMaximized);

@@ -4,7 +4,9 @@
 #include "App.h"
 #include "Canvas.h"
 #include "Recovery.h"
+#include "Splash.h"
 #include "Updater.h"
+#include "Welcome.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -14,6 +16,7 @@ namespace {
 
 GMenu* gRecentMenu = nullptr;
 bool gLibraryLoaded = false;
+GtkWidget* gSplash = nullptr;
 // --screenshot <out.png>: once the window is up, draw it to a PNG and quit
 // (a check that a build really starts, drawing and all; used by CI).
 std::string gScreenshot;
@@ -134,6 +137,7 @@ GMenuModel* buildMenubar() {
 
 	GMenu* help = g_menu_new();
 	g_menu_append(help, "_Keyboard Shortcuts", "win.shortcuts");
+	g_menu_append(help, "Guided _Tour", "app.guided-tour");
 	g_menu_append(help, "CedarLogic _Help", "win.help");
 	g_menu_append(help, "Check for _Updates…", "app.check-updates");
 	g_menu_append(help, "_About CedarLogic", "win.about");
@@ -262,6 +266,9 @@ namespace {
 
 void startupCb(GApplication* gapp, gpointer) {
 	GtkApplication* app = GTK_APPLICATION(gapp);
+	// Not for --screenshot: CI wants one deterministic frame, not a race
+	// with a timed splash.
+	if (gScreenshot.empty()) gSplash = showSplash();
 	prefs().load();
 	applyTheme();
 	loadCss();
@@ -278,6 +285,8 @@ void startupCb(GApplication* gapp, gpointer) {
 		{ "open-sample", openSampleCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "quit", quitCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "check-updates", [](GSimpleAction*, GVariant*, gpointer app) { Updater_CheckNow(GTK_APPLICATION(app)); },
+		  nullptr, nullptr, nullptr, { 0 } },
+		{ "guided-tour", [](GSimpleAction*, GVariant*, gpointer app) { startTour(activeWindow(GTK_APPLICATION(app))); },
 		  nullptr, nullptr, nullptr, { 0 } },
 	};
 	g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
@@ -305,15 +314,34 @@ gboolean offerRecoveryCb(gpointer app) {
 	return G_SOURCE_REMOVE;
 }
 
+gboolean offerWelcomeCb(gpointer app) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().front();
+	guarded("the welcome window", [&] { offerWelcome(GTK_APPLICATION(app), w); });
+	return G_SOURCE_REMOVE;
+}
+
 void activateCb(GApplication* gapp, gpointer) {
-	if (!libraryOrComplain()) { gExitCode = 1; g_application_quit(gapp); return; }
+	if (!libraryOrComplain()) {
+		gExitCode = 1;
+		if (gSplash) { gtk_widget_destroy(gSplash); gSplash = nullptr; }
+		g_application_quit(gapp);
+		return;
+	}
 	newCircuitWindow(GTK_APPLICATION(gapp));
+	hideSplashSoon(gSplash);
+	gSplash = nullptr;
 	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
+	else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, gapp);
 	else g_idle_add(offerRecoveryCb, gapp);
 }
 
 void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpointer) {
-	if (!libraryOrComplain()) { gExitCode = 1; g_application_quit(gapp); return; }
+	if (!libraryOrComplain()) {
+		gExitCode = 1;
+		if (gSplash) { gtk_widget_destroy(gSplash); gSplash = nullptr; }
+		g_application_quit(gapp);
+		return;
+	}
 	bool any = false;
 	for (gint i = 0; i < n; i++) {
 		gchar* path = g_file_get_path(files[i]);
@@ -322,7 +350,10 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		g_free(path);
 	}
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
+	hideSplashSoon(gSplash);
+	gSplash = nullptr;
 	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
+	else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, gapp);
 	else g_idle_add(offerRecoveryCb, gapp);
 }
 
