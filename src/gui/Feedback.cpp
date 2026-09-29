@@ -931,16 +931,18 @@ void paintCanvases(MainFrame* frame, wxImage& base, std::function<wxRect(GUICanv
 
 static wxDialog* g_feedback = nullptr;   // the window, while it's open
 
-bool CaptureAppWindow(MainFrame* frame, wxImage& out) {
-	if (!frame || !frame->IsShown()) return false;
+// A picture of `win`. With `frame`, that window's canvases are painted in too
+// (`win` is then the frame).
+static bool grabWindow(wxTopLevelWindow* win, wxImage& out, MainFrame* frame) {
+	if (!win || !win->IsShown()) return false;
 #ifdef __WXMSW__
 	wxBitmap bmp;
 	int method = -1;
-	if (!WinGrabWindow(frame, bmp, &method)) return false;
+	if (!WinGrabWindow(win, bmp, &method)) return false;
 	out = bmp.ConvertToImage();
-	if (method != 0) {
+	if (frame && method != 0) {
 		// What was composed on screen wasn't to be had: the canvas is likely blank.
-		const wxPoint origin = frame->GetScreenPosition();
+		const wxPoint origin = win->GetScreenPosition();
 		paintCanvases(frame, out, [&](GUICanvas* c) {
 			return wxRect(c->GetScreenPosition() - origin, c->GetClientSize());
 		});
@@ -949,20 +951,22 @@ bool CaptureAppWindow(MainFrame* frame, wxImage& out) {
 #elif defined(__APPLE__)
 	std::vector<unsigned char> rgb;
 	int w = 0, h = 0;
-	if (!MacGrabWindow(frame->GetHandle(), rgb, w, h)) return false;
+	if (!MacGrabWindow(win->GetHandle(), rgb, w, h)) return false;
 	out.Create(w, h, false);
 	std::copy(rgb.begin(), rgb.end(), out.GetData());
-	const double scale = (double)w / std::max(1, frame->GetSize().x);
-	const wxPoint origin = frame->GetScreenPosition();
-	paintCanvases(frame, out, [&](GUICanvas* c) {
-		const wxPoint at = c->GetScreenPosition() - origin;
-		const wxSize sz = c->GetClientSize();
-		return wxRect((int)std::lround(at.x * scale), (int)std::lround(at.y * scale),
-		              (int)std::lround(sz.x * scale), (int)std::lround(sz.y * scale));
-	});
+	if (frame) {
+		const double scale = (double)w / std::max(1, win->GetSize().x);
+		const wxPoint origin = win->GetScreenPosition();
+		paintCanvases(frame, out, [&](GUICanvas* c) {
+			const wxPoint at = c->GetScreenPosition() - origin;
+			const wxSize sz = c->GetClientSize();
+			return wxRect((int)std::lround(at.x * scale), (int)std::lround(at.y * scale),
+			              (int)std::lround(sz.x * scale), (int)std::lround(sz.y * scale));
+		});
+	}
 	return true;
 #elif defined(CL_FEEDBACK_GTK)
-	GtkWidget* top = static_cast<GtkWidget*>(frame->GetHandle());
+	GtkWidget* top = static_cast<GtkWidget*>(win->GetHandle());
 	if (!top || !gtk_widget_get_realized(top)) return false;
 	const int w = gtk_widget_get_allocated_width(top), h = gtk_widget_get_allocated_height(top);
 	const int sf = std::max(1, gtk_widget_get_scale_factor(top));
@@ -988,18 +992,20 @@ bool CaptureAppWindow(MainFrame* frame, wxImage& out) {
 			to += 3;
 		}
 	cairo_surface_destroy(surface);
-	paintCanvases(frame, out, [&](GUICanvas* c) {
-		int x = 0, y = 0;
-		gtk_widget_translate_coordinates(static_cast<GtkWidget*>(c->GetHandle()), top, 0, 0, &x, &y);
-		const wxSize sz = c->GetClientSize();
-		return wxRect(x * sf, y * sf, sz.x * sf, sz.y * sf);
-	});
+	if (frame)
+		paintCanvases(frame, out, [&](GUICanvas* c) {
+			int x = 0, y = 0;
+			gtk_widget_translate_coordinates(static_cast<GtkWidget*>(c->GetHandle()), top, 0, 0, &x, &y);
+			const wxSize sz = c->GetClientSize();
+			return wxRect(x * sf, y * sf, sz.x * sf, sz.y * sf);
+		});
 	return true;
 #else
-	// The screen, under the window: step the form aside while it's taken.
-	const bool hide = g_feedback && g_feedback->IsShown();
+	// The screen, under the window: step the form aside while the app's
+	// window is taken.
+	const bool hide = frame && g_feedback && g_feedback->IsShown();
 	if (hide) { g_feedback->Hide(); wxYield(); wxMilliSleep(150); }
-	const wxRect r = frame->GetScreenRect();
+	const wxRect r = win->GetScreenRect();
 	wxBitmap bmp(r.width, r.height, 24);
 	{
 		wxScreenDC screen;
@@ -1008,12 +1014,18 @@ bool CaptureAppWindow(MainFrame* frame, wxImage& out) {
 	}
 	if (hide) g_feedback->Show();
 	out = bmp.ConvertToImage();
-	const wxPoint origin = r.GetTopLeft();
-	paintCanvases(frame, out, [&](GUICanvas* c) {
-		return wxRect(c->GetScreenPosition() - origin, c->GetClientSize());
-	});
+	if (frame) {
+		const wxPoint origin = r.GetTopLeft();
+		paintCanvases(frame, out, [&](GUICanvas* c) {
+			return wxRect(c->GetScreenPosition() - origin, c->GetClientSize());
+		});
+	}
 	return true;
 #endif
+}
+
+bool CaptureAppWindow(MainFrame* frame, wxImage& out) {
+	return grabWindow(frame, out, frame);
 }
 
 namespace {
@@ -1742,7 +1754,7 @@ private:
 		wxTextCtrl* t = new wxTextCtrl(parent, wxID_ANY, value, wxDefaultPosition,
 		                               multi ? FromDIP(wxSize(-1, 110)) : wxDefaultSize,
 		                               multi ? (wxTE_MULTILINE | wxTE_RICH2) : 0);
-		t->SetHint(hint);
+		if (!multi) t->SetHint(hint);   // the several-line box has its hint above it
 		t->SetFont(font(13));
 		return t;
 	}
@@ -2107,4 +2119,34 @@ static void selfTestNow(MainFrame* frame, const wxString& title) {
 void StartFeedbackSelfTest(MainFrame* frame, const wxString& title) {
 	// Once the window has had time to be drawn.
 	later(2500, [frame, title] { selfTestNow(frame, title); });
+}
+
+bool RenderFeedback(MainFrame* frame, const wxString& dir) {
+	wxFileName::Mkdir(dir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+	auto settle = [] {
+		for (int i = 0; i < 30; i++) { wxYield(); wxMilliSleep(25); }
+	};
+	bool ok = true;
+	const bool wasDark = renderMode().darkMode;
+	for (int dark = 0; dark < 2; dark++) {
+		renderMode().darkMode = dark != 0;
+		frame->ApplyTheme();
+		wxTopLevelWindow* fb = FeedbackWindowForCapture(frame);
+		settle();
+		wxImage img;
+		const bool got = grabWindow(fb, img, nullptr) && img.IsOk();
+		const wxString name = dir + (dark ? "/feedback-dark.png" : "/feedback-light.png");
+		fprintf(stderr, "render-feedback: %s %s\n", (const char*)name.ToUTF8(), got ? "captured" : "NOT captured");
+		ok &= got && img.SaveFile(name, wxBITMAP_TYPE_PNG);
+		if (dark) {
+			wxImage shot;
+			const bool took = CaptureAppWindow(frame, shot) && shot.IsOk();
+			fprintf(stderr, "render-feedback: screenshot %s\n", took ? "taken" : "NOT taken");
+			ok &= took && shot.SaveFile(dir + "/feedback-screenshot.png", wxBITMAP_TYPE_PNG);
+		}
+		DismissFeedback();
+		settle();
+	}
+	renderMode().darkMode = wasDark;
+	return ok;
 }
