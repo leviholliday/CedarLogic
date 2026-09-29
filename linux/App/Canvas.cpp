@@ -779,10 +779,11 @@ void Canvas::dragReceivedCb(GtkWidget*, GdkDragContext* ctx, gint x, gint y, Gtk
 		const std::string name((const char*)raw, (size_t)len);
 		double wx, wy;
 		c->worldPoint(x, y, wx, wy);
-		const int p = c->page();
-		if (p >= 0 && cl_edit_add_gate(c->win->document(), p, name.c_str(), wx, wy)) {
+		// Same as clicking the tile: the gate lands floating, still following
+		// the pointer until a click drops it -- so C-to-connect, Escape, and
+		// every other in-flight key work exactly as they do after a click.
+		if (c->win->addGateFloating(name, wx, wy)) {
 			ok = true;
-			c->win->edited();
 			gtk_widget_grab_focus(c->area);
 		}
 	});
