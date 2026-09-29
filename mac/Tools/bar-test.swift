@@ -23,7 +23,7 @@ func nap(_ s: Double) { usleep(useconds_t(s * 1_000_000)) }
 struct Coords {
     var version = 0, targets: [[String: Any]] = [], strips: [[Double]] = []
     var bar = CGPoint.zero, barLow = CGPoint.zero, left = CGPoint.zero
-    var frame: [Double] = [], visible: [Double] = [], screen: [Double] = [], fullScreen = false, lights: [[Double]] = []
+    var frame: [Double] = [], visible: [Double] = [], screen: [Double] = [], fullScreen = false, lights: [[Double]] = [], drawnOff: [Double] = []
     func t(_ prefix: String, _ part: String = "center") -> CGPoint? {
         guard let x = targets.first(where: { ($0["tip"] as? String ?? "").hasPrefix(prefix) }), let p = x[part] as? [Double] else { return nil }
         return CGPoint(x: p[0], y: p[1])
@@ -37,7 +37,7 @@ func load() -> Coords? {
     return Coords(version: j["version"] as? Int ?? 0, targets: j["targets"] as? [[String: Any]] ?? [], strips: j["strips"] as? [[Double]] ?? [],
                   bar: point(j["bar"]), barLow: point(j["barLow"]), left: point(j["left"]),
                   frame: j["frame"] as? [Double] ?? [], visible: j["visible"] as? [Double] ?? [], screen: j["screen"] as? [Double] ?? [],
-                  fullScreen: j["fullScreen"] as? Bool ?? false, lights: j["lights"] as? [[Double]] ?? [])
+                  fullScreen: j["fullScreen"] as? Bool ?? false, lights: j["lights"] as? [[Double]] ?? [], drawnOff: j["drawnOff"] as? [Double] ?? [])
 }
 func fresh(after v: Int, timeout: Double = 2) -> Coords? {
     let end = now() + timeout
@@ -188,6 +188,10 @@ func lightsLevel(_ c: Coords) -> (Bool, String) {
     return (level && inOrder && ys.count == 3, "traffic light heights \(ys), x \(xs)")
 }
 step("Red, yellow and green buttons sit level", settle: 0.1) { } check: { _ in lightsLevel(c) }
+step("... and are drawn where their frames say", settle: 0.1) { } check: { _ in
+    let bad = c.drawnOff.enumerated().filter { $0.element > 0.5 }.map { $0.offset }
+    return (bad.isEmpty, "buttons \(bad) drawn away from their frames")
+}
 step("Hover lights every tool, top edge included") {
     for t in c.targets { if let p = t["top"] as? [Double] { move(CGPoint(x: p[0] - 2, y: p[1])); nap(0.03); move(CGPoint(x: p[0], y: p[1])); nap(0.3) } }
 } check: { l in

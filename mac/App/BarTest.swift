@@ -28,6 +28,26 @@ enum BarTest {
 
     static func start() {
         guard on else { return }
+        if ProcessInfo.processInfo.environment["CL_BAR_WATCH"] != nil {
+            // Development: the window buttons' positions, sampled through launch.
+            Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    guard let w = NSApp.windows.first(where: { NSDocumentController.shared.document(for: $0) != nil }) else { return }
+                    let l = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { w.standardWindowButton($0) }
+                        .map { b -> String in let r = b.convert(b.bounds, to: nil); return "(\(Int(r.minX)),\(Int(r.minY)))" }
+                    let inner = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { w.standardWindowButton($0) }
+                        .map { b in b.subviews.map { v in "\(Int(v.frame.minX)),\(Int(v.frame.minY)) \(Int(v.frame.width))x\(Int(v.frame.height)) t\(Int(v.layer?.affineTransform().tx ?? 0)),\(Int(v.layer?.affineTransform().ty ?? 0))" }.joined() + " bt\(Int(b.layer?.affineTransform().tx ?? 0)),\(Int(b.layer?.affineTransform().ty ?? 0)) \(type(of: b))" }
+                    let shown = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { w.standardWindowButton($0) }
+                        .map { b -> String in
+                            let m = b.layer?.position ?? .zero, p = b.layer?.presentation()?.position ?? .zero
+                            return "model(\(Int(m.x)),\(Int(m.y))) shown(\(Int(p.x)),\(Int(p.y))) anims \(b.layer?.animationKeys() ?? [])"
+                        }
+                    note("shown \(shown)")
+                    note("inner \(inner)")
+                    note("lights \(l.joined(separator: " ")) alpha \(w.alphaValue) key \(w.isKeyWindow) active \(NSApp.isActive)")
+                }
+            }
+        }
         func wait() {
             guard let w = window() else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { MainActor.assumeIsolated { wait() } }
@@ -49,8 +69,10 @@ enum BarTest {
         let si = Int(ProcessInfo.processInfo.environment["CL_BAR_SCREEN"] ?? "0") ?? 0
         let vf = screens[max(0, min(si, screens.count - 1))].visibleFrame
         w.setFrame(NSRect(x: vf.minX + 150, y: vf.maxY - 80 - 700, width: 1100, height: 700), display: true)
-        NSApp.activate(ignoringOtherApps: true)
-        w.makeKeyAndOrderFront(nil)
+        if ProcessInfo.processInfo.environment["CL_BAR_INACTIVE"] == nil {
+            NSApp.activate(ignoringOtherApps: true)
+            w.makeKeyAndOrderFront(nil)
+        }
         for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
             NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { _ in
                 MainActor.assumeIsolated { note("frame \(frame(w.frame))"); publishSoon(w) }
@@ -137,6 +159,8 @@ enum BarTest {
             "visible": [Double(vf.minX), Double(mainH - vf.maxY), Double(vf.width), Double(vf.height)],
             "screen": [Double(sf.minX), Double(mainH - sf.maxY), Double(sf.width), Double(sf.height)],
             "fullScreen": w.styleMask.contains(.fullScreen),
+            "drawnOff": [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { w.standardWindowButton($0) }
+                .map { b -> Double in let p = b.layer?.position ?? b.frame.origin; return Double(max(abs(p.x - b.frame.origin.x), abs(p.y - b.frame.origin.y))) },
             "lights": [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { w.standardWindowButton($0) }
                 .map { b -> [Double] in let r = b.convert(b.bounds, to: nil); return [Double(r.minX), Double(r.minY), Double(r.width), Double(r.height)] },
         ]

@@ -321,6 +321,7 @@ final class TitlebarManager {
         var observers: [NSObjectProtocol] = []
         var toolbarWatch: NSKeyValueObservation?
         var titleWatch: NSKeyValueObservation?
+        var watch: Timer?
     }
     private var states: [ObjectIdentifier: State] = [:]
 
@@ -366,6 +367,11 @@ final class TitlebarManager {
                 st.observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: v, queue: nil) { [weak self, weak w] _ in
                     MainActor.assumeIsolated { if let w { self?.reassert(w) } }
                 })
+            }
+            // Nothing says when AppKit moves a button's layer (see layout),
+            // so a look every so often, while the window can be seen.
+            st.watch = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self, weak w] _ in
+                MainActor.assumeIsolated { if let w, w.isVisible { self?.layout(w) } }
             }
             states[id] = st
         }
@@ -446,6 +452,7 @@ final class TitlebarManager {
     }
 
     private func forget(_ id: ObjectIdentifier) {
+        states[id]?.watch?.invalidate()
         for o in states[id]?.observers ?? [] { NotificationCenter.default.removeObserver(o) }
         states[id] = nil
     }
@@ -478,7 +485,14 @@ final class TitlebarManager {
         if container.frame != f { container.frame = f }
         for (i, btn) in b.enumerated() {
             let o = NSPoint(x: 2 + CGFloat(i) * spacing, y: ((st.barHeight - btn.frame.height) / 2).rounded())
-            if btn.frame.origin != o { btn.setFrameOrigin(o) }
+            // AppKit also moves a button's layer without its frame following
+            // (the green one, in a window that isn't active yet): the frame
+            // then looks right and the button is drawn in the wrong place.
+            let drawn = btn.layer?.position ?? o
+            if btn.frame.origin != o || abs(drawn.x - o.x) > 0.5 || abs(drawn.y - o.y) > 0.5 {
+                btn.setFrameOrigin(NSPoint(x: o.x + 1, y: o.y))
+                btn.setFrameOrigin(o)
+            }
         }
     }
 }

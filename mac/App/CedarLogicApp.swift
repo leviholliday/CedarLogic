@@ -116,7 +116,7 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             let launched = { Self.afterFirstDraw { Splash.shared.begin() } }
             guard dc.documents.isEmpty, !CommandLine.arguments.contains("--render-ui") else { launched(); return }
             // The toolbar test works on a new circuit, never one of yours.
-            if BarTest.on { Self.newHidden(); launched(); return }
+            if BarTest.on && ProcessInfo.processInfo.environment["CL_BAR_WATCH"] == nil { Self.newHidden(); launched(); return }
             let remembered = LastCircuit.url.map { [$0] } ?? []
             if let last = (remembered + dc.recentDocumentURLs).first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
                 dc.openDocument(withContentsOf: last, display: false) { doc, _, error in
