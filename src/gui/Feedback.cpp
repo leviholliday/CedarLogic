@@ -1742,7 +1742,7 @@ private:
 		wxTextCtrl* t = new wxTextCtrl(parent, wxID_ANY, value, wxDefaultPosition,
 		                               multi ? FromDIP(wxSize(-1, 110)) : wxDefaultSize,
 		                               multi ? (wxTE_MULTILINE | wxTE_RICH2) : 0);
-		t->SetHint(hint);
+		if (!multi) t->SetHint(hint);   // the several-line box has its hint above it
 		t->SetFont(font(13));
 		return t;
 	}
