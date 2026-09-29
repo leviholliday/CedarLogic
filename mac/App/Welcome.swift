@@ -306,6 +306,12 @@ struct WelcomeView: View {
             tile("Take the guided tour", "Two switches, a gate and a light. Recommended.", index: 0, action: readyAction(0))
             tile("Start with a blank canvas", "Jump straight in. Help > Guided Tour replays it.", index: 1, action: readyAction(1))
             tile("See every shortcut", "The whole list, searchable.", index: 2, action: readyAction(2))
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.bubble").font(.system(size: 15)).foregroundStyle(accent)
+                Text("Found something odd, or have an idea? The speech bubble at the right of the toolbar (or Help > Send Feedback) sends it straight to Levi, with a screenshot or a quick recording if you like.")
+                    .font(.system(size: 12.5)).foregroundStyle(dim).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 6)
         }
         .padding(.horizontal, 60).padding(.top, 36)
     }
@@ -511,7 +517,7 @@ final class TourModel: ObservableObject {
                  guard let w = c.view?.window, let d = NSDocumentController.shared.document(for: w) else { return false }
                  return d.fileURL != nil && d.fileModificationDate != m.savedAtStart && !d.isDocumentEdited }),
         Step(title: "You built a working circuit",
-             body: { _, _ in "That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help > Guided Tour brings this back." },
+             body: { _, _ in "That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help > Guided Tour brings this back. Something odd, or an idea? The speech bubble at the right of the toolbar sends it to Levi." },
              keys: { _, _ in ["?"] }, check: nil),
     ]
 

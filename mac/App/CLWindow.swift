@@ -1052,6 +1052,9 @@ struct CLToolbar: View {
         if prefs.shown(.tab) {
             group { button("plus.square.on.square", tip("New tab", .newTab)) { canvas.newPage() } }
         }
+        if prefs.shown(.feedback) {
+            group { button("exclamationmark.bubble", tip("Send feedback: a bug, an idea, anything", .feedback)) { canvas.perform(.feedback) } }
+        }
     }
 
     private var full: some View {
@@ -1097,6 +1100,8 @@ struct CLToolbar: View {
                     Button(canvas.locked ? "Unlock" : "Lock") { canvas.locked.toggle() }
                     Button("New Tab") { canvas.newPage() }
                     Button(focusMode ? "Leave Focus Mode" : "Focus Mode") { focusMode.toggle() }
+                    Divider()
+                    Button("Send Feedback…") { canvas.perform(.feedback) }
                 } label: {
                     Image(systemName: "ellipsis").font(.system(size: 15)).foregroundStyle(ink.opacity(0.9))
                         .frame(width: 34, height: 30)

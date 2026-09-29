@@ -670,6 +670,7 @@ final class CanvasController: ObservableObject {
         case .previousTab: cyclePage(-1)
         case .shortcuts: sheetHost.showShortcuts = true
         case .darkMode: Prefs.shared.dark.toggle()
+        case .feedback: FeedbackModel.aim(); openWindow?("feedback")
         }
     }
     /// Where the pointer is on the page right now. Asked of the window, not

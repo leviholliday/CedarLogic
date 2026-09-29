@@ -83,7 +83,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Tabs
     case newTab, closeTab, reopenTab, splitView, switchPane, closeSplit, nextTab, previousTab
     // App
-    case shortcuts, darkMode
+    case shortcuts, darkMode, feedback
 
     var id: String { rawValue }
 
@@ -95,7 +95,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode: "Moving around"
         case .simView, .step, .truthTable, .scope, .lock: "Simulation"
         case .newTab, .closeTab, .reopenTab, .splitView, .switchPane, .closeSplit, .nextTab, .previousTab: "Tabs and split view"
-        case .shortcuts, .darkMode: "App"
+        case .shortcuts, .darkMode, .feedback: "App"
         }
     }
 
@@ -143,6 +143,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .previousTab: "Previous tab"
         case .shortcuts: "Every shortcut (this list)"
         case .darkMode: "Dark mode"
+        case .feedback: "Send feedback"
         }
     }
 
@@ -191,6 +192,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .previousTab: return KeyCombo(key: "tab", mods: ctl | s)
         case .shortcuts: return KeyCombo(key: "/", mods: s)
         case .darkMode: return KeyCombo(key: "d", mods: c | s)
+        case .feedback: return nil
         }
     }
 }

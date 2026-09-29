@@ -64,6 +64,13 @@ struct CedarLogicApp: App {
         .defaultSize(width: 1000, height: 700)
         .defaultPosition(.center)
 
+        Window("Send Feedback", id: "feedback") {
+            FeedbackView()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Window("Version History", id: "versions") {
             VersionHistoryView()
         }
@@ -105,6 +112,7 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DevSnapshot.runIfAsked()
         BarTest.start()
+        FeedbackModel.selfTestIfAsked()
         // Once anything macOS was asked to open (a file double-clicked in
         // Finder) has arrived: the circuit you were last in (LastCircuit), as
         // the wx app reopens the one you had; else the most recent; else a
@@ -556,6 +564,7 @@ struct FileCommands: Commands {
 struct HelpCommands: Commands {
     @FocusedObject private var canvas: CanvasController?
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var keys = ShortcutStore.shared
     @AppStorage(interfaceKey) private var interface = Interface.cedarlogic.rawValue
 
     var body: some Commands {
@@ -565,6 +574,9 @@ struct HelpCommands: Commands {
                 .keyboardShortcut("?", modifiers: .command)
             Button("Contents…") { openWindow(id: "help") }
                 .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF1FunctionKey)!)), modifiers: [])
+            Divider()
+            Button("Send Feedback…") { FeedbackModel.aim(); openWindow(id: "feedback") }
+                .keyboardShortcut(keys.menu(.feedback))
             Divider()
             if interface == Interface.cedarlogic.rawValue {
                 Button("Keyboard Shortcuts") { (canvas ?? CanvasController.front)?.showShortcuts = true }

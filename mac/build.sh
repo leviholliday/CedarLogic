@@ -116,6 +116,10 @@ rm -f "$APP/Contents/Resources/CedarLogic.icns"
 /usr/libexec/PlistBuddy -c "Add SUFeedURL string https://raw.githubusercontent.com/leviholliday/CedarLogic-Releases/main/appcast-native.xml" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add SUEnableAutomaticChecks bool true" "$APP/Contents/Info.plist"
 [ -n "$SENTRY_DSN" ] && /usr/libexec/PlistBuddy -c "Add SentryDSN string $SENTRY_DSN" "$APP/Contents/Info.plist"
+# Send Feedback's server (the cedarlogic-site repository) and the key it
+# expects (its APP_KEY: not a secret, it keeps out passers-by).
+/usr/libexec/PlistBuddy -c "Add FeedbackURL string ${FEEDBACK_URL:-https://cedarlogic.netlify.app}" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add FeedbackKey string ${FEEDBACK_KEY:-96611596304230a4c3c21e22b1b3e523}" "$APP/Contents/Info.plist"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1
 echo "Built $APP"
 [ "${OPEN:-0}" = 1 ] && open "$APP"
