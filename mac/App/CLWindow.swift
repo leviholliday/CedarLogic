@@ -342,7 +342,10 @@ final class TitlebarManager {
                          NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification,
                          NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification,
                          NSWindow.didResignMainNotification, NSWindow.didChangeOcclusionStateNotification,
-                         NSWindow.didEnterFullScreenNotification, NSWindow.didDeminiaturizeNotification] {
+                         NSWindow.didEnterFullScreenNotification, NSWindow.didDeminiaturizeNotification,
+                         NSWindow.didChangeScreenNotification, NSWindow.didChangeBackingPropertiesNotification,
+                         NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification,
+                         NSWindow.didEndSheetNotification] {
                 st.observers.append(NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { [weak self, weak w] _ in
                     MainActor.assumeIsolated { if let w { self?.relayoutSoon(w) } }
                 })

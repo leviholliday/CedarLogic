@@ -15,6 +15,7 @@ import Foundation
 let dir = CommandLine.arguments[1]
 let appPID = Int(CommandLine.arguments[2])!
 func now() -> Double { ProcessInfo.processInfo.systemUptime }
+extension Array { subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil } }
 func nap(_ s: Double) { usleep(useconds_t(s * 1_000_000)) }
 
 // MARK: - Where things are (from the app)
@@ -22,7 +23,7 @@ func nap(_ s: Double) { usleep(useconds_t(s * 1_000_000)) }
 struct Coords {
     var version = 0, targets: [[String: Any]] = [], strips: [[Double]] = []
     var bar = CGPoint.zero, barLow = CGPoint.zero, left = CGPoint.zero
-    var frame: [Double] = [], visible: [Double] = [], screen: [Double] = [], fullScreen = false
+    var frame: [Double] = [], visible: [Double] = [], screen: [Double] = [], fullScreen = false, lights: [[Double]] = []
     func t(_ prefix: String, _ part: String = "center") -> CGPoint? {
         guard let x = targets.first(where: { ($0["tip"] as? String ?? "").hasPrefix(prefix) }), let p = x[part] as? [Double] else { return nil }
         return CGPoint(x: p[0], y: p[1])
@@ -36,7 +37,7 @@ func load() -> Coords? {
     return Coords(version: j["version"] as? Int ?? 0, targets: j["targets"] as? [[String: Any]] ?? [], strips: j["strips"] as? [[Double]] ?? [],
                   bar: point(j["bar"]), barLow: point(j["barLow"]), left: point(j["left"]),
                   frame: j["frame"] as? [Double] ?? [], visible: j["visible"] as? [Double] ?? [], screen: j["screen"] as? [Double] ?? [],
-                  fullScreen: j["fullScreen"] as? Bool ?? false)
+                  fullScreen: j["fullScreen"] as? Bool ?? false, lights: j["lights"] as? [[Double]] ?? [])
 }
 func fresh(after v: Int, timeout: Double = 2) -> Coords? {
     let end = now() + timeout
@@ -180,6 +181,13 @@ func clickCheck(_ prefix: String) -> ([String]) -> (Bool, String) {
     }
 }
 
+func lightsLevel(_ c: Coords) -> (Bool, String) {
+    let ys = c.lights.map { $0[1] }, xs = c.lights.map { $0[0] }
+    let level = (ys.max() ?? 0) - (ys.min() ?? 0) < 0.5
+    let inOrder = xs == xs.sorted()
+    return (level && inOrder && ys.count == 3, "traffic light heights \(ys), x \(xs)")
+}
+step("Red, yellow and green buttons sit level", settle: 0.1) { } check: { _ in lightsLevel(c) }
 step("Hover lights every tool, top edge included") {
     for t in c.targets { if let p = t["top"] as? [Double] { move(CGPoint(x: p[0] - 2, y: p[1])); nap(0.03); move(CGPoint(x: p[0], y: p[1])); nap(0.3) } }
 } check: { l in
@@ -214,6 +222,7 @@ step("Drag the empty bar moves the window") { drag(c.bar, by: CGPoint(x: 60, y: 
 }
 c = fresh(after: c.version) ?? c
 let sized = c.frame
+step("Buttons level after moving", settle: 0.1) { } check: { _ in lightsLevel(c) }
 step("Double-click the empty bar fills the screen", settle: 1.5) { doubleClick(c.bar) } check: { l in
     guard let b = frames(l).last else { return (false, "nothing happened") }
     let ok = b[2] > sized[2] + 200

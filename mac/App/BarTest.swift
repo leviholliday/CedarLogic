@@ -77,6 +77,12 @@ enum BarTest {
                     NotificationCenter.default.post(name: .clToggleFocusMode, object: CanvasController.front)
                     publishSoon(w)
                 case "fullscreen": w.toggleFullScreen(nil)
+                case "otherscreen":
+                    let screens = NSScreen.screens
+                    if let cur = w.screen, let to = screens.first(where: { $0 != cur }) {
+                        let vf = to.visibleFrame
+                        w.setFrame(NSRect(x: vf.minX + 100, y: vf.maxY - 60 - w.frame.height, width: w.frame.width, height: w.frame.height), display: true)
+                    }
                 case "publish": publish(w)
                 default: break
                 }
@@ -131,6 +137,8 @@ enum BarTest {
             "visible": [Double(vf.minX), Double(mainH - vf.maxY), Double(vf.width), Double(vf.height)],
             "screen": [Double(sf.minX), Double(mainH - sf.maxY), Double(sf.width), Double(sf.height)],
             "fullScreen": w.styleMask.contains(.fullScreen),
+            "lights": [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { w.standardWindowButton($0) }
+                .map { b -> [Double] in let r = b.convert(b.bounds, to: nil); return [Double(r.minX), Double(r.minY), Double(r.width), Double(r.height)] },
         ]
         if let d = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
             try? d.write(to: URL(fileURLWithPath: dir + "/coords.json"), options: .atomic)
