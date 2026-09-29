@@ -12,8 +12,13 @@
 // it's visible before any slow startup work runs on the same thread.
 GtkWidget* showSplash();
 
+// What it says it's doing, e.g. "Loading the gate library…".
+void splashSetStatus(GtkWidget* splash, const char* status);
+
 // Keeps it on top for at least a short, fixed time from when it was shown
-// (so a fast launch doesn't just flash it), then destroys it.
-void hideSplashSoon(GtkWidget* splash);
+// (so a fast launch doesn't just flash it), then destroys it and calls
+// `onHidden` (if given) right after -- for revealing windows that opened
+// while it was up (see main.cpp), so nothing peeks out from behind it.
+void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden = nullptr, gpointer data = nullptr);
 
 #endif  // CL_LINUX_SPLASH_H

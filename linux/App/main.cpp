@@ -274,9 +274,11 @@ void startupCb(GApplication* gapp, gpointer) {
 	loadCss();
 	setIcon();
 
+	if (gSplash) splashSetStatus(gSplash, "Loading the gate library…");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "/cl_gatedefs.xml";
 	gLibraryLoaded = !lib.empty() && cl_library_load(lib.c_str());
 	prefs().applyWireDots();
+	if (gSplash) splashSetStatus(gSplash, gLibraryLoaded ? "Opening the workspace…" : "Couldn't find the gate library");
 
 	const GActionEntry entries[] = {
 		{ "new", newCb, nullptr, nullptr, nullptr, { 0 } },
@@ -327,12 +329,16 @@ void activateCb(GApplication* gapp, gpointer) {
 		g_application_quit(gapp);
 		return;
 	}
-	newCircuitWindow(GTK_APPLICATION(gapp));
-	hideSplashSoon(gSplash);
+	CircuitWindow* w = newCircuitWindow(GTK_APPLICATION(gapp));
+	if (gSplash && w) gtk_widget_hide(GTK_WIDGET(w->window()));
+	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
+		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
+		if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, app);
+		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
+		else g_idle_add(offerRecoveryCb, app);
+		return G_SOURCE_REMOVE;
+	}, gapp);
 	gSplash = nullptr;
-	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
-	else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, gapp);
-	else g_idle_add(offerRecoveryCb, gapp);
 }
 
 void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpointer) {
@@ -350,11 +356,15 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		g_free(path);
 	}
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
-	hideSplashSoon(gSplash);
+	if (gSplash) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
+	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
+		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
+		if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, app);
+		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
+		else g_idle_add(offerRecoveryCb, app);
+		return G_SOURCE_REMOVE;
+	}, gapp);
 	gSplash = nullptr;
-	if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, gapp);
-	else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, gapp);
-	else g_idle_add(offerRecoveryCb, gapp);
 }
 
 }  // namespace
