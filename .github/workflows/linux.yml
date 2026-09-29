@@ -135,8 +135,20 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 120 build/CedarLogic --render format/tests/fixtures/Lab5.cdl renders/Lab5.png 1200 800 \
             || echo "--render exit $?"
+          # Send Feedback, light and dark, and the screenshot it takes.
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 120 build/CedarLogic --render-feedback renders/feedback format/tests/fixtures/Lab5.cdl \
+            || echo "--render-feedback exit $?"
           cp smoke.png smoke-appimage.png renders/
           ls -R renders
+
+      # Send Feedback can reach the site from the AppImage: curl found, TLS,
+      # an answer read back. It asks for a refusal, so nothing is sent.
+      - name: Feedback reaches the site
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 120 "$APPIMAGE" --feedback-probe
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7
