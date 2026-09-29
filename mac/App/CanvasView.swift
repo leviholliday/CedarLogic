@@ -490,7 +490,7 @@ final class CanvasController: ObservableObject {
             // doesn't say so, and keeps one only now and then (Library).
             let explicit = CACurrentMediaTime() - explicitSaveAt < 10
             Library.noteSaved(d.fileURL, explicit: explicit)
-            if explicit && Prefs.shared.isCedarLogic { note("Saved, and a version was kept.") }
+            if explicit { note("Saved, and a version was kept.") }
             explicitSaveAt = 0
         }
         lastSeenSave = date

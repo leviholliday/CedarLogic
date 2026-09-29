@@ -223,7 +223,6 @@ final class FeedbackModel: ObservableObject {
         ]
         if let chip = Self.sysctl("machdep.cpu.brand_string") { system["chip"] = chip }
         var context: [String: Any] = [
-            "interface": prefs.interface.name,
             "toolbar": prefs.toolbarStyle.name,
             "dark": prefs.dark,
         ]

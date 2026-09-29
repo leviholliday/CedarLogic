@@ -1,22 +1,9 @@
-// Preferences for the CedarLogic interface: the wx app's settings, kept in
+// Preferences: the wx app's settings, kept in
 // UserDefaults. On first launch they're read from the wx app's own
 // preferences file, so the look you chose there carries over.
 
 import AppKit
 import SwiftUI
-
-/// Which interface the windows use. CedarLogic is the wx app's, rebuilt;
-/// Simple is the plain Mac window (Native or Classic layout, look presets).
-enum Interface: String, CaseIterable, Identifiable {
-    case cedarlogic, simple
-    var id: String { rawValue }
-    var name: String { self == .cedarlogic ? "CedarLogic" : "Simple" }
-    var summary: String {
-        self == .cedarlogic
-            ? "Everything from the CedarLogic app: its toolbar and tabs, Simulation View, the minimap, quick add, the tour and the rest."
-            : "A plain Mac window with the basics, in the Native or Classic layout, with look presets."
-    }
-}
 
 /// The wx app's toolbar styles (Segmented was dropped: it was Classic again).
 enum ToolbarStyle: Int, CaseIterable, Identifiable {
@@ -55,7 +42,6 @@ final class Prefs: ObservableObject {
     static let shared = Prefs()
     private let d = UserDefaults.standard
 
-    @Published var interface: Interface { didSet { d.set(interface.rawValue, forKey: "interface") } }
     @Published var testingGroup: TestingGroup {
         didSet {
             guard testingGroup != oldValue else { return }
@@ -110,7 +96,6 @@ final class Prefs: ObservableObject {
         let d = UserDefaults.standard
         func int(_ k: String, _ v: Int) -> Int { d.object(forKey: k) == nil ? v : d.integer(forKey: k) }
         func bool(_ k: String, _ v: Bool) -> Bool { d.object(forKey: k) == nil ? v : d.bool(forKey: k) }
-        interface = Interface(rawValue: d.string(forKey: "interface") ?? "") ?? .cedarlogic
         testingGroup = TestingGroup(rawValue: d.string(forKey: "testingGroup") ?? "") ?? .normal
         themeMode = int("cl.themeMode", 0)
         dark = bool("cl.lastDark", false)
@@ -148,7 +133,6 @@ final class Prefs: ObservableObject {
         applyWireDots()
     }
 
-    var isCedarLogic: Bool { interface == .cedarlogic }
 
     // MARK: Derived
 

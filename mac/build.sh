@@ -103,7 +103,7 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" mac/App/
 /usr/libexec/PlistBuddy -c "Add CFBundleGetInfoString string CedarLogic Native $VERSION (build $BUILD, $COMMIT)" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add CLCommit string $COMMIT" "$APP/Contents/Info.plist"
 cp res/cl_gatedefs.xml "$APP/Contents/Resources/"
-cp mac/App/CedarLogicNative.icns "$APP/Contents/Resources/"
+cp mac/App/CedarLogicNative.icns mac/App/CedarLogicDocument.icns "$APP/Contents/Resources/"
 # The launch screen's icon (the artwork without the NATIVE badge), and the
 # original CedarLogic help pages for Help > Classic Help.
 sips -c 1086 1086 res/macos/icon-artwork.png --out "$OUT/launch-icon.png" >/dev/null   # just the rounded tile

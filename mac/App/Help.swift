@@ -181,7 +181,7 @@ enum HelpBook {
         HelpPage(id: "settings", title: "Settings", icon: "gearshape",
                  line: "Make it yours (⌘,).",
                  blocks: [
-                    .p("**General**: the interface, your name for exports, how circuits open, the status bar and updates. **Appearance**: theme, accent colour, tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut."),
+                    .p("**General**: your name for exports, how circuits open, the status bar, updates and crash reports. **Appearance**: theme, accent colour, tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut."),
                     .p("**{darkMode}** switches between light and dark any time."),
                  ]),
     ]
