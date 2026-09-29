@@ -36,6 +36,9 @@ struct FeedbackView: View {
         .background(paper)
         // The band runs up under the title bar, the window's buttons on it.
         .ignoresSafeArea(.container, edges: .top)
+        // The window keeps the title bar's height at the bottom; paper there too.
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(paper.ignoresSafeArea())
         .preferredColorScheme(dark ? .dark : .light)
         .tint(accent)
         .onEscape { dismiss() }
