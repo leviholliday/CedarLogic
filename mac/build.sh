@@ -72,7 +72,7 @@ SENTRY_DIR="${SENTRY_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/bu
 SENTRY_FLAGS=()
 [ -d "$SENTRY_DIR/Sentry.framework" ] && SENTRY_FLAGS=(-F "$SENTRY_DIR" -framework Sentry)
 # Where reports go: the Sentry project's DSN (Settings > Client Keys).
-SENTRY_DSN="${SENTRY_DSN:-}"
+SENTRY_DSN="${SENTRY_DSN:-https://36b411e83b623ea3bc3a7bc6fda107a0@o4512167663239168.ingest.us.sentry.io/4512167685849088}"
 
 echo "App..."
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

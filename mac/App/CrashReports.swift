@@ -25,7 +25,7 @@ enum CrashReports {
     private static var dsn: String { Bundle.main.object(forInfoDictionaryKey: "SentryDSN") as? String ?? "" }
     /// The tester said yes (nil: not asked yet).
     static var allowed: Bool? {
-        get { UserDefaults.standard.object(forKey: key) as? Bool }
+        get { UserDefaults.standard.object(forKey: key) == nil ? nil : UserDefaults.standard.bool(forKey: key) }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 
@@ -45,6 +45,11 @@ enum CrashReports {
             o.enableAutoPerformanceTracing = false
         }
         started = true
+        // Development: CL_TEST_CRASH=1 crashes the app a few seconds after
+        // launch, so a report can be seen arriving (on the next launch).
+        if ProcessInfo.processInfo.environment["CL_TEST_CRASH"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { SentrySDK.crash() }
+        }
         #endif
     }
     private static var started = false
