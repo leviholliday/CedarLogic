@@ -61,6 +61,7 @@ const char* groupName(int g) {
 		case GLock:      return "Lock";
 		case GTheme:     return "Dark mode";
 		case GTab:       return "New tab";
+		case GFeedback:  return "Send feedback";
 	}
 	return "";
 }
@@ -122,7 +123,8 @@ wxBitmap icon(const char* name, const wxColour& c, int px, double scale) {
 		{ "run", "play.fill" }, { "stop", "stop.fill" }, { "speed", "gauge.with.dots.needle.50percent" },
 		{ "locked", "lock.fill" }, { "unlocked", "lock.open" },
 		{ "moon", "moon" }, { "sun", "sun.max" }, { "newtab", "plus.square.on.square" },
-		{ "more", "ellipsis" } };
+		{ "more", "ellipsis" }, { "feedback", "exclamationmark.bubble" },
+		{ "camera", "camera" }, { "image", "photo" } };
 	auto m = sf.find(name);
 	if (m != sf.end()) bmp = NativeIcon_TintedSFSymbol(m->second, px * 0.88, c.Red(), c.Green(), c.Blue(), c.Alpha(), scale);
 	if (bmp.IsOk()) { cache[key] = bmp; return bmp; }
@@ -220,6 +222,7 @@ std::vector<Item> layout(int style, int hidden, const State& s, int W, int H) {
 	// when the window is too narrow for both. What they did is still in the
 	// menu and on its shortcut.
 	auto fits = [&](int w) { return r - w - GROUP_GAP > x; };
+	if (shown(GFeedback) && fits(BTN_W)) { add(Item::Button, Help_Feedback, "feedback", "Send feedback: a bug, an idea, anything", 15, r, BTN_W, false); r -= GROUP_GAP; }
 	if (shown(GTab) && fits(BTN_W))   { add(Item::Button, Tool_NewTab, "newtab", "New tab (" + mod + "T)", 13, r, BTN_W, false); r -= GROUP_GAP; }
 	if (shown(GTheme) && fits(BTN_W)) { add(Item::Toggle, Tool_ThemeToggle, nullptr, "Dark mode", 12, r, BTN_W, false); r -= GROUP_GAP; }
 	if (shown(GLock) && fits(BTN_W))  { add(Item::Toggle, Tool_Lock, nullptr, "Lock the circuit so it can't be edited", 11, r, BTN_W, false); r -= GROUP_GAP; }
@@ -527,6 +530,8 @@ void ModernToolbar::activate(const Item& it) {
 			menu.AppendSeparator();
 			menu.Append(View_TruthTable, "Truth Table...");
 			menu.Append(Tool_NewTab, "New Tab");
+			menu.AppendSeparator();
+			menu.Append(Help_Feedback, "Send Feedback...");
 			const int chosen = GetPopupMenuSelectionFromUser(menu, it.rect.GetBottomLeft());
 			if (chosen == wxID_NONE) break;
 			Item picked{ Item::Button, chosen, nullptr, "", 0, wxRect() };

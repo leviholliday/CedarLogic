@@ -7,5 +7,8 @@
 #define CEDARLOGIC_APPCAST_BETA_URL "@CEDARLOGIC_APPCAST_BETA_URL@"
 #define CEDARLOGIC_RELEASES_URL "https://github.com/@CEDARLOGIC_RELEASES_REPO@/releases/latest"
 #define CEDARLOGIC_ISSUES_URL "https://github.com/@CEDARLOGIC_RELEASES_REPO@/issues/new"
+// Send Feedback (see Feedback.h).
+#define CEDARLOGIC_FEEDBACK_URL "@CEDARLOGIC_FEEDBACK_URL@"
+#define CEDARLOGIC_FEEDBACK_KEY "@CEDARLOGIC_FEEDBACK_KEY@"
 // 1 when the build carries the update signing key; the updater stays off otherwise.
 #define CEDARLOGIC_UPDATES_SIGNED @CEDARLOGIC_UPDATES_SIGNED@

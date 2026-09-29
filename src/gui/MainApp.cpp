@@ -12,6 +12,7 @@
 #include "MainFrame.h"
 #include "Welcome.h"
 #include "ShortcutsSheet.h"
+#include "Feedback.h"
 #include "wx/cmdline.h"
 #include "../version.h"
 #include "CedarLogic.h"   // update feed and download URLs
@@ -740,6 +741,8 @@ bool MainApp::OnInit()
     bool wireDrag = false;     // --wire-drag dumps a wire's segment map after a seg drag
     bool renderUi = false;     // --render-ui draws the welcome/tour/shortcuts windows
     bool renderWindows = false;   // --render-windows captures real windows (Windows only)
+    bool feedbackProbe = false;   // --feedback-probe checks Send Feedback can reach the site
+    wxString feedbackSelfTest;    // --feedback-selftest <title> sends a test item
     std::string gateName, gateAngle;
     std::string wsGateA, wsGateB, wsAngleA, wsAngleB;
     if (argc >= 7 && (wxString(argv[1]) == "--wire-shape" ||
@@ -789,6 +792,14 @@ bool MainApp::OnInit()
         cmdFilename = argv[2].ToStdString();
         renderOutput = argv[3].ToStdString();
         if (argc >= 6) { renderW = wxAtoi(argv[4]); renderH = wxAtoi(argv[5]); }
+    } else if (argc >= 2 && wxString(argv[1]) == "--feedback-probe") {
+        // --feedback-probe: can Send Feedback reach the site from here? Asks
+        // for a refusal, so nothing is sent (see Feedback.h).
+        renderMode().headlessRender = true;
+        feedbackProbe = true;
+    } else if (argc >= 3 && wxString(argv[1]) == "--feedback-selftest") {
+        // --feedback-selftest <title>: sends a real item, screenshot and all.
+        feedbackSelfTest = argv[2];
     } else if( argc >= 2 ){
 		cmdFilename = argv[1].ToStdString();
 //		logfile << "cmdFilename = " << cmdFilename << endl;
@@ -850,6 +861,11 @@ bool MainApp::OnInit()
         MacSetBackgroundApp();
 #endif
         if (!renderWindows) frame->Move(-30000, -30000);
+    }
+
+    if (feedbackProbe) {
+        CallAfter([] { StartFeedbackProbe(); });
+        return true;
     }
 
     if (renderMode().headlessRender && (wireShape || wireDrag)) {
@@ -990,6 +1006,23 @@ bool MainApp::OnInit()
             ok &= WinCaptureWindow(&add, renderOutput + (dark ? "/gatesearch-dark.png" : "/gatesearch-light.png"));
             add.Hide();
         }
+
+        // Send Feedback, light and dark, and the screenshot it would take.
+        for (int dark = 0; dark < 2; dark++) {
+            renderMode().darkMode = dark != 0;
+            frame->ApplyTheme();
+            wxTopLevelWindow* fb = FeedbackWindowForCapture(frame);
+            settle();
+            ok &= WinCaptureWindow(fb, renderOutput + (dark ? "/feedback-dark.png" : "/feedback-light.png"));
+            if (dark) {
+                wxImage shot;
+                const bool took = CaptureAppWindow(frame, shot);
+                wxPrintf("feedback screenshot: %s\n", took ? "taken" : "NOT taken");
+                ok &= took && shot.SaveFile(renderOutput + "/feedback-screenshot.png", wxBITMAP_TYPE_PNG);
+            }
+            DismissFeedback();
+            settle();
+        }
 #endif
         fflush(nullptr);
         std::_Exit(ok ? 0 : 1);
@@ -1109,6 +1142,8 @@ bool MainApp::OnInit()
     if (!crashReportHandled) {
         CallAfter([this]() { showPendingCrashReport(mainframe, /*duringStartup=*/false); });
     }
+
+    if (!feedbackSelfTest.empty()) StartFeedbackSelfTest(frame, feedbackSelfTest);
 
     return true;
 }

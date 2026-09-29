@@ -8,6 +8,7 @@
 
 #ifdef _WIN32
 
+#include <wx/bitmap.h>
 #include <wx/colour.h>
 #include <wx/string.h>
 
@@ -37,6 +38,11 @@ void WinSetCaptionColour(wxTopLevelWindow* window, const wxColour& bar, const wx
 // The window as it looks on screen, children and all, saved as a PNG. For
 // --render-windows, which is how a Windows build gets looked at from a Mac.
 bool WinCaptureWindow(wxWindow* window, const wxString& pngPath);
+
+// The same picture as a bitmap (for Send Feedback's screenshot). `method` says
+// how it was got: 0 is what the screen showed, OpenGL canvas and all; 1 and 2
+// may have a blank canvas.
+bool WinGrabWindow(wxWindow* window, wxBitmap& out, int* method = nullptr);
 
 // Round a borderless popup's corners the Windows 11 way: antialiased, with
 // the system's thin border and shadow. Does nothing on Windows 10.

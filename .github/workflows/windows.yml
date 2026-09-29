@@ -107,6 +107,12 @@ jobs:
           cp smoke.png renders/
           ls -R renders
 
+      # Send Feedback can reach the site from Windows: curl.exe found, TLS, an
+      # answer read back. It asks for a refusal, so nothing is sent.
+      - name: Feedback reaches the site
+        shell: bash
+        run: timeout 120 "$EXE" --feedback-probe
+
       - name: Package
         shell: bash
         run: |

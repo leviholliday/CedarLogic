@@ -32,6 +32,7 @@
 #include "MainFrame.h"
 #include "TabStrip.h"
 #include "Welcome.h"
+#include "Feedback.h"
 #include "ShortcutsSheet.h"
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
@@ -313,6 +314,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	helpMenu->Append(Help_SetUp, "Set Up CedarLogic...", "Walk through the settings one at a time");
 	helpMenu->Append(Help_Tour, "Guided Tour", "Build a working circuit step by step");
 	helpMenu->AppendSeparator();
+	helpMenu->Append(Help_Feedback, "Send Feedback...", "A bug, an idea, anything: it goes straight to Levi");
 	//helpMenu->Append(Help_ReportABug, "Report a bug...");
 	//helpMenu->Append(Help_RequestAFeature, "Request a feature...");
 	helpMenu->Append(Help_DownloadLatestVersion, "Check for Updates...");
@@ -520,6 +522,9 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	                 "Toggle dark mode", wxITEM_CHECK);
 	toolBar->AddSeparator();
 	toolBar->AddTool(wxID_ABOUT, "About", icon("info.circle", "about"), "About");
+	feedbackIcon = icon("exclamationmark.bubble", "feedback");
+	toolBar->AddTool(Help_Feedback, "Feedback", feedbackIcon,
+	                 "Send feedback: a bug, an idea, anything");
 	toolBar->AddSeparator();
 	toolBar->AddTool(Tool_NewTab, "New Tab", icon("plus.square", "newtab"), "New Tab");
 #ifdef __WXMSW__
@@ -759,6 +764,7 @@ MainFrame::MainFrame(const wxString& title, string cmdFilename)
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWelcome(this, false); }, Help_Welcome);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowWelcome(this, true); }, Help_SetUp);
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) { StartTutorial(this); }, Help_Tour);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowFeedback(this); }, Help_Feedback);
 	Bind(wxEVT_MENU, &MainFrame::OnSplitRight, this, Tool_SplitRight);
 	Bind(wxEVT_MENU, &MainFrame::OnSplitClose, this, Tool_SplitClose);
 	Bind(wxEVT_MENU, &MainFrame::OnFocusOtherPane, this, Tool_FocusOtherPane);
@@ -1584,6 +1590,20 @@ void MainFrame::ApplyThemeToggleVisibility() {
 	// The same "Dark mode" group the modern toolbars show or hide, so one
 	// checkbox in the Toolbar settings covers every style.
 	auto& settings = appConfig().appSettings;
+	// Send Feedback, beside About, follows its checkbox the same way.
+	const bool wantFeedback = !(settings.toolbarHidden & (1 << cl::tb::GFeedback));
+	if (wantFeedback != (toolBar->FindById(Help_Feedback) != nullptr)) {
+		if (wantFeedback) {
+			const int aboutPos = toolBar->GetToolPos(wxID_ABOUT);
+			toolBar->InsertTool(aboutPos >= 0 ? (size_t)aboutPos + 1 : toolBar->GetToolsCount(), Help_Feedback,
+			                    "Feedback", feedbackIcon, wxNullBitmap, wxITEM_NORMAL,
+			                    "Send feedback: a bug, an idea, anything");
+			toolBar->Realize();
+			setToolIcon(Help_Feedback, feedbackIcon, "exclamationmark.bubble");
+		} else {
+			toolBar->DeleteTool(Help_Feedback);
+		}
+	}
 	settings.showThemeToggleButton = !(settings.toolbarHidden & (1 << cl::tb::GTheme));
 	const bool want = settings.showThemeToggleButton;
 	const bool have = toolBar->FindById(Tool_ThemeToggle) != nullptr;

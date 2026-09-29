@@ -8,6 +8,8 @@
 
 #ifdef __APPLE__
 
+#include <vector>
+
 // Force `nsView` (from wxWindow::GetHandle()) and everything nested inside it to
 // the light appearance, whatever the system is set to. For panels the app paints
 // light itself: their native chrome -- scrollbars above all -- otherwise inherits
@@ -58,6 +60,11 @@ bool MacAskYesNo(const char* title, const char* message, bool dark);
 // with a real title bar.
 void MacDragWindow(void* nsWindow);
 void MacTitlebarDoubleClick(void* nsWindow);
+
+// The whole window `nsView` is in, title bar included, as the window server
+// last drew it -- at the screen's sharpness -- as RGB rows from the top. An
+// OpenGL canvas comes out blank: CaptureAppWindow paints those in itself.
+bool MacGrabWindow(void* nsView, std::vector<unsigned char>& rgb, int& width, int& height);
 
 #endif // __APPLE__
 

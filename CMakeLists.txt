@@ -59,6 +59,10 @@ set(CEDARLOGIC_APPCAST_BETA_URL
     "https://raw.githubusercontent.com/${CEDARLOGIC_RELEASES_REPO}/main/appcast-beta.xml"
     CACHE STRING "Update feed for beta testers")
 set(CEDARLOGIC_BUNDLE_ID "com.leviholliday.cedarlogic" CACHE STRING "macOS bundle identifier")
+# Help > Send Feedback posts here (the cedarlogic-site repo). The key isn't a
+# secret -- it ships in every copy -- it only keeps out what wanders by.
+set(CEDARLOGIC_FEEDBACK_URL "https://cedarlogic.netlify.app" CACHE STRING "Where Send Feedback sends to")
+set(CEDARLOGIC_FEEDBACK_KEY "96611596304230a4c3c21e22b1b3e523" CACHE STRING "Sent with feedback so the site knows it's from the app")
 configure_file(CedarLogic.h.in CedarLogic.h)
 
 # CMake modules, that is, files specifying functions we can use in CMake
@@ -295,7 +299,7 @@ set_source_files_properties(${SKIA_SRC_FILES} PROPERTIES
 # include/gui/EmbeddedRes.h); everything else in res/ is still read from disk.
 file(GLOB EMBED_ICONS RELATIVE "${PROJECT_SOURCE_DIR}/res" "${PROJECT_SOURCE_DIR}/res/icons/*.svg")
 embed_resources(EMBEDDED_RES_CPP "${PROJECT_SOURCE_DIR}/res"
-    cl_gatedefs.xml samples/practice.cdl ${EMBED_ICONS})
+    cl_gatedefs.xml samples/practice.cdl icon.png ${EMBED_ICONS})
 list(APPEND SRC_FILES "${EMBEDDED_RES_CPP}")
 
 # macOS: Add Objective-C++ sources
