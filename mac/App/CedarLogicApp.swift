@@ -95,6 +95,7 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DevSnapshot.runIfAsked()
+        BarTest.start()
         // Once anything macOS was asked to open (a file double-clicked in
         // Finder) has arrived: the circuit you were last in (LastCircuit), as
         // the wx app reopens the one you had; else the most recent; else a
@@ -105,6 +106,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             let dc = NSDocumentController.shared
             let launched = { Self.afterFirstDraw { Splash.shared.begin() } }
             guard dc.documents.isEmpty, !CommandLine.arguments.contains("--render-ui") else { launched(); return }
+            // The toolbar test works on a new circuit, never one of yours.
+            if BarTest.on { Self.newHidden(); launched(); return }
             let remembered = LastCircuit.url.map { [$0] } ?? []
             if let last = (remembered + dc.recentDocumentURLs).first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
                 dc.openDocument(withContentsOf: last, display: false) { doc, _, error in

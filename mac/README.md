@@ -49,6 +49,14 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   Simulation View's drawing)
 - `save_check` -- open, save and reopen circuits; the text must match
 - `asan-check.sh` -- `edit_check` under AddressSanitizer
+- `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
+  and top edges included), hover, tooltips, dragging, double-click to fill,
+  focus mode's tab strip and full screen, PASS or FAIL for each
+  (`STYLE=minimal` for the Minimal toolbar, `SCREEN=1` for another
+  display). It moves the pointer for about a minute and needs Accessibility
+  permission; run it after any change to the title bar row. The app side
+  is `CL_BAR_TEST=<dir>` (App/BarTest.swift): a new untitled circuit, tool
+  clicks logged instead of done
 - `CL_SNAPSHOT=<dir>` when running the app -- the circuit window draws
   itself to PNGs as it opens, splits (placing a gate on the second side),
   gains a tab and unsplits, and logs both canvases' frames (works when

@@ -580,18 +580,22 @@ struct BarClickArea: NSViewRepresentable {
         private func fraction(_ p: NSPoint) -> CGFloat { min(1, max(0, p.x / max(1, bounds.width))) }
 
         override func mouseDown(with e: NSEvent) {
+            BarTest.note("down \(tip ?? "") clicks=\(e.clickCount)")
             held = true
             onPress(true)
-            onDrag?(fraction(point(e)))
+            if !BarTest.on { onDrag?(fraction(point(e))) }
         }
         override func mouseDragged(with e: NSEvent) {
             let p = point(e)
+            if BarTest.on { return }
             if let onDrag { onDrag(fraction(p)) } else { onPress(inside(p)) }
         }
         override func mouseUp(with e: NSEvent) {
             held = false
             onPress(false)
-            if onDrag == nil && inside(point(e)) { onClick() }
+            // Under the toolbar test (BarTest) a click is logged, not done.
+            if BarTest.on { if inside(point(e)) { BarTest.note("CLICK \(tip ?? "")") } }
+            else if onDrag == nil && inside(point(e)) { onClick() }
             BarHover.refresh()
         }
     }
@@ -603,6 +607,28 @@ struct BarClickArea: NSViewRepresentable {
         v.onPress = onPress
         v.onClick = onClick
         v.onDrag = onDrag
+    }
+}
+
+/// A tip and a light for a control that takes its own clicks (a SwiftUI
+/// Menu, say): BarHover finds it by where the pointer is, never by a hit
+/// test, so it's never between the control and a click.
+struct BarTipArea: NSViewRepresentable {
+    var tip: String
+    var onHover: (Bool) -> Void = { _ in }
+
+    final class Area: BarControl {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { BarHover.region(self) }
+        }
+    }
+
+    func makeNSView(context: Context) -> Area { Area() }
+    func updateNSView(_ v: Area, context: Context) {
+        v.tip = tip
+        v.onHover = onHover
     }
 }
 
@@ -641,6 +667,15 @@ enum BarHover {
     }
     static func unfollow(_ v: WindowDragArea.DragView) { followers[ObjectIdentifier(v)] = nil }
 
+    private struct Region { weak var view: BarControl? }
+    private static var regions: [Region] = []
+    /// A BarTipArea: found by where the pointer is (see refresh).
+    static func region(_ v: BarControl) {
+        install()
+        regions.removeAll { $0.view == nil || $0.view === v }
+        regions.append(Region(view: v))
+    }
+
     /// What's under the pointer now: the control there lit, the one before
     /// not. (`near`: it's known to be by a control.)
     static func refresh(near: Bool = false) {
@@ -652,10 +687,18 @@ enum BarHover {
         let w = NSApp.window(withWindowNumber: NSWindow.windowNumber(at: m, belowWindowWithWindowNumber: 0))
         var found: BarControl?
         if let w, w.attachedSheet == nil, let frame = w.contentView?.superview {
-            var v = frame.hitTest(w.convertPoint(fromScreen: m))
+            let p = w.convertPoint(fromScreen: m)
+            var v = frame.hitTest(p)
             while let x = v, found == nil { found = x as? BarControl; v = x.superview }
+            if found == nil {
+                found = regions.lazy.compactMap(\.view).first {
+                    $0.window === w && !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: nil).contains(p)
+                }
+            }
         }
         if lit?.held != true, found !== lit {
+            if found == nil && lit != nil { BarTest.note("unlit") }
+            if let found { BarTest.note("lit \(found.tip ?? "")") }
             lit?.light(false)
             lit = found
             found?.light(true)
@@ -742,6 +785,7 @@ enum BarTip {
         p.invalidateShadow()
         p.orderFront(nil)
         shownFor = c
+        BarTest.note("tip shown: \(text)")
     }
 
     private static func hide() {
@@ -821,6 +865,7 @@ struct WindowDragArea: NSViewRepresentable {
 
         override func mouseDown(with event: NSEvent) {
             guard let w = window else { return }
+            BarTest.note("dragview down clicks=\(event.clickCount)")
             if event.clickCount >= 2 {
                 if let onDoubleClick { onDoubleClick() } else { Self.titlebarDoubleClick(w) }
                 return
@@ -878,6 +923,7 @@ struct CLToolbar: View {
     var styleOverride: ToolbarStyle? = nil
     @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var keys = ShortcutStore.shared
+    @State private var moreHover = false
 
     private var style: ToolbarStyle { styleOverride ?? prefs.toolbarStyle }
     private var dark: Bool { prefs.dark }
@@ -1041,7 +1087,9 @@ struct CLToolbar: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("More")
+                .background(RoundedRectangle(cornerRadius: 7).fill(ink.opacity(moreHover ? 0.08 : 0)))
+                .overlay(BarTipArea(tip: "More", onHover: { h in withAnimation(.easeOut(duration: 0.12)) { moreHover = h } })
+                    .allowsHitTesting(false))
             }
             .padding(.trailing, 12)
         }
@@ -1086,6 +1134,8 @@ private struct TitleClickArea: NSViewRepresentable {
 
     final class Area: BarControl {
         override func mouseDown(with event: NSEvent) {
+            BarTest.note("down \(tip ?? "") clicks=\(event.clickCount)")
+            if BarTest.on { BarTest.note("CLICK \(tip ?? "")"); return }
             TitleActions.popUp(in: self)
             BarHover.refresh()
         }
@@ -1538,7 +1588,7 @@ struct CLTabStrip: View {
             if titleRow {
                 LinearGradient(colors: [chrome.tabBarTop, chrome.tabBar], startPoint: .top, endPoint: .bottom)
                     .allowsHitTesting(false)
-                WindowDragArea(onPress: { activate() }, onDoubleClick: { controller.newPage() },
+                WindowDragArea(onPress: { activate() }, onDoubleClick: { if BarTest.on { BarTest.note("strip doubleclick") } else { controller.newPage() } },
                                onPointer: { pointer($0, pages, tw) })
             } else {
                 LinearGradient(colors: [chrome.tabBarTop, chrome.tabBar], startPoint: .top, endPoint: .bottom)
@@ -1624,6 +1674,7 @@ struct CLTabStrip: View {
             let px = x(pages.count, tw)
             if h == nil && pt.x >= px && pt.x < px + plusW { h = -2 }
         }
+        if hover != h || hoverClose != close { BarTest.note("strip hover \(h.map(String.init) ?? "-") close \(close.map(String.init) ?? "-")") }
         if hover != h { hover = h }
         if hoverClose != close { hoverClose = close }
     }
