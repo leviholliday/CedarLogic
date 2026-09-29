@@ -193,3 +193,34 @@ void MacTitlebarDoubleClick(void* nsWindow) {
 }
 
 #endif // __APPLE__
+
+bool MacGrabWindow(void* nsView, std::vector<unsigned char>& rgb, int& width, int& height) {
+	NSView* view = (NSView*)nsView;
+	NSWindow* window = view.window;
+	if (window == nil) return false;
+	NSView* whole = window.contentView.superview ?: window.contentView;
+	const NSRect bounds = whole.bounds;
+	NSBitmapImageRep* rep = [whole bitmapImageRepForCachingDisplayInRect:bounds];
+	if (rep == nil) return false;
+	[whole cacheDisplayInRect:bounds toBitmapImageRep:rep];
+	CGImageRef image = rep.CGImage;
+	if (image == nullptr) return false;
+	width = (int)CGImageGetWidth(image);
+	height = (int)CGImageGetHeight(image);
+	if (width <= 0 || height <= 0) return false;
+	std::vector<unsigned char> rgba((size_t)width * height * 4, 255);
+	CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+	CGContextRef ctx = CGBitmapContextCreate(rgba.data(), width, height, 8, (size_t)width * 4, space,
+	                                         kCGImageAlphaNoneSkipLast);
+	CGColorSpaceRelease(space);
+	if (ctx == nullptr) return false;
+	CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), image);
+	CGContextRelease(ctx);
+	rgb.resize((size_t)width * height * 3);
+	for (size_t i = 0, n = (size_t)width * height; i < n; i++) {
+		rgb[3 * i] = rgba[4 * i];
+		rgb[3 * i + 1] = rgba[4 * i + 1];
+		rgb[3 * i + 2] = rgba[4 * i + 2];
+	}
+	return true;
+}

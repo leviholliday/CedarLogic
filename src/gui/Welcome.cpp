@@ -18,6 +18,7 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "UiKit.h"
+#include "ModernToolbar.h"   // cl::tb::ToolIcon
 #ifdef __WXMSW__
 #include "WinAppearance.h"
 #endif
@@ -715,6 +716,18 @@ private:
 			gc->DrawText(U(tiles[i].line), r.x + 24, r.y + 44);
 			hits.push_back({ r, tiles[i].id });
 		}
+
+		// Where to say what's wrong, or what would be better.
+		const double noteY = 150 + 3 * 96 + 8;
+		const wxBitmap bubble = cl::tb::ToolIcon("feedback", accent, 18, face->GetContentScaleFactor());
+		if (bubble.IsOk()) gc->DrawBitmap(bubble, 62, noteY, 18, 18);
+		gc->SetFont(wxFont(wxFontInfo(12)), ui::dim());
+		double lineY = noteY + 1;
+		for (const wxString& line : ui::wrap(gc, U("Found a bug, or have an idea? Help > Send Feedback (the "
+		                                           "speech bubble on the toolbar) sends it straight to Levi."), W - 150)) {
+			gc->DrawText(line, 90, lineY);
+			lineY += 16;
+		}
 	}
 
 	// Progress dots, Back, and the way on -- on every page.
@@ -1016,7 +1029,8 @@ std::vector<TourStep> buildTour() {
 
 	steps.push_back({ "You built a working circuit",
 		text("That's the loop: add, wire, try it, check it. Press ? whenever you want every "
-		     "shortcut, and Help > Guided Tour brings this back."),
+		     "shortcut, and Help > Guided Tour brings this back. Found a bug, or have an idea? "
+		     "Help > Send Feedback (the speech bubble on the toolbar) sends it straight to Levi."),
 		caps({ "?" }),
 		nullptr, nullptr });
 	return steps;

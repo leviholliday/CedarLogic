@@ -92,6 +92,7 @@ enum
 	Help_Welcome,
 	Help_SetUp,
 	Help_Tour,
+	Help_Feedback,
 
 	ID_SIM_PUMP
 };
@@ -462,6 +463,7 @@ private:
 	wxBitmapBundle unlockedIcon;
 	wxBitmapBundle sunIcon;
 	wxBitmapBundle moonIcon;
+	wxBitmapBundle feedbackIcon;
 
 	//Julian: Re-added timers to fix refresh error
 	wxTimer* simTimer;

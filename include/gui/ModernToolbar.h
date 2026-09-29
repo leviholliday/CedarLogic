@@ -22,7 +22,7 @@ namespace tb {
 enum Style { Classic = 0, Segmented, Minimal, Seamless, StyleCount };
 
 // Tool groups the user can hide, one bit each in appSettings.toolbarHidden.
-enum Group { GFile = 0, GUndo, GClipboard, GZoom, GSim, GRun, GLock, GTheme, GTab, GroupCount };
+enum Group { GFile = 0, GUndo, GClipboard, GZoom, GSim, GRun, GLock, GTheme, GTab, GFeedback, GroupCount };
 
 const char* styleName(int style);
 const char* styleBlurb(int style);

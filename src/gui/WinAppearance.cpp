@@ -133,7 +133,7 @@ void WinSetCaptionColour(wxTopLevelWindow* window, const wxColour& bar, const wx
 	DwmSetWindowAttribute(hwnd, 34, &caption, sizeof(caption));
 }
 
-bool WinCaptureWindow(wxWindow* window, const wxString& pngPath) {
+bool WinGrabWindow(wxWindow* window, wxBitmap& out, int* method) {
 	if (window == nullptr) return false;
 	HWND hwnd = static_cast<HWND>(window->GetHWND());
 	RECT rc;
@@ -153,14 +153,14 @@ bool WinCaptureWindow(wxWindow* window, const wxString& pngPath) {
 	// OpenGL canvas included -- but a machine that composes nothing, like a CI
 	// runner, hands back black. Plain PrintWindow has every window paint
 	// itself into our bitmap. Last, whatever is on the screen there.
-	for (int method = 0; method < 3; method++) {
+	for (int m = 0; m < 3; m++) {
 		wxBitmap bmp(w, h, 24);
 		bool ok;
 		{
 			wxMemoryDC dc(bmp);
 			HDC to = static_cast<HDC>(dc.GetHDC());
-			if (method == 0) ok = ::PrintWindow(hwnd, to, 2) != 0;
-			else if (method == 1) ok = ::PrintWindow(hwnd, to, 0) != 0;
+			if (m == 0) ok = ::PrintWindow(hwnd, to, 2) != 0;
+			else if (m == 1) ok = ::PrintWindow(hwnd, to, 0) != 0;
 			else {
 				HDC screen = ::GetDC(nullptr);
 				ok = ::BitBlt(to, 0, 0, w, h, screen, rc.left, rc.top, SRCCOPY) != 0;
@@ -168,9 +168,20 @@ bool WinCaptureWindow(wxWindow* window, const wxString& pngPath) {
 			}
 		}
 		if (ok && !blank(bmp)) {
-			wxPrintf("captured %s (method %d)\n", pngPath, method);
-			return bmp.SaveFile(pngPath, wxBITMAP_TYPE_PNG);
+			out = bmp;
+			if (method) *method = m;
+			return true;
 		}
+	}
+	return false;
+}
+
+bool WinCaptureWindow(wxWindow* window, const wxString& pngPath) {
+	wxBitmap bmp;
+	int method = -1;
+	if (WinGrabWindow(window, bmp, &method)) {
+		wxPrintf("captured %s (method %d)\n", pngPath, method);
+		return bmp.SaveFile(pngPath, wxBITMAP_TYPE_PNG);
 	}
 	wxPrintf("capture of %s came back blank every way\n", pngPath);
 	return false;
