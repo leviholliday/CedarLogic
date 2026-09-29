@@ -37,6 +37,10 @@ bool CaptureAppWindow(MainFrame* frame, wxImage& out);
 wxTopLevelWindow* FeedbackWindowForCapture(MainFrame* frame);
 void DismissFeedback();
 
+// --render-feedback <dir>: the form, light and dark, and the screenshot it
+// would take, as PNGs -- how a Linux build gets looked at from a Mac.
+bool RenderFeedback(MainFrame* frame, const wxString& dir);
+
 // --feedback-probe: ask the site for something it has to refuse, to show the
 // sending works on this machine (curl found, TLS, an answer read back)
 // without sending any feedback. Ends the app when it has its answer: exit

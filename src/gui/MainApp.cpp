@@ -741,6 +741,7 @@ bool MainApp::OnInit()
     bool wireDrag = false;     // --wire-drag dumps a wire's segment map after a seg drag
     bool renderUi = false;     // --render-ui draws the welcome/tour/shortcuts windows
     bool renderWindows = false;   // --render-windows captures real windows (Windows only)
+    bool renderFeedback = false;  // --render-feedback pictures the Send Feedback window
     bool feedbackProbe = false;   // --feedback-probe checks Send Feedback can reach the site
     wxString feedbackSelfTest;    // --feedback-selftest <title> sends a test item
     std::string gateName, gateAngle;
@@ -792,6 +793,13 @@ bool MainApp::OnInit()
         cmdFilename = argv[2].ToStdString();
         renderOutput = argv[3].ToStdString();
         if (argc >= 6) { renderW = wxAtoi(argv[4]); renderH = wxAtoi(argv[5]); }
+    } else if (argc >= 3 && wxString(argv[1]) == "--render-feedback") {
+        // --render-feedback <dir> [circuit.cdl]: Send Feedback, light and dark,
+        // and the screenshot it takes, as PNGs. Every platform.
+        renderMode().headlessRender = true;
+        renderFeedback = true;
+        renderOutput = argv[2].ToStdString();
+        if (argc >= 4) cmdFilename = argv[3].ToStdString();
     } else if (argc >= 2 && wxString(argv[1]) == "--feedback-probe") {
         // --feedback-probe: can Send Feedback reach the site from here? Asks
         // for a refusal, so nothing is sent (see Feedback.h).
@@ -860,12 +868,24 @@ bool MainApp::OnInit()
 #ifdef __APPLE__
         MacSetBackgroundApp();
 #endif
-        if (!renderWindows) frame->Move(-30000, -30000);
+        if (!renderWindows && !renderFeedback) frame->Move(-30000, -30000);
     }
 
     if (feedbackProbe) {
         CallAfter([] { StartFeedbackProbe(); });
         return true;
+    }
+
+    if (renderFeedback) {
+        frame->SetSize(1200, 800);
+        frame->Centre();
+        frame->Show(true);
+        frame->stopTimers();
+        if (!cmdFilename.empty()) frame->load(cmdFilename);
+        for (int i = 0; i < 30; i++) { wxYield(); wxMilliSleep(25); }
+        const bool ok = RenderFeedback(frame, renderOutput);
+        fflush(nullptr);
+        std::_Exit(ok ? 0 : 1);
     }
 
     if (renderMode().headlessRender && (wireShape || wireDrag)) {
