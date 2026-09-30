@@ -28,18 +28,28 @@ done
 swift mac/Tools/make-doc-icon.swift "$OUT/tile.iconset" "$OUT/doc.iconset"
 iconutil -c icns "$OUT/doc.iconset" -o mac/App/CedarLogicDocument.icns
 
-# Windows: an .ico of PNGs, 16 to 256.
+# Windows: an .ico with classic bitmaps up to 64 (what every tool reads,
+# the NSIS installer included) and a PNG at 256.
+for s in 16 24 32 48 64; do swift mac/Tools/png-to-rgba.swift "$OUT/tile-$s.png" "$OUT/tile-$s.rgba"; done
 python3 - "$OUT" res/icon.ico <<'PY'
 import struct, sys, os
 out, dest = sys.argv[1], sys.argv[2]
-sizes = [16, 24, 32, 48, 64, 128, 256]
-blobs = [open(os.path.join(out, f"tile-{s}.png"), "rb").read() for s in sizes]
-head = struct.pack("<HHH", 0, 1, len(sizes))
-offset = 6 + 16 * len(sizes)
-entries = b""
-for s, b in zip(sizes, blobs):
-    entries += struct.pack("<BBBBHHII", s % 256, s % 256, 0, 0, 1, 32, len(b), offset)
+entries, blobs = [], []
+for s in [16, 24, 32, 48, 64]:
+    rgba = open(os.path.join(out, f"tile-{s}.rgba"), "rb").read()
+    rows = [rgba[y * s * 4:(y + 1) * s * 4] for y in range(s)]
+    bgra = b"".join(bytes(v for i in range(0, len(r), 4) for v in (r[i + 2], r[i + 1], r[i], r[i + 3])) for r in reversed(rows))
+    mask_row = ((s + 31) // 32) * 4
+    mask = b"\0" * (mask_row * s)   # alpha does the work; the AND mask stays clear
+    header = struct.pack("<IiiHHIIiiII", 40, s, s * 2, 1, 32, 0, len(bgra) + len(mask), 0, 0, 0, 0)
+    blobs.append(header + bgra + mask); entries.append((s, 32))
+blobs.append(open(os.path.join(out, "tile-256.png"), "rb").read()); entries.append((256, 32))
+head = struct.pack("<HHH", 0, 1, len(blobs))
+offset = 6 + 16 * len(blobs)
+table = b""
+for (s, bpp), b in zip(entries, blobs):
+    table += struct.pack("<BBBBHHII", s % 256, s % 256, 0, 0, 1, bpp, len(b), offset)
     offset += len(b)
-open(dest, "wb").write(head + entries + b"".join(blobs))
+open(dest, "wb").write(head + table + b"".join(blobs))
 PY
 echo "icons updated"
