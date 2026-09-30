@@ -10,6 +10,7 @@
 // sweep, and the circuit fades up (OpeningCard).
 
 import AppKit
+import AVFoundation
 import SwiftUI
 
 /// The icon's palette: near-black green, neon green, brushed silver.
@@ -84,6 +85,12 @@ final class Splash: ObservableObject {
     private var lastStepAt: Double = 0
 
     static let dissolveTime = 0.42
+    /// The very first launch: slower, with its own sound (FirstLaunch.m4a,
+    /// from mac/Tools/make-launch-sound.py), fading into the welcome.
+    let firstLaunch = !UserDefaults.standard.bool(forKey: "cl.hasSeenWelcome")
+        && !UserDefaults.standard.bool(forKey: "cl.firstLaunchPlayed")
+    var fadeTime: Double { firstLaunch ? 1.1 : Self.dissolveTime }
+    private var player: AVAudioPlayer?
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     var elapsed: Double { Date().timeIntervalSince(start) }
@@ -179,6 +186,7 @@ final class Splash: ObservableObject {
         began = true
         SplashDebug.log("begin")
         start = Date()
+        if firstLaunch { playSound() }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.2
             w.animator().alphaValue = 1
@@ -198,11 +206,24 @@ final class Splash: ObservableObject {
         }
     }
 
+    /// The first launch's sound: a few seconds, once ever, at a moderate
+    /// level, fading with the panel.
+    private func playSound() {
+        UserDefaults.standard.set(true, forKey: "cl.firstLaunchPlayed")
+        guard let url = Bundle.main.url(forResource: "FirstLaunch", withExtension: "m4a"),
+              let p = try? AVAudioPlayer(contentsOf: url) else { return }
+        p.volume = 0.75
+        p.prepareToPlay()
+        p.play()
+        player = p
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.player = nil }
+    }
+
     // MARK: The real work, step by step
 
     private func step(_ text: String, _ progress: Double) {
         // Each line stays up long enough to be read.
-        let at = max(elapsed, lastStepAt + (Self.reduceMotion ? 0.12 : 0.32))
+        let at = max(elapsed, lastStepAt + (Self.reduceMotion ? 0.12 : firstLaunch ? 0.72 : 0.32))
         lastStepAt = at
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at - elapsed)) { [weak self] in
             guard let self else { return }
@@ -233,7 +254,9 @@ final class Splash: ObservableObject {
         let at = lastStepAt + 0.3
         readyAt = at
         // Time for the bar to glide home after the last step.
-        dissolveAt = min(6, max(Self.reduceMotion ? 1.1 : 2.3, at + 0.3))
+        // The first time, the panel holds until the sound's big moment (4 s)
+        // has rung out a little, then fades slowly into the welcome.
+        dissolveAt = firstLaunch ? max(4.9, min(7, at + 0.3)) : min(6, max(Self.reduceMotion ? 1.1 : 2.3, at + 0.3))
     }
 
     // MARK: Holding windows, and the end
@@ -272,7 +295,7 @@ final class Splash: ObservableObject {
         // played while they were hidden).
         NotificationCenter.default.post(name: .clSplashDone, object: nil)
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = Self.dissolveTime
+            ctx.duration = fadeTime
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             for w in windows { w.animator().alphaValue = 1 }
             panel?.animator().alphaValue = 0
@@ -280,7 +303,7 @@ final class Splash: ObservableObject {
         // Done on a clock of its own, not the animation's completion: when
         // macOS doesn't run the fade (the windows in Stage Manager's strip,
         // say), that never comes. Every window it held ends fully visible.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.dissolveTime + 0.05) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + fadeTime + 0.05) { [weak self] in
             for w in windows where w.alphaValue < 1 { w.alphaValue = 1 }
             SplashDebug.log("dissolved")
             self?.panel?.orderOut(nil)
@@ -309,7 +332,7 @@ private struct SplashView: View {
     @ViewBuilder private func content(_ t: Double) -> some View {
         let calm = Splash.reduceMotion
         let rise = calm ? Self.span(t, 0, 0.3) : Self.span(t, 0.08, 0.85)
-        let out = Self.span(t, model.dissolveAt, model.dissolveAt + Splash.dissolveTime)
+        let out = Self.span(t, model.dissolveAt, model.dissolveAt + model.fadeTime)
         let glow = Self.span(t, 0.3, 1.1) * (0.85 + 0.15 * sin(t * 2.6))
         ZStack {
             // The icon's ground: near-black green, its grid showing faintly.
@@ -364,7 +387,7 @@ private struct SplashView: View {
     /// is done. The work decides when it finishes; nothing jumps or stalls.
     private func shownProgress(_ t: Double) -> Double {
         // A fixed pace (not tied to when the panel goes, which can move).
-        let pace = Splash.reduceMotion ? 0.9 : 2.1
+        let pace = Splash.reduceMotion ? 0.9 : model.firstLaunch ? 3.9 : 2.1
         func smooth(_ x: Double) -> Double { let c = min(1, max(0, x)); return c * c * (3 - 2 * c) }
         func early(_ t: Double) -> Double { 0.92 * smooth(t / pace) }
         guard let r = model.readyAt, t > r else { return early(t) }

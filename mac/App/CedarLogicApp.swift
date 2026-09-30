@@ -281,7 +281,7 @@ private func showAbout() {
     let info = Bundle.main.infoDictionary ?? [:]
     let commit = info["CLCommit"] as? String ?? "unknown"
     let credits = NSAttributedString(
-        string: "The native Mac app (SwiftUI), built from commit \(commit).\nThe wx app is CedarLogic 4.x; this one is separate.",
+        string: "CedarLogic began at Cedarville University and was modernized and brought to the Mac by Kieran Klukas. This version was rebuilt and extended with Claude.\nFree software under the GPL-3.0 · build \(commit)",
         attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
                      .foregroundColor: NSColor.secondaryLabelColor])
     NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])

@@ -3,7 +3,7 @@
 // a priority, their name and, if they like, an email, plus screenshots and a
 // recording of the app (FeedbackCapture.swift). The version, the Mac and
 // the moment it was sent from are added by themselves. It goes to
-// cedarlogic.netlify.app (the cedarlogic-site repository), which tells Levi.
+// cedarlogic.netlify.app (the cedarlogic-site repository), which tells the developer.
 
 import AppKit
 import SwiftUI

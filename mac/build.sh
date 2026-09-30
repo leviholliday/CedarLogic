@@ -103,7 +103,7 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" mac/App/
 /usr/libexec/PlistBuddy -c "Add CFBundleGetInfoString string CedarLogic $VERSION (build $BUILD, $COMMIT)" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add CLCommit string $COMMIT" "$APP/Contents/Info.plist"
 cp res/cl_gatedefs.xml "$APP/Contents/Resources/"
-cp mac/App/CedarLogic.icns mac/App/CedarLogicDocument.icns mac/App/LaunchIcon.png "$APP/Contents/Resources/"
+cp mac/App/CedarLogic.icns mac/App/CedarLogicDocument.icns mac/App/LaunchIcon.png mac/App/FirstLaunch.m4a "$APP/Contents/Resources/"
 # The original CedarLogic help pages, for Help > Classic Help. (The icons,
 # LaunchIcon.png included, come from mac/Tools/make-icons.sh.)
 rm -rf "$APP/Contents/Resources/ClassicHelp"

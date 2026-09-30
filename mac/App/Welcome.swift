@@ -320,7 +320,7 @@ struct WelcomeView: View {
             tile("See every shortcut", "The whole list, searchable.", icon: "keyboard", index: 3)
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.bubble").font(.system(size: 12)).foregroundStyle(Brand.neon)
-                Text("Something odd, or an idea? The speech bubble in the toolbar (or Help \u{25B8} Send Feedback) sends it straight to Levi.")
+                Text("Something odd, or an idea? The speech bubble in the toolbar (or Help \u{25B8} Send Feedback) sends it straight to the developer.")
                     .font(.system(size: 11.5)).foregroundStyle(BrandText.faint).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, 4)
@@ -570,7 +570,7 @@ final class TourModel: ObservableObject {
                        let name = Library.displayName(for: url) else { return false }
                  return name != "Untitled Circuit" }),
         Step(title: "You built a working circuit",
-             body: { _, _ in "That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help \u{25B8} Guided Tour brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it to Levi." },
+             body: { _, _ in "That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help \u{25B8} Guided Tour brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in." },
              keys: { _, _ in ["?"] }, check: nil),
     ]
 

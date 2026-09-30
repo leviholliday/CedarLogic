@@ -75,7 +75,7 @@ struct FeedbackView: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Capsule().fill(Brand.neon)).foregroundStyle(Brand.inkDeep)
                     }
-                    Text("What's working, what's broken, what you'd love to see. It goes straight to Levi.")
+                    Text("What's working, what's broken, what you'd love to see. It goes straight to the developer.")
                         .font(.system(size: 12.5)).foregroundStyle(Brand.dim)
                 }
             }
@@ -171,7 +171,7 @@ struct FeedbackView: View {
                                 .textFieldStyle(.plain).padding(.horizontal, 10).frame(height: 32).background(field)
                         }
                     }
-                    Toggle("Levi can email me about this", isOn: $model.contactOK)
+                    Toggle("You can email me about this", isOn: $model.contactOK)
                         .toggleStyle(.checkbox)
                         .font(.system(size: 12.5))
                         .disabled(model.email.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -348,7 +348,7 @@ struct FeedbackView: View {
         let d = model.device
         return VStack(alignment: .leading, spacing: 10) {
             Text("Sent with your feedback").font(.system(size: 13, weight: .semibold))
-            Text("So Levi knows where it happened. Nothing else leaves your Mac.")
+            Text("So we know where it happened. Nothing else leaves your Mac.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             ForEach(["app", "system", "context"], id: \.self) { group in
                 VStack(alignment: .leading, spacing: 3) {
@@ -382,7 +382,7 @@ struct FeedbackView: View {
             SentCheck(color: Brand.neonDeep)
             Text(prefs.studentName.isEmpty ? "Thank you!" : "Thank you, \(prefs.studentName.split(separator: " ").first.map(String.init) ?? prefs.studentName)!")
                 .font(.system(size: 24, weight: .semibold)).foregroundStyle(ink)
-            Text("Your feedback is on its way to Levi.\(model.contactOK && !model.email.isEmpty ? " If he has a question, he'll write to \(model.email)." : "")")
+            Text("Your feedback is on its way.\(model.contactOK && !model.email.isEmpty ? " If there's a question, the reply goes to \(model.email)." : "")")
                 .font(.system(size: 13.5)).foregroundStyle(dim).multilineTextAlignment(.center).frame(maxWidth: 380)
             HStack(spacing: 10) {
                 Button("Send Another") { withAnimation { model.phase = .writing } }
