@@ -8,6 +8,7 @@ import SwiftUI
 @MainActor
 enum QuitConfirm {
     private static var panel: NSPanel?
+    private static var dim: NSWindow?
 
     static func ask() {
         guard Prefs.shared.confirmQuit else { NSApp.terminate(nil); return }
@@ -26,15 +27,33 @@ enum QuitConfirm {
             cancel: { close() }))
         host.frame = p.contentRect(forFrameRect: p.frame)
         p.contentView = host
-        let screen = NSApp.keyWindow?.screen ?? NSScreen.main
-        if let f = screen?.visibleFrame {
-            p.setFrameOrigin(NSPoint(x: f.midX - 210, y: f.midY - 98 + f.height * 0.08))
-        }
+        let screen = NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens[0]
+        // The screen behind darkens a little; a click on it is Cancel.
+        let d = DimWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        d.isOpaque = false
+        d.backgroundColor = NSColor.black.withAlphaComponent(0.28)
+        d.level = .modalPanel
+        d.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
+        d.alphaValue = 0
+        d.onClick = { close() }
+        d.setFrame(screen.frame, display: false)
+        // Starts a little high and see-through, then fades in as it settles.
+        let f = screen.visibleFrame
+        let end = NSPoint(x: f.midX - 210, y: f.midY - 98 + f.height * 0.08)
+        p.setFrameOrigin(NSPoint(x: end.x, y: end.y + 14))
         p.alphaValue = 0
         NSApp.activate()
+        d.orderFront(nil)
         p.makeKeyAndOrderFront(nil)
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.14; p.animator().alphaValue = 1 }
+        NSAnimationContext.runAnimationGroup { c in
+            c.duration = 0.24
+            c.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
+            p.animator().alphaValue = 1
+            p.animator().setFrameOrigin(end)
+            d.animator().alphaValue = 1
+        }
         panel = p
+        dim = d
     }
 
     /// For --render-ui.
@@ -42,11 +61,25 @@ enum QuitConfirm {
 
     private static func close() {
         guard let p = panel else { return }
+        let d = dim
         panel = nil
-        NSAnimationContext.runAnimationGroup({ $0.duration = 0.1; p.animator().alphaValue = 0 }, completionHandler: {
-            MainActor.assumeIsolated { p.orderOut(nil) }
+        dim = nil
+        NSAnimationContext.runAnimationGroup({ c in
+            c.duration = 0.14
+            c.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            p.animator().alphaValue = 0
+            p.animator().setFrameOrigin(NSPoint(x: p.frame.minX, y: p.frame.minY + 8))
+            d?.animator().alphaValue = 0
+        }, completionHandler: {
+            MainActor.assumeIsolated { p.orderOut(nil); d?.orderOut(nil) }
         })
     }
+}
+
+/// The darkened screen behind the question.
+private final class DimWindow: NSWindow {
+    var onClick: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onClick?() }
 }
 
 /// A borderless panel that still takes the keyboard.
