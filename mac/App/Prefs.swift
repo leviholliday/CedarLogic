@@ -81,6 +81,12 @@ final class Prefs: ObservableObject {
     @Published var showThemeToggle: Bool { didSet { d.set(showThemeToggle, forKey: "cl.showThemeToggle") } }
     @Published var studentName: String { didSet { d.set(studentName, forKey: "cl.studentName") } }
     @Published var exportInfo: Bool { didSet { d.set(exportInfo, forKey: "cl.exportInfo") } }
+    /// Timing diagrams in colour (green traces) rather than black and white.
+    @Published var timingInColor: Bool { didSet { d.set(timingInColor, forKey: "cl.timingColor") } }
+    /// Resting on a wire shows what it carries (0, 1, Z...). Off at first.
+    @Published var wireValueTag: Bool { didSet { d.set(wireValueTag, forKey: "cl.wireValueTag") } }
+    /// Cmd-Q asks first, in a panel in the middle of the screen.
+    @Published var confirmQuit: Bool { didSet { d.set(confirmQuit, forKey: "cl.confirmQuit") } }
     @Published var hasSeenWelcome: Bool { didSet { d.set(hasSeenWelcome, forKey: "cl.hasSeenWelcome") } }
     /// Names under the palette's gates, and ⇧1...⇧0 beside its categories.
     @Published var showGateNames: Bool { didSet { d.set(showGateNames, forKey: "cl.showGateNames") } }
@@ -124,6 +130,9 @@ final class Prefs: ObservableObject {
         showThemeToggle = bool("cl.showThemeToggle", true)
         studentName = d.string(forKey: "cl.studentName") ?? ""
         exportInfo = bool("cl.exportInfo", true)
+        timingInColor = bool("cl.timingColor", false)
+        wireValueTag = bool("cl.wireValueTag", false)
+        confirmQuit = bool("cl.confirmQuit", true)
         hasSeenWelcome = bool("cl.hasSeenWelcome", false)
         showGateNames = bool("cl.showGateNames", true)
         showCategoryKeys = bool("cl.showCategoryKeys", true)

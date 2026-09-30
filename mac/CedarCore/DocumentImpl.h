@@ -97,6 +97,8 @@ struct CLDocument {
 	bool hoverPin = false;
 	GLPoint2f hoverPinAt;
 	int hoverPage = -1;   // the page the pin box belongs to
+	unsigned long hoverWire = 0;   // the wire under the pointer, lit up whole
+	int hoverWirePage = -1;
 	bool edited = false;          // changed since opened or last saved
 	int pageToShow = -1;          // set when an undo or redo adds or removes a page
 

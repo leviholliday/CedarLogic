@@ -43,6 +43,9 @@ enum CrashReports {
             o.sendDefaultPii = false
             o.tracesSampleRate = 0
             o.enableAutoPerformanceTracing = false
+            // Crashes only: "app hanging" reports (any 2 s the main thread is
+            // busy, a save panel open included) read as errors and aren't.
+            o.enableAppHangTracking = false
         }
         started = true
         // Development: CL_TEST_CRASH=1 crashes the app a few seconds after

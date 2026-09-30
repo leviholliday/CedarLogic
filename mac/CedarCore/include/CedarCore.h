@@ -156,6 +156,13 @@ bool cl_document_is_edited(const CLDocument *doc);
 // highlight, and move a click-started connection's line. Returns true when
 // the canvas should redraw.
 bool cl_edit_hover(CLDocument *doc, int page, double x, double y, double unitsPerPoint);
+// The wire under the pointer, lit up whole (cl_edit_hover does this too; on
+// its own for Simulation View). True if what's lit changed.
+bool cl_edit_hover_wire(CLDocument *doc, int page, double x, double y, double unitsPerPoint);
+bool cl_edit_hover_clear(CLDocument *doc);   // the pointer left: nothing lit
+// What the lit wire carries, highest bit first: 0, 1, Z (floating), ! (a
+// conflict) or X. Returns the number of bits, 0 if no wire is lit here.
+int cl_edit_hover_wire_state(const CLDocument *doc, int page, char *out, int len);
 // A connection is following the pointer (after a click on a pin).
 bool cl_edit_is_connecting(const CLDocument *doc);
 
@@ -170,6 +177,23 @@ void cl_edit_disconnect_pin(CLDocument *doc, int page, double x, double y, doubl
 
 // Straighten (S): the selected wires, or the wires of the selected gates.
 void cl_edit_straighten(CLDocument *doc, int page);
+
+// Build from Formula: gates (library name, place, and label text for a
+// Label) and the wires between their pins, by index into `gates`, made as
+// one undo step with the new wires routed together. Returns how many gates
+// were made (left selected), or -1.
+typedef struct { const char *gate; double x, y; const char *label; } CLBuildGate;
+typedef struct { int from; const char *fromPin; int to; const char *toPin; } CLBuildWire;
+// Find: labels, TO/FROM names and part types on every page, best first.
+// Fills up to `max` results and returns how many there are in all. The
+// strings last until the next cl_find or cl_gate_find_name.
+typedef struct { int page; long gate; double x, y; const char *text; const char *kind; } CLFindResult;
+int cl_find(CLDocument *doc, const char *query, CLFindResult *out, int max);
+bool cl_edit_select_gate(CLDocument *doc, int page, long gate);   // just that one
+// A label's text or a TO/FROM's name, to search for; "" for other parts.
+const char *cl_gate_find_name(const CLDocument *doc, long gate);
+int cl_edit_build(CLDocument *doc, int page, const CLBuildGate *gates, int gateCount,
+                  const CLBuildWire *wires, int wireCount, const char *undoName);
 
 // Tidy Up (Shift-S): applies at once as a preview over a ghost of the old
 // layout; end it by keeping or reverting. Any other edit keeps it.

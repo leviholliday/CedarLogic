@@ -46,6 +46,12 @@ struct CedarLogicApp: App {
                 Button("About CedarLogic Native") { showAbout() }
                 Button("Check for Updates…") { Updates.shared.checkNow() }
             }
+            CommandGroup(replacing: .appTermination) {
+                // Only Cmd-Q and this item ask: an update's relaunch or the
+                // Mac shutting down quit straight away.
+                Button("Quit CedarLogic Native") { QuitConfirm.ask() }
+                    .keyboardShortcut("q", modifiers: .command)
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { PrefsWindow.shared.show() }
                     .keyboardShortcut(",", modifiers: .command)
@@ -556,6 +562,18 @@ struct EditCommands: Commands {
             Button("Rotate") { canvas?.perform(.rotate) }
                 .keyboardShortcut(keys.menu(.rotate))
                 .disabled(canvas?.hasGateSelection != true)
+            Menu("Find") {
+                Button("Find…") { canvas?.perform(.find) }
+                    .keyboardShortcut(keys.menu(.find))
+                Button("Find Next") { canvas?.perform(.findNext) }
+                    .keyboardShortcut(keys.menu(.findNext))
+                Button("Find Previous") { canvas?.perform(.findPrevious) }
+                    .keyboardShortcut(keys.menu(.findPrevious))
+            }
+            .disabled(canvas == nil)
+            Button("Build from Formula…") { canvas?.perform(.buildFormula) }
+                .keyboardShortcut(keys.menu(.buildFormula))
+                .disabled(canvas == nil)
             Button("Straighten Wires") { canvas?.perform(.straighten) }
                 .keyboardShortcut(keys.menu(.straighten))
                 .help("S: the selected wires, or the wires of the selected parts")

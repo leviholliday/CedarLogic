@@ -2040,6 +2040,7 @@ struct CLCanvasArea: View {
             if shown < document.pageCount {
                 CLCanvasHost(document: document, page: shown, controller: c)
                     .overlay(alignment: .top) { TidyBanner(canvas: c) }
+                    .overlay(alignment: .top) { FindBar(canvas: c, document: document) }
                     .overlay { EmptyHint(document: document, controller: c, page: shown) }
                     .overlay(alignment: .topTrailing) { LockBadge(canvas: c) }
                     .overlay(alignment: .bottom) {

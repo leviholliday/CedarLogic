@@ -814,7 +814,49 @@ bool cl_edit_hover(CLDocument* doc, int pageIndex, double x, double y, double un
 	doc->hoverPin = onPin;
 	doc->hoverPinAt = at;
 	doc->hoverPage = pageIndex;
+	// Over a wire (not a pin, and not mid-gesture): light all of it.
+	if (g.mode == EditGesture::None && !onPin) redraw |= cl_edit_hover_wire(doc, pageIndex, x, y, unitsPerPoint);
+	else if (doc->hoverWire) { doc->hoverWire = 0; redraw = true; }
 	return redraw;
+}
+
+bool cl_edit_hover_wire(CLDocument* doc, int pageIndex, double x, double y, double unitsPerPoint) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return false;
+	guiWire* w = wireAt(page, (float)x, (float)y, (float)(kHoverPoints * unitsPerPoint));
+	const unsigned long id = w ? w->getID() : 0;
+	const bool changed = id != doc->hoverWire || (id && doc->hoverWirePage != pageIndex);
+	doc->hoverWire = id;
+	doc->hoverWirePage = pageIndex;
+	return changed;
+}
+
+bool cl_edit_hover_clear(CLDocument* doc) {
+	if (doc == nullptr) return false;
+	const bool had = doc->hoverWire != 0 || doc->hoverPin;
+	doc->hoverWire = 0;
+	doc->hoverPin = false;
+	return had;
+}
+
+int cl_edit_hover_wire_state(const CLDocument* doc, int pageIndex, char* out, int len) {
+	if (doc == nullptr || out == nullptr || len < 2 || !doc->hoverWire || doc->hoverWirePage != pageIndex) return 0;
+	guiWire* w = const_cast<CLDocument*>(doc)->circuit.getWire(doc->hoverWire);
+	if (w == nullptr) return 0;
+	const std::vector<StateType>& st = w->getState();
+	const int bits = std::min((int)st.size(), len - 1);
+	// The highest bit first, as a bus is read.
+	for (int i = 0; i < bits; i++) {
+		switch (st[(size_t)(bits - 1 - i)]) {
+			case ONE: out[i] = '1'; break;
+			case ZERO: out[i] = '0'; break;
+			case HI_Z: out[i] = 'Z'; break;
+			case CONFLICT: out[i] = '!'; break;
+			default: out[i] = 'X'; break;
+		}
+	}
+	out[bits] = 0;
+	return bits;
 }
 
 bool cl_edit_float_begin(CLDocument* doc, int pageIndex, double x, double y) {
@@ -1005,6 +1047,21 @@ void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, doub
 		}
 	}
 
+	// The wire under the pointer, every branch of it: a soft accent band.
+	if (doc->hoverWire && doc->hoverWirePage == pageIndex && g.mode == EditGesture::None) {
+		if (guiWire* w = doc->circuit.getWire(doc->hoverWire)) {
+			std::vector<Point> segs;
+			for (auto& s : w->getSegmentMap()) {
+				segs.push_back(Point(s.second.begin.x, s.second.begin.y));
+				segs.push_back(Point(s.second.end.x, s.second.end.y));
+			}
+			if (!segs.empty()) {
+				scene.lines(&segs[0], segs.size(), Stroke(Color((float)ar, (float)ag, (float)ab, 0.30f), 6.0f * px));
+				scene.lines(&segs[0], segs.size(), Stroke(Color((float)ar, (float)ag, (float)ab, 0.85f), 1.6f * px));
+			}
+		}
+	}
+
 	// The pin under the pointer: the red box you drag a wire out of.
 	if (doc->hoverPin && doc->hoverPage == pageIndex) {
 		const float r = (float)(kPinBoxPoints * unitsPerPoint);
@@ -1016,3 +1073,63 @@ void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, doub
 }
 
 }  // extern "C"
+
+// Gates and the wires between them, made in one go (Build from Formula): each
+// gate created and given its settings, the wires joined, then all the new
+// wires routed together. One undo step takes the lot back. The new gates are
+// left selected.
+int cl_edit_build(CLDocument* doc, int pageIndex, const CLBuildGate* gates, int gateCount,
+                  const CLBuildWire* wires, int wireCount, const char* undoName) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr || gates == nullptr || gateCount <= 0) return -1;
+	settleTidy(doc);
+	doc->gesture = EditGesture();
+	std::vector<klsCommand*> steps;
+	auto run = [&](klsCommand* c) { c->setCanvas(page); c->Do(); steps.push_back(c); };
+
+	std::vector<unsigned long> ids((size_t)gateCount, 0);
+	for (int i = 0; i < gateCount; i++) {
+		if (gates[i].gate == nullptr) continue;
+		const GLPoint2f at = snap(GLPoint2f((float)gates[i].x, (float)gates[i].y));
+		const unsigned long id = doc->circuit.getNextAvailableGateID();
+		run(new cmdCreateGate(page, &doc->circuit, id, gates[i].gate, at.x, at.y));
+		guiGate* g = doc->circuit.getGate(id);
+		if (g == nullptr) continue;
+		ids[(size_t)i] = id;
+		ParameterMap gui = *g->getAllGUIParams();
+		ParameterMap logic = *g->getAllLogicParams();
+		if (gates[i].label != nullptr) gui["LABEL_TEXT"] = gates[i].label;
+		run(new cmdSetParams(&doc->circuit, id, paramSet(&gui, &logic)));
+	}
+	for (int i = 0; i < wireCount; i++) {
+		const CLBuildWire& w = wires[i];
+		if (w.from < 0 || w.from >= gateCount || w.to < 0 || w.to >= gateCount || !w.fromPin || !w.toPin) continue;
+		if (!ids[(size_t)w.from] || !ids[(size_t)w.to]) continue;
+		klsCommand* c = edits::gateConnection(&doc->circuit, page, ids[(size_t)w.from], w.fromPin,
+		                                      ids[(size_t)w.to], w.toPin);
+		if (c) run(c);
+	}
+	page->collisionUpdate();
+
+	// Route the new wires together, around everything else on the page.
+	std::set<unsigned long> newWires;
+	for (unsigned long id : ids) {
+		guiGate* g = id ? doc->circuit.getGate(id) : nullptr;
+		if (!g) continue;
+		for (const auto& c : g->getConnections()) if (c.second) newWires.insert(c.second->getID());
+	}
+	std::vector<unsigned long> wireIds(newWires.begin(), newWires.end());
+	for (WireReshape& r : edits::rerouteWires(page, wireIds))
+		steps.push_back(new cmdWireSegDrag(&doc->circuit, page, r.id, r.before, r.after));
+	if (steps.empty()) return 0;
+	for (klsCommand* c : steps) c->setCanvas(page);
+	submit(doc, page, new cmdPasteBlock(steps, undoName ? undoName : "Build"));
+
+	page->unselectAllGates();
+	page->unselectAllWires();
+	int made = 0;
+	for (unsigned long id : ids)
+		if (guiGate* g = id ? doc->circuit.getGate(id) : nullptr) { g->select(); made++; }
+	page->collisionUpdate();
+	return made;
+}

@@ -261,6 +261,9 @@ struct GeneralSettingsView: View {
                 }
                 .disabled(opensCDL)
             }
+            Row("Quitting", hint: "⌘Q shows a question in the middle of the screen first: Return quits, Escape doesn't.") {
+                Toggle("Ask before quitting", isOn: $prefs.confirmQuit)
+            }
             Row("Status bar", hint: "The readout in the bottom-right corner of the window.") {
                 Toggle("Show zoom, cursor position, and counts", isOn: $prefs.showStatus)
             }
@@ -375,6 +378,9 @@ struct CLCanvasSettings: View {
 
     var body: some View {
         Page {
+            Row("Wires", hint: "Pointing at a wire always lights up all of it. This also shows what it carries after a moment: 0, 1, Z (floating) or ! (a conflict).") {
+                Toggle("Show a wire's value when you rest on it", isOn: $prefs.wireValueTag)
+            }
             Row("Mouse wheel") {
                 Picker("", selection: $prefs.mouseWheel) { Text("Zooms").tag(0); Text("Moves around").tag(1) }
                     .labelsHidden().fixedSize()

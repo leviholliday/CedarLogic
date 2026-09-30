@@ -41,7 +41,8 @@ struct CircuitWindow: View {
             notices = document.loadNotices
             showNotices = !notices.isEmpty
         }
-        .sheet(item: $canvas.truthTable) { TruthTableView(table: $0) }
+        .sheet(item: $canvas.truthTable) { t in TruthTableView(table: t) { canvas.buildFromTable($0) } }
+        .sheet(item: $canvas.formulaRequest) { r in BuildFormulaView(text: r.text, canvas: canvas) }
         .alert("No Truth Table", isPresented: Binding(get: { canvas.truthTableProblem != nil },
                                                       set: { if !$0 { canvas.truthTableProblem = nil } })) {
             Button("OK", role: .cancel) {}

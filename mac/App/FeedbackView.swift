@@ -419,7 +419,7 @@ private struct SentCheck: View {
 }
 
 /// Chips in rows, wrapping.
-private struct Flow: Layout {
+struct Flow: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {

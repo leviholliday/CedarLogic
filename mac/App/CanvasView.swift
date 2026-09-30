@@ -105,7 +105,7 @@ final class CircuitCanvasNSView: NSView {
         clipsToBounds = true
         layer?.masksToBounds = true
         registerForDraggedTypes([.string])
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
 
@@ -117,8 +117,104 @@ final class CircuitCanvasNSView: NSView {
             needsDisplay = true
             return
         }
-        if clMode && controller?.simView == true { return }
-        if document.hover(page: page, at: worldPoint(p), unitsPerPoint: unitsPerPoint) { needsDisplay = true }
+        let w = worldPoint(p)
+        if clMode && controller?.simView == true {
+            if cl_edit_hover_wire(document.handle, Int32(page), w.x, w.y, unitsPerPoint) { needsDisplay = true }
+        } else if document.hover(page: page, at: w, unitsPerPoint: unitsPerPoint) {
+            needsDisplay = true
+        }
+        updateWireTag(at: p)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard let document else { return }
+        if cl_edit_hover_clear(document.handle) { needsDisplay = true }
+        hideWireTag()
+    }
+
+    // MARK: What a wire carries
+
+    /// The value of the wire under the pointer, shown beside it once the
+    /// pointer has rested there a moment (at once in Simulation View). Read
+    /// as it's drawn, so it follows the simulation.
+    private var wireTagAt: CGPoint?
+    private var wireTagWaiting = false
+    private var wireTagTimer: Timer?
+
+    private func hideWireTag() {
+        wireTagTimer?.invalidate(); wireTagTimer = nil
+        wireTagWaiting = false
+        if wireTagAt != nil { wireTagAt = nil; needsDisplay = true }
+    }
+
+    private func updateWireTag(at p: CGPoint) {
+        guard clMode, Prefs.shared.wireValueTag, wireTagText() != nil else { hideWireTag(); return }
+        if wireTagAt != nil { wireTagAt = p; needsDisplay = true; return }
+        guard !wireTagWaiting else { return }
+        wireTagWaiting = true
+        let delay = controller?.simView == true ? 0.6 : 1.1
+        wireTagTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let w = self.window else { return }
+                self.wireTagTimer = nil
+                self.wireTagWaiting = false
+                guard self.wireTagText() != nil else { return }
+                self.wireTagAt = self.convert(w.mouseLocationOutsideOfEventStream, from: nil)
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    private func wireTagText() -> (text: String, state: Character)? {
+        guard let document else { return nil }
+        var buf = [CChar](repeating: 0, count: 72)
+        let bits = Int(cl_edit_hover_wire_state(document.handle, Int32(page), &buf, 72))
+        guard bits > 0 else { return nil }
+        let s = String(cString: buf)
+        let state: Character = s.contains("!") ? "!" : s.contains("X") ? "X" : s.contains("Z") ? "Z" : bits == 1 ? s.first! : "b"
+        if bits == 1 {
+            switch state {
+            case "1": return ("1", state)
+            case "0": return ("0", state)
+            case "Z": return ("Z · floating (nothing drives it)", state)
+            case "!": return ("! · conflict (outputs disagree)", state)
+            default: return ("X · unknown", state)
+            }
+        }
+        if state == "b", let v = Int(s, radix: 2) { return (s + " = \(v)", state) }
+        return (s, state)
+    }
+
+    /// A small chip beside the pointer: green for 1, grey for 0, blue for
+    /// floating, red for a conflict, orange for unknown.
+    func drawWireTag(_ ctx: CGContext) {
+        guard let at = wireTagAt, let t = wireTagText() else { return }
+        let tag = (text: t.text, state: t.state, at: at)
+        let color: NSColor = switch tag.state {
+        case "1": NSColor(srgbRed: 0.13, green: 0.68, blue: 0.3, alpha: 1)
+        case "0": NSColor(white: 0.42, alpha: 1)
+        case "Z": NSColor.systemBlue
+        case "!": NSColor.systemRed
+        case "X": NSColor.systemOrange
+        default: NSColor(white: 0.25, alpha: 1)
+        }
+        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        let str = NSAttributedString(string: tag.text, attributes: [.font: font, .foregroundColor: NSColor.white])
+        let sz = str.size()
+        var r = CGRect(x: tag.at.x + 14, y: tag.at.y - 30, width: sz.width + 14, height: sz.height + 6)
+        if r.maxX > bounds.maxX - 4 { r.origin.x = tag.at.x - 14 - r.width }
+        if r.minY < bounds.minY + 4 { r.origin.y = tag.at.y + 14 }
+        NSGraphicsContext.saveGraphicsState()
+        let path = NSBezierPath(roundedRect: r, xRadius: r.height / 2, yRadius: r.height / 2)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.3)
+        shadow.shadowBlurRadius = 4
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.set()
+        color.setFill()
+        path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        str.draw(at: CGPoint(x: r.minX + 7, y: r.minY + 3))
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
@@ -133,7 +229,7 @@ final class CircuitCanvasNSView: NSView {
             needsFit = false
         }
         if needsFit, bounds.width > 0 { zoomToFit() }
-        if clMode { drawCL(ctx); return }
+        if clMode { drawCL(ctx); drawWireTag(ctx); return }
         ctx.setFillColor(theme.canvas.cgColor)
         ctx.fill(bounds)
         drawGrid(ctx)
@@ -256,6 +352,8 @@ final class CircuitCanvasNSView: NSView {
     override func smartMagnify(with event: NSEvent) { zoomToFit() }
 
     override func mouseDown(with event: NSEvent) {
+        hideWireTag()
+        if let d = document, cl_edit_hover_clear(d.handle) { needsDisplay = true }
         window?.makeFirstResponder(self)
         controller?.onActivate?()
         let p = convert(event.locationInWindow, from: nil)
@@ -657,6 +755,10 @@ final class CanvasController: ObservableObject {
         case .simView: simView.toggle()
         case .step: stepOnce()
         case .truthTable: makeTruthTable()
+        case .find: openFind()
+        case .findNext: if findActive { findStep(1) } else { openFind() }
+        case .findPrevious: if findActive { findStep(-1) } else { openFind() }
+        case .buildFormula: if canEdit { sheetHost.formulaRequest = FormulaRequest(text: "") } else { lockNudge() }
         case .scope: showScope.toggle()
         case .lock: locked.toggle()
         case .newTab: newPage()
@@ -1019,6 +1121,119 @@ final class CanvasController: ObservableObject {
 
     @Published var truthTable: TruthTable?
     @Published var truthTableProblem: String?
+    @Published var formulaRequest: FormulaRequest?
+
+    // MARK: Find
+
+    struct FindHit: Equatable { let page: Int; let gate: Int; let point: CGPoint; let text: String; let kind: String }
+    @Published var findActive = false
+    @Published var findFocusTick = 0
+    @Published var findQuery = ""
+    @Published private(set) var findHits: [FindHit] = []
+    @Published private(set) var findTotal = 0
+    @Published private(set) var findIndex = 0
+
+    /// Opens the find bar; with a label or a TO/FROM selected, looks for its name.
+    func openFind() {
+        if let document {
+            let g = cl_edit_single_gate(document.handle, Int32(page))
+            if g > 0, let name = cl_gate_find_name(document.handle, g).map({ String(cString: $0) }), !name.isEmpty {
+                findQuery = name
+            }
+        }
+        findActive = true
+        findFocusTick += 1
+        // Out of the canvas, so typing goes to the find field at once.
+        view?.window?.makeFirstResponder(nil)
+        runFind(jump: !findQuery.isEmpty)
+    }
+
+    func closeFind() {
+        findActive = false
+        view?.window?.makeFirstResponder(view)
+    }
+
+    func runFind(jump: Bool) {
+        guard let document else { return }
+        var out = [CLFindResult](repeating: CLFindResult(), count: 500)
+        let total = Int(cl_find(document.handle, findQuery, &out, Int32(out.count)))
+        findTotal = total
+        findHits = out.prefix(min(total, out.count)).map {
+            FindHit(page: Int($0.page), gate: $0.gate, point: CGPoint(x: $0.x, y: $0.y),
+                    text: String(cString: $0.text), kind: String(cString: $0.kind))
+        }
+        findIndex = 0
+        if jump, !findHits.isEmpty { showFind(0) }
+    }
+
+    func findStep(_ delta: Int) {
+        guard !findHits.isEmpty else { NSSound.beep(); return }
+        let n = findHits.count
+        findIndex = ((findIndex + delta) % n + n) % n
+        showFind(findIndex)
+    }
+
+    /// To the result's page, select it, and bring it to the middle.
+    private func showFind(_ i: Int) {
+        guard let document, findHits.indices.contains(i) else { return }
+        let hit = findHits[i]
+        let go = { [weak self] in
+            guard let self else { return }
+            _ = cl_edit_select_gate(document.handle, Int32(hit.page), hit.gate)
+            self.view?.animateCenter(on: hit.point)
+            self.redraw()
+            self.selectionChanged()
+        }
+        if hit.page != page {
+            pageRequest = hit.page
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: go)
+        } else {
+            go()
+        }
+    }
+
+    /// The truth table's "Build This as a Circuit": once its sheet is gone.
+    func buildFromTable(_ text: String) {
+        sheetHost.truthTable = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self else { return }
+            if self.canEdit { self.sheetHost.formulaRequest = FormulaRequest(text: text) } else { self.lockNudge() }
+        }
+    }
+
+    /// Makes a planned circuit: on a new page named `pageName`, or to the right
+    /// of what's on this one. One undo step; the new parts are left selected.
+    @discardableResult
+    func build(_ plan: CircuitPlan, onNewPage: Bool, pageName: String) -> Bool {
+        guard let document, !plan.parts.isEmpty else { return false }
+        var target = page
+        var dx = 0.0, dy = 0.0
+        if onNewPage {
+            guard let i = addBlankPage() else { return false }
+            target = i
+            if !pageName.isEmpty { document.renamePage(i, to: pageName) }
+        } else if let b = document.bounds(ofPage: page), b.width > 0 || b.height > 0 {
+            let minX = plan.parts.map(\.x).min() ?? 0, maxY = plan.parts.map(\.y).max() ?? 0
+            dx = b.maxX + 16 - minX
+            dy = b.maxY - maxY
+        }
+        var strings: [UnsafeMutablePointer<CChar>] = []
+        defer { strings.forEach { free($0) } }
+        func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; strings.append(p); return UnsafePointer(p) }
+        let gates = plan.parts.map { p in
+            CLBuildGate(gate: c(p.gate), x: p.x + dx, y: p.y + dy, label: p.label.map(c))
+        }
+        let wires = plan.wires.map { w in CLBuildWire(from: Int32(w.from), fromPin: c(w.fromPin), to: Int32(w.to), toPin: c(w.toPin)) }
+        let made = cl_edit_build(document.handle, Int32(target), gates, Int32(gates.count), wires, Int32(wires.count), "Build from Formula")
+        guard made > 0 else { return false }
+        document.objectWillChange.send()
+        if onNewPage {
+            if let onNewPage = self.onNewPage { onNewPage(target) } else { pageRequest = target }
+        }
+        edited()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.zoomToFit() }
+        return true
+    }
 
     func makeTruthTable() {
         guard let document else { return }
@@ -1031,7 +1246,7 @@ final class CanvasController: ObservableObject {
         redraw()   // it leaves the switches as they were, but the circuit settles again
     }
 
-    private var documentTitle: String {
+    var documentTitle: String {
         let name = document.map { $0.pageCount > 1 ? " - \($0.pageName(page))" : "" } ?? ""
         let title = (view?.window?.representedURL?.deletingPathExtension().lastPathComponent
             ?? view?.window?.title ?? "Circuit")

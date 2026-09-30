@@ -36,7 +36,7 @@ Two interfaces (Settings > General):
 What it does: open, simulate, edit, wire, straighten and tidy circuits; save
 (with autosave and versions), pages, the Your Circuits library; the
 oscilloscope (Cmd-G), truth tables (T), export as PNG or PDF (Shift-Cmd-E),
-printing; two layouts (Native, Classic) and looks you can customize.
+printing; Build from Formula, Karnaugh maps, timing diagrams and Find.
 
 Checks, all without opening the app (`Tools/build-tools.sh` builds them):
 
@@ -48,6 +48,12 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   connect-nearby, pages that close with an undo, memory, the tour's checks,
   Simulation View's drawing)
 - `save_check` -- open, save and reopen circuits; the text must match
+- `formula-check.sh` -- Build from Formula and the truth table's formulas:
+  the simplifier on known answers and 400 random tables, the formula
+  reader, and ~200 circuits built in the engine whose truth tables must
+  match (a folder argument keeps a .cdl of each)
+- `render_png` with `CL_RENDER_HOVER=1` -- points at the page's longest
+  wire and draws its highlight, printing what it carries
 - `asan-check.sh` -- `edit_check` under AddressSanitizer
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
   and top edges included), hover, tooltips, dragging, double-click to fill,

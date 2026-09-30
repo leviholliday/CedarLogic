@@ -157,7 +157,22 @@ enum HelpBook {
                  line: "See what a circuit does.",
                  blocks: [
                     .p("**Truth table ({truthTable})** tries every combination of the page's switches and writes down its lights. Circuits with clocks or flip-flops are read row by row, each after the circuit settles."),
-                    .p("**Oscilloscope ({scope})** records signals over time. Every **TO** label becomes a signal you can watch."),
+                    .p("Beside the table: each light's **simplest sum of products** and **product of sums**, and its **Karnaugh map** with the groups drawn on (groups of 1s or of 0s). Rows with no clear 0 or 1 count as don't-cares. Copy either formula, or **Build This as a Circuit** to make it again as gates."),
+                    .p("**Oscilloscope ({scope})** records signals over time. Every **TO** label becomes a signal you can watch. Its share button copies a **timing diagram** for a lab report, or saves it as a PNG or PDF (what's on screen, or the whole recording)."),
+                    .p("**Point at a wire** and every branch of it lights up; rest there a moment (at once in Simulation View) and a tag shows what it carries: 0, 1, Z (floating: nothing drives it) or ! (a conflict: two outputs disagree)."),
+                 ]),
+        HelpPage(id: "formula", title: "Build from a Formula", icon: "function",
+                 line: "Type it, get the gates.",
+                 blocks: [
+                    .p("**Edit > Build from Formula…** turns a formula into switches, gates and a light for each output, labelled and wired, on a new page or beside what's there. One undo takes it back."),
+                    .p("Write NOT as **A'** or **~A**, AND as **AB**, **A·B** or **A*B**, OR as **A + B**, XOR as **A ⊕ B** or **A ^ B**. Names are one letter, maybe with digits (**X1**), or a capital and small letters (**Cin**). One output per line: **S = A ^ B ^ Cin** then **Cout = AB + Cin(A ^ B)**. Or list minterms: **F(A,B,C) = Σm(1,3,5) + d(7)**."),
+                    .p("Build it **as written**, or as the **simplest sum of products** or **product of sums**; with **any gates**, **NAND only** or **NOR only**; and with **only 2-input gates** if the exercise says so."),
+                 ]),
+        HelpPage(id: "find", title: "Finding Things", icon: "magnifyingglass",
+                 line: "Big circuits, found fast.",
+                 blocks: [
+                    .p("**Find ({find})** searches every page for labels, **TO/FROM** names and parts (\"flip\", \"AND\", \"LED\"). Return goes to the next one; each is selected and brought to the middle."),
+                    .p("With a label or a TO/FROM selected, Find opens looking for its name, so a TO's FROMs are a Return away."),
                  ]),
         HelpPage(id: "memory", title: "Memory: RAM and ROM", icon: "memorychip",
                  line: "Look inside, and change what's there.",

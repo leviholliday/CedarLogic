@@ -21,6 +21,10 @@ final class ScopeModel: ObservableObject {
     @Published var cursor: Int?
     @Published var chosen = 0
     @Published var hidden: Set<String> = []
+    /// Export the whole recording rather than what's on screen.
+    @Published var wholeRecording = false
+    /// The samples last drawn (for exporting what's on screen).
+    var shownRange = 0..<0
 
     func clampZoom() { pointsPerStep = min(max(pointsPerStep, 0.25), 48) }
 }
@@ -29,6 +33,8 @@ struct ScopeView: View {
     let document: CoreDocument
     @ObservedObject var canvas: CanvasController
     @StateObject private var model = ScopeModel()
+    @ObservedObject private var prefs = Prefs.shared
+    @State private var showShare = false
     @FocusState private var focused: Bool
 
     private let nameWidth: CGFloat = 130
@@ -92,6 +98,26 @@ struct ScopeView: View {
                 }
                 .fixedSize()
             }
+            // A panel rather than a menu, so the two options can be flipped
+            // without it closing; it goes when you pick an export or click away.
+            Button { showShare.toggle() } label: { Image(systemName: "square.and.arrow.up") }
+                .help("A timing diagram for a lab report: copy it, or save it as a PNG or PDF")
+                .disabled(length == 0 || signals.isEmpty)
+                .popover(isPresented: $showShare, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        shareRow("Copy as Image", "doc.on.doc") { exportDiagram(.copy, signals: signals, length: length) }
+                        shareRow("Save as PNG…", "photo") { exportDiagram(.png, signals: signals, length: length) }
+                        shareRow("Save as PDF…", "doc.richtext") { exportDiagram(.pdf, signals: signals, length: length) }
+                        Divider().padding(.vertical, 6)
+                        Toggle("Whole recording", isOn: $model.wholeRecording)
+                            .help("Off: just what's on screen")
+                        Toggle("In color", isOn: $prefs.timingInColor)
+                            .help("Off: black and white, for printing")
+                    }
+                    .toggleStyle(.checkbox)
+                    .padding(12)
+                    .frame(width: 210, alignment: .leading)
+                }
             Button { model.pointsPerStep /= 1.5; model.clampZoom() } label: { Image(systemName: "minus.magnifyingglass") }
                 .help("Zoom out in time (−)")
             Button { model.pointsPerStep *= 1.5; model.clampZoom() } label: { Image(systemName: "plus.magnifyingglass") }
@@ -117,6 +143,7 @@ struct ScopeView: View {
 
     private func draw(_ ctx: GraphicsContext, size: CGSize, shown: [(offset: Int, element: String)], length: Int) {
         let (start, count) = window(width: size.width, length: length)
+        model.shownRange = start..<min(length, start + count)
         let pps = model.pointsPerStep
         let x0 = nameWidth
         func x(_ i: Int) -> CGFloat { x0 + CGFloat(i - start) * pps }
@@ -205,6 +232,47 @@ struct ScopeView: View {
 
     private func color(_ v: UInt8) -> Color {
         switch v { case 1: .green; case 2: .blue; case 3: .red; case 4: .orange; default: .secondary }
+    }
+
+    // MARK: Export
+
+    private func shareRow(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button {
+            showShare = false
+            // After the panel has gone, so a save sheet doesn't open under it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: action)
+        } label: {
+            Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 3)
+    }
+
+    private enum ExportKind { case copy, png, pdf }
+
+    private func exportDiagram(_ kind: ExportKind, signals: [String], length: Int) {
+        let shown = signals.enumerated().filter { !model.hidden.contains($0.element) }
+            .map { TimingDiagram.Signal(index: $0.offset, name: $0.element) }
+        var range = model.wholeRecording ? 0..<length : model.shownRange.clamped(to: 0..<length)
+        if range.isEmpty { range = 0..<length }
+        guard !shown.isEmpty, !range.isEmpty else { NSSound.beep(); return }
+        let title = canvas.documentTitle
+        switch kind {
+        case .copy:
+            guard let png = TimingDiagram.pngData(document: document, signals: shown, range: range, title: title, color: prefs.timingInColor) else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setData(png, forType: .png)
+            canvas.note("Timing diagram copied. Paste it into your report.")
+        case .png, .pdf:
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "\(title) timing." + (kind == .png ? "png" : "pdf")
+            panel.allowedContentTypes = [kind == .png ? .png : .pdf]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            let data = kind == .png
+                ? TimingDiagram.pngData(document: document, signals: shown, range: range, title: title, color: prefs.timingInColor)
+                : TimingDiagram.pdfData(document: document, signals: shown, range: range, title: title, color: prefs.timingInColor)
+            do { try data?.write(to: url) } catch { NSSound.beep() }
+        }
     }
 
     // MARK: Input
