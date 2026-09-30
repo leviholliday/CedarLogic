@@ -18,6 +18,9 @@ struct BuildFormulaView: View {
     @AppStorage("cl.buildTwoInput") private var twoInputOnly = false
     @AppStorage("cl.buildNewPage") private var newPage = true
     @FocusState private var editing: Bool
+    /// What it opened with: a formula typed since then is asked about
+    /// before clicking off throws it away.
+    @State private var opened: String?
 
     private var result: Result<ParsedFormulas, FormulaError> {
         do { return .success(try FormulaParser.parse(text)) } catch let e as FormulaError { return .failure(e) } catch {
@@ -95,7 +98,20 @@ struct BuildFormulaView: View {
         }
         .padding(20)
         .frame(width: 560)
-        .onAppear { editing = true }
+        .onAppear { editing = true; if opened == nil { opened = text } }
+        .onClickOutside { clickedOff() }
+    }
+
+    /// Clicking off closes it, unless a formula was typed: then it asks.
+    private func clickedOff() {
+        let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, text != opened, let w = NSApp.keyWindow, w.sheetParent != nil else { dismiss(); return }
+        let a = NSAlert()
+        a.messageText = "Throw away this formula?"
+        a.informativeText = "It hasn't been built yet."
+        a.addButton(withTitle: "Keep Editing")
+        a.addButton(withTitle: "Throw Away")
+        a.beginSheetModal(for: w) { r in if r == .alertSecondButtonReturn { dismiss() } }
     }
 
     @ViewBuilder private var preview: some View {

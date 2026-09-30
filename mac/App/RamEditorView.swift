@@ -20,6 +20,10 @@ struct RamEditorView: View {
     @State private var text = ""
     @State private var jump = ""
     @FocusState private var fieldFocused: Bool
+    /// What each word the user changed held before (to put back if the
+    /// changes aren't kept when clicking off). Words the circuit itself
+    /// writes aren't counted.
+    @State private var originals: [UInt: UInt] = [:]
 
     private var dark: Bool { prefs.dark }
     private var paper: Color { dark ? CLChrome.rgb(28, 31, 37) : CLChrome.rgb(250, 250, 252) }
@@ -138,6 +142,38 @@ struct RamEditorView: View {
         .frame(width: 76 + 16 * (cellWidth(bits.data) + 3) + 80, height: 580)
         .background(paper)
         .preferredColorScheme(dark ? .dark : .light)
+        .onClickOutside { clickedOff() }
+    }
+
+    /// Clicking off: closes it, but asks first when values were changed.
+    private func clickedOff() {
+        if let addr = editing { commit(addr) }
+        guard !originals.isEmpty, let w = NSApp.keyWindow, w.sheetParent != nil else { dismiss(); return }
+        let a = NSAlert()
+        a.messageText = "Save the changes to this memory?"
+        a.informativeText = originals.count == 1 ? "You changed 1 value." : "You changed \(originals.count.formatted()) values."
+        a.addButton(withTitle: "Save")
+        a.addButton(withTitle: "Don't Save")
+        a.addButton(withTitle: "Cancel")
+        a.beginSheetModal(for: w) { r in
+            switch r {
+            case .alertFirstButtonReturn: dismiss()
+            case .alertSecondButtonReturn:
+                for (addr, v) in originals { cl_ram_set(document.handle, gate, addr, v) }
+                originals = [:]
+                canvas.markEdited()
+                canvas.redraw()
+                dismiss()
+            default: break
+            }
+        }
+    }
+
+    /// Notes a word's old value before the user first changes it (and
+    /// forgets it again if it's changed back).
+    private func remember(_ addr: UInt, becoming v: UInt) {
+        let before = originals[addr] ?? cl_ram_value(document.handle, gate, addr)
+        originals[addr] = before == v ? nil : before
     }
 
     private func legend(_ c: Color, _ s: String) -> some View {
@@ -164,6 +200,7 @@ struct RamEditorView: View {
     private func commit(_ addr: Int) {
         let t = text.trimmingCharacters(in: .whitespaces)
         if let v = decimal ? UInt(t) : UInt(t, radix: 16) {
+            remember(UInt(addr), becoming: v)
             cl_ram_set(document.handle, gate, UInt(addr), v)
             canvas.markEdited()
             canvas.redraw()
@@ -175,7 +212,14 @@ struct RamEditorView: View {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "cdm") ?? .data, UTType(filenameExtension: "hex") ?? .data]
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        let words = UInt(1) << UInt(min(max(bits.address, 0), 20))
+        let before = (0..<words).map { cl_ram_value(document.handle, gate, $0) }
         cl_ram_load_file(document.handle, gate, url.path)
+        for addr in 0..<words {
+            let now = cl_ram_value(document.handle, gate, addr)
+            let old = originals[addr] ?? before[Int(addr)]
+            originals[addr] = old == now ? nil : old
+        }
         canvas.markEdited()
         canvas.redraw()
     }

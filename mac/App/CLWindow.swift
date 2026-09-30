@@ -147,10 +147,14 @@ struct CLLayout: View {
         .splitPaneCommands(canvas: canvas, split: split, document: document, page: $page, classicTabs: prefs.classicTabs)
         .sheet(isPresented: $canvas.showQuickAdd) {
             QuickAddView { name in (canvas.quickAddTarget ?? canvas).addGateOnNextMove(name) }
+                .onClickOutside { canvas.showQuickAdd = false }
         }
-        .sheet(isPresented: $canvas.showShortcuts) { ShortcutsSheet(canvas: canvas.routed) }
+        .sheet(isPresented: $canvas.showShortcuts) {
+            ShortcutsSheet(canvas: canvas.routed).onClickOutside { canvas.showShortcuts = false }
+        }
         .sheet(isPresented: $canvas.showExportImage) {
             ExportImageView(document: document, page: canvas.exportPage, fileName: windowTitle)
+                .onClickOutside { canvas.showExportImage = false }
         }
         .sheet(item: Binding(get: { canvas.ramGate.map { RamRef(id: $0) } }, set: { canvas.ramGate = $0?.id })) { ref in
             RamEditorView(document: document, gate: ref.id, canvas: canvas)
@@ -158,6 +162,7 @@ struct CLLayout: View {
         .sheet(item: $settingsFor) { c in
             GateSettingsSheet(document: document, controller: c) { settingsFor = nil }
                 .onEscape { settingsFor = nil }
+                .onClickOutside { settingsFor = nil }
         }
         .overlay(alignment: .bottomTrailing) {
             if tour.active && tour.target === canvas {

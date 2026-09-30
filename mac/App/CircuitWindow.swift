@@ -43,7 +43,9 @@ struct CircuitWindow: View {
             TourModel.shared.windowAppeared(canvas)
         }
         .onDisappear { TourModel.shared.windowClosed(canvas) }
-        .sheet(item: $canvas.truthTable) { t in TruthTableView(table: t) { canvas.buildFromTable($0) } }
+        .sheet(item: $canvas.truthTable) { t in
+            TruthTableView(table: t) { canvas.buildFromTable($0) }.onClickOutside { canvas.truthTable = nil }
+        }
         .sheet(item: $canvas.formulaRequest) { r in BuildFormulaView(text: r.text, canvas: canvas) }
         .alert("No Truth Table", isPresented: Binding(get: { canvas.truthTableProblem != nil },
                                                       set: { if !$0 { canvas.truthTableProblem = nil } })) {
