@@ -25,6 +25,7 @@ struct CedarLogicApp: App {
             TabSwitcher.shared.install()
             MenuFixup.install()
             RenderUI.runIfAsked()
+            RenderWindow.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
             DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
         }
