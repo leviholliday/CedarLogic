@@ -9,6 +9,7 @@
 
 import AppKit
 import QuartzCore
+import UniformTypeIdentifiers
 import SwiftUI
 
 final class CircuitCanvasNSView: NSView {
@@ -581,6 +582,9 @@ final class CanvasController: ObservableObject {
     /// When the file on disk changes from a save, a circuit from Your
     /// Circuits keeps a version.
     private func noticeSaves() {
+        if !adopted, let w = view?.window, let d = NSDocumentController.shared.document(for: w) {
+            adopted = adoptIntoLibrary(d)
+        }
         guard let w = view?.window, let d = NSDocumentController.shared.document(for: w),
               let date = d.fileModificationDate else { return }
         if let last = lastSeenSave, date != last, !d.isDocumentEdited {
@@ -594,6 +598,37 @@ final class CanvasController: ObservableObject {
         lastSeenSave = date
     }
     fileprivate(set) var explicitSaveAt: CFTimeInterval = 0
+    private var adopted = false
+
+    /// Every circuit lives in Your Circuits: a new one joins it once there's
+    /// something on it (so an empty ⌘N leaves nothing behind), and a .cdl
+    /// file opened from elsewhere carries on as a copy there (the file
+    /// itself is left alone; File ▸ Export gets a file out). Opening the
+    /// same file again finds the copy. Old versions' read-only copies (in
+    /// the temporary folder) stay as they are. False to try again later.
+    private func adoptIntoLibrary(_ d: NSDocument) -> Bool {
+        guard let document else { return false }
+        let type = d.fileType ?? UTType.cedarLogicCircuit.identifier
+        if let url = d.fileURL {
+            let temp = FileManager.default.temporaryDirectory.standardizedFileURL.path
+            if Library.contains(url) || url.standardizedFileURL.path.hasPrefix(temp) { return true }
+            if let existing = Library.imported(from: url) {
+                d.close()
+                Library.open(existing.circuit)
+                return true
+            }
+            guard let item = try? Library.create(named: url.deletingPathExtension().lastPathComponent,
+                                                 text: document.saveText(), source: url) else { return true }
+            d.save(to: item.circuit, ofType: type, for: .saveAsOperation) { _ in }
+        } else {
+            guard document.hasGates else { return false }
+            let name = document.libraryName ?? "Untitled Circuit"
+            guard let item = try? Library.create(named: name, text: document.saveText()) else { return true }
+            d.save(to: item.circuit, ofType: type, for: .saveAsOperation) { _ in }
+        }
+        objectWillChange.send()   // the title reads the library name
+        return true
+    }
 
     /// Saving as you go, the way Google Docs does: a couple of seconds after
     /// the last change, the circuit is written to its file.
@@ -734,7 +769,8 @@ final class CanvasController: ObservableObject {
             sheetHost.explicitSaveAt = CACurrentMediaTime()
             NSApp.sendAction(#selector(NSDocument.save(_:)), to: nil, from: nil)
         case .exportImage: sheetHost.exportPage = page; sheetHost.showExportImage = true
-        case .exportFile: NSApp.sendAction(#selector(NSDocument.saveAs(_:)), to: nil, from: nil)
+        // A copy out of Your Circuits; the circuit itself stays there.
+        case .exportFile: NSApp.sendAction(#selector(NSDocument.saveTo(_:)), to: nil, from: nil)
         case .print: printPage()
         case .undo: undo()
         case .redo: redo()
@@ -842,6 +878,13 @@ final class CanvasController: ObservableObject {
     func addGateFloating(_ name: String, at world: CGPoint? = nil) -> Bool {
         guard canEdit else { lockNudge(); return false }
         guard let document, let at = world ?? placePoint else { return false }
+        if name.hasPrefix(MyParts.prefix) {
+            // A saved part: its gates and wires, pasted where the pointer is.
+            guard let text = MyParts.shared.part(named: name)?.text,
+                  document.paste(text, page: page, at: at, shift: true) != nil else { return false }
+            floatSelection(at: at)
+            return true
+        }
         guard document.addGate(name, page: page, at: at) else { return false }
         floatSelection(at: at)
         return true

@@ -256,6 +256,18 @@ final class Splash: ObservableObject {
         let windows = held
         held = []
         SplashDebug.log("finish: \(windows.count) window(s) coming in")
+        // They come in where the launch screen was (the screen you were
+        // looking at), not wherever macOS put them.
+        if let screen = panel?.screen {
+            let vis = screen.visibleFrame
+            for w in windows where !w.styleMask.contains(.fullScreen) && w.screen !== screen {
+                var f = w.frame
+                f.size.width = min(f.width, vis.width)
+                f.size.height = min(f.height, vis.height)
+                f.origin = NSPoint(x: (vis.midX - f.width / 2).rounded(), y: (vis.midY - f.height / 2).rounded())
+                w.setFrame(f, display: false)
+            }
+        }
         // The canvases fade their grid in with the windows (their own appear
         // played while they were hidden).
         NotificationCenter.default.post(name: .clSplashDone, object: nil)

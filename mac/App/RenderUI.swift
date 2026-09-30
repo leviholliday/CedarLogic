@@ -50,6 +50,40 @@ enum RenderUI {
                 try? pdf.write(to: dir.appendingPathComponent("timing.pdf"))
             }
         }
+        // The built-in templates, as files and pictures.
+        for t in Templates.builtIn {
+            try? t.text.write(to: dir.appendingPathComponent("template-\(t.id).cdl"), atomically: true, encoding: .utf8)
+            if let d = try? CoreDocument(data: Data(t.text.utf8)),
+               let ctx = CGContext(data: nil, width: 1600, height: 1000, bitsPerComponent: 8, bytesPerRow: 0,
+                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                ctx.setFillColor(.white); ctx.fill(CGRect(x: 0, y: 0, width: 1600, height: 1000))
+                ctx.translateBy(x: 0, y: 1000); ctx.scaleBy(x: 2, y: -2)
+                _ = cl_document_draw_fitted(d.handle, 0, ctx, 800, 500, 16, 2, Int32(CL_STYLE_LIGHT))
+                if let img = ctx.makeImage() {
+                    try? NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])?
+                        .write(to: dir.appendingPathComponent("template-\(t.id).png"))
+                }
+            }
+        }
+        // A saved part's tile: the counter template, selected and copied.
+        if let d = try? CoreDocument(data: Data(Templates.builtIn[1].text.utf8)) {
+            cl_edit_select_all(d.handle, 0)
+            let text = d.copySelection(page: 0)
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("render-part", isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? text.write(to: folder.appendingPathComponent("part.txt"), atomically: true, encoding: .utf8)
+            let part = SavedPart(id: "render", name: "Counter", folder: folder)
+            if let ctx = CGContext(data: nil, width: 240, height: 192, bitsPerComponent: 8, bytesPerRow: 0,
+                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                ctx.setFillColor(.white); ctx.fill(CGRect(x: 0, y: 0, width: 240, height: 192))
+                ctx.translateBy(x: 0, y: 192); ctx.scaleBy(x: 4, y: -4)
+                MyParts.draw(part, in: ctx, width: 60, height: 48, scale: 4, dark: false)
+                if let img = ctx.makeImage() {
+                    try? NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])?
+                        .write(to: dir.appendingPathComponent("part-tile.png"))
+                }
+            }
+        }
         for dark in [false, true] {
             prefs.dark = dark
             let t = dark ? "dark" : "light"
@@ -74,7 +108,15 @@ enum RenderUI {
             save("settings-canvas-\(t)", CLCanvasSettings().padding(28), width: 640)
             save("settings-toolbar-\(t)", CLToolbarSettings().padding(28), width: 640)
             save("settings-shortcuts-\(t)", CLShortcutSettings().padding(28), width: 640, height: 520)
-            save("welcome-\(t)", WelcomeView(), width: 780, height: 580)
+            if !dark {   // the welcome and tour are the brand look either way
+                for pg in 0..<5 { save("welcome-\(pg)", WelcomeView(page: pg), width: 780, height: 580) }
+                for pg in 0..<7 { save("whatsnew-\(pg)", WhatsNewView(page: pg), width: 820, height: 600) }
+                for st in [0, 8, 10] {
+                    TourModel.shared.step = st
+                    save("tour-\(st)", TourCard(canvas: canvas).padding(30).background(Color(white: 0.9)), width: 420)
+                }
+                TourModel.shared.step = 0
+            }
             save("quit-\(t)", QuitConfirm.preview.padding(30).background(Color.gray), width: 480, height: 256)
             // A truth table with two lights, one with don't-cares.
             let f = try! FormulaParser.parse("F(A,B,C,D) = Σm(1,3,7,11,15) + d(0,2,5)\nG(A,B,C,D) = AB + AC + BC")
@@ -106,6 +148,56 @@ enum RenderUI {
             save("truthtable-wide-\(t)", TruthTableView(table: TruthTable(names: ["A", "B", "C", "Y1", "Y2", "Y3", "Y4", "Y5", "Y6"], inputs: 3, rows: wide)),
                  width: 900)
             save("buildformula-\(t)", BuildFormulaView(text: "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", canvas: canvas), width: 560, height: 560)
+        }
+        // The memory editor, on an 8x8 RAM with a few words in it (drawn
+        // below, through a real view: its list is a scroll view).
+        var ramShots: [(Bool, Int)] = []
+        let ramDoc = CoreDocument()
+        let ramCanvas = CanvasController()
+        ramCanvas.drivesClock = false
+        ramCanvas.attach(ramDoc)
+        if let name = GateLibrary.categories.flatMap({ GateLibrary.gates(in: $0) }).first(where: { $0.caption == "8x8 RAM" })?.name,
+           ramDoc.addGate(name, page: 0, at: .zero),
+           let ram = (0..<50).first(where: { ramDoc.libraryName(ofGate: $0) == name }) {
+            for a in 0..<20 { cl_ram_set(ramDoc.handle, ram, UInt(a), UInt(a * 7 % 256)) }
+            for dark in [false, true] {
+                prefs.dark = dark
+                ramShots.append((dark, ram))
+            }
+        }
+        // Your Circuits and a gate's settings sheet, through real views.
+        func snap<V: View>(_ name: String, _ view: V, _ size: NSSize, dark: Bool) {
+            let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+            host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            host.frame = NSRect(origin: .zero, size: size)
+            let win = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            win.contentView = host
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name + ".png"))
+            }
+        }
+        for (dark, ram) in ramShots {
+            prefs.dark = dark
+            snap("ram-\(dark ? "dark" : "light")", RamEditorView(document: ramDoc, gate: ram, canvas: ramCanvas), NSSize(width: 700, height: 580), dark: dark)
+        }
+        for dark in [false, true] {
+            prefs.dark = dark
+            let t = dark ? "dark" : "light"
+            snap("library-\(t)", LibraryView(), NSSize(width: 600, height: 540), dark: dark)
+            for style in ToolbarStyle.allCases {
+                prefs.toolbarStyle = style
+                snap("bar-\(style.name.lowercased())-\(t)", CLToolbar(document: doc, canvas: canvas, status: canvas.status, title: "Untitled Circuit", subtitle: "Page 1",
+                                                        focusMode: .constant(false)), NSSize(width: 1200, height: 52), dark: dark)
+            }
+            prefs.toolbarStyle = savedStyle
+            if i + 2 < args.count, let id = (0..<2000).first(where: { doc.libraryName(ofGate: $0) == "AA_REGISTER4" }) {
+                if let pg = (0..<doc.pageCount).first(where: { _ = cl_edit_select_gate(doc.handle, Int32($0), id); return doc.singleSelectedGate(page: $0) == id }) { canvas.page = pg }
+                canvas.selectionChanged()
+                snap("inspector-\(t)", GateSettingsSheet(document: doc, controller: canvas) {}, NSSize(width: 420, height: 440), dark: dark)
+            }
         }
         prefs.dark = savedDark
         prefs.toolbarStyle = savedStyle

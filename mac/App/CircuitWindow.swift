@@ -33,14 +33,16 @@ struct CircuitWindow: View {
             CanvasController.front = canvas
             if !replaceChecked {
                 replaceChecked = true
-                if prefs.openReplaces, let previous, previous !== canvas {
+                if prefs.openReplaces, !TourModel.shared.waitingForCircuit, let previous, previous !== canvas {
                     WindowReplacer.replace(previous, with: canvas)
                 }
             }
             canvas.undoManager = undoManager
             notices = document.loadNotices
             showNotices = !notices.isEmpty
+            TourModel.shared.windowAppeared(canvas)
         }
+        .onDisappear { TourModel.shared.windowClosed(canvas) }
         .sheet(item: $canvas.truthTable) { t in TruthTableView(table: t) { canvas.buildFromTable($0) } }
         .sheet(item: $canvas.formulaRequest) { r in BuildFormulaView(text: r.text, canvas: canvas) }
         .alert("No Truth Table", isPresented: Binding(get: { canvas.truthTableProblem != nil },

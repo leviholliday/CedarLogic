@@ -139,15 +139,18 @@ struct RenderStyle {
 	// each call site inventing its own blue keeps that chrome visually
 	// coherent across the canvas.
 	// accentIndex picks one of the Preferences choices, each with a lighter
-	// variant for dark backgrounds: Blue, Purple, Pink, Orange, Green, Graphite.
+	// variant for dark backgrounds: Blue, Purple, Pink, Orange, Green,
+	// Graphite, and CedarLogic (the icon's neon green; the Mac app's default).
 	Color accent() const {
-		static const float light[6][3] = {
+		static const float light[7][3] = {
 			{0.20f, 0.48f, 0.98f}, {0.55f, 0.32f, 0.93f}, {0.93f, 0.25f, 0.55f},
-			{0.96f, 0.50f, 0.10f}, {0.16f, 0.66f, 0.33f}, {0.42f, 0.45f, 0.50f}};
-		static const float dark[6][3] = {
+			{0.96f, 0.50f, 0.10f}, {0.16f, 0.66f, 0.33f}, {0.42f, 0.45f, 0.50f},
+			{0.02f, 0.62f, 0.24f}};
+		static const float dark[7][3] = {
 			{0.42f, 0.62f, 1.00f}, {0.70f, 0.55f, 1.00f}, {1.00f, 0.48f, 0.70f},
-			{1.00f, 0.66f, 0.32f}, {0.36f, 0.82f, 0.50f}, {0.66f, 0.69f, 0.74f}};
-		const int i = (accentIndex >= 0 && accentIndex < 6) ? accentIndex : 0;
+			{1.00f, 0.66f, 0.32f}, {0.36f, 0.82f, 0.50f}, {0.66f, 0.69f, 0.74f},
+			{0.22f, 0.96f, 0.44f}};
+		const int i = (accentIndex >= 0 && accentIndex < 7) ? accentIndex : 0;
 		const float* c = darkMode ? dark[i] : light[i];
 		return Color(c[0], c[1], c[2], 1);
 	}

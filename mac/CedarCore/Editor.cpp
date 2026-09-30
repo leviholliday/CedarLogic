@@ -741,6 +741,12 @@ const char* cl_gate_caption(const CLDocument* doc, long gate) {
 	return scratch.c_str();
 }
 
+const char* cl_gate_library_name(const CLDocument* doc, long gate) {
+	const LibraryGate* lg = libraryGateOf(doc, gate);
+	scratch = lg ? lg->gateName : "";
+	return scratch.c_str();
+}
+
 int cl_gate_setting_count(const CLDocument* doc, long gate) {
 	const LibraryGate* lg = libraryGateOf(doc, gate);
 	return lg ? (int)lg->dlgParams.size() : 0;

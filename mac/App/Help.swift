@@ -182,8 +182,9 @@ enum HelpBook {
         HelpPage(id: "saving", title: "Saving, Your Circuits and Versions", icon: "clock.arrow.circlepath",
                  line: "It keeps itself.",
                  blocks: [
-                    .p("Your work saves itself a couple of seconds after each change. **Your Circuits ({openLibrary})** lists everything you've made; open, rename or delete from there."),
-                    .p("**Versions**: a version is kept each time you press **{save}**, when you come back after a break, and every half hour while you work. File > Version History shows them with a picture of each; restoring keeps the current one too."),
+                    .p("Every circuit lives in **Your Circuits ({openLibrary})** and saves itself a couple of seconds after each change. A new circuit joins it once there's something on it. Open, rename or delete from there, or rename the one you're in by clicking its name at the top of the window."),
+                    .p("**Files**: opening a .cdl file (from the Finder, or {importFile}) brings in a copy to work on; the file itself isn't touched, and opening it again finds the copy. To get a file out, **File > Export as CedarLogic File…** saves a copy wherever you like."),
+                    .p("**Versions**: a version is kept each time you press **{save}**, when you come back after a break, and every half hour while you work, whenever the circuit itself changed (flipping switches doesn't count). File > Version History shows them with a picture of each; restoring keeps the current one too."),
                     .keys([
                         HelpPage.Key(keys: "{newCircuit}", what: "New circuit"),
                         HelpPage.Key(keys: "{importFile}", what: "Open a .cdl file from anywhere"),
@@ -193,10 +194,17 @@ enum HelpBook {
                     ]),
                     .tip("Opening a circuit takes the place of the one you're in, like classic CedarLogic (it asks first if there's anything unsaved). Settings > General can open each in its own window instead."),
                  ]),
+        HelpPage(id: "templates", title: "Templates and My Parts", icon: "square.on.square",
+                 line: "Start ahead, and reuse what you've built.",
+                 blocks: [
+                    .p("**File > New from Template…** starts a circuit from a **Lab Page** (a title block with your name), a **4-Bit Counter**, a **7-Segment Decoder Starter**, or one of your own. **File > Save as Template…** keeps the circuit you're in as one of yours, every tab of it. Settings > General can make every new circuit start from one."),
+                    .p("**My Parts**: select some gates and choose **Edit > Save as Part…**, and name it. It's at the bottom of the side panel's list (**My Parts**) to drag or click in, and in **Add a Gate ({addGate})** under its name. It drops in as a copy of those gates and wires, so any CedarLogic can open the circuit."),
+                    .tip("Right-click a part (in the side panel or in Add a Gate) to rename or delete it. Your templates rename and delete from New from Template."),
+                 ]),
         HelpPage(id: "settings", title: "Settings", icon: "gearshape",
                  line: "Make it yours (⌘,).",
                  blocks: [
-                    .p("**General**: your name for exports, how circuits open, the status bar, updates and crash reports. **Appearance**: theme, accent colour, tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut."),
+                    .p("**General**: your name for exports, how circuits open, what new circuits start from, quitting, the status bar, updates and crash reports. **Appearance**: theme, the app's colour (CedarLogic green, or another), tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut."),
                     .p("**{darkMode}** switches between light and dark any time."),
                  ]),
     ]

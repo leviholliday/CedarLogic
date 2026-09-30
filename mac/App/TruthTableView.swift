@@ -132,7 +132,7 @@ struct TruthTableView: View {
                         Text("Done").font(.system(size: 13, weight: .semibold))
                             .padding(.horizontal, 22).padding(.vertical, 7)
                             .background(Capsule().fill(accent))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Prefs.shared.onAccentColor(dark: Prefs.shared.dark))
                     }
                     .buttonStyle(.plain).keyboardShortcut(.defaultAction)
                 }

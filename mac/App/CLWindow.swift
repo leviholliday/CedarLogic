@@ -35,6 +35,9 @@ struct CLLayout: View {
     @State private var windowTitle = "Untitled"
     @State private var focusMode = false
     @State private var settingsFor: CanvasController?
+    /// Bumped when a circuit in Your Circuits is renamed, so the title reads
+    /// its name again.
+    @State private var libraryTick = 0
     /// The circuit-opening card: covering the canvas from the window's very
     /// first frame (so the circuit never flashes up first), then playing
     /// from `opening`, once the window has landed. Not at launch: the
@@ -55,6 +58,7 @@ struct CLLayout: View {
     private var workingPage: Int { canvas.splitFocus ? (split.sidePage(document) ?? page) : page }
 
     var body: some View {
+        let _ = libraryTick
         VStack(spacing: 0) {
             if !focusMode {
                 CLToolbar(document: document, canvas: canvas, status: canvas.status, title: windowTitle,
@@ -94,6 +98,7 @@ struct CLLayout: View {
         .preferredColorScheme(prefs.dark ? .dark : .light)
         .tint(prefs.accentColor(dark: prefs.dark))
         .animation(.easeInOut(duration: 0.24), value: focusMode)
+        .onReceive(NotificationCenter.default.publisher(for: .clLibraryChanged)) { _ in libraryTick += 1 }
         .onChange(of: canvas.pageRequest) { _, p in
             guard let p else { return }
             canvas.pageRequest = nil
@@ -151,17 +156,12 @@ struct CLLayout: View {
             RamEditorView(document: document, gate: ref.id, canvas: canvas)
         }
         .sheet(item: $settingsFor) { c in
-            VStack(spacing: 0) {
-                InspectorView(document: document, controller: c).frame(width: 380, height: 320)
-                Divider()
-                HStack { Spacer(); Button("Done") { settingsFor = nil }.keyboardShortcut(.defaultAction) }
-                    .padding(12)
-            }
-            .onEscape { settingsFor = nil }
+            GateSettingsSheet(document: document, controller: c) { settingsFor = nil }
+                .onEscape { settingsFor = nil }
         }
         .overlay(alignment: .bottomTrailing) {
-            if tour.active {
-                TourCard(canvas: canvas, document: document, page: page)
+            if tour.active && tour.target === canvas {
+                TourCard(canvas: canvas)
                     .padding(.trailing, 18).padding(.bottom, 44)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -220,6 +220,7 @@ struct CLLayout: View {
             // The card plays once the window is in place (and drawn).
             if covered { DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { opening = Date() } }
             if !prefs.hasSeenWelcome { openWindow(id: "welcome") }
+            else if WhatsNew.shouldShow { openWindow(id: "whatsnew") }
         }
     }
 }
@@ -1086,6 +1087,7 @@ struct CLToolbar: View {
                 Menu {
                     Button("New Circuit") { canvas.perform(.newCircuit) }
                     Button("Your Circuits…") { canvas.perform(.openLibrary) }
+                    Button("New from Template…") { AppActions.openWindow?(id: "templates") }
                     Button("Save") { canvas.perform(.save) }
                     Divider()
                     Button("Copy") { canvas.copy() }
@@ -1180,6 +1182,7 @@ enum TitleActions {
     private final class Target: NSObject {
         static let shared = Target()
         @objc func renameInLibrary() { MainActor.assumeIsolated { TitleActions.renameInLibrary() } }
+        @objc func duplicateInLibrary() { MainActor.assumeIsolated { TitleActions.duplicateInLibrary() } }
     }
 
     static func popUp(in anchor: NSView) {
@@ -1197,11 +1200,21 @@ enum TitleActions {
             add("Rename…", #selector(NSDocument.rename(_:)))
             add("Move To…", #selector(NSDocument.move(_:)))
         }
-        add("Duplicate", #selector(NSDocument.duplicate(_:)))
+        add("Duplicate", #selector(Target.duplicateInLibrary), target: Target.shared)
         menu.addItem(.separator())
         add("Revert to Last Saved", #selector(NSDocument.revertToSaved(_:)))
         add("Version History…", #selector(VersionsOpener.open), target: VersionsOpener.shared)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 4), in: anchor)
+    }
+
+    /// A copy, as a new circuit in Your Circuits.
+    static func duplicateInLibrary() {
+        guard let w = CanvasController.front?.view?.window, let doc = NSDocumentController.shared.document(for: w),
+              let text = CanvasController.front?.document?.saveText() else { return }
+        let name = (Library.item(for: doc.fileURL)?.name ?? doc.displayName ?? "Circuit") + " copy"
+        Templates.pendingText = text
+        Templates.pendingName = name
+        NSDocumentController.shared.newDocument(nil)
     }
 
     static func renameInLibrary() {

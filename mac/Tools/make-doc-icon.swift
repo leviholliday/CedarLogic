@@ -1,8 +1,6 @@
 // Makes the icon .cdl circuit files carry in Finder: a page with a folded
 // corner, CedarLogic's icon on it and "CDL" underneath.
-//   iconutil -c iconset mac/App/CedarLogicNative.icns -o /tmp/app.iconset
-//   swift mac/Tools/make-doc-icon.swift /tmp/app.iconset /tmp/doc.iconset
-//   iconutil -c icns /tmp/doc.iconset -o mac/App/CedarLogicDocument.icns
+//   (mac/Tools/make-icons.sh runs it on the bare tile.)
 import AppKit
 
 let args = CommandLine.arguments

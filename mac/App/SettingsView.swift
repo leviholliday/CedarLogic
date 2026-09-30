@@ -249,10 +249,25 @@ struct GeneralSettingsView: View {
                 }
                 .labelsHidden().fixedSize()
             }
+            Row("New circuits", hint: prefs.newTemplate.isEmpty
+                ? "⌘N starts a blank page. Pick a template to start every new circuit from it instead."
+                : "⌘N starts from this template. (File \u{25B8} New from Template\u{2026} still offers them all.)") {
+                Picker("", selection: $prefs.newTemplate) {
+                    Text("A blank page").tag("")
+                    Divider()
+                    ForEach(Templates.builtIn) { Text($0.name).tag($0.id) }
+                    let mine = Templates.yours()
+                    if !mine.isEmpty {
+                        Divider()
+                        ForEach(mine) { Text($0.name).tag($0.id) }
+                    }
+                }
+                .labelsHidden().fixedSize()
+            }
             Row("Opening files", hint: opensCDL
                 ? "Double-clicking a .cdl file in Finder opens it here."
                 : "Double-clicking a .cdl file in Finder opens it in \(cdlApp) right now.") {
-                Button(opensCDL ? "CedarLogic Native opens them" : "Open them with CedarLogic Native") {
+                Button(opensCDL ? "CedarLogic opens them" : "Open them with CedarLogic") {
                     Task {
                         await CDLHandler.makeUs()
                         opensCDL = CDLHandler.isUs
@@ -297,9 +312,9 @@ struct CLAppearanceSettings: View {
                 }
                 .labelsHidden().fixedSize()
             }
-            Row("Accent color", hint: "Used for selections and highlights. Wire colors that show signal state never change.") {
+            Row("App colour", hint: "Selections, highlights and buttons. CedarLogic is the icon's green. Wire colours that show signal state never change.") {
                 Picker("", selection: Binding(get: { prefs.accent }, set: { i in withAnimation(.easeOut(duration: 0.15)) { prefs.accent = i } })) {
-                    ForEach(0..<6) { i in
+                    ForEach(accentOrder, id: \.self) { i in
                         Label { Text(accentNames[i]) } icon: { Image(nsImage: Self.swatchImage(swatch(i))) }.tag(i)
                     }
                 }

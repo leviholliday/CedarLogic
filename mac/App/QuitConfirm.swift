@@ -13,47 +13,76 @@ enum QuitConfirm {
     static func ask() {
         guard Prefs.shared.confirmQuit else { NSApp.terminate(nil); return }
         if let panel { panel.makeKeyAndOrderFront(nil); return }
-        let p = QuitPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 196),
+        // Roomy enough for the drop and the shadow; the card moves inside it,
+        // drawn by Core Animation, rather than moving the window (which
+        // steps along instead of gliding).
+        let pad: CGFloat = 40
+        let p = QuitPanel(contentRect: NSRect(x: 0, y: 0, width: 420 + pad * 2, height: 196 + pad * 2),
                           styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.isOpaque = false
         p.backgroundColor = .clear
-        p.hasShadow = true
+        p.hasShadow = false
         p.level = .modalPanel
         p.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
         p.isMovableByWindowBackground = true
-        let host = NSHostingView(rootView: QuitView(
-            quit: { close(); NSApp.terminate(nil) },
-            always: { Prefs.shared.confirmQuit = false; close(); NSApp.terminate(nil) },
-            cancel: { close() }))
+        let arrival = ArrivalState()
+        let host = NSHostingView(rootView: QuitArrival(state: arrival, content: QuitView(
+            quit: { quitAnimated() },
+            always: { Prefs.shared.confirmQuit = false; quitAnimated() },
+            cancel: { close() })))
         host.frame = p.contentRect(forFrameRect: p.frame)
         p.contentView = host
         let screen = NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens[0]
         // The screen behind darkens a little; a click on it is Cancel.
         let d = DimWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         d.isOpaque = false
-        d.backgroundColor = NSColor.black.withAlphaComponent(0.28)
+        d.backgroundColor = NSColor.black.withAlphaComponent(0.15)
         d.level = .modalPanel
         d.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
         d.alphaValue = 0
         d.onClick = { close() }
         d.setFrame(screen.frame, display: false)
-        // Starts a little high and see-through, then fades in as it settles.
         let f = screen.visibleFrame
-        let end = NSPoint(x: f.midX - 210, y: f.midY - 98 + f.height * 0.08)
-        p.setFrameOrigin(NSPoint(x: end.x, y: end.y + 14))
-        p.alphaValue = 0
+        p.setFrameOrigin(NSPoint(x: f.midX - 210 - pad, y: f.midY - 98 - pad + f.height * 0.08))
         NSApp.activate()
         d.orderFront(nil)
         p.makeKeyAndOrderFront(nil)
+        // Start the card's arrival once the window is really on screen (from
+        // onAppear, the very first time, it could be missed).
+        DispatchQueue.main.async { arrival.shown = true }
         NSAnimationContext.runAnimationGroup { c in
-            c.duration = 0.24
-            c.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
-            p.animator().alphaValue = 1
-            p.animator().setFrameOrigin(end)
+            c.duration = 0.4
+            c.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             d.animator().alphaValue = 1
         }
         panel = p
         dim = d
+    }
+
+    /// Quit: the question shrinks away, then every window fades out with
+    /// the dimmed screen, then the app goes.
+    private static func quitAnimated() {
+        guard let p = panel else { NSApp.terminate(nil); return }
+        let d = dim
+        panel = nil
+        dim = nil
+        let windows = NSApp.windows.filter { $0.isVisible && $0 !== p && $0 !== d }
+        let f = p.frame
+        NSAnimationContext.runAnimationGroup({ c in
+            c.duration = 0.38
+            c.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.6, 1)
+            p.animator().alphaValue = 0
+            p.animator().setFrame(f.insetBy(dx: f.width * 0.04, dy: f.height * 0.04), display: true)
+            d?.animator().alphaValue = 0
+            for w in windows { w.animator().alphaValue = 0 }
+        }, completionHandler: {
+            MainActor.assumeIsolated {
+                NSApp.terminate(nil)
+                // Still here: quitting waits on a question (a circuit to
+                // save, say), or was cancelled. The windows come back.
+                for w in windows { w.alphaValue = 1 }
+            }
+        })
     }
 
     /// For --render-ui.
@@ -65,14 +94,35 @@ enum QuitConfirm {
         panel = nil
         dim = nil
         NSAnimationContext.runAnimationGroup({ c in
-            c.duration = 0.14
-            c.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            c.duration = 0.15
+            c.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 1, 1)
             p.animator().alphaValue = 0
-            p.animator().setFrameOrigin(NSPoint(x: p.frame.minX, y: p.frame.minY + 8))
             d?.animator().alphaValue = 0
         }, completionHandler: {
             MainActor.assumeIsolated { p.orderOut(nil); d?.orderOut(nil) }
         })
+    }
+}
+
+@MainActor
+private final class ArrivalState: ObservableObject {
+    @Published var shown = false
+}
+
+/// Like Dia: the card is solid in about 0.14 s while its drop keeps easing
+/// into place for about 0.35 s.
+private struct QuitArrival<Content: View>: View {
+    @ObservedObject var state: ArrivalState
+    let content: Content
+    private var shown: Bool { state.shown }
+    var body: some View {
+        content
+            .shadow(color: .black.opacity(0.35), radius: 22, y: 10)
+            .offset(y: shown ? 0 : -20)
+            .animation(.timingCurve(0.2, 0.9, 0.3, 1, duration: 0.35), value: shown)
+            .opacity(shown ? 1 : 0)
+            .animation(.easeOut(duration: 0.14), value: shown)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

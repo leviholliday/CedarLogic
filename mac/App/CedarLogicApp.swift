@@ -26,6 +26,7 @@ struct CedarLogicApp: App {
             MenuFixup.install()
             RenderUI.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
+            DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
         }
     }
 
@@ -43,13 +44,13 @@ struct CedarLogicApp: App {
             FileCommands()
             HelpCommands()
             CommandGroup(replacing: .appInfo) {
-                Button("About CedarLogic Native") { showAbout() }
+                Button("About CedarLogic") { showAbout() }
                 Button("Check for Updates…") { Updates.shared.checkNow() }
             }
             CommandGroup(replacing: .appTermination) {
                 // Only Cmd-Q and this item ask: an update's relaunch or the
                 // Mac shutting down quit straight away.
-                Button("Quit CedarLogic Native") { QuitConfirm.ask() }
+                Button("Quit CedarLogic") { QuitConfirm.ask() }
                     .keyboardShortcut("q", modifiers: .command)
             }
             CommandGroup(replacing: .appSettings) {
@@ -60,6 +61,13 @@ struct CedarLogicApp: App {
 
         Window("Welcome to CedarLogic", id: "welcome") {
             WelcomeView()
+        }
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+        .defaultPosition(.center)
+
+        Window("What's New in CedarLogic", id: "whatsnew") {
+            WhatsNewView()
         }
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
@@ -83,6 +91,13 @@ struct CedarLogicApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
+        Window("New from Template", id: "templates") {
+            TemplatePicker()
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 940, height: 620)
         .defaultPosition(.center)
 
         Window("Version History", id: "versions") {
@@ -300,6 +315,9 @@ struct NewOpenCommands: Commands {
         let _ = { AppActions.openWindow = openWindow }()
         CommandGroup(after: .newItem) {
             Button("Your Circuits…") { openWindow(id: "library") }
+            Button("New from Template…") { openWindow(id: "templates") }
+            Button("Save as Template…") { if let canvas { Templates.saveCurrent(from: canvas) } }
+                .disabled(canvas == nil)
             Divider()
             Button("New Tab") { canvas?.perform(.newTab) }
                 .keyboardShortcut(keys.menu(.newTab))
@@ -410,17 +428,29 @@ enum MenuFixup {
     /// and the separators left round the gaps.
     private static func tidyEdit() {
         guard let edit = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Edit" })?.submenu else { return }
+        // Hidden, not taken out: taking items out while the menu was
+        // updating for a key press lost that key (the first ⌘A or ⌘N after
+        // launch did nothing), and doing it later made the menu flicker as
+        // the Mac put them back.
         let unwanted = ["Writing Tools", "AutoFill", "Start Dictation", "Emoji & Symbols"]
-        for item in edit.items where unwanted.contains(where: { item.title.hasPrefix($0) })
+        for item in edit.items where !item.isHidden && (unwanted.contains(where: { item.title.hasPrefix($0) })
             || item.action == NSSelectorFromString("startDictation:")
-            || item.action == NSSelectorFromString("orderFrontCharacterPalette:") {
-            edit.removeItem(item)
+            || item.action == NSSelectorFromString("orderFrontCharacterPalette:")) {
+            item.isHidden = true
         }
-        while let last = edit.items.last, last.isSeparatorItem { edit.removeItem(last) }
-        var i = 1
-        while i < edit.items.count {
-            if edit.items[i].isSeparatorItem && edit.items[i - 1].isSeparatorItem { edit.removeItem(at: i) } else { i += 1 }
+        // Separators: none twice in a row, none at the end.
+        var lastShownIsSeparator = true
+        var lastSeparator: NSMenuItem?
+        for item in edit.items {
+            if item.isSeparatorItem {
+                let hide = lastShownIsSeparator
+                if item.isHidden != hide { item.isHidden = hide }
+                if !hide { lastShownIsSeparator = true; lastSeparator = item }
+            } else if !item.isHidden {
+                lastShownIsSeparator = false
+            }
         }
+        if lastShownIsSeparator, let sep = lastSeparator, !sep.isHidden { sep.isHidden = true }
     }
 
     static func apply() {
@@ -571,6 +601,8 @@ struct EditCommands: Commands {
                     .keyboardShortcut(keys.menu(.findPrevious))
             }
             .disabled(canvas == nil)
+            Button("Save as Part…") { if let canvas { MyParts.saveSelection(of: canvas) } }
+                .disabled(canvas?.hasGateSelection != true)
             Button("Build from Formula…") { canvas?.perform(.buildFormula) }
                 .keyboardShortcut(keys.menu(.buildFormula))
                 .disabled(canvas == nil)
@@ -632,6 +664,7 @@ struct HelpCommands: Commands {
             Divider()
             Button("Keyboard Shortcuts") { (canvas ?? CanvasController.front)?.showShortcuts = true }
             Divider()
+            Button("What's New in CedarLogic…") { openWindow(id: "whatsnew") }
             Button("Welcome to CedarLogic…") { openWindow(id: "welcome") }
             Button("Set Up CedarLogic…") { WelcomeRequest.setup(); openWindow(id: "welcome") }
             Button("Guided Tour") { TourModel.shared.start() }
@@ -652,6 +685,13 @@ enum KeyMonitor {
             // F1: Help, as in the wx app.
             if e.keyCode == 122 && e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
                 AppActions.openHelp()
+                return nil
+            }
+            // ⌘Q asks here rather than through the Quit menu item, whose key
+            // is missed the first time after launch.
+            if e.charactersIgnoringModifiers?.lowercased() == "q",
+               e.modifierFlags.intersection([.command, .option, .control, .shift]) == .command {
+                QuitConfirm.ask()
                 return nil
             }
             guard let c = KeyCombo(event: e) else { return e }

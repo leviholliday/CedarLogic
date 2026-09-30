@@ -4,10 +4,10 @@ A SwiftUI/AppKit front end on top of the same C++ engine the wx app uses.
 Nothing here is built by the main CMake project, and nothing here affects the
 Windows or Linux builds.
 
-    mac/build.sh              # -> mac/build/CedarLogic Native.app
+    mac/build.sh              # -> mac/build/CedarLogic.app
     OPEN=1 mac/build.sh       # build, then launch
     CLEAN=1 mac/build.sh      # rebuild everything
-    mac/package.sh            # build, then mac/build/CedarLogic-Native-<version>.dmg
+    mac/package.sh            # build, then mac/build/CedarLogic-<version>-Mac.dmg
 
 Needs only the Xcode Command Line Tools (Swift 6), macOS 14 or later.
 

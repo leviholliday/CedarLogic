@@ -35,7 +35,11 @@ enum ToolGroup: Int, CaseIterable, Identifiable {
     }
 }
 
-let accentNames = ["Blue", "Purple", "Pink", "Orange", "Green", "Graphite"]
+let accentNames = ["Blue", "Purple", "Pink", "Orange", "Green", "Graphite", "CedarLogic"]
+/// The accent choices in the order they're offered: the icon's green first.
+let accentOrder = [6, 0, 1, 2, 3, 4, 5]
+/// The icon's green: the accent a new install starts with.
+let brandAccent = 6
 
 @MainActor
 final class Prefs: ObservableObject {
@@ -96,6 +100,8 @@ final class Prefs: ObservableObject {
     /// Opening or starting a circuit replaces the one in the window, as in
     /// the wx app (asking to save first); off, each gets its own window.
     @Published var openReplaces: Bool { didSet { d.set(openReplaces, forKey: "cl.openReplaces") } }
+    /// What a new circuit starts as: a template's id, or "" for a blank page.
+    @Published var newTemplate: String { didSet { d.set(newTemplate, forKey: "cl.newTemplate") } }
 
     private init() {
         Prefs.importWxPrefsOnce()
@@ -105,7 +111,12 @@ final class Prefs: ObservableObject {
         testingGroup = TestingGroup(rawValue: d.string(forKey: "testingGroup") ?? "") ?? .normal
         themeMode = int("cl.themeMode", 0)
         dark = bool("cl.lastDark", false)
-        accent = int("cl.accent", 0)
+        // The icon's green became the default (and everyone's accent, once).
+        if !d.bool(forKey: "cl.brandAccentSet") {
+            d.set(true, forKey: "cl.brandAccentSet")
+            d.set(brandAccent, forKey: "cl.accent")
+        }
+        accent = int("cl.accent", brandAccent)
         showGrid = bool("cl.showGrid", true)
         gridStyle = int("cl.gridStyle", 0)
         majorGrid = bool("cl.majorGrid", true)
@@ -138,6 +149,7 @@ final class Prefs: ObservableObject {
         showCategoryKeys = bool("cl.showCategoryKeys", true)
         showTitle = bool("cl.showTitle", true)
         openReplaces = bool("cl.openReplaces", true)
+        newTemplate = d.string(forKey: "cl.newTemplate") ?? ""
         applyThemeMode()
         applyWireDots()
     }
@@ -156,6 +168,14 @@ final class Prefs: ObservableObject {
         var r = 0.0, g = 0.0, b = 0.0
         cl_accent_color(Int32(accent), dark, &r, &g, &b)
         return Color(.sRGB, red: r, green: g, blue: b)
+    }
+    /// Text and symbols on an accent-filled button: white, or the icon's
+    /// dark ink on a light accent (the green, on the dark theme) where white
+    /// wouldn't read.
+    func onAccentColor(dark: Bool) -> Color {
+        let (r, g, b) = accentRGB(dark: dark)
+        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return lum > 0.55 ? Brand.ink : .white
     }
     func accentRGB(dark: Bool) -> (Double, Double, Double) {
         var r = 0.0, g = 0.0, b = 0.0

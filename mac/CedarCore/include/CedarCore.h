@@ -216,6 +216,8 @@ long cl_edit_single_gate(const CLDocument *doc, int page);
 // What the library calls it ("AND 2-input") and its settings, in the order the
 // library lists them. Strings are valid until the next call.
 const char *cl_gate_caption(const CLDocument *doc, long gate);
+// The gate's library name ("AA_AND2"), for its picture.
+const char *cl_gate_library_name(const CLDocument *doc, long gate);
 int cl_gate_setting_count(const CLDocument *doc, long gate);
 typedef struct {
 	const char *label;   // shown to the user

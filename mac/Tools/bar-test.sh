@@ -4,7 +4,7 @@
 # events, then PASS or FAIL for each. Run it after changing anything in the
 # title bar row; nothing else catches what goes wrong up there.
 #
-#   mac/Tools/bar-test.sh            test mac/build/CedarLogic Native.app
+#   mac/Tools/bar-test.sh            test mac/build/CedarLogic.app
 #   SCREEN=1 mac/Tools/bar-test.sh   on the second display
 #   STYLE=minimal mac/Tools/bar-test.sh   the Minimal toolbar (for this run
 #                                         only; your setting stays)
@@ -16,7 +16,7 @@
 # of yours changes.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-APP="$PWD/mac/build/CedarLogic Native.app"
+APP="$PWD/mac/build/CedarLogic.app"
 OUT="${TMPDIR:-/tmp}/cl-bar-test"
 rm -rf "$OUT"; mkdir -p "$OUT"
 swiftc -O mac/Tools/bar-test.swift -o "$OUT/bar-test" || exit 2
@@ -28,7 +28,7 @@ case "${STYLE:-}" in
 esac
 open -n --env CL_BAR_TEST="$OUT" --env CL_NO_SPLASH=1 --env CL_BAR_SCREEN="${SCREEN:-0}" "$APP" ${ARGS[@]+"${ARGS[@]}"}
 PID=""
-for i in $(seq 1 50); do PID=$(pgrep -f "mac/build/CedarLogic Native.app/Contents/MacOS/CedarLogic" | head -1); [ -n "$PID" ] && break; sleep 0.1; done
+for i in $(seq 1 50); do PID=$(pgrep -f "mac/build/CedarLogic.app/Contents/MacOS/CedarLogic" | head -1); [ -n "$PID" ] && break; sleep 0.1; done
 [ -n "$PID" ] || { echo "The app didn't start."; exit 2; }
 "$OUT/bar-test" "$OUT" "$PID"
 STATUS=$?

@@ -205,7 +205,7 @@ final class FeedbackModel: ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         let prefs = Prefs.shared
         var app: [String: Any] = [
-            "name": "CedarLogic Native",
+            "name": "CedarLogic for Mac",
             "version": info["CFBundleShortVersionString"] as? String ?? "?",
             "build": info["CFBundleVersion"] as? String ?? "?",
             "channel": prefs.testingGroup.name,

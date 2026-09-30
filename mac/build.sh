@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the native Mac app (no Xcode needed -- the Command Line Tools will do).
 #
-#   mac/build.sh            build mac/build/CedarLogic Native.app
+#   mac/build.sh            build mac/build/CedarLogic.app
 #   CLEAN=1 mac/build.sh    rebuild everything (after changing a header)
 #   OPEN=1 mac/build.sh     then launch it
 #
@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 OUT=mac/build
 OBJ=$OUT/obj
-APP="$OUT/CedarLogic Native.app"
+APP="$OUT/CedarLogic.app"
 ARCH=$(uname -m)
 MIN=14.0
 [ "${CLEAN:-0}" = 1 ] && rm -rf "$OUT"
@@ -100,17 +100,15 @@ COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 [ -n "$(git status --porcelain -- mac src include logic format 2>/dev/null)" ] && COMMIT="$COMMIT+"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" mac/App/Info.plist)
 /usr/libexec/PlistBuddy -c "Set CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Add CFBundleGetInfoString string CedarLogic Native $VERSION (build $BUILD, $COMMIT)" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add CFBundleGetInfoString string CedarLogic $VERSION (build $BUILD, $COMMIT)" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add CLCommit string $COMMIT" "$APP/Contents/Info.plist"
 cp res/cl_gatedefs.xml "$APP/Contents/Resources/"
-cp mac/App/CedarLogicNative.icns mac/App/CedarLogicDocument.icns "$APP/Contents/Resources/"
-# The launch screen's icon (the artwork without the NATIVE badge), and the
-# original CedarLogic help pages for Help > Classic Help.
-sips -c 1086 1086 res/macos/icon-artwork.png --out "$OUT/launch-icon.png" >/dev/null   # just the rounded tile
-sips -Z 512 "$OUT/launch-icon.png" --out "$APP/Contents/Resources/LaunchIcon.png" >/dev/null
+cp mac/App/CedarLogic.icns mac/App/CedarLogicDocument.icns mac/App/LaunchIcon.png "$APP/Contents/Resources/"
+# The original CedarLogic help pages, for Help > Classic Help. (The icons,
+# LaunchIcon.png included, come from mac/Tools/make-icons.sh.)
 rm -rf "$APP/Contents/Resources/ClassicHelp"
 ditto res/help "$APP/Contents/Resources/ClassicHelp"
-rm -f "$APP/Contents/Resources/CedarLogic.icns"
+rm -f "$APP/Contents/Resources/CedarLogicNative.icns"
 # The update key's public half (private half: keychain account "cedarlogic").
 /usr/libexec/PlistBuddy -c "Add SUPublicEDKey string yxLh+j07mcolZ462R1sZtniQPJ+hjvkKSgtNG6dY700=" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add SUFeedURL string https://raw.githubusercontent.com/leviholliday/CedarLogic-Releases/main/appcast-native.xml" "$APP/Contents/Info.plist"
