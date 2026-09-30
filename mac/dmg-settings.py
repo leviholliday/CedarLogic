@@ -1,5 +1,7 @@
 # dmgbuild settings for the Mac app's disk image: the same window as the wx
-# app's (res/macos/dmg-background.tiff, laid out by dmg-setup.applescript):
+# app's (res/macos/dmg-background.tiff, laid out by dmg-setup.applescript),
+# with the Applications icon drawn into the picture as well
+# (mac/dmg-background.tiff, from mac/Tools/make-dmg-background.swift):
 # 660 x 400, the app on the left glass panel, Applications on the right, big
 # icons. dmgbuild writes the window's .DS_Store itself, so nothing opens in
 # Finder while it's made. mac/package.sh runs it from the repo root with
@@ -15,7 +17,7 @@ files = [app]
 symlinks = {"Applications": "/Applications"}
 icon = os.path.join(app, "Contents/Resources/CedarLogic.icns")
 
-background = defines.get("background", "res/macos/dmg-background.tiff")  # noqa: F821 (run from the repo root)
+background = defines.get("background", "mac/dmg-background.tiff")  # noqa: F821 (run from the repo root)
 window_rect = ((200, 120), (660, 400))
 default_view = "icon-view"
 show_status_bar = False

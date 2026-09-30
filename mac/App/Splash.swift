@@ -310,6 +310,12 @@ final class Splash: ObservableObject {
             self?.panel = nil
             if let a = self?.activity { ProcessInfo.processInfo.endActivity(a); self?.activity = nil }
             windows.first(where: { NSDocumentController.shared.document(for: $0) != nil })?.makeKeyAndOrderFront(nil)
+            // The welcome (or What's New) goes on top of the circuit, not
+            // behind it where it can't be seen.
+            let greeting = NSApp.windows.first { w in
+                w.isVisible && ["welcome", "whatsnew"].contains { w.identifier?.rawValue.contains($0) == true }
+            }
+            greeting?.makeKeyAndOrderFront(nil)
         }
     }
 }
