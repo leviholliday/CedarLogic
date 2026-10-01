@@ -38,8 +38,8 @@ it compiles without a Windows machine:
   formulas (`TruthTableWindow`) and Build from Formula (`Formula`), Find
   (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope and
   its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
-  for pictures made off screen), and Send Feedback (`Feedback`, to
-  cedarlogic.netlify.app); the launch screen, first-run welcome, What's New
+  for pictures made off screen), Send Feedback (`Feedback`, to
+  cedarlogic.netlify.app), and Help with search (`Help`); the launch screen, first-run welcome, What's New
   and guided tour (`Welcome`, in the brand's green); updates from the test
   build (`Updater`); recovery copies of unsaved work (`Recovery`); and
   settings and helpers (`Util`; settings live in
@@ -62,8 +62,8 @@ Direct2D here. And:
   captures it to a PNG after two seconds and quits (CI runs it on the zip).
   With `--dark` or `--light` for that run, `--sim-view`, or `--dialog
   preferences|shortcuts|truth-table|add-gate|library|versions|templates|
-  formula|scope|export|feedback|welcome|whatsnew` to capture that instead
-  (`--truth-tab N`, `--formula "..."`, `--page N` for What's New, and
+  formula|scope|export|feedback|help|welcome|whatsnew` to capture that instead
+  (`--truth-tab N`, `--formula "..."`, `--page N` for What's New, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope).
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.

@@ -12,6 +12,7 @@
 #include "Updater.h"
 #include "Welcome.h"
 #include "Feedback.h"
+#include "Help.h"
 #include "Library.h"
 #include "Collections.h"
 #include "LibraryWindow.h"
@@ -1205,12 +1206,7 @@ void CircuitWindow::run(int command) {
 	case CMD_NEXT_TAB: cyclePage(1); break;
 	case CMD_PREVIOUS_TAB: cyclePage(-1); break;
 	case CMD_SHORTCUTS: showShortcuts(); break;
-	case CMD_HELP: {
-		const std::string page = resourcesDir() + "\\help\\Introduction.htm";
-		if (fileExists(page)) openExternally(hwnd, page);
-		else showShortcuts();
-		break;
-	}
+	case CMD_HELP: help::show(this); break;
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
 	case CMD_TOUR: welcome::startTour(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;

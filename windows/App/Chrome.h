@@ -34,7 +34,7 @@ const wchar_t Page = 0xE7C3, Open = 0xE8B7, Save = 0xE74E, Undo = 0xE7A7, Redo =
               Paste = 0xE77F, ZoomOut = 0xE71F, ZoomIn = 0xE8A3, Pause = 0xE769, Play = 0xE768, Step = 0xE893,
               Speed = 0xEC4A, Lock = 0xE72E, Unlock = 0xE785, NewTab = 0xE78B, More = 0xE712, ChevronDown = 0xE70D,
               ChevronUpDown = 0xE70D, Stop = 0xE71A, Close = 0xE8BB, Add = 0xE710, Search = 0xE721,
-              Minimize = 0xE921, StopSolid = 0xE73B, Maximize = 0xE922, Restore = 0xE923, Dismiss = 0xE711;
+              Minimize = 0xE921, StopSolid = 0xE73B, Maximize = 0xE922, Restore = 0xE923, Dismiss = 0xE711, Feedback = 0xED15;
 }
 void drawIcon(ID2D1RenderTarget* rt, wchar_t glyph, const D2D1_RECT_F& box, float size, const D2D1_COLOR_F& color);
 // Two the icon font hasn't as the Mac has them, drawn: a page with a plus

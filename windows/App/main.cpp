@@ -6,6 +6,7 @@
 #include "Canvas.h"
 #include "Dialogs.h"
 #include "Feedback.h"
+#include "Help.h"
 #include "Library.h"
 #include "Recovery.h"
 #include "Updater.h"
@@ -36,6 +37,7 @@ int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
 // diagram too; --timing-color for it in color.
 std::string gTiming;
 bool gTimingColor = false;
+std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 
 void writeOut(const std::string& text) {
@@ -53,6 +55,7 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	gExitCode = 1;
 	HWND dialog = w ? GetLastActivePopup(w->window()) : nullptr;
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
+	if (help::window()) dialog = help::window();
 	if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
 	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
 	if (!gTiming.empty()) {
@@ -251,6 +254,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
 		if (a == "--timing-color") { gTimingColor = true; continue; }
+		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
@@ -259,7 +263,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "library" ? CMD_OPEN : d == "versions" ? CMD_VERSIONS : d == "templates" ? CMD_NEW_TEMPLATE
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
-			        : d == "feedback" ? CMD_FEEDBACK
+			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : 0;
 			continue;
 		}
@@ -308,6 +312,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		welcome::offer(circuitWindows().back());
 	}
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
+	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else {
 		// Once the launch screen goes: the windows, then the welcome the

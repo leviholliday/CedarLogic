@@ -124,6 +124,9 @@ jobs:
           timeout 90 "$A" --dialog whatsnew --screenshot "$PWD/renders/whatsnew-0.png" || true
           timeout 90 "$A" --dialog whatsnew --page 3 --screenshot "$PWD/renders/whatsnew-3.png" || true
           timeout 90 "$A" --dialog whatsnew --page 6 --screenshot "$PWD/renders/whatsnew-6.png" || true
+          timeout 90 "$A" --dialog help --screenshot "$PWD/renders/help.png" || true
+          timeout 90 "$A" --dark --dialog help --help-page editing --screenshot "$PWD/renders/help-editing-dark.png" || true
+          timeout 90 "$A" --dialog help --help-page first --screenshot "$PWD/renders/help-first.png" || true
           timeout 90 "$A" --dialog export --screenshot "$PWD/renders/export-image.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --dialog export --screenshot "$PWD/renders/export-image-dark.png" res/samples/practice.cdl || true
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png

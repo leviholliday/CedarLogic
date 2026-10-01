@@ -34,6 +34,7 @@ void Toolbar::build() {
 	add(Button, CMD_SIM_VIEW, 11);
 	add(Button, CMD_LOCK, 12);
 	add(Button, CMD_NEW_TAB, 13);
+	add(Button, CMD_FEEDBACK, 14);
 	add(More, 0, -1);
 	add(CaptionMin, 0, -1); add(CaptionMax, 0, -1); add(CaptionClose, 0, -1);
 }
@@ -70,7 +71,7 @@ void Toolbar::layout(float w, float h) {
 	x -= 8;
 	for (Item& it : items) if (it.kind == More) { x -= kButtonW; place(it, x); }
 	x -= 8;
-	for (int g = 13; g >= 10; g--) {
+	for (int g = 14; g >= 10; g--) {
 		x -= 3;
 		for (int i = (int)items.size() - 1; i >= 0; i--) {
 			if (items[i].group != g) continue;
@@ -150,6 +151,7 @@ wchar_t Toolbar::iconFor(const Item& it) const {
 	case CMD_SIM_VIEW: return win->simView() ? Icon::StopSolid : Icon::Play;
 	case CMD_LOCK: return win->locked() ? Icon::Lock : Icon::Unlock;
 	case CMD_NEW_TAB: return Icon::NewTab;
+	case CMD_FEEDBACK: return Icon::Feedback;
 	default: return L'?';
 	}
 }
@@ -178,6 +180,7 @@ std::string Toolbar::tipFor(const Item& it) const {
 	case CMD_SIM_VIEW: return "Simulation View (Ctrl+R)";
 	case CMD_LOCK: return "Lock the circuit so it can't be edited";
 	case CMD_NEW_TAB: return "New tab (Ctrl+T)";
+	case CMD_FEEDBACK: return "Send feedback: a bug, an idea, anything";
 	default: return std::string();
 	}
 }
