@@ -30,13 +30,21 @@ it compiles without a Windows machine:
   every menu, Windows' own window buttons); `TabStrip`, a tab card per page,
   over a `Canvas` per page (with the note toast, the Tidy Up and Lock
   banner, and Simulation View's control bar drawn over the circuit); the side
-  panel with the gate palette and minimap (`Palette`); the dialogs and the
-  oscilloscope (`Dialogs`, built with the small `Form` helper there, dark in
-  dark mode); the launch screen, first-run welcome and guided tour
-  (`Welcome`, in the brand's green); updates from the test build
-  (`Updater`); recovery copies of unsaved work (`Recovery`); and settings and
-  helpers (`Util`; settings live in `%APPDATA%\CedarLogic\native.ini`).
-  `Drawn` is the base of the custom-drawn parts: Direct2D, in points.
+  panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
+  (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
+  the Mac app's features: Your Circuits and Version History (`Library`,
+  `LibraryWindow`, sharing `%APPDATA%\CedarLogic\Library` with the wx app),
+  templates and parts (`Collections`), the truth table with K-maps and
+  formulas (`TruthTableWindow`) and Build from Formula (`Formula`), Find
+  (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope and
+  its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
+  for pictures made off screen), and Send Feedback (`Feedback`, to
+  cedarlogic.netlify.app); the launch screen, first-run welcome, What's New
+  and guided tour (`Welcome`, in the brand's green); updates from the test
+  build (`Updater`); recovery copies of unsaved work (`Recovery`); and
+  settings and helpers (`Util`; settings live in
+  `%APPDATA%\CedarLogic\native.ini`). `Drawn` is the base of the custom-drawn
+  parts: Direct2D, in points.
 - `res/` -- the manifest (per-monitor DPI, the current look of the standard
   controls, UTF-8 file names) and the resource script (the icon, version).
 
@@ -53,7 +61,12 @@ Direct2D here. And:
 - `CedarLogic.exe --screenshot out.png [circuit.cdl]` -- opens the window,
   captures it to a PNG after two seconds and quits (CI runs it on the zip).
   With `--dark` or `--light` for that run, `--sim-view`, or `--dialog
-  preferences|shortcuts|truth-table|add-gate|welcome` to capture that instead.
+  preferences|shortcuts|truth-table|add-gate|library|versions|templates|
+  formula|scope|export|feedback|welcome|whatsnew` to capture that instead
+  (`--truth-tab N`, `--formula "..."`, `--page N` for What's New, and
+  `--timing out.png [--timing-color]` with the oscilloscope).
+- `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
+  key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --version`
 
 CI (`.github/workflows/windows-native.yml`) builds x64 and ARM64 on every push

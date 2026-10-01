@@ -332,7 +332,7 @@ Device device(CircuitWindow* win) {
 		if (Canvas* c = win->currentCanvas()) ctx.text("zoom", strf("%d%%", c->zoomPercent()));
 	}
 	d.context = ctx.str();
-	d.line = strf("version %s (%s), %s, %s", CL_VERSION, CL_GIT_COMMIT, os.substr(0, os.find(" (")).c_str(), model.empty() ? "PC" : model.c_str());
+	d.line = strf("version %s (%.7s), %s, %s", CL_VERSION, CL_GIT_COMMIT, os.substr(0, os.find(" (")).c_str(), model.empty() ? "PC" : model.c_str());
 	return d;
 }
 
