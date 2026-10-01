@@ -63,6 +63,8 @@ public:
 	int adding = 0, page = 0;
 	void showPage(int page);
 	std::vector<float> tabEdges;        // for clicks on the row, in points
+	std::vector<int> pageBottoms;       // where each page's fields end (pixels)
+	int footerGap = 0, footerButtonsAt = 0, footerBelow = 0;
 	int add(const FormField& f) { fields.push_back(f); fields.back().page = adding; return (int)fields.size() - 1; }
 	// Show it and wait. Returns IDOK, IDCANCEL, or 100 + a button's index.
 	int run(HWND owner);

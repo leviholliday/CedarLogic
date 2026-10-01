@@ -684,7 +684,10 @@ void Form::build() {
 		}
 		if (!pages.empty()) pageY[std::min<size_t>(x.page, pages.size() - 1)] = y;
 	}
-	if (!pages.empty()) y = *std::max_element(pageY.begin(), pageY.end());
+	if (!pages.empty()) {
+		pageBottoms = pageY;
+		y = *std::max_element(pageY.begin(), pageY.end());
+	}
 
 	y += gap;
 	problem = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, margin, y, fullW, lineH,
@@ -710,6 +713,9 @@ void Form::build() {
 		x -= sc(8);
 	}
 	y += btnH + margin;
+	footerGap = gap;
+	footerButtonsAt = lineH + sc(4);
+	footerBelow = btnH + margin;
 
 	setFontTree(dialog, font);
 	for (FormField& f : fields) {
@@ -749,8 +755,6 @@ void Form::build() {
 			SendMessageW(f.hwnd, LVM_SETTEXTCOLOR, 0, c.text);
 		}
 
-	if (!pages.empty()) showPage(page);
-
 	// Size the window around what's in it, centred on its owner.
 	RECT rc = { 0, 0, width, y };
 	const DWORD style = (DWORD)GetWindowLongW(dialog, GWL_STYLE), ex = (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE);
@@ -772,6 +776,7 @@ void Form::build() {
 		top = std::max<int>(mi.rcWork.top, std::min<int>(top, mi.rcWork.bottom - wh));
 	}
 	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+	if (!pages.empty()) showPage(page);
 }
 
 void Form::refresh(int field) {
@@ -807,6 +812,27 @@ void Form::showPage(int to) {
 			focus = x.hwnd;
 	}
 	if (HWND tabs = GetDlgItem(dialog, kTabsId)) InvalidateRect(tabs, nullptr, FALSE);
+	// The window fits the page, as the Mac's Settings does: what's wrong
+	// and the buttons move up under its last field.
+	if (page < (int)pageBottoms.size()) {
+		const int problemY = pageBottoms[page] + footerGap, buttonsY = problemY + footerButtonsAt;
+		RECT pr;
+		GetWindowRect(problem, &pr);
+		MapWindowPoints(nullptr, dialog, (POINT*)&pr, 2);
+		SetWindowPos(problem, nullptr, pr.left, problemY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		for (HWND b : buttonWindows) {
+			RECT br;
+			GetWindowRect(b, &br);
+			MapWindowPoints(nullptr, dialog, (POINT*)&br, 2);
+			SetWindowPos(b, nullptr, br.left, buttonsY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+		RECT client;
+		GetClientRect(dialog, &client);
+		RECT rc = { 0, 0, client.right, buttonsY + footerBelow };
+		const UINT dpi = dpiOf(dialog);
+		AdjustWindowRectExForDpi(&rc, (DWORD)GetWindowLongW(dialog, GWL_STYLE), FALSE, (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE), dpi);
+		SetWindowPos(dialog, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
 	InvalidateRect(dialog, nullptr, TRUE);
 }
 
