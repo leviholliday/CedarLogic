@@ -39,8 +39,9 @@ it compiles without a Windows machine:
   (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope and
   its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
   for pictures made off screen), Send Feedback (`Feedback`, to
-  cedarlogic.netlify.app), and Help with search (`Help`); the launch screen, first-run welcome, What's New
-  and guided tour (`Welcome`, in the brand's green); updates from the test
+  cedarlogic.netlify.app), and Help with search (`Help`); the launch screen with the first launch's sound
+  (`Splash`), the first-run welcome, What's New and the guided tour that
+  builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
   build (`Updater`); recovery copies of unsaved work (`Recovery`); and
   settings and helpers (`Util`; settings live in
   `%APPDATA%\CedarLogic\native.ini`). `Drawn` is the base of the custom-drawn
@@ -63,10 +64,13 @@ Direct2D here. And:
   With `--dark` or `--light` for that run, `--sim-view`, or `--dialog
   preferences|shortcuts|truth-table|add-gate|library|versions|templates|
   formula|scope|export|feedback|help|welcome|whatsnew` to capture that instead
-  (`--truth-tab N`, `--formula "..."`, `--page N` for What's New, `--help-page id`, and
+  (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
+  or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope).
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.
+- `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the
+  launch screen at that moment; `--card-frame <seconds>` holds the opening card.
 - `CedarLogic.exe --version`
 
 CI (`.github/workflows/windows-native.yml`) builds x64 and ARM64 on every push
