@@ -5,6 +5,7 @@
 #include "App.h"
 #include "Canvas.h"
 #include "Recovery.h"
+#include "Updater.h"
 #include "Window.h"
 
 #include <objbase.h>
@@ -242,7 +243,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
 	if (gDialog && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
-	else SetTimer(nullptr, 0, 300, recoveryTimer);
+	else {
+		SetTimer(nullptr, 0, 300, recoveryTimer);
+		updater::start();
+	}
 
 	MSG msg;
 	while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

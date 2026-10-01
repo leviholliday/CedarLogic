@@ -7,6 +7,7 @@
 #include "Recovery.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
+#include "Updater.h"
 #include "Chrome.h"
 
 #include <commdlg.h>
@@ -216,6 +217,7 @@ void CircuitWindow::buildMenus() {
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
 	item(help, CMD_HELP, "CedarLogic &Help\tF1");
 	separator(help);
+	item(help, CMD_CHECK_UPDATES, "Check for &Updates\u2026");
 	item(help, CMD_ABOUT, "&About CedarLogic");
 }
 
@@ -1022,6 +1024,7 @@ void CircuitWindow::run(int command) {
 		else showShortcuts();
 		break;
 	}
+	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
 	case CMD_ABOUT:
 		showMessage(hwnd, Tone::Info, "CedarLogic " CL_VERSION " (native Windows, testing)",
 		            "A digital logic simulator, from Cedarville University.\n\n"
