@@ -8,6 +8,11 @@
    CircuitParse: uses XMLParser to load and save user circuit files.
 *****************************************************************************/
 
+#if defined(CL_NO_WX) && defined(_WIN32)
+// Before anything that says `using namespace std`: the Windows headers'
+// `byte` would otherwise clash with std::byte.
+#include <windows.h>
+#endif
 #include "CircuitParse.h"
 #include "PaletteDrag.h"
 #include "RenderMode.h"
@@ -17,7 +22,7 @@
 #include "MainApp.h"
 #include "MainFrame.h"
 #include <wx/file.h>
-#else
+#elif !defined(_WIN32)
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -28,10 +33,8 @@
 #include <cstring>
 
 // Windows doesn't define EDQUOT (disk quota exceeded) - define it for compatibility
-#ifdef _MSC_VER
 #ifndef EDQUOT
 #define EDQUOT 122  // POSIX standard value for disk quota exceeded
-#endif
 #endif
 
 #include "XMLParser.h"
@@ -931,7 +934,63 @@ bool CircuitParse::writeToFile(const string &filename, const string &text) {
 		}
 	};
 
-#ifdef CL_NO_WX
+#if defined(CL_NO_WX) && defined(_WIN32)
+	// The same atomic write with Win32 calls (what wxTempFile does there): a
+	// temporary beside the target, flushed to disk, then moved over it.
+	auto widen = [](const string& s) {
+		std::wstring w;
+		const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+		if (n > 0) {
+			w.resize((size_t)n);
+			MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], n);
+			w.resize((size_t)n - 1);
+		}
+		return w;
+	};
+	auto fail = [&](const char* stage) {
+		const DWORD e = GetLastError();
+		int errnum = 0;
+		switch (e) {
+		case ERROR_ACCESS_DENIED: case ERROR_SHARING_VIOLATION: case ERROR_LOCK_VIOLATION: errnum = EACCES; break;
+		case ERROR_DISK_FULL: case ERROR_HANDLE_DISK_FULL: errnum = ENOSPC; break;
+		case ERROR_WRITE_PROTECT: errnum = EROFS; break;
+		case ERROR_PATH_NOT_FOUND: case ERROR_FILE_NOT_FOUND: case ERROR_INVALID_DRIVE: errnum = ENOENT; break;
+		default: break;
+		}
+		if (errnum != 0) describe(errnum, stage);
+		else lastError = string(stage) + " (Windows error " + std::to_string((unsigned long)e) + ").";
+		return false;
+	};
+	const std::wstring target = widen(filename);
+	const std::wstring tmp = target + L".saving-" + std::to_wstring((unsigned long)GetCurrentProcessId()) + L"-" +
+	                         std::to_wstring((unsigned long long)GetTickCount64());
+	HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE) return fail("Cannot open file for writing");
+	const char* p = text.data();
+	size_t left = text.size();
+	while (left > 0) {
+		const DWORD chunk = (DWORD)std::min<size_t>(left, 1u << 30);
+		DWORD wrote = 0;
+		if (!WriteFile(h, p, chunk, &wrote, nullptr) || wrote == 0) {
+			fail("Write operation failed");
+			CloseHandle(h); DeleteFileW(tmp.c_str());
+			return false;
+		}
+		p += wrote; left -= wrote;
+	}
+	if (!FlushFileBuffers(h)) {
+		fail("Could not flush the file to disk");
+		CloseHandle(h); DeleteFileW(tmp.c_str());
+		return false;
+	}
+	CloseHandle(h);
+	if (!MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		fail("Could not replace the existing file");
+		DeleteFileW(tmp.c_str());
+		return false;
+	}
+	return true;
+#elif defined(CL_NO_WX)
 	// The same atomic write with POSIX calls: a temporary beside the target,
 	// fsync, then rename over it.
 	const string tmp = filename + ".saving-XXXXXX";

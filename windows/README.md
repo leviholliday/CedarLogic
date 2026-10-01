@@ -1,0 +1,51 @@
+# CedarLogic for Windows (native)
+
+Plain Win32 windows and controls, with Direct2D for the canvas, on the same C++
+engine the wx app, the native Mac app and the native Linux app use. Everything
+it needs comes with Windows 10 and 11 (Direct2D, DirectWrite, WIC, the common
+controls): no wxWidgets, no Skia, no runtime to install. Nothing here is built
+by the main CMake project, and nothing here affects the other builds.
+
+    cmake -S windows -B windows/build -A x64
+    cmake --build windows/build --config Release
+    windows\build\Release\CedarLogic.exe [circuit.cdl ...]
+
+It needs Visual Studio 2019 or later (the C++ desktop workload) and CMake.
+MinGW-w64 builds it too, including from a Mac, which is handy for checking that
+it compiles without a Windows machine:
+
+    cmake -S windows -B build-mingw -DCMAKE_SYSTEM_NAME=Windows \
+      -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+      -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres
+    cmake --build build-mingw -j8
+
+- `CedarCore/D2DScene` -- the render Scene drawn with Direct2D, the Windows twin
+  of the Mac's `CGScene` and Linux's `CairoScene`. Labels are Arial Bold glyph
+  outlines from DirectWrite, as the wx app draws them on Windows. The rest of
+  the engine is `mac/CedarCore`, shared with the Mac and Linux apps; its
+  drawing calls take a Direct2D render target here (`mac/CedarCore/NativeScene.h`).
+- `App/` -- the app: a window per circuit (`Window`), a tab and a canvas per
+  page (`Canvas`), the gate palette and minimap (`Palette`), the dialogs and
+  the oscilloscope (`Dialogs`, built with the small `Form` helper there),
+  recovery copies of unsaved work (`Recovery`), and settings and helpers
+  (`Util`; settings live in `%APPDATA%\CedarLogic\native.ini`).
+- `res/` -- the manifest (per-monitor DPI, the current look of the standard
+  controls, UTF-8 file names) and the resource script (the icon, version).
+
+The app looks for `cl_gatedefs.xml` in `res` beside the exe (or the repo's
+`res` when run from the build folder, or `CEDARLOGIC_RESOURCES`). The zip CI
+makes is that layout: `CedarLogic.exe` and `res\` with the gates, help and
+samples.
+
+Checks, without opening the app (built with it; `-DCL_BUILD_TOOLS=OFF` skips
+them): `cl_check`, `edit_check`, `sim_check`, `tt_check`, `save_check`,
+`part_check`, `render_png` -- the Mac app's checks (`mac/Tools`), drawing with
+Direct2D here. And:
+
+- `CedarLogic.exe --screenshot out.png [circuit.cdl]` -- opens the window,
+  captures it to a PNG after two seconds and quits (CI runs it on the zip)
+- `CedarLogic.exe --version`
+
+CI (`.github/workflows/windows-native.yml`) builds x64 and ARM64 on every push
+to `windows/native`, runs the checks and the screenshot on x64, and publishes
+the zips as the `windows-native-testing` pre-release.

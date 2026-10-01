@@ -35,6 +35,9 @@ struct CLLayout: View {
     @State private var windowTitle = "Untitled"
     @State private var focusMode = false
     @State private var settingsFor: CanvasController?
+    /// Bumped when a circuit in Your Circuits is renamed, so the title reads
+    /// its name again.
+    @State private var libraryTick = 0
     /// The circuit-opening card: covering the canvas from the window's very
     /// first frame (so the circuit never flashes up first), then playing
     /// from `opening`, once the window has landed. Not at launch: the
@@ -55,6 +58,7 @@ struct CLLayout: View {
     private var workingPage: Int { canvas.splitFocus ? (split.sidePage(document) ?? page) : page }
 
     var body: some View {
+        let _ = libraryTick
         VStack(spacing: 0) {
             if !focusMode {
                 CLToolbar(document: document, canvas: canvas, status: canvas.status, title: windowTitle,
@@ -94,6 +98,7 @@ struct CLLayout: View {
         .preferredColorScheme(prefs.dark ? .dark : .light)
         .tint(prefs.accentColor(dark: prefs.dark))
         .animation(.easeInOut(duration: 0.24), value: focusMode)
+        .onReceive(NotificationCenter.default.publisher(for: .clLibraryChanged)) { _ in libraryTick += 1 }
         .onChange(of: canvas.pageRequest) { _, p in
             guard let p else { return }
             canvas.pageRequest = nil
@@ -142,26 +147,26 @@ struct CLLayout: View {
         .splitPaneCommands(canvas: canvas, split: split, document: document, page: $page, classicTabs: prefs.classicTabs)
         .sheet(isPresented: $canvas.showQuickAdd) {
             QuickAddView { name in (canvas.quickAddTarget ?? canvas).addGateOnNextMove(name) }
+                .onClickOutside { canvas.showQuickAdd = false }
         }
-        .sheet(isPresented: $canvas.showShortcuts) { ShortcutsSheet(canvas: canvas.routed) }
+        .sheet(isPresented: $canvas.showShortcuts) {
+            ShortcutsSheet(canvas: canvas.routed).onClickOutside { canvas.showShortcuts = false }
+        }
         .sheet(isPresented: $canvas.showExportImage) {
             ExportImageView(document: document, page: canvas.exportPage, fileName: windowTitle)
+                .onClickOutside { canvas.showExportImage = false }
         }
         .sheet(item: Binding(get: { canvas.ramGate.map { RamRef(id: $0) } }, set: { canvas.ramGate = $0?.id })) { ref in
             RamEditorView(document: document, gate: ref.id, canvas: canvas)
         }
         .sheet(item: $settingsFor) { c in
-            VStack(spacing: 0) {
-                InspectorView(document: document, controller: c).frame(width: 380, height: 320)
-                Divider()
-                HStack { Spacer(); Button("Done") { settingsFor = nil }.keyboardShortcut(.defaultAction) }
-                    .padding(12)
-            }
-            .onEscape { settingsFor = nil }
+            GateSettingsSheet(document: document, controller: c) { settingsFor = nil }
+                .onEscape { settingsFor = nil }
+                .onClickOutside { settingsFor = nil }
         }
         .overlay(alignment: .bottomTrailing) {
-            if tour.active {
-                TourCard(canvas: canvas, document: document, page: page)
+            if tour.active && tour.target === canvas {
+                TourCard(canvas: canvas)
                     .padding(.trailing, 18).padding(.bottom, 44)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -220,6 +225,7 @@ struct CLLayout: View {
             // The card plays once the window is in place (and drawn).
             if covered { DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { opening = Date() } }
             if !prefs.hasSeenWelcome { openWindow(id: "welcome") }
+            else if WhatsNew.shouldShow { openWindow(id: "whatsnew") }
         }
     }
 }
@@ -321,6 +327,7 @@ final class TitlebarManager {
         var observers: [NSObjectProtocol] = []
         var toolbarWatch: NSKeyValueObservation?
         var titleWatch: NSKeyValueObservation?
+        var watch: Timer?
     }
     private var states: [ObjectIdentifier: State] = [:]
 
@@ -342,7 +349,10 @@ final class TitlebarManager {
                          NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification,
                          NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification,
                          NSWindow.didResignMainNotification, NSWindow.didChangeOcclusionStateNotification,
-                         NSWindow.didEnterFullScreenNotification, NSWindow.didDeminiaturizeNotification] {
+                         NSWindow.didEnterFullScreenNotification, NSWindow.didDeminiaturizeNotification,
+                         NSWindow.didChangeScreenNotification, NSWindow.didChangeBackingPropertiesNotification,
+                         NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification,
+                         NSWindow.didEndSheetNotification] {
                 st.observers.append(NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { [weak self, weak w] _ in
                     MainActor.assumeIsolated { if let w { self?.relayoutSoon(w) } }
                 })
@@ -363,6 +373,11 @@ final class TitlebarManager {
                 st.observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: v, queue: nil) { [weak self, weak w] _ in
                     MainActor.assumeIsolated { if let w { self?.reassert(w) } }
                 })
+            }
+            // Nothing says when AppKit moves a button's layer (see layout),
+            // so a look every so often, while the window can be seen.
+            st.watch = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self, weak w] _ in
+                MainActor.assumeIsolated { if let w, w.isVisible { self?.layout(w) } }
             }
             states[id] = st
         }
@@ -443,6 +458,7 @@ final class TitlebarManager {
     }
 
     private func forget(_ id: ObjectIdentifier) {
+        states[id]?.watch?.invalidate()
         for o in states[id]?.observers ?? [] { NotificationCenter.default.removeObserver(o) }
         states[id] = nil
     }
@@ -475,7 +491,14 @@ final class TitlebarManager {
         if container.frame != f { container.frame = f }
         for (i, btn) in b.enumerated() {
             let o = NSPoint(x: 2 + CGFloat(i) * spacing, y: ((st.barHeight - btn.frame.height) / 2).rounded())
-            if btn.frame.origin != o { btn.setFrameOrigin(o) }
+            // AppKit also moves a button's layer without its frame following
+            // (the green one, in a window that isn't active yet): the frame
+            // then looks right and the button is drawn in the wrong place.
+            let drawn = btn.layer?.position ?? o
+            if btn.frame.origin != o || abs(drawn.x - o.x) > 0.5 || abs(drawn.y - o.y) > 0.5 {
+                btn.setFrameOrigin(NSPoint(x: o.x + 1, y: o.y))
+                btn.setFrameOrigin(o)
+            }
         }
     }
 }
@@ -580,18 +603,22 @@ struct BarClickArea: NSViewRepresentable {
         private func fraction(_ p: NSPoint) -> CGFloat { min(1, max(0, p.x / max(1, bounds.width))) }
 
         override func mouseDown(with e: NSEvent) {
+            BarTest.note("down \(tip ?? "") clicks=\(e.clickCount)")
             held = true
             onPress(true)
-            onDrag?(fraction(point(e)))
+            if !BarTest.on { onDrag?(fraction(point(e))) }
         }
         override func mouseDragged(with e: NSEvent) {
             let p = point(e)
+            if BarTest.on { return }
             if let onDrag { onDrag(fraction(p)) } else { onPress(inside(p)) }
         }
         override func mouseUp(with e: NSEvent) {
             held = false
             onPress(false)
-            if onDrag == nil && inside(point(e)) { onClick() }
+            // Under the toolbar test (BarTest) a click is logged, not done.
+            if BarTest.on { if inside(point(e)) { BarTest.note("CLICK \(tip ?? "")") } }
+            else if onDrag == nil && inside(point(e)) { onClick() }
             BarHover.refresh()
         }
     }
@@ -603,6 +630,28 @@ struct BarClickArea: NSViewRepresentable {
         v.onPress = onPress
         v.onClick = onClick
         v.onDrag = onDrag
+    }
+}
+
+/// A tip and a light for a control that takes its own clicks (a SwiftUI
+/// Menu, say): BarHover finds it by where the pointer is, never by a hit
+/// test, so it's never between the control and a click.
+struct BarTipArea: NSViewRepresentable {
+    var tip: String
+    var onHover: (Bool) -> Void = { _ in }
+
+    final class Area: BarControl {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { BarHover.region(self) }
+        }
+    }
+
+    func makeNSView(context: Context) -> Area { Area() }
+    func updateNSView(_ v: Area, context: Context) {
+        v.tip = tip
+        v.onHover = onHover
     }
 }
 
@@ -641,6 +690,15 @@ enum BarHover {
     }
     static func unfollow(_ v: WindowDragArea.DragView) { followers[ObjectIdentifier(v)] = nil }
 
+    private struct Region { weak var view: BarControl? }
+    private static var regions: [Region] = []
+    /// A BarTipArea: found by where the pointer is (see refresh).
+    static func region(_ v: BarControl) {
+        install()
+        regions.removeAll { $0.view == nil || $0.view === v }
+        regions.append(Region(view: v))
+    }
+
     /// What's under the pointer now: the control there lit, the one before
     /// not. (`near`: it's known to be by a control.)
     static func refresh(near: Bool = false) {
@@ -652,10 +710,18 @@ enum BarHover {
         let w = NSApp.window(withWindowNumber: NSWindow.windowNumber(at: m, belowWindowWithWindowNumber: 0))
         var found: BarControl?
         if let w, w.attachedSheet == nil, let frame = w.contentView?.superview {
-            var v = frame.hitTest(w.convertPoint(fromScreen: m))
+            let p = w.convertPoint(fromScreen: m)
+            var v = frame.hitTest(p)
             while let x = v, found == nil { found = x as? BarControl; v = x.superview }
+            if found == nil {
+                found = regions.lazy.compactMap(\.view).first {
+                    $0.window === w && !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: nil).contains(p)
+                }
+            }
         }
         if lit?.held != true, found !== lit {
+            if found == nil && lit != nil { BarTest.note("unlit") }
+            if let found { BarTest.note("lit \(found.tip ?? "")") }
             lit?.light(false)
             lit = found
             found?.light(true)
@@ -742,6 +808,7 @@ enum BarTip {
         p.invalidateShadow()
         p.orderFront(nil)
         shownFor = c
+        BarTest.note("tip shown: \(text)")
     }
 
     private static func hide() {
@@ -821,6 +888,7 @@ struct WindowDragArea: NSViewRepresentable {
 
         override func mouseDown(with event: NSEvent) {
             guard let w = window else { return }
+            BarTest.note("dragview down clicks=\(event.clickCount)")
             if event.clickCount >= 2 {
                 if let onDoubleClick { onDoubleClick() } else { Self.titlebarDoubleClick(w) }
                 return
@@ -878,6 +946,7 @@ struct CLToolbar: View {
     var styleOverride: ToolbarStyle? = nil
     @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var keys = ShortcutStore.shared
+    @State private var moreHover = false
 
     private var style: ToolbarStyle { styleOverride ?? prefs.toolbarStyle }
     private var dark: Bool { prefs.dark }
@@ -989,6 +1058,9 @@ struct CLToolbar: View {
         if prefs.shown(.tab) {
             group { button("plus.square.on.square", tip("New tab", .newTab)) { canvas.newPage() } }
         }
+        if prefs.shown(.feedback) {
+            group { button("exclamationmark.bubble", tip("Send feedback: a bug, an idea, anything", .feedback)) { canvas.perform(.feedback) } }
+        }
     }
 
     private var full: some View {
@@ -1020,6 +1092,7 @@ struct CLToolbar: View {
                 Menu {
                     Button("New Circuit") { canvas.perform(.newCircuit) }
                     Button("Your Circuits…") { canvas.perform(.openLibrary) }
+                    Button("New from Template…") { AppActions.openWindow?(id: "templates") }
                     Button("Save") { canvas.perform(.save) }
                     Divider()
                     Button("Copy") { canvas.copy() }
@@ -1034,6 +1107,8 @@ struct CLToolbar: View {
                     Button(canvas.locked ? "Unlock" : "Lock") { canvas.locked.toggle() }
                     Button("New Tab") { canvas.newPage() }
                     Button(focusMode ? "Leave Focus Mode" : "Focus Mode") { focusMode.toggle() }
+                    Divider()
+                    Button("Send Feedback…") { canvas.perform(.feedback) }
                 } label: {
                     Image(systemName: "ellipsis").font(.system(size: 15)).foregroundStyle(ink.opacity(0.9))
                         .frame(width: 34, height: 30)
@@ -1041,7 +1116,9 @@ struct CLToolbar: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("More")
+                .background(RoundedRectangle(cornerRadius: 7).fill(ink.opacity(moreHover ? 0.08 : 0)))
+                .overlay(BarTipArea(tip: "More", onHover: { h in withAnimation(.easeOut(duration: 0.12)) { moreHover = h } })
+                    .allowsHitTesting(false))
             }
             .padding(.trailing, 12)
         }
@@ -1086,6 +1163,8 @@ private struct TitleClickArea: NSViewRepresentable {
 
     final class Area: BarControl {
         override func mouseDown(with event: NSEvent) {
+            BarTest.note("down \(tip ?? "") clicks=\(event.clickCount)")
+            if BarTest.on { BarTest.note("CLICK \(tip ?? "")"); return }
             TitleActions.popUp(in: self)
             BarHover.refresh()
         }
@@ -1108,6 +1187,7 @@ enum TitleActions {
     private final class Target: NSObject {
         static let shared = Target()
         @objc func renameInLibrary() { MainActor.assumeIsolated { TitleActions.renameInLibrary() } }
+        @objc func duplicateInLibrary() { MainActor.assumeIsolated { TitleActions.duplicateInLibrary() } }
     }
 
     static func popUp(in anchor: NSView) {
@@ -1125,11 +1205,21 @@ enum TitleActions {
             add("Rename…", #selector(NSDocument.rename(_:)))
             add("Move To…", #selector(NSDocument.move(_:)))
         }
-        add("Duplicate", #selector(NSDocument.duplicate(_:)))
+        add("Duplicate", #selector(Target.duplicateInLibrary), target: Target.shared)
         menu.addItem(.separator())
         add("Revert to Last Saved", #selector(NSDocument.revertToSaved(_:)))
         add("Version History…", #selector(VersionsOpener.open), target: VersionsOpener.shared)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 4), in: anchor)
+    }
+
+    /// A copy, as a new circuit in Your Circuits.
+    static func duplicateInLibrary() {
+        guard let w = CanvasController.front?.view?.window, let doc = NSDocumentController.shared.document(for: w),
+              let text = CanvasController.front?.document?.saveText() else { return }
+        let name = (Library.item(for: doc.fileURL)?.name ?? doc.displayName ?? "Circuit") + " copy"
+        Templates.pendingText = text
+        Templates.pendingName = name
+        NSDocumentController.shared.newDocument(nil)
     }
 
     static func renameInLibrary() {
@@ -1538,7 +1628,7 @@ struct CLTabStrip: View {
             if titleRow {
                 LinearGradient(colors: [chrome.tabBarTop, chrome.tabBar], startPoint: .top, endPoint: .bottom)
                     .allowsHitTesting(false)
-                WindowDragArea(onPress: { activate() }, onDoubleClick: { controller.newPage() },
+                WindowDragArea(onPress: { activate() }, onDoubleClick: { if BarTest.on { BarTest.note("strip doubleclick") } else { controller.newPage() } },
                                onPointer: { pointer($0, pages, tw) })
             } else {
                 LinearGradient(colors: [chrome.tabBarTop, chrome.tabBar], startPoint: .top, endPoint: .bottom)
@@ -1624,6 +1714,7 @@ struct CLTabStrip: View {
             let px = x(pages.count, tw)
             if h == nil && pt.x >= px && pt.x < px + plusW { h = -2 }
         }
+        if hover != h || hoverClose != close { BarTest.note("strip hover \(h.map(String.init) ?? "-") close \(close.map(String.init) ?? "-")") }
         if hover != h { hover = h }
         if hoverClose != close { hoverClose = close }
     }
@@ -1967,6 +2058,7 @@ struct CLCanvasArea: View {
             if shown < document.pageCount {
                 CLCanvasHost(document: document, page: shown, controller: c)
                     .overlay(alignment: .top) { TidyBanner(canvas: c) }
+                    .overlay(alignment: .top) { FindBar(canvas: c, document: document) }
                     .overlay { EmptyHint(document: document, controller: c, page: shown) }
                     .overlay(alignment: .topTrailing) { LockBadge(canvas: c) }
                     .overlay(alignment: .bottom) {

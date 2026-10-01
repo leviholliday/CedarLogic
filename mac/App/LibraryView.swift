@@ -71,27 +71,97 @@ enum Library {
 
     /// A new, empty circuit in the library, named `name`.
     static func create(named name: String) throws -> LibraryItem {
+        try create(named: name, text: CoreDocument().saveText())
+    }
+
+    /// A new circuit in the library holding `text`; `source` is the file it
+    /// was imported from, if any, so opening that file again finds it.
+    static func create(named name: String, text: String, source: URL? = nil) throws -> LibraryItem {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
         let id = "\(f.string(from: Date()))-\(Int.random(in: 1000...99999))"
         let folder = root.appendingPathComponent(id, isDirectory: true)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("versions"), withIntermediateDirectories: true)
         try name.write(to: folder.appendingPathComponent("name.txt"), atomically: true, encoding: .utf8)
-        let empty = CoreDocument()
-        try empty.saveText().write(to: folder.appendingPathComponent("circuit.cdl"), atomically: true, encoding: .utf8)
+        try text.write(to: folder.appendingPathComponent("circuit.cdl"), atomically: true, encoding: .utf8)
+        // The file as it is (not as the engine writes it back), to know it again.
+        if let source, let original = try? String(contentsOf: source, encoding: .utf8) {
+            try? sourceMark(source, text: original).write(to: folder.appendingPathComponent("source.txt"), atomically: true, encoding: .utf8)
+        }
         return LibraryItem(id: id, name: name, folder: folder, modified: Date())
+    }
+
+    /// Whether a file is part of the library (a circuit or one of its versions).
+    static func contains(_ url: URL) -> Bool {
+        url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/")
+    }
+
+    /// What an imported circuit remembers of its file: where it was and
+    /// what was in it, so opening that same file again finds the copy --
+    /// but a file that's changed since (a newer download) comes in afresh.
+    private static func sourceMark(_ url: URL, text: String) -> String {
+        url.standardizedFileURL.path + "\n" + String(format: "%016llx", fnv1a(text))
+    }
+    private static func fnv1a(_ s: String) -> UInt64 {
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return h
+    }
+
+    /// The circuit already imported from `url` as it is now, if there is one.
+    static func imported(from url: URL) -> LibraryItem? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let mark = sourceMark(url, text: text)
+        return items().first { item in
+            let stored = try? String(contentsOf: item.folder.appendingPathComponent("source.txt"), encoding: .utf8)
+            // (The first imports kept only the path.)
+            return stored == mark || stored == url.standardizedFileURL.path
+        }
     }
 
     static func rename(_ item: LibraryItem, to name: String) {
         try? name.write(to: item.folder.appendingPathComponent("name.txt"), atomically: true, encoding: .utf8)
+        // Open windows show it by this name: they read it again.
+        NotificationCenter.default.post(name: .clLibraryChanged, object: nil)
     }
 
     /// Into the library's own trash folder, where the wx app puts deleted
-    /// circuits too.
-    static func moveToTrash(_ item: LibraryItem) {
+    /// circuits too. False if it couldn't be moved.
+    @discardableResult
+    static func moveToTrash(_ item: LibraryItem) -> Bool {
+        let fm = FileManager.default
         let trash = root.appendingPathComponent(".Trash", isDirectory: true)
-        try? FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
-        try? FileManager.default.moveItem(at: item.folder, to: trash.appendingPathComponent(item.id))
+        try? fm.createDirectory(at: trash, withIntermediateDirectories: true)
+        var dest = trash.appendingPathComponent(item.id)
+        var n = 2
+        while fm.fileExists(atPath: dest.path) { dest = trash.appendingPathComponent("\(item.id) \(n)"); n += 1 }
+        return (try? fm.moveItem(at: item.folder, to: dest)) != nil
+    }
+
+    /// The library circuits open in windows now, by id.
+    @MainActor static func openIDs() -> Set<String> {
+        Set(NSDocumentController.shared.documents.compactMap { item(for: $0.fileURL)?.id })
+    }
+
+    /// Deletes a circuit: its windows close first (without saving -- it's
+    /// going), then it goes to the library's trash.
+    @MainActor static func delete(_ item: LibraryItem) -> Bool {
+        for doc in NSDocumentController.shared.documents where Library.item(for: doc.fileURL)?.id == item.id {
+            doc.close()
+        }
+        let ok = moveToTrash(item)
+        NotificationCenter.default.post(name: .clLibraryChanged, object: nil)
+        return ok
+    }
+
+    /// An alert as a sheet on the window in front (the library's), or on
+    /// its own; `done` hears whether the first button was chosen.
+    @MainActor static func present(_ alert: NSAlert, _ done: @escaping (Bool) -> Void) {
+        if let w = NSApp.keyWindow, w.attachedSheet == nil {
+            alert.beginSheetModal(for: w) { r in done(r == .alertFirstButtonReturn) }
+        } else {
+            done(alert.runModal() == .alertFirstButtonReturn)
+        }
     }
 
     /// A library circuit was saved. It saves itself every few seconds, like
@@ -113,8 +183,9 @@ enum Library {
         let now = Date()
         let newest = versions(of: item).first
         func keep(_ src: URL, at date: Date) {
-            // Not twice the same circuit in a row.
-            if let n = newest, let a = try? Data(contentsOf: n.url), let b = try? Data(contentsOf: src), a == b { return }
+            // Not twice the same circuit in a row -- the same parts in the
+            // same places, whatever its switches or wires were doing.
+            if let n = newest, let a = shape(of: n.url), a == shape(of: src) { return }
             let dest = item.versionsFolder.appendingPathComponent(stamp.string(from: date) + ".cdl")
             try? fm.removeItem(at: dest)
             try? fm.copyItem(at: src, to: dest)
@@ -133,6 +204,42 @@ enum Library {
         try? fm.removeItem(at: pending)
         try? fm.copyItem(at: url, to: pending)
         thin(item)
+    }
+
+    /// What a version is, for telling versions apart: the file less what
+    /// running it changes -- switch and keypad settings (OUTPUT_NUM), what
+    /// registers and counters hold (CURRENT_VALUE) -- and less the app that
+    /// wrote it. Gates, where they sit, wires, labels and settings remain.
+    static func shape(of url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return text.split(separator: "\n").filter { line in
+            let t = line.drop { $0 == " " }
+            return !(t.hasPrefix("(lparam \"OUTPUT_NUM\"") || t.hasPrefix("(lparam \"CURRENT_VALUE\"")
+                     || t.hasPrefix("(generator "))
+        }.joined(separator: "\n")
+    }
+
+    /// Versions that are the same circuit as the one before them (from before
+    /// versions were told apart that way) go to the library's trash, once.
+    static func removeRepeats() {
+        let flag = "cl.versionRepeatsRemoved"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        let fm = FileManager.default
+        let trash = root.appendingPathComponent(".Trash/repeated versions", isDirectory: true)
+        for item in items() {
+            var last: String?
+            for v in versions(of: item).reversed() {   // oldest first
+                let s = shape(of: v.url)
+                if let s, s == last {
+                    let dest = trash.appendingPathComponent(item.id, isDirectory: true)
+                    try? fm.createDirectory(at: dest, withIntermediateDirectories: true)
+                    try? fm.moveItem(at: v.url, to: dest.appendingPathComponent(v.url.lastPathComponent))
+                } else {
+                    last = s
+                }
+            }
+        }
+        UserDefaults.standard.set(true, forKey: flag)
     }
 
     private static func thin(_ item: LibraryItem) {
@@ -241,26 +348,33 @@ private struct PickerList: View {
     let accent: Color
     var empty = "Nothing here yet."
     let onActivate: () -> Void
-    @State private var hover: Int?
+    /// The row under the pointer, by its id: rows can move (a list reloads)
+    /// without the highlight staying behind on whatever takes the place.
+    @State private var hover: String?
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                        rowView(i, row).id(i)
+                        rowView(i, row)
                     }
                 }
                 .padding(.vertical, 2)
             }
             .overlay { if rows.isEmpty { Text(empty).font(.system(size: 13)).foregroundStyle(look.dim).padding(.top, 40).frame(maxHeight: .infinity, alignment: .top) } }
-            .onChange(of: selection) { _, s in withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(s) } }
+            .onChange(of: selection) { _, s in
+                guard rows.indices.contains(s) else { return }
+                withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(rows[s].id) }
+            }
+            .onChange(of: rows.map(\.id)) { _, ids in if let h = hover, !ids.contains(h) { hover = nil } }
         }
         .background(look.paper)
     }
 
     private func rowView(_ i: Int, _ row: PickerRowData) -> some View {
-        let sel = i == selection, hot = hover == i
+        let sel = i == selection, hot = hover == row.id
+        let next = rows.indices.contains(i + 1) ? rows[i + 1].id : nil
         return HStack(spacing: 16) {
             LibraryGateTile(accent: accent, on: sel).frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 3) {
@@ -282,13 +396,14 @@ private struct PickerList: View {
                 .padding(.vertical, 4)
         )
         .overlay(alignment: .bottom) {
-            if i < rows.count - 1 && !sel && !hot && selection != i + 1 && hover != i + 1 {
+            if let next, !sel && !hot && selection != i + 1 && hover != next {
                 Rectangle().fill(look.ink.opacity(0.08)).frame(height: 1).padding(.leading, 68).padding(.trailing, 12)
             }
         }
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
-        .onHover { h in if h { hover = i } else if hover == i { hover = nil } }
+        .id(row.id)
+        .onHover { h in if h { hover = row.id } else if hover == row.id { hover = nil } }
         .onTapGesture(count: 2) { selection = i; onActivate() }
         .simultaneousGesture(TapGesture().onEnded { selection = i })
     }
@@ -344,12 +459,10 @@ struct LibraryView: View {
     @ObservedObject private var prefs = Prefs.shared
     @Environment(\.dismiss) private var dismiss
     @State private var items: [LibraryItem] = []
-    @State private var selection = 0
+    /// The chosen circuit, by its id, so it stays chosen when the list
+    /// reloads; nil means the first one shown.
+    @State private var selectedID: String?
     @State private var search = ""
-    @State private var renaming: LibraryItem?
-    @State private var deleting: LibraryItem?
-    @State private var newName = ""
-    @State private var openHint: String?
     @State private var keys = PickerKeys()
     @FocusState private var searchFocused: Bool
 
@@ -359,18 +472,18 @@ struct LibraryView: View {
         let q = search.trimmingCharacters(in: .whitespaces)
         return q.isEmpty ? items : items.filter { $0.name.localizedCaseInsensitiveContains(q) }
     }
-    private var selected: LibraryItem? { shown.indices.contains(selection) ? shown[selection] : nil }
-    /// The circuit open in the front window, if it's one of these.
-    private var currentID: String? {
-        guard let url = frontFileURL(), url.lastPathComponent == "circuit.cdl" else { return nil }
-        return url.deletingLastPathComponent().lastPathComponent
+    private var selected: LibraryItem? { shown.first { $0.id == selectedID } ?? shown.first }
+    private var selectionIndex: Binding<Int> {
+        Binding(get: { shown.firstIndex { $0.id == selected?.id } ?? 0 },
+                set: { i in if shown.indices.contains(i) { selectedID = shown[i].id } })
     }
 
     var body: some View {
+        let open = Library.openIDs()
         VStack(alignment: .leading, spacing: 0) {
             Text("Your Circuits").font(.system(size: 19, weight: .bold)).foregroundStyle(look.ink)
                 .padding(.horizontal, 22).padding(.top, 22)
-            Text("Everything here saves itself. Use Import to bring in a .cdl file.")
+            Text("Everything here saves itself. Use Import to bring in a .cdl file, and File \u{25B8} Export to get one out.")
                 .font(.system(size: 13)).foregroundStyle(look.dim)
                 .padding(.horizontal, 22).padding(.top, 10)
             TextField("Search circuits", text: $search)
@@ -380,14 +493,14 @@ struct LibraryView: View {
             PickerList(rows: shown.map { item in
                 PickerRowData(id: item.id, title: item.name,
                               subtitle: GateCounter.line(item.circuit, friendlyTime(item.modified)),
-                              badge: item.id == currentID ? "OPEN" : nil)
-            }, selection: $selection, look: look, accent: accent,
+                              badge: open.contains(item.id) ? "OPEN" : nil)
+            }, selection: selectionIndex, look: look, accent: accent,
                empty: items.isEmpty ? "Nothing here yet." : "No circuits match.", onActivate: openSelected)
                 .padding(14)
             HStack(spacing: 8) {
                 Button("Import File…", action: importFile).help("Bring in a .cdl file  (⌘I)")
-                Button("Rename…", action: beginRename).help("Rename the selected circuit  (⌘R)").disabled(selected == nil)
-                Button("Delete", action: beginDelete).help("Delete the selected circuit  (⌘⌫)").disabled(selected == nil)
+                Button("Rename…", action: rename).help("Rename the selected circuit  (⌘R)").disabled(selected == nil)
+                Button("Delete…", action: delete).help("Delete the selected circuit  (⌘⌫)").disabled(selected == nil)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Open", action: openSelected).keyboardShortcut(.defaultAction).disabled(selected == nil)
@@ -399,35 +512,26 @@ struct LibraryView: View {
         .background(OverFrontCircuit())
         .preferredColorScheme(prefs.dark ? .dark : .light)
         .onAppear {
-            reload()
+            // Newest first each time it opens; while it's open, the order
+            // holds (a circuit saving itself doesn't jump it to the top).
+            items = Library.items()
+            selectedID = nil
             searchFocused = true
             keys.install(window: "library") { e in handleKey(e) }
         }
         .onDisappear { keys.remove() }
-        .onChange(of: search) { _, _ in selection = 0 }
+        .onChange(of: search) { _, _ in selectedID = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in reload() }
-        .alert("Rename Circuit", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("Name", text: $newName)
-            Button("Rename") {
-                let name = newName.trimmingCharacters(in: .whitespaces)
-                if let r = renaming, !name.isEmpty { Library.rename(r, to: name); reload() }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("Delete Circuit", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-            Button("Delete", role: .destructive) { if let d = deleting { Library.moveToTrash(d); reload() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Delete \u{201C}\(deleting?.name ?? "")\u{201D} and all its versions?")
-        }
-        .alert("Delete Circuit", isPresented: Binding(get: { openHint != nil }, set: { if !$0 { openHint = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(openHint ?? "") }
     }
 
+    /// The list again, in the order it's in: renamed circuits take their new
+    /// names, deleted ones go, new ones come in at the top.
     private func reload() {
-        items = Library.items()
-        if selection >= shown.count { selection = max(0, shown.count - 1) }
+        let fresh = Library.items()
+        let byID = Dictionary(fresh.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let kept = items.compactMap { byID[$0.id] }
+        let known = Set(items.map(\.id))
+        items = fresh.filter { !known.contains($0.id) } + kept
     }
 
     private func openSelected() {
@@ -439,37 +543,72 @@ struct LibraryView: View {
         dismiss()
         DispatchQueue.main.async { NSDocumentController.shared.openDocument(nil) }
     }
-    private func beginRename() {
+
+    private func rename() {
         guard let item = selected else { return }
-        newName = item.name
-        renaming = item
-    }
-    private func beginDelete() {
-        guard let item = selected else { return }
-        if item.id == currentID {
-            openHint = "That circuit is open. Open a different one first, then delete it."
-            return
+        let alert = NSAlert()
+        alert.messageText = "Rename Circuit"
+        alert.informativeText = "The name it has in Your Circuits."
+        let field = NSTextField(string: item.name)
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        Library.present(alert) { ok in
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard ok, !name.isEmpty else { return }
+            Library.rename(item, to: name)
+            reload()
         }
-        deleting = item
+    }
+
+    /// Asks first. A circuit that's open closes, then it and its versions
+    /// go to the library's trash (where the wx app puts deleted circuits).
+    private func delete() {
+        guard let item = selected else { return }
+        let index = shown.firstIndex { $0.id == item.id } ?? 0
+        let isOpen = Library.openIDs().contains(item.id)
+        let alert = NSAlert()
+        alert.messageText = "Delete \u{201C}\(item.name)\u{201D}?"
+        alert.informativeText = (isOpen ? "It's open, so its window will close. " : "") + "It and all its versions will be deleted."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        Library.present(alert) { ok in
+            guard ok else { return }
+            if Library.delete(item) {
+                reload()
+                // The next one down is chosen (or the last).
+                let rows = shown
+                selectedID = rows.isEmpty ? nil : rows[min(index, rows.count - 1)].id
+            } else {
+                let fail = NSAlert()
+                fail.messageText = "Couldn\u{2019}t delete \u{201C}\(item.name)\u{201D}."
+                Library.present(fail) { _ in }
+            }
+        }
     }
 
     /// Type to search, arrows to move, Return to open, wherever the focus is.
     private func handleKey(_ e: NSEvent) -> Bool {
         let cmd = e.modifierFlags.contains(.command)
         let n = shown.count
+        let i = selectionIndex.wrappedValue
+        func go(_ to: Int) { if n > 0 { selectionIndex.wrappedValue = max(0, min(n - 1, to)) } }
         switch e.keyCode {
-        case 125: selection = min(n - 1, selection + 1); return true            // ↓
-        case 126: selection = max(0, selection - 1); return true                // ↑
-        case 121: selection = min(n - 1, selection + 8); return true            // page down
-        case 116: selection = max(0, selection - 8); return true                // page up
-        case 115 where cmd: selection = 0; return true                          // ⌘home
-        case 119 where cmd: selection = max(0, n - 1); return true              // ⌘end
-        case 51 where cmd, 117 where cmd: beginDelete(); return true            // ⌘⌫
+        case 125: go(i + 1); return true            // ↓
+        case 126: go(i - 1); return true            // ↑
+        case 121: go(i + 8); return true            // page down
+        case 116: go(i - 8); return true            // page up
+        case 115 where cmd: go(0); return true      // ⌘home
+        case 119 where cmd: go(n - 1); return true  // ⌘end
+        case 51 where cmd, 117 where cmd: delete(); return true            // ⌘⌫
         default: break
         }
         guard cmd, let k = e.charactersIgnoringModifiers?.lowercased() else { return false }
         switch k {
-        case "r": beginRename(); return true
+        case "r": rename(); return true
         case "i": importFile(); return true
         case "f": searchFocused = true; return true
         default: return false
@@ -698,4 +837,9 @@ struct OverFrontCircuit: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> NSView { Probe() }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+extension Notification.Name {
+    /// A circuit in Your Circuits was renamed or deleted.
+    static let clLibraryChanged = Notification.Name("clLibraryChanged")
 }

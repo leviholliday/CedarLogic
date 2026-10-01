@@ -1,0 +1,168 @@
+name: Windows native build
+
+# The native Windows app (windows/): plain Win32 and Direct2D on the shared
+# engine, no wxWidgets and no Skia. Builds it for Intel/AMD and ARM PCs, runs
+# the engine's headless checks, starts the app and takes a picture of its
+# window, and publishes the zips as a rolling test build on pushes to
+# windows/native.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'windows/native'
+      - 'windows/native-**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      # One CPU failing says nothing about the other.
+      fail-fast: false
+      matrix:
+        include:
+          # PCs and laptops (Intel/AMD): built, checked and started here.
+          - { arch: x64, run: true }
+          # ARM laptops (Snapdragon): cross-built; this runner can't start it.
+          - { arch: ARM64, run: false }
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build
+        shell: bash
+        run: |
+          cmake -S windows -B windows/build -A ${{ matrix.arch }} -DCL_BUILD_TOOLS=${{ matrix.run && 'ON' || 'OFF' }}
+          cmake --build windows/build --config Release -- /m /v:minimal
+
+      # The engine through the C interface the app uses: editing, wires,
+      # simulation, truth tables, and saving without changing a circuit --
+      # drawn with Direct2D, as the app draws. (jmSGTZM is left out of
+      # save_check, as on Linux: two overlapping dots on one wire draw in the
+      # standard library's hash order.)
+      - name: Engine checks
+        if: matrix.run
+        shell: bash
+        run: |
+          L=res/cl_gatedefs.xml
+          B=windows/build/Release
+          $B/cl_check.exe $L
+          $B/edit_check.exe $L res/samples/practice.cdl 0
+          $B/tt_check.exe $L res/samples/practice.cdl 0
+          $B/sim_check.exe $L format/tests/fixtures/lab6.cdl 0 before.png after.png
+          $B/save_check.exe $L format/tests/fixtures/Broadcast.cdl format/tests/fixtures/Lab5.cdl \
+            "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
+
+      # A folder that runs as it is: the exe, and res beside it with the gate
+      # library, the help and the samples.
+      - name: Package
+        shell: bash
+        run: |
+          D=package/CedarLogic
+          mkdir -p "$D/res"
+          cp windows/build/Release/CedarLogic.exe "$D/"
+          cp res/cl_gatedefs.xml "$D/res/"
+          cp -r res/help res/samples "$D/res/"
+          cp LICENSE "$D/LICENSE.txt"
+          cat > "$D/README.txt" <<'EOT'
+          CedarLogic for Windows (native test build)
+
+          Double-click CedarLogic.exe to start it. Keep the res folder next to
+          it: that's where the gates, the help and the practice circuit are.
+          Nothing is installed; delete the folder to remove it.
+
+          Windows 10 or 11.
+          EOT
+          (cd package && 7z a -tzip "../CedarLogic-Windows-native-${{ matrix.arch }}.zip" CedarLogic > /dev/null)
+          ls -la CedarLogic-Windows-native-*.zip
+
+      # Start the packaged app, open a circuit and take a picture of the whole
+      # window: catches anything the zip forgot, and shows what it looks like.
+      - name: Smoke test
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          timeout 60 "$A" --version
+          timeout 90 "$A" --screenshot "$PWD/renders/window-Lab5.png" format/tests/fixtures/Lab5.cdl
+          test -s renders/window-Lab5.png
+          timeout 90 "$A" --screenshot "$PWD/renders/window-new.png"
+          test -s renders/window-new.png
+          windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
+          cp before.png after.png renders/
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Windows-native-${{ matrix.arch }}
+          path: CedarLogic-Windows-native-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+      - name: Upload renders
+        if: always() && matrix.run
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Windows-native-renders
+          path: renders
+          if-no-files-found: warn
+
+  # A public download for testers without a GitHub account: one rolling
+  # pre-release, replaced on every push to windows/native. Its own job, after
+  # both builds, so the release only ever holds a matching pair.
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/windows/native'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download both zips
+        uses: actions/download-artifact@v8
+        with:
+          pattern: CedarLogic-Windows-native-*
+          path: zips
+          merge-multiple: true
+
+      - name: Publish the test build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -f zips/*.png
+          ls -la zips
+          TAG=windows-native-testing
+          NOTES=$(cat <<EOT
+          Native Windows test build from windows/native (${GITHUB_SHA::7}). Not a release: expect missing pieces.
+
+          This is CedarLogic rebuilt natively for Windows, the way the Mac app was: plain Windows controls and Direct2D on the same engine as every other CedarLogic, with nothing else to install.
+
+          Pick the file for your computer:
+          - x64: ordinary PCs and laptops (Intel/AMD)
+          - ARM64: Windows on ARM laptops (Snapdragon)
+
+          Unzip it anywhere and double-click CedarLogic.exe inside. Windows may warn that it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway.
+          EOT
+          )
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease --title "Native Windows test build" --notes "$NOTES"
+          else
+            gh release create "$TAG" --prerelease --title "Native Windows test build" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" zips/*.zip --clobber
+          # Drop anything this run didn't make, so only the current pair is offered.
+          keep=$(cd zips && ls *.zip)
+          for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
+            echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
+          done

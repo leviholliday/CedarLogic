@@ -75,15 +75,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Editing
     case undo, redo, cut, copy, paste, duplicate, selectAll
     // Building
-    case addGate, rotate, straighten, tidy, quickCopy, quickPaste, quickCut, quickDuplicate
+    case addGate, rotate, straighten, tidy, quickCopy, quickPaste, quickCut, quickDuplicate, buildFormula
     // Moving around
-    case zoomIn, zoomOut, zoomFit, zoomActual, focusMode
+    case zoomIn, zoomOut, zoomFit, zoomActual, focusMode, find, findNext, findPrevious
     // Simulation
     case simView, step, truthTable, scope, lock
     // Tabs
     case newTab, closeTab, reopenTab, splitView, switchPane, closeSplit, nextTab, previousTab
     // App
-    case shortcuts, darkMode
+    case shortcuts, darkMode, feedback
 
     var id: String { rawValue }
 
@@ -91,11 +91,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .newCircuit, .openLibrary, .importFile, .save, .exportImage, .exportFile, .print: "Circuits"
         case .undo, .redo, .cut, .copy, .paste, .duplicate, .selectAll: "Editing"
-        case .addGate, .rotate, .straighten, .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate: "Building"
-        case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode: "Moving around"
+        case .addGate, .rotate, .straighten, .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate, .buildFormula: "Building"
+        case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode, .find, .findNext, .findPrevious: "Moving around"
         case .simView, .step, .truthTable, .scope, .lock: "Simulation"
         case .newTab, .closeTab, .reopenTab, .splitView, .switchPane, .closeSplit, .nextTab, .previousTab: "Tabs and split view"
-        case .shortcuts, .darkMode: "App"
+        case .shortcuts, .darkMode, .feedback: "App"
         }
     }
 
@@ -123,11 +123,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickPaste: "Paste (quick key)"
         case .quickCut: "Cut (quick key)"
         case .quickDuplicate: "Duplicate (quick key)"
+        case .buildFormula: "Build a circuit from a formula"
         case .zoomIn: "Zoom in"
         case .zoomOut: "Zoom out"
         case .zoomFit: "Zoom to fit"
         case .zoomActual: "Actual size"
         case .focusMode: "Focus mode: hide the side panel"
+        case .find: "Find a label, a TO/FROM name or a part"
+        case .findNext: "Find the next one"
+        case .findPrevious: "Find the previous one"
         case .simView: "Simulation view"
         case .step: "Step once"
         case .truthTable: "Truth table"
@@ -143,6 +147,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .previousTab: "Previous tab"
         case .shortcuts: "Every shortcut (this list)"
         case .darkMode: "Dark mode"
+        case .feedback: "Send feedback"
         }
     }
 
@@ -171,11 +176,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickPaste: return KeyCombo(key: "v", mods: 0)
         case .quickCut: return KeyCombo(key: "x", mods: 0)
         case .quickDuplicate: return KeyCombo(key: "d", mods: 0)
+        case .buildFormula: return nil
         case .zoomIn: return KeyCombo(key: "=", mods: c)
         case .zoomOut: return KeyCombo(key: "-", mods: c)
         case .zoomFit: return KeyCombo(key: "0", mods: c)
         case .zoomActual: return KeyCombo(key: "1", mods: c)
         case .focusMode: return KeyCombo(key: ".", mods: c)
+        case .find: return KeyCombo(key: "f", mods: c)
+        case .findNext: return nil     // Cmd-G is the oscilloscope's (as in the wx app)
+        case .findPrevious: return nil
         case .simView: return KeyCombo(key: "r", mods: c)
         case .step: return KeyCombo(key: "r", mods: c | s)
         case .truthTable: return KeyCombo(key: "t", mods: 0)
@@ -191,6 +200,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .previousTab: return KeyCombo(key: "tab", mods: ctl | s)
         case .shortcuts: return KeyCombo(key: "/", mods: s)
         case .darkMode: return KeyCombo(key: "d", mods: c | s)
+        case .feedback: return nil
         }
     }
 }

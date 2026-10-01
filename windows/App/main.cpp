@@ -1,0 +1,238 @@
+// CedarLogic for Windows (native): the application -- starting up, the
+// message loop and its keyboard shortcuts, opening circuits, and the list of
+// open windows.
+
+#include "App.h"
+#include "Canvas.h"
+#include "Recovery.h"
+#include "Window.h"
+
+#include <objbase.h>
+#include <shellapi.h>
+
+#include <algorithm>
+#include <cstring>
+
+namespace {
+
+// --screenshot <out.png>: once the window is up, draw it to a PNG and quit
+// (a check that a build really starts, drawing and all; used by CI).
+std::string gScreenshot;
+int gExitCode = 0;
+
+void writeOut(const std::string& text) {
+	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+	if (out == nullptr || out == INVALID_HANDLE_VALUE) {
+		if (AttachConsole(ATTACH_PARENT_PROCESS)) out = GetStdHandle(STD_OUTPUT_HANDLE);
+	}
+	DWORD wrote = 0;
+	if (out && out != INVALID_HANDLE_VALUE) WriteFile(out, text.data(), (DWORD)text.size(), &wrote, nullptr);
+}
+
+void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	gExitCode = 1;
+	if (w && w->screenshot(gScreenshot)) gExitCode = 0;
+	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+	PostQuitMessage(gExitCode);
+}
+
+// Once the first window is up, offer back work a CedarLogic that stopped
+// unexpectedly left behind.
+void CALLBACK recoveryTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().front();
+	guarded("recovering work", [&] { recovery::offer(w); });
+}
+
+bool down(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
+
+// The app's keyboard shortcuts (the menus show them). Bare keys (R, S, T...)
+// are the canvas's own, not here.
+struct Shortcut { UINT vk; bool ctrl, shift; int command; };
+const Shortcut kShortcuts[] = {
+	{ 'N', true, false, CMD_NEW }, { 'O', true, false, CMD_OPEN }, { 'Q', true, false, CMD_QUIT },
+	{ 'S', true, false, CMD_SAVE }, { 'S', true, true, CMD_SAVE_AS }, { 'E', true, false, CMD_EXPORT_IMAGE },
+	{ 'P', true, false, CMD_PRINT }, { 'W', true, true, CMD_CLOSE_WINDOW },
+	{ 'Z', true, false, CMD_UNDO }, { 'Z', true, true, CMD_REDO }, { 'Y', true, false, CMD_REDO },
+	{ 'X', true, false, CMD_CUT }, { 'C', true, false, CMD_COPY }, { 'V', true, false, CMD_PASTE },
+	{ 'D', true, false, CMD_DUPLICATE }, { 'A', true, false, CMD_SELECT_ALL },
+	{ VK_OEM_PLUS, true, false, CMD_ZOOM_IN }, { VK_OEM_PLUS, true, true, CMD_ZOOM_IN }, { VK_ADD, true, false, CMD_ZOOM_IN },
+	{ VK_OEM_MINUS, true, false, CMD_ZOOM_OUT }, { VK_SUBTRACT, true, false, CMD_ZOOM_OUT },
+	{ '0', true, false, CMD_ZOOM_FIT }, { VK_NUMPAD0, true, false, CMD_ZOOM_FIT },
+	{ '1', true, false, CMD_ZOOM_ACTUAL }, { VK_NUMPAD1, true, false, CMD_ZOOM_ACTUAL },
+	{ 'D', true, true, CMD_DARK }, { VK_OEM_PERIOD, true, false, CMD_PALETTE }, { VK_OEM_COMMA, true, false, CMD_PREFERENCES },
+	{ 'R', true, true, CMD_STEP }, { 'R', true, false, CMD_SIM_VIEW }, { 'G', true, false, CMD_SCOPE },
+	{ 'T', true, false, CMD_NEW_TAB }, { 'W', true, false, CMD_CLOSE_TAB }, { 'T', true, true, CMD_REOPEN_TAB },
+	{ VK_NEXT, true, false, CMD_NEXT_TAB }, { VK_PRIOR, true, false, CMD_PREVIOUS_TAB },
+	{ VK_TAB, true, false, CMD_NEXT_TAB }, { VK_TAB, true, true, CMD_PREVIOUS_TAB },
+	{ VK_F1, false, false, CMD_HELP }, { VK_OEM_2, true, false, CMD_SHORTCUTS },
+};
+
+// What a text box does itself with these (copy the text, not the gates).
+bool isEditingKey(const Shortcut& s) {
+	return s.ctrl && !s.shift && (s.vk == 'A' || s.vk == 'C' || s.vk == 'V' || s.vk == 'X' || s.vk == 'Z' || s.vk == 'Y');
+}
+
+CircuitWindow* windowFor(HWND h) {
+	HWND root = GetAncestor(h, GA_ROOT);
+	for (CircuitWindow* w : circuitWindows()) if (w->window() == root) return w;
+	return nullptr;
+}
+
+}  // namespace
+
+bool handleShortcut(CircuitWindow* w, const MSG& msg) {
+	if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) return false;
+	if (down(VK_MENU)) return false;   // Alt belongs to the menus
+	const bool ctrl = down(VK_CONTROL), shift = down(VK_SHIFT);
+	wchar_t cls[32] = L"";
+	GetClassNameW(msg.hwnd, cls, 32);
+	const bool inTextBox = lstrcmpiW(cls, L"Edit") == 0;
+	for (const Shortcut& s : kShortcuts) {
+		if (s.vk != msg.wParam || s.ctrl != ctrl || s.shift != shift) continue;
+		if (inTextBox && isEditingKey(s)) return false;
+		guarded("a shortcut", [&] { w->run(s.command); });
+		return true;
+	}
+	return false;
+}
+
+// ---- Shared with the windows -----------------------------------------------------
+
+std::vector<CircuitWindow*>& circuitWindows() {
+	static std::vector<CircuitWindow*> all;
+	return all;
+}
+
+CircuitWindow* newCircuitWindow() { return new CircuitWindow(cl_document_new(), ""); }
+
+// Each window asks about its own changes; stop at the first "Cancel".
+bool quitApp() {
+	std::vector<CircuitWindow*> all = circuitWindows();
+	for (CircuitWindow* w : all) {
+		SetForegroundWindow(w->window());
+		if (!w->confirmClose()) return false;
+	}
+	for (CircuitWindow* w : all) w->destroy();
+	PostQuitMessage(0);
+	return true;
+}
+
+bool openCircuit(const std::string& path, CircuitWindow* from) {
+	// Already open: bring that window forward.
+	for (CircuitWindow* w : circuitWindows()) {
+		if (!w->filePath().empty() && lowerCase(w->filePath()) == lowerCase(path)) {
+			if (IsIconic(w->window())) ShowWindow(w->window(), SW_RESTORE);
+			SetForegroundWindow(w->window());
+			return true;
+		}
+	}
+	char err[512] = "";
+	CLDocument* doc = cl_document_open(path.c_str(), err, sizeof err);
+	if (doc == nullptr) {
+		showMessage(from ? from->window() : nullptr, Tone::Error,
+		            strf("“%s” couldn't be opened", baseName(path).c_str()), err);
+		// A file that's gone leaves the recent list.
+		std::vector<std::string>& r = prefs().recent;
+		if (!fileExists(path)) {
+			r.erase(std::remove(r.begin(), r.end(), path), r.end());
+			prefs().save();
+		}
+		return false;
+	}
+	CircuitWindow* w;
+	if (from && from->isPristine()) { from->replaceDocument(doc, path); w = from; }
+	else w = new CircuitWindow(doc, path);
+	prefs().noteRecent(path);
+	// What loading had to say (an older format converted, an unknown gate...).
+	std::string notes;
+	bool warning = false;
+	for (int i = 0; i < cl_document_notice_count(doc); i++) {
+		notes += std::string("• ") + cl_document_notice(doc, i) + "\n";
+		warning = warning || cl_document_notice_is_warning(doc, i);
+	}
+	if (warning) showMessage(w->window(), Tone::Warning, "Opened, with notes", notes);
+	else if (!notes.empty()) w->note(notes.substr(4, notes.find('\n') - 4));
+	return true;
+}
+
+void chooseAndOpen(CircuitWindow* from) {
+	const std::vector<std::string> files = chooseOpenFiles(
+		from ? from->window() : nullptr, "Open Circuit",
+		{ { "CedarLogic circuits (*.cdl)", "*.cdl" }, { "All files", "*.*" } }, true);
+	for (const std::string& file : files) {
+		openCircuit(file, from);
+		from = nullptr;   // the rest get windows of their own
+	}
+}
+
+// The practice circuit opens as a new, untitled copy, so saving asks where.
+void openPracticeCircuit(CircuitWindow* from) {
+	const std::string file = resourcesDir() + "\\samples\\practice.cdl";
+	char err[512] = "";
+	CLDocument* doc = cl_document_open(file.c_str(), err, sizeof err);
+	if (doc == nullptr) {
+		showMessage(from ? from->window() : nullptr, Tone::Warning, "The practice circuit couldn't be opened", err);
+		return;
+	}
+	if (from && from->isPristine()) from->replaceDocument(doc, "");
+	else new CircuitWindow(doc, "");
+}
+
+// ---- Starting up -----------------------------------------------------------------
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+	// Every window sharp at its own monitor's scale (the manifest says so
+	// too; this covers a copy run without it).
+	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+	OleInitialize(nullptr);
+	INITCOMMONCONTROLSEX icc = { sizeof icc, ICC_WIN95_CLASSES | ICC_TAB_CLASSES | ICC_BAR_CLASSES | ICC_UPDOWN_CLASS |
+	                                             ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES };
+	InitCommonControlsEx(&icc);
+
+	// Our own options, and the files to open.
+	int argc = 0;
+	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	std::vector<std::string> files;
+	for (int i = 1; i < argc; i++) {
+		const std::string a = U(argv[i]);
+		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
+		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
+		files.push_back(a);
+	}
+	LocalFree(argv);
+
+	prefs().load();
+	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
+	if (lib.empty() || !cl_library_load(lib.c_str())) {
+		showMessage(nullptr, Tone::Error, "CedarLogic can't find its gate library",
+		            "cl_gatedefs.xml wasn't found in the res folder next to CedarLogic.exe. Reinstall CedarLogic, or "
+		            "set CEDARLOGIC_RESOURCES to the folder that has it.");
+		return 1;
+	}
+	prefs().applyWireDots();
+	registerWindowClasses();
+
+	bool any = false;
+	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
+	if (!any && circuitWindows().empty()) newCircuitWindow();
+	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
+	else SetTimer(nullptr, 0, 300, recoveryTimer);
+
+	MSG msg;
+	while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+		if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
+			if (CircuitWindow* w = windowFor(msg.hwnd)) {
+				if (IsWindowEnabled(w->window()) && handleShortcut(w, msg)) continue;
+			}
+		}
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
+	prefs().save();
+	OleUninitialize();
+	return gScreenshot.empty() ? (int)msg.wParam : gExitCode;
+}

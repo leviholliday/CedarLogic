@@ -19,6 +19,11 @@ final class CoreDocument: ObservableObject {
     var shownPageCount = 1
     /// Where each page was last looked at (centre, units per point), by page id.
     var cameras: [UInt64: (CGPoint, CGFloat)] = [:]
+    /// For a new circuit made from a template (or a duplicate): its name
+    /// when it joins Your Circuits.
+    var libraryName: String?
+    /// Whether any page has anything on it.
+    var hasGates: Bool { (0..<pageCount).contains { cl_document_gate_count(handle, Int32($0)) > 0 } }
 
     init(data: Data) throws {
         var error = [CChar](repeating: 0, count: 512)
@@ -169,6 +174,7 @@ final class CoreDocument: ObservableObject {
         return g < 0 ? nil : g
     }
     func caption(ofGate gate: Int) -> String { String(cString: cl_gate_caption(handle, gate)) }
+    func libraryName(ofGate gate: Int) -> String { String(cString: cl_gate_library_name(handle, gate)) }
     func settings(ofGate gate: Int) -> [Setting] {
         (0..<Int(cl_gate_setting_count(handle, gate))).compactMap { i in
             var s = CLGateSetting()
@@ -207,7 +213,27 @@ final class CircuitDocument: ReferenceFileDocument {
     let core: CoreDocument
 
     /// A new, empty circuit.
-    init() { core = CoreDocument() }
+    init() {
+        // New from Template: the next new circuit starts as the template.
+        if let text = Templates.pendingText, let doc = try? CoreDocument(data: Data(text.utf8)) {
+            doc.libraryName = Templates.pendingName
+            core = doc
+        } else if !Templates.nextIsBlank, let text = Self.defaultTemplateText(), let doc = try? CoreDocument(data: Data(text.utf8)) {
+            // Settings > General > New circuits.
+            core = doc
+        } else {
+            core = CoreDocument()
+        }
+        Templates.pendingText = nil
+        Templates.pendingName = nil
+        Templates.nextIsBlank = false
+    }
+
+    /// The template new circuits start from, if one's chosen.
+    private static func defaultTemplateText() -> String? {
+        guard Thread.isMainThread, let id = UserDefaults.standard.string(forKey: "cl.newTemplate"), !id.isEmpty else { return nil }
+        return MainActor.assumeIsolated { Templates.template(id: id)?.text }
+    }
 
     init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {

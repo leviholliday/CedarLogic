@@ -13,6 +13,9 @@ on:
   push:
     branches:
       - 'windows/**'
+      # The native app has its own build (windows-native.yml).
+      - '!windows/native'
+      - '!windows/native-**'
 
 permissions:
   contents: read

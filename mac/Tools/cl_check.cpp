@@ -4,10 +4,10 @@
 // Simulation View read from it, connect-nearby, closing and reopening pages,
 // moving pages, memory contents, and the new drawing calls.
 //   cl_check <cl_gatedefs.xml>
+#include "Bitmap.h"   // first: on Windows it brings the system headers
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
-#include "Bitmap.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

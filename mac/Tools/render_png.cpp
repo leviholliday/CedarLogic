@@ -2,8 +2,11 @@
 // through CedarCore, fitted to the image.
 //   render_png <cl_gatedefs.xml> <in.cdl> <page> <out.png> [width height]
 // With CL_RENDER_FITTED=light|dark|print it draws through the export path
-// (cl_document_draw_fitted) instead.
+// (cl_document_draw_fitted) instead. With CL_RENDER_HOVER=1 it points at the
+// page's longest wire first and draws the hover highlight, printing its value.
 #include "Bitmap.h"
+#include "DocumentImpl.h"
+#include "guiWire.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -32,6 +35,21 @@ int main(int argc, char** argv) {
 		if (!cl_document_draw_fitted(doc, page, ctx, wPts, hPts, 12, sf, style)) printf("empty page\n");
 	} else {
 		cl_document_draw(doc, page, ctx, sf, ox, oy, upp, false);
+		if (getenv("CL_RENDER_HOVER")) {
+			guiWire* best = nullptr;
+			size_t most = 0;
+			for (auto& w : *doc->page(page)->getWireList())
+				if (w.second && w.second->getSegmentMap().size() > most) { most = w.second->getSegmentMap().size(); best = w.second; }
+			if (best) {
+				const auto seg = best->getSegmentMap().begin()->second;
+				const double x = (seg.begin.x + seg.end.x) / 2, y = (seg.begin.y + seg.end.y) / 2;
+				const bool lit = cl_edit_hover(doc, page, x, y, upp);
+				char state[70];
+				const int bits = cl_edit_hover_wire_state(doc, page, state, sizeof state);
+				printf("hover wire %lu (%zu segments): lit=%d bits=%d state=%s\n", best->getID(), most, lit, bits, bits ? state : "-");
+				cl_edit_draw_overlay(doc, page, ctx, sf, ox, oy, upp, 0.1, 0.5, 1.0);
+			}
+		}
 	}
 	const bool ok = bitmap.savePng(argv[4]);
 	printf("pages=%d page=%d ok=%d\n", cl_document_page_count(doc), page, ok);

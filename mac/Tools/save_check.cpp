@@ -2,8 +2,8 @@
 // saved text, save again (text must match), and compare every page's gates,
 // wires and a rendering against the original.
 //   save_check <cl_gatedefs.xml> <file.cdl>...
+#include "Bitmap.h"   // first: on Windows it brings the system headers
 #include "DocumentImpl.h"
-#include "Bitmap.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>

@@ -15,6 +15,9 @@ struct CLSidePanel: View {
     let page: Int
     @ObservedObject private var prefs = Prefs.shared
     @AppStorage("paletteCategory") private var categoryIndex = 0
+    @ObservedObject private var myParts = MyParts.shared
+    /// The picker's tag for My Parts, after the library's categories.
+    static let myPartsTag = 1000
 
     private var categories: [GateLibrary.Category] { GateLibrary.categories }
 
@@ -25,13 +28,34 @@ struct CLSidePanel: View {
                 ForEach(categories) { c in
                     Text(prefs.showCategoryKeys && c.index < 10 ? "\(c.title)    ⇧\((c.index + 1) % 10)" : c.title).tag(c.index)
                 }
+                Divider()
+                Text("My Parts").tag(Self.myPartsTag)
             }
             .labelsHidden()
             .padding(.horizontal, 8).padding(.vertical, 8)
-            PaletteGrid(gates: categories.indices.contains(categoryIndex) ? GateLibrary.gates(in: categories[categoryIndex]) : [],
-                        size: CGFloat(prefs.gateSize), dark: prefs.dark, names: prefs.showGateNames, canvas: canvas)
-                .id(categoryIndex)
-                .transition(.opacity)
+            if categoryIndex == Self.myPartsTag {
+                if myParts.parts.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "shippingbox").font(.system(size: 22)).foregroundStyle(.secondary)
+                        Text("Select some gates, then choose Edit \u{25B8} Save as Part\u{2026} to keep them here.")
+                            .font(.system(size: 11.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                    .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    PaletteGrid(gates: myParts.parts.map(\.gate),
+                                size: CGFloat(prefs.gateSize), dark: prefs.dark, names: true, canvas: canvas)
+                        .id(myParts.parts.map(\.id).joined())
+                    Text("Right-click a part to rename or delete it.")
+                        .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity).padding(.horizontal, 10).padding(.bottom, 8)
+                }
+            } else {
+                PaletteGrid(gates: categories.indices.contains(categoryIndex) ? GateLibrary.gates(in: categories[categoryIndex]) : [],
+                            size: CGFloat(prefs.gateSize), dark: prefs.dark, names: prefs.showGateNames, canvas: canvas)
+                    .id(categoryIndex)
+                    .transition(.opacity)
+            }
             Rectangle().fill(chrome.sash).frame(height: 1)
             let map = mapCanvas ?? canvas
             MiniMap(document: document, canvas: map, status: map.status, page: page)
@@ -72,6 +96,11 @@ private struct PaletteGrid: View {
 enum TileCache {
     private static var images: [String: NSImage] = [:]
 
+    /// A saved part was renamed or deleted: draw it afresh.
+    static func forget(_ name: String) {
+        images = images.filter { !$0.key.hasPrefix(name + "|") }
+    }
+
     static func image(_ name: String, size: CGFloat, dark: Bool, scale: CGFloat) -> NSImage {
         let key = "\(name)|\(Int(size))|\(dark)|\(scale)"
         if let img = images[key] { return img }
@@ -83,7 +112,11 @@ enum TileCache {
             // The engine draws y down, in points.
             ctx.translateBy(x: 0, y: CGFloat(h))
             ctx.scaleBy(x: scale, y: -scale)
-            cl_library_draw_gate(name, ctx, size, size * 0.8, scale, dark)
+            if let part = MyParts.shared.part(named: name) {
+                MyParts.draw(part, in: ctx, width: size, height: size * 0.8, scale: scale, dark: dark)
+            } else {
+                cl_library_draw_gate(name, ctx, size, size * 0.8, scale, dark)
+            }
             if let cg = ctx.makeImage() { img.addRepresentation(NSBitmapImageRep(cgImage: cg)) }
         }
         images[key] = img
@@ -124,7 +157,13 @@ struct CLGateTile: View {
         .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { v in drag(v) }
             .onEnded { v in drop(v) })
-        .help(gate.caption)
+        .help(gate.name.hasPrefix(MyParts.prefix) ? "\(gate.caption) \u{2014} right-click to rename or delete" : gate.caption)
+        .contextMenu {
+            if let part = MyParts.shared.part(named: gate.name) {
+                Button("Rename\u{2026}") { MyParts.renameAsking(part) }
+                Button("Delete\u{2026}") { MyParts.deleteAsking(part) }
+            }
+        }
     }
 
     /// A point in window coordinates (SwiftUI's global space) in a canvas's

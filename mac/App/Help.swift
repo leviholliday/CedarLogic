@@ -157,7 +157,22 @@ enum HelpBook {
                  line: "See what a circuit does.",
                  blocks: [
                     .p("**Truth table ({truthTable})** tries every combination of the page's switches and writes down its lights. Circuits with clocks or flip-flops are read row by row, each after the circuit settles."),
-                    .p("**Oscilloscope ({scope})** records signals over time. Every **TO** label becomes a signal you can watch."),
+                    .p("Beside the table: each light's **simplest sum of products** and **product of sums**, and its **Karnaugh map** with the groups drawn on (groups of 1s or of 0s). Rows with no clear 0 or 1 count as don't-cares. Copy either formula, or **Build This as a Circuit** to make it again as gates."),
+                    .p("**Oscilloscope ({scope})** records signals over time. Every **TO** label becomes a signal you can watch. Its share button copies a **timing diagram** for a lab report, or saves it as a PNG or PDF (what's on screen, or the whole recording)."),
+                    .p("**Point at a wire** and every branch of it lights up; rest there a moment (at once in Simulation View) and a tag shows what it carries: 0, 1, Z (floating: nothing drives it) or ! (a conflict: two outputs disagree)."),
+                 ]),
+        HelpPage(id: "formula", title: "Build from a Formula", icon: "function",
+                 line: "Type it, get the gates.",
+                 blocks: [
+                    .p("**Edit > Build from Formula…** turns a formula into switches, gates and a light for each output, labelled and wired, on a new page or beside what's there. One undo takes it back."),
+                    .p("Write NOT as **A'** or **~A**, AND as **AB**, **A·B** or **A*B**, OR as **A + B**, XOR as **A ⊕ B** or **A ^ B**. Names are one letter, maybe with digits (**X1**), or a capital and small letters (**Cin**). One output per line: **S = A ^ B ^ Cin** then **Cout = AB + Cin(A ^ B)**. Or list minterms: **F(A,B,C) = Σm(1,3,5) + d(7)**."),
+                    .p("Build it **as written**, or as the **simplest sum of products** or **product of sums**; with **any gates**, **NAND only** or **NOR only**; and with **only 2-input gates** if the exercise says so."),
+                 ]),
+        HelpPage(id: "find", title: "Finding Things", icon: "magnifyingglass",
+                 line: "Big circuits, found fast.",
+                 blocks: [
+                    .p("**Find ({find})** searches every page for labels, **TO/FROM** names and parts (\"flip\", \"AND\", \"LED\"). Return goes to the next one; each is selected and brought to the middle."),
+                    .p("With a label or a TO/FROM selected, Find opens looking for its name, so a TO's FROMs are a Return away."),
                  ]),
         HelpPage(id: "memory", title: "Memory: RAM and ROM", icon: "memorychip",
                  line: "Look inside, and change what's there.",
@@ -167,8 +182,9 @@ enum HelpBook {
         HelpPage(id: "saving", title: "Saving, Your Circuits and Versions", icon: "clock.arrow.circlepath",
                  line: "It keeps itself.",
                  blocks: [
-                    .p("Your work saves itself a couple of seconds after each change. **Your Circuits ({openLibrary})** lists everything you've made; open, rename or delete from there."),
-                    .p("**Versions**: a version is kept each time you press **{save}**, when you come back after a break, and every half hour while you work. File > Version History shows them with a picture of each; restoring keeps the current one too."),
+                    .p("Every circuit lives in **Your Circuits ({openLibrary})** and saves itself a couple of seconds after each change. A new circuit joins it once there's something on it. Open, rename or delete from there, or rename the one you're in by clicking its name at the top of the window."),
+                    .p("**Files**: opening a .cdl file (from the Finder, or {importFile}) brings in a copy to work on; the file itself isn't touched, and opening it again finds the copy. To get a file out, **File > Export as CedarLogic File…** saves a copy wherever you like."),
+                    .p("**Versions**: a version is kept each time you press **{save}**, when you come back after a break, and every half hour while you work, whenever the circuit itself changed (flipping switches doesn't count). File > Version History shows them with a picture of each; restoring keeps the current one too."),
                     .keys([
                         HelpPage.Key(keys: "{newCircuit}", what: "New circuit"),
                         HelpPage.Key(keys: "{importFile}", what: "Open a .cdl file from anywhere"),
@@ -178,10 +194,17 @@ enum HelpBook {
                     ]),
                     .tip("Opening a circuit takes the place of the one you're in, like classic CedarLogic (it asks first if there's anything unsaved). Settings > General can open each in its own window instead."),
                  ]),
+        HelpPage(id: "templates", title: "Templates and My Parts", icon: "square.on.square",
+                 line: "Start ahead, and reuse what you've built.",
+                 blocks: [
+                    .p("**File > New from Template…** starts a circuit from a **Lab Page** (a title block with your name), a **4-Bit Counter**, a **7-Segment Decoder Starter**, or one of your own. **File > Save as Template…** keeps the circuit you're in as one of yours, every tab of it. Settings > General can make every new circuit start from one."),
+                    .p("**My Parts**: select some gates and choose **Edit > Save as Part…**, and name it. It's at the bottom of the side panel's list (**My Parts**) to drag or click in, and in **Add a Gate ({addGate})** under its name. It drops in as a copy of those gates and wires, so any CedarLogic can open the circuit."),
+                    .tip("Right-click a part (in the side panel or in Add a Gate) to rename or delete it. Your templates rename and delete from New from Template."),
+                 ]),
         HelpPage(id: "settings", title: "Settings", icon: "gearshape",
                  line: "Make it yours (⌘,).",
                  blocks: [
-                    .p("**General**: the interface, your name for exports, how circuits open, the status bar and updates. **Appearance**: theme, accent colour, tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut."),
+                    .p("**General**: your name for exports, how circuits open, what new circuits start from, quitting, the status bar, updates and crash reports. **Appearance**: theme, the app's colour (CedarLogic green, or another), tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut."),
                     .p("**{darkMode}** switches between light and dark any time."),
                  ]),
     ]

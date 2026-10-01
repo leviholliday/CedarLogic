@@ -1129,8 +1129,17 @@ void guiWire::removeZeroLengthSegments() {
 		eraseIDs.push_back(segWalk->first);
 		map < GLfloat, vector < long > >::iterator isect = (segWalk->second).intersects.begin(); // Get the intersection
 		bool connectionsDone = false;
+		// A zero-length segment touching nothing (a paste or a drop can leave
+		// one) has nowhere to hand its connections: keep it rather than walk
+		// off the end of an empty map.
+		if (isect == (segWalk->second).intersects.end() || isect->second.empty()) {
+			eraseIDs.pop_back();
+			segWalk++;
+			continue;
+		}
 		// Just hook up the connections to the first one we see...
 		//	THAT ISN'T ANOTHER STUPID ZERO-LENGTH SECTOR THAT DESERVES TO DIE
+		int hops = 0;
 		while (!connectionsDone) {
 			for (unsigned int i = 0; i < (isect->second).size() && !connectionsDone; i++) {
 				if (!connectionsDone && !(newSegMap[(isect->second)[i]].begin == newSegMap[(isect->second)[i]].end)) {
@@ -1138,8 +1147,14 @@ void guiWire::removeZeroLengthSegments() {
 					connectionsDone = true;
 				}
 			}
-			if (!connectionsDone) isect = segMap[(isect->second)[0]].intersects.begin();
+			if (connectionsDone) break;
+			// Follow on to the next segment, if it touches anything (and not
+			// round in circles).
+			auto& next = segMap[(isect->second)[0]].intersects;
+			if (next.empty() || next.begin()->second.empty() || ++hops > 64) break;
+			isect = next.begin();
 		}
+		if (!connectionsDone) eraseIDs.pop_back();   // nowhere to hand them: keep it
 		segWalk++;
 	}
 	// DIE A HORRIBLE AND REVOLTING DEATH IN THE DIGITAL DUSTBIN!!!

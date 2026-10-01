@@ -1,0 +1,31 @@
+// CedarLogic for Windows (native): the app's icon, its manifest and its
+// version information. CMake fills in the paths (configure_file), so it
+// builds wherever the build directory is.
+#include <winres.h>
+
+1 ICON "@CL_ICON@"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "@CL_MANIFEST@"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Cedarville University"
+      VALUE "FileDescription", "CedarLogic"
+      VALUE "FileVersion", "0.1"
+      VALUE "ProductName", "CedarLogic"
+      VALUE "ProductVersion", "0.1"
+      VALUE "OriginalFilename", "CedarLogic.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

@@ -8,6 +8,7 @@
    klsClipboard: handles copy and paste of blocks
 *****************************************************************************/
 
+#include <algorithm>
 #include <memory>
 #include "klsClipboard.h"
 #include <fstream>
@@ -204,6 +205,20 @@ string klsClipboard::serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, v
 			if (found) continue; // we found this connection; don't trim it
 			// get rid of it
 			wire->removeConnection( wireConns[i].gid, wireConns[i].connection );
+		}
+		// And no segment may still end on a pin outside the copy (removeConnection
+		// can leave one behind), or the paste has an end with no gate.
+		{
+			map < long, wireSegment > shape = wire->getSegmentMap();
+			bool trimmed = false;
+			for (auto &seg : shape) {
+				vector < wireConnection > &conns = seg.second.connections;
+				for (auto c = conns.begin(); c != conns.end(); ) {
+					if (std::find(gates.begin(), gates.end(), c->gid) == gates.end()) { c = conns.erase(c); trimmed = true; }
+					else ++c;
+				}
+			}
+			if (trimmed && !shape.empty()) wire->setSegmentMap(shape);
 		}
 		// Wire should now have a completely valid shape to copy, shove it on the vector
 		copyWires.push_back(std::move(wire));

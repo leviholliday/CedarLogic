@@ -27,6 +27,9 @@ extension CircuitCanvasNSView {
         if sim {
             cl_simview_draw_flow(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
                                  controller?.flowPhase ?? 0, prefs.wireScale)
+            // The wire under the pointer, lit up whole.
+            let a = prefs.accentRGB(dark: true)
+            cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, a.0, a.1, a.2)
         } else {
             let a = prefs.accentRGB(dark: dark)
             let accent = CGColor(srgbRed: a.0, green: a.1, blue: a.2, alpha: 1)
@@ -86,6 +89,14 @@ extension CircuitCanvasNSView {
         let world = CGPoint(x: base.0.x + c.x * base.1, y: base.0.y - c.y * base.1)
         let upp = min(max(base.1 / factor, minUnitsPerPoint), maxUnitsPerPoint)
         startZoomAnimation(to: CGPoint(x: world.x - c.x * upp, y: world.y + c.y * upp), upp: upp)
+    }
+
+    /// Glide to `world` in the middle, zooming in if it's too far out to
+    /// see a part (Find).
+    func animateCenter(on world: CGPoint) {
+        guard bounds.width > 0 else { center(on: world); return }
+        let upp = min(unitsPerPoint, 0.12)
+        startZoomAnimation(to: CGPoint(x: world.x - bounds.width * upp / 2, y: world.y + bounds.height * upp / 2), upp: upp)
     }
 
     func animateZoomToFit() {

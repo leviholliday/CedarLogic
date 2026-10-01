@@ -128,8 +128,15 @@ void cmdMoveWire::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 	wid = wireids[wid];
 	map < long, wireSegment >::iterator segWalk = newSegList.begin();
 	while (segWalk != newSegList.end()) {
-		for (unsigned int i = 0; i < (segWalk->second).connections.size(); i++) {
-			(segWalk->second).connections[i].gid = gateids[(segWalk->second).connections[i].gid];
+		// A pasted shape can reach a gate that wasn't pasted with it (a
+		// part saved with a stub still running to a pin outside the
+		// selection): that end is dropped, not pointed at gate 0.
+		vector < wireConnection > &conns = (segWalk->second).connections;
+		for (auto c = conns.begin(); c != conns.end(); ) {
+			auto to = gateids.find(c->gid);
+			if (to == gateids.end()) { c = conns.erase(c); continue; }
+			c->gid = to->second;
+			++c;
 		}
 		segWalk++;
 	}

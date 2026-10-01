@@ -4,10 +4,10 @@ A SwiftUI/AppKit front end on top of the same C++ engine the wx app uses.
 Nothing here is built by the main CMake project, and nothing here affects the
 Windows or Linux builds.
 
-    mac/build.sh              # -> mac/build/CedarLogic Native.app
+    mac/build.sh              # -> mac/build/CedarLogic.app
     OPEN=1 mac/build.sh       # build, then launch
     CLEAN=1 mac/build.sh      # rebuild everything
-    mac/package.sh            # build, then mac/build/CedarLogic-Native-<version>.dmg
+    mac/package.sh            # build, then mac/build/CedarLogic-<version>-Mac.dmg
 
 Needs only the Xcode Command Line Tools (Swift 6), macOS 14 or later.
 
@@ -36,7 +36,7 @@ Two interfaces (Settings > General):
 What it does: open, simulate, edit, wire, straighten and tidy circuits; save
 (with autosave and versions), pages, the Your Circuits library; the
 oscilloscope (Cmd-G), truth tables (T), export as PNG or PDF (Shift-Cmd-E),
-printing; two layouts (Native, Classic) and looks you can customize.
+printing; Build from Formula, Karnaugh maps, timing diagrams and Find.
 
 Checks, all without opening the app (`Tools/build-tools.sh` builds them):
 
@@ -48,7 +48,21 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   connect-nearby, pages that close with an undo, memory, the tour's checks,
   Simulation View's drawing)
 - `save_check` -- open, save and reopen circuits; the text must match
+- `formula-check.sh` -- Build from Formula and the truth table's formulas:
+  the simplifier on known answers and 400 random tables, the formula
+  reader, and ~200 circuits built in the engine whose truth tables must
+  match (a folder argument keeps a .cdl of each)
+- `render_png` with `CL_RENDER_HOVER=1` -- points at the page's longest
+  wire and draws its highlight, printing what it carries
 - `asan-check.sh` -- `edit_check` under AddressSanitizer
+- `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
+  and top edges included), hover, tooltips, dragging, double-click to fill,
+  focus mode's tab strip and full screen, PASS or FAIL for each
+  (`STYLE=minimal` for the Minimal toolbar, `SCREEN=1` for another
+  display). It moves the pointer for about a minute and needs Accessibility
+  permission; run it after any change to the title bar row. The app side
+  is `CL_BAR_TEST=<dir>` (App/BarTest.swift): a new untitled circuit, tool
+  clicks logged instead of done
 - `CL_SNAPSHOT=<dir>` when running the app -- the circuit window draws
   itself to PNGs as it opens, splits (placing a gate on the second side),
   gains a tab and unsplits, and logs both canvases' frames (works when

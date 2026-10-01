@@ -9,6 +9,8 @@ struct QuickAddView: View {
     let choose: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var prefs = Prefs.shared
+    /// Your saved parts are in the list too (renamed or deleted from it).
+    @ObservedObject private var myParts = MyParts.shared
     @State private var query = ""
     @State private var selected = 0
     @State private var hover: Int?
@@ -20,8 +22,12 @@ struct QuickAddView: View {
         var id: String { gate.name }
     }
 
-    private static let all: [Entry] = GateLibrary.categories.flatMap { c in
+    private static let library: [Entry] = GateLibrary.categories.flatMap { c in
         GateLibrary.gates(in: c).map { Entry(gate: $0, category: c.title) }
+    }
+    /// The library, then your saved parts.
+    private static var all: [Entry] {
+        library + MyParts.shared.parts.map { Entry(gate: $0.gate, category: "My Parts") }
     }
 
     /// QuickAddDialog::fuzzyScore: a substring beats letters in order; a
@@ -129,7 +135,7 @@ struct QuickAddView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(e.gate.caption.isEmpty ? e.gate.name : e.gate.caption)
                     .font(.system(size: 13, weight: .bold)).foregroundStyle(ink)
-                Text(e.gate.caption != e.gate.name ? "\(e.gate.name)  ·  \(e.category)" : e.category)
+                Text(e.gate.caption != e.gate.name && !e.gate.name.hasPrefix(MyParts.prefix) ? "\(e.gate.name)  ·  \(e.category)" : e.category)
                     .font(.system(size: 10.5)).foregroundStyle(ink.opacity(0.55))
             }
             Spacer()
@@ -141,6 +147,12 @@ struct QuickAddView: View {
         .padding(.horizontal, 8).padding(.vertical, 3)
         .contentShape(Rectangle())
         .onHover { h in withAnimation(.easeOut(duration: 0.1)) { hover = h ? i : (hover == i ? nil : hover) } }
+        .contextMenu {
+            if let part = MyParts.shared.part(named: e.gate.name) {
+                Button("Rename\u{2026}") { MyParts.renameAsking(part) }
+                Button("Delete\u{2026}") { MyParts.deleteAsking(part) }
+            }
+        }
         .onTapGesture(count: 2) { selected = i; pick(results) }
         .onTapGesture { withAnimation(.easeOut(duration: 0.12)) { selected = i } }
     }

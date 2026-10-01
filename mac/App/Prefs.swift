@@ -1,22 +1,9 @@
-// Preferences for the CedarLogic interface: the wx app's settings, kept in
+// Preferences: the wx app's settings, kept in
 // UserDefaults. On first launch they're read from the wx app's own
 // preferences file, so the look you chose there carries over.
 
 import AppKit
 import SwiftUI
-
-/// Which interface the windows use. CedarLogic is the wx app's, rebuilt;
-/// Simple is the plain Mac window (Native or Classic layout, look presets).
-enum Interface: String, CaseIterable, Identifiable {
-    case cedarlogic, simple
-    var id: String { rawValue }
-    var name: String { self == .cedarlogic ? "CedarLogic" : "Simple" }
-    var summary: String {
-        self == .cedarlogic
-            ? "Everything from the CedarLogic app: its toolbar and tabs, Simulation View, the minimap, quick add, the tour and the rest."
-            : "A plain Mac window with the basics, in the Native or Classic layout, with look presets."
-    }
-}
 
 /// The wx app's toolbar styles (Segmented was dropped: it was Classic again).
 enum ToolbarStyle: Int, CaseIterable, Identifiable {
@@ -40,22 +27,25 @@ enum ToolbarStyle: Int, CaseIterable, Identifiable {
 
 /// Tool groups that can be hidden, one bit each (the wx app's cl::tb::Group).
 enum ToolGroup: Int, CaseIterable, Identifiable {
-    case file, undo, clipboard, zoom, sim, run, lock, theme, tab
+    case file, undo, clipboard, zoom, sim, run, lock, theme, tab, feedback
     var id: Int { rawValue }
     var name: String {
         ["New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Speed",
-         "Run (Simulation View)", "Lock", "Dark mode", "New tab"][rawValue]
+         "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback"][rawValue]
     }
 }
 
-let accentNames = ["Blue", "Purple", "Pink", "Orange", "Green", "Graphite"]
+let accentNames = ["Blue", "Purple", "Pink", "Orange", "Green", "Graphite", "CedarLogic"]
+/// The accent choices in the order they're offered: the icon's green first.
+let accentOrder = [6, 0, 1, 2, 3, 4, 5]
+/// The icon's green: the accent a new install starts with.
+let brandAccent = 6
 
 @MainActor
 final class Prefs: ObservableObject {
     static let shared = Prefs()
     private let d = UserDefaults.standard
 
-    @Published var interface: Interface { didSet { d.set(interface.rawValue, forKey: "interface") } }
     @Published var testingGroup: TestingGroup {
         didSet {
             guard testingGroup != oldValue else { return }
@@ -95,6 +85,12 @@ final class Prefs: ObservableObject {
     @Published var showThemeToggle: Bool { didSet { d.set(showThemeToggle, forKey: "cl.showThemeToggle") } }
     @Published var studentName: String { didSet { d.set(studentName, forKey: "cl.studentName") } }
     @Published var exportInfo: Bool { didSet { d.set(exportInfo, forKey: "cl.exportInfo") } }
+    /// Timing diagrams in colour (green traces) rather than black and white.
+    @Published var timingInColor: Bool { didSet { d.set(timingInColor, forKey: "cl.timingColor") } }
+    /// Resting on a wire shows what it carries (0, 1, Z...). Off at first.
+    @Published var wireValueTag: Bool { didSet { d.set(wireValueTag, forKey: "cl.wireValueTag") } }
+    /// Cmd-Q asks first, in a panel in the middle of the screen.
+    @Published var confirmQuit: Bool { didSet { d.set(confirmQuit, forKey: "cl.confirmQuit") } }
     @Published var hasSeenWelcome: Bool { didSet { d.set(hasSeenWelcome, forKey: "cl.hasSeenWelcome") } }
     /// Names under the palette's gates, and ⇧1...⇧0 beside its categories.
     @Published var showGateNames: Bool { didSet { d.set(showGateNames, forKey: "cl.showGateNames") } }
@@ -104,17 +100,23 @@ final class Prefs: ObservableObject {
     /// Opening or starting a circuit replaces the one in the window, as in
     /// the wx app (asking to save first); off, each gets its own window.
     @Published var openReplaces: Bool { didSet { d.set(openReplaces, forKey: "cl.openReplaces") } }
+    /// What a new circuit starts as: a template's id, or "" for a blank page.
+    @Published var newTemplate: String { didSet { d.set(newTemplate, forKey: "cl.newTemplate") } }
 
     private init() {
         Prefs.importWxPrefsOnce()
         let d = UserDefaults.standard
         func int(_ k: String, _ v: Int) -> Int { d.object(forKey: k) == nil ? v : d.integer(forKey: k) }
         func bool(_ k: String, _ v: Bool) -> Bool { d.object(forKey: k) == nil ? v : d.bool(forKey: k) }
-        interface = Interface(rawValue: d.string(forKey: "interface") ?? "") ?? .cedarlogic
         testingGroup = TestingGroup(rawValue: d.string(forKey: "testingGroup") ?? "") ?? .normal
         themeMode = int("cl.themeMode", 0)
         dark = bool("cl.lastDark", false)
-        accent = int("cl.accent", 0)
+        // The icon's green became the default (and everyone's accent, once).
+        if !d.bool(forKey: "cl.brandAccentSet") {
+            d.set(true, forKey: "cl.brandAccentSet")
+            d.set(brandAccent, forKey: "cl.accent")
+        }
+        accent = int("cl.accent", brandAccent)
         showGrid = bool("cl.showGrid", true)
         gridStyle = int("cl.gridStyle", 0)
         majorGrid = bool("cl.majorGrid", true)
@@ -139,16 +141,19 @@ final class Prefs: ObservableObject {
         showThemeToggle = bool("cl.showThemeToggle", true)
         studentName = d.string(forKey: "cl.studentName") ?? ""
         exportInfo = bool("cl.exportInfo", true)
+        timingInColor = bool("cl.timingColor", false)
+        wireValueTag = bool("cl.wireValueTag", false)
+        confirmQuit = bool("cl.confirmQuit", true)
         hasSeenWelcome = bool("cl.hasSeenWelcome", false)
         showGateNames = bool("cl.showGateNames", true)
         showCategoryKeys = bool("cl.showCategoryKeys", true)
         showTitle = bool("cl.showTitle", true)
         openReplaces = bool("cl.openReplaces", true)
+        newTemplate = d.string(forKey: "cl.newTemplate") ?? ""
         applyThemeMode()
         applyWireDots()
     }
 
-    var isCedarLogic: Bool { interface == .cedarlogic }
 
     // MARK: Derived
 
@@ -163,6 +168,14 @@ final class Prefs: ObservableObject {
         var r = 0.0, g = 0.0, b = 0.0
         cl_accent_color(Int32(accent), dark, &r, &g, &b)
         return Color(.sRGB, red: r, green: g, blue: b)
+    }
+    /// Text and symbols on an accent-filled button: white, or the icon's
+    /// dark ink on a light accent (the green, on the dark theme) where white
+    /// wouldn't read.
+    func onAccentColor(dark: Bool) -> Color {
+        let (r, g, b) = accentRGB(dark: dark)
+        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return lum > 0.55 ? Brand.ink : .white
     }
     func accentRGB(dark: Bool) -> (Double, Double, Double) {
         var r = 0.0, g = 0.0, b = 0.0

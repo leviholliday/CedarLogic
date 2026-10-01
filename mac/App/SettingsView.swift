@@ -1,14 +1,13 @@
 // Settings (⌘,), laid out like the wx app's Preferences: the system's row of
 // pages in the toolbar, the window easing to each page's height as you switch,
 // and each setting a label on the left with its control and a line of
-// explanation on the right. General picks the interface: CedarLogic (with
-// Appearance, Canvas, Toolbar and Shortcuts) or Simple (Layout and Look).
+// explanation on the right: General, Appearance, Canvas, Toolbar, Shortcuts.
 
 import AppKit
 import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, appearance, canvas, toolbar, shortcuts, layout, look
+    case general, appearance, canvas, toolbar, shortcuts
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -17,8 +16,6 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .canvas: "Canvas"
         case .toolbar: "Toolbar"
         case .shortcuts: "Shortcuts"
-        case .layout: "Layout"
-        case .look: "Look"
         }
     }
     var icon: String {
@@ -28,8 +25,6 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .canvas: "cursorarrow.rays"
         case .toolbar: "menubar.rectangle"
         case .shortcuts: "keyboard"
-        case .layout: "rectangle.3.group"
-        case .look: "swatchpalette"
         }
     }
 }
@@ -45,9 +40,7 @@ final class PrefsWindow: NSObject, NSToolbarDelegate, NSWindowDelegate {
     private var switching = false
     private var watch: Any?
 
-    private var pages: [SettingsPage] {
-        Prefs.shared.interface == .cedarlogic ? [.general, .appearance, .canvas, .toolbar, .shortcuts] : [.general, .layout, .look]
-    }
+    private var pages: [SettingsPage] { SettingsPage.allCases }
 
     func show() {
         if window == nil { build() }
@@ -74,24 +67,17 @@ final class PrefsWindow: NSObject, NSToolbarDelegate, NSWindowDelegate {
         w.contentView = NSView()
         window = w
         makeToolbar()
-        // The pages change with the interface (General picks it), and the
-        // window follows the theme.
+        // The window follows the theme.
         watch = Prefs.shared.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, let w = self.window else { return }
                 w.appearance = NSAppearance(named: Prefs.shared.dark ? .darkAqua : .aqua)
-                let ids = self.pages.map(\.rawValue)
-                if w.toolbar?.items.map(\.itemIdentifier.rawValue) != ids {
-                    self.makeToolbar()
-                    if !self.pages.contains(self.current) { self.select(.general, animated: true) }
-                    else { w.toolbar?.selectedItemIdentifier = .init(self.current.rawValue) }
-                }
             }
         }
     }
 
     private func makeToolbar() {
-        let tb = NSToolbar(identifier: "cl.settings.\(Prefs.shared.interface == .cedarlogic ? "cl" : "simple")")
+        let tb = NSToolbar(identifier: "cl.settings.cl")
         tb.delegate = self
         tb.displayMode = .iconAndLabel
         tb.allowsUserCustomization = false
@@ -205,8 +191,6 @@ enum SettingsView {
         case .canvas: CLCanvasSettings()
         case .toolbar: CLToolbarSettings()
         case .shortcuts: CLShortcutSettings()
-        case .layout: LayoutSettingsView()
-        case .look: LookSettingsView()
         }
     }
 }
@@ -246,16 +230,13 @@ private struct Page<C: View>: View {
 }
 
 struct GeneralSettingsView: View {
+    @AppStorage(CrashReports.key) private var crashReports = false
     @ObservedObject private var prefs = Prefs.shared
+    @State private var opensCDL = CDLHandler.isUs
+    @State private var cdlApp = CDLHandler.currentName
 
     var body: some View {
         Page {
-            Row("Interface", hint: prefs.interface.summary) {
-                Picker("", selection: $prefs.interface) {
-                    ForEach(Interface.allCases) { Text($0.name).tag($0) }
-                }
-                .labelsHidden().fixedSize()
-            }
             Row("Your name", hint: "Printed under your circuit when you export it as an image.") {
                 TextField("First and last name", text: $prefs.studentName).frame(width: 240)
             }
@@ -268,6 +249,36 @@ struct GeneralSettingsView: View {
                 }
                 .labelsHidden().fixedSize()
             }
+            Row("New circuits", hint: prefs.newTemplate.isEmpty
+                ? "⌘N starts a blank page. Pick a template to start every new circuit from it instead."
+                : "⌘N starts from this template. (File \u{25B8} New from Template\u{2026} still offers them all.)") {
+                Picker("", selection: $prefs.newTemplate) {
+                    Text("A blank page").tag("")
+                    Divider()
+                    ForEach(Templates.builtIn) { Text($0.name).tag($0.id) }
+                    let mine = Templates.yours()
+                    if !mine.isEmpty {
+                        Divider()
+                        ForEach(mine) { Text($0.name).tag($0.id) }
+                    }
+                }
+                .labelsHidden().fixedSize()
+            }
+            Row("Opening files", hint: opensCDL
+                ? "Double-clicking a .cdl file in Finder opens it here."
+                : "Double-clicking a .cdl file in Finder opens it in \(cdlApp) right now.") {
+                Button(opensCDL ? "CedarLogic opens them" : "Open them with CedarLogic") {
+                    Task {
+                        await CDLHandler.makeUs()
+                        opensCDL = CDLHandler.isUs
+                        cdlApp = CDLHandler.currentName
+                    }
+                }
+                .disabled(opensCDL)
+            }
+            Row("Quitting", hint: "⌘Q shows a question in the middle of the screen first: Return quits, Escape doesn't.") {
+                Toggle("Ask before quitting", isOn: $prefs.confirmQuit)
+            }
             Row("Status bar", hint: "The readout in the bottom-right corner of the window.") {
                 Toggle("Show zoom, cursor position, and counts", isOn: $prefs.showStatus)
             }
@@ -278,6 +289,12 @@ struct GeneralSettingsView: View {
                     }
                     .labelsHidden().fixedSize()
                     Button("Check Now") { Updates.shared.checkNow() }
+                }
+            }
+            if CrashReports.available {
+                Row("Crash reports", hint: "If CedarLogic crashes, a report of where it went wrong goes to its developer. Never your circuits, files or name.") {
+                    Toggle("Send crash reports", isOn: $crashReports)
+                        .onChange(of: crashReports) { _, on in CrashReports.set(on) }
                 }
             }
         }
@@ -295,9 +312,9 @@ struct CLAppearanceSettings: View {
                 }
                 .labelsHidden().fixedSize()
             }
-            Row("Accent color", hint: "Used for selections and highlights. Wire colors that show signal state never change.") {
+            Row("App colour", hint: "Selections, highlights and buttons. CedarLogic is the icon's green. Wire colours that show signal state never change.") {
                 Picker("", selection: Binding(get: { prefs.accent }, set: { i in withAnimation(.easeOut(duration: 0.15)) { prefs.accent = i } })) {
-                    ForEach(0..<6) { i in
+                    ForEach(accentOrder, id: \.self) { i in
                         Label { Text(accentNames[i]) } icon: { Image(nsImage: Self.swatchImage(swatch(i))) }.tag(i)
                     }
                 }
@@ -376,6 +393,9 @@ struct CLCanvasSettings: View {
 
     var body: some View {
         Page {
+            Row("Wires", hint: "Pointing at a wire always lights up all of it. This also shows what it carries after a moment: 0, 1, Z (floating) or ! (a conflict).") {
+                Toggle("Show a wire's value when you rest on it", isOn: $prefs.wireValueTag)
+            }
             Row("Mouse wheel") {
                 Picker("", selection: $prefs.mouseWheel) { Text("Zooms").tag(0); Text("Moves around").tag(1) }
                     .labelsHidden().fixedSize()
@@ -413,7 +433,7 @@ struct CLCanvasSettings: View {
 /// either to choose it), then which tools it shows.
 struct CLToolbarSettings: View {
     @ObservedObject private var prefs = Prefs.shared
-    private let groups: [ToolGroup] = [.file, .undo, .clipboard, .zoom, .sim, .run, .lock, .tab]
+    private let groups: [ToolGroup] = [.file, .undo, .clipboard, .zoom, .sim, .run, .lock, .tab, .feedback]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -593,161 +613,5 @@ struct CLShortcutSettings: View {
         recording = nil
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
-    }
-}
-
-struct LookSettingsView: View {
-    @EnvironmentObject private var look: LookStore
-
-    var body: some View {
-        Form {
-            Section {
-                HStack(spacing: 14) {
-                    ForEach(ThemePreset.allCases) { preset in
-                        PresetCard(preset: preset, selected: look.settings.preset == preset) {
-                            look.settings.choose(preset)
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-                Text(look.settings.preset.summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Preset")
-            }
-
-            Section {
-                ColorRow(title: "Canvas", value: look.settings.theme.canvas, isSet: look.settings.canvas != nil,
-                         set: { look.settings.canvas = $0 }, reset: { look.settings.canvas = nil })
-                Picker("Grid", selection: Binding(
-                    get: { look.settings.theme.gridStyle },
-                    set: { look.settings.gridStyle = $0 })) {
-                    ForEach(GridStyle.allCases) { Text($0.label).tag($0) }
-                }
-                ColorRow(title: "Grid", value: look.settings.theme.gridMinor, isSet: look.settings.gridMinor != nil,
-                         set: { look.settings.gridMinor = $0 }, reset: { look.settings.gridMinor = nil })
-                ColorRow(title: "Grid, every fifth line", value: look.settings.theme.gridMajor,
-                         isSet: look.settings.gridMajor != nil,
-                         set: { look.settings.gridMajor = $0 }, reset: { look.settings.gridMajor = nil })
-                Toggle("Light ink for dark canvases", isOn: Binding(
-                    get: { look.settings.theme.darkCircuit },
-                    set: { look.settings.darkCircuit = $0 }))
-                ColorRow(title: "Accent", value: look.settings.theme.accent, isSet: look.settings.accent != nil,
-                         set: { look.settings.accent = $0 }, reset: { look.settings.accent = nil })
-            } header: {
-                Text("Customize")
-            } footer: {
-                HStack {
-                    Spacer()
-                    Button("Reset to \(look.settings.preset.name)") { look.settings.choose(look.settings.preset) }
-                        .disabled(!look.settings.isCustomized)
-                }
-            }
-        }
-        .formStyle(.columns)
-    }
-}
-
-/// A color setting, with a small reset button once it's been changed.
-private struct ColorRow: View {
-    let title: String
-    let value: RGBA
-    let isSet: Bool
-    let set: (RGBA) -> Void
-    let reset: () -> Void
-
-    var body: some View {
-        HStack {
-            ColorPicker(title, selection: Binding(get: { value.color }, set: { set(RGBA($0)) }), supportsOpacity: false)
-            if isSet {
-                Button(action: reset) { Image(systemName: "arrow.uturn.backward") }
-                    .buttonStyle(.borderless)
-                    .help("Back to the preset's color")
-            }
-        }
-    }
-}
-
-/// A preset as a miniature canvas: its background, grid and a tiny gate.
-private struct PresetCard: View {
-    let preset: ThemePreset
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        let t = preset.theme
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Canvas { ctx, size in
-                    ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(t.canvas.color))
-                    let step: CGFloat = 8
-                    for x in stride(from: step, to: size.width, by: step) {
-                        for y in stride(from: step, to: size.height, by: step) {
-                            if t.gridStyle == .dots {
-                                ctx.fill(Path(ellipseIn: CGRect(x: x - 0.7, y: y - 0.7, width: 1.4, height: 1.4)),
-                                         with: .color(t.gridMajor.color))
-                            }
-                        }
-                    }
-                    if t.gridStyle == .lines {
-                        var grid = Path()
-                        for x in stride(from: step, to: size.width, by: step) { grid.move(to: CGPoint(x: x, y: 0)); grid.addLine(to: CGPoint(x: x, y: size.height)) }
-                        for y in stride(from: step, to: size.height, by: step) { grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y)) }
-                        ctx.stroke(grid, with: .color(t.gridMinor.color), lineWidth: 0.5)
-                    }
-                    // An AND gate, in the preset's ink.
-                    let ink: Color = t.darkCircuit ? .white : .black
-                    var gate = Path()
-                    let r = CGRect(x: size.width / 2 - 14, y: size.height / 2 - 11, width: 28, height: 22)
-                    gate.move(to: CGPoint(x: r.minX, y: r.minY))
-                    gate.addLine(to: CGPoint(x: r.midX, y: r.minY))
-                    gate.addArc(center: CGPoint(x: r.midX, y: r.midY), radius: r.height / 2,
-                                startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: false)
-                    gate.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-                    gate.closeSubpath()
-                    ctx.stroke(gate, with: .color(ink), lineWidth: 1.2)
-                    var wires = Path()
-                    wires.move(to: CGPoint(x: r.minX - 12, y: r.minY + 6)); wires.addLine(to: CGPoint(x: r.minX, y: r.minY + 6))
-                    wires.move(to: CGPoint(x: r.minX - 12, y: r.maxY - 6)); wires.addLine(to: CGPoint(x: r.minX, y: r.maxY - 6))
-                    wires.move(to: CGPoint(x: r.midX + r.height / 2, y: r.midY)); wires.addLine(to: CGPoint(x: r.maxX + 14, y: r.midY))
-                    ctx.stroke(wires, with: .color(Color(red: 0, green: 0.7, blue: 0)), lineWidth: 1.2)
-                }
-                .frame(width: 130, height: 76)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: selected ? 2.5 : 1))
-                Text(preset.name).font(.callout.weight(selected ? .semibold : .regular))
-            }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// Which window arrangement to use; either works with any look.
-struct LayoutSettingsView: View {
-    @AppStorage("layout") private var layout = AppLayout.native.rawValue
-    @AppStorage("tidyMode") private var tidyMode = 0
-
-    var body: some View {
-        Form {
-            Picker("Layout", selection: $layout) {
-                ForEach(AppLayout.allCases) { Text($0.name).tag($0.rawValue) }
-            }
-            .pickerStyle(.radioGroup)
-            Text(AppLayout(rawValue: layout)?.summary ?? "")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Section("Tidy Up (Shift-S)") {
-                Picker("Shift-S", selection: $tidyMode) {
-                    Text("Keeps my layout").tag(0)
-                    Text("Rearranges everything").tag(1)
-                }
-                Text("Keeps my layout lines parts up where they are. Rearranges everything lays the circuit out by signal flow. The Edit menu always has both.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.columns)
     }
 }

@@ -1,4 +1,4 @@
-// Updates for CedarLogic Native, through Sparkle (the same updater the wx app
+// Updates for CedarLogic on the Mac, through Sparkle (the same updater the wx app
 // uses). Testers pick a group in Settings > General: normal testers follow
 // appcast-native.xml, beta testers appcast-native-beta.xml, which also carries
 // every normal release. scripts/publish-update.sh --native writes both.
@@ -38,7 +38,7 @@ final class Updates: NSObject, SPUUpdaterDelegate {
         if let c = controller { c.checkForUpdates(nil); return }
         let a = NSAlert()
         a.messageText = "This copy can't update itself."
-        a.informativeText = "Move CedarLogic Native to your Applications folder and open it from there."
+        a.informativeText = "Move CedarLogic to your Applications folder and open it from there."
         a.runModal()
     }
 
