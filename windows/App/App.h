@@ -71,6 +71,7 @@ struct Prefs {
 	std::string lastFormula;
 	int buildShape = 0, buildStyle = 0;
 	bool buildTwoInput = false, buildNewPage = true;
+	int truthTab = 0;                             // the truth table's tab, as last left
 
 	double wireScale() const;
 	void load();

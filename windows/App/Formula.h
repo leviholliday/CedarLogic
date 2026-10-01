@@ -41,6 +41,7 @@ struct TwoLevel {
 	bool sumOfProducts = true;
 	std::vector<std::vector<Literal>> terms;
 	int constant = -1;   // -1 none, else 0 or 1
+	std::vector<Implicant> implicants;   // the groups on a Karnaugh map
 	// As text, with ' for NOT: "A'B + AC", "(A + B)(A' + C)".
 	std::string text(const std::vector<std::string>& names) const;
 };
@@ -48,6 +49,20 @@ struct TwoLevel {
 // The simplest form of a function given as each minterm's value: 1, 0, or -1
 // for either (a don't-care).
 TwoLevel simplest(bool sumOfProducts, int n, const std::vector<int>& values);
+
+// ---- Karnaugh maps ----
+
+// Where each minterm goes on a map of 2 to 4 variables: the first variables
+// down the side, the rest across the top, both in Gray code order.
+struct KMapLayout {
+	int n = 0, rowVars = 0, colVars = 0;
+	std::vector<int> rowCodes, colCodes;
+	static bool make(int n, KMapLayout& out);
+	int minterm(int row, int col) const { return (rowCodes[row] << colVars) | colCodes[col]; }
+	// The rows and columns a group covers, each as runs of neighbouring cells
+	// (two runs when it wraps round an edge): pairs of first and last.
+	void runs(const Implicant& p, std::vector<std::pair<int, int>>& rows, std::vector<std::pair<int, int>>& cols) const;
+};
 
 // ---- Reading formulas ----
 

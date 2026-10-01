@@ -218,6 +218,7 @@ void Prefs::load() {
 	buildStyle = r.i("buildStyle", buildStyle, 0, 2);
 	buildTwoInput = r.b("buildTwoInput", buildTwoInput);
 	buildNewPage = r.b("buildNewPage", buildNewPage);
+	truthTab = r.i("truthTab", truthTab, 0, 2);
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
 		const std::string v = r.s(strf("recent%d", i).c_str(), "");
@@ -272,6 +273,7 @@ void Prefs::save() const {
 	o << "buildStyle=" << buildStyle << "\n";
 	o << "buildTwoInput=" << b(buildTwoInput) << "\n";
 	o << "buildNewPage=" << b(buildNewPage) << "\n";
+	o << "truthTab=" << truthTab << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	const std::string text = o.str();
 	// A temporary beside it, then moved over: a crash mid-write can't leave

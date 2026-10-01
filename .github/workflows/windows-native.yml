@@ -103,7 +103,9 @@ jobs:
           # The dialogs, in each theme (the screenshot is of the dialog).
           timeout 90 "$A" --dark --dialog preferences --screenshot "$PWD/renders/dialog-preferences-dark.png" || true
           timeout 90 "$A" --light --dialog preferences --screenshot "$PWD/renders/dialog-preferences.png" || true
-          timeout 90 "$A" --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --truth-tab 0 --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --truth-tab 1 --dialog truth-table --screenshot "$PWD/renders/truth-table-kmap.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --truth-tab 2 --dialog truth-table --screenshot "$PWD/renders/truth-table-formulas.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
           timeout 90 "$A" --dialog welcome --screenshot "$PWD/renders/welcome.png" || true
           # Your Circuits (by now holding the circuits opened above) and a

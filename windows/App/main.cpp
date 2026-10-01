@@ -29,6 +29,7 @@ bool gSimView = false;
 // screenshot is of it.
 int gDialog = 0;
 std::string gFormula;   // --formula: what Build from Formula opens with
+int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -228,6 +229,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
 		if (a == "--formula" && i + 1 < argc) { gFormula = U(argv[++i]); continue; }
+		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
@@ -244,6 +246,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	prefs().load();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
+	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
 	if (gScreenshot.empty()) splash::show();

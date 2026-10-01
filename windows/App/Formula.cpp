@@ -194,6 +194,7 @@ TwoLevel simplest(bool sop, int n, const std::vector<int>& values) {
 	if (ones.empty()) { t.constant = 0; return t; }
 	// A product of sums is the simplest sum of products of the zeros, inside out.
 	const std::vector<Implicant> imps = minimize(n, sop ? ones : zeros, dc);
+	t.implicants = imps;
 	for (const Implicant& p : imps) {
 		std::vector<Literal> term;
 		for (int i = 0; i < n; i++) {
@@ -234,6 +235,45 @@ std::string TwoLevel::text(const std::vector<std::string>& names) const {
 		}
 	}
 	return out;
+}
+
+// ---- Karnaugh maps ----------------------------------------------------------------
+
+bool KMapLayout::make(int n, KMapLayout& out) {
+	if (n < 2 || n > 4) return false;
+	out.n = n;
+	out.rowVars = n / 2;
+	out.colVars = n - out.rowVars;
+	auto gray = [](int count) { return count == 1 ? std::vector<int>{ 0, 1 } : std::vector<int>{ 0, 1, 3, 2 }; };
+	out.rowCodes = gray(out.rowVars);
+	out.colCodes = gray(out.colVars);
+	return true;
+}
+
+namespace {
+std::vector<std::pair<int, int>> split(const std::vector<int>& idx) {
+	std::vector<std::pair<int, int>> out;
+	if (idx.empty()) return out;
+	int start = idx[0], prev = idx[0];
+	for (size_t k = 1; k < idx.size(); k++) {
+		if (idx[k] == prev + 1) { prev = idx[k]; continue; }
+		out.push_back({ start, prev });
+		start = prev = idx[k];
+	}
+	out.push_back({ start, prev });
+	return out;
+}
+}  // namespace
+
+void KMapLayout::runs(const Implicant& p, std::vector<std::pair<int, int>>& rows, std::vector<std::pair<int, int>>& cols) const {
+	const int colMask = (1 << colVars) - 1;
+	std::vector<int> r, c;
+	for (int i = 0; i < (int)rowCodes.size(); i++)
+		if ((rowCodes[i] & ~(p.mask >> colVars)) == (p.value >> colVars)) r.push_back(i);
+	for (int i = 0; i < (int)colCodes.size(); i++)
+		if ((colCodes[i] & ~(p.mask & colMask)) == (p.value & colMask)) c.push_back(i);
+	rows = split(r);
+	cols = split(c);
 }
 
 // ---- Reading formulas -----------------------------------------------------------------

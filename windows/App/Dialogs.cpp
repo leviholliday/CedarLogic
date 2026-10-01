@@ -702,55 +702,7 @@ void showQuickAdd(CircuitWindow* w) {
 	if (f.run(w->window()) == IDOK && !chosen.empty()) w->addGateOnNextMove(chosen);
 }
 
-// ---- Truth tables ----------------------------------------------------------------
-
-void showTruthTable(CircuitWindow* w, int page) {
-	char err[512] = "";
-	CLTruthTable* tt = cl_truth_table(w->document(), page, err, sizeof err);
-	if (tt == nullptr) {
-		showMessage(w->window(), Tone::Info, "A truth table couldn't be made for this page",
-		            *err ? err : "Add switches (inputs) and lights (outputs) to the page first.");
-		return;
-	}
-	const int cols = cl_tt_columns(tt), rows = cl_tt_rows(tt), inputs = cl_tt_inputs(tt);
-	Form f;
-	f.title = "Truth Table";
-	f.width = std::min(900, std::max(360, 40 + cols * 64));
-	f.okText = "Close";
-	f.cancelText = "";
-	std::string about = strf("%d input%s, %d output%s, %d row%s.", inputs, inputs == 1 ? "" : "s", cols - inputs,
-	                         cols - inputs == 1 ? "" : "s", rows, rows == 1 ? "" : "s");
-	if (cl_tt_sequential(tt)) about += " This page has clocks or flip-flops, so outputs can depend on what came before.";
-	if (cl_tt_unsettled(tt) > 0)
-		about += strf(" %d row%s never settled.", cl_tt_unsettled(tt), cl_tt_unsettled(tt) == 1 ? "" : "s");
-	FormField info;
-	info.kind = FormField::Note;
-	info.label = about;
-	info.lines = 2;
-	f.add(info);
-	FormField table;
-	table.kind = FormField::List;
-	table.mono = true;
-	table.lines = std::min(22, std::max(4, rows));
-	// Outputs are marked, after a gap, as the other apps set them apart.
-	for (int c = 0; c < cols; c++) {
-		std::string name = cl_tt_name(tt, c);
-		if (c == inputs && c > 0) name = "→ " + name;
-		table.choices.push_back(name);
-		table.columnWidths.push_back(std::max(52, (int)textWidth(name, 12) + 22));
-	}
-	const int t = f.add(table);
-	FormField legend;
-	legend.kind = FormField::Note;
-	legend.label = "X unknown · Z floating · ! conflict · - not connected";
-	f.add(legend);
-	std::vector<std::vector<std::string>> data((size_t)rows);
-	for (int r = 0; r < rows; r++)
-		for (int c = 0; c < cols; c++) data[r].push_back(std::string(1, cl_tt_cell(tt, r, c)));
-	cl_tt_free(tt);
-	f.onInit = [&](Form& form) { form.setRows(t, data); };
-	f.run(w->window());
-}
+// ---- Truth tables: TruthTableWindow.cpp ----
 
 // ---- Memory (RAM and ROM contents) -----------------------------------------------
 
