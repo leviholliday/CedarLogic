@@ -235,6 +235,20 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		guarded("a dialog", [&] { paintPicture(f->fields[field], di); });
 		return TRUE;
 	}
+	case WM_MOUSEWHEEL: {
+		if (!f->onWheel) break;
+		POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+		for (size_t i = 0; i < f->fields.size(); i++) {
+			const FormField& x = f->fields[i];
+			RECT r;
+			if (x.kind != FormField::Picture || !GetWindowRect(x.hwnd, &r) || !PtInRect(&r, p)) continue;
+			const int delta = GET_WHEEL_DELTA_WPARAM(wp);
+			guarded("a dialog", [&] { f->onWheel(*f, (int)i, delta); });
+			SetWindowLongPtrW(d, DWLP_MSGRESULT, 0);
+			return TRUE;
+		}
+		break;
+	}
 	case WM_CTLCOLORDLG:
 	case WM_CTLCOLORSTATIC:
 	case WM_CTLCOLORBTN:
@@ -375,7 +389,7 @@ void Form::build() {
 		}
 		case FormField::Picture: {
 			const int h = sc(x.height);
-			x.hwnd = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY, margin, y, fullW, h, dialog, id,
+			x.hwnd = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_OWNERDRAW | SS_NOTIFY, margin, y, fullW, h, dialog, id,
 			                         appInstance(), nullptr);
 			y += h;
 			break;
@@ -806,73 +820,261 @@ void showQuickAdd(CircuitWindow* w) {
 
 // ---- Memory (RAM and ROM contents) -----------------------------------------------
 
+namespace {
+
+// Fixed-width text for the memory grid.
+void monoText(ID2D1RenderTarget* rt, const std::string& text, const D2D1_RECT_F& box, float size, const D2D1_COLOR_F& color,
+              DWRITE_TEXT_ALIGNMENT align) {
+	static std::map<std::pair<int, int>, IDWriteTextFormat*> formats;
+	IDWriteTextFormat*& f = formats[{ (int)(size * 10), (int)align }];
+	if (f == nullptr && dwFactory()) {
+		dwFactory()->CreateTextFormat(L"Consolas", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+		                              size, L"", &f);
+		if (f) {
+			f->SetTextAlignment(align);
+			f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		}
+	}
+	ID2D1SolidColorBrush* b = nullptr;
+	if (f == nullptr || FAILED(rt->CreateSolidColorBrush(color, &b))) return;
+	const std::wstring w = W(text);
+	rt->DrawText(w.c_str(), (UINT32)w.size(), f, box, b);
+	b->Release();
+}
+
+// A value typed into a word: Enter keeps it, Escape doesn't, clicking away keeps it.
+struct WordEdit { std::function<void(bool keep)> done; };
+LRESULT CALLBACK wordEditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
+	WordEdit* e = reinterpret_cast<WordEdit*>(data);
+	if (msg == WM_GETDLGCODE) return DLGC_WANTALLKEYS;
+	if (msg == WM_KEYDOWN && (wp == VK_RETURN || wp == VK_ESCAPE)) { e->done(wp == VK_RETURN); return 0; }
+	if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE)) return 0;
+	if (msg == WM_KILLFOCUS) { LRESULT r = DefSubclassProc(h, msg, wp, lp); e->done(true); return r; }
+	return DefSubclassProc(h, msg, wp, lp);
+}
+
+}  // namespace
+
+// A RAM's or ROM's contents, as the Mac's: sixteen words a row with the
+// address down the side, in hex or decimal. The word last read glows green
+// and the one last written amber, as it runs. Click a word to change it;
+// jump to an address; load or save a .cdm memory file.
 void showRamEditor(CircuitWindow* w, long gate) {
 	int addressBits = 0, dataBits = 0;
 	CLDocument* doc = w->document();
 	if (!cl_ram_info(doc, gate, &addressBits, &dataBits)) return;
 	const unsigned long words = 1UL << std::min(std::max(addressBits, 0), 20);
-	const int aDigits = std::max(1, (addressBits + 3) / 4), dDigits = std::max(1, (dataBits + 3) / 4);
-	long lastRead = -2, lastWritten = -2;
+	const int cols = (int)std::min<unsigned long>(16, words);
+	const unsigned long rowsTotal = std::max(1UL, words / 16);
+	const int aDigits = std::max(1, (std::max(addressBits, 4) + 3) / 4), dDigits = std::max(1, (dataBits + 3) / 4);
+	const int decDigits = (int)std::ceil(dataBits * 0.30103) + 1;
+	bool decimal = false;
+	long scrollRow = 0;
+	long editing = -1;
+	HWND editBox = nullptr;
+	const std::string libName = cl_gate_library_name(doc, gate) ? cl_gate_library_name(doc, gate) : "";
+	const std::string caption = cl_gate_caption(doc, gate);
+
+	const float addrW = 70, headH = 24, rowH = 25;
+	const float cellW = std::max(3, std::max(dDigits, decDigits) + 1) * 7.0f + 10;
+	const float gridW = 12 + addrW + cols * (cellW + 3) + 10;
+	const int gridHeight = 380;
+	const int visibleRows = (int)((gridHeight - headH - 8) / rowH);
+
+	auto ink = [] { return prefs().dark ? D2D1::ColorF(0.886f, 0.902f, 0.933f) : D2D1::ColorF(0.118f, 0.13f, 0.157f); };
+	auto readColor = [] { return prefs().dark ? D2D1::ColorF(0.22f, 0.96f, 0.44f) : D2D1::ColorF(0.05f, 0.68f, 0.27f); };
+	auto writtenColor = [] { return prefs().dark ? D2D1::ColorF(1, 0.72f, 0.25f) : D2D1::ColorF(0.93f, 0.55f, 0.05f); };
+	auto shown = [&](unsigned long v) { return decimal ? strf("%lu", v) : strf("%0*lX", dDigits, v); };
 
 	Form f;
-	f.title = "Memory";
-	f.width = 460;
-	f.okText = "Close";
+	f.title = caption;
+	f.width = std::max(460, (int)std::ceil(gridW) + 24);
+	f.okText = "Done";
 	f.cancelText = "";
 	f.buttons = { "Load File…", "Save File…", "Settings…" };
-	FormField info;
-	info.kind = FormField::Note;
-	info.label = strf("%lu addresses × %d bits. Double-click a value to change it (in hex).", words, dataBits);
-	f.add(info);
-	FormField list;
-	list.kind = FormField::List;
-	list.mono = true;
-	list.lines = 20;
-	list.choices = { "Address", "Value (hex)", "Decimal", "" };
-	list.columnWidths = { 90, 110, 110, 0 };
-	const int l = f.add(list);
+	f.timerMs = 200;
 
-	auto row = [&](unsigned long a) -> std::vector<std::string> {
-		const unsigned long v = cl_ram_value(doc, gate, a);
-		const char* mark = (long)a == lastWritten ? "written last" : (long)a == lastRead ? "read last" : "";
-		return { strf("%0*lX", aDigits, a), strf("%0*lX", dDigits, v), strf("%lu", v), mark };
-	};
-	auto fill = [&](Form& form) {
-		lastRead = cl_ram_last_read(doc, gate);
-		lastWritten = cl_ram_last_written(doc, gate);
-		std::vector<std::vector<std::string>> rows;
-		rows.reserve(words);
-		for (unsigned long a = 0; a < words; a++) rows.push_back(row(a));
-		form.setRows(l, rows);
-	};
-	f.onInit = fill;
-	// The words last read and written change as the circuit runs.
-	f.timerMs = 250;
-	f.onTimer = [&](Form& form) {
-		const long lw = cl_ram_last_written(doc, gate), lr = cl_ram_last_read(doc, gate);
-		if (lw == lastWritten && lr == lastRead) return;
-		const long before[] = { lastRead, lastWritten };
-		lastRead = lr;
-		lastWritten = lw;
-		for (long a : { before[0], before[1], lr, lw }) {
-			if (a < 0 || (unsigned long)a >= words) continue;
-			const std::vector<std::string> r = row((unsigned long)a);
-			for (int c = 0; c < 4; c++) form.setCell(l, (int)a, c, r[c]);
+	// The part's picture and name, as in its settings, and Hex | Decimal.
+	D2D1_RECT_F segs[2] = {};
+	FormField head;
+	head.kind = FormField::Picture;
+	head.height = 58;
+	head.paint = [&](ID2D1RenderTarget* rt, float pw, float) {
+		const Chrome c = chrome();
+		const D2D1_COLOR_F k = ink();
+		const D2D1_RECT_F tile = D2D1::RectF(0, 2, 56, 54);
+		fillRound(rt, tile, 10, c.dark ? D2D1::ColorF(0.14f, 0.16f, 0.18f) : D2D1::ColorF(1, 1, 1));
+		strokeRound(rt, tile, 10, withAlpha(k, 0.09f));
+		if (!libName.empty()) {
+			D2D1_MATRIX_3X2_F was;
+			rt->GetTransform(&was);
+			rt->SetTransform(D2D1::Matrix3x2F::Translation(6, 8) * was);
+			cl_library_draw_gate(libName.c_str(), rt, 44, 36, was._11, c.dark);
+			rt->SetTransform(was);
+		}
+		drawText(rt, caption, D2D1::RectF(70, 8, pw - 170, 32), 16, k, TextAlign::Leading, true);
+		drawText(rt, strf("%lu addresses × %d bits · click a value to change it", words, dataBits), D2D1::RectF(70, 32, pw - 170, 50), 11,
+		         withAlpha(k, 0.55f));
+		const char* names[] = { "Hex", "Decimal" };
+		float x = pw - 2 - (textWidth("Hex", 12, true) + 24) - (textWidth("Decimal", 12, true) + 24) - 4;
+		fillRound(rt, D2D1::RectF(x, 16, pw - 2, 44), 14, withAlpha(k, 0.07f));
+		x += 2;
+		for (int i = 0; i < 2; i++) {
+			const float sw = textWidth(names[i], 12, true) + 24;
+			segs[i] = D2D1::RectF(x, 18, x + sw, 42);
+			const bool on = (i == 1) == decimal;
+			if (on) fillRound(rt, segs[i], 12, c.accent());
+			drawText(rt, names[i], D2D1::RectF(segs[i].left, segs[i].top + 4, segs[i].right, segs[i].bottom), 12,
+			         on ? c.onAccent() : withAlpha(k, 0.75f), TextAlign::Center, on);
+			x += sw;
 		}
 	};
-	f.onActivate = [&](Form& form, int, int r) {
-		std::string text = strf("%0*lX", dDigits, cl_ram_value(doc, gate, (unsigned long)r));
-		if (!askText(form.dialog, "Change a Value", strf("The value at %0*X, in hex:", aDigits, r), text)) return;
+	const int headField = f.add(head);
+
+	FormField jump;
+	jump.kind = FormField::Text;
+	jump.label = "Go to address";
+	jump.mono = true;
+	jump.tip = "In hex. The legend: green was read last, amber written last.";
+	const int jumpField = f.add(jump);
+
+	FormField grid;
+	grid.kind = FormField::Picture;
+	grid.height = gridHeight;
+	auto cellRect = [&](unsigned long addr) {
+		const long r = (long)(addr / 16) - scrollRow;
+		const int c = (int)(addr % 16);
+		const float x = 12 + addrW + c * (cellW + 3), y = headH + 4 + r * rowH;
+		return D2D1::RectF(x, y, x + cellW, y + rowH - 3);
+	};
+	grid.paint = [&](ID2D1RenderTarget* rt, float pw, float ph) {
+		const Chrome c = chrome();
+		const D2D1_COLOR_F k = ink();
+		const D2D1_RECT_F card = D2D1::RectF(0.5f, 0.5f, pw - 0.5f, ph - 0.5f);
+		fillRound(rt, card, 12, c.dark ? D2D1::ColorF(0.141f, 0.157f, 0.184f) : D2D1::ColorF(1, 1, 1));
+		strokeRound(rt, card, 12, withAlpha(k, c.dark ? 0.08f : 0.09f));
+		for (int col = 0; col < cols; col++) {
+			const float x = 12 + addrW + col * (cellW + 3);
+			monoText(rt, strf("%X", col), D2D1::RectF(x, 4, x + cellW, headH), 10.5f, withAlpha(k, 0.45f), DWRITE_TEXT_ALIGNMENT_CENTER);
+		}
+		const long read = cl_ram_last_read(doc, gate), written = cl_ram_last_written(doc, gate);
+		rt->PushAxisAlignedClip(D2D1::RectF(0, headH, pw, ph - 4), D2D1_ANTIALIAS_MODE_ALIASED);
+		for (int r = 0; r <= visibleRows && scrollRow + r < (long)rowsTotal; r++) {
+			const unsigned long row = (unsigned long)(scrollRow + r);
+			const float y = headH + 4 + r * rowH;
+			monoText(rt, strf("0x%0*lX", aDigits, row * 16), D2D1::RectF(12, y, 12 + addrW, y + rowH - 3), 11, withAlpha(k, 0.45f),
+			         DWRITE_TEXT_ALIGNMENT_LEADING);
+			for (int col = 0; col < cols; col++) {
+				const unsigned long addr = row * 16 + col;
+				if (addr >= words) break;
+				const D2D1_RECT_F cell = cellRect(addr);
+				const unsigned long v = cl_ram_value(doc, gate, addr);
+				const D2D1_COLOR_F back = (long)addr == read ? withAlpha(readColor(), 0.35f)
+				                        : (long)addr == written ? withAlpha(writtenColor(), 0.35f) : withAlpha(k, 0.045f);
+				fillRound(rt, cell, 5, back);
+				if ((long)addr == editing) continue;
+				monoText(rt, shown(v), cell, 11.5f, v == 0 ? withAlpha(k, 0.35f) : k, DWRITE_TEXT_ALIGNMENT_CENTER);
+			}
+		}
+		rt->PopAxisAlignedClip();
+		// Where the list is, when there's more than fits.
+		if ((long)rowsTotal > visibleRows) {
+			const float track = ph - headH - 12, thumb = std::max(24.0f, track * visibleRows / rowsTotal);
+			const float ty = headH + 4 + (track - thumb) * scrollRow / std::max(1L, (long)rowsTotal - visibleRows);
+			fillRound(rt, D2D1::RectF(pw - 8, ty, pw - 4, ty + thumb), 2, withAlpha(k, 0.25f));
+		}
+	};
+	const int gridField = f.add(grid);
+
+	auto scrollTo = [&](Form& form, long row) {
+		scrollRow = std::max(0L, std::min(row, (long)rowsTotal - visibleRows));
+		form.refresh(gridField);
+	};
+	WordEdit we;
+	std::vector<HWND> finished;
+	auto finishEdit = [&](Form& form, bool keep) {
+		if (editing < 0 || editBox == nullptr) return;
+		const long addr = editing;
+		editing = -1;
+		HWND box = editBox;
+		editBox = nullptr;
+		if (keep) {
+			const std::string t = trimmed(windowText(box));
+			char* end = nullptr;
+			const unsigned long v = strtoul(t.c_str(), &end, decimal ? 10 : 16);
+			if (!t.empty() && end && *end == 0) {
+				cl_ram_set(doc, gate, (unsigned long)addr, v);
+				w->edited();
+			} else if (!t.empty()) {
+				MessageBeep(MB_ICONWARNING);
+			}
+		}
+		// Hidden now, destroyed on the next tick: this can run inside the
+		// box's own messages (Enter, or losing the keyboard).
+		ShowWindow(box, SW_HIDE);
+		finished.push_back(box);
+		form.refresh(gridField);
+	};
+	f.onClick = [&](Form& form, int field, float x, float y) {
+		if (field == headField) {
+			for (int i = 0; i < 2; i++)
+				if (inRect(segs[i], x, y)) { finishEdit(form, true); decimal = i == 1; form.refresh(headField); form.refresh(gridField); }
+			return;
+		}
+		if (field != gridField) return;
+		finishEdit(form, true);
+		for (int r = 0; r <= visibleRows; r++) {
+			for (int col = 0; col < cols; col++) {
+				const unsigned long addr = (unsigned long)(scrollRow + r) * 16 + col;
+				if (addr >= words || !inRect(cellRect(addr), x, y)) continue;
+				// A box over the word to type in.
+				const D2D1_RECT_F cell = cellRect(addr);
+				HWND pic = form.fields[gridField].hwnd;
+				const float s = dpiOf(pic) / 96.0f;
+				POINT p = { (LONG)(cell.left * s), (LONG)(cell.top * s) };
+				MapWindowPoints(pic, form.dialog, &p, 1);
+				editing = (long)addr;
+				editBox = CreateWindowExW(0, L"EDIT", W(shown(cl_ram_value(doc, gate, addr))).c_str(),
+				                          WS_CHILD | WS_VISIBLE | WS_BORDER | ES_CENTER | ES_AUTOHSCROLL, p.x, p.y, (int)((cell.right - cell.left) * s),
+				                          (int)((cell.bottom - cell.top) * s), form.dialog, nullptr, appInstance(), nullptr);
+				SendMessageW(editBox, WM_SETFONT, (WPARAM)monoFont(dpiOf(pic)), TRUE);
+				if (prefs().dark) darkenControl(editBox, true, L"CFD");
+				SetWindowPos(editBox, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+				we.done = [&form, &finishEdit](bool keep) { finishEdit(form, keep); };
+				SetWindowSubclass(editBox, wordEditProc, 3, (DWORD_PTR)&we);
+				SetFocus(editBox);
+				SendMessageW(editBox, EM_SETSEL, 0, -1);
+				form.refresh(gridField);
+				return;
+			}
+		}
+	};
+	f.onWheel = [&](Form& form, int field, int delta) {
+		if (field != gridField) return;
+		finishEdit(form, true);
+		scrollTo(form, scrollRow - delta / WHEEL_DELTA * 3);
+	};
+	f.onChange = [&](Form& form, int field) {
+		if (field != jumpField) return;
+		const std::string t = trimmed(form.text(jumpField));
 		char* end = nullptr;
-		const unsigned long v = strtoul(text.c_str(), &end, 16);
-		if (text.empty() || end == nullptr || *end != 0) { MessageBeep(MB_ICONWARNING); return; }
-		cl_ram_set(doc, gate, (unsigned long)r, v);
-		const std::vector<std::string> cells = row((unsigned long)r);
-		for (int c = 0; c < 4; c++) form.setCell(l, r, c, cells[c]);
-		w->edited();
+		const unsigned long a = strtoul(t.c_str(), &end, 16);
+		if (!t.empty() && end && *end == 0 && a < words) { finishEdit(form, true); scrollTo(form, (long)(a / 16)); }
+	};
+	// The words last read and written change as the circuit runs.
+	long seenRead = -2, seenWritten = -2;
+	f.onTimer = [&](Form& form) {
+		for (HWND h : finished) DestroyWindow(h);
+		finished.clear();
+		const long r = cl_ram_last_read(doc, gate), wr = cl_ram_last_written(doc, gate);
+		if (r == seenRead && wr == seenWritten) return;
+		seenRead = r;
+		seenWritten = wr;
+		form.refresh(gridField);
 	};
 	bool openSettings = false;
 	f.onButton = [&](Form& form, int b) -> bool {
+		finishEdit(form, true);
 		if (b == 2) { openSettings = true; return true; }
 		const bool load = b == 0;
 		const std::vector<FileFilter> filters = { { "Memory files (*.cdm)", "*.cdm" }, { "All files", "*.*" } };
@@ -884,9 +1086,13 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			file = chooseSaveFile(form.dialog, "Save Memory", "memory.cdm", filters, ".cdm");
 		}
 		if (file.empty()) return false;
-		if (load) { cl_ram_load_file(doc, gate, file.c_str()); fill(form); w->edited(); }
+		if (load) { cl_ram_load_file(doc, gate, file.c_str()); form.refresh(gridField); w->edited(); }
 		else cl_ram_save_file(doc, gate, file.c_str());
 		return false;
+	};
+	f.validate = [&](Form& form) -> std::string {
+		finishEdit(form, true);
+		return std::string();
 	};
 	f.run(w->window());
 	if (openSettings) showGateSettings(w, gate);

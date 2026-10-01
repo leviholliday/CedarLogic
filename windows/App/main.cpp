@@ -37,6 +37,7 @@ int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
 // diagram too; --timing-color for it in color.
 std::string gTiming;
 bool gTimingColor = false;
+std::string gPlace;     // --place: a gate by library name, put on the page and selected
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
@@ -255,6 +256,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
 		if (a == "--timing-color") { gTimingColor = true; continue; }
+		if (a == "--place" && i + 1 < argc) { gPlace = U(argv[++i]); continue; }
 		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
@@ -308,6 +310,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	if (circuitWindows().empty()) newCircuitWindow();
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
+	if (!gPlace.empty() && !circuitWindows().empty()) {
+		CircuitWindow* w = circuitWindows().back();
+		if (cl_edit_add_gate(w->document(), w->currentPage(), gPlace.c_str(), 0, 0)) w->redraw();
+	}
 	if (!gSelect.empty() && !circuitWindows().empty()) {
 		CircuitWindow* w = circuitWindows().back();
 		CLFindResult found;
