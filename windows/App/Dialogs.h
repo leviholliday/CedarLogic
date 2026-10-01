@@ -85,6 +85,7 @@ bool askText(HWND parent, const std::string& title, const std::string& prompt, s
 void showGateSettings(CircuitWindow* w, long gate);
 void showQuickAdd(CircuitWindow* w);
 void showTruthTable(CircuitWindow* w, int page);
+bool truthTableOpen();   // one is up (the guided tour watches for it)
 void showRamEditor(CircuitWindow* w, long gate);
 void showPreferencesDialog(HWND parent);
 void showShortcutsWindow(HWND parent);

@@ -485,7 +485,7 @@ void drawAll(ID2D1RenderTarget* rt, Resources& res, const Timeline& tl, double t
 	D2D1_MATRIX_3X2_F was;
 	rt->GetTransform(&was);
 	rt->SetTransform(D2D1::Matrix3x2F::Scale(s, s, D2D1::Point2F(kW / 2, kH / 2)) * D2D1::Matrix3x2F::Translation(kMargin, kMargin) * was);
-	drawSoft(rt, panel, D2D1::Point2F(0, 0), tl.calm ? 0 : (float)(7 * out), opacity, { { D2D1::ColorF(0, 0, 0, 0.55f), 30, 14 } });
+	drawSoft(rt, panel, D2D1::Point2F(0, 0), tl.calm ? 0 : (float)(7 * out), opacity, { { D2D1::ColorF(0, 0, 0, 0.42f), 26, 12 } });
 	rt->SetTransform(was);
 	panel->Release();
 }

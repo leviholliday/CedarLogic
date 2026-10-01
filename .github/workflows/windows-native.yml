@@ -107,7 +107,8 @@ jobs:
           timeout 90 "$A" --truth-tab 1 --dialog truth-table --screenshot "$PWD/renders/truth-table-kmap.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 2 --dialog truth-table --screenshot "$PWD/renders/truth-table-formulas.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
-          timeout 90 "$A" --dialog welcome --screenshot "$PWD/renders/welcome.png" || true
+          for p in 0 1 2 3 4; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
+          timeout 90 "$A" --dialog tour --screenshot "$PWD/renders/tour.png" || true
           # Your Circuits (by now holding the circuits opened above) and a
           # circuit's versions.
           timeout 90 "$A" --dialog library --screenshot "$PWD/renders/your-circuits.png" || true
@@ -124,9 +125,7 @@ jobs:
           timeout 60 "$A" --feedback-probe || echo "::warning::the feedback probe failed"
           timeout 90 "$A" --dialog feedback --screenshot "$PWD/renders/feedback.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog feedback --screenshot "$PWD/renders/feedback-dark.png" res/samples/practice.cdl || true
-          timeout 90 "$A" --dialog whatsnew --screenshot "$PWD/renders/whatsnew-0.png" || true
-          timeout 90 "$A" --dialog whatsnew --page 3 --screenshot "$PWD/renders/whatsnew-3.png" || true
-          timeout 90 "$A" --dialog whatsnew --page 6 --screenshot "$PWD/renders/whatsnew-6.png" || true
+          for p in 0 1 2 3 4 5 6; do timeout 90 "$A" --dialog whatsnew --page $p --screenshot "$PWD/renders/whatsnew-$p.png" || true; done
           timeout 90 "$A" --dialog help --screenshot "$PWD/renders/help.png" || true
           timeout 90 "$A" --dark --dialog help --help-page editing --screenshot "$PWD/renders/help-editing-dark.png" || true
           timeout 90 "$A" --dialog help --help-page first --screenshot "$PWD/renders/help-first.png" || true

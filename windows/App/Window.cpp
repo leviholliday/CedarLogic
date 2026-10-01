@@ -1208,7 +1208,7 @@ void CircuitWindow::run(int command) {
 	case CMD_SHORTCUTS: showShortcuts(); break;
 	case CMD_HELP: help::show(this); break;
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
-	case CMD_TOUR: welcome::startTour(this); break;
+	case CMD_TOUR: welcome::startTourOn(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;
 	case CMD_ABOUT:

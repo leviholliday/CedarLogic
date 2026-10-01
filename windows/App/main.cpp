@@ -63,6 +63,7 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	HWND dialog = w ? GetLastActivePopup(w->window()) : nullptr;
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
 	if (help::window()) dialog = help::window();
+	if (welcome::tourWindow()) dialog = welcome::tourWindow();
 	if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
 	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
 	if (!gTiming.empty()) {
@@ -275,7 +276,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "gate-settings" ? CMD_GATE_SETTINGS
-			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : 0;
+			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
 			continue;
 		}
 		files.push_back(a);
@@ -341,7 +342,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -1 && !circuitWindows().empty()) {
 		prefs().hasSeenWelcome = false;
 		welcome::offer(circuitWindows().back());
+		welcome::pageForScreenshot(gPage);
 	}
+	if (gDialog == -4 && !circuitWindows().empty()) welcome::startTour(circuitWindows().back());
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);

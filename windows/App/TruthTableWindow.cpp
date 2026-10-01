@@ -616,6 +616,9 @@ private:
 
 }  // namespace
 
+namespace { int g_truthTablesOpen = 0; }
+bool truthTableOpen() { return g_truthTablesOpen > 0; }
+
 void showTruthTable(CircuitWindow* w, int page) {
 	char err[512] = "";
 	CLTruthTable* tt = cl_truth_table(w->document(), page, err, sizeof err);
@@ -638,7 +641,9 @@ void showTruthTable(CircuitWindow* w, int page) {
 	t.unsettled = cl_tt_unsettled(tt);
 	cl_tt_free(tt);
 	t.tab = prefs().truthTab;
+	g_truthTablesOpen++;
 	t.run();
+	g_truthTablesOpen--;
 	if (prefs().truthTab != t.tab) { prefs().truthTab = t.tab; prefs().save(); }
 	if (!t.buildText.empty()) {
 		prefs().lastFormula = t.buildText;

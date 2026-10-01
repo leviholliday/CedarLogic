@@ -30,8 +30,14 @@ namespace welcome {
 // Shown once, the first time the app has a window open (prefs().hasSeenWelcome).
 // Offers the guided tour on its last page. False when it wasn't shown.
 bool offer(CircuitWindow* window);
-// Help > Guided Tour: the tour again, without the welcome pages.
+// The guided tour, on this circuit's window.
 void startTour(CircuitWindow* window);
+// Help > Guided Tour: the tour on a circuit of its own (this one if it's
+// new and empty, else a new one).
+void startTourOn(CircuitWindow* window);
+// For --screenshot: the welcome on a page, and the tour's card.
+bool pageForScreenshot(int page);
+HWND tourWindow();
 }  // namespace welcome
 
 // What's New: after an update, a walk through what's new since the old
