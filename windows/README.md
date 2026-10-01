@@ -24,11 +24,19 @@ it compiles without a Windows machine:
   outlines from DirectWrite, as the wx app draws them on Windows. The rest of
   the engine is `mac/CedarCore`, shared with the Mac and Linux apps; its
   drawing calls take a Direct2D render target here (`mac/CedarCore/NativeScene.h`).
-- `App/` -- the app: a window per circuit (`Window`), a tab and a canvas per
-  page (`Canvas`), the gate palette and minimap (`Palette`), the dialogs and
-  the oscilloscope (`Dialogs`, built with the small `Form` helper there),
-  recovery copies of unsaved work (`Recovery`), and settings and helpers
-  (`Util`; settings live in `%APPDATA%\CedarLogic\native.ini`).
+- `App/` -- the app, drawn to look like the Mac app (its colours and layout
+  are in `Chrome`): a window per circuit (`Window`) whose title bar is the
+  `Toolbar` (the circuit's name and menu, the tools in capsules, ••• for
+  every menu, Windows' own window buttons); `TabStrip`, a tab card per page,
+  over a `Canvas` per page (with the note toast, the Tidy Up and Lock
+  banner, and Simulation View's control bar drawn over the circuit); the side
+  panel with the gate palette and minimap (`Palette`); the dialogs and the
+  oscilloscope (`Dialogs`, built with the small `Form` helper there, dark in
+  dark mode); the launch screen, first-run welcome and guided tour
+  (`Welcome`, in the brand's green); updates from the test build
+  (`Updater`); recovery copies of unsaved work (`Recovery`); and settings and
+  helpers (`Util`; settings live in `%APPDATA%\CedarLogic\native.ini`).
+  `Drawn` is the base of the custom-drawn parts: Direct2D, in points.
 - `res/` -- the manifest (per-monitor DPI, the current look of the standard
   controls, UTF-8 file names) and the resource script (the icon, version).
 
@@ -43,7 +51,9 @@ them): `cl_check`, `edit_check`, `sim_check`, `tt_check`, `save_check`,
 Direct2D here. And:
 
 - `CedarLogic.exe --screenshot out.png [circuit.cdl]` -- opens the window,
-  captures it to a PNG after two seconds and quits (CI runs it on the zip)
+  captures it to a PNG after two seconds and quits (CI runs it on the zip).
+  With `--dark` or `--light` for that run, `--sim-view`, or `--dialog
+  preferences|shortcuts|truth-table|add-gate|welcome` to capture that instead.
 - `CedarLogic.exe --version`
 
 CI (`.github/workflows/windows-native.yml`) builds x64 and ARM64 on every push
