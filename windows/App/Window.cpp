@@ -11,6 +11,7 @@
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
+#include "Feedback.h"
 #include "Library.h"
 #include "Collections.h"
 #include "LibraryWindow.h"
@@ -255,7 +256,9 @@ void CircuitWindow::buildMenus() {
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
 	item(help, CMD_TOUR, "Guided &Tour");
 	item(help, CMD_HELP, "CedarLogic &Help\tF1");
+	item(help, CMD_WHATS_NEW, "&What's New in CedarLogic");
 	separator(help);
+	item(help, CMD_FEEDBACK, "Send &Feedback\u2026");
 	item(help, CMD_CHECK_UPDATES, "Check for &Updates\u2026");
 	item(help, CMD_ABOUT, "&About CedarLogic");
 }
@@ -1155,7 +1158,7 @@ void CircuitWindow::run(int command) {
 	case CMD_EXPORT_V1: exportOlder(1); break;
 	case CMD_PRINT: print(); break;
 	case CMD_CLOSE_WINDOW: PostMessageW(hwnd, WM_CLOSE, 0, 0); break;
-	case CMD_QUIT: quitApp(); break;
+	case CMD_QUIT: if (confirmQuit(hwnd)) quitApp(); break;
 	case CMD_UNDO: undo(); break;
 	case CMD_REDO: redo(); break;
 	case CMD_CUT: editing(&CircuitWindow::cut); break;
@@ -1210,6 +1213,8 @@ void CircuitWindow::run(int command) {
 	}
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
 	case CMD_TOUR: welcome::startTour(this); break;
+	case CMD_WHATS_NEW: whatsnew::show(this); break;
+	case CMD_FEEDBACK: feedback::show(this); break;
 	case CMD_ABOUT:
 		showMessage(hwnd, Tone::Info, "CedarLogic " CL_VERSION " (native Windows, testing)",
 		            "A digital logic simulator, from Cedarville University.\n\n"
@@ -1426,43 +1431,8 @@ IWICImagingFactory* wicFactory() {
 
 }  // namespace
 
-// Export the page in front as a PNG picture, in the style chosen.
-void CircuitWindow::exportImage() {
-	const int p = currentPage();
-	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, p, &l, &b, &r, &t)) { note("This page is empty: nothing to export."); return; }
-	static int style = CL_STYLE_LIGHT;
-	if (!chooseExportStyle(hwnd, style)) return;
-	std::string name = displayName();
-	if (cl_document_page_count(doc) > 1) name += " - " + pageName(p);
-	const std::string file = chooseSaveFile(hwnd, "Export as Image", name + ".png", { { "PNG pictures (*.png)", "*.png" } }, ".png");
-	if (file.empty()) return;
-
-	// Ten points a grid unit; two pixels a point.
-	const double margin = 16, scale = 2;
-	const double wPts = std::min(4000.0, std::max(300.0, (r - l) * 10 + 2 * margin));
-	const double hPts = std::min(4000.0, std::max(200.0, (t - b) * 10 + 2 * margin));
-	IWICImagingFactory* wic = wicFactory();
-	IWICBitmap* bmp = nullptr;
-	ID2D1RenderTarget* rt = nullptr;
-	bool ok = false;
-	if (wic && SUCCEEDED(wic->CreateBitmap((UINT)(wPts * scale), (UINT)(hPts * scale), GUID_WICPixelFormat32bppPBGRA,
-	                                       WICBitmapCacheOnLoad, &bmp))) {
-		const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
-			D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
-		if (SUCCEEDED(d2dFactory()->CreateWicBitmapRenderTarget(bmp, props, &rt))) {
-			rt->BeginDraw();
-			rt->SetTransform(D2D1::Matrix3x2F::Scale((float)scale, (float)scale));
-			rt->Clear(style == CL_STYLE_DARK ? d2dColor(Palette{ true, false }.canvas()) : D2D1::ColorF(1, 1, 1, 1));
-			cl_document_draw_fitted(doc, p, rt, wPts, hPts, margin, scale, style);
-			ok = SUCCEEDED(rt->EndDraw()) && savePng(wic, bmp, file);
-			rt->Release();
-		}
-		bmp->Release();
-	}
-	if (!ok) { showMessage(hwnd, Tone::Error, "The image couldn't be saved", file); return; }
-	note("Exported " + baseName(file) + ".");
-}
+// Export the page in front as a picture (Export.cpp).
+void CircuitWindow::exportImage() { showExportImage(this, currentPage()); }
 
 void CircuitWindow::print() {
 	const int page = currentPage();

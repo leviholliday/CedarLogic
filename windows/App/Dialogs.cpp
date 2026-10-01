@@ -105,6 +105,25 @@ LRESULT CALLBACK darkHeaderProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR
 	return DefSubclassProc(h, msg, wp, lp);
 }
 
+// A Picture field, drawn into the control's DC with Direct2D.
+void paintPicture(const FormField& x, const DRAWITEMSTRUCT* di) {
+	static ID2D1DCRenderTarget* rt = nullptr;
+	if (rt == nullptr) {
+		const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+			D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
+		if (FAILED(d2dFactory()->CreateDCRenderTarget(&props, &rt))) return;
+	}
+	const RECT& r = di->rcItem;
+	if (FAILED(rt->BindDC(di->hDC, &r))) return;
+	const float s = dpiOf(di->hwndItem) / 96.0f;
+	rt->BeginDraw();
+	rt->SetTransform(D2D1::Matrix3x2F::Scale(s, s));
+	const COLORREF back = prefs().dark ? darkColors().back : GetSysColor(COLOR_BTNFACE);
+	rt->Clear(D2D1::ColorF(GetRValue(back) / 255.0f, GetGValue(back) / 255.0f, GetBValue(back) / 255.0f));
+	if (x.paint) x.paint(rt, (r.right - r.left) / s, (r.bottom - r.top) / s);
+	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
+}
+
 INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	Form* f = reinterpret_cast<Form*>(GetWindowLongPtrW(d, DWLP_USER));
 	if (msg == WM_INITDIALOG) {
@@ -165,6 +184,17 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (f->onChange) guarded("a dialog", [&] { f->onChange(*f, id - kLabelBase); });
 			return TRUE;
 		}
+		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && f->fields[id - kFieldBase].kind == FormField::Picture) {
+			if ((code == STN_CLICKED || code == STN_DBLCLK) && f->onClick) {
+				HWND pic = f->fields[id - kFieldBase].hwnd;
+				POINT p;
+				GetCursorPos(&p);
+				ScreenToClient(pic, &p);
+				const float s = dpiOf(pic) / 96.0f;
+				guarded("a dialog", [&] { f->onClick(*f, id - kFieldBase, p.x / s, p.y / s); });
+			}
+			return TRUE;
+		}
 		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && f->onChange) {
 			const FormField& x = f->fields[id - kFieldBase];
 			const bool change = (x.kind == FormField::Text && code == EN_CHANGE) ||
@@ -196,6 +226,13 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			return TRUE;
 		}
 		break;
+	}
+	case WM_DRAWITEM: {
+		const DRAWITEMSTRUCT* di = reinterpret_cast<const DRAWITEMSTRUCT*>(lp);
+		const int field = (int)di->CtlID - kFieldBase;
+		if (field < 0 || field >= (int)f->fields.size() || f->fields[field].kind != FormField::Picture) break;
+		guarded("a dialog", [&] { paintPicture(f->fields[field], di); });
+		return TRUE;
 	}
 	case WM_CTLCOLORDLG:
 	case WM_CTLCOLORSTATIC:
@@ -335,6 +372,13 @@ void Form::build() {
 			y += h;
 			break;
 		}
+		case FormField::Picture: {
+			const int h = sc(x.height);
+			x.hwnd = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY, margin, y, fullW, h, dialog, id,
+			                         appInstance(), nullptr);
+			y += h;
+			break;
+		}
 		case FormField::Note: {
 			const int h = x.lines * lineH;
 			x.hwnd = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
@@ -426,6 +470,16 @@ void Form::build() {
 		top = std::max<int>(mi.rcWork.top, std::min<int>(top, mi.rcWork.bottom - wh));
 	}
 	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void Form::refresh(int field) {
+	if (field >= 0 && field < (int)fields.size() && fields[field].hwnd) InvalidateRect(fields[field].hwnd, nullptr, FALSE);
+}
+
+void Form::enable(int field, bool on) {
+	if (field < 0 || field >= (int)fields.size()) return;
+	if (fields[field].hwnd) EnableWindow(fields[field].hwnd, on);
+	if (fields[field].extra) EnableWindow(fields[field].extra, on);
 }
 
 void Form::capture() {
@@ -858,6 +912,7 @@ void showPreferencesDialog(HWND parent) {
 	const int rightRotate = f.add(checkField("Right-click a gate to rotate it", p.rightClickRotate));
 	const int dupClip = f.add(checkField("Duplicate (D) also copies to the clipboard", p.duplicateUsesClipboard));
 	const int tidy = f.add(choiceField("Tidy Up (Shift+S)", { "Keeps the layout's shape", "Arranges by signal flow" }, p.tidyMode));
+	const int askQuit = f.add(checkField("Ask before quitting with Ctrl+Q", p.confirmQuit));
 
 	// Every change applies at once.
 	f.onChange = [&](Form& form, int field) {
@@ -890,6 +945,7 @@ void showPreferencesDialog(HWND parent) {
 		else if (field == rightRotate) q.rightClickRotate = form.checked(rightRotate);
 		else if (field == dupClip) q.duplicateUsesClipboard = form.checked(dupClip);
 		else if (field == tidy) q.tidyMode = form.choice(tidy);
+		else if (field == askQuit) q.confirmQuit = form.checked(askQuit);
 		prefsApply();
 	};
 	f.run(parent);
@@ -1017,226 +1073,32 @@ void showBuildFormula(CircuitWindow* w) {
 	if (!w->buildPlan(plan, pr.buildNewPage, name)) MessageBeep(MB_ICONWARNING);
 }
 
-// ---- Export style ------------------------------------------------------------------
+// ---- Quitting ------------------------------------------------------------------------
 
-bool chooseExportStyle(HWND parent, int& style) {
+// Ctrl+Q sits beside Ctrl+W (close the tab): asked first, as the Mac app
+// asks about Cmd+Q, unless "Always Quit" was chosen.
+bool confirmQuit(HWND parent) {
+	if (!prefs().confirmQuit) return true;
 	Form f;
-	f.title = "Export as Image";
-	f.width = 380;
-	f.okText = "Choose File…";
-	FormField s = choiceField("Style", { "Black on white, for printing", "Light, with signal colours", "Dark, with signal colours" },
-	                          style == CL_STYLE_PRINT ? 0 : style == CL_STYLE_DARK ? 2 : 1);
-	const int field = f.add(s);
+	f.title = "Quit CedarLogic";
+	f.width = 400;
+	f.okText = "Quit";
+	f.buttons = { "Always Quit" };
+	FormField q;
+	q.kind = FormField::Note;
+	q.label = "Are you sure you want to quit CedarLogic?";
+	f.add(q);
 	FormField note;
 	note.kind = FormField::Note;
-	note.label = "Saved as a PNG picture, twice the size it shows at on screen.";
+	note.label = "Your circuits are saved; they'll be here when you come back.";
 	f.add(note);
-	if (f.run(parent) != IDOK) return false;
-	const int c = atoi(f.fields[field].value.c_str());
-	style = c == 0 ? CL_STYLE_PRINT : c == 2 ? CL_STYLE_DARK : CL_STYLE_LIGHT;
-	return true;
+	f.onButton = [](Form&, int) {
+		prefs().confirmQuit = false;
+		prefs().save();
+		return true;
+	};
+	const int r = f.run(parent);
+	return r == IDOK || r == 100;
 }
 
-// ---- The oscilloscope --------------------------------------------------------------
-
-namespace {
-const wchar_t* kScopeClass = L"CedarLogicScope";
-enum { kScopeClear = 1, kScopeIn, kScopeOut };
-}  // namespace
-
-void registerDialogClasses() {
-	WNDCLASSEXW wc = {};
-	wc.cbSize = sizeof wc;
-	wc.lpfnWndProc = ScopeWindow::proc;
-	wc.hInstance = appInstance();
-	wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-	wc.hIcon = LoadIconW(appInstance(), MAKEINTRESOURCEW(1));
-	wc.lpszClassName = kScopeClass;
-	RegisterClassExW(&wc);
-}
-
-ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
-	const UINT dpi = dpiOf(owner->window());
-	hwnd = CreateWindowExW(0, kScopeClass, L"Oscilloscope", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT,
-	                       CW_USEDEFAULT, scaled(820, dpi), scaled(360, dpi), owner->window(), nullptr, appInstance(), this);
-	clearButton = CreateWindowExW(0, L"BUTTON", L"Clear", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10,
-	                              hwnd, (HMENU)kScopeClear, appInstance(), nullptr);
-	outButton = CreateWindowExW(0, L"BUTTON", L"Zoom Out", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10,
-	                            hwnd, (HMENU)kScopeOut, appInstance(), nullptr);
-	inButton = CreateWindowExW(0, L"BUTTON", L"Zoom In", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10,
-	                           hwnd, (HMENU)kScopeIn, appInstance(), nullptr);
-	info = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 10, 10, hwnd, nullptr,
-	                       appInstance(), nullptr);
-	setFontTree(hwnd, uiFont(dpiOf(hwnd)));
-	setDarkTitleBar(hwnd, prefs().dark);
-	layout();
-}
-
-ScopeWindow::~ScopeWindow() {
-	if (hwnd) {
-		SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-		DestroyWindow(hwnd);
-	}
-}
-
-int ScopeWindow::barHeight() const { return scaled(38, dpiOf(hwnd)); }
-
-void ScopeWindow::layout() {
-	const UINT dpi = dpiOf(hwnd);
-	auto sc = [&](int v) { return scaled(v, dpi); };
-	RECT rc;
-	GetClientRect(hwnd, &rc);
-	int x = sc(6);
-	const int y = sc(6), h = sc(26);
-	MoveWindow(clearButton, x, y, sc(70), h, TRUE); x += sc(76);
-	MoveWindow(outButton, x, y, sc(80), h, TRUE); x += sc(86);
-	MoveWindow(inButton, x, y, sc(80), h, TRUE); x += sc(92);
-	MoveWindow(info, x, y, std::max<int>(10, rc.right - x - sc(6)), h, TRUE);
-	InvalidateRect(hwnd, nullptr, FALSE);
-}
-
-void ScopeWindow::present() {
-	setDarkTitleBar(hwnd, prefs().dark);
-	ShowWindow(hwnd, SW_SHOWNORMAL);
-	SetForegroundWindow(hwnd);
-	update();
-}
-
-void ScopeWindow::close() { ShowWindow(hwnd, SW_HIDE); }
-bool ScopeWindow::visible() const { return IsWindowVisible(hwnd) != FALSE; }
-
-void ScopeWindow::update() {
-	CLDocument* doc = owner->document();
-	const long long len = cl_scope_length(doc);
-	setWindowText(info, strf("%d signal%s · %lld steps recorded · %d ms a step", cl_scope_signal_count(doc),
-	                         cl_scope_signal_count(doc) == 1 ? "" : "s", len, cl_document_step_ms(doc)));
-	RECT rc;
-	GetClientRect(hwnd, &rc);
-	rc.top = barHeight();
-	InvalidateRect(hwnd, &rc, FALSE);
-}
-
-LRESULT CALLBACK ScopeWindow::proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
-	if (msg == WM_NCCREATE) {
-		auto* self = static_cast<ScopeWindow*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
-		self->hwnd = h;
-		SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)self);
-	}
-	auto* self = reinterpret_cast<ScopeWindow*>(GetWindowLongPtrW(h, GWLP_USERDATA));
-	if (self == nullptr) return DefWindowProcW(h, msg, wp, lp);
-	LRESULT r = 0;
-	bool ok = false;
-	guarded("the oscilloscope", [&] { r = self->handle(msg, wp, lp); ok = true; });
-	return ok ? r : DefWindowProcW(h, msg, wp, lp);
-}
-
-LRESULT ScopeWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
-	switch (msg) {
-	case WM_PAINT:
-		paint();
-		return 0;
-	case WM_ERASEBKGND:
-		return 1;
-	case WM_SIZE:
-		layout();
-		return 0;
-	case WM_CLOSE:
-		ShowWindow(hwnd, SW_HIDE);   // kept for next time
-		return 0;
-	case WM_DPICHANGED: {
-		const RECT* r = reinterpret_cast<const RECT*>(lp);
-		SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
-		setFontTree(hwnd, uiFont(dpiOf(hwnd)));
-		layout();
-		return 0;
-	}
-	case WM_COMMAND:
-		switch (LOWORD(wp)) {
-		case kScopeClear: cl_scope_clear(owner->document()); update(); break;
-		case kScopeIn: zoom = std::min(48, zoom * 2); update(); break;
-		case kScopeOut: zoom = std::max(1, zoom / 2); update(); break;
-		}
-		SetFocus(hwnd);
-		return 0;
-	case WM_KEYDOWN:
-		// Escape or Ctrl+G puts it away; Space runs and pauses the circuit.
-		if (wp == VK_ESCAPE || (wp == 'G' && (GetKeyState(VK_CONTROL) & 0x8000))) {
-			close();
-			SetForegroundWindow(owner->window());
-			return 0;
-		}
-		if (wp == VK_SPACE) { owner->toggleRunning(); return 0; }
-		break;
-	}
-	return DefWindowProcW(hwnd, msg, wp, lp);
-}
-
-// One lane per signal: low and high as a line at the bottom or the top,
-// floating in the middle, unknown and conflict as shaded blocks. The newest
-// step is at the right edge.
-void ScopeWindow::paint() {
-	PAINTSTRUCT ps;
-	BeginPaint(hwnd, &ps);
-	ID2D1HwndRenderTarget* rt = surface.begin(hwnd);
-	if (rt == nullptr) { EndPaint(hwnd, &ps); return; }
-	const double s = surface.scale();
-	CLDocument* doc = owner->document();
-	RECT rc;
-	GetClientRect(hwnd, &rc);
-	const float bar = (float)(barHeight() / s);
-	const float w = (float)(rc.right / s), h = (float)(rc.bottom / s) - bar;
-	const bool dark = prefs().dark;
-	const RGBA bg = Palette{ dark, false }.canvas();
-	rt->Clear(d2dColor(bg));
-	rt->SetTransform(D2D1::Matrix3x2F::Translation(0, bar) * D2D1::Matrix3x2F::Scale((float)s, (float)s));
-	const int n = cl_scope_signal_count(doc);
-	const float ink = dark ? 0.85f : 0.15f;
-	ID2D1SolidColorBrush* brush = nullptr;
-	rt->CreateSolidColorBrush(D2D1::ColorF(ink, ink, ink, 1), &brush);
-	if (brush == nullptr) { surface.end(); EndPaint(hwnd, &ps); return; }
-	if (n == 0) {
-		drawText(rt, "Add a TO label to a wire, and its signal shows up here.", D2D1::RectF(0, 0, w, h), 12,
-		         D2D1::ColorF(ink, ink, ink, 1), TextAlign::Center);
-	} else {
-		const float nameW = 130, lane = (float)std::min(34.0, std::max(18.0, (h - 8.0) / n));
-		const long long len = cl_scope_length(doc);
-		const int visible = std::max(1, (int)((w - nameW - 8) / zoom));
-		const long long from = std::max(0LL, len - visible);
-		const int count = (int)std::min<long long>(visible, len - from);
-		std::vector<unsigned char> buf((size_t)std::max(count, 1));
-		const RGBA accent = accentColor(dark);
-		for (int sig = 0; sig < n; sig++) {
-			const float top = 4 + sig * lane, hi = top + 4, lo = top + lane - 6, mid = (hi + lo) / 2;
-			// Lane separator and name.
-			brush->SetColor(D2D1::ColorF(ink, ink, ink, 0.12f));
-			rt->FillRectangle(D2D1::RectF(0, top + lane - 1, w, top + lane), brush);
-			drawText(rt, cl_scope_signal(doc, sig), D2D1::RectF(8, top, nameW - 6, top + lane), 12,
-			         D2D1::ColorF(ink, ink, ink, 1));
-			if (count <= 0) continue;
-			cl_scope_samples(doc, sig, from, count, buf.data());
-			float prevY = -1;
-			for (int i = 0; i < count; i++) {
-				const float x0 = nameW + (float)i * zoom, x1 = x0 + zoom;
-				const unsigned char v = buf[i];
-				if (v == 0 || v == 1 || v == 2) {
-					const float y = v == 1 ? hi : v == 0 ? lo : mid;
-					if (v == 2) brush->SetColor(D2D1::ColorF(0.0f, 0.7f, 0.0f, 1));
-					else brush->SetColor(d2dColor(accent));
-					if (prevY >= 0 && prevY != y) rt->DrawLine(D2D1::Point2F(x0, prevY), D2D1::Point2F(x0, y), brush, 1.5f);
-					rt->DrawLine(D2D1::Point2F(x0, y), D2D1::Point2F(x1, y), brush, 1.5f);
-					prevY = y;
-				} else if (v == 3 || v == 4) {
-					// Conflict red, unknown blue, as the canvas colours them.
-					brush->SetColor(v == 3 ? D2D1::ColorF(0.9f, 0.2f, 0.2f, 0.5f) : D2D1::ColorF(0.3f, 0.3f, 1.0f, 0.4f));
-					rt->FillRectangle(D2D1::RectF(x0, hi, x1, lo), brush);
-					prevY = -1;
-				} else {
-					prevY = -1;
-				}
-			}
-		}
-	}
-	brush->Release();
-	surface.end();
-	EndPaint(hwnd, &ps);
-}
+// ---- The oscilloscope: Scope.cpp ----

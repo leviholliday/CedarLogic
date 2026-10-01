@@ -76,7 +76,11 @@ if(CL_BUILD_APP)
 	if(NOT CL_GIT_RC EQUAL 0 OR CL_GIT_COMMIT STREQUAL "")
 		set(CL_GIT_COMMIT "unknown")
 	endif()
-	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}")
+	# Where Send Feedback goes, and the key that tells the site it's from the app.
+	set(CL_FEEDBACK_URL "https://cedarlogic.netlify.app" CACHE STRING "Where Send Feedback sends to")
+	set(CL_FEEDBACK_KEY "96611596304230a4c3c21e22b1b3e523" CACHE STRING "Sent with feedback so the site knows it's from the app")
+	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}"
+	                           CL_FEEDBACK_URL="${CL_FEEDBACK_URL}" CL_FEEDBACK_KEY="${CL_FEEDBACK_KEY}")
 	if(MSVC)
 		# The manifest is in the resources (res/CedarLogic.manifest).
 		target_link_options(CedarLogic PRIVATE /MANIFEST:NO)

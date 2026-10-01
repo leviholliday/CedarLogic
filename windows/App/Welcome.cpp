@@ -5,6 +5,7 @@
 
 #include "Welcome.h"
 #include "Chrome.h"
+#include "Commands.h"
 #include "Window.h"
 
 #include <dwmapi.h>
@@ -392,6 +393,7 @@ void finish(bool tourNow) {
 	if (w == nullptr) return;
 	g_welcome = nullptr;
 	prefs().hasSeenWelcome = true;
+	prefs().seenWhatsNew = whatsnew::kVersion;   // new to it all: nothing to catch up on
 	prefs().save();
 	CircuitWindow* window = w->window;
 	HWND owner = window && std::find(circuitWindows().begin(), circuitWindows().end(), window) != circuitWindows().end()
@@ -633,3 +635,238 @@ void startTour(CircuitWindow* window) {
 }
 
 }  // namespace welcome
+
+// ---- What's New ------------------------------------------------------------------
+
+namespace whatsnew {
+
+const char* const kVersion = "native-1";
+
+namespace {
+
+struct Point { wchar_t icon; const char* title; const char* line; };
+struct Chapter {
+	const char* eyebrow; const char* title; const char* line;
+	Point points[3];
+	const char* tryTitle;
+	int tryCommand;
+};
+
+const Chapter kChapters[] = {
+	{ "Your circuits", "Everything in one place",
+	  "Every circuit lives in Your Circuits and saves itself as you go. No files to lose.",
+	  { { 0xE8B7, "Your Circuits (Ctrl+O)", "Open, rename, delete. A new circuit joins as soon as there's something on it." },
+	    { 0xE8C8, "Files come in as copies", "Open a .cdl from anywhere and you work on a copy; Export gets one out." },
+	    { 0xE81C, "Versions that mean something", "Ctrl+S keeps a version. Version History has every one, with a picture." } },
+	  "Open Your Circuits", CMD_OPEN },
+	{ "Start ahead", "Templates and your own parts", "Stop rebuilding the same thing every lab.",
+	  { { 0xE8A5, "New from Template", "A Lab Page with your name on it, a 4-bit counter, a 7-segment starter, or your own." },
+	    { 0xE7B8, "My Parts", "Select some gates, Save as Part, name it. Drag it from the side panel or find it with A." },
+	    { 0xE713, "Save your own templates", "Any circuit can be a template for the next one." } },
+	  "Browse Templates", CMD_NEW_TEMPLATE },
+	{ "Check your work", "Truth tables that do the algebra", "Press T, and CedarLogic hands you the simplest answer too.",
+	  { { 0xE80A, "Karnaugh maps and formulas", "The truth table has tabs: the table, a K-map for each light, and the simplest SOP and POS." },
+	    { 0xE943, "Build from a Formula", "Type F = AB + C' (or Σm(1,3,5)) and get the gates, wired and labelled." },
+	    { 0xE721, "Find (Ctrl+F)", "Labels, TO/FROM names and parts on every page, one Enter away." } },
+	  "Build from a Formula", CMD_BUILD_FORMULA },
+	{ "See it think", "Watch the signals", "The circuit shows you what it's doing, and your report shows it too.",
+	  { { 0xE9D9, "A new oscilloscope (Ctrl+G)", "A time cursor reads every signal at once. Copy it as a timing diagram for a lab report." },
+	    { 0xEB9F, "Export as Image (Ctrl+E)", "With your name and whether the circuit works under it, in colour or black and white." },
+	    { 0xE768, "Simulation View (Ctrl+R)", "Lit wires with the signal marching along them." } },
+	  nullptr, 0 },
+	{ "Made for Windows", "Native, and nothing else to install", "Rebuilt from the ground up on Windows' own parts.",
+	  { { 0xE7C4, "Light on its feet", "Plain Windows and Direct2D on the CedarLogic engine. It opens fast and stays fast." },
+	    { 0xE8AB, "Ctrl+Tab between tabs", "Tap it for the last tab; hold Ctrl for a picture of each." },
+	    { 0xED15, "Send Feedback", "Help ▸ Send Feedback sends a note and screenshots straight to the developer." } },
+	  nullptr, 0 },
+};
+const int kChapterCount = (int)(sizeof kChapters / sizeof kChapters[0]);
+const int kPages = kChapterCount + 2;
+
+struct WhatsNew {
+	Panel panel;
+	CircuitWindow* window = nullptr;
+	int page = 0;
+	int hot = -1;   // 0 skip, 1 back, 2 next, 3 try, 10+ an intro line, 20+ a finale tile
+	D2D1_RECT_F skip{}, back{}, next{}, tryIt{};
+	std::vector<D2D1_RECT_F> lines, tiles;
+};
+WhatsNew* g_new = nullptr;
+
+void close(int command) {
+	WhatsNew* w = g_new;
+	if (w == nullptr) return;
+	g_new = nullptr;
+	CircuitWindow* window = w->window;
+	HWND owner = window && std::find(circuitWindows().begin(), circuitWindows().end(), window) != circuitWindows().end()
+	             ? window->window() : nullptr;
+	if (owner) EnableWindow(owner, TRUE);
+	w->panel.destroy();
+	delete w;
+	if (owner) {
+		SetForegroundWindow(owner);
+		if (command == CMD_TOUR) welcome::startTour(window);
+		else if (command) PostMessageW(owner, WM_COMMAND, command, 0);
+	}
+}
+
+void paint(ID2D1RenderTarget* rt, float w, float h) {
+	WhatsNew* wn = g_new;
+	if (wn == nullptr) return;
+	drawGround(rt, w, h, 70);
+	strokeRound(rt, D2D1::RectF(0, 0, w, h), 8, withAlpha(kNeon, 0.18f), 1.2f);
+	const float pad = 48;
+	wn->lines.clear();
+	wn->tiles.clear();
+	if (wn->page == 0) {
+		const float tw = 400;
+		drawText(rt, "WHAT'S NEW", D2D1::RectF(pad, 44, pad + tw, 60), 11, kNeon, TextAlign::Leading, true);
+		drawWrapped(rt, "CedarLogic for Windows", D2D1::RectF(pad, 64, pad + tw, 110), 32, kSilver, true);
+		drawWrapped(rt, "A native Windows app now, with a lot more inside. Here's everything that's new since the old one, a minute's read.",
+		            D2D1::RectF(pad, 112, pad + tw, 170), 14, kDim);
+		float y = 186;
+		for (int i = 0; i < kChapterCount; i++) {
+			const D2D1_RECT_F r = D2D1::RectF(pad - 8, y - 4, pad + tw, y + 24);
+			wn->lines.push_back(r);
+			if (wn->hot == 10 + i) fillRound(rt, r, 8, D2D1::ColorF(1, 1, 1, 0.06f));
+			drawIcon(rt, kChapters[i].points[0].icon, D2D1::RectF(pad, y, pad + 18, y + 20), 12, kNeon);
+			drawText(rt, kChapters[i].title, D2D1::RectF(pad + 28, y + 1, pad + tw, y + 20), 13, kSilver, TextAlign::Leading, true);
+			const float tx = pad + 28 + textWidth(kChapters[i].title, 13, true) + 10;
+			drawText(rt, kChapters[i].eyebrow, D2D1::RectF(tx, y + 3, pad + tw, y + 20), 11, withAlpha(kDim, 0.8f));
+			y += 32;
+		}
+		drawMark(rt, w - 190, 230, 0.95f, 1.0f);
+	} else if (wn->page <= kChapterCount) {
+		const Chapter& c = kChapters[wn->page - 1];
+		const float cw = 440;
+		float y = heading(rt, pad, 36, cw, c.eyebrow, c.title, c.line);
+		for (const Point& p : c.points) {
+			const D2D1_RECT_F r = D2D1::RectF(pad, y, pad + cw, y + 62);
+			card(rt, r, false);
+			drawIcon(rt, p.icon, D2D1::RectF(r.left + 12, r.top + 12, r.left + 36, r.top + 34), 15, kNeon);
+			drawText(rt, p.title, D2D1::RectF(r.left + 48, r.top + 10, r.right - 12, r.top + 28), 13, kSilver, TextAlign::Leading, true);
+			drawWrapped(rt, p.line, D2D1::RectF(r.left + 48, r.top + 29, r.right - 12, r.bottom - 4), 11.5f, kDim);
+			y += 72;
+		}
+		wn->tryIt = c.tryTitle ? D2D1::RectF(pad, y + 4, pad + textWidth(c.tryTitle, 13, true) + 44, y + 40) : D2D1::RectF(0, 0, 0, 0);
+		if (c.tryTitle) pill(rt, wn->tryIt, c.tryTitle, false, wn->hot == 3);
+		// Beside it, the theme's icon, large, in a glow.
+		const float cx = (pad + cw + w) / 2, cy = 220;
+		D2D1_GRADIENT_STOP g[2] = { { 0, withAlpha(kNeon, 0.22f) }, { 1, withAlpha(kNeon, 0) } };
+		ID2D1GradientStopCollection* gs = nullptr;
+		if (SUCCEEDED(rt->CreateGradientStopCollection(g, 2, &gs))) {
+			ID2D1RadialGradientBrush* rb = nullptr;
+			if (SUCCEEDED(rt->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(D2D1::Point2F(cx, cy), D2D1::Point2F(0, 0), 130, 130), gs, &rb))) {
+				rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 130, 130), rb);
+				rb->Release();
+			}
+			gs->Release();
+		}
+		card(rt, D2D1::RectF(cx - 70, cy - 70, cx + 70, cy + 70), true);
+		drawIcon(rt, c.points[0].icon, D2D1::RectF(cx - 70, cy - 70, cx + 70, cy + 70), 64, kNeon);
+	} else {
+		float y = heading(rt, pad, 36, w - 2 * pad, "That's the tour", "Go build something", "Everything here is in Help too, whenever you want it.");
+		struct Tile { const char* title; const char* line; wchar_t icon; };
+		const Tile tiles[] = {
+			{ "Take the guided tour", "Two switches, a gate and a light: around the app in a minute.", 0xE7C1 },
+			{ "Start from a template", "The Lab Page has your name on it already.", 0xE8A5 },
+			{ "Send feedback", "What's working, what's broken, what you'd love to see.", 0xED15 },
+		};
+		for (int i = 0; i < 3; i++) {
+			const D2D1_RECT_F r = D2D1::RectF(pad, y, w - pad, y + 66);
+			wn->tiles.push_back(r);
+			card(rt, r, wn->hot == 20 + i);
+			drawIcon(rt, tiles[i].icon, D2D1::RectF(r.left + 16, r.top, r.left + 50, r.bottom), 18, kNeon);
+			drawText(rt, tiles[i].title, D2D1::RectF(r.left + 64, r.top + 14, r.right - 40, r.top + 34), 13.5f, kSilver, TextAlign::Leading, true);
+			drawText(rt, tiles[i].line, D2D1::RectF(r.left + 64, r.top + 35, r.right - 40, r.bottom - 6), 11.5f, kDim);
+			drawIcon(rt, 0xE72A, D2D1::RectF(r.right - 40, r.top, r.right - 12, r.bottom), 12, withAlpha(kDim, 0.8f));   // arrow
+			y += 78;
+		}
+	}
+
+	// Along the bottom: the page dots, Skip, Back, Next.
+	const float by = h - 62;
+	fillRect(rt, D2D1::RectF(0, by - 14, w, by - 13), D2D1::ColorF(1, 1, 1, 0.06f));
+	for (int i = 0; i < kPages; i++) {
+		const float x = pad + i * 16 + (i > wn->page ? 14 : 0);
+		if (i == wn->page) fillRound(rt, D2D1::RectF(x, by + 14, x + 22, by + 22), 4, kNeon);
+		else fillCircle(rt, D2D1::Point2F(x + 4, by + 18), 4, D2D1::ColorF(1, 1, 1, 0.18f));
+	}
+	const bool last = wn->page == kPages - 1;
+	wn->next = D2D1::RectF(w - pad - (last ? 150 : 130), by, w - pad, by + 36);
+	wn->back = D2D1::RectF(wn->next.left - 100, by, wn->next.left - 12, by + 36);
+	wn->skip = D2D1::RectF(wn->back.left - 80, by, wn->back.left - 12, by + 36);
+	if (!last) drawText(rt, "Skip", wn->skip, 13, withAlpha(kDim, wn->hot == 0 ? 1.0f : 0.75f), TextAlign::Center);
+	if (wn->page > 0) pill(rt, wn->back, "Back", false, wn->hot == 1);
+	pill(rt, wn->next, wn->page == 0 ? "Show Me" : last ? "Start Building" : "Next", true, wn->hot == 2);
+}
+
+int hitAt(float x, float y) {
+	WhatsNew* w = g_new;
+	if (w == nullptr) return -1;
+	const bool last = w->page == kPages - 1;
+	if (!last && inRect(w->skip, x, y)) return 0;
+	if (w->page > 0 && inRect(w->back, x, y)) return 1;
+	if (inRect(w->next, x, y)) return 2;
+	if (w->page >= 1 && w->page <= kChapterCount && kChapters[w->page - 1].tryTitle && inRect(w->tryIt, x, y)) return 3;
+	for (size_t i = 0; i < w->lines.size(); i++) if (inRect(w->lines[i], x, y)) return 10 + (int)i;
+	for (size_t i = 0; i < w->tiles.size(); i++) if (inRect(w->tiles[i], x, y)) return 20 + (int)i;
+	return -1;
+}
+
+void go(int delta) {
+	WhatsNew* w = g_new;
+	if (w == nullptr) return;
+	if (w->page + delta > kPages - 1) { close(0); return; }
+	w->page = std::max(0, w->page + delta);
+	w->hot = -1;
+	w->panel.redraw();
+}
+
+}  // namespace
+
+void show(CircuitWindow* window, int page) {
+	if (window == nullptr) return;
+	if (g_new) { SetForegroundWindow(g_new->panel.hwnd); return; }
+	prefs().seenWhatsNew = kVersion;
+	prefs().save();
+	g_new = new WhatsNew();
+	g_new->window = window;
+	g_new->page = std::max(0, std::min(kPages - 1, page));
+	Panel& p = g_new->panel;
+	p.paint = paint;
+	p.hover = [](float x, float y) {
+		const int h = hitAt(x, y);
+		if (g_new && h != g_new->hot) { g_new->hot = h; g_new->panel.redraw(); }
+	};
+	p.click = [](float x, float y) {
+		const int h = hitAt(x, y);
+		if (h == 0) close(0);
+		else if (h == 1) go(-1);
+		else if (h == 2) go(1);
+		else if (h == 3) close(kChapters[g_new->page - 1].tryCommand);
+		else if (h >= 10 && h < 20) go(h - 10 + 1 - g_new->page);
+		else if (h == 20) close(CMD_TOUR);
+		else if (h == 21) close(CMD_NEW_TEMPLATE);
+		else if (h == 22) close(CMD_FEEDBACK);
+	};
+	p.key = [](UINT vk) {
+		if (vk == VK_ESCAPE) close(0);
+		else if (vk == VK_RETURN || vk == VK_RIGHT) go(1);
+		else if (vk == VK_LEFT) go(-1);
+	};
+	const RECT r = centeredOn(window->window(), 780, 560);
+	p.create(window->window(), WS_POPUP, 0, r.right - r.left, r.bottom - r.top, r.left, r.top);
+	EnableWindow(window->window(), FALSE);
+	ShowWindow(p.hwnd, SW_SHOWNORMAL);
+	SetForegroundWindow(p.hwnd);
+	SetFocus(p.hwnd);
+}
+
+bool offer(CircuitWindow* window) {
+	if (!prefs().hasSeenWelcome || prefs().seenWhatsNew == kVersion || window == nullptr) return false;
+	show(window);
+	return true;
+}
+
+}  // namespace whatsnew

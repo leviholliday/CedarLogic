@@ -4,6 +4,8 @@
 
 #include "App.h"
 #include "Canvas.h"
+#include "Dialogs.h"
+#include "Feedback.h"
 #include "Library.h"
 #include "Recovery.h"
 #include "Updater.h"
@@ -25,11 +27,16 @@ int gExitCode = 0;
 // For the screenshot runs: --dark or --light for this run, --sim-view on.
 int gTheme = -1;
 bool gSimView = false;
-// --dialog <preferences|shortcuts|truth-table|add-gate>: open it, and the
+// --dialog <preferences|shortcuts|truth-table|add-gate|scope|...>: open it, and the
 // screenshot is of it.
 int gDialog = 0;
 std::string gFormula;   // --formula: what Build from Formula opens with
 int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
+// --timing <out.png> (with --dialog scope): the oscilloscope's timing
+// diagram too; --timing-color for it in color.
+std::string gTiming;
+bool gTimingColor = false;
+int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -48,6 +55,10 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
 	if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
 	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
+	if (!gTiming.empty()) {
+		const bool ok = w && w->scopeWindow() && w->scopeWindow()->saveTimingDiagram(gTiming);
+		writeOut(strf("%s %s\n", ok ? "wrote" : "couldn't write", gTiming.c_str()));
+	}
 	// A dialog is still open (its own loop is running): just stop.
 	if (gDialog) { prefs().save(); ExitProcess((UINT)gExitCode); }
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
@@ -227,19 +238,29 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	std::vector<std::string> files;
 	for (int i = 1; i < argc; i++) {
 		const std::string a = U(argv[i]);
+		if (a == "--feedback-probe") {
+			const int status = feedback::probe();
+			writeOut(strf("feedback server: %s (%d)\n", status == 403 ? "reachable, key checked" : status ? "answered" : "unreachable", status));
+			return status == 403 ? 0 : 1;
+		}
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
 		if (a == "--formula" && i + 1 < argc) { gFormula = U(argv[++i]); continue; }
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
+		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
+		if (a == "--timing-color") { gTimingColor = true; continue; }
+		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
 			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE
 			        : d == "library" ? CMD_OPEN : d == "versions" ? CMD_VERSIONS : d == "templates" ? CMD_NEW_TEMPLATE
-			        : d == "formula" ? CMD_BUILD_FORMULA
-			        : d == "welcome" ? -1 : 0;
+			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
+			        : d == "export" ? CMD_EXPORT_IMAGE
+			        : d == "feedback" ? CMD_FEEDBACK
+			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : 0;
 			continue;
 		}
 		files.push_back(a);
@@ -250,6 +271,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
+	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
 	if (gScreenshot.empty()) splash::show();
@@ -281,17 +303,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (circuitWindows().empty()) newCircuitWindow();
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
-	if (gDialog < 0 && !circuitWindows().empty()) {
+	if (gDialog == -1 && !circuitWindows().empty()) {
 		prefs().hasSeenWelcome = false;
 		welcome::offer(circuitWindows().back());
 	}
+	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.
 		splash::hideSoon([] {
 			for (CircuitWindow* w : circuitWindows()) w->present();
-			if (!welcome::offer(circuitWindows().empty() ? nullptr : circuitWindows().front()))
+			CircuitWindow* front = circuitWindows().empty() ? nullptr : circuitWindows().front();
+			if (!welcome::offer(front) && !whatsnew::offer(front))
 				SetTimer(nullptr, 0, 300, recoveryTimer);
 			updater::start();
 		});

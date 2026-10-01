@@ -116,6 +116,16 @@ jobs:
           timeout 90 "$A" --dialog templates --screenshot "$PWD/renders/templates.png" || true
           timeout 90 "$A" --dark --dialog templates --screenshot "$PWD/renders/templates-dark.png" || true
           timeout 90 "$A" --formula "S = A xor B xor Cin; Cout = AB + Cin(A ^ B)" --dialog formula --screenshot "$PWD/renders/build-formula.png" || true
+          timeout 90 "$A" --dialog scope --timing "$PWD/renders/timing.png" --screenshot "$PWD/renders/scope.png" format/tests/fixtures/lab6.cdl || true
+          timeout 90 "$A" --dark --dialog scope --timing "$PWD/renders/timing-color.png" --timing-color --screenshot "$PWD/renders/scope-dark.png" res/samples/practice.cdl || true
+          timeout 60 "$A" --feedback-probe || echo "::warning::the feedback probe failed"
+          timeout 90 "$A" --dialog feedback --screenshot "$PWD/renders/feedback.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog feedback --screenshot "$PWD/renders/feedback-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog whatsnew --screenshot "$PWD/renders/whatsnew-0.png" || true
+          timeout 90 "$A" --dialog whatsnew --page 3 --screenshot "$PWD/renders/whatsnew-3.png" || true
+          timeout 90 "$A" --dialog whatsnew --page 6 --screenshot "$PWD/renders/whatsnew-6.png" || true
+          timeout 90 "$A" --dialog export --screenshot "$PWD/renders/export-image.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --dark --dialog export --screenshot "$PWD/renders/export-image-dark.png" res/samples/practice.cdl || true
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 

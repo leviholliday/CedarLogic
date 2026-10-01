@@ -72,6 +72,18 @@ struct Prefs {
 	int buildShape = 0, buildStyle = 0;
 	bool buildTwoInput = false, buildNewPage = true;
 	int truthTab = 0;                             // the truth table's tab, as last left
+	// Timing diagrams (the oscilloscope's share menu).
+	bool timingWhole = false, timingInColor = false;
+	// Export as Image's last choices.
+	bool exportGrid = false, exportColor = true, exportInfo = false, exportWorks = true;
+	int exportScale = 4;                          // 2, 4 or 6 pixels a point
+	std::string exportProblem;                    // "does not work because…"
+	// Send Feedback's draft, kept until it's sent.
+	std::string feedbackTitle, feedbackDetails, feedbackTags, feedbackEmail;   // tags: comma separated
+	int feedbackPriority = 1;                     // low, normal, high, blocking
+	bool feedbackContact = true;
+	bool confirmQuit = true;                      // Ctrl+Q asks first
+	std::string seenWhatsNew;                     // the version What's New was last shown for
 
 	double wireScale() const;
 	void load();

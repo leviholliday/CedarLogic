@@ -215,6 +215,10 @@ private:
 	GatePalette* palette = nullptr;
 	MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
+public:
+	ScopeWindow* scopeWindow() const { return scope; }
+	std::string pageName(int page) const;
+private:
 	std::vector<Canvas*> canvases;    // in tab order
 	int current = 0;                  // the tab in front
 	bool splitterDrag = false;
@@ -260,7 +264,6 @@ private:
 	void floatSelection(double wx, double wy);
 	void pasteText(const std::string& text, bool floating, bool shift);
 	std::string displayName() const;
-	std::string pageName(int page) const;
 	void rebuildRecentMenu();
 	LRESULT frameHitTest(LPARAM lp);
 	void renameFile();

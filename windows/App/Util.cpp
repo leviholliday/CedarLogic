@@ -219,6 +219,23 @@ void Prefs::load() {
 	buildTwoInput = r.b("buildTwoInput", buildTwoInput);
 	buildNewPage = r.b("buildNewPage", buildNewPage);
 	truthTab = r.i("truthTab", truthTab, 0, 2);
+	timingWhole = r.b("timingWhole", timingWhole);
+	timingInColor = r.b("timingInColor", timingInColor);
+	exportGrid = r.b("exportGrid", exportGrid);
+	exportColor = r.b("exportColor", exportColor);
+	exportInfo = r.b("exportInfo", exportInfo);
+	exportWorks = r.b("exportWorks", exportWorks);
+	exportScale = r.i("exportScale", exportScale, 2, 6);
+	exportProblem = r.s("exportProblem", exportProblem);
+	feedbackTitle = r.s("feedbackTitle", feedbackTitle);
+	feedbackDetails = r.s("feedbackDetails", feedbackDetails);
+	for (char& c : feedbackDetails) if (c == '\x1F') c = '\n';
+	feedbackTags = r.s("feedbackTags", feedbackTags);
+	feedbackEmail = r.s("feedbackEmail", feedbackEmail);
+	feedbackPriority = r.i("feedbackPriority", feedbackPriority, 0, 3);
+	feedbackContact = r.b("feedbackContact", feedbackContact);
+	seenWhatsNew = r.s("seenWhatsNew", seenWhatsNew);
+	confirmQuit = r.b("confirmQuit", confirmQuit);
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
 		const std::string v = r.s(strf("recent%d", i).c_str(), "");
@@ -274,6 +291,26 @@ void Prefs::save() const {
 	o << "buildTwoInput=" << b(buildTwoInput) << "\n";
 	o << "buildNewPage=" << b(buildNewPage) << "\n";
 	o << "truthTab=" << truthTab << "\n";
+	o << "timingWhole=" << b(timingWhole) << "\n";
+	o << "timingInColor=" << b(timingInColor) << "\n";
+	o << "exportGrid=" << b(exportGrid) << "\n";
+	o << "exportColor=" << b(exportColor) << "\n";
+	o << "exportInfo=" << b(exportInfo) << "\n";
+	o << "exportWorks=" << b(exportWorks) << "\n";
+	o << "exportScale=" << exportScale << "\n";
+	o << "exportProblem=" << exportProblem << "\n";
+	o << "feedbackTitle=" << feedbackTitle << "\n";
+	{
+		std::string one;
+		for (char c : feedbackDetails) if (c != '\r') one += c == '\n' ? '\x1F' : c;
+		o << "feedbackDetails=" << one << "\n";
+	}
+	o << "feedbackTags=" << feedbackTags << "\n";
+	o << "feedbackEmail=" << feedbackEmail << "\n";
+	o << "feedbackPriority=" << feedbackPriority << "\n";
+	o << "feedbackContact=" << b(feedbackContact) << "\n";
+	o << "seenWhatsNew=" << seenWhatsNew << "\n";
+	o << "confirmQuit=" << b(confirmQuit) << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	const std::string text = o.str();
 	// A temporary beside it, then moved over: a crash mid-write can't leave
