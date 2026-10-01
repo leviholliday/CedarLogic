@@ -105,6 +105,41 @@ void drawNewTabIcon(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, const D2D1_CO
 	b->Release();
 }
 
+void drawFolderIcon(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, const D2D1_COLOR_F& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	ID2D1Factory* f = nullptr;
+	rt->GetFactory(&f);
+	ID2D1PathGeometry* g = nullptr;
+	ID2D1SolidColorBrush* b = nullptr;
+	if (f && SUCCEEDED(f->CreatePathGeometry(&g)) && SUCCEEDED(rt->CreateSolidColorBrush(color, &b))) {
+		ID2D1GeometrySink* sink = nullptr;
+		if (SUCCEEDED(g->Open(&sink))) {
+			// The tab on the top left, then down and round the body.
+			const float l = cx - 7.5f, r = cx + 7.5f, t = cy - 5.5f, bot = cy + 5.5f;
+			sink->BeginFigure(D2D1::Point2F(l, bot - 1), D2D1_FIGURE_BEGIN_HOLLOW);
+			sink->AddLine(D2D1::Point2F(l, t + 1));
+			sink->AddLine(D2D1::Point2F(l + 1, t));
+			sink->AddLine(D2D1::Point2F(l + 5, t));
+			sink->AddLine(D2D1::Point2F(l + 6.5f, t + 2));
+			sink->AddLine(D2D1::Point2F(r - 1, t + 2));
+			sink->AddLine(D2D1::Point2F(r, t + 3));
+			sink->AddLine(D2D1::Point2F(r, bot - 1));
+			sink->AddLine(D2D1::Point2F(r - 1, bot));
+			sink->AddLine(D2D1::Point2F(l + 1, bot));
+			sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+			sink->BeginFigure(D2D1::Point2F(l, t + 4), D2D1_FIGURE_BEGIN_HOLLOW);
+			sink->AddLine(D2D1::Point2F(r, t + 4));
+			sink->EndFigure(D2D1_FIGURE_END_OPEN);
+			sink->Close();
+			sink->Release();
+			rt->DrawGeometry(g, b, 1.1f);
+		}
+	}
+	if (b) b->Release();
+	if (g) g->Release();
+	if (f) f->Release();
+}
+
 void fillRound(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, float radius, const D2D1_COLOR_F& c) {
 	if (c.a <= 0) return;
 	if (ID2D1SolidColorBrush* b = brushFor(rt, c)) {

@@ -59,6 +59,7 @@ struct Prefs {
 	bool showStatus = false;      // the old status bar (notes show on the canvas instead)
 	bool showGateNames = true;
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
+	bool hasSeenWelcome = false;
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units
 	bool windowMaximized = false;
 	int paletteWidth = 210;                       // in 96-dpi units

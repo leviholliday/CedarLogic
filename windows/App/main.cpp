@@ -6,6 +6,7 @@
 #include "Canvas.h"
 #include "Recovery.h"
 #include "Updater.h"
+#include "Welcome.h"
 #include "Window.h"
 
 #include <objbase.h>
@@ -217,7 +218,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
-			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE : 0;
+			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE
+			        : d == "welcome" ? -1 : 0;
 			continue;
 		}
 		files.push_back(a);
@@ -227,8 +229,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	prefs().load();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
+	// Not for --screenshot: CI wants one deterministic frame.
+	if (gScreenshot.empty()) splash::show();
+	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
+		splash::hideSoon(nullptr);
 		showMessage(nullptr, Tone::Error, "CedarLogic can't find its gate library",
 		            "cl_gatedefs.xml wasn't found in the res folder next to CedarLogic.exe. Reinstall CedarLogic, or "
 		            "set CEDARLOGIC_RESOURCES to the folder that has it.");
@@ -236,16 +242,27 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	prefs().applyWireDots();
 	registerWindowClasses();
+	splash::setStatus("Opening the workspace\u2026");
 
 	bool any = false;
 	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
 	if (!any && circuitWindows().empty()) newCircuitWindow();
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
-	if (gDialog && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
+	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
+	if (gDialog < 0 && !circuitWindows().empty()) {
+		prefs().hasSeenWelcome = false;
+		welcome::offer(circuitWindows().back());
+	}
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else {
-		SetTimer(nullptr, 0, 300, recoveryTimer);
-		updater::start();
+		// Once the launch screen goes: the windows, then the welcome the
+		// first time, or work a CedarLogic that stopped unexpectedly left.
+		splash::hideSoon([] {
+			for (CircuitWindow* w : circuitWindows()) w->present();
+			if (!welcome::offer(circuitWindows().empty() ? nullptr : circuitWindows().front()))
+				SetTimer(nullptr, 0, 300, recoveryTimer);
+			updater::start();
+		});
 	}
 
 	MSG msg;

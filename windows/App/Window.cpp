@@ -8,6 +8,7 @@
 #include "TabStrip.h"
 #include "Toolbar.h"
 #include "Updater.h"
+#include "Welcome.h"
 #include "Chrome.h"
 
 #include <commdlg.h>
@@ -78,9 +79,28 @@ CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path
 	updateRunUI();
 	updateBanner();
 	layout();
+	// While the launch screen is up, windows wait for it.
+	if (!splash::active()) present();
+}
+
+void CircuitWindow::present() {
+	if (IsWindowVisible(hwnd)) return;
 	ShowWindow(hwnd, prefs().windowMaximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 	UpdateWindow(hwnd);
+	appearStart = nowSeconds();
 	if (Canvas* c = currentCanvas()) c->focus();
+}
+
+RECT CircuitWindow::tourAnchor(int which) const {
+	RECT r = { 0, 0, 0, 0 };
+	switch (which) {
+	case 0: if (paletteHost && IsWindowVisible(paletteHost)) { GetWindowRect(paletteHost, &r); return r; } break;
+	case 2: if (toolbar) return toolbar->commandRect(CMD_RUNNING); break;
+	case 3: if (tabStrip) { GetWindowRect(tabStrip->widget(), &r); return r; } break;
+	default: break;
+	}
+	if (Canvas* c = currentCanvas()) GetWindowRect(c->widget(), &r);
+	return r;
 }
 
 CircuitWindow::~CircuitWindow() {
@@ -215,6 +235,7 @@ void CircuitWindow::buildMenus() {
 
 	HMENU help = submenu(menuBar, "&Help");
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
+	item(help, CMD_TOUR, "Guided &Tour");
 	item(help, CMD_HELP, "CedarLogic &Help\tF1");
 	separator(help);
 	item(help, CMD_CHECK_UPDATES, "Check for &Updates\u2026");
@@ -1025,6 +1046,7 @@ void CircuitWindow::run(int command) {
 		break;
 	}
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
+	case CMD_TOUR: welcome::startTour(this); break;
 	case CMD_ABOUT:
 		showMessage(hwnd, Tone::Info, "CedarLogic " CL_VERSION " (native Windows, testing)",
 		            "A digital logic simulator, from Cedarville University.\n\n"

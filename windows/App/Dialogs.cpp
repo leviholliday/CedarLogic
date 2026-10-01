@@ -86,6 +86,23 @@ LRESULT CALLBACK arrowsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DW
 	return DefSubclassProc(h, msg, wp, lp);
 }
 
+// A list's column titles in light text, in dark mode (the dark header theme
+// leaves them dark grey).
+LRESULT CALLBACK darkHeaderProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+	if (msg == WM_NOTIFY) {
+		NMHDR* n = reinterpret_cast<NMHDR*>(lp);
+		if (n->code == NM_CUSTOMDRAW && n->hwndFrom == (HWND)SendMessageW(h, LVM_GETHEADER, 0, 0)) {
+			NMCUSTOMDRAW* cd = reinterpret_cast<NMCUSTOMDRAW*>(lp);
+			if (cd->dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+			if (cd->dwDrawStage == CDDS_ITEMPREPAINT) {
+				SetTextColor(cd->hdc, RGB(200, 206, 216));
+				return CDRF_DODEFAULT;
+			}
+		}
+	}
+	return DefSubclassProc(h, msg, wp, lp);
+}
+
 INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	Form* f = reinterpret_cast<Form*>(GetWindowLongPtrW(d, DWLP_USER));
 	if (msg == WM_INITDIALOG) {
@@ -358,6 +375,7 @@ void Form::build() {
 			case FormField::List:
 				darkenControl(f.hwnd, true, L"ItemsView");
 				if (HWND header = (HWND)SendMessageW(f.hwnd, LVM_GETHEADER, 0, 0)) darkenControl(header, true, L"ItemsView");
+				SetWindowSubclass(f.hwnd, darkHeaderProc, 2, 0);
 				SendMessageW(f.hwnd, LVM_SETBKCOLOR, 0, c.field);
 				SendMessageW(f.hwnd, LVM_SETTEXTBKCOLOR, 0, c.field);
 				SendMessageW(f.hwnd, LVM_SETTEXTCOLOR, 0, c.text);

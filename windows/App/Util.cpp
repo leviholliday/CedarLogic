@@ -204,6 +204,7 @@ void Prefs::load() {
 	showStatus = r.b("statusBar", showStatus);
 	showGateNames = r.b("showGateNames", showGateNames);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
+	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
 	windowHeight = r.i("windowHeight", windowHeight, 300, 20000);
 	windowMaximized = r.b("windowMaximized", windowMaximized);
@@ -246,6 +247,7 @@ void Prefs::save() const {
 	o << "statusBar=" << b(showStatus) << "\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
+	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
 	o << "windowHeight=" << windowHeight << "\n";
 	o << "windowMaximized=" << b(windowMaximized) << "\n";

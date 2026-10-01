@@ -105,6 +105,7 @@ jobs:
           timeout 90 "$A" --light --dialog preferences --screenshot "$PWD/renders/dialog-preferences.png" || true
           timeout 90 "$A" --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
+          timeout 90 "$A" --dialog welcome --screenshot "$PWD/renders/welcome.png" || true
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 

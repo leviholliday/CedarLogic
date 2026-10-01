@@ -290,6 +290,7 @@ void Toolbar::paint(ID2D1RenderTarget* rt, float w, float h) {
 			else if (on) fg = accent;
 			if (it.command == CMD_NEW) drawNewDocIcon(rt, r, fg);
 			else if (it.command == CMD_NEW_TAB) drawNewTabIcon(rt, r, fg);
+			else if (it.command == CMD_OPEN) drawFolderIcon(rt, r, fg);
 			else drawIcon(rt, iconFor(it), r, colored && on ? 12 : 15, fg);
 			break;
 		}
@@ -314,6 +315,19 @@ RECT Toolbar::maximizeRect() const {
 		return r;
 	}
 	return RECT{ 0, 0, 0, 0 };
+}
+
+RECT Toolbar::commandRect(int command) const {
+	const double s = scale();
+	for (const Item& it : items) {
+		if (it.kind != Button || it.command != command) continue;
+		RECT r = { (LONG)(it.rect.left * s), (LONG)(it.rect.top * s), (LONG)(it.rect.right * s), (LONG)(it.rect.bottom * s) };
+		MapWindowPoints(hwnd, nullptr, (POINT*)&r, 2);
+		return r;
+	}
+	RECT r;
+	GetWindowRect(hwnd, &r);
+	return r;
 }
 
 void Toolbar::setMaximizeHot(bool isHot, bool isPressed) {

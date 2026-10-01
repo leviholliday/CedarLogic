@@ -147,6 +147,12 @@ public:
 	void moveTab(int from, int to);
 	void tabContextMenu(int index, POINT screen);
 
+	// For the guided tour: 0 the palette, 1 the canvas, 2 Run, 3 the tabs
+	// (screen pixels).
+	RECT tourAnchor(int which) const;
+	// Show it (after the launch screen).
+	void present();
+
 	// ---- For the canvas's overlays ----
 	// A short note shown over the bottom of the canvas, fading after a while.
 	bool toast(std::string& text, double& alpha) const;

@@ -27,6 +27,8 @@ public:
 	RECT maximizeRect() const;
 	void setMaximizeHot(bool hot, bool pressed);
 	void layoutNow() { relayout = true; redraw(); }
+	// Where a command's button is, on the screen (the guided tour points at it).
+	RECT commandRect(int command) const;
 
 protected:
 	void paint(ID2D1RenderTarget* rt, float w, float h) override;

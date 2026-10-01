@@ -41,6 +41,9 @@ void drawIcon(ID2D1RenderTarget* rt, wchar_t glyph, const D2D1_RECT_F& box, floa
 // (New circuit), and a square with a plus over another (New tab).
 void drawNewDocIcon(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, const D2D1_COLOR_F& color);
 void drawNewTabIcon(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, const D2D1_COLOR_F& color);
+// A folder (Open): Windows 10's icon font has no outline folder that reads
+// as one at this size.
+void drawFolderIcon(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, const D2D1_COLOR_F& color);
 
 // Shapes, filled and outlined.
 void fillRound(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, float radius, const D2D1_COLOR_F& c);
