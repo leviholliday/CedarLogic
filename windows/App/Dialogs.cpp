@@ -3,6 +3,7 @@
 #include "Dialogs.h"
 #include "Window.h"
 #include "Collections.h"
+#include "Formula.h"
 
 #include <uxtheme.h>
 
@@ -254,9 +255,20 @@ void Form::build() {
 				x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, margin,
 				                          y + sc(3), labelW, lineH, dialog, nullptr, appInstance(), nullptr);
 			const int browseW = x.browse ? sc(84) : 0;
-			x.hwnd = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", W(x.value).c_str(),
-			                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, ctrlX, y,
-			                         ctrlW - (browseW ? browseW + sc(6) : 0), rowH, dialog, id, appInstance(), nullptr);
+			// Several lines: a box to type them in (Enter starts a new one).
+			const bool multi = x.lines > 1;
+			const int boxH = multi ? x.lines * sc(20) + sc(8) : rowH;
+			std::string initial = x.value;
+			if (multi) {
+				std::string crlf;
+				for (char c : initial) { if (c == '\n') crlf += '\r'; crlf += c; }
+				initial = crlf;
+			}
+			x.hwnd = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", W(initial).c_str(),
+			                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL |
+			                             (multi ? ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL : 0),
+			                         ctrlX, y, ctrlW - (browseW ? browseW + sc(6) : 0), boxH, dialog, id, appInstance(), nullptr);
+			if (multi) y += boxH - rowH;
 			if (x.browse)
 				CreateWindowExW(0, L"BUTTON", L"Choose…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
 				                ctrlX + ctrlW - browseW, y, browseW, rowH, dialog, (HMENU)(INT_PTR)(kBrowseBase + (int)i),
@@ -358,7 +370,7 @@ void Form::build() {
 
 	setFontTree(dialog, font);
 	for (FormField& f : fields) {
-		if (f.kind == FormField::List && f.mono) SendMessageW(f.hwnd, WM_SETFONT, (WPARAM)monoFont(dpi), TRUE);
+		if ((f.kind == FormField::List || f.kind == FormField::Text) && f.mono) SendMessageW(f.hwnd, WM_SETFONT, (WPARAM)monoFont(dpi), TRUE);
 		if (f.kind == FormField::Text && f.arrowsMove >= 0 && f.arrowsMove < (int)fields.size())
 			SetWindowSubclass(f.hwnd, arrowsProc, 1, (DWORD_PTR)fields[f.arrowsMove].hwnd);
 	}
@@ -977,6 +989,80 @@ void showShortcutsWindow(HWND parent) {
 	const int l = f.add(list);
 	f.onInit = [&](Form& form) { form.setRows(l, rows); };
 	f.run(parent);
+}
+
+// ---- Build from Formula ---------------------------------------------------------------
+// Type a formula (or a list of minterms), see what it means as you type, and
+// build it as switches, gates and lights -- as written or simplified, with
+// any gates or only NAND or only NOR (BuildFormulaView.swift).
+
+void showBuildFormula(CircuitWindow* w) {
+	Prefs& pr = prefs();
+	Form f;
+	f.title = "Build from Formula";
+	f.width = 560;
+	f.okText = "Build";
+	FormField intro;
+	intro.kind = FormField::Note;
+	intro.label = "Switches for the variables, gates for the formula, and a light for each output, labelled and wired.";
+	f.add(intro);
+	FormField text;
+	text.kind = FormField::Text;
+	text.lines = 3;
+	text.mono = true;
+	text.value = pr.lastFormula;
+	const int t = f.add(text);
+	FormField help;
+	help.kind = FormField::Note;
+	help.lines = 2;
+	help.label = "One output per line. NOT: A' or ~A \u00B7 AND: AB, A\u00B7B or A*B \u00B7 OR: A + B \u00B7 XOR: A ^ B "
+	             "\u00B7 or minterms: F(A,B,C) = m(1,3,5) + d(7)";
+	f.add(help);
+	FormField preview;
+	preview.kind = FormField::Note;
+	preview.lines = 5;
+	const int pv = f.add(preview);
+	const int shape = f.add(choiceField("Build it", { "As written", "Simplest sum of products", "Simplest product of sums" }, pr.buildShape));
+	const int style = f.add(choiceField("With", { "Any gates", "NAND only", "NOR only" }, pr.buildStyle));
+	const int two = f.add(checkField("Only 2-input gates", pr.buildTwoInput));
+	const int where = f.add(choiceField("Put it", { "On a new page", "Beside this page's circuit" }, pr.buildNewPage ? 0 : 1));
+
+	formula::Parsed parsed;
+	auto update = [&](Form& form) {
+		std::string error;
+		const std::string src = form.text(t);
+		bool blank = true;
+		for (char c : src) if (!isspace((unsigned char)c)) blank = false;
+		if (blank) { form.setText(pv, ""); return; }
+		if (!formula::parse(src, parsed, error)) { form.setText(pv, "\u26A0  " + error); return; }
+		std::string s = parsed.variables.empty() ? "No variables" : strf("%d variable%s: ", (int)parsed.variables.size(),
+		                                                                   parsed.variables.size() == 1 ? "" : "s");
+		for (size_t i = 0; i < parsed.variables.size(); i++) s += (i ? ", " : "") + parsed.variables[i];
+		for (const formula::Function& fn : parsed.functions)
+			s += "\nSimplest:  " + fn.name + " = " + formula::simplest(true, (int)parsed.variables.size(), fn.values).text(parsed.variables);
+		const formula::Plan plan = formula::plan(parsed, (formula::Shape)form.choice(shape), (formula::Style)form.choice(style),
+		                                         form.checked(two));
+		s += "\n" + plan.summary();
+		form.setText(pv, s);
+	};
+	f.onInit = update;
+	f.onChange = [&](Form& form, int) { update(form); };
+	f.validate = [&](Form& form) -> std::string {
+		std::string error;
+		if (!formula::parse(form.text(t), parsed, error)) return error;
+		return std::string();
+	};
+	if (f.run(w->window()) != IDOK) return;
+	pr.lastFormula = f.fields[t].value;
+	pr.buildShape = atoi(f.fields[shape].value.c_str());
+	pr.buildStyle = atoi(f.fields[style].value.c_str());
+	pr.buildTwoInput = !f.fields[two].value.empty();
+	pr.buildNewPage = atoi(f.fields[where].value.c_str()) == 0;
+	pr.save();
+	const formula::Plan plan = formula::plan(parsed, (formula::Shape)pr.buildShape, (formula::Style)pr.buildStyle, pr.buildTwoInput);
+	std::string name;
+	for (size_t i = 0; i < parsed.functions.size(); i++) name += (i ? ", " : "") + parsed.functions[i].name;
+	if (!w->buildPlan(plan, pr.buildNewPage, name)) MessageBeep(MB_ICONWARNING);
 }
 
 // ---- Export style ------------------------------------------------------------------

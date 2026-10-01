@@ -211,6 +211,7 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_TIDY_FLOW, "Tidy Up by Signal &Flow");
 	item(edit, CMD_CONNECT_NEARBY, "Connect &Nearby Pins");
 	item(edit, CMD_SAVE_PART, "Save as &Part\u2026");
+	item(edit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
 	separator(edit);
 	item(edit, CMD_PREFERENCES, "Pr&eferences…\tCtrl+,");
 
@@ -1008,6 +1009,44 @@ void CircuitWindow::startAs(const std::string& name) {
 	note("A new circuit from \u201C" + name + "\u201D, in Your Circuits.");
 }
 
+bool CircuitWindow::buildPlan(const formula::Plan& plan, bool onNewPage, const std::string& pageName) {
+	if (plan.parts.empty()) return false;
+	int target = currentPage();
+	double dx = 0, dy = 0;
+	if (onNewPage) {
+		const int i = cl_document_add_page(doc);
+		if (i < 0) return false;
+		target = i;
+		if (!pageName.empty()) cl_document_rename_page(doc, i, pageName.c_str());
+	} else {
+		double l, b, r, t;
+		if (cl_document_page_bounds(doc, target, &l, &b, &r, &t)) {
+			double minX = 1e9, maxY = -1e9;
+			for (const formula::Plan::Part& p : plan.parts) { minX = std::min(minX, p.x); maxY = std::max(maxY, p.y); }
+			dx = r + 16 - minX;
+			dy = t - maxY;
+		}
+	}
+	std::vector<CLBuildGate> gates;
+	for (const formula::Plan::Part& p : plan.parts)
+		gates.push_back({ p.gate.c_str(), p.x + dx, p.y + dy, p.label.empty() ? nullptr : p.label.c_str() });
+	std::vector<CLBuildWire> wires;
+	for (const formula::Plan::Wire& w : plan.wires) wires.push_back({ w.from, w.fromPin.c_str(), w.to, w.toPin.c_str() });
+	if (cl_edit_build(doc, target, gates.data(), (int)gates.size(), wires.empty() ? nullptr : wires.data(), (int)wires.size(),
+	                  "Build from Formula") <= 0)
+		return false;
+	if (onNewPage) {
+		syncTabs();
+		for (int i = 0; i < (int)canvases.size(); i++) if (canvases[i]->page() == target) current = i;
+		pageSwitched();
+		appearStart = nowSeconds();
+	}
+	edited();
+	if (Canvas* c = currentCanvas()) c->zoomToFit(true);
+	note(plan.summary());
+	return true;
+}
+
 void CircuitWindow::partsChanged() {
 	if (palette) palette->partsChanged();
 }
@@ -1039,6 +1078,7 @@ void CircuitWindow::run(int command) {
 	case CMD_NEW_TEMPLATE: templates::showPicker(this); break;
 	case CMD_SAVE_TEMPLATE: templates::saveCurrent(this); break;
 	case CMD_SAVE_PART: parts::saveSelection(this); break;
+	case CMD_BUILD_FORMULA: if (canEdit()) showBuildFormula(this); else lockNudge(); break;
 	case CMD_VERSIONS: showVersionHistory(this); break;
 	case CMD_OPEN_SAMPLE: openPracticeCircuit(this); break;
 	case CMD_SAVE: save(); break;

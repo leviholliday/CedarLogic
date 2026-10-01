@@ -9,6 +9,7 @@
 
 #include "App.h"
 #include "Commands.h"
+#include "Formula.h"
 #include <cstdint>
 #include <map>
 #include <string>
@@ -92,6 +93,9 @@ public:
 	void startAs(const std::string& name);
 	// My Parts gained or lost one.
 	void partsChanged();
+	// Build from Formula's circuit: on a new page (named), or beside this
+	// page's circuit. False when nothing could be built.
+	bool buildPlan(const formula::Plan& plan, bool onNewPage, const std::string& pageName);
 	void exportImage();
 	void exportOlder(int format);
 	void print();

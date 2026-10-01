@@ -78,6 +78,7 @@ void showTruthTable(CircuitWindow* w, int page);
 void showRamEditor(CircuitWindow* w, long gate);
 void showPreferencesDialog(HWND parent);
 void showShortcutsWindow(HWND parent);
+void showBuildFormula(CircuitWindow* w);
 // PRINT, LIGHT or DARK for Export as Image; false when cancelled.
 bool chooseExportStyle(HWND parent, int& style);
 

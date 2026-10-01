@@ -67,6 +67,10 @@ struct Prefs {
 	std::string lastFolder;
 	std::string lastCircuit;                      // the Your Circuits circuit last in front
 	std::string studentName;                      // for the Lab Page template and exports
+	// Build from Formula's last choices.
+	std::string lastFormula;
+	int buildShape = 0, buildStyle = 0;
+	bool buildTwoInput = false, buildNewPage = true;
 
 	double wireScale() const;
 	void load();

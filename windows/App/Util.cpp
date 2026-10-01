@@ -212,6 +212,12 @@ void Prefs::load() {
 	lastFolder = r.s("lastFolder", lastFolder);
 	lastCircuit = r.s("lastCircuit", lastCircuit);
 	studentName = r.s("studentName", studentName);
+	lastFormula = r.s("lastFormula", lastFormula);
+	for (char& c : lastFormula) if (c == '\x1F') c = '\n';
+	buildShape = r.i("buildShape", buildShape, 0, 2);
+	buildStyle = r.i("buildStyle", buildStyle, 0, 2);
+	buildTwoInput = r.b("buildTwoInput", buildTwoInput);
+	buildNewPage = r.b("buildNewPage", buildNewPage);
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
 		const std::string v = r.s(strf("recent%d", i).c_str(), "");
@@ -257,6 +263,15 @@ void Prefs::save() const {
 	o << "lastFolder=" << lastFolder << "\n";
 	o << "lastCircuit=" << lastCircuit << "\n";
 	o << "studentName=" << studentName << "\n";
+	{
+		std::string one;   // one line in the file: new lines kept as \x1F
+		for (char c : lastFormula) if (c != '\r') one += c == '\n' ? '\x1F' : c;
+		o << "lastFormula=" << one << "\n";
+	}
+	o << "buildShape=" << buildShape << "\n";
+	o << "buildStyle=" << buildStyle << "\n";
+	o << "buildTwoInput=" << b(buildTwoInput) << "\n";
+	o << "buildNewPage=" << b(buildNewPage) << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	const std::string text = o.str();
 	// A temporary beside it, then moved over: a crash mid-write can't leave

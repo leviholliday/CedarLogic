@@ -28,6 +28,7 @@ bool gSimView = false;
 // --dialog <preferences|shortcuts|truth-table|add-gate>: open it, and the
 // screenshot is of it.
 int gDialog = 0;
+std::string gFormula;   // --formula: what Build from Formula opens with
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -226,11 +227,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
+		if (a == "--formula" && i + 1 < argc) { gFormula = U(argv[++i]); continue; }
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
 			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE
 			        : d == "library" ? CMD_OPEN : d == "versions" ? CMD_VERSIONS : d == "templates" ? CMD_NEW_TEMPLATE
+			        : d == "formula" ? CMD_BUILD_FORMULA
 			        : d == "welcome" ? -1 : 0;
 			continue;
 		}
@@ -240,6 +243,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
 	prefs().load();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
+	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
 	if (gScreenshot.empty()) splash::show();
