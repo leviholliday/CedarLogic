@@ -314,7 +314,7 @@ private:
 				fillRound(rt, b.rect, 8, look.ink(bh ? 0.12f : 0.07f));
 				strokeRound(rt, b.rect, 8, look.ink(0.10f));
 			}
-			drawText(rt, b.label, b.rect, 12.5f, b.primary ? D2D1::ColorF(1, 1, 1, 1) : look.ink(), TextAlign::Center, b.primary);
+			drawText(rt, b.label, b.rect, 12.5f, b.primary ? chrome().onAccent() : look.ink(), TextAlign::Center, b.primary);
 		}
 		surface.end();
 		EndPaint(hwnd, &ps);

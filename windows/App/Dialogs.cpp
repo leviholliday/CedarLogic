@@ -897,7 +897,11 @@ void showPreferencesDialog(HWND parent) {
 	const int name = f.add(who);
 	f.add(heading("Appearance"));
 	const int theme = f.add(choiceField("Theme", { "Match Windows", "Light", "Dark", "As I left it" }, p.themeMode));
-	const int accent = f.add(choiceField("Accent", { "Blue", "Purple", "Pink", "Orange", "Green", "Graphite" }, p.accent));
+	// The icon's green first, as the Mac app offers them (the engine's index 6).
+	static const int kAccentOrder[] = { 6, 0, 1, 2, 3, 4, 5 };
+	int accentAt = 0;
+	for (int i = 0; i < 7; i++) if (kAccentOrder[i] == p.accent) accentAt = i;
+	const int accent = f.add(choiceField("Accent", { "CedarLogic green", "Blue", "Purple", "Pink", "Orange", "Green", "Graphite" }, accentAt));
 	const int grid = f.add(choiceField("Grid", { "Lines", "Dots" }, p.gridStyle));
 	const int showGrid = f.add(checkField("Show the grid", p.showGrid));
 	const int major = f.add(checkField("Every fifth line darker", p.majorGrid));
@@ -931,7 +935,7 @@ void showPreferencesDialog(HWND parent) {
 			applyTheme();
 			return;
 		}
-		if (field == accent) q.accent = form.choice(accent);
+		if (field == accent) q.accent = kAccentOrder[std::max(0, std::min(6, form.choice(accent)))];
 		else if (field == grid) q.gridStyle = form.choice(grid);
 		else if (field == showGrid) q.showGrid = form.checked(showGrid);
 		else if (field == major) q.majorGrid = form.checked(major);

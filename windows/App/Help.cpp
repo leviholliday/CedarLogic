@@ -220,6 +220,8 @@ float rich(ID2D1RenderTarget* rt, const std::string& text, float x, float y, flo
 			i++;
 			continue;
 		}
+		// Key combos (Ctrl+A) stay on one line: word joiners around the +.
+		if (w[i] == L'+' && i > 0 && i + 1 < w.size() && w[i - 1] != L' ' && w[i + 1] != L' ') { plain += L"\u2060+\u2060"; continue; }
 		plain += w[i];
 	}
 	IDWriteTextFormat* f = nullptr;

@@ -420,7 +420,7 @@ private:
 			const D2D1_RECT_F r = D2D1::RectF(x + 2, box.top + 2, x + 2 + segW[i], box.top + 26);
 			const bool on = (i == 0) == groupsOfOnes;
 			if (on) fillRound(rt, r, 12, accent);
-			drawText(rt, segs[i], r, 12, on ? D2D1::ColorF(1, 1, 1, 1) : ink, TextAlign::Center);
+			drawText(rt, segs[i], r, 12, on ? chrome().onAccent() : ink, TextAlign::Center);
 			hits.push_back({ r, [this, i] { groupsOfOnes = i == 0; redraw(); } });
 			x += segW[i];
 		}

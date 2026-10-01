@@ -306,7 +306,7 @@ void Canvas::drawBanner(ID2D1RenderTarget* rt, float w) {
 		const bool hot = hotHit == (int)hits.size();
 		const bool primary = i == 0;
 		fillRound(rt, r, 7, primary ? withAlpha(c.accent(), hot ? 1.0f : 0.9f) : withAlpha(ink, hot ? 0.14f : 0.08f));
-		drawText(rt, buttons[i].label, r, 12, primary ? D2D1::ColorF(1, 1, 1, 1) : ink, TextAlign::Center, primary);
+		drawText(rt, buttons[i].label, r, 12, primary ? c.onAccent() : ink, TextAlign::Center, primary);
 		hits.push_back({ r, buttons[i].command });
 		x += bw[i] + 6;
 	}

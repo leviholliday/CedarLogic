@@ -186,7 +186,10 @@ void Prefs::load() {
 	Reader r{ readIni(prefsPath()) };
 	themeMode = r.i("themeMode", themeMode, 0, 3);
 	dark = r.b("lastDark", dark);
-	accent = r.i("accent", accent, 0, 5);
+	accent = r.i("accent", accent, 0, 6);
+	// The icon's green became the default (and everyone's accent, once), as
+	// on the Mac.
+	if (!r.b("brandAccentSet", false)) accent = 6;
 	showGrid = r.b("showGrid", showGrid);
 	gridStyle = r.i("gridStyle", gridStyle, 0, 1);
 	majorGrid = r.b("majorGrid", majorGrid);
@@ -256,6 +259,7 @@ void Prefs::save() const {
 	o << "themeMode=" << themeMode << "\n";
 	o << "lastDark=" << b(dark) << "\n";
 	o << "accent=" << accent << "\n";
+	o << "brandAccentSet=1\n";
 	o << "showGrid=" << b(showGrid) << "\n";
 	o << "gridStyle=" << gridStyle << "\n";
 	o << "majorGrid=" << b(majorGrid) << "\n";

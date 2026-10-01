@@ -22,6 +22,9 @@ struct Chrome {
 	D2D1_COLOR_F hairline() const;
 	D2D1_COLOR_F sash() const;
 	D2D1_COLOR_F accent() const;
+	// Text and symbols on an accent-filled button: white, or the icon's dark
+	// ink on a light accent (the green, on the dark theme).
+	D2D1_COLOR_F onAccent() const;
 	// The ink at a strength (the Mac's ink.opacity(a)).
 	D2D1_COLOR_F ink(float alpha) const;
 	COLORREF gdi(const D2D1_COLOR_F& c) const;
