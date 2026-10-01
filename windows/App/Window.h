@@ -88,6 +88,10 @@ public:
 	void reloadFromDisk(const std::string& message);
 	// A circuit in Your Circuits was renamed.
 	void libraryChanged();
+	// A new circuit from a template: called `name`, and in Your Circuits.
+	void startAs(const std::string& name);
+	// My Parts gained or lost one.
+	void partsChanged();
 	void exportImage();
 	void exportOlder(int format);
 	void print();

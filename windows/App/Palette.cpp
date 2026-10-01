@@ -4,6 +4,7 @@
 #include "Canvas.h"
 #include "Chrome.h"
 #include "Drawn.h"
+#include "Collections.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -84,20 +85,7 @@ GatePalette::GatePalette(CircuitWindow* window, HWND parent) : win(window) {
 	tiles = CreateWindowExW(0, kTilesClass, L"", WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, host, nullptr, appInstance(), this);
 	map = new MiniMap(window, host);
 
-	for (int c = 0; c < cl_library_category_count(); c++) {
-		Category cat;
-		std::string name = cl_library_category(c);
-		const size_t dash = name.find(" - ");
-		cat.title = dash == std::string::npos ? name : name.substr(dash + 3);
-		for (int i = 0; i < cl_library_gate_count(c); i++) {
-			Gate g;
-			g.name = cl_library_gate(c, i);
-			g.caption = cl_library_gate_caption(g.name.c_str());
-			if (g.caption.empty()) g.caption = g.name;
-			cat.gates.push_back(g);
-		}
-		if (!cat.gates.empty()) categories.push_back(cat);
-	}
+	loadCategories();
 	dpiChanged();
 	fill();
 }
@@ -118,6 +106,37 @@ GatePalette::~GatePalette() {
 void GatePalette::dpiChanged() {
 	setFontTree(host, uiFont(dpiOf(host)));
 	layout();
+}
+
+void GatePalette::loadCategories() {
+	categories.clear();
+	for (int c = 0; c < cl_library_category_count(); c++) {
+		Category cat;
+		std::string name = cl_library_category(c);
+		const size_t dash = name.find(" - ");
+		cat.title = dash == std::string::npos ? name : name.substr(dash + 3);
+		for (int i = 0; i < cl_library_gate_count(c); i++) {
+			Gate g;
+			g.name = cl_library_gate(c, i);
+			g.caption = cl_library_gate_caption(g.name.c_str());
+			if (g.caption.empty()) g.caption = g.name;
+			cat.gates.push_back(g);
+		}
+		if (!cat.gates.empty()) categories.push_back(cat);
+	}
+	// Your own parts, last (Edit > Save as Part).
+	Category mine;
+	mine.title = "My Parts";
+	for (const parts::Part& p : parts::all()) mine.gates.push_back({ p.gate(), p.name });
+	if (!mine.gates.empty()) categories.push_back(mine);
+}
+
+void GatePalette::partsChanged() {
+	const std::string was = category >= 0 && category < (int)categories.size() ? categories[category].title : std::string();
+	loadCategories();
+	category = 0;
+	for (int i = 0; i < (int)categories.size(); i++) if (categories[i].title == was) category = i;
+	fill();
 }
 
 std::string GatePalette::categoryTitle() const {
@@ -325,7 +344,10 @@ void GatePalette::paintTiles() {
 				fillRound(rt, D2D1::RectF(x, y, x + tileW, y + tileH), 8, withAlpha(ink, i == pressed ? 0.14f : 0.07f));
 			// The engine draws the gate in the tile's own points.
 			rt->SetTransform(D2D1::Matrix3x2F::Translation(x, y + 2) * D2D1::Matrix3x2F::Scale((float)s, (float)s));
-			guarded("drawing the palette", [&] { cl_library_draw_gate(shown[i].name.c_str(), rt, tileW, kArtH - 4, s, dark); });
+			guarded("drawing the palette", [&] {
+				if (parts::isPart(shown[i].name)) parts::draw(shown[i].name, rt, tileW, kArtH - 4, s, dark);
+				else cl_library_draw_gate(shown[i].name.c_str(), rt, tileW, kArtH - 4, s, dark);
+			});
 			rt->SetTransform(D2D1::Matrix3x2F::Scale((float)s, (float)s));
 			if (prefs().showGateNames)
 				drawText(rt, shown[i].caption, D2D1::RectF(x + 2, y + kArtH - 2, x + tileW - 2, y + tileH - 2), 10,
@@ -483,6 +505,16 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 			dragging = false;
 			SetCapture(tiles);
 			InvalidateRect(tiles, nullptr, FALSE);
+		}
+		return 0;
+	}
+	case WM_RBUTTONUP: {
+		// A part of yours: rename or delete it.
+		const int i = tileAt(x, y);
+		if (i >= 0 && parts::isPart(shown[i].name)) {
+			POINT p;
+			GetCursorPos(&p);
+			parts::tileMenu(tiles, shown[i].name, p);
 		}
 		return 0;
 	}

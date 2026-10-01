@@ -25,6 +25,8 @@ public:
 	void focusSearch();
 	void themeChanged();
 	void dpiChanged();
+	// My Parts gained or lost one.
+	void partsChanged();
 
 	// For the category button.
 	std::string categoryTitle() const;
@@ -50,6 +52,7 @@ private:
 	POINT pressAt{};
 
 	void fill();
+	void loadCategories();
 	void layout();
 	RECT searchFrame() const;     // the search field's rounded box (host pixels)
 	void layoutTiles(int& columns, float& tileW, float& tileH) const;

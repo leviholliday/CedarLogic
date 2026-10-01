@@ -211,6 +211,7 @@ void Prefs::load() {
 	paletteWidth = r.i("sidePanelWidth", paletteWidth, 160, 800);
 	lastFolder = r.s("lastFolder", lastFolder);
 	lastCircuit = r.s("lastCircuit", lastCircuit);
+	studentName = r.s("studentName", studentName);
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
 		const std::string v = r.s(strf("recent%d", i).c_str(), "");
@@ -255,6 +256,7 @@ void Prefs::save() const {
 	o << "sidePanelWidth=" << paletteWidth << "\n";
 	o << "lastFolder=" << lastFolder << "\n";
 	o << "lastCircuit=" << lastCircuit << "\n";
+	o << "studentName=" << studentName << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	const std::string text = o.str();
 	// A temporary beside it, then moved over: a crash mid-write can't leave

@@ -111,6 +111,8 @@ jobs:
           timeout 90 "$A" --dialog library --screenshot "$PWD/renders/your-circuits.png" || true
           timeout 90 "$A" --dark --dialog library --screenshot "$PWD/renders/your-circuits-dark.png" || true
           timeout 90 "$A" --dialog versions --screenshot "$PWD/renders/version-history.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog templates --screenshot "$PWD/renders/templates.png" || true
+          timeout 90 "$A" --dark --dialog templates --screenshot "$PWD/renders/templates-dark.png" || true
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 

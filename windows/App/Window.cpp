@@ -10,6 +10,7 @@
 #include "Updater.h"
 #include "Welcome.h"
 #include "Library.h"
+#include "Collections.h"
 #include "LibraryWindow.h"
 #include "Chrome.h"
 
@@ -170,12 +171,16 @@ void CircuitWindow::buildMenus() {
 	HMENU menuBar = menus;
 	HMENU file = submenu(menuBar, "&File");
 	item(file, CMD_NEW, "&New\tCtrl+N");
-	item(file, CMD_OPEN, "&Open…\tCtrl+O");
+	item(file, CMD_NEW_TEMPLATE, "New from &Template\u2026");
+	item(file, CMD_OPEN, "Your &Circuits\u2026\tCtrl+O");
 	recentMenu = submenu(file, "Open &Recent");
+	item(file, CMD_IMPORT, "&Import a File\u2026\tCtrl+I");
 	item(file, CMD_OPEN_SAMPLE, "Open the &Practice Circuit");
 	separator(file);
-	item(file, CMD_SAVE, "&Save\tCtrl+S");
-	item(file, CMD_SAVE_AS, "Save &As…\tCtrl+Shift+S");
+	item(file, CMD_SAVE, "&Save a Version\tCtrl+S");
+	item(file, CMD_VERSIONS, "&Version History\u2026");
+	item(file, CMD_SAVE_AS, "E&xport\u2026\tCtrl+Shift+S");
+	item(file, CMD_SAVE_TEMPLATE, "Save as Te&mplate\u2026");
 	item(file, CMD_EXPORT_IMAGE, "&Export as Image…\tCtrl+E");
 	HMENU older = submenu(file, "Export for &Older CedarLogic");
 	item(older, CMD_EXPORT_V2, "For CedarLogic &2…");
@@ -205,6 +210,7 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_TIDY, "T&idy Up\tShift+S");
 	item(edit, CMD_TIDY_FLOW, "Tidy Up by Signal &Flow");
 	item(edit, CMD_CONNECT_NEARBY, "Connect &Nearby Pins");
+	item(edit, CMD_SAVE_PART, "Save as &Part\u2026");
 	separator(edit);
 	item(edit, CMD_PREFERENCES, "Pr&eferences…\tCtrl+,");
 
@@ -994,6 +1000,18 @@ void CircuitWindow::reloadFromDisk(const std::string& message) {
 	if (!message.empty()) note(message);
 }
 
+void CircuitWindow::startAs(const std::string& name) {
+	recoveredName = name;
+	forceDirty = true;
+	saveQuietly(false);
+	updateTitle();
+	note("A new circuit from \u201C" + name + "\u201D, in Your Circuits.");
+}
+
+void CircuitWindow::partsChanged() {
+	if (palette) palette->partsChanged();
+}
+
 void CircuitWindow::libraryChanged() {
 	updateTitle();
 	updateActions();
@@ -1018,6 +1036,9 @@ void CircuitWindow::run(int command) {
 	case CMD_NEW: newCircuitWindow(); break;
 	case CMD_OPEN: showYourCircuits(this); break;
 	case CMD_IMPORT: chooseAndOpen(this); break;
+	case CMD_NEW_TEMPLATE: templates::showPicker(this); break;
+	case CMD_SAVE_TEMPLATE: templates::saveCurrent(this); break;
+	case CMD_SAVE_PART: parts::saveSelection(this); break;
 	case CMD_VERSIONS: showVersionHistory(this); break;
 	case CMD_OPEN_SAMPLE: openPracticeCircuit(this); break;
 	case CMD_SAVE: save(); break;
@@ -1571,6 +1592,17 @@ bool CircuitWindow::placePendingGate(double wx, double wy) {
 
 bool CircuitWindow::addGateFloating(const std::string& name, double wx, double wy) {
 	if (!canEdit()) { lockNudge(); return false; }
+	// One of My Parts: its gates and wires, pasted, on the pointer.
+	if (parts::isPart(name)) {
+		parts::Part p;
+		if (!parts::find(name, p)) return false;
+		const std::string text = p.text();
+		const char* back = nullptr;
+		if (!cl_edit_paste(doc, currentPage(), text.c_str(), wx, wy, true, &back)) return false;
+		floatSelection(wx, wy);
+		redraw();
+		return true;
+	}
 	if (!cl_edit_add_gate(doc, currentPage(), name.c_str(), wx, wy)) return false;
 	floatSelection(wx, wy);
 	redraw();

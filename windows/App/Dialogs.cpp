@@ -2,6 +2,7 @@
 
 #include "Dialogs.h"
 #include "Window.h"
+#include "Collections.h"
 
 #include <uxtheme.h>
 
@@ -641,6 +642,8 @@ void showQuickAdd(CircuitWindow* w) {
 		}
 	std::sort(all.begin(), all.end(), [](auto& a, auto& b) { return lowerCase(a.second) < lowerCase(b.second); });
 	all.erase(std::unique(all.begin(), all.end()), all.end());
+	// My Parts too, after the gates.
+	for (const parts::Part& part : parts::all()) all.push_back({ part.gate(), part.name + "  (My Parts)" });
 
 	std::vector<std::string> names;   // what the list shows, in order
 	Form f;
@@ -868,6 +871,12 @@ void showPreferencesDialog(HWND parent) {
 	f.width = 440;
 	f.okText = "Close";
 	f.cancelText = "";
+	FormField who;
+	who.kind = FormField::Text;
+	who.label = "Your name";
+	who.value = p.studentName;
+	who.tip = "On the Lab Page template and exported pictures.";
+	const int name = f.add(who);
 	f.add(heading("Appearance"));
 	const int theme = f.add(choiceField("Theme", { "Match Windows", "Light", "Dark", "As I left it" }, p.themeMode));
 	const int accent = f.add(choiceField("Accent", { "Blue", "Purple", "Pink", "Orange", "Green", "Graphite" }, p.accent));
@@ -889,6 +898,11 @@ void showPreferencesDialog(HWND parent) {
 	// Every change applies at once.
 	f.onChange = [&](Form& form, int field) {
 		Prefs& q = prefs();
+		if (field == name) {
+			q.studentName = form.text(name);
+			q.save();
+			return;
+		}
 		if (field == theme) {
 			q.themeMode = form.choice(theme);
 			if (q.themeMode == 1) q.dark = false;
