@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           cmake -S windows -B windows/build -A ${{ matrix.arch }} -DCL_BUILD_TOOLS=${{ matrix.run && 'ON' || 'OFF' }}
-          cmake --build windows/build --config Release -- /m /v:minimal
+          cmake --build windows/build --config Release --parallel
 
       # The engine through the C interface the app uses: editing, wires,
       # simulation, truth tables, and saving without changing a circuit --
