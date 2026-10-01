@@ -264,6 +264,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--timing-color") { gTimingColor = true; continue; }
 		if (a == "--splash-frame" && i + 2 < argc) { gSplashAt = atof(U(argv[++i]).c_str()); gSplashFile = U(argv[++i]); continue; }
 		if (a == "--first-launch") { gFirstLaunch = true; continue; }
+		if (a == "--card-frame" && i + 1 < argc) { CircuitWindow::cardFreeze = atof(U(argv[++i]).c_str()); continue; }
 		if (a == "--place" && i + 1 < argc) { gPlace = U(argv[++i]); continue; }
 		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }

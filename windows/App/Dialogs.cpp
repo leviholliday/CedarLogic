@@ -91,6 +91,8 @@ void drawButtonItem(const DRAWITEMSTRUCT* di, bool isToggle) {
 	drawOnDC(di->hDC, di->rcItem, dpiOf(di->hwndItem), [&](ID2D1RenderTarget* rt, float w, float h) {
 		rt->Clear(d2d(c.back));
 		if (isToggle) {
+			if (disabled) rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 0.4f),
+			                            nullptr);
 			const bool on = toggleOn(di->hwndItem);
 			const float tw = 40, th = 20, x = 1, y = (h - th) / 2;
 			const D2D1_RECT_F r = D2D1::RectF(x, y, x + tw, y + th);
@@ -103,6 +105,7 @@ void drawButtonItem(const DRAWITEMSTRUCT* di, bool isToggle) {
 				fillCircle(rt, D2D1::Point2F(r.left + th / 2, y + th / 2), down ? 6.0f : 5.0f, d2d(c.text, 0.7f));
 			}
 			if (focus) strokeRound(rt, D2D1::RectF(r.left - 2, r.top - 2, r.right + 2, r.bottom + 2), th / 2 + 2, withAlpha(ch.accent(), 0.6f), 1.5f);
+			if (disabled) rt->PopLayer();
 			return;
 		}
 		const bool primary = di->CtlID == IDOK;
@@ -439,7 +442,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		HWND ctl = (HWND)lp;
 		COLORREF ink = c.text;
 		if (ctl == f->problem) ink = RGB(220, 64, 64);
-		else if (GetPropW(ctl, L"clTip")) ink = c.dim;
+		else if (GetPropW(ctl, L"clTip") || GetPropW(ctl, L"clDim")) ink = c.dim;
 		if (msg == WM_CTLCOLORSTATIC && !IsWindowEnabled(ctl)) ink = c.dim;
 		SetTextColor((HDC)wp, ink);
 		SetBkColor((HDC)wp, c.back);
@@ -513,7 +516,7 @@ void Form::build() {
 		case FormField::Text: {
 			if (!x.label.empty())
 				x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, margin,
-				                          y + sc(3), labelW, lineH, dialog, nullptr, appInstance(), nullptr);
+				                          y + (rowH - lineH) / 2, labelW, lineH, dialog, nullptr, appInstance(), nullptr);
 			const int browseW = x.browse ? sc(84) : 0;
 			// Several lines: a box to type them in (Enter starts a new one).
 			const bool multi = x.lines > 1;
@@ -555,16 +558,19 @@ void Form::build() {
 			                         ctrlX, y, box, checkH, dialog, id, appInstance(), nullptr);
 			if (!x.value.empty()) SetPropW(x.hwnd, L"clOn", (HANDLE)1);
 			SetWindowSubclass(x.hwnd, hoverProc, 4, 0);
+			const int labelRoom = ctrlW - box - sc(6);
+			const bool twoLines = textPixels(dialog, font, x.label) > labelRoom;
 			x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY | SS_NOPREFIX,
-			                          ctrlX + box + sc(6), y + sc(3), ctrlW - box - sc(6), checkH - sc(3), dialog,
+			                          ctrlX + box + sc(6), y + sc(3), labelRoom, (twoLines ? lineH * 2 : checkH - sc(3)), dialog,
 			                          (HMENU)(INT_PTR)(kLabelBase + (int)i), appInstance(), nullptr);
+			if (twoLines) y += lineH + sc(2) - (checkH - lineH);
 			y += checkH;
 			break;
 		}
 		case FormField::Choice: {
 			if (!x.label.empty())
 				x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, margin,
-				                          y + sc(3), labelW, lineH, dialog, nullptr, appInstance(), nullptr);
+				                          y + (rowH - lineH) / 2, labelW, lineH, dialog, nullptr, appInstance(), nullptr);
 			x.hwnd = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
 			                         ctrlX, y, ctrlW, sc(260), dialog, id, appInstance(), nullptr);
 			for (const std::string& c : x.choices) SendMessageW(x.hwnd, CB_ADDSTRING, 0, (LPARAM)W(c).c_str());
@@ -716,7 +722,17 @@ void Form::refresh(int field) {
 void Form::enable(int field, bool on) {
 	if (field < 0 || field >= (int)fields.size()) return;
 	if (fields[field].hwnd) EnableWindow(fields[field].hwnd, on);
-	if (fields[field].extra) EnableWindow(fields[field].extra, on);
+	if (HWND label = fields[field].extra) {
+		// Labels dim (a disabled static is drawn embossed, which reads badly).
+		wchar_t cls[16] = L"";
+		GetClassNameW(label, cls, 16);
+		if (lstrcmpiW(cls, L"Static") == 0) {
+			if (on) RemovePropW(label, L"clDim"); else SetPropW(label, L"clDim", (HANDLE)1);
+			InvalidateRect(label, nullptr, TRUE);
+		} else {
+			EnableWindow(label, on);
+		}
+	}
 }
 
 void Form::capture() {

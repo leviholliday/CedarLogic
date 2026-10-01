@@ -121,6 +121,7 @@ private:
 	void drawOverlays(ID2D1RenderTarget* rt, float w, float h);
 	void drawSimBar(ID2D1RenderTarget* rt, float w, float h);
 	void drawBanner(ID2D1RenderTarget* rt, float w);
+	void drawOpeningCard(ID2D1RenderTarget* rt, float w, float h, double t);
 	void drawToast(ID2D1RenderTarget* rt, float w, float h);
 	bool overlayPress(double vx, double vy);
 	void setSpeedAt(double vx);

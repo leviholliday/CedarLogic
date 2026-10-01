@@ -55,6 +55,11 @@ public:
 	double flowPhase() const { return phase; }
 	double selectionFade() const;
 	double appearProgress() const;
+	// The opening card (the Mac's OpeningCard): seconds since it began, while
+	// it plays; and what it says under the name.
+	bool openingCard(double& t) const;
+	static double cardFreeze;   // --card-frame: the card held at this moment
+	std::string openingDetail() const;
 	// A released selection box fading out.
 	bool dragFadeBox(double& l, double& b, double& r, double& t, double& alpha) const;
 	void fadeOutDragBox(double l, double b, double r, double t);
@@ -215,6 +220,9 @@ private:
 	GatePalette* palette = nullptr;
 	MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
+	double openingAt = -1;            // when the opening card began (-1: none)
+	bool openingRevealed = false;
+	void beginOpening();
 public:
 	ScopeWindow* scopeWindow() const { return scope; }
 	std::string pageName(int page) const;

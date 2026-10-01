@@ -86,8 +86,35 @@ CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path
 	updateRunUI();
 	updateBanner();
 	layout();
-	// While the launch screen is up, windows wait for it.
-	if (!splash::active()) present();
+	// While the launch screen is up, windows wait for it (it does the
+	// introducing); otherwise the circuit comes in under its opening card.
+	if (!splash::active()) {
+		beginOpening();
+		present();
+	}
+}
+
+// The card plays once the window is in place and drawn.
+void CircuitWindow::beginOpening() {
+	openingAt = nowSeconds() + 0.08;
+	openingRevealed = false;
+}
+
+double CircuitWindow::cardFreeze = -1;
+
+bool CircuitWindow::openingCard(double& t) const {
+	if (cardFreeze >= 0) { t = cardFreeze; return true; }
+	if (openingAt < 0) return false;
+	t = nowSeconds() - openingAt;
+	return true;
+}
+
+std::string CircuitWindow::openingDetail() const {
+	const int tabs = cl_document_page_count(doc);
+	long gates = 0;
+	for (int p = 0; p < tabs; p++) gates += cl_document_gate_count(doc, p);
+	if (gates == 0) return tabs > 1 ? strf("%d empty tabs", tabs) : std::string("A blank page, ready to build");
+	return strf("%d tab%s  \u00B7  %ld gate%s", tabs, tabs == 1 ? "" : "s", gates, gates == 1 ? "" : "s");
 }
 
 void CircuitWindow::present() {
@@ -461,6 +488,13 @@ void CircuitWindow::tick() {
 	lastTick = t;
 	Canvas* c = currentCanvas();
 	if (c) c->stepAnimation();
+	// The opening card: the circuit fades up as it lifts away.
+	if (openingAt >= 0) {
+		const double ot = t - openingAt;
+		if (ot >= 0.58 && !openingRevealed) { openingRevealed = true; appearStart = t; }
+		if (ot >= 0.88) openingAt = -1;
+		redraw();
+	}
 	// Fades in progress (a new selection's halo, a page appearing, the drag box).
 	if (since(selectionChangedAt) < kSelectionFadeTime || since(appearStart) < kAppearTime ||
 	    (hasDragFade && since(dragFadeStart) < kDragFadeTime))
@@ -1308,6 +1342,7 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	lockedOn = false;
 	syncTabs();
 	appearStart = nowSeconds();
+	beginOpening();
 	updateTitle();
 	updateActions();
 	updateRunUI();

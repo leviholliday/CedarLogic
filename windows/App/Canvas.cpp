@@ -1,6 +1,7 @@
 // The circuit canvas (see Canvas.h).
 
 #include "Canvas.h"
+#include "Brand.h"
 #include "Chrome.h"
 #include "Window.h"
 
@@ -184,6 +185,72 @@ void Canvas::drawOverlays(ID2D1RenderTarget* rt, float w, float h) {
 	if (win->simView()) drawSimBar(rt, w, h);
 	else drawBanner(rt, w);
 	drawToast(rt, w, h);
+	double t;
+	if (win->openingCard(t)) drawOpeningCard(rt, w, h, t);
+}
+
+// A circuit opening (the Mac's OpeningCard): over the canvas, a small glass
+// card with its name and what's in it, a sweep of light and a quick line
+// filling; then the card lifts away and the circuit fades up. 0.88 s.
+void Canvas::drawOpeningCard(ID2D1RenderTarget* rt, float w, float h, double t) {
+	auto ease = [](double x) { const double c = std::min(1.0, std::max(0.0, x)); return 1 - std::pow(1 - c, 3); };
+	auto smooth = [](double x) { const double c = std::min(1.0, std::max(0.0, x)); return c * c * c * (c * (c * 6 - 15) + 10); };
+	const bool dark = prefs().dark;
+	const double inP = t < 0 ? 0 : ease(t / 0.24), line = smooth((t - 0.1) / 0.45), out = smooth((t - 0.58) / 0.3);
+	const double sweep = smooth((t - 0.14) / 0.5);
+	// The canvas, held back until the card lifts.
+	const Palette pal{ dark, false };
+	fillRect(rt, D2D1::RectF(0, 0, w, h), withAlpha(d2dColor(pal.canvas()), (float)(1 - out)));
+	const float opacity = (float)(inP * (1 - out));
+	if (opacity <= 0.003f) return;
+	const std::string title = win->titleText(), detail = win->openingDetail();
+	const float textW = std::max({ textWidth(title, 15, true), textWidth(detail, 11.5f), 170.0f });
+	const float cw = std::max(300.0f, 20 + 46 + 14 + textW + 20), ch = 16 + 46 + 16 + 4;
+	const D2D1_RECT_F card = D2D1::RectF((w - cw) / 2, (h - ch) / 2, (w + cw) / 2, (h + ch) / 2);
+	const float s = (float)((0.94 + 0.06 * inP) * (1 + 0.04 * out));
+	D2D1_MATRIX_3X2_F was;
+	rt->GetTransform(&was);
+	rt->SetTransform(D2D1::Matrix3x2F::Scale(s, s, D2D1::Point2F(w / 2, h / 2)) * was);
+	rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), opacity), nullptr);
+	brand::glow(rt, D2D1::RectF(card.left, card.top + 10, card.right, card.bottom + 10), 20, D2D1::ColorF(0, 0, 0, dark ? 0.45f : 0.18f), 22);
+	fillRound(rt, card, 20, dark ? D2D1::ColorF(0.17f, 0.18f, 0.21f, 0.97f) : D2D1::ColorF(0.985f, 0.985f, 0.99f, 0.97f));
+	strokeRound(rt, D2D1::RectF(card.left + 0.4f, card.top + 0.4f, card.right - 0.4f, card.bottom - 0.4f), 19.6f,
+	            dark ? D2D1::ColorF(1, 1, 1, 0.14f) : D2D1::ColorF(0, 0, 0, 0.08f), 0.8f);
+	const float ix = card.left + 20, iy = card.top + 16;
+	brand::icon(rt, ix, iy, 46, 0.35f);
+	const float tx = ix + 46 + 14;
+	drawText(rt, title, D2D1::RectF(tx, iy - 1, card.right - 16, iy + 20), 15, dark ? D2D1::ColorF(1, 1, 1) : D2D1::ColorF(0, 0, 0, 0.85f),
+	         TextAlign::Leading, true);
+	drawText(rt, detail, D2D1::RectF(tx, iy + 21, card.right - 16, iy + 37), 11.5f,
+	         dark ? D2D1::ColorF(1, 1, 1, 0.55f) : D2D1::ColorF(0, 0, 0, 0.5f));
+	const D2D1_RECT_F track = D2D1::RectF(tx, iy + 44, tx + 170, iy + 46.5f);
+	fillRound(rt, track, 1.25f, dark ? D2D1::ColorF(1, 1, 1, 0.08f) : D2D1::ColorF(0, 0, 0, 0.08f));
+	if (line > 0.01) {
+		const D2D1_RECT_F fill = D2D1::RectF(track.left, track.top, track.left + (float)(170 * line), track.bottom);
+		fillRound(rt, D2D1::RectF(fill.left - 2, fill.top - 2, fill.right + 2, fill.bottom + 2), 3, withAlpha(brand::kNeon, 0.2f));
+		fillRound(rt, fill, 1.25f, brand::kNeon);
+	}
+	// The sweep of light across the card.
+	if (sweep > 0 && sweep < 1) {
+		rt->PushAxisAlignedClip(card, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+		const float bx = (float)(card.left - 120 + (cw + 240) * sweep);
+		D2D1_GRADIENT_STOP st[3] = { { 0, D2D1::ColorF(1, 1, 1, 0) }, { 0.5f, D2D1::ColorF(1, 1, 1, dark ? 0.12f : 0.35f) }, { 1, D2D1::ColorF(1, 1, 1, 0) } };
+		ID2D1GradientStopCollection* stops = nullptr;
+		ID2D1LinearGradientBrush* b = nullptr;
+		if (SUCCEEDED(rt->CreateGradientStopCollection(st, 3, &stops)) &&
+		    SUCCEEDED(rt->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(bx, 0), D2D1::Point2F(bx + 90, 0)), stops, &b))) {
+			D2D1_MATRIX_3X2_F in;
+			rt->GetTransform(&in);
+			rt->SetTransform(D2D1::Matrix3x2F::Rotation(18, D2D1::Point2F(bx + 45, (card.top + card.bottom) / 2)) * in);
+			rt->FillRectangle(D2D1::RectF(bx, card.top - ch / 2, bx + 90, card.bottom + ch / 2), b);
+			rt->SetTransform(in);
+		}
+		if (b) b->Release();
+		if (stops) stops->Release();
+		rt->PopAxisAlignedClip();
+	}
+	rt->PopLayer();
+	rt->SetTransform(was);
 }
 
 // Simulation View's control bar (SimBar.swift): a dark glass panel along the
