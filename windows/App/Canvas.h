@@ -13,6 +13,7 @@
 
 #include "App.h"
 #include <cstdint>
+#include <vector>
 
 class CircuitWindow;
 
@@ -69,7 +70,7 @@ public:
 	void drawInto(ID2D1RenderTarget* rt, double scale);
 
 private:
-	enum class Drag { None, Edit, Pan };
+	enum class Drag { None, Edit, Pan, Slider };
 
 	CircuitWindow* win;
 	HWND hwnd = nullptr;
@@ -107,6 +108,20 @@ private:
 	void onSize(double w, double h);
 	bool moving() const;
 	LPCWSTR cursorNow = nullptr;
+
+	// What's drawn over the circuit (the Mac's overlays): the note toast,
+	// the banner for Tidy Up and Lock, Simulation View's control bar. Their
+	// buttons, as drawn last (view points).
+	struct OverlayHit { D2D1_RECT_F rect; int command; };
+	std::vector<OverlayHit> hits;
+	D2D1_RECT_F sliderTrack{};
+	int hotHit = -1;
+	void drawOverlays(ID2D1RenderTarget* rt, float w, float h);
+	void drawSimBar(ID2D1RenderTarget* rt, float w, float h);
+	void drawBanner(ID2D1RenderTarget* rt, float w);
+	void drawToast(ID2D1RenderTarget* rt, float w, float h);
+	bool overlayPress(double vx, double vy);
+	void setSpeedAt(double vx);
 
 	LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 	static LRESULT CALLBACK proc(HWND, UINT, WPARAM, LPARAM);

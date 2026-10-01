@@ -19,6 +19,9 @@ namespace {
 // (a check that a build really starts, drawing and all; used by CI).
 std::string gScreenshot;
 int gExitCode = 0;
+// For the screenshot runs: --dark or --light for this run, --sim-view on.
+int gTheme = -1;
+bool gSimView = false;
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -201,11 +204,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		const std::string a = U(argv[i]);
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
+		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
+		if (a == "--sim-view") { gSimView = true; continue; }
 		files.push_back(a);
 	}
 	LocalFree(argv);
 
 	prefs().load();
+	if (gTheme >= 0) prefs().dark = gTheme == 1;
+	applyTheme();
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
 		showMessage(nullptr, Tone::Error, "CedarLogic can't find its gate library",
@@ -219,6 +226,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	bool any = false;
 	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
 	if (!any && circuitWindows().empty()) newCircuitWindow();
+	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else SetTimer(nullptr, 0, 300, recoveryTimer);
 

@@ -18,6 +18,8 @@ class Canvas;
 class GatePalette;
 class MiniMap;
 class ScopeWindow;
+class TabStrip;
+class Toolbar;
 
 class CircuitWindow {
 public:
@@ -129,6 +131,29 @@ public:
 	// For --screenshot: the whole window, drawn into a PNG.
 	bool screenshot(const std::string& file);
 
+	// ---- For the toolbar and the tabs ----
+	bool commandEnabled(int command) const;
+	int commandChecked(int command) const;   // -1 not a check item
+	std::string titleText() const { return displayName(); }
+	int stepMs() const;
+	void titleMenu(POINT screen);
+	// Every menu, as a popup (the toolbar's •••, Alt, F10).
+	void moreMenu(POINT screen, bool rightAligned);
+	int tabCount() const { return (int)canvases.size(); }
+	std::string tabName(int index) const;
+	int currentTab() const { return current; }
+	void closeTab(int index);
+	void moveTab(int from, int to);
+	void tabContextMenu(int index, POINT screen);
+
+	// ---- For the canvas's overlays ----
+	// A short note shown over the bottom of the canvas, fading after a while.
+	bool toast(std::string& text, double& alpha) const;
+	// The bar over the top of the canvas (Tidy Up's preview, Lock): its text
+	// and buttons, or false.
+	struct BannerButton { std::string label; int command; };
+	bool banner(std::string& text, std::vector<BannerButton>& buttons) const;
+
 private:
 	HWND hwnd = nullptr;
 	CLDocument* doc;
@@ -142,24 +167,22 @@ private:
 	double lastRecovery = 0;
 	void writeRecovery();
 
-	// The controls around the canvas.
-	HWND toolbar = nullptr;           // a plain panel holding the buttons
-	std::vector<HWND> toolButtons;
-	HWND runButton = nullptr, simViewButton = nullptr, lockButton = nullptr, darkButton = nullptr;
-	HWND stepEdit = nullptr, stepUpDown = nullptr;
-	HWND banner = nullptr, bannerLabel = nullptr;
-	std::vector<HWND> bannerButtons;
-	HWND tabs = nullptr, newTabButton = nullptr;
+	// The parts around the canvas.
+	Toolbar* toolbar = nullptr;
+	TabStrip* tabStrip = nullptr;
 	HWND paletteHost = nullptr;
 	HWND statusBar = nullptr;
 	GatePalette* palette = nullptr;
 	MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
 	std::vector<Canvas*> canvases;    // in tab order
-	bool syncing = false;             // rebuilding the tabs; ignore the tab control's notices
+	int current = 0;                  // the tab in front
 	bool splitterDrag = false;
 	int splitterGrab = 0;
+	bool maxPressed = false;          // the drawn maximize button, held down
+	bool trackingNonClient = false;
 	UINT dpi = 96;
+	std::string noteText;             // the toast
 
 	bool isRunning = true;
 	bool simViewOn = false;
@@ -174,17 +197,14 @@ private:
 	bool hasDragFade = false;
 	double fadeL = 0, fadeB = 0, fadeR = 0, fadeT = 0;
 	int lastPageCount = 1;
-	int bannerKind = -1;              // what the banner shows now (-1 hidden)
 	std::map<uint64_t, bool> seenPages;
-	HMENU menuBar = nullptr, recentMenu = nullptr;
+	HMENU menus = nullptr, recentMenu = nullptr;
 
 	void build();
 	void buildMenus();
-	void buildToolbar();
 	void layout();
 	RECT splitterRect() const;
 	int toolbarHeight() const;
-	int bannerHeight() const;
 	void syncTabs();
 	void updateTabLabels();
 	void updateTitle();
@@ -203,14 +223,13 @@ private:
 	std::string displayName() const;
 	std::string pageName(int page) const;
 	void rebuildRecentMenu();
-	void tabContextMenu(int index, POINT screen);
-	bool commandEnabled(int command) const;
-	int commandChecked(int command) const;   // -1 not a check item
+	LRESULT frameHitTest(LPARAM lp);
+	void renameFile();
+	void duplicateCircuit();
+	void revertToSaved();
 
 	LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 	static LRESULT CALLBACK proc(HWND, UINT, WPARAM, LPARAM);
-	static LRESULT CALLBACK toolbarProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
-	static LRESULT CALLBACK tabsProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 
 	friend class Canvas;
 	friend class ScopeWindow;

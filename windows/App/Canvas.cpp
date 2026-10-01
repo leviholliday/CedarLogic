@@ -1,6 +1,7 @@
 // The circuit canvas (see Canvas.h).
 
 #include "Canvas.h"
+#include "Chrome.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -165,13 +166,189 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 	cl_document_draw_ex(doc, p, rt, scale, originX, originY, upp, &o);
 	if (sim) {
 		cl_simview_draw_flow(doc, p, rt, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
-		return;
+	} else {
+		const RGBA a = accentColor(dark);
+		cl_edit_draw_overlay(doc, p, rt, scale, originX, originY, upp, a.r, a.g, a.b);
+		double l, b, r, t, alpha;
+		if (cl_edit_box(doc, &l, &b, &r, &t)) drawBox(rt, l, b, r, t, a, 1);
+		else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(rt, l, b, r, t, a, alpha);
 	}
-	const RGBA a = accentColor(dark);
-	cl_edit_draw_overlay(doc, p, rt, scale, originX, originY, upp, a.r, a.g, a.b);
-	double l, b, r, t, alpha;
-	if (cl_edit_box(doc, &l, &b, &r, &t)) drawBox(rt, l, b, r, t, a, 1);
-	else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(rt, l, b, r, t, a, alpha);
+	drawOverlays(rt, (float)w, (float)h);
+}
+
+// ---- Overlays ------------------------------------------------------------------
+
+void Canvas::drawOverlays(ID2D1RenderTarget* rt, float w, float h) {
+	hits.clear();
+	sliderTrack = D2D1::RectF(0, 0, 0, 0);
+	if (win->simView()) drawSimBar(rt, w, h);
+	else drawBanner(rt, w);
+	drawToast(rt, w, h);
+}
+
+// Simulation View's control bar (SimBar.swift): a dark glass panel along the
+// bottom with a breathing LIVE light, pause and step, the speed, a chip for
+// every switch and light, and Done.
+void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
+	const D2D1_COLOR_F on = D2D1::ColorF(0.28f, 0.93f, 1.0f), ink = D2D1::ColorF(0.86f, 0.93f, 1.0f);
+	const D2D1_COLOR_F dim = D2D1::ColorF(0.48f, 0.58f, 0.68f), live = D2D1::ColorF(0.36f, 1.0f, 0.62f);
+	const D2D1_COLOR_F amber = D2D1::ColorF(1.0f, 0.72f, 0.25f);
+	const float barW = std::min(1040.0f, w - 28), barH = 52;
+	if (barW < 360) return;
+	const float x0 = (w - barW) / 2, y0 = h - 14 - barH, cy = y0 + barH / 2;
+	const D2D1_RECT_F bar = D2D1::RectF(x0, y0, x0 + barW, y0 + barH);
+	fillRound(rt, D2D1::RectF(bar.left, bar.top + 3, bar.right, bar.bottom + 3), 14, D2D1::ColorF(0, 0, 0, 0.30f));
+	fillRound(rt, bar, 14, D2D1::ColorF(0.055f, 0.070f, 0.090f, 0.94f));
+	strokeRound(rt, bar, 14, withAlpha(on, 0.22f));
+
+	const bool paused = !win->running();
+	const double t = nowSeconds();
+	const float breathe = paused ? 1.0f : (float)(0.6 + 0.4 * std::sin(t * 3.2));
+	const D2D1_COLOR_F light = paused ? amber : live;
+	float x = x0 + 18;
+	fillCircle(rt, D2D1::Point2F(x + 9, cy), 9, withAlpha(light, 0.12f * breathe));
+	fillCircle(rt, D2D1::Point2F(x + 9, cy), 4, withAlpha(light, 0.55f + 0.45f * breathe));
+	x += 28;
+	drawText(rt, "SIMULATION", D2D1::RectF(x, cy - 15, x + 80, cy - 3), 9, dim);
+	drawText(rt, paused ? "PAUSED" : "LIVE", D2D1::RectF(x, cy - 3, x + 80, cy + 13), 13, paused ? amber : ink, TextAlign::Leading, true);
+	x += 70 + 14;
+	auto divider = [&] { fillRect(rt, D2D1::RectF(x, cy - 14, x + 1, cy + 14), D2D1::ColorF(1, 1, 1, 0.08f)); x += 1 + 14; };
+	divider();
+	auto button = [&](wchar_t glyph, bool lit, D2D1_COLOR_F color, int command) {
+		const D2D1_RECT_F r = D2D1::RectF(x, cy - 16, x + 32, cy + 16);
+		const bool hot = hotHit == (int)hits.size();
+		fillRound(rt, r, 9, lit ? withAlpha(on, 0.18f) : D2D1::ColorF(1, 1, 1, hot ? 0.12f : 0.07f));
+		strokeRound(rt, r, 9, D2D1::ColorF(1, 1, 1, 0.08f));
+		drawIcon(rt, glyph, r, 13, color);
+		hits.push_back({ r, command });
+		x += 32 + 8;
+	};
+	button(paused ? Icon::Play : Icon::Pause, paused, paused ? on : ink, CMD_RUNNING);
+	button(Icon::Step, false, ink, CMD_STEP);
+	x += 6;
+	divider();
+	// Speed, fast on the right.
+	drawText(rt, "SPEED", D2D1::RectF(x, cy - 18, x + 60, cy - 6), 9, dim);
+	const float trackW = 150, ty = cy + 5;
+	sliderTrack = D2D1::RectF(x, ty - 10, x + trackW, ty + 10);
+	const float f = (float)speedFraction(cl_document_step_ms(win->document()));
+	fillRound(rt, D2D1::RectF(x, ty - 2, x + trackW, ty + 2), 2, D2D1::ColorF(1, 1, 1, 0.12f));
+	fillRound(rt, D2D1::RectF(x, ty - 2, x + std::max(4.0f, trackW * f), ty + 2), 2, withAlpha(on, 0.75f));
+	fillCircle(rt, D2D1::Point2F(x + trackW * f, ty), 10, withAlpha(on, 0.14f));
+	fillCircle(rt, D2D1::Point2F(x + trackW * f, ty), 6, D2D1::ColorF(0.92f, 1, 1));
+	x += trackW + 12;
+	drawText(rt, strf("%d ms / step", cl_document_step_ms(win->document())), D2D1::RectF(x, ty - 8, x + 84, ty + 8), 11, ink);
+	x += 84 + 14;
+	divider();
+
+	// The Done button at the right end; the chips in what's left.
+	const float doneW = 70;
+	const D2D1_RECT_F done = D2D1::RectF(x0 + barW - 18 - doneW, cy - 15, x0 + barW - 18, cy + 15);
+	const bool doneHot = hotHit == (int)hits.size();
+	fillRound(rt, done, 9, D2D1::ColorF(1, 1, 1, doneHot ? 0.12f : 0.07f));
+	strokeRound(rt, done, 9, D2D1::ColorF(1, 1, 1, 0.10f));
+	drawText(rt, "Done", D2D1::RectF(done.left + 13, done.top, done.left + 46, done.bottom), 12, ink);
+	drawText(rt, "esc", D2D1::RectF(done.left + 44, done.top + 1, done.right, done.bottom), 9, dim);
+	hits.push_back({ done, CMD_SIM_VIEW });
+
+	CLSimChip chips[64];
+	const int n = std::min(64, cl_simview_chips(win->document(), page(), chips, 64));
+	std::vector<CLSimChip> ins, outs;
+	for (int i = 0; i < n; i++) (chips[i].isInput ? ins : outs).push_back(chips[i]);
+	const float room = done.left - 14 - x;
+	auto rowWidth = [](size_t count) { return count ? 22.0f + 15.0f * count : 0.0f; };
+	size_t cap = 24;
+	while (cap > 0 && rowWidth(std::min(cap, ins.size())) + rowWidth(std::min(cap, outs.size())) + 14 > room) cap /= 2;
+	if (cap == 0) return;
+	auto row = [&](const char* label, const std::vector<CLSimChip>& list) {
+		if (list.empty()) return;
+		drawText(rt, label, D2D1::RectF(x, cy - 8, x + 24, cy + 8), 9, dim);
+		x += 22;
+		for (size_t i = 0; i < std::min(cap, list.size()); i++) {
+			const D2D1_RECT_F c = D2D1::RectF(x, cy - 5, x + 10, cy + 5);
+			if (list[i].lit) fillRound(rt, D2D1::RectF(c.left - 3, c.top - 3, c.right + 3, c.bottom + 3), 5, withAlpha(on, 0.16f));
+			fillRound(rt, c, 3, list[i].lit ? on : D2D1::ColorF(1, 1, 1, 0.10f));
+			x += 15;
+		}
+		x += 14;
+	};
+	row("IN", ins);
+	row("OUT", outs);
+}
+
+// Tidy Up's preview and Lock: a bar over the top of the canvas with what's
+// happening and its buttons.
+void Canvas::drawBanner(ID2D1RenderTarget* rt, float w) {
+	std::string text;
+	std::vector<CircuitWindow::BannerButton> buttons;
+	if (!win->banner(text, buttons)) return;
+	const Chrome c = chrome();
+	const D2D1_COLOR_F ink = c.barInk();
+	std::vector<float> bw;
+	float total = 16 + textWidth(text, 12) + 12;
+	for (const auto& b : buttons) { bw.push_back(textWidth(b.label, 12) + 22); total += bw.back() + 6; }
+	total += 6;
+	if (win->locked()) total += 20;
+	const float x0 = std::max(8.0f, (w - total) / 2), y0 = 12, hgt = 38;
+	const D2D1_RECT_F pill = D2D1::RectF(x0, y0, x0 + total, y0 + hgt);
+	fillRound(rt, D2D1::RectF(pill.left, pill.top + 2, pill.right, pill.bottom + 2), hgt / 2, D2D1::ColorF(0, 0, 0, c.dark ? 0.35f : 0.10f));
+	fillRound(rt, pill, hgt / 2, c.dark ? rgb255(40, 43, 50, 0.97f) : D2D1::ColorF(1, 1, 1, 0.97f));
+	strokeRound(rt, pill, hgt / 2, withAlpha(ink, c.dark ? 0.14f : 0.10f));
+	float x = x0 + 16;
+	if (win->locked()) {
+		drawIcon(rt, Icon::Lock, D2D1::RectF(x - 2, y0, x + 16, y0 + hgt), 12, withAlpha(ink, 0.8f));
+		x += 20;
+	}
+	drawText(rt, text, D2D1::RectF(x, y0, x + textWidth(text, 12) + 2, y0 + hgt), 12, ink);
+	x += textWidth(text, 12) + 12;
+	for (size_t i = 0; i < buttons.size(); i++) {
+		const D2D1_RECT_F r = D2D1::RectF(x, y0 + 6, x + bw[i], y0 + hgt - 6);
+		const bool hot = hotHit == (int)hits.size();
+		const bool primary = i == 0;
+		fillRound(rt, r, 7, primary ? withAlpha(c.accent(), hot ? 1.0f : 0.9f) : withAlpha(ink, hot ? 0.14f : 0.08f));
+		drawText(rt, buttons[i].label, r, 12, primary ? D2D1::ColorF(1, 1, 1, 1) : ink, TextAlign::Center, primary);
+		hits.push_back({ r, buttons[i].command });
+		x += bw[i] + 6;
+	}
+}
+
+// A note (Saved, Copied...) over the bottom of the canvas, as a dark pill
+// that fades.
+void Canvas::drawToast(ID2D1RenderTarget* rt, float w, float h) {
+	std::string text;
+	double alpha = 0;
+	if (!win->toast(text, alpha)) return;
+	const float a = (float)alpha;
+	const float tw = std::min(w - 40, textWidth(text, 12) + 32), th = 32;
+	const float bottom = h - 16 - (win->simView() ? 52 + 14 : 0);
+	const D2D1_RECT_F r = D2D1::RectF((w - tw) / 2, bottom - th, (w + tw) / 2, bottom);
+	const bool dark = prefs().dark || win->simView();
+	fillRound(rt, D2D1::RectF(r.left, r.top + 2, r.right, r.bottom + 2), th / 2, D2D1::ColorF(0, 0, 0, 0.18f * a));
+	fillRound(rt, r, th / 2, dark ? D2D1::ColorF(0.24f, 0.26f, 0.30f, 0.96f * a) : D2D1::ColorF(0.13f, 0.14f, 0.16f, 0.92f * a));
+	drawText(rt, text, D2D1::RectF(r.left + 14, r.top, r.right - 14, r.bottom), 12, D2D1::ColorF(1, 1, 1, a), TextAlign::Center);
+}
+
+bool Canvas::overlayPress(double vx, double vy) {
+	const float x = (float)vx, y = (float)vy;
+	if (inRect(sliderTrack, x, y) && sliderTrack.right > sliderTrack.left) {
+		drag = Drag::Slider;
+		SetCapture(hwnd);
+		setSpeedAt(vx);
+		return true;
+	}
+	for (const OverlayHit& h : hits) {
+		if (!inRect(h.rect, x, y)) continue;
+		win->run(h.command);
+		redraw();
+		return true;
+	}
+	return false;
+}
+
+void Canvas::setSpeedAt(double vx) {
+	const float f = (float)((vx - sliderTrack.left) / std::max(1.0f, sliderTrack.right - sliderTrack.left));
+	win->setStepMs(speedFromFraction(f));
+	redraw();
 }
 
 void Canvas::drawBox(ID2D1RenderTarget* rt, double l, double b, double r, double t, const RGBA& accent, double alpha) {
@@ -466,6 +643,7 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 		return;
 	}
 	if (button != 1) return;
+	if (overlayPress(vx, vy)) return;
 
 	// Windows sends the second press of a double-click as a double-click
 	// only; GTK and AppKit send it as a press too. Take it as a press first.
@@ -527,7 +705,17 @@ void Canvas::onMotion(double vx, double vy) {
 	double wx, wy;
 	worldPoint(vx, vy, wx, wy);
 	win->pointerMoved(wx, wy);
+	if (drag == Drag::None) {
+		int h = -1;
+		for (int i = 0; i < (int)hits.size(); i++) if (inRect(hits[i].rect, (float)vx, (float)vy)) h = i;
+		if (h != hotHit) { hotHit = h; InvalidateRect(hwnd, nullptr, FALSE); }
+		if (h >= 0 || inRect(sliderTrack, (float)vx, (float)vy)) { setCursor(IDC_HAND); return; }
+		if (cursorNow == IDC_HAND && !spaceDown) setCursor(nullptr);
+	}
 	switch (drag) {
+	case Drag::Slider:
+		setSpeedAt(vx);
+		break;
 	case Drag::Pan:
 		pan(dx, dy);
 		break;
@@ -556,6 +744,9 @@ void Canvas::onRelease(int button, double vx, double vy) {
 		if (GetCapture() == hwnd) ReleaseCapture();
 		cl_edit_release(doc, wx, wy);
 		win->edited();
+	} else if (drag == Drag::Slider && button == 1) {
+		drag = Drag::None;
+		if (GetCapture() == hwnd) ReleaseCapture();
 	} else if (drag == Drag::Pan && (button == 1 || button == 2)) {
 		drag = Drag::None;
 		if (GetCapture() == hwnd) ReleaseCapture();

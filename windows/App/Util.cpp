@@ -200,13 +200,13 @@ void Prefs::load() {
 	rightClickRotate = r.b("rightClickRotate", rightClickRotate);
 	duplicateUsesClipboard = r.b("duplicateClipboard", duplicateUsesClipboard);
 	showPalette = r.b("showPalette", showPalette);
-	showStatus = r.b("showStatus", showStatus);
+	showStatus = r.b("statusBar", showStatus);
 	showGateNames = r.b("showGateNames", showGateNames);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
 	windowHeight = r.i("windowHeight", windowHeight, 300, 20000);
 	windowMaximized = r.b("windowMaximized", windowMaximized);
-	paletteWidth = r.i("paletteWidth", paletteWidth, 120, 800);
+	paletteWidth = r.i("sidePanelWidth", paletteWidth, 160, 800);
 	lastFolder = r.s("lastFolder", lastFolder);
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
@@ -242,13 +242,13 @@ void Prefs::save() const {
 	o << "rightClickRotate=" << b(rightClickRotate) << "\n";
 	o << "duplicateClipboard=" << b(duplicateUsesClipboard) << "\n";
 	o << "showPalette=" << b(showPalette) << "\n";
-	o << "showStatus=" << b(showStatus) << "\n";
+	o << "statusBar=" << b(showStatus) << "\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
 	o << "windowHeight=" << windowHeight << "\n";
 	o << "windowMaximized=" << b(windowMaximized) << "\n";
-	o << "paletteWidth=" << paletteWidth << "\n";
+	o << "sidePanelWidth=" << paletteWidth << "\n";
 	o << "lastFolder=" << lastFolder << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	const std::string text = o.str();
@@ -292,7 +292,23 @@ bool systemPrefersDark() {
 	return value == 0;
 }
 
+// Popup menus in the app's light or dark. Windows has no documented way to
+// ask for this; uxtheme's SetPreferredAppMode (ordinal 135, Windows 10 1903
+// and later) is what Explorer, Notepad and Terminal use. Missing, the menus
+// simply stay light.
+static void setMenuTheme(bool dark) {
+	static HMODULE ux = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	if (ux == nullptr) return;
+	using SetMode = int(WINAPI*)(int);
+	using Flush = void(WINAPI*)();
+	auto set = reinterpret_cast<SetMode>(reinterpret_cast<void*>(GetProcAddress(ux, MAKEINTRESOURCEA(135))));
+	auto flush = reinterpret_cast<Flush>(reinterpret_cast<void*>(GetProcAddress(ux, MAKEINTRESOURCEA(136))));
+	if (set) set(dark ? 2 : 3);   // force dark, force light
+	if (flush) flush();
+}
+
 void applyTheme() {
+	setMenuTheme(prefs().dark);
 	for (CircuitWindow* w : circuitWindows()) w->themeChanged();
 }
 

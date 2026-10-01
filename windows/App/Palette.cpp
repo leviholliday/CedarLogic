@@ -2,6 +2,8 @@
 
 #include "Palette.h"
 #include "Canvas.h"
+#include "Chrome.h"
+#include "Drawn.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -12,13 +14,47 @@ namespace {
 const wchar_t* kHostClass = L"CedarLogicPalette";
 const wchar_t* kTilesClass = L"CedarLogicTiles";
 const wchar_t* kMapClass = L"CedarLogicMiniMap";
-const int kSearchId = 1, kComboId = 2;
+const int kSearchId = 1;
 // In points.
-const int kTileW = 78, kArtH = 50, kCaptionH = 16, kGap = 2, kPad = 6, kMapH = 120;
-
-RGBA panelColor(bool dark) { return dark ? RGBA{ 0.125, 0.13, 0.145, 1 } : RGBA{ 0.965, 0.968, 0.975, 1 }; }
+const float kTileW = 78, kArtH = 46, kCaptionH = 16, kGap = 2, kPad = 8, kMapH = 132, kPickerH = 28, kFieldH = 28;
 
 }  // namespace
+
+// The category picker at the top of the panel: the category's name in a
+// soft rounded box, with a chevron; a click lists them all.
+class CategoryButton : public Drawn {
+public:
+	CategoryButton(GatePalette* palette, HWND parent) : palette(palette) { create(parent); }
+
+protected:
+	void paint(ID2D1RenderTarget* rt, float w, float h) override {
+		const Chrome c = chrome();
+		rt->Clear(c.panel());
+		const D2D1_RECT_F r = D2D1::RectF(0.5f, 0.5f, w - 0.5f, h - 0.5f);
+		fillRound(rt, r, 7, c.dark ? D2D1::ColorF(1, 1, 1, hot ? 0.10f : 0.06f) : D2D1::ColorF(0, 0, 0, hot ? 0.07f : 0.045f));
+		strokeRound(rt, r, 7, c.hairline());
+		const D2D1_COLOR_F ink = c.barInk();
+		drawText(rt, palette->categoryTitle(), D2D1::RectF(10, 0, w - 26, h), 12, ink, TextAlign::Center, true);
+		drawIcon(rt, Icon::ChevronDown, D2D1::RectF(w - 24, 0, w - 8, h), 9, withAlpha(ink, 0.6f));
+	}
+	void mouseMove(float, float) override { if (!hot) { hot = true; redraw(); } }
+	void mouseLeave() override { hot = false; redraw(); }
+	void mouseDown(int button, float, float, bool) override {
+		if (button != 1) return;
+		if (GetCapture() == hwnd) ReleaseCapture();
+		RECT rc;
+		GetClientRect(hwnd, &rc);
+		POINT p = { 0, rc.bottom + 2 };
+		ClientToScreen(hwnd, &p);
+		palette->chooseCategory(p);
+		hot = false;
+		redraw();
+	}
+
+private:
+	GatePalette* palette;
+	bool hot = false;
+};
 
 void registerPaletteClasses() {
 	WNDCLASSEXW wc = {};
@@ -26,11 +62,9 @@ void registerPaletteClasses() {
 	wc.lpfnWndProc = GatePalette::hostProc;
 	wc.hInstance = appInstance();
 	wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
 	wc.lpszClassName = kHostClass;
 	RegisterClassExW(&wc);
 	wc.lpfnWndProc = GatePalette::tilesProc;
-	wc.hbrBackground = nullptr;
 	wc.lpszClassName = kTilesClass;
 	RegisterClassExW(&wc);
 	wc.lpfnWndProc = MiniMap::proc;
@@ -43,13 +77,11 @@ void registerPaletteClasses() {
 GatePalette::GatePalette(CircuitWindow* window, HWND parent) : win(window) {
 	host = CreateWindowExW(WS_EX_CONTROLPARENT, kHostClass, L"", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, 0, 10, 10,
 	                       parent, nullptr, appInstance(), this);
-	search = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 10, 10,
+	search = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 10, 10,
 	                         host, (HMENU)(INT_PTR)kSearchId, appInstance(), nullptr);
 	SendMessageW(search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Find a gate");
-	combo = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 10, 300,
-	                        host, (HMENU)(INT_PTR)kComboId, appInstance(), nullptr);
-	tiles = CreateWindowExW(0, kTilesClass, L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL, 0, 0, 10, 10, host, nullptr,
-	                        appInstance(), this);
+	picker = new CategoryButton(this, host);
+	tiles = CreateWindowExW(0, kTilesClass, L"", WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, host, nullptr, appInstance(), this);
 	map = new MiniMap(window, host);
 
 	for (int c = 0; c < cl_library_category_count(); c++) {
@@ -64,13 +96,8 @@ GatePalette::GatePalette(CircuitWindow* window, HWND parent) : win(window) {
 			if (g.caption.empty()) g.caption = g.name;
 			cat.gates.push_back(g);
 		}
-		if (cat.gates.empty()) continue;
-		const int n = (int)categories.size() + 1;
-		const std::string label = n <= 10 ? strf("%s   (Shift+%d)", cat.title.c_str(), n % 10) : cat.title;
-		SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)W(label).c_str());
-		categories.push_back(cat);
+		if (!cat.gates.empty()) categories.push_back(cat);
 	}
-	if (!categories.empty()) SendMessageW(combo, CB_SETCURSEL, 0, 0);
 	dpiChanged();
 	fill();
 }
@@ -78,6 +105,9 @@ GatePalette::GatePalette(CircuitWindow* window, HWND parent) : win(window) {
 GatePalette::~GatePalette() {
 	delete map;
 	map = nullptr;
+	delete picker;
+	picker = nullptr;
+	if (fieldBrush) DeleteObject(fieldBrush);
 	if (host) {
 		SetWindowLongPtrW(tiles, GWLP_USERDATA, 0);
 		SetWindowLongPtrW(host, GWLP_USERDATA, 0);
@@ -90,17 +120,39 @@ void GatePalette::dpiChanged() {
 	layout();
 }
 
+std::string GatePalette::categoryTitle() const {
+	if (GetWindowTextLengthW(search) > 0) return "Search";
+	return category >= 0 && category < (int)categories.size() ? categories[category].title : std::string();
+}
+
+void GatePalette::chooseCategory(POINT screen) {
+	HMENU m = CreatePopupMenu();
+	for (int i = 0; i < (int)categories.size(); i++) {
+		std::string label = categories[i].title;
+		if (i < 10) label += strf("\tShift+%d", (i + 1) % 10);
+		AppendMenuW(m, MF_STRING | (i == category ? MF_CHECKED : 0), i + 1, W(label).c_str());
+	}
+	const int r = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, screen.x, screen.y, 0, host, nullptr);
+	DestroyMenu(m);
+	if (r > 0) showCategory(r - 1);
+}
+
 void GatePalette::showCategory(int index) {
 	if (index < 0 || index >= (int)categories.size()) return;
-	SetWindowTextW(search, L"");
-	SendMessageW(combo, CB_SETCURSEL, index, 0);
-	fill();
+	category = index;
+	if (GetWindowTextLengthW(search) > 0) SetWindowTextW(search, L"");   // fills
+	else fill();
+	picker->redraw();
 }
 
 void GatePalette::focusSearch() { SetFocus(search); }
 
 void GatePalette::themeChanged() {
+	if (fieldBrush) { DeleteObject(fieldBrush); fieldBrush = nullptr; }
+	InvalidateRect(host, nullptr, TRUE);
+	InvalidateRect(search, nullptr, TRUE);
 	InvalidateRect(tiles, nullptr, FALSE);
+	if (picker) picker->redraw();
 	if (map) map->themeChanged();
 }
 
@@ -113,78 +165,137 @@ void GatePalette::fill() {
 			for (const Gate& g : c.gates)
 				if (lowerCase(g.caption).find(query) != std::string::npos || lowerCase(g.name).find(query) != std::string::npos)
 					shown.push_back(g);
-	} else {
-		const int i = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
-		if (i >= 0 && i < (int)categories.size()) shown = categories[i].gates;
+	} else if (category >= 0 && category < (int)categories.size()) {
+		shown = categories[category].gates;
 	}
 	scrollY = 0;
 	hover = pressed = -1;
-	updateScroll();
+	if (picker) picker->redraw();
 	InvalidateRect(tiles, nullptr, FALSE);
 }
 
-void GatePalette::layout() {
-	if (tiles == nullptr || search == nullptr || combo == nullptr) return;   // still being made
+RECT GatePalette::searchFrame() const {
 	RECT rc;
 	GetClientRect(host, &rc);
 	const UINT dpi = dpiOf(host);
-	const int w = rc.right, h = rc.bottom, pad = scaled(kPad, dpi);
-	const int editH = scaled(24, dpi);
-	MoveWindow(search, pad, pad, std::max(10, w - 2 * pad), editH, TRUE);
-	MoveWindow(combo, pad, pad + editH + pad, std::max(10, w - 2 * pad), scaled(320, dpi), TRUE);
-	RECT cr;
-	GetWindowRect(combo, &cr);
-	const int comboH = cr.bottom - cr.top;
-	const int top = pad + editH + pad + comboH + pad;
-	const int mapH = scaled(kMapH, dpi);
-	MoveWindow(tiles, 0, top, w, std::max(10, h - top - mapH - scaled(1, dpi)), TRUE);
+	const int pad = scaled((int)kPad, dpi);
+	const int top = pad + scaled((int)kPickerH, dpi) + scaled(6, dpi);
+	return RECT{ pad, top, rc.right - pad, top + scaled((int)kFieldH, dpi) };
+}
+
+void GatePalette::layout() {
+	if (tiles == nullptr || search == nullptr || picker == nullptr) return;   // still being made
+	RECT rc;
+	GetClientRect(host, &rc);
+	const UINT dpi = dpiOf(host);
+	const int w = rc.right, h = rc.bottom, pad = scaled((int)kPad, dpi);
+	MoveWindow(picker->widget(), pad, pad, std::max(10, w - 2 * pad), scaled((int)kPickerH, dpi), TRUE);
+	// The edit sits inside the drawn field, its text centred on the line.
+	const RECT f = searchFrame();
+	HDC dc = GetDC(search);
+	HGDIOBJ old = SelectObject(dc, uiFont(dpi));
+	TEXTMETRICW tm = {};
+	GetTextMetricsW(dc, &tm);
+	SelectObject(dc, old);
+	ReleaseDC(search, dc);
+	const int lineH = tm.tmHeight;
+	const int iconW = scaled(26, dpi);
+	MoveWindow(search, f.left + iconW, f.top + (f.bottom - f.top - lineH) / 2, std::max(10, (int)(f.right - f.left) - iconW - scaled(8, dpi)), lineH, TRUE);
+	const int top = f.bottom + scaled(6, dpi);
+	const int mapH = scaled((int)kMapH, dpi);
+	MoveWindow(tiles, 0, top, w, std::max(10, h - top - mapH), TRUE);
 	if (map) MoveWindow(map->widget(), 0, h - mapH, w, mapH, TRUE);
-	updateScroll();
+	clampScroll();
+	InvalidateRect(host, nullptr, TRUE);
+}
+
+void GatePalette::paintHost(HDC dc) {
+	const Chrome c = chrome();
+	RECT rc;
+	GetClientRect(host, &rc);
+	HBRUSH bg = CreateSolidBrush(c.gdi(c.panel()));
+	FillRect(dc, &rc, bg);
+	DeleteObject(bg);
+	// The search field: a rounded box a shade off the panel, a hairline round
+	// it, the magnifier in front.
+	const RECT f = searchFrame();
+	const UINT dpi = dpiOf(host);
+	const D2D1_COLOR_F field = c.dark ? D2D1::ColorF(0.16f, 0.17f, 0.20f) : D2D1::ColorF(1, 1, 1);
+	HBRUSH fb = CreateSolidBrush(c.gdi(field));
+	HPEN pen = CreatePen(PS_SOLID, 1, c.dark ? RGB(58, 62, 72) : RGB(214, 216, 222));
+	HGDIOBJ ob = SelectObject(dc, fb), op = SelectObject(dc, pen);
+	const int r = scaled(14, dpi);
+	RoundRect(dc, f.left, f.top, f.right, f.bottom, r, r);
+	SelectObject(dc, ob);
+	SelectObject(dc, op);
+	DeleteObject(fb);
+	DeleteObject(pen);
+	LOGFONTW lf = {};
+	lf.lfHeight = -scaled(12, dpi);
+	wcscpy(lf.lfFaceName, L"Segoe MDL2 Assets");
+	HFONT icons = CreateFontIndirectW(&lf);
+	HGDIOBJ of = SelectObject(dc, icons);
+	SetBkMode(dc, TRANSPARENT);
+	SetTextColor(dc, c.dark ? RGB(140, 146, 158) : RGB(120, 124, 132));
+	RECT ir = { f.left + scaled(4, dpi), f.top, f.left + scaled(26, dpi), f.bottom };
+	const wchar_t glass = Icon::Search;
+	DrawTextW(dc, &glass, 1, &ir, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	SelectObject(dc, of);
+	DeleteObject(icons);
 }
 
 // In points.
-void GatePalette::layoutTiles(int& columns, int& tileW, int& tileH, int& gap, int& pad) const {
+void GatePalette::layoutTiles(int& columns, float& tileW, float& tileH) const {
 	RECT rc;
 	GetClientRect(tiles, &rc);
 	const double s = dpiOf(tiles) / 96.0;
-	const int width = (int)(rc.right / s);
-	tileW = kTileW;
+	const float width = (float)(rc.right / s);
 	tileH = kArtH + (prefs().showGateNames ? kCaptionH : 0);
-	gap = kGap;
-	pad = kPad;
-	columns = std::max(1, (width - 2 * pad + gap) / (tileW + gap));
+	columns = std::max(1, (int)((width - 2 * kPad + kGap) / (kTileW + kGap)));
 	// Spread whatever width is left over the columns.
-	tileW = std::max(kTileW, (width - 2 * pad - (columns - 1) * gap) / columns);
+	tileW = std::max(kTileW, (width - 2 * kPad - (columns - 1) * kGap) / columns);
 }
 
-int GatePalette::contentHeight() const {
-	int columns, tileW, tileH, gap, pad;
-	layoutTiles(columns, tileW, tileH, gap, pad);
+float GatePalette::contentHeight() const {
+	int columns;
+	float tileW, tileH;
+	layoutTiles(columns, tileW, tileH);
 	const int rows = ((int)shown.size() + columns - 1) / columns;
-	return 2 * pad + rows * tileH + std::max(0, rows - 1) * gap;
+	return 2 * kPad + rows * tileH + std::max(0, rows - 1) * kGap;
 }
 
-void GatePalette::updateScroll() {
-	if (tiles == nullptr) return;
+float GatePalette::viewHeight() const {
 	RECT rc;
 	GetClientRect(tiles, &rc);
-	const double s = dpiOf(tiles) / 96.0;
-	const int page = (int)(rc.bottom / s);
-	const int total = contentHeight();
-	scrollY = std::max(0, std::min(scrollY, total - page));
-	SCROLLINFO si = { sizeof si, SIF_ALL | SIF_DISABLENOSCROLL, 0, std::max(0, total - 1), (UINT)std::max(1, page), scrollY, 0 };
-	SetScrollInfo(tiles, SB_VERT, &si, TRUE);
+	return (float)(rc.bottom / (dpiOf(tiles) / 96.0));
 }
 
-int GatePalette::tileAt(int x, int y) const {
-	const double s = dpiOf(tiles) / 96.0;
-	const int px = (int)(x / s), py = (int)(y / s) + scrollY;
-	int columns, tileW, tileH, gap, pad;
-	layoutTiles(columns, tileW, tileH, gap, pad);
-	if (px < pad || py < pad) return -1;
-	const int col = (px - pad) / (tileW + gap), row = (py - pad) / (tileH + gap);
+void GatePalette::clampScroll() {
+	if (tiles == nullptr) return;
+	scrollY = std::max(0.0f, std::min(scrollY, contentHeight() - viewHeight()));
+}
+
+// The overlay scrollbar's thumb (points), or an empty rect when everything fits.
+D2D1_RECT_F GatePalette::scrollThumb() const {
+	const float view = viewHeight(), total = contentHeight();
+	if (total <= view + 1) return D2D1::RectF(0, 0, 0, 0);
+	RECT rc;
+	GetClientRect(tiles, &rc);
+	const float w = (float)(rc.right / (dpiOf(tiles) / 96.0));
+	const float th = std::max(28.0f, view * view / total);
+	const float ty = (view - th) * scrollY / (total - view);
+	return D2D1::RectF(w - 9, ty + 2, w - 3, ty + th - 2);
+}
+
+int GatePalette::tileAt(float px, float py) const {
+	py += scrollY;
+	int columns;
+	float tileW, tileH;
+	layoutTiles(columns, tileW, tileH);
+	if (px < kPad || py < kPad) return -1;
+	const int col = (int)((px - kPad) / (tileW + kGap)), row = (int)((py - kPad) / (tileH + kGap));
 	if (col >= columns) return -1;
-	if ((px - pad) % (tileW + gap) >= tileW || (py - pad) % (tileH + gap) >= tileH) return -1;
+	if (std::fmod(px - kPad, tileW + kGap) >= tileW || std::fmod(py - kPad, tileH + kGap) >= tileH) return -1;
 	const int i = row * columns + col;
 	return i >= 0 && i < (int)shown.size() ? i : -1;
 }
@@ -194,44 +305,38 @@ void GatePalette::paintTiles() {
 	BeginPaint(tiles, &ps);
 	ID2D1HwndRenderTarget* rt = surface.begin(tiles);
 	if (rt) {
-		const bool dark = prefs().dark;
+		const Chrome c = chrome();
+		const bool dark = c.dark;
 		const double s = surface.scale();
-		rt->Clear(d2dColor(panelColor(dark)));
+		rt->Clear(c.panel());
 		RECT rc;
 		GetClientRect(tiles, &rc);
-		const double viewH = rc.bottom / s;
-		int columns, tileW, tileH, gap, pad;
-		layoutTiles(columns, tileW, tileH, gap, pad);
-		const double ink = dark ? 1 : 0;
-		ID2D1SolidColorBrush* brush = nullptr;
-		rt->CreateSolidColorBrush(D2D1::ColorF((float)ink, (float)ink, (float)ink, 0.08f), &brush);
+		const float viewW = (float)(rc.right / s), viewH = (float)(rc.bottom / s);
+		int columns;
+		float tileW, tileH;
+		layoutTiles(columns, tileW, tileH);
+		const D2D1_COLOR_F ink = c.barInk();
 		for (int i = 0; i < (int)shown.size(); i++) {
 			const int row = i / columns, col = i % columns;
-			const float x = (float)(pad + col * (tileW + gap));
-			const float y = (float)(pad + row * (tileH + gap) - scrollY);
+			const float x = kPad + col * (tileW + kGap);
+			const float y = kPad + row * (tileH + kGap) - scrollY;
 			if (y + tileH < 0 || y > viewH) continue;
-			if ((i == hover || i == pressed) && brush) {
-				brush->SetColor(D2D1::ColorF((float)ink, (float)ink, (float)ink, i == pressed ? 0.15f : 0.08f));
-				rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x + tileW, y + tileH), 6, 6), brush);
-			}
+			if (i == hover || i == pressed)
+				fillRound(rt, D2D1::RectF(x, y, x + tileW, y + tileH), 8, withAlpha(ink, i == pressed ? 0.14f : 0.07f));
 			// The engine draws the gate in the tile's own points.
-			rt->SetTransform(D2D1::Matrix3x2F::Translation(x, y) * D2D1::Matrix3x2F::Scale((float)s, (float)s));
-			guarded("drawing the palette", [&] {
-				cl_library_draw_gate(shown[i].name.c_str(), rt, tileW, kArtH, s, dark);
-			});
+			rt->SetTransform(D2D1::Matrix3x2F::Translation(x, y + 2) * D2D1::Matrix3x2F::Scale((float)s, (float)s));
+			guarded("drawing the palette", [&] { cl_library_draw_gate(shown[i].name.c_str(), rt, tileW, kArtH - 4, s, dark); });
 			rt->SetTransform(D2D1::Matrix3x2F::Scale((float)s, (float)s));
-			if (prefs().showGateNames) {
-				const float c = dark ? 0.72f : 0.35f;
-				drawText(rt, shown[i].caption, D2D1::RectF(x + 2, y + kArtH, x + tileW - 2, y + tileH), 10.5f,
-				         D2D1::ColorF(c, c, c, 1), TextAlign::Center);
-			}
+			if (prefs().showGateNames)
+				drawText(rt, shown[i].caption, D2D1::RectF(x + 2, y + kArtH - 2, x + tileW - 2, y + tileH - 2), 10,
+				         withAlpha(ink, 0.55f), TextAlign::Center);
 		}
-		if (shown.empty()) {
-			const float c = dark ? 0.6f : 0.45f;
-			drawText(rt, "No gates match.", D2D1::RectF(0, 8, (float)(rc.right / s), 40), 12, D2D1::ColorF(c, c, c, 1),
-			         TextAlign::Center);
-		}
-		if (brush) brush->Release();
+		if (shown.empty())
+			drawText(rt, "No gates match.", D2D1::RectF(0, 8, viewW, 40), 12, withAlpha(ink, 0.5f), TextAlign::Center);
+		// The overlay scrollbar, quiet until the pointer's over the panel.
+		const D2D1_RECT_F thumb = scrollThumb();
+		if (thumb.bottom > thumb.top)
+			fillRound(rt, thumb, 3, withAlpha(ink, scrollDrag || scrollHot ? 0.45f : (hover >= 0 ? 0.22f : 0.14f)));
 		surface.end();
 	}
 	EndPaint(tiles, &ps);
@@ -272,13 +377,20 @@ LRESULT GatePalette::hostMessage(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_SIZE:
 		layout();
 		return 0;
+	case WM_ERASEBKGND:
+		paintHost((HDC)wp);
+		return 1;
+	case WM_CTLCOLOREDIT: {
+		// The search box in the field's colours.
+		const Chrome c = chrome();
+		const D2D1_COLOR_F field = c.dark ? D2D1::ColorF(0.16f, 0.17f, 0.20f) : D2D1::ColorF(1, 1, 1);
+		if (fieldBrush == nullptr) fieldBrush = CreateSolidBrush(c.gdi(field));
+		SetBkColor((HDC)wp, c.gdi(field));
+		SetTextColor((HDC)wp, c.gdi(c.barInk()));
+		return (LRESULT)fieldBrush;
+	}
 	case WM_COMMAND:
 		if (LOWORD(wp) == kSearchId && HIWORD(wp) == EN_CHANGE) { fill(); return 0; }
-		if (LOWORD(wp) == kComboId && HIWORD(wp) == CBN_SELCHANGE) {
-			if (GetWindowTextLengthW(search) > 0) SetWindowTextW(search, L"");   // fills
-			else fill();
-			return 0;
-		}
 		break;
 	}
 	return DefWindowProcW(host, msg, wp, lp);
@@ -299,6 +411,8 @@ LRESULT CALLBACK GatePalette::tilesProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) 
 }
 
 LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
+	const double s = dpiOf(tiles) / 96.0;
+	const float x = (float)(GET_X_LPARAM(lp) / s), y = (float)(GET_Y_LPARAM(lp) / s);
 	switch (msg) {
 	case WM_PAINT:
 		paintTiles();
@@ -306,56 +420,64 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_ERASEBKGND:
 		return 1;
 	case WM_SIZE:
-		updateScroll();
+		clampScroll();
 		InvalidateRect(tiles, nullptr, FALSE);
 		return 0;
-	case WM_VSCROLL: {
-		SCROLLINFO si = { sizeof si, SIF_ALL };
-		GetScrollInfo(tiles, SB_VERT, &si);
-		int y = si.nPos;
-		switch (LOWORD(wp)) {
-		case SB_LINEUP: y -= 30; break;
-		case SB_LINEDOWN: y += 30; break;
-		case SB_PAGEUP: y -= (int)si.nPage; break;
-		case SB_PAGEDOWN: y += (int)si.nPage; break;
-		case SB_THUMBTRACK: case SB_THUMBPOSITION: y = si.nTrackPos; break;
-		case SB_TOP: y = 0; break;
-		case SB_BOTTOM: y = si.nMax; break;
-		}
-		scrollY = y;
-		updateScroll();
-		InvalidateRect(tiles, nullptr, FALSE);
-		return 0;
-	}
 	case WM_MOUSEWHEEL:
-		scrollY -= GET_WHEEL_DELTA_WPARAM(wp) * 60 / WHEEL_DELTA;
-		updateScroll();
+		scrollY -= GET_WHEEL_DELTA_WPARAM(wp) * 60.0f / WHEEL_DELTA;
+		clampScroll();
 		InvalidateRect(tiles, nullptr, FALSE);
 		return 0;
 	case WM_MOUSEMOVE: {
-		const int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+		TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE, tiles, 0 };
+		TrackMouseEvent(&t);
+		if (scrollDrag) {
+			const float view = viewHeight(), total = contentHeight();
+			const D2D1_RECT_F th = scrollThumb();
+			const float travel = std::max(1.0f, view - (th.bottom - th.top + 4));
+			scrollY = (y - scrollGrab) / travel * (total - view);
+			clampScroll();
+			InvalidateRect(tiles, nullptr, FALSE);
+			return 0;
+		}
 		if (pressed >= 0) {
 			const int slop = scaled(4, dpiOf(tiles));
-			if (!dragging && (std::abs(x - pressAt.x) > slop || std::abs(y - pressAt.y) > slop)) {
+			if (!dragging && (std::abs(GET_X_LPARAM(lp) - pressAt.x) > slop || std::abs(GET_Y_LPARAM(lp) - pressAt.y) > slop)) {
 				dragging = true;
 				SetCursor(LoadCursor(nullptr, IDC_SIZEALL));
 			}
 			return 0;
 		}
-		const int i = tileAt(x, y);
-		if (i != hover) {
+		const D2D1_RECT_F th = scrollThumb();
+		const bool overBar = th.bottom > th.top && x >= th.left - 4;
+		const int i = overBar ? -1 : tileAt(x, y);
+		if (i != hover || overBar != scrollHot) {
 			hover = i;
+			scrollHot = overBar;
 			InvalidateRect(tiles, nullptr, FALSE);
-			TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE, tiles, 0 };
-			TrackMouseEvent(&t);
 		}
 		return 0;
 	}
 	case WM_MOUSELEAVE:
-		if (hover >= 0) { hover = -1; InvalidateRect(tiles, nullptr, FALSE); }
+		if (hover >= 0 || scrollHot) { hover = -1; scrollHot = false; InvalidateRect(tiles, nullptr, FALSE); }
 		return 0;
-	case WM_LBUTTONDOWN:
-		pressed = tileAt(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+	case WM_LBUTTONDOWN: {
+		const D2D1_RECT_F th = scrollThumb();
+		if (th.bottom > th.top && x >= th.left - 4) {
+			// On the bar: grab the thumb (a click above or below it jumps there).
+			if (y < th.top || y > th.bottom) {
+				const float view = viewHeight(), total = contentHeight();
+				scrollY = (y - (th.bottom - th.top) / 2) / std::max(1.0f, view - (th.bottom - th.top)) * (total - view);
+				clampScroll();
+			}
+			scrollDrag = true;
+			const D2D1_RECT_F now = scrollThumb();
+			scrollGrab = y - (now.top - 2);
+			SetCapture(tiles);
+			InvalidateRect(tiles, nullptr, FALSE);
+			return 0;
+		}
+		pressed = tileAt(x, y);
 		if (pressed >= 0) {
 			pressAt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
 			dragging = false;
@@ -363,7 +485,14 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 			InvalidateRect(tiles, nullptr, FALSE);
 		}
 		return 0;
+	}
 	case WM_LBUTTONUP:
+		if (scrollDrag) {
+			scrollDrag = false;
+			if (GetCapture() == tiles) ReleaseCapture();
+			InvalidateRect(tiles, nullptr, FALSE);
+			return 0;
+		}
 		if (pressed >= 0) {
 			const int was = pressed;
 			const bool dragged = dragging;
@@ -377,7 +506,11 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		return 0;
 	case WM_CAPTURECHANGED:
-		if ((HWND)lp != tiles) { pressed = -1; dragging = false; InvalidateRect(tiles, nullptr, FALSE); }
+		if ((HWND)lp != tiles) {
+			pressed = -1;
+			dragging = scrollDrag = false;
+			InvalidateRect(tiles, nullptr, FALSE);
+		}
 		return 0;
 	}
 	return DefWindowProcW(tiles, msg, wp, lp);

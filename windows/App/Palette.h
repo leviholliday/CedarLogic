@@ -13,6 +13,8 @@
 class CircuitWindow;
 class MiniMap;
 
+class CategoryButton;
+
 class GatePalette {
 public:
 	GatePalette(CircuitWindow* window, HWND parent);
@@ -24,28 +26,40 @@ public:
 	void themeChanged();
 	void dpiChanged();
 
+	// For the category button.
+	std::string categoryTitle() const;
+	void chooseCategory(POINT screen);
+
 private:
 	struct Gate { std::string name, caption; };
 	struct Category { std::string title; std::vector<Gate> gates; };
 
 	CircuitWindow* win;
-	HWND host = nullptr, search = nullptr, combo = nullptr, tiles = nullptr;
+	HWND host = nullptr, search = nullptr, tiles = nullptr;
+	CategoryButton* picker = nullptr;
 	MiniMap* map = nullptr;
 	WindowSurface surface;
+	HBRUSH fieldBrush = nullptr;
 	std::vector<Category> categories;
+	int category = 0;
 	std::vector<Gate> shown;
-	int scrollY = 0;              // pixels
+	float scrollY = 0;            // points
 	int hover = -1, pressed = -1;
-	bool dragging = false;
+	bool dragging = false, scrollDrag = false, scrollHot = false;
+	float scrollGrab = 0;
 	POINT pressAt{};
 
 	void fill();
 	void layout();
-	void layoutTiles(int& columns, int& tileW, int& tileH, int& gap, int& pad) const;
-	int contentHeight() const;
-	void updateScroll();
-	int tileAt(int x, int y) const;
+	RECT searchFrame() const;     // the search field's rounded box (host pixels)
+	void layoutTiles(int& columns, float& tileW, float& tileH) const;
+	float contentHeight() const;
+	float viewHeight() const;
+	void clampScroll();
+	D2D1_RECT_F scrollThumb() const;
+	int tileAt(float x, float y) const;
 	void paintTiles();
+	void paintHost(HDC dc);
 	void drop();
 
 	LRESULT hostMessage(UINT msg, WPARAM wp, LPARAM lp);

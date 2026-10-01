@@ -5,9 +5,14 @@
 #include "Dialogs.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "TabStrip.h"
+#include "Toolbar.h"
+#include "Chrome.h"
 
 #include <commdlg.h>
+#include <dwmapi.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <wincodec.h>
 
 #include <algorithm>
@@ -18,10 +23,11 @@ namespace {
 
 const wchar_t* kClass = L"CedarLogicWindow";
 const UINT_PTR kClockTimer = 1;
-const int kStepEditId = 3000, kTabsId = 3001;
-const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18;
+const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18, kNoteTime = 4.0;
 
 double since(double t) { return nowSeconds() - t; }
+
+const std::vector<FileFilter> kCdlFilters = { { "CedarLogic circuits (*.cdl)", "*.cdl" }, { "All files", "*.*" } };
 
 bool isCircuitWindow(CircuitWindow* w) {
 	const std::vector<CircuitWindow*>& all = circuitWindows();
@@ -37,24 +43,6 @@ HMENU submenu(HMENU parent, const char* label) {
 	return m;
 }
 
-// The toolbar's buttons: a command, its label, whether it stays pressed.
-struct ToolButton { int command; const char* label; const char* tip; bool toggle; bool gapBefore; };
-const ToolButton kToolButtons[] = {
-	{ CMD_NEW, "New", "New circuit (Ctrl+N)", false, false },
-	{ CMD_OPEN, "Open", "Open (Ctrl+O)", false, false },
-	{ CMD_SAVE, "Save", "Save (Ctrl+S)", false, false },
-	{ CMD_UNDO, "Undo", "Undo (Ctrl+Z)", false, true },
-	{ CMD_REDO, "Redo", "Redo (Ctrl+Y)", false, false },
-	{ CMD_ZOOM_IN, "Zoom In", "Zoom in (Ctrl+=)", false, true },
-	{ CMD_ZOOM_OUT, "Zoom Out", "Zoom out (Ctrl+-)", false, false },
-	{ CMD_ZOOM_FIT, "Fit", "Zoom to fit (Ctrl+0, or tap Space)", false, false },
-	{ CMD_RUNNING, "Pause", "Run or pause the simulation", true, true },
-	{ CMD_STEP, "Step", "Step once (Ctrl+Shift+R)", false, false },
-	{ CMD_SIM_VIEW, "Simulation View", "Simulation View: watch it run (Ctrl+R)", true, true },
-	{ CMD_LOCK, "Lock", "Lock: switches still work, nothing else changes", true, false },
-	{ CMD_DARK, "Dark", "Dark mode (Ctrl+Shift+D)", true, true },
-};
-
 }  // namespace
 
 void registerWindowClasses() {
@@ -63,7 +51,6 @@ void registerWindowClasses() {
 	wc.lpfnWndProc = CircuitWindow::proc;
 	wc.hInstance = appInstance();
 	wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
 	wc.hIcon = LoadIconW(appInstance(), MAKEINTRESOURCEW(1));
 	wc.hIconSm = (HICON)LoadImageW(appInstance(), MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
 	                               GetSystemMetrics(SM_CYSMICON), 0);
@@ -96,7 +83,6 @@ CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path
 }
 
 CircuitWindow::~CircuitWindow() {
-	if (tabs) RemoveWindowSubclass(tabs, tabsProc, 1);
 	delete scope;
 	scope = nullptr;
 	for (Canvas* c : canvases) delete c;
@@ -104,6 +90,11 @@ CircuitWindow::~CircuitWindow() {
 	delete palette;
 	palette = nullptr;
 	miniMap = nullptr;
+	delete toolbar;
+	toolbar = nullptr;
+	delete tabStrip;
+	tabStrip = nullptr;
+	if (menus) DestroyMenu(menus);
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
@@ -134,32 +125,26 @@ void CircuitWindow::build() {
 	}
 	setDarkTitleBar(hwnd, prefs().dark);
 	buildMenus();
-	buildToolbar();
-
-	// A bar for Tidy Up's preview, Simulation View and Lock.
-	bannerLabel = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX, 0, 0, 10, 10, hwnd,
-	                              nullptr, appInstance(), nullptr);
-
+	toolbar = new Toolbar(this, hwnd);
 	palette = new GatePalette(this, hwnd);
 	paletteHost = palette->widget();
 	miniMap = palette->miniMap();
-
-	tabs = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_FOCUSNEVER | TCS_TOOLTIPS,
-	                       0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)kTabsId, appInstance(), nullptr);
-	SetWindowSubclass(tabs, tabsProc, 1, (DWORD_PTR)this);
-	newTabButton = CreateWindowExW(0, L"BUTTON", L"+", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 10, 10, hwnd,
-	                               (HMENU)(INT_PTR)CMD_NEW_TAB, appInstance(), nullptr);
-
+	tabStrip = new TabStrip(this, hwnd);
 	statusBar = CreateWindowExW(0, STATUSCLASSNAMEW, L"", WS_CHILD | SBARS_SIZEGRIP, 0, 0, 10, 10, hwnd, nullptr,
 	                            appInstance(), nullptr);
 	setFontTree(hwnd, uiFont(dpi));
 	palette->dpiChanged();
 	ShowWindow(paletteHost, prefs().showPalette ? SW_SHOW : SW_HIDE);
 	ShowWindow(statusBar, prefs().showStatus ? SW_SHOW : SW_HIDE);
+	// The title bar is the toolbar's: tell Windows the frame changed.
+	SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+// Every menu, in one popup: the toolbar's •••, and Alt or F10. (The window
+// has no menu bar: its title bar is the toolbar.)
 void CircuitWindow::buildMenus() {
-	menuBar = CreateMenu();
+	menus = CreatePopupMenu();
+	HMENU menuBar = menus;
 	HMENU file = submenu(menuBar, "&File");
 	item(file, CMD_NEW, "&New\tCtrl+N");
 	item(file, CMD_OPEN, "&Open…\tCtrl+O");
@@ -232,123 +217,37 @@ void CircuitWindow::buildMenus() {
 	item(help, CMD_HELP, "CedarLogic &Help\tF1");
 	separator(help);
 	item(help, CMD_ABOUT, "&About CedarLogic");
-	SetMenu(hwnd, menuBar);
 }
 
-void CircuitWindow::buildToolbar() {
-	for (const ToolButton& b : kToolButtons) {
-		const DWORD style = WS_CHILD | WS_VISIBLE | (b.toggle ? (BS_AUTOCHECKBOX | BS_PUSHLIKE) : BS_PUSHBUTTON);
-		HWND h = CreateWindowExW(0, L"BUTTON", W(b.label).c_str(), style, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)b.command,
-		                         appInstance(), nullptr);
-		toolButtons.push_back(h);
-		if (b.command == CMD_RUNNING) runButton = h;
-		if (b.command == CMD_SIM_VIEW) simViewButton = h;
-		if (b.command == CMD_LOCK) lockButton = h;
-		if (b.command == CMD_DARK) darkButton = h;
-	}
-	// The step length, as the wx app's timestep box.
-	stepEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_RIGHT, 0, 0, 10, 10,
-	                           hwnd, (HMENU)(INT_PTR)kStepEditId, appInstance(), nullptr);
-	stepUpDown = CreateWindowExW(0, UPDOWN_CLASSW, L"", WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT |
-	                                 UDS_ARROWKEYS | UDS_NOTHOUSANDS, 0, 0, 10, 10, hwnd, nullptr, appInstance(), nullptr);
-	SendMessageW(stepUpDown, UDM_SETBUDDY, (WPARAM)stepEdit, 0);
-	SendMessageW(stepUpDown, UDM_SETRANGE32, 1, 500);
-	SendMessageW(stepUpDown, UDM_SETPOS32, 0, cl_document_step_ms(doc));
+int CircuitWindow::toolbarHeight() const { return (int)std::lround(Toolbar::barHeight() * dpi / 96.0); }
 
-	// Tooltips for the buttons.
-	HWND tip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP, CW_USEDEFAULT,
-	                           CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, hwnd, nullptr, appInstance(), nullptr);
-	for (size_t i = 0; i < toolButtons.size(); i++) {
-		const std::wstring text = W(kToolButtons[i].tip);
-		TTTOOLINFOW ti = {};
-		ti.cbSize = sizeof ti;
-		ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
-		ti.hwnd = hwnd;
-		ti.uId = (UINT_PTR)toolButtons[i];
-		ti.lpszText = const_cast<wchar_t*>(text.c_str());
-		SendMessageW(tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
-	}
-	TTTOOLINFOW ti = {};
-	ti.cbSize = sizeof ti;
-	ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
-	ti.hwnd = hwnd;
-	ti.uId = (UINT_PTR)stepEdit;
-	std::wstring stepTip = L"Milliseconds of circuit time per simulation step";
-	ti.lpszText = &stepTip[0];
-	SendMessageW(tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
-}
-
-int CircuitWindow::toolbarHeight() const { return scaled(38, dpi); }
-int CircuitWindow::bannerHeight() const { return bannerKind >= 0 ? scaled(36, dpi) : 0; }
-
+// The line between the side panel and the canvas, and a few pixels either
+// side of it to grab.
 RECT CircuitWindow::splitterRect() const {
 	RECT r = { 0, 0, 0, 0 };
 	if (!prefs().showPalette) return r;
 	RECT rc;
 	GetClientRect(hwnd, &rc);
-	const int top = toolbarHeight() + bannerHeight();
 	RECT sb = { 0, 0, 0, 0 };
 	if (prefs().showStatus && statusBar) GetWindowRect(statusBar, &sb);
 	const int x = scaled(prefs().paletteWidth, dpi);
-	r = { x, top, x + scaled(6, dpi), rc.bottom - (sb.bottom - sb.top) };
+	r = { x - scaled(3, dpi), toolbarHeight(), x + 1 + scaled(3, dpi), rc.bottom - (sb.bottom - sb.top) };
 	return r;
 }
 
 void CircuitWindow::layout() {
-	if (hwnd == nullptr || tabs == nullptr) return;
+	if (hwnd == nullptr || toolbar == nullptr || tabStrip == nullptr) return;
 	RECT rc;
 	GetClientRect(hwnd, &rc);
 	auto sc = [&](int v) { return scaled(v, dpi); };
-	HDWP defer = BeginDeferWindowPos(40);
+	HDWP defer = BeginDeferWindowPos(16);
 	auto place = [&](HWND h, int x, int y, int w, int hh) {
 		if (h) defer = DeferWindowPos(defer, h, nullptr, x, y, std::max(0, w), std::max(0, hh), SWP_NOZORDER | SWP_NOACTIVATE);
 	};
+	const int top = toolbarHeight();
+	place(toolbar->widget(), 0, 0, rc.right, top);
 
-	// The toolbar: buttons sized to their labels, left to right; Dark at the
-	// right end.
-	HDC dc = GetDC(hwnd);
-	HGDIOBJ old = SelectObject(dc, uiFont(dpi));
-	int x = sc(6);
-	const int by = sc(6), bh = sc(26);
-	for (size_t i = 0; i < toolButtons.size(); i++) {
-		const ToolButton& b = kToolButtons[i];
-		const std::wstring label = W(b.command == CMD_RUNNING ? "Pause" : b.label);
-		SIZE s = {};
-		GetTextExtentPoint32W(dc, label.c_str(), (int)label.size(), &s);
-		const int w = std::max(sc(44), (int)s.cx + sc(20));
-		if (b.command == CMD_DARK) {
-			place(toolButtons[i], rc.right - sc(6) - w, by, w, bh);
-			continue;
-		}
-		if (b.gapBefore) x += sc(10);
-		place(toolButtons[i], x, by, w, bh);
-		x += w + sc(3);
-		if (b.command == CMD_STEP) {
-			x += sc(4);
-			place(stepEdit, x, by + sc(1), sc(58), bh - sc(2));
-			x += sc(58);
-			place(stepUpDown, x, by + sc(1), sc(18), bh - sc(2));
-			x += sc(20);
-		}
-	}
-	SelectObject(dc, old);
-	ReleaseDC(hwnd, dc);
-
-	int top = toolbarHeight();
-	// The banner.
-	if (bannerKind >= 0) {
-		int bx = rc.right - sc(8);
-		for (auto it = bannerButtons.rbegin(); it != bannerButtons.rend(); ++it) {
-			const int w = std::max(sc(70), (int)(textWidth(windowText(*it), 9 * 96.0f / 72) * dpi / 96) + sc(24));
-			bx -= w;
-			place(*it, bx, top + sc(5), w, sc(26));
-			bx -= sc(6);
-		}
-		place(bannerLabel, sc(10), top, bx - sc(16), bannerHeight());
-		top += bannerHeight();
-	}
-
-	// The status bar sizes itself along the bottom.
+	// The status bar (off unless asked for) sizes itself along the bottom.
 	int bottom = rc.bottom;
 	if (prefs().showStatus) {
 		SendMessageW(statusBar, WM_SIZE, 0, 0);
@@ -360,20 +259,18 @@ void CircuitWindow::layout() {
 		SendMessageW(statusBar, SB_SETPARTS, 2, (LPARAM)parts);
 	}
 
+	// The side panel, a hairline, then the tabs and the canvas.
 	int left = 0;
 	if (prefs().showPalette) {
-		const int pw = std::min<int>(sc(prefs().paletteWidth), std::max<int>(sc(120), rc.right - sc(200)));
+		const int pw = std::min<int>(sc(prefs().paletteWidth), std::max<int>(sc(140), rc.right - sc(240)));
 		place(paletteHost, 0, top, pw, bottom - top);
-		left = pw + sc(6);
+		left = pw + 1;
 	}
-
-	// The tabs along the top of the canvas, the + at their right.
-	const int tabH = sc(28), plusW = sc(28);
-	place(tabs, left, top, rc.right - left - plusW - sc(4), tabH);
-	place(newTabButton, rc.right - plusW - sc(2), top + sc(2), plusW, tabH - sc(4));
-	const int canvasTop = top + tabH;
-	for (Canvas* c : canvases) place(c->widget(), left, canvasTop, rc.right - left, bottom - canvasTop);
+	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
+	place(tabStrip->widget(), left, top, rc.right - left, tabH);
+	for (Canvas* c : canvases) place(c->widget(), left, top + tabH, rc.right - left, bottom - top - tabH);
 	EndDeferWindowPos(defer);
+	toolbar->layoutNow();
 	InvalidateRect(hwnd, nullptr, TRUE);
 }
 
@@ -385,33 +282,19 @@ std::string CircuitWindow::pageName(int page) const {
 	return strf("Page %d", page + 1);
 }
 
+std::string CircuitWindow::tabName(int index) const {
+	if (index < 0 || index >= (int)canvases.size()) return std::string();
+	const int p = canvases[index]->page();
+	return p >= 0 ? pageName(p) : std::string();
+}
+
 void CircuitWindow::updateTabLabels() {
-	const int n = (int)canvases.size();
-	for (int i = 0; i < n; i++) {
-		const int p = canvases[i]->page();
-		if (p < 0) continue;
-		std::wstring text = W(pageName(p));
-		// Ampersands are shown as they are.
-		std::wstring shown;
-		for (wchar_t c : text) { if (c == L'&') shown += L'&'; shown += c; }
-		wchar_t now[512] = L"";
-		TCITEMW get = {};
-		get.mask = TCIF_TEXT;
-		get.pszText = now;
-		get.cchTextMax = 511;
-		SendMessageW(tabs, TCM_GETITEMW, i, (LPARAM)&get);
-		if (shown == now) continue;
-		TCITEMW t = {};
-		t.mask = TCIF_TEXT;
-		t.pszText = &shown[0];
-		SendMessageW(tabs, TCM_SETITEMW, i, (LPARAM)&t);
-	}
+	if (tabStrip) tabStrip->redraw();
 }
 
 // Make the tabs match the document's pages: after opening, a new page, a
 // close, an undo that brings one back, a move.
 void CircuitWindow::syncTabs() {
-	syncing = true;
 	Canvas* front = currentCanvas();
 	const uint64_t frontKey = front ? front->pageKey() : 0;
 	const int n = cl_document_page_count(doc);
@@ -426,30 +309,17 @@ void CircuitWindow::syncTabs() {
 	for (Canvas* c : canvases)
 		if (std::find(want.begin(), want.end(), c) == want.end()) delete c;
 	canvases = want;
-	// The tab control is rebuilt to match (it's only labels).
-	SendMessageW(tabs, TCM_DELETEALLITEMS, 0, 0);
-	for (int i = 0; i < n; i++) {
-		std::wstring text = L" ";
-		TCITEMW t = {};
-		t.mask = TCIF_TEXT;
-		t.pszText = &text[0];
-		SendMessageW(tabs, TCM_INSERTITEMW, i, (LPARAM)&t);
-	}
-	int sel = 0;
-	for (int i = 0; i < n; i++) if (canvases[i]->pageKey() == frontKey) sel = i;
-	SendMessageW(tabs, TCM_SETCURSEL, sel, 0);
-	for (int i = 0; i < n; i++) canvases[i]->show(i == sel);
+	current = 0;
+	for (int i = 0; i < n; i++) if (canvases[i]->pageKey() == frontKey) current = i;
+	for (int i = 0; i < n; i++) canvases[i]->show(i == current);
 	lastPageCount = n;
 	updateTabLabels();
-	syncing = false;
 	layout();
 	redrawMiniMap();
 }
 
 Canvas* CircuitWindow::currentCanvas() const {
-	if (tabs == nullptr) return nullptr;
-	const int i = (int)SendMessageW(tabs, TCM_GETCURSEL, 0, 0);
-	return i >= 0 && i < (int)canvases.size() ? canvases[i] : nullptr;
+	return current >= 0 && current < (int)canvases.size() ? canvases[current] : nullptr;
 }
 
 int CircuitWindow::currentPage() const {
@@ -459,9 +329,7 @@ int CircuitWindow::currentPage() const {
 }
 
 void CircuitWindow::showPage(int index) {
-	if (index < 0 || index >= (int)canvases.size()) return;
-	const int now = (int)SendMessageW(tabs, TCM_GETCURSEL, 0, 0);
-	if (now == index) return;
+	if (index < 0 || index >= (int)canvases.size() || index == current) return;
 	// Leaving a page lets go of its selection, as the wx app does.
 	if (Canvas* old = currentCanvas()) {
 		if (old->page() >= 0) {
@@ -469,7 +337,7 @@ void CircuitWindow::showPage(int index) {
 			cl_edit_select_none(doc, old->page());
 		}
 	}
-	SendMessageW(tabs, TCM_SETCURSEL, index, 0);
+	current = index;
 	pageSwitched();
 }
 
@@ -485,75 +353,48 @@ void CircuitWindow::pageSwitched() {
 	}
 	updateActions();
 	updateTitle();
+	updateTabLabels();
 	redrawMiniMap();
+}
+
+void CircuitWindow::closeTab(int index) {
+	if (index < 0 || index >= (int)canvases.size()) return;
+	const int p = canvases[index]->page();
+	if (p >= 0) closePage(p);
+}
+
+void CircuitWindow::moveTab(int from, int to) {
+	const int n = cl_document_page_count(doc);
+	if (from < 0 || to < 0 || from >= n || to >= n || from == to) return;
+	// A tab without a name of its own is called by its place ("Page 2"): pin
+	// those names first, so moving a tab doesn't rename the others.
+	for (int i = 0; i < n; i++) {
+		const char* name = cl_document_page_name(doc, i);
+		if (name == nullptr || *name == 0) cl_document_rename_page(doc, i, pageName(i).c_str());
+	}
+	cl_document_move_page(doc, from, to);
+	changes++;
+	syncTabs();
+	updateTitle();
 }
 
 void CircuitWindow::tabContextMenu(int index, POINT screen) {
 	if (index >= 0) showPage(index);
 	HMENU m = CreatePopupMenu();
-	item(m, CMD_RENAME_TAB, "Re&name Tab…");
+	item(m, CMD_RENAME_TAB, "Re&name Tab\u2026");
 	item(m, CMD_CLOSE_TAB, "&Close Tab\tCtrl+W");
 	item(m, CMD_REOPEN_TAB, "&Reopen Closed Tab\tCtrl+Shift+T");
 	separator(m);
-	const int at = (int)SendMessageW(tabs, TCM_GETCURSEL, 0, 0), n = (int)canvases.size();
-	AppendMenuW(m, MF_STRING | (at > 0 ? 0 : MF_GRAYED), 1, L"Move &Left");
-	AppendMenuW(m, MF_STRING | (at < n - 1 ? 0 : MF_GRAYED), 2, L"Move Ri&ght");
+	const int n = (int)canvases.size();
+	AppendMenuW(m, MF_STRING | (current > 0 ? 0 : MF_GRAYED), 1, L"Move &Left");
+	AppendMenuW(m, MF_STRING | (current < n - 1 ? 0 : MF_GRAYED), 2, L"Move Ri&ght");
 	separator(m);
 	item(m, CMD_NEW_TAB, "&New Tab\tCtrl+T");
 	updateMenu(m);
 	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, 0, hwnd, nullptr);
 	DestroyMenu(m);
-	if (cmd == 1 || cmd == 2) {
-		const int from = currentPage();
-		const int to = cmd == 1 ? from - 1 : from + 1;
-		if (to < 0 || to >= cl_document_page_count(doc)) return;
-		// A tab without a name of its own is called by its place ("Page 2"):
-		// pin those names first, so moving a tab doesn't rename the others.
-		for (int i = 0; i < cl_document_page_count(doc); i++) {
-			const char* name = cl_document_page_name(doc, i);
-			if (name == nullptr || *name == 0) cl_document_rename_page(doc, i, pageName(i).c_str());
-		}
-		cl_document_move_page(doc, from, to);
-		changes++;
-		syncTabs();
-		updateTitle();
-	} else if (cmd) {
-		run(cmd);
-	}
-}
-
-LRESULT CALLBACK CircuitWindow::tabsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
-	CircuitWindow* w = reinterpret_cast<CircuitWindow*>(data);
-	auto hit = [&]() {
-		TCHITTESTINFO t = {};
-		t.pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-		return (int)SendMessageW(h, TCM_HITTEST, 0, (LPARAM)&t);
-	};
-	switch (msg) {
-	case WM_LBUTTONDBLCLK: {
-		const int i = hit();
-		if (i >= 0) { guarded("renaming a tab", [&] { w->showPage(i); w->renamePage(w->currentPage()); }); return 0; }
-		break;
-	}
-	case WM_MBUTTONUP: {
-		// A middle click closes the tab, as in browsers.
-		const int i = hit();
-		if (i >= 0 && i < (int)w->canvases.size()) {
-			const int p = w->canvases[i]->page();
-			if (p >= 0) guarded("closing a tab", [&] { w->closePage(p); });
-			return 0;
-		}
-		break;
-	}
-	case WM_RBUTTONUP: {
-		const int i = hit();
-		POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-		ClientToScreen(h, &p);
-		guarded("the tab menu", [&] { w->tabContextMenu(i, p); });
-		return 0;
-	}
-	}
-	return DefSubclassProc(h, msg, wp, lp);
+	if (cmd == 1 || cmd == 2) moveTab(current, cmd == 1 ? current - 1 : current + 1);
+	else if (cmd) run(cmd);
 }
 
 // ---- The clock -------------------------------------------------------------------
@@ -594,9 +435,11 @@ void CircuitWindow::tick() {
 	if ((t - lastTitle) > 0.5) { lastTitle = t; updateTitle(); }
 	// A recovery copy of unsaved work, at most every 20 seconds.
 	if (changes != changesAtRecovery && (t - lastRecovery) > 20) writeRecovery();
-	if (messageAt > 0 && since(messageAt) > 5) {
-		messageAt = 0;
-		SendMessageW(statusBar, SB_SETTEXTW, 0, (LPARAM)L"");
+	// The note over the canvas fades in, stays a while, fades out.
+	if (messageAt > 0) {
+		const double age = since(messageAt);
+		if (age > kNoteTime) { messageAt = 0; redraw(); }
+		else if (age < 0.2 || age > kNoteTime - 0.5) redraw();
 	}
 }
 
@@ -664,9 +507,20 @@ void CircuitWindow::edited() {
 	statusDirty = true;
 }
 
-void CircuitWindow::note(const std::string& message) {
-	SendMessageW(statusBar, SB_SETTEXTW, 0, (LPARAM)W(message).c_str());
+void CircuitWindow::note(const std::string& text) {
+	noteText = text;
 	messageAt = nowSeconds();
+	if (prefs().showStatus) SendMessageW(statusBar, SB_SETTEXTW, 0, (LPARAM)W(text).c_str());
+	redraw();
+}
+
+bool CircuitWindow::toast(std::string& text, double& alpha) const {
+	if (messageAt <= 0 || noteText.empty()) return false;
+	const double age = since(messageAt);
+	if (age > kNoteTime) return false;
+	text = noteText;
+	alpha = std::min(1.0, std::min(age / 0.2, (kNoteTime - age) / 0.5));
+	return alpha > 0;
 }
 
 void CircuitWindow::lockNudge() {
@@ -723,7 +577,8 @@ void CircuitWindow::updateStatus() {
 	if (c) s += strf(" · %d%%", c->zoomPercent());
 	s += strf(" · %.1f, %.1f", pointerX, pointerY);
 	s += isRunning ? " · Running" : " · Paused";
-	SendMessageW(statusBar, SB_SETTEXTW, 1, (LPARAM)W(s).c_str());
+	if (prefs().showStatus) SendMessageW(statusBar, SB_SETTEXTW, 1, (LPARAM)W(s).c_str());
+	if (toolbar) toolbar->redraw();   // the zoom readout
 }
 
 bool CircuitWindow::hasSelection() const {
@@ -775,66 +630,45 @@ void CircuitWindow::updateMenu(HMENU menu) {
 }
 
 void CircuitWindow::updateActions() {
-	for (size_t i = 0; i < toolButtons.size(); i++) {
-		const int command = kToolButtons[i].command;
-		const bool on = commandEnabled(command);
-		if ((IsWindowEnabled(toolButtons[i]) != FALSE) != on) EnableWindow(toolButtons[i], on);
-		const int check = commandChecked(command);
-		if (check >= 0) {
-			const LRESULT want = check ? BST_CHECKED : BST_UNCHECKED;
-			if (SendMessageW(toolButtons[i], BM_GETCHECK, 0, 0) != want) SendMessageW(toolButtons[i], BM_SETCHECK, want, 0);
-		}
-	}
+	if (toolbar) toolbar->redraw();
 }
 
 void CircuitWindow::updateRunUI() {
-	if (runButton) setWindowText(runButton, isRunning ? "Pause" : "Run");
 	updateActions();
+	updateTabLabels();
 	statusDirty = true;
 }
 
-void CircuitWindow::updateBanner() {
-	int kind = -1;
-	std::string text;
-	std::vector<std::pair<const char*, int>> buttons;
+int CircuitWindow::stepMs() const { return cl_document_step_ms(doc); }
+
+bool CircuitWindow::banner(std::string& text, std::vector<BannerButton>& buttons) const {
+	buttons.clear();
 	if (cl_edit_tidy_active(doc)) {
-		kind = 0;
-		text = cl_edit_tidy_mode(doc) == 1
-			? "Tidy Up by signal flow: a preview. Enter keeps it, Escape puts it back, Tab tries keeping the shape."
-			: "Tidy Up: a preview. Enter keeps it, Escape puts it back, Tab tries arranging by signal flow.";
+		text = cl_edit_tidy_mode(doc) == 1 ? "Tidy Up by signal flow: a preview. Enter keeps it, Esc puts it back."
+		                                   : "Tidy Up: a preview. Enter keeps it, Esc puts it back.";
 		buttons = { { "Keep", CMD_TIDY_KEEP }, { "Put Back", CMD_TIDY_REVERT }, { "Other Way", CMD_TIDY_SWITCH } };
-		kind = cl_edit_tidy_mode(doc) == 1 ? 1 : 0;
-	} else if (simViewOn) {
-		kind = 2;
-		text = "Simulation View: switches and keypads still work. Space pauses; Escape goes back to editing.";
-		buttons = { { "Edit", CMD_SIM_VIEW } };
-	} else if (lockedOn) {
-		kind = 3;
-		text = "Locked: switches and keypads still work, but nothing can be moved or changed.";
+		return true;
+	}
+	if (lockedOn && !simViewOn) {
+		text = "Locked: switches still work; nothing else changes.";
 		buttons = { { "Unlock", CMD_LOCK } };
+		return true;
 	}
-	if (kind == bannerKind) return;
-	bannerKind = kind;
-	for (HWND b : bannerButtons) DestroyWindow(b);
-	bannerButtons.clear();
-	for (auto& b : buttons) {
-		HWND h = CreateWindowExW(0, L"BUTTON", W(b.first).c_str(), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 10, 10, hwnd,
-		                         (HMENU)(INT_PTR)b.second, appInstance(), nullptr);
-		SendMessageW(h, WM_SETFONT, (WPARAM)uiFont(dpi), TRUE);
-		bannerButtons.push_back(h);
-	}
-	setWindowText(bannerLabel, text);
-	ShowWindow(bannerLabel, kind >= 0 ? SW_SHOW : SW_HIDE);
-	layout();
+	return false;
 }
+
+// The banner and Simulation View's bar are drawn on the canvas.
+void CircuitWindow::updateBanner() { redraw(); }
 
 void CircuitWindow::themeChanged() {
 	setDarkTitleBar(hwnd, prefs().dark);
 	updateActions();
+	if (tabStrip) tabStrip->redraw();
 	if (palette) palette->themeChanged();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
 	if (scope) scope->update();
+	InvalidateRect(hwnd, nullptr, TRUE);
 }
 
 void CircuitWindow::prefsChanged() {
@@ -865,8 +699,95 @@ LRESULT CALLBACK CircuitWindow::proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 	return ok ? r : DefWindowProcW(h, msg, wp, lp);
 }
 
+// Where a point on the window is, now that the toolbar is its title bar:
+// the resize edges, the drag area, the maximize button (as Windows' own, for
+// snap layouts) or the inside.
+LRESULT CircuitWindow::frameHitTest(LPARAM lp) {
+	const LRESULT def = DefWindowProcW(hwnd, WM_NCHITTEST, 0, lp);
+	if (def != HTCLIENT) return def;   // the left, right and bottom edges
+	POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+	ScreenToClient(hwnd, &p);
+	RECT rc;
+	GetClientRect(hwnd, &rc);
+	const int edge = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+	if (!IsZoomed(hwnd) && p.y < edge) {
+		if (p.x < edge * 2) return HTTOPLEFT;
+		if (p.x >= rc.right - edge * 2) return HTTOPRIGHT;
+		return HTTOP;
+	}
+	if (p.y < toolbarHeight()) {
+		const RECT mx = toolbar ? toolbar->maximizeRect() : RECT{ 0, 0, 0, 0 };
+		if (PtInRect(&mx, p)) return HTMAXBUTTON;
+		return HTCAPTION;
+	}
+	return HTCLIENT;
+}
+
 LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	switch (msg) {
+	case WM_NCCALCSIZE:
+		if (wp) {
+			// No title bar: the toolbar is drawn where it was. The other
+			// edges stay Windows' (resizing, the shadow, the rounded corners).
+			RECT& r = reinterpret_cast<NCCALCSIZE_PARAMS*>(lp)->rgrc[0];
+			const int fx = GetSystemMetricsForDpi(SM_CXFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+			const int fy = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+			r.left += fx;
+			r.right -= fx;
+			r.bottom -= fy;
+			// Maximized, the window hangs past the screen by its frame.
+			if (IsZoomed(hwnd)) r.top += fy;
+			return 0;
+		}
+		break;
+	case WM_NCHITTEST:
+		return frameHitTest(lp);
+	case WM_NCACTIVATE:
+		// Don't let Windows paint the old title bar over ours.
+		if (toolbar) toolbar->redraw();
+		return DefWindowProcW(hwnd, msg, wp, -1);
+	case WM_NCMOUSEMOVE:
+		if (!trackingNonClient) {
+			trackingNonClient = true;
+			TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE | TME_NONCLIENT, hwnd, 0 };
+			TrackMouseEvent(&t);
+		}
+		if (toolbar) toolbar->setMaximizeHot(wp == HTMAXBUTTON, maxPressed && wp == HTMAXBUTTON);
+		if (wp == HTMAXBUTTON) return 0;
+		break;
+	case WM_NCMOUSELEAVE:
+		trackingNonClient = false;
+		maxPressed = false;
+		if (toolbar) toolbar->setMaximizeHot(false, false);
+		break;
+	case WM_NCLBUTTONDOWN:
+		if (wp == HTMAXBUTTON) {
+			maxPressed = true;
+			if (toolbar) toolbar->setMaximizeHot(true, true);
+			return 0;
+		}
+		break;
+	case WM_NCLBUTTONUP:
+		if (wp == HTMAXBUTTON) {
+			const bool was = maxPressed;
+			maxPressed = false;
+			if (toolbar) toolbar->setMaximizeHot(true, false);
+			if (was) ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+			return 0;
+		}
+		maxPressed = false;
+		break;
+	case WM_SYSCOMMAND:
+		// Alt or F10 on its own: every menu, from the toolbar's •••.
+		if ((wp & 0xFFF0) == SC_KEYMENU && lp != VK_SPACE) {
+			RECT rc;
+			GetClientRect(hwnd, &rc);
+			POINT p = { rc.right - scaled(150, dpi), toolbarHeight() };
+			ClientToScreen(hwnd, &p);
+			moreMenu(p, true);
+			return 0;
+		}
+		break;
 	case WM_TIMER:
 		if (wp == kClockTimer) tick();
 		return 0;
@@ -892,12 +813,12 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
 		setFontTree(hwnd, uiFont(dpi));
 		if (palette) palette->dpiChanged();
-		for (HWND b : bannerButtons) SendMessageW(b, WM_SETFONT, (WPARAM)uiFont(dpi), TRUE);
 		layout();
 		for (Canvas* c : canvases) c->redraw();
 		return 0;
 	}
 	case WM_ACTIVATE:
+		if (toolbar) toolbar->redraw();
 		if (LOWORD(wp) != WA_INACTIVE) {
 			// Back to the canvas, unless a text box had the keyboard.
 			HWND f = GetFocus();
@@ -913,15 +834,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		updateMenu((HMENU)wp);
 		return 0;
 	case WM_COMMAND: {
-		const int id = LOWORD(wp), code = HIWORD(wp);
-		if (id == kStepEditId) {
-			if (code == EN_CHANGE) {
-				BOOL bad = FALSE;
-				const int ms = (int)SendMessageW(stepUpDown, UDM_GETPOS32, 0, (LPARAM)&bad);
-				if (!bad) setStepMs(ms);
-			}
-			return 0;
-		}
+		const int id = LOWORD(wp);
 		if (id >= CMD_RECENT && id <= CMD_RECENT_LAST) {
 			const size_t i = (size_t)(id - CMD_RECENT);
 			std::vector<std::string> shown;
@@ -931,26 +844,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		if (id >= CMD_NEW && id < CMD_RECENT) {
 			run(id);
-			// A toolbar button keeps the keyboard off the canvas otherwise.
-			if (lp && (HWND)lp != stepEdit && isCircuitWindow(this)) if (Canvas* c = currentCanvas()) c->focus();
 			return 0;
-		}
-		break;
-	}
-	case WM_NOTIFY: {
-		const NMHDR* n = reinterpret_cast<const NMHDR*>(lp);
-		if (n->hwndFrom == tabs) {
-			if (n->code == TCN_SELCHANGING) {
-				// Leaving a page lets go of its selection, as the wx app does.
-				if (Canvas* old = currentCanvas()) {
-					if (old->page() >= 0) {
-						old->cancelDrag();
-						cl_edit_select_none(doc, old->page());
-					}
-				}
-				return FALSE;
-			}
-			if (n->code == TCN_SELCHANGE && !syncing) { pageSwitched(); return 0; }
 		}
 		break;
 	}
@@ -959,7 +853,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		GetCursorPos(&p);
 		ScreenToClient(hwnd, &p);
 		const RECT s = splitterRect();
-		if ((HWND)wp == hwnd && PtInRect(&s, p)) {
+		if (LOWORD(lp) == HTCLIENT && PtInRect(&s, p)) {
 			SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
 			return TRUE;
 		}
@@ -970,7 +864,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		const RECT s = splitterRect();
 		if (PtInRect(&s, p)) {
 			splitterDrag = true;
-			splitterGrab = p.x - s.left;
+			splitterGrab = p.x - scaled(prefs().paletteWidth, dpi);
 			SetCapture(hwnd);
 			return 0;
 		}
@@ -982,7 +876,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 			GetClientRect(hwnd, &rc);
 			const int x = GET_X_LPARAM(lp) - splitterGrab;
 			const int w = MulDiv(std::max(0, x), 96, (int)dpi);
-			prefs().paletteWidth = std::min(std::max(w, 140), std::min(800, MulDiv(rc.right, 96, (int)dpi) - 240));
+			prefs().paletteWidth = std::min(std::max(w, 160), std::min(800, MulDiv(rc.right, 96, (int)dpi) - 300));
 			layout();
 			return 0;
 		}
@@ -1018,32 +912,23 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		KillTimer(hwnd, kClockTimer);
 		return 0;
 	case WM_ERASEBKGND: {
-		// The bars' background, and a grip line down the splitter.
+		// Behind everything: the side panel's colour, and the hairline
+		// between it and the canvas.
 		RECT rc;
 		GetClientRect(hwnd, &rc);
-		FillRect((HDC)wp, &rc, GetSysColorBrush(COLOR_BTNFACE));
-		const RECT s = splitterRect();
-		if (s.right > s.left) {
-			RECT line = { (s.left + s.right) / 2, s.top, (s.left + s.right) / 2 + 1, s.bottom };
-			FillRect((HDC)wp, &line, GetSysColorBrush(COLOR_BTNSHADOW));
-		}
-		if (bannerKind >= 0) {
-			RECT b = { 0, toolbarHeight(), rc.right, toolbarHeight() + bannerHeight() };
-			HBRUSH info = CreateSolidBrush(RGB(255, 244, 206));
-			FillRect((HDC)wp, &b, info);
-			DeleteObject(info);
+		const Chrome c = chrome();
+		HBRUSH bg = CreateSolidBrush(c.gdi(c.panel()));
+		FillRect((HDC)wp, &rc, bg);
+		DeleteObject(bg);
+		if (prefs().showPalette) {
+			const int x = scaled(prefs().paletteWidth, dpi);
+			RECT line = { x, toolbarHeight(), x + 1, rc.bottom };
+			HBRUSH sash = CreateSolidBrush(c.gdi(c.sash()));
+			FillRect((HDC)wp, &line, sash);
+			DeleteObject(sash);
 		}
 		return 1;
 	}
-	case WM_CTLCOLORSTATIC:
-		if ((HWND)lp == bannerLabel) {
-			HDC dc = (HDC)wp;
-			SetBkColor(dc, RGB(255, 244, 206));
-			SetTextColor(dc, RGB(40, 32, 0));
-			static HBRUSH info = CreateSolidBrush(RGB(255, 244, 206));
-			return (LRESULT)info;
-		}
-		break;
 	}
 	return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -1147,13 +1032,100 @@ void CircuitWindow::run(int command) {
 	}
 }
 
+void CircuitWindow::moreMenu(POINT screen, bool rightAligned) {
+	SetForegroundWindow(hwnd);
+	const int cmd = TrackPopupMenu(menus, TPM_RETURNCMD | (rightAligned ? TPM_RIGHTALIGN : TPM_LEFTALIGN) | TPM_TOPALIGN,
+	                               screen.x, screen.y, 0, hwnd, nullptr);
+	if (cmd) SendMessageW(hwnd, WM_COMMAND, cmd, 0);
+}
+
+// The circuit's name in the toolbar: what a Mac window's title offers.
+void CircuitWindow::titleMenu(POINT screen) {
+	enum { RENAME = 1, SAVE_AS, DUPLICATE, SHOW, REVERT };
+	HMENU m = CreatePopupMenu();
+	const bool saved = !path.empty() && fileExists(path);
+	AppendMenuW(m, MF_STRING, RENAME, L"&Rename\u2026");
+	AppendMenuW(m, MF_STRING, SAVE_AS, L"Save &As\u2026\tCtrl+Shift+S");
+	AppendMenuW(m, MF_STRING, DUPLICATE, L"&Duplicate");
+	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(m, MF_STRING | (saved ? 0 : MF_GRAYED), SHOW, L"Show in File &Explorer");
+	AppendMenuW(m, MF_STRING | (saved && isDirty() ? 0 : MF_GRAYED), REVERT, L"Revert to Last &Saved");
+	SetForegroundWindow(hwnd);
+	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, screen.x, screen.y, 0, hwnd, nullptr);
+	DestroyMenu(m);
+	switch (cmd) {
+	case RENAME: renameFile(); break;
+	case SAVE_AS: saveAs(); break;
+	case DUPLICATE: duplicateCircuit(); break;
+	case SHOW: {
+		PIDLIST_ABSOLUTE item = ILCreateFromPathW(W(path).c_str());
+		if (item) { SHOpenFolderAndSelectItems(item, 0, nullptr, 0); ILFree(item); }
+		break;
+	}
+	case REVERT: revertToSaved(); break;
+	default: break;
+	}
+}
+
+// A saved circuit is renamed where it is; one never saved is saved under the
+// new name.
+void CircuitWindow::renameFile() {
+	std::string name = displayName();
+	if (!askText(hwnd, "Rename Circuit", "The circuit's name:", name) || name.empty() || name == displayName()) return;
+	for (char& c : name) if (strchr("\\/:*?\"<>|", c)) c = '-';
+	if (path.empty() || !fileExists(path)) {
+		const std::string file = chooseSaveFile(hwnd, "Save Circuit", name + ".cdl", kCdlFilters, ".cdl");
+		if (!file.empty()) writeTo(file);
+		return;
+	}
+	const std::string to = dirName(path) + "\\" + name + ".cdl";
+	if (fileExists(to)) {
+		showMessage(hwnd, Tone::Warning, "There's already a circuit called \u201C" + name + "\u201D there", "Choose another name.");
+		return;
+	}
+	if (!MoveFileExW(W(path).c_str(), W(to).c_str(), 0)) {
+		showMessage(hwnd, Tone::Error, "The circuit couldn't be renamed", "Is it open in another program, or read-only?");
+		return;
+	}
+	std::vector<std::string>& r = prefs().recent;
+	r.erase(std::remove(r.begin(), r.end(), path), r.end());
+	path = to;
+	prefs().noteRecent(to);
+	updateTitle();
+	updateActions();
+	note("Renamed.");
+}
+
+// A copy in a new window, unsaved.
+void CircuitWindow::duplicateCircuit() {
+	const std::string text = cl_document_save_text(doc);
+	// Asking for the text marks the engine's copy saved; it isn't.
+	forceDirty = forceDirty || !path.empty() || changes > 0;
+	char err[512] = "";
+	CLDocument* copy = cl_document_open_text(text.c_str(), (long)text.size(), err, sizeof err);
+	if (copy == nullptr) { showMessage(hwnd, Tone::Error, "The circuit couldn't be duplicated", err); return; }
+	CircuitWindow* w = new CircuitWindow(copy, "");
+	w->markRecovered(displayName() + " copy");
+	w->note("A copy. Save it to keep it.");
+	updateTitle();
+}
+
+void CircuitWindow::revertToSaved() {
+	if (path.empty() || !askYesNo(hwnd, "Revert to the last saved version?", "The changes since then will be lost.")) return;
+	char err[512] = "";
+	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
+	if (fresh == nullptr) { showMessage(hwnd, Tone::Error, "The saved circuit couldn't be opened", err); return; }
+	replaceDocument(fresh, path);
+	note("Back to the last saved version.");
+}
+
 // ---- Files ---------------------------------------------------------------------
 
 void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPath) {
 	for (Canvas* c : canvases) c->cancelDrag();
 	for (Canvas* c : canvases) delete c;
 	canvases.clear();
-	SendMessageW(tabs, TCM_DELETEALLITEMS, 0, 0);
+	current = 0;
 	if (scope) { delete scope; scope = nullptr; }
 	cl_document_close(doc);
 	doc = newDoc;
@@ -1168,7 +1140,6 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	isRunning = cl_document_is_running(doc);
 	simViewOn = false;
 	lockedOn = false;
-	SendMessageW(stepUpDown, UDM_SETPOS32, 0, cl_document_step_ms(doc));
 	syncTabs();
 	appearStart = nowSeconds();
 	updateTitle();
@@ -1221,8 +1192,6 @@ bool CircuitWindow::save() {
 	if (path.empty()) return saveAs();
 	return writeTo(path);
 }
-
-static const std::vector<FileFilter> kCdlFilters = { { "CedarLogic circuits (*.cdl)", "*.cdl" }, { "All files", "*.*" } };
 
 bool CircuitWindow::saveAs() {
 	const std::string file = chooseSaveFile(hwnd, "Save Circuit", displayName() + ".cdl", kCdlFilters, ".cdl");
@@ -1395,7 +1364,7 @@ void CircuitWindow::refreshAfterHistory() {
 		const int show = cl_document_page_to_show(doc);
 		syncTabs();
 		if (show >= 0 && show < (int)canvases.size()) {
-			SendMessageW(tabs, TCM_SETCURSEL, show, 0);
+			current = show;
 			pageSwitched();
 			appearStart = nowSeconds();
 		}
@@ -1672,7 +1641,7 @@ void CircuitWindow::newPage() {
 	if (i < 0) return;
 	cl_document_rename_page(doc, i, strf("Page %d", taken).c_str());
 	syncTabs();
-	SendMessageW(tabs, TCM_SETCURSEL, i, 0);
+	current = i;
 	pageSwitched();
 	appearStart = nowSeconds();
 	edited();
@@ -1690,7 +1659,7 @@ void CircuitWindow::closePage(int page) {
 	if (cl_document_close_page(doc, page)) {
 		const int show = std::min(cl_document_page_to_show(doc), cl_document_page_count(doc) - 1);
 		syncTabs();
-		if (show >= 0) { SendMessageW(tabs, TCM_SETCURSEL, show, 0); pageSwitched(); }
+		if (show >= 0) { current = show; pageSwitched(); }
 		edited();
 	}
 }
@@ -1716,8 +1685,7 @@ void CircuitWindow::renamePage(int page) {
 void CircuitWindow::cyclePage(int delta) {
 	const int n = (int)canvases.size();
 	if (n < 2) return;
-	const int at = (int)SendMessageW(tabs, TCM_GETCURSEL, 0, 0);
-	showPage(((at + delta) % n + n) % n);
+	showPage(((current + delta) % n + n) % n);
 }
 
 // ---- App-wide ------------------------------------------------------------------
