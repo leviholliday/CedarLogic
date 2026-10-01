@@ -2,6 +2,7 @@
 
 #include "Dialogs.h"
 #include "Window.h"
+#include "Chrome.h"
 #include "Collections.h"
 #include "Formula.h"
 
@@ -612,13 +613,41 @@ std::string trimmed(const std::string& s) {
 
 }  // namespace
 
+// A gate's settings (double-click it), as the Mac's inspector: the gate's
+// picture and name on top, then its settings, each applied as you make it
+// (a number once it's valid) and undone with Ctrl+Z; Rotate, Delete, Done.
 void showGateSettings(CircuitWindow* w, long gate) {
 	CLDocument* doc = w->document();
 	struct Setting { std::string name, type, value; double min, max; int field; };
 	std::vector<Setting> settings;
+	const std::string libName = cl_gate_library_name(doc, gate) ? cl_gate_library_name(doc, gate) : "";
+	const std::string caption = cl_gate_caption(doc, gate);
 	Form f;
-	f.title = cl_gate_caption(doc, gate);
+	f.title = caption;
 	f.width = 420;
+	f.okText = "Done";
+	f.cancelText = "";
+	f.buttons = { "Rotate", "Delete" };
+	FormField head;
+	head.kind = FormField::Picture;
+	head.height = 58;
+	head.paint = [&](ID2D1RenderTarget* rt, float pw, float) {
+		const Chrome c = chrome();
+		const D2D1_COLOR_F ink = c.dark ? D2D1::ColorF(0.89f, 0.9f, 0.93f) : D2D1::ColorF(0.12f, 0.13f, 0.16f);
+		const D2D1_RECT_F tile = D2D1::RectF(0, 2, 56, 54);
+		fillRound(rt, tile, 10, c.dark ? D2D1::ColorF(0.14f, 0.16f, 0.18f) : D2D1::ColorF(1, 1, 1));
+		strokeRound(rt, tile, 10, withAlpha(ink, c.dark ? 0.08f : 0.09f));
+		if (!libName.empty()) {
+			D2D1_MATRIX_3X2_F was;
+			rt->GetTransform(&was);
+			rt->SetTransform(D2D1::Matrix3x2F::Translation(6, 8) * was);
+			cl_library_draw_gate(libName.c_str(), rt, 44, 36, was._11, c.dark);
+			rt->SetTransform(was);
+		}
+		drawText(rt, caption, D2D1::RectF(70, 8, pw, 32), 16, ink, TextAlign::Leading, true);
+		drawText(rt, "Changes apply as you make them \u00B7 Ctrl+Z undoes", D2D1::RectF(70, 32, pw, 50), 11, withAlpha(ink, 0.55f));
+	};
+	f.add(head);
 	const int n = cl_gate_setting_count(doc, gate);
 	for (int i = 0; i < n; i++) {
 		CLGateSetting s;
@@ -650,30 +679,47 @@ void showGateSettings(CircuitWindow* w, long gate) {
 		x.label = "This part has no settings.";
 		f.add(x);
 	}
-	// Numbers are checked against the library's range, as the wx dialog does.
+	// A number is checked against the library's range, as the wx dialog does.
+	auto problem = [](const Setting& s, const std::string& v) -> std::string {
+		if (s.type != "INT" && s.type != "FLOAT") return "";
+		char* end = nullptr;
+		const double x = strtod(v.c_str(), &end);
+		if (v.empty() || end == nullptr || *end != 0 || !std::isfinite(x) || (s.type == "INT" && x != std::floor(x)))
+			return strf("%s: enter %s.", s.name.c_str(), s.type == "INT" ? "a whole number" : "a number");
+		if (x < s.min || x > s.max)
+			return strf("%s must be between %s and %s.", s.name.c_str(), numberText(s.min).c_str(), numberText(s.max).c_str());
+		return "";
+	};
+	// Each change as it's made, when it's valid.
+	f.onChange = [&](Form& form, int field) {
+		for (Setting& s : settings) {
+			if (s.field != field) continue;
+			const std::string v = s.type == "BOOL" ? (form.checked(field) ? "true" : "false") : trimmed(form.text(field));
+			const std::string bad = problem(s, v);
+			form.setProblem(bad);
+			if (!bad.empty() || v == s.value) return;
+			cl_gate_set_setting(doc, gate, s.name.c_str(), v.c_str());
+			s.value = v;
+			w->edited();
+		}
+	};
 	f.validate = [&](Form& form) -> std::string {
 		for (const Setting& s : settings) {
-			if (s.type != "INT" && s.type != "FLOAT") continue;
-			const std::string v = trimmed(form.text(s.field));
-			char* end = nullptr;
-			const double x = strtod(v.c_str(), &end);
-			if (v.empty() || end == nullptr || *end != 0 || !std::isfinite(x) || (s.type == "INT" && x != std::floor(x)))
-				return strf("%s: enter %s.", s.name.c_str(), s.type == "INT" ? "a whole number" : "a number");
-			if (x < s.min || x > s.max)
-				return strf("%s must be between %s and %s.", s.name.c_str(), numberText(s.min).c_str(), numberText(s.max).c_str());
+			const std::string bad = problem(s, trimmed(form.text(s.field)));
+			if (!bad.empty()) return bad;
 		}
 		return std::string();
 	};
-	if (f.run(w->window()) != IDOK) return;
-	bool changed = false;
-	for (const Setting& s : settings) {
-		const FormField& x = f.fields[s.field];
-		const std::string v = s.type == "BOOL" ? (x.value.empty() ? "false" : "true") : trimmed(x.value);
-		if (v == s.value) continue;
-		cl_gate_set_setting(doc, gate, s.name.c_str(), v.c_str());
-		changed = true;
-	}
-	if (changed) w->edited();
+	f.onButton = [&](Form& form, int button) {
+		if (button == 0) {
+			w->run(CMD_ROTATE);   // through the menus' checks (a locked circuit says so)
+			form.refresh(0);
+			return false;
+		}
+		w->run(CMD_DELETE);
+		return true;
+	};
+	f.run(w->window());
 }
 
 // ---- Quick add (A) -------------------------------------------------------------

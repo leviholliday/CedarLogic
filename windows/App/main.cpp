@@ -37,6 +37,7 @@ int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
 // diagram too; --timing-color for it in color.
 std::string gTiming;
 bool gTimingColor = false;
+std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 
@@ -254,6 +255,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
 		if (a == "--timing-color") { gTimingColor = true; continue; }
+		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--dialog" && i + 1 < argc) {
@@ -263,7 +265,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "library" ? CMD_OPEN : d == "versions" ? CMD_VERSIONS : d == "templates" ? CMD_NEW_TEMPLATE
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
-			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3
+			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : 0;
 			continue;
 		}
@@ -306,6 +308,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	if (circuitWindows().empty()) newCircuitWindow();
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
+	if (!gSelect.empty() && !circuitWindows().empty()) {
+		CircuitWindow* w = circuitWindows().back();
+		CLFindResult found;
+		if (cl_find(w->document(), gSelect.c_str(), &found, 1) > 0) {
+			w->showPage(found.page);
+			cl_edit_select_gate(w->document(), found.page, found.gate);
+		}
+	}
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (gDialog == -1 && !circuitWindows().empty()) {
 		prefs().hasSeenWelcome = false;
