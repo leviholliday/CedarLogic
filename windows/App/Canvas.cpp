@@ -504,6 +504,11 @@ void Canvas::pan(double dx, double dy) {
 	win->statusNeedsUpdate();
 }
 
+void Canvas::centerOn(double wx, double wy) {
+	const double u = zooming ? toUpp : upp;
+	startZoom(wx - width() / 2 * u, wy + height() / 2 * u, u);
+}
+
 void Canvas::panTo(double wx, double wy) {
 	zooming = false;
 	originX = wx - width() / 2 * upp;

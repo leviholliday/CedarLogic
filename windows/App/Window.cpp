@@ -6,6 +6,8 @@
 #include "Palette.h"
 #include "Recovery.h"
 #include "TabStrip.h"
+#include "FindBar.h"
+#include "TabSwitcher.h"
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
@@ -27,7 +29,7 @@
 namespace {
 
 const wchar_t* kClass = L"CedarLogicWindow";
-const UINT_PTR kClockTimer = 1, kAutosaveTimer = 2;
+const UINT_PTR kClockTimer = 1, kAutosaveTimer = 2, kSwitchTimer = 3;
 const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18, kNoteTime = 4.0;
 
 double since(double t) { return nowSeconds() - t; }
@@ -118,6 +120,10 @@ CircuitWindow::~CircuitWindow() {
 	toolbar = nullptr;
 	delete tabStrip;
 	tabStrip = nullptr;
+	delete findBar;
+	findBar = nullptr;
+	delete switcher;
+	switcher = nullptr;
 	if (menus) DestroyMenu(menus);
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
@@ -154,6 +160,8 @@ void CircuitWindow::build() {
 	paletteHost = palette->widget();
 	miniMap = palette->miniMap();
 	tabStrip = new TabStrip(this, hwnd);
+	findBar = new FindBar(this, hwnd);
+	switcher = new TabSwitcher(this);
 	statusBar = CreateWindowExW(0, STATUSCLASSNAMEW, L"", WS_CHILD | SBARS_SIZEGRIP, 0, 0, 10, 10, hwnd, nullptr,
 	                            appInstance(), nullptr);
 	setFontTree(hwnd, uiFont(dpi));
@@ -202,6 +210,7 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_DUPLICATE, "D&uplicate\tCtrl+D");
 	item(edit, CMD_DELETE, "&Delete\tDel");
 	item(edit, CMD_SELECT_ALL, "Select &All\tCtrl+A");
+	item(edit, CMD_FIND, "&Find\u2026\tCtrl+F");
 	separator(edit);
 	item(edit, CMD_ADD_GATE, "Add a &Gate…\tA");
 	item(edit, CMD_GATE_SETTINGS, "Gate &Settings…");
@@ -301,7 +310,14 @@ void CircuitWindow::layout() {
 	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
 	place(tabStrip->widget(), left, top, rc.right - left, tabH);
 	for (Canvas* c : canvases) place(c->widget(), left, top + tabH, rc.right - left, bottom - top - tabH);
+	if (findBar) {
+		// Over the top of the canvas, in the middle.
+		const int fw = std::min<int>((int)std::lround(FindBar::barWidth() * dpi / 96.0), rc.right - left - sc(24));
+		const int fh = (int)std::lround(FindBar::barHeight() * dpi / 96.0);
+		place(findBar->widget(), left + (rc.right - left - fw) / 2, top + tabH + sc(12), fw, fh);
+	}
 	EndDeferWindowPos(defer);
+	if (findBar) SetWindowPos(findBar->widget(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	toolbar->layoutNow();
 	InvalidateRect(hwnd, nullptr, TRUE);
 }
@@ -375,6 +391,10 @@ void CircuitWindow::showPage(int index) {
 
 void CircuitWindow::pageSwitched() {
 	Canvas* front = currentCanvas();
+	if (front) {
+		recentKeys.erase(std::remove(recentKeys.begin(), recentKeys.end(), front->pageKey()), recentKeys.end());
+		recentKeys.insert(recentKeys.begin(), front->pageKey());
+	}
 	for (Canvas* c : canvases) c->show(c == front);
 	statusDirty = true;
 	selectionSignature.clear();
@@ -539,6 +559,7 @@ void CircuitWindow::edited() {
 	updateBanner();
 	updateTabLabels();
 	statusDirty = true;
+	if (findBar && findBar->isOpen()) findBar->run(false);
 }
 
 void CircuitWindow::note(const std::string& text) {
@@ -827,6 +848,10 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		break;
 	case WM_TIMER:
 		if (wp == kClockTimer) tick();
+		if (wp == kSwitchTimer) {
+			if (switcher) switcher->tick();
+			if (!switcher || !switcher->active()) KillTimer(hwnd, kSwitchTimer);
+		}
 		if (wp == kAutosaveTimer) {
 			KillTimer(hwnd, kAutosaveTimer);
 			// Not in the middle of something (a drag, a gate on the pointer,
@@ -1047,6 +1072,41 @@ bool CircuitWindow::buildPlan(const formula::Plan& plan, bool onNewPage, const s
 	return true;
 }
 
+void CircuitWindow::switchTabs(bool backwards) {
+	if (switcher && switcher->key(backwards)) SetTimer(hwnd, kSwitchTimer, 15, nullptr);
+}
+
+bool CircuitWindow::switcherActive() const { return switcher && switcher->active(); }
+
+void CircuitWindow::cancelSwitcher() {
+	if (switcher) switcher->cancel();
+	KillTimer(hwnd, kSwitchTimer);
+}
+
+std::vector<int> CircuitWindow::recentTabs() const {
+	std::vector<int> out;
+	if (current >= 0 && current < (int)canvases.size()) out.push_back(current);
+	for (uint64_t key : recentKeys)
+		for (int i = 0; i < (int)canvases.size(); i++)
+			if (canvases[i]->pageKey() == key && std::find(out.begin(), out.end(), i) == out.end()) out.push_back(i);
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (std::find(out.begin(), out.end(), i) == out.end()) out.push_back(i);
+	return out;
+}
+
+int CircuitWindow::pageOfTab(int index) const {
+	return index >= 0 && index < (int)canvases.size() ? canvases[index]->page() : -1;
+}
+
+void CircuitWindow::showFoundGate(int page, long gate, double x, double y) {
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (canvases[i]->page() == page) showPage(i);
+	cl_edit_select_gate(doc, page, gate);
+	if (Canvas* c = currentCanvas()) c->centerOn(x, y);
+	selectionChanged();
+	redraw();
+}
+
 void CircuitWindow::partsChanged() {
 	if (palette) palette->partsChanged();
 }
@@ -1079,6 +1139,13 @@ void CircuitWindow::run(int command) {
 	case CMD_SAVE_TEMPLATE: templates::saveCurrent(this); break;
 	case CMD_SAVE_PART: parts::saveSelection(this); break;
 	case CMD_BUILD_FORMULA: if (canEdit()) showBuildFormula(this); else lockNudge(); break;
+	case CMD_FIND: {
+		// A label or TO/FROM selected: look for its name.
+		const long g = cl_edit_single_gate(doc, currentPage());
+		const char* name = g >= 0 ? cl_gate_find_name(doc, g) : nullptr;
+		findBar->open(name ? name : "");
+		break;
+	}
 	case CMD_VERSIONS: showVersionHistory(this); break;
 	case CMD_OPEN_SAMPLE: openPracticeCircuit(this); break;
 	case CMD_SAVE: save(); break;

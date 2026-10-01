@@ -19,6 +19,8 @@ class Canvas;
 class GatePalette;
 class MiniMap;
 class ScopeWindow;
+class FindBar;
+class TabSwitcher;
 class TabStrip;
 class Toolbar;
 
@@ -163,6 +165,18 @@ public:
 	void moveTab(int from, int to);
 	void tabContextMenu(int index, POINT screen);
 
+	// Ctrl+Tab: the switcher (TabSwitcher.h). Its tabs, most recently used
+	// first, and the page a tab shows.
+	void switchTabs(bool backwards);
+	bool switcherActive() const;
+	void cancelSwitcher();
+	std::vector<int> recentTabs() const;
+	int pageOfTab(int index) const;
+
+	// Find's result: its page in front, it selected and in the middle.
+	void showFoundGate(int page, long gate, double x, double y);
+	std::string pageTitle(int page) const { return pageName(page); }
+
 	// For the guided tour: 0 the palette, 1 the canvas, 2 Run, 3 the tabs
 	// (screen pixels).
 	RECT tourAnchor(int which) const;
@@ -193,6 +207,9 @@ private:
 	// The parts around the canvas.
 	Toolbar* toolbar = nullptr;
 	TabStrip* tabStrip = nullptr;
+	FindBar* findBar = nullptr;
+	TabSwitcher* switcher = nullptr;
+	std::vector<uint64_t> recentKeys;   // pages by when they were last in front, most recent first
 	HWND paletteHost = nullptr;
 	HWND statusBar = nullptr;
 	GatePalette* palette = nullptr;

@@ -39,6 +39,8 @@ public:
 	void origin(double& ox, double& oy) const { ox = originX; oy = originY; }
 	// Jump the camera to centre on a world point, keeping the current zoom.
 	void panTo(double wx, double wy);
+	// Glide to centre a world point, keeping the zoom (Find's results).
+	void centerOn(double wx, double wy);
 	// Where the pointer is over this canvas, in the world; false when it's
 	// somewhere else.
 	bool pointerWorld(double& wx, double& wy) const;

@@ -73,7 +73,7 @@ const Shortcut kShortcuts[] = {
 	{ 'P', true, false, CMD_PRINT }, { 'W', true, true, CMD_CLOSE_WINDOW },
 	{ 'Z', true, false, CMD_UNDO }, { 'Z', true, true, CMD_REDO }, { 'Y', true, false, CMD_REDO },
 	{ 'X', true, false, CMD_CUT }, { 'C', true, false, CMD_COPY }, { 'V', true, false, CMD_PASTE },
-	{ 'D', true, false, CMD_DUPLICATE }, { 'A', true, false, CMD_SELECT_ALL },
+	{ 'D', true, false, CMD_DUPLICATE }, { 'A', true, false, CMD_SELECT_ALL }, { 'F', true, false, CMD_FIND },
 	{ VK_OEM_PLUS, true, false, CMD_ZOOM_IN }, { VK_OEM_PLUS, true, true, CMD_ZOOM_IN }, { VK_ADD, true, false, CMD_ZOOM_IN },
 	{ VK_OEM_MINUS, true, false, CMD_ZOOM_OUT }, { VK_SUBTRACT, true, false, CMD_ZOOM_OUT },
 	{ '0', true, false, CMD_ZOOM_FIT }, { VK_NUMPAD0, true, false, CMD_ZOOM_FIT },
@@ -103,6 +103,9 @@ bool handleShortcut(CircuitWindow* w, const MSG& msg) {
 	if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) return false;
 	if (down(VK_MENU)) return false;   // Alt belongs to the menus
 	const bool ctrl = down(VK_CONTROL), shift = down(VK_SHIFT);
+	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
+	if (msg.wParam == VK_TAB && ctrl) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
+	if (msg.wParam == VK_ESCAPE && w->switcherActive()) { w->cancelSwitcher(); return true; }
 	wchar_t cls[32] = L"";
 	GetClassNameW(msg.hwnd, cls, 32);
 	const bool inTextBox = lstrcmpiW(cls, L"Edit") == 0;
