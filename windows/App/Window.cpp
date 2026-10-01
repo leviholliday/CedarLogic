@@ -1333,15 +1333,16 @@ void CircuitWindow::print() {
 	if (!ok) showMessage(hwnd, Tone::Error, "The page couldn't be printed", "");
 }
 
-bool CircuitWindow::screenshot(const std::string& file) {
+bool CircuitWindow::screenshot(const std::string& file, HWND other) {
+	HWND target = other ? other : hwnd;
 	RECT rc;
-	GetWindowRect(hwnd, &rc);
+	GetWindowRect(target, &rc);
 	const int w = rc.right - rc.left, h = rc.bottom - rc.top;
 	HDC screen = GetDC(nullptr);
 	HDC mem = CreateCompatibleDC(screen);
 	HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
 	HGDIOBJ old = SelectObject(mem, bmp);
-	const bool drawn = PrintWindow(hwnd, mem, PW_RENDERFULLCONTENT) != FALSE;
+	const bool drawn = PrintWindow(target, mem, PW_RENDERFULLCONTENT) != FALSE;
 	SelectObject(mem, old);
 	bool ok = false;
 	IWICImagingFactory* wic = wicFactory();

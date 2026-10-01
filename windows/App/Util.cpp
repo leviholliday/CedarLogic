@@ -5,6 +5,7 @@
 
 #include <commdlg.h>
 #include <dwmapi.h>
+#include <uxtheme.h>
 #include <shellapi.h>
 #include <shlobj.h>
 
@@ -305,6 +306,16 @@ static void setMenuTheme(bool dark) {
 	auto flush = reinterpret_cast<Flush>(reinterpret_cast<void*>(GetProcAddress(ux, MAKEINTRESOURCEA(136))));
 	if (set) set(dark ? 2 : 3);   // force dark, force light
 	if (flush) flush();
+}
+
+void darkenControl(HWND control, bool dark, const wchar_t* theme) {
+	static HMODULE ux = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	using Allow = BOOL(WINAPI*)(HWND, BOOL);
+	static Allow allow = ux ? reinterpret_cast<Allow>(reinterpret_cast<void*>(GetProcAddress(ux, MAKEINTRESOURCEA(133)))) : nullptr;
+	if (allow) allow(control, dark);
+	const std::wstring name = dark ? std::wstring(L"DarkMode_") + theme : std::wstring(theme);
+	SetWindowTheme(control, name.c_str(), nullptr);
+	SendMessageW(control, WM_THEMECHANGED, 0, 0);
 }
 
 void applyTheme() {

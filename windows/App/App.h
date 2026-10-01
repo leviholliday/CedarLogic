@@ -152,6 +152,10 @@ std::string windowText(HWND hwnd);
 void setWindowText(HWND hwnd, const std::string& text);
 // A dark or light title bar, to match the canvas.
 void setDarkTitleBar(HWND hwnd, bool dark);
+// A standard control in Windows' own dark style (Explorer's), when dark:
+// `theme` is "Explorer" for buttons, lists and scroll bars, "CFD" for text
+// boxes and drop-down lists, "ItemsView" for list views.
+void darkenControl(HWND control, bool dark, const wchar_t* theme);
 
 // ---- Messages ----------------------------------------------------------------------
 

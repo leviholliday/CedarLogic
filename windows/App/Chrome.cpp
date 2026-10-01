@@ -78,6 +78,33 @@ void drawIcon(ID2D1RenderTarget* rt, wchar_t glyph, const D2D1_RECT_F& box, floa
 	if (b) b->Release();
 }
 
+void drawNewDocIcon(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, const D2D1_COLOR_F& color) {
+	// The page, nudged left and up, and a plus badge on its lower right with
+	// a ring of the background cut out of the page behind it.
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	drawIcon(rt, Icon::Page, D2D1::RectF(box.left - 2, box.top - 1, box.right - 2, box.bottom - 1), 15, color);
+	ID2D1SolidColorBrush* b = nullptr;
+	if (FAILED(rt->CreateSolidColorBrush(color, &b))) return;
+	const D2D1_POINT_2F c = D2D1::Point2F(cx + 5, cy + 5);
+	rt->DrawLine(D2D1::Point2F(c.x - 3.5f, c.y), D2D1::Point2F(c.x + 3.5f, c.y), b, 1.4f);
+	rt->DrawLine(D2D1::Point2F(c.x, c.y - 3.5f), D2D1::Point2F(c.x, c.y + 3.5f), b, 1.4f);
+	b->Release();
+}
+
+void drawNewTabIcon(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, const D2D1_COLOR_F& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	ID2D1SolidColorBrush* b = nullptr;
+	if (FAILED(rt->CreateSolidColorBrush(color, &b))) return;
+	// The square behind, showing only its top and left edges.
+	rt->DrawLine(D2D1::Point2F(cx - 7, cy + 3), D2D1::Point2F(cx - 7, cy - 5), b, 1.1f);
+	rt->DrawLine(D2D1::Point2F(cx - 7, cy - 7), D2D1::Point2F(cx + 3, cy - 7), b, 1.1f);
+	// The square in front, and its plus.
+	rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(cx - 4, cy - 4, cx + 7, cy + 7), 2, 2), b, 1.1f);
+	rt->DrawLine(D2D1::Point2F(cx + 1.5f, cy - 1), D2D1::Point2F(cx + 1.5f, cy + 4), b, 1.1f);
+	rt->DrawLine(D2D1::Point2F(cx - 1, cy + 1.5f), D2D1::Point2F(cx + 4, cy + 1.5f), b, 1.1f);
+	b->Release();
+}
+
 void fillRound(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, float radius, const D2D1_COLOR_F& c) {
 	if (c.a <= 0) return;
 	if (ID2D1SolidColorBrush* b = brushFor(rt, c)) {

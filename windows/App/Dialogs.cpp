@@ -3,6 +3,8 @@
 #include "Dialogs.h"
 #include "Window.h"
 
+#include <uxtheme.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -17,6 +19,17 @@ namespace {
 const int kFieldBase = 1000;    // a field's controls: kFieldBase + index
 const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
+const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
+
+// The dialogs' colours in dark mode (the Mac's dark sheets).
+struct DialogColors {
+	COLORREF back = RGB(36, 39, 45), text = RGB(228, 232, 240), field = RGB(24, 26, 31);
+	HBRUSH backBrush = CreateSolidBrush(RGB(36, 39, 45)), fieldBrush = CreateSolidBrush(RGB(24, 26, 31));
+};
+const DialogColors& darkColors() {
+	static DialogColors c;
+	return c;
+}
 const UINT_PTR kFormTimer = 1;
 
 // A Form's list rows are asked for as they come into view (a virtual list
@@ -126,6 +139,13 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (!chosen.empty()) f->setText(id - kBrowseBase, chosen);
 			return TRUE;
 		}
+		if (id >= kLabelBase && id < kLabelBase + (int)f->fields.size() && code == STN_CLICKED) {
+			HWND box = f->fields[id - kLabelBase].hwnd;
+			SendMessageW(box, BM_SETCHECK, SendMessageW(box, BM_GETCHECK, 0, 0) == BST_CHECKED ? BST_UNCHECKED : BST_CHECKED, 0);
+			SetFocus(box);
+			if (f->onChange) guarded("a dialog", [&] { f->onChange(*f, id - kLabelBase); });
+			return TRUE;
+		}
 		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && f->onChange) {
 			const FormField& x = f->fields[id - kFieldBase];
 			const bool change = (x.kind == FormField::Text && code == EN_CHANGE) ||
@@ -158,6 +178,25 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		break;
 	}
+	case WM_CTLCOLORDLG:
+	case WM_CTLCOLORSTATIC:
+	case WM_CTLCOLORBTN:
+		if (prefs().dark) {
+			const DialogColors& c = darkColors();
+			SetTextColor((HDC)wp, c.text);
+			SetBkColor((HDC)wp, c.back);
+			return (INT_PTR)c.backBrush;
+		}
+		break;
+	case WM_CTLCOLOREDIT:
+	case WM_CTLCOLORLISTBOX:
+		if (prefs().dark) {
+			const DialogColors& c = darkColors();
+			SetTextColor((HDC)wp, c.text);
+			SetBkColor((HDC)wp, c.field);
+			return (INT_PTR)c.fieldBrush;
+		}
+		break;
 	case WM_TIMER:
 		if (wp == kFormTimer && f->onTimer) guarded("a dialog", [&] { f->onTimer(*f); });
 		return TRUE;
@@ -212,12 +251,19 @@ void Form::build() {
 			}
 			break;
 		}
-		case FormField::Check:
-			x.hwnd = CreateWindowExW(0, L"BUTTON", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-			                         ctrlX, y, ctrlW, checkH, dialog, id, appInstance(), nullptr);
+		case FormField::Check: {
+			// The box, and its words as a label of their own beside it (a
+			// themed check box draws its words in black, even in dark mode).
+			const int box = GetSystemMetricsForDpi(SM_CXMENUCHECK, dpi) + sc(2);
+			x.hwnd = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+			                         ctrlX, y, box, checkH, dialog, id, appInstance(), nullptr);
 			SendMessageW(x.hwnd, BM_SETCHECK, x.value.empty() ? BST_UNCHECKED : BST_CHECKED, 0);
+			x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY | SS_NOPREFIX,
+			                          ctrlX + box + sc(4), y + sc(2), ctrlW - box - sc(4), checkH - sc(2), dialog,
+			                          (HMENU)(INT_PTR)(kLabelBase + (int)i), appInstance(), nullptr);
 			y += checkH;
 			break;
+		}
 		case FormField::Choice: {
 			if (!x.label.empty())
 				x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, margin,
@@ -299,6 +345,34 @@ void Form::build() {
 			SetWindowSubclass(f.hwnd, arrowsProc, 1, (DWORD_PTR)fields[f.arrowsMove].hwnd);
 	}
 	SetWindowTextW(dialog, W(title).c_str());
+
+	// Dark mode: the title bar and Windows' own dark styles for the controls.
+	if (prefs().dark) {
+		setDarkTitleBar(dialog, true);
+		const DialogColors& c = darkColors();
+		for (FormField& f : fields) {
+			switch (f.kind) {
+			case FormField::Text: darkenControl(f.hwnd, true, L"CFD"); break;
+			case FormField::Choice: darkenControl(f.hwnd, true, L"CFD"); break;
+			case FormField::Check: darkenControl(f.hwnd, true, L"Explorer"); break;
+			case FormField::List:
+				darkenControl(f.hwnd, true, L"ItemsView");
+				if (HWND header = (HWND)SendMessageW(f.hwnd, LVM_GETHEADER, 0, 0)) darkenControl(header, true, L"ItemsView");
+				SendMessageW(f.hwnd, LVM_SETBKCOLOR, 0, c.field);
+				SendMessageW(f.hwnd, LVM_SETTEXTBKCOLOR, 0, c.field);
+				SendMessageW(f.hwnd, LVM_SETTEXTCOLOR, 0, c.text);
+				break;
+			default: break;
+			}
+		}
+		for (HWND b : buttonWindows) darkenControl(b, true, L"Explorer");
+		EnumChildWindows(dialog, [](HWND child, LPARAM) -> BOOL {
+			wchar_t cls[32] = L"";
+			GetClassNameW(child, cls, 32);
+			if (lstrcmpiW(cls, L"Button") == 0 && GetWindowTextLengthW(child) > 0) darkenControl(child, true, L"Explorer");
+			return TRUE;
+		}, 0);
+	}
 
 	// Size the window around what's in it, centred on its owner.
 	RECT rc = { 0, 0, width, y };

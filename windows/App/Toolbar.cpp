@@ -136,7 +136,7 @@ wchar_t Toolbar::iconFor(const Item& it) const {
 	default: break;
 	}
 	switch (it.command) {
-	case CMD_NEW: return Icon::NewDoc;
+	case CMD_NEW: return Icon::Page;
 	case CMD_OPEN: return Icon::Open;
 	case CMD_SAVE: return Icon::Save;
 	case CMD_UNDO: return Icon::Undo;
@@ -147,7 +147,7 @@ wchar_t Toolbar::iconFor(const Item& it) const {
 	case CMD_ZOOM_IN: return Icon::ZoomIn;
 	case CMD_RUNNING: return win->running() ? Icon::Pause : Icon::Play;
 	case CMD_STEP: return Icon::Step;
-	case CMD_SIM_VIEW: return win->simView() ? Icon::Stop : Icon::Play;
+	case CMD_SIM_VIEW: return win->simView() ? Icon::StopSolid : Icon::Play;
 	case CMD_LOCK: return win->locked() ? Icon::Lock : Icon::Unlock;
 	case CMD_NEW_TAB: return Icon::NewTab;
 	default: return L'?';
@@ -279,15 +279,18 @@ void Toolbar::paint(ID2D1RenderTarget* rt, float w, float h) {
 			const bool on = isOn(it);
 			const bool colored = it.command == CMD_SIM_VIEW;
 			if (on || isHot) {
-				const D2D1_COLOR_F bg = on ? withAlpha(accent, isPressed ? 0.30f : (isHot ? 0.24f : 0.18f))
+				const D2D1_COLOR_F onColor = colored ? green : accent;
+				const D2D1_COLOR_F bg = on ? withAlpha(onColor, isPressed ? 0.30f : (isHot ? 0.24f : 0.18f))
 				                           : (dark ? D2D1::ColorF(1, 1, 1, isPressed ? 0.13f : 0.08f)
 				                                   : D2D1::ColorF(0, 0, 0, isPressed ? 0.094f : 0.05f));
 				fillRound(rt, D2D1::RectF(r.left + 2, r.top + 1, r.right - 2, r.bottom - 1), 7, bg);
 			}
 			D2D1_COLOR_F fg = withAlpha(ink, isEnabled(it) ? 0.92f : 0.3f);
-			if (colored) fg = on ? accent : green;
+			if (colored) fg = green;
 			else if (on) fg = accent;
-			drawIcon(rt, iconFor(it), r, 15, fg);
+			if (it.command == CMD_NEW) drawNewDocIcon(rt, r, fg);
+			else if (it.command == CMD_NEW_TAB) drawNewTabIcon(rt, r, fg);
+			else drawIcon(rt, iconFor(it), r, colored && on ? 12 : 15, fg);
 			break;
 		}
 		}

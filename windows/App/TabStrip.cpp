@@ -22,13 +22,18 @@ void TabStrip::layout(float w) {
 		want[i] = std::min(kMaxW, std::max(kMinW + 20, textWidth(win->tabName(i), 12, true) + 50));
 		total += want[i] + kGap;
 	}
-	// Squeezed alike when they don't all fit.
+	// When they don't all fit, the others are squeezed; the one in front
+	// keeps its name readable.
 	const float room = w - 8 - 40;
-	const float k = total > room && total > 0 ? std::max(kMinW / kMaxW, room / total) : 1.0f;
+	const int front = win->currentTab();
+	float others = 0;
+	for (int i = 0; i < n; i++) if (i != front) others += want[i] + kGap;
+	const float frontW = front >= 0 && front < n ? want[front] + kGap : 0;
+	const float k = total > room && others > 0 ? std::max(kMinW / kMaxW, (room - frontW) / others) : 1.0f;
 	const float y = std::floor((stripHeight() - kCardH) / 2) + 1;
 	float x = 8;
 	for (int i = 0; i < n; i++) {
-		const float cw = std::max(kMinW, std::floor(want[i] * k));
+		const float cw = i == front ? want[i] : std::max(kMinW, std::floor(want[i] * k));
 		cards[i] = D2D1::RectF(x, y, x + cw, y + kCardH);
 		x += cw + kGap;
 	}

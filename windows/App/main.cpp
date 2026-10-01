@@ -22,6 +22,9 @@ int gExitCode = 0;
 // For the screenshot runs: --dark or --light for this run, --sim-view on.
 int gTheme = -1;
 bool gSimView = false;
+// --dialog <preferences|shortcuts|truth-table|add-gate>: open it, and the
+// screenshot is of it.
+int gDialog = 0;
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -36,8 +39,12 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
 	gExitCode = 1;
-	if (w && w->screenshot(gScreenshot)) gExitCode = 0;
+	HWND dialog = w ? GetLastActivePopup(w->window()) : nullptr;
+	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
+	if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
 	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
+	// A dialog is still open (its own loop is running): just stop.
+	if (gDialog) { prefs().save(); ExitProcess((UINT)gExitCode); }
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gExitCode);
 }
@@ -206,6 +213,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
+		if (a == "--dialog" && i + 1 < argc) {
+			const std::string d = U(argv[++i]);
+			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
+			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE : 0;
+			continue;
+		}
 		files.push_back(a);
 	}
 	LocalFree(argv);
@@ -227,6 +240,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
 	if (!any && circuitWindows().empty()) newCircuitWindow();
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
+	if (gDialog && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else SetTimer(nullptr, 0, 300, recoveryTimer);
 

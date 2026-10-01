@@ -100,6 +100,11 @@ jobs:
           timeout 90 "$A" --dark --screenshot "$PWD/renders/window-Lab5-dark.png" format/tests/fixtures/Lab5.cdl
           timeout 90 "$A" --dark --sim-view --screenshot "$PWD/renders/window-sim.png" res/samples/practice.cdl
           timeout 90 "$A" --light --screenshot "$PWD/renders/window-practice.png" res/samples/practice.cdl
+          # The dialogs, in each theme (the screenshot is of the dialog).
+          timeout 90 "$A" --dark --dialog preferences --screenshot "$PWD/renders/dialog-preferences-dark.png" || true
+          timeout 90 "$A" --light --dialog preferences --screenshot "$PWD/renders/dialog-preferences.png" || true
+          timeout 90 "$A" --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 

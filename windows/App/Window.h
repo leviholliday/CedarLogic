@@ -128,8 +128,9 @@ public:
 	void prefsChanged();
 
 	bool hasSelection() const;
-	// For --screenshot: the whole window, drawn into a PNG.
-	bool screenshot(const std::string& file);
+	// For --screenshot: the whole window (or a dialog in front of it), drawn
+	// into a PNG.
+	bool screenshot(const std::string& file, HWND other = nullptr);
 
 	// ---- For the toolbar and the tabs ----
 	bool commandEnabled(int command) const;
