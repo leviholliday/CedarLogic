@@ -221,7 +221,7 @@ void dots(ID2D1RenderTarget* rt, float x, float cy, int count, int current) {
 		const bool on = i == current;
 		const float w = on ? 22.0f : 8.0f;
 		const D2D1_RECT_F r = D2D1::RectF(x, cy - 4, x + w, cy + 4);
-		if (on) fillRound(rt, D2D1::RectF(r.left - 3, r.top - 3, r.right + 3, r.bottom + 3), 7, alpha(kNeon, 0.18f));
+		if (on) glow(rt, r, 4, alpha(kNeon, 0.6f), 5);
 		fillRound(rt, r, 4, on ? kNeon : D2D1::ColorF(1, 1, 1, 0.18f));
 		x += w + 6;
 	}
@@ -413,7 +413,8 @@ void pageName(ID2D1RenderTarget* rt, Welcome* w) {
 	label(rt, left, y, "Your name");
 	y += 24;
 	w->nameBox = D2D1::RectF(left, y, left + 300, y + 38);
-	fillRound(rt, w->nameBox, 9, D2D1::ColorF(1, 1, 1, 0.07f));
+	// Opaque, the colour of the box typed in on it.
+	fillRound(rt, w->nameBox, 9, D2D1::ColorF(25 / 255.0f, 33 / 255.0f, 28 / 255.0f));
 	strokeRound(rt, D2D1::RectF(w->nameBox.left + 0.5f, w->nameBox.top + 0.5f, w->nameBox.right - 0.5f, w->nameBox.bottom - 0.5f), 9,
 	            alpha(kNeon, 0.45f));
 	if (prefs().studentName.empty() && GetFocus() != w->name)
@@ -424,8 +425,7 @@ void pageName(ID2D1RenderTarget* rt, Welcome* w) {
 	rt->GetTransform(&was);
 	const D2D1_RECT_F paper = D2D1::RectF(474, 104, 724, 254);
 	rt->SetTransform(D2D1::Matrix3x2F::Rotation(2, D2D1::Point2F((paper.left + paper.right) / 2, (paper.top + paper.bottom) / 2)) * was);
-	for (int i = 3; i >= 1; i--)
-		fillRound(rt, D2D1::RectF(paper.left - 6 * i, paper.top - 6 * i, paper.right + 6 * i, paper.bottom + 6 * i), 12 + 6 * i, alpha(kNeon, 0.035f));
+	glow(rt, paper, 12, alpha(kNeon, 0.3f), 18);
 	fillRound(rt, paper, 12, D2D1::ColorF(1, 1, 1));
 	const D2D1_COLOR_F faintInk = D2D1::ColorF(0, 0, 0, 0.4f);
 	const float mx = (paper.left + paper.right) / 2;
@@ -1133,8 +1133,7 @@ void art(ID2D1RenderTarget* rt, int chapter, float x, float y, double t) {
 void pageIntro(ID2D1RenderTarget* rt, WhatsNew* wn, double t) {
 	const float x = 56, tw = 380;
 	text(rt, "WHAT'S NEW", x, 92, 11, kBold, kNeon, 0, DWRITE_TEXT_ALIGNMENT_LEADING, 1.8f);
-	text(rt, "CedarLogic for Windows", x, 112, 34, kBold, D2D1::ColorF(0.88f, 0.9f, 0.89f), tw + 40);
-	float y = 112 + 2 * 42 + 14;
+	float y = 112 + text(rt, "CedarLogic for Windows", x, 112, 34, kBold, D2D1::ColorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
 	y += text(rt, "A native Windows app now, with a new look and a lot more inside. Here's everything that's new since the old one, a minute's read.",
 	          x, y, 14, kNormal, kSecondary, tw) + 20;
 	for (int i = 0; i < kChapterCount; i++) {
@@ -1149,8 +1148,15 @@ void pageIntro(ID2D1RenderTarget* rt, WhatsNew* wn, double t) {
 	// The icon, large, glowing, gently floating.
 	const float cx = 640, cy = 210 + 6 * (float)std::sin(t * 1.4);
 	const float glowR = 170 * (float)(1 + 0.04 * std::sin(t * 1.4));
-	fillCircle(rt, D2D1::Point2F(cx, cy), glowR, alpha(kNeon, 0.05f));
-	fillCircle(rt, D2D1::Point2F(cx, cy), glowR * 0.75f, alpha(kNeon, 0.06f));
+	D2D1_GRADIENT_STOP gs[3] = { { 0, alpha(kNeon, 0.28f) }, { 10.0f / 170, alpha(kNeon, 0.28f) }, { 1, alpha(kNeon, 0) } };
+	ID2D1GradientStopCollection* stops = nullptr;
+	ID2D1RadialGradientBrush* halo = nullptr;
+	if (SUCCEEDED(rt->CreateGradientStopCollection(gs, 3, &stops)) &&
+	    SUCCEEDED(rt->CreateRadialGradientBrush(D2D1::RadialGradientBrushProperties(D2D1::Point2F(cx, cy), D2D1::Point2F(0, 0), glowR, glowR), stops,
+	                                            &halo)))
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), glowR, glowR), halo);
+	if (halo) halo->Release();
+	if (stops) stops->Release();
 	icon(rt, cx - 105, cy - 105, 210, 0.6f);
 }
 

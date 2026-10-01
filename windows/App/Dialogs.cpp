@@ -24,14 +24,165 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 
-// The dialogs' colours in dark mode (the Mac's dark sheets).
+// The dialogs' look, as the Mac's sheets: paper, filled rounded fields,
+// soft buttons with the default one in the accent, toggles for yes/no.
 struct DialogColors {
-	COLORREF back = RGB(36, 39, 45), text = RGB(228, 232, 240), field = RGB(24, 26, 31);
-	HBRUSH backBrush = CreateSolidBrush(RGB(36, 39, 45)), fieldBrush = CreateSolidBrush(RGB(24, 26, 31));
+	COLORREF back, text, dim, field, line;
+	HBRUSH backBrush, fieldBrush;
 };
 const DialogColors& darkColors() {
-	static DialogColors c;
-	return c;
+	static DialogColors dark = { RGB(28, 31, 37), RGB(226, 230, 238), RGB(150, 156, 168), RGB(41, 45, 53), RGB(58, 63, 72),
+	                             CreateSolidBrush(RGB(28, 31, 37)), CreateSolidBrush(RGB(41, 45, 53)) };
+	static DialogColors light = { RGB(250, 250, 252), RGB(30, 33, 40), RGB(112, 117, 126), RGB(239, 240, 243), RGB(214, 216, 221),
+	                              CreateSolidBrush(RGB(250, 250, 252)), CreateSolidBrush(RGB(239, 240, 243)) };
+	return prefs().dark ? dark : light;
+}
+D2D1_COLOR_F d2d(COLORREF c, float a = 1) { return D2D1::ColorF(GetRValue(c) / 255.0f, GetGValue(c) / 255.0f, GetBValue(c) / 255.0f, a); }
+
+// Draws with Direct2D, in points, into part of a DC.
+void drawOnDC(HDC dc, const RECT& r, UINT dpi, const std::function<void(ID2D1RenderTarget*, float, float)>& draw) {
+	static ID2D1DCRenderTarget* rt = nullptr;
+	if (rt == nullptr) {
+		const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+			D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
+		if (FAILED(d2dFactory()->CreateDCRenderTarget(&props, &rt))) return;
+	}
+	if (FAILED(rt->BindDC(dc, &r))) return;
+	const float s = dpi / 96.0f;
+	rt->BeginDraw();
+	rt->SetTransform(D2D1::Matrix3x2F::Scale(s, s));
+	draw(rt, (r.right - r.left) / s, (r.bottom - r.top) / s);
+	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
+}
+
+// A toggle's state (owner-drawn buttons keep none of their own).
+bool toggleOn(HWND h) { return GetPropW(h, L"clOn") != nullptr; }
+void setToggle(HWND h, bool on) {
+	if (on) SetPropW(h, L"clOn", (HANDLE)1); else RemovePropW(h, L"clOn");
+	InvalidateRect(h, nullptr, FALSE);
+}
+
+// The pointer over a button, for its hover look.
+LRESULT CALLBACK hoverProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+	if (msg == WM_MOUSEMOVE && !GetPropW(h, L"clHot")) {
+		SetPropW(h, L"clHot", (HANDLE)1);
+		TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE, h, 0 };
+		TrackMouseEvent(&t);
+		InvalidateRect(h, nullptr, FALSE);
+	} else if (msg == WM_MOUSELEAVE) {
+		RemovePropW(h, L"clHot");
+		InvalidateRect(h, nullptr, FALSE);
+	} else if (msg == WM_NCDESTROY) {
+		RemovePropW(h, L"clHot");
+		RemovePropW(h, L"clOn");
+	}
+	return DefSubclassProc(h, msg, wp, lp);
+}
+
+// A button: the default one in the accent with its key, Delete in red,
+// the rest soft; a check box as a toggle.
+void drawButtonItem(const DRAWITEMSTRUCT* di, bool isToggle) {
+	const DialogColors& c = darkColors();
+	const bool hot = GetPropW(di->hwndItem, L"clHot") != nullptr, down = (di->itemState & ODS_SELECTED) != 0;
+	const bool focus = (di->itemState & ODS_FOCUS) && !(di->itemState & ODS_NOFOCUSRECT);
+	const bool disabled = (di->itemState & ODS_DISABLED) != 0;
+	const std::string label = windowText(di->hwndItem);
+	const Chrome ch = chrome();
+	drawOnDC(di->hDC, di->rcItem, dpiOf(di->hwndItem), [&](ID2D1RenderTarget* rt, float w, float h) {
+		rt->Clear(d2d(c.back));
+		if (isToggle) {
+			const bool on = toggleOn(di->hwndItem);
+			const float tw = 40, th = 20, x = 1, y = (h - th) / 2;
+			const D2D1_RECT_F r = D2D1::RectF(x, y, x + tw, y + th);
+			if (on) {
+				fillRound(rt, r, th / 2, hot ? withAlpha(ch.accent(), 0.88f) : ch.accent());
+				fillCircle(rt, D2D1::Point2F(r.right - th / 2, y + th / 2), down ? 7.0f : 6.0f, ch.onAccent());
+			} else {
+				fillRound(rt, r, th / 2, d2d(c.text, hot ? 0.06f : 0.0f));
+				strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), th / 2 - 0.5f, d2d(c.text, 0.55f));
+				fillCircle(rt, D2D1::Point2F(r.left + th / 2, y + th / 2), down ? 6.0f : 5.0f, d2d(c.text, 0.7f));
+			}
+			if (focus) strokeRound(rt, D2D1::RectF(r.left - 2, r.top - 2, r.right + 2, r.bottom + 2), th / 2 + 2, withAlpha(ch.accent(), 0.6f), 1.5f);
+			return;
+		}
+		const bool primary = di->CtlID == IDOK;
+		const bool danger = label == "Delete" || label == "Delete…";
+		const D2D1_RECT_F r = D2D1::RectF(1, 1, w - 1, h - 1);
+		D2D1_COLOR_F fill, ink;
+		if (primary) {
+			fill = withAlpha(ch.accent(), down ? 0.8f : hot ? 0.92f : 1.0f);
+			ink = ch.onAccent();
+		} else if (danger) {
+			fill = D2D1::ColorF(229 / 255.0f, 72 / 255.0f, 77 / 255.0f, down ? 0.26f : hot ? 0.2f : 0.13f);
+			ink = D2D1::ColorF(229 / 255.0f, 72 / 255.0f, 77 / 255.0f);
+		} else {
+			fill = d2d(c.text, down ? 0.16f : hot ? 0.11f : 0.07f);
+			ink = d2d(c.text);
+		}
+		if (disabled) { fill = withAlpha(fill, fill.a * 0.5f); ink = withAlpha(ink, 0.45f); }
+		fillRound(rt, r, 8, fill);
+		if (focus) strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 7.5f,
+		                       primary ? withAlpha(ch.onAccent(), 0.5f) : withAlpha(ch.accent(), 0.7f), 1.5f);
+		// The default button carries its key, as on the Mac.
+		const float tw = textWidth(label, 13, primary);
+		const float chip = primary ? 22 : 0, total = tw + (chip ? chip + 7 : 0), x0 = (w - total) / 2;
+		drawText(rt, label, D2D1::RectF(x0, (h - 18) / 2, x0 + tw + 2, (h + 18) / 2), 13, ink, TextAlign::Leading, primary);
+		if (chip) {
+			const D2D1_RECT_F k = D2D1::RectF(x0 + tw + 7, h / 2 - 8.5f, x0 + tw + 7 + chip, h / 2 + 8.5f);
+			fillRound(rt, k, 4, withAlpha(ink, 0.16f));
+			drawText(rt, "\u21B5", D2D1::RectF(k.left, k.top + 0.5f, k.right, k.bottom), 10.5f, ink, TextAlign::Center, true);
+		}
+	});
+}
+
+// A drop-down choice, closed: its value on a field with a chevron.
+LRESULT CALLBACK choiceProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+	if (msg == WM_PAINT) {
+		PAINTSTRUCT ps;
+		HDC dc = BeginPaint(h, &ps);
+		RECT rc;
+		GetClientRect(h, &rc);
+		const DialogColors& c = darkColors();
+		const Chrome ch = chrome();
+		const int sel = (int)SendMessageW(h, CB_GETCURSEL, 0, 0);
+		std::string value;
+		if (sel >= 0) {
+			const int n = (int)SendMessageW(h, CB_GETLBTEXTLEN, sel, 0);
+			std::wstring wv((size_t)std::max(0, n) + 1, L'\0');
+			SendMessageW(h, CB_GETLBTEXT, sel, (LPARAM)wv.data());
+			wv.resize(wcslen(wv.c_str()));
+			char out[1024] = "";
+			WideCharToMultiByte(CP_UTF8, 0, wv.c_str(), -1, out, sizeof out, nullptr, nullptr);
+			value = out;
+		}
+		const bool focus = GetFocus() == h || SendMessageW(h, CB_GETDROPPEDSTATE, 0, 0);
+		const bool hot = GetPropW(h, L"clHot") != nullptr, enabled = IsWindowEnabled(h) != FALSE;
+		drawOnDC(dc, rc, dpiOf(h), [&](ID2D1RenderTarget* rt, float w, float hh) {
+			rt->Clear(d2d(c.back));
+			const D2D1_RECT_F r = D2D1::RectF(0.5f, 0.5f, w - 0.5f, hh - 0.5f);
+			fillRound(rt, r, 7, d2d(c.field));
+			if (hot && enabled) fillRound(rt, r, 7, d2d(c.text, 0.04f));
+			strokeRound(rt, r, 7, focus ? ch.accent() : d2d(c.line), focus ? 1.5f : 1);
+			drawText(rt, value, D2D1::RectF(10, (hh - 18) / 2, w - 30, (hh + 18) / 2), 13, d2d(c.text, enabled ? 1 : 0.45f));
+			drawIcon(rt, Icon::ChevronDown, D2D1::RectF(w - 28, 0, w - 6, hh), 9, d2d(c.text, enabled ? 0.6f : 0.3f));
+		});
+		EndPaint(h, &ps);
+		return 0;
+	}
+	if (msg == WM_ERASEBKGND) return 1;
+	if (msg == WM_SETFOCUS || msg == WM_KILLFOCUS || msg == WM_ENABLE) InvalidateRect(h, nullptr, FALSE);
+	if (msg == WM_MOUSEMOVE && !GetPropW(h, L"clHot")) {
+		SetPropW(h, L"clHot", (HANDLE)1);
+		TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE, h, 0 };
+		TrackMouseEvent(&t);
+		InvalidateRect(h, nullptr, FALSE);
+	} else if (msg == WM_MOUSELEAVE) {
+		RemovePropW(h, L"clHot");
+		InvalidateRect(h, nullptr, FALSE);
+	}
+	LRESULT r = DefSubclassProc(h, msg, wp, lp);
+	if (msg == CB_SETCURSEL) InvalidateRect(h, nullptr, FALSE);
+	return r;
 }
 const UINT_PTR kFormTimer = 1;
 
@@ -119,7 +270,7 @@ void paintPicture(const FormField& x, const DRAWITEMSTRUCT* di) {
 	const float s = dpiOf(di->hwndItem) / 96.0f;
 	rt->BeginDraw();
 	rt->SetTransform(D2D1::Matrix3x2F::Scale(s, s));
-	const COLORREF back = prefs().dark ? darkColors().back : GetSysColor(COLOR_BTNFACE);
+	const COLORREF back = darkColors().back;
 	rt->Clear(D2D1::ColorF(GetRValue(back) / 255.0f, GetGValue(back) / 255.0f, GetBValue(back) / 255.0f));
 	if (x.paint) x.paint(rt, (r.right - r.left) / s, (r.bottom - r.top) / s);
 	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
@@ -191,7 +342,8 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		if (id >= kLabelBase && id < kLabelBase + (int)f->fields.size() && code == STN_CLICKED) {
 			HWND box = f->fields[id - kLabelBase].hwnd;
-			SendMessageW(box, BM_SETCHECK, SendMessageW(box, BM_GETCHECK, 0, 0) == BST_CHECKED ? BST_UNCHECKED : BST_CHECKED, 0);
+			if (!IsWindowEnabled(box)) return TRUE;
+			setToggle(box, !toggleOn(box));
 			SetFocus(box);
 			if (f->onChange) guarded("a dialog", [&] { f->onChange(*f, id - kLabelBase); });
 			return TRUE;
@@ -205,6 +357,19 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 				const float s = dpiOf(pic) / 96.0f;
 				guarded("a dialog", [&] { f->onClick(*f, id - kFieldBase, p.x / s, p.y / s); });
 			}
+			return TRUE;
+		}
+		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && f->fields[id - kFieldBase].kind == FormField::Check &&
+		    (code == BN_CLICKED || code == BN_DOUBLECLICKED)) {
+			setToggle(f->fields[id - kFieldBase].hwnd, !toggleOn(f->fields[id - kFieldBase].hwnd));
+			if (f->onChange) guarded("a dialog", [&] { f->onChange(*f, id - kFieldBase); });
+			return TRUE;
+		}
+		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && (code == EN_SETFOCUS || code == EN_KILLFOCUS)) {
+			const FormField& x = f->fields[id - kFieldBase];
+			RECT fr = x.frame;
+			InflateRect(&fr, 3, 3);
+			InvalidateRect(d, &fr, FALSE);
 			return TRUE;
 		}
 		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && f->onChange) {
@@ -241,6 +406,12 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_DRAWITEM: {
 		const DRAWITEMSTRUCT* di = reinterpret_cast<const DRAWITEMSTRUCT*>(lp);
+		if (di->CtlType == ODT_BUTTON) {
+			const int fi = (int)di->CtlID - kFieldBase;
+			const bool toggle = fi >= 0 && fi < (int)f->fields.size() && f->fields[fi].kind == FormField::Check;
+			guarded("a dialog", [&] { drawButtonItem(di, toggle); });
+			return TRUE;
+		}
 		const int field = (int)di->CtlID - kFieldBase;
 		if (field < 0 || field >= (int)f->fields.size() || f->fields[field].kind != FormField::Picture) break;
 		guarded("a dialog", [&] { paintPicture(f->fields[field], di); });
@@ -262,23 +433,49 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_CTLCOLORDLG:
 	case WM_CTLCOLORSTATIC:
-	case WM_CTLCOLORBTN:
-		if (prefs().dark) {
-			const DialogColors& c = darkColors();
-			SetTextColor((HDC)wp, c.text);
-			SetBkColor((HDC)wp, c.back);
-			return (INT_PTR)c.backBrush;
-		}
-		break;
+	case WM_CTLCOLORBTN: {
+		const DialogColors& c = darkColors();
+		// Tips under fields dimmed; what's wrong in red.
+		HWND ctl = (HWND)lp;
+		COLORREF ink = c.text;
+		if (ctl == f->problem) ink = RGB(220, 64, 64);
+		else if (GetPropW(ctl, L"clTip")) ink = c.dim;
+		if (msg == WM_CTLCOLORSTATIC && !IsWindowEnabled(ctl)) ink = c.dim;
+		SetTextColor((HDC)wp, ink);
+		SetBkColor((HDC)wp, c.back);
+		return (INT_PTR)c.backBrush;
+	}
 	case WM_CTLCOLOREDIT:
-	case WM_CTLCOLORLISTBOX:
-		if (prefs().dark) {
-			const DialogColors& c = darkColors();
-			SetTextColor((HDC)wp, c.text);
-			SetBkColor((HDC)wp, c.field);
-			return (INT_PTR)c.fieldBrush;
-		}
-		break;
+	case WM_CTLCOLORLISTBOX: {
+		const DialogColors& c = darkColors();
+		SetTextColor((HDC)wp, c.text);
+		SetBkColor((HDC)wp, c.field);
+		return (INT_PTR)c.fieldBrush;
+	}
+	case WM_PAINT: {
+		// The paper, and a rounded field around each box and list.
+		PAINTSTRUCT ps;
+		HDC dc = BeginPaint(d, &ps);
+		RECT rc;
+		GetClientRect(d, &rc);
+		const DialogColors& c = darkColors();
+		const Chrome ch = chrome();
+		HWND focus = GetFocus();
+		drawOnDC(dc, rc, dpiOf(d), [&](ID2D1RenderTarget* rt, float, float) {
+			rt->Clear(d2d(c.back));
+			const float s = dpiOf(d) / 96.0f;
+			for (const FormField& x : f->fields) {
+				if (x.frame.right <= x.frame.left) continue;
+				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, x.frame.top / s + 0.5f, x.frame.right / s - 0.5f, x.frame.bottom / s - 0.5f);
+				const bool on = focus == x.hwnd;
+				const bool enabled = IsWindowEnabled(x.hwnd) != FALSE;
+				fillRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, d2d(c.field, enabled ? 1 : 0.6f));
+				strokeRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, on ? ch.accent() : d2d(c.line), on ? 1.5f : 1);
+			}
+		});
+		EndPaint(d, &ps);
+		return TRUE;
+	}
 	case WM_TIMER:
 		if (wp == kFormTimer && f->onTimer) guarded("a dialog", [&] { f->onTimer(*f); });
 		return TRUE;
@@ -296,7 +493,7 @@ void Form::build() {
 	const UINT dpi = dpiOf(dialog);
 	auto sc = [&](int v) { return scaled(v, dpi); };
 	HFONT font = uiFont(dpi);
-	const int margin = sc(12), gap = sc(8), rowH = sc(23), checkH = sc(20), lineH = sc(17);
+	const int margin = sc(16), gap = sc(10), rowH = sc(30), checkH = sc(24), lineH = sc(17);
 	const int width = sc(this->width);
 
 	int labelW = 0;
@@ -327,32 +524,39 @@ void Form::build() {
 				for (char c : initial) { if (c == '\n') crlf += '\r'; crlf += c; }
 				initial = crlf;
 			}
-			x.hwnd = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", W(initial).c_str(),
+			// The box inside a drawn field (painted with the dialog).
+			const int fieldW = ctrlW - (browseW ? browseW + sc(6) : 0);
+			x.frame = RECT{ ctrlX, y, ctrlX + fieldW, y + boxH };
+			const int padX = sc(9), padY = multi ? sc(6) : (boxH - sc(18)) / 2;
+			x.hwnd = CreateWindowExW(0, L"EDIT", W(initial).c_str(),
 			                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL |
 			                             (multi ? ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL : 0),
-			                         ctrlX, y, ctrlW - (browseW ? browseW + sc(6) : 0), boxH, dialog, id, appInstance(), nullptr);
+			                         ctrlX + padX, y + padY, fieldW - 2 * padX + (multi ? sc(5) : 0), boxH - 2 * padY, dialog, id, appInstance(), nullptr);
 			if (multi) y += boxH - rowH;
 			if (x.browse)
-				CreateWindowExW(0, L"BUTTON", L"Choose…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-				                ctrlX + ctrlW - browseW, y, browseW, rowH, dialog, (HMENU)(INT_PTR)(kBrowseBase + (int)i),
-				                appInstance(), nullptr);
+				SetWindowSubclass(CreateWindowExW(0, L"BUTTON", L"Choose…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+				                                  ctrlX + ctrlW - browseW, y, browseW, rowH, dialog, (HMENU)(INT_PTR)(kBrowseBase + (int)i),
+				                                  appInstance(), nullptr),
+				                  hoverProc, 4, 0);
 			y += rowH;
 			if (!x.tip.empty()) {
-				CreateWindowExW(0, L"STATIC", W(x.tip).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, ctrlX, y + sc(2), ctrlW,
-				                lineH, dialog, nullptr, appInstance(), nullptr);
-				y += lineH + sc(2);
+				HWND tip = CreateWindowExW(0, L"STATIC", W(x.tip).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, ctrlX, y + sc(4), ctrlW,
+				                           lineH, dialog, nullptr, appInstance(), nullptr);
+				SetPropW(tip, L"clTip", (HANDLE)1);
+				y += lineH + sc(4);
 			}
 			break;
 		}
 		case FormField::Check: {
-			// The box, and its words as a label of their own beside it (a
-			// themed check box draws its words in black, even in dark mode).
-			const int box = GetSystemMetricsForDpi(SM_CXMENUCHECK, dpi) + sc(2);
-			x.hwnd = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+			// A toggle (as Windows 11 and the Mac both show yes/no), and its
+			// words as a label beside it; a click on either flips it.
+			const int box = sc(44);
+			x.hwnd = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
 			                         ctrlX, y, box, checkH, dialog, id, appInstance(), nullptr);
-			SendMessageW(x.hwnd, BM_SETCHECK, x.value.empty() ? BST_UNCHECKED : BST_CHECKED, 0);
+			if (!x.value.empty()) SetPropW(x.hwnd, L"clOn", (HANDLE)1);
+			SetWindowSubclass(x.hwnd, hoverProc, 4, 0);
 			x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY | SS_NOPREFIX,
-			                          ctrlX + box + sc(4), y + sc(2), ctrlW - box - sc(4), checkH - sc(2), dialog,
+			                          ctrlX + box + sc(6), y + sc(3), ctrlW - box - sc(6), checkH - sc(3), dialog,
 			                          (HMENU)(INT_PTR)(kLabelBase + (int)i), appInstance(), nullptr);
 			y += checkH;
 			break;
@@ -365,16 +569,20 @@ void Form::build() {
 			                         ctrlX, y, ctrlW, sc(260), dialog, id, appInstance(), nullptr);
 			for (const std::string& c : x.choices) SendMessageW(x.hwnd, CB_ADDSTRING, 0, (LPARAM)W(c).c_str());
 			SendMessageW(x.hwnd, CB_SETCURSEL, atoi(x.value.c_str()), 0);
+			// As tall as a field, and drawn as one.
+			SendMessageW(x.hwnd, CB_SETITEMHEIGHT, (WPARAM)-1, rowH - sc(6));
+			SetWindowSubclass(x.hwnd, choiceProc, 5, 0);
 			y += rowH;
 			break;
 		}
 		case FormField::List: {
 			const bool headers = !x.choices.empty();
 			const int h = sc(26) + x.lines * sc(19);
-			x.hwnd = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+			x.frame = RECT{ margin, y, margin + fullW, y + h };
+			x.hwnd = CreateWindowExW(0, WC_LISTVIEWW, L"",
 			                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS |
 			                             LVS_OWNERDATA | (headers ? 0 : LVS_NOCOLUMNHEADER),
-			                         margin, y, fullW, h, dialog, id, appInstance(), nullptr);
+			                         margin + sc(2), y + sc(2), fullW - sc(4), h - sc(4), dialog, id, appInstance(), nullptr);
 			SendMessageW(x.hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
 			             LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | (headers ? LVS_EX_GRIDLINES : 0));
 			listData()[x.hwnd] = ListData();
@@ -426,14 +634,16 @@ void Form::build() {
 	for (size_t i = 0; i < buttons.size(); i++) all.push_back({ buttons[i], kButtonBase + (int)i });
 	if (!okText.empty()) all.push_back({ okText, IDOK });
 	if (!cancelText.empty()) all.push_back({ cancelText, IDCANCEL });
-	const int btnH = sc(26);
+	const int btnH = sc(34);
 	int x = width - margin;
 	for (auto it = all.rbegin(); it != all.rend(); ++it) {
-		const int bw = std::max(sc(84), textPixels(dialog, font, it->first) + sc(28));
+		// Room for the label (bold on the default button, with its key).
+		const int bw = std::max(sc(88), textPixels(dialog, font, it->first) + sc(it->second == IDOK ? 64 : 34));
 		x -= bw;
-		const DWORD style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | (it->second == IDOK ? BS_DEFPUSHBUTTON : BS_PUSHBUTTON);
-		buttonWindows.push_back(CreateWindowExW(0, L"BUTTON", W(it->first).c_str(), style, x, y, bw, btnH, dialog,
-		                                        (HMENU)(INT_PTR)it->second, appInstance(), nullptr));
+		HWND b = CreateWindowExW(0, L"BUTTON", W(it->first).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, x, y, bw, btnH, dialog,
+		                         (HMENU)(INT_PTR)it->second, appInstance(), nullptr);
+		SetWindowSubclass(b, hoverProc, 4, 0);
+		buttonWindows.push_back(b);
 		x -= sc(8);
 	}
 	y += btnH + margin;
@@ -456,7 +666,6 @@ void Form::build() {
 			switch (f.kind) {
 			case FormField::Text: darkenControl(f.hwnd, true, L"CFD"); break;
 			case FormField::Choice: darkenControl(f.hwnd, true, L"CFD"); break;
-			case FormField::Check: darkenControl(f.hwnd, true, L"Explorer"); break;
 			case FormField::List:
 				darkenControl(f.hwnd, true, L"ItemsView");
 				if (HWND header = (HWND)SendMessageW(f.hwnd, LVM_GETHEADER, 0, 0)) darkenControl(header, true, L"ItemsView");
@@ -468,14 +677,14 @@ void Form::build() {
 			default: break;
 			}
 		}
-		for (HWND b : buttonWindows) darkenControl(b, true, L"Explorer");
-		EnumChildWindows(dialog, [](HWND child, LPARAM) -> BOOL {
-			wchar_t cls[32] = L"";
-			GetClassNameW(child, cls, 32);
-			if (lstrcmpiW(cls, L"Button") == 0 && GetWindowTextLengthW(child) > 0) darkenControl(child, true, L"Explorer");
-			return TRUE;
-		}, 0);
 	}
+	for (FormField& f : fields)
+		if (f.kind == FormField::List && !prefs().dark) {
+			const DialogColors& c = darkColors();
+			SendMessageW(f.hwnd, LVM_SETBKCOLOR, 0, c.field);
+			SendMessageW(f.hwnd, LVM_SETTEXTBKCOLOR, 0, c.field);
+			SendMessageW(f.hwnd, LVM_SETTEXTCOLOR, 0, c.text);
+		}
 
 	// Size the window around what's in it, centred on its owner.
 	RECT rc = { 0, 0, width, y };
@@ -555,7 +764,7 @@ void Form::setText(int field, const std::string& text) {
 bool Form::checked(int field) const {
 	const FormField& x = fields[field];
 	if (dialog == nullptr || x.hwnd == nullptr) return !x.value.empty();
-	return SendMessageW(x.hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
+	return toggleOn(x.hwnd);
 }
 
 int Form::choice(int field) const {

@@ -33,6 +33,7 @@ struct FormField {
 	std::function<void(ID2D1RenderTarget* rt, float width, float height)> paint;
 	HWND hwnd = nullptr;
 	HWND extra = nullptr;               // the label, or the Choose... button
+	RECT frame{};                       // Text and List: the drawn field around it (dialog pixels)
 };
 
 class Form {

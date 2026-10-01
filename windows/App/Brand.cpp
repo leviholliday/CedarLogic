@@ -59,11 +59,46 @@ ID2D1RadialGradientBrush* radial(ID2D1RenderTarget* rt, D2D1_POINT_2F center, fl
 	return br;
 }
 
-// A soft glow around a rounded rect: a few wider, fainter layers.
+// A soft glow around a rounded rect: the shape, blurred (Direct2D 1.1's
+// shadow effect), or failing that a few wider, fainter layers.
 void glowRound(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, float radius, D2D1_COLOR_F c, float spread) {
-	for (int i = 3; i >= 1; i--) {
-		const float g = spread * i / 3;
-		fillRound(rt, D2D1::RectF(r.left - g, r.top - g, r.right + g, r.bottom + g), radius + g, alpha(c, c.a * 0.28f));
+	ID2D1DeviceContext* dc = nullptr;
+	if (SUCCEEDED(rt->QueryInterface(__uuidof(ID2D1DeviceContext), (void**)&dc))) {
+		ID2D1Image* target = nullptr;
+		ID2D1CommandList* shape = nullptr;
+		ID2D1Effect* shadow = nullptr;
+		ID2D1SolidColorBrush* b = nullptr;
+		bool drawn = false;
+		dc->GetTarget(&target);
+		if (target && SUCCEEDED(dc->CreateCommandList(&shape)) && SUCCEEDED(dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &b))) {
+			dc->SetTarget(shape);
+			dc->FillRoundedRectangle(D2D1::RoundedRect(r, radius, radius), b);
+			dc->SetTarget(target);
+			shape->Close();
+			if (SUCCEEDED(dc->CreateEffect(CLSID_D2D1Shadow, &shadow))) {
+				// The shape was recorded through the transform; it's drawn back without it.
+				D2D1_MATRIX_3X2_F was;
+				dc->GetTransform(&was);
+				const float scale = std::sqrt(std::fabs(was._11 * was._22 - was._12 * was._21));
+				shadow->SetInput(0, shape);
+				shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, std::max(0.5f, spread * scale / 2));
+				shadow->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(c.r, c.g, c.b, c.a));
+				dc->SetTransform(D2D1::IdentityMatrix());
+				dc->DrawImage(shadow);
+				dc->SetTransform(was);
+				drawn = true;
+			}
+		}
+		release(shadow);
+		release(b);
+		release(shape);
+		release(target);
+		dc->Release();
+		if (drawn) return;
+	}
+	for (int i = 6; i >= 1; i--) {
+		const float g = spread * i / 6;
+		fillRound(rt, D2D1::RectF(r.left - g, r.top - g, r.right + g, r.bottom + g), radius + g, alpha(c, c.a * 0.12f));
 	}
 }
 
@@ -107,6 +142,8 @@ IDWriteTextLayout* layout(const std::string& s, float size, DWRITE_FONT_WEIGHT w
 }
 
 }  // namespace
+
+void glow(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, float radius, D2D1_COLOR_F color, float blur) { glowRound(rt, r, radius, color, blur); }
 
 float text(ID2D1RenderTarget* rt, const std::string& s, float x, float y, float size, DWRITE_FONT_WEIGHT weight, const D2D1_COLOR_F& color,
            float width, DWRITE_TEXT_ALIGNMENT align, float spacing) {
@@ -172,7 +209,7 @@ void button(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const std::string& labe
 	const float rad = (r.bottom - r.top) / 2;
 	const D2D1_RECT_F in = D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f);
 	if (primary) {
-		glowRound(rt, r, rad, alpha(kNeon, hot ? 0.55f : 0.4f), 10);
+		glowRound(rt, r, rad, alpha(kNeon, hot ? 0.6f : 0.42f), 10);
 		if (ID2D1LinearGradientBrush* b = linear(rt, D2D1::Point2F(0, r.top), D2D1::Point2F(0, r.bottom),
 		                                         { { 0, hot ? D2D1::ColorF(0.42f, 1.0f, 0.58f) : kNeon }, { 1, kNeonDeep } })) {
 			rt->FillRoundedRectangle(D2D1::RoundedRect(r, rad, rad), b);

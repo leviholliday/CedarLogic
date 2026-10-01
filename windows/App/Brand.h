@@ -28,6 +28,8 @@ double slideCurve(double t);
 void ground(ID2D1RenderTarget* rt, float w, float h, float bloomX = 0.5f, float bloomY = 0.18f, float gridStep = 28);
 // A glass card; `lit` gives it the neon edge and glow.
 void card(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, bool lit = false, float radius = 14);
+// A soft glow (a blurred shadow of the shape) around a rounded rect.
+void glow(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, float radius, D2D1_COLOR_F color, float blur);
 // Neon (primary) or glass (secondary) pill buttons.
 void button(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const std::string& label, bool primary, bool hot = false);
 // A key as drawn on the brand pages; `lit` while it's pressed.
