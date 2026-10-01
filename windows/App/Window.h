@@ -78,8 +78,16 @@ public:
 
 	// ---- Commands ----
 	void run(int command);
+	// Save into Your Circuits (Ctrl+S also keeps a version).
 	bool save();
-	bool saveAs();
+	bool saveQuietly(bool explicitSave);
+	bool exportCopy();
+	// Close without saving (its circuit was deleted).
+	void discard();
+	// Open the circuit's file again (a version was restored).
+	void reloadFromDisk(const std::string& message);
+	// A circuit in Your Circuits was renamed.
+	void libraryChanged();
 	void exportImage();
 	void exportOlder(int format);
 	void print();
@@ -223,7 +231,6 @@ private:
 	void refreshAfterHistory();
 	void tick();
 	void pageSwitched();
-	bool writeTo(const std::string& file);
 	bool placePoint(double& wx, double& wy) const;
 	void floatSelection(double wx, double wy);
 	void pasteText(const std::string& text, bool floating, bool shift);
@@ -233,7 +240,6 @@ private:
 	LRESULT frameHitTest(LPARAM lp);
 	void renameFile();
 	void duplicateCircuit();
-	void revertToSaved();
 
 	LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 	static LRESULT CALLBACK proc(HWND, UINT, WPARAM, LPARAM);

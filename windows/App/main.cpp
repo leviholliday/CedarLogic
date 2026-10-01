@@ -4,6 +4,7 @@
 
 #include "App.h"
 #include "Canvas.h"
+#include "Library.h"
 #include "Recovery.h"
 #include "Updater.h"
 #include "Welcome.h"
@@ -65,7 +66,7 @@ bool down(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
 // are the canvas's own, not here.
 struct Shortcut { UINT vk; bool ctrl, shift; int command; };
 const Shortcut kShortcuts[] = {
-	{ 'N', true, false, CMD_NEW }, { 'O', true, false, CMD_OPEN }, { 'Q', true, false, CMD_QUIT },
+	{ 'N', true, false, CMD_NEW }, { 'O', true, false, CMD_OPEN }, { 'I', true, false, CMD_IMPORT }, { 'Q', true, false, CMD_QUIT },
 	{ 'S', true, false, CMD_SAVE }, { 'S', true, true, CMD_SAVE_AS }, { 'E', true, false, CMD_EXPORT_IMAGE },
 	{ 'P', true, false, CMD_PRINT }, { 'W', true, true, CMD_CLOSE_WINDOW },
 	{ 'Z', true, false, CMD_UNDO }, { 'Z', true, true, CMD_REDO }, { 'Y', true, false, CMD_REDO },
@@ -133,47 +134,57 @@ bool quitApp() {
 	return true;
 }
 
+// Every circuit lives in Your Circuits: a .cdl file from elsewhere carries
+// on as a copy there (the file itself is left alone; Export gets one out),
+// and opening the same file again finds that copy.
 bool openCircuit(const std::string& path, CircuitWindow* from) {
+	std::string target = path;
+	library::Item existing;
+	if (!library::contains(path) && library::imported(path, existing)) target = existing.circuit();
 	// Already open: bring that window forward.
 	for (CircuitWindow* w : circuitWindows()) {
-		if (!w->filePath().empty() && lowerCase(w->filePath()) == lowerCase(path)) {
+		if (!w->filePath().empty() && lowerCase(w->filePath()) == lowerCase(target)) {
 			if (IsIconic(w->window())) ShowWindow(w->window(), SW_RESTORE);
 			SetForegroundWindow(w->window());
 			return true;
 		}
 	}
 	char err[512] = "";
-	CLDocument* doc = cl_document_open(path.c_str(), err, sizeof err);
+	CLDocument* doc = cl_document_open(target.c_str(), err, sizeof err);
 	if (doc == nullptr) {
 		showMessage(from ? from->window() : nullptr, Tone::Error,
-		            strf("“%s” couldn't be opened", baseName(path).c_str()), err);
-		// A file that's gone leaves the recent list.
-		std::vector<std::string>& r = prefs().recent;
-		if (!fileExists(path)) {
-			r.erase(std::remove(r.begin(), r.end(), path), r.end());
-			prefs().save();
-		}
+		            strf("\u201C%s\u201D couldn't be opened", baseName(path).c_str()), err);
 		return false;
 	}
+	bool importedNow = false;
+	if (!library::contains(target)) {
+		library::Item it;
+		if (library::create(baseName(path), cl_document_save_text(doc), path, it)) {
+			target = it.circuit();
+			importedNow = true;
+		}
+		prefs().lastFolder = dirName(path);
+	}
 	CircuitWindow* w;
-	if (from && from->isPristine()) { from->replaceDocument(doc, path); w = from; }
-	else w = new CircuitWindow(doc, path);
-	prefs().noteRecent(path);
+	if (from && from->isPristine()) { from->replaceDocument(doc, target); w = from; }
+	else w = new CircuitWindow(doc, target);
+	library::noteLastCircuit(target);
 	// What loading had to say (an older format converted, an unknown gate...).
 	std::string notes;
 	bool warning = false;
 	for (int i = 0; i < cl_document_notice_count(doc); i++) {
-		notes += std::string("• ") + cl_document_notice(doc, i) + "\n";
+		notes += std::string("\u2022 ") + cl_document_notice(doc, i) + "\n";
 		warning = warning || cl_document_notice_is_warning(doc, i);
 	}
 	if (warning) showMessage(w->window(), Tone::Warning, "Opened, with notes", notes);
 	else if (!notes.empty()) w->note(notes.substr(4, notes.find('\n') - 4));
+	else if (importedNow) w->note("In Your Circuits now, as a copy. The file itself is left as it was.");
 	return true;
 }
 
 void chooseAndOpen(CircuitWindow* from) {
 	const std::vector<std::string> files = chooseOpenFiles(
-		from ? from->window() : nullptr, "Open Circuit",
+		from ? from->window() : nullptr, "Import a Circuit",
 		{ { "CedarLogic circuits (*.cdl)", "*.cdl" }, { "All files", "*.*" } }, true);
 	for (const std::string& file : files) {
 		openCircuit(file, from);
@@ -219,6 +230,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
 			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE
+			        : d == "library" ? CMD_OPEN : d == "versions" ? CMD_VERSIONS
 			        : d == "welcome" ? -1 : 0;
 			continue;
 		}
@@ -246,7 +258,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
 	bool any = false;
 	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
-	if (!any && circuitWindows().empty()) newCircuitWindow();
+	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
+	// do; else the most recent one; else a new circuit.
+	if (!any && circuitWindows().empty() && gScreenshot.empty()) {
+		std::string last = library::lastCircuit();
+		if (last.empty() || !fileExists(last)) {
+			const std::vector<library::Item> all = library::items();
+			last = all.empty() ? std::string() : all.front().circuit();
+		}
+		if (!last.empty()) openCircuit(last, nullptr);
+	}
+	if (circuitWindows().empty()) newCircuitWindow();
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (gDialog < 0 && !circuitWindows().empty()) {

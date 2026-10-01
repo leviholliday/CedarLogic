@@ -165,8 +165,8 @@ std::string Toolbar::tipFor(const Item& it) const {
 	}
 	switch (it.command) {
 	case CMD_NEW: return "New circuit (Ctrl+N)";
-	case CMD_OPEN: return "Open (Ctrl+O)";
-	case CMD_SAVE: return "Save (Ctrl+S)";
+	case CMD_OPEN: return "Your circuits (Ctrl+O)";
+	case CMD_SAVE: return "Save a version (Ctrl+S)";
 	case CMD_UNDO: return "Undo (Ctrl+Z)";
 	case CMD_REDO: return "Redo (Ctrl+Y)";
 	case CMD_COPY: return "Copy (Ctrl+C)";

@@ -9,6 +9,8 @@
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
+#include "Library.h"
+#include "LibraryWindow.h"
 #include "Chrome.h"
 
 #include <commdlg.h>
@@ -24,7 +26,7 @@
 namespace {
 
 const wchar_t* kClass = L"CedarLogicWindow";
-const UINT_PTR kClockTimer = 1;
+const UINT_PTR kClockTimer = 1, kAutosaveTimer = 2;
 const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18, kNoteTime = 4.0;
 
 double since(double t) { return nowSeconds() - t; }
@@ -520,6 +522,8 @@ void CircuitWindow::selectionChanged() {
 
 void CircuitWindow::edited() {
 	changes++;
+	// Saving as you go: a couple of seconds after the last change.
+	SetTimer(hwnd, kAutosaveTimer, 2000, nullptr);
 	if (cl_document_page_count(doc) != lastPageCount) syncTabs();
 	redraw();
 	selectionChanged();
@@ -553,8 +557,11 @@ void CircuitWindow::lockNudge() {
 }
 
 std::string CircuitWindow::displayName() const {
+	library::Item it;
+	if (library::itemFor(path, it)) return it.name;
+	if (!recoveredName.empty()) return recoveredName;
 	if (!path.empty()) return baseName(path);
-	return recoveredName.empty() ? "Untitled" : recoveredName;
+	return "Untitled";
 }
 
 void CircuitWindow::markRecovered(const std::string& name) {
@@ -813,6 +820,15 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		break;
 	case WM_TIMER:
 		if (wp == kClockTimer) tick();
+		if (wp == kAutosaveTimer) {
+			KillTimer(hwnd, kAutosaveTimer);
+			// Not in the middle of something (a drag, a gate on the pointer,
+			// Tidy Up's preview): then a moment later.
+			Canvas* c = currentCanvas();
+			const bool busy = (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
+			if (busy) SetTimer(hwnd, kAutosaveTimer, 1000, nullptr);
+			else if (isDirty()) saveQuietly(false);
+		}
 		return 0;
 	case WM_SIZE:
 		if (wp == SIZE_MINIMIZED) return 0;
@@ -842,6 +858,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_ACTIVATE:
 		if (toolbar) toolbar->redraw();
+		if (LOWORD(wp) != WA_INACTIVE) library::noteLastCircuit(path);
 		if (LOWORD(wp) != WA_INACTIVE) {
 			// Back to the canvas, unless a text box had the keyboard.
 			HWND f = GetFocus();
@@ -860,9 +877,8 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		const int id = LOWORD(wp);
 		if (id >= CMD_RECENT && id <= CMD_RECENT_LAST) {
 			const size_t i = (size_t)(id - CMD_RECENT);
-			std::vector<std::string> shown;
-			for (const std::string& r : prefs().recent) if (fileExists(r)) shown.push_back(r);
-			if (i < shown.size()) openCircuit(shown[i], this);
+			const std::vector<library::Item> all = library::items();
+			if (i < all.size()) openCircuit(all[i].circuit(), this);
 			return 0;
 		}
 		if (id >= CMD_NEW && id < CMD_RECENT) {
@@ -956,14 +972,31 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+// Circuits save themselves, so closing doesn't ask: it saves. Only when that
+// fails is there a question.
 bool CircuitWindow::confirmClose() {
 	if (!isDirty()) return true;
-	const std::string text = strf("Save the changes to “%s” before closing?\n\nIf you don't save, your changes will be lost.",
-	                              displayName().c_str());
-	const int r = MessageBoxW(hwnd, W(text).c_str(), L"CedarLogic", MB_YESNOCANCEL | MB_ICONWARNING);
-	if (r == IDNO) return true;
-	if (r == IDYES) return save();
-	return false;
+	if (saveQuietly(false)) return true;
+	return askYesNo(hwnd, "This circuit couldn't be saved", "Close it anyway? The changes since it last saved will be lost.");
+}
+
+// Without saving: its circuit is going (deleted from Your Circuits).
+void CircuitWindow::discard() {
+	forceDirty = false;
+	destroy();
+}
+
+void CircuitWindow::reloadFromDisk(const std::string& message) {
+	char err[512] = "";
+	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
+	if (fresh == nullptr) { showMessage(hwnd, Tone::Error, "The circuit couldn't be opened again", err); return; }
+	replaceDocument(fresh, path);
+	if (!message.empty()) note(message);
+}
+
+void CircuitWindow::libraryChanged() {
+	updateTitle();
+	updateActions();
 }
 
 void CircuitWindow::destroy() {
@@ -983,10 +1016,12 @@ void CircuitWindow::run(int command) {
 	Canvas* c = currentCanvas();
 	switch (command) {
 	case CMD_NEW: newCircuitWindow(); break;
-	case CMD_OPEN: chooseAndOpen(this); break;
+	case CMD_OPEN: showYourCircuits(this); break;
+	case CMD_IMPORT: chooseAndOpen(this); break;
+	case CMD_VERSIONS: showVersionHistory(this); break;
 	case CMD_OPEN_SAMPLE: openPracticeCircuit(this); break;
 	case CMD_SAVE: save(); break;
-	case CMD_SAVE_AS: saveAs(); break;
+	case CMD_SAVE_AS: exportCopy(); break;
 	case CMD_EXPORT_IMAGE: exportImage(); break;
 	case CMD_EXPORT_V2: exportOlder(2); break;
 	case CMD_EXPORT_V1: exportOlder(1); break;
@@ -1066,82 +1101,59 @@ void CircuitWindow::moreMenu(POINT screen, bool rightAligned) {
 
 // The circuit's name in the toolbar: what a Mac window's title offers.
 void CircuitWindow::titleMenu(POINT screen) {
-	enum { RENAME = 1, SAVE_AS, DUPLICATE, SHOW, REVERT };
+	enum { RENAME = 1, DUPLICATE, VERSIONS, EXPORT, LIBRARY };
 	HMENU m = CreatePopupMenu();
-	const bool saved = !path.empty() && fileExists(path);
 	AppendMenuW(m, MF_STRING, RENAME, L"&Rename\u2026");
-	AppendMenuW(m, MF_STRING, SAVE_AS, L"Save &As\u2026\tCtrl+Shift+S");
 	AppendMenuW(m, MF_STRING, DUPLICATE, L"&Duplicate");
+	AppendMenuW(m, MF_STRING, VERSIONS, L"&Version History\u2026");
 	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-	AppendMenuW(m, MF_STRING | (saved ? 0 : MF_GRAYED), SHOW, L"Show in File &Explorer");
-	AppendMenuW(m, MF_STRING | (saved && isDirty() ? 0 : MF_GRAYED), REVERT, L"Revert to Last &Saved");
+	AppendMenuW(m, MF_STRING, EXPORT, L"&Export\u2026\tCtrl+Shift+S");
+	AppendMenuW(m, MF_STRING, LIBRARY, L"Your &Circuits\u2026\tCtrl+O");
 	SetForegroundWindow(hwnd);
 	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, screen.x, screen.y, 0, hwnd, nullptr);
 	DestroyMenu(m);
 	switch (cmd) {
 	case RENAME: renameFile(); break;
-	case SAVE_AS: saveAs(); break;
 	case DUPLICATE: duplicateCircuit(); break;
-	case SHOW: {
-		PIDLIST_ABSOLUTE item = ILCreateFromPathW(W(path).c_str());
-		if (item) { SHOpenFolderAndSelectItems(item, 0, nullptr, 0); ILFree(item); }
-		break;
-	}
-	case REVERT: revertToSaved(); break;
+	case VERSIONS: showVersionHistory(this); break;
+	case EXPORT: exportCopy(); break;
+	case LIBRARY: showYourCircuits(this); break;
 	default: break;
 	}
 }
 
-// A saved circuit is renamed where it is; one never saved is saved under the
-// new name.
+// The name it has in Your Circuits (one not in it yet joins under it).
 void CircuitWindow::renameFile() {
 	std::string name = displayName();
-	if (!askText(hwnd, "Rename Circuit", "The circuit's name:", name) || name.empty() || name == displayName()) return;
-	for (char& c : name) if (strchr("\\/:*?\"<>|", c)) c = '-';
-	if (path.empty() || !fileExists(path)) {
-		const std::string file = chooseSaveFile(hwnd, "Save Circuit", name + ".cdl", kCdlFilters, ".cdl");
-		if (!file.empty()) writeTo(file);
-		return;
+	if (!askText(hwnd, "Rename Circuit", "The name it has in Your Circuits:", name) || name.empty() || name == displayName()) return;
+	library::Item it;
+	if (library::itemFor(path, it)) {
+		library::rename(it, name);
+		for (CircuitWindow* w : circuitWindows()) w->libraryChanged();
+	} else {
+		recoveredName = name;
+		forceDirty = true;
+		saveQuietly(false);
 	}
-	const std::string to = dirName(path) + "\\" + name + ".cdl";
-	if (fileExists(to)) {
-		showMessage(hwnd, Tone::Warning, "There's already a circuit called \u201C" + name + "\u201D there", "Choose another name.");
-		return;
-	}
-	if (!MoveFileExW(W(path).c_str(), W(to).c_str(), 0)) {
-		showMessage(hwnd, Tone::Error, "The circuit couldn't be renamed", "Is it open in another program, or read-only?");
-		return;
-	}
-	std::vector<std::string>& r = prefs().recent;
-	r.erase(std::remove(r.begin(), r.end(), path), r.end());
-	path = to;
-	prefs().noteRecent(to);
 	updateTitle();
 	updateActions();
 	note("Renamed.");
 }
 
-// A copy in a new window, unsaved.
+// A copy, as a new circuit in Your Circuits, in a window of its own.
 void CircuitWindow::duplicateCircuit() {
+	saveQuietly(false);
 	const std::string text = cl_document_save_text(doc);
-	// Asking for the text marks the engine's copy saved; it isn't.
-	forceDirty = forceDirty || !path.empty() || changes > 0;
+	library::Item copy;
+	if (!library::create(displayName() + " copy", text, "", copy)) {
+		showMessage(hwnd, Tone::Error, "The circuit couldn't be duplicated", "");
+		return;
+	}
 	char err[512] = "";
-	CLDocument* copy = cl_document_open_text(text.c_str(), (long)text.size(), err, sizeof err);
-	if (copy == nullptr) { showMessage(hwnd, Tone::Error, "The circuit couldn't be duplicated", err); return; }
-	CircuitWindow* w = new CircuitWindow(copy, "");
-	w->markRecovered(displayName() + " copy");
-	w->note("A copy. Save it to keep it.");
-	updateTitle();
-}
-
-void CircuitWindow::revertToSaved() {
-	if (path.empty() || !askYesNo(hwnd, "Revert to the last saved version?", "The changes since then will be lost.")) return;
-	char err[512] = "";
-	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
-	if (fresh == nullptr) { showMessage(hwnd, Tone::Error, "The saved circuit couldn't be opened", err); return; }
-	replaceDocument(fresh, path);
-	note("Back to the last saved version.");
+	CLDocument* d = cl_document_open(copy.circuit().c_str(), err, sizeof err);
+	if (d == nullptr) { showMessage(hwnd, Tone::Error, "The circuit couldn't be duplicated", err); return; }
+	CircuitWindow* w = new CircuitWindow(d, copy.circuit());
+	w->note("A copy, in Your Circuits as \u201C" + copy.name + "\u201D.");
 }
 
 // ---- Files ---------------------------------------------------------------------
@@ -1174,54 +1186,74 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	if (Canvas* c = currentCanvas()) c->focus();
 }
 
-bool CircuitWindow::writeTo(const std::string& file) {
-	// Written to a temporary beside it, then moved over it, so a failed save
-	// leaves the old file as it was.
+// Written to a temporary beside it, then moved over it, so a failed write
+// leaves the old file as it was. "" when written, else why not.
+static std::string writeText(const std::string& file, const std::string& text) {
+	const std::wstring target = W(file), tmp = target + L".saving";
+	HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE) return "The file couldn't be written there. Check that the folder exists and you can save to it.";
+	DWORD wrote = 0;
+	const bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size() && FlushFileBuffers(h);
+	CloseHandle(h);
+	std::string err;
+	if (!ok) err = "The disk may be full.";
+	else if (!MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+		err = "The old file couldn't be replaced. Is it open in another program, or read-only?";
+	if (!err.empty()) DeleteFileW(tmp.c_str());
+	return err;
+}
+
+// Into Your Circuits: a circuit that isn't there yet joins it once there's
+// something on it (so an empty new window leaves nothing behind). A version
+// is kept when one's due, or now when `explicitSave` (Ctrl+S).
+bool CircuitWindow::saveQuietly(bool explicitSave) {
+	library::Item it;
+	const bool inLibrary = library::itemFor(path, it);
+	bool hasGates = false;
+	for (int p = 0; p < cl_document_page_count(doc) && !hasGates; p++) hasGates = cl_document_gate_count(doc, p) > 0;
+	if (!inLibrary && !hasGates && !explicitSave) return true;   // nothing to keep
 	const std::string text = cl_document_save_text(doc);   // marks the engine's copy saved
 	std::string err;
-	{
-		const std::wstring target = W(file), tmp = target + L".saving";
-		HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-		if (h == INVALID_HANDLE_VALUE) {
-			err = "The file couldn't be written there. Check that the folder exists and you can save to it.";
-		} else {
-			DWORD wrote = 0;
-			const bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size() &&
-			                FlushFileBuffers(h);
-			CloseHandle(h);
-			if (!ok) err = "The disk may be full.";
-			else if (!MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-				err = "The old file couldn't be replaced. Is it open in another program, or read-only?";
-			if (!err.empty()) DeleteFileW(tmp.c_str());
-		}
+	if (inLibrary) {
+		err = writeText(path, text);
+	} else {
+		std::string name = displayName();
+		if (name == "Untitled") name = "Untitled Circuit";
+		if (library::create(name, text, "", it)) path = it.circuit();
+		else err = "Your Circuits' folder couldn't be written to.";
 	}
 	if (!err.empty()) {
 		forceDirty = true;
-		showMessage(hwnd, Tone::Error, "The circuit couldn't be saved", err);
+		if (explicitSave) showMessage(hwnd, Tone::Error, "The circuit couldn't be saved", err);
+		else note("Couldn't save just now. Your work is still here; try Ctrl+S.");
 		updateTitle();
 		return false;
 	}
 	forceDirty = false;
-	path = file;
 	recoveredName.clear();
 	// Saved: the recovery copy isn't needed until the next change.
 	recovery::remove(recoveryBase);
 	changesAtRecovery = changes;
-	prefs().noteRecent(file);
+	const bool kept = library::noteSaved(path, explicitSave);
+	library::noteLastCircuit(path);
+	if (explicitSave) note(kept ? "Saved, and a version was kept." : "Saved.");
 	updateTitle();
-	note("Saved.");
 	return true;
 }
 
-bool CircuitWindow::save() {
-	if (path.empty()) return saveAs();
-	return writeTo(path);
-}
+bool CircuitWindow::save() { return saveQuietly(true); }
 
-bool CircuitWindow::saveAs() {
-	const std::string file = chooseSaveFile(hwnd, "Save Circuit", displayName() + ".cdl", kCdlFilters, ".cdl");
+// A copy of the circuit as a .cdl file, anywhere (Your Circuits keeps the
+// circuit itself).
+bool CircuitWindow::exportCopy() {
+	const std::string file = chooseSaveFile(hwnd, "Export", displayName() + ".cdl", kCdlFilters, ".cdl");
 	if (file.empty()) return false;
-	return writeTo(file);
+	const bool wasDirty = isDirty();
+	const std::string err = writeText(file, cl_document_save_text(doc));
+	forceDirty = forceDirty || wasDirty;   // asking for the text marked it saved
+	if (!err.empty()) { showMessage(hwnd, Tone::Error, "The circuit couldn't be exported", err); return false; }
+	note("Exported " + baseName(file) + ".cdl.");
+	return true;
 }
 
 void CircuitWindow::exportOlder(int format) {
@@ -1733,15 +1765,15 @@ void CircuitWindow::showShortcuts() { showShortcutsWindow(hwnd); }
 
 void CircuitWindow::rebuildRecentMenu() {
 	while (GetMenuItemCount(recentMenu) > 0) DeleteMenu(recentMenu, 0, MF_BYPOSITION);
+	const std::vector<library::Item> all = library::items();
 	int shown = 0;
-	for (const std::string& path : prefs().recent) {
-		if (!fileExists(path)) continue;
-		// Ampersands in a file name aren't mnemonics.
+	for (const library::Item& it : all) {
+		// Ampersands in a name aren't mnemonics.
 		std::string label;
-		for (char c : baseName(path)) { if (c == '&') label += '&'; label += c; }
+		for (char c : it.name) { if (c == '&') label += '&'; label += c; }
 		if (shown < 9) label = strf("&%d  ", shown + 1) + label;
 		AppendMenuW(recentMenu, MF_STRING, CMD_RECENT + shown, W(label).c_str());
 		if (++shown >= 10) break;
 	}
-	if (shown == 0) AppendMenuW(recentMenu, MF_STRING | MF_GRAYED, 0, L"No recent circuits");
+	if (shown == 0) AppendMenuW(recentMenu, MF_STRING | MF_GRAYED, 0, L"No circuits yet");
 }

@@ -65,6 +65,7 @@ struct Prefs {
 	int paletteWidth = 210;                       // in 96-dpi units
 	std::vector<std::string> recent;              // most recent first
 	std::string lastFolder;
+	std::string lastCircuit;                      // the Your Circuits circuit last in front
 
 	double wireScale() const;
 	void load();
