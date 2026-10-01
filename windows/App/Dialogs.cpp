@@ -125,6 +125,17 @@ void paintPicture(const FormField& x, const DRAWITEMSTRUCT* di) {
 	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
 }
 
+// Up, Down and the Page keys in a text box, offered to Form::onKey.
+LRESULT CALLBACK formKeysProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data) {
+	if (msg == WM_KEYDOWN && (wp == VK_UP || wp == VK_DOWN || wp == VK_PRIOR || wp == VK_NEXT)) {
+		Form* f = reinterpret_cast<Form*>(data);
+		bool used = false;
+		if (f->onKey) guarded("a dialog", [&] { used = f->onKey(*f, (int)(id - 100), (UINT)wp); });
+		if (used) return 0;
+	}
+	return DefSubclassProc(h, msg, wp, lp);
+}
+
 INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	Form* f = reinterpret_cast<Form*>(GetWindowLongPtrW(d, DWLP_USER));
 	if (msg == WM_INITDIALOG) {
@@ -432,6 +443,8 @@ void Form::build() {
 		if ((f.kind == FormField::List || f.kind == FormField::Text) && f.mono) SendMessageW(f.hwnd, WM_SETFONT, (WPARAM)monoFont(dpi), TRUE);
 		if (f.kind == FormField::Text && f.arrowsMove >= 0 && f.arrowsMove < (int)fields.size())
 			SetWindowSubclass(f.hwnd, arrowsProc, 1, (DWORD_PTR)fields[f.arrowsMove].hwnd);
+		if (f.kind == FormField::Text && onKey && f.lines <= 1)
+			SetWindowSubclass(f.hwnd, formKeysProc, 100 + (UINT_PTR)(&f - fields.data()), (DWORD_PTR)this);
 	}
 	SetWindowTextW(dialog, W(title).c_str());
 
@@ -742,74 +755,148 @@ void showGateSettings(CircuitWindow* w, long gate) {
 
 namespace {
 
-// How well a gate matches what's typed (lower is better; -1 not at all):
-// the whole name, then the start of it, then the start of a word, then
-// anywhere.
-int matchRank(const std::string& caption, const std::string& name, const std::string& text) {
-	if (text.empty()) return 0;
-	const std::string c = lowerCase(caption), n = lowerCase(name);
-	if (c == text || n == text) return 0;
-	if (c.compare(0, text.size(), text) == 0) return 1;
-	for (size_t at = c.find(text); at != std::string::npos; at = c.find(text, at + 1))
-		if (at > 0 && !isalnum((unsigned char)c[at - 1])) return 2;
-	if (c.find(text) != std::string::npos || n.find(text) != std::string::npos) return 3;
-	return -1;
+// QuickAddDialog::fuzzyScore, as the Mac has it: a substring beats letters
+// in order; a match at the start beats one in the middle; -1 for no match.
+int fuzzyScore(const std::string& query, const std::string& target) {
+	const std::string q = lowerCase(query), t = lowerCase(target);
+	if (q.empty()) return 0;
+	const size_t at = t.find(q);
+	if (at != std::string::npos) return at == 0 ? 100 : 80;
+	size_t qi = 0;
+	int score = 0, last = -2;
+	for (size_t ti = 0; ti < t.size() && qi < q.size(); ti++) {
+		if (t[ti] != q[qi]) continue;
+		score += 10;
+		if (last == (int)ti - 1) score += 5;
+		if (ti == 0 || t[ti - 1] == ' ' || t[ti - 1] == '-' || t[ti - 1] == '_') score += 5;
+		last = (int)ti;
+		qi++;
+	}
+	return qi < q.size() ? -1 : score;
+}
+
+// "1 - Basic Gates" -> "Basic Gates".
+std::string categoryTitle(const std::string& raw) {
+	size_t i = 0;
+	while (i < raw.size() && (isdigit((unsigned char)raw[i]) || raw[i] == ' ' || raw[i] == '-')) i++;
+	return i < raw.size() ? raw.substr(i) : raw;
 }
 
 }  // namespace
 
+// Add a gate by name (A), as the Mac's: type part of a name, arrow to the
+// one you want, Enter. Each result shows the gate's own picture. The gate
+// then follows the pointer onto the canvas until a click puts it down.
 void showQuickAdd(CircuitWindow* w) {
-	std::vector<std::pair<std::string, std::string>> all;   // name, caption
-	for (int c = 0; c < cl_library_category_count(); c++)
+	struct Entry { std::string name, caption, category; };
+	std::vector<Entry> all;
+	for (int c = 0; c < cl_library_category_count(); c++) {
+		const std::string cat = categoryTitle(cl_library_category(c) ? cl_library_category(c) : "");
 		for (int i = 0; i < cl_library_gate_count(c); i++) {
-			std::string name = cl_library_gate(c, i);
-			std::string caption = cl_library_gate_caption(name.c_str());
-			all.push_back({ name, caption.empty() ? name : caption });
+			const std::string name = cl_library_gate(c, i);
+			bool seen = false;
+			for (const Entry& e : all) seen = seen || e.name == name;
+			if (seen) continue;
+			const std::string caption = cl_library_gate_caption(name.c_str()) ? cl_library_gate_caption(name.c_str()) : "";
+			all.push_back({ name, caption.empty() ? name : caption, cat });
 		}
-	std::sort(all.begin(), all.end(), [](auto& a, auto& b) { return lowerCase(a.second) < lowerCase(b.second); });
-	all.erase(std::unique(all.begin(), all.end()), all.end());
-	// My Parts too, after the gates.
-	for (const parts::Part& part : parts::all()) all.push_back({ part.gate(), part.name + "  (My Parts)" });
+	}
+	for (const parts::Part& part : parts::all()) all.push_back({ part.gate(), part.name, "My Parts" });
 
-	std::vector<std::string> names;   // what the list shows, in order
+	std::vector<int> results;
+	int selected = 0;
+	float scroll = 0;
+	int hot = -1;
+	const float kRowH = 54;
+	const int listHeight = 400;
+
 	Form f;
 	f.title = "Add a Gate";
-	f.width = 380;
+	f.width = 520;
 	f.okText = "Add";
 	FormField entry;
 	entry.kind = FormField::Text;
-	entry.tip = "Type part of a gate's name. Up and Down choose; Enter adds it.";
+	entry.tip = "Type to search, then press Enter. The gate follows your mouse onto the canvas.";
 	const int e = f.add(entry);
 	FormField list;
-	list.kind = FormField::List;
-	list.lines = 14;
+	list.kind = FormField::Picture;
+	list.height = listHeight;
+	list.paint = [&](ID2D1RenderTarget* rt, float pw, float ph) {
+		const Chrome c = chrome();
+		const D2D1_COLOR_F ink = c.dark ? D2D1::ColorF(0.886f, 0.902f, 0.933f) : D2D1::ColorF(0.118f, 0.13f, 0.157f);
+		if (results.empty()) {
+			drawText(rt, "No gates match that.", D2D1::RectF(0, 30, pw, 60), 13, withAlpha(ink, 0.55f), TextAlign::Center);
+			return;
+		}
+		const double s = dpiOf(f.dialog) / 96.0;
+		const int first = std::max(0, (int)(scroll / kRowH));
+		for (int i = first; i < (int)results.size(); i++) {
+			const float y = i * kRowH - scroll;
+			if (y > ph) break;
+			const Entry& en = all[results[i]];
+			const D2D1_RECT_F r = D2D1::RectF(4, y + 3, pw - 4, y + kRowH - 3);
+			if (i == selected) fillRound(rt, r, 11, withAlpha(c.accent(), c.dark ? 0.26f : 0.16f));
+			else if (i == hot) fillRound(rt, r, 11, withAlpha(ink, 0.06f));
+			D2D1_MATRIX_3X2_F was;
+			rt->GetTransform(&was);
+			rt->SetTransform(D2D1::Matrix3x2F::Translation(18, y + 7) * was);
+			if (parts::isPart(en.name)) parts::draw(en.name, rt, 40, 40, s, c.dark);
+			else cl_library_draw_gate(en.name.c_str(), rt, 40, 40, s, c.dark);
+			rt->SetTransform(was);
+			drawText(rt, en.caption, D2D1::RectF(74, y + 9, pw - 12, y + 28), 13, ink, TextAlign::Leading, true);
+			const std::string sub = en.category == "My Parts" || en.caption == en.name ? en.category : en.name + "  ·  " + en.category;
+			drawText(rt, sub, D2D1::RectF(74, y + 29, pw - 12, y + 46), 10.5f, withAlpha(ink, 0.55f));
+		}
+	};
 	const int l = f.add(list);
-	f.fields[e].arrowsMove = l;
+
+	auto keepInView = [&](Form& form) {
+		const float top = selected * kRowH, bottom = top + kRowH;
+		if (top < scroll) scroll = top;
+		else if (bottom > scroll + listHeight) scroll = bottom - listHeight;
+		form.refresh(l);
+	};
 	auto filter = [&](Form& form) {
-		const std::string text = lowerCase(trimmed(form.text(e)));
-		std::vector<std::pair<int, size_t>> hits;
-		for (size_t i = 0; i < all.size(); i++) {
-			const int r = matchRank(all[i].second, all[i].first, text);
-			if (r >= 0) hits.push_back({ r, i });
+		const std::string q = trimmed(form.text(e));
+		std::vector<std::pair<int, int>> scored;   // score, index
+		for (int i = 0; i < (int)all.size(); i++) {
+			const int sc = q.empty() ? 1 : std::max(fuzzyScore(q, all[i].caption), fuzzyScore(q, all[i].name));
+			if (sc > 0) scored.push_back({ sc, i });
 		}
-		std::stable_sort(hits.begin(), hits.end(), [](auto& a, auto& b) { return a.first < b.first; });
-		std::vector<std::vector<std::string>> rows;
-		names.clear();
-		for (auto& h : hits) {
-			rows.push_back({ all[h.second].second });
-			names.push_back(all[h.second].first);
-			if (rows.size() >= 300) break;
-		}
-		form.setRows(l, rows);
-		if (!rows.empty()) form.selectRow(l, 0);
+		std::stable_sort(scored.begin(), scored.end(), [](auto& a, auto& b) { return a.first > b.first; });
+		results.clear();
+		for (auto& x : scored) results.push_back(x.second);
+		selected = 0;
+		scroll = 0;
+		form.refresh(l);
 	};
 	f.onInit = filter;
 	f.onChange = [&](Form& form, int field) { if (field == e) filter(form); };
-	f.onActivate = [&](Form& form, int, int) { SendMessageW(form.dialog, WM_COMMAND, IDOK, 0); };
+	f.onKey = [&](Form& form, int, UINT vk) {
+		if (results.empty()) return true;
+		const int page = std::max(1, (int)(listHeight / kRowH) - 1);
+		const int d = vk == VK_UP ? -1 : vk == VK_DOWN ? 1 : vk == VK_PRIOR ? -page : page;
+		selected = std::max(0, std::min((int)results.size() - 1, selected + d));
+		keepInView(form);
+		return true;
+	};
+	f.onWheel = [&](Form& form, int, int delta) {
+		const float most = std::max(0.0f, results.size() * kRowH - listHeight);
+		scroll = std::max(0.0f, std::min(most, scroll - delta / (float)WHEEL_DELTA * kRowH * 2));
+		form.refresh(l);
+	};
+	// A click chooses; a second click on the chosen one adds it.
+	f.onClick = [&](Form& form, int, float, float y) {
+		const int i = (int)((y + scroll) / kRowH);
+		if (i < 0 || i >= (int)results.size()) return;
+		if (i == selected) { SendMessageW(form.dialog, WM_COMMAND, IDOK, 0); return; }
+		selected = i;
+		form.refresh(l);
+		SetFocus(form.fields[e].hwnd);
+	};
 	std::string chosen;
-	f.validate = [&](Form& form) -> std::string {
-		const int row = form.selectedRow(l);
-		chosen = row >= 0 && row < (int)names.size() ? names[row] : std::string();
+	f.validate = [&](Form&) -> std::string {
+		chosen = selected >= 0 && selected < (int)results.size() ? all[results[selected]].name : std::string();
 		return chosen.empty() ? "Nothing matches that." : std::string();
 	};
 	// As in wx, it appears on the pointer at the next move over the canvas.
@@ -878,7 +965,8 @@ void showRamEditor(CircuitWindow* w, long gate) {
 	const float addrW = 70, headH = 24, rowH = 25;
 	const float cellW = std::max(3, std::max(dDigits, decDigits) + 1) * 7.0f + 10;
 	const float gridW = 12 + addrW + cols * (cellW + 3) + 10;
-	const int gridHeight = 380;
+	// Tall enough for every row of a small memory; 380 points and a scroll for a big one.
+	const int gridHeight = (int)std::min(380.0f, headH + 8 + rowsTotal * rowH + 6);
 	const int visibleRows = (int)((gridHeight - headH - 8) / rowH);
 
 	auto ink = [] { return prefs().dark ? D2D1::ColorF(0.886f, 0.902f, 0.933f) : D2D1::ColorF(0.118f, 0.13f, 0.157f); };

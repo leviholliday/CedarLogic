@@ -51,6 +51,7 @@ public:
 	std::function<void(Form&)> onTimer;
 	std::function<void(Form&, int field, float x, float y)> onClick;   // a Picture, in its points
 	std::function<void(Form&, int field, int delta)> onWheel;          // the wheel over a Picture (120 a notch)
+	std::function<bool(Form&, int field, UINT vk)> onKey;              // Up, Down, Page Up/Down in a Text field: true if used
 	int timerMs = 0;
 
 	int add(const FormField& f) { fields.push_back(f); return (int)fields.size() - 1; }
