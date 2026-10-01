@@ -63,16 +63,16 @@ bool savePng(IWICBitmapSource* bmp, const std::string& file) {
 	return ok;
 }
 
-IWICBitmap* load(const std::string& file, UINT maxW, UINT maxH) {
-	if (wic() == nullptr) return nullptr;
-	IWICBitmapDecoder* dec = nullptr;
+namespace {
+
+// A decoder's first frame, shrunk to fit and made ready to draw.
+IWICBitmap* fromDecoder(IWICBitmapDecoder* dec, UINT maxW, UINT maxH) {
 	IWICBitmapFrameDecode* frame = nullptr;
 	IWICBitmapScaler* scaler = nullptr;
 	IWICFormatConverter* conv = nullptr;
 	IWICBitmap* out = nullptr;
 	UINT w = 0, h = 0;
-	if (SUCCEEDED(wic()->CreateDecoderFromFilename(W(file).c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &dec)) &&
-	    SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(frame->GetSize(&w, &h)) && w > 0 && h > 0) {
+	if (dec && SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(frame->GetSize(&w, &h)) && w > 0 && h > 0) {
 		const double s = std::min(1.0, std::min((double)maxW / w, (double)maxH / h));
 		const UINT sw = std::max(1u, (UINT)(w * s)), sh = std::max(1u, (UINT)(h * s));
 		if (SUCCEEDED(wic()->CreateBitmapScaler(&scaler)) && SUCCEEDED(scaler->Initialize(frame, sw, sh, WICBitmapInterpolationModeFant)) &&
@@ -83,7 +83,35 @@ IWICBitmap* load(const std::string& file, UINT maxW, UINT maxH) {
 	if (conv) conv->Release();
 	if (scaler) scaler->Release();
 	if (frame) frame->Release();
+	return out;
+}
+
+}  // namespace
+
+IWICBitmap* load(const std::string& file, UINT maxW, UINT maxH) {
+	if (wic() == nullptr) return nullptr;
+	IWICBitmapDecoder* dec = nullptr;
+	if (FAILED(wic()->CreateDecoderFromFilename(W(file).c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &dec))) return nullptr;
+	IWICBitmap* out = fromDecoder(dec, maxW, maxH);
+	dec->Release();
+	return out;
+}
+
+IWICBitmap* loadResource(int id, UINT maxW, UINT maxH) {
+	if (wic() == nullptr) return nullptr;
+	HRSRC res = FindResourceW(appInstance(), MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10));   // RT_RCDATA
+	HGLOBAL mem = res ? LoadResource(appInstance(), res) : nullptr;
+	const DWORD size = res ? SizeofResource(appInstance(), res) : 0;
+	void* data = mem ? LockResource(mem) : nullptr;
+	if (data == nullptr || size == 0) return nullptr;
+	IWICStream* stream = nullptr;
+	IWICBitmapDecoder* dec = nullptr;
+	IWICBitmap* out = nullptr;
+	if (SUCCEEDED(wic()->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromMemory((BYTE*)data, size)) &&
+	    SUCCEEDED(wic()->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnLoad, &dec)))
+		out = fromDecoder(dec, maxW, maxH);
 	if (dec) dec->Release();
+	if (stream) stream->Release();
 	return out;
 }
 

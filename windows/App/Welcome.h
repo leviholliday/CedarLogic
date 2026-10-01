@@ -7,16 +7,23 @@
 
 #include "App.h"
 #include <functional>
+#include <string>
 
 class CircuitWindow;
 
 namespace splash {
-// Show the launch screen (it animates until hidden).
+// The launch screen (Splash.cpp): made at once, unseen; it plays once the
+// launch's work is done (hideSoon), then dissolves into the windows.
 void show();
 bool active();
 void setStatus(const char* status);
-// Hide it once it's been up long enough to see, then run `then`.
+// The circuit being opened, for its "Opening ..." line.
+void setOpening(const std::string& name);
+// The work is done: play it, then run `then` (the windows come in) as it
+// dissolves. Null `then`: close it at once (something went wrong).
 void hideSoon(std::function<void()> then);
+// --splash-frame: the panel at t seconds, as a PNG.
+bool renderFrame(double t, bool first, const std::string& file);
 }  // namespace splash
 
 namespace welcome {

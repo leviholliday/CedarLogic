@@ -20,6 +20,8 @@ bool savePng(IWICBitmapSource* bmp, const std::string& file);
 // A picture file (PNG, JPEG...) shrunk to fit maxW x maxH pixels, ready to
 // draw (premultiplied BGRA). Null if it couldn't be read.
 IWICBitmap* load(const std::string& file, UINT maxW, UINT maxH);
+// The same, from a picture built into the app (an RCDATA resource).
+IWICBitmap* loadResource(int id, UINT maxW, UINT maxH);
 bool copyToClipboard(HWND owner, IWICBitmap* bmp);
 
 }  // namespace images

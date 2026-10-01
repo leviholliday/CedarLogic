@@ -37,6 +37,11 @@ int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
 // diagram too; --timing-color for it in color.
 std::string gTiming;
 bool gTimingColor = false;
+// --splash-frame <seconds> <out.png> [--first-launch]: the launch screen at
+// that moment, drawn to a PNG, and quit.
+double gSplashAt = 0;
+std::string gSplashFile;
+bool gFirstLaunch = false;
 std::string gPlace;     // --place: a gate by library name, put on the page and selected
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
@@ -256,6 +261,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
 		if (a == "--timing-color") { gTimingColor = true; continue; }
+		if (a == "--splash-frame" && i + 2 < argc) { gSplashAt = atof(U(argv[++i]).c_str()); gSplashFile = U(argv[++i]); continue; }
+		if (a == "--first-launch") { gFirstLaunch = true; continue; }
 		if (a == "--place" && i + 1 < argc) { gPlace = U(argv[++i]); continue; }
 		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
@@ -282,7 +289,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty()) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty()) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -291,6 +298,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		            "cl_gatedefs.xml wasn't found in the res folder next to CedarLogic.exe. Reinstall CedarLogic, or "
 		            "set CEDARLOGIC_RESOURCES to the folder that has it.");
 		return 1;
+	}
+	if (!gSplashFile.empty()) {
+		const bool ok = splash::renderFrame(gSplashAt, gFirstLaunch, gSplashFile);
+		writeOut(strf("%s %s\n", ok ? "wrote" : "couldn't write", gSplashFile.c_str()));
+		return ok ? 0 : 1;
 	}
 	prefs().applyWireDots();
 	registerWindowClasses();
@@ -309,6 +321,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (!last.empty()) openCircuit(last, nullptr);
 	}
 	if (circuitWindows().empty()) newCircuitWindow();
+	// The launch screen says what it's opening.
+	if (!circuitWindows().empty() && !circuitWindows().front()->filePath().empty())
+		splash::setOpening(circuitWindows().front()->titleText());
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
 	if (!gPlace.empty() && !circuitWindows().empty()) {
 		CircuitWindow* w = circuitWindows().back();

@@ -1,6 +1,7 @@
 // Settings, resources, colours, text, drawing and small helpers (see App.h).
 
 #include "App.h"
+#include <d2d1_1.h>
 #include "Window.h"
 
 #include <commdlg.h>
@@ -208,6 +209,7 @@ void Prefs::load() {
 	showGateNames = r.b("showGateNames", showGateNames);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
+	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
 	windowHeight = r.i("windowHeight", windowHeight, 300, 20000);
 	windowMaximized = r.b("windowMaximized", windowMaximized);
@@ -278,6 +280,7 @@ void Prefs::save() const {
 	o << "showGateNames=" << b(showGateNames) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
+	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
 	o << "windowHeight=" << windowHeight << "\n";
 	o << "windowMaximized=" << b(windowMaximized) << "\n";
@@ -415,8 +418,12 @@ RGBA accentColor(bool dark) {
 
 ID2D1Factory* d2dFactory() {
 	static ID2D1Factory* f = [] {
+		// Direct2D 1.1 where there is one (Windows 8 and later): its render
+		// targets are device contexts too, with effects (blur, shadows) for
+		// the launch screen. The plain factory otherwise.
 		ID2D1Factory* made = nullptr;
-		D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), nullptr, (void**)&made);
+		if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), nullptr, (void**)&made)) || !made)
+			D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), nullptr, (void**)&made);
 		return made;
 	}();
 	return f;
