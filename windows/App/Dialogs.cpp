@@ -3,6 +3,7 @@
 #include "Dialogs.h"
 #include "Window.h"
 #include "Chrome.h"
+#include "Brand.h"
 #include "Collections.h"
 #include "Formula.h"
 
@@ -23,6 +24,7 @@ const int kFieldBase = 1000;    // a field's controls: kFieldBase + index
 const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
+const int kTabsId = 4000;       // Form::pages' row
 
 // The dialogs' look, as the Mac's sheets: paper, filled rounded fields,
 // soft buttons with the default one in the accent, toggles for yes/no.
@@ -343,6 +345,16 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (!chosen.empty()) f->setText(id - kBrowseBase, chosen);
 			return TRUE;
 		}
+		if (id == kTabsId && (code == STN_CLICKED || code == STN_DBLCLK)) {
+			HWND tabs = GetDlgItem(d, kTabsId);
+			POINT p;
+			GetCursorPos(&p);
+			ScreenToClient(tabs, &p);
+			const float x = p.x / (dpiOf(tabs) / 96.0f);
+			for (size_t i = 0; i < f->tabEdges.size(); i++)
+				if (x < f->tabEdges[i]) { f->showPage((int)i); break; }
+			return TRUE;
+		}
 		if (id >= kLabelBase && id < kLabelBase + (int)f->fields.size() && code == STN_CLICKED) {
 			HWND box = f->fields[id - kLabelBase].hwnd;
 			if (!IsWindowEnabled(box)) return TRUE;
@@ -409,6 +421,29 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_DRAWITEM: {
 		const DRAWITEMSTRUCT* di = reinterpret_cast<const DRAWITEMSTRUCT*>(lp);
+		if (di->CtlID == kTabsId) {
+			const DialogColors& c = darkColors();
+			const Chrome ch = chrome();
+			drawOnDC(di->hDC, di->rcItem, dpiOf(di->hwndItem), [&](ID2D1RenderTarget* rt, float w, float h) {
+				rt->Clear(d2d(c.back));
+				fillRound(rt, D2D1::RectF(0, 0, w, h), 9, d2d(c.text, 0.06f));
+				f->tabEdges.clear();
+				const float seg = (w - 6) / f->pages.size();
+				for (size_t i = 0; i < f->pages.size(); i++) {
+					const D2D1_RECT_F r = D2D1::RectF(3 + i * seg, 3, 3 + (i + 1) * seg, h - 3);
+					const bool on = (int)i == f->page;
+					if (on) {
+						fillRound(rt, D2D1::RectF(r.left, r.top + 1, r.right, r.bottom + 1), 7, D2D1::ColorF(0, 0, 0, prefs().dark ? 0.25f : 0.06f));
+						fillRound(rt, r, 7, prefs().dark ? d2d(c.text, 0.14f) : D2D1::ColorF(1, 1, 1));
+					}
+					drawText(rt, f->pages[i], D2D1::RectF(r.left, (h - 18) / 2, r.right, (h + 18) / 2), 12.5f,
+					         on ? d2d(c.text) : d2d(c.text, 0.65f), TextAlign::Center, on);
+					f->tabEdges.push_back(r.right);
+				}
+				(void)ch;
+			});
+			return TRUE;
+		}
 		if (di->CtlType == ODT_BUTTON) {
 			const int fi = (int)di->CtlID - kFieldBase;
 			const bool toggle = fi >= 0 && fi < (int)f->fields.size() && f->fields[fi].kind == FormField::Check;
@@ -444,6 +479,14 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		if (ctl == f->problem) ink = RGB(220, 64, 64);
 		else if (GetPropW(ctl, L"clTip") || GetPropW(ctl, L"clDim")) ink = c.dim;
 		if (msg == WM_CTLCOLORSTATIC && !IsWindowEnabled(ctl)) ink = c.dim;
+		// A disabled or read-only box asks here too: it keeps its field colour.
+		wchar_t cls[16] = L"";
+		GetClassNameW(ctl, cls, 16);
+		if (lstrcmpiW(cls, L"Edit") == 0) {
+			SetTextColor((HDC)wp, ink);
+			SetBkColor((HDC)wp, c.field);
+			return (INT_PTR)c.fieldBrush;
+		}
 		SetTextColor((HDC)wp, ink);
 		SetBkColor((HDC)wp, c.back);
 		return (INT_PTR)c.backBrush;
@@ -468,12 +511,12 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			rt->Clear(d2d(c.back));
 			const float s = dpiOf(d) / 96.0f;
 			for (const FormField& x : f->fields) {
-				if (x.frame.right <= x.frame.left) continue;
+				if (x.frame.right <= x.frame.left || (!f->pages.empty() && x.page != f->page)) continue;
 				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, x.frame.top / s + 0.5f, x.frame.right / s - 0.5f, x.frame.bottom / s - 0.5f);
 				const bool on = focus == x.hwnd;
 				const bool enabled = IsWindowEnabled(x.hwnd) != FALSE;
-				fillRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, d2d(c.field, enabled ? 1 : 0.6f));
-				strokeRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, on ? ch.accent() : d2d(c.line), on ? 1.5f : 1);
+				fillRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, d2d(c.field));
+				strokeRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, on ? ch.accent() : d2d(c.line, enabled ? 1 : 0.5f), on ? 1.5f : 1);
 			}
 		});
 		EndPaint(d, &ps);
@@ -508,10 +551,19 @@ void Form::build() {
 	const int fullW = width - 2 * margin;
 
 	int y = margin;
+	std::vector<int> pageY;
+	if (!pages.empty()) {
+		CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY, margin, y, fullW, sc(34), dialog,
+		                (HMENU)(INT_PTR)kTabsId, appInstance(), nullptr);
+		y += sc(34) + sc(16);
+		pageY.assign(pages.size(), y);
+	}
+	const int firstY = y;
 	for (size_t i = 0; i < fields.size(); i++) {
 		FormField& x = fields[i];
 		const HMENU id = (HMENU)(INT_PTR)(kFieldBase + (int)i);
-		if (i > 0) y += gap;
+		if (!pages.empty()) y = pageY[std::min<size_t>(x.page, pages.size() - 1)];
+		if (y != firstY) y += gap;
 		switch (x.kind) {
 		case FormField::Text: {
 			if (!x.label.empty())
@@ -537,15 +589,18 @@ void Form::build() {
 			                         ctrlX + padX, y + padY, fieldW - 2 * padX + (multi ? sc(5) : 0), boxH - 2 * padY, dialog, id, appInstance(), nullptr);
 			if (multi) y += boxH - rowH;
 			if (x.browse)
-				SetWindowSubclass(CreateWindowExW(0, L"BUTTON", L"Choose…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-				                                  ctrlX + ctrlW - browseW, y, browseW, rowH, dialog, (HMENU)(INT_PTR)(kBrowseBase + (int)i),
-				                                  appInstance(), nullptr),
-				                  hoverProc, 4, 0);
+			{
+				HWND choose = CreateWindowExW(0, L"BUTTON", L"Choose…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, ctrlX + ctrlW - browseW,
+				                              y, browseW, rowH, dialog, (HMENU)(INT_PTR)(kBrowseBase + (int)i), appInstance(), nullptr);
+				SetWindowSubclass(choose, hoverProc, 4, 0);
+				x.others.push_back(choose);
+			}
 			y += rowH;
 			if (!x.tip.empty()) {
 				HWND tip = CreateWindowExW(0, L"STATIC", W(x.tip).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, ctrlX, y + sc(4), ctrlW,
 				                           lineH, dialog, nullptr, appInstance(), nullptr);
 				SetPropW(tip, L"clTip", (HANDLE)1);
+				x.others.push_back(tip);
 				y += lineH + sc(4);
 			}
 			break;
@@ -627,7 +682,9 @@ void Form::build() {
 			break;
 		}
 		}
+		if (!pages.empty()) pageY[std::min<size_t>(x.page, pages.size() - 1)] = y;
 	}
+	if (!pages.empty()) y = *std::max_element(pageY.begin(), pageY.end());
 
 	y += gap;
 	problem = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, margin, y, fullW, lineH,
@@ -692,6 +749,8 @@ void Form::build() {
 			SendMessageW(f.hwnd, LVM_SETTEXTCOLOR, 0, c.text);
 		}
 
+	if (!pages.empty()) showPage(page);
+
 	// Size the window around what's in it, centred on its owner.
 	RECT rc = { 0, 0, width, y };
 	const DWORD style = (DWORD)GetWindowLongW(dialog, GWL_STYLE), ex = (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE);
@@ -733,6 +792,22 @@ void Form::enable(int field, bool on) {
 			EnableWindow(label, on);
 		}
 	}
+}
+
+void Form::showPage(int to) {
+	page = std::max(0, std::min((int)pages.size() - 1, to));
+	if (dialog == nullptr) return;
+	HWND focus = nullptr;
+	for (FormField& x : fields) {
+		const int show = x.page == page ? SW_SHOW : SW_HIDE;
+		if (x.hwnd) ShowWindow(x.hwnd, show);
+		if (x.extra) ShowWindow(x.extra, show);
+		for (HWND o : x.others) ShowWindow(o, show);
+		if (!focus && x.page == page && x.hwnd && (x.kind == FormField::Text || x.kind == FormField::Choice || x.kind == FormField::Check))
+			focus = x.hwnd;
+	}
+	if (HWND tabs = GetDlgItem(dialog, kTabsId)) InvalidateRect(tabs, nullptr, FALSE);
+	InvalidateRect(dialog, nullptr, TRUE);
 }
 
 void Form::capture() {
@@ -1447,20 +1522,27 @@ FormField heading(const char* text) {
 
 }  // namespace
 
+int g_preferencesPage = 0;   // the page it opens on (--page, for CI)
+void setPreferencesPage(int page) { g_preferencesPage = page; }
+
 void showPreferencesDialog(HWND parent) {
 	Prefs& p = prefs();
 	Form f;
 	f.title = "Preferences";
-	f.width = 440;
+	f.width = 460;
 	f.okText = "Close";
 	f.cancelText = "";
+	f.pages = { "General", "Appearance", "Canvas" };
+	f.page = g_preferencesPage;
 	FormField who;
 	who.kind = FormField::Text;
 	who.label = "Your name";
 	who.value = p.studentName;
 	who.tip = "On the Lab Page template and exported pictures.";
 	const int name = f.add(who);
-	f.add(heading("Appearance"));
+	const int askQuit = f.add(checkField("Ask before quitting with Ctrl+Q", p.confirmQuit));
+	const int status = f.add(checkField("Show the status bar (zoom, pointer, counts)", p.showStatus));
+	f.adding = 1;
 	const int theme = f.add(choiceField("Theme", { "Match Windows", "Light", "Dark", "As I left it" }, p.themeMode));
 	// The icon's green first, as the Mac app offers them (the engine's index 6).
 	static const int kAccentOrder[] = { 6, 0, 1, 2, 3, 4, 5 };
@@ -1474,14 +1556,13 @@ void showPreferencesDialog(HWND parent) {
 	const int dots = f.add(checkField("Dots at every bend (off: only where wires join)", p.wireDots));
 	const int low = f.add(choiceField("Low wires when dark", { "Silver", "Slate blue", "Soft white", "Classic grey" }, p.lowWire));
 	const int names = f.add(checkField("Names under the palette's gates", p.showGateNames));
-	f.add(heading("Canvas"));
+	f.adding = 2;
 	const int wheel = f.add(choiceField("Mouse wheel", { "Zooms", "Moves around" }, p.mouseWheel));
 	const int touchpad = f.add(choiceField("Touchpad scrolling", { "Zooms", "Moves around" }, p.touchpadScroll));
 	const int reverse = f.add(checkField("Reverse the wheel's zoom", p.reverseWheel));
 	const int rightRotate = f.add(checkField("Right-click a gate to rotate it", p.rightClickRotate));
 	const int dupClip = f.add(checkField("Duplicate (D) also copies to the clipboard", p.duplicateUsesClipboard));
 	const int tidy = f.add(choiceField("Tidy Up (Shift+S)", { "Keeps the layout's shape", "Arranges by signal flow" }, p.tidyMode));
-	const int askQuit = f.add(checkField("Ask before quitting with Ctrl+Q", p.confirmQuit));
 
 	// Every change applies at once.
 	f.onChange = [&](Form& form, int field) {
@@ -1515,6 +1596,7 @@ void showPreferencesDialog(HWND parent) {
 		else if (field == dupClip) q.duplicateUsesClipboard = form.checked(dupClip);
 		else if (field == tidy) q.tidyMode = form.choice(tidy);
 		else if (field == askQuit) q.confirmQuit = form.checked(askQuit);
+		else if (field == status) q.showStatus = form.checked(status);
 		prefsApply();
 	};
 	f.run(parent);
@@ -1650,17 +1732,20 @@ bool confirmQuit(HWND parent) {
 	if (!prefs().confirmQuit) return true;
 	Form f;
 	f.title = "Quit CedarLogic";
-	f.width = 400;
+	f.width = 440;
 	f.okText = "Quit";
 	f.buttons = { "Always Quit" };
+	// As the Mac asks: the icon, the question, and the reassurance.
 	FormField q;
-	q.kind = FormField::Note;
-	q.label = "Are you sure you want to quit CedarLogic?";
+	q.kind = FormField::Picture;
+	q.height = 118;
+	q.paint = [](ID2D1RenderTarget* rt, float w, float) {
+		const D2D1_COLOR_F ink = prefs().dark ? D2D1::ColorF(0.89f, 0.9f, 0.93f) : D2D1::ColorF(0.1f, 0.11f, 0.13f);
+		brand::icon(rt, 2, 4, 44, 0);
+		drawText(rt, "Are you sure you want to quit CedarLogic?", D2D1::RectF(2, 62, w, 88), 17, ink, TextAlign::Leading, true);
+		drawText(rt, "Your circuits are saved; they'll be here when you come back.", D2D1::RectF(2, 90, w, 110), 12.5f, withAlpha(ink, 0.6f));
+	};
 	f.add(q);
-	FormField note;
-	note.kind = FormField::Note;
-	note.label = "Your circuits are saved; they'll be here when you come back.";
-	f.add(note);
 	f.onButton = [](Form&, int) {
 		prefs().confirmQuit = false;
 		prefs().save();

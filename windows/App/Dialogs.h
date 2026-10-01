@@ -34,6 +34,8 @@ struct FormField {
 	HWND hwnd = nullptr;
 	HWND extra = nullptr;               // the label, or the Choose... button
 	RECT frame{};                       // Text and List: the drawn field around it (dialog pixels)
+	int page = 0;                       // which of Form::pages it's on
+	std::vector<HWND> others;           // its tip, its Choose... button
 };
 
 class Form {
@@ -55,7 +57,13 @@ public:
 	std::function<bool(Form&, int field, UINT vk)> onKey;              // Up, Down, Page Up/Down in a Text field: true if used
 	int timerMs = 0;
 
-	int add(const FormField& f) { fields.push_back(f); return (int)fields.size() - 1; }
+	// Pages (as the Mac's Settings has): a row of them along the top; each
+	// field goes on the page `adding` is set to when it's added.
+	std::vector<std::string> pages;
+	int adding = 0, page = 0;
+	void showPage(int page);
+	std::vector<float> tabEdges;        // for clicks on the row, in points
+	int add(const FormField& f) { fields.push_back(f); fields.back().page = adding; return (int)fields.size() - 1; }
 	// Show it and wait. Returns IDOK, IDCANCEL, or 100 + a button's index.
 	int run(HWND owner);
 
@@ -89,6 +97,7 @@ void showTruthTable(CircuitWindow* w, int page);
 bool truthTableOpen();   // one is up (the guided tour watches for it)
 void showRamEditor(CircuitWindow* w, long gate);
 void showPreferencesDialog(HWND parent);
+void setPreferencesPage(int page);   // the page Preferences opens on
 void showShortcutsWindow(HWND parent);
 void showBuildFormula(CircuitWindow* w);
 // Ctrl+Q: true to go ahead (asked unless the user said not to).

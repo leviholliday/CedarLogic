@@ -103,6 +103,8 @@ jobs:
           # The dialogs, in each theme (the screenshot is of the dialog).
           timeout 90 "$A" --dark --dialog preferences --screenshot "$PWD/renders/dialog-preferences-dark.png" || true
           timeout 90 "$A" --light --dialog preferences --screenshot "$PWD/renders/dialog-preferences.png" || true
+          timeout 90 "$A" --light --dialog preferences --page 1 --screenshot "$PWD/renders/dialog-preferences-1.png" || true
+          timeout 90 "$A" --dark --dialog preferences --page 2 --screenshot "$PWD/renders/dialog-preferences-2-dark.png" || true
           timeout 90 "$A" --truth-tab 0 --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 1 --dialog truth-table --screenshot "$PWD/renders/truth-table-kmap.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 2 --dialog truth-table --screenshot "$PWD/renders/truth-table-formulas.png" res/samples/practice.cdl || true
@@ -124,6 +126,8 @@ jobs:
           timeout 60 "$A" --splash-frame 4.0 "$PWD/renders/splash-first-4.0.png" --first-launch || true
           timeout 90 "$A" --card-frame 0.35 --screenshot "$PWD/renders/opening-card.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --card-frame 0.35 --screenshot "$PWD/renders/opening-card-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog quit --screenshot "$PWD/renders/quit.png" || true
+          timeout 90 "$A" --dark --dialog quit --screenshot "$PWD/renders/quit-dark.png" || true
           timeout 60 "$A" --feedback-probe || echo "::warning::the feedback probe failed"
           timeout 90 "$A" --dialog feedback --screenshot "$PWD/renders/feedback.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog feedback --screenshot "$PWD/renders/feedback-dark.png" res/samples/practice.cdl || true
