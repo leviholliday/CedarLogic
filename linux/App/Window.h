@@ -15,6 +15,8 @@
 
 class Canvas;
 class GatePalette;
+class Toolbar;
+class TabStrip;
 class ScopeWindow;
 
 class CircuitWindow {
@@ -40,8 +42,27 @@ public:
 	// For the guided tour, to point a bubble at each: the palette, the run
 	// button, the tab strip. currentCanvas()->widget() is the fourth.
 	GtkWidget* paletteWidgetForTour() const { return paletteBox; }
-	GtkWidget* runButtonForTour() const { return runButton; }
-	GtkWidget* tabStripForTour() const { return notebook; }
+	GtkWidget* runButtonForTour() const;
+	GtkWidget* tabStripForTour() const;
+
+	// ---- For the toolbar and the tab strip ----
+	std::string titleText() const { return displayName(); }
+	int stepMs() const;
+	// An action by its full name ("win.save", "app.new"): run it, or ask
+	// whether it's enabled now.
+	void runAction(const char* name);
+	bool actionEnabled(const char* name) const;
+	// Every menu (•••), and the circuit's own (its name), under `anchor`
+	// (points in `from`).
+	void moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
+	void titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
+	int tabCount() const { return (int)canvases.size(); }
+	std::string tabName(int tab) const;
+	int currentTab() const;
+	void showTab(int tab);
+	void moveTab(int from, int to);
+	void closeTab(int tab);
+	void tabContextMenu(int tab, GdkEvent* e);
 	// Bumped on every edit (undo history, page changes...); the minimap's
 	// cache key, so it regenerates only when the picture could have changed.
 	unsigned editStamp() const { return changes; }
@@ -63,6 +84,11 @@ public:
 	// After any edit: redraw, the title, the menus' state.
 	void edited();
 	void note(const std::string& message);
+	// What the canvas draws over itself: a note fading in and out, and the
+	// banner for Tidy Up's preview, Simulation View and Lock.
+	bool toast(std::string& text, double& alpha) const;
+	struct BannerButton { std::string label; const char* action; };
+	bool banner(std::string& text, std::vector<BannerButton>& buttons) const;
 	void lockNudge();
 	void showSettings();
 	void showContextMenu(int target, double wx, double wy, GdkEventButton* e);
@@ -152,9 +178,9 @@ private:
 	GtkWidget* statusBar = nullptr;
 	GtkWidget* statusMessage = nullptr;
 	GtkWidget* statusInfo = nullptr;
-	GtkWidget* runButton = nullptr;
-	GtkWidget* simViewButton = nullptr;
-	GtkWidget* stepSpin = nullptr;
+	Toolbar* toolbar = nullptr;
+	TabStrip* tabs = nullptr;
+	int lastZoomShown = -1;
 	GtkWidget* banner = nullptr;      // Tidy Up's keep/undo bar, Simulation View's
 	GtkWidget* bannerLabel = nullptr;
 	GtkWidget* bannerButtons = nullptr;
@@ -175,6 +201,7 @@ private:
 	double pointerX = 0, pointerY = 0;
 	std::string pendingGate;
 	gint64 selectionChangedAt = 0, appearStart = 0, dragFadeStart = 0, messageAt = 0;
+	std::string noteText;
 	std::string selectionSignature;
 	bool hasDragFade = false;
 	double fadeL = 0, fadeB = 0, fadeR = 0, fadeT = 0;
@@ -183,7 +210,6 @@ private:
 
 	void build();
 	void buildMenus();
-	GtkWidget* buildToolbar();
 	void addActions();
 	void syncTabs();
 	GtkWidget* tabLabel(Canvas* c);

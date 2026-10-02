@@ -1,6 +1,7 @@
 // The circuit canvas (see Canvas.h).
 
 #include "Canvas.h"
+#include "Chrome.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -149,6 +150,79 @@ void Canvas::draw(cairo_t* cr) {
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 	cairo_restore(cr);
+	drawOverlays(cr, (float)w, (float)h);
+}
+
+// ---- Overlays ------------------------------------------------------------------
+
+void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
+	hits.clear();
+	drawBanner(cr, w);
+	drawToast(cr, w, h);
+}
+
+// A pill over the top of the canvas: Tidy Up's preview, Simulation View,
+// Lock, with their buttons.
+void Canvas::drawBanner(cairo_t* cr, float w) {
+	std::string text;
+	std::vector<CircuitWindow::BannerButton> buttons;
+	if (!win->banner(text, buttons)) return;
+	const bool sim = win->simView();
+	const Chrome c{ prefs().dark || sim };
+	const Color ink = c.barInk();
+	std::vector<float> bw;
+	float total = 16 + textWidth(text, 12) + 12;
+	for (const auto& b : buttons) { bw.push_back(textWidth(b.label, 12, true) + 22); total += bw.back() + 6; }
+	total += 6;
+	if (win->locked()) total += 20;
+	const float x0 = std::max(8.0f, (w - total) / 2), y0 = 12, hgt = 38;
+	const RectF pill = rectF(x0, y0, x0 + total, y0 + hgt);
+	fillRound(cr, rectF(pill.left, pill.top + 2, pill.right, pill.bottom + 2), hgt / 2, colorF(0, 0, 0, c.dark ? 0.35f : 0.10f));
+	fillRound(cr, pill, hgt / 2, c.dark ? rgb255(40, 43, 50, 0.97f) : colorF(1, 1, 1, 0.97f));
+	strokeRound(cr, pill, hgt / 2, withAlpha(ink, c.dark ? 0.14f : 0.10f));
+	float x = x0 + 16;
+	const float ty = y0 + hgt / 2 - 8;
+	if (win->locked()) {
+		drawIcon(cr, Icon::Lock, rectF(x - 2, y0, x + 16, y0 + hgt), 13, withAlpha(ink, 0.8f));
+		x += 20;
+	}
+	drawText(cr, text, rectF(x, ty, x + textWidth(text, 12) + 2, ty + 18), 12, ink);
+	x += textWidth(text, 12) + 12;
+	for (size_t i = 0; i < buttons.size(); i++) {
+		const RectF r = rectF(x, y0 + 6, x + bw[i], y0 + hgt - 6);
+		const bool hot = hotHit == (int)hits.size();
+		const bool primary = i == 0;
+		fillRound(cr, r, 7, primary ? withAlpha(c.accent(), hot ? 1.0f : 0.9f) : withAlpha(ink, hot ? 0.14f : 0.08f));
+		drawText(cr, buttons[i].label, rectF(r.left, ty, r.right, ty + 18), 12, primary ? c.onAccent() : ink, TextAlign::Center, primary);
+		hits.push_back({ r.left, r.top, r.right, r.bottom, buttons[i].action });
+		x += bw[i] + 6;
+	}
+}
+
+// A note (Saved, Copied...) over the bottom of the canvas, as a dark pill
+// that fades.
+void Canvas::drawToast(cairo_t* cr, float w, float h) {
+	std::string text;
+	double alpha = 0;
+	if (!win->toast(text, alpha)) return;
+	const float a = (float)alpha;
+	const float tw = std::min(w - 40, textWidth(text, 12) + 32), th = 32;
+	const float bottom = h - 16;
+	const RectF r = rectF((w - tw) / 2, bottom - th, (w + tw) / 2, bottom);
+	const bool dark = prefs().dark || win->simView();
+	fillRound(cr, rectF(r.left, r.top + 2, r.right, r.bottom + 2), th / 2, colorF(0, 0, 0, 0.18f * a));
+	fillRound(cr, r, th / 2, dark ? colorF(0.24f, 0.26f, 0.30f, 0.96f * a) : colorF(0.13f, 0.14f, 0.16f, 0.92f * a));
+	drawText(cr, text, rectF(r.left + 14, r.top + 7, r.right - 14, r.bottom), 12, colorF(1, 1, 1, a), TextAlign::Center);
+}
+
+bool Canvas::overlayPress(double x, double y) {
+	for (const OverlayHit& h : hits) {
+		if (x < h.left || x >= h.right || y < h.top || y >= h.bottom) continue;
+		win->runAction(h.action);
+		redraw();
+		return true;
+	}
+	return false;
 }
 
 void Canvas::drawScene(cairo_t* cr, int scale) {
@@ -457,6 +531,8 @@ bool Canvas::onPress(GdkEventButton* e) {
 	zooming = false;
 	lastX = e->x;
 	lastY = e->y;
+	// The banner's buttons first.
+	if (e->button == 1 && e->type == GDK_BUTTON_PRESS && overlayPress(e->x, e->y)) return TRUE;
 	double wx, wy;
 	worldPoint(e->x, e->y, wx, wy);
 
@@ -532,6 +608,11 @@ bool Canvas::onMotion(GdkEventMotion* e) {
 	const double dx = e->x - lastX, dy = e->y - lastY;
 	lastX = e->x;
 	lastY = e->y;
+	// Hover over the banner's buttons.
+	int h = -1;
+	for (size_t i = 0; i < hits.size(); i++)
+		if (e->x >= hits[i].left && e->x < hits[i].right && e->y >= hits[i].top && e->y < hits[i].bottom) h = (int)i;
+	if (h != hotHit) { hotHit = h; redraw(); }
 	double wx, wy;
 	worldPoint(e->x, e->y, wx, wy);
 	win->pointerMoved(wx, wy);

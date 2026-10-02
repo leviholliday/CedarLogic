@@ -12,6 +12,7 @@
 
 #include "App.h"
 #include <cstdint>
+#include <vector>
 
 class CircuitWindow;
 
@@ -101,6 +102,14 @@ private:
 	bool gridValid = false;
 
 	void draw(cairo_t* cr);
+	// Over the circuit: the banner and its buttons, the note.
+	void drawOverlays(cairo_t* cr, float w, float h);
+	void drawBanner(cairo_t* cr, float w);
+	void drawToast(cairo_t* cr, float w, float h);
+	struct OverlayHit { float left, top, right, bottom; const char* action; };
+	std::vector<OverlayHit> hits;
+	int hotHit = -1;
+	bool overlayPress(double x, double y);
 	void drawScene(cairo_t* cr, int scale);
 	void drawGrid(cairo_t* cr, const Palette& pal, double scale, double fade);
 	void drawBox(cairo_t* cr, double l, double b, double r, double t, const RGBA& accent, double alpha);

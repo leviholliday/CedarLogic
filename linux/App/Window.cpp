@@ -6,6 +6,8 @@
 #include "MiniMap.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "TabStrip.h"
+#include "Toolbar.h"
 
 #include <cairo-pdf.h>
 #include <cairo-svg.h>
@@ -17,7 +19,7 @@
 
 namespace {
 
-const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18;
+const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18, kNoteTime = 4.0;
 
 double secondsSince(gint64 t) { return (g_get_monotonic_time() - t) / 1e6; }
 
@@ -136,6 +138,7 @@ CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const s
 	gtk_widget_set_visible(paletteBox, prefs().showPalette);
 	gtk_widget_set_visible(statusBar, prefs().showStatus);
 	updateBanner();
+	gtk_widget_set_visible(banner, FALSE);
 	if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget());
 }
 
@@ -148,6 +151,8 @@ CircuitWindow::~CircuitWindow() {
 	canvases.clear();
 	delete palette;
 	delete miniMap;
+	delete toolbar;
+	delete tabs;
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
@@ -169,7 +174,11 @@ void CircuitWindow::build() {
 
 	GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(win), v);
-	gtk_box_pack_start(GTK_BOX(v), buildToolbar(), FALSE, FALSE, 0);
+	// The toolbar is the title bar (the Mac's and the Windows app's), and
+	// every menu is behind its •••.
+	toolbar = new Toolbar(this);
+	gtk_window_set_titlebar(GTK_WINDOW(win), toolbar->widget());
+	gtk_application_window_set_show_menubar(GTK_APPLICATION_WINDOW(win), FALSE);
 
 	// A bar for Tidy Up's preview, Simulation View and Lock.
 	banner = gtk_info_bar_new();
@@ -198,19 +207,18 @@ void CircuitWindow::build() {
 	// to miss (GTK 3.16+; ignored harmlessly on older GTK).
 	g_object_set(paned, "wide-handle", TRUE, nullptr);
 
+	// The drawn tab cards over the pages, which stay in a notebook of their
+	// own with its tabs hidden.
+	GtkWidget* right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	tabs = new TabStrip(this);
+	gtk_box_pack_start(GTK_BOX(right), tabs->widget(), FALSE, FALSE, 0);
 	notebook = gtk_notebook_new();
-	gtk_notebook_set_scrollable(GTK_NOTEBOOK(notebook), TRUE);
+	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(notebook), FALSE);
 	gtk_notebook_set_show_border(GTK_NOTEBOOK(notebook), FALSE);
 	g_signal_connect(notebook, "switch-page", G_CALLBACK(switchPageCb), this);
 	g_signal_connect(notebook, "page-reordered", G_CALLBACK(reorderCb), this);
-	// A + at the end of the tabs for a new page.
-	GtkWidget* plus = gtk_button_new_from_icon_name("list-add-symbolic", GTK_ICON_SIZE_MENU);
-	gtk_button_set_relief(GTK_BUTTON(plus), GTK_RELIEF_NONE);
-	gtk_widget_set_tooltip_text(plus, "New tab (Ctrl+T)");
-	gtk_actionable_set_action_name(GTK_ACTIONABLE(plus), "win.new-tab");
-	gtk_widget_show(plus);
-	gtk_notebook_set_action_widget(GTK_NOTEBOOK(notebook), plus, GTK_PACK_END);
-	gtk_paned_pack2(GTK_PANED(paned), notebook, TRUE, FALSE);
+	gtk_box_pack_start(GTK_BOX(right), notebook, TRUE, TRUE, 0);
+	gtk_paned_pack2(GTK_PANED(paned), right, TRUE, FALSE);
 
 	statusBar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
 	gtk_widget_set_name(statusBar, "status");
@@ -236,79 +244,6 @@ void CircuitWindow::addActions() {
 		g_action_map_add_action(G_ACTION_MAP(win), G_ACTION(a));
 		g_object_unref(a);
 	}
-}
-
-static GtkToolItem* toolButton(const char* icon, const char* tip, const char* action) {
-	GtkToolItem* b = gtk_tool_button_new(nullptr, tip);
-	gtk_tool_button_set_icon_name(GTK_TOOL_BUTTON(b), icon);
-	gtk_tool_item_set_tooltip_text(b, tip);
-	gtk_actionable_set_action_name(GTK_ACTIONABLE(b), action);
-	return b;
-}
-
-static GtkToolItem* toggleButton(const char* icon, const char* label, const char* tip, const char* action) {
-	GtkToolItem* b = gtk_toggle_tool_button_new();
-	gtk_tool_button_set_icon_name(GTK_TOOL_BUTTON(b), icon);
-	gtk_tool_button_set_label(GTK_TOOL_BUTTON(b), label);
-	gtk_tool_item_set_tooltip_text(b, tip);
-	gtk_actionable_set_action_name(GTK_ACTIONABLE(b), action);
-	return b;
-}
-
-static void stepSpinCb(GtkSpinButton* s, gpointer self) {
-	static_cast<CircuitWindow*>(self)->setStepMs(gtk_spin_button_get_value_as_int(s));
-}
-
-GtkWidget* CircuitWindow::buildToolbar() {
-	GtkWidget* bar = gtk_toolbar_new();
-	gtk_toolbar_set_style(GTK_TOOLBAR(bar), GTK_TOOLBAR_ICONS);
-	gtk_toolbar_set_icon_size(GTK_TOOLBAR(bar), GTK_ICON_SIZE_LARGE_TOOLBAR);
-	GtkToolbar* t = GTK_TOOLBAR(bar);
-	gtk_toolbar_insert(t, toolButton("document-new", "New circuit (Ctrl+N)", "app.new"), -1);
-	gtk_toolbar_insert(t, toolButton("document-open", "Open (Ctrl+O)", "app.open"), -1);
-	gtk_toolbar_insert(t, toolButton("document-save", "Save (Ctrl+S)", "win.save"), -1);
-	gtk_toolbar_insert(t, gtk_separator_tool_item_new(), -1);
-	gtk_toolbar_insert(t, toolButton("edit-undo", "Undo (Ctrl+Z)", "win.undo"), -1);
-	gtk_toolbar_insert(t, toolButton("edit-redo", "Redo (Ctrl+Shift+Z)", "win.redo"), -1);
-	gtk_toolbar_insert(t, gtk_separator_tool_item_new(), -1);
-	gtk_toolbar_insert(t, toolButton("zoom-in", "Zoom in (Ctrl+=)", "win.zoom-in"), -1);
-	gtk_toolbar_insert(t, toolButton("zoom-out", "Zoom out (Ctrl+-)", "win.zoom-out"), -1);
-	gtk_toolbar_insert(t, toolButton("zoom-fit-best", "Zoom to fit (Ctrl+0, or tap Space)", "win.zoom-fit"), -1);
-	gtk_toolbar_insert(t, gtk_separator_tool_item_new(), -1);
-
-	GtkToolItem* run = toggleButton("media-playback-start", "Run", "Run or pause the simulation", "win.running");
-	runButton = GTK_WIDGET(run);
-	gtk_toolbar_insert(t, run, -1);
-	gtk_toolbar_insert(t, toolButton("media-skip-forward", "Step once (Ctrl+Shift+R)", "win.step"), -1);
-
-	// The step length, as the wx app's timestep box.
-	GtkToolItem* speedItem = gtk_tool_item_new();
-	GtkWidget* speed = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-	GtkWidget* speedLabel = gtk_label_new("Step");
-	stepSpin = gtk_spin_button_new_with_range(1, 500, 1);
-	gtk_spin_button_set_value(GTK_SPIN_BUTTON(stepSpin), cl_document_step_ms(doc));
-	gtk_entry_set_width_chars(GTK_ENTRY(stepSpin), 4);
-	gtk_widget_set_tooltip_text(stepSpin, "Milliseconds of circuit time per simulation step");
-	g_signal_connect(stepSpin, "value-changed", G_CALLBACK(stepSpinCb), this);
-	gtk_box_pack_start(GTK_BOX(speed), speedLabel, FALSE, FALSE, 4);
-	gtk_box_pack_start(GTK_BOX(speed), stepSpin, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(speed), gtk_label_new("ms"), FALSE, FALSE, 0);
-	gtk_widget_set_valign(speed, GTK_ALIGN_CENTER);
-	gtk_container_add(GTK_CONTAINER(speedItem), speed);
-	gtk_toolbar_insert(t, speedItem, -1);
-	gtk_toolbar_insert(t, gtk_separator_tool_item_new(), -1);
-
-	GtkToolItem* sv = toggleButton("video-display", "Simulation View", "Simulation View: watch it run (Ctrl+R)", "win.sim-view");
-	simViewButton = GTK_WIDGET(sv);
-	gtk_toolbar_insert(t, sv, -1);
-	gtk_toolbar_insert(t, toggleButton("changes-prevent", "Lock", "Lock: switches still work, nothing else changes", "win.lock"), -1);
-
-	GtkToolItem* spacer = gtk_separator_tool_item_new();
-	gtk_separator_tool_item_set_draw(GTK_SEPARATOR_TOOL_ITEM(spacer), FALSE);
-	gtk_tool_item_set_expand(spacer, TRUE);
-	gtk_toolbar_insert(t, spacer, -1);
-	gtk_toolbar_insert(t, toggleButton("weather-clear-night", "Dark", "Dark mode (Ctrl+Shift+D)", "win.dark"), -1);
-	return bar;
 }
 
 // ---- Tabs ------------------------------------------------------------------------
@@ -374,7 +309,8 @@ void CircuitWindow::updateTabLabels() {
 		if (label && p >= 0) gtk_label_set_text(GTK_LABEL(label), pageName(p).c_str());
 		if (close) gtk_widget_set_visible(close, n > 1);
 	}
-	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(notebook), TRUE);
+	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(notebook), FALSE);
+	if (tabs) tabs->redraw();
 }
 
 // Make the tabs match the document's pages: after opening, a new page, a
@@ -448,7 +384,7 @@ void CircuitWindow::switchPageCb(GtkNotebook*, GtkWidget* page, guint, gpointer 
 	}
 	g_idle_add([](gpointer self) -> gboolean {
 		for (CircuitWindow* o : circuitWindows())
-			if (o == self) { o->updateActions(); o->updateTitle(); }
+			if (o == self) { o->updateActions(); o->updateTitle(); o->tabs->redraw(); o->toolbar->redraw(); }
 		return G_SOURCE_REMOVE;
 	}, w);
 }
@@ -473,6 +409,105 @@ void CircuitWindow::reorderCb(GtkNotebook*, GtkWidget* child, guint to, gpointer
 	w->syncTabs();
 	w->updateTitle();
 	});
+}
+
+// ---- The toolbar's and the tab strip's side ----------------------------------------
+
+GtkWidget* CircuitWindow::runButtonForTour() const { return toolbar->widget(); }
+GtkWidget* CircuitWindow::tabStripForTour() const { return tabs->widget(); }
+
+void CircuitWindow::runAction(const char* name) {
+	if (name == nullptr) return;
+	const bool onApp = g_str_has_prefix(name, "app.");
+	const char* bare = std::strchr(name, '.') ? std::strchr(name, '.') + 1 : name;
+	GActionGroup* group = onApp ? G_ACTION_GROUP(app) : G_ACTION_GROUP(win);
+	if (g_action_group_has_action(group, bare)) g_action_group_activate_action(group, bare, nullptr);
+}
+
+bool CircuitWindow::actionEnabled(const char* name) const {
+	if (name == nullptr) return false;
+	const bool onApp = g_str_has_prefix(name, "app.");
+	const char* bare = std::strchr(name, '.') ? std::strchr(name, '.') + 1 : name;
+	GActionGroup* group = onApp ? G_ACTION_GROUP(app) : G_ACTION_GROUP(win);
+	return g_action_group_has_action(group, bare) && g_action_group_get_action_enabled(group, bare);
+}
+
+// A menu from a model, popped up under a rectangle and gone when it closes.
+static void popupModel(GtkWidget* attach, GMenuModel* model, GtkWidget* from, GdkRectangle anchor, GdkEvent* e, bool rightAligned) {
+	GtkWidget* menu = gtk_menu_new_from_model(model);
+	gtk_menu_attach_to_widget(GTK_MENU(menu), attach, nullptr);
+	g_signal_connect(menu, "deactivate", G_CALLBACK(+[](GtkMenuShell* m, gpointer) {
+		g_idle_add([](gpointer m) -> gboolean { gtk_widget_destroy(GTK_WIDGET(m)); return G_SOURCE_REMOVE; }, m);
+	}), nullptr);
+	gtk_menu_popup_at_rect(GTK_MENU(menu), gtk_widget_get_window(from), &anchor,
+	                       rightAligned ? GDK_GRAVITY_SOUTH_EAST : GDK_GRAVITY_SOUTH_WEST,
+	                       rightAligned ? GDK_GRAVITY_NORTH_EAST : GDK_GRAVITY_NORTH_WEST, e);
+}
+
+void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
+	if (GMenuModel* bar = gtk_application_get_menubar(app)) popupModel(win, bar, from, anchor, e, true);
+}
+
+void CircuitWindow::titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
+	GMenu* m = g_menu_new();
+	GMenu* a = g_menu_new();
+	g_menu_append(a, "_Save", "win.save");
+	g_menu_append(a, "Save _As…", "win.save-as");
+	g_menu_append_section(m, nullptr, G_MENU_MODEL(a));
+	GMenu* b = g_menu_new();
+	g_menu_append(b, "_Export as Image…", "win.export-image");
+	g_menu_append(b, "_Print…", "win.print");
+	g_menu_append_section(m, nullptr, G_MENU_MODEL(b));
+	GMenu* c = g_menu_new();
+	g_menu_append(c, "_Close Window", "win.close");
+	g_menu_append_section(m, nullptr, G_MENU_MODEL(c));
+	popupModel(win, G_MENU_MODEL(m), from, anchor, e, false);
+	g_object_unref(a);
+	g_object_unref(b);
+	g_object_unref(c);
+	g_object_unref(m);
+}
+
+std::string CircuitWindow::tabName(int tab) const {
+	if (tab < 0 || tab >= (int)canvases.size()) return std::string();
+	const int p = canvases[tab]->page();
+	return p >= 0 ? pageName(p) : std::string();
+}
+
+int CircuitWindow::currentTab() const { return notebook ? gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook)) : -1; }
+
+void CircuitWindow::showTab(int tab) {
+	if (tab >= 0 && tab < (int)canvases.size()) gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), tab);
+	tabs->redraw();
+}
+
+void CircuitWindow::moveTab(int from, int to) {
+	if (from < 0 || from >= (int)canvases.size() || to < 0 || to >= (int)canvases.size() || from == to) return;
+	// The notebook moves it, and its page-reordered moves the page.
+	gtk_notebook_reorder_child(GTK_NOTEBOOK(notebook), canvases[from]->widget(), to);
+	tabs->redraw();
+}
+
+void CircuitWindow::closeTab(int tab) {
+	if (tab < 0 || tab >= (int)canvases.size()) return;
+	const int p = canvases[tab]->page();
+	if (p >= 0) closePage(p);
+}
+
+void CircuitWindow::tabContextMenu(int tab, GdkEvent* e) {
+	if (tab >= 0) showTab(tab);
+	GMenu* m = g_menu_new();
+	g_menu_append(m, "_Rename Tab…", "win.rename-tab");
+	g_menu_append(m, "_Close Tab", "win.close-tab");
+	g_menu_append(m, "_New Tab", "win.new-tab");
+	g_menu_append(m, "Re_open Closed Tab", "win.reopen-tab");
+	GtkWidget* menu = gtk_menu_new_from_model(G_MENU_MODEL(m));
+	gtk_menu_attach_to_widget(GTK_MENU(menu), win, nullptr);
+	g_signal_connect(menu, "deactivate", G_CALLBACK(+[](GtkMenuShell* mm, gpointer) {
+		g_idle_add([](gpointer mm) -> gboolean { gtk_widget_destroy(GTK_WIDGET(mm)); return G_SOURCE_REMOVE; }, mm);
+	}), nullptr);
+	gtk_menu_popup_at_pointer(GTK_MENU(menu), e);
+	g_object_unref(m);
 }
 
 // ---- The clock -------------------------------------------------------------------
@@ -515,10 +550,17 @@ void CircuitWindow::tick() {
 		if (r & CL_TICK_PAUSED) { isRunning = false; updateRunUI(); note("A part paused the simulation."); }
 	}
 	if (statusDirty && (t - lastStatus) > 100000) { statusDirty = false; lastStatus = t; updateStatus(); }
+	// The toolbar's zoom follows the camera.
+	if (c && c->zoomPercent() != lastZoomShown) { lastZoomShown = c->zoomPercent(); toolbar->redraw(); }
 	if ((t - lastTitle) > 500000) { lastTitle = t; updateTitle(); }
 	// A recovery copy of unsaved work, at most every 20 seconds.
 	if (changes != changesAtRecovery && (t - lastRecovery) > 20 * G_USEC_PER_SEC) writeRecovery();
-	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; gtk_label_set_text(GTK_LABEL(statusMessage), ""); }
+	// A note on the canvas: redrawn while it fades in and out.
+	if (messageAt) {
+		const double age = secondsSince(messageAt);
+		if (age < 0.25 || (age > kNoteTime - 0.55 && age < kNoteTime + 0.1)) redraw();
+	}
+	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; gtk_label_set_text(GTK_LABEL(statusMessage), ""); redraw(); }
 }
 
 double CircuitWindow::selectionFade() const {
@@ -587,7 +629,39 @@ void CircuitWindow::edited() {
 
 void CircuitWindow::note(const std::string& message) {
 	gtk_label_set_text(GTK_LABEL(statusMessage), message.c_str());
+	noteText = message;
 	messageAt = g_get_monotonic_time();
+	redraw();
+}
+
+bool CircuitWindow::toast(std::string& text, double& alpha) const {
+	if (messageAt <= 0 || noteText.empty()) return false;
+	const double age = secondsSince(messageAt);
+	if (age > kNoteTime) return false;
+	text = noteText;
+	alpha = std::min(1.0, std::min(age / 0.2, (kNoteTime - age) / 0.5));
+	return alpha > 0;
+}
+
+bool CircuitWindow::banner(std::string& text, std::vector<BannerButton>& buttons) const {
+	buttons.clear();
+	if (cl_edit_tidy_active(doc)) {
+		text = cl_edit_tidy_mode(doc) == 1 ? "Tidy Up by signal flow: a preview. Enter keeps it, Esc puts it back."
+		                                   : "Tidy Up: a preview. Enter keeps it, Esc puts it back.";
+		buttons = { { "Keep", "win.tidy-keep" }, { "Put Back", "win.tidy-revert" }, { "Other Way", "win.tidy-switch" } };
+		return true;
+	}
+	if (simViewOn) {
+		text = "Simulation View: switches still work. Space pauses; Esc goes back to editing.";
+		buttons = { { "Edit", "win.sim-view" } };
+		return true;
+	}
+	if (lockedOn) {
+		text = "Locked: switches still work; nothing else changes.";
+		buttons = { { "Unlock", "win.lock" } };
+		return true;
+	}
+	return false;
 }
 
 void CircuitWindow::lockNudge() {
@@ -633,7 +707,10 @@ void CircuitWindow::updateTitle() {
 	if (cl_document_page_count(doc) > 1) t += " - " + pageName(currentPage());
 	t += " — " CL_APP_NAME;
 	const char* now = gtk_window_get_title(GTK_WINDOW(win));
-	if (now == nullptr || t != now) gtk_window_set_title(GTK_WINDOW(win), t.c_str());
+	if (now == nullptr || t != now) {
+		gtk_window_set_title(GTK_WINDOW(win), t.c_str());
+		if (toolbar) toolbar->layoutNow();
+	}
 }
 
 void CircuitWindow::updateStatus() {
@@ -673,16 +750,13 @@ void CircuitWindow::updateActions() {
 	setChecked(win, "status-bar", prefs().showStatus);
 	// The menus' Undo and Redo say what they undo.
 	(void)edit;
+	if (toolbar) toolbar->redraw();
 }
 
 void CircuitWindow::updateRunUI() {
-	if (runButton) {
-		gtk_tool_button_set_icon_name(GTK_TOOL_BUTTON(runButton),
-		                              isRunning ? "media-playback-pause" : "media-playback-start");
-		gtk_tool_button_set_label(GTK_TOOL_BUTTON(runButton), isRunning ? "Pause" : "Run");
-		gtk_widget_set_tooltip_text(runButton, isRunning ? "Pause the simulation" : "Run the simulation");
-	}
 	setChecked(win, "running", isRunning);
+	if (toolbar) toolbar->redraw();
+	if (tabs) tabs->redraw();
 	statusDirty = true;
 }
 
@@ -712,9 +786,10 @@ void CircuitWindow::updateBanner() {
 		text = "Locked: switches and keypads still work, but nothing can be moved or changed.";
 		bannerButton(bannerButtons, "_Unlock", "win.lock");
 	}
+	// Drawn on the canvas now, as the Mac's and the Windows app's.
 	gtk_label_set_text(GTK_LABEL(bannerLabel), text.c_str());
-	gtk_widget_set_visible(banner, !text.empty());
-	if (!text.empty()) gtk_widget_show_all(bannerButtons);
+	gtk_widget_set_visible(banner, FALSE);
+	redraw();
 }
 
 void CircuitWindow::themeChanged() {
@@ -749,7 +824,6 @@ void CircuitWindow::destroyCb(GtkWidget*, gpointer self) {
 	// GTK takes the widgets apart after this handler; the tabs switching
 	// page on the way out mustn't reach a window that's gone.
 	g_signal_handlers_disconnect_by_data(w->notebook, w);
-	g_signal_handlers_disconnect_by_data(w->stepSpin, w);
 	g_signal_handlers_disconnect_by_data(w->win, w);
 	delete w;
 }
@@ -822,7 +896,6 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	isRunning = cl_document_is_running(doc);
 	simViewOn = false;
 	lockedOn = false;
-	gtk_spin_button_set_value(GTK_SPIN_BUTTON(stepSpin), cl_document_step_ms(doc));
 	syncTabs();
 	appearStart = g_get_monotonic_time();
 	updateTitle();
@@ -1282,9 +1355,12 @@ void CircuitWindow::stepOnce() {
 	if (scope) scope->update();
 }
 
+int CircuitWindow::stepMs() const { return cl_document_step_ms(doc); }
+
 void CircuitWindow::setStepMs(int ms) {
 	if (ms == cl_document_step_ms(doc)) return;
 	cl_document_set_step_ms(doc, ms);
+	if (toolbar) toolbar->redraw();
 	note(format("Each step is now %d ms of circuit time.", cl_document_step_ms(doc)));
 }
 
