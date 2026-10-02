@@ -88,7 +88,7 @@ public:
 	// banner for Tidy Up's preview, Simulation View and Lock.
 	bool toast(std::string& text, double& alpha) const;
 	struct BannerButton { std::string label; const char* action; };
-	bool banner(std::string& text, std::vector<BannerButton>& buttons) const;
+	bool bannerFor(std::string& text, std::vector<BannerButton>& buttons) const;
 	void lockNudge();
 	void showSettings();
 	void showContextMenu(int target, double wx, double wy, GdkEventButton* e);

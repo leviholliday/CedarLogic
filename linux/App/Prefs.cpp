@@ -234,6 +234,7 @@ void applyTheme() {
 	g_object_set(settings, "gtk-theme-name", desktopTheme.c_str(),
 	             "gtk-application-prefer-dark-theme", dark ? TRUE : FALSE, nullptr);
 	if (themeLooksDark() != dark) g_object_set(settings, "gtk-theme-name", "Adwaita", nullptr);
+	applyStyle();
 	for (CircuitWindow* w : circuitWindows()) w->themeChanged();
 }
 

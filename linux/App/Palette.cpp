@@ -23,15 +23,17 @@ std::string lower(const std::string& s) {
 GatePalette::GatePalette(CircuitWindow* window) : win(window) {
 	root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
 	gtk_widget_set_name(root, "palette");
-	gtk_container_set_border_width(GTK_CONTAINER(root), 6);
+	gtk_container_set_border_width(GTK_CONTAINER(root), 8);
+
+	// The family menu, then the search, as the Mac's side panel has them.
+	combo = gtk_combo_box_text_new();
+	gtk_widget_set_tooltip_text(combo, "Shift+1 to Shift+0 pick the first ten");
+	gtk_box_pack_start(GTK_BOX(root), combo, FALSE, FALSE, 0);
 
 	search = gtk_search_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(search), "Find a gate");
 	gtk_box_pack_start(GTK_BOX(root), search, FALSE, FALSE, 0);
 	g_signal_connect(search, "search-changed", G_CALLBACK(searchChangedCb), this);
-
-	combo = gtk_combo_box_text_new();
-	gtk_box_pack_start(GTK_BOX(root), combo, FALSE, FALSE, 0);
 
 	for (int c = 0; c < cl_library_category_count(); c++) {
 		Category cat;
@@ -46,9 +48,7 @@ GatePalette::GatePalette(CircuitWindow* window) : win(window) {
 			cat.gates.push_back(g);
 		}
 		if (cat.gates.empty()) continue;
-		const int n = (int)categories.size() + 1;
-		const std::string label = n <= 10 ? format("%s   (Shift+%d)", cat.title.c_str(), n % 10) : cat.title;
-		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), label.c_str());
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), cat.title.c_str());
 		categories.push_back(cat);
 	}
 

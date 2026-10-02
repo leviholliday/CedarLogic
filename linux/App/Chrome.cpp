@@ -205,7 +205,7 @@ void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const
 		pix = it->second;
 	} else {
 		GtkIconTheme* theme = gtk_icon_theme_get_default();
-		GtkIconInfo* info = gtk_icon_theme_lookup_icon(theme, name, px, GTK_ICON_LOOKUP_FORCE_SIZE | GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
+		GtkIconInfo* info = gtk_icon_theme_lookup_icon(theme, name, px, (GtkIconLookupFlags)(GTK_ICON_LOOKUP_FORCE_SIZE | GTK_ICON_LOOKUP_FORCE_SYMBOLIC));
 		if (info) {
 			GdkRGBA fg = { color.r, color.g, color.b, 1 };
 			pix = gtk_icon_info_load_symbolic(info, &fg, nullptr, nullptr, nullptr, nullptr, nullptr);

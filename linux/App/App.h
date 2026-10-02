@@ -65,6 +65,8 @@ Prefs& prefs();
 bool systemPrefersDark();
 // Apply `prefs().dark` to GTK and every window.
 void applyTheme();
+// The app's CSS for the theme in use (Style.cpp).
+void applyStyle();
 
 // ---- Files -----------------------------------------------------------------------
 

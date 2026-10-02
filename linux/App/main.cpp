@@ -217,28 +217,7 @@ void openSampleCb(GSimpleAction*, GVariant*, gpointer app) {
 
 void quitCb(GSimpleAction*, GVariant*, gpointer app) { quitApp(GTK_APPLICATION(app)); }
 
-void loadCss() {
-	GtkCssProvider* css = gtk_css_provider_new();
-	gtk_css_provider_load_from_data(css,
-		"#status label { font-size: 0.9em; }\n"
-		"#palette flowboxchild { padding: 2px; border-radius: 6px; }\n"
-		// A wide, unmistakable grip between the palette and the canvas,
-		// whatever the system theme draws by default (some draw it a single
-		// pixel wide). wide-handle (set in code) widens the hit area; this
-		// gives it a visible strip and a grip of dots, brighter on hover so
-		// it reads as draggable before the cursor even changes.
-		"paned > separator, paned.wide > separator {\n"
-		"  min-width: 10px;\n"
-		"  background-color: alpha(currentColor, 0.06);\n"
-		"}\n"
-		"paned > separator:hover, paned.wide > separator:hover {\n"
-		"  background-color: alpha(@theme_selected_bg_color, 0.35);\n"
-		"}\n",
-		-1, nullptr);
-	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css),
-	                                          GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-	g_object_unref(css);
-}
+void loadCss() { applyStyle(); }
 
 void setIcon() {
 	const std::string candidates[] = { resourcesDir() + "/cedarlogic.png", resourcesDir() + "/../linux/res/cedarlogic.png" };

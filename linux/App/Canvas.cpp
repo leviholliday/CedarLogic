@@ -166,7 +166,7 @@ void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 void Canvas::drawBanner(cairo_t* cr, float w) {
 	std::string text;
 	std::vector<CircuitWindow::BannerButton> buttons;
-	if (!win->banner(text, buttons)) return;
+	if (!win->bannerFor(text, buttons)) return;
 	const bool sim = win->simView();
 	const Chrome c{ prefs().dark || sim };
 	const Color ink = c.barInk();

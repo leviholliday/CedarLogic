@@ -194,6 +194,7 @@ void CircuitWindow::build() {
 	paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_box_pack_start(GTK_BOX(v), paned, TRUE, TRUE, 0);
 	GtkWidget* leftBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_name(leftBox, "sidepanel");
 	palette = new GatePalette(this);
 	paletteBox = leftBox;
 	gtk_widget_set_size_request(leftBox, 120, -1);
@@ -643,7 +644,7 @@ bool CircuitWindow::toast(std::string& text, double& alpha) const {
 	return alpha > 0;
 }
 
-bool CircuitWindow::banner(std::string& text, std::vector<BannerButton>& buttons) const {
+bool CircuitWindow::bannerFor(std::string& text, std::vector<BannerButton>& buttons) const {
 	buttons.clear();
 	if (cl_edit_tidy_active(doc)) {
 		text = cl_edit_tidy_mode(doc) == 1 ? "Tidy Up by signal flow: a preview. Enter keeps it, Esc puts it back."
