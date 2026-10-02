@@ -21,6 +21,9 @@ GtkWidget* gSplash = nullptr;
 // (a check that a build really starts, drawing and all; used by CI).
 std::string gScreenshot;
 int gExitCode = 0;
+// For the screenshot runs: --dark or --light for this run, --sim-view on.
+int gTheme = -1;
+bool gSimView = false;
 
 gboolean screenshotCb(gpointer app) {
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
@@ -249,6 +252,7 @@ void startupCb(GApplication* gapp, gpointer) {
 	// with a timed splash.
 	if (gScreenshot.empty()) gSplash = showSplash();
 	prefs().load();
+	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
 	loadCss();
 	setIcon();
@@ -312,7 +316,10 @@ void activateCb(GApplication* gapp, gpointer) {
 	if (gSplash && w) gtk_widget_hide(GTK_WIDGET(w->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
 		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
-		if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, app);
+		if (!gScreenshot.empty()) {
+			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
+			g_timeout_add(2000, screenshotCb, app);
+		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
 		else g_idle_add(offerRecoveryCb, app);
 		return G_SOURCE_REMOVE;
@@ -338,7 +345,10 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 	if (gSplash) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
 		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
-		if (!gScreenshot.empty()) g_timeout_add(2000, screenshotCb, app);
+		if (!gScreenshot.empty()) {
+			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
+			g_timeout_add(2000, screenshotCb, app);
+		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
 		else g_idle_add(offerRecoveryCb, app);
 		return G_SOURCE_REMOVE;
@@ -455,6 +465,8 @@ int main(int argc, char** argv) {
 	for (int i = 0; i < argc; i++) {
 		if (strcmp(argv[i], "--version") == 0) { printf("CedarLogic %s (native Linux)\n", CL_VERSION); return 0; }
 		if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) { gScreenshot = argv[++i]; continue; }
+		if (strcmp(argv[i], "--dark") == 0 || strcmp(argv[i], "--light") == 0) { gTheme = strcmp(argv[i], "--dark") == 0; continue; }
+		if (strcmp(argv[i], "--sim-view") == 0) { gSimView = true; continue; }
 		args.push_back(argv[i]);
 	}
 	args.push_back(nullptr);

@@ -106,6 +106,10 @@ private:
 	void drawOverlays(cairo_t* cr, float w, float h);
 	void drawBanner(cairo_t* cr, float w);
 	void drawToast(cairo_t* cr, float w, float h);
+	void drawSimBar(cairo_t* cr, float w, float h);
+	float sliderLeft = 0, sliderRight = 0, sliderTop = 0, sliderBottom = 0;   // Simulation View's speed
+	bool sliderDragging = false;
+	void setSpeedAt(double x);
 	struct OverlayHit { float left, top, right, bottom; const char* action; };
 	std::vector<OverlayHit> hits;
 	int hotHit = -1;

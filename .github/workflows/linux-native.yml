@@ -91,6 +91,12 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --screenshot renders/window-new.png
           test -s renders/window-new.png
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --dark --screenshot renders/window-Lab5-dark.png format/tests/fixtures/Lab5.cdl || true
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --dark --sim-view --screenshot renders/window-sim.png res/samples/practice.cdl || true
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
           linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 

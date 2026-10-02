@@ -157,8 +157,106 @@ void Canvas::draw(cairo_t* cr) {
 
 void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 	hits.clear();
+	sliderRight = sliderLeft = 0;
+	if (win->simView()) drawSimBar(cr, w, h);
 	drawBanner(cr, w);
 	drawToast(cr, w, h);
+}
+
+// Simulation View's control bar (the Mac's SimBar): a dark glass panel along
+// the bottom with a breathing LIVE light, pause and step, the speed, a chip
+// for every switch and light, and Done.
+void Canvas::drawSimBar(cairo_t* cr, float w, float h) {
+	const Color on = colorF(0.28f, 0.93f, 1.0f), ink = colorF(0.86f, 0.93f, 1.0f);
+	const Color dim = colorF(0.48f, 0.58f, 0.68f), live = colorF(0.36f, 1.0f, 0.62f);
+	const Color amber = colorF(1.0f, 0.72f, 0.25f);
+	const float barW = std::min(1040.0f, w - 28), barH = 52;
+	if (barW < 360) return;
+	const float x0 = (w - barW) / 2, y0 = h - 14 - barH, cy = y0 + barH / 2;
+	const RectF bar = rectF(x0, y0, x0 + barW, y0 + barH);
+	fillRound(cr, rectF(bar.left, bar.top + 3, bar.right, bar.bottom + 3), 14, colorF(0, 0, 0, 0.30f));
+	fillRound(cr, bar, 14, colorF(0.055f, 0.070f, 0.090f, 0.94f));
+	strokeRound(cr, bar, 14, withAlpha(on, 0.22f));
+
+	const bool paused = !win->running();
+	const double t = g_get_monotonic_time() / 1e6;
+	const float breathe = paused ? 1.0f : (float)(0.6 + 0.4 * std::sin(t * 3.2));
+	const Color light = paused ? amber : live;
+	float x = x0 + 18;
+	fillCircle(cr, pointF(x + 9, cy), 9, withAlpha(light, 0.12f * breathe));
+	fillCircle(cr, pointF(x + 9, cy), 4, withAlpha(light, 0.55f + 0.45f * breathe));
+	x += 28;
+	drawText(cr, "SIMULATION", rectF(x, cy - 16, x + 80, cy - 3), 9, dim);
+	drawText(cr, paused ? "PAUSED" : "LIVE", rectF(x, cy - 3, x + 80, cy + 15), 13, paused ? amber : ink, TextAlign::Leading, true);
+	x += 70 + 14;
+	auto divider = [&] { fillRect(cr, rectF(x, cy - 14, x + 1, cy + 14), colorF(1, 1, 1, 0.08f)); x += 1 + 14; };
+	divider();
+	auto button = [&](const char* glyph, bool lit, Color color, const char* action) {
+		const RectF r = rectF(x, cy - 16, x + 32, cy + 16);
+		const bool hot = hotHit == (int)hits.size();
+		fillRound(cr, r, 9, lit ? withAlpha(on, 0.18f) : colorF(1, 1, 1, hot ? 0.12f : 0.07f));
+		strokeRound(cr, r, 9, colorF(1, 1, 1, 0.08f));
+		drawIcon(cr, glyph, r, 14, color);
+		hits.push_back({ r.left, r.top, r.right, r.bottom, action });
+		x += 32 + 8;
+	};
+	button(paused ? Icon::Play : Icon::Pause, paused, paused ? on : ink, "win.running");
+	button(Icon::Step, false, ink, "win.step");
+	x += 6;
+	divider();
+	// Speed, fast on the right.
+	drawText(cr, "SPEED", rectF(x, cy - 19, x + 60, cy - 6), 9, dim);
+	const float trackW = 150, ty = cy + 5;
+	sliderLeft = x; sliderRight = x + trackW; sliderTop = ty - 10; sliderBottom = ty + 10;
+	const float f = (float)speedFraction(cl_document_step_ms(win->document()));
+	fillRound(cr, rectF(x, ty - 2, x + trackW, ty + 2), 2, colorF(1, 1, 1, 0.12f));
+	fillRound(cr, rectF(x, ty - 2, x + std::max(4.0f, trackW * f), ty + 2), 2, withAlpha(on, 0.75f));
+	fillCircle(cr, pointF(x + trackW * f, ty), 10, withAlpha(on, 0.14f));
+	fillCircle(cr, pointF(x + trackW * f, ty), 6, colorF(0.92f, 1, 1));
+	x += trackW + 12;
+	drawText(cr, format("%d ms / step", cl_document_step_ms(win->document())), rectF(x, ty - 8, x + 84, ty + 8), 11, ink);
+	x += 84 + 14;
+	divider();
+
+	// The Done button at the right end; the chips in what's left.
+	const float doneW = 70;
+	const RectF done = rectF(x0 + barW - 18 - doneW, cy - 15, x0 + barW - 18, cy + 15);
+	const bool doneHot = hotHit == (int)hits.size();
+	fillRound(cr, done, 9, colorF(1, 1, 1, doneHot ? 0.12f : 0.07f));
+	strokeRound(cr, done, 9, colorF(1, 1, 1, 0.10f));
+	drawText(cr, "Done", rectF(done.left + 13, cy - 8, done.left + 46, cy + 10), 12, ink);
+	drawText(cr, "esc", rectF(done.left + 44, cy - 6, done.right, cy + 8), 9, dim);
+	hits.push_back({ done.left, done.top, done.right, done.bottom, "win.sim-view" });
+
+	CLSimChip chips[64];
+	const int n = std::min(64, cl_simview_chips(win->document(), page(), chips, 64));
+	std::vector<CLSimChip> ins, outs;
+	for (int i = 0; i < n; i++) (chips[i].isInput ? ins : outs).push_back(chips[i]);
+	const float room = done.left - 14 - x;
+	auto rowWidth = [](size_t count) { return count ? 22.0f + 15.0f * count : 0.0f; };
+	size_t cap = 24;
+	while (cap > 0 && rowWidth(std::min(cap, ins.size())) + rowWidth(std::min(cap, outs.size())) + 14 > room) cap /= 2;
+	if (cap == 0) return;
+	auto row = [&](const char* label, const std::vector<CLSimChip>& list) {
+		if (list.empty()) return;
+		drawText(cr, label, rectF(x, cy - 7, x + 24, cy + 8), 9, dim);
+		x += 22;
+		for (size_t i = 0; i < std::min(cap, list.size()); i++) {
+			const RectF c = rectF(x, cy - 5, x + 10, cy + 5);
+			if (list[i].lit) fillRound(cr, rectF(c.left - 3, c.top - 3, c.right + 3, c.bottom + 3), 5, withAlpha(on, 0.16f));
+			fillRound(cr, c, 3, list[i].lit ? on : colorF(1, 1, 1, 0.10f));
+			x += 15;
+		}
+		x += 14;
+	};
+	row("IN", ins);
+	row("OUT", outs);
+}
+
+void Canvas::setSpeedAt(double x) {
+	const float f = (float)((x - sliderLeft) / std::max(1.0f, sliderRight - sliderLeft));
+	win->setStepMs(speedFromFraction(f));
+	redraw();
 }
 
 // A pill over the top of the canvas: Tidy Up's preview, Simulation View,
@@ -207,7 +305,7 @@ void Canvas::drawToast(cairo_t* cr, float w, float h) {
 	if (!win->toast(text, alpha)) return;
 	const float a = (float)alpha;
 	const float tw = std::min(w - 40, textWidth(text, 12) + 32), th = 32;
-	const float bottom = h - 16;
+	const float bottom = h - 16 - (win->simView() ? 52 + 14 : 0);
 	const RectF r = rectF((w - tw) / 2, bottom - th, (w + tw) / 2, bottom);
 	const bool dark = prefs().dark || win->simView();
 	fillRound(cr, rectF(r.left, r.top + 2, r.right, r.bottom + 2), th / 2, colorF(0, 0, 0, 0.18f * a));
@@ -216,6 +314,11 @@ void Canvas::drawToast(cairo_t* cr, float w, float h) {
 }
 
 bool Canvas::overlayPress(double x, double y) {
+	if (sliderRight > sliderLeft && x >= sliderLeft && x < sliderRight && y >= sliderTop && y < sliderBottom) {
+		sliderDragging = true;
+		setSpeedAt(x);
+		return true;
+	}
 	for (const OverlayHit& h : hits) {
 		if (x < h.left || x >= h.right || y < h.top || y >= h.bottom) continue;
 		win->runAction(h.action);
@@ -608,6 +711,7 @@ bool Canvas::onMotion(GdkEventMotion* e) {
 	const double dx = e->x - lastX, dy = e->y - lastY;
 	lastX = e->x;
 	lastY = e->y;
+	if (sliderDragging) { setSpeedAt(e->x); return TRUE; }
 	// Hover over the banner's buttons.
 	int h = -1;
 	for (size_t i = 0; i < hits.size(); i++)
@@ -634,6 +738,7 @@ bool Canvas::onMotion(GdkEventMotion* e) {
 }
 
 bool Canvas::onRelease(GdkEventButton* e) {
+	if (sliderDragging) { sliderDragging = false; return TRUE; }
 	CLDocument* doc = win->document();
 	lastX = e->x;
 	lastY = e->y;

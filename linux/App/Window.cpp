@@ -652,12 +652,7 @@ bool CircuitWindow::bannerFor(std::string& text, std::vector<BannerButton>& butt
 		buttons = { { "Keep", "win.tidy-keep" }, { "Put Back", "win.tidy-revert" }, { "Other Way", "win.tidy-switch" } };
 		return true;
 	}
-	if (simViewOn) {
-		text = "Simulation View: switches still work. Space pauses; Esc goes back to editing.";
-		buttons = { { "Edit", "win.sim-view" } };
-		return true;
-	}
-	if (lockedOn) {
+	if (lockedOn && !simViewOn) {
 		text = "Locked: switches still work; nothing else changes.";
 		buttons = { { "Unlock", "win.lock" } };
 		return true;

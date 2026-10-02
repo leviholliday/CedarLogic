@@ -89,6 +89,11 @@ void drawNewDocIcon(cairo_t* cr, const RectF& box, const Color& color);
 void drawNewTabIcon(cairo_t* cr, const RectF& box, const Color& color);
 void drawFolderIcon(cairo_t* cr, const RectF& box, const Color& color);
 void drawBubbleIcon(cairo_t* cr, const RectF& box, const Color& color);
+// A magnifier with a minus or plus (zoom), a gauge (speed), a tray with an
+// arrow into it (save).
+void drawZoomIcon(cairo_t* cr, const RectF& box, const Color& color, bool in);
+void drawGaugeIcon(cairo_t* cr, const RectF& box, const Color& color);
+void drawSaveIcon(cairo_t* cr, const RectF& box, const Color& color);
 
 // ---- Shapes ---------------------------------------------------------------------------
 

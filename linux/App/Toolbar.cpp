@@ -270,7 +270,7 @@ void Toolbar::paint(cairo_t* cr, float w, float h) {
 		}
 		case Speed: {
 			const float cy = (r.top + r.bottom) / 2;
-			drawIcon(cr, Icon::Speed, rectF(r.left + 4, r.top, r.left + 24, r.bottom), 14, withAlpha(ink, 0.9f));
+			drawGaugeIcon(cr, rectF(r.left + 4, r.top, r.left + 24, r.bottom), withAlpha(ink, 0.9f));
 			const RectF t = speedTrack(it);
 			const float f = (float)speedFraction(win->stepMs());
 			fillRound(cr, rectF(t.left, cy - 1.5f, t.right, cy + 1.5f), 1.5f, withAlpha(ink, 0.16f));
@@ -304,6 +304,8 @@ void Toolbar::paint(cairo_t* cr, float w, float h) {
 			if (is(it.action, "app.new")) drawNewDocIcon(cr, r, fg);
 			else if (is(it.action, "win.new-tab")) drawNewTabIcon(cr, r, fg);
 			else if (is(it.action, "app.open")) drawFolderIcon(cr, r, fg);
+			else if (is(it.action, "win.save")) drawSaveIcon(cr, r, fg);
+			else if (is(it.action, "win.zoom-in") || is(it.action, "win.zoom-out")) drawZoomIcon(cr, r, fg, is(it.action, "win.zoom-in"));
 			else drawIcon(cr, iconFor(it), r, colored && on ? 13 : 16, fg);
 			break;
 		}

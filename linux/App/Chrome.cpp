@@ -320,6 +320,70 @@ void drawBubbleIcon(cairo_t* cr, const RectF& box, const Color& color) {
 	cairo_restore(cr);
 }
 
+void drawZoomIcon(cairo_t* cr, const RectF& box, const Color& color, bool in) {
+	const float cx = (box.left + box.right) / 2 - 1.5f, cy = (box.top + box.bottom) / 2 - 1.5f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy, 5.5, 0, 2 * M_PI);
+	cairo_stroke(cr);
+	cairo_set_line_width(cr, 1.8);
+	cairo_move_to(cr, cx + 4, cy + 4);
+	cairo_line_to(cr, cx + 8, cy + 8);
+	cairo_stroke(cr);
+	cairo_set_line_width(cr, 1.2);
+	cairo_move_to(cr, cx - 2.6, cy);
+	cairo_line_to(cr, cx + 2.6, cy);
+	if (in) {
+		cairo_move_to(cr, cx, cy - 2.6);
+		cairo_line_to(cr, cx, cy + 2.6);
+	}
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+void drawGaugeIcon(cairo_t* cr, const RectF& box, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2 + 1.5f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy, 6.5, M_PI * 0.8, M_PI * 2.2);
+	cairo_stroke(cr);
+	cairo_move_to(cr, cx, cy);
+	cairo_line_to(cr, cx + 3.2, cy - 3.6);
+	cairo_stroke(cr);
+	cairo_arc(cr, cx, cy, 1.4, 0, 2 * M_PI);
+	cairo_fill(cr);
+	cairo_restore(cr);
+}
+
+void drawSaveIcon(cairo_t* cr, const RectF& box, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	// The tray.
+	cairo_move_to(cr, cx - 7, cy + 1);
+	cairo_line_to(cr, cx - 7, cy + 7);
+	cairo_line_to(cr, cx + 7, cy + 7);
+	cairo_line_to(cr, cx + 7, cy + 1);
+	cairo_stroke(cr);
+	// The arrow down into it.
+	cairo_move_to(cr, cx, cy - 8);
+	cairo_line_to(cr, cx, cy + 3);
+	cairo_move_to(cr, cx - 3.5, cy - 0.5);
+	cairo_line_to(cr, cx, cy + 3);
+	cairo_line_to(cr, cx + 3.5, cy - 0.5);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
 double speedFraction(int stepMs) {
 	return 1 - std::min(1.0, std::max(0.0, std::log((double)std::max(1, stepMs)) / std::log(500.0)));
 }
