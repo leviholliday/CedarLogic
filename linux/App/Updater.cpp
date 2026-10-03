@@ -158,6 +158,17 @@ Asset findAsset(const std::string& suffix) {
 	return out;
 }
 
+// The updated copy, started as this one quits. It waits for this process to
+// end (main.cpp), so it becomes the running CedarLogic rather than handing
+// its launch back to this one.
+void relaunch(const std::string& file) {
+	gchar** env = g_environ_setenv(g_get_environ(), "CEDARLOGIC_RESTART_AFTER", format("%ld", (long)getpid()).c_str(), TRUE);
+	gchar* argv[] = { const_cast<gchar*>(file.c_str()), nullptr };
+	// A failure leaves the file updated; a manual relaunch still gets it.
+	g_spawn_async(nullptr, argv, env, (GSpawnFlags)0, nullptr, nullptr, nullptr, nullptr);
+	g_strfreev(env);
+}
+
 std::atomic<bool> g_checking{false};
 std::string g_offeredThisRun;   // a background check offers each commit once
 guint g_timer = 0;
@@ -235,10 +246,7 @@ void installDeb(GtkApplication* app, const Asset& asset) {
 		return;
 	}
 	if (askConfirm(parent, "The update is installed", "Restart CedarLogic now to use it? Your circuits are saved.", "Restart Now", "Later")) {
-		if (quitApp(app)) {
-			gchar* again[] = { (gchar*)"/usr/bin/cedarlogic", nullptr };
-			g_spawn_async(nullptr, again, nullptr, (GSpawnFlags)0, nullptr, nullptr, nullptr, nullptr);
-		}
+		if (quitApp(app)) relaunch("/usr/bin/cedarlogic");
 	}
 }
 
@@ -279,12 +287,7 @@ void install(GtkApplication* app, const Asset& asset) {
 	}
 
 	if (askConfirm(parent, "The update is installed", "Restart CedarLogic now to use it? Your circuits are saved.", "Restart Now", "Later")) {
-		if (quitApp(app)) {
-			gchar* argv[] = { const_cast<gchar*>(current.c_str()), nullptr };
-			GError* e = nullptr;
-			if (!g_spawn_async(nullptr, argv, nullptr, G_SPAWN_SEARCH_PATH, nullptr, nullptr, nullptr, &e) && e)
-				g_error_free(e);   // the file is already updated; a manual relaunch still gets it
-		}
+		if (quitApp(app)) relaunch(current);
 	}
 }
 

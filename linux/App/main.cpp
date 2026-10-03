@@ -499,7 +499,19 @@ gboolean offerWelcomeCb(gpointer app) {
 	return G_SOURCE_REMOVE;
 }
 
+// Launched again while running (the menu, the dock): this CedarLogic comes
+// forward, as the Mac's does, rather than a second window on the same circuit.
+bool gStarted = false;
+
+bool presentRunning(GApplication* gapp) {
+	if (!gStarted || circuitWindows().empty()) return false;
+	// While the launch screen is up its windows are still hidden; they come in with it.
+	if (!splashActive()) gtk_window_present(activeWindow(GTK_APPLICATION(gapp))->window());
+	return true;
+}
+
 void activateCb(GApplication* gapp, gpointer) {
+	if (presentRunning(gapp)) return;
 	if (!libraryOrComplain()) {
 		gExitCode = 1;
 		if (gSplash) { gtk_widget_destroy(gSplash); gSplash = nullptr; }
@@ -544,9 +556,21 @@ void activateCb(GApplication* gapp, gpointer) {
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
+	gStarted = true;
 }
 
 void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpointer) {
+	// Files handed over by another launch: each opens here, in a window of its
+	// own (or the one that has it already comes forward).
+	if (gStarted) {
+		for (gint i = 0; i < n; i++) {
+			gchar* path = g_file_get_path(files[i]);
+			if (path) openCircuit(GTK_APPLICATION(gapp), path, nullptr);
+			g_free(path);
+		}
+		if (circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
+		return;
+	}
 	if (!libraryOrComplain()) {
 		gExitCode = 1;
 		if (gSplash) { gtk_widget_destroy(gSplash); gSplash = nullptr; }
@@ -580,6 +604,26 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
+	gStarted = true;
+}
+
+// Restarted after an update (Updater.cpp): the copy before this one is still
+// quitting. Wait for it to go, so this one becomes the running CedarLogic
+// rather than handing its launch to that one.
+void waitForPreviousCopy() {
+	const char* was = g_getenv("CEDARLOGIC_RESTART_AFTER");
+	const long pid = was ? strtol(was, nullptr, 10) : 0;
+	g_unsetenv("CEDARLOGIC_RESTART_AFTER");
+	for (int i = 0; pid > 0 && i < 100; i++) {
+		gchar* stat = nullptr;
+		if (!g_file_get_contents(format("/proc/%ld/stat", pid).c_str(), &stat, nullptr, nullptr)) return;
+		// "pid (name) state ...": a zombie has gone, whatever its parent does.
+		const char* close = strrchr(stat, ')');
+		const bool gone = close && close[1] == ' ' && (close[2] == 'Z' || close[2] == 'X');
+		g_free(stat);
+		if (gone) return;
+		g_usleep(100000);
+	}
 }
 
 }  // namespace
@@ -731,9 +775,13 @@ int main(int argc, char** argv) {
 	// The window class and the name the desktop shows.
 	g_set_prgname("CedarLogic");
 	g_set_application_name("CedarLogic");
-	// Each launch is its own process: one that misbehaves can't take the
-	// others with it.
-	GtkApplication* app = gtk_application_new(CL_APP_ID, (GApplicationFlags)(G_APPLICATION_NON_UNIQUE | G_APPLICATION_HANDLES_OPEN));
+	// One CedarLogic at a time: launching it again (the menu, a .cdl
+	// double-clicked) hands over to the one running, so two copies never edit
+	// -- and save over -- the same circuit, or each other's settings. The
+	// screenshot runs are each their own.
+	const bool pictureRun = !gScreenshot.empty() || !gSplashFile.empty();
+	if (!pictureRun) waitForPreviousCopy();
+	GtkApplication* app = gtk_application_new(CL_APP_ID, (GApplicationFlags)(G_APPLICATION_HANDLES_OPEN | (pictureRun ? G_APPLICATION_NON_UNIQUE : 0)));
 	g_signal_connect(app, "startup", G_CALLBACK(startupCb), nullptr);
 	g_signal_connect(app, "activate", G_CALLBACK(activateCb), nullptr);
 	g_signal_connect(app, "open", G_CALLBACK(openFilesCb), nullptr);
