@@ -207,7 +207,7 @@ bool moveToTrash(const Item& item) {
 	g_mkdir_with_parents(trash.c_str(), 0755);
 	std::string dest = trash + "/" + item.id;
 	for (int n = 2; fileExists(dest); n++) dest = trash + "/" + item.id + format(" %d", n);
-	return g_rename(item.folder.c_str(), dest.c_str()) == 0;
+	return ::g_rename(item.folder.c_str(), dest.c_str()) == 0;
 }
 
 // It saves itself every few seconds, so not every save is a version: the
