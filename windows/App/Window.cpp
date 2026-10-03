@@ -1551,7 +1551,9 @@ void CircuitWindow::print() {
 	const std::wstring name = W(displayName());
 	DOCINFOW di = { sizeof di, name.c_str(), nullptr, nullptr, 0 };
 	bool ok = false;
-	if (StartDocW(dc, &di) > 0 && StartPage(dc) > 0) {
+	const bool docStarted = StartDocW(dc, &di) > 0;
+	const bool pageStarted = docStarted && StartPage(dc) > 0;
+	if (pageStarted) {
 		const int pw = GetDeviceCaps(dc, HORZRES), ph = GetDeviceCaps(dc, VERTRES);
 		const double dpiX = GetDeviceCaps(dc, LOGPIXELSX);
 		// Points of 1/72 inch, as the Mac prints: lines a point wide.
@@ -1568,8 +1570,12 @@ void CircuitWindow::print() {
 			ok = SUCCEEDED(rt->EndDraw());
 		}
 		if (rt) rt->Release();
-		EndPage(dc);
-		EndDoc(dc);
+	}
+	// A page that didn't draw isn't sent (it would print blank): the job is
+	// called off, as is one whose page couldn't start or finish.
+	if (!(pageStarted && ok && EndPage(dc) > 0 && EndDoc(dc) > 0)) {
+		if (docStarted) AbortDoc(dc);
+		ok = false;
 	}
 	DeleteDC(dc);
 	if (pd.hDevMode) GlobalFree(pd.hDevMode);
