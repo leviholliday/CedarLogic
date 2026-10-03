@@ -341,6 +341,10 @@ private:
 	void floatSelection(double wx, double wy);
 	void pasteText(const std::string& text, bool floating, bool shift);
 	std::string displayName() const;
+	// The name, as last read from Your Circuits, for the path and recovered
+	// name it was read for (the toolbar asks on every paint).
+	mutable std::string cachedName, cachedFor;
+	mutable bool nameValid = false;
 
 	static gboolean tickCb(gpointer);
 	static gboolean deleteCb(GtkWidget*, GdkEvent*, gpointer);

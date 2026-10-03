@@ -893,7 +893,7 @@ void CircuitWindow::tick() {
 	if (statusDirty && (t - lastStatus) > 100000) { statusDirty = false; lastStatus = t; updateStatus(); }
 	// The toolbar's zoom follows the camera.
 	if (c && c->zoomPercent() != lastZoomShown) { lastZoomShown = c->zoomPercent(); toolbar->redraw(); }
-	if ((t - lastTitle) > 500000) { lastTitle = t; updateTitle(); }
+	if ((t - lastTitle) > 500000) { lastTitle = t; nameValid = false; updateTitle(); }
 	// A recovery copy of unsaved work, at most every 20 seconds.
 	if (changes != changesAtRecovery && (t - lastRecovery) > 20 * G_USEC_PER_SEC) writeRecovery();
 	// A note on the canvas: redrawn while it fades in and out.
@@ -1014,11 +1014,18 @@ void CircuitWindow::lockNudge() {
 }
 
 std::string CircuitWindow::displayName() const {
+	// Read again when the circuit changes, on libraryChanged() (a rename) and
+	// twice a second (the title's poll, for a rename made elsewhere).
+	const std::string key = path + '\n' + recoveredName;
+	if (nameValid && cachedFor == key) return cachedName;
 	library::Item it;
-	if (library::itemFor(path, it)) return it.name;
-	if (!recoveredName.empty()) return recoveredName;
-	if (!path.empty()) return baseName(path);
-	return "Untitled";
+	if (library::itemFor(path, it)) cachedName = it.name;
+	else if (!recoveredName.empty()) cachedName = recoveredName;
+	else if (!path.empty()) cachedName = baseName(path);
+	else cachedName = "Untitled";
+	cachedFor = key;
+	nameValid = true;
+	return cachedName;
 }
 
 gboolean CircuitWindow::autosaveCb(gpointer self) {
@@ -1123,6 +1130,7 @@ void CircuitWindow::reloadFromDisk(const std::string& message) {
 
 void CircuitWindow::libraryChanged() {
 	rebuildRecentMenus();   // Open Recent names circuits by their names in Your Circuits
+	nameValid = false;
 	updateTitle();
 	if (toolbar) toolbar->layoutNow();
 }
