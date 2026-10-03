@@ -190,8 +190,14 @@ void showVersionHistory(CircuitWindow* window) {
 		if (b == 100) return true;
 		if (i < 0 || i >= (int)versions.size()) return false;
 		if (b == 0) {
+			// Named for when it was, without a clock's ':' (which a USB stick won't take).
+			std::string when;
+			if (GDateTime* t = g_date_time_new_from_unix_local((gint64)versions[i].time)) {
+				if (gchar* s = g_date_time_format(t, "%Y-%m-%d %H.%M")) { when = s; g_free(s); }
+				g_date_time_unref(t);
+			}
 			const std::string file = chooseSaveFile(GTK_WINDOW(picker.window), "Export a Copy",
-			                                        item.name + " (" + library::friendlyTime(versions[i].time) + ").cdl");
+			                                        safeFileName(item.name + (when.empty() ? "" : " (" + when + ")")) + ".cdl");
 			gchar* data = nullptr;
 			gsize len = 0;
 			if (!file.empty() && (!g_file_get_contents(versions[i].path.c_str(), &data, &len, nullptr) ||

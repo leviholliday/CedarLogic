@@ -4,6 +4,7 @@
 // looks for first -- in colour or black and white, at 2x, 4x or 6x. Copied,
 // or saved as a PNG (or a PDF or SVG, which stay sharp at any size).
 
+#include "Alert.h"
 #include "Chrome.h"
 #include "Dialogs.h"
 #include "Window.h"
@@ -210,26 +211,59 @@ GtkWidget* comboOf(const std::vector<const char*>& items, int active) {
 	return c;
 }
 
-// Where to save it: a PNG, or a PDF or SVG by the name's ending.
-std::string chooseImageFile(GtkWindow* parent, const std::string& suggested) {
-	GtkFileChooserNative* c = gtk_file_chooser_native_new("Export as Image", parent, GTK_FILE_CHOOSER_ACTION_SAVE, "_Export", "_Cancel");
-	gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(c), TRUE);
-	gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(c), suggested.c_str());
-	if (!prefs().lastFolder.empty()) gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(c), prefs().lastFolder.c_str());
-	GtkFileFilter* filter = gtk_file_filter_new();
-	gtk_file_filter_set_name(filter, "Pictures (PNG, or PDF and SVG)");
-	gtk_file_filter_add_pattern(filter, "*.png");
-	gtk_file_filter_add_pattern(filter, "*.pdf");
-	gtk_file_filter_add_pattern(filter, "*.svg");
-	gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(c), filter);
-	std::string file;
-	if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(c)) == GTK_RESPONSE_ACCEPT)
-		if (gchar* f = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(c))) { file = f; g_free(f); }
-	g_object_unref(c);
-	return file;
+}  // namespace
+
+std::string safeFileName(const std::string& name) {
+	std::string out = name;
+	for (char& c : out)
+		if ((unsigned char)c < 0x20 || strchr("/\\:*?\"<>|", c)) c = '-';
+	// Not hidden (a leading dot), and nothing a USB stick drops at the end.
+	const size_t start = out.find_first_not_of(". ");
+	out = start == std::string::npos ? std::string() : out.substr(start);
+	while (!out.empty() && (out.back() == '.' || out.back() == ' ')) out.pop_back();
+	return out.empty() ? "Untitled" : out;
 }
 
-}  // namespace
+std::string chooseImageFile(GtkWindow* parent, const char* title, const char* accept, const std::string& suggested, bool vectors) {
+	std::string name = suggested, folder = prefs().lastFolder;
+	for (;;) {
+		GtkFileChooserNative* c = gtk_file_chooser_native_new(title, parent, GTK_FILE_CHOOSER_ACTION_SAVE, accept, "_Cancel");
+		gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(c), TRUE);
+		gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(c), name.c_str());
+		if (!folder.empty()) gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(c), folder.c_str());
+		GtkFileFilter* filter = gtk_file_filter_new();
+		gtk_file_filter_set_name(filter, vectors ? "Pictures (PNG, or PDF and SVG)" : "PNG pictures");
+		gtk_file_filter_add_pattern(filter, "*.png");
+		gtk_file_filter_add_pattern(filter, "*.PNG");
+		if (vectors) {
+			gtk_file_filter_add_pattern(filter, "*.pdf");
+			gtk_file_filter_add_pattern(filter, "*.svg");
+		}
+		gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(c), filter);
+		std::string file;
+		if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(c)) == GTK_RESPONSE_ACCEPT)
+			if (gchar* f = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(c))) { file = f; g_free(f); }
+		g_object_unref(c);
+		if (file.empty()) return file;
+		auto endsWith = [&](const char* x) {
+			const size_t n = strlen(x);
+			return file.size() >= n && g_ascii_strcasecmp(file.c_str() + file.size() - n, x) == 0;
+		};
+		if (endsWith(".png") || (vectors && (endsWith(".pdf") || endsWith(".svg")))) return file;
+		file += ".png";
+		if (!g_file_test(file.c_str(), G_FILE_TEST_EXISTS)) return file;
+		// The chooser asked only about the name as it was typed.
+		gchar* base = g_path_get_basename(file.c_str());
+		gchar* dir = g_path_get_dirname(file.c_str());
+		name = base;
+		folder = dir;
+		g_free(base);
+		g_free(dir);
+		if (askConfirm(parent, "Replace “" + name + "”?", "There's a file with that name there already. Replacing it writes over it.",
+		               "Replace", "Cancel", true))
+			return file;
+	}
+}
 
 void showExportImage(CircuitWindow* win, int page) {
 	CLDocument* doc = win->document();
@@ -339,7 +373,7 @@ void showExportImage(CircuitWindow* win, int page) {
 			if (!pb) { gtk_label_set_text(GTK_LABEL(f.problem), "The image couldn't be copied."); continue; }
 			break;
 		}
-		file = chooseImageFile(GTK_WINDOW(f.dialog), f.fileName + ".png");
+		file = chooseImageFile(GTK_WINDOW(f.dialog), "Export as Image", "_Export", safeFileName(f.fileName) + ".png", true);
 		if (file.empty()) continue;
 		break;
 	}
@@ -349,7 +383,6 @@ void showExportImage(CircuitWindow* win, int page) {
 	const std::string lf = lowerName;
 	g_free(lowerName);
 	auto endsWith = [&](const char* x) { const size_t n = strlen(x); return lf.size() >= n && lf.compare(lf.size() - n, n, x) == 0; };
-	if (!endsWith(".png") && !endsWith(".pdf") && !endsWith(".svg")) file += ".png";
 	cairo_status_t st = CAIRO_STATUS_SUCCESS;
 	if (endsWith(".pdf") || endsWith(".svg")) {
 		float w, h;

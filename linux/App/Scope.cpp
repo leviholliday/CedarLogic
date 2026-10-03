@@ -467,16 +467,9 @@ void ScopeWindow::exportMenu(GdkEvent* e) {
 				owner->note("Timing diagram copied. Paste it into your report.");
 			}
 		} else {
-			GtkFileChooserNative* c = gtk_file_chooser_native_new("Save Timing Diagram", GTK_WINDOW(gtk_widget_get_toplevel(area)), GTK_FILE_CHOOSER_ACTION_SAVE, "_Save",
-			                                                      "_Cancel");
-			gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(c), TRUE);
-			gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(c), (owner->titleText() + " timing.png").c_str());
-			std::string file;
-			if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(c)) == GTK_RESPONSE_ACCEPT)
-				if (gchar* f = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(c))) { file = f; g_free(f); }
-			g_object_unref(c);
+			const std::string file = chooseImageFile(GTK_WINDOW(gtk_widget_get_toplevel(area)), "Save Timing Diagram", "_Save",
+			                                         safeFileName(owner->titleText() + " timing") + ".png", false);
 			if (!file.empty()) {
-				if (file.size() < 4 || file.compare(file.size() - 4, 4, ".png") != 0) file += ".png";
 				if (cairo_surface_write_to_png(img, file.c_str()) != CAIRO_STATUS_SUCCESS)
 					showMessage(GTK_WINDOW(gtk_widget_get_toplevel(area)), GTK_MESSAGE_WARNING, "Couldn't save it there", "Try another folder.");
 			}

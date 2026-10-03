@@ -67,5 +67,12 @@ private:
 
 // A place to save a .cdl file ("" when cancelled).
 std::string chooseSaveFile(GtkWindow* parent, const std::string& title, const std::string& suggested);
+// A place to save a picture (ExportImage.cpp): a PNG, or with `vectors` a
+// PDF or SVG by the name's ending. ".png" goes on a name without one,
+// asking first when that file is there already. "" when cancelled.
+std::string chooseImageFile(GtkWindow* parent, const char* title, const char* accept, const std::string& suggested, bool vectors);
+// A circuit's name as a file name: what a USB stick or the save window
+// would read as something else (/ \ : * ? " < > |) becomes '-'.
+std::string safeFileName(const std::string& name);
 
 #endif  // CL_LINUX_DIALOGS_H
