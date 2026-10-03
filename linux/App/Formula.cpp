@@ -739,7 +739,7 @@ public:
 	int NAND(std::vector<int> xs) {
 		xs = unique(xs);
 		if (xs.size() == 1) return NOT(xs[0]);
-		if (style == NorOnly) return NOT(OR(xs));
+		if (style == NorOnly) return NOT(AND(xs));
 		const int net = make(NAND_, fanIn(xs, [this](std::vector<int> v) { return AND(v); }));
 		if ((int)xs.size() <= maxIn) {
 			auto it = made.find(key(AND_, sorted(xs)));

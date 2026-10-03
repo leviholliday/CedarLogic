@@ -61,7 +61,8 @@ to nothing.
 Checks, without opening the app (built with it; `-DCL_BUILD_TOOLS=OFF` skips
 them): `cl_check`, `edit_check`, `sim_check`, `tt_check`, `save_check`,
 `render_png` -- the Mac app's checks (`mac/Tools`), which run on either
-system. And:
+system -- and `formula_check <cl_gatedefs.xml>`, which builds formulas in
+every shape and gate style and checks each circuit's truth table. And:
 
 - `cedarlogic --screenshot out.png [circuit.cdl]` -- opens the window, draws
   it to a PNG and quits (CI runs it against the AppImage)

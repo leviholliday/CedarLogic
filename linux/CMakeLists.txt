@@ -94,4 +94,8 @@ if(CL_BUILD_TOOLS)
 		endif()
 		target_link_libraries(${t} PRIVATE CedarCore)
 	endforeach()
+	# Build from Formula's planner (App/Formula.cpp), built in the engine.
+	add_executable(formula_check Tools/formula_check.cpp App/Formula.cpp)
+	target_include_directories(formula_check PRIVATE App)
+	target_link_libraries(formula_check PRIVATE CedarCore)
 endif()
