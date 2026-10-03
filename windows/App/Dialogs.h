@@ -88,6 +88,10 @@ public:
 	std::vector<HWND> buttonWindows;
 	void build();
 	void capture();
+	// Taller than the screen (no pages): it scrolls, in pixels.
+	int scrollY = 0, scrollHeight = 0;
+	void scrollTo(int y);
+	void showFocus();   // the focused control scrolled into view
 };
 
 // A line of text from the user; false when they cancelled.

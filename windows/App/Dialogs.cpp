@@ -25,6 +25,7 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 const int kTabsId = 4000;       // Form::pages' row
+const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
 
 // The dialogs' look, as the Mac's sheets: paper, filled rounded fields,
 // soft buttons with the default one in the accent, toggles for yes/no.
@@ -384,9 +385,13 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			const FormField& x = f->fields[id - kFieldBase];
 			RECT fr = x.frame;
 			InflateRect(&fr, 3, 3);
+			OffsetRect(&fr, 0, -f->scrollY);
 			InvalidateRect(d, &fr, FALSE);
+			if (code == EN_SETFOCUS && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
 			return TRUE;
 		}
+		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && code == CBN_SETFOCUS && f->scrollHeight > 0)
+			PostMessageW(d, kShowFocus, 0, 0);
 		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && f->onChange) {
 			const FormField& x = f->fields[id - kFieldBase];
 			const bool change = (x.kind == FormField::Text && code == EN_CHANGE) ||
@@ -401,6 +406,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		const NMHDR* n = reinterpret_cast<const NMHDR*>(lp);
 		const int field = (int)n->idFrom - kFieldBase;
 		if (field < 0 || field >= (int)f->fields.size() || f->fields[field].kind != FormField::List) break;
+		if (n->code == NM_SETFOCUS && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
 		if (n->code == LVN_GETDISPINFOW) {
 			NMLVDISPINFOW* di = reinterpret_cast<NMLVDISPINFOW*>(lp);
 			if (di->item.mask & LVIF_TEXT) {
@@ -445,6 +451,8 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			return TRUE;
 		}
 		if (di->CtlType == ODT_BUTTON) {
+			// Tabbed to (a scrolling form shows it).
+			if ((di->itemAction & ODA_FOCUS) && (di->itemState & ODS_FOCUS) && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
 			const int fi = (int)di->CtlID - kFieldBase;
 			const bool toggle = fi >= 0 && fi < (int)f->fields.size() && f->fields[fi].kind == FormField::Check;
 			guarded("a dialog", [&] { drawButtonItem(di, toggle); });
@@ -456,19 +464,47 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		return TRUE;
 	}
 	case WM_MOUSEWHEEL: {
-		if (!f->onWheel) break;
 		POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-		for (size_t i = 0; i < f->fields.size(); i++) {
+		const int delta = GET_WHEEL_DELTA_WPARAM(wp);
+		for (size_t i = 0; i < f->fields.size() && f->onWheel; i++) {
 			const FormField& x = f->fields[i];
 			RECT r;
 			if (x.kind != FormField::Picture || !GetWindowRect(x.hwnd, &r) || !PtInRect(&r, p)) continue;
-			const int delta = GET_WHEEL_DELTA_WPARAM(wp);
 			guarded("a dialog", [&] { f->onWheel(*f, (int)i, delta); });
+			SetWindowLongPtrW(d, DWLP_MSGRESULT, 0);
+			return TRUE;
+		}
+		if (f->scrollHeight > 0) {
+			// Three rows a notch (a touchpad's small steps move it a little).
+			f->scrollTo(f->scrollY - MulDiv(delta, scaled(90, dpiOf(d)), WHEEL_DELTA));
 			SetWindowLongPtrW(d, DWLP_MSGRESULT, 0);
 			return TRUE;
 		}
 		break;
 	}
+	case WM_VSCROLL: {
+		if (f->scrollHeight <= 0) break;
+		SCROLLINFO si = { sizeof si, SIF_ALL };
+		GetScrollInfo(d, SB_VERT, &si);
+		const int line = scaled(40, dpiOf(d));
+		int to = f->scrollY;
+		switch (LOWORD(wp)) {
+		case SB_LINEUP: to -= line; break;
+		case SB_LINEDOWN: to += line; break;
+		case SB_PAGEUP: to -= std::max(line, (int)si.nPage - line); break;
+		case SB_PAGEDOWN: to += std::max(line, (int)si.nPage - line); break;
+		case SB_THUMBTRACK:
+		case SB_THUMBPOSITION: to = si.nTrackPos; break;
+		case SB_TOP: to = 0; break;
+		case SB_BOTTOM: to = f->scrollHeight; break;
+		default: return TRUE;
+		}
+		f->scrollTo(to);
+		return TRUE;
+	}
+	case kShowFocus:
+		f->showFocus();
+		return TRUE;
 	case WM_CTLCOLORDLG:
 	case WM_CTLCOLORSTATIC:
 	case WM_CTLCOLORBTN: {
@@ -512,7 +548,8 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			const float s = dpiOf(d) / 96.0f;
 			for (const FormField& x : f->fields) {
 				if (x.frame.right <= x.frame.left || (!f->pages.empty() && x.page != f->page)) continue;
-				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, x.frame.top / s + 0.5f, x.frame.right / s - 0.5f, x.frame.bottom / s - 0.5f);
+				const float top = (float)(x.frame.top - f->scrollY), bottom = (float)(x.frame.bottom - f->scrollY);
+				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, top / s + 0.5f, x.frame.right / s - 0.5f, bottom / s - 0.5f);
 				const bool on = focus == x.hwnd;
 				const bool enabled = IsWindowEnabled(x.hwnd) != FALSE;
 				fillRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, d2d(c.field));
@@ -759,7 +796,7 @@ void Form::build() {
 	RECT rc = { 0, 0, width, y };
 	const DWORD style = (DWORD)GetWindowLongW(dialog, GWL_STYLE), ex = (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE);
 	AdjustWindowRectExForDpi(&rc, style, FALSE, ex, dpi);
-	const int ww = rc.right - rc.left, wh = rc.bottom - rc.top;
+	int ww = rc.right - rc.left, wh = rc.bottom - rc.top;
 	RECT anchor;
 	HWND owner = GetWindow(dialog, GW_OWNER);
 	if (owner == nullptr || !GetWindowRect(owner, &anchor)) {
@@ -768,15 +805,67 @@ void Form::build() {
 		GetMonitorInfoW(m, &mi);
 		anchor = mi.rcWork;
 	}
-	int left = (anchor.left + anchor.right - ww) / 2, top = (anchor.top + anchor.bottom - wh) / 2;
 	HMONITOR m = MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST);
 	MONITORINFO mi = { sizeof mi };
-	if (GetMonitorInfoW(m, &mi)) {
+	const bool onScreen = GetMonitorInfoW(m, &mi) != FALSE;
+	// Taller than the screen (a laptop at 125% or 150%): as tall as the
+	// screen, and the form scrolls, so its buttons can still be reached.
+	scrollY = scrollHeight = 0;
+	const int screenH = mi.rcWork.bottom - mi.rcWork.top;
+	if (onScreen && pages.empty() && wh > screenH && screenH > 0) {
+		scrollHeight = y;
+		const int clientH = std::max(sc(120), y - (wh - screenH));
+		wh = clientH + (wh - y);
+		ww += GetSystemMetricsForDpi(SM_CXVSCROLL, dpi);
+		SetWindowLongW(dialog, GWL_STYLE, (LONG)(style | WS_VSCROLL));
+		SCROLLINFO si = { sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS };
+		si.nMax = y - 1;
+		si.nPage = (UINT)clientH;
+		SetScrollInfo(dialog, SB_VERT, &si, FALSE);
+		if (prefs().dark) darkenControl(dialog, true, L"Explorer");
+	}
+	int left = (anchor.left + anchor.right - ww) / 2, top = (anchor.top + anchor.bottom - wh) / 2;
+	if (onScreen) {
 		left = std::max<int>(mi.rcWork.left, std::min<int>(left, mi.rcWork.right - ww));
 		top = std::max<int>(mi.rcWork.top, std::min<int>(top, mi.rcWork.bottom - wh));
 	}
-	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE | (scrollHeight > 0 ? SWP_FRAMECHANGED : 0));
 	if (!pages.empty()) showPage(page);
+}
+
+void Form::scrollTo(int to) {
+	if (dialog == nullptr || scrollHeight <= 0) return;
+	RECT rc;
+	GetClientRect(dialog, &rc);
+	to = std::max(0, std::min(to, scrollHeight - (int)rc.bottom));
+	if (to == scrollY) return;
+	// The controls move with it; the fields' frames are drawn where they are.
+	ScrollWindowEx(dialog, 0, scrollY - to, nullptr, nullptr, nullptr, nullptr, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+	scrollY = to;
+	SCROLLINFO si = { sizeof si, SIF_POS };
+	si.nPos = to;
+	SetScrollInfo(dialog, SB_VERT, &si, TRUE);
+	UpdateWindow(dialog);
+}
+
+void Form::showFocus() {
+	if (dialog == nullptr || scrollHeight <= 0) return;
+	HWND focus = GetFocus();
+	if (focus == nullptr || !IsChild(dialog, focus)) return;
+	RECT r;
+	GetWindowRect(focus, &r);
+	MapWindowPoints(nullptr, dialog, (POINT*)&r, 2);
+	// A box in a drawn field: all of the field.
+	for (const FormField& x : fields)
+		if (x.frame.right > x.frame.left && (x.hwnd == focus || IsChild(x.hwnd, focus))) {
+			r = x.frame;
+			OffsetRect(&r, 0, -scrollY);
+		}
+	RECT rc;
+	GetClientRect(dialog, &rc);
+	const int pad = scaled(12, dpiOf(dialog));
+	if (r.top - pad < 0) scrollTo(scrollY + r.top - pad);
+	else if (r.bottom + pad > rc.bottom) scrollTo(scrollY + r.bottom + pad - rc.bottom);
 }
 
 void Form::refresh(int field) {
