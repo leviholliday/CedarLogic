@@ -23,9 +23,13 @@ Color Chrome::hairline() const { return dark ? colorF(1, 1, 1, 0.08f) : colorF(0
 Color Chrome::sash() const { return dark ? rgb255(40, 43, 50) : rgb255(218, 220, 224); }
 Color Chrome::accent() const { return fromRGBA(accentColor(dark)); }
 Color Chrome::onAccent() const {
+	// White or near-black, whichever stands out more (the WCAG contrast
+	// ratio), leaning to white as the Mac does: mid greens get dark text.
 	const Color a = accent();
-	const float lum = 0.2126f * a.r + 0.7152f * a.g + 0.0722f * a.b;
-	return lum > 0.55f ? colorF(0.035f, 0.063f, 0.047f) : colorF(1, 1, 1);
+	auto lin = [](float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
+	const float lum = 0.2126f * lin(a.r) + 0.7152f * lin(a.g) + 0.0722f * lin(a.b);
+	const float onWhite = 1.05f / (lum + 0.05f), onDark = (lum + 0.05f) / 0.054f;
+	return onDark > onWhite * 1.3f ? colorF(0.035f, 0.063f, 0.047f) : colorF(1, 1, 1);
 }
 Color Chrome::ink(float alpha) const { return withAlpha(barInk(), alpha); }
 

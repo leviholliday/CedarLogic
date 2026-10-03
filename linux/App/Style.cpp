@@ -206,7 +206,7 @@ void applyStyle() {
 		s += "menu menuitem cellview { color: " + css(ink) + "; }\n";
 		s += "menu menuitem:hover label, menu menuitem:hover accelerator, menu menuitem:hover arrow, menu menuitem:hover cellview { color: " +
 		     css(c.onAccent()) + "; }\n";
-		s += "menu menuitem:disabled label, menu menuitem:disabled accelerator { color: " + css(withAlpha(ink, 0.42f)) + "; }\n";
+		s += "menu menuitem:disabled label, menu menuitem:disabled accelerator { color: " + css(withAlpha(ink, 0.5f)) + "; }\n";
 		s += "menu menuitem check, menu menuitem radio { margin-right: 6px; }\n";
 		s += "menu separator { margin: 4px 8px; min-height: 1px; background-color: " + css(line) + "; }\n";
 		s += "menu arrow { min-width: 14px; min-height: 14px; color: " + css(dimInk) + "; }\n";

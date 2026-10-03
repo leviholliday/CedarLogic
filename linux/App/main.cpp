@@ -83,7 +83,7 @@ bool writeWindowWithMenu(GtkWidget* top, const std::string& file) {
 		GtkWidget* pop = GTK_WIDGET(l->data);
 		GtkWidget* child = gtk_bin_get_child(GTK_BIN(pop));
 		if (!gtk_widget_get_visible(pop) || !child || !GTK_IS_MENU(child)) continue;
-		gtk_menu_shell_select_first(GTK_MENU_SHELL(child), FALSE);
+		if (!gtk_menu_shell_get_selected_item(GTK_MENU_SHELL(child))) gtk_menu_shell_select_first(GTK_MENU_SHELL(child), FALSE);
 		int px = 0, py = 0;
 		gdk_window_get_origin(gtk_widget_get_window(pop), &px, &py);
 		cairo_save(cr);
@@ -132,7 +132,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	if (what == "combo") top = settings::window();
-	const bool ok = top && (what == "menu" || what == "combo" ? writeWindowWithMenu(top, gScreenshot) : writeWindow(top, gScreenshot));
+	const bool ok = top && (what == "menu" || what == "submenu" || what == "combo" ? writeWindowWithMenu(top, gScreenshot) : writeWindow(top, gScreenshot));
 	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
 	prefs().save();
 	fflush(stderr);
@@ -184,6 +184,28 @@ gboolean showCb(gpointer) {
 			};
 			if (GtkWidget* sw = settings::window())
 				if (GtkWidget* combo = find(sw)) gtk_combo_box_popup(GTK_COMBO_BOX(combo));
+			return G_SOURCE_REMOVE;
+		}, nullptr);
+	}
+	else if (what == "submenu") {
+		// The ••• menu with Tabs open, over Simulation View, as on the Pi.
+		w->toggleSimView();
+		GtkWidget* top = GTK_WIDGET(w->window());
+		GdkRectangle r = { gtk_widget_get_allocated_width(top) - 48, 6, 32, 32 };
+		w->moreMenu(top, r, nullptr);
+		g_timeout_add(500, +[](gpointer) -> gboolean {
+			GList* all = gtk_window_list_toplevels();
+			for (GList* l = all; l; l = l->next) {
+				GtkWidget* child = gtk_bin_get_child(GTK_BIN(l->data));
+				if (!gtk_widget_get_visible(GTK_WIDGET(l->data)) || !child || !GTK_IS_MENU(child)) continue;
+				GList* items = gtk_container_get_children(GTK_CONTAINER(child));
+				for (GList* i = items; i; i = i->next) {
+					const char* label = gtk_menu_item_get_label(GTK_MENU_ITEM(i->data));
+					if (label && strstr(label, "Tabs")) gtk_menu_shell_select_item(GTK_MENU_SHELL(child), GTK_WIDGET(i->data));
+				}
+				g_list_free(items);
+			}
+			g_list_free(all);
 			return G_SOURCE_REMOVE;
 		}, nullptr);
 	}
