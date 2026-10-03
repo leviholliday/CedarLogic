@@ -224,16 +224,15 @@ jobs:
           - cedarlogic_arm64.deb: Raspberry Pi 4/5 on 64-bit Raspberry Pi OS, ARM laptops
           - cedarlogic_amd64.deb: ordinary PCs and laptops (Intel/AMD)
 
-          Other distros (Fedora, Arch...): the AppImage, one file with nothing to install. Make it executable once (chmod +x, or Properties > Allow executing) and run it; it adds itself to the applications menu. x86_64 for PCs, aarch64 for ARM. If it won't open, install FUSE: sudo apt install libfuse2.
+          Other distros (Fedora, Arch...): the AppImage, one file with nothing to install. Make it executable once (chmod +x, or Properties > Allow executing) and run it; it adds itself to the applications menu. x86_64 for PCs, aarch64 for ARM. If it won't open, run it once with --appimage-extract-and-run on the end, or install FUSE 2 (Fedora: sudo dnf install fuse; Arch: sudo pacman -S fuse2; Ubuntu 24.04 and newer: sudo apt install libfuse2t64).
 
           Needs Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm), Fedora 36 or newer.
           EOT
           )
-          git tag -f "$TAG" "$GITHUB_SHA"
-          git push -f origin "refs/tags/$TAG"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
-          else
+          # The very first time, the release (and its tag) start here.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            git tag -f "$TAG" "$GITHUB_SHA"
+            git push -f origin "refs/tags/$TAG"
             gh release create "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
           fi
           cp linux/install.sh appimages/install.sh
@@ -244,3 +243,9 @@ jobs:
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done
+          # The tag moves last: the apps' update check compares its commit
+          # with their own, so they see the new build only once its files
+          # are all there.
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+          gh release edit "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
