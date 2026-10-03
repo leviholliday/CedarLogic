@@ -145,10 +145,17 @@ public:
 	void end();
 	void release();
 	double scale() const { return dpiScale; }
+	// Which target it is: a new number each time one is made (after the
+	// display took one away), for the keys of anything made from it.
+	unsigned long long generation() const { return made; }
 
 private:
 	ID2D1HwndRenderTarget* rt = nullptr;
+	HWND window = nullptr;
 	double dpiScale = 1;
+	bool drawing = false;          // between begin() and end()
+	int failures = 0;              // frames in a row that didn't make it
+	unsigned long long made = 0;
 };
 
 // UI text drawn with DirectWrite, in the system's UI font.

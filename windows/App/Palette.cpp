@@ -608,8 +608,8 @@ void MiniMap::paint() {
 		const int page = c->page();
 		// The circuit, drawn once into a layer and kept while nothing it
 		// shows has changed: the canvas redraws often while a circuit runs.
-		const std::string key = strf("%d|%d|%d|%d|%.3f|%.4f|%.4f|%u|%p", page, dark ? 1 : 0, (int)rc.right, (int)rc.bottom, s,
-		                             left, top, win->editStamp(), (void*)rt);
+		const std::string key = strf("%d|%d|%d|%d|%.3f|%.4f|%.4f|%u|%u", page, dark ? 1 : 0, (int)rc.right, (int)rc.bottom, s,
+		                             left, top, win->editStamp(), (unsigned)surface.generation());
 		if (cache == nullptr || key != cacheKey) {
 			if (cache) { cache->Release(); cache = nullptr; }
 			if (SUCCEEDED(rt->CreateCompatibleRenderTarget(&cache))) {

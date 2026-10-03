@@ -439,6 +439,10 @@ IDWriteFactory* dwFactory() {
 }
 
 ID2D1HwndRenderTarget* WindowSurface::begin(HWND hwnd) {
+	// The last frame never ended (drawing it threw, and guarded() carried
+	// on): that target is stuck in it, so a new one.
+	if (drawing) release();
+	window = hwnd;
 	RECT rc;
 	GetClientRect(hwnd, &rc);
 	const UINT32 w = (UINT32)std::max<LONG>(1, rc.right - rc.left), h = (UINT32)std::max<LONG>(1, rc.bottom - rc.top);
@@ -451,26 +455,37 @@ ID2D1HwndRenderTarget* WindowSurface::begin(HWND hwnd) {
 			D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
 		if (FAILED(f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h)), &rt)))
 			return rt = nullptr;
+		static unsigned long long count = 0;
+		made = ++count;
 	} else {
 		const D2D1_SIZE_U now = rt->GetPixelSize();
 		if (now.width != w || now.height != h) rt->Resize(D2D1::SizeU(w, h));
 	}
 	dpiScale = dpiOf(hwnd) / 96.0;
 	rt->BeginDraw();
+	drawing = true;
 	rt->SetTransform(D2D1::Matrix3x2F::Scale((float)dpiScale, (float)dpiScale));
 	return rt;
 }
 
 void WindowSurface::end() {
 	if (rt == nullptr) return;
-	// The display took the target away (a driver update, a remote session):
-	// make a new one next time.
-	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) release();
+	drawing = false;
+	// The frame didn't make it: the display took the target away (a driver
+	// update, a remote session) or something in it failed. A new target, and
+	// the frame again (a few times in a row at most).
+	if (FAILED(rt->EndDraw())) {
+		release();
+		if (failures++ < 3) InvalidateRect(window, nullptr, FALSE);
+	} else {
+		failures = 0;
+	}
 }
 
 void WindowSurface::release() {
 	if (rt) rt->Release();
 	rt = nullptr;
+	drawing = false;
 }
 
 namespace {
