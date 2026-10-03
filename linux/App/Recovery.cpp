@@ -42,7 +42,19 @@ bool running(long pid) {
 	if (open && close && close > open) {
 		const std::string name(open + 1, close);
 		const char state = close[1] == ' ' ? close[2] : 0;
-		ours = (name.rfind("cedarlogic", 0) == 0 || name.rfind("CedarLogic", 0) == 0) && state != 'Z' && state != 'X';
+		// By its name, or by the program it runs: an AppImage's process is
+		// named AppRun, but runs .../usr/bin/cedarlogic all the same (one
+		// updated since it started reads "cedarlogic (deleted)").
+		bool named = name.rfind("cedarlogic", 0) == 0 || name.rfind("CedarLogic", 0) == 0;
+		if (!named) {
+			if (gchar* exe = g_file_read_link(format("/proc/%ld/exe", pid).c_str(), nullptr)) {
+				gchar* base = g_path_get_basename(exe);
+				named = g_str_has_prefix(base, "cedarlogic");
+				g_free(base);
+				g_free(exe);
+			}
+		}
+		ours = named && state != 'Z' && state != 'X';
 	}
 	g_free(stat);
 	return ours;
