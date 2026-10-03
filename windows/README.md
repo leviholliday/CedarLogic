@@ -78,5 +78,5 @@ Direct2D here. And:
 - `CedarLogic.exe --version`
 
 CI (`.github/workflows/windows-native.yml`) builds x64 and ARM64 on every push
-to `windows/native`, runs the checks and the screenshot on x64, and publishes
-the zips as the `windows-native-testing` pre-release.
+to `windows/native`, runs the checks, the screenshots and the click test on
+x64, and publishes the zips as the `windows-native-testing` pre-release.
