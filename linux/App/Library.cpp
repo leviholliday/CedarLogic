@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <map>
@@ -61,6 +62,19 @@ std::string stamp(double t) {
 	char buf[32];
 	strftime(buf, sizeof buf, "%Y%m%d-%H%M%S", &lt);
 	return buf;
+}
+
+// When a version's work was done, from its name (stamp's); its file's date
+// is when it was put away, which after a break is later. 0 if it isn't one.
+double stampTime(const std::string& name) {
+	int y, mo, d, h, mi, s;
+	char rest[8] = "";
+	if (sscanf(name.c_str(), "%4d%2d%2d-%2d%2d%2d%7s", &y, &mo, &d, &h, &mi, &s, rest) != 7 || std::string(rest) != ".cdl") return 0;
+	GDateTime* t = g_date_time_new_local(y, mo, d, h, mi, s);
+	if (t == nullptr) return 0;
+	const double out = (double)g_date_time_to_unix(t);
+	g_date_time_unref(t);
+	return out;
 }
 
 std::string parentOf(const std::string& path) {
@@ -171,7 +185,8 @@ std::vector<Version> versions(const Item& item) {
 		const std::string n = name;
 		if (n.empty() || n[0] == '.' || n.size() < 5 || n.compare(n.size() - 4, 4, ".cdl") != 0) continue;
 		const std::string p = item.versionsFolder() + "/" + n;
-		out.push_back(Version{ p, modifiedTime(p) });
+		const double named = stampTime(n);
+		out.push_back(Version{ p, named > 0 ? named : modifiedTime(p) });
 	}
 	g_dir_close(d);
 	std::sort(out.begin(), out.end(), [](const Version& a, const Version& b) { return a.time > b.time; });
@@ -233,7 +248,8 @@ bool noteSaved(const std::string& path, bool explicitSave) {
 	} else if (fileExists(pending)) {
 		const double pendingTime = modifiedTime(pending);
 		const bool afterBreak = t - pendingTime > 10 * 60;
-		const bool longSession = t - (vs.empty() ? 0 : vs.front().time) > 30 * 60;
+		// Half an hour since the last version was put away (its file's date).
+		const bool longSession = t - (vs.empty() ? 0 : modifiedTime(vs.front().path)) > 30 * 60;
 		if (afterBreak || longSession) keep(pending, pendingTime);
 	} else if (vs.empty()) {
 		keep(path, t);   // a circuit's first save
@@ -259,21 +275,29 @@ std::string friendlyTime(double t) {
 		if (today) g_date_time_unref(today);
 		return std::string();
 	}
-	gchar* clock = g_date_time_format(when, "%l:%M %p");
+	// 3:42 PM, or 15:42 where the language has no AM and PM.
+	gchar* ampm = g_date_time_format(when, "%p");
+	const bool twelveHour = ampm && *ampm;
+	g_free(ampm);
+	gchar* clock = g_date_time_format(when, twelveHour ? "%-l:%M %p" : "%H:%M");
 	std::string c = clock ? trim(clock) : std::string();
 	g_free(clock);
-	const int days = (g_date_time_get_year(today) - g_date_time_get_year(when)) * 366 + g_date_time_get_day_of_year(today) -
-	                 g_date_time_get_day_of_year(when);
+	// Calendar days between them (Dec 31 is yesterday on Jan 1).
+	GDate* whenDay = g_date_new_dmy((GDateDay)g_date_time_get_day_of_month(when), (GDateMonth)g_date_time_get_month(when),
+	                                (GDateYear)g_date_time_get_year(when));
+	GDate* todayDay = g_date_new_dmy((GDateDay)g_date_time_get_day_of_month(today), (GDateMonth)g_date_time_get_month(today),
+	                                 (GDateYear)g_date_time_get_year(today));
+	const int days = g_date_days_between(whenDay, todayDay);
+	g_date_free(whenDay);
+	g_date_free(todayDay);
 	std::string out;
 	if (days == 0) out = "Today at " + c;
 	else if (days == 1) out = "Yesterday at " + c;
 	else {
-		gchar* date = g_date_time_format(when, g_date_time_get_year(when) == g_date_time_get_year(today) ? "%b %e" : "%b %e, %Y");
+		// "%-d", not "%e", which pads with a figure space: "Sep 3".
+		gchar* date = g_date_time_format(when, g_date_time_get_year(when) == g_date_time_get_year(today) ? "%b %-d" : "%b %-d, %Y");
 		std::string d = date ? date : "";
 		g_free(date);
-		// "%e" pads with a space: "Sep  3" -> "Sep 3".
-		const size_t dbl = d.find("  ");
-		if (dbl != std::string::npos) d.erase(dbl, 1);
 		out = d + " at " + c;
 	}
 	g_date_time_unref(when);
