@@ -1259,7 +1259,9 @@ void CircuitWindow::moreMenu(POINT screen, bool rightAligned) {
 	SetForegroundWindow(hwnd);
 	const int cmd = TrackPopupMenu(menus, TPM_RETURNCMD | (rightAligned ? TPM_RIGHTALIGN : TPM_LEFTALIGN) | TPM_TOPALIGN,
 	                               screen.x, screen.y, 0, hwnd, nullptr);
-	if (cmd) SendMessageW(hwnd, WM_COMMAND, cmd, 0);
+	// Posted, so it runs once whatever opened the menu (the toolbar's •••)
+	// is done with it: Exit and Close take the window, the toolbar too, away.
+	if (cmd) PostMessageW(hwnd, WM_COMMAND, cmd, 0);
 }
 
 // The circuit's name in the toolbar: what a Mac window's title offers.

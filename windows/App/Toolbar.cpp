@@ -389,8 +389,10 @@ void Toolbar::mouseDown(int button, float x, float y, bool doubleClick) {
 		POINT p = { (LONG)((k == More ? items[i].rect.right : items[i].rect.left) * s), (LONG)(items[i].rect.bottom * s + 2) };
 		ClientToScreen(hwnd, &p);
 		pressed = -1;
+		const HWND self = hwnd;
 		if (k == Title) win->titleMenu(p);
 		else win->moreMenu(p, true);
+		if (!IsWindow(self)) return;   // what was chosen closed the window, this bar with it
 		hot = -1;
 		redraw();
 	}
