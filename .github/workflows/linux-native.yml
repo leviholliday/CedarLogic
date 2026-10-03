@@ -97,6 +97,16 @@ jobs:
             timeout 60 "$APPIMAGE" --dark --sim-view --screenshot renders/window-sim.png res/samples/practice.cdl || true
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
+          # The Mac's windows, as ported: one picture each.
+          for show in welcome:0 welcome:1 welcome:2 welcome:3 welcome:4 whatsnew:0 whatsnew:3 whatsnew:5 help help:1 truth feedback templates tour find; do
+            name=$(echo "$show" | tr ':' '-')
+            xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
+          done
+          for t in 0.5 1.2 2.0; do
+            xvfb-run -a -s "-screen 0 1600x1000x24" timeout 30 "$APPIMAGE" --splash-frame $t "renders/splash-$t.png" || echo "no splash $t"
+          done
+          "$APPIMAGE" --feedback-probe || echo "feedback probe failed"
           linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 
