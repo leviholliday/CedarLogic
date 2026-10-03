@@ -69,6 +69,35 @@ GtkWidget* toplevelTitled(const char* title) {
 	return found;
 }
 
+// The window with its open menu over it, where the menu is on screen.
+bool writeWindowWithMenu(GtkWidget* top, const std::string& file) {
+	const int width = gtk_widget_get_allocated_width(top), height = gtk_widget_get_allocated_height(top);
+	cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, std::max(1, width), std::max(1, height));
+	cairo_t* cr = cairo_create(s);
+	gtk_widget_draw(top, cr);
+	int tx = 0, ty = 0;
+	gdk_window_get_origin(gtk_widget_get_window(top), &tx, &ty);
+	GList* all = gtk_window_list_toplevels();
+	for (GList* l = all; l; l = l->next) {
+		GtkWidget* pop = GTK_WIDGET(l->data);
+		GtkWidget* child = gtk_bin_get_child(GTK_BIN(pop));
+		if (!gtk_widget_get_visible(pop) || !child || !GTK_IS_MENU(child)) continue;
+		gtk_menu_shell_select_first(GTK_MENU_SHELL(child), FALSE);
+		int px = 0, py = 0;
+		gdk_window_get_origin(gtk_widget_get_window(pop), &px, &py);
+		cairo_save(cr);
+		cairo_translate(cr, px - tx, py - ty);
+		gtk_widget_draw(pop, cr);
+		cairo_restore(cr);
+	}
+	g_list_free(all);
+	cairo_destroy(cr);
+	const bool ok = cairo_surface_write_to_png(s, file.c_str()) == CAIRO_STATUS_SUCCESS;
+	cairo_surface_destroy(s);
+	fprintf(stderr, "%s %s (%dx%d)\n", ok ? "wrote" : "couldn't write", file.c_str(), width, height);
+	return ok;
+}
+
 GtkWidget* toplevelNamed(const char* name) {
 	GtkWidget* found = nullptr;
 	GList* all = gtk_window_list_toplevels();
@@ -101,7 +130,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "ram") top = toplevelNamed("cl-sheet-ram");
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
-	const bool ok = top && writeWindow(top, gScreenshot);
+	const bool ok = top && (what == "menu" ? writeWindowWithMenu(top, gScreenshot) : writeWindow(top, gScreenshot));
 	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
 	prefs().save();
 	fflush(stderr);
@@ -138,6 +167,11 @@ gboolean showCb(gpointer) {
 	else if (what == "scope") w->toggleScope();
 	else if (what == "about") w->showAbout();
 	else if (what == "rename") w->renameFile();
+	else if (what == "menu") {
+		GtkWidget* top = GTK_WIDGET(w->window());
+		GdkRectangle r = { gtk_widget_get_allocated_width(top) - 48, 6, 32, 32 };
+		w->moreMenu(top, r, nullptr);
+	}
 	else if (what == "ram") {
 		// An 8x8 RAM with something in it.
 		CLDocument* doc = w->document();
@@ -415,8 +449,11 @@ void startupCb(GApplication* gapp, gpointer) {
 	gtk_application_set_menubar(app, bar);
 	g_object_unref(bar);
 	rebuildRecentMenus();
-	Updater_Initialize(app);
-	if (gScreenshot.empty()) Updater_IntegrateAppImage();
+	// Not in the screenshot runs: an update question would outlive them.
+	if (gScreenshot.empty()) {
+		Updater_Initialize(app);
+		Updater_IntegrateAppImage();
+	}
 }
 
 bool libraryOrComplain() {

@@ -15,6 +15,7 @@ void Sheet::run(GtkWindow* owner) {
 	gtk_window_set_decorated(GTK_WINDOW(window), decorated);
 	if (owner) {
 		gtk_window_set_transient_for(GTK_WINDOW(window), owner);
+		gtk_window_set_destroy_with_parent(GTK_WINDOW(window), TRUE);
 		gtk_window_set_modal(GTK_WINDOW(window), TRUE);
 		gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ON_PARENT);
 	} else {
@@ -48,6 +49,8 @@ void Sheet::run(GtkWindow* owner) {
 	g_signal_connect(area, "scroll-event", G_CALLBACK(scrollCb), this);
 	g_signal_connect(window, "key-press-event", G_CALLBACK(keyCb), this);
 	g_signal_connect(window, "delete-event", G_CALLBACK(deleteCb), this);
+	// Its window going with the owner's ends it too.
+	g_signal_connect(window, "destroy", G_CALLBACK(destroyCb), this);
 	tickId = gtk_widget_add_tick_callback(area, tickCb, this, nullptr);
 	if (onOpen) guarded("a window", [&] { onOpen(*this); });
 	gtk_widget_show_all(window);
@@ -55,15 +58,17 @@ void Sheet::run(GtkWindow* owner) {
 	gtk_widget_grab_focus(initialFocus ? initialFocus : area);
 	loop = g_main_loop_new(nullptr, FALSE);
 	if (!done) g_main_loop_run(loop);
-	if (onClose) guarded("closing a window", [&] { onClose(*this); });
 	g_main_loop_unref(loop);
 	loop = nullptr;
-	gtk_widget_remove_tick_callback(area, tickId);
-	g_signal_handlers_disconnect_by_data(area, this);
-	g_signal_handlers_disconnect_by_data(window, this);
-	gtk_widget_destroy(window);
+	if (window) {
+		if (onClose) guarded("closing a window", [&] { onClose(*this); });
+		gtk_widget_remove_tick_callback(area, tickId);
+		g_signal_handlers_disconnect_by_data(area, this);
+		g_signal_handlers_disconnect_by_data(window, this);
+		gtk_widget_destroy(window);
+		if (owner) gtk_window_present(owner);
+	}
 	window = area = overlay = initialFocus = nullptr;
-	if (owner) gtk_window_present(owner);
 }
 
 void Sheet::close() {
@@ -151,6 +156,12 @@ gboolean Sheet::keyCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 	if (s->onKey && guarded("a key", [&] { return s->onKey(*s, e->keyval, e->state); })) { s->redraw(); return TRUE; }
 	if (e->keyval == GDK_KEY_Escape) { s->close(); return TRUE; }
 	return FALSE;
+}
+
+void Sheet::destroyCb(GtkWidget*, gpointer self) {
+	Sheet* s = static_cast<Sheet*>(self);
+	s->window = s->area = s->overlay = s->initialFocus = nullptr;
+	s->close();
 }
 
 gboolean Sheet::deleteCb(GtkWidget*, GdkEvent*, gpointer self) {

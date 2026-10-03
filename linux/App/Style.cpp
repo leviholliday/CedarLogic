@@ -133,6 +133,27 @@ void applyStyle() {
 	s += "tooltip { border-radius: 6px; background-color: " + css(dark ? rgb255(52, 56, 64, 0.96f) : rgb255(40, 43, 50, 0.94f)) +
 	     "; color: white; padding: 2px; }\n";
 	s += "tooltip label { color: white; }\n";
+	// Menus (right-click, the window menu, the side panel's): the Mac's
+	// rounded panel, rows lit with the accent, shortcuts dimmed.
+	{
+		const Color menuBg = dark ? rgb255(38, 42, 49, 0.98f) : rgb255(250, 250, 252, 0.98f);
+		const Color dimInk = withAlpha(ink, 0.5f);
+		s += "menu, .menu, .context-menu { background-color: " + css(menuBg) + "; border: 1px solid " + css(line) +
+		     "; padding: 5px; }\n";
+		s += ".csd menu, .csd .menu, .csd .context-menu { border-radius: 10px; }\n";
+		s += "menu menuitem { padding: 4px 10px; min-height: 20px; border-radius: 6px; color: " + css(ink) + "; text-shadow: none; }\n";
+		s += "menu menuitem label { color: " + css(ink) + "; }\n";
+		s += "menu menuitem accelerator { color: " + css(dimInk) + "; margin-left: 18px; }\n";
+		s += "menu menuitem:hover { background-color: " + css(c.accent()) + "; background-image: none; box-shadow: none; }\n";
+		s += "menu menuitem:hover label, menu menuitem:hover accelerator, menu menuitem:hover arrow { color: " + css(c.onAccent()) + "; }\n";
+		s += "menu menuitem:disabled label, menu menuitem:disabled accelerator { color: " + css(withAlpha(ink, 0.32f)) + "; }\n";
+		s += "menu menuitem check, menu menuitem radio { margin-right: 6px; }\n";
+		s += "menu separator { margin: 4px 8px; min-height: 1px; background-color: " + css(line) + "; }\n";
+		s += "menu arrow { min-width: 14px; min-height: 14px; color: " + css(dimInk) + "; }\n";
+		s += "popover { border-radius: 12px; border: 1px solid " + css(line) + "; background-color: " + css(menuBg) + "; padding: 4px; }\n";
+		s += "popover modelbutton { padding: 5px 10px; border-radius: 6px; min-height: 20px; }\n";
+		s += "popover modelbutton:hover { background-color: " + css(c.accent()) + "; color: " + css(c.onAccent()) + "; }\n";
+	}
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);
