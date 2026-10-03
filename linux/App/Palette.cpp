@@ -181,7 +181,7 @@ void TileGrid::paint(cairo_t* cr, float w, float h) {
 		cairo_set_source_surface(cr, img, ix, iy);
 		cairo_paint(cr);
 		if (names)
-			drawText(cr, gates[i].caption, rectF(r.left + 1, iy + artH, r.right - 1, iy + artH + 14), 9.5f, withAlpha(c.barInk(), 0.55f),
+			drawText(cr, gates[i].caption, rectF(r.left + 1, iy + artH, r.right - 1, iy + artH + 14), 9.5f, withAlpha(c.barInk(), 0.72f),
 			         TextAlign::Center);
 		tips.push_back({ r, parts::isPart(gates[i].name) ? gates[i].caption + " — right-click to rename or delete" : gates[i].caption });
 	}

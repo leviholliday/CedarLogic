@@ -95,7 +95,7 @@ void applyStyle() {
 	s += "#palette combobox button:hover { background-color: " + css(withAlpha(ink, dark ? 0.13f : 0.09f)) + "; }\n";
 	s += "#palette flowboxchild { padding: 2px; border-radius: 8px; }\n";
 	s += "#palette flowboxchild:hover { background-color: " + css(withAlpha(ink, 0.06f)) + "; }\n";
-	s += "#palette label.dim-label { color: " + css(withAlpha(ink, 0.55f)) + "; }\n";
+	s += "#palette label.dim-label { color: " + css(withAlpha(ink, 0.7f)) + "; opacity: 1; }\n";
 	s += "#palette scrollbar { background: transparent; border: none; }\n";
 	// A hairline between the side panel and the canvas, easy to grab: the
 	// line is 1 point, the handle around it wider and invisible.
@@ -150,7 +150,12 @@ void applyStyle() {
 	const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
 	s += "#settings label, #gate-settings label, dialog label { color: " + css(text) + "; }\n";
 	s += "#settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
-	s += "#settings scale value { color: " + css(withAlpha(text, 0.8f)) + "; }\n";
+	// Unticked boxes and rings outlined, so they show on a dark page too.
+	s += "#settings check:not(:checked), #settings radio:not(:checked), #gate-settings check:not(:checked) { background-image: none; "
+	     "background-color: " + css(fieldFill) + "; border: 1px solid " + css(withAlpha(text, 0.38f)) + "; box-shadow: none; }\n";
+	s += "#settings check:not(:checked) { border-radius: 4px; } #settings radio:not(:checked) { border-radius: 50%; }\n";
+	// Quieter text (a slider's value, notes) dims less than GTK's 55%.
+	s += ".dim-label { opacity: 0.8; }\n";
 	s += "#settings button:disabled, #settings button:disabled label, #settings check:disabled + label { color: " + css(withAlpha(text, 0.6f)) +
 	     "; }\n";
 	s += "#settings .heading, #settings .style-name { font-weight: bold; }\n";
