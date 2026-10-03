@@ -15,8 +15,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <thread>
 
@@ -173,22 +175,27 @@ std::atomic<bool> g_checking{false};
 std::string g_offeredThisRun;   // a background check offers each commit once
 guint g_timer = 0;
 
-// The download, with a small pulsing dialog while a background thread works
-// (network calls off the GTK thread; only the poll touches widgets).
-bool installWithProgress(GtkWindow* parent, const std::string& url, const std::string& dest) {
+// Slow work (the download, apt) on a background thread, with a small pulsing
+// window meanwhile, so every window keeps drawing; only this loop touches
+// widgets.
+bool runWithProgress(GtkWindow* parent, const char* text, const std::function<bool()>& work) {
 	// A plain window, not a GtkDialog: there are no buttons for the user to
 	// press while this runs.
 	GtkWidget* d = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(d), "Updating CedarLogic");
 	gtk_window_set_modal(GTK_WINDOW(d), TRUE);
 	gtk_window_set_transient_for(GTK_WINDOW(d), parent);
-	gtk_window_set_destroy_with_parent(GTK_WINDOW(d), TRUE);
 	gtk_window_set_resizable(GTK_WINDOW(d), FALSE);
 	gtk_window_set_deletable(GTK_WINDOW(d), FALSE);
+	// Not deletable is only a hint some desktops ignore: closing it anyway
+	// does nothing, and should it go some other way, the loop stops using it.
+	bool gone = false;
+	g_signal_connect(d, "delete-event", G_CALLBACK(gtk_true), nullptr);
+	g_signal_connect(d, "destroy", CL_CALLBACK(+[](GtkWidget*, gpointer gone) { *static_cast<bool*>(gone) = true; }), &gone);
 	GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
 	gtk_container_set_border_width(GTK_CONTAINER(box), 16);
 	gtk_container_add(GTK_CONTAINER(d), box);
-	GtkWidget* label = gtk_label_new("Downloading the update…");
+	GtkWidget* label = gtk_label_new(text);
 	GtkWidget* bar = gtk_progress_bar_new();
 	gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 4);
 	gtk_box_pack_start(GTK_BOX(box), bar, FALSE, FALSE, 4);
@@ -197,15 +204,33 @@ bool installWithProgress(GtkWindow* parent, const std::string& url, const std::s
 
 	std::atomic<bool> done{false};
 	bool ok = false;
-	std::thread worker([&] { ok = download(url, dest); done.store(true); });
+	std::thread worker([&] { ok = work(); done.store(true); });
 	while (!done.load()) {
-		gtk_progress_bar_pulse(GTK_PROGRESS_BAR(bar));
+		if (!gone) gtk_progress_bar_pulse(GTK_PROGRESS_BAR(bar));
 		while (gtk_events_pending()) gtk_main_iteration();
 		g_usleep(80000);
 	}
 	worker.join();
-	gtk_widget_destroy(d);
+	if (!gone) gtk_widget_destroy(d);
 	return ok;
+}
+
+bool installWithProgress(GtkWindow* parent, const std::string& url, const std::string& dest) {
+	return runWithProgress(parent, "Downloading the update…", [&] { return download(url, dest); });
+}
+
+// What apt said last: its error ("E: ..."), or else its last line.
+std::string lastAptLine(const char* out) {
+	std::string last, error;
+	gchar** lines = g_strsplit(out ? out : "", "\n", -1);
+	for (gchar** l = lines; *l; l++) {
+		const std::string line = g_strstrip(*l);
+		if (line.empty()) continue;
+		last = line;
+		if (line.rfind("E:", 0) == 0) error = line;
+	}
+	g_strfreev(lines);
+	return error.empty() ? last : error;
 }
 
 // The .deb: downloaded, then installed by apt through pkexec (which asks for
@@ -231,17 +256,32 @@ void installDeb(GtkApplication* app, const Asset& asset) {
 	// apt reads the file as its own user: make it readable.
 	chmod(dir.c_str(), 0755);
 	chmod(file.c_str(), 0644);
+	// apt waits a minute for another install (unattended-upgrades, the
+	// software updater) rather than failing at once.
 	gchar* argv[] = { pkexec, (gchar*)"apt-get", (gchar*)"install", (gchar*)"-y", (gchar*)"--allow-downgrades",
-	                  const_cast<gchar*>(file.c_str()), nullptr };
+	                  (gchar*)"-o", (gchar*)"DPkg::Lock::Timeout=60", const_cast<gchar*>(file.c_str()), nullptr };
 	gint status = 1;
-	GError* e = nullptr;
-	const bool ran = g_spawn_sync(nullptr, argv, nullptr, G_SPAWN_STDOUT_TO_DEV_NULL, nullptr, nullptr, nullptr, nullptr, &status, &e);
-	if (e) g_error_free(e);
+	bool ran = false;
+	std::string why;
+	runWithProgress(parent, "Installing the update…", [&] {
+		gchar* err = nullptr;
+		GError* e = nullptr;
+		ran = g_spawn_sync(nullptr, argv, nullptr, G_SPAWN_STDOUT_TO_DEV_NULL, nullptr, nullptr, nullptr, &err, &status, &e);
+		why = e ? e->message : lastAptLine(err);
+		if (e) g_error_free(e);
+		g_free(err);
+		return ran;
+	});
 	g_free(pkexec);
 	std::remove(file.c_str());
-	if (!ran || !g_spawn_check_exit_status(status, nullptr)) {
-		if (askConfirm(parent, "The update wasn't installed",
-		               "It needs your password to install. Open the download page to install it by hand?", "Open Page", "Not Now"))
+	const int code = !ran ? -1 : WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+	if (code != 0) {
+		// pkexec: 126, the password was cancelled; 127, it couldn't be asked
+		// for or wasn't accepted. Anything else is apt's own trouble.
+		const std::string text = code == 126 ? "Installing it needs your password, and that was cancelled."
+		                       : code == 127 ? "Installing it needs an administrator's password, and the system couldn't ask for it or didn't accept it."
+		                       : "apt couldn't install it" + (why.empty() ? std::string(".") : ": " + why);
+		if (askConfirm(parent, "The update wasn't installed", text + " Open the download page to install it by hand?", "Open Page", "Not Now"))
 			openExternally(parent, page);
 		return;
 	}
@@ -307,7 +347,9 @@ gboolean pollCheck(gpointer data) {
 	CheckResult* r = static_cast<CheckResult*>(data);
 	if (!r->done.load()) return G_SOURCE_CONTINUE;
 	r->worker.join();
-	g_checking.store(false);
+	// Until the question and any install are over: no second check meanwhile
+	// (the daily one, Check for Updates).
+	struct Done { ~Done() { g_checking.store(false); } } done;
 	GtkWindow* parent = gtk_application_get_active_window(r->app);
 	const bool newer = r->fetched && !r->asset.url.empty();
 	if (!newer) {
@@ -333,6 +375,9 @@ gboolean pollCheck(gpointer data) {
 }
 
 void check(GtkApplication* app, bool interactive) {
+	// A copy that can't update itself (built from source) isn't told about
+	// every new test build at launch; Check for Updates still says.
+	if (!interactive && ((runningAppImage().empty() && !installedFromDeb()) || strcmp(CL_GIT_COMMIT, "unknown") == 0)) return;
 	if (g_checking.exchange(true)) return;
 	CheckResult* r = new CheckResult{ app, interactive };
 	r->worker = std::thread([r] {
