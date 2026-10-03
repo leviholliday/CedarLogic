@@ -285,6 +285,12 @@ gboolean Picker::deleteCb(GtkWidget*, GdkEvent*, gpointer self) {
 	return TRUE;
 }
 
+void Picker::destroyCb(GtkWidget*, gpointer self) {
+	Picker* p = static_cast<Picker*>(self);
+	p->window = p->entry = p->area = nullptr;
+	p->close();
+}
+
 void Picker::changedCb(GtkEditable*, gpointer self) {
 	Picker* p = static_cast<Picker*>(self);
 	p->scroll = 0;
@@ -333,6 +339,8 @@ void Picker::run(GtkWindow* owner) {
 	}
 	g_signal_connect(window, "key-press-event", G_CALLBACK(keyCb), this);
 	g_signal_connect(window, "delete-event", G_CALLBACK(deleteCb), this);
+	// Its window going with the owner's (the app quitting) ends it too.
+	g_signal_connect(window, "destroy", G_CALLBACK(destroyCb), this);
 	reload();
 	gtk_widget_show_all(window);
 	anim::fadeIn(window);
@@ -341,6 +349,8 @@ void Picker::run(GtkWindow* owner) {
 	if (!done) g_main_loop_run(loop);
 	g_main_loop_unref(loop);
 	loop = nullptr;
+	if (window == nullptr) return;   // gone with its owner
+	g_signal_handlers_disconnect_by_data(window, this);
 	gtk_widget_destroy(window);
 	window = entry = area = nullptr;
 	gtk_window_present(owner);

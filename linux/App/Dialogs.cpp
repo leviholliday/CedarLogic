@@ -532,7 +532,11 @@ void showBuildFormula(CircuitWindow* w) {
 	buildUpdate(&f);
 	gtk_widget_show_all(d);
 	gtk_widget_grab_focus(f.text);
+	GtkWidget* alive = d;
+	g_object_add_weak_pointer(G_OBJECT(d), (gpointer*)&alive);
 	const bool ok = gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_OK && f.valid;
+	if (alive == nullptr) return;   // gone with its window (the app quitting)
+	g_object_remove_weak_pointer(G_OBJECT(d), (gpointer*)&alive);
 	if (ok) {
 		pr.lastFormula = textOf(f.text);
 		pr.buildShape = gtk_combo_box_get_active(GTK_COMBO_BOX(f.shape));
