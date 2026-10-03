@@ -234,6 +234,7 @@ private:
 	int splitterGrab = 0;
 	bool maxPressed = false;          // the drawn maximize button, held down
 	bool trackingNonClient = false;
+	HWND savedFocus = nullptr;        // what had the keyboard when the window was last active
 	UINT dpi = 96;
 	std::string noteText;             // the toast
 

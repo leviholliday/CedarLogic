@@ -928,18 +928,22 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_ACTIVATE:
 		if (toolbar) toolbar->redraw();
-		if (LOWORD(wp) != WA_INACTIVE) library::noteLastCircuit(path);
-		if (LOWORD(wp) != WA_INACTIVE) {
-			// Back to the canvas, unless a text box had the keyboard.
-			HWND f = GetFocus();
-			wchar_t cls[32] = L"";
-			if (f) GetClassNameW(f, cls, 32);
-			if (f == nullptr || f == hwnd || (lstrcmpiW(cls, L"Edit") != 0)) {
-				if (Canvas* c = currentCanvas()) c->focus();
-			}
-			return 0;
+		if (LOWORD(wp) == WA_INACTIVE) {
+			// What had the keyboard, to give it back (by the time the window
+			// is active again, Windows has forgotten it).
+			const HWND f = GetFocus();
+			savedFocus = f && IsChild(hwnd, f) ? f : nullptr;
+			break;
 		}
-		break;
+		library::noteLastCircuit(path);
+		// Back to what had the keyboard (Find's box, the side panel's
+		// search), else the canvas.
+		if (savedFocus && IsWindow(savedFocus) && IsChild(hwnd, savedFocus) && IsWindowVisible(savedFocus) &&
+		    IsWindowEnabled(savedFocus))
+			SetFocus(savedFocus);
+		else if (Canvas* c = currentCanvas())
+			c->focus();
+		return 0;
 	case WM_INITMENUPOPUP:
 		updateMenu((HMENU)wp);
 		return 0;
