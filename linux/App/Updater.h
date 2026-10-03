@@ -25,4 +25,7 @@ void Updater_Initialize(GtkApplication* app);
 // to date" and "couldn't reach the update feed".
 void Updater_CheckNow(GtkApplication* app);
 
+// Run as an AppImage: add it to the applications menu with its icon.
+void Updater_IntegrateAppImage();
+
 #endif  // CL_LINUX_UPDATER_H

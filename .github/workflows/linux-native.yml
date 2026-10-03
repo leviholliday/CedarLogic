@@ -77,6 +77,27 @@ jobs:
           echo "APPIMAGE=$OUT" >> "$GITHUB_ENV"
           ls -la "$OUT"
 
+      # The installer: a .deb with the menu entry, icon and .cdl association.
+      - name: Package .deb
+        run: |
+          DEB=$(linux/package-deb.sh linux/build-release ${{ github.run_number }} | tail -1)
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB"
+          mkdir -p debs
+          cp "$DEB" "debs/cedarlogic_$(dpkg-deb -f "$DEB" Architecture).deb"
+          # It installs, with its dependencies, and runs.
+          sudo apt-get install -y "$PWD/$DEB"
+          cedarlogic --version
+          test -f /usr/share/applications/cedarlogic.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/cedarlogic.png
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
+          path: debs/*.deb
+          if-no-files-found: error
+
       # Start the packaged app on a virtual display, open a circuit and take a
       # picture of the whole window: catches anything the AppImage forgot.
       - name: Smoke test the AppImage
@@ -144,6 +165,13 @@ jobs:
           path: appimages
           merge-multiple: true
 
+      - name: Download both .debs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: CedarLogic-Native-linux-deb-*
+          path: appimages
+          merge-multiple: true
+
       - name: Publish the test build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -155,11 +183,17 @@ jobs:
 
           This is CedarLogic rebuilt natively for Linux, the way the Mac app was: GTK and Cairo on the same engine as every other CedarLogic, with no OpenGL at all, so it draws the same on a Raspberry Pi as on a PC.
 
-          Pick the file for your computer:
-          - x86_64: ordinary PCs and laptops (Intel/AMD)
-          - aarch64: Raspberry Pi 4/5 on 64-bit Raspberry Pi OS, ARM laptops (check with uname -m)
+          Easiest (Raspberry Pi OS, Ubuntu, Debian, Mint): paste this into a terminal. It installs CedarLogic with its icon in the applications menu, and it keeps itself up to date:
 
-          Make it executable (chmod +x, or Properties > Allow executing) and run it. Needs Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm), Fedora 36 or newer. If it won't open, install FUSE once: sudo apt install libfuse2 (or run it with --appimage-extract-and-run).
+              curl -fsSL https://github.com/leviholliday/CedarLogic/releases/download/linux-native-testing/install.sh | bash
+
+          Or download the installer for your computer and double-click it (or run sudo apt install ./cedarlogic_arm64.deb):
+          - cedarlogic_arm64.deb: Raspberry Pi 4/5 on 64-bit Raspberry Pi OS, ARM laptops
+          - cedarlogic_amd64.deb: ordinary PCs and laptops (Intel/AMD)
+
+          Other distros (Fedora, Arch...): the AppImage, one file with nothing to install. Make it executable once (chmod +x, or Properties > Allow executing) and run it; it adds itself to the applications menu. x86_64 for PCs, aarch64 for ARM. If it won't open, install FUSE: sudo apt install libfuse2.
+
+          Needs Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm), Fedora 36 or newer.
           EOT
           )
           git tag -f "$TAG" "$GITHUB_SHA"
@@ -169,10 +203,11 @@ jobs:
           else
             gh release create "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
           fi
-          gh release upload "$TAG" appimages/*.AppImage --clobber
+          cp linux/install.sh appimages/install.sh
+          gh release upload "$TAG" appimages/*.AppImage appimages/*.deb appimages/install.sh --clobber
           # Drop anything this run didn't make (older versions), so only the
           # current pair is offered.
-          keep=$(cd appimages && ls *.AppImage)
+          keep=$(cd appimages && ls *.AppImage *.deb install.sh)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done

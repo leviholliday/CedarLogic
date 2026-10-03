@@ -383,6 +383,7 @@ void startupCb(GApplication* gapp, gpointer) {
 	g_object_unref(bar);
 	rebuildRecentMenus();
 	Updater_Initialize(app);
+	if (gScreenshot.empty()) Updater_IntegrateAppImage();
 }
 
 bool libraryOrComplain() {

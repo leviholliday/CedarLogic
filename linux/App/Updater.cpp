@@ -42,6 +42,16 @@ std::string runningAppImage() {
 	return p ? std::string(p) : std::string();
 }
 
+// Installed from the .deb: the app is /usr/bin/cedarlogic, which dpkg owns.
+bool installedFromDeb() {
+	if (!runningAppImage().empty()) return false;
+	char exe[4096];
+	const ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+	if (n <= 0) return false;
+	exe[n] = 0;
+	return strcmp(exe, "/usr/bin/cedarlogic") == 0 && g_file_test("/var/lib/dpkg/info/cedarlogic.list", G_FILE_TEST_EXISTS);
+}
+
 // curl, or wget where curl is missing (a stock Ubuntu desktop has only
 // wget). The URL is ours and quoted; one with a quote in it is refused.
 std::string fetch(const std::string& url) {
@@ -131,9 +141,8 @@ std::string latestCommit() {
 // This CPU's AppImage in the release, or a download url of "" if the release
 // or the asset can't be found.
 struct Asset { std::string url; long long size = 0; };
-Asset findAsset(const std::string& arch) {
+Asset findAsset(const std::string& suffix) {
 	const std::string body = fetch(format("https://api.github.com/repos/%s/releases/tags/%s", kOwnerRepo, kTag));
-	const std::string suffix = "-" + arch + ".AppImage";
 	Asset out;
 	size_t at = 0, start = 0, end = 0;
 	std::string url;
@@ -187,7 +196,53 @@ bool installWithProgress(GtkWindow* parent, const std::string& url, const std::s
 	return ok;
 }
 
+// The .deb: downloaded, then installed by apt through pkexec (which asks for
+// the password in the desktop's own dialog).
+void installDeb(GtkApplication* app, const Asset& asset) {
+	GtkWindow* parent = gtk_application_get_active_window(app);
+	const std::string page = format("https://github.com/%s/releases/tag/%s", kOwnerRepo, kTag);
+	gchar* pkexec = g_find_program_in_path("pkexec");
+	if (pkexec == nullptr) {
+		if (askYesNo(parent, "Update available", "Open the download page to get the new installer?")) openExternally(parent, page);
+		return;
+	}
+	const std::string dir = std::string(g_get_user_cache_dir()) + "/CedarLogic";
+	g_mkdir_with_parents(dir.c_str(), 0755);
+	const std::string file = dir + "/cedarlogic-update.deb";
+	struct stat st;
+	if (!installWithProgress(parent, asset.url, file) || stat(file.c_str(), &st) != 0 || (asset.size > 0 && st.st_size != asset.size)) {
+		std::remove(file.c_str());
+		g_free(pkexec);
+		showMessage(parent, GTK_MESSAGE_WARNING, "The update couldn't be downloaded", "Check your connection and try again.");
+		return;
+	}
+	// apt reads the file as its own user: make it readable.
+	chmod(dir.c_str(), 0755);
+	chmod(file.c_str(), 0644);
+	gchar* argv[] = { pkexec, (gchar*)"apt-get", (gchar*)"install", (gchar*)"-y", (gchar*)"--allow-downgrades",
+	                  const_cast<gchar*>(file.c_str()), nullptr };
+	gint status = 1;
+	GError* e = nullptr;
+	const bool ran = g_spawn_sync(nullptr, argv, nullptr, G_SPAWN_STDOUT_TO_DEV_NULL, nullptr, nullptr, nullptr, nullptr, &status, &e);
+	if (e) g_error_free(e);
+	g_free(pkexec);
+	std::remove(file.c_str());
+	if (!ran || !g_spawn_check_exit_status(status, nullptr)) {
+		if (askYesNo(parent, "The update wasn't installed",
+		             "It needs your password to install. Open the download page to install it by hand?"))
+			openExternally(parent, page);
+		return;
+	}
+	if (askYesNo(parent, "Update installed", "The update is installed. Restart CedarLogic now to use it?")) {
+		if (quitApp(app)) {
+			gchar* again[] = { (gchar*)"/usr/bin/cedarlogic", nullptr };
+			g_spawn_async(nullptr, again, nullptr, (GSpawnFlags)0, nullptr, nullptr, nullptr, nullptr);
+		}
+	}
+}
+
 void install(GtkApplication* app, const Asset& asset) {
+	if (installedFromDeb()) { installDeb(app, asset); return; }
 	GtkWindow* parent = gtk_application_get_active_window(app);
 	const std::string current = runningAppImage();
 	if (current.empty()) {
@@ -279,7 +334,7 @@ void check(GtkApplication* app, bool interactive) {
 		r->fetched = !sha.empty();
 		if (r->fetched && sha.compare(0, strlen(CL_GIT_COMMIT), CL_GIT_COMMIT) != 0) {
 			r->sha = sha;
-			r->asset = findAsset(cpuArch());
+			r->asset = findAsset(installedFromDeb() ? (cpuArch() == "aarch64" ? "_arm64.deb" : "_amd64.deb") : "-" + cpuArch() + ".AppImage");
 		}
 		r->done.store(true);
 	});
@@ -298,3 +353,47 @@ void Updater_Initialize(GtkApplication* app) {
 }
 
 void Updater_CheckNow(GtkApplication* app) { check(app, true); }
+
+// Run as an AppImage: put it in the applications menu, with its icon, and
+// make .cdl files open in it -- as an installed app would be. Written each
+// launch, so a moved file is followed; skipped when the .deb is installed
+// (that has its own entry).
+void Updater_IntegrateAppImage() {
+	const std::string image = runningAppImage();
+	const char* appdir = std::getenv("APPDIR");
+	if (image.empty() || appdir == nullptr) return;
+	if (g_file_test("/usr/share/applications/cedarlogic.desktop", G_FILE_TEST_EXISTS)) return;
+	const std::string data = g_get_user_data_dir();
+	const std::string apps = data + "/applications", icons = data + "/icons/hicolor/256x256/apps", mime = data + "/mime/packages";
+	g_mkdir_with_parents(apps.c_str(), 0755);
+	g_mkdir_with_parents(icons.c_str(), 0755);
+	g_mkdir_with_parents(mime.c_str(), 0755);
+	auto copy = [](const std::string& from, const std::string& to) {
+		gchar* bytes = nullptr;
+		gsize len = 0;
+		if (!g_file_get_contents(from.c_str(), &bytes, &len, nullptr)) return;
+		g_file_set_contents(to.c_str(), bytes, (gssize)len, nullptr);
+		g_free(bytes);
+	};
+	copy(std::string(appdir) + "/usr/share/icons/hicolor/256x256/apps/cedarlogic.png", icons + "/cedarlogic.png");
+	copy(std::string(appdir) + "/usr/share/mime/packages/cedarlogic-mime.xml", mime + "/cedarlogic-mime.xml");
+	std::string quoted;
+	for (char c : image) {
+		if (c == '"' || c == '\\' || c == '`' || c == '$') quoted += '\\';
+		quoted += c;
+	}
+	const std::string entry = "[Desktop Entry]\nName=CedarLogic\nGenericName=Logic Simulator\nComment=Build and simulate digital logic circuits\n"
+	                          "Type=Application\nExec=\"" + quoted + "\" %F\nIcon=cedarlogic\nTerminal=false\n"
+	                          "MimeType=application/x-cedarlogic-circuit;\nStartupWMClass=CedarLogic\n"
+	                          "Categories=Education;Development;Electronics;\nKeywords=logic;simulator;circuit;gates;\n";
+	const std::string file = apps + "/cedarlogic.desktop";
+	gchar* was = nullptr;
+	const bool same = g_file_get_contents(file.c_str(), &was, nullptr, nullptr) && entry == was;
+	g_free(was);
+	if (same) return;
+	g_file_set_contents(file.c_str(), entry.c_str(), -1, nullptr);
+	// Tell the desktop (quietly; whichever of these it has).
+	const std::string cmd = "(update-desktop-database '" + apps + "'; update-mime-database '" + data + "/mime'; "
+	                        "gtk-update-icon-cache -q -t '" + data + "/icons/hicolor') >/dev/null 2>&1 &";
+	if (apps.find('\'') == std::string::npos) (void)std::system(cmd.c_str());
+}
