@@ -238,6 +238,14 @@ void CircuitWindow::build() {
 	}), this);
 	g_signal_connect(win, "window-state-event", G_CALLBACK(stateCb), this);
 	g_signal_connect(win, "size-allocate", G_CALLBACK(sizeCb), this);
+	// .cdl files dropped anywhere on the window open (the canvas takes them
+	// too, with gates from the side panel).
+	GtkTargetEntry files = { (gchar*)"text/uri-list", 0, 2 };
+	gtk_drag_dest_set(win, (GtkDestDefaults)(GTK_DEST_DEFAULT_MOTION | GTK_DEST_DEFAULT_DROP), &files, 1, GDK_ACTION_COPY);
+	g_signal_connect(win, "drag-data-received", CL_CALLBACK(+[](GtkWidget*, GdkDragContext*, gint, gint, GtkSelectionData* data, guint,
+	                                                             guint, gpointer self) {
+		static_cast<CircuitWindow*>(self)->openDroppedFiles(data);
+	}), this);
 	addActions();
 
 	GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1469,6 +1477,32 @@ bool CircuitWindow::saveAs() {
 }
 
 void CircuitWindow::open() { chooseAndOpen(app, GTK_WINDOW(win)); }
+
+struct DroppedFiles {
+	GtkApplication* app;
+	CircuitWindow* from;
+	std::vector<std::string> files;
+};
+
+void CircuitWindow::openDroppedFiles(GtkSelectionData* data) {
+	DroppedFiles* d = new DroppedFiles{ app, this, {} };
+	gchar** uris = gtk_selection_data_get_uris(data);
+	for (gchar** u = uris; u && *u; u++)
+		if (gchar* f = g_filename_from_uri(*u, nullptr, nullptr)) { d->files.push_back(f); g_free(f); }
+	g_strfreev(uris);
+	if (d->files.empty()) { delete d; return; }
+	// After the drop: opening may ask something, and the file manager waits
+	// for the drop to finish.
+	g_idle_add([](gpointer p) -> gboolean {
+		std::unique_ptr<DroppedFiles> d(static_cast<DroppedFiles*>(p));
+		const std::vector<CircuitWindow*>& all = circuitWindows();
+		CircuitWindow* from = std::find(all.begin(), all.end(), d->from) != all.end() ? d->from : nullptr;
+		guarded("opening dropped files", [&] {
+			for (const std::string& f : d->files) { openCircuit(d->app, f, from); from = nullptr; }
+		});
+		return G_SOURCE_REMOVE;
+	}, d);
+}
 void CircuitWindow::newCircuit() { newCircuitWindow(app); }
 
 void CircuitWindow::exportOlder(int format) {

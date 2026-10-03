@@ -66,9 +66,9 @@ Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageK
 	g_signal_connect(area, "event", G_CALLBACK(eventCb), this);
 	g_signal_connect(area, "size-allocate", G_CALLBACK(sizeCb), this);
 
-	// Gates dragged in from the palette.
-	GtkTargetEntry target = { (gchar*)kGateTarget, GTK_TARGET_SAME_APP, 1 };
-	gtk_drag_dest_set(area, GTK_DEST_DEFAULT_ALL, &target, 1, GDK_ACTION_COPY);
+	// Gates dragged in from the palette; .cdl files from the file manager.
+	GtkTargetEntry targets[] = { { (gchar*)kGateTarget, GTK_TARGET_SAME_APP, 1 }, { (gchar*)"text/uri-list", 0, 2 } };
+	gtk_drag_dest_set(area, GTK_DEST_DEFAULT_ALL, targets, 2, GDK_ACTION_COPY);
 	g_signal_connect(area, "drag-data-received", G_CALLBACK(dragReceivedCb), this);
 	g_signal_connect(area, "drag-motion", G_CALLBACK(dragMotionCb), this);
 }
@@ -1165,16 +1165,24 @@ bool Canvas::onKeyRelease(GdkEventKey* e) {
 
 // ---- Gates dropped from the palette ----------------------------------------------
 
-gboolean Canvas::dragMotionCb(GtkWidget*, GdkDragContext* ctx, gint, gint, guint time, gpointer self) {
+gboolean Canvas::dragMotionCb(GtkWidget* widget, GdkDragContext* ctx, gint, gint, guint time, gpointer self) {
 	Canvas* c = static_cast<Canvas*>(self);
-	if (!c->win->canEdit()) { gdk_drag_status(ctx, (GdkDragAction)0, time); return TRUE; }
+	// Files open whatever the circuit's state; a gate needs one that can change.
+	const GdkAtom target = gtk_drag_dest_find_target(widget, ctx, nullptr);
+	const bool files = target == gdk_atom_intern_static_string("text/uri-list");
+	if (target == GDK_NONE || (!files && !c->win->canEdit())) { gdk_drag_status(ctx, (GdkDragAction)0, time); return TRUE; }
 	gdk_drag_status(ctx, GDK_ACTION_COPY, time);
 	return TRUE;
 }
 
 void Canvas::dragReceivedCb(GtkWidget*, GdkDragContext* ctx, gint x, gint y, GtkSelectionData* data,
-                            guint, guint time, gpointer self) {
+                            guint info, guint time, gpointer self) {
 	Canvas* c = static_cast<Canvas*>(self);
+	if (info == 2) {
+		c->win->openDroppedFiles(data);
+		gtk_drag_finish(ctx, TRUE, FALSE, time);
+		return;
+	}
 	const guchar* raw = gtk_selection_data_get_data(data);
 	const gint len = gtk_selection_data_get_length(data);
 	bool ok = false;

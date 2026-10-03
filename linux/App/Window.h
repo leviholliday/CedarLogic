@@ -157,6 +157,11 @@ public:
 	bool isFloating() const;
 	void cancelFloating();
 
+	// .cdl files dropped on the window (from the file manager): opened once
+	// the drop is over, the first in this window's place when that's an
+	// untouched new one.
+	void openDroppedFiles(GtkSelectionData* data);
+
 	// ---- Your Circuits ----
 	// Into Your Circuits, quietly (a version when one's due, or now when
 	// `explicitSave`). False when it couldn't be written.
