@@ -1504,6 +1504,9 @@ void CircuitWindow::refreshAfterHistory() {
 
 void CircuitWindow::undo() {
 	if (simViewOn) return;
+	// Gates still on the pointer (a paste, a duplicate, a new gate): undo
+	// takes them back, as Escape does, and ends the float with them.
+	if (isFloating()) { cancelFloating(); return; }
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
 	if (cl_edit_undo(doc)) refreshAfterHistory();
 	else gtk_widget_error_bell(win);
@@ -1511,6 +1514,8 @@ void CircuitWindow::undo() {
 
 void CircuitWindow::redo() {
 	if (simViewOn) return;
+	// Nothing to redo past gates still on the pointer (placing them is next).
+	if (isFloating()) { gtk_widget_error_bell(win); return; }
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
 	if (cl_edit_redo(doc)) refreshAfterHistory();
 	else gtk_widget_error_bell(win);
