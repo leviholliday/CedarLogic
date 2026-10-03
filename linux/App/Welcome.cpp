@@ -922,7 +922,7 @@ void startTourOn(CircuitWindow* from) {
 		for (int p = 0; p < cl_document_page_count(target->document()); p++) empty = empty && cl_document_gate_count(target->document(), p) == 0;
 	if (!empty) target = from ? newCircuitWindow(from->application()) : nullptr;
 	if (target == nullptr) return;
-	startTour(target);
+	welcome::startTour(target);
 }
 
 }  // namespace welcome
