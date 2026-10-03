@@ -311,6 +311,15 @@ CircuitWindow* newCircuitWindow() { return new CircuitWindow(cl_document_new(), 
 // Each window asks about its own changes; stop at the first "Cancel".
 bool quitApp() {
 	std::vector<CircuitWindow*> all = circuitWindows();
+	// A window with a dialog or the truth table up is in the middle of it
+	// (its code is waiting on that): not yet. The dialog comes forward.
+	for (CircuitWindow* w : all) {
+		if (IsWindowEnabled(w->window())) continue;
+		const HWND popup = GetLastActivePopup(w->window());
+		SetForegroundWindow(popup ? popup : w->window());
+		MessageBeep(MB_ICONWARNING);
+		return false;
+	}
 	for (CircuitWindow* w : all) {
 		SetForegroundWindow(w->window());
 		if (!w->confirmClose()) return false;

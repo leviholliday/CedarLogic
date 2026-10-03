@@ -1015,6 +1015,14 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	}
 	case WM_CLOSE:
+		// Not while one of its dialogs is up (the taskbar can still ask):
+		// the dialog comes forward instead.
+		if (!IsWindowEnabled(hwnd)) {
+			const HWND popup = GetLastActivePopup(hwnd);
+			if (popup && popup != hwnd) SetForegroundWindow(popup);
+			MessageBeep(MB_ICONWARNING);
+			return 0;
+		}
 		if (confirmClose()) destroy();
 		return 0;
 	case WM_DESTROY:
