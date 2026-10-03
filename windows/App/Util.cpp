@@ -181,6 +181,18 @@ struct Reader {
 	}
 };
 
+// Text of several lines, on one line of the file: new lines kept as \x1F.
+std::string oneLine(const std::string& text) {
+	std::string one;
+	for (char c : text) if (c != '\r') one += c == '\n' ? '\x1F' : c;
+	return one;
+}
+
+std::string manyLines(std::string text) {
+	for (char& c : text) if (c == '\x1F') c = '\n';
+	return text;
+}
+
 }  // namespace
 
 void Prefs::load() {
@@ -217,8 +229,7 @@ void Prefs::load() {
 	lastFolder = r.s("lastFolder", lastFolder);
 	lastCircuit = r.s("lastCircuit", lastCircuit);
 	studentName = r.s("studentName", studentName);
-	lastFormula = r.s("lastFormula", lastFormula);
-	for (char& c : lastFormula) if (c == '\x1F') c = '\n';
+	lastFormula = manyLines(r.s("lastFormula", lastFormula));
 	buildShape = r.i("buildShape", buildShape, 0, 2);
 	buildStyle = r.i("buildStyle", buildStyle, 0, 2);
 	buildTwoInput = r.b("buildTwoInput", buildTwoInput);
@@ -231,10 +242,9 @@ void Prefs::load() {
 	exportInfo = r.b("exportInfo", exportInfo);
 	exportWorks = r.b("exportWorks", exportWorks);
 	exportScale = r.i("exportScale", exportScale, 2, 6);
-	exportProblem = r.s("exportProblem", exportProblem);
+	exportProblem = manyLines(r.s("exportProblem", exportProblem));
 	feedbackTitle = r.s("feedbackTitle", feedbackTitle);
-	feedbackDetails = r.s("feedbackDetails", feedbackDetails);
-	for (char& c : feedbackDetails) if (c == '\x1F') c = '\n';
+	feedbackDetails = manyLines(r.s("feedbackDetails", feedbackDetails));
 	feedbackTags = r.s("feedbackTags", feedbackTags);
 	feedbackEmail = r.s("feedbackEmail", feedbackEmail);
 	feedbackPriority = r.i("feedbackPriority", feedbackPriority, 0, 3);
@@ -288,11 +298,7 @@ void Prefs::save() const {
 	o << "lastFolder=" << lastFolder << "\n";
 	o << "lastCircuit=" << lastCircuit << "\n";
 	o << "studentName=" << studentName << "\n";
-	{
-		std::string one;   // one line in the file: new lines kept as \x1F
-		for (char c : lastFormula) if (c != '\r') one += c == '\n' ? '\x1F' : c;
-		o << "lastFormula=" << one << "\n";
-	}
+	o << "lastFormula=" << oneLine(lastFormula) << "\n";
 	o << "buildShape=" << buildShape << "\n";
 	o << "buildStyle=" << buildStyle << "\n";
 	o << "buildTwoInput=" << b(buildTwoInput) << "\n";
@@ -305,13 +311,9 @@ void Prefs::save() const {
 	o << "exportInfo=" << b(exportInfo) << "\n";
 	o << "exportWorks=" << b(exportWorks) << "\n";
 	o << "exportScale=" << exportScale << "\n";
-	o << "exportProblem=" << exportProblem << "\n";
+	o << "exportProblem=" << oneLine(exportProblem) << "\n";
 	o << "feedbackTitle=" << feedbackTitle << "\n";
-	{
-		std::string one;
-		for (char c : feedbackDetails) if (c != '\r') one += c == '\n' ? '\x1F' : c;
-		o << "feedbackDetails=" << one << "\n";
-	}
+	o << "feedbackDetails=" << oneLine(feedbackDetails) << "\n";
 	o << "feedbackTags=" << feedbackTags << "\n";
 	o << "feedbackEmail=" << feedbackEmail << "\n";
 	o << "feedbackPriority=" << feedbackPriority << "\n";
