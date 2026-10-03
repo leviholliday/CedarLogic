@@ -939,6 +939,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
 		setFontTree(hwnd, uiFont(dpi));
 		if (palette) palette->dpiChanged();
+		if (findBar) findBar->dpiChanged();
 		layout();
 		for (Canvas* c : canvases) c->redraw();
 		return 0;
