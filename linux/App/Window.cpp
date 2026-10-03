@@ -1338,6 +1338,8 @@ void CircuitWindow::sizeCb(GtkWidget* widget, GdkRectangle*, gpointer self) {
 // Circuits save themselves, so closing doesn't ask: it saves. Only when that
 // fails is there a question, and a reflexive Enter keeps the work.
 bool CircuitWindow::confirmClose() {
+	// A tab name still being typed is kept, and saved with the rest.
+	for (TabStrip* t : strips) if (t) t->commitRename(true);
 	if (!isDirty()) return true;
 	if (saveQuietly(false)) return true;
 	Alert a;

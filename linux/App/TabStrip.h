@@ -28,6 +28,8 @@ public:
 	GtkWidget* outer() const { return overlay; }
 	void setTitleRow(bool on);
 	void beginRename(int page);
+	// End a rename in progress: the typed name, if `keep`, or the old one.
+	void commitRename(bool keep);
 
 protected:
 	void paint(cairo_t* cr, float w, float h) override;
@@ -70,7 +72,6 @@ private:
 	int tabAt(float x, float y) const;
 	bool onClose(int k, float x) const;
 	bool activeSide() const;
-	void commitRename(bool keep);
 	void paintClassic(cairo_t* cr, float w, float h);
 	std::vector<RectF> classicSegments(float w) const;
 };
