@@ -88,6 +88,9 @@ void applyStyle() {
 	s += "#findbar button { border-radius: 8px; background-image: none; border: none; box-shadow: none; min-height: 26px; min-width: 26px; }\n";
 	s += "#findbar-done { background-color: " + css(withAlpha(ink, 0.07f)) + "; padding: 0 12px; }\n";
 	s += "#findbar label.warning { color: rgb(245,148,33); }\n";
+	// The welcome's name box: a bare entry on its drawn field.
+	s += "#welcome-name { background: transparent; border: none; box-shadow: none; outline: none; color: rgb(242,242,242); "
+	     "caret-color: rgb(56,255,107); font-size: 15px; min-height: 28px; }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

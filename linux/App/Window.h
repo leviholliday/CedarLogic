@@ -128,6 +128,8 @@ public:
 	void find();
 	void showFoundGate(int page, long gate, double x, double y);
 	std::vector<int> recentTabs() const;   // tab indexes, most recently used first
+	// The overlay over the pages (the find bar's, the tour card's).
+	GtkWidget* overlay() const { return pageOverlay; }
 	// The plan's parts and wires, on a new page or beside this page's circuit.
 	bool buildPlan(const formula::Plan& plan, bool onNewPage, const std::string& pageName);
 
@@ -220,6 +222,7 @@ private:
 	class MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
 	FindBar* findBar = nullptr;
+	GtkWidget* pageOverlay = nullptr;
 	TabSwitcher* switcher = nullptr;
 	std::vector<uint64_t> recentKeys;   // pages by key, most recently in front first
 	std::vector<Canvas*> canvases;    // in tab order

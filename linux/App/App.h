@@ -58,9 +58,14 @@ struct Prefs {
 	bool buildTwoInput = false, buildNewPage = true;
 	// Send Feedback remembers who's sending.
 	std::string feedbackName, feedbackEmail;
+	std::string feedbackTitle, feedbackDetails, feedbackTags;   // the draft, until it's sent
+	int feedbackPriority = 1;
+	bool feedbackContact = true;
 	// What's New shows once per version.
 	std::string lastSeenVersion;
 	bool playLaunchSound = true;                  // the launch screen's chime
+	bool firstLaunchPlayed = false;               // the first launch's slower splash and sound, once ever
+	std::string seenWhatsNew;                     // the What's New last shown (whatsnew::kVersion)
 
 	double wireScale() const;
 	void load();

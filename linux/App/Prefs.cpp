@@ -104,8 +104,15 @@ void Prefs::load() {
 		buildNewPage = readBool(k, "buildNewPage", buildNewPage);
 		feedbackName = readString(k, "feedbackName", feedbackName);
 		feedbackEmail = readString(k, "feedbackEmail", feedbackEmail);
+		feedbackTitle = readString(k, "feedbackTitle", feedbackTitle);
+		feedbackDetails = readString(k, "feedbackDetails", feedbackDetails);
+		feedbackTags = readString(k, "feedbackTags", feedbackTags);
+		feedbackPriority = readInt(k, "feedbackPriority", feedbackPriority, 0, 3);
+		feedbackContact = readBool(k, "feedbackContact", feedbackContact);
 		lastSeenVersion = readString(k, "lastSeenVersion", lastSeenVersion);
 		playLaunchSound = readBool(k, "playLaunchSound", playLaunchSound);
+		firstLaunchPlayed = readBool(k, "firstLaunchPlayed", firstLaunchPlayed);
+		seenWhatsNew = readString(k, "seenWhatsNew", seenWhatsNew);
 		gsize n = 0;
 		if (gchar** list = g_key_file_get_string_list(k, kGroup, "recent", &n, nullptr)) {
 			recent.clear();
@@ -160,8 +167,15 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "buildNewPage", buildNewPage);
 	g_key_file_set_string(k, kGroup, "feedbackName", feedbackName.c_str());
 	g_key_file_set_string(k, kGroup, "feedbackEmail", feedbackEmail.c_str());
+	g_key_file_set_string(k, kGroup, "feedbackTitle", feedbackTitle.c_str());
+	g_key_file_set_string(k, kGroup, "feedbackDetails", feedbackDetails.c_str());
+	g_key_file_set_string(k, kGroup, "feedbackTags", feedbackTags.c_str());
+	g_key_file_set_integer(k, kGroup, "feedbackPriority", feedbackPriority);
+	g_key_file_set_boolean(k, kGroup, "feedbackContact", feedbackContact);
 	g_key_file_set_string(k, kGroup, "lastSeenVersion", lastSeenVersion.c_str());
 	g_key_file_set_boolean(k, kGroup, "playLaunchSound", playLaunchSound);
+	g_key_file_set_boolean(k, kGroup, "firstLaunchPlayed", firstLaunchPlayed);
+	g_key_file_set_string(k, kGroup, "seenWhatsNew", seenWhatsNew.c_str());
 	std::vector<const gchar*> list;
 	for (const std::string& r : recent) list.push_back(r.c_str());
 	g_key_file_set_string_list(k, kGroup, "recent", list.data(), list.size());

@@ -39,6 +39,7 @@ void Toolbar::build() {
 	add(Button, "win.sim-view", 11);
 	add(Button, "win.lock", 12);
 	add(Button, "win.new-tab", 13);
+	add(Button, "win.feedback", 14);
 	add(More, nullptr, -1);
 	// The window's buttons, as the desktop lays them out ("menu:minimize,maximize,close").
 	gchar* layoutSetting = nullptr;
@@ -168,6 +169,7 @@ const char* Toolbar::iconFor(const Item& it) const {
 	if (is(a, "win.sim-view")) return win->simView() ? Icon::StopSolid : Icon::Play;
 	if (is(a, "win.lock")) return win->locked() ? Icon::Lock : Icon::Unlock;
 	if (is(a, "win.new-tab")) return Icon::NewTab;
+	if (is(a, "win.feedback")) return Icon::Feedback;
 	return nullptr;
 }
 
@@ -196,6 +198,7 @@ std::string Toolbar::tipFor(const Item& it) const {
 	if (is(a, "win.sim-view")) return "Simulation View (Ctrl+R)";
 	if (is(a, "win.lock")) return "Lock the circuit so it can't be edited";
 	if (is(a, "win.new-tab")) return "New tab (Ctrl+T)";
+	if (is(a, "win.feedback")) return "Send feedback: a bug, an idea, anything";
 	return std::string();
 }
 
@@ -303,6 +306,7 @@ void Toolbar::paint(cairo_t* cr, float w, float h) {
 			else if (on) fg = accent;
 			if (is(it.action, "app.new")) drawNewDocIcon(cr, r, fg);
 			else if (is(it.action, "win.new-tab")) drawNewTabIcon(cr, r, fg);
+			else if (is(it.action, "win.feedback")) drawBubbleIcon(cr, r, fg);
 			else if (is(it.action, "app.open")) drawFolderIcon(cr, r, fg);
 			else if (is(it.action, "win.save")) drawSaveIcon(cr, r, fg);
 			else if (is(it.action, "win.zoom-in") || is(it.action, "win.zoom-out")) drawZoomIcon(cr, r, fg, is(it.action, "win.zoom-in"));

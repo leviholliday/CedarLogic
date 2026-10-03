@@ -4,7 +4,10 @@
 #include "Canvas.h"
 #include "Collections.h"
 #include "Dialogs.h"
+#include "Feedback.h"
 #include "FindBar.h"
+#include "Help.h"
+#include "Welcome.h"
 #include "TabSwitcher.h"
 #include "Formula.h"
 #include "MiniMap.h"
@@ -48,6 +51,8 @@ const Command kCommands[] = {
 	{ "save-part", [](CircuitWindow* w) { parts::saveSelection(w); }, false },
 	{ "build-formula", [](CircuitWindow* w) { if (w->canEdit()) showBuildFormula(w); else w->lockNudge(); }, false },
 	{ "find", [](CircuitWindow* w) { w->find(); }, false },
+	{ "feedback", [](CircuitWindow* w) { feedback::show(w); }, false },
+	{ "whats-new", [](CircuitWindow* w) { whatsnew::show(w); }, false },
 	{ "export-image", [](CircuitWindow* w) { w->exportImage(); }, false },
 	{ "export-v2", [](CircuitWindow* w) { w->exportOlder(2); }, false },
 	{ "export-v1", [](CircuitWindow* w) { w->exportOlder(1); }, false },
@@ -246,6 +251,7 @@ void CircuitWindow::build() {
 	g_signal_connect(notebook, "page-reordered", G_CALLBACK(reorderCb), this);
 	// The find bar floats over the top of the page.
 	GtkWidget* over = gtk_overlay_new();
+	pageOverlay = over;
 	gtk_container_add(GTK_CONTAINER(over), notebook);
 	findBar = new FindBar(this);
 	gtk_overlay_add_overlay(GTK_OVERLAY(over), findBar->widget());
@@ -1722,15 +1728,7 @@ void CircuitWindow::togglePalette() {
 void CircuitWindow::showPreferences() { showPreferencesDialog(GTK_WINDOW(win)); }
 void CircuitWindow::showShortcuts() { showShortcutsWindow(GTK_WINDOW(win)); }
 
-void CircuitWindow::showHelp() {
-	const std::string page = resourcesDir() + "/help/Introduction.htm";
-	if (g_file_test(page.c_str(), G_FILE_TEST_EXISTS)) {
-		gchar* uri = g_filename_to_uri(page.c_str(), nullptr, nullptr);
-		if (uri) { openExternally(GTK_WINDOW(win), uri); g_free(uri); }
-	} else {
-		showShortcuts();
-	}
-}
+void CircuitWindow::showHelp() { help::show(this); }
 
 void CircuitWindow::showAbout() {
 	const char* authors[] = { "Cedarville University", "Contributors to CedarLogic", nullptr };

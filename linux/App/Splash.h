@@ -1,24 +1,33 @@
-// A brief launch screen, shown while the app starts up (matters most on
-// slower machines -- a Raspberry Pi -- where parsing the gate library and
-// the first window taking shape isn't instant). Mirrors the Mac app's
-// Splash.swift, much simplified.
+// The launch screen, as the Mac app's (Splash.swift) and the Windows app's,
+// moment for moment: a glass panel in the icon's own colours in the middle
+// of the screen. The icon rises out of a blur, its circuit traces draw in,
+// "CedarLogic" writes itself in a letter at a time, a line says what's being
+// done and a thin neon bar along the bottom fills as it's done; a band of
+// light passes over the glass. Then it dissolves into the window. About two
+// and a half seconds; the very first time, slower, with its own sound (the
+// Mac's FirstLaunch), fading into the welcome.
 
 #ifndef CL_LINUX_SPLASH_H
 #define CL_LINUX_SPLASH_H
 
 #include "App.h"
+#include <string>
 
-// Shows the splash and returns it; paints at once (pumps the loop once) so
-// it's visible before any slow startup work runs on the same thread.
+// Shows the splash (unseen until hideSplashSoon plays it) and returns it.
 GtkWidget* showSplash();
+bool splashActive();
 
-// What it says it's doing, e.g. "Loading the gate library…".
+// Said while starting; the panel lists what was done once it plays.
 void splashSetStatus(GtkWidget* splash, const char* status);
+// The circuit being opened, for its "Opening ..." line.
+void splashSetOpening(const std::string& name);
 
-// Keeps it on top for at least a short, fixed time from when it was shown
-// (so a fast launch doesn't just flash it), then destroys it and calls
-// `onHidden` (if given) right after -- for revealing windows that opened
-// while it was up (see main.cpp), so nothing peeks out from behind it.
+// The launch's work is done: play it, and call `onHidden` (the windows come
+// in) as it starts to dissolve, then it goes. A null splash calls onHidden
+// at once.
 void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden = nullptr, gpointer data = nullptr);
+
+// --splash-frame: the panel at t seconds, as a PNG.
+bool renderSplashFrame(double t, bool first, const std::string& file);
 
 #endif  // CL_LINUX_SPLASH_H

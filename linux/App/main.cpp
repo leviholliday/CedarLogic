@@ -7,6 +7,10 @@
 #include "Splash.h"
 #include "Updater.h"
 #include "Welcome.h"
+#include "Collections.h"
+#include "Dialogs.h"
+#include "Feedback.h"
+#include "Help.h"
 #include "Library.h"
 #include "LibraryWindow.h"
 #include "Window.h"
@@ -26,6 +30,77 @@ int gExitCode = 0;
 // For the screenshot runs: --dark or --light for this run, --sim-view on.
 int gTheme = -1;
 bool gSimView = false;
+// --show <what>: for the screenshot runs, a window to open and picture
+// instead of the circuit's (welcome:N, whatsnew:N, help, truth, feedback,
+// templates, tour, find).
+std::string gShow;
+// --splash-frame <t> <out.png> [--first]: the launch screen at t seconds.
+double gSplashAt = -1;
+std::string gSplashFile;
+bool gFirstLaunch = false;
+
+// A window's picture, as a PNG.
+bool writeWindow(GtkWidget* top, const std::string& file) {
+	const int width = gtk_widget_get_allocated_width(top), height = gtk_widget_get_allocated_height(top);
+	cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, std::max(1, width), std::max(1, height));
+	cairo_t* cr = cairo_create(s);
+	gtk_widget_draw(top, cr);
+	cairo_destroy(cr);
+	const bool ok = cairo_surface_write_to_png(s, file.c_str()) == CAIRO_STATUS_SUCCESS;
+	cairo_surface_destroy(s);
+	fprintf(stderr, "%s %s (%dx%d)\n", ok ? "wrote" : "couldn't write", file.c_str(), width, height);
+	return ok;
+}
+
+GtkWidget* toplevelTitled(const char* title) {
+	GtkWidget* found = nullptr;
+	GList* all = gtk_window_list_toplevels();
+	for (GList* l = all; l; l = l->next) {
+		GtkWindow* w = GTK_WINDOW(l->data);
+		const char* t = gtk_window_get_title(w);
+		if (t && strcmp(t, title) == 0 && gtk_widget_get_visible(GTK_WIDGET(w))) found = GTK_WIDGET(w);
+	}
+	g_list_free(all);
+	return found;
+}
+
+// The window --show opened, pictured; then the app ends (a modal window may
+// be running its own loop, so this doesn't wait for it).
+gboolean showCaptureCb(gpointer) {
+	GtkWidget* top = nullptr;
+	const std::string what = gShow.substr(0, gShow.find(':'));
+	if (what == "welcome") top = welcome::window();
+	else if (what == "whatsnew") top = whatsnew::window();
+	else if (what == "help") top = help::window();
+	else if (what == "truth") top = toplevelTitled("Truth Table");
+	else if (what == "feedback") top = toplevelTitled("Send Feedback");
+	else if (what == "templates") top = toplevelTitled("New from Template");
+	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
+	const bool ok = top && writeWindow(top, gScreenshot);
+	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
+	prefs().save();
+	fflush(stderr);
+	_exit(ok ? 0 : 1);
+	return G_SOURCE_REMOVE;
+}
+
+gboolean showCb(gpointer) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w == nullptr) return G_SOURCE_REMOVE;
+	const size_t colon = gShow.find(':');
+	const std::string what = gShow.substr(0, colon);
+	const int page = colon == std::string::npos ? 0 : atoi(gShow.c_str() + colon + 1);
+	g_timeout_add(1800, showCaptureCb, nullptr);
+	if (what == "welcome") { prefs().hasSeenWelcome = false; welcome::offer(w); welcome::pageForScreenshot(page); }
+	else if (what == "whatsnew") whatsnew::show(w, page);
+	else if (what == "help") help::show(w, page > 0 ? "analysis" : "");
+	else if (what == "truth") w->makeTruthTable();
+	else if (what == "feedback") feedback::show(w);
+	else if (what == "templates") templates::showPicker(w);
+	else if (what == "tour") welcome::startTour(w);
+	else if (what == "find") w->runAction("win.find");
+	return G_SOURCE_REMOVE;
+}
 
 gboolean screenshotCb(gpointer app) {
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
@@ -272,7 +347,7 @@ void startupCb(GApplication* gapp, gpointer) {
 	GtkApplication* app = GTK_APPLICATION(gapp);
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
-	if (gScreenshot.empty()) gSplash = showSplash();
+	if (gScreenshot.empty() && gSplashFile.empty()) gSplash = showSplash();
 	prefs().load();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
@@ -335,6 +410,13 @@ void activateCb(GApplication* gapp, gpointer) {
 		g_application_quit(gapp);
 		return;
 	}
+	if (!gSplashFile.empty()) {
+		const bool ok = renderSplashFrame(gSplashAt, gFirstLaunch, gSplashFile);
+		fprintf(stderr, "%s %s\n", ok ? "wrote" : "couldn't write", gSplashFile.c_str());
+		gExitCode = ok ? 0 : 1;
+		g_application_quit(gapp);
+		return;
+	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
 	if (gScreenshot.empty()) {
@@ -346,15 +428,23 @@ void activateCb(GApplication* gapp, gpointer) {
 		if (!last.empty()) openCircuit(GTK_APPLICATION(gapp), last, nullptr);
 	}
 	CircuitWindow* w = circuitWindows().empty() ? newCircuitWindow(GTK_APPLICATION(gapp)) : circuitWindows().front();
+	if (gSplash && w && !w->filePath().empty()) splashSetOpening(w->titleText());
 	if (gSplash && w) gtk_widget_hide(GTK_WIDGET(w->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
 		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			g_timeout_add(2000, screenshotCb, app);
+			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
+			else g_timeout_add(2000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
-		else g_idle_add(offerRecoveryCb, app);
+		else {
+			g_idle_add(offerRecoveryCb, app);
+			g_idle_add([](gpointer) -> gboolean {
+				if (!circuitWindows().empty()) guarded("What's New", [] { whatsnew::offer(circuitWindows().front()); });
+				return G_SOURCE_REMOVE;
+			}, app);
+		}
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
@@ -380,10 +470,17 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			g_timeout_add(2000, screenshotCb, app);
+			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
+			else g_timeout_add(2000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
-		else g_idle_add(offerRecoveryCb, app);
+		else {
+			g_idle_add(offerRecoveryCb, app);
+			g_idle_add([](gpointer) -> gboolean {
+				if (!circuitWindows().empty()) guarded("What's New", [] { whatsnew::offer(circuitWindows().front()); });
+				return G_SOURCE_REMOVE;
+			}, app);
+		}
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
@@ -519,6 +616,14 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) { gScreenshot = argv[++i]; continue; }
 		if (strcmp(argv[i], "--dark") == 0 || strcmp(argv[i], "--light") == 0) { gTheme = strcmp(argv[i], "--dark") == 0; continue; }
 		if (strcmp(argv[i], "--sim-view") == 0) { gSimView = true; continue; }
+		if (strcmp(argv[i], "--show") == 0 && i + 1 < argc) { gShow = argv[++i]; continue; }
+		if (strcmp(argv[i], "--first") == 0) { gFirstLaunch = true; continue; }
+		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
+		if (strcmp(argv[i], "--feedback-probe") == 0) {
+			const int code = feedback::probe();
+			printf("feedback server: %d\n", code);
+			return code == 403 ? 0 : 1;
+		}
 		args.push_back(argv[i]);
 	}
 	args.push_back(nullptr);

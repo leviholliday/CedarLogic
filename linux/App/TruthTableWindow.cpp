@@ -84,6 +84,7 @@ std::string formulaName(const std::string& s, const std::string& fallback) {
 }
 
 int gTab = 0;   // the tab last shown, for next time
+int gOpen = 0;  // truth tables open now
 
 struct TruthWindow {
 	CircuitWindow* owner = nullptr;
@@ -499,6 +500,8 @@ struct TruthWindow {
 
 }  // namespace
 
+bool truthTableOpen() { return gOpen > 0; }
+
 void showTruthTable(CircuitWindow* w, int page) {
 	char err[512] = "";
 	CLTruthTable* tt = cl_truth_table(w->document(), page, err, sizeof err);
@@ -521,7 +524,9 @@ void showTruthTable(CircuitWindow* w, int page) {
 	t.unsettled = cl_tt_unsettled(tt);
 	cl_tt_free(tt);
 	t.tab = gTab;
+	gOpen++;
 	t.run();
+	gOpen--;
 	gTab = t.tab;
 	if (!t.buildText.empty()) {
 		prefs().lastFormula = t.buildText;
