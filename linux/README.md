@@ -19,10 +19,18 @@ libfreetype-dev` on Debian, Ubuntu and Raspberry Pi OS).
   of the Mac's `CGScene`. The rest of the engine is `mac/CedarCore`, shared
   with the Mac app: its drawing calls take a Core Graphics context on the Mac
   and a Cairo one here (`mac/CedarCore/NativeScene.h`).
-- `App/` -- the GTK app: a window per circuit (`Window`), a tab and a canvas
-  per page (`Canvas`), the gate palette (`Palette`), the dialogs and the
-  oscilloscope (`Dialogs`), settings (`Prefs`, kept in
-  `~/.config/CedarLogic/native.ini`).
+- `App/` -- the GTK app, matched to the Mac and Windows apps: a window per
+  circuit (`Window`) with the Mac's toolbar in its title bar (`Toolbar`) and
+  tab cards (`TabStrip`), a canvas per page (`Canvas`), the gate palette
+  (`Palette`), Your Circuits and Version History (`Library`,
+  `LibraryWindow`, `Picker`), templates and My Parts (`Collections`), Build
+  from Formula and the truth table's Karnaugh maps (`Formula`,
+  `TruthTableWindow`), Find and the Ctrl+Tab switcher (`FindBar`,
+  `TabSwitcher`), the oscilloscope (`Scope`), Export as Image
+  (`ExportImage`), Send Feedback (`Feedback`), Help (`Help`), and the brand's
+  launch screen, welcome, guided tour and What's New (`Brand`, `Splash`,
+  `Welcome`). Settings (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`;
+  circuits in `~/.local/share/CedarLogic/Library`.
 
 GTK 3 on purpose: every Linux desktop has it (Raspberry Pi OS, Ubuntu, Kali,
 Fedora, Mint), it speaks Wayland and X11 natively, and the AppImage uses the
@@ -42,6 +50,12 @@ system. And:
 
 - `cedarlogic --screenshot out.png [circuit.cdl]` -- opens the window, draws
   it to a PNG and quits (CI runs it against the AppImage)
+- `cedarlogic --show <window> --screenshot out.png [circuit.cdl]` -- the same
+  for one of the app's windows: `welcome:N`, `whatsnew:N`, `help`, `truth`,
+  `feedback`, `templates`, `tour`, `find`, `export`, `scope`
+- `cedarlogic --splash-frame <seconds> out.png [--first]` -- the launch screen
+- `cedarlogic --feedback-probe` -- asks the feedback site with a wrong key
+  (expects 403) and sends nothing
 - `cedarlogic --version`
 - `CEDARLOGIC_RESOURCES=<dir>` -- where `cl_gatedefs.xml` is, when it isn't
   next to the app

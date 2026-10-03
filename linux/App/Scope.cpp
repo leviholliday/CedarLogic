@@ -284,6 +284,7 @@ void ScopeWindow::paint(cairo_t* cr, float w, float h) {
 		const RectF r = rectF(bx, 7, bx + bw, kHeader - 7);
 		if (hot == (int)buttons.size()) fillRound(cr, r, 7, withAlpha(ink, 0.08f));
 		if (!label.empty()) drawTextMid(cr, label, r, 12, ink, TextAlign::Center);
+		else if (id == kBtnIn || id == kBtnOut) drawZoomIcon(cr, r, withAlpha(ink, 0.85f), id == kBtnIn);
 		else drawIcon(cr, icon, r, 14, withAlpha(ink, 0.85f));
 		buttons.push_back({ r, id });
 		bx -= 4;
