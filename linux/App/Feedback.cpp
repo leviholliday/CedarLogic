@@ -203,6 +203,17 @@ struct Draft {
 		attachments.erase(attachments.begin() + i);
 	}
 	void clearAttachments() { while (!attachments.empty()) remove(attachments.size() - 1); }
+	// Sent: cleared for next time.
+	void reset() {
+		clearAttachments();
+		title.clear();
+		details.clear();
+		chosen.clear();
+		declined.clear();
+		priority = 1;
+		includeCircuit = false;
+		save();
+	}
 };
 
 Draft& draft() {
@@ -403,6 +414,7 @@ struct Sending {
 	std::string note = "Sending…";
 	std::atomic<int> state{ 0 };   // 0 going, 1 sent, 2 failed
 	std::string failure;
+	std::string circuitCopy;   // the circuit, copied for this send alone (removed when it's done)
 	void set(const std::string& n) {
 		std::lock_guard<std::mutex> g(lock);
 		note = n;
@@ -429,20 +441,12 @@ Reply perform(const std::string& method, const std::string& path, const std::str
 	return r;
 }
 
-void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment> files) {
-	auto fail = [&](const std::string& why) {
-		{
-			std::lock_guard<std::mutex> g(s->lock);
-			s->failure = why;
-		}
-		s->state = 2;
-	};
-	std::string failure;
+bool sendAll(Sending* s, const std::string& body, const std::vector<Attachment>& files, std::string& failure) {
 	const Reply created = perform("POST", "/api/feedback", "application/json", "", body, failure);
-	if (created.status < 200 || created.status >= 300) { fail(failure); return; }
+	if (created.status < 200 || created.status >= 300) return false;
 	const std::string id = jsonField(created.body, "id"), token = jsonField(created.body, "uploadToken");
 	const long long chunk = std::max(65536LL, atoll(jsonField(created.body, "chunkSize").c_str()));
-	if (id.empty() || token.empty()) { fail("The feedback server's answer didn't make sense."); return; }
+	if (id.empty() || token.empty()) { failure = "The feedback server's answer didn't make sense."; return false; }
 	long long total = 1, done = 0;
 	for (const Attachment& a : files) total += fileSize(a.file);
 	for (const Attachment& a : files) {
@@ -452,14 +456,74 @@ void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment
 			const std::string part = data.substr((size_t)(i * chunk), (size_t)chunk);
 			const std::string q = "/api/feedback/upload?id=" + percent(id) + "&file=" + percent(a.name) + format("&index=%lld&total=%lld", i, pieces);
 			const Reply r = perform("PUT", q, "application/octet-stream", token, part, failure);
-			if (r.status < 200 || r.status >= 300) { fail(failure); return; }
+			if (r.status < 200 || r.status >= 300) return false;
 			done += (long long)part.size();
 			s->set(format("Sending %s… %.1f of %.1f MB", a.name.c_str(), done / 1e6, total / 1e6));
 		}
 	}
 	const Reply r = perform("POST", "/api/feedback/complete?id=" + percent(id), "application/json", token, "", failure);
-	if (r.status < 200 || r.status >= 300) { fail(failure); return; }
-	s->state = 1;
+	return r.status >= 200 && r.status < 300;
+}
+
+void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment> files) {
+	std::string failure;
+	const bool sent = sendAll(s.get(), body, files, failure);
+	// A new copy of the circuit is made for each try.
+	if (!s->circuitCopy.empty()) ::g_remove(s->circuitCopy.c_str());
+	if (!sent) {
+		std::lock_guard<std::mutex> g(s->lock);
+		s->failure = failure;
+	}
+	s->state = sent ? 1 : 2;
+}
+
+// A send that was still going when Send Feedback closed: until it's done,
+// Send Feedback doesn't open again (it would send the same report twice).
+std::shared_ptr<Sending>& inFlight() {
+	static std::shared_ptr<Sending> s;
+	return s;
+}
+
+bool windowAlive(CircuitWindow* w) {
+	for (CircuitWindow* c : circuitWindows()) if (c == w) return true;
+	return false;
+}
+
+gboolean inFlightCb(gpointer) {
+	std::shared_ptr<Sending>& s = inFlight();
+	if (!s) return G_SOURCE_REMOVE;
+	if (s->state == 0) return G_SOURCE_CONTINUE;
+	Draft& d = draft();
+	CircuitWindow* w = windowAlive(d.win) ? d.win : circuitWindows().empty() ? nullptr : circuitWindows().front();
+	if (s->state == 1) {
+		d.reset();
+		if (w) w->note("Feedback sent. Thank you!");
+	} else if (w) {
+		w->note("Your feedback couldn't be sent. It's kept: Send Feedback tries again.");
+	}
+	s.reset();
+	return G_SOURCE_REMOVE;
+}
+
+// Copies from earlier runs (a draft's pictures when the app quit, a send
+// cut short), once a run. A day old at least, so another CedarLogic's draft
+// open now keeps its pictures.
+void sweepOldCopies() {
+	static bool swept = false;
+	if (swept) return;
+	swept = true;
+	const std::string dir = folder();
+	GDir* g = g_dir_open(dir.c_str(), 0, nullptr);
+	if (g == nullptr) return;
+	const gint64 dayAgo = g_get_real_time() / G_USEC_PER_SEC - 24 * 3600;
+	while (const gchar* name = g_dir_read_name(g)) {
+		const std::string file = dir + "/" + name;
+		bool used = false;
+		for (const Attachment& a : draft().attachments) used = used || a.file == file;
+		GStatBuf st;
+		if (!used && g_stat(file.c_str(), &st) == 0 && S_ISREG(st.st_mode) && (gint64)st.st_mtime < dayAgo) ::g_remove(file.c_str());
+	}
+	g_dir_close(g);
 }
 
 // ---- The window ----------------------------------------------------------------------
@@ -756,16 +820,21 @@ void startSending(Form* f) {
 	}
 	std::vector<Attachment> files = d.attachments;
 	for (Attachment& a : files) a.thumb = nullptr;   // the thread needs only the files
+	std::string circuitCopy;
 	if (d.includeCircuit) {
 		const std::string file = folder() + "/" + uniqueId() + "-circuit.cdl";
+		const bool wasDirty = d.win->isDirty();
 		const char* text = cl_document_save_text(d.win->document());
-		if (text && writeAll(file, text)) {
+		const bool written = text && writeAll(file, text);
+		if (wasDirty) d.win->saveQuietly(false);   // asking for the text marked it saved
+		if (written) {
 			Attachment c;
 			c.kind = Attachment::Circuit;
 			c.file = file;
 			c.name = "circuit.cdl";
 			c.type = "text/plain";
 			files.push_back(c);
+			circuitCopy = file;
 		}
 	}
 	std::string list = "[";
@@ -782,6 +851,7 @@ void startSending(Form* f) {
 		.flag("contactOK", d.contactOK && !mail.empty()).text("platform", "linux").raw("attachments", list)
 		.raw("app", f->dev.app).raw("system", f->dev.system).raw("context", f->dev.context);
 	f->sending = std::make_shared<Sending>();
+	f->sending->circuitCopy = circuitCopy;
 	std::thread(upload, f->sending, body.str(), files).detach();
 	gtk_widget_set_sensitive(f->send, FALSE);
 	gtk_label_set_text(GTK_LABEL(f->problem), "Sending…");
@@ -797,15 +867,7 @@ gboolean timerCb(gpointer data) {
 		return G_SOURCE_CONTINUE;
 	}
 	if (f->sending->state == 1) {
-		// Sent: the draft is cleared for next time.
-		d.clearAttachments();
-		d.title.clear();
-		d.details.clear();
-		d.chosen.clear();
-		d.declined.clear();
-		d.priority = 1;
-		d.includeCircuit = false;
-		d.save();
+		d.reset();
 		f->sent = true;
 		gtk_dialog_response(GTK_DIALOG(f->dialog), GTK_RESPONSE_OK);
 		return G_SOURCE_CONTINUE;
@@ -832,9 +894,14 @@ int probe() {
 }
 
 void show(CircuitWindow* win) {
+	if (inFlight()) {
+		win->note("Still sending your last feedback…");
+		return;
+	}
 	Draft& d = draft();
 	d.win = win;
 	d.load();
+	sweepOldCopies();
 	Form f;
 	f.dev = device(win);
 
@@ -983,8 +1050,14 @@ void show(CircuitWindow* win) {
 	g_source_remove(f.timer);
 	if (!f.sent && !f.sending) collect(&f);   // kept as a draft for next time
 	gtk_widget_destroy(f.dialog);
-	if (f.sent) win->note("Feedback sent. Thank you!");
-	else if (f.sending) win->note("Still sending your feedback in the background.");
+	if (f.sent) {
+		win->note("Feedback sent. Thank you!");
+	} else if (f.sending) {
+		// Told about when it's done; the draft goes then, or stays if it failed.
+		inFlight() = f.sending;
+		g_timeout_add(250, inFlightCb, nullptr);
+		win->note("Still sending your feedback in the background.");
+	}
 }
 
 }  // namespace feedback
