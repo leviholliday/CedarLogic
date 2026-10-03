@@ -154,6 +154,9 @@ void applyStyle() {
 	s += "#settings check:not(:checked), #settings radio:not(:checked), #gate-settings check:not(:checked) { background-image: none; "
 	     "background-color: " + css(fieldFill) + "; border: 1px solid " + css(withAlpha(text, 0.38f)) + "; box-shadow: none; }\n";
 	s += "#settings check:not(:checked) { border-radius: 4px; } #settings radio:not(:checked) { border-radius: 50%; }\n";
+	// Selected text in any field: the accent, not the desktop theme's colour.
+	s += "entry selection, textview text selection, label selection, spinbutton selection { background-color: " + css(c.accent()) +
+	     "; color: " + css(c.onAccent()) + "; }\n";
 	// Quieter text (a slider's value, notes) dims less than GTK's 55%.
 	s += ".dim-label { opacity: 0.8; }\n";
 	s += "#settings button:disabled, #settings button:disabled label, #settings check:disabled + label { color: " + css(withAlpha(text, 0.6f)) +
@@ -199,7 +202,10 @@ void applyStyle() {
 		s += "menu menuitem label { color: " + css(ink) + "; }\n";
 		s += "menu menuitem accelerator { color: " + css(dimInk) + "; margin-left: 18px; }\n";
 		s += "menu menuitem:hover { background-color: " + css(c.accent()) + "; background-image: none; box-shadow: none; }\n";
-		s += "menu menuitem:hover label, menu menuitem:hover accelerator, menu menuitem:hover arrow { color: " + css(c.onAccent()) + "; }\n";
+		// A dropdown's rows (Settings' choices) are cell views, not labels.
+		s += "menu menuitem cellview { color: " + css(ink) + "; }\n";
+		s += "menu menuitem:hover label, menu menuitem:hover accelerator, menu menuitem:hover arrow, menu menuitem:hover cellview { color: " +
+		     css(c.onAccent()) + "; }\n";
 		s += "menu menuitem:disabled label, menu menuitem:disabled accelerator { color: " + css(withAlpha(ink, 0.42f)) + "; }\n";
 		s += "menu menuitem check, menu menuitem radio { margin-right: 6px; }\n";
 		s += "menu separator { margin: 4px 8px; min-height: 1px; background-color: " + css(line) + "; }\n";

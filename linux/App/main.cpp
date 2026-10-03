@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 
 namespace {
 
@@ -130,7 +131,8 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "ram") top = toplevelNamed("cl-sheet-ram");
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
-	const bool ok = top && (what == "menu" ? writeWindowWithMenu(top, gScreenshot) : writeWindow(top, gScreenshot));
+	if (what == "combo") top = settings::window();
+	const bool ok = top && (what == "menu" || what == "combo" ? writeWindowWithMenu(top, gScreenshot) : writeWindow(top, gScreenshot));
 	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
 	prefs().save();
 	fflush(stderr);
@@ -167,6 +169,24 @@ gboolean showCb(gpointer) {
 	else if (what == "scope") w->toggleScope();
 	else if (what == "about") w->showAbout();
 	else if (what == "rename") w->renameFile();
+	else if (what == "combo") {
+		// Settings' first dropdown, open.
+		settings::show(w, 0);
+		g_timeout_add(700, +[](gpointer) -> gboolean {
+			std::function<GtkWidget*(GtkWidget*)> find = [&](GtkWidget* x) -> GtkWidget* {
+				if (GTK_IS_COMBO_BOX(x) && gtk_widget_get_mapped(x)) return x;
+				if (!GTK_IS_CONTAINER(x)) return nullptr;
+				GList* kids = gtk_container_get_children(GTK_CONTAINER(x));
+				GtkWidget* got = nullptr;
+				for (GList* l = kids; l && !got; l = l->next) got = find(GTK_WIDGET(l->data));
+				g_list_free(kids);
+				return got;
+			};
+			if (GtkWidget* sw = settings::window())
+				if (GtkWidget* combo = find(sw)) gtk_combo_box_popup(GTK_COMBO_BOX(combo));
+			return G_SOURCE_REMOVE;
+		}, nullptr);
+	}
 	else if (what == "menu") {
 		GtkWidget* top = GTK_WIDGET(w->window());
 		GdkRectangle r = { gtk_widget_get_allocated_width(top) - 48, 6, 32, 32 };
