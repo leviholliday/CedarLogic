@@ -335,7 +335,15 @@ void CALLBACK pollTimer(HWND, UINT, UINT_PTR id, DWORD) {
 }
 
 void begin(HWND parent, bool interactive) {
-	if (g_check) return;   // one at a time
+	// One at a time: Check for Updates while one runs makes that one say
+	// how it went (finish() reads these on this thread; the worker doesn't).
+	if (g_check) {
+		if (interactive) {
+			g_check->interactive = true;
+			g_check->parent = parent;
+		}
+		return;
+	}
 	g_check.reset(new Check());
 	g_check->interactive = interactive;
 	g_check->parent = parent;
@@ -363,5 +371,15 @@ void start() {
 }
 
 void checkNow(HWND parent) { begin(parent, true); }
+
+void shutdown() {
+	if (!g_check) return;
+	// A check still on its way can't be waited for (a slow network takes a
+	// minute), and a std::thread left joinable when the statics go aborts
+	// the process. Let it run until the process ends, and keep what it
+	// writes to alive till then.
+	g_check->worker.detach();
+	(void)g_check.release();
+}
 
 }  // namespace updater

@@ -546,6 +546,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		DispatchMessageW(&msg);
 	}
 	const int clickResult = gClickTest ? finishClickTest() : 0;
+	updater::shutdown();
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;
