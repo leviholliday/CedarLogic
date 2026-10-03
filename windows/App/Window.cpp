@@ -1063,6 +1063,16 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		if (confirmClose()) destroy();
 		return 0;
+	case WM_ENDSESSION:
+		// Signing out, or a restart (Windows Update): Windows ends the app
+		// once this returns, so save now -- busy or not, and without a
+		// question there's no time for. A save that fails leaves a
+		// recovery copy, offered back at the next start.
+		if (wp) {
+			if (isDirty() && !saveQuietly(false)) writeRecovery();
+			prefs().save();
+		}
+		return 0;
 	case WM_DESTROY:
 		KillTimer(hwnd, kClockTimer);
 		return 0;
