@@ -113,6 +113,21 @@ void applyStyle() {
 	     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; }\n";
 	s += "#settings button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
 	s += "#settings scale highlight { background-color: " + css(c.accent()) + "; border: none; }\n";
+	// A gate's settings: the Mac's sheet, its settings in a card.
+	const Color cardColor = dark ? rgb255(36, 40, 47) : rgb255(255, 255, 255);
+	s += "#gate-settings, #gate-settings > box { background-color: " + css(paper) + "; }\n";
+	s += "#gate-settings .sheet-title { font-weight: bold; font-size: 16px; }\n";
+	s += "#gate-settings .hint { font-size: 0.85em; color: " + css(withAlpha(text, 0.5f)) + "; }\n";
+	s += "#gate-settings .problem { color: rgb(229,72,77); }\n";
+	s += "#gate-settings entry.problem { border-color: rgb(229,72,77); }\n";
+	s += "#settings-card { background-color: " + css(cardColor) + "; border: 1px solid " + css(line) + "; border-radius: 12px; }\n";
+	s += "#settings-card separator { background-color: " + css(line) + "; min-height: 1px; }\n";
+	s += "#gate-settings button.destructive-action { background-color: rgba(229,72,77,0.10); color: rgb(229,72,77); }\n";
+	s += "#gate-settings button.destructive-action label { color: rgb(229,72,77); }\n";
+	// Tooltips: small dark rounded labels, as the Mac's.
+	s += "tooltip { border-radius: 6px; background-color: " + css(dark ? rgb255(52, 56, 64, 0.96f) : rgb255(40, 43, 50, 0.94f)) +
+	     "; color: white; padding: 2px; }\n";
+	s += "tooltip label { color: white; }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

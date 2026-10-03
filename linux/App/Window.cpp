@@ -8,6 +8,8 @@
 #include "FindBar.h"
 #include "Help.h"
 #include "Settings.h"
+#include "Brand.h"
+#include "Sheet.h"
 #include "Splash.h"
 #include "StatusBar.h"
 #include "TitleButtons.h"
@@ -1991,18 +1993,47 @@ void CircuitWindow::showShortcuts() { showShortcutsWindow(GTK_WINDOW(win)); }
 
 void CircuitWindow::showHelp() { help::show(this); }
 
+// About: a card in the brand's look (the launch screen's colours).
 void CircuitWindow::showAbout() {
-	const char* authors[] = { "Cedarville University", "Contributors to CedarLogic", nullptr };
-	gtk_show_about_dialog(GTK_WINDOW(win),
-		"program-name", "CedarLogic",
-		"version", CL_VERSION " (native Linux, testing)",
-		"comments", "A digital logic simulator.\nThis is the native Linux app: GTK and Cairo on the shared "
-		            "CedarLogic engine, with no OpenGL.",
-		"logo-icon-name", "cedarlogic",
-		"authors", authors,
-		"license-type", GTK_LICENSE_GPL_2_0,
-		"website", "https://github.com/leviholliday/cedarlogic",
-		nullptr);
+	Sheet sh;
+	sh.title = "About CedarLogic";
+	sh.width = 460;
+	sh.height = 420;
+	sh.minWidth = 460;
+	sh.minHeight = 420;
+	sh.resizable = false;
+	const double opened = anim::now();
+	sh.animating = true;
+	std::string after;
+	sh.paint = [&](Sheet& s, cairo_t* cr, float w, float h) {
+		const double t = anim::now() - opened;
+		brand::ground(cr, w, h, 0.5f, 0.22f, 26);
+		const float k = (float)anim::easeOut(t / 0.5);
+		brand::icon(cr, w / 2 - 48, 40 + 8 * (1 - k), 96, 0.55f * k);
+		brand::text(cr, "CedarLogic", 0, 152, 28, brand::Bold, brand::kPrimary, w, TextAlign::Center);
+		brand::text(cr, std::string("Version ") + CL_VERSION + "  ·  native Linux test build  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0,
+		            192, 12, brand::Medium, brand::kNeon, w, TextAlign::Center);
+		brand::text(cr, "A digital logic simulator, from Cedarville University. Rebuilt natively for Linux: GTK and Cairo on the shared "
+		                "CedarLogic engine, with no OpenGL, so it runs the same on a Raspberry Pi as on a PC.",
+		            40, 222, 13, brand::Normal, brand::kSecondary, w - 80, TextAlign::Center);
+		const RectF site = rectF(w / 2 - 170, h - 70, w / 2 - 60, h - 36);
+		const RectF news = rectF(w / 2 - 50, h - 70, w / 2 + 60, h - 36);
+		const RectF close = rectF(w / 2 + 70, h - 70, w / 2 + 170, h - 36);
+		brand::button(cr, site, "Website", false, s.hotNext());
+		s.hit(site, [&] { after = "site"; s.close(); });
+		brand::button(cr, news, "What's New", false, s.hotNext());
+		s.hit(news, [&] { after = "news"; s.close(); });
+		brand::button(cr, close, "Close", true, s.hotNext());
+		s.hit(close, [&s] { s.close(); });
+		if (t > 0.6) s.animating = false;
+	};
+	sh.onKey = [](Sheet& s, guint k, guint) -> bool {
+		if (k == GDK_KEY_Return || k == GDK_KEY_KP_Enter) { s.close(); return true; }
+		return false;
+	};
+	sh.run(GTK_WINDOW(win));
+	if (after == "site") openExternally(GTK_WINDOW(win), "https://cedarlogic.netlify.app");
+	else if (after == "news") whatsnew::show(this);
 }
 
 void CircuitWindow::rebuildRecentMenu() {}

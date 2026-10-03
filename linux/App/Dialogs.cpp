@@ -1,6 +1,7 @@
 // The app's dialogs and extra windows (see Dialogs.h).
 
 #include "Dialogs.h"
+#include "Anim.h"
 #include "Collections.h"
 #include "Formula.h"
 #include "Picker.h"
@@ -42,33 +43,87 @@ bool askText(GtkWindow* parent, const std::string& title, const std::string& pro
 	return ok;
 }
 
-// ---- A gate's settings -----------------------------------------------------------
-// The same settings the wx app's parameters dialog lists, each with a control
-// that suits its type. OK applies what changed (one undo step each).
+// ---- A gate's settings ------------------------------------------------------------
+// The Mac's GateSettingsSheet: the part's picture and name, its settings in
+// a card -- each its name on the left, the control its type calls for on the
+// right, the allowed range or a problem under it -- applied as they change
+// (one undo step each), and Rotate, Delete and Done along the bottom.
 
 namespace {
-
-struct SettingField {
-	std::string name, type, value;
-	double min, max;
-	GtkWidget* widget;   // check button, entry, or the file row's entry
-};
 
 std::string numberText(double v) {
 	if (v == std::floor(v) && std::fabs(v) < 1e15) return format("%.0f", v);
 	return format("%g", v);
 }
 
+struct SettingRow {
+	CircuitWindow* w;
+	long gate;
+	std::string name, type, value;
+	double min, max;
+	GtkWidget* control = nullptr;
+	GtkWidget* note = nullptr;
+	std::string hint;
+	GtkWidget* dialog = nullptr;
+};
+
+// Numbers are checked against the library's range, as the wx dialog does.
+bool commitRow(SettingRow* r, bool quietly = false) {
+	std::string v;
+	if (r->type == "BOOL") {
+		v = gtk_switch_get_active(GTK_SWITCH(r->control)) ? "true" : "false";
+	} else if (r->type == "FILE_IN" || r->type == "FILE_OUT") {
+		v = r->value;
+	} else {
+		gchar* t = g_strstrip(g_strdup(gtk_entry_get_text(GTK_ENTRY(r->control))));
+		v = t;
+		g_free(t);
+	}
+	if (r->type == "INT" || r->type == "FLOAT") {
+		char* end = nullptr;
+		const double x = strtod(v.c_str(), &end);
+		std::string bad;
+		if (v.empty() || end == nullptr || *end != 0 || !std::isfinite(x) || (r->type == "INT" && x != std::floor(x)))
+			bad = r->type == "INT" ? "Enter a whole number." : "Enter a number.";
+		else if (x < r->min || x > r->max)
+			bad = "Must be between " + numberText(r->min) + " and " + numberText(r->max) + ".";
+		GtkStyleContext* sc = gtk_widget_get_style_context(r->control);
+		if (!bad.empty()) {
+			if (!quietly) {
+				gtk_label_set_text(GTK_LABEL(r->note), bad.c_str());
+				gtk_style_context_add_class(gtk_widget_get_style_context(r->note), "problem");
+				gtk_style_context_add_class(sc, "problem");
+			}
+			return false;
+		}
+		gtk_label_set_text(GTK_LABEL(r->note), r->hint.c_str());
+		gtk_style_context_remove_class(gtk_widget_get_style_context(r->note), "problem");
+		gtk_style_context_remove_class(sc, "problem");
+	}
+	if (v != r->value) {
+		cl_gate_set_setting(r->w->document(), r->gate, r->name.c_str(), v.c_str());
+		r->value = v;
+		r->w->edited();
+	}
+	return true;
+}
+
 void chooseFileCb(GtkButton* b, gpointer data) {
-	SettingField* f = static_cast<SettingField*>(data);
+	SettingRow* r = static_cast<SettingRow*>(data);
 	GtkWindow* parent = GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(b)));
-	const bool in = f->type == "FILE_IN";
+	const bool in = r->type == "FILE_IN";
 	GtkFileChooserNative* c = gtk_file_chooser_native_new(in ? "Choose a File" : "Save to File", parent,
 		in ? GTK_FILE_CHOOSER_ACTION_OPEN : GTK_FILE_CHOOSER_ACTION_SAVE, in ? "_Open" : "_Save", "_Cancel");
 	if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(c)) == GTK_RESPONSE_ACCEPT) {
 		if (gchar* file = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(c))) {
-			gtk_entry_set_text(GTK_ENTRY(f->widget), file);
+			r->value.clear();
+			cl_gate_set_setting(r->w->document(), r->gate, r->name.c_str(), file);
+			r->value = file;
+			gchar* base = g_path_get_basename(file);
+			gtk_label_set_text(GTK_LABEL(r->note), base);
+			g_free(base);
 			g_free(file);
+			r->w->edited();
 		}
 	}
 	g_object_unref(c);
@@ -79,96 +134,175 @@ void chooseFileCb(GtkButton* b, gpointer data) {
 void showGateSettings(CircuitWindow* w, long gate) {
 	CLDocument* doc = w->document();
 	const std::string caption = cl_gate_caption(doc, gate);
-	GtkWidget* d = gtk_dialog_new_with_buttons(caption.c_str(), w->window(),
-	                                           (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
-	                                           "_Cancel", GTK_RESPONSE_CANCEL, "_OK", GTK_RESPONSE_OK, nullptr);
-	gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_OK);
+	const std::string libName = cl_gate_library_name(doc, gate) ? cl_gate_library_name(doc, gate) : "";
+	GtkWidget* d = gtk_dialog_new();
+	gtk_widget_set_name(d, "gate-settings");
+	gtk_window_set_title(GTK_WINDOW(d), caption.c_str());
+	gtk_window_set_transient_for(GTK_WINDOW(d), w->window());
+	gtk_window_set_modal(GTK_WINDOW(d), TRUE);
+	gtk_window_set_resizable(GTK_WINDOW(d), FALSE);
+	gtk_widget_set_size_request(d, 420, -1);
 	GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(d));
-	gtk_container_set_border_width(GTK_CONTAINER(box), 12);
-	GtkWidget* grid = gtk_grid_new();
-	gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
-	gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
-	gtk_box_pack_start(GTK_BOX(box), grid, TRUE, TRUE, 0);
+	gtk_container_set_border_width(GTK_CONTAINER(box), 0);
+	gtk_box_set_spacing(GTK_BOX(box), 0);
 
-	std::vector<std::unique_ptr<SettingField>> fields;
+	// The part, drawn, and its name.
+	GtkWidget* head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 14);
+	gtk_container_set_border_width(GTK_CONTAINER(head), 20);
+	GtkWidget* pic = gtk_drawing_area_new();
+	gtk_widget_set_size_request(pic, 56, 48);
+	std::string* nameKeep = new std::string(libName);
+	g_signal_connect_data(pic, "draw", CL_CALLBACK(+[](GtkWidget* a, cairo_t* cr, gpointer data) -> gboolean {
+		const std::string* n = static_cast<std::string*>(data);
+		const Chrome c = chrome();
+		const float W = gtk_widget_get_allocated_width(a), H = gtk_widget_get_allocated_height(a);
+		fillRound(cr, rectF(0.5f, 0.5f, W - 0.5f, H - 0.5f), 10, c.dark ? rgb255(36, 40, 47) : colorF(1, 1, 1));
+		strokeRound(cr, rectF(0.5f, 0.5f, W - 0.5f, H - 0.5f), 10, c.hairline());
+		cairo_save(cr);
+		cairo_translate(cr, 6, 6);
+		cl_library_draw_gate(n->c_str(), cr, W - 12, H - 12, std::max(1, gtk_widget_get_scale_factor(a)), c.dark);
+		cairo_restore(cr);
+		return TRUE;
+	}), nameKeep, [](gpointer p, GClosure*) { delete static_cast<std::string*>(p); }, (GConnectFlags)0);
+	gtk_box_pack_start(GTK_BOX(head), pic, FALSE, FALSE, 0);
+	GtkWidget* titles = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+	gtk_widget_set_valign(titles, GTK_ALIGN_CENTER);
+	GtkWidget* t = gtk_label_new(caption.c_str());
+	gtk_style_context_add_class(gtk_widget_get_style_context(t), "sheet-title");
+	gtk_label_set_xalign(GTK_LABEL(t), 0);
+	gtk_label_set_line_wrap(GTK_LABEL(t), TRUE);
+	GtkWidget* sub = gtk_label_new("Changes apply as you make them · Ctrl+Z undoes");
+	gtk_style_context_add_class(gtk_widget_get_style_context(sub), "hint");
+	gtk_label_set_xalign(GTK_LABEL(sub), 0);
+	gtk_box_pack_start(GTK_BOX(titles), t, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(titles), sub, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(head), titles, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(box), head, FALSE, FALSE, 0);
+
+	// The settings, in a card.
+	GtkWidget* cardBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_name(cardBox, "settings-card");
+	gtk_widget_set_margin_start(cardBox, 20);
+	gtk_widget_set_margin_end(cardBox, 20);
+	std::vector<std::unique_ptr<SettingRow>> rows;
 	const int n = cl_gate_setting_count(doc, gate);
 	for (int i = 0; i < n; i++) {
-		CLGateSetting s;
-		if (!cl_gate_setting(doc, gate, i, &s)) continue;
-		std::unique_ptr<SettingField> f(new SettingField{ s.name, s.type, s.value ? s.value : "", s.min, s.max, nullptr });
-		const std::string label = s.label ? s.label : s.name;
-		if (f->type == "BOOL") {
-			f->widget = gtk_check_button_new_with_label(label.c_str());
-			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(f->widget), f->value == "true");
-			gtk_grid_attach(GTK_GRID(grid), f->widget, 0, i, 2, 1);
+		CLGateSetting st;
+		if (!cl_gate_setting(doc, gate, i, &st)) continue;
+		std::unique_ptr<SettingRow> r(new SettingRow{ w, gate, st.name, st.type, st.value ? st.value : "", st.min, st.max });
+		r->dialog = d;
+		if (i > 0) {
+			GtkWidget* sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+			gtk_widget_set_margin_start(sep, 14);
+			gtk_box_pack_start(GTK_BOX(cardBox), sep, FALSE, FALSE, 0);
+		}
+		GtkWidget* rowBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+		gtk_container_set_border_width(GTK_CONTAINER(rowBox), 10);
+		gtk_widget_set_margin_start(rowBox, 4);
+		gtk_widget_set_margin_end(rowBox, 4);
+		GtkWidget* line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+		GtkWidget* label = gtk_label_new(st.label ? st.label : st.name);
+		gtk_label_set_xalign(GTK_LABEL(label), 0);
+		gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+		gtk_box_pack_start(GTK_BOX(line), label, TRUE, TRUE, 0);
+		const bool number = r->type == "INT" || r->type == "FLOAT";
+		r->note = gtk_label_new("");
+		gtk_style_context_add_class(gtk_widget_get_style_context(r->note), "hint");
+		gtk_label_set_xalign(GTK_LABEL(r->note), 0);
+		SettingRow* rp = r.get();
+		if (r->type == "BOOL") {
+			r->control = gtk_switch_new();
+			gtk_switch_set_active(GTK_SWITCH(r->control), r->value == "true");
+			gtk_widget_set_valign(r->control, GTK_ALIGN_CENTER);
+			g_signal_connect(r->control, "notify::active", CL_CALLBACK(+[](GObject*, GParamSpec*, gpointer data) { commitRow(static_cast<SettingRow*>(data)); }), rp);
+			gtk_box_pack_end(GTK_BOX(line), r->control, FALSE, FALSE, 0);
+		} else if (r->type == "FILE_IN" || r->type == "FILE_OUT") {
+			GtkWidget* choose = gtk_button_new_with_label("Choose…");
+			g_signal_connect(choose, "clicked", G_CALLBACK(chooseFileCb), rp);
+			gtk_box_pack_end(GTK_BOX(line), choose, FALSE, FALSE, 0);
+			gchar* base = r->value.empty() ? g_strdup("None") : g_path_get_basename(r->value.c_str());
+			r->hint = base;
+			g_free(base);
 		} else {
-			GtkWidget* l = gtk_label_new(label.c_str());
-			gtk_label_set_xalign(GTK_LABEL(l), 1);
-			gtk_grid_attach(GTK_GRID(grid), l, 0, i, 1, 1);
-			f->widget = gtk_entry_new();
-			gtk_entry_set_text(GTK_ENTRY(f->widget), f->value.c_str());
-			gtk_entry_set_activates_default(GTK_ENTRY(f->widget), TRUE);
-			gtk_widget_set_hexpand(f->widget, TRUE);
-			gtk_entry_set_width_chars(GTK_ENTRY(f->widget), 24);
-			if ((f->type == "INT" || f->type == "FLOAT") && f->max < 1e30)
-				gtk_widget_set_tooltip_text(f->widget, format("%s to %s", numberText(f->min).c_str(), numberText(f->max).c_str()).c_str());
-			if (f->type == "FILE_IN" || f->type == "FILE_OUT") {
-				GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-				GtkWidget* choose = gtk_button_new_with_mnemonic("_Choose…");
-				g_signal_connect(choose, "clicked", G_CALLBACK(chooseFileCb), f.get());
-				gtk_box_pack_start(GTK_BOX(row), f->widget, TRUE, TRUE, 0);
-				gtk_box_pack_start(GTK_BOX(row), choose, FALSE, FALSE, 0);
-				gtk_grid_attach(GTK_GRID(grid), row, 1, i, 1, 1);
-			} else {
-				gtk_grid_attach(GTK_GRID(grid), f->widget, 1, i, 1, 1);
+			r->control = gtk_entry_new();
+			gtk_entry_set_text(GTK_ENTRY(r->control), r->value.c_str());
+			gtk_entry_set_width_chars(GTK_ENTRY(r->control), number ? 8 : 18);
+			if (number) gtk_entry_set_alignment(GTK_ENTRY(r->control), 1);
+			gtk_entry_set_activates_default(GTK_ENTRY(r->control), TRUE);
+			g_signal_connect(r->control, "focus-out-event", CL_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer data) -> gboolean {
+				commitRow(static_cast<SettingRow*>(data));
+				return FALSE;
+			}), rp);
+			if (r->type == "INT" && r->max < 1e30) {
+				GtkWidget* steps = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+				gtk_style_context_add_class(gtk_widget_get_style_context(steps), "linked");
+				for (int dir : { -1, 1 }) {
+					GtkWidget* b = gtk_button_new_from_icon_name(dir < 0 ? "list-remove-symbolic" : "list-add-symbolic", GTK_ICON_SIZE_MENU);
+					g_object_set_data(G_OBJECT(b), "dir", GINT_TO_POINTER(dir));
+					g_signal_connect(b, "clicked", CL_CALLBACK(+[](GtkButton* btn, gpointer data) {
+						SettingRow* r = static_cast<SettingRow*>(data);
+						const int d = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "dir"));
+						const double x = std::min(r->max, std::max(r->min, std::floor(strtod(gtk_entry_get_text(GTK_ENTRY(r->control)), nullptr)) + d));
+						gtk_entry_set_text(GTK_ENTRY(r->control), numberText(x).c_str());
+						commitRow(r);
+					}), rp);
+					gtk_box_pack_start(GTK_BOX(steps), b, FALSE, FALSE, 0);
+				}
+				gtk_box_pack_end(GTK_BOX(line), steps, FALSE, FALSE, 0);
 			}
+			gtk_box_pack_end(GTK_BOX(line), r->control, FALSE, FALSE, 0);
+			if (number && r->max < 1e30) r->hint = numberText(r->min) + " to " + numberText(r->max);
 		}
-		fields.push_back(std::move(f));
+		gtk_label_set_text(GTK_LABEL(r->note), r->hint.c_str());
+		gtk_box_pack_start(GTK_BOX(rowBox), line, FALSE, FALSE, 0);
+		if (!r->hint.empty()) gtk_box_pack_start(GTK_BOX(rowBox), r->note, FALSE, FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(cardBox), rowBox, FALSE, FALSE, 0);
+		rows.push_back(std::move(r));
 	}
-	if (fields.empty()) {
+	if (rows.empty()) {
 		GtkWidget* l = gtk_label_new("This part has no settings.");
-		gtk_style_context_add_class(gtk_widget_get_style_context(l), "dim-label");
-		gtk_grid_attach(GTK_GRID(grid), l, 0, 0, 2, 1);
+		gtk_style_context_add_class(gtk_widget_get_style_context(l), "hint");
+		gtk_label_set_xalign(GTK_LABEL(l), 0);
+		gtk_container_set_border_width(GTK_CONTAINER(cardBox), 12);
+		gtk_box_pack_start(GTK_BOX(cardBox), l, FALSE, FALSE, 0);
 	}
-	GtkWidget* problem = gtk_label_new("");
-	gtk_label_set_xalign(GTK_LABEL(problem), 0);
-	gtk_box_pack_start(GTK_BOX(box), problem, FALSE, FALSE, 6);
-	gtk_widget_show_all(d);
-	gtk_widget_hide(problem);
+	GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
+	gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 320);
+	gtk_container_add(GTK_CONTAINER(scroll), cardBox);
+	gtk_box_pack_start(GTK_BOX(box), scroll, FALSE, FALSE, 0);
 
-	while (gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_OK) {
-		// Numbers are checked against the library's range, as the wx dialog does.
-		std::string bad;
-		std::vector<std::pair<std::string, std::string>> changes;
-		for (auto& f : fields) {
-			std::string v;
-			if (f->type == "BOOL") {
-				v = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(f->widget)) ? "true" : "false";
-			} else {
-				gchar* t = g_strstrip(g_strdup(gtk_entry_get_text(GTK_ENTRY(f->widget))));
-				v = t;
-				g_free(t);
-			}
-			if ((f->type == "INT" || f->type == "FLOAT") && bad.empty()) {
-				char* end = nullptr;
-				const double x = strtod(v.c_str(), &end);
-				if (v.empty() || end == nullptr || *end != 0 || !std::isfinite(x) || (f->type == "INT" && x != std::floor(x)))
-					bad = format("%s: enter %s.", f->name.c_str(), f->type == "INT" ? "a whole number" : "a number");
-				else if (x < f->min || x > f->max)
-					bad = format("%s must be between %s and %s.", f->name.c_str(), numberText(f->min).c_str(), numberText(f->max).c_str());
-			}
-			if (v != f->value) changes.push_back({ f->name, v });
-		}
-		if (!bad.empty()) {
-			gtk_label_set_text(GTK_LABEL(problem), bad.c_str());
-			gtk_widget_show(problem);
-			continue;
-		}
-		for (auto& c : changes) cl_gate_set_setting(doc, gate, c.first.c_str(), c.second.c_str());
-		if (!changes.empty()) w->edited();
-		break;
-	}
+	// Rotate and Delete; Done.
+	GtkWidget* foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_set_margin_start(foot, 20);
+	gtk_widget_set_margin_end(foot, 20);
+	gtk_widget_set_margin_top(foot, 16);
+	gtk_widget_set_margin_bottom(foot, 18);
+	GtkWidget* rotate = gtk_button_new_with_label("Rotate");
+	gtk_widget_set_tooltip_text(rotate, "Turn a quarter turn (R). Parts with wires attached stay put.");
+	GtkWidget* del = gtk_button_new_with_label("Delete");
+	gtk_style_context_add_class(gtk_widget_get_style_context(del), "destructive-action");
+	GtkWidget* done = gtk_button_new_with_label("Done  ↩");
+	gtk_style_context_add_class(gtk_widget_get_style_context(done), "suggested-action");
+	gtk_widget_set_can_default(done, TRUE);
+	g_signal_connect_swapped(rotate, "clicked", CL_CALLBACK(+[](CircuitWindow* cw) { cw->rotate(); }), w);
+	g_signal_connect(del, "clicked", CL_CALLBACK(+[](GtkButton*, gpointer dlg) { gtk_dialog_response(GTK_DIALOG(dlg), 2); }), d);
+	g_signal_connect(done, "clicked", CL_CALLBACK(+[](GtkButton*, gpointer dlg) { gtk_dialog_response(GTK_DIALOG(dlg), GTK_RESPONSE_OK); }), d);
+	gtk_box_pack_start(GTK_BOX(foot), rotate, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(foot), del, FALSE, FALSE, 0);
+	gtk_box_pack_end(GTK_BOX(foot), done, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), foot, FALSE, FALSE, 0);
+	gtk_window_set_default(GTK_WINDOW(d), done);
+	gtk_widget_show_all(d);
+	anim::fadeIn(d);
+	for (auto& r : rows) if (r->hint.empty()) gtk_widget_hide(r->note);
+	const int answer = gtk_dialog_run(GTK_DIALOG(d));
+	// Return keeps a value and closes, like Done; a value that isn't valid
+	// is left as it was.
+	for (auto& r : rows) if (r->control && r->type != "BOOL") commitRow(r.get(), true);
 	gtk_widget_destroy(d);
+	if (answer == 2) w->deleteSelection();
 }
 
 // ---- Add a Gate (A) -----------------------------------------------------------

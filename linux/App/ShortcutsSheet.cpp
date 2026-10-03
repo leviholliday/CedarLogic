@@ -83,7 +83,8 @@ void drawCaps(cairo_t* cr, const std::vector<std::string>& keys, float right, fl
 	float x = right - capsWidth(keys);
 	for (const std::string& k : keys) {
 		const float kw = std::max(22.0f, textWidth(k, 11, true) + 14);
-		const bool word = k.size() > 6;
+		// "drag", "click a pin" and "none" are said, not pressed; "Page Down" is a key.
+		const bool word = !k.empty() && g_ascii_islower(k[0]) && k.size() > 1;
 		const RectF r = rectF(x, cy - 11, x + kw, cy + 11);
 		if (!word) {
 			fillRound(cr, rectF(r.left, r.top + 1, r.right, r.bottom + 1), 5, withAlpha(ink, 0.10f));

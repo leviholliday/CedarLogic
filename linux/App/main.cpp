@@ -69,6 +69,15 @@ GtkWidget* toplevelTitled(const char* title) {
 	return found;
 }
 
+GtkWidget* toplevelNamed(const char* name) {
+	GtkWidget* found = nullptr;
+	GList* all = gtk_window_list_toplevels();
+	for (GList* l = all; l; l = l->next)
+		if (strcmp(gtk_widget_get_name(GTK_WIDGET(l->data)), name) == 0 && gtk_widget_get_visible(GTK_WIDGET(l->data))) found = GTK_WIDGET(l->data);
+	g_list_free(all);
+	return found;
+}
+
 // The window --show opened, pictured; then the app ends (a modal window may
 // be running its own loop, so this doesn't wait for it).
 gboolean showCaptureCb(gpointer) {
@@ -87,6 +96,8 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "shortcuts") top = toplevelTitled("Keyboard Shortcuts");
 	else if (what == "quickadd") top = toplevelTitled("Add a Gate");
 	else if (what == "scope") top = toplevelTitled("Oscilloscope");
+	else if (what == "about") top = toplevelTitled("About CedarLogic");
+	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	const bool ok = top && writeWindow(top, gScreenshot);
 	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
@@ -123,6 +134,17 @@ gboolean showCb(gpointer) {
 	else if (what == "toolbar") { prefs().toolbarStyle = page; w->prefsChanged(); }
 	else if (what == "dark-split") { w->toggleSplit(); }
 	else if (what == "scope") w->toggleScope();
+	else if (what == "about") w->showAbout();
+	else if (what == "gatesettings") {
+		// The part on the page with the most settings.
+		CLDocument* doc = w->document();
+		const int pg = w->currentPage();
+		long best = -1;
+		int most = 0;
+		for (long g = 0; g < 5000; g++)
+			if (cl_edit_select_gate(doc, pg, g) && cl_gate_setting_count(doc, g) > most) { best = g; most = cl_gate_setting_count(doc, g); }
+		if (best >= 0) { cl_edit_select_gate(doc, pg, best); w->showSettings(); }
+	}
 	return G_SOURCE_REMOVE;
 }
 
