@@ -1393,12 +1393,19 @@ std::string chooseSavePath(GtkWindow* parent, const char* title, const std::stri
 		g_free(dir);
 	}
 	if (!out.empty() && ext) {
-		// Add the extension when it was left off.
+		// Add the extension when it was left off (other dots don't count:
+		// "lab3 v1.2"). The dialog asked about replacing the name as typed, so
+		// a file with the extension added is asked about here.
 		const size_t n = strlen(ext);
-		gchar* base = g_path_get_basename(out.c_str());
-		const bool hasDot = strchr(base, '.') != nullptr;
-		g_free(base);
-		if (!hasDot && (out.size() < n || g_ascii_strcasecmp(out.c_str() + out.size() - n, ext) != 0)) out += ext;
+		if (out.size() < n || g_ascii_strcasecmp(out.c_str() + out.size() - n, ext) != 0) {
+			out += ext;
+			if (g_file_test(out.c_str(), G_FILE_TEST_EXISTS)) {
+				gchar* base = g_path_get_basename(out.c_str());
+				const std::string heading = format("“%s” already exists", base);
+				g_free(base);
+				if (!askConfirm(parent, heading, "Replace it? What's in it now will be lost.", "Replace", "Cancel", true)) return "";
+			}
+		}
 	}
 	return out;
 }
