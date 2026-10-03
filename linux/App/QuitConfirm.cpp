@@ -1,6 +1,7 @@
 // Ctrl+Q's question (see QuitConfirm.h).
 
 #include "QuitConfirm.h"
+#include "Anim.h"
 #include "Brand.h"
 #include "Sheet.h"
 
