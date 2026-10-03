@@ -120,6 +120,7 @@ void showExportImage(CircuitWindow* w, int page);
 //   Home / End   first sample / follow the live end again
 //   H            hide or show the chosen signal
 //   Space        run or pause the simulation      C   clear the recording
+//   Ctrl+C       copy the timing diagram
 // Its share button makes a timing diagram for a lab report (Scope.cpp).
 class ScopeWindow {
 public:

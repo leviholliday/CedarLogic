@@ -465,6 +465,7 @@ bool ScopeWindow::key(UINT vk) {
 	case VK_HOME: cursor = length > 0 ? 0 : -1; break;
 	case VK_END: cursor = -1; break;
 	case 'H': {
+		if (ctrl || alt) return false;
 		const std::vector<std::string> names = signals();
 		if (chosen < 0 || chosen >= (int)names.size()) return true;
 		auto it = std::find(hidden.begin(), hidden.end(), names[chosen]);
@@ -476,7 +477,20 @@ bool ScopeWindow::key(UINT vk) {
 		}
 		break;
 	}
-	case 'C': cl_scope_clear(doc); cursor = -1; break;
+	case 'C': {
+		// Ctrl+C copies the timing diagram, as the share menu does; C alone clears.
+		if (ctrl && !alt) {
+			IWICBitmap* bmp = timingImage();
+			if (bmp == nullptr) { MessageBeep(MB_OK); return true; }
+			if (images::copyToClipboard(hwnd, bmp)) owner->note("Timing diagram copied. Paste it into your report.");
+			bmp->Release();
+			return true;
+		}
+		if (ctrl || alt) return false;
+		cl_scope_clear(doc);
+		cursor = -1;
+		break;
+	}
 	case VK_SPACE: owner->toggleRunning(); break;
 	default: return false;
 	}
