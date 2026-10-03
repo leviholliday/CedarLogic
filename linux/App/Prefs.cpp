@@ -69,7 +69,9 @@ void Prefs::load() {
 	if (g_key_file_load_from_file(k, prefsPath().c_str(), G_KEY_FILE_NONE, nullptr)) {
 		themeMode = readInt(k, "themeMode", themeMode, 0, 3);
 		dark = readBool(k, "lastDark", dark);
-		accent = readInt(k, "accent", accent, 0, 5);
+		accent = readInt(k, "accent", accent, 0, 6);
+		// The icon's green became the default (and everyone's accent, once), as on the Mac.
+		if (!readBool(k, "brandAccentSet", false)) accent = 6;
 		showGrid = readBool(k, "showGrid", showGrid);
 		gridStyle = readInt(k, "gridStyle", gridStyle, 0, 1);
 		majorGrid = readBool(k, "majorGrid", majorGrid);
@@ -114,6 +116,7 @@ void Prefs::save() const {
 	g_key_file_set_integer(k, kGroup, "themeMode", themeMode);
 	g_key_file_set_boolean(k, kGroup, "lastDark", dark);
 	g_key_file_set_integer(k, kGroup, "accent", accent);
+	g_key_file_set_boolean(k, kGroup, "brandAccentSet", TRUE);
 	g_key_file_set_boolean(k, kGroup, "showGrid", showGrid);
 	g_key_file_set_integer(k, kGroup, "gridStyle", gridStyle);
 	g_key_file_set_boolean(k, kGroup, "majorGrid", majorGrid);

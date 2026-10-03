@@ -579,8 +579,13 @@ void showPreferencesDialog(GtkWindow* parent) {
 			prefs().save();
 			applyTheme();
 		}));
-	addRow(grid, "Accent", combo({ "Blue", "Purple", "Pink", "Orange", "Green", "Graphite" }, p.accent,
-		[](GtkComboBox* c, gpointer) { prefs().accent = gtk_combo_box_get_active(c); prefsApply(); }));
+	// The icon's green first, as the Mac offers them (the engine's index 6).
+	addRow(grid, "Accent", combo({ "CedarLogic green", "Blue", "Purple", "Pink", "Orange", "Green", "Graphite" }, p.accent == 6 ? 0 : p.accent + 1,
+		[](GtkComboBox* c, gpointer) {
+			const int i = gtk_combo_box_get_active(c);
+			prefs().accent = i <= 0 ? 6 : i - 1;
+			prefsApply();
+		}));
 	addRow(grid, "Grid", combo({ "Lines", "Dots" }, p.gridStyle,
 		[](GtkComboBox* c, gpointer) { prefs().gridStyle = gtk_combo_box_get_active(c); prefsApply(); }));
 	addRow(grid, nullptr, check("Show the grid", p.showGrid,

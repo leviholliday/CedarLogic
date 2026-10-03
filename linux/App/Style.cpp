@@ -54,6 +54,28 @@ void applyStyle() {
 	// The status bar, when it's on.
 	s += "#status { background-color: " + css(c.bar()) + "; }\n";
 	s += "#status label { font-size: 0.9em; }\n";
+	// Dialogs, as the Mac's sheets: paper, filled rounded fields that light
+	// in the accent when focused, soft rounded buttons with the default one
+	// in the accent, switches in the accent.
+	const Color paper = dark ? rgb255(28, 31, 37) : rgb255(250, 250, 252);
+	const Color fieldFill = dark ? rgb255(41, 45, 53) : rgb255(239, 240, 243);
+	const Color text = dark ? rgb255(226, 230, 238) : rgb255(30, 33, 40);
+	s += "dialog, dialog > box, dialog .dialog-vbox, messagedialog .dialog-vbox { background-color: " + css(paper) + "; }\n";
+	s += "dialog .dialog-action-area { padding: 6px 12px 12px 12px; }\n";
+	s += "dialog entry, dialog spinbutton, dialog textview, dialog combobox button { border-radius: 7px; background-image: none; background-color: " +
+	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
+	s += "dialog entry:focus, dialog spinbutton:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
+	s += "dialog button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
+	     "; border: none; box-shadow: none; min-height: 30px; padding: 0 14px; text-shadow: none; }\n";
+	s += "dialog button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
+	s += "dialog button.default, dialog button.suggested-action { background-color: " + css(c.accent()) + "; color: " + css(c.onAccent()) +
+	     "; font-weight: bold; }\n";
+	s += "dialog button.default label, dialog button.suggested-action label { color: " + css(c.onAccent()) + "; }\n";
+	s += "dialog button.default:hover, dialog button.suggested-action:hover { background-color: " + css(withAlpha(c.accent(), 0.88f)) + "; }\n";
+	s += "dialog button.destructive-action { background-color: rgba(229,72,77,0.14); color: rgb(229,72,77); }\n";
+	s += "switch { border-radius: 14px; } switch:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; }\n";
+	s += "check:checked, radio:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; color: " +
+	     css(c.onAccent()) + "; }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

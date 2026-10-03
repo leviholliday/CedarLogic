@@ -26,7 +26,7 @@
 struct Prefs {
 	int themeMode = 0;            // 0 follow the system, 1 light, 2 dark, 3 as last time
 	bool dark = false;            // dark right now
-	int accent = 0;               // 0..5: Blue, Purple, Pink, Orange, Green, Graphite
+	int accent = 6;               // 0..6: Blue, Purple, Pink, Orange, Green, Graphite, CedarLogic green
 	bool showGrid = true;
 	int gridStyle = 0;            // 0 lines, 1 dots
 	bool majorGrid = true;
