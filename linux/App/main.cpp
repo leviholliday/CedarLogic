@@ -75,6 +75,8 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "truth") top = toplevelTitled("Truth Table");
 	else if (what == "feedback") top = toplevelTitled("Send Feedback");
 	else if (what == "templates") top = toplevelTitled("New from Template");
+	else if (what == "export") top = toplevelTitled("Export as Image");
+	else if (what == "scope") top = toplevelTitled("Oscilloscope");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	const bool ok = top && writeWindow(top, gScreenshot);
 	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
@@ -99,6 +101,8 @@ gboolean showCb(gpointer) {
 	else if (what == "templates") templates::showPicker(w);
 	else if (what == "tour") welcome::startTour(w);
 	else if (what == "find") w->runAction("win.find");
+	else if (what == "export") w->exportImage();
+	else if (what == "scope") w->toggleScope();
 	return G_SOURCE_REMOVE;
 }
 

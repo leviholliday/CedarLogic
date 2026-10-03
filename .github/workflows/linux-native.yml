@@ -98,7 +98,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 welcome:1 welcome:2 welcome:3 welcome:4 whatsnew:0 whatsnew:3 whatsnew:5 help help:1 truth feedback templates tour find; do
+          for show in welcome:0 welcome:1 welcome:2 welcome:3 welcome:4 whatsnew:0 whatsnew:3 whatsnew:5 help help:1 truth feedback templates tour find export scope; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
