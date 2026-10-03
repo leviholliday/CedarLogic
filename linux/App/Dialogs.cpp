@@ -1,6 +1,7 @@
 // The app's dialogs and extra windows (see Dialogs.h).
 
 #include "Dialogs.h"
+#include "Alert.h"
 #include "Anim.h"
 #include "Collections.h"
 #include "Formula.h"
@@ -17,30 +18,17 @@
 // ---- A line of text ----------------------------------------------------------------
 
 bool askText(GtkWindow* parent, const std::string& title, const std::string& prompt, std::string& value) {
-	GtkWidget* d = gtk_dialog_new_with_buttons(title.c_str(), parent,
-	                                           (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
-	                                           "_Cancel", GTK_RESPONSE_CANCEL, "_OK", GTK_RESPONSE_OK, nullptr);
-	gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_OK);
-	GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(d));
-	gtk_container_set_border_width(GTK_CONTAINER(box), 12);
-	gtk_box_set_spacing(GTK_BOX(box), 8);
-	GtkWidget* label = gtk_label_new(prompt.c_str());
-	gtk_label_set_xalign(GTK_LABEL(label), 0);
-	GtkWidget* entry = gtk_entry_new();
-	gtk_entry_set_text(GTK_ENTRY(entry), value.c_str());
-	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
-	gtk_entry_set_width_chars(GTK_ENTRY(entry), 30);
-	gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box), entry, FALSE, FALSE, 0);
-	gtk_widget_show_all(d);
-	const bool ok = gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_OK;
-	if (ok) {
-		gchar* t = g_strstrip(g_strdup(gtk_entry_get_text(GTK_ENTRY(entry))));
-		value = t;
-		g_free(t);
-	}
-	gtk_widget_destroy(d);
-	return ok;
+	Alert a;
+	a.title = title;
+	a.heading = title;
+	a.text = prompt;
+	a.field = true;
+	a.value = value;
+	const bool naming = title.find("Rename") != std::string::npos || title.find("Save") != std::string::npos;
+	a.buttons = { { naming ? (title.find("Rename") != std::string::npos ? "Rename" : "Save") : "OK", 1, 1 }, { "Cancel", 0, 0 } };
+	if (runAlert(parent, a) != 1) return false;
+	value = a.value;
+	return true;
 }
 
 // ---- A gate's settings ------------------------------------------------------------
@@ -402,254 +390,9 @@ void showQuickAdd(CircuitWindow* w) {
 
 // The truth table: TruthTableWindow.cpp.
 
-// ---- Memory (RAM and ROM contents) -----------------------------------------------
+// ---- Memory (RAM and ROM contents): RamEditor.cpp ----
 
-namespace {
-
-struct RamEditor {
-	CircuitWindow* w;
-	long gate;
-	int addressBits, dataBits;
-	GtkListStore* store;
-	GtkWidget* dialog;
-	guint timer;
-	long lastRead = -2, lastWritten = -2;
-};
-
-std::string wordText(unsigned long v, int bits) {
-	const int digits = std::max(1, (bits + 3) / 4);
-	return format("%0*lX", digits, v);
-}
-
-void ramFill(RamEditor* r) {
-	gtk_list_store_clear(r->store);
-	const unsigned long words = 1UL << std::min(std::max(r->addressBits, 0), 20);
-	const int aDigits = std::max(1, (r->addressBits + 3) / 4);
-	const long lr = cl_ram_last_read(r->w->document(), r->gate), lw = cl_ram_last_written(r->w->document(), r->gate);
-	for (unsigned long a = 0; a < words; a++) {
-		GtkTreeIter it;
-		gtk_list_store_append(r->store, &it);
-		const unsigned long v = cl_ram_value(r->w->document(), r->gate, a);
-		const char* mark = (long)a == lw ? "written last" : (long)a == lr ? "read last" : "";
-		gtk_list_store_set(r->store, &it, 0, format("%0*lX", aDigits, a).c_str(), 1, wordText(v, r->dataBits).c_str(),
-		                   2, format("%lu", v).c_str(), 3, mark, -1);
-	}
-	r->lastRead = lr;
-	r->lastWritten = lw;
-}
-
-void ramEditedCb(GtkCellRendererText*, gchar* pathText, gchar* text, gpointer data) {
-	RamEditor* r = static_cast<RamEditor*>(data);
-	char* end = nullptr;
-	const unsigned long v = strtoul(text, &end, 16);
-	if (end == text || *end != 0) { gtk_widget_error_bell(r->dialog); return; }
-	const unsigned long address = strtoul(pathText, nullptr, 10);
-	cl_ram_set(r->w->document(), r->gate, address, v);
-	GtkTreeIter it;
-	if (gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(r->store), &it, pathText)) {
-		const unsigned long now = cl_ram_value(r->w->document(), r->gate, address);
-		gtk_list_store_set(r->store, &it, 1, wordText(now, r->dataBits).c_str(), 2, format("%lu", now).c_str(), -1);
-	}
-	r->w->edited();
-}
-
-gboolean ramTickCb(gpointer data) {
-	// The words last read and written change as the circuit runs.
-	RamEditor* r = static_cast<RamEditor*>(data);
-	std::vector<CircuitWindow*>& all = circuitWindows();
-	if (std::find(all.begin(), all.end(), r->w) == all.end()) { r->timer = 0; return G_SOURCE_REMOVE; }
-	const long lr = cl_ram_last_read(r->w->document(), r->gate), lw = cl_ram_last_written(r->w->document(), r->gate);
-	if (lw != r->lastWritten) ramFill(r);
-	else r->lastRead = lr;
-	return G_SOURCE_CONTINUE;
-}
-
-}  // namespace
-
-void showRamEditor(CircuitWindow* w, long gate) {
-	RamEditor r{ w, gate, 0, 0, nullptr, nullptr, 0 };
-	if (!cl_ram_info(w->document(), gate, &r.addressBits, &r.dataBits)) return;
-	r.dialog = gtk_dialog_new_with_buttons("Memory", w->window(),
-	                                       (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
-	                                       "_Load File…", 1, "_Save File…", 2, "_Settings…", 3, "_Close", GTK_RESPONSE_CLOSE, nullptr);
-	gtk_window_set_default_size(GTK_WINDOW(r.dialog), 460, 560);
-	GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(r.dialog));
-	gtk_container_set_border_width(GTK_CONTAINER(box), 10);
-	gtk_box_set_spacing(GTK_BOX(box), 8);
-	const unsigned long words = 1UL << std::min(std::max(r.addressBits, 0), 20);
-	GtkWidget* info = gtk_label_new(format("%lu addresses × %d bits. Double-click a value to change it (in hex).",
-	                                       words, r.dataBits).c_str());
-	gtk_label_set_xalign(GTK_LABEL(info), 0);
-	gtk_box_pack_start(GTK_BOX(box), info, FALSE, FALSE, 0);
-	r.store = gtk_list_store_new(4, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
-	ramFill(&r);
-	GtkWidget* view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(r.store));
-	gtk_tree_view_set_fixed_height_mode(GTK_TREE_VIEW(view), FALSE);
-	const char* titles[] = { "Address", "Value (hex)", "Decimal", "" };
-	for (int c = 0; c < 4; c++) {
-		GtkCellRenderer* cell = gtk_cell_renderer_text_new();
-		g_object_set(cell, "family", "monospace", nullptr);
-		if (c == 1) {
-			g_object_set(cell, "editable", TRUE, nullptr);
-			g_signal_connect(cell, "edited", G_CALLBACK(ramEditedCb), &r);
-		}
-		if (c == 3) g_object_set(cell, "style", PANGO_STYLE_ITALIC, nullptr);
-		gtk_tree_view_append_column(GTK_TREE_VIEW(view),
-			gtk_tree_view_column_new_with_attributes(titles[c], cell, "text", c, nullptr));
-	}
-	GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
-	gtk_container_add(GTK_CONTAINER(scroll), view);
-	gtk_widget_set_vexpand(scroll, TRUE);
-	gtk_box_pack_start(GTK_BOX(box), scroll, TRUE, TRUE, 0);
-	gtk_widget_show_all(r.dialog);
-	r.timer = g_timeout_add(250, ramTickCb, &r);
-
-	for (;;) {
-		const int resp = gtk_dialog_run(GTK_DIALOG(r.dialog));
-		if (resp == 1 || resp == 2) {
-			const bool load = resp == 1;
-			GtkFileChooserNative* c = gtk_file_chooser_native_new(load ? "Load Memory" : "Save Memory",
-				GTK_WINDOW(r.dialog), load ? GTK_FILE_CHOOSER_ACTION_OPEN : GTK_FILE_CHOOSER_ACTION_SAVE,
-				load ? "_Load" : "_Save", "_Cancel");
-			gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(c), TRUE);
-			if (!load) gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(c), "memory.cdm");
-			if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(c)) == GTK_RESPONSE_ACCEPT) {
-				if (gchar* f = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(c))) {
-					if (load) { cl_ram_load_file(w->document(), gate, f); ramFill(&r); w->edited(); }
-					else cl_ram_save_file(w->document(), gate, f);
-					g_free(f);
-				}
-			}
-			g_object_unref(c);
-			continue;
-		}
-		if (resp == 3) {
-			gtk_widget_hide(r.dialog);
-			showGateSettings(w, gate);
-			break;
-		}
-		break;
-	}
-	if (r.timer) g_source_remove(r.timer);
-	gtk_widget_destroy(r.dialog);
-	g_object_unref(r.store);
-}
-
-// ---- Preferences ---------------------------------------------------------------
-
-namespace {
-
-void prefsApply() {
-	prefs().applyWireDots();
-	prefs().save();
-	for (CircuitWindow* w : circuitWindows()) w->prefsChanged();
-}
-
-GtkWidget* combo(const std::vector<const char*>& items, int active, void (*changed)(GtkComboBox*, gpointer)) {
-	GtkWidget* c = gtk_combo_box_text_new();
-	for (const char* i : items) gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(c), i);
-	gtk_combo_box_set_active(GTK_COMBO_BOX(c), active);
-	g_signal_connect(c, "changed", G_CALLBACK(changed), nullptr);
-	return c;
-}
-
-GtkWidget* check(const char* label, bool on, void (*toggled)(GtkToggleButton*, gpointer)) {
-	GtkWidget* c = gtk_check_button_new_with_label(label);
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(c), on);
-	g_signal_connect(c, "toggled", G_CALLBACK(toggled), nullptr);
-	return c;
-}
-
-int row = 0;
-void addRow(GtkWidget* grid, const char* label, GtkWidget* w) {
-	if (label) {
-		GtkWidget* l = gtk_label_new(label);
-		gtk_label_set_xalign(GTK_LABEL(l), 1);
-		gtk_grid_attach(GTK_GRID(grid), l, 0, row, 1, 1);
-		gtk_grid_attach(GTK_GRID(grid), w, 1, row, 1, 1);
-	} else {
-		gtk_grid_attach(GTK_GRID(grid), w, 1, row, 1, 1);
-	}
-	row++;
-}
-
-void addHeading(GtkWidget* grid, const char* text) {
-	GtkWidget* l = gtk_label_new(nullptr);
-	gchar* m = g_markup_printf_escaped("<b>%s</b>", text);
-	gtk_label_set_markup(GTK_LABEL(l), m);
-	g_free(m);
-	gtk_label_set_xalign(GTK_LABEL(l), 0);
-	gtk_widget_set_margin_top(l, row ? 10 : 0);
-	gtk_grid_attach(GTK_GRID(grid), l, 0, row++, 2, 1);
-}
-
-}  // namespace
-
-void showPreferencesDialog(GtkWindow* parent) {
-	GtkWidget* d = gtk_dialog_new_with_buttons("Preferences", parent, GTK_DIALOG_DESTROY_WITH_PARENT,
-	                                           "_Close", GTK_RESPONSE_CLOSE, nullptr);
-	GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(d));
-	gtk_container_set_border_width(GTK_CONTAINER(box), 14);
-	GtkWidget* grid = gtk_grid_new();
-	gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
-	gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
-	gtk_box_pack_start(GTK_BOX(box), grid, TRUE, TRUE, 0);
-	row = 0;
-	Prefs& p = prefs();
-
-	addHeading(grid, "Appearance");
-	addRow(grid, "Theme", combo({ "Match the system", "Light", "Dark", "As I left it" }, p.themeMode,
-		[](GtkComboBox* c, gpointer) {
-			prefs().themeMode = gtk_combo_box_get_active(c);
-			if (prefs().themeMode == 1) prefs().dark = false;
-			else if (prefs().themeMode == 2) prefs().dark = true;
-			else if (prefs().themeMode == 0) prefs().dark = systemPrefersDark();
-			prefs().save();
-			applyTheme();
-		}));
-	// The icon's green first, as the Mac offers them (the engine's index 6).
-	addRow(grid, "Accent", combo({ "CedarLogic green", "Blue", "Purple", "Pink", "Orange", "Green", "Graphite" }, p.accent == 6 ? 0 : p.accent + 1,
-		[](GtkComboBox* c, gpointer) {
-			const int i = gtk_combo_box_get_active(c);
-			prefs().accent = i <= 0 ? 6 : i - 1;
-			prefsApply();
-		}));
-	addRow(grid, "Grid", combo({ "Lines", "Dots" }, p.gridStyle,
-		[](GtkComboBox* c, gpointer) { prefs().gridStyle = gtk_combo_box_get_active(c); prefsApply(); }));
-	addRow(grid, nullptr, check("Show the grid", p.showGrid,
-		[](GtkToggleButton* t, gpointer) { prefs().showGrid = gtk_toggle_button_get_active(t); prefsApply(); }));
-	addRow(grid, nullptr, check("Every fifth line darker", p.majorGrid,
-		[](GtkToggleButton* t, gpointer) { prefs().majorGrid = gtk_toggle_button_get_active(t); prefsApply(); }));
-	addRow(grid, "Wires", combo({ "Thin", "Normal", "Thick" }, p.wireThickness,
-		[](GtkComboBox* c, gpointer) { prefs().wireThickness = gtk_combo_box_get_active(c); prefsApply(); }));
-	addRow(grid, nullptr, check("Dots at every bend (off: only where wires join)", p.wireDots,
-		[](GtkToggleButton* t, gpointer) { prefs().wireDots = gtk_toggle_button_get_active(t); prefsApply(); }));
-	addRow(grid, "Low wires when dark", combo({ "Silver", "Slate blue", "Soft white", "Classic grey" }, p.lowWire,
-		[](GtkComboBox* c, gpointer) { prefs().lowWire = gtk_combo_box_get_active(c); prefsApply(); }));
-	addRow(grid, nullptr, check("Names under the palette's gates", p.showGateNames,
-		[](GtkToggleButton* t, gpointer) {
-			prefs().showGateNames = gtk_toggle_button_get_active(t);
-			prefs().save();
-			showMessage(nullptr, GTK_MESSAGE_INFO, "Changes the next window", "New windows show the palette this way.");
-		}));
-
-	addHeading(grid, "Canvas");
-	addRow(grid, "Mouse wheel", combo({ "Zooms", "Moves around" }, p.mouseWheel,
-		[](GtkComboBox* c, gpointer) { prefs().mouseWheel = gtk_combo_box_get_active(c); prefsApply(); }));
-	addRow(grid, "Touchpad scrolling", combo({ "Zooms", "Moves around" }, p.touchpadScroll,
-		[](GtkComboBox* c, gpointer) { prefs().touchpadScroll = gtk_combo_box_get_active(c); prefsApply(); }));
-	addRow(grid, nullptr, check("Reverse the wheel's zoom", p.reverseWheel,
-		[](GtkToggleButton* t, gpointer) { prefs().reverseWheel = gtk_toggle_button_get_active(t); prefsApply(); }));
-	addRow(grid, nullptr, check("Right-click a gate to rotate it", p.rightClickRotate,
-		[](GtkToggleButton* t, gpointer) { prefs().rightClickRotate = gtk_toggle_button_get_active(t); prefsApply(); }));
-	addRow(grid, nullptr, check("Duplicate (D) also copies to the clipboard", p.duplicateUsesClipboard,
-		[](GtkToggleButton* t, gpointer) { prefs().duplicateUsesClipboard = gtk_toggle_button_get_active(t); prefsApply(); }));
-	addRow(grid, "Tidy Up (Shift+S)", combo({ "Keeps the layout's shape", "Arranges by signal flow" }, p.tidyMode,
-		[](GtkComboBox* c, gpointer) { prefs().tidyMode = gtk_combo_box_get_active(c); prefsApply(); }));
-
-	g_signal_connect(d, "response", G_CALLBACK(gtk_widget_destroy), nullptr);
-	gtk_widget_show_all(d);
-}
+// ---- Preferences: Settings.cpp ----
 
 // ---- Every shortcut ----------------------------------------------------------------
 

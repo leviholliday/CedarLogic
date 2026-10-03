@@ -97,6 +97,8 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "quickadd") top = toplevelTitled("Add a Gate");
 	else if (what == "scope") top = toplevelTitled("Oscilloscope");
 	else if (what == "about") top = toplevelTitled("About CedarLogic");
+	else if (what == "rename") top = toplevelTitled("Rename Circuit");
+	else if (what == "ram") top = toplevelNamed("cl-sheet-ram");
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	const bool ok = top && writeWindow(top, gScreenshot);
@@ -135,15 +137,22 @@ gboolean showCb(gpointer) {
 	else if (what == "dark-split") { w->toggleSplit(); }
 	else if (what == "scope") w->toggleScope();
 	else if (what == "about") w->showAbout();
-	else if (what == "gatesettings") {
-		// The part on the page with the most settings.
+	else if (what == "rename") w->renameFile();
+	else if (what == "ram") {
+		// An 8x8 RAM with something in it.
 		CLDocument* doc = w->document();
 		const int pg = w->currentPage();
-		long best = -1;
-		int most = 0;
-		for (long g = 0; g < 5000; g++)
-			if (cl_edit_select_gate(doc, pg, g) && cl_gate_setting_count(doc, g) > most) { best = g; most = cl_gate_setting_count(doc, g); }
-		if (best >= 0) { cl_edit_select_gate(doc, pg, best); w->showSettings(); }
+		if (cl_edit_add_gate(doc, pg, "AE_RAM_8x8", 40, -20)) {
+			const long g = cl_edit_single_gate(doc, pg);
+			const unsigned long values[] = { 0x3C, 0x42, 0x81, 0xA5, 0xFF, 0x18, 0x7E, 0x01, 0x80, 0x55, 0xAA };
+			for (unsigned long a = 0; a < 11; a++) cl_ram_set(doc, g, a * 3, values[a]);
+			if (g >= 0) w->showRam(g);
+		}
+	}
+	else if (what == "gatesettings") {
+		// A clock: it has settings of each kind.
+		CLDocument* doc = w->document();
+		if (cl_edit_add_gate(doc, w->currentPage(), "BB_CLOCK", 40, -20)) w->showSettings();
 	}
 	return G_SOURCE_REMOVE;
 }

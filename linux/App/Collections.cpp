@@ -1,6 +1,7 @@
 // Templates and My Parts (see Collections.h).
 
 #include "Collections.h"
+#include "Alert.h"
 #include "Dialogs.h"
 #include "Picker.h"
 #include "Window.h"
@@ -288,7 +289,7 @@ void showPicker(CircuitWindow* from) {
 				pk.reload();
 			}
 		} else if (b == 1) {
-			if (askYesNo(GTK_WINDOW(pk.window), "Delete “" + t.name + "”?", "It goes to the trash. Circuits you made from it aren't touched.")) {
+			if (askConfirm(GTK_WINDOW(pk.window), "Delete “" + t.name + "”?", "It goes to the trash. Circuits you made from it aren't touched.", "Delete", "Cancel", true)) {
 				recycle(t.folder);
 				mine = yours();
 				pk.reload();
@@ -453,8 +454,8 @@ void deleteCb(GtkMenuItem*, gpointer data) {
 	const MenuData* m = &m0;
 	Part p;
 	if (!find(m->gate, p)) return;
-	if (!askYesNo(m->owner, "Delete \u201C" + p.name + "\u201D?",
-	              "It goes from My Parts to the trash. Circuits that already use it keep their copy."))
+	if (!askConfirm(m->owner, "Delete \u201C" + p.name + "\u201D?",
+	              "It goes from My Parts to the trash. Circuits that already use it keep their copy.", "Delete", "Cancel", true))
 		return;
 	recycle(p.folder);
 	forget(m->gate);

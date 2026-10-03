@@ -4,6 +4,7 @@
 // a CedarLogic that isn't running any more, is offered back.
 
 #include "Recovery.h"
+#include "Alert.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -101,19 +102,18 @@ void offer(GtkApplication* app, CircuitWindow* reuse) {
 	if (found.empty()) return;
 	std::string names;
 	for (const Found& f : found) names += "• " + (f.name.empty() ? std::string("Untitled") : f.name) + "\n";
-	GtkWidget* d = gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
-		found.size() == 1 ? "CedarLogic closed before this circuit was saved"
-		                  : "CedarLogic closed before these circuits were saved");
-	gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d),
-		"%sA copy of the work from just before it closed was kept. Open it again?", names.c_str());
-	gtk_dialog_add_buttons(GTK_DIALOG(d), "_Throw Away", GTK_RESPONSE_REJECT, "_Later", GTK_RESPONSE_CANCEL,
-	                       "_Open", GTK_RESPONSE_ACCEPT, nullptr);
-	gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_ACCEPT);
-	const int r = gtk_dialog_run(GTK_DIALOG(d));
-	gtk_widget_destroy(d);
-	if (r == GTK_RESPONSE_CANCEL || r == GTK_RESPONSE_DELETE_EVENT) return;   // asked again next launch
+	Alert a;
+	a.heading = found.size() == 1 ? "CedarLogic closed before this circuit was saved"
+	                              : "CedarLogic closed before these circuits were saved";
+	a.text = names + "A copy of the work from just before it closed was kept. Open it again?";
+	a.badge = 2;
+	a.buttons = { { "Open", 1, 1 }, { "Later", 0, 0 }, { "Throw Away", 2, 2, true } };
+	a.enter = 1;
+	a.escape = 0;
+	const int answer = runAlert(parent, a);
+	if (answer == 0) return;   // asked again next launch
 	for (const Found& f : found) {
-		if (r == GTK_RESPONSE_ACCEPT) {
+		if (answer == 1) {
 			char err[512] = "";
 			CLDocument* doc = cl_document_open(file(f.base, ".cdl").c_str(), err, sizeof err);
 			if (doc == nullptr) {

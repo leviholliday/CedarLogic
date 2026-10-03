@@ -9,6 +9,7 @@
 //      asked about first) -- then relaunch the new file
 
 #include "Updater.h"
+#include "Alert.h"
 
 #include <atomic>
 #include <cstdio>
@@ -203,7 +204,7 @@ void installDeb(GtkApplication* app, const Asset& asset) {
 	const std::string page = format("https://github.com/%s/releases/tag/%s", kOwnerRepo, kTag);
 	gchar* pkexec = g_find_program_in_path("pkexec");
 	if (pkexec == nullptr) {
-		if (askYesNo(parent, "Update available", "Open the download page to get the new installer?")) openExternally(parent, page);
+		if (askConfirm(parent, "An update is available", "Open the download page to get the new installer?", "Open Page", "Not Now")) openExternally(parent, page);
 		return;
 	}
 	const std::string dir = std::string(g_get_user_cache_dir()) + "/CedarLogic";
@@ -228,12 +229,12 @@ void installDeb(GtkApplication* app, const Asset& asset) {
 	g_free(pkexec);
 	std::remove(file.c_str());
 	if (!ran || !g_spawn_check_exit_status(status, nullptr)) {
-		if (askYesNo(parent, "The update wasn't installed",
-		             "It needs your password to install. Open the download page to install it by hand?"))
+		if (askConfirm(parent, "The update wasn't installed",
+		               "It needs your password to install. Open the download page to install it by hand?", "Open Page", "Not Now"))
 			openExternally(parent, page);
 		return;
 	}
-	if (askYesNo(parent, "Update installed", "The update is installed. Restart CedarLogic now to use it?")) {
+	if (askConfirm(parent, "The update is installed", "Restart CedarLogic now to use it? Your circuits are saved.", "Restart Now", "Later")) {
 		if (quitApp(app)) {
 			gchar* again[] = { (gchar*)"/usr/bin/cedarlogic", nullptr };
 			g_spawn_async(nullptr, again, nullptr, (GSpawnFlags)0, nullptr, nullptr, nullptr, nullptr);
@@ -246,8 +247,9 @@ void install(GtkApplication* app, const Asset& asset) {
 	GtkWindow* parent = gtk_application_get_active_window(app);
 	const std::string current = runningAppImage();
 	if (current.empty()) {
-		if (askYesNo(parent, "Update available",
-		             "This copy of CedarLogic isn't the AppImage, so it can't update itself. Open the download page?"))
+		if (askConfirm(parent, "An update is available",
+		               "This copy of CedarLogic isn't the AppImage or the installed app, so it can't update itself. Open the download page?",
+		               "Open Page", "Not Now"))
 			openExternally(parent, format("https://github.com/%s/releases/tag/%s", kOwnerRepo, kTag));
 		return;
 	}
@@ -276,7 +278,7 @@ void install(GtkApplication* app, const Asset& asset) {
 		return;
 	}
 
-	if (askYesNo(parent, "Update installed", "The update is installed. Restart CedarLogic now to use it?")) {
+	if (askConfirm(parent, "The update is installed", "Restart CedarLogic now to use it? Your circuits are saved.", "Restart Now", "Later")) {
 		if (quitApp(app)) {
 			gchar* argv[] = { const_cast<gchar*>(current.c_str()), nullptr };
 			GError* e = nullptr;
@@ -320,7 +322,8 @@ gboolean pollCheck(gpointer data) {
 		if (g_offeredThisRun == r->sha) { delete r; return G_SOURCE_REMOVE; }
 		g_offeredThisRun = r->sha;
 	}
-	if (askYesNo(parent, "Update available", "A newer CedarLogic test build is available. Download and install it now?"))
+	if (askConfirm(parent, "A new test build is available", "Download and install it now? It takes a moment, and CedarLogic restarts after.",
+	               "Install", "Not Now"))
 		install(r->app, r->asset);
 	delete r;
 	return G_SOURCE_REMOVE;

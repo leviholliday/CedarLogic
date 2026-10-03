@@ -22,7 +22,6 @@ void showExportImage(CircuitWindow* w, int page);
 // Build from Formula: switches, gates and lights from a formula typed in.
 void showBuildFormula(CircuitWindow* w);
 void showRamEditor(CircuitWindow* w, long gate);
-void showPreferencesDialog(GtkWindow* parent);
 void showShortcutsWindow(GtkWindow* parent);
 
 // The oscilloscope (Scope.cpp), as the Mac's ScopeView: every signal a TO

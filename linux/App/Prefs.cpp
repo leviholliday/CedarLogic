@@ -1,6 +1,7 @@
 // Settings, resources, colours and small helpers (see App.h).
 
 #include "App.h"
+#include "Alert.h"
 #include "Settings.h"
 #include "Window.h"
 
@@ -402,23 +403,19 @@ std::string format(const char* fmt, ...) {
 	return out;
 }
 
+// Both as the app's alert card (Alert.cpp).
 void showMessage(GtkWindow* parent, GtkMessageType type, const std::string& title, const std::string& text) {
-	GtkWidget* d = gtk_message_dialog_new(parent, (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
-	                                      type, GTK_BUTTONS_OK, "%s", title.c_str());
-	if (!text.empty()) gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d), "%s", text.c_str());
-	gtk_dialog_run(GTK_DIALOG(d));
-	gtk_widget_destroy(d);
+	Alert a;
+	a.heading = title;
+	a.text = text;
+	a.badge = type == GTK_MESSAGE_INFO ? 1 : type == GTK_MESSAGE_WARNING ? 2 : type == GTK_MESSAGE_ERROR ? 3 : 0;
+	a.buttons = { { "OK", 1, 1 } };
+	a.escape = a.enter = 1;
+	runAlert(parent, a);
 }
 
 bool askYesNo(GtkWindow* parent, const std::string& title, const std::string& text) {
-	GtkWidget* d = gtk_message_dialog_new(parent, (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
-	                                      GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE, "%s", title.c_str());
-	if (!text.empty()) gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d), "%s", text.c_str());
-	gtk_dialog_add_buttons(GTK_DIALOG(d), "_No", GTK_RESPONSE_NO, "_Yes", GTK_RESPONSE_YES, nullptr);
-	gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_YES);
-	const int r = gtk_dialog_run(GTK_DIALOG(d));
-	gtk_widget_destroy(d);
-	return r == GTK_RESPONSE_YES;
+	return askConfirm(parent, title, text, "Yes", "No");
 }
 
 void reportException(const char* where, const char* what) {

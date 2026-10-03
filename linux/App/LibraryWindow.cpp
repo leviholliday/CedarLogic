@@ -1,6 +1,7 @@
 // Your Circuits and Version History (see LibraryWindow.h).
 
 #include "LibraryWindow.h"
+#include "Alert.h"
 #include "Dialogs.h"
 #include "Library.h"
 #include "Picker.h"
@@ -83,8 +84,9 @@ void showYourCircuits(CircuitWindow* from) {
 			if (!selectedItem(it)) return false;
 			const std::vector<std::string> open = openIDs();
 			const bool isOpen = std::find(open.begin(), open.end(), it.id) != open.end();
-			if (!askYesNo(GTK_WINDOW(picker.window), "Delete “" + it.name + "”?",
-			              std::string(isOpen ? "It's open, so its window will close. " : "") + "It and all its versions will be deleted."))
+			if (!askConfirm(GTK_WINDOW(picker.window), "Delete “" + it.name + "”?",
+			                std::string(isOpen ? "It's open, so its window will close. " : "") + "It and all its versions will be deleted.",
+			                "Delete", "Cancel", true))
 				return false;
 			for (CircuitWindow* w : std::vector<CircuitWindow*>(circuitWindows())) {
 				library::Item wi;

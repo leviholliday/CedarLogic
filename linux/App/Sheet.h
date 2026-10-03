@@ -27,7 +27,13 @@ public:
 	std::function<void(Sheet&, cairo_t*, float w, float h)> paint;
 	std::function<bool(Sheet&, guint keyval, guint state)> onKey;   // true when used
 	std::function<void(Sheet&, float dy)> onScroll;                 // dy in points, down positive
-	std::function<void(Sheet&)> onTick;                             // ~60 times a second while `animating`
+	std::function<void(Sheet&)> onTick;
+	// After the window is made, before it shows: widgets can go in `overlay`,
+	// and `initialFocus` takes the keyboard instead of the drawing.
+	std::function<void(Sheet&)> onOpen;
+	GtkWidget* initialFocus = nullptr;
+	// Closed, with the window and its widgets still there (to read them back).
+	std::function<void(Sheet&)> onClose;                             // ~60 times a second while `animating`
 	bool animating = false;
 
 	struct Hit { RectF r; std::function<void()> act; };

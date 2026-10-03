@@ -49,18 +49,20 @@ void Sheet::run(GtkWindow* owner) {
 	g_signal_connect(window, "key-press-event", G_CALLBACK(keyCb), this);
 	g_signal_connect(window, "delete-event", G_CALLBACK(deleteCb), this);
 	tickId = gtk_widget_add_tick_callback(area, tickCb, this, nullptr);
+	if (onOpen) guarded("a window", [&] { onOpen(*this); });
 	gtk_widget_show_all(window);
 	anim::fadeIn(window);
-	gtk_widget_grab_focus(area);
+	gtk_widget_grab_focus(initialFocus ? initialFocus : area);
 	loop = g_main_loop_new(nullptr, FALSE);
 	if (!done) g_main_loop_run(loop);
+	if (onClose) guarded("closing a window", [&] { onClose(*this); });
 	g_main_loop_unref(loop);
 	loop = nullptr;
 	gtk_widget_remove_tick_callback(area, tickId);
 	g_signal_handlers_disconnect_by_data(area, this);
 	g_signal_handlers_disconnect_by_data(window, this);
 	gtk_widget_destroy(window);
-	window = area = overlay = nullptr;
+	window = area = overlay = initialFocus = nullptr;
 	if (owner) gtk_window_present(owner);
 }
 

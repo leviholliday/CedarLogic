@@ -1,6 +1,7 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "Alert.h"
 #include "Canvas.h"
 #include "Collections.h"
 #include "Dialogs.h"
@@ -1299,7 +1300,8 @@ void CircuitWindow::sizeCb(GtkWidget* widget, GdkRectangle*, gpointer self) {
 bool CircuitWindow::confirmClose() {
 	if (!isDirty()) return true;
 	if (saveQuietly(false)) return true;
-	return askYesNo(GTK_WINDOW(win), "This circuit couldn't be saved", "Close it anyway? The changes since it last saved will be lost.");
+	return askConfirm(GTK_WINDOW(win), "This circuit couldn't be saved", "Close it anyway? The changes since it last saved will be lost.",
+	                  "Close Anyway", "Cancel", true);
 }
 
 // ---- Files ---------------------------------------------------------------------
@@ -1893,8 +1895,8 @@ void CircuitWindow::closePage(int page) {
 	if (cl_document_page_count(doc) < 2) return;
 	// A tab with work on it asks first (wx CloseTabCanvas).
 	if (cl_document_gate_count(doc, page) > 0 &&
-	    !askYesNo(GTK_WINDOW(win), "Close Tab", "All work on this tab will be lost. Would you like to close it?\n\n"
-	                                            "(Ctrl+Shift+T brings it back.)"))
+	    !askConfirm(GTK_WINDOW(win), "Close this tab?", "All work on this tab will be lost. Ctrl+Shift+T brings it back.", "Close Tab",
+	                "Cancel", true))
 		return;
 	for (Canvas* c : canvases) c->cancelDrag();
 	cl_edit_select_none(doc, page);

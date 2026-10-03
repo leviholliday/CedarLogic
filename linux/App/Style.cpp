@@ -40,6 +40,11 @@ void applyStyle() {
 	// A tab renamed in place: a bare field on its card.
 	s += "#tab-rename { background: transparent; border: none; box-shadow: none; outline: none; min-height: 20px; padding: 0 2px; "
 	     "font-weight: bold; font-size: 11.5px; color: " + css(c.tabInk()) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#alert-entry { background: transparent; border: none; box-shadow: none; outline: none; min-height: 24px; padding: 0 2px; "
+	     "font-size: 13px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#ram-cell, #ram-jump { background: transparent; border: none; box-shadow: none; outline: none; min-height: 18px; padding: 0 2px; "
+	     "font-family: monospace; font-size: 11.5px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#ram-jump { font-size: 12px; padding-left: 4px; }\n";
 	s += "#palette entry { border-radius: 8px; min-height: 28px; background-color: " + css(field) + "; border: 1px solid " + css(line) +
 	     "; box-shadow: none; }\n";
 	s += "#palette entry:focus { border-color: " + css(c.accent()) + "; }\n";
