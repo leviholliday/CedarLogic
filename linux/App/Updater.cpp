@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <glib/gstdio.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -411,14 +412,35 @@ void Updater_CheckNow(GtkApplication* app) { check(app, true); }
 // Run as an AppImage: put it in the applications menu, with its icon, and
 // make .cdl files open in it -- as an installed app would be. Written each
 // launch, so a moved file is followed; skipped when the .deb is installed
-// (that has its own entry).
+// (that has its own entry), and taken away again then.
 void Updater_IntegrateAppImage() {
+	const std::string data = g_get_user_data_dir();
+	const std::string apps = data + "/applications", icons = data + "/icons/hicolor/256x256/apps", mime = data + "/mime/packages";
+	const std::string file = apps + "/cedarlogic.desktop";
+	// Tell the desktop (quietly; whichever of these it has).
+	auto refresh = [&] {
+		const std::string cmd = "(update-desktop-database '" + apps + "'; update-mime-database '" + data + "/mime'; "
+		                        "gtk-update-icon-cache -q -t '" + data + "/icons/hicolor') >/dev/null 2>&1 &";
+		if (data.find('\'') == std::string::npos) (void)std::system(cmd.c_str());
+	};
+	if (g_file_test("/usr/share/applications/cedarlogic.desktop", G_FILE_TEST_EXISTS)) {
+		// The installed app's entry is hidden by one of the same name here
+		// (the user's own wins), so one an AppImage wrote goes, with its icon
+		// and file type: the menu and .cdl files then open the installed app,
+		// not an AppImage that may be gone.
+		gchar* was = nullptr;
+		if (g_file_get_contents(file.c_str(), &was, nullptr, nullptr) && (strstr(was, "X-CedarLogic-AppImage=") || strstr(was, ".AppImage"))) {
+			g_remove(file.c_str());
+			g_remove((mime + "/cedarlogic-mime.xml").c_str());
+			g_remove((icons + "/cedarlogic.png").c_str());
+			refresh();
+		}
+		g_free(was);
+		return;
+	}
 	const std::string image = runningAppImage();
 	const char* appdir = std::getenv("APPDIR");
 	if (image.empty() || appdir == nullptr) return;
-	if (g_file_test("/usr/share/applications/cedarlogic.desktop", G_FILE_TEST_EXISTS)) return;
-	const std::string data = g_get_user_data_dir();
-	const std::string apps = data + "/applications", icons = data + "/icons/hicolor/256x256/apps", mime = data + "/mime/packages";
 	g_mkdir_with_parents(apps.c_str(), 0755);
 	g_mkdir_with_parents(icons.c_str(), 0755);
 	g_mkdir_with_parents(mime.c_str(), 0755);
@@ -439,15 +461,12 @@ void Updater_IntegrateAppImage() {
 	const std::string entry = "[Desktop Entry]\nName=CedarLogic\nGenericName=Logic Simulator\nComment=Build and simulate digital logic circuits\n"
 	                          "Type=Application\nExec=\"" + quoted + "\" %F\nIcon=cedarlogic\nTerminal=false\n"
 	                          "MimeType=application/x-cedarlogic-circuit;\nStartupWMClass=CedarLogic\n"
-	                          "Categories=Education;Development;Electronics;\nKeywords=logic;simulator;circuit;gates;\n";
-	const std::string file = apps + "/cedarlogic.desktop";
+	                          "Categories=Education;Development;Electronics;\nKeywords=logic;simulator;circuit;gates;\n"
+	                          "X-CedarLogic-AppImage=true\n";
 	gchar* was = nullptr;
 	const bool same = g_file_get_contents(file.c_str(), &was, nullptr, nullptr) && entry == was;
 	g_free(was);
 	if (same) return;
 	g_file_set_contents(file.c_str(), entry.c_str(), -1, nullptr);
-	// Tell the desktop (quietly; whichever of these it has).
-	const std::string cmd = "(update-desktop-database '" + apps + "'; update-mime-database '" + data + "/mime'; "
-	                        "gtk-update-icon-cache -q -t '" + data + "/icons/hicolor') >/dev/null 2>&1 &";
-	if (apps.find('\'') == std::string::npos) (void)std::system(cmd.c_str());
+	refresh();
 }
