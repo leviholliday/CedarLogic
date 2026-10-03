@@ -76,6 +76,9 @@ void applyStyle() {
 	s += "switch { border-radius: 14px; } switch:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; }\n";
 	s += "check:checked, radio:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; color: " +
 	     css(c.onAccent()) + "; }\n";
+	// The pickers' search: a bare entry over the drawn field.
+	s += "#picker-search { background: transparent; border: none; box-shadow: none; outline: none; min-height: 24px; color: " + css(text) +
+	     "; }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

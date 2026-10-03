@@ -25,6 +25,7 @@ public:
 	~CircuitWindow();
 
 	GtkWindow* window() const { return GTK_WINDOW(win); }
+	GtkApplication* application() const { return app; }
 	CLDocument* document() const { return doc; }
 	const std::string& filePath() const { return path; }
 	// An untouched new circuit (a file opened next replaces it).
@@ -102,6 +103,20 @@ public:
 	bool isFloating() const;
 	void cancelFloating();
 
+	// ---- Your Circuits ----
+	// Into Your Circuits, quietly (a version when one's due, or now when
+	// `explicitSave`). False when it couldn't be written.
+	bool saveQuietly(bool explicitSave);
+	// A copy as a .cdl file anywhere (Your Circuits keeps the circuit itself).
+	bool exportCopy();
+	void renameFile();
+	void duplicateCircuit();
+	// Closed without saving: its circuit went (deleted from Your Circuits).
+	void discard();
+	void reloadFromDisk(const std::string& message);
+	// Something in Your Circuits changed (a rename): the title follows.
+	void libraryChanged();
+
 	// ---- Commands ----
 	void newCircuit();
 	void open();
@@ -178,6 +193,8 @@ private:
 	GtkWidget* statusBar = nullptr;
 	GtkWidget* statusMessage = nullptr;
 	GtkWidget* statusInfo = nullptr;
+	guint autosaveId = 0;             // saving as you go, a moment after the last change
+	static gboolean autosaveCb(gpointer self);
 	Toolbar* toolbar = nullptr;
 	TabStrip* tabs = nullptr;
 	int lastZoomShown = -1;

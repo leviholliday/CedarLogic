@@ -95,6 +95,8 @@ void Prefs::load() {
 		windowMaximized = readBool(k, "windowMaximized", windowMaximized);
 		paletteWidth = readInt(k, "paletteWidth", paletteWidth, 120, 800);
 		lastFolder = readString(k, "lastFolder", lastFolder);
+		lastCircuit = readString(k, "lastCircuit", lastCircuit);
+		studentName = readString(k, "studentName", studentName);
 		gsize n = 0;
 		if (gchar** list = g_key_file_get_string_list(k, kGroup, "recent", &n, nullptr)) {
 			recent.clear();
@@ -140,6 +142,8 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "windowMaximized", windowMaximized);
 	g_key_file_set_integer(k, kGroup, "paletteWidth", paletteWidth);
 	g_key_file_set_string(k, kGroup, "lastFolder", lastFolder.c_str());
+	g_key_file_set_string(k, kGroup, "lastCircuit", lastCircuit.c_str());
+	g_key_file_set_string(k, kGroup, "studentName", studentName.c_str());
 	std::vector<const gchar*> list;
 	for (const std::string& r : recent) list.push_back(r.c_str());
 	g_key_file_set_string_list(k, kGroup, "recent", list.data(), list.size());

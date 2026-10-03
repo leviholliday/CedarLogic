@@ -7,6 +7,8 @@
 #include "Splash.h"
 #include "Updater.h"
 #include "Welcome.h"
+#include "Library.h"
+#include "LibraryWindow.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -53,15 +55,19 @@ GMenuModel* buildMenubar() {
 
 	GMenu* file = g_menu_new();
 	GMenu* s1 = g_menu_new();
-	g_menu_append(s1, "_New", "app.new");
-	g_menu_append(s1, "_Open…", "app.open");
+	g_menu_append(s1, "_New Circuit", "app.new");
+	g_menu_append(s1, "Your _Circuits…", "app.open");
+	g_menu_append(s1, "_Import a File…", "app.import");
 	gRecentMenu = g_menu_new();
 	g_menu_append_submenu(s1, "Open _Recent", G_MENU_MODEL(gRecentMenu));
 	g_menu_append(s1, "Open the _Practice Circuit", "app.open-sample");
 	g_menu_append_section(file, nullptr, G_MENU_MODEL(s1));
 	GMenu* s2 = g_menu_new();
-	g_menu_append(s2, "_Save", "win.save");
-	g_menu_append(s2, "Save _As…", "win.save-as");
+	g_menu_append(s2, "_Save a Version", "win.save");
+	g_menu_append(s2, "_Version History…", "win.versions");
+	g_menu_append(s2, "_Rename…", "win.rename-circuit");
+	g_menu_append(s2, "Du_plicate Circuit", "win.duplicate-circuit");
+	g_menu_append(s2, "E_xport as CedarLogic File…", "win.save-as");
 	g_menu_append(s2, "_Export as Image…", "win.export-image");
 	GMenu* older = g_menu_new();
 	g_menu_append(older, "For CedarLogic _2…", "win.export-v2");
@@ -152,6 +158,7 @@ void setAccels(GtkApplication* app) {
 	struct { const char* action; const char* keys[4]; } accels[] = {
 		{ "app.new", { "<Primary>n" } },
 		{ "app.open", { "<Primary>o" } },
+		{ "app.import", { "<Primary>i" } },
 		{ "app.quit", { "<Primary>q" } },
 		{ "win.save", { "<Primary>s" } },
 		{ "win.save-as", { "<Primary><Shift>s" } },
@@ -194,7 +201,14 @@ CircuitWindow* activeWindow(GtkApplication* app) {
 
 void newCb(GSimpleAction*, GVariant*, gpointer app) { newCircuitWindow(GTK_APPLICATION(app)); }
 
+// Ctrl+O: Your Circuits (as the Mac's); Ctrl+I brings in a file from anywhere.
 void openCb(GSimpleAction*, GVariant*, gpointer app) {
+	CircuitWindow* w = activeWindow(GTK_APPLICATION(app));
+	if (w) showYourCircuits(w);
+	else chooseAndOpen(GTK_APPLICATION(app), nullptr);
+}
+
+void importCb(GSimpleAction*, GVariant*, gpointer app) {
 	CircuitWindow* w = activeWindow(GTK_APPLICATION(app));
 	chooseAndOpen(GTK_APPLICATION(app), w ? w->window() : nullptr);
 }
@@ -266,6 +280,7 @@ void startupCb(GApplication* gapp, gpointer) {
 	const GActionEntry entries[] = {
 		{ "new", newCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "open", openCb, nullptr, nullptr, nullptr, { 0 } },
+		{ "import", importCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "open-recent", openRecentCb, "s", nullptr, nullptr, { 0 } },
 		{ "open-sample", openSampleCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "quit", quitCb, nullptr, nullptr, nullptr, { 0 } },
@@ -312,7 +327,17 @@ void activateCb(GApplication* gapp, gpointer) {
 		g_application_quit(gapp);
 		return;
 	}
-	CircuitWindow* w = newCircuitWindow(GTK_APPLICATION(gapp));
+	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
+	// do; else the most recent one; else a new circuit.
+	if (gScreenshot.empty()) {
+		std::string last = library::lastCircuit();
+		if (last.empty() || !g_file_test(last.c_str(), G_FILE_TEST_EXISTS)) {
+			const std::vector<library::Item> all = library::items();
+			last = all.empty() ? std::string() : all.front().circuit();
+		}
+		if (!last.empty()) openCircuit(GTK_APPLICATION(gapp), last, nullptr);
+	}
+	CircuitWindow* w = circuitWindows().empty() ? newCircuitWindow(GTK_APPLICATION(gapp)) : circuitWindows().front();
 	if (gSplash && w) gtk_widget_hide(GTK_WIDGET(w->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
 		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
@@ -369,13 +394,19 @@ CircuitWindow* newCircuitWindow(GtkApplication* app) {
 	return new CircuitWindow(app, cl_document_new(), "");
 }
 
+// Every circuit lives in Your Circuits: a .cdl file from elsewhere carries
+// on as a copy there (the file itself is left alone; Export gets one out),
+// and opening the same file again finds that copy.
 bool openCircuit(GtkApplication* app, const std::string& path, CircuitWindow* from) {
+	std::string target = path;
+	library::Item existing;
+	if (!library::contains(path) && library::imported(path, existing)) target = existing.circuit();
 	// Already open: bring that window forward.
 	for (CircuitWindow* w : circuitWindows()) {
-		if (!w->filePath().empty() && w->filePath() == path) { gtk_window_present(w->window()); return true; }
+		if (!w->filePath().empty() && w->filePath() == target) { gtk_window_present(w->window()); return true; }
 	}
 	char err[512] = "";
-	CLDocument* doc = cl_document_open(path.c_str(), err, sizeof err);
+	CLDocument* doc = cl_document_open(target.c_str(), err, sizeof err);
 	if (doc == nullptr) {
 		showMessage(from ? from->window() : nullptr, GTK_MESSAGE_ERROR,
 		            format("“%s” couldn't be opened", baseName(path).c_str()), err);
@@ -388,10 +419,22 @@ bool openCircuit(GtkApplication* app, const std::string& path, CircuitWindow* fr
 		}
 		return false;
 	}
+	bool importedNow = false;
+	if (!library::contains(target)) {
+		library::Item it;
+		if (library::create(baseName(path), cl_document_save_text(doc), path, it)) {
+			target = it.circuit();
+			importedNow = true;
+		}
+		gchar* dir = g_path_get_dirname(path.c_str());
+		prefs().lastFolder = dir;
+		g_free(dir);
+	}
 	CircuitWindow* w;
-	if (from && from->isPristine()) { from->replaceDocument(doc, path); w = from; }
-	else w = new CircuitWindow(app, doc, path);
-	prefs().noteRecent(path);
+	if (from && from->isPristine()) { from->replaceDocument(doc, target); w = from; }
+	else w = new CircuitWindow(app, doc, target);
+	prefs().noteRecent(target);
+	library::noteLastCircuit(target);
 	// What loading had to say (an older format converted, an unknown gate...).
 	std::string notes;
 	bool warning = false;
@@ -401,6 +444,7 @@ bool openCircuit(GtkApplication* app, const std::string& path, CircuitWindow* fr
 	}
 	if (warning) showMessage(w->window(), GTK_MESSAGE_WARNING, "Opened, with notes", notes);
 	else if (!notes.empty()) w->note(notes.substr(2, notes.find('\n') - 2));
+	else if (importedNow) w->note("In Your Circuits now, as a copy. The file itself is left as it was.");
 	return true;
 }
 

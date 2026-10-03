@@ -50,6 +50,8 @@ struct Prefs {
 	int paletteWidth = 236;
 	std::vector<std::string> recent;   // most recent first
 	std::string lastFolder;
+	std::string lastCircuit;                      // the Your Circuits circuit last in front
+	std::string studentName;                      // for the Lab Page template and exports
 
 	double wireScale() const;
 	void load();

@@ -46,4 +46,7 @@ private:
 	static void zoomOutCb(GtkButton*, gpointer);
 };
 
+// A place to save a .cdl file ("" when cancelled).
+std::string chooseSaveFile(GtkWindow* parent, const std::string& title, const std::string& suggested);
+
 #endif  // CL_LINUX_DIALOGS_H

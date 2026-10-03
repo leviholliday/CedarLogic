@@ -5,6 +5,8 @@
 #include "Dialogs.h"
 #include "MiniMap.h"
 #include "Palette.h"
+#include "Library.h"
+#include "LibraryWindow.h"
 #include "Recovery.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
@@ -32,7 +34,11 @@ struct Command {
 
 const Command kCommands[] = {
 	{ "save", [](CircuitWindow* w) { w->save(); }, false },
-	{ "save-as", [](CircuitWindow* w) { w->saveAs(); }, false },
+	{ "save-as", [](CircuitWindow* w) { w->exportCopy(); }, false },
+	{ "rename-circuit", [](CircuitWindow* w) { w->renameFile(); }, false },
+	{ "duplicate-circuit", [](CircuitWindow* w) { w->duplicateCircuit(); }, false },
+	{ "versions", [](CircuitWindow* w) { showVersionHistory(w); }, false },
+	{ "library", [](CircuitWindow* w) { showYourCircuits(w); }, false },
 	{ "export-image", [](CircuitWindow* w) { w->exportImage(); }, false },
 	{ "export-v2", [](CircuitWindow* w) { w->exportOlder(2); }, false },
 	{ "export-v1", [](CircuitWindow* w) { w->exportOlder(1); }, false },
@@ -144,6 +150,7 @@ CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const s
 
 CircuitWindow::~CircuitWindow() {
 	if (timer) g_source_remove(timer);
+	if (autosaveId) g_source_remove(autosaveId);
 	timer = 0;
 	delete scope;
 	scope = nullptr;
@@ -452,20 +459,17 @@ void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) 
 void CircuitWindow::titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
 	GMenu* m = g_menu_new();
 	GMenu* a = g_menu_new();
-	g_menu_append(a, "_Save", "win.save");
-	g_menu_append(a, "Save _As…", "win.save-as");
+	g_menu_append(a, "_Rename…", "win.rename-circuit");
+	g_menu_append(a, "_Duplicate", "win.duplicate-circuit");
+	g_menu_append(a, "_Version History…", "win.versions");
 	g_menu_append_section(m, nullptr, G_MENU_MODEL(a));
 	GMenu* b = g_menu_new();
-	g_menu_append(b, "_Export as Image…", "win.export-image");
-	g_menu_append(b, "_Print…", "win.print");
+	g_menu_append(b, "_Export…", "win.save-as");
+	g_menu_append(b, "Your _Circuits…", "app.open");
 	g_menu_append_section(m, nullptr, G_MENU_MODEL(b));
-	GMenu* c = g_menu_new();
-	g_menu_append(c, "_Close Window", "win.close");
-	g_menu_append_section(m, nullptr, G_MENU_MODEL(c));
 	popupModel(win, G_MENU_MODEL(m), from, anchor, e, false);
 	g_object_unref(a);
 	g_object_unref(b);
-	g_object_unref(c);
 	g_object_unref(m);
 }
 
@@ -618,6 +622,9 @@ void CircuitWindow::selectionChanged() {
 
 void CircuitWindow::edited() {
 	changes++;
+	// Saving as you go: a couple of seconds after the last change.
+	if (autosaveId) g_source_remove(autosaveId);
+	autosaveId = g_timeout_add(2000, autosaveCb, this);
 	if (cl_document_page_count(doc) != lastPageCount) syncTabs();
 	redraw();
 	selectionChanged();
@@ -667,8 +674,116 @@ void CircuitWindow::lockNudge() {
 }
 
 std::string CircuitWindow::displayName() const {
+	library::Item it;
+	if (library::itemFor(path, it)) return it.name;
+	if (!recoveredName.empty()) return recoveredName;
 	if (!path.empty()) return baseName(path);
-	return recoveredName.empty() ? "Untitled" : recoveredName;
+	return "Untitled";
+}
+
+gboolean CircuitWindow::autosaveCb(gpointer self) {
+	CircuitWindow* w = static_cast<CircuitWindow*>(self);
+	w->autosaveId = 0;
+	guarded("saving", [&] {
+		// Not in the middle of something (a drag, a gate on the pointer,
+		// Tidy Up's preview): then a moment later.
+		Canvas* c = w->currentCanvas();
+		const bool busy = (c && c->isDragging()) || w->isFloating() || w->tidyActive() || cl_edit_is_connecting(w->doc);
+		if (busy) w->autosaveId = g_timeout_add(1000, autosaveCb, w);
+		else if (w->isDirty()) w->saveQuietly(false);
+	});
+	return G_SOURCE_REMOVE;
+}
+
+// Into Your Circuits: a circuit that isn't there yet joins it once there's
+// something on it (so an empty new window leaves nothing behind). A version
+// is kept when one's due, or now when `explicitSave` (Ctrl+S).
+bool CircuitWindow::saveQuietly(bool explicitSave) {
+	library::Item it;
+	const bool inLibrary = library::itemFor(path, it);
+	bool hasGates = false;
+	for (int p = 0; p < cl_document_page_count(doc) && !hasGates; p++) hasGates = cl_document_gate_count(doc, p) > 0;
+	if (!inLibrary && !hasGates && !explicitSave) return true;   // nothing to keep
+	const std::string text = cl_document_save_text(doc);   // marks the engine's copy saved
+	std::string err;
+	if (inLibrary) {
+		GError* e = nullptr;
+		if (!g_file_set_contents(path.c_str(), text.data(), (gssize)text.size(), &e)) err = e ? e->message : "The file couldn't be written.";
+		if (e) g_error_free(e);
+	} else {
+		std::string name = displayName();
+		if (name == "Untitled") name = "Untitled Circuit";
+		if (library::create(name, text, "", it)) path = it.circuit();
+		else err = "Your Circuits' folder couldn't be written to.";
+	}
+	if (!err.empty()) {
+		forceDirty = true;
+		if (explicitSave) showMessage(GTK_WINDOW(win), GTK_MESSAGE_ERROR, "The circuit couldn't be saved", err);
+		else note("Couldn't save just now. Your work is still here; try Ctrl+S.");
+		updateTitle();
+		return false;
+	}
+	forceDirty = false;
+	recoveredName.clear();
+	// Saved: the recovery copy isn't needed until the next change.
+	recovery::remove(recoveryBase);
+	changesAtRecovery = changes;
+	const bool kept = library::noteSaved(path, explicitSave);
+	library::noteLastCircuit(path);
+	if (explicitSave) note(kept ? "Saved, and a version was kept." : "Saved.");
+	updateTitle();
+	return true;
+}
+
+// The name it has in Your Circuits (one not in it yet joins under it).
+void CircuitWindow::renameFile() {
+	std::string name = displayName();
+	if (!askText(GTK_WINDOW(win), "Rename Circuit", "The name it has in Your Circuits:", name) || name.empty() || name == displayName()) return;
+	library::Item it;
+	if (library::itemFor(path, it)) {
+		library::rename(it, name);
+		for (CircuitWindow* w : circuitWindows()) w->libraryChanged();
+	} else {
+		recoveredName = name;
+		forceDirty = true;
+		saveQuietly(false);
+	}
+	updateTitle();
+	note("Renamed.");
+}
+
+// A copy, as a new circuit in Your Circuits, in a window of its own.
+void CircuitWindow::duplicateCircuit() {
+	saveQuietly(false);
+	const std::string text = cl_document_save_text(doc);
+	library::Item copy;
+	if (!library::create(displayName() + " copy", text, "", copy)) {
+		showMessage(GTK_WINDOW(win), GTK_MESSAGE_ERROR, "The circuit couldn't be duplicated", "");
+		return;
+	}
+	char err[512] = "";
+	CLDocument* d = cl_document_open(copy.circuit().c_str(), err, sizeof err);
+	if (d == nullptr) { showMessage(GTK_WINDOW(win), GTK_MESSAGE_ERROR, "The circuit couldn't be duplicated", err); return; }
+	CircuitWindow* w = new CircuitWindow(app, d, copy.circuit());
+	w->note("A copy, in Your Circuits as “" + copy.name + "”.");
+}
+
+void CircuitWindow::discard() {
+	forceDirty = false;
+	gtk_widget_destroy(win);
+}
+
+void CircuitWindow::reloadFromDisk(const std::string& message) {
+	char err[512] = "";
+	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
+	if (fresh == nullptr) { showMessage(GTK_WINDOW(win), GTK_MESSAGE_ERROR, "The circuit couldn't be opened again", err); return; }
+	replaceDocument(fresh, path);
+	if (!message.empty()) note(message);
+}
+
+void CircuitWindow::libraryChanged() {
+	updateTitle();
+	if (toolbar) toolbar->layoutNow();
 }
 
 void CircuitWindow::markRecovered(const std::string& name) {
@@ -854,19 +969,12 @@ void CircuitWindow::sizeCb(GtkWidget* widget, GdkRectangle*, gpointer) {
 	if (w > 0 && h > 0) { prefs().windowWidth = w; prefs().windowHeight = h; }
 }
 
+// Circuits save themselves, so closing doesn't ask: it saves. Only when that
+// fails is there a question.
 bool CircuitWindow::confirmClose() {
 	if (!isDirty()) return true;
-	GtkWidget* d = gtk_message_dialog_new(GTK_WINDOW(win), GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_NONE,
-	                                      "Save the changes to “%s” before closing?", displayName().c_str());
-	gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d), "If you don't save, your changes will be lost.");
-	gtk_dialog_add_buttons(GTK_DIALOG(d), "Close _without Saving", GTK_RESPONSE_REJECT, "_Cancel", GTK_RESPONSE_CANCEL,
-	                       "_Save", GTK_RESPONSE_ACCEPT, nullptr);
-	gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_ACCEPT);
-	const int r = gtk_dialog_run(GTK_DIALOG(d));
-	gtk_widget_destroy(d);
-	if (r == GTK_RESPONSE_REJECT) return true;
-	if (r == GTK_RESPONSE_ACCEPT) return save();
-	return false;
+	if (saveQuietly(false)) return true;
+	return askYesNo(GTK_WINDOW(win), "This circuit couldn't be saved", "Close it anyway? The changes since it last saved will be lost.");
 }
 
 // ---- Files ---------------------------------------------------------------------
@@ -924,10 +1032,7 @@ bool CircuitWindow::writeTo(const std::string& file) {
 	return true;
 }
 
-bool CircuitWindow::save() {
-	if (path.empty()) return saveAs();
-	return writeTo(path);
-}
+bool CircuitWindow::save() { return saveQuietly(true); }
 
 static GtkFileFilter* cdlFilter() {
 	GtkFileFilter* f = gtk_file_filter_new();
@@ -937,8 +1042,7 @@ static GtkFileFilter* cdlFilter() {
 	return f;
 }
 
-static std::string chooseSavePath(GtkWindow* parent, const char* title, const std::string& suggested,
-                                  GtkFileFilter* filter, const char* ext) {
+std::string chooseSavePath(GtkWindow* parent, const char* title, const std::string& suggested, GtkFileFilter* filter, const char* ext) {
 	GtkFileChooserNative* chooser = gtk_file_chooser_native_new(title, parent, GTK_FILE_CHOOSER_ACTION_SAVE,
 	                                                            "_Save", "_Cancel");
 	GtkFileChooser* fc = GTK_FILE_CHOOSER(chooser);
@@ -960,6 +1064,27 @@ static std::string chooseSavePath(GtkWindow* parent, const char* title, const st
 		if (!hasDot && (out.size() < n || g_ascii_strcasecmp(out.c_str() + out.size() - n, ext) != 0)) out += ext;
 	}
 	return out;
+}
+
+std::string chooseSaveFile(GtkWindow* parent, const std::string& title, const std::string& suggested) {
+	return chooseSavePath(parent, title.c_str(), suggested, cdlFilter(), ".cdl");
+}
+
+// A copy of the circuit as a .cdl file, anywhere.
+bool CircuitWindow::exportCopy() {
+	const std::string file = chooseSavePath(GTK_WINDOW(win), "Export", displayName() + ".cdl", cdlFilter(), ".cdl");
+	if (file.empty()) return false;
+	const bool wasDirty = isDirty();
+	const std::string text = cl_document_save_text(doc);
+	forceDirty = forceDirty || wasDirty;   // asking for the text marked it saved
+	GError* e = nullptr;
+	if (!g_file_set_contents(file.c_str(), text.data(), (gssize)text.size(), &e)) {
+		showMessage(GTK_WINDOW(win), GTK_MESSAGE_ERROR, "The circuit couldn't be exported", e ? e->message : "");
+		if (e) g_error_free(e);
+		return false;
+	}
+	note("Exported " + baseName(file) + ".cdl.");
+	return true;
 }
 
 bool CircuitWindow::saveAs() {
