@@ -233,6 +233,7 @@ private:
 	bool splitterDrag = false;
 	int splitterGrab = 0;
 	bool maxPressed = false;          // the drawn maximize button, held down
+	bool openMaximized = false;       // shown maximized (as the last window was)
 	bool trackingNonClient = false;
 	HWND savedFocus = nullptr;        // what had the keyboard when the window was last active
 	UINT dpi = 96;

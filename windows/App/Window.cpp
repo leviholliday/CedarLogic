@@ -75,6 +75,7 @@ void registerWindowClasses() {
 CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path(p) {
 	isRunning = cl_document_is_running(doc);
 	circuitWindows().push_back(this);
+	openMaximized = prefs().windowMaximized;   // before build() sizes the hidden window
 	build();
 	syncTabs();
 	appearStart = nowSeconds();
@@ -119,7 +120,7 @@ std::string CircuitWindow::openingDetail() const {
 
 void CircuitWindow::present() {
 	if (IsWindowVisible(hwnd)) return;
-	ShowWindow(hwnd, prefs().windowMaximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+	ShowWindow(hwnd, openMaximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 	UpdateWindow(hwnd);
 	appearStart = nowSeconds();
 	if (Canvas* c = currentCanvas()) c->focus();
@@ -181,6 +182,18 @@ void CircuitWindow::build() {
 		GetWindowRect(hwnd, &r);
 		SetWindowPos(hwnd, nullptr, 0, 0, scaled(prefs().windowWidth, dpi), scaled(prefs().windowHeight, dpi),
 		             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+	// On its screen, and no bigger (a size kept from a bigger one): the
+	// window's own buttons are at the top right.
+	RECT r;
+	MONITORINFO mi = { sizeof mi };
+	if (GetWindowRect(hwnd, &r) && GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+		const RECT& a = mi.rcWork;
+		const int w = std::min<int>(r.right - r.left, a.right - a.left), h = std::min<int>(r.bottom - r.top, a.bottom - a.top);
+		const int x = std::max<int>(a.left, std::min<int>(r.left, a.right - w));
+		const int y = std::max<int>(a.top, std::min<int>(r.top, a.bottom - h));
+		if (x != r.left || y != r.top || w != r.right - r.left || h != r.bottom - r.top)
+			SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 	}
 	setDarkTitleBar(hwnd, prefs().dark);
 	buildMenus();
@@ -902,12 +915,16 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	case WM_SIZE:
 		if (wp == SIZE_MINIMIZED) return 0;
-		prefs().windowMaximized = wp == SIZE_MAXIMIZED;
-		if (wp == SIZE_RESTORED) {
-			RECT r;
-			GetWindowRect(hwnd, &r);
-			prefs().windowWidth = MulDiv(r.right - r.left, 96, (int)dpi);
-			prefs().windowHeight = MulDiv(r.bottom - r.top, 96, (int)dpi);
+		// Kept for the next window, once this one is up (the sizes a new
+		// window goes through while it's built aren't the user's).
+		if (IsWindowVisible(hwnd)) {
+			prefs().windowMaximized = wp == SIZE_MAXIMIZED;
+			if (wp == SIZE_RESTORED) {
+				RECT r;
+				GetWindowRect(hwnd, &r);
+				prefs().windowWidth = MulDiv(r.right - r.left, 96, (int)dpi);
+				prefs().windowHeight = MulDiv(r.bottom - r.top, 96, (int)dpi);
+			}
 		}
 		layout();
 		return 0;
