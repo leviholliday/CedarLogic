@@ -121,10 +121,20 @@ void offer(GtkApplication* app, CircuitWindow* reuse) {
 				continue;   // left in place, in case a later version can read it
 			}
 			// Back under its own name, marked unsaved: saving puts it where it was.
+			// The circuit may be open already (launch opens the last one, as it
+			// was before the lost changes): the copy takes that window's place,
+			// so two windows never save over the same file. One with changes of
+			// its own keeps them, and the copy comes back as a circuit apart.
+			CircuitWindow* already = nullptr;
+			if (!f.path.empty())
+				for (CircuitWindow* c : circuitWindows()) if (c->filePath() == f.path) already = c;
+			std::string path = f.path, name = f.name;
 			CircuitWindow* w = reuse && reuse->isPristine() ? reuse : nullptr;
-			if (w) w->replaceDocument(doc, f.path);
-			else w = new CircuitWindow(app, doc, f.path);
-			w->markRecovered(f.name);
+			if (already && !already->isDirty()) w = already;
+			else if (already) { path.clear(); name = (name.empty() ? std::string("Untitled") : name) + " (recovered)"; }
+			if (w) { w->replaceDocument(doc, path); gtk_window_present(w->window()); }
+			else w = new CircuitWindow(app, doc, path);
+			w->markRecovered(name);
 			reuse = nullptr;
 		}
 		remove(f.base);
