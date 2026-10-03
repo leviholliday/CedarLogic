@@ -1336,12 +1336,18 @@ void CircuitWindow::sizeCb(GtkWidget* widget, GdkRectangle*, gpointer self) {
 }
 
 // Circuits save themselves, so closing doesn't ask: it saves. Only when that
-// fails is there a question.
+// fails is there a question, and a reflexive Enter keeps the work.
 bool CircuitWindow::confirmClose() {
 	if (!isDirty()) return true;
 	if (saveQuietly(false)) return true;
-	return askConfirm(GTK_WINDOW(win), "This circuit couldn't be saved", "Close it anyway? The changes since it last saved will be lost.",
-	                  "Close Anyway", "Cancel", true);
+	Alert a;
+	a.heading = "This circuit couldn't be saved";
+	a.text = "Close it anyway? The changes since it last saved will be lost.";
+	a.badge = 2;
+	a.buttons = { { "Close Anyway", 1, 2 }, { "Cancel", 0, 1 } };
+	a.escape = 0;
+	a.enter = 0;
+	return runAlert(GTK_WINDOW(win), a) == 1;
 }
 
 // ---- Files ---------------------------------------------------------------------
