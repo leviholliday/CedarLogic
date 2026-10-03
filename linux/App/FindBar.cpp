@@ -50,9 +50,9 @@ FindBar::FindBar(CircuitWindow* window) : win(window) {
 	gtk_box_pack_start(GTK_BOX(root), done, FALSE, FALSE, 4);
 	g_signal_connect(entry, "changed", G_CALLBACK(changedCb), this);
 	g_signal_connect(entry, "key-press-event", G_CALLBACK(keyCb), this);
-	g_signal_connect_swapped(up, "clicked", G_CALLBACK(+[](FindBar* f) { f->step(-1); }), this);
-	g_signal_connect_swapped(down, "clicked", G_CALLBACK(+[](FindBar* f) { f->step(1); }), this);
-	g_signal_connect_swapped(done, "clicked", G_CALLBACK(+[](FindBar* f) { f->close(); }), this);
+	g_signal_connect_swapped(up, "clicked", CL_CALLBACK(+[](FindBar* f) { f->step(-1); }), this);
+	g_signal_connect_swapped(down, "clicked", CL_CALLBACK(+[](FindBar* f) { f->step(1); }), this);
+	g_signal_connect_swapped(done, "clicked", CL_CALLBACK(+[](FindBar* f) { f->close(); }), this);
 	GList* kids = gtk_container_get_children(GTK_CONTAINER(root));
 	for (GList* k = kids; k; k = k->next) gtk_widget_show(GTK_WIDGET(k->data));
 	g_list_free(kids);

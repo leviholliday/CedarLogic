@@ -194,7 +194,7 @@ void CircuitWindow::build() {
 	g_signal_connect(win, "destroy", G_CALLBACK(destroyCb), this);
 	g_signal_connect(win, "key-press-event", G_CALLBACK(keyCb), this);
 	g_signal_connect(win, "key-release-event", G_CALLBACK(keyReleaseCb), this);
-	g_signal_connect(win, "focus-out-event", G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer self) -> gboolean {
+	g_signal_connect(win, "focus-out-event", CL_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer self) -> gboolean {
 		CircuitWindow* w = static_cast<CircuitWindow*>(self);
 		if (w->switcher) w->switcher->cancel();
 		return FALSE;
@@ -477,7 +477,7 @@ bool CircuitWindow::actionEnabled(const char* name) const {
 static void popupModel(GtkWidget* attach, GMenuModel* model, GtkWidget* from, GdkRectangle anchor, GdkEvent* e, bool rightAligned) {
 	GtkWidget* menu = gtk_menu_new_from_model(model);
 	gtk_menu_attach_to_widget(GTK_MENU(menu), attach, nullptr);
-	g_signal_connect(menu, "deactivate", G_CALLBACK(+[](GtkMenuShell* m, gpointer) {
+	g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* m, gpointer) {
 		g_idle_add([](gpointer m) -> gboolean { gtk_widget_destroy(GTK_WIDGET(m)); return G_SOURCE_REMOVE; }, m);
 	}), nullptr);
 	gtk_menu_popup_at_rect(GTK_MENU(menu), gtk_widget_get_window(from), &anchor,
@@ -541,7 +541,7 @@ void CircuitWindow::tabContextMenu(int tab, GdkEvent* e) {
 	g_menu_append(m, "Re_open Closed Tab", "win.reopen-tab");
 	GtkWidget* menu = gtk_menu_new_from_model(G_MENU_MODEL(m));
 	gtk_menu_attach_to_widget(GTK_MENU(menu), win, nullptr);
-	g_signal_connect(menu, "deactivate", G_CALLBACK(+[](GtkMenuShell* mm, gpointer) {
+	g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* mm, gpointer) {
 		g_idle_add([](gpointer mm) -> gboolean { gtk_widget_destroy(GTK_WIDGET(mm)); return G_SOURCE_REMOVE; }, mm);
 	}), nullptr);
 	gtk_menu_popup_at_pointer(GTK_MENU(menu), e);
@@ -1585,7 +1585,7 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventBu
 	}
 	updateActions();
 	gtk_widget_show_all(menu);
-	g_signal_connect(menu, "deactivate", G_CALLBACK(+[](GtkMenuShell* m, gpointer) {
+	g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* m, gpointer) {
 		// Destroy it once its item has run.
 		g_idle_add([](gpointer m) -> gboolean { gtk_widget_destroy(GTK_WIDGET(m)); return G_SOURCE_REMOVE; }, m);
 	}), nullptr);

@@ -507,12 +507,12 @@ void show(CircuitWindow* from, const std::string& id) {
 	gtk_overlay_add_overlay(GTK_OVERLAY(over), w->search);
 	gtk_container_add(GTK_CONTAINER(w->win), over);
 
-	g_signal_connect(w->area, "draw", G_CALLBACK(+[](GtkWidget* a, cairo_t* cr, gpointer data) -> gboolean {
+	g_signal_connect(w->area, "draw", CL_CALLBACK(+[](GtkWidget* a, cairo_t* cr, gpointer data) -> gboolean {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		guarded("Help", [&] { hw->paint(cr, (float)gtk_widget_get_allocated_width(a), (float)gtk_widget_get_allocated_height(a)); });
 		return TRUE;
 	}), w);
-	g_signal_connect(w->area, "motion-notify-event", G_CALLBACK(+[](GtkWidget* a, GdkEventMotion* e, gpointer data) -> gboolean {
+	g_signal_connect(w->area, "motion-notify-event", CL_CALLBACK(+[](GtkWidget* a, GdkEventMotion* e, gpointer data) -> gboolean {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		const int i = hw->rowAt((float)e->x, (float)e->y);
 		if (i != hw->hot) {
@@ -525,19 +525,19 @@ void show(CircuitWindow* from, const std::string& id) {
 		}
 		return TRUE;
 	}), w);
-	g_signal_connect(w->area, "leave-notify-event", G_CALLBACK(+[](GtkWidget*, GdkEventCrossing*, gpointer data) -> gboolean {
+	g_signal_connect(w->area, "leave-notify-event", CL_CALLBACK(+[](GtkWidget*, GdkEventCrossing*, gpointer data) -> gboolean {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		hw->hot = -1;
 		hw->redraw();
 		return FALSE;
 	}), w);
-	g_signal_connect(w->area, "button-release-event", G_CALLBACK(+[](GtkWidget*, GdkEventButton* e, gpointer data) -> gboolean {
+	g_signal_connect(w->area, "button-release-event", CL_CALLBACK(+[](GtkWidget*, GdkEventButton* e, gpointer data) -> gboolean {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		const int i = hw->rowAt((float)e->x, (float)e->y);
 		if (i >= 0 && e->button == 1) guarded("Help", [&] { hw->choose(hw->rows[i]); });
 		return TRUE;
 	}), w);
-	g_signal_connect(w->area, "scroll-event", G_CALLBACK(+[](GtkWidget*, GdkEventScroll* e, gpointer data) -> gboolean {
+	g_signal_connect(w->area, "scroll-event", CL_CALLBACK(+[](GtkWidget*, GdkEventScroll* e, gpointer data) -> gboolean {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		double d = 0;
 		if (e->direction == GDK_SCROLL_SMOOTH) { double dx = 0; gdk_event_get_scroll_deltas((GdkEvent*)e, &dx, &d); d *= 40; }
@@ -549,21 +549,21 @@ void show(CircuitWindow* from, const std::string& id) {
 		hw->redraw();
 		return TRUE;
 	}), w);
-	g_signal_connect(w->search, "search-changed", G_CALLBACK(+[](GtkSearchEntry* s, gpointer data) {
+	g_signal_connect(w->search, "search-changed", CL_CALLBACK(+[](GtkSearchEntry* s, gpointer data) {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		hw->query = gtk_entry_get_text(GTK_ENTRY(s));
 		hw->buildRows();
 		for (const Row& r : hw->rows) if (r.page >= 0) { hw->page = r.page; hw->scroll = 0; break; }
 		hw->redraw();
 	}), w);
-	g_signal_connect(w->win, "key-press-event", G_CALLBACK(+[](GtkWidget*, GdkEventKey* e, gpointer data) -> gboolean {
+	g_signal_connect(w->win, "key-press-event", CL_CALLBACK(+[](GtkWidget*, GdkEventKey* e, gpointer data) -> gboolean {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		const guint k = e->keyval;
 		// The search box keeps its own keys, but Up, Down and Escape are the window's.
 		if (gtk_widget_has_focus(hw->search) && k != GDK_KEY_Up && k != GDK_KEY_Down && k != GDK_KEY_Escape) return FALSE;
 		return hw->key(k) ? TRUE : FALSE;
 	}), w);
-	g_signal_connect(w->win, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer data) {
+	g_signal_connect(w->win, "destroy", CL_CALLBACK(+[](GtkWidget*, gpointer data) {
 		HelpWindow* hw = static_cast<HelpWindow*>(data);
 		if (g_help == hw) g_help = nullptr;
 		delete hw;

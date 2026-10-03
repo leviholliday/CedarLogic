@@ -323,7 +323,7 @@ void Picker::run(GtkWindow* owner) {
 		gtk_widget_set_margin_top(entry, (int)(kMargin + 34 + 44 + 3));
 		gtk_overlay_add_overlay(GTK_OVERLAY(overlay), entry);
 		g_signal_connect(entry, "changed", G_CALLBACK(changedCb), this);
-		g_signal_connect(entry, "notify::has-focus", G_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
+		g_signal_connect(entry, "notify::has-focus", CL_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
 			static_cast<Picker*>(self)->redraw();
 		}), this);
 	}

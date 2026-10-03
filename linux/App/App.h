@@ -15,6 +15,8 @@
 #include <vector>
 
 #define CL_APP_NAME "CedarLogic"
+// G_CALLBACK for a lambda: commas in its body don't split the macro's argument.
+#define CL_CALLBACK(...) G_CALLBACK((__VA_ARGS__))
 #define CL_APP_ID "edu.cedarville.CedarLogic"
 #ifndef CL_VERSION
 #define CL_VERSION "0.1"

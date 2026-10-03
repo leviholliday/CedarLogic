@@ -89,7 +89,7 @@ struct Panel {
 		g_signal_connect(area, "button-press-event", G_CALLBACK(pressCb), this);
 		g_signal_connect(area, "button-release-event", G_CALLBACK(releaseCb), this);
 		g_signal_connect(win, "key-press-event", G_CALLBACK(keyCb), this);
-		g_signal_connect(win, "delete-event", G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer self) -> gboolean {
+		g_signal_connect(win, "delete-event", CL_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer self) -> gboolean {
 			Panel* p = static_cast<Panel*>(self);
 			if (p->key) p->key(GDK_KEY_Escape, 0);
 			return TRUE;
@@ -604,7 +604,7 @@ bool offer(CircuitWindow* window) {
 	gtk_widget_set_size_request(w->name, 284, 32);
 	gtk_widget_set_no_show_all(w->name, TRUE);
 	gtk_overlay_add_overlay(GTK_OVERLAY(p.overlay), w->name);
-	g_signal_connect(w->name, "changed", G_CALLBACK(+[](GtkEditable* e, gpointer) {
+	g_signal_connect(w->name, "changed", CL_CALLBACK(+[](GtkEditable* e, gpointer) {
 		prefs().studentName = gtk_entry_get_text(GTK_ENTRY(e));
 		prefs().save();
 		if (g_welcome) g_welcome->panel.redraw();
@@ -877,23 +877,23 @@ void startTour(CircuitWindow* window) {
 	gtk_widget_set_size_request(t->area, (int)kCardW, t->height);
 	gtk_widget_set_can_focus(t->area, FALSE);
 	gtk_widget_add_events(t->area, GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
-	g_signal_connect(t->area, "draw", G_CALLBACK(+[](GtkWidget* a, cairo_t* cr, gpointer) -> gboolean {
+	g_signal_connect(t->area, "draw", CL_CALLBACK(+[](GtkWidget* a, cairo_t* cr, gpointer) -> gboolean {
 		guarded("the tour", [&] { paintTour(cr, (float)gtk_widget_get_allocated_width(a), (float)gtk_widget_get_allocated_height(a)); });
 		return TRUE;
 	}), t);
-	g_signal_connect(t->area, "motion-notify-event", G_CALLBACK(+[](GtkWidget* a, GdkEventMotion* e, gpointer data) -> gboolean {
+	g_signal_connect(t->area, "motion-notify-event", CL_CALLBACK(+[](GtkWidget* a, GdkEventMotion* e, gpointer data) -> gboolean {
 		Tour* tour = static_cast<Tour*>(data);
 		const int id = tourHit(tour, (float)e->x, (float)e->y);
 		if (id != tour->hot) { tour->hot = id; gtk_widget_queue_draw(a); }
 		return TRUE;
 	}), t);
-	g_signal_connect(t->area, "leave-notify-event", G_CALLBACK(+[](GtkWidget* a, GdkEventCrossing*, gpointer data) -> gboolean {
+	g_signal_connect(t->area, "leave-notify-event", CL_CALLBACK(+[](GtkWidget* a, GdkEventCrossing*, gpointer data) -> gboolean {
 		static_cast<Tour*>(data)->hot = -1;
 		gtk_widget_queue_draw(a);
 		return FALSE;
 	}), t);
-	g_signal_connect(t->area, "button-press-event", G_CALLBACK(+[](GtkWidget*, GdkEventButton*, gpointer) -> gboolean { return TRUE; }), t);
-	g_signal_connect(t->area, "button-release-event", G_CALLBACK(+[](GtkWidget*, GdkEventButton* e, gpointer data) -> gboolean {
+	g_signal_connect(t->area, "button-press-event", CL_CALLBACK(+[](GtkWidget*, GdkEventButton*, gpointer) -> gboolean { return TRUE; }), t);
+	g_signal_connect(t->area, "button-release-event", CL_CALLBACK(+[](GtkWidget*, GdkEventButton* e, gpointer data) -> gboolean {
 		Tour* tour = static_cast<Tour*>(data);
 		const int id = e->button == 1 ? tourHit(tour, (float)e->x, (float)e->y) : -1;
 		if (id == Tour::kClose) endTour();

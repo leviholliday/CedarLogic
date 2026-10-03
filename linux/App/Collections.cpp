@@ -452,7 +452,7 @@ void tileMenu(GtkWindow* owner, const std::string& gateName, GdkEvent* e) {
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), r);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), d);
 	gtk_widget_show_all(menu);
-	g_signal_connect(menu, "deactivate", G_CALLBACK(+[](GtkMenuShell* m, gpointer) {
+	g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* m, gpointer) {
 		g_idle_add([](gpointer w) -> gboolean { gtk_widget_destroy(GTK_WIDGET(w)); return FALSE; }, m);
 	}), nullptr);
 	gtk_menu_popup_at_pointer(GTK_MENU(menu), e);

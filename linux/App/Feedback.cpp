@@ -198,7 +198,7 @@ struct Draft {
 	}
 	void remove(size_t i) {
 		if (i >= attachments.size()) return;
-		g_remove(attachments[i].file.c_str());
+		::g_remove(attachments[i].file.c_str());
 		if (attachments[i].thumb) g_object_unref(attachments[i].thumb);
 		attachments.erase(attachments.begin() + i);
 	}
@@ -672,7 +672,7 @@ GtkWidget* picture(int height, void (*paint)(cairo_t*, float)) {
 	GtkWidget* a = gtk_drawing_area_new();
 	gtk_widget_set_size_request(a, -1, height);
 	gtk_widget_add_events(a, GDK_BUTTON_PRESS_MASK);
-	g_signal_connect(a, "draw", G_CALLBACK(+[](GtkWidget* w, cairo_t* cr, gpointer p) -> gboolean {
+	g_signal_connect(a, "draw", CL_CALLBACK(+[](GtkWidget* w, cairo_t* cr, gpointer p) -> gboolean {
 		guarded("Send Feedback", [&] { reinterpret_cast<void (*)(cairo_t*, float)>(p)(cr, (float)gtk_widget_get_allocated_width(w)); });
 		return TRUE;
 	}), (gpointer)paint);
@@ -858,7 +858,7 @@ void show(CircuitWindow* win) {
 
 	GtkWidget* band = gtk_drawing_area_new();
 	gtk_widget_set_size_request(band, -1, 92);
-	g_signal_connect(band, "draw", G_CALLBACK(+[](GtkWidget* w, cairo_t* cr, gpointer) -> gboolean {
+	g_signal_connect(band, "draw", CL_CALLBACK(+[](GtkWidget* w, cairo_t* cr, gpointer) -> gboolean {
 		paintBand(cr, (float)gtk_widget_get_allocated_width(w), (float)gtk_widget_get_allocated_height(w));
 		return TRUE;
 	}), nullptr);
@@ -932,7 +932,7 @@ void show(CircuitWindow* win) {
 	g_signal_connect_swapped(f.title, "changed", G_CALLBACK(wordsChanged), &f);
 	g_signal_connect_swapped(gtk_text_view_get_buffer(GTK_TEXT_VIEW(f.details)), "changed", G_CALLBACK(wordsChanged), &f);
 	g_signal_connect_swapped(f.email, "changed", G_CALLBACK(emailChanged), &f);
-	g_signal_connect(f.tags, "button-press-event", G_CALLBACK(+[](GtkWidget* w, GdkEventButton* e, gpointer data) -> gboolean {
+	g_signal_connect(f.tags, "button-press-event", CL_CALLBACK(+[](GtkWidget* w, GdkEventButton* e, gpointer data) -> gboolean {
 		Form* form = static_cast<Form*>(data);
 		if (form->sending || e->button != 1) return TRUE;
 		const std::vector<RectF> r = chipRects((float)gtk_widget_get_allocated_width(w));
@@ -940,14 +940,14 @@ void show(CircuitWindow* win) {
 		gtk_widget_queue_draw(w);
 		return TRUE;
 	}), &f);
-	g_signal_connect(f.priority, "button-press-event", G_CALLBACK(+[](GtkWidget* w, GdkEventButton* e, gpointer data) -> gboolean {
+	g_signal_connect(f.priority, "button-press-event", CL_CALLBACK(+[](GtkWidget* w, GdkEventButton* e, gpointer data) -> gboolean {
 		Form* form = static_cast<Form*>(data);
 		if (form->sending || e->button != 1) return TRUE;
 		for (int i = 0; i < 4; i++) if (inRect(pillRect(i, (float)gtk_widget_get_allocated_width(w)), (float)e->x, (float)e->y)) draft().priority = i;
 		gtk_widget_queue_draw(w);
 		return TRUE;
 	}), &f);
-	g_signal_connect(f.shots, "button-press-event", G_CALLBACK(+[](GtkWidget* w, GdkEventButton* e, gpointer data) -> gboolean {
+	g_signal_connect(f.shots, "button-press-event", CL_CALLBACK(+[](GtkWidget* w, GdkEventButton* e, gpointer data) -> gboolean {
 		Form* form = static_cast<Form*>(data);
 		if (form->sending || e->button != 1 || e->type != GDK_BUTTON_PRESS) return TRUE;
 		Draft& dd = draft();

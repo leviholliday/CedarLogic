@@ -616,7 +616,7 @@ ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
 	gtk_window_set_default_size(GTK_WINDOW(win), 820, 360);
 	g_signal_connect(win, "delete-event", G_CALLBACK(deleteCb), this);
 	// Escape or Ctrl+G puts it away; Space runs and pauses the circuit.
-	g_signal_connect(win, "key-press-event", G_CALLBACK(+[](GtkWidget* w, GdkEventKey* e, gpointer self) -> gboolean {
+	g_signal_connect(win, "key-press-event", CL_CALLBACK(+[](GtkWidget* w, GdkEventKey* e, gpointer self) -> gboolean {
 		ScopeWindow* s = static_cast<ScopeWindow*>(self);
 		const bool ctrl = e->state & GDK_CONTROL_MASK;
 		if (e->keyval == GDK_KEY_Escape || (ctrl && gdk_keyval_to_lower(e->keyval) == GDK_KEY_g)) {
