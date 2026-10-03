@@ -1001,6 +1001,12 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_CAPTURECHANGED:
 		splitterDrag = false;
 		break;
+	case WM_COPYDATA:
+		if (takeHandedFiles(hwnd, reinterpret_cast<const COPYDATASTRUCT*>(lp))) return TRUE;
+		break;
+	case kOpenHandedFiles:
+		openHandedFiles(this);
+		return 0;
 	case WM_DROPFILES: {
 		HDROP drop = (HDROP)wp;
 		const UINT n = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);

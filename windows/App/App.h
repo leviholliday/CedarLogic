@@ -220,6 +220,13 @@ void openExternally(HWND parent, const std::string& target);
 // Handle a key the whole app answers to (Ctrl+S, Ctrl+Tab...). True when it
 // was one.
 bool handleShortcut(CircuitWindow* w, const MSG& msg);
+// One CedarLogic at a time (main.cpp): a second start hands its files to a
+// window of the one running, with WM_COPYDATA. The window takes them (true
+// when the message was that), then opens them on kOpenHandedFiles, posted
+// so the second start isn't kept waiting.
+const UINT kOpenHandedFiles = WM_APP + 1;
+bool takeHandedFiles(HWND window, const COPYDATASTRUCT* data);
+void openHandedFiles(CircuitWindow* window);
 
 // ---- Staying up ------------------------------------------------------------------
 // Every place Windows calls into the app runs through guarded(): if the engine

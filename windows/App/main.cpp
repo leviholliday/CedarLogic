@@ -400,6 +400,86 @@ void openPracticeCircuit(CircuitWindow* from) {
 	else new CircuitWindow(doc, "");
 }
 
+// ---- One CedarLogic at a time ----------------------------------------------------
+// Two would each save the same circuits (and settings) over the other's. A
+// second start hands its files to the one running, which opens them (or,
+// with none, comes forward), and ends.
+
+namespace {
+
+const wchar_t* kInstanceMutex = L"Local\\CedarLogic.Native";
+const wchar_t* kWindowClass = L"CedarLogicWindow";   // a circuit window's (Window.cpp)
+const ULONG_PTR kHandedFilesTag = 0x434C4F50;        // WM_COPYDATA's: files to open, a line each
+std::vector<std::string> gHanded;                    // taken, waiting to be opened
+
+// True when a CedarLogic already running took the files.
+bool handToRunning(const std::vector<std::string>& files) {
+	// Held for this process's life by the first; the others find it there.
+	static HANDLE mutex = nullptr;
+	mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
+	if (mutex == nullptr || GetLastError() != ERROR_ALREADY_EXISTS) return false;
+	std::string text;   // full paths: the running one's current folder isn't this one's
+	for (const std::string& f : files) {
+		wchar_t full[MAX_PATH * 4];
+		const DWORD n = GetFullPathNameW(W(f).c_str(), (DWORD)(sizeof full / sizeof full[0]), full, nullptr);
+		text += (n > 0 && n < sizeof full / sizeof full[0] ? U(full) : f) + "\n";
+	}
+	// It may still be starting (no window yet) or on its way out (an
+	// update's restart): wait a few seconds for one or the other.
+	for (int tries = 0; tries < 100; tries++) {
+		const DWORD gone = WaitForSingleObject(mutex, 0);
+		if (gone == WAIT_OBJECT_0 || gone == WAIT_ABANDONED) return false;   // it ended: this one is the one now
+		if (HWND other = FindWindowW(kWindowClass, nullptr)) {
+			DWORD pid = 0;
+			GetWindowThreadProcessId(other, &pid);
+			AllowSetForegroundWindow(pid);
+			COPYDATASTRUCT cd = { kHandedFilesTag, (DWORD)text.size(), text.empty() ? nullptr : (void*)text.data() };
+			DWORD_PTR answer = 0;
+			// No answer (it's stuck): open them here after all.
+			return SendMessageTimeoutW(other, WM_COPYDATA, 0, (LPARAM)&cd, SMTO_ABORTIFHUNG, 10000, &answer) && answer;
+		}
+		Sleep(100);
+	}
+	return false;
+}
+
+}  // namespace
+
+bool takeHandedFiles(HWND window, const COPYDATASTRUCT* data) {
+	if (data == nullptr || data->dwData != kHandedFilesTag) return false;
+	const std::string text = data->lpData && data->cbData ? std::string((const char*)data->lpData, data->cbData) : std::string();
+	size_t at = 0;
+	while (at < text.size()) {
+		size_t end = text.find('\n', at);
+		if (end == std::string::npos) end = text.size();
+		if (end > at) gHanded.push_back(text.substr(at, end - at));
+		at = end + 1;
+	}
+	PostMessageW(window, kOpenHandedFiles, 0, 0);
+	return true;
+}
+
+void openHandedFiles(CircuitWindow* w) {
+	const std::vector<std::string> files = gHanded;
+	gHanded.clear();
+	// The first goes into this window when it's an untouched new one (not
+	// while a dialog of its is up), the rest into windows of their own.
+	CircuitWindow* from = IsWindowEnabled(w->window()) ? w : nullptr;
+	const bool intoThis = !files.empty() && from && from->isPristine();
+	const size_t windowsBefore = circuitWindows().size();
+	for (const std::string& f : files) {
+		openCircuit(f, from);
+		from = nullptr;
+	}
+	// Forward: a new window, else this one (a circuit already open in
+	// another window came forward in openCircuit).
+	CircuitWindow* show = circuitWindows().size() > windowsBefore ? circuitWindows().back()
+	                    : (files.empty() || intoThis) ? w : nullptr;
+	if (show == nullptr) return;
+	if (IsIconic(show->window())) ShowWindow(show->window(), SW_RESTORE);
+	SetForegroundWindow(GetLastActivePopup(show->window()));
+}
+
 // ---- Starting up -----------------------------------------------------------------
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
@@ -452,6 +532,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		files.push_back(a);
 	}
 	LocalFree(argv);
+	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || gClickTest || gDialog != 0;
+	if (!testRun && handToRunning(files)) return 0;
 
 	prefs().load();
 	gPrefsBefore = prefs();
