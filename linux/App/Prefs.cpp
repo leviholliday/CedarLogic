@@ -97,6 +97,15 @@ void Prefs::load() {
 		lastFolder = readString(k, "lastFolder", lastFolder);
 		lastCircuit = readString(k, "lastCircuit", lastCircuit);
 		studentName = readString(k, "studentName", studentName);
+		lastFormula = readString(k, "lastFormula", lastFormula);
+		buildShape = readInt(k, "buildShape", buildShape, 0, 2);
+		buildStyle = readInt(k, "buildStyle", buildStyle, 0, 2);
+		buildTwoInput = readBool(k, "buildTwoInput", buildTwoInput);
+		buildNewPage = readBool(k, "buildNewPage", buildNewPage);
+		feedbackName = readString(k, "feedbackName", feedbackName);
+		feedbackEmail = readString(k, "feedbackEmail", feedbackEmail);
+		lastSeenVersion = readString(k, "lastSeenVersion", lastSeenVersion);
+		playLaunchSound = readBool(k, "playLaunchSound", playLaunchSound);
 		gsize n = 0;
 		if (gchar** list = g_key_file_get_string_list(k, kGroup, "recent", &n, nullptr)) {
 			recent.clear();
@@ -144,6 +153,15 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "lastFolder", lastFolder.c_str());
 	g_key_file_set_string(k, kGroup, "lastCircuit", lastCircuit.c_str());
 	g_key_file_set_string(k, kGroup, "studentName", studentName.c_str());
+	g_key_file_set_string(k, kGroup, "lastFormula", lastFormula.c_str());
+	g_key_file_set_integer(k, kGroup, "buildShape", buildShape);
+	g_key_file_set_integer(k, kGroup, "buildStyle", buildStyle);
+	g_key_file_set_boolean(k, kGroup, "buildTwoInput", buildTwoInput);
+	g_key_file_set_boolean(k, kGroup, "buildNewPage", buildNewPage);
+	g_key_file_set_string(k, kGroup, "feedbackName", feedbackName.c_str());
+	g_key_file_set_string(k, kGroup, "feedbackEmail", feedbackEmail.c_str());
+	g_key_file_set_string(k, kGroup, "lastSeenVersion", lastSeenVersion.c_str());
+	g_key_file_set_boolean(k, kGroup, "playLaunchSound", playLaunchSound);
 	std::vector<const gchar*> list;
 	for (const std::string& r : recent) list.push_back(r.c_str());
 	g_key_file_set_string_list(k, kGroup, "recent", list.data(), list.size());

@@ -52,6 +52,15 @@ struct Prefs {
 	std::string lastFolder;
 	std::string lastCircuit;                      // the Your Circuits circuit last in front
 	std::string studentName;                      // for the Lab Page template and exports
+	// Build from Formula: what was typed last, and how to build it.
+	std::string lastFormula = "F = A'B + AC";
+	int buildShape = 0, buildStyle = 0;
+	bool buildTwoInput = false, buildNewPage = true;
+	// Send Feedback remembers who's sending.
+	std::string feedbackName, feedbackEmail;
+	// What's New shows once per version.
+	std::string lastSeenVersion;
+	bool playLaunchSound = true;                  // the launch screen's chime
 
 	double wireScale() const;
 	void load();

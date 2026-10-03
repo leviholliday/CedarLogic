@@ -113,6 +113,16 @@ enum class TextAlign { Leading, Center, Trailing };
 void drawText(cairo_t* cr, const std::string& text, const RectF& box, float size, const Color& color,
               TextAlign align = TextAlign::Leading, bool bold = false);
 float textWidth(const std::string& text, float size, bool bold = false);
+// The same, centred up and down in `box` (as the Windows app's drawText).
+void drawTextMid(cairo_t* cr, const std::string& text, const RectF& box, float size, const Color& color,
+                 TextAlign align = TextAlign::Leading, bool bold = false);
+// Text in a named face ("Monospace", "Serif"), its top-left at (x, y); the
+// width it takes (drawn only when cr).
+float drawFace(cairo_t* cr, const std::string& text, float x, float y, const char* family, float size, const Color& color,
+               bool bold = false, bool italic = false);
+inline float faceWidth(const std::string& text, const char* family, float size, bool bold = false, bool italic = false) {
+	return drawFace(nullptr, text, 0, 0, family, size, Color{}, bold, italic);
+}
 // Wrapped to the box's width; returns the height it took (drawn when cr).
 float drawWrapped(cairo_t* cr, const std::string& text, const RectF& box, float size, const Color& color, bool bold = false,
                   TextAlign align = TextAlign::Leading);

@@ -157,6 +157,46 @@ void drawText(cairo_t* cr, const std::string& text, const RectF& box, float size
 	g_object_unref(l);
 }
 
+void drawTextMid(cairo_t* cr, const std::string& text, const RectF& box, float size, const Color& color, TextAlign align, bool bold) {
+	if (text.empty()) return;
+	PangoLayout* l = layoutFor(nullptr, text, size, bold);
+	PangoRectangle logical;
+	pango_layout_get_extents(l, nullptr, &logical);
+	g_object_unref(l);
+	const float h = logical.height / (float)PANGO_SCALE;
+	const float top = (box.top + box.bottom) / 2 - h / 2;
+	drawText(cr, text, rectF(box.left, top, box.right, top + h), size, color, align, bold);
+}
+
+float drawFace(cairo_t* cr, const std::string& text, float x, float y, const char* family, float size, const Color& color, bool bold,
+               bool italic) {
+	if (text.empty()) return 0;
+	static cairo_surface_t* scratch = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+	cairo_t* use = cr;
+	if (use == nullptr) use = cairo_create(scratch);
+	PangoLayout* l = pango_cairo_create_layout(use);
+	PangoFontDescription* d = pango_font_description_new();
+	pango_font_description_set_family(d, family);
+	pango_font_description_set_weight(d, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
+	pango_font_description_set_style(d, italic ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
+	pango_font_description_set_absolute_size(d, size * PANGO_SCALE);
+	pango_layout_set_font_description(l, d);
+	pango_font_description_free(d);
+	pango_layout_set_text(l, text.c_str(), -1);
+	PangoRectangle logical;
+	pango_layout_get_extents(l, nullptr, &logical);
+	if (cr) {
+		cairo_save(cr);
+		setColor(cr, color);
+		cairo_move_to(cr, x, y);
+		pango_cairo_show_layout(cr, l);
+		cairo_restore(cr);
+	}
+	g_object_unref(l);
+	if (cr == nullptr) cairo_destroy(use);
+	return logical.width / (float)PANGO_SCALE;
+}
+
 float textWidth(const std::string& text, float size, bool bold) {
 	if (text.empty()) return 0;
 	PangoLayout* l = layoutFor(nullptr, text, size, bold);

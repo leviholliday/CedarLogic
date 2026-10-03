@@ -18,6 +18,9 @@ class GatePalette;
 class Toolbar;
 class TabStrip;
 class ScopeWindow;
+class FindBar;
+class TabSwitcher;
+namespace formula { struct Plan; }
 
 class CircuitWindow {
 public:
@@ -117,6 +120,17 @@ public:
 	// Something in Your Circuits changed (a rename): the title follows.
 	void libraryChanged();
 
+	// ---- Templates, My Parts, Build from Formula ----
+	// A circuit just made from a template: into Your Circuits under its name.
+	void startAs(const std::string& name);
+	void partsChanged();
+	// ---- Find (Ctrl+F) and Ctrl+Tab ----
+	void find();
+	void showFoundGate(int page, long gate, double x, double y);
+	std::vector<int> recentTabs() const;   // tab indexes, most recently used first
+	// The plan's parts and wires, on a new page or beside this page's circuit.
+	bool buildPlan(const formula::Plan& plan, bool onNewPage, const std::string& pageName);
+
 	// ---- Commands ----
 	void newCircuit();
 	void open();
@@ -205,6 +219,9 @@ private:
 	GatePalette* palette = nullptr;
 	class MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
+	FindBar* findBar = nullptr;
+	TabSwitcher* switcher = nullptr;
+	std::vector<uint64_t> recentKeys;   // pages by key, most recently in front first
 	std::vector<Canvas*> canvases;    // in tab order
 	bool syncing = false;             // rebuilding the tabs; ignore the notebook's signals
 
@@ -251,6 +268,7 @@ private:
 	static void switchPageCb(GtkNotebook*, GtkWidget*, guint, gpointer);
 	static void reorderCb(GtkNotebook*, GtkWidget*, guint, gpointer);
 	static gboolean keyCb(GtkWidget*, GdkEventKey*, gpointer);
+	static gboolean keyReleaseCb(GtkWidget*, GdkEventKey*, gpointer);
 	static gboolean stateCb(GtkWidget*, GdkEventWindowState*, gpointer);
 	static void sizeCb(GtkWidget*, GdkRectangle*, gpointer);
 	static void clipboardCb(GtkClipboard*, const gchar*, gpointer);

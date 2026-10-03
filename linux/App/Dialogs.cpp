@@ -1,6 +1,8 @@
 // The app's dialogs and extra windows (see Dialogs.h).
 
 #include "Dialogs.h"
+#include "Collections.h"
+#include "Formula.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -259,6 +261,7 @@ void showQuickAdd(CircuitWindow* w) {
 		}
 	std::sort(q.all.begin(), q.all.end(), [](auto& a, auto& b) { return lowered(a.second) < lowered(b.second); });
 	q.all.erase(std::unique(q.all.begin(), q.all.end()), q.all.end());
+	for (const parts::Part& p : parts::all()) q.all.push_back({ p.gate(), p.name + "  (My Parts)" });
 
 	q.dialog = gtk_dialog_new_with_buttons("Add a Gate", w->window(),
 	                                       (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
@@ -308,71 +311,7 @@ void showQuickAdd(CircuitWindow* w) {
 
 // ---- Truth tables ----------------------------------------------------------------
 
-void showTruthTable(CircuitWindow* w, int page) {
-	char err[512] = "";
-	CLTruthTable* tt = cl_truth_table(w->document(), page, err, sizeof err);
-	if (tt == nullptr) {
-		showMessage(w->window(), GTK_MESSAGE_INFO, "A truth table couldn't be made for this page",
-		            *err ? err : "Add switches (inputs) and lights (outputs) to the page first.");
-		return;
-	}
-	const int cols = cl_tt_columns(tt), rows = cl_tt_rows(tt), inputs = cl_tt_inputs(tt);
-	GtkWidget* d = gtk_dialog_new_with_buttons("Truth Table", w->window(), GTK_DIALOG_DESTROY_WITH_PARENT,
-	                                           "_Close", GTK_RESPONSE_CLOSE, nullptr);
-	gtk_window_set_default_size(GTK_WINDOW(d), std::min(900, 120 + cols * 60), std::min(700, 140 + rows * 26));
-	GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(d));
-	gtk_container_set_border_width(GTK_CONTAINER(box), 10);
-	gtk_box_set_spacing(GTK_BOX(box), 8);
-
-	std::string about = format("%d input%s, %d output%s, %d row%s.", inputs, inputs == 1 ? "" : "s",
-	                           cols - inputs, cols - inputs == 1 ? "" : "s", rows, rows == 1 ? "" : "s");
-	if (cl_tt_sequential(tt)) about += " This page has clocks or flip-flops, so outputs can depend on what came before.";
-	if (cl_tt_unsettled(tt) > 0) about += format(" %d row%s never settled.", cl_tt_unsettled(tt), cl_tt_unsettled(tt) == 1 ? "" : "s");
-	GtkWidget* info = gtk_label_new(about.c_str());
-	gtk_label_set_line_wrap(GTK_LABEL(info), TRUE);
-	gtk_label_set_xalign(GTK_LABEL(info), 0);
-	gtk_box_pack_start(GTK_BOX(box), info, FALSE, FALSE, 0);
-
-	std::vector<GType> types((size_t)cols, G_TYPE_STRING);
-	GtkListStore* store = gtk_list_store_newv(cols, types.data());
-	for (int r = 0; r < rows; r++) {
-		GtkTreeIter it;
-		gtk_list_store_append(store, &it);
-		for (int c = 0; c < cols; c++) {
-			const char cell[2] = { cl_tt_cell(tt, r, c), 0 };
-			gtk_list_store_set(store, &it, c, cell, -1);
-		}
-	}
-	GtkWidget* view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
-	g_object_unref(store);
-	gtk_tree_view_set_grid_lines(GTK_TREE_VIEW(view), GTK_TREE_VIEW_GRID_LINES_BOTH);
-	for (int c = 0; c < cols; c++) {
-		GtkCellRenderer* cell = gtk_cell_renderer_text_new();
-		g_object_set(cell, "xalign", 0.5, "family", "monospace", nullptr);
-		if (c >= inputs) g_object_set(cell, "weight", PANGO_WEIGHT_BOLD, nullptr);
-		GtkTreeViewColumn* col = gtk_tree_view_column_new_with_attributes(cl_tt_name(tt, c), cell, "text", c, nullptr);
-		gtk_tree_view_column_set_alignment(col, 0.5);
-		gtk_tree_view_column_set_min_width(col, 44);
-		gtk_tree_view_append_column(GTK_TREE_VIEW(view), col);
-		if (c == inputs - 1 && c + 1 < cols) {
-			// A gap between the inputs and the outputs.
-			GtkTreeViewColumn* gap = gtk_tree_view_column_new();
-			gtk_tree_view_column_set_min_width(gap, 10);
-			gtk_tree_view_append_column(GTK_TREE_VIEW(view), gap);
-		}
-	}
-	GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
-	gtk_container_add(GTK_CONTAINER(scroll), view);
-	gtk_widget_set_vexpand(scroll, TRUE);
-	gtk_box_pack_start(GTK_BOX(box), scroll, TRUE, TRUE, 0);
-	GtkWidget* legend = gtk_label_new("X unknown · Z floating · ! conflict · - not connected");
-	gtk_style_context_add_class(gtk_widget_get_style_context(legend), "dim-label");
-	gtk_label_set_xalign(GTK_LABEL(legend), 0);
-	gtk_box_pack_start(GTK_BOX(box), legend, FALSE, FALSE, 0);
-	cl_tt_free(tt);
-	g_signal_connect(d, "response", G_CALLBACK(gtk_widget_destroy), nullptr);
-	gtk_widget_show_all(d);
-}
+// The truth table: TruthTableWindow.cpp.
 
 // ---- Memory (RAM and ROM contents) -----------------------------------------------
 
@@ -832,4 +771,153 @@ void ScopeWindow::draw(cairo_t* cr) {
 			}
 		}
 	}
+}
+
+// ---- Build from Formula ----------------------------------------------------------
+// The Mac app's FormulaCircuit: type a formula (or several, one an output),
+// see what it'll make, and it's built -- switches for the variables, gates,
+// a light for each output, labelled and wired.
+
+namespace {
+
+struct BuildForm {
+	GtkWidget* text;
+	GtkWidget* preview;
+	GtkWidget* shape;
+	GtkWidget* style;
+	GtkWidget* two;
+	GtkWidget* ok;
+	formula::Parsed parsed;
+	bool valid = false;
+};
+
+std::string textOf(GtkWidget* view) {
+	GtkTextBuffer* b = gtk_text_view_get_buffer(GTK_TEXT_VIEW(view));
+	GtkTextIter s, e;
+	gtk_text_buffer_get_bounds(b, &s, &e);
+	gchar* t = gtk_text_buffer_get_text(b, &s, &e, FALSE);
+	std::string out = t ? t : "";
+	g_free(t);
+	return out;
+}
+
+void buildUpdate(BuildForm* f) {
+	std::string error;
+	const std::string src = textOf(f->text);
+	bool blank = true;
+	for (char c : src) if (!g_ascii_isspace(c)) blank = false;
+	f->valid = false;
+	if (blank) {
+		gtk_label_set_text(GTK_LABEL(f->preview), "");
+	} else if (!formula::parse(src, f->parsed, error)) {
+		gtk_label_set_text(GTK_LABEL(f->preview), ("⚠  " + error).c_str());
+	} else {
+		f->valid = true;
+		std::string s = f->parsed.variables.empty() ? std::string("No variables")
+		                                            : format("%d variable%s: ", (int)f->parsed.variables.size(),
+		                                                     f->parsed.variables.size() == 1 ? "" : "s");
+		for (size_t i = 0; i < f->parsed.variables.size(); i++) s += (i ? ", " : "") + f->parsed.variables[i];
+		for (const formula::Function& fn : f->parsed.functions)
+			s += "\nSimplest:  " + fn.name + " = " + formula::simplest(true, (int)f->parsed.variables.size(), fn.values).text(f->parsed.variables);
+		const formula::Plan plan = formula::plan(f->parsed, (formula::Shape)gtk_combo_box_get_active(GTK_COMBO_BOX(f->shape)),
+		                                         (formula::Style)gtk_combo_box_get_active(GTK_COMBO_BOX(f->style)),
+		                                         gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(f->two)));
+		s += "\n" + plan.summary();
+		gtk_label_set_text(GTK_LABEL(f->preview), s.c_str());
+	}
+	gtk_widget_set_sensitive(f->ok, f->valid);
+}
+
+GtkWidget* comboOf(const std::vector<const char*>& items, int active) {
+	GtkWidget* c = gtk_combo_box_text_new();
+	for (const char* i : items) gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(c), i);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(c), active);
+	return c;
+}
+
+}  // namespace
+
+void showBuildFormula(CircuitWindow* w) {
+	Prefs& pr = prefs();
+	GtkWidget* d = gtk_dialog_new_with_buttons("Build from Formula", w->window(),
+	                                           (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
+	                                           "_Cancel", GTK_RESPONSE_CANCEL, nullptr);
+	BuildForm f;
+	f.ok = gtk_dialog_add_button(GTK_DIALOG(d), "_Build", GTK_RESPONSE_OK);
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.ok), "suggested-action");
+	gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_OK);
+	gtk_window_set_default_size(GTK_WINDOW(d), 560, -1);
+	GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(d));
+	gtk_container_set_border_width(GTK_CONTAINER(box), 16);
+	gtk_box_set_spacing(GTK_BOX(box), 10);
+	GtkWidget* intro = gtk_label_new("Switches for the variables, gates for the formula, and a light for each output, labelled and wired.");
+	gtk_label_set_line_wrap(GTK_LABEL(intro), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(intro), 0);
+	gtk_box_pack_start(GTK_BOX(box), intro, FALSE, FALSE, 0);
+
+	f.text = gtk_text_view_new();
+	gtk_text_view_set_monospace(GTK_TEXT_VIEW(f.text), TRUE);
+	gtk_text_view_set_left_margin(GTK_TEXT_VIEW(f.text), 8);
+	gtk_text_view_set_top_margin(GTK_TEXT_VIEW(f.text), 6);
+	gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(f.text)), pr.lastFormula.c_str(), -1);
+	gtk_widget_set_size_request(f.text, -1, 76);
+	GtkWidget* frame = gtk_frame_new(nullptr);
+	gtk_container_add(GTK_CONTAINER(frame), f.text);
+	gtk_box_pack_start(GTK_BOX(box), frame, FALSE, FALSE, 0);
+
+	GtkWidget* help = gtk_label_new("One output per line. NOT: A' or ~A · AND: AB, A·B or A*B · OR: A + B · XOR: A ^ B "
+	                                "· or minterms: F(A,B,C) = m(1,3,5) + d(7)");
+	gtk_label_set_line_wrap(GTK_LABEL(help), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(help), 0);
+	gtk_style_context_add_class(gtk_widget_get_style_context(help), "dim-label");
+	gtk_box_pack_start(GTK_BOX(box), help, FALSE, FALSE, 0);
+
+	f.preview = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(f.preview), 0);
+	gtk_label_set_line_wrap(GTK_LABEL(f.preview), TRUE);
+	gtk_label_set_selectable(GTK_LABEL(f.preview), TRUE);
+	gtk_widget_set_size_request(f.preview, -1, 80);
+	gtk_label_set_yalign(GTK_LABEL(f.preview), 0);
+	gtk_box_pack_start(GTK_BOX(box), f.preview, FALSE, FALSE, 0);
+
+	GtkWidget* grid = gtk_grid_new();
+	gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+	f.shape = comboOf({ "As written", "Simplest sum of products", "Simplest product of sums" }, pr.buildShape);
+	f.style = comboOf({ "Any gates", "NAND only", "NOR only" }, pr.buildStyle);
+	f.two = gtk_check_button_new_with_label("Only 2-input gates");
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(f.two), pr.buildTwoInput);
+	GtkWidget* where = comboOf({ "On a new page", "Beside this page's circuit" }, pr.buildNewPage ? 0 : 1);
+	const char* labels[] = { "Build it", "With", "", "Put it" };
+	GtkWidget* fields[] = { f.shape, f.style, f.two, where };
+	for (int i = 0; i < 4; i++) {
+		GtkWidget* l = gtk_label_new(labels[i]);
+		gtk_label_set_xalign(GTK_LABEL(l), 1);
+		gtk_grid_attach(GTK_GRID(grid), l, 0, i, 1, 1);
+		gtk_grid_attach(GTK_GRID(grid), fields[i], 1, i, 1, 1);
+	}
+	gtk_box_pack_start(GTK_BOX(box), grid, FALSE, FALSE, 4);
+
+	g_signal_connect_swapped(gtk_text_view_get_buffer(GTK_TEXT_VIEW(f.text)), "changed", G_CALLBACK(buildUpdate), &f);
+	g_signal_connect_swapped(f.shape, "changed", G_CALLBACK(buildUpdate), &f);
+	g_signal_connect_swapped(f.style, "changed", G_CALLBACK(buildUpdate), &f);
+	g_signal_connect_swapped(f.two, "toggled", G_CALLBACK(buildUpdate), &f);
+	buildUpdate(&f);
+	gtk_widget_show_all(d);
+	gtk_widget_grab_focus(f.text);
+	const bool ok = gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_OK && f.valid;
+	if (ok) {
+		pr.lastFormula = textOf(f.text);
+		pr.buildShape = gtk_combo_box_get_active(GTK_COMBO_BOX(f.shape));
+		pr.buildStyle = gtk_combo_box_get_active(GTK_COMBO_BOX(f.style));
+		pr.buildTwoInput = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(f.two));
+		pr.buildNewPage = gtk_combo_box_get_active(GTK_COMBO_BOX(where)) == 0;
+		pr.save();
+	}
+	gtk_widget_destroy(d);
+	if (!ok) return;
+	const formula::Plan plan = formula::plan(f.parsed, (formula::Shape)pr.buildShape, (formula::Style)pr.buildStyle, pr.buildTwoInput);
+	std::string name;
+	for (size_t i = 0; i < f.parsed.functions.size(); i++) name += (i ? ", " : "") + f.parsed.functions[i].name;
+	if (!w->buildPlan(plan, pr.buildNewPage, name)) gtk_widget_error_bell(GTK_WIDGET(w->window()));
 }

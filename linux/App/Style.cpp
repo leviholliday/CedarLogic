@@ -79,6 +79,15 @@ void applyStyle() {
 	// The pickers' search: a bare entry over the drawn field.
 	s += "#picker-search { background: transparent; border: none; box-shadow: none; outline: none; min-height: 24px; color: " + css(text) +
 	     "; }\n";
+	// The find bar: a pill floating over the top of the page.
+	s += "#findbar { background-color: " + css(dark ? rgb255(40, 43, 50) : rgb255(250, 250, 252)) + "; border: 1px solid " +
+	     css(withAlpha(ink, 0.18f)) + "; border-radius: 21px; padding: 4px 6px 4px 8px; box-shadow: 0 2px 8px " +
+	     css(colorF(0, 0, 0, dark ? 0.35f : 0.12f)) + "; min-height: 32px; }\n";
+	s += "#findbar entry, #findbar-entry { background: transparent; border: none; box-shadow: none; min-height: 24px; color: " + css(ink) +
+	     "; }\n";
+	s += "#findbar button { border-radius: 8px; background-image: none; border: none; box-shadow: none; min-height: 26px; min-width: 26px; }\n";
+	s += "#findbar-done { background-color: " + css(withAlpha(ink, 0.07f)) + "; padding: 0 12px; }\n";
+	s += "#findbar label.warning { color: rgb(245,148,33); }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

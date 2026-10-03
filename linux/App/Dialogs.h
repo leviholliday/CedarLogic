@@ -15,7 +15,9 @@ bool askText(GtkWindow* parent, const std::string& title, const std::string& pro
 
 void showGateSettings(CircuitWindow* w, long gate);
 void showQuickAdd(CircuitWindow* w);
-void showTruthTable(CircuitWindow* w, int page);
+void showTruthTable(CircuitWindow* w, int page);   // TruthTableWindow.cpp
+// Build from Formula: switches, gates and lights from a formula typed in.
+void showBuildFormula(CircuitWindow* w);
 void showRamEditor(CircuitWindow* w, long gate);
 void showPreferencesDialog(GtkWindow* parent);
 void showShortcutsWindow(GtkWindow* parent);

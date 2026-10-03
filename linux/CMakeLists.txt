@@ -71,7 +71,7 @@ if(CL_BUILD_APP)
 
 	include(GNUInstallDirs)
 	install(TARGETS CedarLogic RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-	install(FILES ${ROOT}/res/cl_gatedefs.xml res/cedarlogic.png DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
+	install(FILES ${ROOT}/res/cl_gatedefs.xml res/cedarlogic.png res/FirstLaunch.wav DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
 	install(DIRECTORY ${ROOT}/res/help ${ROOT}/res/samples DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
 	install(FILES res/cedarlogic.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 	install(FILES res/cedarlogic.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)

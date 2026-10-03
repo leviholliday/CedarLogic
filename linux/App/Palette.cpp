@@ -1,6 +1,7 @@
 // The gate palette (see Palette.h).
 
 #include "Palette.h"
+#include "Collections.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -35,22 +36,8 @@ GatePalette::GatePalette(CircuitWindow* window) : win(window) {
 	gtk_box_pack_start(GTK_BOX(root), search, FALSE, FALSE, 0);
 	g_signal_connect(search, "search-changed", G_CALLBACK(searchChangedCb), this);
 
-	for (int c = 0; c < cl_library_category_count(); c++) {
-		Category cat;
-		std::string name = cl_library_category(c);
-		const size_t dash = name.find(" - ");
-		cat.title = dash == std::string::npos ? name : name.substr(dash + 3);
-		for (int i = 0; i < cl_library_gate_count(c); i++) {
-			Gate g;
-			g.name = cl_library_gate(c, i);
-			g.caption = cl_library_gate_caption(g.name.c_str());
-			if (g.caption.empty()) g.caption = g.name;
-			cat.gates.push_back(g);
-		}
-		if (cat.gates.empty()) continue;
-		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), cat.title.c_str());
-		categories.push_back(cat);
-	}
+	loadCategories();
+	for (const Category& cat : categories) gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), cat.title.c_str());
 
 	GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
@@ -91,6 +78,45 @@ GatePalette::~GatePalette() {
 	g_list_free(kids);
 	for (std::string* s : tileNames) delete s;
 	tileNames.clear();
+}
+
+void GatePalette::loadCategories() {
+	categories.clear();
+	for (int c = 0; c < cl_library_category_count(); c++) {
+		Category cat;
+		std::string name = cl_library_category(c);
+		const size_t dash = name.find(" - ");
+		cat.title = dash == std::string::npos ? name : name.substr(dash + 3);
+		for (int i = 0; i < cl_library_gate_count(c); i++) {
+			Gate g;
+			g.name = cl_library_gate(c, i);
+			g.caption = cl_library_gate_caption(g.name.c_str());
+			if (g.caption.empty()) g.caption = g.name;
+			cat.gates.push_back(g);
+		}
+		if (!cat.gates.empty()) categories.push_back(cat);
+	}
+	// Your own parts, last (Save as Part).
+	Category mine;
+	mine.title = "My Parts";
+	for (const parts::Part& p : parts::all()) mine.gates.push_back({ p.gate(), p.name });
+	if (!mine.gates.empty()) categories.push_back(mine);
+}
+
+void GatePalette::partsChanged() {
+	const int at = gtk_combo_box_get_active(GTK_COMBO_BOX(combo));
+	const std::string was = at >= 0 && at < (int)categories.size() ? categories[at].title : std::string();
+	g_signal_handlers_block_by_func(combo, (gpointer)comboChangedCb, this);
+	gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(combo));
+	loadCategories();
+	int pick = 0;
+	for (int i = 0; i < (int)categories.size(); i++) {
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), categories[i].title.c_str());
+		if (categories[i].title == was) pick = i;
+	}
+	gtk_combo_box_set_active(GTK_COMBO_BOX(combo), categories.empty() ? -1 : pick);
+	g_signal_handlers_unblock_by_func(combo, (gpointer)comboChangedCb, this);
+	fill();
 }
 
 void GatePalette::showCategory(int index) {
@@ -159,6 +185,10 @@ GtkWidget* GatePalette::tile(const Gate& g) {
 	gtk_drag_source_set(box, GDK_BUTTON1_MASK, &target, 1, GDK_ACTION_COPY);
 	g_signal_connect(box, "drag-data-get", G_CALLBACK(dragDataGetCb), name);
 	g_signal_connect(box, "drag-begin", G_CALLBACK(dragBeginCb), name);
+	if (parts::isPart(g.name)) {
+		g_object_set_data(G_OBJECT(box), "palette", this);
+		g_signal_connect(box, "button-press-event", G_CALLBACK(tilePressCb), name);
+	}
 	return box;
 }
 
@@ -181,10 +211,21 @@ gboolean GatePalette::drawTileCb(GtkWidget* w, cairo_t* cr, gpointer data) {
 	const std::string* name = static_cast<const std::string*>(data);
 	const double scale = std::max(1, gtk_widget_get_scale_factor(w));
 	guarded("drawing the palette", [&] {
-		cl_library_draw_gate(name->c_str(), cr, gtk_widget_get_allocated_width(w),
-		                     gtk_widget_get_allocated_height(w), scale, prefs().dark);
+		if (parts::isPart(*name))
+			parts::draw(*name, cr, gtk_widget_get_allocated_width(w), gtk_widget_get_allocated_height(w), scale, prefs().dark);
+		else
+			cl_library_draw_gate(name->c_str(), cr, gtk_widget_get_allocated_width(w),
+			                     gtk_widget_get_allocated_height(w), scale, prefs().dark);
 	});
 	return FALSE;
+}
+
+gboolean GatePalette::tilePressCb(GtkWidget* box, GdkEventButton* e, gpointer d) {
+	if (e->type != GDK_BUTTON_PRESS || e->button != 3) return FALSE;
+	GatePalette* p = static_cast<GatePalette*>(g_object_get_data(G_OBJECT(box), "palette"));
+	const std::string name = *static_cast<const std::string*>(d);
+	parts::tileMenu(p->win->window(), name, (GdkEvent*)e);
+	return TRUE;
 }
 
 void GatePalette::dragDataGetCb(GtkWidget*, GdkDragContext*, GtkSelectionData* data, guint, guint, gpointer d) {
@@ -198,7 +239,8 @@ void GatePalette::dragBeginCb(GtkWidget*, GdkDragContext* ctx, gpointer d) {
 	const std::string* name = static_cast<const std::string*>(d);
 	cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, kTileW, kTileH);
 	cairo_t* cr = cairo_create(s);
-	cl_library_draw_gate(name->c_str(), cr, kTileW, kTileH, 1, prefs().dark);
+	if (parts::isPart(*name)) parts::draw(*name, cr, kTileW, kTileH, 1, prefs().dark);
+	else cl_library_draw_gate(name->c_str(), cr, kTileW, kTileH, 1, prefs().dark);
 	cairo_destroy(cr);
 	cairo_surface_set_device_offset(s, -kTileW / 2.0, -kTileH / 2.0);
 	gtk_drag_set_icon_surface(ctx, s);

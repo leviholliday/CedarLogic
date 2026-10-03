@@ -56,6 +56,7 @@ GMenuModel* buildMenubar() {
 	GMenu* file = g_menu_new();
 	GMenu* s1 = g_menu_new();
 	g_menu_append(s1, "_New Circuit", "app.new");
+	g_menu_append(s1, "New from _Template…", "win.new-template");
 	g_menu_append(s1, "Your _Circuits…", "app.open");
 	g_menu_append(s1, "_Import a File…", "app.import");
 	gRecentMenu = g_menu_new();
@@ -68,6 +69,7 @@ GMenuModel* buildMenubar() {
 	g_menu_append(s2, "_Rename…", "win.rename-circuit");
 	g_menu_append(s2, "Du_plicate Circuit", "win.duplicate-circuit");
 	g_menu_append(s2, "E_xport as CedarLogic File…", "win.save-as");
+	g_menu_append(s2, "Save as Te_mplate…", "win.save-template");
 	g_menu_append(s2, "_Export as Image…", "win.export-image");
 	GMenu* older = g_menu_new();
 	g_menu_append(older, "For CedarLogic _2…", "win.export-v2");
@@ -93,6 +95,7 @@ GMenuModel* buildMenubar() {
 	g_menu_append(e2, "D_uplicate", "win.duplicate");
 	g_menu_append(e2, "_Delete", "win.delete");
 	g_menu_append(e2, "Select _All", "win.select-all");
+	g_menu_append(e2, "_Find…", "win.find");
 	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e2));
 	GMenu* e3 = g_menu_new();
 	g_menu_append(e3, "Add a _Gate…   (A)", "win.add-gate");
@@ -102,6 +105,8 @@ GMenuModel* buildMenubar() {
 	g_menu_append(e3, "_Tidy Up   (Shift+S)", "win.tidy");
 	g_menu_append(e3, "Tidy Up by Signal _Flow", "win.tidy-flow");
 	g_menu_append(e3, "Connect _Nearby Pins", "win.connect-nearby");
+	g_menu_append(e3, "Save as _Part…", "win.save-part");
+	g_menu_append(e3, "_Build from Formula…", "win.build-formula");
 	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e3));
 	GMenu* e4 = g_menu_new();
 	g_menu_append(e4, "Pr_eferences", "win.preferences");
@@ -148,6 +153,8 @@ GMenuModel* buildMenubar() {
 	g_menu_append(help, "_Keyboard Shortcuts", "win.shortcuts");
 	g_menu_append(help, "Guided _Tour", "app.guided-tour");
 	g_menu_append(help, "CedarLogic _Help", "win.help");
+	g_menu_append(help, "_What's New in CedarLogic", "win.whats-new");
+	g_menu_append(help, "Send _Feedback…", "win.feedback");
 	g_menu_append(help, "Check for _Updates…", "app.check-updates");
 	g_menu_append(help, "_About CedarLogic", "win.about");
 	g_menu_append_submenu(bar, "_Help", G_MENU_MODEL(help));
@@ -172,6 +179,7 @@ void setAccels(GtkApplication* app) {
 		{ "win.paste", { "<Primary>v" } },
 		{ "win.duplicate", { "<Primary>d" } },
 		{ "win.select-all", { "<Primary>a" } },
+		{ "win.find", { "<Primary>f" } },
 		{ "win.zoom-in", { "<Primary>equal", "<Primary>plus", "<Primary>KP_Add" } },
 		{ "win.zoom-out", { "<Primary>minus", "<Primary>KP_Subtract" } },
 		{ "win.zoom-fit", { "<Primary>0", "<Primary>KP_0" } },

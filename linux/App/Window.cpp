@@ -2,7 +2,11 @@
 
 #include "Window.h"
 #include "Canvas.h"
+#include "Collections.h"
 #include "Dialogs.h"
+#include "FindBar.h"
+#include "TabSwitcher.h"
+#include "Formula.h"
 #include "MiniMap.h"
 #include "Palette.h"
 #include "Library.h"
@@ -39,6 +43,11 @@ const Command kCommands[] = {
 	{ "duplicate-circuit", [](CircuitWindow* w) { w->duplicateCircuit(); }, false },
 	{ "versions", [](CircuitWindow* w) { showVersionHistory(w); }, false },
 	{ "library", [](CircuitWindow* w) { showYourCircuits(w); }, false },
+	{ "new-template", [](CircuitWindow* w) { templates::showPicker(w); }, false },
+	{ "save-template", [](CircuitWindow* w) { templates::saveCurrent(w); }, false },
+	{ "save-part", [](CircuitWindow* w) { parts::saveSelection(w); }, false },
+	{ "build-formula", [](CircuitWindow* w) { if (w->canEdit()) showBuildFormula(w); else w->lockNudge(); }, false },
+	{ "find", [](CircuitWindow* w) { w->find(); }, false },
 	{ "export-image", [](CircuitWindow* w) { w->exportImage(); }, false },
 	{ "export-v2", [](CircuitWindow* w) { w->exportOlder(2); }, false },
 	{ "export-v1", [](CircuitWindow* w) { w->exportOlder(1); }, false },
@@ -154,6 +163,10 @@ CircuitWindow::~CircuitWindow() {
 	timer = 0;
 	delete scope;
 	scope = nullptr;
+	delete switcher;
+	switcher = nullptr;
+	delete findBar;
+	findBar = nullptr;
 	for (Canvas* c : canvases) delete c;
 	canvases.clear();
 	delete palette;
@@ -175,6 +188,12 @@ void CircuitWindow::build() {
 	g_signal_connect(win, "delete-event", G_CALLBACK(deleteCb), this);
 	g_signal_connect(win, "destroy", G_CALLBACK(destroyCb), this);
 	g_signal_connect(win, "key-press-event", G_CALLBACK(keyCb), this);
+	g_signal_connect(win, "key-release-event", G_CALLBACK(keyReleaseCb), this);
+	g_signal_connect(win, "focus-out-event", G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer self) -> gboolean {
+		CircuitWindow* w = static_cast<CircuitWindow*>(self);
+		if (w->switcher) w->switcher->cancel();
+		return FALSE;
+	}), this);
 	g_signal_connect(win, "window-state-event", G_CALLBACK(stateCb), this);
 	g_signal_connect(win, "size-allocate", G_CALLBACK(sizeCb), this);
 	addActions();
@@ -225,7 +244,13 @@ void CircuitWindow::build() {
 	gtk_notebook_set_show_border(GTK_NOTEBOOK(notebook), FALSE);
 	g_signal_connect(notebook, "switch-page", G_CALLBACK(switchPageCb), this);
 	g_signal_connect(notebook, "page-reordered", G_CALLBACK(reorderCb), this);
-	gtk_box_pack_start(GTK_BOX(right), notebook, TRUE, TRUE, 0);
+	// The find bar floats over the top of the page.
+	GtkWidget* over = gtk_overlay_new();
+	gtk_container_add(GTK_CONTAINER(over), notebook);
+	findBar = new FindBar(this);
+	gtk_overlay_add_overlay(GTK_OVERLAY(over), findBar->widget());
+	switcher = new TabSwitcher(this);
+	gtk_box_pack_start(GTK_BOX(right), over, TRUE, TRUE, 0);
 	gtk_paned_pack2(GTK_PANED(paned), right, TRUE, FALSE);
 
 	statusBar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
@@ -387,6 +412,8 @@ void CircuitWindow::switchPageCb(GtkNotebook*, GtkWidget* page, guint, gpointer 
 	w->selectionSignature.clear();
 	for (Canvas* c : w->canvases) {
 		if (c->widget() != page) continue;
+		w->recentKeys.erase(std::remove(w->recentKeys.begin(), w->recentKeys.end(), c->pageKey()), w->recentKeys.end());
+		w->recentKeys.insert(w->recentKeys.begin(), c->pageKey());
 		gtk_widget_grab_focus(c->widget());
 		if (!w->seenPages[c->pageKey()]) { w->seenPages[c->pageKey()] = true; w->appearStart = g_get_monotonic_time(); }
 	}
@@ -632,6 +659,7 @@ void CircuitWindow::edited() {
 	updateTitle();
 	updateBanner();
 	updateTabLabels();
+	if (findBar && findBar->isOpen()) findBar->run(false);
 	statusDirty = true;
 }
 
@@ -949,11 +977,21 @@ gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) 
 	}
 	// Ctrl+Tab and Ctrl+Shift+Tab go through the tabs (GTK would move the
 	// keyboard focus instead).
+	// held, the Mac's switcher (tabs in the order last used).
 	if ((e->state & GDK_CONTROL_MASK) && (e->keyval == GDK_KEY_Tab || e->keyval == GDK_KEY_ISO_Left_Tab ||
 	                                      e->keyval == GDK_KEY_KP_Tab)) {
-		w->cyclePage((e->keyval == GDK_KEY_ISO_Left_Tab || (e->state & GDK_SHIFT_MASK)) ? -1 : 1);
+		const bool back = e->keyval == GDK_KEY_ISO_Left_Tab || (e->state & GDK_SHIFT_MASK);
+		if (!w->switcher || !w->switcher->key(back)) w->cyclePage(back ? -1 : 1);
 		return TRUE;
 	}
+	if (w->switcher && w->switcher->active() && e->keyval == GDK_KEY_Escape) { w->switcher->cancel(); return TRUE; }
+	return FALSE;
+}
+
+gboolean CircuitWindow::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
+	CircuitWindow* w = static_cast<CircuitWindow*>(self);
+	if (w->switcher && w->switcher->active() && (e->keyval == GDK_KEY_Control_L || e->keyval == GDK_KEY_Control_R))
+		guarded("switching tabs", [&] { w->switcher->release(); });
 	return FALSE;
 }
 
@@ -1377,10 +1415,99 @@ bool CircuitWindow::placePendingGate(double wx, double wy) {
 
 bool CircuitWindow::addGateFloating(const std::string& name, double wx, double wy) {
 	if (!canEdit()) { lockNudge(); return false; }
+	// One of My Parts: its gates and wires, pasted, on the pointer.
+	if (parts::isPart(name)) {
+		parts::Part p;
+		if (!parts::find(name, p)) return false;
+		const std::string text = p.text();
+		const char* back = nullptr;
+		if (!cl_edit_paste(doc, currentPage(), text.c_str(), wx, wy, true, &back)) return false;
+		floatSelection(wx, wy);
+		redraw();
+		return true;
+	}
 	if (!cl_edit_add_gate(doc, currentPage(), name.c_str(), wx, wy)) return false;
 	floatSelection(wx, wy);
 	redraw();
 	return true;
+}
+
+bool CircuitWindow::buildPlan(const formula::Plan& plan, bool onNewPage, const std::string& newPageName) {
+	if (plan.parts.empty()) return false;
+	if (!canEdit()) { lockNudge(); return false; }
+	int target = currentPage();
+	double dx = 0, dy = 0;
+	if (onNewPage) {
+		const int i = cl_document_add_page(doc);
+		if (i < 0) return false;
+		target = i;
+		if (!newPageName.empty()) cl_document_rename_page(doc, i, newPageName.c_str());
+	} else {
+		double l, b, r, t;
+		if (cl_document_page_bounds(doc, target, &l, &b, &r, &t)) {
+			double minX = 1e9, maxY = -1e9;
+			for (const formula::Plan::Part& p : plan.parts) { minX = std::min(minX, p.x); maxY = std::max(maxY, p.y); }
+			dx = r + 16 - minX;
+			dy = t - maxY;
+		}
+	}
+	std::vector<CLBuildGate> gates;
+	for (const formula::Plan::Part& p : plan.parts)
+		gates.push_back({ p.gate.c_str(), p.x + dx, p.y + dy, p.label.empty() ? nullptr : p.label.c_str() });
+	std::vector<CLBuildWire> wires;
+	for (const formula::Plan::Wire& w : plan.wires) wires.push_back({ w.from, w.fromPin.c_str(), w.to, w.toPin.c_str() });
+	if (cl_edit_build(doc, target, gates.data(), (int)gates.size(), wires.empty() ? nullptr : wires.data(), (int)wires.size(),
+	                  "Build from Formula") <= 0)
+		return false;
+	if (onNewPage) {
+		syncTabs();
+		gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), target);
+		appearStart = g_get_monotonic_time();
+	}
+	edited();
+	if (Canvas* c = currentCanvas()) c->zoomToFit(true);
+	note(plan.summary());
+	return true;
+}
+
+std::vector<int> CircuitWindow::recentTabs() const {
+	std::vector<int> out;
+	const int current = currentTab();
+	if (current >= 0 && current < (int)canvases.size()) out.push_back(current);
+	for (uint64_t key : recentKeys)
+		for (int i = 0; i < (int)canvases.size(); i++)
+			if (canvases[i]->pageKey() == key && std::find(out.begin(), out.end(), i) == out.end()) out.push_back(i);
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (std::find(out.begin(), out.end(), i) == out.end()) out.push_back(i);
+	return out;
+}
+
+void CircuitWindow::showFoundGate(int page, long gate, double x, double y) {
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (canvases[i]->page() == page) showTab(i);
+	cl_edit_select_gate(doc, page, gate);
+	if (Canvas* c = currentCanvas()) c->panTo(x, y);
+	selectionChanged();
+	redraw();
+}
+
+void CircuitWindow::find() {
+	// A label or TO/FROM selected: look for its name.
+	const long g = cl_edit_single_gate(doc, currentPage());
+	const char* name = g >= 0 ? cl_gate_find_name(doc, g) : nullptr;
+	findBar->open(name ? name : "");
+}
+
+void CircuitWindow::partsChanged() {
+	if (palette) palette->partsChanged();
+}
+
+void CircuitWindow::startAs(const std::string& name) {
+	recoveredName = name;
+	forceDirty = true;
+	saveQuietly(false);
+	updateTitle();
+	note("A new circuit from \u201C" + name + "\u201D, in Your Circuits.");
 }
 
 void CircuitWindow::showSettings() {

@@ -20,6 +20,7 @@ public:
 	void showCategory(int index);
 	void focusSearch();
 	void themeChanged();
+	void partsChanged();   // My Parts changed
 
 private:
 	struct Gate { std::string name, caption; };
@@ -34,12 +35,14 @@ private:
 	std::vector<std::string*> tileNames;   // owned; freed on rebuild
 
 	void fill();
+	void loadCategories();
 	GtkWidget* tile(const Gate& g);
 	void clearTiles();
 
 	static void comboChangedCb(GtkComboBox*, gpointer);
 	static void searchChangedCb(GtkSearchEntry*, gpointer);
 	static void activatedCb(GtkFlowBox*, GtkFlowBoxChild*, gpointer);
+	static gboolean tilePressCb(GtkWidget*, GdkEventButton*, gpointer);
 	static gboolean drawTileCb(GtkWidget*, cairo_t*, gpointer);
 	static void dragDataGetCb(GtkWidget*, GdkDragContext*, GtkSelectionData*, guint, guint, gpointer);
 	static void dragBeginCb(GtkWidget*, GdkDragContext*, gpointer);
