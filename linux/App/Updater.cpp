@@ -346,8 +346,11 @@ void check(GtkApplication* app, bool interactive) {
 void Updater_Initialize(GtkApplication* app) {
 	if (g_timer) return;
 	g_timer = g_timeout_add(8000, +[](gpointer app) -> gboolean {
-		check(GTK_APPLICATION(app), false);
-		g_timeout_add_seconds(24 * 60 * 60, +[](gpointer app) -> gboolean { check(GTK_APPLICATION(app), false); return G_SOURCE_CONTINUE; }, app);
+		if (prefs().checkUpdates) check(GTK_APPLICATION(app), false);
+		g_timeout_add_seconds(24 * 60 * 60, +[](gpointer app) -> gboolean {
+			if (prefs().checkUpdates) check(GTK_APPLICATION(app), false);
+			return G_SOURCE_CONTINUE;
+		}, app);
 		return G_SOURCE_REMOVE;
 	}, app);
 }

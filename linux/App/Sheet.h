@@ -19,6 +19,10 @@ public:
 	int width = 760, height = 660, minWidth = 520, minHeight = 400;
 	bool resizable = true;
 	bool decorated = true;
+	// No frame and see-through where the desktop composites (a card with its
+	// own shadow); paint gets the whole window and should leave the edges clear.
+	bool transparent = false;
+	bool composited = false;   // set by run(): transparency is real
 	std::function<void(Sheet&, cairo_t*, float w, float h)> paint;
 	std::function<bool(Sheet&, guint keyval, guint state)> onKey;   // true when used
 	std::function<void(Sheet&, float dy)> onScroll;                 // dy in points, down positive

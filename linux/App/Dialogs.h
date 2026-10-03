@@ -37,6 +37,7 @@ public:
 	void update();   // new samples (called a few times a second while it runs)
 	void close();
 	bool visible() const;
+	GtkWidget* widget() const { return win; }   // the panel, docked under the canvas
 
 private:
 	struct Button { RectF r; int id; };

@@ -12,6 +12,7 @@
 
 #include "App.h"
 #include <cstdint>
+#include <string>
 #include <vector>
 
 class CircuitWindow;
@@ -73,6 +74,13 @@ private:
 	double lastX = 0, lastY = 0;       // the pointer, in view points
 	bool spaceDown = false, pannedWhileSpaceDown = false;
 	bool pointerInside = false;
+	// Settings > Canvas > Wires: what a wire carries, after resting on it.
+	bool tagShown = false;
+	guint tagTimer = 0;
+	bool wireTagText(std::string& text, char& state) const;
+	void updateWireTag();
+	void hideWireTag();
+	void drawWireTag(cairo_t* cr, float w, float h);
 
 	// An eased zoom in progress.
 	bool zooming = false;

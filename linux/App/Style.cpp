@@ -96,6 +96,22 @@ void applyStyle() {
 	// The welcome's name box: a bare entry on its drawn field.
 	s += "#welcome-name { background: transparent; border: none; box-shadow: none; outline: none; color: rgb(242,242,242); "
 	     "caret-color: rgb(56,255,107); font-size: 15px; min-height: 28px; }\n";
+	// Settings: paper, with quiet hints and key caps.
+	s += "#settings, #settings > box { background-color: " + css(paper) + "; }\n";
+	s += "#settings .hint { font-size: 0.85em; color: " + css(withAlpha(text, 0.55f)) + "; }\n";
+	s += "#settings .heading, #settings .style-name { font-weight: bold; }\n";
+	s += "#settings .section { font-size: 0.8em; font-weight: bold; color: " + css(c.accent()) + "; }\n";
+	s += "#settings .recording { color: " + css(c.accent()) + "; font-size: 0.9em; }\n";
+	s += ".keycap { border-radius: 5px; padding: 1px 6px; min-width: 14px; font-size: 0.85em; font-weight: bold; background-color: " +
+	     css(withAlpha(text, 0.07f)) + "; border: 1px solid " + css(withAlpha(text, 0.16f)) + "; }\n";
+	s += "#shortcut-keys { padding: 2px 4px; border-radius: 6px; }\n";
+	s += "#settings entry, #settings combobox button, #settings spinbutton { border-radius: 7px; background-image: none; background-color: " +
+	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
+	s += "#settings entry:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
+	s += "#settings button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
+	     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; }\n";
+	s += "#settings button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
+	s += "#settings scale highlight { background-color: " + css(c.accent()) + "; border: none; }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

@@ -105,6 +105,7 @@ public:
 	// The strips' window buttons and drag, in focus mode (and the strip at
 	// the window's left edge makes room for buttons there).
 	bool focusMode() const { return focusOn; }
+	Toolbar* toolbarWidget() const { return toolbar; }
 	void toggleFocusMode();
 	bool stripIsLeftmost(int pane) const;
 	bool stripIsRightmost(int pane) const;

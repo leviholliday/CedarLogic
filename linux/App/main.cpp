@@ -11,6 +11,9 @@
 #include "Dialogs.h"
 #include "Feedback.h"
 #include "Help.h"
+#include "QuitConfirm.h"
+#include "Settings.h"
+#include "Shortcuts.h"
 #include "Library.h"
 #include "LibraryWindow.h"
 #include "Window.h"
@@ -38,6 +41,8 @@ std::string gShow;
 double gSplashAt = -1;
 std::string gSplashFile;
 bool gFirstLaunch = false;
+// --hold <seconds>: wait this long before the screenshot (the drag test moves the pointer meanwhile).
+int gHold = 2;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -76,6 +81,8 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "feedback") top = toplevelTitled("Send Feedback");
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
+	else if (what == "settings") top = settings::window();
+	else if (what == "quit") top = toplevelTitled("Quit CedarLogic");
 	else if (what == "scope") top = toplevelTitled("Oscilloscope");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	const bool ok = top && writeWindow(top, gScreenshot);
@@ -102,6 +109,12 @@ gboolean showCb(gpointer) {
 	else if (what == "tour") welcome::startTour(w);
 	else if (what == "find") w->runAction("win.find");
 	else if (what == "export") w->exportImage();
+	else if (what == "settings") settings::show(w, page);
+	else if (what == "quit") confirmQuitting(w->window());
+	else if (what == "focus") w->toggleFocusMode();
+	else if (what == "split") w->toggleSplit();
+	else if (what == "toolbar") { prefs().toolbarStyle = page; w->prefsChanged(); }
+	else if (what == "dark-split") { w->toggleSplit(); }
 	else if (what == "scope") w->toggleScope();
 	return G_SOURCE_REMOVE;
 }
@@ -246,48 +259,8 @@ GMenuModel* buildMenubar() {
 	return G_MENU_MODEL(bar);
 }
 
-void setAccels(GtkApplication* app) {
-	struct { const char* action; const char* keys[4]; } accels[] = {
-		{ "app.new", { "<Primary>n" } },
-		{ "app.open", { "<Primary>o" } },
-		{ "app.import", { "<Primary>i" } },
-		{ "app.quit", { "<Primary>q" } },
-		{ "win.save", { "<Primary>s" } },
-		{ "win.save-as", { "<Primary><Shift>s" } },
-		{ "win.export-image", { "<Primary>e" } },
-		{ "win.print", { "<Primary>p" } },
-		{ "win.close", { "<Primary><Shift>w" } },
-		{ "win.undo", { "<Primary>z" } },
-		{ "win.redo", { "<Primary><Shift>z", "<Primary>y" } },
-		{ "win.cut", { "<Primary>x" } },
-		{ "win.copy", { "<Primary>c" } },
-		{ "win.paste", { "<Primary>v" } },
-		{ "win.duplicate", { "<Primary>d" } },
-		{ "win.select-all", { "<Primary>a" } },
-		{ "win.find", { "<Primary>f" } },
-		{ "win.zoom-in", { "<Primary>equal", "<Primary>plus", "<Primary>KP_Add" } },
-		{ "win.zoom-out", { "<Primary>minus", "<Primary>KP_Subtract" } },
-		{ "win.zoom-fit", { "<Primary>0", "<Primary>KP_0" } },
-		{ "win.zoom-actual", { "<Primary>1", "<Primary>KP_1" } },
-		{ "win.dark", { "<Primary><Shift>d" } },
-		{ "win.focus-mode", { "<Primary>period" } },
-		{ "win.split-view", { "<Primary><Alt>s" } },
-		{ "win.switch-pane", { "<Primary><Alt>Right", "<Primary><Alt>Left" } },
-		{ "win.close-split", { "<Primary><Alt>w" } },
-		{ "win.preferences", { "<Primary>comma" } },
-		{ "win.step", { "<Primary><Shift>r" } },
-		{ "win.sim-view", { "<Primary>r" } },
-		{ "win.scope", { "<Primary>g" } },
-		{ "win.new-tab", { "<Primary>t" } },
-		{ "win.close-tab", { "<Primary>w" } },
-		{ "win.reopen-tab", { "<Primary><Shift>t" } },
-		{ "win.next-tab", { "<Primary>Page_Down" } },
-		{ "win.previous-tab", { "<Primary>Page_Up" } },
-		{ "win.shortcuts", { "<Primary>question", "<Primary>slash" } },
-		{ "win.help", { "F1" } },
-	};
-	for (auto& a : accels) gtk_application_set_accels_for_action(app, a.action, a.keys);
-}
+// Every command's keys: the defaults, with Settings > Shortcuts' changes.
+void setAccels(GtkApplication* app) { shortcuts::apply(app); }
 
 CircuitWindow* activeWindow(GtkApplication* app) {
 	GtkWindow* w = gtk_application_get_active_window(app);
@@ -295,7 +268,17 @@ CircuitWindow* activeWindow(GtkApplication* app) {
 	return circuitWindows().empty() ? nullptr : circuitWindows().back();
 }
 
-void newCb(GSimpleAction*, GVariant*, gpointer app) { newCircuitWindow(GTK_APPLICATION(app)); }
+// Ctrl+N: a blank page, or the template Settings > General names; in this
+// window's place when Settings says new circuits replace the one you're in
+// (it's saved first, as everything is).
+void newCb(GSimpleAction*, GVariant*, gpointer app) {
+	GtkApplication* a = GTK_APPLICATION(app);
+	CircuitWindow* from = activeWindow(a);
+	const bool replace = prefs().openReplaces && from;
+	if (!prefs().newTemplate.empty() && templates::startFrom(prefs().newTemplate, from, a, replace)) return;
+	if (replace && from->saveQuietly(false)) { from->replaceDocument(cl_document_new(), ""); return; }
+	newCircuitWindow(a);
+}
 
 // Ctrl+O: Your Circuits (as the Mac's); Ctrl+I brings in a file from anywhere.
 void openCb(GSimpleAction*, GVariant*, gpointer app) {
@@ -328,7 +311,10 @@ void openSampleCb(GSimpleAction*, GVariant*, gpointer app) {
 	else new CircuitWindow(GTK_APPLICATION(app), doc, "");
 }
 
-void quitCb(GSimpleAction*, GVariant*, gpointer app) { quitApp(GTK_APPLICATION(app)); }
+void quitCb(GSimpleAction*, GVariant*, gpointer app) {
+	CircuitWindow* w = activeWindow(GTK_APPLICATION(app));
+	if (confirmQuitting(w ? w->window() : nullptr)) quitApp(GTK_APPLICATION(app));
+}
 
 void loadCss() { applyStyle(); }
 
@@ -449,7 +435,7 @@ void activateCb(GApplication* gapp, gpointer) {
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
-			else g_timeout_add(2000, screenshotCb, app);
+			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
 		else {
@@ -485,7 +471,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
-			else g_timeout_add(2000, screenshotCb, app);
+			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
 		else {
@@ -550,7 +536,9 @@ bool openCircuit(GtkApplication* app, const std::string& path, CircuitWindow* fr
 		g_free(dir);
 	}
 	CircuitWindow* w;
-	if (from && from->isPristine()) { from->replaceDocument(doc, target); w = from; }
+	// In the window's place: an untouched new one, or any when Settings says
+	// opening replaces the circuit you're in (saved first).
+	if (from && (from->isPristine() || (prefs().openReplaces && from->saveQuietly(false)))) { from->replaceDocument(doc, target); w = from; }
 	else w = new CircuitWindow(app, doc, target);
 	prefs().noteRecent(target);
 	library::noteLastCircuit(target);
@@ -632,6 +620,7 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--sim-view") == 0) { gSimView = true; continue; }
 		if (strcmp(argv[i], "--show") == 0 && i + 1 < argc) { gShow = argv[++i]; continue; }
 		if (strcmp(argv[i], "--first") == 0) { gFirstLaunch = true; continue; }
+		if (strcmp(argv[i], "--hold") == 0 && i + 1 < argc) { gHold = std::max(1, atoi(argv[++i])); continue; }
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
 		if (strcmp(argv[i], "--feedback-probe") == 0) {
 			const int code = feedback::probe();

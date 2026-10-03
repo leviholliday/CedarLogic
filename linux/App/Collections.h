@@ -23,6 +23,10 @@ class CircuitWindow;
 namespace templates {
 void showPicker(CircuitWindow* from);
 void saveCurrent(CircuitWindow* window);
+// Every template: its id and name (the built-in ones first).
+std::vector<std::pair<std::string, std::string>> list();
+// A new circuit from one, in `from`'s place if that's untouched, else a new window.
+bool startFrom(const std::string& id, CircuitWindow* from, GtkApplication* app, bool replace = false);
 }  // namespace templates
 
 namespace parts {

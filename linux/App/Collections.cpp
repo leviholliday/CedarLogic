@@ -308,6 +308,30 @@ void showPicker(CircuitWindow* from) {
 	w->startAs(useName);
 }
 
+std::vector<std::pair<std::string, std::string>> list() {
+	std::vector<std::pair<std::string, std::string>> out;
+	for (const Template& t : builtIn()) out.push_back({ t.id, t.name });
+	for (const Template& t : yours()) out.push_back({ t.id, t.name });
+	return out;
+}
+
+bool startFrom(const std::string& id, CircuitWindow* from, GtkApplication* app, bool replace) {
+	std::vector<Template> all = builtIn();
+	for (const Template& t : yours()) all.push_back(t);
+	for (const Template& t : all) {
+		if (t.id != id) continue;
+		char err[512] = "";
+		CLDocument* doc = cl_document_open_text(t.text.c_str(), (long)t.text.size(), err, sizeof err);
+		if (doc == nullptr) return false;
+		CircuitWindow* w = nullptr;
+		if (alive(from) && (from->isPristine() || (replace && from->saveQuietly(false)))) { from->replaceDocument(doc, ""); w = from; }
+		else w = new CircuitWindow(app, doc, "");
+		w->startAs(t.name);
+		return true;
+	}
+	return false;
+}
+
 void saveCurrent(CircuitWindow* window) {
 	std::string name = window->titleText();
 	if (!askText(window->window(), "Save as Template", "Name your template. Start a circuit from it with New from Template.", name) ||

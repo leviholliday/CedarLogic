@@ -45,7 +45,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev \
-            xvfb xauth fonts-dejavu-core fonts-liberation
+            xvfb xauth xdotool fonts-dejavu-core fonts-liberation
 
       - name: Build
         run: |
@@ -119,11 +119,25 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 welcome:1 welcome:2 welcome:3 welcome:4 whatsnew:0 whatsnew:3 whatsnew:5 help help:1 truth feedback templates tour find export scope; do
+          for show in welcome:0 whatsnew:0 help truth feedback templates tour find export scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 toolbar:0 toolbar:2 toolbar:3; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
           done
+          # The side panel's drag, with a real pointer: press a tile, move onto
+          # the canvas and let go in one motion; the gate should be placed.
+          xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
+            "$APPIMAGE" --hold 9 --screenshot renders/drag-test.png res/samples/practice.cdl &
+            app=$!
+            sleep 4
+            xdotool mousemove 34 158 sleep 0.3 mousedown 1 sleep 0.2
+            for x in 60 120 200 320 450 560 640; do xdotool mousemove $x $((300 + x / 4)); sleep 0.08; done
+            sleep 0.3
+            xdotool mouseup 1
+            sleep 0.5
+            xdotool mousemove 900 700
+            wait $app
+          ' || echo "drag test failed"
           for t in 0.5 1.2 2.0; do
             xvfb-run -a -s "-screen 0 1600x1000x24" timeout 30 "$APPIMAGE" --splash-frame $t "renders/splash-$t.png" || echo "no splash $t"
           done

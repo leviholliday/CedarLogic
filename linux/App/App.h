@@ -57,6 +57,7 @@ struct Prefs {
 	bool openReplaces = false;    // opening a circuit replaces the one in the window
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
+	bool checkUpdates = true;     // look for a new test build now and then
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	bool hasSeenWelcome = false;
 	int windowWidth = 1180, windowHeight = 780;

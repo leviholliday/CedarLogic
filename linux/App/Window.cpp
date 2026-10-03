@@ -7,6 +7,7 @@
 #include "Feedback.h"
 #include "FindBar.h"
 #include "Help.h"
+#include "Settings.h"
 #include "Splash.h"
 #include "StatusBar.h"
 #include "TitleButtons.h"
@@ -1848,10 +1849,17 @@ void CircuitWindow::toggleLock() {
 
 void CircuitWindow::makeTruthTable() { showTruthTable(this, currentPage()); redraw(); }
 
+// The oscilloscope docks under the canvas, as on the Mac (Ctrl+G again, or
+// its ×, puts it away).
 void CircuitWindow::toggleScope() {
-	if (scope && scope->visible()) { scope->close(); return; }
-	if (scope == nullptr) scope = new ScopeWindow(this);
+	if (scope && scope->visible()) { scope->close(); if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget()); return; }
+	if (scope == nullptr) {
+		scope = new ScopeWindow(this);
+		gtk_paned_pack2(GTK_PANED(scopePaned), scope->widget(), FALSE, FALSE);
+	}
 	scope->present();
+	const int h = gtk_widget_get_allocated_height(scopePaned);
+	if (h > 400) gtk_paned_set_position(GTK_PANED(scopePaned), h - 220);
 }
 
 // ---- Pages ---------------------------------------------------------------------
@@ -1971,7 +1979,7 @@ void CircuitWindow::togglePalette() {
 	for (CircuitWindow* w : circuitWindows()) w->prefsChanged();
 }
 
-void CircuitWindow::showPreferences() { showPreferencesDialog(GTK_WINDOW(win)); }
+void CircuitWindow::showPreferences() { settings::show(this); }
 void CircuitWindow::showShortcuts() { showShortcutsWindow(GTK_WINDOW(win)); }
 
 void CircuitWindow::showHelp() { help::show(this); }

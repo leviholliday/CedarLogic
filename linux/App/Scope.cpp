@@ -12,7 +12,7 @@
 namespace {
 
 const float kHeader = 40, kNameWidth = 130, kLane = 30, kRuler = 22;
-enum { kBtnHidden = 1, kBtnShare, kBtnOut, kBtnIn, kBtnLive, kBtnClear };
+enum { kBtnHidden = 1, kBtnShare, kBtnOut, kBtnIn, kBtnLive, kBtnClear, kBtnClose };
 
 const int kTickEvery[] = { 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 };
 
@@ -134,10 +134,10 @@ void drawTiming(cairo_t* cr, CLDocument* doc, const std::vector<int>& sigs, cons
 }  // namespace
 
 ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
-	win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_title(GTK_WINDOW(win), "Oscilloscope");
-	gtk_window_set_transient_for(GTK_WINDOW(win), owner->window());
-	gtk_window_set_default_size(GTK_WINDOW(win), 900, 380);
+	// Docked under the canvas, as on the Mac (the window puts it there).
+	win = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	g_object_ref_sink(win);
+	gtk_widget_set_size_request(win, -1, 140);
 	area = gtk_drawing_area_new();
 	gtk_widget_set_can_focus(area, TRUE);
 	gtk_widget_add_events(area, GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
@@ -203,23 +203,21 @@ ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
 		s->update();
 		return TRUE;
 	}), this);
-	g_signal_connect(win, "key-press-event", CL_CALLBACK(+[](GtkWidget*, GdkEventKey* e, gpointer self) -> gboolean {
+	g_signal_connect(area, "key-press-event", CL_CALLBACK(+[](GtkWidget*, GdkEventKey* e, gpointer self) -> gboolean {
 		ScopeWindow* s = static_cast<ScopeWindow*>(self);
 		return guarded("the oscilloscope", [&] { return s->key(e->keyval, e->state); }) ? TRUE : FALSE;
 	}), this);
 	// Closing hides it, kept for next time.
-	g_signal_connect(win, "delete-event", G_CALLBACK(gtk_widget_hide_on_delete), nullptr);
 }
 
 ScopeWindow::~ScopeWindow() {
 	g_signal_handlers_disconnect_by_data(area, this);
-	g_signal_handlers_disconnect_by_data(win, this);
-	gtk_widget_destroy(win);
+	if (GtkWidget* parent = gtk_widget_get_parent(win)) gtk_container_remove(GTK_CONTAINER(parent), win);
+	g_object_unref(win);
 }
 
 void ScopeWindow::present() {
 	gtk_widget_show_all(win);
-	gtk_window_present(GTK_WINDOW(win));
 	gtk_widget_grab_focus(area);
 	update();
 }
@@ -289,6 +287,7 @@ void ScopeWindow::paint(cairo_t* cr, float w, float h) {
 		buttons.push_back({ r, id });
 		bx -= 4;
 	};
+	button(kBtnClose, Icon::Dismiss, "");
 	button(kBtnClear, "user-trash-symbolic", "");
 	button(kBtnLive, "go-last-symbolic", "");
 	button(kBtnIn, Icon::ZoomIn, "");
@@ -375,6 +374,7 @@ void ScopeWindow::press(int id, GdkEvent* e) {
 	case kBtnIn: pointsPerStep = std::min(48.0f, pointsPerStep * 1.5f); break;
 	case kBtnLive: cursor = -1; break;
 	case kBtnClear: cl_scope_clear(doc); cursor = -1; break;
+	case kBtnClose: close(); return;
 	case kBtnShare: exportMenu(e); break;
 	case kBtnHidden: hiddenMenu(e); break;
 	default: break;
@@ -458,7 +458,7 @@ void ScopeWindow::exportMenu(GdkEvent* e) {
 		if (i == 4) { prefs().timingInColor = !prefs().timingInColor; prefs().save(); continue; }
 		if (i != 0 && i != 1) return;
 		cairo_surface_t* img = timingImage();
-		if (img == nullptr) { gtk_widget_error_bell(win); return; }
+		if (img == nullptr) { gtk_widget_error_bell(area); return; }
 		if (i == 0) {
 			GdkPixbuf* pb = gdk_pixbuf_get_from_surface(img, 0, 0, cairo_image_surface_get_width(img), cairo_image_surface_get_height(img));
 			if (pb) {
@@ -467,7 +467,7 @@ void ScopeWindow::exportMenu(GdkEvent* e) {
 				owner->note("Timing diagram copied. Paste it into your report.");
 			}
 		} else {
-			GtkFileChooserNative* c = gtk_file_chooser_native_new("Save Timing Diagram", GTK_WINDOW(win), GTK_FILE_CHOOSER_ACTION_SAVE, "_Save",
+			GtkFileChooserNative* c = gtk_file_chooser_native_new("Save Timing Diagram", GTK_WINDOW(gtk_widget_get_toplevel(area)), GTK_FILE_CHOOSER_ACTION_SAVE, "_Save",
 			                                                      "_Cancel");
 			gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(c), TRUE);
 			gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(c), (owner->titleText() + " timing.png").c_str());
@@ -478,7 +478,7 @@ void ScopeWindow::exportMenu(GdkEvent* e) {
 			if (!file.empty()) {
 				if (file.size() < 4 || file.compare(file.size() - 4, 4, ".png") != 0) file += ".png";
 				if (cairo_surface_write_to_png(img, file.c_str()) != CAIRO_STATUS_SUCCESS)
-					showMessage(GTK_WINDOW(win), GTK_MESSAGE_WARNING, "Couldn't save it there", "Try another folder.");
+					showMessage(GTK_WINDOW(gtk_widget_get_toplevel(area)), GTK_MESSAGE_WARNING, "Couldn't save it there", "Try another folder.");
 			}
 		}
 		cairo_surface_destroy(img);
@@ -509,7 +509,7 @@ bool ScopeWindow::key(guint k, guint state) {
 		cursor = dir < 0 ? 0 : length - 1;
 	};
 	switch (gdk_keyval_to_lower(k)) {
-	case GDK_KEY_Escape: close(); gtk_window_present(owner->window()); return true;
+	case GDK_KEY_Escape: close(); return true;
 	case GDK_KEY_g: if (ctrl) { close(); gtk_window_present(owner->window()); return true; } return false;
 	case GDK_KEY_Left: if (alt) jump(-1); else moveCursor(shift ? -10 : -1); break;
 	case GDK_KEY_Right: if (alt) jump(1); else moveCursor(shift ? 10 : 1); break;

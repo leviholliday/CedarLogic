@@ -1,6 +1,7 @@
 // Settings, resources, colours and small helpers (see App.h).
 
 #include "App.h"
+#include "Settings.h"
 #include "Window.h"
 
 #include <cmath>
@@ -101,6 +102,7 @@ void Prefs::load() {
 		openReplaces = readBool(k, "openReplaces", openReplaces);
 		newTemplate = readString(k, "newTemplate", newTemplate);
 		shortcuts = readString(k, "shortcuts", shortcuts);
+		checkUpdates = readBool(k, "checkUpdates", checkUpdates);
 		// The second round of the Mac's look: its status bar is on.
 		if (readInt(k, "prefsVersion", 1, 0, 100) < 2) showStatus = true;
 		tidyMode = readInt(k, "tidyMode", tidyMode, 0, 1);
@@ -189,6 +191,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "openReplaces", openReplaces);
 	g_key_file_set_string(k, kGroup, "newTemplate", newTemplate.c_str());
 	g_key_file_set_string(k, kGroup, "shortcuts", shortcuts.c_str());
+	g_key_file_set_boolean(k, kGroup, "checkUpdates", checkUpdates);
 	g_key_file_set_integer(k, kGroup, "windowWidth", windowWidth);
 	g_key_file_set_integer(k, kGroup, "windowHeight", windowHeight);
 	g_key_file_set_boolean(k, kGroup, "windowMaximized", windowMaximized);
@@ -319,6 +322,7 @@ void applyTheme() {
 	if (themeLooksDark() != dark) g_object_set(settings, "gtk-theme-name", "Adwaita", nullptr);
 	applyStyle();
 	for (CircuitWindow* w : circuitWindows()) w->themeChanged();
+	settings::themeChanged();
 }
 
 // ---- Files ---------------------------------------------------------------------

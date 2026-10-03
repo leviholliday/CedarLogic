@@ -3,6 +3,7 @@
 #include "Canvas.h"
 #include "Brand.h"
 #include "Chrome.h"
+#include "Shortcuts.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -73,6 +74,7 @@ Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageK
 }
 
 Canvas::~Canvas() {
+	if (tagTimer) g_source_remove(tagTimer);
 	g_signal_handlers_disconnect_by_data(area, this);
 	g_object_unref(area);
 	dropBuffers();
@@ -163,6 +165,7 @@ void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 	// banner is the side's you're working in.
 	if (win->simView() && win->paneOf(this) == 0) drawSimBar(cr, w, h);
 	if (win->currentCanvas() == this) drawBanner(cr, w);
+	drawWireTag(cr, w, h);
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(cr, w, h, t);
 }
@@ -525,6 +528,72 @@ void Canvas::drawGrid(cairo_t* cr, const Palette& pal, double scale, double fade
 	cairo_restore(cr);
 }
 
+// ---- What a wire carries -------------------------------------------------------------
+
+bool Canvas::wireTagText(std::string& text, char& state) const {
+	const int p = page();
+	if (p < 0) return false;
+	char buf[72] = "";
+	const int bits = cl_edit_hover_wire_state(win->document(), p, buf, sizeof buf);
+	if (bits <= 0) return false;
+	const std::string s = buf;
+	state = s.find('!') != std::string::npos ? '!' : s.find('X') != std::string::npos ? 'X' : s.find('Z') != std::string::npos ? 'Z'
+	        : bits == 1 ? (s.empty() ? '0' : s[0]) : 'b';
+	if (bits == 1) {
+		switch (state) {
+		case '1': text = "1"; break;
+		case '0': text = "0"; break;
+		case 'Z': text = "Z \u00B7 floating (nothing drives it)"; break;
+		case '!': text = "! \u00B7 conflict (outputs disagree)"; break;
+		default: text = "X \u00B7 unknown"; break;
+		}
+	} else if (state == 'b') {
+		text = s + " = " + std::to_string(std::stoll(s, nullptr, 2));
+	} else {
+		text = s;
+	}
+	return true;
+}
+
+void Canvas::hideWireTag() {
+	if (tagTimer) { g_source_remove(tagTimer); tagTimer = 0; }
+	if (tagShown) { tagShown = false; redraw(); }
+}
+
+void Canvas::updateWireTag() {
+	std::string text;
+	char state = 0;
+	if (!prefs().wireValueTag || !wireTagText(text, state)) { hideWireTag(); return; }
+	if (tagShown) { redraw(); return; }
+	if (tagTimer) return;
+	tagTimer = g_timeout_add(win->simView() ? 600 : 1100, [](gpointer self) -> gboolean {
+		Canvas* c = static_cast<Canvas*>(self);
+		c->tagTimer = 0;
+		std::string t;
+		char st;
+		if (c->pointerInside && c->wireTagText(t, st)) { c->tagShown = true; c->redraw(); }
+		return G_SOURCE_REMOVE;
+	}, this);
+}
+
+// A small chip beside the pointer: green for 1, grey for 0, blue for
+// floating, red for a conflict, orange for unknown.
+void Canvas::drawWireTag(cairo_t* cr, float w, float h) {
+	std::string text;
+	char state = 0;
+	if (!tagShown || !wireTagText(text, state)) return;
+	Color c = state == '1' ? colorF(0.13f, 0.68f, 0.3f) : state == '0' ? colorF(0.42f, 0.42f, 0.42f) : state == 'Z' ? colorF(0.2f, 0.47f, 0.96f)
+	        : state == '!' ? colorF(0.92f, 0.26f, 0.24f) : state == 'X' ? colorF(0.96f, 0.58f, 0.13f) : colorF(0.25f, 0.25f, 0.25f);
+	const float tw = faceWidth(text, "Monospace", 12, true);
+	RectF r = rectF((float)lastX + 14, (float)lastY - 30, (float)lastX + 14 + tw + 14, (float)lastY - 30 + 20);
+	if (r.right > w - 4) { const float rw = r.right - r.left; r.left = (float)lastX - 14 - rw; r.right = r.left + rw; }
+	if (r.top < 4) { r.top = (float)lastY + 14; r.bottom = r.top + 20; }
+	(void)h;
+	fillRound(cr, rectF(r.left, r.top + 1, r.right, r.bottom + 2), 10, colorF(0, 0, 0, 0.25f));
+	fillRound(cr, r, 10, c);
+	drawFace(cr, text, r.left + 7, r.top + 2, "Monospace", 12, colorF(1, 1, 1), true);
+}
+
 // ---- Camera --------------------------------------------------------------------
 
 bool Canvas::fitBoxOfPage(double& l, double& b, double& r, double& t) const {
@@ -656,6 +725,7 @@ gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 
 gboolean Canvas::crossingCb(GtkWidget*, GdkEventCrossing* e, gpointer self) {
 	static_cast<Canvas*>(self)->pointerInside = e->type == GDK_ENTER_NOTIFY;
+	if (e->type == GDK_LEAVE_NOTIFY) static_cast<Canvas*>(self)->hideWireTag();
 	return FALSE;
 }
 
@@ -699,6 +769,7 @@ bool Canvas::onPress(GdkEventButton* e) {
 	const int p = page();
 	if (doc == nullptr || p < 0) return FALSE;
 	gtk_widget_grab_focus(area);
+	hideWireTag();
 	win->activatePane(win->paneOf(this));
 	zooming = false;
 	lastX = e->x;
@@ -799,8 +870,13 @@ bool Canvas::onMotion(GdkEventMotion* e) {
 		break;
 	case Drag::None:
 		if (win->hasPendingGate() && win->placePendingGate(wx, wy)) { redraw(); break; }
-		if (win->simView()) break;
+		if (win->simView()) {
+			if (prefs().wireValueTag && cl_edit_hover_wire(doc, p, wx, wy, upp)) redraw();
+			updateWireTag();
+			break;
+		}
 		if (cl_edit_hover(doc, p, wx, wy, upp)) redraw();
+		updateWireTag();
 		break;
 	}
 	return TRUE;
@@ -893,7 +969,7 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		else if (arrow) pan(isLeft ? 40 : isRight ? -40 : 0, isUp ? 40 : (isLeft || isRight) ? 0 : -40);
 		else if (k == GDK_KEY_equal || k == GDK_KEY_plus || k == GDK_KEY_KP_Add) animateZoom(1 / 0.75);
 		else if (k == GDK_KEY_minus || k == GDK_KEY_KP_Subtract) animateZoom(0.75);
-		else if (lower == GDK_KEY_t && !shift) win->makeTruthTable();
+		else if (shortcuts::canvasAction(e) == "truthTable") win->makeTruthTable();
 		else if (k == GDK_KEY_question) win->showShortcuts();
 		return TRUE;
 	}
@@ -970,10 +1046,10 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 
 	if (k == GDK_KEY_question || (lower == GDK_KEY_slash && shift)) { win->showShortcuts(); return TRUE; }
 
-	// The single-letter keys, as in the wx app.
-	switch (lower) {
-	case GDK_KEY_c:
-		if (shift) break;
+	// The single-letter keys, as in the wx app (Settings > Shortcuts changes them).
+	const std::string act = shortcuts::canvasAction(e);
+	(void)lower;
+	if (act == "quickCopy") {
 		// C while something is moving (dragged, or floating on the pointer):
 		// connect it to the pins it's next to and keep moving. The
 		// connections are kept at the drop; Escape takes back just them.
@@ -989,19 +1065,19 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		}
 		win->copy();
 		return TRUE;
-	case GDK_KEY_v: if (shift) break; if (win->canEdit()) win->paste(); else win->lockNudge(); return TRUE;
-	case GDK_KEY_x: if (shift) break; if (win->canEdit()) win->cut(); else win->lockNudge(); return TRUE;
-	case GDK_KEY_d: if (shift) break; if (win->canEdit()) win->duplicate(); else win->lockNudge(); return TRUE;
-	case GDK_KEY_a: if (shift) break; if (win->canEdit()) win->quickAdd(); else win->lockNudge(); return TRUE;
-	case GDK_KEY_r: if (shift) break; if (win->canEdit()) win->rotate(); else win->lockNudge(); return TRUE;
-	case GDK_KEY_s:
-		if (!win->canEdit()) { win->lockNudge(); return TRUE; }
-		if (shift) win->tidy(); else win->straighten();
-		return TRUE;
-	case GDK_KEY_t: if (shift) break; win->makeTruthTable(); return TRUE;
-	default: break;
 	}
-	return FALSE;
+	if (act.empty()) return FALSE;
+	if (act == "truthTable") { win->makeTruthTable(); return TRUE; }
+	if (!win->canEdit()) { win->lockNudge(); return TRUE; }
+	if (act == "quickPaste") win->paste();
+	else if (act == "quickCut") win->cut();
+	else if (act == "quickDuplicate") win->duplicate();
+	else if (act == "addGate") win->quickAdd();
+	else if (act == "rotate") win->rotate();
+	else if (act == "straighten") win->straighten();
+	else if (act == "tidy") win->tidy();
+	else return FALSE;
+	return TRUE;
 }
 
 bool Canvas::onKeyRelease(GdkEventKey* e) {

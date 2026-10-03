@@ -24,6 +24,15 @@ void Sheet::run(GtkWindow* owner) {
 	g.min_width = minWidth;
 	g.min_height = minHeight;
 	gtk_window_set_geometry_hints(GTK_WINDOW(window), nullptr, &g, GDK_HINT_MIN_SIZE);
+	if (transparent) {
+		GdkScreen* screen = gtk_widget_get_screen(window);
+		GdkVisual* rgba = gdk_screen_get_rgba_visual(screen);
+		composited = rgba && gdk_screen_is_composited(screen);
+		if (composited) {
+			gtk_widget_set_visual(window, rgba);
+			gtk_widget_set_app_paintable(window, TRUE);
+		}
+	}
 	overlay = gtk_overlay_new();
 	area = gtk_drawing_area_new();
 	gtk_widget_set_can_focus(area, TRUE);
@@ -62,6 +71,13 @@ void Sheet::close() {
 gboolean Sheet::drawCb(GtkWidget* w, cairo_t* cr, gpointer self) {
 	Sheet* s = static_cast<Sheet*>(self);
 	guarded("drawing a window", [&] {
+		if (s->transparent && s->composited) {
+			cairo_save(cr);
+			cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+			cairo_set_source_rgba(cr, 0, 0, 0, 0);
+			cairo_paint(cr);
+			cairo_restore(cr);
+		}
 		s->hits.clear();
 		if (s->paint) s->paint(*s, cr, gtk_widget_get_allocated_width(w), gtk_widget_get_allocated_height(w));
 	});
