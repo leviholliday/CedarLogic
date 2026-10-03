@@ -46,6 +46,7 @@ protected:
 private:
 	WindowSurface surface;
 	HWND tooltip = nullptr;
+	bool releasing = false;   // letting go of the pointer on a button's release
 	std::vector<std::wstring> tipTexts;
 	LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 	static LRESULT CALLBACK proc(HWND, UINT, WPARAM, LPARAM);
