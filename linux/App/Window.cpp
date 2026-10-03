@@ -578,6 +578,18 @@ void CircuitWindow::movePage(int from, int to) {
 	});
 }
 
+void CircuitWindow::moveTabBy(int page, int delta) {
+	if (page < 0 || page >= (int)canvases.size()) return;
+	const std::vector<int> row = panePages(paneOf(canvases[page]));
+	const int k = (int)(std::find(row.begin(), row.end(), page) - row.begin());
+	if (k + delta < 0 || k + delta >= (int)row.size()) return;
+	const uint64_t key = canvases[page]->pageKey();
+	movePage(page, row[k + delta]);
+	edited();
+	const int now = cl_document_page_index(doc, key);
+	if (now >= 0) showPage(now);
+}
+
 // Split View from the menu or keys: the tab used most recently beside the
 // one in front, or a new tab if it's the only one. Again: closes it.
 void CircuitWindow::toggleSplit() {
@@ -815,7 +827,8 @@ static void tabMenuItem(GtkWidget* menu, const char* label, void (*act)(CircuitW
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 }
 
-// A tab's own menu (the Mac's): Rename, the split's moves, Close.
+// A tab's own menu (the Mac's): Rename, the split's moves, moving it along
+// (for a touchpad or a touch screen, where dragging it is awkward), Close.
 void CircuitWindow::tabContextMenu(int page, GdkEvent* e) {
 	GtkWidget* menu = gtk_menu_new();
 	if (page >= 0) {
@@ -829,6 +842,11 @@ void CircuitWindow::tabContextMenu(int page, GdkEvent* e) {
 		} else {
 			tabMenuItem(menu, "Open in _Split View", [](CircuitWindow* w, int p) { w->splitWith(p, true); }, this, page);
 		}
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+		const std::vector<int> row = panePages(pane);
+		const int k = (int)(std::find(row.begin(), row.end(), page) - row.begin());
+		tabMenuItem(menu, "Move _Left", [](CircuitWindow* w, int p) { w->moveTabBy(p, -1); }, this, page, k > 0 && k < (int)row.size());
+		tabMenuItem(menu, "Move Ri_ght", [](CircuitWindow* w, int p) { w->moveTabBy(p, 1); }, this, page, k + 1 < (int)row.size());
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 		tabMenuItem(menu, "_Close Tab", [](CircuitWindow* w, int p) { w->closePage(p); }, this, page, cl_document_page_count(doc) > 1);
 	} else {

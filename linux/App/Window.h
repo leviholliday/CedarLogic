@@ -283,6 +283,8 @@ private:
 	DropHint hintShown;               // the last one drawn, kept while it fades out
 	bool focusOn = false;
 	int paletteWidth() const;
+	// A tab one place along its side (the tab menu's Move Left and Right).
+	void moveTabBy(int page, int delta);
 	void layoutSplit();
 	void reconcileSplit();
 	static gboolean drawHintCb(GtkWidget*, cairo_t*, gpointer);
