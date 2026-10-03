@@ -104,6 +104,9 @@ bool systemPrefersDark();
 void applyTheme();
 // The app's CSS for the theme in use (Style.cpp).
 void applyStyle();
+// A desktop font in a light weight (Raspberry Pi OS's PibotoLt) swapped for
+// the regular weight of its family, for this app; before anything draws text.
+void sturdyUiFont();
 
 // ---- Files -----------------------------------------------------------------------
 

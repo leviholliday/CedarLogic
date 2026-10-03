@@ -124,6 +124,25 @@ jobs:
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
           done
+          # The Raspberry Pi's own look (its PiXflat and PiXnoir themes and the
+          # light PibotoLt face, from the Raspberry Pi archive): Settings, the
+          # menus and the cards, as they look on a Pi.
+          if [ "$(uname -m)" = x86_64 ] &&
+             curl -fsSL -o /tmp/piboto.deb http://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
+             curl -fsSL -o /tmp/pixflat.deb http://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb; then
+            sudo dpkg-deb -x /tmp/piboto.deb / && sudo dpkg-deb -x /tmp/pixflat.deb / && fc-cache -f > /dev/null
+            mkdir -p ~/.config/gtk-3.0
+            for look in PiXflat:light PiXnoir:dark PiXflat:dark; do
+              theme=${look%%:*}; mode=${look##*:}
+              printf '[Settings]\ngtk-theme-name=%s\ngtk-font-name=PibotoLt 12\n' "$theme" > ~/.config/gtk-3.0/settings.ini
+              for show in settings:0 settings:1 settings:2 settings:3 settings:4 menu gatesettings rename shortcuts; do
+                name=$(echo "$show" | tr ':' '-')
+                xvfb-run -a -s "-screen 0 1600x1000x24" \
+                  timeout 60 "$APPIMAGE" --$mode --show "$show" --screenshot "renders/pi-$theme-$mode-$name.png" res/samples/practice.cdl || echo "no pi $show"
+              done
+            done
+            rm -f ~/.config/gtk-3.0/settings.ini
+          fi
           # The side panel's drag, with a real pointer: press a tile, move onto
           # the canvas and let go in one motion; the gate should be placed.
           xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '

@@ -6,6 +6,8 @@
 #include "App.h"
 #include "Chrome.h"
 
+#include <pango/pangocairo.h>
+#include <cstring>
 #include <string>
 
 namespace {
@@ -25,6 +27,46 @@ GtkCssProvider* provider() {
 }
 
 }  // namespace
+
+// Raspberry Pi OS sets its desktop in PibotoLt, a light face: thin strokes
+// that wash out in small and grey text. The app uses the regular weight of
+// the same family when it's there (Piboto), and any other "Light" or "Thin"
+// face the same way.
+void sturdyUiFont() {
+	GtkSettings* settings = gtk_settings_get_default();
+	if (!settings) return;
+	gchar* name = nullptr;
+	g_object_get(settings, "gtk-font-name", &name, nullptr);
+	if (!name) return;
+	PangoFontDescription* d = pango_font_description_from_string(name);
+	g_free(name);
+	std::string family = pango_font_description_get_family(d) ? pango_font_description_get_family(d) : "";
+	const bool lightWeight = pango_font_description_get_set_fields(d) & PANGO_FONT_MASK_WEIGHT &&
+	                         pango_font_description_get_weight(d) < PANGO_WEIGHT_NORMAL;
+	std::string regular = family;
+	auto strip = [&](const char* suffix) {
+		const size_t n = strlen(suffix);
+		if (regular.size() > n && regular.compare(regular.size() - n, n, suffix) == 0) regular = regular.substr(0, regular.size() - n);
+	};
+	for (const char* suffix : { " ExtraLight", " Extra Light", " UltraLight", " Light", " Thin", " Lt", "Lt" }) strip(suffix);
+	while (!regular.empty() && regular.back() == ' ') regular.pop_back();
+	if (regular != family || lightWeight) {
+		bool found = regular == family;
+		PangoFontFamily** families = nullptr;
+		int count = 0;
+		pango_font_map_list_families(pango_cairo_font_map_get_default(), &families, &count);
+		for (int i = 0; i < count && !found; i++) found = g_ascii_strcasecmp(pango_font_family_get_name(families[i]), regular.c_str()) == 0;
+		g_free(families);
+		if (found) {
+			pango_font_description_set_family(d, regular.c_str());
+			pango_font_description_set_weight(d, PANGO_WEIGHT_NORMAL);
+			gchar* sturdy = pango_font_description_to_string(d);
+			g_object_set(settings, "gtk-font-name", sturdy, nullptr);
+			g_free(sturdy);
+		}
+	}
+	pango_font_description_free(d);
+}
 
 void applyStyle() {
 	const Chrome c = chrome();
@@ -103,7 +145,14 @@ void applyStyle() {
 	     "caret-color: rgb(56,255,107); font-size: 15px; min-height: 28px; }\n";
 	// Settings: paper, with quiet hints and key caps.
 	s += "#settings, #settings > box { background-color: " + css(paper) + "; }\n";
-	s += "#settings .hint { font-size: 0.85em; color: " + css(withAlpha(text, 0.55f)) + "; }\n";
+	// Every label in the app's own colours (not left to the desktop theme),
+	// and the hints a solid grey strong enough to read in small type.
+	const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
+	s += "#settings label, #gate-settings label, dialog label { color: " + css(text) + "; }\n";
+	s += "#settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
+	s += "#settings scale value { color: " + css(withAlpha(text, 0.8f)) + "; }\n";
+	s += "#settings button:disabled, #settings button:disabled label, #settings check:disabled + label { color: " + css(withAlpha(text, 0.6f)) +
+	     "; }\n";
 	s += "#settings .heading, #settings .style-name { font-weight: bold; }\n";
 	s += "#settings .section { font-size: 0.8em; font-weight: bold; color: " + css(c.accent()) + "; }\n";
 	s += "#settings .recording { color: " + css(c.accent()) + "; font-size: 0.9em; }\n";
@@ -122,7 +171,7 @@ void applyStyle() {
 	const Color cardColor = dark ? rgb255(36, 40, 47) : rgb255(255, 255, 255);
 	s += "#gate-settings, #gate-settings > box { background-color: " + css(paper) + "; }\n";
 	s += "#gate-settings .sheet-title { font-weight: bold; font-size: 16px; }\n";
-	s += "#gate-settings .hint { font-size: 0.85em; color: " + css(withAlpha(text, 0.5f)) + "; }\n";
+	s += "#gate-settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
 	s += "#gate-settings .problem { color: rgb(229,72,77); }\n";
 	s += "#gate-settings entry.problem { border-color: rgb(229,72,77); }\n";
 	s += "#settings-card { background-color: " + css(cardColor) + "; border: 1px solid " + css(line) + "; border-radius: 12px; }\n";
@@ -137,7 +186,7 @@ void applyStyle() {
 	// rounded panel, rows lit with the accent, shortcuts dimmed.
 	{
 		const Color menuBg = dark ? rgb255(38, 42, 49, 0.98f) : rgb255(250, 250, 252, 0.98f);
-		const Color dimInk = withAlpha(ink, 0.5f);
+		const Color dimInk = withAlpha(ink, 0.66f);
 		s += "menu, .menu, .context-menu { background-color: " + css(menuBg) + "; border: 1px solid " + css(line) +
 		     "; padding: 5px; }\n";
 		s += ".csd menu, .csd .menu, .csd .context-menu { border-radius: 10px; }\n";
@@ -146,7 +195,7 @@ void applyStyle() {
 		s += "menu menuitem accelerator { color: " + css(dimInk) + "; margin-left: 18px; }\n";
 		s += "menu menuitem:hover { background-color: " + css(c.accent()) + "; background-image: none; box-shadow: none; }\n";
 		s += "menu menuitem:hover label, menu menuitem:hover accelerator, menu menuitem:hover arrow { color: " + css(c.onAccent()) + "; }\n";
-		s += "menu menuitem:disabled label, menu menuitem:disabled accelerator { color: " + css(withAlpha(ink, 0.32f)) + "; }\n";
+		s += "menu menuitem:disabled label, menu menuitem:disabled accelerator { color: " + css(withAlpha(ink, 0.42f)) + "; }\n";
 		s += "menu menuitem check, menu menuitem radio { margin-right: 6px; }\n";
 		s += "menu separator { margin: 4px 8px; min-height: 1px; background-color: " + css(line) + "; }\n";
 		s += "menu arrow { min-width: 14px; min-height: 14px; color: " + css(dimInk) + "; }\n";

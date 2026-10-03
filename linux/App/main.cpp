@@ -416,6 +416,7 @@ namespace {
 
 void startupCb(GApplication* gapp, gpointer) {
 	GtkApplication* app = GTK_APPLICATION(gapp);
+	sturdyUiFont();
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
 	if (gScreenshot.empty() && gSplashFile.empty()) gSplash = showSplash();
