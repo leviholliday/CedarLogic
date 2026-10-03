@@ -97,7 +97,7 @@ const std::vector<Action>& all() {
 		{ "closeTab", "Tabs and split view", "Close tab", "win.close-tab", "<Primary>w" },
 		{ "reopenTab", "Tabs and split view", "Reopen the tab you closed", "win.reopen-tab", "<Primary><Shift>t" },
 		{ "splitView", "Tabs and split view", "Split view", "win.split-view", "<Primary><Alt>s" },
-		{ "switchPane", "Tabs and split view", "Switch side (in a split view)", "win.switch-pane", "<Primary><Alt>Right|<Primary><Alt>Left" },
+		{ "switchPane", "Tabs and split view", "Switch side (in a split view)", "win.switch-pane", "F6|<Primary><Alt>Right|<Primary><Alt>Left" },
 		{ "closeSplit", "Tabs and split view", "Close split view", "win.close-split", "<Primary><Alt>w" },
 		{ "nextTab", "Tabs and split view", "Next tab", "win.next-tab", "<Primary>Page_Down" },
 		{ "previousTab", "Tabs and split view", "Previous tab", "win.previous-tab", "<Primary>Page_Up" },
