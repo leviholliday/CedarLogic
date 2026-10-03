@@ -44,6 +44,9 @@ std::string gSplashFile;
 bool gFirstLaunch = false;
 // --hold <seconds>: wait this long before the screenshot (the drag test moves the pointer meanwhile).
 int gHold = 2;
+// This process is the running CedarLogic (not a launch that handed over to
+// it): it loaded the settings, so it may save them.
+bool gPrimary = false;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -441,6 +444,7 @@ void startupCb(GApplication* gapp, gpointer) {
 	// with a timed splash.
 	if (gScreenshot.empty() && gSplashFile.empty()) gSplash = showSplash();
 	prefs().load();
+	gPrimary = true;
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
 	loadCss();
@@ -792,7 +796,9 @@ int main(int argc, char** argv) {
 	g_signal_connect(app, "activate", G_CALLBACK(activateCb), nullptr);
 	g_signal_connect(app, "open", G_CALLBACK(openFilesCb), nullptr);
 	const int status = g_application_run(G_APPLICATION(app), argc, argv);
-	prefs().save();
+	// A launch that handed over never loaded the settings: saving its
+	// defaults would undo the running one's.
+	if (gPrimary) prefs().save();
 	g_object_unref(app);
 	return status ? status : gExitCode;
 }
