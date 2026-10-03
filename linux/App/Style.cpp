@@ -104,7 +104,8 @@ void applyStyle() {
 	s += "#settings .recording { color: " + css(c.accent()) + "; font-size: 0.9em; }\n";
 	s += ".keycap { border-radius: 5px; padding: 1px 6px; min-width: 14px; font-size: 0.85em; font-weight: bold; background-color: " +
 	     css(withAlpha(text, 0.07f)) + "; border: 1px solid " + css(withAlpha(text, 0.16f)) + "; }\n";
-	s += "#shortcut-keys { padding: 2px 4px; border-radius: 6px; }\n";
+	s += "#settings #shortcut-keys { padding: 2px 4px; border-radius: 6px; background-color: transparent; min-height: 24px; }\n";
+	s += "#settings #shortcut-keys:hover { background-color: " + css(withAlpha(text, 0.06f)) + "; }\n";
 	s += "#settings entry, #settings combobox button, #settings spinbutton { border-radius: 7px; background-image: none; background-color: " +
 	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
 	s += "#settings entry:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";

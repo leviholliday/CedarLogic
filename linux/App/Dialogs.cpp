@@ -3,6 +3,7 @@
 #include "Dialogs.h"
 #include "Collections.h"
 #include "Formula.h"
+#include "Picker.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -170,146 +171,100 @@ void showGateSettings(CircuitWindow* w, long gate) {
 	gtk_widget_destroy(d);
 }
 
-// ---- Quick add (A) -------------------------------------------------------------
-// Type part of a gate's name; Return puts the first (or chosen) match on the
-// pointer.
+// ---- Add a Gate (A) -----------------------------------------------------------
+// The Mac's QuickAddView: type part of a name, arrow to the one you want,
+// Return. Each result is drawn with the gate's own picture; the gate then
+// follows the pointer until a click drops it. Escape closes.
 
 namespace {
 
-struct QuickAdd {
-	GtkWidget* dialog;
-	GtkWidget* entry;
-	GtkListStore* store;
-	GtkWidget* view;
-	std::vector<std::pair<std::string, std::string>> all;   // name, caption
-};
-
-std::string lowered(const std::string& s) {
-	gchar* l = g_utf8_strdown(s.c_str(), -1);
-	std::string out = l ? l : "";
-	g_free(l);
-	return out;
-}
-
-// How well a gate matches what's typed (lower is better; -1 not at all):
-// the whole name, then the start of it, then the start of a word, then
-// anywhere.
-int matchRank(const std::string& caption, const std::string& name, const std::string& text) {
-	if (text.empty()) return 0;
-	const std::string c = lowered(caption), n = lowered(name);
-	if (c == text || n == text) return 0;
-	if (c.compare(0, text.size(), text) == 0) return 1;
-	for (size_t at = c.find(text); at != std::string::npos; at = c.find(text, at + 1))
-		if (at > 0 && !g_ascii_isalnum(c[at - 1])) return 2;
-	if (c.find(text) != std::string::npos || n.find(text) != std::string::npos) return 3;
-	return -1;
-}
-
-void quickFilter(QuickAdd* q) {
-	const std::string text = lowered(gtk_entry_get_text(GTK_ENTRY(q->entry)));
-	gtk_list_store_clear(q->store);
-	std::vector<std::pair<int, size_t>> hits;
-	for (size_t i = 0; i < q->all.size(); i++) {
-		const int r = matchRank(q->all[i].second, q->all[i].first, text);
-		if (r >= 0) hits.push_back({ r, i });
+// QuickAddDialog::fuzzyScore: a substring beats letters in order; a match at
+// the start beats one in the middle; -1 for no match.
+int fuzzyScore(const std::string& query, const std::string& target) {
+	gchar* ql = g_utf8_strdown(query.c_str(), -1);
+	gchar* tl = g_utf8_strdown(target.c_str(), -1);
+	const std::string q = ql ? ql : "", t = tl ? tl : "";
+	g_free(ql);
+	g_free(tl);
+	if (q.empty()) return 0;
+	const size_t at = t.find(q);
+	if (at != std::string::npos) return at == 0 ? 100 : 80;
+	size_t qi = 0;
+	int score = 0, last = -2;
+	for (size_t ti = 0; ti < t.size() && qi < q.size(); ti++) {
+		if (t[ti] != q[qi]) continue;
+		score += 10;
+		if (last == (int)ti - 1) score += 5;
+		if (ti == 0 || t[ti - 1] == ' ' || t[ti - 1] == '-' || t[ti - 1] == '_') score += 5;
+		last = (int)ti;
+		qi++;
 	}
-	std::stable_sort(hits.begin(), hits.end(), [](auto& a, auto& b) { return a.first < b.first; });
-	int shown = 0;
-	for (auto& h : hits) {
-		const auto& g = q->all[h.second];
-		GtkTreeIter it;
-		gtk_list_store_append(q->store, &it);
-		gtk_list_store_set(q->store, &it, 0, g.second.c_str(), 1, g.first.c_str(), -1);
-		if (++shown >= 300) break;
-	}
-	GtkTreePath* first = gtk_tree_path_new_first();
-	gtk_tree_view_set_cursor(GTK_TREE_VIEW(q->view), first, nullptr, FALSE);
-	gtk_tree_path_free(first);
-}
-
-void quickChangedCb(GtkEditable*, gpointer data) { quickFilter(static_cast<QuickAdd*>(data)); }
-
-gboolean quickKeyCb(GtkWidget*, GdkEventKey* e, gpointer data) {
-	QuickAdd* q = static_cast<QuickAdd*>(data);
-	// Up and Down move through the list while typing.
-	if (e->keyval != GDK_KEY_Up && e->keyval != GDK_KEY_Down) return FALSE;
-	GtkTreePath* path = nullptr;
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(q->view), &path, nullptr);
-	if (path == nullptr) return TRUE;
-	if (e->keyval == GDK_KEY_Up) gtk_tree_path_prev(path);
-	else gtk_tree_path_next(path);
-	GtkTreeIter it;
-	if (gtk_tree_model_get_iter(GTK_TREE_MODEL(q->store), &it, path))
-		gtk_tree_view_set_cursor(GTK_TREE_VIEW(q->view), path, nullptr, FALSE);
-	gtk_tree_path_free(path);
-	return TRUE;
-}
-
-void quickRowCb(GtkTreeView*, GtkTreePath*, GtkTreeViewColumn*, gpointer data) {
-	gtk_dialog_response(GTK_DIALOG(static_cast<QuickAdd*>(data)->dialog), GTK_RESPONSE_OK);
+	return qi < q.size() ? -1 : score;
 }
 
 }  // namespace
 
 void showQuickAdd(CircuitWindow* w) {
-	QuickAdd q;
-	for (int c = 0; c < cl_library_category_count(); c++)
+	struct Entry { std::string name, caption, category; };
+	std::vector<Entry> all;
+	for (int c = 0; c < cl_library_category_count(); c++) {
+		std::string cat = cl_library_category(c);
+		const size_t dash = cat.find(" - ");
+		if (dash != std::string::npos) cat = cat.substr(dash + 3);
 		for (int i = 0; i < cl_library_gate_count(c); i++) {
-			std::string name = cl_library_gate(c, i);
-			std::string caption = cl_library_gate_caption(name.c_str());
-			q.all.push_back({ name, caption.empty() ? name : caption });
+			const std::string name = cl_library_gate(c, i);
+			const std::string caption = cl_library_gate_caption(name.c_str());
+			all.push_back({ name, caption.empty() ? name : caption, cat });
 		}
-	std::sort(q.all.begin(), q.all.end(), [](auto& a, auto& b) { return lowered(a.second) < lowered(b.second); });
-	q.all.erase(std::unique(q.all.begin(), q.all.end()), q.all.end());
-	for (const parts::Part& p : parts::all()) q.all.push_back({ p.gate(), p.name + "  (My Parts)" });
-
-	q.dialog = gtk_dialog_new_with_buttons("Add a Gate", w->window(),
-	                                       (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
-	                                       "_Cancel", GTK_RESPONSE_CANCEL, "_Add", GTK_RESPONSE_OK, nullptr);
-	gtk_dialog_set_default_response(GTK_DIALOG(q.dialog), GTK_RESPONSE_OK);
-	gtk_window_set_default_size(GTK_WINDOW(q.dialog), 380, 420);
-	GtkWidget* box = gtk_dialog_get_content_area(GTK_DIALOG(q.dialog));
-	gtk_container_set_border_width(GTK_CONTAINER(box), 10);
-	gtk_box_set_spacing(GTK_BOX(box), 8);
-	q.entry = gtk_search_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(q.entry), "Type part of a gate's name");
-	gtk_entry_set_activates_default(GTK_ENTRY(q.entry), TRUE);
-	gtk_box_pack_start(GTK_BOX(box), q.entry, FALSE, FALSE, 0);
-	q.store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
-	q.view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(q.store));
-	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(q.view), FALSE);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(q.view),
-		gtk_tree_view_column_new_with_attributes("Gate", gtk_cell_renderer_text_new(), "text", 0, nullptr));
-	g_signal_connect(q.view, "row-activated", G_CALLBACK(quickRowCb), &q);
-	GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
-	gtk_container_add(GTK_CONTAINER(scroll), q.view);
-	gtk_widget_set_vexpand(scroll, TRUE);
-	gtk_box_pack_start(GTK_BOX(box), scroll, TRUE, TRUE, 0);
-	g_signal_connect(q.entry, "changed", G_CALLBACK(quickChangedCb), &q);
-	g_signal_connect(q.entry, "key-press-event", G_CALLBACK(quickKeyCb), &q);
-	quickFilter(&q);
-	gtk_widget_show_all(q.dialog);
-	gtk_widget_grab_focus(q.entry);
-
-	std::string chosen;
-	if (gtk_dialog_run(GTK_DIALOG(q.dialog)) == GTK_RESPONSE_OK) {
-		GtkTreePath* path = nullptr;
-		gtk_tree_view_get_cursor(GTK_TREE_VIEW(q.view), &path, nullptr);
-		GtkTreeIter it;
-		if (path && gtk_tree_model_get_iter(GTK_TREE_MODEL(q.store), &it, path)) {
-			gchar* name = nullptr;
-			gtk_tree_model_get(GTK_TREE_MODEL(q.store), &it, 1, &name, -1);
-			if (name) { chosen = name; g_free(name); }
-		}
-		if (path) gtk_tree_path_free(path);
 	}
-	gtk_widget_destroy(q.dialog);
-	g_object_unref(q.store);
+	for (const parts::Part& p : parts::all()) all.push_back({ p.gate(), p.name, "My Parts" });
+	std::string chosen;
+	picker::Picker p;
+	p.title = "Add a Gate";
+	p.line = "Type to search, then press Enter. The gate follows your mouse onto the canvas.";
+	p.width = 520;
+	p.height = 560;
+	p.emptyText = "No gates match that.";
+	p.rightButtons = { "Cancel", "Add" };
+	p.rows = [&](const std::string& query) {
+		std::vector<std::pair<int, size_t>> scored;
+		for (size_t i = 0; i < all.size(); i++) {
+			const int sc = query.empty() ? 1 : std::max(fuzzyScore(query, all[i].caption), fuzzyScore(query, all[i].name));
+			if (sc > 0) scored.push_back({ sc, i });
+		}
+		std::stable_sort(scored.begin(), scored.end(), [](auto& a, auto& b) { return a.first > b.first; });
+		std::vector<picker::Row> out;
+		for (auto& sc : scored) {
+			const Entry& e = all[sc.second];
+			picker::Row r;
+			r.id = e.name;
+			r.title = e.caption;
+			r.subtitle = e.caption != e.name && !parts::isPart(e.name) ? e.name + "  ·  " + e.category : e.category;
+			out.push_back(r);
+			if (out.size() >= 400) break;
+		}
+		return out;
+	};
+	p.drawTile = [](cairo_t* cr, const picker::Row& row, const RectF& r) {
+		cairo_save(cr);
+		cairo_translate(cr, r.left, r.top);
+		if (parts::isPart(row.id)) parts::draw(row.id, cr, r.right - r.left, r.bottom - r.top, 2, prefs().dark);
+		else cl_library_draw_gate(row.id.c_str(), cr, r.right - r.left, r.bottom - r.top, 2, prefs().dark);
+		cairo_restore(cr);
+	};
+	p.onButton = [&](picker::Picker& pk, int b) -> bool {
+		if (b == 100) return true;
+		if (b == 101) {
+			const picker::Row* r = pk.selected();
+			if (r) chosen = r->id;
+			return r != nullptr;
+		}
+		return false;
+	};
+	p.run(w->window());
 	// As in wx, it appears on the pointer at the next move over the canvas.
 	if (!chosen.empty()) w->addGateOnNextMove(chosen);
 }
-
-// ---- Truth tables ----------------------------------------------------------------
 
 // The truth table: TruthTableWindow.cpp.
 
@@ -564,47 +519,7 @@ void showPreferencesDialog(GtkWindow* parent) {
 
 // ---- Every shortcut ----------------------------------------------------------------
 
-void showShortcutsWindow(GtkWindow* parent) {
-	struct Key { const char* keys; const char* what; };
-	struct Group { const char* title; std::vector<Key> keys; };
-	const std::vector<Group> groups = {
-		{ "Circuits", { { "<Primary>n", "New circuit" }, { "<Primary>o", "Open" }, { "<Primary>s", "Save" },
-		                { "<Primary><Shift>s", "Save as" }, { "<Primary>e", "Export as an image" },
-		                { "<Primary>p", "Print" }, { "<Primary>q", "Quit" } } },
-		{ "Editing", { { "<Primary>z", "Undo" }, { "<Primary><Shift>z", "Redo" }, { "<Primary>x", "Cut" },
-		               { "<Primary>c", "Copy" }, { "<Primary>v", "Paste (it follows the pointer)" },
-		               { "<Primary>d", "Duplicate" }, { "<Primary>a", "Select all" }, { "Delete", "Delete" },
-		               { "Escape", "Let go, or drop the selection" } } },
-		{ "Building (on the canvas)", { { "a", "Add a gate by name" }, { "r", "Rotate" }, { "s", "Straighten wires" },
-		               { "<Shift>s", "Tidy up (preview first)" }, { "c", "Copy; while moving, connect nearby pins" },
-		               { "v", "Paste" }, { "x", "Cut" }, { "d", "Duplicate" }, { "Left Right Up Down", "Nudge the selection" },
-		               { "<Shift>1", "Palette category 1 (…9, 0)" } } },
-		{ "Moving around", { { "<Primary>equal", "Zoom in" }, { "<Primary>minus", "Zoom out" }, { "<Primary>0", "Zoom to fit" },
-		               { "space", "Tap: zoom to fit. Hold and drag: move around" }, { "<Primary>1", "Actual size" },
-		               { "<Primary>period", "Show or hide the palette" } } },
-		{ "Simulation", { { "<Primary>r", "Simulation View" }, { "<Primary><Shift>r", "Step once" }, { "t", "Truth table" },
-		               { "<Primary>g", "Oscilloscope" } } },
-		{ "Tabs", { { "<Primary>t", "New tab" }, { "<Primary>w", "Close tab" }, { "<Primary><Shift>t", "Reopen the tab you closed" },
-		            { "<Primary>Tab", "Next tab" }, { "<Primary><Shift>Tab", "Previous tab" } } },
-		{ "App", { { "<Shift>question", "Every shortcut (this list)" }, { "<Primary><Shift>d", "Dark mode" },
-		           { "<Primary>comma", "Preferences" }, { "F1", "Help" } } },
-	};
-	GtkWidget* win = GTK_WIDGET(g_object_new(GTK_TYPE_SHORTCUTS_WINDOW, "modal", TRUE, nullptr));
-	gtk_window_set_transient_for(GTK_WINDOW(win), parent);
-	GtkWidget* section = GTK_WIDGET(g_object_new(GTK_TYPE_SHORTCUTS_SECTION, "section-name", "shortcuts",
-	                                             "max-height", 12, "visible", TRUE, nullptr));
-	for (const Group& g : groups) {
-		GtkWidget* group = GTK_WIDGET(g_object_new(GTK_TYPE_SHORTCUTS_GROUP, "title", g.title, "visible", TRUE, nullptr));
-		for (const Key& k : g.keys) {
-			GtkWidget* s = GTK_WIDGET(g_object_new(GTK_TYPE_SHORTCUTS_SHORTCUT, "accelerator", k.keys,
-			                                       "title", k.what, "visible", TRUE, nullptr));
-			gtk_container_add(GTK_CONTAINER(group), s);
-		}
-		gtk_container_add(GTK_CONTAINER(section), group);
-	}
-	gtk_container_add(GTK_CONTAINER(win), section);
-	gtk_widget_show_all(win);
-}
+// Every shortcut: ShortcutsSheet.cpp.
 
 // ---- The oscilloscope: Scope.cpp ----
 

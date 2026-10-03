@@ -82,7 +82,10 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
 	else if (what == "settings") top = settings::window();
+	else if (what == "scope" && !circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	else if (what == "quit") top = toplevelTitled("Quit CedarLogic");
+	else if (what == "shortcuts") top = toplevelTitled("Keyboard Shortcuts");
+	else if (what == "quickadd") top = toplevelTitled("Add a Gate");
 	else if (what == "scope") top = toplevelTitled("Oscilloscope");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	const bool ok = top && writeWindow(top, gScreenshot);
@@ -112,6 +115,10 @@ gboolean showCb(gpointer) {
 	else if (what == "settings") settings::show(w, page);
 	else if (what == "quit") confirmQuitting(w->window());
 	else if (what == "focus") w->toggleFocusMode();
+	else if (what == "shortcuts") w->showShortcuts();
+	else if (what == "quickadd") w->quickAdd();
+	else if (what == "sim") w->toggleSimView();
+	else if (what == "lock") w->toggleLock();
 	else if (what == "split") w->toggleSplit();
 	else if (what == "toolbar") { prefs().toolbarStyle = page; w->prefsChanged(); }
 	else if (what == "dark-split") { w->toggleSplit(); }

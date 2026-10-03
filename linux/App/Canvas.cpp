@@ -75,6 +75,7 @@ Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageK
 
 Canvas::~Canvas() {
 	if (tagTimer) g_source_remove(tagTimer);
+	if (motionTick) gtk_widget_remove_tick_callback(area, motionTick);
 	g_signal_handlers_disconnect_by_data(area, this);
 	g_object_unref(area);
 	dropBuffers();
@@ -163,7 +164,17 @@ void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 	sliderRight = sliderLeft = 0;
 	// In a split, the bar for Simulation View sits under the first side; the
 	// banner is the side's you're working in.
-	if (win->simView() && win->paneOf(this) == 0) drawSimBar(cr, w, h);
+	// It slides up from the bottom, as the Mac's does.
+	simBarIn.go(win->simView() && win->paneOf(this) == 0 ? 1 : 0, 0.34);
+	if (simBarIn.active()) keepMoving();
+	const float simIn = (float)simBarIn.value();
+	if (simIn > 0.01f) {
+		cairo_save(cr);
+		cairo_translate(cr, 0, (1 - simIn) * 80);
+		drawSimBar(cr, w, h);
+		cairo_restore(cr);
+		if (simIn < 1) hits.clear();
+	}
 	if (win->currentCanvas() == this) drawBanner(cr, w);
 	drawWireTag(cr, w, h);
 	double t;
@@ -246,8 +257,11 @@ void Canvas::drawSimBar(cairo_t* cr, float w, float h) {
 	const float x0 = (w - barW) / 2, y0 = h - 14 - barH, cy = y0 + barH / 2;
 	const RectF bar = rectF(x0, y0, x0 + barW, y0 + barH);
 	fillRound(cr, rectF(bar.left, bar.top + 3, bar.right, bar.bottom + 3), 14, colorF(0, 0, 0, 0.30f));
-	fillRound(cr, bar, 14, colorF(0.055f, 0.070f, 0.090f, 0.94f));
+	// Dark glass over the live circuit.
+	frosted(cr, bar, 14);
+	fillRound(cr, bar, 14, colorF(0.055f, 0.070f, 0.090f, 0.78f));
 	strokeRound(cr, bar, 14, withAlpha(on, 0.22f));
+	fillRect(cr, rectF(bar.left + 14, bar.top + 1, bar.right - 14, bar.top + 2), colorF(1, 1, 1, 0.06f));
 
 	const bool paused = !win->running();
 	const double t = g_get_monotonic_time() / 1e6;
@@ -335,37 +349,95 @@ void Canvas::setSpeedAt(double x) {
 void Canvas::drawBanner(cairo_t* cr, float w) {
 	std::string text;
 	std::vector<CircuitWindow::BannerButton> buttons;
-	if (!win->bannerFor(text, buttons)) return;
+	const bool has = win->bannerFor(text, buttons);
+	if (has) {
+		bannerText = text;
+		bannerButtons.clear();
+		for (const auto& b : buttons) bannerButtons.push_back({ b.label, b.action });
+		bannerLocked = win->locked();
+	}
+	// It drops in and fades, and fades away.
+	bannerFade.go(has ? 1 : 0, has ? 0.22 : 0.16);
+	if (bannerFade.active()) keepMoving();
+	const float a = (float)bannerFade.value();
+	if (a < 0.01f || bannerText.empty()) return;
 	const bool sim = win->simView();
 	const Chrome c{ prefs().dark || sim };
 	const Color ink = c.barInk();
 	std::vector<float> bw;
-	float total = 16 + textWidth(text, 12) + 12;
-	for (const auto& b : buttons) { bw.push_back(textWidth(b.label, 12, true) + 22); total += bw.back() + 6; }
+	float total = 16 + textWidth(bannerText, 12) + 12;
+	for (const auto& b : bannerButtons) { bw.push_back(textWidth(b.first, 12, true) + 22); total += bw.back() + 6; }
 	total += 6;
-	if (win->locked()) total += 20;
-	const float x0 = std::max(8.0f, (w - total) / 2), y0 = 12, hgt = 38;
+	if (bannerLocked) total += 20;
+	const float x0 = std::max(8.0f, (w - total) / 2), y0 = 12 - 10 * (1 - a), hgt = 38;
 	const RectF pill = rectF(x0, y0, x0 + total, y0 + hgt);
-	fillRound(cr, rectF(pill.left, pill.top + 2, pill.right, pill.bottom + 2), hgt / 2, colorF(0, 0, 0, c.dark ? 0.35f : 0.10f));
-	fillRound(cr, pill, hgt / 2, c.dark ? rgb255(40, 43, 50, 0.97f) : colorF(1, 1, 1, 0.97f));
+	cairo_save(cr);
+	cairo_push_group(cr);
+	fillRound(cr, rectF(pill.left, pill.top + 2, pill.right, pill.bottom + 3), hgt / 2, colorF(0, 0, 0, c.dark ? 0.35f : 0.10f));
+	// Glass: the circuit under it, blurred, and a wash of the bar's colour.
+	frosted(cr, pill, hgt / 2);
+	fillRound(cr, pill, hgt / 2, c.dark ? rgb255(40, 43, 50, 0.78f) : colorF(1, 1, 1, 0.74f));
 	strokeRound(cr, pill, hgt / 2, withAlpha(ink, c.dark ? 0.14f : 0.10f));
+	fillRect(cr, rectF(pill.left + hgt / 2, pill.top + 1, pill.right - hgt / 2, pill.top + 2), colorF(1, 1, 1, c.dark ? 0.08f : 0.7f));
 	float x = x0 + 16;
 	const float ty = y0 + hgt / 2 - 8;
-	if (win->locked()) {
+	if (bannerLocked) {
 		drawIcon(cr, Icon::Lock, rectF(x - 2, y0, x + 16, y0 + hgt), 13, withAlpha(ink, 0.8f));
 		x += 20;
 	}
-	drawText(cr, text, rectF(x, ty, x + textWidth(text, 12) + 2, ty + 18), 12, ink);
-	x += textWidth(text, 12) + 12;
-	for (size_t i = 0; i < buttons.size(); i++) {
+	drawText(cr, bannerText, rectF(x, ty, x + textWidth(bannerText, 12) + 2, ty + 18), 12, ink);
+	x += textWidth(bannerText, 12) + 12;
+	for (size_t i = 0; i < bannerButtons.size(); i++) {
 		const RectF r = rectF(x, y0 + 6, x + bw[i], y0 + hgt - 6);
 		const bool hot = hotHit == (int)hits.size();
 		const bool primary = i == 0;
 		fillRound(cr, r, 7, primary ? withAlpha(c.accent(), hot ? 1.0f : 0.9f) : withAlpha(ink, hot ? 0.14f : 0.08f));
-		drawText(cr, buttons[i].label, rectF(r.left, ty, r.right, ty + 18), 12, primary ? c.onAccent() : ink, TextAlign::Center, primary);
-		hits.push_back({ r.left, r.top, r.right, r.bottom, buttons[i].action });
+		drawText(cr, bannerButtons[i].first, rectF(r.left, ty, r.right, ty + 18), 12, primary ? c.onAccent() : ink, TextAlign::Center, primary);
+		if (has) hits.push_back({ r.left, r.top, r.right, r.bottom, bannerButtons[i].second });
 		x += bw[i] + 6;
 	}
+	cairo_pop_group_to_source(cr);
+	cairo_paint_with_alpha(cr, a);
+	cairo_restore(cr);
+}
+
+// Redrawn every frame while something on it is moving.
+void Canvas::keepMoving() {
+	if (motionTick) return;
+	motionTick = gtk_widget_add_tick_callback(area, [](GtkWidget* w, GdkFrameClock*, gpointer self) -> gboolean {
+		Canvas* c = static_cast<Canvas*>(self);
+		gtk_widget_queue_draw(w);
+		if (c->bannerFade.active() || c->simBarIn.active()) return G_SOURCE_CONTINUE;
+		c->motionTick = 0;
+		return G_SOURCE_REMOVE;
+	}, this, nullptr);
+}
+
+// Frosted glass: the frame under r shrunk small and drawn back large (a
+// blur, done the cheap way), inside the panel's rounded shape.
+void Canvas::frosted(cairo_t* cr, const RectF& r, float radius) {
+	if (frame == nullptr) return;
+	const float rw = r.right - r.left, rh = r.bottom - r.top;
+	if (rw < 2 || rh < 2) return;
+	const int sw = std::max(2, (int)(rw / 10)), sh = std::max(2, (int)(rh / 10));
+	cairo_surface_t* small = cairo_image_surface_create(CAIRO_FORMAT_RGB24, sw, sh);
+	cairo_t* sc = cairo_create(small);
+	cairo_scale(sc, sw / rw, sh / rh);
+	cairo_set_source_surface(sc, frame, -r.left, -r.top);
+	cairo_pattern_set_filter(cairo_get_source(sc), CAIRO_FILTER_GOOD);
+	cairo_paint(sc);
+	cairo_destroy(sc);
+	cairo_save(cr);
+	roundedPath(cr, r, radius);
+	cairo_clip(cr);
+	cairo_translate(cr, r.left, r.top);
+	cairo_scale(cr, rw / sw, rh / sh);
+	cairo_set_source_surface(cr, small, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+	cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
+	cairo_paint(cr);
+	cairo_restore(cr);
+	cairo_surface_destroy(small);
 }
 
 // A note (Saved, Copied...) over the bottom of the canvas, as a dark pill

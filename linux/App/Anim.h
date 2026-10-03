@@ -9,6 +9,7 @@
 
 #include <gtk/gtk.h>
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 
@@ -100,6 +101,19 @@ struct HoverFade {
 		return false;
 	}
 };
+
+// A window (or dialog) fading in as it arrives, as the Mac's sheets do.
+inline void fadeIn(GtkWidget* toplevel, double seconds = 0.16) {
+	if (toplevel == nullptr || !enabled()) return;
+	gtk_widget_set_opacity(toplevel, 0);
+	const double step = 1.0 / (seconds * 60);
+	gtk_widget_add_tick_callback(toplevel, [](GtkWidget* w, GdkFrameClock*, gpointer data) -> gboolean {
+		const double s = *static_cast<double*>(data);
+		const double o = std::min(1.0, gtk_widget_get_opacity(w) + s);
+		gtk_widget_set_opacity(w, o);
+		return o < 1 ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+	}, new double(step), [](gpointer d) { delete static_cast<double*>(d); });
+}
 
 }  // namespace anim
 

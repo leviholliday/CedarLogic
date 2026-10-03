@@ -50,6 +50,7 @@ void Sheet::run(GtkWindow* owner) {
 	g_signal_connect(window, "delete-event", G_CALLBACK(deleteCb), this);
 	tickId = gtk_widget_add_tick_callback(area, tickCb, this, nullptr);
 	gtk_widget_show_all(window);
+	anim::fadeIn(window);
 	gtk_widget_grab_focus(area);
 	loop = g_main_loop_new(nullptr, FALSE);
 	if (!done) g_main_loop_run(loop);

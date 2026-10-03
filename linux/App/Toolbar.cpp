@@ -60,7 +60,7 @@ void Toolbar::build(int style) {
 	add(More, nullptr, -1, true);
 }
 
-void Toolbar::layout(float w, float h, int style) {
+void Toolbar::layout(float w, float h, int style, bool live) {
 	relayout = false;
 	lastW = w;
 	laidStyle = style;
@@ -79,8 +79,8 @@ void Toolbar::layout(float w, float h, int style) {
 		it.rect = rectF(left, by, left + widthOf(it), by + kButtonH);
 		it.shown = groupShown(it.group);
 	};
-	const float leftEdge = buttons.leftRoom() > 0 ? buttons.leftRoom() : 10;
-	const float rightEdge = w - (buttons.rightRoom() > 0 ? buttons.rightRoom() - 4 : 10);
+	const float leftEdge = live && buttons.leftRoom() > 0 ? buttons.leftRoom() : 10;
+	const float rightEdge = w - (live && buttons.rightRoom() > 0 ? buttons.rightRoom() - 4 : 10);
 
 	// From the right edge: •••, then the groups, last first.
 	float x = rightEdge;
@@ -230,7 +230,7 @@ void Toolbar::paintPicture(cairo_t* cr, float w, float h, int style) {
 	const int keepStyle = laidStyle;
 	const float keepW = lastW;
 	std::vector<Item> keep = items;
-	layout(w, h, style);
+	layout(w, h, style, false);
 	draw(cr, w, h, style, false);
 	items = keep;
 	laidStyle = keepStyle;

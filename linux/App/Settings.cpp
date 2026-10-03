@@ -143,7 +143,7 @@ class Swatches : public Drawn {
 public:
 	Swatches() {
 		create();
-		gtk_widget_set_size_request(area, 7 * 52, 52);
+		gtk_widget_set_size_request(area, 7 * 60, 52);
 		gtk_widget_set_halign(area, GTK_ALIGN_START);
 	}
 
@@ -157,21 +157,21 @@ protected:
 			double r, g, b;
 			cl_accent_color(a, c.dark, &r, &g, &b);
 			const Color col = colorF((float)r, (float)g, (float)b);
-			const PointF mid = pointF(26 + i * 52, 16);
+			const PointF mid = pointF(30 + i * 60, 16);
 			const bool on = prefs().accent == a;
 			const float hot = (float)fade.amount(i);
 			if (on) strokeCircle(cr, mid, 15, withAlpha(c.barInk(), 0.85f), 2);
 			fillCircle(cr, mid, 11 + hot, col);
 			if (on) fillCircle(cr, mid, 4, colorF(1, 1, 1, 0.95f));
-			drawText(cr, names[a], rectF(mid.x - 26, h - 16, mid.x + 26, h), 10, withAlpha(c.barInk(), on ? 0.9f : 0.55f), TextAlign::Center, on);
+			drawText(cr, names[a], rectF(mid.x - 30, h - 16, mid.x + 30, h), 10, withAlpha(c.barInk(), on ? 0.9f : 0.55f), TextAlign::Center, on);
 		}
 	}
-	void mouseMove(float x, float) override { fade.setHot(std::min(6, std::max(0, (int)(x / 52)))); animate(); }
+	void mouseMove(float x, float) override { fade.setHot(std::min(6, std::max(0, (int)(x / 60)))); animate(); }
 	void mouseLeave() override { fade.setHot(-1); animate(); }
 	void mouseDown(int button, float x, float, bool, GdkEventButton*) override {
 		static const int order[] = { 6, 0, 1, 2, 3, 4, 5 };
 		if (button != 1) return;
-		const int i = (int)(x / 52);
+		const int i = (int)(x / 60);
 		if (i < 0 || i > 6) return;
 		prefs().accent = order[i];
 		prefs().save();
@@ -197,7 +197,7 @@ public:
 
 protected:
 	void paint(cairo_t* cr, float w, float h) override {
-		const float k = 0.82f;
+		const float k = 0.74f;
 		cairo_save(cr);
 		roundedPath(cr, rectF(0, 0, w, h), 8);
 		cairo_clip(cr);

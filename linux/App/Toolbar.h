@@ -65,7 +65,7 @@ private:
 	int laidStyle = -1;
 
 	void build(int style);
-	void layout(float w, float h, int style);
+	void layout(float w, float h, int style, bool live = true);
 	void draw(cairo_t* cr, float w, float h, int style, bool live);
 	int itemAt(float x, float y) const;
 	const char* iconFor(const Item& it) const;

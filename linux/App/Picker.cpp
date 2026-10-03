@@ -1,6 +1,7 @@
 // The pickers' window (see Picker.h).
 
 #include "Picker.h"
+#include "Anim.h"
 
 #include <algorithm>
 #include <cmath>
@@ -132,7 +133,10 @@ void Picker::paint(cairo_t* cr) {
 		if (sel) fillRound(cr, r, 12, withAlpha(accent, look.dark ? 0.26f : 0.16f));
 		else if (isHot) fillRound(cr, r, 12, look.ink(0.06f));
 		const float textLeft = row.tile ? r.left + 68 : r.left + 14;
-		if (row.tile) gateTile(cr, rectF(r.left + 12, y + 11, r.left + 52, y + 51), accent, sel);
+		if (row.tile) {
+			if (drawTile) drawTile(cr, row, rectF(r.left + 12, y + 11, r.left + 52, y + 51));
+			else gateTile(cr, rectF(r.left + 12, y + 11, r.left + 52, y + 51), accent, sel);
+		}
 		float right = r.right - 16;
 		if (!row.badge.empty()) {
 			const float bw = textWidth(row.badge, 9, true) + 16;
@@ -331,6 +335,7 @@ void Picker::run(GtkWindow* owner) {
 	g_signal_connect(window, "delete-event", G_CALLBACK(deleteCb), this);
 	reload();
 	gtk_widget_show_all(window);
+	anim::fadeIn(window);
 	gtk_widget_grab_focus(entry ? entry : area);
 	loop = g_main_loop_new(nullptr, FALSE);
 	if (!done) g_main_loop_run(loop);

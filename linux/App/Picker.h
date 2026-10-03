@@ -49,6 +49,8 @@ public:
 	std::function<bool(Picker&, guint key, bool ctrl)> onKey;
 	std::function<void(cairo_t*, const RectF&)> preview;
 	std::function<void(Picker&)> onSelect;
+	// Draws a row's tile in place of the gate silhouette (Add a Gate draws the gate itself).
+	std::function<void(cairo_t*, const Row&, const RectF&)> drawTile;
 
 	std::vector<Row> shown;
 	int selection = 0;

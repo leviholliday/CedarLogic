@@ -600,6 +600,12 @@ void CircuitWindow::splitWith(int page, bool onRight) {
 	syncTabs();
 	showPage(cl_document_page_index(doc, key));
 	note("Split view. Drag tabs between the two sides; the split closes when a side runs out.");
+	// Each side fits its page in its half, once the halves are laid out.
+	g_idle_add([](gpointer self) -> gboolean {
+		for (CircuitWindow* o : circuitWindows())
+			if (o == self) for (int pane = 0; pane < 2; pane++) if (Canvas* c = o->paneCanvas(pane)) c->zoomToFit(true);
+		return G_SOURCE_REMOVE;
+	}, this);
 }
 
 void CircuitWindow::movePageToPane(int page, int pane) {
@@ -1278,8 +1284,9 @@ gboolean CircuitWindow::stateCb(GtkWidget*, GdkEventWindowState* e, gpointer) {
 	return FALSE;
 }
 
-void CircuitWindow::sizeCb(GtkWidget* widget, GdkRectangle*, gpointer) {
-	if (prefs().windowMaximized) return;
+void CircuitWindow::sizeCb(GtkWidget* widget, GdkRectangle*, gpointer self) {
+	// Focus mode's window has no title bar: its size isn't the window's own.
+	if (prefs().windowMaximized || static_cast<CircuitWindow*>(self)->focusOn) return;
 	int w = 0, h = 0;
 	gtk_window_get_size(GTK_WINDOW(widget), &w, &h);
 	if (w > 0 && h > 0) { prefs().windowWidth = w; prefs().windowHeight = h; }

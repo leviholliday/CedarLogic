@@ -7,6 +7,7 @@
 #ifndef CL_LINUX_SHEET_H
 #define CL_LINUX_SHEET_H
 
+#include "Anim.h"
 #include "Chrome.h"
 
 #include <functional>

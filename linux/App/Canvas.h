@@ -10,7 +10,9 @@
 #ifndef CL_LINUX_CANVAS_H
 #define CL_LINUX_CANVAS_H
 
+#include "Anim.h"
 #include "App.h"
+#include "Chrome.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -114,6 +116,15 @@ private:
 	void drawOpeningCard(cairo_t* cr, float w, float h, double t);
 	void drawOverlays(cairo_t* cr, float w, float h);
 	void drawBanner(cairo_t* cr, float w);
+	// The banner and the Simulation View bar come and go with a little motion.
+	anim::Tween bannerFade, simBarIn;
+	std::string bannerText;
+	std::vector<std::pair<std::string, const char*>> bannerButtons;
+	bool bannerLocked = false;
+	guint motionTick = 0;
+	void keepMoving();
+	// Frosted glass: what's under r, blurred, for a panel over the canvas.
+	void frosted(cairo_t* cr, const RectF& r, float radius);
 	void drawToast(cairo_t* cr, float w, float h);
 	void drawSimBar(cairo_t* cr, float w, float h);
 	float sliderLeft = 0, sliderRight = 0, sliderTop = 0, sliderBottom = 0;   // Simulation View's speed

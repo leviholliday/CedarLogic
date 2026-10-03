@@ -16,10 +16,10 @@ class CircuitWindow;
 class FindBar {
 public:
 	explicit FindBar(CircuitWindow* window);
-	GtkWidget* widget() const { return root; }
+	GtkWidget* widget() const { return revealer; }
 	void open(const std::string& query);
 	void close();
-	bool isOpen() const { return gtk_widget_get_visible(root); }
+	bool isOpen() const { return gtk_revealer_get_reveal_child(GTK_REVEALER(revealer)); }
 	// Look again (the circuit changed); jump to the first hit when asked.
 	void run(bool jump);
 	void step(int delta);
@@ -28,6 +28,7 @@ private:
 	struct Hit { int page; long gate; double x, y; std::string text, kind; };
 	CircuitWindow* win;
 	GtkWidget* root;
+	GtkWidget* revealer;   // it slides down into place
 	GtkWidget* entry;
 	GtkWidget* status;
 	GtkWidget* up;

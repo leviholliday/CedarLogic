@@ -21,11 +21,17 @@ GtkWidget* iconButton(const char* icon, const char* tip) {
 FindBar::FindBar(CircuitWindow* window) : win(window) {
 	root = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 	gtk_widget_set_name(root, "findbar");
-	gtk_widget_set_halign(root, GTK_ALIGN_CENTER);
-	gtk_widget_set_valign(root, GTK_ALIGN_START);
 	gtk_widget_set_margin_top(root, 12);
+	gtk_widget_set_margin_bottom(root, 6);
+	gtk_widget_set_margin_start(root, 6);
+	gtk_widget_set_margin_end(root, 6);
 	gtk_widget_set_size_request(root, 600, -1);
-	gtk_widget_set_no_show_all(root, TRUE);
+	revealer = gtk_revealer_new();
+	gtk_revealer_set_transition_type(GTK_REVEALER(revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
+	gtk_revealer_set_transition_duration(GTK_REVEALER(revealer), 180);
+	gtk_widget_set_halign(revealer, GTK_ALIGN_CENTER);
+	gtk_widget_set_valign(revealer, GTK_ALIGN_START);
+	gtk_container_add(GTK_CONTAINER(revealer), root);
 	GtkWidget* icon = gtk_image_new_from_icon_name("edit-find-symbolic", GTK_ICON_SIZE_MENU);
 	gtk_style_context_add_class(gtk_widget_get_style_context(icon), "dim-label");
 	gtk_box_pack_start(GTK_BOX(root), icon, FALSE, FALSE, 6);
@@ -60,14 +66,15 @@ FindBar::FindBar(CircuitWindow* window) : win(window) {
 
 void FindBar::open(const std::string& query) {
 	if (!query.empty()) gtk_entry_set_text(GTK_ENTRY(entry), query.c_str());
-	gtk_widget_show(root);
+	gtk_widget_show_all(revealer);
+	gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), TRUE);
 	gtk_widget_grab_focus(entry);
 	gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
 	run(gtk_entry_get_text_length(GTK_ENTRY(entry)) > 0);
 }
 
 void FindBar::close() {
-	gtk_widget_hide(root);
+	gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
 	if (Canvas* c = win->currentCanvas()) gtk_widget_grab_focus(c->widget());
 }
 
