@@ -646,7 +646,9 @@ void showTruthTable(CircuitWindow* w, int page) {
 	g_truthTablesOpen--;
 	if (prefs().truthTab != t.tab) { prefs().truthTab = t.tab; prefs().save(); }
 	if (!t.buildText.empty()) {
+		// Kept for Build from Formula either way; a locked circuit isn't added to.
 		prefs().lastFormula = t.buildText;
-		showBuildFormula(w);
+		if (w->canEdit()) showBuildFormula(w);
+		else w->lockNudge();
 	}
 }

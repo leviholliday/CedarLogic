@@ -1059,6 +1059,8 @@ std::string trimmed(const std::string& s) {
 // picture and name on top, then its settings, each applied as you make it
 // (a number once it's valid) and undone with Ctrl+Z; Rotate, Delete, Done.
 void showGateSettings(CircuitWindow* w, long gate) {
+	// Locked, or in Simulation View: nothing to change (the menu still offers it).
+	if (!w->canEdit()) { w->lockNudge(); return; }
 	CLDocument* doc = w->document();
 	struct Setting { std::string name, type, value; double min, max; int field; };
 	std::vector<Setting> settings;
@@ -1376,6 +1378,8 @@ void showRamEditor(CircuitWindow* w, long gate) {
 	HWND editBox = nullptr;
 	const std::string libName = cl_gate_library_name(doc, gate) ? cl_gate_library_name(doc, gate) : "";
 	const std::string caption = cl_gate_caption(doc, gate);
+	// Locked, or in Simulation View: it can be watched, not changed.
+	const bool editable = w->canEdit();
 
 	const float addrW = 70, headH = 24, rowH = 25;
 	const float cellW = std::max(3, std::max(dDigits, decDigits) + 1) * 7.0f + 10;
@@ -1416,8 +1420,8 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			rt->SetTransform(was);
 		}
 		drawText(rt, caption, D2D1::RectF(70, 8, pw - 170, 32), 16, k, TextAlign::Leading, true);
-		drawText(rt, strf("%lu addresses × %d bits · click a value to change it", words, dataBits), D2D1::RectF(70, 32, pw - 170, 50), 11,
-		         withAlpha(k, 0.55f));
+		drawText(rt, strf("%lu addresses × %d bits · %s", words, dataBits, editable ? "click a value to change it" : "locked"),
+		         D2D1::RectF(70, 32, pw - 170, 50), 11, withAlpha(k, 0.55f));
 		const char* names[] = { "Hex", "Decimal" };
 		float x = pw - 2 - (textWidth("Hex", 12, true) + 24) - (textWidth("Decimal", 12, true) + 24) - 4;
 		fillRound(rt, D2D1::RectF(x, 16, pw - 2, 44), 14, withAlpha(k, 0.07f));
@@ -1526,6 +1530,7 @@ void showRamEditor(CircuitWindow* w, long gate) {
 		}
 		if (field != gridField) return;
 		finishEdit(form, true);
+		if (!editable) { w->lockNudge(); return; }
 		for (int r = 0; r <= visibleRows; r++) {
 			for (int col = 0; col < cols; col++) {
 				const unsigned long addr = (unsigned long)(scrollRow + r) * 16 + col;
@@ -1582,6 +1587,7 @@ void showRamEditor(CircuitWindow* w, long gate) {
 		const bool load = b == 0;
 		const std::vector<FileFilter> filters = { { "Memory files (*.cdm)", "*.cdm" }, { "All files", "*.*" } };
 		std::string file;
+		if (load && !editable) { w->lockNudge(); return false; }
 		if (load) {
 			const std::vector<std::string> files = chooseOpenFiles(form.dialog, "Load Memory", filters, false);
 			if (!files.empty()) file = files.front();
