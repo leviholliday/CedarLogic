@@ -160,16 +160,19 @@ void showShortcutsWindow(GtkWindow* parent) {
 					const ShortRow& r = rows[shown[k]];
 					if (r.section != sections[si]) continue;
 					const RectF rr = rectF(x0 - 8, y, x0 + colW + 8, y + 30);
+					// Rows scrolled up under the title can't be clicked there.
+					const bool visible = rr.bottom > top && rr.top < h;
 					const bool sel = k == selected;
 					if (sel) fillRound(cr, rr, 8, withAlpha(accent, dark ? 0.24f : 0.14f));
-					else if (sh.hotNext()) fillRound(cr, rr, 8, withAlpha(ink, 0.05f));
+					else if (visible && sh.hotNext()) fillRound(cr, rr, 8, withAlpha(ink, 0.05f));
 					drawTextMid(cr, r.what, rectF(x0, y, x0 + colW - capsWidth(r.keys) - 10, y + 30), 12.5f, withAlpha(ink, r.gaction || !r.canvasAction.empty() ? 0.95f : 0.65f));
 					drawCaps(cr, r.keys, x0 + colW, y + 15, ink);
 					const int kk = k;
-					sh.hit(rr, [&, kk] {
-						if (selected == kk) { runIt = rows[shown[kk]]; run = true; sh.close(); }
-						else selected = kk;
-					});
+					if (visible)
+						sh.hit(rr, [&, kk] {
+							if (selected == kk) { runIt = rows[shown[kk]]; run = true; sh.close(); }
+							else selected = kk;
+						});
 					y += 30;
 				}
 				y += 12;
