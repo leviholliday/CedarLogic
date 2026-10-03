@@ -92,6 +92,8 @@ let formulas = [
     "Y = A'B'C' + ABC + A B' D + C D' E",
     "F = (A ⊕ B)'",
     "G = A + B + C + D + E + F1",
+    "F = (AB)'",                   // negated products: NAND, built from NORs in NOR-only
+    "F = (A'B')' + (ABC)'D",
 ]
 for (fi, text) in formulas.enumerated() {
     let parsed = try! FormulaParser.parse(text)
