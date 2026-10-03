@@ -2,6 +2,7 @@
 
 #include "App.h"
 #include "Alert.h"
+#include "Library.h"
 #include "Settings.h"
 #include "Window.h"
 
@@ -147,6 +148,12 @@ void Prefs::load() {
 		}
 	}
 	g_key_file_free(k);
+	// The file dialogs start where a file was last chosen, never in Your
+	// Circuits' own folders (where older builds pointed them): else Documents.
+	if (lastFolder.empty() || library::contains(lastFolder + "/") || !g_file_test(lastFolder.c_str(), G_FILE_TEST_IS_DIR)) {
+		const char* docs = g_get_user_special_dir(G_USER_DIRECTORY_DOCUMENTS);
+		lastFolder = docs && g_file_test(docs, G_FILE_TEST_IS_DIR) ? docs : g_get_home_dir();
+	}
 	switch (themeMode) {
 	case 1: dark = false; break;
 	case 2: dark = true; break;
@@ -238,20 +245,29 @@ void Prefs::applyWireDots() const {
 	else cl_set_low_wire_color(false, 0, 0, 0);
 }
 
+// The desktop's own recent list, so the file manager and file choosers know it.
+void noteDesktopRecent(const std::string& path) {
+	if (gchar* uri = g_filename_to_uri(path.c_str(), nullptr, nullptr)) {
+		gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
+		g_free(uri);
+	}
+}
+
 void Prefs::noteRecent(const std::string& path) {
 	if (path.empty()) return;
 	recent.erase(std::remove(recent.begin(), recent.end(), path), recent.end());
 	recent.insert(recent.begin(), path);
 	if (recent.size() > 10) recent.resize(10);
-	gchar* dir = g_path_get_dirname(path.c_str());
-	lastFolder = dir;
-	g_free(dir);
-	save();
-	// The desktop's own list too, so the file manager and file choosers know it.
-	if (gchar* uri = g_filename_to_uri(path.c_str(), nullptr, nullptr)) {
-		gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
-		g_free(uri);
+	// Your Circuits' own files (circuit.cdl, in a folder of their own) are
+	// the app's business: the file dialogs and the desktop's recent list only
+	// hear of files people chose.
+	if (!library::contains(path)) {
+		gchar* dir = g_path_get_dirname(path.c_str());
+		lastFolder = dir;
+		g_free(dir);
+		noteDesktopRecent(path);
 	}
+	save();
 	rebuildRecentMenus();
 }
 

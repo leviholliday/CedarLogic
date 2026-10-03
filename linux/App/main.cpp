@@ -671,9 +671,14 @@ bool openCircuit(GtkApplication* app, const std::string& path, CircuitWindow* fr
 			target = it.circuit();
 			importedNow = true;
 		}
+	}
+	// A file from elsewhere: its folder is where the file dialogs start next,
+	// and it goes in the desktop's recent list (Open Recent has its copy).
+	if (!library::contains(path)) {
 		gchar* dir = g_path_get_dirname(path.c_str());
 		prefs().lastFolder = dir;
 		g_free(dir);
+		noteDesktopRecent(path);
 	}
 	CircuitWindow* w;
 	// In the window's place: an untouched new one, or any when Settings says
@@ -732,11 +737,12 @@ void rebuildRecentMenus() {
 	for (const std::string& path : prefs().recent) {
 		if (!g_file_test(path.c_str(), G_FILE_TEST_EXISTS)) continue;
 		GMenuItem* item = g_menu_item_new(nullptr, nullptr);
-		// Underscores in a file name aren't mnemonics.
-		gchar* label = g_strdup(baseName(path).c_str());
+		// A circuit in Your Circuits by its name there (its file is always
+		// circuit.cdl). Underscores in a name aren't mnemonics.
+		library::Item it;
+		const std::string label = library::itemFor(path, it) ? it.name : baseName(path);
 		std::string escaped;
-		for (const char* p = label; *p; p++) { if (*p == '_') escaped += '_'; escaped += *p; }
-		g_free(label);
+		for (const char* p = label.c_str(); *p; p++) { if (*p == '_') escaped += '_'; escaped += *p; }
 		g_menu_item_set_label(item, escaped.c_str());
 		g_menu_item_set_action_and_target_value(item, "app.open-recent", g_variant_new_string(path.c_str()));
 		g_menu_append_item(gRecentMenu, item);

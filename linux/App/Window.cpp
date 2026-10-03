@@ -1091,6 +1091,7 @@ void CircuitWindow::reloadFromDisk(const std::string& message) {
 }
 
 void CircuitWindow::libraryChanged() {
+	rebuildRecentMenus();   // Open Recent names circuits by their names in Your Circuits
 	updateTitle();
 	if (toolbar) toolbar->layoutNow();
 }
@@ -1386,6 +1387,11 @@ std::string chooseSavePath(GtkWindow* parent, const char* title, const std::stri
 		if (gchar* f = gtk_file_chooser_get_filename(fc)) { out = f; g_free(f); }
 	}
 	g_object_unref(chooser);
+	if (!out.empty()) {
+		gchar* dir = g_path_get_dirname(out.c_str());
+		prefs().lastFolder = dir;   // the next dialog starts here
+		g_free(dir);
+	}
 	if (!out.empty() && ext) {
 		// Add the extension when it was left off.
 		const size_t n = strlen(ext);

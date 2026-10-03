@@ -145,6 +145,8 @@ std::vector<CircuitWindow*>& circuitWindows();
 // Choose a file and open it.
 void chooseAndOpen(GtkApplication* app, GtkWindow* parent);
 void rebuildRecentMenus();
+// A file people chose, into the desktop's recent list.
+void noteDesktopRecent(const std::string& path);
 
 // Open a URL or a file in the desktop's default app.
 void openExternally(GtkWindow* parent, const std::string& uri);
