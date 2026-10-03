@@ -159,9 +159,10 @@ void Canvas::draw(cairo_t* cr) {
 void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 	hits.clear();
 	sliderRight = sliderLeft = 0;
-	if (win->simView()) drawSimBar(cr, w, h);
-	drawBanner(cr, w);
-	drawToast(cr, w, h);
+	// In a split, the bar for Simulation View sits under the first side; the
+	// banner is the side's you're working in.
+	if (win->simView() && win->paneOf(this) == 0) drawSimBar(cr, w, h);
+	if (win->currentCanvas() == this) drawBanner(cr, w);
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(cr, w, h, t);
 }
@@ -698,6 +699,7 @@ bool Canvas::onPress(GdkEventButton* e) {
 	const int p = page();
 	if (doc == nullptr || p < 0) return FALSE;
 	gtk_widget_grab_focus(area);
+	win->activatePane(win->paneOf(this));
 	zooming = false;
 	lastX = e->x;
 	lastY = e->y;

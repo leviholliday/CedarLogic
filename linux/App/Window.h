@@ -7,9 +7,11 @@
 #ifndef CL_LINUX_WINDOW_H
 #define CL_LINUX_WINDOW_H
 
+#include "Anim.h"
 #include "App.h"
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -18,6 +20,8 @@ class GatePalette;
 class Toolbar;
 class TabStrip;
 class ScopeWindow;
+class StatusBar;
+class Sash;
 class FindBar;
 class TabSwitcher;
 namespace formula { struct Plan; }
@@ -60,13 +64,55 @@ public:
 	// (points in `from`).
 	void moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
 	void titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
+
+	// ---- Tabs, and split view (the Mac's SplitState) ----
+	// A tab is a page; its number is the page's index in the document.
 	int tabCount() const { return (int)canvases.size(); }
-	std::string tabName(int tab) const;
-	int currentTab() const;
-	void showTab(int tab);
-	void moveTab(int from, int to);
-	void closeTab(int tab);
-	void tabContextMenu(int tab, GdkEvent* e);
+	std::string tabName(int page) const { return pageName(page); }
+	std::string pageName(int page) const;
+	int currentTab() const { return currentPage(); }
+	void showTab(int page) { showPage(page); }
+	// Bring a page to the front of its side, and work in that side.
+	void showPage(int page);
+	// Move a page to where another is, within its side (the strip's drag).
+	void movePage(int from, int to);
+	void tabContextMenu(int page, GdkEvent* e);
+	bool splitOpen() const { return !sideKeys.empty(); }
+	// The side you're working in: 0 the first (left, unless swapped), 1 the second.
+	int focusedPane() const { return focusPane; }
+	int paneOf(const Canvas* c) const;
+	// The pages in a side's strip, in order; the one it shows (-1 none).
+	std::vector<int> panePages(int pane) const;
+	int shownPage(int pane) const;
+	Canvas* paneCanvas(int pane) const;
+	// A click in a side: work there.
+	void activatePane(int pane);
+	void toggleSplit();
+	void splitWith(int page, bool onRight);
+	void movePageToPane(int page, int pane);
+	void closeSplit();
+	void switchPane();
+	// A tab held over the canvas area: drop it to split, or onto the other
+	// side to move it there.
+	struct DropHint {
+		int kind = 0;   // 0 nothing, 1 split, 2 move
+		int side = 0;   // split: -1 left half, 1 right half; move: the pane
+		bool operator==(const DropHint& o) const { return kind == o.kind && side == o.side; }
+	};
+	DropHint dropHintAt(int fromPane, GtkWidget* from, double x, double y) const;
+	void showDropHint(const DropHint& h);
+	void tabDropped(int page, const DropHint& h);
+	// The strips' window buttons and drag, in focus mode (and the strip at
+	// the window's left edge makes room for buttons there).
+	bool focusMode() const { return focusOn; }
+	void toggleFocusMode();
+	bool stripIsLeftmost(int pane) const;
+	bool stripIsRightmost(int pane) const;
+	void redrawStrips();
+	// The side panel's drag: the canvas under a point in `from` (and the
+	// point in it), or the side next to the panel.
+	Canvas* canvasUnder(GtkWidget* from, double x, double y, double& cx, double& cy) const;
+	bool addGateFloatingOn(Canvas* c, const std::string& name, double wx, double wy);
 	// Bumped on every edit (undo history, page changes...); the minimap's
 	// cache key, so it regenerates only when the picture could have changed.
 	unsigned editStamp() const { return changes; }
@@ -208,16 +254,31 @@ private:
 	gint64 lastRecovery = 0;
 	void writeRecovery();
 
-	GtkWidget* notebook = nullptr;
-	GtkWidget* paned = nullptr;
+	GtkWidget* notebooks[2] = { nullptr, nullptr };
+	GtkWidget* paneBoxes[2] = { nullptr, nullptr };
+	TabStrip* strips[2] = { nullptr, nullptr };
+	GtkWidget* splitPaned = nullptr;  // the two sides
+	GtkWidget* area = nullptr;        // the canvas area (both sides), with the drop hint over it
+	GtkWidget* hintLayer = nullptr;
+	GtkWidget* scopePaned = nullptr;  // the area over the oscilloscope
+	GtkWidget* sideRevealer = nullptr;
+	GtkWidget* titleRevealer = nullptr;
 	GtkWidget* paletteBox = nullptr;
-	GtkWidget* statusBar = nullptr;
-	GtkWidget* statusMessage = nullptr;
-	GtkWidget* statusInfo = nullptr;
+	StatusBar* statusBar = nullptr;
+	std::set<uint64_t> sideKeys;      // the second side's pages; empty: no split
+	bool sideFirst = false;           // the second side sits on the left
+	int focusPane = 0;
+	DropHint hint;
+	anim::Tween hintFade;
+	DropHint hintShown;               // the last one drawn, kept while it fades out
+	bool focusOn = false;
+	int paletteWidth() const;
+	void layoutSplit();
+	void reconcileSplit();
+	static gboolean drawHintCb(GtkWidget*, cairo_t*, gpointer);
 	guint autosaveId = 0;             // saving as you go, a moment after the last change
 	static gboolean autosaveCb(gpointer self);
 	Toolbar* toolbar = nullptr;
-	TabStrip* tabs = nullptr;
 	int lastZoomShown = -1;
 	GtkWidget* banner = nullptr;      // Tidy Up's keep/undo bar, Simulation View's
 	GtkWidget* bannerLabel = nullptr;
@@ -270,13 +331,11 @@ private:
 	void floatSelection(double wx, double wy);
 	void pasteText(const std::string& text, bool floating, bool shift);
 	std::string displayName() const;
-	std::string pageName(int page) const;
 
 	static gboolean tickCb(gpointer);
 	static gboolean deleteCb(GtkWidget*, GdkEvent*, gpointer);
 	static void destroyCb(GtkWidget*, gpointer);
 	static void switchPageCb(GtkNotebook*, GtkWidget*, guint, gpointer);
-	static void reorderCb(GtkNotebook*, GtkWidget*, guint, gpointer);
 	static gboolean keyCb(GtkWidget*, GdkEventKey*, gpointer);
 	static gboolean keyReleaseCb(GtkWidget*, GdkEventKey*, gpointer);
 	static gboolean stateCb(GtkWidget*, GdkEventWindowState*, gpointer);
@@ -284,6 +343,7 @@ private:
 	static void clipboardCb(GtkClipboard*, const gchar*, gpointer);
 
 	friend class Canvas;
+	friend class StatusBar;
 	friend class ScopeWindow;
 };
 

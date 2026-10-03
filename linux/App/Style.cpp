@@ -34,7 +34,12 @@ void applyStyle() {
 	const Color line = dark ? colorF(1, 1, 1, 0.10f) : colorF(0, 0, 0, 0.10f);
 	std::string s;
 	// The side panel.
-	s += "#palette, #sidepanel { background-color: " + css(c.panel()) + "; }\n";
+	// The side panel is the canvas's own colour, as the Mac's is.
+	s += "#palette, #sidepanel { background-color: " + css(c.canvas()) + "; }\n";
+	s += "#sash { background-color: " + css(c.sash()) + "; }\n";
+	// A tab renamed in place: a bare field on its card.
+	s += "#tab-rename { background: transparent; border: none; box-shadow: none; outline: none; min-height: 20px; padding: 0 2px; "
+	     "font-weight: bold; font-size: 11.5px; color: " + css(c.tabInk()) + "; caret-color: " + css(c.accent()) + "; }\n";
 	s += "#palette entry { border-radius: 8px; min-height: 28px; background-color: " + css(field) + "; border: 1px solid " + css(line) +
 	     "; box-shadow: none; }\n";
 	s += "#palette entry:focus { border-color: " + css(c.accent()) + "; }\n";

@@ -14,6 +14,9 @@ Color Chrome::bar() const { return dark ? rgb255(44, 47, 54) : rgb255(236, 237, 
 Color Chrome::barInk() const { return dark ? rgb255(210, 215, 224) : rgb255(52, 56, 64); }
 Color Chrome::tabBar() const { return dark ? rgb255(22, 24, 28) : rgb255(233, 234, 238); }
 Color Chrome::tabCard() const { return dark ? rgb255(32, 35, 41) : rgb255(255, 255, 255); }
+Color Chrome::tabBarTop() const { return dark ? rgb255(38, 41, 48) : rgb255(250, 250, 252); }
+Color Chrome::tabCardLit() const { return dark ? rgb255(44, 48, 56) : rgb255(255, 255, 255); }
+Color Chrome::minimalBar() const { return dark ? rgb255(28, 31, 37) : rgb255(246, 247, 249); }
 Color Chrome::tabInk() const { return dark ? rgb255(228, 232, 240) : rgb255(32, 35, 42); }
 Color Chrome::panel() const { return dark ? colorF(0.105f, 0.115f, 0.135f) : colorF(0.965f, 0.968f, 0.975f); }
 Color Chrome::hairline() const { return dark ? colorF(1, 1, 1, 0.08f) : colorF(0, 0, 0, 0.09f); }

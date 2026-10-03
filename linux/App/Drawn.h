@@ -31,6 +31,13 @@ protected:
 	virtual void wheel(double /*dy*/, float, float) {}
 	virtual void sizeChanged() {}
 
+	// Motion: call when something starts moving; the widget redraws every
+	// frame until animating() says it's done.
+	void animate();
+	// The pointer's shape over the widget (nullptr: the usual arrow).
+	void setCursorName(const char* name);
+	virtual bool animating() { return false; }
+
 	// Tooltips: replace the set, each a rectangle in points.
 	struct Tip { RectF rect; std::string text; };
 	void setTips(const std::vector<Tip>& tips) { tipList = tips; }
@@ -40,6 +47,8 @@ protected:
 
 private:
 	std::vector<Tip> tipList;
+	guint tickId = 0;
+	static gboolean tickCb(GtkWidget*, GdkFrameClock*, gpointer);
 	static gboolean drawCb(GtkWidget*, cairo_t*, gpointer);
 	static gboolean motionCb(GtkWidget*, GdkEventMotion*, gpointer);
 	static gboolean crossingCb(GtkWidget*, GdkEventCrossing*, gpointer);

@@ -8,6 +8,8 @@
 #include "FindBar.h"
 #include "Help.h"
 #include "Splash.h"
+#include "StatusBar.h"
+#include "TitleButtons.h"
 #include "Welcome.h"
 #include "TabSwitcher.h"
 #include "Formula.h"
@@ -83,6 +85,10 @@ const Command kCommands[] = {
 	{ "zoom-actual", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->zoomActual(); }, false },
 	{ "dark", [](CircuitWindow* w) { w->toggleDark(); }, true },
 	{ "palette", [](CircuitWindow* w) { w->togglePalette(); }, true },
+	{ "focus-mode", [](CircuitWindow* w) { w->toggleFocusMode(); }, true },
+	{ "split-view", [](CircuitWindow* w) { w->toggleSplit(); }, true },
+	{ "switch-pane", [](CircuitWindow* w) { w->switchPane(); }, false },
+	{ "close-split", [](CircuitWindow* w) { w->closeSplit(); }, false },
 	{ "status-bar", [](CircuitWindow*) {
 		prefs().showStatus = !prefs().showStatus;
 		prefs().save();
@@ -156,8 +162,8 @@ CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const s
 	updateRunUI();
 	updateBanner();
 	gtk_widget_show_all(win);
-	gtk_widget_set_visible(paletteBox, prefs().showPalette);
-	gtk_widget_set_visible(statusBar, prefs().showStatus);
+	gtk_widget_set_visible(paneBoxes[1], splitOpen());
+	gtk_revealer_set_reveal_child(GTK_REVEALER(statusBar->outer()), prefs().showStatus);
 	updateBanner();
 	gtk_widget_set_visible(banner, FALSE);
 	if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget());
@@ -201,7 +207,10 @@ CircuitWindow::~CircuitWindow() {
 	delete palette;
 	delete miniMap;
 	delete toolbar;
-	delete tabs;
+	delete strips[0];
+	delete strips[1];
+	delete statusBar;
+	for (GtkWidget*& b : paneBoxes) if (b) { g_object_unref(b); b = nullptr; }
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
@@ -230,72 +239,106 @@ void CircuitWindow::build() {
 	GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(win), v);
 	// The toolbar is the title bar (the Mac's and the Windows app's), and
-	// every menu is behind its •••.
+	// every menu is behind its •••. Focus mode slides it away.
 	toolbar = new Toolbar(this);
-	gtk_window_set_titlebar(GTK_WINDOW(win), toolbar->widget());
+	titleRevealer = gtk_revealer_new();
+	gtk_revealer_set_transition_type(GTK_REVEALER(titleRevealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
+	gtk_revealer_set_transition_duration(GTK_REVEALER(titleRevealer), 240);
+	gtk_revealer_set_reveal_child(GTK_REVEALER(titleRevealer), TRUE);
+	gtk_container_add(GTK_CONTAINER(titleRevealer), toolbar->widget());
+	gtk_widget_show_all(titleRevealer);
+	gtk_window_set_titlebar(GTK_WINDOW(win), titleRevealer);
 	gtk_application_window_set_show_menubar(GTK_APPLICATION_WINDOW(win), FALSE);
 
-	// A bar for Tidy Up's preview, Simulation View and Lock.
+	// A bar for Tidy Up's preview, Simulation View and Lock (drawn on the
+	// canvas now; kept for its text).
 	banner = gtk_info_bar_new();
 	gtk_info_bar_set_message_type(GTK_INFO_BAR(banner), GTK_MESSAGE_INFO);
 	bannerLabel = gtk_label_new("");
-	gtk_label_set_xalign(GTK_LABEL(bannerLabel), 0);
-	gtk_label_set_line_wrap(GTK_LABEL(bannerLabel), TRUE);
 	gtk_container_add(GTK_CONTAINER(gtk_info_bar_get_content_area(GTK_INFO_BAR(banner))), bannerLabel);
 	bannerButtons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	gtk_container_add(GTK_CONTAINER(gtk_info_bar_get_content_area(GTK_INFO_BAR(banner))), bannerButtons);
 	gtk_box_pack_start(GTK_BOX(v), banner, FALSE, FALSE, 0);
 
-	paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-	gtk_box_pack_start(GTK_BOX(v), paned, TRUE, TRUE, 0);
+	GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_box_pack_start(GTK_BOX(v), row, TRUE, TRUE, 0);
+	// The side panel (the Mac's CLSidePanel): as wide as its gates need, and
+	// sliding away in focus mode.
 	GtkWidget* leftBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_name(leftBox, "sidepanel");
 	palette = new GatePalette(this);
 	paletteBox = leftBox;
-	gtk_widget_set_size_request(leftBox, 120, -1);
+	gtk_widget_set_size_request(leftBox, paletteWidth(), -1);
 	gtk_box_pack_start(GTK_BOX(leftBox), palette->widget(), TRUE, TRUE, 0);
-	gtk_box_pack_start(GTK_BOX(leftBox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
+	GtkWidget* mapLine = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_widget_set_name(mapLine, "sash");
+	gtk_widget_set_size_request(mapLine, -1, 1);
+	gtk_box_pack_start(GTK_BOX(leftBox), mapLine, FALSE, FALSE, 0);
 	miniMap = new MiniMap(this);
 	gtk_box_pack_start(GTK_BOX(leftBox), miniMap->widget(), FALSE, FALSE, 0);
-	gtk_paned_pack1(GTK_PANED(paned), leftBox, FALSE, FALSE);
-	gtk_paned_set_position(GTK_PANED(paned), prefs().paletteWidth);
-	// A wider, themed grip: the default handle is a thin strip that's easy
-	// to miss (GTK 3.16+; ignored harmlessly on older GTK).
-	g_object_set(paned, "wide-handle", TRUE, nullptr);
+	GtkWidget* sideRow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_box_pack_start(GTK_BOX(sideRow), leftBox, FALSE, FALSE, 0);
+	GtkWidget* sash = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_name(sash, "sash");
+	gtk_widget_set_size_request(sash, 1, -1);
+	gtk_box_pack_start(GTK_BOX(sideRow), sash, FALSE, FALSE, 0);
+	sideRevealer = gtk_revealer_new();
+	gtk_revealer_set_transition_type(GTK_REVEALER(sideRevealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_RIGHT);
+	gtk_revealer_set_transition_duration(GTK_REVEALER(sideRevealer), 240);
+	gtk_container_add(GTK_CONTAINER(sideRevealer), sideRow);
+	gtk_revealer_set_reveal_child(GTK_REVEALER(sideRevealer), prefs().showPalette);
+	gtk_box_pack_start(GTK_BOX(row), sideRevealer, FALSE, FALSE, 0);
 
-	// The drawn tab cards over the pages, which stay in a notebook of their
-	// own with its tabs hidden.
-	GtkWidget* right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	tabs = new TabStrip(this);
-	gtk_box_pack_start(GTK_BOX(right), tabs->widget(), FALSE, FALSE, 0);
-	notebook = gtk_notebook_new();
-	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(notebook), FALSE);
-	gtk_notebook_set_show_border(GTK_NOTEBOOK(notebook), FALSE);
-	g_signal_connect(notebook, "switch-page", G_CALLBACK(switchPageCb), this);
-	g_signal_connect(notebook, "page-reordered", G_CALLBACK(reorderCb), this);
-	// The find bar floats over the top of the page.
-	GtkWidget* over = gtk_overlay_new();
-	pageOverlay = over;
-	gtk_container_add(GTK_CONTAINER(over), notebook);
-	findBar = new FindBar(this);
-	gtk_overlay_add_overlay(GTK_OVERLAY(over), findBar->widget());
+	// The canvas area: a side (its own tab strip over its pages, which stay
+	// in a notebook of their own with its tabs hidden), or two side by side.
+	splitPaned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+	g_object_set(splitPaned, "wide-handle", TRUE, nullptr);
+	for (int pane = 0; pane < 2; pane++) {
+		GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+		strips[pane] = new TabStrip(this, pane);
+		gtk_box_pack_start(GTK_BOX(box), strips[pane]->outer(), FALSE, FALSE, 0);
+		notebooks[pane] = gtk_notebook_new();
+		gtk_notebook_set_show_tabs(GTK_NOTEBOOK(notebooks[pane]), FALSE);
+		gtk_notebook_set_show_border(GTK_NOTEBOOK(notebooks[pane]), FALSE);
+		g_signal_connect(notebooks[pane], "switch-page", G_CALLBACK(switchPageCb), this);
+		if (pane == 0) {
+			// The find bar floats over the top of the first side's page.
+			GtkWidget* over = gtk_overlay_new();
+			pageOverlay = over;
+			gtk_container_add(GTK_CONTAINER(over), notebooks[pane]);
+			findBar = new FindBar(this);
+			gtk_overlay_add_overlay(GTK_OVERLAY(over), findBar->widget());
+			gtk_box_pack_start(GTK_BOX(box), over, TRUE, TRUE, 0);
+		} else {
+			gtk_box_pack_start(GTK_BOX(box), notebooks[pane], TRUE, TRUE, 0);
+		}
+		paneBoxes[pane] = box;
+		g_object_ref_sink(box);   // moved between the paned's two halves
+	}
 	switcher = new TabSwitcher(this);
-	gtk_box_pack_start(GTK_BOX(right), over, TRUE, TRUE, 0);
-	gtk_paned_pack2(GTK_PANED(paned), right, TRUE, FALSE);
+	gtk_paned_pack1(GTK_PANED(splitPaned), paneBoxes[0], TRUE, FALSE);
+	gtk_paned_pack2(GTK_PANED(splitPaned), paneBoxes[1], TRUE, FALSE);
+	// "Drop to split here": drawn over the whole area while a tab is held.
+	area = gtk_overlay_new();
+	gtk_container_add(GTK_CONTAINER(area), splitPaned);
+	hintLayer = gtk_drawing_area_new();
+	gtk_widget_set_no_show_all(hintLayer, TRUE);
+	g_signal_connect(hintLayer, "draw", G_CALLBACK(drawHintCb), this);
+	gtk_overlay_add_overlay(GTK_OVERLAY(area), hintLayer);
+	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(area), hintLayer, TRUE);
+	// The oscilloscope docks under the canvas, as on the Mac.
+	scopePaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
+	g_object_set(scopePaned, "wide-handle", TRUE, nullptr);
+	gtk_paned_pack1(GTK_PANED(scopePaned), area, TRUE, FALSE);
+	gtk_box_pack_start(GTK_BOX(row), scopePaned, TRUE, TRUE, 0);
 
-	statusBar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-	gtk_widget_set_name(statusBar, "status");
-	gtk_container_set_border_width(GTK_CONTAINER(statusBar), 3);
-	statusMessage = gtk_label_new("");
-	gtk_label_set_xalign(GTK_LABEL(statusMessage), 0);
-	gtk_label_set_ellipsize(GTK_LABEL(statusMessage), PANGO_ELLIPSIZE_END);
-	statusInfo = gtk_label_new("");
-	gtk_style_context_add_class(gtk_widget_get_style_context(statusInfo), "dim-label");
-	gtk_box_pack_start(GTK_BOX(statusBar), statusMessage, TRUE, TRUE, 6);
-	gtk_box_pack_end(GTK_BOX(statusBar), statusInfo, FALSE, FALSE, 6);
-	gtk_box_pack_start(GTK_BOX(v), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(v), statusBar, FALSE, FALSE, 0);
+	statusBar = new StatusBar(this);
+	gtk_box_pack_start(GTK_BOX(v), statusBar->outer(), FALSE, FALSE, 0);
 }
+
+// The side panel is as wide as its gates need (Settings > Appearance >
+// Gate size), as the Mac's is.
+int CircuitWindow::paletteWidth() const { return std::max(176, std::min(prefs().gateSize * 3 + 30, 340)); }
 
 void CircuitWindow::addActions() {
 	for (const Command& c : kCommands) {
@@ -309,7 +352,7 @@ void CircuitWindow::addActions() {
 	}
 }
 
-// ---- Tabs ------------------------------------------------------------------------
+// ---- Tabs and split view ------------------------------------------------------------
 
 std::string CircuitWindow::pageName(int page) const {
 	const char* n = cl_document_page_name(doc, page);
@@ -317,69 +360,51 @@ std::string CircuitWindow::pageName(int page) const {
 	return format("Page %d", page + 1);
 }
 
-// The window a canvas belongs to (set when the canvas is made).
-static CircuitWindow* windowOf(Canvas* c) {
-	return static_cast<CircuitWindow*>(g_object_get_data(G_OBJECT(c->widget()), "cl-window"));
+void CircuitWindow::updateTabLabels() { redrawStrips(); }
+
+void CircuitWindow::redrawStrips() {
+	for (TabStrip* t : strips) if (t) t->redraw();
 }
 
-static gboolean tabPressCb(GtkWidget*, GdkEventButton* e, gpointer data) {
-	Canvas* c = static_cast<Canvas*>(data);
-	CircuitWindow* w = windowOf(c);
-	const int p = c->page();
-	if (w == nullptr || p < 0) return FALSE;
-	if (e->type == GDK_2BUTTON_PRESS && e->button == 1) { guarded("renaming a tab", [&] { w->renamePage(p); }); return TRUE; }
-	// A middle click closes the tab, as in browsers.
-	if (e->type == GDK_BUTTON_PRESS && e->button == 2) { guarded("closing a tab", [&] { w->closePage(p); }); return TRUE; }
-	return FALSE;
+int CircuitWindow::paneOf(const Canvas* c) const { return c && sideKeys.count(c->pageKey()) ? 1 : 0; }
+
+std::vector<int> CircuitWindow::panePages(int pane) const {
+	std::vector<int> out;
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (paneOf(canvases[i]) == pane) out.push_back(i);
+	return out;
 }
 
-static void tabCloseCb(GtkButton*, gpointer data) {
-	Canvas* c = static_cast<Canvas*>(data);
-	CircuitWindow* w = windowOf(c);
-	const int p = c->page();
-	if (w && p >= 0) guarded("closing a tab", [&] { w->closePage(p); });
+Canvas* CircuitWindow::paneCanvas(int pane) const {
+	GtkWidget* nb = notebooks[pane];
+	if (nb == nullptr) return nullptr;
+	const int i = gtk_notebook_get_current_page(GTK_NOTEBOOK(nb));
+	GtkWidget* w = i >= 0 ? gtk_notebook_get_nth_page(GTK_NOTEBOOK(nb), i) : nullptr;
+	for (Canvas* c : canvases) if (c->widget() == w) return c;
+	return nullptr;
 }
 
-GtkWidget* CircuitWindow::tabLabel(Canvas* c) {
-	GtkWidget* ev = gtk_event_box_new();
-	gtk_event_box_set_visible_window(GTK_EVENT_BOX(ev), FALSE);
-	GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-	GtkWidget* label = gtk_label_new("");
-	GtkWidget* close = gtk_button_new_from_icon_name("window-close-symbolic", GTK_ICON_SIZE_MENU);
-	gtk_button_set_relief(GTK_BUTTON(close), GTK_RELIEF_NONE);
-	gtk_widget_set_focus_on_click(close, FALSE);
-	gtk_widget_set_tooltip_text(close, "Close tab (Ctrl+W)");
-	g_signal_connect(close, "clicked", G_CALLBACK(tabCloseCb), c);
-	gtk_box_pack_start(GTK_BOX(box), label, TRUE, TRUE, 0);
-	gtk_box_pack_start(GTK_BOX(box), close, FALSE, FALSE, 0);
-	gtk_container_add(GTK_CONTAINER(ev), box);
-	g_object_set_data(G_OBJECT(ev), "label", label);
-	g_object_set_data(G_OBJECT(ev), "close", close);
-	gtk_widget_set_tooltip_text(ev, "Double-click to rename; drag to reorder");
-	g_signal_connect(ev, "button-press-event", G_CALLBACK(tabPressCb), c);
-	gtk_widget_show_all(ev);
-	return ev;
+int CircuitWindow::shownPage(int pane) const {
+	Canvas* c = paneCanvas(pane);
+	return c ? c->page() : -1;
 }
 
-void CircuitWindow::updateTabLabels() {
-	const int n = (int)canvases.size();
-	for (int i = 0; i < n; i++) {
-		GtkWidget* ev = gtk_notebook_get_tab_label(GTK_NOTEBOOK(notebook), canvases[i]->widget());
-		if (ev == nullptr) continue;
-		GtkWidget* label = GTK_WIDGET(g_object_get_data(G_OBJECT(ev), "label"));
-		GtkWidget* close = GTK_WIDGET(g_object_get_data(G_OBJECT(ev), "close"));
-		const int p = canvases[i]->page();
-		if (label && p >= 0) gtk_label_set_text(GTK_LABEL(label), pageName(p).c_str());
-		if (close) gtk_widget_set_visible(close, n > 1);
-	}
-	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(notebook), FALSE);
-	if (tabs) tabs->redraw();
+// Everything in line after pages were added, closed, reopened or moved: a
+// side left with every page gives them back (one strip again), and the
+// split's pages that are gone are forgotten.
+void CircuitWindow::reconcileSplit() {
+	std::set<uint64_t> keep;
+	for (Canvas* c : canvases) if (sideKeys.count(c->pageKey())) keep.insert(c->pageKey());
+	if (!keep.empty() && keep.size() == canvases.size()) keep.clear();   // the first side ran out
+	sideKeys = keep;
+	if (sideKeys.empty()) focusPane = 0;
 }
 
 // Make the tabs match the document's pages: after opening, a new page, a
-// close, an undo that brings one back, a move.
+// close, an undo that brings one back, a move, a split.
 void CircuitWindow::syncTabs() {
 	syncing = true;
+	Canvas* front[2] = { paneCanvas(0), paneCanvas(1) };
 	const int n = cl_document_page_count(doc);
 	std::vector<Canvas*> want;
 	for (int i = 0; i < n; i++) {
@@ -391,34 +416,72 @@ void CircuitWindow::syncTabs() {
 	}
 	for (Canvas* c : canvases) {
 		if (std::find(want.begin(), want.end(), c) != want.end()) continue;
-		const int i = gtk_notebook_page_num(GTK_NOTEBOOK(notebook), c->widget());
-		if (i >= 0) gtk_notebook_remove_page(GTK_NOTEBOOK(notebook), i);
+		if (GtkWidget* parent = gtk_widget_get_parent(c->widget())) gtk_container_remove(GTK_CONTAINER(parent), c->widget());
+		if (front[0] == c) front[0] = nullptr;
+		if (front[1] == c) front[1] = nullptr;
 		delete c;
 	}
-	for (int i = 0; i < n; i++) {
-		GtkWidget* w = want[i]->widget();
-		const int at = gtk_notebook_page_num(GTK_NOTEBOOK(notebook), w);
-		if (at < 0) {
-			gtk_notebook_insert_page(GTK_NOTEBOOK(notebook), w, tabLabel(want[i]), i);
-			gtk_notebook_set_tab_reorderable(GTK_NOTEBOOK(notebook), w, TRUE);
-			gtk_widget_show(w);
-		} else if (at != i) {
-			gtk_notebook_reorder_child(GTK_NOTEBOOK(notebook), w, i);
+	canvases = want;
+	reconcileSplit();
+	// Each page in its side's notebook, in the document's order.
+	for (int pane = 0; pane < 2; pane++) {
+		GtkNotebook* nb = GTK_NOTEBOOK(notebooks[pane]);
+		int at = 0;
+		for (Canvas* c : canvases) {
+			if (paneOf(c) != pane) continue;
+			GtkWidget* w = c->widget();
+			GtkWidget* parent = gtk_widget_get_parent(w);
+			if (parent != notebooks[pane]) {
+				if (parent) gtk_container_remove(GTK_CONTAINER(parent), w);
+				gtk_notebook_insert_page(nb, w, nullptr, at);
+				gtk_widget_show(w);
+			} else if (gtk_notebook_page_num(nb, w) != at) {
+				gtk_notebook_reorder_child(nb, w, at);
+			}
+			at++;
+		}
+		// The page it showed, if it's still here.
+		if (front[pane] && paneOf(front[pane]) == pane) {
+			const int i = gtk_notebook_page_num(nb, front[pane]->widget());
+			if (i >= 0) gtk_notebook_set_current_page(nb, i);
 		}
 	}
-	canvases = want;
 	lastPageCount = n;
-	updateTabLabels();
+	layoutSplit();
 	syncing = false;
+	redrawStrips();
 	redrawMiniMap();
 }
 
+// The two sides in their places, or one when there's no split.
+void CircuitWindow::layoutSplit() {
+	GtkPaned* pp = GTK_PANED(splitPaned);
+	GtkWidget* want1 = sideFirst ? paneBoxes[1] : paneBoxes[0];
+	GtkWidget* want2 = sideFirst ? paneBoxes[0] : paneBoxes[1];
+	if (gtk_paned_get_child1(pp) != want1) {
+		if (GtkWidget* c = gtk_paned_get_child1(pp)) gtk_container_remove(GTK_CONTAINER(pp), c);
+		if (GtkWidget* c = gtk_paned_get_child2(pp)) gtk_container_remove(GTK_CONTAINER(pp), c);
+		gtk_paned_pack1(pp, want1, TRUE, FALSE);
+		gtk_paned_pack2(pp, want2, TRUE, FALSE);
+	}
+	const bool open = splitOpen();
+	if (gtk_widget_get_visible(paneBoxes[1]) != open) {
+		gtk_widget_set_visible(paneBoxes[1], open);
+		if (open) {
+			// Halves, as the Mac opens them.
+			const int w = gtk_widget_get_allocated_width(splitPaned);
+			if (w > 50) gtk_paned_set_position(pp, w / 2);
+		}
+	}
+	redrawStrips();
+}
+
+bool CircuitWindow::stripIsLeftmost(int pane) const { return !splitOpen() || (pane == 1) == sideFirst; }
+bool CircuitWindow::stripIsRightmost(int pane) const { return !splitOpen() || (pane == 1) != sideFirst; }
+
 Canvas* CircuitWindow::currentCanvas() const {
-	if (notebook == nullptr) return nullptr;
-	const int i = gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook));
-	GtkWidget* w = i >= 0 ? gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook), i) : nullptr;
-	for (Canvas* c : canvases) if (c->widget() == w) return c;
-	return nullptr;
+	Canvas* c = paneCanvas(splitOpen() ? focusPane : 0);
+	return c ? c : paneCanvas(0);
 }
 
 int CircuitWindow::currentPage() const {
@@ -427,11 +490,42 @@ int CircuitWindow::currentPage() const {
 	return p >= 0 ? p : 0;
 }
 
-void CircuitWindow::switchPageCb(GtkNotebook*, GtkWidget* page, guint, gpointer self) {
+void CircuitWindow::activatePane(int pane) {
+	if (!splitOpen()) pane = 0;
+	if (pane == focusPane) return;
+	if (Canvas* old = currentCanvas()) old->cancelDrag();
+	focusPane = pane;
+	if (Canvas* c = currentCanvas()) {
+		recentKeys.erase(std::remove(recentKeys.begin(), recentKeys.end(), c->pageKey()), recentKeys.end());
+		recentKeys.insert(recentKeys.begin(), c->pageKey());
+	}
+	statusDirty = true;
+	selectionSignature.clear();
+	updateActions();
+	updateTitle();
+	redrawStrips();
+	redrawMiniMap();
+	if (toolbar) toolbar->redraw();
+}
+
+void CircuitWindow::showPage(int page) {
+	if (page < 0 || page >= (int)canvases.size()) return;
+	Canvas* c = canvases[page];
+	const int pane = paneOf(c);
+	GtkNotebook* nb = GTK_NOTEBOOK(notebooks[pane]);
+	const int i = gtk_notebook_page_num(nb, c->widget());
+	activatePane(pane);
+	if (i >= 0 && gtk_notebook_get_current_page(nb) != i) gtk_notebook_set_current_page(nb, i);
+	gtk_widget_grab_focus(c->widget());
+	redrawStrips();
+}
+
+void CircuitWindow::switchPageCb(GtkNotebook* nb, GtkWidget* page, guint, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
 	if (w->syncing) return;
+	const int pane = GTK_WIDGET(nb) == w->notebooks[1] ? 1 : 0;
 	// Leaving a page lets go of its selection, as the wx app does.
-	if (Canvas* old = w->currentCanvas()) {
+	if (Canvas* old = w->paneCanvas(pane)) {
 		if (old->widget() != page && old->page() >= 0) {
 			old->cancelDrag();
 			cl_edit_select_none(w->doc, old->page());
@@ -440,6 +534,7 @@ void CircuitWindow::switchPageCb(GtkNotebook*, GtkWidget* page, guint, gpointer 
 	}
 	w->statusDirty = true;
 	w->selectionSignature.clear();
+	w->focusPane = w->splitOpen() ? pane : 0;
 	for (Canvas* c : w->canvases) {
 		if (c->widget() != page) continue;
 		w->recentKeys.erase(std::remove(w->recentKeys.begin(), w->recentKeys.end(), c->pageKey()), w->recentKeys.end());
@@ -449,37 +544,169 @@ void CircuitWindow::switchPageCb(GtkNotebook*, GtkWidget* page, guint, gpointer 
 	}
 	g_idle_add([](gpointer self) -> gboolean {
 		for (CircuitWindow* o : circuitWindows())
-			if (o == self) { o->updateActions(); o->updateTitle(); o->tabs->redraw(); o->toolbar->redraw(); }
+			if (o == self) { o->updateActions(); o->updateTitle(); o->redrawStrips(); o->toolbar->redraw(); o->redrawMiniMap(); }
 		return G_SOURCE_REMOVE;
 	}, w);
 }
 
-void CircuitWindow::reorderCb(GtkNotebook*, GtkWidget* child, guint to, gpointer self) {
-	CircuitWindow* w = static_cast<CircuitWindow*>(self);
-	if (w->syncing) return;
-	Canvas* moved = nullptr;
-	for (Canvas* c : w->canvases) if (c->widget() == child) moved = c;
-	if (moved == nullptr) return;
-	const int from = moved->page();
-	if (from < 0 || from == (int)to) return;
+// A tab dragged along its strip: the page moves to where `to` is.
+void CircuitWindow::movePage(int from, int to) {
+	if (from < 0 || to < 0 || from >= (int)canvases.size() || to >= (int)canvases.size() || from == to) return;
 	guarded("moving a tab", [&] {
-	// A tab without a name of its own is called by its place ("Page 2"): pin
-	// those names first, so moving a tab doesn't rename the others.
-	for (int i = 0; i < cl_document_page_count(w->doc); i++) {
-		const char* n = cl_document_page_name(w->doc, i);
-		if (n == nullptr || *n == 0) cl_document_rename_page(w->doc, i, w->pageName(i).c_str());
-	}
-	cl_document_move_page(w->doc, from, (int)to);
-	w->changes++;
-	w->syncTabs();
-	w->updateTitle();
+		// A tab without a name of its own is called by its place ("Page 2"):
+		// pin those names first, so moving a tab doesn't rename the others.
+		for (int i = 0; i < cl_document_page_count(doc); i++) {
+			const char* n = cl_document_page_name(doc, i);
+			if (n == nullptr || *n == 0) cl_document_rename_page(doc, i, pageName(i).c_str());
+		}
+		cl_document_move_page(doc, from, to);
+		changes++;
+		syncTabs();
+		updateTitle();
 	});
+}
+
+// Split View from the menu or keys: the tab used most recently beside the
+// one in front, or a new tab if it's the only one. Again: closes it.
+void CircuitWindow::toggleSplit() {
+	if (splitOpen()) { closeSplit(); return; }
+	const int front = currentPage();
+	int partner = -1;
+	for (uint64_t key : recentKeys) {
+		const int i = cl_document_page_index(doc, key);
+		if (i >= 0 && i != front) { partner = i; break; }
+	}
+	if (partner < 0) for (int i = 0; i < (int)canvases.size(); i++) if (i != front) { partner = i; break; }
+	if (partner < 0) {
+		newPage();
+		partner = cl_document_page_count(doc) - 1;
+		showPage(front);
+	}
+	splitWith(partner, true);
+}
+
+// Split the view with `page` on one side (the wx app's SplitWith). The first
+// side can't be left empty: taking its last tab gives it a new one.
+void CircuitWindow::splitWith(int page, bool onRight) {
+	if (splitOpen() || page < 0 || page >= (int)canvases.size()) return;
+	if (cl_document_page_count(doc) < 2) {
+		newPage();
+		page = 0;
+	}
+	const uint64_t key = canvases[page]->pageKey();
+	sideFirst = !onRight;
+	sideKeys = { key };
+	syncTabs();
+	showPage(cl_document_page_index(doc, key));
+	note("Split view. Drag tabs between the two sides; the split closes when a side runs out.");
+}
+
+void CircuitWindow::movePageToPane(int page, int pane) {
+	if (!splitOpen() || page < 0 || page >= (int)canvases.size()) return;
+	const uint64_t key = canvases[page]->pageKey();
+	if (pane == 1) sideKeys.insert(key);
+	else sideKeys.erase(key);
+	syncTabs();
+	const int now = cl_document_page_index(doc, key);
+	if (now >= 0) showPage(now);
+}
+
+// One strip again, with every tab; the side you were in stays in front.
+void CircuitWindow::closeSplit() {
+	if (!splitOpen()) return;
+	const int keepFront = focusPane == 1 ? shownPage(1) : shownPage(0);
+	sideKeys.clear();
+	focusPane = 0;
+	syncTabs();
+	if (keepFront >= 0) showPage(keepFront);
+	showDropHint(DropHint());
+}
+
+void CircuitWindow::switchPane() {
+	if (!splitOpen()) return;
+	const int other = 1 - focusPane;
+	const int p = shownPage(other);
+	if (p >= 0) showPage(p);
+}
+
+// Where a tab held at (x, y) in `from` would go: half the area to split it
+// (no split yet), or the other side to move it there.
+CircuitWindow::DropHint CircuitWindow::dropHintAt(int fromPane, GtkWidget* from, double x, double y) const {
+	DropHint h;
+	int ax = 0, ay = 0;
+	if (!gtk_widget_translate_coordinates(from, area, (int)x, (int)y, &ax, &ay)) return h;
+	const int w = gtk_widget_get_allocated_width(area), hgt = gtk_widget_get_allocated_height(area);
+	if (ax < 0 || ay < 0 || ax > w || ay > hgt) return h;
+	if (splitOpen()) {
+		const int other = 1 - fromPane;
+		GtkAllocation a;
+		gtk_widget_get_allocation(paneBoxes[other], &a);
+		int ox = 0, oy = 0;
+		gtk_widget_translate_coordinates(paneBoxes[other], area, 0, 0, &ox, &oy);
+		if (ax >= ox && ax < ox + a.width && ay >= oy && ay < oy + a.height) { h.kind = 2; h.side = other; }
+		return h;
+	}
+	if (fromPane != 0 || canvases.empty()) return h;
+	if (ay < TabStrip::stripHeight() + 12) return h;
+	h.kind = 1;
+	h.side = ax < w / 2 ? -1 : 1;
+	return h;
+}
+
+void CircuitWindow::showDropHint(const DropHint& h) {
+	if (h == hint) return;
+	hint = h;
+	if (h.kind != 0) {
+		hintShown = h;
+		gtk_widget_show(hintLayer);
+		hintFade.go(1, 0.15);
+	} else {
+		hintFade.go(0, 0.15);
+	}
+	// Redrawn every frame while it fades.
+	gtk_widget_add_tick_callback(hintLayer, [](GtkWidget* layer, GdkFrameClock*, gpointer self) -> gboolean {
+		CircuitWindow* w = static_cast<CircuitWindow*>(self);
+		gtk_widget_queue_draw(layer);
+		if (w->hintFade.active()) return G_SOURCE_CONTINUE;
+		if (w->hint.kind == 0) gtk_widget_hide(layer);
+		return G_SOURCE_REMOVE;
+	}, this, nullptr);
+}
+
+gboolean CircuitWindow::drawHintCb(GtkWidget* layer, cairo_t* cr, gpointer self) {
+	CircuitWindow* w = static_cast<CircuitWindow*>(self);
+	const float a = (float)w->hintFade.value();
+	if (a <= 0.01f || w->hintShown.kind == 0) return TRUE;
+	const float W = gtk_widget_get_allocated_width(layer), H = gtk_widget_get_allocated_height(layer);
+	RectF r;
+	if (w->hintShown.kind == 1) {
+		const float top = TabStrip::stripHeight();
+		r = w->hintShown.side < 0 ? rectF(0, top, W / 2, H) : rectF(W / 2, top, W, H);
+	} else {
+		GtkAllocation al;
+		gtk_widget_get_allocation(w->paneBoxes[w->hintShown.side], &al);
+		int ox = 0, oy = 0;
+		gtk_widget_translate_coordinates(w->paneBoxes[w->hintShown.side], w->area, 0, 0, &ox, &oy);
+		r = rectF((float)ox, (float)oy, (float)(ox + al.width), (float)(oy + al.height));
+	}
+	r = rectF(r.left + 6, r.top + 6, r.right - 6, r.bottom - 6);
+	const Color accent = chrome().accent();
+	fillRound(cr, r, 14, withAlpha(accent, 0.18f * a));
+	strokeRound(cr, r, 14, withAlpha(accent, a), 2);
+	drawTextMid(cr, w->hintShown.kind == 2 ? "Drop to move here" : "Drop to split here", r, 13, withAlpha(accent, a), TextAlign::Center, true);
+	return TRUE;
+}
+
+void CircuitWindow::tabDropped(int page, const DropHint& h) {
+	showDropHint(DropHint());
+	if (h.kind == 2) movePageToPane(page, h.side);
+	else if (h.kind == 1) splitWith(page, h.side > 0);
 }
 
 // ---- The toolbar's and the tab strip's side ----------------------------------------
 
 GtkWidget* CircuitWindow::runButtonForTour() const { return toolbar->widget(); }
-GtkWidget* CircuitWindow::tabStripForTour() const { return tabs->widget(); }
+GtkWidget* CircuitWindow::tabStripForTour() const { return strips[0]->widget(); }
 
 void CircuitWindow::runAction(const char* name) {
 	if (name == nullptr) return;
@@ -530,46 +757,50 @@ void CircuitWindow::titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e)
 	g_object_unref(m);
 }
 
-std::string CircuitWindow::tabName(int tab) const {
-	if (tab < 0 || tab >= (int)canvases.size()) return std::string();
-	const int p = canvases[tab]->page();
-	return p >= 0 ? pageName(p) : std::string();
+struct TabMenuData { CircuitWindow* w; int page; };
+
+static void tabMenuItem(GtkWidget* menu, const char* label, void (*act)(CircuitWindow*, int), CircuitWindow* w, int page, bool enabled = true) {
+	GtkWidget* item = gtk_menu_item_new_with_mnemonic(label);
+	TabMenuData* d = new TabMenuData{ w, page };
+	g_object_set_data_full(G_OBJECT(item), "cl-tab", d, [](gpointer p) { delete static_cast<TabMenuData*>(p); });
+	g_object_set_data(G_OBJECT(item), "cl-act", (gpointer)act);
+	g_signal_connect(item, "activate", CL_CALLBACK(+[](GtkMenuItem* it, gpointer) {
+		TabMenuData* d = static_cast<TabMenuData*>(g_object_get_data(G_OBJECT(it), "cl-tab"));
+		auto act = reinterpret_cast<void (*)(CircuitWindow*, int)>(g_object_get_data(G_OBJECT(it), "cl-act"));
+		const TabMenuData copy = *d;   // the menu goes once its item has run
+		guarded("a tab's menu", [&] { act(copy.w, copy.page); });
+	}), nullptr);
+	gtk_widget_set_sensitive(item, enabled);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 }
 
-int CircuitWindow::currentTab() const { return notebook ? gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook)) : -1; }
-
-void CircuitWindow::showTab(int tab) {
-	if (tab >= 0 && tab < (int)canvases.size()) gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), tab);
-	tabs->redraw();
-}
-
-void CircuitWindow::moveTab(int from, int to) {
-	if (from < 0 || from >= (int)canvases.size() || to < 0 || to >= (int)canvases.size() || from == to) return;
-	// The notebook moves it, and its page-reordered moves the page.
-	gtk_notebook_reorder_child(GTK_NOTEBOOK(notebook), canvases[from]->widget(), to);
-	tabs->redraw();
-}
-
-void CircuitWindow::closeTab(int tab) {
-	if (tab < 0 || tab >= (int)canvases.size()) return;
-	const int p = canvases[tab]->page();
-	if (p >= 0) closePage(p);
-}
-
-void CircuitWindow::tabContextMenu(int tab, GdkEvent* e) {
-	if (tab >= 0) showTab(tab);
-	GMenu* m = g_menu_new();
-	g_menu_append(m, "_Rename Tab…", "win.rename-tab");
-	g_menu_append(m, "_Close Tab", "win.close-tab");
-	g_menu_append(m, "_New Tab", "win.new-tab");
-	g_menu_append(m, "Re_open Closed Tab", "win.reopen-tab");
-	GtkWidget* menu = gtk_menu_new_from_model(G_MENU_MODEL(m));
+// A tab's own menu (the Mac's): Rename, the split's moves, Close.
+void CircuitWindow::tabContextMenu(int page, GdkEvent* e) {
+	GtkWidget* menu = gtk_menu_new();
+	if (page >= 0) {
+		showPage(page);
+		const int pane = paneOf(canvases[page]);
+		tabMenuItem(menu, "_Rename…", [](CircuitWindow* w, int p) { w->strips[w->paneOf(w->canvases[p])]->beginRename(p); }, this, page);
+		if (splitOpen()) {
+			tabMenuItem(menu, pane == 0 ? "Move to the _Other Side" : "Move to the _Other Side",
+			            [](CircuitWindow* w, int p) { w->movePageToPane(p, 1 - w->paneOf(w->canvases[p])); }, this, page);
+			tabMenuItem(menu, "Close _Split View", [](CircuitWindow* w, int) { w->closeSplit(); }, this, page);
+		} else {
+			tabMenuItem(menu, "Open in _Split View", [](CircuitWindow* w, int p) { w->splitWith(p, true); }, this, page);
+		}
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+		tabMenuItem(menu, "_Close Tab", [](CircuitWindow* w, int p) { w->closePage(p); }, this, page, cl_document_page_count(doc) > 1);
+	} else {
+		tabMenuItem(menu, "_New Tab", [](CircuitWindow* w, int) { w->newPage(); }, this, page);
+		tabMenuItem(menu, "Re_open Closed Tab", [](CircuitWindow* w, int) { w->reopenPage(); }, this, page, cl_edit_undo_is_close_page(doc));
+		if (splitOpen()) tabMenuItem(menu, "Close _Split View", [](CircuitWindow* w, int) { w->closeSplit(); }, this, page);
+	}
+	gtk_widget_show_all(menu);
 	gtk_menu_attach_to_widget(GTK_MENU(menu), win, nullptr);
 	g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* mm, gpointer) {
 		g_idle_add([](gpointer mm) -> gboolean { gtk_widget_destroy(GTK_WIDGET(mm)); return G_SOURCE_REMOVE; }, mm);
 	}), nullptr);
 	gtk_menu_popup_at_pointer(GTK_MENU(menu), e);
-	g_object_unref(m);
 }
 
 // ---- The clock -------------------------------------------------------------------
@@ -629,7 +860,8 @@ void CircuitWindow::tick() {
 		const double age = secondsSince(messageAt);
 		if (age < 0.25 || (age > kNoteTime - 0.55 && age < kNoteTime + 0.1)) redraw();
 	}
-	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; gtk_label_set_text(GTK_LABEL(statusMessage), ""); redraw(); }
+	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; redraw(); }
+	if (statusBar) statusBar->tick();
 }
 
 double CircuitWindow::selectionFade() const {
@@ -657,7 +889,9 @@ void CircuitWindow::fadeOutDragBox(double l, double b, double r, double t) {
 // ---- State shown around the canvas -------------------------------------------------
 
 void CircuitWindow::redraw() {
-	if (Canvas* c = currentCanvas()) c->redraw();
+	// Both sides of a split show the same circuit running.
+	for (int pane = 0; pane < 2; pane++)
+		if (Canvas* c = paneCanvas(pane)) c->redraw();
 }
 
 void CircuitWindow::redrawMiniMap() {
@@ -701,7 +935,7 @@ void CircuitWindow::edited() {
 }
 
 void CircuitWindow::note(const std::string& message) {
-	gtk_label_set_text(GTK_LABEL(statusMessage), message.c_str());
+	if (statusBar) statusBar->note(message);
 	noteText = message;
 	messageAt = g_get_monotonic_time();
 	redraw();
@@ -898,7 +1132,8 @@ void CircuitWindow::updateStatus() {
 	if (c) s += format(" · %d%%", c->zoomPercent());
 	s += format(" · %.1f, %.1f", pointerX, pointerY);
 	s += isRunning ? " · Running" : " · Paused";
-	gtk_label_set_text(GTK_LABEL(statusInfo), s.c_str());
+	(void)s;
+	if (statusBar) statusBar->update();
 }
 
 bool CircuitWindow::hasSelection() const {
@@ -923,6 +1158,10 @@ void CircuitWindow::updateActions() {
 	setChecked(win, "lock", lockedOn);
 	setChecked(win, "dark", prefs().dark);
 	setChecked(win, "palette", prefs().showPalette);
+	setChecked(win, "focus-mode", focusOn);
+	setChecked(win, "split-view", splitOpen());
+	setEnabled(win, "switch-pane", splitOpen());
+	setEnabled(win, "close-split", splitOpen());
 	setChecked(win, "status-bar", prefs().showStatus);
 	// The menus' Undo and Redo say what they undo.
 	(void)edit;
@@ -932,7 +1171,7 @@ void CircuitWindow::updateActions() {
 void CircuitWindow::updateRunUI() {
 	setChecked(win, "running", isRunning);
 	if (toolbar) toolbar->redraw();
-	if (tabs) tabs->redraw();
+	redrawStrips();
 	statusDirty = true;
 }
 
@@ -977,8 +1216,10 @@ void CircuitWindow::themeChanged() {
 }
 
 void CircuitWindow::prefsChanged() {
-	gtk_widget_set_visible(paletteBox, prefs().showPalette);
-	gtk_widget_set_visible(statusBar, prefs().showStatus);
+	if (!focusOn) gtk_revealer_set_reveal_child(GTK_REVEALER(sideRevealer), prefs().showPalette);
+	gtk_widget_set_size_request(paletteBox, paletteWidth(), -1);
+	if (statusBar) statusBar->settingsChanged();
+	if (toolbar) toolbar->layoutNow();
 	themeChanged();
 }
 
@@ -995,11 +1236,10 @@ gboolean CircuitWindow::deleteCb(GtkWidget*, GdkEvent*, gpointer self) {
 
 void CircuitWindow::destroyCb(GtkWidget*, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
-	prefs().paletteWidth = gtk_paned_get_position(GTK_PANED(w->paned));
 	prefs().save();
 	// GTK takes the widgets apart after this handler; the tabs switching
 	// page on the way out mustn't reach a window that's gone.
-	g_signal_handlers_disconnect_by_data(w->notebook, w);
+	for (GtkWidget* nb : w->notebooks) g_signal_handlers_disconnect_by_data(nb, w);
 	g_signal_handlers_disconnect_by_data(w->win, w);
 	delete w;
 }
@@ -1057,7 +1297,10 @@ bool CircuitWindow::confirmClose() {
 void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPath) {
 	for (Canvas* c : canvases) c->cancelDrag();
 	syncing = true;
-	while (gtk_notebook_get_n_pages(GTK_NOTEBOOK(notebook)) > 0) gtk_notebook_remove_page(GTK_NOTEBOOK(notebook), 0);
+	for (GtkWidget* nb : notebooks)
+		while (gtk_notebook_get_n_pages(GTK_NOTEBOOK(nb)) > 0) gtk_notebook_remove_page(GTK_NOTEBOOK(nb), 0);
+	sideKeys.clear();
+	focusPane = 0;
 	for (Canvas* c : canvases) delete c;
 	canvases.clear();
 	syncing = false;
@@ -1227,7 +1470,7 @@ void CircuitWindow::refreshAfterHistory() {
 		const int show = cl_document_page_to_show(doc);
 		syncTabs();
 		if (show >= 0 && show < (int)canvases.size()) {
-			gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), show);
+			showPage(show);
 			appearStart = g_get_monotonic_time();
 		}
 	}
@@ -1426,7 +1669,7 @@ bool CircuitWindow::buildPlan(const formula::Plan& plan, bool onNewPage, const s
 		return false;
 	if (onNewPage) {
 		syncTabs();
-		gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), target);
+		showPage(target);
 		appearStart = g_get_monotonic_time();
 	}
 	edited();
@@ -1622,7 +1865,9 @@ void CircuitWindow::newPage() {
 	if (i < 0) return;
 	cl_document_rename_page(doc, i, format("Page %d", taken).c_str());
 	syncTabs();
-	gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), i);
+	// A new tab opens in the side you're working in.
+	if (focusPane == 1 && splitOpen()) { sideKeys.insert(cl_document_page_id(doc, i)); syncTabs(); }
+	showPage(i);
 	appearStart = g_get_monotonic_time();
 	edited();
 }
@@ -1639,7 +1884,7 @@ void CircuitWindow::closePage(int page) {
 	if (cl_document_close_page(doc, page)) {
 		const int show = std::min(cl_document_page_to_show(doc), cl_document_page_count(doc) - 1);
 		syncTabs();
-		if (show >= 0) gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), show);
+		if (show >= 0) showPage(show);
 		edited();
 	}
 }
@@ -1651,22 +1896,63 @@ void CircuitWindow::reopenPage() {
 	note("Reopened the closed tab.");
 }
 
+// Renamed in place, on its tab (the Mac's).
 void CircuitWindow::renamePage(int page) {
-	if (page < 0 || page >= cl_document_page_count(doc)) return;
-	std::string name = pageName(page);
-	if (!askText(GTK_WINDOW(win), "Rename Tab", "The tab's name:", name)) return;
-	if (name.empty()) return;
-	cl_document_rename_page(doc, page, name.c_str());
-	changes++;
-	updateTabLabels();
-	updateTitle();
+	if (page < 0 || page >= (int)canvases.size()) return;
+	strips[paneOf(canvases[page])]->beginRename(page);
 }
 
 void CircuitWindow::cyclePage(int delta) {
-	const int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(notebook));
+	// Through the tabs of the side you're working in.
+	const std::vector<int> order = panePages(splitOpen() ? focusPane : 0);
+	const int n = (int)order.size();
 	if (n < 2) return;
-	const int at = gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook));
-	gtk_notebook_set_current_page(GTK_NOTEBOOK(notebook), ((at + delta) % n + n) % n);
+	const int at = (int)(std::find(order.begin(), order.end(), currentPage()) - order.begin());
+	showPage(order[((at + delta) % n + n) % n]);
+}
+
+// ---- Focus mode ----------------------------------------------------------------
+// The Mac's: the toolbar and the side panel slide away, and the tab strips
+// become the window's top row (dragging it, with its buttons).
+
+void CircuitWindow::toggleFocusMode() {
+	focusOn = !focusOn;
+	gtk_revealer_set_reveal_child(GTK_REVEALER(titleRevealer), !focusOn);
+	gtk_revealer_set_reveal_child(GTK_REVEALER(sideRevealer), !focusOn && prefs().showPalette);
+	for (TabStrip* t : strips) if (t) t->setTitleRow(focusOn);
+	updateActions();
+	if (focusOn) note("Focus mode. Ctrl+. brings the toolbar and the side panel back.");
+	if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget());
+}
+
+// ---- The side panel's drag --------------------------------------------------------
+
+Canvas* CircuitWindow::canvasUnder(GtkWidget* from, double x, double y, double& cx, double& cy) const {
+	Canvas* nearest = nullptr;
+	int nearestLeft = 1 << 30, nx = 0, ny = 0;
+	for (int pane = 0; pane < 2; pane++) {
+		if (pane == 1 && !splitOpen()) continue;
+		Canvas* c = paneCanvas(pane);
+		if (c == nullptr || !gtk_widget_get_realized(c->widget())) continue;
+		int tx = 0, ty = 0;
+		if (!gtk_widget_translate_coordinates(from, c->widget(), (int)x, (int)y, &tx, &ty)) continue;
+		if (tx >= 0 && ty >= 0 && tx < c->width() && ty < c->height()) { cx = tx; cy = ty; return c; }
+		// Over the panel: the side next to it.
+		int ox = 0, oy = 0;
+		gtk_widget_translate_coordinates(c->widget(), win, 0, 0, &ox, &oy);
+		if (ox < nearestLeft) { nearestLeft = ox; nearest = c; nx = tx; ny = ty; }
+	}
+	cx = nx;
+	cy = ny;
+	return nearest;
+}
+
+bool CircuitWindow::addGateFloatingOn(Canvas* c, const std::string& name, double wx, double wy) {
+	if (c == nullptr) return false;
+	const int p = c->page();
+	if (p < 0) return false;
+	showPage(p);
+	return addGateFloating(name, wx, wy);
 }
 
 // ---- App-wide ------------------------------------------------------------------
@@ -1679,6 +1965,7 @@ void CircuitWindow::toggleDark() {
 }
 
 void CircuitWindow::togglePalette() {
+	if (focusOn) { toggleFocusMode(); if (prefs().showPalette) return; }
 	prefs().showPalette = !prefs().showPalette;
 	prefs().save();
 	for (CircuitWindow* w : circuitWindows()) w->prefsChanged();

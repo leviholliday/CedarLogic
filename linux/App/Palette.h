@@ -1,16 +1,24 @@
-// The gate palette down the window's side: the library's categories, each
-// gate drawn as a tile (the engine draws it), and a search box. Click a tile
-// and the gate follows the pointer onto the canvas until a click drops it;
-// or drag it there.
+// The side panel's gates, as the Mac app's (CLSidePanel): a category menu
+// over tiles on the canvas's own colour, sized by Settings > Appearance >
+// Gate size. Drag a tile out and the gate is on the canvas at once,
+// following the pointer until you let go (it slides out from under the panel
+// as it's pulled across the edge); click one and it follows the pointer
+// until you click. A search finds any gate by name. My Parts are the last
+// category; right-click one to rename or delete it.
 
 #ifndef CL_LINUX_PALETTE_H
 #define CL_LINUX_PALETTE_H
 
+#include "Anim.h"
 #include "App.h"
+#include <map>
 #include <string>
 #include <vector>
 
 class CircuitWindow;
+class Canvas;
+class CategoryButton;
+class TileGrid;
 
 class GatePalette {
 public:
@@ -22,30 +30,28 @@ public:
 	void themeChanged();
 	void partsChanged();   // My Parts changed
 
-private:
+	// For the category button and the tiles.
 	struct Gate { std::string name, caption; };
 	struct Category { std::string title; std::vector<Gate> gates; };
+	std::string categoryTitle() const;
+	void chooseCategory(GtkWidget* from, GdkEvent* e);
+	const std::vector<Gate>& shownGates() const { return shown; }
+	bool showingParts() const;
+	CircuitWindow* window() const { return win; }
 
+private:
 	CircuitWindow* win;
 	GtkWidget* root;
 	GtkWidget* search;
-	GtkWidget* combo;
-	GtkWidget* flow;
+	CategoryButton* picker = nullptr;
+	TileGrid* tiles = nullptr;
 	std::vector<Category> categories;
-	std::vector<std::string*> tileNames;   // owned; freed on rebuild
+	int category = 0;
+	std::vector<Gate> shown;
 
-	void fill();
 	void loadCategories();
-	GtkWidget* tile(const Gate& g);
-	void clearTiles();
-
-	static void comboChangedCb(GtkComboBox*, gpointer);
+	void fill();
 	static void searchChangedCb(GtkSearchEntry*, gpointer);
-	static void activatedCb(GtkFlowBox*, GtkFlowBoxChild*, gpointer);
-	static gboolean tilePressCb(GtkWidget*, GdkEventButton*, gpointer);
-	static gboolean drawTileCb(GtkWidget*, cairo_t*, gpointer);
-	static void dragDataGetCb(GtkWidget*, GdkDragContext*, GtkSelectionData*, guint, guint, gpointer);
-	static void dragBeginCb(GtkWidget*, GdkDragContext*, gpointer);
 };
 
 #endif  // CL_LINUX_PALETTE_H

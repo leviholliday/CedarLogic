@@ -34,7 +34,10 @@ struct Chrome {
 	Color bar() const;          // the toolbar (classicBar)
 	Color barInk() const;       // its icons and text
 	Color tabBar() const;
+	Color tabBarTop() const;    // the strip's glass, at its top
 	Color tabCard() const;
+	Color tabCardLit() const;   // the active card, at its top
+	Color minimalBar() const;   // the Minimal toolbar
 	Color tabInk() const;
 	Color panel() const;        // the side panel
 	Color hairline() const;

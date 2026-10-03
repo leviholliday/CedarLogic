@@ -3,6 +3,7 @@
 #include "Drawn.h"
 
 Drawn::~Drawn() {
+	if (area && tickId) gtk_widget_remove_tick_callback(area, tickId);
 	if (area) {
 		g_signal_handlers_disconnect_by_data(area, this);
 		g_object_unref(area);
@@ -24,6 +25,28 @@ void Drawn::create() {
 	g_signal_connect(area, "scroll-event", G_CALLBACK(scrollCb), this);
 	g_signal_connect(area, "query-tooltip", G_CALLBACK(tooltipCb), this);
 	g_signal_connect(area, "size-allocate", G_CALLBACK(sizeCb), this);
+}
+
+void Drawn::animate() {
+	if (area == nullptr) return;
+	redraw();
+	if (tickId == 0) tickId = gtk_widget_add_tick_callback(area, tickCb, this, nullptr);
+}
+
+gboolean Drawn::tickCb(GtkWidget*, GdkFrameClock*, gpointer self) {
+	Drawn* d = static_cast<Drawn*>(self);
+	d->redraw();
+	if (guarded("an animation", [&] { return d->animating(); })) return G_SOURCE_CONTINUE;
+	d->tickId = 0;
+	return G_SOURCE_REMOVE;
+}
+
+void Drawn::setCursorName(const char* name) {
+	GdkWindow* gw = area ? gtk_widget_get_window(area) : nullptr;
+	if (gw == nullptr) return;
+	GdkCursor* c = name ? gdk_cursor_new_from_name(gdk_window_get_display(gw), name) : nullptr;
+	gdk_window_set_cursor(gw, c);
+	if (c) g_object_unref(c);
 }
 
 float Drawn::width() const { return area ? (float)gtk_widget_get_allocated_width(area) : 0; }

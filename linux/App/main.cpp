@@ -201,7 +201,8 @@ GMenuModel* buildMenubar() {
 	g_menu_append_section(view, nullptr, G_MENU_MODEL(v1));
 	GMenu* v2 = g_menu_new();
 	g_menu_append(v2, "_Dark Mode", "win.dark");
-	g_menu_append(v2, "Gate _Palette", "win.palette");
+	g_menu_append(v2, "_Focus Mode", "win.focus-mode");
+	g_menu_append(v2, "Side _Panel", "win.palette");
 	g_menu_append(v2, "_Status Bar", "win.status-bar");
 	g_menu_append_section(view, nullptr, G_MENU_MODEL(v2));
 	g_menu_append_submenu(bar, "_View", G_MENU_MODEL(view));
@@ -226,6 +227,11 @@ GMenuModel* buildMenubar() {
 	g_menu_append(tabs, "Re_name Tab…", "win.rename-tab");
 	g_menu_append(tabs, "Ne_xt Tab", "win.next-tab");
 	g_menu_append(tabs, "_Previous Tab", "win.previous-tab");
+	GMenu* splitSection = g_menu_new();
+	g_menu_append(splitSection, "_Split View", "win.split-view");
+	g_menu_append(splitSection, "S_witch Side", "win.switch-pane");
+	g_menu_append(splitSection, "Close Split Vie_w", "win.close-split");
+	g_menu_append_section(tabs, nullptr, G_MENU_MODEL(splitSection));
 	g_menu_append_submenu(bar, "_Tabs", G_MENU_MODEL(tabs));
 
 	GMenu* help = g_menu_new();
@@ -264,7 +270,10 @@ void setAccels(GtkApplication* app) {
 		{ "win.zoom-fit", { "<Primary>0", "<Primary>KP_0" } },
 		{ "win.zoom-actual", { "<Primary>1", "<Primary>KP_1" } },
 		{ "win.dark", { "<Primary><Shift>d" } },
-		{ "win.palette", { "<Primary>period" } },
+		{ "win.focus-mode", { "<Primary>period" } },
+		{ "win.split-view", { "<Primary><Alt>s" } },
+		{ "win.switch-pane", { "<Primary><Alt>Right", "<Primary><Alt>Left" } },
+		{ "win.close-split", { "<Primary><Alt>w" } },
 		{ "win.preferences", { "<Primary>comma" } },
 		{ "win.step", { "<Primary><Shift>r" } },
 		{ "win.sim-view", { "<Primary>r" } },

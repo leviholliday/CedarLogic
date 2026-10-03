@@ -43,8 +43,20 @@ struct Prefs {
 	bool rightClickRotate = false;
 	bool duplicateUsesClipboard = false;
 	bool showPalette = true;
-	bool showStatus = false;      // the status bar (notes show on the canvas, as on the Mac)
+	bool showStatus = true;       // the status bar's readout (zoom, pointer, counts), as on the Mac
 	bool showGateNames = true;
+	bool showCategoryKeys = true; // Shift+1...0 beside the side panel's categories
+	int gateSize = 48;            // the side panel's gates, in points (36...96)
+	int toolbarStyle = 3;         // 0 Classic, 2 Minimal, 3 Seamless (the Mac's styles and default)
+	int toolbarHidden = 0;        // tool groups hidden, a bit each (ToolGroup)
+	bool showTitle = true;        // the circuit's name at the toolbar's left
+	bool showThemeToggle = false; // a dark mode switch in the toolbar
+	bool classicTabs = false;     // plain segments instead of the Mac's tab cards
+	bool wireValueTag = false;    // resting on a wire shows what it carries
+	bool confirmQuit = true;      // Ctrl+Q asks first
+	bool openReplaces = false;    // opening a circuit replaces the one in the window
+	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
+	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	bool hasSeenWelcome = false;
 	int windowWidth = 1180, windowHeight = 780;
