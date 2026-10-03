@@ -26,6 +26,11 @@ public:
 	bool composited = false;   // set by run(): transparency is real
 	std::function<void(Sheet&, cairo_t*, float w, float h)> paint;
 	std::function<bool(Sheet&, guint keyval, guint state)> onKey;   // true when used
+	// A text field's input method (Chinese, Japanese, Korean...) sees the
+	// keys a window takes for itself first: Enter there finishes the word
+	// being composed, and Escape drops it, rather than closing the window.
+	// True when it took the key.
+	static bool inputMethodTakes(GtkWidget* window, GdkEventKey* e);
 	std::function<void(Sheet&, float dy)> onScroll;                 // dy in points, down positive
 	std::function<void(Sheet&)> onTick;
 	// After the window is made, before it shows: widgets can go in `overlay`,

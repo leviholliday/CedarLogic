@@ -2,6 +2,7 @@
 
 #include "Picker.h"
 #include "Anim.h"
+#include "Sheet.h"
 
 #include <algorithm>
 #include <cmath>
@@ -275,6 +276,7 @@ gboolean Picker::keyCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 	const bool mine = k == GDK_KEY_Up || k == GDK_KEY_Down || k == GDK_KEY_Page_Up || k == GDK_KEY_Page_Down || k == GDK_KEY_Return ||
 	                  k == GDK_KEY_KP_Enter || k == GDK_KEY_Escape || ctrl || k == GDK_KEY_Delete;
 	if (!mine) return FALSE;
+	if (!ctrl && Sheet::inputMethodTakes(p->window, e)) return TRUE;
 	bool used = false;
 	guarded("a key", [&] { used = p->key(k, ctrl); });
 	return used;
