@@ -967,9 +967,9 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_COMMAND: {
 		const int id = LOWORD(wp);
 		if (id >= CMD_RECENT && id <= CMD_RECENT_LAST) {
+			// The circuit the menu showed (a save since moves the list).
 			const size_t i = (size_t)(id - CMD_RECENT);
-			const std::vector<library::Item> all = library::items();
-			if (i < all.size()) openCircuit(all[i].circuit(), this);
+			if (i < recentPaths.size()) openCircuit(recentPaths[i], this);
 			return 0;
 		}
 		if (id >= CMD_NEW && id < CMD_RECENT) {
@@ -1943,6 +1943,7 @@ void CircuitWindow::showShortcuts() { showShortcutsWindow(hwnd); }
 void CircuitWindow::rebuildRecentMenu() {
 	while (GetMenuItemCount(recentMenu) > 0) DeleteMenu(recentMenu, 0, MF_BYPOSITION);
 	const std::vector<library::Item> all = library::items();
+	recentPaths.clear();
 	int shown = 0;
 	for (const library::Item& it : all) {
 		// Ampersands in a name aren't mnemonics.
@@ -1950,6 +1951,7 @@ void CircuitWindow::rebuildRecentMenu() {
 		for (char c : it.name) { if (c == '&') label += '&'; label += c; }
 		if (shown < 9) label = strf("&%d  ", shown + 1) + label;
 		AppendMenuW(recentMenu, MF_STRING, CMD_RECENT + shown, W(label).c_str());
+		recentPaths.push_back(it.circuit());
 		if (++shown >= 10) break;
 	}
 	if (shown == 0) AppendMenuW(recentMenu, MF_STRING | MF_GRAYED, 0, L"No circuits yet");

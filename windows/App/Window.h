@@ -254,6 +254,7 @@ private:
 	int lastPageCount = 1;
 	std::map<uint64_t, bool> seenPages;
 	HMENU menus = nullptr, recentMenu = nullptr;
+	std::vector<std::string> recentPaths;   // Open Recent's circuits, as the menu shows them
 
 	void build();
 	void buildMenus();
