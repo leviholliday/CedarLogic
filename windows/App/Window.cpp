@@ -962,6 +962,16 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		else if (Canvas* c = currentCanvas())
 			c->focus();
 		return 0;
+	case WM_SETTINGCHANGE:
+		// Windows switched apps between light and dark (by hand, or on a
+		// schedule): follow it when that's the setting. Every window hears
+		// it; the first one changes them all.
+		if (lp && lstrcmpiW(reinterpret_cast<LPCWSTR>(lp), L"ImmersiveColorSet") == 0 && prefs().themeMode == 0 &&
+		    systemPrefersDark() != prefs().dark) {
+			prefs().dark = !prefs().dark;
+			applyTheme();
+		}
+		break;
 	case WM_INITMENUPOPUP:
 		updateMenu((HMENU)wp);
 		return 0;
