@@ -25,8 +25,8 @@ const Action* find(const std::string& id);
 // The keys an action has now (the first, for showing), or "" for none.
 std::string keys(const Action& a);
 bool isCustom(const Action& a);
-// Change one ("" for none). Another action that had those keys loses them:
-// its id comes back, or "".
+// Change one ("" for none). Another action that had that key loses it (and
+// keeps any others): its id comes back, or "".
 std::string set(const Action& a, const std::string& accel);
 void reset(const Action& a);
 void resetAll();
@@ -38,8 +38,13 @@ std::string canvasAction(const GdkEventKey* e);
 // "Ctrl+Shift+S", and the same as key caps.
 std::string label(const std::string& accel);
 std::vector<std::string> caps(const std::string& accel);
-// What a key press would be as an accelerator ("" for a lone modifier).
+// What a key press would be as an accelerator ("" for a lone modifier). On
+// a layout of another script (Russian, Greek...), the Latin key in the
+// same place.
 std::string fromEvent(const GdkEventKey* e);
+// What a key is kept for, when it's one of the fixed keys (Space, the
+// arrows, Shift+1...0, Ctrl+Tab...) that no command can have; else "".
+std::string reserved(const GdkEventKey* e);
 
 }  // namespace shortcuts
 
