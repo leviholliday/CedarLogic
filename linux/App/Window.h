@@ -64,6 +64,10 @@ public:
 	// (points in `from`).
 	void moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
 	void titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
+	// F10: every menu from the keyboard; Shift+F10 or the Menu key: the
+	// canvas's menu for what's selected.
+	void menusFromKeyboard();
+	void contextMenuFromKeyboard();
 
 	// ---- Tabs, and split view (the Mac's SplitState) ----
 	// A tab is a page; its number is the page's index in the document.

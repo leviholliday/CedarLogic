@@ -31,6 +31,8 @@ public:
 	void layoutNow() { relayout = true; redraw(); }
 	// Where an action's button is, on the screen (the guided tour points at it).
 	GdkRectangle actionRect(const char* action) const;
+	// The ••• button, in the bar's own points (false when it isn't showing).
+	bool moreRect(GdkRectangle& out) const;
 	// For Settings' pictures of each style: drawn in `style`, not clickable.
 	void paintPicture(cairo_t* cr, float w, float h, int style);
 

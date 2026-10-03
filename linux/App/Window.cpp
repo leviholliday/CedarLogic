@@ -735,6 +735,8 @@ bool CircuitWindow::actionEnabled(const char* name) const {
 }
 
 // A menu from a model, popped up under a rectangle and gone when it closes.
+// Opened from the keyboard (no event), its first item is picked, so the
+// arrow keys go on from there.
 static void popupModel(GtkWidget* attach, GMenuModel* model, GtkWidget* from, GdkRectangle anchor, GdkEvent* e, bool rightAligned) {
 	GtkWidget* menu = gtk_menu_new_from_model(model);
 	gtk_menu_attach_to_widget(GTK_MENU(menu), attach, nullptr);
@@ -744,10 +746,31 @@ static void popupModel(GtkWidget* attach, GMenuModel* model, GtkWidget* from, Gd
 	gtk_menu_popup_at_rect(GTK_MENU(menu), gtk_widget_get_window(from), &anchor,
 	                       rightAligned ? GDK_GRAVITY_SOUTH_EAST : GDK_GRAVITY_SOUTH_WEST,
 	                       rightAligned ? GDK_GRAVITY_NORTH_EAST : GDK_GRAVITY_NORTH_WEST, e);
+	if (e == nullptr) gtk_menu_shell_select_first(GTK_MENU_SHELL(menu), FALSE);
 }
 
 void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
 	if (GMenuModel* bar = gtk_application_get_menubar(app)) popupModel(win, bar, from, anchor, e, true);
+}
+
+// GTK's own F10 belongs to a menu bar, and there is none: the menus are
+// behind •••, so F10 opens them there (at the top right in focus mode, with
+// the bar away).
+void CircuitWindow::menusFromKeyboard() {
+	GdkRectangle r;
+	if (!focusOn && toolbar && toolbar->moreRect(r)) moreMenu(toolbar->widget(), r, nullptr);
+	else moreMenu(win, GdkRectangle{ gtk_widget_get_allocated_width(win) - 48, 6, 32, 32 }, nullptr);
+}
+
+void CircuitWindow::contextMenuFromKeyboard() {
+	if (simViewOn) return;
+	if (lockedOn) { lockNudge(); return; }
+	const int p = currentPage();
+	const int target = cl_edit_selected_gate_count(doc, p) > 0 ? CL_CONTEXT_GATE
+	                 : cl_edit_selected_wire_count(doc, p) > 0 ? CL_CONTEXT_WIRE : CL_CONTEXT_NOTHING;
+	double wx = 0, wy = 0;
+	placePoint(wx, wy);
+	showContextMenu(target, wx, wy, nullptr);
 }
 
 void CircuitWindow::titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
@@ -1273,6 +1296,14 @@ gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) 
 		return TRUE;
 	}
 	if (w->switcher && w->switcher->active() && e->keyval == GDK_KEY_Escape) { w->switcher->cancel(); return TRUE; }
+	// The menus from the keyboard: F10 every menu; Shift+F10 or the Menu key
+	// the canvas's own, for what's selected.
+	const guint mods = e->state & gtk_accelerator_get_default_mod_mask();
+	if (e->keyval == GDK_KEY_F10 && mods == 0) { guarded("the menus", [&] { w->menusFromKeyboard(); }); return TRUE; }
+	if ((e->keyval == GDK_KEY_F10 && mods == GDK_SHIFT_MASK) || (e->keyval == GDK_KEY_Menu && mods == 0)) {
+		guarded("the menu", [&] { w->contextMenuFromKeyboard(); });
+		return TRUE;
+	}
 	return FALSE;
 }
 
@@ -1821,7 +1852,14 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventBu
 		// Destroy it once its item has run.
 		g_idle_add([](gpointer m) -> gboolean { gtk_widget_destroy(GTK_WIDGET(m)); return G_SOURCE_REMOVE; }, m);
 	}), nullptr);
-	gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent*)e);
+	// From the keyboard: in the middle of the canvas, its first item picked.
+	Canvas* c = currentCanvas();
+	if (e == nullptr && c) {
+		gtk_menu_popup_at_widget(GTK_MENU(menu), c->widget(), GDK_GRAVITY_CENTER, GDK_GRAVITY_NORTH_WEST, nullptr);
+		gtk_menu_shell_select_first(GTK_MENU_SHELL(menu), FALSE);
+	} else {
+		gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent*)e);
+	}
 }
 
 // ---- Simulation --------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 #include "Toolbar.h"
 #include "Canvas.h"
+#include "Shortcuts.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -17,6 +18,17 @@ enum { kClassic = 0, kMinimal = 2, kSeamless = 3 };
 bool is(const char* a, const char* b) { return a && b && std::strcmp(a, b) == 0; }
 
 bool groupShown(int g) { return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0; }
+
+// " (Ctrl+N)": the keys an action has now (Settings > Shortcuts changes
+// them), or nothing when it has none.
+std::string keysFor(const char* action) {
+	for (const shortcuts::Action& a : shortcuts::all()) {
+		if (!is(a.gaction, action)) continue;
+		const std::string k = shortcuts::label(shortcuts::keys(a));
+		return k.empty() ? std::string() : " (" + k + ")";
+	}
+	return std::string();
+}
 
 }  // namespace
 
@@ -183,21 +195,21 @@ std::string Toolbar::tipFor(const Item& it) const {
 	default: break;
 	}
 	const char* a = it.action;
-	if (is(a, "app.new")) return "New circuit (Ctrl+N)";
-	if (is(a, "app.open")) return "Your circuits (Ctrl+O)";
-	if (is(a, "win.save")) return "Save, and keep a version (Ctrl+S)";
-	if (is(a, "win.undo")) return "Undo (Ctrl+Z)";
-	if (is(a, "win.redo")) return "Redo (Ctrl+Shift+Z)";
-	if (is(a, "win.copy")) return "Copy (Ctrl+C)";
-	if (is(a, "win.paste")) return "Paste (Ctrl+V)";
-	if (is(a, "win.zoom-out")) return "Zoom out (Ctrl+-)";
-	if (is(a, "win.zoom-in")) return "Zoom in (Ctrl+=)";
+	if (is(a, "app.new")) return "New circuit" + keysFor(a);
+	if (is(a, "app.open")) return "Your circuits" + keysFor(a);
+	if (is(a, "win.save")) return "Save, and keep a version" + keysFor(a);
+	if (is(a, "win.undo")) return "Undo" + keysFor(a);
+	if (is(a, "win.redo")) return "Redo" + keysFor(a);
+	if (is(a, "win.copy")) return "Copy" + keysFor(a);
+	if (is(a, "win.paste")) return "Paste" + keysFor(a);
+	if (is(a, "win.zoom-out")) return "Zoom out" + keysFor(a);
+	if (is(a, "win.zoom-in")) return "Zoom in" + keysFor(a);
 	if (is(a, "win.running")) return win->running() ? "Pause the simulation" : "Resume the simulation";
-	if (is(a, "win.step")) return "Step once (Ctrl+Shift+R)";
-	if (is(a, "win.sim-view")) return win->simView() ? "Leave Simulation View (Esc)" : "Simulation View (Ctrl+R)";
+	if (is(a, "win.step")) return "Step once" + keysFor(a);
+	if (is(a, "win.sim-view")) return win->simView() ? "Leave Simulation View (Esc)" : "Simulation View" + keysFor(a);
 	if (is(a, "win.lock")) return win->locked() ? "Unlock the circuit" : "Lock the circuit so it can't be edited";
-	if (is(a, "win.dark")) return "Dark mode (Ctrl+Shift+D)";
-	if (is(a, "win.new-tab")) return "New tab (Ctrl+T)";
+	if (is(a, "win.dark")) return "Dark mode" + keysFor(a);
+	if (is(a, "win.new-tab")) return "New tab" + keysFor(a);
 	if (is(a, "win.feedback")) return "Send feedback: a bug, an idea, anything";
 	return std::string();
 }
@@ -356,6 +368,16 @@ GdkRectangle Toolbar::actionRect(const char* action) const {
 		out = { x + a.x + (int)it.rect.left, y + a.y + (int)it.rect.top, (int)rectWidth(it.rect), (int)rectHeight(it.rect) };
 	}
 	return out;
+}
+
+bool Toolbar::moreRect(GdkRectangle& out) const {
+	if (!gtk_widget_get_mapped(area)) return false;
+	for (const Item& it : items) {
+		if (it.kind != More || rectWidth(it.rect) <= 0) continue;
+		out = { (int)it.rect.left, (int)it.rect.top, (int)rectWidth(it.rect), (int)rectHeight(it.rect) };
+		return true;
+	}
+	return false;
 }
 
 void Toolbar::mouseMove(float x, float y) {
