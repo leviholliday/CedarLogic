@@ -739,6 +739,7 @@ void endTour() {
 	g_tour = nullptr;
 	if (t->timer) g_source_remove(t->timer);
 	if (t->area) {
+		g_object_remove_weak_pointer(G_OBJECT(t->area), (gpointer*)&t->area);
 		g_signal_handlers_disconnect_by_data(t->area, t);
 		gtk_widget_destroy(t->area);
 	}
@@ -753,6 +754,7 @@ void next() {
 	t->done = false;
 	t->stepStart = nowSeconds();
 	t->height = cardHeight(t);
+	if (t->area == nullptr) return;
 	gtk_widget_set_size_request(t->area, (int)kCardW, t->height);
 	gtk_widget_queue_draw(t->area);
 }
@@ -775,7 +777,7 @@ void check() {
 	if (s.check(st)) {
 		t->done = true;
 		t->doneAt = now;
-		gtk_widget_queue_draw(t->area);
+		if (t->area) gtk_widget_queue_draw(t->area);
 	}
 }
 
@@ -870,6 +872,9 @@ void startTour(CircuitWindow* window) {
 	// A card over the canvas, in its corner. It takes clicks, never the
 	// keyboard: that stays with the circuit.
 	t->area = gtk_drawing_area_new();
+	// Closing the window destroys the card with it: t->area goes back to
+	// null then, so endTour doesn't touch a freed widget.
+	g_object_add_weak_pointer(G_OBJECT(t->area), (gpointer*)&t->area);
 	gtk_widget_set_halign(t->area, GTK_ALIGN_END);
 	gtk_widget_set_valign(t->area, GTK_ALIGN_END);
 	gtk_widget_set_margin_end(t->area, 18);
@@ -908,7 +913,7 @@ void startTour(CircuitWindow* window) {
 		Tour* tour = g_tour;
 		if (tour == nullptr) return G_SOURCE_REMOVE;
 		const float target = (float)(tour->step + (tour->done ? 1 : 0)) / steps().size();
-		if (std::fabs(target - tour->shownProgress) > 0.001f) gtk_widget_queue_draw(tour->area);
+		if (tour->area && std::fabs(target - tour->shownProgress) > 0.001f) gtk_widget_queue_draw(tour->area);
 		return G_SOURCE_CONTINUE;
 	}, nullptr);
 	gtk_window_present(window->window());
