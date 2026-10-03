@@ -225,6 +225,7 @@ private:
 	void beginOpening();
 public:
 	ScopeWindow* scopeWindow() const { return scope; }
+	Toolbar* toolbarWidget() const { return toolbar; }   // for --click-test
 	std::string pageName(int page) const;
 private:
 	std::vector<Canvas*> canvases;    // in tab order

@@ -144,6 +144,14 @@ jobs:
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 
+      # Clicks on the toolbar's buttons and the window's drawn Minimize and
+      # Close, as Windows sends them (press, then release), each checked for
+      # its effect: a picture can't show that a button does nothing.
+      - name: Click test
+        if: matrix.run
+        shell: bash
+        run: timeout 120 package/CedarLogic/CedarLogic.exe --click-test
+
       - name: Upload zip
         uses: actions/upload-artifact@v7
         with:

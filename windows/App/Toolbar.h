@@ -29,6 +29,11 @@ public:
 	void layoutNow() { relayout = true; redraw(); }
 	// Where a command's button is, on the screen (the guided tour points at it).
 	RECT commandRect(int command) const;
+	// For --click-test: the middle of a button, in the bar's pixels -- a
+	// command's, or kMinimize or kClose for the window's own. False when
+	// it isn't shown (the bar left it out at this width).
+	static const int kMinimize = -1, kClose = -2;
+	bool buttonPoint(int command, POINT& p);
 
 protected:
 	void paint(ID2D1RenderTarget* rt, float w, float h) override;

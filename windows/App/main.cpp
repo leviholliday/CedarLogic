@@ -9,6 +9,7 @@
 #include "Help.h"
 #include "Library.h"
 #include "Recovery.h"
+#include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
 #include "Window.h"
@@ -18,6 +19,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 
 namespace {
 
@@ -74,6 +76,163 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (gDialog) { prefs().save(); ExitProcess((UINT)gExitCode); }
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gExitCode);
+}
+
+// --click-test: clicks on the toolbar's buttons and the window's drawn
+// Minimize and Close, sent as Windows sends a real one (the press, which
+// takes the pointer, then the release), each checked for what it should do.
+// A line per click, PASS, FAIL or SKIP; the exit code is 1 if any failed (CI
+// runs it: a picture of the window can't tell whether its buttons work).
+bool gClickTest = false;
+HWND gClickWindow = nullptr;
+size_t gClickNext = 0;
+long gClickBefore = 0;
+int gClickFailures = 0;
+bool gClickClosing = false;   // the drawn Close was clicked: the window should go
+Prefs gPrefsBefore;           // put back afterwards (the test widens the window)
+
+void report(const char* result, const std::string& what) {
+	writeOut(strf("%s  %s\n", result, what.c_str()));
+	if (strcmp(result, "FAIL") == 0) gClickFailures++;
+}
+
+CircuitWindow* clickWindow() {
+	for (CircuitWindow* w : circuitWindows()) if (w->window() == gClickWindow) return w;
+	return nullptr;
+}
+
+void closeAll() {
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+}
+
+// Press and release the left button over one of the toolbar's buttons.
+// False when the bar doesn't show that button.
+bool clickButton(CircuitWindow* w, int button, const char* name) {
+	Toolbar* bar = w->toolbarWidget();
+	POINT p;
+	if (bar == nullptr || !bar->buttonPoint(button, p)) return false;
+	const HWND h = bar->widget();
+	const LPARAM at = MAKELPARAM(p.x, p.y);
+	SendMessageW(h, WM_MOUSEMOVE, 0, at);
+	SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, at);
+	if (GetCapture() != h) writeOut(strf("note  %s: the bar didn't take the pointer on the press\n", name));
+	SendMessageW(h, WM_LBUTTONUP, 0, at);
+	return true;
+}
+
+struct ClickCase {
+	const char* name;
+	int button;                                   // a command, or Toolbar::kMinimize
+	bool mayBeHidden;                             // on the bar's left, which a narrow window leaves out
+	std::function<long(CircuitWindow*)> state;    // what the click should change
+	std::function<bool(long before, long after)> worked;
+	std::function<void(CircuitWindow*)> tidy;     // put things back for the next click
+};
+
+const std::vector<ClickCase>& clickCases() {
+	auto flipped = [](long before, long after) { return before != after; };
+	auto oneMore = [](long before, long after) { return after == before + 1; };
+	static const std::vector<ClickCase> cases = {
+		{ "Zoom In", CMD_ZOOM_IN, true,
+		  [](CircuitWindow* w) -> long { Canvas* c = w->currentCanvas(); return c ? c->zoomPercent() : 0; },
+		  [](long before, long after) { return after > before; }, nullptr },
+		{ "New Tab", CMD_NEW_TAB, false, [](CircuitWindow* w) -> long { return w->tabCount(); }, oneMore, nullptr },
+		{ "Simulation View on", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
+		{ "Simulation View off", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
+		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "Unlock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "New circuit", CMD_NEW, true, [](CircuitWindow*) -> long { return (long)circuitWindows().size(); }, oneMore,
+		  [](CircuitWindow* w) {
+			  for (CircuitWindow* o : std::vector<CircuitWindow*>(circuitWindows())) if (o != w) o->destroy();
+		  } },
+		{ "Minimize (drawn)", Toolbar::kMinimize, false,
+		  [](CircuitWindow* w) -> long { return IsIconic(w->window()) ? 1 : 0; },
+		  [](long, long after) { return after == 1; }, [](CircuitWindow* w) { ShowWindow(w->window(), SW_RESTORE); } },
+	};
+	return cases;
+}
+
+// After the message loop: the drawn Close's result, and the summary.
+int finishClickTest() {
+	if (gClickClosing) report(IsWindow(gClickWindow) ? "FAIL" : "PASS", "Close (drawn): the window closed");
+	gClickClosing = false;
+	writeOut(gClickFailures ? strf("click test: %d failed\n", gClickFailures) : std::string("click test: all passed\n"));
+	prefs() = gPrefsBefore;
+	return gClickFailures ? 1 : 0;
+}
+
+// A step a tick: check the last click's effect, then make the next.
+int clickTestStep() {
+	CircuitWindow* w = clickWindow();
+	if (w == nullptr) { report("FAIL", "the window went away"); return 0; }
+	if (gClickClosing) {   // still here: Close did nothing
+		report("FAIL", "Close (drawn): the window is still open");
+		gClickClosing = false;
+		closeAll();
+		return 0;
+	}
+	const std::vector<ClickCase>& cases = clickCases();
+	if (gClickNext > 0) {
+		const ClickCase& done = cases[gClickNext - 1];
+		const long after = done.state(w);
+		report(done.worked(gClickBefore, after) ? "PASS" : "FAIL", strf("%s: %ld, then %ld", done.name, gClickBefore, after));
+		if (done.tidy) done.tidy(w);
+	}
+	while (gClickNext < cases.size()) {
+		const ClickCase& c = cases[gClickNext++];
+		// The canvas drawn first, so its first fit can't undo a zoom.
+		if (Canvas* cv = w->currentCanvas()) UpdateWindow(cv->widget());
+		gClickBefore = c.state(w);
+		if (clickButton(w, c.button, c.name)) return 500;
+		const int width = w->toolbarWidget() ? (int)w->toolbarWidget()->width() : 0;
+		report(c.mayBeHidden ? "SKIP" : "FAIL", strf("%s: not on the toolbar at this width (%d points)", c.name, width));
+	}
+	// Last, the drawn Close: the window goes, and with it the app (the
+	// result is read once the message loop ends).
+	if (!clickButton(w, Toolbar::kClose, "Close")) {
+		report("FAIL", "Close (drawn): not on the toolbar");
+		closeAll();
+		return 0;
+	}
+	gClickClosing = true;
+	return 1500;
+}
+
+void CALLBACK clickTestTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	if (id) KillTimer(nullptr, id);
+	int next = 0;
+	guarded("the click test", [&] { next = clickTestStep(); });
+	if (next > 0) SetTimer(nullptr, 0, (UINT)next, clickTestTimer);
+	else if (!circuitWindows().empty()) {
+		report("FAIL", "the click test stopped early");
+		closeAll();
+	}
+}
+
+void CALLBACK clickTestStart(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().front();
+	if (w == nullptr) { report("FAIL", "no window opened"); PostQuitMessage(1); return; }
+	gClickWindow = w->window();
+	SetForegroundWindow(gClickWindow);
+	// As wide as the screen allows, up to what the whole bar needs (a narrow
+	// bar leaves out the tools on its left).
+	POINT p;
+	if (w->toolbarWidget() && !w->toolbarWidget()->buttonPoint(CMD_ZOOM_IN, p)) {
+		RECT r;
+		GetWindowRect(gClickWindow, &r);
+		SetWindowPos(gClickWindow, nullptr, 0, 0, scaled(1400, dpiOf(gClickWindow)), r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER);
+	}
+	clickTestTimer(nullptr, 0, 0, 0);
+}
+
+// A click that hangs (a dialog no one answers) fails rather than waits.
+void CALLBACK clickTestWatchdog(HWND, UINT, UINT_PTR, DWORD) {
+	report("FAIL", "the click test took too long");
+	writeOut(strf("click test: %d failed\n", gClickFailures));
+	prefs() = gPrefsBefore;
+	prefs().save();
+	ExitProcess(1);
 }
 
 // Once the first window is up, offer back work a CedarLogic that stopped
@@ -255,6 +414,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			return status == 403 ? 0 : 1;
 		}
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
+		if (a == "--click-test") { gClickTest = true; continue; }
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
@@ -285,13 +445,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	LocalFree(argv);
 
 	prefs().load();
+	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty()) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && !gClickTest) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -314,7 +475,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty()) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -350,7 +511,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
-	else {
+	else if (gClickTest) {
+		SetTimer(nullptr, 0, 1500, clickTestStart);
+		SetTimer(nullptr, 0, 60000, clickTestWatchdog);
+	} else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.
 		splash::hideSoon([] {
@@ -372,7 +536,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		TranslateMessage(&msg);
 		DispatchMessageW(&msg);
 	}
+	const int clickResult = gClickTest ? finishClickTest() : 0;
 	prefs().save();
 	OleUninitialize();
+	if (gClickTest) return clickResult;
 	return gScreenshot.empty() ? (int)msg.wParam : gExitCode;
 }
