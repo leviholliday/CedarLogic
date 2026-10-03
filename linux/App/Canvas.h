@@ -103,6 +103,7 @@ private:
 
 	void draw(cairo_t* cr);
 	// Over the circuit: the banner and its buttons, the note.
+	void drawOpeningCard(cairo_t* cr, float w, float h, double t);
 	void drawOverlays(cairo_t* cr, float w, float h);
 	void drawBanner(cairo_t* cr, float w);
 	void drawToast(cairo_t* cr, float w, float h);

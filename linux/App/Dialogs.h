@@ -5,7 +5,8 @@
 #ifndef CL_LINUX_DIALOGS_H
 #define CL_LINUX_DIALOGS_H
 
-#include "App.h"
+#include "Chrome.h"
+#include <vector>
 #include <string>
 
 class CircuitWindow;
@@ -16,14 +17,18 @@ bool askText(GtkWindow* parent, const std::string& title, const std::string& pro
 void showGateSettings(CircuitWindow* w, long gate);
 void showQuickAdd(CircuitWindow* w);
 void showTruthTable(CircuitWindow* w, int page);   // TruthTableWindow.cpp
+// Export as Image (ExportImage.cpp): the page as a picture, with your name and result.
+void showExportImage(CircuitWindow* w, int page);
 // Build from Formula: switches, gates and lights from a formula typed in.
 void showBuildFormula(CircuitWindow* w);
 void showRamEditor(CircuitWindow* w, long gate);
 void showPreferencesDialog(GtkWindow* parent);
 void showShortcutsWindow(GtkWindow* parent);
 
-// The oscilloscope: every signal a TO label names, one row each, recorded
-// one sample per simulation step.
+// The oscilloscope (Scope.cpp), as the Mac's ScopeView: every signal a TO
+// label names, one row each, recorded one sample per simulation step; a time
+// cursor that reads every signal at once, zoom, signals hidden with H, and a
+// timing diagram for a lab report (copied, or saved as a PNG).
 class ScopeWindow {
 public:
 	explicit ScopeWindow(CircuitWindow* owner);
@@ -34,18 +39,30 @@ public:
 	bool visible() const;
 
 private:
+	struct Button { RectF r; int id; };
 	CircuitWindow* owner;
 	GtkWidget* win;
 	GtkWidget* area;
-	GtkWidget* info;
-	int zoom = 4;   // pixels per step
+	float pointsPerStep = 6;
+	int cursor = -1;   // the sample the cursor is on (-1: live, at the end)
+	int chosen = 0;    // the signal the arrows and H act on
+	float scrollY = 0;
+	std::vector<std::string> hidden;
+	std::vector<Button> buttons;
+	int hot = -1;
+	bool dragging = false;
+	int shownStart = 0, shownCount = 0;
 
-	void draw(cairo_t* cr);
-	static gboolean drawCb(GtkWidget*, cairo_t*, gpointer);
-	static gboolean deleteCb(GtkWidget*, GdkEvent*, gpointer);
-	static void clearCb(GtkButton*, gpointer);
-	static void zoomInCb(GtkButton*, gpointer);
-	static void zoomOutCb(GtkButton*, gpointer);
+	std::vector<std::string> signals() const;
+	std::vector<int> shownSignals() const;
+	void window(float width, int length, int& start, int& count) const;
+	void setCursorAt(float x, float width);
+	void paint(cairo_t* cr, float w, float h);
+	void press(int id, GdkEvent* e);
+	bool key(guint keyval, guint state);
+	void hiddenMenu(GdkEvent* e);
+	void exportMenu(GdkEvent* e);
+	cairo_surface_t* timingImage();
 };
 
 // A place to save a .cdl file ("" when cancelled).

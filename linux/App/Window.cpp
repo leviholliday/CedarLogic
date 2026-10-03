@@ -7,6 +7,7 @@
 #include "Feedback.h"
 #include "FindBar.h"
 #include "Help.h"
+#include "Splash.h"
 #include "Welcome.h"
 #include "TabSwitcher.h"
 #include "Formula.h"
@@ -160,6 +161,29 @@ CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const s
 	updateBanner();
 	gtk_widget_set_visible(banner, FALSE);
 	if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget());
+	// While the launch screen is up, it does the introducing (main.cpp
+	// begins the card as the windows come in).
+	if (!splashActive()) beginOpening();
+}
+
+// The card plays once the window is in place and drawn.
+void CircuitWindow::beginOpening() {
+	openingAt = g_get_monotonic_time() / 1e6 + 0.08;
+	openingRevealed = false;
+}
+
+bool CircuitWindow::openingCard(double& t) const {
+	if (openingAt < 0) return false;
+	t = g_get_monotonic_time() / 1e6 - openingAt;
+	return true;
+}
+
+std::string CircuitWindow::openingDetail() const {
+	const int pages = cl_document_page_count(doc);
+	long gates = 0;
+	for (int p = 0; p < pages; p++) gates += cl_document_gate_count(doc, p);
+	if (gates == 0) return pages > 1 ? format("%d empty tabs", pages) : std::string("A blank page, ready to build");
+	return format("%d tab%s  \u00B7  %ld gate%s", pages, pages == 1 ? "" : "s", gates, gates == 1 ? "" : "s");
 }
 
 CircuitWindow::~CircuitWindow() {
@@ -561,6 +585,13 @@ void CircuitWindow::tick() {
 	lastTick = t;
 	Canvas* c = currentCanvas();
 	if (c) c->stepAnimation();
+	// The opening card: the circuit fades up as it lifts away.
+	if (openingAt >= 0) {
+		const double ot = t / 1e6 - openingAt;
+		if (ot >= 0.58 && !openingRevealed) { openingRevealed = true; appearStart = t; }
+		if (ot >= 0.88) openingAt = -1;
+		redraw();
+	}
 	// Fades in progress (a new selection's halo, a page appearing, the drag box).
 	if (secondsSince(selectionChangedAt) < kSelectionFadeTime || secondsSince(appearStart) < kAppearTime ||
 	    (hasDragFade && secondsSince(dragFadeStart) < kDragFadeTime))
@@ -1046,6 +1077,7 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	lockedOn = false;
 	syncTabs();
 	appearStart = g_get_monotonic_time();
+	beginOpening();
 	updateTitle();
 	updateActions();
 	updateRunUI();
@@ -1152,81 +1184,8 @@ void CircuitWindow::exportOlder(int format) {
 	            rc > 0 ? "Exported, with one thing left out" : "The circuit couldn't be exported", why);
 }
 
-// Export the page in front as a picture: PNG, or PDF or SVG (which stay
-// sharp at any size), in the style chosen.
-void CircuitWindow::exportImage() {
-	const int p = currentPage();
-	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, p, &l, &b, &r, &t)) { note("This page is empty: nothing to export."); return; }
-	GtkWidget* d = gtk_file_chooser_dialog_new("Export as Image", GTK_WINDOW(win), GTK_FILE_CHOOSER_ACTION_SAVE,
-	                                           "_Cancel", GTK_RESPONSE_CANCEL, "_Export", GTK_RESPONSE_ACCEPT, nullptr);
-	GtkFileChooser* fc = GTK_FILE_CHOOSER(d);
-	gtk_file_chooser_set_do_overwrite_confirmation(fc, TRUE);
-	if (!prefs().lastFolder.empty()) gtk_file_chooser_set_current_folder(fc, prefs().lastFolder.c_str());
-	std::string name = displayName();
-	if (cl_document_page_count(doc) > 1) name += " - " + pageName(p);
-	gtk_file_chooser_set_current_name(fc, (name + ".png").c_str());
-	GtkWidget* extra = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-	gtk_box_pack_start(GTK_BOX(extra), gtk_label_new("Style:"), FALSE, FALSE, 0);
-	GtkWidget* style = gtk_combo_box_text_new();
-	gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(style), "Black on white, for printing");
-	gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(style), "Light, with signal colours");
-	gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(style), "Dark, with signal colours");
-	gtk_combo_box_set_active(GTK_COMBO_BOX(style), 1);
-	gtk_box_pack_start(GTK_BOX(extra), style, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(extra), gtk_label_new("Type .png, .pdf or .svg at the end of the name."), FALSE, FALSE, 8);
-	gtk_widget_show_all(extra);
-	gtk_file_chooser_set_extra_widget(fc, extra);
-	std::string file;
-	int choice = 1;
-	if (gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_ACCEPT) {
-		if (gchar* f = gtk_file_chooser_get_filename(fc)) { file = f; g_free(f); }
-		choice = gtk_combo_box_get_active(GTK_COMBO_BOX(style));
-	}
-	gtk_widget_destroy(d);
-	if (file.empty()) return;
-	const int clStyle = choice == 0 ? CL_STYLE_PRINT : choice == 2 ? CL_STYLE_DARK : CL_STYLE_LIGHT;
-	gchar* lowerName = g_ascii_strdown(file.c_str(), -1);
-	const std::string lf = lowerName;
-	g_free(lowerName);
-	auto endsWith = [&](const char* s) { const size_t n = strlen(s); return lf.size() >= n && lf.compare(lf.size() - n, n, s) == 0; };
-	if (!endsWith(".png") && !endsWith(".pdf") && !endsWith(".svg")) file += ".png";
-	const bool vector = endsWith(".pdf") || endsWith(".svg");
-
-	// Ten points a grid unit for vector files; two pixels a point for PNG.
-	const double margin = 16;
-	const double wPts = std::min(4000.0, std::max(300.0, (r - l) * 10 + 2 * margin));
-	const double hPts = std::min(4000.0, std::max(200.0, (t - b) * 10 + 2 * margin));
-	cairo_surface_t* s;
-	double scale = 1;
-	if (endsWith(".pdf")) s = cairo_pdf_surface_create(file.c_str(), wPts, hPts);
-	else if (endsWith(".svg")) s = cairo_svg_surface_create(file.c_str(), wPts, hPts);
-	else { scale = 2; s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)(wPts * scale), (int)(hPts * scale)); }
-	cairo_t* cr = cairo_create(s);
-	cairo_scale(cr, scale, scale);
-	if (clStyle == CL_STYLE_DARK) {
-		const RGBA bg = Palette{ true, false }.canvas();
-		cairo_set_source_rgb(cr, bg.r, bg.g, bg.b);
-	} else {
-		cairo_set_source_rgb(cr, 1, 1, 1);
-	}
-	cairo_paint(cr);
-	cl_document_draw_fitted(doc, p, cr, wPts, hPts, margin, scale, clStyle);
-	cairo_destroy(cr);
-	cairo_status_t st = CAIRO_STATUS_SUCCESS;
-	if (!vector) st = cairo_surface_write_to_png(s, file.c_str());
-	cairo_surface_finish(s);
-	if (st == CAIRO_STATUS_SUCCESS) st = cairo_surface_status(s);
-	cairo_surface_destroy(s);
-	if (st != CAIRO_STATUS_SUCCESS) {
-		showMessage(GTK_WINDOW(win), GTK_MESSAGE_ERROR, "The image couldn't be saved", cairo_status_to_string(st));
-		return;
-	}
-	gchar* dir = g_path_get_dirname(file.c_str());
-	prefs().lastFolder = dir;
-	g_free(dir);
-	note("Exported " + baseName(file) + ".");
-}
+// Export as Image: ExportImage.cpp.
+void CircuitWindow::exportImage() { showExportImage(this, currentPage()); }
 
 struct PrintJob { CLDocument* doc; int page; };
 

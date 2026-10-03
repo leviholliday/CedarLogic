@@ -431,7 +431,7 @@ void activateCb(GApplication* gapp, gpointer) {
 	if (gSplash && w && !w->filePath().empty()) splashSetOpening(w->titleText());
 	if (gSplash && w) gtk_widget_hide(GTK_WIDGET(w->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
-		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
+		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
@@ -467,7 +467,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
 	if (gSplash) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
-		for (CircuitWindow* c : circuitWindows()) gtk_widget_show(GTK_WIDGET(c->window()));
+		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (!gShow.empty()) g_timeout_add(1200, showCb, app);

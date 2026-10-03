@@ -128,6 +128,11 @@ public:
 	void find();
 	void showFoundGate(int page, long gate, double x, double y);
 	std::vector<int> recentTabs() const;   // tab indexes, most recently used first
+	// The opening card (the Mac's OpeningCard): seconds since it began, while
+	// it plays; and what it says under the name.
+	bool openingCard(double& t) const;
+	std::string openingDetail() const;
+	void beginOpening();
 	// The overlay over the pages (the find bar's, the tour card's).
 	GtkWidget* overlay() const { return pageOverlay; }
 	// The plan's parts and wires, on a new page or beside this page's circuit.
@@ -223,6 +228,8 @@ private:
 	ScopeWindow* scope = nullptr;
 	FindBar* findBar = nullptr;
 	GtkWidget* pageOverlay = nullptr;
+	double openingAt = -1;            // when the opening card began (monotonic seconds; -1: none)
+	bool openingRevealed = false;
 	TabSwitcher* switcher = nullptr;
 	std::vector<uint64_t> recentKeys;   // pages by key, most recently in front first
 	std::vector<Canvas*> canvases;    // in tab order

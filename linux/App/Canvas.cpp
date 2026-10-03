@@ -1,6 +1,7 @@
 // The circuit canvas (see Canvas.h).
 
 #include "Canvas.h"
+#include "Brand.h"
 #include "Chrome.h"
 #include "Window.h"
 
@@ -161,6 +162,72 @@ void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 	if (win->simView()) drawSimBar(cr, w, h);
 	drawBanner(cr, w);
 	drawToast(cr, w, h);
+	double t;
+	if (win->openingCard(t)) drawOpeningCard(cr, w, h, t);
+}
+
+// A circuit opening (the Mac's OpeningCard): over the canvas, a small glass
+// card with its name and what's in it, a sweep of light and a quick line
+// filling; then the card lifts away and the circuit fades up. 0.88 s.
+void Canvas::drawOpeningCard(cairo_t* cr, float w, float h, double t) {
+	auto ease = [](double x) { const double c = std::min(1.0, std::max(0.0, x)); return 1 - std::pow(1 - c, 3); };
+	auto smooth = [](double x) { const double c = std::min(1.0, std::max(0.0, x)); return c * c * c * (c * (c * 6 - 15) + 10); };
+	const bool dark = prefs().dark;
+	const double inP = t < 0 ? 0 : ease(t / 0.24), line = smooth((t - 0.1) / 0.45), out = smooth((t - 0.58) / 0.3);
+	const double sweep = smooth((t - 0.14) / 0.5);
+	// The canvas, held back until the card lifts.
+	const Palette pal{ dark, false };
+	fillRect(cr, rectF(0, 0, w, h), withAlpha(fromRGBA(pal.canvas()), (float)(1 - out)));
+	const float opacity = (float)(inP * (1 - out));
+	if (opacity <= 0.003f) return;
+	const std::string title = win->titleText(), detail = win->openingDetail();
+	const float textW = std::max({ textWidth(title, 15, true), textWidth(detail, 11.5f), 170.0f });
+	const float cw = std::max(300.0f, 20 + 46 + 14 + textW + 20), ch = 16 + 46 + 16 + 4;
+	const RectF card = rectF((w - cw) / 2, (h - ch) / 2, (w + cw) / 2, (h + ch) / 2);
+	const float s = (float)((0.94 + 0.06 * inP) * (1 + 0.04 * out));
+	cairo_save(cr);
+	cairo_translate(cr, w / 2, h / 2);
+	cairo_scale(cr, s, s);
+	cairo_translate(cr, -w / 2, -h / 2);
+	cairo_push_group(cr);
+	brand::glow(cr, rectF(card.left, card.top + 10, card.right, card.bottom + 10), 20, colorF(0, 0, 0, dark ? 0.45f : 0.18f), 22);
+	fillRound(cr, card, 20, dark ? colorF(0.17f, 0.18f, 0.21f, 0.97f) : colorF(0.985f, 0.985f, 0.99f, 0.97f));
+	strokeRound(cr, rectF(card.left + 0.4f, card.top + 0.4f, card.right - 0.4f, card.bottom - 0.4f), 19.6f,
+	            dark ? colorF(1, 1, 1, 0.14f) : colorF(0, 0, 0, 0.08f), 0.8f);
+	const float ix = card.left + 20, iy = card.top + 16;
+	brand::icon(cr, ix, iy, 46, 0.35f);
+	const float tx = ix + 46 + 14;
+	drawText(cr, title, rectF(tx, iy, card.right - 16, iy + 20), 15, dark ? colorF(1, 1, 1) : colorF(0, 0, 0, 0.85f), TextAlign::Leading, true);
+	drawText(cr, detail, rectF(tx, iy + 23, card.right - 16, iy + 39), 11.5f, dark ? colorF(1, 1, 1, 0.55f) : colorF(0, 0, 0, 0.5f));
+	const RectF track = rectF(tx, iy + 44, tx + 170, iy + 46.5f);
+	fillRound(cr, track, 1.25f, dark ? colorF(1, 1, 1, 0.08f) : colorF(0, 0, 0, 0.08f));
+	if (line > 0.01) {
+		const RectF fill = rectF(track.left, track.top, track.left + (float)(170 * line), track.bottom);
+		fillRound(cr, rectF(fill.left - 2, fill.top - 2, fill.right + 2, fill.bottom + 2), 3, withAlpha(brand::kNeon, 0.2f));
+		fillRound(cr, fill, 1.25f, brand::kNeon);
+	}
+	// The sweep of light across the card.
+	if (sweep > 0 && sweep < 1) {
+		cairo_save(cr);
+		roundedPath(cr, card, 20);
+		cairo_clip(cr);
+		const float bx = (float)(card.left - 120 + (cw + 240) * sweep);
+		cairo_translate(cr, bx + 45, (card.top + card.bottom) / 2);
+		cairo_rotate(cr, 18 * G_PI / 180);
+		cairo_translate(cr, -(bx + 45), -(card.top + card.bottom) / 2);
+		cairo_pattern_t* g = cairo_pattern_create_linear(bx, 0, bx + 90, 0);
+		cairo_pattern_add_color_stop_rgba(g, 0, 1, 1, 1, 0);
+		cairo_pattern_add_color_stop_rgba(g, 0.5, 1, 1, 1, dark ? 0.12 : 0.35);
+		cairo_pattern_add_color_stop_rgba(g, 1, 1, 1, 1, 0);
+		cairo_rectangle(cr, bx, card.top - ch / 2, 90, ch * 2);
+		cairo_set_source(cr, g);
+		cairo_fill(cr);
+		cairo_pattern_destroy(g);
+		cairo_restore(cr);
+	}
+	cairo_pop_group_to_source(cr);
+	cairo_paint_with_alpha(cr, opacity);
+	cairo_restore(cr);
 }
 
 // Simulation View's control bar (the Mac's SimBar): a dark glass panel along

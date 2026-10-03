@@ -67,7 +67,13 @@ struct Prefs {
 	std::string lastSeenVersion;
 	bool playLaunchSound = true;                  // the launch screen's chime
 	bool firstLaunchPlayed = false;               // the first launch's slower splash and sound, once ever
-	std::string seenWhatsNew;                     // the What's New last shown (whatsnew::kVersion)
+	std::string seenWhatsNew;
+	// Export as Image: the grid, the name-and-result strip, the style and size.
+	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;
+	std::string exportProblem;
+	int exportScale = 4;
+	// The oscilloscope's timing diagrams: the whole recording or what's on screen; colour or black and white.
+	bool timingWhole = false, timingInColor = false;                     // the What's New last shown (whatsnew::kVersion)
 
 	double wireScale() const;
 	void load();

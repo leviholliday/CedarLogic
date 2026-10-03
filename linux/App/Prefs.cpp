@@ -113,6 +113,14 @@ void Prefs::load() {
 		playLaunchSound = readBool(k, "playLaunchSound", playLaunchSound);
 		firstLaunchPlayed = readBool(k, "firstLaunchPlayed", firstLaunchPlayed);
 		seenWhatsNew = readString(k, "seenWhatsNew", seenWhatsNew);
+		exportGrid = readBool(k, "exportGrid", exportGrid);
+		exportInfo = readBool(k, "exportInfo", exportInfo);
+		exportWorks = readBool(k, "exportWorks", exportWorks);
+		exportColor = readBool(k, "exportColor", exportColor);
+		exportProblem = readString(k, "exportProblem", exportProblem);
+		exportScale = readInt(k, "exportScale", exportScale, 2, 6);
+		timingWhole = readBool(k, "timingWhole", timingWhole);
+		timingInColor = readBool(k, "timingInColor", timingInColor);
 		gsize n = 0;
 		if (gchar** list = g_key_file_get_string_list(k, kGroup, "recent", &n, nullptr)) {
 			recent.clear();
@@ -176,6 +184,14 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "playLaunchSound", playLaunchSound);
 	g_key_file_set_boolean(k, kGroup, "firstLaunchPlayed", firstLaunchPlayed);
 	g_key_file_set_string(k, kGroup, "seenWhatsNew", seenWhatsNew.c_str());
+	g_key_file_set_boolean(k, kGroup, "exportGrid", exportGrid);
+	g_key_file_set_boolean(k, kGroup, "exportInfo", exportInfo);
+	g_key_file_set_boolean(k, kGroup, "exportWorks", exportWorks);
+	g_key_file_set_boolean(k, kGroup, "exportColor", exportColor);
+	g_key_file_set_string(k, kGroup, "exportProblem", exportProblem.c_str());
+	g_key_file_set_integer(k, kGroup, "exportScale", exportScale);
+	g_key_file_set_boolean(k, kGroup, "timingWhole", timingWhole);
+	g_key_file_set_boolean(k, kGroup, "timingInColor", timingInColor);
 	std::vector<const gchar*> list;
 	for (const std::string& r : recent) list.push_back(r.c_str());
 	g_key_file_set_string_list(k, kGroup, "recent", list.data(), list.size());
