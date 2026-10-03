@@ -17,9 +17,9 @@ release page): it fetches the .deb for their processor and installs it, and
 updates come the same way. The AppImage works too, and adds itself to the
 applications menu the first time it runs.
 
-Needs a compiler with C++17, CMake, and the GTK 3, Cairo, fontconfig and
-FreeType development files (`libgtk-3-dev libcairo2-dev libfontconfig1-dev
-libfreetype-dev` on Debian, Ubuntu and Raspberry Pi OS).
+Needs a compiler with C++17, CMake, and the GTK 3, Cairo, Pango, fontconfig
+and FreeType development files (`libgtk-3-dev libcairo2-dev libpango1.0-dev
+libfontconfig1-dev libfreetype-dev` on Debian, Ubuntu and Raspberry Pi OS).
 
 - `CedarCore/CairoScene` -- the render Scene drawn with Cairo, the Linux twin
   of the Mac's `CGScene`. The rest of the engine is `mac/CedarCore`, shared
@@ -78,7 +78,9 @@ system. And:
 - `cedarlogic --version`
 - `CEDARLOGIC_RESOURCES=<dir>` -- where `cl_gatedefs.xml` is, when it isn't
   next to the app
-- `CEDAR_FONT_FILE=<font.ttf>` -- the face for circuit labels
+- `CEDAR_FONT_FILE=<font.ttf>` -- the face for circuit labels (text it has
+  no glyphs for, and scripts that need shaping, go through Pango and the
+  desktop's fallback fonts)
 
 CI (`.github/workflows/linux-native.yml`) builds x86_64 and aarch64 on Ubuntu
 22.04, runs the checks, packages both AppImages and .debs, starts them for the

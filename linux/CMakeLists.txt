@@ -19,7 +19,8 @@ endif()
 get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo cairo-ft fontconfig freetype2)
+# Pango only for circuit labels the label face can't draw alone (CairoScene).
+pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo cairo-ft fontconfig freetype2 pangocairo)
 
 # ---- The engine --------------------------------------------------------------
 # The model, drawing, routing and loading/saving, shared with the wx app; the

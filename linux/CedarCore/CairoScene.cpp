@@ -8,6 +8,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
+#include <pango/pangocairo.h>
 
 #include <cmath>
 #include <cstdlib>
@@ -121,6 +122,51 @@ double capHeight() {
 		return h;
 	}();
 	return cap;
+}
+
+// Whether the label face can't draw this text as it is: a character it has
+// no glyph for (Chinese, Japanese...), or a script that needs shaping
+// (Arabic, Hebrew, Indic, combining accents). Pango lays that out, shaped and
+// with the desktop's fallback fonts; everything else keeps the face's own
+// glyphs, so Latin labels measure and sit exactly as in the other apps.
+bool needsPango(const char* utf8) {
+	const char* p = utf8;
+	while (*p && (unsigned char)*p < 0x80) p++;
+	if (*p == 0) return false;   // plain ASCII, the usual label: no font lookups
+	cairo_scaled_font_t* f = labelFont();
+	FT_Face face = f ? cairo_ft_scaled_font_lock_face(f) : nullptr;
+	bool needs = false;
+	for (; *p && !needs; p = g_utf8_next_char(p)) {
+		if ((unsigned char)*p < 0x80) continue;
+		const gunichar c = g_utf8_get_char_validated(p, -1);
+		if (c == (gunichar)-1 || c == (gunichar)-2) break;   // not UTF-8: drawn as before
+		const GUnicodeScript s = g_unichar_get_script(c);
+		const GUnicodeType t = g_unichar_type(c);
+		needs = (face && FT_Get_Char_Index(face, c) == 0) ||
+		        t == G_UNICODE_NON_SPACING_MARK || t == G_UNICODE_SPACING_MARK || t == G_UNICODE_ENCLOSING_MARK ||
+		        !(s == G_UNICODE_SCRIPT_COMMON || s == G_UNICODE_SCRIPT_INHERITED || s == G_UNICODE_SCRIPT_LATIN ||
+		          s == G_UNICODE_SCRIPT_GREEK || s == G_UNICODE_SCRIPT_CYRILLIC);
+	}
+	if (face) cairo_ft_scaled_font_unlock_face(f);
+	return needs;
+}
+
+// That text laid out by Pango in the label's families at kGlyphUnits, unhinted
+// as the glyphs are, on one line.
+PangoLayout* labelLayout(const char* utf8) {
+	static PangoContext* context = [] {
+		PangoContext* c = pango_font_map_create_context(pango_cairo_font_map_get_default());
+		pango_cairo_context_set_font_options(c, outlineOptions());
+		return c;
+	}();
+	PangoLayout* l = pango_layout_new(context);
+	PangoFontDescription* d = pango_font_description_from_string("Liberation Sans, DejaVu Sans, sans-serif Bold");
+	pango_font_description_set_absolute_size(d, kGlyphUnits * PANGO_SCALE);
+	pango_layout_set_font_description(l, d);
+	pango_font_description_free(d);
+	pango_layout_set_single_paragraph_mode(l, TRUE);
+	pango_layout_set_text(l, utf8, -1);
+	return l;
 }
 
 }  // namespace
@@ -312,6 +358,26 @@ void CairoScene::text(render::Point origin, const char* utf8, float pixelHeight,
 	if (utf8 == nullptr || *utf8 == 0 || !(pixelHeight > 0)) return;
 	cairo_scaled_font_t* font = labelFont();
 	if (font == nullptr) return;
+	if (needsPango(utf8)) {
+		// Placed as the glyphs below are: the first line's baseline a cap
+		// height under `origin`.
+		const double k = pixelHeight / kGlyphUnits;
+		cairo_matrix_t place, full;
+		cairo_matrix_init(&place, k, 0, 0, -k, origin.x, origin.y - capHeight() * k);
+		const cairo_matrix_t m = current();
+		cairo_matrix_multiply(&full, &place, &m);
+		cairo_new_path(ctx);
+		if (!usable(full)) return;
+		PangoLayout* l = labelLayout(utf8);
+		cairo_save(ctx);
+		cairo_transform(ctx, &full);
+		cairo_move_to(ctx, 0, -pango_layout_get_baseline(l) / (double)PANGO_SCALE);
+		pango_cairo_layout_path(ctx, l);
+		cairo_restore(ctx);
+		g_object_unref(l);
+		fill(c);
+		return;
+	}
 	cairo_glyph_t* glyphs = nullptr;
 	int n = 0;
 	if (cairo_scaled_font_text_to_glyphs(font, 0, 0, utf8, -1, &glyphs, &n, nullptr, nullptr, nullptr)
@@ -349,6 +415,13 @@ float measuredTextWidth(const char* utf8, float pixelHeight) {
 	if (utf8 == nullptr || *utf8 == 0) return 0.0f;
 	cairo_scaled_font_t* f = cl::cairo::labelFont();
 	if (f == nullptr) return 0.0f;
+	if (cl::cairo::needsPango(utf8)) {
+		PangoLayout* l = cl::cairo::labelLayout(utf8);
+		PangoRectangle logical;
+		pango_layout_get_extents(l, nullptr, &logical);
+		g_object_unref(l);
+		return (float)(logical.width / (double)PANGO_SCALE * pixelHeight / cl::cairo::kGlyphUnits);
+	}
 	cairo_text_extents_t e;
 	cairo_scaled_font_text_extents(f, utf8, &e);
 	return (float)(e.x_advance * pixelHeight / cl::cairo::kGlyphUnits);
