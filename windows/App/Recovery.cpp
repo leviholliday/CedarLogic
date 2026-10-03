@@ -90,6 +90,41 @@ std::vector<Found> orphans() {
 	return out;
 }
 
+enum class Answer { Later, Open, ThrowAway };
+
+// What to do with the copies, each choice named on its button: Open (the
+// default), Later (Escape too: asked again next launch) or Throw Away. (A
+// Yes/No/Cancel box made a reflexive "No" throw the work away.)
+Answer ask(HWND parent, const std::string& heading, const std::string& text) {
+	using TaskDialogFn = HRESULT(WINAPI*)(const TASKDIALOGCONFIG*, int*, int*, BOOL*);
+	HMODULE controls = GetModuleHandleW(L"comctl32.dll");
+	const TaskDialogFn taskDialog =
+		controls ? reinterpret_cast<TaskDialogFn>(reinterpret_cast<void*>(GetProcAddress(controls, "TaskDialogIndirect"))) : nullptr;
+	if (taskDialog) {
+		const std::wstring wHeading = W(heading), wText = W(text);
+		enum { kOpen = 100, kLater, kThrowAway };
+		const TASKDIALOG_BUTTON buttons[] = { { kOpen, L"Open" }, { kLater, L"Later" }, { kThrowAway, L"Throw Away" } };
+		TASKDIALOGCONFIG c = {};
+		c.cbSize = sizeof c;
+		c.hwndParent = parent;
+		c.hInstance = appInstance();
+		c.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+		c.pszWindowTitle = L"CedarLogic";
+		c.pszMainIcon = TD_INFORMATION_ICON;
+		c.pszMainInstruction = wHeading.c_str();
+		c.pszContent = wText.c_str();
+		c.cButtons = 3;
+		c.pButtons = buttons;
+		c.nDefaultButton = kOpen;
+		int pressed = 0;
+		if (SUCCEEDED(taskDialog(&c, &pressed, nullptr, nullptr)))
+			return pressed == kOpen ? Answer::Open : pressed == kThrowAway ? Answer::ThrowAway : Answer::Later;
+	}
+	// No task dialogs (old common controls): only the safe question.
+	const std::string body = heading + "\n\n" + text + "\n\nYes opens it. No keeps it for next time.";
+	return MessageBoxW(parent, W(body).c_str(), L"CedarLogic", MB_YESNO | MB_ICONQUESTION) == IDYES ? Answer::Open : Answer::Later;
+}
+
 }  // namespace
 
 std::string newBase() {
@@ -114,26 +149,38 @@ void offer(CircuitWindow* reuse) {
 	if (found.empty()) return;
 	std::string names;
 	for (const Found& f : found) names += "• " + (f.name.empty() ? std::string("Untitled") : f.name) + "\n";
-	const std::string text = std::string(found.size() == 1 ? "CedarLogic closed before this circuit was saved:"
-	                                                       : "CedarLogic closed before these circuits were saved:") +
-	                         "\n\n" + names +
-	                         "\nA copy of the work from just before it closed was kept. Open it again?\n\n"
-	                         "Yes opens it. No throws the copy away. Cancel asks again next time.";
-	const int r = MessageBoxW(parent, W(text).c_str(), L"CedarLogic", MB_YESNOCANCEL | MB_ICONQUESTION);
-	if (r == IDCANCEL) return;   // asked again next launch
+	const Answer answer = ask(parent,
+	                          found.size() == 1 ? "CedarLogic closed before this circuit was saved"
+	                                            : "CedarLogic closed before these circuits were saved",
+	                          names + "\nA copy of the work from just before it closed was kept. Open it again? "
+	                                  "Later asks again the next time CedarLogic starts.");
+	if (answer == Answer::Later) return;
 	for (const Found& f : found) {
-		if (r == IDYES) {
+		if (answer == Answer::Open) {
 			char err[512] = "";
 			CLDocument* doc = cl_document_open(file(f.base, ".cdl").c_str(), err, sizeof err);
 			if (doc == nullptr) {
 				showMessage(parent, Tone::Warning, "A kept copy couldn't be opened", err);
 				continue;   // left in place, in case a later version can read it
 			}
-			// Back under its own name, marked unsaved: saving puts it where it was.
-			CircuitWindow* w = reuse && reuse->isPristine() ? reuse : nullptr;
-			if (w) w->replaceDocument(doc, f.path);
-			else w = new CircuitWindow(doc, f.path);
-			w->markRecovered(f.name);
+			// Back under its own name, marked unsaved: saving puts it where it
+			// was. Already open (at launch, the circuit last worked on usually
+			// is): that window takes it when it has no changes of its own (its
+			// file is the older work); one with changes keeps them, and the
+			// copy comes back as a new circuit, so neither saves over the other.
+			std::string path = f.path, name = f.name;
+			CircuitWindow* w = nullptr;
+			for (CircuitWindow* o : circuitWindows())
+				if (!path.empty() && !o->filePath().empty() && lowerCase(o->filePath()) == lowerCase(path)) w = o;
+			if (w && w->isDirty()) {
+				w = nullptr;
+				path.clear();
+				name = (name.empty() ? std::string("Untitled") : name) + " (recovered)";
+			}
+			if (w == nullptr && reuse && reuse->isPristine()) w = reuse;
+			if (w) w->replaceDocument(doc, path);
+			else w = new CircuitWindow(doc, path);
+			w->markRecovered(name);
 			reuse = nullptr;
 		}
 		remove(f.base);
