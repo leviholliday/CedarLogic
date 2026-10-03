@@ -578,16 +578,19 @@ void paintPriority(ID2D1RenderTarget* rt, float width) {
 const float kTileW = 116, kTileH = 72, kThumbW = 112;
 
 D2D1_RECT_F tileRect(int i) { return D2D1::RectF(i * (kTileW + 10), 6, i * (kTileW + 10) + kTileW, 6 + kTileH); }
-D2D1_RECT_F thumbRect(size_t i) {
-	const float x0 = 2 * (kTileW + 10) + 8;
-	return D2D1::RectF(x0 + i * (kThumbW + 12), 6, x0 + i * (kThumbW + 12) + kThumbW, 6 + kTileH);
+// The pictures after the two tiles, narrower if all three wouldn't fit (the
+// last one's × too, which stands 6 points past it).
+D2D1_RECT_F thumbRect(size_t i, float width) {
+	const float x0 = 2 * (kTileW + 10) + 8, gap = 12;
+	const float tw = std::max(40.0f, std::min(kThumbW, (width - x0 - 6 - (kMaxImages - 1) * gap) / kMaxImages));
+	return D2D1::RectF(x0 + i * (tw + gap), 6, x0 + i * (tw + gap) + tw, 6 + kTileH);
 }
-D2D1_RECT_F closeRect(size_t i) {
-	const D2D1_RECT_F t = thumbRect(i);
+D2D1_RECT_F closeRect(size_t i, float width) {
+	const D2D1_RECT_F t = thumbRect(i, width);
 	return D2D1::RectF(t.right - 12, t.top - 6, t.right + 6, t.top + 12);
 }
 
-void paintAttachments(ID2D1RenderTarget* rt, float) {
+void paintAttachments(ID2D1RenderTarget* rt, float width) {
 	const Look l = look();
 	const bool more = draft().imageCount() < kMaxImages;
 	const wchar_t glyphs[] = { 0xE722, 0xEB9F };   // camera, photo
@@ -602,14 +605,14 @@ void paintAttachments(ID2D1RenderTarget* rt, float) {
 	}
 	for (size_t i = 0; i < draft().attachments.size(); i++) {
 		const Attachment& a = draft().attachments[i];
-		const D2D1_RECT_F r = thumbRect(i);
+		const D2D1_RECT_F r = thumbRect(i, width);
 		fillRound(rt, r, 9, D2D1::ColorF(0, 0, 0, 0.3f));
 		if (a.thumb) {
 			ID2D1Bitmap* bmp = nullptr;
 			if (SUCCEEDED(rt->CreateBitmapFromWicBitmap(a.thumb, &bmp))) {
 				const D2D1_SIZE_F s = bmp->GetSize();
 				// Filled, centred, clipped to the rounded card.
-				const float k = std::max(kThumbW / s.width, kTileH / s.height);
+				const float k = std::max((r.right - r.left) / s.width, kTileH / s.height);
 				const float w = s.width * k, h = s.height * k;
 				ID2D1Factory* f = nullptr;
 				rt->GetFactory(&f);
@@ -626,7 +629,7 @@ void paintAttachments(ID2D1RenderTarget* rt, float) {
 			}
 		}
 		strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 9, l.line);
-		const D2D1_RECT_F c = closeRect(i);
+		const D2D1_RECT_F c = closeRect(i, width);
 		fillCircle(rt, D2D1::Point2F((c.left + c.right) / 2, (c.top + c.bottom) / 2), 8.5f, D2D1::ColorF(0, 0, 0, 0.65f));
 		drawIcon(rt, Icon::Dismiss, c, 8, D2D1::ColorF(1, 1, 1));
 	}
@@ -829,9 +832,9 @@ void show(CircuitWindow* win) {
 			for (int i = 0; i < 4; i++) if (inRect(pillRect(i, w), x, y)) d.priority = i;
 		} else if (field == shotsField) {
 			for (size_t i = 0; i < d.attachments.size(); i++)
-				if (inRect(closeRect(i), x, y)) { d.remove(i); form.refresh(field); return; }
+				if (inRect(closeRect(i, w), x, y)) { d.remove(i); form.refresh(field); return; }
 			for (size_t i = 0; i < d.attachments.size(); i++)
-				if (inRect(thumbRect(i), x, y)) { openExternally(form.dialog, d.attachments[i].file); return; }
+				if (inRect(thumbRect(i, w), x, y)) { openExternally(form.dialog, d.attachments[i].file); return; }
 			if (inRect(tileRect(0), x, y)) attachScreenshot(form);
 			else if (inRect(tileRect(1), x, y)) attachImages(form);
 		}
