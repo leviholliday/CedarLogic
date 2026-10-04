@@ -90,8 +90,9 @@ CI makes two ways to get it, for each processor (x64 and ARM64):
 - `CedarLogic-Windows-native-<arch>.zip`: the folder, to run where it's
   unzipped. The first time, when nothing else is on screen, it asks once
   whether to add itself to the Start menu and open .cdl files (the same
-  names the installer uses, pointing at this copy); Help > Add to Start
-  Menu / Remove from Start Menu in the ••• menu changes that later. A copy
+  names the installer uses, pointing at this copy); Settings > General's
+  Start menu switch, or Help > Add to Start Menu / Remove from Start Menu
+  in the ••• menu, changes that later. A copy
   that was added and then moved (a newer zip unzipped elsewhere, the old
   folder gone) follows itself. An installed CedarLogic has these already,
   so a zip copy beside one doesn't ask.
