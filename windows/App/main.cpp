@@ -50,6 +50,7 @@ std::string gSelect;    // --select: the first part Find finds, selected (for --
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
+bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -245,6 +246,14 @@ void CALLBACK alertTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
 	if (w) askConfirm(w->window(), "Delete \u201C" + w->titleText() + "\u201D?", "It and all its versions will be deleted.", "Delete", "Cancel", true);
+}
+
+// --wire-tag: once the circuit is in view, the pointer resting on a wire.
+void CALLBACK wireTagTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	Canvas* c = w ? w->currentCanvas() : nullptr;
+	if (c == nullptr || !c->showWireTagNow()) writeOut("no wire to rest on\n");
 }
 
 // Once the first window is up, offer back work a CedarLogic that stopped
@@ -532,6 +541,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
+		if (a == "--wire-tag") { gWireTag = true; continue; }
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
@@ -557,6 +567,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
+	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
 	if (gScreenshot.empty() && gSplashFile.empty() && !gClickTest) splash::show();
@@ -619,6 +630,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
 	if (gDialog == -5) SetTimer(nullptr, 0, 400, alertTimer);
+	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);

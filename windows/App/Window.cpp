@@ -1833,6 +1833,7 @@ void CircuitWindow::setStepMs(int ms) {
 
 void CircuitWindow::toggleSimView() {
 	simViewOn = !simViewOn;
+	cl_edit_hover_clear(doc);   // what was lit belongs to the other mode
 	if (simViewOn) {
 		if (Canvas* c = currentCanvas()) c->cancelDrag();
 		cl_edit_cancel(doc);

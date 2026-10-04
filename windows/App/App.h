@@ -58,6 +58,7 @@ struct Prefs {
 	bool showPalette = true;
 	bool showStatus = true;       // the status bar's readout (zoom, pointer, counts), as on the Mac
 	bool showGateNames = true;
+	bool wireValueTag = false;    // resting on a wire shows what it carries
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	bool hasSeenWelcome = false;
 	bool firstLaunchPlayed = false;               // the launch screen's sound, once ever

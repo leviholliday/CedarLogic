@@ -1737,6 +1737,7 @@ void showPreferencesDialog(HWND parent) {
 	const int rightRotate = f.add(checkField("Right-click a gate to rotate it", p.rightClickRotate));
 	const int dupClip = f.add(checkField("Duplicate (D) also copies to the clipboard", p.duplicateUsesClipboard));
 	const int tidy = f.add(choiceField("Tidy Up (Shift+S)", { "Keeps the layout's shape", "Arranges by signal flow" }, p.tidyMode));
+	const int wireTag = f.add(checkField("Show a wire's value when you rest on it", p.wireValueTag));
 
 	// Every change applies at once.
 	f.onChange = [&](Form& form, int field) {
@@ -1769,6 +1770,7 @@ void showPreferencesDialog(HWND parent) {
 		else if (field == rightRotate) q.rightClickRotate = form.checked(rightRotate);
 		else if (field == dupClip) q.duplicateUsesClipboard = form.checked(dupClip);
 		else if (field == tidy) q.tidyMode = form.choice(tidy);
+		else if (field == wireTag) q.wireValueTag = form.checked(wireTag);
 		else if (field == askQuit) q.confirmQuit = form.checked(askQuit);
 		else if (field == status) q.showStatus = form.checked(status);
 		prefsApply();

@@ -133,6 +133,10 @@ jobs:
           timeout 90 "$A" --dark --dialog alert --screenshot "$PWD/renders/alert-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog rename --screenshot "$PWD/renders/alert-rename.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog about --screenshot "$PWD/renders/about.png" || true
+          # A wire's value, shown where the pointer rests on it (and the whole
+          # wire lit, in Simulation View).
+          timeout 90 "$A" --wire-tag --screenshot "$PWD/renders/wire-tag.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --sim-view --wire-tag --screenshot "$PWD/renders/wire-tag-sim.png" res/samples/practice.cdl || true
           # The status bar along the bottom, with a note in it.
           timeout 90 "$A" --note "Saved, and a version was kept." --screenshot "$PWD/renders/status-note.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --note "Copied." --screenshot "$PWD/renders/status-note-dark.png" res/samples/practice.cdl || true

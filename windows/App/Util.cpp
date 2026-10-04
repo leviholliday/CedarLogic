@@ -222,6 +222,7 @@ void Prefs::load() {
 	// old one was off).
 	if (!r.b("drawnStatusBar", false)) showStatus = true;
 	showGateNames = r.b("showGateNames", showGateNames);
+	wireValueTag = r.b("wireValueTag", wireValueTag);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
@@ -292,6 +293,7 @@ void Prefs::save() const {
 	o << "statusBar=" << b(showStatus) << "\n";
 	o << "drawnStatusBar=1\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
+	o << "wireValueTag=" << b(wireValueTag) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";

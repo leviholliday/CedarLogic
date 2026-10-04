@@ -70,6 +70,9 @@ public:
 	// Draw the canvas into any Direct2D target sized w x h points (the
 	// window's own paint, and --screenshot).
 	void drawInto(ID2D1RenderTarget* rt, double scale);
+	// --wire-tag: the pointer resting on a wire (one carrying a 1 if there
+	// is one), its value showing, for the screenshot. False: no wire.
+	bool showWireTagNow();
 
 private:
 	enum class Drag { None, Edit, Pan, Slider };
@@ -124,6 +127,14 @@ private:
 	void drawOpeningCard(ID2D1RenderTarget* rt, float w, float h, double t);
 	bool overlayPress(double vx, double vy);
 	void setSpeedAt(double vx);
+
+	// What the wire under the pointer carries, in a chip beside it once the
+	// pointer has rested there a moment (Preferences > Canvas), as the Mac's.
+	bool tagShown = false, tagWaiting = false;
+	bool wireTagText(std::string& text, char& state) const;
+	void updateWireTag();
+	void hideWireTag();
+	void drawWireTag(ID2D1RenderTarget* rt, float w, float h);
 
 	LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
 	static LRESULT CALLBACK proc(HWND, UINT, WPARAM, LPARAM);

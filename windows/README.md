@@ -70,7 +70,8 @@ Direct2D here. And:
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
   or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--note "text"`
-  puts a note in the status bar.
+  puts a note in the status bar, and `--wire-tag` rests the pointer on a wire
+  to show its value.
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
   Tab, Simulation View, Lock, New) and the window's drawn Minimize and Close
   the way Windows sends a click, checks each did what it should, prints PASS,

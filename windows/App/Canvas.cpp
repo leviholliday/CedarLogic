@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -14,6 +15,7 @@ const wchar_t* kClass = L"CedarLogicCanvas";
 const double kMinUpp = 0.004;   // very close
 const double kMaxUpp = 1.0;     // very far
 const double kZoomTime = 0.14;  // seconds, as the wx app's eased zoom
+const UINT_PTR kTagTimer = 1;   // the pointer has rested on a wire
 
 double clampUpp(double u) { return std::min(std::max(u, kMinUpp), kMaxUpp); }
 
@@ -28,6 +30,22 @@ int modifiersNow() {
 
 // Shift and nothing else counts as a bare key (Shift+S is Tidy Up).
 bool bareKey() { return !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_LWIN) && !down(VK_RWIN); }
+
+// The wire tag's text: fixed-width and bold, as the Mac's.
+IDWriteTextFormat* tagFormat() {
+	static IDWriteTextFormat* f = nullptr;
+	static bool tried = false;
+	if (!tried && dwFactory()) {
+		tried = true;
+		dwFactory()->CreateTextFormat(L"Consolas", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12,
+		                              L"", &f);
+		if (f) {
+			f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+			f->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+		}
+	}
+	return f;
+}
 
 }  // namespace
 
@@ -167,6 +185,9 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 	cl_document_draw_ex(doc, p, rt, scale, originX, originY, upp, &o);
 	if (sim) {
 		cl_simview_draw_flow(doc, p, rt, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
+		// The wire under the pointer, lit up whole.
+		const RGBA a = accentColor(true);
+		cl_edit_draw_overlay(doc, p, rt, scale, originX, originY, upp, a.r, a.g, a.b);
 	} else {
 		const RGBA a = accentColor(dark);
 		cl_edit_draw_overlay(doc, p, rt, scale, originX, originY, upp, a.r, a.g, a.b);
@@ -174,7 +195,120 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 		if (cl_edit_box(doc, &l, &b, &r, &t)) drawBox(rt, l, b, r, t, a, 1);
 		else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(rt, l, b, r, t, a, alpha);
 	}
+	drawWireTag(rt, (float)w, (float)h);
 	drawOverlays(rt, (float)w, (float)h);
+}
+
+// ---- What a wire carries -------------------------------------------------------------
+
+bool Canvas::wireTagText(std::string& text, char& state) const {
+	const int p = page();
+	if (p < 0) return false;
+	char buf[72] = "";
+	const int bits = cl_edit_hover_wire_state(win->document(), p, buf, sizeof buf);
+	if (bits <= 0) return false;
+	const std::string s = buf;
+	state = s.find('!') != std::string::npos ? '!' : s.find('X') != std::string::npos ? 'X' : s.find('Z') != std::string::npos ? 'Z'
+	        : bits == 1 ? (s.empty() ? '0' : s[0]) : 'b';
+	if (bits == 1) {
+		switch (state) {
+		case '1': text = "1"; break;
+		case '0': text = "0"; break;
+		case 'Z': text = "Z \u00B7 floating (nothing drives it)"; break;
+		case '!': text = "! \u00B7 conflict (outputs disagree)"; break;
+		default: text = "X \u00B7 unknown"; break;
+		}
+	} else if (state == 'b' && bits <= 64) {
+		// A bus: its bits, and what they make.
+		unsigned long long v = 0;
+		for (char c : s) v = v * 2 + (c == '1' ? 1 : 0);
+		text = s + " = " + std::to_string(v);
+	} else {
+		text = s;
+	}
+	return true;
+}
+
+void Canvas::hideWireTag() {
+	if (tagWaiting) { KillTimer(hwnd, kTagTimer); tagWaiting = false; }
+	if (tagShown) { tagShown = false; InvalidateRect(hwnd, nullptr, FALSE); }
+}
+
+// Shown once the pointer has rested on a wire (sooner in Simulation View),
+// and then it follows the pointer along the wire.
+void Canvas::updateWireTag() {
+	std::string text;
+	char state = 0;
+	if (!prefs().wireValueTag || !wireTagText(text, state)) { hideWireTag(); return; }
+	if (tagShown) { InvalidateRect(hwnd, nullptr, FALSE); return; }
+	if (tagWaiting) return;
+	tagWaiting = true;
+	SetTimer(hwnd, kTagTimer, win->simView() ? 600 : 1100, nullptr);
+}
+
+// A small chip beside the pointer: green for 1, grey for 0, blue for
+// floating, red for a conflict, orange for unknown.
+void Canvas::drawWireTag(ID2D1RenderTarget* rt, float w, float h) {
+	std::string text;
+	char state = 0;
+	IDWriteTextFormat* f = tagFormat();
+	if (!tagShown || f == nullptr || !wireTagText(text, state)) return;
+	const D2D1_COLOR_F c = state == '1' ? D2D1::ColorF(0.13f, 0.68f, 0.3f) : state == '0' ? D2D1::ColorF(0.42f, 0.42f, 0.42f)
+	                     : state == 'Z' ? D2D1::ColorF(0.2f, 0.47f, 0.96f) : state == '!' ? D2D1::ColorF(0.92f, 0.26f, 0.24f)
+	                     : state == 'X' ? D2D1::ColorF(0.96f, 0.58f, 0.13f) : D2D1::ColorF(0.25f, 0.25f, 0.25f);
+	const std::wstring wt = W(text);
+	IDWriteTextLayout* layout = nullptr;
+	if (FAILED(dwFactory()->CreateTextLayout(wt.c_str(), (UINT32)wt.size(), f, 2000, 20, &layout))) return;
+	DWRITE_TEXT_METRICS m = {};
+	layout->GetMetrics(&m);
+	const float tw = m.widthIncludingTrailingWhitespace;
+	const float x = (float)lastX, y = (float)lastY;
+	D2D1_RECT_F r = D2D1::RectF(x + 14, y - 30, x + 14 + tw + 14, y - 10);
+	if (r.right > w - 4) { const float rw = r.right - r.left; r.left = x - 14 - rw; r.right = r.left + rw; }
+	if (r.top < 4) { r.top = y + 14; r.bottom = r.top + 20; }
+	(void)h;
+	fillRound(rt, D2D1::RectF(r.left, r.top + 1, r.right, r.bottom + 2), 10, D2D1::ColorF(0, 0, 0, 0.25f));
+	fillRound(rt, r, 10, c);
+	ID2D1SolidColorBrush* white = nullptr;
+	if (SUCCEEDED(rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1), &white))) {
+		rt->DrawTextLayout(D2D1::Point2F(r.left + 7, r.top), layout, white);
+		white->Release();
+	}
+	layout->Release();
+}
+
+bool Canvas::showWireTagNow() {
+	CLDocument* doc = win->document();
+	const int p = page();
+	const double w = width(), h = height();
+	if (doc == nullptr || p < 0 || w < 2 || h < 2) return false;
+	// Every few points across the view, until a wire carrying a 1 (or the
+	// first wire, if none does).
+	double firstX = -1, firstY = -1;
+	for (double vy = 40; vy < h - 40; vy += 3) {
+		for (double vx = 40; vx < w - 40; vx += 3) {
+			double wx, wy;
+			worldPoint(vx, vy, wx, wy);
+			cl_edit_hover_wire(doc, p, wx, wy, upp);
+			char buf[72] = "";
+			if (cl_edit_hover_wire_state(doc, p, buf, sizeof buf) <= 0) continue;
+			if (firstX < 0) { firstX = vx; firstY = vy; }
+			if (strchr(buf, '1') == nullptr) continue;
+			firstX = vx;
+			firstY = vy;
+			vy = h;
+			break;
+		}
+	}
+	if (firstX < 0) { cl_edit_hover_clear(doc); return false; }
+	double wx, wy;
+	worldPoint(firstX, firstY, wx, wy);
+	cl_edit_hover_wire(doc, p, wx, wy, upp);
+	lastX = firstX;
+	lastY = firstY;
+	tagShown = true;
+	redraw();
+	return true;
 }
 
 // ---- Overlays ------------------------------------------------------------------
@@ -616,7 +750,17 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	case WM_MOUSELEAVE:
 		pointerInside = false;
+		hideWireTag();
 		if (drag == Drag::None && cl_edit_hover_clear(win->document())) redraw();
+		return 0;
+	case WM_TIMER:
+		if (wp == kTagTimer) {
+			KillTimer(hwnd, kTagTimer);
+			tagWaiting = false;
+			std::string text;
+			char state = 0;
+			if (pointerInside && wireTagText(text, state)) { tagShown = true; InvalidateRect(hwnd, nullptr, FALSE); }
+		}
 		return 0;
 	case WM_MOUSEWHEEL:
 	case WM_MOUSEHWHEEL: {
@@ -670,6 +814,7 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 	const int p = page();
 	if (doc == nullptr || p < 0) return;
 	SetFocus(hwnd);
+	hideWireTag();
 	zooming = false;
 	lastX = vx;
 	lastY = vy;
@@ -780,8 +925,9 @@ void Canvas::onMotion(double vx, double vy) {
 		break;
 	case Drag::None:
 		if (win->hasPendingGate() && win->placePendingGate(wx, wy)) { redraw(); break; }
-		if (win->simView()) break;
-		if (cl_edit_hover(doc, p, wx, wy, upp)) redraw();
+		// Simulation View lights the whole wire under the pointer.
+		if (win->simView() ? cl_edit_hover_wire(doc, p, wx, wy, upp) : cl_edit_hover(doc, p, wx, wy, upp)) redraw();
+		updateWireTag();
 		break;
 	}
 }
