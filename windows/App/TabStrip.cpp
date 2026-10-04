@@ -258,6 +258,16 @@ void TabStrip::mouseLeave() {
 }
 
 void TabStrip::mouseDown(int button, float x, float y, bool doubleClick) {
+	// A tab's X clicked twice: the second press is a press of its own on
+	// what slid under the pointer (another X closes its tab, as a browser's
+	// do), not a double-click that renames the tab now there or opens a new
+	// one where the last tab was.
+	bool afterClose = false;
+	if (button == 1) {
+		afterClose = doubleClick && closedOnPress;
+		closedOnPress = false;
+		if (afterClose) doubleClick = false;
+	}
 	const int cap = captionAt(x, y);
 	if (cap >= 0) {
 		if (button == 1 && cap != CapMax) { pressedCap = cap; hotCap = cap; redraw(); }
@@ -278,6 +288,7 @@ void TabStrip::mouseDown(int button, float x, float y, bool doubleClick) {
 	if (button != 1) return;
 	auto letGo = [&] { if (GetCapture() == hwnd) ReleaseCapture(); };
 	if (inRect(plus, x, y)) {
+		if (afterClose) return;
 		win->activatePane(pane);
 		win->run(CMD_NEW_TAB);
 		return;
@@ -296,6 +307,7 @@ void TabStrip::mouseDown(int button, float x, float y, bool doubleClick) {
 	}
 	if (cl_document_page_count(win->document()) > 1 && inRect(closeRect(k), x, y) && (p == win->shownPage(pane) || k == hot)) {
 		letGo();
+		closedOnPress = true;
 		win->closeTab(p);
 		hot = hotClose = -1;
 		return;

@@ -61,6 +61,7 @@ private:
 	int hot = -1, hotClose = -1, pressed = -1, hotCap = -1, pressedCap = -1;
 	bool plusHot = false, maxHot = false, maxPressed = false;
 	bool dragging = false;
+	bool closedOnPress = false;          // the last press closed a tab (the next, to Windows, may be a double-click)
 	float pressX = 0, pressY = 0, grabOffset = 0, dragX = 0;
 	// The other side of a split steps back (0 in front, 1 back), easing.
 	float backFrom = 0, backTo = 0;
