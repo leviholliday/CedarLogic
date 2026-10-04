@@ -204,9 +204,11 @@ void applyStyle() {
 		s += "menu menuitem:hover { background-color: " + css(c.accent()) + "; background-image: none; box-shadow: none; }\n";
 		// A dropdown's rows (Settings' choices) are cell views, not labels.
 		s += "menu menuitem cellview { color: " + css(ink) + "; }\n";
-		s += "menu menuitem:hover label, menu menuitem:hover accelerator, menu menuitem:hover arrow, menu menuitem:hover cellview { color: " +
-		     css(c.onAccent()) + "; }\n";
-		s += "menu menuitem:disabled label, menu menuitem:disabled accelerator { color: " + css(withAlpha(ink, 0.42f)) + "; }\n";
+		// Only the lit row's own text: an open submenu counts as inside its
+		// lit parent row, so a plain descendant rule would light all of it.
+		s += "menuitem:hover > label, menuitem:hover > label > accelerator, menuitem:hover > box > label, menuitem:hover > arrow, "
+		     "menuitem:hover > cellview, menuitem:hover > accelerator { color: " + css(c.onAccent()) + "; }\n";
+		s += "menuitem:disabled > label, menuitem:disabled > label > accelerator, menuitem:disabled > box > label { color: " + css(withAlpha(ink, 0.5f)) + "; }\n";
 		s += "menu menuitem check, menu menuitem radio { margin-right: 6px; }\n";
 		s += "menu separator { margin: 4px 8px; min-height: 1px; background-color: " + css(line) + "; }\n";
 		s += "menu arrow { min-width: 14px; min-height: 14px; color: " + css(dimInk) + "; }\n";
