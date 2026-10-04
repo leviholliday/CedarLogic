@@ -55,6 +55,7 @@ struct Card {
 	COLORREF editBack = 0;
 	WindowSurface surface;
 	bool done = false, calm = false, rounded = false, releasing = false;
+	bool gone = false;   // destroyed with its owner
 	int answer = 0;
 	double shown = 0;
 	int hot = -1, pressed = -1;
@@ -288,6 +289,12 @@ struct Card {
 		case WM_CLOSE:
 			choose(a.escape);
 			return 0;
+		case WM_DESTROY:
+			// Gone with the window it belongs to (as a message box goes):
+			// the way out, rather than waiting for ever.
+			gone = true;
+			if (!done) choose(a.escape);
+			break;
 		case WM_ACTIVATE:
 			// Back from another window: the keyboard where it was.
 			if (LOWORD(wp) != WA_INACTIVE) SetFocus(focus == -2 && edit ? edit : hwnd);
@@ -436,15 +443,17 @@ int runAlert(HWND parent, Alert& a) {
 		DispatchMessageW(&m);
 	}
 	if (m.message == WM_QUIT) PostQuitMessage((int)m.wParam);
-	if (c.edit) {
+	if (c.edit && !c.gone) {
 		a.value = trimmed(windowText(c.edit));
 		RemoveWindowSubclass(c.edit, Card::editProc, 1);
 	}
 	// The window it belongs to takes the keyboard back as this one goes.
 	if (ownerWasEnabled) EnableWindow(owner, TRUE);
-	KillTimer(c.hwnd, kAnimTimer);
-	SetWindowLongPtrW(c.hwnd, GWLP_USERDATA, 0);
-	DestroyWindow(c.hwnd);
+	if (!c.gone) {
+		KillTimer(c.hwnd, kAnimTimer);
+		SetWindowLongPtrW(c.hwnd, GWLP_USERDATA, 0);
+		DestroyWindow(c.hwnd);
+	}
 	if (owner && ownerWasEnabled) SetForegroundWindow(owner);
 	if (c.editFont) DeleteObject(c.editFont);
 	if (c.editBrush) DeleteObject(c.editBrush);
