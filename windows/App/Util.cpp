@@ -220,6 +220,19 @@ void Prefs::load() {
 	showStatus = r.b("statusBar", showStatus);
 	showGateNames = r.b("showGateNames", showGateNames);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
+	showCategoryKeys = r.b("showCategoryKeys", showCategoryKeys);
+	gateSize = r.i("gateSize", gateSize, 36, 96);
+	// Seamless for a new install; whoever had the app before keeps Classic,
+	// the look they knew, until they choose.
+	toolbarStyle = r.i("toolbarStyle", r.m.empty() ? toolbarStyle : 0, 0, 3);
+	if (toolbarStyle == 1) toolbarStyle = 0;
+	toolbarHidden = r.i("toolbarHidden", toolbarHidden, 0, 1 << 12);
+	showTitle = r.b("showTitle", showTitle);
+	showThemeToggle = r.b("showThemeToggle", showThemeToggle);
+	openReplaces = r.b("openReplaces", openReplaces);
+	newTemplate = r.s("newTemplate", newTemplate);
+	shortcuts = r.s("shortcuts", shortcuts);
+	checkUpdates = r.b("checkUpdates", checkUpdates);
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
@@ -289,6 +302,16 @@ void Prefs::save() const {
 	o << "statusBar=" << b(showStatus) << "\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
+	o << "showCategoryKeys=" << b(showCategoryKeys) << "\n";
+	o << "gateSize=" << gateSize << "\n";
+	o << "toolbarStyle=" << toolbarStyle << "\n";
+	o << "toolbarHidden=" << toolbarHidden << "\n";
+	o << "showTitle=" << b(showTitle) << "\n";
+	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
+	o << "openReplaces=" << b(openReplaces) << "\n";
+	o << "newTemplate=" << newTemplate << "\n";
+	o << "shortcuts=" << shortcuts << "\n";
+	o << "checkUpdates=" << b(checkUpdates) << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
