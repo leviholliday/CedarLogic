@@ -108,7 +108,7 @@ const std::vector<Page>& pages() {
 		           { "Ctrl+0", "Zoom to fit" },
 		           { "Ctrl+1", "Actual size" },
 		           { "Arrows", "Move around (when nothing's selected)" },
-		           { "Ctrl+.", "Show or hide the side panel" } }),
+		           { "Ctrl+.", "Focus mode: the toolbar and side panel slide away" } }),
 		    p("The minimap under the side panel shows the whole page; its box is what you can see. Click or drag in it to go there.") },
 		  false },
 		{ "tabs", "Tabs", 0xE8A4, "Pages of one circuit.",
@@ -116,8 +116,13 @@ const std::vector<Page>& pages() {
 		           { "Ctrl+W", "Close the tab (it asks if there's work on it)" },
 		           { "Ctrl+Shift+T", "Reopen the tab you closed" },
 		           { "Ctrl+Tab", "Switch tabs: tap for the last one, hold Ctrl for a picture of each" },
-		           { "Ctrl+PgDn / PgUp", "Next and previous tab" } }),
-		    p("Double-click a tab to rename it; drag it along the strip to put it in order.") },
+		           { "Ctrl+PgDn / PgUp", "Next and previous tab" },
+		           { "Ctrl+Alt+S", "Split view: two tabs side by side" },
+		           { "F6", "Switch side in a split view" },
+		           { "Ctrl+Alt+W", "Close the split view" } }),
+		    p("Double-click a tab to rename it on the tab (Enter keeps the name, Escape puts it back), and the empty strip for a new "
+		      "tab. Drag a tab along the strip to put it in order, or down onto the canvas to split the view; drag it onto the other "
+		      "side to move it there. The split closes when a side runs out of tabs.") },
 		  false },
 		{ "sim", "Running the Simulation", 0xE768, "It runs while you build.",
 		  { p("The circuit runs all the time. The toolbar pauses and resumes it (so does **Space** on the canvas), **Ctrl+Shift+R** steps "
@@ -133,7 +138,8 @@ const std::vector<Page>& pages() {
 		    p("Its other tabs: each light's **Karnaugh map** with the groups drawn on, and its **simplest sum of products** and **product "
 		      "of sums**. Rows with no clear 0 or 1 count as don't-cares. Copy a formula, or **Build This as a Circuit** to make it again "
 		      "as gates."),
-		    p("**Oscilloscope (Ctrl+G)** records signals over time: every **TO** label is a signal you can watch. Click or use the arrows "
+		    p("**Oscilloscope (Ctrl+G)** records signals over time, under the canvas (drag the line over it to make it taller): every "
+		      "**TO** label is a signal you can watch. Click or use the arrows "
 		      "to move its time cursor (Alt+arrows jump to the next change), and the names column reads every signal there. Its share "
 		      "button copies a **timing diagram** for a lab report, or saves it as a PNG (what's on screen, or the whole recording).") },
 		  false },
