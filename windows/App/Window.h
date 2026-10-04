@@ -319,6 +319,7 @@ private:
 	bool hasDragFade = false;
 	double fadeL = 0, fadeB = 0, fadeR = 0, fadeT = 0;
 	int lastPageCount = 1;
+	uint64_t tidyKey = 0;             // the page Tidy Up's preview is on
 	std::map<uint64_t, bool> seenPages;
 	HMENU menus = nullptr, recentMenu = nullptr;
 	std::vector<std::string> recentPaths;   // Open Recent's circuits, as the menu shows them

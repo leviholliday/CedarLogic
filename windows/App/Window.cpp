@@ -600,6 +600,13 @@ void CircuitWindow::showPage(int index) {
 void CircuitWindow::pageSwitched() {
 	Canvas* front = currentCanvas();
 	const int paneBefore = focusPane;
+	// Tidy Up's preview is its page's: going to another page (the other
+	// side, the next tab) keeps it, as any other key does, so its banner's
+	// buttons don't follow you to a page it isn't on.
+	if (front && cl_edit_tidy_active(doc) && front->pageKey() != tidyKey) {
+		cl_edit_tidy_end(doc, true);
+		edited();
+	}
 	if (front) {
 		const int pane = paneOf(front);
 		frontKeys[pane] = front->pageKey();
@@ -2245,6 +2252,7 @@ void CircuitWindow::straighten() { cl_edit_straighten(doc, currentPage()); edite
 void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); }
 
 void CircuitWindow::tidy(int mode) {
+	tidyKey = cl_document_page_id(doc, currentPage());
 	if (!cl_edit_tidy_begin(doc, currentPage(), mode < 0 ? prefs().tidyMode : mode)) note("Nothing to tidy on this page.");
 	edited();
 }
@@ -2257,8 +2265,11 @@ void CircuitWindow::endTidy(bool keep) {
 
 void CircuitWindow::switchTidyMode() {
 	const int other = 1 - cl_edit_tidy_mode(doc);
+	const int at = cl_document_page_index(doc, tidyKey);   // the page being tidied
+	const int page = at >= 0 ? at : currentPage();
 	cl_edit_tidy_end(doc, false);
-	cl_edit_tidy_begin(doc, currentPage(), other);
+	tidyKey = cl_document_page_id(doc, page);
+	cl_edit_tidy_begin(doc, page, other);
 	edited();
 	if (Canvas* c = currentCanvas()) c->focus();
 }
