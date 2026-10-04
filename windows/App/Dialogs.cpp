@@ -447,8 +447,10 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (f->onInit) f->onInit(*f);
 		});
 		if (f->timerMs > 0) SetTimer(d, kFormTimer, (UINT)f->timerMs, nullptr);
-		// The first box to type in, or the first list, has the keyboard.
+		// The first box to type in, or the first list, has the keyboard (on
+		// the page showing: one hidden on another would take the typing).
 		for (FormField& x : f->fields) {
+			if (!f->pages.empty() && x.page != f->page) continue;
 			if (x.kind == FormField::Text || x.kind == FormField::List) { SetFocus(x.hwnd); return FALSE; }
 		}
 		return TRUE;
@@ -1189,6 +1191,9 @@ void Form::showPage(int to) {
 			focus = x.hwnd;
 	}
 	if (HWND tabs = GetDlgItem(dialog, kTabsId)) InvalidateRect(tabs, nullptr, FALSE);
+	// The keyboard leaves a field that's been hidden (it would still take keys).
+	HWND had = GetFocus();
+	if (focus && had && IsChild(dialog, had) && !IsWindowVisible(had)) SetFocus(focus);
 	// The window fits the page, as the Mac's Settings does: what's wrong
 	// and the buttons move up under its last field.
 	if (page < (int)pageBottoms.size()) {
