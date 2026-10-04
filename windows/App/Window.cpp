@@ -2268,6 +2268,9 @@ void CircuitWindow::endTidy(bool keep) {
 }
 
 void CircuitWindow::switchTidyMode() {
+	// Only a preview on show turns the other way (a click on a banner button
+	// drawn just before it settled would start one on the page it was on).
+	if (!cl_edit_tidy_active(doc)) return;
 	const int other = 1 - cl_edit_tidy_mode(doc);
 	const int at = cl_document_page_index(doc, tidyKey);   // the page being tidied
 	const int page = at >= 0 ? at : currentPage();
