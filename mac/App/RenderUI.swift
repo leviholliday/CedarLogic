@@ -145,6 +145,38 @@ enum RenderUI {
                 }
                 UserDefaults.standard.removeObject(forKey: "cl.truthTab")
             }
+            do {   // Check: a full adder whose carry is wrong on the last row.
+                let adder: [[Character]] = (0..<8).map { m in
+                    (0..<3).map { (m >> (2 - $0)) & 1 == 1 ? "1" : "0" } +
+                    [m.nonzeroBitCount % 2 == 1 ? "1" : "0", m.nonzeroBitCount >= 2 && m != 7 ? "1" : "0"]
+                }
+                let floating: [[Character]] = adder.map { r in Array(r.prefix(4)) + [r[0] == "0" ? "Z" : r[4]] }
+                let shots: [(String, Int, String, [[Character]])] = [
+                    ("wrong", 0, "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", adder),
+                    ("matches", 0, "S(A,B,Cin) = Σm(1,2,4,7)\nCout(A,B,Cin) = Σm(3,5,6) + d(7)", adder),
+                    ("table", 1, "A B Cin | S Cout\n0 0 0 | 0 0\n0 0 1 | 1 0\n0 1 0 | 1 0\n0 1 1 | 0 1\n1 0 0 | 1 0\n1 0 1 | 0 1\n1 1 0 | 0 1\n1 1 1 | 1 1", adder),
+                    ("missing", 0, "S = A ^ B ^ Ci + D\nCarry = AB", adder),
+                    ("floating", 0, "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", floating),
+                    ("empty", 0, "", adder),
+                ]
+                UserDefaults.standard.set(TruthTableView.checkTab, forKey: "cl.truthTab")
+                for (name, kind, text, rows) in shots {
+                    let key = "render-ui-check-\(name)"
+                    CheckMemory.save(key, .init(kind: kind, text: text, names: [:]))
+                    var table = TruthTable(names: ["A", "B", "Cin", "S", "Cout"], inputs: 3, rows: rows)
+                    table.checkKey = key
+                    let host = NSHostingView(rootView: TruthTableView(table: table))
+                    host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                    host.frame = NSRect(origin: .zero, size: CGSize(width: 720, height: host.fittingSize.height))
+                    host.layoutSubtreeIfNeeded()
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("check-\(name)-\(t).png"))
+                    }
+                    CheckMemory.save(key, nil)
+                }
+                UserDefaults.standard.removeObject(forKey: "cl.truthTab")
+            }
             save("truthtable-wide-\(t)", TruthTableView(table: TruthTable(names: ["A", "B", "C", "Y1", "Y2", "Y3", "Y4", "Y5", "Y6"], inputs: 3, rows: wide)),
                  width: 900)
             save("buildformula-\(t)", BuildFormulaView(text: "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", canvas: canvas), width: 560, height: 560)
