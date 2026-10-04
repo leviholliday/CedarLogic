@@ -193,8 +193,15 @@ private:
 		return u;
 	}
 	std::string tableText(char sep) const {
+		// CSV: a name with a comma, quote or line break in quotes.
+		auto field = [sep](const std::string& f) {
+			if (sep != ',' || f.find_first_of(",\"\r\n") == std::string::npos) return f;
+			std::string q = "\"";
+			for (char ch : f) { if (ch == '"') q += '"'; q += ch; }
+			return q + "\"";
+		};
 		std::string s;
-		for (size_t c = 0; c < names.size(); c++) s += (c ? std::string(1, sep) : "") + names[c];
+		for (size_t c = 0; c < names.size(); c++) s += (c ? std::string(1, sep) : "") + field(names[c]);
 		s += "\n";
 		for (const std::string& row : rows) {
 			for (size_t c = 0; c < row.size(); c++) { if (c) s += sep; s += row[c]; }
@@ -325,10 +332,12 @@ private:
 			if (file.empty()) return;
 			HANDLE f = CreateFileW(W(file).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 			if (f == INVALID_HANDLE_VALUE) { showMessage(hwnd, Tone::Warning, "Couldn't save it there", "Try another folder."); return; }
-			const std::string text = tableText(',');
+			// UTF-8 marked as such, so Excel shows names like A→B as typed.
+			const std::string text = "\xEF\xBB\xBF" + tableText(',');
 			DWORD wrote = 0;
-			WriteFile(f, text.data(), (DWORD)text.size(), &wrote, nullptr);
+			const bool ok = WriteFile(f, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size();
 			CloseHandle(f);
+			if (!ok) showMessage(hwnd, Tone::Warning, "Couldn't save it there", "Try another folder.");
 		}) + 10;
 		if (copied == "table") drawText(rt, "Copied", D2D1::RectF(fx, fy, fx + 80, fy + 30), 12, dim);
 		{
