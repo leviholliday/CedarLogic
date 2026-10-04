@@ -38,6 +38,8 @@ namespace {
 const wchar_t* kProgId = L"CedarLogic.Circuit";
 const std::wstring kClasses = L"Software\\Classes\\";
 const wchar_t* kInstallKey = L"Software\\CedarLogic\\Native";   // the installer's
+// The installer's entry in Settings > Apps (its AppId, then "_is1").
+const wchar_t* kUninstallKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{59AB891F-9536-471C-BAE2-13C34308A7C3}_is1";
 
 std::wstring exePath() {
 	wchar_t buf[MAX_PATH * 4];
@@ -101,6 +103,13 @@ void deleteIfEmpty(const std::wstring& key) {
 }
 
 std::wstring installDir() { return readString(kInstallKey, L"InstallDir"); }
+
+// Installed, then updated from inside the app: Settings > Apps shows the
+// version this is now, not the one the installer put there.
+void noteVersion() {
+	const std::wstring was = readString(kUninstallKey, L"DisplayVersion"), now = W(CL_VERSION);
+	if (!was.empty() && was != now) writeString(kUninstallKey, L"DisplayVersion", now);
+}
 
 // An installed CedarLogic, this one or another: that one has Start and .cdl
 // files, and a copy from the zip leaves them to it.
@@ -301,9 +310,12 @@ bool installed() {
 }
 
 void start(bool now) {
+	if (g_now) return;   // CI's question is already on its way
+	if (!now && installed()) guarded("noting the installed version", [] { noteVersion(); });
 	// Added, then moved (a newer zip unzipped somewhere else, the old folder
-	// gone): Start and .cdl files follow it here.
-	if (!now && prefs().startMenu == 1 && !installedAnywhere()) {
+	// gone): Start and .cdl files follow it here -- not to a copy run from
+	// the temporary files, which goes away.
+	if (!now && prefs().startMenu == 1 && !installedAnywhere() && !inTemp()) {
 		const std::wstring was = registeredExe();
 		if (!was.empty() && !exists(was) && !samePath(was, exePath())) guarded("following a moved CedarLogic", [] { add(); });
 	}

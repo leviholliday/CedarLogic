@@ -50,7 +50,9 @@
 #define ProgId "CedarLogic.Circuit"
 
 [Setup]
-; The same for every build, so a new one installs over the last.
+; The same for every build, so a new one installs over the last. (The app
+; finds its Settings > Apps entry by it, to keep the version there current
+; after an update from inside the app: Integration.cpp.)
 AppId={{59AB891F-9536-471C-BAE2-13C34308A7C3}
 AppName=CedarLogic
 AppVersion={#AppVersion}

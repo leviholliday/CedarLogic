@@ -13,7 +13,8 @@
 //
 // The same for a copy unzipped anywhere and one the installer put in
 // %LOCALAPPDATA%\Programs\CedarLogic: only the exe and res beside it change
-// (the installer's uninstaller and its notes stay as they are).
+// (the installer's uninstaller and its notes stay as they are; Settings >
+// Apps learns the new version at the next launch, in Integration.cpp).
 //
 // The network calls run on a thread of their own; only the main thread
 // touches windows.
