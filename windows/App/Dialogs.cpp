@@ -1784,9 +1784,9 @@ void showShortcutsWindow(HWND parent) {
 	struct Key { const char* keys; const char* what; };
 	struct Group { const char* title; std::vector<Key> keys; };
 	const std::vector<Group> groups = {
-		{ "Circuits", { { "Ctrl+N", "New circuit" }, { "Ctrl+O", "Open" }, { "Ctrl+S", "Save" },
+		{ "Circuits", { { "Ctrl+N", "New circuit" }, { "Ctrl+O", "Open" }, { "Ctrl+I", "Import a file" }, { "Ctrl+S", "Save" },
 		                { "Ctrl+Shift+S", "Save as" }, { "Ctrl+E", "Export as an image" },
-		                { "Ctrl+P", "Print" }, { "Ctrl+Q", "Quit" } } },
+		                { "Ctrl+P", "Print" }, { "Ctrl+Shift+W", "Close window" }, { "Ctrl+Q", "Quit" } } },
 		{ "Editing", { { "Ctrl+Z", "Undo" }, { "Ctrl+Y or Ctrl+Shift+Z", "Redo" }, { "Ctrl+X", "Cut" },
 		               { "Ctrl+C", "Copy" }, { "Ctrl+V", "Paste (it follows the pointer)" },
 		               { "Ctrl+D", "Duplicate" }, { "Ctrl+A", "Select all" }, { "Delete", "Delete" },
@@ -1795,14 +1795,14 @@ void showShortcutsWindow(HWND parent) {
 		               { "Shift+S", "Tidy up (preview first)" }, { "C", "Copy; while moving, connect nearby pins" },
 		               { "V", "Paste" }, { "X", "Cut" }, { "D", "Duplicate" }, { "Arrow keys", "Nudge the selection" },
 		               { "Shift+1 … Shift+0", "Palette category 1 … 10" } } },
-		{ "Moving around", { { "Ctrl+=", "Zoom in" }, { "Ctrl+-", "Zoom out" }, { "Ctrl+0", "Zoom to fit" },
+		{ "Moving around", { { "Ctrl+F", "Find a gate or label" }, { "Ctrl+=", "Zoom in" }, { "Ctrl+-", "Zoom out" }, { "Ctrl+0", "Zoom to fit" },
 		               { "Space", "Tap: zoom to fit. Hold and drag: move around" }, { "Ctrl+1", "Actual size" },
 		               { "Ctrl+.", "Show or hide the palette" }, { "Middle button drag", "Move around" } } },
 		{ "Simulation", { { "Ctrl+R", "Simulation View" }, { "Ctrl+Shift+R", "Step once" }, { "T", "Truth table" },
 		               { "Ctrl+G", "Oscilloscope" } } },
 		{ "Tabs", { { "Ctrl+T", "New tab" }, { "Ctrl+W", "Close tab" }, { "Ctrl+Shift+T", "Reopen the tab you closed" },
-		            { "Ctrl+Tab", "Next tab" }, { "Ctrl+Shift+Tab", "Previous tab" } } },
-		{ "App", { { "?", "Every shortcut (this list)" }, { "Ctrl+Shift+D", "Dark mode" },
+		            { "Ctrl+Tab or Ctrl+PgDn", "Next tab" }, { "Ctrl+Shift+Tab or Ctrl+PgUp", "Previous tab" } } },
+		{ "App", { { "? or Ctrl+/", "Every shortcut (this list)" }, { "Ctrl+Shift+D", "Dark mode" },
 		           { "Ctrl+,", "Preferences" }, { "F1", "Help" } } },
 	};
 	std::vector<std::vector<std::string>> rows;
@@ -1820,7 +1820,7 @@ void showShortcutsWindow(HWND parent) {
 	list.kind = FormField::List;
 	list.lines = 24;
 	list.choices = { "Keys", "What it does" };
-	list.columnWidths = { 190, 0 };
+	list.columnWidths = { 210, 0 };
 	const int l = f.add(list);
 	f.onInit = [&](Form& form) { form.setRows(l, rows); };
 	f.run(parent);
