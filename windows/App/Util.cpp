@@ -251,6 +251,7 @@ void Prefs::load() {
 	feedbackContact = r.b("feedbackContact", feedbackContact);
 	seenWhatsNew = r.s("seenWhatsNew", seenWhatsNew);
 	confirmQuit = r.b("confirmQuit", confirmQuit);
+	startMenu = r.i("startMenu", startMenu, 0, 2);
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
 		const std::string v = r.s(strf("recent%d", i).c_str(), "");
@@ -320,6 +321,7 @@ void Prefs::save() const {
 	o << "feedbackContact=" << b(feedbackContact) << "\n";
 	o << "seenWhatsNew=" << seenWhatsNew << "\n";
 	o << "confirmQuit=" << b(confirmQuit) << "\n";
+	o << "startMenu=" << startMenu << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	const std::string text = o.str();
 	// A temporary beside it, then moved over: a crash mid-write can't leave
