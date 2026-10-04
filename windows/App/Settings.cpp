@@ -92,16 +92,18 @@ FormField button(const char* label, bool beside) {
 const int kAccentOrder[] = { 6, 0, 1, 2, 3, 4, 5 };   // the icon's green first, as the Mac offers them
 const float kSwatchW = 60;
 
-void paintSwatches(ID2D1RenderTarget* rt, float, float h) {
+// `focused`: tabbed to, the chosen one's ring in the accent.
+void paintSwatches(ID2D1RenderTarget* rt, float, float h, bool focused) {
 	static const char* names[] = { "Blue", "Purple", "Pink", "Orange", "Green", "Graphite", "CedarLogic" };
 	const FormLook look = formLook();
+	const D2D1_COLOR_F ring = focused ? chrome().accent() : withAlpha(look.ink, 0.8f);
 	for (int i = 0; i < 7; i++) {
 		const int a = kAccentOrder[i];
 		double r = 0, g = 0, b = 0;
 		cl_accent_color(a, prefs().dark, &r, &g, &b);
 		const D2D1_POINT_2F mid = D2D1::Point2F(kSwatchW / 2 + i * kSwatchW, 17);
 		const bool on = prefs().accent == a;
-		if (on) strokeRound(rt, D2D1::RectF(mid.x - 15, mid.y - 15, mid.x + 15, mid.y + 15), 15, withAlpha(look.ink, 0.8f), 2);
+		if (on) strokeRound(rt, D2D1::RectF(mid.x - 15, mid.y - 15, mid.x + 15, mid.y + 15), 15, ring, 2);
 		fillCircle(rt, mid, 11, D2D1::ColorF((float)r, (float)g, (float)b));
 		if (on) fillCircle(rt, mid, 4, D2D1::ColorF(1, 1, 1, 0.95f));
 		drawText(rt, names[a], D2D1::RectF(mid.x - kSwatchW / 2, h - 17, mid.x + kSwatchW / 2, h), 10.5f, withAlpha(look.ink, on ? 0.95f : 0.7f),
@@ -119,7 +121,8 @@ const Style kStyles[] = {
 };
 const float kStyleH = 88;
 
-void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float) {
+// `focused`: tabbed to, the chosen one's button ringed.
+void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float, bool focused) {
 	const FormLook look = formLook();
 	const D2D1_COLOR_F accent = chrome().accent();
 	Toolbar* bar = nullptr;
@@ -132,6 +135,7 @@ void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float) {
 		const D2D1_POINT_2F dot = D2D1::Point2F(9, top + 11);
 		strokeRound(rt, D2D1::RectF(dot.x - 7, dot.y - 7, dot.x + 7, dot.y + 7), 7, on ? accent : withAlpha(look.ink, 0.45f), on ? 2.0f : 1.2f);
 		if (on) fillCircle(rt, dot, 3.5f, accent);
+		if (on && focused) strokeRound(rt, D2D1::RectF(dot.x - 9.5f, dot.y - 9.5f, dot.x + 9.5f, dot.y + 9.5f), 9.5f, withAlpha(accent, 0.45f), 1.5f);
 		drawText(rt, st.name, D2D1::RectF(24, top + 1, w, top + 21), 13, look.ink, TextAlign::Leading, true);
 		drawText(rt, st.blurb, D2D1::RectF(24, top + 21, w, top + 39), 11.5f, look.dim);
 		// The bar itself, drawn in that style a size smaller.
@@ -159,6 +163,27 @@ void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float) {
 		strokeRound(rt, D2D1::RectF(pr.left + 0.5f, pr.top + 0.5f, pr.right - 0.5f, pr.bottom - 0.5f), 8,
 		            on ? withAlpha(accent, 0.7f) : withAlpha(look.ink, 0.15f), on ? 1.5f : 1.0f);
 	}
+}
+
+// The colours and the styles by keyboard too: Tab to them, the arrows pick.
+LRESULT CALLBACK arrowPickProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
+	const std::function<void(int)>* step = reinterpret_cast<const std::function<void(int)>*>(data);
+	switch (msg) {
+	case WM_GETDLGCODE: return DLGC_WANTARROWS;
+	case WM_KEYDOWN: {
+		const int by = wp == VK_LEFT || wp == VK_UP ? -1 : wp == VK_RIGHT || wp == VK_DOWN ? 1 : 0;
+		if (by != 0) {
+			guarded("a setting", [&] { (*step)(by); });
+			return 0;
+		}
+		break;
+	}
+	case WM_SETFOCUS:
+	case WM_KILLFOCUS:
+		InvalidateRect(h, nullptr, FALSE);
+		break;
+	}
+	return DefSubclassProc(h, msg, wp, lp);
 }
 
 // ---- Shortcuts: every command, its keys, click to change ------------------------------
@@ -521,7 +546,9 @@ void showPreferencesDialog(HWND parent) {
 			applyTheme();
 			form.retheme();
 		};
-	const int swatches = f.add(picture("App colour:", 52, paintSwatches,
+	int swatchField = -1, styleField = -1;   // (for the pictures: whether they have the keyboard)
+	auto focused = [&f](int field) { return field >= 0 && GetFocus() == f.fields[field].hwnd; };
+	const int swatches = f.add(picture("App colour:", 52, [&](ID2D1RenderTarget* rt, float w, float h) { paintSwatches(rt, w, h, focused(swatchField)); },
 	                                   "Selections, highlights and buttons. CedarLogic is the icon's green. Wire colours that show signal state never change."));
 	const int showGrid = f.add(check("Canvas:", "Show the grid", p.showGrid, "The background grid gates snap to. Printing never includes it."));
 	const int gridStyle = f.add(choice("Grid style:", { "Lines", "Dots" }, p.gridStyle, "Dots are quieter; lines make alignment easier to see."));
@@ -572,7 +599,10 @@ void showPreferencesDialog(HWND parent) {
 
 	// ---- Toolbar
 	f.adding = ToolbarPage;
-	const int styles = f.add(picture("Style:", (int)(3 * kStyleH) - 6, [parent](ID2D1RenderTarget* rt, float w, float h) { paintStyles(parent, rt, w, h); }));
+	const int styles = f.add(picture("Style:", (int)(3 * kStyleH) - 6,
+	                                 [&, parent](ID2D1RenderTarget* rt, float w, float h) { paintStyles(parent, rt, w, h, focused(styleField)); }));
+	swatchField = swatches;
+	styleField = styles;
 	static const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTab, TGFeedback };
 	bool firstGroup = true;
 	for (int g : groups) {
@@ -622,8 +652,38 @@ void showPreferencesDialog(HWND parent) {
 	list.note = f.add(note);
 	list.list = f.add(picture("", 360, [&list](ID2D1RenderTarget* rt, float w, float h) { paintShortcuts(list, rt, w, h); }));
 
+	// A colour or a style picked, by a click or the arrows.
+	auto pickAccent = [&f, swatches](int i) {
+		if (i < 0 || i > 6) return;
+		prefs().accent = kAccentOrder[i];
+		apply();
+		f.retheme();
+		f.refresh(swatches);
+	};
+	auto pickStyle = [&f, styles](int i) {
+		if (i < 0 || i > 2) return;
+		prefs().toolbarStyle = kStyles[i].id;
+		apply();
+		f.refresh(styles);
+	};
+	const std::function<void(int)> stepAccent = [&](int by) {
+		int at = 0;
+		for (int i = 0; i < 7; i++) if (kAccentOrder[i] == prefs().accent) at = i;
+		pickAccent(std::max(0, std::min(6, at + by)));
+	};
+	const std::function<void(int)> stepStyle = [&](int by) {
+		int at = 0;
+		for (int i = 0; i < 3; i++) if (kStyles[i].id == prefs().toolbarStyle) at = i;
+		pickStyle(std::max(0, std::min(2, at + by)));
+	};
+
 	f.onInit = [&](Form& form) {
 		form.enable(gridStyle, prefs().showGrid);
+		for (const auto& picker : { std::make_pair(swatches, &stepAccent), std::make_pair(styles, &stepStyle) }) {
+			HWND h = form.fields[picker.first].hwnd;
+			SetWindowSubclass(h, arrowPickProc, 2, (DWORD_PTR)picker.second);
+			SetWindowLongPtrW(h, GWL_STYLE, GetWindowLongPtrW(h, GWL_STYLE) | WS_TABSTOP);
+		}
 		form.enable(major, prefs().showGrid);
 		SetPropW(form.fields[list.note].hwnd, L"clTip", (HANDLE)1);
 		SetWindowSubclass(list.hwnd(), shortcutListProc, 1, (DWORD_PTR)&list);
@@ -634,20 +694,9 @@ void showPreferencesDialog(HWND parent) {
 		auto it = on.find(field);
 		if (it != on.end()) it->second(form, field);
 	};
-	f.onClick = [&](Form& form, int field, float x, float y) {
-		if (field == swatches) {
-			const int i = (int)(x / kSwatchW);
-			if (i < 0 || i > 6) return;
-			prefs().accent = kAccentOrder[i];
-			apply();
-			form.retheme();
-		} else if (field == styles) {
-			const int i = (int)(y / kStyleH);
-			if (i < 0 || i > 2) return;
-			prefs().toolbarStyle = kStyles[i].id;
-			apply();
-			form.refresh(styles);
-		}
+	f.onClick = [&](Form&, int field, float x, float y) {
+		if (field == swatches && x >= 0) pickAccent((int)(x / kSwatchW));
+		else if (field == styles && y >= 0) pickStyle((int)(y / kStyleH));
 	};
 	f.onWheel = [&](Form& form, int field, int delta) {
 		if (field == list.list) list.scrollBy(-delta * 84.0f / WHEEL_DELTA);
