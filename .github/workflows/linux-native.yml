@@ -224,7 +224,7 @@ jobs:
           - cedarlogic_arm64.deb: Raspberry Pi 4/5 on 64-bit Raspberry Pi OS, ARM laptops
           - cedarlogic_amd64.deb: ordinary PCs and laptops (Intel/AMD)
 
-          Other distros (Fedora, Arch...): the AppImage, one file with nothing to install. Make it executable once (chmod +x, or Properties > Allow executing) and run it; it adds itself to the applications menu. x86_64 for PCs, aarch64 for ARM. If it won't open, run it once with --appimage-extract-and-run on the end, or install FUSE 2 (Fedora: sudo dnf install fuse; Arch: sudo pacman -S fuse2; Ubuntu 24.04 and newer: sudo apt install libfuse2t64).
+          Other distros (Fedora, Arch...): the AppImage, one file with nothing to install. Make it executable once (chmod +x, or Properties > Allow executing) and run it; it adds itself to the applications menu. x86_64 for PCs, aarch64 for ARM. If it won't open, install FUSE 2 (Fedora: sudo dnf install fuse; Arch: sudo pacman -S fuse2; Ubuntu 24.04 and newer: sudo apt install libfuse2t64). Without FUSE it has to start with --appimage-extract-and-run on the end every time: run it that way from a terminal, and the applications-menu entry it adds (and .cdl files opened from the file manager) start it that way too.
 
           Needs Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm), Fedora 36 or newer.
           EOT

@@ -16,6 +16,8 @@
 // Shows the splash (unseen until hideSplashSoon plays it) and returns it.
 GtkWidget* showSplash();
 bool splashActive();
+// Up, and the windows it hides not brought in yet (they come in as it dissolves).
+bool splashHoldsWindows();
 
 // Said while starting; the panel lists what was done once it plays.
 void splashSetStatus(GtkWidget* splash, const char* status);

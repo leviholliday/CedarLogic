@@ -46,6 +46,17 @@ std::string runningAppImage() {
 	return p ? std::string(p) : std::string();
 }
 
+// Started with --appimage-extract-and-run (no FUSE here): the runtime
+// unpacked the AppImage into a temporary appimage_extracted_ folder rather
+// than mounting it, and it needs the same every time it starts. Only APPDIR
+// says so (or the variable that asks for it, when that's how it started).
+bool extractedAndRun() {
+	if (runningAppImage().empty()) return false;
+	const char* e = std::getenv("APPIMAGE_EXTRACT_AND_RUN");
+	const char* d = std::getenv("APPDIR");
+	return (e && *e) || (d && strstr(d, "/appimage_extracted_"));
+}
+
 // Installed from the .deb: the app is /usr/bin/cedarlogic, which dpkg owns.
 bool installedFromDeb() {
 	if (!runningAppImage().empty()) return false;
@@ -166,6 +177,8 @@ Asset findAsset(const std::string& suffix) {
 // its launch back to this one.
 void relaunch(const std::string& file) {
 	gchar** env = g_environ_setenv(g_get_environ(), "CEDARLOGIC_RESTART_AFTER", format("%ld", (long)getpid()).c_str(), TRUE);
+	// Without FUSE, started the way this one was (else it never comes back).
+	if (extractedAndRun()) env = g_environ_setenv(env, "APPIMAGE_EXTRACT_AND_RUN", "1", TRUE);
 	gchar* argv[] = { const_cast<gchar*>(file.c_str()), nullptr };
 	// A failure leaves the file updated; a manual relaunch still gets it.
 	g_spawn_async(nullptr, argv, env, (GSpawnFlags)0, nullptr, nullptr, nullptr, nullptr);
@@ -460,8 +473,11 @@ void Updater_IntegrateAppImage() {
 		if (c == '"' || c == '\\' || c == '`' || c == '$') quoted += '\\';
 		quoted += c;
 	}
+	// Without FUSE, the menu and .cdl files start it the way this launch was
+	// started, or each of them would fail silently.
+	const std::string exec = std::string(extractedAndRun() ? "env APPIMAGE_EXTRACT_AND_RUN=1 " : "") + "\"" + quoted + "\" %F";
 	const std::string entry = "[Desktop Entry]\nName=CedarLogic\nGenericName=Logic Simulator\nComment=Build and simulate digital logic circuits\n"
-	                          "Type=Application\nExec=\"" + quoted + "\" %F\nIcon=cedarlogic\nTerminal=false\n"
+	                          "Type=Application\nExec=" + exec + "\nIcon=cedarlogic\nTerminal=false\n"
 	                          "MimeType=application/x-cedarlogic-circuit;\nStartupWMClass=CedarLogic\n"
 	                          "Categories=Education;Development;Electronics;\nKeywords=logic;simulator;circuit;gates;\n"
 	                          "X-CedarLogic-AppImage=true\n";

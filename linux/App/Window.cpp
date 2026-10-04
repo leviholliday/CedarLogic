@@ -1503,7 +1503,7 @@ std::string chooseSaveFile(GtkWindow* parent, const std::string& title, const st
 
 // A copy of the circuit as a .cdl file, anywhere.
 bool CircuitWindow::exportCopy() {
-	const std::string file = chooseSavePath(GTK_WINDOW(win), "Export", displayName() + ".cdl", cdlFilter(), ".cdl");
+	const std::string file = chooseSavePath(GTK_WINDOW(win), "Export", safeFileName(displayName()) + ".cdl", cdlFilter(), ".cdl");
 	if (file.empty()) return false;
 	const bool wasDirty = isDirty();
 	const std::string text = cl_document_save_text(doc);
@@ -1519,7 +1519,7 @@ bool CircuitWindow::exportCopy() {
 }
 
 bool CircuitWindow::saveAs() {
-	const std::string file = chooseSavePath(GTK_WINDOW(win), "Save Circuit", displayName() + ".cdl", cdlFilter(), ".cdl");
+	const std::string file = chooseSavePath(GTK_WINDOW(win), "Save Circuit", safeFileName(displayName()) + ".cdl", cdlFilter(), ".cdl");
 	if (file.empty()) return false;
 	return writeTo(file);
 }
@@ -1554,7 +1554,7 @@ void CircuitWindow::openDroppedFiles(GtkSelectionData* data) {
 }
 
 void CircuitWindow::exportOlder(int format) {
-	const std::string suggested = displayName() + (format == 1 ? " (v1.x).cdl" : " (v2).cdl");
+	const std::string suggested = safeFileName(displayName()) + (format == 1 ? " (v1.x).cdl" : " (v2).cdl");
 	const std::string file = chooseSavePath(GTK_WINDOW(win),
 		format == 1 ? "Export for CedarLogic 1.x" : "Export for CedarLogic 2", suggested, cdlFilter(), ".cdl");
 	if (file.empty()) return;

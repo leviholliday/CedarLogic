@@ -463,18 +463,39 @@ bool quitApp(GtkApplication* app) {
 
 namespace {
 
+// One CedarLogic at a time: this launch owns the app's name on the session
+// bus before startup begins, so another launch -- the menu clicked again
+// while nothing has appeared yet, a .cdl double-clicked -- can hand over
+// while this one is still starting. GTK delivers it whenever events are
+// handled: as startup puts the launch screen up, or under a question the
+// first windows ask (a last circuit that couldn't be opened). Such a launch
+// waits for this one rather than running a second launch inside it (or, in
+// startup, finding no gate library yet and quitting with an error).
+bool gInStartup = false;   // in startupCb
+bool gLaunching = false;   // in a launch's activate or open, until its windows are made
+// The first windows are made: a later launch hands over to them.
+bool gStarted = false;
+// Files handed over meanwhile, opened once the first windows are made.
+std::vector<std::string> gPendingOpens;
+
+bool launchUnderWay() { return gInStartup || gLaunching; }
+
 void startupCb(GApplication* gapp, gpointer) {
+	gInStartup = true;
+	struct Done { ~Done() { gInStartup = false; } } done;
 	GtkApplication* app = GTK_APPLICATION(gapp);
 	// GTK set every part of the locale from the desktop's; numbers go back
 	// to "C", so 1.5 reads and writes as 1.5 everywhere (circuit files, the
 	// engine's settings, CSS) in German, French and other comma locales.
 	setlocale(LC_NUMERIC, "C");
 	sturdyUiFont();
+	// Before the launch screen: it asks the settings whether this is the
+	// first launch ever (the slower one, with the sound).
+	prefs().load();
+	gPrimary = true;
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
 	if (gScreenshot.empty() && gSplashFile.empty()) gSplash = showSplash();
-	prefs().load();
-	gPrimary = true;
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
 	loadCss();
@@ -535,8 +556,6 @@ gboolean offerWelcomeCb(gpointer app) {
 
 // Launched again while running (the menu, the dock): this CedarLogic comes
 // forward, as the Mac's does, rather than a second window on the same circuit.
-bool gStarted = false;
-
 bool presentRunning(GApplication* gapp) {
 	if (!gStarted || circuitWindows().empty()) return false;
 	// While the launch screen is up its windows are still hidden; they come in with it.
@@ -544,8 +563,53 @@ bool presentRunning(GApplication* gapp) {
 	return true;
 }
 
+// Files handed over by another launch (a .cdl double-clicked in the file
+// manager): each opens here, in a window of its own (or the one that has it
+// already comes forward). An untouched new window -- the blank Untitled one
+// -- takes the first one's place, as with Open and a drop; a circuit you're
+// in is left as it is, whatever Settings says about opening replacing it.
+void openHandedOver(GtkApplication* app, const std::vector<std::string>& paths) {
+	auto stillOpen = [](CircuitWindow* w) {
+		const std::vector<CircuitWindow*>& all = circuitWindows();
+		return w && std::find(all.begin(), all.end(), w) != all.end();
+	};
+	CircuitWindow* blank = activeWindow(app);
+	for (const std::string& path : paths) {
+		// Still there and still blank: a question opening a file asks lets
+		// other things happen meanwhile. Not while a dialog or menu is open
+		// (over it, perhaps, working on what it shows): a window of its own then.
+		if (!stillOpen(blank) || !blank->isPristine() || gtk_grab_get_current() != nullptr) blank = nullptr;
+		openCircuit(app, path, blank);
+		// It has the file now: it comes forward, as a new window would.
+		if (stillOpen(blank) && !blank->filePath().empty()) {
+			if (!splashHoldsWindows()) gtk_window_present(blank->window());
+			blank = nullptr;
+		}
+	}
+	if (circuitWindows().empty()) newCircuitWindow(app);
+	// Handed over while the launch screen still plays, before it brings the
+	// windows in: these come in with them. Asked now, not before: a question
+	// opening a file asked may have outlasted it, and the windows are in.
+	if (splashHoldsWindows()) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
+}
+
+// The first windows are made (behind the launch screen while it plays): a
+// later launch hands over to them now, and files handed over meanwhile open.
+void launched(GtkApplication* app) {
+	gStarted = true;
+	gLaunching = false;
+	std::vector<std::string> paths;
+	paths.swap(gPendingOpens);
+	if (!paths.empty()) openHandedOver(app, paths);
+}
+
 void activateCb(GApplication* gapp, gpointer) {
+	// Launched again while this launch is under way: it brings a window up anyway.
+	if (launchUnderWay()) return;
 	if (presentRunning(gapp)) return;
+	// From here a question (no gate library, a circuit that couldn't be
+	// opened) lets a later launch in: it waits for this one.
+	gLaunching = true;
 	if (!libraryOrComplain()) {
 		gExitCode = 1;
 		if (gSplash) { gtk_widget_destroy(gSplash); gSplash = nullptr; }
@@ -590,26 +654,26 @@ void activateCb(GApplication* gapp, gpointer) {
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
-	gStarted = true;
+	launched(GTK_APPLICATION(gapp));
 }
 
 void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpointer) {
-	// Files handed over by another launch: each opens here, in a window of its
-	// own (or the one that has it already comes forward).
-	if (gStarted) {
-		// Handed over while the launch screen still plays, before it brings
-		// the windows in: these come in with them.
-		const bool waiting = splashActive() && !circuitWindows().empty() &&
-		                     !gtk_widget_get_visible(GTK_WIDGET(circuitWindows().front()->window()));
-		for (gint i = 0; i < n; i++) {
-			gchar* path = g_file_get_path(files[i]);
-			if (path) openCircuit(GTK_APPLICATION(gapp), path, nullptr);
-			g_free(path);
-		}
-		if (circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
-		if (waiting) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
+	std::vector<std::string> paths;
+	for (gint i = 0; i < n; i++) {
+		gchar* path = g_file_get_path(files[i]);
+		if (path) paths.push_back(path);
+		g_free(path);
+	}
+	// Handed over while this launch is under way: they open once its windows are made.
+	if (launchUnderWay()) {
+		gPendingOpens.insert(gPendingOpens.end(), paths.begin(), paths.end());
 		return;
 	}
+	if (gStarted) {
+		openHandedOver(GTK_APPLICATION(gapp), paths);
+		return;
+	}
+	gLaunching = true;
 	if (!libraryOrComplain()) {
 		gExitCode = 1;
 		if (gSplash) { gtk_widget_destroy(gSplash); gSplash = nullptr; }
@@ -617,12 +681,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		return;
 	}
 	bool any = false;
-	for (gint i = 0; i < n; i++) {
-		gchar* path = g_file_get_path(files[i]);
-		if (path == nullptr) continue;
-		any = openCircuit(GTK_APPLICATION(gapp), path, nullptr) || any;
-		g_free(path);
-	}
+	for (const std::string& path : paths) any = openCircuit(GTK_APPLICATION(gapp), path, nullptr) || any;
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
 	if (gSplash) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
@@ -643,7 +702,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
-	gStarted = true;
+	launched(GTK_APPLICATION(gapp));
 }
 
 // Restarted after an update (Updater.cpp): the copy before this one is still
