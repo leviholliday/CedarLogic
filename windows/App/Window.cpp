@@ -271,7 +271,7 @@ void CircuitWindow::buildMenus() {
 	HMENU older = submenu(file, "Export for &Older CedarLogic");
 	item(older, CMD_EXPORT_V2, "For CedarLogic &2…");
 	item(older, CMD_EXPORT_V1, "For CedarLogic &1.x…");
-	item(file, CMD_SHARE_LINK, "Share &Link\u2026");
+	item(file, CMD_SHARE_LINK, "S&hare Link\u2026");   // (L is Export Lab Report's)
 	item(file, CMD_PRINT, "&Print…\tCtrl+P");
 	separator(file);
 	item(file, CMD_CLOSE_WINDOW, "&Close Window\tCtrl+Shift+W");
