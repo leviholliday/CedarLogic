@@ -39,8 +39,8 @@ it compiles without a Windows machine:
   the app's own alert card for every question and note (`Alert`);
   the Mac app's features: Your Circuits and Version History (`Library`,
   `LibraryWindow`, sharing `%APPDATA%\CedarLogic\Library` with the wx app),
-  templates and parts (`Collections`), the truth table with K-maps and
-  formulas (`TruthTableWindow`) and Build from Formula (`Formula`), Find
+  templates and parts (`Collections`), the truth table with K-maps,
+  formulas and Check My Circuit (`TruthTableWindow`) and Build from Formula (`Formula`), Find
   (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope,
   docked under the canvas, and its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
   for pictures made off screen), Send Feedback (`Feedback`, to
@@ -112,10 +112,11 @@ Direct2D here. And:
   captures it to a PNG after two seconds and quits (CI runs it on the zip).
   With `--dark` or `--light` for that run, `--sim-view`, `--split` (split
   view), `--focus` (focus mode), `--rename-tab`, or `--dialog
-  preferences|shortcuts|truth-table|add-gate|library|versions|templates|
+  preferences|shortcuts|truth-table|check|add-gate|library|versions|templates|
   formula|scope|export|feedback|help|welcome|whatsnew|quit|alert|rename|about|
   start-menu` to capture that instead
-  (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
+  (`--truth-tab N`, `--formula "..."`, `--check "..."` for what Check compares
+  with, `--page N` for the welcome, What's New
   or Settings (0 General ... 4 Shortcuts), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--note "text"`
   puts a note in the status bar, and `--wire-tag` rests the pointer on a wire

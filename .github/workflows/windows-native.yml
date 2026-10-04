@@ -155,6 +155,9 @@ jobs:
           timeout 90 "$A" --truth-tab 0 --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 1 --dialog truth-table --screenshot "$PWD/renders/truth-table-kmap.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 2 --dialog truth-table --screenshot "$PWD/renders/truth-table-formulas.png" res/samples/practice.cdl || true
+          # Check My Circuit: the lights against a formula, all right, then with a light that's wrong.
+          timeout 90 "$A" --dialog check --check "Y1 = A ^ B ^ C; Y2 = AB; Y3 = AC; Y4 = BC" --screenshot "$PWD/renders/check.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog check --check "Y1 = A ^ B ^ C; Y2 = AB; Y3 = A + C; Y4 = BC" --screenshot "$PWD/renders/check-wrong-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
           for p in 0 1 2 3 4; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
           timeout 90 "$A" --dialog tour --screenshot "$PWD/renders/tour.png" || true
