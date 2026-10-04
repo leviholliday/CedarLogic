@@ -1645,6 +1645,8 @@ bool CircuitWindow::buildPlan(const formula::Plan& plan, bool onNewPage, const s
 		if (i < 0) return false;
 		target = i;
 		if (!pageName.empty()) cl_document_rename_page(doc, i, pageName.c_str());
+		// In the side you're working in, as a new tab is.
+		if (focusPane == 1 && splitOpen()) sideKeys.insert(cl_document_page_id(doc, i));
 	} else {
 		double l, b, r, t;
 		if (cl_document_page_bounds(doc, target, &l, &b, &r, &t)) {
