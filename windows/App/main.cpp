@@ -9,6 +9,7 @@
 #include "Help.h"
 #include "Library.h"
 #include "Recovery.h"
+#include "Shortcuts.h"
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
@@ -247,31 +248,15 @@ void CALLBACK recoveryTimer(HWND, UINT, UINT_PTR id, DWORD) {
 
 bool down(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
 
-// The app's keyboard shortcuts (the menus show them). Bare keys (R, S, T...)
-// are the canvas's own, not here.
-struct Shortcut { UINT vk; bool ctrl, shift; int command; };
-const Shortcut kShortcuts[] = {
-	{ 'N', true, false, CMD_NEW }, { 'O', true, false, CMD_OPEN }, { 'I', true, false, CMD_IMPORT }, { 'Q', true, false, CMD_QUIT },
-	{ 'S', true, false, CMD_SAVE }, { 'S', true, true, CMD_SAVE_AS }, { 'E', true, false, CMD_EXPORT_IMAGE },
-	{ 'P', true, false, CMD_PRINT }, { 'W', true, true, CMD_CLOSE_WINDOW },
-	{ 'Z', true, false, CMD_UNDO }, { 'Z', true, true, CMD_REDO }, { 'Y', true, false, CMD_REDO },
-	{ 'X', true, false, CMD_CUT }, { 'C', true, false, CMD_COPY }, { 'V', true, false, CMD_PASTE },
-	{ 'D', true, false, CMD_DUPLICATE }, { 'A', true, false, CMD_SELECT_ALL }, { 'F', true, false, CMD_FIND },
-	{ VK_OEM_PLUS, true, false, CMD_ZOOM_IN }, { VK_OEM_PLUS, true, true, CMD_ZOOM_IN }, { VK_ADD, true, false, CMD_ZOOM_IN },
-	{ VK_OEM_MINUS, true, false, CMD_ZOOM_OUT }, { VK_SUBTRACT, true, false, CMD_ZOOM_OUT },
-	{ '0', true, false, CMD_ZOOM_FIT }, { VK_NUMPAD0, true, false, CMD_ZOOM_FIT },
-	{ '1', true, false, CMD_ZOOM_ACTUAL }, { VK_NUMPAD1, true, false, CMD_ZOOM_ACTUAL },
-	{ 'D', true, true, CMD_DARK }, { VK_OEM_PERIOD, true, false, CMD_PALETTE }, { VK_OEM_COMMA, true, false, CMD_PREFERENCES },
-	{ 'R', true, true, CMD_STEP }, { 'R', true, false, CMD_SIM_VIEW }, { 'G', true, false, CMD_SCOPE },
-	{ 'T', true, false, CMD_NEW_TAB }, { 'W', true, false, CMD_CLOSE_TAB }, { 'T', true, true, CMD_REOPEN_TAB },
-	{ VK_NEXT, true, false, CMD_NEXT_TAB }, { VK_PRIOR, true, false, CMD_PREVIOUS_TAB },
-	{ VK_TAB, true, false, CMD_NEXT_TAB }, { VK_TAB, true, true, CMD_PREVIOUS_TAB },
-	{ VK_F1, false, false, CMD_HELP }, { VK_OEM_2, true, false, CMD_SHORTCUTS },
-};
-
-// What a text box does itself with these (copy the text, not the gates).
-bool isEditingKey(const Shortcut& s) {
-	return s.ctrl && !s.shift && (s.vk == 'A' || s.vk == 'C' || s.vk == 'V' || s.vk == 'X' || s.vk == 'Z' || s.vk == 'Y');
+// What a text box does itself with these: types them (any key without Ctrl
+// but the F keys), or edits its text with them (copies the text, not the
+// gates), so a shortcut can't have them there.
+bool isTypingKey(const shortcuts::Key& k) {
+	const UINT v = k.vk;
+	if (!k.ctrl) return !(v >= VK_F1 && v <= VK_F24);
+	const bool words = v == VK_LEFT || v == VK_RIGHT || v == VK_HOME || v == VK_END || v == VK_BACK || v == VK_DELETE;
+	if (k.shift) return words;
+	return words || v == 'A' || v == 'C' || v == 'V' || v == 'X' || v == 'Z' || v == 'Y';
 }
 
 CircuitWindow* windowFor(HWND h) {
@@ -289,16 +274,16 @@ bool handleShortcut(CircuitWindow* w, const MSG& msg) {
 	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
 	if (msg.wParam == VK_TAB && ctrl) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
 	if (msg.wParam == VK_ESCAPE && w->switcherActive()) { w->cancelSwitcher(); return true; }
+	// The keys Settings > Shortcuts gives the menus' commands. (The canvas's
+	// single keys, A, R, S..., are its own: it looks them up as they reach it.)
+	const shortcuts::Key key = shortcuts::pressed((UINT)msg.wParam);
+	const shortcuts::Action* a = shortcuts::match(key, false);
+	if (a == nullptr) return false;
 	wchar_t cls[32] = L"";
 	GetClassNameW(msg.hwnd, cls, 32);
-	const bool inTextBox = lstrcmpiW(cls, L"Edit") == 0;
-	for (const Shortcut& s : kShortcuts) {
-		if (s.vk != msg.wParam || s.ctrl != ctrl || s.shift != shift) continue;
-		if (inTextBox && isEditingKey(s)) return false;
-		guarded("a shortcut", [&] { w->run(s.command); });
-		return true;
-	}
-	return false;
+	if (lstrcmpiW(cls, L"Edit") == 0 && isTypingKey(key)) return false;
+	guarded("a shortcut", [&] { w->run(a->command); });
+	return true;
 }
 
 // ---- Shared with the windows -----------------------------------------------------

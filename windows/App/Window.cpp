@@ -5,6 +5,7 @@
 #include "Dialogs.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "Shortcuts.h"
 #include "TabStrip.h"
 #include "FindBar.h"
 #include "TabSwitcher.h"
@@ -727,6 +728,7 @@ int CircuitWindow::commandChecked(int command) const {
 }
 
 void CircuitWindow::updateMenu(HMENU menu) {
+	shortcuts::relabel(menu);   // the keys each command has now (Settings > Shortcuts)
 	const int n = GetMenuItemCount(menu);
 	for (int i = 0; i < n; i++) {
 		const UINT id = GetMenuItemID(menu, i);
@@ -1328,8 +1330,8 @@ void CircuitWindow::titleMenu(POINT screen) {
 	AppendMenuW(m, MF_STRING, DUPLICATE, L"&Duplicate");
 	AppendMenuW(m, MF_STRING, VERSIONS, L"&Version History\u2026");
 	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-	AppendMenuW(m, MF_STRING, EXPORT, L"&Export\u2026\tCtrl+Shift+S");
-	AppendMenuW(m, MF_STRING, LIBRARY, L"Your &Circuits\u2026\tCtrl+O");
+	AppendMenuW(m, MF_STRING, EXPORT, W("&Export\u2026" + shortcuts::menuKeys(CMD_SAVE_AS)).c_str());
+	AppendMenuW(m, MF_STRING, LIBRARY, W("Your &Circuits\u2026" + shortcuts::menuKeys(CMD_OPEN)).c_str());
 	SetForegroundWindow(hwnd);
 	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, screen.x, screen.y, 0, hwnd, nullptr);
 	DestroyMenu(m);
