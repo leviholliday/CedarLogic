@@ -32,6 +32,7 @@ it compiles without a Windows machine:
   banner, and Simulation View's control bar drawn over the circuit); the side
   panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
   (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
+  the app's own alert card for every question and note (`Alert`);
   the Mac app's features: Your Circuits and Version History (`Library`,
   `LibraryWindow`, sharing `%APPDATA%\CedarLogic\Library` with the wx app),
   templates and parts (`Collections`), the truth table with K-maps and
@@ -63,7 +64,8 @@ Direct2D here. And:
   captures it to a PNG after two seconds and quits (CI runs it on the zip).
   With `--dark` or `--light` for that run, `--sim-view`, or `--dialog
   preferences|shortcuts|truth-table|add-gate|library|versions|templates|
-  formula|scope|export|feedback|help|welcome|whatsnew` to capture that instead
+  formula|scope|export|feedback|help|welcome|whatsnew|quit|alert|rename`
+  to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
   or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope).

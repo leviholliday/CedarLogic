@@ -3,6 +3,7 @@
 // open windows.
 
 #include "App.h"
+#include "Alert.h"
 #include "Canvas.h"
 #include "Dialogs.h"
 #include "Feedback.h"
@@ -235,6 +236,14 @@ void CALLBACK clickTestWatchdog(HWND, UINT, UINT_PTR, DWORD) {
 	prefs() = gPrefsBefore;
 	prefs().save();
 	ExitProcess(1);
+}
+
+// --dialog alert: the card a delete asks with (as Your Circuits' does), for
+// the screenshot.
+void CALLBACK alertTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w) askConfirm(w->window(), "Delete \u201C" + w->titleText() + "\u201D?", "It and all its versions will be deleted.", "Delete", "Cancel", true);
 }
 
 // Once the first window is up, offer back work a CedarLogic that stopped
@@ -529,6 +538,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
+			        : d == "rename" ? CMD_RENAME_TAB : d == "alert" ? -5
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
 			continue;
 		}
@@ -605,6 +615,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -4 && !circuitWindows().empty()) welcome::startTour(circuitWindows().back());
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
+	if (gDialog == -5) SetTimer(nullptr, 0, 400, alertTimer);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);

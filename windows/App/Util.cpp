@@ -608,17 +608,7 @@ void setWindowText(HWND hwnd, const std::string& text) {
 }
 
 // ---- Messages ----------------------------------------------------------------------
-
-void showMessage(HWND parent, Tone tone, const std::string& title, const std::string& text) {
-	const UINT icon = tone == Tone::Error ? MB_ICONERROR : tone == Tone::Warning ? MB_ICONWARNING : MB_ICONINFORMATION;
-	const std::string body = text.empty() ? title : title + "\n\n" + text;
-	MessageBoxW(parent, W(body).c_str(), L"CedarLogic", MB_OK | icon);
-}
-
-bool askYesNo(HWND parent, const std::string& title, const std::string& text) {
-	const std::string body = text.empty() ? title : title + "\n\n" + text;
-	return MessageBoxW(parent, W(body).c_str(), L"CedarLogic", MB_YESNO | MB_ICONQUESTION) == IDYES;
-}
+// showMessage and askYesNo are the app's alert card (Alert.cpp).
 
 void reportException(const char* where, const char* what) {
 	OutputDebugStringW(W(strf("CedarLogic: %s failed: %s\n", where, what)).c_str());

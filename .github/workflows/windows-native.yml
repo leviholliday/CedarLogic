@@ -128,6 +128,10 @@ jobs:
           timeout 90 "$A" --dark --card-frame 0.35 --screenshot "$PWD/renders/opening-card-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog quit --screenshot "$PWD/renders/quit.png" || true
           timeout 90 "$A" --dark --dialog quit --screenshot "$PWD/renders/quit-dark.png" || true
+          # The app's alert card: a delete's question, and a name to type.
+          timeout 90 "$A" --dialog alert --screenshot "$PWD/renders/alert.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog alert --screenshot "$PWD/renders/alert-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog rename --screenshot "$PWD/renders/alert-rename.png" res/samples/practice.cdl || true
           timeout 60 "$A" --feedback-probe || echo "::warning::the feedback probe failed"
           timeout 90 "$A" --dialog feedback --screenshot "$PWD/renders/feedback.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog feedback --screenshot "$PWD/renders/feedback-dark.png" res/samples/practice.cdl || true

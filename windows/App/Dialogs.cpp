@@ -1,6 +1,7 @@
 // The app's dialogs and extra windows (see Dialogs.h).
 
 #include "Dialogs.h"
+#include "Alert.h"
 #include "Window.h"
 #include "Chrome.h"
 #include "Brand.h"
@@ -1029,21 +1030,17 @@ void Form::setProblem(const std::string& text) {
 // ---- A line of text ----------------------------------------------------------------
 
 bool askText(HWND parent, const std::string& title, const std::string& prompt, std::string& value) {
-	Form f;
-	f.title = title;
-	f.width = 360;
-	FormField label;
-	label.kind = FormField::Note;
-	label.label = prompt;
-	f.add(label);
-	FormField entry;
-	entry.kind = FormField::Text;
-	entry.value = value;
-	const int e = f.add(entry);
-	if (f.run(parent) != IDOK) return false;
-	std::string v = f.fields[e].value;
-	const size_t a = v.find_first_not_of(" \t"), b = v.find_last_not_of(" \t");
-	value = a == std::string::npos ? std::string() : v.substr(a, b - a + 1);
+	Alert a;
+	a.title = title;
+	a.heading = title;
+	a.text = prompt;
+	a.field = true;
+	a.value = value;
+	// The button says what it does: Rename, Save, or OK.
+	const bool renaming = title.find("Rename") != std::string::npos, saving = title.find("Save") != std::string::npos;
+	a.buttons = { { renaming ? "Rename" : saving ? "Save" : "OK", 1, 1 }, { "Cancel", 0, 0 } };
+	if (runAlert(parent, a) != 1) return false;
+	value = a.value;
 	return true;
 }
 
@@ -1904,32 +1901,23 @@ void showBuildFormula(CircuitWindow* w) {
 // ---- Quitting ------------------------------------------------------------------------
 
 // Ctrl+Q sits beside Ctrl+W (close the tab): asked first, as the Mac app
-// asks about Cmd+Q, unless "Always Quit" was chosen.
+// asks about Cmd+Q, unless "Always Quit" was chosen -- the app's alert card,
+// with the reassurance under the question.
 bool confirmQuit(HWND parent) {
 	if (!prefs().confirmQuit) return true;
-	Form f;
-	f.title = "Quit CedarLogic";
-	f.width = 440;
-	f.okText = "Quit";
-	f.buttons = { "Always Quit" };
-	// As the Mac asks: the icon, the question, and the reassurance.
-	FormField q;
-	q.kind = FormField::Picture;
-	q.height = 118;
-	q.paint = [](ID2D1RenderTarget* rt, float w, float) {
-		const D2D1_COLOR_F ink = prefs().dark ? D2D1::ColorF(0.89f, 0.9f, 0.93f) : D2D1::ColorF(0.1f, 0.11f, 0.13f);
-		brand::icon(rt, 2, 4, 44, 0);
-		drawText(rt, "Are you sure you want to quit CedarLogic?", D2D1::RectF(2, 62, w, 88), 17, ink, TextAlign::Leading, true);
-		drawText(rt, "Your circuits are saved; they'll be here when you come back.", D2D1::RectF(2, 90, w, 110), 12.5f, withAlpha(ink, 0.6f));
-	};
-	f.add(q);
-	f.onButton = [](Form&, int) {
+	Alert a;
+	a.title = "Quit CedarLogic";
+	a.heading = "Are you sure you want to quit CedarLogic?";
+	a.text = "Your circuits are saved; they'll be here when you come back.";
+	a.buttons = { { "Quit", 1, 1 }, { "Cancel", 0, 0 }, { "Always Quit", 2, 0, true } };
+	a.enter = 1;
+	a.escape = 0;
+	const int r = runAlert(parent, a);
+	if (r == 2) {
 		prefs().confirmQuit = false;
 		prefs().save();
-		return true;
-	};
-	const int r = f.run(parent);
-	return r == IDOK || r == 100;
+	}
+	return r != 0;
 }
 
 // ---- The oscilloscope: Scope.cpp ----

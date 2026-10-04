@@ -4,6 +4,7 @@
 // a CedarLogic that isn't running any more, is offered back.
 
 #include "Recovery.h"
+#include "Alert.h"
 #include "Window.h"
 
 #include <shlobj.h>
@@ -93,36 +94,18 @@ std::vector<Found> orphans() {
 enum class Answer { Later, Open, ThrowAway };
 
 // What to do with the copies, each choice named on its button: Open (the
-// default), Later (Escape too: asked again next launch) or Throw Away. (A
-// Yes/No/Cancel box made a reflexive "No" throw the work away.)
+// default), Later (Escape too: asked again next launch) or Throw Away, apart
+// on the left. (A Yes/No/Cancel box made a reflexive "No" throw the work away.)
 Answer ask(HWND parent, const std::string& heading, const std::string& text) {
-	using TaskDialogFn = HRESULT(WINAPI*)(const TASKDIALOGCONFIG*, int*, int*, BOOL*);
-	HMODULE controls = GetModuleHandleW(L"comctl32.dll");
-	const TaskDialogFn taskDialog =
-		controls ? reinterpret_cast<TaskDialogFn>(reinterpret_cast<void*>(GetProcAddress(controls, "TaskDialogIndirect"))) : nullptr;
-	if (taskDialog) {
-		const std::wstring wHeading = W(heading), wText = W(text);
-		enum { kOpen = 100, kLater, kThrowAway };
-		const TASKDIALOG_BUTTON buttons[] = { { kOpen, L"Open" }, { kLater, L"Later" }, { kThrowAway, L"Throw Away" } };
-		TASKDIALOGCONFIG c = {};
-		c.cbSize = sizeof c;
-		c.hwndParent = parent;
-		c.hInstance = appInstance();
-		c.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
-		c.pszWindowTitle = L"CedarLogic";
-		c.pszMainIcon = TD_INFORMATION_ICON;
-		c.pszMainInstruction = wHeading.c_str();
-		c.pszContent = wText.c_str();
-		c.cButtons = 3;
-		c.pButtons = buttons;
-		c.nDefaultButton = kOpen;
-		int pressed = 0;
-		if (SUCCEEDED(taskDialog(&c, &pressed, nullptr, nullptr)))
-			return pressed == kOpen ? Answer::Open : pressed == kThrowAway ? Answer::ThrowAway : Answer::Later;
-	}
-	// No task dialogs (old common controls): only the safe question.
-	const std::string body = heading + "\n\n" + text + "\n\nYes opens it. No keeps it for next time.";
-	return MessageBoxW(parent, W(body).c_str(), L"CedarLogic", MB_YESNO | MB_ICONQUESTION) == IDYES ? Answer::Open : Answer::Later;
+	Alert a;
+	a.heading = heading;
+	a.text = text;
+	a.badge = 2;
+	a.buttons = { { "Open", 1, 1 }, { "Later", 0, 0 }, { "Throw Away", 2, 2, true } };
+	a.enter = 1;
+	a.escape = 0;
+	const int r = runAlert(parent, a);
+	return r == 1 ? Answer::Open : r == 2 ? Answer::ThrowAway : Answer::Later;
 }
 
 }  // namespace

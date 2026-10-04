@@ -186,6 +186,7 @@ void setDarkTitleBar(HWND hwnd, bool dark);
 void darkenControl(HWND control, bool dark, const wchar_t* theme);
 
 // ---- Messages ----------------------------------------------------------------------
+// Both as the app's alert card (Alert.h).
 
 enum class Tone { Info, Warning, Error };
 void showMessage(HWND parent, Tone tone, const std::string& title, const std::string& text);
