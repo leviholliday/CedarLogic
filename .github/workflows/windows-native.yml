@@ -96,8 +96,13 @@ jobs:
       # for this user, no administrator; CedarLogic in Start, .cdl files
       # opening in it, an uninstaller in Settings > Apps. Inno Setup 6, from
       # Chocolatey when the runner hasn't got it; the version is CMake's.
+      # New and not yet seen on a real Windows, so for now this and its two
+      # tests below don't hold the zips back: a failure shows on the run, and
+      # the release goes out without installers. (Take continue-on-error off
+      # these three once they've passed.)
       - name: Installer
         shell: pwsh
+        continue-on-error: true
         run: |
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $iscc)) {
@@ -188,6 +193,7 @@ jobs:
       - name: Start menu test
         if: matrix.run
         shell: bash
+        continue-on-error: true
         run: timeout 60 package/CedarLogic/CedarLogic.exe --start-menu-test
 
       # Install as someone would (quietly here), check CedarLogic starts from
@@ -196,6 +202,7 @@ jobs:
       - name: Installer test
         if: matrix.run
         shell: pwsh
+        continue-on-error: true
         run: |
           $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'CedarLogic.lnk'
           $prog = 'HKCU:\Software\Classes\CedarLogic.Circuit'
@@ -270,16 +277,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           rm -f zips/*.png
+          shopt -s nullglob
           ls -la zips
           TAG=windows-native-testing
+          # The installers first -- when this run made them (their step
+          # doesn't hold the build back yet).
+          SETUP="To install: download CedarLogic-Windows-Setup-x64.exe and run it (on a Windows on ARM laptop, such as a Snapdragon one: CedarLogic-Windows-Setup-ARM64.exe). Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway. It installs for you only, with no administrator needed: CedarLogic goes in the Start menu, .cdl files open in it, and Settings > Apps removes it. It updates itself from inside the app."
+          ZIPS="Rather not install? The zips run as they are:"
+          setups=(zips/*.exe)
+          if [ ${#setups[@]} -eq 0 ]; then
+            SETUP="This build has no installers; the zips below run as they are. Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway."
+            ZIPS="Pick the file for your computer:"
+          fi
           NOTES=$(cat <<EOT
           Native Windows test build from windows/native (${GITHUB_SHA::7}). Not a release: expect missing pieces.
 
-          To install: download CedarLogic-Windows-Setup-x64.exe and run it (on a Windows on ARM laptop, such as a Snapdragon one: CedarLogic-Windows-Setup-ARM64.exe). Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway. It installs for you only, with no administrator needed: CedarLogic goes in the Start menu, .cdl files open in it, and Settings > Apps removes it. It updates itself from inside the app.
+          $SETUP
 
           This is CedarLogic rebuilt natively for Windows, the way the Mac app was: plain Windows controls and Direct2D on the same engine as every other CedarLogic, with nothing else to install.
 
-          Rather not install? The zips run as they are:
+          $ZIPS
           - x64: ordinary PCs and laptops (Intel/AMD)
           - ARM64: Windows on ARM laptops (Snapdragon)
 
@@ -295,7 +312,7 @@ jobs:
           fi
           gh release upload "$TAG" zips/*.exe zips/*.zip --clobber
           # Drop anything this run didn't make, so only the current set is offered.
-          keep=$(cd zips && ls *.exe *.zip)
+          keep=$(cd zips && ls -1 *.exe *.zip)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done

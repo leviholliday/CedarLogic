@@ -127,3 +127,5 @@ checks, the screenshots, the click test and the Start menu test on x64,
 installs the x64 installer quietly, starts CedarLogic from there, uninstalls
 it and checks nothing's left, and publishes the installers and the zips as
 the `windows-native-testing` pre-release (installers first in its notes).
+The installer's three steps don't hold the zips back for now
+(`continue-on-error`): a release without installers says so in its notes.
