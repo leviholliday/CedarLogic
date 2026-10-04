@@ -167,7 +167,9 @@ void runCheck(Check* c) {
 }
 
 // Run something on a thread while a small window says so, the app still
-// drawing behind it.
+// drawing behind it. The window it's over is left as it was found: one a
+// dialog had disabled stays disabled (enabled, it could be closed under
+// that dialog, whose code is still running).
 template <class F>
 bool withProgress(HWND parent, const char* text, F&& work) {
 	const UINT dpi = dpiOf(parent);
@@ -180,13 +182,14 @@ bool withProgress(HWND parent, const char* text, F&& work) {
 	SendMessageW(bar, PBM_SETMARQUEE, TRUE, 30);
 	setFontTree(w, uiFont(dpi));
 	setDarkTitleBar(w, prefs().dark);
-	RECT pr, wr;
-	GetWindowRect(parent, &pr);
+	RECT pr = {}, wr = {};
+	if (parent == nullptr || !GetWindowRect(parent, &pr)) SystemParametersInfoW(SPI_GETWORKAREA, 0, &pr, 0);
 	GetWindowRect(w, &wr);
 	SetWindowPos(w, nullptr, (pr.left + pr.right - (wr.right - wr.left)) / 2, (pr.top + pr.bottom - (wr.bottom - wr.top)) / 2, 0, 0,
 	             SWP_NOSIZE | SWP_NOZORDER);
 	ShowWindow(w, SW_SHOW);
-	EnableWindow(parent, FALSE);
+	const bool parentWasEnabled = parent && IsWindowEnabled(parent);
+	if (parentWasEnabled) EnableWindow(parent, FALSE);
 	std::atomic<bool> done{ false };
 	bool ok = false;
 	std::thread worker([&] { ok = work(); done.store(true); });
@@ -200,9 +203,9 @@ bool withProgress(HWND parent, const char* text, F&& work) {
 		}
 	}
 	worker.join();
-	EnableWindow(parent, TRUE);
+	if (parentWasEnabled) EnableWindow(parent, TRUE);
 	DestroyWindow(w);
-	SetForegroundWindow(parent);
+	if (parentWasEnabled) SetForegroundWindow(parent);
 	return ok;
 }
 
@@ -274,14 +277,31 @@ std::wstring unpacked(const std::wstring& work) {
 	return found;
 }
 
-// "Restart Now": once no dialog is up (quitting can't happen under one,
-// whose code is waiting on it), the windows close as Quit closes them and
-// the new exe starts.
+// The app in the middle of something: a dialog up over a window (its code
+// is waiting on that dialog, so the window mustn't close or be asked over),
+// the mouse held down, a menu open, a window being moved or sized. Any
+// window's dialog counts, not only the one asked over: a question asked
+// inside another window's dialog loop holds that loop up, and the dialog,
+// finished meanwhile, gives its window back to be closed under its code.
+// `window`, the one asked over, must take clicks; when it's a dialog itself
+// (Settings' Check Now), the circuit window under it is that dialog's.
+bool inTheMiddle(HWND window) {
+	if (window && !IsWindowEnabled(window)) return true;
+	const HWND under = window ? GetAncestor(window, GA_ROOTOWNER) : nullptr;
+	for (CircuitWindow* w : circuitWindows())
+		if (w->window() != under && !IsWindowEnabled(w->window())) return true;
+	GUITHREADINFO gui = { sizeof gui };
+	return GetGUIThreadInfo(GetCurrentThreadId(), &gui) &&
+	       (gui.hwndCapture || (gui.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_INMOVESIZE)));
+}
+
+// "Restart Now": once nothing is in the middle of something (quitting
+// can't happen under a dialog, whose code is waiting on it), the windows
+// close as Quit closes them and the new exe starts.
 std::wstring g_restartExe;
 
 void CALLBACK restartTimer(HWND, UINT, UINT_PTR id, DWORD) {
-	for (CircuitWindow* w : circuitWindows())
-		if (!IsWindowEnabled(w->window())) return;   // a dialog is still up: once it's closed
+	if (inTheMiddle(nullptr)) return;   // once it's over
 	KillTimer(nullptr, id);
 	if (!quitApp()) return;
 	STARTUPINFOW si = { sizeof si };
@@ -375,10 +395,17 @@ void install(HWND parent, const Asset& asset) {
 	}
 }
 
-void finish() {
+// The window a check's answer goes over: the one Check Now was asked from
+// while it's there, else a circuit window with no dialog up.
+HWND answerParent(const Check* c) {
+	if (c->parent && IsWindow(c->parent)) return c->parent;
+	for (CircuitWindow* w : circuitWindows())
+		if (IsWindowEnabled(w->window())) return w->window();
+	return circuitWindows().empty() ? nullptr : circuitWindows().front()->window();
+}
+
+void finish(HWND parent) {
 	Check* c = g_check.get();
-	HWND parent = c->parent && IsWindow(c->parent) ? c->parent
-	              : (circuitWindows().empty() ? nullptr : circuitWindows().front()->window());
 	const bool interactive = c->interactive;
 	const std::string commit = c->commit;
 	const Asset asset = c->asset;
@@ -408,8 +435,14 @@ void finish() {
 void CALLBACK pollTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (!g_check) { KillTimer(nullptr, id); return; }
 	if (!g_check->done.load()) return;
+	// This timer is the thread's, so it fires inside a dialog's loop too
+	// (gate settings, Settings, Export...). The answer waits till that's
+	// over, and tries again 200 ms on: Settings' Check Now is answered over
+	// Settings, inside its loop; any other dialog, in any window, waits.
+	const HWND parent = answerParent(g_check.get());
+	if (inTheMiddle(parent)) return;
 	KillTimer(nullptr, id);
-	guarded("checking for updates", [] { finish(); });
+	guarded("checking for updates", [parent] { finish(parent); });
 }
 
 void begin(HWND parent, bool interactive) {

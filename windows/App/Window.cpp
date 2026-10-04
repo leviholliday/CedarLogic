@@ -2320,6 +2320,9 @@ bool CircuitWindow::placePendingGate(double wx, double wy) {
 }
 
 bool CircuitWindow::addGateFloating(const std::string& name, double wx, double wy) {
+	// A gate still on the pointer (chosen earlier, never dropped) is taken
+	// back, as Escape would, rather than left wherever the pointer left it.
+	cancelFloating();
 	if (!canEdit()) { lockNudge(); return false; }
 	// One of My Parts: its gates and wires, pasted, on the pointer.
 	if (parts::isPart(name)) {

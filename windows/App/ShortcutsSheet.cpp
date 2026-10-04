@@ -81,6 +81,7 @@ public:
 	int selected = 0, hot = -1;
 	const Row* chosen = nullptr;     // what to do once it's closed
 	bool toSettings = false;
+	bool gone = false;               // destroyed with its window (that circuit deleted in another)
 	HWND hwnd = nullptr, owner = nullptr, edit = nullptr;
 
 	void run(HWND ownerWindow) {
@@ -129,6 +130,7 @@ public:
 			DispatchMessageW(&m);
 		}
 		if (m.message == WM_QUIT) PostQuitMessage((int)m.wParam);
+		if (gone) return;   // and its window with it
 		EnableWindow(owner, TRUE);
 		SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 		DestroyWindow(hwnd);
@@ -346,6 +348,15 @@ private:
 			return true;
 		}
 		case WM_CLOSE: done = true; return true;
+		case WM_DESTROY:
+			// Not by run() (which lets go of it first): its window is being
+			// destroyed, and this list with it. The loop ends, and nothing
+			// is done for that window.
+			gone = done = true;
+			chosen = nullptr;
+			toSettings = false;
+			hwnd = nullptr;
+			return false;
 		case WM_COMMAND:
 			if ((HWND)lp == edit && HIWORD(wp) == EN_CHANGE) { refilter(); redraw(); }
 			return true;
@@ -398,6 +409,7 @@ void showShortcutsWindow(HWND parent) {
 	for (CircuitWindow* w : circuitWindows()) if (w->window() == parent) owner = w;
 	ShortcutsSheet sheet;
 	sheet.run(parent);
+	if (sheet.gone) return;   // its window (owner) went with it
 	if (sheet.toSettings) {
 		setPreferencesPage(4);
 		showPreferencesDialog(parent);

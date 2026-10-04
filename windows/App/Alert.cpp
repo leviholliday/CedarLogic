@@ -351,7 +351,9 @@ struct Card {
 			guarded("a question", [&] { c->key((UINT)wp); });
 			return 0;
 		}
-		if (msg == WM_KEYDOWN && wp == 'A' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+		// Ctrl+A selects it all; Ctrl+Alt+A is AltGr+A, a letter on some
+		// keyboards (Polish's ą), and is typed.
+		if (msg == WM_KEYDOWN && wp == 'A' && (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) {
 			SendMessageW(h, EM_SETSEL, 0, -1);
 			return 0;
 		}
