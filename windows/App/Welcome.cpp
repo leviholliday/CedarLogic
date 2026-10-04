@@ -376,7 +376,7 @@ void pageIntro(ID2D1RenderTarget* rt, double t) {
 
 void pageSetup(ID2D1RenderTarget* rt, Panel& panel) {
 	float y = heading(rt, 56, 34, kWW - 112, "Make it yours", "Your canvas, your way",
-	                  "It all applies as you pick it; the window behind this one is the preview. Preferences (Ctrl+,) has the rest.");
+	                  "It all applies as you pick it; the window behind this one is the preview. Settings (Ctrl+,) has the rest.");
 	y += 22;
 	label(rt, 56, y, "Appearance");
 	std::vector<D2D1_RECT_F> hits;
@@ -428,7 +428,7 @@ void pageName(ID2D1RenderTarget* rt, Welcome* w) {
 	            alpha(kNeon, 0.45f));
 	if (prefs().studentName.empty() && GetFocus() != w->name)
 		text(rt, "First and last name", left + 13, y + 9, 15, kNormal, alpha(kPrimary, 0.3f));
-	text(rt, "Rather not? Leave it blank. It's in Preferences whenever you want it.", left, y + 38 + 16, 11.5f, kNormal, kFaint);
+	text(rt, "Rather not? Leave it blank. It's in Settings whenever you want it.", left, y + 38 + 16, 11.5f, kNormal, kFaint);
 	// What an export's footer looks like, with the name in it.
 	D2D1_MATRIX_3X2_F was;
 	rt->GetTransform(&was);
@@ -993,7 +993,7 @@ const Chapter kChapters[] = {
 	    { 0xE768, "Simulation View", "Lit wires with the signal marching along them. Press Ctrl+R." } },
 	  nullptr, 0 },
 	{ "Made for Windows", "Faster, calmer, greener", "A new look, and a lot of care in the small things.",
-	  { { 0xE790, "CedarLogic green", "The icon's colour is the app's colour now. Preferences has the others." },
+	  { { 0xE790, "CedarLogic green", "The icon's colour is the app's colour now. Settings has the others." },
 	    { 0xE9E9, "Gate settings and memory", "Double-click a gate or a RAM for clean, quick editors. Enter is Done." },
 	    { 0xED15, "Send Feedback", "The speech bubble in the toolbar sends a note and screenshots straight to the developer." } },
 	  nullptr, 0 },

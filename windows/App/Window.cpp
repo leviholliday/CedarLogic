@@ -265,7 +265,7 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_SAVE_PART, "Save as &Part\u2026");
 	item(edit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
 	separator(edit);
-	item(edit, CMD_PREFERENCES, "Pr&eferences…\tCtrl+,");
+	item(edit, CMD_PREFERENCES, "S&ettings…\tCtrl+,");
 
 	HMENU view = submenu(menuBar, "&View");
 	item(view, CMD_ZOOM_IN, "Zoom &In\tCtrl+=");
@@ -1229,7 +1229,14 @@ void CircuitWindow::run(int command) {
 	auto editing = [&](void (CircuitWindow::*f)()) { if (canEdit()) (this->*f)(); else lockNudge(); };
 	Canvas* c = currentCanvas();
 	switch (command) {
-	case CMD_NEW: newCircuitWindow(); break;
+	case CMD_NEW:
+		// A blank page, or the template Settings > General names; in this
+		// window's place when Settings says new circuits replace the one
+		// you're in (it's saved first, as everything is).
+		if (!prefs().newTemplate.empty() && templates::startFrom(prefs().newTemplate, this, prefs().openReplaces)) break;
+		if (prefs().openReplaces && saveQuietly(false)) replaceDocument(cl_document_new(), "");
+		else newCircuitWindow();
+		break;
 	case CMD_OPEN: showYourCircuits(this); break;
 	case CMD_IMPORT: chooseAndOpen(this); break;
 	case CMD_NEW_TEMPLATE: templates::showPicker(this); break;

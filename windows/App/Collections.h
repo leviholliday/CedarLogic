@@ -24,6 +24,13 @@ class CircuitWindow;
 namespace templates {
 void showPicker(CircuitWindow* from);
 void saveCurrent(CircuitWindow* window);
+// Every template, built in and yours: its id and its name (Settings' "New
+// circuits" offers them).
+std::vector<std::pair<std::string, std::string>> list();
+// A new circuit from the template with this id, in `from`'s place when it's
+// an untouched new one, or when `replace` (saved first); false when there's
+// no such template.
+bool startFrom(const std::string& id, CircuitWindow* from, bool replace);
 }  // namespace templates
 
 namespace parts {

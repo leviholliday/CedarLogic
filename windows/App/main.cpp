@@ -362,8 +362,10 @@ bool openCircuit(const std::string& path, CircuitWindow* from) {
 		}
 		prefs().lastFolder = dirName(path);
 	}
+	// In the window's place: an untouched new one, or any when Settings says
+	// opening replaces the circuit you're in (saved first).
 	CircuitWindow* w;
-	if (from && from->isPristine()) { from->replaceDocument(doc, target); w = from; }
+	if (from && (from->isPristine() || (prefs().openReplaces && from->saveQuietly(false)))) { from->replaceDocument(doc, target); w = from; }
 	else w = new CircuitWindow(doc, target);
 	library::noteLastCircuit(target);
 	// What loading had to say (an older format converted, an unknown gate...).
@@ -467,7 +469,7 @@ void openHandedFiles(CircuitWindow* w) {
 	// The first goes into this window when it's an untouched new one (not
 	// while a dialog of its is up), the rest into windows of their own.
 	CircuitWindow* from = IsWindowEnabled(w->window()) ? w : nullptr;
-	const bool intoThis = !files.empty() && from && from->isPristine();
+	const bool intoThis = !files.empty() && from && (from->isPristine() || prefs().openReplaces);
 	const size_t windowsBefore = circuitWindows().size();
 	for (const std::string& f : files) {
 		openCircuit(f, from);

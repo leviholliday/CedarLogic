@@ -829,7 +829,7 @@ void Canvas::onRelease(int button, double vx, double vy) {
 	redraw();
 }
 
-// Per device (Preferences > Canvas): a wheel mouse zooms and a touchpad moves
+// Per device (Settings > Canvas): a wheel mouse zooms and a touchpad moves
 // around, by default. Ctrl+scroll always zooms (a touchpad's pinch arrives
 // as that); Shift+scroll moves sideways.
 void Canvas::onWheel(int delta, bool horizontal, WPARAM keys, POINT screen) {

@@ -68,7 +68,7 @@ const std::vector<Page>& pages() {
 		    p("**Add a Gate (A)**: type part of a gate's name, press Enter, and move onto the canvas. The gate appears at the pointer; "
 		      "click to put it down. Escape changes your mind. Your own parts are in it too."),
 		    p("The menu at the top of the side panel picks a family of gates; the search box finds one by name."),
-		    tip("Preferences (Ctrl+,) turns the names under the side panel's gates on or off.") },
+		    tip("Settings (Ctrl+,) turns the names under the side panel's gates on or off.") },
 		  false },
 		{ "wiring", "Wiring", 0xE71B, "Pin to pin, or let C do it.",
 		  { p("**Drag** from one pin to another. While you drag, a small square marks the pin the wire will join. Or **click** a pin, then "
@@ -100,7 +100,7 @@ const std::vector<Page>& pages() {
 		      "in it.") },
 		  false },
 		{ "moving", "Moving Around", 0xE7C2, "Zoom, pan and the minimap.",
-		  { keys({ { "Wheel", "Zoom or move, as set in Preferences (touchpads separately)" },
+		  { keys({ { "Wheel", "Zoom or move, as set in Settings (touchpads separately)" },
 		           { "Ctrl + wheel", "Always zooms" },
 		           { "Shift + wheel", "Moves sideways" },
 		           { "Space", "Tap to fit the page; hold and drag to move around" },
@@ -172,9 +172,14 @@ const std::vector<Page>& pages() {
 		      "panel's list (**My Parts**) to drag or click in, and in **Add a Gate (A)** under its name. It drops in as a copy of those "
 		      "gates and wires, so any CedarLogic can open the circuit.") },
 		  false },
-		{ "settings", "Preferences", 0xE713, "Make it yours (Ctrl+,).",
-		  { p("Your name (for exports and the Lab Page), the theme and accent colour, the grid, wires, the side panel, what the wheel "
-		      "and touchpad do, right-click, duplicating, Tidy Up, and whether Ctrl+Q asks first."),
+		{ "settings", "Settings", 0xE713, "Make it yours (Ctrl+,).",
+		  { p("**General**: your name (for exports and the Lab Page), whether opening a circuit replaces the one you're in, a "
+		      "template for every new circuit, whether Ctrl+Q asks first, and update checks. **Appearance**: the theme and the "
+		      "app's colour, the grid, wires, and the side panel. **Canvas**: what the wheel and touchpad do, right-click, "
+		      "duplicating, and Tidy Up."),
+		    p("**Toolbar**: Seamless (one surface with the canvas), Classic (tools in rounded groups) or Minimal (the essentials, "
+		      "the rest in •••), and which tools it shows. **Shortcuts**: click one and press new keys; Restore Defaults puts "
+		      "them all back. **Ctrl+/** lists them all."),
 		    p("**Ctrl+Shift+D** switches between light and dark any time.") },
 		  false },
 		{ "feedback", "Sending Feedback", 0xED15, "It goes straight to the developer.",
