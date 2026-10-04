@@ -9,6 +9,7 @@
 #include "Feedback.h"
 #include "Help.h"
 #include "Library.h"
+#include "Palette.h"
 #include "Recovery.h"
 #include "Toolbar.h"
 #include "Updater.h"
@@ -155,6 +156,48 @@ const std::vector<ClickCase>& clickCases() {
 	return cases;
 }
 
+// A gate dragged from the side panel onto the canvas in one motion, put down
+// where the button comes up. The panel reads where the pointer really is, so
+// it's moved there first; SKIP when it can't be (no desktop to move it on).
+void dragTest(CircuitWindow* w) {
+	GatePalette* pal = w->paletteWidget();
+	Canvas* c = w->currentCanvas();
+	POINT tile;
+	if (pal == nullptr || c == nullptr || !IsWindowVisible(pal->widget()) || !pal->firstTilePoint(tile)) {
+		report("SKIP", "Drag a gate: no gate in the side panel to drag");
+		return;
+	}
+	RECT cr;
+	GetWindowRect(c->widget(), &cr);
+	const int in = scaled(140, dpiOf(c->widget()));
+	const POINT target = { cr.left + in, cr.top + in };
+	POINT before, now;
+	GetCursorPos(&before);
+	SetCursorPos(target.x, target.y);
+	GetCursorPos(&now);
+	if (now.x != target.x || now.y != target.y || WindowFromPoint(target) != c->widget()) {
+		SetCursorPos(before.x, before.y);
+		report("SKIP", "Drag a gate: the pointer can't be put over the canvas here");
+		return;
+	}
+	CLDocument* doc = w->document();
+	const int page = w->currentPage();
+	const int gates = cl_document_gate_count(doc, page);
+	const HWND h = pal->tilesWidget();
+	POINT over = target;
+	ScreenToClient(h, &over);
+	SendMessageW(h, WM_MOUSEMOVE, 0, MAKELPARAM(tile.x, tile.y));
+	SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(tile.x, tile.y));
+	SendMessageW(h, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(over.x, over.y));
+	const bool following = w->isFloating();
+	SendMessageW(h, WM_LBUTTONUP, 0, MAKELPARAM(over.x, over.y));
+	const int after = cl_document_gate_count(doc, page);
+	report(after == gates + 1 && following && !w->isFloating() ? "PASS" : "FAIL",
+	       strf("Drag a gate onto the canvas: %d gate%s, then %d%s", gates, gates == 1 ? "" : "s", after,
+	            following ? "" : " (it didn't follow the pointer)"));
+	SetCursorPos(before.x, before.y);
+}
+
 // After the message loop: the drawn Close's result, and the summary.
 int finishClickTest() {
 	if (gClickClosing) report(IsWindow(gClickWindow) ? "FAIL" : "PASS", "Close (drawn): the window closed");
@@ -190,6 +233,7 @@ int clickTestStep() {
 		const int width = w->toolbarWidget() ? (int)w->toolbarWidget()->width() : 0;
 		report(c.mayBeHidden ? "SKIP" : "FAIL", strf("%s: not on the toolbar at this width (%d points)", c.name, width));
 	}
+	dragTest(w);
 	// Last, the drawn Close: the window goes, and with it the app (the
 	// result is read once the message loop ends).
 	if (!clickButton(w, Toolbar::kClose, "Close")) {

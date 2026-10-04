@@ -227,6 +227,7 @@ private:
 public:
 	ScopeWindow* scopeWindow() const { return scope; }
 	Toolbar* toolbarWidget() const { return toolbar; }   // for --click-test
+	GatePalette* paletteWidget() const { return palette; }   // and its drag
 	std::string pageName(int page) const;
 private:
 	std::vector<Canvas*> canvases;    // in tab order

@@ -288,6 +288,10 @@ struct Card {
 		case WM_CLOSE:
 			choose(a.escape);
 			return 0;
+		case WM_ACTIVATE:
+			// Back from another window: the keyboard where it was.
+			if (LOWORD(wp) != WA_INACTIVE) SetFocus(focus == -2 && edit ? edit : hwnd);
+			return 0;
 		case WM_TIMER:
 			if (wp == kAnimTimer) {
 				redraw();

@@ -306,6 +306,16 @@ D2D1_RECT_F GatePalette::scrollThumb() const {
 	return D2D1::RectF(w - 9, ty + 2, w - 3, ty + th - 2);
 }
 
+bool GatePalette::firstTilePoint(POINT& at) const {
+	if (shown.empty() || tiles == nullptr) return false;
+	int columns;
+	float tileW, tileH;
+	layoutTiles(columns, tileW, tileH);
+	const double s = dpiOf(tiles) / 96.0;
+	at = { (LONG)((kPad + tileW / 2) * s), (LONG)((kPad + tileH / 2 - scrollY) * s) };
+	return at.y > 0;
+}
+
 int GatePalette::tileAt(float px, float py) const {
 	py += scrollY;
 	int columns;

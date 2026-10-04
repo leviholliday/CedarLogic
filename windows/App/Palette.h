@@ -32,6 +32,9 @@ public:
 	// For the category button.
 	std::string categoryTitle() const;
 	void chooseCategory(POINT screen);
+	// For --click-test: the gates' window, and the first gate's middle in it.
+	HWND tilesWidget() const { return tiles; }
+	bool firstTilePoint(POINT& at) const;
 
 private:
 	struct Gate { std::string name, caption; };

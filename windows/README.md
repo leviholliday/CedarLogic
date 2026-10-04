@@ -74,8 +74,10 @@ Direct2D here. And:
   to show its value.
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
   Tab, Simulation View, Lock, New) and the window's drawn Minimize and Close
-  the way Windows sends a click, checks each did what it should, prints PASS,
-  FAIL or SKIP for each and exits 1 if any failed (CI runs it).
+  the way Windows sends a click, drags a gate from the side panel onto the
+  canvas (SKIP where the pointer can't be moved), checks each did what it
+  should, prints PASS, FAIL or SKIP for each and exits 1 if any failed (CI
+  runs it).
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the
