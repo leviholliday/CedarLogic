@@ -111,7 +111,12 @@ void showYourCircuits(CircuitWindow* from) {
 	p.onKey = [&](Picker& picker, UINT vk, bool ctrl) -> bool {
 		if (ctrl && vk == 'R') { picker.onButton(picker, 1); picker.redraw(); return true; }
 		if (ctrl && vk == 'I') { import = true; picker.close(); return true; }
-		if (vk == VK_DELETE && GetFocus() != picker.edit) { picker.onButton(picker, 2); picker.redraw(); return true; }
+		// Delete: the circuit, unless it's for the search box's text.
+		if (vk == VK_DELETE && (GetFocus() != picker.edit || GetWindowTextLengthW(picker.edit) == 0)) {
+			picker.onButton(picker, 2);
+			picker.redraw();
+			return true;
+		}
 		return false;
 	};
 	p.run(from->window());

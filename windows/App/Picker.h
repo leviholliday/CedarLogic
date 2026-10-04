@@ -351,8 +351,9 @@ private:
 	static LRESULT CALLBACK editProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
 		Picker* p = reinterpret_cast<Picker*>(data);
 		if (msg == WM_KEYDOWN) {
+			// Delete too while there's nothing typed (Your Circuits deletes the circuit).
 			const bool mine = wp == VK_UP || wp == VK_DOWN || wp == VK_PRIOR || wp == VK_NEXT || wp == VK_RETURN || wp == VK_ESCAPE ||
-			                  (GetKeyState(VK_CONTROL) & 0x8000);
+			                  (GetKeyState(VK_CONTROL) & 0x8000) || (wp == VK_DELETE && GetWindowTextLengthW(h) == 0);
 			if (mine && p->key((UINT)wp)) return 0;
 		}
 		if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE)) return 0;   // no beep
