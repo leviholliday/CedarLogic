@@ -26,6 +26,7 @@ struct CedarLogicApp: App {
             MenuFixup.install()
             RenderUI.runIfAsked()
             RenderWindow.runIfAsked()
+            LabReport.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
             DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
         }
@@ -626,6 +627,9 @@ struct FileCommands: Commands {
         CommandGroup(after: .saveItem) {
             Button("Export as Image…") { canvas?.perform(.exportImage) }
                 .keyboardShortcut(keys.menu(.exportImage))
+                .disabled(canvas == nil)
+            Button("Export Lab Report…") { canvas?.perform(.exportReport) }
+                .keyboardShortcut(keys.menu(.exportReport))
                 .disabled(canvas == nil)
             Button("Export as CedarLogic File…") { canvas?.perform(.exportFile) }
                 .keyboardShortcut(keys.menu(.exportFile))

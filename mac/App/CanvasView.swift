@@ -722,6 +722,7 @@ final class CanvasController: ObservableObject {
     @Published var showQuickAdd = false
     @Published var showShortcuts = false
     @Published var showExportImage = false
+    @Published var showExportReport = false
     @Published var ramGate: Int?
     /// A one-line message for the status bar ("Saved.", "Nothing to paste.").
     @Published var statusMessage = ""
@@ -769,6 +770,7 @@ final class CanvasController: ObservableObject {
             sheetHost.explicitSaveAt = CACurrentMediaTime()
             NSApp.sendAction(#selector(NSDocument.save(_:)), to: nil, from: nil)
         case .exportImage: sheetHost.exportPage = page; sheetHost.showExportImage = true
+        case .exportReport: sheetHost.showExportReport = true
         // A copy out of Your Circuits; the circuit itself stays there.
         case .exportFile: NSApp.sendAction(#selector(NSDocument.saveTo(_:)), to: nil, from: nil)
         case .print: printPage()

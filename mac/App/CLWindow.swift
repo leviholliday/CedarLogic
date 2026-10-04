@@ -156,6 +156,10 @@ struct CLLayout: View {
             ExportImageView(document: document, page: canvas.exportPage, fileName: windowTitle)
                 .onClickOutside { canvas.showExportImage = false }
         }
+        .sheet(isPresented: $canvas.showExportReport) {
+            ExportReportView(document: document, fileName: windowTitle)
+                .onClickOutside { canvas.showExportReport = false }
+        }
         .sheet(item: Binding(get: { canvas.ramGate.map { RamRef(id: $0) } }, set: { canvas.ramGate = $0?.id })) { ref in
             RamEditorView(document: document, gate: ref.id, canvas: canvas)
         }
