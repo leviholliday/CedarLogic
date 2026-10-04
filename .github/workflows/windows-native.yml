@@ -98,8 +98,9 @@ jobs:
       # Chocolatey when the runner hasn't got it; the version is CMake's.
       # New and not yet seen on a real Windows, so for now this and its two
       # tests below don't hold the zips back: a failure shows on the run, and
-      # the release goes out without installers. (Take continue-on-error off
-      # these three once they've passed.)
+      # the release goes out without installers (the Installer test takes a
+      # setup that fails it away before it's uploaded). (Take continue-on-error
+      # off these three once they've passed.)
       - name: Installer
         shell: pwsh
         continue-on-error: true
@@ -266,36 +267,45 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'CedarLogic.lnk'
-          $prog = 'HKCU:\Software\Classes\CedarLogic.Circuit'
-          $p = Start-Process -FilePath ".\CedarLogic-Windows-Setup-${{ matrix.arch }}.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$PWD\setup.log`"" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content setup.log; throw "setup ended with $($p.ExitCode)" }
-          # Where it went, as setup noted it for the app.
-          $dir = (Get-ItemProperty 'HKCU:\Software\CedarLogic\Native' -ErrorAction SilentlyContinue).InstallDir
-          if (-not $dir -or $dir -notlike '*\AppData\Local\Programs\CedarLogic') { Get-Content setup.log; throw "InstallDir is '$dir'" }
-          $exe = Join-Path $dir 'CedarLogic.exe'
-          foreach ($f in @($exe, "$dir\res\cl_gatedefs.xml", "$dir\unins000.exe", $lnk)) {
-            if (-not (Test-Path $f)) { Get-Content setup.log; throw "not installed: $f" }
+          $setup = ".\CedarLogic-Windows-Setup-${{ matrix.arch }}.exe"
+          try {
+            $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'CedarLogic.lnk'
+            $prog = 'HKCU:\Software\Classes\CedarLogic.Circuit'
+            $p = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$PWD\setup.log`"" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Get-Content setup.log; throw "setup ended with $($p.ExitCode)" }
+            # Where it went, as setup noted it for the app.
+            $dir = (Get-ItemProperty 'HKCU:\Software\CedarLogic\Native' -ErrorAction SilentlyContinue).InstallDir
+            if (-not $dir -or $dir -notlike '*\AppData\Local\Programs\CedarLogic') { Get-Content setup.log; throw "InstallDir is '$dir'" }
+            $exe = Join-Path $dir 'CedarLogic.exe'
+            foreach ($f in @($exe, "$dir\res\cl_gatedefs.xml", "$dir\unins000.exe", $lnk)) {
+              if (-not (Test-Path $f)) { Get-Content setup.log; throw "not installed: $f" }
+            }
+            $open = (Get-Item "$prog\shell\open\command").GetValue('')
+            if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
+            if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }
+            $p = Start-Process -FilePath $exe -ArgumentList '--screenshot', "`"$PWD\renders\installed.png`"", "`"$PWD\res\samples\practice.cdl`"" -PassThru
+            $null = $p.Handle   # so ExitCode is there once it's gone
+            $p | Wait-Process -Timeout 90
+            if ($p.ExitCode -ne 0 -or -not (Test-Path renders\installed.png)) { throw "the installed CedarLogic didn't start ($($p.ExitCode))" }
+            $p = Start-Process -FilePath "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+            # The uninstaller carries on from a copy of itself, and takes the
+            # folder away last: wait for that.
+            for ($i = 0; $i -lt 90 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
+            if (Test-Path $dir) { Write-Output "::warning::left in $dir after uninstalling: $((Get-ChildItem -Recurse -Name $dir) -join ', ')" }
+            foreach ($f in @($exe, "$dir\res", $lnk, $prog, 'HKCU:\Software\CedarLogic\Native')) {
+              if (Test-Path $f) { throw "still there after uninstalling: $f" }
+            }
+            if ((Test-Path 'HKCU:\Software\Classes\.cdl') -and (Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -eq 'CedarLogic.Circuit') {
+              throw '.cdl is still CedarLogic''s'
+            }
+            Write-Output 'installed, started, uninstalled: all as expected'
+          } catch {
+            # A setup that failed this isn't published (nor is the ARM64 one, made
+            # by the same script and never tried here); the zips still are.
+            Remove-Item $setup -ErrorAction SilentlyContinue
+            Write-Output "::warning::the installer failed its test, so this build goes out without installers: $_"
+            throw
           }
-          $open = (Get-Item "$prog\shell\open\command").GetValue('')
-          if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
-          if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }
-          $p = Start-Process -FilePath $exe -ArgumentList '--screenshot', "`"$PWD\renders\installed.png`"", "`"$PWD\res\samples\practice.cdl`"" -PassThru
-          $null = $p.Handle   # so ExitCode is there once it's gone
-          $p | Wait-Process -Timeout 90
-          if ($p.ExitCode -ne 0 -or -not (Test-Path renders\installed.png)) { throw "the installed CedarLogic didn't start ($($p.ExitCode))" }
-          $p = Start-Process -FilePath "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
-          # The uninstaller carries on from a copy of itself, and takes the
-          # folder away last: wait for that.
-          for ($i = 0; $i -lt 90 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
-          if (Test-Path $dir) { Write-Output "::warning::left in $dir after uninstalling: $((Get-ChildItem -Recurse -Name $dir) -join ', ')" }
-          foreach ($f in @($exe, "$dir\res", $lnk, $prog, 'HKCU:\Software\CedarLogic\Native')) {
-            if (Test-Path $f) { throw "still there after uninstalling: $f" }
-          }
-          if ((Test-Path 'HKCU:\Software\Classes\.cdl') -and (Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -eq 'CedarLogic.Circuit') {
-            throw '.cdl is still CedarLogic''s'
-          }
-          Write-Output 'installed, started, uninstalled: all as expected'
 
       - name: Upload zip and installer
         uses: actions/upload-artifact@v7
@@ -342,13 +352,21 @@ jobs:
           shopt -s nullglob
           ls -la zips
           TAG=windows-native-testing
-          # The installers first -- when this run made them (their step
-          # doesn't hold the build back yet).
-          SETUP="To install: download CedarLogic-Windows-Setup-x64.exe and run it (on a Windows on ARM laptop, such as a Snapdragon one: CedarLogic-Windows-Setup-ARM64.exe). Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway. It installs for you only, with no administrator needed: CedarLogic goes in the Start menu, .cdl files open in it, and Settings > Apps removes it. It updates itself from inside the app."
+          # The installers first -- the ones this run made and that passed
+          # (their steps don't hold the build back yet; a setup that failed
+          # its install test wasn't uploaded). The ARM64 one can't be tried on
+          # this runner: it goes out only beside an x64 one that passed, made
+          # by the same script.
+          X64=zips/CedarLogic-Windows-Setup-x64.exe
+          ARM=zips/CedarLogic-Windows-Setup-ARM64.exe
+          [ -f "$X64" ] || rm -f "$ARM"
+          SMARTSCREEN="Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway."
+          ON_ARM="on a Windows on ARM laptop, such as a Snapdragon one: CedarLogic-Windows-Setup-ARM64.exe"
+          [ -f "$ARM" ] || ON_ARM="on a Windows on ARM laptop, such as a Snapdragon one, use the ARM64 zip below: this build has no installer for it"
+          SETUP="To install: download CedarLogic-Windows-Setup-x64.exe and run it ($ON_ARM). $SMARTSCREEN It installs for you only, with no administrator needed: CedarLogic goes in the Start menu, .cdl files open in it, and Settings > Apps removes it. It updates itself from inside the app."
           ZIPS="Rather not install? The zips run as they are:"
-          setups=(zips/*.exe)
-          if [ ${#setups[@]} -eq 0 ]; then
-            SETUP="This build has no installers; the zips below run as they are. Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway."
+          if [ ! -f "$X64" ]; then
+            SETUP="This build has no installers; the zips below run as they are. $SMARTSCREEN"
             ZIPS="Pick the file for your computer:"
           fi
           NOTES=$(cat <<EOT
