@@ -190,6 +190,7 @@ enum HelpBook {
                         HelpPage.Key(keys: "{newCircuit}", what: "New circuit"),
                         HelpPage.Key(keys: "{importFile}", what: "Open a .cdl file from anywhere"),
                         HelpPage.Key(keys: "{exportImage}", what: "Export an image (PNG or PDF), with your name under it"),
+                        HelpPage.Key(keys: "{exportReport}", what: "Export a lab report: one PDF with the circuit, truth table, Karnaugh maps and timing diagram"),
                         HelpPage.Key(keys: "{exportFile}", what: "Export as a CedarLogic file"),
                         HelpPage.Key(keys: "{print}", what: "Print"),
                     ]),

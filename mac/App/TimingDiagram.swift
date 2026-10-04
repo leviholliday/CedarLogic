@@ -13,8 +13,9 @@ enum TimingDiagram {
     private static let titleHeight: CGFloat = 46, axisHeight: CGFloat = 34
 
     /// The samples `range` of `signals`, as a picture `size` points big.
-    static func size(steps: Int, signals: Int) -> (size: CGSize, pointsPerStep: CGFloat) {
+    static func size(steps: Int, signals: Int, titled: Bool = true) -> (size: CGSize, pointsPerStep: CGFloat) {
         let n = max(1, steps)
+        let titleHeight = titled ? Self.titleHeight : 0
         // Readable steps where there's room; squeezed to fit a wide page otherwise.
         let pps = min(24, max(0.5, 1400 / CGFloat(n)))
         let width = margin * 2 + nameWidth + CGFloat(n) * pps
@@ -22,8 +23,10 @@ enum TimingDiagram {
         return (CGSize(width: max(width, 520), height: height), pps)
     }
 
-    static func draw(_ ctx: CGContext, document: CoreDocument, signals: [Signal], range: Range<Int>, title: String, color: Bool) {
-        let (size, pps) = size(steps: range.count, signals: signals.count)
+    /// `titled: false` leaves the title and byline off (the lab report has its own).
+    static func draw(_ ctx: CGContext, document: CoreDocument, signals: [Signal], range: Range<Int>, title: String, color: Bool, titled: Bool = true) {
+        let (size, pps) = size(steps: range.count, signals: signals.count, titled: titled)
+        let titleHeight = titled ? Self.titleHeight : 0
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
         defer { NSGraphicsContext.restoreGraphicsState() }
@@ -46,12 +49,14 @@ enum TimingDiagram {
         }
 
         // Title, and who made it.
-        text(title, CGPoint(x: margin, y: margin + 10), size: 17, weight: .semibold)
-        let prefs = Prefs.shared
-        var byline = "Timing diagram"
-        if prefs.exportInfo, !prefs.studentName.isEmpty { byline += " · " + prefs.studentName }
-        byline += " · " + Date().formatted(date: .abbreviated, time: .omitted)
-        text(byline, CGPoint(x: margin, y: margin + 30), size: 11, color: .darkGray)
+        if titled {
+            text(title, CGPoint(x: margin, y: margin + 10), size: 17, weight: .semibold)
+            let prefs = Prefs.shared
+            var byline = "Timing diagram"
+            if prefs.exportInfo, !prefs.studentName.isEmpty { byline += " · " + prefs.studentName }
+            byline += " · " + Date().formatted(date: .abbreviated, time: .omitted)
+            text(byline, CGPoint(x: margin, y: margin + 30), size: 11, color: .darkGray)
+        }
 
         let left = margin + nameWidth
         let top = margin + titleHeight

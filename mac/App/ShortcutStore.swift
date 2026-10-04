@@ -71,7 +71,7 @@ struct KeyCombo: Codable, Hashable {
 
 enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Circuits
-    case newCircuit, openLibrary, importFile, save, exportImage, exportFile, print
+    case newCircuit, openLibrary, importFile, save, exportImage, exportReport, exportFile, print
     // Editing
     case undo, redo, cut, copy, paste, duplicate, selectAll
     // Building
@@ -89,7 +89,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     var section: String {
         switch self {
-        case .newCircuit, .openLibrary, .importFile, .save, .exportImage, .exportFile, .print: "Circuits"
+        case .newCircuit, .openLibrary, .importFile, .save, .exportImage, .exportReport, .exportFile, .print: "Circuits"
         case .undo, .redo, .cut, .copy, .paste, .duplicate, .selectAll: "Editing"
         case .addGate, .rotate, .straighten, .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate, .buildFormula: "Building"
         case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode, .find, .findNext, .findPrevious: "Moving around"
@@ -106,6 +106,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .importFile: "Import a .cdl file"
         case .save: "Save now and keep a version"
         case .exportImage: "Export as an image"
+        case .exportReport: "Export a lab report (PDF)"
         case .exportFile: "Export as a CedarLogic file"
         case .print: "Print"
         case .undo: "Undo"
@@ -178,6 +179,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickCut: return KeyCombo(key: "x", mods: 0)
         case .quickDuplicate: return KeyCombo(key: "d", mods: 0)
         case .buildFormula: return nil
+        case .exportReport: return nil
         case .zoomIn: return KeyCombo(key: "=", mods: c)
         case .zoomOut: return KeyCombo(key: "-", mods: c)
         case .zoomFit: return KeyCombo(key: "0", mods: c)
