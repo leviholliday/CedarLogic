@@ -104,11 +104,18 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup -y --no-progress
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Wherever this Inno Setup put itself (Program Files or its x86 one).
+          function Find-Iscc {
+            Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "${env:ProgramFiles}\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName | Select-Object -First 1 -ExpandProperty FullName
           }
+          $iscc = Find-Iscc
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = Find-Iscc
+            if (-not $iscc) { throw "Inno Setup couldn't be installed (choco ended with $LASTEXITCODE)" }
+          }
+          Write-Output "Inno Setup: $iscc"
           $m = Select-String -Path windows/build/CMakeCache.txt -Pattern '^CMAKE_PROJECT_VERSION:STATIC=(.+)$' | Select-Object -First 1
           if (-not $m) { $m = Select-String -Path windows/CMakeLists.txt -Pattern 'project\(\S+ VERSION ([0-9.]+)' | Select-Object -First 1 }
           $version = $m.Matches[0].Groups[1].Value
