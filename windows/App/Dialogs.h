@@ -48,6 +48,7 @@ public:
 
 	std::function<void(Form&)> onInit;
 	std::function<void(Form&, int field)> onChange;       // a field changed (typing, a choice, a tick)
+	std::function<void(Form&, int field)> onLeave;        // a Text field lost the keyboard
 	std::function<std::string(Form&)> validate;           // on OK: "" to close, else what's wrong
 	std::function<bool(Form&, int button)> onButton;      // one of `buttons`: true to close with it
 	std::function<void(Form&, int field, int row)> onActivate;   // a List row double-clicked

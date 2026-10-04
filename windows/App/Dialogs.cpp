@@ -10,6 +10,7 @@
 #include <uxtheme.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -388,6 +389,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			OffsetRect(&fr, 0, -f->scrollY);
 			InvalidateRect(d, &fr, FALSE);
 			if (code == EN_SETFOCUS && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
+			if (code == EN_KILLFOCUS && x.kind == FormField::Text && f->onLeave) guarded("a dialog", [&] { f->onLeave(*f, id - kFieldBase); });
 			return TRUE;
 		}
 		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && code == CBN_SETFOCUS && f->scrollHeight > 0)
@@ -1039,7 +1041,7 @@ bool askText(HWND parent, const std::string& title, const std::string& prompt, s
 
 // ---- A gate's settings -----------------------------------------------------------
 // The same settings the wx app's parameters dialog lists, each with a control
-// that suits its type. OK applies what changed (one undo step each).
+// that suits its type. Each change is one undo step.
 
 namespace {
 
@@ -1057,7 +1059,9 @@ std::string trimmed(const std::string& s) {
 
 // A gate's settings (double-click it), as the Mac's inspector: the gate's
 // picture and name on top, then its settings, each applied as you make it
-// (a number once it's valid) and undone with Ctrl+Z; Rotate, Delete, Done.
+// -- what's typed when you leave the box (Tab, Enter, Done), so a word or a
+// number is one undo step, as on the Mac and Linux; a number once it's
+// valid -- and undone with Ctrl+Z; Rotate, Delete, Done.
 void showGateSettings(CircuitWindow* w, long gate) {
 	// Locked, or in Simulation View: nothing to change (the menu still offers it).
 	if (!w->canEdit()) { w->lockNudge(); return; }
@@ -1124,32 +1128,62 @@ void showGateSettings(CircuitWindow* w, long gate) {
 		f.add(x);
 	}
 	// A number is checked against the library's range, as the wx dialog does.
-	auto problem = [](const Setting& s, const std::string& v) -> std::string {
+	// A whole number is just digits: the engine would read 1e3 as 1 and 0x20
+	// as 0. `value` is what's applied (a whole number as the engine reads it).
+	auto problem = [](const Setting& s, const std::string& v, std::string& value) -> std::string {
+		value = v;
 		if (s.type != "INT" && s.type != "FLOAT") return "";
+		double x = 0;
 		char* end = nullptr;
-		const double x = strtod(v.c_str(), &end);
-		if (v.empty() || end == nullptr || *end != 0 || !std::isfinite(x) || (s.type == "INT" && x != std::floor(x)))
-			return strf("%s: enter %s.", s.name.c_str(), s.type == "INT" ? "a whole number" : "a number");
+		bool ok = !v.empty();
+		if (ok && s.type == "INT") {
+			errno = 0;
+			const long long whole = strtoll(v.c_str(), &end, 10);
+			ok = end != nullptr && *end == 0 && errno != ERANGE;
+			x = (double)whole;
+			if (ok) value = std::to_string(whole);
+		} else if (ok) {
+			x = strtod(v.c_str(), &end);
+			ok = end != nullptr && *end == 0 && std::isfinite(x) && v.find_first_of("xX") == std::string::npos;
+		}
+		if (!ok) return strf("%s: enter %s.", s.name.c_str(), s.type == "INT" ? "a whole number" : "a number");
 		if (x < s.min || x > s.max)
 			return strf("%s must be between %s and %s.", s.name.c_str(), numberText(s.min).c_str(), numberText(s.max).c_str());
 		return "";
 	};
-	// Each change as it's made, when it's valid.
+	// One undo step, when it's valid and something changed.
+	auto apply = [&](Setting& s, const std::string& typed) {
+		std::string v;
+		if (!problem(s, typed, v).empty() || v == s.value) return;
+		cl_gate_set_setting(doc, gate, s.name.c_str(), v.c_str());
+		s.value = v;
+		w->edited();
+	};
+	// A switch at once; typing shows what's wrong as it goes and is applied
+	// when the box is left (a file from Choose... at once).
 	f.onChange = [&](Form& form, int field) {
 		for (Setting& s : settings) {
 			if (s.field != field) continue;
-			const std::string v = s.type == "BOOL" ? (form.checked(field) ? "true" : "false") : trimmed(form.text(field));
-			const std::string bad = problem(s, v);
-			form.setProblem(bad);
-			if (!bad.empty() || v == s.value) return;
-			cl_gate_set_setting(doc, gate, s.name.c_str(), v.c_str());
-			s.value = v;
-			w->edited();
+			if (s.type == "BOOL") {
+				form.setProblem("");
+				apply(s, form.checked(field) ? "true" : "false");
+				return;
+			}
+			const std::string typed = trimmed(form.text(field));
+			std::string v;
+			form.setProblem(problem(s, typed, v));
+			if (GetFocus() != form.fields[field].hwnd) apply(s, typed);
+			return;
 		}
+	};
+	f.onLeave = [&](Form& form, int field) {
+		for (Setting& s : settings)
+			if (s.field == field && s.type != "BOOL") apply(s, trimmed(form.text(field)));
 	};
 	f.validate = [&](Form& form) -> std::string {
 		for (const Setting& s : settings) {
-			const std::string bad = problem(s, trimmed(form.text(s.field)));
+			std::string v;
+			const std::string bad = problem(s, trimmed(form.text(s.field)), v);
 			if (!bad.empty()) return bad;
 		}
 		return std::string();
@@ -1163,7 +1197,11 @@ void showGateSettings(CircuitWindow* w, long gate) {
 		w->run(CMD_DELETE);
 		return true;
 	};
-	f.run(w->window());
+	// Done, Enter, Escape or the close box keeps what was typed last (when
+	// it's valid); Delete took the gate.
+	if (f.run(w->window()) != 101)
+		for (Setting& s : settings)
+			if (s.type != "BOOL") apply(s, trimmed(f.fields[s.field].value));
 }
 
 // ---- Quick add (A) -------------------------------------------------------------
