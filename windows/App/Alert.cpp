@@ -403,9 +403,9 @@ int runAlert(HWND parent, Alert& a) {
 		y = std::max<int>(mi.rcWork.top, std::min<int>(y, mi.rcWork.bottom - ph));
 	}
 	const std::string title = a.title.empty() ? a.heading : a.title;
-	CreateWindowExW(owner ? 0 : WS_EX_APPWINDOW, kClass, W(title).c_str(), WS_POPUP | WS_CLIPCHILDREN, x, y, pw, ph, owner, nullptr,
-	                appInstance(), &c);
-	if (c.hwnd == nullptr) return fallback(owner, a);
+	if (CreateWindowExW(owner ? 0 : WS_EX_APPWINDOW, kClass, W(title).c_str(), WS_POPUP | WS_CLIPCHILDREN, x, y, pw, ph, owner, nullptr,
+	                    appInstance(), &c) == nullptr)
+		return fallback(owner, a);
 	const DWORD round = 2;   // DWMWCP_ROUND (Windows 11; Windows 10 says no)
 	c.rounded = SUCCEEDED(DwmSetWindowAttribute(c.hwnd, 33, &round, sizeof round));
 	setDarkTitleBar(c.hwnd, prefs().dark);
