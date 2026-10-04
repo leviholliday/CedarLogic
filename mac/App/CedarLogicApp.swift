@@ -128,6 +128,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
     /// The launch screen goes up before any window, so they can wait for it.
     func applicationWillFinishLaunching(_ notification: Notification) {
         CrashReports.start()
+        // cedarlogic://open links (ShareLink.swift).
+        MainActor.assumeIsolated { ShareLink.install() }
         Splash.shared.showIfLaunching()
         // Asked once, once the circuit is there to ask over.
         if Splash.shared.active {
@@ -166,6 +168,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             let dc = NSDocumentController.shared
             let launched = { Self.afterFirstDraw { Splash.shared.begin() } }
             guard dc.documents.isEmpty, !CommandLine.arguments.contains("--render-ui") else { launched(); return }
+            // A link that launched the app brings its own circuit.
+            if MainActor.assumeIsolated({ ShareLink.handedOver }) { launched(); return }
             // The toolbar test works on a new circuit, never one of yours.
             if BarTest.on && ProcessInfo.processInfo.environment["CL_BAR_WATCH"] == nil { Self.newHidden(); launched(); return }
             let remembered = LastCircuit.url.map { [$0] } ?? []
@@ -629,6 +633,8 @@ struct FileCommands: Commands {
                 .disabled(canvas == nil)
             Button("Export as CedarLogic File…") { canvas?.perform(.exportFile) }
                 .keyboardShortcut(keys.menu(.exportFile))
+                .disabled(canvas == nil)
+            Button("Share Link…") { if let canvas { ShareLink.copy(from: canvas) } }
                 .disabled(canvas == nil)
             Button("Version History…") { openWindow(id: "versions") }
                 .disabled(canvas == nil)
