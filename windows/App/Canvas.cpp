@@ -805,7 +805,7 @@ void Canvas::onMotion(double vx, double vy) {
 		break;
 	case Drag::None:
 		if (win->hasPendingGate() && win->placePendingGate(wx, wy)) { redraw(); break; }
-		if (win->simView()) break;
+		if (win->simView() || (win->isFloating() && this != win->currentCanvas())) break;   // it floats on its own side
 		if (cl_edit_hover(doc, p, wx, wy, upp)) redraw();
 		break;
 	}

@@ -368,8 +368,12 @@ void GatePalette::drop() {
 	const std::string name = shown[pressed].name;
 	POINT p;
 	GetCursorPos(&p);
-	Canvas* c = win->currentCanvas();
-	if (c && WindowFromPoint(p) == c->widget()) {
+	// Onto either side of a split: that side's page takes it.
+	Canvas* c = nullptr;
+	for (int pane = 0; pane < 2; pane++)
+		if (Canvas* pc = win->paneCanvas(pane)) if (WindowFromPoint(p) == pc->widget()) c = pc;
+	if (c && c != win->currentCanvas()) win->activatePane(win->paneOf(c));
+	if (c && c == win->currentCanvas()) {
 		// Same as clicking the tile: the gate lands floating, still following
 		// the pointer until a click drops it -- so C-to-connect, Escape, and
 		// every other in-flight key work exactly as they do after a click.

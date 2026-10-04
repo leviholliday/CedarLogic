@@ -578,7 +578,12 @@ void CircuitWindow::showPage(int index) {
 			cl_edit_select_none(doc, old->page());
 		}
 	}
-	if (Canvas* was = currentCanvas()) if (was != target) was->cancelDrag();
+	if (Canvas* was = currentCanvas()) {
+		if (was != target) was->cancelDrag();
+		// Gates still on the pointer belong to their side's page: going to
+		// the other side takes them back, as Escape does.
+		if (was != target && paneOf(was) != paneOf(target)) cancelFloating();
+	}
 	current = index;
 	pageSwitched();
 }
@@ -2236,6 +2241,12 @@ void CircuitWindow::addGateOnNextMove(const std::string& name) {
 
 bool CircuitWindow::placePendingGate(double wx, double wy) {
 	if (pendingGate.empty()) return false;
+	// Over the other side of a split: that side's page takes it.
+	POINT p;
+	GetCursorPos(&p);
+	const HWND under = WindowFromPoint(p);
+	for (int pane = 0; pane < 2; pane++)
+		if (Canvas* c = paneCanvas(pane)) if (c->widget() == under && c != currentCanvas()) activatePane(pane);
 	const std::string name = pendingGate;
 	pendingGate.clear();
 	return addGateFloating(name, wx, wy);
