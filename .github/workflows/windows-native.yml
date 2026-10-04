@@ -242,9 +242,12 @@ jobs:
       # circuit of several pages -- each checked to be a whole PDF (its
       # header, its end, at least one page) and kept with the pictures: the
       # pages are pictures drawn here with Direct2D, so open one to see them.
+      # (A first run on real Windows: a report that fails shows as a warning
+      # and keeps the pictures, but doesn't hold the zips back.)
       - name: Lab report
         if: matrix.run
         shell: bash
+        continue-on-error: true
         run: |
           mkdir -p renders
           A=package/CedarLogic/CedarLogic.exe
