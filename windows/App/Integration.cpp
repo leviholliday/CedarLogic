@@ -119,6 +119,18 @@ std::wstring registeredExe() {
 // Start and .cdl files lead to this copy.
 bool added() { return samePath(registeredExe(), exePath()); }
 
+// Run from the temporary files (opened straight from a download, say): not
+// somewhere to add to Start.
+bool inTemp() {
+	wchar_t tmp[MAX_PATH + 1] = L"", full[MAX_PATH * 4] = L"";
+	const DWORD n = GetTempPathW(MAX_PATH + 1, tmp);
+	if (n == 0 || n > MAX_PATH) return false;
+	// Long names: TEMP is often written with short ones (RUNNER~1).
+	const DWORD m = GetLongPathNameW(tmp, full, (DWORD)(sizeof full / sizeof full[0]));
+	const std::wstring t = m > 0 && m < sizeof full / sizeof full[0] ? std::wstring(full, m) : std::wstring(tmp, n), exe = exePath();
+	return exe.size() > t.size() && samePath(exe.substr(0, t.size()), t);
+}
+
 // ---- The Start menu's shortcut ---------------------------------------------------------
 
 std::wstring shortcutPath() {
@@ -296,7 +308,7 @@ void start(bool now) {
 	}
 	g_now = now;
 	g_calm = 0;
-	if (now || (prefs().startMenu == 0 && !installedAnywhere())) SetTimer(nullptr, 0, now ? 500 : 1000, askTimer);
+	if (now || (prefs().startMenu == 0 && !installedAnywhere() && !inTemp())) SetTimer(nullptr, 0, now ? 500 : 1000, askTimer);
 }
 
 bool offered() { return !installedAnywhere(); }
