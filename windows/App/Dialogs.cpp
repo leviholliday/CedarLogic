@@ -1466,7 +1466,8 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			rt->SetTransform(was);
 		}
 		drawText(rt, caption, D2D1::RectF(70, 8, pw - 170, 32), 16, k, TextAlign::Leading, true);
-		drawText(rt, strf("%lu addresses × %d bits · %s", words, dataBits, editable ? "click a value to change it" : "locked"),
+		drawText(rt, strf("%lu addresses × %d bits · %s", words, dataBits,
+		                  editable ? "click a value to change it" : w->simView() ? "read only in Simulation View" : "locked"),
 		         D2D1::RectF(70, 32, pw - 170, 50), 11, withAlpha(k, 0.55f));
 		const char* names[] = { "Hex", "Decimal" };
 		float x = pw - 2 - (textWidth("Hex", 12, true) + 24) - (textWidth("Decimal", 12, true) + 24) - 4;
