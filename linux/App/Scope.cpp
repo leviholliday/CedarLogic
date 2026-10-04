@@ -56,19 +56,19 @@ void line(cairo_t* cr, float x0, float y0, float x1, float y1, const Color& c, f
 
 const float kTMargin = 28, kTName = 110, kTLane = 38, kTTitle = 46, kTAxis = 34;
 
-void timingSize(int steps, int signals, float& w, float& h, float& pps) {
+void timingSize(int steps, int signals, float& w, float& h, float& pps, bool titled = true) {
 	const int n = std::max(1, steps);
 	pps = std::min(24.0f, std::max(0.5f, 1400.0f / n));
 	w = std::max(520.0f, kTMargin * 2 + kTName + n * pps);
-	h = kTMargin * 2 + kTTitle + std::max(1, signals) * kTLane + kTAxis;
+	h = kTMargin * 2 + (titled ? kTTitle : 0.0f) + std::max(1, signals) * kTLane + kTAxis;
 }
 
 void drawTiming(cairo_t* cr, CLDocument* doc, const std::vector<int>& sigs, const std::vector<std::string>& names, int from, int count,
-                const std::string& title, bool color) {
+                const std::string& title, bool color, bool titled = true) {
 	float w, h, pps;
-	timingSize(count, (int)sigs.size(), w, h, pps);
+	timingSize(count, (int)sigs.size(), w, h, pps, titled);
 	const Color black = colorF(0, 0, 0), gray = colorF(0.33f, 0.33f, 0.33f), light = colorF(0.82f, 0.82f, 0.82f);
-	drawText(cr, title, rectF(kTMargin, kTMargin, w - kTMargin, kTMargin + 22), 17, black, TextAlign::Leading, true);
+	if (titled) drawText(cr, title, rectF(kTMargin, kTMargin, w - kTMargin, kTMargin + 22), 17, black, TextAlign::Leading, true);
 	std::string byline = "Timing diagram";
 	if (!prefs().studentName.empty()) byline += " · " + prefs().studentName;
 	char date[64];
@@ -77,8 +77,8 @@ void drawTiming(cairo_t* cr, CLDocument* doc, const std::vector<int>& sigs, cons
 	localtime_r(&t, &lt);
 	strftime(date, sizeof date, "%b %d, %Y", &lt);
 	byline += std::string(" · ") + date;
-	drawText(cr, byline, rectF(kTMargin, kTMargin + 25, w - kTMargin, kTMargin + 40), 11, gray);
-	const float left = kTMargin + kTName, top = kTMargin + kTTitle, bottom = top + sigs.size() * kTLane;
+	if (titled) drawText(cr, byline, rectF(kTMargin, kTMargin + 25, w - kTMargin, kTMargin + 40), 11, gray);
+	const float left = kTMargin + kTName, top = kTMargin + (titled ? kTTitle : 0.0f), bottom = top + sigs.size() * kTLane;
 	auto x = [&](int i) { return left + (i - from) * pps; };
 	const int first = (int)cl_scope_first_step(doc);
 	const int every = tickEvery(pps, 44);
@@ -132,6 +132,18 @@ void drawTiming(cairo_t* cr, CLDocument* doc, const std::vector<int>& sigs, cons
 }
 
 }  // namespace
+
+// For the lab report (LabReport.cpp): the recording as a timing diagram
+// with no title of its own. Pass cr null to get just the size.
+void reportTiming(cairo_t* cr, CLDocument* doc, int from, int count, bool color, float& w, float& h) {
+	std::vector<int> sigs;
+	std::vector<std::string> names;
+	for (int i = 0; i < cl_scope_signal_count(doc); i++) { sigs.push_back(i); names.push_back(cl_scope_signal(doc, i)); }
+	float pps;
+	timingSize(count, (int)sigs.size(), w, h, pps, false);
+	if (cr == nullptr) return;
+	drawTiming(cr, doc, sigs, names, from, count, "", color, false);
+}
 
 ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
 	// Docked under the canvas, as on the Mac (the window puts it there).

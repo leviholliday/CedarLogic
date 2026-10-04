@@ -39,6 +39,9 @@ bool gSimView = false;
 // instead of the circuit's (welcome:N, whatsnew:N, help, truth, feedback,
 // templates, tour, find).
 std::string gShow;
+// --lab-report <in.cdl> <out.pdf> [bw]: writes a lab report without a window.
+std::string gReportIn, gReportOut;
+bool gReportBW = false;
 // --splash-frame <t> <out.png> [--first]: the launch screen at t seconds.
 double gSplashAt = -1;
 std::string gSplashFile;
@@ -124,6 +127,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "feedback") top = toplevelTitled("Send Feedback");
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
+	else if (what == "report") top = toplevelTitled("Export Lab Report");
 	else if (what == "settings") top = settings::window();
 	else if (what == "scope" && !circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	else if (what == "quit") top = toplevelTitled("Quit CedarLogic");
@@ -160,6 +164,7 @@ gboolean showCb(gpointer) {
 	else if (what == "tour") welcome::startTour(w);
 	else if (what == "find") w->runAction("win.find");
 	else if (what == "export") w->exportImage();
+	else if (what == "report") w->exportReport();
 	else if (what == "settings") settings::show(w, page);
 	else if (what == "quit") confirmQuitting(w->window());
 	else if (what == "focus") w->toggleFocusMode();
@@ -284,6 +289,7 @@ GMenuModel* buildMenubar() {
 	g_menu_append(s2, "E_xport as CedarLogic File…", "win.save-as");
 	g_menu_append(s2, "Save as Te_mplate…", "win.save-template");
 	g_menu_append(s2, "_Export as Image…", "win.export-image");
+	g_menu_append(s2, "Export _Lab Report…", "win.export-report");
 	GMenu* older = g_menu_new();
 	g_menu_append(older, "For CedarLogic _2…", "win.export-v2");
 	g_menu_append(older, "For CedarLogic _1.x…", "win.export-v1");
@@ -496,7 +502,7 @@ void startupCb(GApplication* gapp, gpointer) {
 	gPrimary = true;
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
-	if (gScreenshot.empty() && gSplashFile.empty()) gSplash = showSplash();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) gSplash = showSplash();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
 	loadCss();
@@ -506,6 +512,19 @@ void startupCb(GApplication* gapp, gpointer) {
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "/cl_gatedefs.xml";
 	gLibraryLoaded = !lib.empty() && cl_library_load(lib.c_str());
 	prefs().applyWireDots();
+	if (!gReportIn.empty()) {
+		// Not a window: the circuit run a while, then its lab report.
+		char err[512] = "";
+		CLDocument* doc = gLibraryLoaded ? cl_document_open(gReportIn.c_str(), err, sizeof err) : nullptr;
+		if (doc == nullptr) { fprintf(stderr, "couldn't open %s: %s\n", gReportIn.c_str(), err); exit(1); }
+		for (int i = 0; i < 120; i++) cl_document_step(doc);
+		if (prefs().studentName.empty()) prefs().studentName = "Alex Student";
+		LabReportOptions o;
+		o.color = !gReportBW;
+		std::string error;
+		if (!writeLabReport(doc, baseName(gReportIn), o, gReportOut, error)) { fprintf(stderr, "%s\n", error.c_str()); exit(1); }
+		exit(0);
+	}
 	if (gSplash) splashSetStatus(gSplash, gLibraryLoaded ? "Opening the workspace…" : "Couldn't find the gate library");
 
 	const GActionEntry entries[] = {
@@ -864,6 +883,12 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--dark") == 0 || strcmp(argv[i], "--light") == 0) { gTheme = strcmp(argv[i], "--dark") == 0; continue; }
 		if (strcmp(argv[i], "--sim-view") == 0) { gSimView = true; continue; }
 		if (strcmp(argv[i], "--show") == 0 && i + 1 < argc) { gShow = argv[++i]; continue; }
+		if (strcmp(argv[i], "--lab-report") == 0 && i + 2 < argc) {
+			gReportIn = argv[++i];
+			gReportOut = argv[++i];
+			if (i + 1 < argc && strcmp(argv[i + 1], "bw") == 0) { gReportBW = true; i++; }
+			continue;
+		}
 		if (strcmp(argv[i], "--first") == 0) { gFirstLaunch = true; continue; }
 		if (strcmp(argv[i], "--hold") == 0 && i + 1 < argc) { gHold = std::max(1, atoi(argv[++i])); continue; }
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }

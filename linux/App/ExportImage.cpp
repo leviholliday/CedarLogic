@@ -213,6 +213,13 @@ GtkWidget* comboOf(const std::vector<const char*>& items, int active) {
 
 }  // namespace
 
+// For the lab report (LabReport.cpp): a page as Export as Image draws it,
+// without the name strip.
+bool reportCircuitSize(CLDocument* doc, int page, float& w, float& h) { return imageSize(doc, page, ExportInfo(), w, h); }
+void reportCircuitDraw(cairo_t* cr, CLDocument* doc, int page, float w, float h, bool color) {
+	drawImage(cr, doc, page, w, h, 1, color, false, ExportInfo());
+}
+
 std::string safeFileName(const std::string& name) {
 	std::string out = name;
 	for (char& c : out)

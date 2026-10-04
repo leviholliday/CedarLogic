@@ -200,6 +200,7 @@ public:
 	bool save();
 	bool saveAs();
 	void exportImage();
+	void exportReport();
 	void exportOlder(int format);
 	void print();
 	void undo();
