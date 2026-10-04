@@ -31,6 +31,19 @@ const int kTabsId = 4000;       // Form::pages' row
 const int kStepBase = 5000;     // a stepper's − and +: kStepBase + 2 * field (+ 1 for +)
 const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
 
+// The page bar of a form with pages (client pixels): it stays where it is
+// as a page scrolls, and the fields go under it. False without one.
+bool pageBarRect(HWND dialog, RECT& r) {
+	HWND bar = dialog ? GetDlgItem(dialog, kTabsId) : nullptr;
+	if (bar == nullptr || !GetWindowRect(bar, &r)) return false;
+	MapWindowPoints(nullptr, dialog, (POINT*)&r, 2);
+	return true;
+}
+int pageBarBottom(HWND dialog) {
+	RECT r;
+	return pageBarRect(dialog, r) ? (int)r.bottom : 0;
+}
+
 // The dialogs' look, as the Mac's sheets: paper, filled rounded fields,
 // soft buttons with the default one in the accent, toggles for yes/no.
 struct DialogColors {
@@ -724,8 +737,8 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		switch (LOWORD(wp)) {
 		case SB_LINEUP: to -= line; break;
 		case SB_LINEDOWN: to += line; break;
-		case SB_PAGEUP: to -= std::max(line, (int)si.nPage - line); break;
-		case SB_PAGEDOWN: to += std::max(line, (int)si.nPage - line); break;
+		case SB_PAGEUP: to -= std::max(line, (int)si.nPage - line - pageBarBottom(d)); break;
+		case SB_PAGEDOWN: to += std::max(line, (int)si.nPage - line - pageBarBottom(d)); break;
 		case SB_THUMBTRACK:
 		case SB_THUMBPOSITION: to = si.nTrackPos; break;
 		case SB_TOP: to = 0; break;
@@ -776,6 +789,9 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		const DialogColors& c = darkColors();
 		const Chrome ch = chrome();
 		HWND focus = GetFocus();
+		// A field's frame scrolled under the page bar stays under it.
+		RECT bar;
+		if (f->scrollHeight > 0 && pageBarRect(d, bar)) ExcludeClipRect(dc, bar.left, bar.top, bar.right, bar.bottom);
 		drawOnDC(dc, rc, dpiOf(d), [&](ID2D1RenderTarget* rt, float, float) {
 			rt->Clear(d2d(c.back));
 			const float s = dpiOf(d) / 96.0f;
@@ -1202,8 +1218,20 @@ void Form::scrollTo(int to) {
 	to = std::max(0, std::min(to, scrollHeight - (int)rc.bottom));
 	if (to == scrollY) return;
 	// The controls move with it; the fields' frames are drawn where they are.
-	ScrollWindowEx(dialog, 0, scrollY - to, nullptr, nullptr, nullptr, nullptr, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+	const int dy = scrollY - to;
+	RECT bar;
+	const bool hasBar = pageBarRect(dialog, bar);
 	scrollY = to;
+	ScrollWindowEx(dialog, 0, dy, nullptr, nullptr, nullptr, nullptr, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+	if (hasBar) {
+		// Except the page bar: back where it was, over the fields, so the
+		// other pages stay a click away however far down this one is.
+		HWND tabs = GetDlgItem(dialog, kTabsId);
+		SetWindowPos(tabs, HWND_TOP, bar.left, bar.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+		// Where the scroll copied its picture to is drawn again, it too.
+		RECT band = { rc.left, std::max<int>(rc.top, bar.top + std::min(0, dy)), rc.right, bar.bottom + std::max(0, dy) };
+		RedrawWindow(dialog, &band, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+	}
 	SCROLLINFO si = { sizeof si, SIF_POS };
 	si.nPos = to;
 	SetScrollInfo(dialog, SB_VERT, &si, TRUE);
@@ -1225,8 +1253,8 @@ void Form::showFocus() {
 		}
 	RECT rc;
 	GetClientRect(dialog, &rc);
-	const int pad = scaled(12, dpiOf(dialog));
-	if (r.top - pad < 0) scrollTo(scrollY + r.top - pad);
+	const int pad = scaled(12, dpiOf(dialog)), top = pageBarBottom(dialog);   // under the page bar, out of sight
+	if (r.top - pad < top) scrollTo(scrollY + r.top - pad - top);
 	else if (r.bottom + pad > rc.bottom) scrollTo(scrollY + r.bottom + pad - rc.bottom);
 }
 
@@ -1301,6 +1329,12 @@ void Form::showPage(int to) {
 		scrollY = 0;
 		scrollHeight = scrolls ? contentH : 0;
 		const DWORD want = scrolls ? (style | WS_VSCROLL) : (style & ~WS_VSCROLL);
+		// Scrolling, the fields go under the page bar: each leaves it to draw
+		// itself (it's on top), rather than painting over it.
+		if (scrolls)
+			if (HWND tabs = GetDlgItem(dialog, kTabsId))
+				for (HWND c = GetWindow(dialog, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT))
+					if (c != tabs) SetWindowLongPtrW(c, GWL_STYLE, GetWindowLongPtrW(c, GWL_STYLE) | WS_CLIPSIBLINGS);
 		if (want != style) {
 			SetWindowLongW(dialog, GWL_STYLE, (LONG)want);
 			style = want;
