@@ -616,7 +616,11 @@ void Form::build() {
 			std::string initial = x.value;
 			if (multi) {
 				std::string crlf;
-				for (char c : initial) { if (c == '\n') crlf += '\r'; crlf += c; }
+				for (char c : initial) {
+					if (c == '\r') continue;   // text() gives it back with \n alone
+					if (c == '\n') crlf += '\r';
+					crlf += c;
+				}
 				initial = crlf;
 			}
 			// The box inside a drawn field (painted with the dialog).
@@ -961,7 +965,10 @@ int Form::run(HWND owner) {
 std::string Form::text(int field) const {
 	const FormField& x = fields[field];
 	if (dialog == nullptr || x.hwnd == nullptr) return x.value;
-	return windowText(x.hwnd);
+	std::string s = windowText(x.hwnd);
+	// Several lines: each ends with \n alone, as on the Mac and Linux.
+	if (x.kind == FormField::Text && x.lines > 1) s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
+	return s;
 }
 
 void Form::setText(int field, const std::string& text) {
