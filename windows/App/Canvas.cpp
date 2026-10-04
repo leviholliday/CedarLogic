@@ -649,6 +649,14 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_KILLFOCUS:
 		spaceDown = false;
 		return 0;
+	case WM_SETFOCUS:
+		win->canvasFocused(this);   // a click in a split's other side works there
+		return 0;
+	case WM_NCHITTEST:
+		// The lines that drag (the side panel's edge, a split's middle, the
+		// oscilloscope's top) are the window's.
+		if (win->onDivider(POINT{ GET_X_LPARAM(lp), GET_Y_LPARAM(lp) })) return HTTRANSPARENT;
+		break;
 	case WM_KEYDOWN:
 		if (onKeyDown((UINT)wp, lp)) return 0;
 		break;

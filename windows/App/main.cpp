@@ -261,12 +261,12 @@ const Shortcut kShortcuts[] = {
 	{ VK_OEM_MINUS, true, false, CMD_ZOOM_OUT }, { VK_SUBTRACT, true, false, CMD_ZOOM_OUT },
 	{ '0', true, false, CMD_ZOOM_FIT }, { VK_NUMPAD0, true, false, CMD_ZOOM_FIT },
 	{ '1', true, false, CMD_ZOOM_ACTUAL }, { VK_NUMPAD1, true, false, CMD_ZOOM_ACTUAL },
-	{ 'D', true, true, CMD_DARK }, { VK_OEM_PERIOD, true, false, CMD_PALETTE }, { VK_OEM_COMMA, true, false, CMD_PREFERENCES },
+	{ 'D', true, true, CMD_DARK }, { VK_OEM_PERIOD, true, false, CMD_FOCUS_MODE }, { VK_OEM_COMMA, true, false, CMD_PREFERENCES },
 	{ 'R', true, true, CMD_STEP }, { 'R', true, false, CMD_SIM_VIEW }, { 'G', true, false, CMD_SCOPE },
 	{ 'T', true, false, CMD_NEW_TAB }, { 'W', true, false, CMD_CLOSE_TAB }, { 'T', true, true, CMD_REOPEN_TAB },
 	{ VK_NEXT, true, false, CMD_NEXT_TAB }, { VK_PRIOR, true, false, CMD_PREVIOUS_TAB },
 	{ VK_TAB, true, false, CMD_NEXT_TAB }, { VK_TAB, true, true, CMD_PREVIOUS_TAB },
-	{ VK_F1, false, false, CMD_HELP }, { VK_OEM_2, true, false, CMD_SHORTCUTS },
+	{ VK_F1, false, false, CMD_HELP }, { VK_OEM_2, true, false, CMD_SHORTCUTS }, { VK_F6, false, false, CMD_SWITCH_PANE },
 };
 
 // What a text box does itself with these (copy the text, not the gates).
@@ -284,17 +284,28 @@ CircuitWindow* windowFor(HWND h) {
 
 bool handleShortcut(CircuitWindow* w, const MSG& msg) {
 	if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) return false;
-	if (down(VK_MENU)) return false;   // Alt belongs to the menus
 	const bool ctrl = down(VK_CONTROL), shift = down(VK_SHIFT);
-	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
-	if (msg.wParam == VK_TAB && ctrl) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
-	if (msg.wParam == VK_ESCAPE && w->switcherActive()) { w->cancelSwitcher(); return true; }
 	wchar_t cls[32] = L"";
 	GetClassNameW(msg.hwnd, cls, 32);
 	const bool inTextBox = lstrcmpiW(cls, L"Edit") == 0;
+	if (down(VK_MENU)) {
+		// Ctrl+Alt: split view (not in a text box, where it's AltGr typing).
+		// Alt alone belongs to the menus.
+		const WPARAM k = msg.wParam;
+		const int cmd = !ctrl || inTextBox ? 0 : k == 'S' ? CMD_SPLIT_VIEW : k == 'W' ? CMD_CLOSE_SPLIT
+		              : k == VK_LEFT || k == VK_RIGHT ? CMD_SWITCH_PANE : 0;
+		if (cmd) guarded("a shortcut", [&] { w->run(cmd); });
+		return cmd != 0;
+	}
+	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
+	if (msg.wParam == VK_TAB && ctrl) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
+	if (msg.wParam == VK_ESCAPE && w->switcherActive()) { w->cancelSwitcher(); return true; }
+	// The oscilloscope's Ctrl+C copies its timing diagram.
+	const bool inScope = lstrcmpiW(cls, L"CedarLogicScope") == 0;
 	for (const Shortcut& s : kShortcuts) {
 		if (s.vk != msg.wParam || s.ctrl != ctrl || s.shift != shift) continue;
 		if (inTextBox && isEditingKey(s)) return false;
+		if (inScope && s.command == CMD_COPY) return false;
 		guarded("a shortcut", [&] { w->run(s.command); });
 		return true;
 	}

@@ -36,6 +36,35 @@ const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18
 
 double since(double t) { return nowSeconds() - t; }
 
+// Focus mode's slide and the drop hint's fade (as the Linux app's).
+const double kSlideTime = 0.24, kHintFadeTime = 0.15;
+double easeInOut(double t) {
+	t = std::min(1.0, std::max(0.0, t));
+	return t < 0.5 ? 4 * t * t * t : 1 - std::pow(-2 * t + 2, 3) / 2;
+}
+
+// Windows' "Show animations in Windows", off: things change at once.
+bool reduceMotion() {
+	BOOL animations = TRUE;
+	SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+	return !animations;
+}
+
+// The drop hint's window: see-through, never active, the pointer passing
+// through it.
+const wchar_t* hintClass() {
+	static const wchar_t* name = [] {
+		WNDCLASSEXW wc = {};
+		wc.cbSize = sizeof wc;
+		wc.lpfnWndProc = DefWindowProcW;
+		wc.hInstance = appInstance();
+		wc.lpszClassName = L"CedarLogicDropHint";
+		RegisterClassExW(&wc);
+		return L"CedarLogicDropHint";
+	}();
+	return name;
+}
+
 const std::vector<FileFilter> kCdlFilters = { { "CedarLogic circuits (*.cdl)", "*.cdl" }, { "All files", "*.*" } };
 
 bool isCircuitWindow(CircuitWindow* w) {
@@ -131,7 +160,7 @@ RECT CircuitWindow::tourAnchor(int which) const {
 	switch (which) {
 	case 0: if (paletteHost && IsWindowVisible(paletteHost)) { GetWindowRect(paletteHost, &r); return r; } break;
 	case 2: if (toolbar) return toolbar->commandRect(CMD_RUNNING); break;
-	case 3: if (tabStrip) { GetWindowRect(tabStrip->widget(), &r); return r; } break;
+	case 3: if (strips[0]) { GetWindowRect(strips[0]->widget(), &r); return r; } break;
 	default: break;
 	}
 	if (Canvas* c = currentCanvas()) GetWindowRect(c->widget(), &r);
@@ -148,8 +177,8 @@ CircuitWindow::~CircuitWindow() {
 	miniMap = nullptr;
 	delete toolbar;
 	toolbar = nullptr;
-	delete tabStrip;
-	tabStrip = nullptr;
+	for (TabStrip*& t : strips) { delete t; t = nullptr; }
+	if (hintWindow) DestroyWindow(hintWindow);
 	delete findBar;
 	findBar = nullptr;
 	delete switcher;
@@ -201,7 +230,8 @@ void CircuitWindow::build() {
 	palette = new GatePalette(this, hwnd);
 	paletteHost = palette->widget();
 	miniMap = palette->miniMap();
-	tabStrip = new TabStrip(this, hwnd);
+	for (int pane = 0; pane < 2; pane++) strips[pane] = new TabStrip(this, hwnd, pane);
+	ShowWindow(strips[1]->widget(), SW_HIDE);   // until there's a split
 	findBar = new FindBar(this, hwnd);
 	switcher = new TabSwitcher(this);
 	statusBar = CreateWindowExW(0, STATUSCLASSNAMEW, L"", WS_CHILD | SBARS_SIZEGRIP, 0, 0, 10, 10, hwnd, nullptr,
@@ -273,7 +303,8 @@ void CircuitWindow::buildMenus() {
 	item(view, CMD_ZOOM_ACTUAL, "&Actual Size\tCtrl+1");
 	separator(view);
 	item(view, CMD_DARK, "&Dark Mode\tCtrl+Shift+D");
-	item(view, CMD_PALETTE, "Gate &Palette\tCtrl+.");
+	item(view, CMD_FOCUS_MODE, "&Focus Mode\tCtrl+.");
+	item(view, CMD_PALETTE, "Gate &Palette");
 	item(view, CMD_STATUS_BAR, "&Status Bar");
 
 	HMENU sim = submenu(menuBar, "&Simulate");
@@ -289,9 +320,13 @@ void CircuitWindow::buildMenus() {
 	item(tabsMenu, CMD_NEW_TAB, "&New Tab\tCtrl+T");
 	item(tabsMenu, CMD_CLOSE_TAB, "&Close Tab\tCtrl+W");
 	item(tabsMenu, CMD_REOPEN_TAB, "&Reopen Closed Tab\tCtrl+Shift+T");
-	item(tabsMenu, CMD_RENAME_TAB, "Re&name Tab…");
+	item(tabsMenu, CMD_RENAME_TAB, "Re&name Tab");
 	item(tabsMenu, CMD_NEXT_TAB, "Ne&xt Tab\tCtrl+Tab");
 	item(tabsMenu, CMD_PREVIOUS_TAB, "&Previous Tab\tCtrl+Shift+Tab");
+	separator(tabsMenu);
+	item(tabsMenu, CMD_SPLIT_VIEW, "&Split View\tCtrl+Alt+S");
+	item(tabsMenu, CMD_SWITCH_PANE, "S&witch Side\tF6");
+	item(tabsMenu, CMD_CLOSE_SPLIT, "Close Split Vie&w\tCtrl+Alt+W");
 
 	HMENU help = submenu(menuBar, "&Help");
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
@@ -306,31 +341,43 @@ void CircuitWindow::buildMenus() {
 
 int CircuitWindow::toolbarHeight() const { return (int)std::lround(Toolbar::barHeight() * dpi / 96.0); }
 
-// The line between the side panel and the canvas, and a few pixels either
-// side of it to grab.
-RECT CircuitWindow::splitterRect() const {
-	RECT r = { 0, 0, 0, 0 };
-	if (!prefs().showPalette) return r;
-	RECT rc;
-	GetClientRect(hwnd, &rc);
-	RECT sb = { 0, 0, 0, 0 };
-	if (prefs().showStatus && statusBar) GetWindowRect(statusBar, &sb);
-	const int x = scaled(prefs().paletteWidth, dpi);
-	r = { x - scaled(3, dpi), toolbarHeight(), x + 1 + scaled(3, dpi), rc.bottom - (sb.bottom - sb.top) };
-	return r;
+// How far the toolbar and the side panel have slid away for focus mode (0
+// shown, 1 away).
+double CircuitWindow::focusAmount() const {
+	if (focusStart < 0) return focusTo;
+	return focusFrom + (focusTo - focusFrom) * easeInOut((nowSeconds() - focusStart) / kSlideTime);
+}
+
+// Which line a point (client pixels) is on, with a few pixels either side:
+// 1 the side panel's edge, 2 between the sides, 3 the oscilloscope's top;
+// 0 none.
+int CircuitWindow::dividerAt(POINT p) const {
+	const int grab = scaled(3, dpi);
+	if (scopeY >= 0 && p.x >= areaLeft && p.y >= scopeY - grab && p.y <= scopeY + grab) return 3;
+	if (splitX >= 0 && p.y >= areaTop && p.y < areaBottom && p.x >= splitX - grab && p.x <= splitX + grab) return 2;
+	if (sashX >= 0 && p.y >= areaTop && p.y < contentBottom && p.x >= sashX - grab && p.x <= sashX + grab) return 1;
+	return 0;
+}
+
+bool CircuitWindow::onDivider(POINT screen) const {
+	ScreenToClient(hwnd, &screen);
+	return dividerAt(screen) != 0;
 }
 
 void CircuitWindow::layout() {
-	if (hwnd == nullptr || toolbar == nullptr || tabStrip == nullptr) return;
+	if (hwnd == nullptr || toolbar == nullptr || strips[0] == nullptr || strips[1] == nullptr) return;
 	RECT rc;
 	GetClientRect(hwnd, &rc);
 	auto sc = [&](int v) { return scaled(v, dpi); };
-	HDWP defer = BeginDeferWindowPos(16);
+	HDWP defer = BeginDeferWindowPos(24);
 	auto place = [&](HWND h, int x, int y, int w, int hh) {
 		if (h) defer = DeferWindowPos(defer, h, nullptr, x, y, std::max(0, w), std::max(0, hh), SWP_NOZORDER | SWP_NOACTIVATE);
 	};
-	const int top = toolbarHeight();
-	place(toolbar->widget(), 0, 0, rc.right, top);
+	// Focus mode slides the toolbar up and the side panel to the left.
+	const double away = focusAmount();
+	const int barH = toolbarHeight();
+	const int top = (int)std::lround(barH * (1 - away));
+	place(toolbar->widget(), 0, top - barH, rc.right, barH);
 
 	// The status bar (off unless asked for) sizes itself along the bottom.
 	int bottom = rc.bottom;
@@ -343,30 +390,71 @@ void CircuitWindow::layout() {
 		int parts[2] = { rc.right - infoW, -1 };
 		SendMessageW(statusBar, SB_SETPARTS, 2, (LPARAM)parts);
 	}
+	contentBottom = bottom;
 
-	// The side panel, a hairline, then the tabs and the canvas.
+	// The side panel, a hairline, then the sides and the oscilloscope.
 	int left = 0;
+	sashX = -1;
 	if (prefs().showPalette) {
 		const int pw = std::min<int>(sc(prefs().paletteWidth), std::max<int>(sc(140), rc.right - sc(240)));
-		place(paletteHost, 0, top, pw, bottom - top);
-		left = pw + 1;
+		const int shift = (int)std::lround((pw + 1) * away);
+		place(paletteHost, -shift, top, pw, bottom - top);
+		left = pw + 1 - shift;
+		if (shift == 0) sashX = pw;
 	}
+	areaLeft = left;
+	areaTop = top;
+	// The oscilloscope, docked along the bottom, with a line over it.
+	int below = bottom;
+	scopeY = -1;
+	if (scope && scopeOpen) {
+		const int room = bottom - top;
+		const int sh = std::max(std::min(sc(scopeHeight), room - sc(160)), std::min(sc(110), room / 2));
+		place(scope->widget(), left, bottom - sh, rc.right - left, sh);
+		below = bottom - sh - 1;
+		scopeY = below;
+	}
+	areaBottom = below;
+
+	// One side, or two with a line between them.
 	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
-	place(tabStrip->widget(), left, top, rc.right - left, tabH);
-	for (Canvas* c : canvases) place(c->widget(), left, top + tabH, rc.right - left, bottom - top - tabH);
+	RECT sides[2] = { { left, top, rc.right, below }, { left, top, rc.right, below } };
+	splitX = -1;
+	if (splitOpen()) {
+		const int areaW = rc.right - left;
+		const int minW = std::min(sc(200), areaW / 3);
+		const int x = std::max<int>(left + minW, std::min<int>(left + (int)std::lround(areaW * splitAt), rc.right - minW - 1));
+		splitX = x;
+		sides[sideFirst ? 1 : 0] = { left, top, x, below };
+		sides[sideFirst ? 0 : 1] = { x + 1, top, rc.right, below };
+	}
+	for (int pane = 0; pane < 2; pane++) {
+		paneRects[pane] = sides[pane];
+		if (pane == 1 && !splitOpen()) continue;
+		place(strips[pane]->widget(), sides[pane].left, top, sides[pane].right - sides[pane].left, tabH);
+	}
+	for (Canvas* c : canvases) {
+		const RECT& r = sides[paneOf(c)];
+		place(c->widget(), r.left, top + tabH, r.right - r.left, below - top - tabH);
+	}
+	// In focus mode the tabs are the title bar.
+	captionBottom = focusOn ? top + tabH : barH;
 	if (findBar) {
-		// Over the top of the canvas, in the middle.
-		const int fw = std::min<int>((int)std::lround(FindBar::barWidth() * dpi / 96.0), rc.right - left - sc(24));
+		// Over the top of the side you're in, in the middle.
+		const RECT& r = sides[focusPane];
+		const int fw = std::min<int>((int)std::lround(FindBar::barWidth() * dpi / 96.0), r.right - r.left - sc(24));
 		const int fh = (int)std::lround(FindBar::barHeight() * dpi / 96.0);
-		place(findBar->widget(), left + (rc.right - left - fw) / 2, top + tabH + sc(12), fw, fh);
+		place(findBar->widget(), r.left + (r.right - r.left - fw) / 2, top + tabH + sc(12), fw, fh);
 	}
 	EndDeferWindowPos(defer);
+	ShowWindow(strips[1]->widget(), splitOpen() ? SW_SHOWNA : SW_HIDE);
 	if (findBar) SetWindowPos(findBar->widget(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	toolbar->layoutNow();
+	updateTabLabels();
 	InvalidateRect(hwnd, nullptr, TRUE);
 }
 
-// ---- Tabs ------------------------------------------------------------------------
+// ---- Tabs and split view -----------------------------------------------------------
 
 std::string CircuitWindow::pageName(int page) const {
 	const char* n = cl_document_page_name(doc, page);
@@ -381,11 +469,53 @@ std::string CircuitWindow::tabName(int index) const {
 }
 
 void CircuitWindow::updateTabLabels() {
-	if (tabStrip) tabStrip->redraw();
+	for (TabStrip* t : strips) if (t) t->redraw();
+}
+
+int CircuitWindow::paneOf(const Canvas* c) const { return c && sideKeys.count(c->pageKey()) ? 1 : 0; }
+
+std::vector<int> CircuitWindow::panePages(int pane) const {
+	std::vector<int> out;
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (paneOf(canvases[i]) == pane) out.push_back(i);
+	return out;
+}
+
+Canvas* CircuitWindow::paneCanvas(int pane) const {
+	if (pane < 0 || pane > 1 || (pane == 1 && !splitOpen())) return nullptr;
+	for (Canvas* c : canvases)
+		if (c->pageKey() == frontKeys[pane] && paneOf(c) == pane) return c;
+	return nullptr;
+}
+
+int CircuitWindow::shownPage(int pane) const {
+	Canvas* c = paneCanvas(pane);
+	return c ? c->page() : -1;
+}
+
+bool CircuitWindow::stripIsRightmost(int pane) const { return !splitOpen() || (pane == 1) != sideFirst; }
+
+TabStrip* CircuitWindow::rightStrip() const { return strips[!splitOpen() || sideFirst ? 0 : 1]; }
+
+// Everything in line after pages were added, closed, reopened or moved: a
+// side left with every page gives them back (one strip again), and the
+// split's pages that are gone are forgotten.
+void CircuitWindow::reconcileSplit() {
+	std::set<uint64_t> keep;
+	for (Canvas* c : canvases) if (sideKeys.count(c->pageKey())) keep.insert(c->pageKey());
+	if (!keep.empty() && keep.size() == canvases.size()) keep.clear();   // the first side ran out
+	sideKeys = keep;
+	if (sideKeys.empty()) focusPane = 0;
+}
+
+// Each side's page in front; the rest hidden.
+void CircuitWindow::showFronts() {
+	Canvas* front[2] = { paneCanvas(0), paneCanvas(1) };
+	for (Canvas* c : canvases) c->show(c == front[0] || c == front[1]);
 }
 
 // Make the tabs match the document's pages: after opening, a new page, a
-// close, an undo that brings one back, a move.
+// close, an undo that brings one back, a move, a split.
 void CircuitWindow::syncTabs() {
 	Canvas* front = currentCanvas();
 	const uint64_t frontKey = front ? front->pageKey() : 0;
@@ -401,9 +531,25 @@ void CircuitWindow::syncTabs() {
 	for (Canvas* c : canvases)
 		if (std::find(want.begin(), want.end(), c) == want.end()) delete c;
 	canvases = want;
-	current = 0;
+	reconcileSplit();
+	// Each side shows a page it has: the one it showed, else its first.
+	for (int pane = 0; pane < 2; pane++) {
+		const std::vector<int> row = panePages(pane);
+		bool has = false;
+		for (int i : row) has = has || canvases[i]->pageKey() == frontKeys[pane];
+		if (!has) frontKeys[pane] = row.empty() ? 0 : canvases[row.front()]->pageKey();
+	}
+	// The tab in front stays in front; gone, the one its side shows.
+	current = -1;
 	for (int i = 0; i < n; i++) if (canvases[i]->pageKey() == frontKey) current = i;
-	for (int i = 0; i < n; i++) canvases[i]->show(i == current);
+	if (current < 0) for (int i = 0; i < n; i++) if (canvases[i]->pageKey() == frontKeys[focusPane]) current = i;
+	if (current < 0 || current >= n) current = 0;
+	if (current < n) {
+		const int pane = paneOf(canvases[current]);
+		frontKeys[pane] = canvases[current]->pageKey();
+		focusPane = splitOpen() ? pane : 0;
+	}
+	showFronts();
 	lastPageCount = n;
 	updateTabLabels();
 	layout();
@@ -420,26 +566,34 @@ int CircuitWindow::currentPage() const {
 	return p >= 0 ? p : 0;
 }
 
+// Bring a page to the front of its side, and work in that side.
 void CircuitWindow::showPage(int index) {
 	if (index < 0 || index >= (int)canvases.size() || index == current) return;
-	// Leaving a page lets go of its selection, as the wx app does.
-	if (Canvas* old = currentCanvas()) {
-		if (old->page() >= 0) {
+	Canvas* target = canvases[index];
+	// Leaving a page lets go of its selection, as the wx app does (the page
+	// its side showed: the other side keeps its own).
+	if (Canvas* old = paneCanvas(paneOf(target))) {
+		if (old != target && old->page() >= 0) {
 			old->cancelDrag();
 			cl_edit_select_none(doc, old->page());
 		}
 	}
+	if (Canvas* was = currentCanvas()) if (was != target) was->cancelDrag();
 	current = index;
 	pageSwitched();
 }
 
 void CircuitWindow::pageSwitched() {
 	Canvas* front = currentCanvas();
+	const int paneBefore = focusPane;
 	if (front) {
+		const int pane = paneOf(front);
+		frontKeys[pane] = front->pageKey();
+		focusPane = splitOpen() ? pane : 0;
 		recentKeys.erase(std::remove(recentKeys.begin(), recentKeys.end(), front->pageKey()), recentKeys.end());
 		recentKeys.insert(recentKeys.begin(), front->pageKey());
 	}
-	for (Canvas* c : canvases) c->show(c == front);
+	showFronts();
 	statusDirty = true;
 	selectionSignature.clear();
 	if (front) {
@@ -451,6 +605,22 @@ void CircuitWindow::pageSwitched() {
 	updateTitle();
 	updateTabLabels();
 	redrawMiniMap();
+	if (focusPane != paneBefore) layout();   // the find bar goes with the side you're in
+}
+
+// A click in a side (or its strip): work there.
+void CircuitWindow::activatePane(int pane) {
+	if (!splitOpen()) pane = 0;
+	Canvas* c = paneCanvas(pane);
+	if (c == nullptr) return;
+	if (c == currentCanvas()) { c->focus(); return; }
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (canvases[i] == c) showPage(i);
+}
+
+void CircuitWindow::canvasFocused(Canvas* c) {
+	if (c == nullptr || c == currentCanvas() || !splitOpen() || c != paneCanvas(paneOf(c))) return;
+	activatePane(paneOf(c));
 }
 
 void CircuitWindow::closeTab(int index) {
@@ -470,27 +640,284 @@ void CircuitWindow::moveTab(int from, int to) {
 	}
 	cl_document_move_page(doc, from, to);
 	changes++;
+	SetTimer(hwnd, kAutosaveTimer, 2000, nullptr);   // saved a moment later, as any change is
 	syncTabs();
 	updateTitle();
 }
 
+void CircuitWindow::moveTabBy(int index, int delta) {
+	if (index < 0 || index >= (int)canvases.size()) return;
+	const std::vector<int> row = panePages(paneOf(canvases[index]));
+	const int k = (int)(std::find(row.begin(), row.end(), index) - row.begin());
+	if (k + delta < 0 || k + delta >= (int)row.size()) return;
+	const uint64_t key = canvases[index]->pageKey();
+	moveTab(index, row[k + delta]);
+	const int now = cl_document_page_index(doc, key);
+	if (now >= 0) showPage(now);
+}
+
+// A tab's own menu (the Mac's): Rename, the split's moves, moving it along
+// (for a touchpad or a touch screen, where dragging it is awkward), Close.
 void CircuitWindow::tabContextMenu(int index, POINT screen) {
-	if (index >= 0) showPage(index);
+	enum { RENAME = 1, OTHER_SIDE, OPEN_SPLIT, CLOSE_SPLIT, LEFT, RIGHT, CLOSE, NEW, REOPEN };
+	const bool onTab = index >= 0 && index < (int)canvases.size();
 	HMENU m = CreatePopupMenu();
-	item(m, CMD_RENAME_TAB, "Re&name Tab\u2026");
-	item(m, CMD_CLOSE_TAB, "&Close Tab\tCtrl+W");
-	item(m, CMD_REOPEN_TAB, "&Reopen Closed Tab\tCtrl+Shift+T");
-	separator(m);
-	const int n = (int)canvases.size();
-	AppendMenuW(m, MF_STRING | (current > 0 ? 0 : MF_GRAYED), 1, L"Move &Left");
-	AppendMenuW(m, MF_STRING | (current < n - 1 ? 0 : MF_GRAYED), 2, L"Move Ri&ght");
-	separator(m);
-	item(m, CMD_NEW_TAB, "&New Tab\tCtrl+T");
-	updateMenu(m);
+	if (onTab) {
+		showPage(index);
+		const std::vector<int> row = panePages(paneOf(canvases[index]));
+		const int k = (int)(std::find(row.begin(), row.end(), index) - row.begin());
+		AppendMenuW(m, MF_STRING, RENAME, L"Re&name");
+		if (splitOpen()) {
+			AppendMenuW(m, MF_STRING, OTHER_SIDE, L"Move to the &Other Side");
+			AppendMenuW(m, MF_STRING, CLOSE_SPLIT, L"Close &Split View\tCtrl+Alt+W");
+		} else {
+			AppendMenuW(m, MF_STRING, OPEN_SPLIT, L"Open in &Split View");
+		}
+		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+		AppendMenuW(m, MF_STRING | (k > 0 ? 0 : MF_GRAYED), LEFT, L"Move &Left");
+		AppendMenuW(m, MF_STRING | (k + 1 < (int)row.size() ? 0 : MF_GRAYED), RIGHT, L"Move Ri&ght");
+		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+		AppendMenuW(m, MF_STRING | (cl_document_page_count(doc) > 1 ? 0 : MF_GRAYED), CLOSE, L"&Close Tab\tCtrl+W");
+	} else {
+		AppendMenuW(m, MF_STRING, NEW, L"&New Tab\tCtrl+T");
+		AppendMenuW(m, MF_STRING | (cl_edit_undo_is_close_page(doc) ? 0 : MF_GRAYED), REOPEN, L"&Reopen Closed Tab\tCtrl+Shift+T");
+		if (splitOpen()) AppendMenuW(m, MF_STRING, CLOSE_SPLIT, L"Close &Split View\tCtrl+Alt+W");
+	}
 	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, 0, hwnd, nullptr);
 	DestroyMenu(m);
-	if (cmd == 1 || cmd == 2) moveTab(current, cmd == 1 ? current - 1 : current + 1);
-	else if (cmd) run(cmd);
+	if (onTab && index >= (int)canvases.size()) return;
+	switch (cmd) {
+	case RENAME: renamePage(index); break;
+	case OTHER_SIDE: movePageToPane(index, 1 - paneOf(canvases[index])); break;
+	case OPEN_SPLIT: splitWith(index, true); break;
+	case CLOSE_SPLIT: closeSplit(); break;
+	case LEFT: moveTabBy(index, -1); break;
+	case RIGHT: moveTabBy(index, 1); break;
+	case CLOSE: closePage(index); break;
+	case NEW: newPage(); break;
+	case REOPEN: reopenPage(); break;
+	default: break;
+	}
+}
+
+// Split View from the menu or keys: the tab used most recently beside the
+// one in front, or a new tab if it's the only one. Again: closes it.
+void CircuitWindow::toggleSplit() {
+	if (splitOpen()) { closeSplit(); return; }
+	const int front = currentPage();
+	int partner = -1;
+	for (uint64_t key : recentKeys) {
+		const int i = cl_document_page_index(doc, key);
+		if (i >= 0 && i != front) { partner = i; break; }
+	}
+	if (partner < 0) for (int i = 0; i < (int)canvases.size(); i++) if (i != front) { partner = i; break; }
+	if (partner < 0) {
+		newPage();
+		partner = cl_document_page_count(doc) - 1;
+		showPage(front);
+	}
+	splitWith(partner, true);
+}
+
+// Split the view with `page` on one side (the wx app's SplitWith). The first
+// side can't be left empty: taking its last tab gives it a new one.
+void CircuitWindow::splitWith(int page, bool onRight) {
+	if (splitOpen() || page < 0 || page >= (int)canvases.size()) return;
+	if (cl_document_page_count(doc) < 2) {
+		newPage();
+		page = 0;
+	}
+	const uint64_t key = canvases[page]->pageKey();
+	sideFirst = !onRight;
+	sideKeys = { key };
+	splitAt = 0.5;
+	syncTabs();
+	showPage(cl_document_page_index(doc, key));
+	note("Split view. Drag tabs between the two sides; the split closes when a side runs out.");
+	// Each side fits its page in its half.
+	for (int pane = 0; pane < 2; pane++) if (Canvas* c = paneCanvas(pane)) c->zoomToFit(true);
+}
+
+void CircuitWindow::movePageToPane(int page, int pane) {
+	if (!splitOpen() || page < 0 || page >= (int)canvases.size()) return;
+	const uint64_t key = canvases[page]->pageKey();
+	if (pane == 1) sideKeys.insert(key);
+	else sideKeys.erase(key);
+	syncTabs();
+	const int now = cl_document_page_index(doc, key);
+	if (now >= 0) showPage(now);
+	if (Canvas* c = currentCanvas()) c->focus();
+}
+
+// One strip again, with every tab; the side you were in stays in front.
+void CircuitWindow::closeSplit() {
+	if (!splitOpen()) return;
+	const int keepFront = shownPage(focusPane);
+	sideKeys.clear();
+	focusPane = 0;
+	syncTabs();
+	if (keepFront >= 0) showPage(keepFront);
+	showDropHint(DropHint());
+}
+
+void CircuitWindow::switchPane() {
+	if (splitOpen()) activatePane(1 - focusPane);
+}
+
+// Where a tab held at a point would go: half the area to split it (no split
+// yet), or the other side to move it there.
+CircuitWindow::DropHint CircuitWindow::dropHintAt(int fromPane, POINT screen) const {
+	DropHint h;
+	POINT p = screen;
+	ScreenToClient(hwnd, &p);
+	RECT rc;
+	GetClientRect(hwnd, &rc);
+	if (p.x < areaLeft || p.x >= rc.right || p.y < areaTop || p.y >= areaBottom) return h;
+	if (splitOpen()) {
+		const int other = 1 - fromPane;
+		if (PtInRect(&paneRects[other], p)) { h.kind = 2; h.side = other; }
+		return h;
+	}
+	if (fromPane != 0 || canvases.empty()) return h;
+	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
+	if (p.y < areaTop + tabH + scaled(12, dpi)) return h;
+	h.kind = 1;
+	h.side = p.x < (areaLeft + rc.right) / 2 ? -1 : 1;
+	return h;
+}
+
+double CircuitWindow::hintAlpha() const {
+	if (hintStart < 0) return hintTo;
+	return hintFrom + (hintTo - hintFrom) * std::min(1.0, (nowSeconds() - hintStart) / kHintFadeTime);
+}
+
+void CircuitWindow::showDropHint(const DropHint& h) {
+	if (h == hint) return;
+	const double from = hintAlpha();
+	hint = h;
+	if (h.kind != 0) hintShown = h;
+	hintFrom = from;
+	hintTo = h.kind != 0 ? 1 : 0;
+	hintStart = reduceMotion() ? -1 : nowSeconds();
+	paintHint(hintAlpha());
+}
+
+// "Drop to split here" (or move), over the canvases: a window of its own
+// that the pointer passes through, drawn see-through at the given strength.
+void CircuitWindow::paintHint(double alpha) {
+	if (alpha <= 0.004 || hintShown.kind == 0) {
+		if (hintWindow) ShowWindow(hintWindow, SW_HIDE);
+		return;
+	}
+	RECT rc;
+	GetClientRect(hwnd, &rc);
+	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
+	RECT r = paneRects[hintShown.side == 1 ? 1 : 0];
+	if (hintShown.kind == 1) {
+		const int mid = (areaLeft + rc.right) / 2;
+		r = hintShown.side < 0 ? RECT{ areaLeft, areaTop + tabH, mid, areaBottom } : RECT{ mid, areaTop + tabH, rc.right, areaBottom };
+	}
+	const int w = r.right - r.left, h = r.bottom - r.top;
+	if (w <= 0 || h <= 0) return;
+	if (hintWindow == nullptr)
+		hintWindow = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, hintClass(), L"", WS_POPUP,
+		                             0, 0, 1, 1, hwnd, nullptr, appInstance(), nullptr);
+	if (hintWindow == nullptr) return;
+	POINT at = { r.left, r.top };
+	ClientToScreen(hwnd, &at);
+	HDC screen = GetDC(nullptr);
+	HDC mem = CreateCompatibleDC(screen);
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	void* bits = nullptr;
+	if (HBITMAP dib = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0)) {
+		HGDIOBJ old = SelectObject(mem, dib);
+		const float s = dpi / 96.0f;
+		const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+			D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96 * s, 96 * s);
+		ID2D1DCRenderTarget* rt = nullptr;
+		RECT all = { 0, 0, w, h };
+		if (SUCCEEDED(d2dFactory()->CreateDCRenderTarget(&props, &rt)) && SUCCEEDED(rt->BindDC(mem, &all))) {
+			rt->BeginDraw();
+			rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+			rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+			const D2D1_COLOR_F accent = chrome().accent();
+			const D2D1_RECT_F box = D2D1::RectF(6, 6, w / s - 6, h / s - 6);
+			fillRound(rt, box, 14, withAlpha(accent, 0.18f));
+			strokeRound(rt, box, 14, accent, 2);
+			drawText(rt, hintShown.kind == 2 ? "Drop to move here" : "Drop to split here", box, 13, accent, TextAlign::Center, true);
+			rt->EndDraw();
+		}
+		if (rt) rt->Release();
+		POINT src = { 0, 0 };
+		SIZE size = { w, h };
+		BLENDFUNCTION blend = { AC_SRC_OVER, 0, (BYTE)std::lround(255 * std::min(1.0, alpha)), AC_SRC_ALPHA };
+		UpdateLayeredWindow(hintWindow, screen, &at, &size, mem, &src, 0, &blend, ULW_ALPHA);
+		SelectObject(mem, old);
+		DeleteObject(dib);
+	}
+	DeleteDC(mem);
+	ReleaseDC(nullptr, screen);
+	if (!IsWindowVisible(hintWindow)) ShowWindow(hintWindow, SW_SHOWNOACTIVATE);
+}
+
+void CircuitWindow::tabDropped(int page, const DropHint& h) {
+	showDropHint(DropHint());
+	if (h.kind == 2) movePageToPane(page, h.side);
+	else if (h.kind == 1) splitWith(page, h.side > 0);
+}
+
+// ---- Focus mode --------------------------------------------------------------------
+// The Mac's: the toolbar and the side panel slide away, and the tab strips
+// become the window's top row (it drags by them, with its buttons there).
+
+void CircuitWindow::toggleFocusMode() {
+	const double from = focusAmount();
+	focusOn = !focusOn;
+	focusFrom = from;
+	focusTo = focusOn ? 1 : 0;
+	// No slide when Windows' animations are off: it happens at the next tick.
+	focusStart = nowSeconds() - (reduceMotion() ? kSlideTime : 0);
+	// Coming back, the bars are there to slide in.
+	if (!focusOn) {
+		ShowWindow(toolbar->widget(), SW_SHOWNA);
+		if (prefs().showPalette) ShowWindow(paletteHost, SW_SHOWNA);
+	}
+	toolbar->setMaximizeHot(false, false);
+	for (TabStrip* t : strips) { t->setMaximizeHot(false, false); t->setTitleRow(focusOn); }
+	stepAnimations();
+	updateActions();
+	if (focusOn) note("Focus mode. Ctrl+. brings the toolbar and the side panel back.");
+	if (Canvas* c = currentCanvas()) c->focus();
+}
+
+// Focus mode's slide and the drop hint's fade, a frame at a time (the clock
+// calls it).
+void CircuitWindow::stepAnimations() {
+	if (focusStart >= 0) {
+		if (nowSeconds() - focusStart >= kSlideTime) focusStart = -1;
+		layout();
+		// Away: out of the way altogether.
+		if (focusStart < 0 && focusOn) {
+			ShowWindow(toolbar->widget(), SW_HIDE);
+			ShowWindow(paletteHost, SW_HIDE);
+		}
+	}
+	if (hintStart >= 0) {
+		const double a = hintAlpha();
+		if (nowSeconds() - hintStart >= kHintFadeTime) hintStart = -1;
+		paintHint(a);
+	}
+}
+
+void CircuitWindow::setMaximizeHot(bool isHot, bool isPressed) {
+	if (focusOn) { if (TabStrip* t = rightStrip()) t->setMaximizeHot(isHot, isPressed); }
+	else if (toolbar) toolbar->setMaximizeHot(isHot, isPressed);
 }
 
 // ---- The clock -------------------------------------------------------------------
@@ -499,8 +926,9 @@ void CircuitWindow::tick() {
 	const double t = nowSeconds();
 	const double elapsed = (t - lastTick) * 1000.0;   // ms
 	lastTick = t;
-	Canvas* c = currentCanvas();
-	if (c) c->stepAnimation();
+	// Each side's camera eases on its own.
+	for (int pane = 0; pane < 2; pane++) if (Canvas* c = paneCanvas(pane)) c->stepAnimation();
+	stepAnimations();
 	// The opening card: the circuit fades up as it lifts away.
 	if (openingAt >= 0) {
 		const double ot = t - openingAt;
@@ -571,7 +999,9 @@ void CircuitWindow::fadeOutDragBox(double l, double b, double r, double t) {
 // ---- State shown around the canvas -------------------------------------------------
 
 void CircuitWindow::redraw() {
-	if (Canvas* c = currentCanvas()) c->redraw();
+	// Both sides of a split show the same circuit running.
+	for (int pane = 0; pane < 2; pane++) if (Canvas* c = paneCanvas(pane)) c->redraw();
+	if (Canvas* c = currentCanvas()) if (c != paneCanvas(focusPane)) c->redraw();
 }
 
 void CircuitWindow::redrawMiniMap() {
@@ -708,6 +1138,7 @@ bool CircuitWindow::commandEnabled(int command) const {
 	case CMD_ROTATE: return edit && cl_edit_selected_gate_count(doc, currentPage()) > 0;
 	case CMD_GATE_SETTINGS: return cl_edit_single_gate(doc, currentPage()) >= 0;
 	case CMD_REOPEN_TAB: return cl_edit_undo_is_close_page(doc);
+	case CMD_SWITCH_PANE: case CMD_CLOSE_SPLIT: return splitOpen();
 	case CMD_PASTE: case CMD_ADD_GATE: case CMD_STRAIGHTEN: case CMD_TIDY: case CMD_TIDY_FLOW: case CMD_CONNECT_NEARBY:
 		return edit;
 	default: return true;
@@ -721,6 +1152,8 @@ int CircuitWindow::commandChecked(int command) const {
 	case CMD_LOCK: return lockedOn;
 	case CMD_DARK: return prefs().dark;
 	case CMD_PALETTE: return prefs().showPalette;
+	case CMD_FOCUS_MODE: return focusOn;
+	case CMD_SPLIT_VIEW: return splitOpen();
 	case CMD_STATUS_BAR: return prefs().showStatus;
 	default: return -1;
 	}
@@ -772,7 +1205,7 @@ void CircuitWindow::updateBanner() { redraw(); }
 void CircuitWindow::themeChanged() {
 	setDarkTitleBar(hwnd, prefs().dark);
 	updateActions();
-	if (tabStrip) tabStrip->redraw();
+	updateTabLabels();
 	if (palette) palette->themeChanged();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
@@ -781,14 +1214,14 @@ void CircuitWindow::themeChanged() {
 }
 
 void CircuitWindow::prefsChanged() {
-	ShowWindow(paletteHost, prefs().showPalette ? SW_SHOW : SW_HIDE);
+	ShowWindow(paletteHost, prefs().showPalette && !focusOn ? SW_SHOW : SW_HIDE);
 	ShowWindow(statusBar, prefs().showStatus ? SW_SHOW : SW_HIDE);
 	layout();
 	themeChanged();
 }
 
 void CircuitWindow::showPaletteCategory(int index) {
-	if (!prefs().showPalette) togglePalette();
+	if (!prefs().showPalette || focusOn) togglePalette();
 	palette->showCategory(index);
 }
 
@@ -824,8 +1257,9 @@ LRESULT CircuitWindow::frameHitTest(LPARAM lp) {
 		if (p.x >= rc.right - edge * 2) return HTTOPRIGHT;
 		return HTTOP;
 	}
-	if (p.y < toolbarHeight()) {
-		const RECT mx = toolbar ? toolbar->maximizeRect() : RECT{ 0, 0, 0, 0 };
+	// The toolbar's empty parts, or in focus mode the tabs'.
+	if (p.y < captionBottom) {
+		const RECT mx = focusOn ? rightStrip()->maximizeRect() : toolbar ? toolbar->maximizeRect() : RECT{ 0, 0, 0, 0 };
 		if (PtInRect(&mx, p)) return HTMAXBUTTON;
 		return HTCAPTION;
 	}
@@ -854,6 +1288,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_NCACTIVATE:
 		// Don't let Windows paint the old title bar over ours.
 		if (toolbar) toolbar->redraw();
+		updateTabLabels();
 		return DefWindowProcW(hwnd, msg, wp, -1);
 	case WM_NCMOUSEMOVE:
 		if (!trackingNonClient) {
@@ -861,26 +1296,48 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 			TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE | TME_NONCLIENT, hwnd, 0 };
 			TrackMouseEvent(&t);
 		}
-		if (toolbar) toolbar->setMaximizeHot(wp == HTMAXBUTTON, maxPressed && wp == HTMAXBUTTON);
+		setMaximizeHot(wp == HTMAXBUTTON, maxPressed && wp == HTMAXBUTTON);
 		if (wp == HTMAXBUTTON) return 0;
 		break;
 	case WM_NCMOUSELEAVE:
 		trackingNonClient = false;
 		maxPressed = false;
-		if (toolbar) toolbar->setMaximizeHot(false, false);
+		setMaximizeHot(false, false);
 		break;
 	case WM_NCLBUTTONDOWN:
 		if (wp == HTMAXBUTTON) {
 			maxPressed = true;
-			if (toolbar) toolbar->setMaximizeHot(true, true);
+			setMaximizeHot(true, true);
 			return 0;
+		}
+		// Focus mode: a press on the empty tabs works in that side (and
+		// drags the window).
+		if (wp == HTCAPTION && focusOn) {
+			POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+			ScreenToClient(hwnd, &p);
+			for (int pane = splitOpen() ? 1 : 0; pane >= 0; pane--)
+				if (PtInRect(&paneRects[pane], p)) { activatePane(pane); break; }
+		}
+		break;
+	case WM_NCLBUTTONDBLCLK:
+		// Focus mode: twice on the empty tabs is a new tab there, as it is
+		// with the toolbar showing.
+		if (wp == HTCAPTION && focusOn) {
+			POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+			ScreenToClient(hwnd, &p);
+			for (int pane = splitOpen() ? 1 : 0; pane >= 0; pane--) {
+				if (!PtInRect(&paneRects[pane], p)) continue;
+				activatePane(pane);
+				newPage();
+				return 0;
+			}
 		}
 		break;
 	case WM_NCLBUTTONUP:
 		if (wp == HTMAXBUTTON) {
 			const bool was = maxPressed;
 			maxPressed = false;
-			if (toolbar) toolbar->setMaximizeHot(true, false);
+			setMaximizeHot(true, false);
 			if (was) ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
 			return 0;
 		}
@@ -891,7 +1348,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		if ((wp & 0xFFF0) == SC_KEYMENU && lp != VK_SPACE) {
 			RECT rc;
 			GetClientRect(hwnd, &rc);
-			POINT p = { rc.right - scaled(150, dpi), toolbarHeight() };
+			POINT p = { rc.right - scaled(150, dpi), captionBottom };
 			ClientToScreen(hwnd, &p);
 			moreMenu(p, true);
 			return 0;
@@ -946,6 +1403,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_ACTIVATE:
 		if (toolbar) toolbar->redraw();
+		updateTabLabels();
 		if (LOWORD(wp) == WA_INACTIVE) {
 			// What had the keyboard, to give it back (by the time the window
 			// is active again, Windows has forgotten it).
@@ -989,49 +1447,58 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		break;
 	}
+	// The lines between the side panel, the sides and the oscilloscope drag.
 	case WM_SETCURSOR: {
 		POINT p;
 		GetCursorPos(&p);
 		ScreenToClient(hwnd, &p);
-		const RECT s = splitterRect();
-		if (LOWORD(lp) == HTCLIENT && PtInRect(&s, p)) {
-			SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+		const int d = LOWORD(lp) == HTCLIENT ? (dividerDrag ? dividerDrag : dividerAt(p)) : 0;
+		if (d) {
+			SetCursor(LoadCursor(nullptr, d == 3 ? IDC_SIZENS : IDC_SIZEWE));
 			return TRUE;
 		}
 		break;
 	}
 	case WM_LBUTTONDOWN: {
 		POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-		const RECT s = splitterRect();
-		if (PtInRect(&s, p)) {
-			splitterDrag = true;
-			splitterGrab = p.x - scaled(prefs().paletteWidth, dpi);
+		const int d = dividerAt(p);
+		if (d) {
+			dividerDrag = d;
+			dividerGrab = d == 3 ? p.y - scopeY : d == 2 ? p.x - splitX : p.x - sashX;
 			SetCapture(hwnd);
 			return 0;
 		}
 		break;
 	}
 	case WM_MOUSEMOVE:
-		if (splitterDrag) {
+		if (dividerDrag) {
 			RECT rc;
 			GetClientRect(hwnd, &rc);
-			const int x = GET_X_LPARAM(lp) - splitterGrab;
-			const int w = MulDiv(std::max(0, x), 96, (int)dpi);
-			prefs().paletteWidth = std::min(std::max(w, 160), std::min(800, MulDiv(rc.right, 96, (int)dpi) - 300));
+			const int x = GET_X_LPARAM(lp) - dividerGrab, y = GET_Y_LPARAM(lp) - dividerGrab;
+			if (dividerDrag == 1) {
+				const int w = MulDiv(std::max(0, x), 96, (int)dpi);
+				prefs().paletteWidth = std::min(std::max(w, 160), std::min(800, MulDiv(rc.right, 96, (int)dpi) - 300));
+			} else if (dividerDrag == 2) {
+				const int areaW = rc.right - areaLeft;
+				if (areaW > 0) splitAt = std::min(0.85, std::max(0.15, (double)(x - areaLeft) / areaW));
+			} else {
+				scopeHeight = std::min(2000, std::max(110, MulDiv(contentBottom - y - 1, 96, (int)dpi)));
+			}
 			layout();
 			return 0;
 		}
 		break;
 	case WM_LBUTTONUP:
-		if (splitterDrag) {
-			splitterDrag = false;
+		if (dividerDrag) {
+			const int was = dividerDrag;
+			dividerDrag = 0;
 			ReleaseCapture();
-			prefs().save();
+			if (was == 1) prefs().save();
 			return 0;
 		}
 		break;
 	case WM_CAPTURECHANGED:
-		splitterDrag = false;
+		dividerDrag = 0;
 		break;
 	case WM_COPYDATA:
 		if (takeHandedFiles(hwnd, reinterpret_cast<const COPYDATASTRUCT*>(lp))) return TRUE;
@@ -1077,21 +1544,23 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		KillTimer(hwnd, kClockTimer);
 		return 0;
 	case WM_ERASEBKGND: {
-		// Behind everything: the side panel's colour, and the hairline
-		// between it and the canvas.
+		// Behind everything: the side panel's colour, and the lines between
+		// it, the sides and the oscilloscope.
 		RECT rc;
 		GetClientRect(hwnd, &rc);
 		const Chrome c = chrome();
 		HBRUSH bg = CreateSolidBrush(c.gdi(c.panel()));
 		FillRect((HDC)wp, &rc, bg);
 		DeleteObject(bg);
-		if (prefs().showPalette) {
-			const int x = scaled(prefs().paletteWidth, dpi);
-			RECT line = { x, toolbarHeight(), x + 1, rc.bottom };
-			HBRUSH sash = CreateSolidBrush(c.gdi(c.sash()));
-			FillRect((HDC)wp, &line, sash);
-			DeleteObject(sash);
-		}
+		HBRUSH sash = CreateSolidBrush(c.gdi(c.sash()));
+		auto line = [&](int l, int t, int r, int b) {
+			RECT box = { l, t, r, b };
+			FillRect((HDC)wp, &box, sash);
+		};
+		if (areaLeft > 0) line(areaLeft - 1, areaTop, areaLeft, contentBottom);
+		if (splitX >= 0) line(splitX, areaTop, splitX + 1, areaBottom);
+		if (scopeY >= 0) line(areaLeft, scopeY, rc.right, scopeY + 1);
+		DeleteObject(sash);
 		return 1;
 	}
 	}
@@ -1295,6 +1764,10 @@ void CircuitWindow::run(int command) {
 	case CMD_RENAME_TAB: renamePage(currentPage()); break;
 	case CMD_NEXT_TAB: cyclePage(1); break;
 	case CMD_PREVIOUS_TAB: cyclePage(-1); break;
+	case CMD_SPLIT_VIEW: toggleSplit(); break;
+	case CMD_SWITCH_PANE: switchPane(); break;
+	case CMD_CLOSE_SPLIT: closeSplit(); break;
+	case CMD_FOCUS_MODE: toggleFocusMode(); break;
 	case CMD_SHORTCUTS: showShortcuts(); break;
 	case CMD_HELP: help::show(this); break;
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
@@ -1384,7 +1857,12 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	for (Canvas* c : canvases) delete c;
 	canvases.clear();
 	current = 0;
+	sideKeys.clear();
+	focusPane = 0;
+	frontKeys[0] = frontKeys[1] = 0;
+	recentKeys.clear();
 	if (scope) { delete scope; scope = nullptr; }
+	scopeOpen = false;
 	cl_document_close(doc);
 	doc = newDoc;
 	path = newPath;
@@ -1887,9 +2365,19 @@ void CircuitWindow::toggleLock() {
 
 void CircuitWindow::makeTruthTable() { showTruthTable(this, currentPage()); redraw(); }
 
+// The oscilloscope docks under the canvases, as on the Mac (Ctrl+G again,
+// its close button or Escape in it puts it away).
 void CircuitWindow::toggleScope() {
-	if (scope && scope->visible()) { scope->close(); return; }
+	if (scope && scopeOpen) {
+		scopeOpen = false;
+		scope->close();
+		layout();
+		if (Canvas* c = currentCanvas()) c->focus();
+		return;
+	}
 	if (scope == nullptr) scope = new ScopeWindow(this);
+	scopeOpen = true;
+	layout();
 	scope->present();
 }
 
@@ -1904,6 +2392,8 @@ void CircuitWindow::newPage() {
 	if (i < 0) return;
 	cl_document_rename_page(doc, i, strf("Page %d", taken).c_str());
 	syncTabs();
+	// A new tab opens in the side you're working in.
+	if (focusPane == 1 && splitOpen()) { sideKeys.insert(cl_document_page_id(doc, i)); syncTabs(); }
 	current = i;
 	pageSwitched();
 	appearStart = nowSeconds();
@@ -1934,21 +2424,19 @@ void CircuitWindow::reopenPage() {
 	note("Reopened the closed tab.");
 }
 
+// Renamed in place, on its tab (the Mac's).
 void CircuitWindow::renamePage(int page) {
-	if (page < 0 || page >= cl_document_page_count(doc)) return;
-	std::string name = pageName(page);
-	if (!askText(hwnd, "Rename Tab", "The tab's name:", name)) return;
-	if (name.empty()) return;
-	cl_document_rename_page(doc, page, name.c_str());
-	changes++;
-	updateTabLabels();
-	updateTitle();
+	if (page < 0 || page >= (int)canvases.size()) return;
+	strips[paneOf(canvases[page])]->beginRename(page);
 }
 
 void CircuitWindow::cyclePage(int delta) {
-	const int n = (int)canvases.size();
+	// Through the tabs of the side you're working in.
+	const std::vector<int> order = panePages(focusPane);
+	const int n = (int)order.size();
 	if (n < 2) return;
-	showPage(((current + delta) % n + n) % n);
+	const int at = (int)(std::find(order.begin(), order.end(), current) - order.begin());
+	showPage(order[((at + delta) % n + n) % n]);
 }
 
 // ---- App-wide ------------------------------------------------------------------
@@ -1961,6 +2449,8 @@ void CircuitWindow::toggleDark() {
 }
 
 void CircuitWindow::togglePalette() {
+	// In focus mode: the panel comes back with the toolbar.
+	if (focusOn) { toggleFocusMode(); if (prefs().showPalette) return; }
 	prefs().showPalette = !prefs().showPalette;
 	prefs().save();
 	for (CircuitWindow* w : circuitWindows()) w->prefsChanged();

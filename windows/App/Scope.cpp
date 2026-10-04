@@ -14,7 +14,7 @@ namespace {
 
 const wchar_t* kScopeClass = L"CedarLogicScope";
 const float kHeader = 40, kNameWidth = 130, kLane = 30, kRuler = 22;
-enum { kBtnHidden = 1, kBtnShare, kBtnOut, kBtnIn, kBtnLive, kBtnClear };
+enum { kBtnHidden = 1, kBtnShare, kBtnOut, kBtnIn, kBtnLive, kBtnClear, kBtnClose };
 
 const int kTickEvery[] = { 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 };
 
@@ -149,11 +149,10 @@ void registerDialogClasses() {
 	RegisterClassExW(&wc);
 }
 
+// Docked under the canvases, as on the Mac (the window puts it there).
 ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
-	const UINT dpi = dpiOf(owner->window());
-	hwnd = CreateWindowExW(0, kScopeClass, L"Oscilloscope", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, scaled(900, dpi),
-	                       scaled(380, dpi), owner->window(), nullptr, appInstance(), this);
-	setDarkTitleBar(hwnd, prefs().dark);
+	hwnd = CreateWindowExW(0, kScopeClass, L"Oscilloscope", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 10, 10, owner->window(), nullptr,
+	                       appInstance(), this);
 }
 
 ScopeWindow::~ScopeWindow() {
@@ -164,9 +163,8 @@ ScopeWindow::~ScopeWindow() {
 }
 
 void ScopeWindow::present() {
-	setDarkTitleBar(hwnd, prefs().dark);
-	ShowWindow(hwnd, SW_SHOWNORMAL);
-	SetForegroundWindow(hwnd);
+	ShowWindow(hwnd, SW_SHOW);
+	SetFocus(hwnd);
 	update();
 }
 
@@ -242,6 +240,7 @@ void ScopeWindow::paint() {
 		buttons.push_back({ r, id });
 		bx -= 4;
 	};
+	button(kBtnClose, Icon::Dismiss, nullptr);
 	button(kBtnClear, 0xE74D, nullptr);         // delete
 	button(kBtnLive, 0xE893, nullptr);          // to the end
 	button(kBtnIn, Icon::ZoomIn, nullptr);
@@ -339,6 +338,7 @@ void ScopeWindow::press(int id) {
 	case kBtnIn: pointsPerStep = std::min(48.0f, pointsPerStep * 1.5f); break;
 	case kBtnLive: cursor = -1; break;
 	case kBtnClear: cl_scope_clear(doc); cursor = -1; break;
+	case kBtnClose: hot = -1; owner->toggleScope(); return;
 	case kBtnShare: case kBtnHidden: {
 		for (const Button& b : buttons) {
 			if (b.id != id) continue;
@@ -360,7 +360,7 @@ void ScopeWindow::hiddenMenu(POINT at) {
 	for (size_t i = 0; i < hidden.size(); i++) AppendMenuW(m, MF_STRING, i + 1, W("Show " + hidden[i]).c_str());
 	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 	AppendMenuW(m, MF_STRING, 1000, L"Show All");
-	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD, at.x, at.y, 0, hwnd, nullptr);
+	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD, at.x, at.y, 0, owner->window(), nullptr);
 	DestroyMenu(m);
 	if (cmd == 1000) hidden.clear();
 	else if (cmd > 0 && cmd <= (int)hidden.size()) hidden.erase(hidden.begin() + (cmd - 1));
@@ -403,7 +403,7 @@ void ScopeWindow::exportMenu(POINT at) {
 		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(m, MF_STRING | (prefs().timingWhole ? MF_CHECKED : 0), WHOLE, L"&Whole recording");
 		AppendMenuW(m, MF_STRING | (prefs().timingInColor ? MF_CHECKED : 0), COLOR, L"In c&olor");
-		const int cmd = TrackPopupMenu(m, TPM_RETURNCMD, at.x, at.y, 0, hwnd, nullptr);
+		const int cmd = TrackPopupMenu(m, TPM_RETURNCMD, at.x, at.y, 0, owner->window(), nullptr);
 		DestroyMenu(m);
 		// The two options flip and the menu comes back, as the Mac's panel stays.
 		if (cmd == WHOLE) { prefs().timingWhole = !prefs().timingWhole; prefs().save(); continue; }
@@ -415,8 +415,9 @@ void ScopeWindow::exportMenu(POINT at) {
 		if (cmd == COPY) {
 			if (images::copyToClipboard(hwnd, bmp)) owner->note("Timing diagram copied. Paste it into your report.");
 		} else {
-			const std::string file = chooseSaveFile(hwnd, "Save Timing Diagram", title + " timing.png", { { "PNG pictures (*.png)", "*.png" } }, ".png");
-			if (!file.empty() && !images::savePng(bmp, file)) showMessage(hwnd, Tone::Warning, "Couldn't save it there", "Try another folder.");
+			const HWND top = owner->window();
+			const std::string file = chooseSaveFile(top, "Save Timing Diagram", title + " timing.png", { { "PNG pictures (*.png)", "*.png" } }, ".png");
+			if (!file.empty() && !images::savePng(bmp, file)) showMessage(top, Tone::Warning, "Couldn't save it there", "Try another folder.");
 		}
 		bmp->Release();
 		return;
@@ -448,8 +449,7 @@ bool ScopeWindow::key(UINT vk) {
 		cursor = dir < 0 ? 0 : length - 1;
 	};
 	switch (vk) {
-	case VK_ESCAPE: close(); SetForegroundWindow(owner->window()); return true;
-	case 'G': if (ctrl) { close(); SetForegroundWindow(owner->window()); return true; } return false;
+	case VK_ESCAPE: owner->toggleScope(); return true;   // put away; back to the canvas
 	case VK_LEFT: if (alt) jump(-1); else moveCursor(shift ? -10 : -1); break;
 	case VK_RIGHT: if (alt) jump(1); else moveCursor(shift ? 10 : 1); break;
 	case VK_UP: case VK_DOWN: {
@@ -522,11 +522,11 @@ LRESULT ScopeWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_PAINT: paint(); return 0;
 	case WM_ERASEBKGND: return 1;
 	case WM_SIZE: update(); return 0;
-	case WM_CLOSE: ShowWindow(hwnd, SW_HIDE); return 0;   // kept for next time
-	case WM_DPICHANGED: {
-		const RECT* r = reinterpret_cast<const RECT*>(lp);
-		SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
-		return 0;
+	case WM_NCHITTEST: {
+		// The line over it is the window's, to drag.
+		const POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+		if (owner->onDivider(p)) return HTTRANSPARENT;
+		break;
 	}
 	case WM_MOUSEMOVE: {
 		TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE, hwnd, 0 };

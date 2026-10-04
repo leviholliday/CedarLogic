@@ -12,6 +12,7 @@
 #include "Formula.h"
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -163,12 +164,57 @@ public:
 	void titleMenu(POINT screen);
 	// Every menu, as a popup (the toolbar's •••, Alt, F10).
 	void moreMenu(POINT screen, bool rightAligned);
+	// A tab is a page: its index in the document, as the canvases are in
+	// the document's order.
 	int tabCount() const { return (int)canvases.size(); }
 	std::string tabName(int index) const;
 	int currentTab() const { return current; }
 	void closeTab(int index);
 	void moveTab(int from, int to);
+	// A tab one place along its side (the tab menu's Move Left and Right).
+	void moveTabBy(int index, int delta);
 	void tabContextMenu(int index, POINT screen);
+
+	// ---- Split view (the Mac's SplitState) ----
+	// A split puts some pages in a second side; each side has its own tab
+	// strip and shows one of its pages.
+	bool splitOpen() const { return !sideKeys.empty(); }
+	// The side you're working in: 0 the first (left, unless swapped), 1 the second.
+	int focusedPane() const { return focusPane; }
+	int paneOf(const Canvas* c) const;
+	std::vector<int> panePages(int pane) const;   // a side's pages, in order
+	int shownPage(int pane) const;                 // the page it shows (-1 none)
+	Canvas* paneCanvas(int pane) const;
+	void activatePane(int pane);
+	void toggleSplit();
+	void splitWith(int page, bool onRight);
+	void movePageToPane(int page, int pane);
+	void closeSplit();
+	void switchPane();
+	bool stripIsRightmost(int pane) const;
+	// A tab held over the canvas area (a screen point): drop it to split
+	// the view, or onto the other side to move it there.
+	struct DropHint {
+		int kind = 0;   // 0 nothing, 1 split, 2 move
+		int side = 0;   // split: -1 left half, 1 right half; move: the pane
+		bool operator==(const DropHint& o) const { return kind == o.kind && side == o.side; }
+	};
+	DropHint dropHintAt(int fromPane, POINT screen) const;
+	void showDropHint(const DropHint& h);
+	void tabDropped(int page, const DropHint& h);
+	// A canvas took the keyboard (a click in it): work in its side.
+	void canvasFocused(Canvas* c);
+	// On one of the lines that drag (the side panel's edge, the line between
+	// the sides, the oscilloscope's top): the parts under it leave the
+	// pointer to the window there.
+	bool onDivider(POINT screen) const;
+	TabStrip* tabStripWidget(int pane) const { return pane == 0 || pane == 1 ? strips[pane] : nullptr; }   // for --click-test
+
+	// ---- Focus mode ----
+	// The Mac's: the toolbar and the side panel slide away, and the tab
+	// strips become the window's top row.
+	bool focusMode() const { return focusOn; }
+	void toggleFocusMode();
 
 	// Ctrl+Tab: the switcher (TabSwitcher.h). Its tabs, most recently used
 	// first, and the page a tab shows.
@@ -211,7 +257,7 @@ private:
 
 	// The parts around the canvas.
 	Toolbar* toolbar = nullptr;
-	TabStrip* tabStrip = nullptr;
+	TabStrip* strips[2] = { nullptr, nullptr };
 	FindBar* findBar = nullptr;
 	TabSwitcher* switcher = nullptr;
 	std::vector<uint64_t> recentKeys;   // pages by when they were last in front, most recent first
@@ -229,9 +275,28 @@ public:
 	std::string pageName(int page) const;
 private:
 	std::vector<Canvas*> canvases;    // in tab order
-	int current = 0;                  // the tab in front
-	bool splitterDrag = false;
-	int splitterGrab = 0;
+	int current = 0;                  // the tab in front (of the side you're in)
+	// Split view.
+	std::set<uint64_t> sideKeys;      // the second side's pages; empty: no split
+	bool sideFirst = false;           // the second side sits on the left
+	int focusPane = 0;
+	uint64_t frontKeys[2] = { 0, 0 }; // the page each side shows
+	double splitAt = 0.5;             // the line between the sides, across the area
+	DropHint hint, hintShown;
+	HWND hintWindow = nullptr;        // "Drop to split here", over the canvases
+	double hintFrom = 0, hintTo = 0, hintStart = -1;
+	// Focus mode: the bars sliding away (0 shown, 1 away).
+	bool focusOn = false;
+	double focusFrom = 0, focusTo = 0, focusStart = -1;
+	// The oscilloscope, docked under the canvases.
+	bool scopeOpen = false;
+	int scopeHeight = 230;            // points
+	// The lines that drag: 1 the side panel's edge, 2 between the sides, 3 the oscilloscope's top.
+	int dividerDrag = 0;
+	int dividerGrab = 0;
+	// Where things are, as last laid out (client pixels).
+	int sashX = -1, splitX = -1, scopeY = -1, areaLeft = 0, areaTop = 0, areaBottom = 0, contentBottom = 0, captionBottom = 0;
+	RECT paneRects[2] = {};
 	bool maxPressed = false;          // the drawn maximize button, held down
 	bool openMaximized = false;       // shown maximized (as the last window was)
 	bool trackingNonClient = false;
@@ -259,8 +324,16 @@ private:
 	void build();
 	void buildMenus();
 	void layout();
-	RECT splitterRect() const;
+	int dividerAt(POINT client) const;
 	int toolbarHeight() const;
+	void reconcileSplit();
+	void showFronts();
+	double focusAmount() const;
+	void stepAnimations();
+	double hintAlpha() const;
+	void paintHint(double alpha);
+	void setMaximizeHot(bool hot, bool pressed);
+	TabStrip* rightStrip() const;
 	void syncTabs();
 	void updateTabLabels();
 	void updateTitle();

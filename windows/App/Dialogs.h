@@ -112,7 +112,8 @@ bool confirmQuit(HWND parent);
 // Export as Image (Export.cpp).
 void showExportImage(CircuitWindow* w, int page);
 
-// The oscilloscope, redesigned as the Mac app's (ScopeView.swift): every
+// The oscilloscope, redesigned as the Mac app's (ScopeView.swift), docked
+// under the canvases (the window lays it out; the line over it drags): every
 // signal a TO label names as a clean waveform, a time cursor that reads every
 // signal's value at once, zoom and scroll through time, and the keyboard:
 //   Left/Right   move the cursor a step (Shift: 10 steps)
@@ -121,12 +122,13 @@ void showExportImage(CircuitWindow* w, int page);
 //   Home / End   first sample / follow the live end again
 //   H            hide or show the chosen signal
 //   Space        run or pause the simulation      C   clear the recording
-//   Ctrl+C       copy the timing diagram
+//   Ctrl+C       copy the timing diagram     Escape   put it away
 // Its share button makes a timing diagram for a lab report (Scope.cpp).
 class ScopeWindow {
 public:
 	explicit ScopeWindow(CircuitWindow* owner);
 	~ScopeWindow();
+	HWND widget() const { return hwnd; }
 	void present();
 	void update();   // new samples (called a few times a second while it runs)
 	void close();
