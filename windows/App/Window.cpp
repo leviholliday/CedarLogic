@@ -6,6 +6,7 @@
 #include "Dialogs.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "StatusBar.h"
 #include "TabStrip.h"
 #include "FindBar.h"
 #include "TabSwitcher.h"
@@ -33,7 +34,7 @@ namespace {
 
 const wchar_t* kClass = L"CedarLogicWindow";
 const UINT_PTR kClockTimer = 1, kAutosaveTimer = 2, kSwitchTimer = 3;
-const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18, kNoteTime = 4.0;
+const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18;
 
 double since(double t) { return nowSeconds() - t; }
 
@@ -155,6 +156,8 @@ CircuitWindow::~CircuitWindow() {
 	findBar = nullptr;
 	delete switcher;
 	switcher = nullptr;
+	delete statusBar;
+	statusBar = nullptr;
 	if (menus) DestroyMenu(menus);
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
@@ -205,12 +208,10 @@ void CircuitWindow::build() {
 	tabStrip = new TabStrip(this, hwnd);
 	findBar = new FindBar(this, hwnd);
 	switcher = new TabSwitcher(this);
-	statusBar = CreateWindowExW(0, STATUSCLASSNAMEW, L"", WS_CHILD | SBARS_SIZEGRIP, 0, 0, 10, 10, hwnd, nullptr,
-	                            appInstance(), nullptr);
+	statusBar = new StatusBar(this, hwnd);
 	setFontTree(hwnd, uiFont(dpi));
 	palette->dpiChanged();
 	ShowWindow(paletteHost, prefs().showPalette ? SW_SHOW : SW_HIDE);
-	ShowWindow(statusBar, prefs().showStatus ? SW_SHOW : SW_HIDE);
 	// The title bar is the toolbar's: tell Windows the frame changed.
 	SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -307,6 +308,10 @@ void CircuitWindow::buildMenus() {
 
 int CircuitWindow::toolbarHeight() const { return (int)std::lround(Toolbar::barHeight() * dpi / 96.0); }
 
+int CircuitWindow::statusHeight() const {
+	return statusBar ? (int)std::lround(StatusBar::barHeight() * statusBar->shown() * dpi / 96.0) : 0;
+}
+
 // The line between the side panel and the canvas, and a few pixels either
 // side of it to grab.
 RECT CircuitWindow::splitterRect() const {
@@ -314,10 +319,8 @@ RECT CircuitWindow::splitterRect() const {
 	if (!prefs().showPalette) return r;
 	RECT rc;
 	GetClientRect(hwnd, &rc);
-	RECT sb = { 0, 0, 0, 0 };
-	if (prefs().showStatus && statusBar) GetWindowRect(statusBar, &sb);
 	const int x = scaled(prefs().paletteWidth, dpi);
-	r = { x - scaled(3, dpi), toolbarHeight(), x + 1 + scaled(3, dpi), rc.bottom - (sb.bottom - sb.top) };
+	r = { x - scaled(3, dpi), toolbarHeight(), x + 1 + scaled(3, dpi), rc.bottom - statusHeight() };
 	return r;
 }
 
@@ -333,17 +336,9 @@ void CircuitWindow::layout() {
 	const int top = toolbarHeight();
 	place(toolbar->widget(), 0, 0, rc.right, top);
 
-	// The status bar (off unless asked for) sizes itself along the bottom.
-	int bottom = rc.bottom;
-	if (prefs().showStatus) {
-		SendMessageW(statusBar, WM_SIZE, 0, 0);
-		RECT sb;
-		GetWindowRect(statusBar, &sb);
-		bottom -= sb.bottom - sb.top;
-		const int infoW = std::min<int>(sc(460), rc.right / 2);
-		int parts[2] = { rc.right - infoW, -1 };
-		SendMessageW(statusBar, SB_SETPARTS, 2, (LPARAM)parts);
-	}
+	// The status bar along the bottom (sliding up for a note when it's off).
+	const int bottom = rc.bottom - statusHeight();
+	if (statusBar) place(statusBar->widget(), 0, bottom, rc.right, rc.bottom - bottom);
 
 	// The side panel, a hairline, then the tabs and the canvas.
 	int left = 0;
@@ -536,15 +531,10 @@ void CircuitWindow::tick() {
 		if (r & CL_TICK_PAUSED) { isRunning = false; updateRunUI(); note("A part paused the simulation."); }
 	}
 	if (statusDirty && (t - lastStatus) > 0.1) { statusDirty = false; lastStatus = t; updateStatus(); }
+	if (statusBar && statusBar->tick()) layout();
 	if ((t - lastTitle) > 0.5) { lastTitle = t; updateTitle(); }
 	// A recovery copy of unsaved work, at most every 20 seconds.
 	if (changes != changesAtRecovery && (t - lastRecovery) > 20) writeRecovery();
-	// The note over the canvas fades in, stays a while, fades out.
-	if (messageAt > 0) {
-		const double age = since(messageAt);
-		if (age > kNoteTime) { messageAt = 0; redraw(); }
-		else if (age < 0.2 || age > kNoteTime - 0.5) redraw();
-	}
 }
 
 double CircuitWindow::selectionFade() const {
@@ -614,20 +604,9 @@ void CircuitWindow::edited() {
 	if (findBar && findBar->isOpen()) findBar->run(false);
 }
 
+// In the status bar, as the Mac's notes are.
 void CircuitWindow::note(const std::string& text) {
-	noteText = text;
-	messageAt = nowSeconds();
-	if (prefs().showStatus) SendMessageW(statusBar, SB_SETTEXTW, 0, (LPARAM)W(text).c_str());
-	redraw();
-}
-
-bool CircuitWindow::toast(std::string& text, double& alpha) const {
-	if (messageAt <= 0 || noteText.empty()) return false;
-	const double age = since(messageAt);
-	if (age > kNoteTime) return false;
-	text = noteText;
-	alpha = std::min(1.0, std::min(age / 0.2, (kNoteTime - age) / 0.5));
-	return alpha > 0;
+	if (statusBar) statusBar->note(text);
 }
 
 void CircuitWindow::lockNudge() {
@@ -679,15 +658,7 @@ void CircuitWindow::updateTitle() {
 }
 
 void CircuitWindow::updateStatus() {
-	Canvas* c = currentCanvas();
-	const int p = currentPage();
-	std::string s = strf("%d gates", cl_document_gate_count(doc, p));
-	const int sg = cl_edit_selected_gate_count(doc, p), sw = cl_edit_selected_wire_count(doc, p);
-	if (sg + sw > 0) s += strf(" · %d selected", sg + sw);
-	if (c) s += strf(" · %d%%", c->zoomPercent());
-	s += strf(" · %.1f, %.1f", pointerX, pointerY);
-	s += isRunning ? " · Running" : " · Paused";
-	if (prefs().showStatus) SendMessageW(statusBar, SB_SETTEXTW, 1, (LPARAM)W(s).c_str());
+	if (statusBar) statusBar->update();
 	if (toolbar) toolbar->redraw();   // the zoom readout
 }
 
@@ -775,6 +746,7 @@ void CircuitWindow::themeChanged() {
 	updateActions();
 	if (tabStrip) tabStrip->redraw();
 	if (palette) palette->themeChanged();
+	if (statusBar) statusBar->redraw();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
 	if (scope) scope->update();
@@ -783,7 +755,6 @@ void CircuitWindow::themeChanged() {
 
 void CircuitWindow::prefsChanged() {
 	ShowWindow(paletteHost, prefs().showPalette ? SW_SHOW : SW_HIDE);
-	ShowWindow(statusBar, prefs().showStatus ? SW_SHOW : SW_HIDE);
 	layout();
 	themeChanged();
 }

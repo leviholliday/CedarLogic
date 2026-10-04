@@ -184,7 +184,6 @@ void Canvas::drawOverlays(ID2D1RenderTarget* rt, float w, float h) {
 	sliderTrack = D2D1::RectF(0, 0, 0, 0);
 	if (win->simView()) drawSimBar(rt, w, h);
 	else drawBanner(rt, w);
-	drawToast(rt, w, h);
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(rt, w, h, t);
 }
@@ -377,22 +376,6 @@ void Canvas::drawBanner(ID2D1RenderTarget* rt, float w) {
 		hits.push_back({ r, buttons[i].command });
 		x += bw[i] + 6;
 	}
-}
-
-// A note (Saved, Copied...) over the bottom of the canvas, as a dark pill
-// that fades.
-void Canvas::drawToast(ID2D1RenderTarget* rt, float w, float h) {
-	std::string text;
-	double alpha = 0;
-	if (!win->toast(text, alpha)) return;
-	const float a = (float)alpha;
-	const float tw = std::min(w - 40, textWidth(text, 12) + 32), th = 32;
-	const float bottom = h - 16 - (win->simView() ? 52 + 14 : 0);
-	const D2D1_RECT_F r = D2D1::RectF((w - tw) / 2, bottom - th, (w + tw) / 2, bottom);
-	const bool dark = prefs().dark || win->simView();
-	fillRound(rt, D2D1::RectF(r.left, r.top + 2, r.right, r.bottom + 2), th / 2, D2D1::ColorF(0, 0, 0, 0.18f * a));
-	fillRound(rt, r, th / 2, dark ? D2D1::ColorF(0.24f, 0.26f, 0.30f, 0.96f * a) : D2D1::ColorF(0.13f, 0.14f, 0.16f, 0.92f * a));
-	drawText(rt, text, D2D1::RectF(r.left + 14, r.top, r.right - 14, r.bottom), 12, D2D1::ColorF(1, 1, 1, a), TextAlign::Center);
 }
 
 bool Canvas::overlayPress(double vx, double vy) {

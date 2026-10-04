@@ -218,6 +218,9 @@ void Prefs::load() {
 	duplicateUsesClipboard = r.b("duplicateClipboard", duplicateUsesClipboard);
 	showPalette = r.b("showPalette", showPalette);
 	showStatus = r.b("statusBar", showStatus);
+	// The drawn status bar, where notes appear, is on, as on the Mac (the
+	// old one was off).
+	if (!r.b("drawnStatusBar", false)) showStatus = true;
 	showGateNames = r.b("showGateNames", showGateNames);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
@@ -287,6 +290,7 @@ void Prefs::save() const {
 	o << "duplicateClipboard=" << b(duplicateUsesClipboard) << "\n";
 	o << "showPalette=" << b(showPalette) << "\n";
 	o << "statusBar=" << b(showStatus) << "\n";
+	o << "drawnStatusBar=1\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";

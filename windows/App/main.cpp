@@ -49,6 +49,7 @@ std::string gPlace;     // --place: a gate by library name, put on the page and 
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
+std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -530,6 +531,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
+		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
@@ -605,6 +607,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			cl_edit_select_gate(w->document(), found.page, found.gate);
 		}
 	}
+	if (!gNote.empty() && !circuitWindows().empty()) circuitWindows().back()->note(gNote);
 	if (gDialog == CMD_PREFERENCES) setPreferencesPage(gPage);
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (gDialog == -1 && !circuitWindows().empty()) {

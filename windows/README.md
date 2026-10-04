@@ -28,8 +28,9 @@ it compiles without a Windows machine:
   are in `Chrome`): a window per circuit (`Window`) whose title bar is the
   `Toolbar` (the circuit's name and menu, the tools in capsules, ••• for
   every menu, Windows' own window buttons); `TabStrip`, a tab card per page,
-  over a `Canvas` per page (with the note toast, the Tidy Up and Lock
-  banner, and Simulation View's control bar drawn over the circuit); the side
+  over a `Canvas` per page (with the Tidy Up and Lock banner, and
+  Simulation View's control bar drawn over the circuit); the status bar
+  where notes appear (`StatusBar`); the side
   panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
   (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
   the app's own alert card for every question and note (`Alert`);
@@ -68,7 +69,8 @@ Direct2D here. And:
   to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
   or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
-  `--timing out.png [--timing-color]` with the oscilloscope).
+  `--timing out.png [--timing-color]` with the oscilloscope); `--note "text"`
+  puts a note in the status bar.
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
   Tab, Simulation View, Lock, New) and the window's drawn Minimize and Close
   the way Windows sends a click, checks each did what it should, prints PASS,
