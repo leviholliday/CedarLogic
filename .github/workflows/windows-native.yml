@@ -144,13 +144,40 @@ jobs:
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 
+      # Settings, page by page (General, Appearance, Canvas, Toolbar,
+      # Shortcuts), the Keyboard Shortcuts list, and the window in each
+      # toolbar style (Seamless is a new install's).
+      - name: Settings and toolbar pictures
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          for p in 0 1 2 3 4; do
+            timeout 90 "$A" --light --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p.png" || true
+            timeout 90 "$A" --dark --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p-dark.png" || true
+          done
+          timeout 90 "$A" --light --dialog shortcuts --screenshot "$PWD/renders/shortcuts.png" || true
+          timeout 90 "$A" --dark --dialog shortcuts --screenshot "$PWD/renders/shortcuts-dark.png" || true
+          for s in seamless classic minimal; do
+            timeout 90 "$A" --light --toolbar-style $s --screenshot "$PWD/renders/toolbar-$s.png" res/samples/practice.cdl || true
+            timeout 90 "$A" --dark --toolbar-style $s --screenshot "$PWD/renders/toolbar-$s-dark.png" res/samples/practice.cdl || true
+          done
+          timeout 90 "$A" --dark --sim-view --toolbar-style seamless --screenshot "$PWD/renders/toolbar-seamless-sim.png" res/samples/practice.cdl || true
+
       # Clicks on the toolbar's buttons and the window's drawn Minimize and
       # Close, as Windows sends them (press, then release), each checked for
-      # its effect: a picture can't show that a button does nothing.
+      # its effect: a picture can't show that a button does nothing. Once in
+      # each toolbar style (Minimal leaves most tools to its ••• menu).
       - name: Click test
         if: matrix.run
         shell: bash
-        run: timeout 120 package/CedarLogic/CedarLogic.exe --click-test
+        run: |
+          failed=0
+          for s in seamless classic minimal; do
+            timeout 120 package/CedarLogic/CedarLogic.exe --click-test --toolbar-style $s || failed=1
+          done
+          exit $failed
 
       - name: Upload zip
         uses: actions/upload-artifact@v7

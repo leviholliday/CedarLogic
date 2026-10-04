@@ -42,8 +42,11 @@ it compiles without a Windows machine:
   cedarlogic.netlify.app), and Help with search (`Help`); the launch screen with the first launch's sound
   (`Splash`), the first-run welcome, What's New and the guided tour that
   builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
-  build (`Updater`); recovery copies of unsaved work (`Recovery`); and
-  settings and helpers (`Util`; settings live in
+  build (`Updater`); recovery copies of unsaved work (`Recovery`); Settings
+  in the Mac's five pages (`Settings`, on `Form`); every command's keys,
+  changeable in Settings > Shortcuts (`Shortcuts`), and the searchable list
+  of them (`ShortcutsSheet`); the toolbar's three styles, Seamless, Classic
+  and Minimal (`Toolbar`); and settings and helpers (`Util`; settings live in
   `%APPDATA%\CedarLogic\native.ini`). `Drawn` is the base of the custom-drawn
   parts: Direct2D, in points.
 - `res/` -- the manifest (per-monitor DPI, the current look of the standard
@@ -65,12 +68,15 @@ Direct2D here. And:
   preferences|shortcuts|truth-table|add-gate|library|versions|templates|
   formula|scope|export|feedback|help|welcome|whatsnew` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
-  or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
-  `--timing out.png [--timing-color]` with the oscilloscope).
+  or Settings (0 General ... 4 Shortcuts), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
+  `--timing out.png [--timing-color]` with the oscilloscope). `--toolbar-style
+  seamless|classic|minimal` shows the toolbar in that style for the run
+  (with the click test too).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
-  Tab, Simulation View, Lock, New) and the window's drawn Minimize and Close
-  the way Windows sends a click, checks each did what it should, prints PASS,
-  FAIL or SKIP for each and exits 1 if any failed (CI runs it).
+  Tab, Pause and Resume, Simulation View, Lock, New) and the window's drawn
+  Minimize and Close the way Windows sends a click, checks each did what it
+  should, prints PASS, FAIL or SKIP for each and exits 1 if any failed (CI
+  runs it once per toolbar style).
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the
