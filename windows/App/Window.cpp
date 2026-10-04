@@ -1263,8 +1263,9 @@ LRESULT CircuitWindow::frameHitTest(LPARAM lp) {
 		if (p.x >= rc.right - edge * 2) return HTTOPRIGHT;
 		return HTTOP;
 	}
-	// The toolbar's empty parts, or in focus mode the tabs'.
-	if (p.y < captionBottom) {
+	// The toolbar's empty parts, or in focus mode the tabs' (but not the
+	// line between the sides, which drags there too).
+	if (p.y < captionBottom && dividerAt(p) == 0) {
 		const RECT mx = focusOn ? rightStrip()->maximizeRect() : toolbar ? toolbar->maximizeRect() : RECT{ 0, 0, 0, 0 };
 		if (PtInRect(&mx, p)) return HTMAXBUTTON;
 		return HTCAPTION;
