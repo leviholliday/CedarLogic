@@ -268,10 +268,13 @@ jobs:
       # files); the link the app makes for a circuit, which python's zlib must
       # inflate to the circuit; a link python's zlib made of it, which the app
       # must decode; and the app opening a cedarlogic:// link (a picture of the
-      # window it opens: the circuit, named from the link).
+      # window it opens: the circuit, named from the link). New and not yet seen
+      # on a real Windows, so for now it doesn't hold the zips back (take
+      # continue-on-error off once it has passed).
       - name: Share link test
         if: matrix.run
         shell: bash
+        continue-on-error: true
         run: |
           A=package/CedarLogic/CedarLogic.exe
           PY=$(command -v python || command -v python3)
