@@ -1595,10 +1595,16 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			}
 		}
 	};
+	// Three rows a notch; a touchpad's small steps add up to rows.
+	int wheelRest = 0;
 	f.onWheel = [&](Form& form, int field, int delta) {
 		if (field != gridField) return;
 		finishEdit(form, true);
-		scrollTo(form, scrollRow - delta / WHEEL_DELTA * 3);
+		wheelRest += delta;
+		const int rows = wheelRest * 3 / WHEEL_DELTA;
+		if (rows == 0) return;
+		wheelRest -= rows * WHEEL_DELTA / 3;
+		scrollTo(form, scrollRow - rows);
 	};
 	f.onChange = [&](Form& form, int field) {
 		if (field != jumpField) return;
