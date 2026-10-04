@@ -147,9 +147,9 @@ CLCheck* compare(const CLTruthTable* tt, const Expected& e, const std::map<std::
 		std::vector<std::string> names, switches;
 		for (int i : missingIns) names.push_back(e.ins[i]);
 		for (int col = 0; col < tt->inputs; col++) switches.push_back(tt->names[col]);
-		const std::string what = names.size() == 1 ? "no switch called " + names[0] : "no switches called " + list(names);
-		return fail(c, "Can't check yet: there's " + what + ".",
-		            "There's " + what + " (the switches are " + list(switches) + "). Pick which switch " +
+		const std::string what = names.size() == 1 ? "'s no switch called " + names[0] : " are no switches called " + list(names);
+		return fail(c, "Can't check yet: there" + what + ".",
+		            "There" + what + " (the switches are " + list(switches) + "). Pick which switch " +
 		            (names.size() == 1 ? "it is" : "each one is") + " under Names, or change a switch's label.");
 	}
 	if (!paired.empty())
@@ -227,9 +227,10 @@ CLCheck* compare(const CLTruthTable* tt, const Expected& e, const std::map<std::
 		if (!missing.empty()) c->summary += " " + list(missing) + " couldn't be checked.";
 	} else if (!missing.empty()) {
 		c->verdict = 2;
+		const std::string what = missing.size() == 1 ? "'s no light called " : " are no lights called ";
 		c->summary = missing.size() == e.outNames.size()
-			? "Can't check yet: there's no light called " + list(missing) + "."
-			: "The rest matches, but there's no light called " + list(missing) + ".";
+			? "Can't check yet: there" + what + list(missing) + "."
+			: "The rest matches, but there" + what + list(missing) + ".";
 	} else {
 		c->verdict = 0;
 		c->summary = checked == 0 ? "Matches, but every row was a don't-care, so nothing was really checked."

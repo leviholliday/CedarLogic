@@ -122,14 +122,14 @@ do {
     check(c.verdict == .cannotCheck && c.summary == "Can't check yet: there's no light called Sum.", "Sum: \(c.summary)")
     // A switch that isn't there, then picked by hand.
     c = run(.formula, "S = A ^ B ^ Ci; Cout = AB + Ci(A ^ B) + D")
-    check(c.verdict == .cannotCheck && c.summary.contains("no switches called Ci and D"), "missing switches: \(c.summary)")
+    check(c.verdict == .cannotCheck && c.summary == "Can't check yet: there are no switches called Ci and D.", "missing switches: \(c.summary)")
     c = run(.formula, "S = A ^ Q ^ B")
     check(c.verdict == .matches && c.notes.contains { $0.text.contains("Q is Cin") }, "Q by position: \(c.summary)")
     c = run(.formula, "S = A ^ Q ^ B", ["Q": "Cin"])
     check(c.verdict == .matches && c.names.first { $0.name == "Q" }?.byHand == true, "Q by hand: \(c.summary)")
     // A light that isn't there.
     c = run(.formula, "S = A ^ B ^ Cin; Carry = AB + Cin(A ^ B); Z = A")
-    check(c.verdict == .cannotCheck && c.summary.contains("no light called Carry and Z"), "missing lights: \(c.summary)")
+    check(c.verdict == .cannotCheck && c.summary == "The rest matches, but there are no lights called Carry and Z.", "missing lights: \(c.summary)")
     // Unknown and floating lights.
     let floating = table(names, 3, [{ m in m == 2 ? "Z" : bit(m.nonzeroBitCount % 2 == 1) }, { m in m < 4 ? "X" : bit(m.nonzeroBitCount >= 2) }])
     c = run(.formula, adder, rows: floating)

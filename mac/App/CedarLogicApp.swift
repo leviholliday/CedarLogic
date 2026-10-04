@@ -511,6 +511,9 @@ struct ViewCommands: Commands {
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .keyboardShortcut(keys.menu(.truthTable))
                 .disabled(canvas == nil)
+            Button("Check My Circuit…") { canvas?.perform(.checkCircuit) }
+                .keyboardShortcut(keys.menu(.checkCircuit))
+                .disabled(canvas == nil)
             Button(canvas?.simView == true ? "Leave Simulation View" : "Simulation View") { canvas?.simView.toggle() }
                 .keyboardShortcut(keys.menu(.simView))
                 .disabled(canvas == nil)
@@ -539,6 +542,9 @@ struct SimulationCommands: Commands {
             Divider()
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .help("T: every combination of the page's switches (or the selected ones) and what the lights show")
+                .disabled(canvas == nil)
+            Button("Check My Circuit…") { canvas?.perform(.checkCircuit) }
+                .help("Shift-T: compare the lights with a formula or truth table the assignment gives")
                 .disabled(canvas == nil)
             Divider()
             Button(canvas?.locked == true ? "Unlock the Circuit" : "Lock the Circuit") { canvas?.locked.toggle() }

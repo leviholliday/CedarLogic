@@ -233,7 +233,7 @@ extension CircuitCanvasNSView {
                 if ch == "=" || ch == "+" { animateZoom(by: 1 / 0.75) }
                 else if ch == "-" { animateZoom(by: 0.75) }
                 else if let a = ShortcutStore.shared.canvasAction(for: e),
-                        [.truthTable, .shortcuts, .darkMode, .nextTab, .previousTab].contains(a) {
+                        [.truthTable, .checkCircuit, .shortcuts, .darkMode, .nextTab, .previousTab].contains(a) {
                     controller.perform(a)
                 } else { return bare }
             }
@@ -316,7 +316,7 @@ extension ShortcutAction {
         switch self {
         case .exportImage, .print, .cut, .copy, .paste, .duplicate, .selectAll, .addGate, .rotate, .straighten,
              .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate, .zoomIn, .zoomOut, .zoomFit, .zoomActual,
-             .truthTable, .closeTab, .newTab: true
+             .truthTable, .checkCircuit, .closeTab, .newTab: true
         default: false
         }
     }

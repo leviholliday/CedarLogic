@@ -89,7 +89,7 @@ enum CheckMemory {
         return all[circuit]
     }
 
-    static func save(_ circuit: String?, _ saved: Saved) {
+    static func save(_ circuit: String?, _ saved: Saved?) {
         guard let circuit else { return }
         var all = (UserDefaults.standard.data(forKey: key)).flatMap { try? JSONDecoder().decode([String: Saved].self, from: $0) } ?? [:]
         all[circuit] = saved

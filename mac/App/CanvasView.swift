@@ -791,6 +791,7 @@ final class CanvasController: ObservableObject {
         case .simView: simView.toggle()
         case .step: stepOnce()
         case .truthTable: makeTruthTable()
+        case .checkCircuit: makeTruthTable(check: true)
         case .find: openFind()
         case .findNext: if findActive { findStep(1) } else { openFind() }
         case .findPrevious: if findActive { findStep(-1) } else { openFind() }
@@ -1278,10 +1279,15 @@ final class CanvasController: ObservableObject {
         return true
     }
 
-    func makeTruthTable() {
+    /// The truth table; with `check`, open at its Check tab.
+    func makeTruthTable(check: Bool = false) {
         guard let document else { return }
         var error = ""
-        if let table = TruthTable(document: document, page: page, error: &error) {
+        if var table = TruthTable(document: document, page: page, error: &error) {
+            // What was last checked is kept per circuit and page.
+            let circuit = view?.window?.representedURL?.path ?? view?.window?.title ?? "Circuit"
+            table.checkKey = circuit + "#\(page)"
+            if check { UserDefaults.standard.set(TruthTableView.checkTab, forKey: "cl.truthTab") }
             sheetHost.truthTable = table
         } else {
             sheetHost.truthTableProblem = error.isEmpty ? "A truth table couldn't be made for this page." : error
