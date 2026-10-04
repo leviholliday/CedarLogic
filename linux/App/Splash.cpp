@@ -452,6 +452,7 @@ GtkWidget* showSplash() {
 }
 
 bool splashActive() { return g_splash != nullptr; }
+bool splashHoldsWindows() { return g_splash != nullptr && !g_splash->presented; }
 
 // The work happens before it plays (it lists what was done, a line at a
 // time, once it begins), so what's said meanwhile isn't shown.

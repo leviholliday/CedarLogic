@@ -569,10 +569,6 @@ bool presentRunning(GApplication* gapp) {
 // -- takes the first one's place, as with Open and a drop; a circuit you're
 // in is left as it is, whatever Settings says about opening replacing it.
 void openHandedOver(GtkApplication* app, const std::vector<std::string>& paths) {
-	// Handed over while the launch screen still plays, before it brings
-	// the windows in: these come in with them.
-	const bool waiting = splashActive() && !circuitWindows().empty() &&
-	                     !gtk_widget_get_visible(GTK_WIDGET(circuitWindows().front()->window()));
 	auto stillOpen = [](CircuitWindow* w) {
 		const std::vector<CircuitWindow*>& all = circuitWindows();
 		return w && std::find(all.begin(), all.end(), w) != all.end();
@@ -580,17 +576,21 @@ void openHandedOver(GtkApplication* app, const std::vector<std::string>& paths) 
 	CircuitWindow* blank = activeWindow(app);
 	for (const std::string& path : paths) {
 		// Still there and still blank: a question opening a file asks lets
-		// other things happen meanwhile.
-		if (!stillOpen(blank) || !blank->isPristine()) blank = nullptr;
+		// other things happen meanwhile. Not while a dialog or menu is open
+		// (over it, perhaps, working on what it shows): a window of its own then.
+		if (!stillOpen(blank) || !blank->isPristine() || gtk_grab_get_current() != nullptr) blank = nullptr;
 		openCircuit(app, path, blank);
 		// It has the file now: it comes forward, as a new window would.
 		if (stillOpen(blank) && !blank->filePath().empty()) {
-			if (!waiting) gtk_window_present(blank->window());
+			if (!splashHoldsWindows()) gtk_window_present(blank->window());
 			blank = nullptr;
 		}
 	}
 	if (circuitWindows().empty()) newCircuitWindow(app);
-	if (waiting) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
+	// Handed over while the launch screen still plays, before it brings the
+	// windows in: these come in with them. Asked now, not before: a question
+	// opening a file asked may have outlasted it, and the windows are in.
+	if (splashHoldsWindows()) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 }
 
 // The first windows are made (behind the launch screen while it plays): a
