@@ -182,9 +182,12 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 void Canvas::drawOverlays(ID2D1RenderTarget* rt, float w, float h) {
 	hits.clear();
 	sliderTrack = D2D1::RectF(0, 0, 0, 0);
-	if (win->simView()) drawSimBar(rt, w, h);
-	else drawBanner(rt, w);
-	drawToast(rt, w, h);
+	// In a split, Simulation View's bar sits under the first side; the
+	// banner and the note are the side's you're working in.
+	const bool working = win->currentCanvas() == this;
+	if (win->simView()) { if (win->paneOf(this) == 0) drawSimBar(rt, w, h); }
+	else if (working) drawBanner(rt, w);
+	if (working) drawToast(rt, w, h);
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(rt, w, h, t);
 }
@@ -387,7 +390,7 @@ void Canvas::drawToast(ID2D1RenderTarget* rt, float w, float h) {
 	if (!win->toast(text, alpha)) return;
 	const float a = (float)alpha;
 	const float tw = std::min(w - 40, textWidth(text, 12) + 32), th = 32;
-	const float bottom = h - 16 - (win->simView() ? 52 + 14 : 0);
+	const float bottom = h - 16 - (win->simView() && win->paneOf(this) == 0 ? 52 + 14 : 0);   // over the bar
 	const D2D1_RECT_F r = D2D1::RectF((w - tw) / 2, bottom - th, (w + tw) / 2, bottom);
 	const bool dark = prefs().dark || win->simView();
 	fillRound(rt, D2D1::RectF(r.left, r.top + 2, r.right, r.bottom + 2), th / 2, D2D1::ColorF(0, 0, 0, 0.18f * a));

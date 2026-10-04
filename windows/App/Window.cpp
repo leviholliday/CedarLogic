@@ -610,7 +610,8 @@ void CircuitWindow::pageSwitched() {
 	updateTitle();
 	updateTabLabels();
 	redrawMiniMap();
-	if (focusPane != paneBefore) layout();   // the find bar goes with the side you're in
+	// The find bar, the banner and the note go with the side you're in.
+	if (focusPane != paneBefore) { layout(); redraw(); }
 }
 
 // A click in a side (or its strip): work there.
