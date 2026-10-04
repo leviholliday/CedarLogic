@@ -178,7 +178,17 @@ std::vector<Version> versions(const Item& item) {
 }
 
 bool create(const std::string& name, const std::string& text, const std::string& source, Item& out) {
-	const std::string id = stamp(now()) + strf("-%d", 1000 + rand() % 99000);
+	// Its folder is claimed (made) before anything goes in it, and the number
+	// is this process's own, so two imports in the same second -- a file
+	// each, opened together from Explorer -- never share one.
+	static unsigned next = (unsigned)GetCurrentProcessId() * 2654435761u + (unsigned)GetTickCount();
+	makeDirs(root());
+	std::string id;
+	for (int tries = 0; id.empty(); tries++) {
+		const std::string t = stamp(now()) + strf("-%d", 1000 + (int)(next++ % 99000));
+		if (CreateDirectoryW(W(root() + "\\" + t).c_str(), nullptr)) id = t;
+		else if (GetLastError() != ERROR_ALREADY_EXISTS || tries >= 100) return false;
+	}
 	out.id = id;
 	out.folder = root() + "\\" + id;
 	out.name = name;
