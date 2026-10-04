@@ -1420,12 +1420,14 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		library::noteLastCircuit(path);
 		// Back to what had the keyboard (Find's box, the side panel's
-		// search), else the canvas.
+		// search), else the canvas -- unless something in the window has it
+		// already (a tab being renamed as the window first comes up).
 		if (savedFocus && IsWindow(savedFocus) && IsChild(hwnd, savedFocus) && IsWindowVisible(savedFocus) &&
 		    IsWindowEnabled(savedFocus))
 			SetFocus(savedFocus);
-		else if (Canvas* c = currentCanvas())
-			c->focus();
+		else if (const HWND f = GetFocus(); !(f && IsChild(hwnd, f) && IsWindowVisible(f))) {
+			if (Canvas* c = currentCanvas()) c->focus();
+		}
 		return 0;
 	case WM_SETTINGCHANGE:
 		// Windows switched apps between light and dark (by hand, or on a
