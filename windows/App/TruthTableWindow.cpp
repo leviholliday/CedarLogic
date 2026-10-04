@@ -211,9 +211,13 @@ private:
 			ins.push_back(name);
 		}
 		std::string out;
+		std::vector<std::string> used = ins;
 		for (int k = 0; k < outputs(); k++) {
 			std::string o = formulaName(names[inputs + k], outputs() == 1 ? "F" : strf("F%d", k + 1));
-			if (std::find(ins.begin(), ins.end(), o) != ins.end()) o = strf("F%d", k + 1);
+			// Taken by an input or another light (OUT1 and OUT2 both read
+			// as O): F1, F2... instead, the first that's free.
+			for (int m = k + 1; std::find(used.begin(), used.end(), o) != used.end(); m++) o = strf("F%d", m);
+			used.push_back(o);
 			std::string list;
 			for (size_t i = 0; i < ins.size(); i++) list += (i ? "," : "") + ins[i];
 			out += (k ? "\n" : "") + o + "(" + list + ") = " + formula::simplest(true, inputs, values(k)).text(ins);
