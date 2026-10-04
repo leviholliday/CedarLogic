@@ -187,6 +187,15 @@ struct ShortcutList {
 			if (inRect(rows[i].rect, x, y)) return (int)i;
 		return -1;
 	}
+	// The arrow keys: the row chosen, scrolled into view.
+	void choose(int row) {
+		if (rows.empty()) return;
+		hot = std::max(0, std::min((int)rows.size() - 1, row));
+		const D2D1_RECT_F r = rows[hot].rect;
+		if (r.top < 4) scrollBy(r.top - 4 - (hot == 0 ? 28 : 0));   // the first row: its heading too
+		else if (r.bottom > viewH - 4) scrollBy(r.bottom - viewH + 4);
+		else refresh();
+	}
 };
 
 void paintShortcuts(ShortcutList& L, ID2D1RenderTarget* rt, float w, float h) {
@@ -217,6 +226,7 @@ void paintShortcuts(ShortcutList& L, ID2D1RenderTarget* rt, float w, float h) {
 		const D2D1_RECT_F r = D2D1::RectF(6, y, w - 6, y + rowH);
 		const bool rec = L.recording == &a, hot = (int)L.rows.size() == L.hot;
 		if (rec) fillRound(rt, r, 7, withAlpha(accent, prefs().dark ? 0.24f : 0.14f));
+		else if (hot && GetFocus() == L.hwnd()) fillRound(rt, r, 7, withAlpha(accent, prefs().dark ? 0.16f : 0.09f));   // the keyboard's row
 		else if (hot) fillRound(rt, r, 7, withAlpha(look.ink, 0.06f));
 		float capsLeft = right;
 		if (rec) {
@@ -270,7 +280,9 @@ void paintShortcuts(ShortcutList& L, ID2D1RenderTarget* rt, float w, float h) {
 		const float at = 6 + (trackH - thumbH) * (L.scroll / std::max(1.0f, L.contentH - h));
 		fillRound(rt, D2D1::RectF(w - 7, at, w - 4, at + thumbH), 1.5f, withAlpha(look.ink, 0.25f));
 	}
-	strokeRound(rt, box, 8, look.line);
+	// Tabbed to: ringed, as a text box is.
+	if (GetFocus() == L.hwnd()) strokeRound(rt, box, 8, withAlpha(accent, 0.8f), 1.5f);
+	else strokeRound(rt, box, 8, look.line);
 }
 
 // Every window's menus and toolbar show the new keys.
@@ -334,9 +346,17 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 	const float s = dpiOf(h) / 96.0f;
 	const float x = GET_X_LPARAM(lp) / s, y = GET_Y_LPARAM(lp) / s;
 	switch (msg) {
-	case WM_GETDLGCODE:
-		// While recording, every key is the new shortcut's (Escape and Tab too).
+	case WM_GETDLGCODE: {
+		// While recording, every key is the new shortcut's (Escape and Tab too);
+		// else the arrows choose a row and Enter or Space records it.
 		if (L->recording) return DLGC_WANTALLKEYS;
+		const MSG* m = reinterpret_cast<const MSG*>(lp);
+		const bool enter = m && m->message == WM_KEYDOWN && m->wParam == VK_RETURN;
+		return DLGC_WANTARROWS | DLGC_WANTCHARS | (enter ? DLGC_WANTMESSAGE : 0);
+	}
+	case WM_SETFOCUS:
+		if (L->hot < 0 && !L->rows.empty()) L->hot = 0;
+		L->refresh();
 		break;
 	case WM_MOUSEMOVE: {
 		TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE, h, 0 };
@@ -346,7 +366,8 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 		return 0;
 	}
 	case WM_MOUSELEAVE:
-		if (L->hot != -1) { L->hot = -1; L->refresh(); }
+		// (With the keyboard here, the row it's on stays chosen.)
+		if (L->hot != -1 && GetFocus() != h) { L->hot = -1; L->refresh(); }
 		return 0;
 	case WM_LBUTTONDOWN:
 	case WM_LBUTTONDBLCLK: {
@@ -374,6 +395,25 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 			guarded("a shortcut", [&] { record(*L, (UINT)wp); });
 			return 0;
 		}
+		if (msg == WM_KEYDOWN) {
+			switch (wp) {
+			case VK_DOWN: L->choose(L->hot + 1); return 0;
+			case VK_UP: L->choose(L->hot - 1); return 0;
+			case VK_NEXT: L->choose(L->hot + 10); return 0;
+			case VK_PRIOR: L->choose(L->hot - 10); return 0;
+			case VK_HOME: L->choose(0); return 0;
+			case VK_END: L->choose((int)L->rows.size() - 1); return 0;
+			case VK_RETURN:
+			case VK_SPACE:
+				if (L->hot >= 0 && L->hot < (int)L->rows.size()) {
+					L->recording = L->rows[L->hot].action;
+					L->say("Press the new keys. Escape keeps what was there; Backspace removes it.");
+					L->refresh();
+				}
+				return 0;
+			default: break;
+			}
+		}
 		break;
 	case WM_CHAR:
 	case WM_SYSCHAR:
@@ -384,8 +424,8 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 		if (L->recording) {
 			L->recording = nullptr;
 			L->say(kShortcutsNote);
-			L->refresh();
 		}
+		L->refresh();
 		break;
 	}
 	return DefSubclassProc(h, msg, wp, lp);
@@ -587,6 +627,8 @@ void showPreferencesDialog(HWND parent) {
 		form.enable(major, prefs().showGrid);
 		SetPropW(form.fields[list.note].hwnd, L"clTip", (HANDLE)1);
 		SetWindowSubclass(list.hwnd(), shortcutListProc, 1, (DWORD_PTR)&list);
+		// Tab reaches the list (the arrows choose a shortcut, Enter changes it).
+		SetWindowLongPtrW(list.hwnd(), GWL_STYLE, GetWindowLongPtrW(list.hwnd(), GWL_STYLE) | WS_TABSTOP);
 	};
 	f.onChange = [&](Form& form, int field) {
 		auto it = on.find(field);
