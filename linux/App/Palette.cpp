@@ -207,9 +207,10 @@ void TileGrid::wheel(double dy, float, float) {
 	clampScroll();
 	barFade.go(1, 0.1);
 	lastWheel = anim::now();
-	// One timer, looking again while the wheel keeps turning (and removed
-	// with the grid, should its window close first).
-	if (fadeTimer == 0) fadeTimer = g_timeout_add(900, [](gpointer self) -> gboolean {
+	// One timer, looking often enough that the bar still fades about 0.9 s
+	// after the wheel stops (and removed with the grid, should its window
+	// close first).
+	if (fadeTimer == 0) fadeTimer = g_timeout_add(100, [](gpointer self) -> gboolean {
 		TileGrid* t = static_cast<TileGrid*>(self);
 		if (anim::now() - t->lastWheel <= 0.8) return G_SOURCE_CONTINUE;
 		t->fadeTimer = 0;
