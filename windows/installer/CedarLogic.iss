@@ -2,8 +2,8 @@
 ; CI (.github/workflows/windows-native.yml) from the folder the zip is made
 ; of. For this user only, so no administrator is needed: CedarLogic goes in
 ; %LOCALAPPDATA%\Programs\CedarLogic, with a Start menu entry (and one on
-; the desktop if asked), .cdl files opening in it, and an uninstaller in
-; Settings > Apps. The app's own updates keep working there: the folder is
+; the desktop if asked), .cdl files and cedarlogic:// links opening in it, and an
+; uninstaller in Settings > Apps. The app's own updates keep working there: the folder is
 ; the user's, and they replace the files beside the exe as in the zip.
 ;
 ;   ISCC /DAppVersion=0.1.0 /DArch=x64 windows\installer\CedarLogic.iss
@@ -121,6 +121,13 @@ Root: HKCU; Subkey: "Software\Classes\.cdl\OpenWithProgids"; ValueType: string; 
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "CedarLogic Circuit"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},1"
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+; cedarlogic:// links (the website's Open in the App, a link in a chat): a URL
+; protocol, opened in CedarLogic with the link as the argument -- in the one
+; already running when there is one (the app hands it over).
+Root: HKCU; Subkey: "Software\Classes\cedarlogic"; ValueType: string; ValueName: ""; ValueData: "URL:CedarLogic"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\cedarlogic"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\cedarlogic\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"
+Root: HKCU; Subkey: "Software\Classes\cedarlogic\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
 Root: HKCU; Subkey: "Software\CedarLogic"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\CedarLogic\Native"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
 

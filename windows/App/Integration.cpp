@@ -11,6 +11,8 @@
 //
 //   HKCU\Software\Classes\.cdl                  -> CedarLogic.Circuit
 //   HKCU\Software\Classes\CedarLogic.Circuit    its name, icon and open command
+//   HKCU\Software\Classes\cedarlogic            the cedarlogic:// links (ShareLink.h): URL Protocol, and
+//                                                an open command with the link as its argument
 //   <Start menu>\Programs\CedarLogic.lnk        a shortcut to this exe
 //
 // The answer is kept in native.ini (startMenu). A file double-clicked while
@@ -35,6 +37,7 @@ namespace integration {
 namespace {
 
 const wchar_t* kProgId = L"CedarLogic.Circuit";
+const wchar_t* kScheme = L"cedarlogic";   // cedarlogic://open#c=… (a URL protocol's key is its scheme)
 const std::wstring kClasses = L"Software\\Classes\\";
 const wchar_t* kInstallKey = L"Software\\CedarLogic\\Native";   // the installer's
 // The installer's entry in Settings > Apps (its AppId, then "_is1").
@@ -117,12 +120,21 @@ bool installedAnywhere() {
 	return installed() || (!dir.empty() && exists(dir + L"\\CedarLogic.exe"));
 }
 
-// The exe .cdl files open with, from the open command ("" when there's none).
-std::wstring registeredExe() {
-	const std::wstring command = readString(kClasses + kProgId + L"\\shell\\open\\command", nullptr);
+// The exe a class's open command runs ("" when there's none).
+std::wstring commandExe(const std::wstring& classKey) {
+	const std::wstring command = readString(classKey + L"\\shell\\open\\command", nullptr);
 	if (command.size() < 2 || command[0] != L'"') return std::wstring();
 	const size_t end = command.find(L'"', 1);
 	return end == std::wstring::npos ? std::wstring() : command.substr(1, end - 1);
+}
+
+// The exe .cdl files open with, and the one cedarlogic:// links do.
+std::wstring registeredExe() { return commandExe(kClasses + kProgId); }
+std::wstring schemeExe() { return commandExe(kClasses + kScheme); }
+
+bool valueExists(const std::wstring& key, const wchar_t* name) {
+	DWORD size = 0;
+	return RegGetValueW(HKEY_CURRENT_USER, key.c_str(), name, RRF_RT_REG_SZ, nullptr, nullptr, &size) == ERROR_SUCCESS;
 }
 
 // Start and .cdl files lead to this copy.
@@ -186,6 +198,18 @@ bool makeShortcut(const std::wstring& lnk, const std::wstring& exe) {
 
 // ---- Adding and removing -----------------------------------------------------------------
 
+// The cedarlogic:// links, for this user: the website's Open in the App starts
+// this exe with the link as its argument (in the running one, if there is
+// one: main.cpp). The installer writes the same (CedarLogic.iss).
+bool registerScheme(const std::wstring& exe) {
+	const std::wstring key = kClasses + kScheme;
+	bool ok = writeString(key, nullptr, L"URL:CedarLogic");
+	ok = writeString(key, L"URL Protocol", L"") && ok;
+	ok = writeString(key + L"\\DefaultIcon", nullptr, exe + L",0") && ok;
+	ok = writeString(key + L"\\shell\\open\\command", nullptr, L"\"" + exe + L"\" \"%1\"") && ok;
+	return ok;
+}
+
 bool add() {
 	const std::wstring exe = exePath(), prog = kClasses + kProgId;
 	bool ok = writeString(kClasses + L".cdl", nullptr, kProgId);
@@ -194,6 +218,7 @@ bool add() {
 	// The .cdl page icon (the exe's second), as the Mac's Finder shows them.
 	ok = writeString(prog + L"\\DefaultIcon", nullptr, exe + L",1") && ok;
 	ok = writeString(prog + L"\\shell\\open\\command", nullptr, L"\"" + exe + L"\" \"%1\"") && ok;
+	ok = registerScheme(exe) && ok;
 	ok = makeShortcut(shortcutPath(), exe) && ok;
 	SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 	return ok;
@@ -206,6 +231,7 @@ void remove() {
 		if (target.empty() || samePath(target, exePath()) || !exists(target)) DeleteFileW(lnk.c_str());
 	}
 	RegDeleteTreeW(HKEY_CURRENT_USER, (kClasses + kProgId).c_str());
+	RegDeleteTreeW(HKEY_CURRENT_USER, (kClasses + kScheme).c_str());
 	RegDeleteKeyValueW(HKEY_CURRENT_USER, (kClasses + L".cdl\\OpenWithProgids").c_str(), kProgId);
 	deleteIfEmpty(kClasses + L".cdl\\OpenWithProgids");
 	if (readString(kClasses + L".cdl", nullptr) == kProgId) RegDeleteKeyValueW(HKEY_CURRENT_USER, (kClasses + L".cdl").c_str(), nullptr);
@@ -225,8 +251,8 @@ bool ask(CircuitWindow* w, bool firstTime) {
 	Alert a;
 	a.title = "Add to Start";
 	a.heading = "Add CedarLogic to the Start menu?";
-	a.text = "It'll be in Start with your other apps, and double-clicking a .cdl file will open it in "
-	         "CedarLogic. It still runs from this folder, so keep the folder where it is.";
+	a.text = "It'll be in Start with your other apps, and double-clicking a .cdl file, or Open in the App on the website, "
+	         "will open it in CedarLogic. It still runs from this folder, so keep the folder where it is.";
 	if (firstTime) a.text += "\n\nYou can change this later in Settings, or under Help in the \u2022\u2022\u2022 menu.";
 	a.buttons = { { "Add to Start", 1, 1 }, { firstTime ? "No Thanks" : "Cancel", 0, 0 } };
 	a.enter = 1;
@@ -308,6 +334,10 @@ void start(bool now) {
 		const std::wstring was = registeredExe();
 		if (!was.empty() && !exists(was) && !samePath(was, exePath())) guarded("following a moved CedarLogic", [] { add(); });
 	}
+	// cedarlogic:// links came after Start and .cdl files: a copy that has those
+	// (installed, or added from the zip) and was updated in place from inside
+	// the app takes them too the first time it runs.
+	if (!now && added() && !samePath(schemeExe(), exePath())) guarded("registering cedarlogic:// links", [] { registerScheme(exePath()); });
 	g_now = now;
 	g_calm = 0;
 	if (now || (prefs().startMenu == 0 && !installedAnywhere() && !inTemp())) SetTimer(nullptr, 0, now ? 500 : 1000, askTimer);
@@ -345,12 +375,13 @@ bool selfTest(std::string& report) {
 		report += strf("%s  %s\n", ok ? "PASS" : "FAIL", what.c_str());
 		if (!ok) failures++;
 	};
-	// What Windows itself would open a .cdl with (Explorer asks the same).
-	auto opener = [] {
+	// What Windows itself would open a .cdl with (Explorer asks the same), or a
+	// cedarlogic: link (the browser's hand-over does).
+	auto opener = [](const wchar_t* what) {
 		wchar_t buf[MAX_PATH * 4] = L"";
 		DWORD n = (DWORD)(sizeof buf / sizeof buf[0]);
-		return SUCCEEDED(AssocQueryStringW(ASSOCF_NONE, ASSOCSTR_EXECUTABLE, L".cdl", L"open", buf, &n)) ? std::wstring(buf)
-		                                                                                                  : std::wstring();
+		return SUCCEEDED(AssocQueryStringW(ASSOCF_NONE, ASSOCSTR_EXECUTABLE, what, L"open", buf, &n)) ? std::wstring(buf)
+		                                                                                              : std::wstring();
 	};
 	const std::wstring exe = exePath(), lnk = shortcutPath();
 	const bool wasAdded = added();
@@ -359,8 +390,13 @@ bool selfTest(std::string& report) {
 	check(added(), ".cdl files' open command is this copy");
 	check(samePath(shortcutTarget(lnk), exe), "the Start menu's shortcut leads here: " + U(lnk));
 	check(readString(kClasses + kProgId + L"\\DefaultIcon", nullptr) == exe + L",1", "the .cdl icon is the exe's second");
-	check(samePath(opener(), exe), "Windows opens .cdl files with it: " + U(opener()));
+	check(samePath(opener(L".cdl"), exe), "Windows opens .cdl files with it: " + U(opener(L".cdl")));
+	const std::wstring scheme = kClasses + kScheme;
+	check(valueExists(scheme, L"URL Protocol") && readString(scheme, nullptr) == L"URL:CedarLogic", "cedarlogic:// is a URL protocol");
+	check(readString(scheme + L"\\shell\\open\\command", nullptr) == L"\"" + exe + L"\" \"%1\"", "...whose open command runs this copy with the link: " + U(readString(scheme + L"\\shell\\open\\command", nullptr)));
+	check(samePath(opener(L"cedarlogic"), exe), "Windows opens cedarlogic:// links with it: " + U(opener(L"cedarlogic")));
 	remove();
+	check(!valueExists(scheme, L"URL Protocol") && schemeExe().empty(), "removed: cedarlogic:// isn't ours any more");
 	check(!added() && !exists(registeredExe()), "removed: .cdl files' open command is gone");
 	check(!exists(lnk), "removed: the Start menu's shortcut is gone");
 	check(readString(kClasses + L".cdl", nullptr) != kProgId, "removed: .cdl isn't ours any more");

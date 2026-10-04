@@ -1,5 +1,6 @@
 // CedarLogic as a normal Windows app (see Integration.cpp): in the Start
-// menu, and opening .cdl files when they're double-clicked. The installer
+// menu, and opening .cdl files when they're double-clicked (and the website's
+// cedarlogic:// links, ShareLink.h). The installer
 // (windows/installer/CedarLogic.iss) does this for an installed copy; a copy
 // run from the zip asks once, and does it for itself.
 
@@ -17,10 +18,11 @@ namespace integration {
 bool installed();
 // At launch, for a copy run from the zip: one added to Start that has since
 // moved follows itself there, and the question is asked once, when nothing
-// else is in the way (not over the welcome, the tour or a dialog). `now`
-// (CI's --dialog start-menu): asked at once, whatever was answered before.
-// An installed copy updated from inside the app tells Settings > Apps its
-// new version.
+// else is in the way (not over the welcome, the tour or a dialog). A copy with
+// Start and .cdl files that came before cedarlogic:// links (updated in place)
+// registers them too. `now` (CI's --dialog start-menu): asked at once,
+// whatever was answered before. An installed copy updated from inside the app
+// tells Settings > Apps its new version.
 void start(bool now = false);
 // The ••• menu's Help > Add to Start Menu / Remove from Start Menu: there
 // for a copy run from the zip, while no installed CedarLogic is about.
