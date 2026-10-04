@@ -9,6 +9,7 @@
 #include "Help.h"
 #include "Library.h"
 #include "Recovery.h"
+#include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
 #include "Window.h"
@@ -18,6 +19,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 
 namespace {
 
@@ -74,6 +76,165 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (gDialog) { prefs().save(); ExitProcess((UINT)gExitCode); }
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gExitCode);
+}
+
+// --click-test: clicks on the toolbar's buttons and the window's drawn
+// Minimize and Close, sent as Windows sends a real one (the press, which
+// takes the pointer, then the release), each checked for what it should do.
+// A line per click, PASS, FAIL or SKIP; the exit code is 1 if any failed (CI
+// runs it: a picture of the window can't tell whether its buttons work).
+bool gClickTest = false;
+HWND gClickWindow = nullptr;
+size_t gClickNext = 0;
+long gClickBefore = 0;
+int gClickFailures = 0;
+bool gClickClosing = false;   // the drawn Close was clicked: the window should go
+Prefs gPrefsBefore;           // put back afterwards (the test widens the window)
+
+void report(const char* result, const std::string& what) {
+	writeOut(strf("%s  %s\n", result, what.c_str()));
+	if (strcmp(result, "FAIL") == 0) gClickFailures++;
+}
+
+CircuitWindow* clickWindow() {
+	for (CircuitWindow* w : circuitWindows()) if (w->window() == gClickWindow) return w;
+	return nullptr;
+}
+
+void closeAll() {
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+}
+
+// Press and release the left button over one of the toolbar's buttons.
+// False when the bar doesn't show that button.
+bool clickButton(CircuitWindow* w, int button, const char* name) {
+	Toolbar* bar = w->toolbarWidget();
+	POINT p;
+	if (bar == nullptr || !bar->buttonPoint(button, p)) return false;
+	const HWND h = bar->widget();
+	const LPARAM at = MAKELPARAM(p.x, p.y);
+	SendMessageW(h, WM_MOUSEMOVE, 0, at);
+	SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, at);
+	if (GetCapture() != h) writeOut(strf("note  %s: the bar didn't take the pointer on the press\n", name));
+	SendMessageW(h, WM_LBUTTONUP, 0, at);
+	return true;
+}
+
+struct ClickCase {
+	const char* name;
+	int button;                                   // a command, or Toolbar::kMinimize
+	bool mayBeHidden;                             // on the bar's left, which a narrow window leaves out
+	std::function<long(CircuitWindow*)> state;    // what the click should change
+	std::function<bool(long before, long after)> worked;
+	std::function<void(CircuitWindow*)> tidy;     // put things back for the next click
+};
+
+const std::vector<ClickCase>& clickCases() {
+	auto flipped = [](long before, long after) { return before != after; };
+	auto oneMore = [](long before, long after) { return after == before + 1; };
+	static const std::vector<ClickCase> cases = {
+		{ "Zoom In", CMD_ZOOM_IN, true,
+		  [](CircuitWindow* w) -> long { Canvas* c = w->currentCanvas(); return c ? c->zoomPercent() : 0; },
+		  [](long before, long after) { return after > before; }, nullptr },
+		{ "New Tab", CMD_NEW_TAB, false, [](CircuitWindow* w) -> long { return w->tabCount(); }, oneMore, nullptr },
+		{ "Simulation View on", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
+		{ "Simulation View off", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
+		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "Unlock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "New circuit", CMD_NEW, true, [](CircuitWindow*) -> long { return (long)circuitWindows().size(); }, oneMore,
+		  [](CircuitWindow* w) {
+			  for (CircuitWindow* o : std::vector<CircuitWindow*>(circuitWindows())) if (o != w) o->destroy();
+		  } },
+		{ "Minimize (drawn)", Toolbar::kMinimize, false,
+		  [](CircuitWindow* w) -> long { return IsIconic(w->window()) ? 1 : 0; },
+		  [](long, long after) { return after == 1; }, [](CircuitWindow* w) { ShowWindow(w->window(), SW_RESTORE); } },
+	};
+	return cases;
+}
+
+// After the message loop: the drawn Close's result, and the summary.
+int finishClickTest() {
+	if (gClickClosing) report(IsWindow(gClickWindow) ? "FAIL" : "PASS", "Close (drawn): the window closed");
+	gClickClosing = false;
+	writeOut(gClickFailures ? strf("click test: %d failed\n", gClickFailures) : std::string("click test: all passed\n"));
+	prefs() = gPrefsBefore;
+	return gClickFailures ? 1 : 0;
+}
+
+// A step a tick: check the last click's effect, then make the next.
+int clickTestStep() {
+	CircuitWindow* w = clickWindow();
+	if (w == nullptr) { report("FAIL", "the window went away"); return 0; }
+	if (gClickClosing) {   // still here: Close did nothing
+		report("FAIL", "Close (drawn): the window is still open");
+		gClickClosing = false;
+		closeAll();
+		return 0;
+	}
+	const std::vector<ClickCase>& cases = clickCases();
+	if (gClickNext > 0) {
+		const ClickCase& done = cases[gClickNext - 1];
+		const long after = done.state(w);
+		report(done.worked(gClickBefore, after) ? "PASS" : "FAIL", strf("%s: %ld, then %ld", done.name, gClickBefore, after));
+		if (done.tidy) done.tidy(w);
+	}
+	while (gClickNext < cases.size()) {
+		const ClickCase& c = cases[gClickNext++];
+		// The canvas drawn first, so its first fit can't undo a zoom.
+		if (Canvas* cv = w->currentCanvas()) UpdateWindow(cv->widget());
+		gClickBefore = c.state(w);
+		if (clickButton(w, c.button, c.name)) return 500;
+		const int width = w->toolbarWidget() ? (int)w->toolbarWidget()->width() : 0;
+		report(c.mayBeHidden ? "SKIP" : "FAIL", strf("%s: not on the toolbar at this width (%d points)", c.name, width));
+	}
+	// Last, the drawn Close: the window goes, and with it the app (the
+	// result is read once the message loop ends).
+	if (!clickButton(w, Toolbar::kClose, "Close")) {
+		report("FAIL", "Close (drawn): not on the toolbar");
+		closeAll();
+		return 0;
+	}
+	gClickClosing = true;
+	return 1500;
+}
+
+void CALLBACK clickTestTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	if (id) KillTimer(nullptr, id);
+	int next = 0;
+	guarded("the click test", [&] { next = clickTestStep(); });
+	if (next > 0) SetTimer(nullptr, 0, (UINT)next, clickTestTimer);
+	else if (!circuitWindows().empty()) {
+		report("FAIL", "the click test stopped early");
+		closeAll();
+	}
+}
+
+void CALLBACK clickTestStart(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().front();
+	if (w == nullptr) { report("FAIL", "no window opened"); PostQuitMessage(1); return; }
+	gClickWindow = w->window();
+	SetForegroundWindow(gClickWindow);
+	// As wide as the whole bar needs (a narrow bar leaves out the tools on
+	// its left), past the screen's edge if it must: not asked first, Windows
+	// doesn't hold the window to the screen's size (CI's is 1024 wide).
+	POINT p;
+	if (w->toolbarWidget() && !w->toolbarWidget()->buttonPoint(CMD_ZOOM_IN, p)) {
+		RECT r;
+		GetWindowRect(gClickWindow, &r);
+		SetWindowPos(gClickWindow, nullptr, 0, 0, scaled(1400, dpiOf(gClickWindow)), r.bottom - r.top,
+		             SWP_NOMOVE | SWP_NOZORDER | SWP_NOSENDCHANGING);
+	}
+	clickTestTimer(nullptr, 0, 0, 0);
+}
+
+// A click that hangs (a dialog no one answers) fails rather than waits.
+void CALLBACK clickTestWatchdog(HWND, UINT, UINT_PTR, DWORD) {
+	report("FAIL", "the click test took too long");
+	writeOut(strf("click test: %d failed\n", gClickFailures));
+	prefs() = gPrefsBefore;
+	prefs().save();
+	ExitProcess(1);
 }
 
 // Once the first window is up, offer back work a CedarLogic that stopped
@@ -152,6 +313,15 @@ CircuitWindow* newCircuitWindow() { return new CircuitWindow(cl_document_new(), 
 // Each window asks about its own changes; stop at the first "Cancel".
 bool quitApp() {
 	std::vector<CircuitWindow*> all = circuitWindows();
+	// A window with a dialog or the truth table up is in the middle of it
+	// (its code is waiting on that): not yet. The dialog comes forward.
+	for (CircuitWindow* w : all) {
+		if (IsWindowEnabled(w->window())) continue;
+		const HWND popup = GetLastActivePopup(w->window());
+		SetForegroundWindow(popup ? popup : w->window());
+		MessageBeep(MB_ICONWARNING);
+		return false;
+	}
 	for (CircuitWindow* w : all) {
 		SetForegroundWindow(w->window());
 		if (!w->confirmClose()) return false;
@@ -232,6 +402,87 @@ void openPracticeCircuit(CircuitWindow* from) {
 	else new CircuitWindow(doc, "");
 }
 
+// ---- One CedarLogic at a time ----------------------------------------------------
+// Two would each save the same circuits (and settings) over the other's. A
+// second start hands its files to the one running, which opens them (or,
+// with none, comes forward), and ends.
+
+namespace {
+
+const wchar_t* kInstanceMutex = L"Local\\CedarLogic.Native";
+const wchar_t* kWindowClass = L"CedarLogicWindow";   // a circuit window's (Window.cpp)
+const ULONG_PTR kHandedFilesTag = 0x434C4F50;        // WM_COPYDATA's: files to open, a line each
+std::vector<std::string> gHanded;                    // taken, waiting to be opened
+
+// True when a CedarLogic already running took the files.
+bool handToRunning(const std::vector<std::string>& files) {
+	// Held for this process's life by the first; the others find it there.
+	static HANDLE mutex = nullptr;
+	mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
+	if (mutex == nullptr || GetLastError() != ERROR_ALREADY_EXISTS) return false;
+	std::string text;   // full paths: the running one's current folder isn't this one's
+	for (const std::string& f : files) {
+		wchar_t full[MAX_PATH * 4];
+		const DWORD n = GetFullPathNameW(W(f).c_str(), (DWORD)(sizeof full / sizeof full[0]), full, nullptr);
+		text += (n > 0 && n < sizeof full / sizeof full[0] ? U(full) : f) + "\n";
+	}
+	// It may still be starting (no window yet) or on its way out (an
+	// update's restart): wait a few seconds for one or the other.
+	for (int tries = 0; tries < 100; tries++) {
+		const DWORD gone = WaitForSingleObject(mutex, 0);
+		if (gone == WAIT_OBJECT_0 || gone == WAIT_ABANDONED) return false;   // it ended: this one is the one now
+		if (HWND other = FindWindowW(kWindowClass, nullptr)) {
+			DWORD pid = 0;
+			GetWindowThreadProcessId(other, &pid);
+			AllowSetForegroundWindow(pid);
+			COPYDATASTRUCT cd = { kHandedFilesTag, (DWORD)text.size(), text.empty() ? nullptr : (void*)text.data() };
+			DWORD_PTR answer = 0;
+			// No answer (it's stuck): open them here after all.
+			return SendMessageTimeoutW(other, WM_COPYDATA, 0, (LPARAM)&cd, SMTO_ABORTIFHUNG, 10000, &answer) && answer;
+		}
+		Sleep(100);
+	}
+	return false;
+}
+
+}  // namespace
+
+bool takeHandedFiles(HWND window, const COPYDATASTRUCT* data) {
+	if (data == nullptr || data->dwData != kHandedFilesTag) return false;
+	const std::string text = data->lpData && data->cbData ? std::string((const char*)data->lpData, data->cbData) : std::string();
+	size_t at = 0;
+	while (at < text.size()) {
+		size_t end = text.find('\n', at);
+		if (end == std::string::npos) end = text.size();
+		if (end > at) gHanded.push_back(text.substr(at, end - at));
+		at = end + 1;
+	}
+	PostMessageW(window, kOpenHandedFiles, 0, 0);
+	return true;
+}
+
+void openHandedFiles(CircuitWindow* w) {
+	const std::vector<std::string> files = gHanded;
+	gHanded.clear();
+	// The first goes into this window when it's an untouched new one (not
+	// while a dialog of its is up), the rest into windows of their own.
+	CircuitWindow* from = IsWindowEnabled(w->window()) ? w : nullptr;
+	const bool intoThis = !files.empty() && from && from->isPristine();
+	const size_t windowsBefore = circuitWindows().size();
+	for (const std::string& f : files) {
+		openCircuit(f, from);
+		from = nullptr;
+	}
+	// Forward: a new window, else this one when it took the first file or
+	// there was none (a circuit already open in another window came forward
+	// in openCircuit, and stays there).
+	CircuitWindow* show = circuitWindows().size() > windowsBefore ? circuitWindows().back()
+	                    : (files.empty() || (intoThis && !w->isPristine())) ? w : nullptr;
+	if (show == nullptr) return;
+	if (IsIconic(show->window())) ShowWindow(show->window(), SW_RESTORE);
+	SetForegroundWindow(GetLastActivePopup(show->window()));
+}
+
 // ---- Starting up -----------------------------------------------------------------
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
@@ -255,6 +506,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			return status == 403 ? 0 : 1;
 		}
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
+		if (a == "--click-test") { gClickTest = true; continue; }
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
@@ -283,15 +535,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		files.push_back(a);
 	}
 	LocalFree(argv);
+	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || gClickTest || gDialog != 0;
+	if (!testRun && handToRunning(files)) return 0;
 
 	prefs().load();
+	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty()) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && !gClickTest) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -314,7 +570,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty()) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -350,7 +606,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
-	else {
+	else if (gClickTest) {
+		SetTimer(nullptr, 0, 1500, clickTestStart);
+		SetTimer(nullptr, 0, 60000, clickTestWatchdog);
+	} else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.
 		splash::hideSoon([] {
@@ -372,7 +631,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		TranslateMessage(&msg);
 		DispatchMessageW(&msg);
 	}
+	const int clickResult = gClickTest ? finishClickTest() : 0;
+	updater::shutdown();
 	prefs().save();
 	OleUninitialize();
+	if (gClickTest) return clickResult;
 	return gScreenshot.empty() ? (int)msg.wParam : gExitCode;
 }

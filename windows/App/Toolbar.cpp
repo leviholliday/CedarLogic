@@ -333,6 +333,21 @@ RECT Toolbar::commandRect(int command) const {
 	return r;
 }
 
+bool Toolbar::buttonPoint(int command, POINT& p) {
+	if (relayout || (float)width() != lastW) layout((float)width(), (float)height());
+	const double s = scale();
+	for (const Item& it : items) {
+		const bool match = command == kMinimize ? it.kind == CaptionMin
+		                 : command == kClose    ? it.kind == CaptionClose
+		                                        : it.kind == Button && it.command == command;
+		if (!match) continue;
+		if (!it.shown) return false;
+		p = { (LONG)((it.rect.left + it.rect.right) / 2 * s), (LONG)((it.rect.top + it.rect.bottom) / 2 * s) };
+		return true;
+	}
+	return false;
+}
+
 void Toolbar::setMaximizeHot(bool isHot, bool isPressed) {
 	if (isHot == maxHot && isPressed == maxPressed) return;
 	maxHot = isHot;
@@ -374,8 +389,10 @@ void Toolbar::mouseDown(int button, float x, float y, bool doubleClick) {
 		POINT p = { (LONG)((k == More ? items[i].rect.right : items[i].rect.left) * s), (LONG)(items[i].rect.bottom * s + 2) };
 		ClientToScreen(hwnd, &p);
 		pressed = -1;
+		const HWND self = hwnd;
 		if (k == Title) win->titleMenu(p);
 		else win->moreMenu(p, true);
+		if (!IsWindow(self)) return;   // what was chosen closed the window, this bar with it
 		hot = -1;
 		redraw();
 	}

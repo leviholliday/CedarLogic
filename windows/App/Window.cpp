@@ -75,6 +75,7 @@ void registerWindowClasses() {
 CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path(p) {
 	isRunning = cl_document_is_running(doc);
 	circuitWindows().push_back(this);
+	openMaximized = prefs().windowMaximized;   // before build() sizes the hidden window
 	build();
 	syncTabs();
 	appearStart = nowSeconds();
@@ -119,7 +120,7 @@ std::string CircuitWindow::openingDetail() const {
 
 void CircuitWindow::present() {
 	if (IsWindowVisible(hwnd)) return;
-	ShowWindow(hwnd, prefs().windowMaximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+	ShowWindow(hwnd, openMaximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 	UpdateWindow(hwnd);
 	appearStart = nowSeconds();
 	if (Canvas* c = currentCanvas()) c->focus();
@@ -181,6 +182,18 @@ void CircuitWindow::build() {
 		GetWindowRect(hwnd, &r);
 		SetWindowPos(hwnd, nullptr, 0, 0, scaled(prefs().windowWidth, dpi), scaled(prefs().windowHeight, dpi),
 		             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+	// On its screen, and no bigger (a size kept from a bigger one): the
+	// window's own buttons are at the top right.
+	RECT r;
+	MONITORINFO mi = { sizeof mi };
+	if (GetWindowRect(hwnd, &r) && GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+		const RECT& a = mi.rcWork;
+		const int w = std::min<int>(r.right - r.left, a.right - a.left), h = std::min<int>(r.bottom - r.top, a.bottom - a.top);
+		x = std::max<int>(a.left, std::min<int>(r.left, a.right - w));
+		y = std::max<int>(a.top, std::min<int>(r.top, a.bottom - h));
+		if (x != r.left || y != r.top || w != r.right - r.left || h != r.bottom - r.top)
+			SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 	}
 	setDarkTitleBar(hwnd, prefs().dark);
 	buildMenus();
@@ -902,12 +915,16 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	case WM_SIZE:
 		if (wp == SIZE_MINIMIZED) return 0;
-		prefs().windowMaximized = wp == SIZE_MAXIMIZED;
-		if (wp == SIZE_RESTORED) {
-			RECT r;
-			GetWindowRect(hwnd, &r);
-			prefs().windowWidth = MulDiv(r.right - r.left, 96, (int)dpi);
-			prefs().windowHeight = MulDiv(r.bottom - r.top, 96, (int)dpi);
+		// Kept for the next window, once this one is up (the sizes a new
+		// window goes through while it's built aren't the user's).
+		if (IsWindowVisible(hwnd)) {
+			prefs().windowMaximized = wp == SIZE_MAXIMIZED;
+			if (wp == SIZE_RESTORED) {
+				RECT r;
+				GetWindowRect(hwnd, &r);
+				prefs().windowWidth = MulDiv(r.right - r.left, 96, (int)dpi);
+				prefs().windowHeight = MulDiv(r.bottom - r.top, 96, (int)dpi);
+			}
 		}
 		layout();
 		return 0;
@@ -922,22 +939,37 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
 		setFontTree(hwnd, uiFont(dpi));
 		if (palette) palette->dpiChanged();
+		if (findBar) findBar->dpiChanged();
 		layout();
 		for (Canvas* c : canvases) c->redraw();
 		return 0;
 	}
 	case WM_ACTIVATE:
 		if (toolbar) toolbar->redraw();
-		if (LOWORD(wp) != WA_INACTIVE) library::noteLastCircuit(path);
-		if (LOWORD(wp) != WA_INACTIVE) {
-			// Back to the canvas, unless a text box had the keyboard.
-			HWND f = GetFocus();
-			wchar_t cls[32] = L"";
-			if (f) GetClassNameW(f, cls, 32);
-			if (f == nullptr || f == hwnd || (lstrcmpiW(cls, L"Edit") != 0)) {
-				if (Canvas* c = currentCanvas()) c->focus();
-			}
-			return 0;
+		if (LOWORD(wp) == WA_INACTIVE) {
+			// What had the keyboard, to give it back (by the time the window
+			// is active again, Windows has forgotten it).
+			const HWND f = GetFocus();
+			savedFocus = f && IsChild(hwnd, f) ? f : nullptr;
+			break;
+		}
+		library::noteLastCircuit(path);
+		// Back to what had the keyboard (Find's box, the side panel's
+		// search), else the canvas.
+		if (savedFocus && IsWindow(savedFocus) && IsChild(hwnd, savedFocus) && IsWindowVisible(savedFocus) &&
+		    IsWindowEnabled(savedFocus))
+			SetFocus(savedFocus);
+		else if (Canvas* c = currentCanvas())
+			c->focus();
+		return 0;
+	case WM_SETTINGCHANGE:
+		// Windows switched apps between light and dark (by hand, or on a
+		// schedule): follow it when that's the setting. Every window hears
+		// it; the first one changes them all.
+		if (lp && lstrcmpiW(reinterpret_cast<LPCWSTR>(lp), L"ImmersiveColorSet") == 0 && prefs().themeMode == 0 &&
+		    systemPrefersDark() != prefs().dark) {
+			prefs().dark = !prefs().dark;
+			applyTheme();
 		}
 		break;
 	case WM_INITMENUPOPUP:
@@ -946,9 +978,9 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_COMMAND: {
 		const int id = LOWORD(wp);
 		if (id >= CMD_RECENT && id <= CMD_RECENT_LAST) {
+			// The circuit the menu showed (a save since moves the list).
 			const size_t i = (size_t)(id - CMD_RECENT);
-			const std::vector<library::Item> all = library::items();
-			if (i < all.size()) openCircuit(all[i].circuit(), this);
+			if (i < recentPaths.size()) openCircuit(recentPaths[i], this);
 			return 0;
 		}
 		if (id >= CMD_NEW && id < CMD_RECENT) {
@@ -1001,6 +1033,12 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_CAPTURECHANGED:
 		splitterDrag = false;
 		break;
+	case WM_COPYDATA:
+		if (takeHandedFiles(hwnd, reinterpret_cast<const COPYDATASTRUCT*>(lp))) return TRUE;
+		break;
+	case kOpenHandedFiles:
+		openHandedFiles(this);
+		return 0;
 	case WM_DROPFILES: {
 		HDROP drop = (HDROP)wp;
 		const UINT n = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
@@ -1015,7 +1053,25 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	}
 	case WM_CLOSE:
+		// Not while one of its dialogs is up (the taskbar can still ask):
+		// the dialog comes forward instead.
+		if (!IsWindowEnabled(hwnd)) {
+			const HWND popup = GetLastActivePopup(hwnd);
+			if (popup && popup != hwnd) SetForegroundWindow(popup);
+			MessageBeep(MB_ICONWARNING);
+			return 0;
+		}
 		if (confirmClose()) destroy();
+		return 0;
+	case WM_ENDSESSION:
+		// Signing out, or a restart (Windows Update): Windows ends the app
+		// once this returns, so save now -- busy or not, and without a
+		// question there's no time for. A save that fails leaves a
+		// recovery copy, offered back at the next start.
+		if (wp) {
+			if (isDirty() && !saveQuietly(false)) writeRecovery();
+			prefs().save();
+		}
 		return 0;
 	case WM_DESTROY:
 		KillTimer(hwnd, kClockTimer);
@@ -1259,7 +1315,9 @@ void CircuitWindow::moreMenu(POINT screen, bool rightAligned) {
 	SetForegroundWindow(hwnd);
 	const int cmd = TrackPopupMenu(menus, TPM_RETURNCMD | (rightAligned ? TPM_RIGHTALIGN : TPM_LEFTALIGN) | TPM_TOPALIGN,
 	                               screen.x, screen.y, 0, hwnd, nullptr);
-	if (cmd) SendMessageW(hwnd, WM_COMMAND, cmd, 0);
+	// Posted, so it runs once whatever opened the menu (the toolbar's •••)
+	// is done with it: Exit and Close take the window, the toolbar too, away.
+	if (cmd) PostMessageW(hwnd, WM_COMMAND, cmd, 0);
 }
 
 // The circuit's name in the toolbar: what a Mac window's title offers.
@@ -1493,7 +1551,10 @@ void CircuitWindow::print() {
 	const std::wstring name = W(displayName());
 	DOCINFOW di = { sizeof di, name.c_str(), nullptr, nullptr, 0 };
 	bool ok = false;
-	if (StartDocW(dc, &di) > 0 && StartPage(dc) > 0) {
+	const bool docStarted = StartDocW(dc, &di) > 0;
+	const bool cancelled = !docStarted && GetLastError() == ERROR_CANCELLED;   // Print to PDF's Cancel
+	const bool pageStarted = docStarted && StartPage(dc) > 0;
+	if (pageStarted) {
 		const int pw = GetDeviceCaps(dc, HORZRES), ph = GetDeviceCaps(dc, VERTRES);
 		const double dpiX = GetDeviceCaps(dc, LOGPIXELSX);
 		// Points of 1/72 inch, as the Mac prints: lines a point wide.
@@ -1510,13 +1571,17 @@ void CircuitWindow::print() {
 			ok = SUCCEEDED(rt->EndDraw());
 		}
 		if (rt) rt->Release();
-		EndPage(dc);
-		EndDoc(dc);
+	}
+	// A page that didn't draw isn't sent (it would print blank): the job is
+	// called off, as is one whose page couldn't start or finish.
+	if (!(pageStarted && ok && EndPage(dc) > 0 && EndDoc(dc) > 0)) {
+		if (docStarted) AbortDoc(dc);
+		ok = false;
 	}
 	DeleteDC(dc);
 	if (pd.hDevMode) GlobalFree(pd.hDevMode);
 	if (pd.hDevNames) GlobalFree(pd.hDevNames);
-	if (!ok) showMessage(hwnd, Tone::Error, "The page couldn't be printed", "");
+	if (!ok && !cancelled) showMessage(hwnd, Tone::Error, "The page couldn't be printed", "");
 }
 
 bool CircuitWindow::screenshot(const std::string& file, HWND other) {
@@ -1906,6 +1971,7 @@ void CircuitWindow::showShortcuts() { showShortcutsWindow(hwnd); }
 void CircuitWindow::rebuildRecentMenu() {
 	while (GetMenuItemCount(recentMenu) > 0) DeleteMenu(recentMenu, 0, MF_BYPOSITION);
 	const std::vector<library::Item> all = library::items();
+	recentPaths.clear();
 	int shown = 0;
 	for (const library::Item& it : all) {
 		// Ampersands in a name aren't mnemonics.
@@ -1913,6 +1979,7 @@ void CircuitWindow::rebuildRecentMenu() {
 		for (char c : it.name) { if (c == '&') label += '&'; label += c; }
 		if (shown < 9) label = strf("&%d  ", shown + 1) + label;
 		AppendMenuW(recentMenu, MF_STRING, CMD_RECENT + shown, W(label).c_str());
+		recentPaths.push_back(it.circuit());
 		if (++shown >= 10) break;
 	}
 	if (shown == 0) AppendMenuW(recentMenu, MF_STRING | MF_GRAYED, 0, L"No circuits yet");

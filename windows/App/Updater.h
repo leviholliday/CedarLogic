@@ -11,6 +11,8 @@ namespace updater {
 void start();
 // Help > Check for Updates: says so when there's nothing new.
 void checkNow(HWND parent);
+// Quitting: let go of a check that's still running.
+void shutdown();
 
 }  // namespace updater
 

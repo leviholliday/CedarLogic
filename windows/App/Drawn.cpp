@@ -136,7 +136,14 @@ LRESULT Drawn::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_MBUTTONDOWN: mouseDown(2, px(), py(), false); return 0;
 	case WM_RBUTTONDOWN: mouseDown(3, px(), py(), false); return 0;
 	case WM_LBUTTONUP:
-		if (GetCapture() == hwnd) ReleaseCapture();
+		// Let go of the pointer first (the button may open a dialog), but
+		// not as a lost capture: that would forget the button that was
+		// pressed before mouseUp could act on it.
+		if (GetCapture() == hwnd) {
+			releasing = true;
+			ReleaseCapture();
+			releasing = false;
+		}
 		mouseUp(1, px(), py());
 		return 0;
 	case WM_MBUTTONUP: mouseUp(2, px(), py()); return 0;
@@ -148,7 +155,7 @@ LRESULT Drawn::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	}
 	case WM_CAPTURECHANGED:
-		if ((HWND)lp != hwnd) captureLost();
+		if ((HWND)lp != hwnd && !releasing) captureLost();
 		return 0;
 	}
 	return DefWindowProcW(hwnd, msg, wp, lp);

@@ -22,6 +22,9 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#ifdef _WIN32
+#include <filesystem>
+#endif
 #include <string>
 #include <vector>
 
@@ -30,7 +33,19 @@ namespace {
 bool settleOnOpen = true;
 
 bool readFile(const char* path, std::string& out) {
+#ifdef _WIN32
+	// The Windows app's paths are UTF-8: opened by their wide name, so
+	// C:\Users\José works whatever the system's code page (only Windows 10
+	// 1903 and later honour the manifest's UTF-8 one).
+	std::ifstream in;
+	try {
+		in.open(std::filesystem::u8path(path), std::ios::binary);
+	} catch (...) {
+		in.open(path, std::ios::binary);
+	}
+#else
 	std::ifstream in(path, std::ios::binary);
+#endif
 	if (!in) return false;
 	std::ostringstream ss;
 	ss << in.rdbuf();

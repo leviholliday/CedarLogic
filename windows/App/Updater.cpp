@@ -200,11 +200,14 @@ bool withProgress(HWND parent, const char* text, F&& work) {
 	return ok;
 }
 
-bool runHidden(const std::wstring& commandLine) {
+// Run a program (by its full path: never one found in the current folder)
+// without a window, and wait for it. True when it finished with 0.
+bool runHidden(const std::wstring& program, const std::wstring& arguments) {
 	STARTUPINFOW si = { sizeof si };
 	PROCESS_INFORMATION pi = {};
-	std::wstring cmd = commandLine;
-	if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return false;
+	std::wstring cmd = L"\"" + program + L"\" " + arguments;
+	if (!CreateProcessW(program.c_str(), &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+		return false;
 	WaitForSingleObject(pi.hProcess, 120000);
 	DWORD code = 1;
 	GetExitCodeProcess(pi.hProcess, &code);
@@ -253,13 +256,23 @@ void install(HWND parent, const Asset& asset) {
 	const std::wstring zip = work + L".zip";
 	removeTree(work);
 	CreateDirectoryW(work.c_str(), nullptr);
+	// Windows' own tar (Windows 10 1803 and later), from System32.
+	wchar_t sys[MAX_PATH] = L"";
+	const UINT sysLength = GetSystemDirectoryW(sys, MAX_PATH);
+	const std::wstring tar = sysLength > 0 && sysLength < MAX_PATH ? std::wstring(sys) + L"\\tar.exe" : std::wstring();
+	if (tar.empty() || GetFileAttributesW(tar.c_str()) == INVALID_FILE_ATTRIBUTES) {
+		removeTree(work);
+		showMessage(parent, Tone::Warning, "This copy of Windows can't unpack the update",
+		            "Updating needs Windows 10 version 1803 or later. Download the new build from the release page instead.");
+		return;
+	}
 	const bool got = withProgress(parent, "Downloading the update…", [&] {
 		if (!httpGet(asset.url, nullptr, U(zip), 512u << 20)) return false;
 		WIN32_FILE_ATTRIBUTE_DATA a;
 		if (!GetFileAttributesExW(zip.c_str(), GetFileExInfoStandard, &a)) return false;
 		const long long size = ((long long)a.nFileSizeHigh << 32) | a.nFileSizeLow;
 		if (asset.size > 0 && size != asset.size) return false;
-		return runHidden(L"tar.exe -xf \"" + zip + L"\" -C \"" + work + L"\"");
+		return runHidden(tar, L"-xf \"" + zip + L"\" -C \"" + work + L"\"");
 	});
 	DeleteFileW(zip.c_str());
 	const std::wstring fresh = work + L"\\CedarLogic";
@@ -283,7 +296,25 @@ void install(HWND parent, const Asset& asset) {
 		showMessage(parent, Tone::Warning, "The update couldn't be put in place", "Check that you can change the files in " + dir + ".");
 		return;
 	}
-	copyTree(fresh + L"\\res", W(dir) + L"\\res");
+	// The res folder beside it (the gates, help and samples): copied whole
+	// to res.new, then swapped in, so a file that can't be replaced (in use,
+	// read-only, a full disk) leaves the old exe and res, not a mix.
+	const std::wstring res = W(dir) + L"\\res", resNew = res + L".new", resOld = res + L".old";
+	removeTree(resNew);
+	removeTree(resOld);
+	const bool hadRes = GetFileAttributesW(res.c_str()) != INVALID_FILE_ATTRIBUTES;
+	const bool staged = copyTree(fresh + L"\\res", resNew);
+	const bool movedOld = staged && (!hadRes || MoveFileExW(res.c_str(), resOld.c_str(), 0));
+	if (!(movedOld && MoveFileExW(resNew.c_str(), res.c_str(), 0))) {
+		if (movedOld && hadRes) MoveFileExW(resOld.c_str(), res.c_str(), 0);
+		removeTree(resNew);
+		MoveFileExW(old.c_str(), wexe.c_str(), MOVEFILE_REPLACE_EXISTING);   // the old exe back
+		removeTree(work);
+		showMessage(parent, Tone::Warning, "The update couldn't be put in place",
+		            "Some of CedarLogic's files in " + dir + "\\res couldn't be replaced. Close anything using them and try again.");
+		return;
+	}
+	removeTree(resOld);
 	removeTree(work);
 	if (askYesNo(parent, "Update installed", "The update is installed. Restart CedarLogic now to use it?")) {
 		if (quitApp()) {
@@ -335,7 +366,15 @@ void CALLBACK pollTimer(HWND, UINT, UINT_PTR id, DWORD) {
 }
 
 void begin(HWND parent, bool interactive) {
-	if (g_check) return;   // one at a time
+	// One at a time: Check for Updates while one runs makes that one say
+	// how it went (finish() reads these on this thread; the worker doesn't).
+	if (g_check) {
+		if (interactive) {
+			g_check->interactive = true;
+			g_check->parent = parent;
+		}
+		return;
+	}
 	g_check.reset(new Check());
 	g_check->interactive = interactive;
 	g_check->parent = parent;
@@ -354,8 +393,9 @@ void CALLBACK laterCheck(HWND, UINT, UINT_PTR, DWORD) { begin(nullptr, false); }
 }  // namespace
 
 void start() {
-	// The exe a finished update moved aside.
+	// The exe a finished update moved aside, and the res folder it replaced.
 	DeleteFileW((W(exePath()) + L".old").c_str());
+	removeTree(W(dirName(exePath())) + L"\\res.old");
 	// Builds made outside CI (no commit known) don't update themselves.
 	if (std::string(CL_GIT_COMMIT) == "unknown") return;
 	SetTimer(nullptr, 0, 8000, firstCheck);
@@ -363,5 +403,15 @@ void start() {
 }
 
 void checkNow(HWND parent) { begin(parent, true); }
+
+void shutdown() {
+	if (!g_check) return;
+	// A check still on its way can't be waited for (a slow network takes a
+	// minute), and a std::thread left joinable when the statics go aborts
+	// the process. Let it run until the process ends, and keep what it
+	// writes to alive till then.
+	g_check->worker.detach();
+	(void)g_check.release();
+}
 
 }  // namespace updater

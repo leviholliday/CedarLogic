@@ -181,6 +181,18 @@ struct Reader {
 	}
 };
 
+// Text of several lines, on one line of the file: new lines kept as \x1F.
+std::string oneLine(const std::string& text) {
+	std::string one;
+	for (char c : text) if (c != '\r') one += c == '\n' ? '\x1F' : c;
+	return one;
+}
+
+std::string manyLines(std::string text) {
+	for (char& c : text) if (c == '\x1F') c = '\n';
+	return text;
+}
+
 }  // namespace
 
 void Prefs::load() {
@@ -217,8 +229,7 @@ void Prefs::load() {
 	lastFolder = r.s("lastFolder", lastFolder);
 	lastCircuit = r.s("lastCircuit", lastCircuit);
 	studentName = r.s("studentName", studentName);
-	lastFormula = r.s("lastFormula", lastFormula);
-	for (char& c : lastFormula) if (c == '\x1F') c = '\n';
+	lastFormula = manyLines(r.s("lastFormula", lastFormula));
 	buildShape = r.i("buildShape", buildShape, 0, 2);
 	buildStyle = r.i("buildStyle", buildStyle, 0, 2);
 	buildTwoInput = r.b("buildTwoInput", buildTwoInput);
@@ -231,10 +242,9 @@ void Prefs::load() {
 	exportInfo = r.b("exportInfo", exportInfo);
 	exportWorks = r.b("exportWorks", exportWorks);
 	exportScale = r.i("exportScale", exportScale, 2, 6);
-	exportProblem = r.s("exportProblem", exportProblem);
+	exportProblem = manyLines(r.s("exportProblem", exportProblem));
 	feedbackTitle = r.s("feedbackTitle", feedbackTitle);
-	feedbackDetails = r.s("feedbackDetails", feedbackDetails);
-	for (char& c : feedbackDetails) if (c == '\x1F') c = '\n';
+	feedbackDetails = manyLines(r.s("feedbackDetails", feedbackDetails));
 	feedbackTags = r.s("feedbackTags", feedbackTags);
 	feedbackEmail = r.s("feedbackEmail", feedbackEmail);
 	feedbackPriority = r.i("feedbackPriority", feedbackPriority, 0, 3);
@@ -288,11 +298,7 @@ void Prefs::save() const {
 	o << "lastFolder=" << lastFolder << "\n";
 	o << "lastCircuit=" << lastCircuit << "\n";
 	o << "studentName=" << studentName << "\n";
-	{
-		std::string one;   // one line in the file: new lines kept as \x1F
-		for (char c : lastFormula) if (c != '\r') one += c == '\n' ? '\x1F' : c;
-		o << "lastFormula=" << one << "\n";
-	}
+	o << "lastFormula=" << oneLine(lastFormula) << "\n";
 	o << "buildShape=" << buildShape << "\n";
 	o << "buildStyle=" << buildStyle << "\n";
 	o << "buildTwoInput=" << b(buildTwoInput) << "\n";
@@ -305,13 +311,9 @@ void Prefs::save() const {
 	o << "exportInfo=" << b(exportInfo) << "\n";
 	o << "exportWorks=" << b(exportWorks) << "\n";
 	o << "exportScale=" << exportScale << "\n";
-	o << "exportProblem=" << exportProblem << "\n";
+	o << "exportProblem=" << oneLine(exportProblem) << "\n";
 	o << "feedbackTitle=" << feedbackTitle << "\n";
-	{
-		std::string one;
-		for (char c : feedbackDetails) if (c != '\r') one += c == '\n' ? '\x1F' : c;
-		o << "feedbackDetails=" << one << "\n";
-	}
+	o << "feedbackDetails=" << oneLine(feedbackDetails) << "\n";
 	o << "feedbackTags=" << feedbackTags << "\n";
 	o << "feedbackEmail=" << feedbackEmail << "\n";
 	o << "feedbackPriority=" << feedbackPriority << "\n";
@@ -439,6 +441,10 @@ IDWriteFactory* dwFactory() {
 }
 
 ID2D1HwndRenderTarget* WindowSurface::begin(HWND hwnd) {
+	// The last frame never ended (drawing it threw, and guarded() carried
+	// on): that target is stuck in it, so a new one.
+	if (drawing) release();
+	window = hwnd;
 	RECT rc;
 	GetClientRect(hwnd, &rc);
 	const UINT32 w = (UINT32)std::max<LONG>(1, rc.right - rc.left), h = (UINT32)std::max<LONG>(1, rc.bottom - rc.top);
@@ -451,26 +457,37 @@ ID2D1HwndRenderTarget* WindowSurface::begin(HWND hwnd) {
 			D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
 		if (FAILED(f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h)), &rt)))
 			return rt = nullptr;
+		static unsigned long long count = 0;
+		made = ++count;
 	} else {
 		const D2D1_SIZE_U now = rt->GetPixelSize();
 		if (now.width != w || now.height != h) rt->Resize(D2D1::SizeU(w, h));
 	}
 	dpiScale = dpiOf(hwnd) / 96.0;
 	rt->BeginDraw();
+	drawing = true;
 	rt->SetTransform(D2D1::Matrix3x2F::Scale((float)dpiScale, (float)dpiScale));
 	return rt;
 }
 
 void WindowSurface::end() {
 	if (rt == nullptr) return;
-	// The display took the target away (a driver update, a remote session):
-	// make a new one next time.
-	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) release();
+	drawing = false;
+	// The frame didn't make it: the display took the target away (a driver
+	// update, a remote session) or something in it failed. A new target, and
+	// the frame again (a few times in a row at most).
+	if (FAILED(rt->EndDraw())) {
+		release();
+		if (failures++ < 3) InvalidateRect(window, nullptr, FALSE);
+	} else {
+		failures = 0;
+	}
 }
 
 void WindowSurface::release() {
 	if (rt) rt->Release();
 	rt = nullptr;
+	drawing = false;
 }
 
 namespace {

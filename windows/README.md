@@ -67,6 +67,10 @@ Direct2D here. And:
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
   or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope).
+- `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
+  Tab, Simulation View, Lock, New) and the window's drawn Minimize and Close
+  the way Windows sends a click, checks each did what it should, prints PASS,
+  FAIL or SKIP for each and exits 1 if any failed (CI runs it).
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the
@@ -74,5 +78,5 @@ Direct2D here. And:
 - `CedarLogic.exe --version`
 
 CI (`.github/workflows/windows-native.yml`) builds x64 and ARM64 on every push
-to `windows/native`, runs the checks and the screenshot on x64, and publishes
-the zips as the `windows-native-testing` pre-release.
+to `windows/native`, runs the checks, the screenshots and the click test on
+x64, and publishes the zips as the `windows-native-testing` pre-release.

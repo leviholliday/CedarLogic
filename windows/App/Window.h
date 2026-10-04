@@ -225,6 +225,7 @@ private:
 	void beginOpening();
 public:
 	ScopeWindow* scopeWindow() const { return scope; }
+	Toolbar* toolbarWidget() const { return toolbar; }   // for --click-test
 	std::string pageName(int page) const;
 private:
 	std::vector<Canvas*> canvases;    // in tab order
@@ -232,7 +233,9 @@ private:
 	bool splitterDrag = false;
 	int splitterGrab = 0;
 	bool maxPressed = false;          // the drawn maximize button, held down
+	bool openMaximized = false;       // shown maximized (as the last window was)
 	bool trackingNonClient = false;
+	HWND savedFocus = nullptr;        // what had the keyboard when the window was last active
 	UINT dpi = 96;
 	std::string noteText;             // the toast
 
@@ -251,6 +254,7 @@ private:
 	int lastPageCount = 1;
 	std::map<uint64_t, bool> seenPages;
 	HMENU menus = nullptr, recentMenu = nullptr;
+	std::vector<std::string> recentPaths;   // Open Recent's circuits, as the menu shows them
 
 	void build();
 	void buildMenus();
