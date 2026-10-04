@@ -28,6 +28,7 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 const int kTabsId = 4000;       // Form::pages' row
+const int kStepBase = 5000;     // a stepper's − and +: kStepBase + 2 * field (+ 1 for +)
 const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
 
 // The dialogs' look, as the Mac's sheets: paper, filled rounded fields,
@@ -141,6 +142,27 @@ void drawButtonItem(const DRAWITEMSTRUCT* di, bool isToggle) {
 			fillRound(rt, k, 4, withAlpha(ink, 0.16f));
 			drawText(rt, "\u21B5", D2D1::RectF(k.left, k.top + 0.5f, k.right, k.bottom), 10.5f, ink, TextAlign::Center, true);
 		}
+	});
+}
+
+// A stepper's − or +: a soft square with the sign drawn in.
+void drawStepItem(const DRAWITEMSTRUCT* di, bool plus) {
+	const DialogColors& c = darkColors();
+	const bool hot = GetPropW(di->hwndItem, L"clHot") != nullptr, down = (di->itemState & ODS_SELECTED) != 0;
+	const bool focus = (di->itemState & ODS_FOCUS) && !(di->itemState & ODS_NOFOCUSRECT);
+	const bool disabled = (di->itemState & ODS_DISABLED) != 0;
+	const Chrome ch = chrome();
+	drawOnDC(di->hDC, di->rcItem, dpiOf(di->hwndItem), [&](ID2D1RenderTarget* rt, float w, float h) {
+		rt->Clear(d2d(c.back));
+		const D2D1_RECT_F r = D2D1::RectF(1, 1, w - 1, h - 1);
+		fillRound(rt, r, 7, d2d(c.text, disabled ? 0.04f : down ? 0.16f : hot ? 0.11f : 0.07f));
+		if (focus) strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 6.5f, withAlpha(ch.accent(), 0.7f), 1.5f);
+		ID2D1SolidColorBrush* b = nullptr;
+		if (FAILED(rt->CreateSolidColorBrush(d2d(c.text, disabled ? 0.35f : 0.85f), &b))) return;
+		const float cx = w / 2, cy = h / 2, arm = 4.5f;
+		rt->DrawLine(D2D1::Point2F(cx - arm, cy), D2D1::Point2F(cx + arm, cy), b, 1.6f);
+		if (plus) rt->DrawLine(D2D1::Point2F(cx, cy - arm), D2D1::Point2F(cx, cy + arm), b, 1.6f);
+		b->Release();
 	});
 }
 
@@ -327,6 +349,9 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			return TRUE;
 		}
 		if (id == IDCANCEL) {
+			bool close = true;
+			guarded("a dialog", [&] { close = !f->onCancel || f->onCancel(*f); });
+			if (!close) return TRUE;
 			// Escape, or the close box: with no Cancel, that's OK.
 			f->capture();
 			EndDialog(d, f->cancelText.empty() && !f->okText.empty() && !f->validate ? IDOK : IDCANCEL);
@@ -336,6 +361,10 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			bool close = true;
 			guarded("a dialog", [&] { close = !f->onButton || f->onButton(*f, id - kButtonBase); });
 			if (close) { f->capture(); EndDialog(d, id); }
+			return TRUE;
+		}
+		if (id >= kStepBase && id < kStepBase + 2 * (int)f->fields.size() && (code == BN_CLICKED || code == BN_DOUBLECLICKED)) {
+			if (f->onStep) guarded("a dialog", [&] { f->onStep(*f, (id - kStepBase) / 2, (id - kStepBase) % 2 ? 1 : -1); });
 			return TRUE;
 		}
 		if (id >= kBrowseBase && id < kBrowseBase + (int)f->fields.size()) {
@@ -457,6 +486,10 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		if (di->CtlType == ODT_BUTTON) {
 			// Tabbed to (a scrolling form shows it).
 			if ((di->itemAction & ODA_FOCUS) && (di->itemState & ODS_FOCUS) && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
+			if ((int)di->CtlID >= kStepBase && (int)di->CtlID < kStepBase + 2 * (int)f->fields.size()) {
+				guarded("a dialog", [&] { drawStepItem(di, (di->CtlID - kStepBase) % 2 == 1); });
+				return TRUE;
+			}
 			const int fi = (int)di->CtlID - kFieldBase;
 			const bool toggle = fi >= 0 && fi < (int)f->fields.size() && f->fields[fi].kind == FormField::Check;
 			guarded("a dialog", [&] { drawButtonItem(di, toggle); });
@@ -610,7 +643,7 @@ void Form::build() {
 			if (!x.label.empty())
 				x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, margin,
 				                          y + (rowH - lineH) / 2, labelW, lineH, dialog, nullptr, appInstance(), nullptr);
-			const int browseW = x.browse ? sc(84) : 0;
+			const int browseW = x.browse ? sc(84) : x.stepper ? sc(62) : 0;
 			// Several lines: a box to type them in (Enter starts a new one).
 			const bool multi = x.lines > 1;
 			const int boxH = multi ? x.lines * sc(20) + sc(8) : rowH;
@@ -633,6 +666,16 @@ void Form::build() {
 			                             (multi ? ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL : 0),
 			                         ctrlX + padX, y + padY, fieldW - 2 * padX + (multi ? sc(5) : 0), boxH - 2 * padY, dialog, id, appInstance(), nullptr);
 			if (multi) y += boxH - rowH;
+			if (x.stepper) {
+				// − and +, each a square as tall as the field.
+				for (int k = 0; k < 2; k++) {
+					HWND b = CreateWindowExW(0, L"BUTTON", k ? L"+" : L"\u2212", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+					                         ctrlX + ctrlW - browseW + k * sc(32), y, sc(30), rowH, dialog,
+					                         (HMENU)(INT_PTR)(kStepBase + 2 * (int)i + k), appInstance(), nullptr);
+					SetWindowSubclass(b, hoverProc, 4, 0);
+					x.others.push_back(b);
+				}
+			}
 			if (x.browse)
 			{
 				HWND choose = CreateWindowExW(0, L"BUTTON", L"Choose…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, ctrlX + ctrlW - browseW,
@@ -1118,6 +1161,8 @@ void showGateSettings(CircuitWindow* w, long gate) {
 			x.value = st.value;
 			if ((st.type == "INT" || st.type == "FLOAT") && st.max < 1e30)
 				x.tip = strf("%s to %s", numberText(st.min).c_str(), numberText(st.max).c_str());
+			// A whole number in a range: − and + beside it (Up and Down too).
+			x.stepper = st.type == "INT" && st.max < 1e30;
 			if (st.type == "FILE_IN" || st.type == "FILE_OUT") {
 				x.browse = true;
 				x.browseSave = st.type == "FILE_OUT";
@@ -1184,6 +1229,26 @@ void showGateSettings(CircuitWindow* w, long gate) {
 	f.onLeave = [&](Form& form, int field) {
 		for (Setting& s : settings)
 			if (s.field == field && s.type != "BOOL") apply(s, trimmed(form.text(field)));
+	};
+	// A step at a time, kept in the range; each one is applied (and undone)
+	// on its own.
+	auto step = [&](Form& form, int field, int by) {
+		for (Setting& s : settings) {
+			if (s.field != field || s.type != "INT") continue;
+			const double now = std::floor(strtod(trimmed(form.text(field)).c_str(), nullptr));
+			const std::string v = numberText(std::min(s.max, std::max(s.min, (std::isfinite(now) ? now : s.min) + by)));
+			form.setText(field, v);
+			form.setProblem("");
+			apply(s, v);
+			return true;
+		}
+		return false;
+	};
+	f.onStep = [&](Form& form, int field, int by) { step(form, field, by); };
+	f.onKey = [&](Form& form, int field, UINT vk) {
+		if (vk != VK_UP && vk != VK_DOWN) return false;
+		if (field < 0 || field >= (int)form.fields.size() || !form.fields[field].stepper) return false;
+		return step(form, field, vk == VK_UP ? 1 : -1);
 	};
 	f.validate = [&](Form& form) -> std::string {
 		for (const Setting& s : settings) {

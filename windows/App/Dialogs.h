@@ -26,6 +26,7 @@ struct FormField {
 	bool browseSave = false;            //   which saves (else opens)
 	bool mono = false;                  // List: a fixed-width font
 	int arrowsMove = -1;                // Text: Up and Down move this List field's selection
+	bool stepper = false;               // Text: − and + beside it, for a whole number (Form::onStep)
 	std::string tip;                    // shown under a Text field, dimmed
 	// Picture: drawn with Direct2D, in points, `height` points tall and the
 	// form's width; Form::refresh redraws it.
@@ -56,6 +57,8 @@ public:
 	std::function<void(Form&, int field, float x, float y)> onClick;   // a Picture, in its points
 	std::function<void(Form&, int field, int delta)> onWheel;          // the wheel over a Picture (120 a notch)
 	std::function<bool(Form&, int field, UINT vk)> onKey;              // Up, Down, Page Up/Down in a Text field: true if used
+	std::function<void(Form&, int field, int step)> onStep;            // a stepper's − (-1) or + (1)
+	std::function<bool(Form&)> onCancel;                               // Escape or the close box: false keeps it open
 	int timerMs = 0;
 
 	// Pages (as the Mac's Settings has): a row of them along the top; each
