@@ -148,6 +148,7 @@ void showVersionHistory(CircuitWindow* window) {
 	p.emptyText = "No versions yet.";
 	p.leftButtons = { "Export Copy…" };
 	p.rightButtons = { "Close", "Restore" };
+	p.doubleClickPresses = false;   // a double-click looks at a version; Restore restores it
 	p.rows = [&](const std::string&) {
 		std::vector<Row> out;
 		for (size_t i = 0; i < versions.size(); i++) {

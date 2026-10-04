@@ -74,6 +74,7 @@ public:
 	float width = 600, height = 540, listWidth = 0;   // 0: the list takes the width
 	bool listOnLeft = false;                          // with a preview: the list first
 	std::vector<std::string> leftButtons, rightButtons;   // the last right one is the default
+	bool doubleClickPresses = true;                       // a row double-clicked presses the default
 	std::function<std::vector<Row>(const std::string& query)> rows;
 	// A button pressed (left ones 0.., right ones 100..): true closes.
 	std::function<bool(Picker&, int button)> onButton;
@@ -409,7 +410,8 @@ private:
 			return true;
 		}
 		case WM_LBUTTONDBLCLK:
-			if (rowAt(x, y) >= 0 && !shown[rowAt(x, y)].heading && !rightButtons.empty()) press(100 + (int)rightButtons.size() - 1);
+			if (doubleClickPresses && rowAt(x, y) >= 0 && !shown[rowAt(x, y)].heading && !rightButtons.empty())
+				press(100 + (int)rightButtons.size() - 1);
 			return true;
 		case WM_LBUTTONUP: {
 			const int b = buttonAt(x, y);
