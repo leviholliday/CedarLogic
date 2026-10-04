@@ -245,7 +245,7 @@ std::string nameKey(const std::string& s) {
 const int kCheckTab = 3, kTabs = 4;
 const int kEditId = 10;
 // Icon font glyphs for the verdict and the notes.
-const wchar_t kGlyphCheck = 0xE73E, kGlyphCross = 0xE711, kGlyphInfo = 0xE946, kGlyphWarning = 0xE7BA, kGlyphError = 0xEA39;
+const wchar_t kGlyphCheck = 0xE73E, kGlyphCross = 0xE711, kGlyphInfo = 0xE946, kGlyphWarning = 0xE7BA, kGlyphError = 0xE783;
 
 class TruthWindow {
 public:
