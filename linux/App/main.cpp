@@ -567,12 +567,17 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 	// Files handed over by another launch: each opens here, in a window of its
 	// own (or the one that has it already comes forward).
 	if (gStarted) {
+		// Handed over while the launch screen still plays, before it brings
+		// the windows in: these come in with them.
+		const bool waiting = splashActive() && !circuitWindows().empty() &&
+		                     !gtk_widget_get_visible(GTK_WIDGET(circuitWindows().front()->window()));
 		for (gint i = 0; i < n; i++) {
 			gchar* path = g_file_get_path(files[i]);
 			if (path) openCircuit(GTK_APPLICATION(gapp), path, nullptr);
 			g_free(path);
 		}
 		if (circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
+		if (waiting) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 		return;
 	}
 	if (!libraryOrComplain()) {
