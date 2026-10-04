@@ -1184,7 +1184,9 @@ void CircuitWindow::updateMenu(HMENU menu) {
 	const int n = GetMenuItemCount(menu);
 	for (int i = 0; i < n; i++) {
 		const UINT id = GetMenuItemID(menu, i);
-		if (id == (UINT)-1 || id == 0 || (id >= CMD_RECENT && id <= CMD_RECENT_LAST)) continue;
+		// A popup of its own (a tab's menu, the oscilloscope's) numbers its
+		// items from 1 and greys them itself: only commands are looked at.
+		if (id == (UINT)-1 || id < CMD_NEW || (id >= CMD_RECENT && id <= CMD_RECENT_LAST)) continue;
 		if (id == CMD_START_MENU)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id, W(integration::menuLabel() + shortcuts::menuKeys(CMD_START_MENU)).c_str());
 		EnableMenuItem(menu, i, MF_BYPOSITION | (commandEnabled((int)id) ? MF_ENABLED : MF_GRAYED));

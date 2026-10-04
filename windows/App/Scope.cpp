@@ -356,14 +356,17 @@ void ScopeWindow::press(int id) {
 }
 
 void ScopeWindow::hiddenMenu(POINT at) {
+	// Its own numbers, below the window's commands (the window labels and
+	// greys those as its menus open: 1000 is New's, Ctrl+N).
+	const UINT showAll = 1;
 	HMENU m = CreatePopupMenu();
-	for (size_t i = 0; i < hidden.size(); i++) AppendMenuW(m, MF_STRING, i + 1, W("Show " + hidden[i]).c_str());
+	for (size_t i = 0; i < hidden.size(); i++) AppendMenuW(m, MF_STRING, i + 2, W("Show " + hidden[i]).c_str());
 	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-	AppendMenuW(m, MF_STRING, 1000, L"Show All");
+	AppendMenuW(m, MF_STRING, showAll, L"Show All");
 	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD, at.x, at.y, 0, owner->window(), nullptr);
 	DestroyMenu(m);
-	if (cmd == 1000) hidden.clear();
-	else if (cmd > 0 && cmd <= (int)hidden.size()) hidden.erase(hidden.begin() + (cmd - 1));
+	if (cmd == (int)showAll) hidden.clear();
+	else if (cmd >= 2 && cmd - 2 < (int)hidden.size()) hidden.erase(hidden.begin() + (cmd - 2));
 }
 
 // What's on screen or the whole recording, as the menu says. Null when
