@@ -73,6 +73,11 @@ struct Panel {
 	std::function<void(wchar_t c)> chr;
 	std::function<bool()> animating;
 	std::function<bool(UINT, WPARAM, LPARAM, LRESULT&)> message;   // anything else, first
+	// Destroyed some other way than destroy(): with the window it belongs
+	// to (that circuit deleted from Your Circuits in another window). The
+	// card forgets it; this panel is still in its last message, so it can't
+	// be deleted yet.
+	std::function<void()> gone;
 
 	void addHit(const D2D1_RECT_F& r, int id) { hits.push_back({ r, id }); }
 	int hitAt(float x, float y) const {
@@ -138,6 +143,7 @@ struct Panel {
 				HWND owner = GetWindow(h, GW_OWNER);
 				if (owner && !IsWindowEnabled(owner)) EnableWindow(owner, TRUE);
 				p->hwnd = nullptr;
+				if (p->gone) p->gone();
 				handled = false;
 				break;
 			}
@@ -1008,6 +1014,7 @@ struct WhatsNew {
 	double opened = nowSeconds();
 };
 WhatsNew* g_new = nullptr;
+WhatsNew* g_newGone = nullptr;   // destroyed with its window: freed at the next show()
 
 void close(int command) {
 	WhatsNew* w = g_new;
@@ -1241,6 +1248,8 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 
 void show(CircuitWindow* window, int page) {
 	if (window == nullptr) return;
+	delete g_newGone;
+	g_newGone = nullptr;
 	if (g_new) { SetForegroundWindow(g_new->panel.hwnd); return; }
 	prefs().seenWhatsNew = kVersion;
 	prefs().save();
@@ -1268,6 +1277,10 @@ void show(CircuitWindow* window, int page) {
 		close(0);
 		r = 0;
 		return true;
+	};
+	p.gone = [] {
+		g_newGone = g_new;
+		g_new = nullptr;
 	};
 	p.key = [](UINT vk) {
 		if (vk == VK_ESCAPE) close(0);
@@ -1311,6 +1324,7 @@ struct About {
 	bool calm = reduceMotion();
 };
 About* g_about = nullptr;
+About* g_aboutGone = nullptr;   // destroyed with its window: freed at the next show()
 
 void close(int then) {
 	About* a = g_about;
@@ -1355,6 +1369,8 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 
 void show(CircuitWindow* window) {
 	if (window == nullptr) return;
+	delete g_aboutGone;
+	g_aboutGone = nullptr;
 	if (g_about) { SetForegroundWindow(g_about->panel.hwnd); return; }
 	g_about = new About();
 	g_about->window = window;
@@ -1368,6 +1384,10 @@ void show(CircuitWindow* window) {
 		close(0);
 		r = 0;
 		return true;
+	};
+	p.gone = [] {
+		g_aboutGone = g_about;
+		g_about = nullptr;
 	};
 	p.key = [](UINT vk) {
 		if (vk != VK_ESCAPE && vk != VK_RETURN) return false;
