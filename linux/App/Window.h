@@ -276,6 +276,7 @@ private:
 	GtkWidget* paletteBox = nullptr;
 	StatusBar* statusBar = nullptr;
 	std::set<uint64_t> sideKeys;      // the second side's pages; empty: no split
+	std::set<uint64_t> closedSideKeys;   // the second side's pages that closed: back there when they're reopened
 	bool sideFirst = false;           // the second side sits on the left
 	int focusPane = 0;
 	DropHint hint;
@@ -287,6 +288,10 @@ private:
 	void moveTabBy(int page, int delta);
 	void layoutSplit();
 	void reconcileSplit();
+	// After a page closed in a split (closed, or a redo closing it again):
+	// the side it was in shows its neighbour there, the other side keeps
+	// the page it shows. `at` was its index; `otherFront` the other side's page.
+	void showAfterSplitClose(int pane, int at, bool wasCurrent, bool wasFront, uint64_t otherFront);
 	static gboolean drawHintCb(GtkWidget*, cairo_t*, gpointer);
 	guint autosaveId = 0;             // saving as you go, a moment after the last change
 	static gboolean autosaveCb(gpointer self);
