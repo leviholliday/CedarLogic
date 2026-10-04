@@ -803,9 +803,15 @@ void Form::build() {
 		const int besideW = hasBeside ? buttonWidth(fields[i + 1].label) + sc(8) : 0;
 
 		if (x.kind == FormField::Button && x.beside && i > 0 && fields[i - 1].page == x.page) {
+			// After a toggle's words (as the Mac's Check Now sits); else at the
+			// end of the row, which the field before left room for.
+			const FormField& before = fields[i - 1];
 			const int bw = buttonWidth(x.label);
-			x.hwnd = CreateWindowExW(0, L"BUTTON", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, ctrlX + ctrlW - bw,
-			                         rowTop[i - 1] + (fields[i - 1].kind == FormField::Check ? (checkH - rowH) / 2 : 0), bw, rowH, dialog, id,
+			int bx = ctrlX + ctrlW - bw;
+			if (before.kind == FormField::Check && before.grid == 0)
+				bx = std::min(bx, ctrlX + sc(44) + sc(6) + textPixels(dialog, font, before.label) + sc(14));
+			x.hwnd = CreateWindowExW(0, L"BUTTON", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, bx,
+			                         rowTop[i - 1] + (before.kind == FormField::Check ? (checkH - rowH) / 2 : 0), bw, rowH, dialog, id,
 			                         appInstance(), nullptr);
 			SetWindowSubclass(x.hwnd, hoverProc, 4, 0);
 			rowTop[i] = rowTop[i - 1];
@@ -882,7 +888,8 @@ void Form::build() {
 			                         colX, y, box, checkH, dialog, id, appInstance(), nullptr);
 			if (!x.value.empty()) SetPropW(x.hwnd, L"clOn", (HANDLE)1);
 			SetWindowSubclass(x.hwnd, hoverProc, 4, 0);
-			const int labelRoom = colW - box - sc(6) - (inGrid ? sc(8) : besideW);
+			int labelRoom = colW - box - sc(6) - (inGrid ? sc(8) : besideW);
+			if (hasBeside) labelRoom = std::min(labelRoom, textPixels(dialog, font, x.label) + sc(4));   // the button follows its words
 			const bool twoLines = !inGrid && textPixels(dialog, font, x.label) > labelRoom;
 			x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY | SS_NOPREFIX,
 			                          colX + box + sc(6), y + sc(3), labelRoom, (twoLines ? lineH * 2 : checkH - sc(3)), dialog,
