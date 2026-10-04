@@ -475,10 +475,10 @@ void Updater_IntegrateAppImage() {
 	}
 	// Without FUSE, the menu and .cdl files start it the way this launch was
 	// started, or each of them would fail silently.
-	const std::string exec = std::string(extractedAndRun() ? "env APPIMAGE_EXTRACT_AND_RUN=1 " : "") + "\"" + quoted + "\" %F";
+	const std::string exec = std::string(extractedAndRun() ? "env APPIMAGE_EXTRACT_AND_RUN=1 " : "") + "\"" + quoted + "\" %U";
 	const std::string entry = "[Desktop Entry]\nName=CedarLogic\nGenericName=Logic Simulator\nComment=Build and simulate digital logic circuits\n"
 	                          "Type=Application\nExec=" + exec + "\nIcon=cedarlogic\nTerminal=false\n"
-	                          "MimeType=application/x-cedarlogic-circuit;\nStartupWMClass=CedarLogic\n"
+	                          "MimeType=application/x-cedarlogic-circuit;x-scheme-handler/cedarlogic;\nStartupWMClass=CedarLogic\n"
 	                          "Categories=Education;Development;Electronics;\nKeywords=logic;simulator;circuit;gates;\n"
 	                          "X-CedarLogic-AppImage=true\n";
 	gchar* was = nullptr;
