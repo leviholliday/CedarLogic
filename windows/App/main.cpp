@@ -215,13 +215,15 @@ void CALLBACK clickTestStart(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w == nullptr) { report("FAIL", "no window opened"); PostQuitMessage(1); return; }
 	gClickWindow = w->window();
 	SetForegroundWindow(gClickWindow);
-	// As wide as the screen allows, up to what the whole bar needs (a narrow
-	// bar leaves out the tools on its left).
+	// As wide as the whole bar needs (a narrow bar leaves out the tools on
+	// its left), past the screen's edge if it must: not asked first, Windows
+	// doesn't hold the window to the screen's size (CI's is 1024 wide).
 	POINT p;
 	if (w->toolbarWidget() && !w->toolbarWidget()->buttonPoint(CMD_ZOOM_IN, p)) {
 		RECT r;
 		GetWindowRect(gClickWindow, &r);
-		SetWindowPos(gClickWindow, nullptr, 0, 0, scaled(1400, dpiOf(gClickWindow)), r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER);
+		SetWindowPos(gClickWindow, nullptr, 0, 0, scaled(1400, dpiOf(gClickWindow)), r.bottom - r.top,
+		             SWP_NOMOVE | SWP_NOZORDER | SWP_NOSENDCHANGING);
 	}
 	clickTestTimer(nullptr, 0, 0, 0);
 }
