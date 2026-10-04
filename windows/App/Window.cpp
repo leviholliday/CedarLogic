@@ -507,7 +507,7 @@ void CircuitWindow::reconcileSplit() {
 	for (Canvas* c : canvases) if (sideKeys.count(c->pageKey())) keep.insert(c->pageKey());
 	if (!keep.empty() && keep.size() == canvases.size()) keep.clear();   // the first side ran out
 	sideKeys = keep;
-	if (sideKeys.empty()) focusPane = 0;
+	if (sideKeys.empty()) { focusPane = 0; closedSideKeys.clear(); }
 }
 
 // Each side's page in front; the rest hidden.
@@ -527,11 +527,18 @@ void CircuitWindow::syncTabs() {
 		const uint64_t key = cl_document_page_id(doc, i);
 		Canvas* found = nullptr;
 		for (Canvas* c : canvases) if (c->pageKey() == key) found = c;
-		if (found == nullptr) found = new Canvas(this, hwnd, key);
+		if (found == nullptr) {
+			found = new Canvas(this, hwnd, key);
+			closedSideKeys.erase(key);   // back (refreshAfterHistory put it on its side), or a new page
+		}
 		want.push_back(found);
 	}
 	for (Canvas* c : canvases)
-		if (std::find(want.begin(), want.end(), c) == want.end()) delete c;
+		if (std::find(want.begin(), want.end(), c) == want.end()) {
+			// A second side's page that closes goes back there if it's reopened.
+			if (sideKeys.count(c->pageKey())) closedSideKeys.insert(c->pageKey());
+			delete c;
+		}
 	canvases = want;
 	reconcileSplit();
 	// Each side shows a page it has: the one it showed, else its first.
@@ -629,6 +636,25 @@ void CircuitWindow::activatePane(int pane) {
 void CircuitWindow::canvasFocused(Canvas* c) {
 	if (c == nullptr || c == currentCanvas() || !splitOpen() || c != paneCanvas(paneOf(c))) return;
 	activatePane(paneOf(c));
+}
+
+void CircuitWindow::showAfterSplitClose(int pane, int at, bool wasCurrent, bool wasFront, uint64_t otherFront) {
+	if (!splitOpen()) {
+		// The split closed with it: the page left on screen stays in front.
+		const int keep = cl_document_page_index(doc, otherFront);
+		if (keep >= 0 && keep < (int)canvases.size()) current = keep;
+	} else if (wasFront) {
+		// Its side shows the next tab along there, else the one before (as
+		// one strip does), not whatever is next in the document.
+		const std::vector<int> row = panePages(pane);
+		if (!row.empty()) {
+			int next = row.back();
+			for (int i : row) if (i >= at) { next = i; break; }
+			frontKeys[pane] = canvases[next]->pageKey();
+			if (wasCurrent) current = next;
+		}
+	}
+	pageSwitched();
 }
 
 void CircuitWindow::closeTab(int index) {
@@ -1865,6 +1891,7 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	canvases.clear();
 	current = 0;
 	sideKeys.clear();
+	closedSideKeys.clear();
 	focusPane = 0;
 	frontKeys[0] = frontKeys[1] = 0;
 	recentKeys.clear();
@@ -2099,8 +2126,28 @@ void CircuitWindow::refreshAfterHistory() {
 	// An undo or redo that closed or reopened a page shows that page.
 	if (cl_document_page_count(doc) != lastPageCount) {
 		const int show = cl_document_page_to_show(doc);
+		// In a split, a page reopened goes back to the side it closed from;
+		// one closed again is closed as Close Tab does it.
+		int gone = -1, gonePane = 0;
+		bool goneCurrent = false, goneFront = false;
+		uint64_t otherFront = 0;
+		if (splitOpen()) {
+			for (uint64_t key : closedSideKeys)
+				if (cl_document_page_index(doc, key) >= 0) sideKeys.insert(key);
+			for (int i = 0; i < (int)canvases.size() && gone < 0; i++) {
+				const uint64_t key = canvases[i]->pageKey();
+				if (cl_document_page_index(doc, key) >= 0) continue;
+				gone = i;
+				gonePane = paneOf(canvases[i]);
+				goneCurrent = i == current;
+				goneFront = frontKeys[gonePane] == key;
+				otherFront = frontKeys[1 - gonePane];
+			}
+		}
 		syncTabs();
-		if (show >= 0 && show < (int)canvases.size()) {
+		if (gone >= 0) {
+			showAfterSplitClose(gonePane, gone, goneCurrent, goneFront, otherFront);
+		} else if (show >= 0 && show < (int)canvases.size()) {
 			current = show;
 			pageSwitched();
 			appearStart = nowSeconds();
@@ -2422,10 +2469,17 @@ void CircuitWindow::closePage(int page) {
 		return;
 	for (Canvas* c : canvases) c->cancelDrag();
 	cl_edit_select_none(doc, page);
+	// In a split: where it was, so its side shows its neighbour and the other
+	// side (and the side you're working in, if it wasn't this one) stay put.
+	const bool split = splitOpen() && page >= 0 && page < (int)canvases.size();
+	const int pane = split ? paneOf(canvases[page]) : 0;
+	const bool wasCurrent = page == current, wasFront = split && frontKeys[pane] == canvases[page]->pageKey();
+	const uint64_t otherFront = frontKeys[1 - pane];
 	if (cl_document_close_page(doc, page)) {
 		const int show = std::min(cl_document_page_to_show(doc), cl_document_page_count(doc) - 1);
 		syncTabs();
-		if (show >= 0) { current = show; pageSwitched(); }
+		if (split) showAfterSplitClose(pane, page, wasCurrent, wasFront, otherFront);
+		else if (show >= 0) { current = show; pageSwitched(); }
 		edited();
 	}
 }

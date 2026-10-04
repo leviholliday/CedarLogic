@@ -280,6 +280,7 @@ private:
 	int current = 0;                  // the tab in front (of the side you're in)
 	// Split view.
 	std::set<uint64_t> sideKeys;      // the second side's pages; empty: no split
+	std::set<uint64_t> closedSideKeys;   // the second side's pages that closed: back there when they're reopened
 	bool sideFirst = false;           // the second side sits on the left
 	int focusPane = 0;
 	uint64_t frontKeys[2] = { 0, 0 }; // the page each side shows
@@ -330,6 +331,10 @@ private:
 	int statusHeight() const;   // as much of the status bar as shows (pixels)
 	void reconcileSplit();
 	void showFronts();
+	// After a page closed in a split (closed, or a redo closing it again):
+	// the side it was in shows its neighbour there, the other side keeps
+	// the page it shows. `at` was its index; `otherFront` the other side's page.
+	void showAfterSplitClose(int pane, int at, bool wasCurrent, bool wasFront, uint64_t otherFront);
 	double focusAmount() const;
 	void stepAnimations();
 	double hintAlpha() const;
