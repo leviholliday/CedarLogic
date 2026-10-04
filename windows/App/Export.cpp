@@ -153,6 +153,13 @@ IWICBitmap* makeImage(CLDocument* doc, int page, double multiplier, bool color, 
 
 }  // namespace
 
+// For the lab report (LabReport.cpp): a page as Export as Image draws it,
+// without the name strip. `scale` is pixels a point of the picture.
+bool reportCircuitSize(CLDocument* doc, int page, float& w, float& h) { return imageSize(doc, page, ExportInfo(), w, h); }
+void reportCircuitDraw(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, bool color) {
+	drawImage(rt, doc, page, w, h, scale, color, false, ExportInfo());
+}
+
 void showExportImage(CircuitWindow* win, int page) {
 	CLDocument* doc = win->document();
 	double l, b, r, t;

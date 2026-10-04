@@ -254,6 +254,11 @@ void Prefs::load() {
 	truthTab = r.i("truthTab", truthTab, 0, 2);
 	timingWhole = r.b("timingWhole", timingWhole);
 	timingInColor = r.b("timingInColor", timingInColor);
+	reportCircuit = r.b("reportCircuit", reportCircuit);
+	reportTable = r.b("reportTable", reportTable);
+	reportFormulas = r.b("reportFormulas", reportFormulas);
+	reportTiming = r.b("reportTiming", reportTiming);
+	reportColor = r.b("reportColor", reportColor);
 	exportGrid = r.b("exportGrid", exportGrid);
 	exportColor = r.b("exportColor", exportColor);
 	exportInfo = r.b("exportInfo", exportInfo);
@@ -339,6 +344,11 @@ void Prefs::save() const {
 	o << "truthTab=" << truthTab << "\n";
 	o << "timingWhole=" << b(timingWhole) << "\n";
 	o << "timingInColor=" << b(timingInColor) << "\n";
+	o << "reportCircuit=" << b(reportCircuit) << "\n";
+	o << "reportTable=" << b(reportTable) << "\n";
+	o << "reportFormulas=" << b(reportFormulas) << "\n";
+	o << "reportTiming=" << b(reportTiming) << "\n";
+	o << "reportColor=" << b(reportColor) << "\n";
 	o << "exportGrid=" << b(exportGrid) << "\n";
 	o << "exportColor=" << b(exportColor) << "\n";
 	o << "exportInfo=" << b(exportInfo) << "\n";

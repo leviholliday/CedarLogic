@@ -168,6 +168,9 @@ const std::vector<Page>& pages() {
 		      "like."),
 		    p("**Versions**: **Ctrl+S** keeps a version. Version History (click the circuit's name) shows them with a picture of each; "
 		      "restoring one keeps the current one too."),
+		    p("**Lab reports**: **File ▸ Export Lab Report…** makes one PDF to hand in, with your name and the date: a picture of "
+		      "each page, the truth table, a Karnaugh map and the simplest formulas for each light (2 to 4 switches), and the "
+		      "oscilloscope's timing diagram. Tick what goes in, in colour or black and white."),
 		    keys({ { "Ctrl+N", "New circuit" },
 		           { "Ctrl+I", "Open a .cdl file from anywhere" },
 		           { "Ctrl+E", "Export an image, with your name under it" },

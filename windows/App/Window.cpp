@@ -266,6 +266,7 @@ void CircuitWindow::buildMenus() {
 	item(file, CMD_SAVE_AS, "E&xport\u2026\tCtrl+Shift+S");
 	item(file, CMD_SAVE_TEMPLATE, "Save as Te&mplate\u2026");
 	item(file, CMD_EXPORT_IMAGE, "&Export as Image…\tCtrl+E");
+	item(file, CMD_EXPORT_REPORT, "Export &Lab Report…");
 	HMENU older = submenu(file, "Export for &Older CedarLogic");
 	item(older, CMD_EXPORT_V2, "For CedarLogic &2…");
 	item(older, CMD_EXPORT_V1, "For CedarLogic &1.x…");
@@ -1762,6 +1763,7 @@ void CircuitWindow::run(int command) {
 	case CMD_SAVE: save(); break;
 	case CMD_SAVE_AS: exportCopy(); break;
 	case CMD_EXPORT_IMAGE: exportImage(); break;
+	case CMD_EXPORT_REPORT: exportReport(); break;
 	case CMD_EXPORT_V2: exportOlder(2); break;
 	case CMD_EXPORT_V1: exportOlder(1); break;
 	case CMD_PRINT: print(); break;
@@ -2045,6 +2047,8 @@ IWICImagingFactory* wicFactory() {
 
 // Export the page in front as a picture (Export.cpp).
 void CircuitWindow::exportImage() { showExportImage(this, currentPage()); }
+// Export Lab Report: LabReport.cpp.
+void CircuitWindow::exportReport() { showExportReport(this); }
 
 void CircuitWindow::print() {
 	const int page = currentPage();

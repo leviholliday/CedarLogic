@@ -145,6 +145,15 @@ void showBuildFormula(CircuitWindow* w);
 bool confirmQuit(HWND parent);
 // Export as Image (Export.cpp).
 void showExportImage(CircuitWindow* w, int page);
+// Export Lab Report (LabReport.cpp): one PDF to hand in.
+struct LabReportOptions {
+	bool circuit = true, truthTable = true, formulas = true, timing = true, color = true;
+	bool pump = false;   // repaint the windows between pages, so a long report doesn't leave them "not responding"
+};
+void showExportReport(CircuitWindow* w);
+// The PDF itself (also --lab-report). False, with `error`, if it couldn't be written.
+bool writeLabReport(CLDocument* doc, const std::string& title, const LabReportOptions& options, const std::string& file, std::string& error);
+bool hasScopeRecording(CLDocument* doc);
 
 // The oscilloscope, redesigned as the Mac app's (ScopeView.swift), docked
 // under the canvases (the window lays it out; the line over it drags): every

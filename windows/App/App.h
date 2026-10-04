@@ -86,6 +86,8 @@ struct Prefs {
 	int truthTab = 0;                             // the truth table's tab, as last left
 	// Timing diagrams (the oscilloscope's share menu).
 	bool timingWhole = false, timingInColor = false;
+	// Export Lab Report's last choices: what goes in, and colour or black and white.
+	bool reportCircuit = true, reportTable = true, reportFormulas = true, reportTiming = true, reportColor = true;
 	// Export as Image's last choices.
 	bool exportGrid = false, exportColor = true, exportInfo = true, exportWorks = true;   // exportInfo: the name-and-result strip
 	int exportScale = 4;                          // 2, 4 or 6 pixels a point

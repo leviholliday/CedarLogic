@@ -44,6 +44,9 @@ int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
 // diagram too; --timing-color for it in color.
 std::string gTiming;
 bool gTimingColor = false;
+// --lab-report <in.cdl> <out.pdf> [bw]: writes a lab report without a window.
+std::string gReportIn, gReportOut;
+bool gReportBW = false;
 // --splash-frame <seconds> <out.png> [--first-launch]: the launch screen at
 // that moment, drawn to a PNG, and quit.
 double gSplashAt = 0;
@@ -646,6 +649,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
 		if (a == "--timing-color") { gTimingColor = true; continue; }
+		if (a == "--lab-report" && i + 2 < argc) {
+			gReportIn = U(argv[++i]);
+			gReportOut = U(argv[++i]);
+			if (i + 1 < argc && U(argv[i + 1]) == "bw") { gReportBW = true; i++; }
+			continue;
+		}
 		if (a == "--splash-frame" && i + 2 < argc) { gSplashAt = atof(U(argv[++i]).c_str()); gSplashFile = U(argv[++i]); continue; }
 		if (a == "--first-launch") { gFirstLaunch = true; continue; }
 		if (a == "--card-frame" && i + 1 < argc) { CircuitWindow::cardFreeze = atof(U(argv[++i]).c_str()); continue; }
@@ -666,7 +675,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE
 			        : d == "library" ? CMD_OPEN : d == "versions" ? CMD_VERSIONS : d == "templates" ? CMD_NEW_TEMPLATE
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
-			        : d == "export" ? CMD_EXPORT_IMAGE
+			        : d == "export" ? CMD_EXPORT_IMAGE : d == "lab-report" ? CMD_EXPORT_REPORT
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
@@ -676,7 +685,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	LocalFree(argv);
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
-	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || gClickTest || gDialog != 0;
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || gClickTest || gDialog != 0;
 	if (!testRun && handToRunning(files)) return 0;
 
 	prefs().load();
@@ -697,7 +706,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && !gClickTest) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && !gClickTest) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -713,6 +722,20 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		return ok ? 0 : 1;
 	}
 	prefs().applyWireDots();
+	if (!gReportIn.empty()) {
+		// Not a window: the circuit run a while, then its lab report.
+		char err[512] = "";
+		CLDocument* doc = cl_document_open(gReportIn.c_str(), err, sizeof err);
+		if (doc == nullptr) { writeOut(strf("couldn't open %s: %s\n", gReportIn.c_str(), err)); return 1; }
+		for (int i = 0; i < 120; i++) cl_document_step(doc);
+		if (prefs().studentName.empty()) prefs().studentName = "Alex Student";
+		LabReportOptions o;
+		o.color = !gReportBW;
+		std::string error;
+		const bool ok = writeLabReport(doc, baseName(gReportIn), o, gReportOut, error);
+		writeOut(ok ? strf("wrote %s\n", gReportOut.c_str()) : strf("couldn't write %s: %s\n", gReportOut.c_str(), error.c_str()));
+		return ok ? 0 : 1;
+	}
 	registerWindowClasses();
 	splash::setStatus("Opening the workspace\u2026");
 
