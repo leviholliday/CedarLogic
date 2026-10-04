@@ -279,13 +279,17 @@ std::wstring unpacked(const std::wstring& work) {
 
 // The app in the middle of something: a dialog up over a window (its code
 // is waiting on that dialog, so the window mustn't close or be asked over),
-// the mouse held down, a menu open, a window being moved or sized. With
-// `everyWindow` false, only `window` is looked at for a dialog.
-bool inTheMiddle(HWND window, bool everyWindow) {
+// the mouse held down, a menu open, a window being moved or sized. Any
+// window's dialog counts, not only the one asked over: a question asked
+// inside another window's dialog loop holds that loop up, and the dialog,
+// finished meanwhile, gives its window back to be closed under its code.
+// `window`, the one asked over, must take clicks; when it's a dialog itself
+// (Settings' Check Now), the circuit window under it is that dialog's.
+bool inTheMiddle(HWND window) {
 	if (window && !IsWindowEnabled(window)) return true;
-	if (everyWindow)
-		for (CircuitWindow* w : circuitWindows())
-			if (!IsWindowEnabled(w->window())) return true;
+	const HWND under = window ? GetAncestor(window, GA_ROOTOWNER) : nullptr;
+	for (CircuitWindow* w : circuitWindows())
+		if (w->window() != under && !IsWindowEnabled(w->window())) return true;
 	GUITHREADINFO gui = { sizeof gui };
 	return GetGUIThreadInfo(GetCurrentThreadId(), &gui) &&
 	       (gui.hwndCapture || (gui.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_INMOVESIZE)));
@@ -297,7 +301,7 @@ bool inTheMiddle(HWND window, bool everyWindow) {
 std::wstring g_restartExe;
 
 void CALLBACK restartTimer(HWND, UINT, UINT_PTR id, DWORD) {
-	if (inTheMiddle(nullptr, true)) return;   // once it's over
+	if (inTheMiddle(nullptr)) return;   // once it's over
 	KillTimer(nullptr, id);
 	if (!quitApp()) return;
 	STARTUPINFOW si = { sizeof si };
@@ -433,10 +437,10 @@ void CALLBACK pollTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (!g_check->done.load()) return;
 	// This timer is the thread's, so it fires inside a dialog's loop too
 	// (gate settings, Settings, Export...). The answer waits till that's
-	// over, and tries again 200 ms on: a check of the app's own waits for
-	// every window, Check Now only for the one it was asked from.
+	// over, and tries again 200 ms on: Settings' Check Now is answered over
+	// Settings, inside its loop; any other dialog, in any window, waits.
 	const HWND parent = answerParent(g_check.get());
-	if (inTheMiddle(parent, !g_check->interactive)) return;
+	if (inTheMiddle(parent)) return;
 	KillTimer(nullptr, id);
 	guarded("checking for updates", [parent] { finish(parent); });
 }
