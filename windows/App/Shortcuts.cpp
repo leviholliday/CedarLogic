@@ -137,6 +137,7 @@ const std::vector<Action>& all() {
 		{ "importFile", "Circuits", "Import a .cdl file", CMD_IMPORT, false, "Ctrl+I" },
 		{ "save", "Circuits", "Save now and keep a version", CMD_SAVE, false, "Ctrl+S" },
 		{ "exportImage", "Circuits", "Export as an image", CMD_EXPORT_IMAGE, false, "Ctrl+E" },
+		{ "exportReport", "Circuits", "Export a lab report (PDF)", CMD_EXPORT_REPORT, false, "" },
 		{ "exportFile", "Circuits", "Export as a CedarLogic file", CMD_SAVE_AS, false, "Ctrl+Shift+S" },
 		{ "print", "Circuits", "Print", CMD_PRINT, false, "Ctrl+P" },
 		{ "closeWindow", "Circuits", "Close the window", CMD_CLOSE_WINDOW, false, "Ctrl+Shift+W" },

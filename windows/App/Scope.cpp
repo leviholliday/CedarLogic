@@ -44,20 +44,20 @@ D2D1_COLOR_F valueColor(unsigned char v, D2D1_COLOR_F dim) {
 
 const float kTMargin = 28, kTName = 110, kTLane = 38, kTTitle = 46, kTAxis = 34;
 
-void timingSize(int steps, int signals, float& w, float& h, float& pps) {
+void timingSize(int steps, int signals, float& w, float& h, float& pps, bool titled = true) {
 	const int n = std::max(1, steps);
 	// Readable steps where there's room; squeezed to fit a wide page otherwise.
 	pps = std::min(24.0f, std::max(0.5f, 1400.0f / n));
 	w = std::max(520.0f, kTMargin * 2 + kTName + n * pps);
-	h = kTMargin * 2 + kTTitle + std::max(1, signals) * kTLane + kTAxis;
+	h = kTMargin * 2 + (titled ? kTTitle : 0.0f) + std::max(1, signals) * kTLane + kTAxis;
 }
 
 void drawTiming(ID2D1RenderTarget* rt, CLDocument* doc, const std::vector<int>& sigs, const std::vector<std::string>& names, int from,
-                int count, const std::string& title, bool color) {
+                int count, const std::string& title, bool color, bool titled = true) {
 	float w, h, pps;
-	timingSize(count, (int)sigs.size(), w, h, pps);
+	timingSize(count, (int)sigs.size(), w, h, pps, titled);
 	const D2D1_COLOR_F black = D2D1::ColorF(0, 0, 0), gray = D2D1::ColorF(0.33f, 0.33f, 0.33f), light = D2D1::ColorF(0.82f, 0.82f, 0.82f);
-	drawText(rt, title, D2D1::RectF(kTMargin, kTMargin, w - kTMargin, kTMargin + 22), 17, black, TextAlign::Leading, true);
+	if (titled) drawText(rt, title, D2D1::RectF(kTMargin, kTMargin, w - kTMargin, kTMargin + 22), 17, black, TextAlign::Leading, true);
 	std::string byline = "Timing diagram";
 	if (!prefs().studentName.empty()) byline += " · " + prefs().studentName;
 	char date[64];
@@ -66,8 +66,8 @@ void drawTiming(ID2D1RenderTarget* rt, CLDocument* doc, const std::vector<int>& 
 	localtime_s(&lt, &t);
 	strftime(date, sizeof date, "%b %d, %Y", &lt);
 	byline += std::string(" · ") + date;
-	drawText(rt, byline, D2D1::RectF(kTMargin, kTMargin + 23, w - kTMargin, kTMargin + 38), 11, gray);
-	const float left = kTMargin + kTName, top = kTMargin + kTTitle, bottom = top + sigs.size() * kTLane;
+	if (titled) drawText(rt, byline, D2D1::RectF(kTMargin, kTMargin + 23, w - kTMargin, kTMargin + 38), 11, gray);
+	const float left = kTMargin + kTName, top = kTMargin + (titled ? kTTitle : 0.0f), bottom = top + sigs.size() * kTLane;
 	auto x = [&](int i) { return left + (i - from) * pps; };
 	ID2D1SolidColorBrush* b = nullptr;
 	if (FAILED(rt->CreateSolidColorBrush(black, &b))) return;
@@ -136,6 +136,21 @@ void drawTiming(ID2D1RenderTarget* rt, CLDocument* doc, const std::vector<int>& 
 }
 
 }  // namespace
+
+// For the lab report (LabReport.cpp): the recording as a timing diagram with
+// no title of its own. Pass rt null to get just the size.
+void reportTiming(ID2D1RenderTarget* rt, CLDocument* doc, int from, int count, bool color, float& w, float& h) {
+	std::vector<int> sigs;
+	std::vector<std::string> names;
+	for (int i = 0; i < cl_scope_signal_count(doc); i++) {
+		sigs.push_back(i);
+		names.push_back(cl_scope_signal(doc, i));
+	}
+	float pps;
+	timingSize(count, (int)sigs.size(), w, h, pps, false);
+	if (rt == nullptr) return;
+	drawTiming(rt, doc, sigs, names, from, count, "", color, false);
+}
 
 void registerDialogClasses() {
 	WNDCLASSEXW wc = {};

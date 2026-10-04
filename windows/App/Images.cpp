@@ -36,23 +36,51 @@ bool encode(IWICBitmapSource* bmp, IStream* out) {
 
 }  // namespace
 
-IWICBitmap* render(double w, double h, double scale, bool white, const std::function<void(ID2D1RenderTarget*)>& draw) {
-	if (wic() == nullptr || w <= 0 || h <= 0) return nullptr;
+Sheet::~Sheet() {
+	if (rt) {
+		rt->EndDraw();
+		rt->Release();
+	}
+	if (bmp) bmp->Release();
+}
+
+bool Sheet::begin(double w, double h, double scale, bool white) {
+	if (wic() == nullptr || w <= 0 || h <= 0 || rt != nullptr) return false;
 	const UINT pw = (UINT)std::ceil(w * scale), ph = (UINT)std::ceil(h * scale);
-	IWICBitmap* bmp = nullptr;
-	if (FAILED(wic()->CreateBitmap(pw, ph, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp))) return nullptr;
+	if (FAILED(wic()->CreateBitmap(pw, ph, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp))) return false;
 	const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
 		D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
-	ID2D1RenderTarget* rt = nullptr;
-	if (FAILED(d2dFactory()->CreateWicBitmapRenderTarget(bmp, props, &rt))) { bmp->Release(); return nullptr; }
+	if (FAILED(d2dFactory()->CreateWicBitmapRenderTarget(bmp, props, &rt))) {
+		bmp->Release();
+		bmp = nullptr;
+		return false;
+	}
+	rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);   // no coloured fringes on a picture
 	rt->BeginDraw();
 	rt->Clear(white ? D2D1::ColorF(1, 1, 1, 1) : D2D1::ColorF(0, 0, 0, 0));
 	rt->SetTransform(D2D1::Matrix3x2F::Scale((float)scale, (float)scale));
-	draw(rt);
+	return true;
+}
+
+IWICBitmap* Sheet::finish() {
+	if (rt == nullptr) return nullptr;
 	const bool ok = SUCCEEDED(rt->EndDraw());
 	rt->Release();
-	if (!ok) { bmp->Release(); return nullptr; }
-	return bmp;
+	rt = nullptr;
+	IWICBitmap* out = bmp;
+	bmp = nullptr;
+	if (!ok && out) {
+		out->Release();
+		out = nullptr;
+	}
+	return out;
+}
+
+IWICBitmap* render(double w, double h, double scale, bool white, const std::function<void(ID2D1RenderTarget*)>& draw) {
+	Sheet sheet;
+	if (!sheet.begin(w, h, scale, white)) return nullptr;
+	draw(sheet.target());
+	return sheet.finish();
 }
 
 bool savePng(IWICBitmapSource* bmp, const std::string& file) {

@@ -43,7 +43,9 @@ it compiles without a Windows machine:
   formulas and Check My Circuit (`TruthTableWindow`) and Build from Formula (`Formula`), Find
   (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope,
   docked under the canvas, and its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
-  for pictures made off screen), Send Feedback (`Feedback`, to
+  for pictures made off screen), Export Lab Report (`LabReport`: a PDF of the
+  circuit, truth table, Karnaugh maps and timing diagram, its pages drawn off
+  screen and put in the file by the small writer in `Pdf`), Send Feedback (`Feedback`, to
   cedarlogic.netlify.app), and Help with search (`Help`); the launch screen with the first launch's sound
   (`Splash`), the first-run welcome, What's New and the guided tour that
   builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
@@ -113,7 +115,7 @@ Direct2D here. And:
   With `--dark` or `--light` for that run, `--sim-view`, `--split` (split
   view), `--focus` (focus mode), `--rename-tab`, or `--dialog
   preferences|shortcuts|truth-table|check|add-gate|library|versions|templates|
-  formula|scope|export|feedback|help|welcome|whatsnew|quit|alert|rename|about|
+  formula|scope|export|lab-report|feedback|help|welcome|whatsnew|quit|alert|rename|about|
   start-menu` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--check "..."` for what Check compares
   with, `--page N` for the welcome, What's New
@@ -122,6 +124,9 @@ Direct2D here. And:
   puts a note in the status bar, and `--wire-tag` rests the pointer on a wire
   to show its value. `--toolbar-style seamless|classic|minimal` shows the
   toolbar in that style for the run (with the click test too).
+- `CedarLogic.exe --lab-report circuit.cdl out.pdf [bw]` -- the circuit run for a
+  while, then its lab report (File > Export Lab Report) written without a
+  window; `bw` for black and white (CI runs it and keeps the PDFs).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
   Tab, Pause and Resume, Simulation View, Lock, the dark mode switch, New),
   the tabs' +, and the window's drawn Minimize (on the toolbar, and on the

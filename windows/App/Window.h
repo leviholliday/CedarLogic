@@ -108,6 +108,7 @@ public:
 	// page's circuit. False when nothing could be built.
 	bool buildPlan(const formula::Plan& plan, bool onNewPage, const std::string& pageName);
 	void exportImage();
+	void exportReport();
 	void exportOlder(int format);
 	void print();
 	void undo();
