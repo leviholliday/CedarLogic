@@ -190,8 +190,8 @@ void CircuitWindow::build() {
 	if (GetWindowRect(hwnd, &r) && GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
 		const RECT& a = mi.rcWork;
 		const int w = std::min<int>(r.right - r.left, a.right - a.left), h = std::min<int>(r.bottom - r.top, a.bottom - a.top);
-		const int x = std::max<int>(a.left, std::min<int>(r.left, a.right - w));
-		const int y = std::max<int>(a.top, std::min<int>(r.top, a.bottom - h));
+		x = std::max<int>(a.left, std::min<int>(r.left, a.right - w));
+		y = std::max<int>(a.top, std::min<int>(r.top, a.bottom - h));
 		if (x != r.left || y != r.top || w != r.right - r.left || h != r.bottom - r.top)
 			SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 	}
@@ -1552,6 +1552,7 @@ void CircuitWindow::print() {
 	DOCINFOW di = { sizeof di, name.c_str(), nullptr, nullptr, 0 };
 	bool ok = false;
 	const bool docStarted = StartDocW(dc, &di) > 0;
+	const bool cancelled = !docStarted && GetLastError() == ERROR_CANCELLED;   // Print to PDF's Cancel
 	const bool pageStarted = docStarted && StartPage(dc) > 0;
 	if (pageStarted) {
 		const int pw = GetDeviceCaps(dc, HORZRES), ph = GetDeviceCaps(dc, VERTRES);
@@ -1580,7 +1581,7 @@ void CircuitWindow::print() {
 	DeleteDC(dc);
 	if (pd.hDevMode) GlobalFree(pd.hDevMode);
 	if (pd.hDevNames) GlobalFree(pd.hDevNames);
-	if (!ok) showMessage(hwnd, Tone::Error, "The page couldn't be printed", "");
+	if (!ok && !cancelled) showMessage(hwnd, Tone::Error, "The page couldn't be printed", "");
 }
 
 bool CircuitWindow::screenshot(const std::string& file, HWND other) {
