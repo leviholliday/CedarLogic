@@ -31,10 +31,17 @@
   #define SetupDir AddBackslash(SourcePath) + "..\.."
 #endif
 
+; Which Windows each runs on: ARM64 on Windows on ARM; x64 on x64 PCs, and
+; on Windows 11 on ARM too, which runs x64 apps (Inno Setup 6.3 and later
+; can say so; before, x64 means x64 PCs only).
 #if Arch == "ARM64"
   #define ArchId "arm64"
 #elif Arch == "x64"
-  #define ArchId "x64"
+  #if VER >= EncodeVer(6, 3, 0, 0)
+    #define ArchId "x64compatible"
+  #else
+    #define ArchId "x64"
+  #endif
 #else
   #error Arch must be x64 or ARM64
 #endif
@@ -60,7 +67,6 @@ DefaultDirName={localappdata}\Programs\CedarLogic
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
-; Built for one kind of processor, and runs on that one.
 ArchitecturesAllowed={#ArchId}
 ArchitecturesInstallIn64BitMode={#ArchId}
 MinVersion=10.0
