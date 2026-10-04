@@ -70,11 +70,11 @@ bool validUtf8(const std::string& s) {
 	while (i < s.size()) {
 		const unsigned char c = (unsigned char)s[i];
 		size_t more;
-		unsigned min, cp;
+		unsigned lowest, cp;
 		if (c < 0x80) { i++; continue; }
-		else if (c >= 0xC2 && c <= 0xDF) { more = 1; min = 0x80; cp = c & 0x1F; }
-		else if (c >= 0xE0 && c <= 0xEF) { more = 2; min = 0x800; cp = c & 0x0F; }
-		else if (c >= 0xF0 && c <= 0xF4) { more = 3; min = 0x10000; cp = c & 0x07; }
+		else if (c >= 0xC2 && c <= 0xDF) { more = 1; lowest = 0x80; cp = c & 0x1F; }
+		else if (c >= 0xE0 && c <= 0xEF) { more = 2; lowest = 0x800; cp = c & 0x0F; }
+		else if (c >= 0xF0 && c <= 0xF4) { more = 3; lowest = 0x10000; cp = c & 0x07; }
 		else return false;
 		if (i + more >= s.size()) return false;
 		for (size_t k = 1; k <= more; k++) {
@@ -82,7 +82,7 @@ bool validUtf8(const std::string& s) {
 			if ((d & 0xC0) != 0x80) return false;
 			cp = cp << 6 | (d & 0x3F);
 		}
-		if (cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+		if (cp < lowest || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
 		i += more + 1;
 	}
 	return true;
