@@ -268,6 +268,54 @@ const char *cl_tt_name(const CLTruthTable *tt, int column);
 char cl_tt_cell(const CLTruthTable *tt, int row, int column);
 bool cl_tt_sequential(const CLTruthTable *tt);   // clocks or flip-flops on the page
 int cl_tt_unsettled(const CLTruthTable *tt);     // rows that never stopped changing
+// A table given outright (the app's copy, with any names the student
+// changed): names (inputs, then outputs) and rows of cells as above.
+CLTruthTable *cl_tt_new(int inputs, bool sequential, int unsettled);
+void cl_tt_add_name(CLTruthTable *tt, const char *name);
+void cl_tt_add_row(CLTruthTable *tt, const char *cells);
+
+// ---- Check my circuit ----------------------------------------------------------
+// Compares a circuit's truth table with what an assignment asks for, matching
+// switches and lights by name (case and spaces don't matter).
+//
+// `expected` is what the app's formula reader made, one tab-separated line
+// each: "in<TAB>A<TAB>B<TAB>Cin", then "out<TAB>S<TAB>01101001" per output,
+// a value per minterm ('0', '1', or '-' for don't care; the first input is the
+// most significant bit). cl_check_table reads a truth table the student
+// pasted or typed instead (a header of names, a | between inputs and outputs
+// if it likes, then rows of 0, 1 and X or - for don't care).
+//
+// `names` matches names by hand, a line each: "Cin<TAB>C" says the asked-for
+// Cin is the circuit's column C. Names left out are matched automatically.
+typedef struct CLCheck CLCheck;
+CLCheck *cl_check_expected(const CLTruthTable *tt, const char *expected, const char *names);
+CLCheck *cl_check_table(const CLTruthTable *tt, const char *table, const char *names);
+void cl_check_free(CLCheck *c);
+int cl_check_verdict(const CLCheck *c);          // 0 matches, 1 wrong rows, 2 couldn't check (all of it)
+const char *cl_check_summary(const CLCheck *c);  // one line, as the app shows it
+// Notes: kind 0 for your information, 1 a warning, 2 a problem to fix.
+int cl_check_note_count(const CLCheck *c);
+const char *cl_check_note(const CLCheck *c, int index);
+int cl_check_note_kind(const CLCheck *c, int index);
+// The asked-for outputs: which column of the circuit's table each is (-1 when
+// none could be matched) and on how many rows it's wrong.
+int cl_check_outputs(const CLCheck *c);
+const char *cl_check_output_name(const CLCheck *c, int output);
+int cl_check_output_column(const CLCheck *c, int output);
+int cl_check_output_wrong(const CLCheck *c, int output);
+// Row by row (the circuit table's rows): what was asked for ('0', '1', '-'
+// don't care, ' ' unknown) and whether the circuit gave it ('=' yes, 'x' no,
+// '-' not checked: a don't care, or the output wasn't matched).
+char cl_check_expected_cell(const CLCheck *c, int row, int output);
+char cl_check_result(const CLCheck *c, int row, int output);
+bool cl_check_row_wrong(const CLCheck *c, int row);
+// Every asked-for name, inputs first: the column of the circuit's table it
+// was matched with (-1 none) and whether that was by hand.
+int cl_check_name_count(const CLCheck *c);
+const char *cl_check_name(const CLCheck *c, int index);
+bool cl_check_name_is_input(const CLCheck *c, int index);
+int cl_check_name_column(const CLCheck *c, int index);
+bool cl_check_name_by_hand(const CLCheck *c, int index);
 
 // ---- Load notes ----------------------------------------------------------
 

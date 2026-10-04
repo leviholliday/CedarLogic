@@ -74,6 +74,87 @@ for bad in ["F = A +", "F = (A", "F = A )", "= A", "F = ", "F(A,B) = C", "F = Σ
     check((try? FormulaParser.parse(bad)) == nil, "should refuse \"\(bad)\"")
 }
 
+// MARK: Check my circuit, on tables made by hand
+func tt_spec_only(_ p: ParsedFormulas) -> String { CircuitCheck.spec(p) }
+/// A parsed formula as a pasted truth table: "A B | F" then a row per minterm.
+func tableText(_ p: ParsedFormulas) -> String {
+    let n = p.variables.count
+    var lines = [p.variables.joined(separator: " ") + " | " + p.functions.map(\.name).joined(separator: " ")]
+    for m in 0..<(1 << n) {
+        let ins: [String] = (0..<n).map { (m >> (n - 1 - $0)) & 1 == 1 ? "1" : "0" }
+        let outs: [String] = p.functions.map { f -> String in
+            guard let v = f.values[m] else { return "X" }
+            return v ? "1" : "0"
+        }
+        lines.append(ins.joined(separator: " ") + " | " + outs.joined(separator: " "))
+    }
+    return lines.joined(separator: "\n")
+}
+func table(_ names: [String], _ inputs: Int, _ outs: [(Int) -> Character]) -> [[Character]] {
+    (0..<(1 << inputs)).map { m in (0..<inputs).map { (m >> (inputs - 1 - $0)) & 1 == 1 ? "1" : "0" } + outs.map { $0(m) } }
+}
+func bit(_ b: Bool) -> Character { b ? "1" : "0" }
+do {
+    // A full adder whose carry is wrong when all three are on.
+    let names = ["A", "B", "Cin", "S", "Cout"]
+    let rows = table(names, 3, [{ bit($0.nonzeroBitCount % 2 == 1) }, { m in bit(m.nonzeroBitCount >= 2 && m != 7) }])
+    func run(_ kind: CircuitCheck.Kind, _ text: String, _ byHand: [String: String] = [:], names: [String] = names, rows r: [[Character]]? = nil,
+             sequential: Bool = false) -> CircuitCheck {
+        CircuitCheck(names: names, inputs: 3, rows: r ?? rows, sequential: sequential, unsettled: 0, kind: kind, text: text, byHand: byHand)
+    }
+    let adder = "S = A ^ B ^ Cin; Cout = AB + Cin(A ^ B)"
+    var c = run(.formula, adder)
+    check(c.verdict == .wrong && c.wrongRows == [7] && c.outputs.map(\.wrong) == [0, 1], "adder: \(c.summary)")
+    check(c.summary == "Doesn't match: Cout is wrong on 1 of 8 rows.", "adder summary: \(c.summary)")
+    check(c.expected[7] == ["1", "1"] && c.result[7] == ["=", "x"], "adder row 7: \(c.expected[7]) \(c.result[7])")
+    c = run(.formula, "S = A ^ B ^ Cin")
+    check(c.verdict == .matches && c.notes.contains { $0.text.contains("Light Cout isn't") }, "only S: \(c.summary) \(c.notes)")
+    // Don't-cares: the wrong row is a don't-care, so it matches.
+    c = run(.formula, "S(A,B,Cin) = Σm(1,2,4,7); Cout(A,B,Cin) = Σm(3,5,6) + d(7)")
+    check(c.verdict == .matches && c.summary.contains("1 don't-care"), "don't-care: \(c.summary)")
+    // Names: case and spaces don't matter; different names pair up in order, with a note.
+    c = run(.formula, "s = a ^ b ^ cin")
+    check(c.verdict == .matches, "lower case: \(c.summary)")
+    c = run(.formula, "Sum = X ^ Y ^ Z; Carry = XY + Z(X ^ Y)")
+    check(c.verdict == .wrong && c.notes.contains { $0.text == "Matched by position, as the names differ: X is A, Y is B, Z is Cin, Sum is S and Carry is Cout." },
+          "by position: \(c.summary) \(c.notes)")
+    c = run(.formula, "Sum = A ^ B ^ Cin")   // one asked for, two lights: which one isn't clear
+    check(c.verdict == .cannotCheck && c.summary == "Can't check yet: there's no light called Sum.", "Sum: \(c.summary)")
+    // A switch that isn't there, then picked by hand.
+    c = run(.formula, "S = A ^ B ^ Ci; Cout = AB + Ci(A ^ B) + D")
+    check(c.verdict == .cannotCheck && c.summary.contains("no switches called Ci and D"), "missing switches: \(c.summary)")
+    c = run(.formula, "S = A ^ Q ^ B")
+    check(c.verdict == .matches && c.notes.contains { $0.text.contains("Q is Cin") }, "Q by position: \(c.summary)")
+    c = run(.formula, "S = A ^ Q ^ B", ["Q": "Cin"])
+    check(c.verdict == .matches && c.names.first { $0.name == "Q" }?.byHand == true, "Q by hand: \(c.summary)")
+    // A light that isn't there.
+    c = run(.formula, "S = A ^ B ^ Cin; Carry = AB + Cin(A ^ B); Z = A")
+    check(c.verdict == .cannotCheck && c.summary.contains("no light called Carry and Z"), "missing lights: \(c.summary)")
+    // Unknown and floating lights.
+    let floating = table(names, 3, [{ m in m == 2 ? "Z" : bit(m.nonzeroBitCount % 2 == 1) }, { m in m < 4 ? "X" : bit(m.nonzeroBitCount >= 2) }])
+    c = run(.formula, adder, rows: floating)
+    check(c.verdict == .wrong && c.notes.contains { $0.text.contains("shows Z (floating)") } && c.notes.contains { $0.text.contains("On 4 rows the light Cout shows X") },
+          "odd values: \(c.summary) \(c.notes)")
+    c = run(.formula, adder, sequential: true)
+    check(c.notes.contains { $0.text.contains("clocks or flip-flops") }, "sequential note")
+    // Formula mistakes come back as they read.
+    c = run(.formula, "S = A +")
+    check(c.verdict == .cannotCheck && c.notes.first?.kind == 2, "bad formula: \(c.summary)")
+    // Pasted tables: with a bar, without one (names tell), as a block of digits, partial, without names.
+    c = run(.table, "A B Cin | S Cout\n000 00\n001 10\n010 10\n011 01\n100 10\n101 01\n110 01\n111 11")
+    check(c.verdict == .wrong && c.wrongRows == [7], "table: \(c.summary) \(c.notes)")
+    c = run(.table, "A\tB\tCin\tS\tCout\n0\t0\t0\t0\t0\n1\t1\t1\t1\tX")
+    check(c.verdict == .matches && c.notes.contains { $0.text.contains("leaves out 6 rows") }, "partial table: \(c.summary) \(c.notes)")
+    c = run(.table, "0 0 0 0 0\n0 0 1 1 0")
+    check(c.verdict == .matches && c.notes.contains { $0.text.contains("no names on top") }, "no header: \(c.summary)")
+    c = run(.table, "A B | F\n0 0 | 2")
+    check(c.verdict == .cannotCheck && c.summary.contains("\"2\""), "bad value: \(c.summary)")
+    c = run(.table, "A B Cin | S\n0 0 0 | 0\n0 0 0 | 1")
+    check(c.verdict == .cannotCheck && c.summary.contains("different values"), "clash: \(c.summary)")
+    c = run(.table, "A B Cin | S\n0 0 | 0")
+    check(c.verdict == .cannotCheck && c.summary.hasPrefix("Row 1 has 3 values"), "short row: \(c.summary)")
+}
+
 // MARK: Built in the engine: its truth table must be the formula's
 guard cl_library_load(CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "res/cl_gatedefs.xml") else {
     print("FAIL: gate library didn't load"); exit(2)
@@ -135,6 +216,18 @@ for (fi, text) in formulas.enumerated() {
                         let cell = cl_tt_cell(tt, Int32(r), Int32(col))
                         check(cell == (want ? 49 : 48), "\(what): \(f.name) row \(r) is \(Character(UnicodeScalar(UInt8(cell)))), want \(want ? 1 : 0)")
                     }
+                }
+                // Check my circuit: the formula itself matches; one row changed doesn't.
+                let rows = (0..<Int(cl_tt_rows(tt))).map { r in (0..<cols).map { Character(UnicodeScalar(UInt8(cl_tt_cell(tt, Int32(r), Int32($0))))) } }
+                let ok = CircuitCheck(names: names, inputs: ins, rows: rows, sequential: false, unsettled: 0, kind: .formula, text: text, byHand: [:])
+                check(ok.verdict == .matches, "\(what): check says \(ok.summary) \(ok.notes.map(\.text))")
+                if let r = parsed.functions[0].values.firstIndex(where: { $0 != nil }) {
+                    var bad = parsed
+                    bad.functions[0].values[r]!.toggle()
+                    let wrong = CircuitCheck(names: names, inputs: ins, rows: rows, sequential: false, unsettled: 0, kind: .table,
+                                             text: tableText(bad), byHand: [:])
+                    check(wrong.verdict == .wrong && wrong.wrongRows == [r] && wrong.outputs[0].wrong == 1,
+                          "\(what): one changed row: \(wrong.summary) rows \(wrong.wrongRows)")
                 }
                 cl_tt_free(tt)
                 if let outDir, shape == .asWritten, !two {

@@ -4,6 +4,7 @@
 // then the switches put back.
 
 #include "DocumentImpl.h"
+#include "TruthTableImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
 
@@ -12,14 +13,6 @@
 #include <cstring>
 #include <string>
 #include <vector>
-
-struct CLTruthTable {
-	std::vector<std::string> names;          // inputs, then outputs
-	int inputs = 0;
-	std::vector<std::vector<char>> rows;
-	bool sequential = false;
-	int unsettled = 0;
-};
 
 namespace {
 
@@ -157,5 +150,18 @@ char cl_tt_cell(const CLTruthTable* tt, int row, int col) {
 }
 bool cl_tt_sequential(const CLTruthTable* tt) { return tt && tt->sequential; }
 int cl_tt_unsettled(const CLTruthTable* tt) { return tt ? tt->unsettled : 0; }
+
+CLTruthTable* cl_tt_new(int inputs, bool sequential, int unsettled) {
+	auto* tt = new CLTruthTable();
+	tt->inputs = std::max(0, inputs);
+	tt->sequential = sequential;
+	tt->unsettled = unsettled;
+	return tt;
+}
+void cl_tt_add_name(CLTruthTable* tt, const char* name) { if (tt) tt->names.push_back(name ? name : ""); }
+void cl_tt_add_row(CLTruthTable* tt, const char* cells) {
+	if (!tt || !cells) return;
+	tt->rows.emplace_back(cells, cells + std::strlen(cells));
+}
 
 }  // extern "C"
