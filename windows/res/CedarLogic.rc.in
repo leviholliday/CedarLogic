@@ -4,6 +4,9 @@
 #include <winres.h>
 
 1 ICON "@CL_ICON@"
+// The icon .cdl files carry in Explorer (the Mac's document icon): the
+// exe's second, ",1" in the file association.
+2 ICON "@CL_DOC_ICON@"
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "@CL_MANIFEST@"
 // The launch screen's icon (the Mac's LaunchIcon.png) and the first
 // launch's sound (the Mac's FirstLaunch.m4a, as a WAV at its 0.75 volume).
