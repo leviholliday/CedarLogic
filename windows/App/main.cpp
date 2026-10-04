@@ -540,7 +540,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
-			        : d == "rename" ? CMD_RENAME_TAB : d == "alert" ? -5
+			        : d == "rename" ? CMD_RENAME_TAB : d == "alert" ? -5 : d == "about" ? CMD_ABOUT
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
 			continue;
 		}

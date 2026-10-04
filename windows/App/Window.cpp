@@ -1280,12 +1280,7 @@ void CircuitWindow::run(int command) {
 	case CMD_TOUR: welcome::startTourOn(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;
-	case CMD_ABOUT:
-		showMessage(hwnd, Tone::Info, "CedarLogic " CL_VERSION " (native Windows, testing)",
-		            "A digital logic simulator, from Cedarville University.\n\n"
-		            "This is the native Windows app: plain Windows controls and Direct2D on the shared CedarLogic "
-		            "engine, with nothing else to install.\n\nhttps://github.com/leviholliday/CedarLogic");
-		break;
+	case CMD_ABOUT: about::show(this); break;
 	default: break;
 	}
 }

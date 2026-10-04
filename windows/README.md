@@ -65,7 +65,7 @@ Direct2D here. And:
   captures it to a PNG after two seconds and quits (CI runs it on the zip).
   With `--dark` or `--light` for that run, `--sim-view`, or `--dialog
   preferences|shortcuts|truth-table|add-gate|library|versions|templates|
-  formula|scope|export|feedback|help|welcome|whatsnew|quit|alert|rename`
+  formula|scope|export|feedback|help|welcome|whatsnew|quit|alert|rename|about`
   to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
   or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and

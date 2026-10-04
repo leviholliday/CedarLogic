@@ -1291,3 +1291,95 @@ bool offer(CircuitWindow* window) {
 }
 
 }  // namespace whatsnew
+
+// ---- About ------------------------------------------------------------------------
+// A card in the brand's look (the launch screen's colours), as the Linux
+// app's: the icon rising into place, the version, a line about the app, and
+// Website, What's New and Close.
+
+namespace about {
+
+namespace {
+
+enum { kSite = 1, kNews, kClose };
+const float kAW = 460, kAH = 420;
+
+struct About {
+	Panel panel;
+	CircuitWindow* window = nullptr;
+	double opened = nowSeconds();
+	bool calm = reduceMotion();
+};
+About* g_about = nullptr;
+
+void close(int then) {
+	About* a = g_about;
+	if (a == nullptr) return;
+	g_about = nullptr;
+	CircuitWindow* window = windowAlive(a->window) ? a->window : nullptr;
+	if (window) EnableWindow(window->window(), TRUE);
+	a->panel.destroy();
+	delete a;
+	if (window == nullptr) return;
+	SetForegroundWindow(window->window());
+	if (then == kSite) openExternally(window->window(), "https://cedarlogic.netlify.app");
+	else if (then == kNews) whatsnew::show(window);
+}
+
+void paint(ID2D1RenderTarget* rt, float w, float h) {
+	About* a = g_about;
+	if (a == nullptr) return;
+	const double t = a->calm ? 1 : nowSeconds() - a->opened;
+	ground(rt, w, h, 0.5f, 0.22f, 26);
+	const float k = (float)easeOut(t / 0.5);
+	icon(rt, w / 2 - 48, 40 + 8 * (1 - k), 96, 0.55f * k);
+	text(rt, "CedarLogic", 0, 152, 28, kBold, kPrimary, w, DWRITE_TEXT_ALIGNMENT_CENTER);
+	text(rt, "Version " CL_VERSION "  ·  native Windows test build  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0, 192, 12,
+	     kMedium, kNeon, w, DWRITE_TEXT_ALIGNMENT_CENTER);
+	text(rt,
+	     "A digital logic simulator, from Cedarville University. Rebuilt natively for Windows: plain Windows controls and Direct2D on "
+	     "the shared CedarLogic engine, with nothing else to install.",
+	     40, 222, 13, kNormal, kSecondary, w - 80, DWRITE_TEXT_ALIGNMENT_CENTER);
+	const D2D1_RECT_F site = D2D1::RectF(w / 2 - 170, h - 70, w / 2 - 60, h - 34);
+	const D2D1_RECT_F news = D2D1::RectF(w / 2 - 50, h - 70, w / 2 + 60, h - 34);
+	const D2D1_RECT_F done = D2D1::RectF(w / 2 + 70, h - 70, w / 2 + 170, h - 34);
+	button(rt, site, "Website", false, a->panel.hot == kSite);
+	a->panel.addHit(site, kSite);
+	button(rt, news, "What's New", false, a->panel.hot == kNews);
+	a->panel.addHit(news, kNews);
+	button(rt, done, "Close", true, a->panel.hot == kClose);
+	a->panel.addHit(done, kClose);
+}
+
+}  // namespace
+
+void show(CircuitWindow* window) {
+	if (window == nullptr) return;
+	if (g_about) { SetForegroundWindow(g_about->panel.hwnd); return; }
+	g_about = new About();
+	g_about->window = window;
+	Panel& p = g_about->panel;
+	p.paint = paint;
+	p.animating = [] { return g_about && !g_about->calm && nowSeconds() - g_about->opened < 0.6; };
+	p.click = [](int id) { close(id == kClose ? 0 : id); };
+	// Alt+F4 closes it.
+	p.message = [](UINT msg, WPARAM, LPARAM, LRESULT& r) {
+		if (msg != WM_CLOSE || g_about == nullptr) return false;
+		close(0);
+		r = 0;
+		return true;
+	};
+	p.key = [](UINT vk) {
+		if (vk != VK_ESCAPE && vk != VK_RETURN) return false;
+		close(0);
+		return true;
+	};
+	const RECT r = centeredOn(window->window(), (int)kAW, (int)kAH);
+	p.create(window->window(), r.right - r.left, r.bottom - r.top, r.left, r.top);
+	EnableWindow(window->window(), FALSE);
+	ShowWindow(p.hwnd, SW_SHOWNORMAL);
+	SetForegroundWindow(p.hwnd);
+	SetFocus(p.hwnd);
+}
+
+}  // namespace about
