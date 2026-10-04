@@ -282,6 +282,9 @@ void Toolbar::paintPicture(ID2D1RenderTarget* rt, float w, float h, int style) {
 	laidTitle = keepTitle;
 	hot = keepHot;
 	pressed = keepPressed;
+	// Laid out afresh when next drawn: a change Settings made before this
+	// picture (a group hidden, the name turned off) still has to reach the bar.
+	relayout = true;
 }
 
 void Toolbar::draw(ID2D1RenderTarget* rt, float w, float h, int style, bool live) {
@@ -427,7 +430,7 @@ RECT Toolbar::maximizeRect() const {
 RECT Toolbar::commandRect(int command) const {
 	const double s = scale();
 	for (const Item& it : items) {
-		if (it.kind != Button || it.command != command) continue;
+		if (it.kind != Button || it.command != command || !it.shown) continue;
 		RECT r = { (LONG)(it.rect.left * s), (LONG)(it.rect.top * s), (LONG)(it.rect.right * s), (LONG)(it.rect.bottom * s) };
 		MapWindowPoints(hwnd, nullptr, (POINT*)&r, 2);
 		return r;
