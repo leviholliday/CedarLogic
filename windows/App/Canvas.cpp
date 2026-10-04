@@ -195,7 +195,6 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 		if (cl_edit_box(doc, &l, &b, &r, &t)) drawBox(rt, l, b, r, t, a, 1);
 		else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(rt, l, b, r, t, a, alpha);
 	}
-	drawWireTag(rt, (float)w, (float)h);
 	drawOverlays(rt, (float)w, (float)h);
 }
 
@@ -318,6 +317,7 @@ void Canvas::drawOverlays(ID2D1RenderTarget* rt, float w, float h) {
 	sliderTrack = D2D1::RectF(0, 0, 0, 0);
 	if (win->simView()) drawSimBar(rt, w, h);
 	else drawBanner(rt, w);
+	drawWireTag(rt, w, h);   // over the bars, as it's beside the pointer
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(rt, w, h, t);
 }
