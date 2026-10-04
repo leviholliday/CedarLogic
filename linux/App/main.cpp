@@ -489,11 +489,13 @@ void startupCb(GApplication* gapp, gpointer) {
 	// engine's settings, CSS) in German, French and other comma locales.
 	setlocale(LC_NUMERIC, "C");
 	sturdyUiFont();
+	// Before the launch screen: it asks the settings whether this is the
+	// first launch ever (the slower one, with the sound).
+	prefs().load();
+	gPrimary = true;
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
 	if (gScreenshot.empty() && gSplashFile.empty()) gSplash = showSplash();
-	prefs().load();
-	gPrimary = true;
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
 	loadCss();
