@@ -380,7 +380,8 @@ void GatePalette::paintTiles() {
 // until the button comes up -- as the Mac's and the Linux app's do. In a
 // split it's on the side under the pointer: crossing to the other side takes
 // it back from the side it left (as switching sides does) and puts it on
-// there.
+// there. Still over the panel, it starts on the side next to the panel (as
+// on Linux), so it's that side's edge it slides out from under.
 void GatePalette::dragTo() {
 	if (win->currentCanvas() == nullptr || pressed < 0 || pressed >= (int)shown.size()) return;
 	if (!win->canEdit()) {
@@ -390,13 +391,22 @@ void GatePalette::dragTo() {
 	POINT p;
 	GetCursorPos(&p);
 	const HWND under = WindowFromPoint(p);
+	int side = -1, nearest = -1;
+	LONG nearestLeft = 0;
 	for (int pane = 0; pane < 2; pane++) {
 		Canvas* pc = win->paneCanvas(pane);
-		if (pc == nullptr || pc->widget() != under || pc == win->currentCanvas()) continue;
+		if (pc == nullptr) continue;
+		if (pc->widget() == under) side = pane;
+		RECT r;
+		GetWindowRect(pc->widget(), &r);
+		if (nearest < 0 || r.left < nearestLeft) { nearest = pane; nearestLeft = r.left; }
+	}
+	if (side < 0 && !placed) side = nearest;
+	Canvas* to = side >= 0 ? win->paneCanvas(side) : nullptr;
+	if (to && to != win->currentCanvas()) {
 		const bool carried = placed && win->isFloating();   // not after Escape took it back
-		win->activatePane(pane);
+		win->activatePane(side);
 		if (carried) placed = false;
-		break;
 	}
 	Canvas* c = win->currentCanvas();
 	if (c == nullptr) return;
