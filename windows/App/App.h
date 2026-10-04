@@ -86,6 +86,7 @@ struct Prefs {
 	bool feedbackContact = true;
 	bool confirmQuit = true;                      // Ctrl+Q asks first
 	std::string seenWhatsNew;                     // the version What's New was last shown for
+	int startMenu = 0;                            // a copy from the zip: 0 not asked, 1 added to Start, 2 not wanted
 
 	double wireScale() const;
 	void load();

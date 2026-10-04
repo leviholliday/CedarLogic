@@ -11,6 +11,11 @@
 //      unsaved work is asked about first. The old exe is removed at the next
 //      launch.
 //
+// The same for a copy unzipped anywhere and one the installer put in
+// %LOCALAPPDATA%\Programs\CedarLogic: only the exe and res beside it change
+// (the installer's uninstaller and its notes stay as they are; Settings >
+// Apps learns the new version at the next launch, in Integration.cpp).
+//
 // The network calls run on a thread of their own; only the main thread
 // touches windows.
 
@@ -248,6 +253,27 @@ void removeTree(const std::wstring& dir) {
 	RemoveDirectoryW(dir.c_str());
 }
 
+// The unpacked folder that has CedarLogic.exe: the zip's CedarLogic folder,
+// else the zip's top, else whichever folder a level down has it.
+std::wstring unpacked(const std::wstring& work) {
+	auto has = [](const std::wstring& dir) { return GetFileAttributesW((dir + L"\\CedarLogic.exe").c_str()) != INVALID_FILE_ATTRIBUTES; };
+	if (has(work + L"\\CedarLogic")) return work + L"\\CedarLogic";
+	if (has(work)) return work;
+	std::wstring found = work + L"\\CedarLogic";
+	WIN32_FIND_DATAW fd;
+	HANDLE h = FindFirstFileW((work + L"\\*").c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) return found;
+	do {
+		const std::wstring name = fd.cFileName;
+		if (name != L"." && name != L".." && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && has(work + L"\\" + name)) {
+			found = work + L"\\" + name;
+			break;
+		}
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+	return found;
+}
+
 void install(HWND parent, const Asset& asset) {
 	const std::string exe = exePath();
 	const std::string dir = dirName(exe);
@@ -276,7 +302,7 @@ void install(HWND parent, const Asset& asset) {
 		return runHidden(tar, L"-xf \"" + zip + L"\" -C \"" + work + L"\"");
 	});
 	DeleteFileW(zip.c_str());
-	const std::wstring fresh = work + L"\\CedarLogic";
+	const std::wstring fresh = unpacked(work);
 	if (!got || GetFileAttributesW((fresh + L"\\CedarLogic.exe").c_str()) == INVALID_FILE_ATTRIBUTES) {
 		removeTree(work);
 		showMessage(parent, Tone::Warning, "The update couldn't be downloaded", "Check your connection and try again.");

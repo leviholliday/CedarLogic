@@ -8,6 +8,7 @@
 #include "Dialogs.h"
 #include "Feedback.h"
 #include "Help.h"
+#include "Integration.h"
 #include "Library.h"
 #include "Palette.h"
 #include "Recovery.h"
@@ -618,6 +619,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			return status == 403 ? 0 : 1;
 		}
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
+		if (a == "--start-menu-test") {
+			std::string report;
+			const bool ok = integration::selfTest(report);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
 		if (a == "--click-test") { gClickTest = true; continue; }
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
@@ -646,7 +653,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
-			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT
+			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
 			continue;
 		}
@@ -730,6 +737,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
 	if (gDialog == -5) SetTimer(nullptr, 0, 400, alertTimer);
 	if (gDialog == -6) SetTimer(nullptr, 0, 400, renameTimer);
+	if (gDialog == -7) integration::start(true);
 	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else if (gClickTest) {
@@ -744,6 +752,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			if (!welcome::offer(front) && !whatsnew::offer(front))
 				SetTimer(nullptr, 0, 300, recoveryTimer);
 			updater::start();
+			integration::start();
 		});
 	}
 

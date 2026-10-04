@@ -25,6 +25,8 @@ enum Command {
 	CMD_SHORTCUTS, CMD_TOUR, CMD_HELP, CMD_CHECK_UPDATES, CMD_ABOUT, CMD_WHATS_NEW, CMD_FEEDBACK,
 	// The right-click menu's Disconnect, and the recent files (CMD_RECENT + i).
 	CMD_DISCONNECT,
+	// Help's Add to / Remove from Start Menu, for a copy run from the zip.
+	CMD_START_MENU,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

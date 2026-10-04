@@ -19,6 +19,7 @@
 #include "Collections.h"
 #include "LibraryWindow.h"
 #include "Chrome.h"
+#include "Integration.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -338,6 +339,7 @@ void CircuitWindow::buildMenus() {
 	separator(help);
 	item(help, CMD_FEEDBACK, "Send &Feedback\u2026");
 	item(help, CMD_CHECK_UPDATES, "Check for &Updates\u2026");
+	if (integration::offered()) item(help, CMD_START_MENU, integration::menuLabel().c_str());
 	item(help, CMD_ABOUT, "&About CedarLogic");
 }
 
@@ -1145,6 +1147,7 @@ void CircuitWindow::updateMenu(HMENU menu) {
 	for (int i = 0; i < n; i++) {
 		const UINT id = GetMenuItemID(menu, i);
 		if (id == (UINT)-1 || id == 0 || (id >= CMD_RECENT && id <= CMD_RECENT_LAST)) continue;
+		if (id == CMD_START_MENU) ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id, W(integration::menuLabel()).c_str());
 		EnableMenuItem(menu, i, MF_BYPOSITION | (commandEnabled((int)id) ? MF_ENABLED : MF_GRAYED));
 		const int check = commandChecked((int)id);
 		if (check >= 0) CheckMenuItem(menu, i, MF_BYPOSITION | (check ? MF_CHECKED : MF_UNCHECKED));
@@ -1768,6 +1771,7 @@ void CircuitWindow::run(int command) {
 	case CMD_TOUR: welcome::startTourOn(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;
+	case CMD_START_MENU: integration::menuCommand(this); break;
 	case CMD_ABOUT: about::show(this); break;
 	default: break;
 	}

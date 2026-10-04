@@ -3,7 +3,8 @@ name: Windows native build
 # The native Windows app (windows/): plain Win32 and Direct2D on the shared
 # engine, no wxWidgets and no Skia. Builds it for Intel/AMD and ARM PCs, runs
 # the engine's headless checks, starts the app and takes a picture of its
-# window, and publishes the zips as a rolling test build on pushes to
+# window, makes an installer beside each zip (and installs and uninstalls
+# it), and publishes them as a rolling test build on pushes to
 # windows/native.
 
 on:
@@ -77,12 +78,50 @@ jobs:
 
           Double-click CedarLogic.exe to start it. Keep the res folder next to
           it: that's where the gates, the help and the practice circuit are.
-          Nothing is installed; delete the folder to remove it.
+
+          The first time, CedarLogic asks whether to add itself to the Start
+          menu and open .cdl files. Say yes and keep this folder where it is;
+          the ••• menu's Help > Remove from Start Menu undoes it. Otherwise
+          nothing is installed: delete the folder to remove it.
+
+          For a normal install instead, use CedarLogic-Windows-Setup from the
+          same download page.
 
           Windows 10 or 11.
           EOT
           (cd package && 7z a -tzip "../CedarLogic-Windows-native-${{ matrix.arch }}.zip" CedarLogic > /dev/null)
           ls -la CedarLogic-Windows-native-*.zip
+
+      # The installer, from the same folder (windows/installer/CedarLogic.iss):
+      # for this user, no administrator; CedarLogic in Start, .cdl files
+      # opening in it, an uninstaller in Settings > Apps. Inno Setup 6, from
+      # Chocolatey when the runner hasn't got it; the version is CMake's.
+      # New and not yet seen on a real Windows, so for now this and its two
+      # tests below don't hold the zips back: a failure shows on the run, and
+      # the release goes out without installers. (Take continue-on-error off
+      # these three once they've passed.)
+      - name: Installer
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # Wherever this Inno Setup put itself (Program Files or its x86 one).
+          function Find-Iscc {
+            Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "${env:ProgramFiles}\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName | Select-Object -First 1 -ExpandProperty FullName
+          }
+          $iscc = Find-Iscc
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = Find-Iscc
+            if (-not $iscc) { throw "Inno Setup couldn't be installed (choco ended with $LASTEXITCODE)" }
+          }
+          Write-Output "Inno Setup: $iscc"
+          $m = Select-String -Path windows/build/CMakeCache.txt -Pattern '^CMAKE_PROJECT_VERSION:STATIC=(.+)$' | Select-Object -First 1
+          if (-not $m) { $m = Select-String -Path windows/CMakeLists.txt -Pattern 'project\(\S+ VERSION ([0-9.]+)' | Select-Object -First 1 }
+          $version = $m.Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$version" "/DArch=${{ matrix.arch }}" windows\installer\CedarLogic.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item CedarLogic-Windows-Setup-${{ matrix.arch }}.exe
 
       # Start the packaged app, open a circuit and take a picture of the whole
       # window: catches anything the zip forgot, and shows what it looks like.
@@ -149,6 +188,9 @@ jobs:
           # The status bar along the bottom, with a note in it.
           timeout 90 "$A" --note "Saved, and a version was kept." --screenshot "$PWD/renders/status-note.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --note "Copied." --screenshot "$PWD/renders/status-note-dark.png" res/samples/practice.cdl || true
+          # The zip's first-run question: add CedarLogic to Start?
+          timeout 90 "$A" --dialog start-menu --screenshot "$PWD/renders/start-menu.png" || true
+          timeout 90 "$A" --dark --dialog start-menu --screenshot "$PWD/renders/start-menu-dark.png" || true
           timeout 60 "$A" --feedback-probe || echo "::warning::the feedback probe failed"
           timeout 90 "$A" --dialog feedback --screenshot "$PWD/renders/feedback.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog feedback --screenshot "$PWD/renders/feedback-dark.png" res/samples/practice.cdl || true
@@ -167,18 +209,69 @@ jobs:
 
       # Clicks on the toolbar's buttons, the tabs' +, and the window's drawn
       # Minimize (on the toolbar, and on the tabs in focus mode) and Close,
-      # as Windows sends them (press, then release), each checked for its
-      # effect: a picture can't show that a button does nothing.
+      # as Windows sends them (press, then release), and a gate dragged from
+      # the side panel onto the canvas, each checked for its effect: a
+      # picture can't show that a button does nothing.
       - name: Click test
         if: matrix.run
         shell: bash
         run: timeout 120 package/CedarLogic/CedarLogic.exe --click-test
 
-      - name: Upload zip
+      # The zip's copy adding itself to Start and to .cdl files (as its
+      # first-run question's yes does), checked the way Windows looks them
+      # up, then taking itself away again.
+      - name: Start menu test
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: timeout 60 package/CedarLogic/CedarLogic.exe --start-menu-test
+
+      # Install as someone would (quietly here), check CedarLogic starts from
+      # there, is in Start and owns .cdl files; then uninstall and check it's
+      # all gone.
+      - name: Installer test
+        if: matrix.run
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'CedarLogic.lnk'
+          $prog = 'HKCU:\Software\Classes\CedarLogic.Circuit'
+          $p = Start-Process -FilePath ".\CedarLogic-Windows-Setup-${{ matrix.arch }}.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$PWD\setup.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content setup.log; throw "setup ended with $($p.ExitCode)" }
+          # Where it went, as setup noted it for the app.
+          $dir = (Get-ItemProperty 'HKCU:\Software\CedarLogic\Native' -ErrorAction SilentlyContinue).InstallDir
+          if (-not $dir -or $dir -notlike '*\AppData\Local\Programs\CedarLogic') { Get-Content setup.log; throw "InstallDir is '$dir'" }
+          $exe = Join-Path $dir 'CedarLogic.exe'
+          foreach ($f in @($exe, "$dir\res\cl_gatedefs.xml", "$dir\unins000.exe", $lnk)) {
+            if (-not (Test-Path $f)) { Get-Content setup.log; throw "not installed: $f" }
+          }
+          $open = (Get-Item "$prog\shell\open\command").GetValue('')
+          if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
+          if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }
+          $p = Start-Process -FilePath $exe -ArgumentList '--screenshot', "`"$PWD\renders\installed.png`"", "`"$PWD\res\samples\practice.cdl`"" -PassThru
+          $null = $p.Handle   # so ExitCode is there once it's gone
+          $p | Wait-Process -Timeout 90
+          if ($p.ExitCode -ne 0 -or -not (Test-Path renders\installed.png)) { throw "the installed CedarLogic didn't start ($($p.ExitCode))" }
+          $p = Start-Process -FilePath "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          # The uninstaller carries on from a copy of itself, and takes the
+          # folder away last: wait for that.
+          for ($i = 0; $i -lt 90 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $dir) { Write-Output "::warning::left in $dir after uninstalling: $((Get-ChildItem -Recurse -Name $dir) -join ', ')" }
+          foreach ($f in @($exe, "$dir\res", $lnk, $prog, 'HKCU:\Software\CedarLogic\Native')) {
+            if (Test-Path $f) { throw "still there after uninstalling: $f" }
+          }
+          if ((Test-Path 'HKCU:\Software\Classes\.cdl') -and (Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -eq 'CedarLogic.Circuit') {
+            throw '.cdl is still CedarLogic''s'
+          }
+          Write-Output 'installed, started, uninstalled: all as expected'
+
+      - name: Upload zip and installer
         uses: actions/upload-artifact@v7
         with:
           name: CedarLogic-Windows-native-${{ matrix.arch }}
-          path: CedarLogic-Windows-native-${{ matrix.arch }}.zip
+          path: |
+            CedarLogic-Windows-native-${{ matrix.arch }}.zip
+            CedarLogic-Windows-Setup-${{ matrix.arch }}.exe
           if-no-files-found: error
 
       - name: Upload renders
@@ -191,7 +284,8 @@ jobs:
 
   # A public download for testers without a GitHub account: one rolling
   # pre-release, replaced on every push to windows/native. Its own job, after
-  # both builds, so the release only ever holds a matching pair.
+  # both builds, so the release only ever holds a matching set (the two
+  # installers and the two zips).
   publish:
     needs: build
     if: github.ref == 'refs/heads/windows/native'
@@ -201,7 +295,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download both zips
+      - name: Download the zips and installers
         uses: actions/download-artifact@v8
         with:
           pattern: CedarLogic-Windows-native-*
@@ -213,18 +307,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           rm -f zips/*.png
+          shopt -s nullglob
           ls -la zips
           TAG=windows-native-testing
+          # The installers first -- when this run made them (their step
+          # doesn't hold the build back yet).
+          SETUP="To install: download CedarLogic-Windows-Setup-x64.exe and run it (on a Windows on ARM laptop, such as a Snapdragon one: CedarLogic-Windows-Setup-ARM64.exe). Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway. It installs for you only, with no administrator needed: CedarLogic goes in the Start menu, .cdl files open in it, and Settings > Apps removes it. It updates itself from inside the app."
+          ZIPS="Rather not install? The zips run as they are:"
+          setups=(zips/*.exe)
+          if [ ${#setups[@]} -eq 0 ]; then
+            SETUP="This build has no installers; the zips below run as they are. Windows SmartScreen may say it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway."
+            ZIPS="Pick the file for your computer:"
+          fi
           NOTES=$(cat <<EOT
           Native Windows test build from windows/native (${GITHUB_SHA::7}). Not a release: expect missing pieces.
 
+          $SETUP
+
           This is CedarLogic rebuilt natively for Windows, the way the Mac app was: plain Windows controls and Direct2D on the same engine as every other CedarLogic, with nothing else to install.
 
-          Pick the file for your computer:
+          $ZIPS
           - x64: ordinary PCs and laptops (Intel/AMD)
           - ARM64: Windows on ARM laptops (Snapdragon)
 
-          Unzip it anywhere and double-click CedarLogic.exe inside. Windows may warn that it doesn't recognise the app (it isn't signed yet): choose More info, then Run anyway.
+          Unzip one anywhere and double-click CedarLogic.exe inside (the same More info, then Run anyway). The first time, it offers to add itself to the Start menu and open .cdl files.
           EOT
           )
           git tag -f "$TAG" "$GITHUB_SHA"
@@ -234,9 +340,9 @@ jobs:
           else
             gh release create "$TAG" --prerelease --title "Native Windows test build" --notes "$NOTES"
           fi
-          gh release upload "$TAG" zips/*.zip --clobber
-          # Drop anything this run didn't make, so only the current pair is offered.
-          keep=$(cd zips && ls *.zip)
+          gh release upload "$TAG" zips/*.exe zips/*.zip --clobber
+          # Drop anything this run didn't make, so only the current set is offered.
+          keep=$(cd zips && ls -1 *.exe *.zip)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done
