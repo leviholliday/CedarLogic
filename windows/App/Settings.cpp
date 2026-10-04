@@ -3,7 +3,7 @@
 // Appearance, Canvas, Toolbar, Shortcuts -- the window fitting each page as
 // you switch, and each setting a label on the left with its control and a
 // line of explanation under it. Every change applies at once; Escape or the
-// close box closes it.
+// close box closes it, and Ctrl+Tab steps through the pages.
 
 #include "Dialogs.h"
 #include "Chrome.h"

@@ -425,6 +425,28 @@ LRESULT CALLBACK tabsProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWOR
 	return DefSubclassProc(h, msg, wp, lp);
 }
 
+// Ctrl+Tab and Ctrl+Shift+Tab (and Ctrl+Page Down and Up) step through a
+// form's pages, as in Windows' own tabbed dialogs. The modal loop offers
+// each message here before the dialog sees it; a field that wants every key
+// (Settings' shortcut recorder) keeps them.
+Form* g_pagedForm = nullptr;
+HHOOK g_pageKeys = nullptr;
+
+LRESULT CALLBACK pageKeysHook(int code, WPARAM wp, LPARAM lp) {
+	const MSG* m = reinterpret_cast<const MSG*>(lp);
+	Form* f = g_pagedForm;
+	if (code == MSGF_DIALOGBOX && m && m->message == WM_KEYDOWN && f && f->dialog && f->pages.size() > 1 &&
+	    (m->wParam == VK_TAB || m->wParam == VK_NEXT || m->wParam == VK_PRIOR) && (GetKeyState(VK_CONTROL) & 0x8000) &&
+	    !(GetKeyState(VK_MENU) & 0x8000) && (m->hwnd == f->dialog || IsChild(f->dialog, m->hwnd)) &&
+	    !(SendMessageW(m->hwnd, WM_GETDLGCODE, m->wParam, (LPARAM)m) & DLGC_WANTALLKEYS)) {
+		const int n = (int)f->pages.size();
+		const bool back = m->wParam == VK_PRIOR || (m->wParam == VK_TAB && (GetKeyState(VK_SHIFT) & 0x8000));
+		guarded("a dialog", [&] { f->showPage((f->page + (back ? n - 1 : 1)) % n); });
+		return 1;
+	}
+	return CallNextHookEx(g_pageKeys, code, wp, lp);
+}
+
 // Up, Down and the Page keys in a text box, offered to Form::onKey.
 LRESULT CALLBACK formKeysProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR data) {
 	if (msg == WM_KEYDOWN && (wp == VK_UP || wp == VK_DOWN || wp == VK_PRIOR || wp == VK_NEXT)) {
@@ -1305,8 +1327,20 @@ int Form::run(HWND owner) {
 	str(L"");                                                // the title comes in build()
 	t.push_back(9);                                          // points
 	str(L"Segoe UI");
+	// With pages, Ctrl+Tab steps through them (one form's at a time).
+	Form* const outerForm = g_pagedForm;
+	const HHOOK outerHook = g_pageKeys;
+	if (pages.size() > 1) {
+		g_pagedForm = this;
+		g_pageKeys = SetWindowsHookExW(WH_MSGFILTER, pageKeysHook, nullptr, GetCurrentThreadId());
+	}
 	const INT_PTR r = DialogBoxIndirectParamW(appInstance(), reinterpret_cast<LPCDLGTEMPLATEW>(t.data()), owner, formProc,
 	                                          (LPARAM)this);
+	if (pages.size() > 1) {
+		if (g_pageKeys) UnhookWindowsHookEx(g_pageKeys);
+		g_pagedForm = outerForm;
+		g_pageKeys = outerHook;
+	}
 	dialog = nullptr;
 	return (int)r;
 }
