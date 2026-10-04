@@ -83,7 +83,7 @@ struct Prefs {
 	std::string lastFormula;
 	int buildShape = 0, buildStyle = 0;
 	bool buildTwoInput = false, buildNewPage = true;
-	int truthTab = 0;                             // the truth table's tab, as last left
+	int truthTab = 0;                             // the truth table's tab, as last left (3: Check)
 	// Timing diagrams (the oscilloscope's share menu).
 	bool timingWhole = false, timingInColor = false;
 	// Export as Image's last choices.

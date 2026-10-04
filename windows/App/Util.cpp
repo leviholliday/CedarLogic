@@ -251,7 +251,7 @@ void Prefs::load() {
 	buildStyle = r.i("buildStyle", buildStyle, 0, 2);
 	buildTwoInput = r.b("buildTwoInput", buildTwoInput);
 	buildNewPage = r.b("buildNewPage", buildNewPage);
-	truthTab = r.i("truthTab", truthTab, 0, 2);
+	truthTab = r.i("truthTab", truthTab, 0, 3);
 	timingWhole = r.b("timingWhole", timingWhole);
 	timingInColor = r.b("timingInColor", timingInColor);
 	exportGrid = r.b("exportGrid", exportGrid);

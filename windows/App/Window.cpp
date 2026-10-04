@@ -318,6 +318,7 @@ void CircuitWindow::buildMenus() {
 	item(sim, CMD_LOCK, "&Lock the Circuit");
 	separator(sim);
 	item(sim, CMD_TRUTH_TABLE, "&Truth Table\tT");
+	item(sim, CMD_CHECK_CIRCUIT, "&Check My Circuit\u2026\tShift+T");
 	item(sim, CMD_SCOPE, "&Oscilloscope\tCtrl+G");
 
 	HMENU tabsMenu = submenu(menuBar, "&Tabs");
@@ -1802,6 +1803,7 @@ void CircuitWindow::run(int command) {
 	case CMD_SIM_VIEW: toggleSimView(); break;
 	case CMD_LOCK: toggleLock(); break;
 	case CMD_TRUTH_TABLE: makeTruthTable(); break;
+	case CMD_CHECK_CIRCUIT: checkCircuit(); break;
 	case CMD_SCOPE: toggleScope(); break;
 	case CMD_NEW_TAB: newPage(); break;
 	case CMD_CLOSE_TAB:
@@ -2446,6 +2448,7 @@ void CircuitWindow::toggleLock() {
 }
 
 void CircuitWindow::makeTruthTable() { showTruthTable(this, currentPage()); redraw(); }
+void CircuitWindow::checkCircuit() { showTruthTable(this, currentPage(), true); redraw(); }
 
 // The oscilloscope docks under the canvases, as on the Mac (Ctrl+G again,
 // its close button or Escape in it puts it away).

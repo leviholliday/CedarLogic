@@ -1032,6 +1032,7 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 		else if (vk == VK_OEM_PLUS || vk == VK_ADD) animateZoom(1 / 0.75);
 		else if (vk == VK_OEM_MINUS || vk == VK_SUBTRACT) animateZoom(0.75);
 		else if (is("truthTable")) win->makeTruthTable();
+		else if (is("checkCircuit")) win->checkCircuit();
 		return true;
 	}
 
@@ -1084,6 +1085,7 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 			return true;
 		}
 		if (is("truthTable")) { win->makeTruthTable(); return true; }
+		if (is("checkCircuit")) { win->checkCircuit(); return true; }
 		if (!win->canEdit()) { win->lockNudge(); return true; }
 		if (is("quickPaste")) win->paste();
 		else if (is("quickCut")) win->cut();

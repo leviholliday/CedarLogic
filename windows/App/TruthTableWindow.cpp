@@ -2,10 +2,13 @@
 // brand's band across the top with three tabs -- the table (click a column's
 // name to rename it), a Karnaugh map for every light with the groups drawn
 // on, and each light's simplest sum of products and product of sums, with
-// NOT as a bar over the letter and a way to build them as gates. Copy puts
+// NOT as a bar over the letter and a way to build them as gates. And Check:
+// the lights against a formula or truth table the assignment gives (the
+// core's cl_check_*, as the Mac and Linux apps), wrong rows shown. Copy puts
 // the table on the clipboard as a tab-separated table that pastes into Word,
 // Docs or a spreadsheet; Export saves it as CSV.
 
+#include "Brand.h"
 #include "Chrome.h"
 #include "Dialogs.h"
 #include "Formula.h"
@@ -13,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <functional>
 #include <map>
 
@@ -114,6 +118,135 @@ std::string formulaName(const std::string& s, const std::string& fallback) {
 	return kept.size() == 1 || restSmall ? kept : kept.substr(0, 1);
 }
 
+// ---- The last check of each circuit ----
+// Saved circuits' in %APPDATA%\CedarLogic\checks.ini (a section per file and
+// page); unsaved ones' only while the app runs.
+struct SavedCheck {
+	int kind = 0;   // 0 a formula, 1 a truth table
+	std::string text;
+	std::map<std::string, std::string> names;   // asked-for name -> the circuit's
+};
+std::map<std::string, SavedCheck> gUnsavedChecks;
+// --check: what the Check tab opens with for CI's pictures (not kept).
+std::string gCheckForTesting;
+bool gHasCheckForTesting = false;
+
+std::string checksFile() { return settingsDir() + "\\checks.ini"; }
+std::string checkSection(std::string key) {
+	for (char& c : key) if (c == '[' || c == ']' || c == '\n' || c == '\r') c = '_';
+	return key;
+}
+// Several lines on one line of the file: new lines kept as \x1F, as native.ini keeps them.
+std::string oneLine(const std::string& text) {
+	std::string one;
+	for (char c : text) if (c != '\r') one += c == '\n' ? '\x1F' : c;
+	return one;
+}
+std::string manyLines(std::string text) {
+	for (char& c : text) if (c == '\x1F') c = '\n';
+	return text;
+}
+bool blank(const std::string& s) {
+	for (char c : s) if (!isspace((unsigned char)c)) return false;
+	return true;
+}
+// The text box wants \r\n between lines.
+std::string crlf(const std::string& s) {
+	std::string out;
+	for (char c : s) {
+		if (c == '\r') continue;
+		if (c == '\n') out += '\r';
+		out += c;
+	}
+	return out;
+}
+
+using CheckSections = std::map<std::string, std::map<std::string, std::string>>;
+CheckSections readChecks() {
+	CheckSections out;
+	std::ifstream in(W(checksFile()).c_str(), std::ios::binary);
+	std::string line, section;
+	while (std::getline(in, line)) {
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		if (line.size() >= 2 && line.front() == '[' && line.back() == ']') {
+			section = line.substr(1, line.size() - 2);
+			out[section];
+			continue;
+		}
+		const size_t eq = line.find('=');
+		if (section.empty() || eq == std::string::npos) continue;
+		out[section][line.substr(0, eq)] = line.substr(eq + 1);
+	}
+	return out;
+}
+
+bool loadCheck(const std::string& key, SavedCheck& out) {
+	if (key.empty()) return false;
+	if (key.rfind("unsaved-", 0) == 0) {
+		auto it = gUnsavedChecks.find(key);
+		if (it == gUnsavedChecks.end()) return false;
+		out = it->second;
+		return true;
+	}
+	const CheckSections all = readChecks();
+	auto it = all.find(checkSection(key));
+	if (it == all.end()) return false;
+	auto value = [&](const char* name) {
+		auto v = it->second.find(name);
+		return v == it->second.end() ? std::string() : v->second;
+	};
+	out.kind = value("kind") == "1" ? 1 : 0;
+	out.text = manyLines(value("text"));
+	const std::string names = manyLines(value("names"));
+	size_t at = 0;
+	while (at < names.size()) {
+		size_t end = names.find('\n', at);
+		if (end == std::string::npos) end = names.size();
+		const std::string line = names.substr(at, end - at);
+		const size_t tab = line.find('\t');
+		if (tab != std::string::npos) out.names[line.substr(0, tab)] = line.substr(tab + 1);
+		at = end + 1;
+	}
+	return true;
+}
+
+void saveCheck(const std::string& key, const SavedCheck& c) {
+	if (key.empty()) return;
+	if (key.rfind("unsaved-", 0) == 0) { gUnsavedChecks[key] = c; return; }
+	CheckSections all = readChecks();
+	std::map<std::string, std::string>& s = all[checkSection(key)];
+	s["kind"] = c.kind == 1 ? "1" : "0";
+	s["text"] = oneLine(c.text);
+	std::string names;
+	for (auto& n : c.names) names += n.first + "\t" + n.second + "\n";
+	s["names"] = oneLine(names);
+	std::string text;
+	for (auto& section : all) {
+		text += "[" + section.first + "]\n";
+		for (auto& kv : section.second) text += kv.first + "=" + kv.second + "\n";
+	}
+	// A temporary beside it, then moved over: a crash mid-write can't leave half a file.
+	const std::wstring file = W(checksFile()), temp = file + L".new";
+	HANDLE f = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (f == INVALID_HANDLE_VALUE) return;
+	DWORD wrote = 0;
+	const bool ok = WriteFile(f, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size();
+	CloseHandle(f);
+	if (!ok || !MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(temp.c_str());
+}
+
+// Names match whatever their case or spacing, as the core matches them.
+std::string nameKey(const std::string& s) {
+	std::string k;
+	for (unsigned char c : s) if (isalnum(c) || c >= 0x80) k += (char)tolower(c);
+	return k;
+}
+
+const int kCheckTab = 3, kTabs = 4;
+const int kEditId = 10;
+// Icon font glyphs for the verdict and the notes.
+const wchar_t kGlyphCheck = 0xE73E, kGlyphCross = 0xE711, kGlyphInfo = 0xE946, kGlyphWarning = 0xE7BA, kGlyphError = 0xEA39;
+
 class TruthWindow {
 public:
 	CircuitWindow* owner = nullptr;
@@ -125,6 +258,15 @@ public:
 	int tab = 0;
 	bool groupsOfOnes = true;
 	std::string buildText;   // set when "Build This as a Circuit" was chosen
+	// Check: what the assignment gives (kept per circuit and page).
+	std::string checkKey;
+	SavedCheck want;
+
+	~TruthWindow() {
+		if (check) cl_check_free(check);
+		if (editFont) DeleteObject(editFont);
+		if (editBrush) DeleteObject(editBrush);
+	}
 
 	void run() {
 		static bool registered = false;
@@ -147,9 +289,19 @@ public:
 		RECT r = { 0, 0, scaled(760, dpi), scaled(660, dpi) };
 		AdjustWindowRectExForDpi(&r, WS_CAPTION | WS_SYSMENU | WS_THICKFRAME, FALSE, 0, dpi);
 		const int w = r.right - r.left, h = r.bottom - r.top;
-		hwnd = CreateWindowExW(0, L"CedarLogicTruthTable", L"Truth Table", WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+		hwnd = CreateWindowExW(0, L"CedarLogicTruthTable", L"Truth Table", WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
 		                       (orc.left + orc.right - w) / 2, (orc.top + orc.bottom - h) / 2, w, h, o, nullptr, appInstance(), this);
 		setDarkTitleBar(hwnd, true);
+		// Check's text box: the formula or table the assignment gives (placed
+		// and shown while the Check tab is).
+		edit = CreateWindowExW(0, L"EDIT", W(crlf(want.text)).c_str(),
+		                       WS_CHILD | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | ES_AUTOHSCROLL, 0, 0, 10,
+		                       10, hwnd, (HMENU)(INT_PTR)kEditId, appInstance(), nullptr);
+		SendMessageW(edit, EM_SETLIMITTEXT, 0, 0);
+		SetWindowSubclass(edit, editProc, 1, (DWORD_PTR)this);
+		if (prefs().dark) darkenControl(edit, true, L"CFD");
+		recheck();
+		focusEditor = tab == kCheckTab;
 		EnableWindow(o, FALSE);
 		ShowWindow(hwnd, SW_SHOW);
 		MSG m = {};
@@ -175,6 +327,18 @@ private:
 	struct Hit { D2D1_RECT_F r; std::function<void()> act; };
 	std::vector<Hit> hits;
 	D2D1_RECT_F contentRect{};
+	// Check: how the circuit compares, and its text box.
+	CLCheck* check = nullptr;
+	std::string checkError;   // the formula couldn't be read
+	bool onlyWrong = false, scrollToWrong = false;
+	HWND edit = nullptr;
+	HWND focusBefore = nullptr;   // what had the keyboard when the window went to the back
+	bool focusEditor = false;     // give the box the keyboard once it's shown
+	RECT placed{};
+	HFONT editFont = nullptr;
+	UINT editFontDpi = 0;
+	HBRUSH editBrush = nullptr;
+	COLORREF editBack = 0;
 
 	int n() const { return inputs; }
 	int outputs() const { return (int)names.size() - inputs; }
@@ -233,7 +397,7 @@ private:
 	}
 
 	float scale() const { return dpiOf(hwnd) / 96.0f; }
-	void redraw() { InvalidateRect(hwnd, nullptr, FALSE); }
+	void redraw() { if (hwnd) InvalidateRect(hwnd, nullptr, FALSE); }
 	void copy(const std::string& key, const std::string& text) {
 		setClipboardText(hwnd, text);
 		copied = key;
@@ -286,27 +450,27 @@ private:
 			drawText(rt, strf("%d switch%s → %d light%s · %d rows", n(), n() == 1 ? "" : "es", outputs(), outputs() == 1 ? "" : "s",
 			                  (int)rows.size()),
 			         D2D1::RectF(160, 27, w - 22, 50), 12.5f, kBandDim);
-			const char* tabs[] = { "Truth Table", "Karnaugh Map", "Formulas" };
+			const char* tabs[] = { "Truth Table", "Karnaugh Map", "Formulas", "Check" };
 			float x = 22;
-			for (int i = 0; i < 3; i++) {
+			for (int i = 0; i < kTabs; i++) {
 				const float tw = textWidth(tabs[i], 12.5f, true) + 26;
 				const D2D1_RECT_F r = D2D1::RectF(x, 62, x + tw, 90);
 				const bool on = tab == i, isHot = hot == (int)hits.size();
 				fillRound(rt, r, 14, on ? kNeon : D2D1::ColorF(1, 1, 1, isHot ? 0.16f : 0.09f));
 				drawText(rt, tabs[i], r, 12.5f, on ? kInkDeep : D2D1::ColorF(1, 1, 1, 0.88f), TextAlign::Center, true);
-				hits.push_back({ r, [this, i] { tab = i; scroll = 0; redraw(); } });
+				hits.push_back({ r, [this, i] { setTab(i); } });
 				x += tw + 8;
 			}
 		}
 
-		// Notes about the table.
+		// Notes about the table (Check has the core's own).
 		float y = 104 + 14;
-		if (sequential) {
+		if (sequential && tab != kCheckTab) {
 			drawText(rt, "This page has clocks or flip-flops, so outputs can depend on what happened before.",
 			         D2D1::RectF(22, y, w - 22, y + 18), 12, dim);
 			y += 22;
 		}
-		if (unsettled > 0) {
+		if (unsettled > 0 && tab != kCheckTab) {
 			drawText(rt, strf("%d row%s never stopped changing (a clock or an oscillation), so those outputs are a snapshot.", unsettled,
 			                  unsettled == 1 ? "" : "s"),
 			         D2D1::RectF(22, y, w - 22, y + 18), 12, kOrange);
@@ -348,8 +512,16 @@ private:
 			hits.push_back({ done_, [this] { done = true; } });
 		}
 
+		// Check's text box stays put above what scrolls.
+		if (tab == kCheckTab) y = drawCheckControls(rt, y, w, ink, dim, accent, dark);
+		else placeEditor(false);
+
 		// The tab's content, scrolling.
 		contentRect = D2D1::RectF(22, y, w - 22, fy - 14);
+		{
+			const float view = contentRect.bottom - contentRect.top;
+			scroll = std::max(0.0f, std::min(scroll, std::max(0.0f, contentH - view)));
+		}
 		rt->PushAxisAlignedClip(contentRect, D2D1_ANTIALIAS_MODE_ALIASED);
 		D2D1_MATRIX_3X2_F base;
 		rt->GetTransform(&base);
@@ -358,6 +530,7 @@ private:
 		switch (tab) {
 		case 1: contentH = drawKMaps(rt, contentRect, ink, dim, accent, dark); break;
 		case 2: contentH = drawFormulas(rt, contentRect, ink, dim, accent, dark); break;
+		case kCheckTab: contentH = drawCheck(rt, contentRect, ink, dim, accent, dark); break;
 		default: contentH = drawTable(rt, contentRect, ink, dim, accent, dark); break;
 		}
 		rt->SetTransform(base);
@@ -386,7 +559,7 @@ private:
 			const int col = (int)c;
 			hits.push_back({ r, [this, col] {
 				std::string name = names[col];
-				if (askText(hwnd, "Rename Column", "The column's name:", name) && !name.empty()) { names[col] = name; redraw(); }
+				if (askText(hwnd, "Rename Column", "The column's name:", name) && !name.empty()) { names[col] = name; recheck(); }
 			} });
 		}
 		const Face mono(L"Consolas", 14);
@@ -559,6 +732,385 @@ private:
 		return y + 40 - box.top;
 	}
 
+	// ---- Check ----
+
+	void setTab(int i) {
+		tab = i;
+		scroll = 0;
+		if (tab == kCheckTab) focusEditor = true;
+		else if (edit && GetFocus() == edit) SetFocus(hwnd);
+		redraw();
+	}
+
+	void recheck() {
+		if (check) { cl_check_free(check); check = nullptr; }
+		checkError.clear();
+		if (!blank(want.text)) {
+			CLTruthTable* tt = cl_tt_new(inputs, sequential, unsettled);
+			for (const std::string& name : names) cl_tt_add_name(tt, name.c_str());
+			for (const std::string& row : rows) cl_tt_add_row(tt, row.c_str());
+			std::string mapping;
+			for (auto& n : want.names) mapping += n.first + "\t" + n.second + "\n";
+			if (want.kind == 0) {
+				formula::Parsed p;
+				std::string error;
+				if (formula::parse(want.text, p, error)) check = cl_check_expected(tt, formula::checkSpec(p).c_str(), mapping.c_str());
+				else checkError = error;
+			} else {
+				check = cl_check_table(tt, want.text.c_str(), mapping.c_str());
+			}
+			cl_tt_free(tt);
+		}
+		scrollToWrong = true;
+		redraw();
+	}
+
+	// The box's text changed (typed, pasted, or filled in): check again.
+	void textChanged() {
+		std::string text = windowText(edit);
+		text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+		if (text == want.text) return;
+		want.text = text;
+		InvalidateRect(edit, nullptr, TRUE);   // its hint comes and goes
+		recheck();
+	}
+
+	// The box's paper, under it and in it.
+	static D2D1_COLOR_F boxPaper(bool dark) { return dark ? D2D1::ColorF(0.118f, 0.126f, 0.141f) : D2D1::ColorF(1, 1, 1); }
+	static COLORREF gdiColor(D2D1_COLOR_F c) {
+		return RGB((int)std::lround(c.r * 255), (int)std::lround(c.g * 255), (int)std::lround(c.b * 255));
+	}
+
+	HFONT fontFor(UINT dpi) {
+		if (editFont && editFontDpi == dpi) return editFont;
+		if (editFont) DeleteObject(editFont);
+		LOGFONTW lf = {};
+		lf.lfHeight = -MulDiv(13, (int)dpi, 96);
+		lf.lfWeight = FW_NORMAL;
+		lf.lfQuality = CLEARTYPE_QUALITY;
+		wcscpy(lf.lfFaceName, L"Consolas");
+		editFont = CreateFontIndirectW(&lf);
+		editFontDpi = dpi;
+		return editFont;
+	}
+
+	// The text box over the drawn one (box, in points), or hidden.
+	void placeEditor(bool show, const D2D1_RECT_F& box = D2D1_RECT_F{}) {
+		if (edit == nullptr) return;
+		if (!show) {
+			if (IsWindowVisible(edit)) {
+				if (GetFocus() == edit) SetFocus(hwnd);
+				ShowWindow(edit, SW_HIDE);
+			}
+			return;
+		}
+		const float s = scale();
+		const UINT dpi = dpiOf(hwnd);
+		const RECT to = { (LONG)std::lround((box.left + 10) * s), (LONG)std::lround((box.top + 7) * s), (LONG)std::lround((box.right - 3) * s),
+		                  (LONG)std::lround((box.bottom - 3) * s) };
+		if (!EqualRect(&to, &placed)) {
+			placed = to;
+			SetWindowPos(edit, nullptr, to.left, to.top, to.right - to.left, to.bottom - to.top, SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+		if (editFontDpi != dpi) SendMessageW(edit, WM_SETFONT, (WPARAM)fontFor(dpi), TRUE);
+		if (!IsWindowVisible(edit)) ShowWindow(edit, SW_SHOW);
+		if (focusEditor) {
+			focusEditor = false;
+			SetFocus(edit);
+		}
+	}
+
+	// While the box is empty: what to type, dimmed (a multi-line box has no
+	// cue banner of its own).
+	void paintHint(HWND h) {
+		const bool dark = prefs().dark;
+		const D2D1_COLOR_F dim = dark ? D2D1::ColorF(0.62f, 0.62f, 0.62f) : D2D1::ColorF(0.42f, 0.42f, 0.42f), paper = boxPaper(dark);
+		const D2D1_COLOR_F mix = D2D1::ColorF(paper.r + (dim.r - paper.r) * 0.75f, paper.g + (dim.g - paper.g) * 0.75f, paper.b + (dim.b - paper.b) * 0.75f);
+		const std::wstring hint = W(want.kind == 0 ? "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)        or   F(A,B,C) = Σm(1,3,5) + d(7)"
+		                                           : "A  B  Cin | S  Cout\n0  0  0   | 0  0\n0  0  1   | 1  0\n…  (X for don't care)");
+		RECT r = {};
+		SendMessageW(h, EM_GETRECT, 0, (LPARAM)&r);
+		HideCaret(h);   // drawn over, it would blink back inverted
+		HDC dc = GetDC(h);
+		HGDIOBJ old = SelectObject(dc, (HGDIOBJ)SendMessageW(h, WM_GETFONT, 0, 0));
+		SetBkMode(dc, TRANSPARENT);
+		SetTextColor(dc, gdiColor(mix));
+		DrawTextW(dc, hint.c_str(), (int)hint.size(), &r, DT_LEFT | DT_TOP | DT_NOPREFIX);
+		SelectObject(dc, old);
+		ReleaseDC(h, dc);
+		ShowCaret(h);
+	}
+
+	static LRESULT CALLBACK editProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
+		TruthWindow* t = reinterpret_cast<TruthWindow*>(data);
+		const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+		switch (msg) {
+		case WM_KEYDOWN:
+			// Escape closes the window, as anywhere in it; Ctrl+Tab goes on to the next tab.
+			if (wp == VK_ESCAPE) { t->done = true; return 0; }
+			if (wp == 'A' && ctrl) { SendMessageW(h, EM_SETSEL, 0, -1); return 0; }
+			if (wp == VK_TAB && ctrl) { t->setTab((t->tab + ((GetKeyState(VK_SHIFT) & 0x8000) ? kTabs - 1 : 1)) % kTabs); return 0; }
+			break;
+		case WM_CHAR:
+			if (wp == 0x1B || (ctrl && (wp == 0x01 || wp == '\t' || wp == 0x7F))) return 0;   // no beep, no stray characters
+			break;
+		case WM_MOUSEWHEEL: {
+			// Not over the box: the window's to scroll.
+			const POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+			if (WindowFromPoint(p) != h) return SendMessageW(t->hwnd, msg, wp, lp);
+			break;
+		}
+		case WM_PAINT: {
+			const LRESULT r = DefSubclassProc(h, msg, wp, lp);
+			if (GetWindowTextLengthW(h) == 0) t->paintHint(h);
+			return r;
+		}
+		case WM_NCDESTROY:
+			RemoveWindowSubclass(h, editProc, 1);
+			break;
+		}
+		return DefSubclassProc(h, msg, wp, lp);
+	}
+
+	// What the assignment gives: a formula or a table, and the box to type it in.
+	float drawCheckControls(ID2D1RenderTarget* rt, float y, float w, D2D1_COLOR_F ink, D2D1_COLOR_F dim, D2D1_COLOR_F accent, bool dark) {
+		float x = 22;
+		const char* intro = "The assignment gives";
+		drawText(rt, intro, D2D1::RectF(x, y, x + 200, y + 28), 12.5f, dim);
+		x += textWidth(intro, 12.5f) + 10;
+		const char* segs[] = { "A formula", "A truth table" };
+		const float segW[2] = { textWidth(segs[0], 12) + 24, textWidth(segs[1], 12) + 24 };
+		fillRound(rt, D2D1::RectF(x, y, x + segW[0] + segW[1] + 4, y + 28), 14, withAlpha(ink, 0.06f));
+		for (int i = 0; i < 2; i++) {
+			const D2D1_RECT_F r = D2D1::RectF(x + 2, y + 2, x + 2 + segW[i], y + 26);
+			const bool on = want.kind == i, isHot = hot == (int)hits.size();
+			if (on) fillRound(rt, r, 12, accent);
+			else if (isHot) fillRound(rt, r, 12, withAlpha(ink, 0.06f));
+			drawText(rt, segs[i], r, 12, on ? chrome().onAccent() : ink, TextAlign::Center);
+			hits.push_back({ r, [this, i] {
+				if (want.kind == i) return;
+				want.kind = i;
+				InvalidateRect(edit, nullptr, TRUE);   // the other hint
+				recheck();
+			} });
+			x += segW[i];
+		}
+		if (want.kind == 1) {
+			const char* fill = "Fill In This Circuit's Rows";
+			const float fw = textWidth(fill, 11.5f, true);
+			const D2D1_RECT_F r = D2D1::RectF(w - 22 - fw, y, w - 22, y + 28);
+			const bool isHot = hot == (int)hits.size();
+			drawText(rt, fill, r, 11.5f, withAlpha(accent, isHot ? 0.75f : 1.0f), TextAlign::Trailing, true);
+			hits.push_back({ r, [this] {
+				// A multi-line box doesn't say it changed when it's set: checked here.
+				setWindowText(edit, crlf(circuitTableText()));
+				textChanged();
+				focusEditor = true;
+			} });
+		}
+		y += 36;
+		const float h = want.kind == 1 ? 104 : 62;
+		const D2D1_RECT_F box = D2D1::RectF(22, y, w - 22, y + h);
+		fillRound(rt, box, 10, boxPaper(dark));
+		strokeRound(rt, box, 10, dark ? D2D1::ColorF(1, 1, 1, 0.09f) : D2D1::ColorF(0, 0, 0, 0.08f));
+		placeEditor(true, box);
+		return box.bottom + 10;
+	}
+
+	// The verdict, its notes, the names, and the rows.
+	float drawCheck(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, D2D1_COLOR_F ink, D2D1_COLOR_F dim, D2D1_COLOR_F accent, bool dark) {
+		const D2D1_COLOR_F on = dark ? kNeon : kNeonDeep, white = D2D1::ColorF(1, 1, 1);
+		float y = box.top;
+		const bool empty = blank(want.text);
+		const int verdict = check ? cl_check_verdict(check) : 2;
+		const std::string summary = empty ? (want.kind == 0 ? "Type what the assignment asks for, like S = A ^ B ^ Cin."
+		                                                    : "Paste or type the truth table you were given.")
+		                          : check ? cl_check_summary(check) : "Can't read that yet.";
+		const D2D1_COLOR_F color = empty ? dim : verdict == 0 ? on : verdict == 1 ? kRed : kOrange;
+		{
+			const D2D1_RECT_F banner = D2D1::RectF(box.left, y, box.right, y + 38);
+			fillRound(rt, banner, 10, withAlpha(color, empty ? 0.06f : dark ? 0.16f : 0.11f));
+			const D2D1_POINT_2F c = D2D1::Point2F(banner.left + 22, (banner.top + banner.bottom) / 2);
+			fillCircle(rt, c, 9.5f, color);
+			const D2D1_RECT_F mark = D2D1::RectF(c.x - 9, c.y - 9, c.x + 9, c.y + 9);
+			if (!empty && verdict == 0) drawIcon(rt, kGlyphCheck, mark, 10, white);
+			else if (!empty && verdict == 1) drawIcon(rt, kGlyphCross, mark, 8.5f, white);
+			else drawText(rt, empty ? "…" : "?", mark, 11, white, TextAlign::Center, true);
+			float right = banner.right - 12;
+			if (verdict == 1 && check) {
+				const char* label = "Only wrong rows";
+				const float lw = textWidth(label, 11.5f) + 22;
+				const D2D1_RECT_F r = D2D1::RectF(right - lw, banner.top + 8, right, banner.bottom - 8);
+				const D2D1_RECT_F tick = D2D1::RectF(r.left, r.top + 4, r.left + 14, r.top + 18);
+				const bool isHot = hot == (int)hits.size();
+				fillRound(rt, tick, 4, onlyWrong ? accent : withAlpha(ink, isHot ? 0.14f : 0.08f));
+				if (onlyWrong) drawIcon(rt, kGlyphCheck, tick, 9, chrome().onAccent());
+				drawText(rt, label, D2D1::RectF(r.left + 20, r.top, r.right, r.bottom), 11.5f, dim);
+				hits.push_back({ r, [this] { onlyWrong = !onlyWrong; scroll = 0; } });
+				right = r.left - 10;
+			}
+			drawText(rt, summary, D2D1::RectF(banner.left + 42, banner.top, right, banner.bottom), 13.5f, empty ? dim : ink, TextAlign::Leading,
+			         !empty);
+			y = banner.bottom + 10;
+		}
+		// Notes: problems in red, warnings in orange, the rest quiet.
+		auto note = [&](const std::string& text, int kind) {
+			const D2D1_COLOR_F c = kind == 2 ? kRed : kind == 1 ? kOrange : dim;
+			drawIcon(rt, kind == 2 ? kGlyphError : kind == 1 ? kGlyphWarning : kGlyphInfo, D2D1::RectF(box.left, y, box.left + 16, y + 16), 11, c);
+			const float h = brand::text(rt, text, box.left + 20, y, 11.5f, DWRITE_FONT_WEIGHT_NORMAL, c, box.right - box.left - 20);
+			y += std::max(16.0f, h) + 5;
+		};
+		if (!checkError.empty()) note(checkError, 2);
+		for (int i = 0; check && i < cl_check_note_count(check); i++) note(cl_check_note(check, i), cl_check_note_kind(check, i));
+		if (!check) return y - box.top;
+
+		// Names, when one isn't simply the circuit's: click to choose.
+		bool showNames = false;
+		for (int i = 0; i < cl_check_name_count(check); i++) {
+			const int col = cl_check_name_column(check, i);
+			if (col < 0 || col >= (int)names.size() || cl_check_name_by_hand(check, i) || nameKey(names[col]) != nameKey(cl_check_name(check, i)))
+				showNames = true;
+		}
+		if (showNames) {
+			y += 4;
+			drawText(rt, "Names", D2D1::RectF(box.left, y, box.left + 50, y + 24), 11.5f, dim, TextAlign::Leading, true);
+			float x = box.left + 52;
+			for (int i = 0; i < cl_check_name_count(check); i++) {
+				const std::string name = cl_check_name(check, i);
+				const int col = cl_check_name_column(check, i);
+				const bool matched = col >= 0 && col < (int)names.size(), input = cl_check_name_is_input(check, i);
+				const std::string label = name + " → " + (matched ? names[col] : std::string("?"));
+				const bool bold = cl_check_name_by_hand(check, i);
+				const float cw = textWidth(label, 11.5f, bold) + 20;
+				if (x + cw > box.right && x > box.left + 52) { x = box.left + 52; y += 30; }
+				const D2D1_RECT_F r = D2D1::RectF(x, y, x + cw, y + 24);
+				const bool isHot = hot == (int)hits.size();
+				fillRound(rt, r, 12, !matched ? withAlpha(kRed, 0.14f) : withAlpha(ink, isHot ? 0.11f : 0.06f));
+				strokeRound(rt, r, 12, !matched ? withAlpha(kRed, 0.5f) : withAlpha(ink, 0.09f));
+				drawText(rt, label, r, 11.5f, !matched ? kRed : accent, TextAlign::Center, bold);
+				hits.push_back({ r, [this, name, input] { chooseName(name, input); } });
+				x += cw + 6;
+			}
+			y += 34;
+		}
+
+		// The rows: the circuit's inputs, then for each output what was asked for and what it gave.
+		std::vector<int> outs;
+		for (int k = 0; k < cl_check_outputs(check); k++) {
+			const int col = cl_check_output_column(check, k);
+			if (col >= inputs && col < (int)names.size()) outs.push_back(k);
+		}
+		if (outs.empty()) return y - box.top;
+		const float cw = 50, headH = 38, rowH = 24;
+		std::vector<int> shown;
+		for (int r = 0; r < (int)rows.size(); r++) if (!onlyWrong || cl_check_row_wrong(check, r)) shown.push_back(r);
+		const float tableW = cw * (inputs + 2 * outs.size()), x0 = box.left, y0 = y;
+		const D2D1_RECT_F card = D2D1::RectF(x0, y0, x0 + tableW, y0 + headH + rowH * shown.size());
+		fillRound(rt, card, 12, dark ? D2D1::ColorF(1, 1, 1, 0.045f) : D2D1::ColorF(1, 1, 1, 1));
+		// The header and the row bands kept inside the card's corners.
+		ID2D1RoundedRectangleGeometry* shape = nullptr;
+		ID2D1Layer* layer = nullptr;
+		if (SUCCEEDED(d2dFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(card, 12, 12), &shape)) && SUCCEEDED(rt->CreateLayer(&layer)))
+			rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), shape), layer);
+		fillRect(rt, D2D1::RectF(x0, y0, card.right, y0 + headH), withAlpha(ink, 0.05f));
+		for (int i = 0; i < inputs; i++)
+			drawText(rt, names[i], D2D1::RectF(x0 + i * cw, y0, x0 + (i + 1) * cw, y0 + headH), 12, ink, TextAlign::Center, true);
+		for (size_t j = 0; j < outs.size(); j++) {
+			const float ox = x0 + (inputs + 2 * j) * cw;
+			fillRect(rt, D2D1::RectF(ox, y0, ox + 2 * cw, y0 + headH), withAlpha(accent, dark ? 0.13f : 0.10f));
+			drawText(rt, cl_check_output_name(check, outs[j]), D2D1::RectF(ox, y0 + 3, ox + 2 * cw, y0 + 21), 12, accent, TextAlign::Center, true);
+			drawText(rt, "asked", D2D1::RectF(ox, y0 + 21, ox + cw, y0 + 35), 9.5f, dim, TextAlign::Center);
+			drawText(rt, "got", D2D1::RectF(ox + cw, y0 + 21, ox + 2 * cw, y0 + 35), 9.5f, dim, TextAlign::Center);
+		}
+		const Face mono(L"Consolas", 13), monoBold(L"Consolas", 13, false, DWRITE_FONT_WEIGHT_BOLD);
+		float firstWrong = -1;
+		for (size_t i = 0; i < shown.size(); i++) {
+			const int r = shown[i];
+			const float ry = y0 + headH + i * rowH;
+			const bool wrong = cl_check_row_wrong(check, r);
+			if (wrong && firstWrong < 0) firstWrong = ry;
+			if (wrong) fillRect(rt, D2D1::RectF(x0, ry, card.right, ry + rowH), withAlpha(kRed, dark ? 0.2f : 0.12f));
+			else if (r % 2 == 1) fillRect(rt, D2D1::RectF(x0, ry, card.right, ry + rowH), withAlpha(ink, 0.03f));
+			auto cell = [&](const std::string& t, float cx, D2D1_COLOR_F c, bool bold) {
+				const Face& f = bold ? monoBold : mono;
+				f.draw(rt, t, cx + (cw - f.width(t)) / 2, ry + 4, c);
+			};
+			for (int c = 0; c < inputs; c++) cell(std::string(1, rows[r][c]), x0 + c * cw, dim, false);
+			for (size_t j = 0; j < outs.size(); j++) {
+				const int k = outs[j];
+				const float ox = x0 + (inputs + 2 * j) * cw;
+				const char asked = cl_check_expected_cell(check, r, k), result = cl_check_result(check, r, k);
+				const char got = rows[r][cl_check_output_column(check, k)];
+				cell(asked == '-' ? "X" : std::string(1, asked), ox, asked == '-' ? kOrange : ink, false);
+				cell(std::string(1, got), ox + cw, result == 'x' ? kRed : result == '=' ? ink : dim, result == 'x');
+			}
+		}
+		if (layer) {
+			rt->PopLayer();
+			layer->Release();
+		}
+		if (shape) shape->Release();
+		const D2D1_COLOR_F divider = withAlpha(accent, 0.55f);
+		for (size_t j = 0; j < outs.size(); j++) {
+			const float dx = x0 + (inputs + 2 * j) * cw;
+			fillRect(rt, D2D1::RectF(dx - 0.75f, y0, dx + 0.75f, card.bottom), divider);
+		}
+		strokeRound(rt, card, 12, dark ? D2D1::ColorF(1, 1, 1, 0.09f) : D2D1::ColorF(0, 0, 0, 0.08f));
+		// The first wrong row in view, once per check.
+		if (scrollToWrong) {
+			scrollToWrong = false;
+			const float view = contentRect.bottom - contentRect.top;
+			if (firstWrong >= 0 && firstWrong + rowH - box.top > view) {
+				scroll = firstWrong - box.top - view / 2;
+				redraw();
+			}
+		}
+		return card.bottom + 12 - box.top;
+	}
+
+	// Which switch or light an asked-for name is: a menu of them.
+	void chooseName(const std::string& name, bool input) {
+		HMENU menu = CreatePopupMenu();
+		std::vector<std::string> choices;
+		auto byHand = want.names.find(name);
+		auto menuText = [](std::string s) {
+			std::string out;
+			for (char c : s) { if (c == '&') out += '&'; out += c; }
+			return out;
+		};
+		for (int c = input ? 0 : inputs; c < (input ? inputs : (int)names.size()); c++) {
+			choices.push_back(names[c]);
+			const bool chosen = byHand != want.names.end() && byHand->second == names[c];
+			AppendMenuW(menu, MF_STRING | (chosen ? MF_CHECKED : 0), choices.size(), W(menuText((input ? "Switch " : "Light ") + names[c])).c_str());
+		}
+		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+		AppendMenuW(menu, MF_STRING | (byHand == want.names.end() ? MF_CHECKED : 0), 1000, L"Match by Name");
+		POINT p;
+		GetCursorPos(&p);
+		const int picked = (int)TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, p.x, p.y, 0, hwnd, nullptr);
+		DestroyMenu(menu);
+		if (picked <= 0) return;
+		if (picked == 1000) want.names.erase(name);
+		else if (picked <= (int)choices.size()) want.names[name] = choices[picked - 1];
+		recheck();
+	}
+
+	// This circuit's table as text to edit: "A B | F", then a row each.
+	std::string circuitTableText() const {
+		auto line = [&](const std::vector<std::string>& cells) {
+			std::string s;
+			for (size_t c = 0; c < cells.size(); c++) s += (c == 0 ? "" : (int)c == inputs ? " | " : " ") + cells[c];
+			return s;
+		};
+		std::string out = line(names);
+		for (const std::string& row : rows) {
+			std::vector<std::string> cells;
+			for (char ch : row) cells.push_back(std::string(1, ch));
+			out += "\n" + line(cells);
+		}
+		return out;
+	}
+
 	// ---- Messages ----
 
 	static LRESULT CALLBACK proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -606,6 +1158,34 @@ private:
 			return true;
 		}
 		case WM_MOUSELEAVE: hot = -1; redraw(); return true;
+		case WM_COMMAND:
+			if ((HWND)lp == edit && edit && HIWORD(wp) == EN_CHANGE) textChanged();
+			return true;
+		case WM_CTLCOLOREDIT: {
+			// Check's box: its text on the drawn box's paper.
+			const bool dark = prefs().dark;
+			const COLORREF back = gdiColor(boxPaper(dark));
+			if (editBrush == nullptr || editBack != back) {
+				if (editBrush) DeleteObject(editBrush);
+				editBrush = CreateSolidBrush(back);
+				editBack = back;
+			}
+			SetBkColor((HDC)wp, back);
+			SetTextColor((HDC)wp, dark ? RGB(238, 238, 238) : RGB(26, 26, 26));
+			r = (LRESULT)editBrush;
+			return true;
+		}
+		case WM_ACTIVATE:
+			// Back in front: the keyboard where it was (the box, say), not the window.
+			if (LOWORD(wp) == WA_INACTIVE) {
+				focusBefore = GetFocus();
+				return false;
+			}
+			if (focusBefore && focusBefore == edit && IsWindowVisible(edit)) {
+				SetFocus(edit);
+				return true;
+			}
+			return false;
 		case WM_LBUTTONUP: {
 			const int i = hitAt(x, y);
 			if (i >= 0) { auto act = hits[i].act; act(); redraw(); }
@@ -619,7 +1199,7 @@ private:
 		}
 		case WM_KEYDOWN:
 			if (wp == VK_ESCAPE || wp == VK_RETURN) { done = true; return true; }
-			if (wp == VK_TAB) { tab = (tab + ((GetKeyState(VK_SHIFT) & 0x8000) ? 2 : 1)) % 3; scroll = 0; redraw(); return true; }
+			if (wp == VK_TAB) { setTab((tab + ((GetKeyState(VK_SHIFT) & 0x8000) ? kTabs - 1 : 1)) % kTabs); return true; }
 			if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) { copy("table", tableText('\t')); return true; }
 			return false;
 		}
@@ -632,7 +1212,12 @@ private:
 namespace { int g_truthTablesOpen = 0; }
 bool truthTableOpen() { return g_truthTablesOpen > 0; }
 
-void showTruthTable(CircuitWindow* w, int page) {
+void setCheckForTesting(const std::string& text) {
+	gCheckForTesting = text;
+	gHasCheckForTesting = true;
+}
+
+void showTruthTable(CircuitWindow* w, int page, bool check) {
 	char err[512] = "";
 	CLTruthTable* tt = cl_truth_table(w->document(), page, err, sizeof err);
 	if (tt == nullptr) {
@@ -653,10 +1238,18 @@ void showTruthTable(CircuitWindow* w, int page) {
 	t.sequential = cl_tt_sequential(tt);
 	t.unsettled = cl_tt_unsettled(tt);
 	cl_tt_free(tt);
-	t.tab = prefs().truthTab;
+	t.tab = check ? kCheckTab : std::min(std::max(prefs().truthTab, 0), kTabs - 1);
+	// What was last checked is kept per circuit and page (CI's --check isn't).
+	t.checkKey = w->filePath().empty() ? strf("unsaved-%p#%d", (void*)w, page) : w->filePath() + strf("#%d", page);
+	const bool hadCheck = loadCheck(t.checkKey, t.want);
+	if (gHasCheckForTesting) {
+		t.want = SavedCheck();
+		t.want.text = gCheckForTesting;
+	}
 	g_truthTablesOpen++;
 	t.run();
 	g_truthTablesOpen--;
+	if (!gHasCheckForTesting && (hadCheck || !blank(t.want.text))) saveCheck(t.checkKey, t.want);
 	if (prefs().truthTab != t.tab) { prefs().truthTab = t.tab; prefs().save(); }
 	if (!t.buildText.empty()) {
 		// Kept for Build from Formula either way; a locked circuit isn't added to.

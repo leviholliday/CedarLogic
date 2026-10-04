@@ -167,6 +167,7 @@ const std::vector<Action>& all() {
 		{ "simView", "Simulation", "Simulation view", CMD_SIM_VIEW, false, "Ctrl+R" },
 		{ "step", "Simulation", "Step once", CMD_STEP, false, "Ctrl+Shift+R" },
 		{ "truthTable", "Simulation", "Truth table", CMD_TRUTH_TABLE, true, "T" },
+		{ "checkCircuit", "Simulation", "Check my circuit against a formula or table", CMD_CHECK_CIRCUIT, true, "Shift+T" },
 		{ "scope", "Simulation", "Oscilloscope", CMD_SCOPE, false, "Ctrl+G" },
 		{ "lock", "Simulation", "Lock the circuit", CMD_LOCK, false, "" },
 		{ "newTab", "Tabs and split view", "New tab", CMD_NEW_TAB, false, "Ctrl+T" },

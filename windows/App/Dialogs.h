@@ -132,7 +132,8 @@ bool askText(HWND parent, const std::string& title, const std::string& prompt, s
 
 void showGateSettings(CircuitWindow* w, long gate);
 void showQuickAdd(CircuitWindow* w);
-void showTruthTable(CircuitWindow* w, int page);
+void showTruthTable(CircuitWindow* w, int page, bool check = false);   // check: at its Check tab
+void setCheckForTesting(const std::string& formula);   // --check: what the Check tab opens with (not kept)
 bool truthTableOpen();   // one is up (the guided tour watches for it)
 void showRamEditor(CircuitWindow* w, long gate);
 // Settings (Settings.cpp): General, Appearance, Canvas, Toolbar, Shortcuts.

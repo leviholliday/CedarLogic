@@ -141,6 +141,10 @@ const std::vector<Page>& pages() {
 		    p("Its other tabs: each light's **Karnaugh map** with the groups drawn on, and its **simplest sum of products** and **product "
 		      "of sums**. Rows with no clear 0 or 1 count as don't-cares. Copy a formula, or **Build This as a Circuit** to make it again "
 		      "as gates."),
+		    p("**Check my circuit (Shift+T)** compares the lights with what the assignment asks for: type the formulas (**S = A ^ B ^ Cin**, "
+		      "then **Cout = AB + Cin(A ^ B)**), a minterm list (**F(A,B,C) = Σm(1,3,5) + d(7)**), or paste the truth table you were "
+		      "given. Switches and lights are matched by name (pick by hand under **Names** when they differ), don't-cares are skipped, "
+		      "and wrong rows are shown with what was asked for and what the circuit gave. The last check is kept for each circuit."),
 		    p("**Oscilloscope (Ctrl+G)** records signals over time, under the canvas (drag the line over it to make it taller): every "
 		      "**TO** label is a signal you can watch. Click or use the arrows "
 		      "to move its time cursor (Alt+arrows jump to the next change), and the names column reads every signal there. Its share "
