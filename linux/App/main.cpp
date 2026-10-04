@@ -350,6 +350,7 @@ GMenuModel* buildMenubar() {
 	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m1));
 	GMenu* m2 = g_menu_new();
 	g_menu_append(m2, "_Truth Table   (T)", "win.truth-table");
+	g_menu_append(m2, "_Check My Circuit   (Shift+T)", "win.check-circuit");
 	g_menu_append(m2, "_Oscilloscope", "win.scope");
 	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m2));
 	g_menu_append_submenu(bar, "_Simulate", G_MENU_MODEL(sim));

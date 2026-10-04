@@ -143,6 +143,7 @@ const std::vector<Action>& all() {
 		{ "simView", "Simulation", "Simulation view", "win.sim-view", "<Primary>r" },
 		{ "step", "Simulation", "Step once", "win.step", "<Primary><Shift>r" },
 		{ "truthTable", "Simulation", "Truth table", nullptr, "t" },
+		{ "checkCircuit", "Simulation", "Check my circuit against a formula or table", nullptr, "<Shift>t" },
 		{ "scope", "Simulation", "Oscilloscope", "win.scope", "<Primary>g" },
 		{ "lock", "Simulation", "Lock the circuit", "win.lock", "" },
 		{ "newTab", "Tabs and split view", "New tab", "win.new-tab", "<Primary>t" },

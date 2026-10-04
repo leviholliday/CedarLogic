@@ -252,6 +252,7 @@ void showShortcutsWindow(GtkWindow* parent) {
 	else if (runIt.canvasAction == "straighten") owner->straighten();
 	else if (runIt.canvasAction == "tidy") owner->tidy();
 	else if (runIt.canvasAction == "truthTable") owner->makeTruthTable();
+	else if (runIt.canvasAction == "checkCircuit") owner->checkCircuit();
 	else if (runIt.canvasAction == "quickCopy") owner->copy();
 	else if (runIt.canvasAction == "quickPaste") owner->paste();
 	else if (runIt.canvasAction == "quickCut") owner->cut();

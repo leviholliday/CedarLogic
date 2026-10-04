@@ -1042,6 +1042,7 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		else if (k == GDK_KEY_equal || k == GDK_KEY_plus || k == GDK_KEY_KP_Add) animateZoom(1 / 0.75);
 		else if (k == GDK_KEY_minus || k == GDK_KEY_KP_Subtract) animateZoom(0.75);
 		else if (shortcuts::canvasAction(e) == "truthTable") win->makeTruthTable();
+		else if (shortcuts::canvasAction(e) == "checkCircuit") win->checkCircuit();
 		else if (k == GDK_KEY_question) win->showShortcuts();
 		return TRUE;
 	}
@@ -1140,6 +1141,7 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 	}
 	if (act.empty()) return FALSE;
 	if (act == "truthTable") { win->makeTruthTable(); return TRUE; }
+	if (act == "checkCircuit") { win->checkCircuit(); return TRUE; }
 	if (!win->canEdit()) { win->lockNudge(); return TRUE; }
 	if (act == "quickPaste") win->paste();
 	else if (act == "quickCut") win->cut();

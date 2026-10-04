@@ -227,6 +227,7 @@ public:
 	void toggleSimView();
 	void toggleLock();
 	void makeTruthTable();
+	void checkCircuit();   // the truth table at its Check tab
 	void toggleScope();
 	void newPage();
 	void closePage(int page);
