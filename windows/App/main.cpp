@@ -473,10 +473,11 @@ void openHandedFiles(CircuitWindow* w) {
 		openCircuit(f, from);
 		from = nullptr;
 	}
-	// Forward: a new window, else this one (a circuit already open in
-	// another window came forward in openCircuit).
+	// Forward: a new window, else this one when it took the first file or
+	// there was none (a circuit already open in another window came forward
+	// in openCircuit, and stays there).
 	CircuitWindow* show = circuitWindows().size() > windowsBefore ? circuitWindows().back()
-	                    : (files.empty() || intoThis) ? w : nullptr;
+	                    : (files.empty() || (intoThis && !w->isPristine())) ? w : nullptr;
 	if (show == nullptr) return;
 	if (IsIconic(show->window())) ShowWindow(show->window(), SW_RESTORE);
 	SetForegroundWindow(GetLastActivePopup(show->window()));
