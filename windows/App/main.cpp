@@ -269,6 +269,9 @@ int clickTestStep() {
 		if (Canvas* cv = w->currentCanvas()) UpdateWindow(cv->widget());
 		gClickBefore = c.state(w);
 		if (clickButton(w, c.button, c.name)) { gClickPending = true; return 500; }
+		// Not clicked: what the case set up goes back for the ones after it
+		// (focus mode would hide the side panel from the drag).
+		if (c.tidy) c.tidy(w);
 		// Minimal leaves most tools to the ••• menu (the tab strip's buttons are always there).
 		if (c.button > kStrip / 2 && w->toolbarWidget() && !w->toolbarWidget()->hasButton(c.button)) {
 			report("SKIP", strf("%s: not in this style of toolbar", c.name));
