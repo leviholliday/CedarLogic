@@ -205,6 +205,9 @@ jobs:
           timeout 90 "$A" --dark --place AA_RAM_4x4 --dialog gate-settings --screenshot "$PWD/renders/ram-editor-dark.png" || true
           timeout 90 "$A" --dialog export --screenshot "$PWD/renders/export-image.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --dialog export --screenshot "$PWD/renders/export-image-dark.png" res/samples/practice.cdl || true
+          # Export Lab Report's sheet (practice.cdl has TO labels, so the timing diagram's tick is on).
+          timeout 90 "$A" --dialog lab-report --screenshot "$PWD/renders/lab-report-sheet.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog lab-report --screenshot "$PWD/renders/lab-report-sheet-dark.png" format/tests/fixtures/Lab5.cdl || true
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 
@@ -233,6 +236,29 @@ jobs:
           timeout 90 "$A" --light --toolbar-style classic --split --screenshot "$PWD/renders/toolbar-classic-split.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --dark --toolbar-style minimal --split --screenshot "$PWD/renders/toolbar-minimal-split-dark.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --light --toolbar-style minimal --focus --screenshot "$PWD/renders/toolbar-minimal-focus.png" format/tests/fixtures/lab6.cdl || true
+
+      # Export Lab Report without a window (--lab-report): a circuit run a
+      # while, then its PDF -- in colour and in black and white, and for a
+      # circuit of several pages -- each checked to be a whole PDF (its
+      # header, its end, at least one page) and kept with the pictures: the
+      # pages are pictures drawn here with Direct2D, so open one to see them.
+      - name: Lab report
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          timeout 180 "$A" --lab-report res/samples/practice.cdl "$PWD/renders/lab-report-practice.pdf"
+          timeout 180 "$A" --lab-report res/samples/practice.cdl "$PWD/renders/lab-report-practice-bw.pdf" bw
+          timeout 180 "$A" --lab-report format/tests/fixtures/lab6.cdl "$PWD/renders/lab-report-lab6.pdf"
+          for f in renders/lab-report-*.pdf; do
+            test -s "$f"
+            head -c 5 "$f" | grep -q '^%PDF-'
+            tail -c 8 "$f" | grep -aq '%%EOF'
+            pages=$(grep -a -o '/Type /Page /Parent' "$f" | wc -l)
+            echo "$f: $(wc -c < "$f") bytes, $pages pages"
+            test "$pages" -ge 1
+          done
 
       # Clicks on the toolbar's buttons, the tabs' +, and the window's drawn
       # Minimize (on the toolbar, and on the tabs in focus mode) and Close,
@@ -348,7 +374,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -f zips/*.png
+          rm -f zips/*.png zips/*.pdf
           shopt -s nullglob
           ls -la zips
           TAG=windows-native-testing
