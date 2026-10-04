@@ -306,6 +306,11 @@ void record(ShortcutList& L, UINT vk) {
 	}
 	const shortcuts::Key k = shortcuts::pressed(vk);
 	if (!k.valid()) return;   // Ctrl or Shift on its own: keep waiting
+	// A key with no name to keep it by (a media key, a browser key...).
+	if (shortcuts::text(k).empty()) {
+		L.say("That key can't be a shortcut. Press other keys, or Escape.");
+		return;
+	}
 	// The fixed keys would never reach it.
 	const std::string kept = shortcuts::reserved(k);
 	if (!kept.empty()) {
