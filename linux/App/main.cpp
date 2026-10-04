@@ -1,9 +1,12 @@
 // CedarLogic for Linux (native): the application -- its menus and shortcuts,
 // opening circuits, and the list of open windows.
 
+#include <deque>
+
 #include "App.h"
 #include "Canvas.h"
 #include "Recovery.h"
+#include "ShareLink.h"
 #include "Splash.h"
 #include "Updater.h"
 #include "Welcome.h"
@@ -282,6 +285,7 @@ GMenuModel* buildMenubar() {
 	g_menu_append(s2, "_Rename…", "win.rename-circuit");
 	g_menu_append(s2, "Du_plicate Circuit", "win.duplicate-circuit");
 	g_menu_append(s2, "E_xport as CedarLogic File…", "win.save-as");
+	g_menu_append(s2, "Share _Link…", "app.share-link");
 	g_menu_append(s2, "Save as Te_mplate…", "win.save-template");
 	g_menu_append(s2, "_Export as Image…", "win.export-image");
 	GMenu* older = g_menu_new();
@@ -413,6 +417,29 @@ void importCb(GSimpleAction*, GVariant*, gpointer app) {
 	chooseAndOpen(GTK_APPLICATION(app), w ? w->window() : nullptr);
 }
 
+// File > Share Link…: the circuit's link on the clipboard (the website's, which
+// opens in CedarLogic Online and offers the app). Too long for a link says so.
+void shareLinkCb(GSimpleAction*, GVariant*, gpointer app) {
+	CircuitWindow* w = activeWindow(GTK_APPLICATION(app));
+	if (!w) return;
+	CLDocument* doc = w->document();
+	bool any = false;
+	for (int p = 0; p < cl_document_page_count(doc); p++) any = any || cl_document_gate_count(doc, p) > 0;
+	if (!any) { w->note("There's nothing on the circuit to share yet."); return; }
+	const std::string name = w->titleText();
+	const std::string data = sharelink::encode(cl_document_save_text(doc));
+	if (data.empty()) { w->note("Couldn't make a link for this circuit."); return; }
+	const std::string link = std::string(sharelink::kWebBase) + "#" + sharelink::fragment(data, name);
+	if (link.size() > sharelink::kMaxWebLink) {
+		showMessage(w->window(), GTK_MESSAGE_INFO, "This circuit is too big for a link",
+		            format("A link holds the whole circuit, and this one would be about %d KB. Use File \u25B8 Export as CedarLogic File… and send the file instead.",
+		                   (int)(link.size() / 1024)));
+		return;
+	}
+	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), link.c_str(), -1);
+	w->note("Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.");
+}
+
 void openRecentCb(GSimpleAction*, GVariant* param, gpointer app) {
 	const gchar* path = g_variant_get_string(param, nullptr);
 	if (path) openCircuit(GTK_APPLICATION(app), path, activeWindow(GTK_APPLICATION(app)));
@@ -513,6 +540,7 @@ void startupCb(GApplication* gapp, gpointer) {
 		{ "import", importCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "open-recent", openRecentCb, "s", nullptr, nullptr, { 0 } },
 		{ "open-sample", openSampleCb, nullptr, nullptr, nullptr, { 0 } },
+		{ "share-link", shareLinkCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "quit", quitCb, nullptr, nullptr, nullptr, { 0 } },
 		{ "check-updates", [](GSimpleAction*, GVariant*, gpointer app) { Updater_CheckNow(GTK_APPLICATION(app)); },
 		  nullptr, nullptr, nullptr, { 0 } },
@@ -870,6 +898,18 @@ int main(int argc, char** argv) {
 			const int code = feedback::probe();
 			printf("feedback server: %d\n", code);
 			return code == 403 ? 0 : 1;
+		}
+		// A cedarlogic://open#c=… link (the website's Open in the App, a link
+		// in a chat): its circuit goes in a file, which then opens as any
+		// file handed over does, here or in the CedarLogic already running.
+		if (strncmp(argv[i], "cedarlogic:", 11) == 0) {
+			static std::deque<std::string> linkFiles;   // (they stay where they are as it grows)
+			std::string why;
+			const std::string file = sharelink::fileForLink(argv[i], why);
+			if (file.empty()) { g_printerr("CedarLogic: that link couldn't be opened (%s)\n", why.c_str()); continue; }
+			linkFiles.push_back(file);
+			args.push_back(const_cast<char*>(linkFiles.back().c_str()));
+			continue;
 		}
 		args.push_back(argv[i]);
 	}
