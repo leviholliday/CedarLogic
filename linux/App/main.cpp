@@ -201,7 +201,10 @@ gboolean showCb(gpointer) {
 				GList* items = gtk_container_get_children(GTK_CONTAINER(child));
 				for (GList* i = items; i; i = i->next) {
 					const char* label = gtk_menu_item_get_label(GTK_MENU_ITEM(i->data));
-					if (label && strstr(label, "Tabs")) gtk_menu_shell_select_item(GTK_MENU_SHELL(child), GTK_WIDGET(i->data));
+					if (label && strstr(label, "Tabs")) {
+						gtk_menu_shell_select_item(GTK_MENU_SHELL(child), GTK_WIDGET(i->data));
+						g_signal_emit_by_name(i->data, "activate-item");   // opens its submenu now
+					}
 				}
 				g_list_free(items);
 			}
