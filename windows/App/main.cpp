@@ -150,6 +150,8 @@ const std::vector<ClickCase>& clickCases() {
 		{ "Simulation View off", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
 		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
 		{ "Unlock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "Dark mode switch", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
+		{ "Dark mode switch back", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
 		{ "New circuit", CMD_NEW, true, [](CircuitWindow*) -> long { return (long)circuitWindows().size(); }, oneMore,
 		  [](CircuitWindow* w) {
 			  for (CircuitWindow* o : std::vector<CircuitWindow*>(circuitWindows())) if (o != w) o->destroy();
@@ -550,8 +552,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gToolbarStyle;
-	// The click test wants every tool on the bar, and New in a window of its own.
-	if (gClickTest) { prefs().toolbarHidden = 0; prefs().openReplaces = false; prefs().newTemplate.clear(); }
+	// The click test wants every tool on the bar (the dark mode switch too),
+	// and New in a window of its own.
+	if (gClickTest) {
+		prefs().toolbarHidden = 0;
+		prefs().showThemeToggle = true;
+		prefs().openReplaces = false;
+		prefs().newTemplate.clear();
+	}
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;

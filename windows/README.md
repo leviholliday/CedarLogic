@@ -73,7 +73,7 @@ Direct2D here. And:
   seamless|classic|minimal` shows the toolbar in that style for the run
   (with the click test too).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
-  Tab, Pause and Resume, Simulation View, Lock, New) and the window's drawn
+  Tab, Pause and Resume, Simulation View, Lock, the dark mode switch, New) and the window's drawn
   Minimize and Close the way Windows sends a click, checks each did what it
   should, prints PASS, FAIL or SKIP for each and exits 1 if any failed (CI
   runs it once per toolbar style).
