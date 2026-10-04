@@ -39,6 +39,38 @@ void expectTruth(const std::string& text, const std::string& name, const std::ve
 	fail("\"" + text + "\": no output " + name);
 }
 
+// A full adder whose carry is wrong when all three are on.
+CLTruthTable* wrongAdder(char floatingCarry = 0) {
+	CLTruthTable* tt = cl_tt_new(3, false, 0);
+	for (const char* n : { "A", "B", "Cin", "S", "Cout" }) cl_tt_add_name(tt, n);
+	for (int m = 0; m < 8; m++) {
+		const int ones = __builtin_popcount(m);
+		std::string row;
+		for (int i = 2; i >= 0; i--) row += ((m >> i) & 1) ? '1' : '0';
+		row += ones % 2 ? '1' : '0';
+		row += floatingCarry && m < 4 ? floatingCarry : (ones >= 2 && m != 7) ? '1' : '0';
+		cl_tt_add_row(tt, row.c_str());
+	}
+	return tt;
+}
+
+void expectCheck(const std::string& what, bool table, const std::string& text, int verdict, const std::string& summary,
+                 const char* names = "", char floating = 0) {
+	CLTruthTable* tt = wrongAdder(floating);
+	std::string source = text;
+	if (!table) {
+		formula::Parsed p;
+		std::string error;
+		if (!formula::parse(text, p, error)) { fail(what + ": didn't read: " + error); cl_tt_free(tt); return; }
+		source = formula::checkSpec(p);
+	}
+	CLCheck* c = table ? cl_check_table(tt, source.c_str(), names) : cl_check_expected(tt, source.c_str(), names);
+	if (cl_check_verdict(c) != verdict || (!summary.empty() && summary != cl_check_summary(c)))
+		fail(what + ": " + std::to_string(cl_check_verdict(c)) + " " + cl_check_summary(c));
+	cl_check_free(c);
+	cl_tt_free(tt);
+}
+
 const char* kShapes[] = { "as written", "sum of products", "product of sums" };
 const char* kStyles[] = { "any gates", "NAND only", "NOR only" };
 
@@ -57,6 +89,19 @@ int main(int argc, char** argv) {
 		std::string error;
 		if (formula::parse(bad, p, error)) fail(std::string("should refuse \"") + bad + "\"");
 	}
+
+	// ---- Check my circuit, on tables made by hand ----
+	const std::string adder = "S = A ^ B ^ Cin; Cout = AB + Cin(A ^ B)";
+	expectCheck("adder", false, adder, 1, "Doesn't match: Cout is wrong on 1 of 8 rows.");
+	expectCheck("don't-care", false, "S(A,B,Cin) = Σm(1,2,4,7); Cout(A,B,Cin) = Σm(3,5,6) + d(7)", 0,
+	            "Matches: every row gives what was asked for (1 don't-care wasn't checked).");
+	expectCheck("by position", false, "Sum = X ^ Y ^ Z", 2, "Can't check yet: there's no light called Sum.");
+	expectCheck("by hand", false, "Sum = X ^ Y ^ Z", 0, "", "Sum\tS");
+	expectCheck("missing switches", false, "S = A ^ B ^ Ci + D", 2, "Can't check yet: there are no switches called Ci and D.");
+	expectCheck("floating", false, adder, 1, "Doesn't match: Cout is wrong on 5 of 8 rows.", "", 'Z');
+	expectCheck("table", true, "A B Cin | S Cout\n000 00\n001 10\n010 10\n011 01\n100 10\n101 01\n110 01\n111 11", 1,
+	            "Doesn't match: Cout is wrong on 1 of 8 rows.");
+	expectCheck("bad table", true, "A B | F\n0 0 | 2", 2, "Row 1 has \"2\"; use 0, 1, or X for don't care.");
 
 	// ---- Built in the engine: its truth table must be the formula's ----
 	if (!cl_library_load(argc > 1 ? argv[1] : "res/cl_gatedefs.xml")) {
@@ -134,6 +179,12 @@ int main(int argc, char** argv) {
 							if (cell != (f.values[r] ? '1' : '0'))
 								fail(what + ": " + f.name + " row " + std::to_string(r) + " is " + cell + ", want " + (f.values[r] ? "1" : "0"));
 						}
+					}
+					// Check my circuit: the formula itself matches.
+					{
+						CLCheck* c = cl_check_expected(tt, formula::checkSpec(parsed).c_str(), "");
+						if (cl_check_verdict(c) != 0) fail(what + ": check says " + cl_check_summary(c));
+						cl_check_free(c);
 					}
 					cl_tt_free(tt);
 					cl_document_close(doc);

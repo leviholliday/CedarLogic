@@ -93,6 +93,10 @@ const int kMaxVariables = 8;
 // student can act on.
 bool parse(const std::string& source, Parsed& out, std::string& error);
 
+// What was read, as the core's circuit check takes it (cl_check_expected):
+// "in<TAB>A<TAB>B", then "out<TAB>F<TAB>0110" per output, '-' for don't care.
+std::string checkSpec(const Parsed& p);
+
 // ---- Formula -> circuit ----
 
 enum Style { AnyGates = 0, NandOnly = 1, NorOnly = 2 };
