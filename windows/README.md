@@ -27,17 +27,20 @@ it compiles without a Windows machine:
 - `App/` -- the app, drawn to look like the Mac app (its colours and layout
   are in `Chrome`): a window per circuit (`Window`) whose title bar is the
   `Toolbar` (the circuit's name and menu, the tools in capsules, ••• for
-  every menu, Windows' own window buttons); `TabStrip`, a tab card per page,
-  over a `Canvas` per page (with the note toast, the Tidy Up and Lock
-  banner, and Simulation View's control bar drawn over the circuit); the side
+  every menu, Windows' own window buttons); `TabStrip`, a tab card per page
+  (renamed in place), dragged down onto the canvas into a split view of two
+  sides, each with its strip; focus mode, where the toolbar and the side
+  panel slide away and the tabs become the title row; a `Canvas` per page
+  (with the note toast, the Tidy Up and Lock banner, and Simulation View's
+  control bar drawn over the circuit); the side
   panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
   (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
   the Mac app's features: Your Circuits and Version History (`Library`,
   `LibraryWindow`, sharing `%APPDATA%\CedarLogic\Library` with the wx app),
   templates and parts (`Collections`), the truth table with K-maps and
   formulas (`TruthTableWindow`) and Build from Formula (`Formula`), Find
-  (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope and
-  its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
+  (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope,
+  docked under the canvas, and its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
   for pictures made off screen), Send Feedback (`Feedback`, to
   cedarlogic.netlify.app), and Help with search (`Help`); the launch screen with the first launch's sound
   (`Splash`), the first-run welcome, What's New and the guided tour that
@@ -61,15 +64,17 @@ Direct2D here. And:
 
 - `CedarLogic.exe --screenshot out.png [circuit.cdl]` -- opens the window,
   captures it to a PNG after two seconds and quits (CI runs it on the zip).
-  With `--dark` or `--light` for that run, `--sim-view`, or `--dialog
+  With `--dark` or `--light` for that run, `--sim-view`, `--split` (split
+  view), `--focus` (focus mode), `--rename-tab`, or `--dialog
   preferences|shortcuts|truth-table|add-gate|library|versions|templates|
   formula|scope|export|feedback|help|welcome|whatsnew` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
   or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
-  Tab, Simulation View, Lock, New) and the window's drawn Minimize and Close
-  the way Windows sends a click, checks each did what it should, prints PASS,
+  Tab, Simulation View, Lock, New), the tabs' +, and the window's drawn
+  Minimize (on the toolbar, and on the tabs in focus mode) and Close the way
+  Windows sends a click, checks each did what it should, prints PASS,
   FAIL or SKIP for each and exits 1 if any failed (CI runs it).
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.

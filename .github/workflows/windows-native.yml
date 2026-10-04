@@ -100,6 +100,13 @@ jobs:
           timeout 90 "$A" --dark --screenshot "$PWD/renders/window-Lab5-dark.png" format/tests/fixtures/Lab5.cdl
           timeout 90 "$A" --dark --sim-view --screenshot "$PWD/renders/window-sim.png" res/samples/practice.cdl
           timeout 90 "$A" --light --screenshot "$PWD/renders/window-practice.png" res/samples/practice.cdl
+          # Split view, focus mode (the tabs as the title row), both, and a
+          # tab being renamed in place.
+          timeout 90 "$A" --split --screenshot "$PWD/renders/window-split.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --dark --split --screenshot "$PWD/renders/window-split-dark.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --focus --screenshot "$PWD/renders/window-focus.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --dark --focus --split --screenshot "$PWD/renders/window-focus-split-dark.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --rename-tab --screenshot "$PWD/renders/window-rename-tab.png" format/tests/fixtures/Lab5.cdl || true
           # The dialogs, in each theme (the screenshot is of the dialog).
           timeout 90 "$A" --dark --dialog preferences --screenshot "$PWD/renders/dialog-preferences-dark.png" || true
           timeout 90 "$A" --light --dialog preferences --screenshot "$PWD/renders/dialog-preferences.png" || true
@@ -121,6 +128,8 @@ jobs:
           timeout 90 "$A" --formula "S = A xor B xor Cin; Cout = AB + Cin(A ^ B)" --dialog formula --screenshot "$PWD/renders/build-formula.png" || true
           timeout 90 "$A" --dialog scope --timing "$PWD/renders/timing.png" --screenshot "$PWD/renders/scope.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --dark --dialog scope --timing "$PWD/renders/timing-color.png" --timing-color --screenshot "$PWD/renders/scope-dark.png" res/samples/practice.cdl || true
+          # The oscilloscope docks under the canvas: here under a split.
+          timeout 90 "$A" --split --dialog scope --screenshot "$PWD/renders/scope-split.png" format/tests/fixtures/lab6.cdl || true
           # The launch screen, moment by moment (as the Mac's timeline).
           for t in 0.25 0.6 0.9 1.2 1.6 2.2 2.7; do timeout 60 "$A" --splash-frame $t "$PWD/renders/splash-$t.png" || true; done
           timeout 60 "$A" --splash-frame 4.0 "$PWD/renders/splash-first-4.0.png" --first-launch || true
@@ -144,9 +153,10 @@ jobs:
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 
-      # Clicks on the toolbar's buttons and the window's drawn Minimize and
-      # Close, as Windows sends them (press, then release), each checked for
-      # its effect: a picture can't show that a button does nothing.
+      # Clicks on the toolbar's buttons, the tabs' +, and the window's drawn
+      # Minimize (on the toolbar, and on the tabs in focus mode) and Close,
+      # as Windows sends them (press, then release), each checked for its
+      # effect: a picture can't show that a button does nothing.
       - name: Click test
         if: matrix.run
         shell: bash

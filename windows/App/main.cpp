@@ -9,6 +9,7 @@
 #include "Help.h"
 #include "Library.h"
 #include "Recovery.h"
+#include "TabStrip.h"
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
@@ -48,6 +49,9 @@ std::string gPlace;     // --place: a gate by library name, put on the page and 
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
+// --split, --focus, --rename-tab: the window in split view, in focus mode,
+// or renaming its tab.
+bool gSplit = false, gFocus = false, gRenameTab = false;
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -105,13 +109,20 @@ void closeAll() {
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 }
 
-// Press and release the left button over one of the toolbar's buttons.
-// False when the bar doesn't show that button.
+// Press and release the left button over one of the toolbar's buttons, or
+// (kStrip + a TabStrip button) the tab strip's. False when the bar doesn't
+// show that button.
+const int kStrip = -100;
 bool clickButton(CircuitWindow* w, int button, const char* name) {
 	Toolbar* bar = w->toolbarWidget();
+	TabStrip* strip = w->tabStripWidget(0);
 	POINT p;
-	if (bar == nullptr || !bar->buttonPoint(button, p)) return false;
-	const HWND h = bar->widget();
+	if (button < kStrip / 2) {
+		if (strip == nullptr || !strip->buttonPoint(button - kStrip, p)) return false;
+	} else if (bar == nullptr || !bar->buttonPoint(button, p)) {
+		return false;
+	}
+	const HWND h = button < kStrip / 2 ? strip->widget() : bar->widget();
 	const LPARAM at = MAKELPARAM(p.x, p.y);
 	SendMessageW(h, WM_MOUSEMOVE, 0, at);
 	SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, at);
@@ -127,6 +138,7 @@ struct ClickCase {
 	std::function<long(CircuitWindow*)> state;    // what the click should change
 	std::function<bool(long before, long after)> worked;
 	std::function<void(CircuitWindow*)> tidy;     // put things back for the next click
+	std::function<void(CircuitWindow*)> setup;    // made ready first (the state is read after)
 };
 
 const std::vector<ClickCase>& clickCases() {
@@ -148,6 +160,16 @@ const std::vector<ClickCase>& clickCases() {
 		{ "Minimize (drawn)", Toolbar::kMinimize, false,
 		  [](CircuitWindow* w) -> long { return IsIconic(w->window()) ? 1 : 0; },
 		  [](long, long after) { return after == 1; }, [](CircuitWindow* w) { ShowWindow(w->window(), SW_RESTORE); } },
+		{ "New Tab (the tabs' +)", kStrip + TabStrip::kPlusButton, false, [](CircuitWindow* w) -> long { return w->tabCount(); },
+		  oneMore, nullptr },
+		// Focus mode: the tabs are the top row, with the window's buttons.
+		{ "Minimize (focus mode, on the tabs)", kStrip + TabStrip::kMinimizeButton, false,
+		  [](CircuitWindow* w) -> long { return IsIconic(w->window()) ? 1 : 0; }, [](long, long after) { return after == 1; },
+		  [](CircuitWindow* w) {
+			  ShowWindow(w->window(), SW_RESTORE);
+			  if (w->focusMode()) w->toggleFocusMode();
+		  },
+		  [](CircuitWindow* w) { if (!w->focusMode()) w->toggleFocusMode(); } },
 	};
 	return cases;
 }
@@ -180,6 +202,7 @@ int clickTestStep() {
 	}
 	while (gClickNext < cases.size()) {
 		const ClickCase& c = cases[gClickNext++];
+		if (c.setup) c.setup(w);
 		// The canvas drawn first, so its first fit can't undo a zoom.
 		if (Canvas* cv = w->currentCanvas()) UpdateWindow(cv->widget());
 		gClickBefore = c.state(w);
@@ -521,6 +544,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
+		if (a == "--split") { gSplit = true; continue; }
+		if (a == "--focus") { gFocus = true; continue; }
+		if (a == "--rename-tab") { gRenameTab = true; continue; }
 		if (a == "--formula" && i + 1 < argc) { gFormula = U(argv[++i]); continue; }
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
@@ -594,6 +620,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (!circuitWindows().empty() && !circuitWindows().front()->filePath().empty())
 		splash::setOpening(circuitWindows().front()->titleText());
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
+	if (gSplit && !circuitWindows().empty()) circuitWindows().back()->toggleSplit();
+	if (gFocus && !circuitWindows().empty()) circuitWindows().back()->toggleFocusMode();
+	if (gRenameTab && !circuitWindows().empty()) circuitWindows().back()->run(CMD_RENAME_TAB);
 	if (!gPlace.empty() && !circuitWindows().empty()) {
 		CircuitWindow* w = circuitWindows().back();
 		if (cl_edit_add_gate(w->document(), w->currentPage(), gPlace.c_str(), 0, 0)) w->redraw();
