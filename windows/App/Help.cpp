@@ -170,6 +170,9 @@ const std::vector<Page>& pages() {
 		    p("**Files**: opening a .cdl file (from File Explorer, or **Ctrl+I**) brings in a copy to work on; the file itself isn't "
 		      "touched, and opening it again finds the copy. To get a file out, **Export as CedarLogic File** saves a copy wherever you "
 		      "like."),
+		    p("**Share Link…** (File menu) copies a link to the circuit: whoever opens it gets the whole circuit, in CedarLogic "
+		      "Online or, from its Open in the App button, here, as a new circuit in Your Circuits. Nothing is uploaded, because the "
+		      "link holds the circuit; one too big for a link says so, and Export sends it as a file instead."),
 		    p("**Versions**: **Ctrl+S** keeps a version. Version History (click the circuit's name) shows them with a picture of each; "
 		      "restoring one keeps the current one too."),
 		    p("**Lab reports**: **File ▸ Export Lab Report…** makes one PDF to hand in, with your name and the date: a picture of "

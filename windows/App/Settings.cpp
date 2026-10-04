@@ -533,8 +533,8 @@ void showPreferencesDialog(HWND parent) {
 	// A copy run from the zip (an installed one is in Start already).
 	if (integration::offered()) {
 		on[f.add(check("Start menu:", "Add CedarLogic to the Start menu", integration::inStartMenu(),
-		               "In Start with your other apps, and double-clicking a .cdl file opens it here. It runs from this folder, so "
-		               "keep the folder where it is."))] = [](Form& form, int i) {
+		               "In Start with your other apps, and double-clicking a .cdl file, or Open in the App on the website, opens it "
+		               "here. It runs from this folder, so keep the folder where it is."))] = [](Form& form, int i) {
 			const bool want = form.checked(i);
 			if (integration::setInStartMenu(want)) return;
 			form.setChecked(i, integration::inStartMenu());

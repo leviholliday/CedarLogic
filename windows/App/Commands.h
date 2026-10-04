@@ -29,6 +29,8 @@ enum Command {
 	CMD_START_MENU,
 	// File's Export Lab Report.
 	CMD_EXPORT_REPORT,
+	// File > Share Link…
+	CMD_SHARE_LINK,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

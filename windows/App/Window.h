@@ -94,6 +94,7 @@ public:
 	bool save();
 	bool saveQuietly(bool explicitSave);
 	bool exportCopy();
+	void shareLink();
 	// Close without saving (its circuit was deleted).
 	void discard();
 	// Open the circuit's file again (a version was restored).

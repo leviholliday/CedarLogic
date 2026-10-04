@@ -21,6 +21,7 @@
 #include "LibraryWindow.h"
 #include "Chrome.h"
 #include "Integration.h"
+#include "ShareLink.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -270,6 +271,7 @@ void CircuitWindow::buildMenus() {
 	HMENU older = submenu(file, "Export for &Older CedarLogic");
 	item(older, CMD_EXPORT_V2, "For CedarLogic &2…");
 	item(older, CMD_EXPORT_V1, "For CedarLogic &1.x…");
+	item(file, CMD_SHARE_LINK, "Share &Link\u2026");
 	item(file, CMD_PRINT, "&Print…\tCtrl+P");
 	separator(file);
 	item(file, CMD_CLOSE_WINDOW, "&Close Window\tCtrl+Shift+W");
@@ -1767,6 +1769,7 @@ void CircuitWindow::run(int command) {
 	case CMD_EXPORT_REPORT: exportReport(); break;
 	case CMD_EXPORT_V2: exportOlder(2); break;
 	case CMD_EXPORT_V1: exportOlder(1); break;
+	case CMD_SHARE_LINK: shareLink(); break;
 	case CMD_PRINT: print(); break;
 	case CMD_CLOSE_WINDOW: PostMessageW(hwnd, WM_CLOSE, 0, 0); break;
 	case CMD_QUIT: if (confirmQuit(hwnd)) quitApp(); break;
@@ -2003,6 +2006,17 @@ bool CircuitWindow::exportCopy() {
 	if (!err.empty()) { showMessage(hwnd, Tone::Error, "The circuit couldn't be exported", err); return false; }
 	note("Exported " + baseName(file) + ".cdl.");
 	return true;
+}
+
+// File > Share Link…: the link for the circuit on the clipboard (ShareLink.h).
+void CircuitWindow::shareLink() {
+	bool any = false;
+	for (int p = 0; p < cl_document_page_count(doc) && !any; p++) any = cl_document_gate_count(doc, p) > 0;
+	if (!any) { note("There's nothing on the circuit to share yet."); return; }
+	const bool wasDirty = isDirty();
+	const std::string text = cl_document_save_text(doc);
+	forceDirty = forceDirty || wasDirty;   // asking for the text marked it saved
+	sharelink::copyLink(this, text, displayName());
 }
 
 void CircuitWindow::exportOlder(int format) {
