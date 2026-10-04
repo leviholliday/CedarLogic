@@ -191,7 +191,7 @@ gboolean showCb(gpointer) {
 		// The ••• menu with Tabs open, over Simulation View, as on the Pi.
 		w->toggleSimView();
 		GtkWidget* top = GTK_WIDGET(w->window());
-		GdkRectangle r = { gtk_widget_get_allocated_width(top) - 48, 6, 32, 32 };
+		GdkRectangle r = { gtk_widget_get_allocated_width(top) / 2, 6, 32, 32 };   // room for the submenu in the picture
 		w->moreMenu(top, r, nullptr);
 		g_timeout_add(500, +[](gpointer) -> gboolean {
 			GList* all = gtk_window_list_toplevels();
