@@ -171,6 +171,7 @@ void GatePalette::focusSearch() { SetFocus(search); }
 
 void GatePalette::themeChanged() {
 	if (fieldBrush) { DeleteObject(fieldBrush); fieldBrush = nullptr; }
+	clampScroll();   // smaller gates (Settings' gate size, or no names): not scrolled past the end
 	InvalidateRect(host, nullptr, TRUE);
 	InvalidateRect(search, nullptr, TRUE);
 	InvalidateRect(tiles, nullptr, FALSE);
