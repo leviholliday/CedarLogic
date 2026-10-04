@@ -77,12 +77,29 @@ void showYourCircuits(CircuitWindow* from) {
 		}
 		case 2: {
 			if (!selectedItem(it)) return false;
+			// Its window can't close while something is open over it (gate
+			// settings, a list, a card): that code is waiting on it, and would
+			// carry on with the circuit gone. Asked again after the question,
+			// which other windows go on working under.
+			auto busyElsewhere = [&] {
+				for (CircuitWindow* w : circuitWindows()) {
+					library::Item wi;
+					if (w != from && !IsWindowEnabled(w->window()) && library::itemFor(w->filePath(), wi) && wi.id == it.id) {
+						showMessage(picker.hwnd, Tone::Warning, "“" + it.name + "” has something open over it",
+						            "Close what's open in its window first, then delete it.");
+						return true;
+					}
+				}
+				return false;
+			};
+			if (busyElsewhere()) return false;
 			const std::vector<std::string> open = openIDs();
 			const bool isOpen = std::find(open.begin(), open.end(), it.id) != open.end();
 			if (!askConfirm(picker.hwnd, "Delete “" + it.name + "”?",
 			                std::string(isOpen ? "It's open, so its window will close. " : "") + "It and all its versions will be deleted.",
 			                "Delete", "Cancel", true))
 				return false;
+			if (busyElsewhere()) return false;
 			for (CircuitWindow* w : std::vector<CircuitWindow*>(circuitWindows())) {
 				library::Item wi;
 				if (library::itemFor(w->filePath(), wi) && wi.id == it.id && w != from) w->discard();
