@@ -274,6 +274,25 @@ std::wstring unpacked(const std::wstring& work) {
 	return found;
 }
 
+// "Restart Now": once no dialog is up (quitting can't happen under one,
+// whose code is waiting on it), the windows close as Quit closes them and
+// the new exe starts.
+std::wstring g_restartExe;
+
+void CALLBACK restartTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	for (CircuitWindow* w : circuitWindows())
+		if (!IsWindowEnabled(w->window())) return;   // a dialog is still up: once it's closed
+	KillTimer(nullptr, id);
+	if (!quitApp()) return;
+	STARTUPINFOW si = { sizeof si };
+	PROCESS_INFORMATION pi = {};
+	std::wstring cmd = L"\"" + g_restartExe + L"\"";
+	if (CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+	}
+}
+
 void install(HWND parent, const Asset& asset) {
 	const std::string exe = exePath();
 	const std::string dir = dirName(exe);
@@ -344,15 +363,15 @@ void install(HWND parent, const Asset& asset) {
 	removeTree(resOld);
 	removeTree(work);
 	if (askConfirm(parent, "The update is installed", "Restart CedarLogic now to use it? Your circuits are saved.", "Restart Now", "Later")) {
-		if (quitApp()) {
-			STARTUPINFOW si = { sizeof si };
-			PROCESS_INFORMATION pi = {};
-			std::wstring cmd = L"\"" + wexe + L"\"";
-			if (CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-				CloseHandle(pi.hThread);
-				CloseHandle(pi.hProcess);
-			}
-		}
+		// Asked from Settings' Check Now: Settings closes first (its loop
+		// ends before the restart's turn comes).
+		bool fromWindow = false;
+		for (CircuitWindow* w : circuitWindows()) fromWindow = fromWindow || w->window() == parent;
+		wchar_t cls[16] = L"";
+		if (parent && IsWindow(parent) && !fromWindow && GetClassNameW(parent, cls, 16) && lstrcmpW(cls, L"#32770") == 0)
+			PostMessageW(parent, WM_COMMAND, IDCANCEL, 0);
+		g_restartExe = wexe;
+		SetTimer(nullptr, 0, 100, restartTimer);
 	}
 }
 
