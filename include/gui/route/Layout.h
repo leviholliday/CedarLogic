@@ -7,10 +7,15 @@
 //     three off the pin it connects to is nudged level with it (so the wire
 //     runs straight), gates that overlap in a column are spread apart, and
 //     columns that are too close for their wires get room.
-//   * Rearrange -- layered by signal flow: inputs in the first column, each
-//     gate one column right of what drives it, outputs in the last; gates
-//     ordered within a column to cut crossings, then placed level with what
-//     they connect to where the column has room.
+//   * Rearrange -- the groups the user drew (a clear gap between them, few
+//     wires across it: the digits of a multi-digit adder) are kept and put
+//     back side by side in drawn order; each is layered by signal flow,
+//     left to right or top to bottom as its pins run: inputs in the first
+//     column, each gate one column on from what drives it, outputs in the
+//     last; gates ordered within a column to cut crossings, with labels,
+//     keypads and displays kept in drawn order; a wire passing a column
+//     keeps a lane through it; then each gate placed level with what it
+//     connects to where the column has room.
 //
 // Pure: no wx, no engine. Unit-tested in test_route.
 
