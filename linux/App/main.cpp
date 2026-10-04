@@ -561,14 +561,32 @@ bool presentRunning(GApplication* gapp) {
 	return true;
 }
 
-// Files handed over by another launch: each opens here, in a window of its
-// own (or the one that has it already comes forward).
+// Files handed over by another launch (a .cdl double-clicked in the file
+// manager): each opens here, in a window of its own (or the one that has it
+// already comes forward). An untouched new window -- the blank Untitled one
+// -- takes the first one's place, as with Open and a drop; a circuit you're
+// in is left as it is, whatever Settings says about opening replacing it.
 void openHandedOver(GtkApplication* app, const std::vector<std::string>& paths) {
 	// Handed over while the launch screen still plays, before it brings
 	// the windows in: these come in with them.
 	const bool waiting = splashActive() && !circuitWindows().empty() &&
 	                     !gtk_widget_get_visible(GTK_WIDGET(circuitWindows().front()->window()));
-	for (const std::string& path : paths) openCircuit(app, path, nullptr);
+	auto stillOpen = [](CircuitWindow* w) {
+		const std::vector<CircuitWindow*>& all = circuitWindows();
+		return w && std::find(all.begin(), all.end(), w) != all.end();
+	};
+	CircuitWindow* blank = activeWindow(app);
+	for (const std::string& path : paths) {
+		// Still there and still blank: a question opening a file asks lets
+		// other things happen meanwhile.
+		if (!stillOpen(blank) || !blank->isPristine()) blank = nullptr;
+		openCircuit(app, path, blank);
+		// It has the file now: it comes forward, as a new window would.
+		if (stillOpen(blank) && !blank->filePath().empty()) {
+			if (!waiting) gtk_window_present(blank->window());
+			blank = nullptr;
+		}
+	}
 	if (circuitWindows().empty()) newCircuitWindow(app);
 	if (waiting) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 }
