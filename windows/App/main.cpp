@@ -550,6 +550,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gToolbarStyle;
+	// The click test wants every tool on the bar, and New in a window of its own.
+	if (gClickTest) { prefs().toolbarHidden = 0; prefs().openReplaces = false; prefs().newTemplate.clear(); }
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
