@@ -1525,6 +1525,7 @@ bool CircuitWindow::saveAs() {
 }
 
 void CircuitWindow::open() { chooseAndOpen(app, GTK_WINDOW(win)); }
+void CircuitWindow::newCircuit() { newCircuitWindow(app); }
 
 struct DroppedFiles {
 	GtkApplication* app;
@@ -1551,7 +1552,6 @@ void CircuitWindow::openDroppedFiles(GtkSelectionData* data) {
 		return G_SOURCE_REMOVE;
 	}, d);
 }
-void CircuitWindow::newCircuit() { newCircuitWindow(app); }
 
 void CircuitWindow::exportOlder(int format) {
 	const std::string suggested = displayName() + (format == 1 ? " (v1.x).cdl" : " (v2).cdl");
