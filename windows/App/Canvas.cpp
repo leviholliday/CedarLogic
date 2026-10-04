@@ -6,6 +6,7 @@
 #include "Shortcuts.h"
 #include "Window.h"
 
+#include <imm.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -63,6 +64,10 @@ void registerCanvasClass() {
 
 Canvas::Canvas(CircuitWindow* window, HWND parent, uint64_t pageKey) : win(window), key(pageKey) {
 	hwnd = CreateWindowExW(0, kClass, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 10, 10, parent, nullptr, appInstance(), this);
+	// No input method here: nothing is typed on the canvas, and a Chinese,
+	// Japanese or Korean one would take its single keys (A, R, S...) as
+	// the start of a word. Text boxes keep theirs.
+	if (hwnd) ImmAssociateContextEx(hwnd, nullptr, 0);
 }
 
 Canvas::~Canvas() {

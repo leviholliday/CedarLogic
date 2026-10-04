@@ -15,6 +15,7 @@
 #include "Updater.h"
 #include "Window.h"
 
+#include <imm.h>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -715,6 +716,9 @@ void showPreferencesDialog(HWND parent) {
 		form.enable(major, prefs().showGrid);
 		SetPropW(form.fields[list.note].hwnd, L"clTip", (HANDLE)1);
 		SetWindowSubclass(list.hwnd(), shortcutListProc, 1, (DWORD_PTR)&list);
+		// The keys pressed are the shortcut, not the start of a word for an
+		// input method (Chinese, Japanese, Korean) to compose.
+		ImmAssociateContextEx(list.hwnd(), nullptr, 0);
 		// Tab reaches the list (the arrows choose a shortcut, Enter changes it).
 		SetWindowLongPtrW(list.hwnd(), GWL_STYLE, GetWindowLongPtrW(list.hwnd(), GWL_STYLE) | WS_TABSTOP);
 	};
