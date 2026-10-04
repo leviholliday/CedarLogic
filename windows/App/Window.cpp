@@ -915,9 +915,9 @@ void CircuitWindow::stepAnimations() {
 		}
 	}
 	if (hintStart >= 0) {
-		const double a = hintAlpha();
+		// Done: drawn at its end (gone, or fully there), not a frame short.
 		if (nowSeconds() - hintStart >= kHintFadeTime) hintStart = -1;
-		paintHint(a);
+		paintHint(hintAlpha());
 	}
 }
 
