@@ -181,6 +181,9 @@ jobs:
           timeout 90 "$A" --dialog alert --screenshot "$PWD/renders/alert.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog alert --screenshot "$PWD/renders/alert-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog rename --screenshot "$PWD/renders/alert-rename.png" res/samples/practice.cdl || true
+          # A cedarlogic:// link that can't be opened.
+          timeout 90 "$A" --dialog bad-link --screenshot "$PWD/renders/link-bad.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog bad-link --screenshot "$PWD/renders/link-bad-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog about --screenshot "$PWD/renders/about.png" || true
           # A wire's value, shown where the pointer rests on it (and the whole
           # wire lit, in Simulation View).
@@ -259,6 +262,37 @@ jobs:
         continue-on-error: true
         run: timeout 60 package/CedarLogic/CedarLogic.exe --start-menu-test
 
+      # Share Link and cedarlogic:// links (windows/App/ShareLink.h). The link
+      # format's own checks (round trips, links python's zlib made -- one of each
+      # kind of deflate block -- and ones that must be refused, and the cache's
+      # files); the link the app makes for a circuit, which python's zlib must
+      # inflate to the circuit; a link python's zlib made of it, which the app
+      # must decode; and the app opening a cedarlogic:// link (a picture of the
+      # window it opens: the circuit, named from the link).
+      - name: Share link test
+        if: matrix.run
+        shell: bash
+        run: |
+          A=package/CedarLogic/CedarLogic.exe
+          PY=$(command -v python || command -v python3)
+          mkdir -p renders
+          "$PY" - <<'PY'
+          import base64, zlib
+          raw = open("res/samples/practice.cdl", "rb").read()
+          c = zlib.compressobj(9, zlib.DEFLATED, -15)
+          open("share-python.link", "w").write(base64.urlsafe_b64encode(c.compress(raw) + c.flush()).decode().rstrip("="))
+          PY
+          timeout 60 "$A" --share-test res/samples/practice.cdl share-app.link share-python.link
+          "$PY" - <<'PY'
+          import base64, zlib
+          app = open("share-app.link").read().strip()
+          made = zlib.decompress(base64.urlsafe_b64decode(app + "=" * (-len(app) % 4)), -15)
+          assert made == open("res/samples/practice.cdl", "rb").read(), "python's zlib inflated the app's link to something else"
+          print("python's zlib inflates the app's link (%d characters) to the circuit (%d bytes)" % (len(app), len(made)))
+          PY
+          timeout 90 "$A" --screenshot "$PWD/renders/link-opened.png" "cedarlogic://open#c=$(cat share-app.link)&n=Shared%20practice"
+          test -s renders/link-opened.png
+
       # Install as someone would (quietly here), check CedarLogic starts from
       # there, is in Start and owns .cdl files; then uninstall and check it's
       # all gone.
@@ -283,6 +317,11 @@ jobs:
             $open = (Get-Item "$prog\shell\open\command").GetValue('')
             if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
             if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }
+            # cedarlogic:// links: a URL protocol, run with the link as the argument.
+            $scheme = 'HKCU:\Software\Classes\cedarlogic'
+            if ((Get-Item $scheme).GetValueNames() -notcontains 'URL Protocol') { throw 'cedarlogic isn''t a URL protocol' }
+            $link = (Get-Item "$scheme\shell\open\command").GetValue('')
+            if ($link -ne "`"$exe`" `"%1`"") { throw "cedarlogic:// links open with: $link" }
             $p = Start-Process -FilePath $exe -ArgumentList '--screenshot', "`"$PWD\renders\installed.png`"", "`"$PWD\res\samples\practice.cdl`"" -PassThru
             $null = $p.Handle   # so ExitCode is there once it's gone
             $p | Wait-Process -Timeout 90
@@ -292,7 +331,7 @@ jobs:
             # folder away last: wait for that.
             for ($i = 0; $i -lt 90 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
             if (Test-Path $dir) { Write-Output "::warning::left in $dir after uninstalling: $((Get-ChildItem -Recurse -Name $dir) -join ', ')" }
-            foreach ($f in @($exe, "$dir\res", $lnk, $prog, 'HKCU:\Software\CedarLogic\Native')) {
+            foreach ($f in @($exe, "$dir\res", $lnk, $prog, $scheme, 'HKCU:\Software\CedarLogic\Native')) {
               if (Test-Path $f) { throw "still there after uninstalling: $f" }
             }
             if ((Test-Path 'HKCU:\Software\Classes\.cdl') -and (Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -eq 'CedarLogic.Circuit') {

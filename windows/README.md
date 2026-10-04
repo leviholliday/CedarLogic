@@ -43,7 +43,9 @@ it compiles without a Windows machine:
   formulas (`TruthTableWindow`) and Build from Formula (`Formula`), Find
   (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope,
   docked under the canvas, and its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
-  for pictures made off screen), Send Feedback (`Feedback`, to
+  for pictures made off screen), Share Link and cedarlogic:// links (`ShareLink`;
+  the link format is `ShareCodec`, over `Deflate`, a deflate compressor and
+  decompressor of its own, since Windows has no zlib), Send Feedback (`Feedback`, to
   cedarlogic.netlify.app), and Help with search (`Help`); the launch screen with the first launch's sound
   (`Splash`), the first-run welcome, What's New and the guided tour that
   builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
@@ -77,7 +79,9 @@ CI makes two ways to get it, for each processor (x64 and ARM64):
   For the one user, with no administrator needed: it puts that same folder
   in `%LOCALAPPDATA%\Programs\CedarLogic`, adds CedarLogic to the Start menu
   (and the desktop, if asked), makes .cdl files open in it with their own
-  icon (`HKCU\Software\Classes`: `.cdl` -> `CedarLogic.Circuit`), notes where
+  icon (`HKCU\Software\Classes`: `.cdl` -> `CedarLogic.Circuit`), makes the
+  website's Open in the App work (`cedarlogic://` links: `HKCU\Software\Classes\cedarlogic`,
+  a URL protocol that runs the exe with the link), notes where
   it went (`HKCU\Software\CedarLogic\Native`, `InstallDir`), and offers to
   start it at the end. Settings > Apps uninstalls it, leaving Your Circuits
   and the settings. A newer installer installs over an older one; while
@@ -89,8 +93,8 @@ CI makes two ways to get it, for each processor (x64 and ARM64):
   the version is the CMake project's).
 - `CedarLogic-Windows-native-<arch>.zip`: the folder, to run where it's
   unzipped. The first time, when nothing else is on screen, it asks once
-  whether to add itself to the Start menu and open .cdl files (the same
-  names the installer uses, pointing at this copy); Settings > General's
+  whether to add itself to the Start menu and open .cdl files and cedarlogic://
+  links (the same names the installer uses, pointing at this copy); Settings > General's
   Start menu switch, or Help > Add to Start Menu / Remove from Start Menu
   in the ••• menu, changes that later. A copy
   that was added and then moved (a newer zip unzipped elsewhere, the old
@@ -99,7 +103,12 @@ CI makes two ways to get it, for each processor (x64 and ARM64):
 
 Either way, double-clicking a .cdl opens it in CedarLogic -- in the one
 already running, if there is one (a second start hands its files over,
-`main.cpp`) -- and updates from inside the app replace `CedarLogic.exe` and
+`main.cpp`) -- and so does a cedarlogic://open#c=... link: its circuit is made a
+file in `%LOCALAPPDATA%\CedarLogic\links` and opened as a new circuit in Your
+Circuits, as Import does (a link is the last argument the app reads: whatever
+follows it is ignored). A copy added before links existed, or an installed one
+updated from inside the app, registers the scheme the first time it starts.
+Updates from inside the app replace `CedarLogic.exe` and
 `res` where they are. Windows SmartScreen warns about both until they're
 signed: More info, then Run anyway.
 
@@ -114,7 +123,7 @@ Direct2D here. And:
   view), `--focus` (focus mode), `--rename-tab`, or `--dialog
   preferences|shortcuts|truth-table|add-gate|library|versions|templates|
   formula|scope|export|feedback|help|welcome|whatsnew|quit|alert|rename|about|
-  start-menu` to capture that instead
+  start-menu|bad-link` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
   or Settings (0 General ... 4 Shortcuts), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--note "text"`
@@ -130,9 +139,17 @@ Direct2D here. And:
   (a tool the style leaves to ••• is a SKIP) and exits 1 if any failed (CI
   runs it once per toolbar style).
 - `CedarLogic.exe --start-menu-test` -- adds this copy to the Start menu
-  and .cdl files, checks them (as Windows looks them up), removes them and
+  and .cdl files and cedarlogic:// links, checks them (as Windows looks them up), removes them and
   checks they're gone, printing PASS or FAIL for each (CI runs it). It
   changes this account's Start menu and .cdl files while it runs.
+- `CedarLogic.exe --share-test [circuit.cdl [file to write its link to [a link
+  another program made of it]]]` -- the share link format's checks (round
+  trips, links made by python's zlib, links that must be refused) and the
+  cache's, printing PASS or FAIL for each; CI runs it with python's zlib on
+  either side. (`--screenshot out.png "cedarlogic://open#c=..."` opens a link;
+  `--dialog bad-link` shows the card for one that can't be opened.) The format
+  and the deflate under it are plain C++, so a Mac checks them too:
+  `windows/Tools/share-check.sh` and `windows/Tools/deflate-check.sh`.
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the
