@@ -138,6 +138,11 @@ void Prefs::load() {
 		exportColor = readBool(k, "exportColor", exportColor);
 		exportProblem = readString(k, "exportProblem", exportProblem);
 		exportScale = readInt(k, "exportScale", exportScale, 2, 6);
+		reportCircuit = readBool(k, "reportCircuit", reportCircuit);
+		reportTable = readBool(k, "reportTable", reportTable);
+		reportFormulas = readBool(k, "reportFormulas", reportFormulas);
+		reportTiming = readBool(k, "reportTiming", reportTiming);
+		reportColor = readBool(k, "reportColor", reportColor);
 		timingWhole = readBool(k, "timingWhole", timingWhole);
 		timingInColor = readBool(k, "timingInColor", timingInColor);
 		gsize n = 0;
@@ -229,6 +234,11 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "exportColor", exportColor);
 	g_key_file_set_string(k, kGroup, "exportProblem", exportProblem.c_str());
 	g_key_file_set_integer(k, kGroup, "exportScale", exportScale);
+	g_key_file_set_boolean(k, kGroup, "reportCircuit", reportCircuit);
+	g_key_file_set_boolean(k, kGroup, "reportTable", reportTable);
+	g_key_file_set_boolean(k, kGroup, "reportFormulas", reportFormulas);
+	g_key_file_set_boolean(k, kGroup, "reportTiming", reportTiming);
+	g_key_file_set_boolean(k, kGroup, "reportColor", reportColor);
 	g_key_file_set_boolean(k, kGroup, "timingWhole", timingWhole);
 	g_key_file_set_boolean(k, kGroup, "timingInColor", timingInColor);
 	std::vector<const gchar*> list;

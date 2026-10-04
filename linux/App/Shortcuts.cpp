@@ -114,6 +114,7 @@ const std::vector<Action>& all() {
 		{ "importFile", "Circuits", "Import a .cdl file", "app.import", "<Primary>i" },
 		{ "save", "Circuits", "Save now and keep a version", "win.save", "<Primary>s" },
 		{ "exportImage", "Circuits", "Export as an image", "win.export-image", "<Primary>e" },
+		{ "exportReport", "Circuits", "Export a lab report (PDF)", "win.export-report", "" },
 		{ "exportFile", "Circuits", "Export as a CedarLogic file", "win.save-as", "<Primary><Shift>s" },
 		{ "print", "Circuits", "Print", "win.print", "<Primary>p" },
 		{ "closeWindow", "Circuits", "Close the window", "win.close", "<Primary><Shift>w" },

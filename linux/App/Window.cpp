@@ -62,6 +62,7 @@ const Command kCommands[] = {
 	{ "feedback", [](CircuitWindow* w) { feedback::show(w); }, false },
 	{ "whats-new", [](CircuitWindow* w) { whatsnew::show(w); }, false },
 	{ "export-image", [](CircuitWindow* w) { w->exportImage(); }, false },
+	{ "export-report", [](CircuitWindow* w) { w->exportReport(); }, false },
 	{ "export-v2", [](CircuitWindow* w) { w->exportOlder(2); }, false },
 	{ "export-v1", [](CircuitWindow* w) { w->exportOlder(1); }, false },
 	{ "print", [](CircuitWindow* w) { w->print(); }, false },
@@ -1599,6 +1600,7 @@ void CircuitWindow::exportOlder(int format) {
 
 // Export as Image: ExportImage.cpp.
 void CircuitWindow::exportImage() { showExportImage(this, currentPage()); }
+void CircuitWindow::exportReport() { showExportReport(this); }
 
 struct PrintJob { CLDocument* doc; int page; };
 

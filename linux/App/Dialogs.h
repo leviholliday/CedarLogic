@@ -19,6 +19,14 @@ void showQuickAdd(CircuitWindow* w);
 void showTruthTable(CircuitWindow* w, int page);   // TruthTableWindow.cpp
 // Export as Image (ExportImage.cpp): the page as a picture, with your name and result.
 void showExportImage(CircuitWindow* w, int page);
+// Export Lab Report (LabReport.cpp): one PDF to hand in.
+struct LabReportOptions {
+	bool circuit = true, truthTable = true, formulas = true, timing = true, color = true;
+};
+void showExportReport(CircuitWindow* w);
+// The PDF itself (also --lab-report). False, with `error`, if it couldn't be written.
+bool writeLabReport(CLDocument* doc, const std::string& title, const LabReportOptions& options, const std::string& file, std::string& error);
+bool hasScopeRecording(CLDocument* doc);
 // Build from Formula: switches, gates and lights from a formula typed in.
 void showBuildFormula(CircuitWindow* w);
 void showRamEditor(CircuitWindow* w, long gate);

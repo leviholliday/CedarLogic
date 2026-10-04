@@ -86,6 +86,8 @@ struct Prefs {
 	std::string exportProblem;
 	int exportScale = 4;
 	// The oscilloscope's timing diagrams: the whole recording or what's on screen; colour or black and white.
+	// Export Lab Report: what goes in, and colour or black and white.
+	bool reportCircuit = true, reportTable = true, reportFormulas = true, reportTiming = true, reportColor = true;
 	bool timingWhole = false, timingInColor = false;                     // the What's New last shown (whatsnew::kVersion)
 
 	double wireScale() const;
