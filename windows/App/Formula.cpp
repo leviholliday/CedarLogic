@@ -1017,4 +1017,14 @@ Plan plan(const Parsed& formulas, Shape shape, Style style, bool twoInputOnly) {
 	return out;
 }
 
+std::string checkSpec(const Parsed& p) {
+	std::string s = "in";
+	for (const std::string& v : p.variables) s += "\t" + v;
+	for (const Function& f : p.functions) {
+		s += "\nout\t" + f.name + "\t";
+		for (int v : f.values) s += v == 1 ? '1' : v == 0 ? '0' : '-';
+	}
+	return s;
+}
+
 }  // namespace formula
