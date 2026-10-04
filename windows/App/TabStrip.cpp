@@ -467,11 +467,12 @@ LRESULT CALLBACK TabStrip::editProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT
 	TabStrip* t = reinterpret_cast<TabStrip*>(data);
 	switch (msg) {
 	case WM_KEYDOWN:
-		if (wp == VK_RETURN) { guarded("renaming a tab", [&] { t->commitRename(true, true); }); return 0; }
+		// Enter (or Tab, as clicking away) keeps the name; Escape puts the old one back.
+		if (wp == VK_RETURN || wp == VK_TAB) { guarded("renaming a tab", [&] { t->commitRename(true, true); }); return 0; }
 		if (wp == VK_ESCAPE) { guarded("renaming a tab", [&] { t->commitRename(false, true); }); return 0; }
 		break;
 	case WM_CHAR:
-		if (wp == VK_RETURN || wp == VK_ESCAPE) return 0;   // no beep
+		if (wp == VK_RETURN || wp == VK_ESCAPE || wp == VK_TAB) return 0;   // no beep
 		break;
 	case WM_GETDLGCODE:
 		return DLGC_WANTALLKEYS | DefSubclassProc(h, msg, wp, lp);
