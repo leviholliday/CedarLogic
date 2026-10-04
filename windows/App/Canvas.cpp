@@ -3,6 +3,7 @@
 #include "Canvas.h"
 #include "Brand.h"
 #include "Chrome.h"
+#include "Shortcuts.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -970,7 +971,7 @@ void Canvas::onRelease(int button, double vx, double vy) {
 	redraw();
 }
 
-// Per device (Preferences > Canvas): a wheel mouse zooms and a touchpad moves
+// Per device (Settings > Canvas): a wheel mouse zooms and a touchpad moves
 // around, by default. Ctrl+scroll always zooms (a touchpad's pinch arrives
 // as that); Shift+scroll moves sideways.
 void Canvas::onWheel(int delta, bool horizontal, WPARAM keys, POINT screen) {
@@ -1012,16 +1013,20 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 	const bool isLeft = vk == VK_LEFT, isRight = vk == VK_RIGHT, isUp = vk == VK_UP;
 	const bool isReturn = vk == VK_RETURN;
 	const bool isDelete = vk == VK_DELETE || vk == VK_BACK;
+	// The key Settings > Shortcuts gives one of the canvas's actions (A, R,
+	// S, Shift+S, T, C, V, X, D, unless they've been changed), if any.
+	const shortcuts::Action* act = shortcuts::match(shortcuts::pressed(vk), true);
+	auto is = [&](const char* id) { return act && std::strcmp(act->id, id) == 0; };
 
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {
-		if (!bare) return false;
+		if (!bare && !act) return false;
 		if (vk == VK_ESCAPE) win->toggleSimView();
 		else if (vk == VK_SPACE) { if (!spaceDown && !repeat) { spaceDown = true; win->toggleRunning(); } }
 		else if (arrow) pan(isLeft ? 40 : isRight ? -40 : 0, isUp ? 40 : (isLeft || isRight) ? 0 : -40);
 		else if (vk == VK_OEM_PLUS || vk == VK_ADD) animateZoom(1 / 0.75);
 		else if (vk == VK_OEM_MINUS || vk == VK_SUBTRACT) animateZoom(0.75);
-		else if (vk == 'T' && !shift) win->makeTruthTable();
+		else if (is("truthTable")) win->makeTruthTable();
 		return true;
 	}
 
@@ -1051,6 +1056,38 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 			return true;
 		}
 		win->selectNone();
+		return true;
+	}
+
+	// The canvas's actions, before anything else (the fixed keys below can't
+	// be given to one).
+	if (act) {
+		if (is("quickCopy")) {
+			// C while something is moving (dragged, or floating on the pointer):
+			// connect it to the pins it's next to and keep moving. The
+			// connections are kept at the drop; Escape takes back just them.
+			if (moving()) {
+				if (win->canEdit() && pointerInside) {
+					const int n = cl_edit_connect_while_moving(doc, page(), upp);
+					if (n > 0) win->note(strf("Connected %d pin%s. Escape takes it back.", n, n == 1 ? "" : "s"));
+					else if (n == 0) win->note("Nothing close enough to connect.");
+					win->redraw();
+				}
+				return true;
+			}
+			win->copy();
+			return true;
+		}
+		if (is("truthTable")) { win->makeTruthTable(); return true; }
+		if (!win->canEdit()) { win->lockNudge(); return true; }
+		if (is("quickPaste")) win->paste();
+		else if (is("quickCut")) win->cut();
+		else if (is("quickDuplicate")) win->duplicate();
+		else if (is("addGate")) win->quickAdd();
+		else if (is("rotate")) win->rotate();
+		else if (is("straighten")) win->straighten();
+		else if (is("tidy")) win->tidy();
+		else return false;
 		return true;
 	}
 
@@ -1090,36 +1127,6 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 		return true;
 	}
 
-	// The single-letter keys, as in the wx app.
-	switch (vk) {
-	case 'C':
-		if (shift) break;
-		// C while something is moving (dragged, or floating on the pointer):
-		// connect it to the pins it's next to and keep moving. The
-		// connections are kept at the drop; Escape takes back just them.
-		if (moving()) {
-			if (win->canEdit() && pointerInside) {
-				const int n = cl_edit_connect_while_moving(doc, page(), upp);
-				if (n > 0) win->note(strf("Connected %d pin%s. Escape takes it back.", n, n == 1 ? "" : "s"));
-				else if (n == 0) win->note("Nothing close enough to connect.");
-				win->redraw();
-			}
-			return true;
-		}
-		win->copy();
-		return true;
-	case 'V': if (shift) break; if (win->canEdit()) win->paste(); else win->lockNudge(); return true;
-	case 'X': if (shift) break; if (win->canEdit()) win->cut(); else win->lockNudge(); return true;
-	case 'D': if (shift) break; if (win->canEdit()) win->duplicate(); else win->lockNudge(); return true;
-	case 'A': if (shift) break; if (win->canEdit()) win->quickAdd(); else win->lockNudge(); return true;
-	case 'R': if (shift) break; if (win->canEdit()) win->rotate(); else win->lockNudge(); return true;
-	case 'S':
-		if (!win->canEdit()) { win->lockNudge(); return true; }
-		if (shift) win->tidy(); else win->straighten();
-		return true;
-	case 'T': if (shift) break; win->makeTruthTable(); return true;
-	default: break;
-	}
 	return false;
 }
 

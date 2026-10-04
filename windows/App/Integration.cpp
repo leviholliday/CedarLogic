@@ -227,7 +227,7 @@ bool ask(CircuitWindow* w, bool firstTime) {
 	a.heading = "Add CedarLogic to the Start menu?";
 	a.text = "It'll be in Start with your other apps, and double-clicking a .cdl file will open it in "
 	         "CedarLogic. It still runs from this folder, so keep the folder where it is.";
-	if (firstTime) a.text += "\n\nYou can change this later in the \u2022\u2022\u2022 menu, under Help.";
+	if (firstTime) a.text += "\n\nYou can change this later in Settings, or under Help in the \u2022\u2022\u2022 menu.";
 	a.buttons = { { "Add to Start", 1, 1 }, { firstTime ? "No Thanks" : "Cancel", 0, 0 } };
 	a.enter = 1;
 	a.escape = 0;
@@ -326,6 +326,17 @@ void menuCommand(CircuitWindow* w) {
 	prefs().startMenu = 2;
 	prefs().save();
 	if (isOpen(w)) w->note("CedarLogic is out of the Start menu, and .cdl files no longer open in it.");
+}
+
+bool inStartMenu() { return added(); }
+
+bool setInStartMenu(bool on) {
+	bool ok = true;
+	if (on) ok = add();
+	else remove();
+	prefs().startMenu = on ? 1 : 2;
+	prefs().save();
+	return ok;
 }
 
 bool selfTest(std::string& report) {

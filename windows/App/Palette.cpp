@@ -18,6 +18,9 @@ const wchar_t* kMapClass = L"CedarLogicMiniMap";
 const int kSearchId = 1;
 // In points.
 const float kTileW = 78, kArtH = 46, kCaptionH = 16, kGap = 2, kPad = 8, kMapH = 132, kPickerH = 28, kFieldH = 28;
+// Settings > Appearance's gate size (48, the standard, is these sizes).
+float gateScale() { return std::min(96, std::max(36, prefs().gateSize)) / 48.0f; }
+float artH() { return kArtH * gateScale(); }
 
 }  // namespace
 
@@ -148,7 +151,7 @@ void GatePalette::chooseCategory(POINT screen) {
 	HMENU m = CreatePopupMenu();
 	for (int i = 0; i < (int)categories.size(); i++) {
 		std::string label = categories[i].title;
-		if (i < 10) label += strf("\tShift+%d", (i + 1) % 10);
+		if (i < 10 && prefs().showCategoryKeys) label += strf("\tShift+%d", (i + 1) % 10);
 		AppendMenuW(m, MF_STRING | (i == category ? MF_CHECKED : 0), i + 1, W(label).c_str());
 	}
 	const int r = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, screen.x, screen.y, 0, host, nullptr);
@@ -168,6 +171,7 @@ void GatePalette::focusSearch() { SetFocus(search); }
 
 void GatePalette::themeChanged() {
 	if (fieldBrush) { DeleteObject(fieldBrush); fieldBrush = nullptr; }
+	clampScroll();   // smaller gates (Settings' gate size, or no names): not scrolled past the end
 	InvalidateRect(host, nullptr, TRUE);
 	InvalidateRect(search, nullptr, TRUE);
 	InvalidateRect(tiles, nullptr, FALSE);
@@ -269,10 +273,10 @@ void GatePalette::layoutTiles(int& columns, float& tileW, float& tileH) const {
 	GetClientRect(tiles, &rc);
 	const double s = dpiOf(tiles) / 96.0;
 	const float width = (float)(rc.right / s);
-	tileH = kArtH + (prefs().showGateNames ? kCaptionH : 0);
-	columns = std::max(1, (int)((width - 2 * kPad + kGap) / (kTileW + kGap)));
+	tileH = artH() + (prefs().showGateNames ? kCaptionH : 0);
+	columns = std::max(1, (int)((width - 2 * kPad + kGap) / (kTileW * gateScale() + kGap)));
 	// Spread whatever width is left over the columns.
-	tileW = std::max(kTileW, (width - 2 * kPad - (columns - 1) * kGap) / columns);
+	tileW = std::max(kTileW * gateScale(), (width - 2 * kPad - (columns - 1) * kGap) / columns);
 }
 
 float GatePalette::contentHeight() const {
@@ -355,12 +359,12 @@ void GatePalette::paintTiles() {
 			// The engine draws the gate in the tile's own points.
 			rt->SetTransform(D2D1::Matrix3x2F::Translation(x, y + 2) * D2D1::Matrix3x2F::Scale((float)s, (float)s));
 			guarded("drawing the palette", [&] {
-				if (parts::isPart(shown[i].name)) parts::draw(shown[i].name, rt, tileW, kArtH - 4, s, dark);
-				else cl_library_draw_gate(shown[i].name.c_str(), rt, tileW, kArtH - 4, s, dark);
+				if (parts::isPart(shown[i].name)) parts::draw(shown[i].name, rt, tileW, artH() - 4, s, dark);
+				else cl_library_draw_gate(shown[i].name.c_str(), rt, tileW, artH() - 4, s, dark);
 			});
 			rt->SetTransform(D2D1::Matrix3x2F::Scale((float)s, (float)s));
 			if (prefs().showGateNames)
-				drawText(rt, shown[i].caption, D2D1::RectF(x + 2, y + kArtH - 2, x + tileW - 2, y + tileH - 2), 10,
+				drawText(rt, shown[i].caption, D2D1::RectF(x + 2, y + artH() - 2, x + tileW - 2, y + tileH - 2), 10,
 				         withAlpha(ink, 0.55f), TextAlign::Center);
 		}
 		if (shown.empty())

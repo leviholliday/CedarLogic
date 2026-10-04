@@ -411,12 +411,15 @@ void begin(HWND parent, bool interactive) {
 	SetTimer(nullptr, 0, 200, pollTimer);
 }
 
+// Unless Settings > General says not to (Check Now still asks).
 void CALLBACK firstCheck(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
-	begin(nullptr, false);
+	if (prefs().checkUpdates) begin(nullptr, false);
 }
 
-void CALLBACK laterCheck(HWND, UINT, UINT_PTR, DWORD) { begin(nullptr, false); }
+void CALLBACK laterCheck(HWND, UINT, UINT_PTR, DWORD) {
+	if (prefs().checkUpdates) begin(nullptr, false);
+}
 
 }  // namespace
 

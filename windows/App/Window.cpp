@@ -6,6 +6,7 @@
 #include "Dialogs.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "Shortcuts.h"
 #include "StatusBar.h"
 #include "TabStrip.h"
 #include "FindBar.h"
@@ -297,7 +298,7 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_SAVE_PART, "Save as &Part\u2026");
 	item(edit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
 	separator(edit);
-	item(edit, CMD_PREFERENCES, "Pr&eferences…\tCtrl+,");
+	item(edit, CMD_PREFERENCES, "S&ettings…\tCtrl+,");
 
 	HMENU view = submenu(menuBar, "&View");
 	item(view, CMD_ZOOM_IN, "Zoom &In\tCtrl+=");
@@ -676,7 +677,7 @@ void CircuitWindow::tabContextMenu(int index, POINT screen) {
 		AppendMenuW(m, MF_STRING, RENAME, L"Re&name");
 		if (splitOpen()) {
 			AppendMenuW(m, MF_STRING, OTHER_SIDE, L"Move to the &Other Side");
-			AppendMenuW(m, MF_STRING, CLOSE_SPLIT, L"Close &Split View\tCtrl+Alt+W");
+			AppendMenuW(m, MF_STRING, CLOSE_SPLIT, W("Close &Split View" + shortcuts::menuKeys(CMD_CLOSE_SPLIT)).c_str());
 		} else {
 			AppendMenuW(m, MF_STRING, OPEN_SPLIT, L"Open in &Split View");
 		}
@@ -684,11 +685,12 @@ void CircuitWindow::tabContextMenu(int index, POINT screen) {
 		AppendMenuW(m, MF_STRING | (k > 0 ? 0 : MF_GRAYED), LEFT, L"Move &Left");
 		AppendMenuW(m, MF_STRING | (k + 1 < (int)row.size() ? 0 : MF_GRAYED), RIGHT, L"Move Ri&ght");
 		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-		AppendMenuW(m, MF_STRING | (cl_document_page_count(doc) > 1 ? 0 : MF_GRAYED), CLOSE, L"&Close Tab\tCtrl+W");
+		AppendMenuW(m, MF_STRING | (cl_document_page_count(doc) > 1 ? 0 : MF_GRAYED), CLOSE, W("&Close Tab" + shortcuts::menuKeys(CMD_CLOSE_TAB)).c_str());
 	} else {
-		AppendMenuW(m, MF_STRING, NEW, L"&New Tab\tCtrl+T");
-		AppendMenuW(m, MF_STRING | (cl_edit_undo_is_close_page(doc) ? 0 : MF_GRAYED), REOPEN, L"&Reopen Closed Tab\tCtrl+Shift+T");
-		if (splitOpen()) AppendMenuW(m, MF_STRING, CLOSE_SPLIT, L"Close &Split View\tCtrl+Alt+W");
+		AppendMenuW(m, MF_STRING, NEW, W("&New Tab" + shortcuts::menuKeys(CMD_NEW_TAB)).c_str());
+		AppendMenuW(m, MF_STRING | (cl_edit_undo_is_close_page(doc) ? 0 : MF_GRAYED), REOPEN,
+		            W("&Reopen Closed Tab" + shortcuts::menuKeys(CMD_REOPEN_TAB)).c_str());
+		if (splitOpen()) AppendMenuW(m, MF_STRING, CLOSE_SPLIT, W("Close &Split View" + shortcuts::menuKeys(CMD_CLOSE_SPLIT)).c_str());
 	}
 	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, 0, hwnd, nullptr);
 	DestroyMenu(m);
@@ -899,7 +901,9 @@ void CircuitWindow::toggleFocusMode() {
 	for (TabStrip* t : strips) { t->setMaximizeHot(false, false); t->setTitleRow(focusOn); }
 	stepAnimations();
 	updateActions();
-	if (focusOn) note("Focus mode. Ctrl+. brings the toolbar and the side panel back.");
+	if (focusOn)
+		note("Focus mode. " + shortcuts::keysFor(CMD_FOCUS_MODE, "View \u25B8 Focus Mode (Alt opens the menus)") +
+		     " brings the toolbar and the side panel back.");
 	if (Canvas* c = currentCanvas()) c->focus();
 }
 
@@ -1143,11 +1147,13 @@ int CircuitWindow::commandChecked(int command) const {
 }
 
 void CircuitWindow::updateMenu(HMENU menu) {
+	shortcuts::relabel(menu);   // the keys each command has now (Settings > Shortcuts)
 	const int n = GetMenuItemCount(menu);
 	for (int i = 0; i < n; i++) {
 		const UINT id = GetMenuItemID(menu, i);
 		if (id == (UINT)-1 || id == 0 || (id >= CMD_RECENT && id <= CMD_RECENT_LAST)) continue;
-		if (id == CMD_START_MENU) ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id, W(integration::menuLabel()).c_str());
+		if (id == CMD_START_MENU)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id, W(integration::menuLabel() + shortcuts::menuKeys(CMD_START_MENU)).c_str());
 		EnableMenuItem(menu, i, MF_BYPOSITION | (commandEnabled((int)id) ? MF_ENABLED : MF_GRAYED));
 		const int check = commandChecked((int)id);
 		if (check >= 0) CheckMenuItem(menu, i, MF_BYPOSITION | (check ? MF_CHECKED : MF_UNCHECKED));
@@ -1201,6 +1207,7 @@ void CircuitWindow::themeChanged() {
 void CircuitWindow::prefsChanged() {
 	ShowWindow(paletteHost, prefs().showPalette && !focusOn ? SW_SHOW : SW_HIDE);
 	layout();
+	if (toolbar) toolbar->layoutNow();   // its style, its groups, its tips' keys
 	themeChanged();
 }
 
@@ -1692,7 +1699,14 @@ void CircuitWindow::run(int command) {
 	auto editing = [&](void (CircuitWindow::*f)()) { if (canEdit()) (this->*f)(); else lockNudge(); };
 	Canvas* c = currentCanvas();
 	switch (command) {
-	case CMD_NEW: newCircuitWindow(); break;
+	case CMD_NEW:
+		// A blank page, or the template Settings > General names; in this
+		// window's place when Settings says new circuits replace the one
+		// you're in (it's saved first, as everything is).
+		if (!prefs().newTemplate.empty() && templates::startFrom(prefs().newTemplate, this, prefs().openReplaces)) break;
+		if (prefs().openReplaces && saveQuietly(false)) replaceDocument(cl_document_new(), "");
+		else newCircuitWindow();
+		break;
 	case CMD_OPEN: showYourCircuits(this); break;
 	case CMD_IMPORT: chooseAndOpen(this); break;
 	case CMD_NEW_TEMPLATE: templates::showPicker(this); break;
@@ -1771,7 +1785,7 @@ void CircuitWindow::run(int command) {
 	case CMD_TOUR: welcome::startTourOn(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;
-	case CMD_START_MENU: integration::menuCommand(this); break;
+	case CMD_START_MENU: if (integration::offered()) integration::menuCommand(this); break;
 	case CMD_ABOUT: about::show(this); break;
 	default: break;
 	}
@@ -1794,8 +1808,8 @@ void CircuitWindow::titleMenu(POINT screen) {
 	AppendMenuW(m, MF_STRING, DUPLICATE, L"&Duplicate");
 	AppendMenuW(m, MF_STRING, VERSIONS, L"&Version History\u2026");
 	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-	AppendMenuW(m, MF_STRING, EXPORT, L"&Export\u2026\tCtrl+Shift+S");
-	AppendMenuW(m, MF_STRING, LIBRARY, L"Your &Circuits\u2026\tCtrl+O");
+	AppendMenuW(m, MF_STRING, EXPORT, W("&Export\u2026" + shortcuts::menuKeys(CMD_SAVE_AS)).c_str());
+	AppendMenuW(m, MF_STRING, LIBRARY, W("Your &Circuits\u2026" + shortcuts::menuKeys(CMD_OPEN)).c_str());
 	SetForegroundWindow(hwnd);
 	const int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, screen.x, screen.y, 0, hwnd, nullptr);
 	DestroyMenu(m);
@@ -1918,7 +1932,7 @@ bool CircuitWindow::saveQuietly(bool explicitSave) {
 	if (!err.empty()) {
 		forceDirty = true;
 		if (explicitSave) showMessage(hwnd, Tone::Error, "The circuit couldn't be saved", err);
-		else note("Couldn't save just now. Your work is still here; try Ctrl+S.");
+		else note("Couldn't save just now. Your work is still here; try " + shortcuts::keysFor(CMD_SAVE, "Save a Version") + ".");
 		updateTitle();
 		return false;
 	}
@@ -2404,7 +2418,7 @@ void CircuitWindow::closePage(int page) {
 	if (cl_document_page_count(doc) < 2) return;
 	// A tab with work on it asks first (wx CloseTabCanvas).
 	if (cl_document_gate_count(doc, page) > 0 &&
-	    !askConfirm(hwnd, "Close this tab?", "All work on this tab will be lost. Ctrl+Shift+T brings it back.", "Close Tab", "Cancel", true))
+	    !askConfirm(hwnd, "Close this tab?", "All work on this tab will be lost. " + shortcuts::keysFor(CMD_REOPEN_TAB, "Reopen Closed Tab") + " brings it back.", "Close Tab", "Cancel", true))
 		return;
 	for (Canvas* c : canvases) c->cancelDrag();
 	cl_edit_select_none(doc, page);

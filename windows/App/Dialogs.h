@@ -1,5 +1,5 @@
 // The app's dialogs and extra windows: a gate's settings, quick add, truth
-// tables, the oscilloscope, the memory editor, Preferences and the shortcut
+// tables, the oscilloscope, the memory editor, Settings and the shortcut
 // list -- and Form, the small builder they're made with: a list of fields
 // laid out top to bottom in a standard Windows dialog.
 
@@ -15,10 +15,11 @@ class CircuitWindow;
 struct IWICBitmap;
 
 struct FormField {
-	enum Kind { Text, Check, Choice, List, Note, Picture };
+	enum Kind { Text, Check, Choice, List, Note, Picture, Button, Slider };
 	Kind kind = Note;
-	std::string label;                  // beside a Text or Choice; a Check's own text; a Note's text
-	std::string value;                  // Text: the text. Check: "1" or "". Choice: the index.
+	std::string label;                  // beside a Text or Choice; a Check's own text; a Note's text; a Button's
+	std::string value;                  // Text: the text. Check: "1" or "". Choice: the index. Slider: the number.
+	std::string side;                   // a Check, Picture, Button or Slider: a label in the left column
 	std::vector<std::string> choices;   // Choice: the items. List: the column titles.
 	std::vector<int> columnWidths;      // List: in points (0 shares what's left)
 	int lines = 1;                      // List and Note: how tall, in rows of text
@@ -27,7 +28,14 @@ struct FormField {
 	bool mono = false;                  // List: a fixed-width font
 	int arrowsMove = -1;                // Text: Up and Down move this List field's selection
 	bool stepper = false;               // Text: − and + beside it, for a whole number (Form::onStep)
-	std::string tip;                    // shown under a Text field, dimmed
+	std::string tip;                    // shown under the field, dimmed (wrapped to its width)
+	int tipLines = 0;                   //   room for this many lines at least (a tip that changes)
+	int widthPt = 0;                    // Text: how wide, in points (0: the whole column)
+	std::string placeholder;            // Text: shown dimmed while it's empty
+	bool beside = false;                // Button: at the end of the row before it, not a row of its own
+	int grid = 0;                       // Check: this many to a row, with the Checks after it that say the same
+	double lo = 0, hi = 1, step = 0;    // Slider: its range, and its steps (0: any value)
+	std::string format = "%.2f";        // Slider: how its number is shown beside it
 	// Picture: drawn with Direct2D, in points, `height` points tall and the
 	// form's width; Form::refresh redraws it.
 	int height = 0;
@@ -36,7 +44,8 @@ struct FormField {
 	HWND extra = nullptr;               // the label, or the Choose... button
 	RECT frame{};                       // Text and List: the drawn field around it (dialog pixels)
 	int page = 0;                       // which of Form::pages it's on
-	std::vector<HWND> others;           // its tip, its Choose... button
+	std::vector<HWND> others;           // its tip, its Choose... button, its left label
+	HWND tipWindow = nullptr;
 };
 
 class Form {
@@ -66,7 +75,15 @@ public:
 	std::vector<std::string> pages;
 	int adding = 0, page = 0;
 	void showPage(int page);
-	std::vector<float> tabEdges;        // for clicks on the row, in points
+	// With pages: each an icon over its name, in a bar across the top (the
+	// Mac's Settings), rather than a segmented row.
+	std::vector<wchar_t> pageIcons;
+	// The Mac's Settings layout: the left column's labels right-aligned
+	// against their controls, drop-downs as wide as their choices, smaller
+	// tips. Without buttons (and validate) there's no row of them either.
+	bool settingsLayout = false;
+	std::vector<float> tabStarts, tabEdges;   // for clicks on the row, in points
+	int hotTab = -1;
 	std::vector<int> pageBottoms;       // where each page's fields end (pixels)
 	int footerGap = 0, footerButtonsAt = 0, footerBelow = 0;
 	int add(const FormField& f) { fields.push_back(f); fields.back().page = adding; return (int)fields.size() - 1; }
@@ -78,6 +95,7 @@ public:
 	std::string text(int field) const;
 	void setText(int field, const std::string& text);
 	bool checked(int field) const;
+	void setChecked(int field, bool on);
 	int choice(int field) const;
 	void setRows(int field, const std::vector<std::vector<std::string>>& rows);
 	void setCell(int field, int row, int column, const std::string& text);
@@ -86,6 +104,10 @@ public:
 	void setProblem(const std::string& text);
 	void refresh(int field);                  // a Picture: draw it again
 	void enable(int field, bool on);
+	double number(int field) const;           // a Slider's
+	void setTip(int field, const std::string& text);
+	// The theme changed while it's open: its title bar, fields and paper.
+	void retheme();
 
 	// For the dialog procedure.
 	HWND problem = nullptr;
@@ -98,6 +120,13 @@ public:
 	void showFocus();   // the focused control scrolled into view
 };
 
+// The dialogs' colours (paper, text, dimmed text, fields, their edges), for
+// what's drawn in a Picture.
+struct FormLook {
+	D2D1_COLOR_F paper, ink, dim, field, line;
+};
+FormLook formLook();
+
 // A line of text from the user; false when they cancelled.
 bool askText(HWND parent, const std::string& title, const std::string& prompt, std::string& value);
 
@@ -106,8 +135,10 @@ void showQuickAdd(CircuitWindow* w);
 void showTruthTable(CircuitWindow* w, int page);
 bool truthTableOpen();   // one is up (the guided tour watches for it)
 void showRamEditor(CircuitWindow* w, long gate);
+// Settings (Settings.cpp): General, Appearance, Canvas, Toolbar, Shortcuts.
 void showPreferencesDialog(HWND parent);
-void setPreferencesPage(int page);   // the page Preferences opens on
+void setPreferencesPage(int page);   // the page Settings opens on
+// Every shortcut, searchable; a row runs its command (ShortcutsSheet.cpp).
 void showShortcutsWindow(HWND parent);
 void showBuildFormula(CircuitWindow* w);
 // Ctrl+Q: true to go ahead (asked unless the user said not to).

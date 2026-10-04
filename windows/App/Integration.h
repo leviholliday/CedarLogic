@@ -27,6 +27,12 @@ void start(bool now = false);
 bool offered();
 std::string menuLabel();
 void menuCommand(CircuitWindow* window);
+// Settings > General's Start menu switch (shown while offered()): whether
+// this copy is in Start and opens .cdl files, and putting it there or
+// taking it out at once, without the question. False when Windows wouldn't
+// let it.
+bool inStartMenu();
+bool setInStartMenu(bool on);
 // --start-menu-test (CI): adds this copy, checks Start and what opens .cdl
 // files, removes it and checks it's gone, then puts back what was there. A
 // PASS or FAIL line each, in `report`; false if any failed.

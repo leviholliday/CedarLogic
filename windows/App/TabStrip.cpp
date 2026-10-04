@@ -3,6 +3,7 @@
 #include "TabStrip.h"
 #include "Canvas.h"
 #include "Chrome.h"
+#include "Shortcuts.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -193,7 +194,7 @@ void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 	}
 
 	std::vector<Tip> tips;
-	tips.push_back({ plus, "New tab (Ctrl+T)" });
+	tips.push_back({ plus, "New tab" + shortcuts::tipKeys(CMD_NEW_TAB) });
 	for (const D2D1_RECT_F& r : cards) tips.push_back({ r, "Double-click to rename. Drag along to move, or down onto the canvas to split the view" });
 	if (capsShown) {
 		tips.push_back({ caps[CapMin], "Minimize" });

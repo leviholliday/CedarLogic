@@ -26,8 +26,8 @@ it compiles without a Windows machine:
   drawing calls take a Direct2D render target here (`mac/CedarCore/NativeScene.h`).
 - `App/` -- the app, drawn to look like the Mac app (its colours and layout
   are in `Chrome`): a window per circuit (`Window`) whose title bar is the
-  `Toolbar` (the circuit's name and menu, the tools in capsules, ••• for
-  every menu, Windows' own window buttons); `TabStrip`, a tab card per page
+  `Toolbar` (the circuit's name and menu, the tools in the style Settings
+  picks, ••• for every menu, Windows' own window buttons); `TabStrip`, a tab card per page
   (renamed in place), dragged down onto the canvas into a split view of two
   sides, each with its strip; focus mode, where the toolbar and the side
   panel slide away and the tabs become the title row; a `Canvas` per page
@@ -48,8 +48,12 @@ it compiles without a Windows machine:
   (`Splash`), the first-run welcome, What's New and the guided tour that
   builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
   build (`Updater`); recovery copies of unsaved work (`Recovery`); the Start
-  menu and .cdl files for a copy run from the zip (`Integration`); and
-  settings and helpers (`Util`; settings live in
+  menu and .cdl files for a copy run from the zip (`Integration`); Settings
+  in the Mac's five pages (`Settings`, on `Form`); every command's keys,
+  changeable in Settings > Shortcuts (`Shortcuts`; Ctrl+Alt ones too, such as
+  split view's, which a text box leaves to AltGr), and the searchable list
+  of them (`ShortcutsSheet`); the toolbar's three styles, Seamless, Classic
+  and Minimal (`Toolbar`); and settings and helpers (`Util`; settings live in
   `%APPDATA%\CedarLogic\native.ini`). `Drawn` is the base of the custom-drawn
   parts: Direct2D, in points.
 - `res/` -- the manifest (per-monitor DPI, the current look of the standard
@@ -111,16 +115,19 @@ Direct2D here. And:
   formula|scope|export|feedback|help|welcome|whatsnew|quit|alert|rename|about|
   start-menu` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--page N` for the welcome, What's New
-  or Preferences, `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
+  or Settings (0 General ... 4 Shortcuts), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--note "text"`
   puts a note in the status bar, and `--wire-tag` rests the pointer on a wire
-  to show its value.
+  to show its value. `--toolbar-style seamless|classic|minimal` shows the
+  toolbar in that style for the run (with the click test too).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
-  Tab, Simulation View, Lock, New), the tabs' +, and the window's drawn
-  Minimize (on the toolbar, and on the tabs in focus mode) and Close the way
-  Windows sends a click, drags a gate from the side panel onto the canvas
-  (SKIP where the pointer can't be moved), checks each did what it should,
-  prints PASS, FAIL or SKIP for each and exits 1 if any failed (CI runs it).
+  Tab, Pause and Resume, Simulation View, Lock, the dark mode switch, New),
+  the tabs' +, and the window's drawn Minimize (on the toolbar, and on the
+  tabs in focus mode) and Close the way Windows sends a click, drags a gate
+  from the side panel onto the canvas (SKIP where the pointer can't be
+  moved), checks each did what it should, prints PASS, FAIL or SKIP for each
+  (a tool the style leaves to ••• is a SKIP) and exits 1 if any failed (CI
+  runs it once per toolbar style).
 - `CedarLogic.exe --start-menu-test` -- adds this copy to the Start menu
   and .cdl files, checks them (as Windows looks them up), removes them and
   checks they're gone, printing PASS or FAIL for each (CI runs it). It

@@ -60,6 +60,16 @@ struct Prefs {
 	bool showGateNames = true;
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
+	bool showCategoryKeys = true; // Shift+1...0 beside the side panel's categories
+	int gateSize = 48;            // the side panel's gates (36...96; 48 is the standard size)
+	int toolbarStyle = 3;         // 0 Classic, 2 Minimal, 3 Seamless (the Mac's styles; new installs get Seamless)
+	int toolbarHidden = 0;        // tool groups hidden, a bit each (ToolGroup, Toolbar.h)
+	bool showTitle = true;        // the circuit's name at the toolbar's left
+	bool showThemeToggle = false; // a dark mode switch in the toolbar
+	bool openReplaces = false;    // opening a circuit replaces the one in the window
+	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
+	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
+	bool checkUpdates = true;     // look for a new test build now and then
 	bool hasSeenWelcome = false;
 	bool firstLaunchPlayed = false;               // the launch screen's sound, once ever
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units

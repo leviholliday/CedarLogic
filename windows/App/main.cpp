@@ -12,6 +12,7 @@
 #include "Library.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "Shortcuts.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
 #include "Updater.h"
@@ -57,6 +58,9 @@ bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value 
 // --split, --focus, --rename-tab: the window in split view, in focus mode,
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
+int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar in that style, for this run
+
+Prefs gPrefsBefore;     // the settings as loaded: put back after a test run changed them for itself
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -82,7 +86,12 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 		writeOut(strf("%s %s\n", ok ? "wrote" : "couldn't write", gTiming.c_str()));
 	}
 	// A dialog is still open (its own loop is running): just stop.
-	if (gDialog) { prefs().save(); ExitProcess((UINT)gExitCode); }
+	if (gDialog) {
+		if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
+		if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
+		prefs().save();
+		ExitProcess((UINT)gExitCode);
+	}
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gExitCode);
 }
@@ -100,7 +109,6 @@ int gClickFailures = 0;
 bool gClickClosing = false;   // the drawn Close was clicked: the window should go
 bool gClickPending = false;   // a case was clicked: its result is read at the next step
 bool gClickDragNext = false;  // the cases are done: the drag next, once things have settled
-Prefs gPrefsBefore;           // put back afterwards (the test widens the window)
 
 void report(const char* result, const std::string& what) {
 	writeOut(strf("%s  %s\n", result, what.c_str()));
@@ -156,10 +164,14 @@ const std::vector<ClickCase>& clickCases() {
 		  [](CircuitWindow* w) -> long { Canvas* c = w->currentCanvas(); return c ? c->zoomPercent() : 0; },
 		  [](long before, long after) { return after > before; }, nullptr },
 		{ "New Tab", CMD_NEW_TAB, false, [](CircuitWindow* w) -> long { return w->tabCount(); }, oneMore, nullptr },
+		{ "Pause", CMD_RUNNING, false, [](CircuitWindow* w) -> long { return w->running(); }, flipped, nullptr },
+		{ "Resume", CMD_RUNNING, false, [](CircuitWindow* w) -> long { return w->running(); }, flipped, nullptr },
 		{ "Simulation View on", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
 		{ "Simulation View off", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
 		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
 		{ "Unlock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "Dark mode switch", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
+		{ "Dark mode switch back", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
 		{ "New circuit", CMD_NEW, true, [](CircuitWindow*) -> long { return (long)circuitWindows().size(); }, oneMore,
 		  [](CircuitWindow* w) {
 			  for (CircuitWindow* o : std::vector<CircuitWindow*>(circuitWindows())) if (o != w) o->destroy();
@@ -257,6 +269,11 @@ int clickTestStep() {
 		if (Canvas* cv = w->currentCanvas()) UpdateWindow(cv->widget());
 		gClickBefore = c.state(w);
 		if (clickButton(w, c.button, c.name)) { gClickPending = true; return 500; }
+		// Minimal leaves most tools to the ••• menu (the tab strip's buttons are always there).
+		if (c.button > kStrip / 2 && w->toolbarWidget() && !w->toolbarWidget()->hasButton(c.button)) {
+			report("SKIP", strf("%s: not in this style of toolbar", c.name));
+			continue;
+		}
 		const int width = w->toolbarWidget() ? (int)w->toolbarWidget()->width() : 0;
 		report(c.mayBeHidden ? "SKIP" : "FAIL", strf("%s: not on the toolbar at this width (%d points)", c.name, width));
 	}
@@ -292,6 +309,8 @@ void CALLBACK clickTestStart(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w == nullptr) { report("FAIL", "no window opened"); PostQuitMessage(1); return; }
 	gClickWindow = w->window();
 	SetForegroundWindow(gClickWindow);
+	const int style = prefs().toolbarStyle;
+	writeOut(strf("click test: the %s toolbar\n", style == TSClassic ? "Classic" : style == TSMinimal ? "Minimal" : "Seamless"));
 	// As wide as the whole bar needs (a narrow bar leaves out the tools on
 	// its left), past the screen's edge if it must: not asked first, Windows
 	// doesn't hold the window to the screen's size (CI's is 1024 wide).
@@ -349,31 +368,17 @@ void CALLBACK recoveryTimer(HWND, UINT, UINT_PTR id, DWORD) {
 
 bool down(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
 
-// The app's keyboard shortcuts (the menus show them). Bare keys (R, S, T...)
-// are the canvas's own, not here.
-struct Shortcut { UINT vk; bool ctrl, shift; int command; };
-const Shortcut kShortcuts[] = {
-	{ 'N', true, false, CMD_NEW }, { 'O', true, false, CMD_OPEN }, { 'I', true, false, CMD_IMPORT }, { 'Q', true, false, CMD_QUIT },
-	{ 'S', true, false, CMD_SAVE }, { 'S', true, true, CMD_SAVE_AS }, { 'E', true, false, CMD_EXPORT_IMAGE },
-	{ 'P', true, false, CMD_PRINT }, { 'W', true, true, CMD_CLOSE_WINDOW },
-	{ 'Z', true, false, CMD_UNDO }, { 'Z', true, true, CMD_REDO }, { 'Y', true, false, CMD_REDO },
-	{ 'X', true, false, CMD_CUT }, { 'C', true, false, CMD_COPY }, { 'V', true, false, CMD_PASTE },
-	{ 'D', true, false, CMD_DUPLICATE }, { 'A', true, false, CMD_SELECT_ALL }, { 'F', true, false, CMD_FIND },
-	{ VK_OEM_PLUS, true, false, CMD_ZOOM_IN }, { VK_OEM_PLUS, true, true, CMD_ZOOM_IN }, { VK_ADD, true, false, CMD_ZOOM_IN },
-	{ VK_OEM_MINUS, true, false, CMD_ZOOM_OUT }, { VK_SUBTRACT, true, false, CMD_ZOOM_OUT },
-	{ '0', true, false, CMD_ZOOM_FIT }, { VK_NUMPAD0, true, false, CMD_ZOOM_FIT },
-	{ '1', true, false, CMD_ZOOM_ACTUAL }, { VK_NUMPAD1, true, false, CMD_ZOOM_ACTUAL },
-	{ 'D', true, true, CMD_DARK }, { VK_OEM_PERIOD, true, false, CMD_FOCUS_MODE }, { VK_OEM_COMMA, true, false, CMD_PREFERENCES },
-	{ 'R', true, true, CMD_STEP }, { 'R', true, false, CMD_SIM_VIEW }, { 'G', true, false, CMD_SCOPE },
-	{ 'T', true, false, CMD_NEW_TAB }, { 'W', true, false, CMD_CLOSE_TAB }, { 'T', true, true, CMD_REOPEN_TAB },
-	{ VK_NEXT, true, false, CMD_NEXT_TAB }, { VK_PRIOR, true, false, CMD_PREVIOUS_TAB },
-	{ VK_TAB, true, false, CMD_NEXT_TAB }, { VK_TAB, true, true, CMD_PREVIOUS_TAB },
-	{ VK_F1, false, false, CMD_HELP }, { VK_OEM_2, true, false, CMD_SHORTCUTS }, { VK_F6, false, false, CMD_SWITCH_PANE },
-};
-
-// What a text box does itself with these (copy the text, not the gates).
-bool isEditingKey(const Shortcut& s) {
-	return s.ctrl && !s.shift && (s.vk == 'A' || s.vk == 'C' || s.vk == 'V' || s.vk == 'X' || s.vk == 'Z' || s.vk == 'Y');
+// What a text box does itself with these: types them (any key without Ctrl
+// but the F keys, and Ctrl+Alt ones, which are AltGr's characters there), or
+// edits its text with them (copies the text, not the gates), so a shortcut
+// can't have them there.
+bool isTypingKey(const shortcuts::Key& k) {
+	const UINT v = k.vk;
+	const bool fKey = v >= VK_F1 && v <= VK_F24;
+	if (!k.ctrl || k.alt) return !fKey;
+	const bool words = v == VK_LEFT || v == VK_RIGHT || v == VK_HOME || v == VK_END || v == VK_BACK || v == VK_DELETE;
+	if (k.shift) return words;
+	return words || v == 'A' || v == 'C' || v == 'V' || v == 'X' || v == 'Z' || v == 'Y';
 }
 
 CircuitWindow* windowFor(HWND h) {
@@ -386,32 +391,32 @@ CircuitWindow* windowFor(HWND h) {
 
 bool handleShortcut(CircuitWindow* w, const MSG& msg) {
 	if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) return false;
-	const bool ctrl = down(VK_CONTROL), shift = down(VK_SHIFT);
+	const bool ctrl = down(VK_CONTROL), shift = down(VK_SHIFT), alt = down(VK_MENU);
+	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
+	if (msg.wParam == VK_TAB && ctrl && !alt) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
+	if (msg.wParam == VK_ESCAPE && w->switcherActive()) { w->cancelSwitcher(); return true; }
+	// The keys Settings > Shortcuts gives the menus' commands, Ctrl+Alt ones
+	// (split view's) too; Alt alone is the menus'. (The canvas's single keys,
+	// A, R, S..., are its own: it looks them up as they reach it.)
+	const shortcuts::Key key = shortcuts::pressed((UINT)msg.wParam);
+	const shortcuts::Action* a = shortcuts::match(key, false);
+	if (a == nullptr) return false;
 	wchar_t cls[32] = L"";
 	GetClassNameW(msg.hwnd, cls, 32);
-	const bool inTextBox = lstrcmpiW(cls, L"Edit") == 0;
-	if (down(VK_MENU)) {
-		// Ctrl+Alt: split view (not in a text box, where it's AltGr typing).
-		// Alt alone belongs to the menus.
-		const WPARAM k = msg.wParam;
-		const int cmd = !ctrl || inTextBox ? 0 : k == 'S' ? CMD_SPLIT_VIEW : k == 'W' ? CMD_CLOSE_SPLIT
-		              : k == VK_LEFT || k == VK_RIGHT ? CMD_SWITCH_PANE : 0;
-		if (cmd) guarded("a shortcut", [&] { w->run(cmd); });
-		return cmd != 0;
+	// In a text box (Find, the side panel's search, a tab renamed in place)
+	// it types or edits; Ctrl+Alt is AltGr there.
+	if (lstrcmpiW(cls, L"Edit") == 0 && isTypingKey(key)) return false;
+	// The docked oscilloscope's own keys: Ctrl+C copies its timing diagram,
+	// C clears it, H hides a signal, + and - stretch it, Home and End.
+	if (lstrcmpiW(cls, L"CedarLogicScope") == 0) {
+		const UINT v = key.vk;
+		const bool scopes = key.ctrl ? !key.shift && !key.alt && v == 'C'
+		                             : v == 'C' || v == 'H' || v == VK_HOME || v == VK_END || v == VK_OEM_PLUS || v == VK_OEM_MINUS ||
+		                                   v == VK_ADD || v == VK_SUBTRACT;
+		if (scopes) return false;
 	}
-	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
-	if (msg.wParam == VK_TAB && ctrl) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
-	if (msg.wParam == VK_ESCAPE && w->switcherActive()) { w->cancelSwitcher(); return true; }
-	// The oscilloscope's Ctrl+C copies its timing diagram.
-	const bool inScope = lstrcmpiW(cls, L"CedarLogicScope") == 0;
-	for (const Shortcut& s : kShortcuts) {
-		if (s.vk != msg.wParam || s.ctrl != ctrl || s.shift != shift) continue;
-		if (inTextBox && isEditingKey(s)) return false;
-		if (inScope && s.command == CMD_COPY) return false;
-		guarded("a shortcut", [&] { w->run(s.command); });
-		return true;
-	}
-	return false;
+	guarded("a shortcut", [&] { w->run(a->command); });
+	return true;
 }
 
 // ---- Shared with the windows -----------------------------------------------------
@@ -475,8 +480,10 @@ bool openCircuit(const std::string& path, CircuitWindow* from) {
 		}
 		prefs().lastFolder = dirName(path);
 	}
+	// In the window's place: an untouched new one, or any when Settings says
+	// opening replaces the circuit you're in (saved first).
 	CircuitWindow* w;
-	if (from && from->isPristine()) { from->replaceDocument(doc, target); w = from; }
+	if (from && (from->isPristine() || (prefs().openReplaces && from->saveQuietly(false)))) { from->replaceDocument(doc, target); w = from; }
 	else w = new CircuitWindow(doc, target);
 	library::noteLastCircuit(target);
 	// What loading had to say (an older format converted, an unknown gate...).
@@ -580,7 +587,7 @@ void openHandedFiles(CircuitWindow* w) {
 	// The first goes into this window when it's an untouched new one (not
 	// while a dialog of its is up), the rest into windows of their own.
 	CircuitWindow* from = IsWindowEnabled(w->window()) ? w : nullptr;
-	const bool intoThis = !files.empty() && from && from->isPristine();
+	const bool intoThis = !files.empty() && from && (from->isPristine() || prefs().openReplaces);
 	const size_t windowsBefore = circuitWindows().size();
 	for (const std::string& f : files) {
 		openCircuit(f, from);
@@ -645,6 +652,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
 		if (a == "--wire-tag") { gWireTag = true; continue; }
+		if (a == "--toolbar-style" && i + 1 < argc) {
+			const std::string v = U(argv[++i]);
+			gToolbarStyle = v == "classic" ? TSClassic : v == "minimal" ? TSMinimal : TSSeamless;
+			continue;
+		}
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
@@ -667,6 +679,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	prefs().load();
 	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
+	if (gToolbarStyle >= 0) prefs().toolbarStyle = gToolbarStyle;
+	// The click test wants every tool on the bar (the dark mode switch too),
+	// and New in a window of its own.
+	if (gClickTest) {
+		prefs().toolbarHidden = 0;
+		prefs().showThemeToggle = true;
+		prefs().openReplaces = false;
+		prefs().newTemplate.clear();
+	}
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
@@ -768,6 +789,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	const int clickResult = gClickTest ? finishClickTest() : 0;
 	updater::shutdown();
+	// What this run's flags changed for themselves goes back as it was.
+	if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
+	if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;
