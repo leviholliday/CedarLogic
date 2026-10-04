@@ -27,6 +27,8 @@ enum Command {
 	CMD_DISCONNECT,
 	// Help's Add to / Remove from Start Menu, for a copy run from the zip.
 	CMD_START_MENU,
+	// File > Share Link…
+	CMD_SHARE_LINK,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

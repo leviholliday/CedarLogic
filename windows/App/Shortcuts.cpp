@@ -138,6 +138,7 @@ const std::vector<Action>& all() {
 		{ "save", "Circuits", "Save now and keep a version", CMD_SAVE, false, "Ctrl+S" },
 		{ "exportImage", "Circuits", "Export as an image", CMD_EXPORT_IMAGE, false, "Ctrl+E" },
 		{ "exportFile", "Circuits", "Export as a CedarLogic file", CMD_SAVE_AS, false, "Ctrl+Shift+S" },
+		{ "shareLink", "Circuits", "Copy a link to the circuit", CMD_SHARE_LINK, false, "" },
 		{ "print", "Circuits", "Print", CMD_PRINT, false, "Ctrl+P" },
 		{ "closeWindow", "Circuits", "Close the window", CMD_CLOSE_WINDOW, false, "Ctrl+Shift+W" },
 		{ "quit", "Circuits", "Quit CedarLogic", CMD_QUIT, false, "Ctrl+Q" },

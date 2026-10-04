@@ -12,6 +12,7 @@
 #include "Library.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "ShareLink.h"
 #include "Shortcuts.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
@@ -59,6 +60,8 @@ bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value 
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
 int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar in that style, for this run
+
+bool gTestRun = false;   // a picture or test run: no card is left waiting for an answer
 
 Prefs gPrefsBefore;     // the settings as loaded: put back after a test run changed them for itself
 
@@ -353,6 +356,13 @@ void CALLBACK renameTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w) askText(w->window(), "Rename Circuit", "The name it has in Your Circuits:", name);
 }
 
+// --dialog bad-link: the card a link that can't be opened gets, for the screenshot.
+void CALLBACK badLinkTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w) sharelink::showProblem(w->window(), "the link was cut short");
+}
+
 // --wire-tag: once the circuit is in view, the pointer resting on a wire.
 void CALLBACK wireTagTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
@@ -481,7 +491,7 @@ bool openCircuit(const std::string& path, CircuitWindow* from) {
 			target = it.circuit();
 			importedNow = true;
 		}
-		prefs().lastFolder = dirName(path);
+		if (!sharelink::isCacheFile(path)) prefs().lastFolder = dirName(path);
 	}
 	// In the window's place: an untouched new one, or any when Settings says
 	// opening replaces the circuit you're in (saved first).
@@ -498,6 +508,7 @@ bool openCircuit(const std::string& path, CircuitWindow* from) {
 	}
 	if (warning) showMessage(w->window(), Tone::Warning, "Opened, with notes", notes);
 	else if (!notes.empty()) w->note(notes.substr(4, notes.find('\n') - 4));
+	else if (importedNow && sharelink::isCacheFile(path)) w->note("From the link, in Your Circuits now as a new circuit.");
 	else if (importedNow) w->note("In Your Circuits now, as a copy. The file itself is left as it was.");
 	return true;
 }
@@ -510,6 +521,25 @@ void chooseAndOpen(CircuitWindow* from) {
 		openCircuit(file, from);
 		from = nullptr;   // the rest get windows of their own
 	}
+}
+
+// A file to open, or a cedarlogic://open#c=… link (the website's Open in the
+// App, a link in a chat): the link's circuit is put in a file first, which
+// opens as any does, as a new circuit in Your Circuits (ShareLink.h).
+bool openArgument(const std::string& arg, CircuitWindow* from) {
+	if (!sharelink::isLink(arg)) return openCircuit(arg, from);
+	std::string why;
+	const std::string file = sharelink::fileForLink(arg, why);
+	if (file.empty()) {
+		if (gTestRun) {
+			writeOut("link: couldn't open it (" + why + ")\n");
+			return false;
+		}
+		if (splash::active()) splash::hideSoon(nullptr);   // (it would cover the card)
+		sharelink::showProblem(from ? from->window() : nullptr, why);
+		return false;
+	}
+	return openCircuit(file, from);
 }
 
 // The practice circuit opens as a new, untitled copy, so saving asks where.
@@ -546,7 +576,7 @@ bool handToRunning(const std::vector<std::string>& files) {
 	std::string text;   // full paths: the running one's current folder isn't this one's
 	for (const std::string& f : files) {
 		wchar_t full[MAX_PATH * 4];
-		const DWORD n = GetFullPathNameW(W(f).c_str(), (DWORD)(sizeof full / sizeof full[0]), full, nullptr);
+		const DWORD n = sharelink::isLink(f) ? 0 : GetFullPathNameW(W(f).c_str(), (DWORD)(sizeof full / sizeof full[0]), full, nullptr);
 		text += (n > 0 && n < sizeof full / sizeof full[0] ? U(full) : f) + "\n";
 	}
 	// It may still be starting (no window yet) or on its way out (an
@@ -593,7 +623,7 @@ void openHandedFiles(CircuitWindow* w) {
 	const bool intoThis = !files.empty() && from && (from->isPristine() || prefs().openReplaces);
 	const size_t windowsBefore = circuitWindows().size();
 	for (const std::string& f : files) {
-		openCircuit(f, from);
+		openArgument(f, from);
 		from = nullptr;
 	}
 	// Forward: a new window, else this one when it took the first file or
@@ -623,6 +653,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	std::vector<std::string> files;
 	for (int i = 1; i < argc; i++) {
 		const std::string a = U(argv[i]);
+		// A cedarlogic: link is the last argument that counts: Windows hands the
+		// link over as typed, so whatever follows it (a quote in the link ends
+		// the argument, and options could come after) is not the app's to obey.
+		if (sharelink::isLink(a)) {
+			files.push_back(a);
+			break;
+		}
 		if (a == "--feedback-probe") {
 			const int status = feedback::probe();
 			writeOut(strf("feedback server: %s (%d)\n", status == 403 ? "reachable, key checked" : status ? "answered" : "unreachable", status));
@@ -632,6 +669,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--start-menu-test") {
 			std::string report;
 			const bool ok = integration::selfTest(report);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
+		if (a == "--share-test") {   // [circuit.cdl [file for its link [a link another program made of it]]]
+			std::vector<std::string> paths;
+			while (i + 1 < argc && paths.size() < 3) paths.push_back(U(argv[++i]));
+			std::string report;
+			const bool ok = sharelink::runSelfTest(report, paths);
 			writeOut(report);
 			return ok ? 0 : 1;
 		}
@@ -668,7 +713,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
-			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7
+			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
 			continue;
 		}
@@ -677,6 +722,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	LocalFree(argv);
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
 	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || gClickTest || gDialog != 0;
+	gTestRun = testRun;
 	if (!testRun && handToRunning(files)) return 0;
 
 	prefs().load();
@@ -717,7 +763,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	splash::setStatus("Opening the workspace\u2026");
 
 	bool any = false;
-	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
+	for (const std::string& f : files) any = openArgument(f, nullptr) || any;
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
 	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest) {
@@ -762,6 +808,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -5) SetTimer(nullptr, 0, 400, alertTimer);
 	if (gDialog == -6) SetTimer(nullptr, 0, 400, renameTimer);
 	if (gDialog == -7) integration::start(true);
+	if (gDialog == -8) SetTimer(nullptr, 0, 400, badLinkTimer);
 	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else if (gClickTest) {
