@@ -674,7 +674,7 @@ void CircuitWindow::tabContextMenu(int index, POINT screen) {
 		showPage(index);
 		const std::vector<int> row = panePages(paneOf(canvases[index]));
 		const int k = (int)(std::find(row.begin(), row.end(), index) - row.begin());
-		AppendMenuW(m, MF_STRING, RENAME, L"Re&name");
+		AppendMenuW(m, MF_STRING, RENAME, W("Re&name" + shortcuts::menuKeys(CMD_RENAME_TAB)).c_str());
 		if (splitOpen()) {
 			AppendMenuW(m, MF_STRING, OTHER_SIDE, L"Move to the &Other Side");
 			AppendMenuW(m, MF_STRING, CLOSE_SPLIT, W("Close &Split View" + shortcuts::menuKeys(CMD_CLOSE_SPLIT)).c_str());
