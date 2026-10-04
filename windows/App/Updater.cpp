@@ -15,6 +15,7 @@
 // touches windows.
 
 #include "Updater.h"
+#include "Alert.h"
 #include "Window.h"
 
 #include <winhttp.h>
@@ -316,7 +317,7 @@ void install(HWND parent, const Asset& asset) {
 	}
 	removeTree(resOld);
 	removeTree(work);
-	if (askYesNo(parent, "Update installed", "The update is installed. Restart CedarLogic now to use it?")) {
+	if (askConfirm(parent, "The update is installed", "Restart CedarLogic now to use it? Your circuits are saved.", "Restart Now", "Later")) {
 		if (quitApp()) {
 			STARTUPINFOW si = { sizeof si };
 			PROCESS_INFORMATION pi = {};
@@ -352,9 +353,10 @@ void finish() {
 	}
 	if (!interactive && g_offered == commit) return;
 	g_offered = commit;
-	if (askYesNo(parent, "A new CedarLogic test build is ready",
-	             strf("Build %s is out (you have %s). Download and install it now?", commit.substr(0, 7).c_str(),
-	                  std::string(CL_GIT_COMMIT).substr(0, 7).c_str())))
+	if (askConfirm(parent, "A new CedarLogic test build is ready",
+	               strf("Build %s is out (you have %s). Download and install it now?", commit.substr(0, 7).c_str(),
+	                    std::string(CL_GIT_COMMIT).substr(0, 7).c_str()),
+	               "Install", "Not Now"))
 		install(parent, asset);
 }
 

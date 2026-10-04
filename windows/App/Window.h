@@ -20,6 +20,7 @@ class Canvas;
 class GatePalette;
 class MiniMap;
 class ScopeWindow;
+class StatusBar;
 class FindBar;
 class TabSwitcher;
 class TabStrip;
@@ -65,6 +66,8 @@ public:
 	bool dragFadeBox(double& l, double& b, double& r, double& t, double& alpha) const;
 	void fadeOutDragBox(double l, double b, double r, double t);
 	void statusNeedsUpdate() { statusDirty = true; }
+	// Where the pointer last was over the canvas, in the world (the status bar).
+	void pointer(double& x, double& y) const { x = pointerX; y = pointerY; }
 
 	void redraw();
 	void pointerMoved(double wx, double wy);
@@ -235,8 +238,6 @@ public:
 	void present();
 
 	// ---- For the canvas's overlays ----
-	// A short note shown over the bottom of the canvas, fading after a while.
-	bool toast(std::string& text, double& alpha) const;
 	// The bar over the top of the canvas (Tidy Up's preview, Lock): its text
 	// and buttons, or false.
 	struct BannerButton { std::string label; int command; };
@@ -262,7 +263,7 @@ private:
 	TabSwitcher* switcher = nullptr;
 	std::vector<uint64_t> recentKeys;   // pages by when they were last in front, most recent first
 	HWND paletteHost = nullptr;
-	HWND statusBar = nullptr;
+	StatusBar* statusBar = nullptr;   // where notes appear
 	GatePalette* palette = nullptr;
 	MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
@@ -272,6 +273,7 @@ private:
 public:
 	ScopeWindow* scopeWindow() const { return scope; }
 	Toolbar* toolbarWidget() const { return toolbar; }   // for --click-test
+	GatePalette* paletteWidget() const { return palette; }   // and its drag
 	std::string pageName(int page) const;
 private:
 	std::vector<Canvas*> canvases;    // in tab order
@@ -302,7 +304,6 @@ private:
 	bool trackingNonClient = false;
 	HWND savedFocus = nullptr;        // what had the keyboard when the window was last active
 	UINT dpi = 96;
-	std::string noteText;             // the toast
 
 	bool isRunning = true;
 	bool simViewOn = false;
@@ -312,7 +313,7 @@ private:
 	bool statusDirty = true;
 	double pointerX = 0, pointerY = 0;
 	std::string pendingGate;
-	double selectionChangedAt = 0, appearStart = 0, dragFadeStart = 0, messageAt = 0;
+	double selectionChangedAt = 0, appearStart = 0, dragFadeStart = 0;
 	std::string selectionSignature;
 	bool hasDragFade = false;
 	double fadeL = 0, fadeB = 0, fadeR = 0, fadeT = 0;
@@ -326,6 +327,7 @@ private:
 	void layout();
 	int dividerAt(POINT client) const;
 	int toolbarHeight() const;
+	int statusHeight() const;   // as much of the status bar as shows (pixels)
 	void reconcileSplit();
 	void showFronts();
 	double focusAmount() const;

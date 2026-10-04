@@ -3,11 +3,13 @@
 // open windows.
 
 #include "App.h"
+#include "Alert.h"
 #include "Canvas.h"
 #include "Dialogs.h"
 #include "Feedback.h"
 #include "Help.h"
 #include "Library.h"
+#include "Palette.h"
 #include "Recovery.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
@@ -49,6 +51,8 @@ std::string gPlace;     // --place: a gate by library name, put on the page and 
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
+std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
+bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
 // --split, --focus, --rename-tab: the window in split view, in focus mode,
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
@@ -93,6 +97,8 @@ size_t gClickNext = 0;
 long gClickBefore = 0;
 int gClickFailures = 0;
 bool gClickClosing = false;   // the drawn Close was clicked: the window should go
+bool gClickPending = false;   // a case was clicked: its result is read at the next step
+bool gClickDragNext = false;  // the cases are done: the drag next, once things have settled
 Prefs gPrefsBefore;           // put back afterwards (the test widens the window)
 
 void report(const char* result, const std::string& what) {
@@ -174,6 +180,48 @@ const std::vector<ClickCase>& clickCases() {
 	return cases;
 }
 
+// A gate dragged from the side panel onto the canvas in one motion, put down
+// where the button comes up. The panel reads where the pointer really is, so
+// it's moved there first; SKIP when it can't be (no desktop to move it on).
+void dragTest(CircuitWindow* w) {
+	GatePalette* pal = w->paletteWidget();
+	Canvas* c = w->currentCanvas();
+	POINT tile;
+	if (pal == nullptr || c == nullptr || !IsWindowVisible(pal->widget()) || !pal->firstTilePoint(tile)) {
+		report("SKIP", "Drag a gate: no gate in the side panel to drag");
+		return;
+	}
+	RECT cr;
+	GetWindowRect(c->widget(), &cr);
+	const int in = scaled(140, dpiOf(c->widget()));
+	const POINT target = { cr.left + in, cr.top + in };
+	POINT before, now;
+	GetCursorPos(&before);
+	SetCursorPos(target.x, target.y);
+	GetCursorPos(&now);
+	if (now.x != target.x || now.y != target.y || WindowFromPoint(target) != c->widget()) {
+		SetCursorPos(before.x, before.y);
+		report("SKIP", "Drag a gate: the pointer can't be put over the canvas here");
+		return;
+	}
+	CLDocument* doc = w->document();
+	const int page = w->currentPage();
+	const int gates = cl_document_gate_count(doc, page);
+	const HWND h = pal->tilesWidget();
+	POINT over = target;
+	ScreenToClient(h, &over);
+	SendMessageW(h, WM_MOUSEMOVE, 0, MAKELPARAM(tile.x, tile.y));
+	SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(tile.x, tile.y));
+	SendMessageW(h, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(over.x, over.y));
+	const bool following = w->isFloating();
+	SendMessageW(h, WM_LBUTTONUP, 0, MAKELPARAM(over.x, over.y));
+	const int after = cl_document_gate_count(doc, page);
+	report(after == gates + 1 && following && !w->isFloating() ? "PASS" : "FAIL",
+	       strf("Drag a gate onto the canvas: %d gate%s, then %d%s", gates, gates == 1 ? "" : "s", after,
+	            following ? "" : " (it didn't follow the pointer)"));
+	SetCursorPos(before.x, before.y);
+}
+
 // After the message loop: the drawn Close's result, and the summary.
 int finishClickTest() {
 	if (gClickClosing) report(IsWindow(gClickWindow) ? "FAIL" : "PASS", "Close (drawn): the window closed");
@@ -194,7 +242,8 @@ int clickTestStep() {
 		return 0;
 	}
 	const std::vector<ClickCase>& cases = clickCases();
-	if (gClickNext > 0) {
+	if (gClickPending) {
+		gClickPending = false;
 		const ClickCase& done = cases[gClickNext - 1];
 		const long after = done.state(w);
 		report(done.worked(gClickBefore, after) ? "PASS" : "FAIL", strf("%s: %ld, then %ld", done.name, gClickBefore, after));
@@ -206,10 +255,14 @@ int clickTestStep() {
 		// The canvas drawn first, so its first fit can't undo a zoom.
 		if (Canvas* cv = w->currentCanvas()) UpdateWindow(cv->widget());
 		gClickBefore = c.state(w);
-		if (clickButton(w, c.button, c.name)) return 500;
+		if (clickButton(w, c.button, c.name)) { gClickPending = true; return 500; }
 		const int width = w->toolbarWidget() ? (int)w->toolbarWidget()->width() : 0;
 		report(c.mayBeHidden ? "SKIP" : "FAIL", strf("%s: not on the toolbar at this width (%d points)", c.name, width));
 	}
+	// The drag a moment after the last case put things back (focus mode's
+	// toolbar and side panel sliding in again), with the panel in place.
+	if (!gClickDragNext) { gClickDragNext = true; return 500; }
+	dragTest(w);
 	// Last, the drawn Close: the window goes, and with it the app (the
 	// result is read once the message loop ends).
 	if (!clickButton(w, Toolbar::kClose, "Close")) {
@@ -258,6 +311,31 @@ void CALLBACK clickTestWatchdog(HWND, UINT, UINT_PTR, DWORD) {
 	prefs() = gPrefsBefore;
 	prefs().save();
 	ExitProcess(1);
+}
+
+// --dialog alert: the card a delete asks with (as Your Circuits' does), for
+// the screenshot.
+void CALLBACK alertTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w) askConfirm(w->window(), "Delete \u201C" + w->titleText() + "\u201D?", "It and all its versions will be deleted.", "Delete", "Cancel", true);
+}
+
+// --dialog rename: the card with a name to type (Rename Circuit's; a tab is
+// renamed on its card, which --rename-tab shows), for the screenshot.
+void CALLBACK renameTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	std::string name = w ? w->titleText() : std::string();
+	if (w) askText(w->window(), "Rename Circuit", "The name it has in Your Circuits:", name);
+}
+
+// --wire-tag: once the circuit is in view, the pointer resting on a wire.
+void CALLBACK wireTagTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	Canvas* c = w ? w->currentCanvas() : nullptr;
+	if (c == nullptr || !c->showWireTagNow()) writeOut("no wire to rest on\n");
 }
 
 // Once the first window is up, offer back work a CedarLogic that stopped
@@ -558,6 +636,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
+		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
+		if (a == "--wire-tag") { gWireTag = true; continue; }
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
@@ -566,6 +646,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
 			        : d == "export" ? CMD_EXPORT_IMAGE
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
+			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
 			continue;
 		}
@@ -582,6 +663,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
+	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
 	if (gScreenshot.empty() && gSplashFile.empty() && !gClickTest) splash::show();
@@ -635,6 +717,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			cl_edit_select_gate(w->document(), found.page, found.gate);
 		}
 	}
+	if (!gNote.empty() && !circuitWindows().empty()) circuitWindows().back()->note(gNote);
 	if (gDialog == CMD_PREFERENCES) setPreferencesPage(gPage);
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (gDialog == -1 && !circuitWindows().empty()) {
@@ -645,6 +728,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -4 && !circuitWindows().empty()) welcome::startTour(circuitWindows().back());
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
+	if (gDialog == -5) SetTimer(nullptr, 0, 400, alertTimer);
+	if (gDialog == -6) SetTimer(nullptr, 0, 400, renameTimer);
+	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);

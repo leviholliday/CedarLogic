@@ -1,6 +1,7 @@
 // The app's dialogs and extra windows (see Dialogs.h).
 
 #include "Dialogs.h"
+#include "Alert.h"
 #include "Window.h"
 #include "Chrome.h"
 #include "Brand.h"
@@ -27,6 +28,7 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 const int kTabsId = 4000;       // Form::pages' row
+const int kStepBase = 5000;     // a stepper's − and +: kStepBase + 2 * field (+ 1 for +)
 const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
 
 // The dialogs' look, as the Mac's sheets: paper, filled rounded fields,
@@ -140,6 +142,27 @@ void drawButtonItem(const DRAWITEMSTRUCT* di, bool isToggle) {
 			fillRound(rt, k, 4, withAlpha(ink, 0.16f));
 			drawText(rt, "\u21B5", D2D1::RectF(k.left, k.top + 0.5f, k.right, k.bottom), 10.5f, ink, TextAlign::Center, true);
 		}
+	});
+}
+
+// A stepper's − or +: a soft square with the sign drawn in.
+void drawStepItem(const DRAWITEMSTRUCT* di, bool plus) {
+	const DialogColors& c = darkColors();
+	const bool hot = GetPropW(di->hwndItem, L"clHot") != nullptr, down = (di->itemState & ODS_SELECTED) != 0;
+	const bool focus = (di->itemState & ODS_FOCUS) && !(di->itemState & ODS_NOFOCUSRECT);
+	const bool disabled = (di->itemState & ODS_DISABLED) != 0;
+	const Chrome ch = chrome();
+	drawOnDC(di->hDC, di->rcItem, dpiOf(di->hwndItem), [&](ID2D1RenderTarget* rt, float w, float h) {
+		rt->Clear(d2d(c.back));
+		const D2D1_RECT_F r = D2D1::RectF(1, 1, w - 1, h - 1);
+		fillRound(rt, r, 7, d2d(c.text, disabled ? 0.04f : down ? 0.16f : hot ? 0.11f : 0.07f));
+		if (focus) strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 6.5f, withAlpha(ch.accent(), 0.7f), 1.5f);
+		ID2D1SolidColorBrush* b = nullptr;
+		if (FAILED(rt->CreateSolidColorBrush(d2d(c.text, disabled ? 0.35f : 0.85f), &b))) return;
+		const float cx = w / 2, cy = h / 2, arm = 4.5f;
+		rt->DrawLine(D2D1::Point2F(cx - arm, cy), D2D1::Point2F(cx + arm, cy), b, 1.6f);
+		if (plus) rt->DrawLine(D2D1::Point2F(cx, cy - arm), D2D1::Point2F(cx, cy + arm), b, 1.6f);
+		b->Release();
 	});
 }
 
@@ -326,6 +349,9 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			return TRUE;
 		}
 		if (id == IDCANCEL) {
+			bool close = true;
+			guarded("a dialog", [&] { close = !f->onCancel || f->onCancel(*f); });
+			if (!close) return TRUE;
 			// Escape, or the close box: with no Cancel, that's OK.
 			f->capture();
 			EndDialog(d, f->cancelText.empty() && !f->okText.empty() && !f->validate ? IDOK : IDCANCEL);
@@ -335,6 +361,10 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			bool close = true;
 			guarded("a dialog", [&] { close = !f->onButton || f->onButton(*f, id - kButtonBase); });
 			if (close) { f->capture(); EndDialog(d, id); }
+			return TRUE;
+		}
+		if (id >= kStepBase && id < kStepBase + 2 * (int)f->fields.size() && (code == BN_CLICKED || code == BN_DOUBLECLICKED)) {
+			if (f->onStep) guarded("a dialog", [&] { f->onStep(*f, (id - kStepBase) / 2, (id - kStepBase) % 2 ? 1 : -1); });
 			return TRUE;
 		}
 		if (id >= kBrowseBase && id < kBrowseBase + (int)f->fields.size()) {
@@ -456,6 +486,10 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		if (di->CtlType == ODT_BUTTON) {
 			// Tabbed to (a scrolling form shows it).
 			if ((di->itemAction & ODA_FOCUS) && (di->itemState & ODS_FOCUS) && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
+			if ((int)di->CtlID >= kStepBase && (int)di->CtlID < kStepBase + 2 * (int)f->fields.size()) {
+				guarded("a dialog", [&] { drawStepItem(di, (di->CtlID - kStepBase) % 2 == 1); });
+				return TRUE;
+			}
 			const int fi = (int)di->CtlID - kFieldBase;
 			const bool toggle = fi >= 0 && fi < (int)f->fields.size() && f->fields[fi].kind == FormField::Check;
 			guarded("a dialog", [&] { drawButtonItem(di, toggle); });
@@ -609,7 +643,7 @@ void Form::build() {
 			if (!x.label.empty())
 				x.extra = CreateWindowExW(0, L"STATIC", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, margin,
 				                          y + (rowH - lineH) / 2, labelW, lineH, dialog, nullptr, appInstance(), nullptr);
-			const int browseW = x.browse ? sc(84) : 0;
+			const int browseW = x.browse ? sc(84) : x.stepper ? sc(62) : 0;
 			// Several lines: a box to type them in (Enter starts a new one).
 			const bool multi = x.lines > 1;
 			const int boxH = multi ? x.lines * sc(20) + sc(8) : rowH;
@@ -632,6 +666,16 @@ void Form::build() {
 			                             (multi ? ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | WS_VSCROLL : 0),
 			                         ctrlX + padX, y + padY, fieldW - 2 * padX + (multi ? sc(5) : 0), boxH - 2 * padY, dialog, id, appInstance(), nullptr);
 			if (multi) y += boxH - rowH;
+			if (x.stepper) {
+				// − and +, each a square as tall as the field.
+				for (int k = 0; k < 2; k++) {
+					HWND b = CreateWindowExW(0, L"BUTTON", k ? L"+" : L"\u2212", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+					                         ctrlX + ctrlW - browseW + k * sc(32), y, sc(30), rowH, dialog,
+					                         (HMENU)(INT_PTR)(kStepBase + 2 * (int)i + k), appInstance(), nullptr);
+					SetWindowSubclass(b, hoverProc, 4, 0);
+					x.others.push_back(b);
+				}
+			}
 			if (x.browse)
 			{
 				HWND choose = CreateWindowExW(0, L"BUTTON", L"Choose…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, ctrlX + ctrlW - browseW,
@@ -1029,21 +1073,17 @@ void Form::setProblem(const std::string& text) {
 // ---- A line of text ----------------------------------------------------------------
 
 bool askText(HWND parent, const std::string& title, const std::string& prompt, std::string& value) {
-	Form f;
-	f.title = title;
-	f.width = 360;
-	FormField label;
-	label.kind = FormField::Note;
-	label.label = prompt;
-	f.add(label);
-	FormField entry;
-	entry.kind = FormField::Text;
-	entry.value = value;
-	const int e = f.add(entry);
-	if (f.run(parent) != IDOK) return false;
-	std::string v = f.fields[e].value;
-	const size_t a = v.find_first_not_of(" \t"), b = v.find_last_not_of(" \t");
-	value = a == std::string::npos ? std::string() : v.substr(a, b - a + 1);
+	Alert a;
+	a.title = title;
+	a.heading = title;
+	a.text = prompt;
+	a.field = true;
+	a.value = value;
+	// The button says what it does: Rename, Save, or OK.
+	const bool renaming = title.find("Rename") != std::string::npos, saving = title.find("Save") != std::string::npos;
+	a.buttons = { { renaming ? "Rename" : saving ? "Save" : "OK", 1, 1 }, { "Cancel", 0, 0 } };
+	if (runAlert(parent, a) != 1) return false;
+	value = a.value;
 	return true;
 }
 
@@ -1121,6 +1161,8 @@ void showGateSettings(CircuitWindow* w, long gate) {
 			x.value = st.value;
 			if ((st.type == "INT" || st.type == "FLOAT") && st.max < 1e30)
 				x.tip = strf("%s to %s", numberText(st.min).c_str(), numberText(st.max).c_str());
+			// A whole number in a range: − and + beside it (Up and Down too).
+			x.stepper = st.type == "INT" && st.max < 1e30;
 			if (st.type == "FILE_IN" || st.type == "FILE_OUT") {
 				x.browse = true;
 				x.browseSave = st.type == "FILE_OUT";
@@ -1187,6 +1229,26 @@ void showGateSettings(CircuitWindow* w, long gate) {
 	f.onLeave = [&](Form& form, int field) {
 		for (Setting& s : settings)
 			if (s.field == field && s.type != "BOOL") apply(s, trimmed(form.text(field)));
+	};
+	// A step at a time, kept in the range; each one is applied (and undone)
+	// on its own.
+	auto step = [&](Form& form, int field, int by) {
+		for (Setting& s : settings) {
+			if (s.field != field || s.type != "INT") continue;
+			const double now = std::floor(strtod(trimmed(form.text(field)).c_str(), nullptr));
+			const std::string v = numberText(std::min(s.max, std::max(s.min, (std::isfinite(now) ? now : s.min) + by)));
+			form.setText(field, v);
+			form.setProblem("");
+			apply(s, v);
+			return true;
+		}
+		return false;
+	};
+	f.onStep = [&](Form& form, int field, int by) { step(form, field, by); };
+	f.onKey = [&](Form& form, int field, UINT vk) {
+		if (vk != VK_UP && vk != VK_DOWN) return false;
+		if (field < 0 || field >= (int)form.fields.size() || !form.fields[field].stepper) return false;
+		return step(form, field, vk == VK_UP ? 1 : -1);
 	};
 	f.validate = [&](Form& form) -> std::string {
 		for (const Setting& s : settings) {
@@ -1392,14 +1454,25 @@ void monoText(ID2D1RenderTarget* rt, const std::string& text, const D2D1_RECT_F&
 	b->Release();
 }
 
-// A value typed into a word: Enter keeps it, Escape doesn't, clicking away keeps it.
-struct WordEdit { std::function<void(bool keep)> done; };
+// A value typed into a word: Enter keeps it and moves on to the next word,
+// as a spreadsheet does (Tab too, Shift+Tab back; Up and Down a row, Page Up
+// and Down a page); Escape doesn't keep it; clicking away keeps it.
+struct WordEdit {
+	std::function<void(HWND box, bool keep, int move)> done;
+	int page = 16;   // words a page
+};
 LRESULT CALLBACK wordEditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
 	WordEdit* e = reinterpret_cast<WordEdit*>(data);
 	if (msg == WM_GETDLGCODE) return DLGC_WANTALLKEYS;
-	if (msg == WM_KEYDOWN && (wp == VK_RETURN || wp == VK_ESCAPE)) { e->done(wp == VK_RETURN); return 0; }
-	if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE)) return 0;
-	if (msg == WM_KILLFOCUS) { LRESULT r = DefSubclassProc(h, msg, wp, lp); e->done(true); return r; }
+	if (msg == WM_KEYDOWN) {
+		const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+		const int move = wp == VK_RETURN ? 1 : wp == VK_TAB ? (shift ? -1 : 1) : wp == VK_UP ? -16 : wp == VK_DOWN ? 16
+		               : wp == VK_PRIOR ? -e->page : wp == VK_NEXT ? e->page : 0;
+		if (wp == VK_ESCAPE) { e->done(h, false, 0); return 0; }
+		if (move) { e->done(h, true, move); return 0; }
+	}
+	if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE || wp == VK_TAB)) return 0;
+	if (msg == WM_KILLFOCUS) { LRESULT r = DefSubclassProc(h, msg, wp, lp); e->done(h, true, 0); return r; }
 	return DefSubclassProc(h, msg, wp, lp);
 }
 
@@ -1407,8 +1480,10 @@ LRESULT CALLBACK wordEditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, 
 
 // A RAM's or ROM's contents, as the Mac's: sixteen words a row with the
 // address down the side, in hex or decimal. The word last read glows green
-// and the one last written amber, as it runs. Click a word to change it;
-// jump to an address; load or save a .cdm memory file.
+// and the one last written amber, as it runs. Click a word to change it
+// (Enter moves on to the next); jump to an address (Page Up and Down
+// scroll); load or save a .cdm memory file. Leaving with changes (Escape, or
+// the close box) asks whether to keep them, as the Mac's does.
 void showRamEditor(CircuitWindow* w, long gate) {
 	int addressBits = 0, dataBits = 0;
 	CLDocument* doc = w->document();
@@ -1422,6 +1497,7 @@ void showRamEditor(CircuitWindow* w, long gate) {
 	long scrollRow = 0;
 	long editing = -1;
 	HWND editBox = nullptr;
+	std::map<unsigned long, unsigned long> originals;   // what the words changed here held before
 	const std::string libName = cl_gate_library_name(doc, gate) ? cl_gate_library_name(doc, gate) : "";
 	const std::string caption = cl_gate_caption(doc, gate);
 	// Locked, or in Simulation View: it can be watched, not changed.
@@ -1489,7 +1565,7 @@ void showRamEditor(CircuitWindow* w, long gate) {
 	jump.kind = FormField::Text;
 	jump.label = "Go to address";
 	jump.mono = true;
-	jump.tip = "In hex. The legend: green was read last, amber written last.";
+	jump.tip = "In hex; Page Up and Down scroll. Green was read last, amber written last.";
 	const int jumpField = f.add(jump);
 
 	FormField grid;
@@ -1527,6 +1603,8 @@ void showRamEditor(CircuitWindow* w, long gate) {
 				                        : (long)addr == written ? withAlpha(writtenColor(), 0.35f) : withAlpha(k, 0.045f);
 				fillRound(rt, cell, 5, back);
 				if ((long)addr == editing) continue;
+				// A word changed here has a dot in its corner.
+				if (originals.count(addr)) fillCircle(rt, D2D1::Point2F(cell.right - 4.5f, cell.top + 4.5f), 2, withAlpha(c.accent(), 0.9f));
 				monoText(rt, shown(v), cell, 11.5f, v == 0 ? withAlpha(k, 0.35f) : k, DWRITE_TEXT_ALIGNMENT_CENTER);
 			}
 		}
@@ -1546,6 +1624,12 @@ void showRamEditor(CircuitWindow* w, long gate) {
 	};
 	WordEdit we;
 	std::vector<HWND> finished;
+	auto remember = [&](unsigned long addr, unsigned long becoming) {
+		auto it = originals.find(addr);
+		const unsigned long before = it != originals.end() ? it->second : cl_ram_value(doc, gate, addr);
+		if (before == becoming) originals.erase(addr);
+		else originals[addr] = before;
+	};
 	auto finishEdit = [&](Form& form, bool keep) {
 		if (editing < 0 || editBox == nullptr) return;
 		const long addr = editing;
@@ -1560,8 +1644,11 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			errno = 0;
 			const unsigned long v = strtoul(t.c_str(), &end, decimal ? 10 : 16);
 			if (!t.empty() && t[0] != '-' && t[0] != '+' && end && *end == 0 && errno != ERANGE && v <= most) {
-				cl_ram_set(doc, gate, (unsigned long)addr, v);
-				w->edited();
+				if (v != cl_ram_value(doc, gate, (unsigned long)addr)) {
+					remember((unsigned long)addr, v);
+					cl_ram_set(doc, gate, (unsigned long)addr, v);
+					w->edited();
+				}
 			} else if (!t.empty()) {
 				MessageBeep(MB_ICONWARNING);
 			}
@@ -1571,6 +1658,44 @@ void showRamEditor(CircuitWindow* w, long gate) {
 		ShowWindow(box, SW_HIDE);
 		finished.push_back(box);
 		form.refresh(gridField);
+	};
+	// A box over the word to type in, scrolled into view first.
+	auto beginEdit = [&](Form& form, unsigned long addr) {
+		finishEdit(form, true);
+		const long row = (long)(addr / 16);
+		if (row < scrollRow) scrollTo(form, row);
+		else if (row >= scrollRow + visibleRows) scrollTo(form, row - visibleRows + 1);
+		const D2D1_RECT_F cell = cellRect(addr);
+		HWND pic = form.fields[gridField].hwnd;
+		const float s = dpiOf(pic) / 96.0f;
+		POINT p = { (LONG)(cell.left * s), (LONG)(cell.top * s) };
+		MapWindowPoints(pic, form.dialog, &p, 1);
+		editing = (long)addr;
+		editBox = CreateWindowExW(0, L"EDIT", W(shown(cl_ram_value(doc, gate, addr))).c_str(),
+		                          WS_CHILD | WS_VISIBLE | WS_BORDER | ES_CENTER | ES_AUTOHSCROLL, p.x, p.y, (int)((cell.right - cell.left) * s),
+		                          (int)((cell.bottom - cell.top) * s), form.dialog, nullptr, appInstance(), nullptr);
+		SendMessageW(editBox, WM_SETFONT, (WPARAM)monoFont(dpiOf(pic)), TRUE);
+		if (prefs().dark) darkenControl(editBox, true, L"CFD");
+		SetWindowPos(editBox, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		SetWindowSubclass(editBox, wordEditProc, 3, (DWORD_PTR)&we);
+		SetFocus(editBox);
+		SendMessageW(editBox, EM_SETSEL, 0, -1);
+		form.refresh(gridField);
+	};
+	// The box's keys. A box already finished (losing the keyboard to the
+	// next one) has nothing more to say.
+	we.page = 16 * std::max(1, visibleRows);
+	we.done = [&](HWND box, bool keep, int move) {
+		if (box != editBox) return;
+		const long addr = editing;
+		finishEdit(f, keep);
+		if (keep && move) {
+			long next = addr + move;
+			if (move != 1 && move != -1) next = std::max(0L, std::min((long)words - 1, next));   // a row or a page: as far as there is
+			if (next >= 0 && next < (long)words) { beginEdit(f, (unsigned long)next); return; }
+		}
+		// Escape, or past the last word: the keys go to the address box.
+		if (!keep || move) SetFocus(f.fields[jumpField].hwnd);
 	};
 	f.onClick = [&](Form& form, int field, float x, float y) {
 		if (field == headField) {
@@ -1585,27 +1710,18 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			for (int col = 0; col < cols; col++) {
 				const unsigned long addr = (unsigned long)(scrollRow + r) * 16 + col;
 				if (addr >= words || !inRect(cellRect(addr), x, y)) continue;
-				// A box over the word to type in.
-				const D2D1_RECT_F cell = cellRect(addr);
-				HWND pic = form.fields[gridField].hwnd;
-				const float s = dpiOf(pic) / 96.0f;
-				POINT p = { (LONG)(cell.left * s), (LONG)(cell.top * s) };
-				MapWindowPoints(pic, form.dialog, &p, 1);
-				editing = (long)addr;
-				editBox = CreateWindowExW(0, L"EDIT", W(shown(cl_ram_value(doc, gate, addr))).c_str(),
-				                          WS_CHILD | WS_VISIBLE | WS_BORDER | ES_CENTER | ES_AUTOHSCROLL, p.x, p.y, (int)((cell.right - cell.left) * s),
-				                          (int)((cell.bottom - cell.top) * s), form.dialog, nullptr, appInstance(), nullptr);
-				SendMessageW(editBox, WM_SETFONT, (WPARAM)monoFont(dpiOf(pic)), TRUE);
-				if (prefs().dark) darkenControl(editBox, true, L"CFD");
-				SetWindowPos(editBox, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-				we.done = [&form, &finishEdit](bool keep) { finishEdit(form, keep); };
-				SetWindowSubclass(editBox, wordEditProc, 3, (DWORD_PTR)&we);
-				SetFocus(editBox);
-				SendMessageW(editBox, EM_SETSEL, 0, -1);
-				form.refresh(gridField);
+				beginEdit(form, addr);
 				return;
 			}
 		}
+	};
+	// In the address box: Page Up and Down a page of rows, Up and Down one.
+	f.onKey = [&](Form& form, int field, UINT vk) {
+		if (field != jumpField) return false;
+		const long by = vk == VK_PRIOR ? -visibleRows : vk == VK_NEXT ? visibleRows : vk == VK_UP ? -1 : vk == VK_DOWN ? 1 : 0;
+		if (by == 0) return false;
+		scrollTo(form, scrollRow + by);
+		return true;
 	};
 	// Three rows a notch; a touchpad's small steps add up to rows.
 	int wheelRest = 0;
@@ -1651,9 +1767,44 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			file = chooseSaveFile(form.dialog, "Save Memory", "memory.cdm", filters, ".cdm");
 		}
 		if (file.empty()) return false;
-		if (load) { cl_ram_load_file(doc, gate, file.c_str()); form.refresh(gridField); w->edited(); }
-		else cl_ram_save_file(doc, gate, file.c_str());
+		if (load) {
+			// What it changed counts as changed here, to keep or put back.
+			const unsigned long n = std::min(words, 1UL << 16);
+			std::vector<unsigned long> before;
+			for (unsigned long a = 0; a < n; a++) before.push_back(cl_ram_value(doc, gate, a));
+			cl_ram_load_file(doc, gate, file.c_str());
+			for (unsigned long a = 0; a < n; a++) {
+				auto it = originals.find(a);
+				const unsigned long old = it != originals.end() ? it->second : before[a];
+				if (old == cl_ram_value(doc, gate, a)) originals.erase(a);
+				else originals[a] = old;
+			}
+			form.refresh(gridField);
+			w->edited();
+		} else {
+			cl_ram_save_file(doc, gate, file.c_str());
+		}
 		return false;
+	};
+	// Escape or the close box with changes: keep them, or put them back
+	// (Done keeps them without asking).
+	f.onCancel = [&](Form& form) {
+		finishEdit(form, true);
+		if (originals.empty()) return true;
+		Alert a;
+		a.heading = "Keep the changes to this memory?";
+		a.text = originals.size() == 1 ? std::string("You changed 1 value.") : strf("You changed %d values.", (int)originals.size());
+		a.buttons = { { "Keep", 1, 1 }, { "Cancel", 0, 0 }, { "Put Them Back", 2, 0, true } };
+		a.enter = 1;
+		a.escape = 0;
+		const int r = runAlert(form.dialog, a);
+		if (r == 0) return false;
+		if (r == 2) {
+			for (const auto& o : originals) cl_ram_set(doc, gate, o.first, o.second);
+			originals.clear();
+			w->edited();
+		}
+		return true;
 	};
 	f.validate = [&](Form& form) -> std::string {
 		finishEdit(form, true);
@@ -1740,6 +1891,7 @@ void showPreferencesDialog(HWND parent) {
 	const int rightRotate = f.add(checkField("Right-click a gate to rotate it", p.rightClickRotate));
 	const int dupClip = f.add(checkField("Duplicate (D) also copies to the clipboard", p.duplicateUsesClipboard));
 	const int tidy = f.add(choiceField("Tidy Up (Shift+S)", { "Keeps the layout's shape", "Arranges by signal flow" }, p.tidyMode));
+	const int wireTag = f.add(checkField("Show a wire's value when you rest on it", p.wireValueTag));
 
 	// Every change applies at once.
 	f.onChange = [&](Form& form, int field) {
@@ -1772,6 +1924,7 @@ void showPreferencesDialog(HWND parent) {
 		else if (field == rightRotate) q.rightClickRotate = form.checked(rightRotate);
 		else if (field == dupClip) q.duplicateUsesClipboard = form.checked(dupClip);
 		else if (field == tidy) q.tidyMode = form.choice(tidy);
+		else if (field == wireTag) q.wireValueTag = form.checked(wireTag);
 		else if (field == askQuit) q.confirmQuit = form.checked(askQuit);
 		else if (field == status) q.showStatus = form.checked(status);
 		prefsApply();
@@ -1906,32 +2059,23 @@ void showBuildFormula(CircuitWindow* w) {
 // ---- Quitting ------------------------------------------------------------------------
 
 // Ctrl+Q sits beside Ctrl+W (close the tab): asked first, as the Mac app
-// asks about Cmd+Q, unless "Always Quit" was chosen.
+// asks about Cmd+Q, unless "Always Quit" was chosen -- the app's alert card,
+// with the reassurance under the question.
 bool confirmQuit(HWND parent) {
 	if (!prefs().confirmQuit) return true;
-	Form f;
-	f.title = "Quit CedarLogic";
-	f.width = 440;
-	f.okText = "Quit";
-	f.buttons = { "Always Quit" };
-	// As the Mac asks: the icon, the question, and the reassurance.
-	FormField q;
-	q.kind = FormField::Picture;
-	q.height = 118;
-	q.paint = [](ID2D1RenderTarget* rt, float w, float) {
-		const D2D1_COLOR_F ink = prefs().dark ? D2D1::ColorF(0.89f, 0.9f, 0.93f) : D2D1::ColorF(0.1f, 0.11f, 0.13f);
-		brand::icon(rt, 2, 4, 44, 0);
-		drawText(rt, "Are you sure you want to quit CedarLogic?", D2D1::RectF(2, 62, w, 88), 17, ink, TextAlign::Leading, true);
-		drawText(rt, "Your circuits are saved; they'll be here when you come back.", D2D1::RectF(2, 90, w, 110), 12.5f, withAlpha(ink, 0.6f));
-	};
-	f.add(q);
-	f.onButton = [](Form&, int) {
+	Alert a;
+	a.title = "Quit CedarLogic";
+	a.heading = "Are you sure you want to quit CedarLogic?";
+	a.text = "Your circuits are saved; they'll be here when you come back.";
+	a.buttons = { { "Quit", 1, 1 }, { "Cancel", 0, 0 }, { "Always Quit", 2, 0, true } };
+	a.enter = 1;
+	a.escape = 0;
+	const int r = runAlert(parent, a);
+	if (r == 2) {
 		prefs().confirmQuit = false;
 		prefs().save();
-		return true;
-	};
-	const int r = f.run(parent);
-	return r == IDOK || r == 100;
+	}
+	return r != 0;
 }
 
 // ---- The oscilloscope: Scope.cpp ----

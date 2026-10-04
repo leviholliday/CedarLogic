@@ -306,6 +306,16 @@ D2D1_RECT_F GatePalette::scrollThumb() const {
 	return D2D1::RectF(w - 9, ty + 2, w - 3, ty + th - 2);
 }
 
+bool GatePalette::firstTilePoint(POINT& at) const {
+	if (shown.empty() || tiles == nullptr) return false;
+	int columns;
+	float tileW, tileH;
+	layoutTiles(columns, tileW, tileH);
+	const double s = dpiOf(tiles) / 96.0;
+	at = { (LONG)((kPad + tileW / 2) * s), (LONG)((kPad + tileH / 2 - scrollY) * s) };
+	return at.y > 0;
+}
+
 int GatePalette::tileAt(float px, float py) const {
 	py += scrollY;
 	int columns;
@@ -364,23 +374,73 @@ void GatePalette::paintTiles() {
 	EndPaint(tiles, &ps);
 }
 
-void GatePalette::drop() {
-	const std::string name = shown[pressed].name;
+// Dragged out of the panel, the gate is on the canvas at once, even while
+// the pointer is still over the panel (the canvas only draws inside itself,
+// so it slides out from under the panel's edge), and follows the pointer
+// until the button comes up -- as the Mac's and the Linux app's do. In a
+// split it's on the side under the pointer: crossing to the other side takes
+// it back from the side it left (as switching sides does) and puts it on
+// there.
+void GatePalette::dragTo() {
+	if (win->currentCanvas() == nullptr || pressed < 0 || pressed >= (int)shown.size()) return;
+	if (!win->canEdit()) {
+		if (!refused) { refused = true; win->lockNudge(); }
+		return;
+	}
 	POINT p;
 	GetCursorPos(&p);
-	// Onto either side of a split: that side's page takes it.
-	Canvas* c = nullptr;
-	for (int pane = 0; pane < 2; pane++)
-		if (Canvas* pc = win->paneCanvas(pane)) if (WindowFromPoint(p) == pc->widget()) c = pc;
-	if (c && c != win->currentCanvas()) win->activatePane(win->paneOf(c));
-	if (c && c == win->currentCanvas()) {
-		// Same as clicking the tile: the gate lands floating, still following
-		// the pointer until a click drops it -- so C-to-connect, Escape, and
-		// every other in-flight key work exactly as they do after a click.
-		double vx, vy, wx, wy;
-		c->screenToView(p, vx, vy);
+	const HWND under = WindowFromPoint(p);
+	for (int pane = 0; pane < 2; pane++) {
+		Canvas* pc = win->paneCanvas(pane);
+		if (pc == nullptr || pc->widget() != under || pc == win->currentCanvas()) continue;
+		const bool carried = placed && win->isFloating();   // not after Escape took it back
+		win->activatePane(pane);
+		if (carried) placed = false;
+		break;
+	}
+	Canvas* c = win->currentCanvas();
+	if (c == nullptr) return;
+	double vx, vy, wx, wy;
+	c->screenToView(p, vx, vy);
+	c->worldPoint(vx, vy, wx, wy);
+	win->pointerMoved(wx, wy);
+	if (!placed) {
+		placed = win->addGateFloating(shown[pressed].name, wx, wy);
+		if (placed) {
+			// It takes over from a gate clicked earlier and not yet on the
+			// canvas, and the canvas takes the keys (Escape takes it back;
+			// only in the window in front: focus would activate one behind).
+			win->clearPendingGate();
+			if (GetForegroundWindow() == win->window()) c->focus();
+		}
+	} else if (win->isFloating()) {
+		const int page = c->page();
+		if (page >= 0 && cl_edit_hover(win->document(), page, wx, wy, c->unitsPerPoint())) c->redraw();
+	}
+}
+
+// Let go over the canvas (the side it's on): it's put down there, as a
+// click would. Anywhere else: never mind. (Escape on the way took it back
+// already.)
+void GatePalette::drop() {
+	const bool was = placed;
+	placed = false;
+	Canvas* c = win->currentCanvas();
+	if (!was || c == nullptr || !win->isFloating()) return;
+	POINT p;
+	GetCursorPos(&p);
+	double vx, vy;
+	c->screenToView(p, vx, vy);
+	const int page = c->page();
+	if (page >= 0 && WindowFromPoint(p) == c->widget() && vx >= 0 && vy >= 0 && vx < c->width() && vy < c->height()) {
+		double wx, wy;
 		c->worldPoint(vx, vy, wx, wy);
-		if (win->addGateFloating(name, wx, wy)) c->focus();
+		cl_edit_press(win->document(), page, wx, wy, 0, c->unitsPerPoint());
+		cl_edit_release(win->document(), wx, wy);
+		win->edited();
+		c->focus();
+	} else {
+		win->cancelFloating();
 	}
 }
 
@@ -472,6 +532,7 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 				dragging = true;
 				SetCursor(LoadCursor(nullptr, IDC_SIZEALL));
 			}
+			if (dragging) dragTo();
 			return 0;
 		}
 		const D2D1_RECT_F th = scrollThumb();
@@ -506,7 +567,7 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 		pressed = tileAt(x, y);
 		if (pressed >= 0) {
 			pressAt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-			dragging = false;
+			dragging = placed = refused = false;
 			SetCapture(tiles);
 			InvalidateRect(tiles, nullptr, FALSE);
 		}
@@ -532,7 +593,11 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 		if (pressed >= 0) {
 			const int was = pressed;
 			const bool dragged = dragging;
-			if (GetCapture() == tiles) ReleaseCapture();
+			if (GetCapture() == tiles) {
+				releasing = true;
+				ReleaseCapture();
+				releasing = false;
+			}
 			pressed = was;
 			if (dragged) drop();
 			else win->addGateOnNextMove(shown[was].name);
@@ -542,7 +607,9 @@ LRESULT GatePalette::tilesMessage(UINT msg, WPARAM wp, LPARAM lp) {
 		}
 		return 0;
 	case WM_CAPTURECHANGED:
-		if ((HWND)lp != tiles) {
+		if ((HWND)lp != tiles && !releasing) {
+			// Something took the pointer mid-drag: the gate goes back.
+			if (placed) { placed = false; win->cancelFloating(); }
 			pressed = -1;
 			dragging = scrollDrag = false;
 			InvalidateRect(tiles, nullptr, FALSE);

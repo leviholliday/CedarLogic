@@ -51,4 +51,10 @@ bool offer(CircuitWindow* window);
 void show(CircuitWindow* window, int page = 0);
 }  // namespace whatsnew
 
+// Help > About: a card in the brand's look with the version, and Website and
+// What's New.
+namespace about {
+void show(CircuitWindow* window);
+}  // namespace about
+
 #endif  // CL_WINDOWS_WELCOME_H

@@ -218,7 +218,11 @@ void Prefs::load() {
 	duplicateUsesClipboard = r.b("duplicateClipboard", duplicateUsesClipboard);
 	showPalette = r.b("showPalette", showPalette);
 	showStatus = r.b("statusBar", showStatus);
+	// The drawn status bar, where notes appear, is on, as on the Mac (the
+	// old one was off).
+	if (!r.b("drawnStatusBar", false)) showStatus = true;
 	showGateNames = r.b("showGateNames", showGateNames);
+	wireValueTag = r.b("wireValueTag", wireValueTag);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
@@ -240,6 +244,9 @@ void Prefs::load() {
 	exportGrid = r.b("exportGrid", exportGrid);
 	exportColor = r.b("exportColor", exportColor);
 	exportInfo = r.b("exportInfo", exportInfo);
+	// The name-and-result strip is in an exported picture to begin with, as
+	// on the Mac and Linux (it was left out here, once).
+	if (!r.b("exportStripOn", false)) exportInfo = true;
 	exportWorks = r.b("exportWorks", exportWorks);
 	exportScale = r.i("exportScale", exportScale, 2, 6);
 	exportProblem = manyLines(r.s("exportProblem", exportProblem));
@@ -287,7 +294,9 @@ void Prefs::save() const {
 	o << "duplicateClipboard=" << b(duplicateUsesClipboard) << "\n";
 	o << "showPalette=" << b(showPalette) << "\n";
 	o << "statusBar=" << b(showStatus) << "\n";
+	o << "drawnStatusBar=1\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
+	o << "wireValueTag=" << b(wireValueTag) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
@@ -309,6 +318,7 @@ void Prefs::save() const {
 	o << "exportGrid=" << b(exportGrid) << "\n";
 	o << "exportColor=" << b(exportColor) << "\n";
 	o << "exportInfo=" << b(exportInfo) << "\n";
+	o << "exportStripOn=1\n";
 	o << "exportWorks=" << b(exportWorks) << "\n";
 	o << "exportScale=" << exportScale << "\n";
 	o << "exportProblem=" << oneLine(exportProblem) << "\n";
@@ -608,17 +618,7 @@ void setWindowText(HWND hwnd, const std::string& text) {
 }
 
 // ---- Messages ----------------------------------------------------------------------
-
-void showMessage(HWND parent, Tone tone, const std::string& title, const std::string& text) {
-	const UINT icon = tone == Tone::Error ? MB_ICONERROR : tone == Tone::Warning ? MB_ICONWARNING : MB_ICONINFORMATION;
-	const std::string body = text.empty() ? title : title + "\n\n" + text;
-	MessageBoxW(parent, W(body).c_str(), L"CedarLogic", MB_OK | icon);
-}
-
-bool askYesNo(HWND parent, const std::string& title, const std::string& text) {
-	const std::string body = text.empty() ? title : title + "\n\n" + text;
-	return MessageBoxW(parent, W(body).c_str(), L"CedarLogic", MB_YESNO | MB_ICONQUESTION) == IDYES;
-}
+// showMessage and askYesNo are the app's alert card (Alert.cpp).
 
 void reportException(const char* where, const char* what) {
 	OutputDebugStringW(W(strf("CedarLogic: %s failed: %s\n", where, what)).c_str());

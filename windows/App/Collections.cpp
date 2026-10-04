@@ -1,6 +1,7 @@
 // Templates and My Parts (see Collections.h).
 
 #include "Collections.h"
+#include "Alert.h"
 #include "Dialogs.h"
 #include "Picker.h"
 #include "Window.h"
@@ -292,7 +293,8 @@ void showPicker(CircuitWindow* from) {
 				pk.reload();
 			}
 		} else if (b == 1) {
-			if (askYesNo(pk.hwnd, "Delete “" + t.name + "”?", "It goes to the Recycle Bin. Circuits you made from it aren't touched.")) {
+			if (askConfirm(pk.hwnd, "Delete “" + t.name + "”?", "It goes to the Recycle Bin. Circuits you made from it aren't touched.",
+			               "Delete", "Cancel", true)) {
 				recycle(t.folder);
 				mine = yours();
 				pk.reload();
@@ -424,8 +426,8 @@ bool tileMenu(HWND owner, const std::string& gateName, POINT screen) {
 		if (!askText(owner, "Rename Part", "The part's name:", name) || name.empty()) return false;
 		writeFile(p.folder + "\\name.txt", name);
 	} else if (cmd == 2) {
-		if (!askYesNo(owner, "Delete “" + p.name + "”?",
-		              "It goes from My Parts to the Recycle Bin. Circuits that already use it keep their copy."))
+		if (!askConfirm(owner, "Delete “" + p.name + "”?",
+		                "It goes from My Parts to the Recycle Bin. Circuits that already use it keep their copy.", "Delete", "Cancel", true))
 			return false;
 		recycle(p.folder);
 		forget(gateName);

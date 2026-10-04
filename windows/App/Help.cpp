@@ -129,7 +129,10 @@ const std::vector<Page>& pages() {
 		      "once, and the speed slider sets how long each step takes."),
 		    p("Click a switch to flip it; keypads and pulse generators take clicks too."),
 		    p("**Simulation View (Ctrl+R)** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the "
-		      "bar at the bottom shows every switch and light. Space pauses, Escape leaves."),
+		      "bar at the bottom shows every switch and light. Point at a wire and all of it lights up. Space pauses, Escape leaves."),
+		    p("To see what a wire carries, turn on **Show a wire's value when you rest on it** (Preferences ▸ Canvas): rest the "
+		      "pointer on a wire and its value appears beside it, 1 in green and 0 in grey, a bus's bits and what they make, or "
+		      "floating, a conflict or unknown."),
 		    p("**Lock** (in the toolbar) stops edits, so a circuit can be shown and played with but not changed. Switches still work.") },
 		  false },
 		{ "analysis", "Truth Tables and the Oscilloscope", 0xE80A, "See what a circuit does.",

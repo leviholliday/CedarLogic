@@ -1,7 +1,8 @@
 // The gate palette down the window's side -- a search box, the library's
 // categories, each gate drawn as a tile (the engine draws it) -- and the
 // minimap under it. Click a tile and the gate follows the pointer onto the
-// canvas until a click drops it; or drag it there.
+// canvas until a click drops it; or drag it there in one motion, and it's
+// put down where the button comes up.
 
 #ifndef CL_WINDOWS_PALETTE_H
 #define CL_WINDOWS_PALETTE_H
@@ -31,6 +32,9 @@ public:
 	// For the category button.
 	std::string categoryTitle() const;
 	void chooseCategory(POINT screen);
+	// For --click-test: the gates' window, and the first gate's middle in it.
+	HWND tilesWidget() const { return tiles; }
+	bool firstTilePoint(POINT& at) const;
 
 private:
 	struct Gate { std::string name, caption; };
@@ -48,6 +52,9 @@ private:
 	float scrollY = 0;            // points
 	int hover = -1, pressed = -1;
 	bool dragging = false, scrollDrag = false, scrollHot = false;
+	bool placed = false;          // the dragged gate is on the canvas, following the pointer
+	bool refused = false;         // ... or the canvas can't be changed (said once)
+	bool releasing = false;       // letting go of the pointer on the release
 	float scrollGrab = 0;
 	POINT pressAt{};
 
@@ -63,6 +70,7 @@ private:
 	int tileAt(float x, float y) const;
 	void paintTiles();
 	void paintHost(HDC dc);
+	void dragTo();
 	void drop();
 
 	LRESULT hostMessage(UINT msg, WPARAM wp, LPARAM lp);

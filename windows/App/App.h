@@ -56,8 +56,9 @@ struct Prefs {
 	bool rightClickRotate = false;
 	bool duplicateUsesClipboard = false;
 	bool showPalette = true;
-	bool showStatus = false;      // the old status bar (notes show on the canvas instead)
+	bool showStatus = true;       // the status bar's readout (zoom, pointer, counts), as on the Mac
 	bool showGateNames = true;
+	bool wireValueTag = false;    // resting on a wire shows what it carries
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	bool hasSeenWelcome = false;
 	bool firstLaunchPlayed = false;               // the launch screen's sound, once ever
@@ -76,7 +77,7 @@ struct Prefs {
 	// Timing diagrams (the oscilloscope's share menu).
 	bool timingWhole = false, timingInColor = false;
 	// Export as Image's last choices.
-	bool exportGrid = false, exportColor = true, exportInfo = false, exportWorks = true;
+	bool exportGrid = false, exportColor = true, exportInfo = true, exportWorks = true;   // exportInfo: the name-and-result strip
 	int exportScale = 4;                          // 2, 4 or 6 pixels a point
 	std::string exportProblem;                    // "does not work because…"
 	// Send Feedback's draft, kept until it's sent.
@@ -186,6 +187,7 @@ void setDarkTitleBar(HWND hwnd, bool dark);
 void darkenControl(HWND control, bool dark, const wchar_t* theme);
 
 // ---- Messages ----------------------------------------------------------------------
+// Both as the app's alert card (Alert.h).
 
 enum class Tone { Info, Warning, Error };
 void showMessage(HWND parent, Tone tone, const std::string& title, const std::string& text);

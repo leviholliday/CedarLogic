@@ -1,10 +1,12 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "Alert.h"
 #include "Canvas.h"
 #include "Dialogs.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "StatusBar.h"
 #include "TabStrip.h"
 #include "FindBar.h"
 #include "TabSwitcher.h"
@@ -32,7 +34,7 @@ namespace {
 
 const wchar_t* kClass = L"CedarLogicWindow";
 const UINT_PTR kClockTimer = 1, kAutosaveTimer = 2, kSwitchTimer = 3;
-const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18, kNoteTime = 4.0;
+const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18;
 
 double since(double t) { return nowSeconds() - t; }
 
@@ -183,6 +185,8 @@ CircuitWindow::~CircuitWindow() {
 	findBar = nullptr;
 	delete switcher;
 	switcher = nullptr;
+	delete statusBar;
+	statusBar = nullptr;
 	if (menus) DestroyMenu(menus);
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
@@ -234,12 +238,10 @@ void CircuitWindow::build() {
 	ShowWindow(strips[1]->widget(), SW_HIDE);   // until there's a split
 	findBar = new FindBar(this, hwnd);
 	switcher = new TabSwitcher(this);
-	statusBar = CreateWindowExW(0, STATUSCLASSNAMEW, L"", WS_CHILD | SBARS_SIZEGRIP, 0, 0, 10, 10, hwnd, nullptr,
-	                            appInstance(), nullptr);
+	statusBar = new StatusBar(this, hwnd);
 	setFontTree(hwnd, uiFont(dpi));
 	palette->dpiChanged();
 	ShowWindow(paletteHost, prefs().showPalette ? SW_SHOW : SW_HIDE);
-	ShowWindow(statusBar, prefs().showStatus ? SW_SHOW : SW_HIDE);
 	// The title bar is the toolbar's: tell Windows the frame changed.
 	SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -341,6 +343,10 @@ void CircuitWindow::buildMenus() {
 
 int CircuitWindow::toolbarHeight() const { return (int)std::lround(Toolbar::barHeight() * dpi / 96.0); }
 
+int CircuitWindow::statusHeight() const {
+	return statusBar ? (int)std::lround(StatusBar::barHeight() * statusBar->shown() * dpi / 96.0) : 0;
+}
+
 // How far the toolbar and the side panel have slid away for focus mode (0
 // shown, 1 away).
 double CircuitWindow::focusAmount() const {
@@ -379,17 +385,10 @@ void CircuitWindow::layout() {
 	const int top = (int)std::lround(barH * (1 - away));
 	place(toolbar->widget(), 0, top - barH, rc.right, barH);
 
-	// The status bar (off unless asked for) sizes itself along the bottom.
-	int bottom = rc.bottom;
-	if (prefs().showStatus) {
-		SendMessageW(statusBar, WM_SIZE, 0, 0);
-		RECT sb;
-		GetWindowRect(statusBar, &sb);
-		bottom -= sb.bottom - sb.top;
-		const int infoW = std::min<int>(sc(460), rc.right / 2);
-		int parts[2] = { rc.right - infoW, -1 };
-		SendMessageW(statusBar, SB_SETPARTS, 2, (LPARAM)parts);
-	}
+	// The status bar along the bottom, under everything, in focus mode too
+	// (sliding up for a note when it's off).
+	const int bottom = rc.bottom - statusHeight();
+	if (statusBar) place(statusBar->widget(), 0, bottom, rc.right, rc.bottom - bottom);
 	contentBottom = bottom;
 
 	// The side panel, a hairline, then the sides and the oscilloscope.
@@ -610,7 +609,7 @@ void CircuitWindow::pageSwitched() {
 	updateTitle();
 	updateTabLabels();
 	redrawMiniMap();
-	// The find bar, the banner and the note go with the side you're in.
+	// The find bar and the banner go with the side you're in.
 	if (focusPane != paneBefore) { layout(); redraw(); }
 }
 
@@ -969,15 +968,10 @@ void CircuitWindow::tick() {
 		if (r & CL_TICK_PAUSED) { isRunning = false; updateRunUI(); note("A part paused the simulation."); }
 	}
 	if (statusDirty && (t - lastStatus) > 0.1) { statusDirty = false; lastStatus = t; updateStatus(); }
+	if (statusBar && statusBar->tick()) layout();
 	if ((t - lastTitle) > 0.5) { lastTitle = t; updateTitle(); }
 	// A recovery copy of unsaved work, at most every 20 seconds.
 	if (changes != changesAtRecovery && (t - lastRecovery) > 20) writeRecovery();
-	// The note over the canvas fades in, stays a while, fades out.
-	if (messageAt > 0) {
-		const double age = since(messageAt);
-		if (age > kNoteTime) { messageAt = 0; redraw(); }
-		else if (age < 0.2 || age > kNoteTime - 0.5) redraw();
-	}
 }
 
 double CircuitWindow::selectionFade() const {
@@ -1049,20 +1043,9 @@ void CircuitWindow::edited() {
 	if (findBar && findBar->isOpen()) findBar->run(false);
 }
 
+// In the status bar, as the Mac's notes are.
 void CircuitWindow::note(const std::string& text) {
-	noteText = text;
-	messageAt = nowSeconds();
-	if (prefs().showStatus) SendMessageW(statusBar, SB_SETTEXTW, 0, (LPARAM)W(text).c_str());
-	redraw();
-}
-
-bool CircuitWindow::toast(std::string& text, double& alpha) const {
-	if (messageAt <= 0 || noteText.empty()) return false;
-	const double age = since(messageAt);
-	if (age > kNoteTime) return false;
-	text = noteText;
-	alpha = std::min(1.0, std::min(age / 0.2, (kNoteTime - age) / 0.5));
-	return alpha > 0;
+	if (statusBar) statusBar->note(text);
 }
 
 void CircuitWindow::lockNudge() {
@@ -1114,15 +1097,7 @@ void CircuitWindow::updateTitle() {
 }
 
 void CircuitWindow::updateStatus() {
-	Canvas* c = currentCanvas();
-	const int p = currentPage();
-	std::string s = strf("%d gates", cl_document_gate_count(doc, p));
-	const int sg = cl_edit_selected_gate_count(doc, p), sw = cl_edit_selected_wire_count(doc, p);
-	if (sg + sw > 0) s += strf(" · %d selected", sg + sw);
-	if (c) s += strf(" · %d%%", c->zoomPercent());
-	s += strf(" · %.1f, %.1f", pointerX, pointerY);
-	s += isRunning ? " · Running" : " · Paused";
-	if (prefs().showStatus) SendMessageW(statusBar, SB_SETTEXTW, 1, (LPARAM)W(s).c_str());
+	if (statusBar) statusBar->update();
 	if (toolbar) toolbar->redraw();   // the zoom readout
 }
 
@@ -1213,6 +1188,7 @@ void CircuitWindow::themeChanged() {
 	updateActions();
 	updateTabLabels();
 	if (palette) palette->themeChanged();
+	if (statusBar) statusBar->redraw();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
 	if (scope) scope->update();
@@ -1221,7 +1197,6 @@ void CircuitWindow::themeChanged() {
 
 void CircuitWindow::prefsChanged() {
 	ShowWindow(paletteHost, prefs().showPalette && !focusOn ? SW_SHOW : SW_HIDE);
-	ShowWindow(statusBar, prefs().showStatus ? SW_SHOW : SW_HIDE);
 	layout();
 	themeChanged();
 }
@@ -1577,14 +1552,21 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 // Circuits save themselves, so closing doesn't ask: it saves. Only when that
-// fails is there a question.
+// fails is there a question, and a reflexive Enter keeps the work.
 bool CircuitWindow::confirmClose() {
 	// A tab being renamed keeps its new name (a click on Close doesn't take
 	// the keyboard from its box).
 	for (TabStrip* t : strips) if (t) t->commitRename(true, false);
 	if (!isDirty()) return true;
 	if (saveQuietly(false)) return true;
-	return askYesNo(hwnd, "This circuit couldn't be saved", "Close it anyway? The changes since it last saved will be lost.");
+	Alert a;
+	a.heading = "This circuit couldn't be saved";
+	a.text = "Close it anyway? The changes since it last saved will be lost.";
+	a.badge = 2;
+	a.buttons = { { "Close Anyway", 1, 2 }, { "Cancel", 0, 1 } };
+	a.escape = 0;
+	a.enter = 0;
+	return runAlert(hwnd, a) == 1;
 }
 
 // Without saving: its circuit is going (deleted from Your Circuits).
@@ -1786,12 +1768,7 @@ void CircuitWindow::run(int command) {
 	case CMD_TOUR: welcome::startTourOn(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;
-	case CMD_ABOUT:
-		showMessage(hwnd, Tone::Info, "CedarLogic " CL_VERSION " (native Windows, testing)",
-		            "A digital logic simulator, from Cedarville University.\n\n"
-		            "This is the native Windows app: plain Windows controls and Direct2D on the shared CedarLogic "
-		            "engine, with nothing else to install.\n\nhttps://github.com/leviholliday/CedarLogic");
-		break;
+	case CMD_ABOUT: about::show(this); break;
 	default: break;
 	}
 }
@@ -2355,6 +2332,7 @@ void CircuitWindow::setStepMs(int ms) {
 
 void CircuitWindow::toggleSimView() {
 	simViewOn = !simViewOn;
+	cl_edit_hover_clear(doc);   // what was lit belongs to the other mode
 	if (simViewOn) {
 		if (Canvas* c = currentCanvas()) c->cancelDrag();
 		cl_edit_cancel(doc);
@@ -2422,8 +2400,7 @@ void CircuitWindow::closePage(int page) {
 	if (cl_document_page_count(doc) < 2) return;
 	// A tab with work on it asks first (wx CloseTabCanvas).
 	if (cl_document_gate_count(doc, page) > 0 &&
-	    !askYesNo(hwnd, "Close Tab", "All work on this tab will be lost. Would you like to close it?\n\n"
-	                                 "(Ctrl+Shift+T brings it back.)"))
+	    !askConfirm(hwnd, "Close this tab?", "All work on this tab will be lost. Ctrl+Shift+T brings it back.", "Close Tab", "Cancel", true))
 		return;
 	for (Canvas* c : canvases) c->cancelDrag();
 	cl_edit_select_none(doc, page);
