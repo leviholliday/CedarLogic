@@ -74,13 +74,18 @@ float drawFormula(cairo_t* cr, const std::string& name, const formula::TwoLevel&
 }
 
 // A name a formula can use: letters, digits and _, starting with a letter.
+// More than one capital would read as a product (LED is L·E·D), so those
+// keep the first letter and any digits at the end (LED1 is L1).
 std::string formulaName(const std::string& s, const std::string& fallback) {
 	std::string kept;
 	for (char c : s) if (isalnum((unsigned char)c) || c == '_') kept += c;
 	if (kept.empty() || !isalpha((unsigned char)kept[0])) return fallback;
 	bool restSmall = true;
 	for (size_t i = 1; i < kept.size(); i++) if (isupper((unsigned char)kept[i])) restSmall = false;
-	return kept.size() == 1 || restSmall ? kept : kept.substr(0, 1);
+	if (kept.size() == 1 || restSmall) return kept;
+	size_t digits = kept.size();
+	while (digits > 1 && isdigit((unsigned char)kept[digits - 1])) digits--;
+	return kept.substr(0, 1) + kept.substr(digits);
 }
 
 int gTab = 0;   // the tab last shown, for next time
@@ -120,8 +125,15 @@ struct TruthWindow {
 		return u;
 	}
 	std::string tableText(char sep) const {
+		// A CSV's column names quoted when they need it ("A, B", Sum "S").
+		auto field = [sep](const std::string& f) {
+			if (sep != ',' || f.find_first_of(",\"\r\n") == std::string::npos) return f;
+			std::string q = "\"";
+			for (char ch : f) q += ch == '"' ? std::string("\"\"") : std::string(1, ch);
+			return q + "\"";
+		};
 		std::string s;
-		for (size_t c = 0; c < names.size(); c++) s += (c ? std::string(1, sep) : "") + names[c];
+		for (size_t c = 0; c < names.size(); c++) s += (c ? std::string(1, sep) : "") + field(names[c]);
 		s += "\n";
 		for (const std::string& row : rows) {
 			for (size_t c = 0; c < row.size(); c++) { if (c) s += sep; s += row[c]; }
@@ -130,16 +142,28 @@ struct TruthWindow {
 		return s;
 	}
 	std::string formulasForBuilding() const {
+		// Every name once, inputs and outputs alike, and none a formula's word.
+		std::vector<std::string> taken;
+		auto unused = [&](const std::string& name, const std::string& fallback, const char* numbered) {
+			auto usable = [&](const std::string& n) {
+				std::string up = n;
+				for (char& c : up) c = (char)toupper((unsigned char)c);
+				return up != "AND" && up != "OR" && up != "NOT" && up != "XOR" && std::find(taken.begin(), taken.end(), n) == taken.end();
+			};
+			std::string out = usable(name) ? name : fallback;
+			for (int k = 1; !usable(out); k++) out = format(numbered, k);
+			taken.push_back(out);
+			return out;
+		};
 		std::vector<std::string> ins;
 		for (int i = 0; i < inputs; i++) {
-			std::string name = formulaName(names[i], std::string(1, (char)('A' + i)));
-			if (std::find(ins.begin(), ins.end(), name) != ins.end()) name = std::string(1, (char)('A' + i));
-			ins.push_back(name);
+			const std::string letter(1, (char)('A' + i));
+			ins.push_back(unused(formulaName(names[i], letter), letter, "X%d"));
 		}
 		std::string out;
 		for (int k = 0; k < outputs(); k++) {
-			std::string o = formulaName(names[inputs + k], outputs() == 1 ? "F" : format("F%d", k + 1));
-			if (std::find(ins.begin(), ins.end(), o) != ins.end()) o = format("F%d", k + 1);
+			const std::string fallback = outputs() == 1 ? "F" : format("F%d", k + 1);
+			const std::string o = unused(formulaName(names[inputs + k], fallback), fallback, "Y%d");
 			std::string list;
 			for (size_t i = 0; i < ins.size(); i++) list += (i ? "," : "") + ins[i];
 			out += (k ? "\n" : "") + o + "(" + list + ") = " + formula::simplest(true, inputs, values(k)).text(ins);

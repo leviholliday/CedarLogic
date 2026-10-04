@@ -93,6 +93,7 @@ private:
 	static gboolean scrollCb(GtkWidget*, GdkEventScroll*, gpointer);
 	static gboolean keyCb(GtkWidget*, GdkEventKey*, gpointer);
 	static gboolean deleteCb(GtkWidget*, GdkEvent*, gpointer);
+	static void destroyCb(GtkWidget*, gpointer);
 	static void changedCb(GtkEditable*, gpointer);
 };
 

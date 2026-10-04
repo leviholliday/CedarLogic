@@ -106,7 +106,10 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			gchar* t = g_strstrip(g_strdup(gtk_entry_get_text(GTK_ENTRY(cellEntry))));
 			char* end = nullptr;
 			const unsigned long v = strtoul(t, &end, decimal ? 10 : 16);
-			if (*t && end && *end == 0) {
+			// Not negative (strtoul takes -1 as the largest number), and no
+			// wider than the data bus: the memory would never give it out.
+			const bool fits = *t != '-' && *t != '+' && (dataBits >= (int)(sizeof v * 8) || (v >> dataBits) == 0);
+			if (*t && end && *end == 0 && fits) {
 				if (v != cl_ram_value(doc, gate, addr)) {
 					remember(addr, v);
 					cl_ram_set(doc, gate, addr, v);

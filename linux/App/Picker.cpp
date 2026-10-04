@@ -2,6 +2,7 @@
 
 #include "Picker.h"
 #include "Anim.h"
+#include "Sheet.h"
 
 #include <algorithm>
 #include <cmath>
@@ -275,6 +276,7 @@ gboolean Picker::keyCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 	const bool mine = k == GDK_KEY_Up || k == GDK_KEY_Down || k == GDK_KEY_Page_Up || k == GDK_KEY_Page_Down || k == GDK_KEY_Return ||
 	                  k == GDK_KEY_KP_Enter || k == GDK_KEY_Escape || ctrl || k == GDK_KEY_Delete;
 	if (!mine) return FALSE;
+	if (!ctrl && Sheet::inputMethodTakes(p->window, e)) return TRUE;
 	bool used = false;
 	guarded("a key", [&] { used = p->key(k, ctrl); });
 	return used;
@@ -283,6 +285,12 @@ gboolean Picker::keyCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 gboolean Picker::deleteCb(GtkWidget*, GdkEvent*, gpointer self) {
 	static_cast<Picker*>(self)->close();
 	return TRUE;
+}
+
+void Picker::destroyCb(GtkWidget*, gpointer self) {
+	Picker* p = static_cast<Picker*>(self);
+	p->window = p->entry = p->area = nullptr;
+	p->close();
 }
 
 void Picker::changedCb(GtkEditable*, gpointer self) {
@@ -333,6 +341,8 @@ void Picker::run(GtkWindow* owner) {
 	}
 	g_signal_connect(window, "key-press-event", G_CALLBACK(keyCb), this);
 	g_signal_connect(window, "delete-event", G_CALLBACK(deleteCb), this);
+	// Its window going with the owner's (the app quitting) ends it too.
+	g_signal_connect(window, "destroy", G_CALLBACK(destroyCb), this);
 	reload();
 	gtk_widget_show_all(window);
 	anim::fadeIn(window);
@@ -341,6 +351,8 @@ void Picker::run(GtkWindow* owner) {
 	if (!done) g_main_loop_run(loop);
 	g_main_loop_unref(loop);
 	loop = nullptr;
+	if (window == nullptr) return;   // gone with its owner
+	g_signal_handlers_disconnect_by_data(window, this);
 	gtk_widget_destroy(window);
 	window = entry = area = nullptr;
 	gtk_window_present(owner);

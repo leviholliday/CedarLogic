@@ -775,11 +775,21 @@ void show(CircuitWindow* from, int page) {
 			} else {
 				const std::string accel = shortcuts::fromEvent(e);
 				if (accel.empty()) return TRUE;   // a modifier on its own: keep waiting
+				// The fixed keys would never reach it (or a menu's would stop them working).
+				const std::string kept = shortcuts::reserved(e);
+				if (!kept.empty()) {
+					gtk_label_set_text(GTK_LABEL(s->shortcutNote),
+					                   (shortcuts::label(accel) + " is kept for " + kept + ". Press other keys, or Escape.").c_str());
+					return TRUE;
+				}
 				const std::string loser = shortcuts::set(*a, accel);
 				if (!loser.empty())
-					if (const shortcuts::Action* l = shortcuts::find(loser))
+					if (const shortcuts::Action* l = shortcuts::find(loser)) {
+						const std::string left = shortcuts::keys(*l);
 						gtk_label_set_text(GTK_LABEL(s->shortcutNote),
-						                   (shortcuts::label(accel) + " was “" + l->name + "”; that one has no shortcut now.").c_str());
+						                   (shortcuts::label(accel) + " was “" + l->name + "”; " +
+						                    (left.empty() ? std::string("that one has no shortcut now.") : "that one keeps " + shortcuts::label(left) + ".")).c_str());
+					}
 			}
 			s->recording = nullptr;
 			if (CircuitWindow* f = front()) shortcuts::apply(f->application());

@@ -347,6 +347,8 @@ struct CheckResult {
 gboolean pollCheck(gpointer data) {
 	CheckResult* r = static_cast<CheckResult*>(data);
 	if (!r->done.load()) return G_SOURCE_CONTINUE;
+	// Not over a dialog: restarting would close the windows under it.
+	if (!r->interactive && gtk_grab_get_current() != nullptr) return G_SOURCE_CONTINUE;
 	r->worker.join();
 	// Until the question and any install are over: no second check meanwhile
 	// (the daily one, Check for Updates).

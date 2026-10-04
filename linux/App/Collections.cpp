@@ -57,12 +57,22 @@ std::string newId() {
 	return std::string(buf) + format("-%d", 1000 + g_random_int_range(0, 99000));
 }
 
-// Into the desktop's trash, so a mistake can be taken back.
+// Into the desktop's trash, so a mistake can be taken back; where there's
+// no trash, into a hidden .Trash beside it (as Your Circuits does).
 bool recycle(const std::string& folder) {
 	GFile* f = g_file_new_for_path(folder.c_str());
 	const bool ok = g_file_trash(f, nullptr, nullptr) != FALSE;
 	g_object_unref(f);
-	return ok;
+	if (ok) return true;
+	gchar* parent = g_path_get_dirname(folder.c_str());
+	gchar* name = g_path_get_basename(folder.c_str());
+	const std::string trash = std::string(parent) + "/.Trash";
+	g_free(parent);
+	g_mkdir_with_parents(trash.c_str(), 0755);
+	std::string dest = trash + "/" + name;
+	for (int n = 2; fileExists(dest); n++) dest = trash + "/" + name + format(" %d", n);
+	g_free(name);
+	return ::g_rename(folder.c_str(), dest.c_str()) == 0;
 }
 
 std::vector<std::string> folders(const std::string& root) {
@@ -290,7 +300,8 @@ void showPicker(CircuitWindow* from) {
 			}
 		} else if (b == 1) {
 			if (askConfirm(GTK_WINDOW(pk.window), "Delete “" + t.name + "”?", "It goes to the trash. Circuits you made from it aren't touched.", "Delete", "Cancel", true)) {
-				recycle(t.folder);
+				if (!recycle(t.folder))
+					showMessage(GTK_WINDOW(pk.window), GTK_MESSAGE_WARNING, "Couldn't delete “" + t.name + "”", "Its folder couldn't be moved.");
 				mine = yours();
 				pk.reload();
 			}
@@ -457,7 +468,10 @@ void deleteCb(GtkMenuItem*, gpointer data) {
 	if (!askConfirm(m->owner, "Delete \u201C" + p.name + "\u201D?",
 	              "It goes from My Parts to the trash. Circuits that already use it keep their copy.", "Delete", "Cancel", true))
 		return;
-	recycle(p.folder);
+	if (!recycle(p.folder)) {
+		showMessage(m->owner, GTK_MESSAGE_WARNING, "Couldn't delete \u201C" + p.name + "\u201D", "Its folder couldn't be moved.");
+		return;
+	}
 	forget(m->gate);
 	for (CircuitWindow* w : circuitWindows()) w->partsChanged();
 }

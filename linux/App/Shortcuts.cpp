@@ -38,6 +38,12 @@ std::vector<std::string> split(const std::string& s) {
 	return out;
 }
 
+std::string join(const std::vector<std::string>& keys) {
+	std::string out;
+	for (const std::string& k : keys) out += (out.empty() ? "" : "|") + k;
+	return out;
+}
+
 // Both the same key, whatever the case and spelling.
 bool same(const std::string& a, const std::string& b) {
 	guint ka = 0, kb = 0;
@@ -47,10 +53,56 @@ bool same(const std::string& a, const std::string& b) {
 	return ka != 0 && gdk_keyval_to_lower(ka) == gdk_keyval_to_lower(kb) && ma == mb;
 }
 
+// A changed action's keys are kept like the defaults, separated by '|'.
 std::vector<std::string> keyList(const Action& a) {
 	auto it = overrides().find(a.id);
-	if (it != overrides().end()) return it->second.empty() ? std::vector<std::string>() : std::vector<std::string>{ it->second };
+	if (it != overrides().end()) return split(it->second);
 	return split(a.keys);
+}
+
+std::string accelName(guint keyval, guint state) {
+	const GdkModifierType mods = (GdkModifierType)(state & gtk_accelerator_get_default_mod_mask());
+	gchar* name = gtk_accelerator_name(gdk_keyval_to_lower(keyval), mods);
+	std::string out = name ? name : "";
+	g_free(name);
+	return out;
+}
+
+// The same physical key on a Latin layout, when the one in use writes
+// another script (Russian, Greek, Hebrew...), so R is still Rotate there.
+// 0 when the key is Latin already (é and ß too), isn't a character, or no
+// layout the desktop has gives it a Latin letter.
+guint latinKeyval(const GdkEventKey* e) {
+	if (gdk_keyval_to_unicode(e->keyval) < 0x370) return 0;   // Greek is the first script after Latin's
+	GdkKeymap* keymap = gdk_keymap_get_for_display(e->window ? gdk_window_get_display(e->window) : gdk_display_get_default());
+	GdkKeymapKey* entries = nullptr;
+	guint* keyvals = nullptr;
+	gint n = 0;
+	if (keymap == nullptr || !gdk_keymap_get_entries_for_keycode(keymap, e->hardware_keycode, &entries, &keyvals, &n)) return 0;
+	guint out = 0;
+	for (gint i = 0; i < n && out == 0; i++) {
+		if (keyvals[i] <= 0x20 || keyvals[i] >= 0x7f) continue;   // Latin keyvals are their ASCII codes
+		// That layout, with the same Shift as now.
+		guint kv = 0;
+		if (gdk_keymap_translate_keyboard_state(keymap, e->hardware_keycode, (GdkModifierType)e->state, entries[i].group, &kv,
+		                                        nullptr, nullptr, nullptr) &&
+		    kv > 0x20 && kv < 0x7f)
+			out = kv;
+	}
+	g_free(entries);
+	g_free(keyvals);
+	return out;
+}
+
+bool isModifier(guint keyval) {
+	switch (keyval) {
+	case GDK_KEY_Shift_L: case GDK_KEY_Shift_R: case GDK_KEY_Control_L: case GDK_KEY_Control_R:
+	case GDK_KEY_Alt_L: case GDK_KEY_Alt_R: case GDK_KEY_Super_L: case GDK_KEY_Super_R:
+	case GDK_KEY_Meta_L: case GDK_KEY_Meta_R: case GDK_KEY_ISO_Level3_Shift:
+		return true;
+	default:
+		return false;
+	}
 }
 
 }  // namespace
@@ -126,14 +178,40 @@ bool anyCustom() { return !overrides().empty(); }
 std::string set(const Action& a, const std::string& accel) {
 	std::string loser;
 	if (!accel.empty()) {
+		// Whoever had the key loses just that one, and keeps any others.
 		for (const Action& o : all()) {
 			if (&o == &a) continue;
-			for (const std::string& k : keyList(o))
-				if (same(k, accel)) { overrides()[o.id] = ""; loser = o.id; }
+			std::vector<std::string> kept;
+			bool had = false;
+			for (const std::string& k : keyList(o)) {
+				if (same(k, accel)) had = true;
+				else kept.push_back(k);
+			}
+			if (!had) continue;
+			overrides()[o.id] = join(kept);
+			loser = o.id;
 		}
 	}
-	if (accel == std::string(a.keys)) overrides().erase(a.id);
-	else overrides()[a.id] = accel;
+	// One of the action's own keys: it has all its keys back (bar any another
+	// action has taken), the one pressed first.
+	const std::vector<std::string> defaults = split(a.keys);
+	bool own = false;
+	for (const std::string& k : defaults) own = own || same(k, accel);
+	if (own) {
+		std::vector<std::string> keys = { accel };
+		for (const std::string& k : defaults) {
+			if (same(k, accel)) continue;
+			bool taken = false;
+			for (const Action& o : all())
+				if (&o != &a)
+					for (const std::string& ok : keyList(o)) taken = taken || same(ok, k);
+			if (!taken) keys.push_back(k);
+		}
+		if (join(keys) == join(defaults)) overrides().erase(a.id);
+		else overrides()[a.id] = join(keys);
+	} else {
+		overrides()[a.id] = accel;
+	}
 	save();
 	return loser;
 }
@@ -160,27 +238,50 @@ void apply(GtkApplication* app) {
 }
 
 std::string fromEvent(const GdkEventKey* e) {
-	switch (e->keyval) {
-	case GDK_KEY_Shift_L: case GDK_KEY_Shift_R: case GDK_KEY_Control_L: case GDK_KEY_Control_R:
-	case GDK_KEY_Alt_L: case GDK_KEY_Alt_R: case GDK_KEY_Super_L: case GDK_KEY_Super_R:
-	case GDK_KEY_Meta_L: case GDK_KEY_Meta_R: case GDK_KEY_ISO_Level3_Shift:
-		return "";
-	default: break;
-	}
-	const GdkModifierType mods = (GdkModifierType)(e->state & gtk_accelerator_get_default_mod_mask());
-	gchar* name = gtk_accelerator_name(gdk_keyval_to_lower(e->keyval), mods);
-	std::string out = name ? name : "";
-	g_free(name);
-	return out;
+	if (isModifier(e->keyval)) return "";
+	const guint latin = latinKeyval(e);
+	return accelName(latin ? latin : e->keyval, e->state);
 }
 
 std::string canvasAction(const GdkEventKey* e) {
-	const std::string pressed = fromEvent(e);
-	if (pressed.empty()) return "";
-	for (const Action& a : all()) {
-		if (a.gaction) continue;
-		for (const std::string& k : keyList(a))
-			if (same(k, pressed)) return a.id;
+	if (isModifier(e->keyval)) return "";
+	// The key as a Latin layout has it, then as it is (a key recorded on
+	// another script before).
+	const std::string tries[] = { fromEvent(e), accelName(e->keyval, e->state) };
+	for (const std::string& pressed : tries) {
+		if (pressed.empty()) continue;
+		for (const Action& a : all()) {
+			if (a.gaction) continue;
+			for (const std::string& k : keyList(a))
+				if (same(k, pressed)) return a.id;
+		}
+	}
+	return "";
+}
+
+std::string reserved(const GdkEventKey* e) {
+	const guint k = e->keyval;
+	const bool bare = (e->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK | GDK_SUPER_MASK | GDK_META_MASK)) == 0;
+	const bool tab = k == GDK_KEY_Tab || k == GDK_KEY_ISO_Left_Tab || k == GDK_KEY_KP_Tab;
+	// The window's, before any shortcut.
+	if (tab && (e->state & GDK_CONTROL_MASK)) return "switching tabs";
+	// The canvas's, before its single keys (and a menu's shortcut would take
+	// them from it).
+	if (!bare) return "";
+	if (k == GDK_KEY_space) return "moving around and zooming to fit";
+	if (k == GDK_KEY_Left || k == GDK_KEY_Right || k == GDK_KEY_Up || k == GDK_KEY_Down || k == GDK_KEY_KP_Left ||
+	    k == GDK_KEY_KP_Right || k == GDK_KEY_KP_Up || k == GDK_KEY_KP_Down)
+		return "nudging and moving around";
+	if (k == GDK_KEY_Return || k == GDK_KEY_KP_Enter || tab) return "Tidy Up's preview";
+	if (k == GDK_KEY_KP_Delete) return "deleting";
+	if (k == GDK_KEY_question || (gdk_keyval_to_lower(k) == GDK_KEY_slash && (e->state & GDK_SHIFT_MASK))) return "the list of shortcuts";
+	if (e->state & GDK_SHIFT_MASK) {
+		guint plain = 0;
+		GdkKeymap* keymap = gdk_keymap_get_for_display(e->window ? gdk_window_get_display(e->window) : gdk_display_get_default());
+		if (keymap && gdk_keymap_translate_keyboard_state(keymap, e->hardware_keycode, (GdkModifierType)0, e->group, &plain, nullptr,
+		                                                  nullptr, nullptr) &&
+		    plain >= GDK_KEY_0 && plain <= GDK_KEY_9)
+			return "the gate categories";
 	}
 	return "";
 }

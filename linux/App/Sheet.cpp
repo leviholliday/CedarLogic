@@ -151,8 +151,26 @@ gboolean Sheet::scrollCb(GtkWidget*, GdkEventScroll* e, gpointer self) {
 	return TRUE;
 }
 
+bool Sheet::inputMethodTakes(GtkWidget* window, GdkEventKey* e) {
+	switch (e->keyval) {
+	case GDK_KEY_Return: case GDK_KEY_KP_Enter: case GDK_KEY_ISO_Enter: case GDK_KEY_Escape:
+	case GDK_KEY_Up: case GDK_KEY_Down: case GDK_KEY_Page_Up: case GDK_KEY_Page_Down:
+		break;
+	default:
+		return false;   // the rest reach the field as usual
+	}
+	GtkWidget* focus = window ? gtk_window_get_focus(GTK_WINDOW(window)) : nullptr;
+	if (focus == nullptr || !gtk_widget_is_visible(focus)) return false;
+	if (GTK_IS_ENTRY(focus) && gtk_editable_get_editable(GTK_EDITABLE(focus)))
+		return gtk_entry_im_context_filter_keypress(GTK_ENTRY(focus), e) != FALSE;
+	if (GTK_IS_TEXT_VIEW(focus) && gtk_text_view_get_editable(GTK_TEXT_VIEW(focus)))
+		return gtk_text_view_im_context_filter_keypress(GTK_TEXT_VIEW(focus), e) != FALSE;
+	return false;
+}
+
 gboolean Sheet::keyCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 	Sheet* s = static_cast<Sheet*>(self);
+	if (inputMethodTakes(s->window, e)) return TRUE;
 	if (s->onKey && guarded("a key", [&] { return s->onKey(*s, e->keyval, e->state); })) { s->redraw(); return TRUE; }
 	if (e->keyval == GDK_KEY_Escape) { s->close(); return TRUE; }
 	return FALSE;

@@ -86,6 +86,11 @@ void FindBar::run(bool jump) {
 	if (!q.empty()) {
 		std::vector<CLFindResult> out(500);
 		total = cl_find(win->document(), q.c_str(), out.data(), (int)out.size());
+		// More than that: again with room for them all, so each can be stepped to.
+		if (total > (int)out.size()) {
+			out.resize((size_t)total);
+			total = cl_find(win->document(), q.c_str(), out.data(), (int)out.size());
+		}
 		for (int i = 0; i < std::min(total, (int)out.size()); i++)
 			hits.push_back({ out[i].page, out[i].gate, out[i].x, out[i].y, out[i].text ? out[i].text : "", out[i].kind ? out[i].kind : "" });
 	}

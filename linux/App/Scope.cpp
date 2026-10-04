@@ -195,7 +195,10 @@ ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
 		else if (e->direction == GDK_SCROLL_UP) d = -1;
 		else if (e->direction == GDK_SCROLL_DOWN) d = 1;
 		if (e->state & GDK_CONTROL_MASK) {
-			s->pointsPerStep = d < 0 ? std::min(48.0f, s->pointsPerStep * 1.25f) : std::max(0.25f, s->pointsPerStep / 1.25f);
+			// A wheel's click is a quarter; a touchpad zooms as far as it moves
+			// (and its lift-off, which moves nothing, not at all).
+			if (d == 0) return TRUE;
+			s->pointsPerStep = std::min(48.0f, std::max(0.25f, s->pointsPerStep * (float)std::pow(1.25, -d)));
 		} else {
 			const float lanes = s->shownSignals().size() * kLane, view = gtk_widget_get_allocated_height(a) - kHeader - kRuler;
 			s->scrollY = std::max(0.0f, std::min(s->scrollY + (float)d * 40, std::max(0.0f, lanes - view)));
@@ -435,8 +438,14 @@ cairo_surface_t* ScopeWindow::timingImage() {
 	const std::vector<std::string> names = signals();
 	float tw, th, pps;
 	timingSize(count, (int)sigs.size(), tw, th, pps);
-	const int scale = 2;
+	// Sharp at 2x, but a long recording only as large as an image can be
+	// (32767 pixels a side).
+	const double scale = std::min(2.0, 32000.0 / std::max(tw, th));
 	cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)std::ceil(tw * scale), (int)std::ceil(th * scale));
+	if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(s);
+		return nullptr;
+	}
 	cairo_t* cr = cairo_create(s);
 	cairo_scale(cr, scale, scale);
 	fillRect(cr, rectF(0, 0, tw, th), colorF(1, 1, 1));
@@ -467,16 +476,9 @@ void ScopeWindow::exportMenu(GdkEvent* e) {
 				owner->note("Timing diagram copied. Paste it into your report.");
 			}
 		} else {
-			GtkFileChooserNative* c = gtk_file_chooser_native_new("Save Timing Diagram", GTK_WINDOW(gtk_widget_get_toplevel(area)), GTK_FILE_CHOOSER_ACTION_SAVE, "_Save",
-			                                                      "_Cancel");
-			gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(c), TRUE);
-			gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(c), (owner->titleText() + " timing.png").c_str());
-			std::string file;
-			if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(c)) == GTK_RESPONSE_ACCEPT)
-				if (gchar* f = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(c))) { file = f; g_free(f); }
-			g_object_unref(c);
+			const std::string file = chooseImageFile(GTK_WINDOW(gtk_widget_get_toplevel(area)), "Save Timing Diagram", "_Save",
+			                                         safeFileName(owner->titleText() + " timing") + ".png", false);
 			if (!file.empty()) {
-				if (file.size() < 4 || file.compare(file.size() - 4, 4, ".png") != 0) file += ".png";
 				if (cairo_surface_write_to_png(img, file.c_str()) != CAIRO_STATUS_SUCCESS)
 					showMessage(GTK_WINDOW(gtk_widget_get_toplevel(area)), GTK_MESSAGE_WARNING, "Couldn't save it there", "Try another folder.");
 			}

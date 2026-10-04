@@ -19,6 +19,7 @@
 #include "Window.h"
 
 #include <algorithm>
+#include <clocale>
 #include <cstring>
 #include <functional>
 
@@ -439,6 +440,10 @@ namespace {
 
 void startupCb(GApplication* gapp, gpointer) {
 	GtkApplication* app = GTK_APPLICATION(gapp);
+	// GTK set every part of the locale from the desktop's; numbers go back
+	// to "C", so 1.5 reads and writes as 1.5 everywhere (circuit files, the
+	// engine's settings, CSS) in German, French and other comma locales.
+	setlocale(LC_NUMERIC, "C");
 	sturdyUiFont();
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
