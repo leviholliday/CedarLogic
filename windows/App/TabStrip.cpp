@@ -11,6 +11,15 @@
 namespace {
 const float kCardH = 26, kMinW = 72, kMaxW = 220, kGap = 4, kCaptionW = 46;
 const int kEditId = 1;
+const UINT_PTR kBackTimer = 1;
+const double kBackTime = 0.18;
+
+// Windows' "Show animations in Windows", off: things change at once.
+bool reduceMotion() {
+	BOOL animations = TRUE;
+	SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+	return !animations;
+}
 }
 
 TabStrip::TabStrip(CircuitWindow* window, HWND parent, int paneIndex) : win(window), pane(paneIndex) {
@@ -34,6 +43,12 @@ void TabStrip::setTitleRow(bool on) {
 }
 
 bool TabStrip::activeSide() const { return !win->splitOpen() || win->focusedPane() == pane; }
+
+float TabStrip::backAmount() const {
+	if (backStart < 0) return backTo;
+	const double t = std::min(1.0, (nowSeconds() - backStart) / kBackTime);
+	return backFrom + (backTo - backFrom) * (float)(1 - std::pow(1 - t, 3));
+}
 
 void TabStrip::layout(float w) {
 	pages = win->panePages(pane);
@@ -147,9 +162,17 @@ void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 	// A hairline under the strip -- or, in a split, an accent rail under the
 	// side you're in, and the other side stepping back.
 	const bool split = win->splitOpen();
-	if (split && activeSide()) fillRect(rt, D2D1::RectF(0, h - 2, w, h), c.accent());
-	else fillRect(rt, D2D1::RectF(0, h - 1, w, h), c.hairline());
-	if (split && !activeSide()) fillRect(rt, D2D1::RectF(0, 0, w, h - 1), withAlpha(c.tabBar(), 0.45f));
+	const float want = split && !activeSide() ? 1.0f : 0.0f;
+	if (want != backTo) {
+		backFrom = backAmount();
+		backTo = want;
+		backStart = reduceMotion() ? -1 : nowSeconds();
+		if (backStart >= 0) SetTimer(hwnd, kBackTimer, 15, nullptr);
+	}
+	const float back = backAmount();
+	fillRect(rt, D2D1::RectF(0, h - 1, w, h), c.hairline());
+	if (split && back < 0.99f) fillRect(rt, D2D1::RectF(0, h - 2, w, h), withAlpha(c.accent(), 1 - back));
+	if (back > 0.01f) fillRect(rt, D2D1::RectF(0, 0, w, h - 1), withAlpha(c.tabBar(), 0.45f * back));
 
 	// Focus mode: the window's own buttons, as the toolbar draws them.
 	if (capsShown) {
@@ -463,6 +486,15 @@ LRESULT CALLBACK TabStrip::editProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT
 
 LRESULT TabStrip::message(UINT msg, WPARAM wp, LPARAM lp, bool& handled) {
 	handled = false;
+	if (msg == WM_TIMER && wp == kBackTimer) {
+		if (backStart < 0 || nowSeconds() - backStart >= kBackTime) {
+			backStart = -1;
+			KillTimer(hwnd, kBackTimer);
+		}
+		redraw();
+		handled = true;
+		return 0;
+	}
 	if (msg == WM_CTLCOLOREDIT && (HWND)lp == edit) {
 		// The front card's colour, under the name being typed.
 		const Chrome c = chrome();

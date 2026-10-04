@@ -62,6 +62,10 @@ private:
 	bool plusHot = false, maxHot = false, maxPressed = false;
 	bool dragging = false;
 	float pressX = 0, pressY = 0, grabOffset = 0, dragX = 0;
+	// The other side of a split steps back (0 in front, 1 back), easing.
+	float backFrom = 0, backTo = 0;
+	double backStart = -1;
+	float backAmount() const;
 	// Renaming in place.
 	HWND edit = nullptr;
 	HFONT editFont = nullptr;
