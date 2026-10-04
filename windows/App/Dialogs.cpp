@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -1546,8 +1547,11 @@ void showRamEditor(CircuitWindow* w, long gate) {
 		if (keep) {
 			const std::string t = trimmed(windowText(box));
 			char* end = nullptr;
+			// No wider than a word, and not negative (strtoul would wrap -1).
+			const unsigned long most = dataBits >= (int)(sizeof(unsigned long) * 8) ? ULONG_MAX : (1UL << std::max(dataBits, 0)) - 1;
+			errno = 0;
 			const unsigned long v = strtoul(t.c_str(), &end, decimal ? 10 : 16);
-			if (!t.empty() && end && *end == 0) {
+			if (!t.empty() && t[0] != '-' && t[0] != '+' && end && *end == 0 && errno != ERANGE && v <= most) {
 				cl_ram_set(doc, gate, (unsigned long)addr, v);
 				w->edited();
 			} else if (!t.empty()) {
