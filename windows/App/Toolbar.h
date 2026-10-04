@@ -1,7 +1,11 @@
-// The toolbar, drawn as the Mac app's (CLToolbar, its Classic style): in the
-// title bar's place, the circuit's name with its menu, the tools in soft
-// capsules, the zoom and the simulation speed, ••• for every menu, and the
-// window's own minimize, maximize and close buttons at the right.
+// The toolbar, drawn as the Mac app's (CLToolbar) in its three styles:
+// Seamless (the default: one surface with the canvas, tools quiet until you
+// point at them), Classic (tools in soft capsules on their own bar) and
+// Minimal (the essentials and the circuit's name; the rest is behind •••).
+// In the title bar's place: the circuit's name with its menu, the tools, the
+// zoom and the simulation speed, ••• for every menu, and the window's own
+// minimize, maximize and close buttons at the right. Settings > Toolbar
+// picks the style and hides groups of tools.
 //
 // Where nothing is under the pointer, the bar is the window's title bar: it
 // drags the window, double-clicks maximize, and right-clicks bring up the
@@ -16,6 +20,13 @@
 #include <vector>
 
 class CircuitWindow;
+
+// Tool groups that can be hidden, one bit each in prefs().toolbarHidden (the
+// Mac's ToolGroup).
+enum ToolGroup { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTheme, TGTab, TGFeedback, TGCount };
+const char* toolGroupName(int g);
+// The styles (prefs().toolbarStyle), as the Mac numbers them.
+enum ToolbarStyle { TSClassic = 0, TSMinimal = 2, TSSeamless = 3 };
 
 class Toolbar : public Drawn {
 public:
@@ -34,6 +45,12 @@ public:
 	// it isn't shown (the bar left it out at this width).
 	static const int kMinimize = -1, kClose = -2;
 	bool buttonPoint(int command, POINT& p);
+	// Whether the style in use has that button at all (Minimal leaves most
+	// to •••), shown at this width or not.
+	bool hasButton(int command);
+	// For Settings' pictures of each style: drawn in `style`, w x h points,
+	// without the window's buttons and not clickable.
+	void paintPicture(ID2D1RenderTarget* rt, float w, float h, int style);
 
 protected:
 	void paint(ID2D1RenderTarget* rt, float w, float h) override;
@@ -50,7 +67,8 @@ private:
 	struct Item {
 		Kind kind;
 		int command;           // for a Button
-		int group;             // capsules: items with the same group share one (-1 none)
+		int group;             // its ToolGroup: hidden together, a capsule in Classic (-1: always there)
+		bool right;            // laid out from the right edge
 		D2D1_RECT_F rect{};
 		bool shown = true;
 	};
@@ -62,9 +80,12 @@ private:
 	bool draggingSpeed = false;
 	bool relayout = true;
 	float lastW = 0;
+	int laidStyle = -1;
+	std::string laidTitle;   // the name (and Minimal's page) it was laid out for
 
-	void build();
-	void layout(float w, float h);
+	void build(int style, bool live);
+	void layout(float w, float h, int style, bool live = true);
+	void draw(ID2D1RenderTarget* rt, float w, float h, int style, bool live);
 	int itemAt(float x, float y) const;
 	wchar_t iconFor(const Item& it) const;
 	std::string tipFor(const Item& it) const;

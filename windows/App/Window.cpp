@@ -786,6 +786,7 @@ void CircuitWindow::prefsChanged() {
 	ShowWindow(paletteHost, prefs().showPalette ? SW_SHOW : SW_HIDE);
 	ShowWindow(statusBar, prefs().showStatus ? SW_SHOW : SW_HIDE);
 	layout();
+	if (toolbar) toolbar->layoutNow();   // its style, its groups, its tips' keys
 	themeChanged();
 }
 

@@ -49,6 +49,9 @@ std::string gPlace;     // --place: a gate by library name, put on the page and 
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
+int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar in that style, for this run
+
+Prefs gPrefsBefore;     // the settings as loaded: put back after a test run changed them for itself
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -74,7 +77,11 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 		writeOut(strf("%s %s\n", ok ? "wrote" : "couldn't write", gTiming.c_str()));
 	}
 	// A dialog is still open (its own loop is running): just stop.
-	if (gDialog) { prefs().save(); ExitProcess((UINT)gExitCode); }
+	if (gDialog) {
+		if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
+		prefs().save();
+		ExitProcess((UINT)gExitCode);
+	}
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gExitCode);
 }
@@ -90,7 +97,6 @@ size_t gClickNext = 0;
 long gClickBefore = 0;
 int gClickFailures = 0;
 bool gClickClosing = false;   // the drawn Close was clicked: the window should go
-Prefs gPrefsBefore;           // put back afterwards (the test widens the window)
 
 void report(const char* result, const std::string& what) {
 	writeOut(strf("%s  %s\n", result, what.c_str()));
@@ -138,6 +144,8 @@ const std::vector<ClickCase>& clickCases() {
 		  [](CircuitWindow* w) -> long { Canvas* c = w->currentCanvas(); return c ? c->zoomPercent() : 0; },
 		  [](long before, long after) { return after > before; }, nullptr },
 		{ "New Tab", CMD_NEW_TAB, false, [](CircuitWindow* w) -> long { return w->tabCount(); }, oneMore, nullptr },
+		{ "Pause", CMD_RUNNING, false, [](CircuitWindow* w) -> long { return w->running(); }, flipped, nullptr },
+		{ "Resume", CMD_RUNNING, false, [](CircuitWindow* w) -> long { return w->running(); }, flipped, nullptr },
 		{ "Simulation View on", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
 		{ "Simulation View off", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
 		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
@@ -185,6 +193,11 @@ int clickTestStep() {
 		if (Canvas* cv = w->currentCanvas()) UpdateWindow(cv->widget());
 		gClickBefore = c.state(w);
 		if (clickButton(w, c.button, c.name)) return 500;
+		// Minimal leaves most tools to the ••• menu.
+		if (w->toolbarWidget() && !w->toolbarWidget()->hasButton(c.button)) {
+			report("SKIP", strf("%s: not in this style of toolbar", c.name));
+			continue;
+		}
 		const int width = w->toolbarWidget() ? (int)w->toolbarWidget()->width() : 0;
 		report(c.mayBeHidden ? "SKIP" : "FAIL", strf("%s: not on the toolbar at this width (%d points)", c.name, width));
 	}
@@ -216,6 +229,8 @@ void CALLBACK clickTestStart(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w == nullptr) { report("FAIL", "no window opened"); PostQuitMessage(1); return; }
 	gClickWindow = w->window();
 	SetForegroundWindow(gClickWindow);
+	const int style = prefs().toolbarStyle;
+	writeOut(strf("click test: the %s toolbar\n", style == TSClassic ? "Classic" : style == TSMinimal ? "Minimal" : "Seamless"));
 	// As wide as the whole bar needs (a narrow bar leaves out the tools on
 	// its left), past the screen's edge if it must: not asked first, Windows
 	// doesn't hold the window to the screen's size (CI's is 1024 wide).
@@ -506,6 +521,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
 		if (a == "--help-page" && i + 1 < argc) { gHelpPage = U(argv[++i]); continue; }
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
+		if (a == "--toolbar-style" && i + 1 < argc) {
+			const std::string v = U(argv[++i]);
+			gToolbarStyle = v == "classic" ? TSClassic : v == "minimal" ? TSMinimal : TSSeamless;
+			continue;
+		}
 		if (a == "--dialog" && i + 1 < argc) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
@@ -527,6 +547,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	prefs().load();
 	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
+	if (gToolbarStyle >= 0) prefs().toolbarStyle = gToolbarStyle;
 	if (!gFormula.empty()) prefs().lastFormula = gFormula;
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
@@ -618,6 +639,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	const int clickResult = gClickTest ? finishClickTest() : 0;
 	updater::shutdown();
+	if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;
