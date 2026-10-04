@@ -1579,6 +1579,9 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 // Circuits save themselves, so closing doesn't ask: it saves. Only when that
 // fails is there a question.
 bool CircuitWindow::confirmClose() {
+	// A tab being renamed keeps its new name (a click on Close doesn't take
+	// the keyboard from its box).
+	for (TabStrip* t : strips) if (t) t->commitRename(true, false);
 	if (!isDirty()) return true;
 	if (saveQuietly(false)) return true;
 	return askYesNo(hwnd, "This circuit couldn't be saved", "Close it anyway? The changes since it last saved will be lost.");
