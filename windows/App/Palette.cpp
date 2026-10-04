@@ -393,6 +393,13 @@ void GatePalette::dragTo() {
 	win->pointerMoved(wx, wy);
 	if (!placed) {
 		placed = win->addGateFloating(shown[pressed].name, wx, wy);
+		if (placed) {
+			// It takes over from a gate clicked earlier and not yet on the
+			// canvas, and the canvas takes the keys (Escape takes it back;
+			// only in the window in front: focus would activate one behind).
+			win->clearPendingGate();
+			if (GetForegroundWindow() == win->window()) c->focus();
+		}
 	} else if (win->isFloating()) {
 		const int page = c->page();
 		if (page >= 0 && cl_edit_hover(win->document(), page, wx, wy, c->unitsPerPoint())) c->redraw();
