@@ -383,16 +383,24 @@ jobs:
           Unzip one anywhere and double-click CedarLogic.exe inside (the same More info, then Run anyway). The first time, it offers to add itself to the Start menu and open .cdl files.
           EOT
           )
-          git tag -f "$TAG" "$GITHUB_SHA"
-          git push -f origin "refs/tags/$TAG"
+          # The tag moves last. The app's updater goes by it: it asks which
+          # commit the tag is on, and downloads the release's zip when that's
+          # not its own. Moved first, a copy could be offered this build and
+          # be given the last one's zip, still there while these upload.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --prerelease --title "Native Windows test build" --notes "$NOTES"
           else
-            gh release create "$TAG" --prerelease --title "Native Windows test build" --notes "$NOTES"
+            # The first time: the tag is made here, on this commit.
+            gh release create "$TAG" --prerelease --target "$GITHUB_SHA" --title "Native Windows test build" --notes "$NOTES"
           fi
-          gh release upload "$TAG" zips/*.exe zips/*.zip --clobber
+          # The zips (what the updater downloads) before the installers.
+          gh release upload "$TAG" zips/*.zip --clobber
+          setups=(zips/*.exe)
+          if [ ${#setups[@]} -gt 0 ]; then gh release upload "$TAG" "${setups[@]}" --clobber; fi
           # Drop anything this run didn't make, so only the current set is offered.
           keep=$(cd zips && ls -1 *.exe *.zip)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
