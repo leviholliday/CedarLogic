@@ -97,3 +97,125 @@ TEST_CASE("layout: a display made of packed lights is left exactly as drawn") {
 		for (int i = 1; i <= 5; i++) { CHECK(off[i].first == 0.0f); CHECK(off[i].second == 0.0f); }
 	}
 }
+
+// ---- Full rearrange: the rules from the owner's example circuits ----------
+
+namespace {
+
+// A keypad-like source with four right-facing pins, each wired to a label
+// straight across and, through an inverter, to a second label below it.
+LayoutInput keypadInverters() {
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	LayoutNode kp = box(0, -6, 9, 12);
+	for (int i = 0; i < 4; i++) kp.pins.push_back(pin(9, 3 - 2 * i, 1, i, true));
+	in.nodes.push_back(kp);
+	for (int i = 0; i < 4; i++) {
+		const float y = 3 - 2.0f * i;
+		LayoutNode inv = box(30, y - 2, 6, 2); inv.pins = { pin(30, y - 1, -1, i, false), pin(36, y - 1, 1, 4 + i, true) };
+		LayoutNode plain = box(42, y - 1, 2, 2); plain.pins = { pin(42, y, -1, i, false) };
+		LayoutNode bar = box(42, y - 3, 2, 2); bar.pins = { pin(42, y - 2, -1, 4 + i, false) };
+		in.nodes.push_back(inv); in.nodes.push_back(plain); in.nodes.push_back(bar);
+	}
+	return in;
+}
+
+float top(const LayoutInput &in, const std::vector<std::pair<float, float>> &off, size_t i) { return in.nodes[i].t + off[i].second; }
+float left(const LayoutInput &in, const std::vector<std::pair<float, float>> &off, size_t i) { return in.nodes[i].l + off[i].first; }
+
+}  // namespace
+
+TEST_CASE("layout rearrange: output labels keep the order they were drawn in") {
+	LayoutInput in = keypadInverters();
+	auto off = layoutGates(in);
+	// labels are nodes 2,3, 5,6, 8,9, 11,12: A A' B B' C C' D D', top to bottom
+	const size_t labels[8] = { 2, 3, 5, 6, 8, 9, 11, 12 };
+	for (int i = 0; i + 1 < 8; i++) CHECK(top(in, off, labels[i]) > top(in, off, labels[i + 1]));
+	// and they stay in one column
+	for (int i = 1; i < 8; i++) CHECK(left(in, off, labels[i]) == doctest::Approx(left(in, off, labels[0])));
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
+TEST_CASE("layout rearrange: a wire passing the inverter column runs straight to its label") {
+	LayoutInput in = keypadInverters();
+	auto off = layoutGates(in);
+	for (int i = 0; i < 4; i++) {
+		const size_t plain = 2 + 3 * i;
+		// the plain label sits on a lane clear of every inverter, so its wire
+		// can run straight across that column instead of round an inverter
+		const float labelY = in.nodes[plain].pins[0].y + off[plain].second;
+		for (int k = 0; k < 4; k++) {
+			const size_t inv = 1 + 3 * k;
+			const float invTop = top(in, off, inv), invBottom = in.nodes[inv].b + off[inv].second;
+			CHECK((labelY > invTop + 0.5f || labelY < invBottom - 0.5f));
+		}
+		// and just above its own inverter, the way it was drawn
+		CHECK(labelY > top(in, off, 1 + 3 * i));
+		if (i) CHECK(labelY < in.nodes[1 + 3 * (i - 1)].b + off[1 + 3 * (i - 1)].second);
+	}
+}
+
+TEST_CASE("layout rearrange: repeated groups drawn apart stay apart, in order") {
+	// three identical slices: source -> gate -> sink, each 30 apart, chained
+	// by one wire from a slice's gate to the next slice's gate
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	for (int s = 0; s < 3; s++) {
+		const float X = 30.0f * s;
+		const int n0 = 10 * s;
+		LayoutNode src = box(X, 4, 2, 2);  src.pins = { pin(X + 2, 5, 1, n0, true) };
+		LayoutNode g = box(X + 5, 0, 4, 4); g.pins = { pin(X + 5, 1, -1, n0, false), pin(X + 5, 3, -1, s ? n0 - 5 : -1, false),
+		                                               pin(X + 9, 2, 1, n0 + 1, true), pin(X + 9, 1, 1, s < 2 ? n0 + 5 : -1, true) };
+		LayoutNode sink = box(X + 12, -4, 2, 2); sink.pins = { pin(X + 12, -3, -1, n0 + 1, false) };
+		in.nodes.push_back(src); in.nodes.push_back(g); in.nodes.push_back(sink);
+	}
+	auto off = layoutGates(in);
+	for (int s = 0; s + 1 < 3; s++) {
+		float r = -1e9f, l = 1e9f;
+		for (int k = 0; k < 3; k++) {
+			r = std::max(r, in.nodes[3 * s + k].r + off[3 * s + k].first);
+			l = std::min(l, in.nodes[3 * (s + 1) + k].l + off[3 * (s + 1) + k].first);
+		}
+		CHECK(r < l);   // slice s wholly left of slice s + 1
+	}
+	// each slice reads left to right and is laid out the same way
+	for (int s = 0; s < 3; s++) {
+		CHECK(left(in, off, 3 * s) < left(in, off, 3 * s + 1));
+		CHECK(left(in, off, 3 * s + 1) < left(in, off, 3 * s + 2));
+		if (s) CHECK(left(in, off, 3 * s + 1) - left(in, off, 3 * s) == doctest::Approx(left(in, off, 1) - left(in, off, 0)));
+	}
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
+TEST_CASE("layout rearrange: a group wired top to bottom keeps flowing down") {
+	// two adders stacked: the first's bottom pins feed the second's top pins,
+	// a keypad beside them feeds the first from the side
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	LayoutNode kp = box(-14, 2, 9, 12);
+	for (int i = 0; i < 4; i++) kp.pins.push_back({ -5, 11.0f - 2 * i, 1, 0, i, true });
+	LayoutNode a1 = box(-8, 0, 16, 8), a2 = box(-8, -14, 16, 8);
+	for (int i = 0; i < 4; i++) {
+		a1.pins.push_back({ -5.0f + i, 8, 0, 1, i, false });        // top inputs
+		a1.pins.push_back({ -5.0f + i, 0, 0, -1, 4 + i, true });    // bottom outputs, same spacing
+		a2.pins.push_back({ -5.0f + i, -6, 0, 1, 4 + i, false });
+	}
+	in.nodes = { kp, a1, a2 };
+	auto off = layoutGates(in);
+	// still top to bottom: keypad above, then adder 1, then adder 2
+	CHECK(in.nodes[1].b + off[1].second > top(in, off, 2));
+	// the keypad's pins stay left of the inputs they feed, so its wires turn once
+	CHECK(in.nodes[0].pins[0].x + off[0].first < in.nodes[1].pins[0].x + off[1].first);
+	// adder 2 straight under adder 1, its inputs right below adder 1's outputs
+	CHECK(left(in, off, 1) == doctest::Approx(left(in, off, 2)));
+	for (size_t i = 0; i < 3; i++)
+		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
+TEST_CASE("layout rearrange: the same input gives the same answer") {
+	LayoutInput in = keypadInverters();
+	auto a = layoutGates(in), b = layoutGates(in);
+	CHECK(a == b);
+}
