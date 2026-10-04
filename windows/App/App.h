@@ -77,7 +77,7 @@ struct Prefs {
 	// Timing diagrams (the oscilloscope's share menu).
 	bool timingWhole = false, timingInColor = false;
 	// Export as Image's last choices.
-	bool exportGrid = false, exportColor = true, exportInfo = false, exportWorks = true;
+	bool exportGrid = false, exportColor = true, exportInfo = true, exportWorks = true;   // exportInfo: the name-and-result strip
 	int exportScale = 4;                          // 2, 4 or 6 pixels a point
 	std::string exportProblem;                    // "does not work because…"
 	// Send Feedback's draft, kept until it's sent.

@@ -244,6 +244,9 @@ void Prefs::load() {
 	exportGrid = r.b("exportGrid", exportGrid);
 	exportColor = r.b("exportColor", exportColor);
 	exportInfo = r.b("exportInfo", exportInfo);
+	// The name-and-result strip is in an exported picture to begin with, as
+	// on the Mac and Linux (it was left out here, once).
+	if (!r.b("exportStripOn", false)) exportInfo = true;
 	exportWorks = r.b("exportWorks", exportWorks);
 	exportScale = r.i("exportScale", exportScale, 2, 6);
 	exportProblem = manyLines(r.s("exportProblem", exportProblem));
@@ -315,6 +318,7 @@ void Prefs::save() const {
 	o << "exportGrid=" << b(exportGrid) << "\n";
 	o << "exportColor=" << b(exportColor) << "\n";
 	o << "exportInfo=" << b(exportInfo) << "\n";
+	o << "exportStripOn=1\n";
 	o << "exportWorks=" << b(exportWorks) << "\n";
 	o << "exportScale=" << exportScale << "\n";
 	o << "exportProblem=" << oneLine(exportProblem) << "\n";
