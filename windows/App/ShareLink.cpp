@@ -111,6 +111,11 @@ void tidyCache(const std::wstring& root) {
 
 bool isLink(const std::string& arg) { return arg.size() > 11 && lowerCase(arg.substr(0, 11)) == "cedarlogic:"; }
 
+bool isBareLink(const std::string& link) {
+	const size_t cut = link.find_first_of("#?");
+	return isLink(link) && (cut == std::string::npos || cut + 1 == link.size());
+}
+
 std::string fileForLink(const std::string& link, std::string& why) {
 	why.clear();
 	std::string data, name, text;
@@ -196,6 +201,9 @@ static bool selfTestFiles(std::string& report) {
 	check(!isLink("C:\\Circuits\\a.cdl") && !isLink("--screenshot") && !isLink("cedarlogic"), "a path or an option isn't a link");
 	check(fileForLink("cedarlogic://open#c=AAAA", why).empty() && !why.empty(), "a broken link says why: " + why);
 	check(fileForLink("cedarlogic://open", why).empty() && why == "not a CedarLogic link", "a link with no circuit in it is refused");
+	check(isBareLink("cedarlogic://open") && isBareLink("cedarlogic://open/") && isBareLink("cedarlogic://open#") && !isBareLink("cedarlogic://open#c=AAAA") &&
+	          !isBareLink("cedarlogic://open?c=AAAA") && !isBareLink("C:\\a.cdl"),
+	      "a link with nothing after the address only asks for the app");
 	check(fileForLink(linkTo("hello there", "x"), why).empty() && why == "not a circuit", "text that isn't a circuit is refused");
 	const std::string evil = fileForLink(linkTo(circuit + "1", "..\\..\\x:y*z?"), why);
 	check(!evil.empty() && inCache(evil) && evil.find('?') == std::string::npos && evil.find('*') == std::string::npos,

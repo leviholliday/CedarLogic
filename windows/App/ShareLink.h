@@ -29,6 +29,9 @@ void copyLink(CircuitWindow* window, const std::string& text, const std::string&
 
 // A cedarlogic: link (an argument that is one, not a file).
 bool isLink(const std::string& arg);
+// A link with no circuit in it (the website's Open in the App on an empty
+// board: cedarlogic://open): it only asks for the app, which comes forward.
+bool isBareLink(const std::string& link);
 // The link's circuit as a .cdl file in the cache, named for the circuit and in
 // a folder of its own for this data (so the same link opens the same copy);
 // the file's path, or empty and why (in a few words, for problem()).

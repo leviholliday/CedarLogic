@@ -657,7 +657,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		// link over as typed, so whatever follows it (a quote in the link ends
 		// the argument, and options could come after) is not the app's to obey.
 		if (sharelink::isLink(a)) {
-			files.push_back(a);
+			if (!sharelink::isBareLink(a)) files.push_back(a);   // (a bare one, from an empty board, just asks for the app)
 			break;
 		}
 		if (a == "--feedback-probe") {

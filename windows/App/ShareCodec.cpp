@@ -173,7 +173,7 @@ bool parse(const std::string& link, std::string& data, std::string& name) {
 		if (end == std::string::npos) end = link.size();
 		const std::string pair = link.substr(i, end - i);
 		if (!haveData && pair.compare(0, 2, "c=") == 0) {
-			data = pair.substr(2);
+			data = percentDecoded(pair.substr(2));   // (as the website's URLSearchParams does, if a chat escaped it)
 			haveData = true;
 		} else if (!haveName && pair.compare(0, 2, "n=") == 0) {
 			name = percentDecoded(pair.substr(2));
@@ -301,6 +301,7 @@ bool selfTest(std::string& report, const std::string& circuit, std::string* link
 	check(parse("https://x/online/#c=abc&n=A%20B", data, name) && data == "abc" && name == "A B", "parse reads the data and the name");
 	check(parse("cedarlogic://open?c=xyz", data, name) && data == "xyz" && name.empty(), "...and the ? form");
 	check(parse("https://x/?utm=1#c=abc", data, name) && data == "abc", "...and the # when a ? comes first");
+	check(parse("#c=ab%2Bcd%3D&n=x", data, name) && data == "ab+cd=", "...the data too, if something escaped it");
 	check(parse("#c=q&c=r&n=a%2Bb+c", data, name) && data == "q" && name == "a+b+c", "...the first of each, + staying +");
 	check(!parse("cedarlogic://open", data, name) && !parse("https://x/#compare", data, name) && !parse("#n=a", data, name), "...and refuses what has no data");
 	check(parse("#c=a&n=%E6%97%A5%E6%9C%AC", data, name) && name == "\xE6\x97\xA5\xE6\x9C\xAC", "...names in UTF-8");
