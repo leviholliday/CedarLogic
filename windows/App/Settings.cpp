@@ -539,19 +539,20 @@ void showPreferencesDialog(HWND parent) {
 		FormField c = check(firstGroup ? "Show:" : "", toolGroupName(g), (p.toolbarHidden & (1 << g)) == 0);
 		c.grid = 2;
 		firstGroup = false;
-		on[f.add(c)] = [g](Form& form, int i) {
+		on[f.add(c)] = [g, styles](Form& form, int i) {
 			if (form.checked(i)) prefs().toolbarHidden &= ~(1 << g);
 			else prefs().toolbarHidden |= 1 << g;
 			apply();
+			form.refresh(styles);   // the pictures of the styles show it too
 		};
 	}
 	FormField title = check("", "Circuit name", p.showTitle);
 	title.grid = 2;
-	on[f.add(title)] = [](Form& form, int i) { prefs().showTitle = form.checked(i); apply(); };
+	on[f.add(title)] = [styles](Form& form, int i) { prefs().showTitle = form.checked(i); apply(); form.refresh(styles); };
 	FormField themeSwitch = check("", "Dark mode switch", p.showThemeToggle,
 	                              "Applies to every style. Hidden tools are still in the ••• menu and keep their shortcuts.");
 	themeSwitch.grid = 2;
-	on[f.add(themeSwitch)] = [](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); };
+	on[f.add(themeSwitch)] = [styles](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); form.refresh(styles); };
 
 	// ---- Shortcuts
 	f.adding = ShortcutsPage;
