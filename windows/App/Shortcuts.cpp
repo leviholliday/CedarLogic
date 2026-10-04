@@ -218,23 +218,28 @@ Key first(const Action& a) {
 bool isCustom(const Action& a) { return overrides().count(a.id) > 0; }
 bool anyCustom() { return !overrides().empty(); }
 
-std::string set(const Action& a, const Key& key) {
+// Whoever else has the key loses just that one, and keeps any others: the
+// id of the one that had it, or "".
+static std::string takeFromOthers(const Action& a, const Key& key) {
 	std::string loser;
-	if (key.valid()) {
-		// Whoever had the key loses just that one, and keeps any others.
-		for (const Action& o : all()) {
-			if (&o == &a) continue;
-			std::vector<Key> kept;
-			bool had = false;
-			for (const Key& k : keyList(o)) {
-				if (k == key) had = true;
-				else kept.push_back(k);
-			}
-			if (!had) continue;
-			overrides()[o.id] = join(kept);
-			loser = o.id;
+	if (!key.valid()) return loser;
+	for (const Action& o : all()) {
+		if (&o == &a) continue;
+		std::vector<Key> kept;
+		bool had = false;
+		for (const Key& k : keyList(o)) {
+			if (k == key) had = true;
+			else kept.push_back(k);
 		}
+		if (!had) continue;
+		overrides()[o.id] = join(kept);
+		loser = o.id;
 	}
+	return loser;
+}
+
+std::string set(const Action& a, const Key& key) {
+	const std::string loser = takeFromOthers(a, key);
 	// One of the action's own keys: it has all its keys back (bar any another
 	// action has taken), the one pressed first.
 	const std::vector<Key> defaults = split(a.keys);
@@ -259,9 +264,18 @@ std::string set(const Action& a, const Key& key) {
 	return loser;
 }
 
-void reset(const Action& a) {
+std::string reset(const Action& a) {
 	overrides().erase(a.id);
+	// Its own keys come back from whoever was given them since, as set()
+	// takes a key: else two commands would show one key, and only the
+	// first in the list would ever get it.
+	std::string loser;
+	for (const Key& k : split(a.keys)) {
+		const std::string l = takeFromOthers(a, k);
+		if (!l.empty()) loser = l;
+	}
 	save();
+	return loser;
 }
 
 void resetAll() {

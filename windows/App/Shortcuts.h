@@ -54,7 +54,9 @@ bool anyCustom();
 // Give an action this key (an empty Key: none). Another action that had it
 // loses just that key (and keeps any others): its id comes back, or "".
 std::string set(const Action& a, const Key& key);
-void reset(const Action& a);
+// Back to its own keys, taken back from any other action that has one of
+// them now: that one's id comes back, or "".
+std::string reset(const Action& a);
 void resetAll();
 
 // The key being pressed now (WM_KEYDOWN's vk, with Ctrl, Alt and Shift as

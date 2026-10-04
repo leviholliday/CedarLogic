@@ -405,9 +405,15 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 		if (row < 0) return 0;
 		const ShortcutList::Row r = L->rows[row];
 		if (inRect(r.revert, x, y)) {
-			shortcuts::reset(*r.action);
+			const std::string loser = shortcuts::reset(*r.action);
 			const shortcuts::Key k = shortcuts::first(*r.action);
-			L->say(std::string("“") + r.action->name + "” is back to " + (k.valid() ? shortcuts::label(k) : std::string("no shortcut")) + ".");
+			std::string said = std::string("“") + r.action->name + "” is back to " + (k.valid() ? shortcuts::label(k) : std::string("no shortcut")) + ".";
+			// Whoever had been given its key gives it back, as when one is recorded.
+			if (const shortcuts::Action* l = loser.empty() ? nullptr : shortcuts::find(loser)) {
+				const shortcuts::Key left = shortcuts::first(*l);
+				said += std::string(" “") + l->name + "” " + (left.valid() ? "keeps " + shortcuts::label(left) + "." : std::string("has no shortcut now."));
+			}
+			L->say(said);
 			L->recording = nullptr;
 			shortcutsChanged();
 			L->refresh();
