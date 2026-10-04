@@ -233,7 +233,7 @@ bool ask(CircuitWindow* w, bool firstTime) {
 	q.paint = [=](ID2D1RenderTarget* rt, float width, float) {
 		const D2D1_COLOR_F ink = prefs().dark ? D2D1::ColorF(0.89f, 0.9f, 0.93f) : D2D1::ColorF(0.1f, 0.11f, 0.13f);
 		brand::icon(rt, 2, 4, 44, 0);
-		brand::text(rt, title, 2, 61, 17, DWRITE_FONT_WEIGHT_SEMI_BOLD, ink);
+		drawText(rt, title, D2D1::RectF(2, 60, width, 86), 17, ink, TextAlign::Leading, true);
 		const float h = brand::text(rt, body, 2, 92, 12.5f, DWRITE_FONT_WEIGHT_NORMAL, withAlpha(ink, 0.68f), width - 4);
 		if (!later.empty()) brand::text(rt, later, 2, 92 + h + 10, 12.5f, DWRITE_FONT_WEIGHT_NORMAL, withAlpha(ink, 0.5f), width - 4);
 	};
