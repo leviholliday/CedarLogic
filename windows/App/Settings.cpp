@@ -606,8 +606,10 @@ void showPreferencesDialog(HWND parent) {
 			form.refresh(styles);
 		}
 	};
-	f.onWheel = [&](Form&, int field, int delta) {
+	f.onWheel = [&](Form& form, int field, int delta) {
 		if (field == list.list) list.scrollBy(-delta * 84.0f / WHEEL_DELTA);
+		// Over the colours or the styles: the page scrolls, when it does.
+		else if (form.scrollHeight > 0) form.scrollTo(form.scrollY - MulDiv(delta, scaled(90, dpiOf(form.dialog)), WHEEL_DELTA));
 	};
 	f.run(parent);
 	g_page = f.page;

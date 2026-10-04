@@ -645,7 +645,8 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		for (size_t i = 0; i < f->fields.size() && f->onWheel; i++) {
 			const FormField& x = f->fields[i];
 			RECT r;
-			if (x.kind != FormField::Picture || !GetWindowRect(x.hwnd, &r) || !PtInRect(&r, p)) continue;
+			// (A picture on a page not showing is hidden, not gone.)
+			if (x.kind != FormField::Picture || !IsWindowVisible(x.hwnd) || !GetWindowRect(x.hwnd, &r) || !PtInRect(&r, p)) continue;
 			guarded("a dialog", [&] { f->onWheel(*f, (int)i, delta); });
 			SetWindowLongPtrW(d, DWLP_MSGRESULT, 0);
 			return TRUE;
