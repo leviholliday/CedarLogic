@@ -17,8 +17,7 @@
 // CedarLogic runs goes to the running one (main.cpp's handToRunning).
 
 #include "Integration.h"
-#include "Brand.h"
-#include "Chrome.h"
+#include "Alert.h"
 #include "Dialogs.h"
 #include "Welcome.h"
 #include "Window.h"
@@ -219,36 +218,21 @@ bool isOpen(CircuitWindow* w) {
 	return w && std::find(all.begin(), all.end(), w) != all.end();
 }
 
-// The question, in the app's own look (as Quit asks): the icon, what adding
-// does, and that the folder should stay put. The first time, "No Thanks" is
+// The question, on the app's alert card (as Quit asks): what adding does,
+// and that the folder should stay put. The first time, "No Thanks" is
 // remembered too. True when it was added.
 bool ask(CircuitWindow* w, bool firstTime) {
-	Form f;
-	f.title = "Add to Start";
-	f.width = 460;
-	f.okText = "Add to Start";
-	f.cancelText = firstTime ? "No Thanks" : "Cancel";
-	const std::string title = "Add CedarLogic to the Start menu?";
-	const std::string body = "It'll be in Start with your other apps, and double-clicking a .cdl file will open it in "
-	                         "CedarLogic. It still runs from this folder, so keep the folder where it is.";
-	const std::string later = firstTime ? "You can change this later in the \u2022\u2022\u2022 menu, under Help." : "";
-	const float textW = (float)f.width - 32 - 4;
-	const D2D1_COLOR_F none = D2D1::ColorF(0, 0, 0);
-	const float bodyH = brand::text(nullptr, body, 0, 0, 12.5f, DWRITE_FONT_WEIGHT_NORMAL, none, textW);
-	const float laterH = later.empty() ? 0 : brand::text(nullptr, later, 0, 0, 12.5f, DWRITE_FONT_WEIGHT_NORMAL, none, textW);
-	FormField q;
-	q.kind = FormField::Picture;
-	q.height = (int)std::ceil(92 + bodyH + (later.empty() ? 0 : 10 + laterH) + 8);
-	q.paint = [=](ID2D1RenderTarget* rt, float width, float) {
-		const D2D1_COLOR_F ink = prefs().dark ? D2D1::ColorF(0.89f, 0.9f, 0.93f) : D2D1::ColorF(0.1f, 0.11f, 0.13f);
-		brand::icon(rt, 2, 4, 44, 0);
-		drawText(rt, title, D2D1::RectF(2, 60, width, 86), 17, ink, TextAlign::Leading, true);
-		const float h = brand::text(rt, body, 2, 92, 12.5f, DWRITE_FONT_WEIGHT_NORMAL, withAlpha(ink, 0.68f), width - 4);
-		if (!later.empty()) brand::text(rt, later, 2, 92 + h + 10, 12.5f, DWRITE_FONT_WEIGHT_NORMAL, withAlpha(ink, 0.5f), width - 4);
-	};
-	f.add(q);
-	const int answer = f.run(isOpen(w) ? w->window() : nullptr);
-	if (answer != IDOK) {
+	Alert a;
+	a.title = "Add to Start";
+	a.heading = "Add CedarLogic to the Start menu?";
+	a.text = "It'll be in Start with your other apps, and double-clicking a .cdl file will open it in "
+	         "CedarLogic. It still runs from this folder, so keep the folder where it is.";
+	if (firstTime) a.text += "\n\nYou can change this later in the \u2022\u2022\u2022 menu, under Help.";
+	a.buttons = { { "Add to Start", 1, 1 }, { firstTime ? "No Thanks" : "Cancel", 0, 0 } };
+	a.enter = 1;
+	a.escape = 0;
+	const int answer = runAlert(isOpen(w) ? w->window() : nullptr, a);
+	if (answer != 1) {
 		if (firstTime) {
 			prefs().startMenu = 2;
 			prefs().save();
@@ -282,6 +266,11 @@ bool calm(CircuitWindow* w) {
 	if (GetGUIThreadInfo(GetCurrentThreadId(), &gui) &&
 	    (gui.hwndCapture || (gui.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_INMOVESIZE))))
 		return false;
+	// Nor while a text box has the keyboard (a tab being renamed on its
+	// card, Find, the side panel's search): the card would take it away
+	// mid-word.
+	wchar_t cls[16] = L"";
+	if (gui.hwndFocus && GetClassNameW(gui.hwndFocus, cls, 16) && lstrcmpiW(cls, L"Edit") == 0) return false;
 	LASTINPUTINFO input = { sizeof input };
 	return !GetLastInputInfo(&input) || GetTickCount() - input.dwTime >= 1500;
 }
