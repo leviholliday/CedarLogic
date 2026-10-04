@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 
 namespace integration {
 
@@ -221,7 +222,7 @@ bool ask(CircuitWindow* w, bool firstTime) {
 	const std::string title = "Add CedarLogic to the Start menu?";
 	const std::string body = "It'll be in Start with your other apps, and double-clicking a .cdl file will open it in "
 	                         "CedarLogic. It still runs from this folder, so keep the folder where it is.";
-	const std::string later = firstTime ? "You can change this later in the ••• menu, under Help." : "";
+	const std::string later = firstTime ? "You can change this later in the \u2022\u2022\u2022 menu, under Help." : "";
 	const float textW = (float)f.width - 32 - 4;
 	const D2D1_COLOR_F none = D2D1::ColorF(0, 0, 0);
 	const float bodyH = brand::text(nullptr, body, 0, 0, 12.5f, DWRITE_FONT_WEIGHT_NORMAL, none, textW);
@@ -313,7 +314,7 @@ void start(bool now) {
 
 bool offered() { return !installedAnywhere(); }
 
-std::string menuLabel() { return added() ? "Remove from &Start Menu" : "Add to &Start Menu…"; }
+std::string menuLabel() { return added() ? "Remove from &Start Menu" : "Add to &Start Menu\u2026"; }
 
 void menuCommand(CircuitWindow* w) {
 	if (!added()) {
