@@ -100,12 +100,12 @@ jobs:
           timeout 90 "$A" --dark --screenshot "$PWD/renders/window-Lab5-dark.png" format/tests/fixtures/Lab5.cdl
           timeout 90 "$A" --dark --sim-view --screenshot "$PWD/renders/window-sim.png" res/samples/practice.cdl
           timeout 90 "$A" --light --screenshot "$PWD/renders/window-practice.png" res/samples/practice.cdl
-          # Split view, focus mode (the tabs as the title row), both, and a
-          # tab being renamed in place.
-          timeout 90 "$A" --split --screenshot "$PWD/renders/window-split.png" format/tests/fixtures/Lab5.cdl || true
-          timeout 90 "$A" --dark --split --screenshot "$PWD/renders/window-split-dark.png" format/tests/fixtures/Lab5.cdl || true
+          # Split view (lab6: a circuit on each of its first tabs), focus mode
+          # (the tabs as the title row), both, and a tab being renamed in place.
+          timeout 90 "$A" --split --screenshot "$PWD/renders/window-split.png" format/tests/fixtures/lab6.cdl || true
+          timeout 90 "$A" --dark --split --screenshot "$PWD/renders/window-split-dark.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --focus --screenshot "$PWD/renders/window-focus.png" format/tests/fixtures/Lab5.cdl || true
-          timeout 90 "$A" --dark --focus --split --screenshot "$PWD/renders/window-focus-split-dark.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --dark --focus --split --screenshot "$PWD/renders/window-focus-split-dark.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --rename-tab --screenshot "$PWD/renders/window-rename-tab.png" format/tests/fixtures/Lab5.cdl || true
           # The dialogs, in each theme (the screenshot is of the dialog).
           timeout 90 "$A" --dark --dialog preferences --screenshot "$PWD/renders/dialog-preferences-dark.png" || true
