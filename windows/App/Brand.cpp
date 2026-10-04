@@ -283,11 +283,40 @@ void label(ID2D1RenderTarget* rt, float x, float y, const std::string& s) {
 }
 
 void icon(ID2D1RenderTarget* rt, float x, float y, float size, float glowAmount) {
-	static std::map<std::pair<ID2D1RenderTarget*, int>, ID2D1Bitmap*> made;
+	// Made for each surface, at the pixels it's drawn at: the surfaces scale
+	// to the screen with their transform (in quarter steps here, so a card
+	// zooming in doesn't make one a frame). A surface is held while its
+	// icons are, so a new one can't take its place in memory and use them;
+	// one only held here now (its window closed, or Direct2D wanted a new
+	// one) is let go with them.
+	struct Held { ID2D1RenderTarget* rt; std::map<int, ID2D1Bitmap*> bitmaps; };
+	static std::vector<Held> held;
+	for (size_t i = 0; i < held.size();) {
+		ID2D1RenderTarget* other = held[i].rt;
+		if (other != rt) {
+			other->AddRef();
+			if (other->Release() == 1) {
+				for (auto& b : held[i].bitmaps) if (b.second) b.second->Release();
+				other->Release();
+				held.erase(held.begin() + (std::ptrdiff_t)i);
+				continue;
+			}
+		}
+		i++;
+	}
+	auto mine = std::find_if(held.begin(), held.end(), [rt](const Held& h) { return h.rt == rt; });
+	if (mine == held.end()) {
+		rt->AddRef();
+		held.push_back(Held{ rt, {} });
+		mine = held.end() - 1;
+	}
 	float dx = 96, dy = 96;
 	rt->GetDpi(&dx, &dy);
-	const int px = (int)std::ceil(size * dx / 96);
-	ID2D1Bitmap*& bmp = made[{ rt, px }];
+	D2D1_MATRIX_3X2_F m;
+	rt->GetTransform(&m);
+	const float scale = std::max(0.25f, std::ceil(std::hypot(m._11, m._12) * dx / 96 * 4) / 4);
+	const int px = (int)std::ceil(size * scale);
+	ID2D1Bitmap*& bmp = mine->bitmaps[px];
 	if (bmp == nullptr) {
 		if (IWICBitmap* src = images::loadResource(2, px, px)) {
 			rt->CreateBitmapFromWicBitmap(src, D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dx, dy),
@@ -301,12 +330,13 @@ void icon(ID2D1RenderTarget* rt, float x, float y, float size, float glowAmount)
 	if (glowAmount > 0 && SUCCEEDED(rt->QueryInterface(__uuidof(ID2D1DeviceContext), (void**)&dc))) {
 		ID2D1Effect* shadow = nullptr;
 		if (SUCCEEDED(dc->CreateEffect(CLSID_D2D1Shadow, &shadow))) {
+			// The blur is in the bitmap's points, which are scaled to `size`.
+			const D2D1_SIZE_F bs = bmp->GetSize();
 			shadow->SetInput(0, bmp);
-			shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, size * 0.12f);
+			shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, bs.width * 0.12f);
 			shadow->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(kNeon.r, kNeon.g, kNeon.b, glowAmount));
 			D2D1_MATRIX_3X2_F was;
 			dc->GetTransform(&was);
-			const D2D1_SIZE_F bs = bmp->GetSize();
 			dc->SetTransform(D2D1::Matrix3x2F::Scale(size / bs.width, size / bs.height) * D2D1::Matrix3x2F::Translation(x, y) * was);
 			dc->DrawImage(shadow);
 			dc->SetTransform(was);

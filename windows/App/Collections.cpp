@@ -37,13 +37,22 @@ std::string trim(const std::string& s) {
 	return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
 }
 
-std::string newId() {
-	const time_t t = time(nullptr);
-	struct tm lt;
-	localtime_s(&lt, &t);
-	char buf[32];
-	strftime(buf, sizeof buf, "%Y%m%d-%H%M%S", &lt);
-	return std::string(buf) + strf("-%d", 1000 + rand() % 99000);
+// A new folder in `in`, made here (so no two saves ever share one; the
+// number is this process's own); "" when it couldn't be.
+std::string newFolder(const std::string& in) {
+	static unsigned next = (unsigned)GetCurrentProcessId() * 2654435761u + (unsigned)GetTickCount();
+	CreateDirectoryW(W(in).c_str(), nullptr);
+	for (int tries = 0; tries <= 100; tries++) {
+		const time_t t = time(nullptr);
+		struct tm lt;
+		localtime_s(&lt, &t);
+		char buf[32];
+		strftime(buf, sizeof buf, "%Y%m%d-%H%M%S", &lt);
+		const std::string folder = in + "\\" + buf + strf("-%d", 1000 + (int)(next++ % 99000));
+		if (CreateDirectoryW(W(folder).c_str(), nullptr)) return folder;
+		if (GetLastError() != ERROR_ALREADY_EXISTS) break;
+	}
+	return std::string();
 }
 
 // Into the Recycle Bin, so a mistake can be taken back.
@@ -308,13 +317,11 @@ void saveCurrent(CircuitWindow* window) {
 	if (!askText(window->window(), "Save as Template", "Name your template. Start a circuit from it with New from Template.", name) ||
 	    name.empty())
 		return;
-	const std::string folder = root() + "\\" + newId();
-	CreateDirectoryW(W(root()).c_str(), nullptr);
-	CreateDirectoryW(W(folder).c_str(), nullptr);
+	const std::string folder = newFolder(root());
 	const bool wasDirty = window->isDirty();
 	const std::string text = cl_document_save_text(window->document());
 	if (wasDirty) window->saveQuietly(false);   // asking for the text marked it saved
-	if (writeFile(folder + "\\name.txt", name) && writeFile(folder + "\\template.cdl", text))
+	if (!folder.empty() && writeFile(folder + "\\name.txt", name) && writeFile(folder + "\\template.cdl", text))
 		window->note("Saved “" + name + "” as a template.");
 	else
 		window->note("Couldn't save that template.");
@@ -395,10 +402,8 @@ void saveSelection(CircuitWindow* window) {
 	if (!askText(window->window(), "Save as Part",
 	             "Name your part. It'll be in the side panel under My Parts, and in Add a Gate (A).", name) || name.empty())
 		return;
-	const std::string folder = root() + "\\" + newId();
-	CreateDirectoryW(W(root()).c_str(), nullptr);
-	CreateDirectoryW(W(folder).c_str(), nullptr);
-	if (writeFile(folder + "\\name.txt", name) && writeFile(folder + "\\part.txt", text)) {
+	const std::string folder = newFolder(root());
+	if (!folder.empty() && writeFile(folder + "\\name.txt", name) && writeFile(folder + "\\part.txt", text)) {
 		window->note("Saved “" + name + "” to My Parts.");
 		for (CircuitWindow* w : circuitWindows()) w->partsChanged();
 	} else {

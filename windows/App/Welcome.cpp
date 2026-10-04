@@ -132,6 +132,15 @@ struct Panel {
 			case WM_KEYDOWN: if (!p->key || !p->key((UINT)wp)) handled = false; break;
 			case WM_CHAR: if (p->chr) p->chr((wchar_t)wp); break;
 			case WM_TIMER: if (p->animating && p->animating()) p->redraw(); break;
+			case WM_DESTROY: {
+				// Gone some other way than destroy() (which detaches first):
+				// the owner it disabled takes input again.
+				HWND owner = GetWindow(h, GW_OWNER);
+				if (owner && !IsWindowEnabled(owner)) EnableWindow(owner, TRUE);
+				p->hwnd = nullptr;
+				handled = false;
+				break;
+			}
 			default: handled = false; break;
 			}
 		});
@@ -597,6 +606,8 @@ bool offer(CircuitWindow* window) {
 	p.message = [](UINT msg, WPARAM wp, LPARAM lp, LRESULT& r) {
 		Welcome* wl = g_welcome;
 		if (wl == nullptr) return false;
+		// Alt+F4 is Skip: the circuit window comes back.
+		if (msg == WM_CLOSE) { finish(); r = 0; return true; }
 		if (msg == WM_CTLCOLOREDIT && (HWND)lp == wl->name) {
 			SetTextColor((HDC)wp, RGB(242, 242, 242));
 			SetBkColor((HDC)wp, RGB(25, 33, 28));
@@ -925,6 +936,7 @@ void startTour(CircuitWindow* window) {
 	// Clicks, but never the keyboard: that stays with the circuit.
 	p.message = [](UINT msg, WPARAM, LPARAM, LRESULT& r) {
 		if (msg == WM_MOUSEACTIVATE) { r = MA_NOACTIVATE; return true; }
+		if (msg == WM_CLOSE) { endTour(); r = 0; return true; }
 		return false;
 	};
 	p.create(window->window(), 10, 10, 0, 0, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
@@ -1249,6 +1261,13 @@ void show(CircuitWindow* window, int page) {
 		else if (id == kTile0) close(CMD_TOUR);
 		else if (id == kTile0 + 1) close(CMD_NEW_TEMPLATE);
 		else if (id == kTile0 + 2) close(CMD_HELP);
+	};
+	// Alt+F4 is Skip: the circuit window comes back.
+	p.message = [](UINT msg, WPARAM, LPARAM, LRESULT& r) {
+		if (msg != WM_CLOSE || g_new == nullptr) return false;
+		close(0);
+		r = 0;
+		return true;
 	};
 	p.key = [](UINT vk) {
 		if (vk == VK_ESCAPE) close(0);

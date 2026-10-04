@@ -74,6 +74,7 @@ public:
 	float width = 600, height = 540, listWidth = 0;   // 0: the list takes the width
 	bool listOnLeft = false;                          // with a preview: the list first
 	std::vector<std::string> leftButtons, rightButtons;   // the last right one is the default
+	bool doubleClickPresses = true;                       // a row double-clicked presses the default
 	std::function<std::vector<Row>(const std::string& query)> rows;
 	// A button pressed (left ones 0.., right ones 100..): true closes.
 	std::function<bool(Picker&, int button)> onButton;
@@ -351,8 +352,9 @@ private:
 	static LRESULT CALLBACK editProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
 		Picker* p = reinterpret_cast<Picker*>(data);
 		if (msg == WM_KEYDOWN) {
+			// Delete too while there's nothing typed (Your Circuits deletes the circuit).
 			const bool mine = wp == VK_UP || wp == VK_DOWN || wp == VK_PRIOR || wp == VK_NEXT || wp == VK_RETURN || wp == VK_ESCAPE ||
-			                  (GetKeyState(VK_CONTROL) & 0x8000);
+			                  (GetKeyState(VK_CONTROL) & 0x8000) || (wp == VK_DELETE && GetWindowTextLengthW(h) == 0);
 			if (mine && p->key((UINT)wp)) return 0;
 		}
 		if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE)) return 0;   // no beep
@@ -408,7 +410,8 @@ private:
 			return true;
 		}
 		case WM_LBUTTONDBLCLK:
-			if (rowAt(x, y) >= 0 && !shown[rowAt(x, y)].heading && !rightButtons.empty()) press(100 + (int)rightButtons.size() - 1);
+			if (doubleClickPresses && rowAt(x, y) >= 0 && !shown[rowAt(x, y)].heading && !rightButtons.empty())
+				press(100 + (int)rightButtons.size() - 1);
 			return true;
 		case WM_LBUTTONUP: {
 			const int b = buttonAt(x, y);

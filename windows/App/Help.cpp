@@ -284,15 +284,20 @@ struct HelpWindow {
 		};
 		add(true);
 		add(false);
-		if (q.empty()) {
-			rows.push_back(Row{ -1, 0, "MORE" });
-			rows.push_back(Row{ -1, kShortcuts, "Keyboard Shortcuts" });
-			rows.push_back(Row{ -1, kTour, "Guided Tour" });
-			rows.push_back(Row{ -1, kWhatsNew, "What's New" });
-			rows.push_back(Row{ -1, kClassic, "Classic Help" });
-		} else if (rows.empty()) {
-			rows.push_back(Row{ -1, 0, "NOTHING FOUND" });
+		// The rest of Help, found by name (and a few words for it) too.
+		struct More { int extra; const char* name; const char* words; };
+		const More more[] = { { kShortcuts, "Keyboard Shortcuts", "keys hotkeys" },
+		                      { kTour, "Guided Tour", "tutorial walkthrough" },
+		                      { kWhatsNew, "What's New", "whats new changes release notes" },
+		                      { kClassic, "Classic Help", "old original" } };
+		bool anyMore = false;
+		for (const More& m : more) {
+			if (!q.empty() && lower(std::string(m.name) + " " + m.words).find(q) == std::string::npos) continue;
+			if (!anyMore) rows.push_back(Row{ -1, 0, "MORE" });
+			anyMore = true;
+			rows.push_back(Row{ -1, m.extra, m.name });
 		}
+		if (rows.empty()) rows.push_back(Row{ -1, 0, "NOTHING FOUND" });
 		listScroll = 0;
 	}
 
@@ -524,9 +529,12 @@ struct HelpWindow {
 
 HelpWindow* g_help = nullptr;
 
-// The search box passes Up, Down and Escape to the window.
+// The search box passes Up, Down, Escape and the Page keys to the window,
+// and Home and End while there's nothing typed (else they move the caret).
 LRESULT CALLBACK searchProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
-	if (msg == WM_KEYDOWN && (wp == VK_UP || wp == VK_DOWN || wp == VK_ESCAPE) && g_help) { g_help->key((UINT)wp); return 0; }
+	const bool mine = wp == VK_UP || wp == VK_DOWN || wp == VK_ESCAPE || wp == VK_PRIOR || wp == VK_NEXT ||
+	                  ((wp == VK_HOME || wp == VK_END) && GetWindowTextLengthW(h) == 0);
+	if (msg == WM_KEYDOWN && mine && g_help) { g_help->key((UINT)wp); return 0; }
 	if (msg == WM_CHAR && (wp == VK_ESCAPE || wp == VK_RETURN)) return 0;
 	return DefSubclassProc(h, msg, wp, lp);
 }

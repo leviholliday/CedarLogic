@@ -178,7 +178,17 @@ std::vector<Version> versions(const Item& item) {
 }
 
 bool create(const std::string& name, const std::string& text, const std::string& source, Item& out) {
-	const std::string id = stamp(now()) + strf("-%d", 1000 + rand() % 99000);
+	// Its folder is claimed (made) before anything goes in it, and the number
+	// is this process's own, so two imports in the same second -- a file
+	// each, opened together from Explorer -- never share one.
+	static unsigned next = (unsigned)GetCurrentProcessId() * 2654435761u + (unsigned)GetTickCount();
+	makeDirs(root());
+	std::string id;
+	for (int tries = 0; id.empty(); tries++) {
+		const std::string t = stamp(now()) + strf("-%d", 1000 + (int)(next++ % 99000));
+		if (CreateDirectoryW(W(root() + "\\" + t).c_str(), nullptr)) id = t;
+		else if (GetLastError() != ERROR_ALREADY_EXISTS || tries >= 100) return false;
+	}
 	out.id = id;
 	out.folder = root() + "\\" + id;
 	out.name = name;
@@ -265,9 +275,14 @@ std::string friendlyTime(double t) {
 	st.wMinute = (WORD)lt.tm_min;
 	wchar_t clock[64] = L"";
 	GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, TIME_NOSECONDS, &st, nullptr, clock, 64);
-	const int days = (int)((ln.tm_year - lt.tm_year) * 366 + (ln.tm_yday - lt.tm_yday));
-	if (days == 0) return "Today at " + U(clock);
-	if (days == 1) return "Yesterday at " + U(clock);
+	// Yesterday is the day before today's date (Dec 31 on Jan 1 too).
+	struct tm y = ln;
+	y.tm_mday -= 1;
+	y.tm_hour = 12;
+	y.tm_isdst = -1;
+	mktime(&y);
+	if (lt.tm_year == ln.tm_year && lt.tm_yday == ln.tm_yday) return "Today at " + U(clock);
+	if (lt.tm_year == y.tm_year && lt.tm_yday == y.tm_yday) return "Yesterday at " + U(clock);
 	wchar_t date[64] = L"";
 	GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &st, lt.tm_year == ln.tm_year ? L"MMM d" : L"MMM d, yyyy", date, 64, nullptr);
 	return U(date) + " at " + U(clock);

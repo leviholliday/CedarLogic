@@ -48,6 +48,7 @@ public:
 
 	std::function<void(Form&)> onInit;
 	std::function<void(Form&, int field)> onChange;       // a field changed (typing, a choice, a tick)
+	std::function<void(Form&, int field)> onLeave;        // a Text field lost the keyboard
 	std::function<std::string(Form&)> validate;           // on OK: "" to close, else what's wrong
 	std::function<bool(Form&, int button)> onButton;      // one of `buttons`: true to close with it
 	std::function<void(Form&, int field, int row)> onActivate;   // a List row double-clicked
@@ -88,6 +89,10 @@ public:
 	std::vector<HWND> buttonWindows;
 	void build();
 	void capture();
+	// Taller than the screen (no pages): it scrolls, in pixels.
+	int scrollY = 0, scrollHeight = 0;
+	void scrollTo(int y);
+	void showFocus();   // the focused control scrolled into view
 };
 
 // A line of text from the user; false when they cancelled.
@@ -116,6 +121,7 @@ void showExportImage(CircuitWindow* w, int page);
 //   Home / End   first sample / follow the live end again
 //   H            hide or show the chosen signal
 //   Space        run or pause the simulation      C   clear the recording
+//   Ctrl+C       copy the timing diagram
 // Its share button makes a timing diagram for a lab report (Scope.cpp).
 class ScopeWindow {
 public:

@@ -10,6 +10,8 @@
 #include <uxtheme.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -25,6 +27,7 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 const int kTabsId = 4000;       // Form::pages' row
+const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
 
 // The dialogs' look, as the Mac's sheets: paper, filled rounded fields,
 // soft buttons with the default one in the accent, toggles for yes/no.
@@ -384,9 +387,14 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			const FormField& x = f->fields[id - kFieldBase];
 			RECT fr = x.frame;
 			InflateRect(&fr, 3, 3);
+			OffsetRect(&fr, 0, -f->scrollY);
 			InvalidateRect(d, &fr, FALSE);
+			if (code == EN_SETFOCUS && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
+			if (code == EN_KILLFOCUS && x.kind == FormField::Text && f->onLeave) guarded("a dialog", [&] { f->onLeave(*f, id - kFieldBase); });
 			return TRUE;
 		}
+		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && code == CBN_SETFOCUS && f->scrollHeight > 0)
+			PostMessageW(d, kShowFocus, 0, 0);
 		if (id >= kFieldBase && id < kFieldBase + (int)f->fields.size() && f->onChange) {
 			const FormField& x = f->fields[id - kFieldBase];
 			const bool change = (x.kind == FormField::Text && code == EN_CHANGE) ||
@@ -401,6 +409,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		const NMHDR* n = reinterpret_cast<const NMHDR*>(lp);
 		const int field = (int)n->idFrom - kFieldBase;
 		if (field < 0 || field >= (int)f->fields.size() || f->fields[field].kind != FormField::List) break;
+		if (n->code == NM_SETFOCUS && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
 		if (n->code == LVN_GETDISPINFOW) {
 			NMLVDISPINFOW* di = reinterpret_cast<NMLVDISPINFOW*>(lp);
 			if (di->item.mask & LVIF_TEXT) {
@@ -445,6 +454,8 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			return TRUE;
 		}
 		if (di->CtlType == ODT_BUTTON) {
+			// Tabbed to (a scrolling form shows it).
+			if ((di->itemAction & ODA_FOCUS) && (di->itemState & ODS_FOCUS) && f->scrollHeight > 0) PostMessageW(d, kShowFocus, 0, 0);
 			const int fi = (int)di->CtlID - kFieldBase;
 			const bool toggle = fi >= 0 && fi < (int)f->fields.size() && f->fields[fi].kind == FormField::Check;
 			guarded("a dialog", [&] { drawButtonItem(di, toggle); });
@@ -456,19 +467,47 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		return TRUE;
 	}
 	case WM_MOUSEWHEEL: {
-		if (!f->onWheel) break;
 		POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-		for (size_t i = 0; i < f->fields.size(); i++) {
+		const int delta = GET_WHEEL_DELTA_WPARAM(wp);
+		for (size_t i = 0; i < f->fields.size() && f->onWheel; i++) {
 			const FormField& x = f->fields[i];
 			RECT r;
 			if (x.kind != FormField::Picture || !GetWindowRect(x.hwnd, &r) || !PtInRect(&r, p)) continue;
-			const int delta = GET_WHEEL_DELTA_WPARAM(wp);
 			guarded("a dialog", [&] { f->onWheel(*f, (int)i, delta); });
+			SetWindowLongPtrW(d, DWLP_MSGRESULT, 0);
+			return TRUE;
+		}
+		if (f->scrollHeight > 0) {
+			// Three rows a notch (a touchpad's small steps move it a little).
+			f->scrollTo(f->scrollY - MulDiv(delta, scaled(90, dpiOf(d)), WHEEL_DELTA));
 			SetWindowLongPtrW(d, DWLP_MSGRESULT, 0);
 			return TRUE;
 		}
 		break;
 	}
+	case WM_VSCROLL: {
+		if (f->scrollHeight <= 0) break;
+		SCROLLINFO si = { sizeof si, SIF_ALL };
+		GetScrollInfo(d, SB_VERT, &si);
+		const int line = scaled(40, dpiOf(d));
+		int to = f->scrollY;
+		switch (LOWORD(wp)) {
+		case SB_LINEUP: to -= line; break;
+		case SB_LINEDOWN: to += line; break;
+		case SB_PAGEUP: to -= std::max(line, (int)si.nPage - line); break;
+		case SB_PAGEDOWN: to += std::max(line, (int)si.nPage - line); break;
+		case SB_THUMBTRACK:
+		case SB_THUMBPOSITION: to = si.nTrackPos; break;
+		case SB_TOP: to = 0; break;
+		case SB_BOTTOM: to = f->scrollHeight; break;
+		default: return TRUE;
+		}
+		f->scrollTo(to);
+		return TRUE;
+	}
+	case kShowFocus:
+		f->showFocus();
+		return TRUE;
 	case WM_CTLCOLORDLG:
 	case WM_CTLCOLORSTATIC:
 	case WM_CTLCOLORBTN: {
@@ -512,7 +551,8 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			const float s = dpiOf(d) / 96.0f;
 			for (const FormField& x : f->fields) {
 				if (x.frame.right <= x.frame.left || (!f->pages.empty() && x.page != f->page)) continue;
-				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, x.frame.top / s + 0.5f, x.frame.right / s - 0.5f, x.frame.bottom / s - 0.5f);
+				const float top = (float)(x.frame.top - f->scrollY), bottom = (float)(x.frame.bottom - f->scrollY);
+				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, top / s + 0.5f, x.frame.right / s - 0.5f, bottom / s - 0.5f);
 				const bool on = focus == x.hwnd;
 				const bool enabled = IsWindowEnabled(x.hwnd) != FALSE;
 				fillRound(rt, r, x.kind == FormField::List ? 6.0f : 7.0f, d2d(c.field));
@@ -576,7 +616,11 @@ void Form::build() {
 			std::string initial = x.value;
 			if (multi) {
 				std::string crlf;
-				for (char c : initial) { if (c == '\n') crlf += '\r'; crlf += c; }
+				for (char c : initial) {
+					if (c == '\r') continue;   // text() gives it back with \n alone
+					if (c == '\n') crlf += '\r';
+					crlf += c;
+				}
 				initial = crlf;
 			}
 			// The box inside a drawn field (painted with the dialog).
@@ -759,7 +803,7 @@ void Form::build() {
 	RECT rc = { 0, 0, width, y };
 	const DWORD style = (DWORD)GetWindowLongW(dialog, GWL_STYLE), ex = (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE);
 	AdjustWindowRectExForDpi(&rc, style, FALSE, ex, dpi);
-	const int ww = rc.right - rc.left, wh = rc.bottom - rc.top;
+	int ww = rc.right - rc.left, wh = rc.bottom - rc.top;
 	RECT anchor;
 	HWND owner = GetWindow(dialog, GW_OWNER);
 	if (owner == nullptr || !GetWindowRect(owner, &anchor)) {
@@ -768,15 +812,67 @@ void Form::build() {
 		GetMonitorInfoW(m, &mi);
 		anchor = mi.rcWork;
 	}
-	int left = (anchor.left + anchor.right - ww) / 2, top = (anchor.top + anchor.bottom - wh) / 2;
 	HMONITOR m = MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST);
 	MONITORINFO mi = { sizeof mi };
-	if (GetMonitorInfoW(m, &mi)) {
+	const bool onScreen = GetMonitorInfoW(m, &mi) != FALSE;
+	// Taller than the screen (a laptop at 125% or 150%): as tall as the
+	// screen, and the form scrolls, so its buttons can still be reached.
+	scrollY = scrollHeight = 0;
+	const int screenH = mi.rcWork.bottom - mi.rcWork.top;
+	if (onScreen && pages.empty() && wh > screenH && screenH > 0) {
+		scrollHeight = y;
+		const int clientH = std::max(sc(120), y - (wh - screenH));
+		wh = clientH + (wh - y);
+		ww += GetSystemMetricsForDpi(SM_CXVSCROLL, dpi);
+		SetWindowLongW(dialog, GWL_STYLE, (LONG)(style | WS_VSCROLL));
+		SCROLLINFO si = { sizeof si, SIF_RANGE | SIF_PAGE | SIF_POS };
+		si.nMax = y - 1;
+		si.nPage = (UINT)clientH;
+		SetScrollInfo(dialog, SB_VERT, &si, FALSE);
+		if (prefs().dark) darkenControl(dialog, true, L"Explorer");
+	}
+	int left = (anchor.left + anchor.right - ww) / 2, top = (anchor.top + anchor.bottom - wh) / 2;
+	if (onScreen) {
 		left = std::max<int>(mi.rcWork.left, std::min<int>(left, mi.rcWork.right - ww));
 		top = std::max<int>(mi.rcWork.top, std::min<int>(top, mi.rcWork.bottom - wh));
 	}
-	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE | (scrollHeight > 0 ? SWP_FRAMECHANGED : 0));
 	if (!pages.empty()) showPage(page);
+}
+
+void Form::scrollTo(int to) {
+	if (dialog == nullptr || scrollHeight <= 0) return;
+	RECT rc;
+	GetClientRect(dialog, &rc);
+	to = std::max(0, std::min(to, scrollHeight - (int)rc.bottom));
+	if (to == scrollY) return;
+	// The controls move with it; the fields' frames are drawn where they are.
+	ScrollWindowEx(dialog, 0, scrollY - to, nullptr, nullptr, nullptr, nullptr, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+	scrollY = to;
+	SCROLLINFO si = { sizeof si, SIF_POS };
+	si.nPos = to;
+	SetScrollInfo(dialog, SB_VERT, &si, TRUE);
+	UpdateWindow(dialog);
+}
+
+void Form::showFocus() {
+	if (dialog == nullptr || scrollHeight <= 0) return;
+	HWND focus = GetFocus();
+	if (focus == nullptr || !IsChild(dialog, focus)) return;
+	RECT r;
+	GetWindowRect(focus, &r);
+	MapWindowPoints(nullptr, dialog, (POINT*)&r, 2);
+	// A box in a drawn field: all of the field.
+	for (const FormField& x : fields)
+		if (x.frame.right > x.frame.left && (x.hwnd == focus || IsChild(x.hwnd, focus))) {
+			r = x.frame;
+			OffsetRect(&r, 0, -scrollY);
+		}
+	RECT rc;
+	GetClientRect(dialog, &rc);
+	const int pad = scaled(12, dpiOf(dialog));
+	if (r.top - pad < 0) scrollTo(scrollY + r.top - pad);
+	else if (r.bottom + pad > rc.bottom) scrollTo(scrollY + r.bottom + pad - rc.bottom);
 }
 
 void Form::refresh(int field) {
@@ -869,7 +965,10 @@ int Form::run(HWND owner) {
 std::string Form::text(int field) const {
 	const FormField& x = fields[field];
 	if (dialog == nullptr || x.hwnd == nullptr) return x.value;
-	return windowText(x.hwnd);
+	std::string s = windowText(x.hwnd);
+	// Several lines: each ends with \n alone, as on the Mac and Linux.
+	if (x.kind == FormField::Text && x.lines > 1) s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
+	return s;
 }
 
 void Form::setText(int field, const std::string& text) {
@@ -950,7 +1049,7 @@ bool askText(HWND parent, const std::string& title, const std::string& prompt, s
 
 // ---- A gate's settings -----------------------------------------------------------
 // The same settings the wx app's parameters dialog lists, each with a control
-// that suits its type. OK applies what changed (one undo step each).
+// that suits its type. Each change is one undo step.
 
 namespace {
 
@@ -968,8 +1067,12 @@ std::string trimmed(const std::string& s) {
 
 // A gate's settings (double-click it), as the Mac's inspector: the gate's
 // picture and name on top, then its settings, each applied as you make it
-// (a number once it's valid) and undone with Ctrl+Z; Rotate, Delete, Done.
+// -- what's typed when you leave the box (Tab, Enter, Done), so a word or a
+// number is one undo step, as on the Mac and Linux; a number once it's
+// valid -- and undone with Ctrl+Z; Rotate, Delete, Done.
 void showGateSettings(CircuitWindow* w, long gate) {
+	// Locked, or in Simulation View: nothing to change (the menu still offers it).
+	if (!w->canEdit()) { w->lockNudge(); return; }
 	CLDocument* doc = w->document();
 	struct Setting { std::string name, type, value; double min, max; int field; };
 	std::vector<Setting> settings;
@@ -1033,32 +1136,62 @@ void showGateSettings(CircuitWindow* w, long gate) {
 		f.add(x);
 	}
 	// A number is checked against the library's range, as the wx dialog does.
-	auto problem = [](const Setting& s, const std::string& v) -> std::string {
+	// A whole number is just digits: the engine would read 1e3 as 1 and 0x20
+	// as 0. `value` is what's applied (a whole number as the engine reads it).
+	auto problem = [](const Setting& s, const std::string& v, std::string& value) -> std::string {
+		value = v;
 		if (s.type != "INT" && s.type != "FLOAT") return "";
+		double x = 0;
 		char* end = nullptr;
-		const double x = strtod(v.c_str(), &end);
-		if (v.empty() || end == nullptr || *end != 0 || !std::isfinite(x) || (s.type == "INT" && x != std::floor(x)))
-			return strf("%s: enter %s.", s.name.c_str(), s.type == "INT" ? "a whole number" : "a number");
+		bool ok = !v.empty();
+		if (ok && s.type == "INT") {
+			errno = 0;
+			const long long whole = strtoll(v.c_str(), &end, 10);
+			ok = end != nullptr && *end == 0 && errno != ERANGE;
+			x = (double)whole;
+			if (ok) value = std::to_string(whole);
+		} else if (ok) {
+			x = strtod(v.c_str(), &end);
+			ok = end != nullptr && *end == 0 && std::isfinite(x) && v.find_first_of("xX") == std::string::npos;
+		}
+		if (!ok) return strf("%s: enter %s.", s.name.c_str(), s.type == "INT" ? "a whole number" : "a number");
 		if (x < s.min || x > s.max)
 			return strf("%s must be between %s and %s.", s.name.c_str(), numberText(s.min).c_str(), numberText(s.max).c_str());
 		return "";
 	};
-	// Each change as it's made, when it's valid.
+	// One undo step, when it's valid and something changed.
+	auto apply = [&](Setting& s, const std::string& typed) {
+		std::string v;
+		if (!problem(s, typed, v).empty() || v == s.value) return;
+		cl_gate_set_setting(doc, gate, s.name.c_str(), v.c_str());
+		s.value = v;
+		w->edited();
+	};
+	// A switch at once; typing shows what's wrong as it goes and is applied
+	// when the box is left (a file from Choose... at once).
 	f.onChange = [&](Form& form, int field) {
 		for (Setting& s : settings) {
 			if (s.field != field) continue;
-			const std::string v = s.type == "BOOL" ? (form.checked(field) ? "true" : "false") : trimmed(form.text(field));
-			const std::string bad = problem(s, v);
-			form.setProblem(bad);
-			if (!bad.empty() || v == s.value) return;
-			cl_gate_set_setting(doc, gate, s.name.c_str(), v.c_str());
-			s.value = v;
-			w->edited();
+			if (s.type == "BOOL") {
+				form.setProblem("");
+				apply(s, form.checked(field) ? "true" : "false");
+				return;
+			}
+			const std::string typed = trimmed(form.text(field));
+			std::string v;
+			form.setProblem(problem(s, typed, v));
+			if (GetFocus() != form.fields[field].hwnd) apply(s, typed);
+			return;
 		}
+	};
+	f.onLeave = [&](Form& form, int field) {
+		for (Setting& s : settings)
+			if (s.field == field && s.type != "BOOL") apply(s, trimmed(form.text(field)));
 	};
 	f.validate = [&](Form& form) -> std::string {
 		for (const Setting& s : settings) {
-			const std::string bad = problem(s, trimmed(form.text(s.field)));
+			std::string v;
+			const std::string bad = problem(s, trimmed(form.text(s.field)), v);
 			if (!bad.empty()) return bad;
 		}
 		return std::string();
@@ -1072,7 +1205,11 @@ void showGateSettings(CircuitWindow* w, long gate) {
 		w->run(CMD_DELETE);
 		return true;
 	};
-	f.run(w->window());
+	// Done, Enter, Escape or the close box keeps what was typed last (when
+	// it's valid); Delete took the gate.
+	if (f.run(w->window()) != 101)
+		for (Setting& s : settings)
+			if (s.type != "BOOL") apply(s, trimmed(f.fields[s.field].value));
 }
 
 // ---- Quick add (A) -------------------------------------------------------------
@@ -1287,6 +1424,8 @@ void showRamEditor(CircuitWindow* w, long gate) {
 	HWND editBox = nullptr;
 	const std::string libName = cl_gate_library_name(doc, gate) ? cl_gate_library_name(doc, gate) : "";
 	const std::string caption = cl_gate_caption(doc, gate);
+	// Locked, or in Simulation View: it can be watched, not changed.
+	const bool editable = w->canEdit();
 
 	const float addrW = 70, headH = 24, rowH = 25;
 	const float cellW = std::max(3, std::max(dDigits, decDigits) + 1) * 7.0f + 10;
@@ -1327,8 +1466,9 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			rt->SetTransform(was);
 		}
 		drawText(rt, caption, D2D1::RectF(70, 8, pw - 170, 32), 16, k, TextAlign::Leading, true);
-		drawText(rt, strf("%lu addresses × %d bits · click a value to change it", words, dataBits), D2D1::RectF(70, 32, pw - 170, 50), 11,
-		         withAlpha(k, 0.55f));
+		drawText(rt, strf("%lu addresses × %d bits · %s", words, dataBits,
+		                  editable ? "click a value to change it" : w->simView() ? "read only in Simulation View" : "locked"),
+		         D2D1::RectF(70, 32, pw - 170, 50), 11, withAlpha(k, 0.55f));
 		const char* names[] = { "Hex", "Decimal" };
 		float x = pw - 2 - (textWidth("Hex", 12, true) + 24) - (textWidth("Decimal", 12, true) + 24) - 4;
 		fillRound(rt, D2D1::RectF(x, 16, pw - 2, 44), 14, withAlpha(k, 0.07f));
@@ -1415,8 +1555,11 @@ void showRamEditor(CircuitWindow* w, long gate) {
 		if (keep) {
 			const std::string t = trimmed(windowText(box));
 			char* end = nullptr;
+			// No wider than a word, and not negative (strtoul would wrap -1).
+			const unsigned long most = dataBits >= (int)(sizeof(unsigned long) * 8) ? ULONG_MAX : (1UL << std::max(dataBits, 0)) - 1;
+			errno = 0;
 			const unsigned long v = strtoul(t.c_str(), &end, decimal ? 10 : 16);
-			if (!t.empty() && end && *end == 0) {
+			if (!t.empty() && t[0] != '-' && t[0] != '+' && end && *end == 0 && errno != ERANGE && v <= most) {
 				cl_ram_set(doc, gate, (unsigned long)addr, v);
 				w->edited();
 			} else if (!t.empty()) {
@@ -1437,6 +1580,7 @@ void showRamEditor(CircuitWindow* w, long gate) {
 		}
 		if (field != gridField) return;
 		finishEdit(form, true);
+		if (!editable) { w->lockNudge(); return; }
 		for (int r = 0; r <= visibleRows; r++) {
 			for (int col = 0; col < cols; col++) {
 				const unsigned long addr = (unsigned long)(scrollRow + r) * 16 + col;
@@ -1463,10 +1607,16 @@ void showRamEditor(CircuitWindow* w, long gate) {
 			}
 		}
 	};
+	// Three rows a notch; a touchpad's small steps add up to rows.
+	int wheelRest = 0;
 	f.onWheel = [&](Form& form, int field, int delta) {
 		if (field != gridField) return;
 		finishEdit(form, true);
-		scrollTo(form, scrollRow - delta / WHEEL_DELTA * 3);
+		wheelRest += delta;
+		const int rows = wheelRest * 3 / WHEEL_DELTA;
+		if (rows == 0) return;
+		wheelRest -= rows * WHEEL_DELTA / 3;
+		scrollTo(form, scrollRow - rows);
 	};
 	f.onChange = [&](Form& form, int field) {
 		if (field != jumpField) return;
@@ -1493,6 +1643,7 @@ void showRamEditor(CircuitWindow* w, long gate) {
 		const bool load = b == 0;
 		const std::vector<FileFilter> filters = { { "Memory files (*.cdm)", "*.cdm" }, { "All files", "*.*" } };
 		std::string file;
+		if (load && !editable) { w->lockNudge(); return false; }
 		if (load) {
 			const std::vector<std::string> files = chooseOpenFiles(form.dialog, "Load Memory", filters, false);
 			if (!files.empty()) file = files.front();
@@ -1634,9 +1785,9 @@ void showShortcutsWindow(HWND parent) {
 	struct Key { const char* keys; const char* what; };
 	struct Group { const char* title; std::vector<Key> keys; };
 	const std::vector<Group> groups = {
-		{ "Circuits", { { "Ctrl+N", "New circuit" }, { "Ctrl+O", "Open" }, { "Ctrl+S", "Save" },
+		{ "Circuits", { { "Ctrl+N", "New circuit" }, { "Ctrl+O", "Open" }, { "Ctrl+I", "Import a file" }, { "Ctrl+S", "Save" },
 		                { "Ctrl+Shift+S", "Save as" }, { "Ctrl+E", "Export as an image" },
-		                { "Ctrl+P", "Print" }, { "Ctrl+Q", "Quit" } } },
+		                { "Ctrl+P", "Print" }, { "Ctrl+Shift+W", "Close window" }, { "Ctrl+Q", "Quit" } } },
 		{ "Editing", { { "Ctrl+Z", "Undo" }, { "Ctrl+Y or Ctrl+Shift+Z", "Redo" }, { "Ctrl+X", "Cut" },
 		               { "Ctrl+C", "Copy" }, { "Ctrl+V", "Paste (it follows the pointer)" },
 		               { "Ctrl+D", "Duplicate" }, { "Ctrl+A", "Select all" }, { "Delete", "Delete" },
@@ -1645,14 +1796,14 @@ void showShortcutsWindow(HWND parent) {
 		               { "Shift+S", "Tidy up (preview first)" }, { "C", "Copy; while moving, connect nearby pins" },
 		               { "V", "Paste" }, { "X", "Cut" }, { "D", "Duplicate" }, { "Arrow keys", "Nudge the selection" },
 		               { "Shift+1 … Shift+0", "Palette category 1 … 10" } } },
-		{ "Moving around", { { "Ctrl+=", "Zoom in" }, { "Ctrl+-", "Zoom out" }, { "Ctrl+0", "Zoom to fit" },
+		{ "Moving around", { { "Ctrl+F", "Find a gate or label" }, { "Ctrl+=", "Zoom in" }, { "Ctrl+-", "Zoom out" }, { "Ctrl+0", "Zoom to fit" },
 		               { "Space", "Tap: zoom to fit. Hold and drag: move around" }, { "Ctrl+1", "Actual size" },
 		               { "Ctrl+.", "Show or hide the palette" }, { "Middle button drag", "Move around" } } },
 		{ "Simulation", { { "Ctrl+R", "Simulation View" }, { "Ctrl+Shift+R", "Step once" }, { "T", "Truth table" },
 		               { "Ctrl+G", "Oscilloscope" } } },
 		{ "Tabs", { { "Ctrl+T", "New tab" }, { "Ctrl+W", "Close tab" }, { "Ctrl+Shift+T", "Reopen the tab you closed" },
-		            { "Ctrl+Tab", "Next tab" }, { "Ctrl+Shift+Tab", "Previous tab" } } },
-		{ "App", { { "?", "Every shortcut (this list)" }, { "Ctrl+Shift+D", "Dark mode" },
+		            { "Ctrl+Tab or Ctrl+PgDn", "Next tab" }, { "Ctrl+Shift+Tab or Ctrl+PgUp", "Previous tab" } } },
+		{ "App", { { "? or Ctrl+/", "Every shortcut (this list)" }, { "Ctrl+Shift+D", "Dark mode" },
 		           { "Ctrl+,", "Preferences" }, { "F1", "Help" } } },
 	};
 	std::vector<std::vector<std::string>> rows;
@@ -1670,7 +1821,7 @@ void showShortcutsWindow(HWND parent) {
 	list.kind = FormField::List;
 	list.lines = 24;
 	list.choices = { "Keys", "What it does" };
-	list.columnWidths = { 190, 0 };
+	list.columnWidths = { 210, 0 };
 	const int l = f.add(list);
 	f.onInit = [&](Form& form) { form.setRows(l, rows); };
 	f.run(parent);

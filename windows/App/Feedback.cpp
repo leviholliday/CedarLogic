@@ -344,7 +344,9 @@ std::string envOr(const char* name, const char* fallback) {
 	return n > 0 && n < sizeof buf ? std::string(buf, n) : std::string(fallback);
 }
 
-struct Reply { int status = 0; std::string body; bool reached = false; };
+// `sent`: the request went out whole (so the server may have acted on it);
+// `reached`: an answer came back.
+struct Reply { int status = 0; std::string body; bool sent = false, reached = false; };
 
 Reply request(const std::string& method, const std::string& pathAndQuery, const std::string& type, const std::string& token,
               const std::string& body) {
@@ -370,9 +372,9 @@ Reply request(const std::string& method, const std::string& pathAndQuery, const 
 	                        : nullptr;
 	std::wstring headers = W("content-type: " + type + "\r\nx-cedarlogic-key: " + envOr("CL_FEEDBACK_KEY", CL_FEEDBACK_KEY) + "\r\n");
 	if (!token.empty()) headers += W("x-upload-token: " + token + "\r\n");
-	if (req && WinHttpSendRequest(req, headers.c_str(), (DWORD)-1L, body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data(),
-	                              (DWORD)body.size(), (DWORD)body.size(), 0) &&
-	    WinHttpReceiveResponse(req, nullptr)) {
+	r.sent = req && WinHttpSendRequest(req, headers.c_str(), (DWORD)-1L, body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data(),
+	                                   (DWORD)body.size(), (DWORD)body.size(), 0);
+	if (r.sent && WinHttpReceiveResponse(req, nullptr)) {
 		r.reached = true;
 		DWORD code = 0, size = sizeof code;
 		WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &size,
@@ -437,9 +439,13 @@ struct Sending {
 	}
 };
 
-// Tried again a few times: a flaky connection shouldn't lose a report.
+// Tried again a few times: a flaky connection shouldn't lose a report. A
+// request that makes something (`repeatable` false: the report itself) is
+// only sent again when the server can't have acted on it -- it never got
+// all of it, or said it was too busy -- so a slow answer doesn't file the
+// report twice.
 Reply perform(const std::string& method, const std::string& path, const std::string& type, const std::string& token,
-              const std::string& body, std::string& failure) {
+              const std::string& body, std::string& failure, bool repeatable = true) {
 	Reply r;
 	for (int attempt = 0; attempt < 3; attempt++) {
 		r = request(method, path, type, token, body);
@@ -448,16 +454,26 @@ Reply perform(const std::string& method, const std::string& path, const std::str
 			const std::string why = jsonField(r.body, "error");
 			failure = why.empty() ? strf("The feedback server said no (%d).", r.status) : why;
 			if (r.status < 500 && r.status != 429) return r;
+			if (!repeatable && r.status != 429 && r.status != 503) break;
 		} else {
 			failure = "Couldn't reach the feedback server. Check the internet connection and try again.";
+			if (!repeatable && r.sent) break;
 		}
-		Sleep((DWORD)(700 * std::pow(2, attempt)));
+		if (attempt < 2) Sleep((DWORD)(700 * std::pow(2, attempt)));
 	}
 	r.status = 0;
 	return r;
 }
 
 void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment> files) {
+	// The copy of the circuit made for this send goes when it's done (each
+	// Send or Try Again makes its own).
+	struct Tidy {
+		const std::vector<Attachment>& files;
+		~Tidy() {
+			for (const Attachment& a : files) if (a.kind == Attachment::Circuit) DeleteFileW(W(a.file).c_str());
+		}
+	} tidy{ files };
 	auto fail = [&](const std::string& why) {
 		{
 			std::lock_guard<std::mutex> g(s->lock);
@@ -466,7 +482,7 @@ void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment
 		s->state = 2;
 	};
 	std::string failure;
-	const Reply created = perform("POST", "/api/feedback", "application/json", "", body, failure);
+	const Reply created = perform("POST", "/api/feedback", "application/json", "", body, failure, false);
 	if (created.status < 200 || created.status >= 300) { fail(failure); return; }
 	const std::string id = jsonField(created.body, "id"), token = jsonField(created.body, "uploadToken");
 	const long long chunk = std::max(65536LL, atoll(jsonField(created.body, "chunkSize").c_str()));
@@ -488,6 +504,56 @@ void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment
 	const Reply r = perform("POST", "/api/feedback/complete?id=" + percent(id), "application/json", token, "", failure);
 	if (r.status < 200 || r.status >= 300) { fail(failure); return; }
 	s->state = 1;
+}
+
+// The send going on, if any: it carries on when the window is closed, and
+// is finished here then -- the draft cleared, or a note that it wasn't sent
+// (Send Feedback shows why next time it opens).
+std::shared_ptr<Sending>& inFlight() {
+	static std::shared_ptr<Sending> s;
+	return s;
+}
+UINT_PTR g_watch = 0;
+std::string g_lastFailure;
+
+// Sent: the draft is cleared for next time.
+void clearSentDraft() {
+	Draft& d = draft();
+	d.clearAttachments();
+	d.title.clear();
+	d.details.clear();
+	d.chosen.clear();
+	d.declined.clear();
+	d.priority = 1;
+	d.includeCircuit = false;
+	d.save();
+}
+
+CircuitWindow* liveWindow(CircuitWindow* w) {
+	const std::vector<CircuitWindow*>& all = circuitWindows();
+	if (std::find(all.begin(), all.end(), w) != all.end()) return w;
+	return all.empty() ? nullptr : all.front();
+}
+
+void CALLBACK watchSend(HWND, UINT, UINT_PTR, DWORD) {
+	const std::shared_ptr<Sending> s = inFlight();
+	if (s && s->state == 0) return;
+	KillTimer(nullptr, g_watch);
+	g_watch = 0;
+	if (!s) return;
+	inFlight().reset();
+	CircuitWindow* w = liveWindow(draft().win);
+	if (s->state == 1) {
+		clearSentDraft();
+		if (w) w->note("Feedback sent. Thank you!");
+		return;
+	}
+	{
+		std::lock_guard<std::mutex> g(s->lock);
+		g_lastFailure = s->failure;
+	}
+	if (w) w->note("Your feedback wasn't sent. Open Send Feedback to try again.");
+	MessageBeep(MB_ICONWARNING);
 }
 
 // ---- The window ------------------------------------------------------------------
@@ -578,16 +644,19 @@ void paintPriority(ID2D1RenderTarget* rt, float width) {
 const float kTileW = 116, kTileH = 72, kThumbW = 112;
 
 D2D1_RECT_F tileRect(int i) { return D2D1::RectF(i * (kTileW + 10), 6, i * (kTileW + 10) + kTileW, 6 + kTileH); }
-D2D1_RECT_F thumbRect(size_t i) {
-	const float x0 = 2 * (kTileW + 10) + 8;
-	return D2D1::RectF(x0 + i * (kThumbW + 12), 6, x0 + i * (kThumbW + 12) + kThumbW, 6 + kTileH);
+// The pictures after the two tiles, narrower if all three wouldn't fit (the
+// last one's × too, which stands 6 points past it).
+D2D1_RECT_F thumbRect(size_t i, float width) {
+	const float x0 = 2 * (kTileW + 10) + 8, gap = 12;
+	const float tw = std::max(40.0f, std::min(kThumbW, (width - x0 - 6 - (kMaxImages - 1) * gap) / kMaxImages));
+	return D2D1::RectF(x0 + i * (tw + gap), 6, x0 + i * (tw + gap) + tw, 6 + kTileH);
 }
-D2D1_RECT_F closeRect(size_t i) {
-	const D2D1_RECT_F t = thumbRect(i);
+D2D1_RECT_F closeRect(size_t i, float width) {
+	const D2D1_RECT_F t = thumbRect(i, width);
 	return D2D1::RectF(t.right - 12, t.top - 6, t.right + 6, t.top + 12);
 }
 
-void paintAttachments(ID2D1RenderTarget* rt, float) {
+void paintAttachments(ID2D1RenderTarget* rt, float width) {
 	const Look l = look();
 	const bool more = draft().imageCount() < kMaxImages;
 	const wchar_t glyphs[] = { 0xE722, 0xEB9F };   // camera, photo
@@ -602,14 +671,14 @@ void paintAttachments(ID2D1RenderTarget* rt, float) {
 	}
 	for (size_t i = 0; i < draft().attachments.size(); i++) {
 		const Attachment& a = draft().attachments[i];
-		const D2D1_RECT_F r = thumbRect(i);
+		const D2D1_RECT_F r = thumbRect(i, width);
 		fillRound(rt, r, 9, D2D1::ColorF(0, 0, 0, 0.3f));
 		if (a.thumb) {
 			ID2D1Bitmap* bmp = nullptr;
 			if (SUCCEEDED(rt->CreateBitmapFromWicBitmap(a.thumb, &bmp))) {
 				const D2D1_SIZE_F s = bmp->GetSize();
 				// Filled, centred, clipped to the rounded card.
-				const float k = std::max(kThumbW / s.width, kTileH / s.height);
+				const float k = std::max((r.right - r.left) / s.width, kTileH / s.height);
 				const float w = s.width * k, h = s.height * k;
 				ID2D1Factory* f = nullptr;
 				rt->GetFactory(&f);
@@ -626,7 +695,7 @@ void paintAttachments(ID2D1RenderTarget* rt, float) {
 			}
 		}
 		strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 9, l.line);
-		const D2D1_RECT_F c = closeRect(i);
+		const D2D1_RECT_F c = closeRect(i, width);
 		fillCircle(rt, D2D1::Point2F((c.left + c.right) / 2, (c.top + c.bottom) / 2), 8.5f, D2D1::ColorF(0, 0, 0, 0.65f));
 		drawIcon(rt, Icon::Dismiss, c, 8, D2D1::ColorF(1, 1, 1));
 	}
@@ -790,7 +859,12 @@ void show(CircuitWindow* win) {
 	also.label = "Also sent: " + dev.line;
 	f.add(also);
 
-	std::shared_ptr<Sending> sending;
+	std::shared_ptr<Sending>& sending = inFlight();
+	// This window follows a send that's still going.
+	if (g_watch) {
+		KillTimer(nullptr, g_watch);
+		g_watch = 0;
+	}
 	auto collect = [&](Form& form) {
 		d.title = form.text(titleField);
 		d.details = form.text(detailsField);
@@ -806,6 +880,14 @@ void show(CircuitWindow* win) {
 	f.onInit = [&](Form& form) {
 		refreshTagsHeading(form);
 		form.enable(contactField, !trimmed(d.email).empty());
+		if (sending) {
+			if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
+			form.setProblem("Sending…");
+		} else if (!g_lastFailure.empty()) {
+			if (HWND send = GetDlgItem(form.dialog, 100)) SetWindowTextW(send, L"Try Again");
+			form.setProblem(g_lastFailure);
+		}
+		g_lastFailure.clear();
 	};
 	f.onChange = [&](Form& form, int field) {
 		if (field == titleField || field == detailsField) {
@@ -829,9 +911,9 @@ void show(CircuitWindow* win) {
 			for (int i = 0; i < 4; i++) if (inRect(pillRect(i, w), x, y)) d.priority = i;
 		} else if (field == shotsField) {
 			for (size_t i = 0; i < d.attachments.size(); i++)
-				if (inRect(closeRect(i), x, y)) { d.remove(i); form.refresh(field); return; }
+				if (inRect(closeRect(i, w), x, y)) { d.remove(i); form.refresh(field); return; }
 			for (size_t i = 0; i < d.attachments.size(); i++)
-				if (inRect(thumbRect(i), x, y)) { openExternally(form.dialog, d.attachments[i].file); return; }
+				if (inRect(thumbRect(i, w), x, y)) { openExternally(form.dialog, d.attachments[i].file); return; }
 			if (inRect(tileRect(0), x, y)) attachScreenshot(form);
 			else if (inRect(tileRect(1), x, y)) attachImages(form);
 		}
@@ -875,7 +957,8 @@ void show(CircuitWindow* win) {
 			.raw("app", dev.app).raw("system", dev.system).raw("context", dev.context);
 		sending = std::make_shared<Sending>();
 		std::thread(upload, sending, body.str(), files).detach();
-		for (HWND b : form.buttonWindows) EnableWindow(b, FALSE);
+		// Close stays: it carries on without the window.
+		if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
 		form.setProblem("Sending…");
 		return false;
 	};
@@ -887,15 +970,8 @@ void show(CircuitWindow* win) {
 			return;
 		}
 		if (sending->state == 1) {
-			// Sent: the draft is cleared for next time.
-			d.clearAttachments();
-			d.title.clear();
-			d.details.clear();
-			d.chosen.clear();
-			d.declined.clear();
-			d.priority = 1;
-			d.includeCircuit = false;
-			d.save();
+			sending.reset();
+			clearSentDraft();
 			win->note("Feedback sent. Thank you!");
 			EndDialog(form.dialog, IDOK);
 			return;
@@ -906,8 +982,10 @@ void show(CircuitWindow* win) {
 			why = sending->failure;
 		}
 		sending.reset();
-		for (HWND b : form.buttonWindows) EnableWindow(b, TRUE);
-		if (HWND send = GetDlgItem(form.dialog, 100)) SetWindowTextW(send, L"Try Again");
+		if (HWND send = GetDlgItem(form.dialog, 100)) {
+			EnableWindow(send, TRUE);
+			SetWindowTextW(send, L"Try Again");
+		}
 		form.setProblem(why);
 		MessageBeep(MB_ICONWARNING);
 	};
@@ -922,6 +1000,8 @@ void show(CircuitWindow* win) {
 		prefs().studentName = trimmed(f.fields[nameField].value);
 		d.save();
 	}
+	// Closed while sending: finished without it.
+	if (sending) g_watch = SetTimer(nullptr, 0, 400, watchSend);
 }
 
 }  // namespace feedback
