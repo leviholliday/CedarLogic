@@ -155,9 +155,38 @@ jobs:
           timeout 90 "$A" --truth-tab 0 --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 1 --dialog truth-table --screenshot "$PWD/renders/truth-table-kmap.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 2 --dialog truth-table --screenshot "$PWD/renders/truth-table-formulas.png" res/samples/practice.cdl || true
-          # Check My Circuit: the lights against a formula, all right, then with a light that's wrong.
-          timeout 90 "$A" --dialog check --check "Y1 = A ^ B ^ C; Y2 = AB; Y3 = AC; Y4 = BC" --screenshot "$PWD/renders/check.png" res/samples/practice.cdl || true
-          timeout 90 "$A" --dark --dialog check --check "Y1 = A ^ B ^ C; Y2 = AB; Y3 = A + C; Y4 = BC" --screenshot "$PWD/renders/check-wrong-dark.png" res/samples/practice.cdl || true
+          # Check My Circuit: a half adder's lights against its formula (a match), then
+          # against a wrong one in other names (picked by position, a wrong row in red);
+          # and the practice circuit's (its unknown lights noted).
+          mkdir -p check
+          cat > check/half-adder.cdl <<'EOF'
+          (cedarlogic
+            (version 3)
+            (generator "CedarLogic 4.0.0")
+            (page 0
+              (name "Half Adder")
+              (gate "AA_TOGGLE" (uuid "1") (at -12 4) (angle 0) (lparam "OUTPUT_NUM" "0"))
+              (gate "AA_LABEL" (uuid "2") (at -15 4) (angle 0) (gparam "LABEL_TEXT" "A") (gparam "TEXT_HEIGHT" "2"))
+              (gate "AA_TOGGLE" (uuid "3") (at -12 -2) (angle 0) (lparam "OUTPUT_NUM" "0"))
+              (gate "AA_LABEL" (uuid "4") (at -15 -2) (angle 0) (gparam "LABEL_TEXT" "B") (gparam "TEXT_HEIGHT" "2"))
+              (gate "AI_XOR2" (uuid "5") (at 4 3) (angle 0))
+              (gate "AA_AND2" (uuid "6") (at 4 -3) (angle 0))
+              (gate "GA_LED" (uuid "7") (at 12 3) (angle 0))
+              (gate "AA_LABEL" (uuid "8") (at 15 3) (angle 0) (gparam "LABEL_TEXT" "S") (gparam "TEXT_HEIGHT" "2"))
+              (gate "GA_LED" (uuid "9") (at 12 -3) (angle 0))
+              (gate "AA_LABEL" (uuid "10") (at 16 -3) (angle 0) (gparam "LABEL_TEXT" "Cout") (gparam "TEXT_HEIGHT" "2"))
+              (wire (ids "1001")
+                (seg "0" h (pts -10 4 1 4) (connect "1" "OUT_0") (connect "5" "IN_0") (cross -4 "1"))
+                (seg "1" v (pts -4 -2 -4 4) (connect "6" "IN_0") (cross 4 "0")))
+              (wire (ids "1002")
+                (seg "0" h (pts -10 -2 1 -2) (connect "3" "OUT_0") (connect "6" "IN_1") (cross -6 "1"))
+                (seg "1" v (pts -6 -2 -6 2) (connect "5" "IN_1") (cross -2 "0")))
+              (wire (ids "1003") (seg "0" h (pts 7 3 11 3) (connect "5" "OUT") (connect "7" "N_in0")))
+              (wire (ids "1004") (seg "0" h (pts 7 -3 11 -3) (connect "6" "OUT") (connect "9" "N_in0")))))
+          EOF
+          timeout 90 "$A" --dialog check --check "S = A ^ B; Cout = AB" --screenshot "$PWD/renders/check.png" check/half-adder.cdl || true
+          timeout 90 "$A" --dark --dialog check --check "Sum = A + B; Carry = AB" --screenshot "$PWD/renders/check-wrong-dark.png" check/half-adder.cdl || true
+          timeout 90 "$A" --dialog check --check "Y1 = A ^ B ^ C; Y2 = AB; Y3 = AC; Y4 = BC" --screenshot "$PWD/renders/check-practice.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
           for p in 0 1 2 3 4; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
           timeout 90 "$A" --dialog tour --screenshot "$PWD/renders/tour.png" || true
