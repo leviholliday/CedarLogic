@@ -105,6 +105,7 @@ const Command kCommands[] = {
 	{ "sim-view", [](CircuitWindow* w) { w->toggleSimView(); }, true },
 	{ "lock", [](CircuitWindow* w) { w->toggleLock(); }, true },
 	{ "truth-table", [](CircuitWindow* w) { w->makeTruthTable(); }, false },
+	{ "check-circuit", [](CircuitWindow* w) { w->checkCircuit(); }, false },
 	{ "scope", [](CircuitWindow* w) { w->toggleScope(); }, false },
 	{ "new-tab", [](CircuitWindow* w) { w->newPage(); }, false },
 	{ "close-tab", [](CircuitWindow* w) {
@@ -2050,6 +2051,7 @@ void CircuitWindow::toggleLock() {
 }
 
 void CircuitWindow::makeTruthTable() { showTruthTable(this, currentPage()); redraw(); }
+void CircuitWindow::checkCircuit() { showTruthTable(this, currentPage(), true); redraw(); }
 
 // The oscilloscope docks under the canvas, as on the Mac (Ctrl+G again, or
 // its ×, puts it away).

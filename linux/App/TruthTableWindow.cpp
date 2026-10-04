@@ -3,8 +3,10 @@
 // table (click a column's name to rename it), a Karnaugh map for every light
 // with the groups drawn on, and each light's simplest sum of products and
 // product of sums, with NOT as a bar over the letter and a way to build them
-// as gates. Copy puts the table on the clipboard tab-separated (it pastes
-// into a document or a spreadsheet); Export saves it as CSV.
+// as gates. And Check: the lights against a formula or truth table the
+// assignment gives (the core's cl_check_*, as the Mac app), wrong rows shown.
+// Copy puts the table on the clipboard tab-separated (it pastes into a
+// document or a spreadsheet); Export saves it as CSV.
 
 #include "Brand.h"
 #include "Dialogs.h"
@@ -15,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <map>
 
 namespace {
 
@@ -88,6 +91,84 @@ std::string formulaName(const std::string& s, const std::string& fallback) {
 	return kept.substr(0, 1) + kept.substr(digits);
 }
 
+// ---- The last check of each circuit ----
+// Saved circuits' in ~/.config/CedarLogic/checks.ini (a group per file and
+// page); unsaved ones' only while the app runs.
+struct SavedCheck {
+	int kind = 0;   // 0 a formula, 1 a truth table
+	std::string text;
+	std::map<std::string, std::string> names;   // asked-for name -> the circuit's
+};
+std::map<std::string, SavedCheck> gUnsavedChecks;
+
+std::string checksFile() { return std::string(g_get_user_config_dir()) + "/CedarLogic/checks.ini"; }
+std::string checkGroup(std::string key) {
+	for (char& c : key) if (c == '[' || c == ']' || c == '\n' || c == '\r') c = '_';
+	return key;
+}
+
+bool loadCheck(const std::string& key, SavedCheck& out) {
+	if (key.empty()) return false;
+	if (key.rfind("unsaved-", 0) == 0) {
+		auto it = gUnsavedChecks.find(key);
+		if (it == gUnsavedChecks.end()) return false;
+		out = it->second;
+		return true;
+	}
+	GKeyFile* k = g_key_file_new();
+	bool ok = false;
+	const std::string group = checkGroup(key);
+	if (g_key_file_load_from_file(k, checksFile().c_str(), G_KEY_FILE_NONE, nullptr) && g_key_file_has_group(k, group.c_str())) {
+		out.kind = g_key_file_get_integer(k, group.c_str(), "kind", nullptr);
+		auto str = [&](const char* name) {
+			gchar* v = g_key_file_get_string(k, group.c_str(), name, nullptr);
+			std::string s = v ? v : "";
+			g_free(v);
+			return s;
+		};
+		out.text = str("text");
+		const std::string names = str("names");
+		size_t at = 0;
+		while (at < names.size()) {
+			size_t end = names.find('\n', at);
+			if (end == std::string::npos) end = names.size();
+			const std::string line = names.substr(at, end - at);
+			const size_t tab = line.find('\t');
+			if (tab != std::string::npos) out.names[line.substr(0, tab)] = line.substr(tab + 1);
+			at = end + 1;
+		}
+		ok = true;
+	}
+	g_key_file_free(k);
+	return ok;
+}
+
+void saveCheck(const std::string& key, const SavedCheck& c) {
+	if (key.empty()) return;
+	if (key.rfind("unsaved-", 0) == 0) { gUnsavedChecks[key] = c; return; }
+	GKeyFile* k = g_key_file_new();
+	g_key_file_load_from_file(k, checksFile().c_str(), G_KEY_FILE_KEEP_COMMENTS, nullptr);
+	const std::string group = checkGroup(key);
+	g_key_file_set_integer(k, group.c_str(), "kind", c.kind);
+	g_key_file_set_string(k, group.c_str(), "text", c.text.c_str());
+	std::string names;
+	for (auto& [a, b] : c.names) names += a + "\t" + b + "\n";
+	g_key_file_set_string(k, group.c_str(), "names", names.c_str());
+	gchar* dir = g_path_get_dirname(checksFile().c_str());
+	g_mkdir_with_parents(dir, 0700);
+	g_free(dir);
+	g_key_file_save_to_file(k, checksFile().c_str(), nullptr);
+	g_key_file_free(k);
+}
+
+// Names match whatever their case or spacing, as the core matches them.
+std::string nameKey(const std::string& s) {
+	std::string k;
+	for (unsigned char c : s) if (isalnum(c) || c >= 0x80) k += (char)tolower(c);
+	return k;
+}
+
+const int kCheckTab = 3;
 int gTab = 0;   // the tab last shown, for next time
 int gOpen = 0;  // truth tables open now
 
@@ -101,6 +182,20 @@ struct TruthWindow {
 	int tab = 0;
 	bool groupsOfOnes = true;
 	std::string buildText;   // set when "Build This as a Circuit" was chosen
+
+	// Check: what the assignment gives, and how the circuit compares.
+	std::string checkKey;
+	SavedCheck want;
+	CLCheck* check = nullptr;
+	std::string checkError;   // the formula couldn't be read
+	bool onlyWrong = false, scrollToWrong = false;
+	GtkWidget* checkScroll = nullptr;
+	GtkWidget* checkView = nullptr;
+	GtkCssProvider* checkCss = nullptr;
+	int placed[4] = { -1, -1, -1, -1 };
+	bool cssDark = false, cssSet = false;
+
+	~TruthWindow() { if (check) cl_check_free(check); }
 
 	Sheet sheet;
 	float scroll = 0, contentH = 0;
@@ -213,17 +308,25 @@ struct TruthWindow {
 			scroll = std::max(0.0f, std::min(scroll + dy, contentH - view));
 		};
 		sheet.onKey = [this](Sheet& s, guint k, guint state) -> bool {
+			if (checkView && gtk_widget_has_focus(checkView)) return false;   // typing what's asked for
 			if (k == GDK_KEY_Return || k == GDK_KEY_KP_Enter) { s.close(); return true; }
 			if (k == GDK_KEY_Tab || k == GDK_KEY_ISO_Left_Tab) {
-				tab = (tab + ((state & GDK_SHIFT_MASK) || k == GDK_KEY_ISO_Left_Tab ? 2 : 1)) % 3;
+				tab = (tab + ((state & GDK_SHIFT_MASK) || k == GDK_KEY_ISO_Left_Tab ? 3 : 1)) % 4;
 				scroll = 0;
 				return true;
 			}
 			if ((state & GDK_CONTROL_MASK) && (k == GDK_KEY_c || k == GDK_KEY_C)) { copy("table", tableText('\t')); return true; }
 			return false;
 		};
+		sheet.onOpen = [this](Sheet& sh) { openCheckEditor(sh); };
+		sheet.onClose = [this](Sheet&) {
+			if (checkView) g_signal_handlers_disconnect_by_data(gtk_text_view_get_buffer(GTK_TEXT_VIEW(checkView)), this);
+		};
+		recheck();
 		sheet.run(owner->window());
 		if (copiedTimer) g_source_remove(copiedTimer);
+		if (checkCss) g_object_unref(checkCss);
+		saveCheck(checkKey, want);
 	}
 
 	void paint(Sheet& s, cairo_t* cr, float w, float h) {
@@ -254,9 +357,9 @@ struct TruthWindow {
 			drawTextMid(cr, format("%d switch%s → %d light%s · %d rows", n(), n() == 1 ? "" : "es", outputs(), outputs() == 1 ? "" : "s",
 			                       (int)rows.size()),
 			            rectF(160, 27, w - 22, 50), 12.5f, kBandDim);
-			const char* tabs[] = { "Truth Table", "Karnaugh Map", "Formulas" };
+			const char* tabs[] = { "Truth Table", "Karnaugh Map", "Formulas", "Check" };
 			float x = 22;
-			for (int i = 0; i < 3; i++) {
+			for (int i = 0; i < 4; i++) {
 				const float tw = textWidth(tabs[i], 12.5f, true) + 26;
 				const RectF r = rectF(x, 62, x + tw, 90);
 				const bool on = tab == i, isHot = s.hotNext();
@@ -268,12 +371,12 @@ struct TruthWindow {
 		}
 
 		float y = 104 + 14;
-		if (sequential) {
+		if (sequential && tab != kCheckTab) {
 			drawTextMid(cr, "This page has clocks or flip-flops, so outputs can depend on what happened before.", rectF(22, y, w - 22, y + 18),
 			            12, dim);
 			y += 22;
 		}
-		if (unsettled > 0) {
+		if (unsettled > 0 && tab != kCheckTab) {
 			drawTextMid(cr, format("%d row%s never stopped changing (a clock or an oscillation), so those outputs are a snapshot.", unsettled,
 			                       unsettled == 1 ? "" : "s"),
 			            rectF(22, y, w - 22, y + 18), 12, kOrange);
@@ -302,6 +405,10 @@ struct TruthWindow {
 			s.hit(done, [&s] { s.close(); });
 		}
 
+		// Check's editor stays put above what scrolls.
+		if (tab == kCheckTab) y = drawCheckControls(s, cr, y, w, ink, dim, accent, dark);
+		else showCheckEditor(false);
+
 		// The tab's content, scrolling.
 		contentRect = rectF(22, y, w - 22, fy - 14);
 		{
@@ -317,6 +424,7 @@ struct TruthWindow {
 		switch (tab) {
 		case 1: contentH = drawKMaps(s, cr, contentRect, ink, dim, accent, dark); break;
 		case 2: contentH = drawFormulas(s, cr, contentRect, ink, dim, accent, dark); break;
+		case kCheckTab: contentH = drawCheck(s, cr, contentRect, ink, dim, accent, dark); break;
 		default: contentH = drawTable(s, cr, contentRect, ink, dim, accent, dark); break;
 		}
 		cairo_restore(cr);
@@ -325,6 +433,317 @@ struct TruthWindow {
 			s.hits[i].r.bottom -= scroll;
 			if (s.hits[i].r.bottom < contentRect.top || s.hits[i].r.top > contentRect.bottom) s.hits[i].r = rectF(0, 0, 0, 0);
 		}
+	}
+
+	// ---- Check ----
+
+	void recheck() {
+		if (check) { cl_check_free(check); check = nullptr; }
+		checkError.clear();
+		bool blank = true;
+		for (char c : want.text) if (!g_ascii_isspace(c)) blank = false;
+		if (!blank) {
+			CLTruthTable* tt = cl_tt_new(inputs, sequential, unsettled);
+			for (const std::string& name : names) cl_tt_add_name(tt, name.c_str());
+			for (const std::string& row : rows) cl_tt_add_row(tt, row.c_str());
+			std::string mapping;
+			for (auto& [a, b] : want.names) mapping += a + "\t" + b + "\n";
+			if (want.kind == 0) {
+				formula::Parsed p;
+				std::string error;
+				if (formula::parse(want.text, p, error)) check = cl_check_expected(tt, formula::checkSpec(p).c_str(), mapping.c_str());
+				else checkError = error;
+			} else {
+				check = cl_check_table(tt, want.text.c_str(), mapping.c_str());
+			}
+			cl_tt_free(tt);
+		}
+		scrollToWrong = true;
+		sheet.redraw();
+	}
+
+	void openCheckEditor(Sheet& sh) {
+		checkView = gtk_text_view_new();
+		gtk_widget_set_name(checkView, "cl-check-text");
+		gtk_text_view_set_monospace(GTK_TEXT_VIEW(checkView), TRUE);
+		gtk_text_view_set_left_margin(GTK_TEXT_VIEW(checkView), 10);
+		gtk_text_view_set_top_margin(GTK_TEXT_VIEW(checkView), 7);
+		gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(checkView)), want.text.c_str(), -1);
+		checkScroll = gtk_scrolled_window_new(nullptr, nullptr);
+		gtk_widget_set_name(checkScroll, "cl-check-scroll");
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(checkScroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+		gtk_container_add(GTK_CONTAINER(checkScroll), checkView);
+		gtk_widget_set_halign(checkScroll, GTK_ALIGN_START);
+		gtk_widget_set_valign(checkScroll, GTK_ALIGN_START);
+		gtk_widget_show(checkView);
+		gtk_widget_set_no_show_all(checkScroll, TRUE);
+		checkCss = gtk_css_provider_new();
+		for (GtkWidget* wdg : { checkScroll, checkView })
+			gtk_style_context_add_provider(gtk_widget_get_style_context(wdg), GTK_STYLE_PROVIDER(checkCss),
+			                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+		gtk_overlay_add_overlay(GTK_OVERLAY(sh.overlay), checkScroll);
+		g_signal_connect(gtk_text_view_get_buffer(GTK_TEXT_VIEW(checkView)), "changed", CL_CALLBACK(+[](GtkTextBuffer* b, gpointer self) {
+			TruthWindow* t = static_cast<TruthWindow*>(self);
+			GtkTextIter s, e;
+			gtk_text_buffer_get_bounds(b, &s, &e);
+			gchar* text = gtk_text_buffer_get_text(b, &s, &e, FALSE);
+			t->want.text = text ? text : "";
+			g_free(text);
+			t->recheck();
+		}), this);
+		if (tab == kCheckTab) sh.initialFocus = checkView;
+	}
+
+	void showCheckEditor(bool show, float x = 0, float y = 0, float w = 0, float h = 0) {
+		if (!checkScroll) return;
+		if (!show) {
+			if (gtk_widget_get_visible(checkScroll)) gtk_widget_hide(checkScroll);
+			return;
+		}
+		const int want4[4] = { (int)std::lround(x), (int)std::lround(y), (int)std::lround(w), (int)std::lround(h) };
+		if (!std::equal(want4, want4 + 4, placed)) {
+			std::copy(want4, want4 + 4, placed);
+			gtk_widget_set_margin_start(checkScroll, want4[0]);
+			gtk_widget_set_margin_top(checkScroll, want4[1]);
+			gtk_widget_set_size_request(checkScroll, want4[2], want4[3]);
+		}
+		const bool dark = prefs().dark;
+		if (!cssSet || cssDark != dark) {
+			cssSet = true;
+			cssDark = dark;
+			const std::string css = std::string("#cl-check-scroll, #cl-check-text, #cl-check-text text { background-color: transparent; border: none; }"
+			                                    "#cl-check-text text { color: ") + (dark ? "#eeeeee" : "#1a1a1a") + "; }";
+			gtk_css_provider_load_from_data(checkCss, css.c_str(), -1, nullptr);
+		}
+		if (!gtk_widget_get_visible(checkScroll)) gtk_widget_show(checkScroll);
+	}
+
+	// What the assignment gives: a formula or a table, and the box to type it in.
+	float drawCheckControls(Sheet& s, cairo_t* cr, float y, float w, Color ink, Color dim, Color accent, bool dark) {
+		float x = 22;
+		const char* intro = "The assignment gives";
+		drawTextMid(cr, intro, rectF(x, y, x + 200, y + 28), 12.5f, dim);
+		x += textWidth(intro, 12.5f) + 10;
+		const char* segs[] = { "A formula", "A truth table" };
+		const float segW[2] = { textWidth(segs[0], 12) + 24, textWidth(segs[1], 12) + 24 };
+		fillRound(cr, rectF(x, y, x + segW[0] + segW[1] + 4, y + 28), 14, withAlpha(ink, 0.06f));
+		for (int i = 0; i < 2; i++) {
+			const RectF r = rectF(x + 2, y + 2, x + 2 + segW[i], y + 26);
+			const bool on = want.kind == i;
+			if (on) fillRound(cr, r, 12, accent);
+			else if (s.hotNext()) fillRound(cr, r, 12, withAlpha(ink, 0.06f));
+			drawTextMid(cr, segs[i], r, 12, on ? chrome().onAccent() : ink, TextAlign::Center);
+			s.hit(r, [this, i] { if (want.kind != i) { want.kind = i; recheck(); } });
+			x += segW[i];
+		}
+		if (want.kind == 1) {
+			const char* fill = "Fill In This Circuit's Rows";
+			const float fw = textWidth(fill, 11.5f, true);
+			const RectF r = rectF(w - 22 - fw, y, w - 22, y + 28);
+			drawTextMid(cr, fill, r, 11.5f, withAlpha(accent, s.hotNext() ? 0.75f : 1.0f), TextAlign::Trailing, true);
+			s.hit(r, [this] {
+				if (checkView) gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(checkView)), circuitTableText().c_str(), -1);
+			});
+		}
+		y += 36;
+		const float h = want.kind == 1 ? 104 : 62;
+		const RectF box = rectF(22, y, w - 22, y + h);
+		fillRound(cr, box, 10, dark ? colorF(1, 1, 1, 0.045f) : colorF(1, 1, 1, 1));
+		strokeRound(cr, box, 10, dark ? colorF(1, 1, 1, 0.09f) : colorF(0, 0, 0, 0.08f));
+		if (want.text.empty()) {
+			const char* hint = want.kind == 0 ? "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)        or   F(A,B,C) = Σm(1,3,5) + d(7)"
+			                                  : "A  B  Cin | S  Cout\n0  0  0   | 0  0\n0  0  1   | 1  0\n…  (X for don't care)";
+			float ly = y + 8;
+			std::string text = hint;
+			size_t at = 0;
+			while (at <= text.size()) {
+				size_t end = text.find('\n', at);
+				if (end == std::string::npos) end = text.size();
+				drawFace(cr, text.substr(at, end - at), box.left + 12, ly, kMono, 13, withAlpha(dim, 0.75f));
+				ly += 19;
+				at = end + 1;
+			}
+		}
+		showCheckEditor(true, box.left + 1, box.top + 1, box.right - box.left - 2, h - 2);
+		return box.bottom + 10;
+	}
+
+	// The verdict, its notes, the names, and the rows.
+	float drawCheck(Sheet& s, cairo_t* cr, const RectF& box, Color ink, Color dim, Color accent, bool dark) {
+		const Color on = dark ? kNeon : kNeonDeep;
+		float y = box.top;
+		bool blank = true;
+		for (char c : want.text) if (!g_ascii_isspace(c)) blank = false;
+		const int verdict = check ? cl_check_verdict(check) : 2;
+		std::string summary = blank ? (want.kind == 0 ? "Type what the assignment asks for, like S = A ^ B ^ Cin."
+		                                              : "Paste or type the truth table you were given.")
+		                    : check ? cl_check_summary(check) : "Can't read that yet.";
+		const Color color = blank ? dim : verdict == 0 ? on : verdict == 1 ? kRed : kOrange;
+		{
+			const RectF banner = rectF(box.left, y, box.right, y + 38);
+			fillRound(cr, banner, 10, withAlpha(color, blank ? 0.06f : dark ? 0.16f : 0.11f));
+			const PointF c = pointF(banner.left + 22, (banner.top + banner.bottom) / 2);
+			fillCircle(cr, c, 9.5f, color);
+			const char* glyph = blank ? "…" : verdict == 0 ? "✓" : verdict == 1 ? "✕" : "?";
+			drawTextMid(cr, glyph, rectF(c.x - 9, c.y - 9, c.x + 9, c.y + 9), 11, colorF(1, 1, 1), TextAlign::Center, true);
+			float right = banner.right - 12;
+			if (verdict == 1 && check) {
+				const char* label = "Only wrong rows";
+				const float lw = textWidth(label, 11.5f) + 22;
+				const RectF r = rectF(right - lw, banner.top + 8, right, banner.bottom - 8);
+				const RectF tick = rectF(r.left, r.top + 3, r.left + 14, r.top + 17);
+				fillRound(cr, tick, 4, onlyWrong ? accent : withAlpha(ink, s.hotNext() ? 0.14f : 0.08f));
+				if (onlyWrong) drawTextMid(cr, "✓", tick, 10, chrome().onAccent(), TextAlign::Center, true);
+				drawTextMid(cr, label, rectF(r.left + 20, r.top, r.right, r.bottom), 11.5f, dim);
+				s.hit(r, [this] { onlyWrong = !onlyWrong; scroll = 0; });
+				right = r.left - 10;
+			}
+			drawTextMid(cr, summary, rectF(banner.left + 42, banner.top, right, banner.bottom), 13.5f, blank ? dim : ink, TextAlign::Leading,
+			            !blank);
+			y = banner.bottom + 10;
+		}
+		// Notes: problems in red, warnings in orange, the rest quiet.
+		auto note = [&](const std::string& text, int kind) {
+			const Color c = kind == 2 ? kRed : kind == 1 ? kOrange : dim;
+			const char* mark = kind == 2 ? "⊘" : kind == 1 ? "⚠" : "ⓘ";
+			drawTextMid(cr, mark, rectF(box.left, y, box.left + 16, y + 16), 11.5f, c);
+			const float h = drawWrapped(cr, text, rectF(box.left + 20, y, box.right, y + 200), 11.5f, c);
+			y += std::max(16.0f, h) + 5;
+		};
+		if (!checkError.empty()) note(checkError, 2);
+		for (int i = 0; check && i < cl_check_note_count(check); i++) note(cl_check_note(check, i), cl_check_note_kind(check, i));
+		if (!check) return y - box.top;
+
+		// Names, when one isn't simply the circuit's: click to choose.
+		bool showNames = false;
+		for (int i = 0; i < cl_check_name_count(check); i++) {
+			const int col = cl_check_name_column(check, i);
+			if (col < 0 || cl_check_name_by_hand(check, i) || nameKey(names[col]) != nameKey(cl_check_name(check, i))) showNames = true;
+		}
+		if (showNames) {
+			y += 4;
+			drawTextMid(cr, "Names", rectF(box.left, y, box.left + 50, y + 24), 11.5f, dim, TextAlign::Leading, true);
+			float x = box.left + 52;
+			for (int i = 0; i < cl_check_name_count(check); i++) {
+				const std::string name = cl_check_name(check, i);
+				const int col = cl_check_name_column(check, i);
+				const bool input = cl_check_name_is_input(check, i);
+				const std::string label = name + " → " + (col >= 0 ? names[col] : std::string("?"));
+				const bool bold = cl_check_name_by_hand(check, i);
+				const float cw = textWidth(label, 11.5f, bold) + 20;
+				if (x + cw > box.right) { x = box.left + 52; y += 30; }
+				const RectF r = rectF(x, y, x + cw, y + 24);
+				fillRound(cr, r, 12, col < 0 ? withAlpha(kRed, 0.14f) : withAlpha(ink, s.hotNext() ? 0.11f : 0.06f));
+				strokeRound(cr, r, 12, col < 0 ? withAlpha(kRed, 0.5f) : withAlpha(ink, 0.09f));
+				drawTextMid(cr, label, r, 11.5f, col < 0 ? kRed : accent, TextAlign::Center, bold);
+				s.hit(r, [this, name, input] { chooseName(name, input); });
+				x += cw + 6;
+			}
+			y += 34;
+		}
+
+		// The rows: the circuit's inputs, then for each output what was asked for and what it gave.
+		std::vector<int> outs;
+		for (int k = 0; k < cl_check_outputs(check); k++) if (cl_check_output_column(check, k) >= 0) outs.push_back(k);
+		if (outs.empty()) return y - box.top;
+		const float cw = 50, headH = 38, rowH = 24;
+		std::vector<int> shown;
+		for (int r = 0; r < (int)rows.size(); r++) if (!onlyWrong || cl_check_row_wrong(check, r)) shown.push_back(r);
+		const float tableW = cw * (inputs + 2 * outs.size()), x0 = box.left, y0 = y;
+		const RectF card = rectF(x0, y0, x0 + tableW, y0 + headH + rowH * shown.size());
+		fillRound(cr, card, 12, dark ? colorF(1, 1, 1, 0.045f) : colorF(1, 1, 1, 1));
+		cairo_save(cr);
+		roundedPath(cr, card, 12);
+		cairo_clip(cr);
+		fillRect(cr, rectF(x0, y0, card.right, y0 + headH), withAlpha(ink, 0.05f));
+		for (int i = 0; i < inputs; i++)
+			drawTextMid(cr, names[i], rectF(x0 + i * cw, y0, x0 + (i + 1) * cw, y0 + headH), 12, ink, TextAlign::Center, true);
+		for (size_t j = 0; j < outs.size(); j++) {
+			const float ox = x0 + (inputs + 2 * j) * cw;
+			fillRect(cr, rectF(ox, y0, ox + 2 * cw, y0 + headH), withAlpha(accent, dark ? 0.13f : 0.10f));
+			drawTextMid(cr, cl_check_output_name(check, outs[j]), rectF(ox, y0 + 3, ox + 2 * cw, y0 + 21), 12, accent, TextAlign::Center, true);
+			drawTextMid(cr, "asked", rectF(ox, y0 + 21, ox + cw, y0 + 35), 9.5f, dim, TextAlign::Center);
+			drawTextMid(cr, "got", rectF(ox + cw, y0 + 21, ox + 2 * cw, y0 + 35), 9.5f, dim, TextAlign::Center);
+		}
+		float firstWrong = -1;
+		for (size_t i = 0; i < shown.size(); i++) {
+			const int r = shown[i];
+			const float ry = y0 + headH + i * rowH;
+			const bool wrong = cl_check_row_wrong(check, r);
+			if (wrong && firstWrong < 0) firstWrong = ry;
+			if (wrong) fillRect(cr, rectF(x0, ry, card.right, ry + rowH), withAlpha(kRed, dark ? 0.2f : 0.12f));
+			else if (r % 2 == 1) fillRect(cr, rectF(x0, ry, card.right, ry + rowH), withAlpha(ink, 0.03f));
+			auto mono = [&](const std::string& t, float cx, Color c, bool bold) {
+				drawFace(cr, t, cx + (cw - faceWidth(t, kMono, 13, bold)) / 2, ry + 4, kMono, 13, c, bold);
+			};
+			for (int c = 0; c < inputs; c++) mono(std::string(1, rows[r][c]), x0 + c * cw, dim, false);
+			for (size_t j = 0; j < outs.size(); j++) {
+				const int k = outs[j];
+				const float ox = x0 + (inputs + 2 * j) * cw;
+				const char asked = cl_check_expected_cell(check, r, k), result = cl_check_result(check, r, k);
+				const char got = rows[r][cl_check_output_column(check, k)];
+				mono(asked == '-' ? "X" : std::string(1, asked), ox, asked == '-' ? kOrange : ink, false);
+				mono(std::string(1, got), ox + cw, result == 'x' ? kRed : result == '=' ? ink : dim, result == 'x');
+			}
+		}
+		cairo_restore(cr);
+		const Color divider = withAlpha(accent, 0.55f);
+		for (size_t j = 0; j < outs.size(); j++) {
+			const float dx = x0 + (inputs + 2 * j) * cw;
+			fillRect(cr, rectF(dx - 0.75f, y0, dx + 0.75f, card.bottom), divider);
+		}
+		strokeRound(cr, card, 12, dark ? colorF(1, 1, 1, 0.09f) : colorF(0, 0, 0, 0.08f));
+		// The first wrong row in view, once per check.
+		if (scrollToWrong) {
+			scrollToWrong = false;
+			const float view = contentRect.bottom - contentRect.top;
+			if (firstWrong >= 0 && firstWrong + rowH - box.top > view) {
+				scroll = firstWrong - box.top - view / 2;
+				s.redraw();
+			}
+		}
+		return card.bottom + 12 - box.top;
+	}
+
+	// Which switch or light an asked-for name is: a menu of them.
+	void chooseName(const std::string& name, bool input) {
+		struct Pick { TruthWindow* t; std::string name, choice; };
+		GtkWidget* menu = gtk_menu_new();
+		auto add = [&](const std::string& label, const std::string& choice) {
+			GtkWidget* item = gtk_menu_item_new_with_label(label.c_str());
+			g_signal_connect_data(item, "activate", CL_CALLBACK(+[](GtkMenuItem*, gpointer d) {
+				Pick* p = static_cast<Pick*>(d);
+				if (p->choice.empty()) p->t->want.names.erase(p->name);
+				else p->t->want.names[p->name] = p->choice;
+				p->t->recheck();
+			}), new Pick{ this, name, choice }, [](gpointer d, GClosure*) { delete static_cast<Pick*>(d); }, (GConnectFlags)0);
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+		};
+		for (int c = input ? 0 : inputs; c < (input ? inputs : (int)names.size()); c++) add((input ? "Switch " : "Light ") + names[c], names[c]);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+		add("Match by Name", "");
+		gtk_menu_attach_to_widget(GTK_MENU(menu), sheet.window, nullptr);
+		g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* m, gpointer) {
+			g_idle_add([](gpointer m) -> gboolean { gtk_widget_destroy(GTK_WIDGET(m)); return G_SOURCE_REMOVE; }, m);
+		}), nullptr);
+		gtk_widget_show_all(menu);
+		gtk_menu_popup_at_pointer(GTK_MENU(menu), nullptr);
+	}
+
+	// This circuit's table as text to edit: "A B | F", then a row each.
+	std::string circuitTableText() const {
+		auto line = [&](const std::vector<std::string>& cells) {
+			std::string s;
+			for (size_t c = 0; c < cells.size(); c++) s += (c == 0 ? "" : (int)c == inputs ? " | " : " ") + cells[c];
+			return s;
+		};
+		std::string out = line(names);
+		for (const std::string& row : rows) {
+			std::vector<std::string> cells;
+			for (char ch : row) cells.push_back(std::string(1, ch));
+			out += "\n" + line(cells);
+		}
+		return out;
 	}
 
 	float drawTable(Sheet& s, cairo_t* cr, const RectF& box, Color ink, Color dim, Color accent, bool dark) {
@@ -526,7 +945,7 @@ struct TruthWindow {
 
 bool truthTableOpen() { return gOpen > 0; }
 
-void showTruthTable(CircuitWindow* w, int page) {
+void showTruthTable(CircuitWindow* w, int page, bool check) {
 	char err[512] = "";
 	CLTruthTable* tt = cl_truth_table(w->document(), page, err, sizeof err);
 	if (tt == nullptr) {
@@ -547,7 +966,10 @@ void showTruthTable(CircuitWindow* w, int page) {
 	t.sequential = cl_tt_sequential(tt);
 	t.unsettled = cl_tt_unsettled(tt);
 	cl_tt_free(tt);
-	t.tab = gTab;
+	t.tab = check ? kCheckTab : gTab;
+	// What was last checked is kept per circuit and page.
+	t.checkKey = w->filePath().empty() ? format("unsaved-%p#%d", (void*)w, page) : w->filePath() + format("#%d", page);
+	loadCheck(t.checkKey, t.want);
 	gOpen++;
 	t.run();
 	gOpen--;
