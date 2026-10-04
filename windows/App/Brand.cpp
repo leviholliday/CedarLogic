@@ -330,12 +330,13 @@ void icon(ID2D1RenderTarget* rt, float x, float y, float size, float glowAmount)
 	if (glowAmount > 0 && SUCCEEDED(rt->QueryInterface(__uuidof(ID2D1DeviceContext), (void**)&dc))) {
 		ID2D1Effect* shadow = nullptr;
 		if (SUCCEEDED(dc->CreateEffect(CLSID_D2D1Shadow, &shadow))) {
+			// The blur is in the bitmap's points, which are scaled to `size`.
+			const D2D1_SIZE_F bs = bmp->GetSize();
 			shadow->SetInput(0, bmp);
-			shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, size * 0.12f);
+			shadow->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, bs.width * 0.12f);
 			shadow->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(kNeon.r, kNeon.g, kNeon.b, glowAmount));
 			D2D1_MATRIX_3X2_F was;
 			dc->GetTransform(&was);
-			const D2D1_SIZE_F bs = bmp->GetSize();
 			dc->SetTransform(D2D1::Matrix3x2F::Scale(size / bs.width, size / bs.height) * D2D1::Matrix3x2F::Translation(x, y) * was);
 			dc->DrawImage(shadow);
 			dc->SetTransform(was);
