@@ -285,9 +285,11 @@ Key pressed(UINT vk) {
 const Action* match(const Key& k, bool canvas) {
 	if (!k.valid()) return nullptr;
 	for (const Action& a : all()) {
-		if (a.canvas != canvas || !available(a)) continue;
+		if (a.canvas != canvas) continue;
+		// Whether this copy has it only once the key matches: available()
+		// asks the registry, and this runs for every key pressed.
 		for (const Key& own : keyList(a))
-			if (own == k) return &a;
+			if (own == k && available(a)) return &a;
 	}
 	return nullptr;
 }

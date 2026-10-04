@@ -129,7 +129,7 @@ private:
 	void setSpeedAt(double vx);
 
 	// What the wire under the pointer carries, in a chip beside it once the
-	// pointer has rested there a moment (Preferences > Canvas), as the Mac's.
+	// pointer has rested there a moment (Settings > Canvas), as the Mac's.
 	bool tagShown = false, tagWaiting = false;
 	bool wireTagText(std::string& text, char& state) const;
 	void updateWireTag();
