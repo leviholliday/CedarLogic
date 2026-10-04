@@ -24,6 +24,22 @@ void setError(char* error, int len, const std::string& msg) {
 
 std::pair<float, float> pos(guiGate* g) { float x, y; g->getGLcoords(x, y); return { x, y }; }
 
+// A clock, flip-flop, latch, register, counter or memory, by the words of
+// its library name after the group ("BA_JKFF", "AE_RAM_8x8"): a FROM label
+// (DA_FROM) or a ground (FF_GND) isn't one.
+bool sequentialType(const std::string& type) {
+	size_t at = type.find('_');
+	while (at != std::string::npos) {
+		const size_t end = type.find('_', at + 1);
+		const std::string word = type.substr(at + 1, end == std::string::npos ? std::string::npos : end - at - 1);
+		for (const char* seq : { "CLOCK", "LATCH", "REGISTER", "COUNTER", "RAM", "ROM" })
+			if (word.rfind(seq, 0) == 0) return true;
+		if (word.size() >= 2 && word.compare(word.size() - 2, 2, "FF") == 0) return true;
+		at = end;
+	}
+	return false;
+}
+
 }  // namespace
 
 extern "C" {
@@ -41,9 +57,7 @@ CLTruthTable* cl_truth_table(CLDocument* doc, int pageIndex, char* error, int er
 	std::vector<guiGate*> ins, outs;
 	bool sequential = false;
 	for (auto& g : *gates) {
-		const std::string type = g.second->getLibraryGateName();
-		for (const char* seq : { "CLOCK", "FF", "LATCH", "REGISTER", "COUNTER", "RAM", "ROM" })
-			if (type.find(seq) != std::string::npos) sequential = true;
+		if (sequentialType(g.second->getLibraryGateName())) sequential = true;
 		if (useSelection && !g.second->isSelected()) continue;
 		if (dynamic_cast<guiGateTOGGLE*>(g.second)) ins.push_back(g.second);
 		else if (dynamic_cast<guiGateLED*>(g.second)) outs.push_back(g.second);
