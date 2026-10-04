@@ -9,6 +9,7 @@
 #include "FindBar.h"
 #include "Help.h"
 #include "Settings.h"
+#include "Shortcuts.h"
 #include "Brand.h"
 #include "Sheet.h"
 #include "Splash.h"
@@ -1312,6 +1313,16 @@ void CircuitWindow::destroyCb(GtkWidget*, gpointer self) {
 	delete w;
 }
 
+// A key Settings > Shortcuts gives a command (a menu one or the canvas's).
+static bool isShortcut(GtkApplication* app, const GdkEventKey* e) {
+	if (!shortcuts::canvasAction(e).empty()) return true;
+	const std::string accel = shortcuts::fromEvent(e);
+	gchar** actions = accel.empty() ? nullptr : gtk_application_get_actions_for_accel(app, accel.c_str());
+	const bool taken = actions && actions[0];
+	g_strfreev(actions);
+	return taken;
+}
+
 gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
 	// Text boxes get their keys before the menus' shortcuts, so Ctrl+C in
@@ -1331,11 +1342,14 @@ gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) 
 	}
 	if (w->switcher && w->switcher->active() && e->keyval == GDK_KEY_Escape) { w->switcher->cancel(); return TRUE; }
 	// The menus from the keyboard: F10 every menu; Shift+F10 or the Menu key
-	// the canvas's own, for what's selected.
+	// the canvas's own, for what's selected (unless Settings > Shortcuts gave
+	// that key to a command: then it's the command's).
 	const guint mods = e->state & gtk_accelerator_get_default_mod_mask();
-	if (e->keyval == GDK_KEY_F10 && mods == 0) { guarded("the menus", [&] { w->menusFromKeyboard(); }); return TRUE; }
-	if ((e->keyval == GDK_KEY_F10 && mods == GDK_SHIFT_MASK) || (e->keyval == GDK_KEY_Menu && mods == 0)) {
-		guarded("the menu", [&] { w->contextMenuFromKeyboard(); });
+	const bool menus = e->keyval == GDK_KEY_F10 && mods == 0;
+	const bool context = (e->keyval == GDK_KEY_F10 && mods == GDK_SHIFT_MASK) || (e->keyval == GDK_KEY_Menu && mods == 0);
+	if ((menus || context) && !isShortcut(w->app, e)) {
+		if (menus) guarded("the menus", [&] { w->menusFromKeyboard(); });
+		else guarded("the menu", [&] { w->contextMenuFromKeyboard(); });
 		return TRUE;
 	}
 	return FALSE;
