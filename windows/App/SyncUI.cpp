@@ -275,6 +275,7 @@ bool haveCode(HWND parent, const std::string& prefill, bool run) {
 			if (fm == nullptr || fm->dialog == nullptr) return;   // the sheet was closed meanwhile
 			if (!ok) {
 				fm->enable(text, true);
+				SetFocus(fm->fields[text].hwnd);
 				fm->setText(verdict, "");
 				fm->setProblem(message);
 				return;
