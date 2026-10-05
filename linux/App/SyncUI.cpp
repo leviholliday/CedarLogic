@@ -249,7 +249,8 @@ int runCard(GtkWindow* parent, Card& c) {
 			const bool on = isEnabled(b);
 			const char* key = b.answer == c.enter && !b.keepOpen ? "\xE2\x86\xA9" : b.answer == c.escape && !b.keepOpen ? "esc" : nullptr;
 			const float tw = textWidth(b.label, 13, true) + (key ? textWidth(key, 10, true) + 17 : 0) + 28;
-			if (left < 0) left = rightEdge - tw;
+			const bool fromRight = left < 0;
+			if (fromRight) left = rightEdge - tw;
 			const RectF r = rectF(left, card.bottom - inset - 34, left + tw, card.bottom - inset);
 			const bool hot = on && sh.hotNext();
 			const Color red = colorF(0.86f, 0.22f, 0.2f);
@@ -267,13 +268,14 @@ int runCard(GtkWindow* parent, Card& c) {
 			}
 			CardButton* bp = &b;
 			if (on) sh.hit(r, [&, bp] { press(sh, *bp); });
-			return r.left;
+			return fromRight ? r.left : r.right;   // the edge the next button starts from
 		};
 		float edge = card.right - inset;
 		for (CardButton& b : c.buttons)
 			if (!b.apart) edge = pill(b, -1, edge) - 10;
+		float start = card.left + inset;   // buttons apart from the others go left to right
 		for (CardButton& b : c.buttons)
-			if (b.apart) pill(b, card.left + inset, 0);
+			if (b.apart) start = pill(b, start, 0) + 10;
 		cairo_pop_group_to_source(cr);
 		cairo_paint_with_alpha(cr, appear());
 		cairo_restore(cr);
