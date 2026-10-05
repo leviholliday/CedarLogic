@@ -711,7 +711,12 @@ private:
 		for (size_t i = 0; i < n; i++) if (movable[i] && !inC[i]) blocks.push_back(blockOf({ (int)i }));
 		std::sort(blocks.begin(), blocks.end(), [](const Block &a, const Block &b) { return a.top0 > b.top0; });
 		for (size_t k = 1; k < blocks.size(); k++) {
-			for (int pass = 0; pass < 16; pass++) {
+			// Each move clears at least one block for good (moves only go right
+			// or down), so k + 1 passes always settle it: a column of labels
+			// the circuit grew over steps down past the ones already moved, one
+			// a pass -- a fixed cap of 16 left the rest of a long list piled on
+			// one line.
+			for (size_t pass = 0; pass <= k; pass++) {
 				float drop = 0.0f, shove = 0.0f;
 				for (size_t j = 0; j < k; j++) {
 					const Block &a = blocks[j], &b = blocks[k];
