@@ -66,7 +66,8 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   the engine's self-test, then, with the website's mock server
   (`CL_SITE=<cedarlogic-site>` or found beside this checkout), the same over
   HTTP and two real engines linking two libraries through it. The app
-  draws Settings > Sync and its sheets with `CedarLogic --render-sync <dir>`
+  draws Settings > Sync and its sheets with `CedarLogic --render-sync <dir>`,
+  and the What's New tour's pages with `CedarLogic --render-whatsnew <dir>`
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
   and top edges included), hover, tooltips, dragging, double-click to fill,
   focus mode's tab strip and full screen, PASS or FAIL for each
