@@ -93,6 +93,7 @@ jobs:
           curl -fsSL -o linuxdeploy \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
           chmod +x linuxdeploy
+          set -o pipefail
           OUT=$(LINUXDEPLOY="$PWD/linuxdeploy" linux/package.sh linux/build-release | tail -1)
           echo "APPIMAGE=$OUT" >> "$GITHUB_ENV"
           ls -la "$OUT"
@@ -100,6 +101,7 @@ jobs:
       # The installer: a .deb with the menu entry, icon and .cdl association.
       - name: Package .deb
         run: |
+          set -o pipefail
           DEB=$(linux/package-deb.sh linux/build-release ${{ github.run_number }} | tail -1)
           dpkg-deb --info "$DEB"
           dpkg-deb --contents "$DEB"

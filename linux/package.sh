@@ -92,7 +92,7 @@ rm -f "$BUILD"/CedarLogic*-"$ARCH".AppImage
 
 # Nothing but libcrypto should have been bundled: say so if something was.
 ls "$APPDIR"/usr/lib/libcrypto.so.* >/dev/null 2>&1 || { echo "libcrypto wasn't bundled" >&2; exit 1; }
-BUNDLED=$(find "$APPDIR/usr/lib" -name '*.so*' 2>/dev/null | sed 's|.*/||' | grep -v '^libcrypto\.so' | sort | tr '\n' ' ')
+BUNDLED=$(find "$APPDIR/usr/lib" -name '*.so*' 2>/dev/null | sed 's|.*/||' | { grep -v '^libcrypto\.so' || true; } | sort | tr '\n' ' ')
 [ -z "$BUNDLED" ] || echo "note: bundled libraries: $BUNDLED" >&2
 
 OUT="$BUILD/$OUTNAME"
