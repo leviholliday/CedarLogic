@@ -3145,7 +3145,9 @@ Steps:
    sent it: "Sent from “Sam’s phone”." (plain text). [Cancel] there forgets the
    code: nothing was stored.
 5. The sheet closed, Cancel, the window closed, the app quitting → stop polling,
-   `DELETE` (best effort).
+   `DELETE` (best effort). Destroying the engine (its thread exiting
+   after stop) sends nothing: the host may be gone by then, and the slot expires
+   in 10 minutes anyway; only quitting (within its bounded step) deletes.
 
 ### 11.7 L: adding a device
 
