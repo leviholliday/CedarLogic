@@ -772,7 +772,8 @@ void enginePairing(Crypto& cr, const std::string& dir) {
 		ECHECK(w.dones == 0);
 	}
 
-	// Destroyed with a QR code showing: the slot deleted, done never called.
+	// Destroyed with a QR code showing: nothing is sent from the exiting thread (the host may be
+	// gone, or the machine offline), so the slot is left to expire; done is never called.
 	{
 		Device d(ui, server, cr, files::join(dir, "D"), kSamPc);
 		PairWatch w(ui);
@@ -781,7 +782,8 @@ void enginePairing(Crypto& cr, const std::string& dir) {
 		const auto t0 = std::chrono::steady_clock::now();
 		ui.sync([&] { d.engine.reset(); });
 		ECHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(2));
-		ECHECK(pairSlots(server) == 0 && w.dones == 0);
+		std::this_thread::sleep_for(std::chrono::milliseconds(300));
+		ECHECK(pairSlots(server) == 1 && w.dones == 0);
 		ECHECK(d.host.offMainHostCalls == 0);
 	}
 	ECHECK(a.host.offMainHostCalls == 0 && b.host.offMainHostCalls == 0 && c.host.offMainHostCalls == 0);
@@ -919,7 +921,7 @@ void engineTests(Crypto& cr, const std::string& tempDir, Report& report) {
 		  [&] { engineEndToEnd(cr, tempDir); } },
 		{ "engine: both mass-delete questions, answered later on the UI thread", [&] { engineQuestions(cr, tempDir); } },
 		{ "engine: the C interface", [&] { cInterface(cr); } },
-		{ "engine: pairing, D's side (11.6): code, first answer wins, expiry, damaged, cancel, 503, quit, destroy",
+		{ "engine: pairing, D's side (11.6): code, first answer wins, expiry, damaged, cancel, 503, quit, destroy (slot left to expire)",
 		  [&] { enginePairing(cr, tempDir); } },
 		{ "engine: pairing through the C interface", [&] { cPairing(cr, tempDir); } },
 	};
