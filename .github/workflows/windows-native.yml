@@ -273,6 +273,15 @@ jobs:
             timeout 90 "$A" --light --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p.png" || true
             timeout 90 "$A" --dark --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p-dark.png" || true
           done
+          # Settings > Sync, off and on (sample devices), the code sheet with its QR
+          # code, and what linking asks.
+          for t in light dark; do
+            sfx=$([ $t = dark ] && echo -dark || echo "")
+            timeout 90 "$A" --$t --dialog sync --screenshot "$PWD/renders/sync-off$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-on --screenshot "$PWD/renders/sync-on$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-code --screenshot "$PWD/renders/sync-code$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-link --screenshot "$PWD/renders/sync-link$sfx.png" || true
+          done
           timeout 90 "$A" --light --dialog shortcuts --screenshot "$PWD/renders/shortcuts.png" || true
           timeout 90 "$A" --dark --dialog shortcuts --screenshot "$PWD/renders/shortcuts-dark.png" || true
           for s in seamless classic minimal; do

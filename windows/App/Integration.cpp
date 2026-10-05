@@ -200,7 +200,8 @@ bool makeShortcut(const std::wstring& lnk, const std::wstring& exe) {
 
 // The cedarlogic:// links, for this user: the website's Open in the App starts
 // this exe with the link as its argument (in the running one, if there is
-// one: main.cpp). The installer writes the same (CedarLogic.iss).
+// one: main.cpp), and so do sync links (cedarlogic://sync#k=..., SyncApp.h).
+// The installer writes the same (CedarLogic.iss).
 bool registerScheme(const std::wstring& exe) {
 	const std::wstring key = kClasses + kScheme;
 	bool ok = writeString(key, nullptr, L"URL:CedarLogic");

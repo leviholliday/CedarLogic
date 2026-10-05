@@ -48,13 +48,13 @@ it compiles without a Windows machine:
   screen and put in the file by the small writer in `Pdf`), Share Link and
   cedarlogic:// links (`ShareLink`; the link format is `ShareCodec`, over
   `Deflate`, a deflate compressor and decompressor of its own, since Windows
-  has no zlib), Send Feedback (`Feedback`, to
+  has no zlib), Sync (below), Send Feedback (`Feedback`, to
   cedarlogic.netlify.app), and Help with search (`Help`); the launch screen with the first launch's sound
   (`Splash`), the first-run welcome, What's New and the guided tour that
   builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
   build (`Updater`); recovery copies of unsaved work (`Recovery`); the Start
   menu and .cdl files for a copy run from the zip (`Integration`); Settings
-  in the Mac's five pages (`Settings`, on `Form`); every command's keys,
+  in the Mac's pages -- General, Appearance, Canvas, Toolbar, Shortcuts, Sync (`Settings`, on `Form`); every command's keys,
   changeable in Settings > Shortcuts (`Shortcuts`; Ctrl+Alt ones too, such as
   split view's, which a text box leaves to AltGr), and the searchable list
   of them (`ShortcutsSheet`); the toolbar's three styles, Seamless, Classic
@@ -115,6 +115,22 @@ Updates from inside the app replace `CedarLogic.exe` and
 `res` where they are. Windows SmartScreen warns about both until they're
 signed: More info, then Run anyway.
 
+## Sync
+
+Your Circuits on every device (design: `docs/SYNC.md`). Settings > Sync turns
+it on with a secret code, shown with a QR code, and links another device with
+`I Have a Code` (or a `cedarlogic://sync#k=...` link, which asks before it
+links anything). One shared C++ engine (`mac/CedarCore/Sync*.cpp`, also the
+Mac and Linux apps') does the work on a thread of its own; Windows supplies
+its hooks in `SyncPlatform` (CNG for the cryptography, `Http` over WinHTTP, the
+code kept with DPAPI) and the app's side is `SyncApp` (the engine, the hidden
+window it posts to, the questions it asks) and `SyncUI` (Settings > Sync and
+its sheets). Sync's own files are per-machine, in `%LOCALAPPDATA%\CedarLogic\Sync`
+(`secret.dpapi`, `state.json`, `lock`), not beside Your Circuits in the roaming
+`%APPDATA%`. A circuit changed on another device reloads in place if its
+window has nothing unsaved; otherwise it waits. `CL_SYNC_URL` points the app
+at a test server (https, or http on this computer).
+
 Checks, without opening the app (built with it; `-DCL_BUILD_TOOLS=OFF` skips
 them): `cl_check`, `edit_check`, `sim_check`, `tt_check`, `save_check`,
 `part_check`, `render_png` -- the Mac app's checks (`mac/Tools`), drawing with
@@ -126,10 +142,10 @@ Direct2D here. And:
   view), `--focus` (focus mode), `--rename-tab`, or `--dialog
   preferences|shortcuts|truth-table|check|add-gate|library|versions|templates|
   formula|scope|export|lab-report|feedback|help|welcome|whatsnew|quit|alert|rename|about|
-  start-menu|bad-link` to capture that instead
+  start-menu|bad-link|sync|sync-on|sync-code|sync-link` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--check "..."` for what Check compares
   with, `--page N` for the welcome, What's New
-  or Settings (0 General ... 4 Shortcuts), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
+  or Settings (0 General ... 5 Sync), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--note "text"`
   puts a note in the status bar, and `--wire-tag` rests the pointer on a wire
   to show its value. `--toolbar-style seamless|classic|minimal` shows the
@@ -157,6 +173,14 @@ Direct2D here. And:
   `--dialog bad-link` shows the card for one that can't be opened.) The format
   and the deflate under it are plain C++, so a Mac checks them too:
   `windows/Tools/share-check.sh` and `windows/Tools/deflate-check.sh`.
+- `CedarLogic.exe --sync-test [--server <url>]` -- sync's checks: CNG's
+  SHA-256, HMAC and AES-256-GCM against the standards' answers, the code at
+  rest, the lock and the URL rules, then the engine's own self-test (the
+  design's test vectors and scenarios on an in-process server). With
+  `--server` (or `CL_SYNC_URL`) the single-device scenarios also run against
+  the mock server (`node scripts/sync-mock-server.mjs` in the website's repo).
+  Prints PASS or FAIL for each; CI runs it. `--dialog sync`, `sync-on` (sample
+  devices), `sync-code` and `sync-link` make pictures of the screens.
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the

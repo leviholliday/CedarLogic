@@ -1081,6 +1081,11 @@ void CircuitWindow::noteInput() {
 	lastInputAt = (int64_t)((u.QuadPart - 116444736000000000ULL) / 10000);
 }
 
+bool CircuitWindow::busyEditing() const {
+	Canvas* c = currentCanvas();
+	return (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
+}
+
 void CircuitWindow::edited() {
 	noteInput();
 	changes++;
@@ -1406,9 +1411,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 			KillTimer(hwnd, kAutosaveTimer);
 			// Not in the middle of something (a drag, a gate on the pointer,
 			// Tidy Up's preview): then a moment later.
-			Canvas* c = currentCanvas();
-			const bool busy = (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
-			if (busy) SetTimer(hwnd, kAutosaveTimer, 1000, nullptr);
+			if (busyEditing()) SetTimer(hwnd, kAutosaveTimer, 1000, nullptr);
 			else if (isDirty()) saveQuietly(false);
 		}
 		return 0;

@@ -107,6 +107,9 @@ public:
 	// circuit went (its window closes, or becomes a new circuit if it's the only one).
 	int64_t lastInputMs() const { return lastInputAt; }
 	void noteInput();
+	// In the middle of something (a drag, a gate on the pointer, Tidy Up's
+	// preview, a wire being drawn): saving now would keep it half done.
+	bool busyEditing() const;
 	void reloadFromSync(const std::string& fromDevice);
 	void closeForSync();
 	// A new circuit from a template: called `name`, and in Your Circuits.

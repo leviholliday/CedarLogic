@@ -121,7 +121,9 @@ Root: HKCU; Subkey: "Software\Classes\.cdl\OpenWithProgids"; ValueType: string; 
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "CedarLogic Circuit"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},1"
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
-; cedarlogic:// links (the website's Open in the App, a link in a chat): a URL
+; cedarlogic:// links (the website's Open in the App, a link in a chat, and
+; sync links -- cedarlogic://sync#k=..., which the app asks about before it
+; links anything): a URL
 ; protocol, opened in CedarLogic with the link as the argument -- in the one
 ; already running when there is one (the app hands it over).
 Root: HKCU; Subkey: "Software\Classes\cedarlogic"; ValueType: string; ValueName: ""; ValueData: "URL:CedarLogic"; Flags: uninsdeletekey

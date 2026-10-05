@@ -133,7 +133,8 @@ public:
 	void flushOpen(std::function<void()> done) override {
 		for (CircuitWindow* w : std::vector<CircuitWindow*>(circuitWindows())) {
 			library::Item it;
-			if (library::itemFor(w->filePath(), it) && w->isDirty()) w->saveQuietly(false);
+			// (One in the middle of a drag isn't saved half done: it stays unsaved, and the engine waits for it.)
+			if (library::itemFor(w->filePath(), it) && w->isDirty() && !w->busyEditing()) w->saveQuietly(false);
 		}
 		done();
 	}
@@ -142,7 +143,10 @@ public:
 		clsync::WindowState st;
 		if (CircuitWindow* w = windowForFolder(folderId)) {
 			st.open = true;
-			st.dirty = w->isDirty();
+			// Unsaved work, or something open over the window (a dialog, Your
+			// Circuits, a list): that code is waiting on this circuit as it is, so
+			// a change from elsewhere waits for it.
+			st.dirty = w->isDirty() || !IsWindowEnabled(w->window());
 			st.lastInputAt = w->lastInputMs();
 		}
 		return st;

@@ -247,7 +247,9 @@ bool haveCode(HWND parent, const std::string& prefill, bool run) {
 	}
 	box.value = shown;
 	const int text = f.add(box);
-	const int verdict = f.add(note(" ", 68));
+	FormField said = note(" ", 68);
+	said.lines = 2;   // (a sentence about the code, once it's typed)
+	const int verdict = f.add(said);
 	f.onChange = [text, verdict](Form& form, int field) {
 		if (field != text) return;
 		const std::string typed = form.text(text);
@@ -408,7 +410,7 @@ void SettingsPage::add(Form& form_) {
 	f.how = fm.add(button("How Sync Works…", true));
 	// On: its state, what this PC is called, the devices, the code, and the ways out.
 	f.syncNow = fm.add(button("Sync Now", false, "Sync:", onTip(st)));
-	fm.fields[f.syncNow].tipLines = 2;
+	fm.fields[f.syncNow].tipLines = 3;
 	FormField name;
 	name.kind = FormField::Text;
 	name.label = "This PC’s name:";
