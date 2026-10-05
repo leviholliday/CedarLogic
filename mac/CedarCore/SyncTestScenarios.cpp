@@ -1256,6 +1256,37 @@ void s22_retry_after_is_respected(Ctx& x) {
 	s2.cycleDone(1000000, "offline", 0, 600, false);
 	bool f = false;
 	CHECK(!s2.due(1000000 + 20 * kSecond, f, false) && s2.due(1000000 + 40 * kSecond, f, false));
+	// A wrong code (401) stops retries and polling until Sync Now.
+	Scheduler s3;
+	s3.started(0);
+	s3.cycleDone(1000000, "halted", 0, 600, false);
+	CHECK(!s3.due(1000000 + DAY, f, false));
+	s3.syncNow(1000000 + DAY);
+	CHECK(s3.due(1000000 + DAY, f, false) && f);
+	// Local changes: 5 s after the last, within 60 s of the first.
+	Scheduler s4;
+	s4.started(0);
+	s4.cycleDone(10000, "synced", 0, 600, false);
+	for (int64_t t = 20000; t < 20000 + 70 * kSecond; t += 3 * kSecond) s4.libraryChanged(t);   // a save every 3 s
+	CHECK(!s4.due(20000 + 59 * kSecond, f, false) && s4.due(20000 + 60 * kSecond, f, false));
+	Scheduler s5;
+	s5.started(0);
+	s5.cycleDone(10000, "synced", 0, 600, false);
+	s5.libraryChanged(20000);
+	CHECK(!s5.due(24000, f, false) && s5.due(25000, f, false) && !f);
+	// Polling: every pollSeconds while in use, never while idle in the background.
+	Scheduler s6;
+	s6.started(0);
+	s6.cycleDone(10000, "synced", 0, 600, false);
+	CHECK(!s6.due(10000 + 599 * kSecond, f, false) && s6.due(10000 + 600 * kSecond, f, false));
+	s6.input(300000);
+	s6.deactivated(300000, false);
+	CHECK(s6.due(10000 + 600 * kSecond, f, false));   // in the background, but used in the last 10 minutes
+	Scheduler s7;
+	s7.started(0);
+	s7.cycleDone(10000, "synced", 0, 600, false);
+	s7.deactivated(10000, false);
+	CHECK(!s7.due(10000 + 3 * kHour, f, false));   // idle in the background: no polling
 }
 
 void s23_open_window_with_unsaved_edits_is_not_overwritten(Ctx& x) {
