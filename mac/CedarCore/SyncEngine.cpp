@@ -219,6 +219,7 @@ struct Engine::Impl {
 		};
 		hk.saveState = [this](const State& s) { return saveState(s); };
 		core.reset(new Core(co, crypto, clock, *lib, hk));
+		core->setDeviceName(cfg.defaultDeviceName.empty() ? "CedarLogic" : cfg.defaultDeviceName);
 	}
 
 	std::string statePath() const { return files::join(cfg.syncDir, "state.json"); }
