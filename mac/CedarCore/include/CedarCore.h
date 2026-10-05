@@ -22,6 +22,9 @@ typedef struct ID2D1RenderTarget *CLContext;
 typedef cairo_t *CLContext;
 #endif
 
+// Sync (SYNC.md): its own header, so the Linux and Windows apps can use it too.
+#include "CedarSync.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
