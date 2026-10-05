@@ -1,6 +1,7 @@
 // Regression check for Tidy Up's Full rearrange on saved circuits:
 //   layout_check <cl_gatedefs.xml> <circuit.cdl>...
-// For each file, page 0 is rearranged and checked: no two parts overlap
+// For each file, every page with parts on it is rearranged and checked: it
+// finishes in under 8 seconds (Tidy Up runs on the UI thread), no two parts overlap
 // (unless they did before), named links drawn in one column keep their
 // top-to-bottom order, parts drawn as separate groups (a clear gap between
 // them) stay separate and in order, and running it again gives the same
@@ -10,6 +11,7 @@
 #include "klsBBox.h"
 #include "guiWire.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -22,9 +24,9 @@ namespace {
 
 struct Part { unsigned long id; std::string type; float l, b, r, t; std::vector<unsigned long> wires; int comp = 0; };
 
-std::vector<Part> parts(CLDocument* doc) {
+std::vector<Part> parts(CLDocument* doc, int page) {
 	std::vector<Part> out;
-	for (auto& e : *doc->page(0)->getGateList()) {
+	for (auto& e : *doc->page(page)->getGateList()) {
 		guiGate* g = e.second;
 		if (!g) continue;
 		klsBBox bb = g->getSelectionBBox();
@@ -100,7 +102,9 @@ std::vector<std::vector<size_t>> xGroups(const std::vector<Part>& P, int comp) {
 	return groups;
 }
 
-int check(const char* path) {
+const double TIME_LIMIT = 8.0;   // seconds for one page
+
+int check(const char* path, int page) {
 	int fails = 0;
 	auto report = [&](bool ok, const std::string& what) {
 		printf("  %s %s\n", ok ? "ok  " : "FAIL", what.c_str());
@@ -109,10 +113,15 @@ int check(const char* path) {
 	char err[512];
 	CLDocument* doc = cl_document_open(path, err, sizeof err);
 	if (!doc) { printf("  FAIL open: %s\n", err); return 1; }
-	const std::vector<Part> before = parts(doc);
-	cl_edit_tidy_begin(doc, 0, 1);
+	const std::vector<Part> before = parts(doc, page);
+	const auto t0 = std::chrono::steady_clock::now();
+	cl_edit_tidy_begin(doc, page, 1);
 	cl_edit_tidy_end(doc, true);
-	const std::vector<Part> after = parts(doc);
+	const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+	char took[96];
+	snprintf(took, sizeof took, "finishes in time (%.2f s, %zu parts; limit %.0f s)", secs, before.size(), TIME_LIMIT);
+	report(secs <= TIME_LIMIT, took);
+	const std::vector<Part> after = parts(doc, page);
 	const std::string text = cl_document_save_text(doc);
 	cl_document_close(doc);
 	if (after.size() != before.size()) { printf("  FAIL part count changed\n"); return 1; }
@@ -166,7 +175,7 @@ int check(const char* path) {
 
 	// Deterministic.
 	CLDocument* again = cl_document_open(path, err, sizeof err);
-	cl_edit_tidy_begin(again, 0, 1);
+	cl_edit_tidy_begin(again, page, 1);
 	cl_edit_tidy_end(again, true);
 	report(text == cl_document_save_text(again), "same result twice");
 	cl_document_close(again);
@@ -181,8 +190,17 @@ int main(int argc, char** argv) {
 	cl_set_settle_on_open(false);
 	int fails = 0;
 	for (int i = 2; i < argc; i++) {
-		printf("%s\n", argv[i]);
-		fails += check(argv[i]);
+		char err[512];
+		CLDocument* doc = cl_document_open(argv[i], err, sizeof err);
+		if (!doc) { printf("%s\n  FAIL open: %s\n", argv[i], err); fails++; continue; }
+		const int pages = cl_document_page_count(doc);
+		std::vector<int> withParts;
+		for (int p = 0; p < pages; p++) if (!doc->page(p)->getGateList()->empty()) withParts.push_back(p);
+		cl_document_close(doc);
+		for (int p : withParts) {
+			printf("%s page %d\n", argv[i], p + 1);
+			fails += check(argv[i], p);
+		}
 	}
 	printf("%d failed\n", fails);
 	return fails;

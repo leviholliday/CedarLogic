@@ -5,8 +5,8 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
-#include <queue>
 #include <set>
 #include <utility>
 
@@ -31,9 +31,25 @@ const float NEAR_PIN = 5.0f;        // brushing a pin that isn't ours
 const float RELAXED_WALL = 60.0f;   // last-ditch: through a gate body
 const float HISTORY_STEP = 2.0f;    // added to a contested node each pass
 const float CENTER = 0.06f;         // tie-break: jogs halfway between the ends
+// ...on connections up to this long (world units, along x plus y). The price
+// grows with the distance from the middle, so on a wire across a big page it
+// stopped being a tie-break: up to 18 a step, three times the wire's length,
+// worth more than every crossing on the way -- and the search, paying it
+// everywhere, combed the whole window. Past this, crossings and bends decide.
+const float CENTER_SPAN = 128.0f;
 const int PASSES = 6;
 const size_t MAX_NODES = 1500000;
-const size_t MAX_POPS = 3000000;
+// Work limits, in search steps (nodes taken off the queue: about 0.1 us
+// each), so a big page can't freeze the window and the result never depends
+// on the machine's speed. Tidy Up runs on the UI thread.
+const size_t CONNECT_POPS = 600000;   // one pin's connection, every window tried
+const size_t TOTAL_POPS = 30000000;   // the whole run; what's left gets a plain route
+// Rip up every net again each pass only while that stays cheap; past this,
+// later passes reroute just the nets that still share a line.
+const size_t FULL_PASS_POPS = 6000000;
+// Search windows, in grid steps around the start and the tree's extent.
+const int WINDOW_NEAR = 16;
+const int WINDOW_FAR = 64;
 
 enum { PX = 0, NXD = 1, PY = 2, NYD = 3, NONE = 4 };
 
@@ -79,6 +95,69 @@ int nearestLine(const std::vector<float> &lines, float v) {
 	return i;
 }
 
+// The search's open list: a 4-ary min-heap of (estimate, state) packed in
+// one 64-bit key -- an estimate is never negative, so its float bits sort as
+// numbers, and ties go to the lower state just as std::pair's order did, so
+// routes come out the same. Taking the least of four children without
+// branches avoids most of the mispredicted jumps that made popping a
+// std::priority_queue half of the router's time.
+class OpenList {
+public:
+	static uint64_t key(float f, int s) {
+		uint32_t bits;
+		std::memcpy(&bits, &f, sizeof bits);
+		return ((uint64_t)bits << 32) | (uint32_t)s;
+	}
+	static float estimate(uint64_t k) {
+		const uint32_t bits = (uint32_t)(k >> 32);
+		float f;
+		std::memcpy(&f, &bits, sizeof f);
+		return f;
+	}
+	static int state(uint64_t k) { return (int)(uint32_t)k; }
+
+	void clear() { h.clear(); }
+	bool empty() const { return h.empty(); }
+	void push(uint64_t e) {
+		size_t i = h.size();
+		h.push_back(e);
+		while (i > 0) {
+			const size_t up = (i - 1) / 4;
+			if (h[up] <= e) break;
+			h[i] = h[up];
+			i = up;
+		}
+		h[i] = e;
+	}
+	uint64_t pop() {
+		const uint64_t top = h[0], last = h.back();
+		h.pop_back();
+		const size_t n = h.size();
+		if (n == 0) return top;
+		size_t i = 0;
+		for (;;) {
+			const size_t c = 4 * i + 1;
+			if (c >= n) break;
+			size_t m = c;
+			if (c + 3 < n) {
+				const size_t a = h[c + 1] < h[c] ? c + 1 : c;
+				const size_t b = h[c + 3] < h[c + 2] ? c + 3 : c + 2;
+				m = h[b] < h[a] ? b : a;
+			} else {
+				for (size_t j = c + 1; j < n; j++) m = h[j] < h[m] ? j : m;
+			}
+			if (last <= h[m]) break;
+			h[i] = h[m];
+			i = m;
+		}
+		h[i] = last;
+		return top;
+	}
+
+private:
+	std::vector<uint64_t> h;
+};
+
 class Router {
 public:
 	explicit Router(const GridInput &in) : in(in) {}
@@ -114,10 +193,17 @@ private:
 	std::vector<int> treeNodes;
 	float tx0 = 0, tx1 = 0, ty0 = 0, ty1 = 0;
 	float cx = 0, cy = 0;   // middle of the connection being searched
+	bool centering = true;  // ...and whether to steer its jogs there
+	int wx0 = 0, wx1 = 0, wy0 = 0, wy1 = 0;   // search window, node indices
+	bool windowIsAll = false;
+	size_t budget = 0;     // search steps left for this connection
+	size_t popsUsed = 0;   // search steps so far, all nets
 
-	// Search scratch, reset lazily by stamp.
-	std::vector<float> dist;
-	std::vector<int> parent, stamp;
+	// Search scratch per (node, way in), reset lazily by stamp. Kept together:
+	// one cache line per state touched instead of three.
+	struct State { int stamp = 0; float dist = 0.0f; int parent = -1; };
+	std::vector<State> st;
+	OpenList open;
 	int curStamp = 0;
 
 	int node(int ix, int iy) const { return iy * nx + ix; }
@@ -146,6 +232,7 @@ private:
 	void addToTree(int n);
 	void addTreeEdge(NetState &ns, int a, int b);
 	void resetTree();
+	int search(int k, const PinInfo &p, bool relaxed, int margin);
 	bool connect(int k, const PinInfo &p, bool relaxed, NetState &ns);
 	bool routeNet(int k, bool relaxed);
 	void commit(int k, int sign);
@@ -179,7 +266,7 @@ bool Router::build() {
 	useH.assign(N, 0); useV.assign(N, 0); fixedH.assign(N, 0); fixedV.assign(N, 0);
 	hist.assign(N, 0.0f);
 	inTree.assign(N, 0); treeAxis.assign(N, 0);
-	dist.assign((size_t)N * 5, 0.0f); parent.assign((size_t)N * 5, -1); stamp.assign((size_t)N * 5, 0);
+	st.assign((size_t)N * 5, State());
 
 	// Gate bodies, edges included.
 	for (const GridRect &r : in.obstacles) {
@@ -291,7 +378,8 @@ float Router::moveCost(int k, int from, int arrived, int d, int to, bool goal, b
 	else if (crossUse > 0) c += goal ? TOUCH : CROSS;
 	// Room beside the wire: others (and our own branches) one or two steps off.
 	const int ix = ixOf(to), iy = iyOf(to);
-	for (int off = 1; off <= 2; off++) {
+	// (Two steps off is free at the normal spacing; skip looking it up.)
+	for (int off = 1; off <= (PARALLEL_FAR > 0.0f ? 2 : 1); off++) {
 		const float price = off == 1 ? PARALLEL_NEAR : PARALLEL_FAR;
 		for (int sgn = -1; sgn <= 1; sgn += 2) {
 			if (h) {
@@ -309,8 +397,9 @@ float Router::moveCost(int k, int from, int arrived, int d, int to, bool goal, b
 	}
 	// Among otherwise equal routes, run the jog down the middle: a vertical
 	// run pays for its distance from the middle x, a horizontal one from the
-	// middle y. Small enough never to outweigh a bend.
-	c += CENTER * (h ? std::fabs(ys[iyOf(to)] - cy) : std::fabs(xs[ixOf(to)] - cx)) / in.step
+	// middle y. Small enough never to outweigh a bend -- on a connection of
+	// ordinary length (see CENTER_SPAN).
+	if (centering) c += CENTER * (h ? std::fabs(ys[iyOf(to)] - cy) : std::fabs(xs[ixOf(to)] - cx)) / in.step
 	     * (h ? std::fabs(xs[ixOf(to)] - xs[ixOf(from)]) : std::fabs(ys[iyOf(to)] - ys[iyOf(from)])) / in.step;
 	if (hug[to]) c += HUG_GATE;
 	if (nearPin[to] != -1 && nearPin[to] != k) c += NEAR_PIN;
@@ -340,6 +429,60 @@ void Router::resetTree() {
 	treeNodes.clear();
 }
 
+int Router::search(int k, const PinInfo &p, bool relaxed, int margin) {
+	const int start = p.stub;
+	if (margin < 0) { wx0 = 0; wx1 = nx - 1; wy0 = 0; wy1 = ny - 1; }
+	else {
+		const float sx = xs[ixOf(start)], sy = ys[iyOf(start)];
+		const float pad = margin * in.step;
+		wx0 = std::max(0, nearestLine(xs, std::min(sx, tx0) - pad));
+		wx1 = std::min(nx - 1, nearestLine(xs, std::max(sx, tx1) + pad));
+		wy0 = std::max(0, nearestLine(ys, std::min(sy, ty0) - pad));
+		wy1 = std::min(ny - 1, nearestLine(ys, std::max(sy, ty1) + pad));
+	}
+	windowIsAll = wx0 == 0 && wy0 == 0 && wx1 == nx - 1 && wy1 == ny - 1;
+
+	if (++curStamp == 0x7fffffff) { for (State &x : st) x.stamp = 0; curStamp = 1; }
+	OpenList &pq = open;
+	pq.clear();
+	auto heur = [&](int n) {
+		const float x = xs[ixOf(n)], y = ys[iyOf(n)];
+		const float dx = x < tx0 ? tx0 - x : (x > tx1 ? x - tx1 : 0.0f);
+		const float dy = y < ty0 ? ty0 - y : (y > ty1 ? y - ty1 : 0.0f);
+		return (dx + dy) / in.step;
+	};
+	const int s0 = start * 5 + p.dir;
+	st[s0].stamp = curStamp; st[s0].dist = 0.0f; st[s0].parent = -1;
+	pq.push(OpenList::key(heur(start), s0));
+	size_t pops = 0;
+	while (!pq.empty()) {
+		const uint64_t top = pq.pop();
+		const int s = OpenList::state(top);
+		const int n = s / 5, arrived = s % 5;
+		const float g = st[s].dist;
+		if (OpenList::estimate(top) > g + heur(n) + 1e-4f) continue;   // stale
+		if (goalNode(n) && n != start) { budget -= std::min(budget, pops); return s; }
+		if (++pops > budget) break;
+		for (int d = 0; d < 4; d++) {
+			if (arrived != NONE && d == reverseDir(arrived)) continue;
+			const int m2 = stepFrom(n, d);
+			if (m2 < 0) continue;
+			const int mx = ixOf(m2), my = iyOf(m2);
+			if (mx < wx0 || mx > wx1 || my < wy0 || my > wy1) continue;
+			const bool isGoal = goalNode(m2);
+			if (!isGoal && !passable(k, m2, relaxed)) continue;
+			const float ng = g + moveCost(k, n, arrived, d, m2, isGoal, relaxed);
+			const int s2 = m2 * 5 + d;
+			State &x = st[s2];
+			if (x.stamp == curStamp && x.dist <= ng) continue;
+			x.stamp = curStamp; x.dist = ng; x.parent = s;
+			pq.push(OpenList::key(ng + heur(m2), s2));
+		}
+	}
+	budget -= std::min(budget, pops);
+	return -1;
+}
+
 bool Router::connect(int k, const PinInfo &p, bool relaxed, NetState &ns) {
 	if (p.node < 0) return false;
 	if (inTree[p.node]) return true;
@@ -353,54 +496,32 @@ bool Router::connect(int k, const PinInfo &p, bool relaxed, NetState &ns) {
 	const int start = p.stub;
 	if (!relaxed && owner[start] != k) return false;
 
-	if (++curStamp == 0x7fffffff) { std::fill(stamp.begin(), stamp.end(), 0); curStamp = 1; }
-	typedef std::pair<float, int> QE;
-	std::priority_queue<QE, std::vector<QE>, std::greater<QE>> pq;
-	auto heur = [&](int n) {
-		const float x = xs[ixOf(n)], y = ys[iyOf(n)];
-		const float dx = x < tx0 ? tx0 - x : (x > tx1 ? x - tx1 : 0.0f);
-		const float dy = y < ty0 ? ty0 - y : (y > ty1 ? y - ty1 : 0.0f);
-		return (dx + dy) / in.step;
-	};
 	{
 		// Middle of this connection: between the start and the nearest point of
 		// the tree's extent.
 		const float sx = xs[ixOf(start)], sy = ys[iyOf(start)];
 		cx = (sx + std::min(std::max(sx, tx0), tx1)) / 2.0f;
 		cy = (sy + std::min(std::max(sy, ty0), ty1)) / 2.0f;
+		centering = (std::fabs(sx - cx) + std::fabs(sy - cy)) * 2.0f <= CENTER_SPAN;
 	}
-	const int s0 = start * 5 + p.dir;
-	stamp[s0] = curStamp; dist[s0] = 0.0f; parent[s0] = -1;
-	pq.push({ heur(start), s0 });
+	// Search a window around the start and the tree first -- a wire hardly
+	// ever wanders far outside the box its ends make -- and widen it only when
+	// nothing in it gets through. On a big page this keeps one connection from
+	// exploring the whole sheet.
 	int goal = -1;
-	size_t pops = 0;
-	while (!pq.empty()) {
-		const QE top = pq.top(); pq.pop();
-		const int s = top.second;
-		const int n = s / 5, arrived = s % 5;
-		const float g = dist[s];
-		if (top.first > g + heur(n) + 1e-4f) continue;   // stale
-		if (goalNode(n) && n != start) { goal = s; break; }
-		if (++pops > MAX_POPS) break;
-		for (int d = 0; d < 4; d++) {
-			if (arrived != NONE && d == reverseDir(arrived)) continue;
-			const int m2 = stepFrom(n, d);
-			if (m2 < 0) continue;
-			const bool isGoal = goalNode(m2);
-			if (!isGoal && !passable(k, m2, relaxed)) continue;
-			const float ng = g + moveCost(k, n, arrived, d, m2, isGoal, relaxed);
-			const int s2 = m2 * 5 + d;
-			if (stamp[s2] == curStamp && dist[s2] <= ng) continue;
-			stamp[s2] = curStamp; dist[s2] = ng; parent[s2] = s;
-			pq.push({ ng + heur(m2), s2 });
-		}
+	budget = std::min(CONNECT_POPS, TOTAL_POPS - std::min(TOTAL_POPS, popsUsed));
+	const size_t had = budget;
+	for (int margin : { WINDOW_NEAR, WINDOW_FAR, -1 }) {
+		goal = search(k, p, relaxed, margin);
+		if (goal >= 0 || margin < 0 || windowIsAll || budget == 0) break;
 	}
+	popsUsed += had - budget;
 	if (goal < 0) return false;
 
-	ns.cost += dist[goal];
+	ns.cost += st[goal].dist;
 	for (size_t j = 0; j + 1 < p.walk.size(); j++) addTreeEdge(ns, p.walk[j], p.walk[j + 1]);
 	std::vector<int> path;
-	for (int s = goal; s >= 0; s = parent[s]) path.push_back(s / 5);
+	for (int s = goal; s >= 0; s = st[s].parent) path.push_back(s / 5);
 	for (size_t j = 0; j + 1 < path.size(); j++) addTreeEdge(ns, path[j], path[j + 1]);
 	if (path.size() == 1) addToTree(path[0]);
 	return true;
@@ -546,25 +667,48 @@ GridOutput Router::run() {
 	});
 
 	std::vector<NetState> best;
-	int bestOverlaps = 0x7fffffff;
+	int bestOverlaps = 0x7fffffff, sinceBetter = 0;
 	float bestCost = FLT_MAX, lastCost = FLT_MAX;
+	std::vector<uint8_t> clash(N, 0), redo(K, 1), failed(K, 0);
+	bool full = true;
 	for (int pass = 0; pass < PASSES; pass++) {
+		const size_t popsBefore = popsUsed;
 		for (int k : order) {
+			if (!redo[k]) continue;
 			if (nets[k].ok) { commit(k, -1); nets[k] = NetState(); }
 			if (routeNet(k, false) || routeNet(k, true)) commit(k, +1);
+			else if (pass == 0) failed[k] = 1;   // walled in: no later pass can help
 		}
 		int overlaps = 0;
 		float total = 0.0f;
 		for (size_t k = 0; k < K; k++) total += nets[k].ok ? nets[k].cost : 0.0f;
 		for (int n = 0; n < N; n++) {
-			const bool clash = (useH[n] >= 2 && useH[n] > fixedH[n]) || (useV[n] >= 2 && useV[n] > fixedV[n]);
-			if (clash) { overlaps++; hist[n] += HISTORY_STEP; }
+			clash[n] = (useH[n] >= 2 && useH[n] > fixedH[n] ? 1 : 0) | (useV[n] >= 2 && useV[n] > fixedV[n] ? 2 : 0);
+			if (clash[n]) { overlaps++; hist[n] += HISTORY_STEP; }
 		}
 		if (overlaps < bestOverlaps || (overlaps == bestOverlaps && total < bestCost - 1e-3f)) {
-			best = nets; bestOverlaps = overlaps; bestCost = total;
-		}
-		if (overlaps == 0 && pass >= 1 && total >= lastCost - 1e-3f) break;
+			best = nets; bestCost = total;
+			sinceBetter = overlaps < bestOverlaps ? 0 : sinceBetter + 1;
+			bestOverlaps = overlaps;
+		} else sinceBetter++;
+		// A small page reroutes every net each pass, so early nets make room
+		// for later ones; a big one, once a full pass costs too much, only the
+		// nets still lying on another's line -- and stops at the first pass
+		// that doesn't help (the history price climbs too slowly to shift a
+		// stuck one within the passes left).
+		if (full) {
+			if (overlaps == 0 && pass >= 1 && total >= lastCost - 1e-3f) break;
+			full = popsUsed + (popsUsed - popsBefore) <= FULL_PASS_POPS;
+		} else if (overlaps == 0 || sinceBetter >= 1) break;
+		if (popsUsed >= TOTAL_POPS) break;
 		lastCost = total;
+		for (size_t k = 0; k < K; k++) {
+			if (failed[k]) { redo[k] = 0; continue; }
+			if (full || !nets[k].ok) { redo[k] = full ? 1 : 0; continue; }
+			redo[k] = 0;
+			for (int n : nets[k].nodesH) if (clash[n] & 1) { redo[k] = 1; break; }
+			if (!redo[k]) for (int n : nets[k].nodesV) if (clash[n] & 2) { redo[k] = 1; break; }
+		}
 	}
 	nets = best;
 	out.overlaps = bestOverlaps == 0x7fffffff ? 0 : bestOverlaps;
