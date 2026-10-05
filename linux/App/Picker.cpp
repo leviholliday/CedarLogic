@@ -170,8 +170,27 @@ void Picker::paint(cairo_t* cr) {
 		buttons.push_back({ rectF(x, by, x + bw, by + 30), 100 + i, rightButtons[i], i == (int)rightButtons.size() - 1 });
 		x -= 8;
 	}
+	// The footer's line, between the list and the buttons.
+	const size_t footerAt = buttons.size();
+	if (footer) {
+		const std::pair<std::string, std::string> f = footer();
+		float right = w - kMargin;
+		if (!f.second.empty()) {
+			const float lw = textWidth(f.second, 11.5f, true) + 10;
+			const RectF r = rectF(right - lw, by - 20, right, by - 4);
+			buttons.push_back({ r, 200, f.second, false });
+			right = r.left - 10;
+		}
+		drawText(cr, f.first, rectF(kMargin, by - 20, right, by - 4), 11.5f, look.ink(0.55f));
+	}
 	for (size_t i = 0; i < buttons.size(); i++) {
 		const Button& b = buttons[i];
+		if (i >= footerAt) {
+			// A link, not a button.
+			const bool bh = (int)i == hotButton;
+			drawText(cr, b.label, rectF(b.rect.left, b.rect.top, b.rect.right, b.rect.bottom), 11.5f, bh ? look.ink() : accent, TextAlign::Trailing, true);
+			continue;
+		}
 		const bool bh = (int)i == hotButton;
 		if (b.primary) fillRound(cr, b.rect, 8, withAlpha(accent, bh ? 1.0f : 0.92f));
 		else {
@@ -196,6 +215,11 @@ int Picker::buttonAt(float x, float y) const {
 }
 
 void Picker::press(int id) {
+	if (id == 200) {
+		if (footerAction) footerAction();
+		redraw();
+		return;
+	}
 	if (onButton && onButton(*this, id)) close();
 	else redraw();
 }
@@ -344,6 +368,11 @@ void Picker::run(GtkWindow* owner) {
 	// Its window going with the owner's (the app quitting) ends it too.
 	g_signal_connect(window, "destroy", G_CALLBACK(destroyCb), this);
 	reload();
+	// A line that ages ("Synced 5 min ago") is drawn again now and then.
+	if (footer) footerTimer = g_timeout_add_seconds(5, +[](gpointer self) -> gboolean {
+		static_cast<Picker*>(self)->redraw();
+		return G_SOURCE_CONTINUE;
+	}, this);
 	gtk_widget_show_all(window);
 	anim::fadeIn(window);
 	gtk_widget_grab_focus(entry ? entry : area);
@@ -351,6 +380,7 @@ void Picker::run(GtkWindow* owner) {
 	if (!done) g_main_loop_run(loop);
 	g_main_loop_unref(loop);
 	loop = nullptr;
+	if (footerTimer) { g_source_remove(footerTimer); footerTimer = 0; }
 	if (window == nullptr) return;   // gone with its owner
 	g_signal_handlers_disconnect_by_data(window, this);
 	gtk_widget_destroy(window);

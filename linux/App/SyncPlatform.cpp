@@ -400,7 +400,9 @@ void forgetSecret(const std::string& dir) {
 }
 
 namespace {
-std::mutex gLockMutex;
+// Never destroyed: an engine thread that outlives main() (the engine lets go of one that is stuck in a
+// host call) may still unlock while the process exits.
+std::mutex& gLockMutex = *new std::mutex;
 int gLockFd = -1;
 }  // namespace
 

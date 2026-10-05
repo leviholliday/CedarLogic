@@ -17,11 +17,16 @@
 #include "QuitConfirm.h"
 #include "Settings.h"
 #include "Shortcuts.h"
+#include "SyncApp.h"
+#include "SyncPlatform.h"
+#include "SyncUI.h"
 #include "Library.h"
 #include "LibraryWindow.h"
 #include "Window.h"
 
 #include <algorithm>
+#include <glib/gstdio.h>
+
 #include <clocale>
 #include <cstring>
 #include <functional>
@@ -131,7 +136,10 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
 	else if (what == "report") top = toplevelTitled("Export Lab Report");
-	else if (what == "settings") top = settings::window();
+	else if (what == "settings" || what == "sync") top = settings::window();
+	else if (what == "synccode") top = toplevelTitled("Your sync code");
+	else if (what == "synclink") top = toplevelTitled("Link this computer");
+	else if (what == "syncconfirm") top = toplevelTitled("Link this computer?");
 	else if (what == "scope" && !circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	else if (what == "quit") top = toplevelTitled("Quit CedarLogic");
 	else if (what == "shortcuts") top = toplevelTitled("Keyboard Shortcuts");
@@ -169,6 +177,7 @@ gboolean showCb(gpointer) {
 	else if (what == "export") w->exportImage();
 	else if (what == "report") w->exportReport();
 	else if (what == "settings") settings::show(w, page);
+	else if (what == "sync" || what == "synccode" || what == "synclink" || what == "syncconfirm") syncui::showForScreenshot(w, what);
 	else if (what == "quit") confirmQuitting(w->window());
 	else if (what == "focus") w->toggleFocusMode();
 	else if (what == "shortcuts") w->showShortcuts();
@@ -511,6 +520,22 @@ bool gLaunching = false;   // in a launch's activate or open, until its windows 
 bool gStarted = false;
 // Files handed over meanwhile, opened once the first windows are made.
 std::vector<std::string> gPendingOpens;
+// cedarlogic://sync links handed over: Settings > Sync with the code, once the windows (and the
+// launch screen) are there. Never linking by themselves.
+std::vector<std::string> gPendingSyncLinks;
+
+gboolean syncLinksCb(gpointer) {
+	if (!gStarted || splashActive()) return G_SOURCE_CONTINUE;
+	std::vector<std::string> links;
+	links.swap(gPendingSyncLinks);
+	for (const std::string& link : links) guarded("a sync link", [&] { syncapp::handleLink(link); });
+	return G_SOURCE_REMOVE;
+}
+
+void routeSyncLink(const std::string& link) {
+	gPendingSyncLinks.push_back(link);
+	g_timeout_add(300, syncLinksCb, nullptr);
+}
 
 bool launchUnderWay() { return gInStartup || gLaunching; }
 
@@ -553,6 +578,12 @@ void startupCb(GApplication* gapp, gpointer) {
 		exit(0);
 	}
 	if (gSplash) splashSetStatus(gSplash, gLibraryLoaded ? "Opening the workspace…" : "Couldn't find the gate library");
+	// Sync (docs/SYNC.md): the engine is made, and syncs if a code is stored. The picture runs leave
+	// the person's own library and code alone, unless they point it at a test server.
+	if (gLibraryLoaded && gSplashFile.empty()) {
+		syncapp::start(app);
+		if (gScreenshot.empty() || g_getenv("CL_SYNC_URL")) syncapp::begin();
+	}
 
 	const GActionEntry entries[] = {
 		{ "new", newCb, nullptr, nullptr, nullptr, { 0 } },
@@ -623,6 +654,7 @@ void openHandedOver(GtkApplication* app, const std::vector<std::string>& paths) 
 	};
 	CircuitWindow* blank = activeWindow(app);
 	for (const std::string& path : paths) {
+		if (sharelink::isSyncLink(path)) { routeSyncLink(path); continue; }
 		// Still there and still blank: a question opening a file asks lets
 		// other things happen meanwhile. Not while a dialog or menu is open
 		// (over it, perhaps, working on what it shows): a window of its own then.
@@ -709,7 +741,14 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 	std::vector<std::string> paths;
 	for (gint i = 0; i < n; i++) {
 		gchar* path = g_file_get_path(files[i]);
-		if (path) paths.push_back(path);
+		if (path) {
+			paths.push_back(path);
+		} else {
+			// Not a file: a cedarlogic://sync link (the desktop passes it on as an address).
+			gchar* uri = g_file_get_uri(files[i]);
+			if (uri && sharelink::isSyncLink(uri)) paths.push_back(uri);
+			g_free(uri);
+		}
 		g_free(path);
 	}
 	// Handed over while this launch is under way: they open once its windows are made.
@@ -729,7 +768,10 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		return;
 	}
 	bool any = false;
-	for (const std::string& path : paths) any = openCircuit(GTK_APPLICATION(gapp), path, nullptr) || any;
+	for (const std::string& path : paths) {
+		if (sharelink::isSyncLink(path)) { routeSyncLink(path); continue; }
+		any = openCircuit(GTK_APPLICATION(gapp), path, nullptr) || any;
+	}
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
 	if (gSplash) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
@@ -902,6 +944,37 @@ void rebuildRecentMenus() {
 	}
 }
 
+// A folder and everything in it, gone.
+static void removeTree(const std::string& path) {
+	if (g_file_test(path.c_str(), G_FILE_TEST_IS_DIR) && !g_file_test(path.c_str(), G_FILE_TEST_IS_SYMLINK)) {
+		if (GDir* d = g_dir_open(path.c_str(), 0, nullptr)) {
+			while (const gchar* n = g_dir_read_name(d)) removeTree(path + "/" + n);
+			g_dir_close(d);
+		}
+		g_rmdir(path.c_str());
+	} else {
+		g_remove(path.c_str());
+	}
+}
+
+static int syncTest(int argc, char** argv) {
+	std::string server, only;
+	if (const char* u = g_getenv("CL_SYNC_URL")) server = u;
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) server = argv[++i];
+		else if (strcmp(argv[i], "--only") == 0 && i + 1 < argc) only = argv[++i];
+	}
+	gchar* dir = g_dir_make_tmp("cl-sync-test-XXXXXX", nullptr);
+	if (!dir) { fprintf(stderr, "no temporary folder\n"); return 2; }
+	std::string report;
+	const bool ok = syncplatform::selfTest(dir, server, only, report);
+	fputs(report.c_str(), stdout);
+	removeTree(dir);
+	g_free(dir);
+	printf("%s\n", ok ? "sync self-test: all passed" : "sync self-test: FAILED");
+	return ok ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
 	// Our own options, taken out before GTK sees the rest (files to open).
 	std::vector<char*> args;
@@ -920,6 +993,9 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--first") == 0) { gFirstLaunch = true; continue; }
 		if (strcmp(argv[i], "--hold") == 0 && i + 1 < argc) { gHold = std::max(1, atoi(argv[++i])); continue; }
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
+		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this
+		// machine's hooks (libcrypto, zlib, curl); with a server, also against a mock one.
+		if (strcmp(argv[i], "--sync-test") == 0) return syncTest(argc, argv);
 		if (strcmp(argv[i], "--feedback-probe") == 0) {
 			const int code = feedback::probe();
 			printf("feedback server: %d\n", code);
@@ -928,6 +1004,15 @@ int main(int argc, char** argv) {
 		// A cedarlogic://open#c=… link (the website's Open in the App, a link
 		// in a chat): its circuit goes in a file, which then opens as any
 		// file handed over does, here or in the CedarLogic already running.
+		// A cedarlogic://sync#k=… link carries the secret code: it's copied out of the process's
+		// arguments (where any user could read them) before it goes on.
+		if (sharelink::isSyncLink(argv[i])) {
+			static std::deque<std::string> syncLinks;
+			syncLinks.push_back(argv[i]);
+			memset(argv[i], 0, strlen(argv[i]));
+			args.push_back(const_cast<char*>(syncLinks.back().c_str()));
+			continue;
+		}
 		if (strncmp(argv[i], "cedarlogic:", 11) == 0) {
 			static std::deque<std::string> linkFiles;   // (they stay where they are as it grows)
 			std::string why;
@@ -959,6 +1044,8 @@ int main(int argc, char** argv) {
 	// A launch that handed over never loaded the settings: saving its
 	// defaults would undo the running one's.
 	if (gPrimary) prefs().save();
+	// Every window is closed and saved: what sync hasn't sent yet goes now (five seconds at most).
+	if (gPrimary) syncapp::quit();
 	g_object_unref(app);
 	return status ? status : gExitCode;
 }

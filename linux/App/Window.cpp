@@ -1,6 +1,7 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "SyncApp.h"
 #include "Alert.h"
 #include "Canvas.h"
 #include "Collections.h"
@@ -1086,9 +1087,7 @@ gboolean CircuitWindow::autosaveCb(gpointer self) {
 	guarded("saving", [&] {
 		// Not in the middle of something (a drag, a gate on the pointer,
 		// Tidy Up's preview): then a moment later.
-		Canvas* c = w->currentCanvas();
-		const bool busy = (c && c->isDragging()) || w->isFloating() || w->tidyActive() || cl_edit_is_connecting(w->doc);
-		if (busy) w->autosaveId = g_timeout_add(1000, autosaveCb, w);
+		if (w->busyEditing()) w->autosaveId = g_timeout_add(1000, autosaveCb, w);
 		else if (w->isDirty()) w->saveQuietly(false);
 	});
 	return G_SOURCE_REMOVE;
@@ -1177,6 +1176,36 @@ void CircuitWindow::reloadFromDisk(const std::string& message) {
 	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
 	if (fresh == nullptr) { showMessage(GTK_WINDOW(win), GTK_MESSAGE_ERROR, "The circuit couldn't be opened again", err); return; }
 	replaceDocument(fresh, path);
+	if (!message.empty()) note(message);
+}
+
+bool CircuitWindow::busyEditing() const {
+	Canvas* c = currentCanvas();
+	return (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
+}
+
+void CircuitWindow::noteInput() {
+	lastInputMsec = g_get_real_time() / 1000;
+	syncapp::userInput();
+}
+
+void CircuitWindow::reloadForSync(const std::string& message) {
+	char err[512] = "";
+	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
+	if (fresh == nullptr) {
+		note("Couldn't open the update from your other device.");
+		return;
+	}
+	// The same page and the same view: only what's on it changes.
+	std::vector<Canvas::View> views;
+	for (Canvas* c : canvases) views.push_back(c->view());
+	const int page = currentPage();
+	replaceDocument(fresh, path);
+	openingAt = -1;   // (not the opening card: this window was open already)
+	openingRevealed = true;
+	appearStart = 0;
+	for (size_t i = 0; i < canvases.size() && i < views.size(); i++) canvases[i]->setView(views[i]);
+	if (page >= 0 && page < tabCount()) showPage(page);
 	if (!message.empty()) note(message);
 }
 
@@ -1358,6 +1387,7 @@ static bool isShortcut(GtkApplication* app, const GdkEventKey* e) {
 
 gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
+	w->noteInput();
 	// Text boxes get their keys before the menus' shortcuts, so Ctrl+C in
 	// the palette's search copies text rather than gates.
 	GtkWidget* focus = gtk_window_get_focus(GTK_WINDOW(widget));

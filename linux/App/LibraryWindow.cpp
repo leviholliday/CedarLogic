@@ -5,6 +5,8 @@
 #include "Dialogs.h"
 #include "Library.h"
 #include "Picker.h"
+#include "SyncApp.h"
+#include "SyncUI.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -51,7 +53,10 @@ void showYourCircuits(CircuitWindow* from) {
 		for (const library::Item& it : all) {
 			if (!q.empty() && lowered(it.name).find(q) == std::string::npos) continue;
 			const int n = library::gateCount(it.circuit());
-			out.push_back({ it.id, it.name, format("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified),
+			// A circuit sync can't carry says so on its second line.
+			const std::string problem = syncui::problemFor(it.id);
+			out.push_back({ it.id, it.name,
+			                problem.empty() ? format("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified) : problem,
 			                std::find(open.begin(), open.end(), it.id) != open.end() ? "OPEN" : "" });
 		}
 		p.emptyText = all.empty() ? "Nothing here yet." : "No circuits match.";
@@ -121,10 +126,25 @@ void showYourCircuits(CircuitWindow* from) {
 		}
 		return false;
 	};
+	// The sync line under the list, and the changes sync makes while it's open.
+	bool openSync = false;
+	p.footer = [] { const syncui::Line l = syncui::yourCircuitsLine(); return std::make_pair(l.text, l.button); };
+	p.footerAction = [&] {
+		const syncui::Line l = syncui::yourCircuitsLine();
+		if (l.on) { syncui::yourCircuitsAction(from); return; }
+		openSync = true;   // Settings can't be used while this window holds the pointer: it closes first
+		p.close();
+	};
+	const guint listener = syncapp::addLibraryListener([&] {
+		all = library::items();
+		p.reload();
+	});
 	p.run(from->window());
+	syncapp::removeListener(listener);
 	if (!windowAlive(from)) from = nullptr;
 	if (!toOpen.empty()) openCircuit(app, toOpen, from);
 	else if (import) chooseAndOpen(app, from ? from->window() : nullptr);
+	else if (openSync) syncui::yourCircuitsAction(from);
 }
 
 void showVersionHistory(CircuitWindow* window) {
@@ -154,8 +174,11 @@ void showVersionHistory(CircuitWindow* window) {
 		std::vector<Row> out;
 		for (size_t i = 0; i < versions.size(); i++) {
 			const int n = library::gateCount(versions[i].path);
+			// One sync made says where it came from.
+			const std::string note = library::versionNote(versions[i]);
 			out.push_back({ versions[i].path, library::friendlyTime(versions[i].time),
-			                format("%d gate%s · ", n, n == 1 ? "" : "s") + library::agoText(versions[i].time), i == 0 ? "NEWEST" : "" });
+			                format("%d gate%s · ", n, n == 1 ? "" : "s") + library::agoText(versions[i].time) + (note.empty() ? "" : " · " + note),
+			                i == 0 ? "NEWEST" : "" });
 		}
 		return out;
 	};

@@ -1,6 +1,7 @@
 // Your Circuits (see Library.h).
 
 #include "Library.h"
+#include "SyncApp.h"
 
 #include <glib/gstdio.h>
 #include <sys/stat.h>
@@ -123,8 +124,13 @@ void thin(const Item& item) {
 		if (age < 86400) continue;
 		const std::string s = stamp(v.time);
 		const std::string bucket = age < 7 * 86400 ? "h" + s.substr(0, 11) : "d" + s.substr(0, 8);
-		if (kept.count(bucket)) g_remove(v.path.c_str());
-		else kept.insert(bucket);
+		if (kept.count(bucket)) {
+			g_remove(v.path.c_str());
+			// A version sync made has a note beside it (where it came from): it goes too.
+			g_remove((v.path.substr(0, v.path.size() - 4) + ".txt").c_str());
+		} else {
+			kept.insert(bucket);
+		}
 	}
 }
 
@@ -202,6 +208,7 @@ bool create(const std::string& name, const std::string& text, const std::string&
 	g_mkdir_with_parents(out.versionsFolder().c_str(), 0755);
 	if (!writeFile(out.folder + "/name.txt", name) || !writeFile(out.circuit(), text)) return false;
 	if (!source.empty()) writeFile(out.folder + "/source.txt", sourceMark(source, readFile(source)));
+	syncapp::libraryChanged();
 	return true;
 }
 
@@ -215,14 +222,19 @@ bool imported(const std::string& file, Item& out) {
 	return false;
 }
 
-void rename(const Item& item, const std::string& name) { writeFile(item.folder + "/name.txt", name); }
+void rename(const Item& item, const std::string& name) {
+	writeFile(item.folder + "/name.txt", name);
+	syncapp::libraryChanged();
+}
 
 bool moveToTrash(const Item& item) {
 	const std::string trash = root() + "/.Trash";
 	g_mkdir_with_parents(trash.c_str(), 0755);
 	std::string dest = trash + "/" + item.id;
 	for (int n = 2; fileExists(dest); n++) dest = trash + "/" + item.id + format(" %d", n);
-	return ::g_rename(item.folder.c_str(), dest.c_str()) == 0;
+	const bool moved = ::g_rename(item.folder.c_str(), dest.c_str()) == 0;
+	if (moved) syncapp::libraryChanged();
+	return moved;
 }
 
 // It saves itself every few seconds, so not every save is a version: the
@@ -257,6 +269,7 @@ bool noteSaved(const std::string& path, bool explicitSave) {
 	g_remove(pending.c_str());
 	copyFile(path, pending);
 	thin(item);
+	syncapp::libraryChanged();
 	return kept;
 }
 
@@ -264,7 +277,14 @@ bool restore(const Item& item, const Version& v) {
 	g_mkdir_with_parents(item.versionsFolder().c_str(), 0755);
 	copyFile(item.circuit(), item.versionsFolder() + "/" + stamp(now()) + ".cdl");
 	const std::string text = readFile(v.path);
-	return !text.empty() && writeFile(item.circuit(), text);
+	const bool ok = !text.empty() && writeFile(item.circuit(), text);
+	if (ok) syncapp::libraryChanged();
+	return ok;
+}
+
+std::string versionNote(const Version& v) {
+	if (v.path.size() < 5) return std::string();
+	return trim(readFile(v.path.substr(0, v.path.size() - 4) + ".txt"));
 }
 
 std::string friendlyTime(double t) {

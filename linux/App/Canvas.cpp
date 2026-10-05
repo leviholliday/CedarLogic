@@ -751,6 +751,16 @@ void Canvas::pan(double dx, double dy) {
 	win->statusDirty = true;
 }
 
+void Canvas::setView(const View& v) {
+	zooming = false;
+	originX = v.originX;
+	originY = v.originY;
+	upp = v.upp;
+	needsFit = v.needsFit;
+	gridValid = false;
+	redraw();
+}
+
 void Canvas::panTo(double wx, double wy) {
 	zooming = false;
 	originX = wx - width() / 2 * upp;
@@ -777,6 +787,7 @@ void Canvas::onSizeChanged(int oldW, int oldH, int w, int h) {
 // ---- Pointer -------------------------------------------------------------------
 
 gboolean Canvas::pressCb(GtkWidget*, GdkEventButton* e, gpointer self) {
+	static_cast<Canvas*>(self)->win->noteInput();
 	return guarded("a click", [&] { return static_cast<Canvas*>(self)->onPress(e); });
 }
 gboolean Canvas::releaseCb(GtkWidget*, GdkEventButton* e, gpointer self) {
@@ -789,6 +800,7 @@ gboolean Canvas::scrollCb(GtkWidget*, GdkEventScroll* e, gpointer self) {
 	return guarded("scrolling", [&] { return static_cast<Canvas*>(self)->onScroll(e); });
 }
 gboolean Canvas::keyPressCb(GtkWidget*, GdkEventKey* e, gpointer self) {
+	static_cast<Canvas*>(self)->win->noteInput();
 	return guarded("a key", [&] { return static_cast<Canvas*>(self)->onKeyPress(e); });
 }
 gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {

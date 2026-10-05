@@ -2,7 +2,7 @@
 // (App/SyncPlatform.cpp: libcrypto, GIO's zlib, the curl program), no window needed.
 //
 //   sync_check [--temp <dir>] [--only <name>] [--server <url>]
-//              [--curl-check <url>] [--roundtrip <url> [<a.cdl> <b.cdl>]]
+//              [--curl-check <url>] [--roundtrip <url> [<a.cdl> <b.cdl>]] [--new-code]
 //
 //   (no options)   the engine's self-test: SYNC.md 7.1's vectors and 7.2's scenarios on its
 //                  in-process server, and the engine's threads and C interface.
@@ -13,6 +13,8 @@
 //                  temp file is gone afterwards. Against any server (Tools/sync_mock.py will do).
 //   --roundtrip    two libraries and two engines against a server: turn on, preview, link,
 //                  rename, add, delete, delete the synced copy. Against any server.
+//
+//   --new-code     prints a fresh sync code (for a picture of Settings with sync turned on).
 //
 // Exit status 0 when everything passed. See Tools/sync-check.sh and the workflow.
 
@@ -287,6 +289,10 @@ int main(int argc, char** argv) {
 		if (a == "--temp" && i + 1 < argc) temp = argv[++i];
 		else if (a == "--only" && i + 1 < argc) only = argv[++i];
 		else if (a == "--server" && i + 1 < argc) server = argv[++i];
+		else if (a == "--new-code") {
+			printf("%s\n", clsync::newCode(syncplatform::crypto()).c_str());
+			return 0;
+		}
 		else if (a == "--curl-check" && i + 1 < argc) curlUrl = argv[++i];
 		else if (a == "--roundtrip" && i + 1 < argc) {
 			roundUrl = argv[++i];

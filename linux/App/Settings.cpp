@@ -6,6 +6,7 @@
 #include "Collections.h"
 #include "Drawn.h"
 #include "Shortcuts.h"
+#include "SyncUI.h"
 #include "TitleButtons.h"
 #include "Toolbar.h"
 #include "Window.h"
@@ -18,10 +19,10 @@ namespace settings {
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage, PageCount };
-const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts" };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage, SyncPage, PageCount };
+const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts", "Sync" };
 const char* kIcons[] = { "preferences-system-symbolic", "applications-graphics-symbolic", "input-mouse-symbolic",
-                         "view-more-horizontal-symbolic", "input-keyboard-symbolic" };
+                         "view-more-horizontal-symbolic", "input-keyboard-symbolic", "emblem-synchronizing-symbolic" };
 const float kBarH = 78, kWidth = 640;
 
 // Every window takes the change.
@@ -691,6 +692,7 @@ GtkWidget* buildPage(SettingsWindow* s, int page) {
 	case CanvasPage: return canvasPage();
 	case ToolbarPage: return toolbarPage();
 	case ShortcutsPage: return shortcutsPage(s);
+	case SyncPage: return syncui::settingsPage();
 	default: return generalPage();
 	}
 }
@@ -829,6 +831,14 @@ void show(CircuitWindow* from, int page) {
 }
 
 GtkWidget* window() { return g_settings ? g_settings->win : nullptr; }
+
+void pageChanged() {
+	if (g_settings == nullptr || g_settings->pageWidget == nullptr || g_settings->height.active()) return;
+	int minH = 0, natH = 0;
+	gtk_widget_get_preferred_height_for_width(g_settings->pageWidget, (int)kWidth, &minH, &natH);
+	g_settings->height.set(natH);
+	gtk_widget_set_size_request(g_settings->holder, (int)kWidth, natH);
+}
 
 void themeChanged() {
 	if (g_settings == nullptr) return;

@@ -36,6 +36,8 @@ std::vector<Item> items();
 bool itemFor(const std::string& path, Item& out);
 bool contains(const std::string& path);
 std::vector<Version> versions(const Item& item);
+// Where a version came from, if sync made it ("From Levi's iPhone · edited 4 Oct 10:31"), else "".
+std::string versionNote(const Version& v);
 
 // A new circuit holding `text`; `source` is the file it was imported from,
 // if any, so opening that file again finds it.

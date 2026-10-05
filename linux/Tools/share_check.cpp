@@ -28,6 +28,10 @@ int main(int argc, char** argv) {
 		ok(d.find_first_of("+/=") == std::string::npos, "...base64url, no padding");
 	}
 	ok(sharelink::encode("").empty(), "nothing to encode makes no link");
+	ok(sharelink::isSyncLink("cedarlogic://sync#k=000G40R40M30E209185GR38E1YZ4") && sharelink::isSyncLink("CedarLogic://SYNC?k=000G") &&
+	   sharelink::isSyncLink("cedarlogic://sync") && !sharelink::isSyncLink("cedarlogic://synchronize#k=1") &&
+	   !sharelink::isSyncLink("cedarlogic://open#c=abc") && !sharelink::isSyncLink("https://x/sync#k=1") && !sharelink::isSyncLink(""),
+	   "a cedarlogic://sync link is a sync link, and nothing else is");
 	std::string data, name;
 	ok(sharelink::parse("https://x/online/#c=abc&n=A%20B", data, name) && data == "abc" && name == "A B", "parse reads the data and the name");
 	ok(sharelink::parse("cedarlogic://open?c=xyz", data, name) && data == "xyz", "...and the ? form");

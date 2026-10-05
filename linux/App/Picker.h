@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace picker {
@@ -49,6 +50,10 @@ public:
 	std::function<bool(Picker&, guint key, bool ctrl)> onKey;
 	std::function<void(cairo_t*, const RectF&)> preview;
 	std::function<void(Picker&)> onSelect;
+	// A small line in the strip above the buttons (Your Circuits' sync line): its text and the
+	// link at its right end ("" for none), asked each time it's drawn; footerAction when the link is pressed.
+	std::function<std::pair<std::string, std::string>()> footer;
+	std::function<void()> footerAction;
 	// Draws a row's tile in place of the gate silhouette (Add a Gate draws the gate itself).
 	std::function<void(cairo_t*, const Row&, const RectF&)> drawTile;
 
@@ -70,6 +75,7 @@ private:
 	GMainLoop* loop = nullptr;
 	float scroll = 0;
 	int hot = -1, hotButton = -1;
+	guint footerTimer = 0;
 	bool done = false;
 	struct Button { RectF rect; int id; std::string label; bool primary; };
 	std::vector<Button> buttons;

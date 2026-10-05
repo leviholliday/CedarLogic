@@ -84,6 +84,9 @@ void applyStyle() {
 	     "font-weight: bold; font-size: 11.5px; color: " + css(c.tabInk()) + "; caret-color: " + css(c.accent()) + "; }\n";
 	s += "#alert-entry { background: transparent; border: none; box-shadow: none; outline: none; min-height: 24px; padding: 0 2px; "
 	     "font-size: 13px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
+	// The sync code, big and selectable (SyncUI.cpp).
+	s += "#sync-code { background: transparent; border: none; box-shadow: none; outline: none; min-height: 34px; padding: 0 2px; "
+	     "font-family: monospace; font-weight: bold; font-size: 20px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
 	s += "#ram-cell, #ram-jump { background: transparent; border: none; box-shadow: none; outline: none; min-height: 18px; padding: 0 2px; "
 	     "font-family: monospace; font-size: 11.5px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
 	s += "#ram-jump { font-size: 12px; padding-left: 4px; }\n";

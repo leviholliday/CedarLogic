@@ -59,6 +59,11 @@ public:
 	void cancelDrag();
 	bool isDragging() const { return drag != Drag::None; }
 
+	// The camera, for putting it back after the circuit was reloaded in place.
+	struct View { double originX, originY, upp; bool needsFit; };
+	View view() const { return View{ originX, originY, upp, needsFit }; }
+	void setView(const View& v);
+
 	// Called when the window's circuit changed under it (undo, a new page).
 	void noteFit() { needsFit = true; }
 	// Let go of the off-screen images (a tab that isn't in front).

@@ -176,6 +176,18 @@ public:
 	// Something in Your Circuits changed (a rename): the title follows.
 	void libraryChanged();
 
+	// ---- Sync (SyncApp.cpp) ----
+	// The person did something here: when (ms since 1970), for holding back a change
+	// to a circuit they're working in, and for polling while they work.
+	void noteInput();
+	int64_t lastInputMs() const { return lastInputMsec; }
+	// In the middle of something (a drag, a gate on the pointer, Tidy Up's preview):
+	// not a moment to save.
+	bool busyEditing() const;
+	// The circuit changed on disk (another device's edit): reloaded in place, on the same
+	// page and with the same view, and a quiet note.
+	void reloadForSync(const std::string& message);
+
 	// ---- Templates, My Parts, Build from Formula ----
 	// A circuit just made from a template: into Your Circuits under its name.
 	void startAs(const std::string& name);
@@ -264,6 +276,7 @@ private:
 	std::string recoveredName;
 	unsigned changes = 0, changesAtRecovery = 0;
 	gint64 lastRecovery = 0;
+	int64_t lastInputMsec = 0;
 	void writeRecovery();
 
 	GtkWidget* notebooks[2] = { nullptr, nullptr };
