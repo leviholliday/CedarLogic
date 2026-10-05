@@ -495,6 +495,8 @@ final class SyncCenter: ObservableObject {
         working = "Checking the code\u{2026}"
         let box = Unmanaged.passRetained(PreviewDone { ok, message, n in
             self.working = nil
+            // The person closed the sheet while it was checking: nothing pops up later.
+            guard self.sheet != nil else { return }
             if ok {
                 self.sheet = .confirm(code: code, sentence: message, empty: n == 0)
             } else {
