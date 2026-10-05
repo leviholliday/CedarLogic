@@ -164,6 +164,16 @@ struct Waiter {
 
 namespace {
 std::atomic<int> gDetached{ 0 };
+
+// The pairing sentences (SYNC.md 11.6, 11.10).
+const char* const kPairCantReach = "Can't reach the website. Check the connection, then try again.";
+const char* const kPairExpired = "This QR code expired.";
+const char* const kPairDamaged = "An answer came that couldn't be read.";
+const char* const kPairSyncOn = "Sync is already on.";
+const char* const kPairNoRandom = "Couldn't make a QR code: this computer's random number generator didn't answer.";
+
+using SteadyTime = std::chrono::steady_clock::time_point;
+SteadyTime steadyNow() { return std::chrono::steady_clock::now(); }
 }  // namespace
 
 int detachedEngines() { return gDetached.load(); }
@@ -192,6 +202,19 @@ struct Engine::Impl {
 	std::string pubCode, pubDeviceName, pubStatus = "off", pubDetail;
 	std::vector<std::pair<std::string, int64_t>> pubDevices;
 	std::vector<std::string> pendingNotices;
+
+	// Pairing, D's side (SYNC.md 11.6), under mu. Every start and cancel moves pairGen on; a step
+	// or a callback that finds it moved does nothing more.
+	struct PairJob {
+		bool active = false, put = false;   // put: the website has the slot
+		PairSlot slot;
+		SteadyTime started, next;
+		std::function<void(const std::string&)> show;
+		std::function<void(int, const std::string&, const std::string&)> done;
+	};
+	PairJob pair;
+	uint64_t pairGen = 0;
+	std::vector<std::pair<std::string, std::string>> pairDeletes;   // (pairId, read token) to DELETE
 
 	Impl(Config c, Crypto& cr, Host& h) : cfg(std::move(c)), crypto(cr), host(h) {
 		FileLibraryOptions o;
@@ -405,10 +428,153 @@ struct Engine::Impl {
 		}
 	}
 
+	// ---- pairing (SYNC.md 11.6) ----
+
+	PairServer pairServer() {
+		PairServer s;
+		s.serverBase = cfg.serverBase;
+		s.appKey = cfg.appKey;
+		s.client = cfg.client;
+		s.http = [this](const HttpRequest& r) { return host.http(r); };
+		return s;
+	}
+
+	// Under mu: the current pairing ends without done; its slot is deleted by the engine thread.
+	void cancelPairLocked() {
+		pairGen++;
+		if (pair.active && pair.put) pairDeletes.emplace_back(pair.slot.keys.pairId, pair.slot.readToken);
+		pair = PairJob();
+	}
+
+	// Engine thread.
+	void runPairDeletes() {
+		std::vector<std::pair<std::string, std::string>> dels;
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			dels.swap(pairDeletes);
+		}
+		if (dels.empty()) return;
+		const PairServer srv = pairServer();
+		for (const auto& d : dels) pairDelete(srv, d.first, d.second);
+	}
+
+	// Engine thread: done on the UI thread, unless this pairing was cancelled or replaced
+	// (checked there too: cancel runs on the UI thread, so it comes wholly before or after).
+	void endPair(uint64_t gen, int result, const std::string& text, const std::string& from) {
+		std::function<void(int, const std::string&, const std::string&)> done;
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			if (pairGen != gen || !pair.active) return;
+			done = std::move(pair.done);
+			pair = PairJob();
+		}
+		try {
+			runMain([&] {
+				{
+					std::lock_guard<std::mutex> lock(mu);
+					if (pairGen != gen) return;
+				}
+				if (done) done(result, text, from);
+			});
+		} catch (const Stopped&) {
+		}
+	}
+
+	// Engine thread: the PUT, or one poll.
+	void pairStep() {
+		uint64_t gen;
+		PairJob j;
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			if (!pair.active) return;
+			gen = pairGen;
+			j.put = pair.put;
+			j.slot = pair.slot;
+			j.started = pair.started;
+			j.show = pair.show;
+		}
+		const PairServer srv = pairServer();
+		if (!j.put) {
+			if (core->enabled()) {
+				endPair(gen, Engine::PairFailed, kPairSyncOn, std::string());
+				return;
+			}
+			PairSlot slot;
+			int st = 0;
+			SteadyTime started = steadyNow();
+			for (int attempt = 0; attempt < 3; attempt++) {   // 409: someone has this P (practically never): another
+				started = steadyNow();
+				st = pairPut(srv, crypto, core->deviceName(), slot);
+				if (st != 409) break;
+				std::lock_guard<std::mutex> lock(mu);
+				if (pairGen != gen) return;
+			}
+			if (st != 201) {
+				endPair(gen, Engine::PairFailed, st == -1 ? kPairNoRandom : kPairCantReach, std::string());
+				return;
+			}
+			{
+				std::lock_guard<std::mutex> lock(mu);
+				if (pairGen != gen || !pair.active) {   // cancelled while the PUT was out
+					pairDeletes.emplace_back(slot.keys.pairId, slot.readToken);
+					return;
+				}
+				pair.put = true;
+				pair.slot = slot;
+				pair.started = started;
+				pair.next = std::min(steadyNow() + std::chrono::milliseconds(pairPollMs()),
+				                     started + std::chrono::milliseconds(pairLifeMs()));
+			}
+			try {
+				runMain([&] {
+					{
+						std::lock_guard<std::mutex> lock(mu);
+						if (pairGen != gen) return;
+					}
+					if (j.show) j.show(slot.link);
+				});
+			} catch (const Stopped&) {
+			}
+			return;
+		}
+		if (core->enabled()) {   // linked another way meanwhile (a typed code): stop quietly
+			std::lock_guard<std::mutex> lock(mu);
+			if (pairGen == gen) cancelPairLocked();
+			return;
+		}
+		const auto life = std::chrono::milliseconds(pairLifeMs());
+		if (steadyNow() - j.started >= life) {
+			endPair(gen, Engine::PairExpired, kPairExpired, std::string());
+			return;
+		}
+		std::string env;
+		const int st = pairPoll(srv, j.slot, env);
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			if (pairGen != gen || !pair.active) return;   // cancelled meanwhile: the cancel deletes the slot
+		}
+		if (st == 404) {
+			endPair(gen, Engine::PairExpired, kPairExpired, std::string());
+			return;
+		}
+		if (st == 200 && !env.empty()) {
+			PairMessage m;
+			const bool ok = openPair(crypto, j.slot.keys, "answer", env, m);
+			pairDelete(srv, j.slot.keys.pairId, j.slot.readToken);   // best effort: it expires anyway
+			if (ok) endPair(gen, Engine::PairCode, m.code, pairDeviceText(m.device));
+			else endPair(gen, Engine::PairFailed, kPairDamaged, std::string());
+			return;
+		}
+		// No answer yet, or an error: the next tick (errors silently, until the 10 minutes are up).
+		std::lock_guard<std::mutex> lock(mu);
+		if (pairGen == gen && pair.active)
+			pair.next = std::min(steadyNow() + std::chrono::milliseconds(pairPollMs()), j.started + life);
+	}
+
 	void loop() {
 		for (;;) {
 			std::function<void()> op;
-			bool cycle = false, flush = false;
+			bool cycle = false, flush = false, deletes = false, pairDue = false;
 			{
 				std::unique_lock<std::mutex> lock(mu);
 				for (;;) {
@@ -416,6 +582,14 @@ struct Engine::Impl {
 					if (!ops.empty()) {
 						op = std::move(ops.front());
 						ops.pop_front();
+						break;
+					}
+					if (!pairDeletes.empty()) {
+						deletes = true;
+						break;
+					}
+					if (pair.active && !noMain.load() && steadyNow() >= pair.next) {
+						pairDue = true;
 						break;
 					}
 					const int64_t now = clock.now();
@@ -426,16 +600,31 @@ struct Engine::Impl {
 					}
 					int64_t wake = core->enabled() ? sched.nextWake(now, lazy) : INT64_MAX;
 					int64_t ms = wake == INT64_MAX ? 60000 : std::max<int64_t>(50, std::min<int64_t>(60000, wake - now));
+					if (pair.active) {
+						const int64_t p =
+							std::chrono::duration_cast<std::chrono::milliseconds>(pair.next - steadyNow()).count();
+						ms = std::max<int64_t>(1, std::min(ms, p));
+					}
 					cv.wait_for(lock, std::chrono::milliseconds(ms));
 				}
 				if (stopping) break;
 			}
 			try {
 				if (op) op();
+				else if (deletes) runPairDeletes();
+				else if (pairDue) pairStep();
 				else if (cycle) runCycle(flush);
 			} catch (const std::exception&) {
 			}
 		}
+		{
+			// Stopped or destroyed with a QR code showing: its slot goes too (best effort; after
+			// quitting() it already went, and nothing more is sent).
+			std::lock_guard<std::mutex> lock(mu);
+			cancelPairLocked();
+			if (noMain.load() || orphaned) pairDeletes.clear();
+		}
+		runPairDeletes();
 		std::lock_guard<std::mutex> lock(mu);
 		if (lockHeld && !orphaned) host.unlock();
 		lockHeld = false;
@@ -774,6 +963,7 @@ void Engine::quitting(std::function<void()> done) {
 	d->noMain = true;   // from now on nothing waits for the UI thread
 	{
 		std::lock_guard<std::mutex> lock(d->mu);
+		d->cancelPairLocked();   // a QR code showing: its slot is deleted below (best effort)
 		if (!d->threadRunning || d->stopping) {
 			once->fire();
 			return;
@@ -783,6 +973,7 @@ void Engine::quitting(std::function<void()> done) {
 	d->enqueue(
 		[p, once] {
 			if (p->core->enabled() && p->takeLock()) p->core->syncPushOnly();
+			p->runPairDeletes();
 			once->fire();
 		},
 		true);
@@ -791,6 +982,28 @@ void Engine::quitting(std::function<void()> done) {
 		std::this_thread::sleep_for(std::chrono::seconds(5));
 		once->fire();
 	}).detach();
+}
+
+void Engine::pairStart(std::function<void(const std::string&)> show,
+                       std::function<void(int, const std::string&, const std::string&)> done) {
+	d->startThread();
+	{
+		std::lock_guard<std::mutex> lock(d->mu);
+		d->cancelPairLocked();   // a pairing already under way ends without done
+		d->pair.active = true;
+		d->pair.next = steadyNow();
+		d->pair.show = std::move(show);
+		d->pair.done = std::move(done);
+	}
+	d->cv.notify_all();
+}
+
+void Engine::pairCancel() {
+	{
+		std::lock_guard<std::mutex> lock(d->mu);
+		d->cancelPairLocked();
+	}
+	d->cv.notify_all();
 }
 
 }  // namespace clsync

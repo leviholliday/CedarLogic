@@ -99,6 +99,22 @@ void cl_sync_user_active(CLSyncEngine *e);
 typedef void (*CLSyncQuitDone)(void *ctx);                // called on the engine thread (or, past 5 s, a timer thread)
 void cl_sync_quitting(CLSyncEngine *e, CLSyncQuitDone done, void *ctx);
 
+// Pairing (SYNC.md §11): this device joins by showing a QR code that a device
+// that syncs scans. Sync must be off. `show` gets the QR code's text (the
+// pairing link) once the website has the request; `done` once:
+//   CL_SYNC_PAIR_CODE    text = the sync code (then cl_sync_preview and
+//                        cl_sync_link it), from = the sending device's name
+//   CL_SYNC_PAIR_EXPIRED text = the sentence ("This QR code expired.")
+//   CL_SYNC_PAIR_FAILED  text = the sentence (can't reach the website, damaged)
+// Both on the main thread. cl_sync_pair_cancel (or a new start, or destroy)
+// stops it: then done isn't called. Cancel deletes the slot (best effort).
+// Call start and cancel on the main thread. The strings are valid during the call.
+enum { CL_SYNC_PAIR_CODE, CL_SYNC_PAIR_EXPIRED, CL_SYNC_PAIR_FAILED };
+typedef void (*CLSyncPairShow)(void *ctx, const char *link);
+typedef void (*CLSyncPairDone)(void *ctx, int result, const char *text, const char *from);
+void cl_sync_pair_start(CLSyncEngine *e, CLSyncPairShow show, CLSyncPairDone done, void *ctx);
+void cl_sync_pair_cancel(CLSyncEngine *e);
+
 // Codes (no engine needed; the hooks for SHA-256)
 // Writes the canonical code (29 bytes with NUL) or returns false with why = "length" | "symbol" | "checksum".
 bool cl_sync_parse_code(const CLSyncHooks *hooks, const char *text, char code[29], char why[16]);
