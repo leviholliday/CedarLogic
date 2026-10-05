@@ -149,10 +149,10 @@ struct Waiter {
 		cv.notify_all();
 	}
 	// Waits until set, `ms` pass (< 0: no limit), or `stop` turns true (checked every 100 ms).
-	bool wait(int64_t ms, const std::atomic<bool>& stop) {
+	bool wait(int64_t ms, const std::function<bool()>& stop) {
 		std::unique_lock<std::mutex> lock(mu);
 		const auto start = std::chrono::steady_clock::now();
-		while (!done && !stop.load()) {
+		while (!done && !stop()) {
 			if (ms >= 0 && std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(ms)) break;
 			cv.wait_for(lock, std::chrono::milliseconds(100));
 		}
@@ -269,7 +269,8 @@ struct Engine::Impl {
 			if (local) host.askMassDelete(count, [w](bool yes) { w->set(yes); });
 			else host.askIncomingDeletes(count, devices, [w](bool yes) { w->set(yes); });
 		});
-		if (!w->wait(-1, stopped) || noMain.load()) throw Stopped();
+		// The person may take their time; stop() or quitting abandons the cycle (the cursor held).
+		if (!w->wait(-1, [this] { return stopped.load() || noMain.load(); }) || noMain.load()) throw Stopped();
 		return w->value;
 	}
 
@@ -371,7 +372,7 @@ struct Engine::Impl {
 		try {
 			auto w = std::make_shared<Waiter>();
 			runMain([&] { host.flushOpen([w] { w->set(); }); });
-			w->wait(10 * kSecond, stopped);
+			w->wait(10 * kSecond, [this] { return stopped.load(); });
 		} catch (const Stopped&) {
 			return;
 		}

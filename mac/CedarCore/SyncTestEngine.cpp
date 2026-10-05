@@ -172,6 +172,11 @@ struct TestHost : Host {
 	}
 };
 
+std::string replaceAllSimple(std::string s, const std::string& from, const std::string& to) {
+	for (size_t at = s.find(from); at != std::string::npos; at = s.find(from, at + to.size())) s.replace(at, from.size(), to);
+	return s;
+}
+
 std::string lowerSpaced(const std::string& code) {
 	std::string g = groupCode(code);
 	for (char& c : g) c = c == '-' ? ' ' : (char)tolower((unsigned char)c);
@@ -362,6 +367,49 @@ void engineEndToEnd(Crypto& cr, const std::string& dir) {
 	});
 }
 
+// Both mass-delete questions through the threaded engine: asked on the UI thread, answered
+// later, the cycle waiting meanwhile (scenarios 25 and 37 with real threads).
+void engineQuestions(Crypto& cr, const std::string& dir) {
+	SystemClock clock;
+	FakeServer server(clock, cr);
+	UiThread ui;
+	Device a(ui, server, cr, files::join(dir, "A"), "Mac A");
+	for (int i = 0; i < 8; i++)
+		makeCircuit(a.root, "20261004-10101" + std::to_string(i) + "-1000" + std::to_string(i), "Q" + std::to_string(i),
+		            replaceAllSimple(fixture("vector-v3.cdl"), "(at 18 20)", "(at " + std::to_string(30 + i) + " 20)"));
+	ui.sync([&] { a.engine->start(); });
+	std::atomic<int> on{ 0 };
+	ui.sync([&] { a.engine->turnOn([&](bool ok, std::string) { on = ok ? 1 : -1; }); });
+	ECHECK(waitFor([&] { return on != 0; }, 5000) && on == 1);
+	ECHECK(waitFor([&] { return liveCircuits(server) == 8; }, 5000));
+	const std::string code = a.engine->code();
+	Device b(ui, server, cr, files::join(dir, "B"), "Laptop B");
+	ui.sync([&] { b.engine->start(); });
+	std::atomic<int> linked{ 0 };
+	ui.sync([&] { b.engine->link(code, [&](bool ok, std::string) { linked = ok ? 1 : -1; }); });
+	ECHECK(waitFor([&] { return linked == 1 && folderNames(b.root).size() == 8; }, 5000));
+	ECHECK(waitFor([&] { return b.engine->status().kind == Status::Synced; }, 5000));
+	// A: 7 of 8 deleted on purpose (Delete Them Everywhere, answered a moment later).
+	for (int i = 0; i < 7; i++) a.engine->noteLibraryChanged();
+	for (const std::string& n : files::listDir(a.root))
+		if (n[0] != '.' && folderNames(a.root).size() > 1) files::removeAll(files::join(a.root, n));
+	a.host.answerYes = true;
+	ui.sync([&] { a.engine->syncNow(); });
+	ECHECK(waitFor([&] { return liveCircuits(server) == 1 && a.engine->status().kind == Status::Synced; }, 5000));
+	// B: asked, answers Keep Them; they go back to the server and to A.
+	b.host.answerYes = false;
+	ui.sync([&] { b.engine->syncNow(); });
+	ECHECK(waitFor([&] { return liveCircuits(server) == 8; }, 5000));
+	ECHECK(folderNames(b.root).size() == 8);
+	ui.sync([&] { a.engine->syncNow(); });
+	ECHECK(waitFor([&] { return folderNames(a.root).size() == 8; }, 5000));
+	ECHECK(a.host.offMainHostCalls == 0 && b.host.offMainHostCalls == 0);
+	ui.sync([&] {
+		a.engine.reset();
+		b.engine.reset();
+	});
+}
+
 // The C interface, with hooks over the self-test's Crypto.
 Crypto* gCrypto = nullptr;
 bool cRandom(void*, uint8_t* out, size_t n) { return gCrypto->random(out, n); }
@@ -409,6 +457,7 @@ void engineTests(Crypto& cr, const std::string& tempDir, Report& report) {
 	const std::vector<Row> rows = {
 		{ "engine: turn on, preview, link, sync now, lock (27), quitting, restart, delete, turn off",
 		  [&] { engineEndToEnd(cr, tempDir); } },
+		{ "engine: both mass-delete questions, answered later on the UI thread", [&] { engineQuestions(cr, tempDir); } },
 		{ "engine: the C interface", [&] { cInterface(cr); } },
 	};
 	for (const Row& row : rows) {
