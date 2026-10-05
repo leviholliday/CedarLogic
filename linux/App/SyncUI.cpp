@@ -77,6 +77,10 @@ const char* const kWaiting = "Waiting for your phone\xE2\x80\xA6";
 const char* const kCantReach = "Can't reach the website.";
 const char* const kExpired = "This QR code expired.";
 const char* const kDamaged = "An answer came that couldn't be read.";
+// The engine's other pairing sentences (SyncEngine.cpp), which the status line shows as they are: it has to have
+// room for the longest of them.
+const char* const kSyncOn = "Sync is already on.";
+const char* const kNoRandom = "Couldn't make a QR code: this computer's random number generator didn't answer.";
 // Same length as a real pairing link, so the QR code has the same size: the card's layout is made before there is one.
 const char* const kSampleLink = "https://cedarlogic.netlify.app/sync/#p=AAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
@@ -105,17 +109,17 @@ int runCard(GtkWindow* parent, Card& c) {
 	const float headH = brand::text(nullptr, c.heading, 0, 0, 16, brand::Bold, brand::kPrimary, textW);
 	const float headTop = inset + 52;
 	float y = headTop + headH + 7;
-	float scanLabelTop = 0, scanTop = 0, scanStatusTop = 0, scanActionTop = 0, typeLabelTop = 0;
+	float scanLabelTop = 0, scanTop = 0, scanStatusTop = 0, scanActionTop = 0, typeLabelTop = 0, scanStatusH = 0;
 	const float scanActionH = 28;
 	if (c.scan.on) {
 		scanLabelTop = y + 6;
 		scanTop = scanLabelTop + 26;
 		const float explH = brand::text(nullptr, kScanLine, 0, 0, 12.5f, brand::Normal, brand::kPrimary, scanTextW);
-		float statusH = 0;   // room for the longest of the sentences
-		for (const char* t : { kWaiting, kCantReach, kExpired, kDamaged })
-			statusH = std::max(statusH, brand::text(nullptr, t, 0, 0, 12.5f, brand::Normal, brand::kPrimary, scanTextW));
+		// Room for the longest of the sentences it can show (wrapped to the column's width).
+		for (const char* t : { kWaiting, kCantReach, kExpired, kDamaged, kSyncOn, kNoRandom })
+			scanStatusH = std::max(scanStatusH, brand::text(nullptr, t, 0, 0, 12.5f, brand::Normal, brand::kPrimary, scanTextW));
 		scanStatusTop = scanTop + explH + 14;
-		scanActionTop = scanStatusTop + statusH + 8;
+		scanActionTop = scanStatusTop + scanStatusH + 8;
 		y = std::max(scanTop + scanBox, scanActionTop + scanActionH) + 20;
 		typeLabelTop = y;
 		y += 26;
@@ -292,7 +296,13 @@ int runCard(GtkWindow* parent, Card& c) {
 			}
 			if (!c.scan.action.empty()) {
 				const float tw = textWidth(c.scan.action, 13, true) + 28;
-				const RectF r = rectF(tx, top + scanActionTop, tx + tw, top + scanActionTop + scanActionH);
+				// The button follows the sentence: if this one wraps to more lines than any the card made room for,
+				// it goes below it rather than over it.
+				const float textH = c.scan.text.empty()
+					? 0.0f
+					: brand::text(nullptr, c.scan.text, 0, 0, 12.5f, brand::Normal, brand::kPrimary, scanTextW);
+				const float actionTop = scanActionTop + std::max(0.0f, textH - scanStatusH);
+				const RectF r = rectF(tx, top + actionTop, tx + tw, top + actionTop + scanActionH);
 				const bool hot = sh.hotNext();
 				fillRound(cr, r, 9, withAlpha(ink, hot ? 0.12f : 0.08f));
 				drawTextMid(cr, c.scan.action, rectF(r.left + 14, r.top, r.right, r.bottom), 13, ink, TextAlign::Leading, true);
@@ -1092,7 +1102,7 @@ void showForScreenshot(CircuitWindow* from, const std::string& what, int page) {
 		runCard(from ? from->window() : nullptr, c);
 	} else if (what == "synclink" || what == "syncpair") {
 		// The whole sheet: the QR code of a made-up link (nothing is made or sent), and the field.
-		// syncpair:0 waiting, :1 expired, :2 can't reach the website, :3 a damaged answer, :4 not made yet.
+		// syncpair:0 waiting, :1 expired, :2 can't reach the website, :3 a damaged answer, :4 not made yet, :5 the longest engine sentence.
 		Card c;
 		c.heading = "Link to your synced circuits";
 		c.title = "Link this computer";
@@ -1111,6 +1121,7 @@ void showForScreenshot(CircuitWindow* from, const std::string& what, int page) {
 		else if (page == 2) { c.scan.state = S::CantReach; c.scan.text = kCantReach; c.scan.action = "Try Again"; }
 		else if (page == 3) { c.scan.state = S::Damaged; c.scan.text = kDamaged; c.scan.action = "Show a New One"; }
 		else if (page == 4) c.scan.state = S::Making;
+		else if (page == 5) { c.scan.state = S::CantReach; c.scan.text = kNoRandom; c.scan.action = "Try Again"; }
 		else {
 			c.scan.state = S::Waiting;
 			c.scan.link = "https://cedarlogic.netlify.app/sync/#p=0G40R40M30E209185GR38E1YZ4Q1";

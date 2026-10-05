@@ -142,7 +142,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 whatsnew:0 help truth feedback templates tour find export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu; do
+          for show in welcome:0 whatsnew:0 help truth feedback templates tour find export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"

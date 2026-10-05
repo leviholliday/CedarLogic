@@ -34,7 +34,7 @@ std::string problemFor(const std::string& folderId);
 
 // For the screenshot runs: --show sync (the Settings page), synccode (the code and its QR code),
 // synclink (I Have a Code, with a code typed), syncpair:N (I Have a Code with the QR code to scan,
-// and what it says about the wait: 0 waiting, 1 expired, 2 can't reach, 3 damaged, 4 making it),
+// and what it says about the wait: 0 waiting, 1 expired, 2 can't reach, 3 damaged, 4 making it, 5 the longest sentence the engine can give),
 // syncconfirm (the question before linking).
 void showForScreenshot(CircuitWindow* from, const std::string& what, int page = 0);
 
