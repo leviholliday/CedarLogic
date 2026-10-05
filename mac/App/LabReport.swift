@@ -66,9 +66,19 @@ enum LabReport {
             y = margin
         }
 
-        /// Starts a new page unless `h` more points fit.
+        /// Headings wait here until the block under them is placed, so a
+        /// heading is never left alone at the bottom of a page.
+        var pending: [(String, Bool)] = []   // (text, isSection)
+        static let sectionH: CGFloat = 42, subH: CGFloat = 24
+        var pendingH: CGFloat { pending.reduce(0) { $0 + ($1.1 ? Builder.sectionH : Builder.subH) } }
+
+        /// Starts a new page unless `h` more points fit (with any waiting
+        /// headings), then draws the waiting headings.
         mutating func need(_ h: CGFloat) {
-            if y + h > pageH - margin - footerH { newPage() }
+            if y + pendingH + h > pageH - margin - footerH { newPage() }
+            let queued = pending
+            pending = []
+            for (s, section) in queued { section ? drawHeading(s) : drawSubheading(s) }
         }
 
         private func footer() {
@@ -104,8 +114,10 @@ enum LabReport {
             y += h + gapAfter
         }
 
-        mutating func heading(_ s: String) {
-            need(60)
+        mutating func heading(_ s: String) { pending.append((s, true)) }
+        mutating func subheading(_ s: String) { pending.append((s, false)) }
+
+        private mutating func drawHeading(_ s: String) {
             y += 8
             let h = text(s, x: margin, top: y, size: 15, weight: .semibold)
             y += h + 4
@@ -114,8 +126,7 @@ enum LabReport {
             y += 10
         }
 
-        mutating func subheading(_ s: String) {
-            need(40)
+        private mutating func drawSubheading(_ s: String) {
             let h = text(s, x: margin, top: y, size: 12, weight: .medium, color: NSColor(white: 0.25, alpha: 1))
             y += h + 8
         }
@@ -163,10 +174,10 @@ enum LabReport {
         mutating func circuitPicture(_ page: Int, of count: Int) {
             guard let size = ImageExport.size(document, page: page, info: nil) else { return }
             if count > 1 { subheading("Page \(page + 1): " + document.pageName(page)) }
-            need(220)
-            let room = pageH - margin - footerH - y
+            let room = pageH - margin - footerH - 2 * margin - pendingH   // what a fresh page gives
             let s = min(contentW / size.width, room / size.height, 1.5)
             let w = size.width * s, h = size.height * s
+            need(h)
             let x = margin + (contentW - w) / 2
             ctx.saveGState()
             ctx.translateBy(x: x, y: pageH - y - h)
