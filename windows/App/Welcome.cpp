@@ -8,6 +8,7 @@
 #include "Chrome.h"
 #include "Commands.h"
 #include "Dialogs.h"
+#include "SyncApp.h"
 #include "Window.h"
 
 #include <commctrl.h>
@@ -962,12 +963,15 @@ HWND tourWindow() { return g_tour ? g_tour->panel.hwnd : nullptr; }
 
 namespace whatsnew {
 
-const char* const kVersion = "native-1";
+const char* const kVersion = "0.4";
 
 namespace {
 
 enum { kSkip = 1, kBack, kNext, kTry, kLine0 = 10, kTile0 = 20 };
 const float kNW = 820, kNH = 600;
+
+// A try button's "command" that isn't one: Settings, on its Sync page.
+const int kOpenSync = -2;
 
 struct Point { wchar_t icon; const char* title; const char* line; };
 struct Chapter {
@@ -978,33 +982,38 @@ struct Chapter {
 };
 
 const Chapter kChapters[] = {
-	{ "Your circuits", "Everything in one place", "Every circuit lives in Your Circuits and saves itself as you go. No files to lose.",
-	  { { 0xE8F1, "Your Circuits (Ctrl+O)", "Open, rename, delete. A new circuit joins as soon as there's something on it." },
-	    { 0xE8C8, "Files come in as copies", "Open a .cdl from anywhere and you work on a copy; Export gets one out." },
-	    { 0xE81C, "Versions that mean something", "Ctrl+S keeps a version. Version History has every one, with a picture." } },
-	  "Open Your Circuits", CMD_OPEN },
-	{ "Start ahead", "Templates and your own parts", "Stop rebuilding the same thing every lab.",
-	  { { 0xE8C8, "New from Template", "A Lab Page with your name on it, a 4-bit counter, a 7-segment starter, or your own." },
-	    { 0xE7B8, "My Parts", "Select some gates, Edit ▸ Save as Part, name it. Drag it from the side panel or find it with A." },
-	    { 0xE713, "Save your own templates", "Any circuit can be the start of the next one: File ▸ Save as Template." } },
-	  "Browse Templates", CMD_NEW_TEMPLATE },
-	{ "Check your work", "Truth tables that do the algebra", "Press T, and CedarLogic hands you the simplest answer too.",
-	  { { 0xE80A, "Karnaugh maps and formulas", "The truth table has tabs: the table, a K-map for each light, and the simplest SOP and POS." },
-	    { 0xE943, "Build from a Formula", "Type F = AB + C' (or Σm(1,3,5)) and get the gates, wired and labelled." },
-	    { 0xE721, "Find (Ctrl+F)", "Labels, TO/FROM names and parts on every page, one Enter away." } },
-	  "Build from a Formula", CMD_BUILD_FORMULA },
-	{ "See it think", "Watch the signals", "The circuit shows you what it's doing.",
-	  { { 0xE71B, "Point at a wire", "Every branch of it lights up, so you can follow it across the page." },
-	    { 0xE9D9, "Timing diagrams", "Share the oscilloscope (Ctrl+G) as a picture, in colour or black and white." },
-	    { 0xE768, "Simulation View", "Lit wires with the signal marching along them. Press Ctrl+R." } },
-	  nullptr, 0 },
-	{ "Made for Windows", "Faster, calmer, greener", "A new look, and a lot of care in the small things.",
-	  { { 0xE790, "CedarLogic green", "The icon's colour is the app's colour now. Settings has the others." },
-	    { 0xE9E9, "Gate settings and memory", "Double-click a gate or a RAM for clean, quick editors. Enter is Done." },
-	    { 0xED15, "Send Feedback", "The speech bubble in the toolbar sends a note and screenshots straight to the developer." } },
+	{ "Sync", "Your circuits, on every device", "Turn it on once and Your Circuits follow you: other PCs and Macs, Raspberry Pis, CedarLogic Online and the phone app.",
+	  { { 0xE895, "Turn On Sync", "Settings ▸ Sync ▸ Turn On Sync makes a sync code. There's no account to make." },
+	    { 0xE72E, "Private by design", "Circuits are locked on this PC before they leave it. The website keeps them but can't read them." },
+	    { 0xE81C, "Nothing gets lost", "If two devices edit one circuit, the other edit goes to Version History. A delete goes to the Trash folder." } },
+	  "Open Sync Settings", kOpenSync },
+	{ "Add a device", "Link a new device by scanning", "A phone that already syncs can give a new device the code: scan, and it's linked.",
+	  { { 0xE772, "I Have a Code", "On the new device, Settings ▸ Sync ▸ I Have a Code shows a QR code." },
+	    { 0xE722, "Scan it with your phone", "On a phone that syncs: Your Circuits ▸ Sync ▸ Add a Device, then point the camera at it." },
+	    { 0xE73E, "Typing still works", "Type or paste the code, or a sync link, into the same sheet." } },
+	  "Open Sync Settings", kOpenSync },
+	{ "Check your work", "Check My Circuit", "Say what the assignment asks for, and CedarLogic checks every row of your circuit against it.",
+	  { { 0xE73E, "Simulate ▸ Check My Circuit (Shift+T)", "Opens the truth table on its Check tab." },
+	    { 0xE943, "A formula or a truth table", "Type the formula you were given, or paste the table. Switches and lights match by name." },
+	    { 0xE7BA, "Shows what's wrong", "It says which lights are wrong, and on how many rows, and warns about floating or unknown values." } },
+	  "Check My Circuit", CMD_CHECK_CIRCUIT },
+	{ "Hand it in", "Lab reports and share links", "A PDF to hand in, and a link anyone can open.",
+	  { { 0xE8A5, "File ▸ Export Lab Report", "One PDF: your name, the circuit, and the truth table, K-maps, formulas and timing diagram you tick." },
+	    { 0xE72D, "File ▸ Share Link", "Copies a link that opens this circuit in CedarLogic Online or in the app. Nothing is uploaded." },
+	    { 0xE790, "Color or black and white", "Pick the style for the report. Headings stay with what's under them, so no page ends on a title." } },
+	  "Export Lab Report", CMD_EXPORT_REPORT },
+	{ "Tidy up", "Tidy Up, rebuilt", "Cleaner layouts, and fast on big pages.",
+	  { { 0xE80A, "Rearrange everything", "Edit ▸ Tidy Up by Signal Flow lays the whole page out by how the signals flow, with the wires rerouted." },
+	    { 0xE8F1, "Keeps what you drew", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
+	    { 0xE9D9, "Fast on big pages", "A page of 585 parts used to take half a minute. It takes a couple of seconds now." } },
+	  "Tidy Up by Signal Flow", CMD_TIDY_FLOW },
+	{ "Also new", "Smaller things", "More that's changed since the last tour.",
+	  { { 0xE8A0, "Split view and focus mode", "Ctrl+Alt+S shows two tabs side by side. Ctrl+. slides the toolbar and side panel away." },
+	    { 0xE713, "Your toolbar, your keys", "Settings ▸ Toolbar has Seamless, Classic and Minimal. Settings ▸ Shortcuts changes any key." },
+	    { 0xE73E, "Fixed along the way", "Truth tables with TO and FROM labels, report headings that stay with their content, and NOR-only formulas." } },
 	  nullptr, 0 },
 };
-const int kChapterCount = 5;
+const int kChapterCount = 6;
 const int kPages = kChapterCount + 2;
 
 struct WhatsNew {
@@ -1026,8 +1035,14 @@ void close(int command) {
 	delete w;
 	if (window == nullptr) return;
 	SetForegroundWindow(window->window());
-	if (command == CMD_TOUR) welcome::startTourOn(window);
-	else if (command) PostMessageW(window->window(), WM_COMMAND, command, 0);
+	if (command == CMD_TOUR) {
+		welcome::startTourOn(window);
+	} else if (command == kOpenSync) {
+		setPreferencesPage(5);   // Settings' Sync page
+		PostMessageW(window->window(), WM_COMMAND, CMD_PREFERENCES, 0);
+	} else if (command) {
+		PostMessageW(window->window(), WM_COMMAND, command, 0);
+	}
 }
 
 void go(int d) {
@@ -1039,111 +1054,181 @@ void go(int d) {
 }
 
 // The art beside each chapter.
-void art(ID2D1RenderTarget* rt, int chapter, float x, float y, double t) {
+void art(ID2D1RenderTarget* rt, int chapter, float x, float y, double) {
+	const D2D1_COLOR_F wrong = D2D1::ColorF(1.0f, 0.45f, 0.42f);
 	switch (chapter) {
-	case 0: {   // Your Circuits
-		struct Row { const char* name; const char* meta; };
-		const Row rows[] = { { "Lab 5: Traffic Light", "42 gates · Today at 2:14 PM" }, { "Full Adder", "18 gates · Yesterday" },
-		                     { "BCD to 7 Segment", "96 gates · Sep 24" }, { "Counter", "12 gates · Sep 22" } };
+	case 0: {   // a sync code, and the devices holding it
+		const D2D1_RECT_F code = D2D1::RectF(x, y, x + 290, y + 66);
+		card(rt, code, true, 12);
+		text(rt, "SYNC CODE", code.left, code.top + 11, 9.5f, kBold, kFaint, 290, DWRITE_TEXT_ALIGNMENT_CENTER, 1.4f);
+		text(rt, "••••-••••-••••-1YZ4", code.left, code.top + 30, 17, kSemi, kPrimary, 290, DWRITE_TEXT_ALIGNMENT_CENTER, 1.0f);
+		struct Dev { const char* name; const char* meta; };
+		const Dev devs[] = { { "This PC", "Synced just now" }, { "Lab Mac", "2 minutes ago" }, { "Raspberry Pi", "Yesterday" },
+		                     { "CedarLogic Online", "Today at 2:14 PM" } };
 		for (int i = 0; i < 4; i++) {
-			const D2D1_RECT_F r = D2D1::RectF(x, y + i * 58, x + 290, y + i * 58 + 48);
-			card(rt, r, i == 0, 12);
-			fillRound(rt, D2D1::RectF(r.left + 10, r.top + 9, r.left + 40, r.top + 39), 8, alpha(kNeon, 0.12f));
-			glyph(rt, 0xE964, r.left + 13, r.top + 12, 15);
-			text(rt, rows[i].name, r.left + 52, r.top + 7, 12.5f, kBold, kPrimary);
-			text(rt, rows[i].meta, r.left + 52, r.top + 26, 10.5f, kNormal, kFaint);
-			if (i == 0) {
-				fillRound(rt, D2D1::RectF(r.right - 52, r.top + 15, r.right - 12, r.top + 33), 9, alpha(kNeon, 0.18f));
-				text(rt, "OPEN", r.right - 52, r.top + 17, 9, kBold, kNeon, 40, DWRITE_TEXT_ALIGNMENT_CENTER, 0.8f);
-			}
-		}
-		break;
-	}
-	case 1: {   // templates and parts
-		struct T { wchar_t icon; const char* name; };
-		const T tiles[] = { { 0xE8A5, "Lab Page" }, { 0xE8EF, "Counter" }, { 0xE8F9, "7-Segment" } };
-		for (int i = 0; i < 3; i++) {
-			const D2D1_RECT_F r = D2D1::RectF(x + i * 98, y, x + i * 98 + 86, y + 92);
+			const D2D1_RECT_F r = D2D1::RectF(x, y + 80 + i * 56, x + 290, y + 80 + i * 56 + 48);
 			card(rt, r, false, 12);
-			drawIcon(rt, tiles[i].icon, D2D1::RectF(r.left, r.top + 18, r.right, r.top + 52), 22, kNeon);
-			text(rt, tiles[i].name, r.left, r.top + 60, 10.5f, kSemi, kSecondary, 86, DWRITE_TEXT_ALIGNMENT_CENTER);
+			fillRound(rt, D2D1::RectF(r.left + 10, r.top + 9, r.left + 40, r.top + 39), 8, alpha(kNeon, 0.12f));
+			glyph(rt, 0xE772, r.left + 13, r.top + 12, 15);
+			text(rt, devs[i].name, r.left + 52, r.top + 7, 12.5f, kBold, kPrimary);
+			text(rt, devs[i].meta, r.left + 52, r.top + 26, 10.5f, kNormal, kFaint);
+			fillCircle(rt, D2D1::Point2F(r.right - 22, r.top + 24), 4, kNeon);
 		}
-		const D2D1_RECT_F mine = D2D1::RectF(x, y + 104, x + 290, y + 160);
-		card(rt, mine, true, 12);
-		glyph(rt, 0xE7B8, mine.left + 14, mine.top + 15, 18);
-		text(rt, "My Parts", mine.left + 52, mine.top + 11, 12, kBold, kPrimary);
-		text(rt, "Full Adder · 2-to-4 Decoder · Debouncer", mine.left + 52, mine.top + 30, 10, kNormal, kFaint);
 		break;
 	}
-	case 2: {   // a K-map with its groups, and the answer
-		const int ones[] = { 1, 3, 5, 7, 13, 15 };
-		const int gray[] = { 0, 1, 3, 2 };
-		for (int r = 0; r < 4; r++)
-			for (int c = 0; c < 4; c++) {
-				const int m = gray[r] * 4 + gray[c];
-				const bool one = std::find(std::begin(ones), std::end(ones), m) != std::end(ones);
-				const D2D1_RECT_F cell = D2D1::RectF(x + 26 + c * 52, y + r * 44, x + 26 + c * 52 + 48, y + r * 44 + 40);
-				fillRound(rt, cell, 6, D2D1::ColorF(1, 1, 1, 0.05f));
-				text(rt, one ? "1" : "0", cell.left, cell.top + 9, 15, kBold, one ? kNeon : kFaint, 48, DWRITE_TEXT_ALIGNMENT_CENTER);
+	case 1: {   // the QR code a new device shows
+		const std::string sample = "https://cedarlogic.netlify.app/sync/#p=M2GT58X4MPKAFA59NANTSBDENX83";
+		int n = 0;
+		const std::vector<bool> modules = clsync::qr(sample, n);
+		const float mod = 4, total = (float)(n + 8) * mod, left = x + (290 - total) / 2;
+		if (n > 0) {
+			card(rt, D2D1::RectF(left - 14, y - 14, left + total + 14, y + total + 14), true, 16);
+			fillRound(rt, D2D1::RectF(left, y, left + total, y + total), 6, D2D1::ColorF(1, 1, 1));
+			ID2D1SolidColorBrush* b = nullptr;
+			if (SUCCEEDED(rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &b))) {
+				const D2D1_ANTIALIAS_MODE was = rt->GetAntialiasMode();
+				rt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+				for (int r = 0; r < n; r++)
+					for (int c = 0; c < n; c++)
+						if (modules[(size_t)r * n + c]) {
+							const float mx = left + (c + 4) * mod, my = y + (r + 4) * mod;
+							rt->FillRectangle(D2D1::RectF(mx, my, mx + mod, my + mod), b);
+						}
+				rt->SetAntialiasMode(was);
+				b->Release();
 			}
-		ID2D1SolidColorBrush* b = nullptr;
-		if (SUCCEEDED(rt->CreateSolidColorBrush(kNeon, &b))) {
-			fillRound(rt, D2D1::RectF(x + 74, y - 4, x + 182, y + 86), 12, alpha(kNeon, 0.06f));
-			rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x + 76, y - 2, x + 180, y + 84), 10, 10), b, 2);
-			b->SetColor(D2D1::ColorF(0.45f, 0.8f, 1));
-			rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x + 76, y + 42, x + 180, y + 128), 10, 10), b, 2);
-			b->Release();
 		}
-		text(rt, "F = A'D + BD", x, y + 186, 17, kBold, kPrimary, 260, DWRITE_TEXT_ALIGNMENT_CENTER);
+		const float below = y + total + 34;
+		text(rt, "Scan with your phone", x, below, 14, kBold, kPrimary, 290, DWRITE_TEXT_ALIGNMENT_CENTER);
+		text(rt, "Waiting for your phone…", x, below + 24, 12, kNormal, kFaint, 290, DWRITE_TEXT_ALIGNMENT_CENTER);
 		break;
 	}
-	case 3: {   // the live circuit over a timing diagram
-		hero(rt, D2D1::RectF(x - 5, y, x + 295, y + 120), t);
-		const D2D1_RECT_F r = D2D1::RectF(x - 5, y + 130, x + 295, y + 230);
-		card(rt, r, false, 12);
-		const int rows[3][10] = { { 0, 0, 1, 1, 0, 0, 1, 1, 0, 0 }, { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 }, { 0, 0, 0, 1, 0, 0, 0, 1, 0, 0 } };
-		ID2D1SolidColorBrush* b = nullptr;
-		if (SUCCEEDED(rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.55f), &b))) {
-			const float step = (r.right - r.left - 20) / 10;
-			for (int i = 0; i < 3; i++) {
-				b->SetColor(i == 2 ? kNeon : D2D1::ColorF(1, 1, 1, 0.55f));
-				const float top = r.top + 14 + i * 30, hgt = 16;
-				float lastY = -1;
-				for (int j = 0; j < 10; j++) {
-					const float x0 = r.left + 10 + j * step, yy = rows[i][j] ? top : top + hgt;
-					if (lastY >= 0 && lastY != yy) rt->DrawLine(D2D1::Point2F(x0, lastY), D2D1::Point2F(x0, yy), b, 1.6f);
-					rt->DrawLine(D2D1::Point2F(x0, yy), D2D1::Point2F(x0 + step, yy), b, 1.6f);
-					lastY = yy;
+	case 2: {   // what Check says: a wrong row, and a match
+		const D2D1_RECT_F bad = D2D1::RectF(x, y, x + 290, y + 56);
+		card(rt, bad, false, 12);
+		fillCircle(rt, D2D1::Point2F(bad.left + 26, bad.top + 28), 13, alpha(wrong, 0.18f));
+		drawIcon(rt, 0xE711, D2D1::RectF(bad.left + 13, bad.top + 15, bad.left + 39, bad.top + 41), 11, wrong);
+		text(rt, "Doesn't match", bad.left + 52, bad.top + 9, 13, kBold, kPrimary);
+		text(rt, "S is wrong on 1 of 4 rows.", bad.left + 52, bad.top + 30, 11, kNormal, kSecondary);
+		const char* head[] = { "A", "B", "S", "Wanted" };
+		const float cx[] = { 14, 62, 110, 168 }, cw[] = { 40, 40, 50, 100 };
+		const D2D1_RECT_F table = D2D1::RectF(x, y + 68, x + 290, y + 68 + 30 + 4 * 30);
+		card(rt, table, false, 12);
+		for (int c = 0; c < 4; c++)
+			text(rt, head[c], table.left + cx[c], table.top + 8, 10.5f, kBold, kFaint, cw[c], DWRITE_TEXT_ALIGNMENT_CENTER, 0.6f);
+		const int rows[4][4] = { { 0, 0, 0, 0 }, { 0, 1, 1, 1 }, { 1, 0, 0, 1 }, { 1, 1, 0, 0 } };   // A, B, S, wanted S
+		for (int r = 0; r < 4; r++) {
+			const float top = table.top + 30 + r * 30;
+			const bool bad1 = rows[r][2] != rows[r][3];
+			if (bad1) fillRound(rt, D2D1::RectF(table.left + 8, top + 2, table.right - 8, top + 28), 7, alpha(wrong, 0.16f));
+			for (int c = 0; c < 4; c++)
+				text(rt, rows[r][c] ? "1" : "0", table.left + cx[c], top + 6, 13, kBold,
+				     bad1 && c == 2 ? wrong : (c == 3 ? kNeon : kPrimary), cw[c], DWRITE_TEXT_ALIGNMENT_CENTER);
+		}
+		const D2D1_RECT_F ok = D2D1::RectF(x, table.bottom + 14, x + 290, table.bottom + 14 + 48);
+		card(rt, ok, true, 12);
+		fillCircle(rt, D2D1::Point2F(ok.left + 26, ok.top + 24), 13, alpha(kNeon, 0.18f));
+		drawIcon(rt, 0xE73E, D2D1::RectF(ok.left + 13, ok.top + 11, ok.left + 39, ok.top + 37), 11, kNeon);
+		text(rt, "Matches: every row gives what was asked for.", ok.left + 52, ok.top + 8, 11.5f, kSemi, kPrimary, 226);
+		break;
+	}
+	case 3: {   // a lab report's first page, and a share link
+		const D2D1_RECT_F paper = D2D1::RectF(x + 52, y, x + 238, y + 214);
+		fillRound(rt, paper, 6, D2D1::ColorF(1, 1, 1));
+		const D2D1_COLOR_F ink = D2D1::ColorF(0.1f, 0.12f, 0.11f), grey = D2D1::ColorF(0.55f, 0.58f, 0.56f);
+		text(rt, "Half adder", paper.left + 14, paper.top + 12, 13, kBold, ink);
+		text(rt, "Name: Jordan Smith", paper.left + 14, paper.top + 30, 8.5f, kNormal, grey);
+		fillRound(rt, D2D1::RectF(paper.left + 14, paper.top + 50, paper.right - 14, paper.top + 108), 4, D2D1::ColorF(0.93f, 0.95f, 0.94f));
+		fillRound(rt, D2D1::RectF(paper.left + 46, paper.top + 66, paper.left + 78, paper.top + 92), 5, alpha(kNeonDeep, 0.85f));
+		fillRound(rt, D2D1::RectF(paper.left + 110, paper.top + 66, paper.left + 142, paper.top + 92), 5, alpha(kNeonDeep, 0.85f));
+		text(rt, "Truth table", paper.left + 14, paper.top + 118, 9, kBold, ink);
+		for (int r = 0; r < 4; r++)
+			for (int c = 0; c < 4; c++)
+				fillRect(rt, D2D1::RectF(paper.left + 14 + c * 42, paper.top + 134 + r * 10, paper.left + 14 + c * 42 + 36, paper.top + 134 + r * 10 + 6),
+				         D2D1::ColorF(0.84f, 0.87f, 0.85f));
+		text(rt, "Karnaugh maps", paper.left + 14, paper.top + 182, 9, kBold, ink);
+		fillRound(rt, D2D1::RectF(paper.left + 14, paper.top + 198, paper.right - 14, paper.top + 202), 2, D2D1::ColorF(0.84f, 0.87f, 0.85f));
+		const D2D1_RECT_F link = D2D1::RectF(x, y + 232, x + 290, y + 232 + 44);
+		card(rt, link, false, 12);
+		glyph(rt, 0xE71B, link.left + 14, link.top + 11, 14);
+		text(rt, "cedarlogic.netlify.app/online-logic-gate-simulator/#…", link.left + 46, link.top + 14, 10.5f, kNormal, kSecondary, 236);
+		break;
+	}
+	case 4: {   // before and after a tidy
+		for (int side = 0; side < 2; side++) {
+			const float px = x + side * 152;
+			const D2D1_RECT_F r = D2D1::RectF(px, y, px + 138, y + 150);
+			card(rt, r, side == 1, 12);
+			ID2D1SolidColorBrush* b = nullptr;
+			if (SUCCEEDED(rt->CreateSolidColorBrush(alpha(kNeon, 0.8f), &b))) {
+				// Gates as [left, top], 22 by 16; each wire runs from one's right to the next's left.
+				const float before[5][2] = { { 14, 22 }, { 52, 92 }, { 96, 30 }, { 22, 112 }, { 96, 104 } };
+				const float after[5][2] = { { 14, 38 }, { 14, 96 }, { 58, 66 }, { 102, 38 }, { 102, 96 } };
+				const float(*g)[2] = side == 0 ? before : after;
+				const int wires[5][2] = { { 0, 2 }, { 1, 2 }, { 2, 3 }, { 2, 4 }, { 3, 4 } };
+				for (const auto& w : wires) {
+					const float ax = px + g[w[0]][0] + 22, ay = y + g[w[0]][1] + 8, bx = px + g[w[1]][0], by = y + g[w[1]][1] + 8;
+					if (side == 0) {
+						rt->DrawLine(D2D1::Point2F(ax, ay), D2D1::Point2F(bx, by), b, 1.4f);
+					} else if (w[0] == 3) {
+						continue;   // (drawn below)
+					} else {
+						const float mid = (ax + bx) / 2;
+						rt->DrawLine(D2D1::Point2F(ax, ay), D2D1::Point2F(mid, ay), b, 1.4f);
+						rt->DrawLine(D2D1::Point2F(mid, ay), D2D1::Point2F(mid, by), b, 1.4f);
+						rt->DrawLine(D2D1::Point2F(mid, by), D2D1::Point2F(bx, by), b, 1.4f);
+					}
+				}
+				if (side == 1) rt->DrawLine(D2D1::Point2F(px + 102 + 11, y + 38 + 16), D2D1::Point2F(px + 102 + 11, y + 96), b, 1.4f);
+				b->Release();
+				for (int i = 0; i < 5; i++) {
+					const D2D1_RECT_F gr = D2D1::RectF(px + g[i][0], y + g[i][1], px + g[i][0] + 22, y + g[i][1] + 16);
+					fillRound(rt, gr, 4, D2D1::ColorF(0.1f, 0.14f, 0.12f));
+					strokeRound(rt, gr, 4, alpha(kNeon, 0.9f), 1.4f);
 				}
 			}
-			b->Release();
+			text(rt, side == 0 ? "Before" : "After", px, y + 160, 11, kSemi, side == 0 ? kFaint : kNeon, 138, DWRITE_TEXT_ALIGNMENT_CENTER);
+		}
+		const D2D1_RECT_F banner = D2D1::RectF(x, y + 196, x + 290, y + 196 + 78);
+		card(rt, banner, false, 12);
+		text(rt, "Tidy Up by signal flow: a preview. Enter keeps it, Esc puts it back.", banner.left + 14, banner.top + 12, 11.5f, kNormal,
+		     kSecondary, 262);
+		const char* names[] = { "Keep", "Put Back", "Other Way" };
+		float bx = banner.left + 14;
+		for (int i = 0; i < 3; i++) {
+			const float bw = textWidth(names[i], 10.5f, kSemi) + 22;
+			const D2D1_RECT_F pill = D2D1::RectF(bx, banner.top + 46, bx + bw, banner.top + 68);
+			fillRound(rt, pill, 11, i == 0 ? kNeon : D2D1::ColorF(1, 1, 1, 0.08f));
+			text(rt, names[i], pill.left, pill.top + 3, 10.5f, kSemi, i == 0 ? kInk : kPrimary, bw, DWRITE_TEXT_ALIGNMENT_CENTER);
+			bx += bw + 8;
 		}
 		break;
 	}
-	default: {   // the colours, and a memory editor
-		const int order[] = { 6, 0, 1, 2, 3, 4, 5 };
-		float cx = x + 20;
-		for (int i = 0; i < 7; i++) {
-			double r, g, b;
-			cl_accent_color(order[i], true, &r, &g, &b);
-			const float rad = i == 0 ? 17.0f : 11.0f;
-			if (i == 0) fillCircle(rt, D2D1::Point2F(cx, y + 17), 26, alpha(kNeon, 0.18f));
-			fillCircle(rt, D2D1::Point2F(cx, y + 17), rad, D2D1::ColorF((float)r, (float)g, (float)b));
-			cx += rad + 12 + (i == 0 ? 11 : 11);
+	default: {   // two tabs side by side, and the toolbar's styles
+		for (int side = 0; side < 2; side++) {
+			const float px = x + side * 150;
+			const D2D1_RECT_F r = D2D1::RectF(px, y, px + 140, y + 130);
+			card(rt, r, side == 0, 12);
+			fillRound(rt, D2D1::RectF(px + 12, y + 12, px + 12 + (side == 0 ? 58 : 66), y + 32), 10, alpha(kNeon, side == 0 ? 0.18f : 0.07f));
+			text(rt, side == 0 ? "Lab 5" : "Counter", px + 12, y + 15, 10.5f, kSemi, side == 0 ? kNeon : kFaint, side == 0 ? 58 : 66,
+			     DWRITE_TEXT_ALIGNMENT_CENTER);
+			for (int i = 0; i < 3; i++) {
+				const D2D1_RECT_F gr = D2D1::RectF(px + 16 + i * 38, y + 56 + (i == 1 ? 24 : 0), px + 16 + i * 38 + 26, y + 72 + (i == 1 ? 24 : 0));
+				fillRound(rt, gr, 4, D2D1::ColorF(1, 1, 1, 0.06f));
+				strokeRound(rt, gr, 4, alpha(kNeon, side == 0 ? 0.8f : 0.35f), 1.2f);
+			}
 		}
-		const D2D1_RECT_F r = D2D1::RectF(x, y + 50, x + 290, y + 140);
-		card(rt, r, false, 14);
-		fillRound(rt, D2D1::RectF(r.left + 14, r.top + 14, r.left + 50, r.top + 44), 8, D2D1::ColorF(1, 1, 1, 0.06f));
-		glyph(rt, 0xE964, r.left + 20, r.top + 17, 14);
-		text(rt, "8x8 RAM", r.left + 60, r.top + 19, 13, kBold, kPrimary);
-		fillRound(rt, D2D1::RectF(r.right - 76, r.top + 16, r.right - 14, r.top + 42), 13, kNeon);
-		text(rt, "Done ↵", r.right - 76, r.top + 20, 11, kSemi, kInk, 62, DWRITE_TEXT_ALIGNMENT_CENTER);
-		const char* vals[] = { "00", "07", "0E", "15", "1C", "23" };
-		for (int i = 0; i < 6; i++) {
-			const D2D1_RECT_F v = D2D1::RectF(r.left + 14 + i * 38, r.top + 54, r.left + 14 + i * 38 + 34, r.top + 76);
-			fillRound(rt, v, 5, i == 2 ? alpha(kNeon, 0.35f) : D2D1::ColorF(1, 1, 1, 0.05f));
-			text(rt, vals[i], v.left, v.top + 3, 11, kNormal, kPrimary, 34, DWRITE_TEXT_ALIGNMENT_CENTER);
+		std::vector<D2D1_RECT_F> hits;
+		segmented(rt, x + 18, y + 156, { "Seamless", "Classic", "Minimal" }, 0, hits);
+		const D2D1_RECT_F keys = D2D1::RectF(x, y + 218, x + 290, y + 218 + 48);
+		card(rt, keys, false, 12);
+		float kx = keys.left + 16;
+		const char* caps[] = { "Ctrl", "Alt", "S" };
+		for (const char* cap : caps) {
+			keycap(rt, kx, keys.top + 9, cap, false, 30);
+			kx += keycapWidth(cap, 30) + 6;
 		}
+		text(rt, "Split view", kx + 6, keys.top + 14, 12, kSemi, kPrimary);
 		break;
 	}
 	}
@@ -1152,8 +1237,8 @@ void art(ID2D1RenderTarget* rt, int chapter, float x, float y, double t) {
 void pageIntro(ID2D1RenderTarget* rt, WhatsNew* wn, double t) {
 	const float x = 56, tw = 380;
 	text(rt, "WHAT'S NEW", x, 92, 11, kBold, kNeon, 0, DWRITE_TEXT_ALIGNMENT_LEADING, 1.8f);
-	float y = 112 + text(rt, "CedarLogic for Windows", x, 112, 34, kBold, D2D1::ColorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
-	y += text(rt, "A native Windows app now, with a new look and a lot more inside. Here's everything that's new since the old one, a minute's read.",
+	float y = 112 + text(rt, "CedarLogic 0.4", x, 112, 34, kBold, D2D1::ColorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
+	y += text(rt, "Sync your circuits between devices, check your work, hand in a lab report, share a link, and tidy a whole page in a couple of seconds. Here's everything that's new, a minute's read.",
 	          x, y, 14, kNormal, kSecondary, tw) + 20;
 	for (int i = 0; i < kChapterCount; i++) {
 		const D2D1_RECT_F r = D2D1::RectF(x - 8, y - 4, x + tw, y + 24);
@@ -1258,7 +1343,7 @@ void show(CircuitWindow* window, int page) {
 	g_new->pager.page = std::max(0, std::min(kPages - 1, page));
 	Panel& p = g_new->panel;
 	p.paint = paint;
-	p.animating = [] { return g_new && (g_new->pager.sliding() || g_new->pager.page == 0 || g_new->pager.page == 4); };
+	p.animating = [] { return g_new && (g_new->pager.sliding() || g_new->pager.page == 0); };
 	p.click = [](int id) {
 		WhatsNew* wn = g_new;
 		if (wn == nullptr) return;
