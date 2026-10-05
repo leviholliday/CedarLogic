@@ -344,7 +344,7 @@ jobs:
           import base64, zlib
           raw = open("res/samples/practice.cdl", "rb").read()
           c = zlib.compressobj(9, zlib.DEFLATED, -15)
-          open("share-python.link", "w").write(base64.urlsafe_b64encode(c.compress(raw) + c.flush()).decode().rstrip("="))
+          open("share-python.link", "w").write("c=" + base64.urlsafe_b64encode(c.compress(raw) + c.flush()).decode().rstrip("="))
           PY
           timeout 60 "$A" --share-test res/samples/practice.cdl share-app.link share-python.link
           "$PY" - <<'PY'
