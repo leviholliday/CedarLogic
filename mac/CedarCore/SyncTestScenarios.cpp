@@ -1803,6 +1803,78 @@ void s42_purge_while_paging_restarts_as_a_full_pull(Ctx& x) {
 	CHECK(sameEverywhere({ &a, &b }) && b.state().cursor == w.seq(a));
 }
 
+// After a reset synced copy every device is listed again at once, and a device record written
+// over (412) goes again on the base it has now, within the hour (SYNC.md 4.5, 4.9).
+void s46_after_a_reset_every_device_is_listed_again(Ctx& x) {
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
+	Client &a = w[0], &b = w[1];
+	for (int i = 0; i < 3; i++) a.create("C" + std::to_string(i), cdlWith(30 + i));
+	const std::string code = a.turnOn();
+	a.sync();
+	a.sync();
+	w.tamper(a, "resetSpace");
+	a.sync();
+	bool devOnServer = false;
+	for (const auto& kv : w.recs(a))
+		if (kv.second.dev) devOnServer = true;
+	CHECK(devOnServer);   // A's device record is on the reset copy at once
+	Preview pv;
+	b.link(code, pv);
+	b.sync();
+	auto names = [](Client& c) {
+		std::vector<std::string> out;
+		for (const auto& d : c.core->deviceList()) out.push_back(d.first);
+		return out;
+	};
+	CHECK(names(b) == std::vector<std::string>{ a.core->deviceName() });
+	a.sync();
+	CHECK(names(a) == std::vector<std::string>{ b.core->deviceName() });
+	// A stale base (as after a restore): the 412 takes the server's, and it goes again within the hour.
+	State s = a.state();
+	const int64_t ver = s.device.ver;
+	s.device.ver = ver + 5;
+	s.device.at = 0;
+	a.core->adopt(s);
+	a.savedState = json::write(s.toJson());   // (an app client may start again from what was saved)
+	a.sync();
+	CHECK(a.state().device.ver == ver && a.now() - a.state().device.at >= kDay - kHour - 1);
+	w.clock.tick(kHour + 1000);
+	a.sync();
+	CHECK(a.state().device.ver > ver);
+}
+
+// A damaged tombstone of a circuit not here isn't a damaged circuit, and a damaged circuit that's
+// gone from the synced copy stops counting (SYNC.md 4.5, 4.10).
+void s47_damaged_records_that_are_gone_stop_counting(Ctx& x) {
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
+	Client &a = w[0], &b = w[1];
+	const std::string t = a.create("Gone", cdlWith(21));
+	const std::string code = a.turnOn();
+	a.sync();
+	const std::string rid = a.mapped(t);
+	a.remove(t);
+	a.sync();
+	w.tamper(a, "damage", rid);
+	Preview pv;
+	b.link(code, pv);
+	b.sync();
+	CHECK(b.state().unreadable.empty() && b.status() == "synced");
+	const size_t calls = b.net.calls;
+	b.sync();
+	CHECK(b.net.calls - calls == 1);   // not fetched again
+	const std::string lost = a.create("Lost", cdlWith(22));
+	a.sync();
+	const std::string rid2 = a.mapped(lost);
+	w.tamper(a, "damage", rid2);
+	a.remove(lost);   // A's copy goes before it syncs again
+	b.sync();
+	CHECK(b.state().unreadable.size() == 1 && b.state().unreadable.count(rid2));
+	w.tamper(a, "resetSpace");
+	a.sync();
+	b.sync();
+	CHECK(b.state().unreadable.empty());
+}
+
 void s43_switch_flip_here_real_edit_there_is_not_a_conflict(Ctx& x) {
 	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &wb = w[1];
@@ -1947,6 +2019,8 @@ void scenarioTests(Crypto& cr, const std::string& tempDir, Report& report, Host*
 		{ "s41_switch_flips_are_sent_lazily", s41_switch_flips_are_sent_lazily, true },
 		{ "s42_purge_while_paging_restarts_as_a_full_pull", s42_purge_while_paging_restarts_as_a_full_pull, true },
 		{ "s43_switch_flip_here_real_edit_there_is_not_a_conflict", s43_switch_flip_here_real_edit_there_is_not_a_conflict, true },
+		{ "s46_after_a_reset_every_device_is_listed_again", s46_after_a_reset_every_device_is_listed_again, true },
+		{ "s47_damaged_records_that_are_gone_stop_counting", s47_damaged_records_that_are_gone_stop_counting, true },
 		{ "scale_join_300", scale_join_300, true },
 		{ "state_file_round_trip", state_file_round_trip, false },
 	};
