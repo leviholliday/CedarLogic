@@ -43,7 +43,7 @@ struct Value {
 	bool isBool() const { return type == Bool; }
 	// A whole number from 0 to 2^53-1 (5, 5.0 and 5e0 are all 5).
 	bool isInt() const;
-	int64_t i() const { return (int64_t)n; }
+	int64_t i() const;   // 0 for anything that isn't a finite number inside int64
 
 	// Objects: the member (the last of repeated keys), or nullptr.
 	const Value* get(const std::string& key) const;
