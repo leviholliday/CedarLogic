@@ -109,6 +109,10 @@ const char *cl_sync_app_link(const char *code);
 // QR modules of text: returns size (modules per side) and writes size*size bytes (1 = dark) into out (>= 177*177).
 int cl_sync_qr(const char *text, uint8_t *out);
 
+// A gate_default hook over the core's own gate library (load it first: cl_library_load on the Mac,
+// the app's library on Linux and Windows). ctx is unused.
+bool cl_sync_core_gate_default(void *ctx, const char *lib, bool gui, const char *name, char *out, size_t outLen);
+
 // Tests: the report (malloc'd; caller frees); false if anything failed. serverBase may be NULL.
 bool cl_sync_self_test(const CLSyncHooks *hooks, const char *tempDir, const char *serverBase, char **report);
 

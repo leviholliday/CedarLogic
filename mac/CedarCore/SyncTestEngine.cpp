@@ -3,6 +3,10 @@
 // Turn On, link, Sync Now, the lock (scenario 27), quitting, stop and destroy,
 // a restart, Turn Off, Delete Synced Copy; and the C interface.
 
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
+#define _CRT_SECURE_NO_WARNINGS   // getenv in a test
+#endif
+
 #include "CedarSync.h"
 #include "SyncTest.h"
 #include "SyncTestServer.h"

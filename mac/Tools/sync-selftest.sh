@@ -11,6 +11,9 @@
 #                                            also against the mock server (cedarlogic-site
 #                                            scripts/sync-mock-server.mjs)
 #   ONLY=s26 mac/Tools/sync-selftest.sh      just the checks whose name contains s26
+#   GATES=1 mac/Tools/sync-selftest.sh       also: the core's gate library (res/cl_gatedefs.xml) gives
+#                                            the digest the same defaults as CedarLogic Online
+#                                            (Mac, after mac/build.sh)
 #
 # On a Mac it also decodes the sync link's QR code with Core Image.
 set -euo pipefail
@@ -32,7 +35,7 @@ if [ "$(uname)" = Darwin ]; then
 else
 	LIBS+=(-pthread)
 fi
-SRC=(mac/CedarCore/Sync*.cpp mac/CedarCore/QrCodeGen.cpp mac/Tools/sync_selftest.cpp
+SRC=($(ls mac/CedarCore/Sync*.cpp | grep -v SyncGateDefaults) mac/CedarCore/QrCodeGen.cpp mac/Tools/sync_selftest.cpp
 	format/circuit_file_io.cpp format/legacy_cdl.cpp format/numeric.cpp format/sexpr.cpp)
 echo "Building $OUT/$NAME..."
 "$CXX" "${FLAGS[@]}" "${INC[@]}" "${SRC[@]}" "${LIBS[@]}" -o "$OUT/$NAME"
@@ -56,5 +59,15 @@ if [ "$(uname)" = Darwin ] && command -v swiftc >/dev/null && [ -z "${ONLY:-}" ]
 	want=$(printf '37 %s\n21 hello\n133 %s' "$LINK" "$LONG")
 	if [ "$got" = "$want" ]; then echo "PASS qr: Core Image reads the codes back (versions 1, 5, 29)"
 	else echo "FAIL qr: Core Image read: $got"; status=1; fi
+fi
+# The core's gate defaults against the design's table (needs mac/build/libCedarCore.a).
+if [ "${GATES:-0}" = 1 ]; then
+	CFL=(-std=c++17 -O1 -DCL_NO_WX -D_PRODUCTION_ -Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat
+		-Imac/CedarCore -Imac/CedarCore/include -Wno-deprecated-declarations -Wno-inconsistent-missing-override)
+	"$CXX" "${CFL[@]}" mac/Tools/sync_gate_defaults_check.cpp mac/build/libCedarCore.a -framework CoreGraphics \
+		-framework CoreText -framework ImageIO -framework CoreServices -framework CoreFoundation -framework OpenGL \
+		-o "$OUT/sync_gate_defaults_check"
+	if "$OUT/sync_gate_defaults_check" res/cl_gatedefs.xml >"$OUT/gates.log"; then echo "PASS gates: $(tail -1 "$OUT/gates.log")"
+	else cat "$OUT/gates.log"; status=1; fi
 fi
 exit $status

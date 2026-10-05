@@ -2,6 +2,10 @@
 // ref/vectors.h, copied in as SyncVectors.h, and ref/fixtures as
 // SyncFixtures.h), then the protocol scenarios of 7.2 (SyncTestScenarios.cpp).
 
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
+#define _CRT_SECURE_NO_WARNINGS   // getenv in a test
+#endif
+
 #include "SyncTest.h"
 
 #include "SyncFixtures.h"
