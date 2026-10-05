@@ -345,6 +345,7 @@ public:
 	std::string deviceName() const { return st.deviceName; }
 	void setDeviceName(const std::string& name) { st.deviceName = name; }
 	bool heldLastPull() const { return heldLastPull_; }
+	bool halted() const { return halted_; }   // a 401 or 403: no automatic retries
 	void setBatchItems(size_t n) { opt.batchItems = n ? n : 1; }
 	void setQuitting(bool q) { quitting_ = q; }
 
@@ -422,7 +423,7 @@ private:
 	std::string status_ = "off", statusText_, goneReason_, fullText_, libraryFailed_;
 	int64_t retryAfter_ = 0, pollSeconds_ = 600, lastRetryAfter_ = 0;
 	bool full_ = false, quitting_ = false, saveFailed_ = false, libraryTouched_ = false, heldLastPull_ = false;
-	bool noticedWentBack_ = false;
+	bool noticedWentBack_ = false, halted_ = false;
 	bool joinIndexBuilt_ = false;                                      // the join rule's candidates, once a pull
 	std::vector<std::pair<std::string, LocalHashes>> joinCandidates_;
 	std::map<std::string, std::string> problems_;      // folder -> sentence
@@ -455,7 +456,7 @@ private:
 	int64_t startAt = 0, lastAttempt = 0, firstChange = 0, lastChange = 0, cycleStart = 0;
 	int64_t lastInput = 0, backoffUntil = 0, retryAfterUntil = 0, heldRetryAt = 0, pollMs = 600000;
 	int failures = 0;
-	bool nowPending = false, flushPending = false, retryPending = false, active = true;
+	bool nowPending = false, flushPending = false, retryPending = false, active = true, halted = false;
 	uint32_t jitterSeed = 2463534242u;
 };
 

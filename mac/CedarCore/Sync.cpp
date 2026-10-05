@@ -675,6 +675,7 @@ void Core::sync(bool flush) {
 	status_ = "syncing";
 	statusText_.clear();
 	retryAfter_ = 0;
+	halted_ = false;
 	full_ = false;
 	libraryFailed_.clear();
 	saveFailed_ = false;
@@ -738,6 +739,7 @@ void Core::sync(bool flush) {
 	} catch (const HttpError& e) {
 		status_ = "error";
 		statusText_ = e.what();
+		halted_ = e.status == 401 || e.status == 403;   // the code doesn't match, or not from CedarLogic: no retries
 		save();
 	} catch (const LibraryError& e) {
 		status_ = "error";
@@ -966,6 +968,9 @@ void Core::pull() {
 			api("GET", "/changes?since=" + std::to_string(s) + (opt.changesLimit > 0 ? "&limit=" + std::to_string(opt.changesLimit) : ""),
 			    nullptr, page);
 			const std::string epoch = page.str("epoch");
+			if (!isHex(epoch, 32) || !page.get("seq") || !page.get("seq")->isInt() || !page.get("entries") ||
+			    !page.get("entries")->isArray())
+				throw HttpError(500, "server_error", "the website's answer wasn't understood");
 			const int64_t seq = page.integer("seq"), purged = page.integer("purgedSeq");
 			if (page.get("pollSeconds") && page.get("pollSeconds")->isInt())
 				pollSeconds_ = std::max<int64_t>(60, page.integer("pollSeconds"));
@@ -1540,6 +1545,12 @@ void Core::push(bool flush) {
 		}
 		items.insert(items.end(), changedItems.begin(), changedItems.end());
 		items.insert(items.end(), newItems.begin(), newItems.end());
+		int damagedCount = 0;
+		for (const auto& u : st.unreadable)
+			if (u.second.second == "damaged") damagedCount++;
+		if (damagedCount)
+			problems_[""] = damagedCount == 1 ? "1 synced circuit is damaged and can't be opened."
+			                                  : std::to_string(damagedCount) + " synced circuits are damaged and can't be opened.";
 		if (items.empty() && attempt > 0) break;
 		// The device record: none yet, a day old, or renamed; the last item.
 		if (attempt == 0 && !full_ && !quitting_ &&
