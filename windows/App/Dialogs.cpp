@@ -508,7 +508,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		// The first box to type in, or the first list, has the keyboard (on
 		// the page showing: one hidden on another would take the typing).
 		for (FormField& x : f->fields) {
-			if (!f->pages.empty() && x.page != f->page) continue;
+			if ((!f->pages.empty() && x.page != f->page) || x.hidden) continue;
 			if (x.kind == FormField::Text || x.kind == FormField::List) { SetFocus(x.hwnd); return FALSE; }
 		}
 		return TRUE;
@@ -521,6 +521,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (f->okText.empty()) return TRUE;
 			std::string bad;
 			guarded("a dialog", [&] { if (f->validate) bad = f->validate(*f); });
+			if (bad == "\n") return TRUE;   // stay open and say nothing: an answer is on its way
 			if (!bad.empty()) { f->setProblem(bad); MessageBeep(MB_ICONWARNING); return TRUE; }
 			f->capture();
 			EndDialog(d, IDOK);
@@ -796,7 +797,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			rt->Clear(d2d(c.back));
 			const float s = dpiOf(d) / 96.0f;
 			for (const FormField& x : f->fields) {
-				if (x.frame.right <= x.frame.left || (!f->pages.empty() && x.page != f->page)) continue;
+				if (x.frame.right <= x.frame.left || x.hidden || (!f->pages.empty() && x.page != f->page)) continue;
 				const float top = (float)(x.frame.top - f->scrollY), bottom = (float)(x.frame.bottom - f->scrollY);
 				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, top / s + 0.5f, x.frame.right / s - 0.5f, bottom / s - 0.5f);
 				const bool on = focus == x.hwnd;
@@ -860,6 +861,7 @@ void Form::build() {
 		pageY.assign(pages.size(), y);
 	}
 	const int firstY = y;
+	contentTop = y;
 	std::vector<int> rowTop(fields.size(), y);
 	int gridCol = 0, gridRowY = y;
 	for (size_t i = 0; i < fields.size(); i++) {
@@ -883,11 +885,20 @@ void Form::build() {
 			int bx = ctrlX + ctrlW - bw;
 			if (before.kind == FormField::Check && before.grid == 0)
 				bx = std::min(bx, ctrlX + sc(44) + sc(6) + textPixels(dialog, font, before.label) + sc(14));
+			// After a button: right beside it.
+			if (before.kind == FormField::Button && before.hwnd) {
+				RECT br;
+				GetWindowRect(before.hwnd, &br);
+				MapWindowPoints(nullptr, dialog, (POINT*)&br, 2);
+				bx = br.right + sc(8);
+			}
 			x.hwnd = CreateWindowExW(0, L"BUTTON", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, bx,
 			                         rowTop[i - 1] + (before.kind == FormField::Check ? (checkH - rowH) / 2 : 0), bw, rowH, dialog, id,
 			                         appInstance(), nullptr);
 			SetWindowSubclass(x.hwnd, hoverProc, 4, 0);
 			rowTop[i] = rowTop[i - 1];
+			x.top = rowTop[i];
+			x.span = 0;
 			if (!pages.empty()) pageY[pg] = y;
 			continue;
 		}
@@ -1086,6 +1097,8 @@ void Form::build() {
 			x.others.push_back(x.tipWindow);
 			y = top + h;
 		}
+		x.top = rowTop[i];
+		x.span = y - rowTop[i];
 		if (!pages.empty()) pageY[pg] = y;
 	}
 	if (!pages.empty()) {
@@ -1165,6 +1178,13 @@ void Form::build() {
 			SendMessageW(f.hwnd, LVM_SETTEXTBKCOLOR, 0, c.field);
 			SendMessageW(f.hwnd, LVM_SETTEXTCOLOR, 0, c.text);
 		}
+
+	// Fields that start out hidden take no room.
+	for (size_t pg = 0; pg < pageCount && !pages.empty(); pg++) {
+		bool any = false;
+		for (const FormField& f : fields) any = any || (f.hidden && (size_t)f.page == pg);
+		if (any) relayout((int)pg);
+	}
 
 	// Size the window around what's in it (the page it opens on, with pages),
 	// centred on its owner.
@@ -1278,6 +1298,59 @@ void Form::enable(int field, bool on) {
 	}
 }
 
+// The page's fields in their places, one under another, the hidden ones
+// taking no room (a button beside another stays on its row).
+void Form::relayout(int pg) {
+	if (dialog == nullptr) return;
+	const int gap = scaled(10, dpiOf(dialog));
+	int y = contentTop;
+	bool first = true;
+	int lastDelta = 0;
+	auto move = [&](HWND h, int dy) {
+		if (h == nullptr || dy == 0) return;
+		RECT r;
+		GetWindowRect(h, &r);
+		MapWindowPoints(nullptr, dialog, (POINT*)&r, 2);
+		SetWindowPos(h, nullptr, r.left, r.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	};
+	for (size_t i = 0; i < fields.size(); i++) {
+		FormField& x = fields[i];
+		if (x.page != pg) continue;
+		const bool beside = x.kind == FormField::Button && x.beside && i > 0 && fields[i - 1].page == x.page;
+		int delta;
+		if (beside) {
+			delta = lastDelta;   // on the row of the field before it
+		} else {
+			if (x.hidden) { lastDelta = 0; continue; }
+			const int top = first ? contentTop : y + gap;
+			delta = top - x.top;
+			first = false;
+			y = top + x.span;
+			lastDelta = delta;
+		}
+		if (x.hidden) continue;
+		move(x.hwnd, delta);
+		move(x.extra, delta);
+		for (HWND o : x.others) move(o, delta);
+		OffsetRect(&x.frame, 0, delta);
+		x.top += delta;
+	}
+	if (pg >= 0 && pg < (int)pageBottoms.size()) pageBottoms[pg] = y;
+}
+
+void Form::hiddenChanged(int pg) {
+	if (dialog == nullptr || pages.empty()) return;
+	if (pg == page && scrollY != 0) scrollTo(0);
+	relayout(pg);
+	if (pg == page) showPage(page);
+}
+
+void Form::setHidden(int field, bool hide) {
+	if (field < 0 || field >= (int)fields.size() || fields[field].hidden == hide) return;
+	fields[field].hidden = hide;
+	hiddenChanged(fields[field].page);
+}
+
 void Form::showPage(int to) {
 	page = std::max(0, std::min((int)pages.size() - 1, to));
 	if (dialog == nullptr) return;
@@ -1285,11 +1358,11 @@ void Form::showPage(int to) {
 	if (scrollY != 0) scrollTo(0);
 	HWND focus = nullptr;
 	for (FormField& x : fields) {
-		const int show = x.page == page ? SW_SHOW : SW_HIDE;
+		const int show = x.page == page && !x.hidden ? SW_SHOW : SW_HIDE;
 		if (x.hwnd) ShowWindow(x.hwnd, show);
 		if (x.extra) ShowWindow(x.extra, show);
 		for (HWND o : x.others) ShowWindow(o, show);
-		if (!focus && x.page == page && x.hwnd && (x.kind == FormField::Text || x.kind == FormField::Choice || x.kind == FormField::Check))
+		if (!focus && x.page == page && !x.hidden && x.hwnd && (x.kind == FormField::Text || x.kind == FormField::Choice || x.kind == FormField::Check))
 			focus = x.hwnd;
 	}
 	if (HWND tabs = GetDlgItem(dialog, kTabsId)) InvalidateRect(tabs, nullptr, FALSE);

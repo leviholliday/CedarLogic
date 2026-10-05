@@ -44,6 +44,8 @@ struct FormField {
 	HWND extra = nullptr;               // the label, or the Choose... button
 	RECT frame{};                       // Text and List: the drawn field around it (dialog pixels)
 	int page = 0;                       // which of Form::pages it's on
+	bool hidden = false;                // not shown, and it takes no room (Form::setHidden)
+	int top = 0, span = 0;              // where it is on its page and how tall (with its tip), in pixels, unscrolled
 	std::vector<HWND> others;           // its tip, its Choose... button, its left label
 	HWND tipWindow = nullptr;
 };
@@ -59,7 +61,7 @@ public:
 	std::function<void(Form&)> onInit;
 	std::function<void(Form&, int field)> onChange;       // a field changed (typing, a choice, a tick)
 	std::function<void(Form&, int field)> onLeave;        // a Text field lost the keyboard
-	std::function<std::string(Form&)> validate;           // on OK: "" to close, else what's wrong
+	std::function<std::string(Form&)> validate;           // on OK: "" to close, else what's wrong ("\n": stay open, say nothing)
 	std::function<bool(Form&, int button)> onButton;      // one of `buttons`: true to close with it
 	std::function<void(Form&, int field, int row)> onActivate;   // a List row double-clicked
 	std::function<void(Form&)> onTimer;
@@ -75,6 +77,11 @@ public:
 	std::vector<std::string> pages;
 	int adding = 0, page = 0;
 	void showPage(int page);
+	// A field shown or put away; the ones after it close up (or open out) to
+	// fit, and the window with them. (Not for the Checks that share a row.)
+	void setHidden(int field, bool hidden);
+	// After several `hidden` flags were changed at once: the page laid out again.
+	void hiddenChanged(int page);
 	// With pages: each an icon over its name, in a bar across the top (the
 	// Mac's Settings), rather than a segmented row.
 	std::vector<wchar_t> pageIcons;
@@ -86,6 +93,8 @@ public:
 	int hotTab = -1;
 	std::vector<int> pageBottoms;       // where each page's fields end (pixels)
 	int footerGap = 0, footerButtonsAt = 0, footerBelow = 0;
+	int contentTop = 0;                 // where the first field of a page is (pixels)
+	void relayout(int page);            // the page's fields in their places, the hidden ones taking none
 	int add(const FormField& f) { fields.push_back(f); fields.back().page = adding; return (int)fields.size() - 1; }
 	// Show it and wait. Returns IDOK, IDCANCEL, or 100 + a button's index.
 	int run(HWND owner);
