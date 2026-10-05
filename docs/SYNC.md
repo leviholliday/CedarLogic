@@ -647,7 +647,8 @@ Anything else → `404 not_found`.
 | POST | `/spaces/{space}/write` | body `{writes:[≤ 50 items]}` → one result per item | 200 |
 
 `limits` everywhere =
-`{"maxRecordBytes":524288,"maxSmallRecordBytes":4096,"maxRecords":1000,"maxDevices":20,"maxBytes":10485760,"maxEntries":5000,"maxFetchIds":50,"maxWriteItems":50,"pollSeconds":600}`.
+`{"maxRecordBytes":524288,"maxSmallRecordBytes":4096,"maxRecords":1000,"maxDevices":20,"maxBytes":10485760,"maxEntries":5000,"maxFetchIds":50,"maxWriteItems":50,"pollSeconds":600,"pairSeconds":600}`
+(`pairSeconds`: §11.5).
 
 **Space status** (PUT and GET `/spaces/{space}`):
 `{ "created": bool (PUT only), "epoch": "<32 hex>", "seq": 57, "purgedSeq": 0, "count": 12, "bytes": 48211, "devices": 3, "createdAt": ms, "activeAt": ms, "limits": {…} }`.
@@ -3074,13 +3075,16 @@ as plain text, cut to 64 characters, control characters dropped; empty →
 
 Storage: the sync store, key `p/{pairId}` → `{ helloEnv, readHash, answerEnv,
 createdAt, answeredAt }` (`answerEnv`/`answeredAt` null until answered). A slot
-lives **10 minutes** from `createdAt`; past that it reads as gone (404) whatever
-is stored. The daily cleanup (§3.10) deletes `p/` keys older than an hour.
+lives **10 minutes** from `createdAt` (`expiresAt` = `createdAt` + 600,000 ms;
+at that instant and after it reads as gone, 404, whatever is stored). The daily cleanup (§3.10) deletes `p/` keys older than an hour.
 
 The gate (origin / `x-cedarlogic-key`), the request breaker and Netlify's
 per-address limit apply as to every other endpoint. `pairId` must match
 `^[0-9a-f]{32}$`, bodies are JSON objects, envelopes base64url decoding to
-29…2048 bytes, tokens as `TOKEN_RE`, `readHash` 64 lowercase hex.
+29…2048 bytes, `readHash` 64 lowercase hex; anything else is `400
+bad_request` (a bad `pairId` too, not 404). A missing or malformed bearer
+token is `401 wrong_token`, like a wrong one. The checks run in this order:
+gate, method (405), breaker, then `pairId`, body, slot.
 
 | Request | Who | Answer |
 |---|---|---|
@@ -3093,7 +3097,15 @@ per-address limit apply as to every other endpoint. `pairId` must match
 Messages: `pair_gone` "That QR code has expired. Show a new one on the other
 device."; `pair_answered` "Another device already answered this QR code. Show a
 new one on the other device."; `pair_exists` "Try again."; `wrong_token` "Not
-yours to read." `GET /health`'s `limits` gains `pairSeconds: 600`.
+yours to read." `limits` (in `GET /health` and in every space status, §3.3: it
+is one list) gains `pairSeconds: 600`.
+
+Details that matter to clients: a second `POST …/answer` is `409` even with the
+same envelope (only a write whose outcome was unknown and that did land is `200`);
+`DELETE` of a slot that is gone is `200` whatever token it carries, and of a live
+one needs the token; a `PUT` is counted against the 30 per hour only when it makes
+a slot (a `409` or a `400` doesn't count); a `PUT` over an expired slot makes a
+new one.
 
 Logging as everywhere else: errors only; never a token, envelope or `pairId`.
 
@@ -3133,7 +3145,9 @@ Steps:
    sent it: "Sent from “Sam’s phone”." (plain text). [Cancel] there forgets the
    code: nothing was stored.
 5. The sheet closed, Cancel, the window closed, the app quitting → stop polling,
-   `DELETE` (best effort).
+   `DELETE` (best effort). Destroying the engine (its thread exiting
+   after stop) sends nothing: the host may be gone by then, and the slot expires
+   in 10 minutes anyway; only quitting (within its bounded step) deletes.
 
 ### 11.7 L: adding a device
 
@@ -3148,9 +3162,15 @@ Entry points:
   > [Done]
 - Any in-app scan (Add a Device's, or I Have a Code's Scan Code) that reads a
   pairing link.
-- A pairing link opened in a browser (a phone's camera app): the `/sync/` page
-  (11.8) → CedarLogic Online or `/app/` with `#p=…`, taken like a `#k=` link
-  (§5.3): off the address at once, then the steps below.
+- A pairing link opened in a browser (a phone's camera app, or a link someone
+  sent) is **never** taken as a pairing: the `/sync/` page (11.8) drops `P` and
+  opens the app with `#add`, which shows the Add a device sheet, so the person
+  scans the QR code with Scan QR Code. (A link can come from far away; a scan
+  in the app means the device is in front of the person. See 11.9.) `#add` in
+  the address (on load or on hashchange) comes off it at once and opens that
+  sheet, whether or not this device syncs yet.
+- A `#p=` in the address of CedarLogic Online or `/app/` (an old link, or typed)
+  is treated the same way: dropped, and the Add a device sheet opens.
 
 Steps:
 1. Parse the link → `P` → derive → `GET /pair/{pairId}`. 404 → "That QR code has
@@ -3179,16 +3199,24 @@ Steps:
 
 Nothing is sent before [Add] but the `GET`.
 
+If the preview D runs after an answer fails (offline, a damaged copy), D's I Have
+a Code sheet comes back with the message and a new QR code, **never** with the
+received code in its field (it's someone else's secret on a possibly shared
+computer).
+
 ### 11.8 The `/sync/` page with `#p=`
 
-Read `#p=` like `#k=`, off the address at once. Phones and tablets (iPhone,
-iPad, Android) go to the phone app: `location.replace("/app/#p=" + code)` —
+Read `#p=` like `#k=`, off the address at once — and then **drop the pairing
+code** (11.7): it's never passed on. Phones and tablets (iPhone, iPad, Android)
+go to the phone app's Add a device sheet: `location.replace("/app/#add")` —
 except Safari on an iPhone/iPad not running from the Home Screen, which shows:
-"Using CedarLogic from your Home Screen? Open it, then Your Circuits › Sync ›
-Add a Device, and scan this QR code again." with [Use in Safari Instead]
-(→ `/app/#p=…`). Computers: [Use in This Browser] → CedarLogic Online
-`#p=…`. A damaged pairing code: "This QR code is damaged. Show a new one on the
-other device."
+"This QR code adds a device to your sync. Open CedarLogic from your Home
+Screen, then Your Circuits › Sync › Add a Device, and scan it there." with
+[Use in Safari Instead] (→ `/app/#add`). Computers: "This QR code adds a device
+to your sync. Scan it in CedarLogic on a phone that syncs: Your Circuits › Sync
+› Add a Device." with [Add a Device in This Browser] (→ CedarLogic Online
+`#add`, for a computer with a camera). A damaged pairing code: "This QR code is
+damaged. Show a new one on the other device."
 
 The same page's `#k=` links on phones and tablets now also go to `/app/#k=…`
 (the full-screen phone app; on Android it shares its storage with Chrome's
@@ -3209,6 +3237,14 @@ page's introduction on a phone.
   person's: D's preview shows whose circuits they are, and nothing is linked
   without Link. L then gets "Another device already answered…", which tells the
   person something is off.
+- **A link sent from far away.** Anyone can make a slot as D and send the
+  `/sync/#p=…` link (chat, email, a QR code in a message) to someone whose phone
+  syncs. If tapping it went straight to "Add …?", one press would give the
+  sender the sync code. So a pairing is only ever started by a scan inside the
+  app (11.7): a link only opens the Add a device sheet. To be fooled, the person
+  would have to open Add a Device and point the camera at the sender's QR code
+  on purpose — against the sheet's "Only add a device that's yours and in front
+  of you."
 - L confirms before sending its code, naming the device; D confirms (the
   preview) before linking.
 - Slots are short-lived, small, and limited per address; `DELETE` needs `R`.
