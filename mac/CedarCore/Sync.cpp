@@ -912,7 +912,7 @@ void Core::wentBack(const std::string& rid, int64_t ver) {
 	noticedWentBack_ = true;
 }
 
-void Core::damaged(const std::string& rid, int64_t ver) {
+void Core::damaged(const std::string& rid, int64_t ver, bool tombstone, const std::string& h) {
 	auto it = st.records.find(rid);
 	if (it != st.records.end() && !it->second.local.empty() && lib.exists(it->second.local)) {
 		it->second.ver = ver;
@@ -921,6 +921,8 @@ void Core::damaged(const std::string& rid, int64_t ver) {
 		int64_t m, c;
 		lib.read(it->second.local, name, cdl, m, c);
 		note(q(name) + " was damaged in the synced copy; this device's copy was sent again.");
+	} else if (tombstone) {
+		seenSet(rid, ver, h, nullptr);   // a damaged tombstone of a circuit not here: nothing to open, nothing to count
 	} else {
 		st.unreadable[rid] = { ver, "damaged" };
 	}
@@ -1082,7 +1084,7 @@ void Core::pull() {
 					continue;
 				}
 				if (o.why == "damaged") {
-					damaged(rid, ver);
+					damaged(rid, ver, o.e.flag("deleted"), o.e.str("h"));
 					continue;
 				}
 				st.unreadable.erase(rid);
@@ -1123,6 +1125,17 @@ void Core::pull() {
 			for (const auto& kv : st.records)
 				if (kv.second.ver > 0 && !present.count(kv.first)) gone.push_back(kv.first);
 			for (const std::string& rid : gone) onRemoteForgotten(rid);
+			// What the whole list no longer has is forgotten too (a reset synced copy, a purge): a
+			// damaged record that's gone, another device's record that's gone, and this device's own
+			// device record, which goes out again with this cycle's push (from nothing, base 0).
+			for (auto u = st.unreadable.begin(); u != st.unreadable.end();)
+				u = present.count(u->first) ? std::next(u) : st.unreadable.erase(u);
+			for (auto d = st.devices.begin(); d != st.devices.end();)
+				d = present.count(d->first) ? std::next(d) : st.devices.erase(d);
+			if (st.device.has && !present.count(st.device.id)) {
+				st.device.ver = 0;
+				st.device.at = 0;
+			}
 		}
 	});
 	st.cursor = held.empty() ? pageSeq : *std::min_element(held.begin(), held.end()) - 1;
@@ -1680,10 +1693,12 @@ bool Core::result(const Item& it, const json::Value& res, const std::map<std::st
 			st.device.at = now();
 			st.device.name = st.deviceName;
 			if (e) seenSet(rid, e->integer("ver"), e->str("h"), nullptr);
-		} else {   // again tomorrow (412: written over then)
-			st.device.at = now();
+		} else if (status == 412) {   // written over, or gone (a reset copy): on the base it has now, within the hour
 			const json::Value* cur = res.get("current");
-			if (status == 412 && cur && cur->isObject()) st.device.ver = cur->integer("ver");
+			st.device.ver = cur && cur->isObject() ? cur->integer("ver") : 0;
+			st.device.at = now() - kDay + kHour;
+		} else {   // again tomorrow (a full space delays it, quietly)
+			st.device.at = now();
 		}
 		return false;
 	}
