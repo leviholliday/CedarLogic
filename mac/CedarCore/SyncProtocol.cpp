@@ -397,8 +397,12 @@ std::string appLink(const std::string& code) { return std::string(kAppBase) + "#
 // ---- keys (1.3) ------------------------------------------------------------------------
 
 Bytes hkdf(Crypto& cr, const uint8_t* ikm, size_t ikmLen, const std::string& info, size_t len) {
+	return hkdfSalted(cr, kSalt, ikm, ikmLen, info, len);
+}
+
+Bytes hkdfSalted(Crypto& cr, const std::string& salt, const uint8_t* ikm, size_t ikmLen, const std::string& info, size_t len) {
 	uint8_t prk[32], t[32];
-	cr.hmacSha256((const uint8_t*)kSalt, strlen(kSalt), ikm, ikmLen, prk);
+	cr.hmacSha256((const uint8_t*)salt.data(), salt.size(), ikm, ikmLen, prk);
 	Bytes out, block;
 	for (uint8_t i = 1; out.size() < len; i++) {
 		Bytes msg(block);
