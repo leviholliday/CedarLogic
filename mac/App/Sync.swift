@@ -591,7 +591,7 @@ final class SyncCenter: ObservableObject {
             if text.hasPrefix("An answer came") {
                 pairing = .stopped(text: text, again: "Show a New One")
             } else if text.hasPrefix("Can't reach") {
-                pairing = .stopped(text: "Can't reach the website.", again: "Try Again")
+                pairing = .stopped(text: "Can\u{2019}t reach the website.", again: "Try Again")
             } else {
                 pairing = .stopped(text: text, again: "Try Again")
             }

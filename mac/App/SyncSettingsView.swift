@@ -426,7 +426,7 @@ enum SyncRender {
         let qrExpired = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF),
                                    pairing: .stopped(text: "This QR code expired.", again: "Show a New One"))
         let qrOffline = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF),
-                                   pairing: .stopped(text: "Can't reach the website.", again: "Try Again"))
+                                   pairing: .stopped(text: "Can\u{2019}t reach the website.", again: "Try Again"))
         let qrDamaged = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF),
                                    pairing: .stopped(text: "An answer came that couldn't be read.", again: "Show a New One"))
         let typo = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF), pairing: .showing(link: qrLink))
