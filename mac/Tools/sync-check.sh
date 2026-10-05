@@ -11,6 +11,10 @@
 #      run of two real engines -- two libraries, as two Macs -- through it:
 #      Turn On, preview, Link, edits both ways, a dirty window left alone,
 #      a delete, quitting, Turn Off.
+#   3. adding a device by scanning (SYNC.md 11): this Mac as D shows a QR code,
+#      a phone written in node (mac/Tools/sync-pair-answer.mjs) answers it, and
+#      D previews and links with what came; a cancelled QR code leaves nothing
+#      on the server. Needs a mock server that has pairing (it checks).
 #
 #   mac/Tools/sync-check.sh                  (runs mac/build.sh first if libCedarCore.a is missing)
 #   CL_SITE=<cedarlogic-site checkout> mac/Tools/sync-check.sh
@@ -74,6 +78,21 @@ if [ -n "$URL" ]; then
 	if CL_SYNC_URL=$URL "$OUT/sync-check" engine "$TMP/engine" format/tests/fixtures/Lab5.cdl format/tests/fixtures/lab6.cdl \
 		>"$OUT/engine.log" 2>&1; then :; else status=1; fi
 	grep -v '^PASS' "$OUT/engine.log" || true
+fi
+
+if [ -n "$URL" ] && command -v node >/dev/null; then
+	if curl -s --max-time 5 "$URL/health" | grep -q pairSeconds; then
+		echo "== Adding a device by scanning, through the mock server"
+		PHONE="Sam’s phone"
+		CL_SYNC_URL=$URL CL_PAIR_L_NAME=$PHONE "$OUT/sync-check" pair "$TMP/pair" format/tests/fixtures/Lab5.cdl >"$OUT/pair.log" 2>&1 &
+		D_PID=$!
+		node mac/Tools/sync-pair-answer.mjs "$URL" "$TMP/pair" "$PHONE" >"$OUT/pair-l.log" 2>&1 || status=1
+		wait "$D_PID" || status=1
+		grep -v '^PASS' "$OUT/pair.log" || true
+		cat "$OUT/pair-l.log"
+	else
+		echo "(The mock server has no pairing yet: skipping the pairing round.)"
+	fi
 fi
 
 [ $status = 0 ] && echo "sync-check: everything passed" || echo "sync-check: FAILED (logs in $OUT)"
