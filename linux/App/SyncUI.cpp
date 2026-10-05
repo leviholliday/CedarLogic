@@ -51,7 +51,34 @@ struct Card {
 	// While it runs.
 	std::string checkText;
 	bool checkGood = false;
+	// The "Scan with your phone" half of I Have a Code (SYNC.md 11.6): the QR code of the pairing
+	// link, what it says about the wait, and the button under that.
+	struct Scan {
+		bool on = false;
+		enum State { Making, Waiting, CantReach, Expired, Damaged } state = Making;
+		std::string link;            // the QR code's text, once the website has the request
+		std::string text, action;    // the status line, and its button ("Try Again", "Show a New One")
+		std::function<void()> retry;
+		std::string bitsFor;         // the link the cached modules are of
+		std::vector<bool> bits;
+		int bitsSize = 0;
+	} scan;
+	// Set while the card runs: close it with an answer, repaint it (for what arrives from outside).
+	std::function<void(int)> finish;
+	std::function<void()> redraw;
 };
+
+const char* const kScanHeading = "Scan with your phone";
+const char* const kScanLine =
+	"On a phone that syncs, open CedarLogic \xE2\x96\xB8 Your Circuits \xE2\x96\xB8 Sync \xE2\x96\xB8 Add a Device and scan this. "
+	"Or scan it with the phone's camera.";
+const char* const kTypeHeading = "Or type the code";
+const char* const kWaiting = "Waiting for your phone\xE2\x80\xA6";
+const char* const kCantReach = "Can't reach the website.";
+const char* const kExpired = "This QR code expired.";
+const char* const kDamaged = "An answer came that couldn't be read.";
+// Same length as a real pairing link, so the QR code has the same size: the card's layout is made before there is one.
+const char* const kSampleLink = "https://cedarlogic.netlify.app/sync/#p=AAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 // Runs modally over `parent`; returns the answer of the button that closed it.
 int runCard(GtkWindow* parent, Card& c) {
@@ -64,11 +91,35 @@ int runCard(GtkWindow* parent, Card& c) {
 	if (!c.qrText.empty()) qrBits = clsync::qr(c.qrText, qrSize);
 	const float qrScale = qrSize > 0 ? std::max(3.0f, std::ceil(176.0f / (qrSize + 8))) : 0;
 	const float qrBox = qrSize > 0 ? (qrSize + 8) * qrScale : 0;
+	// The scan half: its QR code is big (at least ~190 points with the quiet zone) and the words sit beside it.
+	int scanSize = 0;
+	float scanScale = 0, scanBox = 0;
+	if (c.scan.on) {
+		clsync::qr(kSampleLink, scanSize);
+		scanScale = std::max(4.0f, std::ceil(190.0f / (scanSize + 8)));
+		scanBox = (scanSize + 8) * scanScale;
+	}
+	const float scanGap = 18, scanTextX = scanBox + scanGap, scanTextW = textW - scanTextX;
 
 	// Layout, from the card's top.
 	const float headH = brand::text(nullptr, c.heading, 0, 0, 16, brand::Bold, brand::kPrimary, textW);
 	const float headTop = inset + 52;
 	float y = headTop + headH + 7;
+	float scanLabelTop = 0, scanTop = 0, scanStatusTop = 0, scanActionTop = 0, typeLabelTop = 0;
+	const float scanActionH = 28;
+	if (c.scan.on) {
+		scanLabelTop = y + 6;
+		scanTop = scanLabelTop + 26;
+		const float explH = brand::text(nullptr, kScanLine, 0, 0, 12.5f, brand::Normal, brand::kPrimary, scanTextW);
+		float statusH = 0;   // room for the longest of the sentences
+		for (const char* t : { kWaiting, kCantReach, kExpired, kDamaged })
+			statusH = std::max(statusH, brand::text(nullptr, t, 0, 0, 12.5f, brand::Normal, brand::kPrimary, scanTextW));
+		scanStatusTop = scanTop + explH + 14;
+		scanActionTop = scanStatusTop + statusH + 8;
+		y = std::max(scanTop + scanBox, scanActionTop + scanActionH) + 20;
+		typeLabelTop = y;
+		y += 26;
+	}
 	std::vector<float> paraTop, paraH;
 	for (const std::string& p : c.paragraphs) {
 		const float h = brand::text(nullptr, p, 0, 0, 12.5f, brand::Normal, brand::kPrimary, textW);
@@ -121,6 +172,11 @@ int runCard(GtkWindow* parent, Card& c) {
 		if (fieldEntry) gtk_widget_set_opacity(fieldEntry, o);
 		if (codeEntry) gtk_widget_set_opacity(codeEntry, o);
 	};
+	c.finish = [&](int a) {
+		answer = a;
+		s.close();
+	};
+	c.redraw = [&] { s.redraw(); };
 	s.onOpen = [&](Sheet& sh) {
 		auto redraw = +[](GtkWidget*, GdkEvent*, gpointer area) -> gboolean { gtk_widget_queue_draw(GTK_WIDGET(area)); return FALSE; };
 		if (c.field) {
@@ -201,6 +257,48 @@ int runCard(GtkWindow* parent, Card& c) {
 		const float x = card.left + inset, top = card.top, right = card.right - inset;
 		brand::icon(cr, x, top + inset, 40);
 		brand::text(cr, c.heading, x, top + headTop, 16, brand::Bold, ink, textW);
+		if (c.scan.on) {
+			brand::text(cr, kScanHeading, x, top + scanLabelTop, 13.5f, brand::Bold, ink, textW);
+			brand::text(cr, kTypeHeading, x, top + typeLabelTop, 13.5f, brand::Bold, ink, textW);
+			// Always dark modules on white, in the dark theme too: a camera has to read it.
+			const float qx = x, qy = top + scanTop;
+			const RectF box = rectF(qx, qy, qx + scanBox, qy + scanBox);
+			const bool have = c.scan.state == Card::Scan::Waiting && !c.scan.link.empty();
+			if (have) {
+				if (c.scan.bitsFor != c.scan.link) {
+					c.scan.bits = clsync::qr(c.scan.link, c.scan.bitsSize);
+					c.scan.bitsFor = c.scan.link;
+				}
+				fillRound(cr, box, 6, colorF(1, 1, 1));
+				setColor(cr, colorF(0, 0, 0));
+				const float m = scanBox / (c.scan.bitsSize + 8);
+				for (int r = 0; r < c.scan.bitsSize; r++)
+					for (int q = 0; q < c.scan.bitsSize; q++)
+						if (c.scan.bits[(size_t)r * c.scan.bitsSize + q]) cairo_rectangle(cr, qx + (q + 4) * m, qy + (r + 4) * m, m, m);
+				cairo_fill(cr);
+			} else {
+				// No QR code to show (not made yet, or it's no good any more): an empty box, not a stale code.
+				fillRound(cr, box, 6, withAlpha(ink, dark ? 0.07f : 0.05f));
+				strokeRound(cr, box, 6, withAlpha(ink, 0.12f));
+				if (c.scan.state == Card::Scan::Making)
+					drawTextMid(cr, "Making a QR code\xE2\x80\xA6", box, 12.5f, dim, TextAlign::Center, false);
+			}
+			const float tx = x + scanTextX;
+			brand::text(cr, kScanLine, tx, top + scanTop, 12.5f, brand::Normal, dim, scanTextW);
+			if (!c.scan.text.empty()) {
+				const bool bad = c.scan.state == Card::Scan::CantReach || c.scan.state == Card::Scan::Damaged;
+				const Color red = dark ? colorF(1.0f, 0.55f, 0.5f) : colorF(0.75f, 0.15f, 0.12f);
+				brand::text(cr, c.scan.text, tx, top + scanStatusTop, 12.5f, brand::Normal, bad ? red : ink, scanTextW);
+			}
+			if (!c.scan.action.empty()) {
+				const float tw = textWidth(c.scan.action, 13, true) + 28;
+				const RectF r = rectF(tx, top + scanActionTop, tx + tw, top + scanActionTop + scanActionH);
+				const bool hot = sh.hotNext();
+				fillRound(cr, r, 9, withAlpha(ink, hot ? 0.12f : 0.08f));
+				drawTextMid(cr, c.scan.action, rectF(r.left + 14, r.top, r.right, r.bottom), 13, ink, TextAlign::Leading, true);
+				sh.hit(r, [&] { if (c.scan.retry) c.scan.retry(); });
+			}
+		}
 		for (size_t i = 0; i < c.paragraphs.size(); i++) brand::text(cr, c.paragraphs[i], x, top + paraTop[i], 12.5f, brand::Normal, dim, textW);
 		if (!c.code.empty()) {
 			const RectF f = rectF(x, top + codeTop, right, top + codeTop + codeH);
@@ -290,6 +388,8 @@ int runCard(GtkWindow* parent, Card& c) {
 		return false;
 	};
 	s.run(parent);
+	c.finish = nullptr;
+	c.redraw = nullptr;
 	if (c.field) {
 		gchar* t = g_strstrip(g_strdup(c.value.c_str()));
 		c.value = t;
@@ -466,13 +566,15 @@ void turnOn() {
 }
 
 // What a code holds, then the question: only then does anything link.
-void confirmLink(const std::string& code, const std::string& sentence) {
+void confirmLink(const std::string& code, const std::string& sentence, const std::string& from = std::string()) {
 	clsync::Engine* e = syncapp::engine();
 	if (!e) return;
 	Card c;
 	c.heading = "Link this computer?";
 	c.width = 520;
-	c.paragraphs = { sentence };
+	// A code that came by QR code says who sent it (plain text).
+	if (!from.empty()) c.paragraphs.push_back("Sent from \xE2\x80\x9C" + from + "\xE2\x80\x9D.");
+	c.paragraphs.push_back(sentence);
 	c.buttons = { { "Link", 1, 1 }, { "Cancel", 0, 0 } };
 	c.escape = 0;
 	c.enter = 1;
@@ -486,43 +588,123 @@ void confirmLink(const std::string& code, const std::string& sentence) {
 	});
 }
 
-void previewThenLink(const std::string& code) {
+void previewThenLink(const std::string& code, const std::string& from = std::string()) {
 	clsync::Engine* e = syncapp::engine();
 	if (!e || !needCurl()) return;
 	startWork("Checking the code\xE2\x80\xA6");
-	e->preview(code, [code](bool ok, std::string text, clsync::Preview) {
-		defer([code, ok, text] {
+	e->preview(code, [code, from](bool ok, std::string text, clsync::Preview) {
+		defer([code, from, ok, text] {
 			endWork();
 			if (!ok) showMessage(sheetParent(), GTK_MESSAGE_WARNING, "Can't link with that code", text);
-			else confirmLink(code, text);
+			else confirmLink(code, text, from);
 		});
 	});
 }
 
-// I Have a Code: a field that checks as you type, then the preview.
+// The field's check, as the person types.
+std::string checkTyped(const std::string& text, bool& good) {
+	good = false;
+	if (text.empty()) return std::string();
+	std::string code, why;
+	if (clsync::parseCode(syncplatform::crypto(), text, code, why)) {
+		good = true;
+		return "That's a sync code.";
+	}
+	return clsync::whyText(why, text);
+}
+
+// Showing a QR code for a phone that syncs to scan (SYNC.md 11): what the engine tells the card.
+// Shared with the engine's callbacks, which come on the main loop while the card runs and never
+// after the card is gone (cancelled first).
+struct Pairing {
+	Card* card = nullptr;      // null once the card is gone
+	bool got = false;          // a code came
+	std::string code, from;
+};
+
+void pairStart(const std::shared_ptr<Pairing>& live) {
+	clsync::Engine* e = syncapp::engine();
+	if (!e || !live->card) return;
+	Card& c = *live->card;
+	c.scan.state = Card::Scan::Making;
+	c.scan.link.clear();
+	c.scan.text.clear();
+	c.scan.action.clear();
+	if (c.redraw) c.redraw();
+	e->pairStart(
+	    [live](const std::string& link) {
+		    if (!live->card) return;
+		    Card& c = *live->card;
+		    c.scan.state = Card::Scan::Waiting;
+		    c.scan.link = link;
+		    c.scan.text = kWaiting;
+		    c.scan.action.clear();
+		    if (c.redraw) c.redraw();
+	    },
+	    [live](int result, const std::string& text, const std::string& from) {
+		    if (!live->card) return;
+		    Card& c = *live->card;
+		    if (result == clsync::Engine::PairCode) {
+			    // As if it had been typed: the card closes and the preview and the question follow.
+			    live->got = true;
+			    live->code = text;
+			    live->from = from;
+			    if (c.finish) c.finish(3);
+			    return;
+		    }
+		    c.scan.link.clear();
+		    if (result == clsync::Engine::PairExpired) {
+			    c.scan.state = Card::Scan::Expired;
+			    c.scan.text = kExpired;
+			    c.scan.action = "Show a New One";
+		    } else if (text == kDamaged) {
+			    c.scan.state = Card::Scan::Damaged;
+			    c.scan.text = kDamaged;
+			    c.scan.action = "Show a New One";
+		    } else {
+			    // The website didn't answer (or this computer couldn't make a secret): try again.
+			    c.scan.state = Card::Scan::CantReach;
+			    c.scan.text = text.compare(0, 5, "Can't") == 0 ? std::string(kCantReach) : text;
+			    c.scan.action = "Try Again";
+		    }
+		    if (c.redraw) c.redraw();
+	    });
+}
+
+// I Have a Code: the QR code for a phone to scan, and a field that checks as you type; then the preview.
 void haveCode(const std::string& prefill) {
+	clsync::Engine* e = syncapp::engine();
+	const bool scan = e && !e->enabled() && syncplatform::curlAvailable();
 	Card c;
-	c.heading = "Link this computer";
+	c.heading = scan ? "Link to your synced circuits" : "Link this computer";
+	c.title = "Link this computer";
+	c.width = scan ? 540 : 480;
 	c.paragraphs = { "Type or paste the code from your other device, or a sync link." };
 	c.field = true;
 	c.value = prefill;
 	c.placeholder = "Sync code or link";
-	c.check = [](const std::string& text, bool& good) -> std::string {
-		good = false;
-		if (text.empty()) return std::string();
-		std::string code, why;
-		if (clsync::parseCode(syncplatform::crypto(), text, code, why)) {
-			good = true;
-			return "That's a sync code.";
-		}
-		return clsync::whyText(why, text);
-	};
+	c.check = checkTyped;
 	c.buttons = { { "Continue", 1, 1 }, { "Cancel", 0, 0 } };
 	Card* cp = &c;
 	c.buttons[0].enabled = [cp] { return cp->checkGood; };
 	c.escape = 0;
 	c.enter = 1;
-	if (runCard(sheetParent(), c) != 1) return;
+	auto live = std::make_shared<Pairing>();
+	if (scan) {
+		c.scan.on = true;
+		live->card = &c;
+		c.scan.retry = [live] { pairStart(live); };
+		pairStart(live);
+	}
+	const int answer = runCard(sheetParent(), c);
+	// Closed (Continue, Cancel, the window going): the QR code is no good any more.
+	live->card = nullptr;
+	if (scan) e->pairCancel();
+	if (answer == 3 && live->got) {
+		previewThenLink(live->code, live->from);
+		return;
+	}
+	if (answer != 1) return;
 	std::string code, why;
 	if (!clsync::parseCode(syncplatform::crypto(), c.value, code, why)) return;
 	previewThenLink(code);
@@ -890,7 +1072,7 @@ void linkFromUrl(const std::string& link) {
 
 // ---- Screenshots -----------------------------------------------------------------------------------------------------
 
-void showForScreenshot(CircuitWindow* from, const std::string& what) {
+void showForScreenshot(CircuitWindow* from, const std::string& what, int page) {
 	(void)from;
 	if (what == "synccode") {
 		// A fixed code, nothing made or sent.
@@ -908,21 +1090,32 @@ void showForScreenshot(CircuitWindow* from, const std::string& what) {
 		c.buttons = { { "Done", 1, 1 }, { "Copy Link", 11, 0, true, true, nullptr, nullptr }, { "Copy Code", 10, 0, true, true, nullptr, nullptr } };
 		c.escape = c.enter = 1;
 		runCard(from ? from->window() : nullptr, c);
-	} else if (what == "synclink") {
+	} else if (what == "synclink" || what == "syncpair") {
+		// The whole sheet: the QR code of a made-up link (nothing is made or sent), and the field.
+		// syncpair:0 waiting, :1 expired, :2 can't reach the website, :3 a damaged answer, :4 not made yet.
 		Card c;
-		c.heading = "Link this computer";
+		c.heading = "Link to your synced circuits";
+		c.title = "Link this computer";
+		c.width = 540;
 		c.paragraphs = { "Type or paste the code from your other device, or a sync link." };
 		c.field = true;
-		c.value = "000G-40R4-0M30-E209-185G-R38E-1YZ4";
+		c.value = what == "synclink" ? "000G-40R4-0M30-E209-185G-R38E-1YZ4" : "";
 		c.placeholder = "Sync code or link";
-		c.check = [](const std::string& text, bool& good) -> std::string {
-			std::string code, why;
-			good = clsync::parseCode(syncplatform::crypto(), text, code, why);
-			return good ? std::string("That's a sync code.") : clsync::whyText(why, text);
-		};
+		c.check = checkTyped;
 		Card* cp = &c;
 		c.buttons = { { "Continue", 1, 1 }, { "Cancel", 0, 0 } };
 		c.buttons[0].enabled = [cp] { return cp->checkGood; };
+		c.scan.on = true;
+		using S = Card::Scan;
+		if (page == 1) { c.scan.state = S::Expired; c.scan.text = kExpired; c.scan.action = "Show a New One"; }
+		else if (page == 2) { c.scan.state = S::CantReach; c.scan.text = kCantReach; c.scan.action = "Try Again"; }
+		else if (page == 3) { c.scan.state = S::Damaged; c.scan.text = kDamaged; c.scan.action = "Show a New One"; }
+		else if (page == 4) c.scan.state = S::Making;
+		else {
+			c.scan.state = S::Waiting;
+			c.scan.link = "https://cedarlogic.netlify.app/sync/#p=0G40R40M30E209185GR38E1YZ4Q1";
+			c.scan.text = kWaiting;
+		}
 		runCard(from ? from->window() : nullptr, c);
 	} else if (what == "syncconfirm") {
 		Card c;

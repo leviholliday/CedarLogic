@@ -138,7 +138,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "report") top = toplevelTitled("Export Lab Report");
 	else if (what == "settings" || what == "sync") top = settings::window();
 	else if (what == "synccode") top = toplevelTitled("Your sync code");
-	else if (what == "synclink") top = toplevelTitled("Link this computer");
+	else if (what == "synclink" || what == "syncpair") top = toplevelTitled("Link this computer");
 	else if (what == "syncconfirm") top = toplevelTitled("Link this computer?");
 	else if (what == "scope" && !circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	else if (what == "quit") top = toplevelTitled("Quit CedarLogic");
@@ -177,7 +177,7 @@ gboolean showCb(gpointer) {
 	else if (what == "export") w->exportImage();
 	else if (what == "report") w->exportReport();
 	else if (what == "settings") settings::show(w, page);
-	else if (what == "sync" || what == "synccode" || what == "synclink" || what == "syncconfirm") syncui::showForScreenshot(w, what);
+	else if (what == "sync" || what == "synccode" || what == "synclink" || what == "syncpair" || what == "syncconfirm") syncui::showForScreenshot(w, what, page);
 	else if (what == "quit") confirmQuitting(w->window());
 	else if (what == "focus") w->toggleFocusMode();
 	else if (what == "shortcuts") w->showShortcuts();
