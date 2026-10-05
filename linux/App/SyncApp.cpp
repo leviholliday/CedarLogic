@@ -248,40 +248,17 @@ void begin() {
 
 void quit() {
 	if (!gEngine) return;
-	struct Wait {
-		std::mutex mu;
-		GMainLoop* loop = nullptr;
-		bool finished = false;
-	};
-	auto wait = std::make_shared<Wait>();
 	if (gEngine->enabled()) {
-		wait->loop = g_main_loop_new(nullptr, FALSE);
-		// On the engine's thread (or a timer's, past five seconds): the loop is told to stop.
-		gEngine->quitting([wait] {
-			std::lock_guard<std::mutex> g(wait->mu);
-			wait->finished = true;
-			if (wait->loop) g_main_loop_quit(wait->loop);
-		});
-		struct Timeout {
-			GMainLoop* loop;
-			bool fired;
-		} timeoutState{ wait->loop, false };
-		const guint timeout = g_timeout_add(5500, [](gpointer p) -> gboolean {
-			Timeout* t = static_cast<Timeout*>(p);
-			t->fired = true;
-			g_main_loop_quit(t->loop);
-			return G_SOURCE_REMOVE;
-		}, &timeoutState);
-		bool already;
-		{
-			std::lock_guard<std::mutex> g(wait->mu);
-			already = wait->finished;
+		// The engine's thread says so when it has sent what's unsent (it gives up on its own after five
+		// seconds). Meanwhile the main loop keeps turning for the calls it still makes. Polled, not a
+		// loop told to stop from the other thread: that told a loop that hadn't started yet, and waited
+		// out the whole timeout for nothing.
+		auto finished = std::make_shared<std::atomic<bool>>(false);
+		gEngine->quitting([finished] { finished->store(true); });
+		const gint64 until = g_get_monotonic_time() + 5500000;
+		while (!finished->load() && g_get_monotonic_time() < until) {
+			if (!g_main_context_iteration(nullptr, FALSE)) g_usleep(10000);
 		}
-		if (!already) g_main_loop_run(wait->loop);
-		if (!timeoutState.fired) g_source_remove(timeout);   // (not after the loop is gone)
-		std::lock_guard<std::mutex> g(wait->mu);
-		g_main_loop_unref(wait->loop);
-		wait->loop = nullptr;
 	}
 	gShuttingDown = true;
 	delete gEngine;   // stops it; waits a moment for its thread
