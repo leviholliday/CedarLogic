@@ -102,11 +102,12 @@ enum LabReport {
         }
 
         /// A paragraph that wraps; moves down past it.
-        mutating func paragraph(_ s: String, size: CGFloat = 11, color: NSColor = .darkGray, gapAfter: CGFloat = 10) {
+        /// `keep`: how much of the block under it must fit on the same page too.
+        mutating func paragraph(_ s: String, size: CGFloat = 11, color: NSColor = .darkGray, gapAfter: CGFloat = 10, keep: CGFloat = 0) {
             let para = NSMutableParagraphStyle(); para.lineSpacing = 2
             let str = NSAttributedString(string: s, attributes: [.font: NSFont.systemFont(ofSize: size), .foregroundColor: color, .paragraphStyle: para])
             let h = ceil(str.boundingRect(with: CGSize(width: contentW, height: 10000), options: [.usesLineFragmentOrigin]).height)
-            need(h)
+            need(h + keep)
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
             str.draw(with: CGRect(x: margin, y: pageH - y - h, width: contentW, height: h), options: [.usesLineFragmentOrigin])
@@ -217,10 +218,10 @@ enum LabReport {
 
         mutating func truthTable(_ t: TruthTable) {
             if t.sequential {
-                paragraph("This circuit has clocks or flip-flops, so a light can depend on what happened before. Each row is read after the circuit settles from the row above it.", size: 10)
+                paragraph("This circuit has clocks or flip-flops, so a light can depend on what happened before. Each row is read after the circuit settles from the row above it.", size: 10, keep: 100)
             }
             if t.unsettled > 0 {
-                paragraph("\(t.unsettled) row\(t.unsettled == 1 ? "" : "s") never stopped changing (a clock or an oscillation), so those lights are a snapshot.", size: 10)
+                paragraph("\(t.unsettled) row\(t.unsettled == 1 ? "" : "s") never stopped changing (a clock or an oscillation), so those lights are a snapshot.", size: 10, keep: 100)
             }
             let cols = t.names.count
             let cw = min(64, contentW / CGFloat(max(cols, 1)))
