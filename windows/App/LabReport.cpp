@@ -384,7 +384,23 @@ struct Report {
 		rt = sheet.target();
 		y = kMargin;
 	}
-	void need(float h) { if (y + h > kPH - kMargin - kFooter) newPage(); }
+	// Headings wait here until the block under them is placed, so a heading
+	// is never left alone at the bottom of a page.
+	std::vector<std::pair<std::string, bool>> pending;   // (text, isSection)
+	static constexpr float kSectionH = 43, kSubH = 22;
+	float pendingH() const {
+		float h = 0;
+		for (const auto& p : pending) h += p.second ? kSectionH : kSubH;
+		return h;
+	}
+	// Starts a new page unless `h` more points fit (with any waiting
+	// headings), then draws the waiting headings.
+	void need(float h) {
+		if (y + pendingH() + h > kPH - kMargin - kFooter) newPage();
+		const std::vector<std::pair<std::string, bool>> queued = pending;
+		pending.clear();
+		for (const auto& p : queued) { if (p.second) drawHeading(p.first); else drawSubheading(p.first); }
+	}
 
 	void paragraph(const std::string& s, float size = 11, Col color = gray(0.3f), float after = 10) {
 		const float h = wrapped(nullptr, s, box(kMargin, y, kPW - kMargin, y + 1000), ui(size), color);
@@ -392,16 +408,16 @@ struct Report {
 		wrapped(rt, s, box(kMargin, y, kPW - kMargin, y + h), ui(size), color);
 		y += h + after;
 	}
-	void heading(const std::string& s) {
-		need(60);
+	void heading(const std::string& s) { pending.push_back({ s, true }); }
+	void subheading(const std::string& s) { pending.push_back({ s, false }); }
+	void drawHeading(const std::string& s) {
 		y += 8;
 		drawIn(rt, s, box(kMargin, y, kPW - kMargin, y + 22), ui(15, true), black);
 		y += 24;
 		fillBox(rt, box(kMargin, y, kPW - kMargin, y + 0.5f), rule);
 		y += 10;
 	}
-	void subheading(const std::string& s) {
-		need(40);
+	void drawSubheading(const std::string& s) {
 		drawIn(rt, s, box(kMargin, y, kPW - kMargin, y + 18), ui(12, true), gray(0.25f));
 		y += 22;
 	}
@@ -421,8 +437,8 @@ struct Report {
 		const time_t now = time(nullptr);
 		struct tm lt;
 		localtime_s(&lt, &now);
-		strftime(date, sizeof date, "%B %d, %Y", &lt);
-		drawIn(rt, std::string("Date: ") + date, box(kPW - kMargin - 200, y, kPW - kMargin, y + 20), ui(13), dark, TextAlign::Trailing);
+		strftime(date, sizeof date, "%B", &lt);
+		drawIn(rt, "Date: " + std::string(date) + strf(" %d, %d", lt.tm_mday, lt.tm_year + 1900), box(kPW - kMargin - 200, y, kPW - kMargin, y + 20), ui(13), dark, TextAlign::Trailing);
 		y += 34;
 	}
 
@@ -430,10 +446,10 @@ struct Report {
 		float w, h;
 		if (!reportCircuitSize(doc, page, w, h)) return;
 		if (count > 1) subheading(pageTitle(page));
-		need(220);
-		const float room = kPH - kMargin - kFooter - y;
+		const float room = kPH - 2 * kMargin - kFooter - pendingH();   // what a fresh page gives
 		const float s = std::min({ kContentW / w, room / h, 1.5f });
 		const float dw = w * s, dh = h * s, x = kMargin + (kContentW - dw) / 2;
+		need(dh);
 		if (rt) {
 			D2D1_MATRIX_3X2_F was;
 			rt->GetTransform(&was);
