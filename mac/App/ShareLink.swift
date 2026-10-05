@@ -1,5 +1,6 @@
 // File > Share Link…, and cedarlogic://open links coming in. The format is
-// ShareLinkCodec.swift's.
+// ShareLinkCodec.swift's. cedarlogic://sync#k=… links (a sync code, SYNC.md
+// 5.3) go to Settings > Sync, which previews the code and asks first.
 
 import SwiftUI
 
@@ -32,7 +33,12 @@ enum ShareLink {
     /// cedarlogic://open#c=<data>: the circuit comes in as a new one in Your
     /// Circuits, as File > Import does.
     static func open(_ url: URL) {
-        guard url.scheme?.lowercased() == "cedarlogic", let link = ShareCodec.parse(url.absoluteString) else { return }
+        guard url.scheme?.lowercased() == "cedarlogic" else { return }
+        if url.host?.lowercased() == "sync" {
+            SyncCenter.shared.openLink(url.absoluteString)
+            return
+        }
+        guard let link = ShareCodec.parse(url.absoluteString) else { return }
         do {
             let text = try ShareCodec.decode(link.data)
             guard text.contains("circuit") || text.contains("cedarlogic") else { throw ShareCodec.Failure(reason: "not a circuit") }
