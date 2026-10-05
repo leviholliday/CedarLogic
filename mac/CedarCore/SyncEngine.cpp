@@ -618,13 +618,14 @@ struct Engine::Impl {
 			}
 		}
 		{
-			// Stopped or destroyed with a QR code showing: its slot goes too (best effort; after
-			// quitting() it already went, and nothing more is sent).
+			// Stopped or destroyed with a QR code showing: nothing goes over the network from here.
+			// If destroy gave up waiting and let this thread go, the host may be gone, and an
+			// offline machine would wait on quit; the slot expires in 10 minutes anyway.
+			// (quitting() already deleted it, within its bounded step.)
 			std::lock_guard<std::mutex> lock(mu);
 			cancelPairLocked();
-			if (noMain.load() || orphaned) pairDeletes.clear();
+			pairDeletes.clear();
 		}
-		runPairDeletes();
 		std::lock_guard<std::mutex> lock(mu);
 		if (lockHeld && !orphaned) host.unlock();
 		lockHeld = false;
