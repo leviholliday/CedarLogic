@@ -19,6 +19,8 @@ namespace clsync {
 // ---- when to sync (§4.3) -------------------------------------------------------------------------
 
 void Scheduler::started(int64_t now) {
+	jitterSeed ^= (uint32_t)now ^ (uint32_t)(now >> 32);   // devices don't all back off in step
+	if (!jitterSeed) jitterSeed = 2463534242u;
 	startAt = now + 2 * kSecond;
 	lastInput = now;
 }
@@ -57,6 +59,7 @@ bool Scheduler::due(int64_t now, bool& flush, int64_t lazySince) {
 		flush = flushPending;
 		return true;
 	}
+	if (halted) return false;   // only Sync Now (or a restart) tries again
 	if (now < backoffUntil) return false;
 	if (retryPending) return true;
 	if (startAt && now >= startAt) return true;
@@ -80,6 +83,7 @@ int64_t Scheduler::nextWake(int64_t now, int64_t lazySince) const {
 	};
 	const int64_t gate = std::max(retryAfterUntil, now);
 	if (nowPending) return std::max(gate, now);
+	if (halted) return INT64_MAX;
 	const int64_t floor = std::max(gate, backoffUntil);
 	if (retryPending) at(floor);
 	at(startAt);
@@ -101,13 +105,14 @@ void Scheduler::cycleDone(int64_t now, const std::string& status, int64_t retryA
 	pollMs = std::max<int64_t>(60, pollSeconds) * kSecond;
 	heldRetryAt = held ? now + 5 * kSecond : 0;
 	if (lastChange <= cycleStart) firstChange = lastChange = 0;
+	halted = status == "halted";
 	if (status == "synced" || status == "full") {
 		failures = 0;
 		backoffUntil = retryAfterUntil = 0;
 		retryPending = false;
 		return;
 	}
-	if (status == "gone" || status == "off" || status == "stopped") {
+	if (status == "gone" || status == "off" || status == "stopped" || status == "halted") {
 		retryPending = false;
 		return;
 	}
@@ -374,7 +379,8 @@ struct Engine::Impl {
 		lazySincePub = core->state().lazySince;
 		{
 			std::lock_guard<std::mutex> lock(mu);
-			sched.cycleDone(clock.now(), core->status(), core->retryAfterMs(), core->pollSeconds(), core->heldLastPull());
+			sched.cycleDone(clock.now(), core->halted() ? "halted" : core->status(), core->retryAfterMs(), core->pollSeconds(),
+			                core->heldLastPull());
 		}
 		publishCore();
 		if (!noMain.load()) {
