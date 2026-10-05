@@ -160,7 +160,10 @@ void showYourCircuits(CircuitWindow* from) {
 		drawIcon(rt, 0xE895, D2D1::RectF(r.left, r.top, r.left + 24, r.bottom), 13, on ? accent : look.ink(0.45f));
 		if (!on) {
 			line->button = D2D1::RectF(0, 0, 0, 0);
-			drawText(rt, "Sync…", D2D1::RectF(r.left + 26, r.top, r.right - 8, r.bottom), 12.5f, look.ink(0.6f), TextAlign::Leading);
+			// Stopped (deleted from another device, or a year unused): say so (Settings says why); else a quiet way in.
+			const bool gone = st.kind == clsync::Status::Gone;
+			drawText(rt, gone ? "Sync stopped. Click for details." : "Sync…",
+			         D2D1::RectF(r.left + 26, r.top, r.right - 8, r.bottom), 12.5f, look.ink(gone ? 0.85f : 0.6f), TextAlign::Leading);
 			return;
 		}
 		const std::string text = syncapp::statusLine(st);
