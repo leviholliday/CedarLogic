@@ -61,6 +61,12 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   its hooks (`brew install openssl@3`); `ASAN=1`/`TSAN=1` for the
   sanitizers, `CL_SYNC_URL=<mock server>` to run the scenarios over HTTP
   too, `GATES=1` (after `build.sh`) to check the gate library's defaults
+- `sync-check.sh` -- the app's own sync hooks (`App/SyncHooks.swift`:
+  CryptoKit, Compression, URLSession, the 0600 secret file, flock) through
+  the engine's self-test, then, with the website's mock server
+  (`CL_SITE=<cedarlogic-site>` or found beside this checkout), the same over
+  HTTP and two real engines linking two libraries through it. The app
+  draws Settings > Sync and its sheets with `CedarLogic --render-sync <dir>`
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
   and top edges included), hover, tooltips, dragging, double-click to fill,
   focus mode's tab strip and full screen, PASS or FAIL for each
