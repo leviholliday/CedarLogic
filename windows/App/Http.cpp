@@ -6,6 +6,8 @@
 #include <winhttp.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cwctype>
 #include <mutex>
 
 namespace http {
