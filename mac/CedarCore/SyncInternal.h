@@ -30,6 +30,7 @@ constexpr int64_t kSecond = 1000, kMinute = 60 * kSecond, kHour = 60 * kMinute, 
 constexpr size_t kBatchItems = 50;               // write items per request
 constexpr size_t kBatchChars = 3000000;          // envelope characters per write request
 constexpr size_t kFetchIds = 50;
+constexpr size_t kUiStep = 20;                   // circuits or records handled per step on the UI thread (§4.12)
 extern const char* const kWebBase;               // https://cedarlogic.netlify.app/sync/
 extern const char* const kAppBase;               // cedarlogic://sync
 
@@ -226,6 +227,10 @@ struct BusyError : std::runtime_error {
 struct Stopped : std::runtime_error { Stopped() : std::runtime_error("stopped") {} };
 struct LibraryError : std::runtime_error { using std::runtime_error::runtime_error; };
 
+// Engines whose thread was still inside a host call when they were destroyed, and so were
+// left to finish (leaked). The C interface keeps its hook objects alive when this went up.
+int detachedEngines();
+
 // ---- The sync state (§2.5, §4.1) --------------------------------------------------------
 
 struct Sent {
@@ -363,6 +368,7 @@ private:
 		std::string rid, local;
 		int64_t ver;
 		std::string device;
+		int64_t seq = 0;   // the change-list entry, to hold the cursor before it
 	};
 
 	int rawApi(const Keys& k, const std::string& method, const std::string& path, const json::Value* body, json::Value& out,
@@ -394,7 +400,9 @@ private:
 	bool openFetched(const std::string& rid, int64_t ver, const std::string& data, Payload& p, std::string& why);
 	bool onRemoteUpdate(const std::string& rid, int64_t ver, int64_t updatedAt, const Payload& p);
 	bool onRemoteDelete(const std::string& rid, int64_t ver, const Payload& p, std::vector<Incoming>& incoming);
-	void incomingDeletes(std::vector<Incoming>& items);
+	// Asks (if it is many), then trashes; the seqs of the entries that couldn't be handled now.
+	std::vector<int64_t> incomingDeletes(std::vector<Incoming>& items);
+	void buildJoinIndex();
 	void onRemoteForgotten(const std::string& rid);
 	std::string createLocal(const Payload& p);
 	void setLocal(const std::string& local, const std::string& name, const std::string& cdl, const Payload& p);

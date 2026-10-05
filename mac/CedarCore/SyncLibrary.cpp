@@ -181,6 +181,9 @@ int64_t mtimeMs(const std::string& path) {
 
 bool setMtimeMs(const std::string& path, int64_t ms) {
 	using namespace std::chrono;
+	// A time from another device's payload: kept inside what every file system can hold (1970 to 3000).
+	if (ms < 0) ms = 0;
+	if (ms > 32503680000000LL) ms = 32503680000000LL;
 	const microseconds us(ms * 1000 + fileEpochOffsetUs());
 	const fs::file_time_type t(duration_cast<fs::file_time_type::duration>(us));
 	std::error_code ec;

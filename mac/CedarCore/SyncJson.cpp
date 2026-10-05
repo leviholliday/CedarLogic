@@ -264,6 +264,16 @@ void writeValue(std::string& o, const Value& v) {
 
 }  // namespace
 
+namespace {
+// A double from a file or a server as an int64 without undefined behaviour at the edges.
+int64_t toInt64(double n) {
+	if (!std::isfinite(n) || n >= 9.2e18 || n <= -9.2e18) return 0;
+	return (int64_t)n;
+}
+}  // namespace
+
+int64_t Value::i() const { return toInt64(n); }
+
 bool Value::isInt() const {
 	return type == Number && std::isfinite(n) && std::floor(n) == n && n >= 0 && n <= kMaxSafe;
 }
@@ -298,8 +308,8 @@ std::string Value::str(const std::string& key, const std::string& fallback) cons
 
 int64_t Value::integer(const std::string& key, int64_t fallback) const {
 	const Value* m = get(key);
-	if (!m || m->type != Number || !std::isfinite(m->n)) return fallback;
-	return (int64_t)m->n;
+	if (!m || m->type != Number || !std::isfinite(m->n) || m->n >= 9.2e18 || m->n <= -9.2e18) return fallback;
+	return toInt64(m->n);
 }
 
 bool Value::flag(const std::string& key, bool fallback) const {

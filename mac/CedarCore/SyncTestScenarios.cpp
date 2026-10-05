@@ -292,6 +292,7 @@ struct Client {
 	std::set<std::string> dirty, recent;
 	std::vector<std::pair<std::string, std::string>> replacedLog;
 	bool answerLocalDeletes = true, answerIncomingDeletes = true;
+	std::function<void()> onAskIncoming;   // runs while the person is being asked (the windows are still live)
 	bool reloadEachSync = true;
 	int made = 0;
 	int64_t changesLimit = 0;
@@ -341,6 +342,7 @@ struct Client {
 		};
 		h.askIncomingDeletes = [this](int n, const std::string&) {
 			asked.emplace_back("incoming-deletes", n);
+			if (onAskIncoming) onAskIncoming();
 			return answerIncomingDeletes;
 		};
 		h.held = [this](const std::string& local, bool runtimeOnly) {
@@ -1402,6 +1404,98 @@ void s26_library_restored_from_a_backup(Ctx& x) {
 	CHECK(a.anyNotice("restored from a backup"));
 }
 
+// ---- found in review (not in the design's list) ----
+
+// A window held back the record a joining device's circuit matches: the circuit isn't sent as a
+// new one meanwhile, so the join never doubles it.
+void r01_join_held_by_a_window_sends_no_duplicates(Ctx& x) {
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
+	Client &a = w[0], &b = w[1];
+	a.create("Open", cdlWith(20));
+	const std::string lb = b.create("Open", cdlWith(20));
+	b.create("Mine", cdlWith(30));
+	Preview pv;
+	const std::string code = a.turnOn();
+	a.sync();
+	b.link(code, pv);
+	b.recent.insert(lb);   // input in the last minute: the match is held
+	b.sync();
+	CHECK(w.circuitsOnServer(a, x.cr) == 1 && b.mapped(lb).empty());
+	b.recent.clear();
+	b.sync();
+	a.sync();
+	CHECK(w.circuitsOnServer(a, x.cr) == 2 && !b.mapped(lb).empty());
+	CHECK(a.names() == V({ "Mine", "Open" }) && b.names() == V({ "Mine", "Open" }) && sameEverywhere({ &a, &b }));
+}
+
+// The push on the way out waits for a join, and never sends deletes for a restored library.
+void r02_quitting_push_waits_for_a_join_and_a_restored_library(Ctx& x) {
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
+	Client &a = w[0], &b = w[1];
+	a.create("One", cdlWith(20));
+	a.create("Two", cdlWith(21));
+	b.create("Mine", cdlWith(30));
+	Preview pv;
+	const std::string code = a.turnOn();
+	a.sync();
+	b.link(code, pv);
+	b.core->syncPushOnly();   // quitting in the middle of the join
+	CHECK(w.circuitsOnServer(a, x.cr) == 2);
+	b.sync();
+	a.sync();
+	CHECK(w.circuitsOnServer(a, x.cr) == 3 && sameEverywhere({ &a, &b }));
+	// A's library comes back from a backup that lacks "One": its folder is missing, its id is new.
+	a.vanish(a.byName("One")[0]);
+	files::writeAtomic(files::join(a.root, ".sync-library-id"), std::string(32, 'a') + "\n");
+	a.core->syncPushOnly();
+	int tombstones = 0;
+	for (const auto& kv : w.recs(a))
+		if (kv.second.deleted) tombstones++;
+	CHECK(tombstones == 0);
+	a.sync();   // the normal cycle re-joins instead: "One" comes back
+	CHECK(a.names() == V({ "Mine", "One", "Two" }) && w.circuitsOnServer(a, x.cr) == 3);
+}
+
+// The person may take a while to answer "move them to Recently Deleted": a window that got edits
+// meanwhile keeps its circuit, and the cursor stays before it.
+void r03_incoming_deletes_leave_a_window_that_got_edits_while_asking(Ctx& x) {
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
+	Client &a = w[0], &b = w[1];
+	for (int i = 0; i < 12; i++) a.create("C" + std::to_string(i), cdlWith(20 + i));
+	Preview pv;
+	const std::string code = a.turnOn();
+	a.sync();
+	b.link(code, pv);
+	b.sync();
+	for (int i = 0; i < 10; i++) a.remove(a.byName("C" + std::to_string(i))[0]);
+	a.sync();
+	const std::string c0 = b.byName("C0")[0];
+	b.onAskIncoming = [&] { b.dirty.insert(c0); };
+	b.sync();
+	CHECK(b.asked.size() == 1 && b.names() == V({ "C0", "C10", "C11" }));
+	CHECK(b.state().cursor < w.seq(b));
+	b.dirty.clear();
+	b.sync();
+	CHECK(b.names() == V({ "C10", "C11" }) && b.state().cursor == w.seq(b));
+}
+
+// A deletion whose base is unknown (a restored library) still writes a tombstone readers accept.
+void r04_tombstone_without_a_known_base_is_readable(Ctx&) {
+	const std::string unknown;
+	Payload p;
+	CHECK(readPayload(tombstoneJson(1000, "d", "5f0c2a9e7d3b41c8a6e2f1b0c9d8e7a6", &unknown, &unknown), p).empty());
+	CHECK(p.kind == "deleted" && !p.hasBase);
+	const std::string h(64, 'a');
+	CHECK(readPayload(tombstoneJson(1000, "d", "5f0c2a9e7d3b41c8a6e2f1b0c9d8e7a6", &h, &h), p).empty() && p.hasBase);
+	CHECK(readPayload(circuitJson("N", "c", 1000, "d", "5f0c2a9e7d3b41c8a6e2f1b0c9d8e7a6", -1, &unknown, &unknown), p).empty() &&
+	      !p.hasBase);
+	// Numbers from a server or a file that don't fit in 64 bits are no integers, not undefined behaviour.
+	json::Value v;
+	CHECK(json::parse("{\"a\":1e300,\"b\":-1e300,\"c\":12}", v));
+	CHECK(v.integer("a", 7) == 7 && v.integer("b", 8) == 8 && v.integer("c", 9) == 12);
+	CHECK(v.get("a")->i() == 0 && !v.get("a")->isInt());
+}
+
 void s30_newer_payload_is_left_alone(Ctx& x) {
 	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
@@ -1833,6 +1927,11 @@ void scenarioTests(Crypto& cr, const std::string& tempDir, Report& report, Host*
 		{ "s24_clean_window_reloads_runtime_change_waits_for_input", s24_clean_window_reloads_runtime_change_waits_for_input, true },
 		{ "s25_mass_delete_here_asks_first", s25_mass_delete_here_asks_first, true },
 		{ "s26_library_restored_from_a_backup", s26_library_restored_from_a_backup, true },
+		{ "r01_join_held_by_a_window_sends_no_duplicates", r01_join_held_by_a_window_sends_no_duplicates, true },
+		{ "r02_quitting_push_waits_for_a_join_and_a_restored_library", r02_quitting_push_waits_for_a_join_and_a_restored_library, true },
+		{ "r03_incoming_deletes_leave_a_window_that_got_edits_while_asking",
+		  r03_incoming_deletes_leave_a_window_that_got_edits_while_asking, true },
+		{ "r04_tombstone_without_a_known_base_is_readable", r04_tombstone_without_a_known_base_is_readable, false },
 		{ "s30_newer_payload_is_left_alone", s30_newer_payload_is_left_alone, true },
 		{ "s31_join_rule_only_when_joining", s31_join_rule_only_when_joining, true },
 		{ "s32_lost_answer_then_another_device_builds_on_it", s32_lost_answer_then_another_device_builds_on_it, true },
