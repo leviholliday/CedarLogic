@@ -145,10 +145,10 @@ public:
 		clsync::WindowState st;
 		if (CircuitWindow* w = windowForFolder(folderId)) {
 			st.open = true;
-			// Unsaved work, or something open over the window (a dialog, Your
-			// Circuits, a list): that code is waiting on this circuit as it is, so
-			// a change from elsewhere waits for it.
-			st.dirty = w->isDirty() || !IsWindowEnabled(w->window());
+			// Unsaved work, a drag or a gate on the pointer, or something open over
+			// the window (a dialog, Your Circuits, a list): that code is waiting on
+			// this circuit as it is, so a change from elsewhere waits for it.
+			st.dirty = w->isDirty() || w->busyEditing() || !IsWindowEnabled(w->window());
 			st.lastInputAt = w->lastInputMs();
 		}
 		return st;
@@ -499,7 +499,8 @@ void openLink(HWND parent, const std::string& link) {
 		if (!askConfirm(parent, "This PC syncs with another code",
 		                "Switch to this one? Circuits here stay; they’ll be added to the other synced circuits.", "Switch", "Cancel"))
 			return;
-		S().engine->turnOff(false);
+		// (This PC leaves the other code only when the person presses Link, after
+		// the preview: the engine switches then. Cancelling there leaves sync as it was.)
 	}
 	haveCode(parent, link, true);
 }
