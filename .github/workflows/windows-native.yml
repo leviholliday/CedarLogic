@@ -124,6 +124,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item CedarLogic-Windows-Setup-${{ matrix.arch }}.exe
 
+      # Sync (docs/SYNC.md): CNG's SHA-256, HMAC and AES-256-GCM against the
+      # standards' answers, the code kept with DPAPI, the lock, the URL rules,
+      # then the engine's own self-test -- the design's test vectors (codes,
+      # keys, envelopes, the structure digest) and its scenarios on an
+      # in-process server -- all with the hooks the app uses. (Against the
+      # mock server too, by hand: --sync-test --server http://localhost:8787/api/sync/v1.)
+      # New and not yet seen on a real Windows, so for now it doesn't hold the
+      # zips back (take continue-on-error off once it has passed).
+      - name: Sync test
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: timeout 300 package/CedarLogic/CedarLogic.exe --sync-test | tee sync-test.log
+
       # Start the packaged app, open a circuit and take a picture of the whole
       # window: catches anything the zip forgot, and shows what it looks like.
       - name: Smoke test

@@ -72,7 +72,7 @@ if(CL_BUILD_APP)
 	configure_file(res/CedarLogic.rc.in "${CMAKE_CURRENT_BINARY_DIR}/CedarLogic.rc" @ONLY)
 	add_executable(CedarLogic WIN32 ${CL_APP_SOURCES} "${CMAKE_CURRENT_BINARY_DIR}/CedarLogic.rc")
 	target_include_directories(CedarLogic PRIVATE App)
-	target_link_libraries(CedarLogic PRIVATE CedarCore windowscodecs ole32 comctl32 comdlg32 shell32 shlwapi dwmapi uxtheme winhttp winmm imm32 dxguid uuid gdi32 user32)
+	target_link_libraries(CedarLogic PRIVATE CedarCore windowscodecs ole32 comctl32 comdlg32 shell32 shlwapi dwmapi uxtheme winhttp winmm imm32 dxguid uuid gdi32 user32 bcrypt crypt32)
 	execute_process(COMMAND git -C "${ROOT}" rev-parse HEAD
 	                OUTPUT_VARIABLE CL_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
 	                RESULT_VARIABLE CL_GIT_RC ERROR_QUIET)

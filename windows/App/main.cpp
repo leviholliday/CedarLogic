@@ -14,6 +14,7 @@
 #include "Recovery.h"
 #include "ShareLink.h"
 #include "Shortcuts.h"
+#include "SyncPlatform.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
 #include "Updater.h"
@@ -680,6 +681,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			while (i + 1 < argc && paths.size() < 3) paths.push_back(U(argv[++i]));
 			std::string report;
 			const bool ok = sharelink::runSelfTest(report, paths);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
+		if (a == "--sync-test") {   // [--server <url>]: the sync engine's checks (SyncPlatform.h)
+			std::string server;
+			if (i + 2 < argc && U(argv[i + 1]) == "--server") { server = U(argv[i + 2]); i += 2; }
+			std::string report;
+			const bool ok = syncplat::runSelfTest(report, server);
 			writeOut(report);
 			return ok ? 0 : 1;
 		}
