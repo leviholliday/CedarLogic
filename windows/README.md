@@ -90,7 +90,7 @@ CI makes two ways to get it, for each processor (x64 and ARM64):
   and the settings. A newer installer installs over an older one; while
   CedarLogic runs, it asks for it to be closed first.
 
-      ISCC /DAppVersion=0.1.0 /DArch=x64 windows\installer\CedarLogic.iss
+      ISCC /DAppVersion=0.4.0 /DArch=x64 windows\installer\CedarLogic.iss
 
   (from the repo's root, after packaging `package\CedarLogic` as CI does;
   the version is the CMake project's).

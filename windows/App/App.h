@@ -31,7 +31,7 @@
 
 #define CL_APP_NAME "CedarLogic"
 #ifndef CL_VERSION
-#define CL_VERSION "0.1"
+#define CL_VERSION "0.4.0"
 #endif
 
 // ---- Settings ------------------------------------------------------------------

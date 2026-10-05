@@ -6,7 +6,7 @@
 ; uninstaller in Settings > Apps. The app's own updates keep working there: the folder is
 ; the user's, and they replace the files beside the exe as in the zip.
 ;
-;   ISCC /DAppVersion=0.1.0 /DArch=x64 windows\installer\CedarLogic.iss
+;   ISCC /DAppVersion=0.4.0 /DArch=x64 windows\installer\CedarLogic.iss
 ;
 ; Arch is x64 or ARM64. AppFiles, the folder with CedarLogic.exe and res,
 ; is package\CedarLogic at the repo's root unless given (where CI makes the
@@ -19,7 +19,7 @@
 ; and InstallDir tells the app it was installed.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.4.0"
 #endif
 #ifndef Arch
   #define Arch "x64"

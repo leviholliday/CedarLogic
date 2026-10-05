@@ -32,7 +32,7 @@ std::string syncDir();
 std::string serverBase();
 // The computer's name (the physical DNS host name), at most 64 characters.
 std::string deviceName();
-// "windows/0.1.0+1a2b3c4", for x-cedarlogic-client.
+// "windows/0.4.0+1a2b3c4", for x-cedarlogic-client.
 std::string clientName();
 
 // The code, kept for this user only (DPAPI) in `dir`\secret.dpapi.
