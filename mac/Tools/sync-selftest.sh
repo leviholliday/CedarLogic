@@ -11,6 +11,7 @@
 #                                            also against the mock server (cedarlogic-site
 #                                            scripts/sync-mock-server.mjs)
 #   ONLY=s26 mac/Tools/sync-selftest.sh      just the checks whose name contains s26
+#   CAPI=1 mac/Tools/sync-selftest.sh        through the C interface (cl_sync_self_test) with C hooks
 #   GATES=1 mac/Tools/sync-selftest.sh       also: the core's gate library (res/cl_gatedefs.xml) gives
 #                                            the digest the same defaults as CedarLogic Online
 #                                            (Mac, after mac/build.sh)
@@ -45,6 +46,7 @@ trap 'rm -rf "$TMP"' EXIT
 ARGS=("$TMP")
 [ -n "${CL_SYNC_URL:-}" ] && ARGS+=(--server "$CL_SYNC_URL")
 [ -n "${ONLY:-}" ] && ARGS+=(--only "$ONLY")
+[ "${CAPI:-0}" = 1 ] && ARGS+=(--c-api)
 status=0
 "$OUT/$NAME" "${ARGS[@]}" | tee "$OUT/$NAME.log" | grep -v '^PASS' || true
 tail -1 "$OUT/$NAME.log" | grep -q ' 0 failed' || status=1
