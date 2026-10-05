@@ -6,11 +6,14 @@
 #include "Picker.h"
 #include "Dialogs.h"
 #include "Library.h"
+#include "SyncApp.h"
 #include "Window.h"
 
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <map>
+#include <memory>
 
 using namespace picker;
 
@@ -42,11 +45,17 @@ void showYourCircuits(CircuitWindow* from) {
 	p.rows = [&](const std::string& query) {
 		const std::string q = lowerCase(query);
 		const std::vector<std::string> open = openIDs();
+		// A circuit sync can't keep says so on its second line ("Too big to sync (over 512 KB)").
+		std::map<std::string, std::string> problems;
+		for (const auto& pr : syncapp::status().problems) problems[pr.first] = pr.second;
 		std::vector<Row> out;
 		for (const library::Item& it : all) {
 			if (!q.empty() && lowerCase(it.name).find(q) == std::string::npos) continue;
 			const int n = library::gateCount(it.circuit());
-			out.push_back({ it.id, it.name, strf("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified),
+			auto problem = problems.find(it.id);
+			out.push_back({ it.id, it.name,
+			                problem != problems.end() ? problem->second
+			                                          : strf("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified),
 			                std::find(open.begin(), open.end(), it.id) != open.end() ? "OPEN" : "" });
 		}
 		p.emptyText = all.empty() ? "Nothing here yet." : "No circuits match.";
@@ -138,7 +147,53 @@ void showYourCircuits(CircuitWindow* from) {
 		}
 		return false;
 	};
+	// The sync line under the list: how sync is doing and Sync Now, or a quiet
+	// way into Settings > Sync while it's off.
+	struct SyncLine { D2D1_RECT_F button = D2D1::RectF(0, 0, 0, 0); };
+	auto line = std::make_shared<SyncLine>();
+	p.footerHeight = 28;
+	p.footer = [line](ID2D1RenderTarget* rt, const D2D1_RECT_F& r) {
+		const Look look{ prefs().dark };
+		const D2D1_COLOR_F accent = chrome().accent();
+		const bool on = syncapp::enabled();
+		const clsync::Status st = syncapp::status();
+		drawIcon(rt, 0xE895, D2D1::RectF(r.left, r.top, r.left + 24, r.bottom), 13, on ? accent : look.ink(0.45f));
+		if (!on) {
+			line->button = D2D1::RectF(0, 0, 0, 0);
+			drawText(rt, "Sync…", D2D1::RectF(r.left + 26, r.top, r.right - 8, r.bottom), 12.5f, look.ink(0.6f), TextAlign::Leading);
+			return;
+		}
+		const std::string text = syncapp::statusLine(st);
+		const std::string notice = syncapp::recentNotice();
+		const float bw = std::max(84.0f, textWidth("Sync Now", 12) + 28), bh = 24;
+		line->button = D2D1::RectF(r.right - bw, r.top + (r.bottom - r.top - bh) / 2, r.right, r.top + (r.bottom - r.top - bh) / 2 + bh);
+		drawText(rt, notice.empty() ? text : notice, D2D1::RectF(r.left + 26, r.top, line->button.left - 10, r.bottom), 12,
+		         st.kind == clsync::Status::Error || st.kind == clsync::Status::Full ? look.ink(0.85f) : look.ink(0.6f), TextAlign::Leading);
+		fillRound(rt, line->button, 7, look.ink(0.07f));
+		strokeRound(rt, line->button, 7, look.ink(0.10f));
+		drawText(rt, "Sync Now", line->button, 12, look.ink(), TextAlign::Center);
+	};
+	p.onFooterClick = [line](Picker& picker, float x, float y) {
+		if (inRect(line->button, x, y)) {
+			syncapp::syncNow();
+			return;
+		}
+		// The line itself: Settings, on its Sync page.
+		setPreferencesPage(5);
+		showPreferencesDialog(picker.hwnd);
+		picker.redraw();
+	};
+	// Circuits that came or went, and how sync is doing, as it happens.
+	const int listener = syncapp::listen([&](syncapp::Event e) {
+		if (e == syncapp::Event::Library) {
+			all = library::items();
+			p.reload();
+		} else {
+			p.reload();   // (the problems under the names)
+		}
+	});
 	p.run(from->window());
+	syncapp::unlisten(listener);
 	if (!windowAlive(from)) from = nullptr;
 	if (!toOpen.empty()) openCircuit(toOpen, from);
 	else if (import) chooseAndOpen(from);
@@ -172,8 +227,11 @@ void showVersionHistory(CircuitWindow* window) {
 		std::vector<Row> out;
 		for (size_t i = 0; i < versions.size(); i++) {
 			const int n = library::gateCount(versions[i].path);
+			// What sync kept it for ("From Levi's iPhone"), else how long ago.
+			const std::string why = versions[i].note.substr(0, versions[i].note.find(" · "));
 			out.push_back({ versions[i].path, library::friendlyTime(versions[i].time),
-			                strf("%d gate%s · ", n, n == 1 ? "" : "s") + library::agoText(versions[i].time), i == 0 ? "NEWEST" : "" });
+			                strf("%d gate%s · ", n, n == 1 ? "" : "s") + (why.empty() ? library::agoText(versions[i].time) : why),
+			                i == 0 ? "NEWEST" : "" });
 		}
 		return out;
 	};

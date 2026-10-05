@@ -81,6 +81,11 @@ public:
 	std::function<bool(Picker&, UINT vk, bool ctrl)> onKey;
 	std::function<void(ID2D1RenderTarget*, const D2D1_RECT_F&)> preview;
 	std::function<void(Picker&)> onSelect;
+	// A strip under the list, above the buttons (Your Circuits' sync line):
+	// drawn in points inside its rectangle, and told of clicks in it.
+	float footerHeight = 0;
+	std::function<void(ID2D1RenderTarget*, const D2D1_RECT_F&)> footer;
+	std::function<void(Picker&, float x, float y)> onFooterClick;
 
 	std::vector<Row> shown;
 	int selection = 0;
@@ -186,9 +191,14 @@ private:
 	float top() const { return kMargin + 34 + 44 + (search ? 44 : 0); }
 	D2D1_RECT_F listRect() const {
 		const float w = clientW(), h = clientH();
-		if (listWidth > 0 && listOnLeft) return D2D1::RectF(kMargin - 8, top(), kMargin + listWidth, h - kMargin - 30 - 18);
+		const float bottom = h - kMargin - 30 - 18 - footerHeight;
+		if (listWidth > 0 && listOnLeft) return D2D1::RectF(kMargin - 8, top(), kMargin + listWidth, bottom);
 		const float left = listWidth > 0 ? w - kMargin - listWidth : kMargin - 8;
-		return D2D1::RectF(left, top(), w - kMargin + 8, h - kMargin - 30 - 18);
+		return D2D1::RectF(left, top(), w - kMargin + 8, bottom);
+	}
+	D2D1_RECT_F footerRect() const {
+		const float top = clientH() - kMargin - 30 - 18 - footerHeight + 6;
+		return D2D1::RectF(kMargin, top, clientW() - kMargin, top + footerHeight);
 	}
 	void clampScroll() {
 		const D2D1_RECT_F l = listRect();
@@ -290,6 +300,8 @@ private:
 		if (shown.empty())
 			drawText(rt, emptyText, D2D1::RectF(l.left, l.top + 30, l.right, l.top + 60), 13, look.ink(0.55f), TextAlign::Center);
 		rt->PopAxisAlignedClip();
+
+		if (footer && footerHeight > 0) footer(rt, footerRect());
 
 		// The buttons along the bottom.
 		buttons.clear();
@@ -414,6 +426,10 @@ private:
 				press(100 + (int)rightButtons.size() - 1);
 			return true;
 		case WM_LBUTTONUP: {
+			if (footer && footerHeight > 0 && onFooterClick && inRect(footerRect(), x, y)) {
+				onFooterClick(*this, x, y);
+				return true;
+			}
 			const int b = buttonAt(x, y);
 			if (b >= 0) press(buttons[b].id);
 			return true;
