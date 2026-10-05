@@ -31,6 +31,12 @@ const float NEAR_PIN = 5.0f;        // brushing a pin that isn't ours
 const float RELAXED_WALL = 60.0f;   // last-ditch: through a gate body
 const float HISTORY_STEP = 2.0f;    // added to a contested node each pass
 const float CENTER = 0.06f;         // tie-break: jogs halfway between the ends
+// ...on connections up to this long (world units, along x plus y). The price
+// grows with the distance from the middle, so on a wire across a big page it
+// stopped being a tie-break: up to 18 a step, three times the wire's length,
+// worth more than every crossing on the way -- and the search, paying it
+// everywhere, combed the whole window. Past this, crossings and bends decide.
+const float CENTER_SPAN = 128.0f;
 const int PASSES = 6;
 const size_t MAX_NODES = 1500000;
 // Work limits, in search steps (nodes taken off the queue: about 0.1 us
@@ -124,6 +130,7 @@ private:
 	std::vector<int> treeNodes;
 	float tx0 = 0, tx1 = 0, ty0 = 0, ty1 = 0;
 	float cx = 0, cy = 0;   // middle of the connection being searched
+	bool centering = true;  // ...and whether to steer its jogs there
 	int wx0 = 0, wx1 = 0, wy0 = 0, wy1 = 0;   // search window, node indices
 	bool windowIsAll = false;
 	size_t budget = 0;     // search steps left for this connection
@@ -324,8 +331,9 @@ float Router::moveCost(int k, int from, int arrived, int d, int to, bool goal, b
 	}
 	// Among otherwise equal routes, run the jog down the middle: a vertical
 	// run pays for its distance from the middle x, a horizontal one from the
-	// middle y. Small enough never to outweigh a bend.
-	c += CENTER * (h ? std::fabs(ys[iyOf(to)] - cy) : std::fabs(xs[ixOf(to)] - cx)) / in.step
+	// middle y. Small enough never to outweigh a bend -- on a connection of
+	// ordinary length (see CENTER_SPAN).
+	if (centering) c += CENTER * (h ? std::fabs(ys[iyOf(to)] - cy) : std::fabs(xs[ixOf(to)] - cx)) / in.step
 	     * (h ? std::fabs(xs[ixOf(to)] - xs[ixOf(from)]) : std::fabs(ys[iyOf(to)] - ys[iyOf(from)])) / in.step;
 	if (hug[to]) c += HUG_GATE;
 	if (nearPin[to] != -1 && nearPin[to] != k) c += NEAR_PIN;
@@ -427,6 +435,7 @@ bool Router::connect(int k, const PinInfo &p, bool relaxed, NetState &ns) {
 		const float sx = xs[ixOf(start)], sy = ys[iyOf(start)];
 		cx = (sx + std::min(std::max(sx, tx0), tx1)) / 2.0f;
 		cy = (sy + std::min(std::max(sy, ty0), ty1)) / 2.0f;
+		centering = (std::fabs(sx - cx) + std::fabs(sy - cy)) * 2.0f <= CENTER_SPAN;
 	}
 	// Search a window around the start and the tree first -- a wire hardly
 	// ever wanders far outside the box its ends make -- and widen it only when
@@ -617,12 +626,13 @@ GridOutput Router::run() {
 		} else sinceBetter++;
 		// A small page reroutes every net each pass, so early nets make room
 		// for later ones; a big one, once a full pass costs too much, only the
-		// nets still lying on another's line -- and stops when that has stopped
-		// helping.
+		// nets still lying on another's line -- and stops at the first pass
+		// that doesn't help (the history price climbs too slowly to shift a
+		// stuck one within the passes left).
 		if (full) {
 			if (overlaps == 0 && pass >= 1 && total >= lastCost - 1e-3f) break;
 			full = popsUsed + (popsUsed - popsBefore) <= FULL_PASS_POPS;
-		} else if (overlaps == 0 || sinceBetter >= 2) break;
+		} else if (overlaps == 0 || sinceBetter >= 1) break;
 		if (popsUsed >= TOTAL_POPS) break;
 		lastCost = total;
 		for (size_t k = 0; k < K; k++) {
