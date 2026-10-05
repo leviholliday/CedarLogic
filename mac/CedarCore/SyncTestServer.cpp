@@ -223,6 +223,10 @@ int FakeServer::write(Space& sp, const json::Value& writes, json::Value& out) {
 			results.push(r);
 			continue;
 		}
+		if (has) {
+			for (const auto& s2 : spaces)
+				if (&s2.second == &sp) history[s2.first + "/" + rid].push_back(cur->second);
+		}
 		sp.seq += 1;
 		sp.ghosts.erase(rid);
 		Rec rec;
@@ -261,6 +265,66 @@ int FakeServer::deleteSpace(const std::string& sid, const std::string& token, co
 	out = json::Value::object();
 	out.set("deleted", json::Value::boolean(true));
 	return 200;
+}
+
+bool FakeServer::tamper(const std::string& sid, const std::string& op, const std::string& id) {
+	if (op == "loseSpace") return spaces.erase(sid) > 0;
+	auto s = spaces.find(sid);
+	if (s == spaces.end()) return false;
+	Space& sp = s->second;
+	if (op == "rollback") {   // serves the newest older envelope as the current one
+		auto r = sp.recs.find(id);
+		auto h = history.find(sid + "/" + id);
+		if (r == sp.recs.end() || h == history.end()) return false;
+		const Rec* best = nullptr;
+		for (const Rec& o : h->second)
+			if (o.ver < r->second.ver && (!best || o.ver > best->ver)) best = &o;
+		if (!best) return false;
+		Rec old = *best;
+		sp.seq += 1;
+		old.seq = sp.seq;
+		old.at = clock.now();
+		old.deleted = false;
+		old.dev = false;
+		r->second = old;
+		return true;
+	}
+	if (op == "forgeTombstones") {   // flagged deleted at a higher ver, no sealed tombstone
+		for (auto& kv : sp.recs) {
+			if (!id.empty() && kv.first != id) continue;
+			sp.seq += 1;
+			kv.second.ver += 1;
+			kv.second.seq = sp.seq;
+			kv.second.deleted = true;
+		}
+		return true;
+	}
+	if (op == "forgePurge") {
+		sp.purgedSeq = sp.seq + 1;
+		sp.seq += 1;
+		sp.recs.clear();
+		return true;
+	}
+	if (op == "damage") {   // the last envelope byte flipped, at a higher ver
+		auto r = sp.recs.find(id);
+		if (r == sp.recs.end()) return false;
+		Bytes env;
+		unb64u(r->second.data, env);
+		if (env.empty()) return false;
+		env.back() ^= 1;
+		sp.seq += 1;
+		r->second.data = b64u(env);
+		r->second.ver += 1;
+		r->second.seq = sp.seq;
+		r->second.at = clock.now();
+		r->second.h = envelopeHash(crypto, env);
+		return true;
+	}
+	if (op == "resetSpace") {
+		sp = newSpace();
+		return true;
+	}
+	return false;
 }
 
 void FakeServer::cleanup() {

@@ -746,6 +746,10 @@ void Core::sync(bool flush) {
 	} catch (const Stopped&) {
 		status_ = "stopped";
 		save();
+	} catch (const std::exception& e) {
+		status_ = "error";
+		statusText_ = e.what();
+		save();
 	}
 }
 
@@ -826,6 +830,10 @@ bool Core::held(const std::string& local, bool runtimeOnly) {
 
 std::string Core::recNew(const std::string& rid, const std::string& local, int64_t ver, const std::string* name,
                          const std::string* cdl) {
+	if (joinIndexBuilt_)
+		joinCandidates_.erase(std::remove_if(joinCandidates_.begin(), joinCandidates_.end(),
+		                                     [&](const std::pair<std::string, LocalHashes>& c) { return c.first == local; }),
+		                      joinCandidates_.end());
 	RecState r;
 	r.local = local;
 	r.ver = ver;
@@ -943,6 +951,8 @@ std::map<std::string, json::Value> Core::fetchIds(std::vector<std::string> ids) 
 // ---- pull (§4.5) ---------------------------------------------------------------------------------------
 
 void Core::pull() {
+	joinIndexBuilt_ = false;
+	joinCandidates_.clear();
 	int64_t since = st.cursor;
 	std::vector<json::Value> entries;
 	json::Value page;
@@ -953,7 +963,8 @@ void Core::pull() {
 		bool restart = false;
 		for (int pages = 0;; pages++) {
 			if (pages > 100000) throw HttpError(500, "server_error", "too many pages");
-			api("GET", "/changes?since=" + std::to_string(s), nullptr, page);
+			api("GET", "/changes?since=" + std::to_string(s) + (opt.changesLimit > 0 ? "&limit=" + std::to_string(opt.changesLimit) : ""),
+			    nullptr, page);
 			const std::string epoch = page.str("epoch");
 			const int64_t seq = page.integer("seq"), purged = page.integer("purgedSeq");
 			if (page.get("pollSeconds") && page.get("pollSeconds")->isInt())
@@ -1102,6 +1113,8 @@ void Core::pull() {
 		st.hints.clear();
 	}
 	heldLastPull_ = !held.empty();
+	joinIndexBuilt_ = false;
+	joinCandidates_.clear();
 	st.applying = false;
 	save();
 }
@@ -1134,29 +1147,26 @@ bool Core::onRemoteUpdate(const std::string& rid, int64_t ver, int64_t updatedAt
 			it = st.records.find(rid);
 		} else {
 			std::string match;
-			if (st.joining) {
-				std::vector<std::string> all;
-				lib.list(all);   // (no folder yet: nothing to match)
-				std::vector<std::string> unmapped;
-				std::set<std::string> mappedSet;
-				for (const auto& kv : st.records) mappedSet.insert(kv.second.local);
-				for (const std::string& x : all)
-					if (!mappedSet.count(x)) unmapped.push_back(x);
-				const std::string ch = contentHash(crypto, p.name, p.cdl);
-				LocalHashes h;
-				for (const std::string& x : unmapped)
-					if (hashesOf(x, h) && h.ch == ch) { match = x; break; }
-				if (match.empty()) {
-					const std::string rSt = structureHash(p.cdl), nn = normalizeName(p.name);
-					for (const std::string& x : unmapped) {
-						std::string name, cdl;
-						int64_t m, c;
-						if (hashesOf(x, h) && h.st == rSt && lib.read(x, name, cdl, m, c) && normalizeName(name) == nn) {
-							match = x;
-							break;
-						}
-					}
+			if (st.joining) {   // the join rule (§4.8): the same content, else the same name and structure
+				if (!joinIndexBuilt_) {
+					joinIndexBuilt_ = true;
+					joinCandidates_.clear();
+					std::vector<std::string> all;
+					lib.list(all);   // (no folder yet: nothing to match)
+					std::set<std::string> mappedSet;
+					for (const auto& kv : st.records) mappedSet.insert(kv.second.local);
+					LocalHashes h;
+					for (const std::string& x : all)
+						if (!mappedSet.count(x) && hashesOf(x, h)) joinCandidates_.emplace_back(x, h);
 				}
+				const std::string ch = contentHash(crypto, p.name, p.cdl), rSt = structureHash(p.cdl);
+				auto pick = [&](const std::function<bool(const LocalHashes&)>& same) {
+					for (auto c = joinCandidates_.begin(); c != joinCandidates_.end(); ++c)
+						if (same(c->second)) return c->first;   // (mapped ones leave the list: recNew)
+					return std::string();
+				};
+				match = pick([&](const LocalHashes& h) { return h.ch == ch; });
+				if (match.empty()) match = pick([&](const LocalHashes& h) { return h.n == rN && h.st == rSt; });
 			}
 			if (!match.empty()) {
 				if (held(match, true)) return false;
@@ -1169,7 +1179,7 @@ bool Core::onRemoteUpdate(const std::string& rid, int64_t ver, int64_t updatedAt
 			}
 			const std::string local = createLocal(p);
 			recNew(rid, local, ver, &p.name, &p.cdl);
-			if (st.seen.count(rid) && !st.joining)
+			if (st.seen.count(rid) && !st.joining && !inRefetch(rid))   // (Bring Them Back is quiet)
 				note(q(p.name) + " was changed on " + orDevice(p.device) + " after it was deleted here, so it's back.");
 			return true;
 		}
@@ -1457,9 +1467,12 @@ void Core::push(bool flush) {
 			std::vector<std::pair<int64_t, std::string>> order;
 			for (const std::string& id : ids) order.emplace_back(lib.modified(id), id);
 			std::sort(order.begin(), order.end());
+			std::map<std::string, std::string> ridOf;
+			for (const auto& kv : st.records) ridOf.emplace(kv.second.local, kv.first);
 			for (const auto& o : order) {
 				const std::string& lid = o.second;
-				std::string rid = mappedRid(lid);
+				auto known = ridOf.find(lid);
+				std::string rid = known == ridOf.end() ? std::string() : known->second;
 				if (rid.empty()) {
 					rid = newUuid(crypto);
 					if (rid.empty()) throw HttpError(0, "crypto", "this computer couldn't make a record id");

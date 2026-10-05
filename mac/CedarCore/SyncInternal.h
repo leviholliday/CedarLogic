@@ -297,6 +297,7 @@ struct CoreOptions {
 	std::string appKey, client;
 	bool web = false;          // self-test only: a CedarLogic Online-like client (copies, no versions)
 	size_t batchItems = kBatchItems;
+	int64_t changesLimit = 0;  // tests: ask for pages of this many entries (0: the server's default)
 	GateDefaults gateDefaults;
 };
 
@@ -422,6 +423,8 @@ private:
 	int64_t retryAfter_ = 0, pollSeconds_ = 600, lastRetryAfter_ = 0;
 	bool full_ = false, quitting_ = false, saveFailed_ = false, libraryTouched_ = false, heldLastPull_ = false;
 	bool noticedWentBack_ = false;
+	bool joinIndexBuilt_ = false;                                      // the join rule's candidates, once a pull
+	std::vector<std::pair<std::string, LocalHashes>> joinCandidates_;
 	std::map<std::string, std::string> problems_;      // folder -> sentence
 	std::map<std::string, std::string> badRequest_;    // rid -> contentHash answered 400
 	std::map<std::string, std::string> structureCache_;

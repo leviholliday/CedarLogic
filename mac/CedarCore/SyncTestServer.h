@@ -51,6 +51,9 @@ public:
 	int putSpace(const std::string& sid, const std::string& token, const std::string& deleteHash, json::Value& out);
 	int deleteSpace(const std::string& sid, const std::string& token, const std::string& deleteToken, json::Value& out);
 	int write(Space& sp, const json::Value& writes, json::Value& out);
+	// Misbehaviour, as the mock server's /__mock/tamper: rollback, forgeTombstones, forgePurge,
+	// damage, resetSpace, loseSpace. False if there was nothing to do it to.
+	bool tamper(const std::string& sid, const std::string& op, const std::string& id);
 
 	Clock& clock;
 	Crypto& crypto;
@@ -58,6 +61,7 @@ public:
 	std::map<std::string, Auth> auth;
 	std::map<std::string, Space> spaces;
 	std::map<std::string, std::string> gone;   // sid -> deleted | expired
+	std::map<std::string, std::vector<Rec>> history;   // sid + "/" + id -> the record's earlier versions
 	int64_t changesLimit = 1000;               // page size cap (paging tests)
 	int failNext = 0, failStatus = 429;        // request-level failures to answer next
 	int64_t failRetryAfter = 120;
