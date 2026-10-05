@@ -162,6 +162,12 @@ struct Waiter {
 
 }  // namespace
 
+namespace {
+std::atomic<int> gDetached{ 0 };
+}  // namespace
+
+int detachedEngines() { return gDetached.load(); }
+
 struct Engine::Impl {
 	Config cfg;
 	Crypto& crypto;
@@ -274,7 +280,9 @@ struct Engine::Impl {
 		return w->value;
 	}
 
-	void publish(const std::string& status, const std::string& detail, int done = 0, int total = 0) {
+	// `onUi`: the caller is the UI thread already (load()), so the host is told directly --
+	// asking onMain from there would wait for a thread that is waiting for us.
+	void publish(const std::string& status, const std::string& detail, int done = 0, int total = 0, bool onUi = false) {
 		{
 			std::lock_guard<std::mutex> lock(mu);
 			pubStatus = status;
@@ -291,6 +299,10 @@ struct Engine::Impl {
 		}
 		if (noMain.load() || stopped.load()) return;
 		const Status s = statusNow();
+		if (onUi) {
+			host.statusChanged(s);
+			return;
+		}
 		try {
 			runMain([&] { host.statusChanged(s); });
 		} catch (const Stopped&) {
@@ -454,7 +466,7 @@ struct Engine::Impl {
 		if (!haveCode) {
 			core->reset();
 			if (core->deviceName().empty()) core->setDeviceName(cfg.defaultDeviceName);
-			publish("off", std::string());
+			publish("off", std::string(), 0, 0, true);
 			return;
 		}
 		const Keys k = keysForCode(crypto, code);
@@ -509,6 +521,7 @@ Engine::~Engine() {
 			// the network): it may not outlive what it points at, so it keeps its Impl.
 			d->th.detach();
 			d.release();
+			gDetached++;
 		}
 	}
 }
@@ -640,8 +653,11 @@ void Engine::link(const std::string& code, std::function<void(bool, std::string)
 			return;
 		}
 		std::string message;
-		Preview pv;
 		if (p->core->enabled()) {   // switching codes: this one leaves the other synced copy first
+			if (!p->core->link(canonical, message, false)) {   // (but not for a code that doesn't work)
+				p->finish(done, false, message);
+				return;
+			}
 			const std::string name = p->core->deviceName();
 			p->core->turnOff(false);
 			p->core->setDeviceName(name);
