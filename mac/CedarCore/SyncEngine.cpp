@@ -180,6 +180,7 @@ struct Engine::Impl {
 	std::condition_variable cv;
 	std::thread th;
 	bool threadRunning = false, threadExited = false, stopping = false, lockHeld = false, started = false;
+	bool orphaned = false;   // the Engine is gone and the thread was let go: it must not touch the host again (under mu)
 	std::atomic<bool> stopped{ false }, noMain{ false };
 	std::atomic<int64_t> lazySincePub{ 0 };   // the engine's lazySince, for appDeactivated
 	std::deque<std::function<void()>> ops;
@@ -435,9 +436,9 @@ struct Engine::Impl {
 			} catch (const std::exception&) {
 			}
 		}
-		if (lockHeld) host.unlock();
-		lockHeld = false;
 		std::lock_guard<std::mutex> lock(mu);
+		if (lockHeld && !orphaned) host.unlock();
+		lockHeld = false;
 		threadExited = true;
 		cv.notify_all();
 	}
@@ -510,8 +511,10 @@ Engine::~Engine() {
 	bool exited = true;
 	{
 		std::unique_lock<std::mutex> lock(d->mu);
-		if (d->threadRunning)
+		if (d->threadRunning) {
 			exited = d->cv.wait_for(lock, std::chrono::seconds(3), [this] { return d->threadExited; });
+			if (!exited) d->orphaned = true;   // (the thread's last step, under the same lock, sees it)
+		}
 	}
 	if (d->threadRunning) {
 		if (exited) {
