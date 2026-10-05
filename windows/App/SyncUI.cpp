@@ -320,7 +320,7 @@ void startPairing(const std::shared_ptr<HaveCodeState>& st) {
 		    st->form->refresh(st->picField);
 		    if (result == clsync::Engine::PairExpired) setPairStatus(*st, "This QR code expired.", "Show a New One");
 		    else if (text == "An answer came that couldn't be read.") setPairStatus(*st, text, "Show a New One");
-		    else if (text == "Can't reach the website. Check the connection, then try again.") setPairStatus(*st, "Can't reach the website.", "Try Again");
+		    else if (text == "Can't reach the website. Check the connection, then try again.") setPairStatus(*st, "Can’t reach the website.", "Try Again");
 		    else setPairStatus(*st, text, "Try Again");
 	    });
 }
@@ -371,7 +371,7 @@ bool haveCodeSheet(HWND parent, const std::string& prefill, bool run, const std:
 		(void)h;
 	};
 	st->picField = f.add(pic);
-	f.add(note("On a phone that syncs, open CedarLogic › Your Circuits › Sync › Add a Device and scan this. Or scan it with the phone's camera.", 68));
+	f.add(note("On a phone that syncs, open CedarLogic › Your Circuits › Sync › Add a Device and scan this. Or scan it with the phone’s camera.", 68));
 	FormField status = note(" ", 68);
 	status.lines = 2;   // (room for the button that sits at the end of its row)
 	st->statusField = f.add(status);
