@@ -509,7 +509,7 @@ bool noLoneSurrogates(const json::Value&) { return true; }   // the reader refus
 bool hex64(const json::Value* j) { return j && j->isString() && isHex(j->s, 64); }
 
 void putBase(std::string& o, const std::string* baseName, const std::string* baseCdl) {
-	if (!baseName || !baseCdl) return;
+	if (!baseName || !baseCdl || !isHex(*baseName, 64) || !isHex(*baseCdl, 64)) return;   // unknown ("") is no base
 	o += ",\"base\":{\"name\":" + json::quote(*baseName) + ",\"cdl\":" + json::quote(*baseCdl) + "}";
 }
 

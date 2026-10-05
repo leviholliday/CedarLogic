@@ -759,7 +759,16 @@ void Core::syncPushOnly() {
 	if (!on) return;
 	quitting_ = true;
 	try {
-		push(true);
+		// Only a device that is in step may send on its way out. In the middle of a join, a
+		// re-join or an apply, or after the library was replaced or restored, the next normal
+		// cycle must decide first: a push now would send duplicates, or deletes for circuits
+		// that are only missing from a restored folder.
+		bool inStep = st.gone.empty() && !st.joining && !st.applying && st.hints.empty();
+		if (inStep && !opt.web) {
+			const std::string id = lib.libraryId();
+			inStep = !id.empty() && id == st.libraryId && lib.libraryGen() == st.libraryGen;
+		}
+		if (inStep) push(true);
 		save();
 	} catch (const std::exception&) {
 		save();
@@ -1054,8 +1063,10 @@ void Core::pull() {
 		main([&] {
 			for (const auto& b : back) wentBack(b.first, b.second);
 		});
+	// The join rule's candidates (every unmapped local circuit, hashed) in short steps first.
+	if (st.joining && !opened.empty()) buildJoinIndex();
 	// Applied in short steps on the UI thread, the state saved after each.
-	const size_t kStep = 20;
+	const size_t kStep = kUiStep;
 	for (size_t at = 0; at < opened.size(); at += kStep) {
 		if (hooks.progress && st.joining && opened.size() > kStep) hooks.progress("bringing", (int)at, (int)opened.size());
 		main([&] {
@@ -1080,7 +1091,9 @@ void Core::pull() {
 					if (o.p.kind == "circuit") {
 						ok = onRemoteUpdate(rid, ver, o.e.integer("updatedAt"), o.p);
 					} else if (o.p.kind == "deleted") {
+						const size_t before = incoming.size();
 						ok = onRemoteDelete(rid, ver, o.p, incoming);
+						for (size_t q2 = before; q2 < incoming.size(); q2++) incoming[q2].seq = seq;
 					} else if (rid != st.device.id) {
 						st.devices[rid] = { o.p.device, o.p.lastSyncAt };
 					}
@@ -1099,7 +1112,9 @@ void Core::pull() {
 		});
 		save();
 	}
-	if (!incoming.empty()) incomingDeletes(incoming);
+	if (!incoming.empty())   // (one whose window has edits in it by the time the person answers stays, cursor held)
+		for (int64_t sq : incomingDeletes(incoming))
+			if (sq > 0) held.push_back(sq);
 	main([&] {
 		if (full) {
 			std::set<std::string> present;
@@ -1122,6 +1137,27 @@ void Core::pull() {
 	joinCandidates_.clear();
 	st.applying = false;
 	save();
+}
+
+// The join rule's candidates -- every local circuit not yet mapped, with its hashes -- built in short
+// steps on the UI thread, so linking a device with a big library doesn't freeze its windows.
+void Core::buildJoinIndex() {
+	if (joinIndexBuilt_) return;
+	std::vector<std::string> all;
+	std::set<std::string> mappedSet;
+	main([&] {
+		lib.list(all);
+		for (const auto& kv : st.records) mappedSet.insert(kv.second.local);
+	});
+	std::vector<std::pair<std::string, LocalHashes>> found;
+	for (size_t at = 0; at < all.size(); at += kUiStep)
+		main([&] {
+			LocalHashes h;
+			for (size_t k = at; k < std::min(all.size(), at + kUiStep); k++)
+				if (!mappedSet.count(all[k]) && hashesOf(all[k], h)) found.emplace_back(all[k], h);
+		});
+	joinCandidates_ = std::move(found);
+	joinIndexBuilt_ = true;
 }
 
 // ---- applying (§4.6) -------------------------------------------------------------------------------------
@@ -1303,7 +1339,8 @@ bool Core::onRemoteDelete(const std::string& rid, int64_t ver, const Payload& p,
 	return true;
 }
 
-void Core::incomingDeletes(std::vector<Incoming>& items) {
+std::vector<int64_t> Core::incomingDeletes(std::vector<Incoming>& items) {
+	std::vector<int64_t> stays;
 	int synced = 0;
 	main([&] {
 		for (const auto& kv : st.records)
@@ -1314,7 +1351,7 @@ void Core::incomingDeletes(std::vector<Incoming>& items) {
 		if (std::find(devs.begin(), devs.end(), i.device) == devs.end()) devs.push_back(i.device);
 	bool keep = false;
 	if (items.size() > 5 && 2 * (int)items.size() > synced) {
-		if (quitting_) return;
+		if (quitting_) return stays;
 		keep = hooks.askIncomingDeletes ? !hooks.askIncomingDeletes((int)items.size(), listWords(devs)) : false;
 	}
 	main([&] {
@@ -1327,6 +1364,11 @@ void Core::incomingDeletes(std::vector<Incoming>& items) {
 				addForce(i.rid);
 				continue;
 			}
+			// The person may have taken a while to answer: a window with edits in it by now is left alone.
+			if (held(i.local, false)) {
+				stays.push_back(i.seq);
+				continue;
+			}
 			std::string name, cdl;
 			int64_t m, c;
 			lib.read(i.local, name, cdl, m, c);
@@ -1334,6 +1376,7 @@ void Core::incomingDeletes(std::vector<Incoming>& items) {
 				trashLocal(i.local);
 			} catch (const LibraryError& x) {
 				libraryFailed_ = x.what();
+				stays.push_back(i.seq);
 				continue;
 			}
 			st.records.erase(it);
@@ -1346,6 +1389,7 @@ void Core::incomingDeletes(std::vector<Incoming>& items) {
 		}
 		if (hooks.libraryChanged) hooks.libraryChanged();
 	});
+	return stays;
 }
 
 void Core::onRemoteForgotten(const std::string& rid) {
@@ -1452,6 +1496,8 @@ void Core::push(bool flush) {
 		};
 		std::vector<Candidate> candidates;
 		std::vector<std::string> deleted;
+		std::vector<std::pair<int64_t, std::string>> order;
+		std::map<std::string, std::string> ridOf;
 		main([&] {
 			problems_.clear();
 			// Deleted here (not while joining or re-joining).
@@ -1469,16 +1515,21 @@ void Core::push(bool flush) {
 			// New or changed here, oldest first.
 			std::vector<std::string> ids;
 			lib.list(ids);
-			std::vector<std::pair<int64_t, std::string>> order;
 			for (const std::string& id : ids) order.emplace_back(lib.modified(id), id);
 			std::sort(order.begin(), order.end());
-			std::map<std::string, std::string> ridOf;
 			for (const auto& kv : st.records) ridOf.emplace(kv.second.local, kv.first);
-			for (const auto& o : order) {
-				const std::string& lid = o.second;
+		});
+		// Reading and hashing the circuits (the first time, every one of them) goes in short
+		// steps, so the person's windows keep answering.
+		for (size_t chunk = 0; chunk < order.size(); chunk += kUiStep) main([&] {
+			for (size_t k = chunk; k < std::min(order.size(), chunk + kUiStep); k++) {
+				const std::string& lid = order[k].second;
 				auto known = ridOf.find(lid);
 				std::string rid = known == ridOf.end() ? std::string() : known->second;
 				if (rid.empty()) {
+					// A join that hasn't finished (a window held a record back): a circuit that
+					// may be one of the synced ones is not sent as a new one.
+					if (st.joining) continue;
 					rid = newUuid(crypto);
 					if (rid.empty()) throw HttpError(0, "crypto", "this computer couldn't make a record id");
 					recNew(rid, lid, 0, nullptr, nullptr);
