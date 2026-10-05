@@ -181,9 +181,20 @@ std::string serverFromEnvironment() {
 	const char* u = getenv("CL_SYNC_URL");
 	const std::string url = u ? u : "";
 	if (url.compare(0, 8, "https://") == 0) return url;
-	if (url.compare(0, 17, "http://localhost:") == 0 || url.compare(0, 17, "http://localhost/") == 0 ||
-	    url.compare(0, 17, "http://127.0.0.1:") == 0 || url.compare(0, 17, "http://127.0.0.1/") == 0)
-		return url;
+	// http only for this computer: "localhost" or "127.0.0.1", then a port (digits) or the path --
+	// not "http://localhost:80@elsewhere/", whose host is elsewhere.
+	for (const char* host : { "http://localhost", "http://127.0.0.1" }) {
+		const size_t n = strlen(host);
+		if (url.compare(0, n, host) != 0) continue;
+		size_t i = n;
+		if (i < url.size() && url[i] == ':') {
+			i++;
+			const size_t digits = i;
+			while (i < url.size() && url[i] >= '0' && url[i] <= '9') i++;
+			if (i == digits) return std::string();
+		}
+		if (i == url.size() || url[i] == '/') return url;
+	}
 	return std::string();
 }
 
@@ -227,7 +238,15 @@ CLSyncEngine* cl_sync_create(const CLSyncHooks* hooks, const char* libraryRoot, 
 	return e;
 }
 
-void cl_sync_destroy(CLSyncEngine* e) { delete e; }
+void cl_sync_destroy(CLSyncEngine* e) {
+	if (!e) return;
+	const int before = detachedEngines();
+	e->engine.reset();   // stops and joins the thread (up to 3 s)
+	// A thread that was still inside a hook can't be stopped: it keeps using the hook objects
+	// (and the app's ctx), so they are left in place rather than freed under it.
+	if (detachedEngines() != before) return;
+	delete e;
+}
 
 void cl_sync_start(CLSyncEngine* e) {
 	if (e) e->engine->start();
