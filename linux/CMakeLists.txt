@@ -21,6 +21,10 @@ get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 find_package(PkgConfig REQUIRED)
 # Pango only for circuit labels the label face can't draw alone (CairoScene).
 pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo cairo-ft fontconfig freetype2 pangocairo)
+# Sync (docs/SYNC.md): libcrypto for the hashes and AES-GCM (no TLS from OpenSSL is used:
+# the curl program does the talking), GIO for deflate and the files.
+find_package(OpenSSL REQUIRED)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
 
 # ---- The engine --------------------------------------------------------------
 # The model, drawing, routing and loading/saving, shared with the wx app; the
@@ -71,7 +75,7 @@ if(CL_BUILD_APP)
 	set(CL_FEEDBACK_KEY "96611596304230a4c3c21e22b1b3e523" CACHE STRING "Sent with feedback so the site knows it's from the app")
 	target_compile_definitions(CedarLogic PRIVATE CL_FEEDBACK_URL="${CL_FEEDBACK_URL}" CL_FEEDBACK_KEY="${CL_FEEDBACK_KEY}")
 	find_package(Threads REQUIRED)
-	target_link_libraries(CedarLogic PRIVATE Threads::Threads)
+	target_link_libraries(CedarLogic PRIVATE Threads::Threads OpenSSL::Crypto PkgConfig::GIO)
 	target_compile_options(CedarLogic PRIVATE -Wall -Wno-deprecated-declarations -Wno-missing-field-initializers)
 	set_target_properties(CedarLogic PROPERTIES OUTPUT_NAME cedarlogic)
 
@@ -99,4 +103,11 @@ if(CL_BUILD_TOOLS)
 	add_executable(formula_check Tools/formula_check.cpp App/Formula.cpp)
 	target_include_directories(formula_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/App)
 	target_link_libraries(formula_check PRIVATE CedarCore)
+	# Sync's checks with the hooks the app uses (App/SyncPlatform.cpp: libcrypto, GIO's zlib and
+	# the curl program): the engine's self-test, the curl program's use, two libraries syncing.
+	find_package(Threads REQUIRED)
+	add_executable(sync_check Tools/sync_check.cpp App/SyncPlatform.cpp)
+	target_include_directories(sync_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/App)
+	target_compile_definitions(sync_check PRIVATE CL_VERSION="${PROJECT_VERSION}")
+	target_link_libraries(sync_check PRIVATE CedarCore OpenSSL::Crypto PkgConfig::GIO Threads::Threads)
 endif()
