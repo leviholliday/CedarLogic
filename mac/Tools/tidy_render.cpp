@@ -1,13 +1,15 @@
-// Headless Tidy Up: open a .cdl, tidy page 0 (mode 0 keeps the layout, 1
-// rearranges, -1 leaves it alone), save the result and draw it to a PNG in
-// the dark style, fitted.
-//   tidy_render <cl_gatedefs.xml> <in.cdl> <mode> <out.cdl|-> <out.png|-> [width height]
+// Headless Tidy Up: open a .cdl, tidy one page (mode 0 keeps the layout, 1
+// rearranges, -1 leaves it alone), print how long that took, save the result
+// and draw that page to a PNG in the dark style, fitted. `page` counts from 1
+// (default 1).
+//   tidy_render <cl_gatedefs.xml> <in.cdl> <mode> <out.cdl|-> <out.png|-> [width height [page]]
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "klsBBox.h"
 #include <CoreGraphics/CoreGraphics.h>
 #include <ImageIO/ImageIO.h>
 #include <CoreServices/CoreServices.h>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,8 +22,10 @@ int main(int argc, char** argv) {
 	CLDocument* doc = cl_document_open(argv[2], err, sizeof err);
 	if (!doc) { fprintf(stderr, "open failed: %s\n", err); return 1; }
 	const int mode = atoi(argv[3]);
+	const int page = argc > 8 ? atoi(argv[8]) - 1 : 0;
+	if (page < 0 || page >= cl_document_page_count(doc)) { fprintf(stderr, "no page %d\n", page + 1); return 1; }
 	if (getenv("CL_TIDY_DEBUG")) {
-		for (auto& e : *doc->page(0)->getGateList()) {
+		for (auto& e : *doc->page(page)->getGateList()) {
 			guiGate* g = e.second;
 			if (!g) continue;
 			klsBBox b = g->getSelectionBBox();
@@ -32,8 +36,10 @@ int main(int argc, char** argv) {
 		}
 	}
 	if (mode >= 0) {
-		if (!cl_edit_tidy_begin(doc, 0, mode)) printf("nothing to tidy\n");
+		const auto t0 = std::chrono::steady_clock::now();
+		if (!cl_edit_tidy_begin(doc, page, mode)) printf("nothing to tidy\n");
 		cl_edit_tidy_end(doc, true);
+		printf("tidy took %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
 	}
 	if (strcmp(argv[4], "-") != 0) {
 		FILE* f = fopen(argv[4], "w");
@@ -49,7 +55,7 @@ int main(int argc, char** argv) {
 		CGContextRef ctx = CGBitmapContextCreate(nullptr, W, H, 8, 0, cs, kCGImageAlphaPremultipliedLast);
 		CGContextTranslateCTM(ctx, 0, H);
 		CGContextScaleCTM(ctx, sf, -sf);
-		if (!cl_document_draw_fitted(doc, 0, ctx, W / sf, H / sf, 12, sf, CL_STYLE_DARK)) printf("empty page\n");
+		if (!cl_document_draw_fitted(doc, page, ctx, W / sf, H / sf, 12, sf, CL_STYLE_DARK)) printf("empty page\n");
 		CGImageRef img = CGBitmapContextCreateImage(ctx);
 		CFURLRef url = CFURLCreateFromFileSystemRepresentation(nullptr, (const UInt8*)argv[5], strlen(argv[5]), false);
 		CGImageDestinationRef dest = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, nullptr);
