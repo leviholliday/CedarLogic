@@ -103,7 +103,8 @@ chmod +x "$OUT"
 # libcrypto must resolve inside the AppImage, not on the host: take it apart and ask the
 # dynamic loader where the app's libcrypto comes from.
 CHECK=$(mktemp -d)
-( cd "$CHECK" && APPIMAGE_EXTRACT_AND_RUN=1 "$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")" --appimage-extract >/dev/null )
+OUTABS="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
+( cd "$CHECK" && APPIMAGE_EXTRACT_AND_RUN=1 "$OUTABS" --appimage-extract >/dev/null )
 RESOLVED=$(ldd "$CHECK/squashfs-root/usr/bin/cedarlogic" | awk '/libcrypto\.so/ { print $3; exit }')
 case "$RESOLVED" in
 	"$CHECK"/squashfs-root/*) ;;
