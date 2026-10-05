@@ -238,6 +238,7 @@ bool selfTest(Crypto& crypto, const std::string& tempDir, std::string& report, H
 	test::Report r;
 	if (const char* only = getenv("CL_SYNC_TEST_ONLY")) r.only = only;
 	if (r.only.empty() || r.only == "vectors") test::vectorTests(crypto, r);
+	if (r.only.empty() || r.only == "vectors" || r.only == "pair") test::pairVectorTests(crypto, r);
 	if (r.only != "vectors") test::scenarioTests(crypto, tempDir, r, httpOnly, serverBase);
 	r.text += std::to_string(r.passed) + " passed, " + std::to_string(r.failed) + " failed\n";
 	report = r.text;

@@ -51,6 +51,7 @@ std::vector<std::tuple<bool, std::string, std::string>> gateDefaultList(const st
 std::string fixture(const std::string& file);
 
 void vectorTests(Crypto&, Report&);
+void pairVectorTests(Crypto&, Report&);   // SYNC.md 11.11 (SyncTestPair.cpp)
 void engineTests(Crypto&, const std::string& tempDir, Report&);
 void scenarioTests(Crypto&, const std::string& tempDir, Report&, Host* httpOnly, const std::string& serverBase);
 
