@@ -104,8 +104,24 @@ std::string shape(const std::string& path) {
 	return out;
 }
 
+std::function<void()>& changedHook() {
+	static std::function<void()> hook;
+	return hook;
+}
+
+void changed() {
+	if (changedHook()) changedHook()();
+}
+
+// A version's note (sync writes one beside what it keeps: <stamp>.txt).
+std::string noteFor(const std::string& versionPath) {
+	if (versionPath.size() < 4) return std::string();
+	const std::string text = trim(readFile(versionPath.substr(0, versionPath.size() - 4) + ".txt"));
+	return text.substr(0, text.find('\n'));
+}
+
 // Old versions thin as the wx app's do: everything from the last day, then
-// one an hour for a week, then one a day.
+// one an hour for a week, then one a day. A note beside a version goes with it.
 void thin(const Item& item) {
 	std::set<std::string> kept;
 	const double t = now();
@@ -114,12 +130,18 @@ void thin(const Item& item) {
 		if (age < 86400) continue;
 		const std::string s = stamp(v.time);
 		const std::string bucket = age < 7 * 86400 ? "h" + s.substr(0, 11) : "d" + s.substr(0, 8);
-		if (kept.count(bucket)) DeleteFileW(W(v.path).c_str());
-		else kept.insert(bucket);
+		if (kept.count(bucket)) {
+			DeleteFileW(W(v.path).c_str());
+			if (v.path.size() > 4) DeleteFileW(W(v.path.substr(0, v.path.size() - 4) + ".txt").c_str());
+		} else {
+			kept.insert(bucket);
+		}
 	}
 }
 
 }  // namespace
+
+void setChangedHook(std::function<void()> hook) { changedHook() = std::move(hook); }
 
 std::string root() { return settingsDir() + "\\Library"; }
 
@@ -170,7 +192,9 @@ std::vector<Version> versions(const Item& item) {
 	do {
 		const std::string name = U(fd.cFileName);
 		if (name.empty() || name[0] == '.') continue;
-		out.push_back(Version{ item.versionsFolder() + "\\" + name, toSeconds(fd.ftLastWriteTime) });
+		Version v{ item.versionsFolder() + "\\" + name, toSeconds(fd.ftLastWriteTime), std::string() };
+		v.note = noteFor(v.path);
+		out.push_back(v);
 	} while (FindNextFileW(h, &fd));
 	FindClose(h);
 	std::sort(out.begin(), out.end(), [](const Version& a, const Version& b) { return a.time > b.time; });
@@ -196,6 +220,7 @@ bool create(const std::string& name, const std::string& text, const std::string&
 	makeDirs(out.versionsFolder());
 	if (!writeFile(out.folder + "\\name.txt", name) || !writeFile(out.circuit(), text)) return false;
 	if (!source.empty()) writeFile(out.folder + "\\source.txt", sourceMark(source, readFile(source)));
+	changed();
 	return true;
 }
 
@@ -210,14 +235,19 @@ bool imported(const std::string& file, Item& out) {
 	return false;
 }
 
-void rename(const Item& item, const std::string& name) { writeFile(item.folder + "\\name.txt", name); }
+void rename(const Item& item, const std::string& name) {
+	writeFile(item.folder + "\\name.txt", name);
+	changed();
+}
 
 bool moveToTrash(const Item& item) {
 	const std::string trash = root() + "\\.Trash";
 	CreateDirectoryW(W(trash).c_str(), nullptr);
 	std::string dest = trash + "\\" + item.id;
 	for (int n = 2; GetFileAttributesW(W(dest).c_str()) != INVALID_FILE_ATTRIBUTES; n++) dest = trash + "\\" + item.id + strf(" %d", n);
-	return MoveFileExW(W(item.folder).c_str(), W(dest).c_str(), 0) != FALSE;
+	const bool moved = MoveFileExW(W(item.folder).c_str(), W(dest).c_str(), 0) != FALSE;
+	if (moved) changed();
+	return moved;
 }
 
 // It saves itself every few seconds, so not every save is a version: the
@@ -252,6 +282,7 @@ bool noteSaved(const std::string& path, bool explicitSave) {
 	CopyFileW(W(path).c_str(), W(pending).c_str(), FALSE);
 	SetFileAttributesW(W(pending).c_str(), FILE_ATTRIBUTE_HIDDEN);
 	thin(item);
+	changed();
 	return kept;
 }
 
@@ -259,7 +290,9 @@ bool restore(const Item& item, const Version& v) {
 	makeDirs(item.versionsFolder());
 	CopyFileW(W(item.circuit()).c_str(), W(item.versionsFolder() + "\\" + stamp(now()) + ".cdl").c_str(), FALSE);
 	const std::string text = readFile(v.path);
-	return !text.empty() && writeFile(item.circuit(), text);
+	const bool ok = !text.empty() && writeFile(item.circuit(), text);
+	if (ok) changed();
+	return ok;
 }
 
 std::string friendlyTime(double t) {

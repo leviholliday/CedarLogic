@@ -11,6 +11,7 @@
 #define CL_WINDOWS_LIBRARY_H
 
 #include "App.h"
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,7 @@ struct Item {
 struct Version {
 	std::string path;
 	double time = 0;
+	std::string note;      // why it was kept, when sync kept it ("From Levi’s iPhone · edited 4 Oct 10:31"); else empty
 };
 
 std::string root();
@@ -55,6 +57,11 @@ bool restore(const Item& item, const Version& v);
 std::string friendlyTime(double t);
 std::string agoText(double t);
 int gateCount(const std::string& path);
+
+// Called after every change to Your Circuits made here (a circuit saved,
+// made, renamed, put in the trash or restored), so sync can look at it soon.
+// Not for what sync itself writes.
+void setChangedHook(std::function<void()> hook);
 
 // The circuit you were last in (reopened at launch).
 std::string lastCircuit();
