@@ -10,6 +10,9 @@
 #include <CoreGraphics/CoreGraphics.h>
 #include <stdbool.h>
 
+// Sync (SYNC.md): its own header, so the Linux and Windows apps can use it too.
+#include "CedarSync.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
