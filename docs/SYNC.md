@@ -2989,3 +2989,292 @@ Acceptance:
   for Online fixes it later; ship sync without it?
 - Should sync start closed on the website (`SYNC_CLOSED=1`) until the apps'
   betas ship, so Online's Your Circuits launches first without sync?
+
+---
+
+## 11. Adding a device by scanning (pairing)
+
+Added 2026-10-05 after the first phone test: typing a 28-symbol code on a new
+computer is a pain, and many school computers can't paste from a phone. A device
+that already syncs (usually a phone) can now **add** a new device by scanning a QR
+code the new device shows; the new device then gets the sync code without anyone
+typing it. The old direction (the new device scans or types the code shown by a
+device that syncs) stays as it is.
+
+Names: **D** is the device that wants to join (shows the QR code). **L** is the
+device that already syncs (scans it). The website only carries sealed messages.
+
+### 11.1 The flow on one page
+
+1. D (sync off) opens **I Have a Code…**. Beside the text field it shows a QR
+   code: "Scan with your phone". D made a fresh 16-byte **pairing secret** `P`,
+   a **read token** `R`, and stored a sealed **hello** (its device name) on the
+   website under `pairId` (derived from `P`). The QR code is the link
+   `https://cedarlogic.netlify.app/sync/#p=<P as a 28-symbol code>`.
+2. L scans it (in CedarLogic: Your Circuits › Sync › **Add a Device** › Scan; or
+   with the phone's own camera app, which opens the link). L reads the hello
+   and asks: **Add “Sam’s Windows PC”?** [Cancel] [Add].
+3. L seals an **answer** holding its sync code and stores it on the website.
+4. D, which has been polling, reads the answer (only D can: it needs `R`),
+   opens it, deletes the slot, and goes straight to the usual **preview and
+   Link** of §4.8 ("Link this PC? This code has 14 circuits from …").
+   The person presses **Link**. Done.
+
+If L doesn't sync yet, step 2 instead offers **Turn On Sync and Add** (11.7):
+one scan sets up sync between two new devices.
+
+### 11.2 The pairing secret and link
+
+- `P` = 16 bytes from the platform CSPRNG (as §1.1). One per QR code shown;
+  never stored on disk; forgotten when the sheet closes.
+- Text: `P` encoded exactly like a sync code (§1.2: 28 Crockford symbols with
+  the 12-bit checksum), the **pairing code**. It's never shown as text.
+- Link: `https://cedarlogic.netlify.app/sync/#p=<pairing code>` (uppercase, no
+  dashes). The QR code encodes this link (same encoder and settings as the sync
+  code's QR, `cl_sync_qr` / `CedarQR`).
+- Reading: any text with `#p=` followed by a pairing code (the https link, or a
+  bare `#p=…`) is a pairing link. `normalizeCode` rules apply to the 28 symbols
+  after `#p=`. Text with `#k=`, or a bare 28-symbol code, is a **sync code**,
+  never a pairing link.
+- `R` = 32 bytes from the CSPRNG; the **read token** is its base64url (no
+  padding, 43 chars). Never in the QR code; never leaves D except as a bearer
+  token to the website. The website keeps only `readHash` = lowercase hex
+  SHA-256 of those 43 ASCII characters.
+
+### 11.3 Keys
+
+HKDF-SHA256, IKM = `P`, salt = the 18 ASCII bytes `cedarlogic-pair-v1`:
+
+| Output | info | Length | Encoding |
+|---|---|---|---|
+| `pairId` | `pair-id` | 16 bytes | 32 lowercase hex chars; in URLs; not secret from the website |
+| `pairKey` | `pair-key` | 32 bytes | raw AES-256-GCM key; never sent |
+
+### 11.4 The two messages
+
+Plaintext: UTF-8 JSON, keys in exactly this order, no whitespace, strings
+escaped as `JSON.stringify` does (`"` `\` and U+0000–U+001F; nothing else):
+
+- hello (D → L): `{"v":1,"kind":"hello","device":"<D's device name>"}`
+- answer (L → D): `{"v":1,"kind":"answer","code":"<L's canonical 28-symbol sync code>","device":"<L's device name>"}`
+
+Envelope: `0x01 ‖ nonce (12 bytes, fresh from the CSPRNG) ‖ AES-256-GCM(pairKey,
+nonce, aad, plaintext)` (ciphertext ‖ 16-byte tag; no compression), sent as
+base64url without padding. `aad` = the ASCII bytes
+`cedarlogic-pair-v1|<kind>|<pairId>` (kind `hello` or `answer`). An envelope is
+at most 2048 bytes.
+
+Opening: wrong first byte, shorter than 29 bytes, a bad tag, JSON that isn't
+an object, `v` ≠ 1, `kind` not the expected one, `device` not a string, or (for
+an answer) a `code` that doesn't parse by §1.2 → **damaged**. `device` is shown
+as plain text, cut to 64 characters, control characters dropped; empty →
+"another device".
+
+### 11.5 Server
+
+Storage: the sync store, key `p/{pairId}` → `{ helloEnv, readHash, answerEnv,
+createdAt, answeredAt }` (`answerEnv`/`answeredAt` null until answered). A slot
+lives **10 minutes** from `createdAt`; past that it reads as gone (404) whatever
+is stored. The daily cleanup (§3.10) deletes `p/` keys older than an hour.
+
+The gate (origin / `x-cedarlogic-key`), the request breaker and Netlify's
+per-address limit apply as to every other endpoint. `pairId` must match
+`^[0-9a-f]{32}$`, bodies are JSON objects, envelopes base64url decoding to
+29…2048 bytes, tokens as `TOKEN_RE`, `readHash` 64 lowercase hex.
+
+| Request | Who | Answer |
+|---|---|---|
+| `PUT /pair/{pairId}` body `{"hello":env,"readHash":hex}` | D | 201 `{expiresAt}`; 409 `pair_exists` (make a new `P`); 429 `rate_limited` past **30 slots per address per hour** (counted with `allowIn` under the address's rate key) |
+| `GET /pair/{pairId}` | L | 200 `{hello, answered: bool, expiresAt}`; 404 `pair_gone` |
+| `POST /pair/{pairId}/answer` body `{"answer":env}` | L | 200 `{}`; 409 `pair_answered` (an answer is there already: first one wins, by a conditional write on the slot's etag); 404 `pair_gone` |
+| `GET /pair/{pairId}/answer`, `Authorization: Bearer <readToken>` | D (polling) | 200 `{answer: env or null, expiresAt}`; 401 `wrong_token` (constant-time compare of SHA-256 of the token with `readHash`); 404 `pair_gone` |
+| `DELETE /pair/{pairId}`, `Authorization: Bearer <readToken>` | D | 200 `{}` (also when already gone); 401 `wrong_token` |
+
+Messages: `pair_gone` "That QR code has expired. Show a new one on the other
+device."; `pair_answered` "Another device already answered this QR code. Show a
+new one on the other device."; `pair_exists` "Try again."; `wrong_token` "Not
+yours to read." `GET /health`'s `limits` gains `pairSeconds: 600`.
+
+Logging as everywhere else: errors only; never a token, envelope or `pairId`.
+
+### 11.6 D: showing the QR code
+
+Where: the **I Have a Code…** sheet of the Mac, Linux and Windows apps, and of
+CedarLogic Online / the phone app (sync off). Laid out as two halves:
+
+> **Link to your synced circuits**
+>
+> **Scan with your phone** — [QR code]
+> "On a phone that syncs, open CedarLogic › Your Circuits › Sync › Add a Device
+> and scan this. Or scan it with the phone's camera."
+> status line: "Waiting for your phone…" · "Can't reach the website. [Try Again]" ·
+> "This QR code expired. [Show a New One]"
+>
+> **Or type the code** — the field, as before (§5.1) · [Continue]
+
+On a phone (web, coarse pointer and narrow) the QR half starts folded: a link
+"Show a QR code for another device to scan instead" unfolds it (and only then is
+a slot made). Everywhere else the slot is made when the sheet opens.
+
+Steps:
+1. `P`, `R` ← CSPRNG; derive (11.3); hello = seal(D's device name);
+   `PUT /pair/{pairId}`. 409 → new `P` (up to 3 times). 429 / 503 / no answer →
+   the "Can't reach the website" line with [Try Again]. 201 → show the QR code.
+2. Poll `GET /pair/{pairId}/answer` every **3 seconds** while the sheet is open
+   (the web: also only while the page is visible; a poll is made at once when it
+   becomes visible again). Errors while polling are retried at the next tick,
+   silently, until the 10 minutes are up.
+3. 404, or 10 minutes since the PUT → stop; "This QR code expired. [Show a New
+   One]" (which starts again at 1).
+4. `answer` not null → stop polling; open it (11.4). Damaged → `DELETE`, and the
+   line says "An answer came that couldn't be read. [Show a New One]". Opened →
+   `DELETE` (best effort; it expires anyway), then the preview of §4.8 with the
+   code, exactly as if it had been typed. The confirmation's first line names who
+   sent it: "Sent from “Sam’s phone”." (plain text). [Cancel] there forgets the
+   code: nothing was stored.
+5. The sheet closed, Cancel, the window closed, the app quitting → stop polling,
+   `DELETE` (best effort).
+
+### 11.7 L: adding a device
+
+Entry points:
+- Sync on, the Sync sheet: a new button **Add a Device…** (beside Show Code).
+  It opens:
+  > **Add a device**
+  > On the other device, open Sync and choose I Have a Code (in the CedarLogic
+  > app: Settings › Sync). It shows a QR code: scan it.
+  > [Scan QR Code] (only where a camera can be used)
+  > "Or link it with your code:" [Show Code]
+  > [Done]
+- Any in-app scan (Add a Device's, or I Have a Code's Scan Code) that reads a
+  pairing link.
+- A pairing link opened in a browser (a phone's camera app): the `/sync/` page
+  (11.8) → CedarLogic Online or `/app/` with `#p=…`, taken like a `#k=` link
+  (§5.3): off the address at once, then the steps below.
+
+Steps:
+1. Parse the link → `P` → derive → `GET /pair/{pairId}`. 404 → "That QR code has
+   expired. Show a new one on the other device." Open the hello; damaged →
+   "That QR code couldn't be read. Show a new one on the other device."
+   `answered: true` → the `pair_answered` sentence.
+2. L syncs → confirm:
+   > **Add “Sam’s Windows PC”?**
+   > It gets your sync code, so it can see and change all your synced circuits.
+   > Only add a device that's yours and in front of you.
+   > [Cancel] [Add]
+3. [Add] → answer = seal({code: L's code, device: L's name}) →
+   `POST /pair/{pairId}/answer` → 200:
+   > **Almost done**
+   > On “Sam’s Windows PC”, check what it shows and press Link.
+   > [Done]
+   409 / 404 → their sentences.
+4. L doesn't sync yet → instead of 2:
+   > **“Sam’s Windows PC” wants to sync**
+   > This phone doesn't sync yet. Turn on sync here and send the new code to
+   > “Sam’s Windows PC”? Circuits on both stay, kept together.
+   > Already syncing on another device? Cancel, and link this phone to it first:
+   > on that device, Sync › Show Code, then scan that code.
+   > [Cancel] [Turn On Sync and Add]
+   → Turn On (§4.8; the code sheet is not shown) → step 3 with the new code.
+
+Nothing is sent before [Add] but the `GET`.
+
+### 11.8 The `/sync/` page with `#p=`
+
+Read `#p=` like `#k=`, off the address at once. Phones and tablets (iPhone,
+iPad, Android) go to the phone app: `location.replace("/app/#p=" + code)` —
+except Safari on an iPhone/iPad not running from the Home Screen, which shows:
+"Using CedarLogic from your Home Screen? Open it, then Your Circuits › Sync ›
+Add a Device, and scan this QR code again." with [Use in Safari Instead]
+(→ `/app/#p=…`). Computers: [Use in This Browser] → CedarLogic Online
+`#p=…`. A damaged pairing code: "This QR code is damaged. Show a new one on the
+other device."
+
+The same page's `#k=` links on phones and tablets now also go to `/app/#k=…`
+(the full-screen phone app; on Android it shares its storage with Chrome's
+installed app), not to CedarLogic Online's page, whose window sits below the
+page's introduction on a phone.
+
+### 11.9 Security
+
+- The website sees `pairId`, sizes, times and addresses. It can't read the hello
+  or the answer (`pairKey` comes only from `P`, only in the QR code) and can't
+  forge them (AES-GCM with `aad` binding kind and `pairId`).
+- Someone who sees the QR code (over a shoulder, a photo) knows `P`: they can
+  read the hello (a device name) and could post an answer of their own. They
+  **can't read L's answer**: the website hands answers only to the holder of `R`,
+  which never leaves D. (The website and a QR-code photographer would have to
+  work together, which is the same trust the rest of sync already places in the
+  website.) An answer posted by someone else reaches D as a code that isn't the
+  person's: D's preview shows whose circuits they are, and nothing is linked
+  without Link. L then gets "Another device already answered…", which tells the
+  person something is off.
+- L confirms before sending its code, naming the device; D confirms (the
+  preview) before linking.
+- Slots are short-lived, small, and limited per address; `DELETE` needs `R`.
+
+### 11.10 The engine (C++) and the C API
+
+`SyncPair.cpp` in the shared engine: `pairKeys(P)`, `sealPair(key, pairId,
+kind, json)`, `openPair(...)`, the link's parse/format, and the D side on the
+engine thread (the polling loop, cancellable; requests through `Host::http`
+with the usual headers but the read token as the bearer).
+
+```c
+// Pairing (SYNC.md §11): this device joins by showing a QR code that a device
+// that syncs scans. Sync must be off. `show` gets the QR code's text (the
+// pairing link) once the website has the request; `done` once:
+//   CL_SYNC_PAIR_CODE    text = the sync code (then cl_sync_preview and
+//                        cl_sync_link it), from = the sending device's name
+//   CL_SYNC_PAIR_EXPIRED text = the sentence ("This QR code expired.")
+//   CL_SYNC_PAIR_FAILED  text = the sentence (can't reach the website, damaged)
+// Both on the main thread. cl_sync_pair_cancel (or a new start, or destroy)
+// stops it: then done isn't called. Cancel deletes the slot (best effort).
+enum { CL_SYNC_PAIR_CODE, CL_SYNC_PAIR_EXPIRED, CL_SYNC_PAIR_FAILED };
+typedef void (*CLSyncPairShow)(void *ctx, const char *link);
+typedef void (*CLSyncPairDone)(void *ctx, int result, const char *text, const char *from);
+void cl_sync_pair_start(CLSyncEngine *e, CLSyncPairShow show, CLSyncPairDone done, void *ctx);
+void cl_sync_pair_cancel(CLSyncEngine *e);
+```
+
+The apps don't scan (no camera code), so they never play L.
+
+### 11.11 Test vectors
+
+`P` = bytes `a0 a1 … af`:
+
+| | |
+|---|---|
+| pairing code | `M2GT58X4MPKAFA59NANTSBDENX83` |
+| link | `https://cedarlogic.netlify.app/sync/#p=M2GT58X4MPKAFA59NANTSBDENX83` |
+| `pairId` | `2caadcde5f2aee160164bd13927d3637` |
+| `pairKey` | `34ff905499658d1bd3842749d074ba1401b0816262af06abbbbc0735fedca39b` |
+
+`R` = bytes `40 41 … 5f`: read token `QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8`,
+`readHash` `f45dc82a7523d14974cea050e3028e8bf06a8ee855a9d63034ebb4fb9ecc2305`.
+
+Hello, nonce `10 11 … 1b`, plaintext
+`{"v":1,"kind":"hello","device":"Sam’s MacBook \"Air\""}` (the ’ is U+2019,
+three UTF-8 bytes):
+`ARAREhMUFRYXGBkaG0vOHTp3q9Sc5tbSN42jE2irZhIUJNlUK6Zu-bHHIWnfkTRS3yJFkRLq1uekWAlpN6N7_r-5atwh5KPKqcA_y6zkuvoLcn7mCdI`
+
+Answer, nonce `20 21 … 2b`, plaintext
+`{"v":1,"kind":"answer","code":"000G40R40M30E209185GR38E1YZ4","device":"Chrome on Android"}`:
+`ASAhIiMkJSYnKCkqK6XNj59CphJxJWWwjDJhjQBq0bFaTI6puMWrGLeOz0YQNUnuMszZCoWCMoG6nDWoj8d39E7TYfEgxBo0Q7mVazyKBMzOBRwf_CPwNfxOdNwvS5Ufp4EiL2LC6cxrjJODs2JjYJzi6r2CQ04`
+
+Must not open: either envelope with any byte changed; the hello opened as an
+answer (wrong `aad`); the answer under another `pairId`.
+
+### 11.12 Tests
+
+- Server (`test_sync_server.mjs`): each row of 11.5, expiry at 10 minutes, first
+  answer wins under a race, the read token, the per-address limit, the cleanup.
+- Web (`test_sync_client.mjs`): the vectors; D and L against the real server
+  code; expiry; a damaged answer; cancel deletes. (`test_sync_ui.mjs`): a
+  computer's I Have a Code shows the QR code; a phone scans it with the camera
+  (fake camera showing that QR), confirms, and the computer reaches the preview
+  and Link; Turn On Sync and Add; `/sync/#p=` on Android goes to `/app/`.
+- Engine (`selfTest`): the vectors; the D loop against the in-process test
+  server (answer arrives; expiry; damaged; cancel deletes; a 503 then success).
+- Interop: the Mac `sync-check` tool (or Linux `sync_check`) as D against the
+  site's mock server, answered by the web engine in node (L): D gets the code.

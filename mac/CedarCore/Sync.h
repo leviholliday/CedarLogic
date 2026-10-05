@@ -147,6 +147,19 @@ public:
 	// thread that never calls onMain; `done` runs on the engine thread within 5 s.
 	void quitting(std::function<void()> done);
 
+	// Pairing (SYNC.md 11.6): this device joins by showing a QR code that a device that syncs
+	// scans. Sync must be off. On the engine thread: a slot on the website, then a poll every 3 s
+	// for up to 10 minutes. `show` gets the QR code's text (the pairing link) once the website has
+	// the slot; `done` once, with PairCode (text = the sync code, for preview() and link();
+	// from = the sending device's name, ready to show), PairExpired or PairFailed (text = the
+	// sentence). Both on the UI thread. pairCancel(), a new pairStart(), turning sync on, stop(),
+	// quitting() or destroying the engine end it: done isn't called then, and the slot is deleted
+	// (best effort).
+	enum PairResult { PairCode = 0, PairExpired = 1, PairFailed = 2 };
+	void pairStart(std::function<void(const std::string& link)> show,
+	               std::function<void(int result, const std::string& text, const std::string& from)> done);
+	void pairCancel();
+
 private:
 	struct Impl;
 	std::unique_ptr<Impl> d;

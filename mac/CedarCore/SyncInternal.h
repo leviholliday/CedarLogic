@@ -72,7 +72,8 @@ std::string encodeCode(Crypto&, const uint8_t secret[16]);
 // The canonical 28 symbols, or false with why = "length" | "symbol" | "checksum".
 bool normalizeCode(const std::string& text, std::string& code, std::string& why);
 bool decodeCode(Crypto&, const std::string& text, uint8_t secret[16], std::string& why);
-Bytes hkdf(Crypto&, const uint8_t* ikm, size_t ikmLen, const std::string& info, size_t len);
+Bytes hkdf(Crypto&, const uint8_t* ikm, size_t ikmLen, const std::string& info, size_t len);   // salt cedarlogic-sync-v1
+Bytes hkdfSalted(Crypto&, const std::string& salt, const uint8_t* ikm, size_t ikmLen, const std::string& info, size_t len);
 
 struct Keys {
 	std::string spaceId, authToken, authHash, deleteToken, deleteHash;
@@ -123,6 +124,64 @@ std::string formatHttpDate(int64_t ms);
 // Civil time <-> days since 1970 (proleptic Gregorian).
 int64_t daysFromCivil(int64_t y, unsigned m, unsigned d);
 void civilFromDays(int64_t z, int64_t& y, unsigned& m, unsigned& d);
+
+// ---- Pairing: adding a device by scanning (SyncPair.cpp, SYNC.md 11) ------------------
+
+constexpr size_t kMaxPairEnvelope = 2048;        // a hello's or answer's envelope, bytes
+extern const char* const kPairSalt;              // cedarlogic-pair-v1
+
+struct PairKeys {
+	std::string pairId;   // 32 lowercase hex
+	Bytes key;            // AES-256-GCM
+	bool valid() const { return key.size() == 32; }
+};
+PairKeys pairKeys(Crypto&, const uint8_t secret[16]);
+// The QR code's text for a pairing code (the 28 symbols): https://cedarlogic.netlify.app/sync/#p=...
+std::string pairLink(const std::string& pairingCode);
+// Text holding "#p=" and a pairing code (the link, or a bare "#p=...") -> P. False for anything
+// else, and always for text with "#k=" (a sync code, never a pairing link).
+bool parsePairLink(Crypto&, const std::string& text, uint8_t secret[16]);
+std::string readTokenOf(const Bytes& r);                     // base64url of R (43 chars)
+std::string readHashOf(Crypto&, const std::string& readToken);   // lowercase hex SHA-256 of those 43 characters
+// The plaintexts, keys in the order of 11.4, strings escaped as JSON.stringify does.
+std::string pairHelloJson(const std::string& device);
+std::string pairAnswerJson(const std::string& code, const std::string& device);
+std::string pairAad(const std::string& kind, const std::string& pairId);
+// kind "hello" or "answer"; env is base64url. False if the RNG or cipher failed or it's over 2048 bytes.
+bool sealPair(Crypto&, const PairKeys&, const std::string& kind, const std::string& json, std::string& env);
+// Test vectors only: the nonce is given.
+bool sealPairForTest(Crypto&, const PairKeys&, const std::string& kind, const std::string& json, const Bytes& nonce,
+                     std::string& env);
+struct PairMessage {
+	std::string device;   // as sent (pairDeviceText makes it showable)
+	std::string code;     // an answer's sync code, canonical
+};
+// False: damaged (11.4).
+bool openPair(Crypto&, const PairKeys&, const std::string& kind, const std::string& env, PairMessage& out);
+// A device name from a message as shown: control characters dropped, at most 64 characters,
+// "another device" if empty.
+std::string pairDeviceText(const std::string& device);
+
+// D's requests (11.5, 11.6). The usual headers (x-cedarlogic-client, x-cedarlogic-key) and,
+// for the answer and DELETE, the read token as the bearer.
+struct PairServer {
+	std::string serverBase, appKey, client;
+	std::function<HttpResponse(const HttpRequest&)> http;
+};
+struct PairSlot {
+	PairKeys keys;
+	std::string readToken, link;
+};
+// A fresh P and R, the hello sealed, PUT. 201 -> the slot; else the status (0: no answer) and,
+// for a 409, make another. -1: the RNG or the cipher failed (nothing sent).
+int pairPut(const PairServer&, Crypto&, const std::string& deviceName, PairSlot& slot);
+// GET /pair/{id}/answer: the status; answerEnv the answer ("" while there's none).
+int pairPoll(const PairServer&, const PairSlot&, std::string& answerEnv);
+void pairDelete(const PairServer&, const std::string& pairId, const std::string& readToken);   // best effort
+// How often D polls and how long a slot lives (ms): 3 s and 10 minutes; tests shorten them.
+int64_t pairPollMs();
+int64_t pairLifeMs();
+void setPairTimingForTest(int64_t pollMs, int64_t lifeMs);   // 0, 0: back to the real ones
 
 // ---- The structure digest (SyncStructure.cpp) ----------------------------------------
 

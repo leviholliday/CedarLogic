@@ -461,6 +461,452 @@ void cInterface(Crypto& cr) {
 	cl_sync_destroy(e);
 }
 
+// ---- Pairing, D's side (SYNC.md 11.6, 11.12): the loop on the engine thread against the FakeServer ----
+
+// A clock the test can move forward (the website's, for the 10 minutes of a slot).
+struct ShiftClock : Clock {
+	SystemClock sys;
+	std::atomic<int64_t> shift{ 0 };
+	int64_t now() override { return sys.now() + shift.load(); }
+};
+
+// What show and done were given, and whether they came on the UI thread.
+struct PairWatch {
+	UiThread& ui;
+	std::mutex mu;
+	std::string link, text, from;
+	int result = -1;
+	std::atomic<int> shows{ 0 }, dones{ 0 }, offUi{ 0 };
+	explicit PairWatch(UiThread& u) : ui(u) {}
+	std::function<void(const std::string&)> show() {
+		return [this](const std::string& l) {
+			if (!ui.onThisThread()) offUi++;
+			std::lock_guard<std::mutex> lock(mu);
+			link = l;
+			shows++;
+		};
+	}
+	std::function<void(int, const std::string&, const std::string&)> done() {
+		return [this](int r, const std::string& t, const std::string& f) {
+			if (!ui.onThisThread()) offUi++;
+			std::lock_guard<std::mutex> lock(mu);
+			result = r;
+			text = t;
+			from = f;
+			dones++;
+		};
+	}
+	std::string getLink() {
+		std::lock_guard<std::mutex> lock(mu);
+		return link;
+	}
+};
+
+HttpResponse serve(FakeServer& server, const std::string& method, const std::string& path, const std::string& body) {
+	HttpRequest r;
+	r.method = method;
+	r.url = "http://fake/api/sync/v1" + path;
+	r.body = body;
+	if (!body.empty()) r.headers.emplace_back("content-type", "application/json");
+	std::lock_guard<std::mutex> lock(server.mu);
+	return server.handle(r);
+}
+
+// Plays L (11.7) against the FakeServer: reads the hello, posts an answer (or bytes that aren't one).
+// The POST's status; -1 not a pairing link, -2 the hello didn't open.
+int answerAs(FakeServer& server, Crypto& cr, const std::string& link, const std::string& code, const std::string& device,
+             std::string& helloDevice, bool garbage = false) {
+	uint8_t p[16];
+	if (!parsePairLink(cr, link, p)) return -1;
+	const PairKeys k = pairKeys(cr, p);
+	const HttpResponse g = serve(server, "GET", "/pair/" + k.pairId, std::string());
+	if (g.status != 200) return g.status;
+	json::Value v;
+	PairMessage m;
+	if (!json::parse(g.body, v) || !openPair(cr, k, "hello", v.str("hello"), m)) return -2;
+	helloDevice = m.device;
+	std::string env;
+	if (garbage) env = b64u(Bytes(60, 7));
+	else if (!sealPair(cr, k, "answer", pairAnswerJson(code, device), env)) return -3;
+	json::Value b = json::Value::object();
+	b.set("answer", json::Value::string(env));
+	return serve(server, "POST", "/pair/" + k.pairId + "/answer", json::write(b)).status;
+}
+
+size_t pairSlots(FakeServer& s) {
+	std::lock_guard<std::mutex> lock(s.mu);
+	return s.pairs.size();
+}
+
+struct PairTiming {   // polls every 100 ms in these tests; back to 3 s and 10 minutes after
+	PairTiming() { setPairTimingForTest(100, 10 * kMinute); }
+	~PairTiming() { setPairTimingForTest(0, 0); }
+};
+
+const char* const kSamPhone = "Sam\xE2\x80\x99s phone";
+const char* const kSamPc = "Sam\xE2\x80\x99s Windows PC";
+
+void enginePairing(Crypto& cr, const std::string& dir) {
+	PairTiming timing;
+	ShiftClock clock;
+	FakeServer server(clock, cr);
+	UiThread ui;
+	Device a(ui, server, cr, files::join(dir, "A"), kSamPhone);
+	makeCircuit(a.root, "20261005-101010-11111", "Adder", fixture("vector-v3.cdl"));
+	ui.sync([&] { a.engine->start(); });
+	std::atomic<int> on{ 0 };
+	ui.sync([&] { a.engine->turnOn([&](bool ok, std::string) { on = ok ? 1 : -1; }); });
+	ECHECK(waitFor([&] { return on != 0; }, 5000) && on == 1);
+	ECHECK(waitFor([&] { return a.engine->status().kind == Status::Synced && liveCircuits(server) == 1; }, 5000));
+	const std::string code = a.engine->code();
+
+	// Starting while sync is on.
+	{
+		PairWatch w(ui);
+		ui.sync([&] { a.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(w.result == Engine::PairFailed && w.text == "Sync is already on." && w.shows == 0 && pairSlots(server) == 0);
+	}
+
+	// The answer arrives (after two polls that failed, retried quietly): the code, then preview and Link.
+	Device b(ui, server, cr, files::join(dir, "B"), kSamPc);
+	ui.sync([&] { b.engine->start(); });
+	{
+		PairWatch w(ui);
+		ui.sync([&] { b.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		const std::string link = w.getLink();
+		ECHECK(link.compare(0, 39, "https://cedarlogic.netlify.app/sync/#p=") == 0 && link.size() == 39 + 28);
+		ECHECK(pairSlots(server) == 1);
+		{
+			std::lock_guard<std::mutex> lock(server.mu);
+			server.failNext = 2;
+			server.failStatus = 503;
+			server.failRetryAfter = 2;
+		}
+		ECHECK(waitFor([&] {
+			std::lock_guard<std::mutex> lock(server.mu);
+			return server.failNext == 0;
+		}, 5000));
+		ECHECK(w.dones == 0);
+		std::string hello, ignored;
+		ECHECK(answerAs(server, cr, link, code, kSamPhone, hello) == 200);
+		ECHECK(hello == kSamPc);
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(w.result == Engine::PairCode && w.text == code && w.from == kSamPhone);
+		ECHECK(waitFor([&] { return pairSlots(server) == 0; }, 2000));   // deleted
+		ECHECK(answerAs(server, cr, link, code, kSamPhone, ignored) == 404);
+		std::atomic<int> previewed{ 0 }, linked{ 0 };
+		ui.sync([&] { b.engine->preview(w.text, [&](bool ok, std::string, Preview pv) { previewed = ok && pv.circuits == 1 ? 1 : -1; }); });
+		ECHECK(waitFor([&] { return previewed != 0; }, 5000) && previewed == 1);
+		ui.sync([&] { b.engine->link(w.text, [&](bool ok, std::string) { linked = ok ? 1 : -1; }); });
+		ECHECK(waitFor([&] { return linked != 0; }, 5000) && linked == 1);
+		ECHECK(b.engine->enabled() && b.engine->code() == code);
+		ECHECK(waitFor([&] { return folderNames(b.root) == std::vector<std::string>({ "Adder" }); }, 5000));
+		ECHECK(w.offUi == 0 && w.dones == 1);
+	}
+
+	Device c(ui, server, cr, files::join(dir, "C"), kSamPc);
+	ui.sync([&] { c.engine->start(); });
+
+	// The first answer wins; a second one is refused (both posted before D's next poll).
+	{
+		PairWatch w(ui);
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		uint8_t p[16];
+		ECHECK(parsePairLink(cr, w.getLink(), p));
+		const PairKeys k = pairKeys(cr, p);
+		std::string e1, e2;
+		ECHECK(sealPair(cr, k, "answer", pairAnswerJson(code, kSamPhone), e1) &&
+		       sealPair(cr, k, "answer", pairAnswerJson(newCode(cr), "someone else"), e2));
+		json::Value b1 = json::Value::object(), b2 = json::Value::object();
+		b1.set("answer", json::Value::string(e1));
+		b2.set("answer", json::Value::string(e2));
+		int s1, s2;
+		{
+			std::lock_guard<std::mutex> lock(server.mu);
+			HttpRequest r;
+			r.method = "POST";
+			r.url = "http://fake/api/sync/v1/pair/" + k.pairId + "/answer";
+			r.body = json::write(b1);
+			s1 = server.handle(r).status;
+			r.body = json::write(b2);
+			s2 = server.handle(r).status;
+		}
+		ECHECK(s1 == 200 && s2 == 409);
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(w.result == Engine::PairCode && w.text == code && w.from == kSamPhone);
+	}
+
+	// Expiry by the website's clock: a 404.
+	{
+		PairWatch w(ui);
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		clock.shift = 11 * kMinute;
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(w.result == Engine::PairExpired && w.text == "This QR code expired." && w.from.empty());
+		clock.shift = 0;
+		std::string hello;
+		ECHECK(answerAs(server, cr, w.getLink(), code, kSamPhone, hello) == 404);
+	}
+
+	// Expiry by D's own clock (the 10 minutes, here 600 ms), polls failing all along.
+	{
+		setPairTimingForTest(50, 600);
+		PairWatch w(ui);
+		const auto t0 = std::chrono::steady_clock::now();
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		{
+			std::lock_guard<std::mutex> lock(server.mu);
+			server.failNext = 1000;
+			server.failStatus = 503;
+		}
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(std::chrono::steady_clock::now() - t0 >= std::chrono::milliseconds(600));
+		ECHECK(w.result == Engine::PairExpired && w.text == "This QR code expired.");
+		{
+			std::lock_guard<std::mutex> lock(server.mu);
+			server.failNext = 0;
+			server.pairs.clear();
+		}
+		setPairTimingForTest(100, 10 * kMinute);
+	}
+
+	// A damaged answer: FAILED, and the slot deleted.
+	{
+		PairWatch w(ui);
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		std::string hello;
+		ECHECK(answerAs(server, cr, w.getLink(), code, kSamPhone, hello, true) == 200);
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(w.result == Engine::PairFailed && w.text == "An answer came that couldn't be read.");
+		ECHECK(waitFor([&] { return pairSlots(server) == 0; }, 2000));
+	}
+
+	// Cancel: the slot deleted, the polls stop, and done never comes.
+	{
+		PairWatch w(ui);
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		ECHECK(waitFor([&] {
+			std::lock_guard<std::mutex> lock(server.mu);
+			return server.pairPolls > 0;
+		}, 5000));
+		ui.sync([&] { c.engine->pairCancel(); });
+		ECHECK(waitFor([&] { return pairSlots(server) == 0; }, 5000));
+		int polls;
+		{
+			std::lock_guard<std::mutex> lock(server.mu);
+			polls = server.pairPolls;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(400));
+		std::lock_guard<std::mutex> lock(server.mu);
+		ECHECK(server.pairPolls == polls && w.dones == 0);
+	}
+
+	// A new start replaces the one showing: its slot deleted, its done never called.
+	{
+		PairWatch w1(ui), w2(ui);
+		ui.sync([&] { c.engine->pairStart(w1.show(), w1.done()); });
+		ECHECK(waitFor([&] { return w1.shows == 1; }, 5000));
+		ui.sync([&] { c.engine->pairStart(w2.show(), w2.done()); });
+		ECHECK(waitFor([&] { return w2.shows == 1; }, 5000));
+		ECHECK(waitFor([&] { return pairSlots(server) == 1; }, 5000));
+		std::string hello;
+		ECHECK(answerAs(server, cr, w1.getLink(), code, kSamPhone, hello) == 404);
+		ECHECK(answerAs(server, cr, w2.getLink(), code, kSamPhone, hello) == 200);
+		ECHECK(waitFor([&] { return w2.dones == 1; }, 5000) && w2.result == Engine::PairCode);
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+		ECHECK(w1.dones == 0 && w1.shows == 1);
+	}
+
+	// A 503 on the PUT: can't reach the website; started again, it works.
+	{
+		PairWatch w(ui);
+		{
+			std::lock_guard<std::mutex> lock(server.mu);
+			server.failNext = 1;
+			server.failStatus = 503;
+		}
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(w.result == Engine::PairFailed && w.text == "Can't reach the website. Check the connection, then try again." &&
+		       w.shows == 0 && pairSlots(server) == 0);
+		PairWatch again(ui);
+		ui.sync([&] { c.engine->pairStart(again.show(), again.done()); });
+		ECHECK(waitFor([&] { return again.shows == 1; }, 5000) && pairSlots(server) == 1);
+		ui.sync([&] { c.engine->pairCancel(); });
+		ECHECK(waitFor([&] { return pairSlots(server) == 0; }, 5000) && again.dones == 0);
+	}
+
+	// No answer at all to the PUT (offline): the same.
+	{
+		PairWatch w(ui);
+		{
+			std::lock_guard<std::mutex> lock(server.mu);
+			server.failNext = 1;
+			server.failStatus = 0;
+		}
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.dones == 1; }, 5000));
+		ECHECK(w.result == Engine::PairFailed && w.text == "Can't reach the website. Check the connection, then try again." &&
+		       w.shows == 0);
+		std::lock_guard<std::mutex> lock(server.mu);
+		server.failStatus = 429;
+	}
+
+	// Quitting with a QR code showing: the slot deleted, done never called.
+	{
+		PairWatch w(ui);
+		ui.sync([&] { c.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		std::atomic<bool> quit{ false };
+		ui.sync([&] { c.engine->quitting([&] { quit = true; }); });
+		ECHECK(waitFor([&] { return quit.load(); }, 6000));
+		ECHECK(pairSlots(server) == 0);
+		ui.sync([&] { c.engine.reset(); });
+		ECHECK(w.dones == 0);
+	}
+
+	// Destroyed with a QR code showing: the slot deleted, done never called.
+	{
+		Device d(ui, server, cr, files::join(dir, "D"), kSamPc);
+		PairWatch w(ui);
+		ui.sync([&] { d.engine->start(); d.engine->pairStart(w.show(), w.done()); });
+		ECHECK(waitFor([&] { return w.shows == 1; }, 5000));
+		const auto t0 = std::chrono::steady_clock::now();
+		ui.sync([&] { d.engine.reset(); });
+		ECHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(2));
+		ECHECK(pairSlots(server) == 0 && w.dones == 0);
+		ECHECK(d.host.offMainHostCalls == 0);
+	}
+	ECHECK(a.host.offMainHostCalls == 0 && b.host.offMainHostCalls == 0 && c.host.offMainHostCalls == 0);
+	ui.sync([&] {
+		a.engine.reset();
+		b.engine.reset();
+	});
+}
+
+// The same through the C interface: start, show, the code; start again, cancel.
+FakeServer* gPairServer = nullptr;
+bool cSeal(void*, const uint8_t key[32], const uint8_t nonce[12], const uint8_t* aad, size_t aadLen, const uint8_t* plain, size_t n,
+           uint8_t* out) {
+	Bytes ct;
+	if (!gCrypto->aesGcmSeal(key, nonce, Bytes(aad, aad + aadLen), Bytes(plain, plain + n), ct) || ct.size() != n + 16) return false;
+	memcpy(out, ct.data(), ct.size());
+	return true;
+}
+bool cOpen(void*, const uint8_t key[32], const uint8_t nonce[12], const uint8_t* aad, size_t aadLen, const uint8_t* ct, size_t n,
+           uint8_t* out) {
+	Bytes plain;
+	if (!gCrypto->aesGcmOpen(key, nonce, Bytes(aad, aad + aadLen), Bytes(ct, ct + n), plain) || plain.size() + 16 != n) return false;
+	if (!plain.empty()) memcpy(out, plain.data(), plain.size());
+	return true;
+}
+void cHttp(void*, const char* method, const char* url, const char* headers, const uint8_t* body, size_t bodyLen, int* status,
+           bool* sent, char** respHeaders, uint8_t** respBody, size_t* respLen) {
+	HttpRequest r;
+	r.method = method;
+	r.url = url;
+	r.body.assign((const char*)body, bodyLen);
+	const std::string all = headers ? headers : "";
+	for (size_t at = 0; at < all.size();) {
+		size_t end = all.find("\r\n", at);
+		if (end == std::string::npos) end = all.size();
+		const std::string line = all.substr(at, end - at);
+		const size_t colon = line.find(": ");
+		if (colon != std::string::npos) r.headers.emplace_back(line.substr(0, colon), line.substr(colon + 2));
+		at = end + 2;
+	}
+	HttpResponse resp;
+	{
+		std::lock_guard<std::mutex> lock(gPairServer->mu);
+		resp = gPairServer->handle(r);
+	}
+	*status = resp.status;
+	*sent = true;
+	std::string h;
+	for (const auto& kv : resp.headers) h += kv.first + ": " + kv.second + "\r\n";
+	*respHeaders = (char*)malloc(h.size() + 1);
+	memcpy(*respHeaders, h.c_str(), h.size() + 1);
+	*respLen = resp.body.size();
+	*respBody = (uint8_t*)malloc(resp.body.size() + 1);
+	memcpy(*respBody, resp.body.data(), resp.body.size());
+}
+
+struct CPairState {
+	std::mutex mu;
+	std::string link, text, from;
+	int result = -1;
+	std::atomic<int> shows{ 0 }, dones{ 0 };
+};
+void cPairShow(void* ctx, const char* link) {
+	auto* s = static_cast<CPairState*>(ctx);
+	std::lock_guard<std::mutex> lock(s->mu);
+	s->link = link;
+	s->shows++;
+}
+void cPairDone(void* ctx, int result, const char* text, const char* from) {
+	auto* s = static_cast<CPairState*>(ctx);
+	std::lock_guard<std::mutex> lock(s->mu);
+	s->result = result;
+	s->text = text;
+	s->from = from;
+	s->dones++;
+}
+
+void cPairing(Crypto& cr, const std::string& dir) {
+	PairTiming timing;
+	SystemClock clock;
+	FakeServer server(clock, cr);
+	gCrypto = &cr;
+	gPairServer = &server;
+	CLSyncHooks h;
+	memset(&h, 0, sizeof h);
+	h.random = cRandom;
+	h.sha256 = cSha;
+	h.hmac_sha256 = cHmac;
+	h.aes_gcm_seal = cSeal;
+	h.aes_gcm_open = cOpen;
+	h.http = cHttp;
+	h.on_main = cMain;
+	files::makeDirs(files::join(dir, "Library"));
+	// (The FakeServer reads only the path after /api/sync/v1, whatever the server.)
+	CLSyncEngine* e = cl_sync_create(&h, files::join(dir, "Library").c_str(), files::join(dir, "Sync").c_str(), "", "test/1", kSamPc);
+	ECHECK(e != nullptr);
+	cl_sync_start(e);
+	CPairState s;
+	cl_sync_pair_start(e, cPairShow, cPairDone, &s);
+	ECHECK(waitFor([&] { return s.shows == 1; }, 5000));
+	std::string link;
+	{
+		std::lock_guard<std::mutex> lock(s.mu);
+		link = s.link;
+	}
+	const std::string code = newCode(cr);
+	std::string hello;
+	ECHECK(answerAs(server, cr, link, code, kSamPhone, hello) == 200 && hello == kSamPc);
+	ECHECK(waitFor([&] { return s.dones == 1; }, 5000));
+	{
+		std::lock_guard<std::mutex> lock(s.mu);
+		ECHECK(s.result == CL_SYNC_PAIR_CODE && s.text == code && s.from == kSamPhone);
+	}
+	ECHECK(waitFor([&] { return pairSlots(server) == 0; }, 2000));
+	CPairState t;
+	cl_sync_pair_start(e, cPairShow, cPairDone, &t);
+	ECHECK(waitFor([&] { return t.shows == 1 && pairSlots(server) == 1; }, 5000));
+	cl_sync_pair_cancel(e);
+	ECHECK(waitFor([&] { return pairSlots(server) == 0; }, 5000));
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	ECHECK(t.dones == 0);
+	cl_sync_destroy(e);
+	gPairServer = nullptr;
+}
+
 }  // namespace
 
 void engineTests(Crypto& cr, const std::string& tempDir, Report& report) {
@@ -473,6 +919,9 @@ void engineTests(Crypto& cr, const std::string& tempDir, Report& report) {
 		  [&] { engineEndToEnd(cr, tempDir); } },
 		{ "engine: both mass-delete questions, answered later on the UI thread", [&] { engineQuestions(cr, tempDir); } },
 		{ "engine: the C interface", [&] { cInterface(cr); } },
+		{ "engine: pairing, D's side (11.6): code, first answer wins, expiry, damaged, cancel, 503, quit, destroy",
+		  [&] { enginePairing(cr, tempDir); } },
+		{ "engine: pairing through the C interface", [&] { cPairing(cr, tempDir); } },
 	};
 	for (const Row& row : rows) {
 		if (!report.wanted(row.name)) continue;
