@@ -107,13 +107,31 @@ final class SyncCenter: ObservableObject {
     @Published private(set) var recentNotice: String?
 
     // Settings > Sync's own state.
-    @Published var sheet: Sheet?
+    @Published var sheet: Sheet? {
+        // The QR code only lives while I Have a Code is showing: any other sheet, or none, stops it (11.6 step 5).
+        didSet { if sheet != .enter { cancelPairing() } }
+    }
     /// "Setting up…", "Checking the code…", "Linking…" while one of those runs.
     @Published var working: String?
     @Published var enteredCode = ""
     @Published var fieldError: String?
     /// A sentence under the page's buttons (a failure of Turn On, Delete…).
     @Published var pageMessage: String?
+
+    /// I Have a Code's QR half (SYNC.md 11.6).
+    enum Pairing: Equatable {
+        case idle
+        case starting                          // the request is on its way to the website
+        case showing(link: String)             // the QR code is up, waiting for a phone
+        case received                          // an answer came: its code is being checked
+        case stopped(text: String, again: String)   // can't reach / expired / damaged, and the button's name
+    }
+    @Published private(set) var pairing = Pairing.idle
+    /// Bumped by every start and cancel: anything late from an older one is ignored.
+    private var pairGeneration = 0
+    /// What the engine's callbacks carry as their context (one per start, kept: the engine never calls an older one).
+    private final class PairBox { let generation: Int; init(_ g: Int) { generation = g } }
+    private var pairBoxes: [PairBox] = []
 
     /// For --render-ui: a model that isn't connected to anything.
     let preview: Bool
@@ -133,8 +151,9 @@ final class SyncCenter: ObservableObject {
 
     /// A stand-in for screenshots (RenderUI): shows what it's given.
     init(previewEnabled: Bool, status: String = "", kind: Int = Int(CL_SYNC_SYNCED), circuits: Int = 0, code: String = "",
-         deviceName: String = "", devices: [Device] = []) {
+         deviceName: String = "", devices: [Device] = [], pairing: Pairing = .idle) {
         preview = true
+        self.pairing = pairing
         enabled = previewEnabled
         statusText = status
         self.kind = kind
@@ -490,18 +509,25 @@ final class SyncCenter: ObservableObject {
         runPreview(code)
     }
 
-    private func runPreview(_ code: String) {
+    /// `from` is the device that sent the code through the QR code (11.6 step 4), if it came that way.
+    private func runPreview(_ code: String, from: String? = nil) {
         guard let engine, working == nil else { return }
+        cancelPairing()   // a code is being checked: the QR code is done with
+        if from != nil { pairing = .received }
         working = "Checking the code\u{2026}"
         let box = Unmanaged.passRetained(PreviewDone { ok, message, n in
             self.working = nil
             // The person closed the sheet while it was checking: nothing pops up later.
-            guard self.sheet != nil else { return }
+            guard self.sheet != nil else { self.pairing = .idle; return }
             if ok {
-                self.sheet = .confirm(code: code, sentence: message, empty: n == 0)
+                // The names in it are plain text, so is the sender's.
+                let sentence = from.map { "Sent from \u{201C}\($0)\u{201D}.\n" + message } ?? message
+                self.sheet = .confirm(code: code, sentence: sentence, empty: n == 0)
             } else {
                 self.sheet = .enter
                 self.fieldError = message
+                self.pairing = .idle
+                self.startPairing()   // the QR code was used up or put away: a new one
             }
         }).toOpaque()
         cl_sync_preview(engine, code, { ctx, ok, message, n, _ in
@@ -509,6 +535,72 @@ final class SyncCenter: ObservableObject {
             let text = message.map { String(cString: $0) } ?? ""
             DispatchQueue.main.async { box.fn(ok, text, Int(n)) }
         }, box)
+    }
+
+    // MARK: Pairing (SYNC.md 11.6)
+
+    /// I Have a Code's QR half: a phone that syncs scans it and sends its code. Sync must be off.
+    /// Started when the sheet opens, and again by Try Again / Show a New One.
+    func startPairing() {
+        guard !preview, !enabled, working == nil, sheet == .enter else { return }
+        start()
+        guard let engine else { return }
+        if pairing == .starting { return }
+        if case .showing = pairing { return }
+        pairGeneration += 1
+        let box = PairBox(pairGeneration)
+        pairBoxes.append(box)
+        pairing = .starting
+        cl_sync_pair_start(engine, { ctx, link in
+            let g = Unmanaged<PairBox>.fromOpaque(ctx!).takeUnretainedValue().generation
+            let text = link.map { String(cString: $0) } ?? ""
+            SyncCenter.onMain { $0.pairShown(g, text) }
+        }, { ctx, result, text, from in
+            let g = Unmanaged<PairBox>.fromOpaque(ctx!).takeUnretainedValue().generation
+            let t = text.map { String(cString: $0) } ?? "", f = from.map { String(cString: $0) } ?? ""
+            SyncCenter.onMain { $0.pairDone(g, Int(result), t, f) }
+        }, Unmanaged.passUnretained(box).toOpaque())
+    }
+
+    /// The sheet closed or went another way, the window or the app closed: the QR code stops, its slot is deleted.
+    func cancelPairing() {
+        pairGeneration += 1
+        switch pairing {
+        case .starting, .showing:
+            if let engine { cl_sync_pair_cancel(engine) }
+        default: break
+        }
+        if pairing != .idle { pairing = .idle }
+    }
+
+    private func pairShown(_ generation: Int, _ link: String) {
+        guard generation == pairGeneration, pairing == .starting else { return }
+        pairing = .showing(link: link)
+    }
+
+    private func pairDone(_ generation: Int, _ result: Int, _ text: String, _ from: String) {
+        guard generation == pairGeneration else { return }
+        switch result {
+        case Int(CL_SYNC_PAIR_CODE):
+            // Straight into the preview and confirmation, as if it had been typed.
+            pairing = .idle
+            runPreview(text, from: from.isEmpty ? "another device" : from)
+        case Int(CL_SYNC_PAIR_EXPIRED):
+            pairing = .stopped(text: "This QR code expired.", again: "Show a New One")
+        default:
+            if text.hasPrefix("An answer came") {
+                pairing = .stopped(text: text, again: "Show a New One")
+            } else if text.hasPrefix("Can't reach") {
+                pairing = .stopped(text: "Can't reach the website.", again: "Try Again")
+            } else {
+                pairing = .stopped(text: text, again: "Try Again")
+            }
+        }
+    }
+
+    /// Settings closed with I Have a Code open: the QR code goes with it.
+    func settingsClosed() {
+        if sheet == .enter { sheet = nil } else { cancelPairing() }
     }
 
     func link(_ code: String) {
@@ -595,12 +687,19 @@ final class SyncCenter: ObservableObject {
     /// applicationShouldTerminate: with sync on, the open circuits are saved,
     /// then the engine sends what's left (at most 5 s) before the app goes.
     func terminate() -> NSApplication.TerminateReply {
-        guard let engine, started, cl_sync_enabled(engine), !isQuitting else { return .terminateNow }
+        // A QR code showing with sync off: its slot is deleted before the app goes (the engine does it in quitting).
+        var qrShowing = false
+        switch pairing {
+        case .starting, .showing: qrShowing = true
+        default: break
+        }
+        if qrShowing { cancelPairing() }
+        guard let engine, started, cl_sync_enabled(engine) || qrShowing, !isQuitting else { return .terminateNow }
         isQuitting = true
         quitReplied = false
-        let docs = NSDocumentController.shared.documents.filter {
+        let docs = cl_sync_enabled(engine) ? NSDocumentController.shared.documents.filter {
             Library.item(for: $0.fileURL) != nil && ($0.isDocumentEdited || $0.hasUnautosavedChanges)
-        }
+        } : []
         let push = Countdown(docs.count) {
             cl_sync_quitting(engine, { _ in
                 DispatchQueue.main.async { SyncCenter.shared.quitDone() }

@@ -45,6 +45,11 @@ final class PrefsWindow: NSObject, NSToolbarDelegate, NSWindowDelegate {
 
     private var pages: [SettingsPage] { SettingsPage.allCases }
 
+    /// A QR code showing in Settings > Sync (I Have a Code) goes with the window.
+    func windowWillClose(_ notification: Notification) {
+        SyncCenter.shared.settingsClosed()
+    }
+
     func show() {
         if window == nil { build() }
         guard let w = window else { return }

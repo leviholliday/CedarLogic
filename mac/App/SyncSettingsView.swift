@@ -293,6 +293,8 @@ struct SyncEnterCodeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Link this Mac").font(.system(size: 17, weight: .bold))
+            if !center.enabled { scanHalf }
+            if !center.enabled { Text("Or type the code").font(.system(size: 13, weight: .semibold)) }
             Text("Enter the sync code from your other device: Settings \u{203A} Sync \u{203A} Show Code there.")
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
@@ -320,7 +322,56 @@ struct SyncEnterCodeSheet: View {
         }
         .padding(24)
         .frame(width: 500)
-        .onAppear { focused = true }
+        .onAppear { focused = true; center.startPairing() }
+    }
+
+    /// "Scan with your phone" (SYNC.md 11.6): the QR code a device that syncs scans to send its code.
+    private var scanHalf: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Scan with your phone").font(.system(size: 13, weight: .semibold))
+            HStack(alignment: .top, spacing: 18) {
+                qr.frame(width: 184, height: 184)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("On a phone that syncs, open CedarLogic \u{203A} Your Circuits \u{203A} Sync \u{203A} Add a Device and scan this. Or scan it with the phone\u{2019}s camera.")
+                    pairStatus
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Dark on white with its quiet zone, in dark mode too; a grey square while there isn't one to scan.
+    @ViewBuilder private var qr: some View {
+        if case .showing(let link) = center.pairing {
+            SyncQRCode(text: link)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12)))
+                .accessibilityLabel("QR code to scan with your phone")
+        } else {
+            RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.12)))
+                .overlay {
+                    switch center.pairing {
+                    case .starting, .received: ProgressView().controlSize(.small)
+                    default: Image(systemName: "qrcode").font(.system(size: 40)).foregroundStyle(.tertiary)
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder private var pairStatus: some View {
+        switch center.pairing {
+        case .showing:
+            Label { Text("Waiting for your phone\u{2026}") } icon: { ProgressView().controlSize(.small) }
+                .foregroundStyle(.secondary)
+        case .stopped(let text, let again):
+            VStack(alignment: .leading, spacing: 8) {
+                Text(text).foregroundStyle(text == "This QR code expired." ? Color.secondary : Color.red)
+                Button(again) { center.startPairing() }
+            }
+        default:
+            EmptyView()
+        }
     }
 }
 
@@ -369,9 +420,18 @@ enum SyncRender {
         let gone = SyncCenter(previewEnabled: false,
                               status: "Sync was turned off from another device, and the synced copy was deleted. Your circuits here are kept. If you started over with a new code, link this device again with it.",
                               kind: Int(CL_SYNC_GONE))
-        let typo = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF))
+        let qrLink = "https://cedarlogic.netlify.app/sync/#p=M2GT58X4MPKAFA59NANTSBDENX83"
+        let qr = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF), pairing: .showing(link: qrLink))
+        let qrStarting = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF), pairing: .starting)
+        let qrExpired = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF),
+                                   pairing: .stopped(text: "This QR code expired.", again: "Show a New One"))
+        let qrOffline = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF),
+                                   pairing: .stopped(text: "Can't reach the website.", again: "Try Again"))
+        let qrDamaged = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF),
+                                   pairing: .stopped(text: "An answer came that couldn't be read.", again: "Show a New One"))
+        let typo = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF), pairing: .showing(link: qrLink))
         typo.enteredCode = "000G-40R4-0M30-E209-185G-R38E-1YZ5"
-        let good = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF))
+        let good = SyncCenter(previewEnabled: false, kind: Int(CL_SYNC_OFF), pairing: .received)
         good.enteredCode = "000g 40r4 0m30 e209 185g r38e 1yz4"
         good.working = "Checking the code\u{2026}"
         let confirm = "This code has 14 circuits from Bob\u{2019}s laptop and Chrome on Android, last changed yesterday: \u{201C}ALU\u{201D}, \u{201C}Lab 3 adder\u{201D}, \u{201C}Traffic light\u{201D}, \u{2026}. Linking adds your 23 circuits here to them. Circuits that are already the same aren't doubled. Anyone with this code can see and change all of them. Only link with a code you made yourself."
@@ -386,9 +446,16 @@ enum SyncRender {
             snap(dir, "sync-gone-\(t)", page(gone), width: 640, dark: dark)
             snap(dir, "sync-on-\(t)", page(on), width: 640, dark: dark)
             snap(dir, "sync-code-\(t)", SyncCodeSheet(center: on), width: 560, dark: dark)
+            snap(dir, "sync-enter-qr-\(t)", SyncEnterCodeSheet(center: qr), width: 500, dark: dark)
+            snap(dir, "sync-enter-qr-starting-\(t)", SyncEnterCodeSheet(center: qrStarting), width: 500, dark: dark)
+            snap(dir, "sync-enter-qr-expired-\(t)", SyncEnterCodeSheet(center: qrExpired), width: 500, dark: dark)
+            snap(dir, "sync-enter-qr-offline-\(t)", SyncEnterCodeSheet(center: qrOffline), width: 500, dark: dark)
+            snap(dir, "sync-enter-qr-damaged-\(t)", SyncEnterCodeSheet(center: qrDamaged), width: 500, dark: dark)
             snap(dir, "sync-enter-typo-\(t)", SyncEnterCodeSheet(center: typo), width: 500, dark: dark)
             snap(dir, "sync-enter-checking-\(t)", SyncEnterCodeSheet(center: good), width: 500, dark: dark)
             snap(dir, "sync-confirm-\(t)", SyncConfirmSheet(center: on, code: code, sentence: confirm, empty: false), width: 500, dark: dark)
+            snap(dir, "sync-confirm-sent-\(t)", SyncConfirmSheet(center: on, code: code,
+                 sentence: "Sent from \u{201C}Chrome on Android\u{201D}.\n" + confirm, empty: false), width: 500, dark: dark)
             snap(dir, "sync-library-\(t)", LibraryView(sync: busy), width: 600, height: 540, dark: dark)
             snap(dir, "sync-library-off-\(t)", LibraryView(sync: off), width: 600, height: 540, dark: dark)
         }
