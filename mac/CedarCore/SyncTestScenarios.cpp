@@ -149,6 +149,11 @@ struct Net {
 	std::function<void(const std::string&)> before;
 	size_t calls = 0;
 	std::vector<std::string> log;
+	std::vector<int64_t> sinces;   // each changes request's `since`
+	// The mock server: its clock pinned to the test's (x-mock-now), its rate limits keyed by
+	// this world's own address (x-mock-ip).
+	FakeClock* mockClock = nullptr;
+	std::string mockIp;
 
 	static std::string opName(const HttpRequest& r) {
 		const size_t at = r.url.find("/spaces/");
@@ -164,6 +169,10 @@ struct Net {
 		calls++;
 		const std::string name = opName(r);
 		log.push_back(name);
+		if (name == "changes") {
+			const size_t at = r.url.find("since=");
+			sinces.push_back(at == std::string::npos ? 0 : atoll(r.url.c_str() + at + 6));
+		}
 		if (failAfter >= 0) {
 			if (failAfter == 0) {
 				down = true;
@@ -174,7 +183,15 @@ struct Net {
 		}
 		if (down) return HttpResponse();
 		if (before) before(name);
-		HttpResponse resp = server ? server->handle(r) : real->http(r);
+		HttpResponse resp;
+		if (server) {
+			resp = server->handle(r);
+		} else {
+			HttpRequest m = r;
+			if (mockClock) m.headers.emplace_back("x-mock-now", std::to_string(mockClock->t));
+			if (!mockIp.empty()) m.headers.emplace_back("x-mock-ip", mockIp);
+			resp = real->http(m);
+		}
 		if (loseAnswers > 0) {
 			loseAnswers--;
 			HttpResponse lost;
@@ -277,6 +294,7 @@ struct Client {
 	bool answerLocalDeletes = true, answerIncomingDeletes = true;
 	bool reloadEachSync = true;
 	int made = 0;
+	int64_t changesLimit = 0;
 	std::string serverBase = "http://fake/api/sync/v1";
 
 	Client(const std::string& k, const std::string& d, FakeClock& c, int64_t skew, Crypto& crypto, const std::string& dir)
@@ -313,6 +331,7 @@ struct Client {
 		o.client = kind + "/selftest";
 		o.web = kind == "web";
 		o.gateDefaults = vectorDefaults();
+		o.changesLimit = changesLimit;
 		CoreHooks h;
 		h.http = [this](const HttpRequest& r) { return net.call(r); };
 		h.notice = [this](const std::string& t) { notices.push_back(t); };
@@ -511,36 +530,129 @@ struct Client {
 	}
 };
 
+// What the scenarios see of the server and do to it: the FakeServer's insides, or the mock
+// server's /__mock/ controls over HTTP.
+struct RecView {
+	int64_t ver = 0, seq = 0;
+	bool deleted = false, dev = false;
+	std::string h, data;
+};
+struct SpaceView {
+	bool exists = false, authExists = false;
+	int64_t seq = 0, purgedSeq = 0;
+	std::map<std::string, RecView> recs;
+};
+
 struct World {
 	FakeClock clock;
+	Crypto& cr;
 	std::unique_ptr<FakeServer> server;
+	Host* real = nullptr;
+	std::string realBase, mockIp;
+	bool limitsChanged = false;
 	std::vector<std::unique_ptr<Client>> cls;
-	World(Crypto& cr, const std::string& dir, std::vector<std::string> kinds, Limits limits = Limits(),
-	      std::vector<int64_t> skews = {}, Host* real = nullptr, const std::string& realBase = "") {
+
+	World(Crypto& c, const std::string& dir, std::vector<std::string> kinds, Limits limits = Limits(),
+	      std::vector<int64_t> skews = {}, Host* r = nullptr, const std::string& rb = "")
+		: cr(c), real(r), realBase(rb) {
 		if (!real) {
 			server.reset(new FakeServer(clock, cr));
 			server->limits = limits;
 		} else {
-			clock.t = SystemClock().now();
+			uint8_t b[3];
+			cr.random(b, 3);
+			mockIp = "10." + std::to_string(b[0]) + "." + std::to_string(b[1]) + "." + std::to_string(b[2]);
+			setLimits(limits);
 		}
 		for (size_t i = 0; i < kinds.size(); i++) {
 			std::string up = kinds[i];
-			for (char& c : up) c = (char)toupper((unsigned char)c);
+			for (char& ch : up) ch = (char)toupper((unsigned char)ch);
 			const std::string name = up + std::to_string(i);
 			cls.emplace_back(new Client(kinds[i], name, clock, i < skews.size() ? skews[i] : 0, cr, files::join(dir, name)));
-			cls.back()->net.server = server.get();
-			cls.back()->net.real = real;
+			Client& cl = *cls.back();
+			cl.net.server = server.get();
+			cl.net.real = real;
 			if (real) {
-				cls.back()->serverBase = realBase;
-				cls.back()->makeCore();
+				cl.net.mockClock = &clock;
+				cl.net.mockIp = mockIp;
+				cl.serverBase = realBase;
+				cl.makeCore();
 			}
 		}
 	}
+	~World() {
+		if (real && limitsChanged) {
+			json::Value b = json::Value::object();
+			b.set("reset", json::Value::boolean(true));
+			control("limits", b);
+		}
+	}
 	Client& operator[](size_t i) { return *cls[i]; }
-	FakeServer::Space& space(Client& c) { return server->spaces.at(c.core->keys().spaceId); }
-	std::map<std::string, FakeServer::Rec>& recs(Client& c) { return space(c).recs; }
+
+	// The mock server's controls (POST /__mock/<op>, JSON).
+	json::Value control(const std::string& op, const json::Value& body, const std::string& method = "POST",
+	                    const std::string& query = "") {
+		HttpRequest r;
+		r.method = method;
+		r.url = realBase.substr(0, realBase.find("/api/sync/v1")) + "/__mock/" + op + query;
+		if (method == "POST") {
+			r.headers.emplace_back("content-type", "application/json");
+			r.body = json::write(body);
+		}
+		const HttpResponse resp = real->http(r);
+		json::Value out;
+		if (resp.status != 200 || !json::parse(resp.body, out)) throw Fail("mock control " + op + ": " + std::to_string(resp.status));
+		return out;
+	}
+
+	void setLimits(const Limits& L) {
+		if (!real) {
+			server->limits = L;
+			return;
+		}
+		const Limits d;
+		json::Value b = json::Value::object();
+		if (L.maxEnvelope != d.maxEnvelope) b.set("maxRecordBytes", json::Value::integer(L.maxEnvelope));
+		if (L.maxRecords != d.maxRecords) b.set("maxRecords", json::Value::integer(L.maxRecords));
+		if (b.o.empty()) return;
+		control("limits", b);
+		limitsChanged = true;
+	}
+
+	SpaceView view(const std::string& sid) {
+		SpaceView v;
+		if (server) {
+			v.authExists = server->auth.count(sid) > 0;
+			auto s = server->spaces.find(sid);
+			if (s == server->spaces.end()) return v;
+			v.exists = true;
+			v.seq = s->second.seq;
+			v.purgedSeq = s->second.purgedSeq;
+			for (const auto& kv : s->second.recs)
+				v.recs[kv.first] = RecView{ kv.second.ver, kv.second.seq, kv.second.deleted, kv.second.dev, kv.second.h, kv.second.data };
+			return v;
+		}
+		const json::Value d = control("dump", json::Value(), "GET", "?space=" + sid + "&data=1");
+		const json::Value* auth = d.get("auth");
+		v.authExists = auth && auth->get(sid);
+		const json::Value* spaces = d.get("spaces");
+		const json::Value* doc = spaces ? spaces->get(sid) : nullptr;
+		if (!doc || !doc->isObject()) return v;
+		v.exists = true;
+		v.seq = doc->integer("seq");
+		v.purgedSeq = doc->integer("purgedSeq");
+		if (const json::Value* recs = doc->get("recs"))
+			for (const auto& kv : recs->o)
+				v.recs[kv.first] = RecView{ kv.second.integer("ver"), kv.second.integer("seq"), kv.second.flag("del"),
+				                            kv.second.flag("dev"), kv.second.str("h"), kv.second.str("data") };
+		return v;
+	}
+	SpaceView view(Client& c) { return view(c.core->keys().spaceId); }
+	std::map<std::string, RecView> recs(Client& c) { return view(c).recs; }
+	int64_t seq(Client& c) { return view(c).seq; }
+
 	// Live circuit records on the server (not device records, not tombstones).
-	int circuitsOnServer(Client& c, Crypto& cr) {
+	int circuitsOnServer(Client& c, Crypto&) {
 		int n = 0;
 		for (const auto& kv : recs(c)) {
 			if (kv.second.deleted) continue;
@@ -552,6 +664,75 @@ struct World {
 				n++;
 		}
 		return n;
+	}
+
+	void tamper(Client& c, const std::string& op, const std::string& id = "") {
+		const std::string sid = c.core->keys().spaceId;
+		if (server) {
+			if (!server->tamper(sid, op, id)) throw Fail("tamper " + op);
+			return;
+		}
+		json::Value b = json::Value::object();
+		b.set("space", json::Value::string(sid));
+		b.set("op", json::Value::string(op));
+		if (!id.empty()) b.set("id", json::Value::string(id));
+		control("tamper", b);
+	}
+
+	// The daily cleanup, now (the test's clock).
+	void cleanup() {
+		if (server) {
+			server->cleanup();
+			return;
+		}
+		json::Value b = json::Value::object();
+		b.set("set", json::Value::integer(clock.t));
+		control("clock", b);
+		control("cleanup", json::Value::object());
+	}
+
+	// The next API request is answered with `status` (and Retry-After), not acted on.
+	void failNext(int status, int64_t retryAfter) {
+		if (server) {
+			server->failNext = 1;
+			server->failStatus = status;
+			server->failRetryAfter = retryAfter;
+			return;
+		}
+		json::Value b = json::Value::object();
+		b.set("status", json::Value::integer(status));
+		b.set("retryAfter", json::Value::integer(retryAfter));
+		b.set("count", json::Value::integer(1));
+		control("fail", b);
+	}
+
+	// One API request with these keys (none of the client's own logic).
+	int raw(const Keys& k, const std::string& method, const std::string& path, const json::Value* body, json::Value& out,
+	        const std::vector<std::pair<std::string, std::string>>& extra = {}) {
+		HttpRequest r;
+		r.method = method;
+		r.url = (server ? std::string("http://fake/api/sync/v1") : realBase) + "/spaces/" + k.spaceId + path;
+		r.headers.emplace_back("authorization", "Bearer " + k.authToken);
+		for (const auto& h : extra) r.headers.push_back(h);
+		if (body) {
+			r.headers.emplace_back("content-type", "application/json");
+			r.body = json::write(*body);
+		}
+		HttpResponse resp;
+		if (server) {
+			resp = server->handle(r);
+		} else {
+			r.headers.emplace_back("x-mock-now", std::to_string(clock.t));
+			r.headers.emplace_back("x-mock-ip", mockIp);
+			resp = real->http(r);
+		}
+		if (!json::parse(resp.body, out)) out = json::Value::object();
+		return resp.status;
+	}
+	int rawWrite(Client& c, const json::Value& writes, json::Value& out) {
+		json::Value b = json::Value::object();
+		b.set("writes", writes);
+		return raw(c.core->keys(), "POST", "/write", &b, out);
 	}
 };
 
@@ -609,13 +790,14 @@ void s02_link_with_unknown_code_creates_nothing(Ctx& x) {
 	const std::string code = newCode(x.cr);
 	Preview pv;
 	CHECK(a.link(code, pv) == 404 && !a.enabled());
-	if (w.server) CHECK(w.server->spaces.empty() && w.server->auth.empty());
+	const SpaceView v = w.view(keysForCode(x.cr, code).spaceId);
+	CHECK(!v.exists && !v.authExists);
 	std::string message;
 	CHECK(!a.core->link(code, message) && message.find("No circuits are synced with this code") == 0);
 }
 
 void s03_edit_offline_on_two_devices_app_app(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string lid = a.create("Counter", cdlWith(20));
 	Preview pv;
@@ -641,7 +823,7 @@ void s03_edit_offline_on_two_devices_app_app(Ctx& x) {
 }
 
 void s04_edit_offline_web_loses_gets_a_copy(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &wb = w[1];
 	const std::string lid = a.create("Counter", cdlWith(20));
 	Preview pv;
@@ -664,7 +846,7 @@ void s04_edit_offline_web_loses_gets_a_copy(Ctx& x) {
 }
 
 void s05_edit_offline_web_wins_app_keeps_version(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &wb = w[1];
 	const std::string lid = a.create("Counter", cdlWith(20));
 	Preview pv;
@@ -684,7 +866,7 @@ void s05_edit_offline_web_wins_app_keeps_version(Ctx& x) {
 
 void s06_delete_here_edit_there_edit_wins_both_orders(Ctx& x) {
 	for (const char* order : { "delete first", "edit first" }) {
-		World w(x.cr, files::join(x.dir, order[0] == 'd' ? "d" : "e"), { "app", "app" });
+		World w(x.cr, files::join(x.dir, order[0] == 'd' ? "d" : "e"), { "app", "app" }, Limits(), {}, x.real, x.realBase);
 		Client &a = w[0], &b = w[1];
 		const std::string lid = a.create("ALU", cdlWith(20));
 		Preview pv;
@@ -724,7 +906,6 @@ void s07_delete_reaches_other_devices_into_trash(Ctx& x) {
 	b.sync();
 	CHECK(b.names().empty() && b.trashNames() == V({ "Mux" }));
 	CHECK(b.anyNotice("Recently Deleted"));
-	if (!w.server) return;
 	bool found = false;
 	for (const auto& kv : w.recs(a)) {
 		if (!kv.second.deleted) continue;
@@ -741,7 +922,7 @@ void s07_delete_reaches_other_devices_into_trash(Ctx& x) {
 }
 
 void s08_rename_one_side_and_both_sides(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string lid = a.create("Untitled", cdlWith(20));
 	Preview pv;
@@ -764,7 +945,7 @@ void s08_rename_one_side_and_both_sides(Ctx& x) {
 }
 
 void s09_switches_only_on_both_app_and_web_is_not_a_conflict(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &wb = w[1];
 	const std::string lid = a.create("Lamp", CDL());
 	Preview pv;
@@ -800,7 +981,7 @@ void s10_join_with_overlapping_libraries(Ctx& x) {
 		b.sync();
 		a.sync();
 		CHECK_MSG(a.names() == V({ "X", "Y", "Y", "Z" }) && b.names() == V({ "X", "Y", "Y", "Z" }), kb);
-		if (w.server) CHECK(w.circuitsOnServer(a, x.cr) == 4);
+		CHECK(w.circuitsOnServer(a, x.cr) == 4);
 		CHECK(sameEverywhere({ &a, &b }));
 	}
 }
@@ -808,7 +989,7 @@ void s10_join_with_overlapping_libraries(Ctx& x) {
 void s11_quota_exceeded(Ctx& x) {
 	Limits L;
 	L.maxRecords = 3;
-	World w(x.cr, x.dir, { "app", "web" }, L);
+	World w(x.cr, x.dir, { "app", "web" }, L, {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	for (int i = 0; i < 4; i++) a.create("C" + std::to_string(i), cdlWith(20 + i));
 	Preview pv;
@@ -830,7 +1011,7 @@ void s11_quota_exceeded(Ctx& x) {
 void s12_too_large_record_is_skipped_not_retried(Ctx& x) {
 	Limits L;
 	L.maxEnvelope = 400;
-	World w(x.cr, x.dir, { "app" }, L);
+	World w(x.cr, x.dir, { "app" }, L, {}, x.real, x.realBase);
 	Client& a = w[0];
 	std::string big;
 	for (int i = 0; i < 50; i++) big += CDL();
@@ -849,7 +1030,7 @@ void s12_too_large_record_is_skipped_not_retried(Ctx& x) {
 }
 
 void s13_412_retry_when_another_device_pushes_between_pull_and_push(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string lid = a.create("FSM", cdlWith(20));
 	Preview pv;
@@ -870,7 +1051,7 @@ void s13_412_retry_when_another_device_pushes_between_pull_and_push(Ctx& x) {
 }
 
 void s14_answer_lost_mid_push_no_duplicates(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string lid = a.create("Decoder", cdlWith(20));
 	a.turnOn();
@@ -891,28 +1072,28 @@ void s14_answer_lost_mid_push_no_duplicates(Ctx& x) {
 }
 
 void s15_replayed_write_is_idempotent(Ctx& x) {
-	World w(x.cr, x.dir, { "app" });
+	World w(x.cr, x.dir, { "app" }, Limits(), {}, x.real, x.realBase);
 	Client& a = w[0];
 	a.create("R", "r");
 	a.turnOn();
 	a.sync();
 	std::string rid;
 	for (const auto& kv : a.state().records) rid = kv.first;
-	const FakeServer::Rec rec = w.recs(a)[rid];
+	const RecView rec = w.recs(a)[rid];
 	json::Value writes = json::Value::array(), item = json::Value::object(), out;
 	item.set("id", json::Value::string(rid));
 	item.set("base", json::Value::integer(0));
 	item.set("ver", json::Value::integer(1));
 	item.set("data", json::Value::string(rec.data));
 	writes.push(item);
-	CHECK(w.server->write(w.space(a), writes, out) == 200);
+	CHECK(w.rawWrite(a, writes, out) == 200);
 	const json::Value& r0 = out.get("results")->a[0];
 	CHECK(r0.integer("status") == 200 && r0.get("entry")->integer("ver") == 1);
 }
 
 void s16_long_offline_device_after_tombstones_are_purged(Ctx& x) {
 	for (bool edited : { false, true }) {
-		World w(x.cr, files::join(x.dir, edited ? "edited" : "unchanged"), { "app", "app" });
+		World w(x.cr, files::join(x.dir, edited ? "edited" : "unchanged"), { "app", "app" }, Limits(), {}, x.real, x.realBase);
 		Client &a = w[0], &b = w[1];
 		const std::string keep = a.create("Keep", cdlWith(20));
 		const std::string gone = a.create("Gone", cdlWith(21));
@@ -929,8 +1110,8 @@ void s16_long_offline_device_after_tombstones_are_purged(Ctx& x) {
 		a.sync();
 		w.clock.tick(401 * DAY);
 		a.sync();
-		w.server->cleanup();
-		CHECK(w.space(a).purgedSeq > 0);
+		w.cleanup();
+		CHECK(w.view(a).purgedSeq > 0);
 		b.net.down = false;
 		b.sync();
 		a.sync();
@@ -941,7 +1122,7 @@ void s16_long_offline_device_after_tombstones_are_purged(Ctx& x) {
 }
 
 void s17_cloud_copy_deleted_from_another_device(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	a.create("A", "a");
 	Preview pv;
@@ -950,13 +1131,15 @@ void s17_cloud_copy_deleted_from_another_device(Ctx& x) {
 	b.link(code, pv);
 	b.sync();
 	json::Value out;
-	CHECK(w.server->deleteSpace(a.core->keys().spaceId, a.core->keys().authToken, "", out) == 403);   // the bearer token alone
+	CHECK(w.raw(a.core->keys(), "DELETE", "", nullptr, out) == 403);   // the bearer token alone
 	std::string message;
 	CHECK(b.core->deleteSyncedCopy(message) == 200);
 	a.sync();
 	CHECK(a.status() == "gone" && !a.enabled() && a.names() == V({ "A" }));
 	const Keys k = keysForCode(x.cr, code);
-	CHECK(w.server->putSpace(k.spaceId, k.authToken, k.deleteHash, out) == 410);   // the same code can't bring it back
+	json::Value body = json::Value::object();
+	body.set("deleteHash", json::Value::string(k.deleteHash));
+	CHECK(w.raw(k, "PUT", "", &body, out) == 410);   // the same code can't bring it back
 }
 
 void s18_turn_off_keeps_or_removes(Ctx& x) {
@@ -975,23 +1158,14 @@ void s18_turn_off_keeps_or_removes(Ctx& x) {
 }
 
 void s19_damaged_record_is_not_applied_and_is_repaired(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	a.create("T", cdlWith(20));
 	Preview pv;
 	const std::string code = a.turnOn();
 	a.sync();
-	FakeServer::Space& sp = w.space(a);
 	const std::string rid = a.state().records.begin()->first;
-	Bytes env;
-	unb64u(sp.recs[rid].data, env);
-	env.back() ^= 1;
-	sp.seq += 1;
-	FakeServer::Rec& r = sp.recs[rid];
-	r.data = b64u(env);
-	r.ver += 1;
-	r.seq = sp.seq;
-	r.h = envelopeHash(x.cr, env);
+	w.tamper(a, "damage", rid);
 	b.link(code, pv);
 	b.sync();
 	CHECK(b.names().empty() && b.state().unreadable.size() == 1 && b.state().unreadable.count(rid) &&
@@ -1000,14 +1174,14 @@ void s19_damaged_record_is_not_applied_and_is_repaired(Ctx& x) {
 	b.sync();
 	CHECK(b.net.calls - calls == 1);   // not fetched again
 	a.sync();                          // A has the circuit: its copy goes over the damaged one
-	CHECK(sp.recs[rid].ver == 3);
+	CHECK(w.recs(a)[rid].ver == 3);
 	CHECK(a.anyNotice("damaged"));
 	b.sync();
 	CHECK(b.names() == V({ "T" }) && sameEverywhere({ &a, &b }));
 }
 
 void s20_three_devices_converge(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app", "web" });
+	World w(x.cr, x.dir, { "app", "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1], &c = w[2];
 	const std::string xid = a.create("Shared", cdlWith(20));
 	Preview pv;
@@ -1030,7 +1204,7 @@ void s20_three_devices_converge(Ctx& x) {
 }
 
 void s21_connection_drops_mid_push(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	for (int i = 0; i < 3; i++) a.create("N" + std::to_string(i), cdlWith(40 + i));
 	a.turnOn();
@@ -1050,21 +1224,19 @@ void s21_connection_drops_mid_push(Ctx& x) {
 
 // 22 (clients): a 429 with Retry-After: 120.
 void s22_retry_after_is_respected(Ctx& x) {
-	World w(x.cr, x.dir, { "app" });
+	World w(x.cr, x.dir, { "app" }, Limits(), {}, x.real, x.realBase);
 	Client& a = w[0];
 	a.create("R", cdlWith(20));
 	a.turnOn();
 	Scheduler sch;
 	sch.started(a.now() - 10 * kSecond);
-	w.server->failNext = 1;
-	w.server->failStatus = 429;
-	w.server->failRetryAfter = 120;
+	w.failNext(429, 120);
 	const int64_t t0 = a.now();
 	a.sync();
 	CHECK(a.status() == "busy" && a.core->retryAfterMs() >= 120 * kSecond);
 	sch.cycleDone(t0, a.status(), a.core->retryAfterMs(), a.core->pollSeconds(), false);
 	sch.syncNow(a.now());   // the person presses Sync Now: still not before Retry-After
-	const size_t before = w.server->requests;
+	const size_t before = a.net.calls;
 	int64_t firstAt = 0;
 	for (int s = 1; s <= 130; s++) {
 		w.clock.tick(kSecond);
@@ -1077,7 +1249,7 @@ void s22_retry_after_is_respected(Ctx& x) {
 		}
 	}
 	CHECK_MSG(firstAt && firstAt - t0 >= 120 * kSecond, std::to_string(firstAt - t0));
-	CHECK(w.server->requests > before && a.status() == "synced" && w.circuitsOnServer(a, x.cr) == 1);
+	CHECK(a.net.calls > before && a.status() == "synced" && w.circuitsOnServer(a, x.cr) == 1);
 	// And the backoff after a failure: 30 s, then longer.
 	Scheduler s2;
 	s2.started(0);
@@ -1087,7 +1259,7 @@ void s22_retry_after_is_respected(Ctx& x) {
 }
 
 void s23_open_window_with_unsaved_edits_is_not_overwritten(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string la = a.create("Open", cdlWith(20));
 	Preview pv;
@@ -1100,7 +1272,7 @@ void s23_open_window_with_unsaved_edits_is_not_overwritten(Ctx& x) {
 	a.dirty.insert(la);   // A's window has edits not yet saved
 	const int64_t cursor = a.state().cursor;
 	a.sync();
-	CHECK(a.cdlOf(la) == cdlWith(20) && a.state().cursor < w.space(a).seq);
+	CHECK(a.cdlOf(la) == cdlWith(20) && a.state().cursor < w.seq(a));
 	CHECK(a.state().cursor >= cursor);
 	a.edit(la, cdlWith(35));
 	a.dirty.clear();   // the window saves (later than B's edit)
@@ -1113,7 +1285,7 @@ void s23_open_window_with_unsaved_edits_is_not_overwritten(Ctx& x) {
 
 // 24 (clients): an open window with no unsaved edits reloads; a runtime-only change waits for input to stop.
 void s24_clean_window_reloads_runtime_change_waits_for_input(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string la = a.create("Open", CDL());
 	Preview pv;
@@ -1132,14 +1304,14 @@ void s24_clean_window_reloads_runtime_change_waits_for_input(Ctx& x) {
 	b.sync(true);
 	a.recent.insert(la);
 	a.sync();
-	CHECK(a.cdlOf(la) == cdlWith(30) && a.state().cursor < w.space(a).seq);
+	CHECK(a.cdlOf(la) == cdlWith(30) && a.state().cursor < w.seq(a));
 	a.recent.clear();
 	a.sync();
-	CHECK(a.cdlOf(la) == cdlSwitch(true, cdlWith(30)) && a.state().cursor == w.space(a).seq);
+	CHECK(a.cdlOf(la) == cdlSwitch(true, cdlWith(30)) && a.state().cursor == w.seq(a));
 }
 
 void s25_mass_delete_here_asks_first(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	std::vector<std::string> made;
 	for (int i = 0; i < 12; i++) made.push_back(a.create("M" + std::to_string(i), cdlWith(20 + i)));
@@ -1172,7 +1344,7 @@ void copyTree(const std::string& from, const std::string& to) {
 }
 
 void s26_library_restored_from_a_backup(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string p = a.create("P", cdlWith(20));
 	const std::string q = a.create("Q", cdlWith(21));
@@ -1200,7 +1372,7 @@ void s26_library_restored_from_a_backup(Ctx& x) {
 }
 
 void s30_newer_payload_is_left_alone(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string la = a.create("V2", cdlWith(20));
 	Preview pv;
@@ -1209,7 +1381,6 @@ void s30_newer_payload_is_left_alone(Ctx& x) {
 	b.link(code, pv);
 	b.sync();
 	const std::string rid = a.mapped(la);
-	FakeServer::Space& sp = w.space(a);
 	std::string p2 = circuitJson("V2", cdlWith(25), 1, "future", std::string(32, 'f'), -1, nullptr, nullptr);
 	p2 = replaceAll(p2, "{\"v\":1,", "{\"v\":2,");
 	Bytes env;
@@ -1221,7 +1392,7 @@ void s30_newer_payload_is_left_alone(Ctx& x) {
 	item.set("ver", json::Value::integer(2));
 	item.set("data", json::Value::string(b64u(env)));
 	writes.push(item);
-	w.server->write(sp, writes, out);
+	CHECK(w.rawWrite(a, writes, out) == 200);
 	const std::string lb = b.byName("V2")[0];
 	b.sync();
 	CHECK(b.state().unreadable.count(rid) && b.state().unreadable.at(rid) == std::make_pair((int64_t)2, std::string("newer")));
@@ -1229,7 +1400,7 @@ void s30_newer_payload_is_left_alone(Ctx& x) {
 	b.edit(lb, cdlWith(26));
 	const size_t calls = b.net.calls;
 	b.sync();
-	CHECK(b.net.calls - calls == 1 && sp.recs[rid].ver == 2);   // no write over it: one request (the pull)
+	CHECK(b.net.calls - calls == 1 && w.recs(a)[rid].ver == 2);   // no write over it: one request (the pull)
 	CHECK(b.problem(lb).find("newer") != std::string::npos);
 }
 
@@ -1251,7 +1422,7 @@ void s31_join_rule_only_when_joining(Ctx& x) {
 
 void s32_lost_answer_then_another_device_builds_on_it(Ctx& x) {
 	for (const char* kind : { "web", "app" }) {
-		World w(x.cr, files::join(x.dir, kind), { kind, "app" });
+		World w(x.cr, files::join(x.dir, kind), { kind, "app" }, Limits(), {}, x.real, x.realBase);
 		Client &wc = w[0], &a = w[1];
 		const std::string lw = wc.create("Counter", cdlWith(20));
 		Preview pv;
@@ -1282,7 +1453,7 @@ void s32_lost_answer_then_another_device_builds_on_it(Ctx& x) {
 void s33_rename_on_one_device_edit_on_the_other(Ctx& x) {
 	const std::vector<std::pair<std::string, std::string>> kinds = { { "app", "app" }, { "web", "web" }, { "app", "web" } };
 	for (const auto& k : kinds) {
-		World w(x.cr, files::join(x.dir, k.first + "-" + k.second), { k.first, k.second });
+		World w(x.cr, files::join(x.dir, k.first + "-" + k.second), { k.first, k.second }, Limits(), {}, x.real, x.realBase);
 		Client &a = w[0], &b = w[1];
 		const std::string la = a.create("Untitled", cdlWith(20));
 		Preview pv;
@@ -1302,7 +1473,7 @@ void s33_rename_on_one_device_edit_on_the_other(Ctx& x) {
 }
 
 void s34_clock_skew_does_not_pick_the_wrong_winner(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" }, Limits(), { 0, -DAY });   // B's clock is a day slow
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), { 0, -DAY }, x.real, x.realBase);   // B's clock is a day slow
 	Client &a = w[0], &b = w[1];
 	const std::string la = a.create("C", cdlWith(20));
 	Preview pv;
@@ -1322,7 +1493,7 @@ void s34_clock_skew_does_not_pick_the_wrong_winner(Ctx& x) {
 }
 
 void s35_server_rolls_a_record_back(Ctx& x) {
-	World w(x.cr, x.dir, { "web", "web" });
+	World w(x.cr, x.dir, { "web", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &w1 = w[0], &w2 = w[1];
 	const std::string lid = w1.create("Report", cdlWith(20));
 	Preview pv;
@@ -1330,15 +1501,11 @@ void s35_server_rolls_a_record_back(Ctx& x) {
 	w1.sync();
 	w2.link(code, pv);
 	w2.sync();
-	FakeServer::Space& sp = w.space(w1);
 	const std::string rid = w1.mapped(lid);
-	FakeServer::Rec old = sp.recs[rid];   // the server quietly keeps ver 1
 	w1.edit(lid, cdlWith(99));
 	w1.sync();
 	w2.sync();
-	sp.seq += 1;
-	old.seq = sp.seq;
-	sp.recs[rid] = old;   // and serves it again as the current one
+	w.tamper(w1, "rollback", rid);   // the server serves ver 1 again as the current one
 	w2.sync();
 	w1.sync();
 	w2.sync();
@@ -1346,12 +1513,12 @@ void s35_server_rolls_a_record_back(Ctx& x) {
 		const std::string id = c->byName("Report")[0];
 		CHECK_MSG(c->core->structureHash(c->cdlOf(id)) == c->core->structureHash(cdlWith(99)), c->device);
 	}
-	CHECK(sp.recs[rid].ver >= 3);   // the newer copy was sent again, at a higher ver
+	CHECK(w.recs(w1)[rid].ver >= 3);   // the newer copy was sent again, at a higher ver
 	CHECK(w2.anyNotice("older copy"));
 }
 
 void s36_forged_deletes_trash_nothing(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &wb = w[1];
 	for (int i = 0; i < 20; i++) a.create("C" + std::to_string(i), cdlWith(30 + i));
 	Preview pv;
@@ -1359,20 +1526,12 @@ void s36_forged_deletes_trash_nothing(Ctx& x) {
 	a.sync();
 	wb.link(code, pv);
 	wb.sync();
-	FakeServer::Space& sp = w.space(a);
-	for (auto& kv : sp.recs) {   // tombstone flags with no sealed tombstone
-		sp.seq += 1;
-		kv.second.ver += 1;
-		kv.second.seq = sp.seq;
-		kv.second.deleted = true;
-	}
+	w.tamper(a, "forgeTombstones");   // tombstone flags with no sealed tombstone
 	a.sync();
 	wb.sync();
 	CHECK(a.ids().size() == 20 && wb.ids().size() == 20 && a.trashNames().empty() && wb.trashNames().empty());
 	// ... and a forged purge: purgedSeq raised, every record gone
-	sp.purgedSeq = sp.seq + 1;
-	sp.seq += 1;
-	sp.recs.clear();
+	w.tamper(a, "forgePurge");
 	a.sync();
 	wb.sync();
 	CHECK(a.ids().size() == 20 && wb.ids().size() == 20 && a.trashNames().empty() && wb.trashNames().empty());
@@ -1380,7 +1539,7 @@ void s36_forged_deletes_trash_nothing(Ctx& x) {
 }
 
 void s37_many_deletes_from_another_device_ask_first(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	std::vector<std::string> made;
 	for (int i = 0; i < 12; i++) made.push_back(a.create("D" + std::to_string(i), cdlWith(20 + i)));
@@ -1401,13 +1560,13 @@ void s37_many_deletes_from_another_device_ask_first(Ctx& x) {
 }
 
 void s38_space_reset_is_noticed(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	for (int i = 0; i < 5; i++) a.create("C" + std::to_string(i), cdlWith(30 + i));
 	const std::string code = a.turnOn();
 	a.sync();
 	a.sync();
-	w.server->spaces[a.core->keys().spaceId] = w.server->newSpace();   // restored / recreated empty
+	w.tamper(a, "resetSpace");   // restored / recreated empty
 	a.sync();
 	CHECK(w.circuitsOnServer(a, x.cr) == 5 && a.anyNotice("reset"));
 	Preview pv;
@@ -1424,20 +1583,18 @@ void s39_someone_elses_code_shows_whose_it_is(Ctx& x) {
 	const std::string code = bob.turnOn();
 	bob.sync();
 	me.create("My secret design", cdlWith(80));
-	std::map<std::string, FakeServer::Rec> before;
-	if (w.server) before = w.recs(bob);
+	const std::map<std::string, RecView> before = w.recs(bob);
 	Preview pv;
 	CHECK(me.link(code, pv, false) == 200);   // the preview, before anything is sent
 	CHECK(pv.circuits == 3 && pv.devices == V({ "Bob\xE2\x80\x99s laptop" }) && !me.enabled());
 	CHECK(pv.sentence.find("3 circuits from Bob\xE2\x80\x99s laptop") == 0 + std::string("This code has ").size());
-	if (w.server) {
-		CHECK(w.recs(bob).size() == before.size() && w.circuitsOnServer(bob, x.cr) == 3);
-		for (const auto& kv : before) CHECK(w.recs(bob)[kv.first].h == kv.second.h);
-	}
+	const std::map<std::string, RecView> after = w.recs(bob);
+	CHECK(after.size() == before.size() && w.circuitsOnServer(bob, x.cr) == 3);
+	for (const auto& kv : before) CHECK(after.at(kv.first).h == kv.second.h && after.at(kv.first).seq == kv.second.seq);
 }
 
 void s40_empty_space_stays_while_devices_use_it_and_a_lost_space_is_made_again(Ctx& x) {
-	World w(x.cr, x.dir, { "web", "web" });
+	World w(x.cr, x.dir, { "web", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &wa = w[0], &p = w[1];
 	Preview pv;
 	const std::string code = wa.turnOn();
@@ -1448,21 +1605,21 @@ void s40_empty_space_stays_while_devices_use_it_and_a_lost_space_is_made_again(C
 		w.clock.tick(DAY);
 		wa.sync();
 		p.sync();
-		w.server->cleanup();
+		w.cleanup();
 	}
-	CHECK(w.server->spaces.count(wa.core->keys().spaceId) && wa.enabled() && p.enabled());
+	CHECK(w.view(wa).exists && wa.enabled() && p.enabled());
 	wa.create("First", cdlWith(20));
 	wa.sync();
 	p.sync();
 	CHECK(p.names() == V({ "First" }));
-	w.server->spaces.erase(wa.core->keys().spaceId);   // lost without a marker
+	w.tamper(wa, "loseSpace");   // lost without a marker
 	wa.sync();
 	p.sync();
 	CHECK(wa.status() == "synced" && p.status() == "synced" && w.circuitsOnServer(wa, x.cr) == 1 && p.names() == V({ "First" }));
 }
 
 void s41_switch_flips_are_sent_lazily(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	const std::string la = a.create("Lamp", CDL());
 	Preview pv;
@@ -1484,7 +1641,7 @@ void s41_switch_flips_are_sent_lazily(Ctx& x) {
 }
 
 void s42_purge_while_paging_restarts_as_a_full_pull(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "app" });
+	World w(x.cr, x.dir, { "app", "app" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &b = w[1];
 	std::vector<std::string> keep;
 	for (int i = 0; i < 3; i++) keep.push_back(a.create("K" + std::to_string(i), cdlWith(20 + i)));
@@ -1501,29 +1658,28 @@ void s42_purge_while_paging_restarts_as_a_full_pull(Ctx& x) {
 	w.clock.tick(401 * DAY);
 	a.sync();
 	b.net.down = false;
-	w.server->changesLimit = 1;
+	b.changesLimit = 1;   // pages of one entry
 	bool purged = false;
-	FakeServer* server = w.server.get();
+	b.net.sinces.clear();
 	b.net.before = [&](const std::string& name) {
-		if (name == "changes" && !purged && server->sinces.size() == 1) {
-			server->cleanup();   // the daily cleanup runs between two pages
+		if (name == "changes" && !purged && b.net.sinces.size() == 2) {
+			w.cleanup();   // the daily cleanup runs between two pages
 			purged = true;
 		}
 	};
-	server->sinces.clear();
 	b.sync();
-	const std::vector<int64_t>& sinces = server->sinces;
+	const std::vector<int64_t>& sinces = b.net.sinces;
 	CHECK(purged && !sinces.empty() && sinces[0] > 0);
 	CHECK(std::find(sinces.begin() + 1, sinces.end(), 0) != sinces.end());   // restarted as a full pull
 	b.net.before = nullptr;
-	w.server->changesLimit = 1000;
+	b.changesLimit = 0;
 	a.sync();
 	b.sync();
-	CHECK(sameEverywhere({ &a, &b }) && b.state().cursor == w.space(a).seq);
+	CHECK(sameEverywhere({ &a, &b }) && b.state().cursor == w.seq(a));
 }
 
 void s43_switch_flip_here_real_edit_there_is_not_a_conflict(Ctx& x) {
-	World w(x.cr, x.dir, { "app", "web" });
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
 	Client &a = w[0], &wb = w[1];
 	const std::string la = a.create("Lamp", CDL());
 	Preview pv;
@@ -1592,50 +1748,50 @@ void scenarioTests(Crypto& cr, const std::string& tempDir, Report& report, Host*
 	struct Row {
 		const char* name;
 		void (*fn)(Ctx&);
-		bool overHttp;   // also run against a mock server (no server internals needed)
+		bool overHttp;   // also run against a mock server (through its /__mock/ controls)
 	};
 	static const Row rows[] = {
 		{ "s01_first_device_then_link", s01_first_device_then_link, true },
 		{ "s02_link_with_unknown_code_creates_nothing", s02_link_with_unknown_code_creates_nothing, true },
-		{ "s03_edit_offline_on_two_devices_app_app", s03_edit_offline_on_two_devices_app_app, false },
-		{ "s04_edit_offline_web_loses_gets_a_copy", s04_edit_offline_web_loses_gets_a_copy, false },
-		{ "s05_edit_offline_web_wins_app_keeps_version", s05_edit_offline_web_wins_app_keeps_version, false },
-		{ "s06_delete_here_edit_there_edit_wins_both_orders", s06_delete_here_edit_there_edit_wins_both_orders, false },
+		{ "s03_edit_offline_on_two_devices_app_app", s03_edit_offline_on_two_devices_app_app, true },
+		{ "s04_edit_offline_web_loses_gets_a_copy", s04_edit_offline_web_loses_gets_a_copy, true },
+		{ "s05_edit_offline_web_wins_app_keeps_version", s05_edit_offline_web_wins_app_keeps_version, true },
+		{ "s06_delete_here_edit_there_edit_wins_both_orders", s06_delete_here_edit_there_edit_wins_both_orders, true },
 		{ "s07_delete_reaches_other_devices_into_trash", s07_delete_reaches_other_devices_into_trash, true },
-		{ "s08_rename_one_side_and_both_sides", s08_rename_one_side_and_both_sides, false },
-		{ "s09_switches_only_on_both_app_and_web_is_not_a_conflict", s09_switches_only_on_both_app_and_web_is_not_a_conflict, false },
+		{ "s08_rename_one_side_and_both_sides", s08_rename_one_side_and_both_sides, true },
+		{ "s09_switches_only_on_both_app_and_web_is_not_a_conflict", s09_switches_only_on_both_app_and_web_is_not_a_conflict, true },
 		{ "s10_join_with_overlapping_libraries", s10_join_with_overlapping_libraries, true },
-		{ "s11_quota_exceeded", s11_quota_exceeded, false },
-		{ "s12_too_large_record_is_skipped_not_retried", s12_too_large_record_is_skipped_not_retried, false },
-		{ "s13_412_retry_when_another_device_pushes_between_pull_and_push", s13_412_retry_when_another_device_pushes_between_pull_and_push, false },
-		{ "s14_answer_lost_mid_push_no_duplicates", s14_answer_lost_mid_push_no_duplicates, false },
-		{ "s15_replayed_write_is_idempotent", s15_replayed_write_is_idempotent, false },
-		{ "s16_long_offline_device_after_tombstones_are_purged", s16_long_offline_device_after_tombstones_are_purged, false },
-		{ "s17_cloud_copy_deleted_from_another_device", s17_cloud_copy_deleted_from_another_device, false },
+		{ "s11_quota_exceeded", s11_quota_exceeded, true },
+		{ "s12_too_large_record_is_skipped_not_retried", s12_too_large_record_is_skipped_not_retried, true },
+		{ "s13_412_retry_when_another_device_pushes_between_pull_and_push", s13_412_retry_when_another_device_pushes_between_pull_and_push, true },
+		{ "s14_answer_lost_mid_push_no_duplicates", s14_answer_lost_mid_push_no_duplicates, true },
+		{ "s15_replayed_write_is_idempotent", s15_replayed_write_is_idempotent, true },
+		{ "s16_long_offline_device_after_tombstones_are_purged", s16_long_offline_device_after_tombstones_are_purged, true },
+		{ "s17_cloud_copy_deleted_from_another_device", s17_cloud_copy_deleted_from_another_device, true },
 		{ "s18_turn_off_keeps_or_removes", s18_turn_off_keeps_or_removes, true },
-		{ "s19_damaged_record_is_not_applied_and_is_repaired", s19_damaged_record_is_not_applied_and_is_repaired, false },
-		{ "s20_three_devices_converge", s20_three_devices_converge, false },
-		{ "s21_connection_drops_mid_push", s21_connection_drops_mid_push, false },
-		{ "s22_retry_after_is_respected", s22_retry_after_is_respected, false },
-		{ "s23_open_window_with_unsaved_edits_is_not_overwritten", s23_open_window_with_unsaved_edits_is_not_overwritten, false },
-		{ "s24_clean_window_reloads_runtime_change_waits_for_input", s24_clean_window_reloads_runtime_change_waits_for_input, false },
-		{ "s25_mass_delete_here_asks_first", s25_mass_delete_here_asks_first, false },
-		{ "s26_library_restored_from_a_backup", s26_library_restored_from_a_backup, false },
-		{ "s30_newer_payload_is_left_alone", s30_newer_payload_is_left_alone, false },
+		{ "s19_damaged_record_is_not_applied_and_is_repaired", s19_damaged_record_is_not_applied_and_is_repaired, true },
+		{ "s20_three_devices_converge", s20_three_devices_converge, true },
+		{ "s21_connection_drops_mid_push", s21_connection_drops_mid_push, true },
+		{ "s22_retry_after_is_respected", s22_retry_after_is_respected, true },
+		{ "s23_open_window_with_unsaved_edits_is_not_overwritten", s23_open_window_with_unsaved_edits_is_not_overwritten, true },
+		{ "s24_clean_window_reloads_runtime_change_waits_for_input", s24_clean_window_reloads_runtime_change_waits_for_input, true },
+		{ "s25_mass_delete_here_asks_first", s25_mass_delete_here_asks_first, true },
+		{ "s26_library_restored_from_a_backup", s26_library_restored_from_a_backup, true },
+		{ "s30_newer_payload_is_left_alone", s30_newer_payload_is_left_alone, true },
 		{ "s31_join_rule_only_when_joining", s31_join_rule_only_when_joining, true },
-		{ "s32_lost_answer_then_another_device_builds_on_it", s32_lost_answer_then_another_device_builds_on_it, false },
-		{ "s33_rename_on_one_device_edit_on_the_other", s33_rename_on_one_device_edit_on_the_other, false },
-		{ "s34_clock_skew_does_not_pick_the_wrong_winner", s34_clock_skew_does_not_pick_the_wrong_winner, false },
-		{ "s35_server_rolls_a_record_back", s35_server_rolls_a_record_back, false },
-		{ "s36_forged_deletes_trash_nothing", s36_forged_deletes_trash_nothing, false },
-		{ "s37_many_deletes_from_another_device_ask_first", s37_many_deletes_from_another_device_ask_first, false },
-		{ "s38_space_reset_is_noticed", s38_space_reset_is_noticed, false },
+		{ "s32_lost_answer_then_another_device_builds_on_it", s32_lost_answer_then_another_device_builds_on_it, true },
+		{ "s33_rename_on_one_device_edit_on_the_other", s33_rename_on_one_device_edit_on_the_other, true },
+		{ "s34_clock_skew_does_not_pick_the_wrong_winner", s34_clock_skew_does_not_pick_the_wrong_winner, true },
+		{ "s35_server_rolls_a_record_back", s35_server_rolls_a_record_back, true },
+		{ "s36_forged_deletes_trash_nothing", s36_forged_deletes_trash_nothing, true },
+		{ "s37_many_deletes_from_another_device_ask_first", s37_many_deletes_from_another_device_ask_first, true },
+		{ "s38_space_reset_is_noticed", s38_space_reset_is_noticed, true },
 		{ "s39_someone_elses_code_shows_whose_it_is", s39_someone_elses_code_shows_whose_it_is, true },
 		{ "s40_empty_space_stays_while_devices_use_it_and_a_lost_space_is_made_again",
-		  s40_empty_space_stays_while_devices_use_it_and_a_lost_space_is_made_again, false },
-		{ "s41_switch_flips_are_sent_lazily", s41_switch_flips_are_sent_lazily, false },
-		{ "s42_purge_while_paging_restarts_as_a_full_pull", s42_purge_while_paging_restarts_as_a_full_pull, false },
-		{ "s43_switch_flip_here_real_edit_there_is_not_a_conflict", s43_switch_flip_here_real_edit_there_is_not_a_conflict, false },
+		  s40_empty_space_stays_while_devices_use_it_and_a_lost_space_is_made_again, true },
+		{ "s41_switch_flips_are_sent_lazily", s41_switch_flips_are_sent_lazily, true },
+		{ "s42_purge_while_paging_restarts_as_a_full_pull", s42_purge_while_paging_restarts_as_a_full_pull, true },
+		{ "s43_switch_flip_here_real_edit_there_is_not_a_conflict", s43_switch_flip_here_real_edit_there_is_not_a_conflict, true },
 		{ "state_file_round_trip", state_file_round_trip, false },
 	};
 	const std::string base = files::join(tempDir, "scenarios");
