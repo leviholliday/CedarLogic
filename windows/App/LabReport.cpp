@@ -402,9 +402,9 @@ struct Report {
 		for (const auto& p : queued) { if (p.second) drawHeading(p.first); else drawSubheading(p.first); }
 	}
 
-	void paragraph(const std::string& s, float size = 11, Col color = gray(0.3f), float after = 10) {
+	void paragraph(const std::string& s, float size = 11, Col color = gray(0.3f), float after = 10, float keep = 0) {
 		const float h = wrapped(nullptr, s, box(kMargin, y, kPW - kMargin, y + 1000), ui(size), color);
-		need(h);
+		need(h + keep);
 		wrapped(rt, s, box(kMargin, y, kPW - kMargin, y + h), ui(size), color);
 		y += h + after;
 	}
@@ -465,10 +465,10 @@ struct Report {
 
 	void truthTable(const Table& t) {
 		if (t.sequential)
-			paragraph("This circuit has clocks or flip-flops, so a light can depend on what happened before. Each row is read after the circuit settles from the row above it.", 10);
+			paragraph("This circuit has clocks or flip-flops, so a light can depend on what happened before. Each row is read after the circuit settles from the row above it.", 10, gray(0.3f), 10, 100);
 		if (t.unsettled > 0)
 			paragraph(strf("%d row%s never stopped changing (a clock or an oscillation), so those lights are a snapshot.", t.unsettled,
-			               t.unsettled == 1 ? "" : "s"), 10);
+			               t.unsettled == 1 ? "" : "s"), 10, gray(0.3f), 10, 100);
 		const int cols = (int)t.names.size();
 		const float cw = std::min(64.0f, kContentW / std::max(cols, 1)), tableW = cw * cols, x0 = kMargin + (kContentW - tableW) / 2, rowH = 16;
 		auto headerRow = [&] {
