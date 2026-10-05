@@ -9,10 +9,18 @@
 //     search over grid nodes where gate bodies are walls and each step costs
 //     length plus a price for bends, for crossing another wire, for running
 //     right beside one, for hugging a gate and for passing a foreign pin;
+//   * each search looks in a window around its ends first (a few steps past
+//     the box they make) and widens only when nothing there gets through, so
+//     one wire on a big page doesn't explore the whole sheet;
 //   * two wires on the same line (which reads as one wire) are all but
 //     forbidden, and the nets are ripped up and rerouted a few times with the
 //     price of contested nodes rising each pass (negotiated congestion), so
-//     early nets move aside for later ones instead of the order deciding;
+//     early nets move aside for later ones instead of the order deciding. On
+//     a big page, where a full pass is costly, later passes reroute only the
+//     nets still sharing a line, and stop once that stops helping;
+//   * the work is capped in search steps, not seconds (Tidy Up runs on the UI
+//     thread, and the result mustn't depend on the machine): a wire past the
+//     cap is left to the caller's plain route;
 //   * the result is written as the same Segment topology TrunkRouter returns,
 //     so guiWire adopts it with no new plumbing.
 //
