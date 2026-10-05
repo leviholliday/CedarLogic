@@ -151,6 +151,15 @@ struct Report {
 	LabReportOptions options;
 	float y = 0;
 	int pageNumber = 0;
+	// Headings wait here until the block under them is placed, so a heading
+	// is never left alone at the bottom of a page.
+	std::vector<std::pair<std::string, bool>> pending;   // (text, isSection)
+	static constexpr float kSectionH = 43, kSubH = 22;
+	float pendingH() const {
+		float h = 0;
+		for (const auto& p : pending) h += p.second ? kSectionH : kSubH;
+		return h;
+	}
 
 	const Color black = colorF(0, 0, 0), gray = colorF(0.4f, 0.4f, 0.4f), rule = colorF(0.75f, 0.75f, 0.75f);
 
@@ -169,7 +178,14 @@ struct Report {
 		fillRect(cr, rectF(0, 0, kPW, kPH), colorF(1, 1, 1));
 		y = kMargin;
 	}
-	void need(float h) { if (y + h > kPH - kMargin - kFooter) newPage(); }
+	// Starts a new page unless `h` more points fit (with any waiting
+	// headings), then draws the waiting headings.
+	void need(float h) {
+		if (y + pendingH() + h > kPH - kMargin - kFooter) newPage();
+		const std::vector<std::pair<std::string, bool>> queued = pending;
+		pending.clear();
+		for (const auto& p : queued) { if (p.second) drawHeading(p.first); else drawSubheading(p.first); }
+	}
 
 	void paragraph(const std::string& s, float size = 11, Color color = colorF(0.3f, 0.3f, 0.3f), float after = 10) {
 		const RectF box = rectF(kMargin, y, kPW - kMargin, y + 1000);
@@ -178,16 +194,16 @@ struct Report {
 		drawWrapped(cr, s, rectF(kMargin, y, kPW - kMargin, y + h), size, color);
 		y += h + after;
 	}
-	void heading(const std::string& s) {
-		need(60);
+	void heading(const std::string& s) { pending.push_back({ s, true }); }
+	void subheading(const std::string& s) { pending.push_back({ s, false }); }
+	void drawHeading(const std::string& s) {
 		y += 8;
 		drawText(cr, s, rectF(kMargin, y, kPW - kMargin, y + 22), 15, black, TextAlign::Leading, true);
 		y += 24;
 		fillRect(cr, rectF(kMargin, y, kPW - kMargin, y + 0.5f), rule);
 		y += 10;
 	}
-	void subheading(const std::string& s) {
-		need(40);
+	void drawSubheading(const std::string& s) {
 		drawText(cr, s, rectF(kMargin, y, kPW - kMargin, y + 18), 12, colorF(0.25f, 0.25f, 0.25f), TextAlign::Leading, true);
 		y += 22;
 	}
@@ -207,8 +223,8 @@ struct Report {
 		const time_t now = time(nullptr);
 		struct tm lt;
 		localtime_r(&now, &lt);
-		strftime(date, sizeof date, "%B %d, %Y", &lt);
-		drawText(cr, std::string("Date: ") + date, rectF(kPW - kMargin - 200, y, kPW - kMargin, y + 20), 13, colorF(0.3f, 0.3f, 0.3f),
+		strftime(date, sizeof date, "%B", &lt);
+		drawText(cr, "Date: " + std::string(date) + format(" %d, %d", lt.tm_mday, lt.tm_year + 1900), rectF(kPW - kMargin - 200, y, kPW - kMargin, y + 20), 13, colorF(0.3f, 0.3f, 0.3f),
 		         TextAlign::Trailing);
 		y += 34;
 	}
@@ -217,10 +233,10 @@ struct Report {
 		float w, h;
 		if (!reportCircuitSize(doc, page, w, h)) return;
 		if (count > 1) subheading(pageTitle(page));
-		need(220);
-		const float room = kPH - kMargin - kFooter - y;
+		const float room = kPH - 2 * kMargin - kFooter - pendingH();   // what a fresh page gives
 		const float s = std::min({ kContentW / w, room / h, 1.5f });
 		const float dw = w * s, dh = h * s, x = kMargin + (kContentW - dw) / 2;
+		need(dh);
 		cairo_save(cr);
 		cairo_translate(cr, x, y);
 		cairo_rectangle(cr, 0, 0, dw, dh);
