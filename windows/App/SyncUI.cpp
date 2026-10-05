@@ -80,16 +80,21 @@ void monoText(ID2D1RenderTarget* rt, const std::string& text, const D2D1_RECT_F&
 	f->Release();
 }
 
-// The code's QR (the website's link), black on a white square with its quiet
-// zone, in either theme: a camera wants it so.
+// A QR of some text (the code's website link, or a pairing link), black on a white
+// square with its quiet zone, in either theme: a camera wants it so.
 struct Qr {
 	std::vector<bool> modules;
 	int size = 0;
-	explicit Qr(const std::string& canonical) { modules = clsync::qr(clsync::webLink(canonical), size); }
+	Qr() = default;
+	explicit Qr(const std::string& text) { modules = clsync::qr(text, size); }
+	bool any() const { return size > 0; }
 	static const int kModule = 4;     // points; version 5 (the usual) is 37 modules: 180 points with the border
 	float side() const { return (float)(size + 8) * kModule; }
-	void paint(ID2D1RenderTarget* rt, float w, float) const {
-		const float total = side(), left = std::floor((w - total) / 2), top = 0;
+	// `room`: the height set aside for it (a bigger code than expected is drawn smaller to fit).
+	void paint(ID2D1RenderTarget* rt, float w, float room) const {
+		if (!any()) return;
+		const float mod = std::min((float)kModule, std::floor(room / (float)(size + 8)));
+		const float total = (float)(size + 8) * mod, left = std::floor((w - total) / 2), top = 0;
 		fillRound(rt, D2D1::RectF(left, top, left + total, top + total), 6, D2D1::ColorF(1, 1, 1));
 		ID2D1SolidColorBrush* b = nullptr;
 		if (FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &b))) return;
@@ -98,8 +103,8 @@ struct Qr {
 		for (int y = 0; y < size; y++)
 			for (int x = 0; x < size; x++)
 				if (modules[(size_t)y * size + x]) {
-					const float mx = left + (x + 4) * kModule, my = top + (y + 4) * kModule;
-					rt->FillRectangle(D2D1::RectF(mx, my, mx + kModule, my + kModule), b);
+					const float mx = left + (x + 4) * mod, my = top + (y + 4) * mod;
+					rt->FillRectangle(D2D1::RectF(mx, my, mx + mod, my + mod), b);
 				}
 		rt->SetAntialiasMode(was);
 		b->Release();
@@ -110,7 +115,7 @@ struct Qr {
 
 void codeSheet(HWND parent, const std::string& canonical, bool afterStartOver) {
 	if (canonical.empty()) return;
-	Qr qr(canonical);
+	Qr qr(clsync::webLink(canonical));
 	const std::string grouped = dashed(canonical);
 	Form f;
 	f.title = afterStartOver ? "Your new sync code" : "Your sync code";
@@ -132,7 +137,7 @@ void codeSheet(HWND parent, const std::string& canonical, bool afterStartOver) {
 	FormField pic;
 	pic.kind = FormField::Picture;
 	pic.height = (int)qr.side() + 4;
-	pic.paint = [&qr](ID2D1RenderTarget* rt, float w, float h) { qr.paint(rt, w, h); };
+	pic.paint = [&qr](ID2D1RenderTarget* rt, float w, float) { qr.paint(rt, w, qr.side()); };
 	f.add(pic);
 	std::string how = "On your other computer: Settings › Sync › I Have a Code. On your phone: scan this with the camera, or open "
 	                  "cedarlogic.netlify.app/app, then Your Circuits › Sync › Scan Code.";
@@ -216,25 +221,163 @@ void turnOn(HWND) {
 
 // ---- I Have a Code ----------------------------------------------------------------------------
 
-bool haveCode(HWND parent, const std::string& prefill, bool run) {
-	clsync::Engine* e = engine();
-	if (e == nullptr) {
+namespace {
+
+// SYNC.md 11.6: the sheet's two halves. "Scan with your phone" shows a QR code (a pairing link)
+// that a device that syncs scans; the code then arrives from the engine and goes through the
+// same preview and confirmation as a typed one. "Or type the code" is the field, as before.
+struct HaveCodeState {
+	Form* form = nullptr;
+	clsync::Engine* engine = nullptr;     // null for the sample (--dialog sync-pair)
+	bool busy = false, got = false;
+	std::string code, from;               // `from`: who sent it, when it came by a QR code
+	clsync::Preview preview;
+	std::string pendingCode, pendingFrom; // a scanned code that came while a typed one was being checked
+	Qr qr;                                // empty until the website has the request
+	int textField = -1, verdictField = -1, picField = -1, statusField = -1, againField = -1;
+};
+
+// The words under the QR code, and the button after them ("" for none).
+void setPairStatus(HaveCodeState& st, const std::string& words, const std::string& button) {
+	Form* f = st.form;
+	if (f == nullptr || f->dialog == nullptr) return;
+	f->setText(st.statusField, words);
+	HWND b = f->fields[st.againField].hwnd;
+	if (b == nullptr) return;
+	if (!button.empty()) f->setText(st.againField, button);
+	ShowWindow(b, button.empty() ? SW_HIDE : SW_SHOW);
+	InvalidateRect(b, nullptr, TRUE);
+}
+
+// The typed or scanned code, checked with the website (what it holds, shown next).
+void checkCode(const std::shared_ptr<HaveCodeState>& st, const std::string& c, const std::string& from) {
+	Form* f = st->form;
+	if (f == nullptr || f->dialog == nullptr || st->engine == nullptr) return;
+	st->busy = true;
+	f->setProblem("");
+	f->setText(st->verdictField, from.empty() ? "Checking the code…" : "");
+	f->enable(st->textField, false);
+	if (!from.empty()) {   // it came by the QR code, which is done with
+		st->qr = Qr();
+		f->refresh(st->picField);
+		setPairStatus(*st, "Checking the code…", "");
+	}
+	st->engine->preview(c, [st, c, from](bool ok, const std::string& message, clsync::Preview pv) {
+		st->busy = false;
+		Form* fm = st->form;
+		if (fm == nullptr || fm->dialog == nullptr) return;   // the sheet was closed meanwhile
+		if (!ok) {
+			fm->enable(st->textField, true);
+			fm->setText(st->verdictField, "");
+			if (from.empty()) {
+				SetFocus(fm->fields[st->textField].hwnd);
+				fm->setProblem(message);
+			} else {
+				st->qr = Qr();   // (that QR code is used up)
+				fm->refresh(st->picField);
+				setPairStatus(*st, message, "Show a New One");
+			}
+			if (!st->pendingCode.empty()) {   // a scanned code waited behind this check
+				const std::string pc = st->pendingCode, pf = st->pendingFrom;
+				st->pendingCode.clear();
+				st->pendingFrom.clear();
+				checkCode(st, pc, pf);
+			}
+			return;
+		}
+		st->got = true;
+		st->code = c;
+		st->from = from;
+		st->preview = pv;
+		EndDialog(fm->dialog, IDOK);
+	});
+}
+
+void startPairing(const std::shared_ptr<HaveCodeState>& st) {
+	if (st->engine == nullptr) return;
+	st->qr = Qr();
+	if (st->form != nullptr) st->form->refresh(st->picField);
+	setPairStatus(*st, "", "");
+	st->engine->pairStart(
+	    [st](const std::string& link) {   // the website has the request: the QR code
+		    if (st->form == nullptr) return;
+		    st->qr = Qr(link);
+		    st->form->refresh(st->picField);
+		    setPairStatus(*st, "Waiting for your phone…", "");
+	    },
+	    [st](int result, const std::string& text, const std::string& from) {
+		    if (st->form == nullptr) return;
+		    if (result == clsync::Engine::PairCode) {
+			    if (st->busy) {
+				    st->pendingCode = text;
+				    st->pendingFrom = from.empty() ? std::string("another device") : from;
+				    return;
+			    }
+			    checkCode(st, text, from.empty() ? std::string("another device") : from);
+			    return;
+		    }
+		    st->qr = Qr();
+		    st->form->refresh(st->picField);
+		    if (result == clsync::Engine::PairExpired) setPairStatus(*st, "This QR code expired.", "Show a New One");
+		    else if (text == "An answer came that couldn't be read.") setPairStatus(*st, text, "Show a New One");
+		    else if (text == "Can't reach the website. Check the connection, then try again.") setPairStatus(*st, "Can't reach the website.", "Try Again");
+		    else setPairStatus(*st, text, "Try Again");
+	    });
+}
+
+// `sample`: "" for the real sheet; "waiting" or "expired" for the pictures (--dialog sync-pair).
+bool haveCodeSheet(HWND parent, const std::string& prefill, bool run, const std::string& sample) {
+	clsync::Engine* e = sample.empty() ? engine() : nullptr;
+	if (e == nullptr && sample.empty()) {
 		showMessage(parent, Tone::Info, "Sync isn’t running", "Start CedarLogic normally to link this PC.");
 		return false;
 	}
-	// What the sheet and the engine's answer share (the answer can come after the sheet is gone).
-	struct Shared {
-		Form* form = nullptr;
-		bool busy = false, got = false;
-		std::string code;
-		clsync::Preview preview;
-	};
-	auto st = std::make_shared<Shared>();
+	auto st = std::make_shared<HaveCodeState>();
+	st->engine = e;
 	Form f;
 	f.title = "I Have a Code";
 	f.width = 480;
 	f.okText = "Continue";
 	f.cancelText = "Cancel";
+	auto heading = [](const std::string& words) {
+		FormField h;
+		h.kind = FormField::Picture;
+		h.height = 22;
+		h.paint = [words](ID2D1RenderTarget* rt, float w, float) {
+			drawText(rt, words, D2D1::RectF(0, 0, w, 22), 15, formLook().ink, TextAlign::Leading, true);
+		};
+		return h;
+	};
+	// Scan with your phone (SYNC.md 11.6).
+	f.add(heading("Scan with your phone"));
+	FormField pic;
+	pic.kind = FormField::Picture;
+	{
+		// Room for the QR code of a pairing link (the same size every time).
+		const Qr sized("https://cedarlogic.netlify.app/sync/#p=M2GT58X4MPKAFA59NANTSBDENX83");
+		pic.height = (int)std::max(sized.side(), 180.0f) + 4;
+	}
+	const float room = (float)pic.height - 4;
+	pic.paint = [st, room](ID2D1RenderTarget* rt, float w, float h) {
+		if (st->qr.any()) {
+			st->qr.paint(rt, w, room);
+			return;
+		}
+		const FormLook look = formLook();   // not here yet: an empty square of its size
+		const float side = std::min(room, w), left = std::floor((w - side) / 2);
+		const D2D1_RECT_F box = D2D1::RectF(left, 0, left + side, side);
+		fillRound(rt, box, 6, look.field);
+		strokeRound(rt, box, 6, look.line);
+		(void)h;
+	};
+	st->picField = f.add(pic);
+	f.add(note("On a phone that syncs, open CedarLogic › Your Circuits › Sync › Add a Device and scan this. Or scan it with the phone's camera.", 68));
+	FormField status = note(" ", 68);
+	status.lines = 2;   // (room for the button that sits at the end of its row)
+	st->statusField = f.add(status);
+	st->againField = f.add(button("Show a New One", true));
+	// Or type the code (as before).
+	f.add(heading("Or type the code"));
 	f.add(note("Enter the code from your other device: type it, or paste it, or paste a sync link.", 68));
 	FormField box;
 	box.kind = FormField::Text;
@@ -246,60 +389,65 @@ bool haveCode(HWND parent, const std::string& prefill, bool run) {
 		if (!prefill.empty() && clsync::parseCode(syncplat::crypto(), prefill, c, why)) shown = dashed(c);
 	}
 	box.value = shown;
-	const int text = f.add(box);
+	st->textField = f.add(box);
 	FormField said = note(" ", 68);
 	said.lines = 2;   // (a sentence about the code, once it's typed)
-	const int verdict = f.add(said);
-	f.onChange = [text, verdict](Form& form, int field) {
-		if (field != text) return;
-		const std::string typed = form.text(text);
+	st->verdictField = f.add(said);
+	f.onChange = [st](Form& form, int field) {
+		if (field == st->againField) {
+			startPairing(st);   // a new QR code
+			return;
+		}
+		if (field != st->textField) return;
+		const std::string typed = form.text(st->textField);
 		std::string c, why;
-		if (typed.find_first_not_of(" \t\r\n") == std::string::npos) form.setText(verdict, "");
-		else if (clsync::parseCode(syncplat::crypto(), typed, c, why)) form.setText(verdict, "✓ That’s a valid code.");
-		else form.setText(verdict, clsync::whyText(why, typed));
+		if (typed.find_first_not_of(" \t\r\n") == std::string::npos) form.setText(st->verdictField, "");
+		else if (clsync::parseCode(syncplat::crypto(), typed, c, why)) form.setText(st->verdictField, "✓ That’s a valid code.");
+		else form.setText(st->verdictField, clsync::whyText(why, typed));
 		form.setProblem("");
 	};
-	f.validate = [st, text, verdict, e](Form& form) -> std::string {
-		if (st->busy) return "\n";
-		const std::string typed = form.text(text);
+	f.validate = [st](Form& form) -> std::string {
+		if (st->busy || st->engine == nullptr) return "\n";
+		const std::string typed = form.text(st->textField);
 		std::string c, why;
 		if (!clsync::parseCode(syncplat::crypto(), typed, c, why)) return clsync::whyText(why, typed);
-		st->busy = true;
-		st->form = &form;
-		form.setProblem("");
-		form.setText(verdict, "Checking the code…");
-		form.enable(text, false);
-		e->preview(c, [st, c, text, verdict](bool ok, const std::string& message, clsync::Preview pv) {
-			st->busy = false;
-			Form* fm = st->form;
-			if (fm == nullptr || fm->dialog == nullptr) return;   // the sheet was closed meanwhile
-			if (!ok) {
-				fm->enable(text, true);
-				SetFocus(fm->fields[text].hwnd);
-				fm->setText(verdict, "");
-				fm->setProblem(message);
-				return;
-			}
-			st->got = true;
-			st->code = c;
-			st->preview = pv;
-			EndDialog(fm->dialog, IDOK);
-		});
+		checkCode(st, c, std::string());
 		return "\n";
 	};
-	f.onInit = [run](Form& form) {
-		// A link that brought the code: the check starts at once.
+	f.onInit = [st, run, sample](Form& form) {
+		st->form = &form;
+		setPairStatus(*st, "", "");
+		if (!sample.empty()) {   // for the pictures: no engine, a fixed QR code
+			if (sample == "expired") setPairStatus(*st, "This QR code expired.", "Show a New One");
+			else {
+				st->qr = Qr("https://cedarlogic.netlify.app/sync/#p=M2GT58X4MPKAFA59NANTSBDENX83");
+				setPairStatus(*st, "Waiting for your phone…", "");
+			}
+			form.refresh(st->picField);
+			return;
+		}
+		// A link that brought the code: the check starts at once (and there's no QR code to show).
 		if (run) PostMessageW(form.dialog, WM_COMMAND, IDOK, 0);
+		else startPairing(st);
 	};
 	const int r = f.run(parent);
 	st->form = nullptr;
+	if (st->engine != nullptr) st->engine->pairCancel();   // the QR code's slot is deleted (best effort)
 	if (r != IDOK || !st->got) return false;
-	if (!confirmLink(parent, st->preview.sentence)) return false;
+	std::string sentence = st->preview.sentence;
+	if (!st->from.empty()) sentence = "Sent from “" + st->from + "”.\n" + sentence;
+	if (!confirmLink(parent, sentence)) return false;
 	e->link(st->code, [](bool ok, const std::string& message) {
 		if (!ok) defer([message] { showMessage(frontWindow(), Tone::Warning, "This PC couldn’t be linked", message); });
 	});
 	return true;
 }
+
+}  // namespace
+
+bool haveCode(HWND parent, const std::string& prefill, bool run) { return haveCodeSheet(parent, prefill, run, std::string()); }
+
+void showPairSample(HWND parent, bool expired) { haveCodeSheet(parent, std::string(), false, expired ? "expired" : "waiting"); }
 
 // ---- Turning off, deleting, starting over -----------------------------------------------
 

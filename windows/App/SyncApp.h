@@ -109,6 +109,7 @@ void askIncomingDeletes(int count, const std::string& from, std::function<void(b
 // --dialog sync-code, sync-link: the sheets as they look, for the pictures.
 void showCodeSample(HWND parent);
 void showLinkSample(HWND parent);
+void showPairSample(HWND parent, bool expired);   // --dialog sync-pair, sync-pair-expired
 
 // ---- Settings > Sync ----------------------------------------------------------------
 
