@@ -29,6 +29,10 @@ void copyLink(CircuitWindow* window, const std::string& text, const std::string&
 
 // A cedarlogic: link (an argument that is one, not a file).
 bool isLink(const std::string& arg);
+// A sync link: cedarlogic://sync#k=<code> (or ?k=, or cedarlogic:sync...). It
+// isn't a circuit: it goes to sync (SyncApp.h), which asks before linking
+// anything. Whatever the case of the scheme and the word.
+bool isSyncLink(const std::string& arg);
 // A link with no circuit in it (the website's Open in the App on an empty
 // board: cedarlogic://open): it only asks for the app, which comes forward.
 bool isBareLink(const std::string& link);

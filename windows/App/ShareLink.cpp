@@ -111,6 +111,16 @@ void tidyCache(const std::wstring& root) {
 
 bool isLink(const std::string& arg) { return arg.size() > 11 && lowerCase(arg.substr(0, 11)) == "cedarlogic:"; }
 
+bool isSyncLink(const std::string& arg) {
+	if (!isLink(arg)) return false;
+	const size_t colon = arg.find(':');
+	size_t at = colon + 1;
+	while (at < arg.size() && at < colon + 3 && arg[at] == '/') at++;   // (cedarlogic://sync, or cedarlogic:sync)
+	size_t end = arg.find_first_of("#?/", at);
+	if (end == std::string::npos) end = arg.size();
+	return lowerCase(arg.substr(at, end - at)) == "sync";
+}
+
 bool isBareLink(const std::string& link) {
 	const size_t cut = link.find_first_of("#?");
 	return isLink(link) && (cut == std::string::npos || cut + 1 == link.size());
@@ -199,6 +209,10 @@ static bool selfTestFiles(std::string& report) {
 	check(fileForLink("CEDARLOGIC://open#" + fragment(encode(circuit), "Half adder"), why) == path && isLink("CEDARLOGIC://open#c=x") && isLink("cedarlogic:open?c=x"),
 	      "...whatever the case of the scheme");
 	check(!isLink("C:\\Circuits\\a.cdl") && !isLink("--screenshot") && !isLink("cedarlogic"), "a path or an option isn't a link");
+	check(isSyncLink("cedarlogic://sync#k=000G40R40M30E209185GR38E1YZ4") && isSyncLink("CEDARLOGIC://Sync?k=000G-40R4") && isSyncLink("cedarlogic:sync#k=x") &&
+	          isSyncLink("cedarlogic://sync") && !isSyncLink("cedarlogic://open#c=AAAA") && !isSyncLink("cedarlogic://syncing#k=x") &&
+	          !isSyncLink("cedarlogic://open#k=sync") && !isSyncLink("C:\\sync\\a.cdl"),
+	      "a sync link is told from a circuit's");
 	check(fileForLink("cedarlogic://open#c=AAAA", why).empty() && !why.empty(), "a broken link says why: " + why);
 	check(fileForLink("cedarlogic://open", why).empty() && why == "not a CedarLogic link", "a link with no circuit in it is refused");
 	check(isBareLink("cedarlogic://open") && isBareLink("cedarlogic://open/") && isBareLink("cedarlogic://open#") && !isBareLink("cedarlogic://open#c=AAAA") &&

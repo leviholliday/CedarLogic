@@ -548,7 +548,7 @@ bool openArgument(const std::string& arg, CircuitWindow* from) {
 	// cedarlogic://sync#k=...: a sync code. It checks what the code holds and
 	// asks before linking anything.
 	if (syncapp::isSyncLink(arg)) {
-		if (splash::active()) splash::hideSoon(nullptr);   // (it would cover the card)
+		// (While the app is still starting, it waits: syncapp::start sends it on.)
 		syncapp::openLink(from ? from->window() : nullptr, arg);
 		return false;
 	}

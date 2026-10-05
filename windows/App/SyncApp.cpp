@@ -54,6 +54,8 @@ struct State {
 	std::map<int, std::function<void(Event)>> listeners;
 	int nextListener = 1;
 	bool demoOn = false;
+	bool started = false;                          // start() was called: the engine has loaded its state
+	std::vector<std::string> waitingLinks;         // sync links that came before that
 	bool active = true;
 	double lastUserActive = -1e9;
 };
@@ -301,7 +303,14 @@ void init() {
 }
 
 void start() {
-	if (S().engine) S().engine->start();
+	State& s = S();
+	if (!s.engine || s.started) return;
+	s.started = true;
+	s.engine->start();
+	// A sync link that arrived while the app was still starting.
+	std::vector<std::string> links;
+	links.swap(s.waitingLinks);
+	for (const std::string& link : links) defer([link] { openLink(frontWindow(), link); });
 }
 
 void shutdown() {
@@ -460,18 +469,15 @@ void quitting() {
 
 // ---- Links -------------------------------------------------------------------------------
 
-bool isSyncLink(const std::string& arg) {
-	if (!sharelink::isLink(arg)) return false;
-	size_t at = arg.find(':') + 1;
-	while (at < arg.size() && at < arg.find(':') + 3 && arg[at] == '/') at++;
-	size_t end = arg.find_first_of("#?/", at);
-	if (end == std::string::npos) end = arg.size();
-	return lowerCase(arg.substr(at, end - at)) == "sync";
-}
+bool isSyncLink(const std::string& arg) { return sharelink::isSyncLink(arg); }
 
 void openLink(HWND parent, const std::string& link) {
-	if (!S().engine && !S().demoOn) {
+	if (!S().engine) {
 		showMessage(parent, Tone::Info, "Sync isn't running", "Start CedarLogic normally to link this PC.");
+		return;
+	}
+	if (!S().started) {   // (the engine hasn't loaded what it had yet: after that)
+		S().waitingLinks.push_back(link);
 		return;
 	}
 	// No code in it (cedarlogic://sync): just the place to type one.
