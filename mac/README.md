@@ -55,6 +55,12 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
 - `render_png` with `CL_RENDER_HOVER=1` -- points at the page's longest
   wire and draws its highlight, printing what it carries
 - `asan-check.sh` -- `edit_check` under AddressSanitizer
+- `sync-selftest.sh` -- the sync engine of docs/SYNC.md (`CedarCore/Sync*`,
+  shared with Linux and Windows): every test vector and protocol scenario,
+  the threaded engine and the C interface, with OpenSSL, zlib and curl as
+  its hooks (`brew install openssl@3`); `ASAN=1`/`TSAN=1` for the
+  sanitizers, `CL_SYNC_URL=<mock server>` to run the scenarios over HTTP
+  too, `GATES=1` (after `build.sh`) to check the gate library's defaults
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
   and top edges included), hover, tooltips, dragging, double-click to fill,
   focus mode's tab strip and full screen, PASS or FAIL for each
