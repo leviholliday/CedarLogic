@@ -1729,6 +1729,31 @@ void s43_switch_flip_here_real_edit_there_is_not_a_conflict(Ctx& x) {
 	CHECK(!a.anyVersionNote(la, "changed on both"));
 }
 
+// Many circuits: a join of 300 app circuits with 300 web ones, 100 of them the same, then an
+// untouched cycle that reads no circuit files (the hash cache) and sends nothing.
+void scale_join_300(Ctx& x) {
+	World w(x.cr, x.dir, { "app", "web" }, Limits(), {}, x.real, x.realBase);
+	Client &a = w[0], &b = w[1];
+	for (int i = 0; i < 300; i++) a.create("A" + std::to_string(i), cdlWith(100 + i));
+	for (int i = 0; i < 300; i++) {
+		if (i < 100) b.create("A" + std::to_string(i), cdlWith(100 + i));   // the same circuit, saved as XML
+		else b.create("B" + std::to_string(i), cdlWith(1000 + i));
+	}
+	Preview pv;
+	const std::string code = a.turnOn();
+	a.sync();
+	CHECK(b.link(code, pv) == 200 && pv.circuits == 300);
+	b.sync();
+	a.sync();
+	CHECK(a.ids().size() == 500 && b.ids().size() == 500 && w.circuitsOnServer(a, x.cr) == 500);
+	CHECK(sameEverywhere({ &a, &b }));
+	w.clock.tick(10 * kSecond);   // past the racily-clean window
+	a.sync();
+	const size_t calls = a.net.calls;
+	a.sync();
+	CHECK(a.net.calls - calls == 1);   // nothing to fetch, nothing to send
+}
+
 // The state file keeps everything across a restart (every scenario reloads it before each
 // cycle; this checks the fields directly).
 void state_file_round_trip(Ctx& x) {
@@ -1823,6 +1848,7 @@ void scenarioTests(Crypto& cr, const std::string& tempDir, Report& report, Host*
 		{ "s41_switch_flips_are_sent_lazily", s41_switch_flips_are_sent_lazily, true },
 		{ "s42_purge_while_paging_restarts_as_a_full_pull", s42_purge_while_paging_restarts_as_a_full_pull, true },
 		{ "s43_switch_flip_here_real_edit_there_is_not_a_conflict", s43_switch_flip_here_real_edit_there_is_not_a_conflict, true },
+		{ "scale_join_300", scale_join_300, true },
 		{ "state_file_round_trip", state_file_round_trip, false },
 	};
 	const std::string base = files::join(tempDir, "scenarios");
