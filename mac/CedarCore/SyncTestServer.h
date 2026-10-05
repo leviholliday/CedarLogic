@@ -42,6 +42,12 @@ public:
 		int64_t createdAt = 0;
 	};
 
+	struct PairSlot {   // SYNC.md 11.5: p/{pairId}
+		std::string helloEnv, readHash, answerEnv;
+		bool answered = false;
+		int64_t createdAt = 0, answeredAt = 0;
+	};
+
 	FakeServer(Clock&, Crypto&);
 	HttpResponse handle(const HttpRequest&);
 	void cleanup();
@@ -68,6 +74,9 @@ public:
 	size_t requests = 0;
 	std::string lastOp;
 	std::vector<int64_t> sinces;               // each changes request's `since`
+	std::map<std::string, PairSlot> pairs;     // pairId -> slot (expired ones read as gone)
+	std::vector<int64_t> pairPuts;             // when slots were made (30 an hour per address; one address here)
+	int pairDeletes = 0, pairPolls = 0;        // DELETE /pair and GET /pair/{id}/answer requests
 	std::mutex mu;                             // held by threaded tests around handle() and their reads
 
 private:
@@ -77,6 +86,8 @@ private:
 	int spaceFor(const std::string& sid, const std::string& token, Space*& sp, json::Value& out);
 	int changes(Space& sp, int64_t since, int64_t limit, json::Value& out);
 	int fetch(Space& sp, const std::vector<std::string>& ids, json::Value& out);
+	int pair(const std::string& method, const std::string& pairId, const std::string& op, const std::string& token,
+	         const json::Value& body, json::Value& out, HttpResponse& resp);
 };
 
 }  // namespace test

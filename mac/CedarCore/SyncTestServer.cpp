@@ -23,6 +23,25 @@ json::Value err(const std::string& code) {
 	return o;
 }
 
+json::Value err(const std::string& code, const std::string& message) {
+	json::Value o = err(code);
+	o.set("message", json::Value::string(message));
+	return o;
+}
+
+// An envelope as the website takes it: base64url decoding to 29...2048 bytes.
+bool pairEnvelope(const json::Value* v) {
+	Bytes b;
+	return v && v->isString() && unb64u(v->s, b) && b.size() >= 29 && b.size() <= kMaxPairEnvelope;
+}
+
+bool tokenShape(const std::string& t) {   // TOKEN_RE: 43 base64url characters
+	if (t.size() != 43) return false;
+	for (char c : t)
+		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
+	return true;
+}
+
 std::string queryParam(const std::string& query, const std::string& key) {
 	size_t at = 0;
 	while (at <= query.size()) {
@@ -267,6 +286,91 @@ int FakeServer::deleteSpace(const std::string& sid, const std::string& token, co
 	return 200;
 }
 
+// SYNC.md 11.5: the pairing slots.
+int FakeServer::pair(const std::string& method, const std::string& pairId, const std::string& op, const std::string& token,
+                     const json::Value& body, json::Value& out, HttpResponse& resp) {
+	static const char* const kGone = "That QR code has expired. Show a new one on the other device.";
+	static const char* const kAnswered = "Another device already answered this QR code. Show a new one on the other device.";
+	static const char* const kNotYours = "Not yours to read.";
+	const int64_t now = clock.now();
+	const int64_t life = 600 * kSecond;
+	if (!isHex(pairId, 32)) { out = err("bad_request", "That request wasn't understood."); return 400; }
+	auto it = pairs.find(pairId);
+	if (it != pairs.end() && now - it->second.createdAt >= life) {   // past 10 minutes: gone, whatever is stored
+		pairs.erase(it);
+		it = pairs.end();
+	}
+	const bool have = it != pairs.end();
+	auto expires = [&](json::Value& o) { o.set("expiresAt", json::Value::integer(it->second.createdAt + life)); };
+	auto tokenOk = [&] { return tokenShape(token) && sha(token) == it->second.readHash; };
+	if (op.empty() && method == "PUT") {
+		if (!body.isObject() || !pairEnvelope(body.get("hello")) || !isHex(body.str("readHash"), 64)) {
+			out = err("bad_request", "That request wasn't understood.");
+			return 400;
+		}
+		if (have) { out = err("pair_exists", "Try again."); return 409; }
+		pairPuts.erase(std::remove_if(pairPuts.begin(), pairPuts.end(), [&](int64_t t) { return now - t >= kHour; }),
+		               pairPuts.end());
+		if (pairPuts.size() >= 30) {
+			out = err("rate_limited", "Lots of syncing just now. Trying again in a minute.");
+			out.set("retryAfter", json::Value::integer(60));
+			resp.headers["retry-after"] = "60";
+			return 429;
+		}
+		pairPuts.push_back(now);
+		PairSlot sl;
+		sl.helloEnv = body.str("hello");
+		sl.readHash = body.str("readHash");
+		sl.createdAt = now;
+		it = pairs.emplace(pairId, sl).first;
+		out = json::Value::object();
+		expires(out);
+		return 201;
+	}
+	if (op.empty() && method == "GET") {
+		if (!have) { out = err("pair_gone", kGone); return 404; }
+		out = json::Value::object();
+		out.set("hello", json::Value::string(it->second.helloEnv));
+		out.set("answered", json::Value::boolean(it->second.answered));
+		expires(out);
+		return 200;
+	}
+	if (op.empty() && method == "DELETE") {
+		pairDeletes++;
+		if (have) {
+			if (!tokenOk()) { out = err("wrong_token", kNotYours); return 401; }
+			pairs.erase(it);
+		}
+		out = json::Value::object();
+		return 200;
+	}
+	if (op == "answer" && method == "POST") {
+		if (!body.isObject() || !pairEnvelope(body.get("answer"))) {
+			out = err("bad_request", "That request wasn't understood.");
+			return 400;
+		}
+		if (!have) { out = err("pair_gone", kGone); return 404; }
+		if (it->second.answered) { out = err("pair_answered", kAnswered); return 409; }   // first one wins
+		it->second.answered = true;
+		it->second.answerEnv = body.str("answer");
+		it->second.answeredAt = now;
+		out = json::Value::object();
+		return 200;
+	}
+	if (op == "answer" && method == "GET") {
+		pairPolls++;
+		if (!have) { out = err("pair_gone", kGone); return 404; }
+		if (!tokenOk()) { out = err("wrong_token", kNotYours); return 401; }
+		out = json::Value::object();
+		out.set("answer", it->second.answered ? json::Value::string(it->second.answerEnv) : json::Value());
+		expires(out);
+		return 200;
+	}
+	if (op.empty() || op == "answer") { out = err("method_not_allowed", "That can't be done here."); return 405; }
+	out = err("not_found", "Not here.");
+	return 404;
+}
+
 bool FakeServer::tamper(const std::string& sid, const std::string& op, const std::string& id) {
 	if (op == "loseSpace") return spaces.erase(sid) > 0;
 	auto s = spaces.find(sid);
@@ -402,7 +506,10 @@ HttpResponse FakeServer::handle(const HttpRequest& req) {
 		parts.push_back(path.substr(at, end - at));
 		at = end + 1;
 	}
-	if (parts.size() >= 2 && parts[0] == "spaces" && isHex(parts[1], 32)) {
+	if (parts.size() >= 2 && parts.size() <= 3 && parts[0] == "pair") {
+		lastOp = req.method + " pair" + (parts.size() > 2 ? "/" + parts[2] : std::string());
+		st = pair(req.method, parts[1], parts.size() > 2 ? parts[2] : std::string(), token, body, out, resp);
+	} else if (parts.size() >= 2 && parts[0] == "spaces" && isHex(parts[1], 32)) {
 		const std::string sid = parts[1];
 		const std::string op = parts.size() > 2 ? parts[2] : "";
 		lastOp = op.empty() ? req.method + " space" : op;

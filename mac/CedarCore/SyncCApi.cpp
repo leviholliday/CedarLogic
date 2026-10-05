@@ -396,6 +396,24 @@ void cl_sync_quitting(CLSyncEngine* e, CLSyncQuitDone done, void* ctx) {
 	});
 }
 
+void cl_sync_pair_start(CLSyncEngine* e, CLSyncPairShow show, CLSyncPairDone done, void* ctx) {
+	if (!e) return;
+	static_assert((int)CL_SYNC_PAIR_CODE == (int)Engine::PairCode && (int)CL_SYNC_PAIR_EXPIRED == (int)Engine::PairExpired &&
+	                  (int)CL_SYNC_PAIR_FAILED == (int)Engine::PairFailed,
+	              "pair results");
+	e->engine->pairStart(
+		[show, ctx](const std::string& link) {
+			if (show) show(ctx, link.c_str());
+		},
+		[done, ctx](int result, const std::string& text, const std::string& from) {
+			if (done) done(ctx, result, text.c_str(), from.c_str());
+		});
+}
+
+void cl_sync_pair_cancel(CLSyncEngine* e) {
+	if (e) e->engine->pairCancel();
+}
+
 bool cl_sync_parse_code(const CLSyncHooks* hooks, const char* text, char code[29], char why[16]) {
 	if (code) code[0] = 0;
 	if (why) why[0] = 0;
