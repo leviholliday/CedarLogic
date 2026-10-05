@@ -3,6 +3,7 @@
 // clean layout exists (the fan-out that used to stack every trunk on one line).
 #include <doctest/doctest.h>
 #include "route/GridRouter.h"
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -172,4 +173,50 @@ TEST_CASE("grid: pins that face up and down leave the gate that way") {
 	// pin 0's segment is vertical (it leaves upward)
 	for (const Segment &s : out.routes[0].segments)
 		for (int p : s.pins) if (p == 0) CHECK(s.vertical);
+}
+
+// Each connection is searched in a window around its ends first; a wall
+// longer than that window must widen the search, not fail the wire or send
+// it through the wall.
+TEST_CASE("grid: a wall taller than the search window is still routed around") {
+	GridInput in;
+	in.margin = 30.0f;
+	GridNet n; n.pins = { pin(0, 0, 1, 0), pin(10, 0, -1, 0) };
+	in.nets.push_back(n);
+	GridRect wall; wall.l = 4; wall.b = -20; wall.r = 6; wall.t = 20;
+	in.obstacles.push_back(wall);
+	GridOutput out = routeGrid(in);
+	REQUIRE(out.ok[0]);
+	CHECK(validTree(out.routes[0], 2));
+	CHECK_FALSE(entersRect(out.routes[0], wall));
+}
+
+// A wide page of long wires (the shape Full rearrange gives a big circuit):
+// every wire routes, cleanly, and the same input gives the same routes.
+TEST_CASE("grid: a wide page of long wires routes every wire, the same way twice") {
+	GridInput in;
+	for (int col = 0; col < 8; col++) {
+		GridRect g; g.l = col * 40.0f; g.b = 0; g.r = g.l + 3; g.t = 24;
+		in.obstacles.push_back(g);
+	}
+	for (int i = 0; i < 40; i++) {
+		const int from = i % 7, to = std::min(7, from + 1 + i % 4);
+		GridNet n;
+		n.pins = { pin(from * 40.0f + 3, 0.5f + (i % 24), 1, 0), pin(to * 40.0f, 23.5f - (i * 7 % 24), -1, 0) };
+		in.nets.push_back(n);
+	}
+	const GridOutput a = routeGrid(in), b = routeGrid(in);
+	for (size_t k = 0; k < in.nets.size(); k++) {
+		REQUIRE(a.ok[k]);
+		CHECK(validTree(a.routes[k], 2));
+		for (const GridRect &g : in.obstacles) CHECK_FALSE(entersRect(a.routes[k], g));
+		REQUIRE(a.routes[k].segments.size() == b.routes[k].segments.size());
+		for (size_t s = 0; s < a.routes[k].segments.size(); s++) {
+			CHECK(a.routes[k].segments[s].bx == b.routes[k].segments[s].bx);
+			CHECK(a.routes[k].segments[s].by == b.routes[k].segments[s].by);
+			CHECK(a.routes[k].segments[s].ex == b.routes[k].segments[s].ex);
+			CHECK(a.routes[k].segments[s].ey == b.routes[k].segments[s].ey);
+		}
+	}
+	CHECK(a.overlaps == b.overlaps);
 }
