@@ -5,8 +5,8 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
-#include <queue>
 #include <set>
 #include <utility>
 
@@ -95,6 +95,69 @@ int nearestLine(const std::vector<float> &lines, float v) {
 	return i;
 }
 
+// The search's open list: a 4-ary min-heap of (estimate, state) packed in
+// one 64-bit key -- an estimate is never negative, so its float bits sort as
+// numbers, and ties go to the lower state just as std::pair's order did, so
+// routes come out the same. Taking the least of four children without
+// branches avoids most of the mispredicted jumps that made popping a
+// std::priority_queue half of the router's time.
+class OpenList {
+public:
+	static uint64_t key(float f, int s) {
+		uint32_t bits;
+		std::memcpy(&bits, &f, sizeof bits);
+		return ((uint64_t)bits << 32) | (uint32_t)s;
+	}
+	static float estimate(uint64_t k) {
+		const uint32_t bits = (uint32_t)(k >> 32);
+		float f;
+		std::memcpy(&f, &bits, sizeof f);
+		return f;
+	}
+	static int state(uint64_t k) { return (int)(uint32_t)k; }
+
+	void clear() { h.clear(); }
+	bool empty() const { return h.empty(); }
+	void push(uint64_t e) {
+		size_t i = h.size();
+		h.push_back(e);
+		while (i > 0) {
+			const size_t up = (i - 1) / 4;
+			if (h[up] <= e) break;
+			h[i] = h[up];
+			i = up;
+		}
+		h[i] = e;
+	}
+	uint64_t pop() {
+		const uint64_t top = h[0], last = h.back();
+		h.pop_back();
+		const size_t n = h.size();
+		if (n == 0) return top;
+		size_t i = 0;
+		for (;;) {
+			const size_t c = 4 * i + 1;
+			if (c >= n) break;
+			size_t m = c;
+			if (c + 3 < n) {
+				const size_t a = h[c + 1] < h[c] ? c + 1 : c;
+				const size_t b = h[c + 3] < h[c + 2] ? c + 3 : c + 2;
+				m = h[b] < h[a] ? b : a;
+			} else {
+				for (size_t j = c + 1; j < n; j++) m = h[j] < h[m] ? j : m;
+			}
+			if (last <= h[m]) break;
+			h[i] = h[m];
+			i = m;
+		}
+		h[i] = last;
+		return top;
+	}
+
+private:
+	std::vector<uint64_t> h;
+};
+
 class Router {
 public:
 	explicit Router(const GridInput &in) : in(in) {}
@@ -136,9 +199,11 @@ private:
 	size_t budget = 0;     // search steps left for this connection
 	size_t popsUsed = 0;   // search steps so far, all nets
 
-	// Search scratch, reset lazily by stamp.
-	std::vector<float> dist;
-	std::vector<int> parent, stamp;
+	// Search scratch per (node, way in), reset lazily by stamp. Kept together:
+	// one cache line per state touched instead of three.
+	struct State { int stamp = 0; float dist = 0.0f; int parent = -1; };
+	std::vector<State> st;
+	OpenList open;
 	int curStamp = 0;
 
 	int node(int ix, int iy) const { return iy * nx + ix; }
@@ -201,7 +266,7 @@ bool Router::build() {
 	useH.assign(N, 0); useV.assign(N, 0); fixedH.assign(N, 0); fixedV.assign(N, 0);
 	hist.assign(N, 0.0f);
 	inTree.assign(N, 0); treeAxis.assign(N, 0);
-	dist.assign((size_t)N * 5, 0.0f); parent.assign((size_t)N * 5, -1); stamp.assign((size_t)N * 5, 0);
+	st.assign((size_t)N * 5, State());
 
 	// Gate bodies, edges included.
 	for (const GridRect &r : in.obstacles) {
@@ -313,7 +378,8 @@ float Router::moveCost(int k, int from, int arrived, int d, int to, bool goal, b
 	else if (crossUse > 0) c += goal ? TOUCH : CROSS;
 	// Room beside the wire: others (and our own branches) one or two steps off.
 	const int ix = ixOf(to), iy = iyOf(to);
-	for (int off = 1; off <= 2; off++) {
+	// (Two steps off is free at the normal spacing; skip looking it up.)
+	for (int off = 1; off <= (PARALLEL_FAR > 0.0f ? 2 : 1); off++) {
 		const float price = off == 1 ? PARALLEL_NEAR : PARALLEL_FAR;
 		for (int sgn = -1; sgn <= 1; sgn += 2) {
 			if (h) {
@@ -376,9 +442,9 @@ int Router::search(int k, const PinInfo &p, bool relaxed, int margin) {
 	}
 	windowIsAll = wx0 == 0 && wy0 == 0 && wx1 == nx - 1 && wy1 == ny - 1;
 
-	if (++curStamp == 0x7fffffff) { std::fill(stamp.begin(), stamp.end(), 0); curStamp = 1; }
-	typedef std::pair<float, int> QE;
-	std::priority_queue<QE, std::vector<QE>, std::greater<QE>> pq;
+	if (++curStamp == 0x7fffffff) { for (State &x : st) x.stamp = 0; curStamp = 1; }
+	OpenList &pq = open;
+	pq.clear();
 	auto heur = [&](int n) {
 		const float x = xs[ixOf(n)], y = ys[iyOf(n)];
 		const float dx = x < tx0 ? tx0 - x : (x > tx1 ? x - tx1 : 0.0f);
@@ -386,15 +452,15 @@ int Router::search(int k, const PinInfo &p, bool relaxed, int margin) {
 		return (dx + dy) / in.step;
 	};
 	const int s0 = start * 5 + p.dir;
-	stamp[s0] = curStamp; dist[s0] = 0.0f; parent[s0] = -1;
-	pq.push({ heur(start), s0 });
+	st[s0].stamp = curStamp; st[s0].dist = 0.0f; st[s0].parent = -1;
+	pq.push(OpenList::key(heur(start), s0));
 	size_t pops = 0;
 	while (!pq.empty()) {
-		const QE top = pq.top(); pq.pop();
-		const int s = top.second;
+		const uint64_t top = pq.pop();
+		const int s = OpenList::state(top);
 		const int n = s / 5, arrived = s % 5;
-		const float g = dist[s];
-		if (top.first > g + heur(n) + 1e-4f) continue;   // stale
+		const float g = st[s].dist;
+		if (OpenList::estimate(top) > g + heur(n) + 1e-4f) continue;   // stale
 		if (goalNode(n) && n != start) { budget -= std::min(budget, pops); return s; }
 		if (++pops > budget) break;
 		for (int d = 0; d < 4; d++) {
@@ -407,9 +473,10 @@ int Router::search(int k, const PinInfo &p, bool relaxed, int margin) {
 			if (!isGoal && !passable(k, m2, relaxed)) continue;
 			const float ng = g + moveCost(k, n, arrived, d, m2, isGoal, relaxed);
 			const int s2 = m2 * 5 + d;
-			if (stamp[s2] == curStamp && dist[s2] <= ng) continue;
-			stamp[s2] = curStamp; dist[s2] = ng; parent[s2] = s;
-			pq.push({ ng + heur(m2), s2 });
+			State &x = st[s2];
+			if (x.stamp == curStamp && x.dist <= ng) continue;
+			x.stamp = curStamp; x.dist = ng; x.parent = s;
+			pq.push(OpenList::key(ng + heur(m2), s2));
 		}
 	}
 	budget -= std::min(budget, pops);
@@ -451,10 +518,10 @@ bool Router::connect(int k, const PinInfo &p, bool relaxed, NetState &ns) {
 	popsUsed += had - budget;
 	if (goal < 0) return false;
 
-	ns.cost += dist[goal];
+	ns.cost += st[goal].dist;
 	for (size_t j = 0; j + 1 < p.walk.size(); j++) addTreeEdge(ns, p.walk[j], p.walk[j + 1]);
 	std::vector<int> path;
-	for (int s = goal; s >= 0; s = parent[s]) path.push_back(s / 5);
+	for (int s = goal; s >= 0; s = st[s].parent) path.push_back(s / 5);
 	for (size_t j = 0; j + 1 < path.size(); j++) addTreeEdge(ns, path[j], path[j + 1]);
 	if (path.size() == 1) addToTree(path[0]);
 	return true;
