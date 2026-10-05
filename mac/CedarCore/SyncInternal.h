@@ -454,7 +454,7 @@ private:
 	void libraryWentBack();
 	void rewound(const std::string& epoch);
 	void wentBack(const std::string& rid, int64_t ver);
-	void damaged(const std::string& rid, int64_t ver);
+	void damaged(const std::string& rid, int64_t ver, bool tombstone = false, const std::string& h = std::string());
 	std::map<std::string, json::Value> fetchIds(std::vector<std::string> ids);
 	bool openFetched(const std::string& rid, int64_t ver, const std::string& data, Payload& p, std::string& why);
 	bool onRemoteUpdate(const std::string& rid, int64_t ver, int64_t updatedAt, const Payload& p);

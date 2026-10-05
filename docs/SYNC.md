@@ -1123,6 +1123,8 @@ pull():
     if incomingDeletes: incomingDeleteGuard(incomingDeletes)              # §4.7
     if full:
         for rid in records with ver > 0 not among the entries: onRemoteForgotten(rid)
+        drop unreadable[rid] and the remembered device records for every rid not among the entries
+        if device.id not among the entries: device.ver = 0; device.at = 0  # this push sends it again (a reset copy)
     cursor = (min(held) − 1) if held else page.seq
     purgedSeq = page.purgedSeq
     if not held: joining = false; refetch = []
@@ -1390,6 +1392,10 @@ client, lastSyncAt}` under its own random id (state `device.id`). It is written
 at Turn On / Link, when the device's name changes, and at most once a day after
 that; it is the last item of a batch (a full space delays it, quietly). Turn Off
 writes a tombstone for it. Other devices show the list in Settings › Sync (§5.1).
+A `412` for it (written over, or gone from a reset copy: `current` null) takes the
+base the answer gives (`current.ver`, or 0) and goes again within the hour, not a
+day later; a full pull that doesn't list it sends it again in the same cycle
+(§4.5), so after a reset every device is listed again at once.
 
 ### 4.10 Records that can't be read
 
@@ -1399,10 +1405,13 @@ Two cases, decided when a record is opened:
   fails, or the payload is *invalid* (§2.2). Nothing local changes. If this device
   has the circuit (the record is mapped and its circuit exists), its copy is sent
   over the damaged one (`force`, `base` = the damaged ver) with the notice "“T”
-  was damaged in the synced copy; this device's copy was sent again." Otherwise
-  `unreadable[rid] = [ver, "damaged"]`, it isn't fetched again until its ver
-  changes, and Your Circuits says "1 synced circuit is damaged and can't be
-  opened." Status stays "synced".
+  was damaged in the synced copy; this device's copy was sent again." A damaged
+  record the change list calls deleted (a tombstone) of a circuit this device
+  doesn't have only goes into `seen`: there's nothing to open and nothing to
+  count. Otherwise `unreadable[rid] = [ver, "damaged"]`, it isn't fetched again
+  until its ver changes, and Your Circuits says "1 synced circuit is damaged and
+  can't be opened." Status stays "synced". The count drops when a readable
+  version arrives, or when a full pull no longer lists the record (§4.5).
 - **Newer** — the payload's `v` is above 1 or its `kind` unknown: written by a
   newer CedarLogic with the key, so authentic. `unreadable[rid] = [ver, "newer"]`,
   `seen` updated; it isn't fetched again until its ver changes; the device never
@@ -3145,9 +3154,12 @@ Steps:
    sent it: "Sent from “Sam’s phone”." (plain text). [Cancel] there forgets the
    code: nothing was stored.
 5. The sheet closed, Cancel, the window closed, the app quitting → stop polling,
-   `DELETE` (best effort). Destroying the engine (its thread exiting
-   after stop) sends nothing: the host may be gone by then, and the slot expires
-   in 10 minutes anyway; only quitting (within its bounded step) deletes.
+   `DELETE` (best effort).
+   A `PUT` still out when this happens: the slot it makes is deleted as soon as it
+   answers (a cancel generation, as in the engine), never shown. The web page
+   going into the back/forward cache is the same (`pagehide`): the QR code is
+   dead; coming back (`pageshow`, persisted) with the sheet still showing makes a
+   new QR code.
 
 ### 11.7 L: adding a device
 
@@ -3196,6 +3208,10 @@ Steps:
    > on that device, Sync › Show Code, then scan that code.
    > [Cancel] [Turn On Sync and Add]
    → Turn On (§4.8; the code sheet is not shown) → step 3 with the new code.
+
+When this device doesn't sync yet, the Add a device sheet (opened by `#add`) says
+so ("This browser doesn't sync yet. After you scan, you can turn on sync here and
+add that device.") and has no Show Code; Scan QR Code leads to step 4.
 
 Nothing is sent before [Add] but the `GET`.
 
