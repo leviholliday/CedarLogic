@@ -11,6 +11,11 @@ import SwiftUI
 enum RenderUI {
     static func runIfAsked() {
         let args = CommandLine.arguments
+        // `--render-sync <dir>`: just Settings > Sync and its sheets (SyncRender).
+        if let j = args.firstIndex(of: "--render-sync"), j + 1 < args.count {
+            SyncRender.run(URL(fileURLWithPath: args[j + 1], isDirectory: true))
+            exit(0)
+        }
         guard let i = args.firstIndex(of: "--render-ui"), i + 1 < args.count else { return }
         let dir = URL(fileURLWithPath: args[i + 1], isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -237,6 +242,7 @@ enum RenderUI {
         prefs.dark = savedDark
         prefs.toolbarStyle = savedStyle
         prefs.toolbarHidden = savedHidden
+        SyncRender.run(dir)
         exit(0)
     }
 }

@@ -79,8 +79,9 @@ enum QuitConfirm {
             MainActor.assumeIsolated {
                 NSApp.terminate(nil)
                 // Still here: quitting waits on a question (a circuit to
-                // save, say), or was cancelled. The windows come back.
-                for w in windows { w.alphaValue = 1 }
+                // save, say), or was cancelled. The windows come back --
+                // unless it's only sync sending the last changes.
+                if !SyncCenter.shared.isQuitting { for w in windows { w.alphaValue = 1 } }
             }
         })
     }

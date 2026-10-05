@@ -159,6 +159,12 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
         DevSnapshot.runIfAsked()
         BarTest.start()
         FeedbackModel.selfTestIfAsked()
+        // Sync starts once the first window is up (SYNC.md 4.3), never in the
+        // test and picture modes.
+        let env = ProcessInfo.processInfo.environment
+        if !BarTest.on, env["CL_SNAPSHOT"] == nil, env["CL_MENU_DUMP"] == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { SyncCenter.shared.start() } }
+        }
         // Once anything macOS was asked to open (a file double-clicked in
         // Finder) has arrived: the circuit you were last in (LastCircuit), as
         // the wx app reopens the one you had; else the most recent; else a
@@ -208,6 +214,11 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { then() }
         }
+    }
+
+    /// With sync on, quitting first sends what's changed (at most 5 s; Sync.swift).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated { SyncCenter.shared.terminate() }
     }
 
     /// Clicking the Dock icon with no window open: the same.

@@ -240,6 +240,8 @@ final class CircuitDocument: ReferenceFileDocument {
             throw CocoaError(.fileReadCorruptFile)
         }
         core = try CoreDocument(data: data)
+        // Read again because sync replaced it: where the window was looking.
+        ReloadStore.apply(to: core)
     }
 
     func snapshot(contentType: UTType) throws -> Data {

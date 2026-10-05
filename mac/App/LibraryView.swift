@@ -6,7 +6,10 @@
 // The library is the same one the wx app keeps, in
 // ~/Library/Application Support/CedarLogic/Library -- one folder per circuit
 // holding name.txt, circuit.cdl and versions/<timestamp>.cdl. Both apps read
-// and write it, so a circuit saved in one shows up in the other.
+// and write it, so a circuit saved in one shows up in the other. With sync
+// on (Sync.swift), every change here is noted for the next sync, a line under
+// the list says how syncing is going, and a version that came from another
+// device carries a note (versions/<stamp>.txt) saying where from.
 
 import AppKit
 import SwiftUI
@@ -88,6 +91,7 @@ enum Library {
         if let source, let original = try? String(contentsOf: source, encoding: .utf8) {
             try? sourceMark(source, text: original).write(to: folder.appendingPathComponent("source.txt"), atomically: true, encoding: .utf8)
         }
+        SyncCenter.libraryChanged()
         return LibraryItem(id: id, name: name, folder: folder, modified: Date())
     }
 
@@ -121,6 +125,7 @@ enum Library {
 
     static func rename(_ item: LibraryItem, to name: String) {
         try? name.write(to: item.folder.appendingPathComponent("name.txt"), atomically: true, encoding: .utf8)
+        SyncCenter.libraryChanged()
         // Open windows show it by this name: they read it again.
         NotificationCenter.default.post(name: .clLibraryChanged, object: nil)
     }
@@ -135,7 +140,9 @@ enum Library {
         var dest = trash.appendingPathComponent(item.id)
         var n = 2
         while fm.fileExists(atPath: dest.path) { dest = trash.appendingPathComponent("\(item.id) \(n)"); n += 1 }
-        return (try? fm.moveItem(at: item.folder, to: dest)) != nil
+        let moved = (try? fm.moveItem(at: item.folder, to: dest)) != nil
+        if moved { SyncCenter.libraryChanged() }
+        return moved
     }
 
     /// The library circuits open in windows now, by id.
@@ -204,6 +211,7 @@ enum Library {
         try? fm.removeItem(at: pending)
         try? fm.copyItem(at: url, to: pending)
         thin(item)
+        SyncCenter.libraryChanged()
     }
 
     /// What a version is, for telling versions apart: the file less what
@@ -251,8 +259,23 @@ enum Library {
             let age = Date().timeIntervalSince(v.date)
             if age < 86400 { continue }
             let bucket = age < 7 * 86400 ? hour.string(from: v.date) : day.string(from: v.date)
-            if kept.contains(bucket) { try? FileManager.default.removeItem(at: v.url) } else { kept.insert(bucket) }
+            if kept.contains(bucket) {
+                try? FileManager.default.removeItem(at: v.url)
+                // and the note beside it, if sync left one
+                try? FileManager.default.removeItem(at: v.url.deletingPathExtension().appendingPathExtension("txt"))
+            } else {
+                kept.insert(bucket)
+            }
         }
+    }
+
+    /// A version's note, if it has one: where a version made by sync came
+    /// from ("From Levi’s iPhone · edited 4 Oct 10:31").
+    static func note(of version: URL) -> String? {
+        let url = version.deletingPathExtension().appendingPathExtension("txt")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces)
+        return line?.isEmpty == false ? line : nil
     }
 
     static func open(_ url: URL) {
@@ -457,6 +480,7 @@ private func frontFileURL() -> URL? {
 
 struct LibraryView: View {
     @ObservedObject private var prefs = Prefs.shared
+    @ObservedObject private var sync: SyncCenter
     @Environment(\.dismiss) private var dismiss
     @State private var items: [LibraryItem] = []
     /// The chosen circuit, by its id, so it stays chosen when the list
@@ -465,6 +489,9 @@ struct LibraryView: View {
     @State private var search = ""
     @State private var keys = PickerKeys()
     @FocusState private var searchFocused: Bool
+
+    /// `sync` is SyncCenter.shared but for pictures (SyncRender).
+    init(sync: SyncCenter? = nil) { self.sync = sync ?? .shared }
 
     private var look: PickerLook { PickerLook(dark: prefs.dark) }
     private var accent: Color { prefs.accentColor(dark: prefs.dark) }
@@ -492,11 +519,13 @@ struct LibraryView: View {
                 .padding(.horizontal, 22).padding(.top, 16)
             PickerList(rows: shown.map { item in
                 PickerRowData(id: item.id, title: item.name,
-                              subtitle: GateCounter.line(item.circuit, friendlyTime(item.modified)),
+                              subtitle: sync.problems[item.id] ?? GateCounter.line(item.circuit, friendlyTime(item.modified)),
                               badge: open.contains(item.id) ? "OPEN" : nil)
             }, selection: selectionIndex, look: look, accent: accent,
                empty: items.isEmpty ? "Nothing here yet." : "No circuits match.", onActivate: openSelected)
-                .padding(14)
+                .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 6)
+            SyncLine(center: sync, look: look)
+                .padding(.horizontal, 22).padding(.bottom, 12)
             HStack(spacing: 8) {
                 Button("Import File…", action: importFile).help("Bring in a .cdl file  (⌘I)")
                 Button("Rename…", action: rename).help("Rename the selected circuit  (⌘R)").disabled(selected == nil)
@@ -522,6 +551,7 @@ struct LibraryView: View {
         .onDisappear { keys.remove() }
         .onChange(of: search) { _, _ in selectedID = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .clLibraryChanged)) { _ in reload() }
     }
 
     /// The list again, in the order it's in: renamed circuits take their new
@@ -616,6 +646,35 @@ struct LibraryView: View {
     }
 }
 
+/// Under Your Circuits' list (5.2): how syncing is going (or a notice from
+/// the last minute) and Sync Now; while sync is off, a quiet way to Settings.
+private struct SyncLine: View {
+    @ObservedObject var center: SyncCenter
+    let look: PickerLook
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if center.enabled || center.kind == Int(CL_SYNC_GONE) {
+                Image(systemName: center.symbol).font(.system(size: 11)).foregroundStyle(look.dim)
+                Text(center.line).font(.system(size: 11)).foregroundStyle(look.dim)
+                    .lineLimit(1).truncationMode(.tail).help(center.line)
+            }
+            Spacer(minLength: 6)
+            if center.enabled {
+                Button { center.syncNow() } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11))
+                }
+                .buttonStyle(.borderless).help("Sync Now")
+            } else {
+                Button("Sync\u{2026}") { PrefsWindow.shared.show(page: .sync) }
+                    .buttonStyle(.link).font(.system(size: 11))
+                    .help("Keep Your Circuits the same on your other devices (Settings \u{203A} Sync)")
+            }
+        }
+        .frame(height: 18)
+    }
+}
+
 // MARK: - Version History
 
 /// The front circuit's saved versions, a picture of the chosen one beside
@@ -654,7 +713,8 @@ struct VersionHistoryView: View {
                 VersionPreview(url: versions.indices.contains(selection) ? versions[selection].url : nil, look: look, dark: prefs.dark)
                 PickerList(rows: versions.enumerated().map { i, v in
                     PickerRowData(id: v.url.path, title: friendlyTime(v.date),
-                                  subtitle: GateCounter.line(v.url, agoText(v.date)), badge: i == 0 ? "NEWEST" : nil)
+                                  subtitle: Library.note(of: v.url).map { "\($0) · \(agoText(v.date))" } ?? GateCounter.line(v.url, agoText(v.date)),
+                                  badge: i == 0 ? "NEWEST" : nil)
                 }, selection: $selection, look: look, accent: accent, empty: "No versions yet.", onActivate: restore)
                     .frame(width: 300)
             }
@@ -727,6 +787,7 @@ struct VersionHistoryView: View {
                 try data.write(to: url, options: .atomic)
             }
             try doc.revert(toContentsOf: url, ofType: doc.fileType ?? "org.cedarlogic.cdl")
+            SyncCenter.libraryChanged()
             dismiss()
         } catch {
             problem = "Couldn't restore that version: \(error.localizedDescription)"
