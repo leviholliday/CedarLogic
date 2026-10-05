@@ -3,11 +3,15 @@
 // the hooks the Linux app uses, so the engine is checked natively on a Mac or
 // Linux machine without any app. mac/Tools/sync-selftest.sh builds and runs it.
 //
-//   sync_selftest [tempDir] [--server http://localhost:8787/api/sync/v1] [--only <name>]
+//   sync_selftest [tempDir] [--server http://localhost:8787/api/sync/v1] [--only <name>] [--c-api]
+//
+// --c-api runs it through the C interface (cl_sync_self_test) with C hooks
+// over the same libraries, as the Mac app's Swift hooks would.
 //
 // With --server (or CL_SYNC_URL), the single-device scenarios also run
 // against the mock server (cedarlogic-site scripts/sync-mock-server.mjs).
 
+#include "CedarSync.h"
 #include "Sync.h"
 
 #include <curl/curl.h>
@@ -171,14 +175,80 @@ struct CurlHost : clsync::Host {
 	void askIncomingDeletes(int, const std::string&, std::function<void(bool)> answer) override { answer(true); }
 };
 
+// ---- the same hooks as C functions (CedarSync.h), for --c-api ----
+
+OpenSslCrypto* gCrypto = nullptr;
+CurlHost* gHost = nullptr;
+
+bool cRandom(void*, uint8_t* out, size_t n) { return gCrypto->random(out, n); }
+void cSha(void*, const uint8_t* p, size_t n, uint8_t out[32]) { gCrypto->sha256(p, n, out); }
+void cHmac(void*, const uint8_t* k, size_t kl, const uint8_t* p, size_t n, uint8_t out[32]) { gCrypto->hmacSha256(k, kl, p, n, out); }
+bool cSeal(void*, const uint8_t key[32], const uint8_t nonce[12], const uint8_t* aad, size_t aadLen, const uint8_t* plain, size_t n,
+           uint8_t* out) {
+	clsync::Bytes ct;
+	if (!gCrypto->aesGcmSeal(key, nonce, clsync::Bytes(aad, aad + aadLen), clsync::Bytes(plain, plain + n), ct)) return false;
+	memcpy(out, ct.data(), ct.size());
+	return true;
+}
+bool cOpen(void*, const uint8_t key[32], const uint8_t nonce[12], const uint8_t* aad, size_t aadLen, const uint8_t* ct, size_t n,
+           uint8_t* out) {
+	clsync::Bytes plain;
+	if (!gCrypto->aesGcmOpen(key, nonce, clsync::Bytes(aad, aad + aadLen), clsync::Bytes(ct, ct + n), plain)) return false;
+	if (!plain.empty()) memcpy(out, plain.data(), plain.size());
+	return true;
+}
+uint8_t* cDeflate(void*, const uint8_t* in, size_t n, size_t* outLen) {
+	clsync::Bytes out;
+	if (!gCrypto->deflateRaw(clsync::Bytes(in, in + n), out)) return nullptr;
+	uint8_t* p = (uint8_t*)malloc(out.size() + 1);
+	memcpy(p, out.data(), out.size());
+	*outLen = out.size();
+	return p;
+}
+uint8_t* cInflate(void*, const uint8_t* in, size_t n, size_t maxOut, size_t* outLen) {
+	clsync::Bytes out;
+	if (!gCrypto->inflateRaw(clsync::Bytes(in, in + n), maxOut, out)) return nullptr;
+	uint8_t* p = (uint8_t*)malloc(out.size() + 1);
+	if (!out.empty()) memcpy(p, out.data(), out.size());
+	*outLen = out.size();
+	return p;
+}
+void cHttp(void*, const char* method, const char* url, const char* headers, const uint8_t* body, size_t bodyLen, int* status,
+           bool* sent, char** respHeaders, uint8_t** respBody, size_t* respLen) {
+	clsync::HttpRequest r;
+	r.method = method;
+	r.url = url;
+	const std::string hs = headers;
+	for (size_t at = 0; at < hs.size();) {
+		size_t end = hs.find("\r\n", at);
+		if (end == std::string::npos) end = hs.size();
+		const std::string line = hs.substr(at, end - at);
+		const size_t colon = line.find(": ");
+		if (colon != std::string::npos) r.headers.emplace_back(line.substr(0, colon), line.substr(colon + 2));
+		at = end + 2;
+	}
+	r.body.assign((const char*)body, bodyLen);
+	const clsync::HttpResponse resp = gHost->http(r);
+	*status = resp.status;
+	*sent = resp.sent;
+	std::string h;
+	for (const auto& kv : resp.headers) h += kv.first + ": " + kv.second + "\r\n";
+	*respHeaders = strdup(h.c_str());
+	*respBody = (uint8_t*)malloc(resp.body.size() + 1);
+	memcpy(*respBody, resp.body.data(), resp.body.size());
+	*respLen = resp.body.size();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
 	std::string temp, server;
+	bool cApi = false;
 	if (const char* u = getenv("CL_SYNC_URL")) server = u;
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) server = argv[++i];
 		else if (strcmp(argv[i], "--only") == 0 && i + 1 < argc) setenv("CL_SYNC_TEST_ONLY", argv[++i], 1);
+		else if (strcmp(argv[i], "--c-api") == 0) cApi = true;
 		else temp = argv[i];
 	}
 	if (temp.empty()) {
@@ -189,7 +259,27 @@ int main(int argc, char** argv) {
 	OpenSslCrypto crypto;
 	CurlHost host;
 	std::string report;
-	const bool ok = clsync::selfTest(crypto, temp, report, server.empty() ? nullptr : &host, server);
+	bool ok;
+	if (cApi) {
+		gCrypto = &crypto;
+		gHost = &host;
+		CLSyncHooks h;
+		memset(&h, 0, sizeof h);
+		h.random = cRandom;
+		h.sha256 = cSha;
+		h.hmac_sha256 = cHmac;
+		h.aes_gcm_seal = cSeal;
+		h.aes_gcm_open = cOpen;
+		h.deflate_raw = cDeflate;
+		h.inflate_raw = cInflate;
+		h.http = cHttp;
+		char* text = nullptr;
+		ok = cl_sync_self_test(&h, temp.c_str(), server.empty() ? nullptr : server.c_str(), &text);
+		report = text ? text : "no report\n";
+		free(text);
+	} else {
+		ok = clsync::selfTest(crypto, temp, report, server.empty() ? nullptr : &host, server);
+	}
 	fputs(report.c_str(), stdout);
 	curl_global_cleanup();
 	return ok ? 0 : 1;
