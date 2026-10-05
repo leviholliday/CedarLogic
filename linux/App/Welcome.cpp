@@ -6,6 +6,8 @@
 #include "Welcome.h"
 #include "Brand.h"
 #include "Canvas.h"
+#include "Settings.h"
+#include "Sync.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -936,7 +938,7 @@ void startTourOn(CircuitWindow* from) {
 
 namespace whatsnew {
 
-const char* const kVersion = "native-1";
+const char* const kVersion = "0.4";
 
 namespace {
 
@@ -952,30 +954,30 @@ struct Chapter {
 };
 
 const Chapter kChapters[] = {
-	{ "Your circuits", "Everything in one place", "Every circuit lives in Your Circuits and saves itself as you go. No files to lose.",
-	  { { "folder-symbolic", "Your Circuits (Ctrl+O)", "Open, rename, delete. A new circuit joins as soon as there's something on it." },
-	    { "document-new-symbolic", "Files come in as copies", "Open a .cdl from anywhere and you work on a copy; Export gets one out." },
-	    { "document-open-recent-symbolic", "Versions that mean something", "Ctrl+S keeps a version. Version History has every one, with a picture." } },
-	  "Open Your Circuits", "app.open" },
-	{ "Start ahead", "Templates and your own parts", "Stop rebuilding the same thing every lab.",
-	  { { "document-new-symbolic", "New from Template", "A Lab Page with your name on it, a 4-bit counter, a 7-segment starter, or your own." },
-	    { "package-x-generic-symbolic", "My Parts", "Select some gates, Edit ▸ Save as Part, name it. Drag it from the side panel or find it with A." },
-	    { "preferences-system-symbolic", "Save your own templates", "Any circuit can be the start of the next one: File ▸ Save as Template." } },
-	  "Browse Templates", "win.new-template" },
-	{ "Check your work", "Truth tables that do the algebra", "Press T, and CedarLogic hands you the simplest answer too.",
-	  { { "view-grid-symbolic", "Karnaugh maps and formulas", "The truth table has tabs: the table, a K-map for each light, and the simplest SOP and POS." },
-	    { "accessories-calculator-symbolic", "Build from a Formula", "Type F = AB + C' (or Σm(1,3,5)) and get the gates, wired and labelled." },
-	    { "edit-find-symbolic", "Find (Ctrl+F)", "Labels, TO/FROM names and parts on every page, one Enter away." } },
-	  "Build from a Formula", "win.build-formula" },
-	{ "See it think", "Watch the signals", "The circuit shows you what it's doing.",
-	  { { "network-wired-symbolic", "Point at a wire", "Every branch of it lights up, so you can follow it across the page." },
-	    { "utilities-system-monitor-symbolic", "Timing diagrams", "The oscilloscope (Ctrl+G) records every TO label over time." },
-	    { "media-playback-start-symbolic", "Simulation View", "Lit wires with the signal marching along them. Press Ctrl+R." } },
+	{ "Sync", "Your circuits, on every device", "Turn on sync and a circuit you save here is waiting on your other devices. There's no account.",
+	  { { "emblem-synchronizing-symbolic", "Settings \xE2\x96\xB8 Sync \xE2\x96\xB8 Turn On Sync", "It makes a sync code, and a QR code for it. Your other devices join with it." },
+	    { "dialog-password-symbolic", "Locked before it leaves", "Circuits are encrypted on your computer. The website keeps them, but it can't read them." },
+	    { "network-workgroup-symbolic", "Every kind of device", "Macs, Windows PCs, Raspberry Pis and other Linux PCs, CedarLogic Online and the phone app." } },
+	  "Open Sync Settings", "sync" },
+	{ "Add a device", "Scan it, don't type it", "A new device doesn't need a long code typed in.",
+	  { { "view-grid-symbolic", "Show a QR code", "On the new device, Settings \xE2\x96\xB8 Sync \xE2\x96\xB8 I Have a Code. Typing or pasting the code still works." },
+	    { "camera-photo-symbolic", "Scan it with your phone", "On a phone that syncs: Your Circuits \xE2\x96\xB8 Sync \xE2\x96\xB8 Add a Device. The new device gets the code." },
+	    { "document-open-recent-symbolic", "Nothing gets lost", "If two devices change a circuit, the other edit goes to Version History. A deleted circuit goes to the trash on the others." } },
 	  nullptr, nullptr },
-	{ "Made for Linux", "Faster, calmer, greener", "A new look, and a lot of care in the small things.",
-	  { { "applications-graphics-symbolic", "CedarLogic green", "The icon's colour is the app's colour now. Preferences has the others." },
-	    { "document-edit-symbolic", "Your toolbar, in the title bar", "The Mac's toolbar and tab cards, drawn the same on every desktop." },
-	    { "mail-message-new-symbolic", "Send Feedback", "The speech bubble in the toolbar sends a note and screenshots straight to the developer." } },
+	{ "Hand it in", "Check, report, share", "Three new ways to finish a lab.",
+	  { { "emblem-ok-symbolic", "Check My Circuit (Shift+T)", "Type a formula or paste the truth table you were given. It marks the rows your circuit gets wrong." },
+	    { "x-office-document-symbolic", "Export Lab Report", "File \xE2\x96\xB8 Export Lab Report makes one PDF to hand in. You pick what goes in: the circuit, truth table, K-maps, timing." },
+	    { "insert-link-symbolic", "Share Link", "File \xE2\x96\xB8 Share Link copies a link that opens your circuit in CedarLogic Online in any browser, or in the app." } },
+	  "Check My Circuit", "win.check-circuit" },
+	{ "Tidy Up", "Rebuilt for cleaner layouts", "Tidy Up by Signal Flow lays a page out again, and it's quick.",
+	  { { "view-sort-ascending-symbolic", "Cleaner results", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
+	    { "media-seek-forward-symbolic", "Fast on big pages", "A page with 585 parts takes about a second." },
+	    { "edit-undo-symbolic", "Still a preview", "Shift+S shows it first: Enter keeps it, Escape puts it back, Tab tries the other way." } },
+	  "Tidy Up by Signal Flow", "win.tidy-flow" },
+	{ "Fixes", "And the small things", "Fixed since the last version.",
+	  { { "emblem-ok-symbolic", "Truth tables with FROM labels", "A FROM label or a ground no longer makes a page count as having memory, so its truth table comes out." },
+	    { "emblem-ok-symbolic", "Lab reports read better", "A heading stays with what's under it, and a truth table's note stays with its table." },
+	    { "emblem-ok-symbolic", "Build from a Formula", "NOR-only circuits come out right for a formula like (AB)'." } },
 	  nullptr, nullptr },
 };
 const int kChapterCount = 5;
@@ -999,6 +1001,7 @@ void close(const char* action) {
 	if (window == nullptr) return;
 	gtk_window_present(window->window());
 	if (action && std::string(action) == "tour") welcome::startTourOn(window);
+	else if (action && std::string(action) == "sync") settings::show(window, settings::kSyncPage);
 	else if (action) runAction(window, action);
 }
 
@@ -1011,103 +1014,102 @@ void go(int d) {
 }
 
 // The art beside each chapter.
-void art(cairo_t* cr, int chapter, float x, float y, double t) {
+void art(cairo_t* cr, int chapter, float x, float y, double) {
 	switch (chapter) {
 	case 0: {
-		struct Row { const char* name; const char* meta; };
-		const Row rows[] = { { "Lab 5: Traffic Light", "42 gates · Today at 2:14 PM" }, { "Full Adder", "18 gates · Yesterday" },
-		                     { "BCD to 7 Segment", "96 gates · Sep 24" }, { "Counter", "12 gates · Sep 22" } };
+		struct Dev { const char* icon; const char* name; const char* meta; };
+		const Dev devs[] = { { "computer-symbolic", "Laptop", "Lab 5: Traffic Light" }, { "computer-symbolic", "Raspberry Pi", "Lab 5: Traffic Light" },
+		                     { "computer-symbolic", "Windows PC", "Lab 5: Traffic Light" }, { "phone-symbolic", "Phone", "Lab 5: Traffic Light" } };
 		for (int i = 0; i < 4; i++) {
-			const RectF r = rectF(x, y + i * 58, x + 290, y + i * 58 + 48);
+			const RectF r = rectF(x, y + i * 56, x + 290, y + i * 56 + 46);
 			card(cr, r, i == 0, 12);
-			fillRound(cr, rectF(r.left + 10, r.top + 9, r.left + 40, r.top + 39), 8, alpha(kNeon, 0.12f));
-			glyph(cr, "text-x-generic-symbolic", r.left + 13, r.top + 12, 15);
-			text(cr, rows[i].name, r.left + 52, r.top + 7, 12.5f, Bold, kPrimary);
-			text(cr, rows[i].meta, r.left + 52, r.top + 26, 10.5f, Normal, kFaint);
-			if (i == 0) {
-				fillRound(cr, rectF(r.right - 52, r.top + 15, r.right - 12, r.top + 33), 9, alpha(kNeon, 0.18f));
-				text(cr, "OPEN", r.right - 52, r.top + 17, 9, Bold, kNeon, 40, TextAlign::Center, 0.8f);
-			}
+			fillRound(cr, rectF(r.left + 10, r.top + 8, r.left + 40, r.top + 38), 8, alpha(kNeon, 0.12f));
+			glyph(cr, devs[i].icon, r.left + 13, r.top + 11, 15);
+			text(cr, devs[i].name, r.left + 52, r.top + 6, 12.5f, Bold, kPrimary);
+			text(cr, devs[i].meta, r.left + 52, r.top + 25, 10.5f, Normal, kFaint);
+			glyph(cr, "emblem-ok-symbolic", r.right - 32, r.top + 11, 12);
 		}
+		const RectF lock = rectF(x, y + 236, x + 290, y + 282);
+		fillRound(cr, lock, 12, alpha(kNeon, 0.08f));
+		glyph(cr, "changes-prevent-symbolic", lock.left + 14, lock.top + 11, 13);
+		text(cr, "Locked on your device first", lock.left + 52, lock.top + 14, 12, SemiBold, kPrimary);
 		break;
 	}
 	case 1: {
-		struct T { const char* icon; const char* name; };
-		const T tiles[] = { { "x-office-document-symbolic", "Lab Page" }, { "accessories-calculator-symbolic", "Counter" },
-		                    { "view-app-grid-symbolic", "7-Segment" } };
-		for (int i = 0; i < 3; i++) {
-			const RectF r = rectF(x + i * 98, y, x + i * 98 + 86, y + 92);
-			card(cr, r, false, 12);
-			drawIcon(cr, tiles[i].icon, rectF(r.left, r.top + 18, r.right, r.top + 52), 22, kNeon);
-			text(cr, tiles[i].name, r.left, r.top + 60, 10.5f, SemiBold, kSecondary, 86, TextAlign::Center);
+		// A QR code (a real one, of the website's sync page), as I Have a Code shows.
+		const char* const sample = "https://cedarlogic.netlify.app/sync/";
+		int n = 0;
+		const std::vector<bool> bits = clsync::qr(sample, n);
+		const float box = 180;
+		const RectF r = rectF(x + 55, y + 6, x + 55 + box, y + 6 + box);
+		fillRound(cr, r, 10, colorF(1, 1, 1));
+		if (n > 0) {
+			const float m = box / (n + 6);
+			setColor(cr, colorF(0, 0, 0));
+			for (int row = 0; row < n; row++)
+				for (int col = 0; col < n; col++)
+					if (bits[(size_t)row * n + col]) cairo_rectangle(cr, r.left + (col + 3) * m, r.top + (row + 3) * m, m, m);
+			cairo_fill(cr);
 		}
-		const RectF mine = rectF(x, y + 104, x + 290, y + 160);
-		card(cr, mine, true, 12);
-		glyph(cr, "package-x-generic-symbolic", mine.left + 14, mine.top + 15, 18);
-		text(cr, "My Parts", mine.left + 52, mine.top + 11, 12, Bold, kPrimary);
-		text(cr, "Full Adder · 2-to-4 Decoder · Debouncer", mine.left + 52, mine.top + 30, 10, Normal, kFaint);
+		text(cr, "Scan with your phone", x, y + 206, 14, Bold, kPrimary, 290, TextAlign::Center);
+		text(cr, "Your Circuits \xE2\x96\xB8 Sync \xE2\x96\xB8 Add a Device", x, y + 230, 11, Normal, kFaint, 290, TextAlign::Center);
 		break;
 	}
 	case 2: {
-		const int ones[] = { 1, 3, 5, 7, 13, 15 };
-		const int gray[] = { 0, 1, 3, 2 };
-		for (int r = 0; r < 4; r++)
-			for (int c = 0; c < 4; c++) {
-				const int m = gray[r] * 4 + gray[c];
-				const bool one = std::find(std::begin(ones), std::end(ones), m) != std::end(ones);
-				const RectF cell = rectF(x + 26 + c * 52, y + r * 44, x + 26 + c * 52 + 48, y + r * 44 + 40);
-				fillRound(cr, cell, 6, colorF(1, 1, 1, 0.05f));
-				text(cr, one ? "1" : "0", cell.left, cell.top + 9, 15, Bold, one ? kNeon : kFaint, 48, TextAlign::Center);
-			}
-		fillRound(cr, rectF(x + 74, y - 4, x + 182, y + 86), 12, alpha(kNeon, 0.06f));
-		strokeRound(cr, rectF(x + 76, y - 2, x + 180, y + 84), 10, kNeon, 2);
-		strokeRound(cr, rectF(x + 76, y + 42, x + 180, y + 128), 10, colorF(0.45f, 0.8f, 1), 2);
-		text(cr, "F = A'D + BD", x, y + 186, 17, Bold, kPrimary, 260, TextAlign::Center);
+		const RectF r = rectF(x, y, x + 290, y + 214);
+		card(cr, r, false, 12);
+		text(cr, "A formula or a table", r.left + 16, r.top + 12, 10.5f, SemiBold, kFaint);
+		text(cr, "F = A'B + AB'", r.left + 16, r.top + 30, 15, Bold, kPrimary);
+		const char* head[] = { "A", "B", "Should be", "Yours" };
+		const float cx[] = { 24, 66, 112, 206 };
+		for (int c = 0; c < 4; c++) text(cr, head[c], r.left + cx[c], r.top + 66, 10.5f, SemiBold, kFaint);
+		const int rows[4][4] = { { 0, 0, 0, 0 }, { 0, 1, 1, 1 }, { 1, 0, 1, 0 }, { 1, 1, 0, 0 } };
+		for (int i = 0; i < 4; i++) {
+			const float ry = r.top + 88 + i * 24;
+			const bool wrong = rows[i][2] != rows[i][3];
+			if (wrong) fillRound(cr, rectF(r.left + 12, ry - 3, r.right - 12, ry + 19), 6, colorF(1, 0.35f, 0.35f, 0.16f));
+			for (int c = 0; c < 4; c++)
+				text(cr, rows[i][c] ? "1" : "0", r.left + cx[c], ry, 12, Bold,
+				     c == 3 && wrong ? colorF(1, 0.5f, 0.5f) : c >= 2 ? kNeon : kSecondary);
+		}
+		text(cr, "Doesn't match: F.", x, y + 232, 13, Bold, colorF(1, 0.5f, 0.5f), 290, TextAlign::Center);
 		break;
 	}
 	case 3: {
-		hero(cr, rectF(x - 5, y, x + 295, y + 120), t);
-		const RectF r = rectF(x - 5, y + 130, x + 295, y + 230);
-		card(cr, r, false, 12);
-		const int rows[3][10] = { { 0, 0, 1, 1, 0, 0, 1, 1, 0, 0 }, { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 }, { 0, 0, 0, 1, 0, 0, 0, 1, 0, 0 } };
-		const float step = (r.right - r.left - 20) / 10;
-		for (int i = 0; i < 3; i++) {
-			const Color c = i == 2 ? kNeon : colorF(1, 1, 1, 0.55f);
-			const float top = r.top + 14 + i * 30, hgt = 16;
-			float lastY = -1;
-			for (int j = 0; j < 10; j++) {
-				const float x0 = r.left + 10 + j * step, yy = rows[i][j] ? top : top + hgt;
-				if (lastY >= 0 && lastY != yy) drawLine(cr, pointF(x0, lastY), pointF(x0, yy), c, 1.6f);
-				drawLine(cr, pointF(x0, yy), pointF(x0 + step, yy), c, 1.6f);
-				lastY = yy;
-			}
+		// A page before Tidy Up and after: the same gates and wires.
+		const char* const labels[] = { "Before", "After" };
+		const float jitter[2][6] = { { 0, 22, -14, 30, -6, 16 }, { 0, 0, 0, 0, 0, 0 } };
+		for (int side = 0; side < 2; side++) {
+			const RectF r = rectF(x, y + side * 130, x + 290, y + side * 130 + 116);
+			card(cr, r, side == 1, 12);
+			text(cr, labels[side], r.left + 14, r.top + 8, 10.5f, SemiBold, side == 1 ? kNeon : kFaint);
+			const float cx[3] = { r.left + 36, r.left + 126, r.left + 216 };
+			const float cy[2] = { r.top + 44, r.top + 82 };
+			for (int c = 0; c < 3; c++)
+				for (int k = 0; k < 2; k++) {
+					const float gy = cy[k] + jitter[side][c * 2 + k] * 0.6f + (side == 0 ? (c == 1 ? 6.0f : 0.0f) : 0.0f);
+					const RectF g = rectF(cx[c], gy - 10, cx[c] + 38, gy + 10);
+					fillRound(cr, g, 5, colorF(1, 1, 1, 0.1f));
+					strokeRound(cr, g, 5, colorF(1, 1, 1, 0.45f), 1.2f);
+					if (c < 2) {
+						const float ny = cy[k] + jitter[side][(c + 1) * 2 + k] * 0.6f + (side == 0 ? (c + 1 == 1 ? 6.0f : 0.0f) : 0.0f);
+						const float mx = side == 0 ? cx[c] + 38 + 22 + 4 * k : cx[c] + 38 + 25;
+						drawLine(cr, pointF(g.right, gy), pointF(mx, gy), side == 1 ? kNeon : colorF(1, 1, 1, 0.5f), 1.5f);
+						drawLine(cr, pointF(mx, gy), pointF(mx, ny), side == 1 ? kNeon : colorF(1, 1, 1, 0.5f), 1.5f);
+						drawLine(cr, pointF(mx, ny), pointF(cx[c + 1], ny), side == 1 ? kNeon : colorF(1, 1, 1, 0.5f), 1.5f);
+					}
+				}
 		}
 		break;
 	}
 	default: {
-		const int order[] = { 6, 0, 1, 2, 3, 4, 5 };
-		float cx = x + 20;
-		for (int i = 0; i < 7; i++) {
-			double r, g, b;
-			cl_accent_color(order[i], true, &r, &g, &b);
-			const float rad = i == 0 ? 17.0f : 11.0f;
-			if (i == 0) fillCircle(cr, pointF(cx, y + 17), 26, alpha(kNeon, 0.18f));
-			fillCircle(cr, pointF(cx, y + 17), rad, colorF((float)r, (float)g, (float)b));
-			cx += rad + 12 + 11;
-		}
-		// A sketch of the toolbar in the title bar.
-		const RectF bar = rectF(x, y + 50, x + 290, y + 92);
-		card(cr, bar, false, 12);
-		const char* icons[] = { "document-new-symbolic", "folder-symbolic", "edit-undo-symbolic", "media-playback-pause-symbolic",
-		                        "media-playback-start-symbolic", "view-more-horizontal-symbolic" };
-		for (int i = 0; i < 6; i++) drawIcon(cr, icons[i], rectF(bar.left + 14 + i * 44, bar.top, bar.left + 44 + i * 44, bar.bottom), 15,
-		                                     i == 4 ? kNeon : kSecondary);
-		const RectF tabs = rectF(x, y + 102, x + 290, y + 140);
+		const char* const names[] = { "Truth tables", "Lab reports", "Build from a Formula" };
 		for (int i = 0; i < 3; i++) {
-			const RectF tcard = rectF(tabs.left + i * 96, tabs.top + 6, tabs.left + i * 96 + 88, tabs.bottom - 6);
-			fillRound(cr, tcard, 8, i == 0 ? colorF(1, 1, 1, 0.12f) : colorF(1, 1, 1, 0.04f));
-			text(cr, format("Page %d", i + 1), tcard.left, tcard.top + 6, 11, i == 0 ? Bold : Normal, i == 0 ? kPrimary : kFaint, 88,
-			     TextAlign::Center);
+			const RectF r = rectF(x, y + i * 56, x + 290, y + i * 56 + 46);
+			card(cr, r, false, 12);
+			fillRound(cr, rectF(r.left + 10, r.top + 8, r.left + 40, r.top + 38), 8, alpha(kNeon, 0.12f));
+			glyph(cr, "emblem-ok-symbolic", r.left + 13, r.top + 11, 15);
+			text(cr, names[i], r.left + 52, r.top + 14, 12.5f, Bold, kPrimary);
 		}
 		break;
 	}
@@ -1117,8 +1119,8 @@ void art(cairo_t* cr, int chapter, float x, float y, double t) {
 void pageIntro(cairo_t* cr, WhatsNew* wn, double t) {
 	const float x = 56, tw = 380;
 	text(cr, "WHAT'S NEW", x, 92, 11, Bold, kNeon, 0, TextAlign::Leading, 1.8f);
-	float y = 112 + text(cr, "CedarLogic for Linux", x, 112, 34, Bold, colorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
-	y += text(cr, "A native Linux app now, with a new look and a lot more inside. Here's everything that's new since the old one, a minute's read.",
+	float y = 112 + text(cr, "CedarLogic 0.4", x, 112, 34, Bold, colorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
+	y += text(cr, "Sync your circuits between devices, check your work, hand in a lab report, and a faster Tidy Up. Here's what's new, a minute's read.",
 	          x, y, 14, Normal, kSecondary, tw) + 20;
 	for (int i = 0; i < kChapterCount; i++) {
 		const RectF r = rectF(x - 8, y - 4, x + tw, y + 24);
@@ -1220,7 +1222,7 @@ void show(CircuitWindow* window, int page) {
 	g_new->pager.page = std::max(0, std::min(kPages - 1, page));
 	Panel& p = g_new->panel;
 	p.paint = paint;
-	p.animating = [] { return g_new && (g_new->pager.sliding() || g_new->pager.page == 0 || g_new->pager.page == 4); };
+	p.animating = [] { return g_new && (g_new->pager.sliding() || g_new->pager.page == 0); };
 	p.click = [](int id) {
 		WhatsNew* wn = g_new;
 		if (wn == nullptr) return;

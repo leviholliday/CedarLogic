@@ -105,6 +105,8 @@ jobs:
           DEB=$(linux/package-deb.sh linux/build-release ${{ github.run_number }} | tail -1)
           dpkg-deb --info "$DEB"
           dpkg-deb --contents "$DEB"
+          # An upgrade from every earlier test build (0.1.0+<run number>): this one has to sort higher.
+          dpkg --compare-versions "$(dpkg-deb -f "$DEB" Version)" gt "0.1.0+999999"
           mkdir -p debs
           cp "$DEB" "debs/cedarlogic_$(dpkg-deb -f "$DEB" Architecture).deb"
           # It installs, with its dependencies, and runs.
@@ -142,7 +144,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 whatsnew:0 help truth feedback templates tour find export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu; do
+          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 help truth feedback templates tour find export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"

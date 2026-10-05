@@ -23,6 +23,7 @@ enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage, SyncPag
 const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts", "Sync" };
 const char* kIcons[] = { "preferences-system-symbolic", "applications-graphics-symbolic", "input-mouse-symbolic",
                          "view-more-horizontal-symbolic", "input-keyboard-symbolic", "emblem-synchronizing-symbolic" };
+static_assert(SyncPage == kSyncPage && PageCount == 6, "Settings.h names the Sync page by number");
 const float kBarH = 78, kWidth = 640;
 
 // Every window takes the change.

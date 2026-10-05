@@ -2247,7 +2247,7 @@ void CircuitWindow::showAbout() {
 		const float k = (float)anim::easeOut(t / 0.5);
 		brand::icon(cr, w / 2 - 48, 40 + 8 * (1 - k), 96, 0.55f * k);
 		brand::text(cr, "CedarLogic", 0, 152, 28, brand::Bold, brand::kPrimary, w, TextAlign::Center);
-		brand::text(cr, std::string("Version ") + CL_VERSION + "  ·  native Linux test build  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0,
+		brand::text(cr, std::string("Version ") + CL_VERSION + "  ·  native Linux  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0,
 		            192, 12, brand::Medium, brand::kNeon, w, TextAlign::Center);
 		brand::text(cr, "A digital logic simulator, from Cedarville University. Rebuilt natively for Linux: GTK and Cairo on the shared "
 		                "CedarLogic engine, with no OpenGL, so it runs the same on a Raspberry Pi as on a PC.",

@@ -12,6 +12,8 @@
 class CircuitWindow;
 
 namespace settings {
+// The Sync page (the last of the six), for show().
+constexpr int kSyncPage = 5;
 void show(CircuitWindow* from, int page = -1);
 GtkWidget* window();
 // The page's content changed size (Sync's states): the window follows.
