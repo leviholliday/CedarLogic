@@ -1,6 +1,6 @@
 // Settings (Ctrl+,), laid out as the Mac app's (SettingsView.swift) and the
 // Linux app's: the pages as icons in a bar across the top -- General,
-// Appearance, Canvas, Toolbar, Shortcuts -- the window fitting each page as
+// Appearance, Canvas, Toolbar, Shortcuts, Sync -- the window fitting each page as
 // you switch, and each setting a label on the left with its control and a
 // line of explanation under it. Every change applies at once; Escape or the
 // close box closes it, and Ctrl+Tab steps through the pages.
@@ -11,6 +11,7 @@
 #include "Collections.h"
 #include "Integration.h"
 #include "Shortcuts.h"
+#include "SyncApp.h"
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Window.h"
@@ -23,7 +24,7 @@
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage, SyncPage };
 
 // Every window takes the change.
 void apply() {
@@ -482,10 +483,10 @@ void showPreferencesDialog(HWND parent) {
 	f.okText = "";
 	f.cancelText = "";
 	f.settingsLayout = true;
-	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts" };
-	// A gear, a palette, a mouse, ••• (as the Linux app has it), a keyboard.
-	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE765 };
-	f.page = std::max(0, std::min((int)ShortcutsPage, g_page));
+	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts", "Sync" };
+	// A gear, a palette, a mouse, ••• (as the Linux app has it), a keyboard, two circling arrows.
+	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE765, 0xE895 };
+	f.page = std::max(0, std::min((int)SyncPage, g_page));
 	// What each field does when it changes.
 	std::map<int, std::function<void(Form&, int)>> on;
 
@@ -681,6 +682,11 @@ void showPreferencesDialog(HWND parent) {
 	list.note = f.add(note);
 	list.list = f.add(picture("", 360, [&list](ID2D1RenderTarget* rt, float w, float h) { paintShortcuts(list, rt, w, h); }));
 
+	// ---- Sync
+	f.adding = SyncPage;
+	syncapp::SettingsPage sync;
+	sync.add(f);
+
 	// A colour or a style picked, by a click or the arrows.
 	auto pickAccent = [&f, swatches](int i) {
 		if (i < 0 || i > 6) return;
@@ -721,8 +727,14 @@ void showPreferencesDialog(HWND parent) {
 		ImmAssociateContextEx(list.hwnd(), nullptr, 0);
 		// Tab reaches the list (the arrows choose a shortcut, Enter changes it).
 		SetWindowLongPtrW(list.hwnd(), GWL_STYLE, GetWindowLongPtrW(list.hwnd(), GWL_STYLE) | WS_TABSTOP);
+		sync.init(form);
 	};
+	// Sync's state is read again every half minute ("Synced 5 min ago").
+	f.timerMs = 30000;
+	f.onTimer = [&](Form& form) { sync.tick(form); };
+	f.onLeave = [&](Form& form, int field) { if (sync.handles(field)) sync.left(form, field); };
 	f.onChange = [&](Form& form, int field) {
+		if (sync.handles(field)) { sync.changed(form, field); return; }
 		auto it = on.find(field);
 		if (it != on.end()) it->second(form, field);
 	};
@@ -736,6 +748,7 @@ void showPreferencesDialog(HWND parent) {
 		else if (form.scrollHeight > 0) form.scrollTo(form.scrollY - MulDiv(delta, scaled(90, dpiOf(form.dialog)), WHEEL_DELTA));
 	};
 	f.run(parent);
+	sync.detach();
 	g_page = f.page;
-	if (g_page < 0 || g_page > ShortcutsPage) g_page = General;
+	if (g_page < 0 || g_page > SyncPage) g_page = General;
 }

@@ -101,6 +101,14 @@ public:
 	void reloadFromDisk(const std::string& message);
 	// A circuit in Your Circuits was renamed.
 	void libraryChanged();
+	// Sync (SyncApp.h): when the last key or click went to this window (ms
+	// since 1970); the circuit changed on disk under a window with nothing
+	// unsaved (reloaded in place: the same tab, the same view); and the
+	// circuit went (its window closes, or becomes a new circuit if it's the only one).
+	int64_t lastInputMs() const { return lastInputAt; }
+	void noteInput();
+	void reloadFromSync(const std::string& fromDevice);
+	void closeForSync();
 	// A new circuit from a template: called `name`, and in Your Circuits.
 	void startAs(const std::string& name);
 	// My Parts gained or lost one.
@@ -256,6 +264,7 @@ private:
 	std::string recoveryBase;
 	std::string recoveredName;
 	unsigned changes = 0, changesAtRecovery = 0;
+	int64_t lastInputAt = 0;
 	double lastRecovery = 0;
 	void writeRecovery();
 

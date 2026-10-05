@@ -14,6 +14,7 @@
 #include "Recovery.h"
 #include "ShareLink.h"
 #include "Shortcuts.h"
+#include "SyncApp.h"
 #include "SyncPlatform.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
@@ -57,6 +58,10 @@ bool gFirstLaunch = false;
 std::string gPlace;     // --place: a gate by library name, put on the page and selected
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
+// --dialog sync, sync-on (Settings on its Sync page, off or on with sample devices),
+// sync-code, sync-link: sync's screens, for the pictures.
+std::string gSyncDialog;
+const int kSyncPage = 5;
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
 bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
@@ -367,6 +372,15 @@ void CALLBACK badLinkTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w) sharelink::showProblem(w->window(), "the link was cut short");
 }
 
+// --dialog sync-code, sync-link: the code sheet, and what linking asks, for the screenshot.
+void CALLBACK syncSheetTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w == nullptr) return;
+	if (gSyncDialog == "sync-code") syncapp::showCodeSample(w->window());
+	else syncapp::showLinkSample(w->window());
+}
+
 // --wire-tag: once the circuit is in view, the pointer resting on a wire.
 void CALLBACK wireTagTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
@@ -531,6 +545,13 @@ void chooseAndOpen(CircuitWindow* from) {
 // App, a link in a chat): the link's circuit is put in a file first, which
 // opens as any does, as a new circuit in Your Circuits (ShareLink.h).
 bool openArgument(const std::string& arg, CircuitWindow* from) {
+	// cedarlogic://sync#k=...: a sync code. It checks what the code holds and
+	// asks before linking anything.
+	if (syncapp::isSyncLink(arg)) {
+		if (splash::active()) splash::hideSoon(nullptr);   // (it would cover the card)
+		syncapp::openLink(from ? from->window() : nullptr, arg);
+		return false;
+	}
 	if (!sharelink::isLink(arg)) return openCircuit(arg, from);
 	std::string why;
 	const std::string file = sharelink::fileForLink(arg, why);
@@ -735,6 +756,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
+			if (d == "sync" || d == "sync-on") { gDialog = CMD_PREFERENCES; gSyncDialog = d; }
+			if (d == "sync-code" || d == "sync-link") { gDialog = -9; gSyncDialog = d; }
 			continue;
 		}
 		files.push_back(a);
@@ -794,10 +817,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		return ok ? 0 : 1;
 	}
 	registerWindowClasses();
+	// Sync: the engine (not started yet), unless this run only makes pictures.
+	if (!testRun) syncapp::init();
+	if (gSyncDialog == "sync-on" || gSyncDialog == "sync-code" || gSyncDialog == "sync-link") syncapp::demo(true);
 	splash::setStatus("Opening the workspace\u2026");
 
 	bool any = false;
-	for (const std::string& f : files) any = openArgument(f, nullptr) || any;
+	// A sync link waits for the windows (it asks a question over one).
+	std::vector<std::string> syncLinks;
+	for (const std::string& f : files) {
+		if (syncapp::isSyncLink(f)) syncLinks.push_back(f);
+		else any = openArgument(f, nullptr) || any;
+	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
 	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest) {
@@ -829,7 +860,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		}
 	}
 	if (!gNote.empty() && !circuitWindows().empty()) circuitWindows().back()->note(gNote);
-	if (gDialog == CMD_PREFERENCES) setPreferencesPage(gPage);
+	if (gDialog == CMD_PREFERENCES) setPreferencesPage(gSyncDialog.empty() || gPage > 0 ? gPage : kSyncPage);
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (gDialog == -1 && !circuitWindows().empty()) {
 		prefs().hasSeenWelcome = false;
@@ -843,6 +874,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -6) SetTimer(nullptr, 0, 400, renameTimer);
 	if (gDialog == -7) integration::start(true);
 	if (gDialog == -8) SetTimer(nullptr, 0, 400, badLinkTimer);
+	if (gDialog == -9) SetTimer(nullptr, 0, 400, syncSheetTimer);
 	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else if (gClickTest) {
@@ -851,13 +883,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	} else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.
-		splash::hideSoon([] {
+		splash::hideSoon([syncLinks] {
 			for (CircuitWindow* w : circuitWindows()) w->present();
 			CircuitWindow* front = circuitWindows().empty() ? nullptr : circuitWindows().front();
 			if (!welcome::offer(front) && !whatsnew::offer(front))
 				SetTimer(nullptr, 0, 300, recoveryTimer);
 			updater::start();
 			integration::start();
+			// Sync starts looking after Your Circuits; a link it was opened with asks first.
+			syncapp::start();
+			for (const std::string& link : syncLinks) syncapp::openLink(front ? front->window() : nullptr, link);
 		});
 	}
 
@@ -868,11 +903,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 				if (IsWindowEnabled(w->window()) && handleShortcut(w, msg)) continue;
 			}
 		}
+		// A key or a click: someone is working here (sync keeps looking, and
+		// leaves a circuit being worked in alone).
+		if (msg.message == WM_KEYDOWN || msg.message == WM_CHAR || msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN ||
+		    msg.message == WM_MOUSEWHEEL) {
+			if (CircuitWindow* w = windowFor(msg.hwnd)) w->noteInput();
+			syncapp::userActive();
+		}
 		TranslateMessage(&msg);
 		DispatchMessageW(&msg);
 	}
 	const int clickResult = gClickTest ? finishClickTest() : 0;
 	updater::shutdown();
+	syncapp::shutdown();
 	// What this run's flags changed for themselves goes back as it was.
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
 	if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;

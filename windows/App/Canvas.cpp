@@ -702,6 +702,16 @@ void Canvas::centerOn(double wx, double wy) {
 	startZoom(wx - width() / 2 * u, wy + height() / 2 * u, u);
 }
 
+void Canvas::setCamera(double ox, double oy, double unitsPerPoint) {
+	zooming = false;
+	needsFit = false;
+	originX = ox;
+	originY = oy;
+	upp = unitsPerPoint;
+	redraw();
+	win->statusNeedsUpdate();
+}
+
 void Canvas::panTo(double wx, double wy) {
 	zooming = false;
 	originX = wx - width() / 2 * upp;

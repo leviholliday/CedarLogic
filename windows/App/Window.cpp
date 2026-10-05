@@ -22,6 +22,7 @@
 #include "Chrome.h"
 #include "Integration.h"
 #include "ShareLink.h"
+#include "SyncApp.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -1071,7 +1072,17 @@ void CircuitWindow::selectionChanged() {
 	statusDirty = true;
 }
 
+void CircuitWindow::noteInput() {
+	FILETIME ft;
+	GetSystemTimeAsFileTime(&ft);
+	ULARGE_INTEGER u;
+	u.LowPart = ft.dwLowDateTime;
+	u.HighPart = ft.dwHighDateTime;
+	lastInputAt = (int64_t)((u.QuadPart - 116444736000000000ULL) / 10000);
+}
+
 void CircuitWindow::edited() {
+	noteInput();
 	changes++;
 	// Saving as you go: a couple of seconds after the last change.
 	SetTimer(hwnd, kAutosaveTimer, 2000, nullptr);
@@ -1432,6 +1443,9 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		for (Canvas* c : canvases) c->redraw();
 		return 0;
 	}
+	case WM_ACTIVATEAPP:
+		syncapp::appActivated(wp != FALSE);   // (the app came forward or went away: sync looks again, or sends)
+		break;
 	case WM_ACTIVATE:
 		if (toolbar) toolbar->redraw();
 		updateTabLabels();
@@ -1632,6 +1646,39 @@ void CircuitWindow::reloadFromDisk(const std::string& message) {
 	if (!message.empty()) note(message);
 }
 
+// Another device changed this circuit and it has nothing unsaved here: its
+// file is already the new one. Shown again in place -- the same tab in front,
+// each tab's view as it was -- not as a circuit being opened.
+void CircuitWindow::reloadFromSync(const std::string& fromDevice) {
+	struct View { double x, y, upp; };
+	std::map<int, View> views;
+	const int front = currentPage();
+	for (Canvas* c : canvases) {
+		const int p = c->page();
+		View v;
+		c->camera(v.x, v.y, v.upp);
+		if (p >= 0) views[p] = v;
+	}
+	char err[512] = "";
+	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
+	if (fresh == nullptr) return;   // (the next sync brings it again)
+	replaceDocument(fresh, path);
+	openingAt = -1;   // not the opening card: it was already open
+	for (Canvas* c : canvases) {
+		auto it = views.find(c->page());
+		if (it != views.end()) c->setCamera(it->second.x, it->second.y, it->second.upp);
+	}
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (canvases[i]->page() == front) showPage(i);
+	note(fromDevice.empty() ? std::string("Updated from another device.") : "Updated from " + fromDevice + ".");
+}
+
+void CircuitWindow::closeForSync() {
+	// The only window: the app stays up, with a new circuit in it.
+	if (circuitWindows().size() <= 1) replaceDocument(cl_document_new(), "");
+	else discard();
+}
+
 void CircuitWindow::startAs(const std::string& name) {
 	recoveredName = name;
 	forceDirty = true;
@@ -1731,7 +1778,12 @@ void CircuitWindow::destroy() {
 	KillTimer(h, kClockTimer);
 	delete this;
 	DestroyWindow(h);
-	if (circuitWindows().empty()) PostQuitMessage(0);
+	if (circuitWindows().empty()) {
+		// The last one: what sync still has to send goes first (every circuit
+		// is saved by now), for a few seconds at most.
+		syncapp::quitting();
+		PostQuitMessage(0);
+	}
 }
 
 // ---- Commands -------------------------------------------------------------------
