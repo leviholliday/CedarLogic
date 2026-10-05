@@ -249,6 +249,7 @@ void engineEndToEnd(Crypto& cr, const std::string& dir) {
 	makeCircuit(a.root, "20261004-101011-22222", "Params", fixture("params-v3.cdl"));
 	ui.sync([&] { a.engine->start(); });
 	ECHECK(!a.engine->enabled() && a.engine->status().kind == Status::Off);
+	ECHECK(a.host.onMainCalls == 0);   // start() runs on the UI thread: it never waits for itself
 
 	// Turn On.
 	std::atomic<int> turnedOn{ 0 };
@@ -295,6 +296,19 @@ void engineEndToEnd(Crypto& cr, const std::string& dir) {
 	ui.sync([&] { b.engine->syncNow(); });
 	ECHECK(waitFor([&] { return folderNames(b.root).size() == 4; }, 5000));
 	ECHECK(waitFor([&] { return !a.engine->devices().empty() || true; }, 10));
+
+	// Linking with a code that has no synced copy fails, and the device keeps syncing as it was.
+	{
+		std::atomic<int> bad{ 0 };
+		std::string message;
+		const std::string unknown = newCode(cr);
+		ui.sync([&] { b.engine->link(unknown, [&](bool ok, std::string m) { message = m; bad = ok ? 1 : -1; }); });
+		ECHECK(waitFor([&] { return bad != 0; }, 5000) && bad == -1);
+		ECHECK(message.find("No circuits are synced") == 0 && b.engine->enabled() && b.engine->code() == code);
+		const int64_t before = b.engine->status().lastSyncAt;
+		ui.sync([&] { b.engine->syncNow(); });
+		ECHECK(waitFor([&] { return b.engine->status().lastSyncAt > before; }, 5000));   // still syncing
+	}
 
 	// Scenario 27: a second process holds the lock -- no requests, and it says so.
 	Device c(ui, server, cr, files::join(dir, "C"), "Locked C");
