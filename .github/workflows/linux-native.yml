@@ -44,8 +44,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
-            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev \
-            xvfb xauth xdotool fonts-dejavu-core fonts-liberation
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation
 
       - name: Build
         run: |
@@ -67,6 +67,26 @@ jobs:
           $B/sim_check $L format/tests/fixtures/lab6.cdl 0 before.png after.png
           $B/save_check $L format/tests/fixtures/Broadcast.cdl format/tests/fixtures/Lab5.cdl \
             "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
+
+      # Sync (docs/SYNC.md): the engine's own self-test with the app's hooks (libcrypto, zlib, the
+      # curl program) -- the vectors every device must agree on, and the protocol's scenarios --
+      # then the curl program's use (no token on its command line, no temp file left behind), and
+      # two libraries turning sync on, linking, editing and deleting through a small stand-in for
+      # the website (linux/Tools/sync_mock.py). The website's own mock server, which the full
+      # scenarios over HTTP need, is in the private cedarlogic-site repo: SITE=<checkout>
+      # linux/Tools/sync-check.sh runs them.
+      - name: Sync checks
+        run: |
+          B=linux/build
+          $B/sync_check
+          python3 linux/Tools/sync_mock.py --port 0 > mock.log &
+          MOCK=$!
+          for i in $(seq 1 50); do grep -q listening mock.log && break; sleep 0.2; done
+          URL=$(sed -n 's/.*"url":"\([^"]*\)".*/\1/p' mock.log | sed 's/localhost/127.0.0.1/')
+          echo "mock server at $URL"
+          $B/sync_check --curl-check "$URL"
+          $B/sync_check --roundtrip "$URL"
+          kill $MOCK
 
       - name: Package AppImage
         run: |
@@ -106,6 +126,7 @@ jobs:
         run: |
           mkdir -p renders
           "$APPIMAGE" --version
+          "$APPIMAGE" --sync-test
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --screenshot renders/window-Lab5.png format/tests/fixtures/Lab5.cdl
           test -s renders/window-Lab5.png
@@ -119,11 +140,26 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 whatsnew:0 help truth feedback templates tour find export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu; do
+          for show in welcome:0 whatsnew:0 help truth feedback templates tour find export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
           done
+          # Settings > Sync with sync turned on, against the stand-in server: the code is in the
+          # sync folder as a turned-on computer has it, and the app syncs while it's pictured.
+          python3 linux/Tools/sync_mock.py --port 0 > mock-show.log &
+          MOCK=$!
+          for i in $(seq 1 50); do grep -q listening mock-show.log && break; sleep 0.2; done
+          SYNCURL=$(sed -n 's/.*"url":"\([^"]*\)".*/\1/p' mock-show.log | sed 's/localhost/127.0.0.1/')
+          SYNCHOME=$(mktemp -d)
+          mkdir -p "$SYNCHOME/CedarLogic/Sync"
+          chmod 700 "$SYNCHOME/CedarLogic/Sync"
+          linux/build/sync_check --new-code > "$SYNCHOME/CedarLogic/Sync/secret"
+          chmod 600 "$SYNCHOME/CedarLogic/Sync/secret"
+          XDG_DATA_HOME="$SYNCHOME" CL_SYNC_URL="$SYNCURL" xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --show sync --screenshot renders/show-sync-on.png res/samples/practice.cdl || echo "no sync-on picture"
+          kill $MOCK
+          rm -rf "$SYNCHOME"
           # The Raspberry Pi's own look (its PiXflat and PiXnoir themes and the
           # light PibotoLt face, from the Raspberry Pi archive): Settings, the
           # menus and the cards, as they look on a Pi.
@@ -135,7 +171,7 @@ jobs:
             for look in PiXflat:light PiXnoir:dark PiXflat:dark; do
               theme=${look%%:*}; mode=${look##*:}
               printf '[Settings]\ngtk-theme-name=%s\ngtk-font-name=PibotoLt 12\n' "$theme" > ~/.config/gtk-3.0/settings.ini
-              for show in settings:0 settings:1 settings:2 settings:3 settings:4 menu submenu combo gatesettings rename shortcuts; do
+              for show in settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 menu submenu combo gatesettings rename shortcuts; do
                 name=$(echo "$show" | tr ':' '-')
                 xvfb-run -a -s "-screen 0 1600x1000x24" \
                   timeout 60 "$APPIMAGE" --$mode --show "$show" --screenshot "renders/pi-$theme-$mode-$name.png" res/samples/practice.cdl || echo "no pi $show"
@@ -178,6 +214,66 @@ jobs:
           name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
           path: renders
           if-no-files-found: warn
+
+  # The .deb on the newer systems it has to run on: Ubuntu 24.04 (where OpenSSL's package is named
+  # libssl3t64) and Debian 12, which Raspberry Pi OS Bookworm is made from. Installed with its
+  # dependencies, started on a virtual display, and sync's self-test run with the system's own
+  # libcrypto and curl.
+  install-ubuntu-24:
+    name: .deb on Ubuntu 24.04 (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-24.04 }
+          - { arch: aarch64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
+          path: debs
+      - name: Install the .deb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./debs/*.deb xvfb curl
+          cedarlogic --version
+          cedarlogic --sync-test
+          dpkg -l | grep -E 'libssl3(t64)?\b'
+      - name: Start it
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 cedarlogic --screenshot window.png /usr/share/CedarLogic/samples/practice.cdl
+          test -s window.png
+
+  install-debian-12:
+    name: .deb on Debian 12 (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-24.04 }
+          - { arch: aarch64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    container: debian:12
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
+          path: debs
+      - name: Install the .deb
+        run: |
+          apt-get update
+          apt-get install -y ./debs/*.deb xvfb curl
+          cedarlogic --version
+          cedarlogic --sync-test
+      - name: Start it
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 cedarlogic --screenshot window.png /usr/share/CedarLogic/samples/practice.cdl
+          test -s window.png
 
   # A public download for testers without a GitHub account: one rolling
   # pre-release, replaced on every push to linux/native. Its own job, after

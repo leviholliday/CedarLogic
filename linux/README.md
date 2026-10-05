@@ -17,9 +17,29 @@ release page): it fetches the .deb for their processor and installs it, and
 updates come the same way. The AppImage works too, and adds itself to the
 applications menu the first time it runs.
 
-Needs a compiler with C++17, CMake, and the GTK 3, Cairo, Pango, fontconfig
-and FreeType development files (`libgtk-3-dev libcairo2-dev libpango1.0-dev
-libfontconfig1-dev libfreetype-dev` on Debian, Ubuntu and Raspberry Pi OS).
+Needs a compiler with C++17, CMake, and the GTK 3, Cairo, Pango, fontconfig,
+FreeType and OpenSSL development files (`libgtk-3-dev libcairo2-dev
+libpango1.0-dev libfontconfig1-dev libfreetype-dev libssl-dev` on Debian,
+Ubuntu and Raspberry Pi OS; `openssl-devel` on Fedora, `openssl` on Arch).
+Sync talks to the website through the `curl` program, as Send Feedback does.
+
+Sync (Your Circuits on every device, `docs/SYNC.md`) is the shared engine in
+`mac/CedarCore/Sync*.cpp` with this machine's hooks (`App/SyncPlatform`:
+OpenSSL's libcrypto for the hashes and AES-GCM, GIO's zlib, curl with the
+headers and body in 0600 temp files, the code in a 0600 file under
+`~/.local/share/CedarLogic/Sync`) behind the app's windows (`App/SyncApp`:
+saving open circuits first, holding a change that would land on unsaved work,
+reloading a window in place) and Settings > Sync, the code sheet with its QR
+code, the link preview, and the line under Your Circuits (`App/SyncUI`).
+`cedarlogic://sync#k=<code>` opens Settings > Sync with the code. To try it
+without the website: `python3 linux/Tools/sync_mock.py`, then
+`CL_SYNC_URL=<the url it prints> linux/build/cedarlogic`.
+
+    linux/build/sync_check                 # the engine's self-test with this app's hooks
+    linux/build/cedarlogic --sync-test     # the same, from the installed app
+    MOCK=1 linux/Tools/sync-check.sh       # builds it (a Mac with Homebrew's openssl@3 works too) and also
+                                           # the curl program's use and two libraries syncing
+    SITE=<cedarlogic-site checkout> linux/Tools/sync-check.sh   # and the full scenarios over HTTP
 
 - `CedarCore/CairoScene` -- the render Scene drawn with Cairo, the Linux twin
   of the Mac's `CGScene`. The rest of the engine is `mac/CedarCore`, shared
@@ -41,7 +61,8 @@ libfontconfig1-dev libfreetype-dev` on Debian, Ubuntu and Raspberry Pi OS).
   `TruthTableWindow`), Find and the Ctrl+Tab switcher (`FindBar`,
   `TabSwitcher`), the oscilloscope, docked under the canvas (`Scope`),
   Export as Image (`ExportImage`), Send Feedback (`Feedback`), Help
-  (`Help`), and the brand's launch screen, welcome, guided tour and What's
+  (`Help`), Settings > Sync, the link preview and the sync line in Your
+  Circuits (`SyncApp`, `SyncUI`, `SyncPlatform`), and the brand's launch screen, welcome, guided tour and What's
   New (`Brand`, `Splash`, `Welcome`). Motion follows the Mac's curves
   (`Anim.h`) and stops when the desktop asks for no animations. Settings
   (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`; circuits in

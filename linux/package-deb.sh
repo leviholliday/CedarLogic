@@ -8,7 +8,8 @@
 # Output: <build-dir>/cedarlogic_<version>_<arch>.deb (amd64 or arm64). The
 # version gets the build number on the end, so every build is newer than the
 # last and installs over it. Built on Ubuntu 22.04 it runs on that and newer,
-# Debian 12 and Raspberry Pi OS Bookworm.
+# Debian 12 and Raspberry Pi OS Bookworm. It depends on OpenSSL 3's libcrypto
+# (sync's cryptography), which Ubuntu 24.04 and Debian 13 ship as libssl3t64.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -41,7 +42,7 @@ Version: $DEBVERSION
 Architecture: $DEBARCH
 Maintainer: CedarLogic <leviholliday7@gmail.com>
 Installed-Size: $SIZE
-Depends: libc6 (>= 2.35), libgtk-3-0, libcairo2, libfontconfig1, libfreetype6, libstdc++6
+Depends: libc6 (>= 2.35), libgtk-3-0, libcairo2, libfontconfig1, libfreetype6, libstdc++6, libssl3 (>= 3.0.0) | libssl3t64 (>= 3.0.0)
 Recommends: curl
 Section: education
 Priority: optional

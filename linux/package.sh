@@ -11,7 +11,9 @@
 # The app needs only the desktop stack every distro has -- GTK 3, Cairo,
 # fontconfig, FreeType -- and none of it is bundled: the host's copies pick up
 # the user's theme, input methods and fonts. So the AppImage is little more
-# than the app and its gate library. Build on the oldest distro you want to
+# than the app and its gate library -- and libcrypto.so.3, which sync's
+# cryptography (AES-GCM, hashes) is built on: bundled, so it runs the same
+# whichever OpenSSL the host has (or none). Build on the oldest distro you want to
 # support (CI uses Ubuntu 22.04), since glibc and GTK only work forwards.
 #
 # Needs linuxdeploy for the same CPU on PATH, or
@@ -38,6 +40,11 @@ VERSION=$(sed -n 's/^project(CedarLogicNative VERSION \([0-9.]*\).*/\1/p' linux/
 APPDIR="$BUILD/AppDir"
 rm -rf "$APPDIR"
 DESTDIR="$PWD/$APPDIR" cmake --install "$BUILD" --prefix /usr
+
+# The one library that is bundled: OpenSSL 3's libcrypto (sync). Found where the
+# app was linked to it, and named to linuxdeploy so it's copied in either way.
+LIBCRYPTO=$(ldd "$APPDIR/usr/bin/cedarlogic" | awk '/libcrypto\.so/ { print $3; exit }')
+[ -n "$LIBCRYPTO" ] && [ -f "$LIBCRYPTO" ] || { echo "the app isn't linked to libcrypto (OpenSSL 3)?" >&2; exit 1; }
 
 # linuxdeploy copies in every shared library the app needs, minus the ones on
 # the AppImage excludelist (glibc, fontconfig, FreeType...) and the ones named
@@ -78,16 +85,30 @@ rm -f "$BUILD"/CedarLogic*-"$ARCH".AppImage
 		--executable AppDir/usr/bin/cedarlogic \
 		--desktop-file AppDir/usr/share/applications/cedarlogic.desktop \
 		--icon-file AppDir/usr/share/icons/hicolor/256x256/apps/cedarlogic.png \
+		--library "$LIBCRYPTO" \
 		"${EXCLUDES[@]}" \
 		--output appimage
 )
 
-# Nothing should have been bundled: say so if something was.
-BUNDLED=$(find "$APPDIR/usr/lib" -name '*.so*' 2>/dev/null | sed 's|.*/||' | sort | tr '\n' ' ')
+# Nothing but libcrypto should have been bundled: say so if something was.
+ls "$APPDIR"/usr/lib/libcrypto.so.* >/dev/null 2>&1 || { echo "libcrypto wasn't bundled" >&2; exit 1; }
+BUNDLED=$(find "$APPDIR/usr/lib" -name '*.so*' 2>/dev/null | sed 's|.*/||' | grep -v '^libcrypto\.so' | sort | tr '\n' ' ')
 [ -z "$BUNDLED" ] || echo "note: bundled libraries: $BUNDLED" >&2
 
 OUT="$BUILD/$OUTNAME"
 [ -f "$OUT" ] || OUT=$(ls "$BUILD"/CedarLogic*-"$ARCH".AppImage 2>/dev/null | head -1)
 [ -n "$OUT" ] && [ -f "$OUT" ] || { echo "linuxdeploy did not produce an AppImage" >&2; exit 1; }
 chmod +x "$OUT"
+
+# libcrypto must resolve inside the AppImage, not on the host: take it apart and ask the
+# dynamic loader where the app's libcrypto comes from.
+CHECK=$(mktemp -d)
+( cd "$CHECK" && APPIMAGE_EXTRACT_AND_RUN=1 "$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")" --appimage-extract >/dev/null )
+RESOLVED=$(ldd "$CHECK/squashfs-root/usr/bin/cedarlogic" | awk '/libcrypto\.so/ { print $3; exit }')
+case "$RESOLVED" in
+	"$CHECK"/squashfs-root/*) ;;
+	*) echo "the AppImage's libcrypto resolves to '$RESOLVED', not inside the bundle" >&2; rm -rf "$CHECK"; exit 1 ;;
+esac
+rm -rf "$CHECK"
+echo "libcrypto resolves inside the AppImage" >&2
 echo "$OUT"
