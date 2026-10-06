@@ -384,7 +384,7 @@ GtkWidget* generalPage() {
 	gtk_box_pack_start(GTK_BOX(upd), button("Check Now", [] {
 		if (CircuitWindow* w = front()) g_action_group_activate_action(G_ACTION_GROUP(w->application()), "check-updates", nullptr);
 	}), FALSE, FALSE, 0);
-	r.add("Updates", upd, "New test builds install from inside the app: it asks first, and keeps your circuits.");
+	r.add("Updates", upd, "New versions install from inside the app: it asks first, and keeps your circuits.");
 	return r.grid;
 }
 

@@ -19,7 +19,7 @@
 #define CL_CALLBACK(...) G_CALLBACK((__VA_ARGS__))
 #define CL_APP_ID "edu.cedarville.CedarLogic"
 #ifndef CL_VERSION
-#define CL_VERSION "0.1"
+#define CL_VERSION "0.4.0"
 #endif
 
 // ---- Settings ------------------------------------------------------------------

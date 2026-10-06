@@ -965,14 +965,14 @@ const Chapter kChapters[] = {
 	    { "document-open-recent-symbolic", "Nothing gets lost", "If two devices change a circuit, the other edit goes to Version History. A circuit you delete goes to Recently Deleted on the others." } },
 	  nullptr, nullptr },
 	{ "Hand it in", "Check, report, share", "Three new ways to finish a lab.",
-	  { { "emblem-ok-symbolic", "Check My Circuit (Shift+T)", "Type a formula or paste the truth table you were given. It marks the rows your circuit gets wrong." },
+	  { { "emblem-ok-symbolic", "Check My Circuit (Shift+T)", "Type the formula or minterms you were given, or paste the truth table. It marks the rows your circuit gets wrong." },
 	    { "x-office-document-symbolic", "Export Lab Report", "File \xE2\x96\xB8 Export Lab Report makes one PDF to hand in. You pick what goes in: the circuit, truth table, K-maps, timing." },
 	    { "insert-link-symbolic", "Share Link", "File \xE2\x96\xB8 Share Link copies a link. Anyone can open it in CedarLogic Online, in any browser. CedarLogic opens cedarlogic:// links too." } },
 	  "Check My Circuit", "win.check-circuit" },
 	{ "Tidy Up", "Rebuilt for cleaner layouts", "Tidy Up by Signal Flow lays a page out again, and it's quick.",
 	  { { "view-sort-ascending-symbolic", "Cleaner results", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
-	    { "media-seek-forward-symbolic", "Fast on big pages", "A page with 585 parts takes about a second." },
-	    { "edit-undo-symbolic", "Still a preview", "Shift+S shows it first: Enter keeps it, Escape puts it back, Tab tries the other way." } },
+	    { "media-seek-forward-symbolic", "Fast on big pages", "A page with hundreds of parts takes a second or two." },
+	    { "edit-undo-symbolic", "Still a preview", "It shows you first: Enter keeps it, Escape puts it back, Tab tries the other way." } },
 	  "Tidy Up by Signal Flow", "win.tidy-flow" },
 	{ "Fixes", "And the small things", "Fixed since the last version.",
 	  { { "emblem-ok-symbolic", "Truth tables with FROM labels", "A FROM label or a ground no longer makes the truth table say the page has clocks or flip-flops." },
@@ -1120,7 +1120,7 @@ void pageIntro(cairo_t* cr, WhatsNew* wn, double t) {
 	const float x = 56, tw = 380;
 	text(cr, "WHAT'S NEW", x, 92, 11, Bold, kNeon, 0, TextAlign::Leading, 1.8f);
 	float y = 112 + text(cr, "CedarLogic 0.4", x, 112, 34, Bold, colorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
-	y += text(cr, "Sync your circuits between devices, check your work, hand in a lab report, and a faster Tidy Up. Here's what's new, a minute's read.",
+	y += text(cr, "Sync your circuits between devices, check your work, hand in a lab report, share a link, and tidy a big page fast. Here's what's new, a minute's read.",
 	          x, y, 14, Normal, kSecondary, tw) + 20;
 	for (int i = 0; i < kChapterCount; i++) {
 		const RectF r = rectF(x - 8, y - 4, x + tw, y + 24);
@@ -1160,7 +1160,7 @@ void pageChapter(cairo_t* cr, WhatsNew* wn, int i, double t) {
 }
 
 void pageFinale(cairo_t* cr, WhatsNew* wn) {
-	float y = heading(cr, 56, 34, kNW - 112, "That's the tour", "Go build something", "Everything here is in Help too, whenever you want it.") + 22;
+	float y = heading(cr, 56, 34, kNW - 112, "That's the tour", "Go build something", "It's under Help ▸ What's New in CedarLogic whenever you want it back.") + 22;
 	struct Tile { const char* title; const char* line; const char* icon; };
 	const Tile tiles[] = {
 		{ "Take the guided tour", "Two switches, a gate and a light, on a circuit of its own.", "find-location-symbolic" },

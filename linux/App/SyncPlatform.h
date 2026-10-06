@@ -36,7 +36,7 @@ std::string syncFolder();       // ~/.local/share/CedarLogic/Sync (per machine, 
 // CL_SYNC_URL if it is https (or http to localhost), else the website's.
 std::string serverBase();
 std::string appKey();           // x-cedarlogic-key, the same key Send Feedback sends
-std::string clientName();       // "linux/0.1.0+abc1234", for x-cedarlogic-client
+std::string clientName();       // "linux/0.4.0+abc1234", for x-cedarlogic-client
 // The pretty hostname (/etc/machine-info), else the host's name, at most 64 characters.
 std::string defaultDeviceName();
 

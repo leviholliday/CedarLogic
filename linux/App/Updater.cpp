@@ -374,7 +374,7 @@ gboolean pollCheck(gpointer data) {
 				showMessage(parent, GTK_MESSAGE_WARNING, "Couldn't check for updates",
 				            "CedarLogic couldn't reach the update feed. Check your connection and try again.");
 			else
-				showMessage(parent, GTK_MESSAGE_INFO, "You're up to date", "This is the latest test build.");
+				showMessage(parent, GTK_MESSAGE_INFO, "You're up to date", "This is the latest version.");
 		}
 		delete r;
 		return G_SOURCE_REMOVE;
@@ -383,7 +383,7 @@ gboolean pollCheck(gpointer data) {
 		if (g_offeredThisRun == r->sha) { delete r; return G_SOURCE_REMOVE; }
 		g_offeredThisRun = r->sha;
 	}
-	if (askConfirm(parent, "A new test build is available", "Download and install it now? It takes a moment, and CedarLogic restarts after.",
+	if (askConfirm(parent, "A new version of CedarLogic is available", "Download and install it now? It takes a moment, and CedarLogic restarts after.",
 	               "Install", "Not Now"))
 		install(r->app, r->asset);
 	delete r;
