@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 
 namespace clsync {
 
@@ -383,7 +384,7 @@ int Core::rawApi(const Keys& k, const std::string& method, const std::string& pa
 		int64_t ms = 0;
 		if (name == "date" && parseHttpDate(h.second, ms)) st.offset = ms - now();
 		if (name == "retry-after") {
-			const long long sec = atoll(h.second.c_str());
+			const long long sec = std::min(strtoll(h.second.c_str(), nullptr, 10), 86400LL);   // at most a day: no overflow
 			if (sec > 0) lastRetryAfter_ = sec * 1000;
 		}
 	}

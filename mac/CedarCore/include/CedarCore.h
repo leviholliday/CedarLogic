@@ -12,6 +12,7 @@
 
 // Sync (SYNC.md): its own header, so the Linux and Windows apps can use it too.
 #include "CedarSync.h"
+#include "CedarClassroom.h"
 
 #ifdef __cplusplus
 extern "C" {

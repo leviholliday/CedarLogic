@@ -1,0 +1,1171 @@
+{
+  "protocol": 1,
+  "maxPlaintext": 4000000,
+  "envelopeOf": {
+    "teacher": 1,
+    "join": 1,
+    "info": 1,
+    "assignment": 1,
+    "live": 1,
+    "move": 1,
+    "classroom": 1,
+    "name": 2,
+    "submission": 2,
+    "answer": 2,
+    "key": 2
+  },
+  "salt": "cedarlogic-classroom-v1",
+  "joinSalt": "cedarlogic-classroom-join-v1",
+  "joinIterations": 600000,
+  "aadPrefix": "cedarlogic-classroom/1",
+  "syncAadPrefix": "cedarlogic-sync/1",
+  "webBase": "https://cedarlogic.netlify.app/classroom/",
+  "appBase": "cedarlogic://classroom",
+  "codes": {
+    "teacher": [
+      {
+        "label": "counting",
+        "secretHex": "000102030405060708090a0b0c0d0e0f",
+        "checksum12": "be4",
+        "code": "000G40R40M30E209185GR38E1YZ4",
+        "grouped": "000G-40R4-0M30-E209-185G-R38E-1YZ4",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#t=000G40R40M30E209185GR38E1YZ4",
+        "appLink": "cedarlogic://classroom#t=000G40R40M30E209185GR38E1YZ4"
+      },
+      {
+        "label": "zeros",
+        "secretHex": "00000000000000000000000000000000",
+        "checksum12": "374",
+        "code": "00000000000000000000000000VM",
+        "grouped": "0000-0000-0000-0000-0000-0000-00VM",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#t=00000000000000000000000000VM",
+        "appLink": "cedarlogic://classroom#t=00000000000000000000000000VM"
+      },
+      {
+        "label": "ones",
+        "secretHex": "ffffffffffffffffffffffffffffffff",
+        "checksum12": "5ac",
+        "code": "ZZZZZZZZZZZZZZZZZZZZZZZZZXDC",
+        "grouped": "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZXDC",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#t=ZZZZZZZZZZZZZZZZZZZZZZZZZXDC",
+        "appLink": "cedarlogic://classroom#t=ZZZZZZZZZZZZZZZZZZZZZZZZZXDC"
+      },
+      {
+        "label": "random",
+        "secretHex": "8e1f5a0c3b9d47e2a6c1f0d9b3e85274",
+        "checksum12": "1a3",
+        "code": "HRFNM31VKN3Y59P1Y3CV7T2JEGD3",
+        "grouped": "HRFN-M31V-KN3Y-59P1-Y3CV-7T2J-EGD3",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#t=HRFNM31VKN3Y59P1Y3CV7T2JEGD3",
+        "appLink": "cedarlogic://classroom#t=HRFNM31VKN3Y59P1Y3CV7T2JEGD3"
+      }
+    ],
+    "join": [
+      {
+        "label": "counting",
+        "secretHex": "000102030405",
+        "checksum12": "17e",
+        "code": "000G40R40MBY",
+        "grouped": "000G-40R4-0MBY",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#j=000G40R40MBY",
+        "appLink": "cedarlogic://classroom#j=000G40R40MBY"
+      },
+      {
+        "label": "zeros",
+        "secretHex": "000000000000",
+        "checksum12": "b0f",
+        "code": "0000000002RF",
+        "grouped": "0000-0000-02RF",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#j=0000000002RF",
+        "appLink": "cedarlogic://classroom#j=0000000002RF"
+      },
+      {
+        "label": "ones",
+        "secretHex": "ffffffffffff",
+        "checksum12": "ce8",
+        "code": "ZZZZZZZZZZ78",
+        "grouped": "ZZZZ-ZZZZ-ZZ78",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#j=ZZZZZZZZZZ78",
+        "appLink": "cedarlogic://classroom#j=ZZZZZZZZZZ78"
+      },
+      {
+        "label": "random",
+        "secretHex": "8e1f5a0c3b9d",
+        "checksum12": "853",
+        "code": "HRFNM31VKP2K",
+        "grouped": "HRFN-M31V-KP2K",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#j=HRFNM31VKP2K",
+        "appLink": "cedarlogic://classroom#j=HRFNM31VKP2K"
+      }
+    ],
+    "move": [
+      {
+        "label": "pattern a0",
+        "secretHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+        "checksum12": "503",
+        "code": "M2GT58X4MPKAFA59NANTSBDENX83",
+        "grouped": "M2GT-58X4-MPKA-FA59-NANT-SBDE-NX83",
+        "webLink": "https://cedarlogic.netlify.app/classroom/#m=M2GT58X4MPKAFA59NANTSBDENX83",
+        "appLink": "cedarlogic://classroom#m=M2GT58X4MPKAFA59NANTSBDENX83"
+      }
+    ]
+  },
+  "parse": [
+    {
+      "kind": "teacher",
+      "label": "canonical",
+      "input": "000G40R40M30E209185GR38E1YZ4",
+      "expect": "000G40R40M30E209185GR38E1YZ4"
+    },
+    {
+      "kind": "teacher",
+      "label": "grouped",
+      "input": "000G-40R4-0M30-E209-185G-R38E-1YZ4",
+      "expect": "000G40R40M30E209185GR38E1YZ4"
+    },
+    {
+      "kind": "teacher",
+      "label": "lower case with spaces",
+      "input": " 000g 40r4 0m30 e209 185g r38e 1yz4 ",
+      "expect": "000G40R40M30E209185GR38E1YZ4"
+    },
+    {
+      "kind": "teacher",
+      "label": "web link",
+      "input": "https://cedarlogic.netlify.app/classroom/#t=000G40R40M30E209185GR38E1YZ4",
+      "expect": "000G40R40M30E209185GR38E1YZ4"
+    },
+    {
+      "kind": "teacher",
+      "label": "app link",
+      "input": "cedarlogic://classroom#t=000G40R40M30E209185GR38E1YZ4",
+      "expect": "000G40R40M30E209185GR38E1YZ4"
+    },
+    {
+      "kind": "teacher",
+      "label": "app link, query form",
+      "input": "cedarlogic://classroom?t=000G-40R4-0M30-E209-185G-R38E-1YZ4",
+      "expect": "000G40R40M30E209185GR38E1YZ4"
+    },
+    {
+      "kind": "teacher",
+      "label": "web link, query form (never accepted)",
+      "input": "https://cedarlogic.netlify.app/classroom/?t=000G40R40M30E209185GR38E1YZ4",
+      "expect": "error:symbol",
+      "message": "‘:’ can't be in a teacher key"
+    },
+    {
+      "kind": "teacher",
+      "label": "a join code where a teacher key is expected",
+      "input": "000G40R40MBY",
+      "expect": "error:length",
+      "message": "A teacher key has 28 letters and digits; this has 12"
+    },
+    {
+      "kind": "teacher",
+      "label": "a join link where a teacher key is expected",
+      "input": "https://cedarlogic.netlify.app/classroom/#j=000G40R40MBY",
+      "expect": "error:kind",
+      "message": "That's a join code, not a teacher key."
+    },
+    {
+      "kind": "teacher",
+      "label": "a sync link where a teacher key is expected",
+      "input": "https://cedarlogic.netlify.app/sync/#k=000G40R40M30E209185GR38E1YZ4",
+      "expect": "error:kind",
+      "message": "That's a sync code, not a teacher key."
+    },
+    {
+      "kind": "teacher",
+      "label": "one symbol wrong",
+      "input": "000G4ZR40M30E209185GR38E1YZ4",
+      "expect": "error:checksum",
+      "message": "That key has a typo in it. Check it against your saved copy."
+    },
+    {
+      "kind": "teacher",
+      "label": "too short",
+      "input": "000G40R40M30E209185GR38E1YZ",
+      "expect": "error:length",
+      "message": "A teacher key has 28 letters and digits; this has 27"
+    },
+    {
+      "kind": "teacher",
+      "label": "U is never a symbol",
+      "input": "U00G40R40M30E209185GR38E1YZ4",
+      "expect": "error:symbol",
+      "message": "‘U’ can't be in a teacher key"
+    },
+    {
+      "kind": "join",
+      "label": "canonical",
+      "input": "000G40R40MBY",
+      "expect": "000G40R40MBY"
+    },
+    {
+      "kind": "join",
+      "label": "grouped",
+      "input": "000G-40R4-0MBY",
+      "expect": "000G40R40MBY"
+    },
+    {
+      "kind": "join",
+      "label": "lower case, O for 0, l for 1",
+      "input": "ooog-4or4-omby",
+      "expect": "000G40R40MBY"
+    },
+    {
+      "kind": "join",
+      "label": "no-break spaces",
+      "input": "000G 40R4 0MBY",
+      "expect": "000G40R40MBY"
+    },
+    {
+      "kind": "join",
+      "label": "web link",
+      "input": "https://cedarlogic.netlify.app/classroom/#j=000G40R40MBY",
+      "expect": "000G40R40MBY"
+    },
+    {
+      "kind": "join",
+      "label": "app link",
+      "input": "cedarlogic://classroom#j=000G40R40MBY",
+      "expect": "000G40R40MBY"
+    },
+    {
+      "kind": "join",
+      "label": "a teacher key where a join code is expected",
+      "input": "000G40R40M30E209185GR38E1YZ4",
+      "expect": "error:length",
+      "message": "A join code has 12 letters and digits; this has 28"
+    },
+    {
+      "kind": "join",
+      "label": "a move link where a join code is expected",
+      "input": "https://cedarlogic.netlify.app/classroom/#m=M2GT58X4MPKAFA59NANTSBDENX83",
+      "expect": "error:kind",
+      "message": "That's a move code, not a join code."
+    },
+    {
+      "kind": "join",
+      "label": "one symbol wrong",
+      "input": "000Z40R40MBY",
+      "expect": "error:checksum",
+      "message": "That code has a typo in it. Check it with your teacher."
+    },
+    {
+      "kind": "join",
+      "label": "too long",
+      "input": "000G40R40MBY0",
+      "expect": "error:length",
+      "message": "A join code has 12 letters and digits; this has 13"
+    },
+    {
+      "kind": "join",
+      "label": "dotless i (U+0131) is not I",
+      "input": "000G40ı40MBY",
+      "expect": "error:symbol",
+      "message": "‘ı’ can't be in a join code"
+    },
+    {
+      "kind": "join",
+      "label": "full-width zero (U+FF10)",
+      "input": "０00G40R40MBY",
+      "expect": "error:symbol",
+      "message": "‘０’ can't be in a join code"
+    },
+    {
+      "kind": "move",
+      "label": "canonical",
+      "input": "M2GT58X4MPKAFA59NANTSBDENX83",
+      "expect": "M2GT58X4MPKAFA59NANTSBDENX83"
+    },
+    {
+      "kind": "move",
+      "label": "web link",
+      "input": "https://cedarlogic.netlify.app/classroom/#m=M2GT58X4MPKAFA59NANTSBDENX83",
+      "expect": "M2GT58X4MPKAFA59NANTSBDENX83"
+    },
+    {
+      "kind": "move",
+      "label": "a teacher link where a move code is expected",
+      "input": "https://cedarlogic.netlify.app/classroom/#t=000G40R40M30E209185GR38E1YZ4",
+      "expect": "error:kind",
+      "message": "That's a teacher key, not a move code."
+    }
+  ],
+  "keys": {
+    "teacher": [
+      {
+        "label": "counting",
+        "secretHex": "000102030405060708090a0b0c0d0e0f",
+        "prkHex": "43472b9cdc411fb6cd145b915789086adb10b15ed03270f29f8892f0bbf9d4f1",
+        "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+        "teacherToken": "GnAkibV2czlE1zhADeTN5d3BGYEWLd_sZuCmWd7LO7U",
+        "teacherHash": "9ac81bbe5eb87f494d7ade493499fd7468b19b1cd6e62016169eb8edeab2f9be",
+        "deleteToken": "OsNx84G_qLn1qGSgyZUvTsTdz5vSylCZCDdj8Ykh_QA",
+        "deleteHash": "1986da0c8ccb16c252144cae76e8165b2177132050489b45df9d640aa964082a",
+        "backupKeyHex": "47abb2dc45d5dec8c85370f119b51a78de57a4f38c4c66ca8ab6cb3bd6d5dd1d"
+      },
+      {
+        "label": "zeros",
+        "secretHex": "00000000000000000000000000000000",
+        "prkHex": "ded7283431baab4a5d8dc7f90182ecde47e5a80c23c11d17287d32a72aa2e9f3",
+        "classId": "3b8d1a072bc2a3da51e62d6ba1e226ac",
+        "teacherToken": "SRREBiwXfX94GwpRXRse-GgoPqqU5eNraL0qoH2EYlU",
+        "teacherHash": "2cb93d997d6836b8b434ad5e8945807b4350f157c5cea7cc9dffce01156c7323",
+        "deleteToken": "71eRPc3JlQtqB9B_CyqGjEWlod4qraL7PNYsz1FX7_U",
+        "deleteHash": "81a08cc332c9c17fa3264ab394faa303c399b6955ab482a6717412703942a4fe",
+        "backupKeyHex": "dc9d595160721c649c34eee6bdbc472d49736d769fc0cbadefca978638cdbcee"
+      },
+      {
+        "label": "ones",
+        "secretHex": "ffffffffffffffffffffffffffffffff",
+        "prkHex": "9f8ba9abc6c1f79f18bf7bfd9c268bfe58191ed3bc1aef0dfe533156649e7548",
+        "classId": "c83c9b04c33160b70fa57bbb6a69e97a",
+        "teacherToken": "4qJsTeiKo-iPrQ9XoXdX5nZx1n2NUtHJxKTu_ECxI0s",
+        "teacherHash": "44ef7178bc067c5a737ca97dedfc61687936d67bd97da6f59d46fa3a1c92a427",
+        "deleteToken": "yBRG1eEXcZKYc9NhuV2H9ZfdStar9yQxNngOuBu0vYY",
+        "deleteHash": "86d9ea7d64a317b695207119c366f01938d414d51dcd8c72dd1edd095c01afbd",
+        "backupKeyHex": "c2068e858fdaca514647a00e2c8f4bf465aef2798314ec41cfcee83adb3de3ef"
+      },
+      {
+        "label": "random",
+        "secretHex": "8e1f5a0c3b9d47e2a6c1f0d9b3e85274",
+        "prkHex": "f3886375699296a67230470ee935bb5322d1a2e866dbfbb76cf6a20538b8a2a8",
+        "classId": "1190cc035a12bc0ca0a32c3954689c1f",
+        "teacherToken": "jZx9b2Nz3FFmZiRdz5E1X_HuQk0oqlu87o49xsffcwU",
+        "teacherHash": "d9ce4292442520f54e5054abb5e86ecdd03c95e5f4d3dc949cbc61889b9debe4",
+        "deleteToken": "1QHovBkrnQs6U4ybfHc6xVcHyZMXtM_pBXoRSpokArM",
+        "deleteHash": "70d3c06efe7bc018653e25b28c86072d65f17e5747a91c2bb3b4eb321a244e58",
+        "backupKeyHex": "0b5bbe8a9d6d5a4ac7c9b2f906ba2d6cbde8b74d91cfafb860383b6b2df1a3a7"
+      }
+    ],
+    "join": [
+      {
+        "label": "counting",
+        "secretHex": "000102030405",
+        "stretchedHex": "5bfd32af2d66869db77c9544e4b984d817b20b341f023909bc5cb0f39c27917c",
+        "prkHex": "7b7c47d5b1cd77e9533294fa790cdae3edbd7d699c59db07a41372069cd0aa5c",
+        "joinId": "cdd55457c09fc79b540e6d3cfe4c49b4",
+        "joinToken": "4XCpmP0JSSv1bd6VPDMlH5xuwMhLG-p3GGO7JJGOm_U",
+        "joinKeyHex": "764d5999b9351ed00327388a8d954527e83707e1cef958ddae6b2857bdececef"
+      },
+      {
+        "label": "zeros",
+        "secretHex": "000000000000",
+        "stretchedHex": "7f602300c15a2c68ad1ce6b7267687487a2a75080363e6a3ae5548b0a1f65ef8",
+        "prkHex": "e2650080da8963877750b62059b7f463b65897cbf3d5444e0776878ebab414e8",
+        "joinId": "13269e21d4303681da142796fb08ac2c",
+        "joinToken": "7G346Ntv-WrxkqqSOxBpdAN-GaDAeoHiGkh4s8mmhfs",
+        "joinKeyHex": "fdbda9a6239b23f95bfc7690395ae84ee0c7ec2ceb2dd166fd1d8d36dd35eca0"
+      },
+      {
+        "label": "ones",
+        "secretHex": "ffffffffffff",
+        "stretchedHex": "47bf055854049801ce3935f50a4643a27e717aa4ef81d46349d2c695a88ed324",
+        "prkHex": "005d31cadafafeaa0f4645a9de3c16e62a2f6d51421891d91ed6f89bc0f63f56",
+        "joinId": "5595c635eecd88467f7f5ce71818d360",
+        "joinToken": "nLkkyfHs5jMjjxWHcff6T8krgguqJNw8z5MgiLv9Hvs",
+        "joinKeyHex": "8490df6ede2b3f4b3cd5406e2cb2fd6f4b397d7c117314e3c9a333b3c8bb8530"
+      },
+      {
+        "label": "random",
+        "secretHex": "8e1f5a0c3b9d",
+        "stretchedHex": "17703a63794cac15317ee55ed1d03174fb068adfae8eaae8c6761bdf00fd7826",
+        "prkHex": "d3409a803b1eee05ab172f76f09f5f6aba341d1fb5fe6ffbebb6d8974a767b04",
+        "joinId": "5344db56825cb06154e777866d92e987",
+        "joinToken": "CKQ18G6Zjbs_k_6ehAIqqco8gtyM-WiN9BfyPYYpT-E",
+        "joinKeyHex": "34eda9225f7d37abf1e6a4c07ac83529ef222c0ceec7d3fbf3e35f0970cfed81"
+      }
+    ],
+    "move": [
+      {
+        "label": "pattern a0",
+        "secretHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+        "moveId": "fb490c53b8af36af281afb2f5064d1fb",
+        "moveKeyHex": "04a3145f07d26ae375750e00c55ec4f693e387f988efa6f65cbc973bb110a7f2"
+      }
+    ],
+    "server": [
+      {
+        "label": "counting join code, test pepper",
+        "pepperHex": "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+        "joinId": "cdd55457c09fc79b540e6d3cfe4c49b4",
+        "joinToken": "4XCpmP0JSSv1bd6VPDMlH5xuwMhLG-p3GGO7JJGOm_U",
+        "joinIndex": "3bd699d5b6c129e47eb1c224c07e596f47f62cbf51fd9214fc9d96ebaa5fed2a",
+        "joinHash": "74277fb6351b2dd56c0eea6b0a1bb9b198d26ee0c1e6f2af350d5fcca423669c"
+      }
+    ]
+  },
+  "tokens": [
+    {
+      "label": "a student token",
+      "bytesHex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "token": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+      "tokenHash": "f45dc82a7523d14974cea050e3028e8bf06a8ee855a9d63034ebb4fb9ecc2305"
+    }
+  ],
+  "proof": {
+    "label": "a student's proof",
+    "bytesHex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+    "proof": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"
+  },
+  "p256": {
+    "teacher": {
+      "dHex": "2e3bc5dbc3f1d5b0e9bb298cabd6fe28be227d61f2b62603a16d3cd047c5fce7",
+      "d": "LjvF28Px1bDpuymMq9b-KL4ifWHytiYDoW080EfF_Oc",
+      "pubHex": "04324e576ab6e0f3fb6660b11d73a616254430b9d8dde1a57112ee8f77b686e15fd56860bf0f934af74f6d1ac8f1d11c454fd9f1fc453d16c1a7098d8b05254217",
+      "pub": "BDJOV2q24PP7ZmCxHXOmFiVEMLnY3eGlcRLuj3e2huFf1Whgvw-TSvdPbRrI8dEcRU_Z8fxFPRbBpwmNiwUlQhc",
+      "x": "Mk5Xarbg8_tmYLEdc6YWJUQwudjd4aVxEu6Pd7aG4V8",
+      "y": "1Whgvw-TSvdPbRrI8dEcRU_Z8fxFPRbBpwmNiwUlQhc"
+    },
+    "ephemeral": {
+      "dHex": "1d10aee5f2f99a4f15abaeed5e72abb0c7241876b33c46f8134f400b42e58787",
+      "d": "HRCu5fL5mk8Vq67tXnKrsMckGHazPEb4E09AC0Llh4c",
+      "pubHex": "045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd9",
+      "pub": "BFmEYFeAsGEIoURkR5M54vOLlw4poB2Y9Qnhj9d5oOOaiMwUYsiDYKBZeNc3d8kavlZCt3Eas5WRSWoHOeiKHdk",
+      "x": "WYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45o",
+      "y": "iMwUYsiDYKBZeNc3d8kavlZCt3Eas5WRSWoHOeiKHdk"
+    },
+    "other": {
+      "dHex": "7bf546b501de8621b3384352980855890f87399ae84df390186b9dae4b1ae9f2",
+      "d": "e_VGtQHehiGzOENSmAhViQ-HOZroTfOQGGudrksa6fI",
+      "pubHex": "0433dc5eb66636c81f7cc62ddfcee4bfd6ab242d76893b83486366c4d3be35f720ce346a0d88c1fa493d05104c975d5670836b43a8e63eba6007429007d1fe6ac0",
+      "pub": "BDPcXrZmNsgffMYt387kv9arJC12iTuDSGNmxNO-NfcgzjRqDYjB-kk9BRBMl11WcINrQ6jmPrpgB0KQB9H-asA",
+      "x": "M9xetmY2yB98xi3fzuS_1qskLXaJO4NIY2bE07419yA",
+      "y": "zjRqDYjB-kk9BRBMl11WcINrQ6jmPrpgB0KQB9H-asA"
+    },
+    "sharedHex": "d946dce2baf1963492089a5356f301f35386b12b4483d111a4eccf9c0198b06c",
+    "sealInfoHex": "7365616c2d6b6579045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd904324e576ab6e0f3fb6660b11d73a616254430b9d8dde1a57112ee8f77b686e15fd56860bf0f934af74f6d1ac8f1d11c454fd9f1fc453d16c1a7098d8b05254217",
+    "sealKeyHex": "a00683a5ca1aa894982e109abdf827ee7752d5fec8c1eda095a91ebc80ea705d",
+    "badPoints": [
+      {
+        "label": "not on the curve (last byte of Y changed)",
+        "pubHex": "04324e576ab6e0f3fb6660b11d73a616254430b9d8dde1a57112ee8f77b686e15fd56860bf0f934af74f6d1ac8f1d11c454fd9f1fc453d16c1a7098d8b05254216"
+      },
+      {
+        "label": "compressed form (0x02 prefix) is not accepted",
+        "pubHex": "02324e576ab6e0f3fb6660b11d73a616254430b9d8dde1a57112ee8f77b686e15f"
+      },
+      {
+        "label": "64 bytes without the 0x04 prefix",
+        "pubHex": "324e576ab6e0f3fb6660b11d73a616254430b9d8dde1a57112ee8f77b686e15fd56860bf0f934af74f6d1ac8f1d11c454fd9f1fc453d16c1a7098d8b05254217"
+      },
+      {
+        "label": "the point at infinity's encoding",
+        "pubHex": "00"
+      }
+    ]
+  },
+  "records": [
+    {
+      "n": 1,
+      "label": "a student's name, sealed to the teacher (byte-exact)",
+      "envelope": "sealed (0x02)",
+      "keyName": "teacher public key",
+      "ephemeral": "ephemeral",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "flags": 0,
+      "nonceHex": "c0c1c2c3c4c5c6c7c8c9cacb",
+      "aad": "cedarlogic-classroom/1|name|9c89e40e9ea981bbfeaf61e93c91be46|5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d|1|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"name\",\"name\":\"Sam Lee\",\"joinedAt\":1759600000000,\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\"}",
+      "payloadBytes": 117,
+      "payloadSha256": "14d7f8e4396c048eeb17908dcdf89bdc8e0ae09cfabf2e357d60d11f32e0c26a",
+      "envelopeBytes": 212,
+      "h": "894017f82fe1539b76726d869068a003",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE",
+      "envelopeHex": "0200045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd9c0c1c2c3c4c5c6c7c8c9cacb11843da5a1a0bf999ddd35db578adf53ccaeae6ea283afae83a74ace1f4582748cc9c6daa2f140b63a5af66e6cef0b17b183e852a89e389fbf77856d191e446a70e53f12e540951c2e3d3067b569296c9e7cf1a50af6f5ec07b8816ecdc2fe2d6a77f28494fed1a2121a760925f13c8be9e9e6a445dff28fbe4601b48c4a058d425291e6e1"
+    },
+    {
+      "n": 2,
+      "label": "an assignment with a key students can read, class key, uncompressed (byte-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "classKey",
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 1,
+      "flags": 0,
+      "nonceHex": "d0d1d2d3d4d5d6d7d8d9dadb",
+      "aad": "cedarlogic-classroom/1|assignment|9c89e40e9ea981bbfeaf61e93c91be46|7c9e6679-7425-40de-944b-e07fc1f90ae7|1|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"assignment\",\"title\":\"Lab 3: a switch and a light\",\"instructions\":\"Wire the switch to the light. Hand in when the light follows the switch.\",\"dueAt\":1760140800000,\"closeAfterDue\":false,\"cdl\":\"(cedarlogic\\n  (version 3)\\n  (generator \\\"CedarLogic 0.3.5\\\")\\n  (page 0\\n    (gate \\\"AA_TOGGLE\\\"\\n      (uuid \\\"1\\\")\\n      (at 10 20)\\n      (angle 0)\\n      (lparam \\\"OUTPUT_NUM\\\" \\\"0\\\"))\\n    (gate \\\"GA_LED\\\"\\n      (uuid \\\"2\\\")\\n      (at 18 20)\\n      (angle 0))\\n    (wire\\n      (ids \\\"3\\\")\\n      (seg \\\"0\\\" h\\n        (pts 11 20 17 20)\\n        (connect \\\"1\\\" \\\"OUT_0\\\")\\n        (connect \\\"2\\\" \\\"N_in0\\\")))))\\n\",\"key\":{\"text\":\"LED = A\"},\"createdAt\":1759600000000,\"modifiedAt\":1759600000000}",
+      "payloadBytes": 708,
+      "payloadSha256": "2ee0cd690c2473ebd62eaeba4a4a7af459fec5e01a1f793fb06b4a34fbe40e1c",
+      "envelopeBytes": 738,
+      "h": "4e60b267fd5ea590055afa47caf279fe",
+      "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdxWjK-pv6HKM2IliQ6tz5vA",
+      "envelopeHex": "0100d0d1d2d3d4d5d6d7d8d9dadb074eed17114a647c0e13d198f9fd9ca25b2d3d411a6b1de0f9c7dd51e0b806ad0a916ceb398da8e7d886c02e39151bf395567ae58d39065dae4fabf3624f718ab0902067b5ea5302f37b73261727c82db8fb99593edbb88d54e09bd66f9db6e6edddf48e2b27d22a1f430414e940582b26876d763b3c70f1caaf7cdf6a4d46ed997a8f55d595dad3e0b9aad6466cbef78b8da3d38acb769bdec30123d9f3b6c7e30fb49019b982db3c1547e4547eac901e7ef2f647172fe745d97b9290bbb90305c15d2fc436e7b990eafa3c6c10e6c448127abee21996dfa85c40cd14e806d1aa90453ed2d87980915ae7593b39b6b8a1a921c52e5c4a4ff276656964062125728577f47392497a68c79b6248d2d8b9fcf96d8958c8c1d482f3a114c5eaa09745c8b6a87dc938f2643bf84ae98c2df3fc54d1ab6eaf9b094893a0fbc3e93103c92f38bf83de05da62758d1ee89cfd59aef6830ce5834231496d925ff824eaa90a80f8bc027c0a1f51a4f9c8ff735276d25f444ee0239e54e3e6000308180ce7af171d67e24aab425858f5288e9e72a843c5d149b571bc91308f6975185f65192bd640af14fa1d312f7fcccf40cc2c81f43cb94bc6661297f16e2ce6a79b24ae2eccf162585cdc92dc6358d62fcd3d8fc5e2ccf607dd4b7468718bde615298db5e7eb93e8568d70dcc96eabc9054bbac835c6dd2494d1d833e3042094aa23c9ff8719023fc3abbd06baa6e51311f925179e8399d5a235e5fece333c6998bc493c5eff57a3d368293a3a947edc317f5f69e54cb314327bda6e9d015cfa0f55c3bd92de54387ce2736ba3f539a6ea8359d758bd16bcc147278180a62d28f6637a582423d11b00a72ca07ac78d77adf290ab25576e3a8fa0128a165866f36fcf8fa3d3d310fee44a856620b97eee1f222f8ccb37c250f3dcd68921caf3ca794b95886149200e36a8dd1a36bdd28fd313c207eff7018285d5182026b5b30d9b461e369bd61dc568cafa9bfa1ca336225890eadcf9bc0"
+    },
+    {
+      "n": 3,
+      "label": "the same assignment at ver 2 with the key sealed to the teacher, deflated (decrypt-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "classKey",
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 2,
+      "flags": 1,
+      "nonceHex": "d1d2d3d4d5d6d7d8d9dadbdc",
+      "aad": "cedarlogic-classroom/1|assignment|9c89e40e9ea981bbfeaf61e93c91be46|7c9e6679-7425-40de-944b-e07fc1f90ae7|2|1",
+      "byteExact": false,
+      "payload": "{\"v\":1,\"kind\":\"assignment\",\"title\":\"Lab 3: a switch and a light\",\"instructions\":\"Wire the switch to the light.\",\"dueAt\":1760140800000,\"closeAfterDue\":true,\"cdl\":\"(cedarlogic\\n  (version 3)\\n  (generator \\\"CedarLogic 0.3.5\\\")\\n  (page 0\\n    (gate \\\"AA_TOGGLE\\\"\\n      (uuid \\\"1\\\")\\n      (at 10 20)\\n      (angle 0)\\n      (lparam \\\"OUTPUT_NUM\\\" \\\"0\\\"))\\n    (gate \\\"GA_LED\\\"\\n      (uuid \\\"2\\\")\\n      (at 18 20)\\n      (angle 0))\\n    (wire\\n      (ids \\\"3\\\")\\n      (seg \\\"0\\\" h\\n        (pts 11 20 17 20)\\n        (connect \\\"1\\\" \\\"OUT_0\\\")\\n        (connect \\\"2\\\" \\\"N_in0\\\")))))\\n\",\"key\":{\"sealed\":\"AgAEM9xetmY2yB98xi3fzuS_1qskLXaJO4NIY2bE07419yDONGoNiMH6ST0FEEyXXVZwg2tDqOY-umAHQpAH0f5qwJCRkpOUlZaXmJmamwlbfbAkyUB9bzTZ23NJ4YfUaTk0yVp22kClQafQAAGWzAN89EOWFgHLgVwYNpWIMtR3XUVv\"},\"createdAt\":1759600000000,\"modifiedAt\":1759610000000}",
+      "payloadBytes": 835,
+      "payloadSha256": "2730ba79b391ffcff228b29d759c1080c813345f97b10c5281f3e1f748d4fe47",
+      "envelopeBytes": 542,
+      "h": "ad09aff943793c071cf9c3766967186b",
+      "data": "AQHR0tPU1dbX2Nna29zh3fwVsFz6p38cbGFE2-NBh1Mrc5nmajOK6bPXQXIZHQCXpLYNciLOrvnuSYOMqH4Knh_ZdPIg2gG4yot6QQKUhYeWbg2lXtRLXqeM74YBwB9lJ0SgO-CJWLNsWYIW6ZB3uXo-4dU7csmtprCu32Q_j5C5mFie_JHrtHrm3MB2wI6fJGCO_903eXGFAfGctzwgmlrorInm8o5rBiNI3xWAjv0fVgfIuIF9Y7OwkIZfwVP5HKLjmG2v5lFpRanECirA5jCmzE8og1_LrT6OnL1Zm0GSGxuyvViT-QRL4ID4671QWzk0kkrxKJCHciSMjjC28mTYcJiwYRGIyxKiT6QF2sHi6bf1RjK3RyTyDkFxNxijMTi9dbfytIHjo1Lssr-rFVk5OJ8k3oxKzwp4LXmlz3SdCL5uUQ3Y-NG-t7xl3HuWlUyfi_dZ0nRKRjgyEqD_4rERF-LOGDfK_rXIrC00P4WINPQeSTlfiVHtGdOc_JoV7Z0BoCZySIPVXS1f1zgNjF93ozNMYmg46t3QDp1Hb_1zss9En4OS7eubEB1zWZC4i3Ddz6vhy4YXFO5fNEnK0TskHJj-Q2mBvaOlTDsZ9Tzrk7D_V8LwDQYXyxac3uE7VJEMj-NET44aKkn15h3y5yWe9WqAGkE_Nbzm_uojOWRgUv1JMwe6NTRa-m0Bz58oqZZXCii7NzrSygHhSCQ",
+      "envelopeHex": "0101d1d2d3d4d5d6d7d8d9dadbdce1ddfc15b05cfaa77f1c6c6144dbe34187532b7399e66a338ae9b3d74172191d0097a4b60d7222ceaef9ee49838ca87e0a9e1fd974f220da01b8ca8b7a4102948587966e0da55ed44b5ea78cef8601c01f652744a03be08958b36c598216e99077b97a3ee1d53b72c9ada6b0aedf643f8f90b998589efc91ebb47ae6dcc076c08e9f24608effdd3779718501f19cb73c209a5ae8ac89e6f28e6b062348df15808efd1f5607c8b8817d63b3b090865fc153f91ca2e3986dafe6516945a9c40a2ac0e630a6cc4f28835fcbad3e8e9cbd599b41921b1bb2bd5893f9044be080f8ebbd505b3934924af128908772248c8e30b6f264d87098b0611188cb12a24fa405dac1e2e9b7f54632b74724f20e41713718a33138bd75b7f2b481e3a352ecb2bfab155939389f24de8c4acf0a782d79a5cf749d08be6e510dd8f8d1beb7bc65dc7b96954c9f8bf759d2744a46383212a0ffe2b11117e2ce1837cafeb5c8ac2d343f858834f41e49395f8951ed19d39cfc9a15ed9d01a026724883d55d2d5fd7380d8c5f77a3334c626838eaddd00e9d476ffd73b2cf449f8392edeb9b101d735990b88b70ddcfabe1cb861714ee5f3449cad13b241c98fe436981bda3a54c3b19f53ceb93b0ff57c2f00d0617cb169cdee13b54910c8fe3444f8e1a2a49f5e61df2e7259ef56a801a413f35bce6feea2339646052fd493307ba35345afa6d01cf9f28a996570a28bb373ad2ca01e14824",
+      "deflatedHex": "6d525d8fa23014fd2b4d9fc6c43505fcc2b78e323a46619d11bf62422a146c80a250747032ff7d0beaaeb3bb7de29e73ee39dcf67ec213ec29751832eec11e2459c6021e532e601d0a26222ac109d901ad0708c8ce4cb87b40b8278b8805fb52c57826d2dc152ce199142f594a81d8d3bb58245555a91b52eee5140b19d96923a589baa83c75e8464946b12f683ac865a434a412f42269f8e4528fa451123077cb01783ad134935940ab556540394d894852b085fd523929950035b4466b0baf9a03092840e567d94004955a8c9db9351c4e8c2dbc1292ca73e6494ab9f5551811404140450f080f2269f707880e2425b16cb4ecf94f7bee98f6740b6589a44fed7bea103b1363f06fa4fa7764f7bf9177b7b3bce4df24f332e9a03d3a6434b8e683fd1d2baf41644051a431503a8ff6927213cea92baec35f2771d083e337895a494c87f16ac25af95bf265435ac0de27cc288968b94b38c0c654ffa0225eabc5b3defd609a7fc9df1de598859315195b4df375adee0cd4692a7a31b0cc6162b2e9a8fd3e472f8651ac568bcd3950c5e068ad7fe4311ecd0e7884fcd6f13ceebf8507cb8e3664158f63129fa39dbfc361613febbbcb7ca36ae6b8b9f66d320f51b138a86ad88f66c49f613c5c5eb0d9d50d6bf9128c26c1e2bc360fcbd7a978d356f6e204bfe4caa5543e9477ddd096de46b7538771e2319f3d50ca8dfafa05",
+      "inner": {
+        "kind": "key",
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "ver": 2,
+        "envHex": "02000433dc5eb66636c81f7cc62ddfcee4bfd6ab242d76893b83486366c4d3be35f720ce346a0d88c1fa493d05104c975d5670836b43a8e63eba6007429007d1fe6ac0909192939495969798999a9b095b7db024c9407d6f34d9db7349e187d4693934c95a76da40a541a7d0000196cc037cf443961601cb815c1836958832d4775d456f",
+        "payload": "key",
+        "nonce": "909192939495969798999a9b",
+        "ephemeral": "other"
+      }
+    },
+    {
+      "n": 4,
+      "label": "the teacher record, backup key (byte-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "backupKey",
+      "keyHex": "47abb2dc45d5dec8c85370f119b51a78de57a4f38c4c66ca8ab6cb3bd6d5dd1d",
+      "kind": "teacher",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "teacher",
+      "ver": 1,
+      "flags": 0,
+      "nonceHex": "e0e1e2e3e4e5e6e7e8e9eaeb",
+      "aad": "cedarlogic-classroom/1|teacher|9c89e40e9ea981bbfeaf61e93c91be46|teacher|1|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"teacher\",\"name\":\"Digital Logic 101\",\"d\":\"LjvF28Px1bDpuymMq9b-KL4ifWHytiYDoW080EfF_Oc\",\"pub\":\"BDJOV2q24PP7ZmCxHXOmFiVEMLnY3eGlcRLuj3e2huFf1Whgvw-TSvdPbRrI8dEcRU_Z8fxFPRbBpwmNiwUlQhc\",\"classKey\":\"EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8\",\"joinCode\":\"000G40R40MBY\",\"joinOpen\":true,\"createdAt\":1759600000000,\"modifiedAt\":1759600000000}",
+      "payloadBytes": 349,
+      "payloadSha256": "b4ad6ded377b349fdabc33f5cedab24586e99b186155480d7f2434c6cfba930d",
+      "envelopeBytes": 379,
+      "h": "570aeb55247a2d0a320295baa8790f7b",
+      "data": "AQDg4eLj5OXm5-jp6uvBVrmDUCYgF8e5LU59-4wJHQ5GBncL9KAwD_RQZBBBCOVFqCqz-SO6uw3BW76Sh_r_KaHHNqisPe4X6O3A64cxtnd_O6IAWgd4F4r6DVbCtcCeVZPBCe5yyx43kO4sV3zlIYe_P1w76CUX2m_UFT-mzXWfc9uwkblfcxcF3pFupsGRW-0A-kFf3AN2fiW54TR2XHNJyDl-uqXF21a3cIvX87HmKE-TU_0DTbZu-q7dEfT9_UAJ5jBQQqeEHC5DLz8B64Ue2iaYpKLq5n_FDU3GmKJLGdcro8CTDRZ7LIf-eqTCnRR5NrVJTDlzVZiQd0L3fmgrkRz_YcpRik9J1xvtmkHIwUNs7VFB5mY5kvhH3mb8kARyFQlt800AW-rf3nWXGxvnuEVT6rGBYa5Pb63gaGBLiE_wlwO6bpPv2NAazUYUaj0U8ZKQPKwcw93Zzj8yhXk1vpbASV0e8fFl_I4KFUs-2nOvgqtMVTsaVA",
+      "envelopeHex": "0100e0e1e2e3e4e5e6e7e8e9eaebc156b98350262017c7b92d4e7dfb8c091d0e4606770bf4a0300ff45064104108e545a82ab3f923babb0dc15bbe9287faff29a1c736a8ac3dee17e8edc0eb8731b6777f3ba2005a0778178afa0d56c2b5c09e5593c109ee72cb1e3790ee2c577ce52187bf3f5c3be82517da6fd4153fa6cd759f73dbb091b95f731705de916ea6c1915bed00fa415fdc03767e25b9e134765c7349c8397ebaa5c5db56b7708bd7f3b1e6284f9353fd034db66efaaedd11f4fdfd4009e6305042a7841c2e432f3f01eb851eda2698a4a2eae67fc50d4dc698a24b19d72ba3c0930d167b2c87fe7aa4c29d147936b5494c39735598907742f77e682b911cff61ca518a4f49d71bed9a41c8c1436ced5141e6663992f847de66fc90047215096df34d005beadfde75971b1be7b84553eab18161ae4f6fade068604b884ff09703ba6e93efd8d01acd46146a3d14f192903cac1cc3ddd9ce3f32857935be96c0495d1ef1f165fc8e0a154b3eda73af82ab4c553b1a54"
+    },
+    {
+      "n": 5,
+      "label": "the join record, join key (byte-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "joinKey",
+      "keyHex": "764d5999b9351ed00327388a8d954527e83707e1cef958ddae6b2857bdececef",
+      "kind": "join",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "cdd55457c09fc79b540e6d3cfe4c49b4",
+      "ver": 1,
+      "flags": 0,
+      "nonceHex": "f0f1f2f3f4f5f6f7f8f9fafb",
+      "aad": "cedarlogic-classroom/1|join|9c89e40e9ea981bbfeaf61e93c91be46|cdd55457c09fc79b540e6d3cfe4c49b4|1|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"join\",\"name\":\"Digital Logic 101\",\"classKey\":\"EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8\",\"pub\":\"BDJOV2q24PP7ZmCxHXOmFiVEMLnY3eGlcRLuj3e2huFf1Whgvw-TSvdPbRrI8dEcRU_Z8fxFPRbBpwmNiwUlQhc\"}",
+      "payloadBytes": 201,
+      "payloadSha256": "fda74fae79fcf04479f8c89486cfac951ae9c536f0df75f83a132421b7caf907",
+      "envelopeBytes": 231,
+      "h": "91896986016f65d61c8caff95f203d5e",
+      "data": "AQDw8fLz9PX29_j5-vsQW_H-GQr8QewNq6-cgmYH2pKe8Wh40oM3U5jYcWYzYAeDRs263p2Iml09ef-DNoSiuMXugC6Cdm4OOT1Rxo7vbjOJiv16d0kzQa8jOfiEaYPPAqKLk-Zf7-CkFMlpPQI6woJoWgIm2hrOi1Ygasu7b9wPKvopaZpB1pfQSJjUesBC8d-yPFtXqfbNBqey3QT0QgNzzLT4RxJJPYE29724hl-Cq8Iwt0zZrlstgT_T760kkT4n0-hhshtnWasg31USqdXHgn4tviatXra75LqVrZqClKLxgU62",
+      "envelopeHex": "0100f0f1f2f3f4f5f6f7f8f9fafb105bf1fe190afc41ec0dabaf9c826607da929ef16878d283375398d871663360078346cdbade9d889a5d3d79ff833684a2b8c5ee802e82766e0e393d51c68eef6e33898afd7a77493341af2339f8846983cf02a28b93e65fefe0a414c9693d023ac282685a0226da1ace8b56206acbbb6fdc0f2afa29699a41d697d04898d47ac042f1dfb23c5b57a9f6cd06a7b2dd04f4420373ccb4f84712493d8136f7bdb8865f82abc230b74cd9ae5b2d813fd3efad24913e27d3e861b21b6759ab20df5512a9d5c7827e2dbe26ad5eb6bbe4ba95ad9a8294a2f1814eb6"
+    },
+    {
+      "n": 6,
+      "label": "the class info record, class key (byte-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "classKey",
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "kind": "info",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "info",
+      "ver": 1,
+      "flags": 0,
+      "nonceHex": "a0a1a2a3a4a5a6a7a8a9aaab",
+      "aad": "cedarlogic-classroom/1|info|9c89e40e9ea981bbfeaf61e93c91be46|info|1|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"info\",\"name\":\"Digital Logic 101\",\"modifiedAt\":1759600000000}",
+      "payloadBytes": 75,
+      "payloadSha256": "64658cf22b4f3d354d8304360309df1e710d78f8a2d92eed2e0fe42f9ece0d9a",
+      "envelopeBytes": 105,
+      "h": "9c0cc08b5be06c15a70858b2af8653e3",
+      "data": "AQCgoaKjpKWmp6ipqqvS7UnURB4wMbdkZbOoP6HSAkGMXkzya-EbObpNLyhuyESDX0RIWCIQvb65jqpPxeHN4S9gz0-hBSQR52IXz55ChkdoKfOSaygqaruSLy-ui1CRqOqg8C7HN_kw",
+      "envelopeHex": "0100a0a1a2a3a4a5a6a7a8a9aaabd2ed49d4441e3031b76465b3a83fa1d202418c5e4cf26be11b39ba4d2f286ec844835f4448582210bdbeb98eaa4fc5e1cde12f60cf4fa1052411e76217cf9e4286476829f3926b282a6abb922f2fae8b5091a8eaa0f02ec737f930"
+    },
+    {
+      "n": 7,
+      "label": "a live record with a predict question, class key (byte-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "classKey",
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "kind": "live",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      "ver": 57,
+      "flags": 0,
+      "nonceHex": "b0b1b2b3b4b5b6b7b8b9babb",
+      "aad": "cedarlogic-classroom/1|live|9c89e40e9ea981bbfeaf61e93c91be46|2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d|57|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"live\",\"session\":\"2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\"step\":3,\"cdl\":\"(cedarlogic\\n  (version 3)\\n  (generator \\\"CedarLogic 0.3.5\\\")\\n  (page 0\\n    (gate \\\"AA_TOGGLE\\\"\\n      (uuid \\\"1\\\")\\n      (at 10 20)\\n      (angle 0)\\n      (lparam \\\"OUTPUT_NUM\\\" \\\"0\\\"))\\n    (gate \\\"GA_LED\\\"\\n      (uuid \\\"2\\\")\\n      (at 18 20)\\n      (angle 0))\\n    (wire\\n      (ids \\\"3\\\")\\n      (seg \\\"0\\\" h\\n        (pts 11 20 17 20)\\n        (connect \\\"1\\\" \\\"OUT_0\\\")\\n        (connect \\\"2\\\" \\\"N_in0\\\")))))\\n\",\"predict\":{\"prompt\":\"What will the light show when the switch is on?\",\"lights\":[\"LED\"]},\"reveal\":false,\"at\":1759603600000}",
+      "payloadBytes": 632,
+      "payloadSha256": "fd45a4aca1cb49e4d431912b72a609acbc65b6b4f521cab81615fdd0d3afe496",
+      "envelopeBytes": 662,
+      "h": "750b6b99380a9c7dd28433d7f40a66ba",
+      "data": "AQCwsbKztLW2t7i5urtRBYxpRw5i0oV0UqZo036vH47VhGQWX-BIa8WVOVWdMwh_JONJkzMZZPdaa4h1_7W_LUuOtwAgqIsa8eHsNBwAGFiYtHiCdHKeQOWoK3SJI9KJiPxuEfP0wGk02KoZQd-rv8GHWewNKPTxlnOdMTU1C_V1s_nXRuV60D4PjKSoVOiFNTJapVoF4-SzxAG4wegR-Tp8bNr_smIdlkhFlpHV8NA8sSKoM912kHxfUETOvHeLErteGDO2qYGEc_WRuL2Zy-Zwty9-h1MFyoq80Gtw3Rpwj4YQrxpxpnOE9t3X4IKn8He6A1G92guYkJprBfK5LG0n2bsMnRuATi06PB5NVqJqotKuZ1F0QOo9HqIOEoTex3qaXRu98KiUjmXQdKwsIvp754R5lRnQHhBkxTmsoPbIyej0gH5q-tA_UmobVDQlGdW-oEOv-WLHoHBFbmRhdw7XpdhOUfYPLHm-Ebm688385RL-z04XBpISJC8e0YtvH80o1lxGksX6IXSEmQKoo8HF83r_8v8MGP3nRq2FCWHitLLhdDMIrf5uMvBl1yLuVccHYpldzLL9aWvPi2homE_GwjpbAzzQwyaEbBQh6xbRmnnJAp7JHmfMfHx3V64JTKLaZRjpTNhMPg_F4orsw4h4mBdjGhOUJSVRSpukOM35jGoPVtJtv7hBYb0PFof2h5TBCKk-OyOPC49UvkkXpIy_RyCFDgpHWmgpfZ21ACHvbqpuv0go_nsF8R3VvEyYQjyo0FburR5sjJ1EZLmd8HqRdUOoYGhq1U7u6ZrKM7TZUH0tO581uPDwZkvBMmzD6KVnFq34NZhfAx2xEKSIIXPVbwbwA6v_OKwmCboBBkpQ8BA1s3c",
+      "envelopeHex": "0100b0b1b2b3b4b5b6b7b8b9babb51058c69470e62d2857452a668d37eaf1f8ed58464165fe0486bc59539559d33087f24e34993331964f75a6b8875ffb5bf2d4b8eb70020a88b1af1e1ec341c00185898b4788274729e40e5a82b748923d28988fc6e11f3f4c06934d8aa1941dfabbfc18759ec0d28f4f196739d3135350bf575b3f9d746e57ad03e0f8ca4a854e88535325aa55a05e3e4b3c401b8c1e811f93a7c6cdaffb2621d9648459691d5f0d03cb122a833dd76907c5f5044cebc778b12bb5e1833b6a9818473f591b8bd99cbe670b72f7e875305ca8abcd06b70dd1a708f8610af1a71a67384f6ddd7e082a7f077ba0351bdda0b98909a6b05f2b92c6d27d9bb0c9d1b804e2d3a3c1e4d56a26aa2d2ae67517440ea3d1ea20e1284dec77a9a5d1bbdf0a8948e65d074ac2c22fa7be784799519d01e1064c539aca0f6c8c9e8f4807e6afad03f526a1b54342519d5bea043aff962c7a070456e6461770ed7a5d84e51f60f2c79be11b9baf3cdfce512fecf4e17069212242f1ed18b6f1fcd28d65c4692c5fa2174849902a8a3c1c5f37afff2ff0c18fde746ad850961e2b4b2e1743308adfe6e32f065d722ee55c70762995dccb2fd696bcf8b6868984fc6c23a5b033cd0c326846c1421eb16d19a79c9029ec91e67cc7c7c7757ae094ca2da6518e94cd84c3e0fc5e28aecc388789817631a13942525514a9ba438cdf98c6a0f56d26dbfb84161bd0f1687f68794c108a93e3b238f0b8f54be4917a48cbf4720850e0a475a68297d9db50021ef6eaa6ebf4828fe7b05f11dd5bc4c98423ca8d056eead1e6c8c9d4464b99df07a917543a860686ad54eeee99aca33b4d9507d2d3b9f35b8f0f0664bc1326cc3e8a56716adf835985f031db110a4882173d56f06f003abff38ac2609ba01064a50f01035b377"
+    },
+    {
+      "n": 8,
+      "label": "the live session ended, class key (byte-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "classKey",
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "kind": "live",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      "ver": 58,
+      "flags": 0,
+      "nonceHex": "b1b2b3b4b5b6b7b8b9babbbc",
+      "aad": "cedarlogic-classroom/1|live|9c89e40e9ea981bbfeaf61e93c91be46|2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d|58|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"live\",\"session\":\"2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\"ended\":true,\"at\":1759607200000}",
+      "payloadBytes": 102,
+      "payloadSha256": "d201ab2f4db425ce1f6b0f0b27e2cf3fce532fe94e9fe46c2f9e79272217fc46",
+      "envelopeBytes": 132,
+      "h": "cf155f7ecd44efc0f8b26c00019212a8",
+      "data": "AQCxsrO0tba3uLm6u7zTuNKsG8oqysU0TBr1TeXdbhDxY4OsG1gKwB75yC5bDkMvkaJBLcL3heTPSWQmjhhOXyRbqq-oCHUK3p7owBbApAkPTcniR2Ka4J0HiUrEgmf792u08XmvhG4M6euv6DlE6I_0-lW4IQLlqIAWBg_pXqXyap3M",
+      "envelopeHex": "0100b1b2b3b4b5b6b7b8b9babbbcd3b8d2ac1bca2acac5344c1af54de5dd6e10f16383ac1b580ac01ef9c82e5b0e432f91a2412dc2f785e4cf4964268e184e5f245baaafa808750ade9ee8c016c0a4090f4dc9e247629ae09d07894ac48267fbf76bb4f179af846e0ce9ebafe83944e88ff4fa55b82102e5a88016060fe95ea5f26a9dcc"
+    },
+    {
+      "n": 9,
+      "label": "a submission, sealed to the teacher, deflated (decrypt-exact)",
+      "envelope": "sealed (0x02)",
+      "keyName": "teacher public key",
+      "ephemeral": "other",
+      "kind": "submission",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7/5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 2,
+      "flags": 1,
+      "nonceHex": "808182838485868788898a8b",
+      "aad": "cedarlogic-classroom/1|submission|9c89e40e9ea981bbfeaf61e93c91be46|7c9e6679-7425-40de-944b-e07fc1f90ae7/5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d|2|1",
+      "byteExact": false,
+      "payload": "{\"v\":1,\"kind\":\"submission\",\"name\":\"Sam Lee\",\"cdl\":\"(cedarlogic\\n  (version 3)\\n  (generator \\\"CedarLogic 0.3.6\\\")\\n  (page 0\\n    (gate \\\"AA_TOGGLE\\\"\\n      (uuid \\\"1\\\")\\n      (at 10 20)\\n      (angle 0)\\n      (lparam \\\"OUTPUT_NUM\\\" \\\"1\\\"))\\n    (gate \\\"GA_LED\\\"\\n      (uuid \\\"2\\\")\\n      (at 18 20)\\n      (angle 0))\\n    (wire\\n      (ids \\\"3\\\")\\n      (seg \\\"0\\\" h\\n        (pts 11 20 17 20)\\n        (connect \\\"1\\\" \\\"OUT_0\\\")\\n        (connect \\\"2\\\" \\\"N_in0\\\")))))\\n\",\"handedInAt\":1759690000000,\"client\":\"web/2026-10-06\",\"attempt\":2,\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\"}",
+      "payloadBytes": 594,
+      "payloadSha256": "1ca9f244d857b3b0ca699fa3faf4e4c552f9676ec221f8661d91e49f85b80ce8",
+      "envelopeBytes": 437,
+      "h": "cb2574c02ba74fe4fc0365b0429f5800",
+      "data": "AgEEM9xetmY2yB98xi3fzuS_1qskLXaJO4NIY2bE07419yDONGoNiMH6ST0FEEyXXVZwg2tDqOY-umAHQpAH0f5qwICBgoOEhYaHiImKi-m-_fptHQuxVLCp2KRjsfr2GWQxsIjn4w7Eh0jRX7CndmyeV6ITJ_o5jjz2iEQzktUmcTMxLolB6ITTBuUS4KNdKyKwp5xZ3wrGzJKEPS9ExpaJmBLmQpzfvvDU85gLXWSTNBcLlLh-KDV57sDU66i-AiCXerqAO95SlcokWvvskg8OAkXLToVMcG-6JZaKDTN7ar0In80nfgcbBu2pL1zOFex9ARDiiL_PvLa9obIWCMtncpCh5E3C-t0l0C7DD3fTndjp5lpLbCm9ktr0BBk262Q4CUpn8Isvjw-p1qqRYMQrrkFaJeNSDxvt4-1xaE8GLX5qKYujY9fV9Yfpey0vQr1B0wM6yy2JXYQZCMxdWh22ELBJHvxRNtNVyCYc4xlRj4PGP366KX-Gegfy0hE5r3t9-R9wUJ_H9E0KAUe_ymek2FcldmiWT4BIoEtXdkxFs0wg0q2OkMVlPIu-jvKvm-0vJnk",
+      "envelopeHex": "02010433dc5eb66636c81f7cc62ddfcee4bfd6ab242d76893b83486366c4d3be35f720ce346a0d88c1fa493d05104c975d5670836b43a8e63eba6007429007d1fe6ac0808182838485868788898a8be9befdfa6d1d0bb154b0a9d8a463b1faf6196431b088e7e30ec48748d15fb0a7766c9e57a21327fa398e3cf688443392d5267133312e8941e884d306e512e0a35d2b22b0a79c59df0ac6cc92843d2f44c696899812e6429cdfbef0d4f3980b5d649334170b94b87e283579eec0d4eba8be0220977aba803bde5295ca245afbec920f0e0245cb4e854c706fba25968a0d337b6abd089fcd277e071b06eda92f5cce15ec7d0110e288bfcfbcb6bda1b21608cb677290a1e44dc2fadd25d02ec30f77d39dd8e9e65a4b6c29bd92daf4041936eb6438094a67f08b2f8f0fa9d6aa9160c42bae415a25e3520f1bede3ed71684f062d7e6a298ba363d7d5f587e97b2d2f42bd41d3033acb2d895d841908cc5d5a1db610b0491efc5136d355c8261ce319518f83c63f7eba297f867a07f2d21139af7b7df91f70509fc7f44d0a0147bfca67a4d857257668964f8048a04b57764c45b34c20d2ad8e90c5653c8bbe8ef2af9bed2f2679",
+      "deflatedHex": "6d515d4fc23014fd2b4d9f2401ecb6383edea6e234996014a290254bb75e46e3d62dfb0012e37ff796810eb54fbde79c7bce6def07ddd2b1d1a5ef52093aa6651da6b22c65a668972a9e02622f3c251e00029148b0be8840f022c96219f98a908b2d14ba81589d43198382825759417c7aa3959e5612d6b7fab64f1b4dce63204c5f7503af00b58e13cc67aeeb4d7cda1048d5b5144819c7be03c62b623062b216a2e204ed7e8024e7050eedd3d962feb49807d3c5a34f8f3e9df354d709bcc9eddf48f377e4f0dfc893db4e16f04d4a51a283d57628214688e1149b13a6bfa12a8961a03131066d7ba4a24c2988aa66e8e625016b399e49cc83641a48a525faf87a7f1bae048807e554b8e2c1d5c81eb1e6e02613090a61ba83f0d264a6dd33588fd9d8c4ab0ad21c29b34bf322cbd6285aba7772693e27ab5464fc352f42d7a843eb7a1fa929136f2b0bee131bacfd68ad86f4f30b"
+    },
+    {
+      "n": 10,
+      "label": "a predict answer, sealed to the teacher (byte-exact)",
+      "envelope": "sealed (0x02)",
+      "keyName": "teacher public key",
+      "ephemeral": "ephemeral",
+      "kind": "answer",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d/5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 57,
+      "flags": 0,
+      "nonceHex": "707172737475767778797a7b",
+      "aad": "cedarlogic-classroom/1|answer|9c89e40e9ea981bbfeaf61e93c91be46|2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d/5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d|57|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"answer\",\"session\":\"2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\"ver\":57,\"lights\":{\"LED\":1},\"at\":1759603660000,\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\"}",
+      "payloadBytes": 173,
+      "payloadSha256": "efe79fa5eb80fde403571760c1cf47c2428cc737d505dce85ff6583346ad9d68",
+      "envelopeBytes": 268,
+      "h": "1916a4363ee4d4be367f4a1e4c3fa99f",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2XBxcnN0dXZ3eHl6e8eIAvPZIvz06wmWDtAYrFGVjc2isdo8212T4Fx0aT4qOJMuW12H9PZFB0H6IJjybudQLDDR0ln7oAji3AEafqkJasEzJ2_W7WXQkSd5NsTnESaHHvFDhuoiaV4whZkpEeYaNZhrklVJZSitbRvg-59Ru4u9P76KhtQr-F7NNWFsn8UzRkf8rsK4OB5J_SOY6cdA4yeJkwxGcYsltq3ybt7j2nslueVPUqDffKo-uRczfPLciPBMQIulUNm2wA",
+      "envelopeHex": "0200045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd9707172737475767778797a7bc78802f3d922fcf4eb09960ed018ac51958dcda2b1da3cdb5d93e05c74693e2a38932e5b5d87f4f6450741fa2098f26ee7502c30d1d259fba008e2dc011a7ea9096ac133276fd6ed65d091277936c4e71126871ef14386ea22695e3085992911e61a35986b9255496528ad6d1be0fb9f51bb8bbd3fbe8a86d42bf85ecd35616c9fc5334647fcaec2b8381e49fd2398e9c740e32789930c46718b25b6adf26edee3da7b25b9e54f52a0df7caa3eb917337cf2dc88f04c408ba550d9b6c0"
+    },
+    {
+      "n": 11,
+      "label": "a move record, move key (byte-exact)",
+      "envelope": "symmetric (0x01)",
+      "keyName": "moveKey",
+      "keyHex": "04a3145f07d26ae375750e00c55ec4f693e387f988efa6f65cbc973bb110a7f2",
+      "kind": "move",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "fb490c53b8af36af281afb2f5064d1fb",
+      "ver": 1,
+      "flags": 0,
+      "nonceHex": "606162636465666768696a6b",
+      "aad": "cedarlogic-classroom/1|move|9c89e40e9ea981bbfeaf61e93c91be46|fb490c53b8af36af281afb2f5064d1fb|1|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"move\",\"classId\":\"9c89e40e9ea981bbfeaf61e93c91be46\",\"studentId\":\"5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d\",\"token\":\"QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\",\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\",\"classKey\":\"EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8\",\"pub\":\"BDJOV2q24PP7ZmCxHXOmFiVEMLnY3eGlcRLuj3e2huFf1Whgvw-TSvdPbRrI8dEcRU_Z8fxFPRbBpwmNiwUlQhc\",\"name\":\"Sam Lee\",\"className\":\"Digital Logic 101\"}",
+      "payloadBytes": 427,
+      "payloadSha256": "a5d30691b440ae8f252a71f1ef90ea961754a21d7ec6992acadc15378d526645",
+      "envelopeBytes": 457,
+      "h": "5edd6a3916be57a939d8532172f643c4",
+      "data": "AQBgYWJjZGVmZ2hpamtiiwke4ayrlf_Qosqmq0_KiqI1dv5H4prHN7nArCAOOBrSkcgYJKFhgghxDf0w4EBnYkjMzhHXl9g2QvXJdyqfL660SU5BN_2XQqw8VDCEGdDgQS3Omx1Kxv-bmgBVnFs-fb7sUYZJ0NCDQi8vnQ5plA3wsXgJQjYeb8UJ9fP44L6Be7w5M2EMH1vT1VBT2aeUz9OMN7uPJHLT26HUJ_zBypUABO-yuwZmeyVkoBPkkhXgLxu59fnrp3PYZOZD1iHwmGjMBdoLzjU-W4ORkFX3vMkjYN6crTw6NE57IxAL5JcTgBpyRWV-1DMV96CfWyOCQvmDuCUF0yg_NBHEqHakwPHCtbGqUIa5xX1Mer75J-mgP_vgDJIzmGd4gOP9sSeAw5RBGR4Pq6OGN7ozbOG2LYfa1GTvhHm2fL5DQw0q2U5TWidxcQjecqZSkNBFTyMvN1jlIMYmg3_YmlRZiqbGilLQ5tWZY590yuZRWNCkuGDx4_bGA1sFyBL5aGPmNI4ywdmNEHRZJqB7-q1vyjo75_fVGKFIWCM0wKqepp7o45r-qdmNqEkd9DZrHjCFnKtECoawjsbCLDQufA",
+      "envelopeHex": "0100606162636465666768696a6b628b091ee1acab95ffd0a2caa6ab4fca8aa23576fe47e29ac737b9c0ac200e381ad291c81824a1618208710dfd30e040676248ccce11d797d83642f5c9772a9f2faeb4494e4137fd9742ac3c54308419d0e0412dce9b1d4ac6ff9b9a00559c5b3e7dbeec518649d0d083422f2f9d0e69940df0b1780942361e6fc509f5f3f8e0be817bbc3933610c1f5bd3d55053d9a794cfd38c37bb8f2472d3dba1d427fcc1ca950004efb2bb06667b2564a013e49215e02f1bb9f5f9eba773d864e643d621f09868cc05da0bce353e5b83919055f7bcc92360de9cad3c3a344e7b23100be49713801a7245657ed43315f7a09f5b238242f983b82505d3283f3411c4a876a4c0f1c2b5b1aa5086b9c57d4c7abef927e9a03ffbe00c923398677880e3fdb12780c39441191e0faba38637ba336ce1b62d87dad464ef8479b67cbe43430d2ad94e535a27717108de72a65290d0454f232f3758e520c626837fd89a54598aa6c68a52d0e6d599639f74cae65158d0a4b860f1e3f6c6035b05c812f96863e6348e32c1d98d10745926a07bfaad6fca3a3be7f7d518a148582334c0aa9ea69ee8e39afea9d98da8491df4366b1e30859cab440a86b08ec6c22c342e7c"
+    },
+    {
+      "n": 12,
+      "label": "the teacher key as a sync side record, sync record key (byte-exact; a sync envelope, SYNC.md 1.4)",
+      "envelope": "sync (0x01, SYNC.md 1.4)",
+      "keyName": "sync recordKey (SYNC.md 7.1.3, counting)",
+      "keyHex": "e7333f3b411aec02c98d925aa938760f5ff075dbe21c1435332a57f5eeaec1d7",
+      "kind": "classroom",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "6f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+      "ver": 1,
+      "flags": 0,
+      "nonceHex": "505152535455565758595a5b",
+      "aad": "cedarlogic-sync/1|6f1e2d3c-4b5a-4968-8778-695a4b3c2d1e|1|0",
+      "byteExact": true,
+      "payload": "{\"v\":1,\"kind\":\"classroom\",\"classId\":\"9c89e40e9ea981bbfeaf61e93c91be46\",\"teacherKey\":\"000G40R40M30E209185GR38E1YZ4\",\"name\":\"Digital Logic 101\",\"createdAt\":1759600000000,\"modifiedAt\":1759600000000,\"device\":\"Levi’s MacBook Air\",\"deviceId\":\"5f0c2a9e7d3b41c8a6e2f1b0c9d8e7a6\"}",
+      "payloadBytes": 273,
+      "payloadSha256": "01f63e35df0e372f1039d61e769cabe208ef33282d98cfc7d25483d7d29bfbc6",
+      "envelopeBytes": 303,
+      "h": "e38769fb156d3661620ac926165a78da",
+      "data": "AQBQUVJTVFVWV1hZWlsSA3blCkRlxaPP5PDfzoV8w-deYMb35wF90VU_8Xjobwg32z_GKT-XxuAc9I2XnZFsLqFAJr0Jrc-vLVh6YNCfej0apfZ4bQSjv11Sdsp5OOcb9KT9_D-QNaeXpDFtipT3GfoMak9ZDOIE4AHDSckrmmXAnMXHA2Y4gy_ZI-mV8ucHj3Nnsg71quZx-D6-JhBXqh0E3tbyzXNadcHqLA5VbwX45MBu-TWCTKhQzL7ERMaokYYMmxg34FanvrjtvW2D7DTZoRrShkFg36hTm07XhBjikYLFH_yPc-reNYKHtzb7WC6NTU8IpMMc1vGO5FNJhNu24rGevOc0jlwxJd_hcKbimmbRFTxd-DKasyk8R_5rHSLuw38xoeyduetS30qu",
+      "envelopeHex": "0100505152535455565758595a5b120376e50a4465c5a3cfe4f0dfce857cc3e75e60c6f7e7017dd1553ff178e86f0837db3fc6293f97c6e01cf48d979d916c2ea14026bd09adcfaf2d587a60d09f7a3d1aa5f6786d04a3bf5d5276ca7938e71bf4a4fdfc3f9035a797a4316d8a94f719fa0c6a4f590ce204e001c349c92b9a65c09cc5c7036638832fd923e995f2e7078f7367b20ef5aae671f83ebe261057aa1d04ded6f2cd735a75c1ea2c0e556f05f8e4c06ef935824ca850ccbec444c6a891860c9b1837e056a7beb8edbd6d83ec34d9a11ad2864160dfa8539b4ed78418e29182c51ffc8f73eade358287b736fb582e8d4d4f08a4c31cd6f18ee4534984dbb6e2b19ebce7348e5c3125dfe170a6e29a66d1153c5df8329ab3293c47fe6b1d22eec37f31a1ec9db9eb52df4aae"
+    }
+  ],
+  "refused": [
+    {
+      "label": "payload v 2",
+      "why": "newer",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a322c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TAxMjM0NTY3ODk6O3pUk0-NGjRAH4rJTdsQlyNlcC88f9TI3p3WmP6RKaUQGDFvj3w18hnsG_kPstfsRqerEqvJLjPILr_6VKB71ZIyPmT-GyPSKT0QwlORYPe3kaxTm2pWYPkCcu4RVX13nH-qhpEn6JWqMh5VlQk3ktNLguQP56wd6vM"
+    },
+    {
+      "label": "kind 'grade' (unknown) read as a name",
+      "why": "newer",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226772616465222c226e616d65223a2253616d204c6565227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TEyMzQ1Njc4OTo7PHUgHVTx-7o-FEVL_DUd9Hj78xgdinzxRAHnVKlRIVmxIcTH6oHd7fuOstm7-aP0uwM67CDdcrU"
+    },
+    {
+      "label": "kind 'submission' read as a name",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a227375626d697373696f6e222c226e616d65223a2253616d204c6565222c2263646c223a22222c2268616e646564496e4174223a312c22617474656d7074223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TIzNDU2Nzg5Ojs8PcM368FzRQT5Po7VxtsI-dn9-RsppDqdFaVceCBEh30FaRRa12NUQV03TPGdMZtsFZ9LDuQauUMpCBmksNtjExqP3JBmxQttYJFbgMhmENw9-BHsfn0DGeIGg0dxAQTjVGnhUkMhdVYM7xGQepFmdhjiA5Pm4xROUxoAWLOOFHiH0kdNDucolMp_a1tLD4k4B6xuPLOR8Q"
+    },
+    {
+      "label": "name is a number",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a372c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TM0NTY3ODk6Ozw9PkR3MCZjNXdMbB2zNV47VMoWcXiRNXaYKuVHERW4lvAbHQT07jqEUkfgyAvVFd9yrbm2Fml1xL4TRke95Bt0kIjkOrprbTkeiXwjSgexSeMGR89YXsJ6OgVSCQTIsNEK_wsp33roEH9rGybSZkKpLfQm"
+    },
+    {
+      "label": "unpaired surrogate escape in name",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a225c7564383364222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TQ1Njc4OTo7PD0-P3cOcD620sJlfFBri0QYF-T2gGCy18-8Op2Vhf1coFKUBzypEpz7WAJLpNoCSLxvQIxA-Ne91AXjCndyR5ScBBUwM746VJmZBi6JWiPWeIt5YJHL99_Pxr7nEgOcaAKvCGGtKlA5D6v7tP8iM2pVqMJkusFD0jsw2Q"
+    },
+    {
+      "label": "invalid UTF-8 byte in name",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a22ff53616d222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TU2Nzg5Ojs8PT4_QHw5LoZXXjHUMaS_ejItZaGplmo2K4dutLohP-sn-ZP1FXS5_8HaWJ3WNkMf611hMdJvG3Tu1Qn1hfco4OCNTZ9FKFldfh0c7EB0rnUR_K3i52UiFbO59mqcHA7BJGn7cHezTLm8B3pC2VEEpwGRTUrm7IBpYEs"
+    },
+    {
+      "label": "joinedAt is a string",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a2231222c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TY3ODk6Ozw9Pj9AQbXSy5fADbIIoZ-FBeIAmyogEF0It2nvxPl6mT9eugmQPNdRBBAPTm7CjPGXG1Ida_GVC_oJfmRkfMODZvmk2OHtVpjtFepTVXgTBHOB2rDuD9MnQ4v1dL2j0v7aR7RkET5F8omnkK8VAB_w2tDbTQA07oeb-XCAWUJpYg"
+    },
+    {
+      "label": "joinedAt past 2^53",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a393030373139393235343734303939332c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2Tc4OTo7PD0-P0BBQiRkGObYoWAR_xuQvwZ8M1skRoeliSnIeKh8W6DfrbsPh0zpsB-PYAqU-lYL5ytlgzR09viYYqdMMD2LMiKEz6x2lBIFwSagS69JDsVjsRHqk6ne-T9bDPZjT2rQ1sg0r1rfdjYLV7iwa-uTAddCUopfuekMkl7NmE_SGB_3DnAitvKdc97trMg"
+    },
+    {
+      "label": "name without a proof",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a317d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2Tg5Ojs8PT4_QEFCQ0chpWkI5ghNRuP5BEC2ctzTgDD6CGh0B_4M-3FbQJzi64fhUWuNo-Rr_SuKWuHwTXjM8fTGVJB-kBFTsTK_pbUgBlw"
+    },
+    {
+      "label": "assignment without cdl",
+      "why": "invalid",
+      "kind": "assignment",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "payloadHex": "7b2276223a312c226b696e64223a2261737369676e6d656e74222c227469746c65223a2274222c22696e737472756374696f6e73223a22222c226475654174223a6e756c6c2c22636c6f73654166746572447565223a66616c73652c226b6579223a6e756c6c2c22637265617465644174223a312c226d6f6469666965644174223a317d",
+      "data": "AQA5Ojs8PT4_QEFCQ0Sj8e74I7k3Tn4qwzwvL3j85jaozGDxMWWcWERbN8ER60dXbFvfYUgFeNyxRTHzWwwwAmxJAX05N4ZmQSEp360eGJWyconmFLDhPhoCvxAjoBNMIUzQFyWfT-xrryzXi9nsE063HQ79Z71JaewqGets6U5bzmO1F0SvWfWOD_97kX6q81kB1hF-BmKf8UqSRjpJvtTl"
+    },
+    {
+      "label": "assignment key with both text and sealed",
+      "why": "invalid",
+      "kind": "assignment",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "payloadHex": "7b2276223a312c226b696e64223a2261737369676e6d656e74222c227469746c65223a2274222c22696e737472756374696f6e73223a22222c226475654174223a6e756c6c2c22636c6f73654166746572447565223a66616c73652c2263646c223a22222c226b6579223a7b2274657874223a2278222c227365616c6564223a2279227d2c22637265617465644174223a312c226d6f6469666965644174223a317d",
+      "data": "AQA6Ozw9Pj9AQUJDREXkD2bnFoqAdHcbsJocADA1ovi2FSF9htW0g4_KtCMvZIB36S3x40R7UIzEljrb0I2oUFnbuB9-Y6CyCC4SogKEnyaeKv8FuO43MmKF8AMSLcdvQ-YuerCzxKLzKof6I07nAOAv8k4Uz-A_MHwMcI3GUKUCpsrDhFp85_BRmwXtVd4vJizYm-iwvDyQktRDEO7FK_JDpfrKsE_Sbal1PRRUGaaWs0JQG9YQR9q50Xz8V1I4"
+    },
+    {
+      "label": "assignment key with neither text nor sealed",
+      "why": "invalid",
+      "kind": "assignment",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "payloadHex": "7b2276223a312c226b696e64223a2261737369676e6d656e74222c227469746c65223a2274222c22696e737472756374696f6e73223a22222c226475654174223a6e756c6c2c22636c6f73654166746572447565223a66616c73652c2263646c223a22222c226b6579223a7b226e616d6573223a22415c74535731227d2c22637265617465644174223a312c226d6f6469666965644174223a317d",
+      "data": "AQA7PD0-P0BBQkNERUY1ZY1VCo-LB5BWdTxkPDaPhP1wQa78PVMA5aOiaVcI1DZRH5FGcyFME5rDTih_0pp4rZXNjk6Oy8RI8VsLYH03e9ECaRo6Uu_MdK9SIVGJ5Ywev1iZXhUWNltLzIF2cJTk5gRFr4BwoKCrLX81m_3pEPyrylEBYtlJ4hOxJhNhaG8tp3ds4Tc7aHs4sx4ghvPG8WcVqiS0YqjK96vCnssKKKlyavKpPlZipO4"
+    },
+    {
+      "label": "teacher record whose join code isn't 12 symbols",
+      "why": "invalid",
+      "kind": "teacher",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "47abb2dc45d5dec8c85370f119b51a78de57a4f38c4c66ca8ab6cb3bd6d5dd1d",
+      "payloadHex": "7b2276223a312c226b696e64223a2274656163686572222c226e616d65223a226e222c2264223a224c6a7646323850783162447075796d4d7139622d4b4c346966574879746959446f573038304566465f4f63222c22707562223a2242444a4f56327132345050375a6d437848584f6d466956454d4c6e593365476c63524c756a336532687546663157686776772d5453766450625272493864456352555f5a386678465052624270776d4e6977556c516863222c22636c6173734b6579223a2245424553457851564668635947526f62484230654879416849694d6b4a53596e4b436b714b7977744c6938222c226a6f696e436f6465223a22303030472d343052342d304d4259222c226a6f696e4f70656e223a747275652c22637265617465644174223a312c226d6f6469666965644174223a317d",
+      "data": "AQA8PT4_QEFCQ0RFRkeFQafNJraYVdXKANKHFGOaH0qTrX5S2T2s6Btfr34THCdCX20SBbeEc4sPJS21pktoCatOOuHA1Zl-GtNH0LDBHrZ1uG4L5jGz4NFVX7h1zmspTpGdWL5h3ODWoQG7d2kvViKUl9x64ZjaRDE96YmhdU96ZJSLczxG-5y_2pvn4QGZuHnyp9cqSqUxr9KU880XspZ_CNcpOiZ1ES7h-FiHWgVdy-MIUi1Y7f73JWMuhgWaV3GqWFR24x7EekjLGblTNZ5vOvQ9cjJiMbqCcRwYXwSsf6OTOlfnlj8xm5mMDmaXl0FnRLzC4GhH5iTPX252GhqHC_ZIWpgTwr4HxtjFe0gE5G5bdagYMARmlmTio_K7J7qf19lPjBHKfL8RazPTBzSmJxdMWufFnPweOd072ERntDtWjvixXYxprHythiUwgnZOJpI"
+    },
+    {
+      "label": "answer with a light that isn't 0 or 1",
+      "why": "invalid",
+      "kind": "answer",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a22616e73776572222c2273657373696f6e223a2232623164306139632d336534662d346135622d386336642d376538663961306231633264222c22766572223a312c226c6967687473223a7b224c4544223a327d2c226174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2T0-P0BBQkNERUZHSJ-LOawSQH-M1PbWw9LXhnkya7-AdHjONVgMxNp-S8z5KARup-ugqwSMQU1sWyusFUNas5stWwi5kAdkNfbXfckY63SH3Qs6cohCqPDvaZd8w6qdpi-2VetGPCzTK2WTsyZzJLN2Cda6POnXRcWA0rnv65vnkHOmdn6QB3d7qZpuYX4QBCYYiHuD4CYwCosF3zbxeZuJsHf82vgvTt9FWt0C5UoELdrGU6dRRj5J_Rmf"
+    },
+    {
+      "label": "live without a session",
+      "why": "invalid",
+      "kind": "live",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "payloadHex": "7b2276223a312c226b696e64223a226c697665222c2273746570223a312c2263646c223a22222c2270726564696374223a6e756c6c2c2272657665616c223a66616c73652c226174223a317d",
+      "data": "AQA-P0BBQkNERUZHSEmiy0GrxJXTBlua1ZtrMQd6vpKUy3wlGCHCEwslBRRr98jmB43l_5hWtAnPp6oj5XR9wN1oanRBxZIg6sDPzpPeDRaZdgaKWcMkfTArZKLR0tbqejgm6yAKM7HFRA"
+    },
+    {
+      "label": "live whose ended is a string",
+      "why": "invalid",
+      "kind": "live",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "payloadHex": "7b2276223a312c226b696e64223a226c697665222c2273657373696f6e223a2232623164306139632d336534662d346135622d386336642d376538663961306231633264222c22656e646564223a22796573222c226174223a317d",
+      "data": "AQA_QEFCQ0RFRkdISUqjVAakLrrOkAddcfsYSgbgK12hzsPwkSG29MqR4ndN4M5DB5VsNcCwT4fz2LZO4A3YW6YsZK7u987Umo-dR01IZTOA_mLNXyyBiN7lDkM58k5wgFphyhWGRsfOy083fNvCHq1_ZDMq4YODrg"
+    },
+    {
+      "label": "move whose token isn't 43 base64url characters",
+      "why": "invalid",
+      "kind": "move",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "04a3145f07d26ae375750e00c55ec4f693e387f988efa6f65cbc973bb110a7f2",
+      "payloadHex": "7b2276223a312c226b696e64223a226d6f7665222c22636c6173734964223a223963383965343065396561393831626266656166363165393363393162653436222c2273747564656e744964223a2235663361316332652d386234642d346136662d396331642d326533663461356236633764222c22746f6b656e223a226e6f742d612d746f6b656e222c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38222c22636c6173734b6579223a2245424553457851564668635947526f62484230654879416849694d6b4a53596e4b436b714b7977744c6938222c22707562223a2242444a4f56327132345050375a6d437848584f6d466956454d4c6e593365476c63524c756a336532687546663157686776772d5453766450625272493864456352555f5a386678465052624270776d4e6977556c516863222c226e616d65223a2253616d204c6565222c22636c6173734e616d65223a224469676974616c204c6f67696320313031227d",
+      "data": "AQBAQUJDREVGR0hJSktd5ejkPfZILaaAGPgyt55-XYFc4sEC22fmBLF3A3QYeEl44K3MySI9G1Yjsiett4jT6wgun8s2bKZSeuZS1lI8oF_Tac3nm6ApyvZxxf3OtUlQ_MqK5_b3dNe76dhWITzhSKYgqiEpaBeJ0D79Dl7XEV6PmG3ZtvRArXRfRDQAwQWwpVsQX99gzbu0Z30V4sY2xEBup3PJtMQlZ36qNplprESUEpodCth3saRcSzsdm5tKq34cQGSoDgGhuW6BkkUU4-V7tC9gJe08RmJAnz2h06nDDevKZY-wLN62Bo2LEb3C-S-w73_WBeaDK2J0NkuMrR1YgeHOHXD-2enlFBYWBzaPnL_u9J7WlQbgLtQ8VG3Fw5hfGQbCj-B4j7riH_Adg1XccU0PNd6d8V6KUCkL1RWG9lwUY_ZPTI3WMy4N1Fs2jKrQ0Cw6Psx94wbpIRHlaERWjciP9l4u0d0eVLdYsvF0uIPdZdLLnQZbF_-ly8tDZopxY8W05Y8_KjqinCeyxGXqFY8N94aHob12mmPU0U8DbZBZyO5eZq0"
+    },
+    {
+      "label": "v missing",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2UFCQ0RFRkdISUpLTOoAKQcwOB_ySYmPMpd1UE35xXrRZb8aurbO6xHB5hdiKTyfwEjwkzon69YDZsSrNm9_K5XQhQXM2x9Hw_9xnni0oLO5PrP0fi8hjVc-__7kSk14fvtearpBQJKUEbgtyHjtieEExi_DAlvwiP0iSwt6tA8"
+    },
+    {
+      "label": "not an object",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "5b312c325d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2UJDREVGR0hJSktMTfehcRO4tg_zw1-dIVy1neXKHbX0jw"
+    },
+    {
+      "label": "not JSON",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2UNERUZHSElKS0xNTvjh_Pf9zyPhc2hvLDDqaQqj4TtdYPSm"
+    }
+  ],
+  "tamper": [
+    {
+      "label": "sealed: ver 2 claimed for the ver 1 name",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 2,
+      "privateKey": "teacher",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: another student's id",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "9b2e7c1a-5d34-4f8e-b1a2-3c4d5e6f7a8b",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: another kind (submission) claimed",
+      "kind": "submission",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: last tag byte flipped",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uA"
+    },
+    {
+      "label": "sealed: a byte of the ephemeral key flipped (not on the curve, or another key)",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyIJgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: flags byte set to 1",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AgEEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: unknown flag bit 0x02",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AgIEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: envelope version 3",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AwAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: envelope version 1 claimed (a name's envelope is 0x02)",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AQAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: truncated to 94 bytes",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK3w"
+    },
+    {
+      "label": "sealed: opened with another teacher's key ('other')",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "other",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "symmetric: ver 2 claimed for the ver 1 assignment",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 2,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdxWjK-pv6HKM2IliQ6tz5vA"
+    },
+    {
+      "label": "symmetric: another class id",
+      "kind": "assignment",
+      "classId": "9d8d8b91b2ab7698e8b8e2b01513d9eb",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdxWjK-pv6HKM2IliQ6tz5vA"
+    },
+    {
+      "label": "symmetric: last tag byte flipped",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdxWjK-pv6HKM2IliQ6tz5vB"
+    },
+    {
+      "label": "symmetric: the join key instead of the class key",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 1,
+      "keyHex": "764d5999b9351ed00327388a8d954527e83707e1cef958ddae6b2857bdececef",
+      "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdxWjK-pv6HKM2IliQ6tz5vA"
+    },
+    {
+      "label": "symmetric: envelope version 2 claimed (an assignment's envelope is 0x01)",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AgDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdxWjK-pv6HKM2IliQ6tz5vA"
+    },
+    {
+      "label": "symmetric: truncated to 29 bytes",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_Zw"
+    },
+    {
+      "label": "symmetric: a sync envelope (its AAD prefix) opened as a classroom one",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdzWVzd1pvhk7JiZFc-Wjm5D"
+    },
+    {
+      "label": "symmetric: a deflate bomb (inflates to 4000001 bytes, one past the cap)",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 3,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQHS09TV1tfY2drb3N34KmwHpCAR5_6hR6Lyessz9x5l5bZ5DqAW5nDaO1Am9SJ7gLvTpABKs8IrvQ-VD1sIroLDV9RcwQSJrDd3T2ebtQEeY2-b8AMZGucmKDHzSWNU-ZjJgWMOxuu-7qaQJBw5rgk6l0bQ5F2pN7lx10rBYbANMURdQ4mrSg8oudykaqqhuBgBSxtJJXMcUU_7qce6zARHB536R714VYt7SFasadKjPlFg5hZwzi3E8i6i_SaabgVvgHiDfQaByyN4M3rQ3TaQf7lPh26oIFFdzY80FcNJH5rKb8hY762E03gvtwA9ur3RYt6UxJ2-3uKiNgbfWfaMk4hnTUsQO9Qw_wzkoP8KBpv7229k6vYMIxxgKlsuppmui6dzZEUesz2x2OcGzLNSbnx2nbSldN876XOPf_PRxZzuGtM92IradwoQDNDFWu5hDtRAXT9vSjDTf0TTeWw6hEKp0HombmNwOQIZHLqRzv4Xc8VIbOqsrxkFJfNl3STL_GnrQotd4-TOfX8aY-8EK70mWJIOEZ66faVfE9HWjmPvGgedXVMXPvPvb8zHq5AJdyOikgh3syAjo9GhItZ3hIIr99ZZ5wECKpstOH6kFJ7ntNHYRiU-AjoS98IGhK1NBEVMOigf3jXDdbk1N21DIia5xt9NPrlSQ7sVCNjKV4YIEHnIT2EKCuMPi1hvPjLItCf2Dz8Dx5CfpMtFTTTu2aQsiV1g69dYGTwa3YChZBBWPSJfW3JkLZNClbt1QJq9WWCH_a2rjF7fNlKFX7LeE8V5azP4rJcwqIJZ4RmtW9KI76vjCAXU1jEzPBvoxYCFAzAVMfSdczoqSa8hEN4JX6Rq9S-9pGntG47-OLPZqM_6m_HJnHcbRitSCwKsYT8lUpqJkCyA4Txz6yNVajQ6ZPs5ansOlp5mV-s64pBPgbXbwQaXXPj1wEiE_X6f32nBaPGfMgKdYnmD9NPJ16ih3xafmChwALTJ670ZtEmJ0oPpIN_WC6ghUqDNU8q9tsY7MkTNMbY6WuK3aCuXKdLGjAr5hgXZpIILjoHXfM_Shtzo4wmyiHXq_TWOo-7cxAmDix-6Cd9phfqKIeJwe2LxbRO4FX_rFz2BClgw2UgIu-gla5lssI28JK88-gsct4wj08oCDNlDf7fyQxK8sAJgBJ-6PwLI08CrpvPC4qit4WQ9pHLTwWQkOG9VoaAfoJxT8fDn9UnxRmJ32mRTTGktF62kql6mFvs8FW_lgdwJo9X_lC8PjZXpqgqc13Di52zg986vSYeTHGYxB7MjbsKNAQ_N03E2LFsiItEHB4HOUEDfjaafS1CSnnY1fP73RngE0oKtNilMvu9ClUe4YvKxH1KcrZpKeM4lHG7_Xu6db3Xn2gil4J5NytB_3IwYLB5hGYo6MvUiEnAZRvTOTa-YfQA9oBpxSDf29a1Egdm_jwzKRTAB5snGfNDk9pz5BJLjtsQHHCskRhyHAyANDQpL9s_i4Nfh0s8DLvJC_AUNKbn9RrhOcLa7vb1kQ-_NUamf3sU6d1_NGBlapVz91K-N5wOPPUamBFPIGkM11UVX44kTbL8C28RMEcIBuS79sYyJI_U-aYMlts6ND5G8IZKhzaQzwwQYH44rzi79hnhdiciZq4omdGpDLPOJ_G6WqcisTUVQChmYo0o5GkQ4PVXsTa1JglkCp33Kd52SQHxCcjHY1a3yfPrQHirUzS3t9keYQKPWoDNOQgLmeeJfrXlXEHD9qq5z7HzBCRX_KZxz-Bo25hv8NcMsBygyxkRF3NEzjaN0xfNdWyZwx2X8_5Qzq364Gf-EwRTBRddz1L6UCWbA39u6J0qsP4FZlP0HQ_s7nkNar7N3ykFpjZeFG0ZzCjXJDQjyB6KvV9RBQibK8ZiJe-FXDTk6a-CF_hwmhfhUz1jWaBdkLpa1TdpAXAX2ZGXo2kjS_c1DLYNeRsNrwNUdhEVvOhLCZM8OeV4xwuUAeNgklmHcNj-uhzEhBJCNAg0p7prdPNsOwHJhz0ACxXXhPVYxR8TzaUYsBU5tTpnqM1alr7VeJMbSA9rJ7BPVjpS5BpcDsjjaexXqnZtWkX__fjIFS0CFBD_WUAvJQQnC5-G8pW7vpz6ZarTz-WlGD8kWcS3m0amHfVQgt0BumqaD1sZ-ppBjXfzQfXgoAjIiHdTMAVSO9YStM_jO42tPrOWhcwFnlGH1jk4mqATMyL-AvRH-QiAdOkFqdxkFmypNW8upBO8_9SJD1LO-6UN4xxz4zNcLNsg5QMoIZIq_8-hK3ZCnWUSUrULTyIDX50TFDl7zv3EDtR2RStpVaOXjCMWZLO9dkwcxNf3KExhgmocnFAmto4sef3SW77W-6Is5U4popnQk-ZwyFHqnBBNvvc3l9Igc1ohw-hoeJLXDUY3JLLuLhHPt0trJI8fKDCSAEivq3F1ykRtOHlSqEvqDUm6Bo9J5N03sTZ-wReFhDkmrXejViRfiGF7VnMvIKPjtQhsm434ykIGOK43JZLvOsitrvGD97h9z_l0jdr9cL0IWheDdvftC_pAi8kKU2Z4jehdYLh95djX9ufWBJaPKo2wHS4hukEiwZu7F6HxTmsMTxUWicAWbATqrPRqL07VSGRpC4IW9h1ZjzYSQ8yBpcWI23PW_slHvVbsfm8adAXACnTPbGlB6x1FxFP9IMesItcWOLf706M5msoKRye3fr5A-BH-Z_cjuddshhgaBvOtv2BCK4SW8NpeVRXP2J4v5hxqCsROXAJxYg_J5RxzlyIio_9LUGMZniYzgab0rlCbxebFdCh1BvJ2X8oKa_n5rmwAxeRimXA59AXgfgJvteBM4srFJvBr0PpZp2wkgjBcpE9gbmfW6WN_2ZJORamAb4yLYo-vJxZPJ4KGXnqgvn3FInBOJbbqrfNi_Lp3al7yG10AfpikNJqzGK2-WcSOMy_5tQdC4fRCJAYgAqDFnlwuLxGnIl3uDlrpcynJQONsYZ3-deQh080RcYjDTEgBj4rrJr19_01p_nD_YxVmDRy9INsoVfSwCiC9nByLdBzlMFgzPGaCAUzsT9zkgeoiA1eiag6DreL5dxQkUQO772EB3Z-OrPNa0ft0sjsQLkjDEzZIccLXctQ3nOkc-UBdc8InQBp5ZEfhq1qjAWAbSucUbC77_KMryJUTJI2UTJc35TWRMIdK6EONnIMQ0XMP_yqdfQGEllwO_sOywsUguBO7bOe-kqBcRujmm0kOLriyldOS14A5MbZvC2P8OxwKHZtpthGP8TgA_TRMoE0dSCXN9ScEJ1ak90LV7aS1hObrsyo5kHt2aDwi21THCRFd1mK_zfYBZt1bz0-ENtn_bXdMFteFkk7tN2-W0BSVNWwyfgmeKf2XzoMZ7ANKjdih7xfjVSveXJGtd0bKkyM4Bl6mrleZtXrIC75cFuHQbILfZuhqxBwsIpofPWj2Z8j9QTgSZTuaGwLwO4oPt5axbjwxc9ggCtT9ScER-YCB0D7K8MLXEDENHMrHVZSC8S5vbb7rHNzYbq3LzdgYUjnsZ4VGGKRDPtBPNl0t81UfU_pik4bN69Z7S14avJY9DGc-OFtRFCOSNPBk4Awp4l0Q90-XckEhEVShbqG55aKyHaWCbupqx7k1LRBMVgiaidAyDy70adpIb1_bsIvfr_qtXjM4k9jY1Ei9dIImm8r_9ETGHmPGRwaPWCgYWTMT95DDmCaT1G_CEgqsa-Jovenp90X1vY8UuTBoXF8bDidOKFzDufx5j_sMlSN0a_HbYQPqBiFsTsk31_r98iGJp8sYu32b3_OPMy9iLE8CEtxobML4RTKP51SG4hHBztULjstvkCugScCJEXMVCT6iUSadzKZFFyZwgZnKV7NVr-1HNRIZCkaLsHL76BjTQurwlCk8dkngc8USiAYlyuRuCaG6CZzokDo0QdVrSeE9fpLcim8_sp6FwmCatiPO-lKqfIbBRP7aeQnUQ5hN3RObR10Ji4Cv642urBthwXtjnF8KQb0svjzkZjzCzzRHZcYLnq9bn0Jj6DLIu4z2Te6ALE8tQ6DZ_GkxstH7_NGgvbL6V3N7AsDoytCgwUo3OHz1VL3w4_X7vxTRfZUpkrS7-DYxIO0ozirN8C1jM0LEwzH6DmP-3p1fPVFA_guZTq1aOfKJTkaqvUveJHzGlfLVoEiv6QyF9fniSHTqE5Wgh1b7GPxWUkeWqKHGmakGzD7dhFBPDKJmj7QnyC5ax2QVJpShjteKKZYKs_b9oh-CMOeldZjZoMJti_6GmXloK_MFbpNJTpUmNd7y5FtKur14GwtsgFOu20e7KnWL5mbSkSuZqzNgYs3AP3dzbC4XGhz-eEw4Em282Aqw-cnymoXlhZUU-C-v8wogQO_4rXDlY06OIs8TdpWh0dwEzhDahh8gZSeoUK0qk62QWpQtFzzbi_vD_1mxT5eTfM7OMNBD1fUVspL5XhRLYc5B7UTuvRNK052hmpKWmQurQnWAtpb6_x6R7FZcE6nqiU1bdj-zIZqq56y037HCg2F6LeW64rrGmTZqloIzRU80TZmI5VvaDcvf-6_0dMhQ6Zg5xw5Bi3sOwJVGmdtt-uM4ytwrCsiItMw8e3sZ6vzWZbigPFKBFZDT6wpsY00vtxZfGCD9xqJ6rA4ILMETJWNCJ4NEULZ9U1bjCD4v6HtwlWT_CpyEUXpVyXMEtFJcJKnqR-KPbBpDc4-XRGsQwQFAHhy89_ALOMzCLViTQ8dwzMFutvwj8kaXlQotNbrtKI_TieJ798jKx5uA2hwYzHjFBS8EJykPRQUSJjrk9DHlmaP59GIj9dtvQVet86eTBNGE8M5zQY-Q3L_yc8X6Cup84fyPvIm9E8TvTGobvFPWBGoM0IpBo3jS2MJ-ejpfSeBWp2-reSiwwmkP723-K8PCiVU6cfbuRsBEPAgoBni-w5sYu4xdoVf56_jiPyXF4t-Z11lj0XL1U6Z8UhLXAsR_vtFYY4F33P8FrRcLCXpQ-G8Wjhc5jmU-K-uKZ3KVLmmzujLUul0SGtpitnLA26c_OdEAAkFA7RtbVpedkr-VnQFvjUj7qiHft8JbgcgPA6Ldo9Ky3s_Np3AIH4Ofgrz5_HrdGTGtl0YGKZKy3AUXJ3obw0KS-tXrn7nB_dKuh6P9lEaMGX1OicGulGw7FBSw-Mf6gHyVdFz83AebzHRPyp9CQnIUBTGQE332ZsrR5M6m_S2DBUzVEcAPr"
+    },
+    {
+      "label": "sync side record: opened as a classroom envelope (the classroom AAD)",
+      "kind": "classroom",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "6f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+      "ver": 1,
+      "keyHex": "e7333f3b411aec02c98d925aa938760f5ff075dbe21c1435332a57f5eeaec1d7",
+      "data": "AQBQUVJTVFVWV1hZWlsSA3blCkRlxaPP5PDfzoV8w-deYMb35wF90VU_8Xjobwg32z_GKT-XxuAc9I2XnZFsLqFAJr0Jrc-vLVh6YNCfej0apfZ4bQSjv11Sdsp5OOcb9KT9_D-QNaeXpDFtipT3GfoMak9ZDOIE4AHDSckrmmXAnMXHA2Y4gy_ZI-mV8ucHj3Nnsg71quZx-D6-JhBXqh0E3tbyzXNadcHqLA5VbwX45MBu-TWCTKhQzL7ERMaokYYMmxg34FanvrjtvW2D7DTZoRrShkFg36hTm07XhBjikYLFH_yPc-reNYKHtzb7WC6NTU8IpMMc1vGO5FNJhNu24rGevOc0jlwxJd_hcKbimmbRFTxd-DKasyk8R_5rHSLuw38xoeyduetS30qu"
+    },
+    {
+      "label": "sync side record: the class key instead of the sync record key",
+      "kind": "classroom",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "6f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQBQUVJTVFVWV1hZWlsSA3blCkRlxaPP5PDfzoV8w-deYMb35wF90VU_8Xjobwg32z_GKT-XxuAc9I2XnZFsLqFAJr0Jrc-vLVh6YNCfej0apfZ4bQSjv11Sdsp5OOcb9KT9_D-QNaeXpDFtipT3GfoMak9ZDOIE4AHDSckrmmXAnMXHA2Y4gy_ZI-mV8ucHj3Nnsg71quZx-D6-JhBXqh0E3tbyzXNadcHqLA5VbwX45MBu-TWCTKhQzL7ERMaokYYMmxg34FanvrjtvW2D7DTZoRrShkFg36hTm07XhBjikYLFH_yPc-reNYKHtzb7WC6NTU8IpMMc1vGO5FNJhNu24rGevOc0jlwxJd_hcKbimmbRFTxd-DKasyk8R_5rHSLuw38xoeyduetS30qu"
+    }
+  ]
+}
