@@ -1,16 +1,42 @@
 // The oscilloscope as a timing diagram for a lab report: white paper, black
 // traces, each signal's name, the step numbers along the bottom, and a title
 // (with your name, as image exports have). Copied as an image, or saved as a
-// PNG or a PDF, of what's on screen or the whole recording.
+// PNG or a PDF, of what's on screen or the whole recording. Signals marked
+// `blank` make a worksheet: their rows are left empty (name, time grid and a
+// dotted guide at every clock edge) for students to draw in; the normal
+// export, with every trace, is the answer key.
 
 import AppKit
 
 @MainActor
 enum TimingDiagram {
-    struct Signal { let index: Int; let name: String }
+    struct Signal {
+        let index: Int
+        let name: String
+        /// Draw an empty row for students to fill in, not the trace.
+        var blank = false
+    }
 
     private static let margin: CGFloat = 28, nameWidth: CGFloat = 110, lane: CGFloat = 38
     private static let titleHeight: CGFloat = 46, axisHeight: CGFloat = 34
+
+    /// The sample numbers (within `range`) where the clock changes, for the
+    /// guide lines of a worksheet: the signal called CLK or CLOCK (anywhere on
+    /// the scope, shown or not); failing that, whichever shown signal changes most.
+    private static func clockEdges(_ document: CoreDocument, signals: [Signal], range: Range<Int>) -> [Int] {
+        guard range.count > 1 else { return [] }
+        var buffer = [UInt8](repeating: 255, count: range.count)
+        func edges(_ index: Int) -> [Int] {
+            let n = Int(cl_scope_samples(document.handle, Int32(index), Int64(range.lowerBound), Int32(range.count), &buffer))
+            guard n > 1 else { return [] }
+            return (1..<n).filter { buffer[$0] != buffer[$0 - 1] && buffer[$0] <= 1 && buffer[$0 - 1] <= 1 }.map { range.lowerBound + $0 }
+        }
+        for i in 0..<Int(cl_scope_signal_count(document.handle)) {
+            let name = String(cString: cl_scope_signal(document.handle, Int32(i))).lowercased()
+            if name.contains("clk") || name.contains("clock") { return edges(i) }
+        }
+        return signals.map { edges($0.index) }.max { $0.count < $1.count } ?? []
+    }
 
     /// The samples `range` of `signals`, as a picture `size` points big.
     static func size(steps: Int, signals: Int, titled: Bool = true) -> (size: CGSize, pointsPerStep: CGFloat) {
@@ -52,7 +78,7 @@ enum TimingDiagram {
         if titled {
             text(title, CGPoint(x: margin, y: margin + 10), size: 17, weight: .semibold)
             let prefs = Prefs.shared
-            var byline = "Timing diagram"
+            var byline = signals.contains(where: \.blank) ? "Timing diagram worksheet" : "Timing diagram"
             if prefs.exportInfo, !prefs.studentName.isEmpty { byline += " · " + prefs.studentName }
             byline += " · " + Date().formatted(date: .abbreviated, time: .omitted)
             text(byline, CGPoint(x: margin, y: margin + 30), size: 11, color: .darkGray)
@@ -85,12 +111,27 @@ enum TimingDiagram {
         ctx.move(to: CGPoint(x: left, y: bottom)); ctx.addLine(to: CGPoint(x: x(range.upperBound), y: bottom)); ctx.strokePath()
         text("step", CGPoint(x: left + (x(range.upperBound) - left) / 2, y: bottom + 26), size: 9.5, color: .gray, align: .center)
 
-        // The traces.
+        // The traces; a worksheet's blank rows get an empty box and clock-edge guides instead.
+        let clock = signals.contains(where: \.blank) ? clockEdges(document, signals: signals, range: range) : []
         var buffer = [UInt8](repeating: 255, count: max(1, range.count))
         for (row, sig) in signals.enumerated() {
             let laneTop = top + CGFloat(row) * lane
             let hi = laneTop + 9, lo = laneTop + lane - 9
             text(sig.name, CGPoint(x: left - 12, y: (hi + lo) / 2), size: 12, weight: .medium, align: .right)
+            if sig.blank {
+                ctx.setStrokeColor(NSColor(white: 0.55, alpha: 1).cgColor)
+                ctx.setLineWidth(0.6)
+                ctx.setLineDash(phase: 0, lengths: [1.5, 3])
+                for e in clock {
+                    ctx.move(to: CGPoint(x: x(e), y: laneTop)); ctx.addLine(to: CGPoint(x: x(e), y: laneTop + lane))
+                }
+                ctx.strokePath()
+                ctx.setLineDash(phase: 0, lengths: [])
+                ctx.setStrokeColor(NSColor(white: 0.7, alpha: 1).cgColor)
+                ctx.setLineWidth(0.8)
+                ctx.stroke(CGRect(x: left, y: laneTop + 2, width: x(range.upperBound) - left, height: lane - 4))
+                continue
+            }
             let n = Int(cl_scope_samples(document.handle, Int32(sig.index), Int64(range.lowerBound), Int32(range.count), &buffer))
             var runStart = 0
             var lastY: CGFloat?

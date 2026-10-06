@@ -21,6 +21,8 @@ final class ScopeModel: ObservableObject {
     @Published var cursor: Int?
     @Published var chosen = 0
     @Published var hidden: Set<String> = []
+    /// Signals the timing-diagram export leaves empty, for a student worksheet.
+    @Published var blank: Set<String> = []
     /// Export the whole recording rather than what's on screen.
     @Published var wholeRecording = false
     /// The samples last drawn (for exporting what's on screen).
@@ -113,10 +115,26 @@ struct ScopeView: View {
                             .help("Off: just what's on screen")
                         Toggle("In color", isOn: $prefs.timingInColor)
                             .help("Off: black and white, for printing")
+                        let listed = signals.filter { !model.hidden.contains($0) }
+                        Divider().padding(.vertical, 6)
+                        Text("Leave blank for students:").font(.callout)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(listed, id: \.self) { name in
+                                    Toggle(name, isOn: Binding(
+                                        get: { model.blank.contains(name) },
+                                        set: { on in if on { model.blank.insert(name) } else { model.blank.remove(name) } }))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(height: min(130, CGFloat(listed.count) * 22))
+                        Text("Those rows come out empty, with the time grid and a guide at each clock edge. The normal export is the answer key.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     .toggleStyle(.checkbox)
                     .padding(12)
-                    .frame(width: 210, alignment: .leading)
+                    .frame(width: 230, alignment: .leading)
                 }
             Button { model.pointsPerStep /= 1.5; model.clampZoom() } label: { Image(systemName: "minus.magnifyingglass") }
                 .help("Zoom out in time (−)")
@@ -252,7 +270,8 @@ struct ScopeView: View {
 
     private func exportDiagram(_ kind: ExportKind, signals: [String], length: Int) {
         let shown = signals.enumerated().filter { !model.hidden.contains($0.element) }
-            .map { TimingDiagram.Signal(index: $0.offset, name: $0.element) }
+            .map { TimingDiagram.Signal(index: $0.offset, name: $0.element, blank: model.blank.contains($0.element)) }
+        let worksheet = shown.contains(where: \.blank)
         var range = model.wholeRecording ? 0..<length : model.shownRange.clamped(to: 0..<length)
         if range.isEmpty { range = 0..<length }
         guard !shown.isEmpty, !range.isEmpty else { NSSound.beep(); return }
@@ -262,10 +281,10 @@ struct ScopeView: View {
             guard let png = TimingDiagram.pngData(document: document, signals: shown, range: range, title: title, color: prefs.timingInColor) else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setData(png, forType: .png)
-            canvas.note("Timing diagram copied. Paste it into your report.")
+            canvas.note(worksheet ? "Timing worksheet copied. Paste it into a document to print." : "Timing diagram copied. Paste it into your report.")
         case .png, .pdf:
             let panel = NSSavePanel()
-            panel.nameFieldStringValue = "\(title) timing." + (kind == .png ? "png" : "pdf")
+            panel.nameFieldStringValue = "\(title) timing\(worksheet ? " worksheet" : "")." + (kind == .png ? "png" : "pdf")
             panel.allowedContentTypes = [kind == .png ? .png : .pdf]
             guard panel.runModal() == .OK, let url = panel.url else { return }
             let data = kind == .png
