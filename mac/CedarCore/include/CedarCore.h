@@ -344,6 +344,22 @@ int cl_check_key_kind(const char *text, bool *options);
 // port (below). Free with cl_check_free. The verdict, summary, notes and
 // names calls above work on it; cl_check_outputs is 0.
 CLCheck *cl_check_clocked(CLDocument *doc, int page, const char *key, const char *names);
+// The same in two halves, so it can run off the main thread: _prepare (where
+// the document is used: it saves the circuit, without marking the document
+// saved, and only when the key can be run) copies all it needs; _run, on any
+// thread, opens copies of its own and touches no open document. _cancel, from
+// any thread while it runs, makes it stop soon (its result is then
+// meaningless). Free the job with cl_check_job_free once _run has returned.
+typedef struct CLCheckJob CLCheckJob;
+CLCheckJob *cl_check_clocked_prepare(CLDocument *doc, int page, const char *key, const char *names);
+CLCheck *cl_check_clocked_run(CLCheckJob *job);
+void cl_check_job_cancel(CLCheckJob *job);
+void cl_check_job_free(CLCheckJob *job);
+// Whether a page cl_truth_table can't make a table for can still be checked
+// clock pulse by clock pulse: no switches or lights selected, a light, no
+// switches or more than 8, and a clock part, a flip-flop or the like, or a
+// switch named CLK or Clock.
+bool cl_check_clocked_page(CLDocument *doc, int page);
 int cl_check_kind(const CLCheck *c);            // CL_KEY_*
 const char *cl_check_error(const CLCheck *c);   // "" or the error's code: "no_clock"...
 // The page's switches, then its lights, as the check named them.

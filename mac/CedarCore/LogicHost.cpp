@@ -10,10 +10,13 @@
 #include "logic_gate.h"
 #include "logic_wire.h"
 
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
 namespace {
+// Locked: Check My Circuit opens and closes its copies on another thread.
+std::mutex hostsLock;
 std::unordered_map<const GUICircuit*, LogicHost*>& hosts() {
 	static std::unordered_map<const GUICircuit*, LogicHost*> map;
 	return map;
@@ -21,11 +24,13 @@ std::unordered_map<const GUICircuit*, LogicHost*>& hosts() {
 }
 
 LogicHost* logicHostFor(const GUICircuit* circuit) {
+	std::lock_guard<std::mutex> hold(hostsLock);
 	auto it = hosts().find(circuit);
 	return it == hosts().end() ? nullptr : it->second;
 }
 
 void registerLogicHost(const GUICircuit* circuit, LogicHost* host) {
+	std::lock_guard<std::mutex> hold(hostsLock);
 	if (host == nullptr) hosts().erase(circuit);
 	else hosts()[circuit] = host;
 }

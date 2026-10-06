@@ -450,7 +450,11 @@ satisfy `good`, trying in this order and stopping at the first that works:
    `{a,b}`, `{a,c}`, ..., `{b,c}`, ...): powerOn(); every switch in T to the
    opposite of its power-on value, settle, pulse, back, settle; read.
 
-Each try starts from a fresh power-on; only the one that works is kept. Any
+Each try starts from a fresh power-on; only the one that works is kept. A try
+always reads the same, so an implementation may remember what each try read
+(every light) and answer a later search from that, powering on again only to
+redo the try that works (the Mac core does: a state table's step 4 then costs
+one sweep, not one per state). Any
 settle that never settles stops the check (`never_settles` at the start). When
 a reset or a try T worked, the note `To start, the check set {list("{name} to
 {v}")}, gave one clock pulse and set {it|them} back.` says how (`{v}` the
@@ -576,6 +580,8 @@ start (§7); s0 = cur = the state read; step: kind start, state = cur
 loop:
   if every row is done: stop
   if 1000 pulses have been given: stop (stopped)
+  if the copy has been powered on 300 times (every try and restart counts):
+     stop (stopped, by restarts)
   1. if a row not done has P == cur: run the first such row (table order); continue
   2. breadth-first search from cur over done rows (an edge from P to its seen
      next state; at each state the rows in table order), for the first state
@@ -586,7 +592,8 @@ loop:
   4. for each row not done, in table order, whose P hasn't failed this before:
      reach(state lights, readings == P) (§7); if it works: step kind set,
      state = the reading; cur = P; continue the loop
-     else remember that P can't be set
+     else remember that P can't be set (a try past 300 power-ons isn't
+     made: then stop, stopped by restarts)
   5. stop
 ```
 
@@ -609,7 +616,8 @@ loop:
     checked.}` and, unless the check stopped at 1000 pulses, the warning
     `{State {s} was|States {list} were} never reached: clocking from the start
     doesn't get there, and no switch sets {it.|them.}`; when it stopped, the
-    warning `The check stopped after 1000 clock pulses.`
+    warning `The check stopped after 1000 clock pulses.`, or when stopped by
+    restarts `The check stopped after starting the circuit again 300 times.`
 
 Signals: the inputs (`input`), the state lights (`state`, named as the key's
 state names), the same lights again as the next state (`next`, named as the
@@ -715,7 +723,7 @@ disabled without a manual clock; that's Group 1's.)
 | A count's values | 2ⁿ−1, 9 digits | `bad_key` |
 | A timing table's rows | 1000 | `bad_key` |
 | A state table's rows, spread | 1024 | `bad_key` |
-| A state table's walk | 1000 pulses | stops, warning |
+| A state table's walk | 1000 pulses, 300 power-ons | stops, warning |
 | The start search | the first 8 control switches, sets of up to 4 (162 tries) | not tried |
 
 ## 11. The Mac core: CedarCore.h
@@ -738,6 +746,16 @@ int cl_check_key_kind(const char *text, bool *options);
 // port (below). Free with cl_check_free. The verdict, summary, notes and
 // names calls above work on it; cl_check_outputs is 0.
 CLCheck *cl_check_clocked(CLDocument *doc, int page, const char *key, const char *names);
+// The same in two halves, so it can run off the main thread: _prepare (where
+// the document is used) copies all it needs; _run, on any thread, touches no
+// open document; _cancel makes a run stop soon.
+typedef struct CLCheckJob CLCheckJob;
+CLCheckJob *cl_check_clocked_prepare(CLDocument *doc, int page, const char *key, const char *names);
+CLCheck *cl_check_clocked_run(CLCheckJob *job);
+void cl_check_job_cancel(CLCheckJob *job);
+void cl_check_job_free(CLCheckJob *job);
+// Whether a page with no truth table can be checked clock pulse by clock pulse.
+bool cl_check_clocked_page(CLDocument *doc, int page);
 int cl_check_kind(const CLCheck *c);            // CL_KEY_*
 const char *cl_check_error(const CLCheck *c);   // "" or the error's code: "no_clock"...
 // The page's switches, then its lights, as the check named them.
@@ -769,7 +787,9 @@ const char *cl_check_step_text(const CLCheck *c, int step, int what);
 The app's flow: `cl_check_key_kind`; a formula without options goes through
 the formula reader and `cl_check_expected` on the truth table, a table
 without options through `cl_check_table`, as today; everything else
-`cl_check_clocked(doc, page, text, names)`.
+`cl_check_clocked(doc, page, text, names)`, which the Mac app runs in its two
+halves: `_prepare` on the main thread, `_run` on a queue of its own (a check
+can take seconds on a big lab circuit), cancelled when the text changes.
 
 Implementation notes:
 
@@ -777,7 +797,8 @@ Implementation notes:
   steps, first wrong); the key reading of §2 and §3 belongs in Check.cpp next
   to `readTable`, the run in a new file (say `CheckClocked.cpp`) that can use
   `DocumentImpl.h`.
-- The copy: `cl_document_save_text(doc)`, then with settle-on-open off
+- The copy: the circuit saved as `cl_document_save_text(doc)` does (without
+  marking the document saved), then with settle-on-open off
   (`cl_set_settle_on_open(false)`, put back after) `cl_document_open_text`
   for each powerOn(); then the primitives of §5 through
   `circuit.sendMessageToCore(MT_SET_GATE_PARAM ...)` (as TruthTable.cpp sets

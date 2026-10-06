@@ -128,14 +128,18 @@ CLDocument* cl_document_new(void) {
 	return doc;
 }
 
+extern "C++" std::string clSaveText(CLDocument* doc) {
+	std::vector<GUICanvas*> pages;
+	for (auto& p : doc->pages) pages.push_back(p.get());
+	CircuitParse writer(pages);
+	return writer.textV3(pages);
+}
+
 const char* cl_document_save_text(CLDocument* doc) {
 	static std::string text;
 	text.clear();
 	if (doc == nullptr) return "";
-	std::vector<GUICanvas*> pages;
-	for (auto& p : doc->pages) pages.push_back(p.get());
-	CircuitParse writer(pages);
-	text = writer.textV3(pages);
+	text = clSaveText(doc);
 	doc->edited = false;
 	return text.c_str();
 }

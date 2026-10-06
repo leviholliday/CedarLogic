@@ -118,4 +118,8 @@ extern "C" void clDrawPage(CLDocument* doc, int page, CGContextRef ctx, double b
 // (Document.cpp): Check My Circuit opens its copies before a single step.
 extern "C" CLDocument* clOpenText(const char* data, long length, char* error, int errorLen, bool settle);
 
+// The circuit as cl_document_save_text writes it, without marking the
+// document saved (Check My Circuit's copies).
+std::string clSaveText(CLDocument* doc);
+
 #endif  // CL_MAC_DOCUMENTIMPL_H

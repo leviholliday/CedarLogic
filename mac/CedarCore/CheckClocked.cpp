@@ -1,16 +1,19 @@
 // Check my circuit for clocked circuits (docs/CHECK-SEQUENTIAL.md): a count,
 // a state table or a timing table, checked clock pulse by clock pulse on a
 // copy of the circuit, from power-on or a start state the check reaches by
-// itself. The key is read by Check.cpp; what the student reads is written
+// itself. The copies are made from the circuit saved as text, so a check can
+// run off the main thread (cl_check_clocked_prepare, then _run). The key is read by Check.cpp; what the student reads is written
 // here, word for word as the document has it (CedarLogic Online's
 // sim-check.js says the same). mac/Tools/check_seq runs the shared cases.
 
 #include "CheckImpl.h"
 #include "DocumentImpl.h"
+#include "TruthTableImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <functional>
@@ -84,7 +87,12 @@ std::vector<ClockPart> clocksOf(CLDocument* doc) {
 	std::vector<ClockPart> out;
 	for (size_t p = 0; p < doc->pages.size(); p++)
 		for (auto& g : *doc->page((int)p)->getGateList())
-			if (g.second->getLogicType() == "CLOCK") out.push_back({ (long)g.first, g.second->getLogicParam("MANUAL") == "true" });
+			if (g.second->getLogicType() == "CLOCK") {
+				// Looked up, not indexed: getLogicParam would add an empty MANUAL.
+				auto* params = g.second->getAllLogicParams();
+				auto it = params->find("MANUAL");
+				out.push_back({ (long)g.first, it != params->end() && it->second == "true" });
+			}
 	std::sort(out.begin(), out.end(), [](const ClockPart& a, const ClockPart& b) { return a.gate < b.gate; });
 	return out;
 }
@@ -117,6 +125,9 @@ struct Sim {
 	std::map<long, std::string> base;      // every switch's power-on value
 	CLDocument* doc = nullptr;
 	bool settled = true;
+	int powerOns = 0;
+	const std::atomic<bool>* cancel = nullptr;   // set when the app no longer wants the result
+	bool cancelled() const { return cancel && cancel->load(std::memory_order_relaxed); }
 
 	~Sim() { if (doc) cl_document_close(doc); }
 
@@ -138,9 +149,13 @@ struct Sim {
 		g->setLogicParam(name, value);
 		send(id, name, value);
 	}
-	bool settle() { if (!doc->sim->settle(1000)) settled = false; return settled; }
+	// A cancelled check stops as though it never settled; nobody reads it.
+	bool settle() { if (cancelled() || !doc->sim->settle(1000)) settled = false; return settled; }
 	bool powerOn() {
 		if (doc) cl_document_close(doc);
+		doc = nullptr;
+		if (cancelled()) { settled = false; return false; }
+		powerOns++;
 		doc = clOpenText(text.data(), (long)text.size(), nullptr, 0, false);
 		if (!doc) { settled = false; return false; }   // made from a save of its own: doesn't happen
 		settled = true;
@@ -185,6 +200,14 @@ struct Checker {
 	std::vector<int> control;            // switches the start search may turn on or off
 	std::vector<std::string> paired;
 	bool neverSettled = false;
+	// What each try of the start search (§7) read, every port: a try always
+	// reads the same, so a search for another state reads it from here
+	// instead of powering on again. Keyed by the switches it set.
+	std::map<std::string, std::string> tried;
+	// Powering on is most of a check's time: past this many the search stops
+	// trying new switches and a state table's walk stops.
+	static constexpr int maxPowerOns = 300;
+	bool outOfTries = false;
 
 	Checker(CLDocument* real, Sim& sim, CLCheck& res) : real(real), sim(sim), res(res) {}
 
@@ -274,12 +297,29 @@ struct Checker {
 	struct Reached { bool ok = false; std::string how; };
 	Reached reach(const std::vector<int>& which, const std::function<bool(const std::string&)>& good) {
 		Reached r;
-		if (!sim.powerOn()) { neverSettled = true; return r; }
-		if (good(readPorts(which))) { r.ok = true; return r; }
+		// A try: power on, the switches in `sets` (none: just power on). One
+		// already made is read from `tried`, and made again only when it
+		// works, to leave the copy there.
 		auto attempt = [&](const std::vector<std::pair<int, char>>& sets) {
-			if (!sim.powerOn() || !withPulse(sets)) { neverSettled = true; return false; }
+			std::string id;
+			for (auto& s : sets) id += std::to_string(s.first) + "=" + s.second + ";";
+			auto seen = tried.find(id);
+			if (seen != tried.end()) {
+				std::string got;
+				for (int p : which) got += seen->second[p];
+				if (!good(got)) return false;
+			} else if (sim.powerOns >= maxPowerOns) {
+				outOfTries = true;
+				return false;
+			}
+			if (!sim.powerOn() || (!sets.empty() && !withPulse(sets))) { neverSettled = true; return false; }
+			std::vector<int> all(ports.size());
+			for (size_t p = 0; p < ports.size(); p++) all[p] = (int)p;
+			tried[id] = readPorts(all);
 			return good(readPorts(which));
 		};
+		if (attempt({})) { r.ok = true; return r; }
+		if (neverSettled) return r;
 		if (k.hasReset) {
 			if (attempt(resetPorts)) { r.ok = true; r.how = setsText(resetPorts); return r; }
 			if (neverSettled) return r;
@@ -823,6 +863,7 @@ CLCheck& Checker::runStates() {
 	for (;;) {
 		if (std::find(done.begin(), done.end(), false) == done.end()) break;
 		if (pulses >= 1000) { stopped = true; break; }
+		if (sim.powerOns >= maxPowerOns) { stopped = outOfTries = true; break; }
 		// 1. A row for the state it's in.
 		int here = -1;
 		for (int q = 0; q < R; q++) if (!done[q] && k.rows[q].st == cur) { here = q; break; }
@@ -880,7 +921,7 @@ CLCheck& Checker::runStates() {
 			set = true;
 		}
 		if (neverSettled) { settleFail = true; unsettledStep(CL_STEP_SET); break; }
-		if (!set) break;
+		if (!set) { stopped = outOfTries; break; }
 	}
 	if (settleFail) {
 		const Step& w = res.steps.back();
@@ -913,7 +954,8 @@ CLCheck& Checker::runStates() {
 		res.notes.push_back({ Warning, (states.size() == 1 ? "State " + states[0] + " was" : "States " + list(states) + " were") +
 		                               " never reached: clocking from the start doesn't get there, and no switch sets " +
 		                               (states.size() == 1 ? "it." : "them.") });
-	if (stopped) res.notes.push_back({ Warning, "The check stopped after 1000 clock pulses." });
+	if (stopped) res.notes.push_back({ Warning, outOfTries ? "The check stopped after starting the circuit again " + std::to_string(maxPowerOns) + " times."
+	                                                       : std::string("The check stopped after 1000 clock pulses.") });
 	res.verdict = 0;
 	if (R == 0) res.summary = "Matches, but every value was a don't-care, so nothing was really checked.";
 	else if (left > 0)
@@ -925,13 +967,75 @@ CLCheck& Checker::runStates() {
 
 }  // namespace
 
+struct CLCheckJob {
+	bool hasCircuit = false;
+	std::string circuit;   // saved; "" when the key can't be checked anyway
+	int page = 0;
+	std::string key, names;
+	std::atomic<bool> cancelled{ false };
+};
+
 extern "C" {
 
-CLCheck* cl_check_clocked(CLDocument* doc, int page, const char* key, const char* names) {
+CLCheckJob* cl_check_clocked_prepare(CLDocument* doc, int page, const char* key, const char* names) {
+	auto* job = new CLCheckJob();
+	job->hasCircuit = doc != nullptr;
+	job->page = page;
+	job->key = key ? key : "";
+	job->names = names ? names : "";
+	// Saved only when there's something to run (the document isn't touched).
+	const Key k = readKey(job->key);
+	if (doc && (k.kind != CL_KEY_EMPTY || k.options) && k.error.empty()) job->circuit = clSaveText(doc);
+	return job;
+}
+
+void cl_check_job_cancel(CLCheckJob* job) { if (job) job->cancelled = true; }
+
+CLCheck* cl_check_clocked_run(CLCheckJob* job) {
 	auto* c = new CLCheck();
-	Sim sim;
-	if (doc) sim.text = cl_document_save_text(doc);
-	Checker(doc, sim, *c).run(key ? key : "", page, readNames(names));
+	if (!job) return c;
+	// The page's switches and lights are read from a copy too: gate ids and
+	// places survive the save, so its ports address every later copy.
+	CLDocument* copy = nullptr;
+	if (job->hasCircuit && !job->circuit.empty()) {
+		copy = clOpenText(job->circuit.data(), (long)job->circuit.size(), nullptr, 0, false);
+		if (!copy) copy = cl_document_new();   // made from a save of its own: doesn't happen
+	}
+	{
+		Sim sim;
+		sim.text = job->circuit;
+		sim.cancel = &job->cancelled;
+		Checker(copy, sim, *c).run(job->key, job->page, readNames(job->names.c_str()));
+	}
+	if (copy) cl_document_close(copy);
+	return c;
+}
+
+void cl_check_job_free(CLCheckJob* job) { delete job; }
+
+bool cl_check_clocked_page(CLDocument* doc, int page) {
+	if (!doc || !doc->page(page)) return false;
+	bool clocked = false;
+	for (size_t p = 0; p < doc->pages.size(); p++)
+		for (auto& g : *doc->page((int)p)->getGateList()) {
+			if (g.second->getLogicType() == "CLOCK") clocked = true;
+			if ((int)p != page) continue;
+			if (clSequentialType(g.second->getLibraryGateName())) clocked = true;
+			// A selection of switches and lights is for a truth table of them.
+			if (g.second->isSelected() && (dynamic_cast<guiGateTOGGLE*>(g.second) || dynamic_cast<guiGateLED*>(g.second))) return false;
+		}
+	int switches = 0, lights = 0;
+	for (const Port& p : portsOf(doc, page)) {
+		(p.input ? switches : lights)++;
+		if (p.input && (key(p.name) == "clk" || key(p.name) == "clock")) clocked = true;
+	}
+	return lights > 0 && (switches == 0 || switches > 8) && clocked;
+}
+
+CLCheck* cl_check_clocked(CLDocument* doc, int page, const char* key, const char* names) {
+	CLCheckJob* job = cl_check_clocked_prepare(doc, page, key, names);
+	CLCheck* c = cl_check_clocked_run(job);
+	cl_check_job_free(job);
 	return c;
 }
 

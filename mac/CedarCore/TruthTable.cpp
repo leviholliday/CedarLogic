@@ -42,6 +42,8 @@ bool sequentialType(const std::string& type) {
 
 }  // namespace
 
+bool clSequentialType(const std::string& libraryGateName) { return sequentialType(libraryGateName); }
+
 extern "C" {
 
 CLTruthTable* cl_truth_table(CLDocument* doc, int pageIndex, char* error, int errorLen) {
