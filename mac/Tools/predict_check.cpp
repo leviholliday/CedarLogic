@@ -71,6 +71,7 @@ int main(int argc, char** argv) {
 	const int n = std::min(64, cl_simview_lights(doc, page, lights, 64));
 	printf("%d lights\n", n);
 	if (n == 0) { printf("FAIL no lights on the page\n"); return 1; }
+	std::vector<std::string> names;
 	for (int i = 0; i < n; i++) {
 		const CLSimLight& l = lights[i];
 		char name[64];
@@ -80,6 +81,11 @@ int main(int argc, char** argv) {
 		printf("  gate %ld %s \"%s\" value %d box %.2f,%.2f..%.2f,%.2f  click finds %ld\n", l.gate,
 		       l.digits ? "display" : "light", name, l.value, l.left, l.bottom, l.right, l.top, hit);
 		if (hit != l.gate) { printf("FAIL a click on gate %ld's light found %ld\n", l.gate, hit); fails++; }
+		// Every light has a name of its own (a screen reader tells them apart).
+		const std::string full = std::string(l.digits ? "Display " : "Light ") + name;
+		if (!name[0]) { printf("FAIL gate %ld has no name\n", l.gate); fails++; }
+		if (std::find(names.begin(), names.end(), full) != names.end()) { printf("FAIL two lights are both \"%s\"\n", full.c_str()); fails++; }
+		names.push_back(full);
 	}
 	if (cl_simview_light_at(doc, page, 1e6, 1e6, nullptr) != -1) { printf("FAIL a click far away found a light\n"); fails++; }
 
@@ -135,7 +141,8 @@ int main(int argc, char** argv) {
 	std::vector<CLPredictMark> revealed;
 	for (int i = 0; i < n; i++) {
 		const int guess = covered[i].guess;
-		const int mark = guess < 0 ? CL_PREDICT_UNGUESSED : guess == now[i].value ? CL_PREDICT_RIGHT : CL_PREDICT_WRONG;
+		const int mark = now[i].value < 0 ? CL_PREDICT_UNCLEAR : guess < 0 ? CL_PREDICT_UNGUESSED
+		               : guess == now[i].value ? CL_PREDICT_RIGHT : CL_PREDICT_WRONG;
 		revealed.push_back({ now[i].gate, guess, mark, false });
 	}
 	draw(doc, page, false, false, revealed, dir + "/predict-revealed.png");

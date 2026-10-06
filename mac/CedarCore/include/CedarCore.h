@@ -394,15 +394,19 @@ int cl_simview_lights(CLDocument *doc, int page, CLSimLight *out, int max);
 // The light or display at a world point (generously), or -1. For a display,
 // `digit` is which of its digits is under the point (0 = the leftmost).
 long cl_simview_light_at(CLDocument *doc, int page, double x, double y, int *digit);
-// What a light is called, for screen readers: the nearest short text label
-// (as the truth table names it), or "" when none is close. Returns the length.
+// What a light is called, for screen readers, as the truth table names it:
+// the nearest short text label not already taken (switches first, then the
+// lights in Tab order); with none close, Y (or Y1, Y2... counting the page's
+// lights) for a light and 1, 2... for a display. Returns the length.
 int cl_simview_light_name(CLDocument *doc, int page, long gate, char *buf, int len);
 
 // Predict, then reveal: drawn over the page. While covered, each light gets a
 // card with "?" or the student's guess; once revealed, a ring: green for a
-// right guess, red for a wrong one, grey for no guess. `focused` rings the
-// light the keyboard is on.
-enum { CL_PREDICT_COVERED = 0, CL_PREDICT_RIGHT = 1, CL_PREDICT_WRONG = 2, CL_PREDICT_UNGUESSED = 3 };
+// right guess, red for a wrong one, grey for no guess, and a dashed grey one
+// tagged "No clear value" for a light that showed none (not scored).
+// `focused` rings the light the keyboard is on.
+enum { CL_PREDICT_COVERED = 0, CL_PREDICT_RIGHT = 1, CL_PREDICT_WRONG = 2, CL_PREDICT_UNGUESSED = 3,
+       CL_PREDICT_UNCLEAR = 4 };
 typedef struct {
 	long gate;
 	int guess;      // -1 for none yet

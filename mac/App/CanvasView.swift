@@ -8,6 +8,7 @@
 // World y points up; the view is flipped, so screen y points down.
 
 import AppKit
+import Combine
 import QuartzCore
 import UniformTypeIdentifiers
 import SwiftUI
@@ -683,6 +684,15 @@ final class CanvasController: ObservableObject {
     }
     /// Predict, then reveal (Predict.swift).
     let predict = PredictModel()
+    private var predictForward: AnyCancellable?
+
+    init() {
+        // The Simulation menu reads Predict through this controller, so it
+        // hears when Predict changes.
+        predictForward = predict.objectWillChange.sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.objectWillChange.send() }
+        }
+    }
     /// Locked: parts can be clicked (switches, keypads) but nothing edited.
     @Published var locked = false
     /// Where the pointer is on the page, for the status bar.
@@ -1512,7 +1522,7 @@ struct CanvasView: NSViewRepresentable {
             let switched = view.pageKey != document.pageID(page)
             view.show(page: page, key: document.pageID(page))
             controller.page = page
-            if switched { DispatchQueue.main.async { controller.selectionChanged() } }
+            if switched { DispatchQueue.main.async { controller.selectionChanged(); controller.predictPageChanged() } }
         }
         view.theme = theme
         view.controller = controller

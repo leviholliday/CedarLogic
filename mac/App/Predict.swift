@@ -6,9 +6,10 @@
 
 import AppKit
 
-/// One round of guesses. A new round (lights covered, guesses cleared) starts
-/// whenever the circuit moves on because someone acted: a switch flipped, a
-/// keypad key pressed, Step or Step Clock (CanvasController.circuitAdvancedByUser).
+/// One round of guesses. While the lights are covered the circuit can move on
+/// (a switch, a keypad key, Step, Step Clock) and the guesses stay: "what will
+/// Q be after the next edge?". Once revealed, the next such move starts a new
+/// round (CanvasController.circuitAdvancedByUser), as does another page.
 @MainActor
 final class PredictModel: ObservableObject {
     /// The Predict toggle in the control bar.
@@ -39,16 +40,21 @@ final class PredictModel: ObservableObject {
         revealed = true
     }
 
-    /// How a light did: right, wrong or not guessed (after Reveal).
+    /// How a light did: right, wrong or not guessed (after Reveal). A light
+    /// with no clear value (unknown, floating, conflicting) can't be guessed
+    /// right, so it gets its own mark and isn't scored.
     func mark(_ gate: Int) -> Int32 {
         guard revealed else { return Int32(CL_PREDICT_COVERED) }
+        guard let answer = answers[gate], answer >= 0 else { return Int32(CL_PREDICT_UNCLEAR) }
         guard let g = guesses[gate] else { return Int32(CL_PREDICT_UNGUESSED) }
-        return Int32(g == answers[gate] ? CL_PREDICT_RIGHT : CL_PREDICT_WRONG)
+        return Int32(g == answer ? CL_PREDICT_RIGHT : CL_PREDICT_WRONG)
     }
 
-    /// "3 of 4 right": counted against the lights at Reveal.
+    /// "3 of 4 right": counted against the lights that showed a clear value at Reveal.
     var right: Int { answers.filter { $0.value >= 0 && guesses[$0.key] == $0.value }.count }
-    var total: Int { answers.count }
+    var total: Int { answers.filter { $0.value >= 0 }.count }
+    /// What the bar and VoiceOver say after Reveal.
+    var score: String { total == 0 ? "No clear values to score" : "\(right) of \(total) right" }
 }
 
 extension CanvasController {
@@ -65,13 +71,24 @@ extension CanvasController {
     var predictCovers: Bool { simView && predict.covering }
 
     /// The circuit moved on because someone acted: a switch flipped, a keypad
-    /// key pressed, Step or Step Clock. Predict covers the lights again and
-    /// clears the guesses for the next round.
+    /// key pressed, Step or Step Clock. While covered the guesses stay (they're
+    /// about where the circuit goes next); after Reveal, Predict covers the
+    /// lights again and clears the guesses for the next round.
     func circuitAdvancedByUser() {
-        guard predict.on, predict.revealed || !predict.guesses.isEmpty else { return }
+        guard predict.on, predict.revealed else { return }
         predict.newRound()
         redraw()
         view?.predictChanged()
+    }
+
+    /// Another page: its lights get a round of their own.
+    func predictPageChanged() {
+        guard predict.on else { return }
+        predict.newRound()
+        predict.focus = nil
+        redraw()
+        view?.predictChanged()
+        announce("Another page. The lights are covered: guess each one, then Reveal.")
     }
 
     func togglePredict() {
@@ -90,7 +107,7 @@ extension CanvasController {
             announce("Covered again. Make your guesses.")
         } else {
             predict.reveal(predictLights)
-            announce("\(predict.right) of \(predict.total) right.")
+            announce("\(predict.score).")
         }
         redraw()
         view?.predictChanged()
@@ -203,6 +220,7 @@ extension CanvasController {
         let answer = predict.answers[g] ?? -1
         let shows = answer >= 0 ? "shows \(text(answer, l))" : "shows no clear value"
         guard let guess else { return "\(name) \(shows), not guessed" }
+        if answer < 0 { return "\(name) \(shows), your guess \(text(guess, l)), not scored" }
         return "\(name) \(shows), your guess \(text(guess, l)), \(guess == answer ? "right" : "wrong")"
     }
 

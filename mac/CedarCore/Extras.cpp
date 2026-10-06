@@ -397,19 +397,61 @@ long cl_simview_light_at(CLDocument* doc, int pageIndex, double x, double y, int
 int cl_simview_light_name(CLDocument* doc, int pageIndex, long gate, char* buf, int len) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	std::string name;
-	guiGate* light = page ? doc->circuit.getGate(gate) : nullptr;
-	if (light != nullptr) {
-		float px, py;
-		light->getGLcoords(px, py);
-		float best = 8.0f;
+	if (page != nullptr) {
+		// Named in one pass, the way the truth table names its columns: the
+		// switches take their nearest short label first, then the lights (in
+		// Tab order), each label going to one of them only. A light with no
+		// label close gets Y, or Y1, Y2... (as in the truth table); a display
+		// gets its number.
+		auto byPlace = [](guiGate* a, guiGate* b) {
+			float ax, ay, bx, by;
+			a->getGLcoords(ax, ay);
+			b->getGLcoords(bx, by);
+			return ay != by ? ay > by : ax != bx ? ax < bx : a->getID() < b->getID();
+		};
+		std::vector<guiGate*> labels, switches, lights;
 		for (auto& ge : *page->getGateList()) {
-			if (dynamic_cast<guiLabel*>(ge.second) == nullptr) continue;
-			const std::string text = ge.second->getGUIParam("LABEL_TEXT");
-			if (text.empty() || text.size() > 16) continue;
-			float lx, ly;
-			ge.second->getGLcoords(lx, ly);
-			const float d = std::hypot(lx - px, ly - py);
-			if (d < best) { best = d; name = text; }
+			guiGate* g = ge.second;
+			if (g == nullptr) continue;
+			if (dynamic_cast<guiLabel*>(g) != nullptr) {
+				const std::string text = g->getGUIParam("LABEL_TEXT");
+				if (!text.empty() && text.size() <= 16) labels.push_back(g);
+			} else if (dynamic_cast<guiGateTOGGLE*>(g) != nullptr) {
+				switches.push_back(g);
+			} else if (isLight(g) || isDisplay(g)) {
+				lights.push_back(g);
+			}
+		}
+		std::sort(switches.begin(), switches.end(), byPlace);
+		std::sort(lights.begin(), lights.end(), byPlace);
+		std::vector<bool> used(labels.size(), false);
+		auto nearest = [&](guiGate* g) -> int {
+			float px, py;
+			g->getGLcoords(px, py);
+			int best = -1;
+			float bestD = 8.0f;
+			for (size_t i = 0; i < labels.size(); i++) {
+				if (used[i]) continue;
+				float lx, ly;
+				labels[i]->getGLcoords(lx, ly);
+				const float d = std::hypot(lx - px, ly - py);
+				if (d < bestD) { bestD = d; best = (int)i; }
+			}
+			if (best >= 0) used[best] = true;
+			return best;
+		};
+		for (guiGate* s : switches) nearest(s);
+		const long ledCount = std::count_if(lights.begin(), lights.end(), [](guiGate* g) { return isLight(g); });
+		int leds = 0, displays = 0;
+		for (guiGate* g : lights) {
+			const bool led = isLight(g);
+			const int number = led ? ++leds : ++displays;
+			const int label = nearest(g);
+			if ((long)g->getID() != gate) continue;
+			name = label >= 0 ? labels[label]->getGUIParam("LABEL_TEXT")
+			     : !led ? std::to_string(number)
+			     : ledCount == 1 ? "Y" : "Y" + std::to_string(number);
+			break;
 		}
 	}
 	if (buf && len > 0) {
@@ -468,14 +510,24 @@ void cl_simview_draw_predict(CLDocument* doc, int pageIndex, CGContextRef ctx, d
 			if (m.focused) ring(L, B, R, T, pad + 0.32f, Color(0.28f, 0.93f, 1.0f, 1), 2.0f * px);
 			continue;
 		}
-		// Revealed: a ring that says how the guess did, and the guess above.
+		// Revealed: a ring that says how the guess did, and the guess above
+		// (or, for a light with no clear value, a dashed ring that says so).
+		const bool unclear = m.mark == CL_PREDICT_UNCLEAR;
 		const Color c = m.mark == CL_PREDICT_RIGHT ? Color(0.30f, 0.92f, 0.45f, 1)
 		              : m.mark == CL_PREDICT_WRONG ? Color(1.0f, 0.36f, 0.36f, 1)
 		                                           : Color(0.56f, 0.60f, 0.66f, 1);
-		ring(L, B, R, T, 0.32f, c, 2.6f * px);
+		if (unclear) {
+			const Point box[] = { Point(L - 0.32f, B - 0.32f), Point(R + 0.32f, B - 0.32f),
+			                      Point(R + 0.32f, T + 0.32f), Point(L - 0.32f, T + 0.32f) };
+			Stroke dashes(c, 2.0f * px);
+			dashes.dashed = true;
+			scene.polyline(box, 4, dashes, true);
+		} else {
+			ring(L, B, R, T, 0.32f, c, 2.6f * px);
+		}
 		if (m.focused) ring(L, B, R, T, 0.75f, Color(0.28f, 0.93f, 1.0f, 0.8f), 1.5f * px);
-		if (!guessed) continue;
-		const std::string tag = "Guess " + guessText;
+		if (!guessed && !unclear) continue;
+		const std::string tag = unclear ? "No clear value" : "Guess " + guessText;
 		const float th = projector ? 1.15f : 0.9f;
 		const float tw = cl::render::measuredTextWidth(tag.c_str(), th);
 		const float ty = T + 0.32f + 0.35f + th * 0.6f;   // the tag's middle, above the ring

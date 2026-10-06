@@ -560,7 +560,7 @@ struct SimulationCommands: Commands {
                 .disabled(canvas == nil)
             Divider()
             Button(canvas?.predict.on == true ? "Stop Predicting" : "Predict, Then Reveal") { canvas?.togglePredict() }
-                .disabled(canvas?.simView != true)
+                .disabled(canvas?.simView != true || (canvas?.predict.on != true && canvas?.predictLights.isEmpty != false))
             Button(canvas?.predict.revealed == true ? "Cover the Lights Again" : "Reveal") { canvas?.revealOrCoverAgain() }
                 .disabled(canvas?.simView != true || canvas?.predict.on != true)
             Divider()

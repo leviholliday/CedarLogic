@@ -154,9 +154,9 @@ struct SimBar: View {
                     canvas.revealOrCoverAgain()
                 }
                 .help(predict.revealed ? "Cover the lights and guess again" : "Uncover the lights and see how you did")
-                Text(predict.revealed ? "\(predict.right) of \(predict.total) right" : "\(guessed) of \(lights.count) guessed")
+                Text(predict.revealed ? predict.score : "\(guessed) of \(lights.count) guessed")
                     .font(.system(size: 12 * k, weight: predict.revealed ? .semibold : .regular)).monospacedDigit()
-                    .foregroundStyle(predict.revealed ? (predict.right == predict.total ? live : ink) : dim)
+                    .foregroundStyle(predict.revealed ? (predict.total > 0 && predict.right == predict.total ? live : ink) : dim)
                     .fixedSize()
                     .accessibilityAddTraits(.updatesFrequently)
             } else if !prefs.projector {
