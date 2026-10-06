@@ -236,7 +236,7 @@ void guiGate::drawToScene(cl::render::Scene& scene,
 	// near-black/white line. Figma/Sketch-style: selection reads as a color,
 	// not a line-pattern squint.
 	const bool isSelectedNow = selected && style.showSelection;
-	Stroke s(style.gateStroke(GateKind::Generic), 1.0f);
+	Stroke s(style.gateStroke(GateKind::Generic), style.projectorOutline());
 	Stroke halo;
 	if (isSelectedNow) {
 		const Color a = style.accent();
@@ -931,6 +931,7 @@ void guiGateREGISTER::drawToScene(cl::render::Scene& scene,
 	using namespace cl::render;
 	guiGate::drawToScene(scene, style);   // outline + labels
 	if (!style.showLiveState) return;     // print/topology: no lit digits
+	const bool covered = style.simView && style.coverOutputs;   // Predict: the digits are the answer
 
 	Transform t;
 	t.a = (float)mModel[0];  t.b = (float)mModel[1];
@@ -942,7 +943,8 @@ void guiGateREGISTER::drawToScene(cl::render::Scene& scene,
 	const float bx = renderInfo_valueBox.begin.x, by = renderInfo_valueBox.begin.y;
 	const float ex = renderInfo_valueBox.end.x,   ey = renderInfo_valueBox.end.y;
 	const Point box[] = {Point(bx, by), Point(bx, ey), Point(ex, ey), Point(ex, by)};
-	scene.polyline(box, 4, Stroke(style.gateStroke(GateKind::Generic), 1.0f), true);
+	scene.polyline(box, 4, Stroke(style.gateStroke(GateKind::Generic), style.projectorOutline()), true);
+	if (covered) { scene.popTransform(); return; }
 
 	// Seven-segment digits, mirroring draw()'s GL_LINES pairs. Red normally,
 	// blue when any input is unknown.
@@ -972,7 +974,7 @@ void guiGateREGISTER::drawToScene(cl::render::Scene& scene,
 		if (c != '2' && c != 'C' && c != 'E' && c != 'F')  // BR
 			{ seg.push_back(Point(R, yB)); seg.push_back(Point(R, yM)); }
 	}
-	if (!seg.empty()) scene.lines(&seg[0], seg.size(), Stroke(segColor, 2.0f));
+	if (!seg.empty()) scene.lines(&seg[0], seg.size(), Stroke(segColor, 2.0f * style.projectorOutline()));
 	scene.popTransform();
 }
 
@@ -1076,8 +1078,14 @@ void guiGateLED::drawToScene(cl::render::Scene& scene,
 	t.c = (float)mModel[4];  t.d = (float)mModel[5];
 	t.e = (float)mModel[12]; t.f = (float)mModel[13];
 	scene.pushTransform(t);
-	const float x1 = renderInfo_ledBox.begin.x, y1 = renderInfo_ledBox.begin.y;
-	const float x2 = renderInfo_ledBox.end.x,   y2 = renderInfo_ledBox.end.y;
+	float x1 = renderInfo_ledBox.begin.x, y1 = renderInfo_ledBox.begin.y;
+	float x2 = renderInfo_ledBox.end.x,   y2 = renderInfo_ledBox.end.y;
+	if (style.simView && style.projector) {
+		// Projector mode: a bigger lit square, about its middle.
+		const float k = style.projectorLight(), cx = (x1 + x2) * 0.5f, cy = (y1 + y2) * 0.5f;
+		x1 = cx + (x1 - cx) * k; x2 = cx + (x2 - cx) * k;
+		y1 = cy + (y1 - cy) * k; y2 = cy + (y2 - cy) * k;
+	}
 
 	if (!style.showLiveState) {
 		// B&W schematic (print/export/minimap): box outline plus a distinct marker
@@ -1103,6 +1111,7 @@ void guiGateLED::drawToScene(cl::render::Scene& scene,
 		// background pure black is indistinguishable from the canvas itself.
 		Color c(0, 0, 0, 1);
 		if (style.simView) {
+			if (style.coverOutputs) outputState = ZERO;   // Predict: dark until revealed
 			switch (outputState) {
 				case ONE:      c = Color(0.80f, 0.98f, 1.0f); break;   // lit: near-white cyan (bloom is an overlay)
 				case CONFLICT: c = style.simError(); break;
@@ -1175,8 +1184,11 @@ void guiLabel::drawToScene(cl::render::Scene& scene,
 		float cc = 1.0f - (float)SELECTED_LABEL_INTENSITY;
 		textColor = Color(1.0f, cc / 4.0f, cc / 4.0f, (float)SELECTED_LABEL_INTENSITY);
 	}
-	scene.text(Point(textPos.x, textPos.y), txt.c_str(),
-	           (float)getTextHeight() * TEXT_SKIA_SCALE, textColor);
+	// Projector mode: bigger, about the label's middle (textPos is its top left
+	// corner, measured from the middle).
+	const float k = style.simView ? style.projectorLabel() : 1.0f;
+	scene.text(Point(textPos.x * k, textPos.y * k), txt.c_str(),
+	           (float)getTextHeight() * TEXT_SKIA_SCALE * k, textColor);
 	scene.popTransform();
 }
 

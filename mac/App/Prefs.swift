@@ -89,6 +89,10 @@ final class Prefs: ObservableObject {
     @Published var timingInColor: Bool { didSet { d.set(timingInColor, forKey: "cl.timingColor") } }
     /// Resting on a wire shows what it carries (0, 1, Z...). Off at first.
     @Published var wireValueTag: Bool { didSet { d.set(wireValueTag, forKey: "cl.wireValueTag") } }
+    /// Simulation View drawn for a projector: thick wires, big labels and
+    /// lights, high contrast, a bigger control bar. This Mac only; the
+    /// circuit file never hears of it.
+    @Published var projector: Bool { didSet { d.set(projector, forKey: "cl.projector") } }
     /// Cmd-Q asks first, in a panel in the middle of the screen.
     @Published var confirmQuit: Bool { didSet { d.set(confirmQuit, forKey: "cl.confirmQuit") } }
     @Published var hasSeenWelcome: Bool { didSet { d.set(hasSeenWelcome, forKey: "cl.hasSeenWelcome") } }
@@ -143,6 +147,7 @@ final class Prefs: ObservableObject {
         exportInfo = bool("cl.exportInfo", true)
         timingInColor = bool("cl.timingColor", false)
         wireValueTag = bool("cl.wireValueTag", false)
+        projector = bool("cl.projector", false)
         confirmQuit = bool("cl.confirmQuit", true)
         hasSeenWelcome = bool("cl.hasSeenWelcome", false)
         showGateNames = bool("cl.showGateNames", true)

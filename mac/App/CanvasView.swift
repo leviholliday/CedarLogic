@@ -8,6 +8,7 @@
 // World y points up; the view is flipped, so screen y points down.
 
 import AppKit
+import Combine
 import QuartzCore
 import UniformTypeIdentifiers
 import SwiftUI
@@ -167,7 +168,8 @@ final class CircuitCanvasNSView: NSView {
     }
 
     private func wireTagText() -> (text: String, state: Character)? {
-        guard let document else { return nil }
+        // Predict: the wire would give the light's answer away.
+        guard let document, controller?.predictCovers != true else { return nil }
         var buf = [CChar](repeating: 0, count: 72)
         let bits = Int(cl_edit_hover_wire_state(document.handle, Int32(page), &buf, 72))
         guard bits > 0 else { return nil }
@@ -218,6 +220,10 @@ final class CircuitCanvasNSView: NSView {
         str.draw(at: CGPoint(x: r.minX + 7, y: r.minY + 3))
     }
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func accessibilityChildren() -> [Any]? {
+        predictAccessibilityChildren() ?? super.accessibilityChildren()
+    }
 
     // MARK: Drawing
 
@@ -670,8 +676,21 @@ final class CanvasController: ObservableObject {
                 document?.cancelGesture()
                 selectNone()
                 if !isRunning { setRunning(true) }   // "Run" means run
+            } else {
+                predict.on = false   // Predict is a Simulation View round
             }
             redraw()
+        }
+    }
+    /// Predict, then reveal (Predict.swift).
+    let predict = PredictModel()
+    private var predictForward: AnyCancellable?
+
+    init() {
+        // The Simulation menu reads Predict through this controller, so it
+        // hears when Predict changes.
+        predictForward = predict.objectWillChange.sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.objectWillChange.send() }
         }
     }
     /// Locked: parts can be clicked (switches, keypads) but nothing edited.
@@ -1425,6 +1444,7 @@ final class CanvasController: ObservableObject {
     func stepOnce() {
         if isRunning { setRunning(false) }
         document?.stepOnce()
+        circuitAdvancedByUser()
         redraw()
         scopeChanged()
     }
@@ -1525,7 +1545,7 @@ struct CanvasView: NSViewRepresentable {
             let switched = view.pageKey != document.pageID(page)
             view.show(page: page, key: document.pageID(page))
             controller.page = page
-            if switched { DispatchQueue.main.async { controller.selectionChanged() } }
+            if switched { DispatchQueue.main.async { controller.selectionChanged(); controller.predictPageChanged() } }
         }
         view.theme = theme
         view.controller = controller

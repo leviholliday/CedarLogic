@@ -1,6 +1,8 @@
 // `CedarLogic --render-window <dir>`: a full CedarLogic window, drawn off
 // screen, for the website and the README: a full adder (built from its
-// formula, a switch or two on), in light, dark and Simulation View.
+// formula, a switch or two on), in light, dark and Simulation View; then,
+// with a hex display added, Simulation View in projector mode and Predict,
+// then reveal (covered, guessed, revealed).
 
 import AppKit
 import SwiftUI
@@ -13,7 +15,7 @@ enum RenderWindow {
         let dir = URL(fileURLWithPath: args[i + 1], isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let prefs = Prefs.shared
-        let saved = (prefs.dark, prefs.toolbarStyle, prefs.accent, prefs.toolbarHidden)
+        let saved = (prefs.dark, prefs.toolbarStyle, prefs.accent, prefs.toolbarHidden, prefs.projector)
 
         // The circuit: a full adder, as written, switches A and Cin on.
         let doc = CoreDocument()
@@ -25,6 +27,7 @@ enum RenderWindow {
         let wires = plan.wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
         _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), wires, Int32(wires.count), "Build")
         strings.forEach { free($0) }
+        strings.removeAll()
         cl_edit_select_none(doc.handle, 0)
         doc.renamePage(0, to: "Full Adder")
         // Switch on the first and last switches (A and Cin) with a click on each.
@@ -36,8 +39,10 @@ enum RenderWindow {
         cl_edit_select_none(doc.handle, 0)
         for _ in 0..<60 { cl_document_step(doc.handle) }
 
-        func shoot(_ name: String, dark: Bool, simView: Bool) {
+        func shoot(_ name: String, dark: Bool, simView: Bool, projector: Bool = false,
+                   setup: ((CanvasController) -> Void)? = nil) {
             prefs.dark = dark
+            prefs.projector = projector
             prefs.toolbarStyle = .classic
             prefs.accent = brandAccent
             prefs.toolbarHidden = 0
@@ -57,6 +62,7 @@ enum RenderWindow {
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.8))
             canvas.simView = simView
+            setup?(canvas)
             canvas.view?.zoomToFit()
             RunLoop.main.run(until: Date().addingTimeInterval(1.2))
             canvas.view?.needsDisplay = true
@@ -102,7 +108,45 @@ enum RenderWindow {
         shoot("window-dark", dark: true, simView: false)
         shoot("window-light", dark: false, simView: false)
         shoot("window-sim", dark: true, simView: true)
+
+        // A hex display on four switches of its own (two of them on), for the
+        // classroom shots.
+        if let box = doc.bounds(ofPage: 0) {
+            let dx = box.maxX + 12, dy = box.midY
+            var parts = [CLBuildGate(gate: c("GE_LED_DISPLAY_4BIT"), x: dx, y: dy, label: nil)]
+            var wires: [CLBuildWire] = []
+            for i in 0..<4 {
+                parts.append(CLBuildGate(gate: c("AA_TOGGLE"), x: dx - 9, y: dy - 5 + Double(i) * 3, label: nil))
+                wires.append(CLBuildWire(from: Int32(i + 1), fromPin: c("OUT_0"), to: 0, toPin: c("IN_\(i)")))
+            }
+            _ = cl_edit_build(doc.handle, 0, parts, Int32(parts.count), wires, Int32(wires.count), "Build")
+            strings.forEach { free($0) }
+            strings.removeAll()
+            for i in [1, 3] {
+                let p = CGPoint(x: dx - 9, y: dy - 5 + Double(i) * 3)
+                _ = doc.press(page: 0, at: p, modifiers: [], unitsPerPoint: 0.05)
+                doc.release(at: p)
+            }
+            cl_edit_select_none(doc.handle, 0)
+            for _ in 0..<60 { cl_document_step(doc.handle) }
+        }
+        shoot("window-sim-display", dark: true, simView: true)
+        shoot("window-sim-projector", dark: true, simView: true, projector: true)
+        // Predict: covered, then guessed (one light each way and the display),
+        // then revealed.
+        func guess(_ canvas: CanvasController) {
+            let lights = canvas.predictLights
+            for (i, l) in lights.enumerated() {
+                canvas.predict.setGuess(Int(l.gate), l.digits == 0 ? (i == 0 ? 1 : 0) : 0xA)
+            }
+            canvas.predict.focus = lights.last.map { Int($0.gate) }
+        }
+        shoot("window-predict-covered", dark: true, simView: true) { $0.togglePredict() }
+        shoot("window-predict-guessed", dark: true, simView: true) { $0.togglePredict(); guess($0) }
+        shoot("window-predict-revealed", dark: true, simView: true) { $0.togglePredict(); guess($0); $0.revealOrCoverAgain() }
+        shoot("window-predict-projector", dark: true, simView: true, projector: true) { $0.togglePredict(); guess($0) }
         prefs.dark = saved.0; prefs.toolbarStyle = saved.1; prefs.accent = saved.2; prefs.toolbarHidden = saved.3
+        prefs.projector = saved.4
         exit(0)
     }
 }
