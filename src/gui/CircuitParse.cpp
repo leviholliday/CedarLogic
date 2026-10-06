@@ -498,7 +498,8 @@ static cl::GateInstance buildGate(guiGate *g) {
 		if (lg.ownsGUIParam(p.first)) continue;
 		gi.params.push_back({ p.first, p.second, true });
 	}
-	// Logic params, skipping FILE_IN/FILE_OUT (runtime paths, as saveGate does).
+	// Logic params, skipping FILE_IN/FILE_OUT (runtime paths, as saveGate does)
+	// and a clock's MANUAL when off (LibraryGate::skipsLogicParam).
 	for (const auto &p : *g->getAllLogicParams()) {
 		bool isFile = false;
 		for (size_t i = 0; i < lg.dlgParams.size() && !isFile; i++)
@@ -506,7 +507,7 @@ static cl::GateInstance buildGate(guiGate *g) {
 			    (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") &&
 			    lg.dlgParams[i].name == p.first)
 				isFile = true;
-		if (!isFile) gi.params.push_back({ p.first, p.second, false });
+		if (!isFile && !lg.skipsLogicParam(p.first, p.second)) gi.params.push_back({ p.first, p.second, false });
 	}
 	// Gate-type-specific params (e.g. RAM memory contents).
 	vector< pair<string, string> > extra;

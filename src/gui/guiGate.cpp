@@ -603,7 +603,7 @@ void guiGate::saveGate(XMLParser* xparse) {
 			if ((lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") &&
 				lg.dlgParams[i].name == pParams->first) found = true;
 		}
-		if (found) { pParams++; continue; }
+		if (found || lg.skipsLogicParam(pParams->first, pParams->second)) { pParams++; continue; }
 		xparse->openTag("lparam");
 		oss.str("");
 		oss << pParams->first << " " << pParams->second;
@@ -680,7 +680,7 @@ void guiGate::saveGateLegacy(XMLParser* xparse) {
 			if ((lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") &&
 				lg.dlgParams[i].name == pParams->first) found = true;
 		}
-		if (found) { pParams++; continue; }
+		if (found || lg.skipsLogicParam(pParams->first, pParams->second)) { pParams++; continue; }
 		xparse->openTag("lparam");
 		oss.str("");
 		oss << pParams->first << " " << pParams->second;
