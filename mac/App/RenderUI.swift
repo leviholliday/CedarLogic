@@ -182,6 +182,30 @@ enum RenderUI {
                 }
                 UserDefaults.standard.removeObject(forKey: "cl.truthTab")
             }
+            do {   // Check, clock pulse by clock pulse: a 3-bit J-K counter with one wire wrong (T2 from Q1
+                   // alone), which has no switches and so no truth table; and a timing table on it.
+                let counter = sequentialCheckCircuit()
+                let shots: [(String, String)] = [
+                    ("count-wrong", "0, 1, 2, 3, 4, 5, 6, 7, repeat"),
+                    ("timing-wrong", "Pulse | Q2 Q1 Q0\n1 | 0 0 1\n2 | 0 1 0\n3 | 0 1 1\n4 | 1 0 0"),
+                    ("states-wrong", "Q2 Q1 Q0 | Q2+ Q1+ Q0+\n0 0 0 | 0 0 1\n0 0 1 | 0 1 0\n0 1 0 | 0 1 1\n0 1 1 | 1 0 0\n1 0 0 | 1 0 1\n1 0 1 | 1 1 0\n1 1 0 | 1 1 1\n1 1 1 | 0 0 0"),
+                ]
+                for (name, text) in shots {
+                    let key = "render-ui-check-\(name)"
+                    CheckMemory.save(key, .init(kind: 0, text: text, names: [:]))
+                    var table = TruthTable(checkOnly: counter, page: 0, problem: "A truth table needs at least one switch (an input) and one light (an output) on this page.")
+                    table.checkKey = key
+                    let host = NSHostingView(rootView: TruthTableView(table: table))
+                    host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                    host.frame = NSRect(origin: .zero, size: CGSize(width: 720, height: host.fittingSize.height))
+                    host.layoutSubtreeIfNeeded()
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("check-\(name)-\(t).png"))
+                    }
+                    CheckMemory.save(key, nil)
+                }
+            }
             save("truthtable-wide-\(t)", TruthTableView(table: TruthTable(names: ["A", "B", "C", "Y1", "Y2", "Y3", "Y4", "Y5", "Y6"], inputs: 3, rows: wide)),
                  width: 900)
             save("buildformula-\(t)", BuildFormulaView(text: "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", canvas: canvas), width: 560, height: 560)
@@ -244,5 +268,30 @@ enum RenderUI {
         prefs.toolbarHidden = savedHidden
         SyncRender.run(dir)
         exit(0)
+    }
+
+    /// A 3-bit up counter from J-K flip-flops, Q0 on top, with the AND gate
+    /// for T2 left out (as tests/check-sequential's counter3-jk-wrong-wire).
+    static func sequentialCheckCircuit() -> CoreDocument {
+        let doc = CoreDocument()
+        let parts: [(String, Double, Double, String?)] = [
+            ("BB_CLOCK", 0, -24, nil), ("EE_VDD", 8, 24, nil),
+            ("BE_JKFF_LOW", 24, 14, nil), ("BE_JKFF_LOW", 24, 0, nil), ("BE_JKFF_LOW", 24, -14, nil),
+            ("GA_LED", 60, 10, nil), ("GA_LED", 60, 5, nil), ("GA_LED", 60, 0, nil),
+            ("AA_LABEL", 63.2, 10, "Q0"), ("AA_LABEL", 63.2, 5, "Q1"), ("AA_LABEL", 63.2, 0, "Q2"),
+        ]
+        let links: [(Int, String, Int, String)] = [
+            (0, "CLK", 2, "clock"), (0, "CLK", 3, "clock"), (0, "CLK", 4, "clock"),
+            (1, "OUT_0", 2, "J"), (1, "OUT_0", 2, "K"), (2, "Q", 3, "J"), (2, "Q", 3, "K"),
+            (3, "Q", 4, "J"), (3, "Q", 4, "K"),
+            (2, "Q", 5, "N_in0"), (3, "Q", 6, "N_in0"), (4, "Q", 7, "N_in0"),
+        ]
+        var keep: [UnsafeMutablePointer<CChar>] = []
+        func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; keep.append(p); return UnsafePointer(p) }
+        let gates = parts.map { CLBuildGate(gate: c($0.0), x: $0.1, y: $0.2, label: $0.3.map(c)) }
+        let wires = links.map { CLBuildWire(from: Int32($0.0), fromPin: c($0.1), to: Int32($0.2), toPin: c($0.3)) }
+        _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), wires, Int32(wires.count), "Counter")
+        keep.forEach { free($0) }
+        return doc
     }
 }

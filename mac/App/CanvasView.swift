@@ -1286,16 +1286,28 @@ final class CanvasController: ObservableObject {
     func makeTruthTable(check: Bool = false) {
         guard let document else { return }
         var error = ""
+        // What was last checked is kept per circuit and page.
+        let checkKey = (view?.window?.representedURL?.path ?? view?.window?.title ?? "Circuit") + "#\(page)"
         if var table = TruthTable(document: document, page: page, error: &error) {
-            // What was last checked is kept per circuit and page.
-            let circuit = view?.window?.representedURL?.path ?? view?.window?.title ?? "Circuit"
-            table.checkKey = circuit + "#\(page)"
+            table.checkKey = checkKey
             if check { UserDefaults.standard.set(TruthTableView.checkTab, forKey: "cl.truthTab") }
+            sheetHost.truthTable = table
+        } else if pageHasLights(document) {
+            // A counter has lights but no switches: no truth table, but it can
+            // still be checked clock pulse by clock pulse.
+            var table = TruthTable(checkOnly: document, page: page, problem: error)
+            table.checkKey = checkKey
             sheetHost.truthTable = table
         } else {
             sheetHost.truthTableProblem = error.isEmpty ? "A truth table couldn't be made for this page." : error
         }
         redraw()   // it leaves the switches as they were, but the circuit settles again
+    }
+
+    private func pageHasLights(_ document: CoreDocument) -> Bool {
+        var chips = [CLSimChip](repeating: CLSimChip(), count: 256)
+        let n = Int(cl_simview_chips(document.handle, Int32(page), &chips, Int32(chips.count)))
+        return n > chips.count || chips.prefix(n).contains { !$0.isInput }
     }
 
     var documentTitle: String {
