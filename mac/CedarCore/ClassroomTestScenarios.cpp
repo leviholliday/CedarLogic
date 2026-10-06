@@ -6,6 +6,7 @@
 #include "ClassroomTest.h"
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 
 namespace clclass {
@@ -41,6 +42,7 @@ struct Device {
 	std::map<std::string, std::string> files;
 	std::vector<std::string> notices;
 	std::unique_ptr<Client> c;
+	std::function<void(const HttpRequest&, HttpResponse&)> tamper;   // changes the FakeServer's answers (a server that's wrong)
 	Device(Crypto& cr, Curve& curve, FakeServer& s, SideStore* side, const std::string& client = "test/1") {
 		Config cfg;
 		cfg.serverBase = FakeServer::base();
@@ -48,7 +50,11 @@ struct Device {
 		cfg.client = client;
 		cfg.deviceName = "Test Mac";
 		ClientHooks h;
-		h.http = [&s](const HttpRequest& r) { return s.handle(r); };
+		h.http = [this, &s](const HttpRequest& r) {
+			HttpResponse x = s.handle(r);
+			if (tamper) tamper(r, x);
+			return x;
+		};
 		h.now = [&s] { return s.now; };
 		h.load = [this](const std::string& n) { auto it = files.find(n); return it == files.end() ? std::string() : it->second; };
 		h.save = [this](const std::string& n, const std::string& t) {
@@ -903,6 +909,62 @@ void scenarioTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report&
 	}
 
 	line(true, "s31 an old sync client reads a classroom record as newer (checked with the vectors: record 12)");
+
+	// Answers no honest server gives (one that's broken, or not ours): nothing breaks, nothing escapes.
+	{
+		Device T(cr, curve, s, nullptr), S(cr, curve, s, nullptr);
+		const std::string c = T->createClass("Odd answers").value;
+		S->join(T->teachingOf(c)->rec.joinCode, "Sam");
+		Assignment a;
+		a.title = "Lab";
+		a.cdl = kCdlOff;
+		const std::string aid = T->postAssignment(c, a, true).value;
+		// Assignment ids that aren't UUIDs: never fetched, never a file name.
+		std::vector<std::string> urls;
+		auto odd = [&urls, c](const HttpRequest& q, HttpResponse& x) {
+			urls.push_back(q.url);
+			const std::string tail = "/classes/" + c;
+			if (q.method != "GET" || x.status != 200 || q.url.size() < tail.size() || q.url.compare(q.url.size() - tail.size(), tail.size(), tail) != 0) return;
+			const std::string from = "\"assignments\":{";
+			const size_t at = x.body.find(from);
+			if (at != std::string::npos)
+				x.body.insert(at + from.size(), "\"../../x\":{\"ver\":1,\"h\":\"00\",\"closesAt\":null},\"a/b\":{\"ver\":1,\"h\":\"00\",\"closesAt\":null},");
+		};
+		S.tamper = odd;
+		T.tamper = odd;
+		S->refreshMember(c);
+		T->refreshTeacher(c);
+		bool fetched = false, filed = false;
+		for (const std::string& u : urls) fetched = fetched || has(u, "/assignment/../") || has(u, "/assignment/a/b");
+		for (const auto& f : S.files) filed = filed || has(f.first, "..") || has(f.first, "assignments/a/");
+		for (const auto& f : T.files) filed = filed || has(f.first, "..") || has(f.first, "assignments/a/");
+		const Membership* m = S->membershipOf(c);
+		line(!fetched && !filed && m && m->seenAssignments.size() == 1 && m->seenAssignments.count(aid) && S->assignments(c).size() == 1 &&
+		         T->teachingOf(c)->assignments.size() == 1,
+		     "odd answers: assignment ids that aren't UUIDs are skipped");
+		// A server that keeps answering 404 no_class: the class is made again once per refresh, no more.
+		size_t puts = 0;
+		T.tamper = [&puts, c](const HttpRequest& q, HttpResponse& x) {
+			if (q.method == "PUT" && has(q.url, "/classes/" + c) && !has(q.url, "/classes/" + c + "/")) puts++;
+			if (q.method == "GET" && has(q.url, "/classes/" + c)) {
+				x.status = 404;
+				x.body = "{\"error\":\"no_class\",\"message\":\"\"}";
+			}
+		};
+		const Result r1 = T->refreshTeacher(c);
+		line(!r1.ok && puts == 1, "odd answers: 404 no_class again and again: re-created once, then an error", std::to_string(puts));
+		// A Retry-After far too big: kept to a day, no overflow.
+		T.tamper = [](const HttpRequest&, HttpResponse& x) {
+			x.status = 429;
+			x.headers["retry-after"] = "99999999999999999999";
+			x.body = "{\"error\":\"rate_limited\",\"retryAfter\":9223372036854775807}";
+		};
+		T->refreshTeacher(c);
+		line(T->retryAfterMs() > s.now && T->retryAfterMs() <= s.now + kDay, "odd answers: a huge Retry-After is kept to a day",
+		     std::to_string(T->retryAfterMs() - s.now));
+		T.tamper = nullptr;
+		S.tamper = nullptr;
+	}
 }
 
 }  // namespace test

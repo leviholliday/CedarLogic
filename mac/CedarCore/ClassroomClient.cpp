@@ -10,6 +10,7 @@
 #include "ClassroomInternal.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 namespace clclass {
@@ -221,10 +222,12 @@ Client::Api Client::call(const std::string& method, const std::string& url,
 	if (clsync::parseHttpDate(header("date"), serverMs)) offset_ = serverMs - now();   // Sync 4.6's clock offset
 	a.etag = header("etag");
 	const std::string ra = header("retry-after");
-	if (!ra.empty()) a.retryAfterMs = std::max<int64_t>(0, atoll(ra.c_str())) * kSecond;
+	// At most a day, before it's made milliseconds: a huge header can't overflow.
+	auto seconds = [](long long s) { return std::min<int64_t>(std::max<long long>(0, s), kDay / kSecond) * kSecond; };
+	if (!ra.empty()) a.retryAfterMs = seconds(strtoll(ra.c_str(), nullptr, 10));
 	if (!h.body.empty() && json::parse(h.body, a.body) && a.body.isObject()) a.error = a.body.str("error");
 	if (a.status == 429 || a.status == 503) {
-		if (a.retryAfterMs <= 0) a.retryAfterMs = a.body.integer("retryAfter", a.status == 429 ? 60 : 30) * kSecond;
+		if (a.retryAfterMs <= 0) a.retryAfterMs = seconds(a.body.integer("retryAfter", a.status == 429 ? 60 : 30));
 		if (a.status == 429) a.retryAfterMs = std::max<int64_t>(a.retryAfterMs, 30 * kSecond);
 		retryAfter_ = std::max(retryAfter_, now() + a.retryAfterMs);
 	}
@@ -469,18 +472,18 @@ void Client::checkJoinRecord(Teaching& t, const json::Value& join) {
 	}
 }
 
-Result Client::refreshTeacher(const std::string& classId) {
+Result Client::refreshTeacher(const std::string& classId, bool mayRecreate) {
 	Teaching* tp = teachingOf(classId);
 	if (!tp) return Result::bad("That class isn't on this device.");
 	Teaching& t = *tp;
 	const Api a = teacherCall(t, "GET", "/classes/" + classId, nullptr, t.etag);
 	if (a.status == 304) return Result::good();
-	if (a.status == 404 && a.error == "no_class") {
-		// A never-used class the website removed after 7 days: re-created quietly (4.1).
+	if (a.status == 404 && a.error == "no_class" && mayRecreate) {
+		// A never-used class the website removed after 7 days: re-created quietly (4.1), once.
 		Result r = putClass(t, false);
 		if (r.ok) {
 			save();
-			return refreshTeacher(classId);
+			return refreshTeacher(classId, false);
 		}
 		return r;
 	}
@@ -532,6 +535,7 @@ Result Client::refreshTeacher(const std::string& classId) {
 	std::set<std::string> listed;
 	if (const json::Value* as = b.get("assignments"))
 		for (const auto& kv : as->o) {
+			if (!isUuid(kv.first)) continue;   // never a path or a file name
 			listed.insert(kv.first);
 			const int64_t ver = kv.second.integer("ver");
 			const json::Value* c = kv.second.get("closesAt");
@@ -812,6 +816,7 @@ Result Client::deleteAssignment(const std::string& classId, const std::string& a
 Result Client::fetchAssignment(const std::string& classId, const std::string& fetchKey, const Bytes& classKey, const std::string& aid,
                                int64_t ver, const std::string& h, bool teacher) {
 	(void)h;
+	if (!isUuid(aid)) return Result::bad("That request wasn't understood.");   // it goes into a path and a file name
 	const Api a = call("GET", cfg_.liveBase + "/" + classId + "/" + fetchKey + "/assignment/" + aid + "/" + std::to_string(ver), {}, nullptr);
 	if (a.status != 200) return Result::bad(sentence(a.error, a.status, false), a.status, a.error);
 	Assignment out;
@@ -1229,13 +1234,19 @@ Result Client::refreshAnswers(const std::string& classId) {
 
 // ---- Student: joining (4.5) ------------------------------------------------------------------
 
+// A join lookup that failed, in words: a code the teacher has changed since says so.
+static std::string lookupSentence(int status, const std::string& error, const json::Value& body) {
+	if (status == 404 && error == "no_class" && body.flag("changed", false)) return "This code was changed. Ask your teacher for the new one.";
+	return sentence(error, status, true);
+}
+
 Result Client::previewJoinCode(const std::string& text) {
 	std::string code, why;
 	if (!parseCode(cr_, CodeKind::Join, text, code, why)) return Result::bad(whyText(CodeKind::Join, why, text), 0, why);
 	const JoinKeys& jk = joinKeysFor(code);
 	if (!jk.valid()) return Result::bad(kNoRandom);
 	const Api a = call("GET", cfg_.serverBase + "/join/" + jk.joinId, { { "Authorization", "Bearer " + jk.joinToken } }, nullptr);
-	if (a.status != 200) return Result::bad(sentence(a.error, a.status, true), a.status, a.error);
+	if (a.status != 200) return Result::bad(lookupSentence(a.status, a.error, a.body), a.status, a.error);
 	const std::string classId = a.body.str("classId");
 	OpenKey k;
 	k.key = jk.joinKey;
@@ -1255,7 +1266,7 @@ Result Client::join(const std::string& text, const std::string& name0) {
 	const JoinKeys& jk = joinKeysFor(code);
 	if (!jk.valid()) return Result::bad(kNoRandom);
 	const Api look = call("GET", cfg_.serverBase + "/join/" + jk.joinId, { { "Authorization", "Bearer " + jk.joinToken } }, nullptr);
-	if (look.status != 200) return Result::bad(sentence(look.error, look.status, true), look.status, look.error);
+	if (look.status != 200) return Result::bad(lookupSentence(look.status, look.error, look.body), look.status, look.error);
 	const std::string classId = look.body.str("classId");
 	OpenKey k;
 	k.key = jk.joinKey;
@@ -1376,6 +1387,7 @@ bool Client::memberStatus(Membership& m, const json::Value& b) {
 	std::set<std::string> listed;
 	if (const json::Value* as = b.get("assignments"))
 		for (const auto& kv : as->o) {
+			if (!isUuid(kv.first)) continue;   // never a path or a file name
 			listed.insert(kv.first);
 			const json::Value* c = kv.second.get("closesAt");
 			closesAt_[mapKey(classId, kv.first)] = c && c->isInt() ? c->i() : -1;

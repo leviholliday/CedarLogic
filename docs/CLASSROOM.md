@@ -936,8 +936,9 @@ Body `{"deleteHash":"<64 hex>","teacher":{"ver":1,"env":"…"},"join":{"joinId":
 5. Else store the three envelopes as blobs (`t/`, `i/`, and `j/<joinIndex>`
    = `{classId, joinHash, open, ver, env, at}` with the HMACs of §1.3, with
    `onlyIfNew`: a `joinIndex` already taken by another class — 1 in 2⁴⁸ per
-   pair of codes — makes the client pick another join code:
-   `409 join_exists`), make the class's `fetchKey` (16 bytes from the CSPRNG,
+   pair of codes — or retired (a changed code, a deleted class: below) makes
+   the client pick another join code: `409 join_exists`; only the class's own
+   code, kept while it was idle, is taken back), make the class's `fetchKey` (16 bytes from the CSPRNG,
    hex), then write the class document (§3.6) with `onlyIfNew` →
    `201 {created:true, …status}`.
 
@@ -948,22 +949,36 @@ after 7 idle days, §3.11) re-creates it the same way from what it holds.
 
 #### `GET /join/{joinId}` and `POST /classes/{classId}/students` — joining
 
-`GET /join/{joinId}` with `Authorization: Bearer <joinToken>`: the server
-computes `joinIndex` (§1.3); `j/<joinIndex>` missing → `404 no_class`
-(counted as a failed lookup: 60 per address per hour, then `429`); the class
-gone → `410`; `joinHash` ≠ HMAC of the token → `401 wrong_token` (counted).
-Else `200 {classId, ver, env, open}`. Nothing is
-written. The server never tells how many students a class has to someone who
+`GET /join/{joinId}` with `Authorization: Bearer <joinToken>`: an address
+already past its 60 failed lookups this hour → `429`, before anything is
+looked up, so past the limit a right code and a wrong one look the same. The
+server computes `joinIndex` (§1.3); `j/<joinIndex>` missing → `404 no_class`
+(counted as a failed lookup); the class gone → `410`; `joinHash` ≠ HMAC of
+the token → `401 wrong_token` (counted; `404 no_class` for a retired code).
+The whole code right but changed since → `404 no_class` with "This code was
+changed. Ask your teacher for the new one." and `changed: true` (not
+counted). Else
+`200 {classId, ver, env, open}`. Nothing is written.
+
+**A join code is never freed.** Change Join Code, Delete Class, expiry and the
+7-day removal of a never-used class turn its `j/` entry into a retired one,
+`{retired:true, reason, classId, joinHash, at}` (`reason`: `changed`,
+`deleted`, `expired` or `idle`), kept 400 days, so whoever knows an old code
+(a leak, an old handout) can't register a class under it for students to
+join. Only the same class can take back an `idle` one (its `a/` is kept, so
+only its own teacher token gets that far). The server never tells how many students a class has to someone who
 hasn't joined.
 
 `POST /classes/{classId}/students` with the join token, body
 `{"studentId":"<uuid>","tokenHash":"<64 hex>","name":{"ver":1,"env":"<sealed, ≤ 640 bytes>"}}`:
 the class's **current** join entry's `joinHash` must match the token (an old
 code → `401 wrong_token`); `open` false → `403 join_closed`; roster at
-`maxStudents` → `507 class_full`; `studentId` already in the roster →
+`maxStudents` → `507 class_full` (an address past its failed lookups → `429`
+first, as above); `studentId` already in the roster →
 `409 student_exists`; a name envelope over 640 bytes → `413
-record_too_large`; counted per address (300 joins an hour: a lab; and 60 per
-class a day: one phone can't fill a class) and per class (1,000 a day). Then
+record_too_large`; counted per address (300 joins an hour: a lab; and 500
+into one class a day: a whole lecture behind one school address) and per
+class (1,000 a day). Then
 a conditional write of the roster document (§3.7) adding `{hash: tokenHash,
 joinedAt: now, seenAt: now, name: {ver, env, size}}` →
 `201 {joinedAt, fetchKey}`. A lost answer: the client repeats the POST; `409`
@@ -980,9 +995,9 @@ teacher ver → `412 conflict` (nothing written). Else: write the new
 `j/<joinIndex>` (`onlyIfNew` unless it is the current one; a taken index →
 `409 join_exists`) and the teacher blob, then one conditional write of the
 class document (`joinIndex`, `join: {ver, h, open, at}`, `teacher`, `seq +
-1`, and — when the code changed — a new `fetchKey`), then delete the old
-`j/<oldJoinIndex>` (best effort; the cleanup removes a `j/` entry no class
-names) and purge the tag `class-<classId>` (§3.3, the pulse). Closing or
+1`, and — when the code changed — a new `fetchKey`), then retire the old
+`j/<oldJoinIndex>` (best effort; the cleanup retires a `j/` entry no class
+names; a retired code → `409 join_exists`) and purge the tag `class-<classId>` (§3.3, the pulse). Closing or
 re-opening with the same code sends the same `joinId`, `joinToken` and `env`
 with `open` changed, and keeps the `fetchKey`. A new code is a new
 `fetchKey` because the old code may be the leak: whoever joined with it and
@@ -1081,7 +1096,7 @@ allows (`todo/`). `200`.
 As Sync's `DELETE /spaces`: the teacher token plus `x-cedarlogic-delete`
 whose SHA-256 is `deleteHash` (`403 wrong_delete_token`); 5 per class per
 day. Marks `a/` deleted, writes `gone/<classId>` (`{at, reason:"deleted"}`,
-kept forever), `todo/<classId>`, deletes `j/<joinIndex>`, purges the tag
+kept forever), `todo/<classId>`, retires `j/<joinIndex>`, purges the tag
 `class-<classId>` (so the CDN's copies of its records go too), then the
 documents and the blobs in batches as time allows → `200 {deleted:true}`. Every later request
 on the id, from anyone, gets `410 class_deleted`.
@@ -1147,7 +1162,7 @@ limit of a class key that never changes, §0.)
 | 403 | `wrong_delete_token` | "That key can't delete the class." | bug |
 | 403 | `join_closed` | "Joining this class is closed. Ask your teacher to open it." | show |
 | 403 | `not_a_member` | "You're not in this class any more." | student: forget the membership; keep the circuits |
-| 404 | `no_class` | join: "No class has this code. Check it with your teacher." / teacher: "This class isn't on the website." | join: show; teacher: re-create (§4.1) |
+| 404 | `no_class` | join: "No class has this code. Check it with your teacher." (a changed code: "This code was changed. Ask your teacher for the new one.") / teacher: "This class isn't on the website." | join: show; teacher: re-create (§4.1) |
 | 404 | `no_assignment` | "That assignment was removed." | drop it from the list |
 | 404 | `no_version` | — (the pulse's record fetch; never shown) | read the pulse again |
 | 404 | `wrong_fetch_key` | — (`/api/live/` with an old `fetchKey`; never shown) | read the status (authenticated), take its `fetchKey`, try again once |
@@ -1184,8 +1199,9 @@ Sync, feedback and the stats function (§3.10 has the plan and the numbers).
   per student.
 - **Per address** (`ipkey` = Sync's HMAC of the address, IPv6 /64): 10 new
   classes a day; 60 failed lookups or sign-ins an hour (wrong join code, wrong
-  token, unknown class, wrong `fetchKey`), then `429` for that hour; 300 joins
-  an hour, and 60 into any one class a day; 30 move slots an hour; 50 MB of
+  token, unknown class, wrong `fetchKey`), then `429` for that hour — for a
+  join lookup or a join, even with the right code; 300 joins an hour, and 500
+  into any one class a day; 30 move slots an hour; 50 MB of
   envelopes written a day.
 - **Per address, every invocation** (`CLASSROOM_ADDRESS_PER_HOUR`, default
   6,000, and `CLASSROOM_ADDRESS_PER_DAY`, default 12,000: a 300-student school
@@ -1259,7 +1275,7 @@ Store `classroom` (per deploy context), `consistency: "strong"`:
 | `lv/<classId>/<ver>-<ms>-<rand>` | a live record envelope |
 | `s/<classId>/<aid>/<sid>/<ver>-<ms>-<rand>` | a submission envelope |
 | `la/<classId>/<session>/<sid>` | `{"ver":57,"h":"…","at":ms,"env":"<b64u>"}` |
-| `j/<joinIndex>` | `{"classId","joinHash","open","ver","env","at"}` — `joinIndex` and `joinHash` are HMACs under `CLASSROOM_JOIN_PEPPER` (§1.3); neither `joinId` nor a plain hash of the join token is stored anywhere |
+| `j/<joinIndex>` | `{"classId","joinHash","open","ver","env","at"}` — `joinIndex` and `joinHash` are HMACs under `CLASSROOM_JOIN_PEPPER` (§1.3); neither `joinId` nor a plain hash of the join token is stored anywhere. A retired code: `{"retired":true,"reason","classId","joinHash","at"}`, kept 400 days (§3.3) |
 | `mv/<moveId>` | `{"classId","studentId","env","createdAt"}` |
 | `gone/<classId>` | `{"at": ms, "reason": "deleted" \| "expired"}` — kept forever |
 | `todo/<classId>` | unfinished deletions: `{"at", "all"?: true, "students"?: [sid], "assignments"?: [aid]}` |
@@ -1451,13 +1467,16 @@ Walks `c/` with `list({prefix:"c/", paginate:true})` from `cleanup/cursor`,
 20 s at a time:
 
 1. A class with no students and no assignments whose `activeAt` is older than
-   7 days → delete its documents, `a/`, `j/`, blobs; no marker.
+   7 days → delete its documents and blobs; no marker; `a/` stays and `j/` is
+   retired as `idle`, so only its teacher can make it again, with its code.
 2. `activeAt` older than 400 days → write `gone/<classId>` `{reason:"expired"}`
    and `todo/`, mark `a/` deleted, remove everything.
 3. Blobs under `t/`, `i/`, `as/`, `lv/`, `s/` not named by a document and
    older than an hour → delete; `la/` sessions other than the current one
    older than a day → delete; `j/` entries no class names, older than an hour
-   → delete; `mv/` older than an hour → delete.
+   → retired; retired ones older than 400 days → deleted (an `idle` one whose
+   class was never made again takes its `a/` with it and leaves
+   `gone/<classId>` `{reason:"expired"}`); `mv/` older than an hour → delete.
 4. Add the class's `bytes` to the day's total.
 
 Then: finish every `todo/` (purging `class-<classId>` / `asg-<aid>` again

@@ -243,7 +243,7 @@ public:
 	Result newJoinCode(const std::string& classId);
 	void forgetClass(const std::string& classId);
 	Result deleteClass(const std::string& classId);
-	Result refreshTeacher(const std::string& classId);                   // the status (4.1)
+	Result refreshTeacher(const std::string& classId, bool mayRecreate = true);   // the status (4.1)
 	Result postAssignment(const std::string& classId, const Assignment& draft, bool studentsCanCheck);
 	Result deleteAssignment(const std::string& classId, const std::string& aid);
 	Result refreshStudents(const std::string& classId);
