@@ -100,6 +100,7 @@ struct CLDocument {
 	unsigned long hoverWire = 0;   // the wire under the pointer, lit up whole
 	int hoverWirePage = -1;
 	bool edited = false;          // changed since opened or last saved
+	bool lockedHeld = false;      // the last move, delete or rotate left locked parts put
 	int pageToShow = -1;          // set when an undo or redo adds or removes a page
 
 	GUICanvas* page(int i) const {

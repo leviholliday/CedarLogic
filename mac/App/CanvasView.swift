@@ -406,6 +406,7 @@ final class CircuitCanvasNSView: NSView {
         if case .edit = drag {
             document?.release(at: worldPoint(p))
             controller?.edited()
+            controller?.noteLockedHeld()
         }
         drag = .none
         NSCursor.arrow.set()
@@ -444,10 +445,21 @@ final class CircuitCanvasNSView: NSView {
             item("Delete") { controller.deleteSelection() }
         case .gate:
             item("Settings…") { controller.showSettings() }
-            item("Rotate") { controller.rotate() }
+            // Locked parts (all of the selection): Unlock Part in place of the
+            // things they refuse. "Part", so it isn't taken for the circuit's
+            // own lock (Unlock the Circuit).
+            let locked = controller.selectedLocked > 0 && controller.selectedUnlocked == 0
+            if !locked { item("Rotate") { controller.rotate() } }
             item("Straighten Its Wires") { controller.straighten() }
             menu.addItem(.separator())
-            item("Delete") { controller.deleteSelection() }
+            if locked {
+                item(controller.unlockPartsTitle) { controller.lockSelection(false) }
+            } else {
+                item("Lock in Place") { controller.lockSelection(true) }
+                if controller.selectedLocked > 0 { item(controller.unlockPartsTitle) { controller.lockSelection(false) } }
+                menu.addItem(.separator())
+                item("Delete") { controller.deleteSelection() }
+            }
         case .nothing:
             item("Select All") { controller.selectAll() }
             item("Paste") { controller.paste() }
@@ -1178,9 +1190,38 @@ final class CanvasController: ObservableObject {
     func redo() { undoManager?.redo() }
     func selectAll() { document?.selectAll(page: page); redraw(); selectionChanged() }
     func selectNone() { document?.selectNone(page: page); redraw(); selectionChanged() }
-    func deleteSelection() { document?.deleteSelection(page: page); edited() }
-    func rotate() { document?.rotateSelection(page: page); edited() }
-    func nudge(dx: CGFloat, dy: CGFloat) { document?.nudge(page: page, dx: dx, dy: dy); edited() }
+    func deleteSelection() { document?.deleteSelection(page: page); edited(); noteLockedHeld() }
+    func rotate() { document?.rotateSelection(page: page); edited(); noteLockedHeld() }
+    func nudge(dx: CGFloat, dy: CGFloat) { document?.nudge(page: page, dx: dx, dy: dy); edited(); noteLockedHeld() }
+
+    // Parts locked in place: they stay put (moves, Rotate, Delete and Cut
+    // leave them), but wires, settings and switches work as usual.
+    static let lockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock Part."
+    /// After a move, delete or rotate: say why locked parts didn't go along.
+    func noteLockedHeld() { if document?.lockedHeld == true { note(Self.lockedNote) } }
+    /// Selected parts that are locked, and that aren't.
+    var selectedLocked: Int { document?.selectedLockedCount(page: page, locked: true) ?? 0 }
+    var selectedUnlocked: Int { document?.selectedLockedCount(page: page, locked: false) ?? 0 }
+    /// "Unlock Part" or "Unlock Parts", by how many selected parts are locked.
+    var unlockPartsTitle: String { selectedLocked > 1 ? "Unlock Parts" : "Unlock Part" }
+    /// Lock in Place (or Unlock Part) the selected parts.
+    func lockSelection(_ lock: Bool) {
+        guard canEdit else { lockNudge(); return }
+        guard let n = document?.lockSelection(page: page, lock: lock), n > 0 else { return }
+        edited()
+        let parts = n == 1 ? "1 part" : "\(n) parts"
+        note(lock ? "Locked \(parts) in place." : "Unlocked \(parts).")
+    }
+    /// The Edit menu's one item: Unlock Part when every selected part is locked.
+    var lockMenuUnlocks: Bool { selectedLocked > 0 && selectedUnlocked == 0 }
+    func toggleLockInPlace() { lockSelection(!lockMenuUnlocks) }
+    var hasLockedParts: Bool { (document?.lockedCount ?? 0) > 0 }
+    func unlockAll() {
+        guard canEdit else { lockNudge(); return }
+        guard let n = document?.unlockAll(page: page), n > 0 else { return }
+        edited()
+        note(n == 1 ? "Unlocked 1 part." : "Unlocked all \(n) parts.")
+    }
     func straighten() { document?.straighten(page: page); edited() }
 
     // MARK: Truth tables, export, print
@@ -1406,7 +1447,13 @@ final class CanvasController: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    func cut() { copy(); deleteSelection() }
+    /// Locked parts stay, and stay off the clipboard (copying them is fine).
+    func cut() {
+        let held = document.map { cl_edit_deselect_locked($0.handle, Int32(page)) } ?? 0
+        copy()
+        deleteSelection()
+        if held > 0 { note(Self.lockedNote) }
+    }
 
     /// Paste in the middle of the view.
     func paste() {

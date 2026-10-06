@@ -93,17 +93,27 @@ void commitMove(CLDocument* doc, GUICanvas* page, std::vector<GateState>& moved,
 	page->collisionUpdate();
 }
 
+// A wire with an end on a part locked in place: it isn't carried along whole
+// (that would pull it off the locked pin); a moving gate drags its own end.
+bool touchesLocked(CLDocument* doc, guiWire* w) {
+	for (const wireConnection& c : w->getConnections())
+		if (guiGate* g = doc->circuit.getGate(c.gid)) if (g->isLocked()) return true;
+	return false;
+}
+
+// What a move takes along: the selection, less the parts locked in place
+// (noted in doc->lockedHeld) and the wires on them.
 void snapshotSelection(CLDocument* doc, GUICanvas* page, std::vector<GateState>& gates, std::vector<WireState>& wires) {
 	for (auto& g : *page->getGateList()) {
 		if (!g.second || !g.second->isSelected()) continue;
+		if (g.second->isLocked()) { doc->lockedHeld = true; continue; }
 		float x, y;
 		g.second->getGLcoords(x, y);
 		gates.push_back(GateState(g.first, x, y, true));
 	}
 	for (auto& w : *page->getWireList())
-		if (w.second && w.second->isSelected())
+		if (w.second && w.second->isSelected() && !touchesLocked(doc, w.second))
 			wires.push_back(WireState(w.first, w.second->getCenter(), w.second->getSegmentMap()));
-	(void)doc;
 }
 
 std::string scratch;   // backs returned strings until the next call
@@ -170,16 +180,37 @@ public:
 	}
 };
 
+// Lock in Place, Unlock and Unlock All Parts: sets or takes off each part's
+// LOCKED (guiGate::setLocked). Holds only the parts it changes, so its undo
+// is the opposite. Not sent to the simulator: it's the editor's, not the
+// circuit's.
+class LockCommand : public klsCommand {
+public:
+	LockCommand(GUICircuit* circuit, std::vector<unsigned long> ids, bool lock, const char* name)
+		: klsCommand(true, name), ids(std::move(ids)), lock(lock) { gCircuit = circuit; }
+	bool Do() override { apply(lock); return true; }
+	bool Undo() override { apply(!lock); return true; }
+private:
+	std::vector<unsigned long> ids;
+	bool lock;
+	void apply(bool on) {
+		for (unsigned long id : ids) if (guiGate* g = gCircuit->getGate(id)) g->setLocked(on);
+	}
+};
+
 // GUICanvas::findNearbyConnections: each free pin of a selected gate that has
 // exactly one clearly-closest free pin on a gate that isn't moving, within
 // 20 points. Near ties connect nothing.
 struct Nearby { unsigned long srcGate; std::string srcPin; unsigned long dstGate; std::string dstPin; float dist; };
-std::vector<Nearby> findNearby(GUICanvas* page, float radius) {
+// Mid-move (`moving`), a selected part locked in place isn't moving: it can be
+// connected to, not from.
+std::vector<Nearby> findNearby(GUICanvas* page, float radius, bool moving) {
 	const float tie = 1.1f;
 	std::vector<Nearby> cands;
+	auto isMoving = [moving](guiGate* g) { return g->isSelected() && !(moving && g->isLocked()); };
 	for (auto& se : *page->getGateList()) {
 		guiGate* src = se.second;
-		if (src == nullptr || !src->isSelected()) continue;
+		if (src == nullptr || !isMoving(src)) continue;
 		for (auto& shs : src->getHotspotList()) {
 			if (src->isConnected(shs.first)) continue;
 			float sx, sy;
@@ -189,7 +220,7 @@ std::vector<Nearby> findNearby(GUICanvas* page, float radius) {
 			float bestDist = -1, second = -1;
 			for (auto& de : *page->getGateList()) {
 				guiGate* dst = de.second;
-				if (dst == nullptr || dst == src || dst->isSelected()) continue;
+				if (dst == nullptr || dst == src || isMoving(dst)) continue;
 				for (auto& dhs : dst->getHotspotList()) {
 					if (dst->isConnected(dhs.first)) continue;
 					float dx, dy;
@@ -219,9 +250,9 @@ std::vector<Nearby> findNearby(GUICanvas* page, float radius) {
 }
 
 // Make those connections as one undo step. Returns how many.
-int connectNearby(CLDocument* doc, GUICanvas* page, float unitsPerPoint) {
+int connectNearby(CLDocument* doc, GUICanvas* page, float unitsPerPoint, bool moving) {
 	page->collisionUpdate();
-	std::vector<Nearby> found = findNearby(page, 20.0f * unitsPerPoint);
+	std::vector<Nearby> found = findNearby(page, 20.0f * unitsPerPoint, moving);
 	if (found.empty()) return 0;
 	CommandGroup* group = new CommandGroup("Connect");
 	for (const Nearby& n : found) {
@@ -266,7 +297,7 @@ void finishMove(CLDocument* doc, GUICanvas* page, EditGesture& g) {
 	if (g.lastDelta.x != 0 || g.lastDelta.y != 0 || g.floating) {
 		if (g.lastDelta.x != 0 || g.lastDelta.y != 0)
 			commitMove(doc, page, g.preMove, g.preMoveWire, g.lastDelta);
-		connectNearby(doc, page, g.unitsPerPoint);
+		connectNearby(doc, page, g.unitsPerPoint, true);
 	}
 	flushPendingConnects(doc, page, g);
 }
@@ -279,6 +310,7 @@ int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifi
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return CL_PRESS_NOTHING;
 	EditGesture& g = doc->gesture;
+	doc->lockedHeld = false;
 	// The click that ends a click-started connection: connect to what's
 	// there, or cancel on nothing.
 	// A gesture belongs to its page. In a split view the other side is
@@ -551,6 +583,14 @@ void cl_edit_delete(CLDocument* doc, int pageIndex) {
 	if (page == nullptr) return;
 	std::vector<unsigned long> gates, wires;
 	selectedIds(page, gates, wires);
+	// Parts locked in place stay (their wires can still go).
+	doc->lockedHeld = false;
+	gates.erase(std::remove_if(gates.begin(), gates.end(), [&](unsigned long id) {
+		guiGate* g = doc->circuit.getGate(id);
+		if (g == nullptr || !g->isLocked()) return false;
+		doc->lockedHeld = true;
+		return true;
+	}), gates.end());
 	if (gates.empty() && wires.empty()) return;
 	submit(doc, page, new cmdDeleteSelection(&doc->circuit, page, gates, wires));
 	page->collisionUpdate();
@@ -561,9 +601,11 @@ void cl_edit_rotate(CLDocument* doc, int pageIndex) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
 	std::vector<klsCommand*> steps;
+	doc->lockedHeld = false;
 	for (auto& e : *page->getGateList()) {
 		guiGate* gate = e.second;
 		if (!gate || !gate->isSelected()) continue;
+		if (gate->isLocked()) { doc->lockedHeld = true; continue; }
 		bool wired = false;
 		for (auto& hs : gate->getHotspotList()) if (gate->isConnected(hs.first)) { wired = true; break; }
 		if (wired) continue;
@@ -591,6 +633,7 @@ void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
 	if (page == nullptr) return;
 	std::vector<GateState> moved;
 	std::vector<WireState> movedWires;
+	doc->lockedHeld = false;
 	snapshotSelection(doc, page, moved, movedWires);
 	if (moved.empty()) return;
 	const GLPoint2f d((float)dx, (float)dy);
@@ -891,7 +934,7 @@ int cl_edit_connect_while_moving(CLDocument* doc, int pageIndex, double unitsPer
 	if (page == nullptr || g->mode != EditGesture::Moving || g->page != pageIndex) return -1;
 	page->collisionUpdate();
 	int made = 0;
-	for (const Nearby& n : findNearby(page, 20.0f * (float)unitsPerPoint)) {
+	for (const Nearby& n : findNearby(page, 20.0f * (float)unitsPerPoint, true)) {
 		klsCommand* cmd = edits::gateConnection(&doc->circuit, page, n.srcGate, n.srcPin, n.dstGate, n.dstPin);
 		if (cmd == nullptr) continue;
 		cmd->setCanvas(page);
@@ -910,8 +953,73 @@ int cl_edit_take_back_connects(CLDocument* doc) {
 int cl_edit_connect_nearby(CLDocument* doc, int pageIndex, double unitsPerPoint) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return 0;
-	return connectNearby(doc, page, (float)unitsPerPoint);
+	return connectNearby(doc, page, (float)unitsPerPoint, false);
 }
+
+// ---- Parts locked in place ---------------------------------------------------
+
+bool cl_gate_is_locked(const CLDocument* doc, long gate) {
+	guiGate* g = doc ? const_cast<CLDocument*>(doc)->circuit.getGate((unsigned long)gate) : nullptr;
+	return g && g->isLocked();
+}
+
+int cl_edit_selected_locked_count(const CLDocument* doc, int pageIndex, bool locked) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return 0;
+	int n = 0;
+	for (auto& g : *page->getGateList()) if (g.second && g.second->isSelected() && g.second->isLocked() == locked) n++;
+	return n;
+}
+
+int cl_edit_lock_selection(CLDocument* doc, int pageIndex, bool lock) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return 0;
+	settleTidy(doc);
+	std::vector<unsigned long> ids;
+	for (auto& g : *page->getGateList())
+		if (g.second && g.second->isSelected() && g.second->isLocked() != lock) ids.push_back(g.first);
+	if (ids.empty()) return 0;
+	std::sort(ids.begin(), ids.end());
+	const int n = (int)ids.size();
+	submit(doc, page, new LockCommand(&doc->circuit, std::move(ids), lock, lock ? "Lock in Place" : (n == 1 ? "Unlock Part" : "Unlock Parts")));
+	return n;
+}
+
+int cl_document_locked_count(const CLDocument* doc) {
+	if (doc == nullptr) return 0;
+	int n = 0;
+	for (auto& p : doc->pages)
+		for (auto& g : *p->getGateList()) if (g.second && g.second->isLocked()) n++;
+	return n;
+}
+
+int cl_edit_unlock_all(CLDocument* doc, int pageIndex) {
+	if (doc == nullptr) return 0;
+	settleTidy(doc);
+	std::vector<unsigned long> ids;
+	for (auto& p : doc->pages)
+		for (auto& g : *p->getGateList()) if (g.second && g.second->isLocked()) ids.push_back(g.first);
+	if (ids.empty()) return 0;
+	std::sort(ids.begin(), ids.end());
+	const int n = (int)ids.size();
+	submit(doc, doc->page(pageIndex), new LockCommand(&doc->circuit, std::move(ids), false, "Unlock All Parts"));
+	return n;
+}
+
+int cl_edit_deselect_locked(CLDocument* doc, int pageIndex) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return 0;
+	int n = 0;
+	for (auto& g : *page->getGateList())
+		if (g.second && g.second->isSelected() && g.second->isLocked()) { g.second->unselect(); n++; }
+	// And the wires on them, which a cut would otherwise take off them.
+	if (n > 0)
+		for (auto& w : *page->getWireList())
+			if (w.second && w.second->isSelected() && touchesLocked(doc, w.second)) w.second->unselect();
+	return n;
+}
+
+bool cl_edit_locked_held(const CLDocument* doc) { return doc && doc->lockedHeld; }
 
 bool cl_edit_is_connecting(const CLDocument* doc) {
 	return doc && doc->gesture.mode == EditGesture::Connect && doc->gesture.sticky;

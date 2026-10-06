@@ -122,6 +122,16 @@ final class CoreDocument: ObservableObject {
     func hasGateSelection(page: Int) -> Bool { cl_edit_selected_gate_count(handle, Int32(page)) > 0 }
     func deleteSelection(page: Int) { cl_edit_delete(handle, Int32(page)) }
     func rotateSelection(page: Int) { cl_edit_rotate(handle, Int32(page)) }
+    // Parts locked in place (CedarCore.h).
+    func selectedLockedCount(page: Int, locked: Bool) -> Int { Int(cl_edit_selected_locked_count(handle, Int32(page), locked)) }
+    @discardableResult
+    func lockSelection(page: Int, lock: Bool) -> Int { Int(cl_edit_lock_selection(handle, Int32(page), lock)) }
+    var lockedCount: Int { Int(cl_document_locked_count(handle)) }
+    @discardableResult
+    func unlockAll(page: Int) -> Int { Int(cl_edit_unlock_all(handle, Int32(page))) }
+    func isLocked(gate: Int) -> Bool { cl_gate_is_locked(handle, gate) }
+    /// The last drag, nudge, delete or rotate left locked parts where they were.
+    var lockedHeld: Bool { cl_edit_locked_held(handle) }
     func nudge(page: Int, dx: CGFloat, dy: CGFloat) { cl_edit_nudge(handle, Int32(page), dx, dy) }
     @discardableResult
     func addGate(_ name: String, page: Int, at p: CGPoint) -> Bool { cl_edit_add_gate(handle, Int32(page), name, p.x, p.y) }

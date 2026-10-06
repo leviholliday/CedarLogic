@@ -327,7 +327,8 @@ TidyPlan applyTidy(GUICanvas* page, int mode) {
 	TidyPlan plan;
 
 	// The selection, or the whole page when nothing is selected. Every gate
-	// goes in (the rest as fixed neighbors to line up with).
+	// goes in (the rest, and parts locked in place, as fixed neighbors to
+	// line up with).
 	std::vector<unsigned long> ids;
 	bool anySelected = false;
 	for (auto& ge : *page->getGateList()) {
@@ -348,7 +349,8 @@ TidyPlan applyTidy(GUICanvas* page, int mode) {
 		if (klsBBox(body).empty()) continue;
 		LayoutNode node;
 		gateFootprint(g, body, node.l, node.b, node.r, node.t);
-		node.movable = !anySelected || g->isSelected();
+		// A part locked in place stays put, a fixed neighbor like the rest.
+		node.movable = (!anySelected || g->isSelected()) && !g->isLocked();
 		node.indicator = g->getLibraryGateName().find("LED") != std::string::npos;
 		for (const auto& hs : g->getHotspotList()) {
 			LayoutPin p;
