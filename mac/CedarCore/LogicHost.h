@@ -33,7 +33,9 @@ public:
 	// Step until the wires stop changing, so a circuit opens settled (what the
 	// wx app's settleSimulation does). Capped for circuits that never settle.
 	// Returns false when it never stopped changing (a clock, an oscillator).
-	bool settle(int maxSteps = 400);
+	// `record` passes each step to afterStep, so the oscilloscope sees them
+	// (Step Clock's edges).
+	bool settle(int maxSteps = 400, bool record = false);
 
 	// A gate asked to pause (the PAUSE_SIM parameter); cleared when read.
 	bool takePauseRequest() { bool p = pauseRequested; pauseRequested = false; return p; }
