@@ -89,6 +89,14 @@ void cl_document_step(CLDocument *doc);
 // Milliseconds of simulated time per step (1..500; 25 by default).
 void cl_document_set_step_ms(CLDocument *doc, int ms);
 int cl_document_step_ms(const CLDocument *doc);
+// Step Clock: clocks with "Only on Step Clock" on (the MANUAL setting) hold
+// still at 0 until told. How many are on a page:
+int cl_document_manual_clock_count(const CLDocument *doc, int page);
+// Each of them makes one full cycle: up to 1, the circuit settles, down to 0,
+// it settles again (at most 1000 steps each, for a circuit that never does).
+// Running or paused alike; running clocks carry on through those steps.
+// False when the page has no manual clock.
+bool cl_document_clock_step(CLDocument *doc, int page);
 
 // A click at a world point: flips a switch, presses a keypad key... Returns
 // true when a part took the click.

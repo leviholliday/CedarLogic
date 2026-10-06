@@ -44,6 +44,24 @@ void setError(char* error, int len, const std::string& msg) {
 	error[len - 1] = 0;
 }
 
+// The page's clocks set to move only on Step Clock. A file from before the
+// setting has no MANUAL at all: a running clock.
+std::vector<unsigned long> manualClocks(const CLDocument* doc, int pageIndex) {
+	std::vector<unsigned long> out;
+	GUICanvas* p = doc ? doc->page(pageIndex) : nullptr;
+	if (p == nullptr) return out;
+	for (auto& g : *p->getGateList()) {
+		guiGate* gate = g.second;
+		if (gate == nullptr || gate->getLogicType() != "CLOCK") continue;
+		// Looked up, not indexed: getLogicParam would add an empty MANUAL,
+		// which the next save would write.
+		auto* params = gate->getAllLogicParams();
+		auto it = params->find("MANUAL");
+		if (it != params->end() && it->second == "true") out.push_back(g.first);
+	}
+	return out;
+}
+
 }  // namespace
 
 extern "C" {
@@ -275,6 +293,24 @@ void cl_document_step(CLDocument* doc) {
 	if (doc == nullptr) return;
 	doc->sim->step(1);
 	doc->sim->takePauseRequest();
+}
+
+int cl_document_manual_clock_count(const CLDocument* doc, int page) {
+	return (int)manualClocks(doc, page).size();
+}
+
+bool cl_document_clock_step(CLDocument* doc, int page) {
+	const std::vector<unsigned long> clocks = manualClocks(doc, page);
+	if (clocks.empty()) return false;
+	// The level goes straight to the engine: it isn't a setting, and isn't saved.
+	for (const char* level : { "1", "0" }) {
+		for (unsigned long id : clocks)
+			doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM,
+				new klsMessage::Message_SET_GATE_PARAM((int)id, "MANUAL_LEVEL", level)));
+		doc->sim->settle(1000, true);
+	}
+	doc->sim->takePauseRequest();
+	return true;
 }
 
 void cl_document_set_step_ms(CLDocument* doc, int ms) {

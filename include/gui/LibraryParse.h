@@ -109,6 +109,16 @@ struct LibraryGate {
 			if( dlgParams[i].isGui && dlgParams[i].name == name ) return false;
 		return true;
 	}
+
+	// A clock's MANUAL ("Only on Step Clock") is saved only when it is on. Off
+	// is the library's default, and leaving it out keeps a running clock's
+	// file -- and sync's structure digest (SYNC.md 2.4) -- the same as versions
+	// from before the setting.
+	bool skipsLogicParam( const string &name, const string &value ) const {
+		if( name != "MANUAL" || value != "false" ) return false;
+		auto d = logicParams.find( name );
+		return d != logicParams.end() && d->second == value;
+	}
 };
 
 // A parsed gate library: the gate definitions, and nothing else. Reading the

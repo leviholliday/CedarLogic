@@ -1,6 +1,6 @@
 // Simulation View's control bar (GUICanvas::drawSimBarInto): a dark glass
-// panel along the bottom with a breathing LIVE light, play/pause and step,
-// the speed, a chip for every switch and light, and Done.
+// panel along the bottom with a breathing LIVE light, play/pause, step and
+// Step Clock, the speed, a chip for every switch and light, and Done.
 
 import SwiftUI
 
@@ -50,6 +50,10 @@ struct SimBar: View {
                 barButton(help: "Step once", lit: false) {
                     Image(systemName: "forward.frame.fill").foregroundStyle(ink)
                 } action: { canvas.stepOnce() }
+                let clockReady = canvas.hasManualClock
+                barButton(help: clockReady ? stepClockTip : CanvasController.stepClockOffTip, lit: false, disabled: !clockReady) {
+                    Image(systemName: "clock.arrow.2.circlepath").foregroundStyle(ink.opacity(clockReady ? 1 : 0.35))
+                } action: { canvas.perform(.stepClock) }
             }
             divider
             // Speed, fast on the right.
@@ -86,8 +90,16 @@ struct SimBar: View {
 
     private var divider: some View { Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1, height: 28) }
 
-    private func barButton<L: View>(help: String, lit: Bool, @ViewBuilder label: () -> L, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private var stepClockTip: String {
+        if let c = ShortcutStore.shared.combo(.stepClock) { return "Step Clock (\(c.label))" }
+        return "Step Clock"
+    }
+
+    private func barButton<L: View>(help: String, lit: Bool, disabled: Bool = false, @ViewBuilder label: () -> L,
+                                    action: @escaping () -> Void) -> some View {
+        // A disabled one ignores clicks but isn't .disabled, so its tip (what
+        // turns it on) still shows; VoiceOver hears it's unavailable, and why.
+        Button { if !disabled { action() } } label: {
             label()
                 .font(.system(size: 13))
                 .frame(width: 32, height: 32)
@@ -97,6 +109,8 @@ struct SimBar: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityValue(disabled ? "Unavailable" : "")
+        .accessibilityHint(disabled ? help : "")
     }
 
     /// Every switch (IN) and light (OUT), top to bottom and left to right

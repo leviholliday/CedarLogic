@@ -30,7 +30,7 @@ enum ToolGroup: Int, CaseIterable, Identifiable {
     case file, undo, clipboard, zoom, sim, run, lock, theme, tab, feedback
     var id: Int { rawValue }
     var name: String {
-        ["New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Speed",
+        ["New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
          "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback"][rawValue]
     }
 }

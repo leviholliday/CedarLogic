@@ -160,6 +160,55 @@ TEST_CASE("CLOCK toggles over time") {
 	CHECK(toggles >= 2);
 }
 
+TEST_CASE("a MANUAL clock holds still and moves only on MANUAL_LEVEL") {
+	Circuit c;
+	IDType clk = c.newGate("CLOCK");
+	c.setGateParameter(clk, "HALF_CYCLE", "1");
+	IDType wOut = c.newWire();
+	c.connectGateOutput(clk, "CLK", wOut);
+	stepN(c, 3);
+
+	// Switched to manual mid-run: it goes to 0 and stays there.
+	c.setGateParameter(clk, "MANUAL", "true");
+	stepN(c, 2);
+	CHECK(c.getWireState(wOut) == ZERO);
+	for (int i = 0; i < 50; i++) {
+		stepN(c, 1);
+		CHECK(c.getWireState(wOut) == ZERO);
+	}
+	CHECK(c.getGateParameter(clk, "MANUAL") == "true");
+
+	c.setGateParameter(clk, "MANUAL_LEVEL", "1");
+	stepN(c, 1);
+	CHECK(c.getWireState(wOut) == ONE);
+	stepN(c, 20);
+	CHECK(c.getWireState(wOut) == ONE);
+	c.setGateParameter(clk, "MANUAL_LEVEL", "0");
+	stepN(c, 1);
+	CHECK(c.getWireState(wOut) == ZERO);
+
+	// Saying MANUAL again leaves the level alone (a settings change re-sends it).
+	c.setGateParameter(clk, "MANUAL_LEVEL", "1");
+	c.setGateParameter(clk, "MANUAL", "true");
+	stepN(c, 1);
+	CHECK(c.getWireState(wOut) == ONE);
+	c.setGateParameter(clk, "MANUAL_LEVEL", "0");
+	stepN(c, 1);
+
+	// Back to running: it toggles again, and MANUAL_LEVEL no longer applies.
+	c.setGateParameter(clk, "MANUAL", "false");
+	c.setGateParameter(clk, "MANUAL_LEVEL", "1");
+	StateType prev = c.getWireState(wOut);
+	int toggles = 0;
+	for (int i = 0; i < 10; i++) {
+		stepN(c, 1);
+		StateType now = c.getWireState(wOut);
+		if (now != prev) toggles++;
+		prev = now;
+	}
+	CHECK(toggles >= 8);
+}
+
 TEST_CASE("JK flip-flop sets Q on J=1,K=0") {
 	Circuit c;
 	IDType jkff = c.newGate("JKFF");

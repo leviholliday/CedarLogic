@@ -149,6 +149,7 @@ enum HelpBook {
                  line: "It runs while you build.",
                  blocks: [
                     .p("The circuit runs all the time. The toolbar pauses and resumes it, **{step}** steps once, and the speed slider sets how long each step takes."),
+                    .p("**Step Clock ({stepClock})** works a clock by hand, one tick at a time. Double-click a clock and turn on **Only on Step Clock**: it holds still at 0. Each Step Clock then takes it to 1 and back to 0, letting the circuit settle after each, so a flip-flop changes once per press. It works running or paused; the clock button beside Step does the same. The flip-flop templates start this way, unless you pick **Running** on the Clock line in New from Template."),
                     .p("Click a switch to flip it; keypads and pulse generators take clicks too."),
                     .p("**Simulation View ({simView})** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the bar at the bottom shows every switch and light. Space pauses, Escape leaves."),
                     .p("**Lock** (in the toolbar) stops edits, so a circuit can be shown and played with but not changed. Switches still work."),

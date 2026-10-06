@@ -188,6 +188,7 @@ static const GateDefault kGateDefaults[] = {
   { "BA_SHIFT_REGISTER_4", true, "VALUE_BOX", "-0.8,-1.3,0.8,1.3" },
   { "BA_TRI_STATE", false, "INPUT_BITS", "1" },
   { "BB_CLOCK", false, "HALF_CYCLE", "5" },
+  { "BB_CLOCK", false, "MANUAL", "false" },
   { "BE_COMPARATOR_4BIT", false, "INPUT_BITS", "4" },
   { "BE_DECODER_3x8", false, "INPUT_BITS", "3" },
   { "BE_JKFF_LOW", false, "SYNC_CLEAR", "false" },

@@ -55,8 +55,11 @@ enum RenderUI {
                 try? pdf.write(to: dir.appendingPathComponent("timing.pdf"))
             }
         }
-        // The built-in templates, as files and pictures.
-        for t in Templates.builtIn {
+        // The built-in templates, as files and pictures (a flip-flop's running
+        // clock choice as -running).
+        let builtIn = Templates.builtIn.map { (id: $0.id, text: $0.text) }
+            + Templates.builtIn.compactMap { t in t.runningText.map { (id: t.id + "-running", text: $0) } }
+        for t in builtIn {
             try? t.text.write(to: dir.appendingPathComponent("template-\(t.id).cdl"), atomically: true, encoding: .utf8)
             if let d = try? CoreDocument(data: Data(t.text.utf8)),
                let ctx = CGContext(data: nil, width: 1600, height: 1000, bitsPerComponent: 8, bytesPerRow: 0,
@@ -184,6 +187,16 @@ enum RenderUI {
             }
             save("truthtable-wide-\(t)", TruthTableView(table: TruthTable(names: ["A", "B", "C", "Y1", "Y2", "Y3", "Y4", "Y5", "Y6"], inputs: 3, rows: wide)),
                  width: 900)
+            // New from Template on the J-K flip-flop, with its Clock line
+            // (through a real view: the list and the Clock control are AppKit).
+            let picker = NSHostingView(rootView: TemplatePicker(selection: "builtin-ff-jk"))
+            picker.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            picker.frame = NSRect(x: 0, y: 0, width: 940, height: 620)
+            picker.layoutSubtreeIfNeeded()
+            if let rep = picker.bitmapImageRepForCachingDisplay(in: picker.bounds) {
+                picker.cacheDisplay(in: picker.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("templates-\(t).png"))
+            }
             save("buildformula-\(t)", BuildFormulaView(text: "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", canvas: canvas), width: 560, height: 560)
         }
         // The memory editor, on an 8x8 RAM with a few words in it (drawn

@@ -1014,6 +1014,13 @@ struct CLToolbar: View {
                on: !canvas.isRunning) { canvas.toggleRunning() }
     }
 
+    /// Step Clock: off until the page has a clock set to move only on it.
+    private var stepClockButton: some View {
+        let ready = canvas.routed.hasManualClock
+        return button("clock.arrow.2.circlepath", ready ? tip("Step Clock", .stepClock) : CanvasController.stepClockOffTip,
+                      disabled: !ready) { canvas.perform(.stepClock) }
+    }
+
     @ViewBuilder private var leftTools: some View {
         if prefs.shown(.file) {
             group {
@@ -1048,6 +1055,7 @@ struct CLToolbar: View {
             group {
                 pauseButton
                 button("forward.frame.fill", tip("Step once", .step)) { canvas.stepOnce() }
+                stepClockButton
                 TBSpeed(stepMs: $canvas.stepMs, ink: ink, quiet: style == .seamless)
             }
         }
@@ -1108,6 +1116,7 @@ struct CLToolbar: View {
                     Button("Zoom to Fit") { canvas.zoomToFit() }
                     Divider()
                     Button("Step") { canvas.stepOnce() }
+                    Button("Step Clock") { canvas.perform(.stepClock) }.disabled(!canvas.routed.hasManualClock)
                     Button(canvas.locked ? "Unlock" : "Lock") { canvas.locked.toggle() }
                     Button("New Tab") { canvas.newPage() }
                     Button(focusMode ? "Leave Focus Mode" : "Focus Mode") { focusMode.toggle() }
