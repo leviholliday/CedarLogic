@@ -994,7 +994,7 @@ const Chapter kChapters[] = {
 	  "Open Sync Settings", kOpenSync },
 	{ "Check your work", "Check My Circuit", "Say what the assignment asks for, and CedarLogic checks every row of your circuit against it.",
 	  { { 0xE73E, "Simulate ▸ Check My Circuit (Shift+T)", "Opens the truth table on its Check tab." },
-	    { 0xE943, "A formula or a truth table", "Type the formula you were given, or paste the table. Switches and lights match by name." },
+	    { 0xE943, "A formula or a truth table", "Type the formula or minterms you were given, or paste the table. Switches and lights match by name." },
 	    { 0xE7BA, "Shows what's wrong", "It says which lights are wrong, and on how many rows, and warns about floating or unknown values." } },
 	  "Check My Circuit", CMD_CHECK_CIRCUIT },
 	{ "Hand it in", "Lab reports and share links", "A PDF to hand in, and a link anyone can open.",
@@ -1005,7 +1005,7 @@ const Chapter kChapters[] = {
 	{ "Tidy up", "Tidy Up, rebuilt", "Cleaner layouts, and fast on big pages.",
 	  { { 0xE80A, "Rearrange everything", "Edit ▸ Tidy Up by Signal Flow lays the whole page out by how the signals flow, with the wires rerouted." },
 	    { 0xE8F1, "Keeps what you drew", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
-	    { 0xE9D9, "Fast on big pages", "A page with 585 parts used to take half a minute. It takes about a second now." } },
+	    { 0xE9D9, "Fast on big pages", "A page with hundreds of parts used to take half a minute. Now it takes a second or two." } },
 	  "Tidy Up by Signal Flow", CMD_TIDY_FLOW },
 	{ "Also new", "Smaller things", "More that's changed since the last tour.",
 	  { { 0xE8A0, "Split view and focus mode", "Ctrl+Alt+S shows two tabs side by side. Ctrl+. slides the toolbar and side panel away." },
@@ -1238,7 +1238,7 @@ void pageIntro(ID2D1RenderTarget* rt, WhatsNew* wn, double t) {
 	const float x = 56, tw = 380;
 	text(rt, "WHAT'S NEW", x, 92, 11, kBold, kNeon, 0, DWRITE_TEXT_ALIGNMENT_LEADING, 1.8f);
 	float y = 112 + text(rt, "CedarLogic 0.4", x, 112, 34, kBold, D2D1::ColorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
-	y += text(rt, "Sync your circuits between devices, check your work, hand in a lab report, share a link, and tidy a big page in about a second. Here's everything that's new, a minute's read.",
+	y += text(rt, "Sync your circuits between devices, check your work, hand in a lab report, share a link, and tidy a big page fast. Here's everything that's new, a minute's read.",
 	          x, y, 14, kNormal, kSecondary, tw) + 20;
 	for (int i = 0; i < kChapterCount; i++) {
 		const D2D1_RECT_F r = D2D1::RectF(x - 8, y - 4, x + tw, y + 24);
@@ -1279,7 +1279,7 @@ void pageChapter(ID2D1RenderTarget* rt, WhatsNew* wn, int i, double t) {
 }
 
 void pageFinale(ID2D1RenderTarget* rt, WhatsNew* wn) {
-	float y = heading(rt, 56, 34, kNW - 112, "That's the tour", "Go build something", "Everything here is in Help too, whenever you want it.") + 22;
+	float y = heading(rt, 56, 34, kNW - 112, "That's the tour", "Go build something", "It's under Help ▸ What's New in CedarLogic whenever you want it back.") + 22;
 	struct Tile { const char* title; const char* line; wchar_t icon; };
 	const Tile tiles[] = {
 		{ "Take the guided tour", "Two switches, a gate and a light, on a circuit of its own.", 0xE805 },
@@ -1433,7 +1433,7 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 	const float k = (float)easeOut(t / 0.5);
 	icon(rt, w / 2 - 48, 40 + 8 * (1 - k), 96, 0.55f * k);
 	text(rt, "CedarLogic", 0, 152, 28, kBold, kPrimary, w, DWRITE_TEXT_ALIGNMENT_CENTER);
-	text(rt, "Version " CL_VERSION "  ·  native Windows test build  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0, 192, 12,
+	text(rt, "Version " CL_VERSION "  ·  native Windows  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0, 192, 12,
 	     kMedium, kNeon, w, DWRITE_TEXT_ALIGNMENT_CENTER);
 	text(rt,
 	     "A digital logic simulator, from Cedarville University. Rebuilt natively for Windows: plain Windows controls and Direct2D on "

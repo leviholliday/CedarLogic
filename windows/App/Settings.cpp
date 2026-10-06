@@ -552,7 +552,7 @@ void showPreferencesDialog(HWND parent) {
 	               "The readout along the bottom of the window. Notes (Saved, Copied\u2026) still show there for a moment either way."))] =
 		[](Form& form, int i) { prefs().showStatus = form.checked(i); apply(); };
 	on[f.add(check("Updates:", "Check for new versions", p.checkUpdates,
-	               "New test builds install from inside the app: it asks first, and keeps your circuits."))] = [](Form& form, int i) {
+	               "New versions install from inside the app: it asks first, and keeps your circuits."))] = [](Form& form, int i) {
 		prefs().checkUpdates = form.checked(i);
 		prefs().save();
 	};

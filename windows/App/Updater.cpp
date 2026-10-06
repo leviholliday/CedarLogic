@@ -416,7 +416,7 @@ void finish(HWND parent) {
 		return;
 	}
 	if (commit == CL_GIT_COMMIT) {
-		if (interactive) showMessage(parent, Tone::Info, "CedarLogic is up to date", "You have the newest test build.");
+		if (interactive) showMessage(parent, Tone::Info, "CedarLogic is up to date", "You have the newest version.");
 		return;
 	}
 	if (asset.url.empty()) {
@@ -425,7 +425,7 @@ void finish(HWND parent) {
 	}
 	if (!interactive && g_offered == commit) return;
 	g_offered = commit;
-	if (askConfirm(parent, "A new CedarLogic test build is ready",
+	if (askConfirm(parent, "A new version of CedarLogic is ready",
 	               strf("Build %s is out (you have %s). Download and install it now?", commit.substr(0, 7).c_str(),
 	                    std::string(CL_GIT_COMMIT).substr(0, 7).c_str()),
 	               "Install", "Not Now"))
