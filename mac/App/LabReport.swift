@@ -351,8 +351,10 @@ enum LabReport {
                 start = length - perChunk * maxChunks
                 paragraph("The recording is \(length) steps long; this shows the last \(perChunk * maxChunks).", size: 10)
             }
+            // One clock for the guide lines on every chunk, worked out over all of them.
+            let guide = signals.contains(where: \.blank) ? TimingDiagram.guide(document, signals: signals, range: start..<length) : nil
             if signals.contains(where: \.blank) {
-                paragraph("Fill in the empty rows. The dotted lines mark each clock edge.", size: 10)
+                paragraph(guide.map { "Fill in the empty rows. The dark lines mark each time \($0.name) changes." } ?? "Fill in the empty rows.", size: 10)
             }
             var from = start
             while from < length {
@@ -366,7 +368,8 @@ enum LabReport {
                 ctx.saveGState()
                 ctx.translateBy(x: margin, y: pageH - y - h)
                 ctx.scaleBy(x: s, y: s)
-                TimingDiagram.draw(ctx, document: document, signals: signals, range: range, title: title, color: color, titled: false)
+                TimingDiagram.draw(ctx, document: document, signals: signals, range: range, title: title, color: color,
+                                   guide: guide, titled: false)
                 ctx.restoreGState()
                 y += h + 6
             }
@@ -439,12 +442,13 @@ struct ExportReportView: View {
                                         Toggle(name, isOn: Binding(
                                             get: { blankSignals.contains(name) },
                                             set: { on in if on { blankSignals.insert(name) } else { blankSignals.remove(name) } }))
+                                        .accessibilityLabel("Leave \(name) blank")
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .frame(height: min(110, CGFloat(signalNames.count) * 22))
-                            Text("Those rows are drawn empty, with the time grid and a dotted guide at each clock edge, to fill in on paper. Leave them all unticked for the answer key.")
+                            Text("Those rows are drawn empty, with the time grid and a dark line each time the clock changes, to fill in on paper. The clock is a signal named CLK, CLOCK or CP, or one that ticks evenly, that isn't left blank. Leave them all unticked for the answer key.")
                                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.leading, 20)

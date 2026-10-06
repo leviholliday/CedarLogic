@@ -124,12 +124,13 @@ struct ScopeView: View {
                                     Toggle(name, isOn: Binding(
                                         get: { model.blank.contains(name) },
                                         set: { on in if on { model.blank.insert(name) } else { model.blank.remove(name) } }))
+                                    .accessibilityLabel("Leave \(name) blank")
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(height: min(130, CGFloat(listed.count) * 22))
-                        Text("Those rows come out empty, with the time grid and a guide at each clock edge. The normal export is the answer key.")
+                        Text("Those rows come out empty, with the time grid and a dark line each time the clock changes (a shown signal named CLK, CLOCK or CP, or one that ticks evenly). The normal export is the answer key.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     .toggleStyle(.checkbox)
