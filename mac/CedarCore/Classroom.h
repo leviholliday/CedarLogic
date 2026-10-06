@@ -1,0 +1,205 @@
+// The CedarLogic classroom core (CLASSROOM.md). Plain C++17; crypto, P-256,
+// HTTP, files and the UI thread come in through the hooks.
+//
+// This is CLASSROOM.md 6.2, with a few small additions marked "(added)":
+// Host::checkCircuit and Host::lightsOf (Check My Circuit and the lights of a
+// pushed circuit come from the app, which has the simulator and the formula
+// reader), Config::deviceName, and read-only fields the UI needs (a record's
+// problem line, a class's warning line, the student's own score).
+#pragma once
+#include "Sync.h"          // clsync::Crypto, HttpRequest, HttpResponse, Bytes
+#include <functional>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace clclass {
+
+using clsync::Bytes;
+using Done = std::function<void(bool ok, const std::string& message)>;   // on the UI thread
+
+// ---- What the platform provides ----------------------------------------------------
+
+// P-256 (thread-safe), beside clsync::Crypto's random / sha256 / hmac / AES-GCM / deflate.
+struct Curve {
+	virtual ~Curve() = default;
+	virtual bool p256Generate(uint8_t d[32], uint8_t pub[65]) = 0;                       // a fresh key pair; false = stop
+	virtual bool p256Public(const uint8_t d[32], uint8_t pub[65]) = 0;                    // false if d is 0 or >= n
+	virtual bool p256Ecdh(const uint8_t d[32], const uint8_t peer[65], uint8_t x[32]) = 0;   // false: peer isn't 04|X|Y on the curve
+	// PBKDF2-HMAC-SHA256 for the join code (1.3). The default runs the rounds on clsync::Crypto's hmacSha256
+	// hook (about a second); a platform with a native PBKDF2 (CommonCrypto, OpenSSL, CNG) overrides it.
+	virtual bool pbkdf2Sha256(clsync::Crypto&, const uint8_t* pw, size_t pwLen, const uint8_t* salt, size_t saltLen,
+	                          uint32_t rounds, uint8_t out[32]);
+};
+
+struct Assignment {
+	std::string id, title, instructions, cdl;
+	int64_t dueAt = -1;                 // -1: none
+	bool closeAfterDue = false;
+	int64_t ver = 0;
+	std::string keyText, keyNames;      // the key as typed (students can check), or the teacher's own copy
+	bool keySealed = false;             // the key is sealed to the teacher (students see only that there is one)
+	// a student's view:
+	int64_t handedInAt = 0; int attempts = 0; bool changedSince = false; bool pending = false; bool closed = false;
+	bool unreadable = false;            // damaged, or needs a newer CedarLogic (message says which)
+	std::string problem;
+};
+struct Submission {
+	std::string studentId, name, cdl;
+	int64_t handedInAt = 0; int attempts = 0;
+	int checkVerdict = -1;              // -1 not checked, 0 matches, 1 wrong rows, 2 couldn't check
+	std::string checkSummary;
+	bool unreadable = false;
+	// (added) "Couldn't be read", "Couldn't be read (too big)", "Needs a newer CedarLogic" or
+	// "Couldn't be verified"; left: the student left or was removed, "(left the class)".
+	std::string problem;
+	bool left = false;
+	int64_t ver = 0;
+};
+struct Student { std::string studentId, name; int64_t joinedAt = 0, seenAt = 0; bool unreadable = false; };
+struct Live {
+	bool on = false, ended = false, reveal = false, hasPredict = false;
+	std::string session, cdl, prompt;
+	std::vector<std::string> lights;
+	int64_t ver = 0; int step = 0;
+	int myRight = -1, myTotal = 0;      // (added) a student's own guesses once revealed (-1: no score)
+	bool takeOver = false;              // (added) teacher: another device is live; takeOverLive() takes over
+};
+struct AnswerCounts { int answered = 0, students = 0, right = 0, wrong = 0; std::map<std::string, std::pair<int, int>> perLight; };   // light -> (ones, zeros)
+struct ClassInfo {
+	std::string classId, name;
+	bool teaching = false;              // else a membership
+	std::string teacherKey, joinCode;   // teaching
+	bool joinOpen = true;
+	std::string studentName;            // membership
+	int64_t expiresAt = 0;
+	bool live = false;
+	// (added) a line for the class page: the expiry warning (4.1), or "The join record on the
+	// website isn't the one your devices wrote. Change the join code."
+	std::string warning;
+};
+struct Status { enum Kind { Idle, Working, Offline, Error, Gone } kind = Idle; std::string text; };
+
+struct Host {
+	virtual ~Host() = default;
+	// Engine thread. Blocking, as Sync's; HTTPS only (http only for localhost overrides).
+	virtual clsync::HttpResponse http(const clsync::HttpRequest&) = 0;
+	virtual void onMain(const std::function<void()>&) = 0;
+	// The Classroom folder (2.4): "teaching.json", "memberships.json", "cache/<classId>/<name>". "" = none. Atomic, 0600.
+	virtual std::string loadFile(const std::string& name) = 0;
+	virtual bool saveFile(const std::string& name, const std::string& text) = 0;
+	virtual void removeTree(const std::string& name) = 0;
+	virtual bool tryLock(const std::string& lockPath) = 0;
+	virtual void unlock() = 0;
+	// UI thread:
+	virtual void classesChanged() = 0;                                          // lists, assignments, roster, hand-ins
+	virtual void liveChanged(const std::string& classId, const Live&) = 0;      // a new version for a student following
+	virtual void answersChanged(const std::string& classId, const AnswerCounts&) = 0;
+	virtual void statusChanged(const std::string& classId, const Status&) = 0;
+	virtual void notice(const std::string& text) = 0;
+	// Sync's side records (2.5); a host without Sync returns nothing and ignores writes.
+	virtual std::vector<std::pair<std::string, std::string>> syncSideRecords() = 0;   // (rid, payload JSON) of kind "classroom"
+	virtual void syncPutSide(const std::string& ridOrEmpty, const std::string& payloadJson) = 0;
+	virtual void syncDeleteSide(const std::string& rid) = 0;
+	// (added) Engine thread. Check My Circuit on a hand-in (4.3): the verdict (0 matches, 1 wrong
+	// rows, 2 couldn't check) and the Check sheet's one-line summary. false: not checked.
+	virtual bool checkCircuit(const std::string& cdl, const std::string& keyText, const std::string& keyNames,
+	                          int& verdict, std::string& summary) {
+		(void)cdl; (void)keyText; (void)keyNames; (void)verdict; (void)summary;
+		return false;
+	}
+	// (added) Engine thread. The named lights of a circuit once it settles (0 or 1), for scoring
+	// predict answers after a reveal (4.4, 4.6). false: can't tell (no right/wrong is shown).
+	virtual bool lightsOf(const std::string& cdl, const std::vector<std::string>& lights, std::map<std::string, int>& values) {
+		(void)cdl; (void)lights; (void)values;
+		return false;
+	}
+};
+
+struct Config {
+	std::string dir;                    // the Classroom folder
+	std::string serverBase = "https://cedarlogic.netlify.app/api/classroom/v1";
+	std::string liveBase = "https://cedarlogic.netlify.app/api/live/v1";
+	std::string appKey, client;         // x-cedarlogic-key, x-cedarlogic-client
+	std::string deviceName;             // (added) the sync side record's `device` (2.5)
+};
+
+// ---- Codes and text (any thread) --------------------------------------------------------
+
+enum class CodeKind { Teacher, Join, Move };
+std::string newCode(clsync::Crypto&, CodeKind);                              // "" if the RNG failed
+bool parseCode(clsync::Crypto&, CodeKind, const std::string& text, std::string& code, std::string& why);   // why: length | symbol | checksum | kind
+std::string whyText(CodeKind, const std::string& why, const std::string& text);
+std::string groupCode(const std::string& code);
+std::string webLink(CodeKind, const std::string& code);
+std::string appLink(CodeKind, const std::string& code);
+// (QR modules: clsync::qr of the web link)
+
+// ---- The engine (create, call and destroy on the UI thread) -------------------------
+
+class Engine {
+public:
+	Engine(Config, clsync::Crypto&, Curve&, Host&);
+	~Engine();
+	void start();                                        // loads the files, starts polling for open pages
+	void stop();
+
+	std::vector<ClassInfo> classes() const;
+	Status status(const std::string& classId) const;
+
+	// Teacher (4.1-4.4). `done` on the UI thread.
+	void createClass(const std::string& name, std::function<void(bool, std::string message, std::string classId)> done);
+	void previewTeacherKey(const std::string& text, std::function<void(bool, std::string message, std::string className)> done);
+	void addTeacherKey(const std::string& text, Done done);
+	void renameClass(const std::string& classId, const std::string& name, Done);
+	void setJoinOpen(const std::string& classId, bool open, Done);
+	void newJoinCode(const std::string& classId, Done);
+	void forgetClass(const std::string& classId);                                   // Remove from This Device: this device only
+	void deleteClass(const std::string& classId, Done);                             // the website too
+	std::vector<Assignment> assignments(const std::string& classId) const;
+	void postAssignment(const std::string& classId, const Assignment& draft, bool studentsCanCheck, Done);   // draft.id "" = new
+	void deleteAssignment(const std::string& classId, const std::string& aid, Done);
+	std::vector<Student> students(const std::string& classId) const;
+	void refreshStudents(const std::string& classId, Done);
+	void removeStudents(const std::string& classId, const std::vector<std::string>& sids, bool deleteHandIns, Done);   // one or many
+	std::vector<Submission> submissions(const std::string& classId, const std::string& aid) const;
+	void refreshSubmissions(const std::string& classId, const std::string& aid, Done);  // index, fetch, open, check
+	void goLive(const std::string& classId, const std::string& cdl, Done);
+	void push(const std::string& classId, const std::string& cdl, const std::string* prompt,
+	          const std::vector<std::string>* lights, bool reveal, Done);
+	void endLive(const std::string& classId, Done);
+	void takeOverLive(const std::string& classId, Done);                             // after a 412
+	Live live(const std::string& classId) const;
+	AnswerCounts answers(const std::string& classId) const;
+
+	// Student (4.5-4.7).
+	void previewJoinCode(const std::string& text, std::function<void(bool, std::string message, std::string className, bool open)> done);
+	void join(const std::string& text, const std::string& name, std::function<void(bool, std::string message, std::string classId)> done);
+	void rename(const std::string& classId, const std::string& name, Done);
+	void handIn(const std::string& classId, const std::string& aid, const std::string& cdl, Done);   // queues when offline
+	void follow(const std::string& classId, bool following);                        // the live view is open
+	void sendAnswer(const std::string& classId, const std::map<std::string, int>& lights, Done);
+	void makeMoveCode(const std::string& classId, std::function<void(bool, std::string message, std::string code)> done);
+	void previewMoveCode(const std::string& text, std::function<void(bool, std::string message, std::string className, std::string studentName)> done);
+	void importMoveCode(const std::string& text, Done);
+	void leaveClass(const std::string& classId, Done);
+	void forgetMembership(const std::string& classId);                              // Remove from This Device: nothing on the website
+
+	// Triggers (4.8).
+	void pageOpen(const std::string& classId, bool open);                            // the class page is showing
+	void appActivated();
+	void appDeactivated();
+	void userActive();
+	void syncSideChanged();                                                          // Sync applied a classroom record
+
+private:
+	struct Impl;
+	std::unique_ptr<Impl> d;
+};
+
+// The vectors of 7.1 and the scenarios of 7.2 on an in-process FakeServer (and, with serverBase, the mock server).
+bool selfTest(clsync::Crypto&, Curve&, const std::string& tempDir, std::string& report, Host* httpOnly = nullptr,
+              const std::string& serverBase = "", const std::string& liveBase = "");
+
+}  // namespace clclass
