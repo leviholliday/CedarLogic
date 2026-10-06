@@ -4,6 +4,9 @@
 // With CL_RENDER_FITTED=light|dark|print it draws through the export path
 // (cl_document_draw_fitted) instead. With CL_RENDER_HOVER=1 it points at the
 // page's longest wire first and draws the hover highlight, printing its value.
+// CL_RENDER_CLICKS="x,y;x,y" clicks those points (switches) first, and
+// CL_RENDER_STEPS=n then runs n simulation steps, so the picture shows the
+// circuit running instead of just opened.
 #include "CedarCore.h"
 #include "DocumentImpl.h"
 #include "guiWire.h"
@@ -22,6 +25,16 @@ int main(int argc, char** argv) {
 	CLDocument* doc = cl_document_open(argv[2], err, sizeof err);
 	if (!doc) { fprintf(stderr, "open failed: %s\n", err); return 1; }
 	const int page = atoi(argv[3]);
+	if (const char* clicks = getenv("CL_RENDER_CLICKS")) {
+		double x, y;
+		for (const char* c = clicks; sscanf(c, "%lf,%lf", &x, &y) == 2; ) {
+			cl_document_click(doc, page, x, y);
+			if (!(c = strchr(c, ';'))) break;
+			c++;
+		}
+	}
+	if (const char* steps = getenv("CL_RENDER_STEPS"))
+		for (int i = atoi(steps); i > 0; i--) cl_document_step(doc);
 	const int W = argc > 6 ? atoi(argv[5]) : 1400, H = argc > 6 ? atoi(argv[6]) : 1000;
 	const double sf = 2.0;   // draw as a Retina view would
 	double l, b, r, t;

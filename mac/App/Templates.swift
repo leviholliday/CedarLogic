@@ -1,6 +1,7 @@
 // Templates: File ▸ New from Template starts a circuit from a built-in
 // starter (a lab page, a counter, a 7-segment decoder, each kind of
-// flip-flop and latch, ready to run) or one of yours;
+// flip-flop and latch, ready to run, and four circuits with a classic
+// mistake in them to find) or one of yours;
 // File ▸ Save as Template keeps the circuit you're in as one of yours.
 //
 // Yours are folders in ~/Library/Application Support/CedarLogic/Templates,
@@ -117,7 +118,7 @@ enum Templates {
         CircuitTemplate(id: "builtin-7seg", name: "7-Segment Decoder Starter",
                         detail: "Four switches and seven segment lights: build the decoder between them",
                         text: sevenSegment(), folder: nil),
-    ] + flipFlops() }
+    ] + flipFlops() + classicMistakes() }
 
     /// Built-in groups, in the picker's order.
     static var builtInGroups: [(name: String, list: [CircuitTemplate])] {
@@ -289,6 +290,149 @@ enum Templates {
         let hint = "Press K to step the clock. PRE' and CLR' are active low."
         p += [label(title, x: 0, y: 21, height: 3), label(hint, x: 0, y: -19.5, height: 1.4)]
         return build(p, w, big: [title: 3, hint: 1.4], manualClock: true)
+    }
+
+    // MARK: Classic mistakes
+
+    /// Four small circuits that each show a classic mistake in the
+    /// simulator, with a big "What's wrong here?" and a hint that doesn't
+    /// give the answer away.
+    private static func classicMistakes() -> [CircuitTemplate] {
+        func t(_ id: String, _ name: String, _ detail: String, _ text: String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-mistake-" + id, name: name, detail: detail, text: text, folder: nil, group: "Classic Mistakes")
+        }
+        return [
+            t("latch", "J-K Latch from Gates", "Four gates make a J-K latch with a Reset. Switch it on and see what Q does",
+              mistakeLatch()),
+            t("gated-clock", "Gated Clock Counter", "A counter behind an AND gate. Press Step Clock and watch the count",
+              mistakeGatedClock()),
+            t("floating", "Three-Input AND", "A light on a 3-input AND gate with two switches. Try every combination",
+              mistakeFloating()),
+            t("two-outputs", "Two Gates, One Light", "An AND gate and an OR gate share a light. Try every combination",
+              mistakeTwoOutputs()),
+        ]
+    }
+
+    /// The big question and the hint under it, at the top left of a mistake
+    /// template (the labels are scaled by `build`).
+    private static func mistakeLabels(_ hint: String, x: Double, y: Double) -> (parts: [Part], big: [String: Double]) {
+        let question = "What's wrong here?"
+        return ([label(question, x: x, y: y, height: 3), label(hint, x: x, y: y - 5, height: 1.4)], [question: 3, hint: 1.4])
+    }
+
+    /// A J-K latch from gates: S = J.EN.Q' and R = K.EN.Q feed a pair of
+    /// cross-coupled NOR gates. With J = K = 1 and EN on, each change of Q
+    /// switches the other gate on, so Q never settles. Reset (an extra input
+    /// on Q's NOR gate) starts it at Q = 0, since a latch like this has no
+    /// way to start from nothing; it starts reset, with J = K = 1 and EN off.
+    private static func mistakeLatch() -> String {
+        var p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 15, on: true),    // 0 Reset
+            Part(gate: "AA_TOGGLE", x: 0, y: 8, on: true),     // 1 K
+            Part(gate: "AA_TOGGLE", x: 0, y: 0),               // 2 EN
+            Part(gate: "AA_TOGGLE", x: 0, y: -8, on: true),    // 3 J
+            Part(gate: "AA_AND3", x: 12, y: 8),                // 4 R = K.EN.Q
+            Part(gate: "AA_AND3", x: 12, y: -8),               // 5 S = J.EN.Q'
+            Part(gate: "BE_NOR3", x: 26, y: 8),                // 6 Q
+            Part(gate: "BE_NOR2", x: 26, y: -8),               // 7 Q'
+            Part(gate: "GA_LED", x: 36, y: 8),                 // 8
+            Part(gate: "GA_LED", x: 36, y: -8),                // 9
+        ]
+        p += [label("Reset", right: -2.4, y: 15), label("K", right: -2.4, y: 8),
+              label("EN", right: -2.4, y: 0), label("J", right: -2.4, y: -8),
+              label("Q", x: 38, y: 8), label("Q'", x: 38, y: -8)]
+        let w = [Wire(from: 1, fromPin: "OUT_0", to: 4, toPin: "IN_0"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 4, toPin: "IN_1"),
+                 Wire(from: 6, fromPin: "OUT", to: 4, toPin: "IN_2"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 5, toPin: "IN_0"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 5, toPin: "IN_1"),
+                 Wire(from: 7, fromPin: "OUT", to: 5, toPin: "IN_2"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 6, toPin: "IN_0"),
+                 Wire(from: 4, fromPin: "OUT", to: 6, toPin: "IN_1"),
+                 Wire(from: 7, fromPin: "OUT", to: 6, toPin: "IN_2"),
+                 Wire(from: 5, fromPin: "OUT", to: 7, toPin: "IN_0"),
+                 Wire(from: 6, fromPin: "OUT", to: 7, toPin: "IN_1"),
+                 Wire(from: 6, fromPin: "OUT", to: 8, toPin: "N_in0"),
+                 Wire(from: 7, fromPin: "OUT", to: 9, toPin: "N_in0")]
+        let (labels, big) = mistakeLabels("Turn Reset off, then switch EN on. Watch Q and Q'.", x: -4, y: 26)
+        return build(p + labels, w, big: big)
+    }
+
+    /// A toggle flip-flop (J = K = 1) makes Enable alternate 1, 0, 1, 0 right
+    /// after each rising edge, while the clock is still high, and an AND
+    /// gate passes the clock to the counter only while Enable is 1. When
+    /// Enable is 0 at the edge and turns on a moment later, the AND gate's
+    /// output rises: an extra edge, so the counter counts on every press
+    /// instead of every other one.
+    private static func mistakeGatedClock() -> String {
+        var p: [Part] = [
+            Part(gate: "BB_CLOCK", x: 0, y: 0),                // 0
+            Part(gate: "BE_JKFF_LOW", x: 16, y: 0),            // 1 toggles
+            Part(gate: "EE_VDD", x: 12, y: 11),                // 2 J and PRE'
+            Part(gate: "EE_VDD", x: 12, y: -11),               // 3 K and CLR'
+            Part(gate: "AA_AND2", x: 32, y: 0),                // 4 the gated clock
+            Part(gate: "AA_REGISTER4", x: 48, y: 0),           // 5 the counter
+            Part(gate: "EE_VDD", x: 42, y: 11),                // 6
+            Part(gate: "FF_GND", x: 42, y: -11),               // 7
+            Part(gate: "GE_LED_DISPLAY_4BIT", x: 64, y: 0),    // 8
+            Part(gate: "GA_LED", x: 24, y: 8),                 // 9 Enable
+        ]
+        p += [label("Clock (K)", x: 1, y: -4.2), label("Enable", x: 20.4, y: 11), label("Count", x: 61, y: -5)]
+        let w = [Wire(from: 0, fromPin: "CLK", to: 1, toPin: "clock"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 1, toPin: "J"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 1, toPin: "set"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 1, toPin: "K"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 1, toPin: "clear"),
+                 Wire(from: 1, fromPin: "Q", to: 4, toPin: "IN_0"),
+                 Wire(from: 0, fromPin: "CLK", to: 4, toPin: "IN_1"),
+                 Wire(from: 1, fromPin: "Q", to: 9, toPin: "N_in0"),
+                 Wire(from: 4, fromPin: "OUT", to: 5, toPin: "clock"),
+                 Wire(from: 6, fromPin: "OUT_0", to: 5, toPin: "count_enable"),
+                 Wire(from: 6, fromPin: "OUT_0", to: 5, toPin: "count_up"),
+                 Wire(from: 7, fromPin: "OUT_0", to: 5, toPin: "load"),
+                 Wire(from: 7, fromPin: "OUT_0", to: 5, toPin: "clear")]
+        var wires = w
+        for i in 0..<4 { wires.append(Wire(from: 5, fromPin: "OUT_\(i)", to: 8, toPin: "IN_\(i)")) }
+        let (labels, big) = mistakeLabels("Press Step Clock (K) eight times. Watch Enable and the count.", x: -4, y: 24)
+        return build(p + labels, wires, big: big, manualClock: true)
+    }
+
+    /// A 3-input AND gate with one input left unwired. While A or B is 0 the
+    /// output is 0 whatever the open input is; with both on it is unknown.
+    private static func mistakeFloating() -> String {
+        var p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 4, on: true),     // 0 A
+            Part(gate: "AA_TOGGLE", x: 0, y: -4, on: true),    // 1 B
+            Part(gate: "AA_AND3", x: 14, y: 0),                // 2
+            Part(gate: "GA_LED", x: 26, y: 0),                 // 3
+        ]
+        p += [label("A", right: -2.4, y: 4), label("B", right: -2.4, y: -4), label("Light", x: 24.2, y: 4)]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 2, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 3, toPin: "N_in0")]
+        let (labels, big) = mistakeLabels("Try every combination of A and B. Does the light always make sense?", x: -4, y: 14)
+        return build(p + labels, w, big: big)
+    }
+
+    /// An AND gate and an OR gate, both fed by A and B, both wired to one
+    /// light. Where they differ (A and B different) the wire is in conflict.
+    private static func mistakeTwoOutputs() -> String {
+        var p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 6, on: true),     // 0 A
+            Part(gate: "AA_TOGGLE", x: 0, y: -6),              // 1 B
+            Part(gate: "AA_AND2", x: 14, y: 6),                // 2
+            Part(gate: "AE_OR2", x: 14, y: -6),                // 3
+            Part(gate: "GA_LED", x: 28, y: 0),                 // 4
+        ]
+        p += [label("A", right: -2.4, y: 6), label("B", right: -2.4, y: -6), label("Light", x: 26.2, y: 4)]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 2, toPin: "IN_1"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 3, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 3, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 4, toPin: "N_in0"),
+                 Wire(from: 3, fromPin: "OUT", to: 4, toPin: "N_in0")]
+        let (labels, big) = mistakeLabels("Watch the light as you change A and B.", x: -4, y: 16)
+        return build(p + labels, w, big: big)
     }
 
     private static func srLatch() -> String {
