@@ -1,7 +1,9 @@
 // Headless check of Step Clock (clocks with "Only on Step Clock" on) through
 // the C interface, on the flip-flop templates `CedarLogic --render-ui <dir>`
 // writes: manual clocks hold still, each Step Clock is one full cycle, a
-// running clock still runs, and the setting survives a save.
+// running clock still runs (and the templates' running choice has one), the
+// setting survives a save, a clock with it off saves without it, and undo
+// turns it back off.
 //   clock_check <cl_gatedefs.xml> <dir with template-builtin-ff-*.cdl>
 #include "CedarCore.h"
 #include <chrono>
@@ -151,8 +153,8 @@ int main(int argc, char** argv) {
 		if (!readFile(dir + "/template-builtin-ff-" + t.id + ".cdl", text)) { check(false, name + ": template file"); continue; }
 		if (strcmp(t.id, "jk") == 0) jkText = text;
 		check(text.find("(lparam \"MANUAL\" \"true\")") != std::string::npos, name + ": the clock is saved as manual");
-		check(text.find("Clock (K)") != std::string::npos && text.find("Press K to step the clock.") != std::string::npos,
-		      name + ": the labels say K");
+		check(text.find("\"Clock\"") != std::string::npos && text.find("The K key steps the clock. Turn PRE' or CLR' off") != std::string::npos,
+		      name + ": the labels name the K key");
 		CLDocument* doc = openText(text);
 		if (!doc) { failures++; continue; }
 		check(cl_document_manual_clock_count(doc, 0) == 1, name + ": one manual clock on the page");
@@ -185,6 +187,73 @@ int main(int argc, char** argv) {
 			captures(doc, name, 8);
 		}
 		cl_document_close(doc);
+
+		// The picker's running choice: the same circuit with a running clock.
+		std::string running;
+		if (!readFile(dir + "/template-builtin-ff-" + t.id + "-running.cdl", running)) { check(false, name + "-running: template file"); continue; }
+		check(running.find("MANUAL") == std::string::npos, name + "-running: no MANUAL saved");
+		check(running.find("The clock runs by itself.") != std::string::npos, name + "-running: the hint says it runs");
+		doc = openText(running);
+		if (!doc) { failures++; continue; }
+		check(cl_document_manual_clock_count(doc, 0) == 0, name + "-running: no manual clock");
+		if (strcmp(t.kind, "jk") == 0 || strcmp(t.kind, "t") == 0) {
+			flip(doc, 8);
+			if (strcmp(t.kind, "jk") == 0) flip(doc, -8);
+			int changes = 0;
+			bool prev = q(doc);
+			for (int i = 0; i < 200; i++) { cl_document_step(doc); if (q(doc) != prev) { changes++; prev = q(doc); } }
+			check(changes >= 10, name + "-running: Q toggles by itself (" + std::to_string(changes) + " changes in 200 steps)");
+		}
+		cl_document_close(doc);
+	}
+
+	// A new clock: no MANUAL in its file (off isn't saved, so a running
+	// clock's file and sync's digest match older versions). Turning it on
+	// saves it; undo turns it off again, redo back on.
+	{
+		CLDocument* doc = cl_document_new();
+		CLBuildGate gates[] = { { "BB_CLOCK", 0, 0, nullptr } };
+		check(cl_edit_build(doc, 0, gates, 1, nullptr, 0, "Test") == 1, "new clock: built");
+		const long gate = cl_edit_single_gate(doc, 0);
+		check(setting(doc, gate, "MANUAL") == "Only on Step Clock|BOOL|false", "new clock: Only on Step Clock shows off");
+		std::string text = cl_document_save_text(doc);
+		check(text.find("MANUAL") == std::string::npos && text.find("HALF_CYCLE") != std::string::npos,
+		      "new clock: saved without MANUAL");
+		check(cl_document_manual_clock_count(doc, 0) == 0, "new clock: not manual");
+		check(cl_gate_set_setting(doc, gate, "MANUAL", "true"), "new clock: turned on");
+		text = cl_document_save_text(doc);
+		check(cl_document_manual_clock_count(doc, 0) == 1 && text.find("(lparam \"MANUAL\" \"true\")") != std::string::npos,
+		      "new clock: on, and saved as true");
+		check(cl_edit_undo(doc), "new clock: undo");
+		text = cl_document_save_text(doc);
+		check(cl_document_manual_clock_count(doc, 0) == 0 && text.find("MANUAL") == std::string::npos,
+		      "new clock: after undo, off and saved without MANUAL");
+		check(!cl_document_clock_step(doc, 0), "new clock: after undo, Step Clock has nothing to step");
+		check(cl_edit_redo(doc), "new clock: redo");
+		text = cl_document_save_text(doc);
+		check(cl_document_manual_clock_count(doc, 0) == 1 && text.find("(lparam \"MANUAL\" \"true\")") != std::string::npos,
+		      "new clock: after redo, on again");
+		cl_document_close(doc);
+	}
+
+	// A file that says MANUAL "false" (by hand, or another app): saved
+	// back without it.
+	{
+		CLDocument* doc = cl_document_new();
+		CLBuildGate gates[] = { { "BB_CLOCK", 0, 0, nullptr } };
+		cl_edit_build(doc, 0, gates, 1, nullptr, 0, "Test");
+		std::string text = cl_document_save_text(doc);
+		cl_document_close(doc);
+		const size_t at = text.find("(lparam \"HALF_CYCLE\"");
+		if (at != std::string::npos) text.insert(at, "(lparam \"MANUAL\" \"false\") ");
+		check(text.find("MANUAL") != std::string::npos, "MANUAL false file: made");
+		doc = openText(text);
+		if (doc) {
+			check(cl_document_manual_clock_count(doc, 0) == 0, "MANUAL false file: a running clock");
+			check(std::string(cl_document_save_text(doc)).find("MANUAL") == std::string::npos,
+			      "MANUAL false file: saved without it");
+			cl_document_close(doc);
+		}
 	}
 
 	// Save and reopen: the setting stays, either way.
@@ -201,7 +270,7 @@ int main(int argc, char** argv) {
 		const long gate = clockGate(doc, 0);
 		cl_gate_set_setting(doc, gate, "MANUAL", "false");
 		const std::string off = cl_document_save_text(doc);
-		check(off.find("(lparam \"MANUAL\" \"false\")") != std::string::npos, "save with the setting off: written as false");
+		check(off.find("MANUAL") == std::string::npos, "save with the setting off: not written");
 		again = openText(off);
 		check(again && cl_document_manual_clock_count(again, 0) == 0, "save and reopen with it off: a running clock");
 		if (again) cl_document_close(again);

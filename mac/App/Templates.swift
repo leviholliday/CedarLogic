@@ -19,6 +19,15 @@ struct CircuitTemplate: Identifiable, Hashable {
     let folder: URL?
     /// The picker's heading for a built-in one.
     var group = "Built In"
+    /// A flip-flop's text with a running clock (`text` has one that moves
+    /// only on Step Clock): the picker's Clock line chooses.
+    var runningText: String? = nil
+
+    /// This one with its clock running, if it has the choice.
+    var running: CircuitTemplate {
+        guard let runningText else { return self }
+        return CircuitTemplate(id: id, name: name, detail: detail, text: runningText, folder: folder, group: group)
+    }
 }
 
 @MainActor
@@ -97,13 +106,14 @@ enum Templates {
     }
 
     /// Built by the engine when first asked for (and again when your name
-    /// changes: the lab page carries it).
-    private static var builtCache: (name: String, list: [CircuitTemplate])?
+    /// or the Step Clock key changes: the lab page and flip-flops carry them).
+    private static var builtCache: (name: String, key: String?, list: [CircuitTemplate])?
     static var builtIn: [CircuitTemplate] {
         let name = Prefs.shared.studentName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let c = builtCache, c.name == name { return c.list }
+        let key = ShortcutStore.shared.combo(.stepClock)?.label
+        if let c = builtCache, c.name == name, c.key == key { return c.list }
         let list = makeBuiltIn(name: name)
-        builtCache = (name, list)
+        builtCache = (name, key, list)
         return list
     }
 
@@ -144,6 +154,16 @@ enum Templates {
         let gates = parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c)) }
         let links = wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
         _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), links, Int32(links.count), "Template")
+        if manualClock {
+            // Each clock, picked by its place like a click would.
+            for p in parts where p.gate == "BB_CLOCK" {
+                cl_edit_select_none(doc.handle, 0)
+                _ = cl_edit_press(doc.handle, 0, p.x, p.y, 0, 0.05)
+                cl_edit_release(doc.handle, p.x, p.y)
+                let gate = cl_edit_single_gate(doc.handle, 0)
+                if gate >= 0 { _ = cl_gate_set_setting(doc.handle, gate, "MANUAL", "true") }
+            }
+        }
         cl_edit_select_none(doc.handle, 0)
         for p in parts where p.on { _ = cl_document_click(doc.handle, 0, p.x, p.y) }
         var text = doc.saveText()
@@ -153,9 +173,6 @@ enum Templates {
                 text = re.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text),
                                                    withTemplate: "$1\(height)")
             }
-        }
-        if manualClock {
-            text = text.replacingOccurrences(of: "(lparam \"MANUAL\" \"false\")", with: "(lparam \"MANUAL\" \"true\")")
         }
         return text
     }
@@ -236,20 +253,25 @@ enum Templates {
         func t(_ id: String, _ name: String, _ detail: String, _ text: String) -> CircuitTemplate {
             CircuitTemplate(id: "builtin-ff-" + id, name: name, detail: detail, text: text, folder: nil, group: "Flip-Flops and Latches")
         }
+        // A clocked one: manual (Step Clock) as given, running as the choice.
+        func t(_ id: String, _ name: String, _ detail: String, _ make: (Bool) -> String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-ff-" + id, name: name, detail: detail, text: make(true), folder: nil,
+                            group: "Flip-Flops and Latches", runningText: make(false))
+        }
         return [
             t("d", "D Flip-Flop", "Q takes D on each rising clock edge; PRE' and CLR' set or clear it at any time",
-              flipFlop("AE_DFF_LOW", title: "D Flip-Flop", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1))),
+              { flipFlop("AE_DFF_LOW", title: "D Flip-Flop", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1), manual: $0) }),
             t("d-nt", "D Flip-Flop, Falling Edge", "The same, triggered as the clock falls from 1 to 0",
-              flipFlop("AE_DFF_LOW_NT", title: "D Flip-Flop, Falling Edge", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1))),
+              { flipFlop("AE_DFF_LOW_NT", title: "D Flip-Flop, Falling Edge", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1), manual: $0) }),
             t("d-ce", "D Flip-Flop with Clock Enable", "Q takes D on a rising edge only while CE is 1",
-              flipFlop("AF_DFF_LOW", title: "D Flip-Flop with Clock Enable", inputs: [("D", "IN_0", 2), ("CE", "clock_enable", -2)], clockY: 0,
-                       q: ("OUT_0", 2), nq: ("OUTINV_0", -1))),
+              { flipFlop("AF_DFF_LOW", title: "D Flip-Flop with Clock Enable", inputs: [("D", "IN_0", 2), ("CE", "clock_enable", -2)], clockY: 0,
+                       q: ("OUT_0", 2), nq: ("OUTINV_0", -1), manual: $0) }),
             t("jk", "J-K Flip-Flop", "On each rising edge: J sets, K resets, both toggle, neither holds; PRE' and CLR' act at once",
-              flipFlop("BE_JKFF_LOW", title: "J-K Flip-Flop", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2))),
+              { flipFlop("BE_JKFF_LOW", title: "J-K Flip-Flop", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2), manual: $0) }),
             t("jk-nt", "J-K Flip-Flop, Falling Edge", "The same, triggered as the clock falls from 1 to 0",
-              flipFlop("BE_JKFF_LOW_NT", title: "J-K Flip-Flop, Falling Edge", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2))),
+              { flipFlop("BE_JKFF_LOW_NT", title: "J-K Flip-Flop, Falling Edge", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2), manual: $0) }),
             t("t", "T Flip-Flop", "A J-K flip-flop with J and K tied together: while T is 1, Q flips on every rising edge",
-              flipFlop("BE_JKFF_LOW", title: "T Flip-Flop", inputs: [("T", "J", 2)], tied: "K", clockY: 0, q: ("Q", 2), nq: ("nQ", -2))),
+              { flipFlop("BE_JKFF_LOW", title: "T Flip-Flop", inputs: [("T", "J", 2)], tied: "K", clockY: 0, q: ("Q", 2), nq: ("nQ", -2), manual: $0) }),
             t("sr", "SR Latch", "Two NOR gates holding one bit: S sets it, R resets it, no clock",
               srLatch()),
             t("gated-d", "Gated D Latch", "Four NAND gates and an inverter: Q follows D while EN is 1 and holds when it's 0",
@@ -258,12 +280,12 @@ enum Templates {
     }
 
     /// A flip-flop from the library at (24, 0) with a switch for each data
-    /// input (left), a clock that moves only on Step Clock (K), PRE' and CLR'
-    /// switches (above and below, on, so the flip-flop runs) and lights on Q
-    /// and Q'. `inputs` are (name, pin, the
-    /// pin's height); `tied` is a second pin the first switch also drives.
+    /// input (left), a clock (`manual`: it moves only on Step Clock), PRE'
+    /// and CLR' switches (above and below, on, so the flip-flop runs) and
+    /// lights on Q and Q'. `inputs` are (name, pin, the pin's height); `tied`
+    /// is a second pin the first switch also drives.
     private static func flipFlop(_ gate: String, title: String, inputs: [(String, String, Double)], tied: String? = nil,
-                                 clockY: Double, q: (String, Double), nq: (String, Double)) -> String {
+                                 clockY: Double, q: (String, Double), nq: (String, Double), manual: Bool) -> String {
         let fx = 24.0
         var p: [Part] = [Part(gate: gate, x: fx, y: 0),
                          Part(gate: "BB_CLOCK", x: 4, y: clockY),
@@ -277,7 +299,7 @@ enum Templates {
                  Wire(from: 0, fromPin: q.0, to: 4, toPin: "N_in0"),
                  Wire(from: 0, fromPin: nq.0, to: 5, toPin: "N_in0")]
         p += [label("PRE'", right: 3.6, y: 14), label("CLR'", right: 3.6, y: -14),
-              label("Clock (K)", x: 1, y: clockY - 4.2),
+              label("Clock", x: 1, y: clockY - 4.2),
               label("Q", x: 36, y: q.1), label("Q'", x: 36, y: nq.1)]
         for (name, pin, y) in inputs {
             let sy = y > 0 ? 8.0 : -8.0
@@ -286,9 +308,12 @@ enum Templates {
             if let tied, pin == inputs[0].1 { w.append(Wire(from: p.count - 1, fromPin: "OUT_0", to: 0, toPin: tied)) }
             p.append(label(name, right: 3.6, y: sy))
         }
-        let hint = "Press K to step the clock. PRE' and CLR' are active low."
+        // The key named as a key, so it isn't read as the K switch.
+        let step = ShortcutStore.shared.combo(.stepClock).map { "The \($0.label) key" } ?? "Simulation \u{25B8} Step Clock"
+        let hint = (manual ? "\(step) steps the clock." : "The clock runs by itself.")
+            + " Turn PRE' or CLR' off to set or clear Q."
         p += [label(title, x: 0, y: 21, height: 3), label(hint, x: 0, y: -19.5, height: 1.4)]
-        return build(p, w, big: [title: 3, hint: 1.4], manualClock: true)
+        return build(p, w, big: [title: 3, hint: 1.4], manualClock: manual)
     }
 
     private static func srLatch() -> String {
@@ -350,13 +375,21 @@ struct TemplatePicker: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var prefs = Prefs.shared
     @State private var mine: [CircuitTemplate] = []
-    @State private var selection: String = Templates.builtIn[0].id
+    @State private var selection: String
+    /// The flip-flops' Clock line: manual (Step Clock) unless you pick running.
+    @AppStorage("cl.templateClockRunning") private var runningClock = false
+
+    init(selection: String? = nil) {
+        _selection = State(initialValue: selection ?? Templates.builtIn[0].id)
+    }
 
     private var dark: Bool { prefs.dark }
     private var paper: Color { dark ? CLChrome.rgb(28, 31, 37) : CLChrome.rgb(250, 250, 252) }
     private var ink: Color { dark ? CLChrome.rgb(226, 230, 238) : CLChrome.rgb(30, 33, 40) }
     private var all: [CircuitTemplate] { Templates.builtIn + mine }
     private var selected: CircuitTemplate? { all.first { $0.id == selection } }
+    /// The selected one, with the clock the Clock line picks.
+    private var chosen: CircuitTemplate? { selected.map { runningClock ? $0.running : $0 } }
 
     var body: some View {
         let accent = prefs.accentColor(dark: dark)
@@ -383,13 +416,24 @@ struct TemplatePicker: View {
                     .padding(.vertical, 6)
                 }
                 .frame(width: 320)
-                TemplatePreview(text: selected?.text, dark: dark, ink: ink)
+                TemplatePreview(text: chosen?.text, dark: dark, ink: ink)
             }
             .padding(14)
             HStack(spacing: 8) {
                 if let t = selected, t.folder != nil {
                     Button("Rename\u{2026}") { rename(t) }
                     Button("Delete\u{2026}") { delete(t) }
+                }
+                if selected?.runningText != nil {
+                    Text("Clock").font(.system(size: 13, weight: .semibold)).foregroundStyle(ink)
+                    Picker("Clock", selection: $runningClock) {
+                        Text("Manual").tag(false)
+                        Text("Running").tag(true)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .help(clockHelp)
+                    Text(runningClock ? "It ticks by itself." : "It moves only on Step Clock (\(stepClockName)).")
+                        .font(.system(size: 12)).foregroundStyle(ink.opacity(0.55))
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -431,8 +475,13 @@ struct TemplatePicker: View {
         if selected == nil { selection = Templates.builtIn[0].id }
     }
 
+    private var stepClockName: String { ShortcutStore.shared.combo(.stepClock).map { "the \($0.label) key" } ?? "Simulation \u{25B8} Step Clock" }
+    private var clockHelp: String {
+        "Manual: the clock holds still, and each Step Clock (\(stepClockName)) makes one full cycle. Running: it ticks by itself."
+    }
+
     private func useSelected() {
-        guard let t = selected else { return }
+        guard let t = chosen else { return }
         dismiss()
         DispatchQueue.main.async { Templates.use(t) }
     }
