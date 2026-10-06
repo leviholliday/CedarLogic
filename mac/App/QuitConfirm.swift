@@ -11,7 +11,7 @@ enum QuitConfirm {
     private static var dim: NSWindow?
 
     static func ask() {
-        guard Prefs.shared.confirmQuit else { NSApp.terminate(nil); return }
+        guard Prefs.shared.confirmQuit else { terminate(); return }
         if let panel { panel.makeKeyAndOrderFront(nil); return }
         // Roomy enough for the drop and the shadow; the card moves inside it,
         // drawn by Core Animation, rather than moving the window (which
@@ -62,7 +62,7 @@ enum QuitConfirm {
     /// Quit: the question shrinks away, then every window fades out with
     /// the dimmed screen, then the app goes.
     private static func quitAnimated() {
-        guard let p = panel else { NSApp.terminate(nil); return }
+        guard let p = panel else { terminate(); return }
         let d = dim
         panel = nil
         dim = nil
@@ -76,14 +76,28 @@ enum QuitConfirm {
             d?.animator().alphaValue = 0
             for w in windows { w.animator().alphaValue = 0 }
         }, completionHandler: {
-            MainActor.assumeIsolated {
-                NSApp.terminate(nil)
+            terminate {
                 // Still here: quitting waits on a question (a circuit to
                 // save, say), or was cancelled. The windows come back --
                 // unless it's only sync sending the last changes.
                 if !SyncCenter.shared.isQuitting { for w in windows { w.alphaValue = 1 } }
             }
         })
+    }
+
+    /// NSApp.terminate, from a run-loop block rather than from inside a
+    /// main-queue block (an animation's completion handler is one). With sync
+    /// on, quitting answers "later" and waits in a nested run loop for the
+    /// sync engine to finish; a main-queue block still running underneath
+    /// would stop the main queue, and with it everything that answer waits
+    /// for, so the app never went. `then` runs if terminate returns.
+    static func terminate(then: (@MainActor () -> Void)? = nil) {
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated {
+                NSApp.terminate(nil)
+                then?()
+            }
+        }
     }
 
     /// For --render-ui.
