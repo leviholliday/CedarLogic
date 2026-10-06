@@ -25,7 +25,7 @@ Two interfaces (Settings > General):
   toolbar in four styles, modern tabs (close with undo, reopen, reorder,
   rename, split view), the palette and minimap, the status bar, Simulation
   View (marching signals and its control bar), quick add (A), the single
-  keys (C/V/X/D/T/?, Shift+1-9), paste and new gates that follow the pointer,
+  keys (C/V/X/D/T/K/?, Shift+1-9), paste and new gates that follow the pointer,
   connect-nearby (C while dragging), Lock, focus mode, the RAM editor, Export
   as Image with your name and whether it works, the welcome, the guided tour,
   and every setting from its Preferences. Its settings are read from the wx
@@ -48,6 +48,10 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   connect-nearby, pages that close with an undo, memory, the tour's checks,
   Simulation View's drawing)
 - `save_check` -- open, save and reopen circuits; the text must match
+- `clock_check` -- Step Clock on the flip-flop templates `--render-ui`
+  writes: manual clocks hold still, each Step Clock is one full cycle (J-K
+  and T toggle, D is taken), a running clock still runs, and the setting
+  survives a save
 - `formula-check.sh` -- Build from Formula and the truth table's formulas:
   the simplifier on known answers and 400 random tables, the formula
   reader, and ~200 circuits built in the engine whose truth tables must

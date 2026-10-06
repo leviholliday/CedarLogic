@@ -555,6 +555,10 @@ struct SimulationCommands: Commands {
             Button("Step") { canvas?.stepOnce() }
                 .keyboardShortcut(keys.menu(.step))
                 .disabled(canvas == nil)
+            Button("Step Clock") { canvas?.perform(.stepClock) }
+                .keyboardShortcut(keys.menu(.stepClock))
+                .help("\(keys.combo(.stepClock).map { $0.label + ": " } ?? "")each clock set to \u{201C}Only on Step Clock\u{201D} makes one full cycle")
+                .disabled(canvas?.routed.hasManualClock != true)
             Divider()
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .help("T: every combination of the page's switches (or the selected ones) and what the lights show")

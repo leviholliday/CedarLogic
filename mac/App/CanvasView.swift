@@ -792,6 +792,7 @@ final class CanvasController: ObservableObject {
         case .focusMode: NotificationCenter.default.post(name: .clToggleFocusMode, object: self)
         case .simView: simView.toggle()
         case .step: stepOnce()
+        case .stepClock: stepClock()
         case .truthTable: makeTruthTable()
         case .checkCircuit: makeTruthTable(check: true)
         case .find: openFind()
@@ -1418,6 +1419,22 @@ final class CanvasController: ObservableObject {
     func stepOnce() {
         if isRunning { setRunning(false) }
         document?.stepOnce()
+        redraw()
+        scopeChanged()
+    }
+
+    /// Whether this page has a clock set to "Only on Step Clock".
+    var hasManualClock: Bool { (document?.manualClockCount(page: page) ?? 0) > 0 }
+    static let stepClockOffTip = "Step Clock: first turn on \u{201C}Only on Step Clock\u{201D} in a clock's settings"
+
+    /// Step Clock: every manual clock on the page makes one full cycle
+    /// (up, settle, down, settle). Running or paused, it stays that way.
+    func stepClock() {
+        guard let document else { return }
+        guard document.clockStep(page: page) else {
+            note("No clock here moves on Step Clock. Double-click a clock and turn on \u{201C}Only on Step Clock\u{201D}.")
+            return
+        }
         redraw()
         scopeChanged()
     }

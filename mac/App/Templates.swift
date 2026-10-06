@@ -133,8 +133,10 @@ enum Templates {
     private struct Wire { let from: Int; let fromPin: String; let to: Int; let toPin: String }
 
     /// Builds parts and wires on a new circuit and returns its file text.
-    /// Labels named in `big` get larger text.
-    private static func build(_ parts: [Part], _ wires: [Wire], big: [String: Double] = [:]) -> String {
+    /// Labels named in `big` get larger text; `manualClock` sets the clocks
+    /// to "Only on Step Clock".
+    private static func build(_ parts: [Part], _ wires: [Wire], big: [String: Double] = [:],
+                              manualClock: Bool = false) -> String {
         let doc = CoreDocument()
         var strings: [UnsafeMutablePointer<CChar>] = []
         defer { strings.forEach { free($0) } }
@@ -151,6 +153,9 @@ enum Templates {
                 text = re.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text),
                                                    withTemplate: "$1\(height)")
             }
+        }
+        if manualClock {
+            text = text.replacingOccurrences(of: "(lparam \"MANUAL\" \"false\")", with: "(lparam \"MANUAL\" \"true\")")
         }
         return text
     }
@@ -253,8 +258,9 @@ enum Templates {
     }
 
     /// A flip-flop from the library at (24, 0) with a switch for each data
-    /// input (left), a clock, PRE' and CLR' switches (above and below, on, so
-    /// the flip-flop runs) and lights on Q and Q'. `inputs` are (name, pin, the
+    /// input (left), a clock that moves only on Step Clock (K), PRE' and CLR'
+    /// switches (above and below, on, so the flip-flop runs) and lights on Q
+    /// and Q'. `inputs` are (name, pin, the
     /// pin's height); `tied` is a second pin the first switch also drives.
     private static func flipFlop(_ gate: String, title: String, inputs: [(String, String, Double)], tied: String? = nil,
                                  clockY: Double, q: (String, Double), nq: (String, Double)) -> String {
@@ -271,7 +277,7 @@ enum Templates {
                  Wire(from: 0, fromPin: q.0, to: 4, toPin: "N_in0"),
                  Wire(from: 0, fromPin: nq.0, to: 5, toPin: "N_in0")]
         p += [label("PRE'", right: 3.6, y: 14), label("CLR'", right: 3.6, y: -14),
-              label("Clock", x: 1, y: clockY - 4.2),
+              label("Clock (K)", x: 1, y: clockY - 4.2),
               label("Q", x: 36, y: q.1), label("Q'", x: 36, y: nq.1)]
         for (name, pin, y) in inputs {
             let sy = y > 0 ? 8.0 : -8.0
@@ -280,9 +286,9 @@ enum Templates {
             if let tied, pin == inputs[0].1 { w.append(Wire(from: p.count - 1, fromPin: "OUT_0", to: 0, toPin: tied)) }
             p.append(label(name, right: 3.6, y: sy))
         }
-        let hint = "PRE' and CLR' are active low: turn one off to set or clear Q at once"
+        let hint = "Press K to step the clock. PRE' and CLR' are active low."
         p += [label(title, x: 0, y: 21, height: 3), label(hint, x: 0, y: -19.5, height: 1.4)]
-        return build(p, w, big: [title: 3, hint: 1.4])
+        return build(p, w, big: [title: 3, hint: 1.4], manualClock: true)
     }
 
     private static func srLatch() -> String {

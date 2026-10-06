@@ -81,6 +81,11 @@ final class CoreDocument: ObservableObject {
         set { cl_document_set_step_ms(handle, Int32(newValue)) }
     }
     func stepOnce() { cl_document_step(handle) }
+    /// Clocks on a page set to "Only on Step Clock".
+    func manualClockCount(page: Int) -> Int { Int(cl_document_manual_clock_count(handle, Int32(page))) }
+    /// Step Clock: each of the page's manual clocks makes one full cycle.
+    /// False when there are none.
+    func clockStep(page: Int) -> Bool { cl_document_clock_step(handle, Int32(page)) }
     /// A click at a world point; true when a switch, keypad or the like took it.
     func click(page: Int, at p: CGPoint) -> Bool { cl_document_click(handle, Int32(page), p.x, p.y) }
 

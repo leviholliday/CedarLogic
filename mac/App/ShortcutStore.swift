@@ -79,7 +79,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Moving around
     case zoomIn, zoomOut, zoomFit, zoomActual, focusMode, find, findNext, findPrevious
     // Simulation
-    case simView, step, truthTable, checkCircuit, scope, lock
+    case simView, step, stepClock, truthTable, checkCircuit, scope, lock
     // Tabs
     case newTab, closeTab, reopenTab, splitView, switchPane, closeSplit, nextTab, previousTab
     // App
@@ -93,7 +93,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .undo, .redo, .cut, .copy, .paste, .duplicate, .selectAll: "Editing"
         case .addGate, .rotate, .straighten, .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate, .buildFormula: "Building"
         case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode, .find, .findNext, .findPrevious: "Moving around"
-        case .simView, .step, .truthTable, .checkCircuit, .scope, .lock: "Simulation"
+        case .simView, .step, .stepClock, .truthTable, .checkCircuit, .scope, .lock: "Simulation"
         case .newTab, .closeTab, .reopenTab, .splitView, .switchPane, .closeSplit, .nextTab, .previousTab: "Tabs and split view"
         case .shortcuts, .darkMode, .feedback: "App"
         }
@@ -135,6 +135,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .findPrevious: "Find the previous one"
         case .simView: "Simulation view"
         case .step: "Step once"
+        case .stepClock: "Step Clock: one full cycle of each manual clock"
         case .truthTable: "Truth table"
         case .checkCircuit: "Check my circuit against a formula or table"
         case .scope: "Oscilloscope"
@@ -190,6 +191,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .findPrevious: return nil
         case .simView: return KeyCombo(key: "r", mods: c)
         case .step: return KeyCombo(key: "r", mods: c | s)
+        case .stepClock: return KeyCombo(key: "k", mods: 0)
         case .truthTable: return KeyCombo(key: "t", mods: 0)
         case .checkCircuit: return KeyCombo(key: "t", mods: s)
         case .scope: return KeyCombo(key: "g", mods: c)
