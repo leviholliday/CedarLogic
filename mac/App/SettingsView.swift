@@ -292,7 +292,8 @@ struct GeneralSettingsView: View {
                 Picker("", selection: $prefs.newTemplate) {
                     Text("A blank page").tag("")
                     Divider()
-                    ForEach(Templates.builtInGroups, id: \.name) { group in
+                    // Not the Classic Mistakes: a broken circuit is no start for every new one.
+                    ForEach(Templates.builtInGroups.filter { $0.name != Templates.mistakesGroup }, id: \.name) { group in
                         if group.name != Templates.builtInGroups[0].name { Divider() }
                         ForEach(group.list) { Text($0.name).tag($0.id) }
                     }

@@ -58,10 +58,16 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   field of every case, on a freshly opened circuit and on one that has been
   running; `--templates <dir>` checks the flip-flop templates `--render-ui`
   writes against their textbook tables
+- `mistakes_check` -- the Classic Mistakes templates `--render-ui` writes
+  really show their problem in the engine: the latch races, the gated clock
+  counts on every press, the open input gives X, the two outputs conflict
 - `formula-check.sh` -- Build from Formula and the truth table's formulas:
   the simplifier on known answers and 400 random tables, the formula
   reader, and ~200 circuits built in the engine whose truth tables must
   match (a folder argument keeps a .cdl of each)
+- `render_png` with `CL_RENDER_CLICKS="x,y;x,y"` and `CL_RENDER_STEPS=n`
+  -- clicks those switches and runs n steps first, to draw the circuit
+  running
 - `render_png` with `CL_RENDER_HOVER=1` -- points at the page's longest
   wire and draws its highlight, printing what it carries
 - `asan-check.sh` -- `edit_check` under AddressSanitizer
