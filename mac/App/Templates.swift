@@ -1,5 +1,6 @@
 // Templates: File ▸ New from Template starts a circuit from a built-in
-// starter (a lab page, a counter, a 7-segment decoder) or one of yours;
+// starter (a lab page, a counter, a 7-segment decoder, each kind of
+// flip-flop and latch, ready to run) or one of yours;
 // File ▸ Save as Template keeps the circuit you're in as one of yours.
 //
 // Yours are folders in ~/Library/Application Support/CedarLogic/Templates,
@@ -16,6 +17,8 @@ struct CircuitTemplate: Identifiable, Hashable {
     let text: String
     /// Yours (a folder), or nil for a built-in one.
     let folder: URL?
+    /// The picker's heading for a built-in one.
+    var group = "Built In"
 }
 
 @MainActor
@@ -114,9 +117,19 @@ enum Templates {
         CircuitTemplate(id: "builtin-7seg", name: "7-Segment Decoder Starter",
                         detail: "Four switches and seven segment lights: build the decoder between them",
                         text: sevenSegment(), folder: nil),
-    ] }
+    ] + flipFlops() }
 
-    private struct Part { let gate: String; let x: Double; let y: Double; var label: String? = nil }
+    /// Built-in groups, in the picker's order.
+    static var builtInGroups: [(name: String, list: [CircuitTemplate])] {
+        var out: [(name: String, list: [CircuitTemplate])] = []
+        for t in builtIn {
+            if let i = out.firstIndex(where: { $0.name == t.group }) { out[i].list.append(t) } else { out.append((t.group, [t])) }
+        }
+        return out
+    }
+
+    /// A switch with `on` starts at 1.
+    private struct Part { let gate: String; let x: Double; let y: Double; var label: String? = nil; var on = false }
     private struct Wire { let from: Int; let fromPin: String; let to: Int; let toPin: String }
 
     /// Builds parts and wires on a new circuit and returns its file text.
@@ -130,6 +143,7 @@ enum Templates {
         let links = wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
         _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), links, Int32(links.count), "Template")
         cl_edit_select_none(doc.handle, 0)
+        for p in parts where p.on { _ = cl_document_click(doc.handle, 0, p.x, p.y) }
         var text = doc.saveText()
         for (label, height) in big {
             let quoted = NSRegularExpression.escapedPattern(for: label)
@@ -144,6 +158,11 @@ enum Templates {
     /// A label whose left edge is at x (labels are placed by their middle).
     private static func label(_ text: String, x: Double, y: Double, height: Double = 2) -> Part {
         Part(gate: "AA_LABEL", x: x + Double(text.count) * 0.3 * height, y: y, label: text)
+    }
+
+    /// A label whose right edge is at x.
+    private static func label(_ text: String, right x: Double, y: Double, height: Double = 2) -> Part {
+        label(text, x: x - Double(text.count) * 0.6 * height, y: y, height: height)
     }
 
     private static func labPage(name: String) -> String {
@@ -205,6 +224,118 @@ enum Templates {
               label("Segments", x: 64, y: 17)]
         return build(p, w, big: ["7-Segment Decoder": 3])
     }
+
+    // MARK: Flip-flops and latches
+
+    private static func flipFlops() -> [CircuitTemplate] {
+        func t(_ id: String, _ name: String, _ detail: String, _ text: String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-ff-" + id, name: name, detail: detail, text: text, folder: nil, group: "Flip-Flops and Latches")
+        }
+        return [
+            t("d", "D Flip-Flop", "Q takes D on each rising clock edge; PRE' and CLR' set or clear it at any time",
+              flipFlop("AE_DFF_LOW", title: "D Flip-Flop", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1))),
+            t("d-nt", "D Flip-Flop, Falling Edge", "The same, triggered as the clock falls from 1 to 0",
+              flipFlop("AE_DFF_LOW_NT", title: "D Flip-Flop, Falling Edge", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1))),
+            t("d-ce", "D Flip-Flop with Clock Enable", "Q takes D on a rising edge only while CE is 1",
+              flipFlop("AF_DFF_LOW", title: "D Flip-Flop with Clock Enable", inputs: [("D", "IN_0", 2), ("CE", "clock_enable", -2)], clockY: 0,
+                       q: ("OUT_0", 2), nq: ("OUTINV_0", -1))),
+            t("jk", "J-K Flip-Flop", "On each rising edge: J sets, K resets, both toggle, neither holds; PRE' and CLR' act at once",
+              flipFlop("BE_JKFF_LOW", title: "J-K Flip-Flop", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2))),
+            t("jk-nt", "J-K Flip-Flop, Falling Edge", "The same, triggered as the clock falls from 1 to 0",
+              flipFlop("BE_JKFF_LOW_NT", title: "J-K Flip-Flop, Falling Edge", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2))),
+            t("t", "T Flip-Flop", "A J-K flip-flop with J and K tied together: while T is 1, Q flips on every rising edge",
+              flipFlop("BE_JKFF_LOW", title: "T Flip-Flop", inputs: [("T", "J", 2)], tied: "K", clockY: 0, q: ("Q", 2), nq: ("nQ", -2))),
+            t("sr", "SR Latch", "Two NOR gates holding one bit: S sets it, R resets it, no clock",
+              srLatch()),
+            t("gated-d", "Gated D Latch", "Four NAND gates and an inverter: Q follows D while EN is 1 and holds when it's 0",
+              gatedDLatch()),
+        ]
+    }
+
+    /// A flip-flop from the library at (24, 0) with a switch for each data
+    /// input (left), a clock, PRE' and CLR' switches (above and below, on, so
+    /// the flip-flop runs) and lights on Q and Q'. `inputs` are (name, pin, the
+    /// pin's height); `tied` is a second pin the first switch also drives.
+    private static func flipFlop(_ gate: String, title: String, inputs: [(String, String, Double)], tied: String? = nil,
+                                 clockY: Double, q: (String, Double), nq: (String, Double)) -> String {
+        let fx = 24.0
+        var p: [Part] = [Part(gate: gate, x: fx, y: 0),
+                         Part(gate: "BB_CLOCK", x: 4, y: clockY),
+                         Part(gate: "AA_TOGGLE", x: 6, y: 14, on: true),
+                         Part(gate: "AA_TOGGLE", x: 6, y: -14, on: true),
+                         Part(gate: "GA_LED", x: 34, y: q.1),
+                         Part(gate: "GA_LED", x: 34, y: nq.1)]
+        var w = [Wire(from: 1, fromPin: "CLK", to: 0, toPin: "clock"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 0, toPin: "set"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 0, toPin: "clear"),
+                 Wire(from: 0, fromPin: q.0, to: 4, toPin: "N_in0"),
+                 Wire(from: 0, fromPin: nq.0, to: 5, toPin: "N_in0")]
+        p += [label("PRE'", right: 3.6, y: 14), label("CLR'", right: 3.6, y: -14),
+              label("Clock", x: 1, y: clockY - 4.2),
+              label("Q", x: 36, y: q.1), label("Q'", x: 36, y: nq.1)]
+        for (name, pin, y) in inputs {
+            let sy = y > 0 ? 8.0 : -8.0
+            p.append(Part(gate: "AA_TOGGLE", x: 6, y: sy))
+            w.append(Wire(from: p.count - 1, fromPin: "OUT_0", to: 0, toPin: pin))
+            if let tied, pin == inputs[0].1 { w.append(Wire(from: p.count - 1, fromPin: "OUT_0", to: 0, toPin: tied)) }
+            p.append(label(name, right: 3.6, y: sy))
+        }
+        let hint = "PRE' and CLR' are active low: turn one off to set or clear Q at once"
+        p += [label(title, x: 0, y: 21, height: 3), label(hint, x: 0, y: -19.5, height: 1.4)]
+        return build(p, w, big: [title: 3, hint: 1.4])
+    }
+
+    private static func srLatch() -> String {
+        let p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 6, on: true),   // 0 R (on: it starts reset)
+            Part(gate: "AA_TOGGLE", x: 0, y: -6),            // 1 S
+            Part(gate: "BE_NOR2", x: 16, y: 5),              // 2 Q
+            Part(gate: "BE_NOR2", x: 16, y: -5),             // 3 Q'
+            Part(gate: "GA_LED", x: 26, y: 5),               // 4
+            Part(gate: "GA_LED", x: 26, y: -5),              // 5
+            label("R", right: -2.4, y: 6), label("S", right: -2.4, y: -6),
+            label("Q", x: 28, y: 5), label("Q'", x: 28, y: -5),
+            label("SR Latch", x: -4, y: 14, height: 3),
+            label("S = 1 sets Q, R = 1 resets it, both 0 holds. Both 1 isn't allowed.", x: -4, y: -12, height: 1.4),
+        ]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 3, fromPin: "OUT", to: 2, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 3, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 3, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 4, toPin: "N_in0"),
+                 Wire(from: 3, fromPin: "OUT", to: 5, toPin: "N_in0")]
+        return build(p, w, big: ["SR Latch": 3, "S = 1 sets Q, R = 1 resets it, both 0 holds. Both 1 isn't allowed.": 1.4])
+    }
+
+    private static func gatedDLatch() -> String {
+        let p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 7),             // 0 D
+            Part(gate: "AA_TOGGLE", x: 0, y: -1, on: true),  // 1 EN
+            Part(gate: "BA_NAND2", x: 15, y: 6),             // 2 S'
+            Part(gate: "AA_INVERTER", x: 10, y: -9),         // 3 D'
+            Part(gate: "BA_NAND2", x: 19, y: -6),            // 4 R'
+            Part(gate: "BA_NAND2", x: 30, y: 4),             // 5 Q
+            Part(gate: "BA_NAND2", x: 30, y: -4),            // 6 Q'
+            Part(gate: "GA_LED", x: 40, y: 4),               // 7
+            Part(gate: "GA_LED", x: 40, y: -4),              // 8
+            label("D", right: -2.4, y: 7), label("EN", right: -2.4, y: -1),
+            label("Q", x: 42, y: 4), label("Q'", x: 42, y: -4),
+            label("Gated D Latch", x: -4, y: 15, height: 3),
+            label("While EN is 1, Q follows D. Turn EN off and Q keeps its last value.", x: -4, y: -15, height: 1.4),
+        ]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 2, toPin: "IN_1"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 3, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 4, toPin: "IN_0"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 4, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 5, toPin: "IN_0"),
+                 Wire(from: 6, fromPin: "OUT", to: 5, toPin: "IN_1"),
+                 Wire(from: 5, fromPin: "OUT", to: 6, toPin: "IN_0"),
+                 Wire(from: 4, fromPin: "OUT", to: 6, toPin: "IN_1"),
+                 Wire(from: 5, fromPin: "OUT", to: 7, toPin: "N_in0"),
+                 Wire(from: 6, fromPin: "OUT", to: 8, toPin: "N_in0")]
+        return build(p, w, big: ["Gated D Latch": 3, "While EN is 1, Q follows D. Turn EN off and Q keeps its last value.": 1.4])
+    }
 }
 
 // MARK: - The picker
@@ -232,8 +363,10 @@ struct TemplatePicker: View {
             HStack(spacing: 14) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        heading("Built In")
-                        ForEach(Templates.builtIn) { row($0, accent: accent) }
+                        ForEach(Templates.builtInGroups, id: \.name) { group in
+                            heading(group.name)
+                            ForEach(group.list) { row($0, accent: accent) }
+                        }
                         heading("Yours")
                         if mine.isEmpty {
                             Text("None yet.").font(.system(size: 12)).foregroundStyle(ink.opacity(0.5))
