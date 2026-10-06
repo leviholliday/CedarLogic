@@ -17,7 +17,7 @@ struct CircuitCheck {
         /// "Read as a count".
         var reading: String {
             switch self {
-            case .empty: "The assignment gives"
+            case .empty: "Nothing typed yet"
             case .formula: "Read as a formula"
             case .table: "Read as a truth table"
             case .count: "Read as a count"
@@ -79,6 +79,21 @@ struct CircuitCheck {
         return (k, options)
     }
 
+    /// Whether checking `text` runs the circuit, which can take a while (a
+    /// count, a state table, a timing table, or start:, reset:, set: or
+    /// clock: lines): CheckRun runs those off the main thread.
+    static func runsCircuit(_ text: String) -> Bool {
+        let (kind, options) = kind(of: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        return options || [.count, .states, .timing].contains(kind)
+    }
+
+    /// A clocked check's result (cl_check_clocked_run's).
+    init(clocked text: String, result c: OpaquePointer) {
+        kind = Self.kind(of: text.trimmingCharacters(in: .whitespacesAndNewlines)).kind
+        clocked = true
+        read(clocked: c)
+    }
+
     /// What the formula reader made, as the core reads it.
     static func spec(_ parsed: ParsedFormulas) -> String {
         var lines = [(["in"] + parsed.variables).joined(separator: "\t")]
@@ -134,7 +149,7 @@ struct CircuitCheck {
                 kind: kind, text: trimmed, mapping: Self.mapping(byHand))
     }
 
-    private static func mapping(_ byHand: [String: String]) -> String {
+    static func mapping(_ byHand: [String: String]) -> String {
         byHand.filter { !$0.value.isEmpty }.map { "\($0.key)\t\($0.value)" }.sorted().joined(separator: "\n")
     }
 
@@ -188,6 +203,10 @@ struct CircuitCheck {
     private mutating func run(document: OpaquePointer?, page: Int, text: String, mapping: String) {
         guard let c = cl_check_clocked(document, Int32(page), text, mapping) else { return }
         defer { cl_check_free(c) }
+        read(clocked: c)
+    }
+
+    private mutating func read(clocked c: OpaquePointer) {
         readCommon(c)
         let ports = Int(cl_check_port_count(c))
         columns = (0..<ports).map { String(cString: cl_check_port_name(c, Int32($0))) }
@@ -272,6 +291,40 @@ struct CircuitCheck {
             parts.append("the lights showed \(names(shown)) = \(bits(s.got))\(number(s.got))")
         }
         return head + ": " + parts.joined(separator: ", ") + (s.wrong ? ". Wrong." : ".")
+    }
+}
+
+/// A check that runs the circuit, off the main thread: the circuit is copied
+/// here, on the main thread, and checked on a queue of its own; `done` gets
+/// the result on the main thread, unless the run was cancelled first.
+final class CheckRun {
+    private let lock = NSLock()
+    private var job: OpaquePointer?
+    private var cancelled = false   // set and read on the main thread
+
+    init(document: OpaquePointer?, page: Int, text: String, byHand: [String: String], done: @escaping (CircuitCheck) -> Void) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let job = cl_check_clocked_prepare(document, Int32(page), trimmed, CircuitCheck.mapping(byHand))
+        self.job = job
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let result = cl_check_clocked_run(job)
+            lock.lock()
+            cl_check_job_free(job)
+            self.job = nil
+            lock.unlock()
+            guard let result else { return }
+            let check = CircuitCheck(clocked: trimmed, result: result)
+            cl_check_free(result)
+            DispatchQueue.main.async { if !self.cancelled { done(check) } }
+        }
+    }
+
+    /// Stops the run soon; `done` isn't called.
+    func cancel() {
+        cancelled = true
+        lock.lock()
+        if let job { cl_check_job_cancel(job) }
+        lock.unlock()
     }
 }
 

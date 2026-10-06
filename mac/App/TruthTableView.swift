@@ -110,22 +110,49 @@ struct TruthTableView: View {
     /// The step strip's chosen step (the first wrong one when a check runs).
     @State private var selectedStep: Int?
     @FocusState private var stripFocused: Bool
-    /// A clocked check waits for typing to pause (it runs the circuit).
+    /// A clocked check waits for typing to pause (it runs the circuit), then
+    /// runs off the main thread; "Checking…" shows if it takes a while.
     @State private var pendingCheck: DispatchWorkItem?
+    @State private var running: CheckRun?
+    @State private var checkingShown = false
+    /// What the check on show (or running) was given, so it isn't run twice.
+    @State private var lastInput: CheckInput?
+    @State private var loaded = false
+
+    private struct CheckInput: Equatable { let text: String; let names: [String: String]; let columns: [String] }
 
     static let checkTab = 3
+    /// Renders (--render-ui) draw the view at once, so they check in init,
+    /// on the main thread.
+    static var checksAtOnce = false
 
+    // SwiftUI makes this view again whenever the window behind it changes
+    // (15 times a second with the oscilloscope running), so nothing is
+    // checked here: the last check is read back and run in onAppear.
     init(table: TruthTable, onBuild: ((String) -> Void)? = nil) {
         _table = State(initialValue: table)
         self.onBuild = onBuild
-        // The last check of this circuit, checked again.
+        if Self.checksAtOnce {
+            let saved = CheckMemory.load(table.checkKey)
+            _checkText = State(initialValue: saved?.text ?? "")
+            _checkNames = State(initialValue: saved?.names ?? [:])
+            let check = CircuitCheck(table: table.checkTable, noTable: table.problem ?? "", document: table.document?.handle, page: table.page,
+                                     text: saved?.text ?? "", byHand: saved?.names ?? [:])
+            _check = State(initialValue: check)
+            _selectedStep = State(initialValue: check.firstWrong)
+            _lastInput = State(initialValue: CheckInput(text: saved?.text ?? "", names: saved?.names ?? [:], columns: table.names))
+            _loaded = State(initialValue: true)
+        }
+    }
+
+    /// The last check of this circuit, checked again.
+    private func loadSaved() {
+        guard !loaded else { return }
+        loaded = true
         let saved = CheckMemory.load(table.checkKey)
-        _checkText = State(initialValue: saved?.text ?? "")
-        _checkNames = State(initialValue: saved?.names ?? [:])
-        let check = CircuitCheck(table: table.checkTable, noTable: table.problem ?? "", document: table.document?.handle, page: table.page,
-                                 text: saved?.text ?? "", byHand: saved?.names ?? [:])
-        _check = State(initialValue: check)
-        _selectedStep = State(initialValue: check.firstWrong)
+        checkText = saved?.text ?? ""
+        checkNames = saved?.names ?? [:]
+        runCheck(now: true)
     }
 
     private var n: Int { table.inputs }
@@ -197,13 +224,15 @@ struct TruthTableView: View {
         .background(paper)
         .preferredColorScheme(dark ? .dark : .light)
         .tint(accent)
+        .onAppear { loadSaved() }
+        .onDisappear { pendingCheck?.cancel(); running?.cancel() }
         .onChange(of: checkText) { runCheck() }
         .onChange(of: checkNames) { runCheck(now: true) }
         .onChange(of: table.names) { runCheck(now: true) }
     }
 
     /// The Check tab grows for the step strip.
-    private var tabHeight: CGFloat { shownTab == Self.checkTab && !(check?.steps.isEmpty ?? true) ? 470 : 400 }
+    private var tabHeight: CGFloat { shownTab == Self.checkTab && !(check?.steps.isEmpty ?? true) ? 480 : 400 }
 
     // MARK: The band
 
@@ -227,7 +256,7 @@ struct TruthTableView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(table.hasTable ? "Truth Table" : "Check My Circuit").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
                     Text(table.hasTable ? "\(n) switch\(n == 1 ? "" : "es") → \(table.outputCount) light\(table.outputCount == 1 ? "" : "s") · \(table.rows.count) rows"
-                                        : "No truth table for this page: check it clock pulse by clock pulse")
+                                        : "No truth table for this page")
                         .font(.system(size: 12.5)).foregroundStyle(Brand.dim)
                 }
                 HStack(spacing: 8) {
@@ -245,7 +274,8 @@ struct TruthTableView: View {
     }
 
     private func tabButton(_ title: String, _ icon: String, _ i: Int) -> some View {
-        Button { withAnimation(.easeOut(duration: 0.15)) { tab = i } } label: {
+        // With no table there's only Check: picking it isn't a choice to keep.
+        Button { if table.hasTable { withAnimation(.easeOut(duration: 0.15)) { tab = i } } } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 11.5, weight: .semibold))
                 Text(title).font(.system(size: 12.5, weight: .semibold))
@@ -652,10 +682,19 @@ extension TruthTableView {
 
     var checkTab: some View {
         VStack(alignment: .leading, spacing: 9) {
+            if let problem = table.problem {
+                // Why there's no Truth Table tab.
+                Label(problem + " It can still be checked clock pulse by clock pulse.", systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 8) {
                 let kind = CircuitCheck.kind(of: checkText).kind
-                Image(systemName: kind == .empty ? "text.cursor" : "text.magnifyingglass").font(.system(size: 12)).foregroundStyle(dim)
-                Text(kind.reading).font(.callout).foregroundStyle(dim)
+                // Nothing to say before anything's typed: the box and the line under it say it.
+                if kind != .empty {
+                    Image(systemName: "text.magnifyingglass").font(.system(size: 12)).foregroundStyle(dim)
+                    Text(kind.reading).font(.callout).foregroundStyle(dim)
+                }
                 Spacer()
                 if table.hasTable && (kind == .empty || kind == .table) {
                     Button("Fill In This Circuit's Rows") { checkText = circuitTableText() }
@@ -678,20 +717,28 @@ extension TruthTableView {
             }
             .frame(height: editorHeight)
             .background(cardShape)
+            if checkingShown {
+                checkingBanner
+            }
             if let check {
-                verdictBanner(check)
-                ForEach(check.notes, id: \.self) { note in
-                    Label(note.text, systemImage: note.kind == 2 ? "exclamationmark.circle" : note.kind == 1 ? "exclamationmark.triangle" : "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(note.kind == 2 ? Color.red : note.kind == 1 ? Color.orange : dim)
-                        .fixedSize(horizontal: false, vertical: true)
+                // While the next check runs, the last one stays, faded.
+                Group {
+                    if !checkingShown { verdictBanner(check) }
+                    ForEach(check.notes, id: \.self) { note in
+                        Label(note.text, systemImage: note.kind == 2 ? "exclamationmark.circle" : note.kind == 1 ? "exclamationmark.triangle" : "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(note.kind == 2 ? Color.red : note.kind == 1 ? Color.orange : dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if showNames(check) { namesRow(check) }
+                    if check.clocked {
+                        if !check.steps.isEmpty { stepStrip(check) }
+                    } else if check.outputs.contains(where: { $0.column != nil }) {
+                        checkGrid(check)
+                    }
                 }
-                if showNames(check) { namesRow(check) }
-                if check.clocked {
-                    if !check.steps.isEmpty { stepStrip(check) }
-                } else if check.outputs.contains(where: { $0.column != nil }) {
-                    checkGrid(check)
-                }
+                .opacity(checkingShown ? 0.4 : 1)
+                .allowsHitTesting(!checkingShown)
             }
             Spacer(minLength: 0)
         }
@@ -700,22 +747,53 @@ extension TruthTableView {
     /// Checks again: at once against a truth table, or once typing pauses
     /// when the circuit has to be run (`now` for a name picked from a menu).
     func runCheck(now: Bool = false) {
+        guard loaded else { return }
         pendingCheck?.cancel()
-        let (kind, options) = CircuitCheck.kind(of: checkText)
-        let clocked = options || [.count, .states, .timing].contains(kind)
+        pendingCheck = nil
+        let input = CheckInput(text: checkText, names: checkNames, columns: table.names)
+        guard input != lastInput else { return }
+        // What's running was asked for something else now.
+        running?.cancel()
+        running = nil
+        let clocked = CircuitCheck.runsCircuit(input.text)
         let work = DispatchWorkItem { [self] in
-            let c = CircuitCheck(table: table.checkTable, noTable: table.problem ?? "", document: table.document?.handle, page: table.page,
-                                 text: checkText, byHand: checkNames)
-            check = c
-            selectedStep = c.firstWrong
-            if !checkText.isEmpty || CheckMemory.load(table.checkKey) != nil {
-                CheckMemory.save(table.checkKey, .init(kind: c.kind == .table ? 1 : 0, text: checkText, names: checkNames))
+            lastInput = input
+            if !clocked || Self.checksAtOnce {
+                show(CircuitCheck(table: table.checkTable, noTable: table.problem ?? "", document: table.document?.handle, page: table.page,
+                                  text: input.text, byHand: input.names), for: input)
+                return
             }
+            let run = CheckRun(document: table.document?.handle, page: table.page, text: input.text, byHand: input.names) { c in
+                show(c, for: input)
+            }
+            running = run
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { if running === run { checkingShown = true } }
         }
         if now || !clocked { work.perform() } else {
             pendingCheck = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
         }
+    }
+
+    private func show(_ c: CircuitCheck, for input: CheckInput) {
+        running = nil
+        checkingShown = false
+        check = c
+        selectedStep = c.firstWrong
+        if !input.text.isEmpty || CheckMemory.load(table.checkKey) != nil {
+            CheckMemory.save(table.checkKey, .init(kind: c.kind == .table ? 1 : 0, text: input.text, names: input.names))
+        }
+    }
+
+    /// While a check that runs the circuit takes a while.
+    private var checkingBanner: some View {
+        HStack(spacing: 9) {
+            ProgressView().controlSize(.small)
+            Text("Checking… (running the circuit clock pulse by clock pulse)").font(.system(size: 13.5)).foregroundStyle(dim)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(dim.opacity(0.06)))
     }
 
     private func verdictBanner(_ c: CircuitCheck) -> some View {
@@ -780,7 +858,7 @@ extension TruthTableView {
 
     private static let stepWidth: CGFloat = 56
     private static let nameWidth: CGFloat = 86
-    private static let headHeight: CGFloat = 36
+    private static let headHeight: CGFloat = 46
     private static let oneHeight: CGFloat = 24      // inputs and the state: what they were
     private static let pairHeight: CGFloat = 38     // the next state and outputs: asked for over got
 
@@ -894,8 +972,15 @@ extension TruthTableView {
                 VStack(spacing: 1) {
                     Text(CircuitCheck.title(step)).font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(first ? Color.red : ink)
+                    // The row (a state or timing table's), then "first wrong" under it.
                     Text(step.row > 0 ? "row \(step.row)" : first ? "first wrong" : " ")
-                        .font(.system(size: 9)).foregroundStyle(first ? Color.red : dim)
+                        .font(.system(size: 9, weight: step.row > 0 ? .regular : .semibold)).foregroundStyle(first ? Color.red : dim)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .frame(maxWidth: Self.stepWidth - 12)
+                    Text(first && step.row > 0 ? "first wrong" : " ")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.red)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .frame(maxWidth: Self.stepWidth - 12)   // inside the rings
                 }
                 .frame(width: Self.stepWidth, height: Self.headHeight)
                 ForEach(rows, id: \.self) { r in
@@ -904,8 +989,9 @@ extension TruthTableView {
             }
             .background(tint)
             .overlay {
-                if selected { RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(accent, lineWidth: 2).padding(1) }
-                else if first { Rectangle().strokeBorder(Color.red.opacity(0.7), lineWidth: 1.5) }
+                // The first wrong step keeps its red outline when it's chosen too.
+                if first { Rectangle().strokeBorder(Color.red.opacity(0.7), lineWidth: 1.5) }
+                if selected { RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(accent, lineWidth: 2).padding(first ? 3 : 1) }
             }
             .contentShape(Rectangle())
         }

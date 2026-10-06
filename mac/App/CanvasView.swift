@@ -1292,9 +1292,9 @@ final class CanvasController: ObservableObject {
             table.checkKey = checkKey
             if check { UserDefaults.standard.set(TruthTableView.checkTab, forKey: "cl.truthTab") }
             sheetHost.truthTable = table
-        } else if pageHasLights(document) {
-            // A counter has lights but no switches: no truth table, but it can
-            // still be checked clock pulse by clock pulse.
+        } else if cl_check_clocked_page(document.handle, Int32(page)) {
+            // A counter has lights and a clock but no switches: no truth table,
+            // but it can still be checked clock pulse by clock pulse.
             var table = TruthTable(checkOnly: document, page: page, problem: error)
             table.checkKey = checkKey
             sheetHost.truthTable = table
@@ -1302,12 +1302,6 @@ final class CanvasController: ObservableObject {
             sheetHost.truthTableProblem = error.isEmpty ? "A truth table couldn't be made for this page." : error
         }
         redraw()   // it leaves the switches as they were, but the circuit settles again
-    }
-
-    private func pageHasLights(_ document: CoreDocument) -> Bool {
-        var chips = [CLSimChip](repeating: CLSimChip(), count: 256)
-        let n = Int(cl_simview_chips(document.handle, Int32(page), &chips, Int32(chips.count)))
-        return n > chips.count || chips.prefix(n).contains { !$0.isInput }
     }
 
     var documentTitle: String {

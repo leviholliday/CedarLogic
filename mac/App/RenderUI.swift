@@ -29,6 +29,7 @@ enum RenderUI {
         let canvas = CanvasController()
         canvas.drivesClock = false
         canvas.attach(doc)
+        TruthTableView.checksAtOnce = true   // drawn at once: no onAppear, no waiting
         let prefs = Prefs.shared
         let savedDark = prefs.dark, savedStyle = prefs.toolbarStyle, savedHidden = prefs.toolbarHidden
 
