@@ -182,9 +182,22 @@ for k in a(d(V, "keys"), "join") {
         try eq(prk(st), s(k, "prkHex"), "PRK")
         try eq(hex(hkdf(st, ascii("join-id"), 16)), s(k, "joinId"), "joinId")
         try eq(b64u(hkdf(st, ascii("join-token"), 32)), s(k, "joinToken"), "joinToken")
-        try eq(shaHex(s(k, "joinToken")), s(k, "joinHash"), "joinHash")
         try eq(hex(hkdf(st, ascii("join-key"), 32)), s(k, "joinKeyHex"), "joinKey")
     }
+}
+/// What the server stores for a join code: HMACs under its pepper, never the joinId or a plain hash (1.3, 3.6).
+for k in a(d(V, "keys"), "server") {
+    check("server join index \(s(k, "label"))") {
+        let pepper = SymmetricKey(data: unhex(s(k, "pepperHex")))
+        func mac(_ t: String) -> String { hex(Data(HMAC<SHA256>.authenticationCode(for: ascii(t), using: pepper))) }
+        try eq(s(k, "joinId"), s(a(d(V, "keys"), "join")[0], "joinId"), "joinId is the counting code's")
+        try eq(mac(s(k, "joinId")), s(k, "joinIndex"), "joinIndex")
+        try eq(mac(s(k, "joinToken")), s(k, "joinHash"), "joinHash")
+    }
+}
+check("proof") {
+    try eq(b64u(unhex(s(d(V, "proof"), "bytesHex"))), s(d(V, "proof"), "proof"), "proof")
+    try eq(s(d(V, "proof"), "proof").count, 43, "length")
 }
 for k in a(d(V, "keys"), "move") {
     check("move keys \(s(k, "label"))") {
@@ -260,18 +273,29 @@ func gcmOpen(_ key: Data, _ nonce: Data, _ ad: Data, _ ctTag: Data) throws -> Da
     let box = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce), ciphertext: ctTag.prefix(ctTag.count - 16), tag: ctTag.suffix(16))
     do { return try AES.GCM.open(box, using: SymmetricKey(data: key), authenticating: ad) } catch { throw Damaged.tag }
 }
+/// A classroom plaintext's cap (1.5): lower than Sync's, since circuits come from the other party.
+let MAX_PLAINTEXT = 4_000_000
+/// The one envelope each kind uses (1.5), checked before anything else.
+let ENVELOPE_OF: [String: UInt8] = ["teacher": 1, "join": 1, "info": 1, "assignment": 1, "live": 1, "move": 1, "classroom": 1, "name": 2, "submission": 2, "answer": 2, "key": 2]
+check("the envelope of every kind, and the plaintext cap") {
+    let given = d(V, "envelopeOf")
+    try eq(given.count, ENVELOPE_OF.count, "kinds")
+    for (k, v) in ENVELOPE_OF { try eq(i(given, k), Int(v), k) }
+    try eq(i(V, "maxPlaintext"), MAX_PLAINTEXT, "maxPlaintext")
+}
 /// Raw deflate (RFC 1951) through Compression's COMPRESSION_ZLIB, into a buffer one byte past the cap:
 /// a stream that fills it is refused, as the app's hooks do (MAX_PLAINTEXT + 1).
-func inflate(_ src: Data, cap: Int = 1 << 20) throws -> Data {
+func inflate(_ src: Data, cap: Int = MAX_PLAINTEXT) throws -> Data {
     let dst = UnsafeMutablePointer<UInt8>.allocate(capacity: cap + 1)
     defer { dst.deallocate() }
     let n = src.withUnsafeBytes { p in compression_decode_buffer(dst, cap + 1, p.baseAddress!.assumingMemoryBound(to: UInt8.self), src.count, nil, COMPRESSION_ZLIB) }
     guard n > 0, n <= cap else { throw Damaged.inflate }
     return Data(bytes: dst, count: n)
 }
-/// Opens either envelope, as a client does: every failure is "damaged".
-func open(_ env: Data, ad: (Int) -> Data, key: Data? = nil, priv: P256.KeyAgreement.PrivateKey? = nil) throws -> Data {
+/// Opens the envelope of a record of `kind`, as a client does: every failure is "damaged".
+func open(_ env: Data, kind: String, ad: (Int) -> Data, key: Data? = nil, priv: P256.KeyAgreement.PrivateKey? = nil) throws -> Data {
     let e = Data(env)   // re-based at 0
+    guard e.count >= 1, e[0] == ENVELOPE_OF[kind] else { throw Damaged.version }
     guard e.count >= 2, e[1] & ~1 == 0 else { throw Damaged.format }
     let flags = Int(e[1])
     var plain: Data
@@ -312,8 +336,8 @@ func isInt(_ v: Any?) -> Bool {
 }
 func isB64(_ v: Any?, _ n: Int) -> Bool { guard let t = v as? String else { return false }; return matches(b64uRe, t) && t.count == (n * 4 + 2) / 3 }
 let escRe = try! NSRegularExpression(pattern: "\\\\u([0-9a-fA-F]{4})")
-/// The payload, or "newer" (hands off) / "invalid" (treated as damaged).
-func readPayload(_ bytes: Data) -> Any {
+/// The payload, or "newer" (hands off) / "invalid" (treated as damaged); the checks in 2.2's order.
+func readPayload(_ bytes: Data, kind expected: String) -> Any {
     guard let text = String(data: bytes, encoding: .utf8) else { return "invalid" }
     // An escaped surrogate with no partner is refused before parsing (Foundation would let it through).
     let ns = text as NSString
@@ -332,6 +356,8 @@ func readPayload(_ bytes: Data) -> Any {
     if (p["v"] as! NSNumber).intValue > 1 { return "newer" }
     guard let kind = p["kind"] as? String else { return "invalid" }
     if !KNOWN.contains(kind) { return "newer" }
+    if kind != expected { return "invalid" }
+    let proofOk = isB64(p["proof"], 32)
     let key = p["key"]
     let keyOk: Bool = {
         if key is NSNull { return true }
@@ -352,15 +378,15 @@ func readPayload(_ bytes: Data) -> Any {
     case "assignment": ok = isStr(p["title"]) && isStr(p["instructions"]) && (p["dueAt"] is NSNull || isInt(p["dueAt"])) && isBool(p["closeAfterDue"]) && isStr(p["cdl"]) && isInt(p["createdAt"]) && isInt(p["modifiedAt"]) && key != nil && keyOk
     case "live":
         let ended = isBool(p["ended"]) && (p["ended"] as! NSNumber).boolValue
-        ok = matches(uuidRe, p["session"]) && isInt(p["at"]) && (ended || (isStr(p["cdl"]) && isInt(p["step"]) && isBool(p["reveal"]) && predict != nil && predictOk))
-    case "name": ok = isStr(p["name"]) && isInt(p["joinedAt"])
-    case "submission": ok = isStr(p["name"]) && isStr(p["cdl"]) && isInt(p["handedInAt"]) && isInt(p["attempt"])
+        ok = matches(uuidRe, p["session"]) && isInt(p["at"]) && (p["ended"] == nil || isBool(p["ended"])) && (ended || (isStr(p["cdl"]) && isInt(p["step"]) && isBool(p["reveal"]) && predict != nil && predictOk))
+    case "name": ok = isStr(p["name"]) && isInt(p["joinedAt"]) && proofOk
+    case "submission": ok = isStr(p["name"]) && isStr(p["cdl"]) && isInt(p["handedInAt"]) && isInt(p["attempt"]) && proofOk
     case "answer":
         let lights = p["lights"] as? [String: Any]
-        ok = matches(uuidRe, p["session"]) && isInt(p["ver"]) && lights != nil && isInt(p["at"]) &&
+        ok = matches(uuidRe, p["session"]) && isInt(p["ver"]) && lights != nil && isInt(p["at"]) && proofOk &&
             lights!.values.allSatisfy { v in !isBool(v) && ((v as? NSNumber).map { $0.doubleValue == 0 || $0.doubleValue == 1 } ?? false) }
     case "key": ok = isStr(p["text"]) && optStr(p["names"])
-    case "move": ok = matches(hex32Re, p["classId"]) && matches(uuidRe, p["studentId"]) && isStr(p["token"]) && isB64(p["classKey"], 32) && isB64(p["pub"], 65) && isStr(p["name"]) && isStr(p["className"])
+    case "move": ok = matches(hex32Re, p["classId"]) && matches(uuidRe, p["studentId"]) && isB64(p["token"], 32) && proofOk && isB64(p["classKey"], 32) && isB64(p["pub"], 65) && isStr(p["name"]) && isStr(p["className"])
     case "classroom": ok = matches(hex32Re, p["classId"]) && matches(code28Re, p["teacherKey"]) && isStr(p["name"]) && isInt(p["createdAt"]) && isInt(p["modifiedAt"])
     default: ok = false
     }
@@ -379,11 +405,11 @@ for r in a(V, "records") {
         try eq(String(hex(sha256(env)).prefix(32)), s(r, "h"), "h")
         if !s(r, "envelopeHex").isEmpty { try eq(hex(env), s(r, "envelopeHex"), "envelope hex") }
         try eq(String(data: aadOf(r, flags: i(r, "flags")), encoding: .ascii)!, s(r, "aad"), "aad")
-        let plain = try open(env, ad: { aadOf(r, flags: $0) }, key: sealed ? nil : unhex(s(r, "keyHex")), priv: sealed ? teacherPriv : nil)
+        let plain = try open(env, kind: s(r, "kind"), ad: { aadOf(r, flags: $0) }, key: sealed ? nil : unhex(s(r, "keyHex")), priv: sealed ? teacherPriv : nil)
         try eq(String(data: plain, encoding: .utf8) ?? "", s(r, "payload"), "payload")
         try eq(plain.count, i(r, "payloadBytes"), "payload length")
         try eq(hex(sha256(plain)), s(r, "payloadSha256"), "payload sha")
-        let p = readPayload(plain)
+        let p = readPayload(plain, kind: s(r, "kind"))
         guard let obj = p as? [String: Any] else { throw Fail(what: "payload \(p)") }
         try eq(obj["kind"] as? String ?? "", s(r, "kind"), "kind")
         if !s(r, "deflatedHex").isEmpty {
@@ -407,13 +433,13 @@ for r in a(V, "records") {
     let inner = d(r, "inner")
     if !inner.isEmpty {
         check("record \(n) inner sealed key opens") {
-            let plain = try open(env, ad: { aadOf(r, flags: $0) }, key: unhex(s(r, "keyHex")))
-            guard let p = readPayload(plain) as? [String: Any], let key = p["key"] as? [String: Any], let sealedB64 = key["sealed"] as? String else { throw Fail(what: "no sealed key") }
+            let plain = try open(env, kind: s(r, "kind"), ad: { aadOf(r, flags: $0) }, key: unhex(s(r, "keyHex")))
+            guard let p = readPayload(plain, kind: s(r, "kind")) as? [String: Any], let key = p["key"] as? [String: Any], let sealedB64 = key["sealed"] as? String else { throw Fail(what: "no sealed key") }
             let innerEnv = unb64u(sealedB64)
             try eq(hex(innerEnv), s(inner, "envHex"), "inner envelope")
             let ad = { (flags: Int) in aad(s(inner, "kind"), s(r, "classId"), s(inner, "id"), i(inner, "ver"), flags) }
-            let innerPlain = try open(innerEnv, ad: ad, priv: teacherPriv)
-            guard let k = readPayload(innerPlain) as? [String: Any] else { throw Fail(what: "inner payload refused") }
+            let innerPlain = try open(innerEnv, kind: s(inner, "kind"), ad: ad, priv: teacherPriv)
+            guard let k = readPayload(innerPlain, kind: "key") as? [String: Any] else { throw Fail(what: "inner payload refused") }
             try eq(k["kind"] as? String ?? "", "key", "kind")
             try eq(k["text"] is String, true, "text")
             let e = try privateKey(s(inner, "ephemeral"))
@@ -439,9 +465,12 @@ check("two seals of one payload differ (fresh nonce, fresh ephemeral key)") {
 
 for r in a(V, "refused") {
     check("refused: \(s(r, "label")) -> \(s(r, "why"))") {
-        let plain = try open(unb64u(s(r, "data")), ad: { aad(s(r, "kind"), s(r, "classId"), s(r, "id"), i(r, "ver"), $0) }, key: unhex(s(r, "keyHex")))
+        let ad = { (flags: Int) in aad(s(r, "kind"), s(r, "classId"), s(r, "id"), i(r, "ver"), flags) }
+        let plain = s(r, "keyHex").isEmpty
+            ? try open(unb64u(s(r, "data")), kind: s(r, "kind"), ad: ad, priv: try privateKey(s(r, "privateKey")))
+            : try open(unb64u(s(r, "data")), kind: s(r, "kind"), ad: ad, key: unhex(s(r, "keyHex")))
         try eq(hex(plain), s(r, "payloadHex"), "payload bytes")
-        try eq(readPayload(plain) as? String ?? "ok", s(r, "why"), "why")
+        try eq(readPayload(plain, kind: s(r, "kind")) as? String ?? "ok", s(r, "why"), "why")
     }
 }
 for t in a(V, "tamper") {
@@ -449,9 +478,9 @@ for t in a(V, "tamper") {
         let ad = { (flags: Int) in aad(s(t, "kind"), s(t, "classId"), s(t, "id"), i(t, "ver"), flags) }
         let opened: Bool
         if s(t, "keyHex").isEmpty {
-            opened = (try? open(unb64u(s(t, "data")), ad: ad, priv: try privateKey(s(t, "privateKey")))) != nil
+            opened = (try? open(unb64u(s(t, "data")), kind: s(t, "kind"), ad: ad, priv: try privateKey(s(t, "privateKey")))) != nil
         } else {
-            opened = (try? open(unb64u(s(t, "data")), ad: ad, key: unhex(s(t, "keyHex")))) != nil
+            opened = (try? open(unb64u(s(t, "data")), kind: s(t, "kind"), ad: ad, key: unhex(s(t, "keyHex")))) != nil
         }
         if opened { throw Fail(what: "opened") }
     }

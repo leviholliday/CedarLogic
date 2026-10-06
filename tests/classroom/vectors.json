@@ -1,5 +1,19 @@
 {
   "protocol": 1,
+  "maxPlaintext": 4000000,
+  "envelopeOf": {
+    "teacher": 1,
+    "join": 1,
+    "info": 1,
+    "assignment": 1,
+    "live": 1,
+    "move": 1,
+    "classroom": 1,
+    "name": 2,
+    "submission": 2,
+    "answer": 2,
+    "key": 2
+  },
   "salt": "cedarlogic-classroom-v1",
   "joinSalt": "cedarlogic-classroom-join-v1",
   "joinIterations": 600000,
@@ -335,7 +349,6 @@
         "prkHex": "7b7c47d5b1cd77e9533294fa790cdae3edbd7d699c59db07a41372069cd0aa5c",
         "joinId": "cdd55457c09fc79b540e6d3cfe4c49b4",
         "joinToken": "4XCpmP0JSSv1bd6VPDMlH5xuwMhLG-p3GGO7JJGOm_U",
-        "joinHash": "415df87c175300a8a8814c0f9c11191d1a2d915bbfe6a0e782d862143ab5b50d",
         "joinKeyHex": "764d5999b9351ed00327388a8d954527e83707e1cef958ddae6b2857bdececef"
       },
       {
@@ -345,7 +358,6 @@
         "prkHex": "e2650080da8963877750b62059b7f463b65897cbf3d5444e0776878ebab414e8",
         "joinId": "13269e21d4303681da142796fb08ac2c",
         "joinToken": "7G346Ntv-WrxkqqSOxBpdAN-GaDAeoHiGkh4s8mmhfs",
-        "joinHash": "9c542387d0f8b09e16514ddf8ccd6fcc3dd7343201e7aa7311be17df273ec46e",
         "joinKeyHex": "fdbda9a6239b23f95bfc7690395ae84ee0c7ec2ceb2dd166fd1d8d36dd35eca0"
       },
       {
@@ -355,7 +367,6 @@
         "prkHex": "005d31cadafafeaa0f4645a9de3c16e62a2f6d51421891d91ed6f89bc0f63f56",
         "joinId": "5595c635eecd88467f7f5ce71818d360",
         "joinToken": "nLkkyfHs5jMjjxWHcff6T8krgguqJNw8z5MgiLv9Hvs",
-        "joinHash": "582530436f504818894e1b36dbc459c1ec1e25b592655c9bcd7d7b0c216e6d4f",
         "joinKeyHex": "8490df6ede2b3f4b3cd5406e2cb2fd6f4b397d7c117314e3c9a333b3c8bb8530"
       },
       {
@@ -365,7 +376,6 @@
         "prkHex": "d3409a803b1eee05ab172f76f09f5f6aba341d1fb5fe6ffbebb6d8974a767b04",
         "joinId": "5344db56825cb06154e777866d92e987",
         "joinToken": "CKQ18G6Zjbs_k_6ehAIqqco8gtyM-WiN9BfyPYYpT-E",
-        "joinHash": "64c327c2eb416687c40885bb5c817098f86294c352fdfb054c1afc65df37d500",
         "joinKeyHex": "34eda9225f7d37abf1e6a4c07ac83529ef222c0ceec7d3fbf3e35f0970cfed81"
       }
     ],
@@ -375,6 +385,16 @@
         "secretHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
         "moveId": "fb490c53b8af36af281afb2f5064d1fb",
         "moveKeyHex": "04a3145f07d26ae375750e00c55ec4f693e387f988efa6f65cbc973bb110a7f2"
+      }
+    ],
+    "server": [
+      {
+        "label": "counting join code, test pepper",
+        "pepperHex": "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+        "joinId": "cdd55457c09fc79b540e6d3cfe4c49b4",
+        "joinToken": "4XCpmP0JSSv1bd6VPDMlH5xuwMhLG-p3GGO7JJGOm_U",
+        "joinIndex": "3bd699d5b6c129e47eb1c224c07e596f47f62cbf51fd9214fc9d96ebaa5fed2a",
+        "joinHash": "74277fb6351b2dd56c0eea6b0a1bb9b198d26ee0c1e6f2af350d5fcca423669c"
       }
     ]
   },
@@ -386,6 +406,11 @@
       "tokenHash": "f45dc82a7523d14974cea050e3028e8bf06a8ee855a9d63034ebb4fb9ecc2305"
     }
   ],
+  "proof": {
+    "label": "a student's proof",
+    "bytesHex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+    "proof": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"
+  },
   "p256": {
     "teacher": {
       "dHex": "2e3bc5dbc3f1d5b0e9bb298cabd6fe28be227d61f2b62603a16d3cd047c5fce7",
@@ -448,13 +473,13 @@
       "nonceHex": "c0c1c2c3c4c5c6c7c8c9cacb",
       "aad": "cedarlogic-classroom/1|name|9c89e40e9ea981bbfeaf61e93c91be46|5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d|1|0",
       "byteExact": true,
-      "payload": "{\"v\":1,\"kind\":\"name\",\"name\":\"Sam Lee\",\"joinedAt\":1759600000000}",
-      "payloadBytes": 63,
-      "payloadSha256": "9adbf5cbfbe8f3699d761c938d7a0dbbd06571bc3a4bf684edcb31d90f850feb",
-      "envelopeBytes": 158,
-      "h": "091014f090a157a08c3f2459b7b127b8",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw",
-      "envelopeHex": "0200045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd9c0c1c2c3c4c5c6c7c8c9cacb11843da5a1a0bf999ddd35db578adf53ccaeae6ea283afae83a74ace1f4582748cc9c6daa2f140b63a5af66e6cef0b17b183e852a89e389fbf77856d191e15e999f53efe1242eca74372c5ddb855ac"
+      "payload": "{\"v\":1,\"kind\":\"name\",\"name\":\"Sam Lee\",\"joinedAt\":1759600000000,\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\"}",
+      "payloadBytes": 117,
+      "payloadSha256": "14d7f8e4396c048eeb17908dcdf89bdc8e0ae09cfabf2e357d60d11f32e0c26a",
+      "envelopeBytes": 212,
+      "h": "894017f82fe1539b76726d869068a003",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE",
+      "envelopeHex": "0200045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd9c0c1c2c3c4c5c6c7c8c9cacb11843da5a1a0bf999ddd35db578adf53ccaeae6ea283afae83a74ace1f4582748cc9c6daa2f140b63a5af66e6cef0b17b183e852a89e389fbf77856d191e446a70e53f12e540951c2e3d3067b569296c9e7cf1a50af6f5ec07b8816ecdc2fe2d6a77f28494fed1a2121a760925f13c8be9e9e6a445dff28fbe4601b48c4a058d425291e6e1"
     },
     {
       "n": 2,
@@ -634,14 +659,14 @@
       "nonceHex": "808182838485868788898a8b",
       "aad": "cedarlogic-classroom/1|submission|9c89e40e9ea981bbfeaf61e93c91be46|7c9e6679-7425-40de-944b-e07fc1f90ae7/5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d|2|1",
       "byteExact": false,
-      "payload": "{\"v\":1,\"kind\":\"submission\",\"name\":\"Sam Lee\",\"cdl\":\"(cedarlogic\\n  (version 3)\\n  (generator \\\"CedarLogic 0.3.6\\\")\\n  (page 0\\n    (gate \\\"AA_TOGGLE\\\"\\n      (uuid \\\"1\\\")\\n      (at 10 20)\\n      (angle 0)\\n      (lparam \\\"OUTPUT_NUM\\\" \\\"1\\\"))\\n    (gate \\\"GA_LED\\\"\\n      (uuid \\\"2\\\")\\n      (at 18 20)\\n      (angle 0))\\n    (wire\\n      (ids \\\"3\\\")\\n      (seg \\\"0\\\" h\\n        (pts 11 20 17 20)\\n        (connect \\\"1\\\" \\\"OUT_0\\\")\\n        (connect \\\"2\\\" \\\"N_in0\\\")))))\\n\",\"handedInAt\":1759690000000,\"client\":\"web/2026-10-06\",\"attempt\":2}",
-      "payloadBytes": 540,
-      "payloadSha256": "ba0b891b5de5ce1b07d0a7c8cefa884de97a3d67495a8ee806541e9d323a451c",
-      "envelopeBytes": 392,
-      "h": "446003669138db2856d4be0dc51b5c41",
-      "data": "AgEEM9xetmY2yB98xi3fzuS_1qskLXaJO4NIY2bE07419yDONGoNiMH6ST0FEEyXXVZwg2tDqOY-umAHQpAH0f5qwICBgoOEhYaHiImKi-m-4dttHQ-w9UgRbCVVRs9NnBZxLEONYqZj6ZLvVjcuQgXs1vMl53rirz8uugsawmBEocNGd97o-JqNTvr4WLDl5MvPmyKwHQVKOFbhlypIVn2aOuPekOlqCaL6sKeHioPCIzaEA0CzJ60exhHE0iAOZZ4Qs-RxLaCqiXp1jW-bAfBnk9xBKcZlMpuxSlXWPVMDJSBtPu-DCjUcdE_ixSPTBfV4ZjRXmOxORy2dwg1MF77rJd7NW_TJ6fwV_tNI9GIRLNvx5n95wKCa-kFqgDK9Po_cWOqVovjlfSt7xVk4eCso2MdMCSWFbnXUiRL0R94v-TkTjDBBewyeHoi2ozpC7WrFEOPaCXsmnF4_AKUO_f1799OCycArNlOrVBhGBOVClekkvoyUNznJEeyawVry9HaYtdvSgZ4",
-      "envelopeHex": "02010433dc5eb66636c81f7cc62ddfcee4bfd6ab242d76893b83486366c4d3be35f720ce346a0d88c1fa493d05104c975d5670836b43a8e63eba6007429007d1fe6ac0808182838485868788898a8be9bee1db6d1d0fb0f548116c255546cf4d9c16712c438d62a663e992ef56372e4205ecd6f325e77ae2af3f2eba0b1ac26044a1c34677dee8f89a8d4efaf858b0e5e4cbcf9b22b01d054a3856e1972a48567d9a3ae3de90e96a09a2fab0a7878a83c22336840340b327ad1ec611c4d2200e659e10b3e4712da0aa897a758d6f9b01f06793dc4129c665329bb14a55d63d530325206d3eef830a351c744fe2c523d305f57866345798ec4e472d9dc20d4c17beeb25decd5bf4c9e9fc15fed348f462112cdbf1e67f79c0a09afa416a8032bd3e8fdc58ea95a2f8e57d2b7bc55938782b28d8c74c0925856e75d48912f447de2ff939138c30417b0c9e1e88b6a33a42ed6ac510e3da097b269c5e3f00a50efdfd7bf7d382c9c02b3653ab54184604e54295e924be8c943739c911ec9ac15af2f47698b5dbd2819e",
-      "deflatedHex": "6d51416ec23010fc8ab5279080da410d855bd4a2a8520a950a374b918957c16ae244898143d5bf774da00d6d7df2ceccceacbd1f70848518c1bbb11a16d01e76a5695b53591881552512f6a64a96201290e982ea41865a3545959b4c5ac606476c7c039b0ecf658e161be5aa864978f4cac42b199f4c27a1844e53ab1c19f757dfa01c92368ad2cd3a8e93a5848e20ea70309a2871e93b63ca31c159c07b88cd0bb2fb018a5a3534b484f576f3badda4abed8b848bcff036358ed264f9f43732f81df9f06fe4d5ed641afc268d6ec961da7768312788d314fb2be6bfc1b54c08326662d6b7272aabacc5cc7543772f4979cff146129c25abd4582ff147fafded95d5a89f6de468c5b3fb7938e7dda14d16062dc170c2dd5dc083702cf89887d4a49cc3b2262af8fc02"
+      "payload": "{\"v\":1,\"kind\":\"submission\",\"name\":\"Sam Lee\",\"cdl\":\"(cedarlogic\\n  (version 3)\\n  (generator \\\"CedarLogic 0.3.6\\\")\\n  (page 0\\n    (gate \\\"AA_TOGGLE\\\"\\n      (uuid \\\"1\\\")\\n      (at 10 20)\\n      (angle 0)\\n      (lparam \\\"OUTPUT_NUM\\\" \\\"1\\\"))\\n    (gate \\\"GA_LED\\\"\\n      (uuid \\\"2\\\")\\n      (at 18 20)\\n      (angle 0))\\n    (wire\\n      (ids \\\"3\\\")\\n      (seg \\\"0\\\" h\\n        (pts 11 20 17 20)\\n        (connect \\\"1\\\" \\\"OUT_0\\\")\\n        (connect \\\"2\\\" \\\"N_in0\\\")))))\\n\",\"handedInAt\":1759690000000,\"client\":\"web/2026-10-06\",\"attempt\":2,\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\"}",
+      "payloadBytes": 594,
+      "payloadSha256": "1ca9f244d857b3b0ca699fa3faf4e4c552f9676ec221f8661d91e49f85b80ce8",
+      "envelopeBytes": 437,
+      "h": "cb2574c02ba74fe4fc0365b0429f5800",
+      "data": "AgEEM9xetmY2yB98xi3fzuS_1qskLXaJO4NIY2bE07419yDONGoNiMH6ST0FEEyXXVZwg2tDqOY-umAHQpAH0f5qwICBgoOEhYaHiImKi-m-_fptHQuxVLCp2KRjsfr2GWQxsIjn4w7Eh0jRX7CndmyeV6ITJ_o5jjz2iEQzktUmcTMxLolB6ITTBuUS4KNdKyKwp5xZ3wrGzJKEPS9ExpaJmBLmQpzfvvDU85gLXWSTNBcLlLh-KDV57sDU66i-AiCXerqAO95SlcokWvvskg8OAkXLToVMcG-6JZaKDTN7ar0In80nfgcbBu2pL1zOFex9ARDiiL_PvLa9obIWCMtncpCh5E3C-t0l0C7DD3fTndjp5lpLbCm9ktr0BBk262Q4CUpn8Isvjw-p1qqRYMQrrkFaJeNSDxvt4-1xaE8GLX5qKYujY9fV9Yfpey0vQr1B0wM6yy2JXYQZCMxdWh22ELBJHvxRNtNVyCYc4xlRj4PGP366KX-Gegfy0hE5r3t9-R9wUJ_H9E0KAUe_ymek2FcldmiWT4BIoEtXdkxFs0wg0q2OkMVlPIu-jvKvm-0vJnk",
+      "envelopeHex": "02010433dc5eb66636c81f7cc62ddfcee4bfd6ab242d76893b83486366c4d3be35f720ce346a0d88c1fa493d05104c975d5670836b43a8e63eba6007429007d1fe6ac0808182838485868788898a8be9befdfa6d1d0bb154b0a9d8a463b1faf6196431b088e7e30ec48748d15fb0a7766c9e57a21327fa398e3cf688443392d5267133312e8941e884d306e512e0a35d2b22b0a79c59df0ac6cc92843d2f44c696899812e6429cdfbef0d4f3980b5d649334170b94b87e283579eec0d4eba8be0220977aba803bde5295ca245afbec920f0e0245cb4e854c706fba25968a0d337b6abd089fcd277e071b06eda92f5cce15ec7d0110e288bfcfbcb6bda1b21608cb677290a1e44dc2fadd25d02ec30f77d39dd8e9e65a4b6c29bd92daf4041936eb6438094a67f08b2f8f0fa9d6aa9160c42bae415a25e3520f1bede3ed71684f062d7e6a298ba363d7d5f587e97b2d2f42bd41d3033acb2d895d841908cc5d5a1db610b0491efc5136d355c8261ce319518f83c63f7eba297f867a07f2d21139af7b7df91f70509fc7f44d0a0147bfca67a4d857257668964f8048a04b57764c45b34c20d2ad8e90c5653c8bbe8ef2af9bed2f2679",
+      "deflatedHex": "6d515d4fc23014fd2b4d9f2401ecb6383edea6e234996014a290254bb75e46e3d62dfb0012e37ff796810eb54fbde79c7bce6def07ddd2b1d1a5ef52093aa6651da6b22c65a668972a9e02622f3c251e00029148b0be8840f022c96219f98a908b2d14ba81589d43198382825759417c7aa3959e5612d6b7fab64f1b4dce63204c5f7503af00b58e13cc67aeeb4d7cda1048d5b5144819c7be03c62b623062b216a2e204ed7e8024e7050eedd3d962feb49807d3c5a34f8f3e9df354d709bcc9eddf48f377e4f0dfc893db4e16f04d4a51a283d57628214688e1149b13a6bfa12a8961a03131066d7ba4a24c2988aa66e8e625016b399e49cc83641a48a525faf87a7f1bae048807e554b8e2c1d5c81eb1e6e02613090a61ba83f0d264a6dd33588fd9d8c4ab0ad21c29b34bf322cbd6285aba7772693e27ab5464fc352f42d7a843eb7a1fa929136f2b0bee131bacfd68ad86f4f30b"
     },
     {
       "n": 10,
@@ -657,13 +682,13 @@
       "nonceHex": "707172737475767778797a7b",
       "aad": "cedarlogic-classroom/1|answer|9c89e40e9ea981bbfeaf61e93c91be46|2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d/5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d|57|0",
       "byteExact": true,
-      "payload": "{\"v\":1,\"kind\":\"answer\",\"session\":\"2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\"ver\":57,\"lights\":{\"LED\":1},\"at\":1759603660000}",
-      "payloadBytes": 119,
-      "payloadSha256": "30f69c08346fad2b7b1c9e15d7ea9e0e9de4c315ea4f26393ea9fbb999689df3",
-      "envelopeBytes": 214,
-      "h": "bc75408433bd46953690bfb12535769b",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2XBxcnN0dXZ3eHl6e8eIAvPZIvz06wmWDtAYrFGVjc2isdo8212T4Fx0aT4qOJMuW12H9PZFB0H6IJjybudQLDDR0ln7oAji3AEafqkJasEzJ2_W7WXQkSd5NsTnESaHHvFDhuoiaV4whZkpEeYaNZhrklVJZSitbRvg-59Ru4u9P77b1Fm1b4MgQrP8xJUdZBiebA",
-      "envelopeHex": "0200045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd9707172737475767778797a7bc78802f3d922fcf4eb09960ed018ac51958dcda2b1da3cdb5d93e05c74693e2a38932e5b5d87f4f6450741fa2098f26ee7502c30d1d259fba008e2dc011a7ea9096ac133276fd6ed65d091277936c4e71126871ef14386ea22695e3085992911e61a35986b9255496528ad6d1be0fb9f51bb8bbd3fbedbd459b56f832042b3fcc4951d64189e6c"
+      "payload": "{\"v\":1,\"kind\":\"answer\",\"session\":\"2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\"ver\":57,\"lights\":{\"LED\":1},\"at\":1759603660000,\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\"}",
+      "payloadBytes": 173,
+      "payloadSha256": "efe79fa5eb80fde403571760c1cf47c2428cc737d505dce85ff6583346ad9d68",
+      "envelopeBytes": 268,
+      "h": "1916a4363ee4d4be367f4a1e4c3fa99f",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2XBxcnN0dXZ3eHl6e8eIAvPZIvz06wmWDtAYrFGVjc2isdo8212T4Fx0aT4qOJMuW12H9PZFB0H6IJjybudQLDDR0ln7oAji3AEafqkJasEzJ2_W7WXQkSd5NsTnESaHHvFDhuoiaV4whZkpEeYaNZhrklVJZSitbRvg-59Ru4u9P76KhtQr-F7NNWFsn8UzRkf8rsK4OB5J_SOY6cdA4yeJkwxGcYsltq3ybt7j2nslueVPUqDffKo-uRczfPLciPBMQIulUNm2wA",
+      "envelopeHex": "0200045984605780b06108a14464479339e2f38b970e29a01d98f509e18fd779a0e39a88cc1462c88360a05978d73777c91abe5642b7711ab39591496a0739e88a1dd9707172737475767778797a7bc78802f3d922fcf4eb09960ed018ac51958dcda2b1da3cdb5d93e05c74693e2a38932e5b5d87f4f6450741fa2098f26ee7502c30d1d259fba008e2dc011a7ea9096ac133276fd6ed65d091277936c4e71126871ef14386ea22695e3085992911e61a35986b9255496528ad6d1be0fb9f51bb8bbd3fbe8a86d42bf85ecd35616c9fc5334647fcaec2b8381e49fd2398e9c740e32789930c46718b25b6adf26edee3da7b25b9e54f52a0df7caa3eb917337cf2dc88f04c408ba550d9b6c0"
     },
     {
       "n": 11,
@@ -679,13 +704,13 @@
       "nonceHex": "606162636465666768696a6b",
       "aad": "cedarlogic-classroom/1|move|9c89e40e9ea981bbfeaf61e93c91be46|fb490c53b8af36af281afb2f5064d1fb|1|0",
       "byteExact": true,
-      "payload": "{\"v\":1,\"kind\":\"move\",\"classId\":\"9c89e40e9ea981bbfeaf61e93c91be46\",\"studentId\":\"5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d\",\"token\":\"QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\",\"classKey\":\"EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8\",\"pub\":\"BDJOV2q24PP7ZmCxHXOmFiVEMLnY3eGlcRLuj3e2huFf1Whgvw-TSvdPbRrI8dEcRU_Z8fxFPRbBpwmNiwUlQhc\",\"name\":\"Sam Lee\",\"className\":\"Digital Logic 101\"}",
-      "payloadBytes": 373,
-      "payloadSha256": "1fc609a643a41a690db673d909b670638cfc9ee65ed37189e8023751581a3a74",
-      "envelopeBytes": 403,
-      "h": "1ac6c7983dc8dcda188130c51d0f3348",
-      "data": "AQBgYWJjZGVmZ2hpamtiiwke4ayrlf_Qosqmq0_KiqI1dv5H4prHN7nArCAOOBrSkcgYJKFhgghxDf0w4EBnYkjMzhHXl9g2QvXJdyqfL660SU5BN_2XQqw8VDCEGdDgQS3Omx1Kxv-bmgBVnFs-fb7sUYZJ0NCDQi8vnQ5plA3wsXgJQjYeb8UJ9fP44L6Be7w5M2EMH1vT1VBT2aeUz9OMN7uPJHLT26HUJ_zBypUABO-yuwZmeyVksw3qjgCJcEDCiJ3HvATZTcR_5Aj5rEH5NfJY8xU9fLOLv3OOsdwSGeiNr0EcbEcJPAlHitIJwVoxRmNXk3AVj8aQVjDjdrPmvjNa6hw7Hjb-r1nSzO_-uZWNYPi3yEJ2RrnPJquOdOThBp067SM9huGyx07U5YBpBDp04vX3BLhRadbNM7fEy1vLr1-EXLxEbWsjz0pTKkcmdVrWJewd9OUVdWsEJErqWLczi07Ju2hx36eh0yLB0OjIcYZeuvhcfcmw9R-opYHXnvW-m327tgrIUhVJAKo5_w",
-      "envelopeHex": "0100606162636465666768696a6b628b091ee1acab95ffd0a2caa6ab4fca8aa23576fe47e29ac737b9c0ac200e381ad291c81824a1618208710dfd30e040676248ccce11d797d83642f5c9772a9f2faeb4494e4137fd9742ac3c54308419d0e0412dce9b1d4ac6ff9b9a00559c5b3e7dbeec518649d0d083422f2f9d0e69940df0b1780942361e6fc509f5f3f8e0be817bbc3933610c1f5bd3d55053d9a794cfd38c37bb8f2472d3dba1d427fcc1ca950004efb2bb06667b2564b30dea8e00897040c2889dc7bc04d94dc47fe408f9ac41f935f258f3153d7cb38bbf738eb1dc1219e88daf411c6c47093c09478ad209c15a314663579370158fc6905630e376b3e6be335aea1c3b1e36feaf59d2cceffeb9958d60f8b7c8427646b9cf26ab8e74e4e1069d3aed233d86e1b2c74ed4e58069043a74e2f5f704b85169d6cd33b7c4cb5bcbaf5f845cbc446d6b23cf4a532a4726755ad625ec1df4e515756b04244aea58b7338b4ec9bb6871dfa7a1d322c1d0e8c871865ebaf85c7dc9b0f51fa8a581d79ef5be9b7dbbb60ac852154900aa39ff"
+      "payload": "{\"v\":1,\"kind\":\"move\",\"classId\":\"9c89e40e9ea981bbfeaf61e93c91be46\",\"studentId\":\"5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d\",\"token\":\"QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8\",\"proof\":\"YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8\",\"classKey\":\"EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8\",\"pub\":\"BDJOV2q24PP7ZmCxHXOmFiVEMLnY3eGlcRLuj3e2huFf1Whgvw-TSvdPbRrI8dEcRU_Z8fxFPRbBpwmNiwUlQhc\",\"name\":\"Sam Lee\",\"className\":\"Digital Logic 101\"}",
+      "payloadBytes": 427,
+      "payloadSha256": "a5d30691b440ae8f252a71f1ef90ea961754a21d7ec6992acadc15378d526645",
+      "envelopeBytes": 457,
+      "h": "5edd6a3916be57a939d8532172f643c4",
+      "data": "AQBgYWJjZGVmZ2hpamtiiwke4ayrlf_Qosqmq0_KiqI1dv5H4prHN7nArCAOOBrSkcgYJKFhgghxDf0w4EBnYkjMzhHXl9g2QvXJdyqfL660SU5BN_2XQqw8VDCEGdDgQS3Omx1Kxv-bmgBVnFs-fb7sUYZJ0NCDQi8vnQ5plA3wsXgJQjYeb8UJ9fP44L6Be7w5M2EMH1vT1VBT2aeUz9OMN7uPJHLT26HUJ_zBypUABO-yuwZmeyVkoBPkkhXgLxu59fnrp3PYZOZD1iHwmGjMBdoLzjU-W4ORkFX3vMkjYN6crTw6NE57IxAL5JcTgBpyRWV-1DMV96CfWyOCQvmDuCUF0yg_NBHEqHakwPHCtbGqUIa5xX1Mer75J-mgP_vgDJIzmGd4gOP9sSeAw5RBGR4Pq6OGN7ozbOG2LYfa1GTvhHm2fL5DQw0q2U5TWidxcQjecqZSkNBFTyMvN1jlIMYmg3_YmlRZiqbGilLQ5tWZY590yuZRWNCkuGDx4_bGA1sFyBL5aGPmNI4ywdmNEHRZJqB7-q1vyjo75_fVGKFIWCM0wKqepp7o45r-qdmNqEkd9DZrHjCFnKtECoawjsbCLDQufA",
+      "envelopeHex": "0100606162636465666768696a6b628b091ee1acab95ffd0a2caa6ab4fca8aa23576fe47e29ac737b9c0ac200e381ad291c81824a1618208710dfd30e040676248ccce11d797d83642f5c9772a9f2faeb4494e4137fd9742ac3c54308419d0e0412dce9b1d4ac6ff9b9a00559c5b3e7dbeec518649d0d083422f2f9d0e69940df0b1780942361e6fc509f5f3f8e0be817bbc3933610c1f5bd3d55053d9a794cfd38c37bb8f2472d3dba1d427fcc1ca950004efb2bb06667b2564a013e49215e02f1bb9f5f9eba773d864e643d621f09868cc05da0bce353e5b83919055f7bcc92360de9cad3c3a344e7b23100be49713801a7245657ed43315f7a09f5b238242f983b82505d3283f3411c4a876a4c0f1c2b5b1aa5086b9c57d4c7abef927e9a03ffbe00c923398677880e3fdb12780c39441191e0faba38637ba336ce1b62d87dad464ef8479b67cbe43430d2ad94e535a27717108de72a65290d0454f232f3758e520c626837fd89a54598aa6c68a52d0e6d599639f74cae65158d0a4b860f1e3f6c6035b05c812f96863e6348e32c1d98d10745926a07bfaad6fca3a3be7f7d518a148582334c0aa9ea69ee8e39afea9d98da8491df4366b1e30859cab440a86b08ec6c22c342e7c"
     },
     {
       "n": 12,
@@ -715,177 +740,241 @@
       "label": "payload v 2",
       "why": "newer",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b2276223a322c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a317d",
-      "data": "AQAwMTIzNDU2Nzg5OjvtMlOryg-6dH9PhjsHALp0DCOHvppWLjKx1SXhu26NkYzrFjbzg9i3hDE3UnWIzV-xMmH8T-Mix2zTTXxYPvoCa9fF"
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a322c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TAxMjM0NTY3ODk6O3pUk0-NGjRAH4rJTdsQlyNlcC88f9TI3p3WmP6RKaUQGDFvj3w18hnsG_kPstfsRqerEqvJLjPILr_6VKB71ZIyPmT-GyPSKT0QwlORYPe3kaxTm2pWYPkCcu4RVX13nH-qhpEn6JWqMh5VlQk3ktNLguQP56wd6vM"
     },
     {
-      "label": "kind 'grade' (unknown)",
+      "label": "kind 'grade' (unknown) read as a name",
       "why": "newer",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "privateKey": "teacher",
       "payloadHex": "7b2276223a312c226b696e64223a226772616465222c226e616d65223a2253616d204c6565227d",
-      "data": "AQAxMjM0NTY3ODk6OzwOUkOP-VcGIZsgiVOrWXh5Meeyjv5e2CXpLN_PI-I5LDIA-PljGrwSYoYEX_OseB0U8-xGZp6h"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TEyMzQ1Njc4OTo7PHUgHVTx-7o-FEVL_DUd9Hj78xgdinzxRAHnVKlRIVmxIcTH6oHd7fuOstm7-aP0uwM67CDdcrU"
+    },
+    {
+      "label": "kind 'submission' read as a name",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a227375626d697373696f6e222c226e616d65223a2253616d204c6565222c2263646c223a22222c2268616e646564496e4174223a312c22617474656d7074223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TIzNDU2Nzg5Ojs8PcM368FzRQT5Po7VxtsI-dn9-RsppDqdFaVceCBEh30FaRRa12NUQV03TPGdMZtsFZ9LDuQauUMpCBmksNtjExqP3JBmxQttYJFbgMhmENw9-BHsfn0DGeIGg0dxAQTjVGnhUkMhdVYM7xGQepFmdhjiA5Pm4xROUxoAWLOOFHiH0kdNDucolMp_a1tLD4k4B6xuPLOR8Q"
     },
     {
       "label": "name is a number",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a372c226a6f696e65644174223a317d",
-      "data": "AQAyMzQ1Njc4OTo7PD2vuUaLArxuw1XouyXm_6c6rt8bRuTGpFEyHXGgTlkCRcm4t2AtV-n3gqNDnxzI1X0C_FqPUOZhERzS5g"
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a372c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TM0NTY3ODk6Ozw9PkR3MCZjNXdMbB2zNV47VMoWcXiRNXaYKuVHERW4lvAbHQT07jqEUkfgyAvVFd9yrbm2Fml1xL4TRke95Bt0kIjkOrprbTkeiXwjSgexSeMGR89YXsJ6OgVSCQTIsNEK_wsp33roEH9rGybSZkKpLfQm"
     },
     {
       "label": "unpaired surrogate escape in name",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a225c7564383364222c226a6f696e65644174223a317d",
-      "data": "AQAzNDU2Nzg5Ojs8PT5GTbzv1gzycSOxUGYF7PipLPRgZCGLm3kSf8qkgpfDMkeX8hE4H134y3EyLx09IS8mKI_Nlm5OSvQOUheT5PNVgCY"
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a225c7564383364222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TQ1Njc4OTo7PD0-P3cOcD620sJlfFBri0QYF-T2gGCy18-8Op2Vhf1coFKUBzypEpz7WAJLpNoCSLxvQIxA-Ne91AXjCndyR5ScBBUwM746VJmZBi6JWiPWeIt5YJHL99_Pxr7nEgOcaAKvCGGtKlA5D6v7tP8iM2pVqMJkusFD0jsw2Q"
     },
     {
       "label": "invalid UTF-8 byte in name",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a22ff53616d222c226a6f696e65644174223a317d",
-      "data": "AQA0NTY3ODk6Ozw9Pj-eB9wO5pSxxuZ8jX8EOebnnLnyxoVTtNfFH_Z0Q8krTLop2M4g3X14I434ikmaXNrPkirnl6-RYEqW2JJtmLON"
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a22ff53616d222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TU2Nzg5Ojs8PT4_QHw5LoZXXjHUMaS_ejItZaGplmo2K4dutLohP-sn-ZP1FXS5_8HaWJ3WNkMf611hMdJvG3Tu1Qn1hfco4OCNTZ9FKFldfh0c7EB0rnUR_K3i52UiFbO59mqcHA7BJGn7cHezTLm8B3pC2VEEpwGRTUrm7IBpYEs"
     },
     {
       "label": "joinedAt is a string",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a2231227d",
-      "data": "AQA1Njc4OTo7PD0-P0D-MTos7-8yH-iv8aAmHSOJevB9QMHXEtxn8reDIDgHTVwTiJHbR2-HKTaUnkcZWSwvxGjX-pfjPccPYYPTRVO6F5qIDsE"
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a2231222c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2TY3ODk6Ozw9Pj9AQbXSy5fADbIIoZ-FBeIAmyogEF0It2nvxPl6mT9eugmQPNdRBBAPTm7CjPGXG1Ida_GVC_oJfmRkfMODZvmk2OHtVpjtFepTVXgTBHOB2rDuD9MnQ4v1dL2j0v7aR7RkET5F8omnkK8VAB_w2tDbTQA07oeb-XCAWUJpYg"
     },
     {
       "label": "joinedAt past 2^53",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a393030373139393235343734303939337d",
-      "data": "AQA2Nzg5Ojs8PT4_QEHZoB-8_ndC0AXB0Yq3AbTZuql9LfA6CibVW4UyjznUS8yyi7tVhAhSOXGm9Ckm6AmXByNHPnLdZExrl0LdoW4BgREIErNb_pqU7qw0DTlYj3g3"
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a393030373139393235343734303939332c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2Tc4OTo7PD0-P0BBQiRkGObYoWAR_xuQvwZ8M1skRoeliSnIeKh8W6DfrbsPh0zpsB-PYAqU-lYL5ytlgzR09viYYqdMMD2LMiKEz6x2lBIFwSagS69JDsVjsRHqk6ne-T9bDPZjT2rQ1sg0r1rfdjYLV7iwa-uTAddCUopfuekMkl7NmE_SGB_3DnAitvKdc97trMg"
+    },
+    {
+      "label": "name without a proof",
+      "why": "invalid",
+      "kind": "name",
+      "envelope": "sealed (0x02)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a317d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2Tg5Ojs8PT4_QEFCQ0chpWkI5ghNRuP5BEC2ctzTgDD6CGh0B_4M-3FbQJzi64fhUWuNo-Rr_SuKWuHwTXjM8fTGVJB-kBFTsTK_pbUgBlw"
     },
     {
       "label": "assignment without cdl",
       "why": "invalid",
-      "kind": "name",
+      "kind": "assignment",
+      "envelope": "symmetric (0x01)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
       "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
       "payloadHex": "7b2276223a312c226b696e64223a2261737369676e6d656e74222c227469746c65223a2274222c22696e737472756374696f6e73223a22222c226475654174223a6e756c6c2c22636c6f73654166746572447565223a66616c73652c226b6579223a6e756c6c2c22637265617465644174223a312c226d6f6469666965644174223a317d",
-      "data": "AQA3ODk6Ozw9Pj9AQUJfwh3PfezJr_odAPh4-uzo12j7AgQokES02KhhPLAJK7DTyoqytbj1ZDoOAs2bJcNoYTVo8ME35orqJ5y3keIpxQIkJETVqZDiRNJ8DRwbxPKXOwoGz5n8ecitAx41LYXX55vsuGpdXccX0EpRvaLB-cVN_6KexrcdqMSXN2nvryxZrO9rE50hFo9ygSDybMVdqC7v"
+      "data": "AQA5Ojs8PT4_QEFCQ0Sj8e74I7k3Tn4qwzwvL3j85jaozGDxMWWcWERbN8ER60dXbFvfYUgFeNyxRTHzWwwwAmxJAX05N4ZmQSEp360eGJWyconmFLDhPhoCvxAjoBNMIUzQFyWfT-xrryzXi9nsE063HQ79Z71JaewqGets6U5bzmO1F0SvWfWOD_97kX6q81kB1hF-BmKf8UqSRjpJvtTl"
     },
     {
       "label": "assignment key with both text and sealed",
       "why": "invalid",
-      "kind": "name",
+      "kind": "assignment",
+      "envelope": "symmetric (0x01)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
       "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
       "payloadHex": "7b2276223a312c226b696e64223a2261737369676e6d656e74222c227469746c65223a2274222c22696e737472756374696f6e73223a22222c226475654174223a6e756c6c2c22636c6f73654166746572447565223a66616c73652c2263646c223a22222c226b6579223a7b2274657874223a2278222c227365616c6564223a2279227d2c22637265617465644174223a312c226d6f6469666965644174223a317d",
-      "data": "AQA4OTo7PD0-P0BBQkNPi4PSc1dgZtc0noUjFaH3lTd0r1kA7t2zKXBcOEpYgBhL4gDKB1vJ0bZRFJFSllTi9D-94tM07L_j4K_l7lldAo79Yt8sVwt3ocNsMGnuCoj1AQiGIxihHa5ocerArumhbCxefLZQFc60xJH0Y85vtj5U_9gcsgip9COV_30XZStzbUYnG5JlO_00qsuyqm2jY3lMGkIinNx6FijakYJOLNNLEyDJ9rU__KhOsFx9070R"
+      "data": "AQA6Ozw9Pj9AQUJDREXkD2bnFoqAdHcbsJocADA1ovi2FSF9htW0g4_KtCMvZIB36S3x40R7UIzEljrb0I2oUFnbuB9-Y6CyCC4SogKEnyaeKv8FuO43MmKF8AMSLcdvQ-YuerCzxKLzKof6I07nAOAv8k4Uz-A_MHwMcI3GUKUCpsrDhFp85_BRmwXtVd4vJizYm-iwvDyQktRDEO7FK_JDpfrKsE_Sbal1PRRUGaaWs0JQG9YQR9q50Xz8V1I4"
     },
     {
       "label": "assignment key with neither text nor sealed",
       "why": "invalid",
-      "kind": "name",
+      "kind": "assignment",
+      "envelope": "symmetric (0x01)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
       "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
       "payloadHex": "7b2276223a312c226b696e64223a2261737369676e6d656e74222c227469746c65223a2274222c22696e737472756374696f6e73223a22222c226475654174223a6e756c6c2c22636c6f73654166746572447565223a66616c73652c2263646c223a22222c226b6579223a7b226e616d6573223a22415c74535731227d2c22637265617465644174223a312c226d6f6469666965644174223a317d",
-      "data": "AQA5Ojs8PT4_QEFCQ0Sj8e74I7k3Tn4qwzwvL3j85jaozGDxMWWcWERbN8ER60dXbFvfYUgFeNyxRTHzWwwwAmxJAX05N4ZmQSEp360eGJWyconmFLDhPhoCvxAjoBNMIUzQFyWfT-xrryzfiszsEwLgXUC6IKcZNvZ8Eu5A-B9DxW3WJl-YZ6LFF7cYhi71o1CAEUHaNwculsfpgmAIsA4Xn1O9bWNgJkFoF8Ovui_69UkUR5zCtOU"
+      "data": "AQA7PD0-P0BBQkNERUY1ZY1VCo-LB5BWdTxkPDaPhP1wQa78PVMA5aOiaVcI1DZRH5FGcyFME5rDTih_0pp4rZXNjk6Oy8RI8VsLYH03e9ECaRo6Uu_MdK9SIVGJ5Ywev1iZXhUWNltLzIF2cJTk5gRFr4BwoKCrLX81m_3pEPyrylEBYtlJ4hOxJhNhaG8tp3ds4Tc7aHs4sx4ghvPG8WcVqiS0YqjK96vCnssKKKlyavKpPlZipO4"
     },
     {
       "label": "teacher record whose join code isn't 12 symbols",
       "why": "invalid",
-      "kind": "name",
+      "kind": "teacher",
+      "envelope": "symmetric (0x01)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "keyHex": "47abb2dc45d5dec8c85370f119b51a78de57a4f38c4c66ca8ab6cb3bd6d5dd1d",
       "payloadHex": "7b2276223a312c226b696e64223a2274656163686572222c226e616d65223a226e222c2264223a224c6a7646323850783162447075796d4d7139622d4b4c346966574879746959446f573038304566465f4f63222c22707562223a2242444a4f56327132345050375a6d437848584f6d466956454d4c6e593365476c63524c756a336532687546663157686776772d5453766450625272493864456352555f5a386678465052624270776d4e6977556c516863222c22636c6173734b6579223a2245424553457851564668635947526f62484230654879416849694d6b4a53596e4b436b714b7977744c6938222c226a6f696e436f6465223a22303030472d343052342d304d4259222c226a6f696e4f70656e223a747275652c22637265617465644174223a312c226d6f6469666965644174223a317d",
-      "data": "AQA6Ozw9Pj9AQUJDREXkD2bnFoqAdHcbsJocADAgtOq8GipiwZfiz8KFpWhhKot3_y3h41J7dYjBpHqW44HwXXPY71wxDP2pDnY8r0LPwx-jP-dAw8k0CiHYgSAADupkVaEgYqanyvOsJOfdDW2TCLM_6jwvncNwSX9mXKfTYu5uwf-txiE859ZRnTODGpZlYWOczM2k6AqMkMZ1SZisbLoxqsfckBHfTa5mHGk0EL0zk7lauriE8XZKv7EVm9TgSHp5Ujert6BawUUl05IdgfhGjsdcb4KWDpO9sswCMvvvWMFOdPbaEVoQKZoPv0AJUMC8OyEatA7K55lJ7ZFYWatLWiSK6Jz7c22-6gIuQ7YzOGFD3rqTWSyUSWp0avIi_PpeX0TzrD774HlSOQpf3pZ7Sr0xPpHvLiTLS2cInJUuoFtwnU7yfmNQ13_hL3mut6jmGzo"
+      "data": "AQA8PT4_QEFCQ0RFRkeFQafNJraYVdXKANKHFGOaH0qTrX5S2T2s6Btfr34THCdCX20SBbeEc4sPJS21pktoCatOOuHA1Zl-GtNH0LDBHrZ1uG4L5jGz4NFVX7h1zmspTpGdWL5h3ODWoQG7d2kvViKUl9x64ZjaRDE96YmhdU96ZJSLczxG-5y_2pvn4QGZuHnyp9cqSqUxr9KU880XspZ_CNcpOiZ1ES7h-FiHWgVdy-MIUi1Y7f73JWMuhgWaV3GqWFR24x7EekjLGblTNZ5vOvQ9cjJiMbqCcRwYXwSsf6OTOlfnlj8xm5mMDmaXl0FnRLzC4GhH5iTPX252GhqHC_ZIWpgTwr4HxtjFe0gE5G5bdagYMARmlmTio_K7J7qf19lPjBHKfL8RazPTBzSmJxdMWufFnPweOd072ERntDtWjvixXYxprHythiUwgnZOJpI"
     },
     {
       "label": "answer with a light that isn't 0 or 1",
       "why": "invalid",
-      "kind": "name",
+      "kind": "answer",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b2276223a312c226b696e64223a22616e73776572222c2273657373696f6e223a2232623164306139632d336534662d346135622d386336642d376538663961306231633264222c22766572223a312c226c6967687473223a7b224c4544223a327d2c226174223a317d",
-      "data": "AQA7PD0-P0BBQkNERUY1ZY1VCo-LB5BWdTxkPDaPmf1uQ7KzdB8HovzzdFESmmlRF9EDNT0PQ5edCT8-18Mlo87cgUzP34xHoktWRzB0cd1GZkRyUqCCbblFQg3MrNw2o1rTEABVYFMMrOZRNsL0oQpF4tY5_-j0TC2E9QtmTLT3viqIhlnmFg"
+      "privateKey": "teacher",
+      "payloadHex": "7b2276223a312c226b696e64223a22616e73776572222c2273657373696f6e223a2232623164306139632d336534662d346135622d386336642d376538663961306231633264222c22766572223a312c226c6967687473223a7b224c4544223a327d2c226174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2T0-P0BBQkNERUZHSJ-LOawSQH-M1PbWw9LXhnkya7-AdHjONVgMxNp-S8z5KARup-ugqwSMQU1sWyusFUNas5stWwi5kAdkNfbXfckY63SH3Qs6cohCqPDvaZd8w6qdpi-2VetGPCzTK2WTsyZzJLN2Cda6POnXRcWA0rnv65vnkHOmdn6QB3d7qZpuYX4QBCYYiHuD4CYwCosF3zbxeZuJsHf82vgvTt9FWt0C5UoELdrGU6dRRj5J_Rmf"
     },
     {
       "label": "live without a session",
       "why": "invalid",
-      "kind": "name",
+      "kind": "live",
+      "envelope": "symmetric (0x01)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
       "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
       "payloadHex": "7b2276223a312c226b696e64223a226c697665222c2273746570223a312c2263646c223a22222c2270726564696374223a6e756c6c2c2272657665616c223a66616c73652c226174223a317d",
-      "data": "AQA8PT4_QEFCQ0RFRkeSxPeuGXEObcuoAiDJWwdPyFBueHTHot9bu7wLETQVpoQYHu_Hgdo57qWhkTn3BkMBanITqIvld_8vy6YAThLUXfLSS54JGfFtvUexDv7AyDYbsMnNhD8FETM2lg"
+      "data": "AQA-P0BBQkNERUZHSEmiy0GrxJXTBlua1ZtrMQd6vpKUy3wlGCHCEwslBRRr98jmB43l_5hWtAnPp6oj5XR9wN1oanRBxZIg6sDPzpPeDRaZdgaKWcMkfTArZKLR0tbqejgm6yAKM7HFRA"
+    },
+    {
+      "label": "live whose ended is a string",
+      "why": "invalid",
+      "kind": "live",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "payloadHex": "7b2276223a312c226b696e64223a226c697665222c2273657373696f6e223a2232623164306139632d336534662d346135622d386336642d376538663961306231633264222c22656e646564223a22796573222c226174223a317d",
+      "data": "AQA_QEFCQ0RFRkdISUqjVAakLrrOkAddcfsYSgbgK12hzsPwkSG29MqR4ndN4M5DB5VsNcCwT4fz2LZO4A3YW6YsZK7u987Umo-dR01IZTOA_mLNXyyBiN7lDkM58k5wgFphyhWGRsfOy083fNvCHq1_ZDMq4YODrg"
+    },
+    {
+      "label": "move whose token isn't 43 base64url characters",
+      "why": "invalid",
+      "kind": "move",
+      "envelope": "symmetric (0x01)",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
+      "ver": 1,
+      "keyHex": "04a3145f07d26ae375750e00c55ec4f693e387f988efa6f65cbc973bb110a7f2",
+      "payloadHex": "7b2276223a312c226b696e64223a226d6f7665222c22636c6173734964223a223963383965343065396561393831626266656166363165393363393162653436222c2273747564656e744964223a2235663361316332652d386234642d346136662d396331642d326533663461356236633764222c22746f6b656e223a226e6f742d612d746f6b656e222c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38222c22636c6173734b6579223a2245424553457851564668635947526f62484230654879416849694d6b4a53596e4b436b714b7977744c6938222c22707562223a2242444a4f56327132345050375a6d437848584f6d466956454d4c6e593365476c63524c756a336532687546663157686776772d5453766450625272493864456352555f5a386678465052624270776d4e6977556c516863222c226e616d65223a2253616d204c6565222c22636c6173734e616d65223a224469676974616c204c6f67696320313031227d",
+      "data": "AQBAQUJDREVGR0hJSktd5ejkPfZILaaAGPgyt55-XYFc4sEC22fmBLF3A3QYeEl44K3MySI9G1Yjsiett4jT6wgun8s2bKZSeuZS1lI8oF_Tac3nm6ApyvZxxf3OtUlQ_MqK5_b3dNe76dhWITzhSKYgqiEpaBeJ0D79Dl7XEV6PmG3ZtvRArXRfRDQAwQWwpVsQX99gzbu0Z30V4sY2xEBup3PJtMQlZ36qNplprESUEpodCth3saRcSzsdm5tKq34cQGSoDgGhuW6BkkUU4-V7tC9gJe08RmJAnz2h06nDDevKZY-wLN62Bo2LEb3C-S-w73_WBeaDK2J0NkuMrR1YgeHOHXD-2enlFBYWBzaPnL_u9J7WlQbgLtQ8VG3Fw5hfGQbCj-B4j7riH_Adg1XccU0PNd6d8V6KUCkL1RWG9lwUY_ZPTI3WMy4N1Fs2jKrQ0Cw6Psx94wbpIRHlaERWjciP9l4u0d0eVLdYsvF0uIPdZdLLnQZbF_-ly8tDZopxY8W05Y8_KjqinCeyxGXqFY8N94aHob12mmPU0U8DbZBZyO5eZq0"
     },
     {
       "label": "v missing",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-      "payloadHex": "7b226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a317d",
-      "data": "AQA9Pj9AQUJDREVGR0gVfbOT2ncQoIlNDQXtYxWhdHGhYpQwHfGbYCiUuKV5PEDPPnFX73f3aqkTvjCBbrxAzky4oiYLrifh7la8"
+      "privateKey": "teacher",
+      "payloadHex": "7b226b696e64223a226e616d65222c226e616d65223a2253616d204c6565222c226a6f696e65644174223a312c2270726f6f66223a22594746695932526c5a6d646f615770726247317562334278636e4e3064585a3365486c3665337839666e38227d",
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2UFCQ0RFRkdISUpLTOoAKQcwOB_ySYmPMpd1UE35xXrRZb8aurbO6xHB5hdiKTyfwEjwkzon69YDZsSrNm9_K5XQhQXM2x9Hw_9xnni0oLO5PrP0fi8hjVc-__7kSk14fvtearpBQJKUEbgtyHjtieEExi_DAlvwiP0iSwt6tA8"
     },
     {
       "label": "not an object",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "privateKey": "teacher",
       "payloadHex": "5b312c325d",
-      "data": "AQA-P0BBQkNERUZHSEmC2Bu7ozkEg3f_4witlZt1tbxtr3s"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2UJDREVGR0hJSktMTfehcRO4tg_zw1-dIVy1neXKHbX0jw"
     },
     {
       "label": "not JSON",
       "why": "invalid",
       "kind": "name",
+      "envelope": "sealed (0x02)",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "bf1d2d5e-96a4-4f80-9235-bcaa2d14a882",
       "ver": 1,
-      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "privateKey": "teacher",
       "payloadHex": "7b2276223a312c",
-      "data": "AQA_QEFCQ0RFRkdISUqjVAakLrrOxEv5qiEpjMA6Ae5ofwO69Q"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2UNERUZHSElKS0xNTvjh_Pf9zyPhc2hvLDDqaQqj4TtdYPSm"
     }
   ],
   "tamper": [
@@ -896,7 +985,7 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 2,
       "privateKey": "teacher",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "sealed: another student's id",
@@ -905,7 +994,7 @@
       "id": "9b2e7c1a-5d34-4f8e-b1a2-3c4d5e6f7a8b",
       "ver": 1,
       "privateKey": "teacher",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "sealed: another kind (submission) claimed",
@@ -914,7 +1003,7 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 1,
       "privateKey": "teacher",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "sealed: last tag byte flipped",
@@ -923,7 +1012,7 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 1,
       "privateKey": "teacher",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Va0"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uA"
     },
     {
       "label": "sealed: a byte of the ephemeral key flipped (not on the curve, or another key)",
@@ -932,7 +1021,7 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 1,
       "privateKey": "teacher",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyIJgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyIJgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "sealed: flags byte set to 1",
@@ -941,7 +1030,7 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 1,
       "privateKey": "teacher",
-      "data": "AgEEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AgEEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "sealed: unknown flag bit 0x02",
@@ -950,7 +1039,7 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 1,
       "privateKey": "teacher",
-      "data": "AgIEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AgIEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "sealed: envelope version 3",
@@ -959,7 +1048,16 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 1,
       "privateKey": "teacher",
-      "data": "AwAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AwAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
+    },
+    {
+      "label": "sealed: envelope version 1 claimed (a name's envelope is 0x02)",
+      "kind": "name",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
+      "ver": 1,
+      "privateKey": "teacher",
+      "data": "AQAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "sealed: truncated to 94 bytes",
@@ -977,7 +1075,7 @@
       "id": "5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d",
       "ver": 1,
       "privateKey": "other",
-      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeFemZ9T7-EkLsp0Nyxd24Vaw"
+      "data": "AgAEWYRgV4CwYQihRGRHkzni84uXDimgHZj1CeGP13mg45qIzBRiyINgoFl41zd3yRq-VkK3cRqzlZFJagc56Iod2cDBwsPExcbHyMnKyxGEPaWhoL-Znd0121eK31PMrq5uooOvroOnSs4fRYJ0jMnG2qLxQLY6WvZubO8LF7GD6FKonjifv3eFbRkeRGpw5T8S5UCVHC49MGe1aSlsnnzxpQr29ewHuIFuzcL-LWp38oSU_tGiEhp2CSXxPIvp6eakRd_yj75GAbSMSgWNQlKR5uE"
     },
     {
       "label": "symmetric: ver 2 claimed for the ver 1 assignment",
@@ -1016,7 +1114,7 @@
       "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdxWjK-pv6HKM2IliQ6tz5vA"
     },
     {
-      "label": "symmetric: envelope version 2 claimed (a sealed layout it isn't)",
+      "label": "symmetric: envelope version 2 claimed (an assignment's envelope is 0x01)",
       "kind": "assignment",
       "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
       "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
@@ -1041,6 +1139,15 @@
       "ver": 1,
       "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
       "data": "AQDQ0dLT1NXW19jZ2tsHTu0XEUpkfA4T0Zj5_ZyiWy09QRprHeD5x91R4LgGrQqRbOs5jajn2IbALjkVG_OVVnrljTkGXa5Pq_NiT3GKsJAgZ7XqUwLze3MmFyfILbj7mVk-27iNVOCb1m-dtubt3fSOKyfSKh9DBBTpQFgrJodtdjs8cPHKr3zfak1G7Zl6j1XVldrT4Lmq1kZsvveLjaPTist2m97DASPZ87bH4w-0kBm5gts8FUfkVH6skB5-8vZHFy_nRdl7kpC7uQMFwV0vxDbnuZDq-jxsEObESBJ6vuIZlt-oXEDNFOgG0aqQRT7S2HmAkVrnWTs5trihqSHFLlxKT_J2ZWlkBiElcoV39HOSSXpox5tiSNLYufz5bYlYyMHUgvOhFMXqoJdFyLaofck48mQ7-ErpjC3z_FTRq26vmwlIk6D7w-kxA8kvOL-D3gXaYnWNHuic_Vmu9oMM5YNCMUltkl_4JOqpCoD4vAJ8Ch9RpPnI_3NSdtJfRE7gI55U4-YAAwgYDOevFx1n4kqrQlhY9SiOnnKoQ8XRSbVxvJEwj2l1GF9lGSvWQK8U-h0xL3_Mz0DMLIH0PLlLxmYSl_FuLOanmySuLszxYlhc3JLcY1jWL809j8XizPYH3Ut0aHGL3mFSmNtefrk-hWjXDcyW6ryQVLusg1xt0klNHYM-MEIJSqI8n_hxkCP8OrvQa6puUTEfklF56DmdWiNeX-zjM8aZi8STxe_1ej02gpOjqUftwxf19p5UyzFDJ72m6dAVz6D1XDvZLeVDh84nNro_U5puqDWddYvRa8wUcngYCmLSj2Y3pYJCPRGwCnLKB6x413rfKQqyVXbjqPoBKKFlhm82_Pj6PT0xD-5EqFZiC5fu4fIi-MyzfCUPPc1okhyvPKeUuViGFJIA42qN0aNr3Sj9MTwgfv9wGChdUYICa1sw2bRh42m9YdzWVzd1pvhk7JiZFc-Wjm5D"
+    },
+    {
+      "label": "symmetric: a deflate bomb (inflates to 4000001 bytes, one past the cap)",
+      "kind": "assignment",
+      "classId": "9c89e40e9ea981bbfeaf61e93c91be46",
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "ver": 3,
+      "keyHex": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "data": "AQHS09TV1tfY2drb3N34KmwHpCAR5_6hR6Lyessz9x5l5bZ5DqAW5nDaO1Am9SJ7gLvTpABKs8IrvQ-VD1sIroLDV9RcwQSJrDd3T2ebtQEeY2-b8AMZGucmKDHzSWNU-ZjJgWMOxuu-7qaQJBw5rgk6l0bQ5F2pN7lx10rBYbANMURdQ4mrSg8oudykaqqhuBgBSxtJJXMcUU_7qce6zARHB536R714VYt7SFasadKjPlFg5hZwzi3E8i6i_SaabgVvgHiDfQaByyN4M3rQ3TaQf7lPh26oIFFdzY80FcNJH5rKb8hY762E03gvtwA9ur3RYt6UxJ2-3uKiNgbfWfaMk4hnTUsQO9Qw_wzkoP8KBpv7229k6vYMIxxgKlsuppmui6dzZEUesz2x2OcGzLNSbnx2nbSldN876XOPf_PRxZzuGtM92IradwoQDNDFWu5hDtRAXT9vSjDTf0TTeWw6hEKp0HombmNwOQIZHLqRzv4Xc8VIbOqsrxkFJfNl3STL_GnrQotd4-TOfX8aY-8EK70mWJIOEZ66faVfE9HWjmPvGgedXVMXPvPvb8zHq5AJdyOikgh3syAjo9GhItZ3hIIr99ZZ5wECKpstOH6kFJ7ntNHYRiU-AjoS98IGhK1NBEVMOigf3jXDdbk1N21DIia5xt9NPrlSQ7sVCNjKV4YIEHnIT2EKCuMPi1hvPjLItCf2Dz8Dx5CfpMtFTTTu2aQsiV1g69dYGTwa3YChZBBWPSJfW3JkLZNClbt1QJq9WWCH_a2rjF7fNlKFX7LeE8V5azP4rJcwqIJZ4RmtW9KI76vjCAXU1jEzPBvoxYCFAzAVMfSdczoqSa8hEN4JX6Rq9S-9pGntG47-OLPZqM_6m_HJnHcbRitSCwKsYT8lUpqJkCyA4Txz6yNVajQ6ZPs5ansOlp5mV-s64pBPgbXbwQaXXPj1wEiE_X6f32nBaPGfMgKdYnmD9NPJ16ih3xafmChwALTJ670ZtEmJ0oPpIN_WC6ghUqDNU8q9tsY7MkTNMbY6WuK3aCuXKdLGjAr5hgXZpIILjoHXfM_Shtzo4wmyiHXq_TWOo-7cxAmDix-6Cd9phfqKIeJwe2LxbRO4FX_rFz2BClgw2UgIu-gla5lssI28JK88-gsct4wj08oCDNlDf7fyQxK8sAJgBJ-6PwLI08CrpvPC4qit4WQ9pHLTwWQkOG9VoaAfoJxT8fDn9UnxRmJ32mRTTGktF62kql6mFvs8FW_lgdwJo9X_lC8PjZXpqgqc13Di52zg986vSYeTHGYxB7MjbsKNAQ_N03E2LFsiItEHB4HOUEDfjaafS1CSnnY1fP73RngE0oKtNilMvu9ClUe4YvKxH1KcrZpKeM4lHG7_Xu6db3Xn2gil4J5NytB_3IwYLB5hGYo6MvUiEnAZRvTOTa-YfQA9oBpxSDf29a1Egdm_jwzKRTAB5snGfNDk9pz5BJLjtsQHHCskRhyHAyANDQpL9s_i4Nfh0s8DLvJC_AUNKbn9RrhOcLa7vb1kQ-_NUamf3sU6d1_NGBlapVz91K-N5wOPPUamBFPIGkM11UVX44kTbL8C28RMEcIBuS79sYyJI_U-aYMlts6ND5G8IZKhzaQzwwQYH44rzi79hnhdiciZq4omdGpDLPOJ_G6WqcisTUVQChmYo0o5GkQ4PVXsTa1JglkCp33Kd52SQHxCcjHY1a3yfPrQHirUzS3t9keYQKPWoDNOQgLmeeJfrXlXEHD9qq5z7HzBCRX_KZxz-Bo25hv8NcMsBygyxkRF3NEzjaN0xfNdWyZwx2X8_5Qzq364Gf-EwRTBRddz1L6UCWbA39u6J0qsP4FZlP0HQ_s7nkNar7N3ykFpjZeFG0ZzCjXJDQjyB6KvV9RBQibK8ZiJe-FXDTk6a-CF_hwmhfhUz1jWaBdkLpa1TdpAXAX2ZGXo2kjS_c1DLYNeRsNrwNUdhEVvOhLCZM8OeV4xwuUAeNgklmHcNj-uhzEhBJCNAg0p7prdPNsOwHJhz0ACxXXhPVYxR8TzaUYsBU5tTpnqM1alr7VeJMbSA9rJ7BPVjpS5BpcDsjjaexXqnZtWkX__fjIFS0CFBD_WUAvJQQnC5-G8pW7vpz6ZarTz-WlGD8kWcS3m0amHfVQgt0BumqaD1sZ-ppBjXfzQfXgoAjIiHdTMAVSO9YStM_jO42tPrOWhcwFnlGH1jk4mqATMyL-AvRH-QiAdOkFqdxkFmypNW8upBO8_9SJD1LO-6UN4xxz4zNcLNsg5QMoIZIq_8-hK3ZCnWUSUrULTyIDX50TFDl7zv3EDtR2RStpVaOXjCMWZLO9dkwcxNf3KExhgmocnFAmto4sef3SW77W-6Is5U4popnQk-ZwyFHqnBBNvvc3l9Igc1ohw-hoeJLXDUY3JLLuLhHPt0trJI8fKDCSAEivq3F1ykRtOHlSqEvqDUm6Bo9J5N03sTZ-wReFhDkmrXejViRfiGF7VnMvIKPjtQhsm434ykIGOK43JZLvOsitrvGD97h9z_l0jdr9cL0IWheDdvftC_pAi8kKU2Z4jehdYLh95djX9ufWBJaPKo2wHS4hukEiwZu7F6HxTmsMTxUWicAWbATqrPRqL07VSGRpC4IW9h1ZjzYSQ8yBpcWI23PW_slHvVbsfm8adAXACnTPbGlB6x1FxFP9IMesItcWOLf706M5msoKRye3fr5A-BH-Z_cjuddshhgaBvOtv2BCK4SW8NpeVRXP2J4v5hxqCsROXAJxYg_J5RxzlyIio_9LUGMZniYzgab0rlCbxebFdCh1BvJ2X8oKa_n5rmwAxeRimXA59AXgfgJvteBM4srFJvBr0PpZp2wkgjBcpE9gbmfW6WN_2ZJORamAb4yLYo-vJxZPJ4KGXnqgvn3FInBOJbbqrfNi_Lp3al7yG10AfpikNJqzGK2-WcSOMy_5tQdC4fRCJAYgAqDFnlwuLxGnIl3uDlrpcynJQONsYZ3-deQh080RcYjDTEgBj4rrJr19_01p_nD_YxVmDRy9INsoVfSwCiC9nByLdBzlMFgzPGaCAUzsT9zkgeoiA1eiag6DreL5dxQkUQO772EB3Z-OrPNa0ft0sjsQLkjDEzZIccLXctQ3nOkc-UBdc8InQBp5ZEfhq1qjAWAbSucUbC77_KMryJUTJI2UTJc35TWRMIdK6EONnIMQ0XMP_yqdfQGEllwO_sOywsUguBO7bOe-kqBcRujmm0kOLriyldOS14A5MbZvC2P8OxwKHZtpthGP8TgA_TRMoE0dSCXN9ScEJ1ak90LV7aS1hObrsyo5kHt2aDwi21THCRFd1mK_zfYBZt1bz0-ENtn_bXdMFteFkk7tN2-W0BSVNWwyfgmeKf2XzoMZ7ANKjdih7xfjVSveXJGtd0bKkyM4Bl6mrleZtXrIC75cFuHQbILfZuhqxBwsIpofPWj2Z8j9QTgSZTuaGwLwO4oPt5axbjwxc9ggCtT9ScER-YCB0D7K8MLXEDENHMrHVZSC8S5vbb7rHNzYbq3LzdgYUjnsZ4VGGKRDPtBPNl0t81UfU_pik4bN69Z7S14avJY9DGc-OFtRFCOSNPBk4Awp4l0Q90-XckEhEVShbqG55aKyHaWCbupqx7k1LRBMVgiaidAyDy70adpIb1_bsIvfr_qtXjM4k9jY1Ei9dIImm8r_9ETGHmPGRwaPWCgYWTMT95DDmCaT1G_CEgqsa-Jovenp90X1vY8UuTBoXF8bDidOKFzDufx5j_sMlSN0a_HbYQPqBiFsTsk31_r98iGJp8sYu32b3_OPMy9iLE8CEtxobML4RTKP51SG4hHBztULjstvkCugScCJEXMVCT6iUSadzKZFFyZwgZnKV7NVr-1HNRIZCkaLsHL76BjTQurwlCk8dkngc8USiAYlyuRuCaG6CZzokDo0QdVrSeE9fpLcim8_sp6FwmCatiPO-lKqfIbBRP7aeQnUQ5hN3RObR10Ji4Cv642urBthwXtjnF8KQb0svjzkZjzCzzRHZcYLnq9bn0Jj6DLIu4z2Te6ALE8tQ6DZ_GkxstH7_NGgvbL6V3N7AsDoytCgwUo3OHz1VL3w4_X7vxTRfZUpkrS7-DYxIO0ozirN8C1jM0LEwzH6DmP-3p1fPVFA_guZTq1aOfKJTkaqvUveJHzGlfLVoEiv6QyF9fniSHTqE5Wgh1b7GPxWUkeWqKHGmakGzD7dhFBPDKJmj7QnyC5ax2QVJpShjteKKZYKs_b9oh-CMOeldZjZoMJti_6GmXloK_MFbpNJTpUmNd7y5FtKur14GwtsgFOu20e7KnWL5mbSkSuZqzNgYs3AP3dzbC4XGhz-eEw4Em282Aqw-cnymoXlhZUU-C-v8wogQO_4rXDlY06OIs8TdpWh0dwEzhDahh8gZSeoUK0qk62QWpQtFzzbi_vD_1mxT5eTfM7OMNBD1fUVspL5XhRLYc5B7UTuvRNK052hmpKWmQurQnWAtpb6_x6R7FZcE6nqiU1bdj-zIZqq56y037HCg2F6LeW64rrGmTZqloIzRU80TZmI5VvaDcvf-6_0dMhQ6Zg5xw5Bi3sOwJVGmdtt-uM4ytwrCsiItMw8e3sZ6vzWZbigPFKBFZDT6wpsY00vtxZfGCD9xqJ6rA4ILMETJWNCJ4NEULZ9U1bjCD4v6HtwlWT_CpyEUXpVyXMEtFJcJKnqR-KPbBpDc4-XRGsQwQFAHhy89_ALOMzCLViTQ8dwzMFutvwj8kaXlQotNbrtKI_TieJ798jKx5uA2hwYzHjFBS8EJykPRQUSJjrk9DHlmaP59GIj9dtvQVet86eTBNGE8M5zQY-Q3L_yc8X6Cup84fyPvIm9E8TvTGobvFPWBGoM0IpBo3jS2MJ-ejpfSeBWp2-reSiwwmkP723-K8PCiVU6cfbuRsBEPAgoBni-w5sYu4xdoVf56_jiPyXF4t-Z11lj0XL1U6Z8UhLXAsR_vtFYY4F33P8FrRcLCXpQ-G8Wjhc5jmU-K-uKZ3KVLmmzujLUul0SGtpitnLA26c_OdEAAkFA7RtbVpedkr-VnQFvjUj7qiHft8JbgcgPA6Ldo9Ky3s_Np3AIH4Ofgrz5_HrdGTGtl0YGKZKy3AUXJ3obw0KS-tXrn7nB_dKuh6P9lEaMGX1OicGulGw7FBSw-Mf6gHyVdFz83AebzHRPyp9CQnIUBTGQE332ZsrR5M6m_S2DBUzVEcAPr"
     },
     {
       "label": "sync side record: opened as a classroom envelope (the classroom AAD)",
