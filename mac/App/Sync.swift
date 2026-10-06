@@ -702,13 +702,24 @@ final class SyncCenter: ObservableObject {
         } : []
         let push = Countdown(docs.count) {
             cl_sync_quitting(engine, { _ in
-                DispatchQueue.main.async { SyncCenter.shared.quitDone() }
+                SyncCenter.onMainLoop { SyncCenter.shared.quitDone() }
             }, nil)
         }
         for d in docs { d.autosave(withImplicitCancellability: false) { _ in push.tick() } }
-        // Never a hang: whatever happens, the app goes.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { self.quitDone() }
+        // Never a hang: whatever happens, the app goes. (A timer in the common
+        // modes, not the main queue: it fires in the nested run loop that
+        // quitting waits in even if that loop was entered from a main-queue
+        // block, which holds the main queue up.)
+        let fallback = Timer(timeInterval: 8, repeats: false) { _ in MainActor.assumeIsolated { SyncCenter.shared.quitDone() } }
+        RunLoop.main.add(fallback, forMode: .common)
         return .terminateLater
+    }
+
+    /// Runs `fn` on the main thread from the run loop itself (any thread may
+    /// call this), so it runs even while the main queue is held up.
+    nonisolated static func onMainLoop(_ fn: @escaping @MainActor () -> Void) {
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { MainActor.assumeIsolated { fn() } }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     private func quitDone() {
