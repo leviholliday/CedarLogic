@@ -1099,6 +1099,9 @@ Result Client::liveWrite(Teaching& t, const LiveRec& lr, bool on, int64_t base) 
 	if (a.status != 200) return fail(a, "live");
 	const bool newQuestion = lr.hasPredict && (!t.live.hasPredict || t.live.prompt != lr.prompt || t.live.session != lr.session ||
 	                                           t.live.lights != lr.lights || !t.liveOn);
+	// A reveal (or a new circuit while revealed) scores the same answers again: the answers
+	// endpoint would answer 304, so its etag goes and the next refresh counts afresh.
+	const bool rescore = lr.hasPredict && (lr.reveal != t.live.reveal || (lr.reveal && lr.cdl != t.liveCdl));
 	t.liveVer = ver;
 	t.live = lr;
 	t.liveOn = on;
@@ -1108,6 +1111,8 @@ Result Client::liveWrite(Teaching& t, const LiveRec& lr, bool on, int64_t base) 
 	if (newQuestion) {
 		t.predictSince = ver;
 		counts_.erase(t.classId);
+		answersEtag_.erase(t.classId);
+	} else if (rescore) {
 		answersEtag_.erase(t.classId);
 	}
 	if (!lr.hasPredict) counts_.erase(t.classId);

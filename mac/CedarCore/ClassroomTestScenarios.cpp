@@ -432,6 +432,9 @@ void scenarioTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report&
 		line(a.ok && b.ok && c.answered == 2 && c.perLight["LED"] == std::make_pair(1, 1) && c.students == 2,
 		     "s18 predict: 2 answered, LED 1 (1) 0 (1)");
 		T1->push(cid, on, &prompt, &lights, true);
+		T1->refreshAnswers(cid);   // nothing new answered: the endpoint alone would say 304
+		c = T1->answers(cid);
+		line(c.answered == 2 && c.right == 1 && c.wrong == 1, "s18 reveal with no new answers: scored at once");
 		const Result late = S2->sendAnswer(cid, { { "LED", 0 } });   // to the version just replaced
 		S1->pulse(cid);
 		S2->pulse(cid);
