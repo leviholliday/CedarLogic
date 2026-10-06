@@ -14,6 +14,8 @@ struct LabReportOptions {
     var truthTable = true
     var formulas = true
     var timing = true
+    /// Oscilloscope signals the timing page leaves empty, for a student worksheet.
+    var blankSignals: Set<String> = []
     var blackAndWhite = false
 }
 
@@ -341,12 +343,18 @@ enum LabReport {
             }
             let count = Int(cl_scope_signal_count(document.handle))
             let signals = (0..<count).map { TimingDiagram.Signal(index: $0, name: String(cString: cl_scope_signal(document.handle, Int32($0)))) }
+                .map { var s = $0; s.blank = options.blankSignals.contains(s.name); return s }
             let length = Int(cl_scope_length(document.handle))
             let perChunk = 28, maxChunks = 6
             var start = 0
             if length > perChunk * maxChunks {
                 start = length - perChunk * maxChunks
                 paragraph("The recording is \(length) steps long; this shows the last \(perChunk * maxChunks).", size: 10)
+            }
+            // One clock for the guide lines on every chunk, worked out over all of them.
+            let guide = signals.contains(where: \.blank) ? TimingDiagram.guide(document, signals: signals, range: start..<length) : nil
+            if signals.contains(where: \.blank) {
+                paragraph(guide.map { "Fill in the empty rows. The dark lines mark each time \($0.name) changes." } ?? "Fill in the empty rows.", size: 10)
             }
             var from = start
             while from < length {
@@ -360,7 +368,8 @@ enum LabReport {
                 ctx.saveGState()
                 ctx.translateBy(x: margin, y: pageH - y - h)
                 ctx.scaleBy(x: s, y: s)
-                TimingDiagram.draw(ctx, document: document, signals: signals, range: range, title: title, color: color, titled: false)
+                TimingDiagram.draw(ctx, document: document, signals: signals, range: range, title: title, color: color,
+                                   guide: guide, titled: false)
                 ctx.restoreGState()
                 y += h + 6
             }
@@ -400,8 +409,13 @@ struct ExportReportView: View {
     @AppStorage("cl.reportFormulas") private var formulas = true
     @AppStorage("cl.reportTiming") private var timing = true
     @AppStorage("cl.reportBW") private var blackAndWhite = false
+    /// Signals the timing page leaves empty for students (not remembered: it depends on the circuit).
+    @State private var blankSignals: Set<String> = []
 
     private var recorded: Bool { LabReport.hasRecording(document) }
+    private var signalNames: [String] {
+        (0..<Int(cl_scope_signal_count(document.handle))).map { String(cString: cl_scope_signal(document.handle, Int32($0))) }
+    }
     private var anything: Bool { circuit || truthTable || formulas || (timing && recorded) }
 
     var body: some View {
@@ -419,6 +433,26 @@ struct ExportReportView: View {
                     Toggle("Truth table", isOn: $truthTable)
                     Toggle("Karnaugh maps and simplest formulas (2 to 4 switches)", isOn: $formulas)
                     Toggle("Timing diagram from the oscilloscope", isOn: $timing).disabled(!recorded)
+                    if recorded && timing {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Leave blank for students:").font(.callout)
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(signalNames, id: \.self) { name in
+                                        Toggle(name, isOn: Binding(
+                                            get: { blankSignals.contains(name) },
+                                            set: { on in if on { blankSignals.insert(name) } else { blankSignals.remove(name) } }))
+                                        .accessibilityLabel("Leave \(name) blank")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(height: min(110, CGFloat(signalNames.count) * 22))
+                            Text("Those rows are drawn empty, with the time grid and a dark line each time the clock changes, to fill in on paper. The clock is a signal named CLK, CLOCK or CP, or one that ticks evenly, that isn't left blank. Leave them all unticked for the answer key.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.leading, 20)
+                    }
                     if !recorded {
                         Text("The oscilloscope has no recording yet. Run the circuit with TO labels on its wires to make one.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -453,7 +487,8 @@ struct ExportReportView: View {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let options = LabReportOptions(circuit: circuit, truthTable: truthTable, formulas: formulas,
-                                       timing: timing && recorded, blackAndWhite: blackAndWhite)
+                                       timing: timing && recorded, blankSignals: blankSignals.intersection(signalNames),
+                                       blackAndWhite: blackAndWhite)
         do {
             guard let data = LabReport.pdf(document, title: fileName, options: options) else { throw CocoaError(.fileWriteUnknown) }
             try data.write(to: url, options: .atomic)
@@ -465,7 +500,7 @@ struct ExportReportView: View {
 // MARK: Without the app's window (for checks)
 
 extension LabReport {
-    /// `CedarLogic --lab-report in.cdl out.pdf [bw]`: runs the circuit a while
+    /// `CedarLogic --lab-report in.cdl out.pdf [bw] [blank=A,B]`: runs the circuit a while
     /// (so the oscilloscope has a recording) and writes the report.
     static func runIfAsked() {
         let args = CommandLine.arguments
@@ -476,6 +511,10 @@ extension LabReport {
         for _ in 0..<120 { cl_document_step(doc.handle) }
         var options = LabReportOptions()
         options.blackAndWhite = args.contains("bw")
+        // blank=A,B leaves those oscilloscope signals empty (a worksheet).
+        if let b = args.first(where: { $0.hasPrefix("blank=") }) {
+            options.blankSignals = Set(b.dropFirst(6).split(separator: ",").map(String.init))
+        }
         if Prefs.shared.studentName.isEmpty { Prefs.shared.studentName = "Alex Student" }
         let title = URL(fileURLWithPath: args[i + 1]).deletingPathExtension().lastPathComponent
         guard let pdf = pdf(doc, title: title, options: options) else { print("no pdf"); exit(1) }

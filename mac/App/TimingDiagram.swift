@@ -1,16 +1,62 @@
 // The oscilloscope as a timing diagram for a lab report: white paper, black
 // traces, each signal's name, the step numbers along the bottom, and a title
 // (with your name, as image exports have). Copied as an image, or saved as a
-// PNG or a PDF, of what's on screen or the whole recording.
+// PNG or a PDF, of what's on screen or the whole recording. Signals marked
+// `blank` make a worksheet: their rows are left empty (name, time grid and a
+// dark line at every change of the clock, if there's one that isn't blank)
+// for students to draw in; the normal export, with every trace, is the answer key.
 
 import AppKit
 
 @MainActor
 enum TimingDiagram {
-    struct Signal { let index: Int; let name: String }
+    struct Signal {
+        let index: Int
+        let name: String
+        /// Draw an empty row for students to fill in, not the trace.
+        var blank = false
+    }
 
     private static let margin: CGFloat = 28, nameWidth: CGFloat = 110, lane: CGFloat = 38
     private static let titleHeight: CGFloat = 46, axisHeight: CGFloat = 34
+
+    /// What a worksheet's guide lines follow: a signal's name and the sample
+    /// numbers where it changes.
+    struct Guide {
+        let name: String
+        let edges: [Int]
+    }
+
+    /// The clock for a worksheet's guide lines (within `range`), never one of
+    /// the blank rows, whose changes would give the answer away. Of the other
+    /// signals: the one with CLK, CLOCK or CP in its name that changes most;
+    /// failing that, the busiest one that ticks evenly, like a clock. Nil when
+    /// there's no such signal (the worksheet then has just the time grid).
+    static func guide(_ document: CoreDocument, signals: [Signal], range: Range<Int>) -> Guide? {
+        guard range.count > 1 else { return nil }
+        var buffer = [UInt8](repeating: 255, count: range.count)
+        func edges(_ index: Int) -> [Int] {
+            let n = Int(cl_scope_samples(document.handle, Int32(index), Int64(range.lowerBound), Int32(range.count), &buffer))
+            guard n > 1 else { return [] }
+            return (1..<n).filter { buffer[$0] != buffer[$0 - 1] && buffer[$0] <= 1 && buffer[$0 - 1] <= 1 }.map { range.lowerBound + $0 }
+        }
+        func clockName(_ name: String) -> Bool {
+            let lower = name.lowercased()
+            return lower.contains("clk") || lower.contains("clock")
+                || lower.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains("cp")
+        }
+        // At least two whole cycles, each high as long as the last high and each low as the last low.
+        func ticksEvenly(_ e: [Int]) -> Bool {
+            guard e.count >= 4 else { return false }
+            let gaps = zip(e.dropFirst(), e).map { $0 - $1 }
+            return (2..<gaps.count).allSatisfy { gaps[$0] == gaps[$0 - 2] }
+        }
+        let others = signals.filter { !$0.blank }.map { (name: $0.name, edges: edges($0.index)) }
+        func busiest(_ list: [(name: String, edges: [Int])]) -> Guide? {
+            list.filter { !$0.edges.isEmpty }.max { $0.edges.count < $1.edges.count }.map { Guide(name: $0.name, edges: $0.edges) }
+        }
+        return busiest(others.filter { clockName($0.name) }) ?? busiest(others.filter { ticksEvenly($0.edges) })
+    }
 
     /// The samples `range` of `signals`, as a picture `size` points big.
     static func size(steps: Int, signals: Int, titled: Bool = true) -> (size: CGSize, pointsPerStep: CGFloat) {
@@ -24,7 +70,10 @@ enum TimingDiagram {
     }
 
     /// `titled: false` leaves the title and byline off (the lab report has its own).
-    static func draw(_ ctx: CGContext, document: CoreDocument, signals: [Signal], range: Range<Int>, title: String, color: Bool, titled: Bool = true) {
+    /// `guide` (from `guide(_:signals:range:)`) draws a line across the blank
+    /// rows at each of its changes within `range`.
+    static func draw(_ ctx: CGContext, document: CoreDocument, signals: [Signal], range: Range<Int>, title: String, color: Bool,
+                     guide: Guide?, titled: Bool = true) {
         let (size, pps) = size(steps: range.count, signals: signals.count, titled: titled)
         let titleHeight = titled ? Self.titleHeight : 0
         NSGraphicsContext.saveGraphicsState()
@@ -52,7 +101,8 @@ enum TimingDiagram {
         if titled {
             text(title, CGPoint(x: margin, y: margin + 10), size: 17, weight: .semibold)
             let prefs = Prefs.shared
-            var byline = "Timing diagram"
+            var byline = signals.contains(where: \.blank) ? "Timing diagram worksheet" : "Timing diagram"
+            if signals.contains(where: \.blank), let guide { byline += " · dark lines where \(guide.name) changes" }
             if prefs.exportInfo, !prefs.studentName.isEmpty { byline += " · " + prefs.studentName }
             byline += " · " + Date().formatted(date: .abbreviated, time: .omitted)
             text(byline, CGPoint(x: margin, y: margin + 30), size: 11, color: .darkGray)
@@ -85,12 +135,29 @@ enum TimingDiagram {
         ctx.move(to: CGPoint(x: left, y: bottom)); ctx.addLine(to: CGPoint(x: x(range.upperBound), y: bottom)); ctx.strokePath()
         text("step", CGPoint(x: left + (x(range.upperBound) - left) / 2, y: bottom + 26), size: 9.5, color: .gray, align: .center)
 
-        // The traces.
+        // The traces; a worksheet's blank rows get an empty box and the guide lines instead.
+        // A change at `range.upperBound` is drawn too: in the lab report that's the
+        // first step of the next chunk, and both chunks show it on their shared edge.
+        let lines = guide?.edges.filter { (range.lowerBound...range.upperBound).contains($0) } ?? []
         var buffer = [UInt8](repeating: 255, count: max(1, range.count))
         for (row, sig) in signals.enumerated() {
             let laneTop = top + CGFloat(row) * lane
             let hi = laneTop + 9, lo = laneTop + lane - 9
             text(sig.name, CGPoint(x: left - 12, y: (hi + lo) / 2), size: 12, weight: .medium, align: .right)
+            if sig.blank {
+                ctx.setStrokeColor(NSColor(white: 0.7, alpha: 1).cgColor)
+                ctx.setLineWidth(0.8)
+                ctx.stroke(CGRect(x: left, y: laneTop + 2, width: x(range.upperBound) - left, height: lane - 4))
+                // Solid and dark, so they don't pass for the light dotted time grid;
+                // drawn over the box, so a change right at its edge still shows.
+                ctx.setStrokeColor(NSColor(white: 0.3, alpha: 1).cgColor)
+                ctx.setLineWidth(0.8)
+                for e in lines {
+                    ctx.move(to: CGPoint(x: x(e), y: laneTop + 2)); ctx.addLine(to: CGPoint(x: x(e), y: laneTop + lane - 2))
+                }
+                ctx.strokePath()
+                continue
+            }
             let n = Int(cl_scope_samples(document.handle, Int32(sig.index), Int64(range.lowerBound), Int32(range.count), &buffer))
             var runStart = 0
             var lastY: CGFloat?
@@ -142,6 +209,11 @@ enum TimingDiagram {
         }
     }
 
+    /// The guide for a picture of `signals`: only a worksheet has one.
+    private static func guideIfWorksheet(_ document: CoreDocument, signals: [Signal], range: Range<Int>) -> Guide? {
+        signals.contains(where: \.blank) ? guide(document, signals: signals, range: range) : nil
+    }
+
     static func pngData(document: CoreDocument, signals: [Signal], range: Range<Int>, title: String, color: Bool) -> Data? {
         let (size, _) = size(steps: range.count, signals: signals.count)
         let scale: CGFloat = 2
@@ -150,7 +222,8 @@ enum TimingDiagram {
                                          colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
               let g = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
         g.cgContext.scaleBy(x: scale, y: scale)
-        draw(g.cgContext, document: document, signals: signals, range: range, title: title, color: color)
+        draw(g.cgContext, document: document, signals: signals, range: range, title: title, color: color,
+             guide: guideIfWorksheet(document, signals: signals, range: range))
         rep.size = size
         return rep.representation(using: .png, properties: [:])
     }
@@ -162,7 +235,8 @@ enum TimingDiagram {
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
               let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
         ctx.beginPDFPage(nil)
-        draw(ctx, document: document, signals: signals, range: range, title: title, color: color)
+        draw(ctx, document: document, signals: signals, range: range, title: title, color: color,
+             guide: guideIfWorksheet(document, signals: signals, range: range))
         ctx.endPDFPage()
         ctx.closePDF()
         return data as Data

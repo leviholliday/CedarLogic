@@ -55,6 +55,14 @@ enum RenderUI {
             if let pdf = TimingDiagram.pdfData(document: doc, signals: signals, range: max(0, length - 40)..<length, title: "Lab 5", color: false) {
                 try? pdf.write(to: dir.appendingPathComponent("timing.pdf"))
             }
+            // The same as a worksheet: the first half of the signals left blank for students.
+            let worksheet = signals.enumerated().map { TimingDiagram.Signal(index: $1.index, name: $1.name, blank: $0 < (signals.count + 1) / 2) }
+            if let png = TimingDiagram.pngData(document: doc, signals: worksheet, range: 0..<length, title: "Lab 5", color: true) {
+                try? png.write(to: dir.appendingPathComponent("timing-worksheet.png"))
+            }
+            if let pdf = TimingDiagram.pdfData(document: doc, signals: worksheet, range: max(0, length - 40)..<length, title: "Lab 5", color: false) {
+                try? pdf.write(to: dir.appendingPathComponent("timing-worksheet.pdf"))
+            }
         }
         // The built-in templates, as files and pictures (a flip-flop's running
         // clock choice as -running).
