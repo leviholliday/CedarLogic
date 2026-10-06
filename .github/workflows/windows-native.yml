@@ -406,6 +406,15 @@ jobs:
             foreach ($f in @($exe, "$dir\res\cl_gatedefs.xml", "$dir\unins000.exe", $lnk)) {
               if (-not (Test-Path $f)) { Get-Content setup.log; throw "not installed: $f" }
             }
+            # The version it says everywhere is the CMake project's: Settings > Apps (the
+            # uninstall entry setup wrote) and the exe's own version info.
+            $want = (Select-String -Path windows/CMakeLists.txt -Pattern 'project\(\S+ VERSION ([0-9.]+)' | Select-Object -First 1).Matches[0].Groups[1].Value
+            $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { $_.GetValue('DisplayName') -like 'CedarLogic*' } | Select-Object -First 1
+            if (-not $entry) { throw 'setup left no entry for Settings > Apps' }
+            if ($entry.GetValue('DisplayVersion') -ne $want) { throw "Settings > Apps says version $($entry.GetValue('DisplayVersion')), not $want" }
+            $info = (Get-Item $exe).VersionInfo
+            if ($info.ProductVersion -ne $want -or $info.FileVersion -ne $want) { throw "the exe's version info says $($info.FileVersion) / $($info.ProductVersion), not $want" }
+            Write-Output "version $want in Settings > Apps and in the exe"
             $open = (Get-Item "$prog\shell\open\command").GetValue('')
             if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
             if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }

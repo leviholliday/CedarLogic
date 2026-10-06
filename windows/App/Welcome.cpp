@@ -1005,7 +1005,7 @@ const Chapter kChapters[] = {
 	{ "Tidy up", "Tidy Up, rebuilt", "Cleaner layouts, and fast on big pages.",
 	  { { 0xE80A, "Rearrange everything", "Edit ▸ Tidy Up by Signal Flow lays the whole page out by how the signals flow, with the wires rerouted." },
 	    { 0xE8F1, "Keeps what you drew", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
-	    { 0xE9D9, "Fast on big pages", "A page of 585 parts used to take half a minute. It takes a couple of seconds now." } },
+	    { 0xE9D9, "Fast on big pages", "A page with 585 parts used to take half a minute. It takes about a second now." } },
 	  "Tidy Up by Signal Flow", CMD_TIDY_FLOW },
 	{ "Also new", "Smaller things", "More that's changed since the last tour.",
 	  { { 0xE8A0, "Split view and focus mode", "Ctrl+Alt+S shows two tabs side by side. Ctrl+. slides the toolbar and side panel away." },
@@ -1238,7 +1238,7 @@ void pageIntro(ID2D1RenderTarget* rt, WhatsNew* wn, double t) {
 	const float x = 56, tw = 380;
 	text(rt, "WHAT'S NEW", x, 92, 11, kBold, kNeon, 0, DWRITE_TEXT_ALIGNMENT_LEADING, 1.8f);
 	float y = 112 + text(rt, "CedarLogic 0.4", x, 112, 34, kBold, D2D1::ColorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
-	y += text(rt, "Sync your circuits between devices, check your work, hand in a lab report, share a link, and tidy a whole page in a couple of seconds. Here's everything that's new, a minute's read.",
+	y += text(rt, "Sync your circuits between devices, check your work, hand in a lab report, share a link, and tidy a big page in about a second. Here's everything that's new, a minute's read.",
 	          x, y, 14, kNormal, kSecondary, tw) + 20;
 	for (int i = 0; i < kChapterCount; i++) {
 		const D2D1_RECT_F r = D2D1::RectF(x - 8, y - 4, x + tw, y + 24);
