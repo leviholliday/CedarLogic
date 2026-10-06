@@ -62,7 +62,7 @@ struct WhatsNewView: View {
                 points: [
                     ("doc.richtext", "A page that's ready", "Your name, the circuit and the date, then a picture of each page of the circuit."),
                     ("tablecells", "Your analysis too", "The truth table, a Karnaugh map and the simplest formulas for each light, and the timing diagram."),
-                    ("checklist", "You choose", "Tick what goes in, in colour or black and white. Headings stay with their content."),
+                    ("checklist", "You choose", "Tick what goes in, in color or black and white. Headings stay with their content."),
                 ], tryTitle: "Export a Lab Report"),
         Chapter(eyebrow: "Show someone", title: "Share Link",
                 line: "File \u{25B8} Share Link copies a link to the circuit you have open.",
@@ -75,7 +75,7 @@ struct WhatsNewView: View {
                 line: "Edit \u{25B8} Tidy Up: Full Rearrange lines up parts and reroutes their wires.",
                 points: [
                     ("square.grid.3x3", "Cleaner layouts", "It keeps groups you drew together, labels in order and straight wires straight."),
-                    ("hare", "Fast on big pages", "A page of hundreds of parts takes about a second."),
+                    ("hare", "Fast on big pages", "A page of hundreds of parts takes a second or two."),
                     ("eye", "A preview first", "Return keeps it, Escape puts it back, Tab tries the other kind of tidy."),
                 ], tryTitle: "Try Full Rearrange"),
     ]
