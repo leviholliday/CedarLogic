@@ -90,6 +90,10 @@ CLDocument* cl_document_open(const char* path, char* error, int errorLen) {
 }
 
 CLDocument* cl_document_open_text(const char* data, long length, char* error, int errorLen) {
+	return clOpenText(data, length, error, errorLen, settleOnOpen);
+}
+
+CLDocument* clOpenText(const char* data, long length, char* error, int errorLen, bool settle) {
 	if (data == nullptr || length < 0) { setError(error, errorLen, "The file is empty."); return nullptr; }
 	if (gateLibrary().libraries.empty()) { setError(error, errorLen, "The gate library isn't loaded."); return nullptr; }
 	cl::LoadResult loaded;
@@ -110,7 +114,7 @@ CLDocument* cl_document_open_text(const char* data, long length, char* error, in
 		doc->noticeWarnings.push_back(n.severity == cl::Severity::Warning);
 	}
 	// Open settled, so the first frame shows real states.
-	if (settleOnOpen) doc->sim->settle();
+	if (settle) doc->sim->settle();
 	return doc.release();
 }
 

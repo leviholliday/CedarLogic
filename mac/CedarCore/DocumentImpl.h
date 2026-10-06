@@ -114,4 +114,8 @@ extern "C" void clDrawPage(CLDocument* doc, int page, CGContextRef ctx, double b
                            double originX, double originY, double unitsPerPoint,
                            const cl::render::RenderStyle& style);
 
+// cl_document_open_text, settled or not whatever cl_set_settle_on_open says
+// (Document.cpp): Check My Circuit opens its copies before a single step.
+extern "C" CLDocument* clOpenText(const char* data, long length, char* error, int errorLen, bool settle);
+
 #endif  // CL_MAC_DOCUMENTIMPL_H
