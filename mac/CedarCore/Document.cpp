@@ -90,6 +90,10 @@ CLDocument* cl_document_open(const char* path, char* error, int errorLen) {
 }
 
 CLDocument* cl_document_open_text(const char* data, long length, char* error, int errorLen) {
+	return clOpenText(data, length, error, errorLen, settleOnOpen);
+}
+
+CLDocument* clOpenText(const char* data, long length, char* error, int errorLen, bool settle) {
 	if (data == nullptr || length < 0) { setError(error, errorLen, "The file is empty."); return nullptr; }
 	if (gateLibrary().libraries.empty()) { setError(error, errorLen, "The gate library isn't loaded."); return nullptr; }
 	cl::LoadResult loaded;
@@ -110,7 +114,7 @@ CLDocument* cl_document_open_text(const char* data, long length, char* error, in
 		doc->noticeWarnings.push_back(n.severity == cl::Severity::Warning);
 	}
 	// Open settled, so the first frame shows real states.
-	if (settleOnOpen) doc->sim->settle();
+	if (settle) doc->sim->settle();
 	return doc.release();
 }
 
@@ -124,14 +128,18 @@ CLDocument* cl_document_new(void) {
 	return doc;
 }
 
+extern "C++" std::string clSaveText(CLDocument* doc) {
+	std::vector<GUICanvas*> pages;
+	for (auto& p : doc->pages) pages.push_back(p.get());
+	CircuitParse writer(pages);
+	return writer.textV3(pages);
+}
+
 const char* cl_document_save_text(CLDocument* doc) {
 	static std::string text;
 	text.clear();
 	if (doc == nullptr) return "";
-	std::vector<GUICanvas*> pages;
-	for (auto& p : doc->pages) pages.push_back(p.get());
-	CircuitParse writer(pages);
-	text = writer.textV3(pages);
+	text = clSaveText(doc);
 	doc->edited = false;
 	return text.c_str();
 }

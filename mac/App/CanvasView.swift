@@ -1286,11 +1286,17 @@ final class CanvasController: ObservableObject {
     func makeTruthTable(check: Bool = false) {
         guard let document else { return }
         var error = ""
+        // What was last checked is kept per circuit and page.
+        let checkKey = (view?.window?.representedURL?.path ?? view?.window?.title ?? "Circuit") + "#\(page)"
         if var table = TruthTable(document: document, page: page, error: &error) {
-            // What was last checked is kept per circuit and page.
-            let circuit = view?.window?.representedURL?.path ?? view?.window?.title ?? "Circuit"
-            table.checkKey = circuit + "#\(page)"
+            table.checkKey = checkKey
             if check { UserDefaults.standard.set(TruthTableView.checkTab, forKey: "cl.truthTab") }
+            sheetHost.truthTable = table
+        } else if cl_check_clocked_page(document.handle, Int32(page)) {
+            // A counter has lights and a clock but no switches: no truth table,
+            // but it can still be checked clock pulse by clock pulse.
+            var table = TruthTable(checkOnly: document, page: page, problem: error)
+            table.checkKey = checkKey
             sheetHost.truthTable = table
         } else {
             sheetHost.truthTableProblem = error.isEmpty ? "A truth table couldn't be made for this page." : error

@@ -137,7 +137,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .step: "Step once"
         case .stepClock: "Step Clock: one full cycle of each manual clock"
         case .truthTable: "Truth table"
-        case .checkCircuit: "Check my circuit against a formula or table"
+        case .checkCircuit: "Check my circuit against a formula, table or count"
         case .scope: "Oscilloscope"
         case .lock: "Lock the circuit"
         case .newTab: "New tab"

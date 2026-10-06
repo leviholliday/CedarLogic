@@ -17,4 +17,8 @@ struct CLTruthTable {
 	int unsettled = 0;
 };
 
+// A library gate name for a part that remembers (a clock, a flip-flop, a
+// latch, a register, a counter, memory).
+bool clSequentialType(const std::string& libraryGateName);
+
 #endif  // CL_MAC_TRUTHTABLEIMPL_H

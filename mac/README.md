@@ -53,6 +53,11 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   and T toggle, D is taken), a running clock still runs, the templates'
   running-clock choice runs, the setting survives a save, a clock with it
   off saves without it (as older versions did), and undo turns it off
+- `check_seq` -- Check My Circuit's shared cases
+  (`tests/check-sequential/cases.json`, docs/CHECK-SEQUENTIAL.md): every
+  field of every case, on a freshly opened circuit and on one that has been
+  running; `--templates <dir>` checks the flip-flop templates `--render-ui`
+  writes against their textbook tables
 - `formula-check.sh` -- Build from Formula and the truth table's formulas:
   the simplifier on known answers and 400 random tables, the formula
   reader, and ~200 circuits built in the engine whose truth tables must

@@ -287,7 +287,8 @@ void cl_tt_add_row(CLTruthTable *tt, const char *cells);
 
 // ---- Check my circuit ----------------------------------------------------------
 // Compares a circuit's truth table with what an assignment asks for, matching
-// switches and lights by name (case and spaces don't matter).
+// switches and lights by name (case and spaces don't matter). Clocked circuits
+// (a count, a state table, a timing table) are below.
 //
 // `expected` is what the app's formula reader made, one tab-separated line
 // each: "in<TAB>A<TAB>B<TAB>Cin", then "out<TAB>S<TAB>01101001" per output,
@@ -327,6 +328,64 @@ const char *cl_check_name(const CLCheck *c, int index);
 bool cl_check_name_is_input(const CLCheck *c, int index);
 int cl_check_name_column(const CLCheck *c, int index);
 bool cl_check_name_by_hand(const CLCheck *c, int index);
+
+// ---- Check my circuit: clocked circuits (docs/CHECK-SEQUENTIAL.md) ---------
+// What kind of answer key a text is, from the text alone; *options (may be
+// NULL) is set when it has start:, reset:, set: or clock: lines. FORMULA and
+// TABLE without options go to today's check; everything else to
+// cl_check_clocked.
+enum { CL_KEY_EMPTY = 0, CL_KEY_FORMULA = 1, CL_KEY_TABLE = 2, CL_KEY_COUNT = 3,
+       CL_KEY_STATES = 4, CL_KEY_TIMING = 5 };
+int cl_check_key_kind(const char *text, bool *options);
+// Checks a page against a count, a state table or a timing table, clock pulse
+// by clock pulse, on a copy of the circuit (the document isn't changed, its
+// clocks keep running). Reports the errors of a key it can't read too, so
+// it takes any text. `names` as for cl_check_expected; a name's column is a
+// port (below). Free with cl_check_free. The verdict, summary, notes and
+// names calls above work on it; cl_check_outputs is 0.
+CLCheck *cl_check_clocked(CLDocument *doc, int page, const char *key, const char *names);
+// The same in two halves, so it can run off the main thread: _prepare (where
+// the document is used: it saves the circuit, without marking the document
+// saved, and only when the key can be run) copies all it needs; _run, on any
+// thread, opens copies of its own and touches no open document. _cancel, from
+// any thread while it runs, makes it stop soon (its result is then
+// meaningless). Free the job with cl_check_job_free once _run has returned.
+typedef struct CLCheckJob CLCheckJob;
+CLCheckJob *cl_check_clocked_prepare(CLDocument *doc, int page, const char *key, const char *names);
+CLCheck *cl_check_clocked_run(CLCheckJob *job);
+void cl_check_job_cancel(CLCheckJob *job);
+void cl_check_job_free(CLCheckJob *job);
+// Whether a page cl_truth_table can't make a table for can still be checked
+// clock pulse by clock pulse: no switches or lights selected, a light, no
+// switches or more than 8, and a clock part, a flip-flop or the like, or a
+// switch named CLK or Clock.
+bool cl_check_clocked_page(CLDocument *doc, int page);
+int cl_check_kind(const CLCheck *c);            // CL_KEY_*
+const char *cl_check_error(const CLCheck *c);   // "" or the error's code: "no_clock"...
+// The page's switches, then its lights, as the check named them.
+int cl_check_port_count(const CLCheck *c);
+const char *cl_check_port_name(const CLCheck *c, int port);
+bool cl_check_port_is_input(const CLCheck *c, int port);
+// The step strip's columns.
+enum { CL_SIGNAL_INPUT = 0, CL_SIGNAL_STATE = 1, CL_SIGNAL_NEXT = 2, CL_SIGNAL_OUTPUT = 3 };
+int cl_check_signal_count(const CLCheck *c);
+const char *cl_check_signal_name(const CLCheck *c, int signal);
+int cl_check_signal_role(const CLCheck *c, int signal);
+int cl_check_signal_port(const CLCheck *c, int signal);
+// The steps: the start (or a state set with switches) and each clock pulse.
+enum { CL_STEP_START = 0, CL_STEP_SET = 1, CL_STEP_PULSE = 2 };
+int cl_check_step_count(const CLCheck *c);
+int cl_check_first_wrong(const CLCheck *c);     // a step, or -1
+int cl_check_step_kind(const CLCheck *c, int step);
+int cl_check_step_pulse(const CLCheck *c, int step);
+int cl_check_step_row(const CLCheck *c, int step);  // the key's row, 0 for none
+bool cl_check_step_wrong(const CLCheck *c, int step);
+// A step's state (read before it), inputs, what was expected ('0', '1', '-')
+// and what the lights showed ('0', '1', 'X', 'Z', '!', '-', '~' still
+// changing), one character per signal of that role. Valid until the check is
+// freed.
+enum { CL_STEP_STATE_BITS = 0, CL_STEP_INPUTS = 1, CL_STEP_EXPECTED = 2, CL_STEP_GOT = 3 };
+const char *cl_check_step_text(const CLCheck *c, int step, int what);
 
 // ---- Load notes ----------------------------------------------------------
 
