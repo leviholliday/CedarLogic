@@ -227,9 +227,12 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 	const bool isBus = ids.size() != 1;
 
 	Stroke s;
-	s.width = (isBus ? 4.0f : 1.0f) * style.wireScale;
+	s.width = (isBus ? 4.0f : 1.0f) * style.wireScale * style.projectorWire();
 	bool simLit = false;   // Simulation View: this wire is on, so it glows
-	if (!style.colorOutput || !style.showLiveState) {
+	if (style.simView && style.coverOutputs) {
+		// Predict, then reveal: no wire gives a light's answer away.
+		s.color = style.simOff();
+	} else if (!style.colorOutput || !style.showLiveState) {
 		// Print/topology: black, weight carries bus vs net (state ignored).
 		s = style.wire(WireState::Low, isBus);
 	} else {
@@ -284,8 +287,9 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 		// gate halo without losing that.
 		// Simulation View: a soft neon glow under wires that are on.
 		if (simLit) {
-			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.10f), s.width + 7.0f));
-			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.22f), s.width + 3.0f));
+			const float k = style.projectorWire();
+			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.10f), s.width + 7.0f * k));
+			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.22f), s.width + 3.0f * k));
 		}
 		if (isSelectedNow) {
 			const Color ac = style.accent();

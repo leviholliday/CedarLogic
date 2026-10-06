@@ -499,6 +499,7 @@ struct ViewCommands: Commands {
     @AppStorage("cl.showGrid") private var showGrid = true
     @AppStorage("cl.wireDots") private var wireDots = true
     @AppStorage("cl.lastDark") private var dark = false
+    @AppStorage("cl.projector") private var projector = false
     @ObservedObject private var keys = ShortcutStore.shared
 
     var body: some Commands {
@@ -533,6 +534,8 @@ struct ViewCommands: Commands {
             Button(canvas?.simView == true ? "Leave Simulation View" : "Simulation View") { canvas?.simView.toggle() }
                 .keyboardShortcut(keys.menu(.simView))
                 .disabled(canvas == nil)
+            // Simulation View drawn big and bright, for a projector (this Mac only).
+            Toggle("Projector Mode", isOn: Binding(get: { projector }, set: { Prefs.shared.projector = $0 }))
             Divider()
             Button(canvas?.showScope == true ? "Hide Oscilloscope" : "Show Oscilloscope") { canvas?.showScope.toggle() }
                 .keyboardShortcut(keys.menu(.scope))
@@ -555,6 +558,11 @@ struct SimulationCommands: Commands {
             Button("Step") { canvas?.stepOnce() }
                 .keyboardShortcut(keys.menu(.step))
                 .disabled(canvas == nil)
+            Divider()
+            Button(canvas?.predict.on == true ? "Stop Predicting" : "Predict, Then Reveal") { canvas?.togglePredict() }
+                .disabled(canvas?.simView != true)
+            Button(canvas?.predict.revealed == true ? "Cover the Lights Again" : "Reveal") { canvas?.revealOrCoverAgain() }
+                .disabled(canvas?.simView != true || canvas?.predict.on != true)
             Divider()
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .help("T: every combination of the page's switches (or the selected ones) and what the lights show")

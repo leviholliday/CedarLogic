@@ -20,17 +20,31 @@ extension CircuitCanvasNSView {
         ctx.fill(bounds)
         if prefs.showGrid { drawCLGrid(ctx, pal: pal, scale: scale, fade: controller?.appearProgress ?? 1) }
         guard let document else { return }
-        var o = CLDrawOptions(dark: dark, accent: Int32(prefs.accent), wireScale: prefs.wireScale,
-                              simView: sim, thumbnail: false, showSelection: true,
-                              selectionFade: controller?.selectionFade ?? 1)
-        cl_document_draw_ex(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, &o)
         if sim {
-            cl_simview_draw_flow(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
-                                 controller?.flowPhase ?? 0, prefs.wireScale)
+            // Projector mode and Predict, then reveal (Predict.swift): covered
+            // lights hide their answer, so no wire glows and no dashes march.
+            let covered = controller?.predictCovers ?? false
+            var st = CLSimViewStyle(accent: Int32(prefs.accent), wireScale: prefs.wireScale,
+                                    projector: prefs.projector, predict: covered)
+            cl_simview_draw_page(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, &st)
+            if !covered {
+                cl_simview_draw_flow(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
+                                     controller?.flowPhase ?? 0,
+                                     prefs.wireScale * (prefs.projector ? CL_PROJECTOR_WIRE_SCALE : 1))
+            }
             // The wire under the pointer, lit up whole.
             let a = prefs.accentRGB(dark: true)
             cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, a.0, a.1, a.2)
+            if let controller, controller.predict.on {
+                let marks = controller.predictMarks
+                cl_simview_draw_predict(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
+                                        marks, Int32(marks.count), prefs.projector)
+            }
         } else {
+            var o = CLDrawOptions(dark: dark, accent: Int32(prefs.accent), wireScale: prefs.wireScale,
+                                  simView: sim, thumbnail: false, showSelection: true,
+                                  selectionFade: controller?.selectionFade ?? 1)
+            cl_document_draw_ex(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, &o)
             let a = prefs.accentRGB(dark: dark)
             let accent = CGColor(srgbRed: a.0, green: a.1, blue: a.2, alpha: 1)
             cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, a.0, a.1, a.2)
@@ -167,7 +181,10 @@ extension CircuitCanvasNSView {
         // Simulation View and Lock: parts still take clicks (switches,
         // keypads); anywhere else, a drag moves around.
         if controller.simView || controller.locked {
+            // Predict: a covered light takes the click as a guess.
+            if controller.predictTap(at: worldPoint(p)) { return true }
             if document.click(page: page, at: worldPoint(p)) {
+                controller.circuitAdvancedByUser()   // a switch or keypad: a new round
                 controller.redraw()
             } else {
                 drag = .pan(last: p)
@@ -221,6 +238,19 @@ extension CircuitCanvasNSView {
         let bare = flags.subtracting(.shift).isEmpty
 
         if controller.simView {
+            // Predict: Tab and the arrows go from light to light, 0/1 (or a
+            // hex digit, on a display) guess, Return reveals.
+            if controller.predict.on {
+                switch e.keyCode {
+                case 48 where flags.subtracting(.shift).isEmpty: controller.movePredictFocus(shift ? -1 : 1); return true
+                case 123, 126: if bare { controller.movePredictFocus(-1); return true }
+                case 124, 125: if bare { controller.movePredictFocus(1); return true }
+                case 36, 76: if bare { controller.revealOrCoverAgain(); return true }
+                case 51, 117: if bare { controller.clearPredictGuess(); return true }
+                default:
+                    if bare, let ch = e.charactersIgnoringModifiers?.first, controller.typePredictGuess(ch) { return true }
+                }
+            }
             switch e.keyCode {
             case 53: controller.simView = false
             case 49: if !e.isARepeat { controller.toggleRunning() }

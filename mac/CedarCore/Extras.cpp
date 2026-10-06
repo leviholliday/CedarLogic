@@ -10,12 +10,15 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "render/RenderStyle.h"
+#include "render/SkiaProbe.h"   // measuredTextWidth (Core Text, in CGScene.cpp)
 #include "command/cmdCreateWire.h"
 #include "command/cmdDeleteSelection.h"
 #include "command/cmdMoveSelection.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <map>
 #include <queue>
@@ -245,6 +248,241 @@ int cl_simview_chips(CLDocument* doc, int pageIndex, CLSimChip* out, int max) {
 			n++;
 		}
 	return n;
+}
+
+// ---- Simulation View in a classroom: projector mode, Predict, then reveal ----------
+
+void cl_simview_draw_page(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+                          double originX, double originY, double unitsPerPoint, const CLSimViewStyle* o) {
+	if (o == nullptr) return;
+	cl::render::RenderStyle s = cl::render::RenderStyle::screen(true);
+	s.simView = true;
+	s.showSelection = false;
+	s.accentIndex = o->accent;
+	s.wireScale = (float)o->wireScale;
+	s.projector = o->projector;
+	s.coverOutputs = o->predict;
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s);
+}
+
+}  // extern "C"
+
+namespace {
+
+// A light (an LED, not a junction, which is drawn by the same class) or a
+// display (a register's value box).
+bool isLight(guiGate* g) {
+	return dynamic_cast<guiGateLED*>(g) != nullptr && g->getLibraryGateName().find("JUNC") == std::string::npos;
+}
+bool isDisplay(guiGate* g) { return dynamic_cast<guiGateREGISTER*>(g) != nullptr; }
+
+// "minx,miny,maxx,maxy" from a gui parameter, in the gate's own units.
+bool modelBox(guiGate* g, float& x0, float& y0, float& x1, float& y1) {
+	std::string v = g->getGUIParam(isDisplay(g) ? "VALUE_BOX" : "LED_BOX");
+	std::replace(v.begin(), v.end(), ',', ' ');
+	std::istringstream iss(v);
+	if (!(iss >> x0 >> y0 >> x1 >> y1)) return false;
+	if (x0 > x1) std::swap(x0, x1);
+	if (y0 > y1) std::swap(y0, y1);
+	return true;
+}
+
+void toWorld(guiGate* g, float x, float y, float& wx, float& wy) {
+	const GLdouble* m = g->getModelMatrix();
+	wx = (float)(m[0] * x + m[4] * y + m[12]);
+	wy = (float)(m[1] * x + m[5] * y + m[13]);
+}
+
+bool fromWorld(guiGate* g, float wx, float wy, float& x, float& y) {
+	const GLdouble* m = g->getModelMatrix();
+	const double det = m[0] * m[5] - m[4] * m[1];
+	if (std::fabs(det) < 1e-9) return false;
+	const double dx = wx - m[12], dy = wy - m[13];
+	x = (float)(( m[5] * dx - m[4] * dy) / det);
+	y = (float)((-m[1] * dx + m[0] * dy) / det);
+	return true;
+}
+
+int displayDigits(guiGate* g) {
+	const int bits = std::atoi(g->getLogicParam("INPUT_BITS").c_str());
+	return std::max(1, std::min(8, (bits + 3) / 4));
+}
+
+CLSimLight lightInfo(guiGate* g) {
+	CLSimLight l{};
+	l.gate = (long)g->getID();
+	l.value = -1;
+	if (isDisplay(g)) {
+		l.digits = displayDigits(g);
+		if (g->getLogicParam("UNKNOWN_OUTPUTS") != "true" && !g->getLogicParam("CURRENT_VALUE").empty()) {
+			const long long v = std::atoll(g->getLogicParam("CURRENT_VALUE").c_str());
+			l.value = (int)(v & ((1LL << (4 * l.digits)) - 1));
+		}
+	} else {
+		for (auto& hs : g->getHotspotList()) {
+			if (!g->isConnected(hs.first)) continue;
+			const std::vector<StateType>& st = g->getConnection(hs.first)->getState();
+			if (!st.empty() && (st[0] == ONE || st[0] == ZERO)) l.value = st[0] == ONE ? 1 : 0;
+			break;
+		}
+	}
+	float x0, y0, x1, y1;
+	if (modelBox(g, x0, y0, x1, y1)) {
+		float ax, ay, bx, by;
+		toWorld(g, x0, y0, ax, ay);
+		toWorld(g, x1, y1, bx, by);
+		l.left = std::min(ax, bx); l.right = std::max(ax, bx);
+		l.bottom = std::min(ay, by); l.top = std::max(ay, by);
+	} else {
+		klsBBox b = g->getBBox();
+		l.left = b.getLeft(); l.right = b.getRight(); l.bottom = b.getBottom(); l.top = b.getTop();
+	}
+	return l;
+}
+
+std::string hexText(int value, int digits) {
+	std::string s;
+	for (int i = digits - 1; i >= 0; i--) s += "0123456789ABCDEF"[(value >> (4 * i)) & 0xF];
+	return s;
+}
+
+}  // namespace
+
+extern "C" {
+
+int cl_simview_lights(CLDocument* doc, int pageIndex, CLSimLight* out, int max) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr) return 0;
+	std::vector<std::pair<std::pair<float, float>, guiGate*>> found;
+	for (auto& ge : *page->getGateList()) {
+		guiGate* g = ge.second;
+		if (g == nullptr || !(isLight(g) || isDisplay(g))) continue;
+		float x, y;
+		g->getGLcoords(x, y);
+		found.push_back({ { -y, x }, g });   // top to bottom, then left to right
+	}
+	std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) {
+		return a.first != b.first ? a.first < b.first : a.second->getID() < b.second->getID();
+	});
+	int n = 0;
+	for (auto& f : found) {
+		if (n < max && out) out[n] = lightInfo(f.second);
+		n++;
+	}
+	return n;
+}
+
+long cl_simview_light_at(CLDocument* doc, int pageIndex, double x, double y, int* digit) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (digit) *digit = 0;
+	if (page == nullptr) return -1;
+	for (auto& ge : *page->getGateList()) {
+		guiGate* g = ge.second;
+		if (g == nullptr || !(isLight(g) || isDisplay(g))) continue;
+		klsBBox b = g->getBBox();
+		b.extendTop(0.3f); b.extendBottom(0.3f); b.extendLeft(0.3f); b.extendRight(0.3f);
+		if (!b.contains(GLPoint2f((float)x, (float)y))) continue;
+		if (digit && isDisplay(g)) {
+			float lx, ly, x0, y0, x1, y1;
+			if (fromWorld(g, (float)x, (float)y, lx, ly) && modelBox(g, x0, y0, x1, y1) && x1 > x0) {
+				const int n = displayDigits(g);
+				*digit = std::max(0, std::min(n - 1, (int)std::floor((lx - x0) / ((x1 - x0) / n))));
+			}
+		}
+		return (long)g->getID();
+	}
+	return -1;
+}
+
+int cl_simview_light_name(CLDocument* doc, int pageIndex, long gate, char* buf, int len) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	std::string name;
+	guiGate* light = page ? doc->circuit.getGate(gate) : nullptr;
+	if (light != nullptr) {
+		float px, py;
+		light->getGLcoords(px, py);
+		float best = 8.0f;
+		for (auto& ge : *page->getGateList()) {
+			if (dynamic_cast<guiLabel*>(ge.second) == nullptr) continue;
+			const std::string text = ge.second->getGUIParam("LABEL_TEXT");
+			if (text.empty() || text.size() > 16) continue;
+			float lx, ly;
+			ge.second->getGLcoords(lx, ly);
+			const float d = std::hypot(lx - px, ly - py);
+			if (d < best) { best = d; name = text; }
+		}
+	}
+	if (buf && len > 0) {
+		std::strncpy(buf, name.c_str(), (size_t)len - 1);
+		buf[len - 1] = 0;
+	}
+	return (int)name.size();
+}
+
+void cl_simview_draw_predict(CLDocument* doc, int pageIndex, CGContextRef ctx, double backingScale,
+                             double originX, double originY, double unitsPerPoint,
+                             const CLPredictMark* marks, int count, bool projector) {
+	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
+	if (page == nullptr || ctx == nullptr || unitsPerPoint <= 0 || marks == nullptr) return;
+	using cl::render::Color;
+	using cl::render::Point;
+	using cl::render::Stroke;
+	Camera cam(ctx, backingScale, originX, originY, unitsPerPoint);
+	cl::mac::CGScene scene(ctx);
+	scene.setViewport(cam.t);
+	const float px = (float)backingScale * (projector ? 1.6f : 1.0f);   // a point, in device pixels
+
+	auto ring = [&](float l, float b, float r, float t, float out, const Color& c, float width) {
+		const Point box[] = { Point(l - out, b - out), Point(r + out, b - out), Point(r + out, t + out), Point(l - out, t + out) };
+		scene.polyline(box, 4, Stroke(c, width), true);
+	};
+	// Text centred on (cx, cy): `h` is the text's pixel height (world units
+	// here); Helvetica's capitals are 0.717 of it.
+	auto centred = [&](const std::string& text, float cx, float cy, float h, const Color& c) {
+		const float w = cl::render::measuredTextWidth(text.c_str(), h);
+		scene.text(Point(cx - w / 2, cy + 0.717f * h / 2), text.c_str(), h, c);
+	};
+
+	for (int i = 0; i < count; i++) {
+		const CLPredictMark& m = marks[i];
+		guiGate* g = doc->circuit.getGate(m.gate);
+		if (g == nullptr || !(isLight(g) || isDisplay(g))) continue;
+		CLSimLight l = lightInfo(g);
+		float L = (float)l.left, B = (float)l.bottom, R = (float)l.right, T = (float)l.top;
+		if (projector && l.digits == 0) {   // the lit square is drawn bigger (guiGateLED)
+			const float k = 1.3f, cx = (L + R) / 2, cy = (B + T) / 2;
+			L = cx + (L - cx) * k; R = cx + (R - cx) * k; B = cy + (B - cy) * k; T = cy + (T - cy) * k;
+		}
+		const float cx = (L + R) / 2, cy = (B + T) / 2, H = T - B;
+		const bool guessed = m.guess >= 0;
+		const std::string guessText = !guessed ? "?" : l.digits == 0 ? std::string(1, m.guess ? '1' : '0')
+		                                                             : hexText(m.guess, l.digits);
+		if (m.mark == CL_PREDICT_COVERED) {
+			// A card over the light: "?" until guessed, then the guess in amber.
+			const float pad = 0.22f;
+			scene.fillRect(Point(L - pad, B - pad), Point(R + pad, T + pad), Color(0.11f, 0.14f, 0.18f, 1));
+			ring(L, B, R, T, pad, Color(0.50f, 0.60f, 0.70f, 1), 1.25f * px);
+			const float h = l.digits == 0 ? std::max(H * 0.95f, 1.0f) : H * 0.62f;
+			centred(guessText, cx, cy, std::min(h, (R - L) * 1.6f / std::max(1, (int)guessText.size())),
+			        guessed ? Color(1.0f, 0.80f, 0.32f, 1) : Color(0.66f, 0.76f, 0.86f, 1));
+			if (m.focused) ring(L, B, R, T, pad + 0.32f, Color(0.28f, 0.93f, 1.0f, 1), 2.0f * px);
+			continue;
+		}
+		// Revealed: a ring that says how the guess did, and the guess above.
+		const Color c = m.mark == CL_PREDICT_RIGHT ? Color(0.30f, 0.92f, 0.45f, 1)
+		              : m.mark == CL_PREDICT_WRONG ? Color(1.0f, 0.36f, 0.36f, 1)
+		                                           : Color(0.56f, 0.60f, 0.66f, 1);
+		ring(L, B, R, T, 0.32f, c, 2.6f * px);
+		if (m.focused) ring(L, B, R, T, 0.75f, Color(0.28f, 0.93f, 1.0f, 0.8f), 1.5f * px);
+		if (!guessed) continue;
+		const std::string tag = "Guess " + guessText;
+		const float th = projector ? 1.15f : 0.9f;
+		const float tw = cl::render::measuredTextWidth(tag.c_str(), th);
+		const float ty = T + 0.32f + 0.35f + th * 0.6f;   // the tag's middle, above the ring
+		scene.fillRect(Point(cx - tw / 2 - 0.3f, ty - th * 0.6f), Point(cx + tw / 2 + 0.3f, ty + th * 0.6f),
+		               Color(0.05f, 0.07f, 0.09f, 0.92f));
+		centred(tag, cx, ty, th, c);
+	}
 }
 
 }  // extern "C"

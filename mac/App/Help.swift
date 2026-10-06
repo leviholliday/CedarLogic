@@ -151,6 +151,8 @@ enum HelpBook {
                     .p("The circuit runs all the time. The toolbar pauses and resumes it, **{step}** steps once, and the speed slider sets how long each step takes."),
                     .p("Click a switch to flip it; keypads and pulse generators take clicks too."),
                     .p("**Simulation View ({simView})** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the bar at the bottom shows every switch and light. Space pauses, Escape leaves."),
+                    .p("**Predict** (in Simulation View's bar) covers every light with a ?. Click a light (or Tab to it and press 0 or 1; a display takes a hex digit) to guess what it will show, then **Reveal** (Return): right guesses ring green, wrong ones red. Flipping a switch or stepping covers them again for the next round."),
+                    .p("**Projector mode** (the projector button in the bar, or the View menu) draws Simulation View for the back of a classroom: thick wires, big labels and lights, and a bigger bar. It's remembered on this Mac and never changes the circuit."),
                     .p("**Lock** (in the toolbar) stops edits, so a circuit can be shown and played with but not changed. Switches still work."),
                  ]),
         HelpPage(id: "analysis", title: "Truth Tables and the Oscilloscope", icon: "tablecells",

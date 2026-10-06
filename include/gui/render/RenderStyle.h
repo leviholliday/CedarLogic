@@ -69,15 +69,32 @@ struct RenderStyle {
 	// Simulation View palette (see RenderMode::simView): near-black canvas,
 	// steel gate outlines, dim wires that are off, neon cyan wires that are on.
 	bool simView;
+	// Classroom options for Simulation View (set by the native apps through
+	// cl_simview_draw_page; the wx app leaves them off). `projector` draws for
+	// the back of a lecture hall: much thicker wires and outlines, bigger
+	// labels and lights, brighter colours. `coverOutputs` is Predict, then
+	// reveal: lights and displays show nothing and every wire draws in its
+	// "off" colour, since a wire carries a light's answer all the way to it.
+	bool projector;
+	bool coverOutputs;
 	TitleBlock titleBlock;
 
 	RenderStyle()
 		: showGrid(true), showSelection(true),
 		  showLiveState(true), colorOutput(true), darkMode(false), selectionFade(1.0f),
-		  accentIndex(0), wireScale(1.0f), simView(false) {}
+		  accentIndex(0), wireScale(1.0f), simView(false), projector(false), coverOutputs(false) {}
+
+	// Projector mode's multipliers: wire widths, gate outlines, label text and
+	// the lit part of a light.
+	float projectorWire() const    { return projector ? 3.5f : 1.0f; }
+	float projectorOutline() const { return projector ? 2.6f : 1.0f; }
+	float projectorLabel() const   { return projector ? 1.3f : 1.0f; }
+	float projectorLight() const   { return projector ? 1.3f : 1.0f; }
 
 	Color simOn() const    { return Color(0.28f, 0.93f, 1.00f, 1); }
-	Color simOff() const   { return Color(0.20f, 0.26f, 0.32f, 1); }
+	// Projector mode lifts the off colour: a projector washes dark slate out
+	// to nothing.
+	Color simOff() const   { return projector ? Color(0.42f, 0.50f, 0.58f, 1) : Color(0.20f, 0.26f, 0.32f, 1); }
 	Color simWarn() const  { return Color(1.00f, 0.70f, 0.22f, 1); }   // unknown / hi-Z
 	Color simError() const { return Color(1.00f, 0.25f, 0.75f, 1); }   // conflict
 
@@ -119,7 +136,7 @@ struct RenderStyle {
 	// screen, near-white on a dark screen.
 	Color gateStroke(GateKind /*kind*/) const {
 		if (!colorOutput) return Color(0, 0, 0, 1);
-		if (simView) return Color(0.52f, 0.62f, 0.72f, 1);
+		if (simView) return projector ? Color(0.86f, 0.92f, 0.98f, 1) : Color(0.52f, 0.62f, 0.72f, 1);
 		return darkMode ? Color(0.90f, 0.90f, 0.92f, 1) : Color(0.05f, 0.05f, 0.05f, 1);
 	}
 

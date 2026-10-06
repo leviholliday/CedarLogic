@@ -167,7 +167,8 @@ final class CircuitCanvasNSView: NSView {
     }
 
     private func wireTagText() -> (text: String, state: Character)? {
-        guard let document else { return nil }
+        // Predict: the wire would give the light's answer away.
+        guard let document, controller?.predictCovers != true else { return nil }
         var buf = [CChar](repeating: 0, count: 72)
         let bits = Int(cl_edit_hover_wire_state(document.handle, Int32(page), &buf, 72))
         guard bits > 0 else { return nil }
@@ -218,6 +219,10 @@ final class CircuitCanvasNSView: NSView {
         str.draw(at: CGPoint(x: r.minX + 7, y: r.minY + 3))
     }
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func accessibilityChildren() -> [Any]? {
+        predictAccessibilityChildren() ?? super.accessibilityChildren()
+    }
 
     // MARK: Drawing
 
@@ -670,10 +675,14 @@ final class CanvasController: ObservableObject {
                 document?.cancelGesture()
                 selectNone()
                 if !isRunning { setRunning(true) }   // "Run" means run
+            } else {
+                predict.on = false   // Predict is a Simulation View round
             }
             redraw()
         }
     }
+    /// Predict, then reveal (Predict.swift).
+    let predict = PredictModel()
     /// Locked: parts can be clicked (switches, keypads) but nothing edited.
     @Published var locked = false
     /// Where the pointer is on the page, for the status bar.
@@ -1418,6 +1427,7 @@ final class CanvasController: ObservableObject {
     func stepOnce() {
         if isRunning { setRunning(false) }
         document?.stepOnce()
+        circuitAdvancedByUser()
         redraw()
         scopeChanged()
     }
