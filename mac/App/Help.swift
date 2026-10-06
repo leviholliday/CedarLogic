@@ -92,6 +92,7 @@ enum HelpBook {
                     .p("**{quickCopy} while moving a gate** (dragging it, or with it on the pointer from the palette, Quick Add or a paste) connects its free pins to the pins they're right next to, and keeps it moving. Escape takes back just those connections."),
                     .p("Putting a gate down right next to a free pin connects them too."),
                     .p("**Straighten ({straighten})** tidies the selected wires into clean routes. **Tidy Up ({tidy})** tidies the whole page, showing you first: Return keeps it, Escape doesn't, Tab tries the other way."),
+                    .p("**Lock in Place** (the Edit menu, or right-click a part) keeps a part where it is, with a small lock on it: it can't be moved, rotated or deleted, but wires to it still work, its settings still change and switches still flip. Teachers: lock the switches and lights, then share the circuit. **Unlock All Parts** in the Edit menu takes every lock off."),
                     .h("Wire colours"),
                     .keys([
                         HelpPage.Key(keys: "Silver", what: "0 (grey on older looks, black on white)"),

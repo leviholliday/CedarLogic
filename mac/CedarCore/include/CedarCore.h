@@ -213,6 +213,30 @@ void cl_edit_draw_overlay(CLDocument *doc, int page, CGContextRef ctx, double ba
                           double originX, double originY, double unitsPerPoint,
                           double accentR, double accentG, double accentB);
 
+// ---- Parts locked in place -------------------------------------------------
+// A teaching aid, not security: a teacher locks the starter parts (switches,
+// lights) and shares the circuit; students wire between them. Locked parts
+// aren't moved (a drag, a box move or the arrow keys take only the unlocked
+// ones along), rotated, deleted or cut, and Tidy Up leaves them put; their
+// settings can still change, wires to them can be made and removed, and
+// switches still flip. Saved as the gate's (gparam "LOCKED" "true"), which
+// older versions keep without acting on it. A pasted copy comes unlocked.
+bool cl_gate_is_locked(const CLDocument *doc, long gate);
+// How many selected parts on a page are locked (`locked` true) or not.
+int cl_edit_selected_locked_count(const CLDocument *doc, int page, bool locked);
+// Lock (or unlock) the selected parts, as one undo step. Returns how many changed.
+int cl_edit_lock_selection(CLDocument *doc, int page, bool lock);
+// Locked parts on every page, and unlocking them all as one undo step
+// (returns how many).
+int cl_document_locked_count(const CLDocument *doc);
+int cl_edit_unlock_all(CLDocument *doc, int page);
+// Leave the page's locked parts (and the wires on them) out of the selection,
+// before a Cut. Returns how many parts.
+int cl_edit_deselect_locked(CLDocument *doc, int page);
+// The last drag, nudge, delete or rotate left locked parts where they were,
+// for a note saying why. Cleared by the next press.
+bool cl_edit_locked_held(const CLDocument *doc);
+
 // ---- Gate settings (the inspector) -----------------------------------------
 // The one selected gate on a page, or -1 when it isn't exactly one.
 long cl_edit_single_gate(const CLDocument *doc, int page);
@@ -338,7 +362,7 @@ typedef struct {
 	double wireScale;    // 0.7 thin, 1 normal, 1.6 thick
 	bool simView;
 	bool thumbnail;      // topology only, hairline, themed by `dark`
-	bool showSelection;
+	bool showSelection;  // the canvas being edited: selection halos and lock badges
 	double selectionFade;  // 0..1: a new selection's halo fades in
 } CLDrawOptions;
 void cl_document_draw_ex(CLDocument *doc, int page, CGContextRef ctx, double backingScale,

@@ -615,6 +615,12 @@ struct EditCommands: Commands {
             Button("Rotate") { canvas?.perform(.rotate) }
                 .keyboardShortcut(keys.menu(.rotate))
                 .disabled(canvas?.hasGateSelection != true)
+            // Parts locked in place stay put: a teacher's starter parts.
+            Button(canvas?.routed.lockMenuUnlocks == true ? "Unlock" : "Lock in Place") { canvas?.routed.toggleLockInPlace() }
+                .disabled(canvas?.routed.hasGateSelection != true)
+                .help("Locked parts can't be moved, rotated or deleted. Wires to them still work.")
+            Button("Unlock All Parts") { canvas?.routed.unlockAll() }
+                .disabled(canvas?.routed.hasLockedParts != true)
             Menu("Find") {
                 Button("Find…") { canvas?.perform(.find) }
                     .keyboardShortcut(keys.menu(.find))

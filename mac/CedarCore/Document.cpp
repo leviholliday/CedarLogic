@@ -38,6 +38,37 @@ bool readFile(const char* path, std::string& out) {
 	return true;
 }
 
+// A part locked in place: a small padlock on a disc at its top-right corner,
+// the same size on screen at any zoom (smaller only when zoomed far out, so
+// it never swamps the part). `upp` is world units per point, `px` device
+// pixels per point.
+void drawLockBadge(cl::render::Scene& scene, guiGate* g, const cl::render::RenderStyle& style, float upp, float px) {
+	using cl::render::Color;
+	using cl::render::Point;
+	using cl::render::Stroke;
+	klsBBox b = g->getSelectionBBox();
+	if (b.empty()) b = g->getBBox();
+	if (b.empty()) return;
+	const float r = std::min(7.0f * upp, 0.6f);   // the disc
+	const float u = r / 7.0f;                      // a point, at that size
+	const Point c(b.getRight() - 1.5f * u, b.getTop() - 1.5f * u);
+	const bool dark = style.darkMode;
+	const Color disc = dark ? Color(0.20f, 0.22f, 0.26f, 1) : Color(1, 1, 1, 1);
+	const Color rim = dark ? Color(1, 1, 1, 0.22f) : Color(0, 0, 0, 0.22f);
+	const Color ink = dark ? Color(0.86f, 0.87f, 0.90f, 1) : Color(0.32f, 0.34f, 0.38f, 1);
+	const float w = std::max(0.5f, (u / upp) * px);   // a point's stroke, scaled with the badge
+	scene.fillCircle(c, r, disc);
+	scene.strokeCircle(c, r, Stroke(rim, w));
+	// The body, and the shackle over it.
+	scene.fillRect(Point(c.x - 3.4f * u, c.y - 3.6f * u), Point(c.x + 3.4f * u, c.y + 0.6f * u), ink);
+	const float sr = 2.1f * u, top = c.y + 1.6f * u;
+	Stroke shackle(ink, 1.4f * w);
+	scene.arc(Point(c.x, top), sr, -90.0f, 180.0f, shackle);
+	Point legs[4] = { Point(c.x - sr, top), Point(c.x - sr, c.y + 0.4f * u),
+	                  Point(c.x + sr, top), Point(c.x + sr, c.y + 0.4f * u) };
+	scene.lines(legs, 4, shackle);
+}
+
 void setError(char* error, int len, const std::string& msg) {
 	if (error == nullptr || len <= 0) return;
 	std::strncpy(error, msg.c_str(), (size_t)len - 1);
@@ -218,6 +249,13 @@ void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
 	for (auto& g : *p->getGateList()) if (g.second) ids.push_back(g.first);
 	std::sort(ids.begin(), ids.end());
 	for (unsigned long id : ids) (*p->getGateList())[id]->drawToScene(scene, style);
+	// Lock badges: on the canvas being edited only (the styles that show the
+	// selection), never in Simulation View, a picture or a thumbnail.
+	if (style.showSelection && style.colorOutput && !style.simView)
+		for (unsigned long id : ids) {
+			guiGate* g = (*p->getGateList())[id];
+			if (g->isLocked()) drawLockBadge(scene, g, style, (float)unitsPerPoint, (float)backingScale);
+		}
 	CGContextRestoreGState(ctx);
 }
 
