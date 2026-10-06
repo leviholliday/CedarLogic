@@ -120,6 +120,10 @@ enum Templates {
                         text: sevenSegment(), folder: nil),
     ] + flipFlops() + classicMistakes() }
 
+    /// The group of circuits with a mistake to find: offered in New from
+    /// Template, but never as the start of every new circuit.
+    static let mistakesGroup = "Classic Mistakes"
+
     /// Built-in groups, in the picker's order.
     static var builtInGroups: [(name: String, list: [CircuitTemplate])] {
         var out: [(name: String, list: [CircuitTemplate])] = []
@@ -299,16 +303,16 @@ enum Templates {
     /// give the answer away.
     private static func classicMistakes() -> [CircuitTemplate] {
         func t(_ id: String, _ name: String, _ detail: String, _ text: String) -> CircuitTemplate {
-            CircuitTemplate(id: "builtin-mistake-" + id, name: name, detail: detail, text: text, folder: nil, group: "Classic Mistakes")
+            CircuitTemplate(id: "builtin-mistake-" + id, name: name, detail: detail, text: text, folder: nil, group: mistakesGroup)
         }
         return [
-            t("latch", "J-K Latch from Gates", "Four gates make a J-K latch with a Reset. Switch it on and see what Q does",
+            t("latch", "J-K Latch from Gates", "A J-K latch made from gates. Turn Reset off and EN on, then watch Q and Q'",
               mistakeLatch()),
-            t("gated-clock", "Gated Clock Counter", "A counter behind an AND gate. Press Step Clock and watch the count",
+            t("gated-clock", "Every Other Count", "A counter that should go up on every other press of Step Clock. Press it and watch the count",
               mistakeGatedClock()),
-            t("floating", "Three-Input AND", "A light on a 3-input AND gate with two switches. Try every combination",
+            t("floating", "A and B Light", "A light that should come on when A and B are both on. Try every combination",
               mistakeFloating()),
-            t("two-outputs", "Two Gates, One Light", "An AND gate and an OR gate share a light. Try every combination",
+            t("two-outputs", "Two-Switch Light", "A light that A and B both control. Try every combination",
               mistakeTwoOutputs()),
         ]
     }
@@ -323,8 +327,9 @@ enum Templates {
     /// A J-K latch from gates: S = J.EN.Q' and R = K.EN.Q feed a pair of
     /// cross-coupled NOR gates. With J = K = 1 and EN on, each change of Q
     /// switches the other gate on, so Q never settles. Reset (an extra input
-    /// on Q's NOR gate) starts it at Q = 0, since a latch like this has no
-    /// way to start from nothing; it starts reset, with J = K = 1 and EN off.
+    /// on Q's NOR gate, and inverted on S's AND gate so Q' holds too) starts
+    /// it at Q = 0, since a latch like this has no way to start from
+    /// nothing; it starts reset, with J = K = 1 and EN off.
     private static func mistakeLatch() -> String {
         var p: [Part] = [
             Part(gate: "AA_TOGGLE", x: 0, y: 15, on: true),    // 0 Reset
@@ -332,11 +337,12 @@ enum Templates {
             Part(gate: "AA_TOGGLE", x: 0, y: 0),               // 2 EN
             Part(gate: "AA_TOGGLE", x: 0, y: -8, on: true),    // 3 J
             Part(gate: "AA_AND3", x: 12, y: 8),                // 4 R = K.EN.Q
-            Part(gate: "AA_AND3", x: 12, y: -8),               // 5 S = J.EN.Q'
+            Part(gate: "AA_AND4", x: 12, y: -8),               // 5 S = J.EN.Q'.Reset'
             Part(gate: "BE_NOR3", x: 26, y: 8),                // 6 Q
             Part(gate: "BE_NOR2", x: 26, y: -8),               // 7 Q'
             Part(gate: "GA_LED", x: 36, y: 8),                 // 8
             Part(gate: "GA_LED", x: 36, y: -8),                // 9
+            Part(gate: "AA_INVERTER", x: 6, y: -15),           // 10 Reset'
         ]
         p += [label("Reset", right: -2.4, y: 15), label("K", right: -2.4, y: 8),
               label("EN", right: -2.4, y: 0), label("J", right: -2.4, y: -8),
@@ -347,6 +353,8 @@ enum Templates {
                  Wire(from: 3, fromPin: "OUT_0", to: 5, toPin: "IN_0"),
                  Wire(from: 2, fromPin: "OUT_0", to: 5, toPin: "IN_1"),
                  Wire(from: 7, fromPin: "OUT", to: 5, toPin: "IN_2"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 10, toPin: "IN_0"),
+                 Wire(from: 10, fromPin: "OUT_0", to: 5, toPin: "IN_3"),
                  Wire(from: 0, fromPin: "OUT_0", to: 6, toPin: "IN_0"),
                  Wire(from: 4, fromPin: "OUT", to: 6, toPin: "IN_1"),
                  Wire(from: 7, fromPin: "OUT", to: 6, toPin: "IN_2"),
@@ -393,7 +401,7 @@ enum Templates {
                  Wire(from: 7, fromPin: "OUT_0", to: 5, toPin: "clear")]
         var wires = w
         for i in 0..<4 { wires.append(Wire(from: 5, fromPin: "OUT_\(i)", to: 8, toPin: "IN_\(i)")) }
-        let (labels, big) = mistakeLabels("Press Step Clock (K) eight times. Watch Enable and the count.", x: -4, y: 24)
+        let (labels, big) = mistakeLabels("Enable should let the count go up only on every other press. Press Step Clock (K) eight times.", x: -4, y: 24)
         return build(p + labels, wires, big: big, manualClock: true)
     }
 

@@ -200,7 +200,7 @@ enum HelpBook {
         HelpPage(id: "templates", title: "Templates and My Parts", icon: "square.on.square",
                  line: "Start ahead, and reuse what you've built.",
                  blocks: [
-                    .p("**File > New from Template…** starts a circuit from a **Lab Page** (a title block with your name), a **4-Bit Counter**, a **7-Segment Decoder Starter**, or one of your own. **File > Save as Template…** keeps the circuit you're in as one of yours, every tab of it. Settings > General can make every new circuit start from one."),
+                    .p("**File > New from Template…** starts a circuit from a **Lab Page** (a title block with your name), a **4-Bit Counter**, a **7-Segment Decoder Starter**, any of the flip-flops and latches, one of four **Classic Mistakes** circuits with a problem to find, or one of your own. **File > Save as Template…** keeps the circuit you're in as one of yours, every tab of it. Settings > General can make every new circuit start from one."),
                     .p("**My Parts**: select some gates and choose **Edit > Save as Part…**, and name it. It's at the bottom of the side panel's list (**My Parts**) to drag or click in, and in **Add a Gate ({addGate})** under its name. It drops in as a copy of those gates and wires, so any CedarLogic can open the circuit."),
                     .tip("Right-click a part (in the side panel or in Add a Gate) to rename or delete it. Your templates rename and delete from New from Template."),
                  ]),

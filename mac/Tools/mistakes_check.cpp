@@ -1,7 +1,8 @@
 // Headless check that each Classic Mistakes template really shows its
 // problem in the engine, on the files `CedarLogic --render-ui <dir>` writes:
-//   - J-K latch from gates: steady while J and K differ, but with J = K = 1
-//     and EN on it flickers for good (the truth table calls it unsettled);
+//   - J-K latch from gates: Reset holds Q and Q' still, even with EN on;
+//     steady while J and K differ, but with J = K = 1 and EN on Q flickers
+//     for good (the truth table calls it unsettled);
 //   - gated clock: Step Clock counts on every press, not every other one,
 //     and a running clock does the same;
 //   - three-input AND: the open input makes the light unknown (X) exactly
@@ -58,7 +59,9 @@ static bool light(CLDocument* doc, size_t i) {
 }
 
 static void click(CLDocument* doc, double x, double y) {
-	if (!cl_document_click(doc, 0, x, y)) printf("FAIL no switch at %g,%g\n", x, y);
+	char where[64];
+	snprintf(where, sizeof where, "%g,%g", x, y);
+	if (!cl_document_click(doc, 0, x, y)) check(false, std::string("a switch at ") + where);
 	steps(doc, 12);
 }
 
@@ -69,7 +72,7 @@ static Table table(CLDocument* doc) {
 	Table t;
 	char err[256] = "";
 	CLTruthTable* tt = cl_truth_table(doc, 0, err, sizeof err);
-	if (!tt) { printf("FAIL truth table: %s\n", err); failures++; return t; }
+	if (!tt) { check(false, std::string("truth table (") + err + ")"); return t; }
 	for (int r = 0; r < cl_tt_rows(tt); r++) {
 		std::string s;
 		for (int c = 0; c < cl_tt_columns(tt); c++) s += cl_tt_cell(tt, r, c);
@@ -96,6 +99,13 @@ static void latch(const std::string& dir) {
 	if (!doc) return;
 	steps(doc, 40);
 	check(!light(doc, 0) && light(doc, 1), "latch: starts reset (Q = 0, Q' = 1)");
+
+	// Reset holds both sides: EN on (J = K = 1) changes nothing yet.
+	click(doc, 0, 0);
+	bool held = true;
+	for (int i = 0; i < 100; i++) { cl_document_step(doc); if (light(doc, 0) || !light(doc, 1)) held = false; }
+	check(held, "latch: Reset on, EN on: Q = 0 and Q' = 1, steady");
+	click(doc, 0, 0);    // EN off again
 	click(doc, 0, 15);   // Reset off
 	steps(doc, 40);
 	check(!light(doc, 0) && light(doc, 1), "latch: Reset off, EN off: Q holds 0");
@@ -104,12 +114,12 @@ static void latch(const std::string& dir) {
 	click(doc, 0, 0);
 	steps(doc, 20);
 	int changes = 0, lateChanges = 0;
-	bool prevQ = light(doc, 0), prevN = light(doc, 1);
+	bool prevQ = light(doc, 0);
 	for (int i = 0; i < 300; i++) {
 		cl_document_step(doc);
-		const bool q = light(doc, 0), n = light(doc, 1);
-		if (q != prevQ || n != prevN) { changes++; if (i >= 150) lateChanges++; }
-		prevQ = q; prevN = n;
+		const bool q = light(doc, 0);
+		if (q != prevQ) { changes++; if (i >= 150) lateChanges++; }
+		prevQ = q;
 	}
 	check(changes >= 40 && lateChanges >= 20,
 	      "latch: J = K = 1 with EN on, Q keeps changing (" + std::to_string(changes) + " changes in 300 steps, " +
