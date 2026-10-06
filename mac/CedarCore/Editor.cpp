@@ -981,7 +981,7 @@ int cl_edit_lock_selection(CLDocument* doc, int pageIndex, bool lock) {
 	if (ids.empty()) return 0;
 	std::sort(ids.begin(), ids.end());
 	const int n = (int)ids.size();
-	submit(doc, page, new LockCommand(&doc->circuit, std::move(ids), lock, lock ? "Lock in Place" : "Unlock"));
+	submit(doc, page, new LockCommand(&doc->circuit, std::move(ids), lock, lock ? "Lock in Place" : (n == 1 ? "Unlock Part" : "Unlock Parts")));
 	return n;
 }
 

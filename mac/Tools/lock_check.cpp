@@ -411,7 +411,7 @@ int main(int argc, char** argv) {
 		cl_edit_undo(doc);
 		select(doc, 0, { s1, andg });
 		CHECK(cl_edit_lock_selection(doc, 0, false) == 1 && !s1->isLocked(), "Unlock on a mixed selection unlocks the locked one");
-		CHECK(!strcmp(cl_edit_undo_name(doc), "Unlock"), "named Unlock");
+		CHECK(!strcmp(cl_edit_undo_name(doc), "Unlock Part"), "named Unlock Part");
 		cl_edit_undo(doc);
 		CHECK(s1->isLocked(), "undo locks it again");
 	}

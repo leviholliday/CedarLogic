@@ -1,7 +1,7 @@
 // A gate's settings (double-click it): the same ones the wx app's
 // parameters dialog lists, each with a control that suits its type, in the
 // app's own look -- the gate's picture and name on top, a card of settings,
-// then Rotate, Lock in Place and Delete (Unlock for a locked part), and
+// then Rotate, Lock in Place and Delete (Unlock Part for a locked part), and
 // Done. A change applies as you make it (a number when it's valid) and can
 // be undone. Return is Done; Escape too.
 
@@ -90,7 +90,7 @@ struct GateSettingsSheet: View {
     private func footer(accent: Color, hasGate: Bool) -> some View {
         HStack(spacing: 8) {
             if hasGate, let gate = document.singleSelectedGate(page: controller.page), document.isLocked(gate: gate) {
-                footButton("lock.open", "Unlock", tint: ink) { controller.lockSelection(false) }
+                footButton("lock.open", "Unlock Part", tint: ink) { controller.lockSelection(false) }
                     .help("This part is locked in place: it can't be moved, rotated or deleted. Its settings still change.")
             } else if hasGate {
                 footButton("arrow.clockwise", "Rotate", tint: ink) { controller.rotate() }

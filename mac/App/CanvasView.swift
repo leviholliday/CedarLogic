@@ -439,17 +439,18 @@ final class CircuitCanvasNSView: NSView {
             item("Delete") { controller.deleteSelection() }
         case .gate:
             item("Settings…") { controller.showSettings() }
-            // Locked parts (all of the selection): Unlock in place of the
-            // things they refuse.
+            // Locked parts (all of the selection): Unlock Part in place of the
+            // things they refuse. "Part", so it isn't taken for the circuit's
+            // own lock (Unlock the Circuit).
             let locked = controller.selectedLocked > 0 && controller.selectedUnlocked == 0
             if !locked { item("Rotate") { controller.rotate() } }
             item("Straighten Its Wires") { controller.straighten() }
             menu.addItem(.separator())
             if locked {
-                item("Unlock") { controller.lockSelection(false) }
+                item(controller.unlockPartsTitle) { controller.lockSelection(false) }
             } else {
                 item("Lock in Place") { controller.lockSelection(true) }
-                if controller.selectedLocked > 0 { item("Unlock") { controller.lockSelection(false) } }
+                if controller.selectedLocked > 0 { item(controller.unlockPartsTitle) { controller.lockSelection(false) } }
                 menu.addItem(.separator())
                 item("Delete") { controller.deleteSelection() }
             }
@@ -1175,13 +1176,15 @@ final class CanvasController: ObservableObject {
 
     // Parts locked in place: they stay put (moves, Rotate, Delete and Cut
     // leave them), but wires, settings and switches work as usual.
-    static let lockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock."
+    static let lockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock Part."
     /// After a move, delete or rotate: say why locked parts didn't go along.
     func noteLockedHeld() { if document?.lockedHeld == true { note(Self.lockedNote) } }
     /// Selected parts that are locked, and that aren't.
     var selectedLocked: Int { document?.selectedLockedCount(page: page, locked: true) ?? 0 }
     var selectedUnlocked: Int { document?.selectedLockedCount(page: page, locked: false) ?? 0 }
-    /// Lock in Place (or Unlock) the selected parts.
+    /// "Unlock Part" or "Unlock Parts", by how many selected parts are locked.
+    var unlockPartsTitle: String { selectedLocked > 1 ? "Unlock Parts" : "Unlock Part" }
+    /// Lock in Place (or Unlock Part) the selected parts.
     func lockSelection(_ lock: Bool) {
         guard canEdit else { lockNudge(); return }
         guard let n = document?.lockSelection(page: page, lock: lock), n > 0 else { return }
@@ -1189,7 +1192,7 @@ final class CanvasController: ObservableObject {
         let parts = n == 1 ? "1 part" : "\(n) parts"
         note(lock ? "Locked \(parts) in place." : "Unlocked \(parts).")
     }
-    /// The Edit menu's one item: Unlock when every selected part is locked.
+    /// The Edit menu's one item: Unlock Part when every selected part is locked.
     var lockMenuUnlocks: Bool { selectedLocked > 0 && selectedUnlocked == 0 }
     func toggleLockInPlace() { lockSelection(!lockMenuUnlocks) }
     var hasLockedParts: Bool { (document?.lockedCount ?? 0) > 0 }
