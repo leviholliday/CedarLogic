@@ -98,7 +98,7 @@ struct SimBar: View {
     private func barButton<L: View>(help: String, lit: Bool, disabled: Bool = false, @ViewBuilder label: () -> L,
                                     action: @escaping () -> Void) -> some View {
         // A disabled one ignores clicks but isn't .disabled, so its tip (what
-        // turns it on) still shows.
+        // turns it on) still shows; VoiceOver hears it's unavailable, and why.
         Button { if !disabled { action() } } label: {
             label()
                 .font(.system(size: 13))
@@ -109,6 +109,8 @@ struct SimBar: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityValue(disabled ? "Unavailable" : "")
+        .accessibilityHint(disabled ? help : "")
     }
 
     /// Every switch (IN) and light (OUT), top to bottom and left to right
