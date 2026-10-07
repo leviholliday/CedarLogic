@@ -74,6 +74,7 @@ std::string sentence(const std::string& code, int status, bool joining) {
 		return "This class has as many assignments as it can hold (100). Delete one to post another.";
 	if (code == "student_full") return "You've handed in as much as this class allows. Ask your teacher.";
 	if (code == "site_full") return "The website's classroom storage is full just now.";
+	if (code == "moved") return "CedarLogic Classroom has moved. Update CedarLogic.";   // revision 2's addresses (13)
 	if (status == 0) return kOffline;
 	return kServerError;
 }
@@ -197,7 +198,14 @@ Membership* Client::membershipOf(const std::string& classId) {
 Client::Api Client::call(const std::string& method, const std::string& url,
                          const std::vector<std::pair<std::string, std::string>>& headers, const json::Value* body,
                          const std::string& ifNoneMatch) {
-	Api a;
+	const HttpRequest r = request(method, url, headers, body, ifNoneMatch);
+	if (!hooks_.http) return Api();
+	return answer(hooks_.http(r));
+}
+
+HttpRequest Client::request(const std::string& method, const std::string& url,
+                            const std::vector<std::pair<std::string, std::string>>& headers, const json::Value* body,
+                            const std::string& ifNoneMatch) {
 	HttpRequest r;
 	r.method = method;
 	r.url = url;
@@ -210,8 +218,11 @@ Client::Api Client::call(const std::string& method, const std::string& url,
 		r.body = json::write(*body);
 	}
 	requests++;
-	if (!hooks_.http) return a;
-	const HttpResponse h = hooks_.http(r);
+	return r;
+}
+
+Client::Api Client::answer(const HttpResponse& h) {
+	Api a;
 	a.status = h.status;
 	a.sent = h.sent;
 	auto header = [&](const char* name) {
@@ -497,6 +508,7 @@ Result Client::refreshTeacher(const std::string& classId, bool mayRecreate) {
 	}
 	status_[classId] = Status();
 	const json::Value& b = a.body;
+	readLimits(b);
 	const int64_t seq = b.integer("seq");
 	if (seq < t.seq) {
 		log.push_back("an older status of " + classId + " (seq " + std::to_string(seq) + ") ignored");
@@ -709,6 +721,7 @@ void Client::forgetClassLocal(const std::string& classId, bool tombstone) {
 	for (auto it = subs_.begin(); it != subs_.end();) it = it->first.compare(0, classId.size() + 1, classId + "/") == 0 ? subs_.erase(it) : std::next(it);
 	for (auto it = roster_.begin(); it != roster_.end();) it = it->first.compare(0, classId.size() + 1, classId + "/") == 0 ? roster_.erase(it) : std::next(it);
 	counts_.erase(classId);
+	answers_.erase(classId);
 	if (hooks_.removeTree && !members_.count(classId)) hooks_.removeTree("cache/" + classId);
 	save();
 }
@@ -1116,11 +1129,15 @@ Result Client::liveWrite(Teaching& t, const LiveRec& lr, bool on, int64_t base) 
 	if (newQuestion) {
 		t.predictSince = ver;
 		counts_.erase(t.classId);
+		answers_.erase(t.classId);
 		answersEtag_.erase(t.classId);
 	} else if (rescore) {
-		answersEtag_.erase(t.classId);
+		recount(t);   // the answers already here, scored against the circuit just pushed
 	}
-	if (!lr.hasPredict) counts_.erase(t.classId);
+	if (!lr.hasPredict) {
+		counts_.erase(t.classId);
+		answers_.erase(t.classId);
+	}
 	save();
 	return Result::good();
 }
@@ -1184,22 +1201,45 @@ Result Client::takeOverLive(const std::string& classId) {
 	return liveWrite(*tp, lr, tp->pendingOn, tp->liveVer);
 }
 
-Result Client::refreshAnswers(const std::string& classId) {
+Result Client::refreshAnswers(const std::string& classId, int64_t waitSeconds) {
+	if (!teachingOf(classId)) return Result::bad("That class isn't on this device.");
+	const HttpRequest q = answersRequest(classId, waitSeconds);
+	if (q.url.empty()) return Result::good();
+	return answersReply(classId, hooks_.http ? hooks_.http(q) : HttpResponse());
+}
+
+HttpRequest Client::answersRequest(const std::string& classId, int64_t waitSeconds) {
+	Teaching* tp = teachingOf(classId);
+	if (!tp || !tp->liveOn || !tp->live.hasPredict) return HttpRequest();
+	TeacherKeys k;
+	keysOf(*tp, k);
+	std::vector<std::pair<std::string, std::string>> h = { { "Authorization", "Bearer " + k.teacherToken } };
+	const std::string& etag = answersEtag_[classId];
+	// Held until an answer arrives (3.3): only a request that says what it already has.
+	if (waitSeconds > 0 && !etag.empty()) h.emplace_back("x-cedarlogic-wait", std::to_string(waitSeconds));
+	return request("GET", cfg_.serverBase + "/classes/" + classId + "/live/answers?session=" + tp->live.session, h, nullptr, etag);
+}
+
+Result Client::answersReply(const std::string& classId, const HttpResponse& h) {
+	const Api a = answer(h);
 	Teaching* tp = teachingOf(classId);
 	if (!tp) return Result::bad("That class isn't on this device.");
-	Teaching& t = *tp;
-	if (!t.liveOn || !t.live.hasPredict) return Result::good();
-	const Api a = teacherCall(t, "GET", "/classes/" + classId + "/live/answers?session=" + t.live.session, nullptr, answersEtag_[classId]);
 	if (a.status == 304) return Result::good();
 	if (a.status != 200) return fail(a, "answers");
+	if (a.body.str("session") != tp->live.session && !a.body.str("session").empty()) return Result::good();   // another question's
 	answersEtag_[classId] = a.etag;
-	AnswerCounts c;
-	for (const std::string& l : t.live.lights) c.perLight[l] = { 0, 0 };
-	for (const auto& kv : roster_)
-		if (kv.first.compare(0, classId.size() + 1, classId + "/") == 0) c.students++;
-	std::map<std::string, int> truth;
-	const bool scored = t.live.reveal && hooks_.lights && hooks_.lights(t.liveCdl, t.live.lights, truth);
-	if (const json::Value* list = a.body.get("answers"))
+	applyAnswers(*tp, a.body.get("answers"), true);
+	return Result::good();
+}
+
+// Answers opened with the class's private key (4.4): the endpoint's whole list (`full`), or a
+// batch of new ones from the live connection (the others kept). A wrong proof, a damaged
+// envelope or an answer to an earlier question isn't counted.
+void Client::applyAnswers(Teaching& t, const json::Value* list, bool full) {
+	const std::string& classId = t.classId;
+	auto& got = answers_[classId];
+	if (full) got.clear();
+	if (list)
 		for (const json::Value& x : list->a) {
 			const std::string sid = x.str("studentId");
 			const int64_t ver = x.integer("ver");
@@ -1209,27 +1249,46 @@ Result Client::refreshAnswers(const std::string& classId) {
 			if (!open(cr_, curve_, fromB64(x.str("env")), "answer", classId, t.live.session + "/" + sid, ver, teacherOpenKey(t), payload, why) ||
 			    !readPayload(payload, "answer", p).empty() || p.str("session") != t.live.session || p.integer("ver") != ver)
 				continue;
-			const std::string proof = p.str("proof");
 			auto pin = t.proofs.find(sid);
-			if (pin == t.proofs.end() || pin->second != proof) continue;   // not counted (4.4)
-			c.answered++;
-			bool right = true;
-			const json::Value* lights = p.get("lights");
-			for (const std::string& l : t.live.lights) {
-				const json::Value* g = lights ? lights->get(l) : nullptr;
-				if (!g) {
-					right = false;
-					continue;
-				}
-				if (g->n == 1) c.perLight[l].first++;
-				else c.perLight[l].second++;
-				if (scored && (!truth.count(l) || truth[l] != (int)g->n)) right = false;
-			}
-			if (scored) (right ? c.right : c.wrong)++;
+			if (pin == t.proofs.end() || pin->second != p.str("proof")) continue;   // not counted (4.4)
+			Guess g;
+			g.ver = ver;
+			if (const json::Value* lights = p.get("lights"))
+				for (const auto& kv : lights->o)
+					if (kv.second.isNumber()) g.lights[kv.first] = kv.second.n == 1 ? 1 : 0;
+			got[sid] = g;
 		}
+	recount(t);
+}
+
+// The counts for the question on screen, from the answers kept: totals, never names.
+void Client::recount(Teaching& t) {
+	const std::string& classId = t.classId;
+	AnswerCounts c;
+	for (const std::string& l : t.live.lights) c.perLight[l] = { 0, 0 };
+	for (const auto& kv : roster_)
+		if (kv.first.compare(0, classId.size() + 1, classId + "/") == 0) c.students++;
+	if (t.students >= 0) c.students = t.students;   // the live connection's count is the newest
+	std::map<std::string, int> truth;
+	const bool scored = t.live.reveal && hooks_.lights && hooks_.lights(t.liveCdl, t.live.lights, truth);
+	for (const auto& kv : answers_[classId]) {
+		if (kv.second.ver < t.predictSince) continue;
+		c.answered++;
+		bool right = true;
+		for (const std::string& l : t.live.lights) {
+			auto g = kv.second.lights.find(l);
+			if (g == kv.second.lights.end()) {
+				right = false;
+				continue;
+			}
+			if (g->second == 1) c.perLight[l].first++;
+			else c.perLight[l].second++;
+			if (scored && (!truth.count(l) || truth[l] != g->second)) right = false;
+		}
+		if (scored) (right ? c.right : c.wrong)++;
+	}
 	counts_[classId] = c;
 	answersChanged_.insert(classId);
-	return Result::good();
 }
 
 // ---- Student: joining (4.5) ------------------------------------------------------------------
@@ -1361,6 +1420,7 @@ bool Client::memberStatus(Membership& m, const json::Value& b) {
 		return false;
 	}
 	const std::string classId = m.classId;
+	readLimits(b);
 	const std::string fk = b.str("fetchKey");
 	if (isHex(fk, 32)) m.fetchKey = fk;
 	m.expiresAt = b.integer("expiresAt", m.expiresAt);
@@ -1403,14 +1463,19 @@ bool Client::memberStatus(Membership& m, const json::Value& b) {
 		if (hooks_.removeTree) hooks_.removeTree(cachePath(classId, "assignments/" + it->first + ".json"));
 		it = m.seenAssignments.erase(it);
 	}
+	int64_t pulseLive = m.pulseLive;
 	if (const json::Value* l = b.get("live")) {
 		const int64_t ver = l->integer("ver");
+		pulseLive = l->flag("on") ? ver : 0;   // what the pulse says for this status
 		if (ver > m.liveSeen) {
 			const Result r = fetchLive(m, ver);
 			if (r.error == "wrong_fetch_key") wrongKey = true;
 		}
 	}
-	if (!wrongKey) m.seq = seq;
+	if (!wrongKey) {
+		m.seq = seq;
+		m.pulseLive = pulseLive;
+	}
 	return !wrongKey;
 }
 
@@ -1419,11 +1484,7 @@ Result Client::refreshMember(const std::string& classId) {
 	if (!mp) return Result::bad("That class isn't on this device.");
 	Membership& m = *mp;
 	const Api a = studentCall(m, "GET", "/classes/" + classId, nullptr);
-	if (a.status == 403 && a.error == "not_a_member") {
-		const std::string text = "You were removed from " + quoted(m.className) + ".";
-		forgetMembershipLocal(classId, text);
-		return Result::bad(text, 403, a.error);
-	}
+	if (a.status == 403 && a.error == "not_a_member") return removedFromClass(classId, 403, a.error);
 	if (a.status == 410) return gone(classId, a, false);
 	if (a.status == 401) {
 		Status s;
@@ -1450,17 +1511,31 @@ Result Client::refreshMember(const std::string& classId) {
 	return Result::good();
 }
 
+Result Client::removedFromClass(const std::string& classId, int status, const std::string& error) {
+	Membership* m = membershipOf(classId);
+	const std::string text = "You were removed from " + quoted(m ? m->className : std::string()) + ".";
+	forgetMembershipLocal(classId, text);
+	return Result::bad(text, status, error);
+}
+
 Result Client::fetchLive(Membership& m, int64_t ver) {
 	const Api a = call("GET", cfg_.liveBase + "/" + m.classId + "/" + m.fetchKey + "/live/" + std::to_string(ver), {}, nullptr);
 	if (a.status != 200) return Result::bad(sentence(a.error, a.status, false), a.status, a.error);
+	if (a.body.integer("ver", ver) != ver) return Result::bad(kLiveUnreadable, 200, "damaged");
+	return applyLiveRecord(m, ver, a.body.str("session"), a.body.str("env"));
+}
+
+// A live record {ver, session, env}, fetched or inside the live connection's push (3.14), opened
+// as version `ver` exactly (the AAD binds the version and the session: an old record can't pass
+// as new).
+Result Client::applyLiveRecord(Membership& m, int64_t ver, const std::string& session, const std::string& envB64) {
 	m.liveSeen = ver;   // fetched once, never again (4.9)
 	OpenKey k;
 	k.key = fromB64(m.classKey);
 	std::string payload, why;
 	json::Value p;
 	LiveRec lr;
-	const std::string session = a.body.str("session");
-	if (!isUuid(session) || !open(cr_, curve_, fromB64(a.body.str("env")), "live", m.classId, session, ver, k, payload, why) ||
+	if (!isUuid(session) || !open(cr_, curve_, fromB64(envB64), "live", m.classId, session, ver, k, payload, why) ||
 	    !readPayload(payload, "live", p).empty() || !liveFrom(p, lr) || lr.session != session || (!lr.ended && tooBig(lr.cdl))) {
 		note(kLiveUnreadable);   // the view keeps the last good one
 		return Result::bad(kLiveUnreadable, 200, "damaged");
@@ -1500,18 +1575,31 @@ Result Client::fetchLive(Membership& m, int64_t ver) {
 	return Result::good();
 }
 
-Result Client::pulse(const std::string& classId) {
+Result Client::pulse(const std::string& classId, int64_t waitSeconds) {
+	if (!membershipOf(classId)) return Result::bad("That class isn't on this device.");
+	const HttpRequest q = pulseRequest(classId, waitSeconds);
+	return pulseReply(classId, hooks_.http ? hooks_.http(q) : HttpResponse());
+}
+
+HttpRequest Client::pulseRequest(const std::string& classId, int64_t waitSeconds) {
 	Membership* mp = membershipOf(classId);
-	if (!mp) return Result::bad("That class isn't on this device.");
-	Membership& m = *mp;
-	const Api a = call("GET", cfg_.liveBase + "/" + classId + "/" + m.fetchKey, {}, nullptr);
+	if (!mp) return HttpRequest();
+	std::vector<std::pair<std::string, std::string>> h;
+	// Held until the class changes (3.3): only a request that says what it already has.
+	if (waitSeconds > 0 && !mp->pulseEtag.empty()) h.emplace_back("x-cedarlogic-wait", std::to_string(waitSeconds));
+	return request("GET", cfg_.liveBase + "/" + classId + "/" + mp->fetchKey, h, nullptr, mp->pulseEtag);
+}
+
+Result Client::pulseReply(const std::string& classId, const HttpResponse& h) {
+	const Api a = answer(h);
+	if (!membershipOf(classId)) return Result::bad("That class isn't on this device.");
 	if (a.status == 404) {
 		// An old fetchKey (a code change or a removal) or no class: the authenticated status says which.
 		Result r = refreshMember(classId);
 		if (!r.ok || !membershipOf(classId)) return r;
 		return sendPending(*membershipOf(classId));
 	}
-	if (a.status != 200) {
+	if (a.status != 200 && a.status != 304) {
 		Status s;
 		s.kind = a.status == 0 ? Status::Offline : Status::Error;
 		s.text = sentence(a.error, a.status, false);
@@ -1519,21 +1607,52 @@ Result Client::pulse(const std::string& classId) {
 		return fail(a, "pulse");
 	}
 	status_[classId] = Status();
-	const int64_t seq = a.body.integer("seq"), live = a.body.integer("live");
-	if (const int64_t p = a.body.integer("p")) pollSeconds_ = std::max<int64_t>(1, std::min<int64_t>(p, 600));
-	if (seq < m.seq || (live != 0 && live < m.liveSeen)) {
-		log.push_back("an older pulse of " + classId + " ignored");   // a stale CDN copy: normal (4.9)
-	} else if (seq > m.seq) {
-		refreshMember(classId);
+	if (a.status == 200) {
+		membershipOf(classId)->pulseEtag = a.etag;
+		applyPulse(classId, a.body, nullptr);
 		if (!membershipOf(classId)) return Result::good();
+		save();
+	}
+	return sendPending(*membershipOf(classId));
+}
+
+// What a pulse says (3.3, 3.14): {seq, live, p, fetchKey?} from the pulse endpoint or the live
+// connection, with the push's live record itself when the socket brought it (`record`). Every
+// teacher write moves seq by one, so a step of one that moved the live slot was the push alone:
+// nothing else to read (300 students don't read 300 statuses per push, 4.8).
+Result Client::applyPulse(const std::string& classId, const json::Value& p, const json::Value* record) {
+	Membership* mp = membershipOf(classId);
+	if (!mp) return Result::good();
+	const int64_t seq = p.integer("seq"), live = p.integer("live");
+	if (const int64_t s = p.integer("p")) pollSeconds_ = std::max<int64_t>(1, std::min<int64_t>(s, 600));
+	if (seq < mp->seq || (live != 0 && (live < mp->liveSeen || live < mp->pulseLive))) {
+		log.push_back("an older pulse of " + classId + " ignored");   // never back (4.9)
+		return Result::good();
+	}
+	const std::string fk = p.str("fetchKey");
+	if (isHex(fk, 32)) mp->fetchKey = fk;
+	const bool onlyLive = mp->pulseLive >= 0 && seq == mp->seq + 1 && live != mp->pulseLive;
+	if (onlyLive) {
+		mp->seq = seq;
+	} else if (seq > mp->seq) {
+		refreshMember(classId);   // the status, which brings a new live version too
+		mp = membershipOf(classId);
+		if (!mp) return Result::good();
+	}
+	Membership& m = *mp;
+	m.pulseLive = live;
+	if (record && record->integer("ver") > m.liveSeen) {
+		applyLiveRecord(m, record->integer("ver"), record->str("session"), record->str("env"));
 	} else if (live > m.liveSeen) {
 		const Result r = fetchLive(m, live);
 		if (r.error == "wrong_fetch_key") refreshMember(classId);
 	} else if (live == 0 && lives_.count(classId) && lives_[classId].on) {
-		// The session ended without our seeing the ended record yet: the status has it.
-		refreshMember(classId);
+		// The session ended (the push that ended it, seen without its record): the view says so.
+		Live& l = lives_[classId];
+		l.on = false;
+		l.ended = true;
+		liveChanged_.insert(classId);
 	}
-	if (Membership* again = membershipOf(classId)) return sendPending(*again);
 	return Result::good();
 }
 
@@ -1635,26 +1754,148 @@ Result Client::sendPending(Membership& m) {
 }
 
 Result Client::sendAnswer(const std::string& classId, const std::map<std::string, int>& lights) {
+	json::Value body;
+	const Result r = sealAnswer(classId, lights, body);
+	if (!r.ok || r.value == "none") return r.ok ? Result::good() : r;
+	return putAnswer(classId, body, lights);
+}
+
+Result Client::sealAnswer(const std::string& classId, const std::map<std::string, int>& lights, json::Value& body) {
 	Membership* mp = membershipOf(classId);
 	if (!mp) return Result::bad("That class isn't on this device.");
 	Membership& m = *mp;
 	const auto lv = lives_.find(classId);
-	if (lv == lives_.end() || !lv->second.on || !lv->second.hasPredict) return Result::good();   // dropped quietly
+	if (lv == lives_.end() || !lv->second.on || !lv->second.hasPredict) return Result::good("none");   // dropped quietly
 	const Live& l = lv->second;
 	Bytes env;
 	std::string why;
 	if (!sealTo(cr_, curve_, fromB64(m.pub), "answer", classId, l.session + "/" + m.studentId, l.ver,
 	            answerJson(l.session, l.ver, lights, serverNow(), m.proof), false, kMaxAnswer, env, why))
 		return Result::bad(why == "too big" ? kTooBig : kNoRandom);
-	json::Value body = json::Value::object();
+	body = json::Value::object();
 	body.set("session", json::Value::string(l.session));
 	body.set("ver", json::Value::integer(l.ver));
 	body.set("env", json::Value::string(b64u(env)));
-	const Api a = studentCall(m, "PUT", "/classes/" + classId + "/live/answers/" + m.studentId, &body);
+	return Result::good();
+}
+
+Result Client::putAnswer(const std::string& classId, const json::Value& body, const std::map<std::string, int>& lights) {
+	Membership* mp = membershipOf(classId);
+	if (!mp) return Result::bad("That class isn't on this device.");
+	const Api a = studentCall(*mp, "PUT", "/classes/" + classId + "/live/answers/" + mp->studentId, &body);
 	if (a.status == 409 && a.error == "not_live") return Result::good("dropped");   // the teacher moved on: quietly
 	if (a.status != 200) return fail(a, "answer");
 	myGuess_[classId] = lights;
 	return Result::good();
+}
+
+// The live connection's "ok" or "error" for an answer: as the PUT's answer would be (3.14).
+Result Client::answerReply(const std::string& classId, const json::Value& reply, const std::map<std::string, int>& lights) {
+	if (reply.str("t") == "ok") {
+		myGuess_[classId] = lights;
+		return Result::good();
+	}
+	const int status = (int)reply.integer("status");
+	const std::string error = reply.str("error");
+	if (status == 409) return Result::good("dropped");
+	if (status == 403 && error == "not_a_member") return removedFromClass(classId, status, error);
+	if (status == 429) retryAfter_ = std::max(retryAfter_, now() + std::max<int64_t>(30, reply.integer("retryAfter", 60)) * kSecond);
+	return Result::bad(sentence(error, status, false), status, error);
+}
+
+// ---- The live connection (3.14) ---------------------------------------------------------------
+
+std::string Client::socketUrl(const std::string& classId) const {
+	std::string base = cfg_.serverBase;
+	if (base.compare(0, 8, "https://") == 0) base = "wss://" + base.substr(8);
+	else if (base.compare(0, 7, "http://") == 0) base = "ws://" + base.substr(7);
+	return base + "/classes/" + classId + "/socket";
+}
+
+std::vector<std::pair<std::string, std::string>> Client::socketHeaders() const {
+	std::vector<std::pair<std::string, std::string>> h;
+	if (!cfg_.client.empty()) h.emplace_back("x-cedarlogic-client", cfg_.client);
+	if (!cfg_.appKey.empty()) h.emplace_back("x-cedarlogic-key", cfg_.appKey);   // the gate, as for HTTP (no Origin)
+	return h;
+}
+
+bool Client::helloFor(const std::string& classId, std::string& text) const {
+	json::Value o = json::Value::object();
+	o.set("t", json::Value::string("hello"));
+	const auto t = teaching_.find(classId);
+	if (t != teaching_.end()) {
+		TeacherKeys k;
+		if (!keysOf(t->second, k)) return false;
+		o.set("token", json::Value::string(k.teacherToken));
+		if (t->second.liveOn && isUuid(t->second.live.session)) o.set("session", json::Value::string(t->second.live.session));
+	} else {
+		const auto m = members_.find(classId);
+		if (m == members_.end()) return false;
+		o.set("token", json::Value::string(m->second.token));
+		o.set("sid", json::Value::string(m->second.studentId));
+		o.set("live", json::Value::integer(m->second.liveSeen));
+	}
+	text = json::write(o);
+	return true;
+}
+
+Result Client::socketMessage(const std::string& classId, const json::Value& msg) {
+	const std::string type = msg.str("t");
+	if (Teaching* tp = teachingOf(classId)) {
+		if (type == "bye") return refreshTeacher(classId);   // the status says what happened (410, 401, a re-creation)
+		if (msg.get("students") && msg.get("students")->isInt()) {
+			tp->students = (int)msg.integer("students");
+			if (tp->liveOn && tp->live.hasPredict) recount(*tp);
+		}
+		if (type == "hello" || type == "pulse") {
+			if (msg.integer("seq") > tp->seq) return refreshTeacher(classId);
+			return Result::good();
+		}
+		if (type == "answers") {
+			if (tp->liveOn && msg.str("session") == tp->live.session) applyAnswers(*tp, msg.get("answers"), msg.flag("full"));
+			return Result::good();
+		}
+		if (type == "handin" && isUuid(msg.str("aid"))) handins_.insert({ classId, msg.str("aid") });
+		return Result::good();
+	}
+	if (!membershipOf(classId)) return Result::good();
+	if (type == "bye") {
+		const int status = (int)msg.integer("status");
+		const std::string error = msg.str("error");
+		if (status == 403) return removedFromClass(classId, 403, error.empty() ? "not_a_member" : error);
+		if (status == 410) {
+			Api a;
+			a.status = 410;
+			a.error = error.empty() ? "class_deleted" : error;
+			return gone(classId, a, false);
+		}
+		if (status == 401 || status == 404) return refreshMember(classId);
+		return Result::good();
+	}
+	if (type != "hello" && type != "pulse" && type != "live") return Result::good();
+	const bool withRecord = type == "live" && msg.get("env") && msg.get("ver");
+	const Result r = applyPulse(classId, msg, withRecord ? &msg : nullptr);
+	if (Membership* m = membershipOf(classId)) {
+		save();
+		sendPending(*m);
+	}
+	return r;
+}
+
+bool Client::handinFlag(std::string& classId, std::string& aid) {
+	if (handins_.empty()) return false;
+	classId = handins_.begin()->first;
+	aid = handins_.begin()->second;
+	handins_.erase(handins_.begin());
+	return true;
+}
+
+void Client::readLimits(const json::Value& status) {
+	const json::Value* l = status.get("limits");
+	if (!l || !l->isObject()) return;
+	// A server without holdSeconds doesn't hold polls (revision 2): don't ask it to.
+	holdSeconds_ = std::max<int64_t>(0, std::min<int64_t>(l->integer("holdSeconds", 0), 60));
+	if (const int64_t p = l->integer("pulseSeconds")) pollSeconds_ = std::max<int64_t>(1, std::min<int64_t>(p, 600));
 }
 
 // ---- Student: another device, leaving (4.7) --------------------------------------------------
@@ -2080,6 +2321,8 @@ void Client::save() {
 		c.set("className", json::Value::string(x.className));
 		c.set("joinedAt", json::Value::integer(x.joinedAt));
 		c.set("seq", json::Value::integer(x.seq));
+		c.set("pulseLive", json::Value::integer(x.pulseLive));
+		c.set("pulseEtag", json::Value::string(x.pulseEtag));
 		json::Value seen = json::Value::object();
 		seen.set("live", json::Value::integer(x.liveSeen));
 		seen.set("assignments", intsJson(x.seenAssignments));
@@ -2177,6 +2420,8 @@ void Client::load() {
 				x.className = c.str("className");
 				x.joinedAt = c.integer("joinedAt");
 				x.seq = c.integer("seq");
+				x.pulseLive = c.integer("pulseLive", -1);
+				x.pulseEtag = c.str("pulseEtag");
 				if (const json::Value* seen = c.get("seen")) {
 					x.liveSeen = seen->integer("live");
 					intsFrom(seen->get("assignments"), x.seenAssignments);

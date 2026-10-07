@@ -5,7 +5,9 @@
 //
 // This is CLASSROOM.md 6.3 written out, with the optional hooks check_circuit
 // and lights_of added (Check My Circuit and a circuit's lights come from the
-// app) and one getter per field of each list.
+// app), one getter per field of each list, and for revision 3's server the
+// live connection (3.14): the socket hooks, cl_classroom_socket_* for what
+// comes back, and submissions_changed.
 
 #ifndef CEDARCLASSROOM_H
 #define CEDARCLASSROOM_H
@@ -51,10 +53,29 @@ typedef struct CLClassroomHooks {
 	bool (*check_circuit)(void *ctx, const char *cdl, const char *keyText, const char *keyNames, int *verdict, char **summary);
 	// (added; may be NULL) on the engine thread. The named lights of a circuit once it settles: values[i] 0 or 1.
 	bool (*lights_of)(void *ctx, const char *cdl, const char *const *lights, int count, int *values);
+	// (added; may be NULL: then no live connection, polls the server holds instead) the live
+	// connection (CLASSROOM.md 3.14), called on the engine thread and never blocking. socket_open:
+	// a WebSocket to `url` (wss://, ws:// for localhost) with these request headers ("Name: value\r\n"
+	// lines); text frames only. Everything that then happens to it is reported, from any thread,
+	// with cl_classroom_socket_opened / _text / _closed and this `events` pointer -- until
+	// socket_close(id) has returned or _closed was reported, and never after. false: can't.
+	bool (*socket_open)(void *ctx, int id, const char *url, const char *headers, void *events);
+	void (*socket_send)(void *ctx, int id, const char *text);
+	void (*socket_close)(void *ctx, int id, int code);
+	// (added; may be NULL) on the main thread: a hand-in to that assignment arrived (the teacher's
+	// live connection said so): an open submissions view refreshes.
+	void (*submissions_changed)(void *ctx, const char *classId, const char *aid);
 } CLClassroomHooks;
 
-// The servers are https://cedarlogic.netlify.app/api/classroom/v1 and .../api/live/v1 unless
-// CL_CLASSROOM_URL and CL_LIVE_URL name others (https, or http for localhost / 127.0.0.1 only).
+// What a socket opened with socket_open does, reported from any thread (3.14).
+void cl_classroom_socket_opened(void *events, int id);
+void cl_classroom_socket_text(void *events, int id, const char *text);
+void cl_classroom_socket_closed(void *events, int id, int code);   // the closing code (1006: the network)
+
+// The servers are the classroom service's https://cedarlogic-classroom.invalid/api/classroom/v1 and
+// .../api/live/v1 (a placeholder until the deploy sets the real origin, CLASSROOM.md 3.13), unless
+// CL_CLASSROOM_SERVICE names another origin, or CL_CLASSROOM_URL and CL_LIVE_URL name the two
+// bases (https, or http for localhost / 127.0.0.1 only).
 CLClassroom *cl_classroom_create(const CLClassroomHooks *, const char *dir, const char *appKey, const char *client);
 void cl_classroom_set_device_name(CLClassroom *, const char *name);   // the sync side record's `device` (before start)
 void cl_classroom_destroy(CLClassroom *);
@@ -181,6 +202,8 @@ void cl_classroom_forget_membership(CLClassroom *, const char *classId);
 
 // Triggers (4.8).
 void cl_classroom_page_open(CLClassroom *, const char *classId, bool open);
+// A class's live connection: "" (none), "connecting", "open", "fallback" or "closed" (valid until the next call).
+const char *cl_classroom_live_connection(CLClassroom *, const char *classId);
 void cl_classroom_app_activated(CLClassroom *);
 void cl_classroom_app_deactivated(CLClassroom *);
 void cl_classroom_user_active(CLClassroom *);

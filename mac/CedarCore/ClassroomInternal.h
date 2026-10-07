@@ -208,12 +208,15 @@ struct Teaching {
 	LiveRec pendingRec;               // a write refused with 412 (Take Over sends it again)
 	bool pendingOn = true;
 	std::string sideRid;              // the sync side record that carries this class (2.5)
+	int students = -1;                // the roster's size, as the live connection last said (-1: not heard)
 };
 
 struct Pending { std::string cdl; int attempt = 0; int64_t at = 0; };
 struct Membership {
 	std::string classId, studentId, token, proof, classKey, pub, fetchKey, name, className;
 	int64_t joinedAt = 0, seq = 0, infoVer = 0, expiresAt = 0, liveSeen = 0, nameVer = 1;
+	int64_t pulseLive = -1;                                       // the pulse's `live` last seen (-1: not known yet)
+	std::string pulseEtag;                                        // the pulse's ETag, for If-None-Match (3.3)
 	std::map<std::string, int64_t> seenAssignments;               // aid -> ver
 	std::map<std::string, int64_t> seenSubmissions;               // aid -> the ver of the last hand-in
 	std::map<std::string, int64_t> handedInAt;                    // aid -> ms
@@ -254,7 +257,7 @@ public:
 	            const std::vector<std::string>* lights, bool reveal);
 	Result endLive(const std::string& classId);
 	Result takeOverLive(const std::string& classId);
-	Result refreshAnswers(const std::string& classId);
+	Result refreshAnswers(const std::string& classId, int64_t waitSeconds = 0);   // waitSeconds: a held poll (3.3)
 
 	// Student.
 	Result previewJoinCode(const std::string& text);   // value: "<class name>\n<1|0>"
@@ -267,8 +270,27 @@ public:
 	Result importMoveCode(const std::string& text);
 	Result leaveClass(const std::string& classId);
 	void forgetMembership(const std::string& classId);
-	Result pulse(const std::string& classId);          // one poll (4.8); sends pending hand-ins
+	Result pulse(const std::string& classId, int64_t waitSeconds = 0);   // one poll (4.8); sends pending hand-ins
 	Result refreshMember(const std::string& classId);  // the status
+
+	// The same two polls in halves, for a poll the server holds (x-cedarlogic-wait, 3.3) while the
+	// engine thread goes on: the request (an empty url: nothing to ask), then its answer.
+	HttpRequest pulseRequest(const std::string& classId, int64_t waitSeconds);
+	Result pulseReply(const std::string& classId, const HttpResponse&);
+	HttpRequest answersRequest(const std::string& classId, int64_t waitSeconds);
+	Result answersReply(const std::string& classId, const HttpResponse&);
+	int64_t holdSeconds() const { return holdSeconds_; }   // the server's limits.holdSeconds (0: it doesn't hold)
+
+	// The live connection (3.14).
+	std::string socketUrl(const std::string& classId) const;            // ws(s)://.../classes/{classId}/socket
+	std::vector<std::pair<std::string, std::string>> socketHeaders() const;
+	bool helloFor(const std::string& classId, std::string& text) const;  // false: the class isn't on this device
+	Result socketMessage(const std::string& classId, const json::Value& msg);   // a message from the server
+	// Send My Guess in parts (4.6): sealed, then sent over the socket or with PUT; the socket's
+	// "ok" or "error" taken like the PUT's answer.
+	Result sealAnswer(const std::string& classId, const std::map<std::string, int>& lights, json::Value& body);
+	Result putAnswer(const std::string& classId, const json::Value& body, const std::map<std::string, int>& lights);
+	Result answerReply(const std::string& classId, const json::Value& reply, const std::map<std::string, int>& lights);
 
 	// Sync's side records (2.5).
 	void sideChanged();
@@ -289,6 +311,7 @@ public:
 	int64_t retryAfterMs() const { return retryAfter_; }
 	bool liveChangedFlag(std::string& classId);        // a new live version since the last call
 	bool answersChangedFlag(std::string& classId);
+	bool handinFlag(std::string& classId, std::string& aid);   // a hand-in the live connection told of
 
 	// Tests.
 	Teaching* teachingOf(const std::string& classId);
@@ -306,6 +329,9 @@ private:
 	};
 	Api call(const std::string& method, const std::string& url, const std::vector<std::pair<std::string, std::string>>& headers,
 	         const json::Value* body, const std::string& ifNoneMatch = std::string());
+	HttpRequest request(const std::string& method, const std::string& url, const std::vector<std::pair<std::string, std::string>>& headers,
+	                    const json::Value* body, const std::string& ifNoneMatch = std::string());
+	Api answer(const HttpResponse&);
 	Api teacherCall(Teaching& t, const std::string& method, const std::string& path, const json::Value* body,
 	                const std::string& ifNoneMatch = std::string());
 	Api studentCall(Membership& m, const std::string& method, const std::string& path, const json::Value* body,
@@ -332,6 +358,12 @@ private:
 	Result fetchAssignment(const std::string& classId, const std::string& fetchKey, const Bytes& classKey,
 	                       const std::string& aid, int64_t ver, const std::string& h, bool teacher);
 	Result fetchLive(Membership& m, int64_t ver);
+	Result applyLiveRecord(Membership& m, int64_t ver, const std::string& session, const std::string& envB64);
+	Result applyPulse(const std::string& classId, const json::Value& p, const json::Value* record);
+	Result removedFromClass(const std::string& classId, int status, const std::string& error);
+	void readLimits(const json::Value& status);
+	void applyAnswers(Teaching& t, const json::Value* list, bool full);
+	void recount(Teaching& t);
 	Result sendPending(Membership& m);
 	Result handInNow(Membership& m, const std::string& aid, const std::string& cdl, int attempt, bool queueOffline);
 	bool memberStatus(Membership& m, const json::Value& s);
@@ -356,11 +388,73 @@ private:
 	std::map<std::string, Live> lives_;                            // student view
 	std::map<std::string, std::map<std::string, int>> myGuess_;    // classId -> the guesses sent for the live ver
 	std::map<std::string, AnswerCounts> counts_;
+	struct Guess { int64_t ver = 0; std::map<std::string, int> lights; };
+	std::map<std::string, std::map<std::string, Guess>> answers_;   // classId -> sid -> the answer counted (4.4)
+	std::set<std::pair<std::string, std::string>> handins_;         // (classId, aid)
 	std::map<std::string, std::string> answersEtag_;
 	std::map<std::string, Status> status_;
 	std::set<std::string> liveChanged_, answersChanged_;
 	std::string deviceId_;
-	int64_t offset_ = 0, pollSeconds_ = 3, retryAfter_ = 0;
+	int64_t offset_ = 0, pollSeconds_ = 10, retryAfter_ = 0, holdSeconds_ = 25;
+};
+
+// ---- The live connection (3.14): one class's WebSocket, as the web core's LiveSocket --------
+
+// The platform's socket, as the engine hands it to a LiveLink (Host's socket hooks, or a test's).
+struct SocketHooks {
+	std::function<int()> newId;
+	std::function<bool(int id, const std::string& url, const std::vector<std::pair<std::string, std::string>>& headers)> open;
+	std::function<void(int id, const std::string& text)> send;
+	std::function<void(int id, int code)> close;
+};
+
+// Says hello with the device's token, hands every message to the Client (socketMessage), answers
+// requests by id, pings every 45 s and closes a socket whose last ping got no pong, and reconnects
+// (1, 2, 5, 10, 30, 60 s, +-20 %). After three tries that never got a hello (a school network that
+// blocks WebSockets) it is in Fallback: the engine holds polls, and the socket is tried again every
+// five minutes. A bye (or a closing code) for a removed student, a deleted class or a wrong key
+// ends it. Everything runs on the engine thread; time comes in as `now` (ms).
+class LiveLink {
+public:
+	enum State { Idle, Connecting, Open, Fallback, Closed };
+	LiveLink(Client&, const std::string& classId, SocketHooks&, uint32_t seed);
+	void start(int64_t now);
+	void stop();                                         // the page closed: closed, no reconnecting
+	void abandon();                                      // the engine ends: the socket closed, nothing reported
+	void opened(int id, int64_t now);
+	void text(int id, const std::string& text, int64_t now);
+	void closed(int id, int code, int64_t now);
+	void tick(int64_t now);                              // reconnect, hello and ping timers, requests waiting
+	int64_t nextTimer() const;                           // INT64_MAX: nothing to wait for
+	bool owns(int id) const { return id != 0 && id == id_; }
+	State state() const { return state_; }
+	bool isOpen() const { return state_ == Open && id_ != 0; }
+	bool unsupported() const { return unsupported_; }   // the platform has no WebSockets
+	bool stateChanged();                                 // since the last call (the engine reschedules its polls)
+	// A message with an id ("answer"): `reply` gets the server's "ok" or "error" for it, or nullptr
+	// when none comes within 8 s or the socket goes first. False (and no reply) if not open.
+	bool request(json::Value msg, std::function<void(const json::Value*)> reply, int64_t now);
+	static const char* stateName(State);
+
+private:
+	void connect(int64_t now);
+	void closeOwn(int64_t now);                          // the client gives up on the socket (no hello, no pong)
+	void finish(int code, int64_t now);                  // the socket is gone: reconnect, fall back or end
+	void retry(int64_t now, int64_t atLeastMs);
+	void setState(State);
+	void failPending();
+	Client& client_;
+	std::string classId_;
+	SocketHooks& hooks_;
+	uint32_t seed_;
+	State state_ = Idle;
+	bool changed_ = false, stopped_ = true, fallback_ = false, greeted_ = false, ended_ = false, alive_ = true;
+	bool unsupported_ = false;
+	int id_ = 0, failures_ = 0, byeStatus_ = 0;
+	int64_t retryAt_ = 0, helloBy_ = 0, pingAt_ = 0, byeRetryAfterMs_ = 0, nextRequest_ = 1;
+	std::string hello_;
+	struct Waiting { std::function<void(const json::Value*)> reply; int64_t until = 0; };
+	std::map<int64_t, Waiting> pending_;
 };
 
 }  // namespace clclass
