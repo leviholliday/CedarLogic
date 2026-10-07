@@ -75,6 +75,9 @@ public:
 	bool saveCircuitV3(string, vector< GUICanvas* >, unsigned int currPage = 0);
 	// What saveCircuitV3 writes, as text (for callers that write it themselves).
 	string textV3(vector< GUICanvas* >);
+	// The same, leaving out the notes and/or the drawing: what goes to others
+	// (a Share Link never carries the notes; the website's DRAWING-NOTES.md 4.11).
+	string textV3(vector< GUICanvas* >, bool withNotes, bool withInk);
 	// Save in v1.x compatible format (no version tag, no sentinel, single wire IDs)
 	bool saveCircuitLegacy(string, vector< GUICanvas* >, unsigned int currPage = 0);
 	// Get detailed error message from last save operation

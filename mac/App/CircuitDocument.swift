@@ -44,6 +44,9 @@ final class CoreDocument: ObservableObject {
 
     /// The circuit as .cdl text, for saving.
     func saveText() -> String { String(cString: cl_document_save_text(handle)) }
+    /// The circuit for others (CL_SAVE_NO_NOTES, CL_SAVE_NO_INK): Share Link's
+    /// text. Doesn't mark it saved.
+    func shareText(flags: Int32) -> String { String(cString: cl_document_save_text_ex(handle, flags)) }
 
     // Pages.
     func addPage() -> Int { Int(cl_document_add_page(handle)) }
@@ -213,6 +216,32 @@ final class CoreDocument: ObservableObject {
         var l = 0.0, b = 0.0, r = 0.0, t = 0.0
         guard cl_document_page_bounds(handle, Int32(page), &l, &b, &r, &t) else { return nil }
         return CGRect(x: l, y: b, width: r - l, height: t - b)
+    }
+
+    /// The drawing's extent on a page (widths included), nil without one.
+    func inkBounds(ofPage page: Int) -> CGRect? {
+        var l = 0.0, b = 0.0, r = 0.0, t = 0.0
+        guard cl_ink_bounds(handle, Int32(page), &l, &b, &r, &t) else { return nil }
+        return CGRect(x: l, y: b, width: r - l, height: t - b)
+    }
+
+    /// What Zoom to Fit shows: the circuit and, while it's shown, the drawing.
+    func fitBounds(ofPage page: Int) -> CGRect? {
+        let circuit = bounds(ofPage: page)
+        guard inkShown, let ink = inkBounds(ofPage: page) else { return circuit }
+        return circuit.map { $0.union(ink) } ?? ink
+    }
+
+    // MARK: Drawing and notes
+
+    var inkShown: Bool { cl_ink_shown(handle) }
+    func setInkShown(_ shown: Bool) { cl_ink_set_shown(handle, shown) }
+    var hasInk: Bool { cl_ink_any(handle) }
+    func inkStrokeCount(page: Int) -> Int { Int(cl_ink_stroke_count(handle, Int32(page))) }
+    /// The student's notes ("" for none).
+    var notes: String {
+        get { String(cString: cl_notes(handle)) }
+        set { cl_notes_set(handle, newValue) }
     }
 }
 

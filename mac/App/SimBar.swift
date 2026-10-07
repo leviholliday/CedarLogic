@@ -94,6 +94,12 @@ struct SimBar: View {
                 chips
             }
             Spacer(minLength: 8)
+            // Draw on the circuit: a teacher marks it up as it runs.
+            barButton(help: canvas.drawing ? "Done drawing (Esc)" : "Draw on the circuit", lit: canvas.drawing) {
+                Image(systemName: "pencil.tip.crop.circle").foregroundStyle(canvas.drawing ? on : ink)
+            } action: { canvas.toggleDrawing() }
+            .accessibilityLabel("Draw on the circuit")
+            .accessibilityValue(canvas.drawing ? "On" : "Off")
             barButton(help: prefs.projector ? "Leave projector mode" : "Projector mode: thick wires, big labels and lights, for the back of the room",
                       lit: prefs.projector) {
                 Image(systemName: prefs.projector ? "videoprojector.fill" : "videoprojector").foregroundStyle(prefs.projector ? on : ink)

@@ -12,11 +12,24 @@ enum ShareLink {
 
     /// Copies the circuit's link: the website's, which opens in the browser
     /// (CedarLogic Online) and can offer the app. Too long for a link says so.
+    /// The notes never go in a link (they're the student's own, and links get
+    /// pasted into chats); the drawing goes when it's shown and the link
+    /// still fits (the website's DRAWING-NOTES.md 4.11).
     static func copy(from canvas: CanvasController) {
         guard let document = canvas.document else { return }
         guard document.hasGates else { canvas.note("There's nothing on the circuit to share yet."); return }
-        guard let data = ShareCodec.encode(document.saveText()) else { canvas.note("Couldn't make a link for this circuit."); return }
-        let link = ShareCodec.webBase + "#" + ShareCodec.fragment(data: data, name: canvas.documentTitle)
+        func make(_ flags: Int32) -> String? {
+            ShareCodec.encode(document.shareText(flags: flags))
+                .map { ShareCodec.webBase + "#" + ShareCodec.fragment(data: $0, name: canvas.documentTitle) }
+        }
+        let withInk = document.hasInk && document.inkShown
+        let plain = Int32(CL_SAVE_NO_NOTES | CL_SAVE_NO_INK)
+        guard var link = make(withInk ? Int32(CL_SAVE_NO_NOTES) : plain) else { canvas.note("Couldn't make a link for this circuit."); return }
+        var leftOutDrawing = false
+        if withInk && link.count > ShareCodec.maxWebLink, let without = make(plain) {
+            link = without
+            leftOutDrawing = true
+        }
         if link.count > ShareCodec.maxWebLink {
             let alert = NSAlert()
             alert.messageText = "This circuit is too big for a link"
@@ -27,7 +40,11 @@ enum ShareLink {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(link, forType: .string)
-        canvas.note("Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.")
+        if leftOutDrawing {
+            canvas.note("Link copied. The link leaves out the drawing; it's too big for a link. Send the file to include it.")
+        } else {
+            canvas.note("Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.")
+        }
     }
 
     /// cedarlogic://open#c=<data>: the circuit comes in as a new one in Your

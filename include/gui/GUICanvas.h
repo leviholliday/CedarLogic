@@ -38,6 +38,7 @@ class cmdCreateGate;
 #include "klsCollisionChecker.h"
 #include "wireSegment.h"
 #include "command/cmdTidy.h"
+#include "circuit_file.hpp"   // cl::PageInk
 
 class klsCommand;
 class guiWire;
@@ -139,6 +140,10 @@ namespace cl { namespace render { class Scene; struct RenderStyle; struct Transf
 class GUICanvas: public klsGLCanvas
 {
 public:
+	// What's drawn on the page (the website's DRAWING-NOTES.md). This app has
+	// no drawing tools yet; it keeps the drawing and writes it back on save.
+	cl::PageInk ink;
+
     GUICanvas( wxWindow *parent, GUICircuit* gCircuit, wxWindowID id = wxID_ANY,
         const wxPoint& pos = wxDefaultPosition,
         const wxSize& size = wxDefaultSize,

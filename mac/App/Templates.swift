@@ -1,7 +1,7 @@
 // Templates: File ▸ New from Template starts a circuit from a built-in
 // starter (a lab page, a counter, a 7-segment decoder, each kind of
-// flip-flop and latch, ready to run, and four circuits with a classic
-// mistake in them to find) or one of yours;
+// flip-flop and latch, ready to run, five registers, and four circuits with
+// a classic mistake in them to find) or one of yours;
 // File ▸ Save as Template keeps the circuit you're in as one of yours.
 //
 // Yours are folders in ~/Library/Application Support/CedarLogic/Templates,
@@ -128,7 +128,7 @@ enum Templates {
         CircuitTemplate(id: "builtin-7seg", name: "7-Segment Decoder Starter",
                         detail: "Four switches and seven segment lights: build the decoder between them",
                         text: sevenSegment(), folder: nil),
-    ] + flipFlops() + classicMistakes() }
+    ] + flipFlops() + registers() + classicMistakes() }
 
     /// The group of circuits with a mistake to find: offered in New from
     /// Template, but never as the start of every new circuit.
@@ -143,8 +143,14 @@ enum Templates {
         return out
     }
 
-    /// A switch with `on` starts at 1.
-    private struct Part { let gate: String; let x: Double; let y: Double; var label: String? = nil; var on = false }
+    /// A switch with `on` starts at 1; `angle` turns a part before it's
+    /// wired; `params` are settings made once it's built (a clock's
+    /// HALF_CYCLE, a TO or FROM's JUNCTION_ID).
+    private struct Part {
+        let gate: String; let x: Double; let y: Double; var label: String? = nil; var on = false
+        var angle = 0.0
+        var params: [String: String] = [:]
+    }
     private struct Wire { let from: Int; let fromPin: String; let to: Int; let toPin: String }
 
     /// Builds parts and wires on a new circuit and returns its file text.
@@ -156,9 +162,15 @@ enum Templates {
         var strings: [UnsafeMutablePointer<CChar>] = []
         defer { strings.forEach { free($0) } }
         func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; strings.append(p); return UnsafePointer(p) }
-        let gates = parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c)) }
+        let gates = parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c), angle: $0.angle) }
         let links = wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
         _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), links, Int32(links.count), "Template")
+        // Settings: a new circuit numbers its parts 1, 2, 3... in the order built.
+        for (k, p) in parts.enumerated() where !p.params.isEmpty {
+            let gate = k + 1
+            guard doc.libraryName(ofGate: gate) == p.gate else { continue }
+            for (name, value) in p.params.sorted(by: { $0.key < $1.key }) { _ = cl_gate_set_setting(doc.handle, gate, name, value) }
+        }
         if manualClock {
             // Each clock, picked by its place like a click would.
             for p in parts where p.gate == "BB_CLOCK" {
@@ -319,6 +331,175 @@ enum Templates {
             + " Turn PRE' or CLR' off to set or clear Q."
         p += [label(title, x: 0, y: 21, height: 3), label(hint, x: 0, y: -19.5, height: 1.4)]
         return build(p, w, big: [title: 3, hint: 1.4], manualClock: manual)
+    }
+
+    // MARK: Registers
+
+    /// Five registers from the library's parts, the same circuits as
+    /// CedarLogic Online's Registers examples (the website's
+    /// docs/REGISTER-EXAMPLES.md): parts, places, settings and wires as
+    /// listed there, each clock moving only on Step Clock (or running, as
+    /// the picker's Clock line chooses).
+    private static func registers() -> [CircuitTemplate] {
+        func t(_ id: String, _ name: String, _ detail: String, _ make: (Bool) -> String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-reg-" + id, name: name, detail: detail, text: make(true), folder: nil,
+                            group: "Registers", runningText: make(false))
+        }
+        return [
+            t("register", "4-Bit Register (Load and Hold)",
+              "Load on: each clock stores D3-D0. Load off: it holds. Clear wins over Load", register4),
+            t("shift", "4-Bit Shift Register",
+              "Shift on: each clock moves the bits left or right, Serial In coming in. Shift off holds; Load and Clear too", shiftRegister),
+            t("sipo", "Serial-In, Parallel-Out",
+              "Four D flip-flops in a chain: each clock moves every bit one along", serialInParallelOut),
+            t("ring", "Ring Counter",
+              "A shift register whose last bit comes back to the start: load a 1 and it goes round", ringCounter),
+            t("johnson", "Johnson Counter",
+              "Four flip-flops with Q3' fed back: 0001, 0011, 0111, 1111, 1110, 1100, 1000, 0000", johnsonCounter),
+        ]
+    }
+
+    /// The clock every register uses: HALF_CYCLE 20, as the website's.
+    private static func regClock(_ x: Double, _ y: Double) -> Part {
+        Part(gate: "BB_CLOCK", x: x, y: y, params: ["HALF_CYCLE": "20"])
+    }
+    /// A named switch (its name a label on its left; turned round, on its right).
+    private static func regSwitch(_ name: String, _ x: Double, _ y: Double, on: Bool = false, turned: Bool = false) -> [Part] {
+        [Part(gate: "AA_TOGGLE", x: x, y: y, on: on, angle: turned ? 180 : 0),
+         turned ? label(name, x: x + 2.2, y: y, height: 1.4) : label(name, right: x - 2.2, y: y, height: 1.4)]
+    }
+    /// A named light, its name on its right (or under it).
+    private static func regLight(_ name: String, _ x: Double, _ y: Double, below: Bool = false) -> [Part] {
+        [Part(gate: "GA_LED", x: x, y: y),
+         below ? Part(gate: "AA_LABEL", x: x, y: y - 2.6, label: name) : label(name, x: x + 2, y: y, height: 1.4)]
+    }
+    /// The line of text at the top (TEXT_HEIGHT 1), placed by its middle.
+    private static func regTitle(_ text: String, _ x: Double, _ y: Double) -> Part { Part(gate: "AA_LABEL", x: x, y: y, label: text) }
+
+    /// The names of `parts` (labels at 1.4, the title at 1).
+    private static func regSizes(_ parts: [Part], title: String) -> [String: Double] {
+        var big: [String: Double] = [title: 1]
+        for p in parts where p.gate == "AA_LABEL" && p.label != title { if let l = p.label { big[l] = 1.4 } }
+        return big
+    }
+
+    /// The register's (or flip-flop's) index in `parts`, by what's built where.
+    private static func index(_ parts: [Part], _ gate: String, _ x: Double, _ y: Double) -> Int {
+        parts.firstIndex { $0.gate == gate && $0.x == x && $0.y == y }!
+    }
+    private static func indexOfSwitch(_ parts: [Part], _ name: String) -> Int {
+        let l = parts.firstIndex { $0.gate == "AA_LABEL" && $0.label == name }!
+        return l - 1
+    }
+
+    private static func register4(_ manual: Bool) -> String {
+        let title = "Load on: Step Clock stores D3-D0. Load off: it holds."
+        var p: [Part] = [Part(gate: "AA_REGISTER4", x: 30, y: -20)]
+        p += regSwitch("Load", 14, -9, on: true)
+        p += regSwitch("D3", 14, -13)
+        p += regSwitch("D2", 14, -17, on: true)
+        p += regSwitch("D1", 14, -23)
+        p += regSwitch("D0", 14, -27, on: true)
+        p.append(regClock(20, -31))
+        p += regSwitch("Clear", 19, -36)
+        for (n, y) in [("Q3", -13.0), ("Q2", -17.0), ("Q1", -23.0), ("Q0", -27.0)] { p += regLight(n, 46, y) }
+        p.append(regTitle(title, 30, -3))
+        let r = 0, clock = index(p, "BB_CLOCK", 20, -31)
+        var w = [Wire(from: indexOfSwitch(p, "Load"), fromPin: "OUT_0", to: r, toPin: "load"),
+                 Wire(from: clock, fromPin: "CLK", to: r, toPin: "clock"),
+                 Wire(from: indexOfSwitch(p, "Clear"), fromPin: "OUT_0", to: r, toPin: "clear")]
+        for b in 0..<4 {
+            w.append(Wire(from: indexOfSwitch(p, "D\(b)"), fromPin: "OUT_0", to: r, toPin: "IN_\(b)"))
+            w.append(Wire(from: r, fromPin: "OUT_\(b)", to: index(p, "GA_LED", 46, [-27.0, -23, -17, -13][b]), toPin: "N_in0"))
+        }
+        return build(p, w, big: regSizes(p, title: title), manualClock: manual)
+    }
+
+    /// The shift register and its switches, shared with the ring counter.
+    private static func shiftRegisterParts(serialIn: Bool, clear: Bool, load: Bool, left: Bool, d: [Bool]) -> [Part] {
+        var p: [Part] = [Part(gate: "BA_SHIFT_REGISTER_4", x: 30, y: -20)]
+        if clear { p += regSwitch("Clear", 19, -20) }
+        p.append(regClock(14, -26))
+        if serialIn { p += regSwitch("Serial In", 46, -15, on: true, turned: true) }
+        p += regSwitch("Shift", 46, -20, on: true, turned: true)
+        p += regSwitch("Load", 46, -25, on: load, turned: true)
+        if left { p += regSwitch("Left", 46, -30, on: true, turned: true) }
+        for (b, y) in [(3, -12.0), (2, -9.0), (1, -6.0), (0, -3.0)] { p += regSwitch("D\(b)", 22, y, on: d[b]) }
+        for (b, x) in [(3, 21.0), (2, 27.0), (1, 33.0), (0, 39.0)] { p += regLight("Q\(b)", x, -32, below: true) }
+        return p
+    }
+
+    private static func shiftRegisterWires(_ p: [Part]) -> [Wire] {
+        let r = 0
+        var w = [Wire(from: index(p, "BB_CLOCK", 14, -26), fromPin: "CLK", to: r, toPin: "clock")]
+        for (name, pin) in [("Clear", "clear"), ("Serial In", "carry_in"), ("Shift", "shift_enable"), ("Load", "load"), ("Left", "shift_left")]
+            where p.contains(where: { $0.label == name }) {
+            w.append(Wire(from: indexOfSwitch(p, name), fromPin: "OUT_0", to: r, toPin: pin))
+        }
+        for (b, x) in [(3, 21.0), (2, 27.0), (1, 33.0), (0, 39.0)] {
+            w.append(Wire(from: indexOfSwitch(p, "D\(b)"), fromPin: "OUT_0", to: r, toPin: "IN_\(b)"))
+            w.append(Wire(from: r, fromPin: "OUT_\(b)", to: index(p, "GA_LED", x, -32), toPin: "N_in3"))
+        }
+        return w
+    }
+
+    private static func shiftRegister(_ manual: Bool) -> String {
+        let title = "Shift on: each Step Clock moves the bits. Shift off: they hold."
+        var p = shiftRegisterParts(serialIn: true, clear: true, load: false, left: true, d: [true, false, true, false])
+        p.append(regTitle(title, 30, 1))
+        return build(p, shiftRegisterWires(p), big: regSizes(p, title: title), manualClock: manual)
+    }
+
+    private static func ringCounter(_ manual: Bool) -> String {
+        let title = "Step Clock once to load D3-D0, turn Load off, then step: the 1 goes round."
+        var p = shiftRegisterParts(serialIn: false, clear: false, load: true, left: false, d: [true, false, false, false])
+        p.append(Part(gate: "DE_TO", x: 18, y: -15, angle: 180, params: ["JUNCTION_ID": "Q3"]))
+        p.append(Part(gate: "DA_FROM", x: 41, y: -16, angle: 180, params: ["JUNCTION_ID": "Q3"]))
+        p.append(regTitle(title, 30, 1))
+        var w = shiftRegisterWires(p)
+        // The feedback: what shifts out of Q3 comes back in, through a TO and a FROM.
+        w.append(Wire(from: 0, fromPin: "carry_out", to: index(p, "DE_TO", 18, -15), toPin: "IN_0"))
+        w.append(Wire(from: index(p, "DA_FROM", 41, -16), fromPin: "IN_0", to: 0, toPin: "carry_in"))
+        return build(p, w, big: regSizes(p, title: title), manualClock: manual)
+    }
+
+    /// Four D flip-flops in a chain with their PRE', CLR' and clock shared,
+    /// the first one's D from `first`.
+    private static func chain(title: String, firstSwitch: Bool) -> (parts: [Part], wires: [Wire]) {
+        var p: [Part] = [24.0, 36, 48, 60].map { Part(gate: "AE_DFF_LOW", x: $0, y: -20) }
+        if firstSwitch { p += regSwitch("Serial In", 15, -18, on: true) }
+        else { p.append(Part(gate: "DA_FROM", x: 16, y: -18, params: ["JUNCTION_ID": "Q3'"])) }
+        p += regSwitch("PRE'", 15, -10, on: true)
+        p += regSwitch("CLR'", 11, -29, on: true)
+        p.append(regClock(12, -35))
+        for (b, x) in [(0, 30.0), (1, 42.0), (2, 54.0), (3, 66.0)] { p += regLight("Q\(b)", x, -12) }
+        p.append(regTitle(title, 42, -3))
+        let clock = index(p, "BB_CLOCK", 12, -35)
+        var w: [Wire] = []
+        for i in 0..<3 { w.append(Wire(from: i, fromPin: "OUT_0", to: i + 1, toPin: "IN_0")) }
+        w.append(firstSwitch ? Wire(from: indexOfSwitch(p, "Serial In"), fromPin: "OUT_0", to: 0, toPin: "IN_0")
+                             : Wire(from: index(p, "DA_FROM", 16, -18), fromPin: "IN_0", to: 0, toPin: "IN_0"))
+        for (i, x) in [30.0, 42, 54, 66].enumerated() {
+            w.append(Wire(from: indexOfSwitch(p, "PRE'"), fromPin: "OUT_0", to: i, toPin: "set"))
+            w.append(Wire(from: indexOfSwitch(p, "CLR'"), fromPin: "OUT_0", to: i, toPin: "clear"))
+            w.append(Wire(from: clock, fromPin: "CLK", to: i, toPin: "clock"))
+            w.append(Wire(from: i, fromPin: "OUT_0", to: index(p, "GA_LED", x, -12), toPin: "N_in2"))
+        }
+        return (p, w)
+    }
+
+    private static func serialInParallelOut(_ manual: Bool) -> String {
+        let title = "Each Step Clock moves every bit one flip-flop to the right."
+        let c = chain(title: title, firstSwitch: true)
+        return build(c.parts, c.wires, big: regSizes(c.parts, title: title), manualClock: manual)
+    }
+
+    private static func johnsonCounter(_ manual: Bool) -> String {
+        let title = "Each Step Clock passes Q3' back to the start: 4 ones in, then 4 zeros."
+        var c = chain(title: title, firstSwitch: false)
+        c.parts.append(Part(gate: "DE_TO", x: 68, y: -21, params: ["JUNCTION_ID": "Q3'"]))
+        c.wires.append(Wire(from: 3, fromPin: "OUTINV_0", to: c.parts.count - 1, toPin: "IN_0"))
+        return build(c.parts, c.wires, big: regSizes(c.parts, title: title), manualClock: manual)
     }
 
     // MARK: Classic mistakes

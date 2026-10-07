@@ -37,9 +37,16 @@ enum ImageExport {
         return (lines, h)
     }
 
+    /// What the picture holds: the circuit, and the drawing when it's included.
+    nonisolated static func box(_ document: CoreDocument, page: Int, ink: Bool) -> CGRect? {
+        let circuit = document.bounds(ofPage: page)
+        guard ink, let drawing = document.inkBounds(ofPage: page) else { return circuit }
+        return circuit.map { $0.union(drawing) } ?? drawing
+    }
+
     /// Size in points of the whole image.
-    static func size(_ document: CoreDocument, page: Int, info: ExportInfo?) -> CGSize? {
-        guard let box = document.bounds(ofPage: page) else { return nil }
+    static func size(_ document: CoreDocument, page: Int, info: ExportInfo?, ink: Bool = false) -> CGSize? {
+        guard let box = box(document, page: page, ink: ink) else { return nil }
         let w = max(box.width * pointsPerUnit + 2 * margin, info?.enabled == true ? 420 : 0)
         var h = box.height * pointsPerUnit + 2 * margin
         if let info, info.enabled { h += strip(info, width: w).height }
@@ -48,7 +55,7 @@ enum ImageExport {
 
     /// Draws into a y-up context `size` points big.
     static func draw(_ document: CoreDocument, page: Int, in ctx: CGContext, size: CGSize, scale: CGFloat,
-                     blackAndWhite: Bool, grid: Bool, info: ExportInfo?) {
+                     blackAndWhite: Bool, grid: Bool, info: ExportInfo?, ink: Bool = false) {
         let prefs = Prefs.shared
         let stripH = (info?.enabled == true) ? strip(info!, width: size.width).height : 0
         let circuitH = size.height - stripH
@@ -58,7 +65,7 @@ enum ImageExport {
         ctx.saveGState()
         ctx.translateBy(x: 0, y: size.height)
         ctx.scaleBy(x: 1, y: -1)
-        if grid, let box = document.bounds(ofPage: page) {
+        if grid, let box = box(document, page: page, ink: ink) {
             let upp = 1 / pointsPerUnit
             let ox = box.midX - size.width / 2 * upp, oy = box.midY + circuitH / 2 * upp
             ctx.setStrokeColor(CGColor(srgbRed: 0, green: 0, blue: 0.2, alpha: 0.2))
@@ -70,11 +77,14 @@ enum ImageExport {
             ctx.strokePath()
         }
         if blackAndWhite {
-            _ = cl_document_draw_fitted(document.handle, Int32(page), ctx, size.width, circuitH, margin, scale, Int32(CL_STYLE_PRINT))
-        } else if let box = document.bounds(ofPage: page) {
+            // The drawing in black and white too (DRAWING-NOTES 4.8).
+            _ = cl_document_draw_fitted_ink(document.handle, Int32(page), ctx, size.width, circuitH, margin, scale,
+                                            Int32(CL_STYLE_PRINT), ink)
+        } else if let box = box(document, page: page, ink: ink) {
             let upp = max(box.width / (size.width - 2 * margin), box.height / (circuitH - 2 * margin))
             var o = CLDrawOptions(dark: false, accent: Int32(prefs.accent), wireScale: 1, simView: false,
-                                  thumbnail: false, showSelection: false, selectionFade: 1)
+                                  thumbnail: false, showSelection: false, selectionFade: 1,
+                                  ink: Int32(ink ? CL_INK_ALWAYS_PRINT : CL_INK_NEVER))
             cl_document_draw_ex(document.handle, Int32(page), ctx, scale, box.midX - size.width / 2 * upp,
                                 box.midY + circuitH / 2 * upp, upp, &o)
         }
@@ -110,8 +120,9 @@ enum ImageExport {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    static func image(_ document: CoreDocument, page: Int, multiplier: CGFloat, blackAndWhite: Bool, grid: Bool, info: ExportInfo?) -> CGImage? {
-        guard var size = size(document, page: page, info: info) else { return nil }
+    static func image(_ document: CoreDocument, page: Int, multiplier: CGFloat, blackAndWhite: Bool, grid: Bool, info: ExportInfo?,
+                      ink: Bool = false) -> CGImage? {
+        guard var size = size(document, page: page, info: info, ink: ink) else { return nil }
         size = CGSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
         var scale = multiplier
         if max(size.width, size.height) * scale > 12000 { scale = 12000 / max(size.width, size.height) }
@@ -119,18 +130,18 @@ enum ImageExport {
                                   bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.scaleBy(x: scale, y: scale)
-        draw(document, page: page, in: ctx, size: size, scale: scale, blackAndWhite: blackAndWhite, grid: grid, info: info)
+        draw(document, page: page, in: ctx, size: size, scale: scale, blackAndWhite: blackAndWhite, grid: grid, info: info, ink: ink)
         return ctx.makeImage()
     }
 
-    static func pdf(_ document: CoreDocument, page: Int, blackAndWhite: Bool, grid: Bool, info: ExportInfo?) -> Data? {
-        guard let size = size(document, page: page, info: info) else { return nil }
+    static func pdf(_ document: CoreDocument, page: Int, blackAndWhite: Bool, grid: Bool, info: ExportInfo?, ink: Bool = false) -> Data? {
+        guard let size = size(document, page: page, info: info, ink: ink) else { return nil }
         let data = NSMutableData()
         var box = CGRect(origin: .zero, size: size)
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
               let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
         ctx.beginPDFPage(nil)
-        draw(document, page: page, in: ctx, size: size, scale: 1, blackAndWhite: blackAndWhite, grid: grid, info: info)
+        draw(document, page: page, in: ctx, size: size, scale: 1, blackAndWhite: blackAndWhite, grid: grid, info: info, ink: ink)
         ctx.endPDFPage()
         ctx.closePDF()
         return data as Data
@@ -148,6 +159,19 @@ struct ExportImageView: View {
     @AppStorage("cl.exportRes") private var multiplier = 4
     @AppStorage("cl.exportWorks") private var works = true
     @AppStorage("cl.exportWhy") private var why = ""
+    /// Include drawing: offered when the page has one, starting as the
+    /// circuit's show/hide (DRAWING-NOTES 4.10).
+    @State private var includeInk: Bool
+    private let pageHasInk: Bool
+
+    init(document: CoreDocument, page: Int, fileName: String) {
+        self.document = document
+        self.page = page
+        self.fileName = fileName
+        pageHasInk = document.inkStrokeCount(page: page) > 0
+        _includeInk = State(initialValue: document.inkShown)
+    }
+    private var ink: Bool { pageHasInk && includeInk }
 
     private var info: ExportInfo {
         ExportInfo(enabled: prefs.exportInfo, name: prefs.studentName, works: works, why: why, fileName: fileName)
@@ -162,7 +186,10 @@ struct ExportImageView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 220)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
-            Toggle("Include grid lines", isOn: $grid)
+            HStack(spacing: 18) {
+                Toggle("Include grid lines", isOn: $grid)
+                if pageHasInk { Toggle("Include drawing", isOn: $includeInk) }
+            }
             GroupBox("Name and result") {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Add my name and whether the circuit works", isOn: $prefs.exportInfo)
@@ -216,7 +243,7 @@ struct ExportImageView: View {
 
     private var preview: some View {
         Group {
-            if let img = ImageExport.image(document, page: page, multiplier: 1, blackAndWhite: blackAndWhite, grid: grid, info: info) {
+            if let img = ImageExport.image(document, page: page, multiplier: 1, blackAndWhite: blackAndWhite, grid: grid, info: info, ink: ink) {
                 Image(decorative: img, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(8)
             } else {
                 Text("This page is empty.").foregroundStyle(.secondary)
@@ -225,7 +252,7 @@ struct ExportImageView: View {
     }
 
     private func copy() {
-        guard let img = ImageExport.image(document, page: page, multiplier: CGFloat(multiplier), blackAndWhite: blackAndWhite, grid: grid, info: info) else { return }
+        guard let img = ImageExport.image(document, page: page, multiplier: CGFloat(multiplier), blackAndWhite: blackAndWhite, grid: grid, info: info, ink: ink) else { return }
         let rep = NSBitmapImageRep(cgImage: img)
         NSPasteboard.general.clearContents()
         if let png = rep.representation(using: .png, properties: [:]) { NSPasteboard.general.setData(png, forType: .png) }
@@ -251,8 +278,8 @@ struct ExportImageView: View {
         _ = target
         let data: Data?
         if url.pathExtension.lowercased() == "pdf" {
-            data = ImageExport.pdf(document, page: page, blackAndWhite: blackAndWhite, grid: grid, info: info)
-        } else if let img = ImageExport.image(document, page: page, multiplier: CGFloat(multiplier), blackAndWhite: blackAndWhite, grid: grid, info: info) {
+            data = ImageExport.pdf(document, page: page, blackAndWhite: blackAndWhite, grid: grid, info: info, ink: ink)
+        } else if let img = ImageExport.image(document, page: page, multiplier: CGFloat(multiplier), blackAndWhite: blackAndWhite, grid: grid, info: info, ink: ink) {
             data = NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])
         } else { data = nil }
         do {

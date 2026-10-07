@@ -1,0 +1,80 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic Online")
+  (page 0
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 6 -8)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_LABEL"
+      (uuid "8")
+      (at 3.65 -8)
+      (angle 0)
+      (gparam "LABEL_TEXT" "A")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_TOGGLE"
+      (uuid "2")
+      (at 6 -14)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_LABEL"
+      (uuid "9")
+      (at 3.65 -14)
+      (angle 0)
+      (gparam "LABEL_TEXT" "B")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_AND2"
+      (uuid "3")
+      (at 19 -11)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "GA_LED"
+      (uuid "4")
+      (at 29 -11)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_LABEL"
+      (uuid "10")
+      (at 31.35 -11)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Y")
+      (gparam "TEXT_HEIGHT" "2"))
+    (wire
+      (ids "5")
+      (seg "0" h
+        (pts 8 -8 12 -8)
+        (connect "1" "OUT_0")
+        (cross 12 "2"))
+      (seg "1" h
+        (pts 12 -10 16 -10)
+        (connect "3" "IN_0")
+        (cross 12 "2"))
+      (seg "2" v
+        (pts 12 -10 12 -8)
+        (cross -8 "0")
+        (cross -10 "1")))
+    (wire
+      (ids "6")
+      (seg "0" h
+        (pts 8 -14 12 -14)
+        (connect "2" "OUT_0")
+        (cross 12 "2"))
+      (seg "1" h
+        (pts 12 -12 16 -12)
+        (connect "3" "IN_1")
+        (cross 12 "2"))
+      (seg "2" v
+        (pts 12 -14 12 -12)
+        (cross -14 "0")
+        (cross -12 "1")))
+    (wire
+      (ids "7")
+      (seg "0" h
+        (pts 22 -11 28 -11)
+        (connect "3" "OUT")
+        (connect "4" "N_in0")))))

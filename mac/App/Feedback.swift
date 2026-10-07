@@ -264,7 +264,8 @@ final class FeedbackModel: ObservableObject {
         var files = attachments
         if includeCircuit, let d = (target.flatMap { w in CanvasController.front.flatMap { $0.view?.window === w ? $0 : nil } } ?? CanvasController.front)?.document {
             let url = Self.folder.appendingPathComponent("\(UUID().uuidString)-circuit.cdl")
-            if (try? d.saveText().write(to: url, atomically: true, encoding: .utf8)) != nil {
+            // Without the student's notes: they're theirs, not the bug's.
+            if (try? d.shareText(flags: Int32(CL_SAVE_NO_NOTES)).write(to: url, atomically: true, encoding: .utf8)) != nil {
                 files.append(FeedbackAttachment(kind: .circuit, url: url, name: "circuit.cdl", type: "text/plain"))
             }
         }

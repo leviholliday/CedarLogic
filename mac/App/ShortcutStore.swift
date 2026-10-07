@@ -82,6 +82,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case simView, step, stepClock, truthTable, checkCircuit, scope, lock
     // Tabs
     case newTab, closeTab, reopenTab, splitView, switchPane, closeSplit, nextTab, previousTab
+    // Drawing and notes
+    case draw, showDrawing, notes, present
     // App
     case shortcuts, darkMode, feedback
 
@@ -95,6 +97,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode, .find, .findNext, .findPrevious: "Moving around"
         case .simView, .step, .stepClock, .truthTable, .checkCircuit, .scope, .lock: "Simulation"
         case .newTab, .closeTab, .reopenTab, .splitView, .switchPane, .closeSplit, .nextTab, .previousTab: "Tabs and split view"
+        case .draw, .showDrawing, .notes, .present: "Drawing and notes"
         case .shortcuts, .darkMode, .feedback: "App"
         }
     }
@@ -148,6 +151,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .closeSplit: "Close split view"
         case .nextTab: "Next tab"
         case .previousTab: "Previous tab"
+        case .draw: "Draw on the circuit (then P pen, H highlighter, E eraser)"
+        case .showDrawing: "Show or hide the drawing"
+        case .notes: "Notes for this circuit"
+        case .present: "Present on another display (or stop)"
         case .shortcuts: "Every shortcut (this list)"
         case .darkMode: "Dark mode"
         case .feedback: "Send feedback"
@@ -204,6 +211,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .closeSplit: return KeyCombo(key: "w", mods: c | o)
         case .nextTab: return KeyCombo(key: "tab", mods: ctl)
         case .previousTab: return KeyCombo(key: "tab", mods: ctl | s)
+        case .draw: return KeyCombo(key: "p", mods: c | o)
+        case .showDrawing: return KeyCombo(key: "h", mods: c | s)
+        case .notes: return KeyCombo(key: "n", mods: c | o)
+        case .present: return KeyCombo(key: "p", mods: c | s)
         case .shortcuts: return KeyCombo(key: "/", mods: s)
         case .darkMode: return KeyCombo(key: "d", mods: c | s)
         case .feedback: return nil

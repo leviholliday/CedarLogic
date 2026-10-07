@@ -541,6 +541,32 @@ struct ViewCommands: Commands {
                 .keyboardShortcut(keys.menu(.scope))
                 .disabled(canvas == nil)
             Divider()
+            // Drawing on the circuit and the notes (Drawing.swift, Notes.swift).
+            let _ = canvas?.inkVersion
+            Button(canvas?.drawing == true ? "Done Drawing" : "Draw on the Circuit") { canvas?.perform(.draw) }
+                .keyboardShortcut(keys.menu(.draw))
+                .disabled(canvas == nil)
+            Menu("Drawing") {
+                ForEach(InkTool.allCases, id: \.self) { t in
+                    Button("\(t.name) (\(t.key))") {
+                        InkSettings.shared.tool = t
+                        if canvas?.drawing != true { canvas?.drawing = true }
+                    }
+                }
+                Divider()
+                Button("Clear Drawing on This Page") { canvas?.routed.clearDrawing() }
+                    .disabled(canvas?.routed.pageHasInk != true || canvas?.routed.pageIsInkReadOnly == true)
+            }
+            .disabled(canvas == nil)
+            Button(canvas?.drawingShown == false ? "Show Drawing" : "Hide Drawing") { canvas?.perform(.showDrawing) }
+                .keyboardShortcut(keys.menu(.showDrawing))
+                .disabled(canvas == nil)
+            Button(canvas?.sheetHost.showNotes == true ? "Hide Notes" : "Show Notes") { canvas?.perform(.notes) }
+                .keyboardShortcut(keys.menu(.notes))
+                .disabled(canvas == nil)
+            Divider()
+            PresentMenu(canvas: canvas)
+            Divider()
         }
     }
 }

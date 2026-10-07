@@ -1,0 +1,13 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 9.0.0-native")
+  (notes "Made by a later CedarLogic.")
+  (page 0
+    (drawing 2
+      (layer "under"
+        (stroke pen ink 0.25 "AAgDA"))
+      (shape rect 1 2 3 4)))
+  (page 1
+    (drawing 1
+      (stroke pen red 0.25 "AAgDA"))
+    (drawing x)))

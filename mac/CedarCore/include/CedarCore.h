@@ -194,7 +194,8 @@ void cl_edit_straighten(CLDocument *doc, int page);
 // Label) and the wires between their pins, by index into `gates`, made as
 // one undo step with the new wires routed together. Returns how many gates
 // were made (left selected), or -1.
-typedef struct { const char *gate; double x, y; const char *label; } CLBuildGate;
+// `angle` turns a gate before it's wired (0, 90, 180 or 270; 0 if left out).
+typedef struct { const char *gate; double x, y; const char *label; double angle; } CLBuildGate;
 typedef struct { int from; const char *fromPin; int to; const char *toPin; } CLBuildWire;
 // Find: labels, TO/FROM names and part types on every page, best first.
 // Fills up to `max` results and returns how many there are in all. The
@@ -432,6 +433,7 @@ typedef struct {
 	bool thumbnail;      // topology only, hairline, themed by `dark`
 	bool showSelection;  // the canvas being edited: selection halos and lock badges
 	double selectionFade;  // 0..1: a new selection's halo fades in
+	int ink;             // the drawing: CL_INK_FOLLOW, _NEVER, _ALWAYS, _ALWAYS_PRINT (below)
 } CLDrawOptions;
 void cl_document_draw_ex(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
                          double originX, double originY, double unitsPerPoint,
@@ -466,6 +468,7 @@ typedef struct {
 	double wireScale;
 	bool projector;
 	bool predict;
+	int ink;             // the drawing: CL_INK_FOLLOW, _NEVER or _ALWAYS (below)
 } CLSimViewStyle;
 void cl_simview_draw_page(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, const CLSimViewStyle *style);
@@ -546,6 +549,84 @@ long cl_ram_last_written(CLDocument *doc, long gate);
 void cl_ram_set(CLDocument *doc, long gate, unsigned long address, unsigned long value);
 void cl_ram_load_file(CLDocument *doc, long gate, const char *path);
 void cl_ram_save_file(CLDocument *doc, long gate, const char *path);
+
+// ---- Drawing on the circuit (the website's docs/DRAWING-NOTES.md) -------------
+// Strokes pinned to a page in world units, saved in the .cdl. Editing the
+// circuit never touches them; copy and paste never carry them.
+enum { CL_INK_PEN = 0, CL_INK_HIGHLIGHTER = 1, CL_INK_ERASER = 2 };   // ERASER: the hover ring only
+enum { CL_INK_OK = 0, CL_INK_FULL = 1, CL_INK_READ_ONLY = 2 };
+
+// Shown or hidden: one flag for the circuit, saved with it (only when there
+// is a drawing to hide). Not an undo step: the app marks the document edited.
+bool cl_ink_shown(const CLDocument *doc);
+void cl_ink_set_shown(CLDocument *doc, bool shown);
+bool cl_ink_any(const CLDocument *doc);                   // strokes or a foreign drawing on any page
+int  cl_ink_stroke_count(const CLDocument *doc, int page);
+long cl_ink_point_count(const CLDocument *doc, int page);  // page -1: the whole circuit
+// A page holding a drawing from a newer CedarLogic: kept, never drawn or changed.
+bool cl_ink_page_read_only(const CLDocument *doc, int page);
+// Whether a stroke can start on a page: CL_INK_OK, _FULL (a cap is reached:
+// "This drawing is full...") or _READ_ONLY.
+int  cl_ink_can_draw(const CLDocument *doc, int page);
+// The drawing's extent on a page, widths included (world, y up). False when none.
+bool cl_ink_bounds(const CLDocument *doc, int page, double *left, double *bottom, double *right, double *top);
+
+// A stroke being drawn: samples in world coordinates (y up). The core
+// filters, splits at 2,000, simplifies with eps = max(0.01, 0.35 * unitsPerPoint),
+// quantizes and enforces the caps. `color` is a palette token ("ink", "red"...);
+// `width` in world units.
+typedef struct { double x, y; double pressure; } CLInkPoint;   // pressure 0..1, or -1 for none
+int  cl_ink_begin(CLDocument *doc, int page, int tool, const char *color, double width, double unitsPerPoint);
+int  cl_ink_add(CLDocument *doc, const CLInkPoint *points, int count);   // CL_INK_FULL once a cap is reached
+int  cl_ink_end(CLDocument *doc);      // commits as one "Draw" step; returns the strokes added (0: none)
+void cl_ink_cancel(CLDocument *doc);
+bool cl_ink_drawing(const CLDocument *doc);   // a stroke is in progress
+
+// Erasing whole strokes: a drag is one "Erase" step (only when it erased).
+void cl_ink_erase_begin(CLDocument *doc, int page);
+int  cl_ink_erase_to(CLDocument *doc, double x, double y, double radius);  // swept from the last point; strokes erased so far
+int  cl_ink_erase_end(CLDocument *doc);
+int  cl_ink_clear(CLDocument *doc, int page);            // one "Clear Drawing" step; returns how many
+
+// After an undo or redo of a drawing step: the page it was on, so the
+// window can show it (-1 for other steps).
+int  cl_ink_history_page(const CLDocument *doc);
+
+// Drawing it. cl_document_draw (as shown), cl_document_draw_ex and
+// cl_simview_draw_page draw the drawing in its layers (highlighter under the
+// parts, pen over them) by CLDrawOptions.ink / CLSimViewStyle.ink.
+// ALWAYS_PRINT draws it in the colour-print colours (pictures of a page).
+// Thumbnails never do.
+enum { CL_INK_FOLLOW = 0, CL_INK_NEVER = 1, CL_INK_ALWAYS = 2, CL_INK_ALWAYS_PRINT = 3 };
+// cl_document_draw_fitted, with the drawing when `ink` (the bounds include
+// it then): LIGHT in the colour-print colours, PRINT in black and white.
+bool cl_document_draw_fitted_ink(CLDocument *doc, int page, CGContextRef ctx, double width, double height,
+                                 double margin, double backingScale, int style, bool ink);
+// What the pointer would draw or erase: a dot of the stroke's width in its
+// colour at half strength, or for CL_INK_ERASER a ring of `width` radius.
+void cl_ink_hover(CLDocument *doc, int page, double x, double y, int tool, const char *color, double width);
+void cl_ink_hover_clear(CLDocument *doc);
+// The page the stroke in progress (or the hover) is on, or -1: the canvas
+// showing it calls cl_ink_draw_live.
+int  cl_ink_live_page(const CLDocument *doc);
+// The stroke being drawn and the hover preview, over everything else.
+void cl_ink_draw_live(CLDocument *doc, CGContextRef ctx, double backingScale,
+                      double originX, double originY, double unitsPerPoint, bool dark, bool projector);
+// A token's colour for a tool, for the palette buttons. `look`: 0 light,
+// 1 dark, 2 colour print, 3 black and white.
+void cl_ink_color(const char *token, int tool, int look, double *r, double *g, double *b, double *a);
+
+// ---- Notes ----------------------------------------------------------------------
+// The student's notes for the circuit: plain text, saved with it. Not an undo step.
+const char *cl_notes(const CLDocument *doc);              // "" for none; valid until the next cl_notes_set
+void cl_notes_set(CLDocument *doc, const char *utf8);     // normalized, cut at 20,000 characters
+
+// ---- Saving for others ------------------------------------------------------------
+// The circuit as cl_document_save_text writes it, without the notes and/or the
+// drawing, and without marking the document saved: what Share Link (and,
+// later, the classroom) sends. Valid until the next call.
+enum { CL_SAVE_NO_NOTES = 1, CL_SAVE_NO_INK = 2 };
+const char *cl_document_save_text_ex(CLDocument *doc, int flags);
 
 // What the guided tour watches for on a page.
 typedef struct {

@@ -13,6 +13,7 @@
 #include "CircuitEdits.h"
 #include "render/Scene.h"
 #include "command/cmdCreateGate.h"
+#include "command/cmdInk.h"
 #include "command/cmdDeleteWire.h"
 #include "command/cmdDisconnectWire.h"
 #include "command/cmdTidy.h"
@@ -717,10 +718,21 @@ int cl_edit_undo_count(const CLDocument* doc) {
 	return doc ? (int)const_cast<GUICircuit&>(doc->circuit).GetCommandProcessor()->UndoCount() : 0;
 }
 
+// The page a drawing step was on, after it's undone or redone, for the
+// window to show (other steps: -1).
+static void noteInkHistory(CLDocument* doc, wxCommand* done) {
+	doc->inkHistoryPage = -1;
+	klsCommand* c = dynamic_cast<klsCommand*>(done);
+	if (!dynamic_cast<cmdInkAdd*>(c) && !dynamic_cast<cmdInkErase*>(c) && !dynamic_cast<cmdInkClear*>(c)) return;
+	for (size_t i = 0; i < doc->pages.size(); i++)
+		if (doc->pages[i].get() == c->getCanvas()) doc->inkHistoryPage = (int)i;
+}
+
 bool cl_edit_undo(CLDocument* doc) {
 	if (doc == nullptr) return false;
 	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Undo();
+	noteInkHistory(doc, ok ? doc->circuit.GetCommandProcessor()->GetRedoCommand() : nullptr);
 	if (ok) doc->edited = true;
 	for (auto& p : doc->pages) p->collisionUpdate();
 	return ok;
@@ -730,6 +742,7 @@ bool cl_edit_redo(CLDocument* doc) {
 	if (doc == nullptr) return false;
 	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Redo();
+	noteInkHistory(doc, ok ? doc->circuit.GetCommandProcessor()->GetUndoCommand() : nullptr);
 	if (ok) doc->edited = true;
 	for (auto& p : doc->pages) p->collisionUpdate();
 	return ok;
@@ -1213,6 +1226,13 @@ int cl_edit_build(CLDocument* doc, int pageIndex, const CLBuildGate* gates, int 
 		ParameterMap gui = *g->getAllGUIParams();
 		ParameterMap logic = *g->getAllLogicParams();
 		if (gates[i].label != nullptr) gui["LABEL_TEXT"] = gates[i].label;
+		// Turned before it's wired, so its wires meet the pins where they are.
+		const double turn = std::fmod(std::fmod(gates[i].angle, 360.0) + 360.0, 360.0);
+		if (turn != 0) {
+			std::ostringstream oss;
+			oss << turn;
+			gui["angle"] = oss.str();
+		}
 		run(new cmdSetParams(&doc->circuit, id, paramSet(&gui, &logic)));
 	}
 	for (int i = 0; i < wireCount; i++) {

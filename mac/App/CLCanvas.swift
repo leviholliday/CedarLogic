@@ -25,7 +25,7 @@ extension CircuitCanvasNSView {
             // lights hide their answer, so no wire glows and no dashes march.
             let covered = controller?.predictCovers ?? false
             var st = CLSimViewStyle(accent: Int32(prefs.accent), wireScale: prefs.wireScale,
-                                    projector: prefs.projector, predict: covered)
+                                    projector: prefs.projector, predict: covered, ink: Int32(CL_INK_FOLLOW))
             cl_simview_draw_page(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, &st)
             if !covered {
                 cl_simview_draw_flow(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
@@ -43,7 +43,7 @@ extension CircuitCanvasNSView {
         } else {
             var o = CLDrawOptions(dark: dark, accent: Int32(prefs.accent), wireScale: prefs.wireScale,
                                   simView: sim, thumbnail: false, showSelection: true,
-                                  selectionFade: controller?.selectionFade ?? 1)
+                                  selectionFade: controller?.selectionFade ?? 1, ink: Int32(CL_INK_FOLLOW))
             cl_document_draw_ex(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, &o)
             let a = prefs.accentRGB(dark: dark)
             let accent = CGColor(srgbRed: a.0, green: a.1, blue: a.2, alpha: 1)
@@ -54,6 +54,8 @@ extension CircuitCanvasNSView {
                 drawBox(ctx, viewRect(box), accent, alpha)
             }
         }
+        // The stroke being drawn, and what the pointer would draw.
+        drawInkLive(ctx, dark: dark, projector: sim && prefs.projector)
         // A tab on its way out dims towards the background.
         if let p = controller?.closeProgress, p > 0 {
             ctx.setFillColor(pal.canvasCG.copy(alpha: p)!)
@@ -115,7 +117,7 @@ extension CircuitCanvasNSView {
 
     func animateZoomToFit() {
         guard bounds.width > 0, bounds.height > 0 else { return }
-        let box = document?.bounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
+        let box = document?.fitBounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
         let pad: CGFloat = 3
         let upp = min(max(max((box.width + 2 * pad) / bounds.width, (box.height + 2 * pad) / bounds.height), minUnitsPerPoint), maxUnitsPerPoint)
         startZoomAnimation(to: CGPoint(x: box.midX - bounds.width * upp / 2, y: box.midY + bounds.height * upp / 2), upp: upp)

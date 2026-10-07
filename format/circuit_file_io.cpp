@@ -1,4 +1,5 @@
 #include "circuit_file_io.hpp"
+#include "ink.hpp"
 #include "numeric.hpp"
 #include "sexpr.hpp"
 
@@ -95,6 +96,13 @@ std::string writeCircuitFile(const CircuitFile &cf) {
 	root.add(SNode::sym("cedarlogic"));
 	root.add(kv("version", num(cf.formatVersion)));
 	root.add(kv("generator", SNode::str(cf.generator)));
+	// The notes and the hidden flag (DRAWING-NOTES 3.1, 3.7, 3.8): each only
+	// when it has something to say, so a circuit without them keeps its bytes.
+	const std::string notes = ink::normalizeNotes(cf.notes);
+	if (ink::notesWorthWriting(notes)) root.add(kv("notes", SNode::str(notes)));
+	bool anyInk = false;
+	for (const Page &pg : cf.pages) anyInk = anyInk || !pg.ink.empty();
+	if (cf.inkHidden && anyInk) root.add(kv("show-drawing", SNode::sym("no")));
 	for (const Page &pg : cf.pages) {
 		SNode pn = SNode::list();
 		pn.add(SNode::sym("page"));
@@ -103,6 +111,7 @@ std::string writeCircuitFile(const CircuitFile &cf) {
 		if (!pg.name.empty()) pn.add(kv("name", SNode::str(pg.name)));
 		for (const GateInstance &g : pg.gates) pn.add(gateNode(g));
 		for (const WireInstance &w : pg.wires) pn.add(wireNode(w));
+		for (SNode &d : ink::pageInkNodes(pg.ink)) pn.add(std::move(d));
 		root.add(std::move(pn));
 	}
 	return writeSexpr(root);
@@ -199,6 +208,22 @@ CircuitFile readCircuitFile(const std::string &text) {
 		                         std::to_string(cf.formatVersion));
 	cf.generator = kvStr(root, "generator");
 
+	// The drawing and the notes: the first (notes ...) and (show-drawing ...)
+	// count; strokes that can't be read are left out and counted.
+	bool notesSeen = false, flagSeen = false;
+	size_t docPoints = 0;
+	for (const SNode &c : root.items) {
+		if (!c.isList()) continue;
+		if (c.head() == "notes" && !notesSeen) {
+			notesSeen = true;
+			if (c.items.size() > 1 && !c.items[1].isList())
+				cf.notes = ink::normalizeNotes(c.items[1].text, ink::kReadNotesChars);
+		} else if (c.head() == "show-drawing" && !flagSeen) {
+			flagSeen = true;
+			cf.inkHidden = c.items.size() > 1 && !c.items[1].isList() && c.items[1].text == "no";
+		}
+	}
+
 	for (const SNode &c : root.items) {
 		if (!c.isList() || c.head() != "page") continue;
 		Page pg;
@@ -209,6 +234,7 @@ CircuitFile readCircuitFile(const std::string &text) {
 			else if (e.head() == "gate") pg.gates.push_back(readGate(e));
 			else if (e.head() == "wire") pg.wires.push_back(readWire(e));
 		}
+		ink::readPageInk(c, pg.ink, cf.inkDropped, docPoints);
 		cf.pages.push_back(std::move(pg));
 	}
 	return cf;

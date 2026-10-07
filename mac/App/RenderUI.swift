@@ -285,11 +285,84 @@ enum RenderUI {
                 snap("inspector-\(t)", GateSettingsSheet(document: doc, controller: canvas) {}, NSSize(width: 420, height: 440), dark: dark)
             }
         }
+        // Drawing and notes: the drawing bar, the notes pane, a circuit with a
+        // drawing on it (the canvas, as in the window), and the presentation.
+        let ink = inkSample()
+        let inkCanvas = CanvasController()
+        inkCanvas.drivesClock = false
+        inkCanvas.attach(ink)
+        let savedTool = InkSettings.shared.tool
+        for dark in [false, true] {
+            prefs.dark = dark
+            let t = dark ? "dark" : "light"
+            for tool in [InkTool.pen, .highlighter, .eraser] {
+                InkSettings.shared.tool = tool
+                snap("drawingbar-\(tool.rawValue)-\(t)", DrawingBar(canvas: inkCanvas, forceShown: true).padding(12),
+                     NSSize(width: 620, height: 72), dark: dark)
+            }
+            InkSettings.shared.tool = .pen
+            snap("notes-\(t)", NotesPanel(canvas: inkCanvas, document: ink), NSSize(width: 280, height: 420), dark: dark)
+            snap("ink-canvas-\(t)", CLCanvasHost(document: ink, page: 0, controller: inkCanvas)
+                    .overlay(alignment: .bottom) { DrawingBar(canvas: inkCanvas, forceShown: true).padding(.bottom, 14) },
+                 NSSize(width: 960, height: 600), dark: dark)
+        }
+        InkSettings.shared.tool = savedTool
+        for (name, pw, ph) in [("presenter", 1280.0, 720.0), ("presenter-4x3", 1024.0, 768.0)] {
+            guard let ctx = CGContext(data: nil, width: Int(pw * 2), height: Int(ph * 2), bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+            ctx.translateBy(x: 0, y: CGFloat(ph * 2)); ctx.scaleBy(x: 2, y: -2)
+            ctx.setFillColor(CLPalette(dark: true, simView: true).canvasCG)
+            ctx.fill(CGRect(x: 0, y: 0, width: pw, height: ph))
+            let box = (ink.fitBounds(ofPage: 0) ?? CGRect(x: -20, y: -15, width: 40, height: 30)).insetBy(dx: -3, dy: -3)
+            let upp = max(box.width / pw, box.height / ph)
+            PresenterView.drawPage(ctx, document: ink, controller: nil, page: 0,
+                                   origin: CGPoint(x: box.midX - pw * upp / 2, y: box.midY + ph * upp / 2), upp: upp,
+                                   size: CGSize(width: pw, height: ph), scale: 2)
+            if let img = ctx.makeImage() {
+                try? NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])?
+                    .write(to: dir.appendingPathComponent(name + ".png"))
+            }
+        }
         prefs.dark = savedDark
         prefs.toolbarStyle = savedStyle
         prefs.toolbarHidden = savedHidden
         SyncRender.run(dir)
         exit(0)
+    }
+
+    /// The 4-bit counter template with a drawing on it (a highlighter under
+    /// the register, a pen circle and an arrow, a pressure stroke) and notes.
+    static func inkSample() -> CoreDocument {
+        let doc = (try? CoreDocument(data: Data(Templates.builtIn[1].text.utf8))) ?? CoreDocument()
+        func stroke(_ tool: Int32, _ color: String, _ width: Double, _ pts: [(Double, Double, Double)]) {
+            guard cl_ink_begin(doc.handle, 0, tool, color, width, 0.05) == Int32(CL_INK_OK) else { return }
+            var arr = pts.map { CLInkPoint(x: $0.0, y: $0.1, pressure: $0.2) }
+            cl_ink_add(doc.handle, &arr, Int32(arr.count))
+            cl_ink_end(doc.handle)
+        }
+        var band: [(Double, Double, Double)] = []
+        for k in 0...20 {
+            let t: Double = Double(k)
+            band.append((8 + t * 0.8, 6.5 + 0.08 * sin(t), -1))
+        }
+        stroke(Int32(CL_INK_HIGHLIGHTER), "yellow", 1.2, band)
+        var ring: [(Double, Double, Double)] = []
+        for k in 0...48 {
+            let a: Double = Double(k) / 48 * 2 * Double.pi
+            ring.append((32 + 7 * cos(a), 0.5 + 5.5 * sin(a), -1))
+        }
+        stroke(Int32(CL_INK_PEN), "red", 0.25, ring)
+        var wave: [(Double, Double, Double)] = []
+        for k in 0...30 {
+            let t: Double = Double(k)
+            let p: Double = 0.25 + 0.7 * abs(sin(t / 6))
+            wave.append((40 + t * 0.4, 9 + 2 * sin(t / 4), p))
+        }
+        stroke(Int32(CL_INK_PEN), "blue", 0.25, wave)
+        stroke(Int32(CL_INK_PEN), "ink", 0.25, [(46, 12, -1), (39.5, 5.5, -1), (41.5, 5.5, -1), (39.5, 5.5, -1), (39.5, 7.5, -1)])
+        doc.notes = "Counts 0 to F, then wraps.\nThe clock drives the register's clock pin; enable and up are tied high.\n\nQuestion: what happens if count_up goes low?"
+        return doc
     }
 
     /// A 3-bit up counter from J-K flip-flops, Q0 on top, with the AND gate
@@ -310,7 +383,7 @@ enum RenderUI {
         ]
         var keep: [UnsafeMutablePointer<CChar>] = []
         func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; keep.append(p); return UnsafePointer(p) }
-        let gates = parts.map { CLBuildGate(gate: c($0.0), x: $0.1, y: $0.2, label: $0.3.map(c)) }
+        let gates = parts.map { CLBuildGate(gate: c($0.0), x: $0.1, y: $0.2, label: $0.3.map(c), angle: 0) }
         let wires = links.map { CLBuildWire(from: Int32($0.0), fromPin: c($0.1), to: Int32($0.2), toPin: c($0.3)) }
         _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), wires, Int32(wires.count), "Counter")
         keep.forEach { free($0) }

@@ -13,15 +13,15 @@ enum PageExport {
     static let pointsPerUnit: CGFloat = 12
     static let margin: CGFloat = 24
 
-    static func size(of document: CoreDocument, page: Int) -> CGSize? {
-        guard let box = document.bounds(ofPage: page) else { return nil }
+    static func size(of document: CoreDocument, page: Int, ink: Bool = false) -> CGSize? {
+        guard let box = ImageExport.box(document, page: page, ink: ink) else { return nil }
         return CGSize(width: box.width * pointsPerUnit + 2 * margin,
                       height: box.height * pointsPerUnit + 2 * margin)
     }
 
     /// Draws into `ctx`, whose y axis points up (a bitmap or PDF context).
     static func draw(_ document: CoreDocument, page: Int, in ctx: CGContext, size: CGSize,
-                     scale: CGFloat, style: Style, theme: Theme) {
+                     scale: CGFloat, style: Style, theme: Theme, ink: Bool = false) {
         let paper = style == .blackAndWhite ? CGColor(gray: 1, alpha: 1) : theme.canvas.cgColor
         ctx.setFillColor(paper)
         ctx.fill(CGRect(origin: .zero, size: size))
@@ -30,13 +30,13 @@ enum PageExport {
         ctx.scaleBy(x: 1, y: -1)
         let clStyle = style == .blackAndWhite ? Int32(CL_STYLE_PRINT)
             : Int32(theme.darkCircuit ? CL_STYLE_DARK : CL_STYLE_LIGHT)
-        _ = cl_document_draw_fitted(document.handle, Int32(page), ctx, size.width, size.height,
-                                    margin, scale, clStyle)
+        _ = cl_document_draw_fitted_ink(document.handle, Int32(page), ctx, size.width, size.height,
+                                        margin, scale, clStyle, ink)
         ctx.restoreGState()
     }
 
-    static func png(_ document: CoreDocument, page: Int, style: Style, theme: Theme) -> Data? {
-        guard var size = size(of: document, page: page) else { return nil }
+    static func png(_ document: CoreDocument, page: Int, style: Style, theme: Theme, ink: Bool = false) -> Data? {
+        guard var size = size(of: document, page: page, ink: ink) else { return nil }
         // Twice the points (Retina-sharp), capped so a huge page stays sane.
         var scale: CGFloat = 2
         let longest = max(size.width, size.height) * scale
@@ -47,21 +47,21 @@ enum PageExport {
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.scaleBy(x: scale, y: scale)
-        draw(document, page: page, in: ctx, size: size, scale: scale, style: style, theme: theme)
+        draw(document, page: page, in: ctx, size: size, scale: scale, style: style, theme: theme, ink: ink)
         guard let image = ctx.makeImage() else { return nil }
         let rep = NSBitmapImageRep(cgImage: image)
         rep.size = size   // 144 dpi, so it opens at its point size
         return rep.representation(using: .png, properties: [:])
     }
 
-    static func pdf(_ document: CoreDocument, page: Int, style: Style, theme: Theme) -> Data? {
-        guard let size = size(of: document, page: page) else { return nil }
+    static func pdf(_ document: CoreDocument, page: Int, style: Style, theme: Theme, ink: Bool = false) -> Data? {
+        guard let size = size(of: document, page: page, ink: ink) else { return nil }
         let data = NSMutableData()
         var box = CGRect(origin: .zero, size: size)
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
               let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
         ctx.beginPDFPage(nil)
-        draw(document, page: page, in: ctx, size: size, scale: 1, style: style, theme: theme)
+        draw(document, page: page, in: ctx, size: size, scale: 1, style: style, theme: theme, ink: ink)
         ctx.endPDFPage()
         ctx.closePDF()
         return data as Data
@@ -86,12 +86,17 @@ enum PageExport {
         let style = NSPopUpButton()
         style.addItems(withTitles: ["Colors (as on screen)", "Black & White (for printing)"])
         style.selectItem(at: defaults.integer(forKey: "exportStyle"))
-        let grid = NSGridView(views: [[NSTextField(labelWithString: "Format:"), format],
-                                      [NSTextField(labelWithString: "Style:"), style]])
+        // Include drawing: when the page has one, starting as it's shown.
+        let includeInk = NSButton(checkboxWithTitle: "Include drawing", target: nil, action: nil)
+        includeInk.state = document.inkShown ? .on : .off
+        var rows: [[NSView]] = [[NSTextField(labelWithString: "Format:"), format],
+                                [NSTextField(labelWithString: "Style:"), style]]
+        if document.inkStrokeCount(page: page) > 0 { rows.append([NSGridCell.emptyContentView, includeInk]) }
+        let grid = NSGridView(views: rows)
         grid.column(at: 0).xPlacement = .trailing
         grid.rowSpacing = 8
         grid.translatesAutoresizingMaskIntoConstraints = false
-        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 76))
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: rows.count > 2 ? 100 : 76))
         accessory.addSubview(grid)
         NSLayoutConstraint.activate([grid.centerXAnchor.constraint(equalTo: accessory.centerXAnchor),
                                      grid.centerYAnchor.constraint(equalTo: accessory.centerYAnchor)])
@@ -112,9 +117,10 @@ enum PageExport {
             defaults.set(style.indexOfSelectedItem, forKey: "exportStyle")
             let s = Style(rawValue: style.indexOfSelectedItem) ?? .colors
             let theme = LookStore.shared.settings.theme
+            let ink = document.inkStrokeCount(page: page) > 0 && includeInk.state == .on
             let data = format.indexOfSelectedItem == 1
-                ? pdf(document, page: page, style: s, theme: theme)
-                : png(document, page: page, style: s, theme: theme)
+                ? pdf(document, page: page, style: s, theme: theme, ink: ink)
+                : png(document, page: page, style: s, theme: theme, ink: ink)
             do {
                 guard let data else { throw CocoaError(.fileWriteUnknown) }
                 try data.write(to: url, options: .atomic)
@@ -127,10 +133,12 @@ enum PageExport {
     }
 }
 
-/// What File > Print prints: the page fitted to the paper, black and white.
+/// What File > Print prints: the page fitted to the paper, black and white,
+/// with the drawing when the print panel's Include drawing says so.
 final class PagePrintView: NSView {
     let document: CoreDocument
     let page: Int
+    @objc dynamic var includeInk = false { didSet { needsDisplay = true } }
 
     init(document: CoreDocument, page: Int, paper: NSSize) {
         self.document = document
@@ -145,8 +153,8 @@ final class PagePrintView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.setFillColor(.white)
         ctx.fill(bounds)
-        _ = cl_document_draw_fitted(document.handle, Int32(page), ctx, bounds.width, bounds.height,
-                                    0, 1, Int32(CL_STYLE_PRINT))
+        _ = cl_document_draw_fitted_ink(document.handle, Int32(page), ctx, bounds.width, bounds.height,
+                                        0, 1, Int32(CL_STYLE_PRINT), includeInk && document.inkStrokeCount(page: page) > 0)
     }
 
     @MainActor
@@ -163,11 +171,48 @@ final class PagePrintView: NSView {
         info.isVerticallyCentered = true
         let paper = info.imageablePageBounds.size
         let view = PagePrintView(document: document, page: page, paper: paper)
+        view.includeInk = document.inkShown
         let op = NSPrintOperation(view: view, printInfo: info)
         op.showsPrintPanel = true
         op.showsProgressPanel = true
         op.printPanel.options.formUnion([.showsOrientation, .showsPaperSize, .showsScaling])
+        if document.inkStrokeCount(page: page) > 0 { op.printPanel.addAccessoryController(InkPrintAccessory(view)) }
         if let window { op.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil) }
         else { op.run() }
     }
+}
+
+/// The print panel's Include drawing checkbox; the preview follows it.
+final class InkPrintAccessory: NSViewController, NSPrintPanelAccessorizing {
+    private let target: PagePrintView
+
+    init(_ target: PagePrintView) {
+        self.target = target
+        super.init(nibName: nil, bundle: nil)
+        title = "Drawing"
+    }
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func loadView() {
+        let box = NSButton(checkboxWithTitle: "Include drawing", target: self, action: #selector(toggled(_:)))
+        box.state = target.includeInk ? .on : .off
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 32))
+        box.frame.origin = NSPoint(x: 20, y: 6)
+        v.addSubview(box)
+        view = v
+    }
+
+    @objc private func toggled(_ sender: NSButton) {
+        willChangeValue(forKey: "includeInk")
+        target.includeInk = sender.state == .on
+        didChangeValue(forKey: "includeInk")
+    }
+
+    @objc var includeInk: Bool { target.includeInk }
+
+    func localizedSummaryItems() -> [[NSPrintPanel.AccessorySummaryKey: String]] {
+        [[.itemName: "Drawing", .itemDescription: target.includeInk ? "Included" : "Left out"]]
+    }
+
+    func keyPathsForValuesAffectingPreview() -> Set<String> { ["includeInk"] }
 }
