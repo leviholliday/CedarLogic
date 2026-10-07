@@ -54,6 +54,8 @@ extension CircuitCanvasNSView {
                 drawBox(ctx, viewRect(box), accent, alpha)
             }
         }
+        // The stroke being drawn, and what the pointer would draw.
+        drawInkLive(ctx, dark: dark, projector: sim && prefs.projector)
         // A tab on its way out dims towards the background.
         if let p = controller?.closeProgress, p > 0 {
             ctx.setFillColor(pal.canvasCG.copy(alpha: p)!)
@@ -115,7 +117,7 @@ extension CircuitCanvasNSView {
 
     func animateZoomToFit() {
         guard bounds.width > 0, bounds.height > 0 else { return }
-        let box = document?.bounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
+        let box = document?.fitBounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
         let pad: CGFloat = 3
         let upp = min(max(max((box.width + 2 * pad) / bounds.width, (box.height + 2 * pad) / bounds.height), minUnitsPerPoint), maxUnitsPerPoint)
         startZoomAnimation(to: CGPoint(x: box.midX - bounds.width * upp / 2, y: box.midY + bounds.height * upp / 2), upp: upp)

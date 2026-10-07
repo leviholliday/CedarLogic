@@ -82,10 +82,15 @@ final class CircuitCanvasNSView: NSView {
     var clMode = false { didSet { if clMode != oldValue { needsDisplay = true } } }
 
     /// What the current drag does.
-    enum Drag { case none, edit, pan(last: CGPoint) }
+    enum Drag { case none, edit, pan(last: CGPoint), ink }
     var drag = Drag.none
     var spaceDown = false
     var pannedWhileSpaceDown = false
+    /// Drawing on the circuit (Drawing.swift): a tablet pen's eraser end is
+    /// near, the stroke in progress erases, and the trackpad's force.
+    var tabletEraser = false
+    var inkErasing = false
+    var forcePressure: Double?
 
     /// An eased zoom in progress (CLCanvas.swift).
     var zoomAnim: ZoomAnimation?
@@ -115,6 +120,7 @@ final class CircuitCanvasNSView: NSView {
         guard let document else { return }
         let p = convert(event.locationInWindow, from: nil)
         controller?.pointerMoved(worldPoint(p))
+        if controller?.drawing == true { inkHover(at: p); return }
         if CanvasController.pendingGate != nil, controller?.placePendingGate(at: worldPoint(p)) == true {
             needsDisplay = true
             return
@@ -128,9 +134,15 @@ final class CircuitCanvasNSView: NSView {
         updateWireTag(at: p)
     }
 
+    // A tablet pen coming near (its eraser end erases) and the trackpad's
+    // force: Drawing.swift.
+    override func tabletProximity(with event: NSEvent) { inkTabletProximity(event) }
+    override func pressureChange(with event: NSEvent) { inkPressureChange(event) }
+
     override func mouseExited(with event: NSEvent) {
         guard let document else { return }
         if cl_edit_hover_clear(document.handle) { needsDisplay = true }
+        if controller?.drawing == true { cl_ink_hover_clear(document.handle); needsDisplay = true }
         hideWireTag()
     }
 
@@ -244,6 +256,7 @@ final class CircuitCanvasNSView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         cl_document_draw(document.handle, Int32(page), ctx, scale, origin.x, origin.y,
                          unitsPerPoint, theme.darkCircuit)
+        defer { drawInkLive(ctx, dark: theme.darkCircuit, projector: false) }
         cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
                              theme.accent.r, theme.accent.g, theme.accent.b)
         if let box = document.selectionBox {
@@ -312,7 +325,7 @@ final class CircuitCanvasNSView: NSView {
     func zoomToFit() {
         needsFit = false
         guard bounds.width > 0, bounds.height > 0 else { return }
-        let box = document?.bounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
+        let box = document?.fitBounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
         let pad: CGFloat = 3
         let target = max((box.width + 2 * pad) / bounds.width, (box.height + 2 * pad) / bounds.height)
         unitsPerPoint = min(max(target, minUnitsPerPoint), maxUnitsPerPoint)
@@ -364,6 +377,7 @@ final class CircuitCanvasNSView: NSView {
         window?.makeFirstResponder(self)
         controller?.onActivate?()
         let p = convert(event.locationInWindow, from: nil)
+        if controller?.drawing == true, inkMouseDown(event, at: p) { return }
         if clMode, clMouseDown(event, at: p) { return }
         // Space or Cmd held: move around instead of editing.
         if spaceDown || event.modifierFlags.contains(.command) {
@@ -395,6 +409,8 @@ final class CircuitCanvasNSView: NSView {
         case .edit:
             document?.drag(to: worldPoint(p))
             needsDisplay = true
+        case .ink:
+            inkMouseDragged(event, at: p)
         case .none:
             break
         }
@@ -402,6 +418,7 @@ final class CircuitCanvasNSView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        if case .ink = drag { inkMouseUp(event, at: p); drag = .none; return }
         if clMode, case .edit = drag, let box = document?.selectionBox { controller?.fadeOutDragBox(box) }
         if case .edit = drag {
             document?.release(at: worldPoint(p))
@@ -421,6 +438,7 @@ final class CircuitCanvasNSView: NSView {
     // (a connected pin's disconnect, a wire's straighten, a gate's settings).
     override func rightMouseDown(with event: NSEvent) {
         controller?.onActivate?()
+        if controller?.drawing == true { inkRightMouseDown(event); return }
         if clMode, clRightMouseDown(event) { return }
         guard let document, let controller else { return }
         let p = worldPoint(convert(event.locationInWindow, from: nil))
@@ -472,6 +490,7 @@ final class CircuitCanvasNSView: NSView {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
+        if controller?.drawing == true, inkKeyDown(event) { return }
         if clMode, clKeyDown(event) { return }
         let plain = event.modifierFlags.intersection([.command, .option, .control]).isEmpty
         let shift = event.modifierFlags.contains(.shift)
@@ -707,6 +726,15 @@ final class CanvasController: ObservableObject {
     }
     /// Locked: parts can be clicked (switches, keypads) but nothing edited.
     @Published var locked = false
+    /// Drawing on the circuit (Drawing.swift): the pointer draws, erases or
+    /// highlights instead of editing. The window's, on both sides of a split.
+    @Published var drawing = false { didSet { if drawing != oldValue { drawingChanged() } } }
+    /// The notes pane (Notes.swift), the window's (on its first side).
+    @Published var showNotes = false
+    /// Present in This Window (Presenter.swift): the window is the presentation.
+    @Published var presentingHere = false
+    /// Bumped when the drawing changes or shows or hides (the bar re-reads).
+    @Published var inkVersion = 0
     /// Where the pointer is on the page, for the status bar.
     private(set) var pointer = CGPoint.zero
     /// Bumped (at most ten times a second) when the status bar, the minimap
@@ -841,6 +869,10 @@ final class CanvasController: ObservableObject {
         case .closeSplit: NotificationCenter.default.post(name: .clCloseSplit, object: self)
         case .nextTab: cyclePage(1)
         case .previousTab: cyclePage(-1)
+        case .draw: toggleDrawing()
+        case .showDrawing: toggleDrawingShown()
+        case .notes: sheetHost.showNotes.toggle()
+        case .present: Presenter.shared.toggle(self)
         case .shortcuts: sheetHost.showShortcuts = true
         case .darkMode: Prefs.shared.dark.toggle()
         case .feedback: FeedbackModel.aim(); openWindow?("feedback")
@@ -1149,6 +1181,10 @@ final class CanvasController: ObservableObject {
     private func refreshAfterHistory() {
         // An undo or redo that closed or reopened a page shows that page.
         if let document {
+            // A drawing step undone on a page that isn't showing goes to it.
+            let inkPage = Int(cl_ink_history_page(document.handle))
+            if inkPage >= 0 && inkPage != page && inkPage < document.pageCount { pageRequest = inkPage }
+            if inkPage >= 0 { inkVersion += 1 }
             let show = Int(cl_document_page_to_show(document.handle))
             if document.pageCount != lastPageCount {
                 lastPageCount = document.pageCount
@@ -1269,6 +1305,12 @@ final class CanvasController: ObservableObject {
             FindHit(page: Int($0.page), gate: $0.gate, point: CGPoint(x: $0.x, y: $0.y),
                     text: String(cString: $0.text), kind: String(cString: $0.kind))
         }
+        // The notes too (Notes.swift): one result, last, that opens them.
+        let q = findQuery.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty, document.notes.range(of: q, options: .caseInsensitive) != nil {
+            findHits.append(FindHit(page: page, gate: -1, point: .zero, text: q, kind: "In your notes"))
+            findTotal += 1
+        }
         findIndex = 0
         if jump, !findHits.isEmpty { showFind(0) }
     }
@@ -1284,6 +1326,14 @@ final class CanvasController: ObservableObject {
     private func showFind(_ i: Int) {
         guard let document, findHits.indices.contains(i) else { return }
         let hit = findHits[i]
+        if hit.gate < 0 {
+            // In the notes: open them, with the words selected.
+            sheetHost.showNotes = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                NotificationCenter.default.post(name: .clNotesFind, object: document, userInfo: ["query": hit.text])
+            }
+            return
+        }
         let go = { [weak self] in
             guard let self else { return }
             _ = cl_edit_select_gate(document.handle, Int32(hit.page), hit.gate)

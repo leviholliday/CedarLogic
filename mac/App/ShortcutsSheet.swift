@@ -51,6 +51,12 @@ struct ShortcutsSheet: View {
                 out.append(Row(section: "Simulation", keys: ["Space"], what: "Pause or resume (in simulation view)"))
                 out.append(Row(section: "Simulation", keys: ["Esc"], what: "Leave simulation view"))
             }
+            if a == .draw {
+                out.append(Row(section: "Drawing and notes", keys: ["P"], what: "Pen (while drawing)"))
+                out.append(Row(section: "Drawing and notes", keys: ["H"], what: "Highlighter (while drawing)"))
+                out.append(Row(section: "Drawing and notes", keys: ["E"], what: "Eraser: whole marks (while drawing)"))
+                out.append(Row(section: "Drawing and notes", keys: ["Esc"], what: "Done drawing"))
+            }
             if a == .previousTab {
                 out.append(Row(section: "Tabs and split view", keys: ["double-click a tab"], what: "Rename it"))
                 out.append(Row(section: "Tabs and split view", keys: ["drag a tab aside"], what: "Split the view"))

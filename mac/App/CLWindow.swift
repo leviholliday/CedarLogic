@@ -80,7 +80,15 @@ struct CLLayout: View {
                                         onReveal: { canvas.playAppear() }, onDone: { covered = false; opening = nil })
                         }
                     }
+                // The student's notes for the circuit (Notes.swift).
+                if canvas.showNotes && !focusMode {
+                    Rectangle().fill(chrome.sash).frame(width: 1)
+                    NotesPanel(canvas: canvas, document: document)
+                        .frame(width: 280)
+                        .transition(.move(edge: .trailing))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: canvas.showNotes)
             if prefs.showStatus || !canvas.statusMessage.isEmpty || !canvas.routed.statusMessage.isEmpty {
                 // The side you're working in: its zoom, pointer and count.
                 CLStatusBar(document: document, canvas: canvas.routed, status: canvas.routed.status)
@@ -126,6 +134,7 @@ struct CLLayout: View {
         .onReceive(split.controller.$locked) { v in if canvas.locked != v { canvas.locked = v } }
         .onReceive(canvas.$simView) { v in if split.controller.simView != v { split.controller.simView = v } }
         .onReceive(split.controller.$simView) { v in if canvas.simView != v { canvas.simView = v } }
+        .modifier(DrawingWindowSync(canvas: canvas, split: split, focusMode: $focusMode))
         .onChange(of: prefs.classicTabs) { _, classic in if classic { split.close(document, leftPage: $page) } }
         // Revealed by the launch screen: the grid fades in as it goes.
         .onReceive(NotificationCenter.default.publisher(for: .clSplashDone)) { _ in canvas.playAppear() }
@@ -1008,6 +1017,27 @@ struct CLToolbar: View {
                on: canvas.simView, colored: true) { canvas.simView.toggle() }
     }
 
+    /// Draw on the circuit: a toggle, with a dot while a drawing is hidden.
+    private var drawButton: some View {
+        let _ = canvas.inkVersion
+        return button("pencil.tip.crop.circle", canvas.drawing ? "Done drawing (Esc)" : tip("Draw on the circuit", .draw),
+                      on: canvas.drawing) { canvas.toggleDrawing() }
+            .overlay(alignment: .topTrailing) {
+                if canvas.hasHiddenDrawing && !canvas.drawing {
+                    Circle().fill(accent).frame(width: 6, height: 6).offset(x: -5, y: 6).allowsHitTesting(false)
+                        .help("This circuit has a drawing that's hidden")
+                }
+            }
+            .accessibilityLabel("Draw on the circuit")
+            .accessibilityAddTraits(canvas.drawing ? .isSelected : [])
+    }
+
+    private var notesButton: some View {
+        button("note.text", canvas.showNotes ? "Hide notes" : tip("Notes for this circuit", .notes),
+               on: canvas.showNotes) { canvas.perform(.notes) }
+            .accessibilityLabel(canvas.showNotes ? "Hide notes" : "Show notes")
+    }
+
     private var pauseButton: some View {
         button(canvas.isRunning ? "pause.fill" : "play.fill",
                canvas.isRunning ? "Pause the simulation" : "Resume the simulation",
@@ -1060,6 +1090,7 @@ struct CLToolbar: View {
             }
         }
         if prefs.shown(.run) { group { runButton } }
+        if prefs.shown(.draw) { group { drawButton; notesButton } }
         if prefs.shown(.lock) {
             group {
                 button(canvas.locked ? "lock.fill" : "lock.open",
@@ -2080,7 +2111,13 @@ struct CLCanvasArea: View {
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
+                    // The drawing tools, above Simulation View's bar when it's up.
+                    .overlay(alignment: .bottom) {
+                        DrawingBar(canvas: c)
+                            .padding(.bottom, canvas.simView && p == 0 ? (prefs.projector ? 96 : 78) : 14)
+                    }
                     .animation(.spring(response: 0.34, dampingFraction: 0.86), value: canvas.simView)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.86), value: canvas.drawing)
             } else {
                 chrome.canvas
             }
@@ -2263,5 +2300,22 @@ private struct StatusMessage: View {
                 guard !m.isEmpty else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { if canvas.statusMessage == m { canvas.statusMessage = "" } }
             }
+    }
+}
+
+/// Draw mode is the window's, on both sides of a split; the notes go when
+/// a projector shows Simulation View (the presenter can open them again);
+/// Present in This Window hides the side panel and toolbar while it lasts.
+private struct DrawingWindowSync: ViewModifier {
+    @ObservedObject var canvas: CanvasController
+    @ObservedObject var split: SplitState
+    @Binding var focusMode: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(canvas.$drawing) { v in if split.controller.drawing != v { split.controller.drawing = v } }
+            .onReceive(split.controller.$drawing) { v in if canvas.drawing != v { canvas.drawing = v } }
+            .onChange(of: canvas.simView) { _, on in if on && Prefs.shared.projector { canvas.showNotes = false } }
+            .onChange(of: canvas.presentingHere) { _, on in focusMode = on; if on { canvas.showNotes = false } }
     }
 }

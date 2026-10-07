@@ -474,7 +474,7 @@ struct CLCanvasSettings: View {
 /// either to choose it), then which tools it shows.
 struct CLToolbarSettings: View {
     @ObservedObject private var prefs = Prefs.shared
-    private let groups: [ToolGroup] = [.file, .undo, .clipboard, .zoom, .sim, .run, .lock, .tab, .feedback]
+    private let groups: [ToolGroup] = [.file, .undo, .clipboard, .zoom, .sim, .run, .draw, .lock, .tab, .feedback]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

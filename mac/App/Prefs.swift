@@ -27,11 +27,11 @@ enum ToolbarStyle: Int, CaseIterable, Identifiable {
 
 /// Tool groups that can be hidden, one bit each (the wx app's cl::tb::Group).
 enum ToolGroup: Int, CaseIterable, Identifiable {
-    case file, undo, clipboard, zoom, sim, run, lock, theme, tab, feedback
+    case file, undo, clipboard, zoom, sim, run, lock, theme, tab, feedback, draw
     var id: Int { rawValue }
     var name: String {
         ["New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
-         "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback"][rawValue]
+         "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback", "Draw and Notes"][rawValue]
     }
 }
 

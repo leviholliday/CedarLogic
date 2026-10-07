@@ -17,6 +17,10 @@ struct LabReportOptions {
     /// Oscilloscope signals the timing page leaves empty, for a student worksheet.
     var blankSignals: Set<String> = []
     var blackAndWhite = false
+    /// The drawing on the circuit's pictures (starts as it's shown).
+    var ink = false
+    /// "My notes": the student's notes for the circuit, after the header.
+    var notes = true
 }
 
 @MainActor
@@ -139,6 +143,7 @@ enum LabReport {
         mutating func build() {
             newPage()
             header()
+            if options.notes { myNotes() }
             let pages = (0..<document.pageCount).filter { cl_document_gate_count(document.handle, Int32($0)) > 0 }
             if pages.isEmpty { paragraph("This circuit is empty, so there is nothing to show.") }
             if options.circuit {
@@ -172,10 +177,31 @@ enum LabReport {
             y += 30
         }
 
+        // MARK: My notes
+
+        /// The notes as written, a paragraph at a time (so they flow across
+        /// pages), long paragraphs in pieces.
+        mutating func myNotes() {
+            let notes = document.notes
+            guard notes.contains(where: { $0 != " " && $0 != "\t" && $0 != "\n" }) else { return }
+            heading("My notes")
+            for para in notes.components(separatedBy: "\n") {
+                if para.trimmingCharacters(in: .whitespaces).isEmpty { y += 6; continue }
+                var rest = Substring(para)
+                while !rest.isEmpty {
+                    var piece = rest.prefix(1200)
+                    if piece.count < rest.count, let space = piece.lastIndex(of: " ") { piece = rest[rest.startIndex..<space] }
+                    paragraph(String(piece), size: 11, color: .black, gapAfter: 4)
+                    rest = rest[piece.endIndex...].drop(while: { $0 == " " })
+                }
+            }
+            y += 8
+        }
+
         // MARK: Circuit pictures
 
         mutating func circuitPicture(_ page: Int, of count: Int) {
-            guard let size = ImageExport.size(document, page: page, info: nil) else { return }
+            guard let size = ImageExport.size(document, page: page, info: nil, ink: options.ink) else { return }
             if count > 1 { subheading("Page \(page + 1): " + document.pageName(page)) }
             let room = pageH - margin - footerH - 2 * margin - pendingH   // what a fresh page gives
             let s = min(contentW / size.width, room / size.height, 1.5)
@@ -186,7 +212,8 @@ enum LabReport {
             ctx.translateBy(x: x, y: pageH - y - h)
             ctx.clip(to: CGRect(x: 0, y: 0, width: w, height: h))
             ctx.scaleBy(x: s, y: s)
-            ImageExport.draw(document, page: page, in: ctx, size: size, scale: s, blackAndWhite: options.blackAndWhite, grid: false, info: nil)
+            ImageExport.draw(document, page: page, in: ctx, size: size, scale: s, blackAndWhite: options.blackAndWhite, grid: false,
+                             info: nil, ink: options.ink)
             ctx.restoreGState()
             ctx.setStrokeColor(CGColor(gray: 0.82, alpha: 1)); ctx.setLineWidth(0.5)
             ctx.stroke(CGRect(x: x, y: pageH - y - h, width: w, height: h))
@@ -409,6 +436,16 @@ struct ExportReportView: View {
     @AppStorage("cl.reportFormulas") private var formulas = true
     @AppStorage("cl.reportTiming") private var timing = true
     @AppStorage("cl.reportBW") private var blackAndWhite = false
+    /// "Include my notes": on unless turned off (remembered).
+    @AppStorage("cl.reportNotes") private var includeNotes = true
+    /// The drawing on the pictures: starts as the circuit shows it.
+    @State private var includeInk: Bool
+    init(document: CoreDocument, fileName: String) {
+        self.document = document
+        self.fileName = fileName
+        _includeInk = State(initialValue: document.inkShown)
+    }
+    private var hasNotes: Bool { document.notes.contains { $0 != " " && $0 != "\t" && $0 != "\n" } }
     /// Signals the timing page leaves empty for students (not remembered: it depends on the circuit).
     @State private var blankSignals: Set<String> = []
 
@@ -416,7 +453,7 @@ struct ExportReportView: View {
     private var signalNames: [String] {
         (0..<Int(cl_scope_signal_count(document.handle))).map { String(cString: cl_scope_signal(document.handle, Int32($0))) }
     }
-    private var anything: Bool { circuit || truthTable || formulas || (timing && recorded) }
+    private var anything: Bool { circuit || truthTable || formulas || (timing && recorded) || (hasNotes && includeNotes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -429,7 +466,13 @@ struct ExportReportView: View {
             }
             GroupBox("Include") {
                 VStack(alignment: .leading, spacing: 8) {
+                    if hasNotes { Toggle("Include my notes", isOn: $includeNotes) }
                     Toggle("The circuit (a picture of each page)", isOn: $circuit)
+                    if document.hasInk {
+                        Toggle("Include drawing", isOn: $includeInk)
+                            .disabled(!circuit)
+                            .padding(.leading, 20)
+                    }
                     Toggle("Truth table", isOn: $truthTable)
                     Toggle("Karnaugh maps and simplest formulas (2 to 4 switches)", isOn: $formulas)
                     Toggle("Timing diagram from the oscilloscope", isOn: $timing).disabled(!recorded)
@@ -488,7 +531,7 @@ struct ExportReportView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let options = LabReportOptions(circuit: circuit, truthTable: truthTable, formulas: formulas,
                                        timing: timing && recorded, blankSignals: blankSignals.intersection(signalNames),
-                                       blackAndWhite: blackAndWhite)
+                                       blackAndWhite: blackAndWhite, ink: includeInk && document.hasInk, notes: includeNotes)
         do {
             guard let data = LabReport.pdf(document, title: fileName, options: options) else { throw CocoaError(.fileWriteUnknown) }
             try data.write(to: url, options: .atomic)
@@ -511,6 +554,8 @@ extension LabReport {
         for _ in 0..<120 { cl_document_step(doc.handle) }
         var options = LabReportOptions()
         options.blackAndWhite = args.contains("bw")
+        options.ink = doc.inkShown && doc.hasInk
+        options.notes = !args.contains("nonotes")
         // blank=A,B leaves those oscilloscope signals empty (a worksheet).
         if let b = args.first(where: { $0.hasPrefix("blank=") }) {
             options.blankSignals = Set(b.dropFirst(6).split(separator: ",").map(String.init))
