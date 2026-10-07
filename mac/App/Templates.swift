@@ -410,7 +410,7 @@ enum Templates {
             Part(gate: "GE_LED_DISPLAY_4BIT", x: 64, y: 0),    // 8
             Part(gate: "GA_LED", x: 24, y: 8),                 // 9 Enable
         ]
-        p += [label("Clock (K)", x: 1, y: -4.2), label("Enable", x: 20.4, y: 11), label("Count", x: 61, y: -5)]
+        p += [label("Clock", x: 1, y: -4.2), label("Enable", x: 20.4, y: 11), label("Count", x: 61, y: -5)]
         let w = [Wire(from: 0, fromPin: "CLK", to: 1, toPin: "clock"),
                  Wire(from: 2, fromPin: "OUT_0", to: 1, toPin: "J"),
                  Wire(from: 2, fromPin: "OUT_0", to: 1, toPin: "set"),
@@ -426,7 +426,10 @@ enum Templates {
                  Wire(from: 7, fromPin: "OUT_0", to: 5, toPin: "clear")]
         var wires = w
         for i in 0..<4 { wires.append(Wire(from: 5, fromPin: "OUT_\(i)", to: 8, toPin: "IN_\(i)")) }
-        let (labels, big) = mistakeLabels("Enable should let the count go up only on every other press. Press Step Clock (K) eight times.", x: -4, y: 24)
+        // The key named as a key, as on the flip-flops (it can be changed in
+        // Settings > Shortcuts, or have none).
+        let press = ShortcutStore.shared.combo(.stepClock).map { "Press Step Clock (the \($0.label) key)" } ?? "Choose Simulation \u{25B8} Step Clock"
+        let (labels, big) = mistakeLabels("Enable should let the count go up only on every other press. \(press) eight times.", x: -4, y: 24)
         return build(p + labels, wires, big: big, manualClock: true)
     }
 
