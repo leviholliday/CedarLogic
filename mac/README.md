@@ -61,6 +61,18 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
 - `mistakes_check` -- the Classic Mistakes templates `--render-ui` writes
   really show their problem in the engine: the latch races, the gated clock
   counts on every press, the open input gives X, the two outputs conflict
+- `predict_check <gatedefs> <file.cdl> <page> <out-dir>` -- Simulation
+  View's Predict and projector drawing: every light found again by a click,
+  each with a name of its own, and a covered page that draws the same
+  whatever the switches say (the out-dir must exist)
+- `lock_check` -- parts locked in place: what's saved and read back (v3,
+  v2, v1.x), refused moves, nudges, deletes, rotates and cuts, wiring and
+  switches that still work, unlocked pasted copies, Tidy Up and Straighten,
+  and the badge
+- `classroom-selftest.sh`, `classroom-check.sh`,
+  `classroom-vectors-check.sh`, `classroom-interop.sh` -- the Classroom
+  client core of docs/CLASSROOM.md (each script's header says how to run
+  it; the interop check needs the website's checkout)
 - `formula-check.sh` -- Build from Formula and the truth table's formulas:
   the simplifier on known answers and 400 random tables, the formula
   reader, and ~200 circuits built in the engine whose truth tables must
