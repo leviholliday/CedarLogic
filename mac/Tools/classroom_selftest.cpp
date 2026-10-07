@@ -6,6 +6,12 @@
 //
 //   classroom_selftest [tempDir] [--vectors file.json] [--only <name>] [--c-api]
 //                      [--server http://localhost:8788/api/classroom/v1 --live http://localhost:8788/api/live/v1]
+//                      [--relay mac/Tools/classroom-ws-relay.mjs]
+//
+// --relay gives the over-HTTP tests WebSockets too (CLASSROOM.md 3.14): node runs
+// that script and the core's socket hooks go to it over a pipe, so the live
+// connection meets the real Worker. Without it the tests' devices have no
+// sockets and live on held polls.
 //
 // --vectors checks another copy of the vectors file (the website's) instead of
 // the embedded one, vectors only. --c-api runs it all through the C interface
@@ -20,8 +26,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace {
 
@@ -45,6 +57,130 @@ struct CurlHost : clclass::Host {
 };
 
 // ---- the same hooks as C functions (CedarClassroom.h), for --c-api ----
+
+// WebSockets through node (classroom-ws-relay.mjs), one line per event each way. Every report is
+// made under the lock and only for a socket still open, so after socketClose returns nothing more
+// about it reaches the core (the promise of Host::socketOpen).
+struct Relay {
+	FILE* to = nullptr;
+	FILE* from = nullptr;
+	pid_t pid = -1;
+	std::thread reader;
+	std::mutex mu, wmu;
+	std::map<int, void*> events;   // id -> the core's events (for cl_classroom_socket_*)
+	bool start(const std::string& script) {
+		int in[2], out[2];
+		if (pipe(in) != 0 || pipe(out) != 0) return false;
+		pid = fork();
+		if (pid < 0) return false;
+		if (pid == 0) {
+			dup2(in[0], 0);
+			dup2(out[1], 1);
+			::close(in[0]);
+			::close(in[1]);
+			::close(out[0]);
+			::close(out[1]);
+			execlp("node", "node", script.c_str(), (char*)nullptr);
+			_exit(127);
+		}
+		::close(in[0]);
+		::close(out[1]);
+		to = fdopen(in[1], "w");
+		from = fdopen(out[0], "r");
+		reader = std::thread([this] { read(); });
+		return true;
+	}
+	void stop() {
+		if (to) fclose(to);   // node sees the end of its input and exits
+		to = nullptr;
+		if (reader.joinable()) reader.join();
+		if (from) fclose(from);
+		if (pid > 0) waitpid(pid, nullptr, 0);
+	}
+	void write(const std::string& line) {
+		std::lock_guard<std::mutex> lock(wmu);
+		if (!to) return;
+		fputs((line + "\n").c_str(), to);
+		fflush(to);
+	}
+	void read() {
+		char* buf = nullptr;
+		size_t cap = 0;
+		ssize_t n;
+		while ((n = getline(&buf, &cap, from)) > 0) {
+			std::string line(buf, (size_t)n);
+			while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+			const size_t sp1 = line.find(' ');
+			if (sp1 == std::string::npos) continue;
+			const size_t sp2 = line.find(' ', sp1 + 1);
+			const int id = atoi(line.substr(sp1 + 1, sp2 == std::string::npos ? std::string::npos : sp2 - sp1 - 1).c_str());
+			const std::string arg = sp2 == std::string::npos ? std::string() : line.substr(sp2 + 1);
+			std::lock_guard<std::mutex> lock(mu);
+			auto it = events.find(id);
+			if (it == events.end()) continue;
+			if (line[0] == 'O') {
+				cl_classroom_socket_opened(it->second, id);
+			} else if (line[0] == 'T') {
+				clsync::json::Value v;
+				if (clsync::json::parse(arg, v) && v.isString()) cl_classroom_socket_text(it->second, id, v.s.c_str());
+			} else if (line[0] == 'C') {
+				void* ev = it->second;
+				events.erase(it);
+				cl_classroom_socket_closed(ev, id, atoi(arg.c_str()));
+			}
+		}
+		free(buf);
+	}
+	bool open(int id, const std::string& url, const std::string& headerLines, void* ev) {
+		clsync::json::Value o = clsync::json::Value::object(), h = clsync::json::Value::object();
+		std::istringstream lines(headerLines);
+		std::string l;
+		while (std::getline(lines, l)) {
+			if (!l.empty() && l.back() == '\r') l.pop_back();
+			const size_t colon = l.find(": ");
+			if (colon != std::string::npos) h.set(l.substr(0, colon), clsync::json::Value::string(l.substr(colon + 2)));
+		}
+		o.set("url", clsync::json::Value::string(url));
+		o.set("headers", h);
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			events[id] = ev;
+		}
+		write("O " + std::to_string(id) + " " + clsync::json::write(o));
+		return true;
+	}
+	void send(int id, const std::string& text) { write("S " + std::to_string(id) + " " + clsync::json::quote(text)); }
+	void close(int id) {
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			events.erase(id);
+		}
+		write("X " + std::to_string(id) + " 1000");
+	}
+};
+Relay* gRelay = nullptr;
+
+// HTTP with curl, WebSockets through the relay.
+struct RelayHost : CurlHost {
+	bool socketOpen(int id, const std::string& url, const std::vector<std::pair<std::string, std::string>>& headers,
+	                clclass::SocketEvents& events) override {
+		std::string lines;
+		for (const auto& kv : headers) lines += kv.first + ": " + kv.second + "\r\n";
+		return gRelay->open(id, url, lines, &events);
+	}
+	void socketSend(int id, const std::string& text) override { gRelay->send(id, text); }
+	void socketClose(int id, int) override { gRelay->close(id); }
+};
+
+bool cSocketOpen(void*, int id, const char* url, const char* headers, void* events) {
+	return gRelay && gRelay->open(id, url, headers ? headers : "", events);
+}
+void cSocketSend(void*, int id, const char* text) {
+	if (gRelay) gRelay->send(id, text);
+}
+void cSocketClose(void*, int id, int) {
+	if (gRelay) gRelay->close(id);
+}
 
 OpenSslCrypto* gCrypto = nullptr;
 OpenSslCurve* gCurve = nullptr;
@@ -113,7 +249,7 @@ bool cPbkdf2(void*, const uint8_t* pw, size_t pwLen, const uint8_t* salt, size_t
 }  // namespace
 
 int main(int argc, char** argv) {
-	std::string temp, server, live, vectors;
+	std::string temp, server, live, vectors, relay;
 	bool cApi = false;
 	if (const char* u = getenv("CL_CLASSROOM_URL")) server = u;
 	if (const char* u = getenv("CL_LIVE_URL")) live = u;
@@ -123,6 +259,7 @@ int main(int argc, char** argv) {
 		else if (strcmp(argv[i], "--vectors") == 0 && i + 1 < argc) vectors = argv[++i];
 		else if (strcmp(argv[i], "--only") == 0 && i + 1 < argc) setenv("CL_CLASSROOM_TEST_ONLY", argv[++i], 1);
 		else if (strcmp(argv[i], "--c-api") == 0) cApi = true;
+		else if (strcmp(argv[i], "--relay") == 0 && i + 1 < argc) relay = argv[++i];
 		else temp = argv[i];
 	}
 	if (temp.empty()) {
@@ -132,7 +269,17 @@ int main(int argc, char** argv) {
 	curl_global_init(CURL_GLOBAL_DEFAULT);
 	OpenSslCrypto crypto;
 	OpenSslCurve curve;
-	CurlHost host;
+	CurlHost curlOnly;
+	RelayHost relayHost;
+	Relay relayProcess;
+	if (!relay.empty()) {
+		if (!relayProcess.start(relay)) {
+			fprintf(stderr, "couldn't start node %s\n", relay.c_str());
+			return 2;
+		}
+		gRelay = &relayProcess;
+	}
+	clclass::Host& host = gRelay ? (clclass::Host&)relayHost : (clclass::Host&)curlOnly;
 	std::string report;
 	bool ok;
 	if (!vectors.empty()) {
@@ -164,6 +311,11 @@ int main(int argc, char** argv) {
 		h.p256_public = cPublic;
 		h.p256_ecdh = cEcdh;
 		h.pbkdf2_sha256 = cPbkdf2;
+		if (gRelay) {
+			h.socket_open = cSocketOpen;
+			h.socket_send = cSocketSend;
+			h.socket_close = cSocketClose;
+		}
 		char* text = nullptr;
 		ok = cl_classroom_self_test(&h, temp.c_str(), server.empty() ? nullptr : server.c_str(), live.empty() ? nullptr : live.c_str(),
 		                            &text);
@@ -173,6 +325,7 @@ int main(int argc, char** argv) {
 		ok = clclass::selfTest(crypto, curve, temp, report, server.empty() ? nullptr : &host, server, live);
 	}
 	fputs(report.c_str(), stdout);
+	if (gRelay) relayProcess.stop();
 	curl_global_cleanup();
 	return ok ? 0 : 1;
 }

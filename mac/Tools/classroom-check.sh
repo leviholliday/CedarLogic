@@ -6,11 +6,15 @@
 # every 7.1 vector, the 7.2 scenarios on the in-process fake server, the
 # threaded engine -- plus the hooks' extras (P-256 edge cases, PBKDF2's time,
 # the 0600 files in the 0700 folder, the lock).
+# classroom-worker-check.sh runs this and the other classroom checks against
+# the Worker on this computer.
 #
 #   mac/Tools/classroom-check.sh                (runs mac/build.sh first if libCedarCore.a is missing)
 #   CL_CLASSROOM_URL=http://localhost:8788/api/classroom/v1 mac/Tools/classroom-check.sh
-#                                               also a class's round trip against the mock server
-#                                               (cedarlogic-site scripts/classroom-mock-server.mjs)
+#                                               also a class's round trip and a live round against a
+#                                               real server -- the Worker (cedarlogic-site: node
+#                                               cloudflare/classroom/test/wrangler.mjs --port 8788) --
+#                                               over URLSession, its WebSockets included (3.14)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

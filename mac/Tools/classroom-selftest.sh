@@ -13,8 +13,12 @@
 #   VECTORS=../cedarlogic-site/tests/classroom/vectors.json mac/Tools/classroom-selftest.sh
 #                                               the vectors of another copy of the file (vectors only)
 #   CL_CLASSROOM_URL=http://localhost:8788/api/classroom/v1 mac/Tools/classroom-selftest.sh
-#                                               also a class's round trip against the mock server
-#                                               (cedarlogic-site scripts/classroom-mock-server.mjs)
+#                                               also a class's round trip and a live round against a
+#                                               real server: the Worker (cedarlogic-site:
+#                                               node cloudflare/classroom/test/wrangler.mjs --port 8788)
+#                                               or the mock server. With node on the PATH the live
+#                                               round has WebSockets (mac/Tools/classroom-ws-relay.mjs);
+#                                               NO_RELAY=1 runs it on held polls alone.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -48,6 +52,9 @@ ARGS=("$TMP")
 [ -n "${ONLY:-}" ] && ARGS+=(--only "$ONLY")
 [ -n "${VECTORS:-}" ] && ARGS+=(--vectors "$VECTORS")
 [ "${CAPI:-0}" = 1 ] && ARGS+=(--c-api)
+if [ -n "${CL_CLASSROOM_URL:-}" ] && [ "${NO_RELAY:-0}" != 1 ] && command -v node >/dev/null; then
+	ARGS+=(--relay mac/Tools/classroom-ws-relay.mjs)
+fi
 status=0
 "$OUT/$NAME" "${ARGS[@]}" | tee "$OUT/$NAME.log" | grep -v '^PASS' || true
 tail -1 "$OUT/$NAME.log" | grep -q ' 0 failed' || status=1
