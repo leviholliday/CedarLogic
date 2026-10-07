@@ -181,11 +181,21 @@ int cl_document_export_legacy(CLDocument* doc, const char* path, int format, cha
 	for (auto& p : doc->pages) pages.push_back(p.get());
 	CircuitParse writer(pages);
 	const bool ok = format == 1 ? writer.saveCircuitLegacy(path, pages) : writer.saveCircuit(path, pages);
-	const std::string why = writer.getLastError();
-	if (ok) return 0;
+	std::string why = writer.getLastError();
+	// The older formats have no place for a drawing or notes (the website's
+	// DRAWING-NOTES.md 4.12): written, with that said.
+	const bool lost = cl_ink_any(doc) || !doc->circuit.circuitNotes.empty();
+	const std::string loss = "Warning: The drawing and notes aren't kept in this older format.";
+	if (ok) {
+		if (!lost) return 0;
+		setError(error, errorLen, loss);
+		return 1;
+	}
+	const bool warning = why.rfind("Warning:", 0) == 0;
+	if (warning && lost) why += "\n" + loss;
 	setError(error, errorLen, why);
 	// The v1.x writer still writes the file when all it has is a warning.
-	return why.rfind("Warning:", 0) == 0 ? 1 : -1;
+	return warning ? 1 : -1;
 }
 
 int cl_document_add_page(CLDocument* doc) {
@@ -249,7 +259,7 @@ bool cl_document_page_bounds(const CLDocument* doc, int page,
 
 void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
                double backingScale, double originX, double originY,
-               double unitsPerPoint, const cl::render::RenderStyle& style) {
+               double unitsPerPoint, const cl::render::RenderStyle& style, int inkMode, int inkLook) {
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
 	if (p == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	// Work in physical pixels, as the wx app's device space does, so stroke
@@ -262,6 +272,10 @@ void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
 	cl::mac::CGScene scene(ctx);
 	scene.setViewport(t);
+	// The drawing (the website's DRAWING-NOTES.md 4.8): highlighter strokes
+	// under the parts, like a real highlighter, and pen strokes over them.
+	const bool ink = clInkDrawn(doc, inkMode) && !p->ink.strokes.empty();
+	if (ink) clDrawInkLayer(scene, p->ink, true, inkLook, scale, style.projector);
 	// In id order: the page's lists are hash maps, whose order depends on how
 	// they were built, and where things overlap the order shows.
 	std::vector<unsigned long> ids;
@@ -275,6 +289,7 @@ void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
 	for (auto& g : *p->getGateList()) if (g.second) ids.push_back(g.first);
 	std::sort(ids.begin(), ids.end());
 	for (unsigned long id : ids) (*p->getGateList())[id]->drawToScene(scene, style);
+	if (ink) clDrawInkLayer(scene, p->ink, false, inkLook, scale, style.projector);
 	// Lock badges: on the canvas being edited only (the styles that show the
 	// selection), never in Simulation View, a picture or a thumbnail.
 	if (style.showSelection && style.colorOutput && !style.simView)
@@ -289,15 +304,28 @@ void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark) {
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint,
-	           cl::render::RenderStyle::screen(dark));
+	           cl::render::RenderStyle::screen(dark), CL_INK_FOLLOW, dark ? kInkLookDark : kInkLookLight);
 }
 
 bool cl_document_draw_fitted(CLDocument* doc, int page, CGContextRef ctx,
                              double width, double height, double margin,
                              double backingScale, int style) {
+	return cl_document_draw_fitted_ink(doc, page, ctx, width, height, margin, backingScale, style, false);
+}
+
+bool cl_document_draw_fitted_ink(CLDocument* doc, int page, CGContextRef ctx,
+                                 double width, double height, double margin,
+                                 double backingScale, int style, bool ink) {
 	double l, b, r, t;
-	if (width <= 2 * margin || height <= 2 * margin ||
-	    !cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return false;
+	if (width <= 2 * margin || height <= 2 * margin) return false;
+	bool any = cl_document_page_bounds(doc, page, &l, &b, &r, &t);
+	// With the drawing, the picture holds all of it too.
+	double il, ib, ir, it;
+	if (ink && cl_ink_bounds(doc, page, &il, &ib, &ir, &it)) {
+		if (any) { l = std::min(l, il); b = std::min(b, ib); r = std::max(r, ir); t = std::max(t, it); }
+		else { l = il; b = ib; r = ir; t = it; any = true; }
+	}
+	if (!any) return false;
 	const double w = std::max(r - l, 1.0), h = std::max(t - b, 1.0);
 	const double upp = std::max(w / (width - 2 * margin), h / (height - 2 * margin));
 	// Centered: the world point at the top-left corner of the area.
@@ -307,7 +335,8 @@ bool cl_document_draw_fitted(CLDocument* doc, int page, CGContextRef ctx,
 		? cl::render::RenderStyle::print()
 		: cl::render::RenderStyle::screen(style == CL_STYLE_DARK);
 	rs.showSelection = false;
-	clDrawPage(doc, page, ctx, backingScale, originX, originY, upp, rs);
+	const int look = style == CL_STYLE_PRINT ? kInkLookBW : style == CL_STYLE_DARK ? kInkLookDark : kInkLookPrint;
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, upp, rs, ink ? CL_INK_ALWAYS : CL_INK_NEVER, look);
 	return true;
 }
 

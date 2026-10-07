@@ -1,0 +1,399 @@
+[
+ {
+  "name": "plain pen",
+  "text": "(stroke pen red 0.25 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "pen",
+   "color": "red",
+   "width": 0.25,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen red 0.25 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "with pressure",
+  "text": "(stroke pen ink 0.3 \"oGwMkDU8BkD\" \"gAz\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.3,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": "gAz"
+  },
+  "rewritten": "(stroke pen ink 0.3 \"oGwMkDU8BkD\" \"gAz\")"
+ },
+ {
+  "name": "highlighter",
+  "text": "(stroke highlighter yellow 1 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "highlighter",
+   "color": "yellow",
+   "width": 1.0,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke highlighter yellow 1 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "strings where symbols are written",
+  "text": "(stroke \"pen\" \"blue\" \"0.5\" \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "pen",
+   "color": "blue",
+   "width": 0.5,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen blue 0.5 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "unknown tool and colour kept",
+  "text": "(stroke laser teal 0.25 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "laser",
+   "color": "teal",
+   "width": 0.25,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke laser teal 0.25 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "token with capitals -> default",
+  "text": "(stroke Pen Red 0.25 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.25,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 0.25 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "token with a space -> default",
+  "text": "(stroke \"fancy pen\" \"dark red\" 0.25 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.25,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 0.25 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "width clamped up",
+  "text": "(stroke pen ink 0.001 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.02,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 0.02 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "width clamped down",
+  "text": "(stroke pen ink 500 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 20.0,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 20 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "width rounded to centi",
+  "text": "(stroke pen ink 0.256 \"oGwMkDU8BkD\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.26,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 0.26 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "pressure of the wrong length ignored",
+  "text": "(stroke pen ink 0.3 \"oGwMkDU8BkD\" \"gA\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.3,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 0.3 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "pressure with a bad char ignored",
+  "text": "(stroke pen ink 0.3 \"oGwMkDU8BkD\" \"g+z\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.3,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 0.3 \"oGwMkDU8BkD\")"
+ },
+ {
+  "name": "extra items ignored",
+  "text": "(stroke pen ink 0.3 \"oGwMkDU8BkD\" \"gAz\" later (things 1))",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.3,
+   "centi": [
+    [
+     100,
+     200
+    ],
+    [
+     150,
+     210
+    ],
+    [
+     180,
+     260
+    ]
+   ],
+   "pressure": "gAz"
+  },
+  "rewritten": "(stroke pen ink 0.3 \"oGwMkDU8BkD\" \"gAz\")"
+ },
+ {
+  "name": "a dot",
+  "text": "(stroke pen ink 0.5 \"8DwE\")",
+  "result": {
+   "tool": "pen",
+   "color": "ink",
+   "width": 0.5,
+   "centi": [
+    [
+     62,
+     72
+    ]
+   ],
+   "pressure": null
+  },
+  "rewritten": "(stroke pen ink 0.5 \"8DwE\")"
+ },
+ {
+  "name": "too short",
+  "text": "(stroke pen ink 0.3)",
+  "error": "short"
+ },
+ {
+  "name": "list where the width goes",
+  "text": "(stroke pen ink (w 1) \"oGwMkDU8BkD\")",
+  "error": "list-in-value"
+ },
+ {
+  "name": "width not a number",
+  "text": "(stroke pen ink wide \"oGwMkDU8BkD\")",
+  "error": "bad-width"
+ },
+ {
+  "name": "width with junk",
+  "text": "(stroke pen ink 0.3px \"oGwMkDU8BkD\")",
+  "error": "bad-width"
+ },
+ {
+  "name": "width zero",
+  "text": "(stroke pen ink 0 \"oGwMkDU8BkD\")",
+  "error": "bad-width"
+ },
+ {
+  "name": "width negative",
+  "text": "(stroke pen ink -1 \"oGwMkDU8BkD\")",
+  "error": "bad-width"
+ },
+ {
+  "name": "width nan",
+  "text": "(stroke pen ink nan \"oGwMkDU8BkD\")",
+  "error": "bad-width"
+ },
+ {
+  "name": "points cut short",
+  "text": "(stroke pen ink 0.3 \"AAg\")",
+  "error": "cut-short"
+ },
+ {
+  "name": "points odd",
+  "text": "(stroke pen ink 0.3 \"AAC\")",
+  "error": "odd"
+ },
+ {
+  "name": "points empty",
+  "text": "(stroke pen ink 0.3 \"\")",
+  "error": "empty"
+ },
+ {
+  "name": "points bad char",
+  "text": "(stroke pen ink 0.3 \"AA=A\")",
+  "error": "bad-char"
+ }
+]

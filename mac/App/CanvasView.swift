@@ -1328,7 +1328,7 @@ final class CanvasController: ObservableObject {
         defer { strings.forEach { free($0) } }
         func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; strings.append(p); return UnsafePointer(p) }
         let gates = plan.parts.map { p in
-            CLBuildGate(gate: c(p.gate), x: p.x + dx, y: p.y + dy, label: p.label.map(c))
+            CLBuildGate(gate: c(p.gate), x: p.x + dx, y: p.y + dy, label: p.label.map(c), angle: 0)
         }
         let wires = plan.wires.map { w in CLBuildWire(from: Int32(w.from), fromPin: c(w.fromPin), to: Int32(w.to), toPin: c(w.toPin)) }
         let made = cl_edit_build(document.handle, Int32(target), gates, Int32(gates.count), wires, Int32(wires.count), "Build from Formula")

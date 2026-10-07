@@ -310,7 +310,7 @@ enum RenderUI {
         ]
         var keep: [UnsafeMutablePointer<CChar>] = []
         func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; keep.append(p); return UnsafePointer(p) }
-        let gates = parts.map { CLBuildGate(gate: c($0.0), x: $0.1, y: $0.2, label: $0.3.map(c)) }
+        let gates = parts.map { CLBuildGate(gate: c($0.0), x: $0.1, y: $0.2, label: $0.3.map(c), angle: 0) }
         let wires = links.map { CLBuildWire(from: Int32($0.0), fromPin: c($0.1), to: Int32($0.2), toPin: c($0.3)) }
         _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), wires, Int32(wires.count), "Counter")
         keep.forEach { free($0) }

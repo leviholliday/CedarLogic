@@ -186,7 +186,7 @@ for (fi, text) in formulas.enumerated() {
                 guard let doc = cl_document_new() else { check(false, "no document"); continue }
                 var strings: [UnsafeMutablePointer<CChar>] = []
                 func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; strings.append(p); return UnsafePointer(p) }
-                let gates = plan.parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c)) }
+                let gates = plan.parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c), angle: 0) }
                 let wires = plan.wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
                 let made = cl_edit_build(doc, 0, gates, Int32(gates.count), wires, Int32(wires.count), "Build")
                 strings.forEach { free($0) }

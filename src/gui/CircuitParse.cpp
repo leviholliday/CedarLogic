@@ -218,6 +218,10 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 	// If no library was loaded, then we can't make gates from one.
 	if (gateLibrary().libraries.size() == 0) return;
+	if (gCanvas != nullptr) {
+		gCanvas->getCircuit()->circuitNotes = cf.notes;
+		gCanvas->getCircuit()->inkHidden = cf.inkHidden;
+	}
 
 	// A page index is an index into the canvas vector. A negative one reads out
 	// of bounds, and an enormous one would have us allocate a canvas per step to
@@ -241,6 +245,10 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 #endif
 		}
 		gCanvas = gCanvases[pg.index];
+		// The page's drawing (the website's DRAWING-NOTES.md): kept on the page,
+		// so it moves, closes and reopens with it. The wx app has no drawing
+		// tools yet, but keeps it and writes it back.
+		gCanvas->ink = pg.ink;
 #ifdef CL_NO_WX
 		gCanvas->name = pg.name;
 #else
@@ -541,6 +549,10 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 	cl::CircuitFile cf;
 	cf.formatVersion = 3;
 	cf.generator = string("CedarLogic ") + VERSION_NUMBER_STRING();
+	if (!glc.empty() && glc[0] != nullptr) {
+		cf.notes = glc[0]->getCircuit()->circuitNotes;
+		cf.inkHidden = glc[0]->getCircuit()->inkHidden;
+	}
 	for (unsigned int i = 0; i < glc.size(); i++) {
 		cl::Page pg;
 		pg.index = (int)i;
@@ -551,6 +563,7 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 		if (wxGetApp().mainframe)
 			pg.name = wxGetApp().mainframe->SavedTabName(glc[i]).ToStdString();
 #endif
+		pg.ink = glc[i]->ink;
 		for (const auto &entry : *glc[i]->getGateList())
 			pg.gates.push_back(buildGate(entry.second));
 		for (const auto &entry : *glc[i]->getWireList())
@@ -585,6 +598,16 @@ bool CircuitParse::saveCircuitV3(string filename, vector< GUICanvas* > glc, unsi
 
 string CircuitParse::textV3(vector< GUICanvas* > glc) {
 	return cl::writeCircuitFile(buildCircuitFile(glc));
+}
+
+string CircuitParse::textV3(vector< GUICanvas* > glc, bool withNotes, bool withInk) {
+	cl::CircuitFile cf = buildCircuitFile(glc);
+	if (!withNotes) cf.notes.clear();
+	if (!withInk) {
+		for (cl::Page &pg : cf.pages) pg.ink = cl::PageInk();
+		cf.inkHidden = false;
+	}
+	return cl::writeCircuitFile(cf);
 }
 
 bool CircuitParse::saveCircuit(string filename, vector< GUICanvas* > glc, unsigned int currPage) {

@@ -23,7 +23,7 @@ enum RenderWindow {
         let plan = FormulaCircuit.plan(formulas, shape: .asWritten, style: .any, twoInputOnly: false)
         var strings: [UnsafeMutablePointer<CChar>] = []
         func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; strings.append(p); return UnsafePointer(p) }
-        let gates = plan.parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c)) }
+        let gates = plan.parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c), angle: 0) }
         let wires = plan.wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
         _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), wires, Int32(wires.count), "Build")
         strings.forEach { free($0) }
@@ -113,10 +113,10 @@ enum RenderWindow {
         // classroom shots.
         if let box = doc.bounds(ofPage: 0) {
             let dx = box.maxX + 12, dy = box.midY
-            var parts = [CLBuildGate(gate: c("GE_LED_DISPLAY_4BIT"), x: dx, y: dy, label: nil)]
+            var parts = [CLBuildGate(gate: c("GE_LED_DISPLAY_4BIT"), x: dx, y: dy, label: nil, angle: 0)]
             var wires: [CLBuildWire] = []
             for i in 0..<4 {
-                parts.append(CLBuildGate(gate: c("AA_TOGGLE"), x: dx - 9, y: dy - 5 + Double(i) * 3, label: nil))
+                parts.append(CLBuildGate(gate: c("AA_TOGGLE"), x: dx - 9, y: dy - 5 + Double(i) * 3, label: nil, angle: 0))
                 wires.append(CLBuildWire(from: Int32(i + 1), fromPin: c("OUT_0"), to: 0, toPin: c("IN_\(i)")))
             }
             _ = cl_edit_build(doc.handle, 0, parts, Int32(parts.count), wires, Int32(wires.count), "Build")

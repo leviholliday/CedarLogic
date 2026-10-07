@@ -14,6 +14,7 @@
 #include "GUICircuit.h"
 #include "guiGate.h"
 #include "guiWire.h"
+#include "circuit_file.hpp"
 
 class GUICircuit;
 class guiGate;
@@ -43,6 +44,9 @@ public:
 	GLPoint2f viewTopLeft = GLPoint2f(-20, 15), viewBottomRight = GLPoint2f(20, -15);
 
 	std::string name;   // what the user called the page; empty for "Page N"
+	// What's drawn on the page (the website's DRAWING-NOTES.md), pinned to it
+	// in world units; never touched by editing the circuit.
+	cl::PageInk ink;
 	klsCollisionChecker collisionChecker;
 
 private:

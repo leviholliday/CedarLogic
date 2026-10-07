@@ -74,7 +74,8 @@ enum ImageExport {
         } else if let box = document.bounds(ofPage: page) {
             let upp = max(box.width / (size.width - 2 * margin), box.height / (circuitH - 2 * margin))
             var o = CLDrawOptions(dark: false, accent: Int32(prefs.accent), wireScale: 1, simView: false,
-                                  thumbnail: false, showSelection: false, selectionFade: 1)
+                                  thumbnail: false, showSelection: false, selectionFade: 1,
+                                  ink: Int32(CL_INK_NEVER))
             cl_document_draw_ex(document.handle, Int32(page), ctx, scale, box.midX - size.width / 2 * upp,
                                 box.midY + circuitH / 2 * upp, upp, &o)
         }

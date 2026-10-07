@@ -68,7 +68,10 @@ void cl_document_draw_ex(CLDocument* doc, int page, CGContextRef ctx, double bac
 		s.showSelection = o->showSelection && !o->simView;
 		s.selectionFade = (float)std::min(1.0, std::max(0.0, o->selectionFade));
 	}
-	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s);
+	// Thumbnails (the minimap, Ctrl+Tab) show topology only, never the drawing.
+	const int inkMode = o->thumbnail ? CL_INK_NEVER : o->ink;
+	const int look = o->ink == CL_INK_ALWAYS_PRINT ? kInkLookPrint : (o->dark || o->simView) ? kInkLookDark : kInkLookLight;
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, inkMode, look);
 }
 
 void cl_accent_color(int index, bool dark, double* r, double* g, double* b) {
@@ -262,7 +265,8 @@ void cl_simview_draw_page(CLDocument* doc, int page, CGContextRef ctx, double ba
 	s.wireScale = (float)o->wireScale;
 	s.projector = o->projector;
 	s.coverOutputs = o->predict;
-	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s);
+	// The theme's colours (Simulation View is dark); Predict's covers go on top.
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, kInkLookDark);
 }
 
 }  // extern "C"

@@ -9,6 +9,7 @@
 #include "SyncInternal.h"
 
 #include "circuit_file_io.hpp"
+#include "ink.hpp"
 #include "legacy_cdl.hpp"
 
 #include <algorithm>
@@ -146,7 +147,23 @@ std::string structureText(const std::string& cdl, const GateDefaults& defaults) 
 			for (const std::string& e : es) line += " " + e;
 			lines.push_back(line);
 		}
+		// The drawing (the website's DRAWING-NOTES.md 3.6): a line a stroke, so
+		// drawing and erasing are real edits. Foreign drawings add nothing,
+		// and a page without strokes adds no line, so a circuit without a
+		// drawing keeps today's text.
+		for (const cl::InkStroke& st : pg.ink.strokes) {
+			std::string line = "D " + std::to_string(pg.index) + " " + esc(st.tool) + " " + esc(st.color) + " " +
+			                   std::to_string((long long)st.widthCenti * 10) + " ";
+			for (size_t i = 0; i < st.xy.size(); i++) {
+				if (i) line += ",";
+				line += std::to_string(st.xy[i]);
+			}
+			if (!st.pressure.empty()) line += " p:" + st.pressure;
+			lines.push_back(line);
+		}
 	}
+	// The notes, when there's something in them.
+	if (cl::ink::notesWorthWriting(cf.notes)) lines.push_back("N " + esc(cf.notes));
 	} catch (const std::exception&) {
 		return "cedarlogic-structure/1 unparsed\n" + t;
 	}
