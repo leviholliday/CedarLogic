@@ -55,6 +55,12 @@ final class InkSettings: ObservableObject {
     var widths: [Double] { drawsWithHighlighter ? Self.highlighterWidths : Self.penWidths }
     func setColor(_ c: String) { if drawsWithHighlighter { highlighterColor = c } else { penColor = c } }
     func setWidth(_ w: Double) { if drawsWithHighlighter { highlighterWidth = w } else { penWidth = w } }
+    /// The three widths by name (keys 1, 2 and 3 while drawing). A mouse or
+    /// trackpad has no pressure, so its line is always the chosen width; a
+    /// tablet pen's pressure thins it a little.
+    static let widthNames = ["Thin", "Medium", "Thick"]
+    var widthIndex: Int { widths.firstIndex { abs($0 - width) < 1e-9 } ?? 1 }
+    func setWidthIndex(_ i: Int) { if widths.indices.contains(i) { setWidth(widths[i]) } }
 
     /// "Red pen", "Yellow highlighter": a colour in plain words.
     static func colorName(_ token: String, highlighter: Bool) -> String {
@@ -96,7 +102,7 @@ extension CanvasController {
                 note("Drawing shown.")
                 announce("Drawing on. Drawing shown.")
             } else {
-                note("Draw: P pen, H highlighter, E eraser. Escape when you're done.")
+                note("Draw: P pen, H highlighter, E eraser, 1 2 3 width. Escape when you're done.")
                 announce("Drawing on")
             }
             if let why = inkBlockedReason { note(why) }
@@ -294,7 +300,8 @@ extension CircuitCanvasNSView {
         NSMenu.popUpContextMenu(menu, with: e, for: self)
     }
 
-    /// P, H and E pick a tool; Escape ends a stroke, then Draw mode.
+    /// P, H and E pick a tool, 1, 2 and 3 a width; Escape ends a stroke,
+    /// then Draw mode.
     func inkKeyDown(_ e: NSEvent) -> Bool {
         guard let controller else { return false }
         let bare = e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
@@ -313,6 +320,16 @@ extension CircuitCanvasNSView {
             return true
         }
         guard bare, let ch = e.charactersIgnoringModifiers?.lowercased() else { return false }
+        if let n = ["1": 0, "2": 1, "3": 2][ch] {
+            let s = InkSettings.shared
+            guard s.tool != .eraser else { return true }
+            s.setWidthIndex(n)
+            let name = InkSettings.widthNames[n] + " line"
+            controller.note(name)
+            announce(name)
+            if let w = window { inkHover(at: convert(w.mouseLocationOutsideOfEventStream, from: nil)) }
+            return true
+        }
         let tool: InkTool? = ch == "p" ? .pen : ch == "h" ? .highlighter : ch == "e" ? .eraser : nil
         guard let tool else { return false }
         InkSettings.shared.tool = tool
@@ -354,6 +371,9 @@ struct DrawingBar: View {
                     } else {
                         ForEach(ink.colors, id: \.self) { colorButton($0) }
                         divider
+                        Text("Width").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                            .padding(.leading, 2).padding(.trailing, 2)
+                            .help("How thick the line is: 1, 2 or 3. A mouse or trackpad draws it steady; a pen tablet's pressure thins it a little.")
                         ForEach(Array(ink.widths.enumerated()), id: \.offset) { i, w in widthButton(w, index: i) }
                     }
                     divider
@@ -415,17 +435,21 @@ struct DrawingBar: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
+    /// A width: a short line that thick, in the tool's colour.
     private func widthButton(_ w: Double, index: Int) -> some View {
         let on = abs(ink.width - w) < 1e-9
-        let name = ["Thin", "Medium", "Thick"][index]
+        let name = InkSettings.widthNames[index]
+        let colour = ink.drawsWithHighlighter ? InkSettings.swatch(ink.color, highlighter: true, dark: dark)
+                                              : InkSettings.swatch(ink.color, highlighter: false, dark: dark)
         return Button { ink.setWidth(w) } label: {
-            Circle().fill(Color.primary.opacity(on ? 0.9 : 0.55))
-                .frame(width: [4.0, 7.0, 11.0][index], height: [4.0, 7.0, 11.0][index])
-                .frame(width: 24, height: 26)
+            Capsule().fill(colour.opacity(on ? 1 : 0.6))
+                .frame(width: 18, height: [2.0, 4.0, 7.0][index])
+                .frame(width: 30, height: 26)
                 .background(RoundedRectangle(cornerRadius: 6).fill(on ? accent.opacity(0.16) : .clear))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(on ? accent.opacity(0.7) : .clear, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .help(name)
+        .help("\(name) line (\(index + 1))")
         .accessibilityLabel(name + " line")
         .accessibilityAddTraits(on ? .isSelected : [])
     }

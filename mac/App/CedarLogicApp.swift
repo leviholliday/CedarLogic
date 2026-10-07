@@ -497,6 +497,7 @@ enum MenuFixup {
 
 struct ViewCommands: Commands {
     @FocusedObject private var canvas: CanvasController?
+    @ObservedObject private var ink = InkSettings.shared
     @AppStorage("cl.showGrid") private var showGrid = true
     @AppStorage("cl.wireDots") private var wireDots = true
     @AppStorage("cl.lastDark") private var dark = false
@@ -554,6 +555,14 @@ struct ViewCommands: Commands {
                         if canvas?.drawing != true { canvas?.drawing = true }
                     }
                 }
+                Divider()
+                // The line's width (1, 2, 3 while drawing).
+                ForEach(0..<3, id: \.self) { i in
+                    Toggle("\(InkSettings.widthNames[i]) Line (\(i + 1))", isOn: Binding(
+                        get: { ink.widthIndex == i },
+                        set: { if $0 { ink.setWidthIndex(i) } }))
+                }
+                .disabled(ink.tool == .eraser)
                 Divider()
                 Button("Clear Drawing on This Page") { canvas?.routed.clearDrawing() }
                     .disabled(canvas?.routed.pageHasInk != true || canvas?.routed.pageIsInkReadOnly == true)
