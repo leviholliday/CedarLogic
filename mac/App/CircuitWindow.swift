@@ -145,6 +145,7 @@ final class WindowReplacer: NSObject {
     @objc private func document(_ doc: NSDocument, shouldClose: Bool, contextInfo: UnsafeMutableRawPointer?) {
         if shouldClose {
             new.makeKeyAndOrderFront(nil)
+            CanvasController.focusCanvas(in: new)
             doc.close()
             // A full-screen circuit's replacement is full screen too.
             if fullScreen && !new.styleMask.contains(.fullScreen) {

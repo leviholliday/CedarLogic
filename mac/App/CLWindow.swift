@@ -47,6 +47,16 @@ struct CLLayout: View {
     @StateObject private var split = SplitState()
 
     private var chrome: CLChrome { CLChrome(dark: prefs.dark) }
+    /// The card plays once the window is in place (and drawn); whatever
+    /// its timeline does (the window ordered out, or moving into full
+    /// screen), its cover goes soon after.
+    private func startOpeningCard() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { opening = Date() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08 + OpeningCard.total + 0.7) {
+            if covered { covered = false; opening = nil; canvas.playAppear() }
+        }
+    }
+
     /// What the opening card says under the name.
     private var openingDetail: String {
         let tabs = document.pageCount
@@ -236,7 +246,7 @@ struct CLLayout: View {
             }
             canvas.playAppear()
             // The card plays once the window is in place (and drawn).
-            if covered { DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { opening = Date() } }
+            if covered { startOpeningCard() }
             if !prefs.hasSeenWelcome { openWindow(id: "welcome") }
             else if WhatsNew.shouldShow { openWindow(id: "whatsnew") }
         }

@@ -577,6 +577,9 @@ struct ViewCommands: Commands {
             Divider()
             PresentMenu(canvas: canvas)
             Divider()
+            // If clicks ever stop editing: everything back to plain editing.
+            Button("Make This Window Editable") { canvas?.makeEditable() }
+                .disabled(canvas == nil)
         }
     }
 }

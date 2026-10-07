@@ -80,7 +80,13 @@ enum QuitConfirm {
                 // Still here: quitting waits on a question (a circuit to
                 // save, say), or was cancelled. The windows come back --
                 // unless it's only sync sending the last changes.
-                if !SyncCenter.shared.isQuitting { for w in windows { w.alphaValue = 1 } }
+                if !SyncCenter.shared.isQuitting {
+                    for w in windows { w.alphaValue = 1 }
+                    // The see-through dimming window over the whole screen
+                    // (and the faded question) mustn't stay in front.
+                    d?.orderOut(nil)
+                    p.orderOut(nil)
+                }
             }
         })
     }

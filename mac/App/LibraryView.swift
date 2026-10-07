@@ -161,12 +161,16 @@ enum Library {
         return ok
     }
 
-    /// An alert as a sheet on the window in front (the library's), or on
-    /// its own; `done` hears whether the first button was chosen.
+    /// An alert as a sheet on Your Circuits when it's in front, or on its
+    /// own; `done` hears whether the first button was chosen. Never on a
+    /// circuit window: opening a circuit can replace, hide or close that
+    /// window under the sheet, leaving a question nobody can see (and a
+    /// window that won't take a click) or answer (sync waits on it).
     @MainActor static func present(_ alert: NSAlert, _ done: @escaping (Bool) -> Void) {
-        if let w = NSApp.keyWindow, w.attachedSheet == nil {
+        if let w = NSApp.keyWindow, w.identifier?.rawValue.contains("library") == true, w.isVisible, w.attachedSheet == nil {
             alert.beginSheetModal(for: w) { r in done(r == .alertFirstButtonReturn) }
         } else {
+            NSApp.activate()
             done(alert.runModal() == .alertFirstButtonReturn)
         }
     }

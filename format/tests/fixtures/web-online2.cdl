@@ -1,0 +1,116 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic Online 2")
+  (page 0
+    (name "Half adder")
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 6 -6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "2")
+      (at 6 -13)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AI_XOR2"
+      (uuid "3")
+      (at 20 -7)
+      (angle 0)
+      (gparam "LOCKED" "true")
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_AND2"
+      (uuid "4")
+      (at 24 -12)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "GA_LED"
+      (uuid "5")
+      (at 32 -7)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "GA_LED"
+      (uuid "6")
+      (at 32 -12)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76")
+      (gparam "LOCKED" "true"))
+    (wire
+      (ids "7")
+      (seg "0" h
+        (pts 8 -6 17 -6)
+        (connect "1" "OUT_0")
+        (connect "3" "IN_0")
+        (cross 15 "2"))
+      (seg "1" h
+        (pts 15 -11 21 -11)
+        (connect "4" "IN_0")
+        (cross 15 "2"))
+      (seg "2" v
+        (pts 15 -11 15 -6)
+        (cross -6 "0")
+        (cross -11 "1")))
+    (wire
+      (ids "8")
+      (seg "0" h
+        (pts 8 -13 21 -13)
+        (connect "2" "OUT_0")
+        (connect "4" "IN_1")
+        (cross 13 "2"))
+      (seg "1" h
+        (pts 13 -8 17 -8)
+        (connect "3" "IN_1")
+        (cross 13 "2"))
+      (seg "2" v
+        (pts 13 -13 13 -8)
+        (cross -13 "0")
+        (cross -8 "1")))
+    (wire
+      (ids "9")
+      (seg "0" h
+        (pts 23 -7 31 -7)
+        (connect "3" "OUT")
+        (connect "5" "N_in0")))
+    (wire
+      (ids "10")
+      (seg "0" h
+        (pts 27 -12 31 -12)
+        (connect "4" "OUT")
+        (connect "6" "N_in0"))))
+  (page 1
+    (name "Clocked")
+    (gate "BB_CLOCK"
+      (uuid "11")
+      (at 6 -6)
+      (angle 0)
+      (gparam "LOCKED" "true")
+      (lparam "HALF_CYCLE" "5")
+      (lparam "MANUAL" "true"))
+    (gate "GA_LED"
+      (uuid "12")
+      (at 20 -6)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (gate "AA_TOGGLE"
+      (uuid "13")
+      (at 6 -15)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_LABEL"
+      (uuid "15")
+      (at 1.35 -15)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Reset")
+      (gparam "TEXT_HEIGHT" "2"))
+    (wire
+      (ids "14")
+      (seg "0" h
+        (pts 10 -6 19 -6)
+        (connect "11" "CLK")
+        (connect "12" "N_in0")))))

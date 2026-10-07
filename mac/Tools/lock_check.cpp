@@ -468,6 +468,42 @@ int main(int argc, char** argv) {
 	}
 
 	cl_document_close(doc);
+	// A circuit from CedarLogic Online (the website's writer, "CedarLogic
+	// Online 2"): unnamed switches and lights, a locked XOR, light and
+	// manual clock, two pages. It opens with nothing to warn about, every
+	// page drawable, an unlocked part moves, a switch moves, a locked part
+	// stays put. (The owner's circuit from the iPad opened in 0.3.12 and
+	// wouldn't edit until the app was restarted; the file isn't why.)
+	printf("A circuit from CedarLogic Online:\n");
+	{
+		char err[256] = "";
+		CLDocument* web = cl_document_open("format/tests/fixtures/web-online2.cdl", err, sizeof err);
+		CHECK(web != nullptr, "web-online2.cdl opens (run from the repo root)");
+		if (web) {
+			CHECK(cl_document_notice_count(web) == 0, "nothing to warn about");
+			bool drawable = true;
+			for (int p = 0; p < cl_document_page_count(web); p++)
+				if (cl_ink_page_read_only(web, p) || cl_ink_can_draw(web, p) != CL_INK_OK) drawable = false;
+			CHECK(drawable, "every page can be drawn on");
+			CHECK(cl_document_manual_clock_count(web, 1) == 1, "its second page's clock is manual");
+			struct { double x, y; bool moves; const char* what; } parts[] = {
+				{ 24, -12, true, "the unlocked AND moves" },
+				{ 6, -6, true, "an unnamed switch moves" },
+				{ 20, -7, false, "the locked XOR stays put" },
+			};
+			for (auto& t : parts) {
+				cl_edit_select_none(web, 0);
+				const std::string before = cl_document_save_text(web);
+				cl_edit_press(web, 0, t.x, t.y, 0, upp);
+				cl_edit_drag(web, t.x + 3, t.y);
+				cl_edit_drag(web, t.x + 6, t.y);
+				cl_edit_release(web, t.x + 6, t.y);
+				CHECK((before != cl_document_save_text(web)) == t.moves, t.what);
+			}
+			cl_document_close(web);
+		}
+	}
+
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;
 }

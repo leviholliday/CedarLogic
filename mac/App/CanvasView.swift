@@ -32,6 +32,12 @@ final class CircuitCanvasNSView: NSView {
         super.viewDidMoveToWindow()
         if let o = occlusionWatch { NotificationCenter.default.removeObserver(o); occlusionWatch = nil }
         guard let w = window else { return }
+        // A newly opened circuit's keys go to its canvas, not to the bare
+        // window (nothing had the keyboard until the first click).
+        DispatchQueue.main.async { [weak self, weak w] in
+            guard let self, let w, self.window === w, w.firstResponder === w else { return }
+            w.makeFirstResponder(self)
+        }
         occlusionWatch = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
                                                                 object: w, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -920,6 +926,60 @@ final class CanvasController: ObservableObject {
         guard let upp = view?.unitsPerPoint, upp > 0 else { return 100 }
         return Int((100 * 0.1 / upp).rounded())
     }
+    // MARK: Never stuck
+
+    /// A question sheet on this window that can't be seen (its window was
+    /// replaced, hidden or moved to full screen under it) blocks every
+    /// click on the circuit. Seen twice in a row, two seconds apart, it's
+    /// cancelled -- every question here has a safe Cancel -- with a note.
+    private var hiddenSheetSeen = false
+    private func checkHiddenSheet() {
+        guard let w = view?.window, w.isVisible, w.occlusionState.contains(.visible),
+              let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 else { hiddenSheetSeen = false; return }
+        if !hiddenSheetSeen { hiddenSheetSeen = true; return }
+        hiddenSheetSeen = false
+        NSLog("CedarLogic: ended a sheet that couldn't be seen (%@)", sheet.title)
+        w.endSheet(sheet, returnCode: .cancel)
+        w.makeFirstResponder(view)
+        note("A question that couldn't be seen was closed, so you can keep editing.")
+    }
+
+    /// View ▸ Make This Window Editable: one click back to plain editing,
+    /// whatever was left on -- Lock, Draw, Simulation View, a part on the
+    /// pointer, Tidy's preview, a question that can't be seen -- and the
+    /// keyboard back on the canvas.
+    func makeEditable() {
+        let host = sheetHost
+        if Presenter.shared.inWindow { Presenter.shared.stop() }
+        host.locked = false
+        host.drawing = false
+        for side in [host, host.partner].compactMap({ $0 }) {
+            if side.simView { side.simView = false }
+            if side.isFloating { side.cancelFloating() }
+            if side.tidyActive { side.endTidy(keep: false) }
+            side.document?.cancelGesture()
+            side.view?.drag = .none
+        }
+        Self.pendingGate = nil
+        if let w = host.view?.window {
+            if let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 { w.endSheet(sheet, returnCode: .cancel) }
+            w.makeKeyAndOrderFront(nil)
+            w.makeFirstResponder(host.view)
+        }
+        host.redraw()
+        host.note("Ready to edit.")
+    }
+
+    /// Gives a circuit window's canvas the keyboard (after it's shown).
+    static func focusCanvas(in window: NSWindow) {
+        func find(_ v: NSView) -> CircuitCanvasNSView? {
+            if let c = v as? CircuitCanvasNSView { return c }
+            for s in v.subviews { if let c = find(s) { return c } }
+            return nil
+        }
+        if let root = window.contentView, let c = find(root) { window.makeFirstResponder(c) }
+    }
+
     func zoomActual() { view?.animateZoom(by: (view?.unitsPerPoint ?? 0.1) / 0.1) }
 
     var canEdit: Bool { !locked && !simView }
@@ -1599,7 +1659,7 @@ final class CanvasController: ObservableObject {
         view?.stepZoomAnimation()
         if animating { redraw() }
         if dragFadeBox != nil && now - dragFadeStart >= Self.dragFadeTime { dragFadeBox = nil; redraw() }
-        if drivesClock && now - lastSaveCheck > 2 { lastSaveCheck = now; noticeSaves() }
+        if drivesClock && now - lastSaveCheck > 2 { lastSaveCheck = now; noticeSaves(); checkHiddenSheet() }
         onTick?()
         // The dashes march at the simulation's speed: 40 points a second at
         // 25 ms a step, faster as steps get shorter.
