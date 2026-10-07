@@ -205,6 +205,22 @@ struct HookHost : Host {
 		for (size_t i = 0; i < lights.size(); i++) values[lights[i]] = v[i] ? 1 : 0;
 		return true;
 	}
+	bool socketOpen(int id, const std::string& url, const std::vector<std::pair<std::string, std::string>>& headers,
+	                SocketEvents& events) override {
+		if (!h.socket_open) return false;
+		std::string lines;
+		for (const auto& kv : headers) lines += kv.first + ": " + kv.second + "\r\n";
+		return h.socket_open(h.ctx, id, url.c_str(), lines.c_str(), &events);
+	}
+	void socketSend(int id, const std::string& text) override {
+		if (h.socket_send) h.socket_send(h.ctx, id, text.c_str());
+	}
+	void socketClose(int id, int code) override {
+		if (h.socket_close) h.socket_close(h.ctx, id, code);
+	}
+	void submissionsChanged(const std::string& classId, const std::string& aid) override {
+		if (h.submissions_changed) h.submissions_changed(h.ctx, classId.c_str(), aid.c_str());
+	}
 };
 
 // An override of a server for testing (3.2): https, or http only for this computer.
@@ -273,6 +289,12 @@ CLClassroom* cl_classroom_create(const CLClassroomHooks* hooks, const char* dir,
 	c->cfg.dir = orEmpty(dir);
 	c->cfg.appKey = orEmpty(appKey);
 	c->cfg.client = orEmpty(client);
+	std::string service = urlFromEnvironment("CL_CLASSROOM_SERVICE");   // the service's origin (3.13)
+	while (!service.empty() && service.back() == '/') service.pop_back();
+	if (!service.empty()) {
+		c->cfg.serverBase = service + "/api/classroom/v1";
+		c->cfg.liveBase = service + "/api/live/v1";
+	}
 	const std::string server = urlFromEnvironment("CL_CLASSROOM_URL"), live = urlFromEnvironment("CL_LIVE_URL");
 	if (!server.empty()) c->cfg.serverBase = server;
 	if (!live.empty()) c->cfg.liveBase = live;
@@ -569,6 +591,22 @@ void cl_classroom_leave_class(CLClassroom* c, const char* classId, CLClassroomDo
 }
 void cl_classroom_forget_membership(CLClassroom* c, const char* classId) {
 	if (c && c->engine) c->engine->forgetMembership(orEmpty(classId));
+}
+
+const char* cl_classroom_live_connection(CLClassroom* c, const char* classId) {
+	if (!c || !c->engine) return "";
+	c->text = c->engine->liveConnection(orEmpty(classId));
+	return c->text.c_str();
+}
+
+void cl_classroom_socket_opened(void* events, int id) {
+	if (events) static_cast<SocketEvents*>(events)->socketOpened(id);
+}
+void cl_classroom_socket_text(void* events, int id, const char* text) {
+	if (events) static_cast<SocketEvents*>(events)->socketText(id, orEmpty(text));
+}
+void cl_classroom_socket_closed(void* events, int id, int code) {
+	if (events) static_cast<SocketEvents*>(events)->socketClosed(id, code);
 }
 
 void cl_classroom_page_open(CLClassroom* c, const char* classId, bool open) {

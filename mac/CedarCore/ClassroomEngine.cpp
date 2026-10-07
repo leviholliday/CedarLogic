@@ -1,10 +1,16 @@
-// clclass::Engine: the Client on its own thread (CLASSROOM.md 6.2, 4.8). The
+// clclass::Engine: the Client on its own thread (CLASSROOM.md 6.2, 4.8, 3.14). The
 // UI thread posts operations and reads published copies of the lists; the
 // engine thread runs one operation or one poll at a time, publishes, and
-// reaches the UI only through Host::onMain. Polling: the pulse every `p`
-// seconds while a session is on and the class page or live view is open, 60 s
-// otherwise (120 s after 10 minutes without change), nothing in the background
-// or after two hours without input; failures back off as Sync's.
+// reaches the UI only through Host::onMain. Each open class page (or live view)
+// keeps the class's live connection (LiveLink, ClassroomLive.cpp) through the
+// Host's socket hooks; while it is open it brings every change and the engine
+// polls only every 5 minutes, in case. Without it (connecting, three tries
+// without a hello, or no WebSockets on the platform) a student's pulse during a
+// lecture and a teacher's predict answers are polls the server holds (up to
+// holdSeconds, on a thread of their own, asked again at once), else the pulse
+// every `p` seconds; outside a session 60 s (120 s after 10 minutes without
+// change), nothing in the background or after two hours without input;
+// failures back off as Sync's.
 
 #include "ClassroomInternal.h"
 
@@ -29,6 +35,7 @@ int64_t backoffMs(int failures, uint32_t& seed) {
 }
 
 std::atomic<int> gDetached{ 0 };
+std::atomic<int> gSocketIds{ 0 };   // one numbering for the process: engines may share a host's sockets
 
 }  // namespace
 
@@ -47,8 +54,10 @@ struct Engine::Impl {
 	std::thread th;
 	bool running = false, exited = false, stopping = false, started = false, locked = false;
 	std::atomic<bool> stopped{ false };
-	std::deque<std::function<void()>> ops;
+	struct Op { std::function<void()> fn; bool publish = true; };
+	std::deque<Op> ops;
 	std::vector<std::string> pendingNotices;
+	int background = 0;                 // threads out in a held poll (under mu)
 
 	// Published for the UI thread (under mu).
 	std::vector<ClassInfo> pubClasses;
@@ -58,6 +67,7 @@ struct Engine::Impl {
 	std::map<std::string, Live> pubLive;
 	std::map<std::string, AnswerCounts> pubAnswers;
 	std::map<std::string, Status> pubStatus;
+	std::map<std::string, std::string> pubLinks;                      // classId -> the live connection's state
 
 	// Polling (engine thread, set through ops).
 	std::set<std::string> pagesOpen, following;
@@ -65,7 +75,22 @@ struct Engine::Impl {
 	int64_t lastInput = 0;
 	std::map<std::string, int64_t> nextPoll, lastChange, nextAnswers;
 	std::map<std::string, int> failures;
+	std::map<std::string, bool> held;   // the last poll was held by the server: ask again at once
+	std::set<std::string> busy;         // "classId/pulse", "classId/answers": a held poll is out
 	uint32_t seed = 2463534242u;
+
+	// The live connections (3.14), engine thread. `links` is declared after what it points at.
+	struct Events : SocketEvents {
+		Impl* d;
+		explicit Events(Impl* i) : d(i) {}
+		void socketOpened(int id) override { d->post({ [this, id] { d->socketEvent(id, 0, std::string(), 0); }, true }); }
+		void socketText(int id, const std::string& text) override {
+			d->post({ [this, id, text] { d->socketEvent(id, 1, text, 0); }, text != "pong" });
+		}
+		void socketClosed(int id, int code) override { d->post({ [this, id, code] { d->socketEvent(id, 2, std::string(), code); }, true }); }
+	} events{ this };
+	SocketHooks sockets;
+	std::map<std::string, std::unique_ptr<LiveLink>> links;
 
 	Impl(Config c, Crypto& crypto, Curve& cv_, Host& h) : cfg(std::move(c)), cr(crypto), curve(cv_), host(h) {
 		ClientHooks k;
@@ -92,6 +117,16 @@ struct Engine::Impl {
 			return host.lightsOf(cdl, names, out);
 		};
 		client.reset(new Client(cfg, cr, curve, k));
+		sockets.newId = [] {
+			int id = ++gSocketIds;
+			if (id <= 0) id = gSocketIds = 1;   // (after two billion sockets)
+			return id;
+		};
+		sockets.open = [this](int id, const std::string& url, const std::vector<std::pair<std::string, std::string>>& headers) {
+			return host.socketOpen(id, url, headers, events);
+		};
+		sockets.send = [this](int id, const std::string& text) { host.socketSend(id, text); };
+		sockets.close = [this](int id, int code) { host.socketClose(id, code); };
 	}
 
 	// Runs fn on the UI thread (and waits); nothing once stop() came.
@@ -115,6 +150,8 @@ struct Engine::Impl {
 			pubLive.clear();
 			pubAnswers.clear();
 			pubStatus.clear();
+			pubLinks.clear();
+			for (const auto& l : links) pubLinks[l.first] = LiveLink::stateName(l.second->state());
 			for (const ClassInfo& c : pubClasses) {
 				pubAssignments[c.classId] = client->assignments(c.classId);
 				pubLive[c.classId] = client->live(c.classId);
@@ -129,9 +166,11 @@ struct Engine::Impl {
 		}
 		std::vector<std::pair<std::string, Live>> lives;
 		std::vector<std::pair<std::string, AnswerCounts>> counts;
-		std::string id;
+		std::vector<std::pair<std::string, std::string>> handins;
+		std::string id, aid;
 		while (client->liveChangedFlag(id)) lives.emplace_back(id, client->live(id));
 		while (client->answersChangedFlag(id)) counts.emplace_back(id, client->answers(id));
+		while (client->handinFlag(id, aid)) handins.emplace_back(id, aid);
 		std::vector<std::pair<std::string, Status>> statuses;
 		{
 			std::lock_guard<std::mutex> lock(mu);
@@ -145,6 +184,7 @@ struct Engine::Impl {
 			for (const auto& l : lives) host.liveChanged(l.first, l.second);
 			for (const auto& c : counts) host.answersChanged(c.first, c.second);
 			for (const auto& s : statuses) host.statusChanged(s.first, s.second);
+			for (const auto& h : handins) host.submissionsChanged(h.first, h.second);
 			std::vector<std::string> n;
 			{
 				std::lock_guard<std::mutex> lock(mu);
@@ -156,7 +196,7 @@ struct Engine::Impl {
 		else main(tell);
 	}
 
-	void post(std::function<void()> op) {
+	void post(Op op) {
 		{
 			std::lock_guard<std::mutex> lock(mu);
 			if (stopping) return;
@@ -164,8 +204,72 @@ struct Engine::Impl {
 		}
 		cv.notify_all();
 	}
+	void post(std::function<void()> fn) { post(Op{ std::move(fn), true }); }
+
+	// ---- the live connections (3.14) ----
+
+	bool linkOpen(const std::string& classId) const {
+		auto it = links.find(classId);
+		return it != links.end() && it->second->isOpen();
+	}
+
+	// One live connection per class whose page (or live view) is open, as the web's Poller keeps.
+	void syncLinks(int64_t now) {
+		if (!locked) return;
+		std::set<std::string> want;
+		for (const std::set<std::string>* s : { &pagesOpen, &following })
+			for (const std::string& id : *s)
+				if (client->teaches(id) || client->member(id)) want.insert(id);
+		for (auto it = links.begin(); it != links.end();) {
+			if (want.count(it->first)) {
+				++it;
+				continue;
+			}
+			it->second->stop();
+			it = links.erase(it);
+		}
+		for (const std::string& id : want) {
+			if (links.count(id)) continue;
+			seed = seed * 1664525u + 1013904223u;
+			links[id].reset(new LiveLink(*client, id, sockets, seed));
+			links[id]->start(now);
+		}
+		afterLinks(now);
+	}
+
+	// A connection opened, fell back or ended: the polls follow (4.8). Open: only a safety poll
+	// now and then; fallback or ended: polling takes over at once.
+	void afterLinks(int64_t now) {
+		for (auto& kv : links) {
+			if (!kv.second->stateChanged()) continue;
+			const LiveLink::State st = kv.second->state();
+			if (busy.count(kv.first + "/pulse")) continue;   // a held poll is out: its answer schedules the next
+			if (st == LiveLink::Open) nextPoll[kv.first] = now + kSafety;
+			else if (st == LiveLink::Fallback || st == LiveLink::Closed) nextPoll[kv.first] = std::min<int64_t>(nextPoll[kv.first], now);
+		}
+	}
+
+	void socketEvent(int id, int kind, const std::string& text, int code) {
+		const int64_t now = clock.now();
+		for (auto& kv : links) {
+			LiveLink& l = *kv.second;
+			if (!l.owns(id)) continue;
+			if (kind == 0) l.opened(id, now);
+			else if (kind == 1) l.text(id, text, now);
+			else l.closed(id, code, now);
+			break;
+		}
+		afterLinks(now);
+	}
+
+	void tickLinks(int64_t now) {
+		for (auto& kv : links) kv.second->tick(now);
+		afterLinks(now);
+	}
 
 	// ---- polling (4.8) ----
+
+	static constexpr int64_t kSafety = 5 * kMinute;   // a poll now and then while the live connection is open
 
 	bool idle(int64_t now) const { return !active || now - lastInput > 2 * kHour; }
 
@@ -177,29 +281,47 @@ struct Engine::Impl {
 		return pagesOpen.count(classId) || following.count(classId) || (m && !m->pending.empty());
 	}
 
+	// How long the server should hold a poll: not while the live connection is open (it brings
+	// everything), else the server's holdSeconds (3.3).
+	int64_t holdFor(const std::string& classId) const { return linkOpen(classId) ? 0 : client->holdSeconds(); }
+
+	bool answersDue(const std::string& classId, int64_t now) {
+		return client->predictOpen(classId) && !linkOpen(classId) && !busy.count(classId + "/answers") && now >= nextAnswers[classId];
+	}
+
 	int64_t interval(const std::string& classId, int64_t now) {
+		if (linkOpen(classId)) return kSafety;
 		if (client->teaches(classId)) return 60 * kSecond;
-		if (client->liveOn(classId) && (following.count(classId) || pagesOpen.count(classId))) return client->pollSeconds() * kSecond;
+		if (client->liveOn(classId) && (following.count(classId) || pagesOpen.count(classId)))
+			return held[classId] ? kSecond : client->pollSeconds() * kSecond;   // held: again at once
 		const int64_t since = lastChange.count(classId) ? now - lastChange[classId] : 0;
 		return since > 10 * kMinute ? 120 * kSecond : 60 * kSecond;
 	}
 
-	void pollOne(const std::string& classId, int64_t now) {
-		Result r;
-		if (client->teaches(classId)) {
-			if (client->predictOpen(classId) && now >= nextAnswers[classId]) {
-				client->refreshAnswers(classId);
-				nextAnswers[classId] = now + 3 * kSecond;
-			}
-			if (now < nextPoll[classId]) return;
-			r = client->refreshTeacher(classId);
-		} else {
-			const int64_t seqBefore = client->membershipOf(classId) ? client->membershipOf(classId)->seq : 0;
-			const int64_t liveBefore = client->membershipOf(classId) ? client->membershipOf(classId)->liveSeen : 0;
-			r = client->pulse(classId);
-			const Membership* m = client->membershipOf(classId);
-			if (m && (m->seq != seqBefore || m->liveSeen != liveBefore)) lastChange[classId] = now;
+	static bool waits(const HttpRequest& q) {
+		for (const auto& h : q.headers)
+			if (h.first == "x-cedarlogic-wait") return true;
+		return false;
+	}
+
+	// A poll the server holds, on a thread of its own so the engine thread goes on (a hand-in or an
+	// answer mustn't wait 25 s behind it); its answer comes back as an operation.
+	void holdPoll(const HttpRequest& q, std::function<void(const HttpResponse&)> apply) {
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			if (stopping) return;
+			background++;
 		}
+		std::thread([this, q, apply] {
+			const HttpResponse h = host.http(q);
+			post([apply, h] { apply(h); });
+			std::lock_guard<std::mutex> lock(mu);
+			background--;
+			cv.notify_all();
+		}).detach();
+	}
+
+	void schedule(const std::string& classId, const Result& r, int64_t now) {
 		const bool failed = !r.ok && (r.status == 0 || r.status == 429 || r.status >= 500);
 		if (failed) failures[classId]++;
 		else failures[classId] = 0;
@@ -214,6 +336,67 @@ struct Engine::Impl {
 		nextPoll[classId] = next;
 	}
 
+	void pollAnswers(const std::string& classId, int64_t now) {
+		const int64_t wait = holdFor(classId);
+		const HttpRequest q = client->answersRequest(classId, wait);
+		if (q.url.empty()) return;
+		if (!waits(q)) {
+			client->answersReply(classId, host.http(q));
+			nextAnswers[classId] = now + 3 * kSecond;
+			return;
+		}
+		busy.insert(classId + "/answers");
+		holdPoll(q, [this, classId, now](const HttpResponse& h) {
+			busy.erase(classId + "/answers");
+			const AnswerCounts before = client->answers(classId);
+			client->answersReply(classId, h);
+			const int64_t at = clock.now();
+			const bool news = client->answers(classId).answered != before.answered;
+			// Held for real (or answered with news): ask again at once; a server that didn't hold: 3 s.
+			const bool wasHeld = (h.status == 200 || h.status == 304) && (at - now >= 2 * kSecond || news);
+			nextAnswers[classId] = at + (wasHeld ? kSecond : 3 * kSecond);
+		});
+	}
+
+	void pollOne(const std::string& classId, int64_t now) {
+		Result r;
+		if (client->teaches(classId)) {
+			if (answersDue(classId, now)) pollAnswers(classId, now);
+			if (now < nextPoll[classId]) return;
+			r = client->refreshTeacher(classId);
+			schedule(classId, r, now);
+			return;
+		}
+		if (busy.count(classId + "/pulse")) return;
+		const Membership* before = client->membershipOf(classId);
+		const int64_t seqBefore = before ? before->seq : 0, liveBefore = before ? before->liveSeen : 0;
+		const int64_t wait = client->liveOn(classId) ? holdFor(classId) : 0;   // held during a lecture (3.10)
+		const HttpRequest q = client->pulseRequest(classId, wait);
+		const bool asked = waits(q);
+		const bool holding = holdFor(classId) > 0;   // polls are held now (no open connection)
+		auto apply = [this, classId, now, seqBefore, liveBefore, holding](const HttpResponse& h) {
+			const int64_t at = clock.now();
+			const Result res = client->pulseReply(classId, h);
+			const Membership* m = client->membershipOf(classId);
+			const bool news = m && (m->seq != seqBefore || m->liveSeen != liveBefore);
+			if (news) lastChange[classId] = at;
+			// Held for real, or answered with news (a session that just began): ask again at once,
+			// held. A server that doesn't hold answers at once: the usual interval.
+			held[classId] = holding && (h.status == 200 || h.status == 304) && (at - now >= 2 * kSecond || news);
+			schedule(classId, res, at);
+		};
+		if (!asked) {
+			apply(host.http(q));
+			return;
+		}
+		busy.insert(classId + "/pulse");
+		nextPoll[classId] = INT64_MAX;
+		holdPoll(q, [this, classId, apply](const HttpResponse& h) {
+			busy.erase(classId + "/pulse");
+			if (client->member(classId)) apply(h);   // (published after, as every operation)
+		});
+	}
+
 	void pollDue() {
 		const int64_t now = clock.now();
 		if (idle(now)) return;
@@ -223,8 +406,7 @@ struct Engine::Impl {
 		for (const std::string& id : ids) {
 			if (stopping) return;
 			if (!wanted(id)) continue;
-			const bool answersDue = client->predictOpen(id) && now >= nextAnswers[id];
-			if (now < nextPoll[id] && !answersDue) continue;
+			if (now < nextPoll[id] && !answersDue(id, now)) continue;
 			pollOne(id, now);
 			any = true;
 		}
@@ -233,12 +415,14 @@ struct Engine::Impl {
 
 	int64_t nextWake() {
 		const int64_t now = clock.now();
-		if (idle(now)) return INT64_MAX;
 		int64_t wake = INT64_MAX;
+		for (const auto& kv : links) wake = std::min(wake, kv.second->nextTimer());
+		if (idle(now)) return wake;
 		for (const ClassInfo& c : client->classes()) {
 			if (!wanted(c.classId)) continue;
 			wake = std::min(wake, nextPoll[c.classId]);
-			if (client->predictOpen(c.classId)) wake = std::min(wake, nextAnswers[c.classId]);
+			if (client->predictOpen(c.classId) && !linkOpen(c.classId) && !busy.count(c.classId + "/answers"))
+				wake = std::min(wake, nextAnswers[c.classId]);
 		}
 		return wake;
 	}
@@ -247,15 +431,18 @@ struct Engine::Impl {
 		std::unique_lock<std::mutex> lock(mu);
 		while (!stopping) {
 			if (!ops.empty()) {
-				std::function<void()> op = std::move(ops.front());
+				Op op = std::move(ops.front());
 				ops.pop_front();
 				lock.unlock();
-				op();
-				publish();
+				op.fn();
+				if (op.publish) publish();
 				lock.lock();
 				continue;
 			}
 			lock.unlock();
+			const int64_t now = clock.now();
+			syncLinks(now);
+			tickLinks(now);
 			pollDue();
 			const int64_t wake = nextWake();
 			lock.lock();
@@ -285,10 +472,12 @@ Engine::Engine(Config c, Crypto& cr, Curve& curve, Host& h) : d(new Impl(std::mo
 Engine::~Engine() {
 	if (!d) return;
 	stop();
-	bool exited = true;
+	bool exited = true, quiet = true;
 	{
 		std::unique_lock<std::mutex> lock(d->mu);
 		if (d->running) exited = d->cv.wait_for(lock, std::chrono::seconds(3), [this] { return d->exited; });
+		// A held poll's thread: a moment to come back (it answers at once on a test server).
+		quiet = d->cv.wait_for(lock, std::chrono::seconds(1), [this] { return d->background == 0; });
 	}
 	if (d->running) {
 		if (exited) {
@@ -302,7 +491,14 @@ Engine::~Engine() {
 			return;
 		}
 	}
+	// The live connections end here (their pending answers with them: nothing is reported now).
+	for (auto& kv : d->links) kv.second->abandon();
 	if (d->locked) d->host.unlock();
+	if (!quiet) {
+		// A held poll is still out (up to holdSeconds): its thread keeps the Impl.
+		d.release();
+		gDetached++;
+	}
 }
 
 void Engine::start() {
@@ -462,7 +658,32 @@ void Engine::follow(const std::string& classId, bool following) {
 	});
 }
 void Engine::sendAnswer(const std::string& classId, const std::map<std::string, int>& lights, Done done) {
-	d->run([this, classId, lights] { return d->client->sendAnswer(classId, lights); }, plain(done));
+	d->post([this, classId, lights, done] {
+		auto tell = [this, done](const Result& r) {
+			if (done) d->main([&] { done(r.ok, r.message); });
+		};
+		json::Value body;
+		const Result sealed = d->client->sealAnswer(classId, lights, body);
+		if (!sealed.ok || sealed.value == "none") {
+			tell(sealed.ok ? Result::good() : sealed);
+			return;
+		}
+		// Over the live connection while it is open (a twentieth of a request, 3.10); the PUT if
+		// no "ok" or "error" comes within 8 s.
+		auto it = d->links.find(classId);
+		if (it != d->links.end() && it->second->isOpen()) {
+			json::Value msg = body;
+			msg.set("t", json::Value::string("answer"));
+			const bool sent = it->second->request(
+				msg,
+				[this, classId, body, lights, tell](const json::Value* reply) {
+					tell(reply ? d->client->answerReply(classId, *reply, lights) : d->client->putAnswer(classId, body, lights));
+				},
+				d->clock.now());
+			if (sent) return;
+		}
+		tell(d->client->putAnswer(classId, body, lights));
+	});
 }
 void Engine::makeMoveCode(const std::string& classId, std::function<void(bool, std::string, std::string)> done) {
 	d->run([this, classId] { return d->client->makeMoveCode(classId); }, valued(done));
@@ -518,6 +739,16 @@ void Engine::userActive() {
 }
 void Engine::syncSideChanged() {
 	d->post([this] { d->client->sideChanged(); });
+}
+
+void Engine::socketOpened(int id) { d->events.socketOpened(id); }
+void Engine::socketText(int id, const std::string& text) { d->events.socketText(id, text); }
+void Engine::socketClosed(int id, int code) { d->events.socketClosed(id, code); }
+
+std::string Engine::liveConnection(const std::string& classId) const {
+	std::lock_guard<std::mutex> lock(d->mu);
+	auto it = d->pubLinks.find(classId);
+	return it == d->pubLinks.end() ? std::string() : it->second;
 }
 
 }  // namespace clclass

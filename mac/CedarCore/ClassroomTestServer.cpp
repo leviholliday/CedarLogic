@@ -93,6 +93,8 @@ std::string FakeServer::fetchKeyOf(const std::string& classId) const {
 
 HttpResponse FakeServer::handle(const HttpRequest& r) {
 	requests++;
+	const std::string wait = header(r, "x-cedarlogic-wait");
+	if (!wait.empty()) waits.push_back(r.url + " wait " + wait + (header(r, "if-none-match").empty() ? " (no If-None-Match)" : ""));
 	if (offline > 0) {
 		offline--;
 		return HttpResponse();   // no answer
@@ -341,6 +343,10 @@ HttpResponse FakeServer::api(const HttpRequest& r, const std::string& full) {
 		lv.set("predict", json::Value::boolean(k.live.predict));
 		lv.set("at", json::Value::integer(k.live.rec.at));
 		o.set("live", lv);
+		json::Value limits = json::Value::object();   // revision 3's (3.3): the clients read these two
+		limits.set("pulseSeconds", json::Value::integer(10));
+		limits.set("holdSeconds", json::Value::integer(25));
+		o.set("limits", limits);
 		if (teacher) {
 			o.set("createdAt", json::Value::integer(k.createdAt));
 			o.set("activeAt", json::Value::integer(k.activeAt));
@@ -637,7 +643,6 @@ HttpResponse FakeServer::api(const HttpRequest& r, const std::string& full) {
 // ---- /api/live/v1: the pulse and the cached records ---------------------------------------
 
 HttpResponse FakeServer::pulse(const HttpRequest& r, const std::string& path) {
-	(void)r;
 	const std::vector<std::string> p = split(path.substr(0, path.find('?')));
 	if (p.size() < 2 || !isHex(p[0], 32)) return error(now, 404, "not_found");
 	auto it = classes.find(p[0]);
@@ -657,8 +662,11 @@ HttpResponse FakeServer::pulse(const HttpRequest& r, const std::string& path) {
 		}
 		o.set("seq", json::Value::integer(seq));
 		o.set("live", json::Value::integer(live));
-		o.set("p", json::Value::integer(3));
-		return reply(now, 200, o, "\"" + std::to_string(seq) + "." + std::to_string(live) + "\"");
+		o.set("p", json::Value::integer(10));
+		const std::string etag = "\"" + std::to_string(seq) + "." + std::to_string(live) + "\"";
+		// (Not held here: a held poll that nothing changes answers 304 at the end, as now.)
+		if (header(r, "if-none-match") == etag) return reply(now, 304, json::Value(), etag);
+		return reply(now, 200, o, etag);
 	}
 	auto version = [&](const Rec& x, const std::string& v) {
 		if (x.ver == 0 || std::to_string(x.ver) != v) return error(now, 404, "no_version");

@@ -52,6 +52,7 @@ public:
 	int retryAfterNext = 0;                // the next write answers 429 with this Retry-After (s)
 	std::vector<std::string> purges;       // tags purged, in order
 	size_t requests = 0;
+	std::vector<std::string> waits;        // every x-cedarlogic-wait asked: "<url> wait <s>"
 	void cleanup();                        // the daily job (3.11)
 	void flipSubmissionByte(const std::string& classId, const std::string& aid, const std::string& sid);
 	void setSubmission(const std::string& classId, const std::string& aid, const std::string& sid, int64_t ver,
@@ -108,6 +109,11 @@ void scenarioTests(Crypto&, Curve&, const std::string& tempDir, Report&);
 void engineTests(Crypto&, Curve&, const std::string& tempDir, Report&);
 void serverTests(Crypto&, Curve&, const std::string& tempDir, Report&, Host& http, const std::string& serverBase,
                  const std::string& liveBase);
+// The live connection and held polls (ClassroomTestLive.cpp): Clients and LiveLinks on a FakeHub,
+// the threaded engine with sockets, and a live round against a real server through `host`.
+void liveTests(Crypto&, Curve&, const std::string& tempDir, Report&);
+void engineLiveTests(Crypto&, Curve&, const std::string& tempDir, Report&);
+void liveServerTests(Crypto&, Curve&, Report&, Host& host, const std::string& serverBase, const std::string& liveBase);
 
 }  // namespace test
 }  // namespace clclass

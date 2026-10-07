@@ -72,7 +72,18 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
 - `classroom-selftest.sh`, `classroom-check.sh`,
   `classroom-vectors-check.sh`, `classroom-interop.sh` -- the Classroom
   client core of docs/CLASSROOM.md (each script's header says how to run
-  it; the interop check needs the website's checkout)
+  it; the interop check needs the website's checkout). The self-test
+  includes the live connection (WebSockets, CLASSROOM.md 3.14) and the
+  polls the server holds against a fake server; `classroom-worker-check.sh`
+  starts the Cloudflare Worker on this computer (`wrangler dev` from the
+  website's checkout, `CEDARLOGIC_SITE`) and runs all four against it --
+  the core's sockets through node (`classroom-ws-relay.mjs`), held polls
+  alone, the app's own URLSession sockets, and the web core together.
+  The app talks to the placeholder `https://cedarlogic-classroom.invalid`
+  until the deploy sets the real address (`kService` in
+  `CedarCore/ClassroomProtocol.cpp`);
+  `CL_CLASSROOM_SERVICE=<origin>` (or `CL_CLASSROOM_URL` and `CL_LIVE_URL`)
+  points it elsewhere
 - `formula-check.sh` -- Build from Formula and the truth table's formulas:
   the simplifier on known answers and 400 random tables, the formula
   reader, and ~200 circuits built in the engine whose truth tables must

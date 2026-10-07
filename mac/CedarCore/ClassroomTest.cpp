@@ -1,8 +1,10 @@
 // clclass::selfTest: the vectors of CLASSROOM.md 7.1 (ClassroomVectors.h,
 // from tests/classroom/vectors.json), the scenarios of 7.2 on the FakeServer
-// (ClassroomTestScenarios.cpp), the threaded engine (ClassroomTestEngine.cpp)
-// and, with a serverBase, a class's round trip against the website's mock
-// server over the platform's own HTTP.
+// (ClassroomTestScenarios.cpp), the threaded engine (ClassroomTestEngine.cpp),
+// the live connection and held polls (ClassroomTestLive.cpp) and, with a
+// serverBase, a class's round trip and a live round against a real server (the
+// Worker under wrangler dev, or the mock server) over the platform's own HTTP
+// and WebSockets.
 
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
 #define _CRT_SECURE_NO_WARNINGS   // getenv in a test
@@ -82,11 +84,14 @@ bool selfTest(clsync::Crypto& cr, Curve& curve, const std::string& tempDir, std:
 	test::vectorTests(cr, curve, r, test::embeddedVectors());
 	test::scenarioTests(cr, curve, tempDir, r);
 	test::engineTests(cr, curve, tempDir, r);
+	test::liveTests(cr, curve, tempDir, r);
+	test::engineLiveTests(cr, curve, tempDir, r);
 	if (httpOnly && !serverBase.empty()) {
 		std::string live = liveBase;
 		const size_t at = serverBase.find("/api/classroom/v1");
 		if (live.empty() && at != std::string::npos) live = serverBase.substr(0, at) + "/api/live/v1";
 		test::serverTests(cr, curve, tempDir, r, *httpOnly, serverBase, live);
+		test::liveServerTests(cr, curve, r, *httpOnly, serverBase, live);
 	}
 	report = r.text + std::to_string(r.passed) + " passed, " + std::to_string(r.failed) + " failed\n";
 	return r.failed == 0;

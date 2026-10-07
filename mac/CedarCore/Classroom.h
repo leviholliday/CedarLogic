@@ -5,7 +5,10 @@
 // Host::checkCircuit and Host::lightsOf (Check My Circuit and the lights of a
 // pushed circuit come from the app, which has the simulator and the formula
 // reader), Config::deviceName, and read-only fields the UI needs (a record's
-// problem line, a class's warning line, the student's own score).
+// problem line, a class's warning line, the student's own score); and, for
+// revision 3's server (CLASSROOM.md 3.14, 13), the live connection: three
+// socket hooks on Host, Engine::socketOpened/Text/Closed for what comes back,
+// and Host::submissionsChanged.
 #pragma once
 #include "Sync.h"          // clsync::Crypto, HttpRequest, HttpResponse, Bytes
 #include <functional>
@@ -81,6 +84,15 @@ struct ClassInfo {
 };
 struct Status { enum Kind { Idle, Working, Offline, Error, Gone } kind = Idle; std::string text; };
 
+// (added) What a platform's WebSocket hands back (3.14), from any thread, for the socket `id` the
+// core opened: until the core closes that id itself, or after the platform reported it closed.
+struct SocketEvents {
+	virtual ~SocketEvents() = default;
+	virtual void socketOpened(int id) = 0;                             // the upgrade succeeded
+	virtual void socketText(int id, const std::string& text) = 0;      // a text frame
+	virtual void socketClosed(int id, int code) = 0;                   // gone, for whatever reason (1006: the network)
+};
+
 struct Host {
 	virtual ~Host() = default;
 	// Engine thread. Blocking, as Sync's; HTTPS only (http only for localhost overrides).
@@ -115,12 +127,33 @@ struct Host {
 		(void)cdl; (void)lights; (void)values;
 		return false;
 	}
+	// (added) The live connection (3.14): a WebSocket (wss://, or ws:// for a localhost override) with
+	// these request headers, text frames only. Engine thread; no blocking. socketOpen returns false
+	// on a platform without WebSockets (the engine then holds polls, 3.10); otherwise everything that
+	// happens to the socket comes back through `events` until socketClose(id) returns or the platform
+	// reports socketClosed(id). "ping" is an ordinary text frame (the server answers "pong").
+	virtual bool socketOpen(int id, const std::string& url, const std::vector<std::pair<std::string, std::string>>& headers,
+	                        SocketEvents& events) {
+		(void)id; (void)url; (void)headers; (void)events;
+		return false;
+	}
+	virtual void socketSend(int id, const std::string& text) { (void)id; (void)text; }
+	virtual void socketClose(int id, int code) { (void)id; (void)code; }
+	// (added) UI thread. A student handed in to that assignment (the teacher's live connection says
+	// so): a submissions view that is open refreshes (refreshSubmissions).
+	virtual void submissionsChanged(const std::string& classId, const std::string& aid) { (void)classId; (void)aid; }
 };
+
+// The classroom service (3.2, 3.13): the Worker's own origin. A placeholder that can never resolve
+// until the owner deploys and sets the real one in ClassroomProtocol.cpp (as the web core's
+// SERVICE); CL_CLASSROOM_SERVICE, or CL_CLASSROOM_URL and CL_LIVE_URL, point the apps at another
+// (cl_classroom_create).
+extern const char* const kService;          // https://cedarlogic-classroom.invalid
 
 struct Config {
 	std::string dir;                    // the Classroom folder
-	std::string serverBase = "https://cedarlogic.netlify.app/api/classroom/v1";
-	std::string liveBase = "https://cedarlogic.netlify.app/api/live/v1";
+	std::string serverBase = std::string(kService) + "/api/classroom/v1";
+	std::string liveBase = std::string(kService) + "/api/live/v1";
 	std::string appKey, client;         // x-cedarlogic-key, x-cedarlogic-client
 	std::string deviceName;             // (added) the sync side record's `device` (2.5)
 };
@@ -192,6 +225,16 @@ public:
 	void appDeactivated();
 	void userActive();
 	void syncSideChanged();                                                          // Sync applied a classroom record
+
+	// (added) The live connection (3.14): what the platform's socket says, from any thread
+	// (Host::socketOpen's `events` lead here too).
+	void socketOpened(int id);
+	void socketText(int id, const std::string& text);
+	void socketClosed(int id, int code);
+	// (added) A class's live connection: "" (none: the page isn't open), "connecting", "open",
+	// "fallback" (three tries got no hello: held polls, the socket again every 5 minutes) or
+	// "closed" (ended by the server: removed, deleted, a wrong key).
+	std::string liveConnection(const std::string& classId) const;
 
 private:
 	struct Impl;
