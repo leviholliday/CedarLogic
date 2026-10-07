@@ -65,6 +65,18 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   View's Predict and projector drawing: every light found again by a click,
   each with a name of its own, and a covered page that draws the same
   whatever the switches say (the out-dir must exist)
+- `ink_check <gatedefs> format/tests/fixtures/drawing [png-dir]` -- drawing on
+  the circuit and notes (the website's docs/DRAWING-NOTES.md): every sample
+  opened and saved through the core (same drawing and notes bytes), the Share
+  Link texts, the sync structure texts, strokes drawn, split at 2,000, capped,
+  erased, cleared, undone and redone, show and hide, the notes' limit and the
+  `<version>` escape, the older-format warning, read-only pages, and PNGs of a
+  drawing in each look. `mac/Tools/ink-old-readers.sh` reads every sample
+  with the format library from before drawings (cls/integrate). The format's
+  own vectors are `format/tests/test_ink.cpp` (the CMake `test_format`).
+- `register_check <gatedefs> <dir>` -- the Registers templates `--render-ui`
+  writes do what docs/REGISTER-EXAMPLES.md (website) says, one Step Clock at
+  a time, and their running-clock choice runs
 - `lock_check` -- parts locked in place: what's saved and read back (v3,
   v2, v1.x), refused moves, nudges, deletes, rotates and cuts, wiring and
   switches that still work, unlocked pasted copies, Tidy Up and Straighten,

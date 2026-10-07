@@ -428,6 +428,16 @@ texts are "the same" only when identical).
   Wire ids, segments, routing, junction points and buses' extra ids are
   ignored.
 
+- The drawing and the notes (the website's `docs/DRAWING-NOTES.md` §3.6), only
+  when there is something to say, so a circuit without them keeps its text and
+  hash: a line per stroke on a page with a readable drawing,
+  `D <page> <esc(tool)> <esc(color)> <width in thousandths> <x0>,<y0>,<x1>,<y1>,… [p:<pressure>]`
+  (points in absolute centi-units), and `N <esc(notes)>` when the notes hold
+  something other than space, tab and LF. A drawing of an unknown version and
+  the show/hide flag add nothing (showing or hiding is runtime-only). Vectors:
+  `format/tests/fixtures/drawing/structure.json`, checked by
+  `mac/Tools/ink_check`.
+
 `esc(s)` = the UTF-8 bytes of `s`, each byte outside `[A-Za-z0-9_.:-]` written
 `%XX` (upper-case hex). All lines are sorted (they are ASCII, so byte order),
 each ends with LF, and the text is `"cedarlogic-structure/1\n"` followed by the
