@@ -1508,6 +1508,7 @@ final class CanvasController: ObservableObject {
             note("No clock here moves on Step Clock. Double-click a clock and turn on \u{201C}Only on Step Clock\u{201D}.")
             return
         }
+        circuitAdvancedByUser()   // Predict: after Reveal, the next clock edge starts a new round
         redraw()
         scopeChanged()
     }
