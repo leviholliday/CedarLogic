@@ -23,6 +23,10 @@ struct SimBar: View {
     private var k: CGFloat { prefs.projector ? 1.3 : 1 }
     /// Room for Predict's controls: the speed loses its words.
     private var compact: Bool { predict.on || prefs.projector }
+    /// Projector mode and Predict together, with Step Clock beside Step: the
+    /// gaps close up and the speed gets shorter, so the bar still fits the
+    /// canvas of a default-size window (1280 points, palette open).
+    private var crowded: Bool { predict.on && prefs.projector }
 
     private let on = Color(.sRGB, red: 0.28, green: 0.93, blue: 1.0)
     private let ink = Color(.sRGB, red: 0.86, green: 0.93, blue: 1.0)
@@ -44,7 +48,7 @@ struct SimBar: View {
         let paused = !canvas.isRunning
         let breathe = paused ? 1.0 : 0.6 + 0.4 * sin(time * 3.2)
         let light = paused ? amber : live
-        return HStack(spacing: 14 * k) {
+        return HStack(spacing: crowded ? 12 : 14 * k) {
             // Status.
             HStack(spacing: 10 * k) {
                 ZStack {
@@ -75,7 +79,7 @@ struct SimBar: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("SPEED").font(.system(size: 9 * k, weight: .medium)).foregroundStyle(dim)
                 HStack(spacing: 12) {
-                    SimSpeedSlider(stepMs: $canvas.stepMs, on: on, scale: k, width: compact ? 110 : 150)
+                    SimSpeedSlider(stepMs: $canvas.stepMs, on: on, scale: k, width: crowded ? 84 : compact ? 110 : 150)
                     if !compact {
                         Text("\(canvas.stepMs) ms / step").font(.system(size: 11 * k)).monospacedDigit().foregroundStyle(ink)
                             .frame(width: 84 * k, alignment: .leading)
