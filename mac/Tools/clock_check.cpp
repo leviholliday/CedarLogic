@@ -3,7 +3,9 @@
 // writes: manual clocks hold still, each Step Clock is one full cycle, a
 // running clock still runs (and the templates' running choice has one), the
 // setting survives a save, a clock with it off saves without it, and undo
-// turns it back off.
+// turns it back off. The picker's pulse-button choice (-pulse): a
+// Single-Pulse Generator labeled Clock in place of the clock, and each
+// click on it clocks the flip-flop once.
 //   clock_check <cl_gatedefs.xml> <dir with template-builtin-ff-*.cdl>
 #include "CedarCore.h"
 #include <chrono>
@@ -136,6 +138,65 @@ static void runsAgain(CLDocument* doc, long gate, const std::string& name) {
 	check(still && cl_document_manual_clock_count(doc, 0) == 1, name + ": switched back mid-run, it holds still again");
 }
 
+
+// The pulse-button choice: no clock part, Q holds until the button (at
+// x = 6, its middle) is clicked, then each click is one clock.
+static bool clickPulse(CLDocument* doc, double clockY) {
+	const bool ok = cl_document_click(doc, 0, 6, clockY);
+	steps(doc, 20);
+	return ok;
+}
+
+static void pulseChoice(const std::string& dir, const char* id, const char* kind, double clockY) {
+	const std::string name = std::string("ff-") + id + "-pulse";
+	std::string text;
+	if (!readFile(dir + "/template-builtin-ff-" + id + "-pulse.cdl", text)) { check(false, name + ": template file"); return; }
+	check(text.find("CC_PULSE") != std::string::npos && text.find("BB_CLOCK") == std::string::npos,
+	      name + ": a pulse button, no clock part");
+	check(text.find("Click the Clock button") != std::string::npos && text.find("K key") == std::string::npos,
+	      name + ": the hint says to click Clock, no K key");
+	CLDocument* doc = openText(text);
+	if (!doc) { failures++; return; }
+	check(cl_document_manual_clock_count(doc, 0) == 0 && !cl_document_clock_step(doc, 0), name + ": nothing for Step Clock");
+	if (strcmp(kind, "jk") == 0 || strcmp(kind, "t") == 0) {
+		flip(doc, 8);
+		if (strcmp(kind, "jk") == 0) flip(doc, -8);
+		const bool q0 = q(doc);
+		bool still = true;
+		for (int i = 0; i < 200; i++) { cl_document_step(doc); if (q(doc) != q0) still = false; }
+		check(still, name + ": Q holds until the button is clicked");
+		bool ok = true, prev = q(doc);
+		for (int i = 0; i < 8; i++) {
+			if (!clickPulse(doc, clockY)) { ok = false; break; }
+			if (q(doc) == prev || nq(doc) == q(doc)) ok = false;
+			prev = q(doc);
+		}
+		check(ok, name + ": each click on Clock toggles Q (8 clicks)");
+	} else {
+		if (strcmp(kind, "dce") == 0) {
+			flip(doc, 8);                  // D = 1 with CE = 0
+			const bool q0 = q(doc);
+			clickPulse(doc, clockY);
+			check(q(doc) == q0, name + ": with CE = 0, a click leaves Q alone");
+			flip(doc, -8);                 // CE = 1
+			flip(doc, 8);                  // D back to 0
+		}
+		bool d = false, ok = true;
+		clickPulse(doc, clockY);           // start with Q = D = 0
+		if (q(doc)) ok = false;
+		for (int i = 0; i < 6; i++) {
+			flip(doc, 8);
+			d = !d;
+			steps(doc, 20);
+			if (q(doc) == d) ok = false;   // not taken before the click
+			if (!clickPulse(doc, clockY)) ok = false;
+			if (q(doc) != d || nq(doc) == d) ok = false;
+		}
+		check(ok, name + ": Q takes D on each click on Clock, and not before");
+	}
+	cl_document_close(doc);
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) { fprintf(stderr, "usage: clock_check <cl_gatedefs.xml> <render-ui dir>\n"); return 2; }
 	if (!cl_library_load(argv[1])) { fprintf(stderr, "couldn't load the library\n"); return 1; }
@@ -205,6 +266,7 @@ int main(int argc, char** argv) {
 			check(changes >= 10, name + "-running: Q toggles by itself (" + std::to_string(changes) + " changes in 200 steps)");
 		}
 		cl_document_close(doc);
+		pulseChoice(dir, t.id, t.kind, t.clockY);
 	}
 
 	// A new clock: no MANUAL in its file (off isn't saved, so a running

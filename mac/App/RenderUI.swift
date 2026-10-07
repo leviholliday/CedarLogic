@@ -65,9 +65,10 @@ enum RenderUI {
             }
         }
         // The built-in templates, as files and pictures (a flip-flop's running
-        // clock choice as -running).
+        // clock choice as -running, its pulse button as -pulse).
         let builtIn = Templates.builtIn.map { (id: $0.id, text: $0.text) }
             + Templates.builtIn.compactMap { t in t.runningText.map { (id: t.id + "-running", text: $0) } }
+            + Templates.builtIn.compactMap { t in t.pulseText.map { (id: t.id + "-pulse", text: $0) } }
         for t in builtIn {
             try? t.text.write(to: dir.appendingPathComponent("template-\(t.id).cdl"), atomically: true, encoding: .utf8)
             if let d = try? CoreDocument(data: Data(t.text.utf8)),

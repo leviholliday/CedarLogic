@@ -4,7 +4,8 @@
 // and clears; the shift register shifts left and right, holds, loads and
 // clears; serial-in parallel-out shifts and sets or clears at once; the ring
 // counter goes round; the Johnson counter counts its eight states -- and
-// each running-clock choice runs.
+// each running-clock choice runs, and each pulse-button choice (-pulse)
+// clocks once per click on its button.
 //   register_check <cl_gatedefs.xml> <dir with template-builtin-reg-*.cdl>
 // (`CedarLogic --render-ui <dir>` writes them.)
 #include "CedarCore.h"
@@ -97,6 +98,31 @@ static void runs(const std::string& dir, const std::string& id, double x = 0, do
 	cl_document_close(doc);
 }
 
+
+// The pulse-button choice: no clock part; each click on the button at
+// (x, y) clocks it once. `flips` are switches set first (x, y, name).
+struct Flip { double x, y; const char* what; };
+static void pulsed(const std::string& dir, const std::string& id, double x, double y,
+                   const std::vector<Flip>& flips, const std::vector<std::string>& want, const std::string& what) {
+	CLDocument* doc = open(dir, id + "-pulse");
+	if (!doc) { check(false, id + " (pulse button): opens"); return; }
+	check(cl_document_manual_clock_count(doc, 0) == 0 && !cl_document_clock_step(doc, 0), id + " (pulse button): no clock part to step");
+	for (const Flip& f : flips) flip(doc, f.x, f.y, f.what);
+	const std::string before = q(doc);
+	steps(doc, 200);
+	check(q(doc) == before, id + " (pulse button): holds until it's clicked (" + q(doc) + ")");
+	std::string got;
+	bool ok = true;
+	for (const std::string& w : want) {
+		if (!cl_document_click(doc, 0, x, y)) { ok = false; got += " no button"; break; }
+		steps(doc, 12);
+		got += (got.empty() ? "" : " ") + q(doc);
+		if (q(doc) != w) ok = false;
+	}
+	check(ok, id + " (pulse button): " + what + " (" + got + ")");
+	cl_document_close(doc);
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) { fprintf(stderr, "usage: register_check <cl_gatedefs.xml> <render-ui dir>\n"); return 2; }
 	if (!cl_library_load(argv[1])) { fprintf(stderr, "library failed\n"); return 1; }
@@ -182,6 +208,13 @@ int main(int argc, char** argv) {
 		cl_document_close(doc);
 	}
 	runs(dir, "johnson");
+
+	// The pulse-button choices: the button sits where the clock's output was.
+	pulsed(dir, "register", 22, -31, {}, { "0101" }, "Load on: a click stores D3-D0 = 0101");
+	pulsed(dir, "shift", 16, -26, {}, { "0001", "0011" }, "each click shifts: 0001, 0011");
+	pulsed(dir, "sipo", 14, -35, {}, { "0001", "0011", "0111" }, "each click moves the bits: 0001, 0011, 0111");
+	pulsed(dir, "ring", 16, -26, {}, { "0001" }, "a click loads 0001");
+	pulsed(dir, "johnson", 14, -35, {}, { "0001", "0011", "0111", "1111", "1110" }, "0001, 0011, 0111, 1111, 1110");
 
 	printf("%d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;

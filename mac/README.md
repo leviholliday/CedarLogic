@@ -76,7 +76,19 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   own vectors are `format/tests/test_ink.cpp` (the CMake `test_format`).
 - `register_check <gatedefs> <dir>` -- the Registers templates `--render-ui`
   writes do what docs/REGISTER-EXAMPLES.md (website) says, one Step Clock at
-  a time, and their running-clock choice runs
+  a time, their running-clock choice runs, and their pulse-button choice
+  (`-pulse`) clocks once per click on its button (clock_check does the same
+  for the flip-flops)
+- `CedarLogic --render-presenter <dir>` -- presenter mode without a second
+  display: a real canvas off screen in each editing state (a selection and
+  the pin under the pointer, a drag box, a wire being connected, a part
+  moved or placed, Tidy's preview, a stroke, Simulation View with and
+  without projector mode, dark, the Simple interface) must draw the same in
+  the presentation at the editor's size; then the presentation at 1280x720
+  and 1024x768 with the big pointer and a click's ring (PNGs in <dir>).
+  It also draws with synthetic mouse and trackpad events: a drag draws a
+  steady line at the chosen width, a tap a dot, Force Touch keeps the width,
+  and the 1-3 keys pick it. PASS or FAIL for each; exit 1 on a failure
 - `lock_check` -- parts locked in place: what's saved and read back (v3,
   v2, v1.x), refused moves, nudges, deletes, rotates and cuts, wiring and
   switches that still work, unlocked pasted copies, Tidy Up and Straighten,
