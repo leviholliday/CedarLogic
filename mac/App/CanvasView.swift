@@ -92,6 +92,11 @@ final class CircuitCanvasNSView: NSView {
     var inkErasing = false
     var forcePressure: Double?
 
+    /// The last click, where and when (world, y up): the presentation
+    /// flashes a ring there so the room sees it (Presenter.swift).
+    var lastPress: (at: CGPoint, time: CFTimeInterval)?
+    func notePress(_ e: NSEvent) { lastPress = (worldPoint(convert(e.locationInWindow, from: nil)), CACurrentMediaTime()) }
+
     /// An eased zoom in progress (CLCanvas.swift).
     var zoomAnim: ZoomAnimation?
 
@@ -249,39 +254,48 @@ final class CircuitCanvasNSView: NSView {
         }
         if needsFit, bounds.width > 0 { zoomToFit() }
         if clMode { drawCL(ctx); drawWireTag(ctx); return }
+        Self.paintSimple(ctx, document: document, theme: theme, page: page, origin: origin, upp: unitsPerPoint,
+                         size: bounds.size, scale: window?.backingScaleFactor ?? 2)
+    }
+
+    /// What the Simple interface's canvas shows, for a camera (the
+    /// presentation draws it too, with its own).
+    static func paintSimple(_ ctx: CGContext, document: CoreDocument?, theme: Theme, page: Int,
+                            origin: CGPoint, upp: CGFloat, size: CGSize, scale: CGFloat) {
         ctx.setFillColor(theme.canvas.cgColor)
-        ctx.fill(bounds)
-        drawGrid(ctx)
+        ctx.fill(CGRect(origin: .zero, size: size))
+        drawGrid(ctx, theme: theme, origin: origin, upp: upp, size: size)
         guard let document else { return }
-        let scale = window?.backingScaleFactor ?? 2
-        cl_document_draw(document.handle, Int32(page), ctx, scale, origin.x, origin.y,
-                         unitsPerPoint, theme.darkCircuit)
-        defer { drawInkLive(ctx, dark: theme.darkCircuit, projector: false) }
-        cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
+        cl_document_draw(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, theme.darkCircuit)
+        cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp,
                              theme.accent.r, theme.accent.g, theme.accent.b)
         if let box = document.selectionBox {
-            let r = viewRect(box)
+            let r = CGRect(x: (box.minX - origin.x) / upp, y: (origin.y - box.maxY) / upp,
+                           width: box.width / upp, height: box.height / upp)
             ctx.setFillColor(theme.accent.cgColor.copy(alpha: 0.12)!)
             ctx.fill(r)
             ctx.setStrokeColor(theme.accent.cgColor.copy(alpha: 0.8)!)
             ctx.setLineWidth(1)
             ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
         }
+        if cl_ink_live_page(document.handle) == Int32(page) {
+            cl_ink_draw_live(document.handle, ctx, Double(scale), origin.x, origin.y, upp, theme.darkCircuit, false)
+        }
     }
 
     /// Minor lines every world unit, major every five; minor ones drop out
     /// when they'd crowd closer than a few points.
-    private func drawGrid(_ ctx: CGContext) {
+    private static func drawGrid(_ ctx: CGContext, theme: Theme, origin: CGPoint, upp: CGFloat, size: CGSize) {
         guard theme.gridStyle != .none else { return }
-        let spacing = 1.0 / unitsPerPoint   // points per world unit
+        let spacing = 1.0 / upp   // points per world unit
         let showMinor = spacing >= 7
         let step = showMinor ? 1 : 5
-        let x0 = Int(floor(origin.x)), x1 = Int(ceil(origin.x + bounds.width * unitsPerPoint))
-        let y1 = Int(ceil(origin.y)), y0 = Int(floor(origin.y - bounds.height * unitsPerPoint))
+        let x0 = Int(floor(origin.x)), x1 = Int(ceil(origin.x + size.width * upp))
+        let y1 = Int(ceil(origin.y)), y0 = Int(floor(origin.y - size.height * upp))
         let startX = x0 - ((x0 % step) + step) % step
         let startY = y0 - ((y0 % step) + step) % step
-        func sx(_ x: Int) -> CGFloat { (CGFloat(x) - origin.x) / unitsPerPoint }
-        func sy(_ y: Int) -> CGFloat { (origin.y - CGFloat(y)) / unitsPerPoint }
+        func sx(_ x: Int) -> CGFloat { (CGFloat(x) - origin.x) / upp }
+        func sy(_ y: Int) -> CGFloat { (origin.y - CGFloat(y)) / upp }
 
         if theme.gridStyle == .lines {
             for pass in 0..<2 {   // minor, then major on top
@@ -290,10 +304,10 @@ final class CircuitCanvasNSView: NSView {
                 ctx.setStrokeColor((major ? theme.gridMajor : theme.gridMinor).cgColor)
                 ctx.setLineWidth(major ? 1 : 0.5)
                 for x in stride(from: startX, through: x1, by: step) where (x % 5 == 0) == major {
-                    ctx.move(to: CGPoint(x: sx(x), y: 0)); ctx.addLine(to: CGPoint(x: sx(x), y: bounds.height))
+                    ctx.move(to: CGPoint(x: sx(x), y: 0)); ctx.addLine(to: CGPoint(x: sx(x), y: size.height))
                 }
                 for y in stride(from: startY, through: y1, by: step) where (y % 5 == 0) == major {
-                    ctx.move(to: CGPoint(x: 0, y: sy(y))); ctx.addLine(to: CGPoint(x: bounds.width, y: sy(y)))
+                    ctx.move(to: CGPoint(x: 0, y: sy(y))); ctx.addLine(to: CGPoint(x: size.width, y: sy(y)))
                 }
                 ctx.strokePath()
             }
@@ -372,6 +386,7 @@ final class CircuitCanvasNSView: NSView {
     override func smartMagnify(with event: NSEvent) { zoomToFit() }
 
     override func mouseDown(with event: NSEvent) {
+        notePress(event)
         hideWireTag()
         if let d = document, cl_edit_hover_clear(d.handle) { needsDisplay = true }
         window?.makeFirstResponder(self)
@@ -431,12 +446,13 @@ final class CircuitCanvasNSView: NSView {
     }
 
     // Right or middle drag moves around.
-    override func otherMouseDown(with event: NSEvent) { drag = .pan(last: convert(event.locationInWindow, from: nil)) }
+    override func otherMouseDown(with event: NSEvent) { notePress(event); drag = .pan(last: convert(event.locationInWindow, from: nil)) }
     override func otherMouseDragged(with event: NSEvent) { mouseDragged(with: event) }
     override func otherMouseUp(with event: NSEvent) { drag = .none }
     // Right-click: a menu for what's under the pointer, as in the wx app
     // (a connected pin's disconnect, a wire's straighten, a gate's settings).
     override func rightMouseDown(with event: NSEvent) {
+        notePress(event)
         controller?.onActivate?()
         if controller?.drawing == true { inkRightMouseDown(event); return }
         if clMode, clRightMouseDown(event) { return }

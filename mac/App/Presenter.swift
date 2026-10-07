@@ -1,12 +1,16 @@
 // Presenter mode (Mac only): View ▸ Present On ▸ <display> opens a clean
-// full-screen picture of the circuit on that display -- Simulation View's
-// projector styling, no toolbars or panels -- while the window on the
-// laptop stays the editor. Both show the same circuit live: the simulation,
-// switches flipped in the editor, and strokes as they're drawn. The
-// picture follows the editor's page, middle and zoom (fitted to the
-// display), so the teacher drives it from the laptop. Escape (with the
-// presentation clicked) or View ▸ Stop Presenting ends it; the display is
-// remembered by name; unplugging it ends the presentation.
+// full-screen picture of the circuit on that display -- no toolbars, palette,
+// notes or other panels -- while the window on the laptop stays the editor.
+// It mirrors the editor, so the room sees what the teacher points at without
+// them turning round: the page, middle and zoom (fitted to the display), the
+// look (the editing view, light or dark as the editor has it; Simulation
+// View, with its projector mode and Predict covers, only while the editor is
+// in it), the selection, the drag box, the part, pin or wire under the
+// pointer, a part being moved or placed, a wire being connected, Tidy's
+// ghost, strokes as they're drawn, the simulation, and the pointer itself
+// (drawn big, with a ring at each click). Escape (with the presentation
+// clicked) or View ▸ Stop Presenting ends it; the display is remembered by
+// name; unplugging it ends the presentation.
 //
 // With one display, Present in This Window makes the circuit window itself
 // the presentation: full screen, Simulation View in projector mode, no side
@@ -85,7 +89,7 @@ final class Presenter: ObservableObject {
         w.level = .statusBar
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         w.isReleasedWhenClosed = false
-        w.backgroundColor = .black
+        w.backgroundColor = Prefs.shared.dark ? .black : .white
         w.title = "CedarLogic Presentation"
         w.onEscape = { [weak self] in self?.stop() }
         let v = PresenterView(frame: NSRect(origin: .zero, size: screen.frame.size))
@@ -190,9 +194,21 @@ final class PresenterWindow: NSWindow {
     override func cancelOperation(_ sender: Any?) { onEscape?() }
 }
 
-/// The presentation: the editor's page, middle and zoom, in projector styling.
+/// The pointer as the presentation shows it (world, y up).
+struct MirrorPointer {
+    var world: CGPoint
+    var pressed = false
+    /// Draw mode: a ring round the pen's point instead of an arrow.
+    var pen = false
+}
+
+/// The presentation: what the editor's canvas shows, with its own camera.
 final class PresenterView: NSView {
     weak var source: CanvasController?
+    /// For pictures (--render-presenter): the pointer to show instead of the
+    /// real one (.some(nil) shows none), and a click ring's age in seconds.
+    var pointerOverride: MirrorPointer??
+    var pressOverride: (at: CGPoint, age: Double)?
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
 
@@ -203,9 +219,12 @@ final class PresenterView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    /// The side being worked in: in a split, the one clicked last.
+    var side: CanvasController? { source?.routed }
+
     /// The camera: the world the editor shows, fitted to this view.
     func camera() -> (origin: CGPoint, upp: CGFloat)? {
-        guard let src = source, let ed = src.view, let doc = src.document, bounds.width > 0, bounds.height > 0 else { return nil }
+        guard let src = side, let ed = src.view, let doc = src.document, bounds.width > 0, bounds.height > 0 else { return nil }
         var world = ed.bounds.width > 0 ? ed.visibleWorldRect : (doc.fitBounds(ofPage: src.page) ?? CGRect(x: -20, y: -15, width: 40, height: 30))
         if world.width <= 0 || world.height <= 0 { world = CGRect(x: -20, y: -15, width: 40, height: 30) }
         let upp = max(world.width / bounds.width, world.height / bounds.height)
@@ -214,39 +233,102 @@ final class PresenterView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let pal = CLPalette(dark: true, simView: true)
-        ctx.setFillColor(pal.canvasCG)
-        ctx.fill(bounds)
-        guard let src = source, let doc = src.document, let cam = camera() else { return }
+        guard let src = side, let doc = src.document, let cam = camera() else {
+            ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+            ctx.fill(bounds)
+            return
+        }
         Self.drawPage(ctx, document: doc, controller: src, page: src.page, origin: cam.origin, upp: cam.upp,
                       size: bounds.size, scale: window?.backingScaleFactor ?? 2)
+        drawPointer(ctx, origin: cam.origin, upp: cam.upp)
     }
 
-    /// The page as the projector shows it (also --render-ui's picture).
+    /// The page as the editor shows it, for this camera (also the pictures'
+    /// of --render-ui and --render-presenter). No controller: the editing
+    /// view of the CedarLogic interface.
     static func drawPage(_ ctx: CGContext, document doc: CoreDocument, controller src: CanvasController?, page: Int,
                          origin: CGPoint, upp: CGFloat, size: CGSize, scale: CGFloat) {
+        if let ed = src?.view, !ed.clMode {
+            CircuitCanvasNSView.paintSimple(ctx, document: doc, theme: ed.theme, page: page, origin: origin, upp: upp,
+                                            size: size, scale: scale)
+        } else {
+            CircuitCanvasNSView.paintCL(ctx, document: doc, controller: src, page: page, origin: origin, upp: upp,
+                                        size: size, scale: scale)
+        }
+    }
+
+    // MARK: The pointer
+
+    /// Where the teacher's pointer is: over the editor's canvas (not over
+    /// a menu, another window or the panels), in its world.
+    func livePointer() -> MirrorPointer? {
+        if let o = pointerOverride { return o }
+        guard let src = side, let ed = src.view, let w = ed.window, w.isVisible else { return nil }
+        let at = NSEvent.mouseLocation
+        guard NSWindow.windowNumber(at: at, belowWindowWithWindowNumber: 0) == w.windowNumber else { return nil }
+        let p = ed.convert(w.convertPoint(fromScreen: at), from: nil)
+        guard ed.visibleRect.contains(p) else { return nil }
+        return MirrorPointer(world: ed.worldPoint(p), pressed: NSEvent.pressedMouseButtons & 1 != 0, pen: src.drawing)
+    }
+
+    /// How long a click's ring lasts.
+    static let pressRingTime = 0.5
+
+    /// The pointer, sized for the back of the room whatever the zoom: an
+    /// arrow (or, drawing, a ring round the pen's point) on a soft halo in
+    /// the accent colour, the halo stronger while the button is down, and a
+    /// ring spreading from each click.
+    private func drawPointer(_ ctx: CGContext, origin: CGPoint, upp: CGFloat) {
+        func view(_ w: CGPoint) -> CGPoint { CGPoint(x: (w.x - origin.x) / upp, y: (origin.y - w.y) / upp) }
+        let unit = max(1, min(bounds.height / 720, 2.5))   // 1 on a 720-point display
         let prefs = Prefs.shared
-        let pal = CLPalette(dark: true, simView: true)
-        if prefs.showGrid {
-            CLGrid.draw(ctx, pal: pal, scale: scale, fade: 1, origin: origin, unitsPerPoint: upp, size: size)
+        let dark = prefs.dark || (side?.simView ?? false)
+        let a = prefs.accentRGB(dark: dark)
+        let accent = CGColor(srgbRed: a.0, green: a.1, blue: a.2, alpha: 1)
+        // A click's ring.
+        let press: (at: CGPoint, age: Double)? = pressOverride ?? side?.view?.lastPress.map { ($0.at, CACurrentMediaTime() - $0.time) }
+        if let press, press.age >= 0, press.age < Self.pressRingTime {
+            let t = press.age / Self.pressRingTime
+            let c = view(press.at)
+            let r = (12 + 34 * (1 - pow(1 - t, 2))) * unit
+            ctx.setStrokeColor(accent.copy(alpha: 0.9 * (1 - t))!)
+            ctx.setLineWidth(4 * unit)
+            ctx.strokeEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
         }
-        // Predict's covers stay on: the projector must not give the answer away.
-        let covered = src?.predictCovers ?? false
-        var st = CLSimViewStyle(accent: Int32(prefs.accent), wireScale: prefs.wireScale, projector: true, predict: covered,
-                                ink: Int32(CL_INK_FOLLOW))
-        cl_simview_draw_page(doc.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, &st)
-        if !covered {
-            cl_simview_draw_flow(doc.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, src?.flowPhase ?? 0,
-                                 prefs.wireScale * CL_PROJECTOR_WIRE_SCALE)
+        guard let ptr = livePointer() else { return }
+        let tip = view(ptr.world)
+        let halo = (ptr.pressed ? 20 : 24) * unit
+        ctx.setFillColor(accent.copy(alpha: ptr.pressed ? 0.45 : 0.25)!)
+        ctx.fillEllipse(in: CGRect(x: tip.x - halo, y: tip.y - halo, width: 2 * halo, height: 2 * halo))
+        if ptr.pen {
+            let r = 9 * unit
+            let ring = CGRect(x: tip.x - r, y: tip.y - r, width: 2 * r, height: 2 * r)
+            ctx.setStrokeColor(CGColor(gray: dark ? 0 : 1, alpha: 0.9))
+            ctx.setLineWidth(5 * unit)
+            ctx.strokeEllipse(in: ring)
+            ctx.setStrokeColor(accent)
+            ctx.setLineWidth(2.5 * unit)
+            ctx.strokeEllipse(in: ring)
+            return
         }
-        if let src, src.simView, src.predict.on {
-            let marks = src.predictMarks
-            cl_simview_draw_predict(doc.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, marks, Int32(marks.count), true)
-        }
-        // A stroke as it's drawn in the editor.
-        if cl_ink_live_page(doc.handle) == Int32(page) {
-            cl_ink_draw_live(doc.handle, ctx, scale, origin.x, origin.y, upp, true, true)
-        }
+        // The arrow: the system's shape, white with a dark edge, tip at the point.
+        let s = 1.7 * unit
+        let shape: [CGFloat] = [0, 0, 0, 17, 4.2, 13, 7, 19.5, 9.6, 18.4, 6.9, 12.2, 12.3, 12.2]
+        var pts: [CGPoint] = []
+        for k in stride(from: 0, to: shape.count, by: 2) { pts.append(CGPoint(x: tip.x + shape[k] * s, y: tip.y + shape[k + 1] * s)) }
+        ctx.saveGState()
+        ctx.setShadow(offset: CGSize(width: 0, height: 1.5 * unit), blur: 4 * unit, color: CGColor(gray: 0, alpha: 0.45))
+        ctx.addLines(between: pts)
+        ctx.closePath()
+        ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+        ctx.fillPath()
+        ctx.restoreGState()
+        ctx.addLines(between: pts)
+        ctx.closePath()
+        ctx.setStrokeColor(CGColor(gray: 0, alpha: 1))
+        ctx.setLineWidth(1.4 * unit)
+        ctx.setLineJoin(.round)
+        ctx.strokePath()
     }
 }
 

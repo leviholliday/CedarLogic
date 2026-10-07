@@ -11,43 +11,59 @@ extension CircuitCanvasNSView {
     // MARK: Drawing
 
     func drawCL(_ ctx: CGContext) {
+        Self.paintCL(ctx, document: document, controller: controller, page: page, origin: origin, upp: unitsPerPoint,
+                     size: bounds.size, scale: window?.backingScaleFactor ?? 2)
+    }
+
+    /// Everything the CedarLogic canvas shows, for a camera: the background
+    /// and grid, the circuit (Simulation View's look when it's on), the
+    /// selection, the part, pin or wire under the pointer, a move or a wire
+    /// in progress, Tidy's ghost, the drag box and the stroke being drawn.
+    /// The presentation (Presenter.swift) draws the same with its own camera.
+    static func paintCL(_ ctx: CGContext, document: CoreDocument?, controller: CanvasController?, page: Int,
+                        origin: CGPoint, upp: CGFloat, size: CGSize, scale: CGFloat) {
         let prefs = Prefs.shared
         let sim = controller?.simView ?? false
         let dark = prefs.dark || sim
         let pal = CLPalette(dark: dark, simView: sim)
-        let scale = window?.backingScaleFactor ?? 2
+        let bounds = CGRect(origin: .zero, size: size)
         ctx.setFillColor(pal.canvasCG)
         ctx.fill(bounds)
-        if prefs.showGrid { drawCLGrid(ctx, pal: pal, scale: scale, fade: controller?.appearProgress ?? 1) }
+        if prefs.showGrid {
+            CLGrid.draw(ctx, pal: pal, scale: scale, fade: controller?.appearProgress ?? 1, origin: origin, unitsPerPoint: upp, size: size)
+        }
         guard let document else { return }
+        func viewRect(_ world: CGRect) -> CGRect {
+            CGRect(x: (world.minX - origin.x) / upp, y: (origin.y - world.maxY) / upp, width: world.width / upp, height: world.height / upp)
+        }
         if sim {
             // Projector mode and Predict, then reveal (Predict.swift): covered
             // lights hide their answer, so no wire glows and no dashes march.
             let covered = controller?.predictCovers ?? false
             var st = CLSimViewStyle(accent: Int32(prefs.accent), wireScale: prefs.wireScale,
                                     projector: prefs.projector, predict: covered, ink: Int32(CL_INK_FOLLOW))
-            cl_simview_draw_page(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, &st)
+            cl_simview_draw_page(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, &st)
             if !covered {
-                cl_simview_draw_flow(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
+                cl_simview_draw_flow(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp,
                                      controller?.flowPhase ?? 0,
                                      prefs.wireScale * (prefs.projector ? CL_PROJECTOR_WIRE_SCALE : 1))
             }
             // The wire under the pointer, lit up whole.
             let a = prefs.accentRGB(dark: true)
-            cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, a.0, a.1, a.2)
+            cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, a.0, a.1, a.2)
             if let controller, controller.predict.on {
                 let marks = controller.predictMarks
-                cl_simview_draw_predict(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
+                cl_simview_draw_predict(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp,
                                         marks, Int32(marks.count), prefs.projector)
             }
         } else {
             var o = CLDrawOptions(dark: dark, accent: Int32(prefs.accent), wireScale: prefs.wireScale,
                                   simView: sim, thumbnail: false, showSelection: true,
                                   selectionFade: controller?.selectionFade ?? 1, ink: Int32(CL_INK_FOLLOW))
-            cl_document_draw_ex(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, &o)
+            cl_document_draw_ex(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, &o)
             let a = prefs.accentRGB(dark: dark)
             let accent = CGColor(srgbRed: a.0, green: a.1, blue: a.2, alpha: 1)
-            cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint, a.0, a.1, a.2)
+            cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, a.0, a.1, a.2)
             if let box = document.selectionBox {
                 drawBox(ctx, viewRect(box), accent, 1)
             } else if let box = controller?.dragFadeBox, let alpha = controller?.dragFadeAlpha, alpha > 0 {
@@ -55,7 +71,9 @@ extension CircuitCanvasNSView {
             }
         }
         // The stroke being drawn, and what the pointer would draw.
-        drawInkLive(ctx, dark: dark, projector: sim && prefs.projector)
+        if cl_ink_live_page(document.handle) == Int32(page) {
+            cl_ink_draw_live(document.handle, ctx, Double(scale), origin.x, origin.y, upp, dark, sim && prefs.projector)
+        }
         // A tab on its way out dims towards the background.
         if let p = controller?.closeProgress, p > 0 {
             ctx.setFillColor(pal.canvasCG.copy(alpha: p)!)
@@ -63,18 +81,12 @@ extension CircuitCanvasNSView {
         }
     }
 
-    private func drawBox(_ ctx: CGContext, _ r: CGRect, _ accent: CGColor, _ alpha: Double) {
+    private static func drawBox(_ ctx: CGContext, _ r: CGRect, _ accent: CGColor, _ alpha: Double) {
         ctx.setFillColor(accent.copy(alpha: 0.25 * alpha)!)
         ctx.fill(r)
         ctx.setStrokeColor(accent.copy(alpha: alpha)!)
         ctx.setLineWidth(1)
         ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
-    }
-
-    /// GUICanvas::drawGridInto: a line (or dot) every grid unit, spread out
-    /// so they're never closer than 13 pixels; every fifth one darker.
-    private func drawCLGrid(_ ctx: CGContext, pal: CLPalette, scale: CGFloat, fade: Double) {
-        CLGrid.draw(ctx, pal: pal, scale: scale, fade: fade, origin: origin, unitsPerPoint: unitsPerPoint, size: bounds.size)
     }
 
     // MARK: Camera

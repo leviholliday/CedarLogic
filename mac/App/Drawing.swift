@@ -276,11 +276,6 @@ extension CircuitCanvasNSView {
         forcePressure = e.stage >= 2 ? 1.0 : e.stage == 1 ? Double(max(0, min(1, e.pressure))) : nil
     }
 
-    func drawInkLive(_ ctx: CGContext, dark: Bool, projector: Bool) {
-        guard let document, cl_ink_live_page(document.handle) == Int32(page) else { return }
-        cl_ink_draw_live(document.handle, ctx, Double(window?.backingScaleFactor ?? 2), origin.x, origin.y, unitsPerPoint, dark, projector)
-    }
-
     func inkRightMouseDown(_ e: NSEvent) {
         guard let controller else { return }
         let menu = NSMenu()

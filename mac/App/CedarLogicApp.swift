@@ -26,6 +26,7 @@ struct CedarLogicApp: App {
             MenuFixup.install()
             RenderUI.runIfAsked()
             RenderWindow.runIfAsked()
+            RenderPresenter.runIfAsked()
             LabReport.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
             DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
