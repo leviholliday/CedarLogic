@@ -442,6 +442,16 @@ ever disagreed on a default, the cost is a spurious "changed" or conflict
 version for that gate type, never lost data; the vectors include gates with
 defaults that matter (a toggle, an LED, a register, a label).
 
+A default added to the library later must not change the digest of files
+written before it in clients that don't have it yet. So a parameter added with
+a default is written only when it differs from that default: the clock's
+`MANUAL` ("Only on Step Clock", library default `false`) is saved only as
+`"true"`, by the apps and by CedarLogic Online alike. A running clock's file is
+then byte for byte what older versions wrote, and an older client (no `MANUAL`
+in its library) keeps `l:MANUAL=true` exactly as a newer one does. An older
+app opens a manual clock as a running one, keeps the parameter and saves it
+again.
+
 What it means: moving a gate, adding or removing one, changing a parameter a
 person sets (label text, input count, a register's max count) or a connection
 changes the structure; flipping a switch, a register counting, the app version,
