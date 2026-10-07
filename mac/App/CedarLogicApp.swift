@@ -27,6 +27,7 @@ struct CedarLogicApp: App {
             RenderUI.runIfAsked()
             RenderWindow.runIfAsked()
             RenderPresenter.runIfAsked()
+            RenderClassroom.runIfAsked()
             LabReport.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
             DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
@@ -81,6 +82,13 @@ struct CedarLogicApp: App {
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 600, height: 540)
+        .defaultPosition(.center)
+
+        Window("Classroom", id: "classroom") {
+            ClassroomView()
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 960, height: 680)
         .defaultPosition(.center)
 
         Window("CedarLogic Help", id: "help") {
@@ -165,6 +173,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
         let env = ProcessInfo.processInfo.environment
         if !BarTest.on, env["CL_SNAPSHOT"] == nil, env["CL_MENU_DUMP"] == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { SyncCenter.shared.start() } }
+            // Classroom (behind its flag) polls the classes this Mac teaches or is in.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { ClassroomCenter.shared.start() } }
         }
         // Once anything macOS was asked to open (a file double-clicked in
         // Finder) has arrived: the circuit you were last in (LastCircuit), as
@@ -336,6 +346,17 @@ struct NewOpenCommands: Commands {
             Button("New from Template…") { openWindow(id: "templates") }
             Button("Save as Template…") { if let canvas { Templates.saveCurrent(from: canvas) } }
                 .disabled(canvas == nil)
+            if ClassroomFlag.on {
+                Menu("Classroom") {
+                    Button("Classroom…") { openWindow(id: "classroom") }
+                    Button("Create Classroom…") { ClassroomCenter.shared.sheet = .create; openWindow(id: "classroom") }
+                    Button("Join a Class…") { ClassroomCenter.shared.sheet = .join(prefill: ""); openWindow(id: "classroom") }
+                    Button("I Have a Teacher Key…") { ClassroomCenter.shared.sheet = .addTeacherKey(prefill: ""); openWindow(id: "classroom") }
+                    Divider()
+                    Button("Hand In…") { ClassroomCenter.shared.handInFront() }
+                        .disabled(canvas == nil)
+                }
+            }
             Divider()
             Button("New Tab") { canvas?.perform(.newTab) }
                 .keyboardShortcut(keys.menu(.newTab))

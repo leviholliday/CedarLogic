@@ -51,6 +51,20 @@ enum ShareLink {
     /// Circuits, as File > Import does.
     static func open(_ url: URL) {
         guard url.scheme?.lowercased() == "cedarlogic" else { return }
+        if url.host?.lowercased() == "classroom" {
+            // cedarlogic://classroom#t= / #j= / #m=: the matching sheet with the code filled in, never more (§5.5).
+            guard ClassroomFlag.on, let frag = url.fragment, frag.count > 2 else { return }
+            let code = String(frag.dropFirst(2))
+            let c = ClassroomCenter.shared
+            switch frag.prefix(2) {
+            case "t=": c.sheet = .addTeacherKey(prefill: code)
+            case "j=": c.sheet = .join(prefill: code)
+            case "m=": c.sheet = .moveIn(prefill: code)
+            default: return
+            }
+            AppActions.openWindow?(id: "classroom")
+            return
+        }
         if url.host?.lowercased() == "sync" {
             SyncCenter.shared.openLink(url.absoluteString)
             return

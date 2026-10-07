@@ -93,6 +93,16 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   v2, v1.x), refused moves, nudges, deletes, rotates and cuts, wiring and
   switches that still work, unlocked pasted copies, Tidy Up and Straighten,
   and the badge
+- `CedarLogic --render-classroom <dir>` -- the Classroom window (teacher and
+  student pages, every sheet, the projector code, the recovery sheet) as
+  PNGs, light and dark, from made-up classes; no network
+- `CL_CLASSROOM_SERVICE=http://localhost:8788 CedarLogic --classroom-e2e <dir>`
+  -- a teacher and a student (two engines, folders under <dir>) through the
+  window's own Classroom code against a running Worker: create, join, post
+  with a key, check, hand in twice, the hand-in's check result, Download All,
+  live, predict, answers, reveal, end, close joining, new code, move code,
+  leave, delete. PASS/FAIL lines, e2e-*.png, exit 1 on a failure. Classroom
+  is off unless `CL_CLASSROOM=1` or the `ClassroomEnabled` default is YES
 - `classroom-selftest.sh`, `classroom-check.sh`,
   `classroom-vectors-check.sh`, `classroom-interop.sh` -- the Classroom
   client core of docs/CLASSROOM.md (each script's header says how to run
