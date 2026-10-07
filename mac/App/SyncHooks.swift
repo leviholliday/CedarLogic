@@ -226,6 +226,11 @@ final class SyncPlatform {
             }
         }
         if let body, bodyLen > 0 { r.httpBody = Data(bytes: body, count: bodyLen) }
+        // A poll the classroom server holds (x-cedarlogic-wait, CLASSROOM.md 3.3) is quiet that long:
+        // wait past it rather than give up after 20 s without a byte.
+        if let w = r.value(forHTTPHeaderField: "x-cedarlogic-wait"), let held = Double(w), held > 0 {
+            r.timeoutInterval = min(held, 40) + 20
+        }
         let done = DispatchSemaphore(value: 0)
         let reply = Reply()
         let task = session.dataTask(with: r) { d, resp, err in

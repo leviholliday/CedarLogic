@@ -1,8 +1,9 @@
 // The classroom core's platform hooks on the Mac (CLASSROOM.md 6.4), the part
 // that needs no window: CryptoKit's P-256 for the class's key pair and the
 // sealed envelopes, CommonCrypto's PBKDF2 for the join code, the Classroom
-// folder (0700) with its files written atomically at 0600, and its flock. The
-// crypto, HTTP and main-thread hooks are Sync's (SyncHooks.swift) as they are.
+// folder (0700) with its files written atomically at 0600, its flock, and the
+// live connection's WebSockets (URLSessionWebSocketTask, 3.14). The crypto,
+// HTTP and main-thread hooks are Sync's (SyncHooks.swift) as they are.
 // The app adds its UI hooks on top (Group 7); mac/Tools/classroom-check.swift
 // uses these as they are to run the core's self-test.
 
@@ -18,6 +19,8 @@ final class ClassroomPlatform {
     private let syncHooks: UnsafeMutablePointer<CLSyncHooks>
     private var lockFD: Int32 = -1
     private let lockGuard = NSLock()
+    /// The live connection's sockets (3.14).
+    let sockets = ClassroomSockets()
 
     init(dir: URL, sync: SyncPlatform) {
         self.dir = dir
@@ -27,6 +30,7 @@ final class ClassroomPlatform {
     }
 
     deinit {
+        sockets.closeAll()
         unlock()
         syncHooks.deinitialize(count: 1)
         syncHooks.deallocate()
@@ -55,6 +59,9 @@ final class ClassroomPlatform {
         h.remove_tree = { ctx, name in ClassroomPlatform.of(ctx).removeTree(name) }
         h.try_lock = { ctx, path in ClassroomPlatform.of(ctx).tryLock(path) }
         h.unlock = { ctx in ClassroomPlatform.of(ctx).unlock() }
+        h.socket_open = { ctx, id, url, headers, events in ClassroomPlatform.of(ctx).sockets.open(id, url, headers, events) }
+        h.socket_send = { ctx, id, text in ClassroomPlatform.of(ctx).sockets.send(id, text) }
+        h.socket_close = { ctx, id, code in ClassroomPlatform.of(ctx).sockets.close(id, code) }
         return h
     }
 
@@ -175,5 +182,157 @@ final class ClassroomPlatform {
         lockGuard.lock(); defer { lockGuard.unlock() }
         if lockFD >= 0 { flock(lockFD, LOCK_UN); close(lockFD) }
         lockFD = -1
+    }
+}
+
+// MARK: The live connection (3.14)
+
+/// The classroom core's WebSockets: opened, sent to and closed on the engine thread (never
+/// blocking it), and everything that happens to them reported back with cl_classroom_socket_*
+/// from URLSession's queue. A report is made under the lock and only while the socket is still
+/// registered, so once close(id) has returned (or the closed report went) nothing more about that
+/// id reaches the core -- the promise CedarClassroom.h asks for.
+final class ClassroomSockets: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+    private struct Entry {
+        let task: URLSessionWebSocketTask
+        let events: UnsafeMutableRawPointer
+    }
+    private let lock = NSLock()
+    private var byId: [Int32: Entry] = [:]
+    private var idOfTask: [Int: Int32] = [:]
+    private let queue: OperationQueue = {
+        let q = OperationQueue()
+        q.maxConcurrentOperationCount = 1   // one socket's reports in the order they happened
+        q.name = "CedarLogic classroom sockets"
+        return q
+    }()
+    /// Nothing kept between connections (no cache, no cookies), as Sync's HTTP. Made once, before
+    /// any engine thread can ask (several engines may share these sockets).
+    private var session: URLSession!
+
+    override init() {
+        super.init()
+        let c = URLSessionConfiguration.ephemeral
+        c.urlCache = nil
+        c.httpCookieStorage = nil
+        c.httpShouldSetCookies = false
+        c.waitsForConnectivity = false
+        session = URLSession(configuration: c, delegate: self, delegateQueue: queue)
+    }
+
+    /// wss://, or ws:// to this computer only (a local server for the checks).
+    static func allowed(_ url: URL) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "wss": return true
+        case "ws": return ["localhost", "127.0.0.1", "::1"].contains(url.host?.lowercased() ?? "")
+        default: return false
+        }
+    }
+
+    func open(_ id: Int32, _ url: UnsafePointer<CChar>?, _ headers: UnsafePointer<CChar>?, _ events: UnsafeMutableRawPointer?) -> Bool {
+        guard let url, let events, let u = URL(string: String(cString: url)), ClassroomSockets.allowed(u) else { return false }
+        var r = URLRequest(url: u)
+        r.timeoutInterval = 20   // the upgrade; the core's own timers watch the connection after it
+        if let headers {
+            for line in String(cString: headers).components(separatedBy: "\r\n") {
+                guard let colon = line.firstIndex(of: ":") else { continue }
+                let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+                let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty { r.setValue(value, forHTTPHeaderField: name) }
+            }
+        }
+        let task = session.webSocketTask(with: r)
+        task.maximumMessageSize = 4 << 20   // a pushed live record is up to 512 KB of base64 inside its JSON
+        lock.lock()
+        byId[id] = Entry(task: task, events: events)
+        idOfTask[task.taskIdentifier] = id
+        lock.unlock()
+        task.resume()
+        receive(id, task)
+        return true
+    }
+
+    func send(_ id: Int32, _ text: UnsafePointer<CChar>?) {
+        guard let text else { return }
+        lock.lock()
+        let task = byId[id]?.task
+        lock.unlock()
+        // A failed send shows as the receive failing next: reported there, once.
+        task?.send(.string(String(cString: text))) { _ in }
+    }
+
+    /// The core is done with this socket: nothing more is reported about it.
+    func close(_ id: Int32, _ code: Int32) {
+        lock.lock()
+        let e = byId.removeValue(forKey: id)
+        if let e { idOfTask.removeValue(forKey: e.task.taskIdentifier) }
+        lock.unlock()
+        e?.task.cancel(with: URLSessionWebSocketTask.CloseCode(rawValue: Int(code)) ?? .normalClosure, reason: nil)
+    }
+
+    func closeAll() {
+        lock.lock()
+        let all = byId.values
+        byId.removeAll()
+        idOfTask.removeAll()
+        lock.unlock()
+        for e in all { e.task.cancel(with: .goingAway, reason: nil) }
+        session.invalidateAndCancel()   // (the session keeps its delegate, this object, until then)
+    }
+
+    /// Runs `report` with the socket's events pointer, under the lock, if the core still has it.
+    private func report(_ id: Int32, _ body: (UnsafeMutableRawPointer) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let e = byId[id] { body(e.events) }
+    }
+
+    private func gone(_ id: Int32, _ code: Int32) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let e = byId.removeValue(forKey: id) else { return }
+        idOfTask.removeValue(forKey: e.task.taskIdentifier)
+        cl_classroom_socket_closed(e.events, id, code)
+    }
+
+    private func receive(_ id: Int32, _ task: URLSessionWebSocketTask) {
+        task.receive { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let message):
+                if case .string(let text) = message {
+                    self.report(id) { events in text.withCString { cl_classroom_socket_text(events, id, $0) } }
+                }   // binary frames: the server sends none (3.14)
+                self.lock.lock()
+                let still = self.byId[id] != nil
+                self.lock.unlock()
+                if still { self.receive(id, task) }
+            case .failure:
+                let code = task.closeCode.rawValue
+                self.gone(id, code != 0 ? Int32(code) : 1006)
+            }
+        }
+    }
+
+    private func idOf(_ task: URLSessionTask) -> Int32? {
+        lock.lock()
+        defer { lock.unlock() }
+        return idOfTask[task.taskIdentifier]
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        guard let id = idOf(webSocketTask) else { return }
+        report(id) { cl_classroom_socket_opened($0, id) }
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        guard let id = idOf(webSocketTask) else { return }
+        gone(id, closeCode.rawValue != 0 ? Int32(closeCode.rawValue) : 1006)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let id = idOf(task) else { return }
+        gone(id, 1006)   // the upgrade failed, or the network went
     }
 }
