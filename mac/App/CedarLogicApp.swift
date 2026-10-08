@@ -376,6 +376,13 @@ struct NewOpenCommands: Commands {
             Button("Switch Pane") { canvas?.perform(.switchPane) }
                 .keyboardShortcut(keys.menu(.switchPane))
                 .disabled(canvas == nil)
+            // Which pages' TO/FROM links connect (docs/PAGE-LINKS.md); a
+            // tab's right-click menu connects pages one by one.
+            Divider()
+            Button("Connect All Pages") { canvas?.connectAllPages() }
+                .disabled(!(canvas?.canConnectAllPages ?? false))
+            Button("Disconnect All Pages") { canvas?.disconnectAllPages() }
+                .disabled(!(canvas?.canDisconnectAllPages ?? false))
         }
     }
 }

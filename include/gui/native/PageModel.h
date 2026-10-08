@@ -47,6 +47,9 @@ public:
 	// What's drawn on the page (the website's DRAWING-NOTES.md), pinned to it
 	// in world units; never touched by editing the circuit.
 	cl::PageInk ink;
+	// Which pages this page's TO/FROM links reach (docs/PAGE-LINKS.md): the
+	// pages with the same number. Any number; only which pages share one counts.
+	int linkGroup = 0;
 	klsCollisionChecker collisionChecker;
 
 private:

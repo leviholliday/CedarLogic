@@ -741,6 +741,21 @@ void Engine::previewMoveCode(const std::string& text, std::function<void(bool, s
 void Engine::importMoveCode(const std::string& text, Done done) {
 	d->run([this, text] { return d->client->importMoveCode(text); }, plain(done));
 }
+void Engine::makeClassPass(const std::string& classId, std::function<void(bool, std::string, std::string)> done) {
+	d->run([this, classId] { return d->client->makeClassPass(classId); }, valued(done));
+}
+void Engine::previewClassPass(const std::string& text, std::function<void(bool, std::string, std::string)> done) {
+	d->run([this, text] { return d->client->previewClassPass(text); }, valued(done));
+}
+void Engine::useClassPass(const std::string& text, std::function<void(bool, std::string, std::string)> done) {
+	d->run([this, text] { return d->client->useClassPass(text); }, valued(done));
+}
+void Engine::listPasses(const std::string& classId, std::function<void(bool, std::string, std::string)> done) {
+	d->run([this, classId] { return d->client->listPasses(classId); }, valued(done));
+}
+void Engine::cancelPass(const std::string& classId, const std::string& pid, Done done) {
+	d->run([this, classId, pid] { return d->client->cancelPass(classId, pid); }, plain(done));
+}
 void Engine::leaveClass(const std::string& classId, Done done) {
 	d->run([this, classId] { return d->client->leaveClass(classId); }, plain(done));
 }

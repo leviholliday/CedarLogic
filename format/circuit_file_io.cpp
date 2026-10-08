@@ -109,6 +109,9 @@ std::string writeCircuitFile(const CircuitFile &cf) {
 		pn.add(num(pg.index));
 		// Written only when there is one, so untouched files do not change.
 		if (!pg.name.empty()) pn.add(kv("name", SNode::str(pg.name)));
+		// Its link group (docs/PAGE-LINKS.md), only when not the shared one,
+		// so a circuit whose pages all connect keeps its bytes.
+		if (pg.linkGroup > 0) pn.add(kv("linkgroup", num(pg.linkGroup)));
 		for (const GateInstance &g : pg.gates) pn.add(gateNode(g));
 		for (const WireInstance &w : pg.wires) pn.add(wireNode(w));
 		for (SNode &d : ink::pageInkNodes(pg.ink)) pn.add(std::move(d));
@@ -189,6 +192,20 @@ static WireInstance readWire(const SNode &n) {
 	return w;
 }
 
+// A page's (linkgroup N): a whole number 0..9999; anything else (a newer
+// writer's idea, a hand edit) reads as the shared group, never an error.
+static int readLinkGroup(const SNode &e) {
+	if (e.items.size() < 2 || e.items[1].isList()) return 0;
+	const std::string &t = e.items[1].text;
+	if (t.empty() || t.size() > 4) return 0;
+	int v = 0;
+	for (char ch : t) {
+		if (ch < '0' || ch > '9') return 0;
+		v = v * 10 + (ch - '0');
+	}
+	return v;
+}
+
 CircuitFile readCircuitFile(const std::string &text) {
 	size_t end = 0;
 	SNode root = parseSexpr(text, &end);
@@ -231,6 +248,7 @@ CircuitFile readCircuitFile(const std::string &text) {
 		for (const SNode &e : c.items) {
 			if (!e.isList()) continue;
 			if (e.head() == "name") pg.name = item(e, 1);
+			else if (e.head() == "linkgroup") pg.linkGroup = readLinkGroup(e);
 			else if (e.head() == "gate") pg.gates.push_back(readGate(e));
 			else if (e.head() == "wire") pg.wires.push_back(readWire(e));
 		}

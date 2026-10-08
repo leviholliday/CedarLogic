@@ -249,6 +249,8 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 		// so it moves, closes and reopens with it. The wx app has no drawing
 		// tools yet, but keeps it and writes it back.
 		gCanvas->ink = pg.ink;
+		// Which pages its TO/FROM links reach (docs/PAGE-LINKS.md).
+		gCanvas->linkGroup = pg.linkGroup;
 #ifdef CL_NO_WX
 		gCanvas->name = pg.name;
 #else
@@ -588,6 +590,18 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 			          return byNumericId(x, y);
 		          });
 		cf.pages.push_back(std::move(pg));
+	}
+	// Link groups (docs/PAGE-LINKS.md), numbered as written: the first page's
+	// group is 0 (not written), the next group met is 1, and so on. All pages
+	// in one group then write nothing, byte for byte what older apps wrote.
+	std::map<int, int> canonical;
+	for (unsigned int i = 0; i < glc.size(); i++) {
+		const int g = glc[i]->linkGroup;
+		if (!canonical.count(g)) {
+			const int next = (int)canonical.size();
+			canonical[g] = next;
+		}
+		cf.pages[i].linkGroup = canonical[g];
 	}
 	return cf;
 }

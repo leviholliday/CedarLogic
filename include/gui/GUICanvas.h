@@ -143,6 +143,9 @@ public:
 	// What's drawn on the page (the website's DRAWING-NOTES.md). This app has
 	// no drawing tools yet; it keeps the drawing and writes it back on save.
 	cl::PageInk ink;
+	// Which pages' TO/FROM links connect (docs/PAGE-LINKS.md). This app
+	// connects every page whatever it says, but keeps it and writes it back.
+	int linkGroup = 0;
 
     GUICanvas( wxWindow *parent, GUICircuit* gCircuit, wxWindowID id = wxID_ANY,
         const wxPoint& pos = wxDefaultPosition,

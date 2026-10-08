@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <locale>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -161,6 +162,22 @@ std::string structureText(const std::string& cdl, const GateDefaults& defaults) 
 			if (!st.pressure.empty()) line += " p:" + st.pressure;
 			lines.push_back(line);
 		}
+	}
+	// Page link groups (docs/PAGE-LINKS.md): which pages' TO/FROM links
+	// connect changes what the circuit does. Only when not every page is in
+	// one group (so today's texts stay), a line a page: `L <page> <n>`, n
+	// counting groups from 0 in page order.
+	{
+		std::map<int, int> canonical;
+		std::vector<std::pair<int, int>> pageGroup;
+		for (const cl::Page& pg : cf.pages) {
+			auto it = canonical.find(pg.linkGroup);
+			const int n = it != canonical.end() ? it->second : (int)canonical.size();
+			canonical.emplace(pg.linkGroup, n);
+			pageGroup.push_back({ pg.index, n });
+		}
+		if (canonical.size() > 1)
+			for (auto& e : pageGroup) lines.push_back("L " + std::to_string(e.first) + " " + std::to_string(e.second));
 	}
 	// The notes, when there's something in them.
 	if (cl::ink::notesWorthWriting(cf.notes)) lines.push_back("N " + esc(cf.notes));

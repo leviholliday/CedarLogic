@@ -98,8 +98,8 @@ func decodeCode(_ code: String, bytes: Int) throws -> Data {
 let KIND_KEY = ["teacher": "t", "join": "j", "move": "m"]
 let KIND_LEN = ["teacher": 28, "join": 12, "move": 28]
 let SKIP: Set<Unicode.Scalar> = ["-", " ", "\t", "\r", "\n", "\u{00A0}"]
-let linkRe = try! NSRegularExpression(pattern: "#([tjmk])=([0-9A-Za-z \\-]*)")
-let queryRe = try! NSRegularExpression(pattern: "[?&]([tjmk])=([0-9A-Za-z \\-]*)")
+let linkRe = try! NSRegularExpression(pattern: "#([tjmks])=([0-9A-Za-z \\-]*)")
+let queryRe = try! NSRegularExpression(pattern: "[?&]([tjmks])=([0-9A-Za-z \\-]*)")
 /// What a code field makes of typed, pasted or scanned text (1.2): the canonical code, or "error:<why>".
 func normalize(_ input: String, kind: String) -> String {
     var text = input

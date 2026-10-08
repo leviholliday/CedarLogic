@@ -297,6 +297,39 @@ void scenarioTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report&
 		line(ok, "s10 hand in twice: S1's row shows attempt 2");
 	}
 
+	// 3.17. A class pass: made by S1, used on a fresh device (guest mode), listed, cancelled by the teacher.
+	{
+		const Result pc = S1->makeClassPass(cid);
+		Device G(cr, curve, s, nullptr);
+		const Result pv = G->previewClassPass(webLink(CodeKind::Pass, pc.value));
+		const Result use = G->useClassPass(webLink(CodeKind::Pass, pc.value));
+		Membership* mg = G->membershipOf(cid);
+		line(pc.ok && pc.value.size() == 28 && pv.ok && pv.value == "Digital Logic 101\nSam Lee" && use.ok && mg && mg->studentId == sid1 &&
+		         mg->token == m1->token && mg->proof == m1->proof,
+		     "3.17 class pass: a fresh device is the same student", use.message + pv.message + pc.message);
+		Device G2(cr, curve, s, nullptr);
+		const Result again = G2->useClassPass(groupCode(pc.value));
+		const Result mine = S1->listPasses(cid);
+		const Result all = T1->listPasses(cid);
+		line(again.ok && mine.ok && all.ok && mine.value.find("\tSam Lee\t") != std::string::npos && all.value.find("\tSam Lee\t") != std::string::npos &&
+		         all.value.substr(all.value.size() - 3) == "\t2\n",
+		     "3.17 class pass: works again (no expiry), listed for the student and the teacher, used twice", all.value);
+		const std::string pid = all.value.substr(0, 64);
+		const Result cancel = T1->cancelPass(cid, pid);
+		Device G3(cr, curve, s, nullptr);
+		const Result after = G3->previewClassPass(pc.value);
+		line(cancel.ok && !after.ok && after.status == 404 && after.error == "pass_gone" && after.message.find("cancelled") != std::string::npos,
+		     "3.17 class pass: the teacher cancels it; it stops working", after.message);
+		const Result typo = G3->previewClassPass(pc.value.substr(0, 27) + (pc.value[27] == '0' ? "1" : "0"));
+		const Result kind = G3->previewClassPass(webLink(CodeKind::Move, pc.value));
+		line(!typo.ok && typo.error == "checksum" && !kind.ok && kind.error == "kind", "3.17 class pass: a typo, a move link", kind.message);
+		const Result p2 = S1->makeClassPass(cid);
+		const Result l2 = S1->listPasses(cid);
+		const Result revoke = S1->cancelPass(cid, l2.value.substr(0, 64));
+		const Result after2 = G3->previewClassPass(p2.value);
+		line(p2.ok && revoke.ok && !after2.ok && after2.error == "pass_gone", "3.17 class pass: the student revokes their own", after2.message);
+	}
+
 	// 24 and 11. Move to another device; hand in from it with a stale base.
 	Device S1b(cr, curve, s, nullptr);
 	{

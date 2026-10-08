@@ -461,6 +461,13 @@ struct CLCanvasSettings: View {
                 }
                 .labelsHidden().fixedSize()
             }
+            Row("New pages", hint: "TO and FROM links of the same name connect across pages that share links. Right-click a tab to choose which pages connect.") {
+                Picker("", selection: $prefs.newPagesShareLinks) {
+                    Text("Share links with the other pages").tag(true)
+                    Text("Start on their own").tag(false)
+                }
+                .labelsHidden().fixedSize()
+            }
             Row("Tidy Up", hint: "Keeps my layout: lines gates up where they are. Rearranges everything: lays the circuit out by signal flow. The Edit menu always has the other one.") {
                 Picker("", selection: $tidyMode) { Text("Keeps my layout").tag(0); Text("Rearranges everything").tag(1) }
                     .labelsHidden().fixedSize()

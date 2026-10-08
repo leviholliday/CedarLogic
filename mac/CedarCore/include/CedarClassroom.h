@@ -230,6 +230,13 @@ void cl_classroom_send_answer(CLClassroom *, const char *classId, const char *co
 void cl_classroom_make_move_code(CLClassroom *, const char *classId, CLClassroomDone, void *ctx);   // result = the code
 void cl_classroom_preview_move_code(CLClassroom *, const char *text, CLClassroomDone, void *ctx);  // result = "<class name>\n<student name>"
 void cl_classroom_import_move_code(CLClassroom *, const char *text, CLClassroomDone, void *ctx);
+// Class passes (3.17): a code (and QR) that never expires and brings a student back on any device.
+void cl_classroom_make_class_pass(CLClassroom *, const char *classId, CLClassroomDone, void *ctx);    // result = the code (shown once)
+void cl_classroom_preview_class_pass(CLClassroom *, const char *text, CLClassroomDone, void *ctx);    // result = "<class name>\n<student name>"
+void cl_classroom_use_class_pass(CLClassroom *, const char *text, CLClassroomDone, void *ctx);        // result = classId
+// The teacher's every pass, or a student's own: result = lines "pid\tstudentId\tname\tcreatedAt\tusedAt\tuses" (usedAt 0: never).
+void cl_classroom_list_passes(CLClassroom *, const char *classId, CLClassroomDone, void *ctx);
+void cl_classroom_cancel_pass(CLClassroom *, const char *classId, const char *pid, CLClassroomDone, void *ctx);
 void cl_classroom_leave_class(CLClassroom *, const char *classId, CLClassroomDone, void *ctx);
 void cl_classroom_forget_membership(CLClassroom *, const char *classId);
 
@@ -242,7 +249,7 @@ void cl_classroom_app_deactivated(CLClassroom *);
 void cl_classroom_user_active(CLClassroom *);
 void cl_classroom_sync_side_changed(CLClassroom *);
 
-// Codes (no engine; the sync hooks for SHA-256): kind 0 teacher, 1 join, 2 move.
+// Codes (no engine; the sync hooks for SHA-256): kind 0 teacher, 1 join, 2 move, 3 class pass.
 // Writes the canonical code (29 bytes with NUL) or returns false with why = "length" | "symbol" | "checksum" | "kind".
 bool cl_classroom_parse_code(const CLSyncHooks *, int kind, const char *text, char code[29], char why[16]);
 const char *cl_classroom_why_text(int kind, const char *why, const char *text);   // valid until the next call

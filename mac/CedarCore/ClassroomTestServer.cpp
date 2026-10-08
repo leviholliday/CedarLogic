@@ -188,8 +188,88 @@ HttpResponse FakeServer::api(const HttpRequest& r, const std::string& full) {
 		return error(now, 405, "method_not_allowed");
 	}
 
+	// ---- class passes (3.17): the redemption ----
+	if (p.size() == 2 && p[0] == "pass") {
+		if (!isHex(p[1], 32)) return error(now, 404, "not_found");
+		if (m != "GET") return error(now, 405, "method_not_allowed");
+		auto ps = passes.find(sha256Hex(cr, p[1]));
+		if (ps == passes.end()) return failedLookup() ? error(now, 429, "rate_limited", 3600) : error(now, 404, "pass_gone");
+		const std::string cid = ps->second.classId;
+		if (gone.count(cid)) {
+			passes.erase(ps);
+			return error(now, 410, gone[cid] == "expired" ? "class_expired" : "class_deleted");
+		}
+		if (sha256Hex(cr, token) != ps->second.hash) return failedLookup() ? error(now, 429, "rate_limited", 3600) : error(now, 401, "wrong_token");
+		auto c = classes.find(cid);
+		if (c == classes.end() || !c->second.roster.count(ps->second.studentId)) {
+			passes.erase(ps);
+			return error(now, 404, "pass_gone");
+		}
+		ps->second.usedAt = now;
+		ps->second.uses++;
+		json::Value o = json::Value::object();
+		o.set("classId", json::Value::string(cid));
+		o.set("studentId", json::Value::string(ps->second.studentId));
+		o.set("env", json::Value::string(ps->second.env));
+		o.set("createdAt", json::Value::integer(ps->second.createdAt));
+		return reply(now, 200, o);
+	}
+
 	if (p.size() < 2 || p[0] != "classes" || !isHex(p[1], 32)) return error(now, 404, "not_found");
 	const std::string classId = p[1];
+
+	// ---- class passes (3.17): make, list, cancel ----
+	if (p.size() >= 3 && p[2] == "passes") {
+		if (gone.count(classId)) return error(now, 410, gone[classId] == "expired" ? "class_expired" : "class_deleted");
+		auto c = classes.find(classId);
+		if (c == classes.end()) return error(now, 404, "no_class");
+		const std::string sid = header(r, "x-cedarlogic-student");
+		const bool teacher = sid.empty() && c->second.teacherHash == sha256Hex(cr, token);
+		if (!sid.empty() && !c->second.roster.count(sid)) return error(now, 403, "not_a_member");
+		const bool student = !sid.empty() && c->second.roster[sid].hash == sha256Hex(cr, token);
+		if (!teacher && !student) return error(now, 401, sid.empty() ? "wrong_key" : "wrong_token");
+		if (p.size() == 3 && m == "POST") {
+			if (!student || body.str("studentId") != sid) return error(now, 403, "forbidden");
+			const std::string passId = body.str("passId"), th = body.str("tokenHash");
+			if (!isHex(passId, 32) || !isHex(th, 64) || body.str("env").empty()) return error(now, 400, "bad_request");
+			const std::string pid = sha256Hex(cr, passId);
+			if (passes.count(pid)) return error(now, 409, "pass_exists");
+			int mine = 0;
+			for (const auto& x : passes) mine += x.second.classId == classId && x.second.studentId == sid;
+			if (mine >= 5) return error(now, 409, "too_many_passes");
+			passes[pid] = { classId, sid, th, body.str("env"), now, 0, 0 };
+			json::Value o = json::Value::object();
+			o.set("pid", json::Value::string(pid));
+			o.set("createdAt", json::Value::integer(now));
+			return reply(now, 201, o);
+		}
+		if (p.size() == 3 && m == "GET") {
+			json::Value list = json::Value::array();
+			for (const auto& x : passes) {
+				if (x.second.classId != classId || (student && x.second.studentId != sid)) continue;
+				json::Value e = json::Value::object();
+				e.set("pid", json::Value::string(x.first));
+				e.set("studentId", json::Value::string(x.second.studentId));
+				e.set("createdAt", json::Value::integer(x.second.createdAt));
+				e.set("usedAt", x.second.usedAt ? json::Value::integer(x.second.usedAt) : json::Value());
+				e.set("uses", json::Value::integer(x.second.uses));
+				list.push(e);
+			}
+			json::Value o = json::Value::object();
+			o.set("passes", list);
+			return reply(now, 200, o);
+		}
+		if (p.size() == 4 && m == "DELETE") {
+			auto ps = passes.find(p[3]);
+			json::Value o = json::Value::object();
+			if (ps == passes.end() || ps->second.classId != classId) { o.set("cancelled", json::Value::boolean(false)); return reply(now, 200, o); }
+			if (student && ps->second.studentId != sid) return error(now, 403, "forbidden");
+			passes.erase(ps);
+			o.set("cancelled", json::Value::boolean(true));
+			return reply(now, 200, o);
+		}
+		return error(now, 405, "method_not_allowed");
+	}
 
 	// ---- create, re-create or confirm (3.3) ----
 	if (p.size() == 2 && m == "PUT") {

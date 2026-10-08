@@ -257,7 +257,7 @@ std::string urlFromEnvironment(const char* var) {
 	return std::string();
 }
 
-CodeKind kindOf(int k) { return k == 1 ? CodeKind::Join : k == 2 ? CodeKind::Move : CodeKind::Teacher; }
+CodeKind kindOf(int k) { return k == 1 ? CodeKind::Join : k == 2 ? CodeKind::Move : k == 3 ? CodeKind::Pass : CodeKind::Teacher; }
 
 }  // namespace
 
@@ -653,6 +653,21 @@ void cl_classroom_preview_move_code(CLClassroom* c, const char* text, CLClassroo
 }
 void cl_classroom_import_move_code(CLClassroom* c, const char* text, CLClassroomDone done, void* ctx) {
 	if (c && c->engine) c->engine->importMoveCode(orEmpty(text), plainOf(done, ctx));
+}
+void cl_classroom_make_class_pass(CLClassroom* c, const char* classId, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->makeClassPass(orEmpty(classId), doneOf(done, ctx));
+}
+void cl_classroom_preview_class_pass(CLClassroom* c, const char* text, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->previewClassPass(orEmpty(text), doneOf(done, ctx));
+}
+void cl_classroom_use_class_pass(CLClassroom* c, const char* text, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->useClassPass(orEmpty(text), doneOf(done, ctx));
+}
+void cl_classroom_list_passes(CLClassroom* c, const char* classId, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->listPasses(orEmpty(classId), doneOf(done, ctx));
+}
+void cl_classroom_cancel_pass(CLClassroom* c, const char* classId, const char* pid, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->cancelPass(orEmpty(classId), orEmpty(pid), plainOf(done, ctx));
 }
 void cl_classroom_leave_class(CLClassroom* c, const char* classId, CLClassroomDone done, void* ctx) {
 	if (c && c->engine) c->engine->leaveClass(orEmpty(classId), plainOf(done, ctx));

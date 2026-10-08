@@ -3,6 +3,7 @@
 // model per page, with a LogicHost running its simulation.
 
 #include "DocumentImpl.h"
+#include <map>
 #include "CGScene.h"
 #include "CircuitParse.h"
 #include "GUICanvas.h"
@@ -140,6 +141,19 @@ CLDocument* clOpenText(const char* data, long length, char* error, int errorLen,
 	CircuitParse parser(canvases);
 	canvases = parser.applyLoaded(loaded);
 	for (GUICanvas* c : canvases) doc->pages.emplace_back(c);
+	// The gates were made before their pages joined the document, so their
+	// links went to the engine as the shared group's (docs/PAGE-LINKS.md).
+	// Numbered from the first page's group (0) so a gate added later agrees.
+	std::map<int, int> groups;
+	bool any = false;
+	for (auto& p : doc->pages) {
+		auto it = groups.find(p->linkGroup);
+		const int g = it != groups.end() ? it->second : (int)groups.size();
+		groups.emplace(p->linkGroup, g);
+		p->linkGroup = g;
+		any = any || g != 0;
+	}
+	if (any) doc->sim->relinkJunctions();
 	for (const cl::MigrationNotice& n : parser.getLoadNotices()) {
 		doc->notices.push_back(n.detail.empty() ? n.summary : n.summary + "\n" + n.detail);
 		doc->noticeWarnings.push_back(n.severity == cl::Severity::Warning);
@@ -200,7 +214,9 @@ int cl_document_export_legacy(CLDocument* doc, const char* path, int format, cha
 
 int cl_document_add_page(CLDocument* doc) {
 	if (doc == nullptr) return -1;
+	const int group = clNewPageLinkGroup(doc);
 	doc->pages.emplace_back(new GUICanvas(&doc->circuit));
+	doc->pages.back()->linkGroup = group;
 	doc->edited = true;
 	return (int)doc->pages.size() - 1;
 }

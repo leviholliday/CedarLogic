@@ -98,7 +98,10 @@ void LogicHost::deliver(const klsMessage::Message& input) {
 	}
 	case MT_SET_GATE_PARAM: {
 		const Message_SET_GATE_PARAM& msg = input.as<Message_SET_GATE_PARAM>();
-		cir->setGateParameter(msg.gateId, msg.paramName, msg.paramValue);
+		if (msg.paramName == "JUNCTION_ID" && linkGroupOf)
+			cir->setGateParameter(msg.gateId, msg.paramName, linkKey(linkGroupOf(msg.gateId), msg.paramValue));
+		else
+			cir->setGateParameter(msg.gateId, msg.paramName, msg.paramValue);
 		break;
 	}
 	case MT_STEPSIM:
@@ -131,11 +134,28 @@ int LogicHost::applyResults(const ID_SET<IDType>* changedWires) {
 	for (const changedParam& p : params) {
 		const std::string value = cir->getGateParameter(p.gateID, p.paramName);
 		if (value.empty()) continue;
+		if (p.paramName == "JUNCTION_ID") continue;   // the engine's key, not the name
 		if (guiGate* gate = circuit.getGate(p.gateID)) gate->setLogicParam(p.paramName, value);
 		if (p.paramName == "PAUSE_SIM") pauseRequested = true;
 		changed++;
 	}
 	return changed;
+}
+
+std::string LogicHost::linkKey(int group, const std::string& name) {
+	// Group 0 keeps the plain name, so a circuit with one group runs exactly
+	// as before. Others get a prefix no typed name has (unit separators).
+	if (group == 0) return name;
+	return "\x1f" + std::to_string(group) + "\x1f" + name;
+}
+
+void LogicHost::relinkJunctions() {
+	if (!linkGroupOf) return;
+	for (auto& g : circuit.gates()) {
+		if (g.second == nullptr || dynamic_cast<guiTO_FROM*>(g.second.get()) == nullptr) continue;
+		cir->setGateParameter(g.first, "JUNCTION_ID",
+		                      linkKey(linkGroupOf(g.first), g.second->getLogicParam("JUNCTION_ID")));
+	}
 }
 
 int LogicHost::step(int steps) {

@@ -74,6 +74,13 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   drawing in each look. `mac/Tools/ink-old-readers.sh` reads every sample
   with the format library from before drawings (cls/integrate). The format's
   own vectors are `format/tests/test_ink.cpp` (the CMake `test_format`).
+- `pagelinks_check <gatedefs> format/tests/fixtures/pagelinks [file.cdl...]`
+  -- page link groups (docs/PAGE-LINKS.md): TO/FROM signals cross only
+  within a group, save and reopen, undo and redo, close/move/new pages,
+  truth tables, the sync structure lines, and other files saving with no
+  groups. `mac/Tools/pagelinks-old-readers.sh [rev]` reads the samples with
+  the format library from before groups and checks files without groups
+  keep their bytes
 - `register_check <gatedefs> <dir>` -- the Registers templates `--render-ui`
   writes do what docs/REGISTER-EXAMPLES.md (website) says, one Step Clock at
   a time, their running-clock choice runs, and their pulse-button choice

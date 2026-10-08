@@ -85,6 +85,12 @@ struct InkHover {
 	double width = 0.25;
 };
 
+struct CLDocument;
+// Page link groups (PageLinks.cpp, docs/PAGE-LINKS.md): the group of the page
+// a gate is on (0 when none), and the group a page added now joins.
+int clLinkGroupOfGate(const CLDocument* doc, unsigned long gateId);
+int clNewPageLinkGroup(const CLDocument* doc);
+
 struct CLDocument {
 	GUICircuit circuit;
 	std::unique_ptr<LogicHost> sim;
@@ -98,6 +104,7 @@ struct CLDocument {
 	CLDocument() : sim(new LogicHost(circuit)) {
 		registerLogicHost(&circuit, sim.get());
 		sim->afterStep = [this] { recordScope(); };
+		sim->linkGroupOf = [this](unsigned long gate) { return clLinkGroupOfGate(this, gate); };
 	}
 	~CLDocument() {
 		// History first: a closed page is kept by its command (Extras.cpp),

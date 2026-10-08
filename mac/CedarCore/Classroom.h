@@ -178,7 +178,7 @@ struct Config {
 
 // ---- Codes and text (any thread) --------------------------------------------------------
 
-enum class CodeKind { Teacher, Join, Move };
+enum class CodeKind { Teacher, Join, Move, Pass };   // Pass: a class pass (3.17), #s=
 std::string newCode(clsync::Crypto&, CodeKind);                              // "" if the RNG failed
 bool parseCode(clsync::Crypto&, CodeKind, const std::string& text, std::string& code, std::string& why);   // why: length | symbol | checksum | kind
 std::string whyText(CodeKind, const std::string& why, const std::string& text);
@@ -242,6 +242,15 @@ public:
 	void makeMoveCode(const std::string& classId, std::function<void(bool, std::string message, std::string code)> done);
 	void previewMoveCode(const std::string& text, std::function<void(bool, std::string message, std::string className, std::string studentName)> done);
 	void importMoveCode(const std::string& text, Done);
+	// Class passes (3.17): a code that never expires and brings the student back on any device.
+	// makeClassPass: value = the code (shown once). previewClassPass: value = "<class name>\n<student name>".
+	// useClassPass: value = the classId. listPasses (the teacher's every pass, or a student's own): value = one line
+	// per pass, "pid\tstudentId\tname\tcreatedAt\tusedAt\tuses" (usedAt 0: never). cancelPass: the teacher any, a student its own.
+	void makeClassPass(const std::string& classId, std::function<void(bool, std::string message, std::string code)> done);
+	void previewClassPass(const std::string& text, std::function<void(bool, std::string message, std::string value)> done);
+	void useClassPass(const std::string& text, std::function<void(bool, std::string message, std::string classId)> done);
+	void listPasses(const std::string& classId, std::function<void(bool, std::string message, std::string lines)> done);
+	void cancelPass(const std::string& classId, const std::string& pid, Done);
 	void leaveClass(const std::string& classId, Done);
 	void forgetMembership(const std::string& classId);                              // Remove from This Device: nothing on the website
 
