@@ -140,6 +140,16 @@ json::Value State::toJson() const {
 		dv.set(kv.first, std::move(a));
 	}
 	o.set("devices", std::move(dv));
+	json::Value sd = json::Value::object();   // side records (SYNC.md 2.5.1)
+	for (const auto& kv : side) {
+		json::Value e = json::Value::object();
+		e.set("ver", json::Value::integer(kv.second.ver));
+		e.set("h", json::Value::string(kv.second.h));
+		e.set("kind", json::Value::string(kv.second.kind));
+		e.set("json", json::Value::string(kv.second.json));
+		sd.set(kv.first, std::move(e));
+	}
+	o.set("side", std::move(sd));
 	return o;
 }
 
@@ -213,6 +223,19 @@ bool State::fromJson(const json::Value& v, State& s) {
 			for (const auto& kv : r->o)
 				if (kv.second.isArray() && kv.second.a.size() >= 2)
 					s.devices[kv.first] = { kv.second.a[0].s, kv.second.a[1].i() };
+	if (const json::Value* r = v.get("side"))
+		if (r->isObject()) {
+			s.sideKnown = true;
+			for (const auto& kv : r->o)
+				if (kv.second.isObject() && isUuid(kv.first)) {
+					State::Side x;
+					x.ver = kv.second.integer("ver");
+					x.h = kv.second.str("h");
+					x.kind = kv.second.str("kind");
+					x.json = kv.second.str("json");
+					s.side[kv.first] = x;
+				}
+		}
 	return true;
 }
 
@@ -309,6 +332,55 @@ void Core::reset() {
 	st = fresh;
 	problems_.clear();
 	badRequest_.clear();
+}
+
+void Core::adopt(const State& s) {
+	st = s;
+	// The first start of an engine with side records over a state from one without: what it put
+	// aside as "newer" may be side records (2.5.1), so they are read again (a full pull).
+	if (!st.sideKnown && !opt.sideKinds.empty()) {
+		bool any = false;
+		for (auto u = st.unreadable.begin(); u != st.unreadable.end();) {
+			if (u->second.second != "newer") { ++u; continue; }
+			if (!st.records.count(u->first)) st.seen.erase(u->first);
+			u = st.unreadable.erase(u);
+			any = true;
+		}
+		if (any) st.cursor = 0;
+	}
+	st.sideKnown = true;
+}
+
+bool Core::isSideKind(const std::string& k) const {
+	return std::find(opt.sideKinds.begin(), opt.sideKinds.end(), k) != opt.sideKinds.end();
+}
+
+std::vector<std::pair<std::string, std::string>> Core::sideRecords(const std::string& kind) {
+	std::lock_guard<std::mutex> lock(sideMu_);
+	std::vector<std::pair<std::string, std::string>> out;
+	for (const auto& kv : st.side)
+		if (kv.second.kind == kind) out.emplace_back(kv.first, kv.second.json);
+	return out;
+}
+
+std::string Core::putSideRecord(const std::string& kind, const std::string& json, const std::string& rid0) {
+	if (!isSideKind(kind)) return std::string();
+	const std::string rid = isUuid(rid0) ? rid0 : newUuid(crypto);
+	if (rid.empty()) return rid;
+	std::lock_guard<std::mutex> lock(sideMu_);
+	SideQ q;
+	q.kind = kind;
+	q.json = json;
+	sideQueue_[rid] = q;
+	return rid;
+}
+
+void Core::deleteSideRecord(const std::string& rid) {
+	if (!isUuid(rid)) return;
+	std::lock_guard<std::mutex> lock(sideMu_);
+	SideQ q;
+	q.deleted = true;
+	sideQueue_[rid] = q;
 }
 
 void Core::setCode(const std::string& canonical) {
@@ -936,7 +1008,7 @@ bool Core::openFetched(const std::string& rid, int64_t ver, const std::string& d
 		why = "damaged";
 		return false;
 	}
-	why = readPayload(payload, p);
+	why = readPayload(payload, p, &opt.sideKinds);
 	if (why == "invalid") why = "damaged";
 	return why.empty();
 }
@@ -1058,6 +1130,7 @@ void Core::pull() {
 
 	std::vector<int64_t> held;
 	std::vector<Incoming> incoming;
+	bool sideChanged = false;
 	if (!opened.empty() || !back.empty()) {
 		st.applying = true;   // a crash before this pull ends: the next one re-joins (§4.5 cursor rule)
 		save();
@@ -1091,7 +1164,24 @@ void Core::pull() {
 				st.unreadable.erase(rid);
 				bool ok = true;
 				try {
-					if (o.p.kind == "circuit") {
+					bool wasSide = false;
+					{
+						std::lock_guard<std::mutex> lock(sideMu_);
+						wasSide = st.side.count(rid) > 0;
+						if (isSideKind(o.p.kind)) {   // a side record (2.5.1): kept as it is, never a circuit
+							State::Side& x = st.side[rid];
+							x.ver = ver;
+							x.h = o.e.str("h");
+							x.kind = o.p.kind;
+							x.json = o.p.raw;
+							sideChanged = true;
+						} else if (o.p.kind == "deleted" && wasSide) {
+							st.side.erase(rid);
+							sideChanged = true;
+						}
+					}
+					if (isSideKind(o.p.kind) || (o.p.kind == "deleted" && wasSide)) {
+					} else if (o.p.kind == "circuit") {
 						ok = onRemoteUpdate(rid, ver, o.e.integer("updatedAt"), o.p);
 					} else if (o.p.kind == "deleted") {
 						const size_t before = incoming.size();
@@ -1133,6 +1223,14 @@ void Core::pull() {
 				u = present.count(u->first) ? std::next(u) : st.unreadable.erase(u);
 			for (auto d = st.devices.begin(); d != st.devices.end();)
 				d = present.count(d->first) ? std::next(d) : st.devices.erase(d);
+			{
+				std::lock_guard<std::mutex> lock(sideMu_);
+				for (auto x = st.side.begin(); x != st.side.end();) {
+					if (present.count(x->first)) { ++x; continue; }
+					x = st.side.erase(x);
+					sideChanged = true;
+				}
+			}
 			if (st.device.has && !present.count(st.device.id)) {
 				st.device.ver = 0;
 				st.device.at = 0;
@@ -1151,6 +1249,7 @@ void Core::pull() {
 	joinCandidates_.clear();
 	st.applying = false;
 	save();
+	if (sideChanged && hooks.sideChanged) main([&] { hooks.sideChanged(); });
 }
 
 // The join rule's candidates -- every local circuit not yet mapped, with its hashes -- built in short
@@ -1616,6 +1715,43 @@ void Core::push(bool flush) {
 		if (damagedCount)
 			problems_[""] = damagedCount == 1 ? "1 synced circuit is damaged and can't be opened."
 			                                  : std::to_string(damagedCount) + " synced circuits are damaged and can't be opened.";
+		// Side records (2.5.1): small, deleted: false (or a tombstone), never a device record.
+		{
+			std::map<std::string, SideQ> queue;
+			{
+				std::lock_guard<std::mutex> lock(sideMu_);
+				queue = sideQueue_;
+			}
+			for (const auto& kv : queue) {
+				const std::string& rid = kv.first;
+				const SideQ& q = kv.second;
+				RecState rs;
+				bool have = false;
+				{
+					std::lock_guard<std::mutex> lock(sideMu_);
+					auto h = st.side.find(rid);
+					have = h != st.side.end();
+					if (have) rs.ver = h->second.ver;
+				}
+				if (q.deleted && !have) {
+					std::lock_guard<std::mutex> lock(sideMu_);
+					sideQueue_.erase(rid);
+					continue;
+				}
+				bool big = false;
+				Item it = writeItem(rid, rs, q.deleted ? tombstoneJson(t + st.offset, st.deviceName, st.deviceId, nullptr, nullptr) : q.json,
+				                    q.deleted, false, nullptr, false, big);
+				if (it.id.empty() || (!q.deleted && it.data.size() > (kMaxSmallEnvelope * 4 + 2) / 3)) {   // over 4 KiB: dropped
+					std::lock_guard<std::mutex> lock(sideMu_);
+					sideQueue_.erase(rid);
+					continue;
+				}
+				items.push_back(it);
+				meta[rid] = "side";
+				std::lock_guard<std::mutex> lock(sideMu_);
+				sideSent_[rid] = q;
+			}
+		}
 		if (items.empty() && attempt > 0) break;
 		// The device record: none yet, a day old, or renamed; the last item.
 		if (attempt == 0 && !full_ && !quitting_ &&
@@ -1685,6 +1821,7 @@ bool Core::result(const Item& it, const json::Value& res, const std::map<std::st
 	const std::string& rid = it.id;
 	const int status = (int)res.integer("status");
 	auto m = meta.find(rid);
+	if (m != meta.end() && m->second == "side") return sideResult(it, res);
 	if (m != meta.end() && m->second == "device") {
 		if (status == 200 || status == 201) {
 			const json::Value* e = res.get("entry");
@@ -1784,6 +1921,53 @@ bool Core::result(const Item& it, const json::Value& res, const std::map<std::st
 	}
 	seenSet(rid, rver, r->second.str("h"), nullptr);
 	return true;
+}
+
+// A side record's answer (2.5.1); true: send it again (a 412: on the server's ver, the last writer wins).
+bool Core::sideResult(const Item& it, const json::Value& res) {
+	const std::string& rid = it.id;
+	const int status = (int)res.integer("status");
+	std::lock_guard<std::mutex> lock(sideMu_);
+	const SideQ q = sideSent_[rid];
+	auto same = [&] {
+		auto x = sideQueue_.find(rid);
+		return x != sideQueue_.end() && x->second.deleted == q.deleted && x->second.json == q.json && x->second.kind == q.kind;
+	};
+	if (status == 200 || status == 201) {
+		const json::Value* e = res.get("entry");
+		const int64_t ver = e ? e->integer("ver") : it.ver;
+		const std::string h = e ? e->str("h") : std::string();
+		seenSet(rid, ver, h, nullptr);
+		if (q.deleted) {
+			st.side.erase(rid);
+		} else {
+			State::Side& x = st.side[rid];
+			x.ver = ver;
+			x.h = h;
+			x.kind = q.kind;
+			x.json = q.json;
+		}
+		if (same()) sideQueue_.erase(rid);
+		return false;
+	}
+	if (status == 412) {
+		const json::Value* cur = res.get("current");
+		if (cur && cur->isObject() && !cur->flag("purged")) {
+			seenSet(rid, cur->integer("ver"), cur->str("h"), nullptr);
+			State::Side& x = st.side[rid];
+			if (x.kind.empty()) {
+				x.kind = q.kind;
+				x.json = q.json;
+			}
+			x.ver = cur->integer("ver");
+			x.h = cur->str("h");
+		} else {
+			st.side.erase(rid);
+		}
+		return !quitting_;
+	}
+	if (status != 429 && status != 503 && status != 0 && same()) sideQueue_.erase(rid);   // refused (too big, full): dropped
+	return false;
 }
 
 // ---- for the UI ---------------------------------------------------------------------------------------

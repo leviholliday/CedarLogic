@@ -7,9 +7,10 @@
 //       a teacher and a student (two engines, each with a folder of its own
 //       under <dir>) through the Classroom code the window uses, against a
 //       running classroom service: create, join, post with a key students can
-//       check, open as the student's own copy, check, hand in, the teacher sees
-//       the hand-in with its check result, opens it, Download All, go live,
-//       predict, answers, reveal, end, leave, delete. Prints PASS/FAIL lines,
+//       check (and a key made from a solution), check, hand in twice, the teacher
+//       sees the hand-in with its check result and the earlier attempt, Download
+//       All, share a circuit and update it (the student is told), a hidden class
+//       example released, leave, delete. Prints PASS/FAIL lines,
 //       pictures the real screens along the way (e2e-*.png), exits 1 on failure.
 
 import AppKit
@@ -106,9 +107,13 @@ enum RenderClassroom {
             CRSubmission(studentId: "s9", name: "Jo Park", handedInAt: now.addingTimeInterval(-90000), attempts: 1, unreadable: true, problem: "Couldn't be verified", left: true),
         ]
         t.submissionsUpdated["\(cid)/a1"] = now
-        t.live[cid] = CRLive(on: true, session: "x", cdl: doc.saveText(), ver: 4, step: 4, hasPredict: true, prompt: "What will S be when A = B = 1?",
-                             lights: ["S", "C"], connection: "open")
-        t.answers[cid] = CRAnswers(answered: 3, students: 4, lights: [.init(name: "S", ones: 1, zeros: 2), .init(name: "C", ones: 3, zeros: 0)])
+        t.items[cid] = [
+            CRItem(id: "i1", type: "share", title: "Today's counter", cdl: doc.saveText(), ver: 2, createdAt: now, releasedAt: now),
+            CRItem(id: "i2", type: "example", title: "Half adder", topic: "Module 2: adders", cdl: doc.saveText(), createdAt: now, releasedAt: now),
+            CRItem(id: "i3", type: "example", title: "Full adder", topic: "Module 2: adders", note: "Try every switch.", cdl: doc.saveText(),
+                   createdAt: now, hidden: true),
+            CRItem(id: "i4", type: "example", title: "SR latch", topic: "Module 3: memory", cdl: doc.saveText(), createdAt: now, releasedAt: now),
+        ]
 
         let s = ClassroomCenter.previewing()
         s.classes = [CRClass(id: cid, name: "Digital Logic 101", teaching: false, studentName: "Sam Lee", live: true),
@@ -120,27 +125,23 @@ enum RenderClassroom {
             CRAssignment(id: "a2", title: "Lab 4: full adder", dueAt: now.addingTimeInterval(10 * 86400), keySealed: true, pending: true),
             CRAssignment(id: "a3", title: "Warm-up: gates", dueAt: now.addingTimeInterval(-2 * 86400), closed: true),
         ]
-        s.live[cid] = t.live[cid]
-        s.following = [cid]
-        let sBanner = ClassroomCenter.previewing()
-        sBanner.classes = s.classes; sBanner.selected = cid; sBanner.assignments = s.assignments; sBanner.live = s.live
-        let sRevealed = ClassroomCenter.previewing()
-        sRevealed.classes = s.classes; sRevealed.selected = cid; sRevealed.assignments = s.assignments; sRevealed.following = [cid]
-        var rl = t.live[cid]!; rl.reveal = true; rl.myRight = 1; rl.myTotal = 2
-        sRevealed.live[cid] = rl
+        s.items[cid] = t.items[cid]!.filter { !$0.hidden }.map { var x = $0; x.news = x.id == "i1" ? "updated" : x.id == "i4" ? "new" : ""; return x }
+        s.news = [CRNews(classId: cid, itemId: "i1", what: "updated", type: "share", title: "Today's counter")]
+        let tOld = ClassroomCenter.previewing()
+        tOld.classes = t.classes; tOld.selected = cid
+        tOld.classes[0].warning = "This class hasn't been used for a long time and will be deleted from the website on 14 Jan 2028. Open it or post something before then to keep it."
         let empty = ClassroomCenter.previewing()
 
         let win = NSSize(width: 980, height: 760)
         for dark in [false, true] {
             let m = dark ? "dark" : "light"
             let look = ClassroomLook(dark: dark), accent = prefs.accentColor(dark: dark)
+            snap("teacher-share-\(m)", ClassroomView(center: t, section: .share), dark: dark, in: dir, size: NSSize(width: 980, height: 1100))
             snap("teacher-assignments-\(m)", ClassroomView(center: t, section: .assignments), dark: dark, in: dir, size: win)
             snap("teacher-students-\(m)", ClassroomView(center: t, section: .students), dark: dark, in: dir, size: win)
-            snap("teacher-live-\(m)", ClassroomView(center: t, section: .live), dark: dark, in: dir, size: win)
+            snap("teacher-expiring-\(m)", ClassroomView(center: tOld, section: .settings), dark: dark, in: dir, size: win)
             snap("teacher-settings-\(m)", ClassroomView(center: t, section: .settings), dark: dark, in: dir, size: win)
             snap("student-class-\(m)", ClassroomView(center: s), dark: dark, in: dir, size: win)
-            snap("student-banner-\(m)", ClassroomView(center: sBanner), dark: dark, in: dir, size: win)
-            snap("student-revealed-\(m)", ClassroomView(center: sRevealed), dark: dark, in: dir, size: win)
             snap("empty-\(m)", ClassroomView(center: empty), dark: dark, in: dir, size: NSSize(width: 860, height: 560))
             snap("sheet-create-\(m)", CreateClassSheet(center: t, look: look, name: "Digital Logic 101").background(look.paper), dark: dark, in: dir)
             snap("sheet-teacher-key-\(m)", TeacherKeySheet(center: t, classId: cid, look: look).background(look.paper), dark: dark, in: dir)
@@ -150,7 +151,8 @@ enum RenderClassroom {
             snap("sheet-move-code-\(m)", MoveCodeSheet(center: s, code: "M2GT58X4MPKAFA59NANTSBDENX83", look: look).background(look.paper), dark: dark, in: dir)
             snap("sheet-post-\(m)", PostAssignmentSheet(center: t, classId: cid, editing: nil, look: look).background(look.paper), dark: dark, in: dir)
             snap("sheet-handins-\(m)", HandInsSheet(center: t, classId: cid, aid: "a1", look: look).background(look.paper), dark: dark, in: dir)
-            snap("sheet-predict-\(m)", PredictSheet(center: t, classId: cid, look: look).background(look.paper), dark: dark, in: dir)
+            snap("sheet-share-\(m)", AddItemSheet(center: t, classId: cid, share: true, files: [], look: look).background(look.paper), dark: dark, in: dir)
+            snap("sheet-example-\(m)", AddItemSheet(center: t, classId: cid, share: false, files: [], look: look).background(look.paper), dark: dark, in: dir)
             _ = accent
         }
         snap("recovery-sheet", RecoverySheetView(className: "Digital Logic 101", key: "000G40R40M30E209185GR38E1YZ4",
@@ -287,35 +289,68 @@ final class EndToEnd {
         }
         teacher.submissionsOpen(cid, aid, false)
 
-        // Live: go live, the student follows, predict, answers, reveal, end.
-        ClassroomFront.override = RenderClassroom.front(right, title: "Half Adder")
-        r = wait { teacher.goLive(cid, cdl: right.saveText(), done: $0) }
-        check("teacher: go live", r.0, r.1)
-        student.follow(cid, true)
-        check("student: sees the live circuit", until(30) { student.live[cid]?.on == true && !(student.live[cid]?.cdl.isEmpty ?? true) })
-        // A and B are off: S = 0, C = 0.
-        r = wait { teacher.push(cid, cdl: right.saveText(), prompt: "What will S and C show?", lights: ["S", "C"], reveal: false, done: $0) }
-        check("teacher: ask a prediction", r.0, r.1)
-        check("student: the question arrives", until(30) { student.live[cid]?.hasPredict == true && student.live[cid]?.prompt == "What will S and C show?" })
-        RenderClassroom.snap("e2e-student-predict", ClassroomView(center: student), dark: false, in: dir, size: NSSize(width: 980, height: 760))
-        r = wait { student.sendAnswer(cid, [("S", 0), ("C", 1)], done: $0) }
-        check("student: send my guess", r.0, r.1)
-        check("teacher: the answer is counted", until(30) { teacher.answers[cid]?.answered == 1 }, "\(String(describing: teacher.answers[cid]))")
-        let perS = teacher.answers[cid]?.lights.first { $0.name == "S" }
-        check("teacher: counts per light (S: 0 once)", perS?.zeros == 1, "\(String(describing: teacher.answers[cid]))")
-        r = wait { teacher.push(cid, cdl: right.saveText(), prompt: "What will S and C show?", lights: ["S", "C"], reveal: true, done: $0) }
-        check("teacher: reveal", r.0, r.1)
-        check("teacher: 1 answered, scored (right + wrong = 1)", until(20) {
-            let a = teacher.answers[cid]; return (a?.right ?? 0) + (a?.wrong ?? 0) == 1
-        }, "\(String(describing: teacher.answers[cid]))")
-        check("student: revealed, scored 1 of 2", until(30) { student.live[cid]?.reveal == true && student.live[cid]?.myTotal == 2 },
-              "\(String(describing: student.live[cid]))")
-        check("student: score is 1 right", student.live[cid]?.myRight == 1)
-        RenderClassroom.snap("e2e-teacher-live", ClassroomView(center: teacher, section: .live), dark: true, in: dir, size: NSSize(width: 980, height: 760))
-        RenderClassroom.snap("e2e-student-revealed", ClassroomView(center: student), dark: true, in: dir, size: NSSize(width: 980, height: 760))
-        r = wait { teacher.endLive(cid, done: $0) }
-        check("teacher: end live", r.0, r.1)
-        check("student: the live view ended", until(30) { student.live[cid]?.on == false })
+        // v2: every hand-in kept (3.16.3): the wrong first try is the earlier attempt, checked on its own.
+        r = wait { teacher.loadHistory(cid, aid, sub?.studentId ?? "", done: $0) }
+        let hist = teacher.history["\(cid)/\(aid)/\(sub?.studentId ?? "")"] ?? []
+        check("teacher: the earlier hand-in (history)", r.0 && hist.count == 1 && hist.first?.attempts == 1, "\(r.1) \(hist)")
+        check("teacher: the earlier one is checked: wrong rows", hist.first?.verdict == 1, "\(hist.first?.verdict ?? -9) \(hist.first?.summary ?? "")")
+        RenderClassroom.snap("e2e-handins-earlier", HandInsSheet(center: teacher, classId: cid, aid: aid, look: look).background(look.paper), dark: false, in: dir)
+
+        // v2: a key made from a solution (3.16.6): the same checker, behaviour not layout.
+        if let k = try? AnswerKey.make(cdl: right.saveText()) {
+            check("key from a solution: a truth table", !k.timing && k.text.hasPrefix("A B | ") && k.text.contains("| "), k.text)
+            check("key from a solution: the right circuit matches it", ClassroomCenter.check(cdl: right.saveText(), key: k.text, names: "").verdict == 0)
+            check("key from a solution: the wrong one doesn't", ClassroomCenter.check(cdl: wrong.saveText(), key: k.text, names: "").verdict == 1)
+        } else {
+            check("key from a solution: made", false)
+        }
+        check("key from a solution: none without lights", (try? AnswerKey.make(cdl: CoreDocument().saveText())) == nil)
+        if let dff = Templates.builtIn.first(where: { $0.id == "builtin-ff-d" }) {
+            do {
+                let k = try AnswerKey.make(cdl: dff.text)
+                check("key from a solution: a D flip-flop gives a timing table", k.timing && k.text.hasPrefix("Pulse | "), k.text)
+                let v = ClassroomCenter.check(cdl: dff.text, key: k.text, names: "")
+                check("key from a solution: the flip-flop matches its own key", v.verdict == 0, "\(v.verdict) \(v.summary)\n\(k.text)")
+                print("note: D flip-flop key\n" + k.text.split(separator: "\n").prefix(4).joined(separator: "\n"))
+            } catch {
+                check("key from a solution: a D flip-flop", false, (error as? AnswerKey.Failure)?.message ?? "\(error)")
+            }
+        }
+
+        // v2: retention (3.16.4): the status's warnAt.
+        check("teacher: warnAt from the status", teacher.classes.first { $0.id == cid }?.warnAt != nil)
+
+        // v2: Share This Circuit; the student is told; an update is news again (3.16.2).
+        r = wait { teacher.postItem(cid, id: nil, type: "share", title: "Today's adder", topic: "", note: "Try every switch.", cdl: right.saveText(), hidden: false, done: $0) }
+        check("teacher: share this circuit", r.0, r.1)
+        let iid = r.2
+        check("student: told “Your teacher shared …”", until(40) { student.news.contains { $0.itemId == iid && $0.what == "new" && $0.type == "share" } },
+              "\(student.news)")
+        check("student: the shared circuit is listed with its circuit", student.items[cid]?.first { $0.id == iid }.map { $0.news == "new" && !$0.cdl.isEmpty } ?? false)
+        if let e = student.engine { cl_classroom_item_opened(e, cid, iid) }
+        student.news.removeAll()
+        check("student: opened, not news any more", until(10) { student.refreshItems(cid); return student.items[cid]?.first { $0.id == iid }?.news == "" })
+        r = wait { teacher.postItem(cid, id: iid, type: "share", title: "Today's adder", topic: "", note: "", cdl: wrong.saveText(), hidden: false, done: $0) }
+        check("teacher: update the shared circuit", r.0 && r.2 == iid, r.1)
+        check("student: told “Updated: …”", until(40) { student.news.contains { $0.itemId == iid && $0.what == "updated" } }, "\(student.news)")
+        check("student: the new version", student.items[cid]?.first { $0.id == iid }?.ver == 2)
+
+        // v2: a class example hidden until released.
+        r = wait { teacher.postItem(cid, id: nil, type: "example", title: "Half adder", topic: "Module 2", note: "", cdl: right.saveText(), hidden: true, done: $0) }
+        check("teacher: add a hidden example", r.0 && teacher.items[cid]?.first { $0.id == r.2 }?.hidden == true, r.1)
+        let ex = r.2
+        r = wait { teacher.postItem(cid, id: nil, type: "share", title: "Ping", topic: "", note: "", cdl: starter.saveText(), hidden: false, done: $0) }
+        check("student: a hidden example isn't listed", until(40) { student.items[cid]?.contains { $0.title == "Ping" } ?? false }
+              && !(student.items[cid]?.contains { $0.id == ex } ?? true))
+        r = wait { teacher.setItemHidden(cid, ex, false, done: $0) }
+        check("teacher: release it", r.0 && teacher.items[cid]?.first { $0.id == ex }.map { !$0.hidden && $0.releasedAt != nil } ?? false, r.1)
+        check("student: told “Your teacher added …”", until(40) { student.news.contains { $0.itemId == ex && $0.what == "new" && $0.type == "example" } })
+        check("student: the example has its topic", student.items[cid]?.first { $0.id == ex }?.topic == "Module 2")
+        RenderClassroom.snap("e2e-teacher-share", ClassroomView(center: teacher, section: .share), dark: false, in: dir, size: NSSize(width: 980, height: 1000))
+        RenderClassroom.snap("e2e-student-items", ClassroomView(center: student), dark: true, in: dir, size: NSSize(width: 980, height: 1000))
+        r = wait { teacher.deleteItem(cid, ex, done: $0) }
+        check("teacher: delete an example", r.0 && !(teacher.items[cid]?.contains { $0.id == ex } ?? true), r.1)
+        check("student: the deleted example goes", until(40) { !(student.items[cid]?.contains { $0.id == ex } ?? true) })
 
         // Joining closed, a new code, a move code.
         r = wait { teacher.setJoinOpen(cid, false, done: $0) }
@@ -327,7 +362,6 @@ final class EndToEnd {
         check("student: move code", r.0 && r.2.count >= 28, r.1)
 
         // Leave, delete.
-        student.follow(cid, false)
         student.pageOpen(cid, false)
         r = wait { student.leaveClass(cid, done: $0) }
         check("student: leave class", r.0 && !student.classes.contains { $0.id == cid }, r.1)

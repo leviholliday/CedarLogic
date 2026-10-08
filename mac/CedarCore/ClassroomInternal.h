@@ -151,6 +151,16 @@ bool moveFrom(const json::Value&, MoveRec&);
 std::string classroomJson(const std::string& classId, const std::string& teacherKey, const std::string& name, int64_t createdAt,
                           int64_t modifiedAt, const std::string& device, const std::string& deviceId);
 
+// v2 (3.16.2): a shared circuit ("share") or a class example ("example").
+struct ItemRec {
+	std::string type, title, topic, note, cdl;
+	int64_t createdAt = 0, modifiedAt = 0;
+};
+std::string itemJson(const ItemRec&);
+bool itemFrom(const json::Value&, ItemRec&);
+// v2 (3.16.7): the sync side record of a membership (a move record plus joinedAt).
+std::string membershipJson(const MoveRec&, int64_t joinedAt);
+
 // Parts in a circuit's text, counted before anything is built from it (4.9).
 void countParts(const std::string& cdl, int& gates, int& segments);
 bool tooBig(const std::string& cdl);
@@ -168,6 +178,7 @@ struct ClientHooks {
 	std::function<std::vector<std::pair<std::string, std::string>>()> sideRecords;
 	std::function<void(const std::string&, const std::string&)> putSide;
 	std::function<void(const std::string&)> deleteSide;
+	std::function<bool()> syncOn;                                         // (none: on)
 	std::function<bool(const std::string&, const std::string&, const std::string&, int&, std::string&)> check;
 	std::function<bool(const std::string&, const std::vector<std::string>&, std::map<std::string, int>&)> lights;
 };
@@ -185,6 +196,8 @@ struct Result {
 };
 
 struct Checked { std::string h; int verdict = -1; std::string summary; };
+// An item as the status lists it (3.16.2).
+struct ItemMark { int64_t ver = 0; std::string h; bool hidden = false; int64_t releasedAt = 0, at = 0; };
 
 struct Teaching {
 	std::string classId, teacherKey;
@@ -208,6 +221,8 @@ struct Teaching {
 	LiveRec pendingRec;               // a write refused with 412 (Take Over sends it again)
 	bool pendingOn = true;
 	std::string sideRid;              // the sync side record that carries this class (2.5)
+	std::map<std::string, ItemMark> items;   // v2 (3.16.2)
+	int64_t warnAt = 0;               // v2 (3.16.4)
 	int students = -1;                // the roster's size, as the live connection last said (-1: not heard)
 };
 
@@ -224,6 +239,12 @@ struct Membership {
 	std::map<std::string, int> attempts;                           // aid -> hand-ins so far
 	std::map<std::string, Pending> pending;
 	int wrongToken = 0;                                           // 401s in a row (4.11)
+	// v2 (3.16)
+	std::map<std::string, ItemMark> items;                        // the released items the status lists
+	std::map<std::string, int64_t> seenItems;                     // iid -> the highest ver opened
+	std::map<std::string, std::string> news;                      // iid -> "new" | "updated", until opened
+	int64_t warnAt = 0;
+	std::string sideRid;                                          // the membership's sync side record (3.16.7)
 };
 
 // Engines whose thread was still inside a host call when they were destroyed, and so were
@@ -295,6 +316,17 @@ public:
 	// Sync's side records (2.5).
 	void sideChanged();
 
+	// v2 (3.16): items and hand-in history.
+	Result postItem(const std::string& classId, const Item& draft, bool hidden);   // value: the iid
+	Result setItemHidden(const std::string& classId, const std::string& iid, bool hidden);
+	Result deleteItem(const std::string& classId, const std::string& iid);
+	std::vector<Item> items(const std::string& classId) const;
+	void itemOpened(const std::string& classId, const std::string& iid);
+	Result loadHistory(const std::string& classId, const std::string& aid, const std::string& sid);
+	std::vector<Submission> history(const std::string& classId, const std::string& aid, const std::string& sid) const;
+	struct News { std::string classId, className; std::vector<ItemNews> items; };
+	bool newsFlag(News& out);                          // items news since the last call
+
 	// Views.
 	std::vector<ClassInfo> classes() const;
 	std::vector<Assignment> assignments(const std::string& classId) const;
@@ -353,7 +385,8 @@ private:
 	void checkJoinRecord(Teaching& t, const json::Value& join);
 	Result liveWrite(Teaching& t, const LiveRec& rec, bool on, int64_t base);
 	void forgetClassLocal(const std::string& classId, bool tombstone);
-	void forgetMembershipLocal(const std::string& classId, const std::string& notice);
+	// tombstone: the membership's side record goes too (left, removed, deleted); else this device only.
+	void forgetMembershipLocal(const std::string& classId, const std::string& notice, bool tombstone = true);
 	Result gone(const std::string& classId, const Api& a, bool teaching);
 	Result fetchAssignment(const std::string& classId, const std::string& fetchKey, const Bytes& classKey,
 	                       const std::string& aid, int64_t ver, const std::string& h, bool teacher);
@@ -370,6 +403,11 @@ private:
 	std::string cachePath(const std::string& classId, const std::string& name) const;
 	void saveCache(const std::string& classId, const std::string& name, const std::string& text);
 	std::string loadCache(const std::string& classId, const std::string& name) const;
+	Result fetchItem(const std::string& classId, const std::string& fetchKey, const Bytes& classKey, const std::string& iid, int64_t ver);
+	void forgetItem(const std::string& classId, const std::string& iid);
+	void putMemberSide(Membership& m);
+	void putTeacherSide(Teaching& t);
+	bool syncOn() const { return !hooks_.syncOn || hooks_.syncOn(); }
 
 	Config cfg_;
 	Crypto& cr_;
@@ -386,6 +424,12 @@ private:
 	std::map<std::string, Submission> subs_;                       // "classId/aid/sid"
 	std::map<std::string, std::string> subsEtag_;                  // "classId/aid"
 	std::map<std::string, Live> lives_;                            // student view
+	std::map<std::string, Item> itemCache_;                        // "classId/iid" -> the opened item (v2)
+	std::map<std::string, std::vector<Submission>> history_;       // "classId/aid/sid" -> earlier hand-ins (v2)
+	std::vector<News> news_;
+public:
+	const std::map<std::string, std::vector<Submission>>& allHistory() const { return history_; }
+private:
 	std::map<std::string, std::map<std::string, int>> myGuess_;    // classId -> the guesses sent for the live ver
 	std::map<std::string, AnswerCounts> counts_;
 	struct Guess { int64_t ver = 0; std::map<std::string, int> lights; };

@@ -98,7 +98,8 @@ bool sealForTest(Crypto&, const Bytes& key, const std::string& id, int64_t ver, 
 bool openRecord(Crypto&, const Bytes& key, const std::string& id, int64_t ver, const Bytes& env, std::string& payload);
 
 struct Payload {
-	std::string kind;             // circuit | deleted | device
+	std::string kind;             // circuit | deleted | device | a registered side kind (SYNC.md 2.5.1)
+	std::string raw;              // a side record: the payload as it came
 	std::string name, cdl;        // circuit (name trimmed and cut as payloadName)
 	std::string device, deviceId, client;
 	int64_t createdAt = -1;       // -1: absent
@@ -106,8 +107,9 @@ struct Payload {
 	bool hasBase = false;
 	std::string baseName, baseCdl;
 };
-// "" (readable), "newer" or "invalid" (SYNC.md 2.2, 4.10).
-std::string readPayload(const std::string& bytes, Payload& p);
+// "" (readable), "newer" or "invalid" (SYNC.md 2.2, 4.10). A kind in sideKinds (2.5.1) is read as
+// it is (p.raw), never "newer"; without them any other kind is "newer", as before.
+std::string readPayload(const std::string& bytes, Payload& p, const std::vector<std::string>* sideKinds = nullptr);
 std::string circuitJson(const std::string& name, const std::string& cdl, int64_t modifiedAt, const std::string& device,
                         const std::string& deviceId, int64_t createdAt, const std::string* baseName,
                         const std::string* baseCdl);
@@ -328,6 +330,9 @@ struct State {
 	std::map<std::string, std::pair<int64_t, std::string>> unreadable;  // rid -> (ver, newer|damaged)
 	std::map<std::string, std::string> hints;                           // rid -> local (a re-join)
 	std::map<std::string, std::pair<std::string, int64_t>> devices;     // rid -> (name, lastSyncAt)
+	struct Side { int64_t ver = 0; std::string h, kind, json; };
+	std::map<std::string, Side> side;                                    // side records (SYNC.md 2.5.1)
+	bool sideKnown = false;                                              // the state was written by an engine with side records
 	json::Value hashCache = json::Value::object();
 
 	json::Value toJson() const;
@@ -354,6 +359,8 @@ struct CoreHooks {
 	std::function<void(const std::string& text, int done, int total)> progress;
 	// Persisting (state.json, the secret); false = couldn't.
 	std::function<bool(const State&)> saveState;
+	// Inside onMain, after a pull that changed side records (2.5.1).
+	std::function<void()> sideChanged;
 };
 
 struct CoreOptions {
@@ -363,6 +370,7 @@ struct CoreOptions {
 	size_t batchItems = kBatchItems;
 	int64_t changesLimit = 0;  // tests: ask for pages of this many entries (0: the server's default)
 	GateDefaults gateDefaults;
+	std::vector<std::string> sideKinds;   // SYNC.md 2.5.1: the kinds kept beside the circuits ("classroom", "membership")
 };
 
 class Core {
@@ -371,7 +379,7 @@ public:
 
 	// State: a fresh one (keeping this device's id and name), or a saved one.
 	void reset();
-	void adopt(const State& s) { st = s; }
+	void adopt(const State& s);
 	const State& state() const { return st; }
 	State& mutableState() { return st; }
 
@@ -477,6 +485,17 @@ private:
 	Item writeItem(const std::string& rid, RecState& s, const std::string& payload, bool deleted, bool compress,
 	               const Sent* content, bool device, bool& tooBig);
 	bool result(const Item& it, const json::Value& res, const std::map<std::string, std::string>& meta);
+	bool sideResult(const Item& it, const json::Value& res);
+public:
+	// Side records (SYNC.md 2.5.1); any thread. The queue is memory only, sent by the next push.
+	std::vector<std::pair<std::string, std::string>> sideRecords(const std::string& kind);
+	std::string putSideRecord(const std::string& kind, const std::string& json, const std::string& rid);
+	void deleteSideRecord(const std::string& rid);
+private:
+	struct SideQ { std::string kind, json; bool deleted = false; };
+	std::map<std::string, SideQ> sideQueue_, sideSent_;
+	std::mutex sideMu_;
+	bool isSideKind(const std::string& k) const;
 
 	CoreOptions opt;
 	Crypto& crypto;

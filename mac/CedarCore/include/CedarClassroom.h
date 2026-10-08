@@ -65,6 +65,11 @@ typedef struct CLClassroomHooks {
 	// (added; may be NULL) on the main thread: a hand-in to that assignment arrived (the teacher's
 	// live connection said so): an open submissions view refreshes.
 	void (*submissions_changed)(void *ctx, const char *classId, const char *aid);
+	// (v2; may be NULL) main thread: a student's class has new or updated shared circuits or examples
+	// (CLASSROOM.md 3.16.2). news: a JSON array of {"id","what":"new"|"updated","type":"share"|"example","title"}.
+	void (*items_changed)(void *ctx, const char *classId, const char *newsJson, const char *className);
+	// (v2; may be NULL = off) main thread: Sync is on, so side records are read and written (3.16.7).
+	bool (*sync_on)(void *ctx);
 } CLClassroomHooks;
 
 // What a socket opened with socket_open does, reported from any thread (3.14).
@@ -96,6 +101,8 @@ const char *cl_classroom_class_student_name(CLClassroom *, int i);
 int64_t cl_classroom_class_expires_at(CLClassroom *, int i);
 bool cl_classroom_class_live(CLClassroom *, int i);
 const char *cl_classroom_class_warning(CLClassroom *, int i);
+int64_t cl_classroom_class_warn_at(CLClassroom *, int i);     // v2: the expiry warning's time (0: none known)
+int cl_classroom_class_news(CLClassroom *, int i);             // v2, student: items not opened yet
 // A class's status: kind 0 idle, 1 working, 2 offline, 3 error, 4 gone; the sentence.
 int cl_classroom_status_kind(CLClassroom *, const char *classId);
 const char *cl_classroom_status_text(CLClassroom *, const char *classId);
@@ -186,6 +193,32 @@ int cl_classroom_answers_right(CLClassroom *, const char *classId);
 int cl_classroom_answers_wrong(CLClassroom *, const char *classId);
 int cl_classroom_answers_light_count(CLClassroom *, const char *classId);
 const char *cl_classroom_answers_light(CLClassroom *, const char *classId, int i, int *ones, int *zeros);
+
+// v2 (3.16.2): shared circuits ("share") and class examples ("example"); valid until the next
+// cl_classroom_item_count. Teacher: every one, newest first; student: the released ones, newest first.
+int cl_classroom_item_count(CLClassroom *, const char *classId);
+const char *cl_classroom_item_id(CLClassroom *, int i);
+const char *cl_classroom_item_type(CLClassroom *, int i);
+const char *cl_classroom_item_title(CLClassroom *, int i);
+const char *cl_classroom_item_topic(CLClassroom *, int i);
+const char *cl_classroom_item_note(CLClassroom *, int i);
+const char *cl_classroom_item_cdl(CLClassroom *, int i);
+int64_t cl_classroom_item_ver(CLClassroom *, int i);
+int64_t cl_classroom_item_created_at(CLClassroom *, int i);
+int64_t cl_classroom_item_released_at(CLClassroom *, int i);   // 0 while hidden
+bool cl_classroom_item_hidden(CLClassroom *, int i);
+const char *cl_classroom_item_news(CLClassroom *, int i);      // student: "new", "updated" or ""
+bool cl_classroom_item_unreadable(CLClassroom *, int i);
+const char *cl_classroom_item_problem(CLClassroom *, int i);
+void cl_classroom_post_item(CLClassroom *, const char *classId, const char *iidOrNull, const char *type, const char *title, const char *topic,
+                            const char *note, const char *cdl, bool hidden, CLClassroomDone, void *ctx);   // result = the iid
+void cl_classroom_set_item_hidden(CLClassroom *, const char *classId, const char *iid, bool hidden, CLClassroomDone, void *ctx);
+void cl_classroom_delete_item(CLClassroom *, const char *classId, const char *iid, CLClassroomDone, void *ctx);
+void cl_classroom_item_opened(CLClassroom *, const char *classId, const char *iid);
+// v2 (3.16.3): a student's earlier hand-ins (teacher). load fetches them; history_count fills the
+// list the cl_classroom_submission_* getters read (oldest first).
+void cl_classroom_load_history(CLClassroom *, const char *classId, const char *aid, const char *sid, CLClassroomDone, void *ctx);
+int cl_classroom_history_count(CLClassroom *, const char *classId, const char *aid, const char *sid);
 
 // Student (4.5-4.7).
 void cl_classroom_preview_join_code(CLClassroom *, const char *text, CLClassroomDone, void *ctx);   // result = "<name>\n<1|0 open>"

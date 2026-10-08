@@ -86,6 +86,8 @@ struct Host {
 	virtual void askMassDelete(int count, std::function<void(bool deleteEverywhere)> answer) = 0;
 	virtual void askIncomingDeletes(int count, const std::string& fromDevices,
 	                                std::function<void(bool moveToTrash)> answer) = 0;
+	// UI thread: a pull changed side records (SYNC.md 2.5.1); read them with Engine::sideRecords.
+	virtual void sideChanged() {}
 };
 
 struct Config {
@@ -97,6 +99,7 @@ struct Config {
 	std::string defaultDeviceName; // §5.1
 	std::function<std::string(const std::string& lib, bool gui, const std::string& name)> gateDefault;
 	                               // the gate library's default for a param, or "\x01" for none (§2.4)
+	std::vector<std::string> sideKinds;   // SYNC.md 2.5.1: kinds kept beside the circuits ("classroom", "membership")
 };
 
 // ---- Codes and text (any thread) -----------------------------------------------------
@@ -159,6 +162,12 @@ public:
 	void pairStart(std::function<void(const std::string& link)> show,
 	               std::function<void(int result, const std::string& text, const std::string& from)> done);
 	void pairCancel();
+
+	// Side records (SYNC.md 2.5.1), any thread: (rid, payload JSON) of a kind, as last pulled or
+	// written; a write (rid "" = a new id, returned) and a tombstone are sent by the next push.
+	std::vector<std::pair<std::string, std::string>> sideRecords(const std::string& kind);
+	std::string putSideRecord(const std::string& kind, const std::string& json, const std::string& rid);
+	void deleteSideRecord(const std::string& rid);
 
 private:
 	struct Impl;

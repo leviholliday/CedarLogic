@@ -9,6 +9,8 @@
     "live": 1,
     "move": 1,
     "classroom": 1,
+    "item": 1,
+    "membership": 1,
     "name": 2,
     "submission": 2,
     "answer": 2,

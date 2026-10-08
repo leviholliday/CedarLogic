@@ -519,7 +519,7 @@ void putBase(std::string& o, const std::string* baseName, const std::string* bas
 
 }  // namespace
 
-std::string readPayload(const std::string& bytes, Payload& p) {
+std::string readPayload(const std::string& bytes, Payload& p, const std::vector<std::string>* sideKinds) {
 	p = Payload();
 	if (!validUtf8(bytes)) return "invalid";
 	json::Value v;
@@ -530,6 +530,10 @@ std::string readPayload(const std::string& bytes, Payload& p) {
 	const json::Value* k = v.get("kind");
 	if (!k || !k->isString()) return "invalid";
 	p.kind = k->s;
+	if (sideKinds && std::find(sideKinds->begin(), sideKinds->end(), p.kind) != sideKinds->end()) {
+		p.raw = bytes;   // the module checks its own fields
+		return std::string();
+	}
 	if (p.kind != "circuit" && p.kind != "deleted" && p.kind != "device") return "newer";
 	for (const char* f : { "device", "deviceId" })
 		if (const json::Value* x = v.get(f))

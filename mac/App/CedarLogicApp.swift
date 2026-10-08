@@ -353,8 +353,9 @@ struct NewOpenCommands: Commands {
                     Button("Join a Class…") { ClassroomCenter.shared.sheet = .join(prefill: ""); openWindow(id: "classroom") }
                     Button("I Have a Teacher Key…") { ClassroomCenter.shared.sheet = .addTeacherKey(prefill: ""); openWindow(id: "classroom") }
                     Divider()
-                    Button("Hand In…") { ClassroomCenter.shared.handInFront() }
+                    Button("Hand In") { ClassroomCenter.shared.handInFront() }
                         .disabled(canvas == nil)
+                    ProjectorMenuItem()
                 }
             }
             Divider()

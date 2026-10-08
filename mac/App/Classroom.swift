@@ -1,9 +1,10 @@
-// Classroom on the Mac (docs/CLASSROOM.md in the website's repository, §4-§5):
-// the shared core (mac/CedarCore/Classroom*.cpp through CedarClassroom.h) with
-// the hooks of ClassroomHooks.swift, plus the app's own part -- the UI hooks,
-// Check My Circuit on hand-ins (check_circuit), a pushed circuit's lights
-// (lights_of), the students' copies in Your Circuits, handing in from them,
-// hand-ins opened as scratch copies, Download All, and the live view's window.
+// Classroom on the Mac (docs/CLASSROOM.md in the website's repository, §4-§5,
+// and v2, §3.16): the shared core (mac/CedarCore/Classroom*.cpp through
+// CedarClassroom.h) with the hooks of ClassroomHooks.swift, plus the app's own
+// part -- the UI hooks, Check My Circuit on hand-ins (check_circuit), the
+// students' own copies in Your Circuits (assignments, shared circuits and class
+// examples), handing in from them, hand-ins opened as scratch copies, Download
+// All, answer keys made from a solution, and the classes Sync carries.
 // ClassroomView.swift draws it; RenderClassroom.swift pictures and tests it.
 //
 // Behind a flag (ClassroomFlag), on by default since the service is deployed: off,
@@ -37,6 +38,10 @@ struct CRClass: Identifiable, Hashable {
     var expiresAt: Date?
     var live = false
     var warning = ""
+    /// v2 (3.16.4): when the expiry warning shows.
+    var warnAt: Date?
+    /// v2, student: shared circuits and examples not opened yet.
+    var news = 0
     /// 0 idle, 1 working, 2 offline, 3 error, 4 gone (cl_classroom_status_kind).
     var statusKind = 0
     var statusText = ""
@@ -64,6 +69,38 @@ struct CRAssignment: Identifiable, Hashable {
     var hasKey: Bool { keySealed || !keyText.isEmpty }
 }
 
+/// v2 (3.16.2): a shared circuit ("share") or a class example ("example").
+struct CRItem: Identifiable, Hashable {
+    var id: String
+    var type = "example"
+    var title = ""
+    var topic = ""
+    var note = ""
+    var cdl = ""
+    var ver: Int64 = 1
+    var createdAt: Date?
+    var releasedAt: Date?
+    var hidden = false
+    /// Student: "new", "updated" or "".
+    var news = ""
+    var unreadable = false
+    var problem = ""
+    var isShare: Bool { type == "share" }
+}
+
+/// "Your teacher shared “X”" and the like: one item's news, until it's opened or dismissed.
+struct CRNews: Identifiable, Hashable {
+    var classId: String
+    var itemId: String
+    var what: String
+    var type: String
+    var title: String
+    var id: String { "\(classId)/\(itemId)" }
+    var text: String {
+        what == "updated" ? "Updated: “\(title)”" : type == "share" ? "Your teacher shared “\(title)”" : "Your teacher added “\(title)”"
+    }
+}
+
 struct CRStudent: Identifiable, Hashable {
     var id: String
     var name: String
@@ -84,34 +121,8 @@ struct CRSubmission: Identifiable, Hashable {
     var unreadable = false
     var problem = ""
     var left = false
-    var id: String { studentId }
-}
-
-struct CRLive: Hashable {
-    var on = false
-    var ended = false
-    var reveal = false
-    var takeOver = false
-    var session = ""
-    var cdl = ""
     var ver: Int64 = 0
-    var step = 0
-    var hasPredict = false
-    var prompt = ""
-    var lights: [String] = []
-    var myRight = -1
-    var myTotal = 0
-    /// "", "connecting", "open", "fallback", "closed".
-    var connection = ""
-}
-
-struct CRAnswers: Hashable {
-    struct Light: Hashable { var name: String; var ones: Int; var zeros: Int }
-    var answered = 0
-    var students = 0
-    var right = 0
-    var wrong = 0
-    var lights: [Light] = []
+    var id: String { "\(studentId)/\(ver)" }
 }
 
 // MARK: - Wording shared by the views (CLASSROOM.md §5)
@@ -138,12 +149,11 @@ enum ClassroomText {
         guard let due = a.dueAt else { return "No due date" }
         return due < now ? "Was due \(shortDate(due))" : "Due \(shortDate(due))"
     }
-    /// "Not handed in" / "Handed in 4 Oct 10:31" / "Changed since you handed in" / pending.
-    static func handInLine(_ a: CRAssignment) -> String {
+    /// "Not handed in" / "Handed in ✓ 4 Oct 10:31" (· changed since) / pending (3.16.3).
+    static func handInLine(_ a: CRAssignment, changed: Bool? = nil) -> String {
         if a.pending { return "Will hand in when you're online." }
         guard let at = a.handedInAt else { return "Not handed in" }
-        if a.changedSince { return "Changed since you handed in" }
-        return "Handed in \(dayTime(at))"
+        return "Handed in ✓ \(dayTime(at))" + ((changed ?? a.changedSince) ? " · changed since" : "")
     }
     static func checkLine(_ s: CRSubmission, hasKey: Bool) -> String {
         if s.unreadable { return s.problem.isEmpty ? "Couldn't be read" : s.problem }
@@ -163,7 +173,6 @@ enum ClassroomText {
     static let keyStudentsCheck = "Students can check: the key is sent to students' devices, encrypted for the class, so Check My Circuit works for them — and a curious student can find the answer in it. Good for practice."
     static let keyOnlyMe = "Only I check: the key is encrypted for you alone; you see each hand-in's result when you open the hand-ins."
     static let moveBlurb = "On your other device: Classroom › Join a Class › I have a move code — or scan this. It works for 10 minutes. Anyone who gets this code can hand in as you, so don't share it."
-    static let goLiveAsk = "Go live with the circuit on screen? Every student who opens the class sees it; push again whenever you change it."
     static let offline = "Can't reach the website."
 }
 
@@ -183,16 +192,18 @@ final class ClassroomCenter: ObservableObject {
     /// By "<classId>/<aid>".
     @Published var submissions: [String: [CRSubmission]] = [:]
     @Published var submissionsUpdated: [String: Date] = [:]
-    @Published var live: [String: CRLive] = [:]
-    @Published var answers: [String: CRAnswers] = [:]
+    /// v2: shared circuits and class examples, by class.
+    @Published var items: [String: [CRItem]] = [:]
+    /// v2: a hand-in's earlier attempts, by "<classId>/<aid>/<sid>" (oldest first).
+    @Published var history: [String: [CRSubmission]] = [:]
+    /// v2: "Your teacher shared …", newest last, until opened or dismissed.
+    @Published var news: [CRNews] = []
     /// The latest notice from the core ("You were removed from …"), shown as the window's banner.
     @Published var notice: String?
     /// The class the window shows.
     @Published var selected: String?
     /// The window's sheets (ClassroomView).
     @Published var sheet: ClassroomSheet?
-    /// Classes whose live view this student joined (follows the teacher's pushes).
-    @Published var following: Set<String> = []
 
     let preview: Bool
     let dir: URL
@@ -203,8 +214,6 @@ final class ClassroomCenter: ObservableObject {
     private var lastUserActive = Date.distantPast
     /// Which hand-ins views are open, so a change refreshes them.
     private var openSubmissions: Set<String> = []
-    /// The live circuit each class's live window last showed (by ver).
-    private var liveShown: [String: Int64] = [:]
 
     init(dir: URL, preview: Bool = false) {
         self.dir = dir
@@ -226,14 +235,6 @@ final class ClassroomCenter: ObservableObject {
         var h = p.hooks()
         Self.registry[UInt(bitPattern: Unmanaged.passUnretained(p).toOpaque())] = Weak(self)
         h.classes_changed = { ctx in ClassroomCenter.post(ctx) { $0.refresh() } }
-        h.live_changed = { ctx, cid in
-            let id = cid.map { String(cString: $0) } ?? ""
-            ClassroomCenter.post(ctx) { $0.refreshLive(id) }
-        }
-        h.answers_changed = { ctx, cid in
-            let id = cid.map { String(cString: $0) } ?? ""
-            ClassroomCenter.post(ctx) { $0.refreshLive(id) }
-        }
         h.status_changed = { ctx, _ in ClassroomCenter.post(ctx) { $0.refreshClasses() } }
         h.notice = { ctx, text in
             let t = text.map { String(cString: $0) } ?? ""
@@ -245,12 +246,22 @@ final class ClassroomCenter: ObservableObject {
                 if c.openSubmissions.contains("\(c1)/\(a1)") { c.fetchSubmissions(c1, a1) }
             }
         }
-        // Teacher keys over Sync (§2.5) need the sync engine's side records, which it doesn't
-        // have yet: none read, none written (each device adds a class with its teacher key).
-        h.sync_side_count = { _ in 0 }
-        h.sync_side = { _, _, rid in rid?.pointee = nil; return nil }
-        h.sync_put_side = { _, _, _ in }
-        h.sync_delete_side = { _, _ in }
+        // Taught and joined classes over Sync (3.16.7): the sync engine's side records. Only the app's
+        // own center (the folder Sync belongs with); a check's centers have none.
+        if dir == ClassroomPlatform.defaultDir {
+            h.sync_on = { _ in ClassroomSide.on }
+            h.sync_side_count = { _ in ClassroomSide.load() }
+            h.sync_side = { _, i, rid in ClassroomSide.record(Int(i), rid) }
+            h.sync_put_side = { _, rid, json in
+                SyncCenter.shared.putSide(json.map { String(cString: $0) } ?? "", rid: rid.map { String(cString: $0) } ?? "")
+            }
+            h.sync_delete_side = { _, rid in SyncCenter.shared.deleteSide(rid.map { String(cString: $0) } ?? "") }
+        }
+        h.items_changed = { ctx, cid, json, cname in
+            let c1 = cid.map { String(cString: $0) } ?? "", j = json.map { String(cString: $0) } ?? "[]"
+            let name = cname.map { String(cString: $0) } ?? ""
+            ClassroomCenter.post(ctx) { $0.itemsArrived(c1, j, className: name) }
+        }
         h.check_circuit = { _, cdl, keyText, keyNames, verdict, summary in
             let r = ClassroomCenter.check(cdl: cdl.map { String(cString: $0) } ?? "",
                                           key: keyText.map { String(cString: $0) } ?? "",
@@ -323,7 +334,7 @@ final class ClassroomCenter: ObservableObject {
         for c in classes {
             refreshAssignments(c.id)
             if c.teaching { refreshStudents(c.id) }
-            refreshLive(c.id)
+            refreshItems(c.id)
         }
         for k in openSubmissions {
             let p = k.split(separator: "/").map(String.init)
@@ -345,7 +356,8 @@ final class ClassroomCenter: ObservableObject {
                                joinCode: Self.str(cl_classroom_class_join_code(e, i)), joinOpen: cl_classroom_class_join_open(e, i),
                                studentName: Self.str(cl_classroom_class_student_name(e, i)),
                                expiresAt: Self.date(cl_classroom_class_expires_at(e, i)), live: cl_classroom_class_live(e, i),
-                               warning: Self.str(cl_classroom_class_warning(e, i))))
+                               warning: Self.str(cl_classroom_class_warning(e, i)), warnAt: Self.date(cl_classroom_class_warn_at(e, i)),
+                               news: Int(cl_classroom_class_news(e, i))))
         }
         for k in out.indices {
             out[k].statusKind = Int(cl_classroom_status_kind(e, out[k].id))
@@ -405,38 +417,58 @@ final class ClassroomCenter: ObservableObject {
         if submissions["\(cid)/\(aid)"] != out { submissions["\(cid)/\(aid)"] = out }
     }
 
-    func refreshLive(_ cid: String) {
+    func refreshItems(_ cid: String) {
         guard let e = engine else { return }
-        var l = CRLive()
-        l.on = cl_classroom_live_on(e, cid)
-        l.ended = cl_classroom_live_ended(e, cid)
-        l.reveal = cl_classroom_live_reveal(e, cid)
-        l.takeOver = cl_classroom_live_take_over(e, cid)
-        l.session = Self.str(cl_classroom_live_session(e, cid))
-        l.cdl = Self.str(cl_classroom_live_cdl(e, cid))
-        l.ver = cl_classroom_live_ver(e, cid)
-        l.step = Int(cl_classroom_live_step(e, cid))
-        l.hasPredict = cl_classroom_live_has_predict(e, cid)
-        l.prompt = Self.str(cl_classroom_live_prompt(e, cid))
-        l.lights = (0..<Int(cl_classroom_live_light_count(e, cid))).map { Self.str(cl_classroom_live_light(e, cid, Int32($0))) }
-        l.myRight = Int(cl_classroom_live_my_right(e, cid))
-        l.myTotal = Int(cl_classroom_live_my_total(e, cid))
-        l.connection = Self.str(cl_classroom_live_connection(e, cid))
-        if live[cid] != l {
-            live[cid] = l
-            liveArrived(cid, l)
+        let n = Int(cl_classroom_item_count(e, cid))
+        let out = (0..<n).map { i -> CRItem in
+            let i = Int32(i)
+            return CRItem(id: Self.str(cl_classroom_item_id(e, i)), type: Self.str(cl_classroom_item_type(e, i)),
+                          title: Self.str(cl_classroom_item_title(e, i)), topic: Self.str(cl_classroom_item_topic(e, i)),
+                          note: Self.str(cl_classroom_item_note(e, i)), cdl: Self.str(cl_classroom_item_cdl(e, i)),
+                          ver: cl_classroom_item_ver(e, i), createdAt: Self.date(cl_classroom_item_created_at(e, i)),
+                          releasedAt: Self.date(cl_classroom_item_released_at(e, i)), hidden: cl_classroom_item_hidden(e, i),
+                          news: Self.str(cl_classroom_item_news(e, i)), unreadable: cl_classroom_item_unreadable(e, i),
+                          problem: Self.str(cl_classroom_item_problem(e, i)))
         }
-        var a = CRAnswers()
-        a.answered = Int(cl_classroom_answers_answered(e, cid))
-        a.students = Int(cl_classroom_answers_students(e, cid))
-        a.right = Int(cl_classroom_answers_right(e, cid))
-        a.wrong = Int(cl_classroom_answers_wrong(e, cid))
-        a.lights = (0..<Int(cl_classroom_answers_light_count(e, cid))).map { i in
-            var ones: Int32 = 0, zeros: Int32 = 0
-            let name = Self.str(cl_classroom_answers_light(e, cid, Int32(i), &ones, &zeros))
-            return CRAnswers.Light(name: name, ones: Int(ones), zeros: Int(zeros))
+        if items[cid] != out { items[cid] = out }
+    }
+
+    /// A hand-in's earlier attempts (v2), as the core last read them.
+    func refreshHistory(_ cid: String, _ aid: String, _ sid: String) {
+        guard let e = engine else { return }
+        let n = Int(cl_classroom_history_count(e, cid, aid, sid))
+        let out = (0..<n).map { i -> CRSubmission in
+            let i = Int32(i)
+            return CRSubmission(studentId: sid, name: Self.str(cl_classroom_submission_name(e, i)), cdl: Self.str(cl_classroom_submission_cdl(e, i)),
+                                handedInAt: Self.date(cl_classroom_submission_handed_in_at(e, i)),
+                                attempts: Int(cl_classroom_submission_attempts(e, i)), verdict: Int(cl_classroom_submission_check_verdict(e, i)),
+                                summary: Self.str(cl_classroom_submission_check_summary(e, i)),
+                                unreadable: cl_classroom_submission_unreadable(e, i), problem: Self.str(cl_classroom_submission_problem(e, i)),
+                                left: cl_classroom_submission_left(e, i), ver: Int64(i) + 1)
         }
-        if answers[cid] != a { answers[cid] = a }
+        history["\(cid)/\(aid)/\(sid)"] = out
+    }
+
+    /// Items news from the core (a student's class): the window's banner and a note on the front circuit.
+    func itemsArrived(_ cid: String, _ json: String, className: String) {
+        refreshItems(cid)
+        refreshClasses()
+        guard let list = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]] else { return }
+        for o in list {
+            let n = CRNews(classId: cid, itemId: o["id"] as? String ?? "", what: o["what"] as? String ?? "new",
+                           type: o["type"] as? String ?? "example", title: o["title"] as? String ?? "")
+            news.removeAll { $0.id == n.id }
+            news.append(n)
+        }
+        if let last = news.last, !preview {
+            CanvasController.front?.note("\(last.text) in \(className). Open it from File › Classroom.")
+        }
+    }
+
+    /// Sync applied side records, or was turned on (3.16.7).
+    func syncSideChanged() {
+        guard let engine else { return }
+        cl_classroom_sync_side_changed(engine)
     }
 
     // MARK: Done callbacks
@@ -512,18 +544,22 @@ final class ClassroomCenter: ObservableObject {
         }) { cl_classroom_refresh_submissions($0, cid, aid, $1, $2) }
     }
 
-    func goLive(_ cid: String, cdl: String, done: @escaping Done) { call(done) { cl_classroom_go_live($0, cid, cdl, $1, $2) } }
-    func push(_ cid: String, cdl: String, prompt: String?, lights: [String], reveal: Bool, done: @escaping Done) {
-        call(done) { e, fn, box in
-            Self.withCStrings(lights) { ptrs in
-                ptrs.withUnsafeBufferPointer { b in
-                    cl_classroom_push(e, cid, cdl, prompt, b.baseAddress, Int32(lights.count), reveal, fn, box)
-                }
-            }
-        }
+    // v2 (3.16.2): shared circuits and class examples. result: the item's id.
+    func postItem(_ cid: String, id: String?, type: String, title: String, topic: String, note: String, cdl: String, hidden: Bool,
+                  done: @escaping Done) {
+        call(done) { cl_classroom_post_item($0, cid, id, type, title, topic, note, cdl, hidden, $1, $2) }
     }
-    func endLive(_ cid: String, done: @escaping Done) { call(done) { cl_classroom_end_live($0, cid, $1, $2) } }
-    func takeOverLive(_ cid: String, done: @escaping Done) { call(done) { cl_classroom_take_over_live($0, cid, $1, $2) } }
+    func setItemHidden(_ cid: String, _ iid: String, _ hidden: Bool, done: @escaping Done) {
+        call(done) { cl_classroom_set_item_hidden($0, cid, iid, hidden, $1, $2) }
+    }
+    func deleteItem(_ cid: String, _ iid: String, done: @escaping Done) { call(done) { cl_classroom_delete_item($0, cid, iid, $1, $2) } }
+    /// v2 (3.16.3): a student's earlier hand-ins.
+    func loadHistory(_ cid: String, _ aid: String, _ sid: String, done: @escaping Done) {
+        call({ [weak self] ok, m, r in
+            MainActor.assumeIsolated { self?.refreshHistory(cid, aid, sid) }
+            done(ok, m, r)
+        }) { cl_classroom_load_history($0, cid, aid, sid, $1, $2) }
+    }
 
     // MARK: Student
 
@@ -532,22 +568,15 @@ final class ClassroomCenter: ObservableObject {
     func join(_ text: String, name: String, done: @escaping Done) { call(done) { cl_classroom_join($0, text, name, $1, $2) } }
     func renameMe(_ cid: String, _ name: String, done: @escaping Done) { call(done) { cl_classroom_rename($0, cid, name, $1, $2) } }
     func handIn(_ cid: String, _ aid: String, cdl: String, done: @escaping Done) { call(done) { cl_classroom_hand_in($0, cid, aid, cdl, $1, $2) } }
-    func follow(_ cid: String, _ on: Bool) {
-        if on { following.insert(cid) } else { following.remove(cid) }
-        guard let engine else { return }
-        cl_classroom_follow(engine, cid, on)
-    }
-    func sendAnswer(_ cid: String, _ guesses: [(String, Int)], done: @escaping Done) {
-        call(done) { e, fn, box in
-            Self.withCStrings(guesses.map(\.0)) { ptrs in
-                let values = guesses.map { Int32($0.1) }
-                ptrs.withUnsafeBufferPointer { b in
-                    values.withUnsafeBufferPointer { v in
-                        cl_classroom_send_answer(e, cid, b.baseAddress, v.baseAddress, Int32(guesses.count), fn, box)
-                    }
-                }
-            }
-        }
+    /// Open = the student's own copy (3.16.2): the same version again opens that copy; a newer one makes
+    /// a new copy, "Title (updated)". A copy is never written over.
+    func openItem(_ cid: String, _ item: CRItem) throws {
+        let copy = try ItemCopies.make(classId: cid, item: item)
+        Library.open(copy.circuit)
+        news.removeAll { $0.classId == cid && $0.itemId == item.id }
+        if let engine { cl_classroom_item_opened(engine, cid, item.id) }
+        refreshItems(cid)
+        refreshClasses()
     }
     func makeMoveCode(_ cid: String, done: @escaping Done) { call(done) { cl_classroom_make_move_code($0, cid, $1, $2) } }
     /// result: "<class name>\n<student name>".
@@ -640,23 +669,6 @@ final class ClassroomCenter: ObservableObject {
         }
     }
 
-    // MARK: The live view's window (a student following)
-
-    /// A push arrived: a following student's live window shows it (read again in place).
-    private func liveArrived(_ cid: String, _ l: CRLive) {
-        guard !preview, following.contains(cid), l.on, !l.cdl.isEmpty, LiveWindow.isOpen(cid) else { return }
-        if liveShown[cid] == l.ver && !(l.reveal) { return }
-        liveShown[cid] = l.ver
-        LiveWindow.show(cid, name: classes.first { $0.id == cid }?.name ?? "Class", cdl: l.cdl, live: l)
-    }
-
-    /// Join Live View: the teacher's circuit in a window of its own.
-    func openLiveWindow(_ cid: String) {
-        follow(cid, true)
-        guard let l = live[cid], l.on, !l.cdl.isEmpty else { return }
-        liveShown[cid] = l.ver
-        LiveWindow.show(cid, name: classes.first { $0.id == cid }?.name ?? "Class", cdl: l.cdl, live: l)
-    }
 }
 
 /// Which sheet the Classroom window shows.
@@ -669,7 +681,7 @@ enum ClassroomSheet: Identifiable, Equatable {
     case moveCode(classId: String, code: String)
     case post(classId: String, editing: String?)
     case handIns(classId: String, aid: String)
-    case predict(classId: String)
+    case addItem(classId: String, share: Bool, files: [URL])
     var id: String {
         switch self {
         case .create: "create"
@@ -680,7 +692,7 @@ enum ClassroomSheet: Identifiable, Equatable {
         case .moveCode(let c, _): "move-\(c)"
         case .post(let c, let e): "post-\(c)-\(e ?? "")"
         case .handIns(let c, let a): "handins-\(c)-\(a)"
-        case .predict(let c): "predict-\(c)"
+        case .addItem(let c, let share, let f): "item-\(c)-\(share)-\(f.count)"
         }
     }
 }
@@ -788,94 +800,6 @@ enum ScratchCircuit {
     }
 }
 
-/// A following student's live window: the teacher's circuit in a scratch file
-/// that each push rewrites and reads again in place, in Simulation View (with
-/// Predict's covers while the teacher asks a prediction).
-@MainActor
-enum LiveWindow {
-    private static var files: [String: URL] = [:]
-
-    static func isOpen(_ cid: String) -> Bool {
-        guard let url = files[cid] else { return false }
-        return document(url) != nil
-    }
-
-    private static func document(_ url: URL) -> NSDocument? {
-        NSDocumentController.shared.documents.first { $0.fileURL?.standardizedFileURL == url.standardizedFileURL }
-    }
-
-    private static func controllers(_ doc: NSDocument) -> [CanvasController] {
-        doc.windowControllers.compactMap { $0.window?.contentView }.flatMap(AssignmentCopies.canvases).compactMap(\.controller)
-    }
-
-    /// The live window shows a push: with a question, Predict covers only the lights it asks
-    /// about, and only the teacher reveals (the reveal push uncovers them, the guesses scored).
-    static func show(_ cid: String, name: String, cdl: String, live: CRLive) {
-        let predict = live.hasPredict
-        let asked = Set(live.lights.map(ClassroomCenter.lightKey))
-        let url: URL
-        if let u = files[cid] { url = u } else {
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("CedarLogic Classroom/live-\(cid)", isDirectory: true)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            url = dir.appendingPathComponent("Live - \(ScratchCircuit.safeName(name)).cdl")
-            files[cid] = url
-        }
-        try? cdl.write(to: url, atomically: true, encoding: .utf8)
-        let after = {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                MainActor.assumeIsolated {
-                    guard let doc = document(url) else { return }
-                    for c in controllers(doc) {
-                        c.simView = true
-                        if predict, let core = c.document {
-                            let gates = ClassroomCenter.namedLights(core, page: c.page).filter { asked.contains(ClassroomCenter.lightKey($0.name)) }.map(\.gate)
-                            c.predict.only = Set(gates)
-                            c.predict.locked = true
-                        } else {
-                            c.predict.only = nil
-                            c.predict.locked = false
-                        }
-                        if predict && !live.reveal { c.predict.on = false }   // (a new question: a new round)
-                        c.predict.on = predict
-                        if predict && live.reveal { c.teacherRevealed() }
-                        c.redraw()
-                        c.view?.predictChanged()
-                        c.note(predict && live.reveal ? "Your teacher revealed the lights."
-                               : predict ? "Your teacher asks for a prediction: click each covered light to guess, then Send My Guess in the Classroom window."
-                                       : "Live: your teacher's circuit. Changes here aren't kept; Keep a Copy is in the Classroom window.")
-                    }
-                }
-            }
-        }
-        if let doc = document(url) {
-            try? doc.revert(toContentsOf: url, ofType: doc.fileType ?? UTType.cedarLogicCircuit.identifier)
-            after()
-        } else {
-            NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, _ in after() }
-        }
-    }
-
-    /// The guesses made with Simulation View's Predict in the live window, by light name
-    /// (the name as `asked` spells it, when it's one of them).
-    static func guesses(_ cid: String, asked: [String] = []) -> [String: Int] {
-        let spelled = Dictionary(asked.map { (ClassroomCenter.lightKey($0), $0) }, uniquingKeysWith: { a, _ in a })
-        guard let url = files[cid], let doc = document(url) else { return [:] }
-        var out: [String: Int] = [:]
-        for c in controllers(doc) {
-            guard let core = c.document else { continue }
-            for l in ClassroomCenter.namedLights(core, page: c.page) {
-                if let g = c.predict.guesses[l.gate] { out[spelled[ClassroomCenter.lightKey(l.name)] ?? l.name] = g }
-            }
-        }
-        return out
-    }
-
-    static func close(_ cid: String) {
-        guard let url = files[cid] else { return }
-        document(url)?.close()
-    }
-}
-
 // MARK: - Download All
 
 enum HandInExport {
@@ -926,11 +850,199 @@ extension ClassroomCenter {
             classroomTell("That assignment isn't here any more", "It may have been deleted, or you left the class.")
             return
         }
-        let due = a.dueAt.map { "You can hand in again until the due date (\(ClassroomText.shortDate($0)))." } ?? ""
-        guard classroomAsk("Hand in “\(a.title)”?", "Your circuit goes to your teacher, encrypted for them. \(due)", "Hand In").ok else { return }
-        handIn(link.classId, a.id, cdl: text) { ok, m, _ in
-            let note = ok ? "Handed in." : m
-            CanvasController.front?.note(note)
+        guard !a.closed else {
+            classroomTell("Hand-ins are closed", "The due date for “\(a.title)” has passed.")
+            return
+        }
+        handIn(link.classId, a.id, cdl: text) { ok, m, _ in   // one tap (3.16.3)
+            CanvasController.front?.note(ok ? "Handed in ✓" : m)
+        }
+    }
+}
+
+// MARK: - v2: students' copies of shared circuits and examples (3.16.2)
+
+/// A student's own copy of a shared circuit or class example: a circuit in Your Circuits whose
+/// folder holds item.json ({classId, item, ver, title}).
+@MainActor
+enum ItemCopies {
+    struct Link: Codable { var classId: String; var item: String; var ver: Int64; var title: String }
+    static let file = "item.json"
+
+    static func link(of item: LibraryItem) -> Link? {
+        guard let data = FileManager.default.contents(atPath: item.folder.appendingPathComponent(file).path) else { return nil }
+        return try? JSONDecoder().decode(Link.self, from: data)
+    }
+
+    /// The copy of that version, made first if there isn't one ("Title (updated)" when an older version has one).
+    static func make(classId: String, item it: CRItem) throws -> LibraryItem {
+        let mine = Library.items().compactMap { i in link(of: i).map { (i, $0) } }.filter { $0.1.classId == classId && $0.1.item == it.id }
+        if let same = mine.first(where: { $0.1.ver == it.ver }) { return same.0 }
+        let title = it.title.isEmpty ? "Untitled" : it.title
+        let copy = try Library.create(named: mine.isEmpty ? title : "\(title) (updated)", text: it.cdl)
+        let data = try JSONEncoder().encode(Link(classId: classId, item: it.id, ver: it.ver, title: title))
+        try data.write(to: copy.folder.appendingPathComponent(file))
+        return copy
+    }
+}
+
+// MARK: - v2: classes on every device (3.16.7)
+
+/// The classroom core's side-record hooks over the app's sync engine (main thread).
+@MainActor
+enum ClassroomSide {
+    private static var records: [(rid: UnsafeMutablePointer<CChar>, json: UnsafeMutablePointer<CChar>)] = []
+
+    nonisolated static var on: Bool { onMain { SyncCenter.shared.sideOn } }
+
+    /// Reads the records again (the strings stay valid until the next load).
+    nonisolated static func load() -> Int32 {
+        onMain {
+            for r in records { free(r.rid); free(r.json) }
+            records = SyncCenter.shared.sideRecords().map { (strdup($0.0)!, strdup($0.1)!) }
+            return Int32(records.count)
+        }
+    }
+
+    nonisolated static func record(_ i: Int, _ rid: UnsafeMutablePointer<UnsafePointer<CChar>?>?) -> UnsafePointer<CChar>? {
+        onMain {
+            guard i >= 0, i < records.count else { rid?.pointee = nil; return nil }
+            rid?.pointee = UnsafePointer(records[i].rid)
+            return UnsafePointer(records[i].json)
+        }
+    }
+
+    nonisolated private static func onMain<T>(_ fn: @MainActor () -> T) -> T {
+        if Thread.isMainThread { return MainActor.assumeIsolated { fn() } }
+        return DispatchQueue.main.sync { MainActor.assumeIsolated { fn() } }
+    }
+}
+
+// MARK: - v2: an answer key from a solution circuit (3.16.6)
+
+enum AnswerKey {
+    struct Made { var text: String; var timing: Bool }
+    struct Failure: Error { var message: String }
+
+    /// A name as a key column: spaces become _.
+    static func keyName(_ s: String) -> String {
+        let t = s.split(whereSeparator: { $0.isWhitespace }).joined(separator: "_")
+        return t.isEmpty ? "?" : t
+    }
+    private static func bit(_ c: Character) -> String { c == "0" || c == "1" ? String(c) : "-" }
+
+    /// The key text Check My Circuit reads, made from what the solution does: a truth table of every switch
+    /// combination, or (with flip-flops and a clock) a timing table clock pulse by clock pulse. Run in a
+    /// simulator of its own; the same checker that later checks a student runs the solution.
+    static func make(cdl: String) throws -> Made {
+        guard let doc = try? CoreDocument(data: Data(cdl.utf8)) else { throw Failure(message: "The solution couldn't be read.") }
+        var problem = ""
+        guard let t = TruthTable(document: doc, page: 0, error: &problem) else {
+            let p = problem.replacingOccurrences(of: "A truth table needs", with: "An answer key needs")
+            throw Failure(message: p.isEmpty ? "An answer key needs at least one switch and one LED." : p)
+        }
+        let ins = Array(t.names.prefix(t.inputs)), outs = Array(t.names.dropFirst(t.inputs))
+        guard !ins.isEmpty, !outs.isEmpty else { throw Failure(message: "An answer key needs at least one switch and one LED.") }
+        func table() -> Made {
+            let head = ins.map(keyName).joined(separator: " ") + " | " + outs.map(keyName).joined(separator: " ")
+            let rows = t.rows.map { r in
+                r.prefix(t.inputs).map { String($0) }.joined(separator: " ") + " | " + r.dropFirst(t.inputs).map(bit).joined(separator: " ")
+            }
+            return Made(text: ([head] + rows).joined(separator: "\n") + "\n", timing: false)
+        }
+        if !t.sequential { return table() }
+        // Sequential: a timing table. The clock is a clock part, or a switch named CLK or Clock.
+        let isClock = { (n: String) in ["clk", "clock"].contains(String(n.lowercased().filter { $0.isLetter || $0.isNumber })) }
+        let sw = ins.filter { !isClock($0) }, m = sw.count
+        let rows = min(64, max(8, 2 << min(m, 5)))
+        let head = m > 0 ? "Pulse | \(sw.map(keyName).joined(separator: " ")) | \(outs.map(keyName).joined(separator: " "))"
+                         : "Pulse | \(outs.map(keyName).joined(separator: " "))"
+        func bits(_ k: Int) -> String { (0..<m).map { (k >> (m - 1 - $0)) & 1 == 1 ? "1" : "0" }.joined(separator: " ") }
+        func line(_ k: Int, _ o: [String]) -> String { "\(k) | " + (m > 0 ? bits(k % (1 << m)) + " | " : "") + o.joined(separator: " ") }
+        let probe = ([head] + (0...rows).map { line($0, outs.map { _ in "-" }) }).joined(separator: "\n") + "\n"
+        guard let c = cl_check_clocked(doc.handle, 0, probe, "") else { throw Failure(message: "The solution couldn't be run.") }
+        defer { cl_check_free(c) }
+        let error = String(cString: cl_check_error(c))
+        if error == "no_clock" { return table() }   // a latch of gates: a truth table
+        if !error.isEmpty { throw Failure(message: String(cString: cl_check_summary(c))) }
+        var got: [String] = []
+        for i in 0..<Int(cl_check_step_count(c)) {
+            let kind = cl_check_step_kind(c, Int32(i))
+            guard kind == Int32(CL_STEP_START) || kind == Int32(CL_STEP_PULSE) else { continue }
+            got.append(String(cString: cl_check_step_text(c, Int32(i), Int32(CL_STEP_GOT))))
+        }
+        guard got.count == rows + 1 else { throw Failure(message: "The solution couldn't be run clock pulse by clock pulse.") }
+        if let bad = got.firstIndex(where: { $0.contains("~") }) {
+            throw Failure(message: "The solution circuit doesn't settle " + (bad == 0 ? "at the start." : "at clock pulse \(bad)."))
+        }
+        let lines = got.enumerated().map { k, g in line(k, g.map(bit)) }
+        return Made(text: ([head] + lines).joined(separator: "\n") + "\n", timing: true)
+    }
+}
+
+// MARK: - v2: the bar over an assignment's own copy (3.16.3)
+
+/// Over a circuit that is a student's copy of an assignment: the title, Instructions, Check (when the
+/// students can check), and Hand In -- one tap; "Handed in ✓ <time>" after, then Hand In Again.
+struct AssignmentBar: View {
+    @ObservedObject var canvas: CanvasController
+    @ObservedObject private var center = ClassroomCenter.shared
+    @State private var item: LibraryItem?
+    @State private var link: AssignmentCopies.Link?
+    @State private var showInstructions = false
+    @State private var note = ""
+    @State private var sending = false
+
+    var body: some View {
+        Group {
+            if let link, let a = center.assignments[link.classId]?.first(where: { $0.id == link.assignmentId }) {
+                HStack(spacing: 10) {
+                    Image(systemName: "graduationcap.fill").foregroundStyle(.secondary)
+                    Text(a.title).fontWeight(.semibold).lineLimit(1)
+                    if !a.instructions.isEmpty {
+                        Button("Instructions") { showInstructions.toggle() }
+                            .popover(isPresented: $showInstructions) {
+                                ScrollView { Text(a.instructions).textSelection(.enabled).padding(14) }.frame(width: 340).frame(maxHeight: 320)
+                            }
+                    }
+                    if !a.keyText.isEmpty { Button("Check") { check(a) } }
+                    Text(note.isEmpty ? (a.closed && a.handedInAt == nil ? "Hand-ins closed" : ClassroomText.handInLine(a)) : note)
+                        .foregroundStyle(a.handedInAt != nil && note.isEmpty ? Color.green : Color.secondary).lineLimit(1)
+                    Button(a.handedInAt == nil ? "Hand In" : "Hand In Again") { handIn(a) }.disabled(a.closed || sending)
+                }
+                .font(.callout)
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4, y: 2)
+                .padding(.top, 10)
+            }
+        }
+        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { MainActor.assumeIsolated { resolve() } } }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in resolve() }
+    }
+
+    /// Which assignment this window's circuit is a copy of (none for most circuits).
+    private func resolve() {
+        guard ClassroomFlag.on, let w = canvas.view?.window, let url = NSDocumentController.shared.document(for: w)?.fileURL,
+              let it = Library.item(for: url), let l = AssignmentCopies.link(of: it) else { link = nil; return }
+        item = it
+        if link?.assignmentId != l.assignmentId { link = l }
+        center.start()
+    }
+
+    private func check(_ a: CRAssignment) {
+        guard let item else { return }
+        CheckMemory.save(item.circuit.path + "#0", CheckMemory.Saved(kind: 0, text: a.keyText, names: ClassroomCenter.names(a.keyNames)))
+        canvas.perform(.checkCircuit)
+    }
+
+    private func handIn(_ a: CRAssignment) {
+        guard let item, let link, let text = AssignmentCopies.text(of: item) else { return }
+        sending = true
+        note = "Handing in…"
+        center.handIn(link.classId, a.id, cdl: text) { ok, m, _ in
+            sending = false
+            note = ok ? "" : m
         }
     }
 }

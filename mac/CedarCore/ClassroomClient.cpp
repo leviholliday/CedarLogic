@@ -61,7 +61,7 @@ std::string sentence(const std::string& code, int status, bool joining) {
 	if (code == "assignment_closed") return "Hand-ins for this assignment are closed.";
 	if (code == "not_live") return "The teacher isn't showing this question any more.";
 	if (code == "class_deleted") return "This class was deleted by the teacher.";
-	if (code == "class_expired") return "This class was removed after 400 days without use.";
+	if (code == "class_expired") return "This class was removed after 18 months without use.";
 	if (code == "conflict") return "This was changed on another device.";
 	if (code == "too_large") return "That's too much to send at once.";
 	if (code == "record_too_large") return kTooBig;
@@ -165,6 +165,47 @@ Submission submissionOfJson(const json::Value& o) {
 }
 
 std::string mapKey(const std::string& a, const std::string& b) { return a + "/" + b; }
+
+json::Value itemToJson(const Item& a) {
+	json::Value o = json::Value::object();
+	o.set("id", json::Value::string(a.id));
+	o.set("type", json::Value::string(a.type));
+	o.set("title", json::Value::string(a.title));
+	o.set("topic", json::Value::string(a.topic));
+	o.set("note", json::Value::string(a.note));
+	o.set("cdl", json::Value::string(a.cdl));
+	o.set("ver", json::Value::integer(a.ver));
+	o.set("createdAt", json::Value::integer(a.createdAt));
+	o.set("unreadable", json::Value::boolean(a.unreadable));
+	o.set("problem", json::Value::string(a.problem));
+	return o;
+}
+
+Item itemOfJson(const json::Value& o) {
+	Item a;
+	a.id = o.str("id");
+	a.type = o.str("type") == "share" ? "share" : "example";
+	a.title = o.str("title");
+	a.topic = o.str("topic");
+	a.note = o.str("note");
+	a.cdl = o.str("cdl");
+	a.ver = o.integer("ver");
+	a.createdAt = o.integer("createdAt");
+	a.unreadable = o.flag("unreadable");
+	a.problem = o.str("problem");
+	return a;
+}
+
+ItemMark markOf(const json::Value& e) {
+	ItemMark m;
+	m.ver = e.integer("ver");
+	m.h = e.str("h");
+	m.hidden = e.flag("hidden");
+	const json::Value* r = e.get("releasedAt");
+	m.releasedAt = r && r->isInt() ? r->i() : 0;
+	m.at = e.integer("at");
+	return m;
+}
 
 // "14 Jan 2028" for a time in ms (UTC; the apps show their own local dates).
 std::string dateText(int64_t ms) {
@@ -369,10 +410,8 @@ Result Client::createClass(const std::string& name0) {
 		if (!r.ok && (r.error == "exists" || r.error == "join_exists")) continue;   // practically impossible: new secrets
 		if (!r.ok) return r;
 		teaching_[t.classId] = t;   // only after the website took it (4.1)
+		putTeacherSide(teaching_[t.classId]);
 		save();
-		if (hooks_.putSide)
-			hooks_.putSide("", classroomJson(t.classId, t.teacherKey, t.rec.name, t.rec.createdAt, t.rec.modifiedAt, cfg_.deviceName,
-			                                 deviceId_));
 		return Result::good(t.classId);
 	}
 	return Result::bad("Try again.");
@@ -529,6 +568,25 @@ Result Client::refreshTeacher(const std::string& classId, bool mayRecreate) {
 	t.etag = a.etag;
 	t.fetchKey = b.str("fetchKey", t.fetchKey);
 	t.expiresAt = b.integer("expiresAt", t.expiresAt);
+	t.warnAt = b.integer("warnAt", 0);
+	if (const json::Value* is = b.get("items")) {   // v2 (3.16.2): every item, hidden ones too
+		std::set<std::string> listedItems;
+		for (const auto& kv : is->o) {
+			if (!isUuid(kv.first)) continue;
+			listedItems.insert(kv.first);
+			const ItemMark mk = markOf(kv.second);
+			auto have = t.items.find(kv.first);
+			if (have != t.items.end() && have->second.ver > mk.ver) continue;
+			t.items[kv.first] = mk;
+			auto c = itemCache_.find(mapKey(classId, kv.first));
+			if (c == itemCache_.end() || c->second.ver != mk.ver) fetchItem(classId, t.fetchKey, classKeyOf(t), kv.first, mk.ver);
+		}
+		for (auto it = t.items.begin(); it != t.items.end();) {
+			if (listedItems.count(it->first)) { ++it; continue; }
+			forgetItem(classId, it->first);
+			it = t.items.erase(it);
+		}
+	}
 	if (const json::Value* i = b.get("info")) t.infoVer = std::max(t.infoVer, i->integer("ver"));
 	if (const json::Value* j = b.get("join")) {
 		t.rec.joinOpen = j->flag("open", t.rec.joinOpen);
@@ -575,7 +633,7 @@ Result Client::gone(const std::string& classId, const Api& a, bool teachingSide)
 	} else {
 		if (Membership* m = membershipOf(classId)) name = m->className;
 	}
-	const std::string text = expired ? quoted(name) + " was removed after 400 days without use."
+	const std::string text = expired ? quoted(name) + " was removed after 18 months without use."
 	                                 : quoted(name) + " was deleted by the teacher.";
 	if (!teachingSide) forgetMembershipLocal(classId, text);
 	else note(text);
@@ -621,13 +679,7 @@ Result Client::renameClass(const std::string& classId, const std::string& name0)
 	t.joinVer++;
 	t.joinH = clsync::envelopeHash(cr_, joinEnv);
 	t.fetchKey = a.body.str("fetchKey", t.fetchKey);
-	if (hooks_.putSide && hooks_.sideRecords)
-		for (const auto& sr : hooks_.sideRecords()) {
-			json::Value p;
-			if (readPayload(sr.second, "classroom", p).empty() && p.str("classId") == classId)
-				hooks_.putSide(sr.first, classroomJson(classId, t.teacherKey, t.rec.name, t.rec.createdAt, t.rec.modifiedAt, cfg_.deviceName,
-				                                       deviceId_));
-		}
+	putTeacherSide(t);
 	save();
 	return Result::good();
 }
@@ -708,14 +760,20 @@ Result Client::newJoinCode(const std::string& classId) {
 }
 
 void Client::forgetClassLocal(const std::string& classId, bool tombstone) {
-	if (hooks_.sideRecords)
+	std::set<std::string> rids;
+	if (Teaching* t = teachingOf(classId))
+		if (!t->sideRid.empty()) rids.insert(t->sideRid);
+	if (hooks_.sideRecords && syncOn())
 		for (const auto& sr : hooks_.sideRecords()) {
 			json::Value p;
-			if (!readPayload(sr.second, "classroom", p).empty() || p.str("classId") != classId) continue;
-			if (tombstone && hooks_.deleteSide) hooks_.deleteSide(sr.first);
-			else if (!tombstone && std::find(removedSide_.begin(), removedSide_.end(), sr.first) == removedSide_.end())
-				removedSide_.push_back(sr.first);
+			if (readPayload(sr.second, "classroom", p).empty() && p.str("classId") == classId) rids.insert(sr.first);
 		}
+	for (const std::string& rid : rids) {
+		if (tombstone && hooks_.deleteSide && syncOn()) hooks_.deleteSide(rid);
+		else if (!tombstone && std::find(removedSide_.begin(), removedSide_.end(), rid) == removedSide_.end()) removedSide_.push_back(rid);
+	}
+	for (auto it = itemCache_.begin(); it != itemCache_.end();)
+		it = (!members_.count(classId) && it->first.compare(0, classId.size() + 1, classId + "/") == 0) ? itemCache_.erase(it) : std::next(it);
 	teaching_.erase(classId);
 	for (auto it = asgCache_.begin(); it != asgCache_.end();) it = it->first.compare(0, classId.size() + 1, classId + "/") == 0 ? asgCache_.erase(it) : std::next(it);
 	for (auto it = subs_.begin(); it != subs_.end();) it = it->first.compare(0, classId.size() + 1, classId + "/") == 0 ? subs_.erase(it) : std::next(it);
@@ -1378,6 +1436,7 @@ Result Client::join(const std::string& text, const std::string& name0) {
 		m.joinedAt = a.body.integer("joinedAt", m.joinedAt);
 		m.fetchKey = a.body.str("fetchKey");
 		members_[classId] = m;
+		putMemberSide(members_[classId]);
 		save();
 		refreshMember(classId);
 		return Result::good(classId);
@@ -1407,6 +1466,7 @@ Result Client::rename(const std::string& classId, const std::string& name0) {
 	if (a.status != 200) return fail(a, "rename");
 	m.nameVer++;
 	m.name = name;
+	putMemberSide(m);
 	save();
 	return Result::good();
 }
@@ -1420,12 +1480,57 @@ bool Client::memberStatus(Membership& m, const json::Value& b) {
 		return false;
 	}
 	const std::string classId = m.classId;
+	const bool first = m.seq <= 0;   // what was there when this device joined isn't news (3.16.2)
 	readLimits(b);
 	const std::string fk = b.str("fetchKey");
 	if (isHex(fk, 32)) m.fetchKey = fk;
 	m.expiresAt = b.integer("expiresAt", m.expiresAt);
+	m.warnAt = b.integer("warnAt", 0);
 	const Bytes classKey = fromB64(m.classKey);
 	bool wrongKey = false;
+	if (const json::Value* is = b.get("items")) {   // v2: the released items
+		std::vector<ItemNews> told;
+		std::set<std::string> listedItems;
+		for (const auto& kv : is->o) {
+			if (!isUuid(kv.first)) continue;
+			listedItems.insert(kv.first);
+			const ItemMark mk = markOf(kv.second);
+			const int64_t seen = m.seenItems.count(kv.first) ? m.seenItems[kv.first] : 0;
+			if (mk.ver < seen) continue;
+			ItemMark& mine = m.items[kv.first];
+			mine = mk;
+			if (!mine.releasedAt) mine.releasedAt = mk.at;
+			if (mk.ver == seen) continue;
+			const Result r = fetchItem(classId, m.fetchKey, classKey, kv.first, mk.ver);
+			if (r.error == "wrong_fetch_key") wrongKey = true;
+			if (!r.ok) continue;
+			m.seenItems[kv.first] = mk.ver;
+			const Item& it = itemCache_[mapKey(classId, kv.first)];
+			if (first || it.unreadable) continue;
+			const std::string what = seen ? "updated" : "new";
+			if (!(m.news[kv.first] == "new" && what == "updated")) m.news[kv.first] = what;
+			ItemNews n;
+			n.id = kv.first;
+			n.what = what;
+			n.type = it.type;
+			n.title = it.title;
+			told.push_back(n);
+		}
+		for (auto it = m.items.begin(); it != m.items.end();) {
+			if (listedItems.count(it->first)) { ++it; continue; }
+			forgetItem(classId, it->first);
+			m.news.erase(it->first);
+			m.seenItems.erase(it->first);
+			it = m.items.erase(it);
+		}
+		if (!told.empty()) {
+			News n;
+			n.classId = classId;
+			n.className = m.className;
+			n.items = told;
+			news_.push_back(n);
+		}
+	}
 	if (const json::Value* i = b.get("info")) {
 		const int64_t ver = i->integer("ver");
 		if (ver > m.infoVer) {
@@ -1996,6 +2101,7 @@ Result Client::importMoveCode(const std::string& text) {
 	m.className = r.className;
 	m.joinedAt = serverNow();
 	members_[classId] = m;
+	putMemberSide(members_[classId]);
 	save();
 	// The slot has done its job (best effort), then the class's status for its fetchKey.
 	studentCall(members_[classId], "DELETE", "/move/" + mk.moveId, nullptr);
@@ -2003,7 +2109,22 @@ Result Client::importMoveCode(const std::string& text) {
 	return Result::good(classId);
 }
 
-void Client::forgetMembershipLocal(const std::string& classId, const std::string& text) {
+void Client::forgetMembershipLocal(const std::string& classId, const std::string& text, bool tombstone) {
+	if (Membership* m = membershipOf(classId)) {
+		std::set<std::string> rids;
+		if (!m->sideRid.empty()) rids.insert(m->sideRid);
+		if (hooks_.sideRecords && syncOn())
+			for (const auto& sr : hooks_.sideRecords()) {
+				json::Value p;
+				if (readPayload(sr.second, "membership", p).empty() && p.str("classId") == classId) rids.insert(sr.first);
+			}
+		for (const std::string& rid : rids) {
+			if (tombstone && hooks_.deleteSide && syncOn()) hooks_.deleteSide(rid);
+			else if (!tombstone && std::find(removedSide_.begin(), removedSide_.end(), rid) == removedSide_.end()) removedSide_.push_back(rid);
+		}
+	}
+	for (auto it = itemCache_.begin(); it != itemCache_.end();)
+		it = (!teaching_.count(classId) && it->first.compare(0, classId.size() + 1, classId + "/") == 0) ? itemCache_.erase(it) : std::next(it);
 	members_.erase(classId);
 	lives_.erase(classId);
 	myGuess_.erase(classId);
@@ -2014,7 +2135,7 @@ void Client::forgetMembershipLocal(const std::string& classId, const std::string
 	if (!text.empty()) note(text);
 }
 
-void Client::forgetMembership(const std::string& classId) { forgetMembershipLocal(classId, std::string()); }
+void Client::forgetMembership(const std::string& classId) { forgetMembershipLocal(classId, std::string(), false); }
 
 Result Client::leaveClass(const std::string& classId) {
 	Membership* mp = membershipOf(classId);
@@ -2027,33 +2148,326 @@ Result Client::leaveClass(const std::string& classId) {
 
 // ---- Sync's side records (2.5) --------------------------------------------------------------
 
+void Client::putTeacherSide(Teaching& t) {
+	if (!hooks_.putSide || !syncOn()) return;
+	if (t.sideRid.empty()) t.sideRid = clsync::newUuid(cr_);
+	if (t.sideRid.empty()) return;
+	hooks_.putSide(t.sideRid, classroomJson(t.classId, t.teacherKey, t.rec.name, t.rec.createdAt, t.rec.modifiedAt, cfg_.deviceName, deviceId_));
+}
+
+void Client::putMemberSide(Membership& m) {
+	if (!hooks_.putSide || !syncOn()) return;
+	if (m.sideRid.empty()) m.sideRid = clsync::newUuid(cr_);
+	if (m.sideRid.empty()) return;
+	MoveRec r;
+	r.classId = m.classId;
+	r.studentId = m.studentId;
+	r.token = m.token;
+	r.proof = m.proof;
+	r.classKey = m.classKey;
+	r.pub = m.pub;
+	r.name = m.name;
+	r.className = m.className;
+	hooks_.putSide(m.sideRid, membershipJson(r, m.joinedAt));
+}
+
+// Sync's side records arrived (2.5, 3.16.7): a "classroom" record adds the class with its teacher
+// key, a "membership" record adds the membership as a move would (nothing written to the website, a
+// status read for the fetchKey); quietly, never one removed here. Then every class here without a
+// record gets one.
 void Client::sideChanged() {
-	if (!hooks_.sideRecords) return;
+	if (!hooks_.sideRecords || !syncOn()) return;
 	std::set<std::string> present;
 	for (const auto& sr : hooks_.sideRecords()) {
+		present.insert(sr.first);
+		const bool removed = std::find(removedSide_.begin(), removedSide_.end(), sr.first) != removedSide_.end();
 		json::Value p;
-		if (!readPayload(sr.second, "classroom", p).empty()) continue;
-		const std::string classId = p.str("classId");
-		present.insert(classId);
-		if (Teaching* t = teachingOf(classId)) {
-			t->sideRid = sr.first;
+		if (readPayload(sr.second, "classroom", p).empty()) {
+			const std::string classId = p.str("classId");
+			if (Teaching* t = teachingOf(classId)) {
+				if (t->sideRid.empty()) t->sideRid = sr.first;
+				continue;
+			}
+			if (removed) continue;
+			addTeacherKey(p.str("teacherKey"), true);   // "Add a class with a teacher key", quietly (4.1)
+			if (Teaching* t = teachingOf(classId)) t->sideRid = sr.first;
 			continue;
 		}
-		if (std::find(removedSide_.begin(), removedSide_.end(), sr.first) != removedSide_.end()) continue;   // removed here
-		const Result r = addTeacherKey(p.str("teacherKey"), true);   // "Add a class with a teacher key", quietly (4.1)
-		if (Teaching* t = teachingOf(classId)) t->sideRid = sr.first;
-		(void)r;
+		if (!readPayload(sr.second, "membership", p).empty()) continue;   // another kind, or damaged
+		const std::string classId = p.str("classId");
+		if (Membership* m = membershipOf(classId)) {
+			if (m->sideRid.empty()) m->sideRid = sr.first;
+			continue;
+		}
+		if (removed || teaching_.count(classId) || !validPoint(curve_, fromB64(p.str("pub")))) continue;
+		Membership m;
+		m.classId = classId;
+		m.studentId = p.str("studentId");
+		m.token = p.str("token");
+		m.proof = p.str("proof");
+		m.classKey = p.str("classKey");
+		m.pub = p.str("pub");
+		m.name = cleanName(p.str("name"), 64, "a student");
+		m.className = cleanName(p.str("className"), 100, "Untitled class");
+		m.joinedAt = p.integer("joinedAt");
+		m.sideRid = sr.first;
+		members_[classId] = m;
+		save();
+		refreshMember(classId);   // the fetchKey; the items there now aren't news
 	}
-	// A class whose side record went away was deleted on another device: forget it here.
-	std::vector<std::string> goneIds;
-	for (const auto& kv : teaching_)
-		if (!kv.second.sideRid.empty() && !present.count(kv.first)) goneIds.push_back(kv.first);
-	for (const std::string& id : goneIds) {
-		const std::string name = teaching_[id].rec.name;
-		forgetClassLocal(id, false);
-		note(quoted(name) + " was deleted by the teacher.");
-	}
+	for (auto& kv : teaching_)
+		if (kv.second.sideRid.empty() || !present.count(kv.second.sideRid)) putTeacherSide(kv.second);
+	for (auto& kv : members_)
+		if (!teaching_.count(kv.first) && (kv.second.sideRid.empty() || !present.count(kv.second.sideRid))) putMemberSide(kv.second);
 	save();
+}
+
+// ---- v2: shared circuits and class examples (3.16.2) ----------------------------------------------
+
+Result Client::fetchItem(const std::string& classId, const std::string& fetchKey, const Bytes& classKey, const std::string& iid, int64_t ver) {
+	if (!isUuid(iid)) return Result::bad("That request wasn't understood.");
+	const Api a = call("GET", cfg_.liveBase + "/" + classId + "/" + fetchKey + "/item/" + iid + "/" + std::to_string(ver), {}, nullptr);
+	if (a.status != 200) return Result::bad(sentence(a.error, a.status, false), a.status, a.error);
+	Item out;
+	out.id = iid;
+	out.ver = ver;
+	OpenKey k;
+	k.key = classKey;
+	std::string payload, why, verdict = "invalid";
+	json::Value p;
+	if (a.body.integer("ver") == ver && open(cr_, curve_, fromB64(a.body.str("env")), "item", classId, iid, ver, k, payload, why))
+		verdict = readPayload(payload, "item", p);
+	if (verdict.empty()) {
+		ItemRec r;
+		itemFrom(p, r);
+		out.type = r.type;
+		out.title = r.title;
+		out.topic = r.topic;
+		out.note = r.note;
+		out.cdl = r.cdl;
+		out.createdAt = r.createdAt;
+		if (tooBig(out.cdl)) {
+			out.cdl.clear();
+			out.unreadable = true;
+			out.problem = kCantReadBig;
+		}
+	} else {
+		out.unreadable = true;
+		out.problem = verdict == "newer" ? kNewer : kCantRead;
+		out.type = "example";
+		auto old = itemCache_.find(mapKey(classId, iid));
+		out.title = old != itemCache_.end() ? old->second.title : std::string();
+	}
+	itemCache_[mapKey(classId, iid)] = out;
+	saveCache(classId, "items/" + iid + ".json", json::write(itemToJson(out)));
+	return Result::good();
+}
+
+void Client::forgetItem(const std::string& classId, const std::string& iid) {
+	itemCache_.erase(mapKey(classId, iid));
+	if (hooks_.removeTree) hooks_.removeTree(cachePath(classId, "items/" + iid + ".json"));
+}
+
+Result Client::postItem(const std::string& classId, const Item& draft, bool hidden) {
+	Teaching* tp = teachingOf(classId);
+	if (!tp) return Result::bad("That class isn't on this device.");
+	Teaching& t = *tp;
+	const std::string iid = draft.id.empty() ? clsync::newUuid(cr_) : draft.id;
+	if (!isUuid(iid)) return Result::bad(iid.empty() ? kNoRandom : "That request wasn't understood.");
+	const auto mark = t.items.find(iid);
+	const int64_t base = mark == t.items.end() ? 0 : mark->second.ver;
+	const int64_t ver = base + 1;
+	const auto prev = itemCache_.find(mapKey(classId, iid));
+	ItemRec r;
+	r.type = draft.type == "share" ? "share" : "example";
+	r.title = cleanName(draft.title, 200, "Untitled");
+	r.topic = cutText(draft.topic, 100);
+	r.note = cutText(draft.note, 20000);
+	r.cdl = draft.cdl;
+	r.modifiedAt = serverNow();
+	r.createdAt = prev != itemCache_.end() && prev->second.createdAt > 0 ? prev->second.createdAt : r.modifiedAt;
+	Bytes env;
+	std::string why;
+	if (!seal(cr_, classKeyOf(t), "item", classId, iid, ver, itemJson(r), true, kMaxRecord, env, why))
+		return Result::bad(why == "too big" ? kTooBig : kNoRandom);
+	json::Value body = baseRec(base, ver, env);
+	body.set("hidden", json::Value::boolean(hidden));
+	const Api a = teacherCall(t, "PUT", "/classes/" + classId + "/items/" + iid, &body);
+	if (a.status == 412) {
+		refreshTeacher(classId);
+		return Result::bad(kChanged, 412, "conflict");
+	}
+	if (a.status == 413) return Result::bad(kTooBig, 413, a.error);
+	if (a.status == 404 && a.error == "not_found")
+		return Result::bad("The classroom website doesn't have shared circuits yet. Try again later.", 404, a.error);
+	if (a.status == 507 && a.error == "too_many_items") return Result::bad("This class has 300 shared circuits and examples already. Delete some first.", 507, a.error);
+	if (a.status != 200 && a.status != 201) return fail(a, "item");
+	ItemMark mk;
+	mk.ver = ver;
+	mk.h = a.body.str("h", clsync::envelopeHash(cr_, env));
+	mk.hidden = a.body.flag("hidden", hidden);
+	const json::Value* rel = a.body.get("releasedAt");
+	mk.releasedAt = rel && rel->isInt() ? rel->i() : 0;
+	mk.at = a.body.integer("at", r.modifiedAt);
+	t.items[iid] = mk;
+	Item kept;
+	kept.id = iid;
+	kept.ver = ver;
+	kept.type = r.type;
+	kept.title = r.title;
+	kept.topic = r.topic;
+	kept.note = r.note;
+	kept.cdl = r.cdl;
+	kept.createdAt = r.createdAt;
+	itemCache_[mapKey(classId, iid)] = kept;
+	saveCache(classId, "items/" + iid + ".json", json::write(itemToJson(kept)));
+	save();
+	return Result::good(iid);
+}
+
+Result Client::setItemHidden(const std::string& classId, const std::string& iid, bool hidden) {
+	auto it = itemCache_.find(mapKey(classId, iid));
+	if (!teachingOf(classId) || it == itemCache_.end() || it->second.unreadable) return Result::bad("That item couldn't be read.");
+	const Item draft = it->second;
+	return postItem(classId, draft, hidden);
+}
+
+Result Client::deleteItem(const std::string& classId, const std::string& iid) {
+	Teaching* tp = teachingOf(classId);
+	if (!tp) return Result::bad("That class isn't on this device.");
+	const Api a = teacherCall(*tp, "DELETE", "/classes/" + classId + "/items/" + iid, nullptr);
+	if (a.status != 200 && a.status != 404) return fail(a, "delete item");
+	tp->items.erase(iid);
+	forgetItem(classId, iid);
+	save();
+	return Result::good();
+}
+
+std::vector<Item> Client::items(const std::string& classId) const {
+	std::vector<Item> out;
+	const std::map<std::string, ItemMark>* marks = nullptr;
+	const Membership* m = nullptr;
+	auto t = teaching_.find(classId);
+	if (t != teaching_.end()) marks = &t->second.items;
+	else if (members_.count(classId)) {
+		m = &members_.at(classId);
+		marks = &m->items;
+	}
+	if (!marks) return out;
+	for (const auto& kv : *marks) {
+		auto c = itemCache_.find(mapKey(classId, kv.first));
+		Item it;
+		if (c != itemCache_.end()) it = c->second;
+		else {
+			it.unreadable = true;
+			it.problem = kCantRead;
+			it.type = "example";
+		}
+		it.id = kv.first;
+		it.ver = kv.second.ver;
+		it.hidden = kv.second.hidden;
+		it.releasedAt = kv.second.releasedAt;
+		if (m) {
+			auto n = m->news.find(kv.first);
+			if (n != m->news.end()) it.news = n->second;
+		}
+		out.push_back(it);
+	}
+	if (m) std::stable_sort(out.begin(), out.end(), [](const Item& a, const Item& b) { return a.releasedAt > b.releasedAt; });
+	else std::stable_sort(out.begin(), out.end(), [](const Item& a, const Item& b) { return a.createdAt > b.createdAt; });
+	return out;
+}
+
+void Client::itemOpened(const std::string& classId, const std::string& iid) {
+	Membership* m = membershipOf(classId);
+	if (!m || !m->news.erase(iid)) return;
+	save();
+}
+
+bool Client::newsFlag(News& out) {
+	if (news_.empty()) return false;
+	out = news_.front();
+	news_.erase(news_.begin());
+	return true;
+}
+
+// ---- v2: a hand-in's earlier attempts (3.16.3) ------------------------------------------------------
+
+Result Client::loadHistory(const std::string& classId, const std::string& aid, const std::string& sid) {
+	Teaching* tp = teachingOf(classId);
+	if (!tp) return Result::bad("That class isn't on this device.");
+	if (!isUuid(aid) || !isUuid(sid)) return Result::bad("That request wasn't understood.");
+	Teaching& t = *tp;
+	const Api a = teacherCall(t, "GET", "/classes/" + classId + "/assignments/" + aid + "/submissions/" + sid + "/history", nullptr);
+	if (a.status == 404 && a.error == "not_found")
+		return Result::bad("The classroom website doesn't keep earlier hand-ins yet.", 404, a.error);
+	if (a.status == 410) return gone(classId, a, true);
+	if (a.status != 200) return fail(a, "history");
+	const auto ak = asgCache_.find(mapKey(classId, aid));
+	const Assignment* asg = ak != asgCache_.end() ? &ak->second : nullptr;
+	const auto rs = roster_.find(mapKey(classId, sid));
+	std::vector<Submission> out;
+	if (const json::Value* list = a.body.get("attempts"))
+		for (const json::Value& r : list->a) {
+			const int64_t ver = r.integer("ver");
+			const Bytes env = fromB64(r.str("env"));
+			const std::string h = r.str("h", clsync::envelopeHash(cr_, env));
+			Submission s;
+			s.studentId = sid;
+			s.ver = ver;
+			s.attempts = (int)r.integer("attempts");
+			s.handedInAt = r.integer("at");
+			s.name = rs != roster_.end() ? rs->second.name : std::string();
+			s.left = rs == roster_.end();
+			std::string payload, why, verdict = "invalid";
+			json::Value p;
+			if (open(cr_, curve_, env, "submission", classId, aid + "/" + sid, ver, teacherOpenKey(t), payload, why))
+				verdict = readPayload(payload, "submission", p);
+			if (!verdict.empty()) {
+				s.unreadable = true;
+				s.problem = verdict == "newer" ? kNewer : (why == "inflate" ? kCantReadBig : kCantRead);
+			} else {
+				auto pin = t.proofs.find(sid);
+				if (pin == t.proofs.end()) t.proofs[sid] = p.str("proof");
+				if (pin != t.proofs.end() && pin->second != p.str("proof")) {
+					s.unreadable = true;
+					s.problem = kUnverified;
+				} else {
+					if (s.name.empty()) s.name = cleanName(p.str("name"), 64, "a student");
+					s.handedInAt = p.integer("handedInAt", s.handedInAt);
+					s.cdl = p.str("cdl");
+					if (tooBig(s.cdl)) {
+						s.cdl.clear();
+						s.unreadable = true;
+						s.problem = kCantReadBig;
+					}
+				}
+			}
+			if (!s.unreadable && asg && !asg->keyText.empty()) {   // each attempt checked, cached by h (3.16.3)
+				Checked& c = t.checked[aid + "/" + sid + "/" + std::to_string(ver)];
+				if (c.h != h) {
+					c = Checked();
+					c.h = h;
+					int verdictCode = -1;
+					std::string summary;
+					if (hooks_.check && hooks_.check(s.cdl, asg->keyText, asg->keyNames, verdictCode, summary)) {
+						c.verdict = verdictCode;
+						c.summary = summary;
+					}
+				}
+				s.checkVerdict = c.verdict;
+				s.checkSummary = c.summary;
+			}
+			out.push_back(s);
+		}
+	history_[classId + "/" + aid + "/" + sid] = out;
+	save();
+	return Result::good();
+}
+
+std::vector<Submission> Client::history(const std::string& classId, const std::string& aid, const std::string& sid) const {
+	auto it = history_.find(classId + "/" + aid + "/" + sid);
+	return it == history_.end() ? std::vector<Submission>() : it->second;
 }
 
 // ---- Views ---------------------------------------------------------------------------------
@@ -2070,11 +2484,12 @@ std::vector<ClassInfo> Client::classes() const {
 		c.joinCode = t.rec.joinCode;
 		c.joinOpen = t.rec.joinOpen;
 		c.expiresAt = t.expiresAt;
+		c.warnAt = t.warnAt > 0 ? t.warnAt : (t.expiresAt > 0 ? t.expiresAt - 30 * kDay : 0);   // an older server: 30 days before
 		c.live = t.liveOn;
 		if (!t.joinProblem.empty()) c.warning = t.joinProblem;
-		else if (t.expiresAt > 0 && t.expiresAt - (hooks_.now ? hooks_.now() + offset_ : 0) < 60 * kDay)
-			c.warning = "This class will be removed from the website on " + dateText(t.expiresAt) +
-			            " unless someone opens it. Opening it, or a student handing in, keeps it.";
+		else if (c.warnAt > 0 && (hooks_.now ? hooks_.now() + offset_ : 0) >= c.warnAt)   // 3.16.4
+			c.warning = "This class hasn't been used for a long time and will be deleted from the website on " + dateText(t.expiresAt) +
+			            ". Open it or post something before then to keep it.";
 		out.push_back(c);
 	}
 	for (const auto& kv : members_) {
@@ -2085,6 +2500,8 @@ std::vector<ClassInfo> Client::classes() const {
 		c.name = m.className;
 		c.studentName = m.name;
 		c.expiresAt = m.expiresAt;
+		c.warnAt = m.warnAt;
+		c.news = (int)m.news.size();
 		auto l = lives_.find(m.classId);
 		c.live = l != lives_.end() && l->second.on;
 		out.push_back(c);
@@ -2242,6 +2659,26 @@ void intsFrom(const json::Value* o, std::map<std::string, int64_t>& m) {
 		for (const auto& kv : o->o) m[kv.first] = kv.second.i();
 }
 
+json::Value itemMarksJson(const std::map<std::string, ItemMark>& marks) {
+	json::Value o = json::Value::object();
+	for (const auto& kv : marks) {
+		json::Value e = json::Value::object();
+		e.set("ver", json::Value::integer(kv.second.ver));
+		e.set("h", json::Value::string(kv.second.h));
+		e.set("hidden", json::Value::boolean(kv.second.hidden));
+		e.set("releasedAt", json::Value::integer(kv.second.releasedAt));
+		e.set("at", json::Value::integer(kv.second.at));
+		o.set(kv.first, e);
+	}
+	return o;
+}
+
+void itemMarksFrom(const json::Value* o, std::map<std::string, ItemMark>& marks) {
+	if (!o) return;
+	for (const auto& kv : o->o)
+		if (isUuid(kv.first)) marks[kv.first] = markOf(kv.second);
+}
+
 json::Value liveRecJson(const LiveRec& l) {
 	json::Value o;
 	json::parse(liveJson(l), o);
@@ -2297,6 +2734,8 @@ void Client::save() {
 		c.set("live", liveRecJson(x.live));
 		c.set("liveOn", json::Value::boolean(x.liveOn));
 		c.set("predictSince", json::Value::integer(x.predictSince));
+		c.set("warnAt", json::Value::integer(x.warnAt));
+		c.set("items", itemMarksJson(x.items));
 		classes.set(kv.first, c);
 	}
 	t.set("classes", classes);
@@ -2346,6 +2785,13 @@ void Client::save() {
 		json::Value hashes = json::Value::object();
 		for (const auto& h : x.handedInHash) hashes.set(h.first, json::Value::string(h.second));
 		c.set("handedInHash", hashes);
+		c.set("warnAt", json::Value::integer(x.warnAt));
+		c.set("items", itemMarksJson(x.items));
+		c.set("seenItems", intsJson(x.seenItems));
+		json::Value news = json::Value::object();
+		for (const auto& n : x.news) news.set(n.first, json::Value::string(n.second));
+		c.set("news", news);
+		c.set("sideRid", json::Value::string(x.sideRid));
 		mc.set(kv.first, c);
 	}
 	m.set("classes", mc);
@@ -2398,6 +2844,8 @@ void Client::load() {
 				x.liveOn = c.flag("liveOn");
 				x.liveCdl = loadCache(x.classId, "live.cdl");
 				x.predictSince = c.integer("predictSince");
+				x.warnAt = c.integer("warnAt");
+				itemMarksFrom(c.get("items"), x.items);
 				teaching_[x.classId] = x;
 			}
 		if (const json::Value* r = t.get("removed"))
@@ -2444,6 +2892,13 @@ void Client::load() {
 				for (const auto& a : attempts) x.attempts[a.first] = (int)a.second;
 				if (const json::Value* hs = c.get("handedInHash"))
 					for (const auto& h : hs->o) x.handedInHash[h.first] = h.second.s;
+				x.warnAt = c.integer("warnAt");
+				itemMarksFrom(c.get("items"), x.items);
+				intsFrom(c.get("seenItems"), x.seenItems);
+				if (const json::Value* ns = c.get("news"))
+					for (const auto& n : ns->o)
+						if (n.second.isString()) x.news[n.first] = n.second.s;
+				x.sideRid = c.str("sideRid");
 				if (!isHex(x.classId, 32) || !isUuid(x.studentId)) continue;
 				members_[x.classId] = x;
 			}
@@ -2467,6 +2922,15 @@ void Client::load() {
 				subs_[kv.first + "/" + sm.first] = submissionOfJson(o);
 		}
 	}
+	auto loadItems = [&](const std::string& classId, const std::map<std::string, ItemMark>& marks) {
+		for (const auto& im : marks) {
+			json::Value o;
+			if (json::parse(loadCache(classId, "items/" + im.first + ".json"), o) && o.isObject())
+				itemCache_[mapKey(classId, im.first)] = itemOfJson(o);
+		}
+	};
+	for (const auto& kv : teaching_) loadItems(kv.first, kv.second.items);
+	for (const auto& kv : members_) loadItems(kv.first, kv.second.items);
 	for (const auto& kv : members_) {
 		std::vector<std::string> aids;
 		for (const auto& a : kv.second.seenAssignments) aids.push_back(a.first);

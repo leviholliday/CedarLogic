@@ -1,14 +1,17 @@
-// The Classroom window (CLASSROOM.md §5): the class list on the left, the class
-// page on the right -- a teacher's (the join code card for the projector,
-// assignments and their hand-ins, students, the live view, settings) or a
-// student's (assignments to open, check and hand in, the live banner, moving
-// and leaving) -- and the sheets: Create Classroom, the teacher-key sheet and
-// its printed recovery sheet, I Have a Teacher Key, Join a Class, a move code,
-// Post an Assignment, Hand-ins, Ask a Prediction. Drawn like Your Circuits.
+// The Classroom window (CLASSROOM.md §5, v2 §3.16): the class list on the left,
+// the class page on the right -- a teacher's (the expiry banner, Getting started,
+// the join code card for the projector, Share with the class and Class
+// examples, assignments and their hand-ins with every earlier attempt, students,
+// settings) or a student's (what the teacher shared, the class examples,
+// assignments to open, check and hand in, moving and leaving) -- and the sheets:
+// Create Classroom, the teacher-key sheet and its printed recovery sheet, I Have
+// a Teacher Key, Join a Class, a move code, Share / Add an example, Post an
+// Assignment (a key from a solution), Hand-ins. Drawn like Your Circuits.
 // Every string from the other side lands in a Text (§4.10).
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ClassroomLook {
     let dark: Bool
@@ -72,9 +75,9 @@ struct ClassroomView: View {
     @ObservedObject var center: ClassroomCenter
     @ObservedObject private var prefs = Prefs.shared
     /// For pictures: which section of a teacher's page shows.
-    var initialSection: TeacherSection = .assignments
+    var initialSection: TeacherSection = .share
 
-    init(center: ClassroomCenter? = nil, section: TeacherSection = .assignments) {
+    init(center: ClassroomCenter? = nil, section: TeacherSection = .share) {
         self.center = center ?? .shared
         initialSection = section
     }
@@ -97,6 +100,16 @@ struct ClassroomView: View {
                     }
                     .padding(10).background(accent.opacity(0.14))
                 }
+                ForEach(center.news.suffix(3)) { n in
+                    HStack {
+                        Image(systemName: n.type == "share" ? "square.and.arrow.down" : "folder")
+                        Text(n.text).font(.system(size: 12, weight: .medium)).lineLimit(2)
+                        Spacer()
+                        Button("Open") { openNews(n) }.controlSize(.small)
+                        Button("Not Now") { center.news.removeAll { $0.id == n.id } }.controlSize(.small)
+                    }
+                    .padding(10).background(accent.opacity(0.10))
+                }
                 if let c = current {
                     if c.teaching {
                         TeacherPage(center: center, cls: c, look: look, accent: accent, section: initialSection).id(c.id)
@@ -114,6 +127,14 @@ struct ClassroomView: View {
         .preferredColorScheme(prefs.dark ? .dark : .light)
         .sheet(item: $center.sheet) { s in ClassroomSheetView(center: center, sheet: s, look: look, accent: accent) }
         .onAppear { center.start() }
+    }
+
+    private func openNews(_ n: CRNews) {
+        guard let it = center.items[n.classId]?.first(where: { $0.id == n.itemId }) else {
+            center.news.removeAll { $0.id == n.id }
+            return
+        }
+        do { try center.openItem(n.classId, it) } catch { center.notice = "Couldn't make your copy: \(error.localizedDescription)" }
     }
 
     private var sidebar: some View {
@@ -155,9 +176,9 @@ struct ClassroomView: View {
                 Text(sub).font(.system(size: 11)).foregroundStyle(look.dim).lineLimit(1)
             }
             Spacer(minLength: 4)
-            if c.live || (center.live[c.id]?.on ?? false) {
-                Text("LIVE").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                    .padding(.horizontal, 6).frame(height: 18).background(Capsule().fill(look.live))
+            if !c.teaching && c.news > 0 {
+                Text("\(c.news) new").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 6).frame(height: 18).background(Capsule().fill(accent))
             }
         }
         .padding(8)
@@ -194,14 +215,22 @@ struct ClassStatusLine: View {
             .font(.system(size: 12)).foregroundStyle(cls.statusKind >= 2 ? look.bad : look.dim)
         }
         if !cls.warning.isEmpty {
-            Text(cls.warning).font(.system(size: 12)).foregroundStyle(look.bad).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text(cls.warning).fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(look.bad)
+            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(look.bad.opacity(0.10)))
         }
     }
 }
 
 // MARK: - Teacher
 
-enum TeacherSection: String, CaseIterable { case assignments = "Assignments", students = "Students", live = "Live", settings = "Settings" }
+enum TeacherSection: String, CaseIterable {
+    case share = "Share & Examples", assignments = "Assignments", students = "Students", settings = "Settings"
+}
 
 struct TeacherPage: View {
     @ObservedObject var center: ClassroomCenter
@@ -210,7 +239,8 @@ struct TeacherPage: View {
     let accent: Color
     @State var section: TeacherSection
     @State private var message = ""
-    @State private var busy = false
+    @State private var byTopic = true
+    @State private var hideStart = false
 
     init(center: ClassroomCenter, cls: CRClass, look: ClassroomLook, accent: Color, section: TeacherSection) {
         self.center = center; self.cls = cls; self.look = look; self.accent = accent
@@ -218,6 +248,8 @@ struct TeacherPage: View {
     }
 
     private var studentCount: Int { center.students[cls.id]?.count ?? 0 }
+    private var items: [CRItem] { center.items[cls.id] ?? [] }
+    private var startKey: String { "ClassroomGettingStartedHidden.\(cls.id)" }
 
     var body: some View {
         ScrollView {
@@ -226,18 +258,16 @@ struct TeacherPage: View {
                     Text(cls.name).font(.system(size: 22, weight: .bold)).foregroundStyle(look.ink)
                     ClassStatusLine(cls: cls, look: look)
                 }
+                if !hideStart && !UserDefaults.standard.bool(forKey: startKey) { gettingStarted }
                 JoinCodeCard(center: center, cls: cls, students: studentCount, look: look, accent: accent)
-                if center.live[cls.id]?.on == true && section != .live {
-                    TeacherLiveBar(center: center, cls: cls, look: look, accent: accent, compact: true)
-                }
                 Picker("", selection: $section) {
                     ForEach(TeacherSection.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 420)
+                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 520)
                 switch section {
+                case .share: shareSection; examplesSection
                 case .assignments: assignmentsSection
                 case .students: studentsSection
-                case .live: TeacherLiveBar(center: center, cls: cls, look: look, accent: accent, compact: false)
                 case .settings: TeacherSettings(center: center, cls: cls, look: look)
                 }
                 if !message.isEmpty { Text(message).font(.system(size: 12)).foregroundStyle(look.bad) }
@@ -249,15 +279,149 @@ struct TeacherPage: View {
         .onDisappear { center.pageOpen(cls.id, false) }
     }
 
+    /// Getting started (3.16.8): each step ticked when done; Hide dismisses it for good on this device.
+    private var gettingStarted: some View {
+        let steps: [(String, Bool)] = [
+            ("Create the class", true),
+            ("Put the join code on the board (Show on Projector), and students join", studentCount > 0),
+            ("Share a circuit with the class, or add class examples", !items.isEmpty),
+            ("Post an assignment", !(center.assignments[cls.id] ?? []).isEmpty),
+        ]
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Getting started").font(.system(size: 14, weight: .semibold)).foregroundStyle(look.ink)
+                Spacer()
+                Button("Hide") { UserDefaults.standard.set(true, forKey: startKey); hideStart = true }.buttonStyle(.link)
+            }
+            ForEach(steps, id: \.0) { step in
+                HStack(spacing: 8) {
+                    Image(systemName: step.1 ? "checkmark.circle.fill" : "circle").foregroundStyle(step.1 ? look.good : look.dim)
+                    Text(step.0).font(.system(size: 12)).foregroundStyle(step.1 ? look.dim : look.ink)
+                }
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(look.card))
+    }
+
+    private func sectionTitle(_ t: String, _ sub: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(t).font(.system(size: 15, weight: .semibold)).foregroundStyle(look.ink)
+            Text(sub).font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var shareSection: some View {
+        let front = ClassroomFront.current
+        let shared = items.filter(\.isShare)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                sectionTitle("Share with the class", front.map { "Students get their own copy to play with. Shares the circuit on screen: \($0.title)" }
+                             ?? "Open or build the circuit to share first: it's the circuit on screen.")
+                Spacer()
+                Button("Share This Circuit…") { center.sheet = .addItem(classId: cls.id, share: true, files: []) }.disabled(front == nil)
+            }
+            if shared.isEmpty { Text("Nothing shared yet.").font(.system(size: 12)).foregroundStyle(look.dim) }
+            ForEach(shared) { it in itemRow(it) }
+        }
+    }
+
+    private var examplesSection: some View {
+        let examples = items.filter { !$0.isShare }
+        let topics = Dictionary(grouping: examples, by: \.topic)
+        let order = topics.keys.sorted { a, b in
+            if a.isEmpty != b.isEmpty { return !a.isEmpty }   // "No topic" last
+            return a.localizedStandardCompare(b) == .orderedAscending
+        }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                sectionTitle("Class examples", "A folder of circuits by topic. Hide one until you release it.")
+                Spacer()
+                Button("Add This Circuit…") { center.sheet = .addItem(classId: cls.id, share: false, files: []) }.disabled(ClassroomFront.current == nil)
+                Button("Add .cdl Files…") { pickFiles() }
+            }
+            if examples.isEmpty {
+                Text("No examples yet.").font(.system(size: 12)).foregroundStyle(look.dim)
+            } else {
+                Picker("Sort", selection: $byTopic) { Text("By topic").tag(true); Text("Newest first").tag(false) }
+                    .pickerStyle(.segmented).frame(maxWidth: 240)
+                if byTopic {
+                    ForEach(order, id: \.self) { t in
+                        Text(t.isEmpty ? "No topic" : t).font(.system(size: 12, weight: .semibold)).foregroundStyle(look.dim).padding(.top, 4)
+                        ForEach(topics[t] ?? []) { it in itemRow(it) }
+                    }
+                } else {
+                    ForEach(examples) { it in itemRow(it) }
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private func itemRow(_ it: CRItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(it.title.isEmpty ? "Untitled" : it.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(look.ink)
+                Text([it.isShare || it.topic.isEmpty ? nil : it.topic,
+                      it.hidden ? "Hidden from students" : it.releasedAt.map { "Released \(ClassroomText.dayTime($0))" },
+                      it.ver > 1 ? "version \(it.ver)" : nil].compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 11)).foregroundStyle(it.hidden ? look.bad : look.dim)
+                if !it.note.isEmpty { Text(it.note).font(.system(size: 11)).foregroundStyle(look.ink.opacity(0.8)).lineLimit(3) }
+                if it.unreadable { Text(it.problem).font(.system(size: 11)).foregroundStyle(look.bad) }
+            }
+            Spacer()
+            if !it.isShare {
+                Button(it.hidden ? "Release" : "Hide") {
+                    center.setItemHidden(cls.id, it.id, !it.hidden) { ok, m, _ in message = ok ? "" : m }
+                }.disabled(it.unreadable)
+            }
+            Menu("•••") {
+                Button("Open") { ScratchCircuit.open(it.cdl, named: it.title) }.disabled(it.cdl.isEmpty)
+                Button("Update from the Circuit on Screen") { update(it) }.disabled(ClassroomFront.current == nil)
+                Divider()
+                Button(it.isShare ? "Stop Sharing…" : "Delete…") { delete(it) }
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(look.card))
+    }
+
+    private func update(_ it: CRItem) {
+        guard let f = ClassroomFront.current else { return }
+        guard classroomAsk("Update “\(it.title)”?", "Students get the circuit on screen as a new version. Copies they already opened stay theirs.", "Update").ok
+        else { return }
+        center.postItem(cls.id, id: it.id, type: it.type, title: it.title, topic: it.topic, note: it.note, cdl: f.cdl, hidden: it.hidden) { ok, m, _ in
+            message = ok ? "" : m
+        }
+    }
+
+    private func delete(_ it: CRItem) {
+        guard classroomAsk(it.isShare ? "Stop sharing “\(it.title)”?" : "Delete “\(it.title)”?",
+                           "It goes from the class page. Copies students already opened stay theirs.", it.isShare ? "Stop Sharing" : "Delete",
+                           destructive: true).ok else { return }
+        center.deleteItem(cls.id, it.id) { ok, m, _ in message = ok ? "" : m }
+    }
+
+    private func pickFiles() {
+        let p = NSOpenPanel()
+        p.allowsMultipleSelection = true
+        p.canChooseDirectories = false
+        p.allowedContentTypes = [.cedarLogicCircuit]
+        p.message = "Choose circuits to add to the class examples"
+        guard p.runModal() == .OK, !p.urls.isEmpty else { return }
+        center.sheet = .addItem(classId: cls.id, share: false, files: p.urls)
+    }
+
     private var assignmentsSection: some View {
         let list = center.assignments[cls.id] ?? []
         let front = ClassroomFront.current
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(front.map { "Posts the circuit on screen: \($0.title)" } ?? "Open the circuit you want to post first.")
+                Text(front.map { "Posts the circuit on screen as the starter: \($0.title)" } ?? "Open the starter circuit first: it's the circuit on screen.")
                     .font(.system(size: 12)).foregroundStyle(look.dim)
                 Spacer()
-                Button("Post Assignment…") { center.sheet = .post(classId: cls.id, editing: nil) }.disabled(front == nil)
+                Button("Post This Circuit as an Assignment…") { center.sheet = .post(classId: cls.id, editing: nil) }.disabled(front == nil)
             }
             if list.isEmpty {
                 Text("No assignments yet.").font(.system(size: 13)).foregroundStyle(look.dim).padding(.vertical, 20)
@@ -332,6 +496,7 @@ struct JoinCodeCard: View {
     let look: ClassroomLook
     let accent: Color
     @State private var message = ""
+    @ObservedObject private var projector = ProjectorWindow.state
 
     var body: some View {
         let link = ClassroomCenter.webLink(kind: 1, cls.joinCode)
@@ -340,16 +505,21 @@ struct JoinCodeCard: View {
                 Text("Join code").font(.system(size: 12, weight: .semibold)).foregroundStyle(look.dim)
                 Text(ClassroomCenter.grouped(cls.joinCode))
                     .font(.system(size: 40, weight: .bold, design: .monospaced)).foregroundStyle(cls.joinOpen ? look.ink : look.dim)
-                    .textSelection(.enabled).minimumScaleFactor(0.5).lineLimit(1)
-                Text("Students: CedarLogic Online › Classroom › Join a Class, or scan.").font(.system(size: 12)).foregroundStyle(look.dim)
+                    .minimumScaleFactor(0.5).lineLimit(1)
+                    .onTapGesture { ProjectorWindow.toggle(className: cls.name, code: cls.joinCode, link: link) }
+                    .help("Click to show it on the projector (click again to close)")
+                Text("Students: CedarLogic Online › Classroom › Join a Class, then type this code — or scan it.").font(.system(size: 12)).foregroundStyle(look.dim)
                 Text((cls.joinOpen ? "Joining is open" : "Joining is closed") + " · " + ClassroomText.students(students))
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(cls.joinOpen ? look.good : look.bad)
                 HStack {
                     Button(cls.joinOpen ? "Close Joining" : "Open Joining") {
                         center.setJoinOpen(cls.id, !cls.joinOpen) { ok, m, _ in message = ok ? "" : m }
                     }
-                    Button("Change Code…") { changeCode() }
-                    Button("Show on Projector") { ProjectorWindow.show(className: cls.name, code: cls.joinCode, link: link) }
+                    Button("New Code…") { changeCode() }
+                    Button(projector.showing ? "Close Projector" : "Show on Projector") {
+                        ProjectorWindow.toggle(className: cls.name, code: cls.joinCode, link: link)
+                    }
+                    .help("The code as big as the screen. Esc, or click the code again, to come back.")
                 }
                 if !message.isEmpty { Text(message).font(.system(size: 12)).foregroundStyle(look.bad) }
             }
@@ -371,81 +541,6 @@ struct JoinCodeCard: View {
     }
 }
 
-/// ● Live · Digital Logic 101 · 212 students · step 4, the buttons, and the prediction's counts.
-struct TeacherLiveBar: View {
-    @ObservedObject var center: ClassroomCenter
-    let cls: CRClass
-    let look: ClassroomLook
-    let accent: Color
-    let compact: Bool
-    @State private var message = ""
-    @State private var busy = false
-
-    var body: some View {
-        let l = center.live[cls.id] ?? CRLive()
-        let a = center.answers[cls.id] ?? CRAnswers()
-        VStack(alignment: .leading, spacing: 10) {
-            if l.on {
-                HStack(spacing: 8) {
-                    Circle().fill(look.live).frame(width: 10, height: 10)
-                    Text("Live · \(cls.name) · \(ClassroomText.students(center.students[cls.id]?.count ?? a.students)) · step \(l.step)")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(look.ink)
-                    Spacer()
-                    if l.connection == "fallback" { Text("Slow connection").font(.system(size: 11)).foregroundStyle(look.dim) }
-                }
-                HStack {
-                    Button("Push This Circuit") { push(prompt: nil, lights: [], reveal: false) }.disabled(busy || ClassroomFront.current == nil)
-                    Button("Ask a Prediction…") { center.sheet = .predict(classId: cls.id) }.disabled(busy || ClassroomFront.current == nil)
-                    Button("Reveal") { push(prompt: l.prompt, lights: l.lights, reveal: true) }.disabled(busy || !l.hasPredict || l.reveal)
-                    Button("End Live") { end() }.disabled(busy)
-                }
-                if l.hasPredict {
-                    Text("Prediction: “\(l.prompt)” · \(a.answered) of \(a.students) answered"
-                         + (l.reveal ? " · \(a.right) right, \(a.wrong) wrong" : ""))
-                        .font(.system(size: 13)).foregroundStyle(look.ink).fixedSize(horizontal: false, vertical: true)
-                    PredictionBars(lights: a.lights, look: look)
-                }
-                if l.takeOver {
-                    HStack {
-                        Text("You're live from another device. Take over here? The other device stops pushing.").font(.system(size: 12))
-                        Button("Take Over") { center.takeOverLive(cls.id) { ok, m, _ in message = ok ? "" : m } }
-                    }
-                }
-            } else if !compact {
-                Text(l.ended ? "The live view ended." : "Show your circuit on every student's screen as you work.")
-                    .font(.system(size: 13)).foregroundStyle(look.dim)
-                Text(ClassroomFront.current.map { "Goes live with: \($0.title)" } ?? "Open the circuit you want to show first.")
-                    .font(.system(size: 12)).foregroundStyle(look.dim)
-                Button("Go Live") { goLive() }.disabled(busy || ClassroomFront.current == nil).keyboardShortcut(.defaultAction)
-            }
-            if !message.isEmpty { Text(message).font(.system(size: 12)).foregroundStyle(look.bad) }
-        }
-        .padding(compact ? 12 : 16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(l.on ? look.live.opacity(0.08) : look.card))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(l.on ? look.live.opacity(0.4) : .clear))
-    }
-
-    private func finish(_ ok: Bool, _ m: String) {
-        busy = false
-        message = ok ? "" : m
-    }
-    private func goLive() {
-        guard let f = ClassroomFront.current else { return }
-        if ClassroomFront.override == nil, !classroomAsk("Go live?", ClassroomText.goLiveAsk, "Go Live").ok { return }
-        busy = true
-        center.goLive(cls.id, cdl: f.cdl) { ok, m, _ in finish(ok, m) }
-    }
-    private func push(prompt: String?, lights: [String], reveal: Bool) {
-        guard let f = ClassroomFront.current else { return }
-        busy = true
-        center.push(cls.id, cdl: f.cdl, prompt: prompt, lights: lights, reveal: reveal) { ok, m, _ in finish(ok, m) }
-    }
-    private func end() {
-        busy = true
-        center.endLive(cls.id) { ok, m, _ in finish(ok, m) }
-    }
-}
-
 struct TeacherSettings: View {
     @ObservedObject var center: ClassroomCenter
     let cls: CRClass
@@ -463,7 +558,7 @@ struct TeacherSettings: View {
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || name == cls.name)
             }
             if let e = cls.expiresAt {
-                Text("Removed from the website on \(ClassroomText.longDay(e)) unless someone opens it. Opening it, or a student handing in, keeps it.")
+                Text("Kept until \(ClassroomText.longDay(e)): a class unused for 18 months is deleted from the website. Opening it, or a student handing in, keeps it.")
                     .font(.system(size: 12)).foregroundStyle(look.dim)
             }
             HStack {
@@ -508,7 +603,7 @@ struct StudentPage: View {
                     }
                     ClassStatusLine(cls: cls, look: look)
                 }
-                StudentLivePanel(center: center, cls: cls, look: look, accent: accent)
+                itemsSection
                 Text("Assignments").font(.system(size: 15, weight: .semibold)).foregroundStyle(look.ink)
                 if list.isEmpty {
                     Text("Nothing assigned yet.").font(.system(size: 13)).foregroundStyle(look.dim)
@@ -535,6 +630,64 @@ struct StudentPage: View {
         }
         .onAppear { center.pageOpen(cls.id, true) }
         .onDisappear { center.pageOpen(cls.id, false) }
+    }
+
+    @State private var byTopic = true
+
+    /// What the teacher shared, then the class examples (3.16.2): Open makes the student's own copy.
+    @ViewBuilder private var itemsSection: some View {
+        let all = center.items[cls.id] ?? []
+        let shared = all.filter(\.isShare), examples = all.filter { !$0.isShare }
+        if !shared.isEmpty {
+            Text("Shared by your teacher").font(.system(size: 15, weight: .semibold)).foregroundStyle(look.ink)
+            ForEach(shared) { it in itemRow(it) }
+        }
+        if !examples.isEmpty {
+            HStack {
+                Text("Class examples").font(.system(size: 15, weight: .semibold)).foregroundStyle(look.ink)
+                Spacer()
+                Picker("Sort", selection: $byTopic) { Text("By topic").tag(true); Text("Newest first").tag(false) }
+                    .pickerStyle(.segmented).frame(maxWidth: 240)
+            }
+            if byTopic {
+                let topics = Dictionary(grouping: examples, by: \.topic)
+                let order = topics.keys.sorted { a, b in
+                    if a.isEmpty != b.isEmpty { return !a.isEmpty }
+                    return a.localizedStandardCompare(b) == .orderedAscending
+                }
+                ForEach(order, id: \.self) { t in
+                    Text(t.isEmpty ? "No topic" : t).font(.system(size: 12, weight: .semibold)).foregroundStyle(look.dim)
+                    ForEach(topics[t] ?? []) { it in itemRow(it) }
+                }
+            } else {
+                ForEach(examples) { it in itemRow(it) }
+            }
+        }
+    }
+
+    private func itemRow(_ it: CRItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(it.title.isEmpty ? "Untitled" : it.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(look.ink)
+                    if !it.news.isEmpty {
+                        Text(it.news == "updated" ? "UPDATED" : "NEW").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 5).frame(height: 16).background(Capsule().fill(accent))
+                    }
+                }
+                if let r = it.releasedAt { Text(ClassroomText.dayTime(r)).font(.system(size: 11)).foregroundStyle(look.dim) }
+                if !it.note.isEmpty { Text(it.note).font(.system(size: 12)).foregroundStyle(look.ink.opacity(0.8)).fixedSize(horizontal: false, vertical: true) }
+                if it.unreadable { Text(it.problem).font(.system(size: 11)).foregroundStyle(look.bad) }
+            }
+            Spacer()
+            Button("Open") {
+                do { try center.openItem(cls.id, it) } catch { message = "Couldn't make your copy: \(error.localizedDescription)" }
+            }
+            .disabled(it.unreadable || it.cdl.isEmpty)
+            .help("Opens your own copy in Your Circuits; your teacher's updates come as new copies")
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(look.card))
     }
 
     private func row(_ a: CRAssignment) -> some View {
@@ -588,19 +741,12 @@ struct StudentPage: View {
         AssignmentCopies.openAndCheck(item, key: a.keyText, names: a.keyNames)
     }
 
+    /// One tap (3.16.3): the copy as it is now goes to the teacher; every attempt is kept.
     private func handIn(_ a: CRAssignment) {
         guard let item = AssignmentCopies.copy(classId: cls.id, aid: a.id), let text = AssignmentCopies.text(of: item) else {
             message = "Open the assignment and build your circuit first."
             return
         }
-        let doc = try? CoreDocument(data: Data(text.utf8))
-        let parts = doc.map { d in (0..<d.pageCount).reduce(0) { $0 + Int(cl_document_gate_count(d.handle, Int32($1))) } } ?? 0
-        let pages = doc?.pageCount ?? 1
-        let until = a.dueAt.map { "You can hand in again until the due date (\(ClassroomText.shortDate($0)))." } ?? "You can hand in again whenever you like."
-        let unchanged = a.handedInAt != nil && !a.changedSince ? " Nothing changed since you handed in." : ""
-        guard classroomAsk("Hand in “\(a.title)”?",
-                           "Your circuit (\(parts) parts, \(pages) \(pages == 1 ? "page" : "pages")) goes to your teacher, encrypted for them. \(until)\(unchanged)",
-                           "Hand In").ok else { return }
         center.handIn(cls.id, a.id, cdl: text) { ok, m, _ in message = ok ? "" : m }
     }
 
@@ -626,117 +772,6 @@ struct StudentPage: View {
     }
 }
 
-/// "Your teacher is live. [Join Live View]", and once joined the prompt, the guesses and the score.
-struct StudentLivePanel: View {
-    @ObservedObject var center: ClassroomCenter
-    let cls: CRClass
-    let look: ClassroomLook
-    let accent: Color
-    @State private var guesses: [String: Int] = [:]
-    @State private var sentFor: String?
-    @State private var message = ""
-
-    var body: some View {
-        let l = center.live[cls.id] ?? CRLive()
-        let following = center.following.contains(cls.id)
-        if l.on || (l.ended && following) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Circle().fill(l.on ? look.live : look.dim).frame(width: 10, height: 10)
-                    if !l.on {
-                        Text("The live view ended.").font(.system(size: 14, weight: .semibold)).foregroundStyle(look.ink)
-                    } else if following {
-                        Text("Live · \(cls.name) · step \(l.step)").font(.system(size: 14, weight: .semibold)).foregroundStyle(look.ink)
-                    } else {
-                        Text("Your teacher is live.").font(.system(size: 14, weight: .semibold)).foregroundStyle(look.ink)
-                    }
-                    Spacer()
-                    if !following && l.on {
-                        Button("Join Live View") { center.openLiveWindow(cls.id) }.keyboardShortcut(.defaultAction)
-                    } else {
-                        Button("Keep a Copy") { ScratchCircuit.keep(l.cdl, named: "\(cls.name) – live") }.disabled(l.cdl.isEmpty)
-                        if l.on { Button("Show Window") { center.openLiveWindow(cls.id) } }
-                        if !l.on { Button("Close") { center.follow(cls.id, false); LiveWindow.close(cls.id) } }
-                    }
-                }
-                if following && l.on && l.hasPredict {
-                    Text("Your teacher asks: \(l.prompt)").font(.system(size: 13, weight: .medium)).foregroundStyle(look.ink)
-                    if l.reveal {
-                        Text(l.myRight >= 0 ? "\(l.myRight) of \(l.myTotal) right" : "Revealed.")
-                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(l.myRight == l.myTotal ? look.good : look.ink)
-                    } else {
-                        Text("Guess each light (or click the covered lights in the live window), then send.")
-                            .font(.system(size: 12)).foregroundStyle(look.dim)
-                        HStack(spacing: 14) {
-                            ForEach(l.lights, id: \.self) { name in
-                                HStack(spacing: 4) {
-                                    Text(name).font(.system(size: 12, weight: .semibold))
-                                    Picker("", selection: Binding(get: { guesses[name] ?? -1 }, set: { guesses[name] = $0 })) {
-                                        Text("?").tag(-1); Text("0").tag(0); Text("1").tag(1)
-                                    }
-                                    .pickerStyle(.segmented).labelsHidden().frame(width: 96)
-                                }
-                            }
-                        }
-                        HStack {
-                            Button("Send My Guess") { send(l) }
-                            if sentFor == "\(l.session)/\(l.ver)" { Text("Sent.").font(.system(size: 12)).foregroundStyle(look.good) }
-                        }
-                    }
-                }
-                if !message.isEmpty { Text(message).font(.system(size: 12)).foregroundStyle(look.bad) }
-            }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: 12).fill(look.live.opacity(0.08)))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(look.live.opacity(0.4)))
-        }
-    }
-
-    private func send(_ l: CRLive) {
-        let fromWindow = LiveWindow.guesses(cls.id, asked: l.lights)
-        let pairs = l.lights.compactMap { n -> (String, Int)? in
-            if let g = guesses[n], g >= 0 { return (n, g) }
-            if let g = fromWindow[n] { return (n, g) }
-            return nil
-        }
-        guard !pairs.isEmpty else { message = "Guess at least one light first."; return }
-        center.sendAnswer(cls.id, pairs) { ok, m, _ in
-            message = ok ? "" : m
-            if ok { sentFor = "\(l.session)/\(l.ver)" }
-        }
-    }
-}
-
-/// The answers to a prediction, a bar for each light: how many said 1 and how many said 0.
-struct PredictionBars: View {
-    let lights: [CRAnswers.Light]
-    let look: ClassroomLook
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(lights, id: \.name) { l in
-                let total = l.ones + l.zeros
-                HStack(spacing: 8) {
-                    Text(l.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(look.ink)
-                        .lineLimit(1).frame(width: 64, alignment: .leading)
-                    GeometryReader { g in
-                        HStack(spacing: 0) {
-                            Rectangle().fill(look.good).frame(width: total == 0 ? 0 : g.size.width * CGFloat(l.ones) / CGFloat(total))
-                            Rectangle().fill(look.ink.opacity(0.35))
-                        }
-                        .opacity(total == 0 ? 0.25 : 1)
-                    }
-                    .frame(height: 10).clipShape(RoundedRectangle(cornerRadius: 3)).frame(maxWidth: 220)
-                    Text("1: \(l.ones)").font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(look.good)
-                    Text("0: \(l.zeros)").font(.system(size: 11)).monospacedDigit().foregroundStyle(look.dim)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(l.name): \(l.ones) said 1, \(l.zeros) said 0")
-            }
-        }
-    }
-}
-
 // MARK: - Sheets
 
 struct ClassroomSheetView: View {
@@ -756,7 +791,7 @@ struct ClassroomSheetView: View {
             case .moveCode(_, let code): MoveCodeSheet(center: center, code: code, look: look)
             case .post(let cid, let aid): PostAssignmentSheet(center: center, classId: cid, editing: aid, look: look)
             case .handIns(let cid, let aid): HandInsSheet(center: center, classId: cid, aid: aid, look: look)
-            case .predict(let cid): PredictSheet(center: center, classId: cid, look: look)
+            case .addItem(let cid, let share, let files): AddItemSheet(center: center, classId: cid, share: share, files: files, look: look)
             }
         }
         .background(look.paper)
@@ -990,6 +1025,92 @@ struct MoveCodeSheet: View {
     }
 }
 
+/// Share This Circuit (a "share" item) or add class examples (from the circuit on screen, or .cdl files).
+struct AddItemSheet: View {
+    @ObservedObject var center: ClassroomCenter
+    let classId: String
+    let share: Bool
+    let files: [URL]
+    let look: ClassroomLook
+    @State private var title = ""
+    @State private var topic = ""
+    @State private var note = ""
+    @State private var hidden = false
+    @State private var working = false
+    @State private var message = ""
+
+    private var cls: CRClass? { center.classes.first { $0.id == classId } }
+    private var topics: [String] {
+        Array(Set((center.items[classId] ?? []).map(\.topic).filter { !$0.isEmpty })).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    var body: some View {
+        let front = ClassroomFront.current
+        VStack(alignment: .leading, spacing: 12) {
+            SheetTitle(text: share ? "Share with the class" : "Add to the class examples", look: look)
+            Text(files.isEmpty ? (share ? "Share the circuit on screen with \(cls?.name ?? "the class"): " : "Add the circuit on screen to the examples of \(cls?.name ?? "the class"): ")
+                 + (front?.title ?? "none open")
+                 : files.count == 1 ? "1 circuit: \(files[0].deletingPathExtension().lastPathComponent)" : "\(files.count) circuits, each titled by its file name")
+                .font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
+            if files.isEmpty {
+                HStack { Text("Title:").frame(width: 90, alignment: .trailing); TextField(share ? "Today's counter" : "Half adder", text: $title).textFieldStyle(.roundedBorder) }
+            }
+            if !share {
+                HStack {
+                    Text("Topic:").frame(width: 90, alignment: .trailing)
+                    TextField("Module 2: adders", text: $topic).textFieldStyle(.roundedBorder)
+                    if !topics.isEmpty {
+                        Menu("Existing") { ForEach(topics, id: \.self) { t in Button(t) { topic = t } } }.menuStyle(.borderlessButton).fixedSize()
+                    }
+                }
+            }
+            if files.isEmpty {
+                HStack(alignment: .top) {
+                    Text("Note:").frame(width: 90, alignment: .trailing)
+                    TextEditor(text: $note).font(.system(size: 12)).frame(height: 54).overlay(RoundedRectangle(cornerRadius: 4).stroke(look.line))
+                }
+            }
+            if !share { Toggle("Hide it until I release it", isOn: $hidden).padding(.leading, 98) }
+            Text(share ? "Students are told “Your teacher shared …” and open their own copy to play with. Update it later from the circuit on screen."
+                       : "Students see it in the class examples (once released) and open their own copy.")
+                .font(.system(size: 11)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
+            if working { HStack { ProgressView().controlSize(.small); Text(share ? "Sharing…" : "Adding…").font(.system(size: 12)) } }
+            if !message.isEmpty { Text(message).font(.system(size: 12)).foregroundStyle(look.bad).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                Spacer()
+                Button("Cancel") { center.sheet = nil }.keyboardShortcut(.cancelAction)
+                Button(share ? "Share" : "Add") { go() }.keyboardShortcut(.defaultAction)
+                    .disabled(working || (files.isEmpty && (front == nil || title.trimmingCharacters(in: .whitespaces).isEmpty)))
+            }
+        }
+        .padding(22).frame(width: 540)
+        .onAppear { if title.isEmpty, let f = ClassroomFront.current { title = f.title.replacingOccurrences(of: ".cdl", with: "") } }
+    }
+
+    private func go() {
+        var jobs: [(title: String, cdl: String)] = []
+        if files.isEmpty {
+            guard let f = ClassroomFront.current else { return }
+            jobs = [(title.trimmingCharacters(in: .whitespaces), f.cdl)]
+        } else {
+            for u in files {
+                guard let t = try? String(contentsOf: u, encoding: .utf8) else { message = "Couldn't read \(u.lastPathComponent)."; return }
+                jobs.append((u.deletingPathExtension().lastPathComponent, t))
+            }
+        }
+        working = true
+        message = ""
+        func next(_ k: Int) {
+            guard k < jobs.count else { working = false; center.sheet = nil; return }
+            center.postItem(classId, id: nil, type: share ? "share" : "example", title: jobs[k].title, topic: share ? "" : topic,
+                            note: files.isEmpty ? note : "", cdl: jobs[k].cdl, hidden: !share && hidden) { ok, m, _ in
+                if ok { next(k + 1) } else { working = false; message = (jobs.count > 1 ? "\(jobs[k].title): " : "") + (m.isEmpty ? ClassroomText.offline : m) }
+            }
+        }
+        next(0)
+    }
+}
+
 /// Post an assignment to a class, from the circuit on screen (or edit one).
 struct PostAssignmentSheet: View {
     @ObservedObject var center: ClassroomCenter
@@ -1007,6 +1128,8 @@ struct PostAssignmentSheet: View {
     @State private var working = false
     @State private var message = ""
     @State private var loaded = false
+    @State private var keyNote = ""
+    @State private var keyBad = false
 
     private var cls: CRClass? { center.classes.first { $0.id == classId } }
     private var existing: CRAssignment? { editing.flatMap { e in center.assignments[classId]?.first { $0.id == e } } }
@@ -1049,6 +1172,13 @@ struct PostAssignmentSheet: View {
                     Text(ClassroomText.keyStudentsCheck).font(.system(size: 11)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
                     Text(ClassroomText.keyOnlyMe).font(.system(size: 11)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
                     if keyChoice != .none {
+                        HStack {
+                            Button("From a Solution File…") { solutionFile() }
+                                .help("Your finished circuit: the key is what it does, every switch combination (and clock pulse)")
+                            Button("From the Circuit on Screen") { if let f = ClassroomFront.current { fromSolution(f.cdl) } }
+                                .disabled(ClassroomFront.current == nil)
+                        }
+                        if !keyNote.isEmpty { Text(keyNote).font(.system(size: 11)).foregroundStyle(keyBad ? look.bad : look.dim).fixedSize(horizontal: false, vertical: true) }
                         TextEditor(text: $keyText).font(.system(size: 12, design: .monospaced)).frame(height: 70)
                             .overlay(RoundedRectangle(cornerRadius: 4).stroke(look.line))
                         Text(keyText.isEmpty ? "As in Check My Circuit: a formula (S = A ^ B), a pasted truth table, a count, a state or timing table."
@@ -1089,6 +1219,29 @@ struct PostAssignmentSheet: View {
         }
     }
 
+    /// An answer key made from a solution (3.16.6): behaviour, never layout; names matched by name.
+    private func fromSolution(_ cdl: String) {
+        do {
+            let k = try AnswerKey.make(cdl: cdl)
+            keyText = k.text
+            keyBad = false
+            keyNote = k.timing
+                ? "A timing table of the solution, clock pulse by clock pulse: students' circuits must do the same. Switches and lights are matched by name."
+                : "A truth table of the solution: students' circuits must do the same, whatever their layout. Switches and lights are matched by name."
+        } catch {
+            keyBad = true
+            keyNote = "Couldn't make a key from it: " + ((error as? AnswerKey.Failure)?.message ?? error.localizedDescription)
+        }
+    }
+    private func solutionFile() {
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.cedarLogicCircuit]
+        p.message = "Choose the solution circuit"
+        guard p.runModal() == .OK, let u = p.url else { return }
+        guard let t = try? String(contentsOf: u, encoding: .utf8) else { keyBad = true; keyNote = "Couldn't read \(u.lastPathComponent)."; return }
+        fromSolution(t)
+    }
+
     private func post() {
         guard let f = ClassroomFront.current else { return }
         working = true
@@ -1111,6 +1264,7 @@ struct HandInsSheet: View {
     let look: ClassroomLook
     @State private var message = ""
     @State private var working = false
+    @State private var expanded: Set<String> = []
 
     private var cls: CRClass? { center.classes.first { $0.id == classId } }
     private var assignment: CRAssignment? { center.assignments[classId]?.first { $0.id == aid } }
@@ -1157,6 +1311,7 @@ struct HandInsSheet: View {
                         .font(.system(size: 12)).foregroundStyle(look.ink)
                         .padding(.vertical, 5).padding(.horizontal, 8)
                         .background(RoundedRectangle(cornerRadius: 6).fill(look.card))
+                        if s.attempts > 1 { earlier(s, hasKey: hasKey) }
                     }
                 }
             }
@@ -1175,6 +1330,36 @@ struct HandInsSheet: View {
             refresh()
         }
         .onDisappear { center.submissionsOpen(classId, aid, false) }
+    }
+
+    /// Every earlier attempt (3.16.3), each with its own check, openable read-only.
+    @ViewBuilder private func earlier(_ s: CRSubmission, hasKey: Bool) -> some View {
+        let key = "\(classId)/\(aid)/\(s.studentId)"
+        if expanded.contains(s.studentId) {
+            let list = center.history[key] ?? []
+            if list.isEmpty { Text("Earlier: none kept, or still loading…").font(.system(size: 11)).foregroundStyle(look.dim).padding(.leading, 24) }
+            ForEach(Array(list.enumerated()), id: \.offset) { _, h in
+                HStack {
+                    Text("Earlier · attempt \(h.attempts)").frame(width: 146, alignment: .leading)
+                    Text(h.handedInAt.map(ClassroomText.dayTime) ?? "").frame(width: 130, alignment: .leading)
+                    Text("").frame(width: 60)
+                    if hasKey || h.unreadable {
+                        Text(ClassroomText.checkLine(h, hasKey: hasKey))
+                            .foregroundStyle(h.verdict == 0 ? look.good : (h.verdict >= 1 || h.unreadable) ? look.bad : look.dim)
+                            .frame(maxWidth: .infinity, alignment: .leading).lineLimit(2)
+                    } else { Spacer() }
+                    Button("Open") { open(h) }.disabled(h.unreadable || h.cdl.isEmpty).frame(width: 60)
+                }
+                .font(.system(size: 11)).foregroundStyle(look.ink.opacity(0.85))
+                .padding(.vertical, 3).padding(.leading, 32).padding(.trailing, 8)
+            }
+        } else {
+            Button("Earlier (\(s.attempts - 1))") {
+                expanded.insert(s.studentId)
+                center.loadHistory(classId, aid, s.studentId) { ok, m, _ in if !ok { message = m } }
+            }
+            .buttonStyle(.link).font(.system(size: 11)).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 24)
+        }
     }
 
     private func refresh() {
@@ -1214,52 +1399,9 @@ struct HandInsSheet: View {
     }
 }
 
-/// Ask a Prediction: the question and the lights (Simulation View's Predict names).
-struct PredictSheet: View {
-    @ObservedObject var center: ClassroomCenter
-    let classId: String
-    let look: ClassroomLook
-    @State private var prompt = ""
-    @State private var chosen: Set<String> = []
-    @State private var working = false
-    @State private var message = ""
-
-    var body: some View {
-        let lights = ClassroomFront.current?.lights ?? []
-        VStack(alignment: .leading, spacing: 12) {
-            SheetTitle(text: "Ask a prediction", look: look)
-            TextField("What will Q be after the next clock?", text: $prompt).textFieldStyle(.roundedBorder)
-            Text("Which lights do students guess? They're covered on students' screens until you Reveal.")
-                .font(.system(size: 12)).foregroundStyle(look.dim)
-            if lights.isEmpty { Text("This page has no lights.").font(.system(size: 12)).foregroundStyle(look.bad) }
-            ForEach(lights, id: \.self) { l in
-                Toggle(l, isOn: Binding(get: { chosen.contains(l) }, set: { if $0 { chosen.insert(l) } else { chosen.remove(l) } }))
-            }
-            if !message.isEmpty { Text(message).font(.system(size: 12)).foregroundStyle(look.bad) }
-            HStack {
-                Spacer()
-                Button("Cancel") { center.sheet = nil }.keyboardShortcut(.cancelAction)
-                Button("Ask") { ask(lights) }.keyboardShortcut(.defaultAction)
-                    .disabled(working || prompt.trimmingCharacters(in: .whitespaces).isEmpty || chosen.isEmpty)
-            }
-        }
-        .padding(22).frame(width: 460)
-        .onAppear { if chosen.isEmpty { chosen = Set(lights) } }
-    }
-
-    private func ask(_ lights: [String]) {
-        guard let f = ClassroomFront.current else { return }
-        working = true
-        center.push(classId, cdl: f.cdl, prompt: prompt.trimmingCharacters(in: .whitespaces), lights: lights.filter(chosen.contains), reveal: false) { ok, m, _ in
-            working = false
-            if ok { center.sheet = nil } else { message = m }
-        }
-    }
-}
-
 // MARK: - The projector and the recovery sheet
 
-/// The join code filling a screen (the projector's, if Presenter is showing on one).
+/// The join code filling a screen (the projector's, if Presenter is showing on one). Clicking the code closes it.
 struct JoinProjectorView: View {
     let className: String
     let code: String
@@ -1270,8 +1412,10 @@ struct JoinProjectorView: View {
                 Text("Join \(className)").font(.system(size: g.size.height * 0.06, weight: .bold))
                 Text(ClassroomCenter.grouped(code)).font(.system(size: g.size.width * 0.075, weight: .heavy, design: .monospaced))
                     .minimumScaleFactor(0.3).lineLimit(1)
+                    .onTapGesture { ProjectorWindow.close() }
                 SyncQRCode(text: link).frame(width: g.size.height * 0.38, height: g.size.height * 0.38)
                 Text("CedarLogic Online › Classroom › Join a Class, or scan.").font(.system(size: g.size.height * 0.035))
+                Text("Esc or click the code to come back").font(.system(size: g.size.height * 0.02)).opacity(0.45)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1280,11 +1424,22 @@ struct JoinProjectorView: View {
     }
 }
 
+/// Show on Projector (3.16.8): closes from the laptop -- Escape (in any of the app's windows), clicking the
+/// code (on the projector, or the card again), or File › Classroom › Close Projector.
 @MainActor
 enum ProjectorWindow {
+    final class Shown: ObservableObject { @Published var showing = false }
+    static let state = Shown()
     private static var window: NSWindow?
+    private static var escape: Any?
+    private static var closing: Any?
+
+    static func toggle(className: String, code: String, link: String) {
+        if state.showing { close() } else { show(className: className, code: code, link: link) }
+    }
+
     static func show(className: String, code: String, link: String) {
-        window?.close()
+        close()
         let screen = NSScreen.screens.count > 1 ? NSScreen.screens.last! : (NSScreen.main ?? NSScreen.screens[0])
         let w = NSWindow(contentRect: screen.frame.insetBy(dx: screen.frame.width * 0.1, dy: screen.frame.height * 0.1),
                          styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false, screen: screen)
@@ -1296,6 +1451,35 @@ enum ProjectorWindow {
         w.makeKeyAndOrderFront(nil)
         w.toggleFullScreen(nil)
         window = w
+        state.showing = true
+        escape = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            guard e.keyCode == 53 else { return e }   // Escape, wherever the focus is
+            MainActor.assumeIsolated { close() }
+            return nil
+        }
+        closing = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            MainActor.assumeIsolated { forget() }
+        }
+    }
+
+    static func close() {
+        guard let w = window else { return }
+        forget()
+        if w.styleMask.contains(.fullScreen) {
+            w.toggleFullScreen(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { w.close() }
+        } else {
+            w.close()
+        }
+    }
+
+    private static func forget() {
+        if let e = escape { NSEvent.removeMonitor(e) }
+        if let c = closing { NotificationCenter.default.removeObserver(c) }
+        escape = nil
+        closing = nil
+        window = nil
+        state.showing = false
     }
 }
 
@@ -1334,5 +1518,19 @@ enum RecoverySheet {
         let op = NSPrintOperation(view: v, printInfo: info)
         op.jobTitle = "\(className) teacher key"
         op.run()
+    }
+}
+
+/// File › Classroom › Show on Projector / Close Projector: the selected class's join code (3.16.8).
+struct ProjectorMenuItem: View {
+    @ObservedObject private var state = ProjectorWindow.state
+    @ObservedObject private var center = ClassroomCenter.shared
+    var body: some View {
+        let cls = center.classes.first { $0.id == center.selected && $0.teaching } ?? center.classes.first { $0.teaching }
+        Button(state.showing ? "Close Projector" : "Show Join Code on Projector") {
+            if state.showing { ProjectorWindow.close() }
+            else if let c = cls { ProjectorWindow.show(className: c.name, code: c.joinCode, link: ClassroomCenter.webLink(kind: 1, c.joinCode)) }
+        }
+        .disabled(!state.showing && cls == nil)
     }
 }

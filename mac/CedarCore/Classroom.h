@@ -60,6 +60,16 @@ struct Submission {
 	bool left = false;
 	int64_t ver = 0;
 };
+// v2 (3.16.2): a shared circuit (type "share") or a class example ("example").
+struct Item {
+	std::string id, type, title, topic, note, cdl;
+	int64_t ver = 0, createdAt = 0, releasedAt = 0;   // releasedAt: when students first saw it (0: hidden)
+	bool hidden = false;                              // teacher: kept from students until released
+	std::string news;                                 // student: "new", "updated" or "" (opened, or there when joining)
+	bool unreadable = false;
+	std::string problem;
+};
+struct ItemNews { std::string id, what, type, title; };   // what: "new" | "updated"
 struct Student { std::string studentId, name; int64_t joinedAt = 0, seenAt = 0; bool unreadable = false; };
 struct Live {
 	bool on = false, ended = false, reveal = false, hasPredict = false;
@@ -77,6 +87,8 @@ struct ClassInfo {
 	bool joinOpen = true;
 	std::string studentName;            // membership
 	int64_t expiresAt = 0;
+	int64_t warnAt = 0;                 // v2 (3.16.4): the status's warnAt (0: an older server)
+	int news = 0;                       // student: items not opened yet (3.16.2)
 	bool live = false;
 	// (added) a line for the class page: the expiry warning (4.1), or "The join record on the
 	// website isn't the one your devices wrote. Change the join code."
@@ -142,6 +154,12 @@ struct Host {
 	// (added) UI thread. A student handed in to that assignment (the teacher's live connection says
 	// so): a submissions view that is open refreshes (refreshSubmissions).
 	virtual void submissionsChanged(const std::string& classId, const std::string& aid) { (void)classId; (void)aid; }
+	// v2 (3.16.2), UI thread: a student's class has new or updated items ("Your teacher shared …").
+	virtual void itemsChanged(const std::string& classId, const std::vector<ItemNews>& news, const std::string& className) {
+		(void)classId; (void)news; (void)className;
+	}
+	// v2 (3.16.7): whether Sync is on (side records are read and written only then).
+	virtual bool syncOn() { return true; }
 };
 
 // The classroom service (3.2, 3.13): the Worker's own origin. A placeholder that can never resolve
@@ -205,6 +223,14 @@ public:
 	void takeOverLive(const std::string& classId, Done);                             // after a 412
 	Live live(const std::string& classId) const;
 	AnswerCounts answers(const std::string& classId) const;
+	// v2 (3.16.2, 3.16.3): shared circuits and class examples; a hand-in's earlier attempts.
+	std::vector<Item> items(const std::string& classId) const;      // teacher: every one; student: the released ones
+	void postItem(const std::string& classId, const Item& draft, bool hidden, std::function<void(bool, std::string message, std::string iid)> done);
+	void setItemHidden(const std::string& classId, const std::string& iid, bool hidden, Done);
+	void deleteItem(const std::string& classId, const std::string& iid, Done);
+	void itemOpened(const std::string& classId, const std::string& iid);   // student: not news any more
+	void loadHistory(const std::string& classId, const std::string& aid, const std::string& sid, Done);
+	std::vector<Submission> history(const std::string& classId, const std::string& aid, const std::string& sid) const;   // oldest first
 
 	// Student (4.5-4.7).
 	void previewJoinCode(const std::string& text, std::function<void(bool, std::string message, std::string className, bool open)> done);

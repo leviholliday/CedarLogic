@@ -96,7 +96,7 @@ void vectorTests(Crypto& cr, Curve& curve, Report& r, const std::string& text) {
 		bool ok = true;
 		if (const json::Value* e = v.get("envelopeOf"))
 			for (const auto& kv : e->o) ok = ok && envelopeOf(kv.first) == kv.second.i();
-		r.line(ok && v.get("envelopeOf") && v.get("envelopeOf")->o.size() == 11, "envelopeOf: every kind's envelope");
+		r.line(ok && v.get("envelopeOf") && v.get("envelopeOf")->o.size() == 13, "envelopeOf: every kind's envelope");
 	}
 
 	// 7.1.1 codes.

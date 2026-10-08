@@ -158,6 +158,9 @@ struct HookHost : Host {
 	void notice(const std::string& text) override {
 		if (h.notice) h.notice(h.ctx, text.c_str());
 	}
+	void sideChanged() override {
+		if (h.side_changed) h.side_changed(h.ctx);
+	}
 	void askMassDelete(int count, std::function<void(bool)> answer) override {
 		if (!h.ask_mass_delete) {
 			answer(false);   // nobody to ask: keep them (Bring Them Back)
@@ -204,7 +207,7 @@ struct CLSyncEngine {
 	HookCrypto crypto;
 	HookHost host;
 	std::unique_ptr<Engine> engine;
-	std::string code, deviceName, statusText, device;
+	std::string code, deviceName, statusText, device, sideRid;
 	Status snapshot;
 	std::vector<std::pair<std::string, int64_t>> devices;
 	CLSyncEngine(const CLSyncHooks& h) : crypto(h), host(h) {}
@@ -222,6 +225,7 @@ CLSyncEngine* cl_sync_create(const CLSyncHooks* hooks, const char* libraryRoot, 
 	c.appKey = orEmpty(appKey);
 	c.client = orEmpty(client);
 	c.defaultDeviceName = orEmpty(defaultDeviceName);
+	c.sideKinds = { "classroom", "membership" };   // the classroom's (CLASSROOM.md 3.16.7)
 	const std::string server = serverFromEnvironment();
 	if (!server.empty()) c.serverBase = server;
 	const CLSyncHooks h = *hooks;
@@ -368,6 +372,31 @@ void cl_sync_flush_done(void* token) {
 	if (!fn) return;
 	(*fn)();
 	delete fn;
+}
+
+char* cl_sync_side_records(CLSyncEngine* e, const char* kind) {
+	json::Value out = json::Value::array();
+	if (e)
+		for (const auto& r : e->engine->sideRecords(orEmpty(kind))) {
+			json::Value pair = json::Value::array();
+			pair.push(json::Value::string(r.first));
+			pair.push(json::Value::string(r.second));
+			out.push(pair);
+		}
+	const std::string text = json::write(out);
+	char* p = (char*)malloc(text.size() + 1);
+	if (p) memcpy(p, text.c_str(), text.size() + 1);
+	return p;
+}
+const char* cl_sync_put_side(CLSyncEngine* e, const char* payloadJson, const char* rid) {
+	if (!e) return "";
+	json::Value v;
+	const std::string text = orEmpty(payloadJson);
+	e->sideRid = json::parse(text, v) && v.isObject() ? e->engine->putSideRecord(v.str("kind"), text, orEmpty(rid)) : std::string();
+	return e->sideRid.c_str();
+}
+void cl_sync_delete_side(CLSyncEngine* e, const char* rid) {
+	if (e) e->engine->deleteSideRecord(orEmpty(rid));
 }
 
 void cl_sync_now(CLSyncEngine* e) {

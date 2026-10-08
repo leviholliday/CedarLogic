@@ -893,7 +893,7 @@ void scenarioTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report&
 		S->join(T->teachingOf(c29)->rec.joinCode, "Sam");
 		T->refreshTeacher(c29);
 		const int64_t start = s.now;
-		s.now = start + 345 * kDay;
+		s.now = start + 380 * kDay;   // within 30 days of expiry (3.16.4)
 		std::string warning;
 		for (const ClassInfo& c : T->classes())
 			if (c.classId == c29) warning = c.warning;
@@ -901,9 +901,9 @@ void scenarioTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report&
 		s.cleanup();
 		const Result r1 = T->refreshTeacher(c29);
 		const Result r2 = S->refreshMember(c29);
-		line(has(warning, "will be removed from the website on") && has(warning, "unless someone opens it"), "s29 expiry: the warning line", warning);
-		line(!r1.ok && r1.error == "class_expired" && has(r1.message, "was removed after 400 days without use.") && !T->teachingOf(c29) &&
-		         !S->membershipOf(c29) && S.noticed("was removed after 400 days without use."),
+		line(has(warning, "will be deleted from the website on") && has(warning, "Open it or post something"), "s29 expiry: the warning line", warning);
+		line(!r1.ok && r1.error == "class_expired" && has(r1.message, "was removed after 18 months without use.") && !T->teachingOf(c29) &&
+		         !S->membershipOf(c29) && S.noticed("was removed after 18 months without use."),
 		     "s29 expiry: class_expired for everyone", r1.message);
 		s.now = start;
 	}

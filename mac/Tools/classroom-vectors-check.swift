@@ -276,7 +276,7 @@ func gcmOpen(_ key: Data, _ nonce: Data, _ ad: Data, _ ctTag: Data) throws -> Da
 /// A classroom plaintext's cap (1.5): lower than Sync's, since circuits come from the other party.
 let MAX_PLAINTEXT = 4_000_000
 /// The one envelope each kind uses (1.5), checked before anything else.
-let ENVELOPE_OF: [String: UInt8] = ["teacher": 1, "join": 1, "info": 1, "assignment": 1, "live": 1, "move": 1, "classroom": 1, "name": 2, "submission": 2, "answer": 2, "key": 2]
+let ENVELOPE_OF: [String: UInt8] = ["teacher": 1, "join": 1, "info": 1, "assignment": 1, "live": 1, "move": 1, "classroom": 1, "item": 1, "membership": 1, "name": 2, "submission": 2, "answer": 2, "key": 2]
 check("the envelope of every kind, and the plaintext cap") {
     let given = d(V, "envelopeOf")
     try eq(given.count, ENVELOPE_OF.count, "kinds")
@@ -314,7 +314,7 @@ func open(_ env: Data, kind: String, ad: (Int) -> Data, key: Data? = nil, priv: 
 
 // ---- payloads (2.2) ------------------------------------------------------------
 
-let KNOWN: Set<String> = ["teacher", "join", "info", "assignment", "live", "name", "submission", "answer", "key", "move", "classroom"]
+let KNOWN: Set<String> = ["teacher", "join", "info", "assignment", "live", "name", "submission", "answer", "key", "move", "classroom", "item", "membership"]
 let uuidRe = try! NSRegularExpression(pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 let hex32Re = try! NSRegularExpression(pattern: "^[0-9a-f]{32}$")
 let code28Re = try! NSRegularExpression(pattern: "^[0-9A-HJKMNP-TV-Z]{28}$")
@@ -388,6 +388,8 @@ func readPayload(_ bytes: Data, kind expected: String) -> Any {
     case "key": ok = isStr(p["text"]) && optStr(p["names"])
     case "move": ok = matches(hex32Re, p["classId"]) && matches(uuidRe, p["studentId"]) && isB64(p["token"], 32) && proofOk && isB64(p["classKey"], 32) && isB64(p["pub"], 65) && isStr(p["name"]) && isStr(p["className"])
     case "classroom": ok = matches(hex32Re, p["classId"]) && matches(code28Re, p["teacherKey"]) && isStr(p["name"]) && isInt(p["createdAt"]) && isInt(p["modifiedAt"])
+    case "item": ok = isStr(p["type"]) && isStr(p["title"]) && isStr(p["topic"]) && isStr(p["note"]) && isStr(p["cdl"]) && isInt(p["createdAt"]) && isInt(p["modifiedAt"])
+    case "membership": ok = matches(hex32Re, p["classId"]) && matches(uuidRe, p["studentId"]) && isB64(p["token"], 32) && proofOk && isB64(p["classKey"], 32) && isB64(p["pub"], 65) && isStr(p["name"]) && isStr(p["className"]) && isInt(p["joinedAt"])
     default: ok = false
     }
     return ok ? p : "invalid"

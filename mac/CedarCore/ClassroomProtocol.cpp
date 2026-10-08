@@ -289,7 +289,7 @@ std::string hmacHex(Crypto& cr, const Bytes& key, const std::string& text) {
 // ---- envelopes (1.5) ------------------------------------------------------------------------
 
 int envelopeOf(const std::string& kind) {
-	for (const char* k : { "teacher", "join", "info", "assignment", "live", "move", "classroom" })
+	for (const char* k : { "teacher", "join", "info", "assignment", "live", "move", "classroom", "item", "membership" })
 		if (kind == k) return 1;
 	for (const char* k : { "name", "submission", "answer", "key" })
 		if (kind == k) return 2;
@@ -531,10 +531,18 @@ bool fields(const json::Value& p, const std::string& kind) {
 		return isStr(c) && isHex(c->s, 32) && isCode(g("teacherKey"), 28) && isStr(g("name")) && isInt(g("createdAt")) &&
 		       isInt(g("modifiedAt"));
 	}
+	if (kind == "item")   // v2 (3.16.2)
+		return isStr(g("type")) && isStr(g("title")) && isStr(g("topic")) && isStr(g("note")) && isStr(g("cdl")) && isInt(g("createdAt")) &&
+		       isInt(g("modifiedAt"));
+	if (kind == "membership") {   // v2 (3.16.7): a move record plus joinedAt
+		const json::Value* c = g("classId");
+		return isStr(c) && isHex(c->s, 32) && isUuidV(g("studentId")) && isB64(g("token"), 32) && isB64(g("proof"), 32) &&
+		       isB64(g("classKey"), 32) && isB64(g("pub"), 65) && isStr(g("name")) && isStr(g("className")) && isInt(g("joinedAt"));
+	}
 	return false;
 }
 
-const char* const kKnown[] = { "teacher", "join", "info", "assignment", "live", "name", "submission", "answer", "key", "move", "classroom" };
+const char* const kKnown[] = { "teacher", "join", "info", "assignment", "live", "name", "submission", "answer", "key", "move", "classroom", "item", "membership" };
 
 }  // namespace
 
@@ -738,6 +746,29 @@ std::string classroomJson(const std::string& classId, const std::string& teacher
 	return "{\"v\":1,\"kind\":\"classroom\",\"classId\":" + q(classId) + ",\"teacherKey\":" + q(teacherKey) + ",\"name\":" + q(name) +
 	       ",\"createdAt\":" + num(createdAt) + ",\"modifiedAt\":" + num(modifiedAt) + ",\"device\":" + q(device) +
 	       ",\"deviceId\":" + q(deviceId) + "}";
+}
+
+std::string itemJson(const ItemRec& a) {
+	return "{\"v\":1,\"kind\":\"item\",\"type\":" + q(a.type == "share" ? "share" : "example") + ",\"title\":" + q(cleanName(a.title, 200, "Untitled")) +
+	       ",\"topic\":" + q(cutText(a.topic, 100)) + ",\"note\":" + q(cutText(a.note, 20000)) + ",\"cdl\":" + q(a.cdl) +
+	       ",\"createdAt\":" + num(a.createdAt) + ",\"modifiedAt\":" + num(a.modifiedAt) + "}";
+}
+
+bool itemFrom(const json::Value& p, ItemRec& a) {
+	a.type = p.str("type") == "share" ? "share" : "example";
+	a.title = cleanName(p.str("title"), 200, "Untitled");
+	a.topic = cutText(p.str("topic"), 100);
+	a.note = cutText(p.str("note"), 20000);
+	a.cdl = p.str("cdl");
+	a.createdAt = p.integer("createdAt");
+	a.modifiedAt = p.integer("modifiedAt");
+	return true;
+}
+
+std::string membershipJson(const MoveRec& m, int64_t joinedAt) {
+	return "{\"v\":1,\"kind\":\"membership\",\"classId\":" + q(m.classId) + ",\"studentId\":" + q(m.studentId) + ",\"token\":" + q(m.token) +
+	       ",\"proof\":" + q(m.proof) + ",\"classKey\":" + q(m.classKey) + ",\"pub\":" + q(m.pub) + ",\"name\":" + q(m.name) +
+	       ",\"className\":" + q(m.className) + ",\"joinedAt\":" + num(joinedAt) + "}";
 }
 
 // ---- the parts budget (4.9) ------------------------------------------------------------------

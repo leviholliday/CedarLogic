@@ -221,6 +221,20 @@ struct HookHost : Host {
 	void submissionsChanged(const std::string& classId, const std::string& aid) override {
 		if (h.submissions_changed) h.submissions_changed(h.ctx, classId.c_str(), aid.c_str());
 	}
+	void itemsChanged(const std::string& classId, const std::vector<ItemNews>& news, const std::string& className) override {
+		if (!h.items_changed) return;
+		json::Value list = json::Value::array();
+		for (const ItemNews& n : news) {
+			json::Value o = json::Value::object();
+			o.set("id", json::Value::string(n.id));
+			o.set("what", json::Value::string(n.what));
+			o.set("type", json::Value::string(n.type));
+			o.set("title", json::Value::string(n.title));
+			list.push(o);
+		}
+		h.items_changed(h.ctx, classId.c_str(), json::write(list).c_str(), className.c_str());
+	}
+	bool syncOn() override { return h.sync_on && h.sync_on(h.ctx); }
 };
 
 // An override of a server for testing (3.2): https, or http only for this computer.
@@ -257,6 +271,7 @@ struct CLClassroom {
 	std::vector<Assignment> assignments;
 	std::vector<Student> students;
 	std::vector<Submission> submissions;
+	std::vector<Item> items;
 	Live live;
 	AnswerCounts answers;
 	std::string text;   // a string returned by a getter that has no list behind it
@@ -337,6 +352,8 @@ CLASS_FIELD(student_name, const char*, c->classes[(size_t)i].studentName.c_str()
 CLASS_FIELD(expires_at, int64_t, c->classes[(size_t)i].expiresAt, 0)
 CLASS_FIELD(live, bool, c->classes[(size_t)i].live, false)
 CLASS_FIELD(warning, const char*, c->classes[(size_t)i].warning.c_str(), "")
+CLASS_FIELD(warn_at, int64_t, c->classes[(size_t)i].warnAt, 0)
+CLASS_FIELD(news, int, c->classes[(size_t)i].news, 0)
 #undef CLASS_FIELD
 
 int cl_classroom_status_kind(CLClassroom* c, const char* classId) {
@@ -450,6 +467,57 @@ void cl_classroom_remove_students(CLClassroom* c, const char* classId, const cha
 }
 void cl_classroom_remove_student(CLClassroom* c, const char* classId, const char* sid, bool deleteHandIns, CLClassroomDone done, void* ctx) {
 	if (c && c->engine) c->engine->removeStudents(orEmpty(classId), { orEmpty(sid) }, deleteHandIns, plainOf(done, ctx));
+}
+
+int cl_classroom_item_count(CLClassroom* c, const char* classId) {
+	if (!c || !c->engine) return 0;
+	c->items = c->engine->items(orEmpty(classId));
+	return (int)c->items.size();
+}
+#define ITEM_FIELD(name, type, expr, fallback) \
+	type cl_classroom_item_##name(CLClassroom* c, int i) { return c && in(i, c->items.size()) ? expr : fallback; }
+ITEM_FIELD(id, const char*, c->items[(size_t)i].id.c_str(), "")
+ITEM_FIELD(type, const char*, c->items[(size_t)i].type.c_str(), "example")
+ITEM_FIELD(title, const char*, c->items[(size_t)i].title.c_str(), "")
+ITEM_FIELD(topic, const char*, c->items[(size_t)i].topic.c_str(), "")
+ITEM_FIELD(note, const char*, c->items[(size_t)i].note.c_str(), "")
+ITEM_FIELD(cdl, const char*, c->items[(size_t)i].cdl.c_str(), "")
+ITEM_FIELD(ver, int64_t, c->items[(size_t)i].ver, 0)
+ITEM_FIELD(created_at, int64_t, c->items[(size_t)i].createdAt, 0)
+ITEM_FIELD(released_at, int64_t, c->items[(size_t)i].releasedAt, 0)
+ITEM_FIELD(hidden, bool, c->items[(size_t)i].hidden, false)
+ITEM_FIELD(news, const char*, c->items[(size_t)i].news.c_str(), "")
+ITEM_FIELD(unreadable, bool, c->items[(size_t)i].unreadable, false)
+ITEM_FIELD(problem, const char*, c->items[(size_t)i].problem.c_str(), "")
+#undef ITEM_FIELD
+void cl_classroom_post_item(CLClassroom* c, const char* classId, const char* iidOrNull, const char* type, const char* title, const char* topic,
+                            const char* note, const char* cdl, bool hidden, CLClassroomDone done, void* ctx) {
+	if (!c || !c->engine) return;
+	Item it;
+	it.id = orEmpty(iidOrNull);
+	it.type = orEmpty(type);
+	it.title = orEmpty(title);
+	it.topic = orEmpty(topic);
+	it.note = orEmpty(note);
+	it.cdl = orEmpty(cdl);
+	c->engine->postItem(orEmpty(classId), it, hidden, doneOf(done, ctx));
+}
+void cl_classroom_set_item_hidden(CLClassroom* c, const char* classId, const char* iid, bool hidden, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->setItemHidden(orEmpty(classId), orEmpty(iid), hidden, plainOf(done, ctx));
+}
+void cl_classroom_delete_item(CLClassroom* c, const char* classId, const char* iid, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->deleteItem(orEmpty(classId), orEmpty(iid), plainOf(done, ctx));
+}
+void cl_classroom_item_opened(CLClassroom* c, const char* classId, const char* iid) {
+	if (c && c->engine) c->engine->itemOpened(orEmpty(classId), orEmpty(iid));
+}
+void cl_classroom_load_history(CLClassroom* c, const char* classId, const char* aid, const char* sid, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->loadHistory(orEmpty(classId), orEmpty(aid), orEmpty(sid), plainOf(done, ctx));
+}
+int cl_classroom_history_count(CLClassroom* c, const char* classId, const char* aid, const char* sid) {
+	if (!c || !c->engine) return 0;
+	c->submissions = c->engine->history(orEmpty(classId), orEmpty(aid), orEmpty(sid));
+	return (int)c->submissions.size();
 }
 
 int cl_classroom_submission_count(CLClassroom* c, const char* classId, const char* aid) {

@@ -228,6 +228,7 @@ struct Engine::Impl {
 		co.appKey = cfg.appKey;
 		co.client = cfg.client;
 		co.gateDefaults = cfg.gateDefault;
+		co.sideKinds = cfg.sideKinds;
 		CoreHooks hk;
 		hk.http = [this](const HttpRequest& r) { return host.http(r); };
 		hk.onMain = [this](const std::function<void()>& fn) { runMain(fn); };
@@ -253,6 +254,9 @@ struct Engine::Impl {
 			publish("syncing", text, done, total);
 		};
 		hk.saveState = [this](const State& s) { return saveState(s); };
+		hk.sideChanged = [this] {
+			if (!noMain) host.sideChanged();
+		};
 		core.reset(new Core(co, crypto, clock, *lib, hk));
 		core->setDeviceName(cfg.defaultDeviceName.empty() ? "CedarLogic" : cfg.defaultDeviceName);
 	}
@@ -926,6 +930,19 @@ void Engine::syncNow() {
 	std::lock_guard<std::mutex> lock(d->mu);
 	d->sched.syncNow(d->clock.now());
 	d->cv.notify_all();
+}
+
+std::vector<std::pair<std::string, std::string>> Engine::sideRecords(const std::string& kind) {
+	return d->core->sideRecords(kind);
+}
+std::string Engine::putSideRecord(const std::string& kind, const std::string& json, const std::string& rid) {
+	const std::string id = d->core->putSideRecord(kind, json, rid);
+	noteLibraryChanged();   // sent with the next cycle (seconds)
+	return id;
+}
+void Engine::deleteSideRecord(const std::string& rid) {
+	d->core->deleteSideRecord(rid);
+	noteLibraryChanged();
 }
 
 void Engine::noteLibraryChanged() {

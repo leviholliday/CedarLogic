@@ -18,6 +18,8 @@ static const char* const kVectorLines[] = {
 	"    \"live\": 1,\n",
 	"    \"move\": 1,\n",
 	"    \"classroom\": 1,\n",
+	"    \"item\": 1,\n",
+	"    \"membership\": 1,\n",
 	"    \"name\": 2,\n",
 	"    \"submission\": 2,\n",
 	"    \"answer\": 2,\n",

@@ -68,6 +68,8 @@ struct Engine::Impl {
 	std::map<std::string, AnswerCounts> pubAnswers;
 	std::map<std::string, Status> pubStatus;
 	std::map<std::string, std::string> pubLinks;                      // classId -> the live connection's state
+	std::map<std::string, std::vector<Item>> pubItems;                // v2
+	std::map<std::string, std::vector<Submission>> pubHistory;        // "classId/aid/sid"
 
 	// Polling (engine thread, set through ops).
 	std::set<std::string> pagesOpen, following;
@@ -110,6 +112,11 @@ struct Engine::Impl {
 		};
 		k.putSide = [this](const std::string& rid, const std::string& j) { main([&] { host.syncPutSide(rid, j); }); };
 		k.deleteSide = [this](const std::string& rid) { main([&] { host.syncDeleteSide(rid); }); };
+		k.syncOn = [this] {
+			bool on = false;
+			main([&] { on = host.syncOn(); });
+			return on;
+		};
 		k.check = [this](const std::string& cdl, const std::string& text, const std::string& names, int& verdict, std::string& summary) {
 			return host.checkCircuit(cdl, text, names, verdict, summary);
 		};
@@ -151,11 +158,14 @@ struct Engine::Impl {
 			pubAnswers.clear();
 			pubStatus.clear();
 			pubLinks.clear();
+			pubItems.clear();
+			pubHistory = client->allHistory();
 			for (const auto& l : links) pubLinks[l.first] = LiveLink::stateName(l.second->state());
 			for (const ClassInfo& c : pubClasses) {
 				pubAssignments[c.classId] = client->assignments(c.classId);
 				pubLive[c.classId] = client->live(c.classId);
 				pubStatus[c.classId] = client->status(c.classId);
+				pubItems[c.classId] = client->items(c.classId);
 				if (c.teaching) {
 					pubStudents[c.classId] = client->students(c.classId);
 					pubAnswers[c.classId] = client->answers(c.classId);
@@ -171,6 +181,9 @@ struct Engine::Impl {
 		while (client->liveChangedFlag(id)) lives.emplace_back(id, client->live(id));
 		while (client->answersChangedFlag(id)) counts.emplace_back(id, client->answers(id));
 		while (client->handinFlag(id, aid)) handins.emplace_back(id, aid);
+		std::vector<Client::News> news;
+		Client::News one;
+		while (client->newsFlag(one)) news.push_back(one);
 		std::vector<std::pair<std::string, Status>> statuses;
 		{
 			std::lock_guard<std::mutex> lock(mu);
@@ -185,6 +198,7 @@ struct Engine::Impl {
 			for (const auto& c : counts) host.answersChanged(c.first, c.second);
 			for (const auto& s : statuses) host.statusChanged(s.first, s.second);
 			for (const auto& h : handins) host.submissionsChanged(h.first, h.second);
+			for (const auto& n : news) host.itemsChanged(n.classId, n.items, n.className);
 			std::vector<std::string> n;
 			{
 				std::lock_guard<std::mutex> lock(mu);
@@ -278,7 +292,8 @@ struct Engine::Impl {
 		if (client->teaches(classId)) return pagesOpen.count(classId) || client->predictOpen(classId);
 		if (!client->member(classId)) return false;
 		const Membership* m = client->membershipOf(classId);
-		return pagesOpen.count(classId) || following.count(classId) || (m && !m->pending.empty());
+		(void)m;
+		return true;   // v2: a joined class is polled while the app is in use (Your teacher shared …, 3.16.2)
 	}
 
 	// How long the server should hold a poll: not while the live connection is open (it brings
@@ -627,6 +642,32 @@ AnswerCounts Engine::answers(const std::string& classId) const {
 	std::lock_guard<std::mutex> lock(d->mu);
 	auto it = d->pubAnswers.find(classId);
 	return it == d->pubAnswers.end() ? AnswerCounts() : it->second;
+}
+
+std::vector<Item> Engine::items(const std::string& classId) const {
+	std::lock_guard<std::mutex> lock(d->mu);
+	auto it = d->pubItems.find(classId);
+	return it == d->pubItems.end() ? std::vector<Item>() : it->second;
+}
+void Engine::postItem(const std::string& classId, const Item& draft, bool hidden, std::function<void(bool, std::string, std::string)> done) {
+	d->run([this, classId, draft, hidden] { return d->client->postItem(classId, draft, hidden); }, valued(done));
+}
+void Engine::setItemHidden(const std::string& classId, const std::string& iid, bool hidden, Done done) {
+	d->run([this, classId, iid, hidden] { return d->client->setItemHidden(classId, iid, hidden); }, plain(done));
+}
+void Engine::deleteItem(const std::string& classId, const std::string& iid, Done done) {
+	d->run([this, classId, iid] { return d->client->deleteItem(classId, iid); }, plain(done));
+}
+void Engine::itemOpened(const std::string& classId, const std::string& iid) {
+	d->post([this, classId, iid] { d->client->itemOpened(classId, iid); });
+}
+void Engine::loadHistory(const std::string& classId, const std::string& aid, const std::string& sid, Done done) {
+	d->run([this, classId, aid, sid] { return d->client->loadHistory(classId, aid, sid); }, plain(done));
+}
+std::vector<Submission> Engine::history(const std::string& classId, const std::string& aid, const std::string& sid) const {
+	std::lock_guard<std::mutex> lock(d->mu);
+	auto it = d->pubHistory.find(classId + "/" + aid + "/" + sid);
+	return it == d->pubHistory.end() ? std::vector<Submission>() : it->second;
 }
 
 void Engine::previewJoinCode(const std::string& text, std::function<void(bool, std::string, std::string, bool)> done) {

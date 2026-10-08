@@ -201,6 +201,8 @@ final class SyncCenter: ObservableObject {
             SyncCenter.onMain { $0.askIncomingDeletes(Int(count), from: devices, token) }
         }
         h.gate_default = cl_sync_core_gate_default
+        // Classroom's side records (SYNC.md 2.5.1): the classes this person teaches and joined.
+        h.side_changed = { _ in SyncCenter.onMain { _ in ClassroomCenter.shared.syncSideChanged() } }
         hooks = h
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "0"
@@ -274,9 +276,37 @@ final class SyncCenter: ObservableObject {
 
     // MARK: What the engine says
 
+    // MARK: Side records (SYNC.md 2.5.1), for Classroom
+
+    /// Sync is on here (side records are read and written only then).
+    var sideOn: Bool { engine.map { started && cl_sync_enabled($0) } ?? false }
+
+    /// (rid, payload JSON) of the classroom's kinds, as last pulled or written.
+    func sideRecords() -> [(String, String)] {
+        guard let e = engine, sideOn else { return [] }
+        var out: [(String, String)] = []
+        for kind in ["classroom", "membership"] {
+            guard let p = cl_sync_side_records(e, kind) else { continue }
+            defer { free(p) }
+            let list = (try? JSONSerialization.jsonObject(with: Data(String(cString: p).utf8))) as? [[String]] ?? []
+            out += list.compactMap { $0.count == 2 ? ($0[0], $0[1]) : nil }
+        }
+        return out
+    }
+    func putSide(_ json: String, rid: String) {
+        guard let e = engine, sideOn else { return }
+        _ = cl_sync_put_side(e, json, rid)
+    }
+    func deleteSide(_ rid: String) {
+        guard let e = engine, sideOn else { return }
+        cl_sync_delete_side(e, rid)
+    }
+
     func refresh() {
         guard let e = engine else { return }
+        let was = enabled
         enabled = cl_sync_enabled(e)
+        if enabled && !was { ClassroomCenter.shared.syncSideChanged() }   // turned on: the classes here get records
         kind = Int(cl_sync_status_kind(e))
         statusText = String(cString: cl_sync_status_text(e))
         circuits = Int(cl_sync_circuit_count(e))

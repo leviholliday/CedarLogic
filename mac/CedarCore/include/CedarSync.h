@@ -53,6 +53,8 @@ typedef struct CLSyncHooks {
 	void (*ask_incoming_deletes)(void *ctx, int count, const char *fromDevices, void *token);   // cl_sync_answer(token, yes)
 	// the gate library's default for a param; returns false if there is none
 	bool (*gate_default)(void *ctx, const char *lib, bool gui, const char *name, char *out, size_t outLen);
+	// main thread, may be NULL: a pull changed side records (SYNC.md 2.5.1); read them with cl_sync_side_records
+	void (*side_changed)(void *ctx);
 } CLSyncHooks;
 
 // The server is https://cedarlogic.netlify.app/api/sync/v1 unless the environment
@@ -90,6 +92,13 @@ void cl_sync_delete_synced_copy(CLSyncEngine *e, CLSyncDone done, void *ctx);
 void cl_sync_start_over(CLSyncEngine *e, CLSyncDone done, void *ctx);
 void cl_sync_answer(void *token, bool yes);
 void cl_sync_flush_done(void *token);
+
+// Side records (SYNC.md 2.5.1; the kinds "classroom" and "membership"). Records of a kind as a malloc'd JSON
+// array of [rid, payloadJson] pairs (caller frees). put: the payload's own "kind"; rid NULL or "" = a new id;
+// returns the id (valid until the next call) or "" if the kind isn't a side kind. Sent by the next cycle.
+char *cl_sync_side_records(CLSyncEngine *e, const char *kind);
+const char *cl_sync_put_side(CLSyncEngine *e, const char *payloadJson, const char *rid);
+void cl_sync_delete_side(CLSyncEngine *e, const char *rid);
 
 void cl_sync_now(CLSyncEngine *e);
 void cl_sync_note_library_changed(CLSyncEngine *e);
