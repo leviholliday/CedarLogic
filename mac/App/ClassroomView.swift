@@ -400,10 +400,10 @@ struct TeacherLiveBar: View {
                     Button("End Live") { end() }.disabled(busy)
                 }
                 if l.hasPredict {
-                    let per = a.lights.map { "\($0.name): 1 (\($0.ones)) 0 (\($0.zeros))" }.joined(separator: " · ")
-                    Text("Prediction: “\(l.prompt)” · \(a.answered) answered" + (per.isEmpty ? "" : " · " + per)
+                    Text("Prediction: “\(l.prompt)” · \(a.answered) of \(a.students) answered"
                          + (l.reveal ? " · \(a.right) right, \(a.wrong) wrong" : ""))
                         .font(.system(size: 13)).foregroundStyle(look.ink).fixedSize(horizontal: false, vertical: true)
+                    PredictionBars(lights: a.lights, look: look)
                 }
                 if l.takeOver {
                     HStack {
@@ -693,7 +693,7 @@ struct StudentLivePanel: View {
     }
 
     private func send(_ l: CRLive) {
-        let fromWindow = LiveWindow.guesses(cls.id)
+        let fromWindow = LiveWindow.guesses(cls.id, asked: l.lights)
         let pairs = l.lights.compactMap { n -> (String, Int)? in
             if let g = guesses[n], g >= 0 { return (n, g) }
             if let g = fromWindow[n] { return (n, g) }
@@ -703,6 +703,36 @@ struct StudentLivePanel: View {
         center.sendAnswer(cls.id, pairs) { ok, m, _ in
             message = ok ? "" : m
             if ok { sentFor = "\(l.session)/\(l.ver)" }
+        }
+    }
+}
+
+/// The answers to a prediction, a bar for each light: how many said 1 and how many said 0.
+struct PredictionBars: View {
+    let lights: [CRAnswers.Light]
+    let look: ClassroomLook
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(lights, id: \.name) { l in
+                let total = l.ones + l.zeros
+                HStack(spacing: 8) {
+                    Text(l.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(look.ink)
+                        .lineLimit(1).frame(width: 64, alignment: .leading)
+                    GeometryReader { g in
+                        HStack(spacing: 0) {
+                            Rectangle().fill(look.good).frame(width: total == 0 ? 0 : g.size.width * CGFloat(l.ones) / CGFloat(total))
+                            Rectangle().fill(look.ink.opacity(0.35))
+                        }
+                        .opacity(total == 0 ? 0.25 : 1)
+                    }
+                    .frame(height: 10).clipShape(RoundedRectangle(cornerRadius: 3)).frame(maxWidth: 220)
+                    Text("1: \(l.ones)").font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(look.good)
+                    Text("0: \(l.zeros)").font(.system(size: 11)).monospacedDigit().foregroundStyle(look.dim)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(l.name): \(l.ones) said 1, \(l.zeros) said 0")
+            }
         }
     }
 }

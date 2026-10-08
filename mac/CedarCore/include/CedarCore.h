@@ -472,6 +472,11 @@ typedef struct {
 } CLSimViewStyle;
 void cl_simview_draw_page(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, const CLSimViewStyle *style);
+// The same, with Predict covering only `gates` (a live class's question names its
+// lights; the others show as ever, and the wires still all draw "off").
+void cl_simview_draw_page_covering(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+                                   double originX, double originY, double unitsPerPoint, const CLSimViewStyle *style,
+                                   const long *gates, int count);
 
 // The page's lights (LEDs) and displays (hex displays, and anything else
 // that shows a number), top to bottom, left to right. `value` is what it

@@ -148,7 +148,7 @@ struct Host {
 // until the owner deploys and sets the real one in ClassroomProtocol.cpp (as the web core's
 // SERVICE); CL_CLASSROOM_SERVICE, or CL_CLASSROOM_URL and CL_LIVE_URL, point the apps at another
 // (cl_classroom_create).
-extern const char* const kService;          // https://cedarlogic-classroom.invalid
+extern const char* const kService;          // https://cedarlogic-classroom.leviholliday7.workers.dev
 
 struct Config {
 	std::string dir;                    // the Classroom folder

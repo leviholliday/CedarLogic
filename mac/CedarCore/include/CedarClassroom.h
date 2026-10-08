@@ -72,7 +72,7 @@ void cl_classroom_socket_opened(void *events, int id);
 void cl_classroom_socket_text(void *events, int id, const char *text);
 void cl_classroom_socket_closed(void *events, int id, int code);   // the closing code (1006: the network)
 
-// The servers are the classroom service's https://cedarlogic-classroom.invalid/api/classroom/v1 and
+// The servers are the classroom service's https://cedarlogic-classroom.leviholliday7.workers.dev/api/classroom/v1 and
 // .../api/live/v1 (a placeholder until the deploy sets the real origin, CLASSROOM.md 3.13), unless
 // CL_CLASSROOM_SERVICE names another origin, or CL_CLASSROOM_URL and CL_LIVE_URL name the two
 // bases (https, or http for localhost / 127.0.0.1 only).

@@ -23,6 +23,10 @@ final class PredictModel: ObservableObject {
     private(set) var answers: [Int: Int] = [:]
 
     var covering: Bool { on && !revealed }
+    /// A live class's question: only these gates are covered and guessed (nil: every light).
+    @Published var only: Set<Int>?
+    /// In a live class only the teacher reveals: no Reveal here, and Return doesn't.
+    @Published var locked = false
 
     func newRound() {
         revealed = false
@@ -64,7 +68,9 @@ extension CanvasController {
         guard let document else { return [] }
         var buf = [CLSimLight](repeating: CLSimLight(), count: 256)
         let n = Int(cl_simview_lights(document.handle, Int32(page), &buf, Int32(buf.count)))
-        return Array(buf.prefix(min(n, buf.count)))
+        let all = Array(buf.prefix(min(n, buf.count)))
+        guard let only = predict.only else { return all }
+        return all.filter { only.contains(Int($0.gate)) }
     }
 
     /// The lights are covered right now (Simulation View, Predict on, not revealed).
@@ -102,6 +108,7 @@ extension CanvasController {
     /// Reveal, or (once revealed) cover the lights again for another round.
     func revealOrCoverAgain() {
         guard predict.on else { return }
+        if predict.locked { announce("Your teacher reveals the lights."); return }
         if predict.revealed {
             predict.newRound()
             announce("Covered again. Make your guesses.")
@@ -109,6 +116,15 @@ extension CanvasController {
             predict.reveal(predictLights)
             announce("\(predict.score).")
         }
+        redraw()
+        view?.predictChanged()
+    }
+
+    /// The teacher revealed (a live class): uncover with the student's guesses scored.
+    func teacherRevealed() {
+        guard predict.on, !predict.revealed else { return }
+        predict.reveal(predictLights)
+        announce("Revealed. \(predict.score).")
         redraw()
         view?.predictChanged()
     }

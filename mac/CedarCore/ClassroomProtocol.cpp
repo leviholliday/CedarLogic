@@ -21,7 +21,7 @@ using clsync::sha256Hex;
 using clsync::unb64u;
 
 const char* const kWebBase = "https://cedarlogic.netlify.app/classroom/";
-const char* const kService = "https://cedarlogic-classroom.invalid";   // set at deploy (Classroom.h)
+const char* const kService = "https://cedarlogic-classroom.leviholliday7.workers.dev";   // set at deploy (Classroom.h)
 const char* const kAppBase = "cedarlogic://classroom";
 const char* const kSalt = "cedarlogic-classroom-v1";
 const char* const kJoinSalt = "cedarlogic-classroom-join-v1";

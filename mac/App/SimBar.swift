@@ -174,10 +174,12 @@ struct SimBar: View {
             .accessibilityLabel("Predict")
             .accessibilityValue(predict.on ? "On" : "Off")
             if predict.on {
-                textButton(predict.revealed ? "Cover again" : "Reveal", key: "return", lit: !predict.revealed && guessed > 0) {
-                    canvas.revealOrCoverAgain()
+                if !predict.locked {
+                    textButton(predict.revealed ? "Cover again" : "Reveal", key: "return", lit: !predict.revealed && guessed > 0) {
+                        canvas.revealOrCoverAgain()
+                    }
+                    .help(predict.revealed ? "Cover the lights and guess again" : "Uncover the lights and see how you did")
                 }
-                .help(predict.revealed ? "Cover the lights and guess again" : "Uncover the lights and see how you did")
                 Text(predict.revealed ? predict.score : "\(guessed) of \(lights.count) guessed")
                     .font(.system(size: 12 * k, weight: predict.revealed ? .semibold : .regular)).monospacedDigit()
                     .foregroundStyle(predict.revealed ? (predict.total > 0 && predict.right == predict.total ? live : ink) : dim)

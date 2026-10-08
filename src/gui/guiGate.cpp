@@ -931,7 +931,7 @@ void guiGateREGISTER::drawToScene(cl::render::Scene& scene,
 	using namespace cl::render;
 	guiGate::drawToScene(scene, style);   // outline + labels
 	if (!style.showLiveState) return;     // print/topology: no lit digits
-	const bool covered = style.simView && style.coverOutputs;   // Predict: the digits are the answer
+	const bool covered = style.covers(gateID);   // Predict: the digits are the answer
 
 	Transform t;
 	t.a = (float)mModel[0];  t.b = (float)mModel[1];
@@ -1111,7 +1111,7 @@ void guiGateLED::drawToScene(cl::render::Scene& scene,
 		// background pure black is indistinguishable from the canvas itself.
 		Color c(0, 0, 0, 1);
 		if (style.simView) {
-			if (style.coverOutputs) outputState = ZERO;   // Predict: dark until revealed
+			if (style.covers(gateID)) outputState = ZERO;   // Predict: dark until revealed
 			switch (outputState) {
 				case ONE:      c = Color(0.80f, 0.98f, 1.0f); break;   // lit: near-white cyan (bloom is an overlay)
 				case CONFLICT: c = style.simError(); break;

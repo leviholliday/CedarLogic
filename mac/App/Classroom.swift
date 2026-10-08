@@ -6,7 +6,7 @@
 // hand-ins opened as scratch copies, Download All, and the live view's window.
 // ClassroomView.swift draws it; RenderClassroom.swift pictures and tests it.
 //
-// Behind a flag until the classroom service is deployed (ClassroomFlag): off,
+// Behind a flag (ClassroomFlag), on by default since the service is deployed: off,
 // nothing here starts and no menu shows.
 
 import AppKit
@@ -14,12 +14,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Whether Classroom shows at all: `defaults write <the app's bundle id> ClassroomEnabled -bool YES`
-/// or CL_CLASSROOM=1 in the environment (which wins either way). Off by default.
+/// or CL_CLASSROOM=1 in the environment (which wins either way). On by default (the service is
+/// deployed); `ClassroomEnabled -bool NO` or CL_CLASSROOM=0 turns it off.
 enum ClassroomFlag {
     static let defaultsKey = "ClassroomEnabled"
     static var on: Bool {
         if let e = ProcessInfo.processInfo.environment["CL_CLASSROOM"] { return e == "1" || e.lowercased() == "yes" }
-        return UserDefaults.standard.bool(forKey: defaultsKey)
+        return UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
     }
 }
 
@@ -620,7 +621,12 @@ final class ClassroomCenter: ObservableObject {
         guard let doc = try? CoreDocument(data: Data(cdl.utf8)) else { return nil }
         for _ in 0..<40 { cl_document_step(doc.handle) }
         let found = namedLights(doc, page: 0)
-        return names.map { n in found.first { $0.name.caseInsensitiveCompare(n) == .orderedSame }?.value ?? -1 }
+        return names.map { n in found.first { lightKey($0.name) == lightKey(n) }?.value ?? -1 }
+    }
+
+    /// Two names for the same light (the teacher's board, a student's copy): spaces and capitals don't count.
+    nonisolated static func lightKey(_ s: String) -> String {
+        s.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
     }
 
     /// A page's lights (not displays) with Predict's names, in Tab order.
@@ -641,7 +647,7 @@ final class ClassroomCenter: ObservableObject {
         guard !preview, following.contains(cid), l.on, !l.cdl.isEmpty, LiveWindow.isOpen(cid) else { return }
         if liveShown[cid] == l.ver && !(l.reveal) { return }
         liveShown[cid] = l.ver
-        LiveWindow.show(cid, name: classes.first { $0.id == cid }?.name ?? "Class", cdl: l.cdl, predict: l.hasPredict && !l.reveal)
+        LiveWindow.show(cid, name: classes.first { $0.id == cid }?.name ?? "Class", cdl: l.cdl, live: l)
     }
 
     /// Join Live View: the teacher's circuit in a window of its own.
@@ -649,7 +655,7 @@ final class ClassroomCenter: ObservableObject {
         follow(cid, true)
         guard let l = live[cid], l.on, !l.cdl.isEmpty else { return }
         liveShown[cid] = l.ver
-        LiveWindow.show(cid, name: classes.first { $0.id == cid }?.name ?? "Class", cdl: l.cdl, predict: l.hasPredict && !l.reveal)
+        LiveWindow.show(cid, name: classes.first { $0.id == cid }?.name ?? "Class", cdl: l.cdl, live: l)
     }
 }
 
@@ -802,7 +808,11 @@ enum LiveWindow {
         doc.windowControllers.compactMap { $0.window?.contentView }.flatMap(AssignmentCopies.canvases).compactMap(\.controller)
     }
 
-    static func show(_ cid: String, name: String, cdl: String, predict: Bool) {
+    /// The live window shows a push: with a question, Predict covers only the lights it asks
+    /// about, and only the teacher reveals (the reveal push uncovers them, the guesses scored).
+    static func show(_ cid: String, name: String, cdl: String, live: CRLive) {
+        let predict = live.hasPredict
+        let asked = Set(live.lights.map(ClassroomCenter.lightKey))
         let url: URL
         if let u = files[cid] { url = u } else {
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent("CedarLogic Classroom/live-\(cid)", isDirectory: true)
@@ -817,8 +827,21 @@ enum LiveWindow {
                     guard let doc = document(url) else { return }
                     for c in controllers(doc) {
                         c.simView = true
+                        if predict, let core = c.document {
+                            let gates = ClassroomCenter.namedLights(core, page: c.page).filter { asked.contains(ClassroomCenter.lightKey($0.name)) }.map(\.gate)
+                            c.predict.only = Set(gates)
+                            c.predict.locked = true
+                        } else {
+                            c.predict.only = nil
+                            c.predict.locked = false
+                        }
+                        if predict && !live.reveal { c.predict.on = false }   // (a new question: a new round)
                         c.predict.on = predict
-                        c.note(predict ? "Your teacher asks for a prediction: click each covered light to guess, then Send My Guess in the Classroom window."
+                        if predict && live.reveal { c.teacherRevealed() }
+                        c.redraw()
+                        c.view?.predictChanged()
+                        c.note(predict && live.reveal ? "Your teacher revealed the lights."
+                               : predict ? "Your teacher asks for a prediction: click each covered light to guess, then Send My Guess in the Classroom window."
                                        : "Live: your teacher's circuit. Changes here aren't kept; Keep a Copy is in the Classroom window.")
                     }
                 }
@@ -832,14 +855,16 @@ enum LiveWindow {
         }
     }
 
-    /// The guesses made with Simulation View's Predict in the live window, by light name.
-    static func guesses(_ cid: String) -> [String: Int] {
+    /// The guesses made with Simulation View's Predict in the live window, by light name
+    /// (the name as `asked` spells it, when it's one of them).
+    static func guesses(_ cid: String, asked: [String] = []) -> [String: Int] {
+        let spelled = Dictionary(asked.map { (ClassroomCenter.lightKey($0), $0) }, uniquingKeysWith: { a, _ in a })
         guard let url = files[cid], let doc = document(url) else { return [:] }
         var out: [String: Int] = [:]
         for c in controllers(doc) {
             guard let core = c.document else { continue }
             for l in ClassroomCenter.namedLights(core, page: c.page) {
-                if let g = c.predict.guesses[l.gate] { out[l.name] = g }
+                if let g = c.predict.guesses[l.gate] { out[spelled[ClassroomCenter.lightKey(l.name)] ?? l.name] = g }
             }
         }
         return out

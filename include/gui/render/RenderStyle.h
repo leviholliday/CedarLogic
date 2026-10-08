@@ -24,6 +24,7 @@
 #define CL_RENDER_RENDERSTYLE_H
 
 #include <string>
+#include <vector>
 
 #include "Scene.h"
 
@@ -77,6 +78,15 @@ struct RenderStyle {
 	// "off" colour, since a wire carries a light's answer all the way to it.
 	bool projector;
 	bool coverOutputs;
+	// With coverOutputs: only these gates' lights are covered (a live class's
+	// question names its lights); null covers every light. Not owned.
+	const std::vector<unsigned long>* coverOnly = nullptr;
+	bool covers(unsigned long gateID) const {
+		if (!simView || !coverOutputs) return false;
+		if (!coverOnly) return true;
+		for (unsigned long g : *coverOnly) if (g == gateID) return true;
+		return false;
+	}
 	TitleBlock titleBlock;
 
 	RenderStyle()

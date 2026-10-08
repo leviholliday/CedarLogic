@@ -269,6 +269,23 @@ void cl_simview_draw_page(CLDocument* doc, int page, CGContextRef ctx, double ba
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, kInkLookDark);
 }
 
+void cl_simview_draw_page_covering(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+                                   double originX, double originY, double unitsPerPoint, const CLSimViewStyle* o,
+                                   const long* gates, int count) {
+	if (o == nullptr) return;
+	cl::render::RenderStyle s = cl::render::RenderStyle::screen(true);
+	s.simView = true;
+	s.showSelection = false;
+	s.accentIndex = o->accent;
+	s.wireScale = (float)o->wireScale;
+	s.projector = o->projector;
+	s.coverOutputs = o->predict;
+	std::vector<unsigned long> only;
+	for (int i = 0; gates && i < count; i++) only.push_back((unsigned long)gates[i]);
+	s.coverOnly = &only;
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, kInkLookDark);
+}
+
 }  // extern "C"
 
 namespace {

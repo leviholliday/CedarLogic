@@ -102,7 +102,7 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   with a key, check, hand in twice, the hand-in's check result, Download All,
   live, predict, answers, reveal, end, close joining, new code, move code,
   leave, delete. PASS/FAIL lines, e2e-*.png, exit 1 on a failure. Classroom
-  is off unless `CL_CLASSROOM=1` or the `ClassroomEnabled` default is YES
+  is on unless `CL_CLASSROOM=0` or the `ClassroomEnabled` default is NO
 - `classroom-selftest.sh`, `classroom-check.sh`,
   `classroom-vectors-check.sh`, `classroom-interop.sh` -- the Classroom
   client core of docs/CLASSROOM.md (each script's header says how to run
@@ -113,9 +113,8 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   website's checkout, `CEDARLOGIC_SITE`) and runs all four against it --
   the core's sockets through node (`classroom-ws-relay.mjs`), held polls
   alone, the app's own URLSession sockets, and the web core together.
-  The app talks to the placeholder `https://cedarlogic-classroom.invalid`
-  until the deploy sets the real address (`kService` in
-  `CedarCore/ClassroomProtocol.cpp`);
+  The app talks to `https://cedarlogic-classroom.leviholliday7.workers.dev`
+  (`kService` in `CedarCore/ClassroomProtocol.cpp`);
   `CL_CLASSROOM_SERVICE=<origin>` (or `CL_CLASSROOM_URL` and `CL_LIVE_URL`)
   points it elsewhere
 - `formula-check.sh` -- Build from Formula and the truth table's formulas:

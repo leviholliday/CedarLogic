@@ -42,7 +42,15 @@ extension CircuitCanvasNSView {
             let covered = controller?.predictCovers ?? false
             var st = CLSimViewStyle(accent: Int32(prefs.accent), wireScale: prefs.wireScale,
                                     projector: prefs.projector, predict: covered, ink: Int32(CL_INK_FOLLOW))
-            cl_simview_draw_page(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, &st)
+            if covered, let only = controller?.predict.only {
+                let gates = only.map { Int($0) }
+                gates.withUnsafeBufferPointer { b in
+                    cl_simview_draw_page_covering(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, &st,
+                                                  b.baseAddress, Int32(b.count))
+                }
+            } else {
+                cl_simview_draw_page(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, &st)
+            }
             if !covered {
                 cl_simview_draw_flow(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp,
                                      controller?.flowPhase ?? 0,

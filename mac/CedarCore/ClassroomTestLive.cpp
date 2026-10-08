@@ -786,9 +786,9 @@ void liveTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report& r) 
 		Config local;
 		local.serverBase = "http://localhost:8788/api/classroom/v1";
 		Client near(local, cr, curve, ClientHooks());
-		line(d.serverBase == "https://cedarlogic-classroom.invalid/api/classroom/v1" && d.liveBase == "https://cedarlogic-classroom.invalid/api/live/v1" &&
+		line(d.serverBase == "https://cedarlogic-classroom.leviholliday7.workers.dev/api/classroom/v1" && d.liveBase == "https://cedarlogic-classroom.leviholliday7.workers.dev/api/live/v1" &&
 		         near.socketUrl(cid) == "ws://localhost:8788/api/classroom/v1/classes/" + cid + "/socket",
-		     "live: the service's placeholder; ws:// for a local http:// server");
+		     "live: the service's address; ws:// for a local http:// server");
 		line(!moved.ok && moved.message == "CedarLogic Classroom has moved. Update CedarLogic.", "live: 410 moved: \"Update CedarLogic.\"", moved.message);
 	}
 }

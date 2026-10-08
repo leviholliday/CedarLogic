@@ -626,7 +626,7 @@ struct SimulationCommands: Commands {
             Button(canvas?.predict.on == true ? "Stop Predicting" : "Predict, Then Reveal") { canvas?.togglePredict() }
                 .disabled(canvas?.simView != true || (canvas?.predict.on != true && canvas?.predictLights.isEmpty != false))
             Button(canvas?.predict.revealed == true ? "Cover the Lights Again" : "Reveal") { canvas?.revealOrCoverAgain() }
-                .disabled(canvas?.simView != true || canvas?.predict.on != true)
+                .disabled(canvas?.simView != true || canvas?.predict.on != true || canvas?.predict.locked == true)
             Divider()
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .help("T: every combination of the page's switches (or the selected ones) and what the lights show")
