@@ -84,7 +84,11 @@ RouteResult TrunkRouter::route(const RouteInput &in) const {
 		return out;
 	}
 
-	if (oneVertical != twoVertical) {
+	// The L-bend joins exactly two pins. With more (a third pin added, then
+	// the wire straightened) it used to route pins 0 and 1 only: the rest were
+	// left on no segment, still connected in memory but dropped by the next
+	// save. Those take case A's trunk, which reaches every pin.
+	if (oneVertical != twoVertical && in.pins.size() == 2) {
 		// Case C: one vertical, one horizontal -> an L-bend (ids 0 and 1).
 		const int verticalConn = oneVertical ? 0 : 1;
 		const int horizontalConn = oneVertical ? 1 : 0;

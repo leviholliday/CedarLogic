@@ -634,7 +634,7 @@ void guiWire::calcShape() {
 			miny = (std::min)(miny, p.y); maxy = (std::max)(maxy, p.y);
 		}
 		const bool v0 = in.pins[0].verticalHotspot, v1 = in.pins[1].verticalHotspot;
-		hasTrunk = (v0 == v1);
+		hasTrunk = (v0 == v1) || in.pins.size() > 2;   // mixed with 3+ pins: a vertical trunk (TrunkRouter case A)
 		const bool horizontalTrunk = v0 && v1 && miny != maxy;
 		lastTrunk = routed.trunkPos;
 		trunkLo = horizontalTrunk ? miny : minx;
