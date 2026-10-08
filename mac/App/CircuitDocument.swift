@@ -17,6 +17,8 @@ final class CoreDocument: ObservableObject {
     var mirroredUndo = 0
     /// The page count the window last showed (see CanvasController).
     var shownPageCount = 1
+    /// Which pages connect, as the tabs last showed it (cl_pages_link_signature).
+    var shownLinks: UInt64 = 0
     /// Where each page was last looked at (centre, units per point), by page id.
     var cameras: [UInt64: (CGPoint, CGFloat)] = [:]
     /// For a new circuit made from a template (or a duplicate): its name

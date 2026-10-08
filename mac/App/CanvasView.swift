@@ -1170,6 +1170,46 @@ final class CanvasController: ObservableObject {
         markEdited()
         return i
     }
+    // MARK: Page links (docs/PAGE-LINKS.md)
+    // Which pages' TO/FROM links connect by name. Each change is one undo step.
+
+    var canConnectAllPages: Bool {
+        guard let document, document.pageCount > 1 else { return false }
+        return !cl_pages_all_linked(document.handle)
+    }
+    var canDisconnectAllPages: Bool {
+        guard let document, document.pageCount > 1 else { return false }
+        return !cl_pages_none_linked(document.handle)
+    }
+    func connectAllPages() {
+        guard let document, cl_pages_connect_all(document.handle) else { return }
+        linksChanged("Every page's links connect now.")
+    }
+    func disconnectAllPages() {
+        guard let document, cl_pages_disconnect_all(document.handle) else { return }
+        linksChanged("Each page's links stay on that page now.")
+    }
+    func pagesLinked(_ a: Int, _ b: Int) -> Bool {
+        guard let document else { return false }
+        return cl_pages_linked(document.handle, Int32(a), Int32(b))
+    }
+    /// Connect page `p` to page `other` (or take it off): `p` keeps the
+    /// pages it reaches now, give or take that one.
+    func setPagesLinked(_ p: Int, _ other: Int, _ on: Bool) {
+        guard let document, p != other else { return }
+        let n = document.pageCount
+        var with = (0..<n).map { $0 != p && cl_pages_linked(document.handle, Int32(p), Int32($0)) }
+        guard other >= 0 && other < n else { return }
+        with[other] = on
+        let changed = with.withUnsafeBufferPointer { cl_page_connect_to(document.handle, Int32(p), $0.baseAddress, Int32(n)) }
+        if changed { linksChanged(nil) }
+    }
+    private func linksChanged(_ message: String?) {
+        document?.objectWillChange.send()
+        edited()
+        if let message { note(message) }
+    }
+
     func movePage(from: Int, to: Int) {
         guard let document else { return }
         // A tab without a name of its own is called by its place ("Page 2");
@@ -1261,6 +1301,9 @@ final class CanvasController: ObservableObject {
             let inkPage = Int(cl_ink_history_page(document.handle))
             if inkPage >= 0 && inkPage != page && inkPage < document.pageCount { pageRequest = inkPage }
             if inkPage >= 0 { inkVersion += 1 }
+            // Tabs show which pages connect: redraw them when that changed.
+            let links = cl_pages_link_signature(document.handle)
+            if links != document.shownLinks { document.shownLinks = links; document.objectWillChange.send() }
             let show = Int(cl_document_page_to_show(document.handle))
             if document.pageCount != lastPageCount {
                 lastPageCount = document.pageCount

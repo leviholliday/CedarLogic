@@ -529,6 +529,27 @@ void cl_document_move_page(CLDocument *doc, int from, int to);
 // A page's identity, which survives other pages opening, closing and moving
 // (0 for none), and the page with an identity now (-1 when it's gone).
 unsigned long long cl_document_page_id(const CLDocument *doc, int page);
+// Page link groups (docs/PAGE-LINKS.md): TO/FROM links connect by name only
+// between pages in the same group. Every change is one undo step; each
+// returns false (and adds no step) when nothing would change.
+bool cl_pages_linked(const CLDocument *doc, int a, int b);
+// The shared dot a tab shows: its group's number among the groups of more
+// than one page (0, 1, ... by first page), or -1 for none (a page on its own,
+// or every page connected).
+int cl_page_link_mark(const CLDocument *doc, int page);
+bool cl_pages_all_linked(const CLDocument *doc);
+bool cl_pages_none_linked(const CLDocument *doc);   // 2+ pages, none connected
+bool cl_pages_connect_all(CLDocument *doc);
+bool cl_pages_disconnect_all(CLDocument *doc);
+// `page` and the pages `with` marks (count = the page count) become one group;
+// the rest keep theirs.
+bool cl_page_connect_to(CLDocument *doc, int page, const bool *with, int count);
+// Changes whenever which pages connect does (for redrawing tabs).
+unsigned long long cl_pages_link_signature(const CLDocument *doc);
+// Settings: whether a page added later joins the shared group (the default)
+// or starts on its own.
+void cl_set_new_pages_share_links(bool share);
+bool cl_new_pages_share_links(void);
 int cl_document_page_index(const CLDocument *doc, unsigned long long id);
 
 // A paste, duplicate or new gate that follows the pointer until a click

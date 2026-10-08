@@ -14,6 +14,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <string>
 
 class Circuit;
 class GUICircuit;
@@ -44,6 +45,15 @@ public:
 
 	// Called after every step (the oscilloscope records here).
 	std::function<void()> afterStep;
+
+	// Page link groups (docs/PAGE-LINKS.md): the link group of the page a
+	// gate is on (0 when it isn't on one yet). A TO/FROM's name goes to the
+	// engine as linkKey(group, name), so labels of the same name connect only
+	// within a group. The engine itself knows nothing of pages.
+	std::function<int(unsigned long gateId)> linkGroupOf;
+	static std::string linkKey(int group, const std::string& name);
+	// Hand every TO/FROM's name to the engine again, after link groups changed.
+	void relinkJunctions();
 
 private:
 	// Push a step's results into the model; returns how many wires changed.

@@ -110,11 +110,15 @@ struct Page {
 	int index = 0;
 	// What the user named this tab; empty means it is still "Page N".
 	std::string name;
+	// Which pages' TO/FROM links connect (docs/PAGE-LINKS.md): pages with the
+	// same number connect by name, others never do. 0 is the shared group;
+	// a file without (linkgroup ...) has every page in it.
+	int linkGroup = 0;
 	std::vector<GateInstance> gates;
 	std::vector<WireInstance> wires;
 	PageInk ink;
 	bool operator==(const Page &o) const {
-		return index == o.index && name == o.name && gates == o.gates && wires == o.wires && ink == o.ink;
+		return index == o.index && name == o.name && linkGroup == o.linkGroup && gates == o.gates && wires == o.wires && ink == o.ink;
 	}
 };
 

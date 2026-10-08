@@ -1874,6 +1874,14 @@ struct CLTabStrip: View {
                         .lineLimit(1).truncationMode(.tail)
                         .padding(.leading, 9)
                 }
+                // Pages whose TO/FROM links connect share a dot's colour
+                // (docs/PAGE-LINKS.md); none while every page connects.
+                let mark = Int(cl_page_link_mark(document.handle, Int32(p)))
+                if mark >= 0 {
+                    Circle().fill(Self.linkColors[mark % Self.linkColors.count])
+                        .frame(width: 6, height: 6).padding(.leading, 6)
+                        .help("Its TO/FROM links connect with the other tabs with this colour")
+                }
                 Spacer(minLength: 26)
             }
             if document.pageCount > 1 && (active || hot) && renaming != id {
@@ -1913,6 +1921,26 @@ struct CLTabStrip: View {
                     if let i = document.pageIndex(of: id) { split.splitWith(i, onRight: true, document, leftPage: $page) }
                 }
             }
+            if document.pageCount > 1 {
+                Divider()
+                // A checklist: the pages this one's TO/FROM links reach.
+                Menu("Connect to") {
+                    ForEach(0..<document.pageCount, id: \.self) { j in
+                        if j != p {
+                            Toggle(document.pageName(j), isOn: Binding(
+                                get: { controller.pagesLinked(p, j) },
+                                set: { on in
+                                    if let i = document.pageIndex(of: id) { controller.setPagesLinked(i, j, on) }
+                                }))
+                        }
+                    }
+                    Divider()
+                    Button("Connect All Pages") { controller.connectAllPages() }
+                        .disabled(!controller.canConnectAllPages)
+                    Button("Disconnect All Pages") { controller.disconnectAllPages() }
+                        .disabled(!controller.canDisconnectAllPages)
+                }
+            }
             Divider()
             Button("Close Tab") {
                 if let i = document.pageIndex(of: id) { controller.closePage(i) }
@@ -1920,6 +1948,9 @@ struct CLTabStrip: View {
             .disabled(document.pageCount < 2)
         }
     }
+
+    /// The link groups' dot colours, in order (cl_page_link_mark).
+    static let linkColors: [Color] = [.blue, .orange, .purple, .pink, .teal, .yellow, .brown, .indigo, .mint, .red]
 
     private func select(_ p: Int) {
         if pane == 0 {
