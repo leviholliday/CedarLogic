@@ -67,6 +67,58 @@ void gateFootprint(guiGate* g, const klsBBox& body, float& l, float& b, float& r
 	}
 }
 
+// Whether a wire's segment map really is the wire: every pin it's connected to
+// lies on a segment that carries that connection, and the segments are one
+// connected piece. Saving writes connections per segment, so a shape that
+// fails this loses (or misdraws) a connection on the next reload.
+bool shapeIsSound(GUICanvas* page, guiWire* w, const std::map<long, wireSegment>& segs) {
+	if (segs.empty()) return false;
+	const float e = 0.02f;
+	auto on = [&](const wireSegment& s, float x, float y) {
+		const float l = std::min(s.begin.x, s.end.x), r = std::max(s.begin.x, s.end.x);
+		const float b = std::min(s.begin.y, s.end.y), t = std::max(s.begin.y, s.end.y);
+		return x > l - e && x < r + e && y > b - e && y < t + e;
+	};
+	for (const wireConnection& c : w->getConnections()) {
+		guiGate* g = pageGate(page, c.gid);
+		if (g == nullptr) return false;
+		float x = 0, y = 0;
+		g->getHotspotCoords(c.connection, x, y);
+		bool carried = false;
+		for (const auto& sg : segs)
+			for (const wireConnection& sc : sg.second.connections)
+				if (sc.gid == c.gid && sc.connection == c.connection && on(sg.second, x, y)) carried = true;
+		if (!carried) return false;
+	}
+	// One piece: segments joined where an end of one lies on the other, or
+	// where they cross at a junction the wire records (drawn with a dot).
+	std::vector<const wireSegment*> v;
+	std::map<long, int> index;
+	for (const auto& sg : segs) { index[sg.first] = (int)v.size(); v.push_back(&sg.second); }
+	std::vector<int> parent(v.size());
+	for (size_t i = 0; i < v.size(); i++) parent[i] = (int)i;
+	auto find = [&](int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; };
+	for (size_t i = 0; i < v.size(); i++) {
+		for (size_t j = i + 1; j < v.size(); j++) {
+			const wireSegment &a = *v[i], &b = *v[j];
+			if (on(a, b.begin.x, b.begin.y) || on(a, b.end.x, b.end.y) || on(b, a.begin.x, a.begin.y) || on(b, a.end.x, a.end.y))
+				parent[find((int)i)] = find((int)j);
+		}
+		const wireSegment& a = *v[i];
+		for (const auto& x : a.intersects)
+			for (long other : x.second) {
+				auto o = index.find(other);
+				if (o == index.end()) continue;
+				const wireSegment& b = *v[o->second];
+				// The junction must really be on both runs.
+				const float px = a.isVertical() ? a.begin.x : x.first, py = a.isVertical() ? x.first : a.begin.y;
+				if (on(a, px, py) && on(b, px, py)) parent[find((int)i)] = find(o->second);
+			}
+	}
+	for (size_t i = 1; i < v.size(); i++) if (find((int)i) != find(0)) return false;
+	return true;
+}
+
 }  // namespace
 
 klsCommand* gateWireConnection(GUICircuit* gCircuit, GUICanvas* page, IDType gateId,
@@ -249,14 +301,25 @@ std::vector<WireReshape> rerouteWires(GUICanvas* page, const std::vector<unsigne
 		bool gatesMoved = false;
 		if (movedGates != nullptr)
 			for (const wireConnection& c : w->getConnections()) if (movedGates->count(c.gid)) gatesMoved = true;
-		if (!gatesMoved) {
+		// A shape that misses a pin or falls apart is never kept: try the
+		// simple route, and failing that the old shape if that one was sound.
+		const bool beforeSound = shapeIsSound(page, w, before);
+		if (!shapeIsSound(page, w, w->getSegmentMap())) {
+			if (routed) straightenWireAvoiding(page, w);
+			if (!shapeIsSound(page, w, w->getSegmentMap()) && beforeSound) w->setSegmentMap(before);
+		}
+		if (!gatesMoved && beforeSound) {
 			auto length = [](const std::map<long, wireSegment>& m) {
 				float len = 0.0f;
 				for (const auto& seg : m) len += std::fabs(seg.second.end.x - seg.second.begin.x) + std::fabs(seg.second.end.y - seg.second.begin.y);
 				return len;
 			};
 			const float was = length(before), now = length(w->getSegmentMap());
-			if (now > was * 1.5f + 3.0f) w->setSegmentMap(before);
+			if (now > was * 1.5f + 3.0f) {
+				const auto fresh = w->getSegmentMap();
+				w->setSegmentMap(before);
+				if (!shapeIsSound(page, w, w->getSegmentMap())) w->setSegmentMap(fresh);
+			}
 		}
 		WireReshape r;
 		r.id = wireIds[k];

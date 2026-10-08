@@ -1,6 +1,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 #include "route/WireRoute.h"
+#include <algorithm>
+#include <vector>
 
 using namespace cl::route;
 
@@ -74,6 +76,30 @@ TEST_CASE("mixed-orientation pins route to an L-bend") {
 
 // Case B: two vertical-facing pins -> a horizontal trunk (id 2) with vertical
 // branches (ids 0,1), the mirror of case A.
+// Case C joins exactly two pins. A third pin (a wire with three ends whose
+// first two face different ways) once got no segment at all: in memory the
+// wire still had it, but the next save dropped the connection.
+TEST_CASE("mixed-orientation pins with a third pin reach every pin") {
+	RouteInput in;
+	in.pins = { {0, 3, true}, {2, 0, false}, {-4, -2, false} };
+	in.snapTrunk = true; in.nextId = 1;
+
+	RouteResult r = TrunkRouter().route(in);
+
+	std::vector<int> seen(in.pins.size(), 0);
+	for (const Segment &s : r.segments) {
+		for (int p : s.pins) {
+			REQUIRE(p >= 0); REQUIRE(p < (int)in.pins.size());
+			seen[p]++;
+			// The segment carrying a pin really reaches it.
+			const Pin &pin = in.pins[p];
+			CHECK(pin.x >= std::min(s.bx, s.ex)); CHECK(pin.x <= std::max(s.bx, s.ex));
+			CHECK(pin.y >= std::min(s.by, s.ey)); CHECK(pin.y <= std::max(s.by, s.ey));
+		}
+	}
+	for (int n : seen) CHECK(n == 1);
+}
+
 TEST_CASE("both-vertical pins route to a horizontal trunk") {
 	RouteInput in;
 	in.pins = { {-2, 3, true}, {2, -3, true} };

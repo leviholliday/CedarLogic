@@ -124,6 +124,12 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   (`kService` in `CedarCore/ClassroomProtocol.cpp`);
   `CL_CLASSROOM_SERVICE=<origin>` (or `CL_CLASSROOM_URL` and `CL_LIVE_URL`)
   points it elsewhere
+- `straighten_lab selftest <gatedefs> format/tests/fixtures` -- Straighten
+  and Tidy Up keep every connection (live and after a save and reload), every
+  pin on its wire, each net one connected tree with its junctions dotted: one
+  output into two inputs of a gate from all sides, a mixed three-pin net, and
+  the overnight lab's failed seeds. `straighten-lab.sh` is the overnight
+  version (random circuits up to 340 parts; results and pictures in a folder)
 - `formula-check.sh` -- Build from Formula and the truth table's formulas:
   the simplifier on known answers and 400 random tables, the formula
   reader, and ~200 circuits built in the engine whose truth tables must
