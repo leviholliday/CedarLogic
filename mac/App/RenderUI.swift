@@ -232,6 +232,19 @@ enum RenderUI {
                 try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("templates-\(t).png"))
             }
             save("buildformula-\(t)", BuildFormulaView(text: "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", canvas: canvas), width: 560, height: 560)
+            do {   // Export as Image, matching the window: Studio in light, Graphite in dark.
+                let looks = LookStore.shared.settings
+                LookStore.shared.settings.preset = dark ? .graphite : .studio
+                let host = NSHostingView(rootView: ExportImageView(document: doc, page: 0, fileName: "Lab 5"))
+                host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                host.frame = NSRect(origin: .zero, size: host.fittingSize)
+                host.layoutSubtreeIfNeeded()
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("export-\(t).png"))
+                }
+                LookStore.shared.settings = looks
+            }
         }
         // The memory editor, on an 8x8 RAM with a few words in it (drawn
         // below, through a real view: its list is a scroll view).
