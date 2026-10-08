@@ -70,6 +70,23 @@ void serverTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report& r
 	S->pulse(cid);
 	r.line(g.ok && S->live(cid).on, "server: live", g.message);
 	T->endLive(cid);
+	// 3.17 class passes (a server without them, the old mock, answers 404 not_found: skipped).
+	const Result pc = S->makeClassPass(cid);
+	if (!(pc.status == 404 && pc.error == "not_found")) {
+		std::map<std::string, std::string> fG;
+		auto G = client(fG);
+		const Result pv = G->previewClassPass(pc.value);
+		const Result use = G->useClassPass(pc.value);
+		const Result all = T->listPasses(cid);
+		r.line(pc.ok && pv.ok && pv.value == "Self-test class\nSam Lee" && use.ok && G->membershipOf(cid) &&
+		           all.ok && all.value.find("\tSam Lee\t") != std::string::npos,
+		       "server: a class pass brings the student back on a fresh device; the teacher sees it", pc.message + use.message + all.message);
+		const Result cancel = T->cancelPass(cid, all.value.substr(0, 64));
+		std::map<std::string, std::string> fG2;
+		auto G2 = client(fG2);
+		const Result after = G2->previewClassPass(pc.value);
+		r.line(cancel.ok && !after.ok && after.error == "pass_gone", "server: the teacher cancels the pass; it stops working", after.message);
+	}
 	const Result d = T->deleteClass(cid);
 	const Result after = S->refreshMember(cid);
 	r.line(d.ok && !after.ok && after.status == 410, "server: delete; the student gets 410", d.message);

@@ -156,6 +156,7 @@ struct ClassroomView: View {
                 Menu("More") {
                     Button("I Have a Teacher Key…") { center.sheet = .addTeacherKey(prefill: "") }
                     Button("I Have a Move Code…") { center.sheet = .moveIn(prefill: "") }
+                    Button("I Have a Class Pass…") { center.sheet = .passIn(prefill: "") }
                 }
                 .menuStyle(.borderlessButton).foregroundStyle(look.dim)
             }
@@ -563,6 +564,7 @@ struct TeacherSettings: View {
             }
             HStack {
                 Button("Show Teacher Key") { center.sheet = .teacherKey(classId: cls.id) }
+                Button("Class Passes…") { center.sheet = .passes(classId: cls.id) }
                 Button("Remove from This Device…") {
                     if classroomAsk("Remove \(cls.name) from this computer?",
                                     "The class stays on the website and on your other devices. To open it here again you'll need your teacher key.",
@@ -617,6 +619,7 @@ struct StudentPage: View {
                             if ok { center.sheet = .moveCode(classId: cls.id, code: code) } else { message = m }
                         }
                     }
+                    Button("Class Pass…") { center.sheet = .passes(classId: cls.id) }
                     Button("Remove from This Device…") {
                         if classroomAsk("Remove \(cls.name) from this computer?",
                                         "You stay in the class. To use it here again, make a move code on another device that's in the class, or join again (your teacher will then see you twice).",
@@ -789,6 +792,9 @@ struct ClassroomSheetView: View {
             case .join(let p): CodeEntrySheet(center: center, kind: 1, prefill: p, look: look)
             case .moveIn(let p): CodeEntrySheet(center: center, kind: 2, prefill: p, look: look)
             case .moveCode(_, let code): MoveCodeSheet(center: center, code: code, look: look)
+            case .passIn(let p): CodeEntrySheet(center: center, kind: 3, prefill: p, look: look)
+            case .passCode(let cid, let code): ClassPassSheet(center: center, classId: cid, code: code, look: look)
+            case .passes(let cid): PassesSheet(center: center, classId: cid, look: look)
             case .post(let cid, let aid): PostAssignmentSheet(center: center, classId: cid, editing: aid, look: look)
             case .handIns(let cid, let aid): HandInsSheet(center: center, classId: cid, aid: aid, look: look)
             case .addItem(let cid, let share, let files): AddItemSheet(center: center, classId: cid, share: share, files: files, look: look)
@@ -906,8 +912,8 @@ struct CodeEntrySheet: View {
         _found = State(initialValue: previewFound)
     }
 
-    private var title: String { ["Add a class with your teacher key", "Join a class", "Move to this device"][kind] }
-    private var field: String { ["Type or paste the key, or a link", "Code from the board", "Move code from your other device"][kind] }
+    private var title: String { ["Add a class with your teacher key", "Join a class", "Move to this device", "Use your class pass"][kind] }
+    private var field: String { ["Type or paste the key, or a link", "Code from the board", "Move code from your other device", "The code on your class pass"][kind] }
     private var parsed: (code: String?, why: String?) { ClassroomCenter.parse(text, kind: kind) }
 
     var body: some View {
@@ -922,6 +928,7 @@ struct CodeEntrySheet: View {
                 if let why = parsed.why { Text(why).font(.system(size: 12)).foregroundStyle(look.bad).fixedSize(horizontal: false, vertical: true) }
                 if kind == 1 {
                     Button("I have a move code from my other device…") { center.sheet = .moveIn(prefill: "") }.buttonStyle(.link)
+                    Button("I have a class pass…") { center.sheet = .passIn(prefill: "") }.buttonStyle(.link)
                 }
             }
             if let working { HStack { ProgressView().controlSize(.small); Text(working).font(.system(size: 12)) } }
@@ -932,7 +939,7 @@ struct CodeEntrySheet: View {
                 if found == nil {
                     Button("Continue") { check() }.keyboardShortcut(.defaultAction).disabled(parsed.code == nil || working != nil)
                 } else if !closed {
-                    Button(kind == 0 ? "Add" : "Join") { finish() }.keyboardShortcut(.defaultAction)
+                    Button(kind == 0 ? "Add" : kind == 3 ? "Use Pass" : "Join") { finish() }.keyboardShortcut(.defaultAction)
                         .disabled(working != nil || (kind == 1 && name.trimmingCharacters(in: .whitespaces).isEmpty))
                 }
             }
@@ -955,6 +962,10 @@ struct CodeEntrySheet: View {
                 TextField("Sam Lee", text: $name).textFieldStyle(.roundedBorder)
                 Text(ClassroomText.joinPrivacy).font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
             }
+        case 3:
+            SheetTitle(text: "Come back to “\(cls)” as \(foundStudent)?", look: look)
+            Text("You'll hand in as the same student here as on your other devices. Your pass keeps working; keep it somewhere safe.")
+                .font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
         default:
             SheetTitle(text: "Join “\(cls)” as \(foundStudent) on this device?", look: look)
             Text("This device hands in as you too.").font(.system(size: 12)).foregroundStyle(look.dim)
@@ -970,12 +981,13 @@ struct CodeEntrySheet: View {
             guard ok else { message = m; return }
             let lines = r.components(separatedBy: "\n")
             if kind == 1 { closed = lines.count > 1 && lines[1] == "0" }
-            if kind == 2 { foundStudent = lines.count > 1 ? lines[1] : "" }
+            if kind >= 2 { foundStudent = lines.count > 1 ? lines[1] : "" }
             found = lines.first ?? ""
         }
         switch kind {
         case 0: center.previewTeacherKey(code, done: done)
         case 1: center.previewJoinCode(code, done: done)
+        case 3: center.previewClassPass(code, done: done)
         default: center.previewMoveCode(code, done: done)
         }
     }
@@ -992,6 +1004,7 @@ struct CodeEntrySheet: View {
         switch kind {
         case 0: center.addTeacherKey(code, done: done)
         case 1: center.join(code, name: name.trimmingCharacters(in: .whitespaces), done: done)
+        case 3: center.useClassPass(code, done: done)
         default: center.importMoveCode(code, done: done)
         }
     }
@@ -1022,6 +1035,122 @@ struct MoveCodeSheet: View {
             }
         }
         .padding(22).frame(width: 560)
+    }
+}
+
+/// A new class pass (3.17): shown once, with its QR code; Print Pass and Copy Code.
+struct ClassPassSheet: View {
+    @ObservedObject var center: ClassroomCenter
+    let classId: String
+    let code: String
+    let look: ClassroomLook
+    private var cls: CRClass? { center.classes.first { $0.id == classId } }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SheetTitle(text: "Class pass for “\(cls?.name ?? "")”", look: look)
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(ClassroomCenter.grouped(code)).font(.system(size: 20, weight: .bold, design: .monospaced)).foregroundStyle(look.ink)
+                        .textSelection(.enabled)
+                    Text(ClassroomText.passUse + " It doesn't expire.").font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
+                    Text(ClassroomText.passPrivate + " This is the only time the code is shown.").font(.system(size: 12)).foregroundStyle(look.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                SyncQRCode(text: ClassroomCenter.webLink(kind: 3, code)).frame(width: 130, height: 130)
+            }
+            HStack {
+                Button("Print Pass…") {
+                    RecoverySheet.printPass(className: cls?.name ?? "", student: cls?.studentName ?? "", code: code, link: ClassroomCenter.webLink(kind: 3, code))
+                }
+                Button("Copy Code") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(ClassroomCenter.grouped(code), forType: .string)
+                }
+                Spacer()
+                Button("Done") { center.sheet = .passes(classId: classId) }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22).frame(width: 580)
+    }
+}
+
+/// Class passes (3.17): a student's own (make one, cancel any), or the teacher's list of every pass (cancel any).
+struct PassesSheet: View {
+    @ObservedObject var center: ClassroomCenter
+    let classId: String
+    let look: ClassroomLook
+    @State private var list: [CRPass] = []
+    @State private var loading = true
+    @State private var working = false
+    @State private var message = ""
+    private var cls: CRClass? { center.classes.first { $0.id == classId } }
+    private var teaching: Bool { cls?.teaching ?? false }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SheetTitle(text: teaching ? "Class passes" : "Class pass", look: look)
+            Text(teaching ? ClassroomText.passTeacher : ClassroomText.passAbout).font(.system(size: 12)).foregroundStyle(look.dim)
+                .fixedSize(horizontal: false, vertical: true)
+            if loading { ProgressView().controlSize(.small) }
+            else if list.isEmpty { Text(teaching ? "No student has made a pass." : "You have no class passes.").font(.system(size: 13)).foregroundStyle(look.dim) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(list.enumerated()), id: \.element.id) { i, p in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(teaching ? p.name : "Pass \(i + 1), made \(ClassroomText.longDay(Date(timeIntervalSince1970: Double(p.createdAt) / 1000)))")
+                                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(look.ink)
+                                Text(detail(p)).font(.system(size: 11)).foregroundStyle(look.dim)
+                            }
+                            Spacer()
+                            Button("Cancel Pass") { cancel(p) }.disabled(working)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+            if !message.isEmpty { Text(message).font(.system(size: 12)).foregroundStyle(look.bad).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                if !teaching {
+                    Button("Make a Class Pass…") {
+                        working = true; message = ""
+                        center.makeClassPass(classId) { ok, m, code in
+                            working = false
+                            if ok { center.sheet = .passCode(classId: classId, code: code) } else { message = m }
+                        }
+                    }.disabled(working)
+                }
+                Spacer()
+                Button("Done") { center.sheet = nil }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22).frame(width: 540)
+        .onAppear { reload() }
+    }
+
+    private func detail(_ p: CRPass) -> String {
+        let made = "Made \(ClassroomText.longDay(Date(timeIntervalSince1970: Double(p.createdAt) / 1000)))"
+        guard p.usedAt > 0 else { return made + " · not used yet" }
+        let used = Date(timeIntervalSince1970: Double(p.usedAt) / 1000).formatted(date: .abbreviated, time: .shortened)
+        return made + " · last used \(used), \(p.uses) time\(p.uses == 1 ? "" : "s")"
+    }
+    private func reload() {
+        center.listPasses(classId) { ok, m, l in
+            loading = false
+            if ok { list = l } else { message = m }
+        }
+    }
+    private func cancel(_ p: CRPass) {
+        if teaching {
+            guard classroomAsk("Cancel \(p.name)'s pass?",
+                               "It stops working at once. Devices that already used it stay in the class; to take the student out, remove them in Students.",
+                               "Cancel Pass", destructive: true).ok else { return }
+        }
+        working = true; message = ""
+        center.cancelPass(classId, p.id) { ok, m, _ in
+            working = false
+            if ok { reload() } else { message = m }
+        }
     }
 }
 
@@ -1507,6 +1636,30 @@ struct RecoverySheetView: View {
     }
 }
 
+struct PassPrintView: View {
+    let className: String
+    let student: String
+    let code: String
+    let link: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("CedarLogic Classroom — class pass").font(.system(size: 13, weight: .semibold)).foregroundStyle(.gray)
+            Text(className).font(.system(size: 26, weight: .bold))
+            Text(student).font(.system(size: 16, weight: .semibold))
+            Text("Printed \(ClassroomText.longDay(Date()))").font(.system(size: 12)).foregroundStyle(.gray)
+            Text(ClassroomCenter.grouped(code)).font(.system(size: 26, weight: .bold, design: .monospaced))
+            SyncQRCode(text: link).frame(width: 200, height: 200)
+            Text(ClassroomText.passUse + " It doesn't expire.").font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+            Text(ClassroomText.passPrivate).font(.system(size: 12, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .foregroundStyle(.black)
+        .padding(54)
+        .frame(width: 612, height: 792, alignment: .topLeading)
+        .background(Color.white)
+    }
+}
+
 @MainActor
 enum RecoverySheet {
     static func print(className: String, key: String, link: String) {
@@ -1517,6 +1670,17 @@ enum RecoverySheet {
         info.horizontalPagination = .fit; info.verticalPagination = .fit
         let op = NSPrintOperation(view: v, printInfo: info)
         op.jobTitle = "\(className) teacher key"
+        op.run()
+    }
+    /// A class pass on paper (3.17): the class, the student, the code and its QR code.
+    static func printPass(className: String, student: String, code: String, link: String) {
+        let v = NSHostingView(rootView: PassPrintView(className: className, student: student, code: code, link: link))
+        v.frame = NSRect(x: 0, y: 0, width: 612, height: 792)
+        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        info.topMargin = 0; info.bottomMargin = 0; info.leftMargin = 0; info.rightMargin = 0
+        info.horizontalPagination = .fit; info.verticalPagination = .fit
+        let op = NSPrintOperation(view: v, printInfo: info)
+        op.jobTitle = "\(className) class pass"
         op.run()
     }
 }

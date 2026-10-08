@@ -60,6 +60,7 @@ enum ShareLink {
             case "t=": c.sheet = .addTeacherKey(prefill: code)
             case "j=": c.sheet = .join(prefill: code)
             case "m=": c.sheet = .moveIn(prefill: code)
+            case "s=": c.sheet = .passIn(prefill: code)      // a class pass (3.17)
             default: return
             }
             AppActions.openWindow?(id: "classroom")

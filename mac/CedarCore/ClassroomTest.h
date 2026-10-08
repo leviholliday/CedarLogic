@@ -96,6 +96,8 @@ private:
 	Bytes pepper;
 	std::map<std::string, JoinEntry> joins;
 	std::map<std::string, Move> moves;
+	struct Pass { std::string classId, studentId, hash, env; int64_t createdAt = 0, usedAt = 0, uses = 0; };
+	std::map<std::string, Pass> passes;                   // 3.17, by pid = SHA-256(passId)
 	std::map<std::string, std::string> gone;              // classId -> deleted | expired
 	std::map<std::string, int> counters;
 

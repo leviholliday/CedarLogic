@@ -70,6 +70,13 @@ struct MoveKeys {
 	bool valid() const { return moveKey.size() == 32; }
 };
 MoveKeys moveKeys(Crypto&, const Bytes& secret);
+// A class pass (3.17): three independent HKDF outputs of its 16 bytes; the server keeps SHA-256 of passId (pid) and of passToken.
+struct PassKeys {
+	std::string passId, pid, passToken, tokenHash;
+	Bytes passKey;
+	bool valid() const { return passKey.size() == 32; }
+};
+PassKeys passKeys(Crypto&, const Bytes& secret);
 std::string hmacHex(Crypto&, const Bytes& key, const std::string& text);   // the server's join index and hash
 
 // ---- Envelopes (1.5) ------------------------------------------------------------------
@@ -147,6 +154,7 @@ struct MoveRec {
 	std::string classId, studentId, token, proof, classKey, pub, name, className;
 };
 std::string moveJson(const MoveRec&);
+std::string passJson(const MoveRec&);   // 3.17: the move record's fields, kind "pass"
 bool moveFrom(const json::Value&, MoveRec&);
 std::string classroomJson(const std::string& classId, const std::string& teacherKey, const std::string& name, int64_t createdAt,
                           int64_t modifiedAt, const std::string& device, const std::string& deviceId);
@@ -289,6 +297,11 @@ public:
 	Result makeMoveCode(const std::string& classId);
 	Result previewMoveCode(const std::string& text);   // value: "<class name>\n<student name>"
 	Result importMoveCode(const std::string& text);
+	Result makeClassPass(const std::string& classId);
+	Result previewClassPass(const std::string& text);   // value: "<class name>\n<student name>"
+	Result useClassPass(const std::string& text);
+	Result listPasses(const std::string& classId);
+	Result cancelPass(const std::string& classId, const std::string& pid);
 	Result leaveClass(const std::string& classId);
 	void forgetMembership(const std::string& classId);
 	Result pulse(const std::string& classId, int64_t waitSeconds = 0);   // one poll (4.8); sends pending hand-ins
@@ -388,6 +401,7 @@ private:
 	// tombstone: the membership's side record goes too (left, removed, deleted); else this device only.
 	void forgetMembershipLocal(const std::string& classId, const std::string& notice, bool tombstone = true);
 	Result gone(const std::string& classId, const Api& a, bool teaching);
+	Result openPass(const std::string& text, MoveRec& r);   // 3.17: GET /pass/{passId}, opened
 	Result fetchAssignment(const std::string& classId, const std::string& fetchKey, const Bytes& classKey,
 	                       const std::string& aid, int64_t ver, const std::string& h, bool teacher);
 	Result fetchLive(Membership& m, int64_t ver);
@@ -415,6 +429,8 @@ private:
 	ClientHooks hooks_;
 	std::map<std::string, Teaching> teaching_;
 	std::map<std::string, Membership> members_;
+	struct PassSeen { std::string text; MoveRec rec; int64_t at = 0; };
+	PassSeen passSeen_;                                            // 3.17: the pass a preview just opened
 	std::vector<std::string> removedSide_;                         // sync record ids not to add back (2.5)
 	std::map<std::string, JoinKeys> joinCache_;                    // code -> keys
 	std::map<std::string, Assignment> asgCache_;                   // "classId/aid" -> the opened assignment

@@ -18,6 +18,7 @@ using clsync::hex;
 using clsync::isHex;
 using clsync::isUuid;
 using clsync::sha256Hex;
+using clsync::sha256Hex;
 using clsync::unb64u;
 
 const char* const kWebBase = "https://cedarlogic.netlify.app/classroom/";
@@ -35,13 +36,14 @@ int alphaIndex(char c) {
 	return p ? (int)(p - kAlpha) : -1;
 }
 
-char kindLetter(CodeKind k) { return k == CodeKind::Teacher ? 't' : k == CodeKind::Join ? 'j' : 'm'; }
-const char* kindWhat(CodeKind k) { return k == CodeKind::Teacher ? "teacher key" : k == CodeKind::Join ? "join code" : "move code"; }
+char kindLetter(CodeKind k) { return k == CodeKind::Teacher ? 't' : k == CodeKind::Join ? 'j' : k == CodeKind::Pass ? 's' : 'm'; }
+const char* kindWhat(CodeKind k) { return k == CodeKind::Teacher ? "teacher key" : k == CodeKind::Join ? "join code" : k == CodeKind::Pass ? "class pass" : "move code"; }
 const char* letterWhat(char c) {
 	switch (c) {
 	case 't': return "teacher key";
 	case 'j': return "join code";
 	case 'm': return "move code";
+	case 's': return "class pass";
 	default: return "sync code";
 	}
 }
@@ -61,14 +63,14 @@ std::string codePart(const std::string& text, char& letter) {
 	letter = 0;
 	size_t at = std::string::npos;
 	for (size_t i = 0; i + 2 < text.size(); i++)
-		if (text[i] == '#' && strchr("tjmk", text[i + 1]) && text[i + 1] && text[i + 2] == '=') { at = i; break; }
+		if (text[i] == '#' && strchr("tjmks", text[i + 1]) && text[i + 1] && text[i + 2] == '=') { at = i; break; }
 	if (at == std::string::npos) {
 		std::string head = text.substr(0, 11);
 		for (char& ch : head)
 			if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32);
 		if (head == "cedarlogic:")
 			for (size_t i = 0; i + 2 < text.size(); i++)
-				if ((text[i] == '?' || text[i] == '&') && strchr("tjmk", text[i + 1]) && text[i + 1] && text[i + 2] == '=') {
+				if ((text[i] == '?' || text[i] == '&') && strchr("tjmks", text[i + 1]) && text[i + 1] && text[i + 2] == '=') {
 					at = i;
 					break;
 				}
@@ -202,6 +204,7 @@ std::string whyText(CodeKind k, const std::string& why, const std::string& text)
 	if (why == "checksum") {
 		if (k == CodeKind::Teacher) return "That key has a typo in it. Check it against your saved copy.";
 		if (k == CodeKind::Join) return "That code has a typo in it. Check it with your teacher.";
+		if (k == CodeKind::Pass) return "That pass has a typo in it. Check it against your printed copy.";
 		return "That code has a typo in it. Check it on the other device.";
 	}
 	return std::string();
@@ -280,6 +283,17 @@ MoveKeys moveKeys(Crypto& cr, const Bytes& secret) {
 	return k;
 }
 
+PassKeys passKeys(Crypto& cr, const Bytes& secret) {
+	PassKeys k;
+	if (secret.size() != 16) return k;
+	k.passId = hex(hkdf(cr, secret, "pass-id", 16));
+	k.pid = sha256Hex(cr, k.passId);
+	k.passToken = b64u(hkdf(cr, secret, "pass-token", 32));
+	k.tokenHash = sha256Hex(cr, k.passToken);
+	k.passKey = hkdf(cr, secret, "pass-key", 32);
+	return k;
+}
+
 std::string hmacHex(Crypto& cr, const Bytes& key, const std::string& text) {
 	uint8_t out[32];
 	cr.hmacSha256(key.data(), key.size(), (const uint8_t*)text.data(), text.size(), out);
@@ -289,7 +303,7 @@ std::string hmacHex(Crypto& cr, const Bytes& key, const std::string& text) {
 // ---- envelopes (1.5) ------------------------------------------------------------------------
 
 int envelopeOf(const std::string& kind) {
-	for (const char* k : { "teacher", "join", "info", "assignment", "live", "move", "classroom", "item", "membership" })
+	for (const char* k : { "teacher", "join", "info", "assignment", "live", "move", "pass", "classroom", "item", "membership" })
 		if (kind == k) return 1;
 	for (const char* k : { "name", "submission", "answer", "key" })
 		if (kind == k) return 2;
@@ -521,7 +535,7 @@ bool fields(const json::Value& p, const std::string& kind) {
 		return true;
 	}
 	if (kind == "key") return isStr(g("text")) && optStr(g("names"));
-	if (kind == "move") {
+	if (kind == "move" || kind == "pass") {
 		const json::Value* c = g("classId");
 		return isStr(c) && isHex(c->s, 32) && isUuidV(g("studentId")) && isB64(g("token"), 32) && isB64(g("proof"), 32) &&
 		       isB64(g("classKey"), 32) && isB64(g("pub"), 65) && isStr(g("name")) && isStr(g("className"));
@@ -542,7 +556,7 @@ bool fields(const json::Value& p, const std::string& kind) {
 	return false;
 }
 
-const char* const kKnown[] = { "teacher", "join", "info", "assignment", "live", "name", "submission", "answer", "key", "move", "classroom", "item", "membership" };
+const char* const kKnown[] = { "teacher", "join", "info", "assignment", "live", "name", "submission", "answer", "key", "move", "pass", "classroom", "item", "membership" };
 
 }  // namespace
 
@@ -727,6 +741,11 @@ std::string moveJson(const MoveRec& m) {
 	return "{\"v\":1,\"kind\":\"move\",\"classId\":" + q(m.classId) + ",\"studentId\":" + q(m.studentId) + ",\"token\":" + q(m.token) +
 	       ",\"proof\":" + q(m.proof) + ",\"classKey\":" + q(m.classKey) + ",\"pub\":" + q(m.pub) + ",\"name\":" + q(m.name) +
 	       ",\"className\":" + q(m.className) + "}";
+}
+
+std::string passJson(const MoveRec& m) {
+	std::string s = moveJson(m);
+	return "{\"v\":1,\"kind\":\"pass\"" + s.substr(std::string("{\"v\":1,\"kind\":\"move\"").size());
 }
 
 bool moveFrom(const json::Value& p, MoveRec& m) {

@@ -174,6 +174,11 @@ enum ClassroomText {
     static let keyOnlyMe = "Only I check: the key is encrypted for you alone; you see each hand-in's result when you open the hand-ins."
     static let moveBlurb = "On your other device: Classroom › Join a Class › I have a move code — or scan this. It works for 10 minutes. Anyone who gets this code can hand in as you, so don't share it."
     static let offline = "Can't reach the website."
+    // Class passes (3.17)
+    static let passAbout = "A class pass is a code (and a QR code) that brings you back into this class as yourself on any computer — a Chromebook in guest mode, a lab computer that's wiped every night. It doesn't expire. Print it or write it down and keep it like a password: anyone who has it can hand in as you. Your teacher can see your passes and cancel them; cancel one here if you lose it."
+    static let passUse = "To use it: CedarLogic › Classroom › I have a class pass, then type the code or scan the QR code."
+    static let passPrivate = "Keep it private, like a password: anyone who has it can hand in as you. If you lose it, cancel it in Class Pass and make a new one. Your teacher can cancel it too."
+    static let passTeacher = "Students can make a class pass to come back as themselves on a computer that forgets everything (a Chromebook in guest mode). Passes don't expire. Cancel one if it's lost or shared; removing a student cancels theirs."
 }
 
 // MARK: - The center
@@ -582,6 +587,23 @@ final class ClassroomCenter: ObservableObject {
     /// result: "<class name>\n<student name>".
     func previewMoveCode(_ text: String, done: @escaping Done) { call(done) { cl_classroom_preview_move_code($0, text, $1, $2) } }
     func importMoveCode(_ text: String, done: @escaping Done) { call(done) { cl_classroom_import_move_code($0, text, $1, $2) } }
+    // Class passes (3.17). makeClassPass: result = the code (shown once).
+    func makeClassPass(_ cid: String, done: @escaping Done) { call(done) { cl_classroom_make_class_pass($0, cid, $1, $2) } }
+    /// result: "<class name>\n<student name>".
+    func previewClassPass(_ text: String, done: @escaping Done) { call(done) { cl_classroom_preview_class_pass($0, text, $1, $2) } }
+    func useClassPass(_ text: String, done: @escaping Done) { call(done) { cl_classroom_use_class_pass($0, text, $1, $2) } }
+    /// The teacher's every pass, or a student's own.
+    func listPasses(_ cid: String, done: @escaping (Bool, String, [CRPass]) -> Void) {
+        call({ ok, m, r in
+            let list = r.split(separator: "\n").compactMap { line -> CRPass? in
+                let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+                guard f.count == 6 else { return nil }
+                return CRPass(id: f[0], studentId: f[1], name: f[2], createdAt: Int64(f[3]) ?? 0, usedAt: Int64(f[4]) ?? 0, uses: Int(f[5]) ?? 0)
+            }
+            done(ok, m, list)
+        }) { cl_classroom_list_passes($0, cid, $1, $2) }
+    }
+    func cancelPass(_ cid: String, _ pid: String, done: @escaping Done) { call(done) { cl_classroom_cancel_pass($0, cid, pid, $1, $2) } }
     func leaveClass(_ cid: String, done: @escaping Done) {
         call({ ok, m, r in
             if ok { MainActor.assumeIsolated { AssignmentCopies.unlink(classId: cid) } }
@@ -602,7 +624,7 @@ final class ClassroomCenter: ObservableObject {
 
     // MARK: Codes (no engine needed)
 
-    /// The canonical code, or the §1.2 sentence for what's wrong (nil, nil while empty). kind 0 teacher, 1 join, 2 move.
+    /// The canonical code, or the §1.2 sentence for what's wrong (nil, nil while empty). kind 0 teacher, 1 join, 2 move, 3 class pass.
     static func parse(_ text: String, kind: Int) -> (code: String?, why: String?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return (nil, nil) }
@@ -671,6 +693,9 @@ final class ClassroomCenter: ObservableObject {
 
 }
 
+/// A class pass as the website lists it (3.17); usedAt 0: never used.
+struct CRPass: Identifiable, Equatable { let id: String; let studentId: String; let name: String; let createdAt: Int64; let usedAt: Int64; let uses: Int }
+
 /// Which sheet the Classroom window shows.
 enum ClassroomSheet: Identifiable, Equatable {
     case create
@@ -679,6 +704,9 @@ enum ClassroomSheet: Identifiable, Equatable {
     case join(prefill: String)
     case moveIn(prefill: String)
     case moveCode(classId: String, code: String)
+    case passIn(prefill: String)                      // 3.17
+    case passCode(classId: String, code: String)
+    case passes(classId: String)
     case post(classId: String, editing: String?)
     case handIns(classId: String, aid: String)
     case addItem(classId: String, share: Bool, files: [URL])
@@ -690,6 +718,9 @@ enum ClassroomSheet: Identifiable, Equatable {
         case .join: "join"
         case .moveIn: "movein"
         case .moveCode(let c, _): "move-\(c)"
+        case .passIn: "passin"
+        case .passCode(let c, _): "passcode-\(c)"
+        case .passes(let c): "passes-\(c)"
         case .post(let c, let e): "post-\(c)-\(e ?? "")"
         case .handIns(let c, let a): "handins-\(c)-\(a)"
         case .addItem(let c, let share, let f): "item-\(c)-\(share)-\(f.count)"

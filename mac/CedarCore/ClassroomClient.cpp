@@ -2109,6 +2109,160 @@ Result Client::importMoveCode(const std::string& text) {
 	return Result::good(classId);
 }
 
+// ---- Class passes (3.17) ---------------------------------------------------------------------
+
+Result Client::makeClassPass(const std::string& classId) {
+	Membership* mp = membershipOf(classId);
+	if (!mp) return Result::bad("That class isn't on this device.");
+	Membership& m = *mp;
+	for (int attempt = 0; attempt < 2; attempt++) {
+		uint8_t secret[16];
+		if (!cr_.random(secret, 16)) return Result::bad(kNoRandom);
+		const std::string code = encodeCode(cr_, CodeKind::Pass, secret);
+		const PassKeys pk = passKeys(cr_, Bytes(secret, secret + 16));
+		memset(secret, 0, sizeof secret);
+		MoveRec r;
+		r.classId = classId;
+		r.studentId = m.studentId;
+		r.token = m.token;
+		r.proof = m.proof;
+		r.classKey = m.classKey;
+		r.pub = m.pub;
+		r.name = m.name;
+		r.className = m.className;
+		Bytes env;
+		std::string why;
+		if (!seal(cr_, pk.passKey, "pass", classId, pk.passId, 1, passJson(r), false, kMaxSmall, env, why)) return Result::bad(kNoRandom);
+		json::Value body = json::Value::object();
+		body.set("studentId", json::Value::string(m.studentId));
+		body.set("passId", json::Value::string(pk.passId));
+		body.set("tokenHash", json::Value::string(pk.tokenHash));
+		body.set("env", json::Value::string(b64u(env)));
+		const Api a = studentCall(m, "POST", "/classes/" + classId + "/passes", &body);
+		if (a.status == 409 && a.error == "pass_exists") continue;
+		if (a.status == 409 && a.error == "too_many_passes")
+			return Result::bad("You already have 5 class passes for this class. Cancel one to make another.", a.status, a.error);
+		if (a.status == 410) return gone(classId, a, false);
+		if (a.status == 403 && a.error == "not_a_member") return removedFromClass(classId, a.status, a.error);
+		if (a.status != 201 && a.status != 200) return fail(a, "pass");
+		return Result::good(code);
+	}
+	return Result::bad("Try again.");
+}
+
+namespace {
+const char* const kPassGone = "That class pass was cancelled, or isn't for a class on the website any more. Ask your teacher.";
+}  // namespace
+
+// GET /pass/{passId} with the pass token, opened under the pass key: the membership it carries.
+Result Client::openPass(const std::string& text, MoveRec& r) {
+	std::string code, why;
+	if (!parseCode(cr_, CodeKind::Pass, text, code, why)) return Result::bad(whyText(CodeKind::Pass, why, text), 0, why);
+	Bytes secret;
+	decodeCode(cr_, CodeKind::Pass, code, secret, why);
+	const PassKeys pk = passKeys(cr_, secret);
+	std::fill(secret.begin(), secret.end(), 0);
+	const Api a = call("GET", cfg_.serverBase + "/pass/" + pk.passId, { { "Authorization", "Bearer " + pk.passToken } }, nullptr);
+	if (a.status == 404 && a.error == "pass_gone") return Result::bad(kPassGone, a.status, a.error);
+	if (a.status != 200) return Result::bad(sentence(a.error, a.status, false), a.status, a.error);
+	const std::string classId = a.body.str("classId");
+	OpenKey k;
+	k.key = pk.passKey;
+	std::string payload;
+	json::Value p;
+	if (!isHex(classId, 32) || !open(cr_, curve_, fromB64(a.body.str("env")), "pass", classId, pk.passId, 1, k, payload, why) ||
+	    !readPayload(payload, "pass", p).empty() || !moveFrom(p, r) || r.classId != classId || r.studentId != a.body.str("studentId") ||
+	    !validPoint(curve_, fromB64(r.pub)))
+		return Result::bad(kRecordUnreadable, 200, "damaged");
+	return Result::good(classId);
+}
+
+Result Client::previewClassPass(const std::string& text) {
+	MoveRec r;
+	const Result o = openPass(text, r);
+	if (!o.ok) return o;
+	passSeen_ = { text, r, now() };      // the [Use Pass] that follows isn't a second lookup (one use, counted once)
+	Result out = Result::good(r.className + "\n" + r.name);
+	if (members_.count(r.classId)) out.message = "You're already in this class on this device.";
+	return out;
+}
+
+Result Client::useClassPass(const std::string& text) {
+	MoveRec r;
+	if (passSeen_.text == text && now() - passSeen_.at < 60 * kSecond && !passSeen_.rec.classId.empty()) r = passSeen_.rec;
+	else {
+		const Result o = openPass(text, r);
+		if (!o.ok) return o;
+	}
+	passSeen_ = PassSeen();
+	const std::string classId = r.classId;
+	if (Membership* had = membershipOf(classId)) {
+		if (had->studentId == r.studentId) {
+			Result out = Result::good(classId);
+			out.message = "You're already in this class on this device.";
+			return out;
+		}
+	}
+	Membership m;
+	m.classId = classId;
+	m.studentId = r.studentId;
+	m.token = r.token;
+	m.proof = r.proof;
+	m.classKey = r.classKey;
+	m.pub = r.pub;
+	m.name = r.name;
+	m.className = r.className;
+	m.joinedAt = serverNow();
+	members_[classId] = m;
+	putMemberSide(members_[classId]);
+	save();
+	refreshMember(classId);
+	return Result::good(classId);
+}
+
+Result Client::listPasses(const std::string& classId) {
+	Teaching* t = teachingOf(classId);
+	Membership* m = t ? nullptr : membershipOf(classId);
+	if (!t && !m) return Result::bad("That class isn't on this device.");
+	const std::string path = "/classes/" + classId + "/passes";
+	const Api a = t ? teacherCall(*t, "GET", path, nullptr) : studentCall(*m, "GET", path, nullptr);
+	if (a.status == 410) return gone(classId, a, !!t);
+	if (!t && a.status == 403 && a.error == "not_a_member") return removedFromClass(classId, a.status, a.error);
+	if (a.status != 200) return fail(a, "passes");
+	if (t) refreshStudents(classId);     // for the names (best effort)
+	std::string out;
+	if (const json::Value* list = a.body.get("passes"))
+		for (const json::Value& x : list->a) {
+			const std::string pid = x.str("pid"), sid = x.str("studentId");
+			if (!isHex(pid, 64) || !isUuid(sid)) continue;
+			std::string name;
+			if (t) {
+				auto it = roster_.find(mapKey(classId, sid));
+				name = it != roster_.end() && !it->second.name.empty() ? it->second.name : "a student";
+			} else {
+				name = m->name;
+			}
+			for (char& c : name)
+				if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+			out += pid + "\t" + sid + "\t" + name + "\t" + std::to_string(x.integer("createdAt")) + "\t" + std::to_string(x.integer("usedAt")) +
+			       "\t" + std::to_string(x.integer("uses")) + "\n";
+		}
+	return Result::good(out);
+}
+
+Result Client::cancelPass(const std::string& classId, const std::string& pid) {
+	if (!isHex(pid, 64)) return Result::bad("That request wasn't understood.");
+	Teaching* t = teachingOf(classId);
+	Membership* m = t ? nullptr : membershipOf(classId);
+	if (!t && !m) return Result::bad("That class isn't on this device.");
+	const std::string path = "/classes/" + classId + "/passes/" + pid;
+	const Api a = t ? teacherCall(*t, "DELETE", path, nullptr) : studentCall(*m, "DELETE", path, nullptr);
+	if (a.status == 410) return gone(classId, a, !!t);
+	if (!t && a.status == 403 && a.error == "not_a_member") return removedFromClass(classId, a.status, a.error);
+	if (a.status != 200) return fail(a, "pass");
+	return Result::good();
+}
+
 void Client::forgetMembershipLocal(const std::string& classId, const std::string& text, bool tombstone) {
 	if (Membership* m = membershipOf(classId)) {
 		std::set<std::string> rids;
