@@ -65,10 +65,14 @@ struct Item {
 	std::string id, type, title, topic, note, cdl;
 	int64_t ver = 0, createdAt = 0, releasedAt = 0;   // releasedAt: when students first saw it (0: hidden)
 	bool hidden = false;                              // teacher: kept from students until released
+	int64_t releaseAt = 0;                            // teacher (3.16.10): the scheduled release, UTC ms (0: none)
 	std::string news;                                 // student: "new", "updated" or "" (opened, or there when joining)
 	bool unreadable = false;
 	std::string problem;
 };
+// 3.16.10: postItem / setItemHidden's releaseAt. kReleaseKeep: not sent (a hidden write keeps
+// any schedule, a visible one clears it); kReleaseCancel: null (no schedule); > 0: that time (UTC ms).
+constexpr int64_t kReleaseKeep = -1, kReleaseCancel = 0;
 struct ItemNews { std::string id, what, type, title; };   // what: "new" | "updated"
 struct Student { std::string studentId, name; int64_t joinedAt = 0, seenAt = 0; bool unreadable = false; };
 struct Live {
@@ -225,8 +229,9 @@ public:
 	AnswerCounts answers(const std::string& classId) const;
 	// v2 (3.16.2, 3.16.3): shared circuits and class examples; a hand-in's earlier attempts.
 	std::vector<Item> items(const std::string& classId) const;      // teacher: every one; student: the released ones
-	void postItem(const std::string& classId, const Item& draft, bool hidden, std::function<void(bool, std::string message, std::string iid)> done);
-	void setItemHidden(const std::string& classId, const std::string& iid, bool hidden, Done);
+	void postItem(const std::string& classId, const Item& draft, bool hidden, std::function<void(bool, std::string message, std::string iid)> done,
+	              int64_t releaseAt = kReleaseKeep);
+	void setItemHidden(const std::string& classId, const std::string& iid, bool hidden, Done, int64_t releaseAt = kReleaseKeep);
 	void deleteItem(const std::string& classId, const std::string& iid, Done);
 	void itemOpened(const std::string& classId, const std::string& iid);   // student: not news any more
 	void loadHistory(const std::string& classId, const std::string& aid, const std::string& sid, Done);

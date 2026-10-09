@@ -362,6 +362,7 @@ HttpResponse FakeServer::api(const HttpRequest& r, const std::string& full) {
 		teacher = true;
 	}
 	if (now - k.activeAt > kDay) k.activeAt = now;   // a class students still use is active
+	releaseDue(k);
 
 	auto recJson = [](const Rec& x, bool env) {
 		json::Value o = json::Value::object();
@@ -388,6 +389,13 @@ HttpResponse FakeServer::api(const HttpRequest& r, const std::string& full) {
 		o.set("message", json::Value::string("conflict"));
 		o.set("current", recJson(cur, false));
 		return reply(now, 412, o);
+	};
+	auto itemEntry = [&](const ItemRow& x) {
+		json::Value e = recJson(x.rec, false);
+		e.set("hidden", json::Value::boolean(x.hidden));
+		e.set("releasedAt", x.releasedAt ? json::Value::integer(x.releasedAt) : json::Value());
+		e.set("releaseAt", x.releaseAt ? json::Value::integer(x.releaseAt) : json::Value());
+		return e;
 	};
 	auto purge = [&](const std::string& tag) { purges.push_back(tag); };
 	auto newKey = [&]() {
@@ -416,6 +424,10 @@ HttpResponse FakeServer::api(const HttpRequest& r, const std::string& full) {
 			as.set(a.first, e);
 		}
 		o.set("assignments", as);
+		json::Value is = json::Value::object();   // v2: the teacher every item, a student the released ones
+		for (const auto& kv : k.items)
+			if (teacher || !kv.second.hidden) is.set(kv.first, itemEntry(kv.second));
+		o.set("items", is);
 		json::Value lv = json::Value::object();
 		lv.set("ver", json::Value::integer(k.live.rec.ver));
 		lv.set("session", json::Value::string(k.live.session));
@@ -491,6 +503,67 @@ HttpResponse FakeServer::api(const HttpRequest& r, const std::string& full) {
 		o.set("fetchKey", json::Value::string(k.fetchKey));
 		o.set("seq", json::Value::integer(k.seq));
 		return reply(now, 200, o);
+	}
+
+	// ---- items (3.16.2), scheduled release (3.16.10) ----
+	if (p.size() == 4 && p[2] == "items" && (m == "PUT" || m == "DELETE")) {
+		const std::string iid = p[3];
+		if (!isUuid(iid)) return error(now, 404, "not_found");
+		if (!teacher) return error(now, 401, "wrong_key");
+		auto a = k.items.find(iid);
+		if (m == "DELETE") {
+			if (a != k.items.end()) {
+				k.items.erase(a);
+				k.seq++;
+			}
+			json::Value o = json::Value::object();
+			o.set("deleted", json::Value::boolean(true));
+			return reply(now, 200, o);
+		}
+		const bool fresh = a == k.items.end();
+		const int64_t cur = fresh ? 0 : a->second.rec.ver;
+		Bytes env;
+		unb64u(body.str("env"), env);
+		if (!fresh && body.integer("ver") == cur && clsync::envelopeHash(cr, env) == a->second.rec.h)
+			return reply(now, 200, itemEntry(a->second));   // a replay
+		if (body.integer("base", -1) != cur) {
+			json::Value o = json::Value::object();
+			o.set("error", json::Value::string("conflict"));
+			o.set("message", json::Value::string("conflict"));
+			o.set("current", fresh ? json::Value() : itemEntry(a->second));
+			return reply(now, 412, o);
+		}
+		const json::Value* h = body.get("hidden");
+		if (h && !h->isBool()) return error(now, 400, "bad_request");
+		bool hidden = h && h->b;
+		const json::Value* ra = body.get("releaseAt");
+		if (ra && !ra->isNull() && !(ra->isInt() && ra->i() > 0)) return error(now, 400, "bad_request");
+		if (ra && ra->isInt() && ra->i() > now + 400 * kDay) return error(now, 400, "bad_request");
+		if (env.size() > 524288) return error(now, 413, "record_too_large");
+		if (fresh && k.items.size() >= 300) return error(now, 507, "too_many_items");
+		ItemRow x = fresh ? ItemRow() : a->second;
+		const bool wasHidden = fresh || x.hidden;
+		x.rec = store(body.str("env"));
+		x.rec.ver = body.integer("ver");
+		if (ra && ra->isInt() && ra->i() > now) {   // scheduled: hidden until then
+			hidden = true;
+			x.releaseAt = ra->i();
+		} else if (ra && ra->isInt()) {             // a time already past: now
+			hidden = false;
+			x.releaseAt = 0;
+		} else if (ra) {                            // null: cancel, hidden as sent
+			x.releaseAt = 0;
+		} else if (!hidden) {                       // absent + visible (an older client's Release)
+			x.releaseAt = 0;
+		}                                           // absent + hidden: the schedule stays
+		x.hidden = hidden;
+		if (hidden) x.releasedAt = 0;
+		else if (wasHidden) x.releasedAt = now;
+		k.items[iid] = x;
+		k.seq++;
+		json::Value o = itemEntry(x);
+		o.set("seq", json::Value::integer(k.seq));
+		return reply(now, fresh ? 201 : 200, o);
 	}
 
 	// ---- assignments ----
@@ -732,6 +805,7 @@ HttpResponse FakeServer::pulse(const HttpRequest& r, const std::string& path) {
 		bump("fail/" + ip + "/" + std::to_string(now / kHour), 60);
 		return error(now, 404, "wrong_fetch_key");
 	}
+	releaseDue(k);
 	json::Value o = json::Value::object();
 	if (p.size() == 2) {
 		int64_t seq = k.seq, live = k.live.on ? k.live.rec.ver : 0;
@@ -771,7 +845,25 @@ HttpResponse FakeServer::pulse(const HttpRequest& r, const std::string& path) {
 		if (a == k.assignments.end()) return error(now, 404, "no_version");
 		return version(a->second, p[4]);
 	}
+	if (p.size() == 5 && p[2] == "item") {   // hidden ones too: unlisted, not secret (3.16.2)
+		auto a = k.items.find(p[3]);
+		if (a == k.items.end()) return error(now, 404, "no_version");
+		return version(a->second.rec, p[4]);
+	}
 	return error(now, 404, "not_found");
+}
+
+void FakeServer::releaseDue(Klass& k) {
+	bool any = false;
+	for (auto& kv : k.items) {
+		ItemRow& x = kv.second;
+		if (!x.hidden || !x.releaseAt || x.releaseAt > now) continue;
+		x.hidden = false;
+		x.releasedAt = x.releaseAt;   // the time it was meant for
+		x.releaseAt = 0;
+		any = true;
+	}
+	if (any) k.seq++;
 }
 
 // ---- controls -------------------------------------------------------------------------------
@@ -779,7 +871,7 @@ HttpResponse FakeServer::pulse(const HttpRequest& r, const std::string& path) {
 void FakeServer::cleanup() {
 	for (auto it = classes.begin(); it != classes.end();) {
 		Klass& k = it->second;
-		if (k.roster.empty() && k.assignments.empty() && now - k.activeAt > 7 * kDay) {
+		if (k.roster.empty() && k.assignments.empty() && k.items.empty() && now - k.activeAt > 7 * kDay) {
 			joins.erase(k.joinIndex);   // never used: no marker (3.11)
 			it = classes.erase(it);
 			continue;

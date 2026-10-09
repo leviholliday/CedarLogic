@@ -71,6 +71,8 @@ public:
 	struct Answer { int64_t ver = 0, at = 0; std::string h, env; };
 	struct Member { std::string hash; int64_t joinedAt = 0, seenAt = 0; Rec name; };
 	struct LiveSlot { Rec rec; std::string session; bool on = false, predict = false; };
+	// v2 (3.16.2, 3.16.10): an item; releasedAt / releaseAt 0 = null.
+	struct ItemRow { Rec rec; bool hidden = false; int64_t releasedAt = 0, releaseAt = 0; };
 	struct Klass {
 		std::string teacherHash, deleteHash;
 		int64_t createdAt = 0, activeAt = 0, seq = 0;
@@ -79,6 +81,7 @@ public:
 		bool joinOpen = true;
 		Rec teacher, info;
 		std::map<std::string, Rec> assignments;
+		std::map<std::string, ItemRow> items;
 		std::map<std::string, int64_t> closesAt;          // -1: null
 		LiveSlot live;
 		std::map<std::string, Member> roster;
@@ -105,6 +108,7 @@ private:
 	HttpResponse pulse(const HttpRequest&, const std::string& path);
 	bool bump(const std::string& key, int limit);
 	std::string newFetchKey();
+	void releaseDue(Klass&);   // 3.16.10: every scheduled item whose releaseAt <= now
 };
 
 void scenarioTests(Crypto&, Curve&, const std::string& tempDir, Report&);

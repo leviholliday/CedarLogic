@@ -1,7 +1,10 @@
 # CLASSROOM.md — CedarLogic Classroom: codes, no accounts
 
-Status: design, protocol version 1, **revision 2** (2026-10-06: the review's
-findings, each accepted or declined with its reason in §12). Written for
+Status: design, protocol version 1, **revision 3** (2026-10-06: the server
+moved to Cloudflare Workers + Durable Objects, with a live connection over
+WebSockets; what changed, and what didn't, in the changelog, §13).
+Revision 2 (the same day: the review's findings, each accepted or declined
+with its reason in §12) is in this file's history. Written for
 the work packages of §10 (server, web, the shared core, the Mac app; Windows
 and Linux later), which must interoperate on the first try. Everything marked
 MUST is checked by the test vectors (§7.1) or the scenarios (§7.2). The
@@ -17,8 +20,9 @@ tie-breaker whenever this text and an implementation disagree — fix the text
 or the code until all three checkers and every client's own suite agree.
 
 It is built on `docs/SYNC.md`: the same code format, the same HKDF, the same
-AES-GCM envelope, the same Netlify Functions + Blobs server pattern, the same
-"the server keeps a hash of the token" rule, and the same people maintain both.
+AES-GCM envelope, the same "the server keeps a hash of the token" rule, and
+the same people maintain both. (Sync stays on Netlify Functions + Blobs;
+Classroom moved to Cloudflare, §3.)
 Where this document says "as Sync", the Sync section named is the rule.
 
 ## 0. The whole thing on one page
@@ -28,7 +32,8 @@ has to sign up for, no passwords, no emails. Version 1 does three things — the
 teacher posts assignments, collects what students hand in, and runs a live view
 of a circuit on every student's screen — and nothing else (no roster
 management, no grades). CedarLogic Online (the website) and the Mac app first;
-Windows and Linux follow with the same core. Free, on the existing Netlify site.
+Windows and Linux follow with the same core. Free: the website stays on
+Netlify; the classroom service runs on Cloudflare's Free plan (§3).
 The website can't read a student's name, a submission, an assignment or a
 predict answer: everything is encrypted before it leaves a device.
 
@@ -65,13 +70,15 @@ gets **412**, as Sync). Students write only their own records (their name,
 their hand-ins, their predict answers), each sealed to the class's public key,
 so the server, other students and a school's TLS-inspecting proxy learn
 nothing from them; the server never holds that public key, and each carries
-the student's proof, so the server can't make one up either. Students poll
-one tiny CDN-cached "pulse" per class to learn that something changed, and
-fetch records by version (immutable, cached) under the class's current
-`fetchKey`: a
-class of 300 polling through a 75-minute lecture costs about 6,000 function
-invocations (a third of them the pulse, half of them predict answers) and
-320 MB (§3.10).
+the student's proof, so the server can't make one up either. Each class is
+one Durable Object on Cloudflare; a class page keeps one WebSocket to it, so
+a push reaches every student at once with the live record inside, and
+predict answers go back up the same socket; a network that blocks
+WebSockets falls back to polls the server holds until something changes.
+Records are fetched by version under the class's current `fetchKey`. A
+lecture of 300 through 75 minutes with ten predict questions costs about
+420 Worker requests, 2,200 object requests and 3,400 rows written — a few
+per cent of a day of Cloudflare's Free plan (§3.10).
 
 **Decisions in one table.**
 
@@ -90,19 +97,20 @@ invocations (a third of them the pulse, half of them predict answers) and
 | Who wrote it | a student's sealed records carry the student's `proof`, pinned per student by the teacher's devices ("Couldn't be verified" otherwise); the class's public key never reaches the server; signing the teacher's records is v1.1 (§8.2) |
 | Who can download | the record paths carry the class's `fetchKey`, which the server changes when a student is removed or the join code changes; a removed student keeps the class key but can't fetch anything new (§3.3) |
 | Concurrency | teacher records carry `base`/`ver` (412 on a stale base); a student's own records are last-writer-wins per device; nobody merges circuits |
-| Live view | the teacher writes one `live` record per push (ver rises); students poll the pulse every 3 s while a session is on and the page is visible (60 s otherwise), fetch each version once; predict answers come back sealed and are counted on the teacher's device; reveal is a push with `reveal: true` |
+| Live view | the teacher writes one `live` record per push (ver rises); every open class page keeps a WebSocket to the class's object, which sends each push to every student with the record inside; predict answers go up the sockets, sealed, and reach the teacher's sockets in batches, counted on the teacher's device; reveal is a push with `reveal: true`; without sockets, held polls of the pulse (§3.10, §3.14) |
 | Answer keys | per assignment: **students can check their work** (the key is in the assignment, readable by the class) or **only I check** (the key is sealed to the teacher inside the assignment; results are computed on the teacher's device when it views submissions) |
-| Limits | 300 students, 100 assignments, 512 KiB per assignment or submission, 4 MB inflated and 20,000 parts per received circuit, 100 MiB per class; per-address, per-class and per-student rate limits; site-wide budgets and a daily request breaker that pauses writes only and that one address can't trip alone (§3.5) |
+| Limits | 300 students, 100 assignments, 512 KiB per assignment or submission, 4 MB inflated and 20,000 parts per received circuit, 100 MiB per class; per-address, per-class and per-student rate limits; a storage budget whose "nearly full" refuses new classes first; a daily request breaker that pauses writes only and that one address can't trip alone; `CLASSROOM_CLOSED` (§3.5) |
 | Retention | a class nobody touches for 400 days is removed (the id answers 410 forever); the teacher's devices warn from 60 days before; never-used classes after 7 days |
-| Deletion | the teacher deletes the class (delete token; everything goes, the CDN's copies purged); a student leaves, or the teacher removes a student (roster entry and answers go; hand-ins stay with the teacher unless the teacher also ticks "delete everything they handed in"); Remove from This Device forgets a class on one computer and touches nothing on the website |
-| Hosting | Netlify Functions + Netlify Blobs, stores `classroom` / `classroom-misc` per deploy context, as Sync; one function on `/api/classroom/*` (authenticated) and `/api/live/*` (ciphertext and counters behind the `fetchKey`, CDN-cached), carrying the Free plan's second and last code-based rate-limit rule (§3.1, §3.10) |
-| Cost | a lecture of 300 students ≈ 5,800 function invocations and 320 MB; one such class at three lectures a week ≈ 60 % of the legacy Free plan's 125,000 invocations a month; on a credit plan ≈ 100 credits (about $0.67) a lecture (§3.10) |
+| Deletion | the teacher deletes the class (delete token; everything goes at once, in one transaction; nothing was cached anywhere); a student leaves, or the teacher removes a student (roster entry and answers go; hand-ins stay with the teacher unless the teacher also ticks "delete everything they handed in"); Remove from This Device forgets a class on one computer and touches nothing on the website |
+| Hosting | Cloudflare Workers + SQLite-backed Durable Objects, Free plan: one Worker on `/api/classroom/*` and `/api/live/*`, one object per class (its records, roster, hand-ins, live session, sockets and alarm), one site object (the join index by its HMAC, move slots, the storage sum), one object per address key (its counters); on `*.workers.dev` for now, a custom domain later (§3.1, §3.10, §3.13). Revision 2's Netlify functions are kept, unrouted |
+| Cost | a lecture of 300 on sockets ≈ 420 Worker requests, 2,200 object requests, 3,400 rows written (the answers): ≈ 3 % of a day of the Free plan, about 29 such lectures a day; over a free limit only the classroom pauses until 00:00 UTC, never the website (§3.10) |
 | Engine | one C++ core (`mac/CedarCore/Classroom*.cpp`, P-256 behind hooks like Sync's crypto) for the Mac now and Linux/Windows later; `classroom-core.js` for the web; both checked against the same vectors |
 | Keys at rest | Mac: 0600 files in `~/Library/Application Support/CedarLogic/Classroom/`; web: IndexedDB `cl-classroom` |
 
 **Who builds what** — four packages now, with owned files, dependencies and
-acceptance tests in §10: **S** server (+ the in-memory Blobs stub and a mock
-server every other package tests against), **W** web client (core + UI, with
+acceptance tests in §10: **S** server (the Worker and its objects, with test
+controls every other package tests against; revision 2's mock server
+kept), **W** web client (core + UI, with
 Group 6's UI), **E** the shared C++ core, **M** the Mac hooks and UI (Group 7).
 **L** and **X** (Linux, Windows) later, as for Sync.
 
@@ -113,7 +121,7 @@ class key (a removed student keeps it: what keeps them out is the server's
 `fetchKey`, §3.3, so a dishonest server could still hand them later records;
 rotation needs student key pairs, v1.1); signing the teacher's records and
 requests instead of bearer tokens (§8.2, v1.1); a "class pass" that brings a
-student back on a wiped shared computer (§11); websockets or long polling (§3.10); a second teacher
+student back on a wiped shared computer (done since: §3.17); a second teacher
 (share the teacher key); sections (make a class per section); an LMS link;
 self-hosting.
 
@@ -255,20 +263,22 @@ all 2⁴⁸ codes** cost 2⁴⁸ × 600,000 rounds — about 700 years of one to
 breach, opens every class it can be matched against. Two things keep it from
 being matched against anything a copy of the store holds:
 
-- **The server keeps only HMACs.** The join index is `j/<joinIndex>` with
+- **The server keeps only HMACs.** The join index is the site object's
+  `joins` row `<joinIndex>` (revision 2: the blob `j/<joinIndex>`, §3.6) with
   `joinIndex` = lowercase hex HMAC-SHA256(`CLASSROOM_JOIN_PEPPER`, the 32
   ASCII hex characters of `joinId`), and the entry's `joinHash` =
   HMAC-SHA256(`CLASSROOM_JOIN_PEPPER`, the 43 ASCII characters of
   `joinToken`); the class document keeps `joinIndex`, never `joinId`. The
   teacher's device sends `joinId` and `joinToken` themselves (on create and
   on Change Join Code: a server that has them can only do what it already
-  can to its own index). `CLASSROOM_JOIN_PEPPER` is 32 random bytes in the
-  function's environment, never in Blobs, separate from Sync's rate pepper
+  can to its own index). `CLASSROOM_JOIN_PEPPER` is 32 random bytes, a
+  secret of the Worker (`wrangler secret put`, §3.13), never in the Durable
+  Objects' storage, separate from the rate pepper
   because it can't be rotated freely: a lookup tries it and then
   `CLASSROOM_JOIN_PEPPER_OLD` if set, and re-indexes a class found under the
   old one (it has the `joinId` from the path). §7.1.3 has a vector with a test
   pepper.
-- **What's left needs the function's secrets too**: the operator, or someone
+- **What's left needs the Worker's secrets too**: the operator, or someone
   who has both the store and the environment, still faces the 700-GPU-year
   table (and the class's join record, which they can then read, carries the
   class key, not names or hand-ins: those need the teacher's private key).
@@ -508,6 +518,12 @@ bytes of the vectors (§7.1.5): writers produce `JSON.stringify` of an object
 with the keys in this order (so the byte-exact vectors reproduce); readers
 accept any order and ignore unknown fields.
 
+A circuit's `cdl` may hold a drawing on the circuit and its notes
+(`docs/DRAWING-NOTES.md`); they travel as they are, under the same cap. What a
+record should include (a live push without the teacher's notes, say) is for
+the classroom UI to decide: build the text with `CedarInk.textFor(snapshot,
+{ ink, notes })`, as Share Link does (DRAWING-NOTES.md §4.15).
+
 **teacher** (under `backupKey`; the teacher's whole state for the class):
 
 ```json
@@ -609,7 +625,7 @@ below → else invalid.
 | Field | Kinds | Type | Rules |
 |---|---|---|---|
 | `v` | all | integer | 1. Larger → "newer"; missing or not an integer → invalid. |
-| `kind` | all | string | one of the ten above, or `classroom` for the sync side record of §2.5; any other string → "newer". A record read under one kind's AAD whose payload says another kind → invalid. |
+| `kind` | all | string | one of the ten above, `item` (v2, §3.16.2), or `classroom` / `membership` for the sync side records of §2.5 and §3.16.7; any other string → "newer". A record read under one kind's AAD whose payload says another kind → invalid. |
 | `name` | teacher, join, info, name, submission, move (`className` too) | string | writers trim ASCII whitespace at both ends, drop control characters (U+0000–U+001F, U+007F) and cut to 64 scalar values (a person's name) or 100 (a class name); empty → "a student" / "Untitled class". Readers trim and cut the same way and show it only as plain text. |
 | `title`, `instructions`, `prompt` | assignment, live | string | ≤ 200 / 20,000 / 500 scalar values; writers trim; readers cut. |
 | `d`, `pub`, `classKey` | teacher, join, move | string | base64url of exactly 32 / 65 / 32 bytes (43 / 87 / 43 characters); `pub` must start with `0x04` and be on the curve. |
@@ -714,8 +730,7 @@ written at Create Classroom (and when the class is renamed), ≤ 4,096 bytes,
 sent with `deleted: false, device: false`; deleting the class writes Sync's
 sealed tombstone over it. Only the key and the name are synced: everything
 else a device needs comes from the website with the key (§4.1). (A student's
-membership is not synced in v1; the move code does that. It would be the same
-mechanism, kind `membership`, if wanted later.) Record 12 of §7.1.5 is such a
+membership is synced too since v2: kind `membership`, §3.16.7.) Record 12 of §7.1.5 is such a
 record, sealed with the sync vectors' own record key, so the sync engines can
 test it. Readers apply the field rules of §2.2 to it: `classId` 32 hex,
 `teacherKey` 28 canonical symbols, `name` a string, the times integers;
@@ -765,9 +780,10 @@ to the day), the class's `fetchKey` (its own random value), how many
 assignments there are, their sizes, versions and times,
 which assignments close hand-ins and when, each student's hand-in times,
 attempt counts and sizes, when a live session is on and how often the teacher
-pushes, how many students answered a predict question and when, and the IP
-addresses requests come from (used for rate limits through an HMAC with a
-server secret, as Sync; and in Netlify's own request logs). It cannot see
+pushes, how many students answered a predict question and when, when each
+device's live connection opens and closes, and the IP addresses requests
+come from (used for rate limits through an HMAC with a server secret, never
+stored as addresses; and in Cloudflare's own handling of requests). It cannot see
 names, class names, instructions, circuits, answer keys, guesses or results,
 and it never holds the class's public key or a student's proof, so it can't
 make a record a teacher's device would accept as a student's. §8 says what that does and doesn't
@@ -775,81 +791,146 @@ reveal, in the words a school will read.
 
 ---
 
-## 3. Server API (Netlify Functions)
+## 3. Server API (Cloudflare Workers + Durable Objects)
 
-### 3.1 Files
+Revision 3 moved the server from Netlify Functions + Blobs to Cloudflare
+(the reason, and what changed, in §13). The API's paths, bodies, headers,
+status codes and every rule are the ones revision 2 gave; what is new is
+where it runs, how it stores, the live connection (§3.14) and held polls
+(§3.3, the pulse). Every byte of §1 and §2 is unchanged.
 
-- `netlify/lib/classroom.mjs` — all the logic: `handle(req, context, deps)`
-  for `/api/classroom/v1/…`, `pulse(req, context, deps)` for the cached
-  `/api/live/v1/…` endpoints, `cleanup(deps)` for the daily job, with
-  `deps = { store, misc, now, env, ip, state?, limits? }` exactly as
-  `netlify/lib/sync.mjs`, so the tests and the mock server run it on the
-  in-memory stub (`netlify/lib/memory-blobs.mjs`, unchanged).
-- `netlify/functions/classroom.mjs` — one function for both prefixes, so
-  one rule covers the pulse too:
-  `export const config = { path: ["/api/classroom/*", "/api/live/*"], rateLimit: { windowLimit: 1200, windowSize: 60, aggregateBy: ["ip", "domain"] } }`.
-  Netlify allows **2 code-based rate-limit rules per site on the Free plan**
-  (5 on Pro, 100 on Enterprise), and `sync.mjs` holds one, so this is the
-  site's last: nothing else may add one without moving to Pro. 1,200 a minute
-  is 20 a second from one address: a class of 300 behind one school address
-  joining, fetching and handing in at once stays under it. Whether CDN cache
-  hits on `/api/live/*` count against the rule isn't documented: the
-  deploy-preview check of §3.10 measures it, and if they do, the limit goes to
-  7,200 (300 students polling every 3 s are 6,000 a minute), leaving the
-  per-address allowance of §3.5 to do the fine work.
-  `export default (req, context) => (new URL(req.url).pathname.startsWith("/api/live/") ? pulse : handle)(req, context, { state, store: getStore({ name: storeName("classroom", context), consistency: "strong" }), misc: getStore({ name: storeName("classroom-misc", context), consistency: "strong" }), now: Date.now, env, ip: context.ip, purge: tags => purgeCache({ tags }) })`
-  (`purgeCache` from `@netlify/functions`), with Sync's `storeName`
-  (production / `-preview` / `-dev`), so previews and local runs never touch
-  real classes. Every thrown error becomes `500 {"error":"server_error"}`,
-  never a stack.
-- `netlify/functions/classroom-cleanup.mjs` — `config = { schedule: "@daily" }` (§3.11).
-- `scripts/classroom-mock-server.mjs` — a plain Node HTTP server serving
-  `handle()` and `pulse()` on the memory stub (with a `purge` that records the
-  tags it was given) at
-  `http://localhost:8788/api/classroom/v1/…` and `/api/live/v1/…`, with
-  test-only controls under `/__mock/` (§10 S). Every other package's tests
-  run against it.
-- Shared with Sync: `netlify/lib/common.mjs` (`sameSecret`, `rateKey`,
-  `allowIn`, `bump`, `done`, `env`); the gate, the request breaker, the site
-  byte budget, `readJSONBody`, `bearer` and the error reply helpers move from
-  `sync.mjs` into `netlify/lib/api.mjs` and both import them (behaviour
-  unchanged; `test_sync_server.mjs` still passes). The rate pepper and the
-  allowed origins are Sync's (`SYNC_RATE_PEPPER`, `SYNC_ORIGINS`): one secret,
-  one list. The join pepper is the classroom's own (`CLASSROOM_JOIN_PEPPER`,
-  §1.3): the function refuses to start a join or a create without it
-  (`503 busy`), so a deploy that forgot it fails loudly, not openly.
+### 3.1 Architecture and files
+
+```
+  browser / app ──HTTPS──► Worker "cedarlogic-classroom"  (one per request; no state of its own but its isolate's memory)
+                             │  the gate and CORS, the per-address allowance, the daily breaker (§3.5)
+                             ├──► ClassroomClass  "<classId>"     one SQLite-backed Durable Object per class: its records,
+                             │                                     roster, hand-ins, live session, answers, sockets, alarm
+                             ├──► ClassroomSite   "site"          one for the site: the join index, move slots, the storage sum,
+                             │                                     the breaker's counts, new classes a day
+                             └──► ClassroomAddress "<address key>" one per address key (an HMAC, §3.5): its counters
+  browser / app ──WSS───► Worker ──► ClassroomClass "<classId>"   the live connection (§3.14), held by the class's object
+```
+
+- **The Worker** (`cloudflare/classroom/src/front.mjs`; `src/index.mjs` is
+  the entry wrangler builds) answers `/api/classroom/v1/…` and
+  `/api/live/v1/…`. It reads no body (a hand-in streams through to its
+  class's object), so it stays well inside the Free plan's 10 ms of CPU a
+  request. `/health` it answers itself. Everything under
+  `/classes/{classId}` and every `/api/live/v1/{classId}/…` goes to the
+  object named by the `classId`; `/join/{joinId}` and `/move/{moveId}` go
+  to the site object.
+- **One object per class** (`src/class.mjs`), named by its `classId`
+  (`idFromName`), holds the whole class in its own SQLite database (§3.6),
+  so every change to a class is one transaction in one place: the
+  conditional writes, retries and `todo/` of revision 2 are gone, and two
+  hand-ins at the same moment are simply one after the other. The object
+  writes nothing until the class is made: an id that was never a class
+  reads an empty database, answers `404`, and leaves no trace.
+- **The join index** needs a name a joining device can find from the code
+  alone: `joinIndex` = HMAC-SHA256(`CLASSROOM_JOIN_PEPPER`, `joinId`), as
+  revision 2. It is a row of the site object (`joins`), not an object of
+  its own: lookups are once per join, the site object is never on a
+  lecture's path, and one table makes "a code is never freed" (§3.3) one
+  `INSERT` that checks first. The class's own object keeps the current
+  `joinIndex` and the HMAC of the join token, so joining (`POST …/students`)
+  never asks the site.
+- **One object per address key** (`src/address.mjs`) counts what is
+  counted per address (§3.5). The Worker counts every request in its
+  isolate's memory and adds the count to the address's object every 50
+  requests (as revision 2's instances did with Blobs), so the allowance
+  costs one object request in fifty.
+- `src/protocol.mjs` — what all of them share: the limits, the sentences of
+  §3.4, the paths, the envelope checks, the tokens' hashes and HMACs, the
+  address key, the replies. Platform-neutral (WebCrypto, `Request`,
+  `Response`), so node runs the same code in the tests.
+- `cloudflare/classroom/wrangler.toml` — the Worker, the three
+  Durable Object bindings (`CLASS`, `SITE`, `ADDR`) and the SQLite
+  migration (`new_sqlite_classes`, the only kind the Free plan has); no
+  secret in it (§3.13).
+- `cloudflare/classroom/test/` — `runtime.mjs` (the Worker and the objects
+  in node on `node:sqlite`), `wrangler.mjs` (`wrangler dev` on a free port
+  for the tests, and as a program a local server for the apps),
+  `test_worker.mjs`, `test_live.mjs` (§3.12).
+- **Superseded, kept**: `netlify/functions/classroom.mjs` and
+  `classroom-cleanup.mjs` have no path and no schedule any more and answer
+  `410 {"error":"moved"}` unless `CLASSROOM_NETLIFY=1`;
+  `netlify/lib/classroom.mjs`, `scripts/classroom-mock-server.mjs` (and its
+  other name, `classroom-dev-server.mjs`) and `scripts/test_classroom_server.mjs`
+  are unchanged and still run (the protocol's reference behaviour, and the
+  server the app repo's cross-check has used; §3.13 says how to run it
+  against the Worker instead).
+
+Test controls: with `CLASSROOM_TEST_CONTROLS=1` — set only by the tests'
+`wrangler dev`, never in `wrangler.toml` — and only on `localhost`, the
+Worker answers `/__mock/…` with the mock server's controls, the same names
+and shapes (`reset`, `clock`, `cleanup`, `limits`, `dump`, `purges`,
+`tamper`, `dropNextAnswer`, `fail`), plus `env` (an environment variable
+for the test), `forget` (the class object's memory dropped, as hibernation
+does), `evict` (the object reset, its sockets dropped), `sockets`, `total`
+(the storage sum) and `isolate`. Every other client's tests run against it
+unchanged (§3.12).
 
 ### 3.2 Requests
 
-Base URLs `https://cedarlogic.netlify.app/api/classroom/v1` and
-`https://cedarlogic.netlify.app/api/live/v1`. Apps read overrides from
-`CL_CLASSROOM_URL` and `CL_LIVE_URL` (as `CL_SYNC_URL`); `http://` only for
+Base URLs `https://cedarlogic-classroom.<account>.workers.dev/api/classroom/v1`
+and `…/api/live/v1` (the account's workers.dev subdomain is set when the
+owner deploys; a custom domain later, §3.10). The web core reads one
+origin (`CedarClassroom.configure({ service })`, §6.5); apps read
+`CL_CLASSROOM_URL` and `CL_LIVE_URL` as before. `http://` only for
 `localhost` / `127.0.0.1`.
+
+**Why the Worker's own origin, not a rewrite on cedarlogic.netlify.app**: a
+Netlify proxy rewrite can't carry a WebSocket and cuts a proxied request
+after 26 s (a held poll is up to 25); every proxied request would hide the
+caller's address behind Netlify's (the per-address limits of §3.5 would
+see a few Netlify addresses for everyone, and the forwarded header that
+names the real one can be sent by anyone who calls the Worker directly);
+and it would put the classroom's traffic back on the Netlify bandwidth the
+move exists to spare. The cost: the website's pages call another origin
+(CORS, below; the classroom pages' `connect-src` gains the Worker's
+`https:` and `wss:` origin when the UI ships, §4.10), and a school whose web
+filter blocks `*.workers.dev` blocks the classroom (§3.10, a custom domain
+is the fix). A same-origin rewrite for the HTTP API alone stays possible
+later (the client takes any base) once the address question has an answer
+(§11.16).
 
 | Header | Value |
 |---|---|
 | `Authorization` | `Bearer <teacherToken>` (teacher endpoints), `Bearer <studentToken>` (student endpoints), `Bearer <joinToken>` (the two join endpoints); none on `/health`, `/api/live/*` and `GET /move/{moveId}` |
-| `x-cedarlogic-student` | student endpoints: the `studentId` the token belongs to (the server looks the hash up by it) |
+| `x-cedarlogic-student` | student endpoints: the `studentId` the token belongs to |
 | `x-cedarlogic-client` | `mac/0.4.0+830`, `web/<build>`; logged nowhere |
 | `x-cedarlogic-key` | apps only: `APP_KEY`, as Sync |
 | `x-cedarlogic-delete` | `DELETE /classes/{classId}` only: the `deleteToken` |
 | `If-None-Match` | status, the pulse, the submissions index and the answers: the `ETag` last seen → `304` |
+| `x-cedarlogic-wait` | **new**: the pulse and the answers, with `If-None-Match`: hold the request up to this many seconds (the server holds at most `limits.holdSeconds`) until there is something new (§3.3) |
 | `content-type` | `application/json` with a body |
 
 Bodies are JSON (≤ 4,000,000 bytes; larger → `413 too_large`). Every
-`/api/classroom/` response is JSON with `cache-control: no-store` and a `Date`
-header (clients keep Sync's clock offset from it); errors are
+response is JSON with `cache-control: no-store` and a `Date` header
+(clients keep Sync's clock offset from it); errors are
 `{"error":"<code>","message":"<a sentence a person can read>"}` plus
-`retryAfter` and a `Retry-After` header with 429/503. `/api/live/` responses
-carry cache headers instead (§3.10).
+`retryAfter` and a `Retry-After` header with 429/503. Nothing is cached
+by Cloudflare or anyone else on the way (revision 2's CDN headers and cache
+tags are gone; so is purging).
 
-**Who may call**: Sync §3.2's gate (an `Origin` of the site or of
-`SYNC_ORIGINS`, a same-origin `Sec-Fetch-Site`, or the app key), with the
-same CORS answer for the extra origins and `Access-Control-Allow-Headers:
-authorization, content-type, if-none-match, x-cedarlogic-client,
-x-cedarlogic-delete, x-cedarlogic-student`. The `/api/live/` endpoints skip
-the gate: they are cacheable, need the class's `fetchKey` in the path, and
-hold nothing but ciphertext and two counters.
+**Who may call**: the gate of revision 2, by origin: an `Origin` on
+`CLASSROOM_ORIGINS` (default `https://cedarlogic.netlify.app`; local dev
+servers added in `.dev.vars`), a same-origin `Sec-Fetch-Site`, or, with no
+`Origin`, the app key (`APP_KEY`; without one set, apps pass). The site
+itself is now one of the listed origins, so its responses carry
+`Access-Control-Allow-Origin` too (revision 2 sent none for the site's own
+origin): `Access-Control-Allow-Origin: <the origin>`,
+`-Allow-Methods: GET, PUT, POST, DELETE`, `-Allow-Headers: authorization,
+content-type, if-none-match, x-cedarlogic-client, x-cedarlogic-delete,
+x-cedarlogic-student, x-cedarlogic-key, x-cedarlogic-wait`,
+`-Expose-Headers: date, retry-after, etag`, `-Max-Age: 7200` (a browser asks
+again at most every two hours: preflights are Worker requests), `Vary:
+Origin`. The `/api/live/` endpoints skip the gate (ciphertext and counters
+behind the `fetchKey`) and answer any page: `Access-Control-Allow-Origin:
+*`, `-Allow-Headers: if-none-match, x-cedarlogic-wait`. A WebSocket's
+upgrade request passes the same gate as the API (browsers send `Origin` on
+it).
 
 ### 3.3 Endpoints
 
@@ -876,21 +957,29 @@ hold nothing but ciphertext and two counters.
 | GET | `/classes/{classId}/assignments/{aid}/submissions/{sid}` | T, or S for its own | one submission record | 200 |
 | PUT | `/classes/{classId}/assignments/{aid}/submissions/{sid}` | S (own) | hand in `{base, ver, env}` | 201 / 200 / 409 / 412 |
 | PUT | `/classes/{classId}/live` | T | go live, push, predict, reveal, end: `{base, ver, session, on, predict, env}` | 200 / 412 |
-| GET | `/classes/{classId}/live/answers?session=…` | T | `{session, answers:[{studentId, ver, h, env}]}` | 200 / 304 |
-| PUT | `/classes/{classId}/live/answers/{sid}` | S (own) | `{session, ver, env}` (the latest wins) | 200 |
+| GET | `/classes/{classId}/live/answers?session=…` | T | `{session, answers:[{studentId, ver, h, env}]}`; may be held (`x-cedarlogic-wait`) | 200 / 304 |
+| PUT | `/classes/{classId}/live/answers/{sid}` | S (own) | `{session, ver, env}` (the latest wins); or over the socket (§3.14) | 200 |
+| GET | `/classes/{classId}/socket` | – then T or S in `hello` | **new**: the live connection, a WebSocket (§3.14) | 101 |
 | GET | `/join/{joinId}` | J | what the code holds: `{classId, ver, env, open}` | 200 |
 | POST | `/classes/{classId}/students` | J | join: `{studentId, tokenHash, name:{ver:1, env}}` → `{joinedAt, fetchKey}` | 201 |
 | PUT | `/classes/{classId}/students/{sid}` | S (own) | rename: `{name:{ver, env}}` | 200 |
 | PUT | `/move/{moveId}` | S | leave a move slot: `{classId, studentId, env}` | 201 |
 | GET | `/move/{moveId}` | – | `{classId, env, expiresAt}` | 200 |
 | DELETE | `/move/{moveId}` | S (the slot's student), – after expiry | | 200 |
-| GET | `/api/live/v1/{classId}/{fetchKey}` | – (the `fetchKey`) | **the pulse**: `{"seq":12,"live":57,"p":3}` (`live` 0 when no session is on; `p` the poll interval in seconds), `ETag: "12.57"` | 200 / 304 / 404 |
+| GET | `/api/live/v1/{classId}/{fetchKey}` | – (the `fetchKey`) | **the pulse**: `{"seq":12,"live":57,"p":10}` (`live` 0 when no session is on; `p` the poll interval in seconds), `ETag: "12.57"`; may be held (`x-cedarlogic-wait`) | 200 / 304 / 404 |
 | GET | `/api/live/v1/{classId}/{fetchKey}/live/{ver}` | – (the `fetchKey`) | the live record `{ver, session, env}` of exactly that version | 200 / 404 |
 | GET | `/api/live/v1/{classId}/{fetchKey}/assignment/{aid}/{ver}` | – (the `fetchKey`) | the assignment record `{ver, env}` of exactly that version | 200 / 404 |
 | GET | `/api/live/v1/{classId}/{fetchKey}/info/{ver}` | – (the `fetchKey`) | the info record of exactly that version | 200 / 404 |
+| PUT | `/classes/{classId}/items/{iid}` | T | **v2** (§3.16.2): a shared circuit or class example `{base, ver, env, hidden}` | 201 / 200 / 412 / 507 |
+| DELETE | `/classes/{classId}/items/{iid}` | T | **v2**: delete it | 200 |
+| GET | `/api/live/v1/{classId}/{fetchKey}/item/{iid}/{ver}` | – (the `fetchKey`) | **v2**: the item record of exactly that version | 200 / 404 |
+| GET | `/classes/{classId}/assignments/{aid}/submissions/{sid}/history` | T, or S for its own | **v2** (§3.16.3): the earlier hand-ins `{attempts:[{ver, size, at, h, attempts, env}]}`, oldest first | 200 |
+| DELETE | `/admin/classes/{classId}` | `ADMIN_TOKEN` | **v2** (§3.16.5): the owner deletes a class | 200 / 401 / 404 |
 
 `limits` everywhere =
-`{"maxStudents":300,"maxAssignments":100,"maxRecordBytes":524288,"maxSmallRecordBytes":4096,"maxNameBytes":640,"maxAnswerBytes":2048,"maxClassBytes":104857600,"maxStudentBytes":10485760,"maxFetchIds":50,"pulseSeconds":3,"idleSeconds":60,"moveSeconds":600,"expiryDays":400}`.
+`{"maxStudents":300,"maxAssignments":100,"maxRecordBytes":524288,"maxSmallRecordBytes":4096,"maxNameBytes":640,"maxAnswerBytes":2048,"maxClassBytes":104857600,"maxStudentBytes":10485760,"maxFetchIds":50,"pulseSeconds":10,"idleSeconds":60,"moveSeconds":600,"expiryDays":548,"holdSeconds":25,"maxItems":300,"maxHistory":20,"expiryWarnDays":30}`
+(revision 2: `pulseSeconds` 3 and no `holdSeconds`; readers ignore fields
+they don't know).
 
 **Entry** shapes: a record index entry is `{ "ver": 3, "size": 2048, "at": ms, "h": "<32 hex>" }`
 (a submission's adds `attempts`, `firstAt`; an assignment's adds `closesAt`:
@@ -914,33 +1003,36 @@ server, which the teacher's devices compare with the one they wrote (§4.1).
 The student view has `seq`, `fetchKey`, `info`, `assignments`, `live`,
 `expiresAt` and `limits` only. Both carry `ETag: "<seq>"`; `If-None-Match` →
 `304`. There is no public key in either: the server has none (§1.4).
+`bytes` is every envelope byte the class keeps (the class side's, the
+names', the hand-ins'); answers aren't counted (as revision 2).
 
 #### `PUT /classes/{classId}` — create, re-create or confirm
 
 Body `{"deleteHash":"<64 hex>","teacher":{"ver":1,"env":"…"},"join":{"joinId":"<32 hex>","joinToken":"<43 b64url>","open":true,"ver":1,"env":"…"},"info":{"ver":1,"env":"…"}}`
-(all required to create; ignored when confirming).
+(all required to create; ignored when confirming). In the class's object:
 
-1. A `gone/<classId>` marker → `410 class_deleted` / `410 class_expired`.
-2. `a/<classId>` exists with another `teacherHash` → `401 wrong_key`.
-3. `a/<classId>` missing: a new class. `CLASSROOM_CLOSED=1` → `503 busy`.
+1. A `gone` marker → `410 class_deleted` / `410 class_expired`.
+2. `auth` exists with another `teacherHash` → `401 wrong_key` (counted).
+3. `auth` and the class document both there → `200 {created:false, …status}`.
+4. Else a new class (or one the alarm removed after a week unused, made
+   again). `CLASSROOM_CLOSED=1` or no `CLASSROOM_JOIN_PEPPER` → `503 busy`.
    Validate the body (envelopes base64url decoding to 30…4,096 bytes with
    byte 0 = 1 and byte 1 ∈ {0, 1}; `deleteHash` 64 hex; `joinId` 32 hex;
    `joinToken` 43 base64url characters; an unknown field such as an old
-   client's `pub` is ignored and never stored) → else `400 bad_request`. Rate checks: `create/<ipkey>` (10 per
-   address per day), the site's daily creation brake (env
-   `CLASSROOM_NEW_CLASSES_PER_DAY`, default 200) and the site byte budget →
-   `503 classroom_busy` when over. Write `a/<classId>` =
-   `{teacherHash, deleteHash, createdAt}` with `onlyIfNew` (if that loses,
-   re-read and go to step 2).
-4. `c/<classId>` exists → `200 {created:false, …status}`.
-5. Else store the three envelopes as blobs (`t/`, `i/`, and `j/<joinIndex>`
-   = `{classId, joinHash, open, ver, env, at}` with the HMACs of §1.3, with
-   `onlyIfNew`: a `joinIndex` already taken by another class — 1 in 2⁴⁸ per
-   pair of codes — or retired (a changed code, a deleted class: below) makes
-   the client pick another join code: `409 join_exists`; only the class's own
-   code, kept while it was idle, is taken back), make the class's `fetchKey` (16 bytes from the CSPRNG,
-   hex), then write the class document (§3.6) with `onlyIfNew` →
-   `201 {created:true, …status}`.
+   client's `pub` is ignored and never stored) → else `400 bad_request`.
+   Without `auth` yet: the address's 10 new classes a day (the address's
+   object), then the site's daily brake (`CLASSROOM_NEW_CLASSES_PER_DAY`,
+   200) and the storage budget's "nearly full" (the site object, §3.5) →
+   `503 classroom_busy` when over; then `auth` = `{classId, teacherHash,
+   deleteHash, createdAt}`.
+5. Claim the join index at the site object: a `joinIndex` held by another
+   class, or retired (a changed code, a deleted class: below), is never
+   taken → `409 join_exists` (1 in 2⁴⁸ per pair of codes for a fresh one;
+   only the class's own code, kept while it was idle, is taken back).
+6. One transaction: the teacher and info envelopes, the class document
+   (§3.6) with a new `fetchKey` (16 bytes from the CSPRNG, hex) →
+   `201 {created:true, …status}`; the class's size to the site's sum; its
+   alarm set (§3.11).
 
 **Create Classroom** uses PUT with brand-new codes and keys (must be 201; on
 200 — practically impossible — start again with new secrets). A device that
@@ -949,60 +1041,66 @@ after 7 idle days, §3.11) re-creates it the same way from what it holds.
 
 #### `GET /join/{joinId}` and `POST /classes/{classId}/students` — joining
 
-`GET /join/{joinId}` with `Authorization: Bearer <joinToken>`: an address
-already past its 60 failed lookups this hour → `429`, before anything is
-looked up, so past the limit a right code and a wrong one look the same. The
-server computes `joinIndex` (§1.3); `j/<joinIndex>` missing → `404 no_class`
-(counted as a failed lookup); the class gone → `410`; `joinHash` ≠ HMAC of
-the token → `401 wrong_token` (counted; `404 no_class` for a retired code).
-The whole code right but changed since → `404 no_class` with "This code was
-changed. Ask your teacher for the new one." and `changed: true` (not
-counted). Else
-`200 {classId, ver, env, open}`. Nothing is written.
+`GET /join/{joinId}` with `Authorization: Bearer <joinToken>` (the site
+object): an address already past its 60 failed lookups this hour → `429`,
+before anything is looked up, so past the limit a right code and a wrong one
+look the same. The site computes `joinIndex` (§1.3) and looks it up (then
+under `CLASSROOM_JOIN_PEPPER_OLD`, if set); none → `404 no_class` (counted
+as a failed lookup); then it asks the class's object whether the class is
+there and this is its current code: the class gone → `410`; the HMAC of the
+token ≠ the entry's `joinHash` → `401 wrong_token` (counted; `404 no_class`
+for a retired code). The whole code right but changed since → `404 no_class`
+with "This code was changed. Ask your teacher for the new one." and
+`changed: true` (not counted). Found under the old pepper → moved to the
+current one (the site's row and the class's document). Else
+`200 {classId, ver, env, open}`.
 
 **A join code is never freed.** Change Join Code, Delete Class, expiry and the
-7-day removal of a never-used class turn its `j/` entry into a retired one,
-`{retired:true, reason, classId, joinHash, at}` (`reason`: `changed`,
-`deleted`, `expired` or `idle`), kept 400 days, so whoever knows an old code
-(a leak, an old handout) can't register a class under it for students to
-join. Only the same class can take back an `idle` one (its `a/` is kept, so
-only its own teacher token gets that far). The server never tells how many students a class has to someone who
-hasn't joined.
+7-day removal of a never-used class turn its row into a retired one,
+`{retired, reason, classId, joinHash, at}` (`reason`: `changed`, `deleted`,
+`expired` or `idle`; the record itself dropped), kept 400 days, so whoever
+knows an old code (a leak, an old handout) can't register a class under it
+for students to join. Only the same class can take back an `idle` one (its
+`auth` is kept, so only its own teacher token gets that far). The server
+never tells how many students a class has to someone who hasn't joined.
 
 `POST /classes/{classId}/students` with the join token, body
-`{"studentId":"<uuid>","tokenHash":"<64 hex>","name":{"ver":1,"env":"<sealed, ≤ 640 bytes>"}}`:
-the class's **current** join entry's `joinHash` must match the token (an old
-code → `401 wrong_token`); `open` false → `403 join_closed`; roster at
-`maxStudents` → `507 class_full` (an address past its failed lookups → `429`
-first, as above); `studentId` already in the roster →
-`409 student_exists`; a name envelope over 640 bytes → `413
-record_too_large`; counted per address (300 joins an hour: a lab; and 500
-into one class a day: a whole lecture behind one school address) and per
-class (1,000 a day). Then
-a conditional write of the roster document (§3.7) adding `{hash: tokenHash,
-joinedAt: now, seenAt: now, name: {ver, env, size}}` →
-`201 {joinedAt, fetchKey}`. A lost answer: the client repeats the POST; `409`
-on its own `studentId` → it checks with `GET /classes/{classId}` under its
-token: `200` means it is in; `401`/`403` means the id belongs to someone else
-(impossible in practice) — make a new one and join again.
+`{"studentId":"<uuid>","tokenHash":"<64 hex>","name":{"ver":1,"env":"<sealed, ≤ 640 bytes>"}}`
+(the class's object): no class → `404 no_class` (counted), a gone one →
+`410`; an address past its failed lookups → `429`; the HMAC of the token ≠
+the class's **current** join HMAC (an old code too) → `401 wrong_token`
+(counted); `open` false → `403 join_closed`; a name envelope over 640 bytes
+→ `413 record_too_large`; counted per address (300 joins an hour), per
+address into this class (500 a day: a whole lecture behind one school
+address) and per class (1,000 a day); `studentId` already in the roster →
+`409 student_exists` (the same id, token hash and name again → `201` as it
+was: a lost answer repeated); roster at `maxStudents` → `507 class_full`.
+Then one transaction adds the student `{hash: tokenHash, joinedAt: now,
+seenAt: now, name: {ver, env, size}}` → `201 {joinedAt, fetchKey}`, and the
+teacher's sockets hear the new count (§3.14). A lost answer: the client
+repeats the POST; `409` on its own `studentId` → it checks with
+`GET /classes/{classId}` under its token: `200` means it is in;
+`401`/`403` means the id belongs to someone else (impossible in practice) —
+make a new one and join again.
 
 #### `PUT /classes/{classId}/join` — change the code, open or close joining
 
 Body `{"joinId":"…","joinToken":"…","open":true,"ver":4,"env":"…","teacher":{"base":2,"ver":3,"env":"…"}}`.
 The teacher record travels in the same request so the join code and the
 record that remembers it change together: `teacher.base` ≠ the current
-teacher ver → `412 conflict` (nothing written). Else: write the new
-`j/<joinIndex>` (`onlyIfNew` unless it is the current one; a taken index →
-`409 join_exists`) and the teacher blob, then one conditional write of the
+teacher ver → `412 conflict` (nothing written; a join `ver` below the
+current, or a new code with the same `ver`, → `412` with the join's
+`current`). Else the site object claims the new index (a taken or retired
+one → `409 join_exists`) or, for the same code, updates its row (open,
+`ver`, `env`); then one transaction in the class: the teacher envelope, the
 class document (`joinIndex`, `join: {ver, h, open, at}`, `teacher`, `seq +
-1`, and — when the code changed — a new `fetchKey`), then retire the old
-`j/<oldJoinIndex>` (best effort; the cleanup retires a `j/` entry no class
-names; a retired code → `409 join_exists`) and purge the tag `class-<classId>` (§3.3, the pulse). Closing or
-re-opening with the same code sends the same `joinId`, `joinToken` and `env`
-with `open` changed, and keeps the `fetchKey`. A new code is a new
-`fetchKey` because the old code may be the leak: whoever joined with it and
-was then removed, or only ever read the join record, loses the record paths
-with it; current members get the new value from their next status.
+1`, and — when the code changed — a new `fetchKey`); then the old index is
+retired (`changed`). Closing or re-opening with the same code sends the same
+`joinId`, `joinToken` and `env` with `open` changed, and keeps the
+`fetchKey`. A new code is a new `fetchKey` because the old code may be the
+leak: whoever joined with it and was then removed, or only ever read the
+join record, loses the record paths with it; current members get the new
+value from their next status, or at once on their socket (§3.14).
 
 #### `PUT /classes/{classId}/assignments/{aid}` — post or edit
 
@@ -1012,9 +1110,11 @@ Body `{"base":0,"ver":1,"env":"<class-key envelope ≤ 512 KiB>","closesAt":null
 `412 conflict` with `current`; the same `ver` and `h` again → `200` (replay);
 `maxAssignments` reached by a new id → `507 too_many_assignments`; the
 class's bytes over `maxClassBytes` by a growing write → `507 class_full`
-(edits that shrink and deletes always go through); the site budget → `507
-site_full`. Store the blob, then the class document (`assignments[aid]`, `seq
-+ 1`) → `201` (new) / `200`. Every student's next pulse shows the new `seq`.
+(edits that shrink and deletes always go through); the site's storage full
+(§3.5) → `507 site_full`. One transaction stores the assignment's row
+(entry and envelope together) and the class document (`seq + 1`) → `201`
+(new) / `200`. Every student's socket hears the new `seq` at once; pollers
+at their next pulse.
 
 #### `PUT …/submissions/{sid}` — hand in
 
@@ -1023,133 +1123,142 @@ The assignment must exist (`404 no_assignment`); `closesAt` set and `now >
 closesAt` → `409 assignment_closed`; the envelope must be a sealed one (byte 0
 = 2); counted: 60 hand-ins per student per hour, 600 per class per hour, and
 the student's bytes in the class ≤ `maxStudentBytes` → else `429` /
-`507 student_full`. Replay and `base` as above (the index entry is the
-record). Store the blob, then the submissions index document of that
-assignment (`subs[sid] = {ver, size, at, h, b, attempts+1, firstAt}`) with a
-conditional write → `201` the first time, `200` after. The previous blob is
-garbage. A student can `GET` its own record back (the Mac app uses that to
-show "Handed in 4 Oct 10:31 · attempt 2" after a reinstall).
+`507 student_full`. Replay and `base` as above. One transaction: the
+hand-in's row (the latest per student per assignment: the previous one is
+replaced, not kept), the student's bytes, the class's → `201` the first
+time, `200` after. The teacher's sockets hear `{"t":"handin","aid"}`. A
+student can `GET` its own record back (the Mac app uses that to show
+"Handed in 4 Oct 10:31 · attempt 2" after a reinstall).
 
 #### `PUT /classes/{classId}/live` — the live session
 
 Body `{"base":56,"ver":57,"session":"<uuid>","on":true,"predict":true,"env":"<class-key envelope>"}`.
-`base`/`ver` against `live.ver` in the class document (the slot starts at 0);
-a second teacher device that is behind gets `412` with `current` and asks
-the teacher (§4.4). `on: false` ends the session (`env` is the ended
-record; `live` in the pulse becomes 0). Store the blob, write the document
-(`live = {ver, session, on, predict, at, size, h, b}`, `seq + 1`). Answers of
-sessions other than the current one are deleted by the cleanup after a day.
+`base`/`ver` against the live slot's `ver` (it starts at 0); a second
+teacher device that is behind gets `412` with `current` and asks the
+teacher (§4.4). `on: false` ends the session (`env` is the ended record;
+`live` in the pulse becomes 0). One transaction: the live envelope and the
+document (`live = {ver, session, on, predict, at, size, h}`, `seq + 1`).
+Then every student's socket gets the record itself (`{"t":"live", …,
+"env"}`, §3.14), every teacher socket the pulse, and every held pulse its
+answer. Answers of sessions other than the current one are deleted by the
+class's alarm a day after the session changed.
 
 #### `PUT /classes/{classId}/live/answers/{sid}` — a predict answer
 
-Student auth. Body `{"session":"<uuid>","ver":57,"env":"<sealed ≤ 2 KiB>"}`.
+Student auth. Body `{"session":"<uuid>","ver":57,"env":"<sealed ≤ 2 KiB>"}`
+— or the same over the student's socket (§3.14: a twentieth of the cost).
 The session must be the live one and `ver` ≤ its ver (an answer to the
 version just replaced is kept and labelled by its ver), else
 `409 not_live`; counted 10 per student per minute and 6,000 per class per
-day. Writes `la/<classId>/<session>/<sid>` = `{ver, h, at, env}` (a plain
-overwrite: no document, no contention when 300 answer in the same ten
-seconds) → `200 {at}`.
+day. One row per student per session `{ver, h, at, env}` (a plain
+overwrite: 300 answering in the same ten seconds are 300 small writes in
+one object, one after another) → `200 {at}`. The teacher's sockets get the
+new answers in batches (at most every half second, the latest per student).
 
 #### `GET /classes/{classId}/live/answers?session=S`
 
-Teacher. Lists `la/<classId>/<S>/` (keys and etags only), `ETag` = first 32
-hex of SHA-256 of the sorted `key:etag` lines; `If-None-Match` equal → `304`
-without reading a blob. Else reads them 16 at a time (≤ 500) →
-`200 {session, answers:[{studentId, ver, h, env}]}`.
+Teacher. `ETag` = `"` + the first 32 hex of SHA-256 of the sorted
+`studentId:ver:h` lines + `"`; `If-None-Match` equal → `304` (or, with
+`x-cedarlogic-wait`, held until an answer arrives or the time is up);
+else `200 {session, answers:[{studentId, ver, h, env}]}` (≤ 500). A teacher
+device with an open socket doesn't poll this: the answers come to it.
 
 #### `GET …/submissions` and `POST …/submissions/fetch`
 
-Teacher. The index document with `ETag: "<its etag>"` (`304` when
-unchanged). `fetch` takes ≤ 50 student ids and answers like Sync's fetch
-(records in the order asked until 4,000,000 characters or ~6 s, the rest in
-`deferred`; ids not handed in in `missing`); bytes served count against the
-class's daily serve budget (200 MB).
+Teacher. The index with `ETag` = `"` + the first 32 hex of SHA-256 of the
+sorted `studentId:ver:h` lines + `"` (`"0"` with none; `304` when unchanged).
+`fetch` takes ≤ 50 student ids and answers like Sync's fetch (records in the
+order asked until 4,000,000 characters, the rest in `deferred`; ids not
+handed in in `missing`); characters served count against the class's daily
+serve budget (200 MB).
 
 #### `DELETE /classes/{classId}/students/{sid}`
 
-With the teacher token: the roster entry and the student's answers
-(`la/<classId>/*/<sid>`); the hand-ins **stay** (each is readable on its own,
-with the name inside: the teacher's list shows them under that name, marked
-"left the class") unless the request says `?submissions=delete`, which also
-removes every submission of theirs (each assignment's index document, then
-the blobs; `todo/<classId>` lists what the cleanup must finish) →
-`200 {removed:true}`. With the student's own token: the roster entry and the
-answers; hand-ins stay (§4.7) → `200 {left:true}`. Either way the class gets a
-new `fetchKey` (one conditional write of the class document, `seq + 1`, then
-a purge of `class-<classId>`), and the student's next request answers
-`403 not_a_member`.
+With the teacher token: the roster entry and the student's answers; the
+hand-ins **stay** (each is readable on its own, with the name inside: the
+teacher's list shows them under that name, marked "left the class") unless
+the request says `?submissions=delete`, which also removes every submission
+of theirs → `200 {removed:true}`. With the student's own token: the roster
+entry and the answers; hand-ins stay (§4.7) → `200 {left:true}`. Either way
+it is one transaction that also gives the class a new `fetchKey` (`seq +
+1`); the student's sockets are told (`bye`, 403) and closed, the others hear
+the new `fetchKey`, and the student's next request answers
+`403 not_a_member`. A second call → `200`.
 
 `POST /classes/{classId}/students/remove` (teacher; `{ids, submissions}`):
-the same for up to 300 students in one roster write and one `fetchKey`
+the same for up to 300 students in one transaction and one `fetchKey`
 change — what "Remove everyone who joined after 10:05" and a multi-select in
 the Students tab (§5.2) send after someone posted the code online. Counted as
-one teacher write; the submissions, when deleted, go through `todo/`.
+one teacher write.
 
 #### `DELETE /classes/{classId}/assignments/{aid}`
 
-Teacher. Conditional write of the class document (the entry removed, `seq +
-1`), purge the tag `asg-<aid>`, then its index document and blobs as time
-allows (`todo/`). `200`.
+Teacher. One transaction: the assignment, its hand-ins (and their bytes
+given back to their students), `seq + 1` → `200 {deleted:true}`; again →
+`200`.
 
 #### `DELETE /classes/{classId}`
 
 As Sync's `DELETE /spaces`: the teacher token plus `x-cedarlogic-delete`
 whose SHA-256 is `deleteHash` (`403 wrong_delete_token`); 5 per class per
-day. Marks `a/` deleted, writes `gone/<classId>` (`{at, reason:"deleted"}`,
-kept forever), `todo/<classId>`, retires `j/<joinIndex>`, purges the tag
-`class-<classId>` (so the CDN's copies of its records go too), then the
-documents and the blobs in batches as time allows → `200 {deleted:true}`. Every later request
-on the id, from anyone, gets `410 class_deleted`.
+day. Every socket of the class is told (`bye`, 410) and closed; the
+object's whole storage is deleted (`deleteAll`) and a `gone` marker
+(`{at, reason:"deleted", classId}`) written, kept for good; then the site
+object retires the join index and takes the class off the storage sum →
+`200 {deleted:true}`. Nothing is left for a cleanup to finish, and nothing
+was cached anywhere to purge. Every later request on the id, from anyone,
+gets `410 class_deleted`.
 
 #### The move slot
 
-`PUT /move/{moveId}` (student auth; body `{"classId", "studentId", "env"}`,
-`studentId` must be the caller): a live slot with this id → `409 move_exists`
-(make a new code); counted 10 per student per hour and 30 per address per
-hour; writes `mv/<moveId>` = `{classId, studentId, env, createdAt}` →
-`201 {expiresAt}`. `GET /move/{moveId}` (no auth: knowing the id is knowing
-the code): `200 {classId, env, expiresAt}` or `404 move_gone` (at or after
-`createdAt + 600,000 ms`, whatever is stored). `DELETE /move/{moveId}`: the
-slot's student's token, or anyone once it has expired → `200`. The cleanup
-deletes slots older than an hour.
+`PUT /move/{moveId}` (the site object; student auth, checked by the class's
+object; body `{"classId", "studentId", "env"}`, `studentId` must be the
+caller): a live slot with this id → `409 move_exists` (make a new code; the
+same student and envelope again → `201`, a repeat); counted 10 per student
+per hour and 30 per address per hour; stores `{classId, studentId, env,
+createdAt}` → `201 {expiresAt}`. `GET /move/{moveId}` (no auth: knowing the
+id is knowing the code): `200 {classId, env, expiresAt}` or `404 move_gone`
+(at or after `createdAt + 600,000 ms`, whatever is stored; counted as a
+failed lookup). `DELETE /move/{moveId}`: the slot's student's token, or
+anyone once it has expired → `200`. The site's alarm deletes slots older
+than an hour.
 
 #### The pulse (`/api/live/v1/…`)
 
-`GET /{classId}/{fetchKey}`: reads the class document (one strong read of a
-few KB): `200 {"seq":12,"live":57,"p":3}` with `ETag: "12.57"`,
-`Cache-Control: no-store` (for browsers), `Netlify-CDN-Cache-Control: public,
-durable, s-maxage=2, stale-while-revalidate=5` and `Netlify-Cache-Tag:
-class-<classId>`; an `If-None-Match` that matches → `304` with the same cache
-headers; no such class (or gone) → `404 {"error":"no_class"}` cached 10 s; a
-`fetchKey` that isn't the class's current one → `404
-{"error":"wrong_fetch_key"}` cached 10 s (a member then reads its status,
-which has the new one; a removed member gets `403 not_a_member` there).
-`p` is `limits.pulseSeconds` (env `CLASSROOM_PULSE_SECONDS`), so the owner
-can slow a whole site's polling without a deploy.
+`GET /{classId}/{fetchKey}` (the class's object): `200 {"seq":12,"live":57,"p":10}`
+with `ETag: "12.57"`; an `If-None-Match` that matches → `304`; no such class
+(or gone) → `404 {"error":"no_class"}`; a `fetchKey` that isn't the class's
+current one → `404 {"error":"wrong_fetch_key"}` (a member then reads its
+status, which has the new one; a removed member gets `403 not_a_member`
+there); both 404s are counted as failed lookups. `p` is
+`limits.pulseSeconds` (env `CLASSROOM_PULSE_SECONDS`), so the owner can slow
+every client's polling without a deploy.
+
+**Held polls (new).** A pulse whose `If-None-Match` matches and that carries
+`x-cedarlogic-wait: N` is held open up to min(N, `holdSeconds`) seconds
+(env `CLASSROOM_HOLD_SECONDS`, 25 by default; 0 turns holding off), and
+answered the moment the class changes (`200` with the new pulse) or at the
+end (`304`). A held poll is one Worker request and one object request
+however long it waits; while any is held the object stays awake, which is
+billed as the object's duration, not per poll (§3.10). It is the fallback
+for a device whose socket can't connect (§3.14). Clients that don't send
+the header are answered at once, as before.
 
 `GET /{classId}/{fetchKey}/live/{ver}`, `…/assignment/{aid}/{ver}`,
-`…/info/{ver}`: the class document is read first (the `fetchKey` must be the
-current one, else `404 wrong_fetch_key` as above; a cache miss happens about
-once per version, so the extra read is cheap), then the record of exactly
-that version — `200 {ver, session?, env}` with `Netlify-CDN-Cache-Control:
-public, durable, max-age=31536000, immutable` (a version's bytes never
-change) and `Netlify-Cache-Tag: class-<classId>` (an assignment's also
-`asg-<aid>`) — or `404 {"error":"no_version"}` cached 10 s when the class has
-moved on (the client reads the pulse again). Every `/api/live/` response
-carries the class's cache tag, so a purge (a deleted class or assignment, a
-new `fetchKey`, an expired class) removes the CDN's copies at once; the
-purge is best effort (a failure is logged as a count and retried by the
-cleanup), and the deletion texts promise only what it does. The version is in the path, never in a query
-string: Netlify's CDN keys a function's response on the whole URL, query
-string included, so a `?v=` would work but would also let any `?x=…` make a
-fresh cache miss; these endpoints ignore query strings, clients never send
-one, and no `Netlify-Vary` header is needed. They hold only ciphertext under
-the class key, and only someone who has the current `fetchKey` — a member,
-from an authenticated status — can download them. A student who leaves or is
-removed, or who only ever had an old join code, keeps the class key but not
-the path: an honest server stops serving them anything new. (A dishonest
-server could, and a current member could pass the path on; that is the
-limit of a class key that never changes, §0.)
+`…/info/{ver}`: the `fetchKey` must be the current one (else `404
+wrong_fetch_key`), then the record of exactly that version — `200 {ver,
+session?, env}` — or `404 {"error":"no_version"}` when the class has moved
+on (the client reads the pulse again). Only the current version of each
+record is kept (revision 2's CDN could serve an older one for a while;
+here a member asks for the version the pulse or status named). The version
+is in the path, never in a query string; query strings are ignored. They
+hold only ciphertext under the class key, and only someone who has the
+current `fetchKey` — a member, from an authenticated status or its socket —
+can download them. A student who leaves or is removed, or who only ever had
+an old join code, keeps the class key but not the path: an honest server
+stops serving them anything new. (A dishonest server could, and a current
+member could pass the path on; that is the limit of a class key that never
+changes, §0.)
 
 ### 3.4 Status codes and errors (complete list)
 
@@ -1173,7 +1282,7 @@ limit of a class key that never changes, §0.)
 | 409 | `assignment_closed` | "Hand-ins for this assignment are closed." | show, with the due date the client knows |
 | 409 | `not_live` | "The teacher isn't showing this question any more." | drop the answer |
 | 410 | `class_deleted` | "This class was deleted by the teacher." | forget the class (§4.11) |
-| 410 | `class_expired` | "This class was removed after 400 days without use." | forget the class |
+| 410 | `class_expired` | "This class was removed after 18 months without use." | forget the class |
 | 412 | `conflict` | "This was changed on another device." (+ `current`) | teacher: refetch, show, let the person decide (§4.1); student hand-in: take `current.ver` as base and send again |
 | 413 | `too_large` | "That's too much to send at once." | bug |
 | 413 | `record_too_large` | "Too big to send (over 512 KB)." | show; the circuit stays local |
@@ -1184,167 +1293,202 @@ limit of a class key that never changes, §0.)
 | 503 | `classroom_paused` | "Classrooms are resting on the website for today. Your work is safe on this device." | writes only (§3.5): back off until `Retry-After`; reading goes on |
 | 507 | `class_full` | "This class is full." | show |
 | 507 | `too_many_assignments` | "This class has as many assignments as it can hold (100). Delete one to post another." | show |
+| 507 | `too_many_items` | "This class has as many examples and shared circuits as it can hold (300). Delete one to add another." | show (v2, §3.16.2) |
 | 507 | `student_full` | "You've handed in as much as this class allows. Ask your teacher." | show |
 | 507 | `site_full` | "The website's classroom storage is full just now." | show; keep the work local |
+
+
+The Netlify functions that revision 2 ran (§3.1, superseded) answer every
+request `410 {"error":"moved","message":"CedarLogic Classroom has moved.
+Update CedarLogic."}` unless `CLASSROOM_NETLIFY=1`: a client built for
+revision 2's addresses shows that sentence. The live connection's own
+closing codes and `bye` messages are in §3.14.
 
 ### 3.5 Limits and abuse policy (stated plainly)
 
 Free encrypted storage with public write endpoints invites abuse, and the
-server can't look inside. The budget is the site's Netlify plan, shared with
-Sync, feedback and the stats function (§3.10 has the plan and the numbers).
+server can't look inside. The budget is the Cloudflare account's Free plan
+(§3.10 has the numbers, read from Cloudflare's pages on 2026-10-06): each
+day (reset at 00:00 UTC) 100,000 Worker requests, 100,000 Durable Object
+requests, 13,000 GB-s of object duration, 5,000,000 SQLite rows read and
+100,000 written; 5 GB of storage in all, for good. Past any of them
+"further operations of that type will fail with an error" until the reset:
+the Worker or the objects fail, **the Netlify site, the simulator and Sync
+don't** (that is the point of the move).
 
-- **Caps per class**: 300 students (`maxStudents`; 500 as a hard ceiling in
-  code), 100 assignments, 512 KiB per assignment, submission or live record,
-  4 KiB per small record, 2 KiB per answer, 100 MiB in all, 10 MiB of hand-ins
-  per student.
-- **Per address** (`ipkey` = Sync's HMAC of the address, IPv6 /64): 10 new
-  classes a day; 60 failed lookups or sign-ins an hour (wrong join code, wrong
-  token, unknown class, wrong `fetchKey`), then `429` for that hour — for a
-  join lookup or a join, even with the right code; 300 joins an hour, and 500
-  into any one class a day; 30 move slots an hour; 50 MB of
-  envelopes written a day.
-- **Per address, every invocation** (`CLASSROOM_ADDRESS_PER_HOUR`, default
-  6,000, and `CLASSROOM_ADDRESS_PER_DAY`, default 12,000: a 300-student school
-  behind one address in a predict-heavy lecture makes about 4,700 function
-  invocations — pulse misses, answers, joins — in its 75 minutes). Counted on
-  every request that reaches the function, 4xx and 5xx included, before
-  anything else is read: each instance counts in memory per `ipkey` and adds
-  its count to `rate/<hour>/addr/<ipkey>` with Sync's `allowIn` every 50
-  requests (so a busy address costs one counter write per 50 requests, not
-  one each); an address over either allowance gets `429 rate_limited` (with
-  `Retry-After` to the window's end) and is remembered in that instance's
-  memory until then. Over-allowance requests are **not** counted by the
-  site's breaker below.
-- **Per class, only after the token checks out**: 1,000 joins a day; 600
-  hand-ins an hour; 6,000 answers a day; 200 MB served by `fetch` a day; 5
-  deletions a day; 60 teacher writes a minute.
+- **Caps per class** (unchanged): 300 students (`maxStudents`; 500 as a
+  hard ceiling in code), 100 assignments, 512 KiB per assignment,
+  submission or live record, 4 KiB per small record, 2 KiB per answer,
+  100 MiB in all, 10 MiB of hand-ins per student.
+- **Per address** (the address key = the first 24 hex of
+  HMAC-SHA256(`CLASSROOM_RATE_PEPPER`, the address), IPv6 by its /64, as
+  Sync's; counted in that key's own object, never stored as an address):
+  10 new classes a day; 60 failed lookups or sign-ins an hour (wrong join
+  code, wrong token, unknown class, wrong `fetchKey`, an expired move code),
+  then `429` for that hour — for a join lookup or a join, even with the
+  right code; 300 joins an hour, and 500 into any one class a day; 30 move
+  slots an hour; 50 MB of envelopes
+  written a day (counted by the Worker from written bodies: about ¾ of their
+  characters).
+- **Per address, every request** (`CLASSROOM_ADDRESS_PER_HOUR`, default
+  10,000, and `CLASSROOM_ADDRESS_PER_DAY`, default 20,000): counted by the
+  Worker before anything else is read, in its isolate's memory, and added
+  to the address's object every 50 requests (or 2 MB of written bodies), so
+  isolates share the count at one object request in fifty; an address over
+  either gets `429 rate_limited` (with `Retry-After` to the window's end)
+  and is remembered in that isolate until then. Over-allowance requests are
+  **not** counted by the breaker below. A school of 300 on sockets makes
+  about 1,000 requests in a lecture; one whose network blocks sockets
+  would make tens of thousands (§3.10), and meets this allowance.
+- **Per class, only after the token checks out** (in the class's object):
+  1,000 joins a day; 600 hand-ins an hour; 6,000 answers a day; 200 MB
+  served by `fetch` a day; 5 deletions a day; 60 teacher writes a minute.
 - **Per student**: 60 hand-ins an hour; 10 answers a minute; 5 renames an
   hour; 10 move slots an hour.
-- **Site-wide**: a byte budget (env `CLASSROOM_MAX_TOTAL_BYTES`, default 4 GiB)
-  summed by the cleanup; a daily creation brake (`CLASSROOM_NEW_CLASSES_PER_DAY`,
+- **Per socket** (§3.14): 120 messages a minute (then `bye` 429 and
+  closed), 16 KiB a message, a `hello` within 30 s; 650 sockets per class.
+- **The class objects' counters** are kept in memory and written to the
+  class's `meta` row at most every 20 s (a counter is not a row written per
+  request): an eviction can lose at most those seconds of counting.
+- **Storage** (new): the site object keeps each class's size (envelope
+  bytes) as the class last reported it — at creation, deletion and expiry,
+  whenever it has moved by 1 MiB, and on each alarm — and their sum.
+  `CLASSROOM_MAX_TOTAL_BYTES` (default 3 GiB of envelopes, under the
+  account's 5 GB of SQLite storage with room for the database's own
+  overhead, the site's and the addresses' objects) and
+  `CLASSROOM_NEARLY_FULL_BYTES` (default 80 % of it). **Nearly full refuses
+  new classes first** (`503 classroom_busy`: "Classrooms can't be made
+  today…"), so the classes in use keep growing; **full** refuses every
+  growing write (`507 site_full`), while shrinking edits, deletions, reads,
+  joins and the live view go on. A class trusts the state it last heard
+  for ten minutes. At the 100 MiB cap 30 full classes would fill the
+  budget: the per-class cap is the owner's to lower (§11.17).
+- **Site-wide requests**: a daily creation brake (`CLASSROOM_NEW_CLASSES_PER_DAY`,
   200); a daily request breaker (`CLASSROOM_MAX_REQUESTS_PER_DAY`, default
-  20,000 invocations that were within their address's allowance — Netlify
-  counts invocations, not cached hits, so the pulse's cache hits are free).
-  **Past the breaker only writes stop**: every `PUT`, `POST` and `DELETE`
-  except `DELETE /classes/{classId}` gets `503 classroom_paused` until 00:00
-  UTC; the status, the pulse and the record fetches keep being served, so a
-  lecture in progress goes on (students' hand-ins and answers queue or drop
-  as §4.8 says). This is the one place that says so; §3.4 and §8.3 follow it.
-  `CLASSROOM_CLOSED=1` refuses new classes and every write with `503 busy`
-  (reads and the pulse keep working).
-- **Before the function runs**: the Netlify rate-limit rule of §3.1, on both
-  `/api/classroom/*` and `/api/live/*` (one function, one rule).
-- **A flood.** Every request that reaches a function is an invocation, and
-  the legacy Free plan has 125,000 a month, so what stops a flood from
-  spending them is the edge rule (a request it refuses never runs the
-  function), not anything inside the function: a `429` or a `503` is still an
-  invocation. One address is held to the rule's 1,200 a minute by the edge
-  and to 6,000 an hour and 12,000 a day by the allowance; the allowance keeps
-  it from tripping the breaker for everyone (it can spend at most 12,000 of
-  the breaker's 20,000; tripping it takes two addresses at full allowance in
-  one day), and the pulse's made-up class ids and stale `fetchKey`s are
-  failed lookups, `429` after 60. What no rule here prevents is a flood from
-  many addresses spending the month's invocations: that is the same exposure
-  `/api/sync` and `/api/feedback` have today, and the answer is by hand — a
-  Netlify firewall traffic rule blocking the source (two per site on the Free
-  plan), raising the pulse interval, or the owner's choice of §11.4. Netlify's
-  suspension of the whole site (feedback and sync with it) is what the
-  breaker exists to make come second, not what it can always prevent.
-- **Counters** live in `classroom-misc` with Sync's `allowIn` (fixed windows,
-  conditional writes, fail open after two lost tries, deleted daily).
+  70,000 Worker requests that were within their address's allowance, of the
+  account's 100,000: each isolate counts in memory and tells the site object
+  every 100 requests or every minute, learning the day's sum). **Past the
+  breaker only writes stop**: every `PUT`, `POST` and `DELETE` except
+  `DELETE /classes/{classId}` gets `503 classroom_paused` until 00:00 UTC;
+  the status, the pulse, the record fetches and the sockets keep being
+  served, so a lecture in progress goes on (hand-ins and answers queue or
+  drop as §4.8 says), and the last 30,000 requests of the day are kept for
+  that. `CLASSROOM_CLOSED=1` refuses new classes and every write with
+  `503 busy` (reads, the pulse and sockets keep working): the kill switch,
+  a `wrangler secret put` away (§3.13).
+- **A flood.** Every request that reaches the Worker counts against the
+  day's 100,000, whatever it is answered (a `429` is still a request), and
+  nothing inside the Worker can stop that. One address is held to its
+  allowance (20,000 a day, so it can't trip the breaker alone: that takes
+  four); the pulse's made-up class ids and stale `fetchKey`s are failed
+  lookups, `429` after 60. A flood from many addresses can spend the day's
+  Worker requests, and then the classroom is down until 00:00 UTC — the
+  website, the simulator and Sync are not. On `workers.dev` there is no
+  WAF to block a source; with a custom domain (§3.10) Cloudflare's free
+  rate-limiting rule and WAF custom rules can, before the Worker runs
+  (those requests aren't Worker requests). The Workers Rate Limiting
+  binding is not used: per-location and approximate by design, and its
+  windows (10 or 60 s) don't fit the hour and the day.
 - **Expiry** (in the UI and on the website, in these words): "A class nobody
   opens for 400 days is removed from the website. Everyone keeps the circuits
   on their own devices." A class with no students and no assignments that
   nobody touched for 7 days is removed quietly (the teacher's device
   re-creates it from the key at the next open).
-- **Logging**: no bodies, tokens, codes, ids or addresses; counts only.
+- **Logging**: no bodies, tokens, codes, ids or addresses; error names and
+  counts only. Workers observability (logs kept by Cloudflare) is off in
+  `wrangler.toml`.
 
-### 3.6 Storage layout (Netlify Blobs)
+### 3.6 Storage layout (SQLite in the Durable Objects)
 
-Store `classroom` (per deploy context), `consistency: "strong"`:
+**A class's object** (named by its `classId`), its own SQLite database. Every
+table is `WITHOUT ROWID` with only its primary key, so a write is one row
+written (an extra index would be another, and rows written are the Free
+plan's tightest daily allowance):
 
-| Key | Value |
+| Table | Rows |
 |---|---|
-| `a/<classId>` | `{"teacherHash","deleteHash","createdAt","deleted"?,"reason"?}` — read first on every teacher request |
-| `c/<classId>` | the class document (below): teacher-written; `activeAt` touched daily |
-| `r/<classId>` | the roster document: `{"v":1,"students":{"<sid>":{"hash":"<64 hex>","joinedAt":ms,"seenAt":ms,"name":{"ver":1,"size":212,"env":"<b64u>"}}},"count":212,"bytes":…}` — read on every student request |
-| `si/<classId>/<aid>` | the submissions index: `{"v":1,"subs":{"<sid>":{"ver":2,"size":392,"at":ms,"h":"…","attempts":2,"firstAt":ms,"b":"<blob name>"}},"bytes":…}` |
-| `t/<classId>/<ver>-<ms>-<rand8hex>` | the teacher record envelope (raw bytes) |
-| `i/<classId>/<ver>-<ms>-<rand>` | the info envelope |
-| `as/<classId>/<aid>/<ver>-<ms>-<rand>` | an assignment envelope |
-| `lv/<classId>/<ver>-<ms>-<rand>` | a live record envelope |
-| `s/<classId>/<aid>/<sid>/<ver>-<ms>-<rand>` | a submission envelope |
-| `la/<classId>/<session>/<sid>` | `{"ver":57,"h":"…","at":ms,"env":"<b64u>"}` |
-| `j/<joinIndex>` | `{"classId","joinHash","open","ver","env","at"}` — `joinIndex` and `joinHash` are HMACs under `CLASSROOM_JOIN_PEPPER` (§1.3); neither `joinId` nor a plain hash of the join token is stored anywhere. A retired code: `{"retired":true,"reason","classId","joinHash","at"}`, kept 400 days (§3.3) |
-| `mv/<moveId>` | `{"classId","studentId","env","createdAt"}` |
-| `gone/<classId>` | `{"at": ms, "reason": "deleted" \| "expired"}` — kept forever |
-| `todo/<classId>` | unfinished deletions: `{"at", "all"?: true, "students"?: [sid], "assignments"?: [aid]}` |
-
-Store `classroom-misc`: `rate/<end>/<key>` counters (`rate/<hour>/addr/<ipkey>` among them), `day/<yyyymmdd>/creates`,
-`day/<yyyymmdd>/req/<instance>`, `budget`, `cleanup/cursor`.
+| `meta (k, v)` | `auth` = `{classId, teacherHash, deleteHash, createdAt, idleAt?}`; `doc` = the class document (below); `gone` = `{at, reason: "deleted" \| "expired", classId}` (after `deleteAll`, alone, for good); `counters` = the per-class rate counters |
+| `blobs (k, v BLOB)` | `t` the teacher record, `i` the info record, `lv` the live record (envelope bytes; only the current version) |
+| `asg (aid, ver, size, at, h, closesAt, env BLOB)` | one per assignment: its entry and its envelope |
+| `students (sid, hash, joinedAt, seenAt, nver, nsize, nh, nenv, hb)` | one per student: the token's SHA-256, the times, the sealed name (base64url), the bytes handed in |
+| `subs (aid, sid, ver, size, at, h, attempts, firstAt, env BLOB)` | one per student per assignment: the latest hand-in |
+| `answers (session, sid, ver, h, at, env)` | one per student per live session: the latest answer |
 
 The class document:
 
 ```json
 {
-  "v": 1, "createdAt": 1759600000000, "activeAt": 1759690000000, "seq": 12,
+  "v": 1, "classId": "9c89e40e9ea981bbfeaf61e93c91be46", "createdAt": 1759600000000, "activeAt": 1759690000000, "seq": 12,
   "fetchKey": "4f6b0c2d…c7d9",
   "joinIndex": "3bd699d5b6c129e47eb1c224c07e596f47f62cbf51fd9214fc9d96ebaa5fed2a",
-  "join": { "ver": 1, "h": "91896986016f65d61c8caff95f203d5e", "open": true, "at": 1759600000000 },
-  "teacher": { "ver": 1, "size": 379, "at": 1759600000000, "h": "570aeb55…", "b": "1-1759600000000-9f2c4e1a" },
-  "info":    { "ver": 1, "size": 105, "at": 1759600000000, "h": "9c0cc08b…", "b": "1-1759600000000-1c2d3e4f" },
-  "assignments": {
-    "7c9e6679-7425-40de-944b-e07fc1f90ae7": { "ver": 1, "size": 738, "at": 1759600000000, "h": "4e60b267…", "b": "1-1759600000000-77aa0012", "closesAt": null }
-  },
-  "live": { "ver": 57, "session": "2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d", "on": true, "predict": true, "at": 1759603600000, "size": 662, "h": "750b6b99…", "b": "57-1759603600000-0a0b0c0d" },
-  "bytes": 1234567
+  "join": { "ver": 1, "h": "91896986016f65d61c8caff95f203d5e", "open": true, "at": 1759600000000, "size": 231, "joinHash": "74277fb6351b2dd56c0eea6b0a1bb9b198d26ee0c1e6f2af350d5fcca423669c" },
+  "teacher": { "ver": 1, "size": 379, "at": 1759600000000, "h": "570aeb55…" },
+  "info":    { "ver": 1, "size": 105, "at": 1759600000000, "h": "9c0cc08b…" },
+  "live": { "ver": 57, "session": "2b1d0a9c-3e4f-4a5b-8c6d-7e8f9a0b1c2d", "on": true, "predict": true, "at": 1759603600000, "size": 662, "h": "750b6b99…" },
+  "bytes": 1234567, "names": 63600, "hb": 1048576, "students": 212, "assignments": 14, "reported": 2300000, "oldAnswersAt": 1759690000000
 }
 ```
 
-`seq` rises on every teacher write (not on joins, hand-ins or answers, which
-live in their own documents and blobs — so the pulse changes only when there
-is something new for students). `bytes` counts every envelope of the class
-(the roster's and the indexes' envelopes included, kept up to date by their
-writes). With 100 assignments the document is ~20 KB; the roster at 300
-students ~110 KB (≤ 640 bytes of name envelope each, so never much more); an
-index at 300 hand-ins ~40 KB.
+`seq` rises on every teacher write (not on joins, hand-ins or answers — so
+the pulse changes only when there is something new for students). `bytes`
+counts the class side's envelopes, `names` the roster's, `hb` the
+hand-ins'; their sum is the class's size. `reported` is the size the site
+last heard; `oldAnswersAt` when a session's answers became old (the alarm
+deletes them a day later).
 
-### 3.7 Consistency: every change is one conditional write
+**The site object** ("site"): `joins (idx, classId, joinHash, open, ver, env,
+at, retired, reason)` — `idx` and `joinHash` are HMACs under
+`CLASSROOM_JOIN_PEPPER` (§1.3), neither `joinId` nor a plain hash of the join
+token is stored anywhere; a retired row drops `env`. `moves (id, classId,
+studentId, env, createdAt)`. `classes (classId, bytes, at)` — the storage
+sum. `counts (k, e, n)` — new classes a day, the breaker's count per Worker
+isolate, move slots per student, each with its window's end `e`.
 
-As Sync §3.7, document by document: a request reads the document it needs
-with `getWithMetadata`, decides, stores new envelopes as blobs nobody refers
-to yet, then writes the document once with `onlyIfMatch: etag` (or
-`onlyIfNew`); a write is done **only if `w.modified && w.etag`** (the
-`@netlify/blobs` trap); anything else means "unknown": re-read and decide
-again (the replay rule recognises a write that did land); five tries, then
-`503 busy` (`retryAfter: 2`). After a definite loss the request waits a
-random moment (`Math.random() * 100 * (attempt + 1)` ms) so 300 hand-ins at
-the deadline minute don't lose the same rounds together. Blobs are never
-deleted inline — not a record's previous blob, not a lost write's — and a
-blob no document names is collected by the cleanup an hour later. Answers and
-move slots are plain blobs with no document, so they never contend.
+**An address's object** (named by the address key): `counts (k, e, n)` —
+its counters, each with its window's end. The table is made by the first
+count; an address only ever looked up (`peek`) leaves nothing.
 
-The documents a request may write, and in which order when it writes two:
-blobs first, then `c/` (class) **or** `r/` (roster) **or** `si/` (one
-assignment's index) — never two documents in one request, except `PUT /join`
-(the class document only; the `j/` entries are blobs). Deleting a student or
-an assignment touches several documents one after another and leaves a
-`todo/` for the cleanup, so a half-done removal is finished, never left
-inconsistent for long.
+Each object's alarm deletes what is old (§3.11).
+
+### 3.7 Consistency: one object, one transaction
+
+A Durable Object runs one event at a time, and its SQLite calls are
+synchronous, so a request that reads, decides and writes without an
+`await` in between can't be interleaved: every change to a class is one
+`transactionSync` in its object, and two hand-ins, 300 joins or 300 answers
+at the same moment are simply in order. A handler does its awaited work
+first (reading the body, hashing the token, asking another object), then
+reads and decides again in one synchronous step — which is why, for
+example, `PUT /join` checks the bases once before asking the site object to
+claim the new index and once more after. Nothing is ever half done:
+deleting a student, an assignment or a class is one transaction (and a
+class's deletion one `deleteAll`), so revision 2's `todo/`, garbage blobs
+and the cleanup's finishing work are gone.
+
+Between objects there is no transaction; the order makes each step safe on
+its own: a new class writes its `auth` before claiming its join index (a
+failed claim leaves an `auth` that only its own teacher token can use, as
+revision 2's `a/`); a code change claims the new index before it commits
+the class (a crash between leaves a claim only this class can take back);
+the old index is retired after (a crash between leaves the old code
+answering "This code was changed", since the class names the new one); a
+deleted class wipes itself first and then tells the site (until it does,
+the old code's lookup asks the class, which says `410`).
 
 ### 3.8 Auth and activity
 
-Teacher: read `a/<classId>` (missing → `gone/` → `410`, else `404 no_class`,
-counted); `deleted` → `410`; compare the token's SHA-256 with `teacherHash`
-in constant time → `401 wrong_key` (counted). Student: read `r/<classId>`;
-the `x-cedarlogic-student` id missing from it → `403 not_a_member`; its hash
-≠ the token's → `401 wrong_token` (counted). Join: `j/<joinIndex>` as §3.3.
-Only after the token checks out are per-class counters touched.
+Teacher: the class's `auth` row (none: a `gone` marker → `410`, else `404
+no_class`, counted); compare the token's SHA-256 with `teacherHash` in
+constant time → `401 wrong_key` (counted). Student: the student's row; none
+→ `403 not_a_member`; its hash ≠ the token's → `401 wrong_token` (counted).
+Join: the site's row, then the class (§3.3). Only after the token checks
+out are per-class counters touched. A socket's `hello` is checked the same
+way (§3.14).
 
-`activeAt` on the class document is updated when it is more than 24 hours old
-(a conditional write whose failure is ignored), by teacher **and** student
-requests: a class students still use is active. A student's `seenAt` in the
-roster likewise, daily. `expiresAt` in every status = `activeAt + 400 days`.
+`activeAt` in the class document is updated when it is more than 24 hours
+old, by teacher **and** student requests (a socket's `hello` too): a class
+students still use is active. A student's `seenAt` likewise, daily.
+`expiresAt` in every status = `activeAt + 400 days`.
 
 ### 3.9 Idempotency, in one place
 
@@ -1352,170 +1496,806 @@ roster likewise, daily. `expiresAt` in every status = `activeAt + 400 days`.
 - Teacher record writes, assignments, live, hand-ins: a lost answer followed
   by the same request is answered `200` by the replay rule (same `ver`, same
   `h`); a different write of the same record gets `412` with `current`.
-- Join: `409 student_exists` on one's own id → confirm with a status read
-  (§3.3).
-- Answers, renames: plain overwrites; repeating is harmless (a rename is
-  counted, §3.5, and a forged one fails the teacher's proof check, §2.2).
+- Join: the same join repeated → `201` as it was; `409 student_exists` on
+  one's own id with another token → confirm with a status read (§3.3).
+- Answers (HTTP or socket), renames: plain overwrites; repeating is
+  harmless (a rename is counted, §3.5, and a forged one fails the teacher's
+  proof check, §2.2). A socket answer whose `ok` never came is sent again
+  over HTTP.
 - `DELETE` class: a second call gets `410`, treated as done; `DELETE`
   student/assignment: a second call gets `200`.
 
-### 3.10 The live view's load, and what it costs
+### 3.10 The live view, and what it costs
 
-**The plan, as read on 2026-10-06** (`netlify api getSite` for
-`4021c3de-8c03-48e0-80dc-90fcb5faf0c8`, `listAccountsForUser`): site
-`cedarlogic`, account "Levi" (`leviholliday7`), account type **Free**, site
-plan `nf_team_dev`, `credit_features: false` — a **legacy Free plan**, not one
-of the credit-based plans Netlify has sold since September 2025. Its included
-monthly amounts, from the account's capabilities: **125,000 function
-invocations**, 360,000 function-seconds (100 GB-hours), **100 GB bandwidth**,
-1,000,000 edge function invocations, 300 build minutes, 100 form
-submissions; `accumulate_overages: false` and
-`block_builds_when_usage_exceeded: true` — past a limit the site "will be
-suspended for the remaining days in the calendar month" (Netlify's Free plan
-announcement), with notices at 50/75/90/100 %. Functions (Netlify's
-configuration docs, read the same day): 60 s per synchronous call, 30 s for a
-scheduled one, 15 min for a background one, 6 MB buffered request or
-response, 1,024 MB memory. Blobs: included, with no per-operation price
-published for this plan, so a Blobs read or write costs the invocation and
-runtime of the function that does it, nothing more; site-wide stores are
-kept in `us-east-2` (Ohio) whatever the functions' region. Rate limiting: 2
-code-based rules per site on Free, 5 on Pro, 100 on Enterprise (§3.1). If the
-account is ever moved to a credit-based plan — the move is permanent —
-Netlify's pricing page says today: Free 300 credits a month, Personal 1,000
-for $9, Pro 3,000 for $20 a member; extra credits 500 for $5 (Personal) or
-1,500 for $10 (Pro); **web requests 2 credits per 10,000 — every request,
-cache hits included**; bandwidth 20 credits per GB; compute 10 credits per
-GB-hour; production deploys 15 each.
+**The plan, as read on 2026-10-06** (Cloudflare's pages
+`developers.cloudflare.com/durable-objects/platform/pricing/`,
+`/durable-objects/platform/limits/`, `/workers/platform/limits/`). Workers
+Free: **100,000 requests a day**, reset at 00:00 UTC (past it, a route set
+to "fail closed" answers error 1027; `workers.dev` has no route to set);
+10 ms of CPU per request; 128 MB of memory per isolate. Durable Objects on
+the Free plan: SQLite-backed only; **100,000 requests a day** ("HTTP
+requests, RPC sessions, WebSocket messages, and alarm invocations"; "a
+request is needed to create a WebSocket connection"); **13,000 GB-s of
+duration a day**, billed "in wall-clock time as long as the Object is active
+and not eligible for hibernation" at 128 MB per object whatever it uses;
+**incoming WebSocket messages count at 20:1** (twenty messages, one
+request); outgoing messages are free; "Durable Objects that are idle and
+eligible for hibernation are not billed for duration"; auto-responses
+(`setWebSocketAutoResponse`) "will not incur additional wall-clock time";
+SQLite: **5 million rows read and 100,000 rows written a day, 5 GB of
+storage in all**; each `setAlarm()` is one row written, a delete is rows
+written, every index a row writes is another row written. Past any free
+limit, "further operations of that type will fail with an error" until the
+reset. Per object: 10 GB of storage, a soft limit of 1,000 requests a
+second, a row or value of at most 2 MB, received WebSocket messages up to
+32 MiB, an attachment of at most 16 KiB. The Workers Paid plan ($5 a month:
+1 million object requests and 400,000 GB-s a month, 50 million rows
+written) is not turned on (§11.18).
 
-**The design that keeps a lecture cheap.** Students never poll an
-authenticated endpoint. They poll the pulse, which is one URL per class,
-public, 40 bytes, cached at Netlify's edge for 2 s and in the durable cache
-shared by every edge node, so the function behind it runs about once every
-2 seconds per class however many students poll; everything a student then
-fetches is a record addressed by its version in the path (immutable, cached
-for a year). Polling runs only while the class page is visible: every `p`
-seconds (3) while a session is on, every 60 s otherwise, and stops when the
-page is hidden or after two hours without input. The teacher's device polls
-answers every 3 s only while a predict question is open. The pulse carries
-`p`, so the interval can be raised for the whole site from an environment
-variable if a month gets tight. The pulse sets an `ETag` and clients send
-`If-None-Match`; whether Netlify's edge answers such a poll with a `304`
-itself or hands it to the function isn't documented and is measured before
-launch — the numbers below don't depend on it (a `304` and a 40-byte `200`
-are the same invocation and nearly the same bytes).
+**The live connection is the design** (§3.14). Each class page opens one
+WebSocket to the class's object (through the Worker: one Worker request and
+one object request), says `hello`, and then hears everything as it happens:
+a push arrives with the live record inside it (outgoing messages are free,
+so no student fetches a record or polls a pulse), a teacher write as a
+`pulse` (the student reads its status only when something besides the live
+slot moved), a removal as a `bye`. Predict answers go up the same socket
+(a twentieth of a request each) and come down to the teacher's sockets in
+batches, at most every half second, the latest per student: **aggregated
+by the server only as far as it can**: it never opens an answer (they are
+sealed to the teacher), so it counts nothing but who answered, and the
+teacher's device opens, checks the proofs and tallies (§4.4). The object
+accepts sockets with the Hibernation API (`acceptWebSocket`), so between
+messages it can be evicted from memory without dropping them and isn't
+billed for the time; everything a socket needs survives that: its role and
+student id in its attachment, the class in SQLite (§3.6). Clients ping
+every 45 s (`"ping"` → `"pong"`, answered by the runtime without waking the
+object), which keeps school networks from dropping an idle connection.
 
-**One lecture** — 300 students, 75 minutes, a session on throughout, the
-teacher pushes 30 times and asks 10 predict questions:
+**The fallback, for networks that block WebSockets** (some school filters
+and TLS-inspecting proxies do): after three tries that never got a `hello`,
+the client polls instead — the pulse with `If-None-Match` and
+`x-cedarlogic-wait`, held by the object up to 25 s and answered the moment
+something changes, then asked again at once — and tries the socket again
+every five minutes. A held poll costs one Worker request and one object
+request whether it waits a second or 25; while polls are held the object is
+awake (duration, below). Outside a live session the fallback polls every
+60 s (120 s after ten minutes without change), as revision 2.
 
-| What | Requests | Function invocations | Bandwidth |
+**One lecture** — 300 students on sockets, 75 minutes, a session on
+throughout, the teacher pushes 30 times and asks 10 predict questions
+(3,000 answers):
+
+| What | Worker requests | Object requests | Rows written | Rows read |
+|---|---|---|---|---|
+| 300 students' sockets and the teacher's (connect, `hello`; ~10 % reconnects) | ≈ 330 | ≈ 330 + 16 (hellos at 20:1) | ≈ 0 | ≈ 1,000 |
+| pings, every 45 s (counted here as incoming messages, though not billed for duration) | 0 | ≈ 1,500 (30,000 at 20:1) | 0 | 0 |
+| 30 pushes (the teacher's `PUT`; the record to 300 sockets is outgoing: free) | 30 | 30 | 60 | ≈ 100 |
+| 3,000 answers over the sockets (and to the teacher, outgoing) | 0 | 150 | ≈ 3,000 | ≈ 3,000 |
+| the class's counters, kept every 20 s | 0 | 0 | ≈ 225 | 0 |
+| the teacher's status reads, the allowance's and the breaker's shared counts | ≈ 60 | ≈ 150 | ≈ 100 | ≈ 300 |
+| **per lecture** | **≈ 420** | **≈ 2,200** | **≈ 3,400** | **≈ 4,400** |
+| **share of a day's Free plan** | **0.4 %** | **2.2 %** | **3.4 %** | **0.1 %** |
+
+Duration: the class's object is awake while it handles a message and for
+the half second an answer batch waits; even awake the whole 75 minutes it
+would be 4,500 s × 0.128 GB = 576 GB-s, 4.4 % of the day's 13,000.
+Bandwidth isn't billed on Workers. So the day's Free plan carries **about
+29 such lectures**, the rows written (the answers) running out first; a
+lecture without predict questions is a fifth of that. (Revision 2's
+Netlify design: ≈ 5,800 function invocations a lecture of the legacy Free
+plan's 125,000 a month, and past the month the whole site suspended.)
+Joining is once per student per class: a 300-student class joining costs
+≈ 600 Worker requests, ≈ 1,800 object requests and ≈ 900 rows written.
+
+**The same lecture without sockets** (a school that blocks them, all 300
+behind one address): every student holds a poll every ~25 s and asks again
+after each push, ≈ 240 polls each, **≈ 72,000 Worker and 72,000 object
+requests a lecture** — most of a day, and past one address's allowance
+(20,000 a day) after about a quarter of it. The fallback carries a class of
+30 (≈ 7,200) comfortably, not a lecture hall; for those the answers are a
+custom domain that the school can allow (below), the Paid plan, or raising
+`CLASSROOM_ADDRESS_PER_DAY` for the day. A client that neither keeps a
+socket nor holds its polls (revision 2's, polling the pulse every `p` = 10
+s) would cost 300 × 450 = 135,000 a lecture: the C++ client must take the
+socket or held polls before Mac students join large lectures (§3.14,
+§13).
+
+**School web filters.** K-12 filters (and some district firewalls) sort
+`*.workers.dev` as "uncategorised" or "proxy/anonymiser" and block it, which
+blocks the classroom — sockets and polls alike — while the website itself
+works. The fix is a custom domain (a zone on Cloudflare, e.g.
+`classroom.<a domain the owner has>`, as a `[[routes]]` entry with
+`custom_domain = true`) that schools can allow by name; it also brings
+Cloudflare's free WAF rules and rate-limiting rule in front of the Worker
+(§3.5). Not set up in this revision (§11.16).
+
+**Checks before launch** (on the deployed Worker, §3.13): a create, join,
+post, hand-in and live round trip with `curl` and two browsers; a socket
+from Chrome, Safari, a Chromebook and a phone on a school-like network (one
+with TLS inspection if one can be borrowed) reaching `hello` and getting a
+push; the same with the socket blocked (the fallback's held polls); the
+dashboard's request, duration and rows-written counts after a rehearsal
+lecture against the table above, within 2×.
+
+### 3.11 Housekeeping: the alarms
+
+There is no daily walk over every class. Each class's object sets its own
+alarm (one row written each time it moves earlier): for the earliest of a
+week after `activeAt` while it has no students and no assignments, 400 days
+after `activeAt`, and a day after a session's answers became old. When the
+alarm fires (an object request), the class looks at itself:
+
+1. No students and no assignments, `activeAt` older than 7 days → its
+   records are deleted (`deleteAll`), its `auth` kept with `idleAt`, its
+   join index retired as `idle` (only its teacher can make it again, with
+   its code), its size off the site's sum; no marker. 400 days later, still
+   not made again → `gone` `{reason:"expired"}` and the `auth` dropped: the
+   id answers `410 class_expired` for good.
+2. `activeAt` older than 400 days → as a deletion (§3.3), with
+   `reason:"expired"`.
+3. Else answers of sessions other than the live one, older than a day, are
+   deleted; the class's size goes to the site's sum; the next alarm is set.
+
+The site's object and each address's object keep a daily alarm while they
+hold anything: move slots older than an hour, retired join codes older
+than 400 days, counters from windows that are over. The test controls'
+`cleanup` runs every alarm of the test's objects at the test clock and
+answers the same counts revision 2's cleanup did (`emptied`, `expired`,
+`answersDeleted`, `joinsDeleted`, `moves`, `counters`, `bytes`). Logs
+counts only.
+
+### 3.12 Server tests
+
+`cloudflare/classroom/test/test_worker.mjs` — every case of revision 2's
+`scripts/test_classroom_server.mjs`, ported (every row of §3.4 at least
+once; create/confirm/re-create; the join flow; hand-ins with replay, `412`,
+`closesAt` by the server's clock, the quotas at their edges; the live slot;
+answers; removals and deletions; the pulse and the records by version; the
+move slot; the cleanup's rules; the gate and CORS; the breaker (writes
+only) and `CLOSED`; the store holding no `joinId`, no SHA-256 of a join
+token and no public key, the `joinIndex`/`joinHash` of §7.1.3's server
+vector instead; one address at full speed held by its allowance before the
+breaker moves; the allowance shared between isolates), adapted where the
+design changed (no conditional-write traps: one transaction; no CDN headers
+or purges; deletions finish at once), plus: the storage budget (nearly full
+refuses new classes, full refuses growing writes, shrinking goes on), the
+alarm set and fired without the test controls, held polls (answered by a
+change, 304 when nothing came, off at `CLASSROOM_HOLD_SECONDS=0`), an id
+that was never a class leaving nothing behind, the test controls only on
+localhost and only with the variable, and the vectors' own records (§7.1.5:
+the teacher, join, info, name, assignment, live, answer, submission and
+move envelopes) through the server byte for byte, their `h` and sizes
+exactly the vectors'. It runs twice: in node on `test/runtime.mjs` (the
+Worker and the objects on `node:sqlite`, the clock frozen) and against
+`wrangler dev` (workerd and its SQLite).
+
+`cloudflare/classroom/test/test_live.mjs` (against `wrangler dev`): 50
+students' sockets and a teacher's — `hello`, a push reaching all 50 with the
+record inside in well under a second, a late `hello` getting the record it
+missed; 50 answers over the sockets, each acknowledged, batched to the
+teacher, all in the answers list; **hibernation** (the object's memory
+dropped, its sockets kept: pushes, answers and roles carry on, `ping`
+answered); **eviction** (memory and sockets gone: the clients reconnect and
+the class, its live session and its answers are there); **a restart of
+workerd** (only what is stored is left: the class, its hand-in and its
+live session); the held-pulse fallback (30 held polls all answered by one
+push); a removed student's socket told and closed, the others given the new
+`fetchKey`; a deleted class's sockets told; and the sockets' own limits.
+
+`scripts/test_classroom_client.mjs` runs every scenario of §7.2 against the
+Worker too (`CLASSROOM_BACKEND=worker`; by default after the in-process and
+mock-server runs), including the tamper scenarios through the test
+controls, and two of its own: the live view over sockets (no pulse, no
+record fetch, no status read for a push, answers over the socket) and the
+fallback (a socket that never connects; held polls bringing the push).
+`scripts/test_classroom_interop.mjs --worker` runs the C++ core (the app
+repo's `classroom_interop`, unchanged) and the web core against it: 128
+checks, the same as against the mock server.
+
+Revision 2's `scripts/test_classroom_server.mjs` still runs, against
+`netlify/lib/classroom.mjs` and the mock server.
+
+### 3.13 Deploying, and running it locally
+
+Everything is in `cloudflare/classroom/` (`npm install` there gives
+`wrangler` 4 and `workerd`; nothing else).
+
+**Locally** (`wrangler dev` is local: workerd and SQLite on this computer,
+nothing on Cloudflare): copy `.dev.vars.example` to `.dev.vars` (gitignored;
+the test peppers and the local origins), then `npx wrangler dev` →
+`http://localhost:8787/api/classroom/v1`. For the apps' checks,
+`node cloudflare/classroom/test/wrangler.mjs --port 8788` starts it with the
+test controls on and prints the mock server's `{"event":"listening",
+"url", "liveUrl"}` line: point `CL_CLASSROOM_URL` and `CL_LIVE_URL` at those
+URLs as at `scripts/classroom-dev-server.mjs` (which still runs revision
+2's server, for comparison). The app repo's cross-check runs against the
+Worker with `node scripts/test_classroom_interop.mjs --worker --tool
+<classroom_interop>` (or `CL_SERVER=worker` in its environment).
+
+**Deploying** (the owner, by hand; nothing in the repo deploys):
+
+```
+cd cloudflare/classroom
+npx wrangler login                                   # once, if not logged in
+openssl rand -hex 32 | npx wrangler secret put CLASSROOM_JOIN_PEPPER     # keep a copy offline: it can't be rotated freely (1.3)
+openssl rand -hex 32 | npx wrangler secret put CLASSROOM_RATE_PEPPER
+npx wrangler secret put APP_KEY                      # optional: the apps' key, as Sync's
+npx wrangler deploy                                  # prints https://cedarlogic-classroom.<account>.workers.dev
+curl https://cedarlogic-classroom.<account>.workers.dev/api/classroom/v1/health
+```
+
+The first deploy creates the three Durable Object classes from the `v1`
+migration. Then: set that origin as `SERVICE` in
+`public/assets/js/classroom-core.js` (or `window.CEDARLOGIC_CLASSROOM_SERVICE`
+on the classroom pages), add its `https:` and `wss:` origins to the
+`connect-src` of the pages that use the classroom (`netlify.toml`; none do
+yet), and give the apps the same base (`Classroom.h`'s `serverBase` and
+`liveBase`). `CLASSROOM_CLOSED=1` (`npx wrangler secret put
+CLASSROOM_CLOSED`) closes writes at once; `CLASSROOM_MAX_REQUESTS_PER_DAY`,
+`CLASSROOM_PULSE_SECONDS`, `CLASSROOM_HOLD_SECONDS`, the address allowances
+and the storage budget are variables too (`[vars]` in `wrangler.toml`, or
+secrets to change them without a commit). Never set `CLASSROOM_TEST_CONTROLS`.
+
+### 3.14 The live connection (WebSocket), byte for byte
+
+`GET /api/classroom/v1/classes/{classId}/socket` with `Upgrade: websocket`
+(`wss://` in production), through the Worker's gate (§3.2: browsers send
+`Origin`; apps send `x-cedarlogic-key` if `APP_KEY` is set) and its
+allowance. No class → `404 no_class` (counted); a deleted or expired one →
+`410`; 650 sockets already → `503 busy`; else `101`. Text frames only, each
+one JSON object (UTF-8), except the two literal frames `ping` and `pong`.
+Unknown fields are ignored; an unknown `t` from the server is ignored by
+clients.
+
+**Client → server**
+
+| Message | When | Fields |
+|---|---|---|
+| `{"t":"hello","token":"<teacherToken>","session":"<uuid>"?}` | first, a teacher device | `session`: the live session it knows (optional) |
+| `{"t":"hello","token":"<studentToken>","sid":"<studentId>","live":57}` | first, a student device | `live`: the live version it has (0: none) |
+| `{"t":"answer","id":7,"session":"<uuid>","ver":57,"env":"<sealed ≤ 2 KiB>"}` | a student: a predict answer | exactly `PUT …/live/answers/{sid}`'s body, plus `id` (any JSON value; echoed) |
+| `{"t":"answers","session":"<uuid>"?}` | a teacher: the session's whole list again | |
+| `ping` (the literal 4 bytes) | every 45 s | answered `pong` by the runtime |
+
+**Server → client**
+
+| Message | When |
+|---|---|
+| `{"t":"hello","role":"teacher","seq":12,"live":57,"p":10,"fetchKey":"<32 hex>","students":212}` | the `hello` checked out (a student's has `"role":"student"` and no `students`) |
+| `{"t":"live","seq":13,"live":58,"p":10,"fetchKey":"…","ver":58,"session":"<uuid>","on":true,"predict":true,"env":"<the live record>"}` | to students: a push (an `ended` record has `"on":false` and `"live":0`); also right after a student's `hello` when its `live` is behind |
+| `{"t":"pulse","seq":13,"live":58,"p":10,"fetchKey":"…"}` | any other teacher write (and pushes, to teachers); a removal's new `fetchKey` |
+| `{"t":"answers","session":"<uuid>","full":false,"answers":[{"studentId","ver","h","env"}]}` | to teachers: new answers (at most every 500 ms, the latest per student); `"full":true` with the session's whole list after a teacher's `hello` or `answers` |
+| `{"t":"students","students":213}` | to teachers: someone joined or was removed |
+| `{"t":"handin","aid":"<uuid>"}` | to teachers: a hand-in to that assignment (refresh the index) |
+| `{"t":"ok","id":7,"at":1759603660000}` | the answer with that `id` was kept |
+| `{"t":"error","id":7,"status":409,"error":"not_live","message":"…","retryAfter":60?}` | it wasn't (the status, `error` and `message` of §3.4: 400, 404, 409, 413, 429, 500) |
+| `{"t":"bye","status":403,"error":"not_a_member","message":"…"}` | then the server closes the socket |
+
+A student's `live` and `pulse` messages carry the same numbers as the
+pulse (`seq`, `live`, `p`) and the class's current `fetchKey`, so a socket
+replaces polling entirely. Clients apply them with the pulse's rules (§4.9:
+lower than seen → ignored).
+
+**Closing codes** (4000 + an HTTP status, after a `bye` where one is sent):
+
+| Code | `bye` | Why | The client |
 |---|---|---|---|
-| pulse polls, every 3 s | 450,000 | ≈ 2,250 (one per 2 s, the cache serves the rest) | ≈ 225 MB (≈ 0.5 KB each with headers, `304` or a 40-byte body) |
-| live record fetches | 30 × 300 = 9,000 | 30 (cached, immutable) | 9,000 × ~10 KB ≈ 90 MB |
-| predict answers | 3,000 PUTs | 3,000 | ≈ 3 MB |
-| the teacher: pushes, answer polls (3 s during 10 two-minute windows), status | ≈ 500 | ≈ 500 | ≈ 5 MB |
-| **per lecture** | **≈ 462,000** | **≈ 5,800** | **≈ 320 MB** |
-| **per month, 3 lectures a week (13)** | ≈ 6,000,000 | **≈ 75,000** | **≈ 4.2 GB** |
+| 4400 | — | not JSON, no `t`, or a binary frame | a bug: log |
+| 4401 | `401 wrong_key` / `wrong_token` (counted as a failed sign-in) | the `hello` didn't check out; or anything sent before a `hello` (no `bye`) | as the HTTP 401 (§4.11); don't reconnect |
+| 4403 | `403 not_a_member` | the student was removed (also an `answer` from a removed student) | forget the membership (§4.7) |
+| 4404 | `404 no_class` | the class went (a never-used class removed) | the teacher's device re-creates it (§4.1) |
+| 4408 | `408 hello_first` | no `hello` within 30 s | reconnect |
+| 4410 | `410 class_deleted` / `class_expired` | the class was deleted or expired | forget the class |
+| 4413 | — | a message over 16 KiB | a bug: log |
+| 4429 | `429 rate_limited` | over 120 messages a minute | reconnect after `retryAfter` |
+| 1006 and others | — | the network, an eviction, a deploy | reconnect: 1, 2, 5, 10, 30, 60 s (±20 %); three without a `hello` → the fallback (§3.10), and the socket again every 5 minutes |
 
-Outside lectures, the same class adds about 3,000–6,000 invocations a month
-(joins, status fetches when an assignment is posted, hand-ins, the teacher's
-submission views) and under 1 GB.
+(Local workerd doesn't finish the closing handshake of a socket that never
+sent anything, so a client closes its side on any `bye` itself.)
 
-So on the legacy Free plan one such class uses ≈ 60 % of the month's function
-invocations (predict answers are half of them: every answer is a write that
-can't be cached) and 4 % of the bandwidth, beside Sync's and feedback's
-use. Two classes of 300 with ten predict questions every lecture would pass
-125,000 — the request breaker (§3.5) would pause classroom writes for the
-rest of that day rather than let Netlify suspend the whole site. If that
-happens, in order: ask fewer predict questions per lecture (five instead of
-ten halves the answers); move `PUT …/answers` and the pulse to Edge Functions
-(their 1,000,000 a month are a separate budget; `@netlify/blobs` works there;
-the durable cache doesn't apply to edge responses, but the per-node edge
-cache does, a class sits behind one or two nodes, and Netlify doesn't count
-cached edge responses as invocations; an edge function gets 50 ms of CPU per
-request and 40 s to start its response, enough for a Blobs read or write),
-which the API shapes here allow without a client change; or Netlify Pro.
+**What a client must do** (the web core's `LiveSocket`, §6.5; the C++ core
+the same): one socket per open class page; `hello` on open; on `live`,
+open the record as version `ver` exactly as one fetched from the records
+path (the AAD binds the version and the session: a socket can't pass an
+old record off as new) and apply it; on `pulse`, if `seq` moved by exactly
+one **and** `live` changed, the step was the push alone (each teacher write
+moves `seq` by one), so no status read is needed; otherwise read the status
+as after a pulse; send answers over the socket while it is open, falling
+back to `PUT …/answers/{sid}` if no `ok` or `error` comes within 8 s;
+ping every 45 s and close a socket whose last ping got no `pong`.
 
-On a credit-based plan every request counts, cache hits included, so the
-interval matters: 3 s is 90 credits of requests a lecture, plus ≈ 6 for
-bandwidth and ≈ 5 for compute — **≈ 100 credits, about $0.67, per lecture of
-300** (1,500 credits for $10), ≈ 1,300 credits a month at three lectures a
-week: more than the Free (300) and Personal (1,000) allowances, well within
-Pro's 3,000 ($20 a month). Each second added to the interval saves in
-proportion (5 s: 54 credits; 10 s: 27).
+### 3.15 Revision 2's Netlify server (superseded)
 
-What the design does **not** do, and why: long polling (a function may run
-60 s, but each held request is an invocation per student per minute —
-22,500 a lecture) and websockets (no Netlify runtime holds one). Server-sent
-events from an Edge Function (40 s response-header limit, invocations per
-student per 40 s) would cost 1,700 edge invocations a lecture per class and
-is the upgrade path if sub-second latency is ever wanted.
-
-**Checks before launch** (package S, on a deploy preview): `Cache-Status`
-shows `"Netlify Edge"; hit` and `"Netlify Durable"; hit` on the pulse; what an
-`If-None-Match` poll gets (`304` from the edge, or from the function); a
-request for a record with a stray query string is served from the cache all
-the same; **whether cache hits count against the rate-limit rule** (poll a
-cached pulse 1,300 times in a minute from one address: a `429` from the edge
-means they do, and the rule goes to 7,200, §3.1); after a purge of
-`class-<classId>`, the next fetch of a cached record shows `Cache-Status`
-miss (and `404` once the class is gone); the usage dashboard after a
-rehearsal lecture matches the table within 2×.
-
-### 3.11 The daily cleanup (`classroom-cleanup.mjs`)
-
-Walks `c/` with `list({prefix:"c/", paginate:true})` from `cleanup/cursor`,
-20 s at a time:
-
-1. A class with no students and no assignments whose `activeAt` is older than
-   7 days → delete its documents and blobs; no marker; `a/` stays and `j/` is
-   retired as `idle`, so only its teacher can make it again, with its code.
-2. `activeAt` older than 400 days → write `gone/<classId>` `{reason:"expired"}`
-   and `todo/`, mark `a/` deleted, remove everything.
-3. Blobs under `t/`, `i/`, `as/`, `lv/`, `s/` not named by a document and
-   older than an hour → delete; `la/` sessions other than the current one
-   older than a day → delete; `j/` entries no class names, older than an hour
-   → retired; retired ones older than 400 days → deleted (an `idle` one whose
-   class was never made again takes its `a/` with it and leaves
-   `gone/<classId>` `{reason:"expired"}`); `mv/` older than an hour → delete.
-4. Add the class's `bytes` to the day's total.
-
-Then: finish every `todo/` (purging `class-<classId>` / `asg-<aid>` again
-as each finishes, in case the request's purge failed); write `budget`;
-delete `rate/` and `day/` keys from past windows. An expired class (2.) is
-purged like a deleted one. Logs counts only.
-
-### 3.12 Server tests (`scripts/test_classroom_server.mjs`)
-
-On the memory stub, in the style of `test_sync_server.mjs`: every row of §3.4
-at least once; create/confirm/re-create; the join flow (a wrong code 404 and
-counted, a closed class, a full class, a stale code after a change, the
-`409` own-id rule); hand-ins (replay, `412`, `closesAt` with the server clock,
-quotas at the edge: the 300th student accepted and the 301st `507`, the 100th
-assignment and the 101st, a shrinking edit in a full class accepted); the
-live slot (`412` for a second device, `on: false`, answers to the current and
-the previous ver, `not_live`, the answers `ETag`/`304` without blob reads);
-`DELETE` student/assignment/class finishing through `todo/`; the pulse's
-headers, `304`, `404` for a gone class, the immutable record fetches by path
-(a query string is ignored) and `no_version`; the Blobs trap on every
-document; two concurrent hand-ins to
-the same assignment (both land, no lost update); the cleanup rules; the gate
-and CORS headers; the per-context store names; the breaker (writes only) and
-`CLOSED`; a dump of the store after create, join and Change Join Code
-contains no `joinId`, no SHA-256 of a join token and no public key (the
-`joinIndex`/`joinHash` HMACs of §7.1.3's server vector instead), and a
-missing `CLASSROOM_JOIN_PEPPER` answers `503 busy`; `fetchKey`: a new one
-after a removal and after a code change (not after closing joining), the
-old path `404 wrong_fetch_key`, the purge called with the class's tag;
-removal keeps hand-ins, `?submissions=delete` and the bulk remove don't;
-the per-address-per-class join cap (61st join from one address into one
-class `429`), the 640-byte name cap, the rename cap; one address at full
-speed: `429` from its allowance before the site's breaker moves (the breaker
-counts only allowed requests); `DELETE` class and assignment and the
-expiry purge their tags;
-then the mock server over HTTP with its `/__mock/` controls (clock, limits,
-`tamper {rollback|damage|forgePulse}`, `dropNextAnswer`, `fail`).
+Revision 2's §3 (Netlify Functions + Blobs: one function on both prefixes
+with the site's second rate-limit rule, documents written with conditional
+writes and a `todo/` for a daily cleanup to finish, the pulse cached by
+Netlify's CDN for 2 s and records for a year, purged by tag on deletion) is
+in this file's history (revision 2, 2026-10-06) and in
+`netlify/lib/classroom.mjs`, which still runs in the mock server. It was
+left because Netlify's legacy Free plan includes 125,000 function
+invocations a month and **suspends the whole site** — the website, the
+simulator, Sync, feedback — for the rest of the month when they run out,
+and a live class's polling spends them (§13).
 
 ---
+
+### 3.16 Classroom v2 (2026-10-08): share, class examples, hand-in history, keys from a solution, sync, retention, admin
+
+What changed from revision 3, in one place, for every client (the Mac port
+follows this section). Protocol number stays **1**: every change is additive
+(new paths, new status fields, new record kinds), old clients ignore what they
+don't know, and the live endpoints stay.
+
+#### 3.16.1 What went away (UI only)
+
+- **Predict / poll in a class is gone from the clients.** No Ask…, guesses,
+  counts or reveal. Predict stays as the solo Simulation View tool.
+- **The live view (projector/follow mode) is gone from the clients.** It is
+  replaced by Share (§3.16.2).
+- The server keeps `PUT /live`, the answers endpoints, the `live` slot in the
+  status and the socket's `live`/`answers` messages, so an older client still
+  works; a v2 client never calls them and ignores `live` in the status and
+  pulse (it may still read `pulse.live`; it does nothing with it).
+
+#### 3.16.2 Items: shared circuits and class examples
+
+A new class-side record kind, **`item`** (class key, envelope type 1,
+compressed like an assignment, ≤ 512 KiB, AAD `id` = the item's UUID, `ver` =
+base/ver as every class-side record). One kind carries both:
+
+```json
+{"v":1,"kind":"item","type":"share","title":"Today's counter","topic":"","note":"Try every switch.","cdl":"(cedarlogic\n…","createdAt":1759600000000,"modifiedAt":1759600000000}
+```
+
+| Field | Type | Rules |
+|---|---|---|
+| `type` | string | `"share"` (Share with the class) or `"example"` (the class examples folder). Readers treat any other string as `"example"`. |
+| `title` | string | ≤ 200 scalar values; writers trim; empty → "Untitled". |
+| `topic` | string | the module/topic an example is filed under, ≤ 100; `""` for none (and for shares). |
+| `note` | string | ≤ 20,000; may be `""`. |
+| `cdl` | string | the circuit, as an assignment's `cdl` (§2.2); readers apply the 4.9 budget. |
+| `createdAt`, `modifiedAt` | integer | ms, server-corrected; `createdAt` kept across versions. |
+
+Writers produce the keys in exactly this order (`itemJson` in
+classroom-core.js). Readers apply §2.2's order of checks; `item` is a known
+kind.
+
+**Server** (the class's object, table `items (iid, ver, size, at, h, hidden,
+releasedAt, env)`, created in old classes the first time they're opened):
+
+| Method | Path | Who | Body / answer |
+|---|---|---|---|
+| PUT | `/classes/{classId}/items/{iid}` | T | `{"base":0,"ver":1,"env":"<b64u>","hidden":false}` → `201` (new) / `200` `{ver, size, at, h, hidden, releasedAt, seq}`; replay (same `ver` and `h`) `200`; `base` ≠ current ver → `412 conflict` with `current` (an item entry or null); envelope rules, `413`, `class_full` / `site_full` exactly as assignments; the class's `maxItems` (300) reached by a new id → `507 too_many_items`; `hidden` optional boolean (absent = false), anything else `400` |
+| DELETE | `/classes/{classId}/items/{iid}` | T | `200 {deleted:true}`; again `200` |
+| GET | `/api/live/v1/{classId}/{fetchKey}/item/{iid}/{ver}` | – (`fetchKey`) | `200 {ver, env}` of exactly that version, else `404 no_version` |
+
+**Item entry** (in the status): `{"ver":2,"size":812,"at":ms,"h":"<32 hex>","hidden":false,"releasedAt":ms|null}`.
+The teacher's status gains `"items": {"<iid>": entry}` (every item); the
+student's status gains `"items"` with **only the items whose `hidden` is
+false**. Every write is `seq + 1` (students' sockets/pulses hear it as any
+teacher write).
+
+**Hidden and Release.** `hidden: true` keeps an item out of the students'
+status. Releasing (or hiding again) is an ordinary new version (`base` = its
+ver, `ver + 1`, the same payload sealed again) with `hidden` changed — there
+is no separate release call. `releasedAt` is set by the server: the time the
+item became visible (a write with `hidden: false` when it was hidden or new);
+kept across later visible versions; `null` while hidden. Students sort by it.
+A hidden item's ciphertext is still fetchable on the `fetchKey` path by
+whoever knows its UUID (only the teacher's status lists it): "hidden" means
+unlisted, which is enough for "not yet".
+
+**A class with only items** (no students, no assignments) is not removed as
+unused after 7 days (§3.11 counts `doc.items` too).
+
+**Clients.**
+- Teacher: *Share This Circuit…* = post a `type:"share"` item, visible, from
+  the circuit on screen. *Update* on a shared item = a new version from the
+  circuit on screen (same `iid`). *Add This Circuit…* / *Add .cdl Files…* = one
+  `type:"example"` item per circuit (title = file name without `.cdl`), with a
+  topic and "Hide it until I release it". Examples are listed by topic (topics
+  sorted, numeric-aware; "No topic" last) or newest first. *Release* / *Hide*,
+  *Delete*. A teacher's other device reads items like assignments (the cached
+  path by version).
+- Student: on every status read, for each item in `items`: unseen → fetch,
+  open as kind `item` with AAD id `iid`, `ver`; it is **news**: `"new"` (first
+  version seen) or `"updated"` (a higher ver than seen) — except on the first
+  status after joining (what was already there isn't news). The host is told
+  `itemsChanged(classId, [{id, what:"new"|"updated", type, title}], className)`;
+  CedarLogic Online shows "Your teacher shared “X”" (share), "Your teacher
+  added “X”" (example), "Updated: “X”" (an update) with *Open*. News is cleared
+  when the item is opened. An item gone from the status is forgotten (its
+  cache too).
+- **Open = the student's own copy**: a new circuit in Your Circuits from the
+  item's `cdl`, linked `{classId, item: iid, ver, title}`; opening the same
+  version again opens that copy; a newer version makes a **new** copy named
+  "Title (updated)". A student's copy is never written over.
+
+#### 3.16.3 Hand-in: one tap, every attempt kept
+
+- Client: the bar over an assignment's copy shows the instructions, *Check*
+  (when students can check) and *Hand In*: one tap hands in (no sheet) and the
+  bar says "Handed in ✓ <time>" (plus "· changed since" after an edit; *Hand
+  In Again*).
+- Server: a hand-in that replaces one **keeps the replaced one** in table
+  `subhist (aid, sid, ver, size, at, h, attempts, env)`, up to `maxHistory`
+  (20) per student per assignment; past that the oldest is dropped. History
+  bytes count in the student's `maxStudentBytes` and the class's bytes;
+  deleting the assignment, or removing the student with
+  `?submissions=delete`, deletes the history too. `PUT …/submissions/{sid}`'s
+  body and answer are unchanged; `attempts` keeps counting.
+- New: `GET /classes/{classId}/assignments/{aid}/submissions/{sid}/history`
+  (the teacher, or the student for its own `sid`; another student `403
+  forbidden`) → `200 {"attempts":[{"ver":1,"size":300,"at":ms,"h":"…","attempts":1,"env":"<b64u>"}, …]}`,
+  oldest first, **without** the latest (the latest is the ordinary submission
+  record). Each `env` is the sealed submission exactly as handed in: open it
+  with kind `submission`, AAD id `{aid}/{sid}`, **its own** `ver`; proofs and
+  "Couldn't be verified" as §2.2.
+- Teacher's hand-ins table: the latest per student as before, plus *Earlier*
+  when `attempts > 1`: every earlier attempt with its time and its own Check
+  result (cached by `h` as `checked["{aid}/{sid}/{ver}"]`), each openable
+  read-only.
+
+#### 3.16.4 Retention: 18 months, warned 30 days before
+
+- `expiryDays` is **548** (18 months) instead of 400: a class unused that
+  long is removed (`410 class_expired`, "This class was removed after 18
+  months without use."); retired join codes are kept as long.
+- Both statuses gain **`warnAt`** = `expiresAt − expiryWarnDays` (30 days).
+  When `now ≥ warnAt` the teacher's class page shows a banner ("This class
+  hasn't been used for a long time and will be deleted from the website on
+  <date>. Open it or post something before then to keep it.") and the student's
+  a line. Any teacher or student request moves `activeAt` (at most once a day),
+  which moves both.
+- `GET /health` / `limits` gain `"maxItems":300,"maxHistory":20,"expiryWarnDays":30`.
+
+#### 3.16.5 The owner's admin delete
+
+`DELETE /api/classroom/v1/admin/classes/{classId}` with `Authorization:
+Bearer <ADMIN_TOKEN>`. Without the Worker secret `ADMIN_TOKEN` set (or one
+shorter than 32 characters) the path answers `404 not_found`. The Worker
+compares SHA-256 of the sent token and of the secret in constant time; a wrong
+one is `401 wrong_key` and counted per address (10 an hour, then `429`). The
+gate (Origin / APP_KEY) doesn't apply. A right one does what the teacher's
+Delete Class does (every socket told `bye 410`, all storage deleted, the
+`gone` marker, the join code retired) → `200 {"deleted":true,"gone":false}`; a
+class already gone or never made → `200 {"deleted":false,"gone":true|false}`.
+
+```sh
+cd cloudflare/classroom
+openssl rand -hex 32                        # make a token; keep it in your password manager
+npx wrangler secret put ADMIN_TOKEN         # paste it
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://cedarlogic-classroom.leviholliday7.workers.dev/api/classroom/v1/admin/classes/<32-hex classId>
+```
+
+(The classId isn't shown anywhere in the UI. Given a teacher key, it is
+`(await CedarClassroom.teacherKeys((await CedarClassroom.parseCode(key, "teacher")).secret)).classId`
+in a browser console on the website.)
+
+**Shared school networks.** One address may now make 1,500 joins an hour
+(was 300), 1,000 into one class a day (was 500), and 200 failed lookups an hour
+(was 60: a room of typos). The address's total allowance (§3.5) is unchanged.
+
+**Class pass (a never-expiring move code for Chromebook guest mode): not
+done.** It would need a move slot with no expiry and a way to revoke it, and a
+long-lived bearer of a student's token printed on paper; not small. Guest-mode
+students join again (the teacher sees them twice) or use Sync (§3.16.7) on a
+signed-in browser.
+
+#### 3.16.6 Check against the teacher's solution
+
+The assignment payload is unchanged: the key is still `key.text`, the text
+Check My Circuit reads (§2.2). New is how a client **makes** that text from a
+solution circuit (Post an assignment › Answer key › *From a Solution File…* /
+*From the Circuit on Screen*), so checking compares **behaviour**, never
+layout, and matches switches and lights **by name** (CHECK-SEQUENTIAL.md's
+name rules: case, spaces and punctuation don't matter). Every client must make
+the same text from the same circuit:
+
+1. Load the solution in a simulator of its own (not the board). Its switches
+   (inputs) and lights (outputs) and their names are the truth table's
+   (`CedarLogicTruth.plan` / the app's truth table: labels, or the text beside
+   them; top to bottom, then left to right; all pages). No switch or no light
+   → "An answer key needs at least one switch … and one LED".
+2. **Combinational** (no flip-flop, latch, register or counter part, and no
+   gate loop): a **truth table** of every switch combination, in the truth
+   table's row order:
+   ```
+   A B Cin | Cout S
+   0 0 0 | 0 0
+   …
+   ```
+   names with spaces joined by `_`; a light that isn't a clear 0 or 1 → `-`.
+3. **Sequential**: a **timing table** (CHECK-SEQUENTIAL.md's timing kind).
+   Inputs = every switch except one whose name is `CLK` or `Clock` (any case;
+   that one is the clock). Rows = `min(64, max(8, 2 × 2^m))` pulses for `m`
+   inputs (m capped at 5 for the count), plus row 0. Row `k` (k = 0 … rows)
+   sets the inputs to `k mod 2^m` in binary (first input the high bit); row 0
+   is the start (power on: every register 0, then the inputs set and settled,
+   no pulse); row `k ≥ 1` sets the inputs, settles, then **one clock pulse**
+   (the clock parts — or the clock switch — to 1, settle, to 0, settle), then
+   reads the lights. Header `Pulse | <inputs> | <lights>` (`Pulse | <lights>`
+   with no inputs); a cell that isn't a clear 0/1 → `-`. The solution is run
+   through Check My Circuit's own machine with every light `-` and the read
+   values filled in — so the same checker that later checks a student runs
+   the solution. A solution that doesn't settle → "doesn't settle at clock
+   pulse k". A sequential circuit with **no clock** (no clock part, no
+   CLK/Clock switch: e.g. a latch of gates) falls back to the truth table.
+4. The text goes in the key box; the teacher can still edit it; "Students can
+   check" / "Only I check" as before.
+
+A student's check against it is an ordinary Check My Circuit run; a missing
+name gives the checker's sentence, e.g. "Can't check yet: there's no light
+called S." with "(the lights are …). Pick which light it is under Names, or
+change a light's label." (The wording is Check.cpp's, kept word for word in
+both apps; it says which name the circuit lacks.)
+
+#### 3.16.7 Joined and taught classes on every device (Sync)
+
+With Sync on, two kinds of **sync side record** (docs/SYNC.md §2.5.1)
+carry classes to the person's other devices:
+
+- `classroom` (as §2.5): the teacher key, written at Create Classroom, rename,
+  and for any class on the device that has none yet when Sync is on; a device
+  that gets one adds the class with the key, quietly.
+- **`membership`** (new): written at Join, at a move in, at rename, and for
+  any membership without one; tombstoned at Leave Class; payload
+
+  ```json
+  {"v":1,"kind":"membership","classId":"9c89e40e9ea981bbfeaf61e93c91be46","studentId":"5f3a1c2e-8b4d-4a6f-9c1d-2e3f4a5b6c7d","token":"QEFC…","proof":"YGFi…","classKey":"EBES…","pub":"BDJO…","name":"Sam Lee","className":"Digital Logic 101","joinedAt":1759600000000}
+  ```
+
+  (exactly this key order; field rules as `move` plus `joinedAt` an integer).
+  A device that gets one and has no membership (and doesn't teach the class)
+  adds it as a move would — the same `studentId`, token and proof, so the
+  teacher sees one student — then reads the status (which gives the
+  `fetchKey`); nothing is written to the classroom service. It is not news.
+
+Both: **Remove from This Device** leaves the record alone (the other devices
+keep the class) and notes the record's id in `meta["sideRemoved"]` (web; Mac:
+`teaching.json`/`memberships.json`'s `removed` list) so this device's own
+sync doesn't add the class back. The records are sealed under the person's
+sync record key, which the classroom service never sees; a membership record
+holds the student's token, so it is exactly as private as the synced circuits.
+
+#### 3.16.8 Teacher flow
+
+The class page, top to bottom: the expiry banner (§3.16.4), **Getting started**
+(Create the class ✓ · Put the join code on the board and students join ·
+Share a circuit or add class examples · Post an assignment — each ticked when
+done; *Hide* dismisses it for good on that device), the join code card, **Share
+with the class**, **Class examples**, **Assignments**, **Settings**.
+**Show on Projector** closes from the laptop: Escape (anywhere), clicking the
+code (on the projector or the card again), *Done*, or the Classroom menu item.
+**Print Recovery Sheet** keeps the sheet in the page until `afterprint` (or the
+window has the focus again) — it used to be removed after 1.5 s, which printed
+a blank page wherever `print()` doesn't wait for the dialog.
+
+#### 3.16.9 Deploying v2
+
+No new Durable Object classes and no migration entry: the new tables are made
+by the objects themselves (`CREATE TABLE IF NOT EXISTS` the first time a class
+is opened). No cron. Optional new secret `ADMIN_TOKEN`. Then, from
+`cloudflare/classroom/`:
+
+```sh
+npx wrangler secret put ADMIN_TOKEN     # optional (3.16.5)
+npx wrangler deploy
+```
+
+Deploy the Worker before the website: a v2 page against a v1 Worker gets `404
+not_found` for items and history (it says so in the status line); a v1 page
+against the v2 Worker works as before.
+
+#### 3.16.10 Scheduled release, and adding from Your Circuits (2026-10-09)
+
+**Scheduled release.** A class example or a shared circuit (any `item`) can be
+set to release at a chosen date and time instead of now or "hidden until I
+press Release". The teacher picks it in their own time zone (the sheet names
+it); it is sent and stored as **UTC milliseconds**. The server releases it at
+that time on its own: the teacher's devices don't have to be on.
+
+- **Request.** `PUT /classes/{classId}/items/{iid}` takes an optional
+  **`releaseAt`**: an integer (ms) or `null`.
+  - a time in the future → the item is stored **hidden** (whatever `hidden`
+    says; clients send `hidden: true` with it) with that `releaseAt`;
+  - a time already past (or now) → released at once (`hidden: false`), no
+    schedule;
+  - `null` → no schedule (cancel); `hidden` as sent (a cancelled schedule
+    leaves the item hidden until the teacher presses Release);
+  - **absent** → a write with `hidden: true` keeps the schedule the item
+    already has (so an older client's *Update* doesn't drop it); a write with
+    `hidden: false` (an older client's *Release*) releases now and clears it.
+  - Not an integer > 0, or more than 400 days ahead (`maxReleaseDays`,
+    internal) → `400 bad_request`.
+- **Answer and status.** The answer and every item entry gain
+  **`releaseAt`** (`ms|null`): `{"ver":2,…,"hidden":true,"releasedAt":null,"releaseAt":1760706000000}`.
+  Only the teacher's status ever shows a non-null one (a scheduled item is
+  hidden, and students see only released items). Old clients ignore the field.
+  Editing the schedule (a new time) or cancelling it is an ordinary new version
+  (`base`/`ver`, the same payload sealed again), like Release/Hide.
+- **The release.** The class object keeps `doc.releaseNext` (the earliest
+  `releaseAt` still to come). Before **every** request that reads the class
+  (the API, the pulse and the records by version, the end of a held pulse) and
+  when its **alarm** fires, it releases every hidden item whose `releaseAt ≤
+  now`: `hidden` false, `releasedAt` = **its `releaseAt`** (so students sort it
+  by the time it was meant for, even when the release ran a little late),
+  `releaseAt` null, `seq + 1` once for the lot, and `changed()` (held polls
+  answer, every socket hears the pulse). The alarm (§3.11) is set for
+  `releaseNext` too, so sockets and pulse-polling students hear it at that
+  moment; a held pulse is held no longer than the next release. Students'
+  clients then see a new item in the status and say "Your teacher added “X”"
+  / "shared “X”" exactly as for a released one (§3.16.2; news is per client).
+- **Sealed meanwhile.** The item is sealed to the class key and uploaded when
+  it is scheduled; until its time it is unlisted (only the teacher's status
+  lists its id), as a hidden item is. Its ciphertext stays fetchable on the
+  `fetchKey` path by whoever knows its UUID (the teacher's other devices read
+  it that way), which is the same promise as "hidden": not listed, not
+  announced, unguessable id.
+- **Storage.** Column `releaseAt INTEGER` on `items`, added by the object the
+  first time it opens after the deploy (`ALTER TABLE … ADD COLUMN`, an error
+  when it's already there is ignored). No migration entry, no new secret.
+- **Assignments** have no scheduled release (they post when posted); a teacher
+  who wants that can schedule a shared circuit or keep the assignment until
+  the day.
+
+**Clients (teacher).** The Share and Add sheets have *When*: **Now** · **At a
+time…** (date and time, "your time zone: Europe/London") · and for examples
+**Hidden until I release it**. A scheduled row says **"Releases Fri, Oct 17,
+9:00 AM"** (a share: "Shares …") and offers *Release Now*, *Change Time…*
+(a new time, or *Don't schedule* = keep it hidden) and *Delete*. Clients send
+`releaseAt` only when the teacher chose a time or cancelled one; *Update* of a
+scheduled share keeps it (absent).
+
+**Add from Your Circuits.** Wherever a teacher sends a circuit to the class —
+*Share*, *Add to the class examples*, *Post an assignment* — and wherever a
+student hands one in, a **From Your Circuits…** choice lists the circuits on
+that device (CedarLogic Online: Your Circuits in the browser; the Mac: the ⌘O
+library), newest first, with the name, when it was last changed and its part
+count, searchable; examples can take several at once (one item each, title =
+the circuit's name). The chosen circuit's saved `.cdl` is what is sent; the
+board isn't changed. Nothing changes on the server.
+
+### 3.17 Class passes (2026-10-08): coming back on a computer that forgets
+
+A Chromebook in guest or ephemeral mode, or a lab computer wiped every
+night, forgets a class at sign-out (§8.3), and before this a student came
+back by joining again as a new student. A **class pass** is a code that
+never expires and brings the student back **as the same student** on any
+device: a long-lived move slot (§3.3 "The move slot") the student makes,
+prints or writes down, and can use again and again. It answers §11.13.
+
+**The code.** 16 random bytes, encoded exactly like a teacher key or move
+code (§1.2: 28 symbols, Sync's 12-bit checksum), new code kind `pass`, link
+letter **`s`**: `https://cedarlogic.netlify.app/classroom/#s=<code>` and
+`cedarlogic://classroom#s=<code>` (`#p=` is Sync's pairing link, so not
+that). The QR code encodes the https link (version 5, as a move code); the
+code stays in the fragment, which never reaches a server, a log or a
+`Referer`, and the page takes it off the address bar at once (§1.2). A
+`#s=` link only fills in the "I have a class pass" sheet: nothing happens
+until the person presses Use Pass after seeing the class and the name.
+
+**Keys** (HKDF-SHA256, salt `cedarlogic-classroom-v1`, as §1.3), three
+independent outputs of the 16 bytes:
+
+| info | Output | Use |
+|---|---|---|
+| `pass-id` | `passId`, 16 B, 32 hex | the lookup id, in the redemption's path |
+| `pass-token` | `passToken`, 32 B, base64url (43) | `Authorization: Bearer` on the redemption: proof of the whole code |
+| `pass-key` | `passKey`, 32 B | AES-256-GCM key of the pass record; never sent |
+
+The lookup id is separate from the secret that authorises: knowing a
+`passId` (from a log, say) without the code gives nothing. **The server
+stores only hashes**: `pid` = lowercase hex SHA-256 of the 32 ASCII
+characters of `passId` (the pass's id everywhere on the server, and in the
+listings) and SHA-256 of the 43 characters of `passToken`; never `passId`,
+the token or the key. Comparison is constant time (`sameHex`). 128 random
+bits need no stretching (§1.3).
+
+**The record**: kind `pass`, envelope `01` under `passKey`, AAD id =
+`passId`, ver 1, ≤ 4 KiB, not deflated; the payload has the move record's
+fields (§2.2) with `"kind":"pass"`: `classId`, `studentId`, `token` (the
+student token), `proof`, `classKey`, `pub`, `name`, `className`. The
+class's public key reaches the new device inside it, authenticated by
+`passKey`, as with a move. (The `pass` kind came after the vectors file:
+`vectors.json`'s `envelopeOf` table is unchanged; each client adds `pass: 1`
+beside it.)
+
+**Endpoints** (additive; nothing existing changed):
+
+| Method | Path | Who | Does | Success |
+|---|---|---|---|---|
+| POST | `/classes/{classId}/passes` | S (own) | `{studentId, passId, tokenHash, env}` → `{pid, createdAt}`; the same request again → 201 as it was | 201 |
+| GET | `/classes/{classId}/passes` | T (every pass), S (its own) | `{passes:[{pid, studentId, createdAt, usedAt, uses}]}` (oldest first; never a record or a hash) | 200 |
+| DELETE | `/classes/{classId}/passes/{pid}` | T (any), S (its own) | cancel; again → `{cancelled:false}` | 200 |
+| GET | `/pass/{passId}` | `Bearer <passToken>` | `{classId, studentId, env, createdAt}`; sets `usedAt`, `uses + 1` | 200 |
+
+`{pid}` = 64 lowercase hex. New errors: `404 pass_gone` ("That class pass
+was cancelled, or isn't for a class on the website any more. Ask your
+teacher."), `409 pass_exists` ("Try again.": a new code), `409
+too_many_passes` ("You already have 5 class passes for this class. Cancel
+one to make another."). A deleted or expired class answers `410` as
+everywhere.
+
+**Storage.** The class's object: a new table `passes (pid, sid, hash,
+createdAt, usedAt, uses, env)` (`WITHOUT ROWID`), made with `CREATE TABLE
+IF NOT EXISTS` the first time each object wakes after the deploy, as v2's
+tables were. The site object: `passes (idx, classId, at)`, the index from
+`pid` to its class, made the same way. **No Durable Object migration** (a
+`[[migrations]]` entry is only for new or renamed object classes) and **no
+D1**: Classroom has no D1 database. Removing a student deletes their passes
+in the same transaction; deleting the class deletes them with everything
+else; the site's index row goes at its next lookup (the class says 404 or
+410).
+
+**Limits** (`INTERNAL` in `protocol.mjs`, test controls can change them):
+5 live passes per student per class; 5 new passes per student an hour and
+60 per address an hour; redemption 30 a day **per pass**, 1,000 a day per
+class, 600 an hour per address; wrong tokens 10 an hour **per pass** (then
+even the right one gets 429 for that hour) and, as every failed lookup,
+the address's `failedPerIpPerHour` (`authfail`), past which a right pass
+gets 429 too (§3.5). The redemption is a `GET`, so the daily breaker and
+`CLASSROOM_CLOSED` don't stop it (it writes only `usedAt` and `uses`).
+
+**What a client does.** *Make* (student's class page › Class Pass › Make a
+Class Pass): a new code, the record sealed, `POST …/passes`; the code shown
+once, large, with its QR code, Print Pass and Copy Code. *Use* (Classroom ›
+I have a class pass, a `#s=` link, or Scan with the camera, CedarScan on
+the web): `GET /pass/{passId}` → open → "Come back to “Digital Logic 101”
+as Sam Lee?" → [Use Pass] → the membership is saved as a move's is (same
+studentId, same token, same proof), a status read for the `fetchKey`. The
+preview's answer is kept a minute so Use Pass isn't a second lookup. The
+pass stays usable. *List and cancel*: the student sees their passes (made,
+last used, uses) and cancels any; the teacher (class page › Class Passes)
+sees every pass with the student's name (from the roster, opened on the
+teacher's device) and cancels any.
+
+**Threat model** (adds to §8.2).
+
+- *A pass is a bearer credential for one student, for good.* Whoever has
+  the code can hand in, answer and rename as that student, and read the
+  class. The sheet and the printout say "Keep it private, like a
+  password". Mitigations: 128-bit codes (no guessing online or offline);
+  the teacher sees every pass with its last use and count and can cancel
+  it; the student can cancel it; removing the student ends every pass;
+  per-pass daily redemptions cap a pass posted online.
+- *Cancelling a pass doesn't sign out devices that already used it*: they
+  hold the student token, as a moved device does (one token per student
+  in v1). To cut a student off, the teacher removes them (§4.7); the
+  cancel sheet says so. Per-device tokens are v1.1 with student key pairs.
+- *A copy of the server's store* holds SHA-256 of `passId` and of the
+  token and the record under `passKey`: none of them gives the code, the
+  token or the record (128-bit preimages). A dishonest server can refuse
+  or count redemptions but can't read or forge a pass record (AES-GCM under
+  a key it never has; AAD binds kind, class, `passId`).
+- *Logs*: none of `passId`, the token or `pid` is logged (§3.5's logging
+  rule); the code is only in the URL fragment.
+- *Online guessing* of `passId`/token is hopeless at 2^128 and counted
+  anyway (per address, per pass).
+- *A pass outlives the class only as a dead code*: a class removed after 18
+  months unused (§3.5) takes its passes with it — "never expires" means the
+  pass has no expiry of its own.
+
+**Tests.** `cloudflare/classroom/test/test_worker.mjs` (`pass:` cases, both
+backends), `scripts/test_classroom_client.mjs` `s53_class_pass` (the web
+core against the Worker), `scripts/test_classroom_ui.mjs` ("class pass":
+make, use in a fresh browser, the teacher's list and cancel), and in the app
+repo the C++ core's scenario "3.17 class pass" (`classroom-selftest.sh`) and
+its server round against the Worker (`classroom-worker-check.sh`).
+
+**Deploying** (the owner, by hand; nothing new to configure):
+
+```
+cd cloudflare/classroom
+npm install                       # once
+node test/test_worker.mjs         # both backends; node test/test_live.mjs too
+npx wrangler deploy               # the same Worker; no new secrets, vars, bindings or [[migrations]]
+```
+
+Live clients are unaffected: every existing path, field, table and message
+is as it was; Mac 0.3.14/0.3.15 and the live website never call the new
+paths. Rolling back is `npx wrangler rollback` (the new tables stay, unused).
 
 ## 4. The clients (web and Mac, from the same rules)
 
@@ -1680,8 +2460,9 @@ where the teacher stepped it; students may press K locally.
 **Predict**: type the question, pick the lights (the names Group 3's Predict
 mode lists); push with `predict: {prompt, lights}` and `reveal: false`
 (students' lights hide); the live bar shows "23 of 212 answered · LED: 1 (18)
-0 (5)" from the answers endpoint polled every 3 s (`304` most of the time;
-an answer whose proof isn't the student's pinned one isn't counted);
+0 (5)" from the answers that arrive on the teacher's live connection in
+batches (without one, from the answers endpoint, held by the server until a
+new one comes; an answer whose proof isn't the student's pinned one isn't counted);
 counts, not names — the answers carry `studentId`, and the UI shows only
 totals. **Reveal**: push the circuit (usually after stepping the clock) with
 `reveal: true` and the same `predict`; the bar adds "18 right, 5 wrong" by
@@ -1746,8 +2527,11 @@ last hand-in's, and says "Nothing changed since you handed in" otherwise
 
 ### 4.6 Student: the live view
 
-While the pulse says `live > seen.live`, the client fetches that version
-(`/api/live/v1/{classId}/{fetchKey}/live/{ver}`), opens it and, if the live view is open or
+A push arrives on the class's live connection with the record inside
+(`{"t":"live", "ver", "session", "env", …}`, §3.14); without one, while the
+pulse says `live > seen.live`, the client fetches that version
+(`/api/live/v1/{classId}/{fetchKey}/live/{ver}`). Either way it opens it as
+that version and, if the live view is open or
 the student accepts the banner "Your teacher is live. [Join Live View]",
 loads the circuit into the **live view**: a read-only-by-default circuit slot
 "Live: Digital Logic 101" outside Your Circuits (Mac: a window with the live
@@ -1757,10 +2541,11 @@ is the teacher's circuit, not the student's: it isn't kept, and the bar says
 "Updated · step 4" when it happens); [Keep a Copy] saves the current one to
 Your Circuits. `predict` present and `reveal` false → the named lights hide
 (Group 3's Predict mode), the prompt shows, the student guesses, [Send My
-Guess] → `PUT …/answers/{sid}` with `{session, ver, lights, at, proof}` sealed
-(`409 not_live` → dropped quietly: the teacher moved on). `reveal` true →
+Guess] → `{session, ver, lights, at, proof}` sealed, over the live connection
+(`{"t":"answer", …}`; `PUT …/answers/{sid}` when there is none, or no answer
+comes within 8 s) (`409 not_live` → dropped quietly: the teacher moved on). `reveal` true →
 lights show, the student's own guesses are scored locally ("2 of 2 right").
-`ended` → "The live view ended." and the fast polling stops. A `live` record
+`ended` → "The live view ended." and the held polls stop. A `live` record
 that won't open is reported once ("Couldn't read what the teacher sent.
 Trying again.") and the view keeps the last good one.
 
@@ -1801,15 +2586,23 @@ one notice: "You were removed from “Digital Logic 101”." / "“Digital Logic
 
 One poller per device per class (web: `navigator.locks.request`, tabs
 coordinated by the `BroadcastChannel`; Mac: the engine thread), and nothing
-polls while the page is hidden or the app is in the background.
+polls while the page is hidden or the app is in the background. **Each open
+class page also keeps the class's live connection** (§3.14: one WebSocket,
+`hello`, pings every 45 s, reconnecting 1, 2, 5, 10, 30, 60 s ±20 %); while it
+is open it brings every change, and the poller only looks now and then.
 
 | Trigger | Student | Teacher |
 |---|---|---|
-| The class page or live view opened; visibility → visible; the `online` event; app activated | pulse at once | status at once (`If-None-Match`) |
-| While a live session is on (pulse `live` ≠ 0) and the live view or class page is visible | pulse every `p` s (3), fetch new versions | answers every 3 s while a predict question is open |
+| The class page or live view opened; visibility → visible; the `online` event; app activated | pulse at once (and the socket) | status at once (`If-None-Match`; and the socket) |
+| The live connection open | a pulse every 5 minutes, in case | status every 5 minutes, in case; answers come over it |
+| No live connection (three tries got no `hello`: the fallback, §3.10; the socket tried again every 5 minutes), a live session on | the pulse held (`x-cedarlogic-wait`, up to 25 s), then again at once; every `p` s (10) if the server doesn't hold | the answers held the same way while a predict question is open |
 | Otherwise, while the class page is visible | pulse every 60 s, rising to 120 s after 10 minutes without change | status every 30 s while the submissions view is open, else 60 s |
 | Two hours without input | stop until the next input | stop |
 | `pending` hand-ins | sent at the next pulse or `online`, oldest first | — |
+
+A push moves `seq` by one and the live slot with it: a client that sees
+exactly that (on the socket or the pulse) applies the live record and
+doesn't read the status, so 300 students don't read 300 statuses per push.
 
 Failures back off as Sync §4.3 (30 s, 1 min, 2 min, 5 min, 10 min, then every
 15 min, ±20 %); `429`/`503` wait at least `Retry-After`; a success resets.
@@ -1828,8 +2621,8 @@ what was typed); the submissions view shows what it has with "Last updated
 - Every client keeps **high-water marks**: `seq`, `live` and each
   assignment's `ver` (student); the live ver, each assignment's ver and each
   submission's `(ver, h)` (teacher). A pulse, status or index that shows a
-  lower value is ignored quietly — the CDN can serve a copy that is a second
-  old, which is normal, not an attack; a lower value after a higher one is
+  lower value is ignored quietly — a reconnecting socket or a retried poll can
+  bring an older one, which is normal, not an attack; a lower value after a higher one is
   never applied either way, which is what stops a dishonest server from
   rolling a class back. A record fetched at a version the mark already passed
   isn't fetched again.
@@ -1866,7 +2659,9 @@ Names, class names, titles, instructions, prompts and light names go into the
 page only with `textContent` (or as DOM attribute values), never into
 `innerHTML`; instructions are shown as plain text with line breaks. The
 `/classroom/` page and the simulator pages keep Sync's Content-Security-Policy
-(`connect-src 'self'`, no inline scripts); `qrcodegen.js` draws the QR codes
+(no inline scripts), with `connect-src 'self'` widened by exactly the
+classroom service's two origins (`https://cedarlogic-classroom.<account>.workers.dev`
+and its `wss:` twin, §3.13) on the pages that use it; `qrcodegen.js` draws the QR codes
 as SVG. On the Mac, every string lands in an `NSTextField`/SwiftUI `Text`.
 
 ### 4.11 Errors as the person sees them
@@ -2415,12 +3210,26 @@ new CedarClassroom.Engine({ store, fetch, now, host, base, liveBase, client, che
    answersChanged / statusChanged / notice; `check(cdl, text, names)` -> { verdict, summary } runs Check My Circuit
    through the WASM engine's worker (`CedarLogicCheck`, docs/CHECK-SEQUENTIAL.md 12); `sync` is the CedarSync engine,
    for side records (2.5), or null.
-new CedarClassroom.Poller(engine, { lock, visible, timers })                                        (4.8)
+new CedarClassroom.Poller(engine, { lock, visible, timers, WebSocket })                             (4.8)
+   with WebSocket given, each open class page also keeps a LiveSocket and polls only now and then while it is open
+new CedarClassroom.LiveSocket(engine, classId, "teacher" | "student", { WebSocket, setTimeout, clearTimeout, random, onState })
+   start() / stop() / isOpen() / request(msg) -> the "ok" or "error" for it; state: connecting | open | fallback | closed (3.14)
+CedarClassroom.configure({ service } | { base, liveBase })  -> where every Api made after it talks to (3.2, 3.13)
+   engine.socketMessage(classId, role, msg)  applies a socket's message (the LiveSocket calls it); engine.applyPulse,
+   engine.applyLiveRecord, engine.applyAnswers: the pulse, a live record and answers, from wherever they came;
+   refreshMembership(classId, { wait }) / refreshAnswers(classId, { wait }): polls the server may hold; host also
+   hears submissionsChanged(classId, aid) (a hand-in arrived, from the teacher's socket)
 ```
 
+`SERVICE`, the classroom service's origin, is a placeholder that can never
+resolve (`https://cedarlogic-classroom.invalid`) until the deploy sets it
+(§3.13); a page may set `window.CEDARLOGIC_CLASSROOM_SERVICE` before the
+file loads, or call `configure`.
+
 `scripts/test_classroom_client.mjs` runs it in node on Maps against
-`netlify/lib/classroom.mjs`'s `handle()`/`pulse()` in-process and against
-the mock server; `sim-classroom.js` (Group 6) is the UI on top, plus the
+`netlify/lib/classroom.mjs`'s `handle()`/`pulse()` in-process, against
+the mock server, and against the Cloudflare Worker under `wrangler dev`
+(with its sockets, §3.12); `sim-classroom.js` (Group 6) is the UI on top, plus the
 `/classroom/` page's script.
 
 ---
@@ -2771,7 +3580,7 @@ FakeServer in `ClassroomTest.cpp`, plus the mock server over the platform's
 | 4 | S1 joins with the code (grouped, lower case) and a name | the preview names the class; 201; the roster has a sealed name T1 opens to "Sam Lee"; S1's status lists no assignments yet |
 | 5 | A wrong join code / a closed class / a full class (`maxStudents` = 2) | `404 no_class` and counted / `403 join_closed` / `507 class_full`; the sentences |
 | 6 | T1 changes the join code; S2 tries the old one, then the new | old: `404 no_class`; new: joins; the class's `fetchKey` changed: S1's next record fetch gets `404 wrong_fetch_key`, S1 reads its status and keeps working; the old path stays refused |
-| 7 | T1 posts an assignment with a readable key; S1 polls | the pulse's `seq` moves; S1 fetches the status and the record from the cached path; the list shows it; Check My Circuit is offered; `attempt` 0 |
+| 7 | T1 posts an assignment with a readable key; S1 polls | the pulse's `seq` moves; S1 fetches the status and the record by its version; the list shows it; Check My Circuit is offered; `attempt` 0 |
 | 8 | T1 posts with "only I check" | S1 sees the title and "Your teacher checks this one"; S1's device holds no key text; T1 opens the sealed key from the assignment |
 | 9 | T1 and T2 edit the same assignment; T2 saves second | T2 gets 412, refetches, shows T1's edit; nothing merged |
 | 10 | S1 hands in; hands in again after a change; T1 views | two attempts, the latest content, `firstAt` kept; T1's table shows "attempt 2", the check result from T1's own run |
@@ -2796,7 +3605,7 @@ FakeServer in `ClassroomTest.cpp`, plus the mock server over the platform's
 | 29 | A class idle 400 days (clock advanced); the cleanup runs | `class_expired` for everyone; the warning line appeared on T1 from 60 days before |
 | 30 | A never-used class idle 8 days; the cleanup runs; T1 opens it | 404 → T1 re-creates it quietly from its files; the same key and code work |
 | 31 | Two devices run an old sync client beside a new one; the new creates a class | the old device shows nothing (no notice, no damaged count), keeps syncing circuits; the new device's record is intact |
-| 32 | The request breaker trips during a lecture | `503 classroom_paused` on writes only; the status, the pulse and record fetches keep being served (cache hits and misses); S1's live view keeps following |
+| 32 | The request breaker trips during a lecture | `503 classroom_paused` on writes only; the status, the pulse, record fetches and sockets keep being served; S1's live view keeps following |
 | 33 | `429` with `Retry-After: 120` on a hand-in | no request for 120 s; then it goes |
 | 34 | The server answers the join lookup with a record under another key, or a `pub` not on the curve | "couldn't be read"; nothing joined |
 | 35 | 300 students join and hand in within one minute (the mock server with latency) | every write lands or is retried to success; no lost update in the index |
@@ -2806,22 +3615,28 @@ FakeServer in `ClassroomTest.cpp`, plus the mock server over the platform's
 | 39 | A store dump after create, join and a code change (`GET /__mock/dump`) | no `joinId`, no SHA-256 of a join token, no public key anywhere; the `j/` key and `joinHash` equal §7.1.3's server vector under the test pepper |
 | 40 | Someone posts the code; 40 names join from one address in a minute; T1 removes everyone who joined after 10:05 | the 61st join from that address into the class would be `429`; one request removes the 40; their record paths stop working |
 | 41 | One address sends requests as fast as the edge allows | its allowance answers `429` before the site's breaker moves; other classes keep handing in |
-| 42 | T1 deletes an assignment, then the class | the mock's purge log shows `asg-<aid>`, then `class-<classId>` |
+| 42 | T1 deletes an assignment, then the class | revision 2's mock: its purge log shows `asg-<aid>`, then `class-<classId>`; the Worker: nothing to purge, everything gone at once |
+| 47 | The live view over sockets (the Worker): T1 pushes; S1–S3 answer | every push reaches the students with the record inside; no pulse, no record fetch, no status read for a push; the answers go over the sockets and reach T1's counts; a removed student's socket ends with its membership |
+| 48 | A network that blocks WebSockets (the Worker) | three tries, then the fallback; a held pulse answers the next push at once; the Poller keeps holding polls during the lecture |
 | 43 | A hand-in whose `cdl` has 25,000 gates; one whose deflate inflates past 4,000,000 bytes | "Couldn't be read (too big)" for both; nothing built; the rest of the table fills |
 | 44 | T1 uses Remove from This Device on a second computer (Sync on); S1 does the same on a lab PC | the class is gone from that computer only; T1's other devices and the website unchanged; the sync side record intact and not re-added there; S1 is still in the class on the website |
 
 ### 7.3 Per-client suites
 
-- **Server** — §3.12 (`scripts/test_classroom_server.mjs`), then scenarios
-  1–44 driven by the web core against the mock server.
+- **Server** — §3.12 (`cloudflare/classroom/test/test_worker.mjs` in node
+  and on `wrangler dev`, `test_live.mjs`; revision 2's
+  `scripts/test_classroom_server.mjs`), then scenarios 1–48 driven by the
+  web core against the Worker.
 - **Web** — `scripts/test_classroom_client.mjs` (Node 20+): the vectors
-  (every item of §7.1), then scenarios 1–44 with web engines on Maps against
-  `handle()`/`pulse()` in-process and once more against the mock server;
+  (every item of §7.1), then scenarios 1–48 with web engines on Maps against
+  `handle()`/`pulse()` in-process, against the mock server, and against the
+  Worker under `wrangler dev`;
   `scripts/test_classroom_ui.mjs` (Group 6, headless Chrome): a whole class
   through the real pages, and the phone-width checks.
 - **C++ core** — `clclass::selfTest`: the vectors (`ClassroomVectors.h`) and
   scenarios 1–44 on the FakeServer; `mac/Tools/classroom-check.sh` with the
-  CryptoKit hooks, also against the mock server; sanitizers clean.
+  CryptoKit hooks, also against the mock server or the Worker (§3.13); sanitizers clean;
+  then the live connection of §3.14 and scenarios 47–48 (§13, the protocol changes).
 - **Interop, once, before release**: a Mac teacher with website students
   (Chrome, Safari, a Chromebook, a phone) and a website teacher with a Mac
   student through scenarios 1, 4, 7, 8, 10, 17, 18, 24, 27, 28 by hand against a
@@ -2847,29 +3662,33 @@ section (plain words, no legal advice):
 > hand in and every answer to a live question are encrypted *for the teacher*
 > on the student's device before they are sent: only a device holding the
 > teacher key can read them. Assignments and the live view are encrypted for
-> the class: only its members can read them. CedarLogic's website stores
-> these encrypted records so the class can find them; it never has the keys.
+> the class: only its members can read them. CedarLogic's classroom service
+> stores these encrypted records so the class can find them; it never has the keys.
 > A student who leaves or is removed keeps what they already saw, but can't
 > download anything new from the class.
 >
 > **What the website does see.** That a class exists, when it was made and
 > last used, how many students joined and when, how many assignments there
-> are and how big they are, when hand-ins and answers arrive, and the
-> internet addresses devices connect from (used only to stop abuse, kept as a
-> keyed hash for at most a day, not stored as addresses). It doesn't see names, class names,
+> are and how big they are, when hand-ins and answers arrive, when a
+> device's live connection opens and closes, and the internet addresses
+> devices connect from (used only to stop abuse, kept as a keyed hash for at
+> most two days, not stored as addresses). It doesn't see names, class names,
 > instructions, circuits, answer keys, guesses or results. It sets no
 > cookies, runs no analytics and loads nothing from third parties on
 > classroom pages.
 >
-> **Where.** The records live in Netlify's storage for this site, in the
-> United States (the site's functions and storage run in Netlify's `us-east-2`
-> region, in Ohio). Netlify, the website's host, keeps ordinary request logs
-> for a short time.
+> **Where.** The classroom service runs on Cloudflare (Workers and Durable
+> Objects). Each class's records are kept in one Cloudflare data centre,
+> chosen near where the class was first used (for a class made in the United
+> States, normally in the United States; Cloudflare can move it). Cloudflare
+> handles the service's requests; the service itself keeps no request logs.
+> The website's pages are on Netlify, which keeps ordinary request logs for a
+> short time.
 >
 > **How long.** A class nobody opens for 400 days is removed from the website
 > (the teacher's devices warn beforehand). A teacher can delete a class at any
-> time, and everything in it is deleted from the website, along with the
-> copies the website's content network keeps; a student can leave a class at
+> time, and everything in it is deleted from the classroom service at once
+> (nothing is kept in any cache on the way); a student can leave a class at
 > any time. Everyone keeps the circuits on their own devices.
 >
 > **For schools.** CedarLogic Classroom asks for no email, login or account.
@@ -2877,7 +3696,7 @@ section (plain words, no legal advice):
 > device, so the website can't read them. What it does handle: the internet
 > addresses devices connect from (which some rules, COPPA among them, count
 > as personal information; used only against abuse, as above, and in
-> Netlify's ordinary request logs) and a random id per student per class,
+> Cloudflare's handling of requests) and a random id per student per class,
 > tied to a person only by the name the teacher sees. If your school's policy
 > treats student names or coursework as protected records (FERPA-style rules
 > in the US, or similar elsewhere), note that the operator of this website
@@ -2900,9 +3719,9 @@ name and what you hand in are encrypted for your teacher" in §5.3.
 
 | Who | Can | Can't |
 |---|---|---|
-| **Anyone with a copy of the Blobs store** (a leaked store token, a backup) | See what §2.6 lists: class ids, counts, sizes, times, which student id handed in when, how often the teacher pushes; with write access, replace or delete records and deny service | Read names, class names, instructions, circuits, keys, guesses; alter a record (any change fails the tag); make a student record a teacher's device accepts (the store has no public key to seal to and no proof: a made-up one is "Couldn't be verified"); make a class-key record (no class key); roll a class back (high-water marks); present a record as another class's, student's, assignment's or version (AAD); search the store for join codes (only HMACs under a pepper that isn't in the store, §1.3) |
-| **The site operator** (the store and the function's environment, the pepper included) | All of the above; withhold records, delete a class; link classes to addresses; hand a removed student new records (the `fetchKey` is the server's own rule); and, with one table of all 2⁴⁸ join codes built once for about 700 GPU-years (§1.3), or with a join code a student passes on: open that class's join record, read its assignments and live view, and seal records to the class — but still no proof, so a forged hand-in or answer is "Couldn't be verified" | Read names, hand-ins, answers or sealed keys (the teacher's private key never leaves the teacher's devices); swap the join record without the teacher's devices noticing (§4.1); forge the teacher's assignments or pushes without a member's class key, and even with it only until v1.1's signatures (§0, below) |
-| **A network attacker** | See that a device talks to `cedarlogic.netlify.app`, when, and roughly how much | Anything else |
+| **Anyone with a copy of the objects' storage** (the classes', the site's: a leaked account token, a backup) | See what §2.6 lists: class ids, counts, sizes, times, which student id handed in when, how often the teacher pushes; with write access, replace or delete records and deny service | Read names, class names, instructions, circuits, keys, guesses; alter a record (any change fails the tag); make a student record a teacher's device accepts (the store has no public key to seal to and no proof: a made-up one is "Couldn't be verified"); make a class-key record (no class key); roll a class back (high-water marks); present a record as another class's, student's, assignment's or version (AAD); search the store for join codes (only HMACs under a pepper that isn't in the store but in the Worker's secrets, §1.3) |
+| **The site operator** (the Cloudflare account: the objects' storage and the Worker's secrets, the pepper included) | All of the above; withhold records, delete a class; link classes to addresses; hand a removed student new records (the `fetchKey` is the server's own rule); and, with one table of all 2⁴⁸ join codes built once for about 700 GPU-years (§1.3), or with a join code a student passes on: open that class's join record, read its assignments and live view, and seal records to the class — but still no proof, so a forged hand-in or answer is "Couldn't be verified" | Read names, hand-ins, answers or sealed keys (the teacher's private key never leaves the teacher's devices); swap the join record without the teacher's devices noticing (§4.1); forge the teacher's assignments or pushes without a member's class key, and even with it only until v1.1's signatures (§0, below) |
+| **A network attacker** | See that a device talks to `cedarlogic.netlify.app` and the classroom service (`cedarlogic-classroom.<account>.workers.dev`), when, and roughly how much | Anything else |
 | **A TLS-inspecting proxy** (school networks) | See the teacher's and students' bearer tokens; with a student's: hand in garbage (it fails the proof check) or leave as that student; with the teacher's: post garbage or delete assignments, remove students, push a garbage live record, read encrypted records (useless) — vandalism the teacher sees at once; with the join token (sent on the two join requests): join under any name, though it can't read the join record without the join key | Read or forge anything (no keys, no proofs); delete the class (the delete token is sent only for that one request); learn the join code or the teacher key (never sent) |
 | **Someone who sees the join code** (the board, a photo, a student who shares it) | Join the class under any name (60 a day from one address) and read the assignments and the live view while a member; hand in as that made-up student; keep what they downloaded, and the class key, after being removed | Read anyone's name, hand-ins or answers; download anything new from an honest server once removed or once the code changes (the `fetchKey` changes); act as a real student (no proof) |
 | **Someone who gets the teacher key** (a screenshot, the recovery sheet, a shared computer, or the teacher's sync code when Sync is on) | Everything the teacher can: read every name and hand-in, post, push, delete the class | Keep access after… there is no rotation of the teacher key in v1: the teacher makes a new class (open question §11) |
@@ -2912,8 +3731,8 @@ name and what you hand in are encrypted for your teacher" in §5.3.
 | **A malicious student client** | Hand in huge, malformed or deflate-bomb envelopes within the caps; answer many times a minute; join many times under many names (counted per address and per class; the teacher removes them in one go) | Pass the caps (512 KiB sent, 4 MB inflated, 20,000 gates built, 5 s checked, §4.9); make the teacher's client apply anything (damaged records are listed, never applied); read anything beyond the class key's records |
 | **Malware, or the next person at a shared computer** | Read the key files / IndexedDB like any of the person's files: every class left on that computer | — so: Remove from This Device (§4.1, §4.7), which the teacher-key and join sheets point to |
 | **A script injected into the website** | Read the keys in IndexedDB | — so it must not happen: text only via `textContent`, the CSP, no third-party scripts |
-| **Abusers of free storage** | 100 MiB per class, 10 new classes per address per day, within the site budget | Pass the budgets and the request breaker; a lecture in progress keeps its cached pulse and records even when writes are paused |
-| **A flood of requests** | From one address: run the function up to the edge rule's rate and its allowance (§3.5), each refused request still an invocation. From many addresses: spend the plan's monthly invocations, and trip the daily breaker (writes pause until 00:00 UTC) | From one address: trip the breaker for everyone (its allowance runs out first); take a lecture's live view down (reads go on past the breaker); read anything. Stopping a many-address flood before it spends the month is by hand (§3.5) |
+| **Abusers of free storage** | 100 MiB per class, 10 new classes per address per day, within the site budget | Pass the budgets and the request breaker; fill the account's storage (nearly full refuses new classes first, §3.5); a lecture in progress keeps its sockets, pulse and records even when writes are paused |
+| **A flood of requests** | From one address: spend its allowance (§3.5: 20,000 a day), each refused request still a Worker request. From many addresses: trip the daily breaker (writes pause until 00:00 UTC) and spend the day's 100,000 Worker requests, which takes the classroom (not the website) down until 00:00 UTC | From one address: trip the breaker for everyone (its allowance runs out first); take the website, the simulator or Sync down (they are on Netlify); read anything. On `workers.dev` nothing stops a many-address flood before it reaches the Worker; with a custom domain, Cloudflare's WAF rules can (§3.5, §3.10) |
 
 Notes:
 
@@ -2956,15 +3775,17 @@ Notes:
 | **Replay**: an old record or pulse served again | high-water marks ignore lower versions; the AAD stops re-labelling | nothing |
 | **A malicious student sends huge or malformed hand-ins** | 512 KiB and per-student caps; a malformed one is "Couldn't be read" with the name and time; the teacher removes the student | — |
 | **The teacher's two devices disagree** (edit, join-code change, live) | 412 on the second write; the second device refetches and shows the first's change; live: Take Over | choose |
-| **The website is down mid-lecture** | the pulse's cached answers survive short outages; the student keeps the last circuit; the teacher's pushes fail with "Can't reach the website"; hand-ins queue | wait; nothing is lost |
-| **Netlify's monthly budget runs out** (legacy plan) | the breaker pauses writes before Netlify suspends the site; the live view keeps its cached state | the owner raises the limits, slows the pulse (`CLASSROOM_PULSE_SECONDS`) or upgrades (§3.10) |
+| **The classroom service is unreachable mid-lecture** (a network, an eviction, a deploy) | sockets reconnect (1, 2, 5… s) and the class is as it was (everything is in SQLite); the student keeps the last circuit; the teacher's pushes fail with "Can't reach the website"; hand-ins queue | wait; nothing is lost |
+| **A day's Cloudflare free limit runs out** (Worker or object requests, rows written, duration) | the breaker pauses writes before the Worker requests run out, keeping the rest of the day for lectures in progress; past a limit only the classroom fails, until 00:00 UTC — the website, the simulator and Sync go on | the owner raises the limits, slows the pulse (`CLASSROOM_PULSE_SECONDS`) or turns on the Paid plan (§3.10, §11.18) |
+| **The account's 5 GB fills** | "nearly full" refuses new classes; full refuses growing writes (`507 site_full`); everything else goes on (§3.5) | the owner lowers the per-class cap or deletes what isn't used; the Paid plan has more |
+| **A school's web filter blocks `*.workers.dev`** | the classroom doesn't load there (sockets and polls alike); the website does | a custom domain the school can allow (§3.10, §11.16) |
 | **A device's clock is wrong** | times are server-corrected (the `Date` header); `closesAt` is enforced by the server's clock; due dates are shown from the payload | nothing |
 | **The teacher posts an assignment that won't open on a student's device** (damaged in transit) | the student's list says so; the teacher's device re-posts from its draft cache on the next status (the client compares `h`) | post again if it persists |
 | **Two students pick the same name** | the teacher sees two rows with the same name and different join times | ask them to rename ("Sam L." / "Sam Lee 2") |
 | **A student joins twice from one device** | the device already has the membership and opens it instead | — |
 | **The class expires while the teacher still wants it** | the warning showed for 60 days on every teacher device | open the class once a year |
-| **A flood of requests trips the daily breaker** (it takes more than one address, §3.5) | writes answer `503 classroom_paused` until 00:00 UTC; reading goes on — the status, the pulse and the record fetches keep every lecture's live view going; hand-ins queue on the students' devices | the owner blocks the source with a Netlify traffic rule, or raises `CLASSROOM_MAX_REQUESTS_PER_DAY`; students hand in later |
-| **A copy of the server's records is stolen and searched for join codes** | nothing to search: the store holds only HMACs under a pepper kept in the function's environment (§1.3). With the environment too, one table of all codes (about 700 GPU-years, once, for every class) would give a class's assignments and live records, not names or hand-ins; a new join code makes the old index worthless | the owner rotates the join pepper (§1.3); teachers can change their join codes |
+| **A flood of requests trips the daily breaker** (it takes more than one address, §3.5) | writes answer `503 classroom_paused` until 00:00 UTC; reading goes on — the status, the pulse and the record fetches keep every lecture's live view going; hand-ins queue on the students' devices | the owner raises `CLASSROOM_MAX_REQUESTS_PER_DAY` or sets `CLASSROOM_CLOSED=1` for the day; with a custom domain, a WAF rule blocks the source; students hand in later |
+| **A copy of the server's records is stolen and searched for join codes** | nothing to search: the store holds only HMACs under a pepper kept in the Worker's secrets (§1.3). With the environment too, one table of all codes (about 700 GPU-years, once, for every class) would give a class's assignments and live records, not names or hand-ins; a new join code makes the old index worthless | the owner rotates the join pepper (§1.3); teachers can change their join codes |
 | **A teacher or student leaves a class on a shared computer** | everything of that class on it is readable to the next person (§8.2) | Remove from This Device; the sheets say so |
 | **Chromebooks in guest or ephemeral mode** | IndexedDB is wiped at sign-out: a student's membership is gone and they join again as a new student, every lesson | the teacher removes the old entries (several at once); hand-ins stay under the name; the school can allow CedarLogic's site data to persist, or students can use a move code from a device that keeps it; a lasting "class pass" is an open question (§11) |
 
@@ -2972,16 +3793,18 @@ Notes:
 
 ## 9. Order of work, and the contract between packages
 
-1. **S — server** first: `netlify/lib/classroom.mjs` + the stub + the mock
-   server + tests; deployed behind a deploy preview. `GET /health` answers
-   `{ok:true, protocol:1}`; the pulse's `Cache-Status` is checked there.
+1. **S — server** first: revision 2 built `netlify/lib/classroom.mjs` + the
+   stub + the mock server + tests; revision 3 the Worker and its objects
+   (`cloudflare/classroom/`, with test controls in the mock's shape), tested
+   locally under `wrangler dev`; deployed by the owner (§3.13). `GET /health`
+   answers `{ok:true, protocol:1}`.
 2. **In parallel from day one** (they need only §1–§2 and the vectors): **W**
    (`classroom-core.js`: vectors first, then the engine against `handle()`),
    **E** (`ClassroomProtocol.cpp` + vectors, then the engine + FakeServer
    scenarios), **M** (the P-256 hooks, checked with
    `mac/Tools/classroom-vectors-check.sh` before the core exists).
-3. **UI**: Group 6 (web) and Group 7 (Mac) against the mock server, then the
-   deploy preview.
+3. **UI**: Group 6 (web) and Group 7 (Mac) against the Worker under `wrangler
+   dev` (or the mock server), then the deployed Worker.
 4. **Interop day** (§7.3), then release: the site first with
    `CLASSROOM_CLOSED=1` until the Mac beta ships, if preferred.
 
@@ -3000,9 +3823,12 @@ The contract, so nobody needs to talk to anyone else:
 
 ### S — Server
 
-Owns: `netlify/lib/classroom.mjs`, `netlify/lib/api.mjs` (the gate, breaker,
+Owns (revision 3): `cloudflare/classroom/` — `src/` (the Worker and the
+three objects, §3.1), `wrangler.toml`, `.dev.vars.example`, `test/` (§3.12) —
+and the deploy steps of §3.13. Kept from revision 2:
+`netlify/lib/classroom.mjs`, `netlify/lib/api.mjs` (the gate, breaker,
 budget, body reader and reply helpers lifted from `sync.mjs`, which keeps
-passing its tests), `netlify/functions/classroom.mjs` (both prefixes, §3.1),
+passing its tests), `netlify/functions/classroom.mjs` (unrouted now, §3.1),
 `classroom-cleanup.mjs`, `scripts/classroom-mock-server.mjs` (`--port 8788`;
 controls `POST /__mock/reset|clock|cleanup|limits|tamper|dropNextAnswer|fail`
 — `tamper` also `swapJoin` and `forgeAs {sid}` for scenarios 37–38 —
@@ -3011,10 +3837,11 @@ rate-limit rules, the env names of §1.3 and §3.5 (`CLASSROOM_JOIN_PEPPER`,
 `CLASSROOM_ADDRESS_PER_HOUR`, `CLASSROOM_ADDRESS_PER_DAY`, …) in the
 README/HANDOFF.
 
-Needs: nothing. Acceptance: `node scripts/test_classroom_server.mjs` passes
-every case of §3.12; on a deploy preview a create/join/post/hand-in/live round
-trip with `curl`, the store names end in `-preview`, the pulse shows
-`Cache-Status` hits and a `304`, the cleanup runs on schedule and logs counts.
+Needs: nothing. Acceptance (revision 3): `node test/test_worker.mjs` and
+`node test/test_live.mjs` in `cloudflare/classroom/` pass every case of §3.12,
+`CLASSROOM_BACKEND=worker node scripts/test_classroom_client.mjs` every
+scenario, `node scripts/test_classroom_interop.mjs --worker` both clients;
+on the deployed Worker the checks before launch of §3.10.
 
 ### W — Web core (and, with Group 6, the UI)
 
@@ -3076,12 +3903,13 @@ warnings; the manual checklist of §7.3.
 3. **Earlier attempts.** Only the latest hand-in is kept (with the attempt
    count and the first time). Should the previous one be kept too, so the
    teacher can see what changed?
-4. **Cost on the legacy Free plan.** One class of 300 with heavy predict use
-   is about 60 % of the month's function invocations (§3.10). OK to launch
-   with the breaker at 20,000 a day and watch the dashboard, or move answers
-   and the pulse to Edge Functions before launch?
+4. **Cost on the legacy Free plan** — answered in revision 3: Classroom
+   moved to Cloudflare's Free plan (§3, §13), where a lecture of 300 is a
+   few per cent of a day and running out pauses only the classroom.
 5. **Sync's breaker.** `SYNC_MAX_REQUESTS_PER_DAY` defaults to 100,000 a day,
-   above the plan's 125,000 a month. Lower it to the same 20,000?
+   above the plan's 125,000 a month. Lower it to the same 20,000? (Sync
+   stays on Netlify; with Classroom gone from Netlify, Sync is the site's
+   main use of invocations.)
 6. **The 400-day expiry and the 60-day warning**, and the 7-day removal of
    never-used classes: fine?
 7. **Student memberships via Sync** (kind `membership`): would make a student's
@@ -3097,15 +3925,21 @@ warnings; the manual checklist of §7.3.
     codes at about 700 GPU-years, and the pepper keeps a copy of the store
     from being searched at all; trading down would halve the one and change
     nothing about the other.
-11. **Where the data is.** Netlify keeps site-wide Blobs in `us-east-2`
-    (Ohio), so the privacy text says "in the United States". A school outside
-    the US may ask about transfers; say so on the page, or leave it?
+11. **Where the data is.** Revision 3: each class's object lives in one
+    Cloudflare data centre near where the class was first used, so the
+    privacy text says that (a US class: normally the United States).
+    Cloudflare offers a `locationHint` (a region to prefer) and, for the EU,
+    a jurisdiction that keeps an object in the EU; neither is used. Pin
+    classes to North America, say nothing more, or offer schools in the EU
+    an EU class later? Default: as written, nothing pinned.
 12. **A longer join code.** 15 symbols (`K7QM-4XPD-2FJ3-X9W`, 60 secret bits)
     would make the table of all codes 4,096 times dearer (§12, finding 1.3).
     Revision 2 keeps 12 symbols, since the pepper already keeps the store from
     being searched and a code on a whiteboard is typed by every student.
     Switch to 15?
-13. **A class pass for wiped computers.** Chromebooks in guest or ephemeral
+13. **A class pass for wiped computers.** *Built (2026-10-08, §3.17): a pass
+    never expires, a student holds up to 5 per class, the teacher sees and
+    cancels them; defaults chosen by the implementer, the owner may change them.* Chromebooks in guest or ephemeral
     mode forget a class at every sign-out, so students re-join as new
     students (§8.3). A pass — a move slot that never expires, shown once as a
     28-symbol code / link / QR ("Save this to come back on another
@@ -3118,6 +3952,37 @@ warnings; the manual checklist of §7.3.
     server from serving them anything new; real rotation (student key pairs,
     the class key re-sealed to each remaining student) is v1.1. Acceptable
     for launch?
+16. **A custom domain for the classroom service.** On `*.workers.dev`, school
+    web filters that block that domain block the classroom, and there is no
+    WAF in front of the Worker (§3.10). A domain on Cloudflare (a few dollars
+    a year; the zone itself is free), e.g. `classroom.<the domain>`, fixes
+    both and lets schools allow it by name. Buy one before schools rely on
+    it? Default: launch on `workers.dev`, the client's `SERVICE` one constant
+    to change.
+17. **The per-class cap against 5 GB.** At 100 MiB a class, 30 full classes
+    would fill the 3 GiB storage budget (§3.5). A class that uses its whole
+    year (300 students × 100 assignments × a ~2 KB deflated hand-in) is about
+    60 MB, most far less. Lower `maxClassBytes` to 50 MiB, or keep 100 MiB and
+    rely on "nearly full"? Default: keep 100 MiB (no protocol number changed)
+    and watch the sum.
+18. **The Workers Paid plan** ($5 a month: 10 million Worker requests,
+    1 million object requests, 400,000 GB-s, 50 million rows written and
+    5 GB-month of storage included, then pay as you go; monthly, not daily). Stays off; turn it on when a day's limits
+    are reached in practice (the dashboard shows it), or for a school that
+    blocks WebSockets and runs large lectures on the fallback (§3.10)?
+19. **A same-origin rewrite as a second road in.** A Netlify rewrite of
+    `/api/classroom/*` to the Worker would get the HTTP API (not the sockets)
+    past a filter that blocks `workers.dev`, but the Worker would then see
+    Netlify's addresses for every such caller (the per-address limits of
+    §3.5 would lump them together, and the forwarded address can't be
+    trusted from anyone else). Default: not done; the custom domain (16) is
+    the better fix.
+20. **The Mac app before the socket.** Revision 2's C++ client polls the
+    pulse every `p` s; on Cloudflare every poll is a request (no CDN), so a
+    300-student lecture of Mac students polling would cost about 135,000
+    requests (§3.10). Default: the Mac's classroom ships only with the live
+    connection of §3.14 (or at least held polls); until then `p` is 10 s
+    (`CLASSROOM_PULSE_SECONDS` can raise it for everyone).
 
 ---
 
@@ -3232,3 +4097,143 @@ eighth finding: anything it said after that is not addressed here.
    no personal information" or "no device identifier", names internet
    addresses and Netlify's logs, and says "encrypted for the teacher" rather
    than "end to end".
+
+---
+
+## 13. Changelog
+
+### Revision 6 (2026-10-09): scheduled release, add from Your Circuits
+
+§3.16.10: items take an optional `releaseAt` (UTC ms); the server releases a
+scheduled item at its time by itself (read path + the object's alarm), with
+`releasedAt` = that time and the usual "Your teacher added …" news. Additive:
+older clients keep working (an absent `releaseAt` keeps a hidden item's
+schedule). Clients add circuits from Your Circuits / the ⌘O library.
+
+### Revision 5 (2026-10-08): class passes
+
+§3.17: a never-expiring class pass (`#s=`, kind `pass`, `pass-id` /
+`pass-token` / `pass-key`), four additive endpoints, two new tables made on
+first use, limits per pass, per class and per address; the web and Mac
+clients make, use, list and cancel them. Nothing existing changed.
+
+### Revision 4 (2026-10-08): Classroom v2
+
+§3.16, all of it: predict and the live view gone from the clients (the
+endpoints kept); Share with the class and the class examples (record kind
+`item`, `/items/{iid}`, hidden until released); hand-in history
+(`subhist`, `/history`), one-tap Hand In; answer keys made from a solution
+circuit (truth table or timing table, by name); joined classes on every device
+(sync side record `membership`; SYNC.md §2.5.1); 18-month retention with
+`warnAt`; the owner's `DELETE /admin/classes/{classId}` (`ADMIN_TOKEN`);
+higher join allowances per address; Getting started, the projector closable
+from the laptop, the recovery sheet that printed blank. Older sections that
+describe the live view and predict describe the server's kept endpoints and
+older clients.
+
+### Revision 3 (2026-10-06): Cloudflare Workers + Durable Objects
+
+**Why.** The site's Netlify account is on the legacy Free plan: 125,000
+function invocations a month, and past them Netlify suspends the **whole
+site** — the website, CedarLogic Online, Sync and feedback — for the rest of
+the month. Revision 2's live view polls a pulse (cached by Netlify's CDN,
+but every answer, hand-in and status read is an invocation): one class of
+300 with predict questions was ≈ 60 % of the month. On Cloudflare's Free
+plan the same lecture is a few per cent of one **day** (§3.10), and running
+out pauses only the classroom until 00:00 UTC. Decided with the owner;
+the Paid plan stays off.
+
+**Unchanged** — every byte of §1 and §2 (codes, keys, HKDF and PBKDF2, both
+envelopes, the AAD, the payloads, the field rules; `tests/classroom/vectors.json`
+is untouched and the server passes its records through byte for byte,
+§3.12); every endpoint's path, method, body, success and error codes, error
+sentence and rule (§3.3, §3.4); the join index and hash as HMACs under
+`CLASSROOM_JOIN_PEPPER`, with `CLASSROOM_JOIN_PEPPER_OLD`; tokens kept as
+SHA-256 and compared in constant time; the `fetchKey`; retention (7 and 400
+days), a join code never freed; every limit in `limits` but one.
+
+**Changed on the wire** (what a client sees; the web core does all of it,
+the C++ core needs items 1, 2 and 4 to use the new server well, and works
+against it unchanged meanwhile — `scripts/test_classroom_interop.mjs
+--worker`, 128 checks):
+
+1. **The base URLs** are the classroom service's own origin:
+   `https://cedarlogic-classroom.<account>.workers.dev/api/classroom/v1` and
+   `…/api/live/v1` (§3.2; a custom domain later, §11.16). Paths below them
+   are revision 2's. Revision 2's Netlify paths answer `410
+   {"error":"moved","message":"CedarLogic Classroom has moved. Update CedarLogic."}`.
+2. **`limits`**: `pulseSeconds` 3 → **10** (every poll is a request now: no
+   CDN); new **`holdSeconds`: 25**. Readers ignore fields they don't know.
+3. **Held polls** (§3.3): `x-cedarlogic-wait: <seconds>` with a matching
+   `If-None-Match` on `GET /api/live/v1/{classId}/{fetchKey}` and
+   `GET /classes/{classId}/live/answers` holds the request until something
+   changes (`200`) or the time is up (`304`), at most `holdSeconds`.
+4. **The live connection** (§3.14): `GET /api/classroom/v1/classes/{classId}/socket`,
+   a WebSocket; `hello` with the teacher's or the student's token; pushes with
+   the record inside, pulses, answers up and batched down, `bye` and closing
+   codes 4400–4429.
+5. **CORS**: the website's own origin is now cross-origin and gets
+   `Access-Control-Allow-Origin` (revision 2 sent it only to the extra
+   origins); the allowed headers add `x-cedarlogic-key` and
+   `x-cedarlogic-wait`; `Access-Control-Max-Age: 7200`; the `/api/live/`
+   endpoints answer `Access-Control-Allow-Origin: *`. `CLASSROOM_ORIGINS`
+   (not `SYNC_ORIGINS`) lists the origins.
+6. **No CDN**: every response is `cache-control: no-store`; no
+   `Netlify-CDN-Cache-Control` or `Netlify-Cache-Tag` headers; nothing to
+   purge. A record path serves the current version only (as it effectively
+   did once the CDN's copy was purged or expired).
+7. **ETags** of the submissions index and of the answers are now a hash of
+   their entries (`"<32 hex>"`, `"0"` for an empty index); they were and
+   remain opaque: compare, don't parse.
+
+**Changed in the server's behaviour** (§3.5–§3.11): one object per class,
+one transaction per change (no lost updates, nothing half done, deletions
+finished at once — `todo/` and garbage collection are gone); the site's
+storage sum with "nearly full" refusing new classes first (`503
+classroom_busy`) and "full" refusing growing writes (`507 site_full`); the
+breaker counts Worker requests (default 70,000 a day, was 20,000
+invocations) and the per-address allowance is 10,000 an hour and 20,000 a
+day (was 6,000 and 12,000), both sized to the Free plan's daily 100,000; the
+50 MB a day of writes per address is counted from written bodies; per-class
+counters are kept to within 20 s; housekeeping is each object's alarm, not
+a daily walk; the address key's pepper is `CLASSROOM_RATE_PEPPER` (Sync's
+stays Sync's).
+
+**Changed in the web client** (§4.4, §4.6, §4.8, §6.5):
+`CedarClassroom.configure`, one `SERVICE` origin (a placeholder that can't
+resolve until the deploy sets it); `LiveSocket`; the Poller keeps a socket
+per open class page and holds its polls without one; answers over the
+socket; a push recognised from `seq` moving by one with the live slot, so
+no student reads its status per push (revision 2's clients did: 9,000
+status reads in a 30-push lecture of 300).
+
+**For the C++ core** (a later package; nothing in the app repo changed
+here): set `serverBase`/`liveBase` to the service's origin; read
+`holdSeconds`; implement §3.14's socket (one per open class: `hello`, apply
+`live` records exactly as fetched ones, the `seq`-by-one rule, answers with
+`id` and the 8 s HTTP fallback, pings every 45 s, the closing codes, the
+reconnect backoff and the fallback to held polls after three failed tries)
+and scenarios 47–48; until then the app works over HTTP but polls every 10 s,
+which large lectures can't afford (§11.20).
+
+**Files**: new `cloudflare/classroom/` (§3.1, §3.12, §3.13); changed
+`public/assets/js/classroom-core.js`, `scripts/test_classroom_client.mjs`
+(the Worker backend, scenarios 47–48), `scripts/test_classroom_interop.mjs`
+(`--worker`); `netlify/functions/classroom.mjs` and `classroom-cleanup.mjs`
+unrouted (410 moved); `netlify/lib/classroom.mjs`, the mock server and
+revision 2's server tests unchanged.
+
+**Not verified here** (no deploy was made): Cloudflare's own behaviour in
+production — WebSocket hibernation timings, whether auto-answered pings
+count as incoming messages (§3.10 budgets them as if they do), how
+`deleteAll` is billed, the placement of objects, workers.dev's reach
+through school filters — and the costs table against a real dashboard
+(the checks before launch, §3.10).
+
+### Revision 2 (2026-10-06)
+
+The reviews' findings, §12.
+
+### Revision 1 (2026-10-06)
+
+The first design: codes, no accounts; Netlify Functions + Blobs.

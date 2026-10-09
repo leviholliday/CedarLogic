@@ -81,6 +81,8 @@ struct CRItem: Identifiable, Hashable {
     var createdAt: Date?
     var releasedAt: Date?
     var hidden = false
+    /// Teacher (3.16.10): when the server releases it by itself (nil: not scheduled).
+    var releaseAt: Date?
     /// Student: "new", "updated" or "".
     var news = ""
     var unreadable = false
@@ -132,6 +134,13 @@ enum ClassroomText {
         let f = DateFormatter()
         f.dateFormat = "EEE d MMM, h:mm a"
         return f.string(from: d)
+    }
+    /// "Fri, Oct 17, 9:00 AM" (in the person's own locale): a scheduled release (3.16.10).
+    static func releaseTime(_ d: Date) -> String {
+        let day = DateFormatter(), time = DateFormatter()
+        day.setLocalizedDateFormatFromTemplate("EEEMMMd")
+        time.setLocalizedDateFormatFromTemplate("jmm")
+        return day.string(from: d) + ", " + time.string(from: d)
     }
     static func dayTime(_ d: Date) -> String {
         let f = DateFormatter()
@@ -432,6 +441,7 @@ final class ClassroomCenter: ObservableObject {
                           note: Self.str(cl_classroom_item_note(e, i)), cdl: Self.str(cl_classroom_item_cdl(e, i)),
                           ver: cl_classroom_item_ver(e, i), createdAt: Self.date(cl_classroom_item_created_at(e, i)),
                           releasedAt: Self.date(cl_classroom_item_released_at(e, i)), hidden: cl_classroom_item_hidden(e, i),
+                          releaseAt: Self.date(cl_classroom_item_release_at(e, i)),
                           news: Self.str(cl_classroom_item_news(e, i)), unreadable: cl_classroom_item_unreadable(e, i),
                           problem: Self.str(cl_classroom_item_problem(e, i)))
         }
@@ -550,10 +560,19 @@ final class ClassroomCenter: ObservableObject {
     }
 
     // v2 (3.16.2): shared circuits and class examples. result: the item's id.
+    /// releaseAt (3.16.10): a time schedules the release (the item goes hidden until then); nil sends none,
+    /// so an Update of a scheduled item keeps its schedule.
     func postItem(_ cid: String, id: String?, type: String, title: String, topic: String, note: String, cdl: String, hidden: Bool,
-                  done: @escaping Done) {
-        call(done) { cl_classroom_post_item($0, cid, id, type, title, topic, note, cdl, hidden, $1, $2) }
+                  releaseAt: Date? = nil, done: @escaping Done) {
+        let at = releaseAt.map(Self.ms) ?? Int64(CL_RELEASE_KEEP)
+        call(done) { cl_classroom_post_item2($0, cid, id, type, title, topic, note, cdl, hidden, at, $1, $2) }
     }
+    /// A new time for an item's release, or nil: no schedule (it stays hidden until Release).
+    func scheduleItem(_ cid: String, _ iid: String, at: Date?, done: @escaping Done) {
+        let ms = at.map(Self.ms) ?? Int64(CL_RELEASE_CANCEL)
+        call(done) { cl_classroom_schedule_item($0, cid, iid, ms, $1, $2) }
+    }
+    static func ms(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }
     func setItemHidden(_ cid: String, _ iid: String, _ hidden: Bool, done: @escaping Done) {
         call(done) { cl_classroom_set_item_hidden($0, cid, iid, hidden, $1, $2) }
     }
@@ -710,6 +729,8 @@ enum ClassroomSheet: Identifiable, Equatable {
     case post(classId: String, editing: String?)
     case handIns(classId: String, aid: String)
     case addItem(classId: String, share: Bool, files: [URL])
+    case addFromLibrary(classId: String, share: Bool)     // 3.16.10: From Your Circuits…
+    case postFromLibrary(classId: String)
     var id: String {
         switch self {
         case .create: "create"
@@ -724,6 +745,8 @@ enum ClassroomSheet: Identifiable, Equatable {
         case .post(let c, let e): "post-\(c)-\(e ?? "")"
         case .handIns(let c, let a): "handins-\(c)-\(a)"
         case .addItem(let c, let share, let f): "item-\(c)-\(share)-\(f.count)"
+        case .addFromLibrary(let c, let share): "libitem-\(c)-\(share)"
+        case .postFromLibrary(let c): "libpost-\(c)"
         }
     }
 }

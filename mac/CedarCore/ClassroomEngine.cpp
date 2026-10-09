@@ -649,11 +649,12 @@ std::vector<Item> Engine::items(const std::string& classId) const {
 	auto it = d->pubItems.find(classId);
 	return it == d->pubItems.end() ? std::vector<Item>() : it->second;
 }
-void Engine::postItem(const std::string& classId, const Item& draft, bool hidden, std::function<void(bool, std::string, std::string)> done) {
-	d->run([this, classId, draft, hidden] { return d->client->postItem(classId, draft, hidden); }, valued(done));
+void Engine::postItem(const std::string& classId, const Item& draft, bool hidden, std::function<void(bool, std::string, std::string)> done,
+                      int64_t releaseAt) {
+	d->run([this, classId, draft, hidden, releaseAt] { return d->client->postItem(classId, draft, hidden, releaseAt); }, valued(done));
 }
-void Engine::setItemHidden(const std::string& classId, const std::string& iid, bool hidden, Done done) {
-	d->run([this, classId, iid, hidden] { return d->client->setItemHidden(classId, iid, hidden); }, plain(done));
+void Engine::setItemHidden(const std::string& classId, const std::string& iid, bool hidden, Done done, int64_t releaseAt) {
+	d->run([this, classId, iid, hidden, releaseAt] { return d->client->setItemHidden(classId, iid, hidden, releaseAt); }, plain(done));
 }
 void Engine::deleteItem(const std::string& classId, const std::string& iid, Done done) {
 	d->run([this, classId, iid] { return d->client->deleteItem(classId, iid); }, plain(done));

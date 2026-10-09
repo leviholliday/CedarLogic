@@ -213,6 +213,17 @@ const char *cl_classroom_item_problem(CLClassroom *, int i);
 void cl_classroom_post_item(CLClassroom *, const char *classId, const char *iidOrNull, const char *type, const char *title, const char *topic,
                             const char *note, const char *cdl, bool hidden, CLClassroomDone, void *ctx);   // result = the iid
 void cl_classroom_set_item_hidden(CLClassroom *, const char *classId, const char *iid, bool hidden, CLClassroomDone, void *ctx);
+// 3.16.10, scheduled release. releaseAt: CL_RELEASE_KEEP (-1) not sent (a hidden write keeps any
+// schedule the item has: Update; a visible one releases now and clears it), CL_RELEASE_CANCEL (0)
+// null (no schedule: the item stays hidden until released), > 0 that time in UTC ms (the item is
+// sent hidden and the server releases it then; a time already past releases it now).
+#define CL_RELEASE_KEEP (-1)
+#define CL_RELEASE_CANCEL 0
+int64_t cl_classroom_item_release_at(CLClassroom *, int i);   // teacher: the scheduled time (0: none)
+void cl_classroom_post_item2(CLClassroom *, const char *classId, const char *iidOrNull, const char *type, const char *title, const char *topic,
+                             const char *note, const char *cdl, bool hidden, int64_t releaseAt, CLClassroomDone, void *ctx);   // result = the iid
+// A new version of an item as it is: releaseAt > 0 schedules (or moves) it, CL_RELEASE_CANCEL keeps it hidden with no schedule.
+void cl_classroom_schedule_item(CLClassroom *, const char *classId, const char *iid, int64_t releaseAt, CLClassroomDone, void *ctx);
 void cl_classroom_delete_item(CLClassroom *, const char *classId, const char *iid, CLClassroomDone, void *ctx);
 void cl_classroom_item_opened(CLClassroom *, const char *classId, const char *iid);
 // v2 (3.16.3): a student's earlier hand-ins (teacher). load fetches them; history_count fills the
