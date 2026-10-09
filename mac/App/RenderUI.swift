@@ -232,9 +232,7 @@ enum RenderUI {
                 try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("templates-\(t).png"))
             }
             save("buildformula-\(t)", BuildFormulaView(text: "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)", canvas: canvas), width: 560, height: 560)
-            do {   // Export as Image, matching the window: Studio in light, Graphite in dark.
-                let looks = LookStore.shared.settings
-                LookStore.shared.settings.preset = dark ? .graphite : .studio
+            do {   // Export as Image, matching the window (its light or dark theme).
                 let host = NSHostingView(rootView: ExportImageView(document: doc, page: 0, fileName: "Lab 5"))
                 host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
                 host.frame = NSRect(origin: .zero, size: host.fittingSize)
@@ -243,7 +241,20 @@ enum RenderUI {
                     host.cacheDisplay(in: host.bounds, to: rep)
                     try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("export-\(t).png"))
                 }
-                LookStore.shared.settings = looks
+            }
+            do {   // The exported picture itself at two looks (export-image-a/b.png):
+                   // light, Blue, dot grid; dark, Orange, line grid without the darker fifth.
+                let saved = (prefs.accent, prefs.gridStyle, prefs.majorGrid, prefs.showGrid)
+                prefs.accent = dark ? 3 : 0
+                prefs.gridStyle = dark ? 0 : 1
+                prefs.majorGrid = !dark
+                prefs.showGrid = true
+                let theme = ImageExport.windowTheme(prefs: prefs, look: LookStore.shared.settings)
+                if let img = ImageExport.image(doc, page: 0, multiplier: 2, blackAndWhite: false, grid: true, info: nil, screen: theme) {
+                    try? NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])?
+                        .write(to: dir.appendingPathComponent("export-image-\(dark ? "b" : "a").png"))
+                }
+                (prefs.accent, prefs.gridStyle, prefs.majorGrid, prefs.showGrid) = saved
             }
         }
         // The memory editor, on an 8x8 RAM with a few words in it (drawn
