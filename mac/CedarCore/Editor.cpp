@@ -478,20 +478,23 @@ void cl_edit_drag(CLDocument* doc, double x, double y) {
 	}
 }
 
-void cl_edit_release(CLDocument* doc, double x, double y) {
-	if (doc == nullptr) return;
+void cl_edit_release(CLDocument* doc, double x, double y) { cl_edit_release_ex(doc, x, y, true); }
+
+int cl_edit_release_ex(CLDocument* doc, double x, double y, bool stepClock) {
+	if (doc == nullptr) return CL_CLICK_NONE;
+	int clicked = CL_CLICK_NONE;
 	EditGesture& g = doc->gesture;
 	GUICanvas* page = doc->page(g.page);
 	if (page != nullptr) {
 		if (g.mode == EditGesture::Connect) {
 			const bool barelyMoved = std::fabs((float)x - g.start.x) < g.dragSlop &&
 			                         std::fabs((float)y - g.start.y) < g.dragSlop;
-			if (finishConnection(doc, page, (float)x, (float)y) || !barelyMoved) { g = EditGesture(); return; }
+			if (finishConnection(doc, page, (float)x, (float)y) || !barelyMoved) { g = EditGesture(); return CL_CLICK_NONE; }
 			// Pressed and let go on the pin: the line follows the pointer
 			// until the next click.
 			g.sticky = true;
 			g.current = GLPoint2f((float)x, (float)y);
-			return;
+			return CL_CLICK_NONE;
 		}
 		if (g.mode == EditGesture::WireSeg) {
 			if (guiWire* w = doc->circuit.getWire(g.wire)) {
@@ -505,23 +508,28 @@ void cl_edit_release(CLDocument* doc, double x, double y) {
 			}
 			page->collisionUpdate();
 			g = EditGesture();
-			return;
+			return CL_CLICK_NONE;
 		}
 		if (g.mode == EditGesture::Moving) {
-			if (g.floating) return;   // it drops on the next click
+			if (g.floating) return CL_CLICK_NONE;   // it drops on the next click
 			finishMove(doc, page, g);
 		} else if (g.mode == EditGesture::Pressed && g.onGate) {
-			// Pressed and let go in place: a switch or keypad gets the click.
+			// Pressed and let go in place: a switch or keypad gets the click,
+			// and a clock on "Only on Step Clock" steps (as Step Clock does).
 			if (guiGate* gate = doc->circuit.getGate(g.gate)) {
 				if (klsMessage::Message_SET_GATE_PARAM* msg = gate->checkClick((float)x, (float)y)) {
 					doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM, msg));
 					doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_UPDATE_GATES));
+					clicked = CL_CLICK_PART;
+				} else if (stepClock && !g.toggledOff && isManualClock(gate) && cl_document_clock_step(doc, g.page)) {
+					clicked = CL_CLICK_CLOCK_STEP;
 				}
 			}
 		}
 		page->collisionUpdate();
 	}
 	g = EditGesture();
+	return clicked;
 }
 
 void cl_edit_cancel(CLDocument* doc) {

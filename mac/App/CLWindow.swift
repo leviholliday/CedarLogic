@@ -1095,7 +1095,7 @@ struct CLToolbar: View {
             group {
                 pauseButton
                 button("forward.frame.fill", tip("Step once", .step)) { canvas.stepOnce() }
-                stepClockButton
+                if prefs.showStepClock { stepClockButton }
                 TBSpeed(stepMs: $canvas.stepMs, ink: ink, quiet: style == .seamless)
             }
         }

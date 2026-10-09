@@ -70,9 +70,11 @@ struct SimBar: View {
                     Image(systemName: "forward.frame.fill").foregroundStyle(ink)
                 } action: { canvas.stepOnce() }
                 let clockReady = canvas.hasManualClock
-                barButton(help: clockReady ? stepClockTip : CanvasController.stepClockOffTip, lit: false, disabled: !clockReady) {
-                    Image(systemName: "clock.arrow.2.circlepath").foregroundStyle(ink.opacity(clockReady ? 1 : 0.35))
-                } action: { canvas.perform(.stepClock) }
+                if prefs.showStepClock {
+                    barButton(help: clockReady ? stepClockTip : CanvasController.stepClockOffTip, lit: false, disabled: !clockReady) {
+                        Image(systemName: "clock.arrow.2.circlepath").foregroundStyle(ink.opacity(clockReady ? 1 : 0.35))
+                    } action: { canvas.perform(.stepClock) }
+                }
             }
             divider
             // Speed, fast on the right.

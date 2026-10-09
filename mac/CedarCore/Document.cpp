@@ -83,18 +83,21 @@ std::vector<unsigned long> manualClocks(const CLDocument* doc, int pageIndex) {
 	GUICanvas* p = doc ? doc->page(pageIndex) : nullptr;
 	if (p == nullptr) return out;
 	for (auto& g : *p->getGateList()) {
-		guiGate* gate = g.second;
-		if (gate == nullptr || gate->getLogicType() != "CLOCK") continue;
-		// Looked up, not indexed: getLogicParam would add an empty MANUAL,
-		// which the next save would write.
-		auto* params = gate->getAllLogicParams();
-		auto it = params->find("MANUAL");
-		if (it != params->end() && it->second == "true") out.push_back(g.first);
+		if (isManualClock(g.second)) out.push_back(g.first);
 	}
 	return out;
 }
 
 }  // namespace
+
+bool isManualClock(guiGate* gate) {
+	if (gate == nullptr || gate->getLogicType() != "CLOCK") return false;
+	// Looked up, not indexed: getLogicParam would add an empty MANUAL,
+	// which the next save would write.
+	auto* params = gate->getAllLogicParams();
+	auto it = params->find("MANUAL");
+	return it != params->end() && it->second == "true";
+}
 
 extern "C" {
 
@@ -425,6 +428,8 @@ bool cl_document_click(CLDocument* doc, int page, double x, double y) {
 			doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_UPDATE_GATES));
 			return true;
 		}
+		// A clock on "Only on Step Clock": the click is a Step Clock.
+		if (isManualClock(gate)) return cl_document_clock_step(doc, page);
 	}
 	return false;
 }

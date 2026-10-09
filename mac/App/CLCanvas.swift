@@ -206,8 +206,9 @@ extension CircuitCanvasNSView {
             // Predict: a covered light takes the click as a guess.
             if controller.predictTap(at: worldPoint(p)) { return true }
             if document.click(page: page, at: worldPoint(p)) {
-                controller.circuitAdvancedByUser()   // a switch or keypad: a new round
+                controller.circuitAdvancedByUser()   // a switch, keypad or manual clock: a new round
                 controller.redraw()
+                controller.scopeChanged()
             } else {
                 drag = .pan(last: p)
                 NSCursor.closedHand.set()
@@ -217,7 +218,7 @@ extension CircuitCanvasNSView {
         }
         if event.clickCount == 2 && !controller.isFloating {
             _ = document.press(page: page, at: worldPoint(p), modifiers: [], unitsPerPoint: unitsPerPoint)
-            document.release(at: worldPoint(p))
+            document.releaseSteppedClock(at: worldPoint(p), stepClock: false)   // the first click already stepped
             if document.singleSelectedGate(page: page) != nil {
                 controller.showSettings()
             } else {

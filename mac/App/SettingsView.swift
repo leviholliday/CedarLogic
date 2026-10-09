@@ -496,6 +496,8 @@ struct CLToolbarSettings: View {
                         .toggleStyle(.checkbox)
                 }
                 Toggle("Circuit name", isOn: $prefs.showTitle).toggleStyle(.checkbox)
+                Toggle("Step Clock", isOn: $prefs.showStepClock).toggleStyle(.checkbox)
+                    .help("Show Step Clock in the toolbar and the Simulation View bar. Clicking a clock set to \u{201C}Only on Step Clock\u{201D} steps it too.")
             }
             .padding(.top, 10)
             Text("Applies to every style. Hidden tools are still in the menus and keep their shortcuts.")

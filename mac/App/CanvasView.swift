@@ -90,6 +90,9 @@ final class CircuitCanvasNSView: NSView {
     /// What the current drag does.
     enum Drag { case none, edit, pan(last: CGPoint), ink }
     var drag = Drag.none
+    /// The press being dragged was a double-click's second (it opened the
+    /// part's settings): its release doesn't step a manual clock again.
+    var pressWasDoubleClick = false
     var spaceDown = false
     var pannedWhileSpaceDown = false
     /// Drawing on the circuit (Drawing.swift): a tablet pen's eraser end is
@@ -412,6 +415,7 @@ final class CircuitCanvasNSView: NSView {
         if event.modifierFlags.contains(.shift) { mods.insert(.shift) }
         if event.modifierFlags.contains(.option) { mods.insert(.option) }
         let what = document.press(page: page, at: worldPoint(p), modifiers: mods, unitsPerPoint: unitsPerPoint)
+        pressWasDoubleClick = event.clickCount >= 2
         if event.clickCount == 2 {
             if what == .box { zoomToFit() } else { controller?.showSettings() }
         }
@@ -442,7 +446,12 @@ final class CircuitCanvasNSView: NSView {
         if case .ink = drag { inkMouseUp(event, at: p); drag = .none; return }
         if clMode, case .edit = drag, let box = document?.selectionBox { controller?.fadeOutDragBox(box) }
         if case .edit = drag {
-            document?.release(at: worldPoint(p))
+            // A click (no drag) on a clock set to "Only on Step Clock" steps it.
+            if document?.releaseSteppedClock(at: worldPoint(p), stepClock: !pressWasDoubleClick) == true {
+                controller?.circuitAdvancedByUser()
+                controller?.scopeChanged()
+            }
+            pressWasDoubleClick = false
             controller?.edited()
             controller?.noteLockedHeld()
         }

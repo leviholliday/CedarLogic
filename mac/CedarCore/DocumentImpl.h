@@ -90,6 +90,9 @@ struct CLDocument;
 // a gate is on (0 when none), and the group a page added now joins.
 int clLinkGroupOfGate(const CLDocument* doc, unsigned long gateId);
 int clNewPageLinkGroup(const CLDocument* doc);
+// A clock with "Only on Step Clock" (MANUAL) on (Document.cpp).
+class guiGate;
+bool isManualClock(guiGate* gate);
 
 struct CLDocument {
 	GUICircuit circuit;

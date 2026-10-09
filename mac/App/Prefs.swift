@@ -101,6 +101,9 @@ final class Prefs: ObservableObject {
     @Published var showCategoryKeys: Bool { didSet { d.set(showCategoryKeys, forKey: "cl.showCategoryKeys") } }
     /// The circuit's name (and its Rename menu) at the toolbar's top left.
     @Published var showTitle: Bool { didSet { d.set(showTitle, forKey: "cl.showTitle") } }
+    /// The Step Clock button in the toolbar and the Simulation View bar (the
+    /// menu item and its key stay either way).
+    @Published var showStepClock: Bool { didSet { d.set(showStepClock, forKey: "cl.showStepClock") } }
     /// Opening or starting a circuit replaces the one in the window, as in
     /// the wx app (asking to save first); off, each gets its own window.
     @Published var openReplaces: Bool { didSet { d.set(openReplaces, forKey: "cl.openReplaces") } }
@@ -158,6 +161,7 @@ final class Prefs: ObservableObject {
         showGateNames = bool("cl.showGateNames", true)
         showCategoryKeys = bool("cl.showCategoryKeys", true)
         showTitle = bool("cl.showTitle", true)
+        showStepClock = bool("cl.showStepClock", true)
         openReplaces = bool("cl.openReplaces", true)
         newTemplate = d.string(forKey: "cl.newTemplate") ?? ""
         newPagesShareLinks = bool("cl.newPagesShareLinks", true)
