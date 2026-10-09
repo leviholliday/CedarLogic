@@ -50,6 +50,11 @@ struct Status {
 	std::vector<std::pair<std::string, std::string>> problems;   // (folder id, "Too big to sync (over 512 KB)")
 };
 
+struct DeviceInfo {          // another device's device record (SYNC.md 5.1)
+	std::string rid, name;
+	int64_t lastSyncAt = 0;
+};
+
 struct Preview {            // what a code holds (§4.8), for the Link confirmation
 	int circuits = 0;
 	std::vector<std::string> devices;   // device names
@@ -131,6 +136,13 @@ public:
 	void setDeviceName(const std::string&);
 	Status status() const;
 	std::vector<std::pair<std::string, int64_t>> devices() const;   // (name, lastSyncAt) from the device records
+	std::vector<DeviceInfo> deviceInfos() const;                    // the same with each record's id, same order
+	// Removes another device's record (SYNC.md 5.1): gone from the list now, its tombstone sent by
+	// the next push. False for this device's own or an unknown one.
+	bool removeDevice(const std::string& rid);
+	// The profile (SYNC.md 2.5.2): the person's name across devices. False when none is synced.
+	bool profileName(std::string& name, int64_t& modifiedAt);
+	void setProfileName(const std::string& name);                    // now, this device's clock; sent by the next push
 
 	// Each finishes on the UI thread through `done` (ok, or a sentence for the person).
 	void turnOn(std::function<void(bool, std::string)> done);                                   // new code, PUT space, first cycle

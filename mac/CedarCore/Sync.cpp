@@ -150,6 +150,9 @@ json::Value State::toJson() const {
 		sd.set(kv.first, std::move(e));
 	}
 	o.set("side", std::move(sd));
+	json::Value sk = json::Value::array();   // the side kinds this engine reads (2.5.2)
+	for (const std::string& k : sideKinds) sk.push(json::Value::string(k));
+	o.set("sideKinds", std::move(sk));
 	return o;
 }
 
@@ -235,6 +238,12 @@ bool State::fromJson(const json::Value& v, State& s) {
 					x.json = kv.second.str("json");
 					s.side[kv.first] = x;
 				}
+		}
+	if (const json::Value* r = v.get("sideKinds"))
+		if (r->isArray()) {
+			s.sideKindsKnown = true;
+			for (const json::Value& k : r->a)
+				if (k.isString()) s.sideKinds.push_back(k.s);
 		}
 	return true;
 }
@@ -329,16 +338,29 @@ void Core::reset() {
 	State fresh;
 	fresh.deviceId = isHex(st.deviceId, 32) ? st.deviceId : randomHex(crypto, 16);
 	fresh.deviceName = st.deviceName;
+	fresh.sideKinds = opt.sideKinds;   // nothing put aside yet, so nothing to read again (2.5.2)
+	fresh.sideKindsKnown = true;
 	st = fresh;
 	problems_.clear();
 	badRequest_.clear();
+	std::lock_guard<std::mutex> lock(sideMu_);
+	devRemove_.clear();
 }
 
 void Core::adopt(const State& s) {
 	st = s;
 	// The first start of an engine with side records over a state from one without: what it put
-	// aside as "newer" may be side records (2.5.1), so they are read again (a full pull).
-	if (!st.sideKnown && !opt.sideKinds.empty()) {
+	// aside as "newer" may be side records (2.5.1), so they are read again (a full pull). The same
+	// when this engine reads a side kind the one that wrote the state didn't ("profile", 2.5.2; a
+	// state with side records but no list was written by one with classroom and membership).
+	std::vector<std::string> before = st.sideKindsKnown ? st.sideKinds : std::vector<std::string>();
+	if (st.sideKnown && !st.sideKindsKnown) before = { "classroom", "membership" };
+	bool newKind = false;
+	for (const std::string& k : opt.sideKinds)
+		if (std::find(before.begin(), before.end(), k) == before.end()) newKind = true;
+	st.sideKinds = opt.sideKinds;
+	st.sideKindsKnown = true;
+	if ((!st.sideKnown || newKind) && !opt.sideKinds.empty()) {
 		bool any = false;
 		for (auto u = st.unreadable.begin(); u != st.unreadable.end();) {
 			if (u->second.second != "newer") { ++u; continue; }
@@ -381,6 +403,47 @@ void Core::deleteSideRecord(const std::string& rid) {
 	SideQ q;
 	q.deleted = true;
 	sideQueue_[rid] = q;
+}
+
+// ---- the profile (2.5.2) and removing a device (5.1) ----------------------------------------------------
+
+Profile Core::profile() {
+	std::lock_guard<std::mutex> lock(sideMu_);
+	std::vector<std::pair<std::string, std::string>> list;
+	for (const auto& kv : st.side)
+		if (kv.second.kind == "profile" && !sideQueue_.count(kv.first)) list.emplace_back(kv.first, kv.second.json);
+	for (const auto& kv : sideQueue_)
+		if (!kv.second.deleted && kv.second.kind == "profile") list.emplace_back(kv.first, kv.second.json);
+	return pickProfile(list);
+}
+
+std::string Core::setProfileName(const std::string& name, int64_t atMs) {
+	if (!isSideKind("profile")) return std::string();
+	const Profile cur = profile();
+	const std::string nm = profileName(name);
+	const int64_t t = std::max<int64_t>(0, atMs + st.offset);
+	if (cur.has() && (cur.name == nm || cur.modifiedAt > t)) return cur.rid;
+	const std::string rid = putSideRecord("profile", profileJson(nm, t, st.deviceName, st.deviceId), cur.has() ? cur.rid : std::string());
+	if (rid.empty()) return rid;
+	for (const auto& r : sideRecords("profile"))
+		if (r.first != rid) deleteSideRecord(r.first);
+	return rid;
+}
+
+bool Core::removeDevice(const std::string& rid) {
+	if (!isUuid(rid) || (st.device.has && rid == st.device.id) || !st.devices.count(rid)) return false;
+	std::lock_guard<std::mutex> lock(sideMu_);
+	devRemove_.insert(rid);
+	return true;
+}
+
+std::vector<Core::DeviceEntry> Core::deviceEntries() const {
+	std::vector<DeviceEntry> out;
+	std::lock_guard<std::mutex> lock(sideMu_);
+	for (const auto& kv : st.devices)
+		if (kv.first != st.device.id && !devRemove_.count(kv.first)) out.push_back({ kv.first, kv.second.first, kv.second.second });
+	std::stable_sort(out.begin(), out.end(), [](const DeviceEntry& a, const DeviceEntry& b) { return a.lastSyncAt > b.lastSyncAt; });
+	return out;
 }
 
 void Core::setCode(const std::string& canonical) {
@@ -1752,6 +1815,30 @@ void Core::push(bool flush) {
 				sideSent_[rid] = q;
 			}
 		}
+		// Other devices' records being removed (5.1): a tombstone on the version last seen.
+		{
+			std::set<std::string> gone;
+			{
+				std::lock_guard<std::mutex> lock(sideMu_);
+				gone = devRemove_;
+			}
+			for (const std::string& rid : gone) {
+				if (!st.devices.count(rid) || (st.device.has && rid == st.device.id)) {
+					std::lock_guard<std::mutex> lock(sideMu_);
+					devRemove_.erase(rid);
+					continue;
+				}
+				RecState rs;
+				auto sv = st.seen.find(rid);
+				rs.ver = sv != st.seen.end() ? sv->second.ver : 0;
+				bool big = false;
+				Item it = writeItem(rid, rs, tombstoneJson(t + st.offset, st.deviceName, st.deviceId, nullptr, nullptr), true, false,
+				                    nullptr, false, big);
+				if (it.id.empty()) continue;
+				items.push_back(it);
+				meta[rid] = "devgone";
+			}
+		}
 		if (items.empty() && attempt > 0) break;
 		// The device record: none yet, a day old, or renamed; the last item.
 		if (attempt == 0 && !full_ && !quitting_ &&
@@ -1822,6 +1909,20 @@ bool Core::result(const Item& it, const json::Value& res, const std::map<std::st
 	const int status = (int)res.integer("status");
 	auto m = meta.find(rid);
 	if (m != meta.end() && m->second == "side") return sideResult(it, res);
+	if (m != meta.end() && m->second == "devgone") {
+		if (status == 200 || status == 201) {
+			const json::Value* e = res.get("entry");
+			seenSet(rid, e ? e->integer("ver") : it.ver, e ? e->str("h") : std::string(), nullptr);
+			st.devices.erase(rid);
+		}
+		// (412: that device wrote its record again meanwhile, so it's in use: it stays listed.
+		// 429/503/offline: the next push.)
+		if (status != 429 && status != 503 && status != 0) {
+			std::lock_guard<std::mutex> lock(sideMu_);
+			devRemove_.erase(rid);
+		}
+		return false;
+	}
 	if (m != meta.end() && m->second == "device") {
 		if (status == 200 || status == 201) {
 			const json::Value* e = res.get("entry");
@@ -1981,9 +2082,7 @@ int Core::circuitCount() {
 
 std::vector<std::pair<std::string, int64_t>> Core::deviceList() const {
 	std::vector<std::pair<std::string, int64_t>> out;
-	for (const auto& kv : st.devices)
-		if (kv.first != st.device.id) out.push_back(kv.second);
-	std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+	for (const DeviceEntry& d : deviceEntries()) out.emplace_back(d.name, d.lastSyncAt);
 	return out;
 }
 

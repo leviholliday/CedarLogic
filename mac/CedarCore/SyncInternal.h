@@ -117,6 +117,22 @@ std::string tombstoneJson(int64_t deletedAt, const std::string& device, const st
                           const std::string* baseName, const std::string* baseCdl);
 std::string deviceJson(const std::string& device, const std::string& deviceId, const std::string& client,
                        int64_t lastSyncAt);
+
+// The profile (SYNC.md 2.5.2): a side record (2.5.1) of kind "profile" carrying the person's name,
+// the one Export's name-and-result strip, the lab report and "your name" fill in. Exactly:
+//   {"v":1,"kind":"profile","name":"<name>","modifiedAt":<ms, server time>,"device":"<name>","deviceId":"<hex>"}
+// name: normalizeName (BOM dropped, ASCII whitespace trimmed), at most 80 Unicode scalar values;
+// "" = no name. Read: v == 1, kind "profile", name a string, modifiedAt a whole number >= 0 (other
+// fields ignored), the name normalized again. Of several, the one with the latest modifiedAt counts
+// (a tie: the greater rid, compared as strings). Setting a name writes over the record that counts
+// (a new one if none) unless it already has that name or a later modifiedAt, and removes the others
+// (tombstones). An engine without the kind ignores it (2.5.1: "newer", never a circuit).
+std::string profileName(const std::string& name);
+std::string profileJson(const std::string& name, int64_t modifiedAt, const std::string& device,
+                        const std::string& deviceId);
+struct Profile { std::string rid, name; int64_t modifiedAt = -1; bool has() const { return modifiedAt >= 0; } };
+bool readProfile(const std::string& json, Profile& out);   // rid left as is
+Profile pickProfile(const std::vector<std::pair<std::string, std::string>>& records);   // (rid, json)
 // A payload's time as used to pick the newer (SYNC.md 4.6).
 int64_t effectiveTime(int64_t stamp, int64_t serverAt);
 
@@ -333,6 +349,8 @@ struct State {
 	struct Side { int64_t ver = 0; std::string h, kind, json; };
 	std::map<std::string, Side> side;                                    // side records (SYNC.md 2.5.1)
 	bool sideKnown = false;                                              // the state was written by an engine with side records
+	std::vector<std::string> sideKinds;                                  // the side kinds of the engine that wrote it (2.5.2)
+	bool sideKindsKnown = false;                                         // (a state from before: classroom, membership)
 	json::Value hashCache = json::Value::object();
 
 	json::Value toJson() const;
@@ -491,10 +509,22 @@ public:
 	std::vector<std::pair<std::string, std::string>> sideRecords(const std::string& kind);
 	std::string putSideRecord(const std::string& kind, const std::string& json, const std::string& rid);
 	void deleteSideRecord(const std::string& rid);
+	// The profile (2.5.2), any thread: the record that counts, queued or synced (has() false: none);
+	// setting the name (atMs: when it was typed, this device's clock) returns the rid it went to
+	// ("" when the engine has no "profile" kind).
+	Profile profile();
+	std::string setProfileName(const std::string& name, int64_t atMs);
+	// Removing another device's device record (SYNC.md 5.1), any thread: a tombstone over it on the
+	// version last seen, sent by the next push (200: gone here too; 412: that device wrote it again
+	// meanwhile, so it stays). Never this device's own record. False if it isn't another device's.
+	bool removeDevice(const std::string& rid);
+	using DeviceEntry = DeviceInfo;
+	std::vector<DeviceEntry> deviceEntries() const;   // the other devices, newest first, minus those being removed
 private:
 	struct SideQ { std::string kind, json; bool deleted = false; };
 	std::map<std::string, SideQ> sideQueue_, sideSent_;
-	std::mutex sideMu_;
+	std::set<std::string> devRemove_;   // rids of other devices' records to tombstone (under sideMu_)
+	mutable std::mutex sideMu_;
 	bool isSideKind(const std::string& k) const;
 
 	CoreOptions opt;
