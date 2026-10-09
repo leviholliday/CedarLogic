@@ -330,9 +330,12 @@ int main(int argc, char** argv) {
 			cl_document_close(again);
 		}
 		const long gate = clockGate(doc, 0);
+		// (The template's second page, built from gates, has a manual clock of its own.)
+		auto manuals = [](const std::string& t) { size_t n = 0; for (size_t at = t.find("MANUAL"); at != std::string::npos; at = t.find("MANUAL", at + 1)) n++; return n; };
+		const size_t before = manuals(saved);
 		cl_gate_set_setting(doc, gate, "MANUAL", "false");
 		const std::string off = cl_document_save_text(doc);
-		check(off.find("MANUAL") == std::string::npos, "save with the setting off: not written");
+		check(before >= 1 && manuals(off) == before - 1, "save with the setting off: not written");
 		again = openText(off);
 		check(again && cl_document_manual_clock_count(again, 0) == 0, "save and reopen with it off: a running clock");
 		if (again) cl_document_close(again);

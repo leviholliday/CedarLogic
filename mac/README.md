@@ -86,6 +86,13 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   a time, their running-clock choice runs, and their pulse-button choice
   (`-pulse`) clocks once per click on its button (clock_check does the same
   for the flip-flops)
+- `examples_check <gatedefs> <dir>` -- the templates from the website's
+  examples (`App/TemplatesExamples.swift`, written by
+  `node mac/Tools/make-example-templates.mjs <cedarlogic-site>`) do what the
+  website's `scripts/test_sim_examples2.mjs` checks, every page of each:
+  flip-flops and the register as parts and built from gates, the 3-bit
+  counter, the 4-bit adder, decoder, multiplexer, comparator, parity
+  generator, edge detector and SR latch with enable
 - `CedarLogic --render-presenter <dir>` -- presenter mode without a second
   display: a real canvas off screen in each editing state (a selection and
   the pin under the pointer, a drag box, a wire being connected, a part
