@@ -92,10 +92,17 @@ struct SyncSettingsView: View {
                     .onSubmit { center.setDeviceName(name) }
                     .frame(width: 240)
             }
-            SyncRow("Devices", hint: "Don\u{2019}t recognise one? Start over with a new code.") {
+            SyncRow("Devices", hint: "Remove takes an old device off the list. Your devices share one code, so a device that still has it keeps access: to lock out a lost one, start over with a new code.") {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(center.devices) { d in
-                        Text(deviceLine(d)).foregroundStyle(d.isThis ? .primary : .secondary).lineLimit(1)
+                        HStack(spacing: 8) {
+                            Text(deviceLine(d)).foregroundStyle(d.isThis ? .primary : .secondary).lineLimit(1)
+                            if !d.isThis && d.rid != nil {
+                                Button("Remove") { center.removeDevice(d) }
+                                    .buttonStyle(.link).font(.system(size: 11))
+                                    .help("Take \u{201C}\(d.name)\u{201D} off the list on all your devices")
+                            }
+                        }
                     }
                 }
             }
@@ -411,8 +418,8 @@ enum SyncRender {
         let now = Date()
         let devices = [
             SyncCenter.Device(name: "Levi\u{2019}s MacBook Air", lastSync: now, isThis: true),
-            SyncCenter.Device(name: "Safari on iPhone", lastSync: now.addingTimeInterval(-2 * 86400), isThis: false),
-            SyncCenter.Device(name: "Raspberry Pi", lastSync: now.addingTimeInterval(-90 * 86400), isThis: false),
+            SyncCenter.Device(name: "Safari on iPhone", lastSync: now.addingTimeInterval(-2 * 86400), isThis: false, rid: "r1"),
+            SyncCenter.Device(name: "Raspberry Pi", lastSync: now.addingTimeInterval(-90 * 86400), isThis: false, rid: "r2"),
         ]
         let on = SyncCenter(previewEnabled: true, status: "Synced just now", circuits: 42, code: code,
                             deviceName: "Levi\u{2019}s MacBook Air", devices: devices)

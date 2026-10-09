@@ -61,10 +61,11 @@ static void flip(CLDocument* doc, double y) {
 	steps(doc, 12);
 }
 
-// The clock (at x = 4 in the templates), selected; its gate id.
+// The clock (at x = 4 in the templates), selected (not stepped: a plain
+// click on a manual clock would step it); its gate id.
 static long clockGate(CLDocument* doc, double clockY) {
 	cl_edit_press(doc, 0, 4, clockY, 0, 0.05);
-	cl_edit_release(doc, 4, clockY);
+	cl_edit_release_ex(doc, 4, clockY, false);
 	return cl_edit_single_gate(doc, 0);
 }
 
@@ -379,6 +380,50 @@ int main(int argc, char** argv) {
 				if (now != prev) { changes++; prev = now; }
 			}
 			check(changes >= 4, "while running: the running clock's light still blinks (" + std::to_string(changes) + " changes in 40 steps)");
+			cl_document_close(doc);
+		}
+	}
+
+	// Clicking the clock part itself is a Step Clock (paused, as these
+	// documents are: nothing runs unless stepped). A drag moves it instead,
+	// the second click of a double-click (settings) doesn't step again, and
+	// Simulation View's click (cl_document_click) steps too.
+	if (!jkText.empty()) {
+		CLDocument* doc = openText(jkText);
+		if (doc) {
+			flip(doc, 8); flip(doc, -8);   // J = K = 1
+			bool ok = true, prev = q(doc);
+			for (int i = 0; i < 4; i++) {
+				cl_edit_press(doc, 0, 4, 0, 0, 0.05);
+				if (cl_edit_release_ex(doc, 4, 0, true) != CL_CLICK_CLOCK_STEP) ok = false;
+				if (q(doc) == prev || nq(doc) == q(doc)) ok = false;
+				prev = q(doc);
+			}
+			check(ok, "click the clock: each click toggles Q (4 clicks)");
+			check(cl_edit_single_gate(doc, 0) >= 0, "click the clock: it's selected too");
+			prev = q(doc);
+			cl_edit_press(doc, 0, 4, 0, 0, 0.05);
+			check(cl_edit_release_ex(doc, 4, 0, false) == CL_CLICK_NONE && q(doc) == prev,
+			      "click the clock: a double-click's second click doesn't step");
+			const std::string before = cl_document_save_text(doc);
+			cl_edit_press(doc, 0, 4, 0, 0, 0.05);
+			cl_edit_drag(doc, 6, 0);
+			cl_edit_drag(doc, 9, -2);
+			const int r = cl_edit_release_ex(doc, 9, -2, true);
+			const std::string after = cl_document_save_text(doc);
+			check(r == CL_CLICK_NONE && q(doc) == prev, "drag the clock: no step, Q holds");
+			check(after != before && cl_document_manual_clock_count(doc, 0) == 1, "drag the clock: it moved");
+			check(cl_edit_undo(doc), "drag the clock: undo puts it back");
+			cl_edit_select_none(doc, 0);
+			check(cl_document_click(doc, 0, 4, 0) && q(doc) != prev, "Simulation View click on the clock: a Step Clock");
+			cl_document_close(doc);
+		}
+		// A running clock (setting off): a click only selects it.
+		std::string run;
+		if (readFile(dir + "/template-builtin-ff-jk-running.cdl", run) && (doc = openText(run))) {
+			cl_edit_press(doc, 0, 4, 0, 0, 0.05);
+			check(cl_edit_release_ex(doc, 4, 0, true) == CL_CLICK_NONE, "click a running clock: no Step Clock");
+			check(!cl_document_click(doc, 0, 4, 0), "Simulation View click on a running clock: nothing");
 			cl_document_close(doc);
 		}
 	}

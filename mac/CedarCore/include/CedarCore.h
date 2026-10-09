@@ -99,7 +99,8 @@ int cl_document_manual_clock_count(const CLDocument *doc, int page);
 // False when the page has no manual clock.
 bool cl_document_clock_step(CLDocument *doc, int page);
 
-// A click at a world point: flips a switch, presses a keypad key... Returns
+// A click at a world point: flips a switch, presses a keypad key, or (on a
+// clock with "Only on Step Clock" on) does Step Clock for the page. Returns
 // true when a part took the click.
 bool cl_document_click(CLDocument *doc, int page, double x, double y);
 
@@ -115,8 +116,15 @@ enum { CL_PRESS_NOTHING = 0, CL_PRESS_PART = 1, CL_PRESS_BOX = 2 };
 // CL_PRESS_BOX when it landed on empty canvas (a drag draws a selection box).
 int cl_edit_press(CLDocument *doc, int page, double x, double y, int modifiers, double unitsPerPoint);
 void cl_edit_drag(CLDocument *doc, double x, double y);
-// A release. A press and release in place on a switch or keypad operates it.
+// A release. A press and release in place on a switch or keypad operates it;
+// on a clock with "Only on Step Clock" on, it does Step Clock for the page
+// (a drag moves the clock instead).
 void cl_edit_release(CLDocument *doc, double x, double y);
+// The same, saying what the click did. `stepClock` false: a click on a manual
+// clock only selects it (the second click of a double-click, which opens its
+// settings, shouldn't step a second time).
+enum { CL_CLICK_NONE = 0, CL_CLICK_PART = 1, CL_CLICK_CLOCK_STEP = 2 };
+int cl_edit_release_ex(CLDocument *doc, double x, double y, bool stepClock);
 void cl_edit_cancel(CLDocument *doc);
 // The selection box being drawn, if any (world coordinates).
 bool cl_edit_box(const CLDocument *doc, double *left, double *bottom, double *right, double *top);

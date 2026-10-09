@@ -52,7 +52,9 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   writes: manual clocks hold still, each Step Clock is one full cycle (J-K
   and T toggle, D is taken), a running clock still runs, the templates'
   running-clock choice runs, the setting survives a save, a clock with it
-  off saves without it (as older versions did), and undo turns it off
+  off saves without it (as older versions did), and undo turns it off;
+  clicking the clock part steps it (a drag moves it, a double-click's second
+  click doesn't step again, Simulation View's click steps too)
 - `check_seq` -- Check My Circuit's shared cases
   (`tests/check-sequential/cases.json`, docs/CHECK-SEQUENTIAL.md): every
   field of every case, on a freshly opened circuit and on one that has been

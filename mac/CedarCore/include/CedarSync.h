@@ -70,6 +70,17 @@ const char *cl_sync_device_name(CLSyncEngine *e);
 void cl_sync_set_device_name(CLSyncEngine *e, const char *name);
 int cl_sync_device_count(CLSyncEngine *e);
 const char *cl_sync_device(CLSyncEngine *e, int i, int64_t *lastSyncAt);
+// The device record's id of device i (same snapshot as cl_sync_device), for cl_sync_remove_device.
+const char *cl_sync_device_id(CLSyncEngine *e, int i);
+// Removes another device's record (SYNC.md 5.1): off the list now, a tombstone by the next cycle.
+// The device keeps the code, so it can still sync (and lists itself again when it does). False
+// for this device's own record or an unknown id.
+bool cl_sync_remove_device(CLSyncEngine *e, const char *rid);
+// The person's name across devices (SYNC.md 2.5.2, the "profile" side record; format in
+// CedarCore/SyncInternal.h): malloc'd UTF-8 to free(), or NULL when none is synced.
+char *cl_sync_profile_name(CLSyncEngine *e, int64_t *modifiedAt);
+// Sets it (now), sent by the next cycle ("" is stored as "no name"; the Mac app never sends it).
+void cl_sync_set_profile_name(CLSyncEngine *e, const char *name);
 
 // Status: kind is CL_SYNC_OFF ... ; text is the sentence to show.
 enum { CL_SYNC_OFF, CL_SYNC_SYNCED, CL_SYNC_SYNCING, CL_SYNC_OFFLINE, CL_SYNC_ERROR, CL_SYNC_FULL, CL_SYNC_GONE, CL_SYNC_BUSY };

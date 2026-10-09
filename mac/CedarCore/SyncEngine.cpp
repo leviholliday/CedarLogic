@@ -201,6 +201,7 @@ struct Engine::Impl {
 	bool pubEnabled = false;
 	std::string pubCode, pubDeviceName, pubStatus = "off", pubDetail;
 	std::vector<std::pair<std::string, int64_t>> pubDevices;
+	std::vector<DeviceInfo> pubDeviceInfos;   // pubDevices with each record's id
 	std::vector<std::string> pendingNotices;
 
 	// Pairing, D's side (SYNC.md 11.6), under mu. Every start and cancel moves pairGen on; a step
@@ -318,7 +319,9 @@ struct Engine::Impl {
 			pubEnabled = core->enabled();
 			pubCode = core->code();
 			pubDeviceName = core->deviceName();
-			pubDevices = core->deviceList();
+			pubDeviceInfos = core->deviceEntries();
+			pubDeviceInfos = core->deviceEntries();
+		pubDevices = core->deviceList();
 			pub.progressDone = done;
 			pub.progressTotal = total;
 			pub.lastSyncAt = core->state().lastSyncAt;
@@ -684,6 +687,7 @@ struct Engine::Impl {
 		pubEnabled = true;
 		pubCode = core->code();
 		pubDeviceName = core->deviceName();
+		pubDeviceInfos = core->deviceEntries();
 		pubDevices = core->deviceList();
 		pubStatus = "synced";
 		pub.lastSyncAt = core->state().lastSyncAt;
@@ -787,6 +791,38 @@ Status Engine::status() const { return d->statusNow(); }
 std::vector<std::pair<std::string, int64_t>> Engine::devices() const {
 	std::lock_guard<std::mutex> lock(d->mu);
 	return d->pubDevices;
+}
+
+std::vector<DeviceInfo> Engine::deviceInfos() const {
+	std::lock_guard<std::mutex> lock(d->mu);
+	return d->pubDeviceInfos;
+}
+
+bool Engine::removeDevice(const std::string& rid) {
+	if (!d->core->removeDevice(rid)) return false;
+	{
+		std::lock_guard<std::mutex> lock(d->mu);
+		d->pubDeviceInfos.erase(std::remove_if(d->pubDeviceInfos.begin(), d->pubDeviceInfos.end(),
+		                                       [&](const DeviceInfo& x) { return x.rid == rid; }),
+		                        d->pubDeviceInfos.end());
+		d->pubDevices.clear();
+		for (const DeviceInfo& x : d->pubDeviceInfos) d->pubDevices.emplace_back(x.name, x.lastSyncAt);
+	}
+	noteLibraryChanged();   // sent with the next cycle (seconds)
+	return true;
+}
+
+bool Engine::profileName(std::string& name, int64_t& modifiedAt) {
+	const Profile p = d->core->profile();
+	if (!p.has()) return false;
+	name = p.name;
+	modifiedAt = p.modifiedAt;
+	return true;
+}
+
+void Engine::setProfileName(const std::string& name) {
+	if (d->core->setProfileName(name, d->clock.now()).empty()) return;
+	noteLibraryChanged();
 }
 
 void Engine::turnOn(std::function<void(bool, std::string)> done) {

@@ -112,6 +112,12 @@ final class CoreDocument: ObservableObject {
     }
     func drag(to p: CGPoint) { cl_edit_drag(handle, p.x, p.y) }
     func release(at p: CGPoint) { cl_edit_release(handle, p.x, p.y) }
+    /// A release that says whether the click stepped a manual clock.
+    /// `stepClock` false: a click on such a clock only selects it.
+    @discardableResult
+    func releaseSteppedClock(at p: CGPoint, stepClock: Bool = true) -> Bool {
+        cl_edit_release_ex(handle, p.x, p.y, stepClock) == Int32(CL_CLICK_CLOCK_STEP)
+    }
     func cancelGesture() { cl_edit_cancel(handle) }
     var selectionBox: CGRect? {
         var l = 0.0, b = 0.0, r = 0.0, t = 0.0

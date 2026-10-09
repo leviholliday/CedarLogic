@@ -20,6 +20,30 @@ enum ImageExport {
     static let pointsPerUnit: CGFloat = 12
     static let margin: CGFloat = 24
 
+    /// The window's look as a Theme, for Match Window: the CedarLogic window's
+    /// light or dark canvas (CLPalette, the engine's RenderStyle), its grid
+    /// colours and style (lines or dots, every fifth darker or not), and the
+    /// accent. The classic window's preset and overrides (Settings >
+    /// Appearance's look) when `classic`. Low-wire colour and wire dots are
+    /// engine-wide settings, so the export already draws with them.
+    @MainActor static func windowTheme(prefs: Prefs, look: LookSettings, classic: Bool = false) -> Theme {
+        if classic { return look.theme }
+        let pal = CLPalette(dark: prefs.dark, simView: false)
+        func rgba(_ c: CGColor) -> RGBA {
+            let n = NSColor(cgColor: c)?.usingColorSpace(.sRGB) ?? .white
+            return RGBA(n.redComponent, n.greenComponent, n.blueComponent, n.alphaComponent)
+        }
+        let dots = prefs.gridStyle == 1
+        // What CLGrid uses (scaled up a little: the export's squares are
+        // smaller on the page than the window's).
+        let minor = pal.grid(dots ? 0.3 : 0.12)
+        let major = prefs.majorGrid ? pal.grid(dots ? 0.45 : (prefs.dark ? 0.2 : 0.28)) : minor
+        let a = prefs.accentRGB(dark: prefs.dark)
+        return Theme(canvas: rgba(pal.canvasCG), gridMinor: rgba(minor), gridMajor: rgba(major),
+                     gridStyle: !prefs.showGrid ? .none : (dots ? .dots : .lines),
+                     darkCircuit: prefs.dark, accent: RGBA(a.0, a.1, a.2))
+    }
+
     /// The strip's lines and height for a width (PNG and PDF share this).
     static func strip(_ info: ExportInfo, width: CGFloat) -> (lines: [String], height: CGFloat) {
         let pad: CGFloat = 22, body: CGFloat = 17, gap: CGFloat = 8
@@ -74,15 +98,33 @@ enum ImageExport {
         ctx.translateBy(x: 0, y: size.height)
         ctx.scaleBy(x: 1, y: -1)
         if grid, let box = box(document, page: page, ink: ink) {
+            // One square per unit, every fifth darker (when the window has
+            // that on), as lines or dots the way the window draws them.
             let upp = 1 / pointsPerUnit
             let ox = box.midX - size.width / 2 * upp, oy = box.midY + circuitH / 2 * upp
-            ctx.setStrokeColor(theme?.gridMajor.cgColor ?? CGColor(srgbRed: 0, green: 0, blue: 0.2, alpha: 0.2))
-            ctx.setLineWidth(0.5)
+            let light = CGColor(srgbRed: 0, green: 0, blue: 0.2, alpha: 0.2)
+            let minor = theme?.gridMinor.cgColor ?? light, major = theme?.gridMajor.cgColor ?? light
+            let dots = theme?.gridStyle == .dots
+            var xs: [(CGFloat, Bool)] = [], ys: [(CGFloat, Bool)] = []
             var x = ceil(ox)
-            while x < ox + size.width * upp { let sx = (x - ox) / upp; ctx.move(to: CGPoint(x: sx, y: 0)); ctx.addLine(to: CGPoint(x: sx, y: circuitH)); x += 1 }
+            while x < ox + size.width * upp { xs.append(((x - ox) / upp, Int(x) % 5 == 0)); x += 1 }
             var y = floor(oy)
-            while y > oy - circuitH * upp { let sy = (oy - y) / upp; ctx.move(to: CGPoint(x: 0, y: sy)); ctx.addLine(to: CGPoint(x: size.width, y: sy)); y -= 1 }
-            ctx.strokePath()
+            while y > oy - circuitH * upp { ys.append(((oy - y) / upp, Int(y) % 5 == 0)); y -= 1 }
+            if dots {
+                for (sx, mx) in xs { for (sy, my) in ys {
+                    let m = mx && my, r: CGFloat = m ? 1.4 : 0.9
+                    ctx.setFillColor(m ? major : minor)
+                    ctx.fillEllipse(in: CGRect(x: sx - r, y: sy - r, width: 2 * r, height: 2 * r))
+                } }
+            } else {
+                ctx.setLineWidth(0.5)
+                for pass in [false, true] {
+                    ctx.setStrokeColor(pass ? major : minor)
+                    for (sx, m) in xs where m == pass { ctx.move(to: CGPoint(x: sx, y: 0)); ctx.addLine(to: CGPoint(x: sx, y: circuitH)) }
+                    for (sy, m) in ys where m == pass { ctx.move(to: CGPoint(x: 0, y: sy)); ctx.addLine(to: CGPoint(x: size.width, y: sy)) }
+                    ctx.strokePath()
+                }
+            }
         }
         if blackAndWhite {
             // The drawing in black and white too (DRAWING-NOTES 4.8).
@@ -90,7 +132,8 @@ enum ImageExport {
                                             Int32(CL_STYLE_PRINT), ink)
         } else if let box = box(document, page: page, ink: ink) {
             let upp = max(box.width / (size.width - 2 * margin), box.height / (circuitH - 2 * margin))
-            var o = CLDrawOptions(dark: theme?.darkCircuit ?? false, accent: Int32(prefs.accent), wireScale: 1, simView: false,
+            var o = CLDrawOptions(dark: theme?.darkCircuit ?? false, accent: Int32(prefs.accent),
+                                  wireScale: theme == nil ? 1 : prefs.wireScale, simView: false,
                                   thumbnail: false, showSelection: false, selectionFade: 1,
                                   ink: Int32(ink ? CL_INK_ALWAYS_PRINT : CL_INK_NEVER))
             cl_document_draw_ex(document.handle, Int32(page), ctx, scale, box.midX - size.width / 2 * upp,
@@ -204,7 +247,9 @@ struct ExportImageView: View {
     private var ink: Bool { pageHasInk && includeInk }
     private var style: ExportLook { ExportLook(rawValue: lookRaw) ?? .screen }
     private var blackAndWhite: Bool { style == .blackAndWhite }
-    private var screen: Theme? { style == .screen ? look.settings.theme : nil }
+    /// Match Window: the colours the window draws with now (its light or
+    /// dark theme, accent, grid), so changing the theme changes the export.
+    private var screen: Theme? { style == .screen ? ImageExport.windowTheme(prefs: prefs, look: look.settings) : nil }
 
     private var info: ExportInfo {
         ExportInfo(enabled: prefs.exportInfo, name: prefs.studentName, works: works, why: why, fileName: fileName)

@@ -595,6 +595,45 @@ std::string deviceJson(const std::string& device, const std::string& deviceId, c
 	       ",\"client\":" + json::quote(client) + ",\"lastSyncAt\":" + std::to_string(lastSyncAt < 0 ? 0 : lastSyncAt) + "}";
 }
 
+std::string profileName(const std::string& name) {
+	const std::string n = normalizeName(name);
+	size_t count = 0, i = 0;
+	for (; i < n.size(); i++)
+		if (((unsigned char)n[i] & 0xC0) != 0x80) {
+			if (count == 80) break;
+			count++;
+		}
+	return n.substr(0, i);
+}
+
+std::string profileJson(const std::string& name, int64_t modifiedAt, const std::string& device, const std::string& deviceId) {
+	return "{\"v\":1,\"kind\":\"profile\",\"name\":" + json::quote(profileName(name)) + ",\"modifiedAt\":" +
+	       std::to_string(modifiedAt < 0 ? 0 : modifiedAt) + ",\"device\":" + json::quote(device) +
+	       ",\"deviceId\":" + json::quote(deviceId) + "}";
+}
+
+bool readProfile(const std::string& text, Profile& out) {
+	json::Value v;
+	if (!json::parse(text, v) || !v.isObject()) return false;
+	const json::Value *ver = v.get("v"), *kind = v.get("kind"), *name = v.get("name"), *at = v.get("modifiedAt");
+	if (!ver || !ver->isInt() || ver->i() != 1 || !kind || !kind->isString() || kind->s != "profile") return false;
+	if (!name || !name->isString() || !at || !at->isInt()) return false;
+	out.name = profileName(name->s);
+	out.modifiedAt = at->i();
+	return true;
+}
+
+Profile pickProfile(const std::vector<std::pair<std::string, std::string>>& records) {
+	Profile best;
+	for (const auto& r : records) {
+		Profile p;
+		if (!readProfile(r.second, p)) continue;
+		p.rid = r.first;
+		if (!best.has() || p.modifiedAt > best.modifiedAt || (p.modifiedAt == best.modifiedAt && p.rid > best.rid)) best = p;
+	}
+	return best;
+}
+
 int64_t effectiveTime(int64_t stamp, int64_t serverAt) {
 	return std::max(kMinTime, std::min(stamp, serverAt + 60 * kSecond));
 }

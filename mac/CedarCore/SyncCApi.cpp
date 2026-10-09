@@ -210,6 +210,7 @@ struct CLSyncEngine {
 	std::string code, deviceName, statusText, device, sideRid;
 	Status snapshot;
 	std::vector<std::pair<std::string, int64_t>> devices;
+	std::vector<DeviceInfo> deviceInfos;
 	CLSyncEngine(const CLSyncHooks& h) : crypto(h), host(h) {}
 };
 
@@ -225,7 +226,7 @@ CLSyncEngine* cl_sync_create(const CLSyncHooks* hooks, const char* libraryRoot, 
 	c.appKey = orEmpty(appKey);
 	c.client = orEmpty(client);
 	c.defaultDeviceName = orEmpty(defaultDeviceName);
-	c.sideKinds = { "classroom", "membership" };   // the classroom's (CLASSROOM.md 3.16.7)
+	c.sideKinds = { "classroom", "membership", "profile" };   // the classroom's (CLASSROOM.md 3.16.7); the name (SYNC.md 2.5.2)
 	const std::string server = serverFromEnvironment();
 	if (!server.empty()) c.serverBase = server;
 	const CLSyncHooks h = *hooks;
@@ -276,8 +277,33 @@ void cl_sync_set_device_name(CLSyncEngine* e, const char* name) {
 
 int cl_sync_device_count(CLSyncEngine* e) {
 	if (!e) return 0;
-	e->devices = e->engine->devices();
+	e->deviceInfos = e->engine->deviceInfos();
+	e->devices.clear();
+	for (const DeviceInfo& d : e->deviceInfos) e->devices.emplace_back(d.name, d.lastSyncAt);
 	return (int)e->devices.size();
+}
+
+const char* cl_sync_device_id(CLSyncEngine* e, int i) {
+	if (!e || i < 0 || i >= (int)e->deviceInfos.size()) return "";
+	return e->deviceInfos[(size_t)i].rid.c_str();
+}
+
+bool cl_sync_remove_device(CLSyncEngine* e, const char* rid) {
+	return e && e->engine->removeDevice(orEmpty(rid));
+}
+
+char* cl_sync_profile_name(CLSyncEngine* e, int64_t* modifiedAt) {
+	std::string name;
+	int64_t at = 0;
+	if (!e || !e->engine->profileName(name, at)) return nullptr;
+	if (modifiedAt) *modifiedAt = at;
+	char* p = (char*)malloc(name.size() + 1);
+	if (p) memcpy(p, name.c_str(), name.size() + 1);
+	return p;
+}
+
+void cl_sync_set_profile_name(CLSyncEngine* e, const char* name) {
+	if (e) e->engine->setProfileName(orEmpty(name));
 }
 
 const char* cl_sync_device(CLSyncEngine* e, int i, int64_t* lastSyncAt) {

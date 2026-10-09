@@ -7,6 +7,7 @@
 // is Settings > Sync; Your Circuits shows the status line.
 
 import AppKit
+import Combine
 import SwiftUI
 import SystemConfiguration
 import UniformTypeIdentifiers
@@ -76,7 +77,9 @@ final class SyncCenter: ObservableObject {
         let name: String
         let lastSync: Date?
         let isThis: Bool
-        var id: String { name }
+        /// Its device record's id (another device's), for Remove.
+        var rid: String? = nil
+        var id: String { rid ?? name }
     }
 
     /// Settings > Sync's sheets.
@@ -202,7 +205,8 @@ final class SyncCenter: ObservableObject {
         }
         h.gate_default = cl_sync_core_gate_default
         // Classroom's side records (SYNC.md 2.5.1): the classes this person teaches and joined.
-        h.side_changed = { _ in SyncCenter.onMain { _ in ClassroomCenter.shared.syncSideChanged() } }
+        // The profile (2.5.2): the person's name, from another device.
+        h.side_changed = { _ in SyncCenter.onMain { $0.profileChanged(); ClassroomCenter.shared.syncSideChanged() } }
         hooks = h
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "0"
@@ -210,6 +214,7 @@ final class SyncCenter: ObservableObject {
         let key = ProcessInfo.processInfo.environment["CL_SYNC_KEY"] ?? info["FeedbackKey"] as? String ?? ""
         engine = cl_sync_create(&h, Library.root.path, platform.syncDir.path, key, "mac/\(version)+\(build)", Self.computerName)
         watch()
+        watchName()
     }
 
     /// Starts syncing if it's on: at launch, a couple of seconds after the first window (4.3).
@@ -316,9 +321,10 @@ final class SyncCenter: ObservableObject {
         for i in 0..<Int(cl_sync_device_count(e)) {
             var last: Int64 = 0
             let name = String(cString: cl_sync_device(e, Int32(i), &last))
-            guard !name.isEmpty, !list.contains(where: { $0.name == name }) else { continue }
+            let rid = String(cString: cl_sync_device_id(e, Int32(i)))
+            guard !name.isEmpty else { continue }
             list.append(Device(name: name, lastSync: last > 0 ? Date(timeIntervalSince1970: Double(last) / 1000) : nil,
-                               isThis: name == deviceName))
+                               isThis: name == deviceName, rid: rid.isEmpty ? nil : rid))
         }
         if enabled, !list.contains(where: \.isThis) { list.insert(Device(name: deviceName, lastSync: nil, isThis: true), at: 0) }
         devices = list.sorted { a, b in a.isThis != b.isThis ? a.isThis : (a.lastSync ?? .distantPast) > (b.lastSync ?? .distantPast) }
@@ -329,6 +335,68 @@ final class SyncCenter: ObservableObject {
             if let folder { p[String(cString: folder)] = text }
         }
         problems = p
+        // The name (2.5.2), once a session after the first sync: the synced one fills in an empty or
+        // different one here; none synced yet, this Mac's goes.
+        if !enabled { nameReconciled = false }
+        else if kind == Int(CL_SYNC_SYNCED) && !nameReconciled { nameReconciled = true; reconcileName() }
+    }
+
+    // MARK: The name across devices (SYNC.md 2.5.2)
+    // Prefs.studentName (Export's name-and-result strip, the lab report, "your name") rides in the
+    // "profile" side record. Typing it here sends it (2 s after the last key); another device's
+    // newer name fills it in here. An empty name is never sent and never fills one in.
+
+    private var nameSink: AnyCancellable?
+    private var applyingName = false
+    private var nameReconciled = false
+
+    private func watchName() {
+        nameSink = Prefs.shared.$studentName.dropFirst()
+            .debounce(for: .seconds(2), scheduler: RunLoop.main)
+            .sink { n in MainActor.assumeIsolated { SyncCenter.shared.sendName(n) } }
+    }
+
+    /// The synced name, or nil when none (or sync is off).
+    var syncedName: String? {
+        guard let e = engine, sideOn, let p = cl_sync_profile_name(e, nil) else { return nil }
+        defer { free(p) }
+        return String(cString: p)
+    }
+
+    private func sendName(_ name: String) {
+        guard !applyingName, let e = engine, sideOn else { return }
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, n != syncedName else { return }
+        cl_sync_set_profile_name(e, n)
+    }
+
+    private func applyName(_ n: String) {
+        guard !n.isEmpty, n != Prefs.shared.studentName.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        applyingName = true
+        Prefs.shared.studentName = n
+        applyingName = false
+    }
+
+    func profileChanged() { if let n = syncedName { applyName(n) } }
+
+    private func reconcileName() {
+        if let n = syncedName, !n.isEmpty { applyName(n) } else { sendName(Prefs.shared.studentName) }
+    }
+
+    // MARK: Removing a device (SYNC.md 5.1)
+
+    func removeDevice(_ d: Device) {
+        guard let engine, let rid = d.rid, !d.isThis else { return }
+        let alert = NSAlert()
+        alert.messageText = "Remove \u{201C}\(d.name)\u{201D} from your devices?"
+        alert.informativeText = "It comes off this list on all your devices. It isn\u{2019}t locked out: your devices share one sync code, so if it still has the code it keeps syncing and shows up here again.\n\nTo lock out a lost or stolen device, use Start Over with a New Code, then link your other devices with the new code."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        Library.present(alert) { yes in
+            guard yes else { return }
+            _ = cl_sync_remove_device(engine, rid)
+            self.refresh()
+        }
     }
 
     /// One line for Your Circuits: the status, or a notice from the last minute.
