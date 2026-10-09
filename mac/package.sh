@@ -16,17 +16,19 @@ DMG="mac/build/CedarLogic-${VERSION}-Mac.dmg"
 codesign --verify --strict "$APP"
 
 rm -f "$DMG"
+# (macOS refuses to copy CedarLogic.app onto a disk named exactly "CedarLogic", so the disk gets another name.)
+VOL="CedarLogic Install"
 # The styled window (the wx app's background, big icons, the arrow between
 # them) needs dmgbuild (pip install dmgbuild; DMGBUILD=<path> to point at it).
 DMGBUILD="${DMGBUILD:-$(command -v dmgbuild || true)}"
 if [ -n "$DMGBUILD" ]; then
-	"$DMGBUILD" -s mac/dmg-settings.py -D app="$APP" "CedarLogic" "$DMG" >/dev/null
+	"$DMGBUILD" -s mac/dmg-settings.py -D app="$APP" "$VOL" "$DMG" >/dev/null
 else
 	echo "note: dmgbuild not found; making a plain disk image"
 	STAGING=$(mktemp -d)
 	trap 'rm -rf "$STAGING"' EXIT
 	cp -R "$APP" "$STAGING/"
 	ln -s /Applications "$STAGING/Applications"
-	hdiutil create -volname "CedarLogic" -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
+	hdiutil create -volname "$VOL" -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
 fi
 echo "Packaged $DMG"
