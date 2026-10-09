@@ -486,12 +486,17 @@ ITEM_FIELD(ver, int64_t, c->items[(size_t)i].ver, 0)
 ITEM_FIELD(created_at, int64_t, c->items[(size_t)i].createdAt, 0)
 ITEM_FIELD(released_at, int64_t, c->items[(size_t)i].releasedAt, 0)
 ITEM_FIELD(hidden, bool, c->items[(size_t)i].hidden, false)
+ITEM_FIELD(release_at, int64_t, c->items[(size_t)i].releaseAt, 0)
 ITEM_FIELD(news, const char*, c->items[(size_t)i].news.c_str(), "")
 ITEM_FIELD(unreadable, bool, c->items[(size_t)i].unreadable, false)
 ITEM_FIELD(problem, const char*, c->items[(size_t)i].problem.c_str(), "")
 #undef ITEM_FIELD
 void cl_classroom_post_item(CLClassroom* c, const char* classId, const char* iidOrNull, const char* type, const char* title, const char* topic,
                             const char* note, const char* cdl, bool hidden, CLClassroomDone done, void* ctx) {
+	cl_classroom_post_item2(c, classId, iidOrNull, type, title, topic, note, cdl, hidden, CL_RELEASE_KEEP, done, ctx);
+}
+void cl_classroom_post_item2(CLClassroom* c, const char* classId, const char* iidOrNull, const char* type, const char* title, const char* topic,
+                             const char* note, const char* cdl, bool hidden, int64_t releaseAt, CLClassroomDone done, void* ctx) {
 	if (!c || !c->engine) return;
 	Item it;
 	it.id = orEmpty(iidOrNull);
@@ -500,7 +505,10 @@ void cl_classroom_post_item(CLClassroom* c, const char* classId, const char* iid
 	it.topic = orEmpty(topic);
 	it.note = orEmpty(note);
 	it.cdl = orEmpty(cdl);
-	c->engine->postItem(orEmpty(classId), it, hidden, doneOf(done, ctx));
+	c->engine->postItem(orEmpty(classId), it, hidden, doneOf(done, ctx), releaseAt < 0 ? kReleaseKeep : releaseAt);
+}
+void cl_classroom_schedule_item(CLClassroom* c, const char* classId, const char* iid, int64_t releaseAt, CLClassroomDone done, void* ctx) {
+	if (c && c->engine) c->engine->setItemHidden(orEmpty(classId), orEmpty(iid), true, plainOf(done, ctx), releaseAt < 0 ? kReleaseCancel : releaseAt);
 }
 void cl_classroom_set_item_hidden(CLClassroom* c, const char* classId, const char* iid, bool hidden, CLClassroomDone done, void* ctx) {
 	if (c && c->engine) c->engine->setItemHidden(orEmpty(classId), orEmpty(iid), hidden, plainOf(done, ctx));

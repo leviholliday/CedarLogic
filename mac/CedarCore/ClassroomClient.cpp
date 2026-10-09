@@ -203,6 +203,8 @@ ItemMark markOf(const json::Value& e) {
 	m.hidden = e.flag("hidden");
 	const json::Value* r = e.get("releasedAt");
 	m.releasedAt = r && r->isInt() ? r->i() : 0;
+	const json::Value* s = e.get("releaseAt");   // 3.16.10 (null or absent: none)
+	m.releaseAt = s && s->isInt() ? s->i() : 0;
 	m.at = e.integer("at");
 	return m;
 }
@@ -2422,7 +2424,7 @@ void Client::forgetItem(const std::string& classId, const std::string& iid) {
 	if (hooks_.removeTree) hooks_.removeTree(cachePath(classId, "items/" + iid + ".json"));
 }
 
-Result Client::postItem(const std::string& classId, const Item& draft, bool hidden) {
+Result Client::postItem(const std::string& classId, const Item& draft, bool hidden, int64_t releaseAt) {
 	Teaching* tp = teachingOf(classId);
 	if (!tp) return Result::bad("That class isn't on this device.");
 	Teaching& t = *tp;
@@ -2445,7 +2447,10 @@ Result Client::postItem(const std::string& classId, const Item& draft, bool hidd
 	if (!seal(cr_, classKeyOf(t), "item", classId, iid, ver, itemJson(r), true, kMaxRecord, env, why))
 		return Result::bad(why == "too big" ? kTooBig : kNoRandom);
 	json::Value body = baseRec(base, ver, env);
+	if (releaseAt > 0) hidden = true;   // scheduled: hidden until then (3.16.10)
 	body.set("hidden", json::Value::boolean(hidden));
+	if (releaseAt > 0) body.set("releaseAt", json::Value::integer(releaseAt));
+	else if (releaseAt == kReleaseCancel) body.set("releaseAt", json::Value());
 	const Api a = teacherCall(t, "PUT", "/classes/" + classId + "/items/" + iid, &body);
 	if (a.status == 412) {
 		refreshTeacher(classId);
@@ -2462,6 +2467,8 @@ Result Client::postItem(const std::string& classId, const Item& draft, bool hidd
 	mk.hidden = a.body.flag("hidden", hidden);
 	const json::Value* rel = a.body.get("releasedAt");
 	mk.releasedAt = rel && rel->isInt() ? rel->i() : 0;
+	const json::Value* sch = a.body.get("releaseAt");   // a server before 3.16.10 has none: no schedule
+	mk.releaseAt = sch && sch->isInt() ? sch->i() : 0;
 	mk.at = a.body.integer("at", r.modifiedAt);
 	t.items[iid] = mk;
 	Item kept;
@@ -2479,11 +2486,11 @@ Result Client::postItem(const std::string& classId, const Item& draft, bool hidd
 	return Result::good(iid);
 }
 
-Result Client::setItemHidden(const std::string& classId, const std::string& iid, bool hidden) {
+Result Client::setItemHidden(const std::string& classId, const std::string& iid, bool hidden, int64_t releaseAt) {
 	auto it = itemCache_.find(mapKey(classId, iid));
 	if (!teachingOf(classId) || it == itemCache_.end() || it->second.unreadable) return Result::bad("That item couldn't be read.");
 	const Item draft = it->second;
-	return postItem(classId, draft, hidden);
+	return postItem(classId, draft, hidden, releaseAt);
 }
 
 Result Client::deleteItem(const std::string& classId, const std::string& iid) {
@@ -2521,6 +2528,7 @@ std::vector<Item> Client::items(const std::string& classId) const {
 		it.ver = kv.second.ver;
 		it.hidden = kv.second.hidden;
 		it.releasedAt = kv.second.releasedAt;
+		it.releaseAt = m ? 0 : kv.second.releaseAt;
 		if (m) {
 			auto n = m->news.find(kv.first);
 			if (n != m->news.end()) it.news = n->second;
@@ -2821,6 +2829,7 @@ json::Value itemMarksJson(const std::map<std::string, ItemMark>& marks) {
 		e.set("h", json::Value::string(kv.second.h));
 		e.set("hidden", json::Value::boolean(kv.second.hidden));
 		e.set("releasedAt", json::Value::integer(kv.second.releasedAt));
+		e.set("releaseAt", json::Value::integer(kv.second.releaseAt));
 		e.set("at", json::Value::integer(kv.second.at));
 		o.set(kv.first, e);
 	}

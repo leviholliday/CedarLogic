@@ -242,6 +242,7 @@ struct TeacherPage: View {
     @State private var message = ""
     @State private var byTopic = true
     @State private var hideStart = false
+    @State private var rescheduling: CRItem?
 
     init(center: ClassroomCenter, cls: CRClass, look: ClassroomLook, accent: Color, section: TeacherSection) {
         self.center = center; self.cls = cls; self.look = look; self.accent = accent
@@ -278,6 +279,13 @@ struct TeacherPage: View {
         }
         .onAppear { center.pageOpen(cls.id, true) }
         .onDisappear { center.pageOpen(cls.id, false) }
+        .sheet(item: $rescheduling) { it in
+            ChangeTimeSheet(item: it, look: look) { choice in
+                rescheduling = nil
+                guard let choice else { return }
+                center.scheduleItem(cls.id, it.id, at: choice) { ok, m, _ in message = ok ? "" : m }
+            }
+        }
     }
 
     /// Getting started (3.16.8): each step ticked when done; Hide dismisses it for good on this device.
@@ -321,6 +329,7 @@ struct TeacherPage: View {
                              ?? "Open or build the circuit to share first: it's the circuit on screen.")
                 Spacer()
                 Button("Share This Circuit…") { center.sheet = .addItem(classId: cls.id, share: true, files: []) }.disabled(front == nil)
+                Button("From Your Circuits…") { center.sheet = .addFromLibrary(classId: cls.id, share: true) }
             }
             if shared.isEmpty { Text("Nothing shared yet.").font(.system(size: 12)).foregroundStyle(look.dim) }
             ForEach(shared) { it in itemRow(it) }
@@ -339,6 +348,7 @@ struct TeacherPage: View {
                 sectionTitle("Class examples", "A folder of circuits by topic. Hide one until you release it.")
                 Spacer()
                 Button("Add This Circuit…") { center.sheet = .addItem(classId: cls.id, share: false, files: []) }.disabled(ClassroomFront.current == nil)
+                Button("From Your Circuits…") { center.sheet = .addFromLibrary(classId: cls.id, share: false) }
                 Button("Add .cdl Files…") { pickFiles() }
             }
             if examples.isEmpty {
@@ -364,20 +374,26 @@ struct TeacherPage: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(it.title.isEmpty ? "Untitled" : it.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(look.ink)
                 Text([it.isShare || it.topic.isEmpty ? nil : it.topic,
-                      it.hidden ? "Hidden from students" : it.releasedAt.map { "Released \(ClassroomText.dayTime($0))" },
+                      it.releaseAt.map { (it.isShare ? "Shares " : "Releases ") + ClassroomText.releaseTime($0) }
+                        ?? (it.hidden ? "Hidden from students" : it.releasedAt.map { "Released \(ClassroomText.dayTime($0))" }),
                       it.ver > 1 ? "version \(it.ver)" : nil].compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 11)).foregroundStyle(it.hidden ? look.bad : look.dim)
+                    .font(.system(size: 11)).foregroundStyle(it.releaseAt != nil ? look.ink : it.hidden ? look.bad : look.dim)
                 if !it.note.isEmpty { Text(it.note).font(.system(size: 11)).foregroundStyle(look.ink.opacity(0.8)).lineLimit(3) }
                 if it.unreadable { Text(it.problem).font(.system(size: 11)).foregroundStyle(look.bad) }
             }
             Spacer()
-            if !it.isShare {
+            if it.releaseAt != nil || (it.isShare && it.hidden) {
+                Button("Release Now") {
+                    center.setItemHidden(cls.id, it.id, false) { ok, m, _ in message = ok ? "" : m }
+                }.disabled(it.unreadable)
+            } else if !it.isShare {
                 Button(it.hidden ? "Release" : "Hide") {
                     center.setItemHidden(cls.id, it.id, !it.hidden) { ok, m, _ in message = ok ? "" : m }
                 }.disabled(it.unreadable)
             }
             Menu("•••") {
                 Button("Open") { ScratchCircuit.open(it.cdl, named: it.title) }.disabled(it.cdl.isEmpty)
+                if it.hidden { Button(it.releaseAt == nil ? "Schedule Release…" : "Change Time…") { rescheduling = it }.disabled(it.unreadable) }
                 Button("Update from the Circuit on Screen") { update(it) }.disabled(ClassroomFront.current == nil)
                 Divider()
                 Button(it.isShare ? "Stop Sharing…" : "Delete…") { delete(it) }
@@ -423,6 +439,7 @@ struct TeacherPage: View {
                     .font(.system(size: 12)).foregroundStyle(look.dim)
                 Spacer()
                 Button("Post This Circuit as an Assignment…") { center.sheet = .post(classId: cls.id, editing: nil) }.disabled(front == nil)
+                Button("From Your Circuits…") { center.sheet = .postFromLibrary(classId: cls.id) }
             }
             if list.isEmpty {
                 Text("No assignments yet.").font(.system(size: 13)).foregroundStyle(look.dim).padding(.vertical, 20)
@@ -592,6 +609,7 @@ struct StudentPage: View {
     let accent: Color
     @State private var message = ""
     @State private var checks: [String: (Int, String)] = [:]
+    @State private var handingIn: CRAssignment?        // Hand In From Your Circuits… (3.16.10)
 
     var body: some View {
         let list = center.assignments[cls.id] ?? []
@@ -633,6 +651,14 @@ struct StudentPage: View {
         }
         .onAppear { center.pageOpen(cls.id, true) }
         .onDisappear { center.pageOpen(cls.id, false) }
+        .sheet(item: $handingIn) { a in
+            LibraryPickerSheet(look: look, multiple: false, action: "Hand In") { chosen in
+                handingIn = nil
+                guard let c = chosen.first else { return }
+                guard let text = LibraryPickerSheet.savedText(c) else { message = "Couldn't read “\(c.name)”."; return }
+                center.handIn(cls.id, a.id, cdl: text) { ok, m, _ in message = ok ? "" : m }
+            }
+        }
     }
 
     @State private var byTopic = true
@@ -711,6 +737,11 @@ struct StudentPage: View {
                         Button("Check My Circuit") { check(a) }
                     }
                     Button(a.handedInAt == nil ? "Hand In" : "Hand In Again") { handIn(a) }.disabled(a.closed)
+                    Menu("•••") {
+                        Button("Hand In From Your Circuits…") { handingIn = a }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize().disabled(a.closed)
+                    .help("Hand in another circuit from Your Circuits instead of your copy")
                 }
             }
             if !a.instructions.isEmpty {
@@ -798,6 +829,8 @@ struct ClassroomSheetView: View {
             case .post(let cid, let aid): PostAssignmentSheet(center: center, classId: cid, editing: aid, look: look)
             case .handIns(let cid, let aid): HandInsSheet(center: center, classId: cid, aid: aid, look: look)
             case .addItem(let cid, let share, let files): AddItemSheet(center: center, classId: cid, share: share, files: files, look: look)
+            case .addFromLibrary(let cid, let share): AddItemSheet(center: center, classId: cid, share: share, files: [], look: look, fromLibrary: true)
+            case .postFromLibrary(let cid): PostAssignmentSheet(center: center, classId: cid, editing: nil, look: look, fromLibrary: true)
             }
         }
         .background(look.paper)
@@ -1161,10 +1194,15 @@ struct AddItemSheet: View {
     let share: Bool
     let files: [URL]
     let look: ClassroomLook
+    var fromLibrary = false
     @State private var title = ""
     @State private var topic = ""
     @State private var note = ""
-    @State private var hidden = false
+    @State private var when = ReleaseWhen.now
+    @State private var releaseAt = ReleaseWhen.defaultTime
+    @State private var picked: [LibraryItem] = []
+    @State private var picking = false
+    @State private var asked = false
     @State private var working = false
     @State private var message = ""
 
@@ -1172,16 +1210,19 @@ struct AddItemSheet: View {
     private var topics: [String] {
         Array(Set((center.items[classId] ?? []).map(\.topic).filter { !$0.isEmpty })).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
+    /// One circuit with a title and a note (the one on screen, or one picked); several: each titled by its name.
+    private var single: Bool { files.isEmpty && picked.count <= 1 }
 
     var body: some View {
         let front = ClassroomFront.current
         VStack(alignment: .leading, spacing: 12) {
             SheetTitle(text: share ? "Share with the class" : "Add to the class examples", look: look)
-            Text(files.isEmpty ? (share ? "Share the circuit on screen with \(cls?.name ?? "the class"): " : "Add the circuit on screen to the examples of \(cls?.name ?? "the class"): ")
-                 + (front?.title ?? "none open")
-                 : files.count == 1 ? "1 circuit: \(files[0].deletingPathExtension().lastPathComponent)" : "\(files.count) circuits, each titled by its file name")
-                .font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
-            if files.isEmpty {
+            HStack(alignment: .top) {
+                Text(source(front)).font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                if files.isEmpty { Button("From Your Circuits…") { picking = true } }
+            }
+            if single {
                 HStack { Text("Title:").frame(width: 90, alignment: .trailing); TextField(share ? "Today's counter" : "Half adder", text: $title).textFieldStyle(.roundedBorder) }
             }
             if !share {
@@ -1193,13 +1234,13 @@ struct AddItemSheet: View {
                     }
                 }
             }
-            if files.isEmpty {
+            if single {
                 HStack(alignment: .top) {
                     Text("Note:").frame(width: 90, alignment: .trailing)
                     TextEditor(text: $note).font(.system(size: 12)).frame(height: 54).overlay(RoundedRectangle(cornerRadius: 4).stroke(look.line))
                 }
             }
-            if !share { Toggle("Hide it until I release it", isOn: $hidden).padding(.leading, 98) }
+            ReleaseWhenPicker(when: $when, at: $releaseAt, allowHidden: !share, look: look)
             Text(share ? "Students are told “Your teacher shared …” and open their own copy to play with. Update it later from the circuit on screen."
                        : "Students see it in the class examples (once released) and open their own copy.")
                 .font(.system(size: 11)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
@@ -1208,35 +1249,209 @@ struct AddItemSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { center.sheet = nil }.keyboardShortcut(.cancelAction)
-                Button(share ? "Share" : "Add") { go() }.keyboardShortcut(.defaultAction)
-                    .disabled(working || (files.isEmpty && (front == nil || title.trimmingCharacters(in: .whitespaces).isEmpty)))
+                Button(when == .at ? "Schedule" : share ? "Share" : "Add") { go() }.keyboardShortcut(.defaultAction)
+                    .disabled(working || (when == .at && releaseAt <= Date())
+                              || (single && (title.trimmingCharacters(in: .whitespaces).isEmpty || (picked.isEmpty && front == nil))))
             }
         }
-        .padding(22).frame(width: 540)
-        .onAppear { if title.isEmpty, let f = ClassroomFront.current { title = f.title.replacingOccurrences(of: ".cdl", with: "") } }
+        .padding(22).frame(width: 560)
+        .onAppear {
+            if title.isEmpty, let f = ClassroomFront.current { title = f.title.replacingOccurrences(of: ".cdl", with: "") }
+            if fromLibrary && !asked { asked = true; picking = true }
+        }
+        .sheet(isPresented: $picking) {
+            LibraryPickerSheet(look: look, multiple: !share, action: share ? "Choose" : "Add") { chosen in
+                picking = false
+                guard !chosen.isEmpty else { return }
+                picked = chosen
+                if chosen.count == 1 { title = chosen[0].name }
+            }
+        }
+    }
+
+    private func source(_ front: ClassroomFront.Circuit?) -> String {
+        if !files.isEmpty {
+            return files.count == 1 ? "1 circuit: \(files[0].deletingPathExtension().lastPathComponent)" : "\(files.count) circuits, each titled by its file name"
+        }
+        if picked.count > 1 { return "\(picked.count) circuits from Your Circuits, each titled by its name" }
+        if let p = picked.first { return "From Your Circuits: \(p.name)" }
+        return (share ? "Share the circuit on screen with \(cls?.name ?? "the class"): " : "Add the circuit on screen to the examples of \(cls?.name ?? "the class"): ")
+            + (front?.title ?? "none open")
     }
 
     private func go() {
         var jobs: [(title: String, cdl: String)] = []
-        if files.isEmpty {
-            guard let f = ClassroomFront.current else { return }
-            jobs = [(title.trimmingCharacters(in: .whitespaces), f.cdl)]
-        } else {
+        if !files.isEmpty {
             for u in files {
                 guard let t = try? String(contentsOf: u, encoding: .utf8) else { message = "Couldn't read \(u.lastPathComponent)."; return }
                 jobs.append((u.deletingPathExtension().lastPathComponent, t))
             }
+        } else if !picked.isEmpty {
+            for p in picked {
+                guard let t = LibraryPickerSheet.savedText(p) else { message = "Couldn't read “\(p.name)”."; return }
+                jobs.append((picked.count == 1 ? title.trimmingCharacters(in: .whitespaces) : p.name, t))
+            }
+        } else {
+            guard let f = ClassroomFront.current else { return }
+            jobs = [(title.trimmingCharacters(in: .whitespaces), f.cdl)]
         }
         working = true
         message = ""
+        let hidden = when != .now
+        let at = when == .at ? releaseAt : nil
         func next(_ k: Int) {
             guard k < jobs.count else { working = false; center.sheet = nil; return }
             center.postItem(classId, id: nil, type: share ? "share" : "example", title: jobs[k].title, topic: share ? "" : topic,
-                            note: files.isEmpty ? note : "", cdl: jobs[k].cdl, hidden: !share && hidden) { ok, m, _ in
+                            note: single ? note : "", cdl: jobs[k].cdl, hidden: hidden, releaseAt: at) { ok, m, _ in
                 if ok { next(k + 1) } else { working = false; message = (jobs.count > 1 ? "\(jobs[k].title): " : "") + (m.isEmpty ? ClassroomText.offline : m) }
             }
         }
         next(0)
+    }
+}
+
+/// When a shared circuit or an example reaches the students (3.16.10).
+enum ReleaseWhen: Hashable {
+    case now, at, hidden
+    /// Tomorrow at 9:00, a sensible first guess for a class.
+    static var defaultTime: Date {
+        let cal = Calendar.current
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        return cal.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+    }
+    static var zoneName: String { TimeZone.current.identifier }
+}
+
+struct ReleaseWhenPicker: View {
+    @Binding var when: ReleaseWhen
+    @Binding var at: Date
+    let allowHidden: Bool
+    let look: ClassroomLook
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Text("When:").frame(width: 90, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("", selection: $when) {
+                    Text("Now").tag(ReleaseWhen.now)
+                    Text("At a time…").tag(ReleaseWhen.at)
+                    if allowHidden { Text("Hidden until I release it").tag(ReleaseWhen.hidden) }
+                }
+                .pickerStyle(.radioGroup).labelsHidden()
+                if when == .at {
+                    HStack {
+                        DatePicker("", selection: $at, in: Date()..., displayedComponents: [.date, .hourAndMinute]).labelsHidden()
+                        Text("your time zone: \(ReleaseWhen.zoneName)").font(.system(size: 11)).foregroundStyle(look.dim)
+                    }
+                    Text("It stays hidden until then; the classroom service releases it at that time, even with this Mac off.")
+                        .font(.system(size: 11)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+/// Change Time… on a hidden or scheduled item: a new time, or Don't schedule (it stays hidden).
+struct ChangeTimeSheet: View {
+    let item: CRItem
+    let look: ClassroomLook
+    /// nil: cancelled; .some(nil): don't schedule; .some(date): that time.
+    let done: (Date??) -> Void
+    @State private var at = ReleaseWhen.defaultTime
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SheetTitle(text: (item.isShare ? "When should “\(item.title)” be shared?" : "When should “\(item.title)” be released?"), look: look)
+            HStack {
+                DatePicker("", selection: $at, in: Date()..., displayedComponents: [.date, .hourAndMinute]).labelsHidden()
+                Text("your time zone: \(ReleaseWhen.zoneName)").font(.system(size: 11)).foregroundStyle(look.dim)
+            }
+            Text(item.releaseAt.map { "Now: " + (item.isShare ? "shares " : "releases ") + ClassroomText.releaseTime($0) + "." }
+                 ?? "Now: hidden until you release it.")
+                .font(.system(size: 11)).foregroundStyle(look.dim)
+            HStack {
+                if item.releaseAt != nil {
+                    Button("Don't Schedule") { done(.some(nil)) }.help("Keep it hidden until you press Release Now")
+                }
+                Spacer()
+                Button("Cancel") { done(nil) }.keyboardShortcut(.cancelAction)
+                Button("Schedule") { done(.some(at)) }.keyboardShortcut(.defaultAction).disabled(at <= Date())
+            }
+        }
+        .padding(22).frame(width: 460)
+        .onAppear { if let r = item.releaseAt, r > Date() { at = r } }
+    }
+}
+
+/// From Your Circuits… (3.16.10): the ⌘O library's circuits, newest first, searchable.
+struct LibraryPickerSheet: View {
+    let look: ClassroomLook
+    let multiple: Bool
+    let action: String
+    let done: ([LibraryItem]) -> Void
+    @State private var all: [LibraryItem] = []
+    @State private var parts: [String: Int] = [:]
+    @State private var query = ""
+    @State private var chosen = Set<String>()
+
+    /// The circuit as saved (the board on screen isn't touched).
+    static func savedText(_ item: LibraryItem) -> String? { try? String(contentsOf: item.circuit, encoding: .utf8) }
+
+    private var shown: [LibraryItem] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? all : all.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SheetTitle(text: "From Your Circuits", look: look)
+            TextField("Search", text: $query).textFieldStyle(.roundedBorder)
+            if all.isEmpty {
+                Text("No circuits in Your Circuits yet (File > Open, ⌘O).").font(.system(size: 12)).foregroundStyle(look.dim).frame(height: 240)
+            } else {
+                List(shown) { it in
+                    HStack {
+                        if multiple {
+                            Image(systemName: chosen.contains(it.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(chosen.contains(it.id) ? look.good : look.dim)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(it.name).font(.system(size: 13, weight: .semibold))
+                            Text([ClassroomText.dayTime(it.modified), parts[it.id].map { "\($0) \($0 == 1 ? "part" : "parts")" }].compactMap { $0 }.joined(separator: " · "))
+                                .font(.system(size: 11)).foregroundStyle(look.dim)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 2)
+                    .background(!multiple && chosen.contains(it.id) ? look.line.opacity(0.6) : Color.clear)
+                    .onTapGesture(count: 2) { if !multiple { done([it]) } }
+                    .onTapGesture {
+                        if multiple { if chosen.contains(it.id) { chosen.remove(it.id) } else { chosen.insert(it.id) } } else { chosen = [it.id] }
+                    }
+                }
+                .frame(height: 300)
+            }
+            HStack {
+                if multiple && !chosen.isEmpty { Text("\(chosen.count) chosen").font(.system(size: 12)).foregroundStyle(look.dim) }
+                Spacer()
+                Button("Cancel") { done([]) }.keyboardShortcut(.cancelAction)
+                Button(action) { done(all.filter { chosen.contains($0.id) }) }.keyboardShortcut(.defaultAction).disabled(chosen.isEmpty)
+            }
+        }
+        .padding(22).frame(width: 520)
+        .onAppear {
+            all = Library.items()
+            let list = all
+            DispatchQueue.global(qos: .userInitiated).async {   // part counts: "(gate" in each saved file
+                var counts: [String: Int] = [:]
+                for it in list {
+                    guard let size = (try? FileManager.default.attributesOfItem(atPath: it.circuit.path)[.size] as? Int), size < 4_000_000,
+                          let t = try? String(contentsOf: it.circuit, encoding: .utf8) else { continue }
+                    counts[it.id] = t.components(separatedBy: "(gate ").count - 1
+                }
+                DispatchQueue.main.async { parts = counts }
+            }
+        }
     }
 }
 
@@ -1246,7 +1461,10 @@ struct PostAssignmentSheet: View {
     let classId: String
     let editing: String?
     let look: ClassroomLook
+    var fromLibrary = false
     enum KeyChoice: Int { case none, studentsCheck, onlyMe }
+    @State private var starter: LibraryItem?        // From Your Circuits… (3.16.10) instead of the circuit on screen
+    @State private var picking = false
     @State private var title = ""
     @State private var instructions = ""
     @State private var hasDue = true
@@ -1284,10 +1502,13 @@ struct PostAssignmentSheet: View {
             }
             HStack(alignment: .top) {
                 Text("Starter circuit:").frame(width: 90, alignment: .trailing)
-                Text(editing != nil ? "The circuit on screen replaces the old one: \(front?.title ?? "none open")"
+                Text(starter.map { (editing != nil ? "Replaces the old one: " : "") + "\($0.name), from Your Circuits. Parts you locked stay locked." }
+                     ?? (editing != nil ? "The circuit on screen replaces the old one: \(front?.title ?? "none open")"
                      : front.map { "the circuit on screen: \($0.title) (\($0.parts) parts, \($0.pages) \($0.pages == 1 ? "page" : "pages")). Parts you locked stay locked." }
-                     ?? "Open a circuit first.")
+                     ?? "Open a circuit first, or choose one from Your Circuits."))
                     .font(.system(size: 12)).foregroundStyle(look.dim).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("From Your Circuits…") { picking = true }
             }
             HStack(alignment: .top) {
                 Text("Answer key:").frame(width: 90, alignment: .trailing)
@@ -1324,17 +1545,26 @@ struct PostAssignmentSheet: View {
                 Button("Cancel") { center.sheet = nil }.keyboardShortcut(.cancelAction)
                 Button(message.hasPrefix(ClassroomText.offline) ? "Try Again" : editing == nil ? "Post" : "Save") { post() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(working || front == nil || title.trimmingCharacters(in: .whitespaces).isEmpty
+                    .disabled(working || (front == nil && starter == nil) || title.trimmingCharacters(in: .whitespaces).isEmpty
                               || (keyChoice != .none && keyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }
         .padding(22).frame(width: 640)
         .onAppear(perform: load)
+        .sheet(isPresented: $picking) {
+            LibraryPickerSheet(look: look, multiple: false, action: "Choose") { chosen in
+                picking = false
+                guard let c = chosen.first else { return }
+                starter = c
+                if editing == nil { title = c.name }
+            }
+        }
     }
 
     private func load() {
         guard !loaded else { return }
         loaded = true
+        if fromLibrary { picking = true }
         if let a = existing {
             title = a.title
             instructions = a.instructions
@@ -1343,7 +1573,7 @@ struct PostAssignmentSheet: View {
             closeAfterDue = a.closeAfterDue
             keyChoice = a.keySealed ? .onlyMe : a.keyText.isEmpty ? .none : .studentsCheck
             keyText = a.keyText
-        } else if let f = ClassroomFront.current {
+        } else if let f = ClassroomFront.current, !fromLibrary {
             title = f.title.replacingOccurrences(of: ".cdl", with: "")
         }
     }
@@ -1372,12 +1602,19 @@ struct PostAssignmentSheet: View {
     }
 
     private func post() {
-        guard let f = ClassroomFront.current else { return }
+        let cdl: String
+        if let s = starter {
+            guard let t = LibraryPickerSheet.savedText(s) else { message = "Couldn't read “\(s.name)”."; return }
+            cdl = t
+        } else {
+            guard let f = ClassroomFront.current else { return }
+            cdl = f.cdl
+        }
         working = true
         message = ""
         let key = keyChoice == .none ? "" : keyText.trimmingCharacters(in: .whitespacesAndNewlines)
         center.postAssignment(classId, editing: editing, title: title.trimmingCharacters(in: .whitespaces), instructions: instructions,
-                              due: hasDue ? due : nil, closeAfterDue: hasDue && closeAfterDue, cdl: f.cdl, keyText: key,
+                              due: hasDue ? due : nil, closeAfterDue: hasDue && closeAfterDue, cdl: cdl, keyText: key,
                               keyNames: existing?.keyNames ?? "", studentsCanCheck: keyChoice != .onlyMe) { ok, m, _ in
             working = false
             if ok { center.sheet = nil } else { message = m.isEmpty ? ClassroomText.offline : m }

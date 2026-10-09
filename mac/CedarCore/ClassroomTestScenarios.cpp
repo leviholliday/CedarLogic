@@ -943,6 +943,70 @@ void scenarioTests(Crypto& cr, Curve& curve, const std::string& tempDir, Report&
 
 	line(true, "s31 an old sync client reads a classroom record as newer (checked with the vectors: record 12)");
 
+	// 3.16.10: scheduled release. An item scheduled ahead is the teacher's alone until its time, then
+	// every student's, released at that time; a write with no releaseAt (an older client) still works.
+	{
+		Device T(cr, curve, s, nullptr), S(cr, curve, s, nullptr);
+		const std::string c = T->createClass("Scheduled").value;
+		S->join(T->teachingOf(c)->rec.joinCode, "Sam");
+		S->refreshMember(c);
+		const int64_t start = s.now, at = start + 5000;
+		Item d;
+		d.type = "example";
+		d.title = "Tomorrow's adder";
+		d.cdl = kCdlOff;
+		const Result p1 = T->postItem(c, d, false, at);
+		const std::vector<Item> ti = T->items(c);
+		S->refreshMember(c);
+		const size_t before = S->items(c).size();
+		line(p1.ok && ti.size() == 1 && ti[0].hidden && ti[0].releaseAt == at && before == 0,
+		     "s50 scheduled release: hidden from students before its time", p1.message);
+		// Update (no releaseAt, hidden) keeps the schedule.
+		d.id = p1.value;
+		d.title = "Tomorrow's adder, fixed";
+		const Result p2 = T->postItem(c, d, true);
+		const std::vector<Item> tu = T->items(c);
+		line(p2.ok && tu.size() == 1 && tu[0].hidden && tu[0].releaseAt == at, "s50 scheduled release: an Update keeps the schedule");
+		s.now = at + 1000;
+		S->refreshMember(c);
+		const std::vector<Item> si = S->items(c);
+		T->refreshTeacher(c);
+		const std::vector<Item> ta = T->items(c);
+		line(si.size() == 1 && si[0].title == "Tomorrow's adder, fixed" && si[0].releasedAt == at && si[0].news == "new" && ta.size() == 1 &&
+		         !ta[0].hidden && ta[0].releaseAt == 0,
+		     "s50 scheduled release: released at its time, students see it as news", std::to_string(si.size()));
+		// Change Time / Don't schedule: a new time moves it, cancel keeps it hidden with none.
+		Item e;
+		e.type = "share";
+		e.title = "Quiz";
+		e.cdl = kCdlOff;
+		const std::string iid = T->postItem(c, e, false, s.now + 60000).value;
+		const Result moved = T->setItemHidden(c, iid, true, s.now + 120000);
+		bool movedOk = false;
+		for (const Item& x : T->items(c)) movedOk = movedOk || (x.id == iid && x.releaseAt == s.now + 120000);
+		const Result cancelled = T->setItemHidden(c, iid, true, kReleaseCancel);
+		bool cancelOk = false;
+		for (const Item& x : T->items(c)) cancelOk = cancelOk || (x.id == iid && x.hidden && x.releaseAt == 0);
+		s.now += 200000;
+		S->refreshMember(c);
+		line(moved.ok && movedOk && cancelled.ok && cancelOk && S->items(c).size() == 1, "s50 scheduled release: Change Time and Don't schedule");
+		// An older client: no releaseAt at all, hidden then Release.
+		Item o;
+		o.type = "example";
+		o.title = "Old client";
+		o.cdl = kCdlOff;
+		const std::string oid = T->postItem(c, o, true).value;
+		const Result rel = T->setItemHidden(c, oid, false);
+		S->refreshMember(c);
+		bool seen = false;
+		for (const Item& x : S->items(c)) seen = seen || (x.id == oid && x.releasedAt == s.now);
+		line(!oid.empty() && rel.ok && seen, "s50 scheduled release: a write without releaseAt still works (older clients)");
+		// Out of range: more than 400 days ahead is refused.
+		const Result far = T->postItem(c, o, false, s.now + 401 * kDay);
+		line(!far.ok, "s50 scheduled release: more than 400 days ahead is refused", far.message);
+		s.now = start;
+	}
+
 	// Answers no honest server gives (one that's broken, or not ours): nothing breaks, nothing escapes.
 	{
 		Device T(cr, curve, s, nullptr), S(cr, curve, s, nullptr);

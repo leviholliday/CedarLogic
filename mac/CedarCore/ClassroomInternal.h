@@ -205,7 +205,7 @@ struct Result {
 
 struct Checked { std::string h; int verdict = -1; std::string summary; };
 // An item as the status lists it (3.16.2).
-struct ItemMark { int64_t ver = 0; std::string h; bool hidden = false; int64_t releasedAt = 0, at = 0; };
+struct ItemMark { int64_t ver = 0; std::string h; bool hidden = false; int64_t releasedAt = 0, at = 0, releaseAt = 0; };
 
 struct Teaching {
 	std::string classId, teacherKey;
@@ -330,8 +330,8 @@ public:
 	void sideChanged();
 
 	// v2 (3.16): items and hand-in history.
-	Result postItem(const std::string& classId, const Item& draft, bool hidden);   // value: the iid
-	Result setItemHidden(const std::string& classId, const std::string& iid, bool hidden);
+	Result postItem(const std::string& classId, const Item& draft, bool hidden, int64_t releaseAt = kReleaseKeep);   // value: the iid
+	Result setItemHidden(const std::string& classId, const std::string& iid, bool hidden, int64_t releaseAt = kReleaseKeep);
 	Result deleteItem(const std::string& classId, const std::string& iid);
 	std::vector<Item> items(const std::string& classId) const;
 	void itemOpened(const std::string& classId, const std::string& iid);

@@ -10,7 +10,8 @@
 //       check (and a key made from a solution), check, hand in twice, the teacher
 //       sees the hand-in with its check result and the earlier attempt, Download
 //       All, share a circuit and update it (the student is told), a hidden class
-//       example released, leave, delete. Prints PASS/FAIL lines,
+//       example released, a share scheduled seconds ahead released by the service,
+//       leave, delete. Prints PASS/FAIL lines,
 //       pictures the real screens along the way (e2e-*.png), exits 1 on failure.
 
 import AppKit
@@ -351,6 +352,27 @@ final class EndToEnd {
         r = wait { teacher.deleteItem(cid, ex, done: $0) }
         check("teacher: delete an example", r.0 && !(teacher.items[cid]?.contains { $0.id == ex } ?? true), r.1)
         check("student: the deleted example goes", until(40) { !(student.items[cid]?.contains { $0.id == ex } ?? true) })
+
+        // 3.16.10: a share scheduled a few seconds ahead: the teacher's alone until then (an Update keeps the
+        // schedule), then the service releases it by itself and the student is told; Change Time / Don't schedule.
+        let at = Date().addingTimeInterval(8)
+        r = wait { teacher.postItem(cid, id: nil, type: "share", title: "Scheduled adder", topic: "", note: "", cdl: right.saveText(), hidden: true,
+                                    releaseAt: at, done: $0) }
+        let sch = r.2
+        check("teacher: schedule a share", r.0 && teacher.items[cid]?.first { $0.id == sch }.map { $0.hidden && $0.releaseAt != nil } ?? false, r.1)
+        r = wait { teacher.postItem(cid, id: sch, type: "share", title: "Scheduled adder", topic: "", note: "", cdl: wrong.saveText(), hidden: true, done: $0) }
+        check("teacher: Update keeps the schedule", r.0 && teacher.items[cid]?.first { $0.id == sch }?.releaseAt != nil, r.1)
+        check("student: not listed before its time", Date() < at && !(student.items[cid]?.contains { $0.id == sch } ?? false))
+        RenderClassroom.snap("e2e-teacher-scheduled", ClassroomView(center: teacher, section: .share), dark: false, in: dir, size: NSSize(width: 980, height: 1000))
+        check("student: told “Your teacher shared …” at its time", until(60) { student.news.contains { $0.itemId == sch && $0.what == "new" } }, "\(student.news)")
+        check("student: released at the scheduled time", student.items[cid]?.first { $0.id == sch }?.releasedAt.map { abs($0.timeIntervalSince(at)) < 1.5 } ?? false)
+        r = wait { teacher.postItem(cid, id: nil, type: "example", title: "Later", topic: "", note: "", cdl: right.saveText(), hidden: true,
+                                    releaseAt: Date().addingTimeInterval(3600), done: $0) }
+        let later = r.2
+        r = wait { teacher.scheduleItem(cid, later, at: Date().addingTimeInterval(7200), done: $0) }
+        check("teacher: Change Time", r.0 && teacher.items[cid]?.first { $0.id == later }?.releaseAt.map { $0.timeIntervalSinceNow > 7000 } ?? false, r.1)
+        r = wait { teacher.scheduleItem(cid, later, at: nil, done: $0) }
+        check("teacher: Don't schedule keeps it hidden", r.0 && teacher.items[cid]?.first { $0.id == later }.map { $0.hidden && $0.releaseAt == nil } ?? false, r.1)
 
         // Joining closed, a new code, a move code.
         r = wait { teacher.setJoinOpen(cid, false, done: $0) }
