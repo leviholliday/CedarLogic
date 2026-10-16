@@ -696,8 +696,9 @@ struct TruthWindow {
 		float x = 22;
 		if (!hasTable) {
 			// Why there's no Truth Table tab.
-			const std::string why = "ⓘ  " + problem + " It can still be checked clock pulse by clock pulse.";
-			y += drawWrapped(cr, why, rectF(x, y, w - 22, y + 60), 11.5f, dim) + 8;
+			const std::string why = problem + " It can still be checked clock pulse by clock pulse.";
+			drawIcon(cr, "dialog-information-symbolic", rectF(x, y + 1, x + 14, y + 15), 12, dim);
+			y += drawWrapped(cr, why, rectF(x + 20, y, w - 22, y + 60), 11.5f, dim) + 8;
 		}
 		// The kind of answer is read from the text alone, as on the Mac.
 		bool options = false;
@@ -791,8 +792,9 @@ struct TruthWindow {
 		// Notes: problems in red, warnings in orange, the rest quiet.
 		auto note = [&](const std::string& text, int kind) {
 			const Color c = kind == 2 ? kRed : kind == 1 ? kOrange : dim;
-			const char* mark = kind == 2 ? "⊘" : kind == 1 ? "⚠" : "ⓘ";
-			drawTextMid(cr, mark, rectF(box.left, y, box.left + 16, y + 16), 11.5f, c);
+			// The desktop's symbolic icons: not every face has ⓘ, ⚠ or ⊘ (CI's showed boxes).
+			const char* mark = kind == 2 ? "dialog-error-symbolic" : kind == 1 ? "dialog-warning-symbolic" : "dialog-information-symbolic";
+			drawIcon(cr, mark, rectF(box.left, y + 1, box.left + 14, y + 15), 12, c);
 			const float h = drawWrapped(cr, text, rectF(box.left + 20, y, box.right, y + 200), 11.5f, c);
 			y += std::max(16.0f, h) + 5;
 		};
