@@ -25,6 +25,7 @@
 //                       circuit before it, Redo the one after
 //   CL_FUZZ_CHAIN=1     each seed starts from the circuit the previous one saved
 //   CL_FUZZ_SAYSEED=1   print each seed as it starts (to find the one that crashed)
+//   CL_FUZZ_TREE=1      every wire is one connected piece
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
@@ -33,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -434,6 +436,31 @@ static bool danglingConnection(CLDocument* doc, std::string& what) {
 		if (!gl || !wl) continue;
 		for (auto& w : *wl) {
 			if (!w.second) continue;
+			// CL_FUZZ_TREE=1: a wire's segments are one connected piece (touching
+			// within 0.05), as it is drawn: a wire in two pieces looks like two.
+			if (getenv("CL_FUZZ_TREE") && !cl_edit_is_floating(doc)) {
+				std::vector<wireSegment> segs;
+				for (const auto& s : w.second->getSegmentMap()) segs.push_back(s.second);
+				std::vector<int> up(segs.size());
+				for (size_t i = 0; i < up.size(); i++) up[i] = (int)i;
+				std::function<int(int)> find = [&](int i) { return up[(size_t)i] == i ? i : up[(size_t)i] = find(up[(size_t)i]); };
+				const float e = 0.05f;
+				for (size_t i = 0; i < segs.size(); i++)
+					for (size_t j = i + 1; j < segs.size(); j++) {
+						const wireSegment &a = segs[i], &b = segs[j];
+						const bool touch = std::min(a.end.x, b.end.x) + e >= std::max(a.begin.x, b.begin.x) &&
+						                   std::min(a.end.y, b.end.y) + e >= std::max(a.begin.y, b.begin.y);
+						if (touch) up[(size_t)find((int)i)] = find((int)j);
+					}
+				int pieces = 0;
+				for (size_t i = 0; i < up.size(); i++) if (find((int)i) == (int)i) pieces++;
+				if (pieces > 1) {
+					what = "wire " + std::to_string(w.first) + " on page " + std::to_string(p) + " is in " + std::to_string(pieces) + " pieces";
+					for (const auto& s : w.second->getSegmentMap())
+						what += " [seg " + std::to_string(s.first) + (s.second.isVertical() ? " v " : " h ") + std::to_string(s.second.begin.x) + "," + std::to_string(s.second.begin.y) + " -> " + std::to_string(s.second.end.x) + "," + std::to_string(s.second.end.y) + "]";
+					return true;
+				}
+			}
 			// CL_FUZZ_DUP=1: no pin may be recorded twice on a wire's segments (a save
 			// writes each record, and a reload keeps one).
 			if (getenv("CL_FUZZ_DUP") && !cl_edit_is_floating(doc)) {
@@ -804,6 +831,7 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 		case 23: cl_document_click(doc, page, rf(-30, 30), rf(-30, 30)); break;
 		}
 		watchPrint(doc, "after op");
+		if (stepCheck) { std::string what; if (getenv("CL_FUZZ_INVARIANT") && danglingConnection(doc, what)) { printf("seed %llu: after op %d (case %d): %s\n", seed, n, op, what.c_str()); cl_document_close(doc); return false; } }
 		if (stepCheck && doc == before && idle(doc) && cl_edit_undo_count(doc) == preSteps + 1 && !cl_edit_can_redo(doc) && pageKey(doc) == prePages) {
 			const std::string name = cl_edit_undo_name(doc);
 			const std::string post = canonical(cl_document_save_text(doc));
