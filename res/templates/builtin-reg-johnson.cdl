@@ -1,0 +1,314 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AE_DFF_LOW"
+      (uuid "1")
+      (at 24 -20)
+      (angle 0)
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "AE_DFF_LOW"
+      (uuid "2")
+      (at 36 -20)
+      (angle 0)
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "AE_DFF_LOW"
+      (uuid "3")
+      (at 48 -20)
+      (angle 0)
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "AE_DFF_LOW"
+      (uuid "4")
+      (at 60 -20)
+      (angle 0)
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "DA_FROM"
+      (uuid "5")
+      (at 16 -18)
+      (angle 0)
+      (lparam "JUNCTION_ID" "Q3'"))
+    (gate "AA_TOGGLE"
+      (uuid "6")
+      (at 15 -10)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_LABEL"
+      (uuid "7")
+      (at 11 -10)
+      (angle 0)
+      (gparam "LABEL_TEXT" "PRE'")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (gate "AA_TOGGLE"
+      (uuid "8")
+      (at 11 -29)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_LABEL"
+      (uuid "9")
+      (at 7 -29)
+      (angle 0)
+      (gparam "LABEL_TEXT" "CLR'")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (gate "BB_CLOCK"
+      (uuid "10")
+      (at 12 -35)
+      (angle 0)
+      (lparam "HALF_CYCLE" "20")
+      (lparam "MANUAL" "true"))
+    (gate "GA_LED"
+      (uuid "11")
+      (at 30 -12)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "12")
+      (at 33 -12)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q0")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (gate "GA_LED"
+      (uuid "13")
+      (at 42 -12)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "14")
+      (at 45 -12)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q1")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (gate "GA_LED"
+      (uuid "15")
+      (at 54 -12)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "16")
+      (at 57 -12)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q2")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (gate "GA_LED"
+      (uuid "17")
+      (at 66 -12)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "18")
+      (at 69 -12)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q3")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (gate "AA_LABEL"
+      (uuid "19")
+      (at 42 -3)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Each Step Clock passes Q3' back to the start: 4 ones in, then 4 zeros.")
+      (gparam "TEXT_HEIGHT" "1.0"))
+    (gate "DE_TO"
+      (uuid "20")
+      (at 68 -21)
+      (angle 0)
+      (lparam "JUNCTION_ID" "Q3'"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 27 -18 33 -18)
+        (connect "1" "OUT_0")
+        (connect "2" "IN_0")
+        (cross 30 "1"))
+      (seg "1" v
+        (pts 30 -18 30 -13)
+        (connect "11" "N_in2")
+        (cross -18 "0")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 39 -18 45 -18)
+        (connect "2" "OUT_0")
+        (connect "3" "IN_0")
+        (cross 42 "1"))
+      (seg "1" v
+        (pts 42 -18 42 -13)
+        (connect "13" "N_in2")
+        (cross -18 "0")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 51 -18 57 -18)
+        (connect "3" "OUT_0")
+        (connect "4" "IN_0")
+        (cross 54 "1"))
+      (seg "1" v
+        (pts 54 -18 54 -13)
+        (connect "15" "N_in2")
+        (cross -18 "0")))
+    (wire
+      (ids "4")
+      (seg "0" h
+        (pts 18 -18 21 -18)
+        (connect "5" "IN_0")
+        (cross 21 "1"))
+      (seg "1" v
+        (pts 21 -18 21 -18)
+        (connect "1" "IN_0")
+        (cross -18 "0")))
+    (wire
+      (ids "5")
+      (seg "0" h
+        (pts 24 -15 60 -15)
+        (cross 24 "4")
+        (cross 36 "5")
+        (cross 48 "6")
+        (cross 60 "7"))
+      (seg "1" h
+        (pts 17.5 -13 24 -13)
+        (cross 17.5 "3")
+        (cross 24 "4"))
+      (seg "2" h
+        (pts 17 -10 17.5 -10)
+        (connect "6" "OUT_0")
+        (cross 17.5 "3"))
+      (seg "3" v
+        (pts 17.5 -13 17.5 -10)
+        (cross -13 "1")
+        (cross -10 "2"))
+      (seg "4" v
+        (pts 24 -16 24 -13)
+        (connect "1" "set")
+        (cross -15 "0")
+        (cross -13 "1"))
+      (seg "5" v
+        (pts 36 -16 36 -15)
+        (connect "2" "set")
+        (cross -15 "0"))
+      (seg "6" v
+        (pts 48 -16 48 -15)
+        (connect "3" "set")
+        (cross -15 "0"))
+      (seg "7" v
+        (pts 60 -16 60 -15)
+        (connect "4" "set")
+        (cross -15 "0")))
+    (wire
+      (ids "6")
+      (seg "0" h
+        (pts 13 -29 13.5 -29)
+        (connect "8" "OUT_0")
+        (cross 13.5 "3"))
+      (seg "1" h
+        (pts 13.5 -27 24 -27)
+        (cross 13.5 "3")
+        (cross 24 "4"))
+      (seg "2" h
+        (pts 24 -25 60 -25)
+        (cross 24 "4")
+        (cross 36 "5")
+        (cross 48 "6")
+        (cross 60 "7"))
+      (seg "3" v
+        (pts 13.5 -29 13.5 -27)
+        (cross -29 "0")
+        (cross -27 "1"))
+      (seg "4" v
+        (pts 24 -27 24 -24)
+        (connect "1" "clear")
+        (cross -27 "1")
+        (cross -25 "2"))
+      (seg "5" v
+        (pts 36 -25 36 -24)
+        (connect "2" "clear")
+        (cross -25 "2"))
+      (seg "6" v
+        (pts 48 -25 48 -24)
+        (connect "3" "clear")
+        (cross -25 "2"))
+      (seg "7" v
+        (pts 60 -25 60 -24)
+        (connect "4" "clear")
+        (cross -25 "2")))
+    (wire
+      (ids "7")
+      (seg "0" h
+        (pts 16 -35 18.5 -35)
+        (connect "10" "CLK")
+        (cross 18.5 "7"))
+      (seg "1" h
+        (pts 18.5 -28 28.5 -28)
+        (cross 18.5 "7")
+        (cross 28.5 "8"))
+      (seg "2" h
+        (pts 28.5 -26 52.5 -26)
+        (cross 28.5 "8")
+        (cross 40.5 "9")
+        (cross 52.5 "10"))
+      (seg "3" h
+        (pts 18.5 -21 21 -21)
+        (connect "1" "clock")
+        (cross 18.5 "7"))
+      (seg "4" h
+        (pts 28.5 -21 33 -21)
+        (connect "2" "clock")
+        (cross 28.5 "8"))
+      (seg "5" h
+        (pts 40.5 -21 45 -21)
+        (connect "3" "clock")
+        (cross 40.5 "9"))
+      (seg "6" h
+        (pts 52.5 -21 57 -21)
+        (connect "4" "clock")
+        (cross 52.5 "10"))
+      (seg "7" v
+        (pts 18.5 -35 18.5 -21)
+        (cross -35 "0")
+        (cross -28 "1")
+        (cross -21 "3"))
+      (seg "8" v
+        (pts 28.5 -28 28.5 -21)
+        (cross -28 "1")
+        (cross -26 "2")
+        (cross -21 "4"))
+      (seg "9" v
+        (pts 40.5 -26 40.5 -21)
+        (cross -26 "2")
+        (cross -21 "5"))
+      (seg "10" v
+        (pts 52.5 -26 52.5 -21)
+        (cross -26 "2")
+        (cross -21 "6")))
+    (wire
+      (ids "8")
+      (seg "0" h
+        (pts 63 -18 66 -18)
+        (connect "4" "OUT_0")
+        (cross 66 "1"))
+      (seg "1" v
+        (pts 66 -18 66 -13)
+        (connect "17" "N_in2")
+        (cross -18 "0")))
+    (wire
+      (ids "9")
+      (seg "0" h
+        (pts 63 -21 66 -21)
+        (connect "20" "IN_0")
+        (cross 63 "1"))
+      (seg "1" v
+        (pts 63 -21 63 -21)
+        (connect "4" "OUTINV_0")
+        (cross -21 "0")))))

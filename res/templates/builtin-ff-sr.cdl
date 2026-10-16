@@ -1,0 +1,130 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 0 6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "2")
+      (at 0 -6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "BE_NOR2"
+      (uuid "3")
+      (at 16 5)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BE_NOR2"
+      (uuid "4")
+      (at 16 -5)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "GA_LED"
+      (uuid "5")
+      (at 26 5)
+      (angle 0))
+    (gate "GA_LED"
+      (uuid "6")
+      (at 26 -5)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "7")
+      (at -3 6)
+      (angle 0)
+      (gparam "LABEL_TEXT" "R")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "8")
+      (at -3 -6)
+      (angle 0)
+      (gparam "LABEL_TEXT" "S")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "9")
+      (at 28.5 5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "10")
+      (at 29 -5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q'")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "11")
+      (at 3 14)
+      (angle 0)
+      (gparam "LABEL_TEXT" "SR Latch")
+      (gparam "TEXT_HEIGHT" "3.0"))
+    (gate "AA_LABEL"
+      (uuid "12")
+      (at 23.5 -12)
+      (angle 0)
+      (gparam "LABEL_TEXT" "S = 1 sets Q, R = 1 resets it, both 0 holds. Both 1 isn't allowed.")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 2 6 13 6)
+        (connect "1" "OUT_0")
+        (connect "3" "IN_0")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 19 -5 25 -5)
+        (connect "4" "OUT")
+        (connect "6" "N_in0")
+        (cross 20 "4"))
+      (seg "1" h
+        (pts 12.5 -0.5 20 -0.5)
+        (cross 12.5 "3")
+        (cross 20 "4"))
+      (seg "2" h
+        (pts 12.5 4 13 4)
+        (connect "3" "IN_1")
+        (cross 12.5 "3"))
+      (seg "3" v
+        (pts 12.5 -0.5 12.5 4)
+        (cross -0.5 "1")
+        (cross 4 "2"))
+      (seg "4" v
+        (pts 20 -5 20 -0.5)
+        (cross -5 "0")
+        (cross -0.5 "1")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 11.5 -4 13 -4)
+        (connect "4" "IN_0")
+        (cross 11.5 "3"))
+      (seg "1" h
+        (pts 11.5 0.5 20 0.5)
+        (cross 11.5 "3")
+        (cross 20 "4"))
+      (seg "2" h
+        (pts 19 5 25 5)
+        (connect "3" "OUT")
+        (connect "5" "N_in0")
+        (cross 20 "4"))
+      (seg "3" v
+        (pts 11.5 -4 11.5 0.5)
+        (cross -4 "0")
+        (cross 0.5 "1"))
+      (seg "4" v
+        (pts 20 0.5 20 5)
+        (cross 0.5 "1")
+        (cross 5 "2")))
+    (wire
+      (ids "4")
+      (seg "0" h
+        (pts 2 -6 13 -6)
+        (connect "2" "OUT_0")
+        (connect "4" "IN_1")))))

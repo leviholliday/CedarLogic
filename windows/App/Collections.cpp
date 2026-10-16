@@ -4,12 +4,14 @@
 #include "Alert.h"
 #include "Dialogs.h"
 #include "Picker.h"
+#include "Shortcuts.h"
 #include "Window.h"
 
 #include <shellapi.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -92,6 +94,17 @@ namespace {
 
 struct Template {
 	std::string id, name, detail, text, folder;   // folder: "" for a built-in one
+	std::string group = "Built In";               // the picker's heading for a built-in one
+	// A flip-flop's or register's text with a running clock (`text` has one
+	// that moves only on Step Clock) and with a pulse button in its place:
+	// the picker's Clock line chooses. Empty: no choice.
+	std::string runningText, pulseText;
+	bool hasClockChoice() const { return !runningText.empty() && !pulseText.empty(); }
+	const std::string& withClock(int clock) const {
+		if (clock == 1 && !runningText.empty()) return runningText;
+		if (clock == 2 && !pulseText.empty()) return pulseText;
+		return text;
+	}
 };
 
 std::string root() { return settingsDir() + "\\Templates"; }
@@ -167,56 +180,104 @@ std::string labPage() {
 	             {}, { { "Lab 1: Title", 4 } });
 }
 
-std::string counter() {
-	std::vector<Part> p = { { "BB_CLOCK", 0, 0, "" }, { "AA_REGISTER4", 16, 0, "" }, { "EE_VDD", 10, 11, "" },
-	                        { "FF_GND", 10, -11, "" }, { "GE_LED_DISPLAY_4BIT", 32, 0, "" } };
-	p.push_back(label("4-Bit Counter", 0, 18, 3));
-	p.push_back(label("Clock", -3, -4));
-	p.push_back(label("Count", 29, -5));
-	std::vector<Wire> w = { { 0, "CLK", 1, "clock" }, { 2, "OUT_0", 1, "count_enable" }, { 2, "OUT_0", 1, "count_up" },
-	                        { 3, "OUT_0", 1, "load" }, { 3, "OUT_0", 1, "clear" } };
-	for (int i = 0; i < 4; i++) w.push_back({ 1, strf("OUT_%d", i), 4, strf("IN_%d", i) });
-	return build(p, w, { { "4-Bit Counter", 3 } });
+// The Step Clock key the flip-flop and mistake templates name ("The K key
+// steps the clock"), as it is now: another key, or the menu when it has none.
+std::string withStepClockKey(std::string text) {
+	const shortcuts::Action* a = shortcuts::find("stepClock");
+	const shortcuts::Key k = a ? shortcuts::first(*a) : shortcuts::Key();
+	if (k.valid() && shortcuts::label(k) == "K") return text;
+	for (const char* from : { "The K key", "the K key" }) {
+		const bool capital = from[0] == 'T';
+		const std::string to = k.valid() ? std::string(capital ? "The " : "the ") + shortcuts::label(k) + " key"
+		                                 : std::string("Simulate ▸ Step Clock");
+		for (size_t at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size()))
+			text.replace(at, strlen(from), to);
+	}
+	return text;
 }
 
-std::string sevenSegment() {
-	std::vector<Part> p;
-	std::vector<Wire> w;
-	// Switches D (top, most significant) down to A.
-	const char* names[] = { "D", "C", "B", "A" };
-	for (int i = 0; i < 4; i++) {
-		const double y = 6.0 - i * 4;
-		p.push_back({ "AA_TOGGLE", 0, y, "" });
-		p.push_back(label(names[i], -4, y));
+// The Mac's built-in templates, as files in res\templates (made from the Mac
+// app's by windows/make-templates.py): templates.txt lists each one's id,
+// group, name, line and whether it has a Clock choice. Read once.
+const std::vector<Template>& shipped() {
+	static std::vector<Template> list;
+	static bool read = false;
+	if (read) return list;
+	read = true;
+	const std::string dir = resourcesDir().empty() ? std::string() : resourcesDir() + "\\templates";
+	std::istringstream lines(readFile(dir + "\\templates.txt"));
+	std::string line;
+	while (std::getline(lines, line)) {
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		if (line.empty() || line[0] == '#') continue;
+		std::vector<std::string> f;
+		for (size_t at = 0;;) {
+			const size_t tab = line.find('\t', at);
+			f.push_back(line.substr(at, tab == std::string::npos ? std::string::npos : tab - at));
+			if (tab == std::string::npos) break;
+			at = tab + 1;
+		}
+		if (f.size() < 4) continue;
+		Template t;
+		t.id = f[0];
+		t.group = f[1];
+		t.name = f[2];
+		t.detail = f[3];
+		t.text = readFile(dir + "\\" + t.id + ".cdl");
+		if (t.text.empty()) continue;
+		if (f.size() > 4 && f[4] == "clock") {
+			t.runningText = readFile(dir + "\\" + t.id + "-running.cdl");
+			t.pulseText = readFile(dir + "\\" + t.id + "-pulse.cdl");
+		}
+		list.push_back(t);
 	}
-	const int display = (int)p.size();
-	p.push_back({ "GE_LED_DISPLAY_4BIT", 14, 16, "" });
-	for (int i = 0; i < 4; i++) w.push_back({ i * 2, "OUT_0", display, strf("IN_%d", 3 - i) });
-	// The segments, laid out as the digit: a on top, g in the middle.
-	struct Seg { const char* n; double x, y; };
-	const Seg segs[] = { { "a", 70, 12 }, { "b", 75, 7 }, { "c", 75, -3 }, { "d", 70, -8 },
-	                     { "e", 65, -3 }, { "f", 65, 7 }, { "g", 70, 2 } };
-	for (const Seg& s : segs) {
-		p.push_back({ "GA_LED", s.x, s.y, "" });
-		p.push_back(label(s.n, s.x + 1.6, s.y + 1.6));
-	}
-	p.push_back(label("7-Segment Decoder", 0, 26, 3));
-	p.push_back(label("Hex value", 10, 9));
-	p.push_back(label("Build your decoder here", 26, -12));
-	p.push_back(label("Segments", 64, 17));
-	return build(p, w, { { "7-Segment Decoder", 3 } });
+	return list;
 }
 
+// The Lab Page (built here: it carries your name), then the shipped ones.
 std::vector<Template> builtIn() {
-	return {
+	std::vector<Template> out = {
 		{ "builtin-lab", "Lab Page", "A title, your name, the date and the course, with room for inputs and outputs", labPage(), "" },
-		{ "builtin-counter", "4-Bit Counter", "A clock driving a counting register, shown on a hex display", counter(), "" },
-		{ "builtin-7seg", "7-Segment Decoder Starter", "Four switches and seven segment lights: build the decoder between them",
-		  sevenSegment(), "" },
 	};
+	for (Template t : shipped()) {
+		t.text = withStepClockKey(t.text);
+		if (!t.runningText.empty()) t.runningText = withStepClockKey(t.runningText);
+		if (!t.pulseText.empty()) t.pulseText = withStepClockKey(t.pulseText);
+		out.push_back(t);
+	}
+	return out;
+}
+
+// The group of circuits with a mistake to find: offered in New from
+// Template, but never as the start of every new circuit.
+const char* const kMistakesGroup = "Classic Mistakes";
+
+// The flip-flops' and registers' Clock line, as the Mac's picker has it
+// (kept in prefs().templateClock): 0 manual (it moves only on Step Clock),
+// 1 running, 2 a pulse button.
+const char* const kClockChoices[] = { "Manual", "Running", "Pulse button" };
+
+std::string stepClockName() {
+	const shortcuts::Action* a = shortcuts::find("stepClock");
+	const shortcuts::Key k = a ? shortcuts::first(*a) : shortcuts::Key();
+	return k.valid() ? "the " + shortcuts::label(k) + " key" : "Simulate ▸ Step Clock";
+}
+
+std::string clockNote(int clock) {
+	switch (clock) {
+	case 1: return "It ticks by itself.";
+	case 2: return "Click the Clock button on the circuit.";
+	default: return "It moves only on Step Clock (" + stepClockName() + ").";
+	}
 }
 
 }  // namespace
+
+namespace {
+std::string preselected;
+}  // namespace
+
+void preselect(const std::string& id) { preselected = id; }
 
 void showPicker(CircuitWindow* from) {
 	if (from == nullptr) return;
@@ -237,9 +298,18 @@ void showPicker(CircuitWindow* from) {
 		std::vector<picker::Row> out;
 		picker::Row h;
 		h.heading = true;
-		h.title = "Built In";
-		out.push_back(h);
-		for (const Template& t : built) { picker::Row r; r.id = t.id; r.title = t.name; r.subtitle = t.detail; r.tile = false; out.push_back(r); }
+		// The built-in ones under their groups' headings, in the Mac's order.
+		std::vector<std::string> groups;
+		for (const Template& t : built)
+			if (std::find(groups.begin(), groups.end(), t.group) == groups.end()) groups.push_back(t.group);
+		for (const std::string& g : groups) {
+			h.title = g;
+			out.push_back(h);
+			for (const Template& t : built) {
+				if (t.group != g) continue;
+				picker::Row r; r.id = t.id; r.title = t.name; r.subtitle = t.detail; r.tile = false; out.push_back(r);
+			}
+		}
 		h.title = "Yours";
 		h.subtitle = mine.empty() ? "None yet." : "";
 		out.push_back(h);
@@ -248,6 +318,8 @@ void showPicker(CircuitWindow* from) {
 	};
 	CLDocument* shown = nullptr;
 	std::string shownId;
+	int clock = std::max(0, std::min(2, prefs().templateClock));
+	int shownClock = clock;
 	auto selectedTemplate = [&](Template& out) {
 		const picker::Row* r = p.selected();
 		if (r == nullptr) return false;
@@ -257,13 +329,15 @@ void showPicker(CircuitWindow* from) {
 	p.onSelect = [&](picker::Picker&) {
 		Template t;
 		const bool has = selectedTemplate(t);
-		if (has && t.id == shownId) return;
+		if (has && t.id == shownId && clock == shownClock) return;
 		if (shown) cl_document_close(shown);
 		shown = nullptr;
 		shownId = has ? t.id : std::string();
+		shownClock = clock;
 		if (has) {
 			char err[256];
-			shown = cl_document_open_text(t.text.c_str(), (long)t.text.size(), err, sizeof err);
+			const std::string& text = t.withClock(clock);
+			shown = cl_document_open_text(text.c_str(), (long)text.size(), err, sizeof err);
 		}
 	};
 	p.preview = [&](ID2D1RenderTarget* rt, const D2D1_RECT_F& box) {
@@ -275,12 +349,48 @@ void showPicker(CircuitWindow* from) {
 		rt->SetTransform(t);
 		if (!drawn) drawText(rt, "An empty page", box, 12, picker::Look{ prefs().dark }.ink(0.5f), TextAlign::Center);
 	};
+	// The Clock line (a flip-flop or a register selected): Manual, Running or
+	// Pulse button, and what that means, as the Mac's picker has it.
+	p.footerHeight = 34;
+	std::vector<D2D1_RECT_F> clockSegments;
+	p.footer = [&](ID2D1RenderTarget* rt, const D2D1_RECT_F& box) {
+		clockSegments.clear();
+		Template t;
+		if (!selectedTemplate(t) || !t.hasClockChoice()) return;
+		const picker::Look look{ prefs().dark };
+		const float cy = (box.top + box.bottom) / 2;
+		drawText(rt, "Clock", D2D1::RectF(box.left, cy - 10, box.left + 50, cy + 10), 13, look.ink(), TextAlign::Leading, true);
+		float x = box.left + 50;
+		const D2D1_RECT_F all = D2D1::RectF(x, cy - 13, x + 3 * 96, cy + 13);
+		fillRound(rt, all, 7, look.ink(0.07f));
+		for (int i = 0; i < 3; i++) {
+			const D2D1_RECT_F r = D2D1::RectF(x + 2, cy - 11, x + 94, cy + 11);
+			if (i == clock) {
+				fillRound(rt, r, 6, look.sheet());
+				strokeRound(rt, r, 6, look.ink(0.12f));
+			}
+			drawText(rt, kClockChoices[i], r, 12, look.ink(i == clock ? 1.0f : 0.75f), TextAlign::Center, i == clock);
+			clockSegments.push_back(r);
+			x += 96;
+		}
+		drawText(rt, clockNote(clock), D2D1::RectF(x + 12, cy - 10, box.right, cy + 10), 12, look.ink(0.55f));
+	};
+	p.onFooterClick = [&](picker::Picker& pk, float x, float y) {
+		for (int i = 0; i < (int)clockSegments.size(); i++) {
+			if (!inRect(clockSegments[i], x, y) || i == clock) continue;
+			clock = i;
+			prefs().templateClock = i;
+			prefs().save();
+			if (pk.onSelect) pk.onSelect(pk);   // the preview, with that clock
+			pk.redraw();
+		}
+	};
 	std::string useText, useName;
 	p.onButton = [&](picker::Picker& pk, int b) -> bool {
 		Template t;
 		if (b == 100) return true;
 		if (!selectedTemplate(t)) return false;
-		if (b == 101) { useText = t.text; useName = t.name; return true; }
+		if (b == 101) { useText = t.withClock(clock); useName = t.name; return true; }
 		if (t.folder.empty()) {
 			showMessage(pk.hwnd, Tone::Info, "That one's built in", "Only your own templates can be renamed or deleted.");
 			return false;
@@ -302,6 +412,10 @@ void showPicker(CircuitWindow* from) {
 		}
 		return false;
 	};
+	if (!preselected.empty()) {
+		p.shown = p.rows("");
+		for (int i = 0; i < (int)p.shown.size(); i++) if (p.shown[i].id == preselected) p.selection = i;
+	}
 	p.run(from->window());
 	if (shown) cl_document_close(shown);
 	if (useText.empty()) return;
@@ -316,7 +430,8 @@ void showPicker(CircuitWindow* from) {
 
 std::vector<std::pair<std::string, std::string>> list() {
 	std::vector<std::pair<std::string, std::string>> out;
-	for (const Template& t : builtIn()) out.push_back({ t.id, t.name });
+	for (const Template& t : builtIn())
+		if (t.group != kMistakesGroup) out.push_back({ t.id, t.name });
 	for (const Template& t : yours()) out.push_back({ t.id, t.name });
 	return out;
 }

@@ -100,7 +100,7 @@ endif()
 # The Mac app's headless checks (mac/Tools), drawing with Direct2D here.
 option(CL_BUILD_TOOLS "Build the engine's checks" ON)
 if(CL_BUILD_TOOLS)
-	foreach(tool render_png sim_check edit_check save_check tt_check cl_check part_check lock_check)
+	foreach(tool render_png sim_check edit_check save_check tt_check cl_check part_check lock_check clock_check register_check mistakes_check examples_check check_seq pagelinks_check)
 		add_executable(${tool} ${ROOT}/mac/Tools/${tool}.cpp)
 		target_include_directories(${tool} PRIVATE ${ROOT}/mac/Tools)
 		target_link_libraries(${tool} PRIVATE CedarCore windowscodecs ole32)

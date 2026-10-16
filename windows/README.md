@@ -71,8 +71,17 @@ it compiles without a Windows machine:
 
 The app looks for `cl_gatedefs.xml` in `res` beside the exe (or the repo's
 `res` when run from the build folder, or `CEDARLOGIC_RESOURCES`). The zip CI
-makes is that layout: `CedarLogic.exe` and `res\` with the gates, help and
-samples.
+makes is that layout: `CedarLogic.exe` and `res\` with the gates, help,
+samples and templates.
+
+The built-in templates other than the Lab Page (which carries your name, so
+the app builds it) are the Mac app's, as files in the repo's `res/templates`
+with `templates.txt` naming and grouping them. After the Mac's change, make
+them again from its `--render-ui` output:
+
+    mac/build.sh
+    mac/build/CedarLogic.app/Contents/MacOS/CedarLogic --render-ui /tmp/ui
+    python3 windows/make-templates.py /tmp/ui
 
 ## Installing
 

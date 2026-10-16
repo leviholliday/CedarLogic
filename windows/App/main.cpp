@@ -5,6 +5,7 @@
 #include "App.h"
 #include "Alert.h"
 #include "Canvas.h"
+#include "Collections.h"
 #include "Dialogs.h"
 #include "DragLog.h"
 #include "Feedback.h"
@@ -758,6 +759,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
 		if (a == "--wire-tag") { gWireTag = true; continue; }
 		if (a == "--run" && i + 1 < argc) { gRun = U(argv[++i]); continue; }
+		if (a == "--template" && i + 1 < argc) { templates::preselect(U(argv[++i])); continue; }   // with --dialog templates
 		if (a == "--toolbar-style" && i + 1 < argc) {
 			const std::string v = U(argv[++i]);
 			gToolbarStyle = v == "classic" ? TSClassic : v == "minimal" ? TSMinimal : TSSeamless;

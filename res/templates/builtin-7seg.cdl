@@ -1,0 +1,239 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 0 6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_LABEL"
+      (uuid "2")
+      (at -3.5 6)
+      (angle 0)
+      (gparam "LABEL_TEXT" "D")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_TOGGLE"
+      (uuid "3")
+      (at 0 2)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_LABEL"
+      (uuid "4")
+      (at -3.5 2)
+      (angle 0)
+      (gparam "LABEL_TEXT" "C")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_TOGGLE"
+      (uuid "5")
+      (at 0 -2)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_LABEL"
+      (uuid "6")
+      (at -3.5 -2)
+      (angle 0)
+      (gparam "LABEL_TEXT" "B")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_TOGGLE"
+      (uuid "7")
+      (at 0 -6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_LABEL"
+      (uuid "8")
+      (at -3.5 -6)
+      (angle 0)
+      (gparam "LABEL_TEXT" "A")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "GE_LED_DISPLAY_4BIT"
+      (uuid "9")
+      (at 14 16)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "GA_LED"
+      (uuid "10")
+      (at 70 12)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "11")
+      (at 72 13.5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "a")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "GA_LED"
+      (uuid "12")
+      (at 75 7)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "13")
+      (at 77 8.5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "b")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "GA_LED"
+      (uuid "14")
+      (at 75 -3)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "15")
+      (at 77 -1.5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "c")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "GA_LED"
+      (uuid "16")
+      (at 70 -8)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "17")
+      (at 72 -6.5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "d")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "GA_LED"
+      (uuid "18")
+      (at 65 -3)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "19")
+      (at 67 -1.5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "e")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "GA_LED"
+      (uuid "20")
+      (at 65 7)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "21")
+      (at 67 8.5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "f")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "GA_LED"
+      (uuid "22")
+      (at 70 2)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "23")
+      (at 72 3.5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "g")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "24")
+      (at 15.5 26)
+      (angle 0)
+      (gparam "LABEL_TEXT" "7-Segment Decoder")
+      (gparam "TEXT_HEIGHT" "3.0"))
+    (gate "AA_LABEL"
+      (uuid "25")
+      (at 15.5 9)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Hex value")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "26")
+      (at 40 -12)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Build your decoder here")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "27")
+      (at 69 17)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Segments")
+      (gparam "TEXT_HEIGHT" "2"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 2 6 6.5 6)
+        (connect "1" "OUT_0")
+        (cross 6.5 "2"))
+      (seg "1" h
+        (pts 6.5 18 11 18)
+        (connect "9" "IN_3")
+        (cross 6.5 "2"))
+      (seg "2" v
+        (pts 6.5 6 6.5 18)
+        (cross 6 "0")
+        (cross 18 "1")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 2 2 7.5 2)
+        (connect "3" "OUT_0")
+        (cross 7.5 "2"))
+      (seg "1" h
+        (pts 7.5 17 11 17)
+        (connect "9" "IN_2")
+        (cross 7.5 "2"))
+      (seg "2" v
+        (pts 7.5 2 7.5 17)
+        (cross 2 "0")
+        (cross 17 "1")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 2 -2 8.5 -2)
+        (connect "5" "OUT_0")
+        (cross 8.5 "2"))
+      (seg "1" h
+        (pts 8.5 16 11 16)
+        (connect "9" "IN_1")
+        (cross 8.5 "2"))
+      (seg "2" v
+        (pts 8.5 -2 8.5 16)
+        (cross -2 "0")
+        (cross 16 "1")))
+    (wire
+      (ids "4")
+      (seg "0" h
+        (pts 2 -6 2.5 -6)
+        (connect "7" "OUT_0")
+        (cross 2.5 "5"))
+      (seg "1" h
+        (pts 2.5 -3 9.5 -3)
+        (cross 2.5 "5")
+        (cross 9.5 "7"))
+      (seg "2" h
+        (pts 9 7.5 9.5 7.5)
+        (cross 9 "6")
+        (cross 9.5 "7"))
+      (seg "3" h
+        (pts 9 10.5 9.5 10.5)
+        (cross 9 "6")
+        (cross 9.5 "8"))
+      (seg "4" h
+        (pts 9.5 15 11 15)
+        (connect "9" "IN_0")
+        (cross 9.5 "8"))
+      (seg "5" v
+        (pts 2.5 -6 2.5 -3)
+        (cross -6 "0")
+        (cross -3 "1"))
+      (seg "6" v
+        (pts 9 7.5 9 10.5)
+        (cross 7.5 "2")
+        (cross 10.5 "3"))
+      (seg "7" v
+        (pts 9.5 -3 9.5 7.5)
+        (cross -3 "1")
+        (cross 7.5 "2"))
+      (seg "8" v
+        (pts 9.5 10.5 9.5 15)
+        (cross 10.5 "3")
+        (cross 15 "4")))))

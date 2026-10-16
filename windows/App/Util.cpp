@@ -237,6 +237,7 @@ void Prefs::load() {
 	showStepClock = r.b("showStepClock", showStepClock);
 	openReplaces = r.b("openReplaces", openReplaces);
 	newTemplate = r.s("newTemplate", newTemplate);
+	templateClock = r.i("templateClock", templateClock, 0, 2);
 	shortcuts = r.s("shortcuts", shortcuts);
 	checkUpdates = r.b("checkUpdates", checkUpdates);
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
@@ -328,6 +329,7 @@ void Prefs::save() const {
 	o << "showStepClock=" << b(showStepClock) << "\n";
 	o << "openReplaces=" << b(openReplaces) << "\n";
 	o << "newTemplate=" << newTemplate << "\n";
+	o << "templateClock=" << templateClock << "\n";
 	o << "shortcuts=" << shortcuts << "\n";
 	o << "checkUpdates=" << b(checkUpdates) << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";

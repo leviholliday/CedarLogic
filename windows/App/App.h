@@ -69,6 +69,7 @@ struct Prefs {
 	bool showStepClock = true;    // Step Clock in the toolbar and Simulation View's bar
 	bool openReplaces = false;    // opening a circuit replaces the one in the window
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
+	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
 	bool checkUpdates = true;     // look for a new test build now and then
 	bool hasSeenWelcome = false;
