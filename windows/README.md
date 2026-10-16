@@ -47,7 +47,7 @@ it compiles without a Windows machine:
   formulas and Check My Circuit -- against a formula or a truth table, or clock
   pulse by clock pulse against a count, a state table or a timing table, with
   its step strip (`TruthTableWindow`) -- and Build from Formula (`Formula`), Find
-  (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope,
+  (`FindBar`, with Find Next and Previous on F3 and Shift+F3), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope,
   docked under the canvas, and its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
   for pictures made off screen), Export Lab Report (`LabReport`: a PDF of the
   circuit, truth table, Karnaugh maps and timing diagram, its pages drawn off
@@ -162,8 +162,9 @@ Direct2D here. And:
   with, `--page N` for the welcome, What's New
   or Settings (0 General ... 5 Sync), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--run a,b`
-  runs commands by their Shortcuts id first (`draw`, `stepClock`, and the
-  drawing bar's `inkPen`, `inkHighlighter`, `inkEraser`); `--note "text"`
+  runs commands by their Shortcuts id first (`draw`, `stepClock`, `findNext`, and the
+  drawing bar's `inkPen`, `inkHighlighter`, `inkEraser`); `--find "text"` opens
+  the find bar looking for it; `--note "text"`
   puts a note in the status bar, and `--wire-tag` rests the pointer on a wire
   to show its value. `--toolbar-style seamless|classic|minimal` shows the
   toolbar in that style for the run (with the click test too).

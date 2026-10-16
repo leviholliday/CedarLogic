@@ -188,6 +188,10 @@ jobs:
           timeout 90 "$A" --dark --sim-view --run draw,inkEraser --screenshot "$PWD/renders/drawing-bar-sim.png" $D/drawing-and-notes.cdl || true
           timeout 90 "$A" --light --screenshot "$PWD/renders/drawing-hidden.png" $D/hidden-drawing.cdl || true
           timeout 90 "$A" --dialog export --screenshot "$PWD/renders/export-image-drawing.png" $D/drawing-and-notes.cdl || true
+          # Find: the bar looking for the practice circuit's AND gates, then Find
+          # Next twice (F3: "3 of ..."), and Find Previous from the first (the last one).
+          timeout 90 "$A" --light --find "AND" --run findNext,findNext --screenshot "$PWD/renders/find-next.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --find "AND" --run findPrevious --screenshot "$PWD/renders/find-previous-dark.png" res/samples/practice.cdl || true
           # Split view (lab6: a circuit on each of its first tabs), focus mode
           # (the tabs as the title row), both, and a tab being renamed in place.
           timeout 90 "$A" --split --screenshot "$PWD/renders/window-split.png" format/tests/fixtures/lab6.cdl || true

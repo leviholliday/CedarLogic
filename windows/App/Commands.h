@@ -46,6 +46,9 @@ enum Command {
 	CMD_DRAW, CMD_SHOW_DRAWING, CMD_CLEAR_DRAWING, CMD_INK_PEN, CMD_INK_HIGHLIGHTER, CMD_INK_ERASER,
 	CMD_INK_WIDTH, CMD_INK_WIDTH_LAST = CMD_INK_WIDTH + 2,
 	CMD_INK_COLOR, CMD_INK_COLOR_LAST = CMD_INK_COLOR + 5,
+	// Edit > Find Next and Find Previous: along the find bar's results (it
+	// opens, with what it last looked for, when it's closed).
+	CMD_FIND_NEXT, CMD_FIND_PREVIOUS,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

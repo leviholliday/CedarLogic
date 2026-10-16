@@ -1,6 +1,8 @@
 // The find bar (Ctrl+F) over the canvas, as the Mac app's FindBar: labels,
 // TO/FROM names and parts on every page. Enter goes to the next one (Shift
-// the one before), the arrows either way, Escape closes it. With a label or a
+// the one before), the arrows either way, and F3 and Shift+F3 from anywhere
+// in the window (Edit > Find Next and Find Previous, which open the bar on
+// what it last looked for when it's closed); Escape closes it. With a label or a
 // TO/FROM selected, it opens looking for that name, so a TO's FROMs are one
 // Enter away.
 

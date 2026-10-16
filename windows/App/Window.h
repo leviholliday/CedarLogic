@@ -293,6 +293,10 @@ public:
 
 	// Find's result: its page in front, it selected and in the middle.
 	void showFoundGate(int page, long gate, double x, double y);
+	// Find Next and Find Previous (1, -1): along the results, or the bar opened
+	// on what it last looked for. --find opens it looking for `query`.
+	void findStep(int delta);
+	void openFind(const std::string& query);
 	std::string pageTitle(int page) const { return pageName(page); }
 
 	// For the guided tour: 0 the palette, 1 the canvas, 2 Run, 3 the tabs

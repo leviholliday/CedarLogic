@@ -151,6 +151,8 @@ const std::vector<Action>& all() {
 		{ "duplicate", "Editing", "Duplicate the selection", CMD_DUPLICATE, false, "Ctrl+D" },
 		{ "selectAll", "Editing", "Select everything on the page", CMD_SELECT_ALL, false, "Ctrl+A" },
 		{ "find", "Editing", "Find a label, a TO/FROM name or a part", CMD_FIND, false, "Ctrl+F" },
+		{ "findNext", "Editing", "Find the next one", CMD_FIND_NEXT, false, "F3" },
+		{ "findPrevious", "Editing", "Find the previous one", CMD_FIND_PREVIOUS, false, "Shift+F3" },
 		{ "addGate", "Building", "Add a gate by name", CMD_ADD_GATE, true, "A" },
 		{ "rotate", "Building", "Rotate the selection", CMD_ROTATE, true, "R" },
 		{ "straighten", "Building", "Straighten the selected wires", CMD_STRAIGHTEN, true, "S" },

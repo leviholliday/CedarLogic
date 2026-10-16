@@ -118,7 +118,7 @@ void FindBar::paint(ID2D1RenderTarget* rt, float w, float h) {
 	drawIcon(rt, Icon::ChevronDown, down, 10, withAlpha(ink, any ? 0.8f : 0.3f));
 	fillRound(rt, done, 8, withAlpha(ink, hot == 2 ? 0.12f : 0.07f));
 	drawText(rt, "Done", done, 12, ink, TextAlign::Center);
-	setTips({ { up, "Previous (Shift+Enter)" }, { down, "Next (Enter)" } });
+	setTips({ { up, "Previous (Shift+Enter, Shift+F3)" }, { down, "Next (Enter, F3)" } });
 }
 
 void FindBar::mouseMove(float x, float y) {

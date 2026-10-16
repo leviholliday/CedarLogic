@@ -68,6 +68,7 @@ const int kSyncPage = 5;
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
 bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
+std::string gFind;      // --find: the find bar open, looking for this (then --run findNext steps along)
 std::string gRun;       // --run a,b,...: those commands, by their Shortcuts id (stepClock, lockInPlace), before the picture
 // --drag-selftest [log]: a gate dragged with real input, PASS or FAIL
 // (DragLog.h); --drag-log <file>: every drag measured into the file.
@@ -805,6 +806,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
 		if (a == "--wire-tag") { gWireTag = true; continue; }
 		if (a == "--run" && i + 1 < argc) { gRun = U(argv[++i]); continue; }
+		if (a == "--find" && i + 1 < argc) { gFind = U(argv[++i]); continue; }
 		if (a == "--template" && i + 1 < argc) { templates::preselect(U(argv[++i])); continue; }   // with --dialog templates
 		if (a == "--toolbar-style" && i + 1 < argc) {
 			const std::string v = U(argv[++i]);
@@ -934,6 +936,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			cl_edit_select_gate(w->document(), found.page, found.gate);
 		}
 	}
+	if (!gFind.empty() && !circuitWindows().empty()) circuitWindows().back()->openFind(gFind);
 	if (!gRun.empty() && !circuitWindows().empty())
 		for (size_t at = 0; at <= gRun.size();) {
 			const size_t comma = std::min(gRun.find(',', at), gRun.size());

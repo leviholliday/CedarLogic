@@ -295,6 +295,8 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_DELETE, "&Delete\tDel");
 	item(edit, CMD_SELECT_ALL, "Select &All\tCtrl+A");
 	item(edit, CMD_FIND, "&Find\u2026\tCtrl+F");
+	item(edit, CMD_FIND_NEXT, "Find &Next\tF3");
+	item(edit, CMD_FIND_PREVIOUS, "Find Pre&vious\tShift+F3");
 	separator(edit);
 	item(edit, CMD_ADD_GATE, "Add a &Gate…\tA");
 	item(edit, CMD_GATE_SETTINGS, "Gate &Settings…");
@@ -1851,6 +1853,16 @@ void CircuitWindow::showFoundGate(int page, long gate, double x, double y) {
 	redraw();
 }
 
+void CircuitWindow::findStep(int delta) {
+	if (findBar == nullptr) return;
+	if (findBar->isOpen()) findBar->step(delta);
+	else findBar->open("");
+}
+
+void CircuitWindow::openFind(const std::string& query) {
+	if (findBar) findBar->open(query);
+}
+
 void CircuitWindow::partsChanged() {
 	if (palette) palette->partsChanged();
 }
@@ -1902,6 +1914,8 @@ void CircuitWindow::run(int command) {
 		findBar->open(name ? name : "");
 		break;
 	}
+	case CMD_FIND_NEXT: findStep(1); break;
+	case CMD_FIND_PREVIOUS: findStep(-1); break;
 	case CMD_VERSIONS: showVersionHistory(this); break;
 	case CMD_OPEN_SAMPLE: openPracticeCircuit(this); break;
 	case CMD_SAVE: save(); break;
