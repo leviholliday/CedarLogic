@@ -111,7 +111,10 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   and the badge
 - `CedarLogic --render-classroom <dir>` -- the Classroom window (teacher and
   student pages, every sheet, the projector code, the recovery sheet) as
-  PNGs, light and dark, from made-up classes; no network
+  PNGs, light and dark, from made-up classes; no network. Then what Print
+  sends for the recovery sheet and a class pass (`*-print.pdf`): every word
+  there and a QR code that scans back to its link (PASS/FAIL, exit 1 on a
+  failure)
 - `CL_CLASSROOM_SERVICE=http://localhost:8788 CedarLogic --classroom-e2e <dir>`
   -- a teacher and a student (two engines, folders under <dir>) through the
   window's own Classroom code against a running Worker: create, join, post
