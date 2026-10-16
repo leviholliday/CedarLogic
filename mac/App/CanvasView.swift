@@ -1296,7 +1296,22 @@ final class CanvasController: ObservableObject {
             undoManager?.setActionName(name)
             mirrored += 1
         }
+        // A full history: the engine keeps its last 500 steps (kLimit in
+        // include/gui/native/NoWxCompat.h), so from then on a new step drops
+        // the oldest and the count stays put -- and counting alone missed
+        // every step after the 500th: nothing was registered, so the window
+        // never became edited, autosave skipped it and quitting lost it.
+        // At the limit, an edit since the last save (the engine's own flag,
+        // which saving clears) is mirrored as one more step. Undo always
+        // takes back the engine's latest step, so one too many here only
+        // means a last Cmd-Z that does nothing; the engine has nothing to
+        // redo at the limit, so no redo is lost.
+        if n == mirrored, n >= Self.engineHistoryLimit, document.isEdited, !document.canRedo {
+            undoManager?.registerUndo(withTarget: self) { $0.engineUndo() }
+            undoManager?.setActionName(document.undoName)
+        }
     }
+    static let engineHistoryLimit = 500
 
     private func engineUndo() {
         guard let document, document.undo() else { return }
