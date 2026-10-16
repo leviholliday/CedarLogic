@@ -719,8 +719,21 @@ final class CanvasController: ObservableObject {
     func attach(_ document: CoreDocument) {
         guard self.document !== document else { return }
         self.document = document
-        isRunning = document.isRunning
-        stepMs = document.stepMs
+        // attach runs inside SwiftUI's view update (CanvasView's makeNSView
+        // and updateNSView), where publishing a change is undefined
+        // behaviour (SwiftUI warned 22 times for every circuit window that
+        // opened). So only what differs is set: run/pause straight away (the
+        // clock below must not run a paused circuit; a new controller and a
+        // new document both start running, so this almost never publishes),
+        // the speed just after the update (the engine already has it; this
+        // copy is for the control bar and the marching dashes).
+        if isRunning != document.isRunning { isRunning = document.isRunning }
+        if stepMs != document.stepMs {
+            DispatchQueue.main.async { [weak self, weak document] in
+                guard let self, let document, self.document === document, self.stepMs != document.stepMs else { return }
+                self.stepMs = document.stepMs
+            }
+        }
         lastPageCount = document.pageCount
         // The second side of a split runs no simulation (its partner does),
         // but still needs the ticks for its own view: the status bar, eased

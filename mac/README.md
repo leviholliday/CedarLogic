@@ -169,6 +169,12 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   permission; run it after any change to the title bar row. The app side
   is `CL_BAR_TEST=<dir>` (App/BarTest.swift): a new untitled circuit, tool
   clicks logged instead of done
+- `launch-check.sh [runs]` -- real launches of the built app (a copy with
+  settings and folders of its own, so yours are never touched): each must
+  open its circuit window, quit by itself and print none of SwiftUI's
+  "Publishing changes from within view updates" / "Modifying state during
+  view update" warnings; the first is a first launch. The windows show on
+  screen for a few seconds each; nothing is clicked
 - `CL_SNAPSHOT=<dir>` when running the app -- the circuit window draws
   itself to PNGs as it opens, splits (placing a gate on the second side),
   gains a tab and unsplits, and logs both canvases' frames (works when
