@@ -324,32 +324,11 @@ struct Report {
 	// The page just drawn, as a picture in the file: gray when nothing on it
 	// has a colour (a third of the bytes).
 	void addPicture(IWICBitmap* bmp) {
+		std::vector<unsigned char> px;
+		int components = 3;
 		UINT w = 0, h = 0;
-		if (FAILED(bmp->GetSize(&w, &h)) || w == 0 || h == 0) { fail("A page of the report couldn't be read back."); return; }
-		std::vector<unsigned char> src((size_t)w * h * 4);
-		if (FAILED(bmp->CopyPixels(nullptr, w * 4, (UINT)src.size(), src.data()))) { fail("A page of the report couldn't be read back."); return; }
-		const size_t count = (size_t)w * h;
-		bool grayOnly = true;
-		for (size_t i = 0; i < count; i++) {
-			unsigned char* p = &src[i * 4];   // blue, green, red, alpha (premultiplied): onto white
-			if (p[3] != 255) {
-				const int add = 255 - p[3];
-				for (int k = 0; k < 3; k++) p[k] = (unsigned char)std::min(255, p[k] + add);
-			}
-			if (p[0] != p[1] || p[1] != p[2]) grayOnly = false;
-		}
-		std::vector<unsigned char> px(count * (grayOnly ? 1 : 3));
-		for (size_t i = 0; i < count; i++) {
-			const unsigned char* p = &src[i * 4];
-			if (grayOnly) {
-				px[i] = p[2];
-			} else {
-				px[i * 3] = p[2];
-				px[i * 3 + 1] = p[1];
-				px[i * 3 + 2] = p[0];
-			}
-		}
-		file.addPage(kPW, kPH, (int)w, (int)h, grayOnly ? 1 : 3, px.data());
+		if (!images::pdfPixels(bmp, px, components, w, h)) { fail("A page of the report couldn't be read back."); return; }
+		file.addPage(kPW, kPH, (int)w, (int)h, components, px.data());
 	}
 
 	void endPage() {

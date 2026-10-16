@@ -10,6 +10,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace images {
 
@@ -32,6 +33,11 @@ private:
 	ID2D1RenderTarget* rt = nullptr;
 };
 bool savePng(IWICBitmapSource* bmp, const std::string& file);
+// Its pixels as a PDF page's picture (Pdf.h): onto white, top row first, 8-bit
+// gray when nothing in it has a colour (`components` 1), else RGB (3).
+bool pdfPixels(IWICBitmap* bmp, std::vector<unsigned char>& out, int& components, UINT& w, UINT& h);
+// A PDF of one page, `widthPt` x `heightPt` points, showing the picture.
+bool savePdf(IWICBitmap* bmp, float widthPt, float heightPt, const std::string& title, const std::string& file);
 // A picture file (PNG, JPEG...) shrunk to fit maxW x maxH pixels, ready to
 // draw (premultiplied BGRA). Null if it couldn't be read.
 IWICBitmap* load(const std::string& file, UINT maxW, UINT maxH);

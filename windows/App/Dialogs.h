@@ -155,6 +155,8 @@ void showBuildFormula(CircuitWindow* w);
 bool confirmQuit(HWND parent);
 // Export as Image (Export.cpp).
 void showExportImage(CircuitWindow* w, int page);
+// --export-image: the first page written as a PNG or a PDF (by the file's ending), without a window.
+bool writeExportImage(CLDocument* doc, const std::string& name, const std::string& file, std::string& error);
 // Export Lab Report (LabReport.cpp): one PDF to hand in.
 struct LabReportOptions {
 	bool circuit = true, truthTable = true, formulas = true, timing = true, color = true;

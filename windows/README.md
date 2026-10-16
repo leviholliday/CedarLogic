@@ -51,7 +51,8 @@ it compiles without a Windows machine:
   docked under the canvas, and its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
   for pictures made off screen), Export Lab Report (`LabReport`: a PDF of the
   circuit, truth table, Karnaugh maps and timing diagram, its pages drawn off
-  screen and put in the file by the small writer in `Pdf`), Share Link and
+  screen and put in the file by the small writer in `Pdf`, which Export as
+  Image also saves a PDF with), Share Link and
   cedarlogic:// links (`ShareLink`; the link format is `ShareCodec`, over
   `Deflate`, a deflate compressor and decompressor of its own, since Windows
   has no zlib), Sync (below), Send Feedback (`Feedback`, to
@@ -171,6 +172,10 @@ Direct2D here. And:
 - `CedarLogic.exe --lab-report circuit.cdl out.pdf [bw]` -- the circuit run for a
   while, then its lab report (File > Export Lab Report) written without a
   window; `bw` for black and white (CI runs it and keeps the PDFs).
+- `CedarLogic.exe --export-image circuit.cdl out.png|out.pdf` -- the first
+  page as Export as Image writes it (a PNG, or a PDF of one page holding the
+  same picture, by the file's ending), with its last choices, without a
+  window (CI runs it and checks the PDFs).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
   Tab, Pause and Resume, Simulation View, Draw, Lock, the dark mode switch, New),
   the tabs' +, and the window's drawn Minimize (on the toolbar, and on the

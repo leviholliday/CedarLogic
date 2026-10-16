@@ -52,6 +52,8 @@ std::string gTiming;
 bool gTimingColor = false;
 // --lab-report <in.cdl> <out.pdf> [bw]: writes a lab report without a window.
 std::string gReportIn, gReportOut;
+// --export-image <in.cdl> <out.png|out.pdf>: Export as Image's file, without a window.
+std::string gExportIn, gExportOut;
 bool gReportBW = false;
 // --splash-frame <seconds> <out.png> [--first-launch]: the launch screen at
 // that moment, drawn to a PNG, and quit.
@@ -797,6 +799,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			if (i + 1 < argc && U(argv[i + 1]) == "bw") { gReportBW = true; i++; }
 			continue;
 		}
+		if (a == "--export-image" && i + 2 < argc) {
+			gExportIn = U(argv[++i]);
+			gExportOut = U(argv[++i]);
+			continue;
+		}
 		if (a == "--splash-frame" && i + 2 < argc) { gSplashAt = atof(U(argv[++i]).c_str()); gSplashFile = U(argv[++i]); continue; }
 		if (a == "--first-launch") { gFirstLaunch = true; continue; }
 		if (a == "--card-frame" && i + 1 < argc) { CircuitWindow::cardFreeze = atof(U(argv[++i]).c_str()); continue; }
@@ -842,7 +849,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		draglog::open(U(tmp) + "cedarlogic-drag-selftest.log");
 	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
-	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest;
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest;
 	gTestRun = testRun;
 	if (!testRun && handToRunning(files)) return 0;
 
@@ -864,7 +871,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && !gClickTest && !gDragSelfTest) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -892,6 +899,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		std::string error;
 		const bool ok = writeLabReport(doc, baseName(gReportIn), o, gReportOut, error);
 		writeOut(ok ? strf("wrote %s\n", gReportOut.c_str()) : strf("couldn't write %s: %s\n", gReportOut.c_str(), error.c_str()));
+		return ok ? 0 : 1;
+	}
+	if (!gExportIn.empty()) {
+		char err[512] = "";
+		CLDocument* doc = cl_document_open(gExportIn.c_str(), err, sizeof err);
+		if (doc == nullptr) { writeOut(strf("couldn't open %s: %s\n", gExportIn.c_str(), err)); return 1; }
+		std::string error;
+		const bool ok = writeExportImage(doc, baseName(gExportIn), gExportOut, error);
+		cl_document_close(doc);
+		writeOut(ok ? strf("wrote %s\n", gExportOut.c_str()) : strf("couldn't write %s: %s\n", gExportOut.c_str(), error.c_str()));
 		return ok ? 0 : 1;
 	}
 	registerWindowClasses();

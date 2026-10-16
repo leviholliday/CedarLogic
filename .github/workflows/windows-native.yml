@@ -385,6 +385,28 @@ jobs:
             test "$pages" -ge 1
           done
 
+      # Export as Image's files without a window (--export-image): a PNG and a
+      # PDF (one page holding the same picture) of a circuit, and a PDF of one
+      # with a drawing; each PDF checked to be whole, with its one page.
+      - name: Export as Image files
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          timeout 90 "$A" --export-image format/tests/fixtures/Lab5.cdl "$PWD/renders/export-Lab5.png"
+          timeout 90 "$A" --export-image format/tests/fixtures/Lab5.cdl "$PWD/renders/export-Lab5.pdf"
+          timeout 90 "$A" --export-image format/tests/fixtures/drawing/cdl/drawing-and-notes.cdl "$PWD/renders/export-drawing.pdf"
+          test -s renders/export-Lab5.png
+          for f in renders/export-*.pdf; do
+            test -s "$f"
+            head -c 5 "$f" | grep -q '^%PDF-'
+            tail -c 8 "$f" | grep -aq '%%EOF'
+            pages=$(grep -a -o '/Type /Page /Parent' "$f" | wc -l)
+            echo "$f: $(wc -c < "$f") bytes, $pages page"
+            test "$pages" -eq 1
+          done
+
       # Clicks on the toolbar's buttons, the tabs' +, and the window's drawn
       # Minimize (on the toolbar, and on the tabs in focus mode) and Close,
       # as Windows sends them (press, then release), a stroke drawn on the

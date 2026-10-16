@@ -1,11 +1,13 @@
 // Pictures made off screen (see Images.h).
 
 #include "Images.h"
+#include "Pdf.h"
 
 #include <objidl.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include <vector>
 
@@ -81,6 +83,58 @@ IWICBitmap* render(double w, double h, double scale, bool white, const std::func
 	if (!sheet.begin(w, h, scale, white)) return nullptr;
 	draw(sheet.target());
 	return sheet.finish();
+}
+
+bool pdfPixels(IWICBitmap* bmp, std::vector<unsigned char>& px, int& components, UINT& w, UINT& h) {
+	w = h = 0;
+	if (bmp == nullptr || FAILED(bmp->GetSize(&w, &h)) || w == 0 || h == 0) return false;
+	std::vector<unsigned char> src((size_t)w * h * 4);
+	if (FAILED(bmp->CopyPixels(nullptr, w * 4, (UINT)src.size(), src.data()))) return false;
+	const size_t count = (size_t)w * h;
+	bool grayOnly = true;
+	for (size_t i = 0; i < count; i++) {
+		unsigned char* p = &src[i * 4];   // blue, green, red, alpha (premultiplied): onto white
+		if (p[3] != 255) {
+			const int add = 255 - p[3];
+			for (int k = 0; k < 3; k++) p[k] = (unsigned char)std::min(255, p[k] + add);
+		}
+		if (p[0] != p[1] || p[1] != p[2]) grayOnly = false;
+	}
+	components = grayOnly ? 1 : 3;
+	px.assign(count * components, 0);
+	for (size_t i = 0; i < count; i++) {
+		const unsigned char* p = &src[i * 4];
+		if (grayOnly) {
+			px[i] = p[2];
+		} else {
+			px[i * 3] = p[2];
+			px[i * 3 + 1] = p[1];
+			px[i * 3 + 2] = p[0];
+		}
+	}
+	return true;
+}
+
+bool savePdf(IWICBitmap* bmp, float widthPt, float heightPt, const std::string& title, const std::string& file) {
+	std::vector<unsigned char> px;
+	int components = 3;
+	UINT w = 0, h = 0;
+	if (!pdfPixels(bmp, px, components, w, h)) return false;
+	SYSTEMTIME t;
+	GetLocalTime(&t);
+	char date[32];
+	snprintf(date, sizeof date, "%04u%02u%02u%02u%02u%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+	pdf::Document doc(title, "CedarLogic " CL_VERSION, date);
+	// PDF points are 1/72 inch; the picture's are 1/96.
+	doc.addPage(widthPt * 0.75f, heightPt * 0.75f, (int)w, (int)h, components, px.data());
+	const std::string& bytes = doc.finish();
+	HANDLE f = CreateFileW(W(file).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (f == INVALID_HANDLE_VALUE) return false;
+	DWORD wrote = 0;
+	const bool ok = WriteFile(f, bytes.data(), (DWORD)bytes.size(), &wrote, nullptr) && wrote == bytes.size();
+	CloseHandle(f);
+	if (!ok) DeleteFileW(W(file).c_str());
+	return ok;
 }
 
 bool savePng(IWICBitmapSource* bmp, const std::string& file) {

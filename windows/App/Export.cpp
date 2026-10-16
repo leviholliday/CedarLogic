@@ -1,5 +1,6 @@
 // Export as Image, as the Mac app's (ExportImageView.swift, after the wx
-// app's): a preview, the grid if wanted, and a strip under the circuit with
+// app's), as a PNG or a PDF (the file chooser's type, as the Mac's Format;
+// the PDF holds the same picture, at the resolution chosen): a preview, the grid if wanted, and a strip under the circuit with
 // your name and whether it works -- what a grader looks for first -- in
 // colour or black and white, at 2x, 4x or 6x, with the drawing on the
 // circuit or without it. Copied, or saved as a PNG.
@@ -167,6 +168,23 @@ IWICBitmap* makeImage(CLDocument* doc, int page, double multiplier, bool color, 
 
 }  // namespace
 
+// --export-image in.cdl out.png|out.pdf: the first page as Export as Image
+// writes it with its last choices (and the name strip off), without a window.
+bool writeExportImage(CLDocument* doc, const std::string& name, const std::string& file, std::string& error) {
+	ExportInfo info;
+	info.ink = cl_ink_stroke_count(doc, 0) > 0 && prefs().exportInk;
+	info.fileName = name;
+	float w = 0, h = 0;
+	if (!imageSize(doc, 0, info, w, h)) { error = "the page is empty"; return false; }
+	IWICBitmap* bmp = makeImage(doc, 0, prefs().exportScale, prefs().exportColor, prefs().exportGrid, info);
+	if (bmp == nullptr) { error = "the picture couldn't be made"; return false; }
+	const bool asPdf = file.size() > 4 && _stricmp(file.c_str() + file.size() - 4, ".pdf") == 0;
+	const bool ok = asPdf ? images::savePdf(bmp, w, h, name, file) : images::savePng(bmp, file);
+	bmp->Release();
+	if (!ok) error = "it couldn't be written";
+	return ok;
+}
+
 // For the lab report (LabReport.cpp): a page as Export as Image draws it,
 // without the name strip. `scale` is pixels a point of the picture.
 // The drawing is in it when it's shown.
@@ -325,10 +343,14 @@ void showExportImage(CircuitWindow* win, int page) {
 	const int res = atoi(f.fields[resField].value.c_str());
 	s.multiplier = res == 0 ? 2 : res == 2 ? 6 : 4;
 	keep(s);
-	const std::string file = chooseSaveFile(win->window(), "Export as Image", fileName + ".png", { { "PNG pictures (*.png)", "*.png" } }, ".png");
+	const std::string file = chooseSaveFile(win->window(), "Export as Image", fileName + ".png",
+	                                        { { "PNG Image (*.png)", "*.png" }, { "PDF Document (*.pdf)", "*.pdf" } }, ".png");
 	if (file.empty()) return;
+	const bool asPdf = file.size() > 4 && _stricmp(file.c_str() + file.size() - 4, ".pdf") == 0;
 	IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.color, s.grid, s.info);
-	const bool ok = bmp && images::savePng(bmp, file);
+	float w = 0, h = 0;
+	imageSize(doc, page, s.info, w, h);
+	const bool ok = bmp && (asPdf ? images::savePdf(bmp, w, h, fileName, file) : images::savePng(bmp, file));
 	if (bmp) bmp->Release();
 	if (!ok) { showMessage(win->window(), Tone::Error, "The image couldn't be saved", file); return; }
 	win->note("Exported " + baseName(file) + ".");
