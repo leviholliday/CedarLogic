@@ -61,6 +61,10 @@ jobs:
           $B/sim_check.exe $L format/tests/fixtures/lab6.cdl 0 before.png after.png
           $B/save_check.exe $L format/tests/fixtures/Broadcast.cdl format/tests/fixtures/Lab5.cdl \
             "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
+          # Parts locked in place: locking, undo, saving, moves that leave them,
+          # and the badge drawn only on the canvas being edited.
+          mkdir -p renders
+          $B/lock_check.exe $L renders/lock-check.png
 
       # A folder that runs as it is: the exe, and res beside it with the gate
       # library, the help and the samples.
@@ -154,6 +158,13 @@ jobs:
           timeout 90 "$A" --dark --screenshot "$PWD/renders/window-Lab5-dark.png" format/tests/fixtures/Lab5.cdl
           timeout 90 "$A" --dark --sim-view --screenshot "$PWD/renders/window-sim.png" res/samples/practice.cdl
           timeout 90 "$A" --light --screenshot "$PWD/renders/window-practice.png" res/samples/practice.cdl
+          # A circuit from CedarLogic Online with parts locked in place (their
+          # badges), and its second page's clock set to "Only on Step Clock":
+          # the Step Clock button on, after a Step Clock, and in Simulation View's bar.
+          timeout 90 "$A" --light --screenshot "$PWD/renders/lock-in-place.png" format/tests/fixtures/web-online2.cdl || true
+          timeout 90 "$A" --dark --screenshot "$PWD/renders/lock-in-place-dark.png" format/tests/fixtures/web-online2.cdl || true
+          timeout 90 "$A" --light --run nextTab,stepClock --screenshot "$PWD/renders/step-clock.png" format/tests/fixtures/web-online2.cdl || true
+          timeout 90 "$A" --dark --sim-view --run nextTab --screenshot "$PWD/renders/step-clock-sim.png" format/tests/fixtures/web-online2.cdl || true
           # Split view (lab6: a circuit on each of its first tabs), focus mode
           # (the tabs as the title row), both, and a tab being renamed in place.
           timeout 90 "$A" --split --screenshot "$PWD/renders/window-split.png" format/tests/fixtures/lab6.cdl || true

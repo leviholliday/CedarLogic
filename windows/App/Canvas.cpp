@@ -1044,6 +1044,7 @@ void Canvas::onRelease(int button, double vx, double vy) {
 		const bool stepped = cl_edit_release_ex(doc, wx, wy, true) == CL_CLICK_CLOCK_STEP;
 		if (draglog::on()) draglog::release(draglog::View{ hwnd, doc, page(), originX, originY, upp }, wx, wy);
 		win->edited();
+		win->noteLockedHeld();   // a drag that left locked parts behind says why
 		if (stepped) win->advancedByHand();
 	} else if (drag == Drag::Slider && button == 1) {
 		drag = Drag::None;

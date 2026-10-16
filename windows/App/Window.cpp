@@ -39,6 +39,8 @@ namespace {
 const wchar_t* kClass = L"CedarLogicWindow";
 const UINT_PTR kClockTimer = 1, kAutosaveTimer = 2, kSwitchTimer = 3;
 const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18;
+// Why a move, delete, rotate or cut left some parts where they were.
+const char* kLockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock Part.";
 
 double since(double t) { return nowSeconds() - t; }
 
@@ -295,6 +297,9 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_ADD_GATE, "Add a &Gate…\tA");
 	item(edit, CMD_GATE_SETTINGS, "Gate &Settings…");
 	item(edit, CMD_ROTATE, "R&otate\tR");
+	// Parts locked in place stay put: a teacher's starter parts.
+	item(edit, CMD_LOCK_IN_PLACE, "&Lock in Place");
+	item(edit, CMD_UNLOCK_ALL_PARTS, "Unloc&k All Parts");
 	item(edit, CMD_STRAIGHTEN, "Straighten &Wires\tS");
 	item(edit, CMD_TIDY, "T&idy Up\tShift+S");
 	item(edit, CMD_TIDY_FLOW, "Tidy Up by Signal &Flow");
@@ -1177,6 +1182,8 @@ bool CircuitWindow::commandEnabled(int command) const {
 	case CMD_DUPLICATE: return edit && sel;
 	case CMD_DELETE: return edit && sel;
 	case CMD_ROTATE: return edit && cl_edit_selected_gate_count(doc, currentPage()) > 0;
+	case CMD_LOCK_IN_PLACE: case CMD_LOCK_PARTS: case CMD_UNLOCK_PARTS: return cl_edit_selected_gate_count(doc, currentPage()) > 0;
+	case CMD_UNLOCK_ALL_PARTS: return cl_document_locked_count(doc) > 0;
 	case CMD_GATE_SETTINGS: return cl_edit_single_gate(doc, currentPage()) >= 0;
 	case CMD_REOPEN_TAB: return cl_edit_undo_is_close_page(doc);
 	case CMD_SWITCH_PANE: case CMD_CLOSE_SPLIT: return splitOpen();
@@ -1210,6 +1217,9 @@ void CircuitWindow::updateMenu(HMENU menu) {
 		if (id == (UINT)-1 || id < CMD_NEW || (id >= CMD_RECENT && id <= CMD_RECENT_LAST)) continue;
 		if (id == CMD_START_MENU)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id, W(integration::menuLabel() + shortcuts::menuKeys(CMD_START_MENU)).c_str());
+		if (id == CMD_LOCK_IN_PLACE)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W((lockMenuUnlocks() ? unlockPartsTitle() : std::string("&Lock in Place")) + shortcuts::menuKeys(CMD_LOCK_IN_PLACE)).c_str());
 		EnableMenuItem(menu, i, MF_BYPOSITION | (commandEnabled((int)id) ? MF_ENABLED : MF_GRAYED));
 		const int check = commandChecked((int)id);
 		if (check >= 0) CheckMenuItem(menu, i, MF_BYPOSITION | (check ? MF_CHECKED : MF_UNCHECKED));
@@ -1840,6 +1850,10 @@ void CircuitWindow::run(int command) {
 	case CMD_ADD_GATE: editing(&CircuitWindow::quickAdd); break;
 	case CMD_GATE_SETTINGS: showSettings(); break;
 	case CMD_ROTATE: editing(&CircuitWindow::rotate); break;
+	case CMD_LOCK_IN_PLACE: lockSelection(!lockMenuUnlocks()); break;
+	case CMD_LOCK_PARTS: lockSelection(true); break;
+	case CMD_UNLOCK_PARTS: lockSelection(false); break;
+	case CMD_UNLOCK_ALL_PARTS: unlockAllParts(); break;
 	case CMD_STRAIGHTEN: editing(&CircuitWindow::straighten); break;
 	case CMD_TIDY: if (canEdit()) tidy(0); else lockNudge(); break;
 	case CMD_TIDY_FLOW: if (canEdit()) tidy(1); else lockNudge(); break;
@@ -2266,10 +2280,15 @@ void CircuitWindow::copy() {
 }
 
 void CircuitWindow::cut() {
+	// Locked parts stay: copied and taken away are the others.
+	const int held = cl_edit_deselect_locked(doc, currentPage());
 	const std::string text = cl_edit_copy(doc, currentPage());
-	if (text.empty()) return;
-	setClipboardText(hwnd, text);
-	deleteSelection();
+	if (!text.empty()) {
+		setClipboardText(hwnd, text);
+		cl_edit_delete(doc, currentPage());
+	}
+	edited();
+	if (held > 0) note(kLockedNote);
 }
 
 bool CircuitWindow::placePoint(double& wx, double& wy) const {
@@ -2327,10 +2346,35 @@ void CircuitWindow::duplicate() {
 
 void CircuitWindow::selectAll() { cl_edit_select_all(doc, currentPage()); redraw(); selectionChanged(); }
 void CircuitWindow::selectNone() { cl_edit_select_none(doc, currentPage()); redraw(); selectionChanged(); }
-void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); }
-void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); }
+void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); noteLockedHeld(); }
+void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); noteLockedHeld(); }
 void CircuitWindow::straighten() { cl_edit_straighten(doc, currentPage()); edited(); }
-void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); }
+void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); noteLockedHeld(); }
+
+// ---- Parts locked in place ------------------------------------------------------
+
+void CircuitWindow::noteLockedHeld() {
+	if (cl_edit_locked_held(doc)) note(kLockedNote);
+}
+
+int CircuitWindow::selectedLockedCount(bool locked) const { return cl_edit_selected_locked_count(doc, currentPage(), locked); }
+
+void CircuitWindow::lockSelection(bool lock) {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_lock_selection(doc, currentPage(), lock);
+	if (n <= 0) return;
+	edited();
+	const std::string parts = n == 1 ? "1 part" : strf("%d parts", n);
+	note(lock ? "Locked " + parts + " in place." : "Unlocked " + parts + ".");
+}
+
+void CircuitWindow::unlockAllParts() {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_unlock_all(doc, currentPage());
+	if (n <= 0) return;
+	edited();
+	note(n == 1 ? "Unlocked 1 part." : strf("Unlocked all %d parts.", n));
+}
 
 void CircuitWindow::tidy(int mode) {
 	tidyKey = cl_document_page_id(doc, currentPage());
@@ -2439,16 +2483,30 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, POINT scre
 		separator(m);
 		item(m, CMD_DELETE, "&Delete\tDel");
 		break;
-	case CL_CONTEXT_GATE:
+	case CL_CONTEXT_GATE: {
+		// Locked parts (all of the selection): Unlock Part in place of the
+		// things they refuse. "Part", so it isn't taken for the circuit's own
+		// lock (Simulate > Lock the Circuit).
+		const int lockedN = selectedLockedCount(true);
+		const bool locked = lockedN > 0 && selectedLockedCount(false) == 0;
 		item(m, CMD_GATE_SETTINGS, "&Settings…");
-		item(m, CMD_ROTATE, "&Rotate\tR");
+		if (!locked) item(m, CMD_ROTATE, "&Rotate\tR");
 		item(m, CMD_STRAIGHTEN, "Straighten Its &Wires\tS");
 		separator(m);
-		item(m, CMD_CUT, "Cu&t\tCtrl+X");
+		if (!locked) item(m, CMD_CUT, "Cu&t\tCtrl+X");
 		item(m, CMD_COPY, "&Copy\tCtrl+C");
 		item(m, CMD_DUPLICATE, "D&uplicate\tCtrl+D");
-		item(m, CMD_DELETE, "&Delete\tDel");
+		separator(m);
+		if (locked) {
+			item(m, CMD_UNLOCK_PARTS, lockedN > 1 ? "&Unlock Parts" : "&Unlock Part");
+		} else {
+			item(m, CMD_LOCK_PARTS, "&Lock in Place");
+			if (lockedN > 0) item(m, CMD_UNLOCK_PARTS, lockedN > 1 ? "&Unlock Parts" : "&Unlock Part");
+			separator(m);
+			item(m, CMD_DELETE, "&Delete\tDel");
+		}
 		break;
+	}
 	default:
 		item(m, CMD_PASTE, "&Paste\tCtrl+V");
 		item(m, CMD_SELECT_ALL, "Select &All\tCtrl+A");

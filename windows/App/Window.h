@@ -137,6 +137,17 @@ public:
 	void deleteSelection();
 	void rotate();
 	void straighten();
+	// Parts locked in place (a teacher's starter parts): they stay put --
+	// moves, Rotate, Delete and Cut leave them -- but wires, settings and
+	// switches work as usual. Lock (or unlock) the selected parts; unlock
+	// every one; after a move, delete or rotate, say why locked ones stayed.
+	void lockSelection(bool lock);
+	void unlockAllParts();
+	void noteLockedHeld();
+	int selectedLockedCount(bool locked) const;
+	// Edit's one item: Unlock Part(s) when every selected part is locked.
+	bool lockMenuUnlocks() const { return selectedLockedCount(true) > 0 && selectedLockedCount(false) == 0; }
+	std::string unlockPartsTitle() const { return selectedLockedCount(true) > 1 ? "Unlock Parts" : "Unlock Part"; }
 	void tidy(int mode = -1);
 	void endTidy(bool keep);
 	void switchTidyMode();

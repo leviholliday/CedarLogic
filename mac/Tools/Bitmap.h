@@ -69,6 +69,19 @@ public:
 	Bitmap(const Bitmap&) = delete;
 	Bitmap& operator=(const Bitmap&) = delete;
 
+	// Filled with one opaque colour (before flip: the whole image).
+	void fill(double r, double g, double b) {
+#if defined(__APPLE__)
+		CGContextSetRGBFillColor(c, r, g, b, 1);
+		CGContextFillRect(c, CGRectMake(0, 0, w, h));
+#elif defined(_WIN32)
+		if (ctx()) c->Clear(D2D1::ColorF((float)r, (float)g, (float)b, 1));
+#else
+		cairo_set_source_rgb(c, r, g, b);
+		cairo_paint(c);
+#endif
+	}
+
 	// A flipped view in points, as a window's is: y down, scaled by the
 	// backing factor.
 	void flip(double backingScale) {

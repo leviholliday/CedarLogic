@@ -33,6 +33,10 @@ enum Command {
 	CMD_SHARE_LINK,
 	// Simulate > Step Clock: one full cycle of each clock set to "Only on Step Clock".
 	CMD_STEP_CLOCK,
+	// Parts locked in place: Edit's Lock in Place (Unlock Part when every
+	// selected part is locked), the right-click menu's lock and unlock, and
+	// Edit's Unlock All Parts.
+	CMD_LOCK_IN_PLACE, CMD_LOCK_PARTS, CMD_UNLOCK_PARTS, CMD_UNLOCK_ALL_PARTS,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

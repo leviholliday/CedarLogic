@@ -1619,7 +1619,10 @@ void showGateSettings(CircuitWindow* w, long gate) {
 	f.width = 420;
 	f.okText = "Done";
 	f.cancelText = "";
-	f.buttons = { "Rotate", "Delete" };
+	// A part locked in place offers only Unlock Part: it can't be rotated or deleted.
+	const bool locked = cl_gate_is_locked(doc, gate);
+	if (locked) f.buttons = { "Unlock Part" };
+	else f.buttons = { "Rotate", "Lock", "Delete" };
 	FormField head;
 	head.kind = FormField::Picture;
 	head.height = 58;
@@ -1755,17 +1758,27 @@ void showGateSettings(CircuitWindow* w, long gate) {
 		return std::string();
 	};
 	f.onButton = [&](Form& form, int button) {
+		if (locked) {
+			w->lockSelection(false);
+			return true;
+		}
 		if (button == 0) {
 			w->run(CMD_ROTATE);   // through the menus' checks (a locked circuit says so)
 			form.refresh(0);
 			return false;
 		}
+		if (button == 1) {
+			// Lock in Place ("Lock" here, to fit beside the others); the
+			// settings are done with, as the part now stays put.
+			w->lockSelection(true);
+			return true;
+		}
 		w->run(CMD_DELETE);
 		return true;
 	};
-	// Done, Enter, Escape or the close box keeps what was typed last (when
-	// it's valid); Delete took the gate.
-	if (f.run(w->window()) != 101)
+	// Done, Enter, Escape, the close box or Lock keeps what was typed last
+	// (when it's valid); Delete took the gate.
+	if (f.run(w->window()) != (locked ? -1 : 102))
 		for (Setting& s : settings)
 			if (s.type != "BOOL") apply(s, trimmed(f.fields[s.field].value));
 }

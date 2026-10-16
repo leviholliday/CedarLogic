@@ -160,6 +160,8 @@ const std::vector<Action>& all() {
 		{ "quickCut", "Building", "Cut (quick key)", CMD_CUT, true, "X" },
 		{ "quickDuplicate", "Building", "Duplicate (quick key)", CMD_DUPLICATE, true, "D" },
 		{ "buildFormula", "Building", "Build a circuit from a formula", CMD_BUILD_FORMULA, false, "" },
+		{ "lockInPlace", "Building", "Lock in place (or unlock) the selected parts", CMD_LOCK_IN_PLACE, false, "Ctrl+L" },
+		{ "unlockAllParts", "Building", "Unlock all parts", CMD_UNLOCK_ALL_PARTS, false, "" },
 		{ "zoomIn", "Moving around", "Zoom in", CMD_ZOOM_IN, false, "Ctrl+Equals|Ctrl+Shift+Equals|Ctrl+NumPlus" },
 		{ "zoomOut", "Moving around", "Zoom out", CMD_ZOOM_OUT, false, "Ctrl+Minus|Ctrl+NumMinus" },
 		{ "zoomFit", "Moving around", "Zoom to fit", CMD_ZOOM_FIT, false, "Ctrl+0|Ctrl+Num0" },
