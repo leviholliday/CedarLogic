@@ -334,7 +334,7 @@ jobs:
             timeout 90 "$A" --light --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p.png" || true
             timeout 90 "$A" --dark --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p-dark.png" || true
           done
-          # Settings > Sync, off and on (sample devices), the code sheet with its QR
+          # Settings > Sync, off and on (sample devices, with Remove), what Remove asks, the code sheet with its QR
           # code, and what linking asks.
           for t in light dark; do
             sfx=$([ $t = dark ] && echo -dark || echo "")
@@ -344,6 +344,7 @@ jobs:
             timeout 90 "$A" --$t --dialog sync-link --screenshot "$PWD/renders/sync-link$sfx.png" || true
             timeout 90 "$A" --$t --dialog sync-pair --screenshot "$PWD/renders/sync-pair$sfx.png" || true
             timeout 90 "$A" --$t --dialog sync-pair-expired --screenshot "$PWD/renders/sync-pair-expired$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-remove --screenshot "$PWD/renders/sync-remove$sfx.png" || true
           done
           timeout 90 "$A" --light --dialog shortcuts --screenshot "$PWD/renders/shortcuts.png" || true
           timeout 90 "$A" --dark --dialog shortcuts --screenshot "$PWD/renders/shortcuts-dark.png" || true

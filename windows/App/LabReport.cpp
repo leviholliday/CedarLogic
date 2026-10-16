@@ -15,6 +15,7 @@
 #include "Formula.h"
 #include "Images.h"
 #include "Pdf.h"
+#include "SyncApp.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -794,6 +795,7 @@ void showExportReport(CircuitWindow* win) {
 	if (recorded) p.reportTiming = o.timing;
 	p.reportColor = o.color;
 	p.save();
+	syncapp::nameChanged();
 
 	const std::string title = win->titleText();
 	const std::string file = chooseSaveFile(win->window(), "Export Lab Report", title + " lab report.pdf", { { "PDF documents (*.pdf)", "*.pdf" } }, ".pdf");

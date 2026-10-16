@@ -157,7 +157,7 @@ Direct2D here. And:
   view), `--focus` (focus mode), `--rename-tab`, or `--dialog
   preferences|shortcuts|truth-table|check|add-gate|library|versions|templates|
   formula|scope|export|lab-report|feedback|help|welcome|whatsnew|quit|alert|rename|about|
-  start-menu|bad-link|sync|sync-on|sync-code|sync-link` to capture that instead
+  start-menu|bad-link|sync|sync-on|sync-code|sync-link|sync-remove` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--check "..."` for what Check compares
   with, `--page N` for the welcome, What's New
   or Settings (0 General ... 5 Sync), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
@@ -200,7 +200,9 @@ Direct2D here. And:
   `--server` (or `CL_SYNC_URL`) the single-device scenarios also run against
   the mock server (`node scripts/sync-mock-server.mjs` in the website's repo).
   Prints PASS or FAIL for each; CI runs it. `--dialog sync`, `sync-on` (sample
-  devices), `sync-code` and `sync-link` make pictures of the screens.
+  devices, each other one with Remove), `sync-code`, `sync-link` and `sync-remove`
+  (what Remove asks) make pictures of the screens. Your name (Export's strip, the
+  lab report, Send Feedback) is synced as the "profile" record, as on the Mac.
 - `CedarLogic.exe --feedback-probe` -- asks the feedback site with a wrong
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the

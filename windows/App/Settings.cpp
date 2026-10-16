@@ -747,7 +747,8 @@ void showPreferencesDialog(HWND parent) {
 		auto it = on.find(field);
 		if (it != on.end()) it->second(form, field);
 	};
-	f.onClick = [&](Form&, int field, float x, float y) {
+	f.onClick = [&](Form& form, int field, float x, float y) {
+		if (sync.clicked(form, field, x, y)) return;
 		if (field == swatches && x >= 0) pickAccent((int)(x / kSwatchW));
 		else if (field == styles && y >= 0) pickStyle((int)(y / kStyleH));
 	};

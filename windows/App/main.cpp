@@ -62,7 +62,7 @@ std::string gPlace;     // --place: a gate by library name, put on the page and 
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 // --dialog sync, sync-on (Settings on its Sync page, off or on with sample devices),
-// sync-code, sync-link, sync-pair, sync-pair-expired: sync's screens, for the pictures.
+// sync-code, sync-link, sync-pair, sync-pair-expired, sync-remove (Remove's question): sync's screens, for the pictures.
 std::string gSyncDialog;
 const int kSyncPage = 5;
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
@@ -432,6 +432,7 @@ void CALLBACK syncSheetTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w == nullptr) return;
 	if (gSyncDialog == "sync-code") syncapp::showCodeSample(w->window());
 	else if (gSyncDialog == "sync-pair" || gSyncDialog == "sync-pair-expired") syncapp::showPairSample(w->window(), gSyncDialog == "sync-pair-expired");
+	else if (gSyncDialog == "sync-remove") { const std::vector<syncapp::Device> d = syncapp::deviceList(); if (d.size() > 1) syncapp::removeDevice(w->window(), d[1]); }
 	else syncapp::showLinkSample(w->window());
 }
 
@@ -825,7 +826,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
 			if (d == "sync" || d == "sync-on") { gDialog = CMD_PREFERENCES; gSyncDialog = d; }
-			if (d == "sync-code" || d == "sync-link" || d == "sync-pair" || d == "sync-pair-expired") { gDialog = -9; gSyncDialog = d; }
+			if (d == "sync-code" || d == "sync-link" || d == "sync-pair" || d == "sync-pair-expired" || d == "sync-remove") { gDialog = -9; gSyncDialog = d; }
 			continue;
 		}
 		files.push_back(a);
@@ -896,7 +897,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	registerWindowClasses();
 	// Sync: the engine (not started yet), unless this run only makes pictures.
 	if (!testRun) syncapp::init();
-	if (gSyncDialog == "sync-on" || gSyncDialog == "sync-code" || gSyncDialog == "sync-link") syncapp::demo(true);
+	if (gSyncDialog == "sync-on" || gSyncDialog == "sync-code" || gSyncDialog == "sync-link" || gSyncDialog == "sync-remove") syncapp::demo(true);
 	splash::setStatus("Opening the workspace\u2026");
 
 	bool any = false;

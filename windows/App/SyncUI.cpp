@@ -545,6 +545,10 @@ std::string onTip(const clsync::Status& st) {
 	return line;
 }
 
+// The devices' list: a row each, the last few as "and N more", and Remove's width.
+const float kDeviceRow = 22, kRemoveW = 78;
+const int kDeviceRows = 4;
+
 }  // namespace
 
 void SettingsPage::add(Form& form_) {
@@ -567,26 +571,36 @@ void SettingsPage::add(Form& form_) {
 	name.widthPt = 260;
 	name.tip = "Shown on your other devices when a circuit comes from here.";
 	f.name = fm.add(name);
+	// The devices, each other one with Remove (the Mac's list).
 	FormField list;
 	list.kind = FormField::Picture;
 	list.side = "Devices:";
-	list.height = 62;
-	list.tip = "Don’t recognise one? Start over with a new code.";
+	list.height = (int)(kDeviceRow * kDeviceRows);
+	list.tip = "Remove takes an old device off the list. Your devices share one code, so a device that still has it keeps access: "
+	           "to lock out a lost one, start over with a new code.";
+	list.tipLines = 3;
 	list.paint = [](ID2D1RenderTarget* rt, float w, float h) {
 		const FormLook look = formLook();
-		std::vector<std::pair<std::string, int64_t>> all = devices();
-		const std::string me = deviceName();
-		const int shownRows = (int)all.size() > 3 ? 2 : (int)all.size();
+		const std::vector<Device> all = deviceList();
+		const int shownRows = (int)all.size() > kDeviceRows ? kDeviceRows - 1 : (int)all.size();
 		for (int i = 0; i < shownRows; i++) {
-			const float y = i * 20.0f;
-			const bool mine = all[i].first == me;
-			const std::string when = mine ? std::string("this PC") : "synced " + library::agoText((double)all[i].second / 1000.0);
+			const float y = i * kDeviceRow;
+			const Device& d = all[i];
+			std::string when = d.isThis ? std::string("this PC") : d.lastSyncAt > 0 ? "synced " + library::agoText((double)d.lastSyncAt / 1000.0) : std::string();
 			const float tw = textWidth(when, 11.5f);
-			drawText(rt, all[i].first, D2D1::RectF(0, y, std::max(10.0f, w - tw - 14), y + 18), 12.5f, look.ink, TextAlign::Leading, mine);
-			drawText(rt, when, D2D1::RectF(std::max(10.0f, w - tw - 8), y + 1, w, y + 19), 11.5f, look.dim, TextAlign::Trailing);
+			const float removeW = d.rid.empty() ? 0.0f : kRemoveW;
+			drawText(rt, d.name, D2D1::RectF(0, y, std::max(10.0f, w - removeW - tw - 14), y + kDeviceRow), 12.5f, look.ink, TextAlign::Leading, d.isThis);
+			drawText(rt, when, D2D1::RectF(std::max(10.0f, w - removeW - tw - 8), y + 1, w - removeW, y + kDeviceRow), 11.5f, look.dim, TextAlign::Trailing);
+			if (!d.rid.empty()) {
+				const D2D1_RECT_F b = D2D1::RectF(w - kRemoveW + 8, y + 2, w, y + kDeviceRow - 2);
+				fillRound(rt, b, 6, withAlpha(look.ink, 0.06f));
+				strokeRound(rt, b, 6, withAlpha(look.ink, 0.12f));
+				drawText(rt, "Remove", b, 11.5f, look.ink, TextAlign::Center);
+			}
 		}
-		if ((int)all.size() > 3) {
-			drawText(rt, strf("and %d more", (int)all.size() - 2), D2D1::RectF(0, 2 * 20.0f, w, 2 * 20.0f + 18), 12, look.dim);
+		if ((int)all.size() > kDeviceRows) {
+			const float y = (kDeviceRows - 1) * kDeviceRow;
+			drawText(rt, strf("and %d more", (int)all.size() - shownRows), D2D1::RectF(0, y, w, y + kDeviceRow), 12, look.dim);
 		}
 		(void)h;
 	};
@@ -642,6 +656,20 @@ void SettingsPage::left(Form& fm, int field) {
 }
 
 void SettingsPage::tick(Form&) { refresh(); }
+
+bool SettingsPage::clicked(Form& fm, int field, float x, float y) {
+	if (field != f.devices || fm.dialog == nullptr) return false;
+	RECT rc;
+	GetClientRect(fm.fields[f.devices].hwnd, &rc);
+	const float w = rc.right / (dpiOf(fm.dialog) / 96.0f);
+	const std::vector<Device> all = deviceList();
+	const int row = (int)(y / kDeviceRow);
+	const int shownRows = (int)all.size() > kDeviceRows ? kDeviceRows - 1 : (int)all.size();
+	if (row < 0 || row >= shownRows || all[row].rid.empty() || x < w - kRemoveW + 8) return true;
+	removeDevice(fm.dialog, all[row]);
+	refresh();
+	return true;
+}
 
 void SettingsPage::detach() {
 	if (listener) unlisten(listener);

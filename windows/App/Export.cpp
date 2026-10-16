@@ -7,6 +7,7 @@
 #include "Chrome.h"
 #include "Dialogs.h"
 #include "Images.h"
+#include "SyncApp.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -261,6 +262,7 @@ void showExportImage(CircuitWindow* win, int page) {
 		p.exportColor = s.color;
 		p.exportScale = s.multiplier;
 		p.save();
+		syncapp::nameChanged();
 	};
 	// A "does not work" answer needs its reason before anything goes out.
 	auto problem = [&](const State& s) -> std::string {

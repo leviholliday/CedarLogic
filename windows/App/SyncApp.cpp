@@ -56,6 +56,8 @@ struct State {
 	bool demoOn = false;
 	bool started = false;                          // start() was called: the engine has loaded its state
 	std::vector<std::string> waitingLinks;         // sync links that came before that
+	bool nameReconciled = false;                   // the name was matched up once this session, after a sync
+	bool applyingName = false;                     // the synced name is being put in (not sent back)
 	bool active = true;
 	double lastUserActive = -1e9;
 };
@@ -99,6 +101,44 @@ std::string forWindows(std::string text) {
 	const std::string from = "Recently Deleted", to = "the Trash folder";
 	for (size_t at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size())) text.replace(at, from.size(), to);
 	return text;
+}
+
+// ---- The name across devices (SYNC.md 2.5.2) ----
+
+bool syncedName(std::string& name) {
+	State& s = S();
+	int64_t at = 0;
+	if (!s.engine || !s.started || !s.engine->enabled()) return false;
+	return s.engine->profileName(name, at);
+}
+
+std::string trimmedName(const std::string& n) {
+	const size_t a = n.find_first_not_of(" \t\r\n"), b = n.find_last_not_of(" \t\r\n");
+	return a == std::string::npos ? std::string() : n.substr(a, b - a + 1);
+}
+
+void sendName(const std::string& name) {
+	State& s = S();
+	if (s.applyingName || !s.engine || !s.started || !s.engine->enabled()) return;
+	const std::string n = trimmedName(name);
+	std::string synced;
+	if (n.empty() || (syncedName(synced) && synced == n)) return;
+	s.engine->setProfileName(n);
+}
+
+void applyName(const std::string& name) {
+	const std::string n = trimmedName(name);
+	if (n.empty() || n == trimmedName(prefs().studentName)) return;
+	S().applyingName = true;
+	prefs().studentName = n;
+	prefs().save();
+	S().applyingName = false;
+}
+
+void reconcileName() {
+	std::string n;
+	if (syncedName(n) && !trimmedName(n).empty()) applyName(n);
+	else sendName(prefs().studentName);
 }
 
 class AppHost : public syncplat::PlatformHost {
@@ -169,7 +209,20 @@ public:
 
 	void statusChanged(const clsync::Status& st) override {
 		S().last = st;
+		// The name (2.5.2), once a session after the first sync: the synced one
+		// fills in an empty or different one here; none synced yet, this PC's goes.
+		if (st.kind == clsync::Status::Off) S().nameReconciled = false;
+		else if (st.kind == clsync::Status::Synced && !S().nameReconciled) {
+			S().nameReconciled = true;
+			defer([] { reconcileName(); });
+		}
 		fire(Event::Status);
+	}
+
+	// Another device's newer name came in.
+	void sideChanged() override {
+		std::string n;
+		if (syncedName(n)) applyName(n);
 	}
 
 	void notice(const std::string& text) override {
@@ -289,6 +342,8 @@ void init() {
 	c.appKey = envOr("CL_FEEDBACK_KEY", CL_FEEDBACK_KEY);   // the apps' own key, as Send Feedback sends
 	c.client = syncplat::clientName();
 	c.defaultDeviceName = syncplat::deviceName();
+	// Kept beside the circuits: the person's name (SYNC.md 2.5.2; the classroom's kinds aren't Windows's).
+	c.sideKinds = { "profile" };
 	// What the digest leaves out of a gate is what the gate library says is its default.
 	c.gateDefault = [](const std::string& lib, bool gui, const std::string& name) -> std::string {
 		char buf[4096];
@@ -396,6 +451,46 @@ std::vector<std::pair<std::string, int64_t>> devices() {
 	});
 	return out;
 }
+
+std::vector<Device> deviceList() {
+	std::vector<Device> out;
+	const std::string me = deviceName();
+	if (S().demoOn) {
+		const int64_t now = nowMs();
+		out.push_back({ me, "", now, true });
+		out.push_back({ "Safari on iPhone", "r1", now - 2 * kDay, false });
+		out.push_back({ "Raspberry Pi", "r2", now - 90 * kDay, false });
+		return out;
+	}
+	if (!S().engine) return out;
+	for (const clsync::DeviceInfo& d : S().engine->deviceInfos()) {
+		if (d.name.empty()) continue;
+		out.push_back({ d.name, d.name == me ? std::string() : d.rid, d.lastSyncAt, d.name == me });
+	}
+	// This PC first, even before its device record has been sent.
+	if (enabled() && std::none_of(out.begin(), out.end(), [](const Device& d) { return d.isThis; }))
+		out.insert(out.begin(), Device{ me, "", status().lastSyncAt ? status().lastSyncAt : nowMs(), true });
+	std::stable_sort(out.begin(), out.end(), [](const Device& a, const Device& b) {
+		if (a.isThis != b.isThis) return a.isThis;
+		return a.lastSyncAt > b.lastSyncAt;
+	});
+	return out;
+}
+
+void removeDevice(HWND parent, const Device& d) {
+	if (d.isThis || d.rid.empty()) return;
+	if (!askConfirm(parent, "Remove \u201C" + d.name + "\u201D from your devices?",
+	                "It comes off this list on all your devices. It isn\u2019t locked out: your devices share one sync code, so if it "
+	                "still has the code it keeps syncing and shows up here again.\r\n\r\nTo lock out a lost or stolen device, use Start "
+	                "Over with a New Code, then link your other devices with the new code.",
+	                "Remove", "Cancel", true))
+		return;
+	if (S().demoOn || !S().engine) return;
+	S().engine->removeDevice(d.rid);
+	stateChanged();
+}
+
+void nameChanged() { sendName(prefs().studentName); }
 
 std::string recentNotice() {
 	State& s = S();

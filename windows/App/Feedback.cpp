@@ -7,6 +7,7 @@
 #include "Chrome.h"
 #include "Dialogs.h"
 #include "Images.h"
+#include "SyncApp.h"
 #include "Window.h"
 
 #include <winhttp.h>
@@ -999,6 +1000,7 @@ void show(CircuitWindow* win) {
 		d.includeCircuit = !f.fields[circuitField].value.empty();
 		prefs().studentName = trimmed(f.fields[nameField].value);
 		d.save();
+		syncapp::nameChanged();
 	}
 	// Closed while sending: finished without it.
 	if (sending) g_watch = SetTimer(nullptr, 0, 400, watchSend);

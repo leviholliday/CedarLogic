@@ -58,6 +58,21 @@ std::string deviceName();
 void setDeviceName(const std::string& name);
 // The name and the time each device last synced (this one included), newest first.
 std::vector<std::pair<std::string, int64_t>> devices();
+// The same with each other device's record id, for Remove (this PC's has none).
+struct Device {
+	std::string name, rid;
+	int64_t lastSyncAt = 0;
+	bool isThis = false;
+};
+std::vector<Device> deviceList();
+// Takes another device off the list on every device (SYNC.md 5.1), after asking.
+void removeDevice(HWND parent, const Device& d);
+// Your name (Export's name-and-result strip, the lab report, Send Feedback)
+// rides along as the "profile" record (SYNC.md 2.5.2), as on the Mac: a name
+// typed here is sent, another device's newer one fills it in here. An empty
+// name is never sent and never fills one in. Call after prefs().studentName
+// changes.
+void nameChanged();
 // The engine's note of something that happened, and when (ms since 1970); empty after a minute.
 std::string recentNotice();
 
@@ -124,6 +139,8 @@ public:
 	void left(Form& f, int field);           // from onLeave
 	void tick(Form& f);                      // from onTimer (the minutes since the last sync change)
 	void detach();                           // once the dialog is closed
+	// A click on the devices' list (its Remove buttons): true when it was one.
+	bool clicked(Form& f, int field, float x, float y);
 
 private:
 	struct Fields {
