@@ -14,6 +14,7 @@
 #include <vector>
 
 static int fails = 0;
+static char err0[256];
 #define CHECK(c, what) do { if (c) printf("  ok   %s\n", what); else { printf("  FAIL %s\n", what); fails++; } } while (0)
 
 static guiGate* newest(CLDocument* doc, int page) {
@@ -347,6 +348,27 @@ int main(int argc, char** argv) {
 		g = newest(d, 0);
 		if (g) g->getGLcoords(nx, ny);
 		CHECK(g && std::fabs(nx - gx) < 1e-3 && std::fabs(ny - gy) < 1e-3, "and Undo takes it back");
+		cl_document_close(d);
+	}
+
+	printf("renaming a wired TO saves the same after a reopen\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "DE_TO", 8, 0);
+		guiGate* to = newest(d, 0);
+		wire(d, sw, "OUT", to, "");
+		CHECK(cl_gate_set_setting(d, (long)to->getID(), "JUNCTION_ID", "Sum"), "renamed");
+		std::string a = cl_document_save_text(d);
+		CLDocument* r = cl_document_open_text(a.c_str(), (long)a.size(), err0, sizeof err0);
+		CHECK(r && std::string(cl_document_save_text(r)) == a, "save, reopen, save: the same text");
+		if (r) cl_document_close(r);
+		cl_edit_undo(d);
+		a = cl_document_save_text(d);
+		r = cl_document_open_text(a.c_str(), (long)a.size(), err0, sizeof err0);
+		CHECK(r && std::string(cl_document_save_text(r)) == a, "and after Undo of the rename");
+		if (r) cl_document_close(r);
 		cl_document_close(d);
 	}
 
