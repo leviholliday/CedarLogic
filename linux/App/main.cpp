@@ -23,6 +23,7 @@
 #include "SyncUI.h"
 #include "Library.h"
 #include "LibraryWindow.h"
+#include "FindBar.h"
 #include "Notes.h"
 #include "Window.h"
 
@@ -194,6 +195,20 @@ gboolean showCb(gpointer) {
 	else if (what == "feedback") feedback::show(w);
 	else if (what == "templates") templates::showPicker(w, page == 1 ? "builtin-ff-d" : "");
 	else if (what == "tour") welcome::startTour(w);
+	else if (what == "find" && page == 1) {
+		// Find Next and Find Previous: "A" on the practice circuit, then
+		// Next twice and Previous once, each reported.
+		w->runAction("win.find");
+		if (FindBar* fb = w->findBarWidget()) {
+			fb->open("A");
+			fprintf(stderr, "find: %d hit(s), at %d\n", fb->count(), fb->current() + 1);
+			w->runAction("win.find-next");
+			w->runAction("win.find-next");
+			fprintf(stderr, "find: Next twice, at %d\n", fb->current() + 1);
+			w->runAction("win.find-previous");
+			fprintf(stderr, "find: Previous once, at %d\n", fb->current() + 1);
+		}
+	}
 	else if (what == "find") w->runAction("win.find");
 	else if (what == "export") w->exportImage();
 	else if (what == "report") w->exportReport();
@@ -465,6 +480,8 @@ GMenuModel* buildMenubar() {
 	g_menu_append(e2, "_Delete", "win.delete");
 	g_menu_append(e2, "Select _All", "win.select-all");
 	g_menu_append(e2, "_Find…", "win.find");
+	g_menu_append(e2, "Find _Next", "win.find-next");
+	g_menu_append(e2, "Find Pre_vious", "win.find-previous");
 	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e2));
 	GMenu* e3 = g_menu_new();
 	g_menu_append(e3, "Add a _Gate…   (A)", "win.add-gate");

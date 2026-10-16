@@ -127,6 +127,8 @@ const std::vector<Action>& all() {
 		{ "duplicate", "Editing", "Duplicate the selection", "win.duplicate", "<Primary>d" },
 		{ "selectAll", "Editing", "Select everything on the page", "win.select-all", "<Primary>a" },
 		{ "find", "Editing", "Find a label, a TO/FROM name or a part", "win.find", "<Primary>f" },
+		{ "findNext", "Editing", "Find the next one", "win.find-next", "F3" },
+		{ "findPrevious", "Editing", "Find the previous one", "win.find-previous", "<Shift>F3" },
 		{ "addGate", "Building", "Add a gate by name", nullptr, "a" },
 		{ "rotate", "Building", "Rotate the selection", nullptr, "r" },
 		{ "lockInPlace", "Building", "Lock in Place (or unlock the selected parts)", "win.lock-in-place", "<Primary>l" },

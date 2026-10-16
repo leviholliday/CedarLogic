@@ -195,6 +195,10 @@ public:
 	void partsChanged();
 	// ---- Find (Ctrl+F) and Ctrl+Tab ----
 	void find();
+	// Find Next and Find Previous (F3, Shift+F3, as GTK apps have them): the
+	// next or the one before, or the find bar when it isn't open.
+	void findStep(int delta);
+	FindBar* findBarWidget() const { return findBar; }
 	void showFoundGate(int page, long gate, double x, double y);
 	std::vector<int> recentTabs() const;   // tab indexes, most recently used first
 	// The opening card (the Mac's OpeningCard): seconds since it began, while

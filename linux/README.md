@@ -96,7 +96,7 @@ every shape and gate style and checks each circuit's truth table. And:
   it to a PNG and quits (CI runs it against the AppImage)
 - `cedarlogic --show <window> --screenshot out.png [circuit.cdl]` -- the same
   for one of the app's windows: `welcome:N`, `whatsnew:N`, `help`, `truth`,
-  `feedback`, `templates`, `tour`, `find`, `export`, `scope`, `focus`,
+  `feedback`, `templates`, `tour`, `find`, `find:1` (Find Next and Previous), `export`, `scope`, `focus`,
   `split`, `quit`, `settings:N`, `toolbar:N`, `shortcuts`, `quickadd`,
   `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `stepclock:N`, `lockinplace:N`, `pagelinks`, `draw:N`, `checkclocked:N` (on a counter)
 - `cedarlogic --hold <seconds> --screenshot out.png` -- waits before the

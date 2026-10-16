@@ -65,6 +65,8 @@ const Command kCommands[] = {
 	{ "save-part", [](CircuitWindow* w) { parts::saveSelection(w); }, false },
 	{ "build-formula", [](CircuitWindow* w) { if (w->canEdit()) showBuildFormula(w); else w->lockNudge(); }, false },
 	{ "find", [](CircuitWindow* w) { w->find(); }, false },
+	{ "find-next", [](CircuitWindow* w) { w->findStep(1); }, false },
+	{ "find-previous", [](CircuitWindow* w) { w->findStep(-1); }, false },
 	{ "feedback", [](CircuitWindow* w) { feedback::show(w); }, false },
 	{ "whats-new", [](CircuitWindow* w) { whatsnew::show(w); }, false },
 	{ "export-image", [](CircuitWindow* w) { w->exportImage(); }, false },
@@ -2159,6 +2161,12 @@ void CircuitWindow::find() {
 	const long g = cl_edit_single_gate(doc, currentPage());
 	const char* name = g >= 0 ? cl_gate_find_name(doc, g) : nullptr;
 	findBar->open(name ? name : "");
+}
+
+void CircuitWindow::findStep(int delta) {
+	if (!findBar) return;
+	if (!findBar->isOpen()) { find(); return; }
+	findBar->step(delta);
 }
 
 void CircuitWindow::partsChanged() {
