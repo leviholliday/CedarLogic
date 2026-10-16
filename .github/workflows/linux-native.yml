@@ -156,6 +156,12 @@ jobs:
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
           done
+          # Check My Circuit clock pulse by clock pulse, on the 3-bit counter template.
+          for show in checkclocked:0 checkclocked:1 checkclocked:2; do
+            name=$(echo "$show" | tr ':' '-')
+            xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/templates/template-builtin-count-3bit.cdl || echo "no $show"
+          done
           # Settings > Sync with sync turned on, against the stand-in server: the code is in the
           # sync folder as a turned-on computer has it, and the app syncs while it's pictured.
           python3 linux/Tools/sync_mock.py --port 0 > mock-show.log &

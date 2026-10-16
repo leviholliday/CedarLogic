@@ -17,6 +17,8 @@ bool askText(GtkWindow* parent, const std::string& title, const std::string& pro
 void showGateSettings(CircuitWindow* w, long gate);
 void showQuickAdd(CircuitWindow* w);
 void showTruthTable(CircuitWindow* w, int page, bool check = false);   // TruthTableWindow.cpp (check: at its Check tab)
+// For --show: what Check My Circuit starts with, and its results reported.
+void setCheckForScreenshot(const std::string& text);
 // Export as Image (ExportImage.cpp): the page as a picture, with your name and result.
 void showExportImage(CircuitWindow* w, int page);
 // Export Lab Report (LabReport.cpp): one PDF to hand in.

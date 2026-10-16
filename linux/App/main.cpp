@@ -141,6 +141,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "whatsnew") top = whatsnew::window();
 	else if (what == "help") top = help::window();
 	else if (what == "truth") top = toplevelTitled("Truth Table");
+	else if (what == "checkclocked") top = toplevelTitled("Check My Circuit") ? toplevelTitled("Check My Circuit") : toplevelTitled("Truth Table");
 	else if (what == "feedback") top = toplevelTitled("Send Feedback");
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
@@ -179,6 +180,17 @@ gboolean showCb(gpointer) {
 	else if (what == "whatsnew") whatsnew::show(w, page);
 	else if (what == "help") help::show(w, page > 0 ? "analysis" : "");
 	else if (what == "truth") w->makeTruthTable();
+	else if (what == "checkclocked") {
+		// Check My Circuit clock pulse by clock pulse, on a counter (CI opens
+		// the 3-bit counter template): :0 a count it matches, :1 one it
+		// doesn't (the strip marks the first wrong step), :2 a state table.
+		const char* keys[] = { "0, 1, 2, 3, 4, 5, 6, 7, repeat", "0, 2, 4, 6, repeat",
+		                       "Q2 Q1 Q0 | Q2+ Q1+ Q0+\n0 0 0 | 0 0 1\n0 0 1 | 0 1 0\n0 1 0 | 0 1 1\n0 1 1 | 1 0 0" };
+		setCheckForScreenshot(keys[std::max(0, std::min(2, page))]);
+		fprintf(stderr, "check (clocked): this page %s be checked clock pulse by clock pulse\n",
+		        cl_check_clocked_page(w->document(), w->currentPage()) ? "can" : "can't");
+		w->checkCircuit();
+	}
 	else if (what == "feedback") feedback::show(w);
 	else if (what == "templates") templates::showPicker(w, page == 1 ? "builtin-ff-d" : "");
 	else if (what == "tour") welcome::startTour(w);
