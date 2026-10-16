@@ -90,7 +90,6 @@ final class Splash: ObservableObject {
     let firstLaunch = !UserDefaults.standard.bool(forKey: "cl.hasSeenWelcome")
         && !UserDefaults.standard.bool(forKey: "cl.firstLaunchPlayed")
     var fadeTime: Double { firstLaunch ? 1.1 : Self.dissolveTime }
-    private var player: AVAudioPlayer?
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     var elapsed: Double { Date().timeIntervalSince(start) }
@@ -208,16 +207,22 @@ final class Splash: ObservableObject {
 
     /// The first launch's sound: a few seconds, once ever, at a moderate
     /// level, fading with the panel.
+    /// Off the main thread: setting up the audio output waits on the Mac's
+    /// audio service, and when that doesn't answer (seen with the lid shut)
+    /// prepareToPlay never returned -- the launch froze on the panel for good.
     private func playSound() {
         UserDefaults.standard.set(true, forKey: "cl.firstLaunchPlayed")
-        guard let url = Bundle.main.url(forResource: "FirstLaunch", withExtension: "m4a"),
-              let p = try? AVAudioPlayer(contentsOf: url) else { return }
-        p.volume = 0.75
-        p.prepareToPlay()
-        p.play()
-        player = p
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.player = nil }
+        guard let url = Bundle.main.url(forResource: "FirstLaunch", withExtension: "m4a") else { return }
+        Self.soundQueue.async {
+            guard let p = try? AVAudioPlayer(contentsOf: url) else { return }
+            p.volume = 0.75
+            p.prepareToPlay()
+            p.play()
+            // Kept until it has played (the queue holds it), then let go.
+            Self.soundQueue.asyncAfter(deadline: .now() + 8) { withExtendedLifetime(p) {} }
+        }
     }
+    private nonisolated static let soundQueue = DispatchQueue(label: "CedarLogic.launchSound", qos: .userInitiated)
 
     // MARK: The real work, step by step
 
