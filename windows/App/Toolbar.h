@@ -4,7 +4,8 @@
 // Minimal (the essentials and the circuit's name; the rest is behind •••).
 // In the title bar's place: the circuit's name with its menu, the tools, the
 // zoom and the simulation speed, ••• for every menu, and the window's own
-// minimize, maximize and close buttons at the right. Settings > Toolbar
+// minimize, maximize and close buttons at the right, with a gear for
+// Settings beside the menus, where Windows apps keep it. Settings > Toolbar
 // picks the style and hides groups of tools.
 //
 // Where nothing is under the pointer, the bar is the window's title bar: it

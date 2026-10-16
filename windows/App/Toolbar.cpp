@@ -41,6 +41,7 @@ void Toolbar::build(int style, bool live) {
 		add(Button, CMD_UNDO, TGUndo, false); add(Button, CMD_REDO, TGUndo, false);
 		add(Button, CMD_RUNNING, TGSim, true);
 		add(Button, CMD_SIM_VIEW, TGRun, true);
+		add(Button, CMD_PREFERENCES, -1, true);
 		add(More, 0, -1, true);
 	} else {
 		if (prefs().showTitle) add(Title, 0, -1, false);
@@ -58,6 +59,9 @@ void Toolbar::build(int style, bool live) {
 		if (prefs().showThemeToggle) add(Button, CMD_DARK, TGTheme, true);
 		add(Button, CMD_NEW_TAB, TGTab, true);
 		add(Button, CMD_FEEDBACK, TGFeedback, true);
+		// Settings, where Windows apps keep it: a gear beside the menus (and
+		// File > Settings, Ctrl+,). Always shown, in every style.
+		add(Button, CMD_PREFERENCES, -1, true);
 		add(More, 0, -1, true);
 	}
 	if (live) { add(CaptionMin, 0, -1, true); add(CaptionMax, 0, -1, true); add(CaptionClose, 0, -1, true); }
@@ -214,6 +218,7 @@ wchar_t Toolbar::iconFor(const Item& it) const {
 	case CMD_DARK: return prefs().dark ? kMoon : kSun;
 	case CMD_NEW_TAB: return Icon::NewTab;
 	case CMD_FEEDBACK: return Icon::Feedback;
+	case CMD_PREFERENCES: return Icon::Settings;
 	default: return L'?';
 	}
 }
@@ -250,6 +255,7 @@ std::string Toolbar::tipFor(const Item& it) const {
 	case CMD_DARK: return "Dark mode" + keys;
 	case CMD_NEW_TAB: return "New tab" + keys;
 	case CMD_FEEDBACK: return "Send feedback: a bug, an idea, anything";
+	case CMD_PREFERENCES: return "Settings" + keys;
 	default: return std::string();
 	}
 }

@@ -279,6 +279,9 @@ void CircuitWindow::buildMenus() {
 	item(file, CMD_SHARE_LINK, "S&hare Link\u2026");   // (L is Export Lab Report's)
 	item(file, CMD_PRINT, "&Print…\tCtrl+P");
 	separator(file);
+	// Settings, where a Windows app keeps it (the toolbar's gear opens it too).
+	item(file, CMD_PREFERENCES, "Se&ttings\u2026\tCtrl+,");
+	separator(file);
 	item(file, CMD_CLOSE_WINDOW, "&Close Window\tCtrl+Shift+W");
 	item(file, CMD_QUIT, "E&xit\tCtrl+Q");
 
@@ -310,8 +313,6 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_CONNECT_NEARBY, "Connect &Nearby Pins");
 	item(edit, CMD_SAVE_PART, "Save as &Part\u2026");
 	item(edit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
-	separator(edit);
-	item(edit, CMD_PREFERENCES, "S&ettings…\tCtrl+,");
 
 	HMENU view = submenu(menuBar, "&View");
 	item(view, CMD_ZOOM_IN, "Zoom &In\tCtrl+=");

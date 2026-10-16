@@ -27,7 +27,7 @@ it compiles without a Windows machine:
 - `App/` -- the app, drawn to look like the Mac app (its colours and layout
   are in `Chrome`): a window per circuit (`Window`) whose title bar is the
   `Toolbar` (the circuit's name and menu, the tools in the style Settings
-  picks, ••• for every menu, Windows' own window buttons); `TabStrip`, a tab card per page
+  picks, a gear for Settings and ••• for every menu, Windows' own window buttons); `TabStrip`, a tab card per page
   (renamed in place), dragged down onto the canvas into a split view of two
   sides, each with its strip; focus mode, where the toolbar and the side
   panel slide away and the tabs become the title row; a `Canvas` per page
@@ -177,7 +177,8 @@ Direct2D here. And:
   same picture, by the file's ending), with its last choices, without a
   window (CI runs it and checks the PDFs).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
-  Tab, Pause and Resume, Simulation View, Draw, Lock, the dark mode switch, New),
+  Tab, Pause and Resume, Simulation View, Draw, Lock, the Settings gear (Settings
+  must open), the dark mode switch, New),
   the tabs' +, and the window's drawn Minimize (on the toolbar, and on the
   tabs in focus mode) and Close the way Windows sends a click, draws a
   stroke in Draw mode (then saves and reads it back, erases it and undoes

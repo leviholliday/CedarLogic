@@ -131,6 +131,23 @@ int gClickFailures = 0;
 bool gClickClosing = false;   // the drawn Close was clicked: the window should go
 bool gClickPending = false;   // a case was clicked: its result is read at the next step
 bool gClickDragNext = false;  // the cases are done: the drag next, once things have settled
+bool gSettingsSeen = false;   // the gear's click opened Settings (it's closed again at once)
+
+// Settings opened by the gear: noted, and closed, so the click test goes on.
+void CALLBACK closeSettingsTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	for (CircuitWindow* w : circuitWindows()) {
+		HWND popup = GetLastActivePopup(w->window());
+		wchar_t title[64] = L"";
+		if (popup && popup != w->window()) GetWindowTextW(popup, title, 64);
+		if (wcscmp(title, L"Settings") == 0) {
+			gSettingsSeen = true;
+			PostMessageW(popup, WM_CLOSE, 0, 0);
+			return;
+		}
+	}
+	SetTimer(nullptr, 0, 300, closeSettingsTimer);   // not up yet
+}
 
 void report(const char* result, const std::string& what) {
 	writeOut(strf("%s  %s\n", result, what.c_str()));
@@ -194,6 +211,9 @@ const std::vector<ClickCase>& clickCases() {
 		{ "Draw off", CMD_DRAW, false, [](CircuitWindow* w) -> long { return w->drawing(); }, flipped, nullptr },
 		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
 		{ "Unlock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "Settings (the gear)", CMD_PREFERENCES, false, [](CircuitWindow*) -> long { return gSettingsSeen; },
+		  [](long, long after) { return after == 1; }, nullptr,
+		  [](CircuitWindow*) { gSettingsSeen = false; SetTimer(nullptr, 0, 700, closeSettingsTimer); } },
 		{ "Dark mode switch", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
 		{ "Dark mode switch back", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
 		{ "New circuit", CMD_NEW, true, [](CircuitWindow*) -> long { return (long)circuitWindows().size(); }, oneMore,
