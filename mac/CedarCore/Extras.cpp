@@ -72,6 +72,74 @@ void cl_document_draw_ex(CLDocument* doc, int page, CLContext ctx, double backin
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, inkMode, look);
 }
 
+// What a move in progress on a page moves: its gates, and the wires that go
+// with them (selected ones moving whole, and those that end on a moving part
+// and reshape). False when nothing is moving there.
+static bool movingSet(const CLDocument* doc, int page, ClMovingSet& out) {
+	if (doc == nullptr) return false;
+	const EditGesture& g = doc->gesture;
+	if (g.mode != EditGesture::Moving || g.page != page || g.preMove.empty()) return false;
+	out.gates.clear();
+	out.wires.clear();
+	for (const GateState& s : g.preMove) out.gates.push_back(s.id);
+	for (const WireState& s : g.preMoveWire) out.wires.push_back(s.id);
+	for (const WireState& s : g.preMoveAttached) out.wires.push_back(s.id);
+	// A floating paste's or a C connection's wires aren't in the snapshot:
+	// every wire on a moving gate's pins goes with it.
+	if (GUICanvas* p = doc->page(page)) {
+		for (unsigned long id : out.gates) {
+			auto it = p->getGateList()->find(id);
+			if (it == p->getGateList()->end() || it->second == nullptr) continue;
+			guiGate* gt = it->second;
+			for (auto& hs : gt->getHotspotList())
+				if (gt->isConnected(hs.first))
+					if (guiWire* w = gt->getConnection(hs.first)) out.wires.push_back(w->getID());
+		}
+	}
+	std::sort(out.gates.begin(), out.gates.end());
+	out.gates.erase(std::unique(out.gates.begin(), out.gates.end()), out.gates.end());
+	std::sort(out.wires.begin(), out.wires.end());
+	out.wires.erase(std::unique(out.wires.begin(), out.wires.end()), out.wires.end());
+	return true;
+}
+
+bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double backingScale,
+                            double originX, double originY, double unitsPerPoint,
+                            const CLDrawOptions* o, int layer) {
+	if (o == nullptr || o->thumbnail || (layer != CL_LAYER_STATIC && layer != CL_LAYER_MOVING)) return false;
+	ClMovingSet moving;
+	if (!movingSet(doc, page, moving)) return false;
+	// The style exactly as cl_document_draw_ex makes it.
+	using cl::render::RenderStyle;
+	RenderStyle s = RenderStyle::screen(o->dark);
+	s.accentIndex = o->accent;
+	s.wireScale = (float)o->wireScale;
+	s.simView = o->simView;
+	s.showSelection = o->showSelection && !o->simView;
+	s.selectionFade = (float)std::min(1.0, std::max(0.0, o->selectionFade));
+	const int look = o->ink == CL_INK_ALWAYS_PRINT ? kInkLookPrint : (o->dark || o->simView) ? kInkLookDark : kInkLookLight;
+	clDrawPageLayer(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, look, &moving, layer);
+	return true;
+}
+
+unsigned long long cl_document_moving_signature(const CLDocument* doc, int page) {
+	ClMovingSet moving;
+	if (!movingSet(doc, page, moving)) return 0;
+	// FNV-1a over the ids, gates then wires, and where the move started.
+	unsigned long long h = 1469598103934665603ULL;
+	auto mix = [&](unsigned long long v) { h ^= v; h *= 1099511628211ULL; };
+	for (unsigned long id : moving.gates) mix(id);
+	mix(0xFFFFFFFFULL);
+	for (unsigned long id : moving.wires) mix(id);
+	float sx = doc->gesture.start.x, sy = doc->gesture.start.y;
+	unsigned int bx, by;
+	std::memcpy(&bx, &sx, sizeof bx);
+	std::memcpy(&by, &sy, sizeof by);
+	mix(bx);
+	mix(by);
+	return h ? h : 1;
+}
+
 void cl_accent_color(int index, bool dark, double* r, double* g, double* b) {
 	cl::render::RenderStyle s;
 	s.darkMode = dark;

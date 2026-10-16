@@ -460,6 +460,23 @@ typedef struct {
 void cl_document_draw_ex(CLDocument *doc, int page, CLContext ctx, double backingScale,
                          double originX, double originY, double unitsPerPoint,
                          const CLDrawOptions *options);
+// cl_document_draw_ex in two layers while parts are being moved, for a canvas
+// that keeps what isn't moving in an image and draws only what moves each
+// frame (linux/SMOOTHNESS.md). CL_LAYER_STATIC is the page without the parts
+// being moved and their wires (the ones moving and the ones reshaping as the
+// parts go); CL_LAYER_MOVING is only those, to draw over it. Both return
+// false and draw nothing when no move is in progress on that page: draw it
+// whole with cl_document_draw_ex then. Moving parts draw over the others
+// where they overlap, and the drawing (highlighter and pen) stays with the
+// static layer.
+enum { CL_LAYER_STATIC = 1, CL_LAYER_MOVING = 2 };
+bool cl_document_draw_layer(CLDocument *doc, int page, CLContext ctx, double backingScale,
+                            double originX, double originY, double unitsPerPoint,
+                            const CLDrawOptions *options, int layer);
+// What is moving on a page now, as a number: it changes when another move
+// starts or other parts join it. 0 when nothing is moving there. A static
+// layer kept for one value is wrong for any other.
+unsigned long long cl_document_moving_signature(const CLDocument *doc, int page);
 // The accent colour for an index, light or dark variant (0..1 RGB).
 void cl_accent_color(int index, bool dark, double *r, double *g, double *b);
 // The dots drawn on wires: at every bend (or only where wires join), and

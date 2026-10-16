@@ -172,6 +172,14 @@ enum { kInkLookLight = 0, kInkLookDark = 1, kInkLookPrint = 2, kInkLookBW = 3 };
 extern "C" void clDrawPage(CLDocument* doc, int page, CLContext ctx, double backingScale,
                            double originX, double originY, double unitsPerPoint,
                            const cl::render::RenderStyle& style, int inkMode, int inkLook);
+// The same, one layer of it (cl_document_draw_layer): `layer` 0 is the whole
+// page (clDrawPage), CL_LAYER_STATIC leaves out the gates and wires in
+// `moving`, CL_LAYER_MOVING draws only those (and no drawing).
+struct ClMovingSet { std::vector<unsigned long> gates, wires; };   // sorted
+extern "C" void clDrawPageLayer(CLDocument* doc, int page, CLContext ctx, double backingScale,
+                     double originX, double originY, double unitsPerPoint,
+                     const cl::render::RenderStyle& style, int inkMode, int inkLook,
+                     const ClMovingSet* moving, int layer);
 
 // One layer of a page's drawing into a scene whose viewport is the page's:
 // the highlighter strokes (under the parts) or the pen strokes (over them).
