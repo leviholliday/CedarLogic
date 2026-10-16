@@ -178,7 +178,7 @@ gboolean showCb(gpointer) {
 	else if (what == "help") help::show(w, page > 0 ? "analysis" : "");
 	else if (what == "truth") w->makeTruthTable();
 	else if (what == "feedback") feedback::show(w);
-	else if (what == "templates") templates::showPicker(w);
+	else if (what == "templates") templates::showPicker(w, page == 1 ? "builtin-ff-d" : "");
 	else if (what == "tour") welcome::startTour(w);
 	else if (what == "find") w->runAction("win.find");
 	else if (what == "export") w->exportImage();

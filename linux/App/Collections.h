@@ -23,7 +23,8 @@
 class CircuitWindow;
 
 namespace templates {
-void showPicker(CircuitWindow* from);
+// `select`: a template to have chosen when it opens (for pictures).
+void showPicker(CircuitWindow* from, const std::string& select = std::string());
 void saveCurrent(CircuitWindow* window);
 // Every template: its id and name (the built-in ones first).
 std::vector<std::pair<std::string, std::string>> list();

@@ -303,7 +303,7 @@ std::string clockNote(int clock) {
 
 }  // namespace
 
-void showPicker(CircuitWindow* from) {
+void showPicker(CircuitWindow* from, const std::string& select) {
 	if (from == nullptr) return;
 	const std::vector<Template> built = builtIn();
 	std::vector<Template> mine = yours();
@@ -419,6 +419,12 @@ void showPicker(CircuitWindow* from) {
 		}
 		return false;
 	};
+	if (!select.empty()) {
+		// The rows, with that one chosen: run's first reload keeps it.
+		p.shown = p.rows(std::string());
+		for (int i = 0; i < (int)p.shown.size(); i++)
+			if (!p.shown[i].heading && p.shown[i].id == select) p.selection = i;
+	}
 	p.run(from->window());
 	if (shown) cl_document_close(shown);
 	if (useText.empty()) return;
