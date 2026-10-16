@@ -284,6 +284,23 @@ gboolean showCb(gpointer) {
 		w->edited();
 		if (page == 1) w->toggleSimView();
 	}
+	else if (what == "lockinplace") {
+		// Every part locked in place (a lock on each), then a nudge that
+		// leaves them put, each reported; :1 unlocks one again.
+		CLDocument* doc = w->document();
+		const int pg = w->currentPage();
+		cl_edit_select_all(doc, pg);
+		w->lockSelection(true);
+		fprintf(stderr, "lock in place: %d part(s) locked\n", cl_document_locked_count(doc));
+		w->nudge(2, 0);
+		fprintf(stderr, "lock in place: a nudge %s\n", cl_edit_locked_held(doc) ? "left them put" : "moved them");
+		if (page == 1) {
+			cl_edit_select_none(doc, pg);
+			w->unlockAll();
+			fprintf(stderr, "lock in place: %d part(s) locked after Unlock All Parts\n", cl_document_locked_count(doc));
+		}
+		w->selectionChanged();
+	}
 	return G_SOURCE_REMOVE;
 }
 
@@ -372,6 +389,8 @@ GMenuModel* buildMenubar() {
 	g_menu_append(e3, "Add a _Gate…   (A)", "win.add-gate");
 	g_menu_append(e3, "Gate _Settings…", "win.gate-settings");
 	g_menu_append(e3, "_Rotate   (R)", "win.rotate");
+	g_menu_append(e3, "_Lock in Place", "win.lock-in-place");
+	g_menu_append(e3, "Unlock All _Parts", "win.unlock-all");
 	g_menu_append(e3, "Straighten _Wires   (S)", "win.straighten");
 	g_menu_append(e3, "_Tidy Up   (Shift+S)", "win.tidy");
 	g_menu_append(e3, "Tidy Up by Signal _Flow", "win.tidy-flow");

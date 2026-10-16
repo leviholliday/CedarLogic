@@ -41,6 +41,9 @@ const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18
 
 double secondsSince(gint64 t) { return (g_get_monotonic_time() - t) / 1e6; }
 
+// Parts locked in place stayed put through a move, delete, rotate or cut.
+const char* kLockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock Part.";
+
 // Every command, whichever way it arrives, by action name.
 struct Command {
 	const char* name;
@@ -86,6 +89,9 @@ const Command kCommands[] = {
 	{ "tidy-switch", [](CircuitWindow* w) { w->switchTidyMode(); }, false },
 	{ "connect-nearby", [](CircuitWindow* w) { if (w->canEdit()) w->connectNearby(false); else w->lockNudge(); }, false },
 	{ "gate-settings", [](CircuitWindow* w) { w->showSettings(); }, false },
+	{ "lock-in-place", [](CircuitWindow* w) { w->toggleLockInPlace(); }, false },
+	{ "unlock-parts", [](CircuitWindow* w) { w->lockSelection(false); }, false },
+	{ "unlock-all", [](CircuitWindow* w) { w->unlockAll(); }, false },
 	{ "zoom-in", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->animateZoom(1 / 0.75); }, false },
 	{ "zoom-out", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->animateZoom(0.75); }, false },
 	{ "zoom-fit", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->zoomToFit(true); }, false },
@@ -805,8 +811,43 @@ static void popupModel(GtkWidget* attach, GMenuModel* model, GtkWidget* from, Gd
 	if (e == nullptr) gtk_menu_shell_select_first(GTK_MENU_SHELL(menu), FALSE);
 }
 
+// The menus are one model for every window: an item whose wording follows
+// the window in front gets it just before they open.
+static void relabel(GMenuModel* model, const char* action, const char* label) {
+	for (int i = 0; i < g_menu_model_get_n_items(model); i++) {
+		gchar* a = nullptr;
+		if (G_IS_MENU(model) && g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_ACTION, "s", &a) && a &&
+		    std::strcmp(a, action) == 0) {
+			gchar* now = nullptr;
+			g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_LABEL, "s", &now);
+			if (!now || std::strcmp(now, label) != 0) {
+				GMenuItem* item = g_menu_item_new_from_model(model, i);
+				g_menu_item_set_label(item, label);
+				g_menu_remove(G_MENU(model), i);
+				g_menu_insert_item(G_MENU(model), i, item);
+				g_object_unref(item);
+			}
+			g_free(now);
+		}
+		g_free(a);
+		GMenuLinkIter* links = g_menu_model_iterate_item_links(model, i);
+		GMenuModel* sub = nullptr;
+		while (g_menu_link_iter_get_next(links, nullptr, &sub)) {
+			relabel(sub, action, label);
+			g_object_unref(sub);
+		}
+		g_object_unref(links);
+	}
+}
+
 void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
-	if (GMenuModel* bar = gtk_application_get_menubar(app)) popupModel(win, bar, from, anchor, e, true);
+	GMenuModel* bar = gtk_application_get_menubar(app);
+	if (bar == nullptr) return;
+	// Edit's Lock in Place says Unlock Part when every selected part is locked.
+	updateActions();
+	const std::string lockLabel = lockMenuUnlocks() ? std::string("_") + unlockPartsTitle() : std::string("_Lock in Place");
+	relabel(bar, "win.lock-in-place", lockLabel.c_str());
+	popupModel(win, bar, from, anchor, e, true);
 }
 
 // GTK's own F10 belongs to a menu bar, and there is none: the menus are
@@ -1284,6 +1325,9 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "delete", edit && sel);
 	setEnabled(win, "rotate", edit && cl_edit_selected_gate_count(doc, currentPage()) > 0);
 	setEnabled(win, "gate-settings", cl_edit_single_gate(doc, currentPage()) >= 0);
+	setEnabled(win, "lock-in-place", cl_edit_selected_gate_count(doc, currentPage()) > 0);
+	setEnabled(win, "unlock-parts", selectedLocked() > 0);
+	setEnabled(win, "unlock-all", cl_document_locked_count(doc) > 0);
 	setEnabled(win, "reopen-tab", cl_edit_undo_is_close_page(doc));
 	// Off until the page has a clock set to "Only on Step Clock" (its key
 	// still says why, through the canvas).
@@ -1732,10 +1776,16 @@ void CircuitWindow::copy() {
 }
 
 void CircuitWindow::cut() {
+	// Locked parts stay: out of the selection before it's copied.
+	const int held = cl_edit_deselect_locked(doc, currentPage());
 	const std::string text = cl_edit_copy(doc, currentPage());
-	if (text.empty()) return;
+	if (text.empty()) {
+		if (held > 0) { edited(); note(kLockedNote); }
+		return;
+	}
 	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), text.c_str(), (gint)text.size());
 	deleteSelection();
+	if (held > 0) note(kLockedNote);
 }
 
 bool CircuitWindow::placePoint(double& wx, double& wy) const {
@@ -1803,10 +1853,36 @@ void CircuitWindow::duplicate() {
 
 void CircuitWindow::selectAll() { cl_edit_select_all(doc, currentPage()); redraw(); selectionChanged(); }
 void CircuitWindow::selectNone() { cl_edit_select_none(doc, currentPage()); redraw(); selectionChanged(); }
-void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); }
-void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); }
+void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); noteLockedHeld(); }
+void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); noteLockedHeld(); }
 void CircuitWindow::straighten() { cl_edit_straighten(doc, currentPage()); edited(); }
-void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); }
+void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); noteLockedHeld(); }
+
+// ---- Parts locked in place ---------------------------------------------------------
+
+void CircuitWindow::noteLockedHeld() {
+	if (cl_edit_locked_held(doc)) note(kLockedNote);
+}
+
+int CircuitWindow::selectedLocked() const { return cl_edit_selected_locked_count(doc, currentPage(), true); }
+int CircuitWindow::selectedUnlocked() const { return cl_edit_selected_locked_count(doc, currentPage(), false); }
+
+void CircuitWindow::lockSelection(bool lock) {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_lock_selection(doc, currentPage(), lock);
+	if (n <= 0) return;
+	edited();
+	const std::string parts = n == 1 ? std::string("1 part") : format("%d parts", n);
+	note(lock ? "Locked " + parts + " in place." : "Unlocked " + parts + ".");
+}
+
+void CircuitWindow::unlockAll() {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_unlock_all(doc, currentPage());
+	if (n <= 0) return;
+	edited();
+	note(n == 1 ? std::string("Unlocked 1 part.") : format("Unlocked all %d parts.", n));
+}
 
 void CircuitWindow::tidy(int mode) {
 	if (!cl_edit_tidy_begin(doc, currentPage(), mode < 0 ? prefs().tidyMode : mode)) note("Nothing to tidy on this page.");
@@ -2000,16 +2076,29 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventBu
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 		menuItem(menu, "_Delete", "win.delete");
 		break;
-	case CL_CONTEXT_GATE:
+	case CL_CONTEXT_GATE: {
+		// Locked parts (all of the selection): Unlock Part in place of the
+		// things they refuse. "Part", so it isn't taken for the circuit's own
+		// lock (Unlock the Circuit).
+		const bool locked = lockMenuUnlocks();
+		const std::string unlockTitle = std::string("_") + unlockPartsTitle();
 		menuItem(menu, "_Settings…", "win.gate-settings");
-		menuItem(menu, "_Rotate", "win.rotate");
+		if (!locked) menuItem(menu, "_Rotate", "win.rotate");
 		menuItem(menu, "Straighten Its _Wires", "win.straighten");
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
-		menuItem(menu, "Cu_t", "win.cut");
+		if (locked) {
+			menuItem(menu, unlockTitle.c_str(), "win.unlock-parts");
+		} else {
+			menuItem(menu, "_Lock in Place", "win.lock-in-place");
+			if (selectedLocked() > 0) menuItem(menu, unlockTitle.c_str(), "win.unlock-parts");
+		}
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+		if (!locked) menuItem(menu, "Cu_t", "win.cut");
 		menuItem(menu, "_Copy", "win.copy");
 		menuItem(menu, "D_uplicate", "win.duplicate");
-		menuItem(menu, "_Delete", "win.delete");
+		if (!locked) menuItem(menu, "_Delete", "win.delete");
 		break;
+	}
 	default:
 		menuItem(menu, "_Paste", "win.paste");
 		menuItem(menu, "Select _All", "win.select-all");

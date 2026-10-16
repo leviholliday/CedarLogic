@@ -129,6 +129,7 @@ const std::vector<Action>& all() {
 		{ "find", "Editing", "Find a label, a TO/FROM name or a part", "win.find", "<Primary>f" },
 		{ "addGate", "Building", "Add a gate by name", nullptr, "a" },
 		{ "rotate", "Building", "Rotate the selection", nullptr, "r" },
+		{ "lockInPlace", "Building", "Lock in Place (or unlock the selected parts)", "win.lock-in-place", "<Primary>l" },
 		{ "straighten", "Building", "Straighten the selected wires", nullptr, "s" },
 		{ "tidy", "Building", "Tidy up (preview first)", nullptr, "<Shift>s" },
 		{ "quickCopy", "Building", "Copy, or connect while moving (quick key)", nullptr, "c" },

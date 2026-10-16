@@ -99,7 +99,12 @@ const std::vector<Page>& pages() {
 		           { "Arrows", "Nudge the selection a square (Shift: five)" },
 		           { "Ctrl+Z / Ctrl+Y", "Undo and redo" } }),
 		    p("Double-click a gate for its settings (a clock's speed, a label's text). Double-click a RAM or ROM to see and change what's "
-		      "in it.") },
+		      "in it."),
+		    p("**Lock in Place (Ctrl+L)** (the Edit menu, or right-click a part) keeps a part where it is, with a small lock on it: it "
+		      "can't be moved, rotated or deleted (closing its tab still removes it, and Undo brings it back), but wires to it still work, "
+		      "its settings still change and switches still flip. Teachers: lock the switches and lights, then share the circuit. **Unlock "
+		      "Part** takes the lock off one part, and **Unlock All Parts** in the Edit menu takes every lock off. This is different from "
+		      "**Lock the Circuit** in the Simulate menu, which stops all editing.") },
 		  false },
 		{ "moving", "Moving Around", "zoom-fit-best-symbolic", "Zoom, pan and the minimap.",
 		  { keys({ { "Wheel", "Zoom or move, as set in Preferences (touchpads separately)" },

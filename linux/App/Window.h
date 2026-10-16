@@ -235,6 +235,20 @@ public:
 	void quickAdd();
 	void setRunning(bool run);
 	void toggleRunning() { setRunning(!isRunning); }
+	// Parts locked in place (a teacher's starter parts): they stay put --
+	// moves, Rotate, Delete and Cut leave them -- but wires, settings and
+	// switches work as usual. Lock in Place locks the selection, or unlocks
+	// it when every selected part is locked already (the menu says which).
+	void lockSelection(bool lock);
+	void toggleLockInPlace() { lockSelection(!lockMenuUnlocks()); }
+	void unlockAll();
+	int selectedLocked() const;
+	int selectedUnlocked() const;
+	bool lockMenuUnlocks() const { return selectedLocked() > 0 && selectedUnlocked() == 0; }
+	const char* unlockPartsTitle() const { return selectedLocked() > 1 ? "Unlock Parts" : "Unlock Part"; }
+	// After a move, delete or rotate: say why locked parts didn't go along.
+	void noteLockedHeld();
+
 	void stepOnce();
 	// Step Clock: every clock on the page set to "Only on Step Clock" makes
 	// one full cycle (up, settle, down, settle), running or paused.

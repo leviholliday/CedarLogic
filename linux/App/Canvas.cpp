@@ -1066,6 +1066,7 @@ bool Canvas::onRelease(GdkEventButton* e) {
 		drag = Drag::None;
 		if (stepped) win->clockStepped();
 		win->edited();
+		win->noteLockedHeld();
 	} else if (drag == Drag::Pan && (e->button == 1 || e->button == 2)) {
 		drag = Drag::None;
 	}
