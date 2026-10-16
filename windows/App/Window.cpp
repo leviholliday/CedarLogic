@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
 
 namespace {
 
@@ -342,6 +343,11 @@ void CircuitWindow::buildMenus() {
 	item(tabsMenu, CMD_SPLIT_VIEW, "&Split View\tCtrl+Alt+S");
 	item(tabsMenu, CMD_SWITCH_PANE, "S&witch Side\tF6");
 	item(tabsMenu, CMD_CLOSE_SPLIT, "Close Split Vie&w\tCtrl+Alt+W");
+	// Which pages' TO/FROM links connect; a tab's right-click menu connects
+	// pages one by one.
+	separator(tabsMenu);
+	item(tabsMenu, CMD_CONNECT_ALL_PAGES, "Connect &All Pages");
+	item(tabsMenu, CMD_DISCONNECT_ALL_PAGES, "&Disconnect All Pages");
 
 	HMENU help = submenu(menuBar, "&Help");
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
@@ -711,7 +717,8 @@ void CircuitWindow::moveTabBy(int index, int delta) {
 // A tab's own menu (the Mac's): Rename, the split's moves, moving it along
 // (for a touchpad or a touch screen, where dragging it is awkward), Close.
 void CircuitWindow::tabContextMenu(int index, POINT screen) {
-	enum { RENAME = 1, OTHER_SIDE, OPEN_SPLIT, CLOSE_SPLIT, LEFT, RIGHT, CLOSE, NEW, REOPEN };
+	enum { RENAME = 1, OTHER_SIDE, OPEN_SPLIT, CLOSE_SPLIT, LEFT, RIGHT, CLOSE, NEW, REOPEN, CONNECT_ALL, DISCONNECT_ALL,
+	       CONNECT_TO = 100 };   // + the other page's index
 	const bool onTab = index >= 0 && index < (int)canvases.size();
 	HMENU m = CreatePopupMenu();
 	if (onTab) {
@@ -728,8 +735,21 @@ void CircuitWindow::tabContextMenu(int index, POINT screen) {
 		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(m, MF_STRING | (k > 0 ? 0 : MF_GRAYED), LEFT, L"Move &Left");
 		AppendMenuW(m, MF_STRING | (k + 1 < (int)row.size() ? 0 : MF_GRAYED), RIGHT, L"Move Ri&ght");
+		const int pageCount = cl_document_page_count(doc);
+		if (pageCount > 1) {
+			// A checklist: the pages this one's TO/FROM links reach.
+			AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+			HMENU to = CreatePopupMenu();
+			for (int j = 0; j < pageCount; j++)
+				if (j != index)
+					AppendMenuW(to, MF_STRING | (cl_pages_linked(doc, index, j) ? MF_CHECKED : 0), CONNECT_TO + j, W(pageName(j)).c_str());
+			AppendMenuW(to, MF_SEPARATOR, 0, nullptr);
+			AppendMenuW(to, MF_STRING | (commandEnabled(CMD_CONNECT_ALL_PAGES) ? 0 : MF_GRAYED), CONNECT_ALL, L"Connect &All Pages");
+			AppendMenuW(to, MF_STRING | (commandEnabled(CMD_DISCONNECT_ALL_PAGES) ? 0 : MF_GRAYED), DISCONNECT_ALL, L"&Disconnect All Pages");
+			AppendMenuW(m, MF_POPUP, (UINT_PTR)to, L"Connect &to");
+		}
 		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-		AppendMenuW(m, MF_STRING | (cl_document_page_count(doc) > 1 ? 0 : MF_GRAYED), CLOSE, W("&Close Tab" + shortcuts::menuKeys(CMD_CLOSE_TAB)).c_str());
+		AppendMenuW(m, MF_STRING | (pageCount > 1 ? 0 : MF_GRAYED), CLOSE, W("&Close Tab" + shortcuts::menuKeys(CMD_CLOSE_TAB)).c_str());
 	} else {
 		AppendMenuW(m, MF_STRING, NEW, W("&New Tab" + shortcuts::menuKeys(CMD_NEW_TAB)).c_str());
 		AppendMenuW(m, MF_STRING | (cl_edit_undo_is_close_page(doc) ? 0 : MF_GRAYED), REOPEN,
@@ -749,8 +769,36 @@ void CircuitWindow::tabContextMenu(int index, POINT screen) {
 	case CLOSE: closePage(index); break;
 	case NEW: newPage(); break;
 	case REOPEN: reopenPage(); break;
-	default: break;
+	case CONNECT_ALL: connectAllPages(); break;
+	case DISCONNECT_ALL: disconnectAllPages(); break;
+	default:
+		if (onTab && cmd >= CONNECT_TO && cmd - CONNECT_TO < cl_document_page_count(doc))
+			setPagesLinked(index, cmd - CONNECT_TO, !cl_pages_linked(doc, index, cmd - CONNECT_TO));
+		break;
 	}
+}
+
+// ---- Page links (docs/PAGE-LINKS.md) ----------------------------------------------
+
+void CircuitWindow::connectAllPages() {
+	if (!cl_pages_connect_all(doc)) return;
+	edited();
+	note("Every page's links connect now.");
+}
+
+void CircuitWindow::disconnectAllPages() {
+	if (!cl_pages_disconnect_all(doc)) return;
+	edited();
+	note("Each page's links stay on that page now.");
+}
+
+void CircuitWindow::setPagesLinked(int page, int other, bool on) {
+	const int n = cl_document_page_count(doc);
+	if (page == other || page < 0 || page >= n || other < 0 || other >= n) return;
+	std::unique_ptr<bool[]> with(new bool[n]);
+	for (int j = 0; j < n; j++) with[j] = j != page && cl_pages_linked(doc, page, j);
+	with[other] = on;
+	if (cl_page_connect_to(doc, page, with.get(), n)) edited();
 }
 
 // Split View from the menu or keys: the tab used most recently beside the
@@ -1184,6 +1232,8 @@ bool CircuitWindow::commandEnabled(int command) const {
 	case CMD_ROTATE: return edit && cl_edit_selected_gate_count(doc, currentPage()) > 0;
 	case CMD_LOCK_IN_PLACE: case CMD_LOCK_PARTS: case CMD_UNLOCK_PARTS: return cl_edit_selected_gate_count(doc, currentPage()) > 0;
 	case CMD_UNLOCK_ALL_PARTS: return cl_document_locked_count(doc) > 0;
+	case CMD_CONNECT_ALL_PAGES: return cl_document_page_count(doc) > 1 && !cl_pages_all_linked(doc);
+	case CMD_DISCONNECT_ALL_PAGES: return cl_document_page_count(doc) > 1 && !cl_pages_none_linked(doc);
 	case CMD_GATE_SETTINGS: return cl_edit_single_gate(doc, currentPage()) >= 0;
 	case CMD_REOPEN_TAB: return cl_edit_undo_is_close_page(doc);
 	case CMD_SWITCH_PANE: case CMD_CLOSE_SPLIT: return splitOpen();
@@ -1854,6 +1904,8 @@ void CircuitWindow::run(int command) {
 	case CMD_LOCK_PARTS: lockSelection(true); break;
 	case CMD_UNLOCK_PARTS: lockSelection(false); break;
 	case CMD_UNLOCK_ALL_PARTS: unlockAllParts(); break;
+	case CMD_CONNECT_ALL_PAGES: connectAllPages(); break;
+	case CMD_DISCONNECT_ALL_PAGES: disconnectAllPages(); break;
 	case CMD_STRAIGHTEN: editing(&CircuitWindow::straighten); break;
 	case CMD_TIDY: if (canEdit()) tidy(0); else lockNudge(); break;
 	case CMD_TIDY_FLOW: if (canEdit()) tidy(1); else lockNudge(); break;

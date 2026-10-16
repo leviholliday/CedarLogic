@@ -60,6 +60,7 @@ struct Prefs {
 	bool showGateNames = true;
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
+	bool newPagesShareLinks = true;  // a new page's TO/FROM links connect with the others' (docs/PAGE-LINKS.md)
 	bool showCategoryKeys = true; // Shift+1...0 beside the side panel's categories
 	int gateSize = 48;            // the side panel's gates (36...96; 48 is the standard size)
 	int toolbarStyle = 3;         // 0 Classic, 2 Minimal, 3 Seamless (the Mac's styles; new installs get Seamless)
@@ -107,6 +108,8 @@ struct Prefs {
 	void save() const;
 	// Tell the engine about the wire settings.
 	void applyWireDots() const;
+	// Tell the engine whether new pages share links.
+	void applyPageLinks() const;
 	void noteRecent(const std::string& path);
 };
 Prefs& prefs();

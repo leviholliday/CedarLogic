@@ -75,6 +75,7 @@ private:
 	void layout(float w);
 	void placeEdit();
 	D2D1_RECT_F closeRect(int k) const;
+	static D2D1_COLOR_F linkColor(int mark, bool dark);
 	int tabAt(float x, float y) const;
 	int captionAt(float x, float y) const;
 	bool activeSide() const;

@@ -37,6 +37,9 @@ enum Command {
 	// selected part is locked), the right-click menu's lock and unlock, and
 	// Edit's Unlock All Parts.
 	CMD_LOCK_IN_PLACE, CMD_LOCK_PARTS, CMD_UNLOCK_PARTS, CMD_UNLOCK_ALL_PARTS,
+	// Tabs > Connect All Pages and Disconnect All Pages: which pages' TO/FROM
+	// links connect (docs/PAGE-LINKS.md; a tab's right-click menu does it page by page).
+	CMD_CONNECT_ALL_PAGES, CMD_DISCONNECT_ALL_PAGES,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

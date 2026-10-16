@@ -235,6 +235,8 @@ void Prefs::load() {
 	showTitle = r.b("showTitle", showTitle);
 	showThemeToggle = r.b("showThemeToggle", showThemeToggle);
 	showStepClock = r.b("showStepClock", showStepClock);
+	newPagesShareLinks = r.b("newPagesShareLinks", newPagesShareLinks);
+	applyPageLinks();
 	openReplaces = r.b("openReplaces", openReplaces);
 	newTemplate = r.s("newTemplate", newTemplate);
 	templateClock = r.i("templateClock", templateClock, 0, 2);
@@ -327,6 +329,7 @@ void Prefs::save() const {
 	o << "showTitle=" << b(showTitle) << "\n";
 	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
 	o << "showStepClock=" << b(showStepClock) << "\n";
+	o << "newPagesShareLinks=" << b(newPagesShareLinks) << "\n";
 	o << "openReplaces=" << b(openReplaces) << "\n";
 	o << "newTemplate=" << newTemplate << "\n";
 	o << "templateClock=" << templateClock << "\n";
@@ -390,6 +393,8 @@ void Prefs::applyWireDots() const {
 	if (lowWire >= 0 && lowWire < 3) cl_set_low_wire_color(true, colors[lowWire][0], colors[lowWire][1], colors[lowWire][2]);
 	else cl_set_low_wire_color(false, 0, 0, 0);
 }
+
+void Prefs::applyPageLinks() const { cl_set_new_pages_share_links(newPagesShareLinks); }
 
 void Prefs::noteRecent(const std::string& path) {
 	if (path.empty()) return;

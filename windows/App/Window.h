@@ -173,6 +173,12 @@ public:
 	void checkCircuit();   // the truth table at its Check tab
 	void toggleScope();
 	void newPage();
+	// Page links (docs/PAGE-LINKS.md): TO/FROM links connect by name only
+	// between pages that share links. Each change is one undo step.
+	void connectAllPages();
+	void disconnectAllPages();
+	// Page `page` connects to `other` (on) or not; it keeps the others it reaches.
+	void setPagesLinked(int page, int other, bool on);
 	void closePage(int page);
 	void reopenPage();
 	void renamePage(int page);

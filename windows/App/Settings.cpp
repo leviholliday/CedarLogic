@@ -623,6 +623,10 @@ void showPreferencesDialog(HWND parent) {
 	on[f.add(choice("Duplicate:", { "Leaves the clipboard alone", "Copies to the clipboard too" }, p.duplicateUsesClipboard ? 1 : 0,
 	                "Second option: the copy stays on the clipboard, so paste makes more of it."))] =
 		[](Form& form, int i) { prefs().duplicateUsesClipboard = form.choice(i) == 1; apply(); };
+	on[f.add(choice("New pages:", { "Share links with the other pages", "Start on their own" }, p.newPagesShareLinks ? 0 : 1,
+	                "TO and FROM links of the same name connect across pages that share links. Right-click a tab to choose "
+	                "which pages connect."))] =
+		[](Form& form, int i) { prefs().newPagesShareLinks = form.choice(i) == 0; prefs().applyPageLinks(); apply(); };
 	on[f.add(choice("Tidy Up:", { "Keeps my layout", "Rearranges everything" }, p.tidyMode,
 	                "Keeps my layout: lines gates up where they are. Rearranges everything: lays the circuit out by signal flow. "
 	                "The Edit menu has both."))] = [](Form& form, int i) { prefs().tidyMode = form.choice(i); apply(); };

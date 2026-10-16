@@ -69,7 +69,9 @@ void TabStrip::layout(float w) {
 	std::vector<float> want((size_t)n);
 	float total = 0;
 	for (int k = 0; k < n; k++) {
-		want[k] = std::min(kMaxW, std::max(kMinW + 20, textWidth(win->pageName(pages[k]), 12, true) + 50));
+		// (Room for the link dot, when its pages share links with only some others.)
+		const float dot = cl_page_link_mark(win->document(), pages[k]) >= 0 ? 12.0f : 0.0f;
+		want[k] = std::min(kMaxW, std::max(kMinW + 20, textWidth(win->pageName(pages[k]), 12, true) + 50 + dot));
 		total += want[k] + kGap;
 	}
 	// When they don't all fit, the others are squeezed; the one in front
@@ -110,6 +112,17 @@ int TabStrip::captionAt(float x, float y) const {
 	return -1;
 }
 
+// The link groups' dot colours, in order (cl_page_link_mark): the Mac's
+// blue, orange, purple, pink, teal, yellow, brown, indigo, mint and red.
+D2D1_COLOR_F TabStrip::linkColor(int mark, bool dark) {
+	static const int light[][3] = { { 0, 122, 255 }, { 255, 149, 0 }, { 175, 82, 222 }, { 255, 45, 85 }, { 48, 176, 199 },
+	                                { 255, 204, 0 }, { 162, 132, 94 }, { 88, 86, 214 }, { 0, 199, 190 }, { 255, 59, 48 } };
+	static const int night[][3] = { { 10, 132, 255 }, { 255, 159, 10 }, { 191, 90, 242 }, { 255, 55, 95 }, { 64, 200, 224 },
+	                                { 255, 214, 10 }, { 172, 142, 104 }, { 94, 92, 230 }, { 102, 212, 207 }, { 255, 69, 58 } };
+	const int* c = (dark ? night : light)[((mark % 10) + 10) % 10];
+	return rgb255(c[0], c[1], c[2]);
+}
+
 void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 	layout(w);
 	const Chrome c = chrome();
@@ -137,9 +150,16 @@ void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 		fillCircle(rt, D2D1::Point2F(r.left + 13, cy), 3, front && win->running() ? green : withAlpha(ink, front ? 0.35f : 0.22f));
 		if (renamingKey == cl_document_page_id(doc, p)) return;   // the text box is over it
 		const bool showClose = closable && (front || k == hot);
-		const float textRight = r.right - (showClose ? 26 : 10);
+		// Pages whose TO/FROM links connect share a dot's colour after the
+		// name (docs/PAGE-LINKS.md); none while every page connects.
+		const int mark = cl_page_link_mark(doc, p);
+		const float textRight = r.right - (showClose ? 26 : 10) - (mark >= 0 ? 12 : 0);
 		drawText(rt, win->pageName(p), D2D1::RectF(r.left + 23, r.top, textRight, r.bottom), 12, withAlpha(ink, front ? 1.0f : 0.62f),
 		         TextAlign::Leading, front);
+		if (mark >= 0) {
+			const float tx = std::min(textRight, r.left + 23 + textWidth(win->pageName(p), 12, front));
+			fillCircle(rt, D2D1::Point2F(tx + 6 + 3, cy), 3, linkColor(mark, dark));
+		}
 		if (showClose) {
 			const D2D1_RECT_F x = closeRect(k);
 			if (k == hotClose) fillRound(rt, x, 5, withAlpha(ink, 0.16f));
