@@ -56,7 +56,8 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   `ShortcutsSheet`), the app's own alert card and quit question (`Alert`,
   `QuitConfirm`), gate settings, Add a Gate and the memory editor
   (`Dialogs`, `RamEditor`), Your Circuits and Version History (`Library`,
-  `LibraryWindow`, `Picker`), templates and My Parts (`Collections`), Build
+  `LibraryWindow`, `Picker`), templates (the Mac's own, as files in `res/templates`,
+  written by `mac/Tools/export-templates.sh`) and My Parts (`Collections`), Build
   from Formula and the truth table's Karnaugh maps (`Formula`,
   `TruthTableWindow`), Find and the Ctrl+Tab switcher (`FindBar`,
   `TabSwitcher`), the oscilloscope, docked under the canvas (`Scope`),
@@ -83,7 +84,10 @@ costs, and what would make it cheaper: `SMOOTHNESS.md`.
 Checks, without opening the app (built with it; `-DCL_BUILD_TOOLS=OFF` skips
 them): `cl_check`, `edit_check`, `sim_check`, `tt_check`, `save_check`,
 `render_png` -- the Mac app's checks (`mac/Tools`), which run on either
-system -- and `formula_check <cl_gatedefs.xml>`, which builds formulas in
+system; `clock_check`, `examples_check`, `register_check` and
+`mistakes_check <cl_gatedefs.xml> res/templates`, the Mac's checks of the
+templates this app ships (Step Clock, the examples, the registers, the
+Classic Mistakes) -- and `formula_check <cl_gatedefs.xml>`, which builds formulas in
 every shape and gate style and checks each circuit's truth table. And:
 
 - `cedarlogic --screenshot out.png [circuit.cdl]` -- opens the window, draws
