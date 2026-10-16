@@ -80,18 +80,101 @@ void selectedIds(GUICanvas* page, std::vector<unsigned long>& gates, std::vector
 	std::sort(wires.begin(), wires.end());
 }
 
-// Move the selection by `delta` as one undo step: shift the wires, then the
-// gates, then record it. GUICanvas::nudgeSelection and the drop in OnMouseUp
-// do the same, including the Undo after Submit -- the move already happened,
-// and Submit runs Do again.
+// The pins a wire holds, or a saved shape of it records, sorted.
+std::vector<std::pair<unsigned long, std::string>> pinsOf(const SegmentMap& m) {
+	std::vector<std::pair<unsigned long, std::string>> out;
+	for (const auto& s : m) for (const wireConnection& c : s.second.connections) out.emplace_back(c.gid, c.connection);
+	std::sort(out.begin(), out.end());
+	return out;
+}
+std::vector<std::pair<unsigned long, std::string>> pinsOf(guiWire* w) {
+	std::vector<std::pair<unsigned long, std::string>> out;
+	for (const wireConnection& c : w->getConnections()) out.emplace_back(c.gid, c.connection);
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+// A move of the selection, as one undo step, that also gives every wire the
+// move reshaped (the ones moved whole and the ones that only end on a moving
+// part) its exact shape back: Undo the one from before the move, Redo the one
+// it was dropped with. Moving the parts back reshapes those wires on its
+// own, which isn't the shape they had (the bends a student dragged in went
+// elsewhere). A shape is only put back on a wire still holding exactly the
+// pins it records; any other wire is left as the parts' move leaves it.
+class MoveCommand : public klsCommand {
+public:
+	struct Place { unsigned long id; float fromX, fromY, toX, toY; };
+	MoveCommand(GUICircuit* circuit, cmdMoveSelection* move, std::vector<Place> places,
+	            std::map<unsigned long, SegmentMap> before, std::map<unsigned long, SegmentMap> after)
+		: klsCommand(true, "Move Selection"), move(move), places(std::move(places)), before(std::move(before)),
+		  after(std::move(after)) { gCircuit = circuit; }
+	bool Do() override {
+		if (applied) { applied = false; return true; }   // the drop already did it
+		move->Do();
+		// Exactly where they were dropped (moving by -d then +d leaves float
+		// noise: a part a millionth off the grid).
+		for (const Place& p : places) if (guiGate* g = gCircuit->getGate(p.id)) g->setGLcoords(p.toX, p.toY, true);
+		put(after);
+		return true;
+	}
+	bool Undo() override {
+		move->Undo();
+		for (const Place& p : places) if (guiGate* g = gCircuit->getGate(p.id)) g->setGLcoords(p.fromX, p.fromY, true);
+		put(before);
+		return true;
+	}
+private:
+	void put(const std::map<unsigned long, SegmentMap>& shapes) {
+		for (const auto& e : shapes) {
+			guiWire* w = gCircuit->getWire(e.first);
+			if (w != nullptr && !e.second.empty() && pinsOf(e.second) == pinsOf(w)) w->setSegmentMap(e.second);
+		}
+	}
+	std::unique_ptr<cmdMoveSelection> move;
+	std::vector<Place> places;
+	std::map<unsigned long, SegmentMap> before, after;
+	bool applied = true;
+};
+
+// The wires that end on one of these gates but aren't among `whole` (moved
+// whole): they reshape as the gates move. Their shapes now.
+std::vector<WireState> attachedWires(CLDocument* doc, const std::vector<GateState>& gates, const std::vector<WireState>& whole) {
+	std::set<unsigned long> seen;
+	for (auto& ws : whole) seen.insert(ws.id);
+	std::vector<WireState> out;
+	for (auto& gs : gates) {
+		guiGate* gt = doc->circuit.getGate(gs.id);
+		if (gt == nullptr) continue;
+		for (auto& hs : gt->getHotspotList()) {
+			if (!gt->isConnected(hs.first)) continue;
+			guiWire* w = gt->getConnection(hs.first);
+			if (w == nullptr || !seen.insert(w->getID()).second) continue;
+			out.emplace_back((unsigned int)w->getID(), GLPoint2f(), w->getSegmentMap());
+		}
+	}
+	return out;
+}
+
+// Record a move of the selection by `delta`, already made, as one undo step
+// (attached: the shapes before the move of the wires that end on the moving
+// parts).
 void commitMove(CLDocument* doc, GUICanvas* page, std::vector<GateState>& moved,
-                std::vector<WireState>& movedWires, GLPoint2f delta) {
+                std::vector<WireState>& movedWires, const std::vector<WireState>& attached, GLPoint2f delta) {
 	if (moved.empty()) return;
+	for (auto& gs : moved) if (guiGate* g = doc->circuit.getGate(gs.id)) g->updateConnectionMerges();
+	std::map<unsigned long, SegmentMap> before, after;
+	for (auto& ws : movedWires) before[ws.id] = ws.oldWireTree;
+	for (auto& ws : attached) before.emplace(ws.id, ws.oldWireTree);
+	for (auto& e : before) if (guiWire* w = doc->circuit.getWire(e.first)) after[e.first] = w->getSegmentMap();
+	std::vector<MoveCommand::Place> places;
+	for (auto& gs : moved) {
+		float x = gs.x + delta.x, y = gs.y + delta.y;
+		if (guiGate* g = doc->circuit.getGate(gs.id)) g->getGLcoords(x, y);
+		places.push_back({ gs.id, gs.x, gs.y, x, y });
+	}
 	cmdMoveSelection* mc = new cmdMoveSelection(&doc->circuit, moved, movedWires,
 		moved[0].x, moved[0].y, moved[0].x + delta.x, moved[0].y + delta.y);
-	for (auto& gs : moved) if (guiGate* g = doc->circuit.getGate(gs.id)) g->updateConnectionMerges();
-	submit(doc, page, mc);
-	mc->Undo();
+	submit(doc, page, new MoveCommand(&doc->circuit, mc, std::move(places), std::move(before), std::move(after)));
 	page->collisionUpdate();
 }
 
@@ -298,7 +381,7 @@ int discardPendingConnects(CLDocument* doc, EditGesture& g) {
 void finishMove(CLDocument* doc, GUICanvas* page, EditGesture& g) {
 	if (g.lastDelta.x != 0 || g.lastDelta.y != 0 || g.floating) {
 		if (g.lastDelta.x != 0 || g.lastDelta.y != 0)
-			commitMove(doc, page, g.preMove, g.preMoveWire, g.lastDelta);
+			commitMove(doc, page, g.preMove, g.preMoveWire, g.preMoveAttached, g.lastDelta);
 		connectNearby(doc, page, g.unitsPerPoint, true);
 	}
 	flushPendingConnects(doc, page, g);
@@ -482,21 +565,8 @@ void cl_edit_drag(CLDocument* doc, double x, double y) {
 		g.preMoveAttached.clear();
 		snapshotSelection(doc, page, g.preMove, g.preMoveWire);
 		// The wires that end on a moving part but aren't moving whole: remember their
-		// shape, so Escape can put them back with the part.
-		{
-			std::set<unsigned long> whole;
-			for (auto& ws : g.preMoveWire) whole.insert(ws.id);
-			for (auto& gs : g.preMove) {
-				guiGate* gt = doc->circuit.getGate(gs.id);
-				if (gt == nullptr) continue;
-				for (auto& hs : gt->getHotspotList()) {
-					if (!gt->isConnected(hs.first)) continue;
-					guiWire* w = gt->getConnection(hs.first);
-					if (w == nullptr || !whole.insert(w->getID()).second) continue;
-					g.preMoveAttached.emplace_back((unsigned int)w->getID(), GLPoint2f(), w->getSegmentMap());
-				}
-			}
-		}
+		// shape, so Escape (and Undo) can put them back with the part.
+		g.preMoveAttached = attachedWires(doc, g.preMove, g.preMoveWire);
 		// A drag that started on a lone wire waits for stage 3 (segment drags).
 		g.mode = g.preMove.empty() ? EditGesture::None : EditGesture::Moving;
 	}
@@ -700,10 +770,11 @@ void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
 	doc->lockedHeld = false;
 	snapshotSelection(doc, page, moved, movedWires);
 	if (moved.empty()) return;
+	const std::vector<WireState> attached = attachedWires(doc, moved, movedWires);
 	const GLPoint2f d((float)dx, (float)dy);
 	for (auto& ws : movedWires) if (guiWire* w = doc->circuit.getWire(ws.id)) w->move(ws.point, d);
 	for (auto& gs : moved) if (guiGate* g = doc->circuit.getGate(gs.id)) g->setGLcoords(gs.x + d.x, gs.y + d.y);
-	commitMove(doc, page, moved, movedWires, d);
+	commitMove(doc, page, moved, movedWires, attached, d);
 }
 
 bool cl_edit_add_gate(CLDocument* doc, int pageIndex, const char* libGateName, double x, double y) {
@@ -1001,6 +1072,7 @@ bool cl_edit_float_begin(CLDocument* doc, int pageIndex, double x, double y) {
 	g.unitsPerPoint = upp;
 	snapshotSelection(doc, page, g.preMove, g.preMoveWire);
 	if (g.preMove.empty()) return false;
+	g.preMoveAttached = attachedWires(doc, g.preMove, g.preMoveWire);
 	g.mode = EditGesture::Moving;
 	g.floating = true;
 	return true;

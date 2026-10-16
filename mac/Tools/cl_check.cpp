@@ -379,6 +379,7 @@ int main(int argc, char** argv) {
 		guiGate* sw = newest(d, 0);
 		cl_edit_add_gate(d, 0, "AA_AND2", 12, 6);
 		guiGate* a1 = newest(d, 0);
+		const unsigned long a1id = a1->getID();
 		cl_edit_add_gate(d, 0, "AA_AND2", 12, -6);
 		guiGate* a2 = newest(d, 0);
 		wire(d, sw, "OUT", a1, "IN");
@@ -423,6 +424,27 @@ int main(int argc, char** argv) {
 		CHECK(!a2->isConnected(ipin), "Disconnect takes it off");
 		cl_edit_undo(d);
 		CHECK(std::string(cl_document_save_text(d)) == shaped, "Disconnect, Undo: the same");
+
+		// Drag the first AND down past the bend (and nudge it): Undo gives the
+		// bends back, Redo the shape it was dropped with.
+		float sx, sy;
+		a1 = newest(d, 0) ? d->circuit.getGate(a1id) : nullptr;   // the delete's Undo made it anew
+		a1->getGLcoords(sx, sy);
+		cl_edit_select_none(d, 0);
+		cl_edit_press(d, 0, sx, sy, 0, 0.05);
+		cl_edit_drag(d, sx, sy - 3);
+		cl_edit_drag(d, sx, sy - 6);
+		cl_edit_release(d, sx, sy - 6);
+		const std::string dropped = cl_document_save_text(d);
+		CHECK(dropped != shaped, "the AND moved");
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "drag a part, Undo: its wire's bends are back");
+		cl_edit_redo(d);
+		CHECK(std::string(cl_document_save_text(d)) == dropped, "and Redo gives the shape it was dropped with");
+		cl_edit_undo(d);
+		cl_edit_nudge(d, 0, 0, 3);
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "an arrow-key nudge, Undo: the same");
 		(void)sw;
 		cl_document_close(d);
 	}
