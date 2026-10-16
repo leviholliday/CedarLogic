@@ -852,8 +852,10 @@ final class CanvasController: ObservableObject {
     var sheetHost: CanvasController { isSecondary ? (partner ?? self) : self }
     /// The side commands go to: this one, or the second side when it's active.
     var routed: CanvasController { splitFocus ? (partner ?? self) : self }
-    /// What the sheets act on: the side that asked.
-    var quickAddTarget: CanvasController?
+    /// What the sheets act on: the side that asked. Weak: it's usually this
+    /// controller itself, and holding on to itself kept it, its circuit and
+    /// its clock alive after the window closed (--leak-check).
+    weak var quickAddTarget: CanvasController?
     var exportPage = 0
     var settingsGate: Int?
 

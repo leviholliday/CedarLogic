@@ -176,6 +176,10 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   manager, which is what makes a window edited and autosaved: edits past
   the engine's 500-step history still mark the circuit edited, and undo
   and redo still reach the engine (headless, PASS/FAIL, exit 1 on a failure)
+- `CedarLogic --leak-check` -- a circuit window's controller (and with it
+  its circuit and its 60-a-second clock) goes when the window does, after
+  Add a Gate, a split's second side, Simulation View (headless, PASS/FAIL,
+  exit 1 on a failure)
 - `launch-check.sh [runs]` -- real launches of the built app (a copy with
   settings and folders of its own, so yours are never touched): each must
   open its circuit window, quit by itself and print none of SwiftUI's
