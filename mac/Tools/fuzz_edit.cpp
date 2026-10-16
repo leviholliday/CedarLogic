@@ -636,7 +636,12 @@ static std::string wiresAsSets(const std::string& text) {
 		}
 		std::vector<std::string> flat;
 		for (auto& s : segs) {
-			std::string f = s.head + " " + s.pts;
+			// A segment that is a single point has no direction to compare.
+			std::string bare = s.pts;
+			while (!bare.empty() && bare.back() == ')') bare.pop_back();
+			std::vector<std::string> pw = words(bare);
+			const bool dot = pw.size() >= 5 && std::fabs(atof(pw[1].c_str()) - atof(pw[3].c_str())) < 1e-3 && std::fabs(atof(pw[2].c_str()) - atof(pw[4].c_str())) < 1e-3;
+			std::string f = (dot ? std::string("dot") : s.head) + " " + s.pts;
 			std::sort(s.rest.begin(), s.rest.end());
 			for (auto& r : s.rest) f += " | " + r;
 			std::vector<std::string> xs;
