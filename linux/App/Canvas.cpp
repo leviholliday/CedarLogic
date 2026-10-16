@@ -571,7 +571,7 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	CLDocument* doc = win->document();
 	const int p = page();
 	if (doc == nullptr || p < 0) return;
-	CLDrawOptions o;
+	CLDrawOptions o{};
 	o.dark = dark;
 	o.accent = prefs().accent;
 	o.wireScale = prefs().wireScale();
@@ -579,6 +579,7 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	o.thumbnail = false;
 	o.showSelection = true;
 	o.selectionFade = win->selectionFade();
+	o.ink = CL_INK_FOLLOW;
 	// CEDARLOGIC_FAST_DRAG=1: coarser antialiasing while a drag is moving
 	// things (see SMOOTHNESS.md); the release draws it properly again.
 	const bool coarse = fastDrag && drag == Drag::Edit;
