@@ -783,7 +783,8 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 		CLDocument* const before = doc;
 		std::string pre;
 		const int preSteps = stepCheck ? cl_edit_undo_count(doc) : 0;
-		if (stepCheck) pre = canonical(cl_document_save_text(doc));
+		std::string preRaw;   // as saved, to reopen
+		if (stepCheck) { preRaw = cl_document_save_text(doc); pre = canonical(preRaw); }
 		// Pages added, moved or renamed aren't undo steps: an op that did that too is not checked.
 		auto pageKey = [](CLDocument* d) { std::string k; for (int i = 0; i < cl_document_page_count(d); i++) k += std::to_string(cl_document_page_id(d, i)) + ":" + cl_document_page_name(d, i) + ";"; return k; };
 		const std::string prePages = stepCheck ? pageKey(doc) : std::string();
@@ -821,7 +822,10 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 			else if (ri(6) == 0 && pages > 1) cl_document_delete_page(doc, page);
 			else if (ri(8) == 0 && pages > 1) cl_document_close_page(doc, page);
 			break;
-		case 20: if (ri(2)) cl_edit_straighten(doc, page); else if (cl_edit_tidy_begin(doc, page, ri(2))) cl_edit_tidy_end(doc, ri(2)); break;
+		case 20:
+			if (getenv("CL_FUZZ_TRACE")) printf("    selected: %d gates, %d wires\n", cl_edit_selected_gate_count(doc, page), cl_edit_selected_wire_count(doc, page));
+			if (ri(2)) cl_edit_straighten(doc, page); else if (cl_edit_tidy_begin(doc, page, ri(2))) cl_edit_tidy_end(doc, ri(2));
+			break;
 		case 21: if (ri(2)) cl_edit_lock_selection(doc, page, true); else cl_edit_unlock_all(doc, page); break;
 		case 22:
 			cl_document_set_running(doc, ri(3) != 0);
@@ -831,7 +835,13 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 		case 23: cl_document_click(doc, page, rf(-30, 30), rf(-30, 30)); break;
 		}
 		watchPrint(doc, "after op");
-		if (stepCheck) { std::string what; if (getenv("CL_FUZZ_INVARIANT") && danglingConnection(doc, what)) { printf("seed %llu: after op %d (case %d): %s\n", seed, n, op, what.c_str()); cl_document_close(doc); return false; } }
+		if (stepCheck) { std::string what; if (getenv("CL_FUZZ_INVARIANT") && danglingConnection(doc, what)) {
+			printf("seed %llu: after op %d (case %d): %s\n", seed, n, op, what.c_str());
+			if (const char* dir = getenv("CL_FUZZ_DUMP")) {   // the circuit before the operation, to reproduce it
+				std::string path = std::string(dir) + "/before-op.cdl";
+				if (FILE* f = fopen(path.c_str(), "w")) { fwrite(preRaw.data(), 1, preRaw.size(), f); fclose(f); }
+			}
+			cl_document_close(doc); return false; } }
 		if (stepCheck && doc == before && idle(doc) && cl_edit_undo_count(doc) == preSteps + 1 && !cl_edit_can_redo(doc) && pageKey(doc) == prePages) {
 			const std::string name = cl_edit_undo_name(doc);
 			const std::string post = canonical(cl_document_save_text(doc));
