@@ -3,8 +3,12 @@
 // name to rename it), a Karnaugh map for every light with the groups drawn
 // on, and each light's simplest sum of products and product of sums, with
 // NOT as a bar over the letter and a way to build them as gates. And Check:
-// the lights against a formula or truth table the assignment gives (the
-// core's cl_check_*, as the Mac and Linux apps), wrong rows shown. Copy puts
+// the lights against what the assignment gives (the core's cl_check_*, as the
+// Mac and Linux apps): a formula or a truth table, wrong rows shown; or a
+// count, a state table or a timing table, run clock pulse by clock pulse on a
+// copy of the circuit (off this thread, as the Mac's CheckRun), each pulse a
+// column of the step strip. A page with lights but no truth table (a counter
+// has no switches) opens on Check alone. Copy puts
 // the table on the clipboard as a tab-separated table that pastes into Word,
 // Docs or a spreadsheet; Export saves it as CSV.
 
@@ -19,6 +23,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <thread>
 
 namespace {
 
@@ -244,6 +249,9 @@ std::string nameKey(const std::string& s) {
 
 const int kCheckTab = 3, kTabs = 4;
 const int kEditId = 10;
+// Timers (1 is Copied's), and a clocked check's result coming back.
+const UINT_PTR kCheckTimer = 2, kSpinTimer = 3;
+const UINT kCheckDone = WM_APP + 20;
 // Icon font glyphs for the verdict and the notes.
 const wchar_t kGlyphCheck = 0xE73E, kGlyphCross = 0xE711, kGlyphInfo = 0xE946, kGlyphWarning = 0xE7BA, kGlyphError = 0xE783;
 
@@ -261,8 +269,15 @@ public:
 	// Check: what the assignment gives (kept per circuit and page).
 	std::string checkKey;
 	SavedCheck want;
+	// The page, for checks clock pulse by clock pulse; and why it has no truth
+	// table, when it can only be checked that way.
+	CLDocument* doc = nullptr;
+	int page = 0;
+	std::string problem;
+	bool hasTable() const { return problem.empty(); }
 
 	~TruthWindow() {
+		stopClocked();
 		if (check) cl_check_free(check);
 		if (editFont) DeleteObject(editFont);
 		if (editBrush) DeleteObject(editBrush);
@@ -310,6 +325,7 @@ public:
 			DispatchMessageW(&m);
 		}
 		if (m.message == WM_QUIT) PostQuitMessage((int)m.wParam);
+		stopClocked();
 		EnableWindow(o, TRUE);
 		SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 		DestroyWindow(hwnd);
@@ -331,6 +347,23 @@ private:
 	CLCheck* check = nullptr;
 	std::string checkError;   // the formula couldn't be read
 	bool onlyWrong = false, scrollToWrong = false;
+	int keyKind = CL_KEY_EMPTY;   // what the text reads as (cl_check_key_kind)
+	bool clocked = false;         // `check` was run clock pulse by clock pulse
+	// What a name's column means: the table's columns, or the page's switches
+	// then lights (a clocked check's ports).
+	std::vector<std::string> columns;
+	std::vector<bool> columnIsInput;
+	// A clocked check running off this thread: its job, the thread, and which
+	// run it is (a result for an older one is thrown away).
+	CLCheckJob* job = nullptr;
+	std::thread worker;
+	unsigned runId = 0;
+	bool checking = false;
+	// The step strip: the step chosen, and how far it's scrolled along.
+	int selectedStep = -1;
+	float stripScroll = 0, stripView = 0, stripContent = 0;
+	D2D1_RECT_F stripRect{};
+	bool scrollToStep = false;
 	HWND edit = nullptr;
 	HWND focusBefore = nullptr;   // what had the keyboard when the window went to the back
 	bool focusEditor = false;     // give the box the keyboard once it's shown
@@ -446,13 +479,15 @@ private:
 				}
 				trace->Release();
 			}
-			drawText(rt, "Truth Table", D2D1::RectF(22, 22, 200, 50), 21, D2D1::ColorF(1, 1, 1, 1), TextAlign::Leading, true);
-			drawText(rt, strf("%d switch%s → %d light%s · %d rows", n(), n() == 1 ? "" : "es", outputs(), outputs() == 1 ? "" : "s",
-			                  (int)rows.size()),
-			         D2D1::RectF(160, 27, w - 22, 50), 12.5f, kBandDim);
+			const char* heading = hasTable() ? "Truth Table" : "Check My Circuit";
+			drawText(rt, heading, D2D1::RectF(22, 22, 22 + textWidth(heading, 21, true) + 4, 50), 21, D2D1::ColorF(1, 1, 1, 1), TextAlign::Leading, true);
+			drawText(rt, hasTable() ? strf("%d switch%s → %d light%s · %d rows", n(), n() == 1 ? "" : "es", outputs(), outputs() == 1 ? "" : "s",
+			                               (int)rows.size())
+			                        : std::string("clock pulse by clock pulse"),
+			         D2D1::RectF(22 + textWidth(heading, 21, true) + 16, 27, w - 22, 50), 12.5f, kBandDim);
 			const char* tabs[] = { "Truth Table", "Karnaugh Map", "Formulas", "Check" };
 			float x = 22;
-			for (int i = 0; i < kTabs; i++) {
+			for (int i = hasTable() ? 0 : kCheckTab; i < kTabs; i++) {
 				const float tw = textWidth(tabs[i], 12.5f, true) + 26;
 				const D2D1_RECT_F r = D2D1::RectF(x, 62, x + tw, 90);
 				const bool on = tab == i, isHot = hot == (int)hits.size();
@@ -490,8 +525,8 @@ private:
 			return pw;
 		};
 		float fx = 22;
-		fx += pill("Copy Table", fx, [this] { copy("table", tableText('\t')); }) + 10;
-		fx += pill("Export as CSV…", fx, [this] {
+		if (hasTable()) fx += pill("Copy Table", fx, [this] { copy("table", tableText('\t')); }) + 10;
+		if (hasTable()) fx += pill("Export as CSV…", fx, [this] {
 			const std::string file = chooseSaveFile(hwnd, "Export as CSV", "Truth Table.csv", { { "CSV (*.csv)", "*.csv" } }, ".csv");
 			if (file.empty()) return;
 			HANDLE f = CreateFileW(W(file).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -735,6 +770,7 @@ private:
 	// ---- Check ----
 
 	void setTab(int i) {
+		if (!hasTable()) i = kCheckTab;
 		tab = i;
 		scroll = 0;
 		if (tab == kCheckTab) focusEditor = true;
@@ -742,26 +778,108 @@ private:
 		redraw();
 	}
 
-	void recheck() {
+	static std::string trimmed(const std::string& t) {
+		const size_t a = t.find_first_not_of(" \t\r\n"), b = t.find_last_not_of(" \t\r\n");
+		return a == std::string::npos ? std::string() : t.substr(a, b - a + 1);
+	}
+
+	// Checks again: at once against the truth table; when the circuit has to
+	// be run (a count, a state table, a timing table, or start:, reset:, set:
+	// or clock: lines), once typing pauses (`now`: at once), off this thread.
+	void recheck(bool now = true) {
+		if (hwnd) KillTimer(hwnd, kCheckTimer);
+		const std::string text = trimmed(want.text);
+		bool options = false;
+		keyKind = text.empty() ? CL_KEY_EMPTY : cl_check_key_kind(text.c_str(), &options);
+		want.kind = keyKind == CL_KEY_TABLE ? 1 : 0;   // as the Mac keeps it (older versions read it)
+		std::string mapping;
+		for (auto& n : want.names) if (!n.second.empty()) mapping += n.first + "\t" + n.second + "\n";
+		const bool runs = options || keyKind == CL_KEY_COUNT || keyKind == CL_KEY_STATES || keyKind == CL_KEY_TIMING;
+		if (runs) {
+			if (!now && !gHasCheckForTesting) { SetTimer(hwnd, kCheckTimer, 300, nullptr); return; }
+			startClocked(text, mapping);
+			return;
+		}
+		stopClocked();
 		if (check) { cl_check_free(check); check = nullptr; }
 		checkError.clear();
-		if (!blank(want.text)) {
+		clocked = false;
+		if (!text.empty() && hasTable()) {
 			CLTruthTable* tt = cl_tt_new(inputs, sequential, unsettled);
 			for (const std::string& name : names) cl_tt_add_name(tt, name.c_str());
 			for (const std::string& row : rows) cl_tt_add_row(tt, row.c_str());
-			std::string mapping;
-			for (auto& n : want.names) mapping += n.first + "\t" + n.second + "\n";
-			if (want.kind == 0) {
+			if (keyKind == CL_KEY_FORMULA) {
 				formula::Parsed p;
 				std::string error;
-				if (formula::parse(want.text, p, error)) check = cl_check_expected(tt, formula::checkSpec(p).c_str(), mapping.c_str());
+				if (formula::parse(text, p, error)) check = cl_check_expected(tt, formula::checkSpec(p).c_str(), mapping.c_str());
 				else checkError = error;
 			} else {
-				check = cl_check_table(tt, want.text.c_str(), mapping.c_str());
+				check = cl_check_table(tt, text.c_str(), mapping.c_str());
 			}
 			cl_tt_free(tt);
 		}
+		columns.assign(names.begin(), names.end());
+		columnIsInput.clear();
+		for (size_t i = 0; i < names.size(); i++) columnIsInput.push_back((int)i < inputs);
 		scrollToWrong = true;
+		redraw();
+	}
+
+	// A clocked check, on a copy of the circuit made here; the run on a
+	// thread of its own posts its result back (kCheckDone). The last result
+	// stays, faded, until then.
+	void startClocked(const std::string& text, const std::string& mapping) {
+		stopClocked();
+		checkError.clear();
+		if (gHasCheckForTesting || hwnd == nullptr) {   // CI's pictures: one deterministic frame
+			showClocked(cl_check_clocked(doc, page, text.c_str(), mapping.c_str()));
+			return;
+		}
+		CLCheckJob* j = cl_check_clocked_prepare(doc, page, text.c_str(), mapping.c_str());
+		if (j == nullptr) { showClocked(cl_check_clocked(doc, page, text.c_str(), mapping.c_str())); return; }
+		job = j;
+		checking = true;
+		const unsigned id = ++runId;
+		const HWND to = hwnd;
+		worker = std::thread([j, id, to] {
+			CLCheck* r = cl_check_clocked_run(j);
+			if (!PostMessageW(to, kCheckDone, (WPARAM)id, (LPARAM)r) && r) cl_check_free(r);
+		});
+		redraw();
+	}
+
+	// Stops a run in progress (its result, if it still comes, is thrown away).
+	void stopClocked() {
+		if (worker.joinable()) {
+			if (job) cl_check_job_cancel(job);
+			worker.join();
+		}
+		if (job) { cl_check_job_free(job); job = nullptr; }
+		checking = false;
+		runId++;
+	}
+
+	void clockedDone(unsigned id, CLCheck* r) {
+		if (id != runId) { if (r) cl_check_free(r); return; }
+		if (worker.joinable()) worker.join();
+		if (job) { cl_check_job_free(job); job = nullptr; }
+		checking = false;
+		showClocked(r);
+	}
+
+	void showClocked(CLCheck* r) {
+		if (check) cl_check_free(check);
+		check = r;
+		clocked = true;
+		columns.clear();
+		columnIsInput.clear();
+		for (int i = 0; check && i < cl_check_port_count(check); i++) {
+			columns.push_back(cl_check_port_name(check, i));
+			columnIsInput.push_back(cl_check_port_is_input(check, i));
+		}
+		selectedStep = check ? cl_check_first_wrong(check) : -1;
+		stripScroll = 0;
+		scrollToStep = selectedStep >= 0;
 		redraw();
 	}
 
@@ -772,7 +890,7 @@ private:
 		if (text == want.text) return;
 		want.text = text;
 		InvalidateRect(edit, nullptr, TRUE);   // its hint comes and goes
-		recheck();
+		recheck(false);
 	}
 
 	// The box's paper, under it and in it.
@@ -826,8 +944,12 @@ private:
 		const bool dark = prefs().dark;
 		const D2D1_COLOR_F dim = dark ? D2D1::ColorF(0.62f, 0.62f, 0.62f) : D2D1::ColorF(0.42f, 0.42f, 0.42f), paper = boxPaper(dark);
 		const D2D1_COLOR_F mix = D2D1::ColorF(paper.r + (dim.r - paper.r) * 0.75f, paper.g + (dim.g - paper.g) * 0.75f, paper.b + (dim.b - paper.b) * 0.75f);
-		const std::wstring hint = W(want.kind == 0 ? "S = A ^ B ^ Cin\nCout = AB + Cin(A ^ B)        or   F(A,B,C) = Σm(1,3,5) + d(7)"
-		                                           : "A  B  Cin | S  Cout\n0  0  0   | 0  0\n0  0  1   | 1  0\n…  (X for don't care)");
+		// What it reads, the Mac's examples.
+		const std::wstring hint = W("S = A ^ B ^ Cin              a formula (or Σm(1,3,5))\n"
+		                            "A B | F, then a row each     a truth table\n"
+		                            "0, 1, 2, 3, repeat           a count\n"
+		                            "Q1 Q0 X | Q1+ Q0+ | Z …      a state table\n"
+		                            "Pulse | X | Z, then rows     a timing table");
 		RECT r = {};
 		SendMessageW(h, EM_GETRECT, 0, (LPARAM)&r);
 		HideCaret(h);   // drawn over, it would blink back inverted
@@ -873,29 +995,32 @@ private:
 	}
 
 	// What the assignment gives: a formula or a table, and the box to type it in.
-	float drawCheckControls(ID2D1RenderTarget* rt, float y, float w, D2D1_COLOR_F ink, D2D1_COLOR_F dim, D2D1_COLOR_F accent, bool dark) {
-		float x = 22;
-		const char* intro = "The assignment gives";
-		drawText(rt, intro, D2D1::RectF(x, y, x + 200, y + 28), 12.5f, dim);
-		x += textWidth(intro, 12.5f) + 10;
-		const char* segs[] = { "A formula", "A truth table" };
-		const float segW[2] = { textWidth(segs[0], 12) + 24, textWidth(segs[1], 12) + 24 };
-		fillRound(rt, D2D1::RectF(x, y, x + segW[0] + segW[1] + 4, y + 28), 14, withAlpha(ink, 0.06f));
-		for (int i = 0; i < 2; i++) {
-			const D2D1_RECT_F r = D2D1::RectF(x + 2, y + 2, x + 2 + segW[i], y + 26);
-			const bool on = want.kind == i, isHot = hot == (int)hits.size();
-			if (on) fillRound(rt, r, 12, accent);
-			else if (isHot) fillRound(rt, r, 12, withAlpha(ink, 0.06f));
-			drawText(rt, segs[i], r, 12, on ? chrome().onAccent() : ink, TextAlign::Center);
-			hits.push_back({ r, [this, i] {
-				if (want.kind == i) return;
-				want.kind = i;
-				InvalidateRect(edit, nullptr, TRUE);   // the other hint
-				recheck();
-			} });
-			x += segW[i];
+	static const char* reading(int kind) {
+		switch (kind) {
+		case CL_KEY_FORMULA: return "Read as a formula";
+		case CL_KEY_TABLE: return "Read as a truth table";
+		case CL_KEY_COUNT: return "Read as a count";
+		case CL_KEY_STATES: return "Read as a state table";
+		case CL_KEY_TIMING: return "Read as a timing table";
+		default: return "";
 		}
-		if (want.kind == 1) {
+	}
+
+	float drawCheckControls(ID2D1RenderTarget* rt, float y, float w, D2D1_COLOR_F ink, D2D1_COLOR_F dim, D2D1_COLOR_F accent, bool dark) {
+		(void)ink;
+		if (!hasTable()) {
+			// Why there's no Truth Table tab.
+			const std::string why = problem + " It can still be checked clock pulse by clock pulse.";
+			drawIcon(rt, kGlyphInfo, D2D1::RectF(22, y + 1, 38, y + 17), 11, dim);
+			const float th = brand::text(rt, why, 42, y, 11.5f, DWRITE_FONT_WEIGHT_NORMAL, dim, w - 64);
+			y += std::max(18.0f, th) + 8;
+		}
+		// What the text reads as (nothing before anything's typed: the box says it).
+		if (keyKind != CL_KEY_EMPTY) {
+			drawIcon(rt, Icon::Search, D2D1::RectF(22, y + 6, 38, y + 22), 11, dim);
+			drawText(rt, reading(keyKind), D2D1::RectF(42, y, w - 22, y + 28), 12.5f, dim);
+		}
+		if (hasTable() && (keyKind == CL_KEY_EMPTY || keyKind == CL_KEY_TABLE)) {
 			const char* fill = "Fill In This Circuit's Rows";
 			const float fw = textWidth(fill, 11.5f, true);
 			const D2D1_RECT_F r = D2D1::RectF(w - 22 - fw, y, w - 22, y + 28);
@@ -908,8 +1033,11 @@ private:
 				focusEditor = true;
 			} });
 		}
-		y += 36;
-		const float h = want.kind == 1 ? 104 : 62;
+		y += 32;
+		// Room for the examples, else for what's typed.
+		int lines = 1;
+		for (char ch : want.text) if (ch == '\n') lines++;
+		const float h = blank(want.text) ? 5 * 17.0f + 14 : std::min(104.0f, std::max(58.0f, lines * 17.0f + 16));
 		const D2D1_RECT_F box = D2D1::RectF(22, y, w - 22, y + h);
 		fillRound(rt, box, 10, boxPaper(dark));
 		strokeRound(rt, box, 10, dark ? D2D1::ColorF(1, 1, 1, 0.09f) : D2D1::ColorF(0, 0, 0, 0.08f));
@@ -922,11 +1050,33 @@ private:
 		const D2D1_COLOR_F on = dark ? kNeon : kNeonDeep, white = D2D1::ColorF(1, 1, 1);
 		float y = box.top;
 		const bool empty = blank(want.text);
-		const int verdict = check ? cl_check_verdict(check) : 2;
-		const std::string summary = empty ? (want.kind == 0 ? "Type what the assignment asks for, like S = A ^ B ^ Cin."
-		                                                    : "Paste or type the truth table you were given.")
+		const bool runs = keyKind == CL_KEY_COUNT || keyKind == CL_KEY_STATES || keyKind == CL_KEY_TIMING || clocked;
+		const bool noTable = !empty && !runs && !hasTable();
+		const int verdict = check && !noTable ? cl_check_verdict(check) : 2;
+		const std::string summary = empty ? "Type what the assignment asks for, like S = A ^ B ^ Cin."
+		                          : noTable ? "Can't check that yet: this page has no truth table."
 		                          : check ? cl_check_summary(check) : "Can't read that yet.";
 		const D2D1_COLOR_F color = empty ? dim : verdict == 0 ? on : verdict == 1 ? kRed : kOrange;
+		if (checking) {
+			// While the next check runs, the last one stays, faded.
+			const D2D1_RECT_F banner = D2D1::RectF(box.left, y, box.right, y + 38);
+			fillRound(rt, banner, 10, withAlpha(dim, 0.06f));
+			const double t = nowSeconds();
+			for (int i = 0; i < 8; i++) {
+				const float a = (float)(i * 3.14159 / 4 + t * 6);
+				const D2D1_POINT_2F c = D2D1::Point2F(banner.left + 22 + 6 * std::cos(a), (banner.top + banner.bottom) / 2 + 6 * std::sin(a));
+				fillCircle(rt, c, 1.6f, withAlpha(dim, 0.25f + 0.09f * ((i + (int)(t * 8)) % 8)));
+			}
+			drawText(rt, "Checking\u2026 (running the circuit clock pulse by clock pulse)", D2D1::RectF(banner.left + 42, banner.top, banner.right - 12, banner.bottom),
+			         13.5f, dim);
+			y = banner.bottom + 10;
+			SetTimer(hwnd, kSpinTimer, 60, nullptr);
+			if (check == nullptr) return y - box.top;
+			rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 0.4f), nullptr);
+			const float rest = drawCheckResult(rt, box, y, ink, dim, accent, dark, false, false);
+			rt->PopLayer();
+			return rest;
+		}
 		{
 			const D2D1_RECT_F banner = D2D1::RectF(box.left, y, box.right, y + 38);
 			fillRound(rt, banner, 10, withAlpha(color, empty ? 0.06f : dark ? 0.16f : 0.11f));
@@ -937,7 +1087,7 @@ private:
 			else if (!empty && verdict == 1) drawIcon(rt, kGlyphCross, mark, 8.5f, white);
 			else drawText(rt, empty ? "…" : "?", mark, 11, white, TextAlign::Center, true);
 			float right = banner.right - 12;
-			if (verdict == 1 && check) {
+			if (verdict == 1 && check && !clocked) {
 				const char* label = "Only wrong rows";
 				const float lw = textWidth(label, 11.5f) + 22;
 				const D2D1_RECT_F r = D2D1::RectF(right - lw, banner.top + 8, right, banner.bottom - 8);
@@ -953,6 +1103,21 @@ private:
 			         !empty);
 			y = banner.bottom + 10;
 		}
+		if (noTable) {
+			drawIcon(rt, kGlyphError, D2D1::RectF(box.left, y, box.left + 16, y + 16), 11, kRed);
+			const float th = brand::text(rt, problem + " Check it clock pulse by clock pulse instead, with a count, a state table or a timing table.",
+			                             box.left + 20, y, 11.5f, DWRITE_FONT_WEIGHT_NORMAL, kRed, box.right - box.left - 20);
+			return y + std::max(16.0f, th) + 5 - box.top;
+		}
+		return drawCheckResult(rt, box, y, ink, dim, accent, dark, true, true);
+	}
+
+	// The notes, the names, and the rows or the step strip, from `y` down.
+	float drawCheckResult(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, float y, D2D1_COLOR_F ink, D2D1_COLOR_F dim, D2D1_COLOR_F accent, bool dark,
+	                      bool live, bool scrolls) {
+		const D2D1_COLOR_F on = dark ? kNeon : kNeonDeep;
+		(void)live;
+		(void)scrolls;
 		// Notes: problems in red, warnings in orange, the rest quiet.
 		auto note = [&](const std::string& text, int kind) {
 			const D2D1_COLOR_F c = kind == 2 ? kRed : kind == 1 ? kOrange : dim;
@@ -968,7 +1133,7 @@ private:
 		bool showNames = false;
 		for (int i = 0; i < cl_check_name_count(check); i++) {
 			const int col = cl_check_name_column(check, i);
-			if (col < 0 || col >= (int)names.size() || cl_check_name_by_hand(check, i) || nameKey(names[col]) != nameKey(cl_check_name(check, i)))
+			if (col < 0 || col >= (int)columns.size() || cl_check_name_by_hand(check, i) || nameKey(columns[col]) != nameKey(cl_check_name(check, i)))
 				showNames = true;
 		}
 		if (showNames) {
@@ -978,8 +1143,8 @@ private:
 			for (int i = 0; i < cl_check_name_count(check); i++) {
 				const std::string name = cl_check_name(check, i);
 				const int col = cl_check_name_column(check, i);
-				const bool matched = col >= 0 && col < (int)names.size(), input = cl_check_name_is_input(check, i);
-				const std::string label = name + " → " + (matched ? names[col] : std::string("?"));
+				const bool matched = col >= 0 && col < (int)columns.size(), input = cl_check_name_is_input(check, i);
+				const std::string label = name + " → " + (matched ? columns[col] : std::string("?"));
 				const bool bold = cl_check_name_by_hand(check, i);
 				const float cw = textWidth(label, 11.5f, bold) + 20;
 				if (x + cw > box.right && x > box.left + 52) { x = box.left + 52; y += 30; }
@@ -993,6 +1158,8 @@ private:
 			}
 			y += 34;
 		}
+
+		if (clocked) return cl_check_step_count(check) > 0 ? drawStepStrip(rt, box, y, ink, dim, accent, dark, on) : y - box.top;
 
 		// The rows: the circuit's inputs, then for each output what was asked for and what it gave.
 		std::vector<int> outs;
@@ -1068,6 +1235,234 @@ private:
 		return card.bottom + 12 - box.top;
 	}
 
+	// ---- The step strip (the Mac's) ----
+	// A column per step (the start, then each clock pulse), a row per signal:
+	// inputs and the state as they were, then the next state and the lights,
+	// what was asked for over what they showed. The first wrong step is
+	// marked and scrolled to; click a step, or ← and →, to read it.
+
+	struct StripRow { int signal; bool pair; float height() const { return pair ? 38.0f : 24.0f; } };   // signal -1: a count's number
+
+	std::vector<int> signalsOf(int role) const {
+		std::vector<int> out;
+		for (int i = 0; i < cl_check_signal_count(check); i++) if (cl_check_signal_role(check, i) == role) out.push_back(i);
+		return out;
+	}
+
+	std::vector<StripRow> stripRows() const {
+		std::vector<StripRow> rowsOut;
+		if (cl_check_kind(check) == CL_KEY_COUNT && cl_check_signal_count(check) > 1) rowsOut.push_back({ -1, true });
+		for (int role : { CL_SIGNAL_INPUT, CL_SIGNAL_STATE, CL_SIGNAL_NEXT, CL_SIGNAL_OUTPUT })
+			for (int i : signalsOf(role)) rowsOut.push_back({ i, role == CL_SIGNAL_NEXT || role == CL_SIGNAL_OUTPUT });
+		return rowsOut;
+	}
+
+	std::string stepText(int step, int what) const { return cl_check_step_text(check, step, what); }
+
+	// A signal's cells in a step: what was asked for (0 when nothing is) and what was there.
+	void cellOf(int step, int signal, char& asked, char& got) const {
+		asked = 0;
+		got = 0;
+		const int role = cl_check_signal_role(check, signal);
+		auto at = [](const std::string& t, int k) { return k >= 0 && k < (int)t.size() ? t[k] : (char)0; };
+		auto indexIn = [](const std::vector<int>& v, int x) {
+			for (size_t i = 0; i < v.size(); i++) if (v[i] == x) return (int)i;
+			return -1;
+		};
+		if (role == CL_SIGNAL_INPUT) { got = at(stepText(step, CL_STEP_INPUTS), indexIn(signalsOf(CL_SIGNAL_INPUT), signal)); return; }
+		if (role == CL_SIGNAL_STATE) { got = at(stepText(step, CL_STEP_STATE_BITS), indexIn(signalsOf(CL_SIGNAL_STATE), signal)); return; }
+		std::vector<int> shown = signalsOf(CL_SIGNAL_NEXT);
+		for (int i : signalsOf(CL_SIGNAL_OUTPUT)) shown.push_back(i);
+		const int k = indexIn(shown, signal);
+		asked = at(stepText(step, CL_STEP_EXPECTED), k);
+		got = at(stepText(step, CL_STEP_GOT), k);
+	}
+
+	// A count's number from its bits: -1 unless every bit is 0 or 1.
+	static long number(const std::string& bits) {
+		if (bits.empty()) return -1;
+		long v = 0;
+		for (char c : bits) { if (c != '0' && c != '1') return -1; v = v * 2 + (c == '1'); }
+		return v;
+	}
+
+	std::string stepTitle(int step) const {
+		const int k = cl_check_step_kind(check, step);
+		return k == CL_STEP_START ? "Start" : k == CL_STEP_SET ? "Set" : strf("Pulse %d", cl_check_step_pulse(check, step));
+	}
+
+	// A step in words (the line under the strip), as the Mac says it.
+	std::string describe(int step) const {
+		if (step < 0 || step >= cl_check_step_count(check)) return "";
+		auto namesOf = [&](const std::vector<int>& idx) {
+			std::string out;
+			for (int i : idx) out += (out.empty() ? "" : " ") + std::string(cl_check_signal_name(check, i));
+			return out;
+		};
+		auto bits = [](const std::string& t) {
+			std::string out;
+			for (char c : t) out += c == '-' ? std::string("–") : std::string(1, c);
+			return out;
+		};
+		const int k = cl_check_step_kind(check, step), row = cl_check_step_row(check, step);
+		std::string head = k == CL_STEP_START ? (step == 0 ? "The start" : "Back to the start")
+		                 : k == CL_STEP_SET ? "The state set with switches"
+		                                    : strf("Pulse %d", cl_check_step_pulse(check, step)) + (row > 0 ? strf(" (row %d)", row) : "");
+		const std::vector<int> state = signalsOf(CL_SIGNAL_STATE), ins = signalsOf(CL_SIGNAL_INPUT);
+		std::vector<int> shown = signalsOf(CL_SIGNAL_NEXT);
+		for (int i : signalsOf(CL_SIGNAL_OUTPUT)) shown.push_back(i);
+		const std::string st = stepText(step, CL_STEP_STATE_BITS), in = stepText(step, CL_STEP_INPUTS);
+		const std::string ex = stepText(step, CL_STEP_EXPECTED), got = stepText(step, CL_STEP_GOT);
+		if (!state.empty() && !st.empty()) head += ", in state " + namesOf(state) + " = " + bits(st);
+		if (!ins.empty() && !in.empty()) head += ", with " + namesOf(ins) + " = " + bits(in);
+		if (got.empty()) return head + ".";
+		auto num = [&](const std::string& t) {
+			const long v = cl_check_kind(check) == CL_KEY_COUNT && t.size() > 1 ? number(t) : -1;
+			return v < 0 ? std::string() : strf(" (%ld)", v);
+		};
+		std::string parts;
+		if (ex.find_first_not_of('-') != std::string::npos)
+			parts = "asked for " + namesOf(shown) + " = " + bits(ex) + num(ex) + ", the lights showed " + bits(got) + num(got);
+		else
+			parts = "the lights showed " + namesOf(shown) + " = " + bits(got) + num(got);
+		return head + ": " + parts + (cl_check_step_wrong(check, step) ? ". Wrong." : ".");
+	}
+
+	float drawStepStrip(ID2D1RenderTarget* rt, const D2D1_RECT_F& box, float y, D2D1_COLOR_F ink, D2D1_COLOR_F dim, D2D1_COLOR_F accent, bool dark,
+	                    D2D1_COLOR_F on) {
+		const float nameW = 86, stepW = 56, headH = 46;
+		const std::vector<StripRow> rs = stripRows();
+		float bodyH = 0;
+		for (const StripRow& r : rs) bodyH += r.height();
+		const int steps = cl_check_step_count(check), firstWrong = cl_check_first_wrong(check);
+		const float cardW = std::min(box.right - box.left, nameW + stepW * steps + 1);
+		const D2D1_RECT_F card = D2D1::RectF(box.left, y, box.left + cardW, y + headH + bodyH);
+		stripRect = card;
+		stripView = cardW - nameW;
+		stripContent = stepW * steps;
+		if (scrollToStep && selectedStep >= 0) {
+			scrollToStep = false;
+			const float left = selectedStep * stepW, right = left + stepW;
+			if (left < stripScroll) stripScroll = std::max(0.0f, left - stepW);
+			else if (right > stripScroll + stripView) stripScroll = right - stripView + stepW;
+		}
+		stripScroll = std::max(0.0f, std::min(stripScroll, std::max(0.0f, stripContent - stripView)));
+		const D2D1_COLOR_F line = dark ? D2D1::ColorF(1, 1, 1, 0.09f) : D2D1::ColorF(0, 0, 0, 0.08f);
+		fillRound(rt, card, 12, dark ? D2D1::ColorF(1, 1, 1, 0.045f) : D2D1::ColorF(1, 1, 1, 1));
+		ID2D1RoundedRectangleGeometry* shape = nullptr;
+		ID2D1Layer* layer = nullptr;
+		if (SUCCEEDED(d2dFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(card, 12, 12), &shape)) && SUCCEEDED(rt->CreateLayer(&layer)))
+			rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), shape), layer);
+		const Face mono(L"Consolas", 13), monoSmall(L"Consolas", 11.5f), monoBold(L"Consolas", 13.5f, false, DWRITE_FONT_WEIGHT_BOLD);
+		auto centred = [&](const Face& f, const std::string& t, float cx, float top, D2D1_COLOR_F c) { f.draw(rt, t, cx - f.width(t) / 2, top, c); };
+		// The steps, scrolled along, clipped to the right of the names.
+		const float sx0 = card.left + nameW;
+		rt->PushAxisAlignedClip(D2D1::RectF(sx0, card.top, card.right, card.bottom), D2D1_ANTIALIAS_MODE_ALIASED);
+		for (int i = 0; i < steps; i++) {
+			const float x = sx0 + i * stepW - stripScroll;
+			if (x + stepW < sx0 || x > card.right) continue;
+			const bool first = firstWrong == i, wrong = cl_check_step_wrong(check, i), selected = selectedStep == i;
+			const D2D1_RECT_F col = D2D1::RectF(x, card.top, x + stepW, card.bottom);
+			if (first) fillRect(rt, col, withAlpha(kRed, dark ? 0.26f : 0.16f));
+			else if (wrong) fillRect(rt, col, withAlpha(kRed, dark ? 0.12f : 0.07f));
+			else if (i % 2 == 1) fillRect(rt, col, withAlpha(ink, 0.025f));
+			const float cx = x + stepW / 2;
+			drawText(rt, stepTitle(i), D2D1::RectF(x, card.top + 6, x + stepW, card.top + 20), 10.5f, first ? kRed : ink, TextAlign::Center, true);
+			const int row = cl_check_step_row(check, i);
+			if (row > 0) drawText(rt, strf("row %d", row), D2D1::RectF(x, card.top + 20, x + stepW, card.top + 32), 9, first ? kRed : dim, TextAlign::Center);
+			if (first) drawText(rt, "first wrong", D2D1::RectF(x, card.top + (row > 0 ? 31 : 20), x + stepW, card.top + (row > 0 ? 43 : 32)), 9, kRed,
+			                    TextAlign::Center, true);
+			float ry = card.top + headH;
+			for (const StripRow& r : rs) {
+				if (r.signal < 0) {
+					// A count: the number over the bits.
+					const long asked = number(stepText(i, CL_STEP_EXPECTED)), got = number(stepText(i, CL_STEP_GOT));
+					if (asked >= 0) centred(monoSmall, std::to_string(asked), cx, ry + 3, dim);
+					const std::string g = got >= 0 ? std::to_string(got) : stepText(i, CL_STEP_GOT).empty() ? std::string() : "?";
+					centred(monoBold, g, cx, ry + 18, wrong ? kRed : ink);
+				} else {
+					char asked = 0, got = 0;
+					cellOf(i, r.signal, asked, got);
+					if (r.pair) {
+						const bool bad = asked && asked != '-' && got && got != asked;
+						if (asked) centred(monoSmall, asked == '-' ? std::string("–") : std::string(1, asked), cx, ry + 3, dim);
+						if (bad) fillRound(rt, D2D1::RectF(cx - 13, ry + 18, cx + 13, ry + 35), 5, withAlpha(kRed, dark ? 0.22f : 0.14f));
+						const D2D1_COLOR_F c = bad ? kRed : got == '1' ? on : got == '0' ? ink : got == 'Z' ? kBlue : got == '!' ? kRed : got == 'X' ? kOrange : dim;
+						if (got) centred(bad || got == '1' ? monoBold : mono, std::string(1, got), cx, ry + 18, c);
+					} else if (got) {
+						centred(mono, std::string(1, got), cx, ry + 4, dim);
+					}
+				}
+				ry += r.height();
+			}
+			if (first) strokeRound(rt, D2D1::RectF(col.left + 0.75f, col.top + 0.75f, col.right - 0.75f, col.bottom - 0.75f), 0, withAlpha(kRed, 0.7f), 1.5f);
+			if (selected) {
+				const float in = first ? 3.0f : 1.0f;
+				strokeRound(rt, D2D1::RectF(col.left + in + 1, col.top + in + 1, col.right - in - 1, col.bottom - in - 1), 6, accent, 2);
+			}
+			const int index = i;
+			const D2D1_RECT_F hitR = D2D1::RectF(std::max(x, sx0), card.top, std::min(x + stepW, card.right), card.bottom);
+			hits.push_back({ hitR, [this, index] { selectedStep = index; SetFocus(hwnd); } });
+		}
+		rt->PopAxisAlignedClip();
+		// The names, which stay put.
+		fillRect(rt, D2D1::RectF(card.left, card.top, sx0, card.bottom), withAlpha(ink, 0.04f));
+		fillRect(rt, D2D1::RectF(sx0 - 0.5f, card.top, sx0 + 0.5f, card.bottom), line);
+		drawText(rt, cl_check_kind(check) == CL_KEY_STATES ? "Row" : "Step", D2D1::RectF(card.left + 10, card.top, sx0, card.top + headH), 10.5f, dim,
+		         TextAlign::Leading, true);
+		float ry = card.top + headH;
+		for (const StripRow& r : rs) {
+			const int role = r.signal >= 0 ? cl_check_signal_role(check, r.signal) : CL_SIGNAL_OUTPUT;
+			const std::string name = r.signal >= 0 ? cl_check_signal_name(check, r.signal) : "Count";
+			const D2D1_COLOR_F c = role == CL_SIGNAL_INPUT || role == CL_SIGNAL_STATE ? ink : accent;
+			drawText(rt, name, D2D1::RectF(card.left + 10, ry, sx0 - 30, ry + r.height()), 12, c, TextAlign::Leading, true);
+			if (r.pair) {
+				drawText(rt, "asked", D2D1::RectF(sx0 - 34, ry + 4, sx0 - 4, ry + 17), 9, dim, TextAlign::Trailing);
+				drawText(rt, "got", D2D1::RectF(sx0 - 34, ry + 20, sx0 - 4, ry + 33), 9, dim, TextAlign::Trailing);
+			}
+			ry += r.height();
+		}
+		if (layer) { rt->PopLayer(); layer->Release(); }
+		if (shape) shape->Release();
+		strokeRound(rt, card, 12, GetFocus() == hwnd && selectedStep >= 0 ? withAlpha(accent, 0.7f) : line);
+		// More steps than fit: a thin bar under the card shows where it's scrolled.
+		float below = card.bottom + 6;
+		if (stripContent > stripView + 1) {
+			const float trackW = stripView, f = stripView / stripContent;
+			const float tx = sx0 + (trackW - trackW * f) * (stripScroll / std::max(1.0f, stripContent - stripView));
+			fillRound(rt, D2D1::RectF(sx0, below, sx0 + trackW, below + 4), 2, withAlpha(ink, 0.06f));
+			fillRound(rt, D2D1::RectF(tx, below, tx + trackW * f, below + 4), 2, withAlpha(ink, 0.25f));
+			below += 10;
+		}
+		// The chosen step in words, and the way to the first wrong one.
+		const std::string said = selectedStep >= 0 ? describe(selectedStep) : "Click a step, or use ← and →, to read it.";
+		float right = box.right;
+		if (firstWrong >= 0 && selectedStep != firstWrong) {
+			const char* go = "Show the First Wrong Step";
+			const float gw = textWidth(go, 11.5f, true);
+			const D2D1_RECT_F r = D2D1::RectF(box.right - gw, below, box.right, below + 16);
+			const bool isHot = hot == (int)hits.size();
+			drawText(rt, go, r, 11.5f, withAlpha(accent, isHot ? 0.75f : 1.0f), TextAlign::Trailing, true);
+			hits.push_back({ r, [this, firstWrong] { selectedStep = firstWrong; scrollToStep = true; SetFocus(hwnd); } });
+			right = r.left - 12;
+		}
+		const bool wrongStep = selectedStep >= 0 && cl_check_step_wrong(check, selectedStep);
+		const float th = brand::text(rt, said, box.left, below, 11.5f, DWRITE_FONT_WEIGHT_NORMAL, wrongStep ? kRed : dim, right - box.left);
+		return below + std::max(16.0f, th) + 12 - box.top;
+	}
+
+	// ← and → along the steps.
+	bool stepKey(UINT vk) {
+		if (tab != kCheckTab || !clocked || check == nullptr || (vk != VK_LEFT && vk != VK_RIGHT)) return false;
+		const int last = cl_check_step_count(check) - 1;
+		if (last < 0) return false;
+		const int at = selectedStep >= 0 ? selectedStep : std::max(0, cl_check_first_wrong(check));
+		selectedStep = vk == VK_LEFT ? std::max(0, at - 1) : std::min(last, at + 1);
+		scrollToStep = true;
+		redraw();
+		return true;
+	}
+
 	// Which switch or light an asked-for name is: a menu of them.
 	void chooseName(const std::string& name, bool input) {
 		HMENU menu = CreatePopupMenu();
@@ -1078,10 +1473,11 @@ private:
 			for (char c : s) { if (c == '&') out += '&'; out += c; }
 			return out;
 		};
-		for (int c = input ? 0 : inputs; c < (input ? inputs : (int)names.size()); c++) {
-			choices.push_back(names[c]);
-			const bool chosen = byHand != want.names.end() && byHand->second == names[c];
-			AppendMenuW(menu, MF_STRING | (chosen ? MF_CHECKED : 0), choices.size(), W(menuText((input ? "Switch " : "Light ") + names[c])).c_str());
+		for (size_t c = 0; c < columns.size(); c++) {
+			if (columnIsInput[c] != input || std::find(choices.begin(), choices.end(), columns[c]) != choices.end()) continue;
+			choices.push_back(columns[c]);
+			const bool chosen = byHand != want.names.end() && byHand->second == columns[c];
+			AppendMenuW(menu, MF_STRING | (chosen ? MF_CHECKED : 0), choices.size(), W(menuText((input ? "Switch " : "Light ") + columns[c])).c_str());
 		}
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING | (byHand == want.names.end() ? MF_CHECKED : 0), 1000, L"Match by Name");
@@ -1145,9 +1541,13 @@ private:
 			return true;
 		}
 		case WM_TIMER:
-			KillTimer(hwnd, 1);
-			copied.clear();
-			redraw();
+			KillTimer(hwnd, wp);
+			if (wp == kCheckTimer) recheck(true);
+			else if (wp == kSpinTimer) { if (checking) redraw(); }
+			else { copied.clear(); redraw(); }
+			return true;
+		case kCheckDone:
+			clockedDone((unsigned)wp, reinterpret_cast<CLCheck*>(lp));
 			return true;
 		case WM_MOUSEMOVE: {
 			TRACKMOUSEEVENT t = { sizeof t, TME_LEAVE, hwnd, 0 };
@@ -1191,7 +1591,20 @@ private:
 			if (i >= 0) { auto act = hits[i].act; act(); redraw(); }
 			return true;
 		}
+		case WM_MOUSEHWHEEL:
 		case WM_MOUSEWHEEL: {
+			// Over the step strip, with Shift or sideways: along the steps.
+			POINT sp = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+			ScreenToClient(hwnd, &sp);
+			const float px = sp.x / scale(), py = sp.y / scale() + scroll;
+			const bool sideways = msg == WM_MOUSEHWHEEL || (GetKeyState(VK_SHIFT) & 0x8000);
+			if (tab == kCheckTab && clocked && sideways && stripContent > stripView && inRect(stripRect, px, py)) {
+				const float d = GET_WHEEL_DELTA_WPARAM(wp) * 56.0f / WHEEL_DELTA;
+				stripScroll = std::max(0.0f, std::min(stripScroll + (msg == WM_MOUSEHWHEEL ? d : -d), stripContent - stripView));
+				redraw();
+				return true;
+			}
+			if (msg == WM_MOUSEHWHEEL) return true;
 			const float view = contentRect.bottom - contentRect.top;
 			scroll = std::max(0.0f, std::min(scroll - GET_WHEEL_DELTA_WPARAM(wp) * 56.0f / WHEEL_DELTA, contentH - view));
 			redraw();
@@ -1199,6 +1612,7 @@ private:
 		}
 		case WM_KEYDOWN:
 			if (wp == VK_ESCAPE || wp == VK_RETURN) { done = true; return true; }
+			if (stepKey((UINT)wp)) return true;
 			if (wp == VK_TAB) { setTab((tab + ((GetKeyState(VK_SHIFT) & 0x8000) ? kTabs - 1 : 1)) % kTabs); return true; }
 			if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) { copy("table", tableText('\t')); return true; }
 			return false;
@@ -1220,25 +1634,35 @@ void setCheckForTesting(const std::string& text) {
 void showTruthTable(CircuitWindow* w, int page, bool check) {
 	char err[512] = "";
 	CLTruthTable* tt = cl_truth_table(w->document(), page, err, sizeof err);
-	if (tt == nullptr) {
+	// A counter has lights and a clock but no switches: no truth table, but
+	// it can still be checked clock pulse by clock pulse.
+	const bool checkOnly = tt == nullptr && cl_check_clocked_page(w->document(), page);
+	if (tt == nullptr && !checkOnly) {
 		showMessage(w->window(), Tone::Info, "A truth table couldn't be made for this page",
 		            *err ? err : "Add switches (inputs) and lights (outputs) to the page first.");
 		return;
 	}
 	TruthWindow t;
 	t.owner = w;
-	const int cols = cl_tt_columns(tt), rows = cl_tt_rows(tt);
-	t.inputs = cl_tt_inputs(tt);
-	for (int c = 0; c < cols; c++) t.names.push_back(cl_tt_name(tt, c));
-	for (int r = 0; r < rows; r++) {
-		std::string row;
-		for (int c = 0; c < cols; c++) row += cl_tt_cell(tt, r, c);
-		t.rows.push_back(row);
+	t.doc = w->document();
+	t.page = page;
+	if (tt) {
+		const int cols = cl_tt_columns(tt), rows = cl_tt_rows(tt);
+		t.inputs = cl_tt_inputs(tt);
+		for (int c = 0; c < cols; c++) t.names.push_back(cl_tt_name(tt, c));
+		for (int r = 0; r < rows; r++) {
+			std::string row;
+			for (int c = 0; c < cols; c++) row += cl_tt_cell(tt, r, c);
+			t.rows.push_back(row);
+		}
+		t.sequential = cl_tt_sequential(tt);
+		t.unsettled = cl_tt_unsettled(tt);
+		cl_tt_free(tt);
+	} else {
+		t.problem = *err ? err : "A truth table couldn't be made for this page.";
+		t.sequential = true;
 	}
-	t.sequential = cl_tt_sequential(tt);
-	t.unsettled = cl_tt_unsettled(tt);
-	cl_tt_free(tt);
-	t.tab = check ? kCheckTab : std::min(std::max(prefs().truthTab, 0), kTabs - 1);
+	t.tab = check || checkOnly ? kCheckTab : std::min(std::max(prefs().truthTab, 0), kTabs - 1);
 	// What was last checked is kept per circuit and page (CI's --check isn't).
 	t.checkKey = w->filePath().empty() ? strf("unsaved-%p#%d", (void*)w, page) : w->filePath() + strf("#%d", page);
 	const bool hadCheck = loadCheck(t.checkKey, t.want);
@@ -1250,7 +1674,7 @@ void showTruthTable(CircuitWindow* w, int page, bool check) {
 	t.run();
 	g_truthTablesOpen--;
 	if (!gHasCheckForTesting && (hadCheck || !blank(t.want.text))) saveCheck(t.checkKey, t.want);
-	if (prefs().truthTab != t.tab) { prefs().truthTab = t.tab; prefs().save(); }
+	if (!checkOnly && prefs().truthTab != t.tab) { prefs().truthTab = t.tab; prefs().save(); }
 	if (!t.buildText.empty()) {
 		// Kept for Build from Formula either way; a locked circuit isn't added to.
 		prefs().lastFormula = t.buildText;

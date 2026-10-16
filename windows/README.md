@@ -44,7 +44,9 @@ it compiles without a Windows machine:
   the Mac app's features: Your Circuits and Version History (`Library`,
   `LibraryWindow`, sharing `%APPDATA%\CedarLogic\Library` with the wx app),
   templates and parts (`Collections`), the truth table with K-maps,
-  formulas and Check My Circuit (`TruthTableWindow`) and Build from Formula (`Formula`), Find
+  formulas and Check My Circuit -- against a formula or a truth table, or clock
+  pulse by clock pulse against a count, a state table or a timing table, with
+  its step strip (`TruthTableWindow`) -- and Build from Formula (`Formula`), Find
   (`FindBar`), the Ctrl+Tab switcher (`TabSwitcher`), the oscilloscope,
   docked under the canvas, and its timing diagrams (`Scope`), Export as Image (`Export`, with `Images`
   for pictures made off screen), Export Lab Report (`LabReport`: a PDF of the
