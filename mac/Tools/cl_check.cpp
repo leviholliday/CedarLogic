@@ -372,6 +372,61 @@ int main(int argc, char** argv) {
 		cl_document_close(d);
 	}
 
+	printf("Undo of a delete or a Disconnect gives the wires back their bends\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "AA_AND2", 12, 6);
+		guiGate* a1 = newest(d, 0);
+		cl_edit_add_gate(d, 0, "AA_AND2", 12, -6);
+		guiGate* a2 = newest(d, 0);
+		wire(d, sw, "OUT", a1, "IN");
+		guiWire* w = nullptr;
+		for (auto& e : *d->page(0)->getWireList()) if (e.second) w = e.second;
+		auto run = [&](bool vertical, float& rx, float& ry) {
+			for (auto& s : w->getSegmentMap()) {
+				const wireSegment& g = s.second;
+				const float len = vertical ? g.end.y - g.begin.y : g.end.x - g.begin.x;
+				if (g.isVertical() == vertical && len > 1) { rx = (g.begin.x + g.end.x) / 2; ry = (g.begin.y + g.end.y) / 2; return true; }
+			}
+			return false;
+		};
+		float vx = 0, vy = 0;
+		CHECK(w && run(true, vx, vy), "a wire with a vertical run");
+		// Give it a bend of the student's own: drag that run to the left.
+		cl_edit_select_none(d, 0);
+		cl_edit_press(d, 0, vx, vy, 0, 0.05);
+		cl_edit_drag(d, vx - 1.5f, vy);
+		cl_edit_drag(d, vx - 3, vy);
+		cl_edit_release(d, vx - 3, vy);
+		// And the second AND onto it: a wire with three pins.
+		float ix, iy, hx = 0, hy = 0;
+		std::string ipin;
+		pin(a2, "IN", ix, iy, &ipin);
+		CHECK(run(true, hx, hy), "the run moved");
+		cl_edit_press(d, 0, ix, iy, 0, 0.05);
+		cl_edit_drag(d, (ix + hx) / 2, (iy + hy) / 2);
+		cl_edit_drag(d, hx, hy);
+		cl_edit_release(d, hx, hy);
+		CHECK(a2->isConnected(ipin) && a2->getConnection(ipin) == w, "three pins on one wire");
+		const std::string shaped = cl_document_save_text(d);
+		cl_edit_select_none(d, 0);
+		a1->select();
+		cl_edit_delete(d, 0);
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "Delete a part, Undo: the wire's bends are as they were");
+		float px, py;
+		a2->getHotspotCoords(ipin, px, py);
+		CHECK(cl_edit_context(d, 0, px, py, 0.05) == CL_CONTEXT_PIN, "right-click the wired pin");
+		cl_edit_disconnect_pin(d, 0, px, py, 0.05);
+		CHECK(!a2->isConnected(ipin), "Disconnect takes it off");
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "Disconnect, Undo: the same");
+		(void)sw;
+		cl_document_close(d);
+	}
+
 	printf("save round trip keeps it all\n");
 	std::string text = cl_document_save_text(doc);
 	char err[256];
