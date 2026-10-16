@@ -51,6 +51,7 @@ struct Prefs {
 	int toolbarHidden = 0;        // tool groups hidden, a bit each (ToolGroup)
 	bool showTitle = true;        // the circuit's name at the toolbar's left
 	bool showThemeToggle = false; // a dark mode switch in the toolbar
+	bool showStepClock = true;    // Step Clock in the toolbar and the Simulation View bar (the menu item and key stay)
 	bool classicTabs = false;     // plain segments instead of the Mac's tab cards
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	bool confirmQuit = true;      // Ctrl+Q asks first

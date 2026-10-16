@@ -512,6 +512,11 @@ GtkWidget* toolbarPage() {
 	}
 	gtk_grid_attach(GTK_GRID(grid), check("Circuit name", prefs().showTitle, [](bool on) { prefs().showTitle = on; apply(); }), i % 3, i / 3, 1, 1);
 	i++;
+	GtkWidget* stepClock = check("Step Clock", prefs().showStepClock, [](bool on) { prefs().showStepClock = on; apply(); });
+	gtk_widget_set_tooltip_text(stepClock, "Show Step Clock in the toolbar and the Simulation View bar. "
+	                                       "Clicking a clock set to \u201COnly on Step Clock\u201D steps it too.");
+	gtk_grid_attach(GTK_GRID(grid), stepClock, i % 3, i / 3, 1, 1);
+	i++;
 	gtk_grid_attach(GTK_GRID(grid), check("Dark mode switch", prefs().showThemeToggle, [](bool on) { prefs().showThemeToggle = on; apply(); }),
 	                i % 3, i / 3, 1, 1);
 	gtk_box_pack_start(GTK_BOX(box), grid, FALSE, FALSE, 0);

@@ -104,6 +104,7 @@ const Command kCommands[] = {
 	{ "preferences", [](CircuitWindow* w) { w->showPreferences(); }, false },
 	{ "running", [](CircuitWindow* w) { w->toggleRunning(); }, true },
 	{ "step", [](CircuitWindow* w) { w->stepOnce(); }, false },
+	{ "step-clock", [](CircuitWindow* w) { w->stepClock(); }, false },
 	{ "sim-view", [](CircuitWindow* w) { w->toggleSimView(); }, true },
 	{ "lock", [](CircuitWindow* w) { w->toggleLock(); }, true },
 	{ "truth-table", [](CircuitWindow* w) { w->makeTruthTable(); }, false },
@@ -1284,6 +1285,9 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "rotate", edit && cl_edit_selected_gate_count(doc, currentPage()) > 0);
 	setEnabled(win, "gate-settings", cl_edit_single_gate(doc, currentPage()) >= 0);
 	setEnabled(win, "reopen-tab", cl_edit_undo_is_close_page(doc));
+	// Off until the page has a clock set to "Only on Step Clock" (its key
+	// still says why, through the canvas).
+	setEnabled(win, "step-clock", hasManualClock());
 	setChecked(win, "running", isRunning);
 	setChecked(win, "sim-view", simViewOn);
 	setChecked(win, "lock", lockedOn);
@@ -2043,6 +2047,23 @@ void CircuitWindow::stepOnce() {
 	// Stepping a running circuit means little: pause first.
 	if (isRunning) setRunning(false);
 	cl_document_step(doc);
+	redraw();
+	if (scope) scope->update();
+}
+
+const char* CircuitWindow::stepClockOffTip = "Step Clock: first turn on “Only on Step Clock” in a clock’s settings";
+
+bool CircuitWindow::hasManualClock() const { return cl_document_manual_clock_count(doc, currentPage()) > 0; }
+
+void CircuitWindow::stepClock() {
+	if (!cl_document_clock_step(doc, currentPage())) {
+		note("No clock here moves on Step Clock. Double-click a clock and turn on “Only on Step Clock”.");
+		return;
+	}
+	clockStepped();
+}
+
+void CircuitWindow::clockStepped() {
 	redraw();
 	if (scope) scope->update();
 }

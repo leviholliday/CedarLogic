@@ -261,6 +261,29 @@ gboolean showCb(gpointer) {
 		CLDocument* doc = w->document();
 		if (cl_edit_add_gate(doc, w->currentPage(), "BB_CLOCK", 40, -20)) w->showSettings();
 	}
+	else if (what == "stepclock") {
+		// A clock set to "Only on Step Clock": Step Clock three times, then a
+		// click on the clock (the canvas's own calls), each reported; the
+		// picture shows the toolbar's Step Clock button on (:1 in Simulation
+		// View, with the bar's).
+		CLDocument* doc = w->document();
+		const int pg = w->currentPage();
+		if (cl_edit_add_gate(doc, pg, "BB_CLOCK", 40, -20)) {
+			const long g = cl_edit_single_gate(doc, pg);
+			cl_gate_set_setting(doc, g, "MANUAL", "true");
+			cl_edit_select_none(doc, pg);
+			w->edited();
+		}
+		fprintf(stderr, "step clock: %d manual clock(s) on the page\n", cl_document_manual_clock_count(doc, pg));
+		for (int i = 1; i <= 3; i++) fprintf(stderr, "step clock %d: %s\n", i, cl_document_clock_step(doc, pg) ? "stepped" : "nothing to step");
+		const double upp = w->currentCanvas() ? w->currentCanvas()->unitsPerPoint() : 0.05;
+		cl_edit_press(doc, pg, 40, -20, 0, upp);
+		const int click = cl_edit_release_ex(doc, 40, -20, true);
+		fprintf(stderr, "step clock: a click on the clock %s\n", click == CL_CLICK_CLOCK_STEP ? "stepped it" : "did not step it");
+		w->clockStepped();
+		w->edited();
+		if (page == 1) w->toggleSimView();
+	}
 	return G_SOURCE_REMOVE;
 }
 
@@ -380,6 +403,7 @@ GMenuModel* buildMenubar() {
 	GMenu* m1 = g_menu_new();
 	g_menu_append(m1, "_Running", "win.running");
 	g_menu_append(m1, "_Step Once", "win.step");
+	g_menu_append(m1, "Step _Clock   (K)", "win.step-clock");
 	g_menu_append(m1, "Simulation _View", "win.sim-view");
 	g_menu_append(m1, "_Lock the Circuit", "win.lock");
 	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m1));

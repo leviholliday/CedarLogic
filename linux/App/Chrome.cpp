@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <map>
 #include <tuple>
 
@@ -237,6 +238,7 @@ float drawWrapped(cairo_t* cr, const std::string& text, const RectF& box, float 
 
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color) {
 	if (name == nullptr || color.a <= 0) return;
+	if (std::strcmp(name, Icon::StepClock) == 0) { drawStepClockIcon(cr, box, size, color); return; }
 	// Loaded at the screen's scale, tinted, and kept.
 	double sx = 1, sy = 1;
 	cairo_user_to_device_distance(cr, &sx, &sy);
@@ -405,6 +407,37 @@ void drawGaugeIcon(cairo_t* cr, const RectF& box, const Color& color) {
 	cairo_stroke(cr);
 	cairo_arc(cr, cx, cy, 1.4, 0, 2 * M_PI);
 	cairo_fill(cr);
+	cairo_restore(cr);
+}
+
+void drawStepClockIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f, r = 6.6f * k;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	// The rim, open at the top right where it turns into an arrow head.
+	const double a0 = -M_PI / 2 + 0.55, a1 = -M_PI / 2 + 2 * M_PI - 0.25;
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy, r, a0, a1);
+	cairo_stroke(cr);
+	// The head, at the rim's end, pointing on round (clockwise).
+	const double hx = cx + r * std::cos(a1), hy = cy + r * std::sin(a1);
+	const double tx = -std::sin(a1), ty = std::cos(a1);   // the way the rim runs on
+	const double nx = std::cos(a1), ny = std::sin(a1);    // outward
+	const double len = 2.9 * k, wide = 2.3 * k;
+	cairo_move_to(cr, hx + tx * len, hy + ty * len);
+	cairo_line_to(cr, hx - tx * 0.6 * k + nx * wide, hy - ty * 0.6 * k + ny * wide);
+	cairo_line_to(cr, hx - tx * 0.6 * k - nx * wide, hy - ty * 0.6 * k - ny * wide);
+	cairo_close_path(cr);
+	cairo_fill(cr);
+	// The hands: twelve o'clock and three.
+	cairo_move_to(cr, cx, cy - 3.6 * k);
+	cairo_line_to(cr, cx, cy);
+	cairo_line_to(cr, cx + 2.6 * k, cy);
+	cairo_stroke(cr);
 	cairo_restore(cr);
 }
 

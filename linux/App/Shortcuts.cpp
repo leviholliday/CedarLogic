@@ -143,6 +143,7 @@ const std::vector<Action>& all() {
 		{ "focusMode", "Moving around", "Focus mode: hide the toolbar and side panel", "win.focus-mode", "<Primary>period" },
 		{ "simView", "Simulation", "Simulation view", "win.sim-view", "<Primary>r" },
 		{ "step", "Simulation", "Step once", "win.step", "<Primary><Shift>r" },
+		{ "stepClock", "Simulation", "Step Clock: one full cycle of each manual clock", nullptr, "k" },
 		{ "truthTable", "Simulation", "Truth table", nullptr, "t" },
 		{ "checkCircuit", "Simulation", "Check my circuit against a formula or table", nullptr, "<Shift>t" },
 		{ "scope", "Simulation", "Oscilloscope", "win.scope", "<Primary>g" },

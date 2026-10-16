@@ -84,6 +84,9 @@ constexpr const char* Minimize = "window-minimize-symbolic";
 constexpr const char* Maximize = "window-maximize-symbolic";
 constexpr const char* Restore = "window-restore-symbolic";
 constexpr const char* Feedback = "mail-message-new-symbolic";
+// Drawn by hand (drawIcon knows it): a clock face with a turning arrow, the
+// Mac's clock.arrow.2.circlepath, for Step Clock.
+constexpr const char* StepClock = "cedarlogic-step-clock";
 }
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color);
 // Drawn: a page with a plus (New circuit), a square with a plus over
@@ -97,6 +100,8 @@ void drawBubbleIcon(cairo_t* cr, const RectF& box, const Color& color);
 void drawZoomIcon(cairo_t* cr, const RectF& box, const Color& color, bool in);
 void drawGaugeIcon(cairo_t* cr, const RectF& box, const Color& color);
 void drawSaveIcon(cairo_t* cr, const RectF& box, const Color& color);
+// A clock face whose rim turns into an arrow (Step Clock), `size` points across.
+void drawStepClockIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 
 // ---- Shapes ---------------------------------------------------------------------------
 

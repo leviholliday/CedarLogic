@@ -124,6 +124,9 @@ const std::vector<Page>& pages() {
 		{ "sim", "Running the Simulation", "media-playback-start-symbolic", "It runs while you build.",
 		  { p("The circuit runs all the time. The toolbar pauses and resumes it (so does **Space** on the canvas), **Ctrl+Shift+R** steps "
 		      "once, and the speed slider sets how long each step takes."),
+		    p("**Step Clock (K)** works a clock by hand, one tick at a time. Double-click a clock and turn on **Only on Step Clock**: it "
+		      "holds still at 0. Each Step Clock then takes it to 1 and back to 0, letting the circuit settle after each, so a flip-flop "
+		      "changes once per press. It works running or paused; clicking the clock, or the clock button beside Step, does the same."),
 		    p("Click a switch to flip it; keypads and pulse generators take clicks too."),
 		    p("**Simulation View (Ctrl+R)** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the "
 		      "bar at the bottom shows every switch and light. Space pauses, Escape leaves."),

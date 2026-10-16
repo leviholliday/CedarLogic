@@ -98,6 +98,7 @@ void Prefs::load() {
 		toolbarHidden = readInt(k, "toolbarHidden", toolbarHidden, 0, 1 << 12);
 		showTitle = readBool(k, "showTitle", showTitle);
 		showThemeToggle = readBool(k, "showThemeToggle", showThemeToggle);
+		showStepClock = readBool(k, "showStepClock", showStepClock);
 		classicTabs = readBool(k, "classicTabs", classicTabs);
 		wireValueTag = readBool(k, "wireValueTag", wireValueTag);
 		confirmQuit = readBool(k, "confirmQuit", confirmQuit);
@@ -198,6 +199,7 @@ void Prefs::save() const {
 	g_key_file_set_integer(k, kGroup, "toolbarHidden", toolbarHidden);
 	g_key_file_set_boolean(k, kGroup, "showTitle", showTitle);
 	g_key_file_set_boolean(k, kGroup, "showThemeToggle", showThemeToggle);
+	g_key_file_set_boolean(k, kGroup, "showStepClock", showStepClock);
 	g_key_file_set_boolean(k, kGroup, "classicTabs", classicTabs);
 	g_key_file_set_boolean(k, kGroup, "wireValueTag", wireValueTag);
 	g_key_file_set_boolean(k, kGroup, "confirmQuit", confirmQuit);

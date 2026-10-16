@@ -20,10 +20,11 @@ bool is(const char* a, const char* b) { return a && b && std::strcmp(a, b) == 0;
 bool groupShown(int g) { return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0; }
 
 // " (Ctrl+N)": the keys an action has now (Settings > Shortcuts changes
-// them), or nothing when it has none.
+// them), or nothing when it has none. `action` is its GTK action, or the id
+// of a canvas key ("stepClock").
 std::string keysFor(const char* action) {
 	for (const shortcuts::Action& a : shortcuts::all()) {
-		if (!is(a.gaction, action)) continue;
+		if (!is(a.gaction, action) && !is(a.id, action)) continue;
 		const std::string k = shortcuts::label(shortcuts::keys(a));
 		return k.empty() ? std::string() : " (" + k + ")";
 	}
@@ -33,7 +34,7 @@ std::string keysFor(const char* action) {
 }  // namespace
 
 const char* toolGroupName(int g) {
-	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Speed",
+	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
 	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback" };
 	return g >= 0 && g < TGCount ? names[g] : "";
 }
@@ -63,7 +64,9 @@ void Toolbar::build(int style) {
 	add(Button, "win.undo", TGUndo, false); add(Button, "win.redo", TGUndo, false);
 	add(Button, "win.copy", TGClipboard, false); add(Button, "win.paste", TGClipboard, false);
 	add(Button, "win.zoom-out", TGZoom, false); add(Zoom, nullptr, TGZoom, false); add(Button, "win.zoom-in", TGZoom, false);
-	add(Button, "win.running", TGSim, true); add(Button, "win.step", TGSim, true); add(Speed, nullptr, TGSim, true);
+	add(Button, "win.running", TGSim, true); add(Button, "win.step", TGSim, true);
+	if (prefs().showStepClock) add(Button, "win.step-clock", TGSim, true);
+	add(Speed, nullptr, TGSim, true);
 	add(Button, "win.sim-view", TGRun, true);
 	add(Button, "win.lock", TGLock, true);
 	if (prefs().showThemeToggle) add(Button, "win.dark", TGTheme, true);
@@ -179,6 +182,7 @@ const char* Toolbar::iconFor(const Item& it) const {
 	if (is(a, "win.zoom-in")) return Icon::ZoomIn;
 	if (is(a, "win.running")) return win->running() ? Icon::Pause : Icon::Play;
 	if (is(a, "win.step")) return Icon::Step;
+	if (is(a, "win.step-clock")) return Icon::StepClock;
 	if (is(a, "win.sim-view")) return win->simView() ? Icon::StopSolid : Icon::Play;
 	if (is(a, "win.lock")) return win->locked() ? Icon::Lock : Icon::Unlock;
 	if (is(a, "win.dark")) return prefs().dark ? "weather-clear-night-symbolic" : "weather-clear-symbolic";
@@ -206,6 +210,7 @@ std::string Toolbar::tipFor(const Item& it) const {
 	if (is(a, "win.zoom-in")) return "Zoom in" + keysFor(a);
 	if (is(a, "win.running")) return win->running() ? "Pause the simulation" : "Resume the simulation";
 	if (is(a, "win.step")) return "Step once" + keysFor(a);
+	if (is(a, "win.step-clock")) return win->hasManualClock() ? "Step Clock" + keysFor("stepClock") : std::string(CircuitWindow::stepClockOffTip);
 	if (is(a, "win.sim-view")) return win->simView() ? "Leave Simulation View (Esc)" : "Simulation View" + keysFor(a);
 	if (is(a, "win.lock")) return win->locked() ? "Unlock the circuit" : "Lock the circuit so it can't be edited";
 	if (is(a, "win.dark")) return "Dark mode" + keysFor(a);

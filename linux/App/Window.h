@@ -236,6 +236,13 @@ public:
 	void setRunning(bool run);
 	void toggleRunning() { setRunning(!isRunning); }
 	void stepOnce();
+	// Step Clock: every clock on the page set to "Only on Step Clock" makes
+	// one full cycle (up, settle, down, settle), running or paused.
+	void stepClock();
+	// After a click stepped such a clock (the engine already did the step).
+	void clockStepped();
+	bool hasManualClock() const;
+	static const char* stepClockOffTip;
 	void setStepMs(int ms);
 	void toggleSimView();
 	void toggleLock();

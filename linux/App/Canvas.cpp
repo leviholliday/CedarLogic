@@ -344,6 +344,10 @@ void Canvas::drawSimBar(cairo_t* cr, float w, float h) {
 	};
 	button(paused ? Icon::Play : Icon::Pause, paused, paused ? on : ink, "win.running");
 	button(Icon::Step, false, ink, "win.step");
+	if (prefs().showStepClock) {
+		const bool ready = win->hasManualClock();
+		button(Icon::StepClock, false, withAlpha(ink, ready ? 1.0f : 0.35f), "win.step-clock");
+	}
 	x += 6;
 	divider();
 	// Speed, fast on the right.
@@ -915,7 +919,9 @@ void Canvas::cancelDrag() {
 	if (drag == Drag::Edit) {
 		double wx, wy;
 		worldPoint(lastX, lastY, wx, wy);
-		cl_edit_release(win->document(), wx, wy);
+		// Ended from outside (the pointer was taken away): never a click
+		// that steps a clock.
+		cl_edit_release_ex(win->document(), wx, wy, false);
 		win->edited();
 	}
 	drag = Drag::None;
@@ -965,7 +971,9 @@ bool Canvas::onPress(GdkEventButton* e) {
 		// The second press of a double-click already began a gesture: end
 		// it in place, then open the gate's settings, or fit the page.
 		if (win->isFloating()) return TRUE;
-		if (drag == Drag::Edit) cl_edit_release(doc, wx, wy);
+		// The first click already stepped a clock set to "Only on Step
+		// Clock"; this one only opens its settings.
+		if (drag == Drag::Edit) cl_edit_release_ex(doc, wx, wy, false);
 		drag = Drag::None;
 		if (win->simView() || win->locked()) return TRUE;
 		if (cl_edit_single_gate(doc, p) >= 0) win->showSettings();
@@ -1053,8 +1061,10 @@ bool Canvas::onRelease(GdkEventButton* e) {
 		if (cl_edit_box(doc, &l, &b, &r, &t)) win->fadeOutDragBox(l, b, r, t);
 		double wx, wy;
 		worldPoint(e->x, e->y, wx, wy);
-		cl_edit_release(doc, wx, wy);
+		// A click (no drag) on a clock set to "Only on Step Clock" steps it.
+		const bool stepped = cl_edit_release_ex(doc, wx, wy, true) == CL_CLICK_CLOCK_STEP;
 		drag = Drag::None;
+		if (stepped) win->clockStepped();
 		win->edited();
 	} else if (drag == Drag::Pan && (e->button == 1 || e->button == 2)) {
 		drag = Drag::None;
@@ -1132,6 +1142,7 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		else if (k == GDK_KEY_minus || k == GDK_KEY_KP_Subtract) animateZoom(0.75);
 		else if (shortcuts::canvasAction(e) == "truthTable") win->makeTruthTable();
 		else if (shortcuts::canvasAction(e) == "checkCircuit") win->checkCircuit();
+		else if (shortcuts::canvasAction(e) == "stepClock") win->stepClock();
 		else if (k == GDK_KEY_question) win->showShortcuts();
 		return TRUE;
 	}
@@ -1231,6 +1242,8 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 	if (act.empty()) return FALSE;
 	if (act == "truthTable") { win->makeTruthTable(); return TRUE; }
 	if (act == "checkCircuit") { win->checkCircuit(); return TRUE; }
+	// Step Clock works on a locked circuit too, as switches do.
+	if (act == "stepClock") { win->stepClock(); return TRUE; }
 	if (!win->canEdit()) { win->lockNudge(); return TRUE; }
 	if (act == "quickPaste") win->paste();
 	else if (act == "quickCut") win->cut();
