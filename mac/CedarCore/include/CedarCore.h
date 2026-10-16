@@ -14,7 +14,7 @@
 // its BeginDraw and EndDraw). Either way its units are points, y down.
 #if defined(__APPLE__)
 #include <CoreGraphics/CoreGraphics.h>
-typedef CLContext CLContext;
+typedef CGContextRef CLContext;
 #elif defined(_WIN32)
 typedef struct ID2D1RenderTarget *CLContext;
 #else

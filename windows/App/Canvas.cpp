@@ -218,7 +218,7 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 	CLDocument* doc = win->document();
 	const int p = page();
 	if (doc == nullptr || p < 0) return;
-	CLDrawOptions o;
+	CLDrawOptions o{};   // zeroed first: a field the engine adds later is off, not garbage
 	o.dark = dark;
 	o.accent = prefs().accent;
 	o.wireScale = prefs().wireScale();
@@ -226,6 +226,7 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 	o.thumbnail = false;
 	o.showSelection = true;
 	o.selectionFade = win->selectionFade();
+	o.ink = CL_INK_FOLLOW;
 	cl_document_draw_ex(doc, p, rt, scale, originX, originY, upp, &o);
 	if (sim) {
 		cl_simview_draw_flow(doc, p, rt, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
