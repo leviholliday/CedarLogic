@@ -4,7 +4,8 @@
 // pastes into Word, Docs or a spreadsheet. In tabs: the table, a Karnaugh map
 // for every light with the groups drawn on, and each light's simplest sum of
 // products and product of sums (BooleanAlgebra.swift), with a way to build
-// them as gates.
+// them as gates. And Check: the lights against a formula or truth table the
+// assignment gives (CircuitCheck.swift), with the wrong rows shown.
 
 import AppKit
 import SwiftUI
@@ -16,9 +17,24 @@ struct TruthTable: Identifiable {
     let rows: [[Character]]
     let sequential: Bool
     let unsettled: Int
+    /// Where the last check is kept (the circuit and page); nil keeps nothing.
+    var checkKey: String?
+    /// The circuit, for checks clock pulse by clock pulse (nil in previews).
+    var document: CoreDocument?
+    var page = 0
+    /// Why there's no table, for a page that can only be checked clock pulse
+    /// by clock pulse (a counter has lights but no switches).
+    var problem: String?
+    var hasTable: Bool { problem == nil }
+    /// The table as Check My Circuit compares it.
+    var checkTable: CircuitCheck.Table? {
+        hasTable ? CircuitCheck.Table(names: names, inputs: inputs, rows: rows, sequential: sequential, unsettled: unsettled) : nil
+    }
 
     init?(document: CoreDocument, page: Int, error: inout String) {
         var buf = [CChar](repeating: 0, count: 512)
+        self.document = document
+        self.page = page
         guard let tt = cl_truth_table(document.handle, Int32(page), &buf, Int32(buf.count)) else {
             error = String(cString: buf)
             return nil
@@ -38,6 +54,15 @@ struct TruthTable: Identifiable {
     init(names: [String], inputs: Int, rows: [[Character]]) {
         self.names = names; self.inputs = inputs; self.rows = rows
         sequential = false; unsettled = 0
+    }
+
+    /// No table, just the Check tab: a page with lights that a truth table
+    /// can't be made for (no switches, or too many).
+    init(checkOnly document: CoreDocument, page: Int, problem: String) {
+        names = []; inputs = 0; rows = []; sequential = true; unsettled = 0
+        self.document = document
+        self.page = page
+        self.problem = problem
     }
 
     func text(separator: String) -> String {
@@ -78,8 +103,61 @@ struct TruthTableView: View {
     @State private var groupsOfOnes = true
     @State private var copied: String?
     @State private var hoverRow: Int?
+    @State private var checkText = ""
+    @State private var checkNames: [String: String] = [:]
+    @State private var check: CircuitCheck?
+    @State private var onlyWrong = false
+    /// The step strip's chosen step (the first wrong one when a check runs).
+    @State private var selectedStep: Int?
+    @FocusState private var stripFocused: Bool
+    /// A clocked check waits for typing to pause (it runs the circuit), then
+    /// runs off the main thread; "Checking…" shows if it takes a while.
+    @State private var pendingCheck: DispatchWorkItem?
+    @State private var running: CheckRun?
+    @State private var checkingShown = false
+    /// What the check on show (or running) was given, so it isn't run twice.
+    @State private var lastInput: CheckInput?
+    @State private var loaded = false
+
+    private struct CheckInput: Equatable { let text: String; let names: [String: String]; let columns: [String] }
+
+    static let checkTab = 3
+    /// Renders (--render-ui) draw the view at once, so they check in init,
+    /// on the main thread.
+    static var checksAtOnce = false
+
+    // SwiftUI makes this view again whenever the window behind it changes
+    // (15 times a second with the oscilloscope running), so nothing is
+    // checked here: the last check is read back and run in onAppear.
+    init(table: TruthTable, onBuild: ((String) -> Void)? = nil) {
+        _table = State(initialValue: table)
+        self.onBuild = onBuild
+        if Self.checksAtOnce {
+            let saved = CheckMemory.load(table.checkKey)
+            _checkText = State(initialValue: saved?.text ?? "")
+            _checkNames = State(initialValue: saved?.names ?? [:])
+            let check = CircuitCheck(table: table.checkTable, noTable: table.problem ?? "", document: table.document?.handle, page: table.page,
+                                     text: saved?.text ?? "", byHand: saved?.names ?? [:])
+            _check = State(initialValue: check)
+            _selectedStep = State(initialValue: check.firstWrong)
+            _lastInput = State(initialValue: CheckInput(text: saved?.text ?? "", names: saved?.names ?? [:], columns: table.names))
+            _loaded = State(initialValue: true)
+        }
+    }
+
+    /// The last check of this circuit, checked again.
+    private func loadSaved() {
+        guard !loaded else { return }
+        loaded = true
+        let saved = CheckMemory.load(table.checkKey)
+        checkText = saved?.text ?? ""
+        checkNames = saved?.names ?? [:]
+        runCheck(now: true)
+    }
 
     private var n: Int { table.inputs }
+    /// The tab on show: only Check when the page has no truth table.
+    private var shownTab: Int { table.hasTable ? tab : Self.checkTab }
     private var inputNames: [String] { Array(table.names.prefix(n)) }
 
     // The app's own paper and ink (as in Send Feedback).
@@ -97,35 +175,38 @@ struct TruthTableView: View {
             Color.clear.frame(height: 0).onEscape { dismiss() }
             band
             VStack(alignment: .leading, spacing: 12) {
-                if table.sequential {
+                if table.sequential && shownTab != Self.checkTab {
                     Label("This page has clocks or flip-flops, so outputs can depend on what happened before. Each row is read after the circuit settles from the row above it.",
                           systemImage: "info.circle")
                         .font(.callout).foregroundStyle(dim)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if table.unsettled > 0 {
+                if table.unsettled > 0 && shownTab != Self.checkTab {
                     Label("\(table.unsettled) row\(table.unsettled == 1 ? "" : "s") never stopped changing (a clock or an oscillation), so those outputs are a snapshot.",
                           systemImage: "exclamationmark.triangle")
                         .font(.callout).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Group {
-                    switch tab {
+                    switch shownTab {
                     case 1: karnaughTab
                     case 2: formulasTab
+                    case Self.checkTab: checkTab
                     default: tableTab
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 400, maxHeight: 400, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: tabHeight, maxHeight: tabHeight, alignment: .topLeading)
                 HStack(spacing: 10) {
-                    pill("Copy Table", "doc.on.doc") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(table.text(separator: "\t"), forType: .string)
-                        copied = "table"
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copied == "table" { copied = nil } }
+                    if table.hasTable {
+                        pill("Copy Table", "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(table.text(separator: "\t"), forType: .string)
+                            copied = "table"
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copied == "table" { copied = nil } }
+                        }
+                        .help("A tab-separated table: pastes into Word, Docs, Numbers or Excel")
+                        pill("Export as CSV…", "square.and.arrow.up") { export() }
                     }
-                    .help("A tab-separated table: pastes into Word, Docs, Numbers or Excel")
-                    pill("Export as CSV…", "square.and.arrow.up") { export() }
                     if copied == "table" { Text("Copied").font(.caption).foregroundStyle(dim) }
                     Spacer()
                     Button { dismiss() } label: {
@@ -143,7 +224,15 @@ struct TruthTableView: View {
         .background(paper)
         .preferredColorScheme(dark ? .dark : .light)
         .tint(accent)
+        .onAppear { loadSaved() }
+        .onDisappear { pendingCheck?.cancel(); running?.cancel() }
+        .onChange(of: checkText) { runCheck() }
+        .onChange(of: checkNames) { runCheck(now: true) }
+        .onChange(of: table.names) { runCheck(now: true) }
     }
+
+    /// The Check tab grows for the step strip.
+    private var tabHeight: CGFloat { shownTab == Self.checkTab && !(check?.steps.isEmpty ?? true) ? 480 : 400 }
 
     // MARK: The band
 
@@ -165,14 +254,18 @@ struct TruthTableView: View {
             }
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Truth Table").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
-                    Text("\(n) switch\(n == 1 ? "" : "es") → \(table.outputCount) light\(table.outputCount == 1 ? "" : "s") · \(table.rows.count) rows")
+                    Text(table.hasTable ? "Truth Table" : "Check My Circuit").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
+                    Text(table.hasTable ? "\(n) switch\(n == 1 ? "" : "es") → \(table.outputCount) light\(table.outputCount == 1 ? "" : "s") · \(table.rows.count) rows"
+                                        : "No truth table for this page")
                         .font(.system(size: 12.5)).foregroundStyle(Brand.dim)
                 }
                 HStack(spacing: 8) {
-                    tabButton("Truth Table", "tablecells", 0)
-                    tabButton("Karnaugh Map", "square.grid.3x3", 1)
-                    tabButton("Formulas", "function", 2)
+                    if table.hasTable {
+                        tabButton("Truth Table", "tablecells", 0)
+                        tabButton("Karnaugh Map", "square.grid.3x3", 1)
+                        tabButton("Formulas", "function", 2)
+                    }
+                    tabButton("Check", "checkmark.seal", Self.checkTab)
                 }
             }
             .padding(.horizontal, 22).padding(.bottom, 14)
@@ -181,14 +274,15 @@ struct TruthTableView: View {
     }
 
     private func tabButton(_ title: String, _ icon: String, _ i: Int) -> some View {
-        Button { withAnimation(.easeOut(duration: 0.15)) { tab = i } } label: {
+        // With no table there's only Check: picking it isn't a choice to keep.
+        Button { if table.hasTable { withAnimation(.easeOut(duration: 0.15)) { tab = i } } } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 11.5, weight: .semibold))
                 Text(title).font(.system(size: 12.5, weight: .semibold))
             }
             .padding(.horizontal, 13).padding(.vertical, 6)
-            .background(Capsule().fill(tab == i ? Brand.neon : Color.white.opacity(0.09)))
-            .foregroundStyle(tab == i ? Brand.inkDeep : Color.white.opacity(0.88))
+            .background(Capsule().fill(shownTab == i ? Brand.neon : Color.white.opacity(0.09)))
+            .foregroundStyle(shownTab == i ? Brand.inkDeep : Color.white.opacity(0.88))
         }
         .buttonStyle(.plain)
     }
@@ -561,5 +655,486 @@ struct KMapView: View {
         }
         .frame(width: left + CGFloat(cols) * cell + 4, height: top + CGFloat(rows) * cell + 4)
         .accessibilityLabel("Karnaugh map")
+    }
+}
+
+// MARK: - Check
+
+extension TruthTableView {
+    /// One example of each kind of answer.
+    private var checkPlaceholder: String {
+        """
+        S = A ^ B ^ Cin              a formula (or Σm(1,3,5))
+        A B | F, then a row each     a truth table
+        0, 1, 2, 3, repeat           a count
+        Q1 Q0 X | Q1+ Q0+ | Z …      a state table
+        Pulse | X | Z, then rows     a timing table
+        """
+    }
+
+    /// Room for the placeholder's five examples, else for what's typed (a
+    /// formula needs less than a table).
+    private var editorHeight: CGFloat {
+        if checkText.isEmpty { return 100 }
+        let lines = checkText.split(separator: "\n", omittingEmptySubsequences: false).count
+        return min(100, max(58, CGFloat(lines) * 17 + 16))
+    }
+
+    var checkTab: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let problem = table.problem {
+                // Why there's no Truth Table tab.
+                Label(problem + " It can still be checked clock pulse by clock pulse.", systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                let kind = CircuitCheck.kind(of: checkText).kind
+                // Nothing to say before anything's typed: the box and the line under it say it.
+                if kind != .empty {
+                    Image(systemName: "text.magnifyingglass").font(.system(size: 12)).foregroundStyle(dim)
+                    Text(kind.reading).font(.callout).foregroundStyle(dim)
+                }
+                Spacer()
+                if table.hasTable && (kind == .empty || kind == .table) {
+                    Button("Fill In This Circuit's Rows") { checkText = circuitTableText() }
+                        .buttonStyle(.plain).font(.caption.weight(.medium)).foregroundStyle(accent)
+                        .help("Writes this circuit's table here, to change into the one you were given")
+                }
+            }
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $checkText)
+                    .font(.system(size: 13, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 7).padding(.vertical, 6)
+                if checkText.isEmpty {
+                    Text(checkPlaceholder)
+                        .font(.system(size: 13, design: .monospaced)).foregroundStyle(dim.opacity(0.75))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(height: editorHeight)
+            .background(cardShape)
+            if checkingShown {
+                checkingBanner
+            }
+            if let check {
+                // While the next check runs, the last one stays, faded.
+                Group {
+                    if !checkingShown { verdictBanner(check) }
+                    ForEach(check.notes, id: \.self) { note in
+                        Label(note.text, systemImage: note.kind == 2 ? "exclamationmark.circle" : note.kind == 1 ? "exclamationmark.triangle" : "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(note.kind == 2 ? Color.red : note.kind == 1 ? Color.orange : dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if showNames(check) { namesRow(check) }
+                    if check.clocked {
+                        if !check.steps.isEmpty { stepStrip(check) }
+                    } else if check.outputs.contains(where: { $0.column != nil }) {
+                        checkGrid(check)
+                    }
+                }
+                .opacity(checkingShown ? 0.4 : 1)
+                .allowsHitTesting(!checkingShown)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Checks again: at once against a truth table, or once typing pauses
+    /// when the circuit has to be run (`now` for a name picked from a menu).
+    func runCheck(now: Bool = false) {
+        guard loaded else { return }
+        pendingCheck?.cancel()
+        pendingCheck = nil
+        let input = CheckInput(text: checkText, names: checkNames, columns: table.names)
+        guard input != lastInput else { return }
+        // What's running was asked for something else now.
+        running?.cancel()
+        running = nil
+        let clocked = CircuitCheck.runsCircuit(input.text)
+        let work = DispatchWorkItem { [self] in
+            lastInput = input
+            if !clocked || Self.checksAtOnce {
+                show(CircuitCheck(table: table.checkTable, noTable: table.problem ?? "", document: table.document?.handle, page: table.page,
+                                  text: input.text, byHand: input.names), for: input)
+                return
+            }
+            let run = CheckRun(document: table.document?.handle, page: table.page, text: input.text, byHand: input.names) { c in
+                show(c, for: input)
+            }
+            running = run
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { if running === run { checkingShown = true } }
+        }
+        if now || !clocked { work.perform() } else {
+            pendingCheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
+    }
+
+    private func show(_ c: CircuitCheck, for input: CheckInput) {
+        running = nil
+        checkingShown = false
+        check = c
+        selectedStep = c.firstWrong
+        if !input.text.isEmpty || CheckMemory.load(table.checkKey) != nil {
+            CheckMemory.save(table.checkKey, .init(kind: c.kind == .table ? 1 : 0, text: input.text, names: input.names))
+        }
+    }
+
+    /// While a check that runs the circuit takes a while.
+    private var checkingBanner: some View {
+        HStack(spacing: 9) {
+            ProgressView().controlSize(.small)
+            Text("Checking… (running the circuit clock pulse by clock pulse)").font(.system(size: 13.5)).foregroundStyle(dim)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(dim.opacity(0.06)))
+    }
+
+    private func verdictBanner(_ c: CircuitCheck) -> some View {
+        let empty = checkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let color: Color = empty ? dim : c.verdict == .matches ? on : c.verdict == .wrong ? .red : .orange
+        let icon = empty ? "text.cursor" : c.verdict == .matches ? "checkmark.circle.fill" : c.verdict == .wrong ? "xmark.circle.fill" : "questionmark.circle.fill"
+        return HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(color)
+            Text(c.summary).font(.system(size: 13.5, weight: empty ? .regular : .semibold)).foregroundStyle(empty ? dim : ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if c.verdict == .wrong && !c.clocked {
+                Toggle("Only wrong rows", isOn: $onlyWrong).toggleStyle(.checkbox).font(.caption)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(color.opacity(empty ? 0.06 : dark ? 0.16 : 0.11)))
+    }
+
+    /// Names are shown when one isn't simply the same as the circuit's.
+    private func showNames(_ c: CircuitCheck) -> Bool {
+        func key(_ s: String) -> String { s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        return c.names.contains { name in
+            guard let col = name.column, col < c.columns.count else { return true }
+            return name.byHand || key(c.columns[col]) != key(name.name)
+        }
+    }
+
+    /// Each asked-for name and the switch or light it was matched with; click to choose.
+    private func namesRow(_ c: CircuitCheck) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Names").font(.caption.weight(.semibold)).foregroundStyle(dim)
+            Flow(spacing: 6) {
+                ForEach(c.names, id: \.self) { name in nameChip(c, name) }
+            }
+        }
+    }
+
+    private func nameChip(_ c: CircuitCheck, _ name: CircuitCheck.Name) -> some View {
+        var choices: [String] = []
+        for (i, col) in c.columns.enumerated() where c.columnIsInput[i] == name.isInput && !choices.contains(col) { choices.append(col) }
+        let matched: String = name.column.flatMap { $0 < c.columns.count ? c.columns[$0] : nil } ?? "?"
+        let missing = name.column == nil
+        let kind = name.isInput ? "Switch " : "Light "
+        return Menu {
+            ForEach(choices, id: \.self) { choice in
+                Button(kind + choice) { checkNames[name.name] = choice }
+            }
+            Divider()
+            Button("Match by Name") { checkNames[name.name] = nil }
+        } label: {
+            Text("\(name.name) → \(matched)").font(.system(size: 11.5, weight: name.byHand ? .semibold : .regular))
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .padding(.horizontal, 9).padding(.vertical, 3)
+        .background(Capsule().fill(missing ? Color.red.opacity(0.14) : ink.opacity(0.06)))
+        .overlay(Capsule().strokeBorder(missing ? Color.red.opacity(0.5) : line))
+        .help("Which " + kind.lowercased() + "is " + name.name)
+    }
+
+    // MARK: The step strip
+
+    private static let stepWidth: CGFloat = 56
+    private static let nameWidth: CGFloat = 86
+    private static let headHeight: CGFloat = 46
+    private static let oneHeight: CGFloat = 24      // inputs and the state: what they were
+    private static let pairHeight: CGFloat = 38     // the next state and outputs: asked for over got
+
+    /// A column per step (the start, then each clock pulse), a row per
+    /// signal: inputs and the state as they were, then the next state and the
+    /// lights, what was asked for over what they showed. The first wrong step
+    /// is marked and scrolled to; ← and → move along the steps.
+    private func stepStrip(_ c: CircuitCheck) -> some View {
+        let rows = stripRows(c)
+        let selected = selectedStep.flatMap { c.steps.indices.contains($0) ? $0 : nil }
+        return VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.vertical) {
+                HStack(alignment: .top, spacing: 0) {
+                    // The signals' names stay put while the steps scroll.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(c.kind == .states ? "Row" : "Step").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(dim)
+                            .frame(width: Self.nameWidth, height: Self.headHeight, alignment: .leading).padding(.leading, 10)
+                        ForEach(rows, id: \.self) { r in
+                            stripName(c, r).frame(height: r.height).padding(.leading, 10)
+                        }
+                    }
+                    .background(ink.opacity(0.04))
+                    .overlay(alignment: .trailing) { Rectangle().frame(width: 1).foregroundStyle(line) }
+                    ScrollViewReader { reader in
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 0) {
+                                ForEach(c.steps.indices, id: \.self) { i in
+                                    stepColumn(c, i, rows, selected: selected == i).id(i)
+                                }
+                            }
+                        }
+                        .onAppear { if let w = c.firstWrong { reader.scrollTo(w, anchor: .center) } }
+                        .onChange(of: selectedStep) { if let s = selectedStep { withAnimation(.easeOut(duration: 0.15)) { reader.scrollTo(s) } } }
+                    }
+                }
+            }
+            .frame(maxHeight: CGFloat(rows.reduce(0) { $0 + $1.height }) + Self.headHeight + 2)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(card))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(stripFocused ? accent.opacity(0.7) : line))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .focusable()
+            .focused($stripFocused)
+            .focusEffectDisabled()
+            .onMoveCommand { direction in
+                let last = c.steps.count - 1
+                let at = selectedStep ?? c.firstWrong ?? 0
+                switch direction {
+                case .left: selectedStep = max(0, at - 1)
+                case .right: selectedStep = min(last, at + 1)
+                default: break
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Clock pulse by clock pulse")
+            HStack(spacing: 8) {
+                if let s = selected {
+                    Text(c.describe(s)).font(.caption).foregroundStyle(c.steps[s].wrong ? Color.red : dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Click a step, or use ← and →, to read it.").font(.caption).foregroundStyle(dim)
+                }
+                Spacer(minLength: 0)
+                if let w = c.firstWrong, selected != w {
+                    Button("Show the First Wrong Step") { selectedStep = w }
+                        .buttonStyle(.plain).font(.caption.weight(.medium)).foregroundStyle(accent)
+                }
+            }
+        }
+    }
+
+    /// A row of the strip: a count's number, or a signal.
+    private struct StripRow: Hashable {
+        var signal: Int?          // nil: the count, as a number
+        var pair: Bool
+        var height: CGFloat { pair ? TruthTableView.pairHeight : TruthTableView.oneHeight }
+    }
+
+    private func stripRows(_ c: CircuitCheck) -> [StripRow] {
+        var rows: [StripRow] = []
+        if c.kind == .count && c.signals.count > 1 { rows.append(StripRow(signal: nil, pair: true)) }
+        for role in [CircuitCheck.Role.input, .state, .next, .output] {
+            for i in c.signals(role) { rows.append(StripRow(signal: i, pair: role == .next || role == .output)) }
+        }
+        return rows
+    }
+
+    private func stripName(_ c: CircuitCheck, _ r: StripRow) -> some View {
+        let role = r.signal.map { c.signals[$0].role }
+        let name = r.signal.map { c.signals[$0].name } ?? "Count"
+        let color: Color = role == .input || role == .state ? ink : accent
+        return HStack(spacing: 4) {
+            Text(name).font(.system(size: 12, weight: .semibold)).foregroundStyle(color).lineLimit(1)
+            if r.pair {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("asked")
+                    Text("got")
+                }
+                .font(.system(size: 9)).foregroundStyle(dim)
+            }
+        }
+        .frame(width: Self.nameWidth - 6, alignment: .leading)
+    }
+
+    private func stepColumn(_ c: CircuitCheck, _ i: Int, _ rows: [StripRow], selected: Bool) -> some View {
+        let step = c.steps[i]
+        let first = c.firstWrong == i
+        let tint: Color = first ? Color.red.opacity(dark ? 0.26 : 0.16) : step.wrong ? Color.red.opacity(dark ? 0.12 : 0.07)
+                        : (i % 2 == 1 ? ink.opacity(0.025) : .clear)
+        return Button { selectedStep = i; stripFocused = true } label: {
+            VStack(spacing: 0) {
+                VStack(spacing: 1) {
+                    Text(CircuitCheck.title(step)).font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(first ? Color.red : ink)
+                    // The row (a state or timing table's), then "first wrong" under it.
+                    Text(step.row > 0 ? "row \(step.row)" : first ? "first wrong" : " ")
+                        .font(.system(size: 9, weight: step.row > 0 ? .regular : .semibold)).foregroundStyle(first ? Color.red : dim)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .frame(maxWidth: Self.stepWidth - 12)
+                    Text(first && step.row > 0 ? "first wrong" : " ")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.red)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .frame(maxWidth: Self.stepWidth - 12)   // inside the rings
+                }
+                .frame(width: Self.stepWidth, height: Self.headHeight)
+                ForEach(rows, id: \.self) { r in
+                    stripCell(c, step, r).frame(width: Self.stepWidth, height: r.height)
+                }
+            }
+            .background(tint)
+            .overlay {
+                // The first wrong step keeps its red outline when it's chosen too.
+                if first { Rectangle().strokeBorder(Color.red.opacity(0.7), lineWidth: 1.5) }
+                if selected { RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(accent, lineWidth: 2).padding(first ? 3 : 1) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(c.describe(i))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func stripCell(_ c: CircuitCheck, _ step: CircuitCheck.Step, _ r: StripRow) -> some View {
+        if let i = r.signal {
+            let (asked, got) = c.cell(step, signal: i)
+            if r.pair {
+                let wrong = asked != nil && asked != "-" && got != nil && got != asked
+                VStack(spacing: 1) {
+                    Text(asked.map { $0 == "-" ? "–" : String($0) } ?? " ")
+                        .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(dim)
+                    stripValue(got, wrong: wrong)
+                }
+            } else {
+                Text(got.map { String($0) } ?? " ")
+                    .font(.system(size: 13, design: .monospaced)).foregroundStyle(dim)
+            }
+        } else {
+            // A count: the number over the bits.
+            let asked = CircuitCheck.number(step.expected), got = CircuitCheck.number(step.got)
+            VStack(spacing: 1) {
+                Text(asked.map { String($0) } ?? " ").font(.system(size: 11.5, design: .monospaced)).foregroundStyle(dim)
+                Text(got.map { String($0) } ?? (step.got.isEmpty ? " " : "?"))
+                    .font(.system(size: 13.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(step.wrong ? Color.red : ink)
+            }
+        }
+    }
+
+    /// What a light showed: 1 lit, 0 quiet, the rest in their colours; red when wrong.
+    private func stripValue(_ v: Character?, wrong: Bool) -> some View {
+        let s = v.map { String($0) } ?? " "
+        let color: Color = wrong ? .red : v == "1" ? on : v == "0" ? ink : v == "Z" ? .blue : v == "!" ? .red : v == "X" ? .orange : dim
+        return Text(s)
+            .font(.system(size: 13.5, weight: wrong || v == "1" ? .bold : .regular, design: .monospaced))
+            .foregroundStyle(color)
+            .frame(width: 26, height: 18)
+            .background { if wrong { RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.red.opacity(dark ? 0.22 : 0.14)) } }
+    }
+
+    private static let checkCell: CGFloat = 50
+
+    /// The circuit's inputs, then for each output what was asked for and what it gave.
+    private func checkGrid(_ c: CircuitCheck) -> some View {
+        let outs: [Int] = c.outputs.indices.filter { c.outputs[$0].column != nil }
+        let rows: [Int] = table.rows.indices.filter { !onlyWrong || c.wrongRows.contains($0) }
+        return ScrollViewReader { reader in
+          ScrollView([.vertical, .horizontal]) {
+            VStack(spacing: 0) {
+                checkHeader(c, outs)
+                LazyVStack(spacing: 0) {
+                    ForEach(rows, id: \.self) { r in checkRow(c, outs, r).id(r) }
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(card))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(line))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(1)
+            .fixedSize(horizontal: true, vertical: false)
+          }
+          // The first wrong row in view.
+          .onAppear { if let r = c.wrongRows.min() { reader.scrollTo(r, anchor: .center) } }
+          .onChange(of: c.wrongRows) { if let r = c.wrongRows.min() { withAnimation { reader.scrollTo(r, anchor: .center) } } }
+        }
+    }
+
+    private func checkHeader(_ c: CircuitCheck, _ outs: [Int]) -> some View {
+        let w = Self.checkCell
+        return HStack(spacing: 0) {
+            ForEach(0..<n, id: \.self) { i in
+                Text(table.names[i]).font(.system(size: 12, weight: .semibold)).foregroundStyle(ink)
+                    .lineLimit(1).frame(width: w).padding(.vertical, 7)
+            }
+            ForEach(outs, id: \.self) { k in
+                VStack(spacing: 0) {
+                    Text(c.outputs[k].name).font(.system(size: 12, weight: .semibold)).foregroundStyle(accent).lineLimit(1)
+                    HStack(spacing: 0) {
+                        Text("asked").frame(width: w)
+                        Text("got").frame(width: w)
+                    }
+                    .font(.system(size: 9.5)).foregroundStyle(dim)
+                }
+                .padding(.vertical, 3)
+                .background(accent.opacity(dark ? 0.13 : 0.10))
+                .overlay(alignment: .leading) { divider }
+            }
+        }
+        .background(ink.opacity(0.05))
+    }
+
+    private func checkRow(_ c: CircuitCheck, _ outs: [Int], _ r: Int) -> some View {
+        let w = Self.checkCell
+        let wrong = c.wrongRows.contains(r)
+        let tip: String = !wrong ? "" : "Row \(r): " + outs.filter { c.result[r][$0] == "x" }.map { k -> String in
+            let got = table.rows[r][c.outputs[k].column!]
+            return "\(c.outputs[k].name) should be \(c.expected[r][k]); the circuit gives \(got)"
+        }.joined(separator: "; ")
+        let stripe: Color = wrong ? Color.red.opacity(dark ? 0.2 : 0.12) : (r % 2 == 1 ? ink.opacity(0.03) : .clear)
+        return HStack(spacing: 0) {
+            ForEach(0..<n, id: \.self) { i in
+                Text(String(table.rows[r][i])).font(.system(size: 13, design: .monospaced)).foregroundStyle(dim).frame(width: w, height: 24)
+            }
+            ForEach(outs, id: \.self) { k in checkPair(c, r, k) }
+        }
+        .background(stripe)
+        .help(tip)
+    }
+
+    private func checkPair(_ c: CircuitCheck, _ r: Int, _ k: Int) -> some View {
+        let w = Self.checkCell
+        let asked: Character = c.expected[r][k]
+        let result: Character = c.result[r][k]
+        let got: Character = table.rows[r][c.outputs[k].column!]
+        let gotColor: Color = result == "x" ? .red : result == "=" ? ink : dim
+        return HStack(spacing: 0) {
+            Text(asked == "-" ? "X" : String(asked))
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(asked == "-" ? Color.orange : ink)
+                .frame(width: w, height: 24)
+            Text(String(got))
+                .font(.system(size: 13, weight: result == "x" ? .bold : .regular, design: .monospaced))
+                .foregroundStyle(gotColor)
+                .frame(width: w, height: 24)
+        }
+        .overlay(alignment: .leading) { divider }
+    }
+
+    /// This circuit's table as text to edit: "A B | F", then a row each.
+    private func circuitTableText() -> String {
+        func line(_ cells: [String]) -> String {
+            let ins: String = cells.prefix(n).joined(separator: " ")
+            let outs: String = cells.dropFirst(n).joined(separator: " ")
+            return ins + " | " + outs
+        }
+        var lines: [String] = [line(table.names)]
+        for row in table.rows { lines.append(line(row.map { String($0) })) }
+        return lines.joined(separator: "\n")
     }
 }

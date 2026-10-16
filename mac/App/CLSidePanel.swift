@@ -297,7 +297,8 @@ struct MiniMap: View {
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
         var o = CLDrawOptions(dark: prefs.dark, accent: Int32(prefs.accent), wireScale: 1,
-                              simView: false, thumbnail: true, showSelection: false, selectionFade: 1)
+                              simView: false, thumbnail: true, showSelection: false, selectionFade: 1,
+                              ink: Int32(CL_INK_NEVER))
         cl_document_draw_ex(document.handle, Int32(page), ctx, scale, originX, originY, upp, &o)
         guard let img = ctx.makeImage() else { return nil }
         DispatchQueue.main.async { cache = (key, img) }

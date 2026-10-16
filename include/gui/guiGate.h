@@ -161,6 +161,20 @@ public:
 	virtual string getLogicParam( string paramName ) { return lparams[paramName]; };
 	map < string, string >* getAllLogicParams() { return &lparams; };
 
+	// Locked in place (a teacher's starter parts): the GUI param LOCKED, only
+	// ever "true" -- unlocking takes it off, so an unlocked part saves exactly
+	// as before, and older versions keep it without acting on it. Read with
+	// find: getGUIParam("LOCKED") would add an empty one, which v2.x and v1.x
+	// can't read back.
+	bool isLocked() const {
+		map < string, string >::const_iterator it = gparams.find("LOCKED");
+		return it != gparams.end() && it->second == "true";
+	};
+	void setLocked( bool locked ) {
+		if (locked) gparams["LOCKED"] = "true";
+		else gparams.erase("LOCKED");
+	};
+
 	// Extra (name, value) params a gate type persists beyond its gparams/lparams
 	// -- the model-serialization counterpart of saveGateTypeSpecifics(). The base
 	// gate has none; guiGateRAM returns its memory contents.

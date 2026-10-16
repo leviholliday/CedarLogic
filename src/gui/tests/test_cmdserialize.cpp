@@ -92,6 +92,16 @@ TEST_CASE("parse consumes the leading keyword and fields") {
 	CHECK(cw.hotspot == "OUT_3");
 }
 
+TEST_CASE("a gate name with spaces round-trips") {
+	CreateGate cg{9, "3x8 Decoder Chip", 22.5f, 26.5f};
+	CreateGate back;
+	REQUIRE(parse(emit(cg), back));
+	CHECK(back.gid == 9);
+	CHECK(back.gateType == "3x8 Decoder Chip");
+	CHECK(back.x == doctest::Approx(22.5));
+	CHECK(back.y == doctest::Approx(26.5));
+}
+
 TEST_CASE("keyword returns the leading token the dispatcher matches on") {
 	CHECK(keyword("creategate 5 AND 1 2") == "creategate");
 	CHECK(keyword("connectwire 3 7 IN_0") == "connectwire");

@@ -294,7 +294,7 @@ final class Synth {
                 inverse[net] = and; inverse[and] = net
             }
             return net
-        case .nor: return NOT(OR(xs))
+        case .nor: return NOT(AND(xs))
         }
     }
 

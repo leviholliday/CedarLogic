@@ -146,6 +146,26 @@ std::vector<MigrationNotice> migrate(CircuitFile &cf) {
 	return notices;
 }
 
+// What reading a drawing had to say (the website's DRAWING-NOTES.md 3.2, 3.5).
+static void inkNotices(const CircuitFile &cf, std::vector<MigrationNotice> &out) {
+	if (cf.inkDropped > 0) {
+		MigrationNotice n;
+		n.severity = Severity::Warning;
+		n.summary = std::to_string(cf.inkDropped) +
+		            (cf.inkDropped == 1 ? " mark in the drawing couldn't be read and was left out."
+		                                : " marks in the drawing couldn't be read and were left out.");
+		out.push_back(std::move(n));
+	}
+	for (const Page &pg : cf.pages) {
+		if (!pg.ink.readOnly()) continue;
+		MigrationNotice n;
+		n.summary = "This page has a drawing from a newer CedarLogic. It's kept, but this version "
+		            "can't show or change it.";
+		out.push_back(std::move(n));
+		break;   // once, whichever pages have one
+	}
+}
+
 LoadResult loadCircuit(const std::string &text) {
 	LoadResult r;
 	r.source = detectFormat(text);
@@ -155,6 +175,7 @@ LoadResult loadCircuit(const std::string &text) {
 	switch (r.source) {
 	case SourceFormat::SexprV3:
 		r.file = readCircuitFile(body); // already the target format; no migration
+		inkNotices(r.file, r.notices);
 		break;
 	case SourceFormat::XmlV1:
 	case SourceFormat::XmlV2:

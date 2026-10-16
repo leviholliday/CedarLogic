@@ -438,12 +438,15 @@ public:
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate::paramSchema();
 		s.push_back({ "HALF_CYCLE", ParamKind::BITS });
+		s.push_back({ "MANUAL", ParamKind::BOOL });
 		return s;
 	}
 
 private:
 	TimeType halfCycle;
 	StateType theState;
+	// Only moves on Step Clock (the MANUAL parameter).
+	bool manual;
 };
 
 

@@ -53,6 +53,8 @@ typedef struct CLSyncHooks {
 	void (*ask_incoming_deletes)(void *ctx, int count, const char *fromDevices, void *token);   // cl_sync_answer(token, yes)
 	// the gate library's default for a param; returns false if there is none
 	bool (*gate_default)(void *ctx, const char *lib, bool gui, const char *name, char *out, size_t outLen);
+	// main thread, may be NULL: a pull changed side records (SYNC.md 2.5.1); read them with cl_sync_side_records
+	void (*side_changed)(void *ctx);
 } CLSyncHooks;
 
 // The server is https://cedarlogic.netlify.app/api/sync/v1 unless the environment
@@ -68,6 +70,17 @@ const char *cl_sync_device_name(CLSyncEngine *e);
 void cl_sync_set_device_name(CLSyncEngine *e, const char *name);
 int cl_sync_device_count(CLSyncEngine *e);
 const char *cl_sync_device(CLSyncEngine *e, int i, int64_t *lastSyncAt);
+// The device record's id of device i (same snapshot as cl_sync_device), for cl_sync_remove_device.
+const char *cl_sync_device_id(CLSyncEngine *e, int i);
+// Removes another device's record (SYNC.md 5.1): off the list now, a tombstone by the next cycle.
+// The device keeps the code, so it can still sync (and lists itself again when it does). False
+// for this device's own record or an unknown id.
+bool cl_sync_remove_device(CLSyncEngine *e, const char *rid);
+// The person's name across devices (SYNC.md 2.5.2, the "profile" side record; format in
+// CedarCore/SyncInternal.h): malloc'd UTF-8 to free(), or NULL when none is synced.
+char *cl_sync_profile_name(CLSyncEngine *e, int64_t *modifiedAt);
+// Sets it (now), sent by the next cycle ("" is stored as "no name"; the Mac app never sends it).
+void cl_sync_set_profile_name(CLSyncEngine *e, const char *name);
 
 // Status: kind is CL_SYNC_OFF ... ; text is the sentence to show.
 enum { CL_SYNC_OFF, CL_SYNC_SYNCED, CL_SYNC_SYNCING, CL_SYNC_OFFLINE, CL_SYNC_ERROR, CL_SYNC_FULL, CL_SYNC_GONE, CL_SYNC_BUSY };
@@ -90,6 +103,13 @@ void cl_sync_delete_synced_copy(CLSyncEngine *e, CLSyncDone done, void *ctx);
 void cl_sync_start_over(CLSyncEngine *e, CLSyncDone done, void *ctx);
 void cl_sync_answer(void *token, bool yes);
 void cl_sync_flush_done(void *token);
+
+// Side records (SYNC.md 2.5.1; the kinds "classroom" and "membership"). Records of a kind as a malloc'd JSON
+// array of [rid, payloadJson] pairs (caller frees). put: the payload's own "kind"; rid NULL or "" = a new id;
+// returns the id (valid until the next call) or "" if the kind isn't a side kind. Sent by the next cycle.
+char *cl_sync_side_records(CLSyncEngine *e, const char *kind);
+const char *cl_sync_put_side(CLSyncEngine *e, const char *payloadJson, const char *rid);
+void cl_sync_delete_side(CLSyncEngine *e, const char *rid);
 
 void cl_sync_now(CLSyncEngine *e);
 void cl_sync_note_library_changed(CLSyncEngine *e);

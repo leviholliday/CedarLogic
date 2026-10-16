@@ -297,6 +297,7 @@ struct Client {
 	int made = 0;
 	int64_t changesLimit = 0;
 	std::string serverBase = "http://fake/api/sync/v1";
+	std::vector<std::string> sideKinds;   // SYNC.md 2.5.1 (none: an engine from before side records)
 
 	Client(const std::string& k, const std::string& d, FakeClock& c, int64_t skew, Crypto& crypto, const std::string& dir)
 		: kind(k), device(d), clock(c), myClock(c, skew), cr(crypto) {
@@ -333,6 +334,7 @@ struct Client {
 		o.web = kind == "web";
 		o.gateDefaults = vectorDefaults();
 		o.changesLimit = changesLimit;
+		o.sideKinds = sideKinds;
 		CoreHooks h;
 		h.http = [this](const HttpRequest& r) { return net.call(r); };
 		h.notice = [this](const std::string& t) { notices.push_back(t); };
@@ -1843,6 +1845,143 @@ void s46_after_a_reset_every_device_is_listed_again(Ctx& x) {
 	CHECK(a.state().device.ver > ver);
 }
 
+// The profile (SYNC.md 2.5.2): the name goes to every device that reads the kind, the newer name
+// wins, two written at once settle on one, and an engine without the kind (or from 0.3.16, with
+// only the classroom's) leaves it alone and reads it once it has the kind. Removing another
+// device's record (5.1): gone here and on the others, never this device's own, and the removed
+// device, which still has the code, lists itself again when it next writes its record.
+void s48_profile_name_and_removing_a_device(Ctx& x) {
+	World w(x.cr, x.dir, { "app", "web", "app" }, Limits(), {}, x.real, x.realBase);
+	Client &a = w[0], &b = w[1], &old = w[2];
+	const std::vector<std::string> kinds{ "classroom", "membership", "profile" };
+	a.sideKinds = b.sideKinds = kinds;
+	old.sideKinds = { "classroom", "membership" };   // 0.3.16
+	a.reloadEachSync = b.reloadEachSync = false;      // (the queue is the engine's memory)
+	a.makeCore();
+	b.makeCore();
+	old.makeCore();
+	const std::string lid = a.create("Adder", cdlWith(40));
+	const std::string code = a.turnOn();
+	a.sync();
+	Preview pv;
+	b.link(code, pv);
+	b.sync();
+	old.link(code, pv);
+	old.sync();
+	const RecState circuitBefore = a.state().records.at(a.mapped(lid));
+	CHECK(!a.core->profile().has() && !b.core->profile().has());
+	w.clock.tick();
+	const std::string rid = a.core->setProfileName("\xEF\xBB\xBF  Ada Lovelace \t", a.now());
+	CHECK(!rid.empty() && a.core->profile().name == "Ada Lovelace");
+	a.sync();
+	b.sync();
+	old.sync();
+	CHECK(b.core->profile().has() && b.core->profile().name == "Ada Lovelace" && b.core->profile().rid == rid);
+	// The payload, exactly.
+	Profile pa = a.core->profile();
+	const auto side = a.core->sideRecords("profile");
+	CHECK(side.size() == 1 && side[0].second == profileJson("Ada Lovelace", pa.modifiedAt, a.core->deviceName(), a.state().deviceId));
+	CHECK(side[0].second.rfind("{\"v\":1,\"kind\":\"profile\",\"name\":\"Ada Lovelace\",\"modifiedAt\":", 0) == 0);
+	// The old engine: not a circuit, nothing damaged, its one circuit as it was.
+	CHECK(old.core->circuitCount() == 1 && old.state().unreadable.count(rid) && old.state().unreadable.at(rid).second == "newer");
+	CHECK(old.state().records.size() == 1 && old.problem("").empty());
+	// The newer name wins; setting the same name writes nothing new.
+	w.clock.tick();
+	b.core->setProfileName("Ada L.", b.now());
+	b.sync();
+	a.sync();
+	CHECK(a.core->profile().name == "Ada L." && a.core->profile().rid == rid);
+	const int64_t at = a.core->profile().modifiedAt;
+	w.clock.tick();
+	a.core->setProfileName(" Ada L. ", a.now());
+	CHECK(a.core->profile().modifiedAt == at);
+	// Two written at once (neither knew of the other's): both settle on the later one, and the next
+	// name leaves one record.
+	{
+		World w2(x.cr, files::join(x.dir, "pair"), { "app", "app" }, Limits(), {}, x.real, x.realBase);
+		Client &c = w2[0], &d = w2[1];
+		c.sideKinds = d.sideKinds = kinds;
+		c.reloadEachSync = d.reloadEachSync = false;
+		c.makeCore();
+		d.makeCore();
+		const std::string code2 = c.turnOn();
+		c.sync();
+		d.link(code2, pv);
+		d.sync();
+		w2.clock.tick();
+		c.core->setProfileName("Grace", c.now());
+		w2.clock.tick();
+		d.core->setProfileName("Grace Hopper", d.now());
+		c.sync();
+		d.sync();
+		c.sync();
+		CHECK(c.core->sideRecords("profile").size() == 2 && d.core->sideRecords("profile").size() == 2);
+		CHECK(c.core->profile().name == "Grace Hopper" && d.core->profile().name == "Grace Hopper");
+		w2.clock.tick();
+		std::string longName;
+		for (int i = 0; i < 90; i++) longName += "\xC3\xA9";   // 90 x U+00E9
+		c.core->setProfileName(longName, c.now());
+		c.sync();
+		d.sync();
+		CHECK(c.core->sideRecords("profile").size() == 1 && d.core->sideRecords("profile").size() == 1);
+		CHECK(scalarCount(d.core->profile().name) == 80);
+	}
+	// 0.3.16's state (side records, no list of kinds) upgraded to an engine with "profile": the
+	// record it put aside is read now.
+	{
+		json::Value v;
+		CHECK(json::parse(old.savedState, v) && v.isObject());
+		v.erase("sideKinds");
+		old.savedState = json::write(v);
+		old.sideKinds = kinds;
+		old.sync();
+		CHECK(old.core->profile().has() && old.core->profile().name == "Ada L." && !old.state().unreadable.count(rid));
+		CHECK(old.core->circuitCount() == 1);
+	}
+	// The circuit's record and hashes are as they were.
+	const RecState circuitAfter = a.state().records.at(a.mapped(lid));
+	CHECK(circuitAfter.ver == circuitBefore.ver && circuitAfter.n == circuitBefore.n && circuitAfter.c == circuitBefore.c &&
+	      circuitAfter.st == circuitBefore.st);
+
+	// Removing a device.
+	auto names = [](Client& c) {
+		std::vector<std::string> out;
+		for (const auto& d : c.core->deviceList()) out.push_back(d.first);
+		std::sort(out.begin(), out.end());
+		return out;
+	};
+	a.sync();
+	b.sync();
+	old.sync();
+	a.sync();
+	b.sync();
+	std::vector<std::string> both{ b.core->deviceName(), old.core->deviceName() };
+	std::sort(both.begin(), both.end());
+	CHECK(names(a) == both);
+	std::string oldRid;
+	for (const auto& d : a.core->deviceEntries())
+		if (d.name == old.core->deviceName()) oldRid = d.rid;
+	CHECK(!oldRid.empty() && oldRid == old.state().device.id);
+	CHECK(!a.core->removeDevice(a.state().device.id) && !a.core->removeDevice("not-a-uuid"));
+	CHECK(a.core->removeDevice(oldRid));
+	CHECK(names(a) == std::vector<std::string>{ b.core->deviceName() });   // off the list at once
+	a.sync();
+	auto recs = w.recs(a);
+	CHECK(recs.count(oldRid) && recs[oldRid].deleted);
+	CHECK(names(a) == std::vector<std::string>{ b.core->deviceName() } && !a.state().devices.count(oldRid));
+	b.sync();
+	CHECK(names(b) == std::vector<std::string>{ a.core->deviceName() });
+	// The removed device still has the code: its next device record (a day on) is listed again.
+	old.sync();
+	CHECK(old.enabled() && old.core->circuitCount() == 1);
+	w.clock.tick(kDay + 1000);
+	old.sync();
+	w.clock.tick(kHour + 1000);
+	old.sync();
+	a.sync();
+	CHECK(names(a) == both);
+}
+
 // A damaged tombstone of a circuit not here isn't a damaged circuit, and a damaged circuit that's
 // gone from the synced copy stops counting (SYNC.md 4.5, 4.10).
 void s47_damaged_records_that_are_gone_stop_counting(Ctx& x) {
@@ -2021,6 +2160,7 @@ void scenarioTests(Crypto& cr, const std::string& tempDir, Report& report, Host*
 		{ "s43_switch_flip_here_real_edit_there_is_not_a_conflict", s43_switch_flip_here_real_edit_there_is_not_a_conflict, true },
 		{ "s46_after_a_reset_every_device_is_listed_again", s46_after_a_reset_every_device_is_listed_again, true },
 		{ "s47_damaged_records_that_are_gone_stop_counting", s47_damaged_records_that_are_gone_stop_counting, true },
+		{ "s48_profile_name_and_removing_a_device", s48_profile_name_and_removing_a_device, true },
 		{ "scale_join_300", scale_join_300, true },
 		{ "state_file_round_trip", state_file_round_trip, false },
 	};

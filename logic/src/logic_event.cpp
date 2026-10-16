@@ -13,4 +13,4 @@ bool Event::operator > (const Event &other) const {
 	return (eventTime > other.eventTime);
 }
 
-TimeType Event::globalCreationTime = 0;
+std::atomic<TimeType> Event::globalCreationTime{0};

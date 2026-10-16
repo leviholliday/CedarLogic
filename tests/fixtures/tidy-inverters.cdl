@@ -1,0 +1,218 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.1.0-native")
+  (page 0
+    (gate "DD_KEYPAD_HEX"
+      (uuid "1")
+      (at 0 0)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_INVERTER"
+      (uuid "2")
+      (at 30 1)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DE_TO"
+      (uuid "3")
+      (at 42 3)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "DE_TO"
+      (uuid "4")
+      (at 42 1)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A'"))
+    (gate "AA_INVERTER"
+      (uuid "5")
+      (at 30 -4)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DE_TO"
+      (uuid "6")
+      (at 42 -2)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B"))
+    (gate "DE_TO"
+      (uuid "7")
+      (at 42 -4)
+      (angle 0)
+      (lparam "JUNCTION_ID" "B'"))
+    (gate "AA_INVERTER"
+      (uuid "8")
+      (at 30 -9)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DE_TO"
+      (uuid "9")
+      (at 42 -7)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C"))
+    (gate "DE_TO"
+      (uuid "10")
+      (at 42 -9)
+      (angle 0)
+      (lparam "JUNCTION_ID" "C'"))
+    (gate "AA_INVERTER"
+      (uuid "11")
+      (at 30 -14)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DE_TO"
+      (uuid "12")
+      (at 42 -12)
+      (angle 0)
+      (lparam "JUNCTION_ID" "D"))
+    (gate "DE_TO"
+      (uuid "13")
+      (at 42 -14)
+      (angle 0)
+      (lparam "JUNCTION_ID" "D'"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 16 1 27 1)
+        (connect "2" "IN_0")
+        (cross 16 "4")
+        (cross 26 "5"))
+      (seg "1" h
+        (pts 5 3 16 3)
+        (connect "1" "OUT_3")
+        (cross 16 "4"))
+      (seg "2" h
+        (pts 34 3 40 3)
+        (connect "3" "IN_0")
+        (cross 34 "6"))
+      (seg "3" h
+        (pts 26 4 34 4)
+        (cross 26 "5")
+        (cross 34 "6"))
+      (seg "4" v
+        (pts 16 1 16 3)
+        (cross 1 "0")
+        (cross 3 "1"))
+      (seg "5" v
+        (pts 26 1 26 4)
+        (cross 1 "0")
+        (cross 4 "3"))
+      (seg "6" v
+        (pts 34 3 34 4)
+        (cross 3 "2")
+        (cross 4 "3")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 33 1 40 1)
+        (connect "2" "OUT_0")
+        (connect "4" "IN_0")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 15 -4 27 -4)
+        (connect "5" "IN_0")
+        (cross 15 "4")
+        (cross 26 "5"))
+      (seg "1" h
+        (pts 34 -2 40 -2)
+        (connect "6" "IN_0")
+        (cross 34 "6"))
+      (seg "2" h
+        (pts 26 -1.5 34 -1.5)
+        (cross 26 "5")
+        (cross 34 "6"))
+      (seg "3" h
+        (pts 5 1 15 1)
+        (connect "1" "OUT_2")
+        (cross 15 "4"))
+      (seg "4" v
+        (pts 15 -4 15 1)
+        (cross -4 "0")
+        (cross 1 "3"))
+      (seg "5" v
+        (pts 26 -4 26 -1.5)
+        (cross -4 "0")
+        (cross -1.5 "2"))
+      (seg "6" v
+        (pts 34 -2 34 -1.5)
+        (cross -2 "1")
+        (cross -1.5 "2")))
+    (wire
+      (ids "4")
+      (seg "0" h
+        (pts 33 -4 40 -4)
+        (connect "5" "OUT_0")
+        (connect "7" "IN_0")))
+    (wire
+      (ids "5")
+      (seg "0" h
+        (pts 14 -9 27 -9)
+        (connect "8" "IN_0")
+        (cross 14 "4")
+        (cross 26 "5"))
+      (seg "1" h
+        (pts 34 -7 40 -7)
+        (connect "9" "IN_0")
+        (cross 34 "6"))
+      (seg "2" h
+        (pts 26 -6.5 34 -6.5)
+        (cross 26 "5")
+        (cross 34 "6"))
+      (seg "3" h
+        (pts 5 -1 14 -1)
+        (connect "1" "OUT_1")
+        (cross 14 "4"))
+      (seg "4" v
+        (pts 14 -9 14 -1)
+        (cross -9 "0")
+        (cross -1 "3"))
+      (seg "5" v
+        (pts 26 -9 26 -6.5)
+        (cross -9 "0")
+        (cross -6.5 "2"))
+      (seg "6" v
+        (pts 34 -7 34 -6.5)
+        (cross -7 "1")
+        (cross -6.5 "2")))
+    (wire
+      (ids "6")
+      (seg "0" h
+        (pts 33 -9 40 -9)
+        (connect "8" "OUT_0")
+        (connect "10" "IN_0")))
+    (wire
+      (ids "7")
+      (seg "0" h
+        (pts 13 -14 27 -14)
+        (connect "11" "IN_0")
+        (cross 13 "4")
+        (cross 26 "5"))
+      (seg "1" h
+        (pts 34 -12 40 -12)
+        (connect "12" "IN_0")
+        (cross 34 "6"))
+      (seg "2" h
+        (pts 26 -11.5 34 -11.5)
+        (cross 26 "5")
+        (cross 34 "6"))
+      (seg "3" h
+        (pts 5 -3 13 -3)
+        (connect "1" "OUT_0")
+        (cross 13 "4"))
+      (seg "4" v
+        (pts 13 -14 13 -3)
+        (cross -14 "0")
+        (cross -3 "3"))
+      (seg "5" v
+        (pts 26 -14 26 -11.5)
+        (cross -14 "0")
+        (cross -11.5 "2"))
+      (seg "6" v
+        (pts 34 -12 34 -11.5)
+        (cross -12 "1")
+        (cross -11.5 "2")))
+    (wire
+      (ids "8")
+      (seg "0" h
+        (pts 33 -14 40 -14)
+        (connect "11" "OUT_0")
+        (connect "13" "IN_0")))))

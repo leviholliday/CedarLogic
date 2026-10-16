@@ -200,7 +200,8 @@ final class TabSwitcher {
                             origin: origin, unitsPerPoint: tUPP, size: CGSize(width: thumbW, height: thumbH))
             }
             var o = CLDrawOptions(dark: dark, accent: Int32(prefs.accent), wireScale: prefs.wireScale,
-                                  simView: false, thumbnail: false, showSelection: false, selectionFade: 1)
+                                  simView: false, thumbnail: false, showSelection: false, selectionFade: 1,
+                                  ink: Int32(CL_INK_FOLLOW))
             cl_document_draw_ex(doc.handle, Int32(page), ctx, Double(scale), origin.x, origin.y, tUPP, &o)
         } else {
             _ = cl_document_draw_fitted(doc.handle, Int32(page), ctx, Double(thumbW), Double(thumbH), 10, Double(scale),

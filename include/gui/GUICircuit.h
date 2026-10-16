@@ -167,6 +167,12 @@ public:
 	// window, when there is one).
 	void oscopeSignalsChanged();
 
+	// The student's notes for this circuit and whether its drawing is hidden
+	// (the website's DRAWING-NOTES.md 3.7, 3.8): saved with it, not undo steps.
+	// ("circuitNotes", not "notes": Version History's notes are another thing.)
+	std::string circuitNotes;
+	bool inkHidden = false;
+
 private:
 
 	GateMap gateList;

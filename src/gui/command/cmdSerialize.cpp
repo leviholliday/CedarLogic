@@ -50,7 +50,23 @@ bool parse(const std::string &line, CreateGate &out) {
 	std::string kw;
 	iss >> kw;
 	if (kw != "creategate") return false;
-	iss >> out.gid >> out.gateType >> out.x >> out.y;
+	iss >> out.gid;
+	// A library name may contain spaces ("3x8 Decoder Chip"), and emit() writes
+	// it as is, so the last two words are x and y and everything between them
+	// is the name. Reading the name as one word made such a paste create
+	// nothing, and the next pasted part was given the same id.
+	std::vector<std::string> words;
+	std::string w;
+	while (iss >> w) words.push_back(w);
+	if (words.size() < 3) {
+		std::istringstream rest(line);
+		rest >> kw >> out.gid >> out.gateType >> out.x >> out.y;
+		return true;
+	}
+	out.gateType = words[0];
+	for (size_t i = 1; i + 2 < words.size(); i++) out.gateType += " " + words[i];
+	std::istringstream(words[words.size() - 2]) >> out.x;
+	std::istringstream(words[words.size() - 1]) >> out.y;
 	return true;
 }
 

@@ -19,5 +19,7 @@ void GUICircuit::reInitializeLogicCircuit() {
 	sendMessageToCore(klsMessage::Message(klsMessage::MT_REINITIALIZE));
 }
 
-std::string VERSION_NUMBER_STRING() { return "4.1.0-native"; }
-std::string VERSION_NUMBER() { return "4.1.0"; }
+// 4.2: drawing and notes (the website's DRAWING-NOTES.md 3.10). Sync's guard
+// for older writers reads this from the generator.
+std::string VERSION_NUMBER_STRING() { return "4.2.0-native"; }
+std::string VERSION_NUMBER() { return "4.2.0"; }

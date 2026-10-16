@@ -12,6 +12,7 @@
 #include <memory>
 #include "klsClipboard.h"
 #include <fstream>
+#include <sstream>
 #include <map>
 #include <unordered_map>   // removed .h  KAS
 
@@ -100,8 +101,25 @@ cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanva
 }
 #endif
 
-cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& pasteText, bool useClipboard ) {
+// A pasted copy of a part locked in place comes unlocked: drop LOCKED from
+// the block's setparams lines (before the JUNCTION_ID bump, which reads the
+// end of the text).
+static string withoutLocks(const string& text) {
+	if (text.find("LOCKED") == string::npos) return text;
+	istringstream iss(text);
+	string out, line;
+	while (getline(iss, line, '\n')) {
+		cmdser::SetParams d;
+		if (cmdser::keyword(line) == "setparams" && cmdser::parse(line, d) && d.guiParams.erase("LOCKED"))
+			line = cmdser::emit(d);
+		out += line + "\n";
+	}
+	return out;
+}
+
+cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& rawText, bool useClipboard ) {
     vector < klsCommand* > cmdList;
+    const string pasteText = withoutLocks(rawText);
     {
     	if (pasteText.find('\n',0) == string::npos) return NULL;
     	istringstream iss(pasteText);
@@ -226,7 +244,19 @@ string klsClipboard::serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, v
 	}
 	// Now actually generate copy of wire
 	for (unsigned int i = 0; i < copyWires.size(); i++) {
-		vector < wireConnection > wconns = copyWires[i]->getConnections();
+		vector < wireConnection > wconns;
+		// Two pins in one spot (a RAM's DATA_IN_n and DATA_OUT_n) are joined
+		// together: connecting either connects both. Writing a connectwire for
+		// each made the paste connect each pin twice, and the doubled records
+		// later turned up as repeated (connect ...) lines in the saved file.
+		for (const wireConnection &c : copyWires[i]->getConnections()) {
+			guiGate *g = gCircuit->getGate(c.gid);
+			const string pal = g != nullptr ? g->getHotspotPal(c.connection) : string();
+			bool palWritten = false;
+			for (const wireConnection &k : wconns)
+				if (k.gid == c.gid && (k.connection == c.connection || (!pal.empty() && k.connection == pal))) palWritten = true;
+			if (!palWritten) wconns.push_back(c);
+		}
 		// A wire needs two ends to be worth copying, and the wire has to still
 		// be in the circuit for its bus ids to be readable. Neither was checked:
 		// a wire left with fewer than two connections read past the end of the

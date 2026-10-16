@@ -8,6 +8,7 @@
 // World y points up; the view is flipped, so screen y points down.
 
 import AppKit
+import Combine
 import QuartzCore
 import UniformTypeIdentifiers
 import SwiftUI
@@ -31,6 +32,12 @@ final class CircuitCanvasNSView: NSView {
         super.viewDidMoveToWindow()
         if let o = occlusionWatch { NotificationCenter.default.removeObserver(o); occlusionWatch = nil }
         guard let w = window else { return }
+        // A newly opened circuit's keys go to its canvas, not to the bare
+        // window (nothing had the keyboard until the first click).
+        DispatchQueue.main.async { [weak self, weak w] in
+            guard let self, let w, self.window === w, w.firstResponder === w else { return }
+            w.makeFirstResponder(self)
+        }
         occlusionWatch = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
                                                                 object: w, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -81,10 +88,23 @@ final class CircuitCanvasNSView: NSView {
     var clMode = false { didSet { if clMode != oldValue { needsDisplay = true } } }
 
     /// What the current drag does.
-    enum Drag { case none, edit, pan(last: CGPoint) }
+    enum Drag { case none, edit, pan(last: CGPoint), ink }
     var drag = Drag.none
+    /// The press being dragged was a double-click's second (it opened the
+    /// part's settings): its release doesn't step a manual clock again.
+    var pressWasDoubleClick = false
     var spaceDown = false
     var pannedWhileSpaceDown = false
+    /// Drawing on the circuit (Drawing.swift): a tablet pen's eraser end is
+    /// near, the stroke in progress erases, and the trackpad's force.
+    var tabletEraser = false
+    var inkErasing = false
+    var forcePressure: Double?
+
+    /// The last click, where and when (world, y up): the presentation
+    /// flashes a ring there so the room sees it (Presenter.swift).
+    var lastPress: (at: CGPoint, time: CFTimeInterval)?
+    func notePress(_ e: NSEvent) { lastPress = (worldPoint(convert(e.locationInWindow, from: nil)), CACurrentMediaTime()) }
 
     /// An eased zoom in progress (CLCanvas.swift).
     var zoomAnim: ZoomAnimation?
@@ -114,6 +134,7 @@ final class CircuitCanvasNSView: NSView {
         guard let document else { return }
         let p = convert(event.locationInWindow, from: nil)
         controller?.pointerMoved(worldPoint(p))
+        if controller?.drawing == true { inkHover(at: p); return }
         if CanvasController.pendingGate != nil, controller?.placePendingGate(at: worldPoint(p)) == true {
             needsDisplay = true
             return
@@ -127,9 +148,15 @@ final class CircuitCanvasNSView: NSView {
         updateWireTag(at: p)
     }
 
+    // A tablet pen coming near (its eraser end erases) and the trackpad's
+    // force: Drawing.swift.
+    override func tabletProximity(with event: NSEvent) { inkTabletProximity(event) }
+    override func pressureChange(with event: NSEvent) { inkPressureChange(event) }
+
     override func mouseExited(with event: NSEvent) {
         guard let document else { return }
         if cl_edit_hover_clear(document.handle) { needsDisplay = true }
+        if controller?.drawing == true { cl_ink_hover_clear(document.handle); needsDisplay = true }
         hideWireTag()
     }
 
@@ -167,7 +194,8 @@ final class CircuitCanvasNSView: NSView {
     }
 
     private func wireTagText() -> (text: String, state: Character)? {
-        guard let document else { return nil }
+        // Predict: the wire would give the light's answer away.
+        guard let document, controller?.predictCovers != true else { return nil }
         var buf = [CChar](repeating: 0, count: 72)
         let bits = Int(cl_edit_hover_wire_state(document.handle, Int32(page), &buf, 72))
         guard bits > 0 else { return nil }
@@ -219,6 +247,10 @@ final class CircuitCanvasNSView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    override func accessibilityChildren() -> [Any]? {
+        predictAccessibilityChildren() ?? super.accessibilityChildren()
+    }
+
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
@@ -231,38 +263,48 @@ final class CircuitCanvasNSView: NSView {
         }
         if needsFit, bounds.width > 0 { zoomToFit() }
         if clMode { drawCL(ctx); drawWireTag(ctx); return }
+        Self.paintSimple(ctx, document: document, theme: theme, page: page, origin: origin, upp: unitsPerPoint,
+                         size: bounds.size, scale: window?.backingScaleFactor ?? 2)
+    }
+
+    /// What the Simple interface's canvas shows, for a camera (the
+    /// presentation draws it too, with its own).
+    static func paintSimple(_ ctx: CGContext, document: CoreDocument?, theme: Theme, page: Int,
+                            origin: CGPoint, upp: CGFloat, size: CGSize, scale: CGFloat) {
         ctx.setFillColor(theme.canvas.cgColor)
-        ctx.fill(bounds)
-        drawGrid(ctx)
+        ctx.fill(CGRect(origin: .zero, size: size))
+        drawGrid(ctx, theme: theme, origin: origin, upp: upp, size: size)
         guard let document else { return }
-        let scale = window?.backingScaleFactor ?? 2
-        cl_document_draw(document.handle, Int32(page), ctx, scale, origin.x, origin.y,
-                         unitsPerPoint, theme.darkCircuit)
-        cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, unitsPerPoint,
+        cl_document_draw(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp, theme.darkCircuit)
+        cl_edit_draw_overlay(document.handle, Int32(page), ctx, scale, origin.x, origin.y, upp,
                              theme.accent.r, theme.accent.g, theme.accent.b)
         if let box = document.selectionBox {
-            let r = viewRect(box)
+            let r = CGRect(x: (box.minX - origin.x) / upp, y: (origin.y - box.maxY) / upp,
+                           width: box.width / upp, height: box.height / upp)
             ctx.setFillColor(theme.accent.cgColor.copy(alpha: 0.12)!)
             ctx.fill(r)
             ctx.setStrokeColor(theme.accent.cgColor.copy(alpha: 0.8)!)
             ctx.setLineWidth(1)
             ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
         }
+        if cl_ink_live_page(document.handle) == Int32(page) {
+            cl_ink_draw_live(document.handle, ctx, Double(scale), origin.x, origin.y, upp, theme.darkCircuit, false)
+        }
     }
 
     /// Minor lines every world unit, major every five; minor ones drop out
     /// when they'd crowd closer than a few points.
-    private func drawGrid(_ ctx: CGContext) {
+    private static func drawGrid(_ ctx: CGContext, theme: Theme, origin: CGPoint, upp: CGFloat, size: CGSize) {
         guard theme.gridStyle != .none else { return }
-        let spacing = 1.0 / unitsPerPoint   // points per world unit
+        let spacing = 1.0 / upp   // points per world unit
         let showMinor = spacing >= 7
         let step = showMinor ? 1 : 5
-        let x0 = Int(floor(origin.x)), x1 = Int(ceil(origin.x + bounds.width * unitsPerPoint))
-        let y1 = Int(ceil(origin.y)), y0 = Int(floor(origin.y - bounds.height * unitsPerPoint))
+        let x0 = Int(floor(origin.x)), x1 = Int(ceil(origin.x + size.width * upp))
+        let y1 = Int(ceil(origin.y)), y0 = Int(floor(origin.y - size.height * upp))
         let startX = x0 - ((x0 % step) + step) % step
         let startY = y0 - ((y0 % step) + step) % step
-        func sx(_ x: Int) -> CGFloat { (CGFloat(x) - origin.x) / unitsPerPoint }
-        func sy(_ y: Int) -> CGFloat { (origin.y - CGFloat(y)) / unitsPerPoint }
+        func sx(_ x: Int) -> CGFloat { (CGFloat(x) - origin.x) / upp }
+        func sy(_ y: Int) -> CGFloat { (origin.y - CGFloat(y)) / upp }
 
         if theme.gridStyle == .lines {
             for pass in 0..<2 {   // minor, then major on top
@@ -271,10 +313,10 @@ final class CircuitCanvasNSView: NSView {
                 ctx.setStrokeColor((major ? theme.gridMajor : theme.gridMinor).cgColor)
                 ctx.setLineWidth(major ? 1 : 0.5)
                 for x in stride(from: startX, through: x1, by: step) where (x % 5 == 0) == major {
-                    ctx.move(to: CGPoint(x: sx(x), y: 0)); ctx.addLine(to: CGPoint(x: sx(x), y: bounds.height))
+                    ctx.move(to: CGPoint(x: sx(x), y: 0)); ctx.addLine(to: CGPoint(x: sx(x), y: size.height))
                 }
                 for y in stride(from: startY, through: y1, by: step) where (y % 5 == 0) == major {
-                    ctx.move(to: CGPoint(x: 0, y: sy(y))); ctx.addLine(to: CGPoint(x: bounds.width, y: sy(y)))
+                    ctx.move(to: CGPoint(x: 0, y: sy(y))); ctx.addLine(to: CGPoint(x: size.width, y: sy(y)))
                 }
                 ctx.strokePath()
             }
@@ -306,7 +348,7 @@ final class CircuitCanvasNSView: NSView {
     func zoomToFit() {
         needsFit = false
         guard bounds.width > 0, bounds.height > 0 else { return }
-        let box = document?.bounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
+        let box = document?.fitBounds(ofPage: page) ?? CGRect(x: -20, y: -15, width: 40, height: 30)
         let pad: CGFloat = 3
         let target = max((box.width + 2 * pad) / bounds.width, (box.height + 2 * pad) / bounds.height)
         unitsPerPoint = min(max(target, minUnitsPerPoint), maxUnitsPerPoint)
@@ -353,11 +395,13 @@ final class CircuitCanvasNSView: NSView {
     override func smartMagnify(with event: NSEvent) { zoomToFit() }
 
     override func mouseDown(with event: NSEvent) {
+        notePress(event)
         hideWireTag()
         if let d = document, cl_edit_hover_clear(d.handle) { needsDisplay = true }
         window?.makeFirstResponder(self)
         controller?.onActivate?()
         let p = convert(event.locationInWindow, from: nil)
+        if controller?.drawing == true, inkMouseDown(event, at: p) { return }
         if clMode, clMouseDown(event, at: p) { return }
         // Space or Cmd held: move around instead of editing.
         if spaceDown || event.modifierFlags.contains(.command) {
@@ -371,6 +415,7 @@ final class CircuitCanvasNSView: NSView {
         if event.modifierFlags.contains(.shift) { mods.insert(.shift) }
         if event.modifierFlags.contains(.option) { mods.insert(.option) }
         let what = document.press(page: page, at: worldPoint(p), modifiers: mods, unitsPerPoint: unitsPerPoint)
+        pressWasDoubleClick = event.clickCount >= 2
         if event.clickCount == 2 {
             if what == .box { zoomToFit() } else { controller?.showSettings() }
         }
@@ -389,6 +434,8 @@ final class CircuitCanvasNSView: NSView {
         case .edit:
             document?.drag(to: worldPoint(p))
             needsDisplay = true
+        case .ink:
+            inkMouseDragged(event, at: p)
         case .none:
             break
         }
@@ -396,10 +443,17 @@ final class CircuitCanvasNSView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        if case .ink = drag { inkMouseUp(event, at: p); drag = .none; return }
         if clMode, case .edit = drag, let box = document?.selectionBox { controller?.fadeOutDragBox(box) }
         if case .edit = drag {
-            document?.release(at: worldPoint(p))
+            // A click (no drag) on a clock set to "Only on Step Clock" steps it.
+            if document?.releaseSteppedClock(at: worldPoint(p), stepClock: !pressWasDoubleClick) == true {
+                controller?.circuitAdvancedByUser()
+                controller?.scopeChanged()
+            }
+            pressWasDoubleClick = false
             controller?.edited()
+            controller?.noteLockedHeld()
         }
         drag = .none
         NSCursor.arrow.set()
@@ -407,13 +461,15 @@ final class CircuitCanvasNSView: NSView {
     }
 
     // Right or middle drag moves around.
-    override func otherMouseDown(with event: NSEvent) { drag = .pan(last: convert(event.locationInWindow, from: nil)) }
+    override func otherMouseDown(with event: NSEvent) { notePress(event); drag = .pan(last: convert(event.locationInWindow, from: nil)) }
     override func otherMouseDragged(with event: NSEvent) { mouseDragged(with: event) }
     override func otherMouseUp(with event: NSEvent) { drag = .none }
     // Right-click: a menu for what's under the pointer, as in the wx app
     // (a connected pin's disconnect, a wire's straighten, a gate's settings).
     override func rightMouseDown(with event: NSEvent) {
+        notePress(event)
         controller?.onActivate?()
+        if controller?.drawing == true { inkRightMouseDown(event); return }
         if clMode, clRightMouseDown(event) { return }
         guard let document, let controller else { return }
         let p = worldPoint(convert(event.locationInWindow, from: nil))
@@ -438,10 +494,21 @@ final class CircuitCanvasNSView: NSView {
             item("Delete") { controller.deleteSelection() }
         case .gate:
             item("Settings…") { controller.showSettings() }
-            item("Rotate") { controller.rotate() }
+            // Locked parts (all of the selection): Unlock Part in place of the
+            // things they refuse. "Part", so it isn't taken for the circuit's
+            // own lock (Unlock the Circuit).
+            let locked = controller.selectedLocked > 0 && controller.selectedUnlocked == 0
+            if !locked { item("Rotate") { controller.rotate() } }
             item("Straighten Its Wires") { controller.straighten() }
             menu.addItem(.separator())
-            item("Delete") { controller.deleteSelection() }
+            if locked {
+                item(controller.unlockPartsTitle) { controller.lockSelection(false) }
+            } else {
+                item("Lock in Place") { controller.lockSelection(true) }
+                if controller.selectedLocked > 0 { item(controller.unlockPartsTitle) { controller.lockSelection(false) } }
+                menu.addItem(.separator())
+                item("Delete") { controller.deleteSelection() }
+            }
         case .nothing:
             item("Select All") { controller.selectAll() }
             item("Paste") { controller.paste() }
@@ -454,6 +521,7 @@ final class CircuitCanvasNSView: NSView {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
+        if controller?.drawing == true, inkKeyDown(event) { return }
         if clMode, clKeyDown(event) { return }
         let plain = event.modifierFlags.intersection([.command, .option, .control]).isEmpty
         let shift = event.modifierFlags.contains(.shift)
@@ -670,12 +738,34 @@ final class CanvasController: ObservableObject {
                 document?.cancelGesture()
                 selectNone()
                 if !isRunning { setRunning(true) }   // "Run" means run
+            } else {
+                predict.on = false   // Predict is a Simulation View round
             }
             redraw()
         }
     }
+    /// Predict, then reveal (Predict.swift).
+    let predict = PredictModel()
+    private var predictForward: AnyCancellable?
+
+    init() {
+        // The Simulation menu reads Predict through this controller, so it
+        // hears when Predict changes.
+        predictForward = predict.objectWillChange.sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.objectWillChange.send() }
+        }
+    }
     /// Locked: parts can be clicked (switches, keypads) but nothing edited.
     @Published var locked = false
+    /// Drawing on the circuit (Drawing.swift): the pointer draws, erases or
+    /// highlights instead of editing. The window's, on both sides of a split.
+    @Published var drawing = false { didSet { if drawing != oldValue { drawingChanged() } } }
+    /// The notes pane (Notes.swift), the window's (on its first side).
+    @Published var showNotes = false
+    /// Present in This Window (Presenter.swift): the window is the presentation.
+    @Published var presentingHere = false
+    /// Bumped when the drawing changes or shows or hides (the bar re-reads).
+    @Published var inkVersion = 0
     /// Where the pointer is on the page, for the status bar.
     private(set) var pointer = CGPoint.zero
     /// Bumped (at most ten times a second) when the status bar, the minimap
@@ -722,6 +812,7 @@ final class CanvasController: ObservableObject {
     @Published var showQuickAdd = false
     @Published var showShortcuts = false
     @Published var showExportImage = false
+    @Published var showExportReport = false
     @Published var ramGate: Int?
     /// A one-line message for the status bar ("Saved.", "Nothing to paste.").
     @Published var statusMessage = ""
@@ -769,6 +860,7 @@ final class CanvasController: ObservableObject {
             sheetHost.explicitSaveAt = CACurrentMediaTime()
             NSApp.sendAction(#selector(NSDocument.save(_:)), to: nil, from: nil)
         case .exportImage: sheetHost.exportPage = page; sheetHost.showExportImage = true
+        case .exportReport: sheetHost.showExportReport = true
         // A copy out of Your Circuits; the circuit itself stays there.
         case .exportFile: NSApp.sendAction(#selector(NSDocument.saveTo(_:)), to: nil, from: nil)
         case .print: printPage()
@@ -790,7 +882,9 @@ final class CanvasController: ObservableObject {
         case .focusMode: NotificationCenter.default.post(name: .clToggleFocusMode, object: self)
         case .simView: simView.toggle()
         case .step: stepOnce()
+        case .stepClock: stepClock()
         case .truthTable: makeTruthTable()
+        case .checkCircuit: makeTruthTable(check: true)
         case .find: openFind()
         case .findNext: if findActive { findStep(1) } else { openFind() }
         case .findPrevious: if findActive { findStep(-1) } else { openFind() }
@@ -806,6 +900,10 @@ final class CanvasController: ObservableObject {
         case .closeSplit: NotificationCenter.default.post(name: .clCloseSplit, object: self)
         case .nextTab: cyclePage(1)
         case .previousTab: cyclePage(-1)
+        case .draw: toggleDrawing()
+        case .showDrawing: toggleDrawingShown()
+        case .notes: sheetHost.showNotes.toggle()
+        case .present: Presenter.shared.toggle(self)
         case .shortcuts: sheetHost.showShortcuts = true
         case .darkMode: Prefs.shared.dark.toggle()
         case .feedback: FeedbackModel.aim(); openWindow?("feedback")
@@ -837,6 +935,60 @@ final class CanvasController: ObservableObject {
         guard let upp = view?.unitsPerPoint, upp > 0 else { return 100 }
         return Int((100 * 0.1 / upp).rounded())
     }
+    // MARK: Never stuck
+
+    /// A question sheet on this window that can't be seen (its window was
+    /// replaced, hidden or moved to full screen under it) blocks every
+    /// click on the circuit. Seen twice in a row, two seconds apart, it's
+    /// cancelled -- every question here has a safe Cancel -- with a note.
+    private var hiddenSheetSeen = false
+    private func checkHiddenSheet() {
+        guard let w = view?.window, w.isVisible, w.occlusionState.contains(.visible),
+              let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 else { hiddenSheetSeen = false; return }
+        if !hiddenSheetSeen { hiddenSheetSeen = true; return }
+        hiddenSheetSeen = false
+        NSLog("CedarLogic: ended a sheet that couldn't be seen (%@)", sheet.title)
+        w.endSheet(sheet, returnCode: .cancel)
+        w.makeFirstResponder(view)
+        note("A question that couldn't be seen was closed, so you can keep editing.")
+    }
+
+    /// View ▸ Make This Window Editable: one click back to plain editing,
+    /// whatever was left on -- Lock, Draw, Simulation View, a part on the
+    /// pointer, Tidy's preview, a question that can't be seen -- and the
+    /// keyboard back on the canvas.
+    func makeEditable() {
+        let host = sheetHost
+        if Presenter.shared.inWindow { Presenter.shared.stop() }
+        host.locked = false
+        host.drawing = false
+        for side in [host, host.partner].compactMap({ $0 }) {
+            if side.simView { side.simView = false }
+            if side.isFloating { side.cancelFloating() }
+            if side.tidyActive { side.endTidy(keep: false) }
+            side.document?.cancelGesture()
+            side.view?.drag = .none
+        }
+        Self.pendingGate = nil
+        if let w = host.view?.window {
+            if let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 { w.endSheet(sheet, returnCode: .cancel) }
+            w.makeKeyAndOrderFront(nil)
+            w.makeFirstResponder(host.view)
+        }
+        host.redraw()
+        host.note("Ready to edit.")
+    }
+
+    /// Gives a circuit window's canvas the keyboard (after it's shown).
+    static func focusCanvas(in window: NSWindow) {
+        func find(_ v: NSView) -> CircuitCanvasNSView? {
+            if let c = v as? CircuitCanvasNSView { return c }
+            for s in v.subviews { if let c = find(s) { return c } }
+            return nil
+        }
+        if let root = window.contentView, let c = find(root) { window.makeFirstResponder(c) }
+    }
+
     func zoomActual() { view?.animateZoom(by: (view?.unitsPerPoint ?? 0.1) / 0.1) }
 
     var canEdit: Bool { !locked && !simView }
@@ -1027,6 +1179,46 @@ final class CanvasController: ObservableObject {
         markEdited()
         return i
     }
+    // MARK: Page links (docs/PAGE-LINKS.md)
+    // Which pages' TO/FROM links connect by name. Each change is one undo step.
+
+    var canConnectAllPages: Bool {
+        guard let document, document.pageCount > 1 else { return false }
+        return !cl_pages_all_linked(document.handle)
+    }
+    var canDisconnectAllPages: Bool {
+        guard let document, document.pageCount > 1 else { return false }
+        return !cl_pages_none_linked(document.handle)
+    }
+    func connectAllPages() {
+        guard let document, cl_pages_connect_all(document.handle) else { return }
+        linksChanged("Every page's links connect now.")
+    }
+    func disconnectAllPages() {
+        guard let document, cl_pages_disconnect_all(document.handle) else { return }
+        linksChanged("Each page's links stay on that page now.")
+    }
+    func pagesLinked(_ a: Int, _ b: Int) -> Bool {
+        guard let document else { return false }
+        return cl_pages_linked(document.handle, Int32(a), Int32(b))
+    }
+    /// Connect page `p` to page `other` (or take it off): `p` keeps the
+    /// pages it reaches now, give or take that one.
+    func setPagesLinked(_ p: Int, _ other: Int, _ on: Bool) {
+        guard let document, p != other else { return }
+        let n = document.pageCount
+        var with = (0..<n).map { $0 != p && cl_pages_linked(document.handle, Int32(p), Int32($0)) }
+        guard other >= 0 && other < n else { return }
+        with[other] = on
+        let changed = with.withUnsafeBufferPointer { cl_page_connect_to(document.handle, Int32(p), $0.baseAddress, Int32(n)) }
+        if changed { linksChanged(nil) }
+    }
+    private func linksChanged(_ message: String?) {
+        document?.objectWillChange.send()
+        edited()
+        if let message { note(message) }
+    }
+
     func movePage(from: Int, to: Int) {
         guard let document else { return }
         // A tab without a name of its own is called by its place ("Page 2");
@@ -1114,6 +1306,13 @@ final class CanvasController: ObservableObject {
     private func refreshAfterHistory() {
         // An undo or redo that closed or reopened a page shows that page.
         if let document {
+            // A drawing step undone on a page that isn't showing goes to it.
+            let inkPage = Int(cl_ink_history_page(document.handle))
+            if inkPage >= 0 && inkPage != page && inkPage < document.pageCount { pageRequest = inkPage }
+            if inkPage >= 0 { inkVersion += 1 }
+            // Tabs show which pages connect: redraw them when that changed.
+            let links = cl_pages_link_signature(document.handle)
+            if links != document.shownLinks { document.shownLinks = links; document.objectWillChange.send() }
             let show = Int(cl_document_page_to_show(document.handle))
             if document.pageCount != lastPageCount {
                 lastPageCount = document.pageCount
@@ -1155,9 +1354,38 @@ final class CanvasController: ObservableObject {
     func redo() { undoManager?.redo() }
     func selectAll() { document?.selectAll(page: page); redraw(); selectionChanged() }
     func selectNone() { document?.selectNone(page: page); redraw(); selectionChanged() }
-    func deleteSelection() { document?.deleteSelection(page: page); edited() }
-    func rotate() { document?.rotateSelection(page: page); edited() }
-    func nudge(dx: CGFloat, dy: CGFloat) { document?.nudge(page: page, dx: dx, dy: dy); edited() }
+    func deleteSelection() { document?.deleteSelection(page: page); edited(); noteLockedHeld() }
+    func rotate() { document?.rotateSelection(page: page); edited(); noteLockedHeld() }
+    func nudge(dx: CGFloat, dy: CGFloat) { document?.nudge(page: page, dx: dx, dy: dy); edited(); noteLockedHeld() }
+
+    // Parts locked in place: they stay put (moves, Rotate, Delete and Cut
+    // leave them), but wires, settings and switches work as usual.
+    static let lockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock Part."
+    /// After a move, delete or rotate: say why locked parts didn't go along.
+    func noteLockedHeld() { if document?.lockedHeld == true { note(Self.lockedNote) } }
+    /// Selected parts that are locked, and that aren't.
+    var selectedLocked: Int { document?.selectedLockedCount(page: page, locked: true) ?? 0 }
+    var selectedUnlocked: Int { document?.selectedLockedCount(page: page, locked: false) ?? 0 }
+    /// "Unlock Part" or "Unlock Parts", by how many selected parts are locked.
+    var unlockPartsTitle: String { selectedLocked > 1 ? "Unlock Parts" : "Unlock Part" }
+    /// Lock in Place (or Unlock Part) the selected parts.
+    func lockSelection(_ lock: Bool) {
+        guard canEdit else { lockNudge(); return }
+        guard let n = document?.lockSelection(page: page, lock: lock), n > 0 else { return }
+        edited()
+        let parts = n == 1 ? "1 part" : "\(n) parts"
+        note(lock ? "Locked \(parts) in place." : "Unlocked \(parts).")
+    }
+    /// The Edit menu's one item: Unlock Part when every selected part is locked.
+    var lockMenuUnlocks: Bool { selectedLocked > 0 && selectedUnlocked == 0 }
+    func toggleLockInPlace() { lockSelection(!lockMenuUnlocks) }
+    var hasLockedParts: Bool { (document?.lockedCount ?? 0) > 0 }
+    func unlockAll() {
+        guard canEdit else { lockNudge(); return }
+        guard let n = document?.unlockAll(page: page), n > 0 else { return }
+        edited()
+        note(n == 1 ? "Unlocked 1 part." : "Unlocked all \(n) parts.")
+    }
     func straighten() { document?.straighten(page: page); edited() }
 
     // MARK: Truth tables, export, print
@@ -1205,6 +1433,12 @@ final class CanvasController: ObservableObject {
             FindHit(page: Int($0.page), gate: $0.gate, point: CGPoint(x: $0.x, y: $0.y),
                     text: String(cString: $0.text), kind: String(cString: $0.kind))
         }
+        // The notes too (Notes.swift): one result, last, that opens them.
+        let q = findQuery.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty, document.notes.range(of: q, options: .caseInsensitive) != nil {
+            findHits.append(FindHit(page: page, gate: -1, point: .zero, text: q, kind: "In your notes"))
+            findTotal += 1
+        }
         findIndex = 0
         if jump, !findHits.isEmpty { showFind(0) }
     }
@@ -1220,6 +1454,14 @@ final class CanvasController: ObservableObject {
     private func showFind(_ i: Int) {
         guard let document, findHits.indices.contains(i) else { return }
         let hit = findHits[i]
+        if hit.gate < 0 {
+            // In the notes: open them, with the words selected.
+            sheetHost.showNotes = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                NotificationCenter.default.post(name: .clNotesFind, object: document, userInfo: ["query": hit.text])
+            }
+            return
+        }
         let go = { [weak self] in
             guard let self else { return }
             _ = cl_edit_select_gate(document.handle, Int32(hit.page), hit.gate)
@@ -1264,7 +1506,7 @@ final class CanvasController: ObservableObject {
         defer { strings.forEach { free($0) } }
         func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; strings.append(p); return UnsafePointer(p) }
         let gates = plan.parts.map { p in
-            CLBuildGate(gate: c(p.gate), x: p.x + dx, y: p.y + dy, label: p.label.map(c))
+            CLBuildGate(gate: c(p.gate), x: p.x + dx, y: p.y + dy, label: p.label.map(c), angle: 0)
         }
         let wires = plan.wires.map { w in CLBuildWire(from: Int32(w.from), fromPin: c(w.fromPin), to: Int32(w.to), toPin: c(w.toPin)) }
         let made = cl_edit_build(document.handle, Int32(target), gates, Int32(gates.count), wires, Int32(wires.count), "Build from Formula")
@@ -1278,10 +1520,21 @@ final class CanvasController: ObservableObject {
         return true
     }
 
-    func makeTruthTable() {
+    /// The truth table; with `check`, open at its Check tab.
+    func makeTruthTable(check: Bool = false) {
         guard let document else { return }
         var error = ""
-        if let table = TruthTable(document: document, page: page, error: &error) {
+        // What was last checked is kept per circuit and page.
+        let checkKey = (view?.window?.representedURL?.path ?? view?.window?.title ?? "Circuit") + "#\(page)"
+        if var table = TruthTable(document: document, page: page, error: &error) {
+            table.checkKey = checkKey
+            if check { UserDefaults.standard.set(TruthTableView.checkTab, forKey: "cl.truthTab") }
+            sheetHost.truthTable = table
+        } else if cl_check_clocked_page(document.handle, Int32(page)) {
+            // A counter has lights and a clock but no switches: no truth table,
+            // but it can still be checked clock pulse by clock pulse.
+            var table = TruthTable(checkOnly: document, page: page, problem: error)
+            table.checkKey = checkKey
             sheetHost.truthTable = table
         } else {
             sheetHost.truthTableProblem = error.isEmpty ? "A truth table couldn't be made for this page." : error
@@ -1372,7 +1625,13 @@ final class CanvasController: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    func cut() { copy(); deleteSelection() }
+    /// Locked parts stay, and stay off the clipboard (copying them is fine).
+    func cut() {
+        let held = document.map { cl_edit_deselect_locked($0.handle, Int32(page)) } ?? 0
+        copy()
+        deleteSelection()
+        if held > 0 { note(Self.lockedNote) }
+    }
 
     /// Paste in the middle of the view.
     func paste() {
@@ -1410,6 +1669,24 @@ final class CanvasController: ObservableObject {
     func stepOnce() {
         if isRunning { setRunning(false) }
         document?.stepOnce()
+        circuitAdvancedByUser()
+        redraw()
+        scopeChanged()
+    }
+
+    /// Whether this page has a clock set to "Only on Step Clock".
+    var hasManualClock: Bool { (document?.manualClockCount(page: page) ?? 0) > 0 }
+    static let stepClockOffTip = "Step Clock: first turn on \u{201C}Only on Step Clock\u{201D} in a clock's settings"
+
+    /// Step Clock: every manual clock on the page makes one full cycle
+    /// (up, settle, down, settle). Running or paused, it stays that way.
+    func stepClock() {
+        guard let document else { return }
+        guard document.clockStep(page: page) else {
+            note("No clock here moves on Step Clock. Double-click a clock and turn on \u{201C}Only on Step Clock\u{201D}.")
+            return
+        }
+        circuitAdvancedByUser()   // Predict: after Reveal, the next clock edge starts a new round
         redraw()
         scopeChanged()
     }
@@ -1434,7 +1711,7 @@ final class CanvasController: ObservableObject {
         view?.stepZoomAnimation()
         if animating { redraw() }
         if dragFadeBox != nil && now - dragFadeStart >= Self.dragFadeTime { dragFadeBox = nil; redraw() }
-        if drivesClock && now - lastSaveCheck > 2 { lastSaveCheck = now; noticeSaves() }
+        if drivesClock && now - lastSaveCheck > 2 { lastSaveCheck = now; noticeSaves(); checkHiddenSheet() }
         onTick?()
         // The dashes march at the simulation's speed: 40 points a second at
         // 25 ms a step, faster as steps get shorter.
@@ -1494,7 +1771,7 @@ struct CanvasView: NSViewRepresentable {
             let switched = view.pageKey != document.pageID(page)
             view.show(page: page, key: document.pageID(page))
             controller.page = page
-            if switched { DispatchQueue.main.async { controller.selectionChanged() } }
+            if switched { DispatchQueue.main.async { controller.selectionChanged(); controller.predictPageChanged() } }
         }
         view.theme = theme
         view.controller = controller

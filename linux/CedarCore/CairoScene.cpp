@@ -259,6 +259,8 @@ void CairoScene::stroke(const render::Stroke& s0) {
 	// Device pixels, like the wx app; zero is a hairline, as in Skia.
 	cairo_set_line_width(ctx, s0.width > 0 ? s0.width : 1.0);
 	cairo_set_line_cap(ctx, toCap(s0.cap));
+	// A hand-drawn stroke (the drawing layer) bends round, as on the Mac.
+	if (s0.roundJoin) cairo_set_line_join(ctx, CAIRO_LINE_JOIN_ROUND);
 	if (s0.dashed) {
 		const double dash[] = { 3.0, 3.0 };
 		cairo_set_dash(ctx, dash, 2, 0);

@@ -3,6 +3,7 @@
 // model per page, with a LogicHost running its simulation.
 
 #include "DocumentImpl.h"
+#include <map>
 #include "NativeScene.h"
 #include "CircuitParse.h"
 #include "GUICanvas.h"
@@ -53,13 +54,65 @@ bool readFile(const char* path, std::string& out) {
 	return true;
 }
 
+// A part locked in place: a small padlock on a disc at its top-right corner,
+// the same size on screen at any zoom (smaller only when zoomed far out, so
+// it never swamps the part). `upp` is world units per point, `px` device
+// pixels per point.
+void drawLockBadge(cl::render::Scene& scene, guiGate* g, const cl::render::RenderStyle& style, float upp, float px) {
+	using cl::render::Color;
+	using cl::render::Point;
+	using cl::render::Stroke;
+	klsBBox b = g->getSelectionBBox();
+	if (b.empty()) b = g->getBBox();
+	if (b.empty()) return;
+	const float r = std::min(7.0f * upp, 0.6f);   // the disc
+	const float u = r / 7.0f;                      // a point, at that size
+	const Point c(b.getRight() - 1.5f * u, b.getTop() - 1.5f * u);
+	const bool dark = style.darkMode;
+	const Color disc = dark ? Color(0.20f, 0.22f, 0.26f, 1) : Color(1, 1, 1, 1);
+	const Color rim = dark ? Color(1, 1, 1, 0.22f) : Color(0, 0, 0, 0.22f);
+	const Color ink = dark ? Color(0.86f, 0.87f, 0.90f, 1) : Color(0.32f, 0.34f, 0.38f, 1);
+	const float w = std::max(0.5f, (u / upp) * px);   // a point's stroke, scaled with the badge
+	scene.fillCircle(c, r, disc);
+	scene.strokeCircle(c, r, Stroke(rim, w));
+	// The body, and the shackle over it.
+	scene.fillRect(Point(c.x - 3.4f * u, c.y - 3.6f * u), Point(c.x + 3.4f * u, c.y + 0.6f * u), ink);
+	const float sr = 2.1f * u, top = c.y + 1.6f * u;
+	Stroke shackle(ink, 1.4f * w);
+	scene.arc(Point(c.x, top), sr, -90.0f, 180.0f, shackle);
+	Point legs[4] = { Point(c.x - sr, top), Point(c.x - sr, c.y + 0.4f * u),
+	                  Point(c.x + sr, top), Point(c.x + sr, c.y + 0.4f * u) };
+	scene.lines(legs, 4, shackle);
+}
+
 void setError(char* error, int len, const std::string& msg) {
 	if (error == nullptr || len <= 0) return;
 	std::strncpy(error, msg.c_str(), (size_t)len - 1);
 	error[len - 1] = 0;
 }
 
+// The page's clocks set to move only on Step Clock. A file from before the
+// setting has no MANUAL at all: a running clock.
+std::vector<unsigned long> manualClocks(const CLDocument* doc, int pageIndex) {
+	std::vector<unsigned long> out;
+	GUICanvas* p = doc ? doc->page(pageIndex) : nullptr;
+	if (p == nullptr) return out;
+	for (auto& g : *p->getGateList()) {
+		if (isManualClock(g.second)) out.push_back(g.first);
+	}
+	return out;
+}
+
 }  // namespace
+
+bool isManualClock(guiGate* gate) {
+	if (gate == nullptr || gate->getLogicType() != "CLOCK") return false;
+	// Looked up, not indexed: getLogicParam would add an empty MANUAL,
+	// which the next save would write.
+	auto* params = gate->getAllLogicParams();
+	auto it = params->find("MANUAL");
+	return it != params->end() && it->second == "true";
+}
 
 extern "C" {
 
@@ -87,6 +140,10 @@ CLDocument* cl_document_open(const char* path, char* error, int errorLen) {
 }
 
 CLDocument* cl_document_open_text(const char* data, long length, char* error, int errorLen) {
+	return clOpenText(data, length, error, errorLen, settleOnOpen);
+}
+
+CLDocument* clOpenText(const char* data, long length, char* error, int errorLen, bool settle) {
 	if (data == nullptr || length < 0) { setError(error, errorLen, "The file is empty."); return nullptr; }
 	if (gateLibrary().libraries.empty()) { setError(error, errorLen, "The gate library isn't loaded."); return nullptr; }
 	cl::LoadResult loaded;
@@ -102,12 +159,25 @@ CLDocument* cl_document_open_text(const char* data, long length, char* error, in
 	CircuitParse parser(canvases);
 	canvases = parser.applyLoaded(loaded);
 	for (GUICanvas* c : canvases) doc->pages.emplace_back(c);
+	// The gates were made before their pages joined the document, so their
+	// links went to the engine as the shared group's (docs/PAGE-LINKS.md).
+	// Numbered from the first page's group (0) so a gate added later agrees.
+	std::map<int, int> groups;
+	bool any = false;
+	for (auto& p : doc->pages) {
+		auto it = groups.find(p->linkGroup);
+		const int g = it != groups.end() ? it->second : (int)groups.size();
+		groups.emplace(p->linkGroup, g);
+		p->linkGroup = g;
+		any = any || g != 0;
+	}
+	if (any) doc->sim->relinkJunctions();
 	for (const cl::MigrationNotice& n : parser.getLoadNotices()) {
 		doc->notices.push_back(n.detail.empty() ? n.summary : n.summary + "\n" + n.detail);
 		doc->noticeWarnings.push_back(n.severity == cl::Severity::Warning);
 	}
 	// Open settled, so the first frame shows real states.
-	if (settleOnOpen) doc->sim->settle();
+	if (settle) doc->sim->settle();
 	return doc.release();
 }
 
@@ -121,14 +191,18 @@ CLDocument* cl_document_new(void) {
 	return doc;
 }
 
+extern "C++" std::string clSaveText(CLDocument* doc) {
+	std::vector<GUICanvas*> pages;
+	for (auto& p : doc->pages) pages.push_back(p.get());
+	CircuitParse writer(pages);
+	return writer.textV3(pages);
+}
+
 const char* cl_document_save_text(CLDocument* doc) {
 	static std::string text;
 	text.clear();
 	if (doc == nullptr) return "";
-	std::vector<GUICanvas*> pages;
-	for (auto& p : doc->pages) pages.push_back(p.get());
-	CircuitParse writer(pages);
-	text = writer.textV3(pages);
+	text = clSaveText(doc);
 	doc->edited = false;
 	return text.c_str();
 }
@@ -139,16 +213,28 @@ int cl_document_export_legacy(CLDocument* doc, const char* path, int format, cha
 	for (auto& p : doc->pages) pages.push_back(p.get());
 	CircuitParse writer(pages);
 	const bool ok = format == 1 ? writer.saveCircuitLegacy(path, pages) : writer.saveCircuit(path, pages);
-	const std::string why = writer.getLastError();
-	if (ok) return 0;
+	std::string why = writer.getLastError();
+	// The older formats have no place for a drawing or notes (the website's
+	// DRAWING-NOTES.md 4.12): written, with that said.
+	const bool lost = cl_ink_any(doc) || !doc->circuit.circuitNotes.empty();
+	const std::string loss = "Warning: The drawing and notes aren't kept in this older format.";
+	if (ok) {
+		if (!lost) return 0;
+		setError(error, errorLen, loss);
+		return 1;
+	}
+	const bool warning = why.rfind("Warning:", 0) == 0;
+	if (warning && lost) why += "\n" + loss;
 	setError(error, errorLen, why);
 	// The v1.x writer still writes the file when all it has is a warning.
-	return why.rfind("Warning:", 0) == 0 ? 1 : -1;
+	return warning ? 1 : -1;
 }
 
 int cl_document_add_page(CLDocument* doc) {
 	if (doc == nullptr) return -1;
+	const int group = clNewPageLinkGroup(doc);
 	doc->pages.emplace_back(new GUICanvas(&doc->circuit));
+	doc->pages.back()->linkGroup = group;
 	doc->edited = true;
 	return (int)doc->pages.size() - 1;
 }
@@ -207,7 +293,7 @@ bool cl_document_page_bounds(const CLDocument* doc, int page,
 
 void clDrawPage(CLDocument* doc, int page, CLContext ctx,
                double backingScale, double originX, double originY,
-               double unitsPerPoint, const cl::render::RenderStyle& style) {
+               double unitsPerPoint, const cl::render::RenderStyle& style, int inkMode, int inkLook) {
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
 	if (p == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	// Work in physical pixels, as the wx app's device space does, so stroke
@@ -219,6 +305,10 @@ void clDrawPage(CLDocument* doc, int page, CLContext ctx,
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
 	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(t);
+	// The drawing (the website's DRAWING-NOTES.md 4.8): highlighter strokes
+	// under the parts, like a real highlighter, and pen strokes over them.
+	const bool ink = clInkDrawn(doc, inkMode) && !p->ink.strokes.empty();
+	if (ink) clDrawInkLayer(scene, p->ink, true, inkLook, scale, style.projector);
 	// In id order: the page's lists are hash maps, whose order depends on how
 	// they were built, and where things overlap the order shows.
 	std::vector<unsigned long> ids;
@@ -232,21 +322,42 @@ void clDrawPage(CLDocument* doc, int page, CLContext ctx,
 	for (auto& g : *p->getGateList()) if (g.second) ids.push_back(g.first);
 	std::sort(ids.begin(), ids.end());
 	for (unsigned long id : ids) (*p->getGateList())[id]->drawToScene(scene, style);
+	if (ink) clDrawInkLayer(scene, p->ink, false, inkLook, scale, style.projector);
+	// Lock badges: on the canvas being edited only (the styles that show the
+	// selection), never in Simulation View, a picture or a thumbnail.
+	if (style.showSelection && style.colorOutput && !style.simView)
+		for (unsigned long id : ids) {
+			guiGate* g = (*p->getGateList())[id];
+			if (g->isLocked()) drawLockBadge(scene, g, style, (float)unitsPerPoint, (float)backingScale);
+		}
 }
 
 void cl_document_draw(CLDocument* doc, int page, CLContext ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark) {
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint,
-	           cl::render::RenderStyle::screen(dark));
+	           cl::render::RenderStyle::screen(dark), CL_INK_FOLLOW, dark ? kInkLookDark : kInkLookLight);
 }
 
 bool cl_document_draw_fitted(CLDocument* doc, int page, CLContext ctx,
                              double width, double height, double margin,
                              double backingScale, int style) {
+	return cl_document_draw_fitted_ink(doc, page, ctx, width, height, margin, backingScale, style, false);
+}
+
+bool cl_document_draw_fitted_ink(CLDocument* doc, int page, CLContext ctx,
+                                 double width, double height, double margin,
+                                 double backingScale, int style, bool ink) {
 	double l, b, r, t;
-	if (width <= 2 * margin || height <= 2 * margin ||
-	    !cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return false;
+	if (width <= 2 * margin || height <= 2 * margin) return false;
+	bool any = cl_document_page_bounds(doc, page, &l, &b, &r, &t);
+	// With the drawing, the picture holds all of it too.
+	double il, ib, ir, it;
+	if (ink && cl_ink_bounds(doc, page, &il, &ib, &ir, &it)) {
+		if (any) { l = std::min(l, il); b = std::min(b, ib); r = std::max(r, ir); t = std::max(t, it); }
+		else { l = il; b = ib; r = ir; t = it; any = true; }
+	}
+	if (!any) return false;
 	const double w = std::max(r - l, 1.0), h = std::max(t - b, 1.0);
 	const double upp = std::max(w / (width - 2 * margin), h / (height - 2 * margin));
 	// Centered: the world point at the top-left corner of the area.
@@ -256,7 +367,8 @@ bool cl_document_draw_fitted(CLDocument* doc, int page, CLContext ctx,
 		? cl::render::RenderStyle::print()
 		: cl::render::RenderStyle::screen(style == CL_STYLE_DARK);
 	rs.showSelection = false;
-	clDrawPage(doc, page, ctx, backingScale, originX, originY, upp, rs);
+	const int look = style == CL_STYLE_PRINT ? kInkLookBW : style == CL_STYLE_DARK ? kInkLookDark : kInkLookPrint;
+	clDrawPage(doc, page, ctx, backingScale, originX, originY, upp, rs, ink ? CL_INK_ALWAYS : CL_INK_NEVER, look);
 	return true;
 }
 
@@ -291,6 +403,24 @@ void cl_document_step(CLDocument* doc) {
 	doc->sim->takePauseRequest();
 }
 
+int cl_document_manual_clock_count(const CLDocument* doc, int page) {
+	return (int)manualClocks(doc, page).size();
+}
+
+bool cl_document_clock_step(CLDocument* doc, int page) {
+	const std::vector<unsigned long> clocks = manualClocks(doc, page);
+	if (clocks.empty()) return false;
+	// The level goes straight to the engine: it isn't a setting, and isn't saved.
+	for (const char* level : { "1", "0" }) {
+		for (unsigned long id : clocks)
+			doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM,
+				new klsMessage::Message_SET_GATE_PARAM((int)id, "MANUAL_LEVEL", level)));
+		doc->sim->settle(1000, true);
+	}
+	doc->sim->takePauseRequest();
+	return true;
+}
+
 void cl_document_set_step_ms(CLDocument* doc, int ms) {
 	if (doc) doc->stepMs = std::min(500, std::max(1, ms));
 }
@@ -312,6 +442,8 @@ bool cl_document_click(CLDocument* doc, int page, double x, double y) {
 			doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_UPDATE_GATES));
 			return true;
 		}
+		// A clock on "Only on Step Clock": the click is a Step Clock.
+		if (isManualClock(gate)) return cl_document_clock_step(doc, page);
 	}
 	return false;
 }

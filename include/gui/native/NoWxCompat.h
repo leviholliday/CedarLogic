@@ -71,6 +71,10 @@ public:
 	wxString GetUndoName() const { return undoStack.empty() ? wxString() : undoStack.back()->GetName(); }
 	wxString GetRedoName() const { return redoStack.empty() ? wxString() : redoStack.back()->GetName(); }
 	void ClearCommands() { undoStack.clear(); redoStack.clear(); }
+	// The step an Undo would take back, and the one a Redo would do again
+	// (just after an undo, the one it undid).
+	wxCommand* GetUndoCommand() const { return undoStack.empty() ? nullptr : undoStack.back().get(); }
+	wxCommand* GetRedoCommand() const { return redoStack.empty() ? nullptr : redoStack.back().get(); }
 	// Whether anything was done or undone since the flag was last cleared
 	// (the document's "edited" dot).
 	bool changed = false;

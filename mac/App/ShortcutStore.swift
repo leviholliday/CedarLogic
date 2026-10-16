@@ -71,7 +71,7 @@ struct KeyCombo: Codable, Hashable {
 
 enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Circuits
-    case newCircuit, openLibrary, importFile, save, exportImage, exportFile, print
+    case newCircuit, openLibrary, importFile, save, exportImage, exportReport, exportFile, print
     // Editing
     case undo, redo, cut, copy, paste, duplicate, selectAll
     // Building
@@ -79,9 +79,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Moving around
     case zoomIn, zoomOut, zoomFit, zoomActual, focusMode, find, findNext, findPrevious
     // Simulation
-    case simView, step, truthTable, scope, lock
+    case simView, step, stepClock, truthTable, checkCircuit, scope, lock
     // Tabs
     case newTab, closeTab, reopenTab, splitView, switchPane, closeSplit, nextTab, previousTab
+    // Drawing and notes
+    case draw, showDrawing, notes, present
     // App
     case shortcuts, darkMode, feedback
 
@@ -89,12 +91,13 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     var section: String {
         switch self {
-        case .newCircuit, .openLibrary, .importFile, .save, .exportImage, .exportFile, .print: "Circuits"
+        case .newCircuit, .openLibrary, .importFile, .save, .exportImage, .exportReport, .exportFile, .print: "Circuits"
         case .undo, .redo, .cut, .copy, .paste, .duplicate, .selectAll: "Editing"
         case .addGate, .rotate, .straighten, .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate, .buildFormula: "Building"
         case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode, .find, .findNext, .findPrevious: "Moving around"
-        case .simView, .step, .truthTable, .scope, .lock: "Simulation"
+        case .simView, .step, .stepClock, .truthTable, .checkCircuit, .scope, .lock: "Simulation"
         case .newTab, .closeTab, .reopenTab, .splitView, .switchPane, .closeSplit, .nextTab, .previousTab: "Tabs and split view"
+        case .draw, .showDrawing, .notes, .present: "Drawing and notes"
         case .shortcuts, .darkMode, .feedback: "App"
         }
     }
@@ -106,6 +109,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .importFile: "Import a .cdl file"
         case .save: "Save now and keep a version"
         case .exportImage: "Export as an image"
+        case .exportReport: "Export a lab report (PDF)"
         case .exportFile: "Export as a CedarLogic file"
         case .print: "Print"
         case .undo: "Undo"
@@ -134,7 +138,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .findPrevious: "Find the previous one"
         case .simView: "Simulation view"
         case .step: "Step once"
+        case .stepClock: "Step Clock: one full cycle of each manual clock"
         case .truthTable: "Truth table"
+        case .checkCircuit: "Check my circuit against a formula, table or count"
         case .scope: "Oscilloscope"
         case .lock: "Lock the circuit"
         case .newTab: "New tab"
@@ -145,6 +151,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .closeSplit: "Close split view"
         case .nextTab: "Next tab"
         case .previousTab: "Previous tab"
+        case .draw: "Draw on the circuit (then P pen, H highlighter, E eraser)"
+        case .showDrawing: "Show or hide the drawing"
+        case .notes: "Notes for this circuit"
+        case .present: "Present on another display (or stop)"
         case .shortcuts: "Every shortcut (this list)"
         case .darkMode: "Dark mode"
         case .feedback: "Send feedback"
@@ -177,6 +187,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickCut: return KeyCombo(key: "x", mods: 0)
         case .quickDuplicate: return KeyCombo(key: "d", mods: 0)
         case .buildFormula: return nil
+        case .exportReport: return nil
         case .zoomIn: return KeyCombo(key: "=", mods: c)
         case .zoomOut: return KeyCombo(key: "-", mods: c)
         case .zoomFit: return KeyCombo(key: "0", mods: c)
@@ -187,7 +198,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .findPrevious: return nil
         case .simView: return KeyCombo(key: "r", mods: c)
         case .step: return KeyCombo(key: "r", mods: c | s)
+        case .stepClock: return KeyCombo(key: "k", mods: 0)
         case .truthTable: return KeyCombo(key: "t", mods: 0)
+        case .checkCircuit: return KeyCombo(key: "t", mods: s)
         case .scope: return KeyCombo(key: "g", mods: c)
         case .lock: return nil
         case .newTab: return KeyCombo(key: "t", mods: c)
@@ -198,6 +211,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .closeSplit: return KeyCombo(key: "w", mods: c | o)
         case .nextTab: return KeyCombo(key: "tab", mods: ctl)
         case .previousTab: return KeyCombo(key: "tab", mods: ctl | s)
+        case .draw: return KeyCombo(key: "p", mods: c | o)
+        case .showDrawing: return KeyCombo(key: "h", mods: c | s)
+        case .notes: return KeyCombo(key: "n", mods: c | o)
+        case .present: return KeyCombo(key: "p", mods: c | s)
         case .shortcuts: return KeyCombo(key: "/", mods: s)
         case .darkMode: return KeyCombo(key: "d", mods: c | s)
         case .feedback: return nil

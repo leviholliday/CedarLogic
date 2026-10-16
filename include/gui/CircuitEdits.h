@@ -54,7 +54,8 @@ struct TidyPlan {
 };
 
 // mode 0 keeps the layout's shape, 1 rearranges by signal flow. Tidies the
-// selected gates, or the whole page when nothing is selected.
+// selected gates, or the whole page when nothing is selected. Gates locked in
+// place (guiGate::isLocked) never move.
 TidyPlan applyTidy(GUICanvas* page, int mode);
 
 // Undo an applied plan that wasn't recorded: gates back first, so each wire's

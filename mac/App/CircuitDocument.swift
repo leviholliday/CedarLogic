@@ -17,6 +17,8 @@ final class CoreDocument: ObservableObject {
     var mirroredUndo = 0
     /// The page count the window last showed (see CanvasController).
     var shownPageCount = 1
+    /// Which pages connect, as the tabs last showed it (cl_pages_link_signature).
+    var shownLinks: UInt64 = 0
     /// Where each page was last looked at (centre, units per point), by page id.
     var cameras: [UInt64: (CGPoint, CGFloat)] = [:]
     /// For a new circuit made from a template (or a duplicate): its name
@@ -44,6 +46,9 @@ final class CoreDocument: ObservableObject {
 
     /// The circuit as .cdl text, for saving.
     func saveText() -> String { String(cString: cl_document_save_text(handle)) }
+    /// The circuit for others (CL_SAVE_NO_NOTES, CL_SAVE_NO_INK): Share Link's
+    /// text. Doesn't mark it saved.
+    func shareText(flags: Int32) -> String { String(cString: cl_document_save_text_ex(handle, flags)) }
 
     // Pages.
     func addPage() -> Int { Int(cl_document_add_page(handle)) }
@@ -81,6 +86,11 @@ final class CoreDocument: ObservableObject {
         set { cl_document_set_step_ms(handle, Int32(newValue)) }
     }
     func stepOnce() { cl_document_step(handle) }
+    /// Clocks on a page set to "Only on Step Clock".
+    func manualClockCount(page: Int) -> Int { Int(cl_document_manual_clock_count(handle, Int32(page))) }
+    /// Step Clock: each of the page's manual clocks makes one full cycle.
+    /// False when there are none.
+    func clockStep(page: Int) -> Bool { cl_document_clock_step(handle, Int32(page)) }
     /// A click at a world point; true when a switch, keypad or the like took it.
     func click(page: Int, at p: CGPoint) -> Bool { cl_document_click(handle, Int32(page), p.x, p.y) }
 
@@ -102,6 +112,12 @@ final class CoreDocument: ObservableObject {
     }
     func drag(to p: CGPoint) { cl_edit_drag(handle, p.x, p.y) }
     func release(at p: CGPoint) { cl_edit_release(handle, p.x, p.y) }
+    /// A release that says whether the click stepped a manual clock.
+    /// `stepClock` false: a click on such a clock only selects it.
+    @discardableResult
+    func releaseSteppedClock(at p: CGPoint, stepClock: Bool = true) -> Bool {
+        cl_edit_release_ex(handle, p.x, p.y, stepClock) == Int32(CL_CLICK_CLOCK_STEP)
+    }
     func cancelGesture() { cl_edit_cancel(handle) }
     var selectionBox: CGRect? {
         var l = 0.0, b = 0.0, r = 0.0, t = 0.0
@@ -117,6 +133,16 @@ final class CoreDocument: ObservableObject {
     func hasGateSelection(page: Int) -> Bool { cl_edit_selected_gate_count(handle, Int32(page)) > 0 }
     func deleteSelection(page: Int) { cl_edit_delete(handle, Int32(page)) }
     func rotateSelection(page: Int) { cl_edit_rotate(handle, Int32(page)) }
+    // Parts locked in place (CedarCore.h).
+    func selectedLockedCount(page: Int, locked: Bool) -> Int { Int(cl_edit_selected_locked_count(handle, Int32(page), locked)) }
+    @discardableResult
+    func lockSelection(page: Int, lock: Bool) -> Int { Int(cl_edit_lock_selection(handle, Int32(page), lock)) }
+    var lockedCount: Int { Int(cl_document_locked_count(handle)) }
+    @discardableResult
+    func unlockAll(page: Int) -> Int { Int(cl_edit_unlock_all(handle, Int32(page))) }
+    func isLocked(gate: Int) -> Bool { cl_gate_is_locked(handle, gate) }
+    /// The last drag, nudge, delete or rotate left locked parts where they were.
+    var lockedHeld: Bool { cl_edit_locked_held(handle) }
     func nudge(page: Int, dx: CGFloat, dy: CGFloat) { cl_edit_nudge(handle, Int32(page), dx, dy) }
     @discardableResult
     func addGate(_ name: String, page: Int, at p: CGPoint) -> Bool { cl_edit_add_gate(handle, Int32(page), name, p.x, p.y) }
@@ -199,6 +225,32 @@ final class CoreDocument: ObservableObject {
         guard cl_document_page_bounds(handle, Int32(page), &l, &b, &r, &t) else { return nil }
         return CGRect(x: l, y: b, width: r - l, height: t - b)
     }
+
+    /// The drawing's extent on a page (widths included), nil without one.
+    func inkBounds(ofPage page: Int) -> CGRect? {
+        var l = 0.0, b = 0.0, r = 0.0, t = 0.0
+        guard cl_ink_bounds(handle, Int32(page), &l, &b, &r, &t) else { return nil }
+        return CGRect(x: l, y: b, width: r - l, height: t - b)
+    }
+
+    /// What Zoom to Fit shows: the circuit and, while it's shown, the drawing.
+    func fitBounds(ofPage page: Int) -> CGRect? {
+        let circuit = bounds(ofPage: page)
+        guard inkShown, let ink = inkBounds(ofPage: page) else { return circuit }
+        return circuit.map { $0.union(ink) } ?? ink
+    }
+
+    // MARK: Drawing and notes
+
+    var inkShown: Bool { cl_ink_shown(handle) }
+    func setInkShown(_ shown: Bool) { cl_ink_set_shown(handle, shown) }
+    var hasInk: Bool { cl_ink_any(handle) }
+    func inkStrokeCount(page: Int) -> Int { Int(cl_ink_stroke_count(handle, Int32(page))) }
+    /// The student's notes ("" for none).
+    var notes: String {
+        get { String(cString: cl_notes(handle)) }
+        set { cl_notes_set(handle, newValue) }
+    }
 }
 
 /// A circuit file. Opening builds the engine's copy; saving asks the engine
@@ -240,6 +292,8 @@ final class CircuitDocument: ReferenceFileDocument {
             throw CocoaError(.fileReadCorruptFile)
         }
         core = try CoreDocument(data: data)
+        // Read again because sync replaced it: where the window was looking.
+        ReloadStore.apply(to: core)
     }
 
     func snapshot(contentType: UTType) throws -> Data {

@@ -30,7 +30,7 @@ CORE=(
 	$(ls src/gui/command/*.cpp | grep -v -e cmdAddTab -e cmdDeleteTab)
 	# the logic engine and the file format library
 	logic/src/*.cpp
-	format/circuit_file_io.cpp format/legacy_cdl.cpp format/migrate.cpp format/numeric.cpp format/sexpr.cpp
+	format/circuit_file_io.cpp format/ink.cpp format/legacy_cdl.cpp format/migrate.cpp format/numeric.cpp format/sexpr.cpp
 	# the native side
 	mac/CedarCore/*.cpp
 )
