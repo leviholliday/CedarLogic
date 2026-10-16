@@ -1002,7 +1002,8 @@ void Form::build() {
 			int w = ctrlW - besideW;
 			if (settingsLayout) {
 				int longest = 0;
-				for (const std::string& c : x.choices) longest = std::max(longest, textPixels(dialog, font, c));
+				// Measured as choiceProc draws it (13 points), not in the dialog's smaller font.
+				for (const std::string& c : x.choices) longest = std::max(longest, sc((int)std::ceil(textWidth(c, 13))));
 				w = std::min(w, std::max(sc(150), longest + sc(48)));
 			}
 			x.hwnd = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,

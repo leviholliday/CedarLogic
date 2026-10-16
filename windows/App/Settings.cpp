@@ -499,7 +499,8 @@ void showPreferencesDialog(HWND parent) {
 	name.widthPt = 260;
 	name.placeholder = "First and last name";
 	name.tip = "Printed under your circuit when you export it as an image, and on the Lab Page template.";
-	on[f.add(name)] = [](Form& form, int i) { prefs().studentName = form.text(i); prefs().save(); };
+	const int nameField = f.add(name);
+	on[nameField] = [](Form& form, int i) { prefs().studentName = form.text(i); prefs().save(); };
 
 	auto openTip = [] {
 		return std::string(prefs().openReplaces
@@ -637,7 +638,9 @@ void showPreferencesDialog(HWND parent) {
 	                                 [&, parent](ID2D1RenderTarget* rt, float w, float h) { paintStyles(parent, rt, w, h, focused(styleField)); }));
 	swatchField = swatches;
 	styleField = styles;
-	static const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTab, TGFeedback };
+	// In the Mac's order, then the circuit's name and Step Clock as it has them,
+	// then the dark mode switch (a Windows toolbar's own).
+	static const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGDraw, TGLock, TGTab, TGFeedback };
 	bool firstGroup = true;
 	for (int g : groups) {
 		FormField c = check(firstGroup ? "Show:" : "", toolGroupName(g), (p.toolbarHidden & (1 << g)) == 0);
@@ -653,13 +656,12 @@ void showPreferencesDialog(HWND parent) {
 	FormField title = check("", "Circuit name", p.showTitle);
 	title.grid = 2;
 	on[f.add(title)] = [styles](Form& form, int i) { prefs().showTitle = form.checked(i); apply(); form.refresh(styles); };
-	FormField stepClock = check("", "Step Clock", p.showStepClock,
-	                            "Show Step Clock in the toolbar and the Simulation View bar. Clicking a clock set to "
-	                            "\u201COnly on Step Clock\u201D steps it too.");
+	FormField stepClock = check("", "Step Clock", p.showStepClock);
 	stepClock.grid = 2;
 	on[f.add(stepClock)] = [styles](Form& form, int i) { prefs().showStepClock = form.checked(i); apply(); form.refresh(styles); };
 	FormField themeSwitch = check("", "Dark mode switch", p.showThemeToggle,
-	                              "Applies to every style. Hidden tools are still in the ••• menu and keep their shortcuts.");
+	                              "Applies to every style. Hidden tools are still in the ••• menu and keep their shortcuts. Step Clock "
+	                              "shows in Simulation View's bar too; clicking a clock set to \u201COnly on Step Clock\u201D steps it.");
 	themeSwitch.grid = 2;
 	on[f.add(themeSwitch)] = [styles](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); form.refresh(styles); };
 
@@ -741,7 +743,10 @@ void showPreferencesDialog(HWND parent) {
 	// Sync's state is read again every half minute ("Synced 5 min ago").
 	f.timerMs = 30000;
 	f.onTimer = [&](Form& form) { sync.tick(form); };
-	f.onLeave = [&](Form& form, int field) { if (sync.handles(field)) sync.left(form, field); };
+	f.onLeave = [&](Form& form, int field) {
+		if (sync.handles(field)) sync.left(form, field);
+		if (field == nameField) syncapp::nameChanged();   // your name, on your other devices too
+	};
 	f.onChange = [&](Form& form, int field) {
 		if (sync.handles(field)) { sync.changed(form, field); return; }
 		auto it = on.find(field);
@@ -759,6 +764,7 @@ void showPreferencesDialog(HWND parent) {
 	};
 	f.run(parent);
 	sync.detach();
+	syncapp::nameChanged();
 	g_page = f.page;
 	if (g_page < 0 || g_page > SyncPage) g_page = General;
 }

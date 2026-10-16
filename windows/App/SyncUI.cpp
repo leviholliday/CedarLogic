@@ -575,7 +575,7 @@ void SettingsPage::add(Form& form_) {
 	FormField list;
 	list.kind = FormField::Picture;
 	list.side = "Devices:";
-	list.height = (int)(kDeviceRow * kDeviceRows);
+	list.height = (int)(kDeviceRow * std::min(kDeviceRows, std::max(1, (int)deviceList().size())));   // as many rows as there are, up to four
 	list.tip = "Remove takes an old device off the list. Your devices share one code, so a device that still has it keeps access: "
 	           "to lock out a lost one, start over with a new code.";
 	list.tipLines = 3;
