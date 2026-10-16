@@ -92,6 +92,8 @@ constexpr const char* StepClock = "cedarlogic-step-clock";
 constexpr const char* Draw = "cedarlogic-draw";
 constexpr const char* Notes = "cedarlogic-notes";
 }
+// Three lines (the header bar's primary menu, GTK's open-menu).
+void drawHamburgerIcon(cairo_t* cr, const RectF& box, const Color& color);
 // An eye, struck through when `hidden` (Show and Hide Drawing).
 void drawEyeIcon(cairo_t* cr, const RectF& box, const Color& color, bool hidden);
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color);

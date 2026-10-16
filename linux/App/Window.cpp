@@ -867,6 +867,27 @@ void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) 
 	popupModel(win, bar, from, anchor, e, true);
 }
 
+void CircuitWindow::primaryMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
+	static GMenu* model = [] {
+		GMenu* m = g_menu_new();
+		GMenu* a = g_menu_new();
+		g_menu_append(a, "_Settings", "win.preferences");
+		g_menu_append(a, "_Keyboard Shortcuts", "win.shortcuts");
+		g_menu_append_section(m, nullptr, G_MENU_MODEL(a));
+		GMenu* b = g_menu_new();
+		g_menu_append(b, "CedarLogic _Help", "win.help");
+		g_menu_append(b, "_What's New", "win.whats-new");
+		g_menu_append(b, "Send _Feedback…", "win.feedback");
+		g_menu_append_section(m, nullptr, G_MENU_MODEL(b));
+		GMenu* c = g_menu_new();
+		g_menu_append(c, "_About CedarLogic", "win.about");
+		g_menu_append_section(m, nullptr, G_MENU_MODEL(c));
+		return m;
+	}();
+	updateActions();
+	popupModel(win, G_MENU_MODEL(model), from, anchor, e, true);
+}
+
 // GTK's own F10 belongs to a menu bar, and there is none: the menus are
 // behind •••, so F10 opens them there (at the top right in focus mode, with
 // the bar away).

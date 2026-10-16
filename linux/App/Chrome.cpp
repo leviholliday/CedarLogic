@@ -497,6 +497,20 @@ void drawNotesIcon(cairo_t* cr, const RectF& box, float size, const Color& color
 
 }  // namespace
 
+void drawHamburgerIcon(cairo_t* cr, const RectF& box, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.5);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	for (int i = -1; i <= 1; i++) {
+		cairo_move_to(cr, cx - 6.5, cy + i * 4.5);
+		cairo_line_to(cr, cx + 6.5, cy + i * 4.5);
+	}
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
 void drawEyeIcon(cairo_t* cr, const RectF& box, const Color& color, bool hidden) {
 	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
 	cairo_save(cr);

@@ -1125,7 +1125,7 @@ bool Canvas::onRelease(GdkEventButton* e) {
 	return TRUE;
 }
 
-// Per device (Preferences > Canvas): a wheel mouse zooms and a touchpad moves
+// Per device (Settings > Canvas): a wheel mouse zooms and a touchpad moves
 // around, by default. Ctrl+scroll always zooms; Shift+scroll moves sideways.
 bool Canvas::onScroll(GdkEventScroll* e) {
 	zooming = false;

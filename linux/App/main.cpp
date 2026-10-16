@@ -24,6 +24,7 @@
 #include "Library.h"
 #include "LibraryWindow.h"
 #include "FindBar.h"
+#include "Toolbar.h"
 #include "Notes.h"
 #include "Window.h"
 
@@ -162,7 +163,8 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	if (what == "combo") top = settings::window();
-	const bool ok = top && (what == "menu" || what == "submenu" || what == "combo" ? writeWindowWithMenu(top, gScreenshot) : writeWindow(top, gScreenshot));
+	const bool ok = top && (what == "menu" || what == "submenu" || what == "combo" || what == "primary" ? writeWindowWithMenu(top, gScreenshot)
+	                                                                                                      : writeWindow(top, gScreenshot));
 	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
 	prefs().save();
 	fflush(stderr);
@@ -268,6 +270,12 @@ gboolean showCb(gpointer) {
 			g_list_free(all);
 			return G_SOURCE_REMOVE;
 		}, nullptr);
+	}
+	else if (what == "primary") {
+		// The header bar's primary menu (☰), open under its button.
+		GdkRectangle r;
+		if (w->toolbarWidget() && w->toolbarWidget()->primaryRect(r)) w->primaryMenu(w->toolbarWidget()->widget(), r, nullptr);
+		else fprintf(stderr, "primary menu: no button in the toolbar\n");
 	}
 	else if (what == "menu") {
 		GtkWidget* top = GTK_WIDGET(w->window());
@@ -512,7 +520,7 @@ GMenuModel* buildMenubar() {
 	g_menu_append(e3, "_Build from Formula…", "win.build-formula");
 	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e3));
 	GMenu* e4 = g_menu_new();
-	g_menu_append(e4, "Pr_eferences", "win.preferences");
+	g_menu_append(e4, "_Settings", "win.preferences");
 	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e4));
 	g_menu_append_submenu(bar, "_Edit", G_MENU_MODEL(edit));
 

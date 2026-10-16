@@ -392,7 +392,7 @@ void showQuickAdd(CircuitWindow* w) {
 
 // ---- Memory (RAM and ROM contents): RamEditor.cpp ----
 
-// ---- Preferences: Settings.cpp ----
+// ---- Settings: Settings.cpp ----
 
 // ---- Every shortcut ----------------------------------------------------------------
 

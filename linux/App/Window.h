@@ -65,6 +65,9 @@ public:
 	// (points in `from`).
 	void moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
 	void titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
+	// The header bar's primary menu (☰): Settings, Keyboard Shortcuts, Help,
+	// What's New, About, as GTK apps keep them.
+	void primaryMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
 	// F10: every menu from the keyboard; Shift+F10 or the Menu key: the
 	// canvas's menu for what's selected.
 	void menusFromKeyboard();

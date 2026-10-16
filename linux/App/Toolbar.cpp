@@ -57,6 +57,7 @@ void Toolbar::build(int style) {
 		add(Button, "win.running", TGSim, true);
 		add(Button, "win.sim-view", TGRun, true);
 		add(More, nullptr, -1, true);
+		add(Primary, nullptr, -1, true);
 		return;
 	}
 	if (prefs().showTitle) add(Title, nullptr, -1, false);
@@ -74,6 +75,10 @@ void Toolbar::build(int style) {
 	add(Button, "win.new-tab", TGTab, true);
 	add(Button, "win.feedback", TGFeedback, true);
 	add(More, nullptr, -1, true);
+	// The header bar's primary menu, where GTK apps keep Settings, Keyboard
+	// Shortcuts, Help and About (the design rule: window chrome follows the
+	// desktop's habits).
+	add(Primary, nullptr, -1, true);
 }
 
 void Toolbar::layout(float w, float h, int style, bool live) {
@@ -173,6 +178,7 @@ bool Toolbar::isEnabled(const Item& it) const {
 
 const char* Toolbar::iconFor(const Item& it) const {
 	if (it.kind == More) return Icon::More;
+	if (it.kind == Primary) return "open-menu-symbolic";
 	const char* a = it.action;
 	if (is(a, "app.new")) return Icon::Page;
 	if (is(a, "app.open")) return Icon::Open;
@@ -200,6 +206,7 @@ std::string Toolbar::tipFor(const Item& it) const {
 	switch (it.kind) {
 	case Zoom: return "Zoom level. Click for 100%";
 	case More: return "Every menu (F10)";
+	case Primary: return "Main menu: Settings, Keyboard Shortcuts, Help, About";
 	case Title: return "This circuit: rename it, see its versions";
 	default: break;
 	}
@@ -363,6 +370,7 @@ void Toolbar::draw(cairo_t* cr, float w, float h, int style, bool live) {
 			else if (is(it.action, "app.open")) drawFolderIcon(cr, r, fg);
 			else if (is(it.action, "win.save")) drawSaveIcon(cr, r, fg);
 			else if (is(it.action, "win.zoom-in") || is(it.action, "win.zoom-out")) drawZoomIcon(cr, r, fg, is(it.action, "win.zoom-in"));
+			else if (it.kind == Primary) drawHamburgerIcon(cr, r, fg);
 			else drawIcon(cr, iconFor(it), r, colored && on ? 13 : (it.kind == More ? 15 : 16), fg);
 			// A drawing that's hidden: a dot on Draw, as the Mac's.
 			if (is(it.action, "win.draw") && !on && win->hasHiddenDrawing()) fillCircle(cr, pointF(r.right - 8, r.top + 7), 3, accent);
@@ -384,6 +392,16 @@ GdkRectangle Toolbar::actionRect(const char* action) const {
 		out = { x + a.x + (int)it.rect.left, y + a.y + (int)it.rect.top, (int)rectWidth(it.rect), (int)rectHeight(it.rect) };
 	}
 	return out;
+}
+
+bool Toolbar::primaryRect(GdkRectangle& out) const {
+	if (!gtk_widget_get_mapped(area)) return false;
+	for (const Item& it : items) {
+		if (it.kind != Primary || rectWidth(it.rect) <= 0) continue;
+		out = { (int)it.rect.left, (int)it.rect.top, (int)rectWidth(it.rect), (int)rectHeight(it.rect) };
+		return true;
+	}
+	return false;
 }
 
 bool Toolbar::moreRect(GdkRectangle& out) const {
@@ -434,10 +452,11 @@ void Toolbar::mouseDown(int button, float x, float y, bool doubleClick, GdkEvent
 	pressed = i;
 	redraw();
 	// Menus open on the press, as menus do, under their button.
-	if (items[i].kind == Title || items[i].kind == More) {
+	if (items[i].kind == Title || items[i].kind == More || items[i].kind == Primary) {
 		pressed = -1;
 		GdkRectangle anchor = { (int)items[i].rect.left, (int)items[i].rect.top, (int)rectWidth(items[i].rect), (int)rectHeight(items[i].rect) };
 		if (items[i].kind == Title) win->titleMenu(area, anchor, (GdkEvent*)e);
+		else if (items[i].kind == Primary) win->primaryMenu(area, anchor, (GdkEvent*)e);
 		else win->moreMenu(area, anchor, (GdkEvent*)e);
 		hot = -1;
 		fade.setHot(-1);

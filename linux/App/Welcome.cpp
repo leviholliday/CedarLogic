@@ -383,7 +383,7 @@ void pageIntro(cairo_t* cr, double t) {
 
 void pageSetup(cairo_t* cr, Panel& panel) {
 	float y = heading(cr, 56, 34, kWW - 112, "Make it yours", "Your canvas, your way",
-	                  "It all applies as you pick it; the window behind this one is the preview. Preferences (Ctrl+,) has the rest.");
+	                  "It all applies as you pick it; the window behind this one is the preview. Settings (Ctrl+,) has the rest.");
 	y += 22;
 	label(cr, 56, y, "Appearance");
 	std::vector<RectF> hits;
@@ -429,7 +429,7 @@ void pageName(cairo_t* cr, Welcome* w) {
 	strokeRound(cr, rectF(w->nameBox.left + 0.5f, w->nameBox.top + 0.5f, w->nameBox.right - 0.5f, w->nameBox.bottom - 0.5f), 9, alpha(kNeon, 0.45f));
 	if (prefs().studentName.empty() && !(w->name && gtk_widget_has_focus(w->name)))
 		text(cr, "First and last name", left + 13, y + 9, 15, Normal, alpha(kPrimary, 0.3f));
-	text(cr, "Rather not? Leave it blank. It's in Preferences whenever you want it.", left, y + 38 + 16, 11.5f, Normal, kFaint);
+	text(cr, "Rather not? Leave it blank. It's in Settings whenever you want it.", left, y + 38 + 16, 11.5f, Normal, kFaint);
 	// What an export's footer looks like, with the name in it.
 	const RectF paper = rectF(474, 104, 724, 254);
 	cairo_save(cr);

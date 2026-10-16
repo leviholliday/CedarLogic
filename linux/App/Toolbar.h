@@ -34,6 +34,8 @@ public:
 	GdkRectangle actionRect(const char* action) const;
 	// The ••• button, in the bar's own points (false when it isn't showing).
 	bool moreRect(GdkRectangle& out) const;
+	// The primary menu's button (☰), the same way.
+	bool primaryRect(GdkRectangle& out) const;
 	// For Settings' pictures of each style: drawn in `style`, not clickable.
 	void paintPicture(cairo_t* cr, float w, float h, int style);
 
@@ -47,7 +49,7 @@ protected:
 	bool animating() override { return fade.active() || buttons.animating(); }
 
 private:
-	enum Kind { Button, Zoom, Speed, Title, More };
+	enum Kind { Button, Zoom, Speed, Title, More, Primary };
 	struct Item {
 		Kind kind;
 		const char* action;    // for a Button: "app.new", "win.save"...

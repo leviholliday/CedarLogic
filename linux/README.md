@@ -98,7 +98,7 @@ every shape and gate style and checks each circuit's truth table. And:
   for one of the app's windows: `welcome:N`, `whatsnew:N`, `help`, `truth`,
   `feedback`, `templates`, `tour`, `find`, `find:1` (Find Next and Previous), `export`, `scope`, `focus`,
   `split`, `quit`, `settings:N`, `toolbar:N`, `shortcuts`, `quickadd`,
-  `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `stepclock:N`, `lockinplace:N`, `pagelinks`, `draw:N`, `projector:N`, `checkclocked:N` (on a counter)
+  `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `primary` (the ☰ menu), `stepclock:N`, `lockinplace:N`, `pagelinks`, `draw:N`, `projector:N`, `checkclocked:N` (on a counter)
 - `cedarlogic --hold <seconds> --screenshot out.png` -- waits before the
   picture (CI drags a gate onto the canvas with xdotool meanwhile)
 - `cedarlogic --bench-drag [steps] circuit.cdl` -- times the canvas while
