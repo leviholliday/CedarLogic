@@ -10,6 +10,15 @@
 namespace {
 const float kTabH = 30, kGap = 2, kEdge = 8, kPlusW = 26;
 
+// Pages whose TO/FROM links connect share a dot's colour (docs/PAGE-LINKS.md,
+// cl_page_link_mark); none while every page connects. The Mac's colours, in order.
+Color linkColor(int mark) {
+	static const Color colors[] = { rgb255(0, 122, 255), rgb255(255, 149, 0), rgb255(175, 82, 222), rgb255(255, 45, 85),
+	                                rgb255(48, 176, 199), rgb255(255, 204, 0), rgb255(162, 132, 94), rgb255(88, 86, 214),
+	                                rgb255(0, 199, 190), rgb255(255, 59, 48) };
+	return colors[mark % 10];
+}
+
 void linear(cairo_t* cr, const RectF& r, float radius, const Color& top, const Color& bottom) {
 	cairo_pattern_t* g = cairo_pattern_create_linear(0, r.top, 0, r.bottom);
 	cairo_pattern_add_color_stop_rgba(g, 0, top.r, top.g, top.b, top.a);
@@ -198,8 +207,15 @@ void TabStrip::paint(cairo_t* cr, float w, float h) {
 		fillCircle(cr, pointF(r.left + 12, cy), 3, active ? accent : withAlpha(ink, 0.28f));
 		if (renamingKey != cl_document_page_id(doc, p)) {
 			const bool showClose = cl_document_page_count(doc) > 1 && (active || hot > 0.5f);
-			drawTextMid(cr, win->pageName(p), rectF(r.left + 24, r.top, r.right - (showClose ? 28 : 10), r.bottom), 11.5f,
+			const float textRight = r.right - (showClose ? 28 : 10);
+			const int mark = cl_page_link_mark(doc, p);
+			const float nameRight = mark >= 0 ? textRight - 12 : textRight;
+			drawTextMid(cr, win->pageName(p), rectF(r.left + 24, r.top, nameRight, r.bottom), 11.5f,
 			            withAlpha(ink, active ? 1.0f : 0.7f), TextAlign::Leading, active);
+			if (mark >= 0) {
+				const float x = std::min(r.left + 24 + textWidth(win->pageName(p), 11.5f, active) + 7, nameRight + 6);
+				fillCircle(cr, pointF(x, cy), 3, linkColor(mark));
+			}
 			if (showClose) {
 				const RectF x = rectF(r.right - 26, cy - 10, r.right - 6, cy + 10);
 				fillRound(cr, x, 6, withAlpha(ink, 0.16f * (float)closeHover.amount(k)));
@@ -285,6 +301,12 @@ void TabStrip::paintClassic(cairo_t* cr, float w, float h) {
 			strokeRound(cr, rectF(segs[i].left + 2, segs[i].top + 2, segs[i].right - 2, segs[i].bottom - 2), 5, withAlpha(ink, 0.12f));
 		}
 		drawTextMid(cr, win->pageName(pages[i]), segs[i], 11.5f, withAlpha(ink, on ? 1.0f : 0.7f), TextAlign::Center, on);
+		const int mark = cl_page_link_mark(win->document(), pages[i]);
+		if (mark >= 0) {
+			const float tw = textWidth(win->pageName(pages[i]), 11.5f, on);
+			const float x = std::min((segs[i].left + segs[i].right + tw) / 2 + 7, segs[i].right - 6);
+			fillCircle(cr, pointF(x, (segs[i].top + segs[i].bottom) / 2), 3, linkColor(mark));
+		}
 	}
 	const RectF plus = rectF(w - rightInset - 8 - kPlusW, (h - kTabH) / 2, w - rightInset - 8, (h + kTabH) / 2);
 	drawIcon(cr, Icon::Add, plus, 13, withAlpha(ink, 0.75f));

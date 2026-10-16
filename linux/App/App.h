@@ -67,6 +67,7 @@ struct Prefs {
 	std::vector<std::string> recent;   // most recent first
 	std::string lastFolder;
 	std::string lastCircuit;                      // the Your Circuits circuit last in front
+	bool newPagesShareLinks = true; // a page added later joins the pages' shared TO/FROM links (docs/PAGE-LINKS.md)
 	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string studentName;                      // for the Lab Page template and exports
 	// Build from Formula: what was typed last, and how to build it.
@@ -95,7 +96,7 @@ struct Prefs {
 	double wireScale() const;
 	void load();
 	void save() const;
-	// Tell the engine about the wire settings.
+	// Tell the engine about the wire settings (and whether new pages share links).
 	void applyWireDots() const;
 	void noteRecent(const std::string& path);
 };

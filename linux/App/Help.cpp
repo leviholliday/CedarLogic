@@ -124,7 +124,10 @@ const std::vector<Page>& pages() {
 		           { "Ctrl+Shift+T", "Reopen the tab you closed" },
 		           { "Ctrl+Tab", "Switch tabs: tap for the last one, hold Ctrl for a picture of each" },
 		           { "Ctrl+PgDn / PgUp", "Next and previous tab" } }),
-		    p("Double-click a tab to rename it; drag it along the strip to put it in order.") },
+		    p("Double-click a tab to rename it; drag it along the strip to put it in order."),
+		    p("TO and FROM links of the same name connect across pages that share links. Right-click a tab and choose **Connect to** "
+		      "to pick which pages connect; tabs that connect share a coloured dot. **Connect All Pages** and **Disconnect All Pages** "
+		      "are in the Tabs menu.") },
 		  false },
 		{ "sim", "Running the Simulation", "media-playback-start-symbolic", "It runs while you build.",
 		  { p("The circuit runs all the time. The toolbar pauses and resumes it (so does **Space** on the canvas), **Ctrl+Shift+R** steps "

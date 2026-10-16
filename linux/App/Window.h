@@ -249,6 +249,16 @@ public:
 	// After a move, delete or rotate: say why locked parts didn't go along.
 	void noteLockedHeld();
 
+	// Page links (docs/PAGE-LINKS.md): which pages' TO/FROM links connect by
+	// name. Each change is one undo step.
+	bool canConnectAllPages() const;
+	bool canDisconnectAllPages() const;
+	void connectAllPages();
+	void disconnectAllPages();
+	// Connect page `p` to page `other` (or take it off): `p` keeps the pages
+	// it reaches now, give or take that one.
+	void setPagesLinked(int p, int other, bool on);
+
 	void stepOnce();
 	// Step Clock: every clock on the page set to "Only on Step Clock" makes
 	// one full cycle (up, settle, down, settle), running or paused.

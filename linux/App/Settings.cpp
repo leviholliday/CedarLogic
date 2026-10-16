@@ -444,6 +444,9 @@ GtkWidget* canvasPage() {
 	r.add("Duplicate", combo({ "Leaves the clipboard alone", "Copies to the clipboard too" }, p.duplicateUsesClipboard ? 1 : 0,
 	                         [](int i) { prefs().duplicateUsesClipboard = i == 1; apply(); }),
 	      "Second option: the copy stays on the clipboard, so paste makes more of it.");
+	r.add("New pages", combo({ "Share links with the other pages", "Start on their own" }, p.newPagesShareLinks ? 0 : 1,
+	                         [](int i) { prefs().newPagesShareLinks = i == 0; apply(); }),
+	      "TO and FROM links of the same name connect across pages that share links. Right-click a tab to choose which pages connect.");
 	r.add("Tidy Up", combo({ "Keeps my layout", "Rearranges everything" }, p.tidyMode, [](int i) { prefs().tidyMode = i; apply(); }),
 	      "Keeps my layout: lines gates up where they are. Rearranges everything: lays the circuit out by signal flow. The Edit menu always has the other one.");
 	return r.grid;

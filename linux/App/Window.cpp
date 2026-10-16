@@ -122,6 +122,8 @@ const Command kCommands[] = {
 		else gtk_window_close(w->window());
 	}, false },
 	{ "reopen-tab", [](CircuitWindow* w) { w->reopenPage(); }, false },
+	{ "connect-all-pages", [](CircuitWindow* w) { w->connectAllPages(); }, false },
+	{ "disconnect-all-pages", [](CircuitWindow* w) { w->disconnectAllPages(); }, false },
 	{ "rename-tab", [](CircuitWindow* w) { w->renamePage(w->currentPage()); }, false },
 	{ "next-tab", [](CircuitWindow* w) { w->cyclePage(1); }, false },
 	{ "previous-tab", [](CircuitWindow* w) { w->cyclePage(-1); }, false },
@@ -889,6 +891,9 @@ void CircuitWindow::titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e)
 
 struct TabMenuData { CircuitWindow* w; int page; };
 
+// A tab menu's Connect to item: the two pages, by their identities.
+struct PageLink { CircuitWindow* w; unsigned long long from, to; };
+
 static void tabMenuItem(GtkWidget* menu, const char* label, void (*act)(CircuitWindow*, int), CircuitWindow* w, int page, bool enabled = true) {
 	GtkWidget* item = gtk_menu_item_new_with_mnemonic(label);
 	TabMenuData* d = new TabMenuData{ w, page };
@@ -924,6 +929,33 @@ void CircuitWindow::tabContextMenu(int page, GdkEvent* e) {
 		const int k = (int)(std::find(row.begin(), row.end(), page) - row.begin());
 		tabMenuItem(menu, "Move _Left", [](CircuitWindow* w, int p) { w->moveTabBy(p, -1); }, this, page, k > 0 && k < (int)row.size());
 		tabMenuItem(menu, "Move Ri_ght", [](CircuitWindow* w, int p) { w->moveTabBy(p, 1); }, this, page, k + 1 < (int)row.size());
+		const int n = cl_document_page_count(doc);
+		if (n > 1) {
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+			// A checklist: the pages this one's TO/FROM links reach.
+			GtkWidget* sub = gtk_menu_new();
+			for (int j = 0; j < n; j++) {
+				if (j == page) continue;
+				GtkWidget* item = gtk_check_menu_item_new_with_label(pageName(j).c_str());
+				gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(item), cl_pages_linked(doc, page, j));
+				// By the pages' identities, which outlast pages moving.
+				g_object_set_data_full(G_OBJECT(item), "cl-link", new PageLink{ this, cl_document_page_id(doc, page), cl_document_page_id(doc, j) },
+				                       [](gpointer d) { delete static_cast<PageLink*>(d); });
+				g_signal_connect(item, "toggled", CL_CALLBACK(+[](GtkCheckMenuItem* it, gpointer) {
+					const PageLink l = *static_cast<PageLink*>(g_object_get_data(G_OBJECT(it), "cl-link"));
+					const int from = cl_document_page_index(l.w->document(), l.from), to = cl_document_page_index(l.w->document(), l.to);
+					const bool on = gtk_check_menu_item_get_active(it);
+					guarded("a tab's menu", [&] { l.w->setPagesLinked(from, to, on); });
+				}), nullptr);
+				gtk_menu_shell_append(GTK_MENU_SHELL(sub), item);
+			}
+			gtk_menu_shell_append(GTK_MENU_SHELL(sub), gtk_separator_menu_item_new());
+			tabMenuItem(sub, "Connect _All Pages", [](CircuitWindow* w, int) { w->connectAllPages(); }, this, page, canConnectAllPages());
+			tabMenuItem(sub, "_Disconnect All Pages", [](CircuitWindow* w, int) { w->disconnectAllPages(); }, this, page, canDisconnectAllPages());
+			GtkWidget* connect = gtk_menu_item_new_with_mnemonic("Co_nnect to");
+			gtk_menu_item_set_submenu(GTK_MENU_ITEM(connect), sub);
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), connect);
+		}
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 		tabMenuItem(menu, "_Close Tab", [](CircuitWindow* w, int p) { w->closePage(p); }, this, page, cl_document_page_count(doc) > 1);
 	} else {
@@ -1329,6 +1361,8 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "unlock-parts", selectedLocked() > 0);
 	setEnabled(win, "unlock-all", cl_document_locked_count(doc) > 0);
 	setEnabled(win, "reopen-tab", cl_edit_undo_is_close_page(doc));
+	setEnabled(win, "connect-all-pages", canConnectAllPages());
+	setEnabled(win, "disconnect-all-pages", canDisconnectAllPages());
 	// Off until the page has a clock set to "Only on Step Clock" (its key
 	// still says why, through the canvas).
 	setEnabled(win, "step-clock", hasManualClock());
@@ -2121,6 +2155,32 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventBu
 	} else {
 		gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent*)e);
 	}
+}
+
+// ---- Page links ----------------------------------------------------------------------
+
+bool CircuitWindow::canConnectAllPages() const { return cl_document_page_count(doc) > 1 && !cl_pages_all_linked(doc); }
+bool CircuitWindow::canDisconnectAllPages() const { return cl_document_page_count(doc) > 1 && !cl_pages_none_linked(doc); }
+
+void CircuitWindow::connectAllPages() {
+	if (!cl_pages_connect_all(doc)) return;
+	edited();
+	note("Every page's links connect now.");
+}
+
+void CircuitWindow::disconnectAllPages() {
+	if (!cl_pages_disconnect_all(doc)) return;
+	edited();
+	note("Each page's links stay on that page now.");
+}
+
+void CircuitWindow::setPagesLinked(int p, int other, bool on) {
+	const int n = cl_document_page_count(doc);
+	if (p == other || p < 0 || p >= n || other < 0 || other >= n) return;
+	std::unique_ptr<bool[]> with(new bool[n]);
+	for (int j = 0; j < n; j++) with[j] = j != p && cl_pages_linked(doc, p, j);
+	with[other] = on;
+	if (cl_page_connect_to(doc, p, with.get(), n)) edited();
 }
 
 // ---- Simulation --------------------------------------------------------------------

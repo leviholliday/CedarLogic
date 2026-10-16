@@ -118,6 +118,7 @@ void Prefs::load() {
 		lastCircuit = readString(k, "lastCircuit", lastCircuit);
 		studentName = readString(k, "studentName", studentName);
 		templateClock = readInt(k, "templateClock", templateClock, 0, 2);
+		newPagesShareLinks = readBool(k, "newPagesShareLinks", newPagesShareLinks);
 		lastFormula = readString(k, "lastFormula", lastFormula);
 		buildShape = readInt(k, "buildShape", buildShape, 0, 2);
 		buildStyle = readInt(k, "buildStyle", buildStyle, 0, 2);
@@ -216,6 +217,7 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "lastCircuit", lastCircuit.c_str());
 	g_key_file_set_string(k, kGroup, "studentName", studentName.c_str());
 	g_key_file_set_integer(k, kGroup, "templateClock", templateClock);
+	g_key_file_set_boolean(k, kGroup, "newPagesShareLinks", newPagesShareLinks);
 	g_key_file_set_string(k, kGroup, "lastFormula", lastFormula.c_str());
 	g_key_file_set_integer(k, kGroup, "buildShape", buildShape);
 	g_key_file_set_integer(k, kGroup, "buildStyle", buildStyle);
@@ -253,6 +255,7 @@ void Prefs::save() const {
 }
 
 void Prefs::applyWireDots() const {
+	cl_set_new_pages_share_links(newPagesShareLinks);
 	cl_set_wire_dots(wireDots, wireDotSize);
 	static const double colors[][3] = { { 0.62, 0.67, 0.76 }, { 0.47, 0.58, 0.84 }, { 0.86, 0.87, 0.90 } };
 	if (lowWire >= 0 && lowWire < 3) cl_set_low_wire_color(true, colors[lowWire][0], colors[lowWire][1], colors[lowWire][2]);

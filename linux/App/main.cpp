@@ -284,6 +284,18 @@ gboolean showCb(gpointer) {
 		w->edited();
 		if (page == 1) w->toggleSimView();
 	}
+	else if (what == "pagelinks") {
+		// Page links: every page on its own, then the first two connected
+		// (their tabs share a dot), each reported.
+		CLDocument* doc = w->document();
+		while (cl_document_page_count(doc) < 3) cl_document_add_page(doc);
+		w->disconnectAllPages();
+		fprintf(stderr, "page links: none linked %d\n", cl_pages_none_linked(doc));
+		w->setPagesLinked(0, 1, true);
+		fprintf(stderr, "page links: 1-2 linked %d, 1-3 linked %d, marks %d %d %d\n", cl_pages_linked(doc, 0, 1), cl_pages_linked(doc, 0, 2),
+		        cl_page_link_mark(doc, 0), cl_page_link_mark(doc, 1), cl_page_link_mark(doc, 2));
+		w->edited();
+	}
 	else if (what == "lockinplace") {
 		// Every part locked in place (a lock on each), then a nudge that
 		// leaves them put, each reported; :1 unlocks one again.
@@ -445,6 +457,12 @@ GMenuModel* buildMenubar() {
 	g_menu_append(splitSection, "S_witch Side", "win.switch-pane");
 	g_menu_append(splitSection, "Close Split Vie_w", "win.close-split");
 	g_menu_append_section(tabs, nullptr, G_MENU_MODEL(splitSection));
+	// Which pages' TO/FROM links connect (docs/PAGE-LINKS.md); a tab's
+	// right-click menu connects pages one by one.
+	GMenu* linkSection = g_menu_new();
+	g_menu_append(linkSection, "Connect _All Pages", "win.connect-all-pages");
+	g_menu_append(linkSection, "_Disconnect All Pages", "win.disconnect-all-pages");
+	g_menu_append_section(tabs, nullptr, G_MENU_MODEL(linkSection));
 	g_menu_append_submenu(bar, "_Tabs", G_MENU_MODEL(tabs));
 
 	GMenu* help = g_menu_new();
