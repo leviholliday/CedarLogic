@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -71,6 +72,8 @@ Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageK
 	gtk_drag_dest_set(area, GTK_DEST_DEFAULT_ALL, targets, 2, GDK_ACTION_COPY);
 	g_signal_connect(area, "drag-data-received", G_CALLBACK(dragReceivedCb), this);
 	g_signal_connect(area, "drag-motion", G_CALLBACK(dragMotionCb), this);
+	const char* fast = g_getenv("CEDARLOGIC_FAST_DRAG");
+	fastDrag = fast && strcmp(fast, "1") == 0;
 }
 
 Canvas::~Canvas() {
@@ -86,12 +89,20 @@ void Canvas::dropBuffers() {
 	if (gridLayer) cairo_surface_destroy(gridLayer);
 	frame = gridLayer = nullptr;
 	gridValid = false;
+	frameWhole = frameFresh = false;
 }
 
 int Canvas::page() const { return cl_document_page_index(win->document(), key); }
 
 void Canvas::redraw() {
+	// GTK draws once per frame however often this is asked, so a burst of
+	// pointer moves costs one draw.
 	gtk_widget_queue_draw(area);
+	if (drag != Drag::None) {
+		const gint64 t = g_get_monotonic_time();
+		if (t - lastMiniMap < 100000) return;   // the release redraws it
+		lastMiniMap = t;
+	}
 	win->redrawMiniMap();
 }
 
@@ -122,16 +133,38 @@ bool Canvas::pointerWorld(double& wx, double& wy) const {
 // ---- Drawing -------------------------------------------------------------------
 
 gboolean Canvas::drawCb(GtkWidget*, cairo_t* cr, gpointer self) {
-	guarded("drawing", [&] { static_cast<Canvas*>(self)->draw(cr); });
+	Canvas* c = static_cast<Canvas*>(self);
+	const gint64 start = c->drawTimes ? g_get_monotonic_time() : 0;
+	guarded("drawing", [&] { c->draw(cr); });
+	if (c->drawTimes) c->drawTimes->push_back((g_get_monotonic_time() - start) / 1000.0);
 	return TRUE;
+}
+
+bool Canvas::canDrawDirect(cairo_t* cr, int scale) const {
+	if (pathOverride != 0) return pathOverride == 2;
+	static const bool off = [] { const char* v = g_getenv("CEDARLOGIC_CANVAS_FRAME"); return v && strcmp(v, "1") == 0; }();
+	if (off) return false;
+	// An image in memory at the same scale (Wayland's shared-memory buffers,
+	// GTK's own offscreen drawing). On X11 the window is the X server's, and
+	// one image sent there beats every shape sent one by one: the frame stays.
+	cairo_surface_t* target = cairo_get_group_target(cr);
+	if (target == nullptr || cairo_surface_get_type(target) != CAIRO_SURFACE_TYPE_IMAGE) return false;
+	double sx = 0, sy = 0;
+	cairo_surface_get_device_scale(target, &sx, &sy);
+	if (sx != scale || sy != scale) return false;
+	// The glass panels blur the frame under them.
+	if (win->simView() || simBarIn.to > 0 || simBarIn.value() > 0.01) return false;
+	if (bannerFade.to > 0 || bannerFade.value() > 0.01) return false;
+	return true;
 }
 
 void Canvas::draw(cairo_t* cr) {
 	const double w = width(), h = height();
 	if (needsFit && w > 1 && h > 1) zoomToFit(false);
-	const int scale = std::max(1, gtk_widget_get_scale_factor(area));
+	const int scale = scaleOverride > 0 ? scaleOverride : std::max(1, gtk_widget_get_scale_factor(area));
 	const int pw = (int)std::ceil(w * scale), ph = (int)std::ceil(h * scale);
 	if (pw <= 0 || ph <= 0) return;
+	frameFresh = false;
 	if (frame == nullptr || cairo_image_surface_get_width(frame) != pw || cairo_image_surface_get_height(frame) != ph) {
 		dropBuffers();
 		frame = cairo_image_surface_create(CAIRO_FORMAT_RGB24, pw, ph);
@@ -145,10 +178,34 @@ void Canvas::draw(cairo_t* cr) {
 		drawScene(cr, scale);
 		return;
 	}
+	if (canDrawDirect(cr, scale)) {
+		// Straight onto the window's own image: one full-size copy fewer
+		// each frame. GTK has clipped it to what needs drawing.
+		cairo_save(cr);
+		cairo_rectangle(cr, 0, 0, w, h);
+		cairo_clip(cr);
+		drawScene(cr, scale);
+		cairo_restore(cr);
+		frameWhole = false;   // `frame` is out of date now
+		drawOverlays(cr, (float)w, (float)h);
+		return;
+	}
 	cairo_t* fc = cairo_create(frame);
+	// Only the part GTK asked for (another widget over the canvas changed),
+	// when the rest of the frame is still what's on screen. Anything that
+	// changes the circuit or the camera asks for all of it.
+	double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+	cairo_clip_extents(cr, &x1, &y1, &x2, &y2);
+	if (frameWhole && x2 > x1 && y2 > y1 && (x1 > 0 || y1 > 0 || x2 < w || y2 < h)) {
+		x1 = std::floor(std::max(0.0, x1));
+		y1 = std::floor(std::max(0.0, y1));
+		cairo_rectangle(fc, x1, y1, std::ceil(std::min(w, x2)) - x1, std::ceil(std::min(h, y2)) - y1);
+		cairo_clip(fc);
+	}
 	drawScene(fc, scale);
 	cairo_destroy(fc);
 	cairo_surface_flush(frame);
+	frameWhole = frameFresh = true;
 	cairo_save(cr);
 	cairo_set_source_surface(cr, frame, 0, 0);
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
@@ -417,6 +474,12 @@ void Canvas::keepMoving() {
 // blur, done the cheap way), inside the panel's rounded shape.
 void Canvas::frosted(cairo_t* cr, const RectF& r, float radius) {
 	if (frame == nullptr) return;
+	if (!frameFresh) {
+		// Drawn straight to the window this time (a panel just appeared):
+		// the next frame goes through `frame`, glass and all.
+		gtk_widget_queue_draw(area);
+		return;
+	}
 	const float rw = r.right - r.left, rh = r.bottom - r.top;
 	if (rw < 2 || rh < 2) return;
 	const int sw = std::max(2, (int)(rw / 10)), sh = std::max(2, (int)(rh / 10));
@@ -480,7 +543,12 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	const double fade = win->appearProgress();
 	const GridKey key{ originX, originY, upp, fade, (int)width(), (int)height(), scale, prefs().gridStyle,
 	                   dark, sim, prefs().majorGrid, prefs().showGrid };
-	if (gridLayer) {
+	// While the camera moves, the layer would be redrawn and copied every
+	// frame: the grid is drawn straight in until it has stayed put a frame.
+	const bool settled = (gridValid && key == gridKey) || (lastGridKeySet && key == lastGridKey);
+	lastGridKey = key;
+	lastGridKeySet = true;
+	if (gridLayer && settled) {
 		if (!gridValid || !(key == gridKey)) {
 			cairo_t* gc = cairo_create(gridLayer);
 			const RGBA bg = pal.canvas();
@@ -511,7 +579,15 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	o.thumbnail = false;
 	o.showSelection = true;
 	o.selectionFade = win->selectionFade();
+	// CEDARLOGIC_FAST_DRAG=1: coarser antialiasing while a drag is moving
+	// things (see SMOOTHNESS.md); the release draws it properly again.
+	const bool coarse = fastDrag && drag == Drag::Edit;
+	if (coarse) {
+		cairo_save(cr);
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
+	}
 	cl_document_draw_ex(doc, p, cr, scale, originX, originY, upp, &o);
+	if (coarse) cairo_restore(cr);
 	if (sim) {
 		cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
 		return;

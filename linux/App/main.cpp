@@ -4,6 +4,7 @@
 #include <deque>
 
 #include "App.h"
+#include "Bench.h"
 #include "Canvas.h"
 #include "Recovery.h"
 #include "ShareLink.h"
@@ -59,6 +60,12 @@ int gHold = 2;
 // This process is the running CedarLogic (not a launch that handed over to
 // it): it loaded the settings, so it may save them.
 bool gPrimary = false;
+// --bench-drag [steps] <circuit.cdl>: times the canvas while dragging and
+// quits (Bench.cpp, linux/SMOOTHNESS.md). It runs as a screenshot run does
+// (no splash, updater or sync), with its settings and Your Circuits in a
+// temporary folder, so the person's own are never touched.
+int gBench = 0;
+std::string gBenchHome;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -271,6 +278,15 @@ gboolean screenshotCb(gpointer app) {
 		cairo_surface_destroy(s);
 		fprintf(stderr, "%s %s (%dx%d)\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str(), width, height);
 	}
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
+	g_application_quit(G_APPLICATION(app));
+	return G_SOURCE_REMOVE;
+}
+
+gboolean benchCb(gpointer app) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	gExitCode = 1;
+	if (w) guarded("the drag benchmark", [&] { gExitCode = bench::dragBenchmark(w, gBench); });
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
 	g_application_quit(G_APPLICATION(app));
 	return G_SOURCE_REMOVE;
@@ -720,7 +736,8 @@ void activateCb(GApplication* gapp, gpointer) {
 		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
+			if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
@@ -778,7 +795,8 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
+			if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
@@ -992,6 +1010,11 @@ int main(int argc, char** argv) {
 		}
 		if (strcmp(argv[i], "--first") == 0) { gFirstLaunch = true; continue; }
 		if (strcmp(argv[i], "--hold") == 0 && i + 1 < argc) { gHold = std::max(1, atoi(argv[++i])); continue; }
+		if (strcmp(argv[i], "--bench-drag") == 0) {
+			gBench = 60;
+			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gBench = std::max(5, atoi(argv[++i]));
+			continue;
+		}
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
 		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this
 		// machine's hooks (libcrypto, zlib, curl); with a server, also against a mock one.
@@ -1027,6 +1050,17 @@ int main(int argc, char** argv) {
 	args.push_back(nullptr);
 	argc = (int)args.size() - 1;
 	argv = args.data();
+	if (gBench > 0) {
+		// Settings and Your Circuits in a folder of its own (removed at the end),
+		// and the screenshot runs' quiet start; the picture itself isn't taken.
+		gchar* home = g_dir_make_tmp("cl-bench-XXXXXX", nullptr);
+		if (home == nullptr) { fprintf(stderr, "bench-drag: no temporary folder\n"); return 2; }
+		gBenchHome = home;
+		g_free(home);
+		g_setenv("XDG_DATA_HOME", (gBenchHome + "/data").c_str(), TRUE);
+		g_setenv("XDG_CONFIG_HOME", (gBenchHome + "/config").c_str(), TRUE);
+		gScreenshot = gBenchHome + "/unused.png";
+	}
 	// The window class and the name the desktop shows.
 	g_set_prgname("CedarLogic");
 	g_set_application_name("CedarLogic");
@@ -1047,5 +1081,6 @@ int main(int argc, char** argv) {
 	// Every window is closed and saved: what sync hasn't sent yet goes now (five seconds at most).
 	if (gPrimary) syncapp::quit();
 	g_object_unref(app);
+	if (!gBenchHome.empty()) removeTree(gBenchHome);
 	return status ? status : gExitCode;
 }

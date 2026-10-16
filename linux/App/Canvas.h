@@ -70,6 +70,8 @@ public:
 	void dropBuffers();
 
 private:
+	// --bench-drag (Bench.cpp) drives the real handlers and draw() directly.
+	friend struct CanvasBench;
 	enum class Drag { None, Edit, Pan };
 
 	CircuitWindow* win;
@@ -101,7 +103,9 @@ private:
 	// The view is drawn into an image in memory, on the processor, and put on
 	// screen in one piece: on X11 that's one image sent to the display
 	// instead of every shape. The background and grid are kept in a layer
-	// of their own while the camera stays put.
+	// of their own while the camera stays put. On Wayland the window itself
+	// is an image in memory, and the canvas draws straight onto it instead
+	// (canDrawDirect) unless a glass panel needs the frame.
 	cairo_surface_t* frame = nullptr;
 	cairo_surface_t* gridLayer = nullptr;
 	struct GridKey {
@@ -115,6 +119,34 @@ private:
 	};
 	GridKey gridKey{};
 	bool gridValid = false;
+	// The camera of the frame before: the grid goes into its layer only once
+	// the camera has stayed put for two frames (while it moves -- a pan, a
+	// zoom -- the layer would be thrown away every frame, so the grid is
+	// drawn straight in instead, one full-size copy fewer).
+	GridKey lastGridKey{};
+	bool lastGridKeySet = false;
+
+	// What draw() did last (see SMOOTHNESS.md). `frameWhole`: `frame` holds
+	// the whole canvas as it's on screen, so a redraw of part of it may draw
+	// just that part. `frameFresh`: `frame` was drawn this time, so the glass
+	// panels may blur it.
+	bool frameWhole = false, frameFresh = false;
+	// Drawing straight onto the window, without `frame`: when the window is
+	// an image in memory (Wayland) and no glass panel needs `frame`.
+	// CEDARLOGIC_CANVAS_FRAME=1 turns it off.
+	bool canDrawDirect(cairo_t* cr, int scale) const;
+	// For --bench-drag: a scale factor to draw at instead of the screen's,
+	// and which way to draw (0 as above, 1 always through `frame`, 2 always
+	// straight), and a cheaper antialiasing while dragging (also
+	// CEDARLOGIC_FAST_DRAG=1; off by default).
+	int scaleOverride = 0, pathOverride = 0;
+	bool fastDrag = false;
+	// While dragging, the minimap follows at most ten times a second (its
+	// picture of the whole page is drawn again whenever the view or the
+	// page's bounds move); it catches up when the drag ends.
+	gint64 lastMiniMap = 0;
+	// --bench-drag: each draw's time, in ms, while set.
+	std::vector<double>* drawTimes = nullptr;
 
 	void draw(cairo_t* cr);
 	// Over the circuit: the banner and its buttons, the note.

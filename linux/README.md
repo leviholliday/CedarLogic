@@ -74,10 +74,11 @@ system's copy, so the app picks up the desktop's theme, fonts and input
 methods. Dark mode asks the theme for its dark side, and falls back to GTK's
 built-in Adwaita when the theme hasn't one.
 
-The canvas draws each frame into an image in memory, keeps the grid in a
-layer of its own, and only redraws when the simulation changed something on
-screen (`CL_TICK_SHOWN`), so a running circuit that isn't changing costs next
-to nothing.
+The canvas draws each frame into an image in memory (on Wayland straight
+onto the window's own), keeps the grid in a layer of its own, and only
+redraws when the simulation changed something on screen (`CL_TICK_SHOWN`),
+so a running circuit that isn't changing costs next to nothing. What a drag
+costs, and what would make it cheaper: `SMOOTHNESS.md`.
 
 Checks, without opening the app (built with it; `-DCL_BUILD_TOOLS=OFF` skips
 them): `cl_check`, `edit_check`, `sim_check`, `tt_check`, `save_check`,
@@ -94,6 +95,9 @@ every shape and gate style and checks each circuit's truth table. And:
   `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`
 - `cedarlogic --hold <seconds> --screenshot out.png` -- waits before the
   picture (CI drags a gate onto the canvas with xdotool meanwhile)
+- `cedarlogic --bench-drag [steps] circuit.cdl` -- times the canvas while
+  dragging one gate, everything, and the view, and prints ms per frame
+  (`SMOOTHNESS.md` says how to read it); nothing is saved
 - `cedarlogic --splash-frame <seconds> out.png [--first]` -- the launch screen
 - `cedarlogic --feedback-probe` -- asks the feedback site with a wrong key
   (expects 403) and sends nothing
