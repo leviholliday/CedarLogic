@@ -40,7 +40,8 @@ const wchar_t Page = 0xE7C3, Open = 0xE8B7, Save = 0xE74E, Undo = 0xE7A7, Redo =
               Minimize = 0xE921, StopSolid = 0xE73B, Maximize = 0xE922, Restore = 0xE923, Dismiss = 0xE711, Feedback = 0xED15,
               StepClock = 0xE823,   // Recent: a clock with an arrow round it, as the Mac's clock.arrow.2.circlepath
               Draw = 0xE70F,        // Edit: a pencil (the drawing bar's pen is InkingTool, E76D)
-              Settings = 0xE713;    // Setting: a gear, for Settings where a Windows app has it
+              Settings = 0xE713,    // Setting: a gear, for Settings where a Windows app has it
+              Notes = 0xE70B;       // QuickNote: the notes pane
 }
 void drawIcon(ID2D1RenderTarget* rt, wchar_t glyph, const D2D1_RECT_F& box, float size, const D2D1_COLOR_F& color);
 // Two the icon font hasn't as the Mac has them, drawn: a page with a plus

@@ -63,6 +63,14 @@ void FindBar::run(bool jump) {
 		total = cl_find(win->document(), q.c_str(), out.data(), (int)out.size());
 		for (int i = 0; i < std::min(total, (int)out.size()); i++)
 			hits.push_back({ out[i].page, out[i].gate, out[i].x, out[i].y, out[i].text ? out[i].text : "", out[i].kind ? out[i].kind : "" });
+		// The notes too (Notes.h): one result, last, that opens them, as on the Mac.
+		std::wstring notes = W(cl_notes(win->document())), wq = W(q);
+		CharLowerBuffW(notes.empty() ? nullptr : &notes[0], (DWORD)notes.size());
+		CharLowerBuffW(wq.empty() ? nullptr : &wq[0], (DWORD)wq.size());
+		if (!wq.empty() && notes.find(wq) != std::wstring::npos) {
+			hits.push_back({ -1, -1, 0, 0, q, "In your notes" });
+			total++;
+		}
 	}
 	if (jump && !hits.empty()) show(0);
 	redraw();
@@ -80,6 +88,11 @@ void FindBar::step(int delta) {
 void FindBar::show(int i) {
 	if (i < 0 || i >= (int)hits.size()) return;
 	const Hit& h = hits[i];
+	if (h.page < 0) {
+		win->showNotesMatch(h.text);
+		SetFocus(edit);   // the bar keeps the keyboard, so Enter goes on to the next
+		return;
+	}
 	win->showFoundGate(h.page, h.gate, h.x, h.y);
 }
 
@@ -101,7 +114,7 @@ void FindBar::paint(ID2D1RenderTarget* rt, float w, float h) {
 	std::string status;
 	if (total > 0 && index < (int)hits.size()) {
 		status = strf("%d of %d · %s", index + 1, total, hits[index].kind.c_str());
-		if (cl_document_page_count(win->document()) > 1) status += " · " + win->pageTitle(hits[index].page);
+		if (cl_document_page_count(win->document()) > 1 && hits[index].page >= 0) status += " · " + win->pageTitle(hits[index].page);
 	} else if (GetWindowTextLengthW(edit) > 0) {
 		status = "Not found";
 	}

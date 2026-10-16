@@ -22,6 +22,7 @@ class MiniMap;
 class ScopeWindow;
 class StatusBar;
 class FindBar;
+class NotesPanel;
 class TabSwitcher;
 class TabStrip;
 class Toolbar;
@@ -189,6 +190,10 @@ public:
 	void setInkColor(int index);
 	// The drawing changed (a stroke, an erase): an edit, and redrawn.
 	void inkEdited();
+	// The notes pane (Notes.h): shown or put away; Find's match in the notes.
+	bool notesShown() const { return notesOpen; }
+	void toggleNotes();
+	void showNotesMatch(const std::string& query);
 	// Shown or hidden is saved with the circuit, but isn't an undo step.
 	void markEdited();
 	void makeTruthTable();
@@ -329,6 +334,8 @@ private:
 	Toolbar* toolbar = nullptr;
 	TabStrip* strips[2] = { nullptr, nullptr };
 	FindBar* findBar = nullptr;
+	NotesPanel* notes = nullptr;      // made when first shown
+	bool notesOpen = false;
 	TabSwitcher* switcher = nullptr;
 	std::vector<uint64_t> recentKeys;   // pages by when they were last in front, most recent first
 	HWND paletteHost = nullptr;

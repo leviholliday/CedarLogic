@@ -49,6 +49,8 @@ enum Command {
 	// Edit > Find Next and Find Previous: along the find bar's results (it
 	// opens, with what it last looked for, when it's closed).
 	CMD_FIND_NEXT, CMD_FIND_PREVIOUS,
+	// View > Show Notes (Notes.h): the circuit's notes in a pane at the right.
+	CMD_NOTES,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

@@ -24,7 +24,7 @@ bool groupShown(int g) { return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0
 
 const char* toolGroupName(int g) {
 	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
-	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback", "Draw" };
+	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback", "Draw and Notes" };
 	return g >= 0 && g < TGCount ? names[g] : "";
 }
 
@@ -55,6 +55,7 @@ void Toolbar::build(int style, bool live) {
 		add(Speed, 0, TGSim, true);
 		add(Button, CMD_SIM_VIEW, TGRun, true);
 		add(Button, CMD_DRAW, TGDraw, true);
+		add(Button, CMD_NOTES, TGDraw, true);
 		add(Button, CMD_LOCK, TGLock, true);
 		if (prefs().showThemeToggle) add(Button, CMD_DARK, TGTheme, true);
 		add(Button, CMD_NEW_TAB, TGTab, true);
@@ -177,6 +178,7 @@ bool Toolbar::isOn(const Item& it) const {
 	case CMD_SIM_VIEW: return win->simView();
 	case CMD_LOCK: return win->locked();
 	case CMD_DRAW: return win->drawing();
+	case CMD_NOTES: return win->notesShown();
 	case CMD_DARK: return prefs().dark;
 	default: return false;
 	}
@@ -215,6 +217,7 @@ wchar_t Toolbar::iconFor(const Item& it) const {
 	case CMD_SIM_VIEW: return win->simView() ? Icon::StopSolid : Icon::Play;
 	case CMD_LOCK: return win->locked() ? Icon::Lock : Icon::Unlock;
 	case CMD_DRAW: return Icon::Draw;
+	case CMD_NOTES: return Icon::Notes;
 	case CMD_DARK: return prefs().dark ? kMoon : kSun;
 	case CMD_NEW_TAB: return Icon::NewTab;
 	case CMD_FEEDBACK: return Icon::Feedback;
@@ -252,6 +255,7 @@ std::string Toolbar::tipFor(const Item& it) const {
 	case CMD_DRAW: return win->drawing() ? std::string("Done drawing (Esc)")
 	                     : win->hasHiddenDrawing() ? "Draw on the circuit (it has a drawing that's hidden)" + keys
 	                                               : "Draw on the circuit" + keys;
+	case CMD_NOTES: return win->notesShown() ? "Hide notes" + keys : "Notes for this circuit" + keys;
 	case CMD_DARK: return "Dark mode" + keys;
 	case CMD_NEW_TAB: return "New tab" + keys;
 	case CMD_FEEDBACK: return "Send feedback: a bug, an idea, anything";

@@ -24,6 +24,7 @@
 #include "ShareLink.h"
 #include "SyncApp.h"
 #include "Ink.h"
+#include "Notes.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -191,6 +192,8 @@ CircuitWindow::~CircuitWindow() {
 	if (hintWindow) DestroyWindow(hintWindow);
 	delete findBar;
 	findBar = nullptr;
+	delete notes;
+	notes = nullptr;
 	delete switcher;
 	switcher = nullptr;
 	delete statusBar;
@@ -338,6 +341,7 @@ void CircuitWindow::buildMenus() {
 	separator(drawingMenu);
 	item(drawingMenu, CMD_CLEAR_DRAWING, "&Clear Drawing on This Page");
 	item(view, CMD_SHOW_DRAWING, "&Hide Drawing\tCtrl+Shift+H");
+	item(view, CMD_NOTES, "Show &Notes\tCtrl+Alt+N");
 
 	HMENU sim = submenu(menuBar, "&Simulate");
 	item(sim, CMD_RUNNING, "&Running");
@@ -441,13 +445,23 @@ void CircuitWindow::layout() {
 	}
 	areaLeft = left;
 	areaTop = top;
+	// The notes, a pane at the right (its own hairline at its left edge).
+	int right = rc.right;
+	if (notes) {
+		if (notesOpen) {
+			const int nw = std::min(sc((int)NotesPanel::panelWidth()), std::max(0, (int)(rc.right - left) / 2));
+			place(notes->widget(), rc.right - nw, top, nw, bottom - top);
+			right = rc.right - nw;
+		}
+		ShowWindow(notes->widget(), notesOpen ? SW_SHOWNA : SW_HIDE);
+	}
 	// The oscilloscope, docked along the bottom, with a line over it.
 	int below = bottom;
 	scopeY = -1;
 	if (scope && scopeOpen) {
 		const int room = bottom - top;
 		const int sh = std::max(std::min(sc(scopeHeight), room - sc(160)), std::min(sc(110), room / 2));
-		place(scope->widget(), left, bottom - sh, rc.right - left, sh);
+		place(scope->widget(), left, bottom - sh, right - left, sh);
 		below = bottom - sh - 1;
 		scopeY = below;
 	}
@@ -455,15 +469,15 @@ void CircuitWindow::layout() {
 
 	// One side, or two with a line between them.
 	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
-	RECT sides[2] = { { left, top, rc.right, below }, { left, top, rc.right, below } };
+	RECT sides[2] = { { left, top, right, below }, { left, top, right, below } };
 	splitX = -1;
 	if (splitOpen()) {
-		const int areaW = rc.right - left;
+		const int areaW = right - left;
 		const int minW = std::min(sc(200), areaW / 3);
-		const int x = std::max<int>(left + minW, std::min<int>(left + (int)std::lround(areaW * splitAt), rc.right - minW - 1));
+		const int x = std::max<int>(left + minW, std::min<int>(left + (int)std::lround(areaW * splitAt), right - minW - 1));
 		splitX = x;
 		sides[sideFirst ? 1 : 0] = { left, top, x, below };
-		sides[sideFirst ? 0 : 1] = { x + 1, top, rc.right, below };
+		sides[sideFirst ? 0 : 1] = { x + 1, top, right, below };
 	}
 	for (int pane = 0; pane < 2; pane++) {
 		paneRects[pane] = sides[pane];
@@ -1295,6 +1309,9 @@ void CircuitWindow::updateMenu(HMENU menu) {
 		if (id == CMD_DRAW)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
 			            W(std::string(drawOn ? "Done Dra&wing" : "Dra&w on the Circuit") + shortcuts::menuKeys(CMD_DRAW)).c_str());
+		if (id == CMD_NOTES)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(notesOpen ? "Hide &Notes" : "Show &Notes") + shortcuts::menuKeys(CMD_NOTES)).c_str());
 		if (id == CMD_SHOW_DRAWING)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
 			            W(std::string(drawingShown() ? "&Hide Drawing" : "S&how Drawing") + shortcuts::menuKeys(CMD_SHOW_DRAWING)).c_str());
@@ -1341,6 +1358,7 @@ void CircuitWindow::themeChanged() {
 	updateActions();
 	updateTabLabels();
 	if (palette) palette->themeChanged();
+	if (notes) notes->themeChanged();
 	if (statusBar) statusBar->redraw();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
@@ -1531,6 +1549,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		setFontTree(hwnd, uiFont(dpi));
 		if (palette) palette->dpiChanged();
 		if (findBar) findBar->dpiChanged();
+		if (notes) notes->dpiChanged();
 		layout();
 		for (Canvas* c : canvases) c->redraw();
 		return 0;
@@ -1973,6 +1992,7 @@ void CircuitWindow::run(int command) {
 	case CMD_DRAW: toggleDrawing(); break;
 	case CMD_SHOW_DRAWING: setDrawingShown(!drawingShown()); break;
 	case CMD_CLEAR_DRAWING: clearDrawing(); break;
+	case CMD_NOTES: toggleNotes(); break;
 	case CMD_INK_PEN: setInkTool(ink::Pen); break;
 	case CMD_INK_HIGHLIGHTER: setInkTool(ink::Highlighter); break;
 	case CMD_INK_ERASER: setInkTool(ink::Eraser); break;
@@ -2100,6 +2120,7 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	isRunning = cl_document_is_running(doc);
 	simViewOn = false;
 	lockedOn = false;
+	if (notes) notes->load();   // the new circuit's notes
 	syncTabs();
 	appearStart = nowSeconds();
 	beginOpening();
@@ -2744,6 +2765,24 @@ void CircuitWindow::setDrawing(bool on) {
 	updateActions();
 	for (Canvas* c : canvases) c->redraw();
 	if (Canvas* c = currentCanvas()) c->focus();
+}
+
+void CircuitWindow::toggleNotes() {
+	notesOpen = !notesOpen;
+	if (notesOpen && notes == nullptr) {
+		notes = new NotesPanel(this, hwnd);
+		setFontTree(notes->widget(), uiFont(dpi));
+		notes->dpiChanged();
+	}
+	layout();
+	if (notesOpen && notes) notes->focus();
+	else if (Canvas* c = currentCanvas()) c->focus();
+	updateActions();
+}
+
+void CircuitWindow::showNotesMatch(const std::string& query) {
+	if (!notesOpen) toggleNotes();
+	if (notes) notes->select(query);
 }
 
 void CircuitWindow::setDrawingShown(bool shown) {

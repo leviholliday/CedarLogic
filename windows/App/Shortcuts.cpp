@@ -179,6 +179,7 @@ const std::vector<Action>& all() {
 		{ "lock", "Simulation", "Lock the circuit", CMD_LOCK, false, "" },
 		{ "draw", "Drawing and notes", "Draw on the circuit (then P pen, H highlighter, E eraser)", CMD_DRAW, false, "Ctrl+Alt+P" },
 		{ "showDrawing", "Drawing and notes", "Show or hide the drawing", CMD_SHOW_DRAWING, false, "Ctrl+Shift+H" },
+		{ "notes", "Drawing and notes", "Notes for this circuit", CMD_NOTES, false, "Ctrl+Alt+N" },
 		{ "clearDrawing", "Drawing and notes", "Clear the drawing on this page", CMD_CLEAR_DRAWING, false, "" },
 		{ "newTab", "Tabs and split view", "New tab", CMD_NEW_TAB, false, "Ctrl+T" },
 		{ "closeTab", "Tabs and split view", "Close tab", CMD_CLOSE_TAB, false, "Ctrl+W" },
