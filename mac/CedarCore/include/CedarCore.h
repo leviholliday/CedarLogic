@@ -235,6 +235,8 @@ long cl_edit_single_gate(const CLDocument *doc, int page);
 const char *cl_gate_caption(const CLDocument *doc, long gate);
 // The gate's library name ("AA_AND2"), for its picture.
 const char *cl_gate_library_name(const CLDocument *doc, long gate);
+// Where the gate is (world coordinates, its own origin); false if there's no such gate.
+bool cl_gate_position(const CLDocument *doc, long gate, double *x, double *y);
 int cl_gate_setting_count(const CLDocument *doc, long gate);
 typedef struct {
 	const char *label;   // shown to the user

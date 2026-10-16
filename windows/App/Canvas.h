@@ -28,6 +28,9 @@ public:
 	int page() const;
 
 	void redraw();
+	// While something follows the pointer (a drag, a gate from the side
+	// panel): the canvas again, drawn now if a frame is due (see Canvas.cpp).
+	void redrawWhileMoving();
 	// World <-> view points.
 	void worldPoint(double vx, double vy, double& wx, double& wy) const;
 	double width() const;    // points
@@ -91,6 +94,10 @@ private:
 	bool spaceDown = false, pannedWhileSpaceDown = false;
 	bool pointerInside = false;
 	double lastW = 0, lastH = 0;
+	double lastPaintAt = 0;            // nowSeconds() of the last paint
+	double frameSeconds = 1.0 / 60;    // the display's refresh, read as a drag starts
+	void paceFrame();
+	void noteFrameRate();
 
 	// An eased zoom in progress.
 	bool zooming = false;

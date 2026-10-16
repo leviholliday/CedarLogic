@@ -3,6 +3,7 @@
 #include "App.h"
 #include <d2d1_1.h>
 #include "Window.h"
+#include "DragLog.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -500,7 +501,15 @@ ID2D1HwndRenderTarget* WindowSurface::begin(HWND hwnd) {
 		// makes them points.
 		const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
 			D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
-		if (FAILED(f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h)), &rt)))
+		// Presented at once, not held for the display's next refresh: the
+		// default (D2D1_PRESENT_OPTIONS_NONE) makes EndDraw wait for a vblank,
+		// and with a target per window (the canvas, the minimap, the status
+		// bar, the toolbar...) each pointer move during a drag waited for
+		// several in a row. Windows' compositor shows the last frame given at
+		// each refresh, so nothing tears. CEDARLOGIC_DRAG_OLD=1 puts the old
+		// way back, to compare (windows/DRAG-DIAGNOSIS.md).
+		const D2D1_PRESENT_OPTIONS present = draglog::legacy() ? D2D1_PRESENT_OPTIONS_NONE : D2D1_PRESENT_OPTIONS_IMMEDIATELY;
+		if (FAILED(f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h), present), &rt)))
 			return rt = nullptr;
 		static unsigned long long count = 0;
 		made = ++count;

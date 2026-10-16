@@ -63,6 +63,9 @@ endif()
 # ---- The app -------------------------------------------------------------------
 option(CL_BUILD_APP "Build the app" ON)
 if(CL_BUILD_APP)
+	# Every App/*.cpp, DragLog.cpp included (--drag-log, --drag-selftest:
+	# windows/DRAG-DIAGNOSIS.md; it uses winmm's timeBeginPeriod, linked below).
+	# Re-run the configure step after adding a file, as the list is made then.
 	file(GLOB CL_APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/App/*.cpp")
 	set(CL_ICON "${ROOT}/res/icon.ico")
 	set(CL_DOC_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/CedarLogicDocument.ico")

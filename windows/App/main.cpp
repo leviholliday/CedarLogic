@@ -6,6 +6,7 @@
 #include "Alert.h"
 #include "Canvas.h"
 #include "Dialogs.h"
+#include "DragLog.h"
 #include "Feedback.h"
 #include "Help.h"
 #include "Integration.h"
@@ -65,6 +66,9 @@ const int kSyncPage = 5;
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
 bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
+// --drag-selftest [log]: a gate dragged with real input, PASS or FAIL
+// (DragLog.h); --drag-log <file>: every drag measured into the file.
+bool gDragSelfTest = false;
 // --split, --focus, --rename-tab: the window in split view, in focus mode,
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
@@ -715,6 +719,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			return ok ? 0 : 1;
 		}
 		if (a == "--click-test") { gClickTest = true; continue; }
+		if (a == "--drag-log" && i + 1 < argc) { draglog::open(U(argv[++i])); continue; }
+		if (a == "--drag-selftest") {
+			gDragSelfTest = true;
+			// The log's file may follow (not another option, and not a circuit).
+			if (i + 1 < argc) {
+				const std::string next = U(argv[i + 1]);
+				const bool circuit = next.size() > 4 && _stricmp(next.c_str() + next.size() - 4, ".cdl") == 0;
+				if (!next.empty() && next[0] != '-' && !circuit) { draglog::open(next); i++; }
+			}
+			continue;
+		}
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
@@ -764,8 +779,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		files.push_back(a);
 	}
 	LocalFree(argv);
+	if (!draglog::on()) {
+		wchar_t env[MAX_PATH] = L"";
+		if (GetEnvironmentVariableW(L"CEDARLOGIC_DRAG_LOG", env, MAX_PATH) > 0 && env[0]) draglog::open(U(env));
+	}
+	if (gDragSelfTest && !draglog::on()) {
+		wchar_t tmp[MAX_PATH] = L"";
+		GetTempPathW(MAX_PATH, tmp);
+		draglog::open(U(tmp) + "cedarlogic-drag-selftest.log");
+	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
-	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || gClickTest || gDialog != 0;
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest;
 	gTestRun = testRun;
 	if (!testRun && handToRunning(files)) return 0;
 
@@ -787,7 +811,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && !gClickTest) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && !gClickTest && !gDragSelfTest) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -832,7 +856,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -881,6 +905,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);
 		SetTimer(nullptr, 0, 60000, clickTestWatchdog);
+	} else if (gDragSelfTest) {
+		draglog::startSelfTest();
 	} else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.
@@ -915,6 +941,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		DispatchMessageW(&msg);
 	}
 	const int clickResult = gClickTest ? finishClickTest() : 0;
+	draglog::close();
 	updater::shutdown();
 	syncapp::shutdown();
 	// What this run's flags changed for themselves goes back as it was.

@@ -747,6 +747,16 @@ const char* cl_gate_library_name(const CLDocument* doc, long gate) {
 	return scratch.c_str();
 }
 
+bool cl_gate_position(const CLDocument* doc, long gate, double* x, double* y) {
+	guiGate* g = doc && gate >= 0 ? doc->circuit.getGate((unsigned long)gate) : nullptr;
+	if (g == nullptr) return false;
+	float gx = 0, gy = 0;
+	g->getGLcoords(gx, gy);
+	if (x) *x = gx;
+	if (y) *y = gy;
+	return true;
+}
+
 int cl_gate_setting_count(const CLDocument* doc, long gate) {
 	const LibraryGate* lg = libraryGateOf(doc, gate);
 	return lg ? (int)lg->dlgParams.size() : 0;

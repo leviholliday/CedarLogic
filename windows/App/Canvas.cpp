@@ -3,6 +3,7 @@
 #include "Canvas.h"
 #include "Brand.h"
 #include "Chrome.h"
+#include "DragLog.h"
 #include "Shortcuts.h"
 #include "Window.h"
 
@@ -18,6 +19,10 @@ const double kMinUpp = 0.004;   // very close
 const double kMaxUpp = 1.0;     // very far
 const double kZoomTime = 0.14;  // seconds, as the wx app's eased zoom
 const UINT_PTR kTagTimer = 1;   // the pointer has rested on a wire
+
+// The WM_MOUSEMOVE being handled, for the drag log.
+LPARAM gMoveLp = 0;
+bool gMoveHasLp = false;
 
 double clampUpp(double u) { return std::min(std::max(u, kMinUpp), kMaxUpp); }
 
@@ -98,6 +103,31 @@ void Canvas::redraw() {
 	win->redrawMiniMap();
 }
 
+// Windows sends WM_PAINT only once no input is waiting. A mouse sending
+// 500-1000 moves a second keeps input waiting for as long as it moves, so a
+// drag that only invalidated got its frames late and irregularly: the part
+// stood still, then jumped to the pointer (windows/DRAG-DIAGNOSIS.md). Here
+// a frame is drawn as soon as the display could show a new one, with
+// wherever the pointer is then; moves in between only update the engine.
+// The minimap, which shows nothing new until the drop, waits for it.
+void Canvas::redrawWhileMoving() {
+	InvalidateRect(hwnd, nullptr, FALSE);
+	if (draglog::legacy()) { win->redrawMiniMap(); return; }
+	paceFrame();
+}
+
+void Canvas::paceFrame() {
+	if (draglog::legacy()) return;
+	if (nowSeconds() - lastPaintAt >= frameSeconds * 0.9) UpdateWindow(hwnd);
+}
+
+void Canvas::noteFrameRate() {
+	HDC dc = GetDC(hwnd);
+	const int hz = dc ? GetDeviceCaps(dc, VREFRESH) : 0;   // 0 or 1: the hardware's default
+	if (dc) ReleaseDC(hwnd, dc);
+	frameSeconds = 1.0 / (hz >= 30 && hz <= 500 ? hz : 60);
+}
+
 void Canvas::show(bool visible) {
 	ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
 	if (!visible) dropBuffers();
@@ -161,11 +191,19 @@ void Canvas::setCursor(LPCWSTR which) {
 void Canvas::paint() {
 	PAINTSTRUCT ps;
 	BeginPaint(hwnd, &ps);
+	const double t0 = nowSeconds();
+	lastPaintAt = t0;
+	double t1 = t0;
 	if (ID2D1HwndRenderTarget* rt = surface.begin(hwnd)) {
 		drawInto(rt, surface.scale());
+		t1 = nowSeconds();
 		surface.end();
 	}
 	EndPaint(hwnd, &ps);
+	if (draglog::on() && (drag == Drag::Edit || win->isFloating())) {
+		const double t2 = nowSeconds();
+		draglog::paint(draglog::View{ hwnd, win->document(), page(), originX, originY, upp }, (t1 - t0) * 1000, (t2 - t1) * 1000);
+	}
 }
 
 void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
@@ -722,6 +760,8 @@ void Canvas::panTo(double wx, double wy) {
 
 void Canvas::onSize(double w, double h) {
 	// Keep the middle of the view where it was as the window resizes.
+	if (draglog::on() && (drag != Drag::None || win->isFloating()) && (w != lastW || h != lastH))
+		draglog::note(strf("WM_SIZE mid-drag: the canvas went from %.1fx%.1f to %.1fx%.1f points; the view shifts by half that", lastW, lastH, w, h));
 	if (lastW > 1 && lastH > 1 && !needsFit && w > 1 && h > 1) {
 		originX -= (w - lastW) / 2.0 * upp;
 		originY += (h - lastH) / 2.0 * upp;
@@ -765,7 +805,10 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 			TrackMouseEvent(&t);
 		}
 		viewPoint(lp, vx, vy);
+		gMoveLp = lp;   // for the drag log
+		gMoveHasLp = true;
 		onMotion(vx, vy);
+		gMoveHasLp = false;
 		return 0;
 	case WM_MOUSELEAVE:
 		pointerInside = false;
@@ -790,7 +833,10 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_CAPTURECHANGED:
 		// Something took the pointer mid-drag (a menu, another window):
 		// finish the gesture where it is, so nothing is left half-done.
-		if ((HWND)lp != hwnd && drag != Drag::None) cancelDrag();
+		if ((HWND)lp != hwnd && drag != Drag::None) {
+			if (draglog::on()) draglog::note(strf("WM_CAPTURECHANGED: the pointer went to window %p mid-drag; the drag ends", (void*)lp));
+			cancelDrag();
+		}
 		return 0;
 	case WM_KILLFOCUS:
 		spaceDown = false;
@@ -901,6 +947,8 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 		}
 		cl_edit_press(doc, p, wx, wy, modifiersNow(), upp);
 		drag = Drag::Edit;
+		noteFrameRate();
+		if (draglog::on()) draglog::press(draglog::View{ hwnd, doc, p, originX, originY, upp }, vx, vy, wx, wy);
 		SetCapture(hwnd);
 		redraw();
 		win->selectionChanged();
@@ -912,6 +960,9 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 	if (win->isFloating()) return;
 	const Drag was = drag;
 	drag = Drag::None;
+	if (draglog::on())
+		draglog::note(strf("WM_LBUTTONDBLCLK at %.1f,%.1f: the press is taken as a double-click; the drag ends here (%s)", vx, vy,
+		                   cl_edit_single_gate(doc, p) >= 0 ? "gate settings open" : "zoom to fit, animated"));
 	if (was == Drag::Edit) cl_edit_release(doc, wx, wy);
 	if (GetCapture() == hwnd) ReleaseCapture();
 	setCursor(nullptr);
@@ -945,20 +996,33 @@ void Canvas::onMotion(double vx, double vy) {
 		break;
 	case Drag::Pan:
 		pan(dx, dy);
+		paceFrame();
 		break;
-	case Drag::Edit:
+	case Drag::Edit: {
+		const double t0 = draglog::on() ? nowSeconds() : 0;
 		cl_edit_drag(doc, wx, wy);
-		redraw();
+		if (draglog::on())
+			draglog::motion(draglog::View{ hwnd, doc, p, originX, originY, upp }, "edit", gMoveLp, gMoveHasLp, vx, vy, wx, wy,
+			                (nowSeconds() - t0) * 1000);
+		redrawWhileMoving();
 		break;
-	case Drag::None:
+	}
+	case Drag::None: {
 		if (win->hasPendingGate() && win->placePendingGate(wx, wy)) { redraw(); break; }
 		// Gates on the pointer float on their own side: the other one only
 		// watches them go by.
-		if (win->isFloating() && this != win->currentCanvas()) { hideWireTag(); break; }
+		const bool floating = win->isFloating();
+		if (floating && this != win->currentCanvas()) { hideWireTag(); break; }
 		// Simulation View lights the whole wire under the pointer.
-		if (win->simView() ? cl_edit_hover_wire(doc, p, wx, wy, upp) : cl_edit_hover(doc, p, wx, wy, upp)) redraw();
+		const double t0 = draglog::on() ? nowSeconds() : 0;
+		const bool changed = win->simView() ? cl_edit_hover_wire(doc, p, wx, wy, upp) : cl_edit_hover(doc, p, wx, wy, upp);
+		if (floating && draglog::on())
+			draglog::motion(draglog::View{ hwnd, doc, p, originX, originY, upp }, "float", gMoveLp, gMoveHasLp, vx, vy, wx, wy,
+			                (nowSeconds() - t0) * 1000);
+		if (changed) { if (floating) redrawWhileMoving(); else redraw(); }
 		updateWireTag();
 		break;
+	}
 	}
 }
 
@@ -974,6 +1038,7 @@ void Canvas::onRelease(int button, double vx, double vy) {
 		drag = Drag::None;
 		if (GetCapture() == hwnd) ReleaseCapture();
 		cl_edit_release(doc, wx, wy);
+		if (draglog::on()) draglog::release(draglog::View{ hwnd, doc, page(), originX, originY, upp }, wx, wy);
 		win->edited();
 	} else if (drag == Drag::Slider && button == 1) {
 		drag = Drag::None;

@@ -5,6 +5,7 @@
 #include "Chrome.h"
 #include "Drawn.h"
 #include "Collections.h"
+#include "DragLog.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -429,7 +430,15 @@ void GatePalette::dragTo() {
 		}
 	} else if (win->isFloating()) {
 		const int page = c->page();
-		if (page >= 0 && cl_edit_hover(win->document(), page, wx, wy, c->unitsPerPoint())) c->redraw();
+		const double t0 = draglog::on() ? nowSeconds() : 0;
+		const bool changed = page >= 0 && cl_edit_hover(win->document(), page, wx, wy, c->unitsPerPoint());
+		if (draglog::on() && page >= 0) {
+			double ox, oy;
+			c->origin(ox, oy);
+			draglog::motion(draglog::View{ c->widget(), win->document(), page, ox, oy, c->unitsPerPoint() }, "palette", 0, false, vx, vy, wx,
+			                wy, (nowSeconds() - t0) * 1000);
+		}
+		if (changed) c->redrawWhileMoving();
 	}
 }
 
@@ -451,6 +460,11 @@ void GatePalette::drop() {
 		c->worldPoint(vx, vy, wx, wy);
 		cl_edit_press(win->document(), page, wx, wy, 0, c->unitsPerPoint());
 		cl_edit_release(win->document(), wx, wy);
+		if (draglog::on()) {
+			double ox, oy;
+			c->origin(ox, oy);
+			draglog::release(draglog::View{ c->widget(), win->document(), page, ox, oy, c->unitsPerPoint() }, wx, wy);
+		}
 		win->edited();
 		c->focus();
 	} else {
