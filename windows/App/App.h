@@ -66,6 +66,7 @@ struct Prefs {
 	int toolbarHidden = 0;        // tool groups hidden, a bit each (ToolGroup, Toolbar.h)
 	bool showTitle = true;        // the circuit's name at the toolbar's left
 	bool showThemeToggle = false; // a dark mode switch in the toolbar
+	bool showStepClock = true;    // Step Clock in the toolbar and Simulation View's bar
 	bool openReplaces = false;    // opening a circuit replaces the one in the window
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)

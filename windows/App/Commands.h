@@ -31,6 +31,8 @@ enum Command {
 	CMD_EXPORT_REPORT,
 	// File > Share Link…
 	CMD_SHARE_LINK,
+	// Simulate > Step Clock: one full cycle of each clock set to "Only on Step Clock".
+	CMD_STEP_CLOCK,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

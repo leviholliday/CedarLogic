@@ -82,6 +82,7 @@ private:
 	float lastW = 0;
 	int laidStyle = -1;
 	std::string laidTitle;   // the name (and Minimal's page) it was laid out for
+	bool laidClock = false;  // whether the page had a Step Clock clock then (the button's tip says)
 
 	void build(int style, bool live);
 	void layout(float w, float h, int style, bool live = true);

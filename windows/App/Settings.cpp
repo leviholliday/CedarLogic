@@ -649,6 +649,11 @@ void showPreferencesDialog(HWND parent) {
 	FormField title = check("", "Circuit name", p.showTitle);
 	title.grid = 2;
 	on[f.add(title)] = [styles](Form& form, int i) { prefs().showTitle = form.checked(i); apply(); form.refresh(styles); };
+	FormField stepClock = check("", "Step Clock", p.showStepClock,
+	                            "Show Step Clock in the toolbar and the Simulation View bar. Clicking a clock set to "
+	                            "\u201COnly on Step Clock\u201D steps it too.");
+	stepClock.grid = 2;
+	on[f.add(stepClock)] = [styles](Form& form, int i) { prefs().showStepClock = form.checked(i); apply(); form.refresh(styles); };
 	FormField themeSwitch = check("", "Dark mode switch", p.showThemeToggle,
 	                              "Applies to every style. Hidden tools are still in the ••• menu and keep their shortcuts.");
 	themeSwitch.grid = 2;

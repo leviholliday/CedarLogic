@@ -462,17 +462,19 @@ void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
 	x += 70 + 14;
 	auto divider = [&] { fillRect(rt, D2D1::RectF(x, cy - 14, x + 1, cy + 14), D2D1::ColorF(1, 1, 1, 0.08f)); x += 1 + 14; };
 	divider();
-	auto button = [&](wchar_t glyph, bool lit, D2D1_COLOR_F color, int command) {
+	auto button = [&](wchar_t glyph, bool lit, D2D1_COLOR_F color, int command, bool enabled = true) {
 		const D2D1_RECT_F r = D2D1::RectF(x, cy - 16, x + 32, cy + 16);
-		const bool hot = hotHit == (int)hits.size();
+		const bool hot = enabled && hotHit == (int)hits.size();
 		fillRound(rt, r, 9, lit ? withAlpha(on, 0.18f) : D2D1::ColorF(1, 1, 1, hot ? 0.12f : 0.07f));
 		strokeRound(rt, r, 9, D2D1::ColorF(1, 1, 1, 0.08f));
-		drawIcon(rt, glyph, r, 13, color);
-		hits.push_back({ r, command });
+		drawIcon(rt, glyph, r, 13, enabled ? color : withAlpha(color, 0.3f));
+		if (enabled) hits.push_back({ r, command });
 		x += 32 + 8;
 	};
 	button(paused ? Icon::Play : Icon::Pause, paused, paused ? on : ink, CMD_RUNNING);
 	button(Icon::Step, false, ink, CMD_STEP);
+	// Step Clock beside Step, off until the page has a clock set to move only on it.
+	if (prefs().showStepClock) button(Icon::StepClock, false, ink, CMD_STEP_CLOCK, win->hasManualClock());
 	x += 6;
 	divider();
 	// Speed, fast on the right.
@@ -873,7 +875,7 @@ void Canvas::cancelDrag() {
 	if (was == Drag::Edit) {
 		double wx, wy;
 		worldPoint(lastX, lastY, wx, wy);
-		cl_edit_release(win->document(), wx, wy);
+		cl_edit_release_ex(win->document(), wx, wy, false);   // a gesture cut short: no clock steps
 		win->edited();
 	}
 	if (GetCapture() == hwnd) ReleaseCapture();
@@ -937,7 +939,7 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 		// keypads); anywhere else, a drag moves around.
 		if (win->simView() || win->locked()) {
 			if (cl_document_click(doc, p, wx, wy)) {
-				win->redraw();
+				win->advancedByHand();   // a switch, a keypad, or a clock set to "Only on Step Clock"
 			} else {
 				drag = Drag::Pan;
 				SetCapture(hwnd);
@@ -964,7 +966,7 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 	if (draglog::on())
 		draglog::note(strf("WM_LBUTTONDBLCLK at %.1f,%.1f: the press is taken as a double-click; the drag ends here (%s)", vx, vy,
 		                   cl_edit_single_gate(doc, p) >= 0 ? "gate settings open" : "zoom to fit, animated"));
-	if (was == Drag::Edit) cl_edit_release(doc, wx, wy);
+	if (was == Drag::Edit) cl_edit_release_ex(doc, wx, wy, false);   // the first click already stepped a clock
 	if (GetCapture() == hwnd) ReleaseCapture();
 	setCursor(nullptr);
 	if (win->simView() || win->locked()) return;
@@ -1038,9 +1040,11 @@ void Canvas::onRelease(int button, double vx, double vy) {
 		worldPoint(vx, vy, wx, wy);
 		drag = Drag::None;
 		if (GetCapture() == hwnd) ReleaseCapture();
-		cl_edit_release(doc, wx, wy);
+		// A click (no drag) on a clock set to "Only on Step Clock" steps it.
+		const bool stepped = cl_edit_release_ex(doc, wx, wy, true) == CL_CLICK_CLOCK_STEP;
 		if (draglog::on()) draglog::release(draglog::View{ hwnd, doc, page(), originX, originY, upp }, wx, wy);
 		win->edited();
+		if (stepped) win->advancedByHand();
 	} else if (drag == Drag::Slider && button == 1) {
 		drag = Drag::None;
 		if (GetCapture() == hwnd) ReleaseCapture();

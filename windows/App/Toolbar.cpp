@@ -23,7 +23,7 @@ bool groupShown(int g) { return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0
 }  // namespace
 
 const char* toolGroupName(int g) {
-	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Speed",
+	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
 	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback" };
 	return g >= 0 && g < TGCount ? names[g] : "";
 }
@@ -49,7 +49,9 @@ void Toolbar::build(int style, bool live) {
 		add(Button, CMD_COPY, TGClipboard, false); add(Button, CMD_PASTE, TGClipboard, false);
 		add(Button, CMD_ZOOM_OUT, TGZoom, false); add(Zoom, 0, TGZoom, false); add(Button, CMD_ZOOM_IN, TGZoom, false);
 		// The right-hand side, laid out from the right edge.
-		add(Button, CMD_RUNNING, TGSim, true); add(Button, CMD_STEP, TGSim, true); add(Speed, 0, TGSim, true);
+		add(Button, CMD_RUNNING, TGSim, true); add(Button, CMD_STEP, TGSim, true);
+		if (prefs().showStepClock) add(Button, CMD_STEP_CLOCK, TGSim, true);
+		add(Speed, 0, TGSim, true);
 		add(Button, CMD_SIM_VIEW, TGRun, true);
 		add(Button, CMD_LOCK, TGLock, true);
 		if (prefs().showThemeToggle) add(Button, CMD_DARK, TGTheme, true);
@@ -65,6 +67,7 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 	lastW = w;
 	laidStyle = style;
 	laidTitle = win->titleText() + (style == TSMinimal ? "\n" + win->pageName(win->currentPage()) : std::string());
+	laidClock = win->hasManualClock();
 	build(style, live);
 	const float by = std::floor((h - kButtonH) / 2);
 	// Room either side of a group (Classic's capsule; the others keep its spacing).
@@ -177,6 +180,7 @@ bool Toolbar::isEnabled(const Item& it) const {
 	if (it.kind != Button) return true;
 	switch (it.command) {
 	case CMD_UNDO: case CMD_REDO: return win->commandEnabled(it.command);
+	case CMD_STEP_CLOCK: return win->hasManualClock();   // off until the page has a clock set to move only on it
 	default: return true;
 	}
 }
@@ -201,6 +205,7 @@ wchar_t Toolbar::iconFor(const Item& it) const {
 	case CMD_ZOOM_IN: return Icon::ZoomIn;
 	case CMD_RUNNING: return win->running() ? Icon::Pause : Icon::Play;
 	case CMD_STEP: return Icon::Step;
+	case CMD_STEP_CLOCK: return Icon::StepClock;
 	case CMD_SIM_VIEW: return win->simView() ? Icon::StopSolid : Icon::Play;
 	case CMD_LOCK: return win->locked() ? Icon::Lock : Icon::Unlock;
 	case CMD_DARK: return prefs().dark ? kMoon : kSun;
@@ -233,6 +238,7 @@ std::string Toolbar::tipFor(const Item& it) const {
 	case CMD_ZOOM_IN: return "Zoom in" + keys;
 	case CMD_RUNNING: return "Pause or resume the simulation";
 	case CMD_STEP: return "Step once" + keys;
+	case CMD_STEP_CLOCK: return win->hasManualClock() ? "Step Clock" + keys : stepClockOffTip();
 	case CMD_SIM_VIEW: return "Simulation View" + keys;
 	case CMD_LOCK: return "Lock the circuit so it can't be edited";
 	case CMD_DARK: return "Dark mode" + keys;
@@ -263,7 +269,7 @@ int Toolbar::itemAt(float x, float y) const {
 void Toolbar::paint(ID2D1RenderTarget* rt, float w, float h) {
 	const int style = prefs().toolbarStyle;
 	const std::string title = win->titleText() + (style == TSMinimal ? "\n" + win->pageName(win->currentPage()) : std::string());
-	if (relayout || w != lastW || style != laidStyle || title != laidTitle) layout(w, h, style);
+	if (relayout || w != lastW || style != laidStyle || title != laidTitle || win->hasManualClock() != laidClock) layout(w, h, style);
 	draw(rt, w, h, style, true);
 }
 

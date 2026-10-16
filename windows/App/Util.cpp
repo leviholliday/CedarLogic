@@ -234,6 +234,7 @@ void Prefs::load() {
 	toolbarHidden = r.i("toolbarHidden", toolbarHidden, 0, 1 << 12);
 	showTitle = r.b("showTitle", showTitle);
 	showThemeToggle = r.b("showThemeToggle", showThemeToggle);
+	showStepClock = r.b("showStepClock", showStepClock);
 	openReplaces = r.b("openReplaces", openReplaces);
 	newTemplate = r.s("newTemplate", newTemplate);
 	shortcuts = r.s("shortcuts", shortcuts);
@@ -324,6 +325,7 @@ void Prefs::save() const {
 	o << "toolbarHidden=" << toolbarHidden << "\n";
 	o << "showTitle=" << b(showTitle) << "\n";
 	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
+	o << "showStepClock=" << b(showStepClock) << "\n";
 	o << "openReplaces=" << b(openReplaces) << "\n";
 	o << "newTemplate=" << newTemplate << "\n";
 	o << "shortcuts=" << shortcuts << "\n";

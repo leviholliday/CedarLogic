@@ -318,6 +318,7 @@ void CircuitWindow::buildMenus() {
 	HMENU sim = submenu(menuBar, "&Simulate");
 	item(sim, CMD_RUNNING, "&Running");
 	item(sim, CMD_STEP, "&Step Once\tCtrl+Shift+R");
+	item(sim, CMD_STEP_CLOCK, "Step &Clock\tK");
 	item(sim, CMD_SIM_VIEW, "Simulation &View\tCtrl+R");
 	item(sim, CMD_LOCK, "&Lock the Circuit");
 	separator(sim);
@@ -1860,6 +1861,7 @@ void CircuitWindow::run(int command) {
 		break;
 	case CMD_RUNNING: toggleRunning(); break;
 	case CMD_STEP: stepOnce(); break;
+	case CMD_STEP_CLOCK: stepClock(); break;
 	case CMD_SIM_VIEW: toggleSimView(); break;
 	case CMD_LOCK: toggleLock(); break;
 	case CMD_TRUTH_TABLE: makeTruthTable(); break;
@@ -2481,6 +2483,21 @@ void CircuitWindow::stepOnce() {
 	// Stepping a running circuit means little: pause first.
 	if (isRunning) setRunning(false);
 	cl_document_step(doc);
+	redraw();
+	if (scope) scope->update();
+}
+
+bool CircuitWindow::hasManualClock() const { return cl_document_manual_clock_count(doc, currentPage()) > 0; }
+
+void CircuitWindow::stepClock() {
+	if (!cl_document_clock_step(doc, currentPage())) {
+		note("No clock here moves on Step Clock. Double-click a clock and turn on \u201COnly on Step Clock\u201D.");
+		return;
+	}
+	advancedByHand();
+}
+
+void CircuitWindow::advancedByHand() {
 	redraw();
 	if (scope) scope->update();
 }

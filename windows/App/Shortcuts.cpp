@@ -168,6 +168,7 @@ const std::vector<Action>& all() {
 		{ "palette", "Moving around", "Show or hide the side panel", CMD_PALETTE, false, "" },
 		{ "simView", "Simulation", "Simulation view", CMD_SIM_VIEW, false, "Ctrl+R" },
 		{ "step", "Simulation", "Step once", CMD_STEP, false, "Ctrl+Shift+R" },
+		{ "stepClock", "Simulation", "Step Clock: one full cycle of each manual clock", CMD_STEP_CLOCK, true, "K" },
 		{ "truthTable", "Simulation", "Truth table", CMD_TRUTH_TABLE, true, "T" },
 		{ "checkCircuit", "Simulation", "Check my circuit against a formula or table", CMD_CHECK_CIRCUIT, true, "Shift+T" },
 		{ "scope", "Simulation", "Oscilloscope", CMD_SCOPE, false, "Ctrl+G" },

@@ -66,6 +66,7 @@ const int kSyncPage = 5;
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
 bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
+std::string gRun;       // --run a,b,...: those commands, by their Shortcuts id (stepClock, lockInPlace), before the picture
 // --drag-selftest [log]: a gate dragged with real input, PASS or FAIL
 // (DragLog.h); --drag-log <file>: every drag measured into the file.
 bool gDragSelfTest = false;
@@ -756,6 +757,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
 		if (a == "--wire-tag") { gWireTag = true; continue; }
+		if (a == "--run" && i + 1 < argc) { gRun = U(argv[++i]); continue; }
 		if (a == "--toolbar-style" && i + 1 < argc) {
 			const std::string v = U(argv[++i]);
 			gToolbarStyle = v == "classic" ? TSClassic : v == "minimal" ? TSMinimal : TSSeamless;
@@ -884,6 +886,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			cl_edit_select_gate(w->document(), found.page, found.gate);
 		}
 	}
+	if (!gRun.empty() && !circuitWindows().empty())
+		for (size_t at = 0; at <= gRun.size();) {
+			const size_t comma = std::min(gRun.find(',', at), gRun.size());
+			if (const shortcuts::Action* act = shortcuts::find(gRun.substr(at, comma - at))) circuitWindows().back()->run(act->command);
+			at = comma + 1;
+		}
 	if (!gNote.empty() && !circuitWindows().empty()) circuitWindows().back()->note(gNote);
 	if (gDialog == CMD_PREFERENCES) setPreferencesPage(gSyncDialog.empty() || gPage > 0 ? gPage : kSyncPage);
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);

@@ -26,6 +26,9 @@ class TabSwitcher;
 class TabStrip;
 class Toolbar;
 
+// Step Clock's button, off because the page has no clock set to move only on it.
+inline const char* stepClockOffTip() { return "Step Clock: first turn on \u201COnly on Step Clock\u201D in a clock's settings"; }
+
 class CircuitWindow {
 public:
 	CircuitWindow(CLDocument* doc, const std::string& path);
@@ -144,6 +147,14 @@ public:
 	void setRunning(bool run);
 	void toggleRunning() { setRunning(!isRunning); }
 	void stepOnce();
+	// Step Clock: each clock on the page set to "Only on Step Clock" makes one
+	// full cycle (up, settle, down, settle); running or paused, it stays so.
+	void stepClock();
+	// Whether the page has such a clock (the toolbar's button is off without).
+	bool hasManualClock() const;
+	// A click moved the circuit on (a switch flipped, a clock stepped): show
+	// it, and the oscilloscope.
+	void advancedByHand();
 	void setStepMs(int ms);
 	void toggleSimView();
 	void toggleLock();
