@@ -21,6 +21,8 @@
 //   CL_FUZZ_ODD=1       out-of-range settings and two-line text too
 //   CL_FUZZ_REOPEN=k    every k ops: the save reopens with no notices and saves the same
 //   CL_FUZZ_UNDOALL=k   every k ops and at the end: undo all, redo all, same circuit
+//   CL_FUZZ_UNDOSTEP=1  each op that adds one undo step: Undo gives back the
+//                       circuit before it, Redo the one after
 //   CL_FUZZ_CHAIN=1     each seed starts from the circuit the previous one saved
 //   CL_FUZZ_SAYSEED=1   print each seed as it starts (to find the one that crashed)
 #include "DocumentImpl.h"
@@ -597,6 +599,19 @@ static bool sameWords(const std::string& a, const std::string& b) {
 	}
 	return true;
 }
+// The first place sameWords finds a real difference, with the words around it.
+static std::string firstWordDiff(const std::string& a, const std::string& b) {
+	std::vector<std::string> x = words(a), y = words(b);
+	size_t i = 0;
+	for (; i < x.size() && i < y.size(); i++) {
+		if (x[i] == y[i]) continue;
+		char *ea, *eb;
+		const double u = strtod(x[i].c_str(), &ea), v = strtod(y[i].c_str(), &eb);
+		if (*ea || *eb || ea == x[i].c_str() || eb == y[i].c_str() || std::fabs(u - v) > 1e-3) break;
+	}
+	auto around = [&](const std::vector<std::string>& w) { std::string r; for (size_t k = i > 6 ? i - 6 : 0; k < std::min(w.size(), i + 8); k++) r += (k == i ? ">>" : "") + w[k] + " "; return r; };
+	return "word " + std::to_string(i) + ": \"" + around(x) + "\" vs \"" + around(y) + "\"";
+}
 static std::string wiresAsSets(const std::string& text) {
 	std::vector<std::string> lines; { std::string l; for (char c : text) { if (c == '\n') { lines.push_back(l); l.clear(); } else l += c; } lines.push_back(l); }
 	auto trim = [](const std::string& l) { size_t a = l.find_first_not_of(" \t"); return a == std::string::npos ? std::string() : l.substr(a); };
@@ -651,6 +666,27 @@ static std::string withoutClickState(const std::string& text) {
 	}
 	return out;
 }
+// The circuit without wire geometry: every line but a wire's segments, and
+// for each wire the sorted pins it connects.
+static std::string netlist(const std::string& text) {
+	std::string out, line;
+	std::vector<std::string> pins;
+	bool inWire = false;
+	auto flushWire = [&] { std::sort(pins.begin(), pins.end()); for (auto& p : pins) out += "  pin " + p + "\n"; pins.clear(); };
+	for (size_t i = 0; i <= text.size(); i++) {
+		if (i < text.size() && text[i] != '\n') { line += text[i]; continue; }
+		size_t a = line.find_first_not_of(" \t");
+		std::string t = a == std::string::npos ? std::string() : line.substr(a);
+		while (!t.empty() && t.back() == ')') t.pop_back();
+		if (t.compare(0, 5, "(wire") == 0 || t.compare(0, 5, "(gate") == 0 || t.compare(0, 5, "(page") == 0) { flushWire(); inWire = t.compare(0, 5, "(wire") == 0; out += t + "\n"; }
+		else if (inWire && t.compare(0, 9, "(connect ") == 0) pins.push_back(t);
+		else if (inWire && (t.compare(0, 5, "(seg ") == 0 || t.compare(0, 5, "(pts ") == 0 || t.compare(0, 7, "(cross ") == 0)) {}
+		else out += t + "\n";
+		line.clear();
+	}
+	flushWire();
+	return out;
+}
 static std::string semantic(const std::string& text) { return wiresAsSets(withoutClickState(text)); }
 static bool sameCircuit(const std::string& a, const std::string& b) {
 	if (a == b) return true;
@@ -670,7 +706,11 @@ static bool undoAllCheck(CLDocument* doc, std::string& what) {
 	std::string b = canonical(cl_document_save_text(doc));
 	if (redone != undone) { what = "undid " + std::to_string(undone) + " steps but could redo only " + std::to_string(redone); return false; }
 	if (!sameCircuit(a, b)) {
-		what = "undo all (" + std::to_string(undone) + ") then redo all changed the circuit at " + firstDiff(semantic(a), semantic(b));
+		// Which kind: the parts, settings and what each wire connects (a lost or
+		// added connection, a part in the wrong place), or only the wires' routes.
+		const bool shapeOnly = sameWords(netlist(withoutClickState(a)), netlist(withoutClickState(b)));
+		what = "undo all (" + std::to_string(undone) + ") then redo all changed " + (shapeOnly ? "only wire shapes" : "the circuit") + " at " +
+			(shapeOnly ? firstWordDiff(semantic(a), semantic(b)) : firstWordDiff(netlist(withoutClickState(a)), netlist(withoutClickState(b))));
 		if (const char* dir = getenv("CL_FUZZ_DUMP")) {
 			for (int w = 0; w < 2; w++) {
 				std::string path = std::string(dir) + (w ? "/undoall-b.cdl" : "/undoall-a.cdl");
@@ -695,6 +735,7 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 	if (!doc) { printf("seed %llu: could not open: %s\n", seed, startFile ? err : "new"); return false; }
 	const bool wide = getenv("CL_FUZZ_WIDE") != nullptr;
 	const int reopenEvery = envInt("CL_FUZZ_REOPEN"), undoAllEvery = envInt("CL_FUZZ_UNDOALL");
+	const bool undoStep = getenv("CL_FUZZ_UNDOSTEP") != nullptr;
 	// CL_FUZZ_SIM=1: half the seeds run the simulation the whole session.
 	simFrames = getenv("CL_FUZZ_SIM") && (seed % 2 == 1);
 	if (simFrames) cl_document_set_running(doc, true);
@@ -704,6 +745,16 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 		int page = ri(pages);
 		const int op = ri(wide ? 46 : 24);
 		if (getenv("CL_FUZZ_TRACE")) printf("  op %d: case %d (page %d of %d)%s\n", n, op, page, pages, cl_edit_is_floating(doc) ? " floating" : "");
+		// CL_FUZZ_UNDOSTEP=1: an operation that adds one undo step is undone and
+		// redone at once: Undo must give back the circuit before it, Redo after it.
+		const bool stepCheck = undoStep && idle(doc);
+		CLDocument* const before = doc;
+		std::string pre;
+		const int preSteps = stepCheck ? cl_edit_undo_count(doc) : 0;
+		if (stepCheck) pre = canonical(cl_document_save_text(doc));
+		// Pages added, moved or renamed aren't undo steps: an op that did that too is not checked.
+		auto pageKey = [](CLDocument* d) { std::string k; for (int i = 0; i < cl_document_page_count(d); i++) k += std::to_string(cl_document_page_id(d, i)) + ":" + cl_document_page_name(d, i) + ";"; return k; };
+		const std::string prePages = stepCheck ? pageKey(doc) : std::string();
 		if (op >= 24) wideOp(doc, op - 24, page, pages);
 		else switch (op) {
 		case 0: case 1: case 2: case 3:
@@ -748,6 +799,31 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 		case 23: cl_document_click(doc, page, rf(-30, 30), rf(-30, 30)); break;
 		}
 		watchPrint(doc, "after op");
+		if (stepCheck && doc == before && idle(doc) && cl_edit_undo_count(doc) == preSteps + 1 && !cl_edit_can_redo(doc) && pageKey(doc) == prePages) {
+			const std::string name = cl_edit_undo_name(doc);
+			const std::string post = canonical(cl_document_save_text(doc));
+			cl_edit_undo(doc);
+			const std::string undone = canonical(cl_document_save_text(doc));
+			cl_edit_redo(doc);
+			const std::string redone = canonical(cl_document_save_text(doc));
+			for (int w = 0; w < 2; w++) {
+				const std::string& want = w ? post : pre;
+				const std::string& got = w ? redone : undone;
+				if (sameCircuit(want, got)) continue;
+				const bool shapeOnly = sameWords(netlist(withoutClickState(want)), netlist(withoutClickState(got)));
+				printf("seed %llu: after op %d (case %d): %s of \"%s\" changed %s at %s\n", seed, n, op, w ? "Redo" : "Undo", name.c_str(),
+					shapeOnly ? "only wire shapes" : "the circuit",
+					(shapeOnly ? firstWordDiff(semantic(want), semantic(got)) : firstWordDiff(netlist(withoutClickState(want)), netlist(withoutClickState(got)))).c_str());
+				if (const char* dir = getenv("CL_FUZZ_DUMP")) {
+					for (int k = 0; k < 2; k++) {
+						std::string path = std::string(dir) + (k ? "/step-got.cdl" : "/step-want.cdl");
+						if (FILE* f = fopen(path.c_str(), "w")) { const std::string& t = k ? got : want; fwrite(t.data(), 1, t.size(), f); fclose(f); }
+					}
+				}
+				cl_document_close(doc);
+				return false;
+			}
+		}
 		if (simFrames) for (int i = 0, k = 1 + ri(3); i < k; i++) cl_document_tick(doc, 16.7);
 		{ std::string what; if (getenv("CL_FUZZ_INVARIANT") && danglingConnection(doc, what)) { printf("seed %llu: after op %d (case %d): %s\n", seed, n, op, what.c_str()); cl_document_close(doc); return false; } }
 		if (reopenEvery > 0 && (n + 1) % reopenEvery == 0 && idle(doc)) {
