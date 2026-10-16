@@ -173,6 +173,17 @@ jobs:
           chmod 700 "$SYNCHOME/CedarLogic/Sync"
           linux/build/sync_check --new-code > "$SYNCHOME/CedarLogic/Sync/secret"
           chmod 600 "$SYNCHOME/CedarLogic/Sync/secret"
+          # A second "device" with the same code syncs first (its own folder, settings and name, and
+          # the student's name), so the picture lists it with Remove and the name comes across.
+          SECOND=$(mktemp -d)
+          mkdir -p "$SECOND/data/CedarLogic/Sync" "$SECOND/config/CedarLogic"
+          chmod 700 "$SECOND/data/CedarLogic/Sync"
+          cp "$SYNCHOME/CedarLogic/Sync/secret" "$SECOND/data/CedarLogic/Sync/secret"
+          printf '[CedarLogic]\nstudentName=Robin Lab\nhasSeenWelcome=true\n' > "$SECOND/config/CedarLogic/native.ini"
+          XDG_DATA_HOME="$SECOND/data" XDG_CONFIG_HOME="$SECOND/config" CL_SYNC_DEVICE_NAME="Lab PC" CL_SYNC_URL="$SYNCURL" \
+            xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 "$APPIMAGE" --hold 8 --screenshot renders/sync-second-device.png \
+            res/samples/practice.cdl || echo "no second device"
+          rm -rf "$SECOND"
           XDG_DATA_HOME="$SYNCHOME" CL_SYNC_URL="$SYNCURL" xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --show sync --screenshot renders/show-sync-on.png res/samples/practice.cdl || echo "no sync-on picture"
           kill $MOCK

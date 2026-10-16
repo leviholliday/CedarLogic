@@ -45,6 +45,59 @@ void fire(bool library) {
 	}
 }
 
+// ---- The name across devices (SYNC.md 2.5.2) ----
+// prefs().studentName (Export's name-and-result strip, the lab report, the
+// welcome's "your name") rides in the "profile" side record, as on the Mac.
+// A change here is sent a couple of seconds after it's made; another
+// device's newer name fills it in here. An empty name is never sent and
+// never fills one in.
+bool gNameReconciled = false;
+std::string gNameSeen;   // the name as last sent or filled in
+
+std::string trimmedName(const std::string& s) {
+	const size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
+	return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+}
+
+bool syncedName(std::string& out) {
+	if (!gEngine || !gEngine->enabled()) return false;
+	int64_t at = 0;
+	return gEngine->profileName(out, at);
+}
+
+void sendName(const std::string& raw) {
+	if (!gEngine || !gEngine->enabled()) return;
+	const std::string n = trimmedName(raw);
+	std::string synced;
+	if (n.empty() || (syncedName(synced) && synced == n)) return;
+	gEngine->setProfileName(n);
+}
+
+void applyName(const std::string& n) {
+	gNameSeen = prefs().studentName;
+	if (n.empty() || n == trimmedName(prefs().studentName)) return;
+	prefs().studentName = n;
+	prefs().save();
+	gNameSeen = n;
+}
+
+void reconcileName() {
+	std::string n;
+	if (syncedName(n) && !n.empty()) applyName(n);
+	else sendName(prefs().studentName);
+	gNameSeen = prefs().studentName;
+}
+
+// Every couple of seconds: the name changed here (Settings, Export, the
+// welcome...) goes to the other devices.
+gboolean watchNameCb(gpointer) {
+	if (prefs().studentName != gNameSeen) {
+		gNameSeen = prefs().studentName;
+		guarded("sync", [] { sendName(prefs().studentName); });
+	}
+	return G_SOURCE_CONTINUE;
+}
+
 CircuitWindow* frontWindow() {
 	for (CircuitWindow* w : circuitWindows())
 		if (gtk_window_is_active(w->window())) return w;
@@ -158,7 +211,28 @@ public:
 		fire(true);
 	}
 
-	void statusChanged(const clsync::Status&) override { fire(false); }
+	// The name is read a moment later, not inside the engine's call (it waits
+	// for this one to return), as the Mac's main-queue hop does.
+	void statusChanged(const clsync::Status& s) override {
+		if (!gEngine || !gEngine->enabled()) gNameReconciled = false;
+		else if (s.kind == clsync::Status::Synced && !gNameReconciled) {
+			gNameReconciled = true;
+			g_idle_add([](gpointer) -> gboolean { guarded("sync", [] { reconcileName(); }); return G_SOURCE_REMOVE; }, nullptr);
+		}
+		fire(false);
+	}
+
+	// A pull changed the side records: the name from another device.
+	void sideChanged() override {
+		g_idle_add([](gpointer) -> gboolean {
+			guarded("sync", [] {
+				std::string n;
+				if (syncedName(n)) applyName(n);
+			});
+			return G_SOURCE_REMOVE;
+		}, nullptr);
+		fire(false);
+	}
 
 	void notice(const std::string& text) override {
 		gNotice = text;
@@ -240,6 +314,8 @@ void start(GtkApplication*) {
 	gHost = new AppHost();
 	gEngine = new clsync::Engine(c, syncplatform::crypto(), *gHost);
 	g_timeout_add(500, activeCb, nullptr);
+	gNameSeen = prefs().studentName;
+	g_timeout_add_seconds(2, watchNameCb, nullptr);
 }
 
 void begin() {

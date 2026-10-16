@@ -339,7 +339,9 @@ std::string clientName() { return std::string("linux/") + CL_VERSION + "+" + std
 std::string defaultDeviceName() {
 	std::string name;
 	std::string info;
-	if (readAll("/etc/machine-info", info, 1 << 16)) {
+	// CL_SYNC_DEVICE_NAME: another name, for a second "device" on one machine (CI's device list).
+	if (const char* forced = g_getenv("CL_SYNC_DEVICE_NAME")) name = forced;
+	if (name.empty() && readAll("/etc/machine-info", info, 1 << 16)) {
 		size_t at = 0;
 		while (at < info.size()) {
 			size_t end = info.find('\n', at);

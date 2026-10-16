@@ -775,25 +775,67 @@ void startOver() {
 struct Page {
 	GtkWidget* box = nullptr;
 	GtkWidget* statusLabel = nullptr;
-	GtkWidget* devicesLabel = nullptr;
+	GtkWidget* devicesLabel = nullptr;   // the list: a row per device, Remove on the others
+	std::string devicesShown;            // what it shows, to rebuild only when that changes
 	std::string key;
 	guint listener = 0, timer = 0;
 };
 Page* gPage = nullptr;
 
-std::string devicesText(clsync::Engine* e) {
+// The devices: this computer, then the others, each with when it last synced
+// and Remove (SYNC.md 5.1), as the Mac's list.
+struct DeviceLine { std::string text, rid, name; };
+
+std::vector<DeviceLine> deviceLines(clsync::Engine* e) {
 	const std::string own = e->deviceName();
-	std::string out = own + " (this computer)";
+	std::vector<DeviceLine> out = { { own + " (this computer)", "", own } };
 	bool skipped = false;
-	for (const auto& d : e->devices()) {
-		if (!skipped && d.first == own) {   // this computer's own record
+	for (const clsync::DeviceInfo& d : e->deviceInfos()) {
+		if (!skipped && d.name == own) {   // this computer's own record
 			skipped = true;
 			continue;
 		}
-		out += "\n" + d.first;
-		if (d.second > 0) out += ", synced " + library::agoText(d.second / 1000.0);
+		std::string t = d.name;
+		if (d.lastSyncAt > 0) t += ", synced " + library::agoText(d.lastSyncAt / 1000.0);
+		out.push_back({ t, d.rid, d.name });
 	}
 	return out;
+}
+
+std::string devicesText(clsync::Engine* e) {
+	std::string out;
+	for (const DeviceLine& d : deviceLines(e)) out += (out.empty() ? "" : "\n") + d.text + (d.rid.empty() ? "" : "\t" + d.rid);
+	return out;
+}
+
+void removeDevice(const std::string& rid, const std::string& name);
+
+void fillDevices(Page* p, clsync::Engine* e) {
+	if (!p->devicesLabel) return;
+	const std::string now = devicesText(e);
+	if (now == p->devicesShown) return;
+	p->devicesShown = now;
+	GList* kids = gtk_container_get_children(GTK_CONTAINER(p->devicesLabel));
+	for (GList* k = kids; k; k = k->next) gtk_widget_destroy(GTK_WIDGET(k->data));
+	g_list_free(kids);
+	for (const DeviceLine& d : deviceLines(e)) {
+		GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+		GtkWidget* label = gtk_label_new(d.text.c_str());
+		gtk_label_set_xalign(GTK_LABEL(label), 0);
+		gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+		gtk_label_set_selectable(GTK_LABEL(label), TRUE);
+		if (!d.rid.empty()) gtk_style_context_add_class(gtk_widget_get_style_context(label), "dim-label");
+		gtk_box_pack_start(GTK_BOX(row), label, FALSE, FALSE, 0);
+		if (!d.rid.empty()) {
+			const std::string rid = d.rid, name = d.name;
+			GtkWidget* remove = makeButton("Remove", [rid, name] { removeDevice(rid, name); });
+			gtk_widget_set_name(remove, "sync-remove");
+			gtk_widget_set_tooltip_text(remove, ("Take \u201C" + name + "\u201D off the list on all your devices").c_str());
+			gtk_box_pack_start(GTK_BOX(row), remove, FALSE, FALSE, 0);
+		}
+		gtk_box_pack_start(GTK_BOX(p->devicesLabel), row, FALSE, FALSE, 0);
+	}
+	gtk_widget_show_all(p->devicesLabel);
 }
 
 std::string pageKey() {
@@ -816,7 +858,7 @@ void updateLabels(Page* p) {
 	clsync::Engine* e = syncapp::engine();
 	if (!e || !e->enabled()) return;
 	if (p->statusLabel) gtk_label_set_text(GTK_LABEL(p->statusLabel), statusLine(e->status()).c_str());
-	if (p->devicesLabel) gtk_label_set_text(GTK_LABEL(p->devicesLabel), devicesText(e).c_str());
+	fillDevices(p, e);
 }
 
 // One setting: its name on the left, the control and a line of help on the right.
@@ -901,6 +943,21 @@ void buildOff(Page* p, const clsync::Status& st) {
 	gtk_box_pack_start(GTK_BOX(p->box), box, FALSE, FALSE, 0);
 }
 
+// Remove: off the list on every device, after asking (the Mac's words).
+void removeDevice(const std::string& rid, const std::string& name) {
+	clsync::Engine* e = syncapp::engine();
+	if (!e) return;
+	GtkWindow* parent = settings::window() ? GTK_WINDOW(settings::window()) : nullptr;
+	if (!askConfirm(parent, "Remove \u201C" + name + "\u201D from your devices?",
+	                "It comes off this list on all your devices. It isn\u2019t locked out: your devices share one sync code, so if it still has "
+	                "the code it keeps syncing and shows up here again.\n\nTo lock out a lost or stolen device, use Start Over with a New Code, "
+	                "then link your other devices with the new code.",
+	                "Remove", "Cancel", true))
+		return;
+	e->removeDevice(rid);
+	if (gPage) fillDevices(gPage, e);
+}
+
 void buildOn(Page* p, clsync::Engine* e) {
 	GtkWidget* outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	Form f;
@@ -934,11 +991,12 @@ void buildOn(Page* p, clsync::Engine* e) {
 	}), new Commit(commit), +[](gpointer p, GClosure*) { delete static_cast<Commit*>(p); }, (GConnectFlags)0);
 	f.add("This computer's name", name, "Shown on your other devices when a circuit comes from here.");
 	// The devices.
-	p->devicesLabel = gtk_label_new(devicesText(e).c_str());
-	gtk_label_set_xalign(GTK_LABEL(p->devicesLabel), 0);
-	gtk_label_set_line_wrap(GTK_LABEL(p->devicesLabel), TRUE);
-	gtk_label_set_selectable(GTK_LABEL(p->devicesLabel), TRUE);
-	f.add("Devices", p->devicesLabel, "Don't recognise one? Start over with a new code.");
+	p->devicesLabel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	p->devicesShown.clear();
+	fillDevices(p, e);
+	f.add("Devices", p->devicesLabel,
+	      "Remove takes an old device off the list. Your devices share one code, so a device that still has it keeps access: to lock out a "
+	      "lost one, start over with a new code.");
 	// The code, hidden.
 	GtkWidget* code = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
 	const std::string grouped = clsync::groupCode(e->code());
@@ -1141,6 +1199,18 @@ void showForScreenshot(CircuitWindow* from, const std::string& what, int page) {
 		runCard(from ? from->window() : nullptr, c);
 	} else {
 		settings::show(from, SyncPage);
+		// What the page lists, for the log (CI syncs a second "device" first).
+		g_timeout_add(1700, [](gpointer) -> gboolean {
+			if (clsync::Engine* e = syncapp::engine()) {
+				for (const DeviceLine& d : deviceLines(e))
+					fprintf(stderr, "sync devices: %s%s\n", d.text.c_str(), d.rid.empty() ? "" : " [Remove]");
+				std::string name;
+				int64_t at = 0;
+				const bool has = e->enabled() && e->profileName(name, at);
+				fprintf(stderr, "sync name: %s; here: %s\n", has ? ("\"" + name + "\"").c_str() : "none synced", prefs().studentName.c_str());
+			}
+			return G_SOURCE_REMOVE;
+		}, nullptr);
 	}
 }
 
