@@ -1,0 +1,28 @@
+builtin-lab	Built In	Lab Page	A title, your name, the date and the course, with room for inputs and outputs	
+builtin-counter	Built In	4-Bit Counter	A clock driving a counting register, shown on a hex display	
+builtin-7seg	Built In	7-Segment Decoder Starter	Four switches and seven segment lights: build the decoder between them	
+builtin-ff-d	Flip-Flops and Latches	D Flip-Flop	Q takes D on each rising clock edge; PRE' and CLR' act at once. Page 2: built from NAND gates	running,pulse
+builtin-ff-d-nt	Flip-Flops and Latches	D Flip-Flop, Falling Edge	The same, triggered as the clock falls from 1 to 0	running,pulse
+builtin-ff-d-ce	Flip-Flops and Latches	D Flip-Flop with Clock Enable	Q takes D on a rising edge only while CE is 1	running,pulse
+builtin-ff-jk	Flip-Flops and Latches	J-K Flip-Flop	Each rising edge: J sets, K resets, both toggle, neither holds. Page 2: master-slave from NANDs	running,pulse
+builtin-ff-jk-nt	Flip-Flops and Latches	J-K Flip-Flop, Falling Edge	The same, triggered as the clock falls from 1 to 0	running,pulse
+builtin-ff-t	Flip-Flops and Latches	T Flip-Flop	A J-K with J and K tied: while T is 1, Q flips each rising edge. Page 2: a D flip-flop and an XOR	running,pulse
+builtin-ff-sr	Flip-Flops and Latches	SR Latch	Two NOR gates holding one bit: S sets it, R resets it, no clock	
+builtin-ff-gated-d	Flip-Flops and Latches	Gated D Latch	Four NAND gates and an inverter: Q follows D while EN is 1 and holds when it's 0	
+builtin-ff-sr-enable	Flip-Flops and Latches	SR Latch with Enable	The NAND latch with two more NANDs: S and R act only while EN is 1	
+builtin-ff-edge	Flip-Flops and Latches	Edge Detector	A D flip-flop and an AND gate: Edge lights when X has just gone from 0 to 1	
+builtin-reg-register	Registers	4-Bit Register (Load and Hold)	Load on: each clock stores D3-D0; off, it holds. Page 2: four D flip-flops with clock enable	running,pulse
+builtin-reg-shift	Registers	4-Bit Shift Register	Shift on: each clock moves the bits left or right, Serial In coming in. Shift off holds; Load and Clear too	running,pulse
+builtin-reg-sipo	Registers	Serial-In, Parallel-Out	Four D flip-flops in a chain: each clock moves every bit one along	running,pulse
+builtin-reg-ring	Registers	Ring Counter	A shift register whose last bit comes back to the start: load a 1 and it goes round	running,pulse
+builtin-reg-johnson	Registers	Johnson Counter	Four flip-flops with Q3' fed back: 0001, 0011, 0111, 1111, 1110, 1100, 1000, 0000	running,pulse
+builtin-comb-adder-4bit	Combinational	4-Bit Adder	Adds two 4-bit numbers and a carry. Page 2: four 1-bit full adders, carry to carry	
+builtin-comb-decoder-2to4	Combinational	2-to-4 Decoder	Two inputs pick one of four outputs while EN is 1. Page 2: two inverters and four ANDs	
+builtin-comb-mux-4to1	Combinational	4-to-1 Multiplexer	S1 and S0 choose which of four inputs reaches Y. Page 2: AND gates and an OR	
+builtin-comb-comparator-2bit	Combinational	2-Bit Comparator	Is A bigger, equal or smaller than B? XNORs, ANDs, an OR and a NOR	
+builtin-comb-parity	Combinational	Parity Generator	Three XOR gates: P makes the number of 1s even, a check bit for data	
+builtin-count-3bit	Counters and Displays	3-Bit Counter	A counting register stepping 0 to 7. Page 2: a ripple counter of three J-K flip-flops	
+builtin-mistake-latch	Classic Mistakes	J-K Latch from Gates	A J-K latch made from gates. Turn Reset off and EN on, then watch Q and Q'	
+builtin-mistake-gated-clock	Classic Mistakes	Every Other Count	A counter that should go up on every other press of Step Clock. Press it and watch the count	
+builtin-mistake-floating	Classic Mistakes	A and B Light	A light that should come on when A and B are both on. Try every combination	
+builtin-mistake-two-outputs	Classic Mistakes	Two-Switch Light	A light that A and B both control. Try every combination	

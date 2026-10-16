@@ -2,7 +2,9 @@
 // MyParts.swift) and the Windows app ports them.
 //
 // Templates: New from Template starts a circuit from a built-in starter (a
-// lab page, a counter, a 7-segment decoder) or one of yours; Save as
+// lab page, a counter, a 7-segment decoder, each kind of flip-flop and latch,
+// registers, combinational circuits, counters and Classic Mistakes: the Mac
+// app's, from res/templates) or one of yours; Save as
 // Template keeps the circuit you're in as one of yours, in
 // ~/.local/share/CedarLogic/Templates (a folder each: name.txt, template.cdl).
 //

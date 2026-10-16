@@ -117,6 +117,7 @@ void Prefs::load() {
 		lastFolder = readString(k, "lastFolder", lastFolder);
 		lastCircuit = readString(k, "lastCircuit", lastCircuit);
 		studentName = readString(k, "studentName", studentName);
+		templateClock = readInt(k, "templateClock", templateClock, 0, 2);
 		lastFormula = readString(k, "lastFormula", lastFormula);
 		buildShape = readInt(k, "buildShape", buildShape, 0, 2);
 		buildStyle = readInt(k, "buildStyle", buildStyle, 0, 2);
@@ -214,6 +215,7 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "lastFolder", lastFolder.c_str());
 	g_key_file_set_string(k, kGroup, "lastCircuit", lastCircuit.c_str());
 	g_key_file_set_string(k, kGroup, "studentName", studentName.c_str());
+	g_key_file_set_integer(k, kGroup, "templateClock", templateClock);
 	g_key_file_set_string(k, kGroup, "lastFormula", lastFormula.c_str());
 	g_key_file_set_integer(k, kGroup, "buildShape", buildShape);
 	g_key_file_set_integer(k, kGroup, "buildStyle", buildStyle);

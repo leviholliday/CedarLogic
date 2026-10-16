@@ -1,0 +1,40 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AA_LABEL"
+      (uuid "1")
+      (at 11 12)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Lab 1: Title")
+      (gparam "TEXT_HEIGHT" "4.0"))
+    (gate "AA_LABEL"
+      (uuid "2")
+      (at 17 5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Name: ______________________")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "3")
+      (at 55 5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Date: ____________")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "4")
+      (at 10.5 1)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Course: ____________")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "5")
+      (at 2 -8)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Inputs")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "6")
+      (at 64 -8)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Outputs")
+      (gparam "TEXT_HEIGHT" "2"))))

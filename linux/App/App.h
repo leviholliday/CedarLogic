@@ -67,6 +67,7 @@ struct Prefs {
 	std::vector<std::string> recent;   // most recent first
 	std::string lastFolder;
 	std::string lastCircuit;                      // the Your Circuits circuit last in front
+	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string studentName;                      // for the Lab Page template and exports
 	// Build from Formula: what was typed last, and how to build it.
 	std::string lastFormula = "F = A'B + AC";

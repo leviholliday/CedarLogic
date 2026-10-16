@@ -1,0 +1,150 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "BB_CLOCK"
+      (uuid "1")
+      (at 0 0)
+      (angle 0)
+      (lparam "HALF_CYCLE" "5"))
+    (gate "AA_REGISTER4"
+      (uuid "2")
+      (at 16 0)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "MAX_COUNT" "15")
+      (lparam "SYNC_CLEAR" "true")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "EE_VDD"
+      (uuid "3")
+      (at 10 11)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "FF_GND"
+      (uuid "4")
+      (at 10 -11)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "GE_LED_DISPLAY_4BIT"
+      (uuid "5")
+      (at 32 0)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "AA_LABEL"
+      (uuid "6")
+      (at 11.5 18)
+      (angle 0)
+      (gparam "LABEL_TEXT" "4-Bit Counter")
+      (gparam "TEXT_HEIGHT" "3.0"))
+    (gate "AA_LABEL"
+      (uuid "7")
+      (at 0 -4)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Clock")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "8")
+      (at 32 -5)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Count")
+      (gparam "TEXT_HEIGHT" "2"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 9.5 -4.5 15 -4.5)
+        (cross 9.5 "2")
+        (cross 15 "3"))
+      (seg "1" h
+        (pts 4 0 9.5 0)
+        (connect "1" "CLK")
+        (cross 9.5 "2"))
+      (seg "2" v
+        (pts 9.5 -4.5 9.5 0)
+        (cross -4.5 "0")
+        (cross 0 "1"))
+      (seg "3" v
+        (pts 15 -4.5 15 -4)
+        (connect "2" "clock")
+        (cross -4.5 "0")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 16 6 17 6)
+        (cross 16 "3")
+        (cross 17 "4"))
+      (seg "1" h
+        (pts 10 7.5 16 7.5)
+        (cross 10 "2")
+        (cross 16 "3"))
+      (seg "2" v
+        (pts 10 7.5 10 10)
+        (connect "3" "OUT_0")
+        (cross 7.5 "1"))
+      (seg "3" v
+        (pts 16 5 16 7.5)
+        (connect "2" "count_enable")
+        (cross 6 "0")
+        (cross 7.5 "1"))
+      (seg "4" v
+        (pts 17 5 17 6)
+        (connect "2" "count_up")
+        (cross 6 "0")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 10 -7 17 -7)
+        (cross 10 "2")
+        (cross 10.5 "3")
+        (cross 17 "5"))
+      (seg "1" h
+        (pts 10.5 5.5 15 5.5)
+        (cross 10.5 "3")
+        (cross 15 "4"))
+      (seg "2" v
+        (pts 10 -10 10 -7)
+        (connect "4" "OUT_0")
+        (cross -7 "0"))
+      (seg "3" v
+        (pts 10.5 -7 10.5 5.5)
+        (cross -7 "0")
+        (cross 5.5 "1"))
+      (seg "4" v
+        (pts 15 5 15 5.5)
+        (connect "2" "load")
+        (cross 5.5 "1"))
+      (seg "5" v
+        (pts 17 -7 17 -4)
+        (connect "2" "clear")
+        (cross -7 "0")))
+    (wire
+      (ids "4")
+      (seg "0" h
+        (pts 20 -1 29 -1)
+        (connect "2" "OUT_0")
+        (connect "5" "IN_0")))
+    (wire
+      (ids "5")
+      (seg "0" h
+        (pts 20 0 29 0)
+        (connect "2" "OUT_1")
+        (connect "5" "IN_1")))
+    (wire
+      (ids "6")
+      (seg "0" h
+        (pts 20 1 29 1)
+        (connect "2" "OUT_2")
+        (connect "5" "IN_2")))
+    (wire
+      (ids "7")
+      (seg "0" h
+        (pts 20 2 29 2)
+        (connect "2" "OUT_3")
+        (connect "5" "IN_3")))))

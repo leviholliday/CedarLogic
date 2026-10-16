@@ -67,6 +67,13 @@ jobs:
           $B/sim_check $L format/tests/fixtures/lab6.cdl 0 before.png after.png
           $B/save_check $L format/tests/fixtures/Broadcast.cdl format/tests/fixtures/Lab5.cdl \
             "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
+          # The templates this app ships (res/templates, the Mac's own): Step Clock on the
+          # flip-flops (manual, running and pulse-button clocks), the examples' second pages,
+          # the registers and the Classic Mistakes each do what they say.
+          for t in clock_check examples_check register_check mistakes_check; do
+            $B/$t $L res/templates > $t.log 2>&1 || { cat $t.log; exit 1; }
+            echo "$t: $(grep -c '^PASS\|  ok ' $t.log) passed"
+          done
 
       # Sync (docs/SYNC.md): the engine's own self-test with the app's hooks (libcrypto, zlib, the
       # curl program) -- the vectors every device must agree on, and the protocol's scenarios --
