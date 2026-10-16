@@ -204,6 +204,19 @@ jobs:
           linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 
+      # How smooth dragging is (linux/SMOOTHNESS.md): ms per frame while
+      # dragging one gate, everything, and the view, on a large circuit. Only
+      # numbers to read: GitHub's runners are shared and noisy, so this never
+      # fails the build. The output goes with the renders.
+      - name: Drag benchmark (numbers only)
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          mkdir -p renders
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag.txt || true
+
       - name: Upload AppImage
         uses: actions/upload-artifact@v7
         with:
