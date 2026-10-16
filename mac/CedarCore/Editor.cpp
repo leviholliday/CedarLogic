@@ -306,6 +306,41 @@ void finishMove(CLDocument* doc, GUICanvas* page, EditGesture& g) {
 
 }  // namespace
 
+// Something else is about to change the circuit while a gesture is still under
+// way: a key pressed mid-drag, a paste or new part still following the
+// pointer, a press whose drag never got its release. Finish the gesture first
+// (`keep`: what it moved goes on the undo stack, as its release would have
+// done), or put it back (Undo and Redo). Left as it was, the gesture would
+// later record a move of parts the edit removed or renumbered, and the
+// connections C made mid-move would stay applied with no undo step.
+void clEndGesture(CLDocument* doc, bool keep) {
+	if (doc == nullptr) return;
+	EditGesture& g = doc->gesture;
+	if (g.mode == EditGesture::None) return;
+	GUICanvas* page = doc->page(g.page);
+	if (!keep || page == nullptr) { cl_edit_cancel(doc); return; }
+	if (g.mode == EditGesture::Moving) {
+		finishMove(doc, page, g);
+	} else if (g.mode == EditGesture::WireSeg) {
+		if (guiWire* w = doc->circuit.getWire(g.wire)) {
+			if (g.moved) {
+				w->endSegDrag();
+				submit(doc, page, new cmdWireSegDrag(&doc->circuit, page, g.wire));
+			} else {
+				w->setSegmentMap(w->getOldSegmentMap());
+			}
+		}
+	}
+	discardPendingConnects(doc, g);   // none left after a move; a stray set otherwise
+	page->collisionUpdate();
+	g = EditGesture();
+}
+
+namespace {
+// Any edit first finishes a gesture still under way (see clEndGesture).
+void settleGesture(CLDocument* doc) { clEndGesture(doc, true); }
+}  // namespace
+
 extern "C" {
 
 int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifiers, double unitsPerPoint) {
@@ -319,12 +354,10 @@ int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifi
 	// another page whose points mean nothing to it: a click there leaves a
 	// floating gate where it was, drops an unfinished wire, and then acts on
 	// that side as usual.
-	if (g.page != pageIndex && (g.mode == EditGesture::Moving || g.mode == EditGesture::Connect)) {
-		if (g.mode == EditGesture::Moving && g.floating) {
-			if (GUICanvas* p = doc->page(g.page)) { finishMove(doc, p, g); p->collisionUpdate(); }
-		}
-		g = EditGesture();
-	}
+	// A drag whose release never came (the window lost the mouse-up) is
+	// finished as its release would have finished it.
+	if (g.page != pageIndex || !((g.mode == EditGesture::Moving && g.floating) || (g.mode == EditGesture::Connect && g.sticky)))
+		clEndGesture(doc, true);
 	if (g.mode == EditGesture::Connect && g.sticky) {
 		if (GUICanvas* p = doc->page(g.page)) finishConnection(doc, p, (float)x, (float)y);
 		g = EditGesture();
@@ -606,6 +639,7 @@ int cl_edit_selected_wire_count(const CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_delete(CLDocument* doc, int pageIndex) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
@@ -625,6 +659,7 @@ void cl_edit_delete(CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_rotate(CLDocument* doc, int pageIndex) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
@@ -656,6 +691,7 @@ void cl_edit_rotate(CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
@@ -671,6 +707,7 @@ void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
 }
 
 bool cl_edit_add_gate(CLDocument* doc, int pageIndex, const char* libGateName, double x, double y) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr || libGateName == nullptr) return false;
@@ -707,6 +744,7 @@ bool cl_edit_paste(CLDocument* doc, int pageIndex, const char* text, double x, d
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (clipboardOut) *clipboardOut = "";
 	if (page == nullptr || text == nullptr) return false;
+	settleGesture(doc);
 	settleTidy(doc);
 	klsClipboard::shiftHeld = shift;
 	klsClipboard::rewrittenText.clear();
@@ -757,6 +795,7 @@ static void noteInkHistory(CLDocument* doc, wxCommand* done) {
 
 bool cl_edit_undo(CLDocument* doc) {
 	if (doc == nullptr) return false;
+	clEndGesture(doc, false);   // a paste still on the pointer is put back, then taken back
 	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Undo();
 	noteInkHistory(doc, ok ? doc->circuit.GetCommandProcessor()->GetRedoCommand() : nullptr);
@@ -767,6 +806,7 @@ bool cl_edit_undo(CLDocument* doc) {
 
 bool cl_edit_redo(CLDocument* doc) {
 	if (doc == nullptr) return false;
+	clEndGesture(doc, false);
 	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Redo();
 	noteInkHistory(doc, ok ? doc->circuit.GetCommandProcessor()->GetUndoCommand() : nullptr);
@@ -857,6 +897,7 @@ bool cl_gate_set_setting(CLDocument* doc, long gate, const char* name, const cha
 	if (lg == nullptr || name == nullptr || value == nullptr) return false;
 	for (const lgDlgParam& p : lg->dlgParams) {
 		if (p.name != name) continue;
+		settleGesture(doc);
 		settleTidy(doc);
 		ParameterMap m;
 		m[name] = value;
@@ -953,6 +994,7 @@ bool cl_edit_float_begin(CLDocument* doc, int pageIndex, double x, double y) {
 	if (page == nullptr) return false;
 	EditGesture& g = doc->gesture;
 	const float upp = g.unitsPerPoint > 0 ? g.unitsPerPoint : 0.05f;
+	settleGesture(doc);
 	g = EditGesture();
 	g.page = pageIndex;
 	g.start = g.current = GLPoint2f((float)x, (float)y);
@@ -993,6 +1035,7 @@ int cl_edit_take_back_connects(CLDocument* doc) {
 int cl_edit_connect_nearby(CLDocument* doc, int pageIndex, double unitsPerPoint) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return 0;
+	settleGesture(doc);
 	return connectNearby(doc, page, (float)unitsPerPoint, false);
 }
 
@@ -1014,6 +1057,7 @@ int cl_edit_selected_locked_count(const CLDocument* doc, int pageIndex, bool loc
 int cl_edit_lock_selection(CLDocument* doc, int pageIndex, bool lock) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return 0;
+	settleGesture(doc);
 	settleTidy(doc);
 	std::vector<unsigned long> ids;
 	for (auto& g : *page->getGateList())
@@ -1035,6 +1079,7 @@ int cl_document_locked_count(const CLDocument* doc) {
 
 int cl_edit_unlock_all(CLDocument* doc, int pageIndex) {
 	if (doc == nullptr) return 0;
+	settleGesture(doc);
 	settleTidy(doc);
 	std::vector<unsigned long> ids;
 	for (auto& p : doc->pages)
@@ -1068,8 +1113,8 @@ bool cl_edit_is_connecting(const CLDocument* doc) {
 int cl_edit_context(CLDocument* doc, int pageIndex, double x, double y, double unitsPerPoint) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return CL_CONTEXT_NOTHING;
+	settleGesture(doc);
 	settleTidy(doc);
-	doc->gesture = EditGesture();
 	unsigned long gate = 0;
 	std::string pin;
 	if (pinAt(page, (float)x, (float)y, (float)(kPinPoints * unitsPerPoint), gate, pin)) {
@@ -1098,6 +1143,7 @@ void cl_edit_disconnect_pin(CLDocument* doc, int pageIndex, double x, double y, 
 	unsigned long gate = 0;
 	std::string pin;
 	if (!pinAt(page, (float)x, (float)y, (float)(kPinPoints * unitsPerPoint), gate, pin)) return;
+	settleGesture(doc);
 	guiGate* g = doc->circuit.getGate(gate);
 	if (!g->isConnected(pin)) return;
 	guiWire* w = g->getConnection(pin);
@@ -1111,6 +1157,7 @@ void cl_edit_disconnect_pin(CLDocument* doc, int pageIndex, double x, double y, 
 void cl_edit_straighten(CLDocument* doc, int pageIndex) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
+	settleGesture(doc);
 	settleTidy(doc);
 	std::vector<unsigned long> ids;
 	for (auto& w : *page->getWireList()) if (w.second && w.second->isSelected()) ids.push_back(w.first);
@@ -1135,7 +1182,7 @@ bool cl_edit_tidy_begin(CLDocument* doc, int pageIndex, int mode) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return false;
 	if (doc->tidy.active) cl_edit_tidy_end(doc, false);
-	doc->gesture = EditGesture();
+	settleGesture(doc);
 	edits::TidyPlan plan = edits::applyTidy(page, mode);
 	page->collisionUpdate();
 	if (plan.empty()) return false;
@@ -1236,8 +1283,8 @@ int cl_edit_build(CLDocument* doc, int pageIndex, const CLBuildGate* gates, int 
                   const CLBuildWire* wires, int wireCount, const char* undoName) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr || gates == nullptr || gateCount <= 0) return -1;
+	settleGesture(doc);
 	settleTidy(doc);
-	doc->gesture = EditGesture();
 	std::vector<klsCommand*> steps;
 	auto run = [&](klsCommand* c) { c->setCanvas(page); c->Do(); steps.push_back(c); };
 

@@ -252,6 +252,104 @@ int main(int argc, char** argv) {
 		CHECK(!sw->isConnected(opin) && std::fabs(nx - (lx + (ox - px) + 3)) < 1e-3, "the first undo takes back the connection, not the move");
 	}
 
+	// Every wire's pins are on gates still on its page (what a save writes).
+	auto wiresHoldLiveGates = [&](CLDocument* d) {
+		for (int p = 0; p < cl_document_page_count(d); p++)
+			for (auto& w : *d->page(p)->getWireList()) {
+				if (!w.second) continue;
+				for (auto& c : w.second->getConnections()) {
+					auto it = d->page(p)->getGateList()->find(c.gid);
+					if (it == d->page(p)->getGateList()->end() || !it->second) return false;
+				}
+				for (auto& s : w.second->getSegmentMap())
+					for (auto& c : s.second.connections) {
+						auto it = d->page(p)->getGateList()->find(c.gid);
+						if (it == d->page(p)->getGateList()->end() || !it->second) return false;
+					}
+			}
+		return true;
+	};
+
+	printf("Undo while a paste follows the pointer takes the paste back\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "GA_LED", 10, 0);
+		guiGate* led = newest(d, 0);
+		cl_edit_select_all(d, 0);
+		std::string block = cl_edit_copy(d, 0);
+		cl_edit_select_none(d, 0);
+		const int u0 = cl_edit_undo_count(d);
+		const char* back = nullptr;
+		CHECK(cl_edit_paste(d, 0, block.c_str(), 0, 3, true, &back), "pasted");
+		CHECK(cl_edit_float_begin(d, 0, 0, 3), "it follows the pointer");
+		// Bring the pasted light's pin onto the first switch's output and press C.
+		float sx, sy, lx, ly;
+		std::string spin, lpin;
+		pin(sw, "OUT", sx, sy, &spin);
+		guiGate* pastedLed = newest(d, 0);
+		pin(pastedLed, "", lx, ly, &lpin);
+		cl_edit_hover(d, 0, 0 + (sx - lx), 3 + (sy - ly), 0.05);
+		CHECK(cl_edit_connect_while_moving(d, 0, 0.05) >= 1 && sw->isConnected(spin), "C connects it while it floats");
+		cl_edit_undo(d);   // Cmd-Z instead of Escape
+		CHECK(!cl_edit_is_floating(d), "it no longer follows the pointer");
+		CHECK(d->page(0)->getGateList()->size() == 2 && cl_edit_undo_count(d) == u0, "the paste is gone, and only it");
+		CHECK(!sw->isConnected(spin), "and so is the connection C made");
+		cl_edit_press(d, 0, 5, 5, 0, 0.05);   // the next click
+		cl_edit_release(d, 5, 5);
+		CHECK(wiresHoldLiveGates(d) && cl_edit_undo_count(d) == u0, "the next click records nothing");
+		cl_edit_redo(d);
+		CHECK(d->page(0)->getGateList()->size() == 4 && wiresHoldLiveGates(d), "Redo brings the paste back");
+		(void)led;
+		cl_document_close(d);
+	}
+
+	printf("an edit while a paste floats puts the paste down first\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_AND2", 0, 0);
+		guiGate* g = newest(d, 0);
+		const int u0 = cl_edit_undo_count(d);
+		CHECK(cl_edit_float_begin(d, 0, 0, 0), "it floats");
+		cl_edit_hover(d, 0, 4, 2, 0.05);
+		cl_edit_delete(d, 0);   // the Delete key
+		CHECK(!cl_edit_is_floating(d) && d->page(0)->getGateList()->empty(), "dropped, then deleted");
+		cl_edit_undo(d);
+		float gx, gy;
+		g = newest(d, 0);
+		if (g) g->getGLcoords(gx, gy);
+		CHECK(g && std::fabs(gx - 4) < 1e-3 && std::fabs(gy - 2) < 1e-3, "Undo brings it back where it was dropped");
+		cl_edit_undo(d);
+		g = newest(d, 0);
+		if (g) g->getGLcoords(gx, gy);
+		CHECK(g && cl_edit_undo_count(d) == u0 && std::fabs(gx) < 1e-3 && std::fabs(gy) < 1e-3, "and the next Undo takes back the move");
+		cl_document_close(d);
+	}
+
+	printf("a press after a drag whose release never came keeps the drag\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_AND2", 0, 0);
+		guiGate* g = newest(d, 0);
+		const int u0 = cl_edit_undo_count(d);
+		float gx, gy;
+		g->getGLcoords(gx, gy);
+		cl_edit_press(d, 0, gx, gy, 0, 0.05);
+		cl_edit_drag(d, gx + 3, gy + 2);
+		cl_edit_drag(d, gx + 6, gy + 4);
+		cl_edit_press(d, 0, 30, 30, 0, 0.05);   // no release for the drag
+		cl_edit_release(d, 30, 30);
+		float nx, ny;
+		g->getGLcoords(nx, ny);
+		CHECK(std::fabs(nx - gx - 6) < 1e-3 && cl_edit_undo_count(d) == u0 + 1, "the move stays, as one undo step");
+		cl_edit_undo(d);
+		g = newest(d, 0);
+		if (g) g->getGLcoords(nx, ny);
+		CHECK(g && std::fabs(nx - gx) < 1e-3 && std::fabs(ny - gy) < 1e-3, "and Undo takes it back");
+		cl_document_close(d);
+	}
+
 	printf("save round trip keeps it all\n");
 	std::string text = cl_document_save_text(doc);
 	char err[256];
