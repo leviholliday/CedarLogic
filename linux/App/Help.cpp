@@ -106,6 +106,22 @@ const std::vector<Page>& pages() {
 		      "Part** takes the lock off one part, and **Unlock All Parts** in the Edit menu takes every lock off. This is different from "
 		      "**Lock the Circuit** in the Simulate menu, which stops all editing.") },
 		  false },
+		{ "drawing", "Drawing and Notes", "document-edit-symbolic", "Mark up a circuit, and keep notes with it.",
+		  { p("**Draw on the Circuit (Ctrl+Alt+P)** (the View menu, or the pencil in the toolbar) turns the pointer into a pen. Draw "
+		      "around a part, circle a wire, write a word: the drawing stays where you put it, saved with the circuit, and editing never "
+		      "moves it. A pen tablet's pressure thins the line a little."),
+		    keys({ { "P", "Pen" },
+		           { "H", "Highlighter: under the parts, so they stay readable" },
+		           { "E", "Eraser: takes away whole marks (a tablet pen's eraser end does too)" },
+		           { "1 2 3", "Thin, medium or thick line" },
+		           { "Space + drag", "Move around without drawing" },
+		           { "Escape", "Done drawing" } }),
+		    p("The bar over the bottom of the canvas has the colours, the widths, **Clear** (this page's drawing, and Undo brings it "
+		      "back) and **Hide Drawing** (Ctrl+Shift+H). Each mark is one step for Undo."),
+		    p("**Show Notes (Ctrl+Alt+N)** opens a pane at the right for your own notes about the circuit. They're saved with it, and "
+		      "Ctrl+Z there undoes typing, not the circuit. Share Link never includes your notes; it includes the drawing when it's "
+		      "shown.") },
+		  false },
 		{ "moving", "Moving Around", "zoom-fit-best-symbolic", "Zoom, pan and the minimap.",
 		  { keys({ { "Wheel", "Zoom or move, as set in Preferences (touchpads separately)" },
 		           { "Ctrl + wheel", "Always zooms" },

@@ -21,7 +21,8 @@
 class CircuitWindow;
 
 // Tool groups that can be hidden, one bit each (the Mac's ToolGroup).
-enum ToolGroup { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTheme, TGTab, TGFeedback, TGCount };
+// (TGDraw is last so the bits kept in Settings stay the same.)
+enum ToolGroup { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTheme, TGTab, TGFeedback, TGDraw, TGCount };
 const char* toolGroupName(int g);
 
 class Toolbar : public Drawn {

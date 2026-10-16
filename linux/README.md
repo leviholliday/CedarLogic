@@ -59,7 +59,9 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   `LibraryWindow`, `Picker`), templates (the Mac's own, as files in `res/templates`,
   written by `mac/Tools/export-templates.sh`) and My Parts (`Collections`), Build
   from Formula and the truth table's Karnaugh maps (`Formula`,
-  `TruthTableWindow`), Find and the Ctrl+Tab switcher (`FindBar`,
+  `TruthTableWindow`), drawing on the circuit (pen, highlighter and eraser,
+  saved with it; `Ink`, and the canvas's Draw mode and drawing bar) and the
+  notes pane (`Notes`), Find and the Ctrl+Tab switcher (`FindBar`,
   `TabSwitcher`), the oscilloscope, docked under the canvas (`Scope`),
   Export as Image (`ExportImage`), Send Feedback (`Feedback`), Help
   (`Help`), Settings > Sync, the link preview and the sync line in Your
@@ -96,7 +98,7 @@ every shape and gate style and checks each circuit's truth table. And:
   for one of the app's windows: `welcome:N`, `whatsnew:N`, `help`, `truth`,
   `feedback`, `templates`, `tour`, `find`, `export`, `scope`, `focus`,
   `split`, `quit`, `settings:N`, `toolbar:N`, `shortcuts`, `quickadd`,
-  `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `stepclock:N`, `lockinplace:N`, `pagelinks`
+  `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `stepclock:N`, `lockinplace:N`, `pagelinks`, `draw:N`
 - `cedarlogic --hold <seconds> --screenshot out.png` -- waits before the
   picture (CI drags a gate onto the canvas with xdotool meanwhile)
 - `cedarlogic --bench-drag [steps] circuit.cdl` -- times the canvas while

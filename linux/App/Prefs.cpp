@@ -118,6 +118,12 @@ void Prefs::load() {
 		lastCircuit = readString(k, "lastCircuit", lastCircuit);
 		studentName = readString(k, "studentName", studentName);
 		templateClock = readInt(k, "templateClock", templateClock, 0, 2);
+		inkTool = readInt(k, "inkTool", inkTool, 0, 2);
+		inkPenColor = readString(k, "inkPenColor", inkPenColor);
+		inkHighlighterColor = readString(k, "inkHighlighterColor", inkHighlighterColor);
+		inkPenWidth = readDouble(k, "inkPenWidth", inkPenWidth, 0.05, 3);
+		inkHighlighterWidth = readDouble(k, "inkHighlighterWidth", inkHighlighterWidth, 0.05, 5);
+		exportInk = readBool(k, "exportInk", exportInk);
 		newPagesShareLinks = readBool(k, "newPagesShareLinks", newPagesShareLinks);
 		lastFormula = readString(k, "lastFormula", lastFormula);
 		buildShape = readInt(k, "buildShape", buildShape, 0, 2);
@@ -217,6 +223,12 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "lastCircuit", lastCircuit.c_str());
 	g_key_file_set_string(k, kGroup, "studentName", studentName.c_str());
 	g_key_file_set_integer(k, kGroup, "templateClock", templateClock);
+	g_key_file_set_integer(k, kGroup, "inkTool", inkTool);
+	g_key_file_set_string(k, kGroup, "inkPenColor", inkPenColor.c_str());
+	g_key_file_set_string(k, kGroup, "inkHighlighterColor", inkHighlighterColor.c_str());
+	g_key_file_set_double(k, kGroup, "inkPenWidth", inkPenWidth);
+	g_key_file_set_double(k, kGroup, "inkHighlighterWidth", inkHighlighterWidth);
+	g_key_file_set_boolean(k, kGroup, "exportInk", exportInk);
 	g_key_file_set_boolean(k, kGroup, "newPagesShareLinks", newPagesShareLinks);
 	g_key_file_set_string(k, kGroup, "lastFormula", lastFormula.c_str());
 	g_key_file_set_integer(k, kGroup, "buildShape", buildShape);

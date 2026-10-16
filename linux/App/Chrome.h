@@ -87,7 +87,13 @@ constexpr const char* Feedback = "mail-message-new-symbolic";
 // Drawn by hand (drawIcon knows it): a clock face with a turning arrow, the
 // Mac's clock.arrow.2.circlepath, for Step Clock.
 constexpr const char* StepClock = "cedarlogic-step-clock";
+// Drawn by hand too: a pencil tip in a ring (Draw on the circuit, the Mac's
+// pencil.tip.crop.circle) and a page of lines (Notes, note.text).
+constexpr const char* Draw = "cedarlogic-draw";
+constexpr const char* Notes = "cedarlogic-notes";
 }
+// An eye, struck through when `hidden` (Show and Hide Drawing).
+void drawEyeIcon(cairo_t* cr, const RectF& box, const Color& color, bool hidden);
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color);
 // Drawn: a page with a plus (New circuit), a square with a plus over
 // another (New tab), a folder (Open), a speech bubble (Send Feedback).

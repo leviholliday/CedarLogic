@@ -68,6 +68,11 @@ struct Prefs {
 	std::string lastFolder;
 	std::string lastCircuit;                      // the Your Circuits circuit last in front
 	bool newPagesShareLinks = true; // a page added later joins the pages' shared TO/FROM links (docs/PAGE-LINKS.md)
+	// Drawing on the circuit (Canvas, Ink.cpp): the last tool, colour and width.
+	int inkTool = 0;              // 0 pen, 1 highlighter, 2 eraser
+	std::string inkPenColor = "ink", inkHighlighterColor = "yellow";
+	double inkPenWidth = 0.25, inkHighlighterWidth = 1.2;
+	bool exportInk = true;        // Export as Image: the drawing too, when there is one
 	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string studentName;                      // for the Lab Page template and exports
 	// Build from Formula: what was typed last, and how to build it.

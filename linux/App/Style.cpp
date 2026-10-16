@@ -219,6 +219,16 @@ void applyStyle() {
 		s += "popover modelbutton { padding: 5px 10px; border-radius: 6px; min-height: 20px; }\n";
 		s += "popover modelbutton:hover { background-color: " + css(c.accent()) + "; color: " + css(c.onAccent()) + "; }\n";
 	}
+	// The notes pane at the right of the canvas (Notes.cpp): the panel's
+	// colour, its text in the canvas's ink.
+	s += "#notes, #notes-text, #notes-text text { background-color: " + css(c.panel()) + "; }\n";
+	s += "#notes-text text { color: " + css(text) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#notes label { color: " + css(text) + "; }\n";
+	s += "#notes .notes-title { font-weight: bold; }\n";
+	s += "#notes .notes-placeholder { color: " + css(hint) + "; }\n";
+	s += "#notes .notes-count { font-size: 0.85em; color: " + css(hint) + "; }\n";
+	s += "#notes .notes-count.full { color: rgb(245,148,33); }\n";
+	s += "#notes-close { min-height: 22px; min-width: 22px; padding: 0; border-radius: 6px; }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

@@ -35,7 +35,7 @@ std::string keysFor(const char* action) {
 
 const char* toolGroupName(int g) {
 	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
-	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback" };
+	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback", "Draw and Notes" };
 	return g >= 0 && g < TGCount ? names[g] : "";
 }
 
@@ -68,6 +68,7 @@ void Toolbar::build(int style) {
 	if (prefs().showStepClock) add(Button, "win.step-clock", TGSim, true);
 	add(Speed, nullptr, TGSim, true);
 	add(Button, "win.sim-view", TGRun, true);
+	add(Button, "win.draw", TGDraw, true); add(Button, "win.notes", TGDraw, true);
 	add(Button, "win.lock", TGLock, true);
 	if (prefs().showThemeToggle) add(Button, "win.dark", TGTheme, true);
 	add(Button, "win.new-tab", TGTab, true);
@@ -159,6 +160,8 @@ bool Toolbar::isOn(const Item& it) const {
 	if (is(it.action, "win.running")) return !win->running();
 	if (is(it.action, "win.sim-view")) return win->simView();
 	if (is(it.action, "win.lock")) return win->locked();
+	if (is(it.action, "win.draw")) return win->drawing();
+	if (is(it.action, "win.notes")) return win->notesShown();
 	if (is(it.action, "win.dark")) return prefs().dark;
 	return false;
 }
@@ -185,6 +188,8 @@ const char* Toolbar::iconFor(const Item& it) const {
 	if (is(a, "win.step-clock")) return Icon::StepClock;
 	if (is(a, "win.sim-view")) return win->simView() ? Icon::StopSolid : Icon::Play;
 	if (is(a, "win.lock")) return win->locked() ? Icon::Lock : Icon::Unlock;
+	if (is(a, "win.draw")) return Icon::Draw;
+	if (is(a, "win.notes")) return Icon::Notes;
 	if (is(a, "win.dark")) return prefs().dark ? "weather-clear-night-symbolic" : "weather-clear-symbolic";
 	if (is(a, "win.new-tab")) return Icon::NewTab;
 	if (is(a, "win.feedback")) return Icon::Feedback;
@@ -213,6 +218,10 @@ std::string Toolbar::tipFor(const Item& it) const {
 	if (is(a, "win.step-clock")) return win->hasManualClock() ? "Step Clock" + keysFor("stepClock") : std::string(CircuitWindow::stepClockOffTip);
 	if (is(a, "win.sim-view")) return win->simView() ? "Leave Simulation View (Esc)" : "Simulation View" + keysFor(a);
 	if (is(a, "win.lock")) return win->locked() ? "Unlock the circuit" : "Lock the circuit so it can't be edited";
+	if (is(a, "win.draw"))
+		return win->drawing() ? std::string("Done drawing (Esc)")
+		                      : "Draw on the circuit" + keysFor(a) + (win->hasHiddenDrawing() ? ". It has a drawing that's hidden" : "");
+	if (is(a, "win.notes")) return win->notesShown() ? std::string("Hide notes") : "Notes for this circuit" + keysFor(a);
 	if (is(a, "win.dark")) return "Dark mode" + keysFor(a);
 	if (is(a, "win.new-tab")) return "New tab" + keysFor(a);
 	if (is(a, "win.feedback")) return "Send feedback: a bug, an idea, anything";
@@ -355,6 +364,8 @@ void Toolbar::draw(cairo_t* cr, float w, float h, int style, bool live) {
 			else if (is(it.action, "win.save")) drawSaveIcon(cr, r, fg);
 			else if (is(it.action, "win.zoom-in") || is(it.action, "win.zoom-out")) drawZoomIcon(cr, r, fg, is(it.action, "win.zoom-in"));
 			else drawIcon(cr, iconFor(it), r, colored && on ? 13 : (it.kind == More ? 15 : 16), fg);
+			// A drawing that's hidden: a dot on Draw, as the Mac's.
+			if (is(it.action, "win.draw") && !on && win->hasHiddenDrawing()) fillCircle(cr, pointF(r.right - 8, r.top + 7), 3, accent);
 			break;
 		}
 		}

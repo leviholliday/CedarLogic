@@ -501,7 +501,7 @@ GtkWidget* toolbarPage() {
 	gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
 	gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
 	gtk_widget_set_margin_top(grid, 10);
-	const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTab, TGFeedback };
+	const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGDraw, TGLock, TGTab, TGFeedback };
 	int i = 0;
 	for (int g : groups) {
 		GtkWidget* c = check(toolGroupName(g), (prefs().toolbarHidden & (1 << g)) == 0, [g](bool on) {

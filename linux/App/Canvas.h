@@ -64,6 +64,9 @@ public:
 	View view() const { return View{ originX, originY, upp, needsFit }; }
 	void setView(const View& v);
 
+	// Draw mode turned on or off, or another tool picked (the window's).
+	void drawingChanged();
+
 	// Called when the window's circuit changed under it (undo, a new page).
 	void noteFit() { needsFit = true; }
 	// Let go of the off-screen images (a tab that isn't in front).
@@ -72,7 +75,7 @@ public:
 private:
 	// --bench-drag (Bench.cpp) drives the real handlers and draw() directly.
 	friend struct CanvasBench;
-	enum class Drag { None, Edit, Pan };
+	enum class Drag { None, Edit, Pan, Ink };
 
 	CircuitWindow* win;
 	GtkWidget* area;
@@ -175,6 +178,23 @@ private:
 	void drawGrid(cairo_t* cr, const Palette& pal, double scale, double fade);
 	void drawBox(cairo_t* cr, double l, double b, double r, double t, const RGBA& accent, double alpha);
 	bool fitBoxOfPage(double& l, double& b, double& r, double& t) const;
+
+	// Draw mode (Ink.h): a stroke or an eraser drag in progress, the pointer's
+	// shape and the drawing bar over the bottom of the canvas.
+	bool inkErasing = false;
+	bool tabletEraser = false;   // a tablet pen's eraser end is near
+	double eraserRadius() const { return 10 * upp; }   // 10 points on screen
+	bool erasesWith(GdkEvent* e);
+	double pressureOf(GdkEvent* e) const;
+	void inkSample(GdkEvent* e, double vx, double vy);
+	bool inkPress(GdkEventButton* e);
+	void inkMotion(GdkEventMotion* e);
+	void inkRelease(GdkEventButton* e);
+	void inkHover(double vx, double vy);
+	void endInkStroke(bool keep);
+	bool inkKey(GdkEventKey* e);
+	void drawInkBar(cairo_t* cr, float w, float h);
+	bool inkBarAction(const char* action);
 
 	bool onPress(GdkEventButton* e);
 	bool onRelease(GdkEventButton* e);

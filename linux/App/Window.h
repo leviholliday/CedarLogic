@@ -24,6 +24,7 @@ class StatusBar;
 class Sash;
 class FindBar;
 class TabSwitcher;
+class NotesPane;
 namespace formula { struct Plan; }
 
 class CircuitWindow {
@@ -259,6 +260,34 @@ public:
 	// it reaches now, give or take that one.
 	void setPagesLinked(int p, int other, bool on);
 
+	// Drawing on the circuit (Ink.h) and the notes (Notes.h). Draw mode: the
+	// pointer draws with a pen or a highlighter, or erases whole strokes,
+	// instead of editing. Show/Hide is saved with the circuit (not an undo
+	// step); each stroke, erase or Clear is one.
+	bool drawing() const { return drawingOn; }
+	void setDrawing(bool on);
+	void toggleDrawing() { setDrawing(!drawingOn); }
+	bool drawingShown() const;
+	void setDrawingShown(bool shown);
+	void toggleDrawingShown() { setDrawingShown(!drawingShown()); }
+	void clearDrawing();
+	void setInkTool(int tool);
+	// Why the tools can't draw on this page (a cap, a newer drawing), or nullptr.
+	const char* inkBlockedReason() const;
+	bool pageHasInk() const;
+	bool pageIsInkReadOnly() const;
+	// A drawing that's hidden: the Draw button shows a dot.
+	bool hasHiddenDrawing() const;
+	// After a stroke or an erase landed: one undo step, saved as ever.
+	void inkEdited();
+	void showInkMenu(GdkEventButton* e);
+	bool notesShown() const;
+	void toggleNotes();
+	NotesPane* notesPane() const { return notes; }
+	// A change that isn't an undo step (the notes, Show/Hide Drawing): saved
+	// as after any edit.
+	void markEdited();
+
 	void stepOnce();
 	// Step Clock: every clock on the page set to "Only on Step Clock" makes
 	// one full cycle (up, settle, down, settle), running or paused.
@@ -351,6 +380,8 @@ private:
 	class MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
 	FindBar* findBar = nullptr;
+	NotesPane* notes = nullptr;
+	bool drawingOn = false;
 	GtkWidget* pageOverlay = nullptr;
 	double openingAt = -1;            // when the opening card began (monotonic seconds; -1: none)
 	bool openingRevealed = false;

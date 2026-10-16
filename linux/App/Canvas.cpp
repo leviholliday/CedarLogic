@@ -3,6 +3,7 @@
 #include "Canvas.h"
 #include "Brand.h"
 #include "Chrome.h"
+#include "Ink.h"
 #include "Shortcuts.h"
 #include "Window.h"
 
@@ -233,6 +234,7 @@ void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 		if (simIn < 1) hits.clear();
 	}
 	if (win->currentCanvas() == this) drawBanner(cr, w);
+	if (win->drawing() && win->currentCanvas() == this) drawInkBar(cr, w, h);
 	drawWireTag(cr, w, h);
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(cr, w, h, t);
@@ -531,7 +533,7 @@ bool Canvas::overlayPress(double x, double y) {
 	}
 	for (const OverlayHit& h : hits) {
 		if (x < h.left || x >= h.right || y < h.top || y >= h.bottom) continue;
-		win->runAction(h.action);
+		if (!inkBarAction(h.action)) win->runAction(h.action);
 		redraw();
 		return true;
 	}
@@ -593,8 +595,11 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	}
 	cl_document_draw_ex(doc, p, cr, scale, originX, originY, upp, &o);
 	if (coarse) cairo_restore(cr);
+	// The stroke being drawn and the hover preview, over everything else.
+	const bool live = cl_ink_live_page(doc) == p;
 	if (sim) {
 		cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
+		if (live) cl_ink_draw_live(doc, cr, scale, originX, originY, upp, dark, false);
 		return;
 	}
 	const RGBA a = accentColor(dark);
@@ -602,6 +607,7 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	double l, b, r, t, alpha;
 	if (cl_edit_box(doc, &l, &b, &r, &t)) drawBox(cr, l, b, r, t, a, 1);
 	else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(cr, l, b, r, t, a, alpha);
+	if (live) cl_ink_draw_live(doc, cr, scale, originX, originY, upp, dark, false);
 }
 
 void Canvas::drawBox(cairo_t* cr, double l, double b, double r, double t, const RGBA& accent, double alpha) {
@@ -890,7 +896,14 @@ gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 
 gboolean Canvas::crossingCb(GtkWidget*, GdkEventCrossing* e, gpointer self) {
 	static_cast<Canvas*>(self)->pointerInside = e->type == GDK_ENTER_NOTIFY;
-	if (e->type == GDK_LEAVE_NOTIFY) static_cast<Canvas*>(self)->hideWireTag();
+	if (e->type == GDK_LEAVE_NOTIFY) {
+		Canvas* c = static_cast<Canvas*>(self);
+		c->hideWireTag();
+		if (c->drag != Drag::Ink && c->win->document() && cl_ink_live_page(c->win->document()) >= 0) {
+			cl_ink_hover_clear(c->win->document());
+			c->redraw();
+		}
+	}
 	return FALSE;
 }
 
@@ -924,6 +937,7 @@ void Canvas::cancelDrag() {
 		cl_edit_release_ex(win->document(), wx, wy, false);
 		win->edited();
 	}
+	if (drag == Drag::Ink) endInkStroke(true);
 	drag = Drag::None;
 	setCursor(area, nullptr);
 	redraw();
@@ -950,6 +964,15 @@ bool Canvas::onPress(GdkEventButton* e) {
 		drag = Drag::Pan;
 		setCursor(area, "grabbing");
 		return TRUE;
+	}
+	// Draw mode: the pointer draws (Space or Ctrl held still moves around).
+	if (win->drawing() && e->button == 3) {
+		if (e->type == GDK_BUTTON_PRESS) win->showInkMenu(e);
+		return TRUE;
+	}
+	if (win->drawing() && e->button == 1 && !spaceDown && !(e->state & GDK_CONTROL_MASK)) {
+		if (e->type != GDK_BUTTON_PRESS) return TRUE;
+		return inkPress(e);
 	}
 	if (e->button == 3) {
 		if (e->type != GDK_BUTTON_PRESS) return TRUE;
@@ -1037,7 +1060,16 @@ bool Canvas::onMotion(GdkEventMotion* e) {
 		cl_edit_drag(doc, wx, wy);
 		redraw();
 		break;
+	case Drag::Ink:
+		inkMotion(e);
+		break;
 	case Drag::None:
+		if (win->drawing()) {
+			GdkDevice* d = gdk_event_get_source_device((GdkEvent*)e);
+			tabletEraser = d && gdk_device_get_source(d) == GDK_SOURCE_ERASER;
+			inkHover(e->x, e->y);
+			break;
+		}
 		if (win->hasPendingGate() && win->placePendingGate(wx, wy)) { redraw(); break; }
 		if (win->simView()) {
 			if (prefs().wireValueTag && cl_edit_hover_wire(doc, p, wx, wy, upp)) redraw();
@@ -1056,6 +1088,10 @@ bool Canvas::onRelease(GdkEventButton* e) {
 	CLDocument* doc = win->document();
 	lastX = e->x;
 	lastY = e->y;
+	if (drag == Drag::Ink) {
+		if (e->button == 1) inkRelease(e);
+		return TRUE;
+	}
 	if (drag == Drag::Edit && e->button == 1 && doc) {
 		double l, b, r, t;
 		if (cl_edit_box(doc, &l, &b, &r, &t)) win->fadeOutDragBox(l, b, r, t);
@@ -1070,7 +1106,7 @@ bool Canvas::onRelease(GdkEventButton* e) {
 	} else if (drag == Drag::Pan && (e->button == 1 || e->button == 2)) {
 		drag = Drag::None;
 	}
-	setCursor(area, spaceDown ? "grab" : nullptr);
+	setCursor(area, spaceDown ? "grab" : win->drawing() ? "crosshair" : nullptr);
 	redraw();
 	return TRUE;
 }
@@ -1132,6 +1168,10 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 	const bool isReturn = k == GDK_KEY_Return || k == GDK_KEY_KP_Enter;
 	const bool isDelete = k == GDK_KEY_Delete || k == GDK_KEY_BackSpace || k == GDK_KEY_KP_Delete;
 	const guint lower = gdk_keyval_to_lower(k);
+
+	// Draw mode: P, H and E pick a tool, 1, 2 and 3 a width; Escape ends a
+	// stroke, then Draw mode.
+	if (win->drawing() && inkKey(e)) return TRUE;
 
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {
@@ -1304,4 +1344,332 @@ void Canvas::dragReceivedCb(GtkWidget*, GdkDragContext* ctx, gint x, gint y, Gtk
 		}
 	});
 	gtk_drag_finish(ctx, ok, FALSE, time);
+}
+
+// ---- Drawing on the circuit (Ink.h) --------------------------------------------------
+
+void Canvas::drawingChanged() {
+	if (!win->drawing()) {
+		if (drag == Drag::Ink) {
+			endInkStroke(false);
+			drag = Drag::None;
+		}
+		if (pointerInside) setCursor(area, nullptr);
+	} else if (pointerInside) {
+		setCursor(area, "crosshair");
+		inkHover(lastX, lastY);
+	}
+	redraw();
+}
+
+// A tablet pen's eraser end erases, whatever the tool.
+bool Canvas::erasesWith(GdkEvent* e) {
+	GdkDevice* d = gdk_event_get_source_device(e);
+	tabletEraser = d && gdk_device_get_source(d) == GDK_SOURCE_ERASER;
+	return ink::tool() == ink::Eraser || tabletEraser;
+}
+
+// A pen tablet's pressure (0...1); a mouse, touchpad or touch screen has none (-1).
+double Canvas::pressureOf(GdkEvent* e) const {
+	GdkDevice* d = gdk_event_get_source_device(e);
+	const GdkInputSource s = d ? gdk_device_get_source(d) : GDK_SOURCE_MOUSE;
+	if (s != GDK_SOURCE_PEN && s != GDK_SOURCE_ERASER) return -1;
+	double p = 0;
+	if (!gdk_event_get_axis(e, GDK_AXIS_PRESSURE, &p) || !std::isfinite(p)) return -1;
+	return std::min(1.0, std::max(0.0, p));
+}
+
+void Canvas::inkSample(GdkEvent* e, double vx, double vy) {
+	double wx, wy;
+	worldPoint(vx, vy, wx, wy);
+	CLInkPoint pt = { wx, wy, pressureOf(e) };
+	// Cut at the cap: what's drawn so far is kept.
+	if (cl_ink_add(win->document(), &pt, 1) == CL_INK_FULL) win->note(ink::kFullNote);
+}
+
+bool Canvas::inkPress(GdkEventButton* e) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	double wx, wy;
+	worldPoint(e->x, e->y, wx, wy);
+	cl_ink_hover_clear(doc);
+	if (erasesWith((GdkEvent*)e)) {
+		if (cl_ink_page_read_only(doc, p)) { win->note(ink::kReadOnlyNote); return TRUE; }
+		cl_ink_erase_begin(doc, p);
+		inkErasing = true;
+		cl_ink_erase_to(doc, wx, wy, eraserRadius());
+		cl_ink_hover(doc, p, wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+	} else {
+		const int r = cl_ink_begin(doc, p, ink::engineTool(), ink::color().c_str(), ink::width(), upp);
+		if (r != CL_INK_OK) {
+			win->note(r == CL_INK_FULL ? ink::kFullNote : ink::kReadOnlyNote);
+			gtk_widget_error_bell(area);
+			return TRUE;
+		}
+		inkErasing = false;
+		inkSample((GdkEvent*)e, e->x, e->y);
+	}
+	drag = Drag::Ink;
+	// Every sample, not just one a frame: a line follows the pen.
+	if (GdkWindow* gw = gtk_widget_get_window(area)) gdk_window_set_event_compression(gw, FALSE);
+	redraw();
+	return TRUE;
+}
+
+void Canvas::inkMotion(GdkEventMotion* e) {
+	CLDocument* doc = win->document();
+	if (inkErasing) {
+		double wx, wy;
+		worldPoint(e->x, e->y, wx, wy);
+		cl_ink_erase_to(doc, wx, wy, eraserRadius());
+		cl_ink_hover(doc, page(), wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+	} else {
+		inkSample((GdkEvent*)e, e->x, e->y);
+	}
+	redraw();
+}
+
+// The stroke or the eraser drag ends: kept as one undo step (a pen stroke
+// Escape ends is taken back instead, as on the Mac).
+void Canvas::endInkStroke(bool keep) {
+	CLDocument* doc = win->document();
+	if (GdkWindow* gw = gtk_widget_get_window(area)) gdk_window_set_event_compression(gw, TRUE);
+	if (doc == nullptr) return;
+	if (inkErasing) {
+		inkErasing = false;
+		if (cl_ink_erase_end(doc) > 0) win->inkEdited();
+	} else if (keep) {
+		if (cl_ink_end(doc) > 0) win->inkEdited();
+		if (cl_ink_can_draw(doc, page()) == CL_INK_FULL) win->note(ink::kFullNote);
+	} else {
+		cl_ink_cancel(doc);
+	}
+}
+
+void Canvas::inkRelease(GdkEventButton* e) {
+	if (!inkErasing) inkSample((GdkEvent*)e, e->x, e->y);
+	endInkStroke(true);
+	drag = Drag::None;
+	inkHover(e->x, e->y);
+	redraw();
+}
+
+// What the pointer would draw: a dot of the stroke, or the eraser's ring.
+void Canvas::inkHover(double vx, double vy) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	if (doc == nullptr || p < 0) return;
+	double wx, wy;
+	worldPoint(vx, vy, wx, wy);
+	if (ink::tool() == ink::Eraser || tabletEraser) cl_ink_hover(doc, p, wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+	else cl_ink_hover(doc, p, wx, wy, ink::engineTool(), ink::color().c_str(), ink::width());
+	setCursor(area, "crosshair");
+	redraw();
+}
+
+bool Canvas::inkKey(GdkEventKey* e) {
+	const guint mods = e->state & gtk_accelerator_get_default_mod_mask();
+	if (e->keyval == GDK_KEY_Escape && mods == 0) {
+		if (drag == Drag::Ink) {
+			endInkStroke(false);
+			drag = Drag::None;
+			redraw();
+		} else {
+			win->setDrawing(false);
+		}
+		return true;
+	}
+	if (mods != 0) return false;
+	const guint k = gdk_keyval_to_lower(e->keyval);
+	int width = -1;
+	if (k == GDK_KEY_1 || k == GDK_KEY_KP_1) width = 0;
+	else if (k == GDK_KEY_2 || k == GDK_KEY_KP_2) width = 1;
+	else if (k == GDK_KEY_3 || k == GDK_KEY_KP_3) width = 2;
+	if (width >= 0) {
+		if (ink::tool() == ink::Eraser) return true;
+		ink::setWidthIndex(width);
+		win->note(std::string(ink::widthName(width)) + " line");
+		inkHover(lastX, lastY);
+		return true;
+	}
+	const int tool = k == GDK_KEY_p ? ink::Pen : k == GDK_KEY_h ? ink::Highlighter : k == GDK_KEY_e ? ink::Eraser : -1;
+	if (tool < 0) return false;
+	win->setInkTool(tool);
+	inkHover(lastX, lastY);
+	return true;
+}
+
+namespace {
+
+// The bar's own buttons, by name (a hit's action).
+const char* const kToolActs[] = { "ink:tool:0", "ink:tool:1", "ink:tool:2" };
+const char* const kColorActs[] = { "ink:color:0", "ink:color:1", "ink:color:2", "ink:color:3", "ink:color:4", "ink:color:5" };
+const char* const kWidthActs[] = { "ink:width:0", "ink:width:1", "ink:width:2" };
+
+// Pen, highlighter and eraser, drawn small, as the Mac's pencil.tip,
+// highlighter and eraser.
+void drawToolGlyph(cairo_t* cr, int tool, const RectF& box, const Color& c) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	cairo_save(cr);
+	cairo_translate(cr, cx, cy);
+	cairo_rotate(cr, -G_PI / 4);
+	setColor(cr, c);
+	cairo_set_line_width(cr, 1.3);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	if (tool == ink::Pen) {
+		// A pencil: the body, and its point to the lower left.
+		cairo_rectangle(cr, -2.5, -7, 5, 9.5);
+		cairo_stroke(cr);
+		cairo_move_to(cr, -2.5, 2.5);
+		cairo_line_to(cr, 0, 7);
+		cairo_line_to(cr, 2.5, 2.5);
+		cairo_stroke(cr);
+		cairo_move_to(cr, -2.5, -4.5);
+		cairo_line_to(cr, 2.5, -4.5);
+		cairo_stroke(cr);
+	} else if (tool == ink::Highlighter) {
+		// A marker with a chisel tip.
+		cairo_rectangle(cr, -3.5, -7, 7, 8);
+		cairo_stroke(cr);
+		cairo_move_to(cr, -3.5, 1);
+		cairo_line_to(cr, -2, 4.5);
+		cairo_line_to(cr, 2, 4.5);
+		cairo_line_to(cr, 3.5, 1);
+		cairo_stroke(cr);
+		cairo_rectangle(cr, -2, 4.5, 4, 2.3);
+		cairo_fill(cr);
+	} else {
+		// A block, its working end filled.
+		cairo_rectangle(cr, -3.5, -6.5, 7, 13);
+		cairo_stroke(cr);
+		cairo_rectangle(cr, -3.5, 1.5, 7, 5);
+		cairo_fill(cr);
+	}
+	cairo_restore(cr);
+}
+
+}  // namespace
+
+bool Canvas::inkBarAction(const char* action) {
+	if (action == nullptr || std::strncmp(action, "ink:", 4) != 0) return false;
+	const char* what = action + 4;
+	const int n = atoi(std::strrchr(action, ':') + 1);
+	if (std::strncmp(what, "tool:", 5) == 0) {
+		win->setInkTool(n);
+	} else if (std::strncmp(what, "color:", 6) == 0) {
+		const std::vector<std::string>& cs = ink::colors();
+		if (n >= 0 && n < (int)cs.size()) ink::setColor(cs[n]);
+	} else if (std::strncmp(what, "width:", 6) == 0) {
+		ink::setWidthIndex(n);
+	}
+	redraw();
+	return true;
+}
+
+// The tools while Draw is on (the Mac's DrawingBar): pen, highlighter,
+// eraser; the tool's colours and three widths; Clear; Show/Hide; Done. A
+// capsule over the bottom of the canvas.
+void Canvas::drawInkBar(cairo_t* cr, float w, float h) {
+	const bool dark = prefs().dark || win->simView();
+	const Chrome c{ dark };
+	const Color ink = c.barInk(), accent = c.accent();
+	const Color dim = withAlpha(ink, 0.62f);
+	const int tool = ink::tool();
+	const bool hl = ink::highlighter();
+	const char* blocked = win->inkBlockedReason();
+	const bool readOnly = win->pageIsInkReadOnly();
+	const std::vector<std::string>& colors = ink::colors();
+
+	// Its width first, to centre it.
+	const float tb = 28, cb = 26, wb = 30, gap = 4, divW = 9;
+	float total = 10 + 3 * (tb + gap) + divW;
+	if (tool == ink::Eraser) total += textWidth("Erases whole marks", 11) + 12;
+	else total += colors.size() * (cb + gap) + divW + textWidth("Width", 11, true) + 6 + 3 * (wb + gap);
+	const float doneW = textWidth("Done", 12, true) + 18;
+	total += divW + 2 * (tb + gap) + doneW + 8;
+	const float barH = 38;
+	const float bottom = h - 14 - (win->simView() ? 52 + 14 : 0);
+	const float x0 = std::max(8.0f, (w - total) / 2), y0 = bottom - barH;
+	const RectF bar = rectF(x0, y0, x0 + total, bottom);
+	if (blocked) {
+		const float bw = std::min(w - 16, textWidth(blocked, 11) + 24);
+		const RectF note = rectF((w - bw) / 2, y0 - 30, (w + bw) / 2, y0 - 6);
+		fillRound(cr, note, 12, dark ? rgb255(40, 43, 50, 0.95f) : colorF(1, 1, 1, 0.95f));
+		strokeRound(cr, note, 12, withAlpha(ink, 0.14f));
+		drawText(cr, blocked, rectF(note.left + 12, note.top + 5, note.right - 12, note.bottom), 11, dim, TextAlign::Center);
+	}
+	fillRound(cr, rectF(bar.left, bar.top + 2, bar.right, bar.bottom + 3), barH / 2, colorF(0, 0, 0, dark ? 0.32f : 0.12f));
+	fillRound(cr, bar, barH / 2, dark ? rgb255(40, 43, 50, 0.97f) : colorF(0.985f, 0.985f, 0.99f, 0.97f));
+	strokeRound(cr, bar, barH / 2, withAlpha(ink, dark ? 0.16f : 0.12f));
+	const float cy = (bar.top + bar.bottom) / 2;
+	float x = x0 + 10;
+	auto hot = [&] { return hotHit == (int)hits.size(); };
+	auto divider = [&] { fillRect(cr, rectF(x + 4, cy - 9, x + 5, cy + 9), withAlpha(ink, 0.22f)); x += divW; };
+
+	for (int t = 0; t < 3; t++) {
+		const RectF r = rectF(x, cy - 13, x + tb, cy + 13);
+		const bool on = tool == t;
+		const bool off = readOnly || (t != ink::Eraser && blocked != nullptr);
+		if (on) fillRound(cr, r, 6, withAlpha(accent, 0.16f));
+		else if (hot() && !off) fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+		drawToolGlyph(cr, t, r, off ? withAlpha(ink, 0.3f) : on ? accent : withAlpha(ink, 0.8f));
+		if (!off) hits.push_back({ r.left, r.top, r.right, r.bottom, kToolActs[t] });
+		x += tb + gap;
+	}
+	divider();
+	if (tool == ink::Eraser) {
+		drawText(cr, "Erases whole marks", rectF(x + 6, cy - 8, x + 6 + textWidth("Erases whole marks", 11) + 2, cy + 8), 11, dim);
+		x += textWidth("Erases whole marks", 11) + 12;
+	} else {
+		for (size_t i = 0; i < colors.size() && i < 6; i++) {
+			const RectF r = rectF(x, cy - 13, x + cb, cy + 13);
+			const PointF mid = pointF((r.left + r.right) / 2, cy);
+			fillCircle(cr, mid, 8, ink::swatch(colors[i], hl, dark));
+			strokeCircle(cr, mid, 8, withAlpha(ink, 0.25f), 0.5f);
+			if (colors[i] == ink::color()) strokeCircle(cr, mid, 11, accent, 2);
+			else if (hot()) strokeCircle(cr, mid, 11, withAlpha(ink, 0.25f), 1);
+			hits.push_back({ r.left, r.top, r.right, r.bottom, kColorActs[i] });
+			x += cb + gap;
+		}
+		divider();
+		drawText(cr, "Width", rectF(x + 2, cy - 8, x + 2 + textWidth("Width", 11, true) + 2, cy + 8), 11, dim, TextAlign::Leading, true);
+		x += textWidth("Width", 11, true) + 6;
+		const Color line = ink::swatch(ink::color(), hl, dark);
+		const float thick[] = { 2, 4, 7 };
+		for (int i = 0; i < 3; i++) {
+			const RectF r = rectF(x, cy - 13, x + wb, cy + 13);
+			const bool on = ink::widthIndex() == i;
+			if (on) {
+				fillRound(cr, r, 6, withAlpha(accent, 0.16f));
+				strokeRound(cr, rectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 6, withAlpha(accent, 0.7f));
+			} else if (hot()) {
+				fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+			}
+			fillRound(cr, rectF(r.left + 6, cy - thick[i] / 2, r.right - 6, cy + thick[i] / 2), thick[i] / 2, withAlpha(line, on ? 1.0f : 0.6f));
+			hits.push_back({ r.left, r.top, r.right, r.bottom, kWidthActs[i] });
+			x += wb + gap;
+		}
+	}
+	divider();
+	{
+		const RectF r = rectF(x, cy - 13, x + tb, cy + 13);
+		const bool off = !win->pageHasInk() || readOnly;
+		if (hot() && !off) fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+		drawIcon(cr, "user-trash-symbolic", r, 14, withAlpha(ink, off ? 0.3f : 0.8f));
+		if (!off) hits.push_back({ r.left, r.top, r.right, r.bottom, "win.clear-drawing" });
+		x += tb + gap;
+	}
+	{
+		const RectF r = rectF(x, cy - 13, x + tb, cy + 13);
+		if (hot()) fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+		drawEyeIcon(cr, r, withAlpha(ink, 0.8f), !win->drawingShown());
+		hits.push_back({ r.left, r.top, r.right, r.bottom, "win.show-drawing" });
+		x += tb + gap;
+	}
+	{
+		const RectF r = rectF(x, cy - 13, x + doneW, cy + 13);
+		if (hot()) fillRound(cr, r, 7, withAlpha(ink, 0.08f));
+		drawText(cr, "Done", rectF(r.left, cy - 8, r.right, cy + 9), 12, ink, TextAlign::Center, true);
+		hits.push_back({ r.left, r.top, r.right, r.bottom, "win.draw" });
+	}
 }

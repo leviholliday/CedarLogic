@@ -23,12 +23,14 @@
 #include "SyncUI.h"
 #include "Library.h"
 #include "LibraryWindow.h"
+#include "Notes.h"
 #include "Window.h"
 
 #include <algorithm>
 #include <glib/gstdio.h>
 
 #include <clocale>
+#include <cmath>
 #include <cstring>
 #include <functional>
 
@@ -296,6 +298,61 @@ gboolean showCb(gpointer) {
 		        cl_page_link_mark(doc, 0), cl_page_link_mark(doc, 1), cl_page_link_mark(doc, 2));
 		w->edited();
 	}
+	else if (what == "draw") {
+		// Drawing on the circuit: Draw mode on, a pen stroke and a highlighter
+		// stroke round the circuit (through the engine, as the canvas makes
+		// them), saved and opened again, each reported. :0 pictures the
+		// drawing bar; :1 the drawing hidden (the Draw button's dot) and the
+		// notes pane with notes, which Share Link leaves out; :2 the eraser
+		// takes a stroke away and Undo brings it back.
+		CLDocument* doc = w->document();
+		const int pg = w->currentPage();
+		double l = -20, b = -15, r = 20, t = 15;
+		cl_document_page_bounds(doc, pg, &l, &b, &r, &t);
+		const double upp = w->currentCanvas() ? w->currentCanvas()->unitsPerPoint() : 0.05;
+		w->setDrawing(true);
+		auto stroke = [&](int tool, const char* color, double width, double y0, double y1) {
+			cl_ink_begin(doc, pg, tool, color, width, upp);
+			for (int i = 0; i <= 40; i++) {
+				const double f = i / 40.0;
+				CLInkPoint p = { l + (r - l) * f, y0 + (y1 - y0) * f + std::sin(f * 9) * 1.2, -1 };
+				cl_ink_add(doc, &p, 1);
+			}
+			if (cl_ink_end(doc) > 0) w->inkEdited();
+		};
+		stroke(CL_INK_HIGHLIGHTER, "yellow", 1.2, (b + t) / 2, (b + t) / 2);
+		stroke(CL_INK_PEN, "red", 0.25, b - 1, t + 1);
+		fprintf(stderr, "drawing: %d stroke(s) on the page, %ld point(s)\n", cl_ink_stroke_count(doc, pg), cl_ink_point_count(doc, -1));
+		const std::string saved = cl_document_save_text_ex(doc, 0);
+		char err[256] = "";
+		if (CLDocument* again = cl_document_open_text(saved.c_str(), (long)saved.size(), err, sizeof err)) {
+			fprintf(stderr, "drawing: saved and opened again: %d stroke(s)\n", cl_ink_stroke_count(again, pg));
+			cl_document_close(again);
+		} else {
+			fprintf(stderr, "drawing: saved, but it couldn't be opened again: %s\n", err);
+		}
+		if (page == 1) {
+			w->setDrawingShown(false);
+			fprintf(stderr, "drawing: hidden %d, Draw mode %d\n", !cl_ink_shown(doc), w->drawing());
+			cl_notes_set(doc, "Q1: the output is high only when both inputs are.\nTry the clock at a slower speed next time.");
+			w->notesPane()->load();
+			w->toggleNotes();
+			const std::string share = cl_document_save_text_ex(doc, CL_SAVE_NO_NOTES);
+			fprintf(stderr, "notes: %zu character(s); Share Link's copy leaves them out: %s\n", strlen(cl_notes(doc)),
+			        share.find("both inputs") == std::string::npos ? "yes" : "NO");
+		} else if (page == 2) {
+			const int before = cl_ink_stroke_count(doc, pg);
+			cl_ink_erase_begin(doc, pg);
+			for (int i = 0; i <= 20; i++) cl_ink_erase_to(doc, l + (r - l) * i / 20.0, b - 1 + (t - b + 2) * i / 20.0, 1.0);
+			const int erased = cl_ink_erase_end(doc);
+			w->inkEdited();
+			fprintf(stderr, "eraser: %d of %d stroke(s) erased, %d left\n", erased, before, cl_ink_stroke_count(doc, pg));
+			w->undo();
+			fprintf(stderr, "eraser: after Undo, %d stroke(s)\n", cl_ink_stroke_count(doc, pg));
+			w->setInkTool(2);
+		}
+		w->redraw();
+	}
 	else if (what == "lockinplace") {
 		// Every part locked in place (a lock on each), then a nudge that
 		// leaves them put, each reported; :1 unlocks one again.
@@ -428,6 +485,20 @@ GMenuModel* buildMenubar() {
 	g_menu_append(v2, "Side _Panel", "win.palette");
 	g_menu_append(v2, "_Status Bar", "win.status-bar");
 	g_menu_append_section(view, nullptr, G_MENU_MODEL(v2));
+	// Drawing on the circuit and the notes (Ink.h, Notes.h), as the Mac's View menu.
+	GMenu* v3 = g_menu_new();
+	g_menu_append(v3, "Draw on the _Circuit", "win.draw");
+	GMenu* drawing = g_menu_new();
+	g_menu_append(drawing, "_Pen   (P)", "win.ink-pen");
+	g_menu_append(drawing, "_Highlighter   (H)", "win.ink-highlighter");
+	g_menu_append(drawing, "_Eraser   (E)", "win.ink-eraser");
+	GMenu* clear = g_menu_new();
+	g_menu_append(clear, "_Clear Drawing on This Page", "win.clear-drawing");
+	g_menu_append_section(drawing, nullptr, G_MENU_MODEL(clear));
+	g_menu_append_submenu(v3, "Dra_wing", G_MENU_MODEL(drawing));
+	g_menu_append(v3, "Show D_rawing", "win.show-drawing");
+	g_menu_append(v3, "Show _Notes", "win.notes");
+	g_menu_append_section(view, nullptr, G_MENU_MODEL(v3));
 	g_menu_append_submenu(bar, "_View", G_MENU_MODEL(view));
 
 	GMenu* sim = g_menu_new();
@@ -519,10 +590,22 @@ void shareLinkCb(GSimpleAction*, GVariant*, gpointer app) {
 	bool any = false;
 	for (int p = 0; p < cl_document_page_count(doc); p++) any = any || cl_document_gate_count(doc, p) > 0;
 	if (!any) { w->note("There's nothing on the circuit to share yet."); return; }
+	// The notes never go in a link (they're the student's own, and links get
+	// pasted into chats); the drawing goes when it's shown and the link still
+	// fits (the website's DRAWING-NOTES.md 4.11), as on the Mac.
 	const std::string name = w->titleText();
-	const std::string data = sharelink::encode(cl_document_save_text(doc));
-	if (data.empty()) { w->note("Couldn't make a link for this circuit."); return; }
-	const std::string link = std::string(sharelink::kWebBase) + "#" + sharelink::fragment(data, name);
+	auto make = [&](int flags) {
+		const std::string data = sharelink::encode(cl_document_save_text_ex(doc, flags));
+		return data.empty() ? std::string() : std::string(sharelink::kWebBase) + "#" + sharelink::fragment(data, name);
+	};
+	const bool withInk = cl_ink_any(doc) && cl_ink_shown(doc);
+	std::string link = make(withInk ? CL_SAVE_NO_NOTES : CL_SAVE_NO_NOTES | CL_SAVE_NO_INK);
+	if (link.empty()) { w->note("Couldn't make a link for this circuit."); return; }
+	bool leftOutDrawing = false;
+	if (withInk && link.size() > sharelink::kMaxWebLink) {
+		const std::string without = make(CL_SAVE_NO_NOTES | CL_SAVE_NO_INK);
+		if (!without.empty()) { link = without; leftOutDrawing = true; }
+	}
 	if (link.size() > sharelink::kMaxWebLink) {
 		showMessage(w->window(), GTK_MESSAGE_INFO, "This circuit is too big for a link",
 		            format("A link holds the whole circuit, and this one would be about %d KB. Use File \u25B8 Export as CedarLogic File… and send the file instead.",
@@ -530,7 +613,8 @@ void shareLinkCb(GSimpleAction*, GVariant*, gpointer app) {
 		return;
 	}
 	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), link.c_str(), -1);
-	w->note("Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.");
+	w->note(leftOutDrawing ? "Link copied. The link leaves out the drawing; it's too big for a link. Send the file to include it."
+	                       : "Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.");
 }
 
 void openRecentCb(GSimpleAction*, GVariant* param, gpointer app) {

@@ -26,7 +26,18 @@ struct ExportInfo {
 	bool enabled = false;
 	std::string name, why, fileName;
 	bool works = true;
+	bool ink = false;   // the drawing too (Include the drawing), in the colour-print colours
 };
+
+// The page's extent, with the drawing's when it's included.
+bool pageBox(CLDocument* doc, int page, bool ink, double& l, double& b, double& r, double& t) {
+	const bool parts = cl_document_page_bounds(doc, page, &l, &b, &r, &t);
+	double il, ib, ir, it;
+	if (!ink || !cl_ink_bounds(doc, page, &il, &ib, &ir, &it)) return parts;
+	if (!parts) { l = il; b = ib; r = ir; t = it; return true; }
+	l = std::min(l, il); b = std::min(b, ib); r = std::max(r, ir); t = std::max(t, it);
+	return true;
+}
 
 std::string trimmed(const std::string& s) {
 	const size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
@@ -55,7 +66,7 @@ std::vector<std::string> stripLines(const ExportInfo& info, float width, float& 
 
 bool imageSize(CLDocument* doc, int page, const ExportInfo& info, float& w, float& h) {
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return false;
+	if (!pageBox(doc, page, info.ink, l, b, r, t)) return false;
 	w = std::max((float)(r - l) * kPointsPerUnit + 2 * kMargin, info.enabled ? 420.0f : 0.0f);
 	h = (float)(t - b) * kPointsPerUnit + 2 * kMargin;
 	if (info.enabled) {
@@ -75,7 +86,7 @@ void drawImage(cairo_t* cr, CLDocument* doc, int page, float w, float h, double 
 	const float circuitH = h - stripH;
 	fillRect(cr, rectF(0, 0, w, h), colorF(1, 1, 1));
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return;
+	if (!pageBox(doc, page, info.ink, l, b, r, t)) return;
 	const double midX = (l + r) / 2, midY = (b + t) / 2;
 	cairo_save(cr);
 	cairo_rectangle(cr, 0, 0, w, circuitH);
@@ -98,7 +109,7 @@ void drawImage(cairo_t* cr, CLDocument* doc, int page, float w, float h, double 
 		cairo_stroke(cr);
 	}
 	if (!color) {
-		cl_document_draw_fitted(doc, page, cr, w, circuitH, kMargin, scale, CL_STYLE_PRINT);
+		cl_document_draw_fitted_ink(doc, page, cr, w, circuitH, kMargin, scale, CL_STYLE_PRINT, info.ink);
 	} else {
 		const double upp = std::max((r - l) / (w - 2 * kMargin), (t - b) / (circuitH - 2 * kMargin));
 		CLDrawOptions o = {};
@@ -109,6 +120,7 @@ void drawImage(cairo_t* cr, CLDocument* doc, int page, float w, float h, double 
 		o.thumbnail = false;
 		o.showSelection = false;
 		o.selectionFade = 1;
+		o.ink = info.ink ? CL_INK_ALWAYS_PRINT : CL_INK_NEVER;
 		cl_document_draw_ex(doc, page, cr, scale, midX - w / 2 * upp, midY + circuitH / 2 * upp, upp, &o);
 	}
 	cairo_restore(cr);
@@ -158,6 +170,7 @@ struct Form {
 	GtkWidget* preview;
 	GtkWidget* grid;
 	GtkWidget* info;
+	GtkWidget* ink = nullptr;   // only when there's a drawing
 	GtkWidget* name;
 	GtkWidget* works;
 	GtkWidget* why;
@@ -170,6 +183,7 @@ struct Form {
 		State s;
 		s.grid = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(grid));
 		s.info.enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(info));
+		s.info.ink = ink && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ink));
 		s.info.name = gtk_entry_get_text(GTK_ENTRY(name));
 		s.info.works = gtk_combo_box_get_active(GTK_COMBO_BOX(works)) == 0;
 		s.info.why = gtk_entry_get_text(GTK_ENTRY(why));
@@ -183,6 +197,7 @@ struct Form {
 		Prefs& p = prefs();
 		p.exportGrid = s.grid;
 		p.exportInfo = s.info.enabled;
+		if (ink) p.exportInk = s.info.ink;
 		p.studentName = trimmed(s.info.name);
 		p.exportWorks = s.info.works;
 		p.exportProblem = s.info.why;
@@ -275,7 +290,7 @@ std::string chooseImageFile(GtkWindow* parent, const char* title, const char* ac
 void showExportImage(CircuitWindow* win, int page) {
 	CLDocument* doc = win->document();
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) { win->note("This page is empty: nothing to export."); return; }
+	if (!pageBox(doc, page, true, l, b, r, t)) { win->note("This page is empty: nothing to export."); return; }
 	Prefs& p = prefs();
 	Form f;
 	f.win = win;
@@ -307,6 +322,13 @@ void showExportImage(CircuitWindow* win, int page) {
 	f.info = gtk_check_button_new_with_label("Add my name and whether the circuit works");
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(f.info), p.exportInfo);
 	gtk_box_pack_start(GTK_BOX(box), f.info, FALSE, FALSE, 0);
+	// The drawing on the circuit, as the Mac's Include drawing.
+	if (cl_ink_stroke_count(doc, page) > 0 && !cl_ink_page_read_only(doc, page)) {
+		f.ink = gtk_check_button_new_with_label("Include the drawing");
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(f.ink), p.exportInk);
+		gtk_box_pack_start(GTK_BOX(box), f.ink, FALSE, FALSE, 0);
+		g_signal_connect_swapped(f.ink, "toggled", G_CALLBACK(+[](Form* form) { form->changed(); }), &f);
+	}
 
 	GtkWidget* grid = gtk_grid_new();
 	gtk_grid_set_row_spacing(GTK_GRID(grid), 8);

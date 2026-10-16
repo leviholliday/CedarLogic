@@ -9,6 +9,8 @@
 #include "Feedback.h"
 #include "FindBar.h"
 #include "Help.h"
+#include "Ink.h"
+#include "Notes.h"
 #include "Settings.h"
 #include "Shortcuts.h"
 #include "Brand.h"
@@ -92,6 +94,13 @@ const Command kCommands[] = {
 	{ "lock-in-place", [](CircuitWindow* w) { w->toggleLockInPlace(); }, false },
 	{ "unlock-parts", [](CircuitWindow* w) { w->lockSelection(false); }, false },
 	{ "unlock-all", [](CircuitWindow* w) { w->unlockAll(); }, false },
+	{ "draw", [](CircuitWindow* w) { w->toggleDrawing(); }, true },
+	{ "show-drawing", [](CircuitWindow* w) { w->toggleDrawingShown(); }, true },
+	{ "notes", [](CircuitWindow* w) { w->toggleNotes(); }, true },
+	{ "ink-pen", [](CircuitWindow* w) { w->setInkTool(ink::Pen); }, false },
+	{ "ink-highlighter", [](CircuitWindow* w) { w->setInkTool(ink::Highlighter); }, false },
+	{ "ink-eraser", [](CircuitWindow* w) { w->setInkTool(ink::Eraser); }, false },
+	{ "clear-drawing", [](CircuitWindow* w) { w->clearDrawing(); }, false },
 	{ "zoom-in", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->animateZoom(1 / 0.75); }, false },
 	{ "zoom-out", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->animateZoom(0.75); }, false },
 	{ "zoom-fit", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->zoomToFit(true); }, false },
@@ -356,6 +365,9 @@ void CircuitWindow::build() {
 	g_object_set(scopePaned, "wide-handle", TRUE, nullptr);
 	gtk_paned_pack1(GTK_PANED(scopePaned), area, TRUE, FALSE);
 	gtk_box_pack_start(GTK_BOX(row), scopePaned, TRUE, TRUE, 0);
+	// The notes, at the right (View > Show Notes).
+	notes = new NotesPane(this);
+	gtk_box_pack_start(GTK_BOX(row), notes->widget(), FALSE, FALSE, 0);
 
 	statusBar = new StatusBar(this);
 	gtk_box_pack_start(GTK_BOX(v), statusBar->outer(), FALSE, FALSE, 0);
@@ -1376,6 +1388,10 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "switch-pane", splitOpen());
 	setEnabled(win, "close-split", splitOpen());
 	setChecked(win, "status-bar", prefs().showStatus);
+	setChecked(win, "draw", drawingOn);
+	setChecked(win, "show-drawing", drawingShown());
+	setChecked(win, "notes", notesShown());
+	setEnabled(win, "clear-drawing", pageHasInk() && !pageIsInkReadOnly());
 	// The menus' Undo and Redo say what they undo.
 	(void)edit;
 	if (toolbar) toolbar->redraw();
@@ -1554,6 +1570,8 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	cl_document_close(doc);
 	doc = newDoc;
 	path = newPath;
+	drawingOn = false;
+	if (notes) notes->load();
 	forceDirty = false;
 	recovery::remove(recoveryBase);
 	recoveredName.clear();
@@ -1780,6 +1798,9 @@ void CircuitWindow::refreshAfterHistory() {
 			appearStart = g_get_monotonic_time();
 		}
 	}
+	// An undo or redo of a drawing step shows the page it was on.
+	const int inkPage = cl_ink_history_page(doc);
+	if (inkPage >= 0 && inkPage < tabCount() && inkPage != currentPage()) showPage(inkPage);
 	edited();
 }
 
@@ -1916,6 +1937,97 @@ void CircuitWindow::unlockAll() {
 	if (n <= 0) return;
 	edited();
 	note(n == 1 ? std::string("Unlocked 1 part.") : format("Unlocked all %d parts.", n));
+}
+
+// ---- Drawing on the circuit, and the notes -----------------------------------------
+
+void CircuitWindow::markEdited() {
+	changes++;
+	if (autosaveId) g_source_remove(autosaveId);
+	autosaveId = g_timeout_add(2000, autosaveCb, this);
+	updateTitle();
+}
+
+void CircuitWindow::setDrawing(bool on) {
+	if (on == drawingOn) return;
+	if (on) {
+		ink::validate();
+		// Out of whatever was in progress: a gate on the pointer, a drag, Tidy Up's preview.
+		if (hasPendingGate()) clearPendingGate();
+		if (isFloating()) cancelFloating();
+		for (Canvas* c : canvases) if (c->isDragging()) c->cancelDrag();
+		if (tidyActive()) endTidy(true);
+		drawingOn = true;
+		if (!cl_ink_shown(doc)) {
+			cl_ink_set_shown(doc, true);
+			markEdited();
+			note("Drawing shown.");
+		} else {
+			note("Draw: P pen, H highlighter, E eraser, 1 2 3 width. Escape when you're done.");
+		}
+		if (const char* why = inkBlockedReason()) note(why);
+	} else {
+		drawingOn = false;
+		cl_ink_cancel(doc);
+		cl_ink_hover_clear(doc);
+		if (noteText.rfind("Draw", 0) == 0 || noteText.rfind("This drawing", 0) == 0) note("");
+	}
+	for (Canvas* c : canvases) c->drawingChanged();
+	updateActions();
+	redraw();
+}
+
+bool CircuitWindow::drawingShown() const { return cl_ink_shown(doc); }
+
+void CircuitWindow::setDrawingShown(bool shown) {
+	if (cl_ink_shown(doc) == shown) { updateActions(); return; }
+	if (!shown && drawingOn) setDrawing(false);
+	cl_ink_set_shown(doc, shown);
+	markEdited();
+	updateActions();
+	redraw();
+	note(shown ? "Drawing shown." : "Drawing hidden.");
+}
+
+void CircuitWindow::clearDrawing() {
+	if (pageIsInkReadOnly()) { note(ink::kReadOnlyNote); return; }
+	const int n = cl_ink_clear(doc, currentPage());
+	if (n <= 0) { note("Nothing drawn on this page."); return; }
+	edited();
+	note("Cleared the drawing on this page. Undo brings it back.");
+}
+
+void CircuitWindow::setInkTool(int tool) {
+	ink::validate();
+	ink::setTool(tool);
+	if (!drawingOn) setDrawing(true);
+	note(ink::toolName(tool));
+	for (Canvas* c : canvases) c->drawingChanged();
+	redraw();
+}
+
+const char* CircuitWindow::inkBlockedReason() const {
+	switch (cl_ink_can_draw(doc, currentPage())) {
+	case CL_INK_READ_ONLY: return ink::kReadOnlyNote;
+	case CL_INK_FULL: return ink::kFullNote;
+	default: return nullptr;
+	}
+}
+
+bool CircuitWindow::pageHasInk() const { return cl_ink_stroke_count(doc, currentPage()) > 0; }
+bool CircuitWindow::pageIsInkReadOnly() const { return cl_ink_page_read_only(doc, currentPage()); }
+bool CircuitWindow::hasHiddenDrawing() const { return cl_ink_any(doc) && !cl_ink_shown(doc); }
+
+void CircuitWindow::inkEdited() { edited(); }
+
+bool CircuitWindow::notesShown() const { return notes && notes->shown(); }
+
+void CircuitWindow::toggleNotes() {
+	if (!notes) return;
+	const bool on = !notes->shown();
+	notes->setShown(on);
+	if (!on) if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget());
+	updateActions();
 }
 
 void CircuitWindow::tidy(int mode) {
@@ -2091,6 +2203,22 @@ static void disconnectCb(GtkMenuItem*, gpointer data) {
 		cl_edit_disconnect_pin(mp->w->document(), mp->w->currentPage(), mp->x, mp->y, c->unitsPerPoint());
 		mp->w->edited();
 	});
+}
+
+// Right-click while drawing: the drawing's own menu.
+void CircuitWindow::showInkMenu(GdkEventButton* e) {
+	GtkWidget* menu = gtk_menu_new();
+	gtk_menu_attach_to_widget(GTK_MENU(menu), win, nullptr);
+	updateActions();
+	menuItem(menu, "_Clear Drawing on This Page", "win.clear-drawing");
+	menuItem(menu, "_Hide Drawing", "win.show-drawing");
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+	menuItem(menu, "_Done Drawing", "win.draw");
+	gtk_widget_show_all(menu);
+	g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* m, gpointer) {
+		g_idle_add([](gpointer w) -> gboolean { gtk_widget_destroy(GTK_WIDGET(w)); return G_SOURCE_REMOVE; }, m);
+	}), nullptr);
+	gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent*)e);
 }
 
 void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventButton* e) {

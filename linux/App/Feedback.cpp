@@ -824,7 +824,8 @@ void startSending(Form* f) {
 	if (d.includeCircuit) {
 		const std::string file = folder() + "/" + uniqueId() + "-circuit.cdl";
 		const bool wasDirty = d.win->isDirty();
-		const char* text = cl_document_save_text(d.win->document());
+		// Never the student's notes (as on the Mac); the drawing goes along.
+		const char* text = cl_document_save_text_ex(d.win->document(), CL_SAVE_NO_NOTES);
 		const bool written = text && writeAll(file, text);
 		if (wasDirty) d.win->saveQuietly(false);   // asking for the text marked it saved
 		if (written) {
