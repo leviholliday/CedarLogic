@@ -240,6 +240,16 @@ jobs:
           mkdir -p renders
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
             --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag.txt || true
+          # Labels as Cairo's cached glyphs (CEDARLOGIC_GLYPH_TEXT=1, not the default yet):
+          # the same picture and the same benchmark, to compare.
+          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --screenshot renders/window-Lab5-glyphs.png format/tests/fixtures/Lab5.cdl || true
+          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --screenshot renders/window-practice-glyphs.png res/samples/practice.cdl || true
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --screenshot renders/window-practice-paths.png res/samples/practice.cdl || true
+          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag-glyphs.txt || true
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7

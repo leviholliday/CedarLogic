@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 
 namespace cl {
@@ -395,7 +396,21 @@ void CairoScene::text(render::Point origin, const char* utf8, float pixelHeight,
 	const cairo_matrix_t m = current();
 	cairo_matrix_multiply(&full, &place, &m);
 	cairo_new_path(ctx);
-	if (usable(full)) {
+	// CEDARLOGIC_GLYPH_TEXT=1: Cairo's cached glyphs (cairo_show_glyphs, about
+	// 12x faster, SMOOTHNESS.md) in place of each glyph's outline filled as a
+	// path. Off until pictures drawn both ways look the same.
+	static const bool cachedGlyphs = [] { const char* v = getenv("CEDARLOGIC_GLYPH_TEXT"); return v && strcmp(v, "1") == 0; }();
+	if (usable(full) && cachedGlyphs) {
+		const render::Color mc = mapped(c);
+		cairo_save(ctx);
+		cairo_transform(ctx, &full);
+		cairo_set_font_face(ctx, labelFace());
+		cairo_set_font_size(ctx, kGlyphUnits);
+		cairo_set_font_options(ctx, outlineOptions());
+		cairo_set_source_rgba(ctx, mc.r, mc.g, mc.b, mc.a);
+		cairo_show_glyphs(ctx, glyphs, n);
+		cairo_restore(ctx);
+	} else if (usable(full)) {
 		cairo_save(ctx);
 		cairo_transform(ctx, &full);
 		cairo_set_font_face(ctx, labelFace());
