@@ -345,6 +345,7 @@ gboolean showCb(gpointer) {
 		double l = -20, b = -15, r = 20, t = 15;
 		cl_document_page_bounds(doc, pg, &l, &b, &r, &t);
 		const double upp = w->currentCanvas() ? w->currentCanvas()->unitsPerPoint() : 0.05;
+		prefs().inkTool = 0;   // the pen, whatever an earlier run left
 		w->setDrawing(true);
 		auto stroke = [&](int tool, const char* color, double width, double y0, double y1) {
 			cl_ink_begin(doc, pg, tool, color, width, upp);

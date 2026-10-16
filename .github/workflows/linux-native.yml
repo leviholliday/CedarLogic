@@ -181,7 +181,7 @@ jobs:
           cp "$SYNCHOME/CedarLogic/Sync/secret" "$SECOND/data/CedarLogic/Sync/secret"
           printf '[CedarLogic]\nstudentName=Robin Lab\nhasSeenWelcome=true\n' > "$SECOND/config/CedarLogic/native.ini"
           XDG_DATA_HOME="$SECOND/data" XDG_CONFIG_HOME="$SECOND/config" CL_SYNC_DEVICE_NAME="Lab PC" CL_SYNC_URL="$SYNCURL" \
-            xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 "$APPIMAGE" --hold 8 --screenshot renders/sync-second-device.png \
+            xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 "$APPIMAGE" --hold 15 --screenshot renders/sync-second-device.png \
             res/samples/practice.cdl || echo "no second device"
           rm -rf "$SECOND"
           XDG_DATA_HOME="$SYNCHOME" CL_SYNC_URL="$SYNCURL" xvfb-run -a -s "-screen 0 1600x1000x24" \

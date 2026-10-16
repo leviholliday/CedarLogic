@@ -1474,7 +1474,7 @@ void Canvas::drawingChanged() {
 		if (pointerInside) setCursor(area, nullptr);
 	} else if (pointerInside) {
 		setCursor(area, "crosshair");
-		inkHover(lastX, lastY);
+		inkHoverAtPointer();
 	}
 	redraw();
 }
@@ -1571,6 +1571,20 @@ void Canvas::inkRelease(GdkEventButton* e) {
 	redraw();
 }
 
+// The hover where the pointer really is (not where it last moved: a key or
+// the menu can change the tool before any move), when it's over the canvas.
+void Canvas::inkHoverAtPointer() {
+	GdkWindow* w = gtk_widget_get_window(area);
+	GdkDisplay* display = w ? gdk_window_get_display(w) : nullptr;
+	GdkSeat* seat = display ? gdk_display_get_default_seat(display) : nullptr;
+	GdkDevice* pointer = seat ? gdk_seat_get_pointer(seat) : nullptr;
+	if (pointer == nullptr) return;
+	double x = 0, y = 0;
+	gdk_window_get_device_position_double(w, pointer, &x, &y, nullptr);
+	if (x < 0 || y < 0 || x >= width() || y >= height()) return;
+	inkHover(x, y);
+}
+
 // What the pointer would draw: a dot of the stroke, or the eraser's ring.
 void Canvas::inkHover(double vx, double vy) {
 	CLDocument* doc = win->document();
@@ -1606,13 +1620,13 @@ bool Canvas::inkKey(GdkEventKey* e) {
 		if (ink::tool() == ink::Eraser) return true;
 		ink::setWidthIndex(width);
 		win->note(std::string(ink::widthName(width)) + " line");
-		inkHover(lastX, lastY);
+		inkHoverAtPointer();
 		return true;
 	}
 	const int tool = k == GDK_KEY_p ? ink::Pen : k == GDK_KEY_h ? ink::Highlighter : k == GDK_KEY_e ? ink::Eraser : -1;
 	if (tool < 0) return false;
 	win->setInkTool(tool);
-	inkHover(lastX, lastY);
+	inkHoverAtPointer();
 	return true;
 }
 

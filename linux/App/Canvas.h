@@ -226,6 +226,7 @@ private:
 	void inkMotion(GdkEventMotion* e);
 	void inkRelease(GdkEventButton* e);
 	void inkHover(double vx, double vy);
+	void inkHoverAtPointer();
 	void endInkStroke(bool keep);
 	bool inkKey(GdkEventKey* e);
 	void drawInkBar(cairo_t* cr, float w, float h);
