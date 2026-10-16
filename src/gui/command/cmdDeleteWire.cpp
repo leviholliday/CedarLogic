@@ -36,6 +36,13 @@ bool cmdDeleteWire::Do() {
 	cmdList.push(std::unique_ptr<klsCommand>(movewire));
 
 	for (unsigned int j = 0; j < destroyList.size(); j++) {
+		// Disconnecting a pin also disconnects the pin sharing its spot (a RAM's
+		// DATA_IN_n and DATA_OUT_n), so that one may be gone already. Disconnecting
+		// it again made Undo connect both pins twice, leaving doubled records.
+		bool held = false;
+		for (const wireConnection &c : wire->getConnections())
+			if (c.gid == destroyList[j].gid && c.connection == destroyList[j].connection) held = true;
+		if (!held) continue;
 		cmdDisconnectWire* disconn = new cmdDisconnectWire(gCircuit, wireIds[0], destroyList[j].gid, destroyList[j].connection, true);
 		cmdList.push(std::unique_ptr<klsCommand>(disconn));
 		disconn->Do();

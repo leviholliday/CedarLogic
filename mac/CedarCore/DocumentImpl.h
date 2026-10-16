@@ -44,6 +44,9 @@ struct EditGesture {
 	float dragSlop = 0.3f;        // world units the pointer may wander before it's a drag
 	std::vector<GateState> preMove;
 	std::vector<WireState> preMoveWire;
+	// Wires that aren't selected but end on a part being moved: they reshape as the
+	// part goes, so Escape needs their old shape to put them back.
+	std::vector<WireState> preMoveAttached;
 	GLPoint2f lastDelta;
 	klsBBox box;
 	// Moving: connections C made mid-move (wx pendingConnects). Applied at

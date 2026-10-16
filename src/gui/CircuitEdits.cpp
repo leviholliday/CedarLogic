@@ -134,6 +134,13 @@ klsCommand* gateWireConnection(GUICircuit* gCircuit, GUICanvas* page, IDType gat
 		return nullptr;
 	}
 
+	// A pin belongs to one wire. Joining one that is already on a different
+	// wire left both wires holding it, and deleting the gate later detached
+	// only one, so the other kept a connection to a gate that no longer existed.
+	if (gate->isConnected(hotspot)) {
+		return nullptr;
+	}
+
 	cmdConnectWire *command = new cmdConnectWire(gCircuit, wireId, gateId, hotspot);
 
 	if (command->validateBusLines()) {
@@ -154,6 +161,12 @@ klsCommand* gateConnection(GUICircuit* gCircuit, GUICanvas* page, IDType gate1Id
 
 	// Don't connect a hotspot to itself.
 	if (gate1 == gate2 && hotspot1 == hotspot2) {
+		return nullptr;
+	}
+	// Nor to the pin sharing its spot (a RAM's DATA_IN_n and DATA_OUT_n): the
+	// two are joined already, and connecting one connects both, so this wire
+	// would hold each pin twice.
+	if (gate1 == gate2 && gate1->getHotspotPal(hotspot1) == hotspot2) {
 		return nullptr;
 	}
 

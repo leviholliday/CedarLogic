@@ -17,6 +17,7 @@
 #include "render/RenderStyle.h"
 #include "route/WireRoute.h"
 #include "Settings.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <stack>
@@ -951,9 +952,14 @@ void guiWire::mergeSegments() {
 			wireSegment* nSeg = &(walkNewSegs->second);
 			// Only merge with segs of same orientation
 			if (cSeg->isVertical() != nSeg->isVertical()) { walkNewSegs++; continue; }
-			// Now check channel, if not the same then don't bother
-			if (cSeg->isVertical() && (cSeg->begin.x != nSeg->begin.x)) { walkNewSegs++; continue; }
-			if (cSeg->isHorizontal() && (cSeg->begin.y != nSeg->begin.y)) { walkNewSegs++; continue; }
+			// Now check channel, if not the same then don't bother. "The same" within
+			// EQUALRANGE, as removeZeroLengthSegments judges length: a rotated part's
+			// pins can sit a few millionths off the grid, and a jog that short was
+			// removed there as zero length while the two runs either side of it,
+			// told apart here by those millionths, were never joined -- leaving
+			// the wire in two pieces (each trimmed to a dot on its pin).
+			if (cSeg->isVertical() && std::fabs(cSeg->begin.x - nSeg->begin.x) > EQUALRANGE) { walkNewSegs++; continue; }
+			if (cSeg->isHorizontal() && std::fabs(cSeg->begin.y - nSeg->begin.y) > EQUALRANGE) { walkNewSegs++; continue; }
 			// Now a valid check can be made on endpoints.  Consider that for horizontal
 			//	segments, begin's x is always less than end's x (same for y's in vertical)
 			if (cSeg->isVertical() && ((cSeg->begin.y >= nSeg->begin.y - EQUALRANGE && cSeg->begin.y <= nSeg->end.y + EQUALRANGE) ||
@@ -1079,7 +1085,11 @@ void guiWire::mergeSegments() {
 				if (mapped == mapIDs.end()) continue;
 				map< long, wireSegment >::iterator target = newSegMap.find(mapped->second);
 				if (target == newSegMap.end()) continue;
-				if (target->second.isVertical() != (segWalk->second).isVertical()) newIsectVector.push_back(mapped->second);
+				// Two old segments merged into one map to the same id: keep it once,
+				// or the crossing is saved twice and a reload drops the copy.
+				if (target->second.isVertical() != (segWalk->second).isVertical() &&
+					std::find(newIsectVector.begin(), newIsectVector.end(), mapped->second) == newIsectVector.end())
+					newIsectVector.push_back(mapped->second);
 			}
 			(isectWalk->second) = newIsectVector;
 			isectWalk++;
@@ -1090,6 +1100,23 @@ void guiWire::mergeSegments() {
 	}
 
 	commitSegMap(std::move(newSegMap));  // Assign the new tree
+
+	// Trimming above can shrink a segment to a point (a branch whose junction
+	// is on its pin), and zero-length segments are only cleared at the start.
+	// Left in, the next merge -- the one a reload does -- removes it, so the
+	// wire saved differently after Save and Reopen. One more pass clears it
+	// (or, for a wire that is all one point, settles it as segment 0).
+	static thread_local bool secondPass = false;
+	if (!secondPass) {
+		bool dot = false;
+		for (const auto &s : segMap) if (s.second.begin == s.second.end) dot = true;
+		if (dot) {
+			secondPass = true;
+			mergeSegments();
+			secondPass = false;
+			return;
+		}
+	}
 
 	generateRenderInfo();
 }

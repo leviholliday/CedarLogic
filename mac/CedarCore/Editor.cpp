@@ -5,6 +5,7 @@
 // OnMouseMove / OnMouseUp for the parts it covers.
 
 #include "DocumentImpl.h"
+#include <set>
 #include "GateLibrary.h"
 #include "guiGate.h"
 #include "guiWire.h"
@@ -445,7 +446,24 @@ void cl_edit_drag(CLDocument* doc, double x, double y) {
 		if (std::fabs(m.x - g.start.x) < g.dragSlop && std::fabs(m.y - g.start.y) < g.dragSlop) return;
 		g.preMove.clear();
 		g.preMoveWire.clear();
+		g.preMoveAttached.clear();
 		snapshotSelection(doc, page, g.preMove, g.preMoveWire);
+		// The wires that end on a moving part but aren't moving whole: remember their
+		// shape, so Escape can put them back with the part.
+		{
+			std::set<unsigned long> whole;
+			for (auto& ws : g.preMoveWire) whole.insert(ws.id);
+			for (auto& gs : g.preMove) {
+				guiGate* gt = doc->circuit.getGate(gs.id);
+				if (gt == nullptr) continue;
+				for (auto& hs : gt->getHotspotList()) {
+					if (!gt->isConnected(hs.first)) continue;
+					guiWire* w = gt->getConnection(hs.first);
+					if (w == nullptr || !whole.insert(w->getID()).second) continue;
+					g.preMoveAttached.emplace_back((unsigned int)w->getID(), GLPoint2f(), w->getSegmentMap());
+				}
+			}
+		}
 		// A drag that started on a lone wire waits for stage 3 (segment drags).
 		g.mode = g.preMove.empty() ? EditGesture::None : EditGesture::Moving;
 	}
@@ -543,6 +561,7 @@ void cl_edit_cancel(CLDocument* doc) {
 		// shape, so it's trimmed to where its pins really are.
 		for (auto& gs : g.preMove) if (guiGate* gt = doc->circuit.getGate(gs.id)) gt->setGLcoords(gs.x, gs.y, true);
 		for (auto& ws : g.preMoveWire) if (guiWire* w = doc->circuit.getWire(ws.id)) w->setSegmentMap(ws.oldWireTree);
+		for (auto& ws : g.preMoveAttached) if (guiWire* w = doc->circuit.getWire(ws.id)) w->setSegmentMap(ws.oldWireTree);
 	}
 	if (GUICanvas* page = doc->page(g.page)) page->collisionUpdate();
 	g = EditGesture();
