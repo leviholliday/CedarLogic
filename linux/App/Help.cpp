@@ -154,6 +154,8 @@ const std::vector<Page>& pages() {
 		    p("Click a switch to flip it; keypads and pulse generators take clicks too."),
 		    p("**Simulation View (Ctrl+R)** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the "
 		      "bar at the bottom shows every switch and light. Space pauses, Escape leaves."),
+		    p("**Projector Mode** (the Simulate menu, or the projector button on that bar) draws Simulation View for the back of the "
+		      "room: thick wires, big labels and lights. Escape still leaves Simulation View, and the button turns it off."),
 		    p("**Lock** (in the toolbar) stops edits, so a circuit can be shown and played with but not changed. Switches still work.") },
 		  false },
 		{ "analysis", "Truth Tables and the Oscilloscope", "view-grid-symbolic", "See what a circuit does.",
@@ -180,7 +182,8 @@ const std::vector<Page>& pages() {
 		  false },
 		{ "find", "Finding Things", "edit-find-symbolic", "Big circuits, found fast.",
 		  { p("**Find (Ctrl+F)** searches every page for labels, **TO/FROM** names and parts (\"flip\", \"AND\", \"LED\"). Enter goes to "
-		      "the next one; each is selected and brought to the middle."),
+		      "the next one; each is selected and brought to the middle. **F3** and **Shift+F3** (Find Next and Find Previous, in the Edit "
+		      "menu) step through them from anywhere in the window."),
 		    p("With a label or a TO/FROM selected, Find opens looking for its name, so a TO's FROMs are an Enter away.") },
 		  false },
 		{ "saving", "Saving, Your Circuits and Versions", "document-open-recent-symbolic", "It keeps itself.",
