@@ -380,6 +380,21 @@ gboolean showCb(gpointer) {
 		}
 		w->redraw();
 	}
+	else if (what == "projector") {
+		// Projector Mode: on (it opens Simulation View), pictured; Escape's
+		// way out (leaving Simulation View) is run and reported, then it's
+		// shown again for the picture. :1 turns it off again too.
+		prefs().projector = false;
+		w->toggleProjector();
+		fprintf(stderr, "projector: on %d, Simulation View %d\n", prefs().projector, w->simView());
+		w->toggleSimView();
+		fprintf(stderr, "projector: after Escape, Simulation View %d (the editing view is back)\n", w->simView());
+		w->toggleSimView();
+		if (page == 1) {
+			w->toggleProjector();
+			fprintf(stderr, "projector: off again %d\n", !prefs().projector);
+		}
+	}
 	else if (what == "lockinplace") {
 		// Every part locked in place (a lock on each), then a nudge that
 		// leaves them put, each reported; :1 unlocks one again.
@@ -536,6 +551,7 @@ GMenuModel* buildMenubar() {
 	g_menu_append(m1, "_Step Once", "win.step");
 	g_menu_append(m1, "Step _Clock   (K)", "win.step-clock");
 	g_menu_append(m1, "Simulation _View", "win.sim-view");
+	g_menu_append(m1, "_Projector Mode", "win.projector");
 	g_menu_append(m1, "_Lock the Circuit", "win.lock");
 	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m1));
 	GMenu* m2 = g_menu_new();

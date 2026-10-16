@@ -72,7 +72,11 @@ struct Prefs {
 	int inkTool = 0;              // 0 pen, 1 highlighter, 2 eraser
 	std::string inkPenColor = "ink", inkHighlighterColor = "yellow";
 	double inkPenWidth = 0.25, inkHighlighterWidth = 1.2;
-	bool exportInk = true;        // Export as Image: the drawing too, when there is one
+	bool exportInk = true;
+	// Simulation View drawn for a projector (the Mac's Projector Mode): thick
+	// wires, big labels and lights, brighter colours. Only in Simulation View,
+	// so Escape (leaving it) puts the laptop's view back.
+	bool projector = false;        // Export as Image: the drawing too, when there is one
 	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string studentName;                      // for the Lab Page template and exports
 	// Build from Formula: what was typed last, and how to build it.

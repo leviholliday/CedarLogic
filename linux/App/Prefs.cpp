@@ -124,6 +124,7 @@ void Prefs::load() {
 		inkPenWidth = readDouble(k, "inkPenWidth", inkPenWidth, 0.05, 3);
 		inkHighlighterWidth = readDouble(k, "inkHighlighterWidth", inkHighlighterWidth, 0.05, 5);
 		exportInk = readBool(k, "exportInk", exportInk);
+		projector = readBool(k, "projector", projector);
 		newPagesShareLinks = readBool(k, "newPagesShareLinks", newPagesShareLinks);
 		lastFormula = readString(k, "lastFormula", lastFormula);
 		buildShape = readInt(k, "buildShape", buildShape, 0, 2);
@@ -229,6 +230,7 @@ void Prefs::save() const {
 	g_key_file_set_double(k, kGroup, "inkPenWidth", inkPenWidth);
 	g_key_file_set_double(k, kGroup, "inkHighlighterWidth", inkHighlighterWidth);
 	g_key_file_set_boolean(k, kGroup, "exportInk", exportInk);
+	g_key_file_set_boolean(k, kGroup, "projector", projector);
 	g_key_file_set_boolean(k, kGroup, "newPagesShareLinks", newPagesShareLinks);
 	g_key_file_set_string(k, kGroup, "lastFormula", lastFormula.c_str());
 	g_key_file_set_integer(k, kGroup, "buildShape", buildShape);

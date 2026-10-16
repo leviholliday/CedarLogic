@@ -350,6 +350,7 @@ void Canvas::drawSimBar(cairo_t* cr, float w, float h) {
 		const bool ready = win->hasManualClock();
 		button(Icon::StepClock, false, withAlpha(ink, ready ? 1.0f : 0.35f), "win.step-clock");
 	}
+	button("video-display-symbolic", prefs().projector, prefs().projector ? on : ink, "win.projector");
 	x += 6;
 	divider();
 	// Speed, fast on the right.
@@ -593,13 +594,26 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 		cairo_save(cr);
 		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
 	}
-	cl_document_draw_ex(doc, p, cr, scale, originX, originY, upp, &o);
+	const bool projector = sim && prefs().projector;
+	if (projector) {
+		// Projector Mode: Simulation View drawn big and bright (the Mac's).
+		CLSimViewStyle st{};
+		st.accent = prefs().accent;
+		st.wireScale = prefs().wireScale();
+		st.projector = true;
+		st.predict = false;
+		st.ink = CL_INK_FOLLOW;
+		cl_simview_draw_page(doc, p, cr, scale, originX, originY, upp, &st);
+	} else {
+		cl_document_draw_ex(doc, p, cr, scale, originX, originY, upp, &o);
+	}
 	if (coarse) cairo_restore(cr);
 	// The stroke being drawn and the hover preview, over everything else.
 	const bool live = cl_ink_live_page(doc) == p;
 	if (sim) {
-		cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
-		if (live) cl_ink_draw_live(doc, cr, scale, originX, originY, upp, dark, false);
+		cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(),
+		                     prefs().wireScale() * (projector ? CL_PROJECTOR_WIRE_SCALE : 1));
+		if (live) cl_ink_draw_live(doc, cr, scale, originX, originY, upp, dark, projector);
 		return;
 	}
 	const RGBA a = accentColor(dark);

@@ -123,6 +123,7 @@ const Command kCommands[] = {
 	{ "step", [](CircuitWindow* w) { w->stepOnce(); }, false },
 	{ "step-clock", [](CircuitWindow* w) { w->stepClock(); }, false },
 	{ "sim-view", [](CircuitWindow* w) { w->toggleSimView(); }, true },
+	{ "projector", [](CircuitWindow* w) { w->toggleProjector(); }, true },
 	{ "lock", [](CircuitWindow* w) { w->toggleLock(); }, true },
 	{ "truth-table", [](CircuitWindow* w) { w->makeTruthTable(); }, false },
 	{ "check-circuit", [](CircuitWindow* w) { w->checkCircuit(); }, false },
@@ -1382,6 +1383,7 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "step-clock", hasManualClock());
 	setChecked(win, "running", isRunning);
 	setChecked(win, "sim-view", simViewOn);
+	setChecked(win, "projector", prefs().projector);
 	setChecked(win, "lock", lockedOn);
 	setChecked(win, "dark", prefs().dark);
 	setChecked(win, "palette", prefs().showPalette);
@@ -2375,6 +2377,14 @@ void CircuitWindow::toggleSimView() {
 	updateActions();
 	updateBanner();
 	for (Canvas* c : canvases) c->redraw();
+}
+
+void CircuitWindow::toggleProjector() {
+	prefs().projector = !prefs().projector;
+	prefs().save();
+	if (prefs().projector && !simViewOn) toggleSimView();
+	for (CircuitWindow* o : circuitWindows()) { o->updateActions(); o->redraw(); }
+	note(prefs().projector ? "Projector Mode: thick wires, big labels and lights. Escape leaves Simulation View." : "Projector Mode off.");
 }
 
 void CircuitWindow::toggleLock() {

@@ -302,6 +302,9 @@ public:
 	static const char* stepClockOffTip;
 	void setStepMs(int ms);
 	void toggleSimView();
+	// Projector Mode (Simulate menu, and the Simulation View bar): on, it
+	// opens Simulation View too; Escape or Done leaves it as ever.
+	void toggleProjector();
 	void toggleLock();
 	void makeTruthTable();
 	void checkCircuit();   // the truth table at its Check tab
