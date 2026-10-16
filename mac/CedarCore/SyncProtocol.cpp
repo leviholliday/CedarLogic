@@ -519,7 +519,7 @@ void putBase(std::string& o, const std::string* baseName, const std::string* bas
 
 }  // namespace
 
-std::string readPayload(const std::string& bytes, Payload& p) {
+std::string readPayload(const std::string& bytes, Payload& p, const std::vector<std::string>* sideKinds) {
 	p = Payload();
 	if (!validUtf8(bytes)) return "invalid";
 	json::Value v;
@@ -530,6 +530,10 @@ std::string readPayload(const std::string& bytes, Payload& p) {
 	const json::Value* k = v.get("kind");
 	if (!k || !k->isString()) return "invalid";
 	p.kind = k->s;
+	if (sideKinds && std::find(sideKinds->begin(), sideKinds->end(), p.kind) != sideKinds->end()) {
+		p.raw = bytes;   // the module checks its own fields
+		return std::string();
+	}
 	if (p.kind != "circuit" && p.kind != "deleted" && p.kind != "device") return "newer";
 	for (const char* f : { "device", "deviceId" })
 		if (const json::Value* x = v.get(f))
@@ -589,6 +593,45 @@ std::string tombstoneJson(int64_t deletedAt, const std::string& device, const st
 std::string deviceJson(const std::string& device, const std::string& deviceId, const std::string& client, int64_t lastSyncAt) {
 	return "{\"v\":1,\"kind\":\"device\",\"device\":" + json::quote(device) + ",\"deviceId\":" + json::quote(deviceId) +
 	       ",\"client\":" + json::quote(client) + ",\"lastSyncAt\":" + std::to_string(lastSyncAt < 0 ? 0 : lastSyncAt) + "}";
+}
+
+std::string profileName(const std::string& name) {
+	const std::string n = normalizeName(name);
+	size_t count = 0, i = 0;
+	for (; i < n.size(); i++)
+		if (((unsigned char)n[i] & 0xC0) != 0x80) {
+			if (count == 80) break;
+			count++;
+		}
+	return n.substr(0, i);
+}
+
+std::string profileJson(const std::string& name, int64_t modifiedAt, const std::string& device, const std::string& deviceId) {
+	return "{\"v\":1,\"kind\":\"profile\",\"name\":" + json::quote(profileName(name)) + ",\"modifiedAt\":" +
+	       std::to_string(modifiedAt < 0 ? 0 : modifiedAt) + ",\"device\":" + json::quote(device) +
+	       ",\"deviceId\":" + json::quote(deviceId) + "}";
+}
+
+bool readProfile(const std::string& text, Profile& out) {
+	json::Value v;
+	if (!json::parse(text, v) || !v.isObject()) return false;
+	const json::Value *ver = v.get("v"), *kind = v.get("kind"), *name = v.get("name"), *at = v.get("modifiedAt");
+	if (!ver || !ver->isInt() || ver->i() != 1 || !kind || !kind->isString() || kind->s != "profile") return false;
+	if (!name || !name->isString() || !at || !at->isInt()) return false;
+	out.name = profileName(name->s);
+	out.modifiedAt = at->i();
+	return true;
+}
+
+Profile pickProfile(const std::vector<std::pair<std::string, std::string>>& records) {
+	Profile best;
+	for (const auto& r : records) {
+		Profile p;
+		if (!readProfile(r.second, p)) continue;
+		p.rid = r.first;
+		if (!best.has() || p.modifiedAt > best.modifiedAt || (p.modifiedAt == best.modifiedAt && p.rid > best.rid)) best = p;
+	}
+	return best;
 }
 
 int64_t effectiveTime(int64_t stamp, int64_t serverAt) {

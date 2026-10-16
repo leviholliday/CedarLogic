@@ -37,7 +37,7 @@ else
 	LIBS+=(-pthread)
 fi
 SRC=($(ls mac/CedarCore/Sync*.cpp | grep -v SyncGateDefaults) mac/CedarCore/QrCodeGen.cpp mac/Tools/sync_selftest.cpp
-	format/circuit_file_io.cpp format/legacy_cdl.cpp format/numeric.cpp format/sexpr.cpp)
+	format/circuit_file_io.cpp format/ink.cpp format/legacy_cdl.cpp format/numeric.cpp format/sexpr.cpp)
 echo "Building $OUT/$NAME..."
 "$CXX" "${FLAGS[@]}" "${INC[@]}" "${SRC[@]}" "${LIBS[@]}" -o "$OUT/$NAME"
 

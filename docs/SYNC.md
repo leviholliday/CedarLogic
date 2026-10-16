@@ -428,6 +428,16 @@ texts are "the same" only when identical).
   Wire ids, segments, routing, junction points and buses' extra ids are
   ignored.
 
+- The drawing and the notes (the website's `docs/DRAWING-NOTES.md` §3.6), only
+  when there is something to say, so a circuit without them keeps its text and
+  hash: a line per stroke on a page with a readable drawing,
+  `D <page> <esc(tool)> <esc(color)> <width in thousandths> <x0>,<y0>,<x1>,<y1>,… [p:<pressure>]`
+  (points in absolute centi-units), and `N <esc(notes)>` when the notes hold
+  something other than space, tab and LF. A drawing of an unknown version and
+  the show/hide flag add nothing (showing or hiding is runtime-only). Vectors:
+  `format/tests/fixtures/drawing/structure.json`, checked by
+  `mac/Tools/ink_check`.
+
 `esc(s)` = the UTF-8 bytes of `s`, each byte outside `[A-Za-z0-9_.:-]` written
 `%XX` (upper-case hex). All lines are sorted (they are ASCII, so byte order),
 each ends with LF, and the text is `"cedarlogic-structure/1\n"` followed by the
@@ -441,6 +451,16 @@ client doesn't know has no defaults (all its params are kept). If two libraries
 ever disagreed on a default, the cost is a spurious "changed" or conflict
 version for that gate type, never lost data; the vectors include gates with
 defaults that matter (a toggle, an LED, a register, a label).
+
+A default added to the library later must not change the digest of files
+written before it in clients that don't have it yet. So a parameter added with
+a default is written only when it differs from that default: the clock's
+`MANUAL` ("Only on Step Clock", library default `false`) is saved only as
+`"true"`, by the apps and by CedarLogic Online alike. A running clock's file is
+then byte for byte what older versions wrote, and an older client (no `MANUAL`
+in its library) keeps `l:MANUAL=true` exactly as a newer one does. An older
+app opens a manual clock as a running one, keeps the parameter and saves it
+again.
 
 What it means: moving a gate, adding or removing one, changing a parameter a
 person sets (label text, input count, a register's max count) or a connection

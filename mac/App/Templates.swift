@@ -1,5 +1,9 @@
 // Templates: File ▸ New from Template starts a circuit from a built-in
-// starter (a lab page, a counter, a 7-segment decoder) or one of yours;
+// starter (a lab page, a counter, a 7-segment decoder, each kind of
+// flip-flop and latch, ready to run, five registers, combinational circuits
+// and a 3-bit counter, and four circuits with a classic mistake in them to
+// find; several with a second page, the same thing built from gates, as
+// the website's examples: TemplatesExamples.swift) or one of yours;
 // File ▸ Save as Template keeps the circuit you're in as one of yours.
 //
 // Yours are folders in ~/Library/Application Support/CedarLogic/Templates,
@@ -16,6 +20,34 @@ struct CircuitTemplate: Identifiable, Hashable {
     let text: String
     /// Yours (a folder), or nil for a built-in one.
     let folder: URL?
+    /// The picker's heading for a built-in one.
+    var group = "Built In"
+    /// A flip-flop's text with a running clock (`text` has one that moves
+    /// only on Step Clock) and with a pulse button in its place: the
+    /// picker's Clock line chooses.
+    var runningText: String? = nil
+    var pulseText: String? = nil
+
+    /// This one with the clock the picker's Clock line chose, if it has the choice.
+    func with(clock: TemplateClock) -> CircuitTemplate {
+        let t: String?
+        switch clock {
+        case .manual: t = text
+        case .running: t = runningText
+        case .pulse: t = pulseText
+        }
+        guard let t else { return self }
+        return CircuitTemplate(id: id, name: name, detail: detail, text: t, folder: folder, group: group)
+    }
+    var running: CircuitTemplate { with(clock: .running) }
+}
+
+/// The clock a flip-flop or register template comes with: a clock that
+/// moves only on Step Clock (the default), one that ticks by itself, or a
+/// Single-Pulse Generator, a button on the board that clocks it once each
+/// click (or tap).
+enum TemplateClock: String, CaseIterable {
+    case manual, running, pulse
 }
 
 @MainActor
@@ -94,13 +126,14 @@ enum Templates {
     }
 
     /// Built by the engine when first asked for (and again when your name
-    /// changes: the lab page carries it).
-    private static var builtCache: (name: String, list: [CircuitTemplate])?
+    /// or the Step Clock key changes: the lab page and flip-flops carry them).
+    private static var builtCache: (name: String, key: String?, list: [CircuitTemplate])?
     static var builtIn: [CircuitTemplate] {
         let name = Prefs.shared.studentName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let c = builtCache, c.name == name { return c.list }
+        let key = ShortcutStore.shared.combo(.stepClock)?.label
+        if let c = builtCache, c.name == name, c.key == key { return c.list }
         let list = makeBuiltIn(name: name)
-        builtCache = (name, list)
+        builtCache = (name, key, list)
         return list
     }
 
@@ -114,22 +147,80 @@ enum Templates {
         CircuitTemplate(id: "builtin-7seg", name: "7-Segment Decoder Starter",
                         detail: "Four switches and seven segment lights: build the decoder between them",
                         text: sevenSegment(), folder: nil),
-    ] }
+    ] + flipFlops() + registers() + combinational() + counters() + classicMistakes() }
 
-    private struct Part { let gate: String; let x: Double; let y: Double; var label: String? = nil }
-    private struct Wire { let from: Int; let fromPin: String; let to: Int; let toPin: String }
+    /// The group of circuits with a mistake to find: offered in New from
+    /// Template, but never as the start of every new circuit.
+    static let mistakesGroup = "Classic Mistakes"
+
+    /// Built-in groups, in the picker's order.
+    static var builtInGroups: [(name: String, list: [CircuitTemplate])] {
+        var out: [(name: String, list: [CircuitTemplate])] = []
+        for t in builtIn {
+            if let i = out.firstIndex(where: { $0.name == t.group }) { out[i].list.append(t) } else { out.append((t.group, [t])) }
+        }
+        return out
+    }
+
+    /// A switch with `on` starts at 1; `angle` turns a part before it's
+    /// wired; `params` are settings made once it's built (a clock's
+    /// HALF_CYCLE, a TO or FROM's JUNCTION_ID).
+    struct Part {
+        let gate: String; let x: Double; let y: Double; var label: String? = nil; var on = false
+        var angle = 0.0
+        var params: [String: String] = [:]
+    }
+    struct Wire { let from: Int; let fromPin: String; let to: Int; let toPin: String }
+    /// A named page of parts and wires (TemplatesExamples.swift has the
+    /// website's), its labels' text sizes in `big`.
+    struct ExamplePage { let name: String; let parts: [Part]; let wires: [Wire]; let big: [String: Double] }
 
     /// Builds parts and wires on a new circuit and returns its file text.
-    /// Labels named in `big` get larger text.
-    private static func build(_ parts: [Part], _ wires: [Wire], big: [String: Double] = [:]) -> String {
+    /// Labels named in `big` get larger text; `manualClock` sets the clocks
+    /// to "Only on Step Clock". `more` are further pages, each built on a
+    /// page of its own (their labels' sizes too), and `firstPage` names
+    /// the first page when there are.
+    static func build(_ parts: [Part], _ wires: [Wire], big: [String: Double] = [:],
+                      manualClock: Bool = false, firstPage: String? = nil, more: [ExamplePage] = []) -> String {
         let doc = CoreDocument()
         var strings: [UnsafeMutablePointer<CChar>] = []
         defer { strings.forEach { free($0) } }
         func c(_ s: String) -> UnsafePointer<CChar> { let p = strdup(s)!; strings.append(p); return UnsafePointer(p) }
-        let gates = parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c)) }
-        let links = wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
-        _ = cl_edit_build(doc.handle, 0, gates, Int32(gates.count), links, Int32(links.count), "Template")
-        cl_edit_select_none(doc.handle, 0)
+        // Settings: a new circuit numbers its parts 1, 2, 3... in the order
+        // built, page after page.
+        var built = 0
+        func make(_ parts: [Part], _ wires: [Wire], page: Int) {
+            let gates = parts.map { CLBuildGate(gate: c($0.gate), x: $0.x, y: $0.y, label: $0.label.map(c), angle: $0.angle) }
+            let links = wires.map { CLBuildWire(from: Int32($0.from), fromPin: c($0.fromPin), to: Int32($0.to), toPin: c($0.toPin)) }
+            _ = cl_edit_build(doc.handle, Int32(page), gates, Int32(gates.count), links, Int32(links.count), "Template")
+            for (k, p) in parts.enumerated() where !p.params.isEmpty {
+                let gate = built + k + 1
+                guard doc.libraryName(ofGate: gate) == p.gate else { continue }
+                for (name, value) in p.params.sorted(by: { $0.key < $1.key }) { _ = cl_gate_set_setting(doc.handle, gate, name, value) }
+            }
+            built += parts.count
+            if manualClock {
+                // Each clock, picked by its place like a click would.
+                for p in parts where p.gate == "BB_CLOCK" {
+                    cl_edit_select_none(doc.handle, Int32(page))
+                    _ = cl_edit_press(doc.handle, Int32(page), p.x, p.y, 0, 0.05)
+                    cl_edit_release(doc.handle, p.x, p.y)
+                    let gate = cl_edit_single_gate(doc.handle, Int32(page))
+                    if gate >= 0 { _ = cl_gate_set_setting(doc.handle, gate, "MANUAL", "true") }
+                }
+            }
+            cl_edit_select_none(doc.handle, Int32(page))
+            for p in parts where p.on { _ = cl_document_click(doc.handle, Int32(page), p.x, p.y) }
+        }
+        make(parts, wires, page: 0)
+        if let firstPage, !more.isEmpty { cl_document_rename_page(doc.handle, 0, firstPage) }
+        var big = big
+        for pg in more {
+            let page = Int(cl_document_add_page(doc.handle))
+            cl_document_rename_page(doc.handle, Int32(page), pg.name)
+            make(pg.parts, pg.wires, page: page)
+            big.merge(pg.big) { a, _ in a }
+        }
         var text = doc.saveText()
         for (label, height) in big {
             let quoted = NSRegularExpression.escapedPattern(for: label)
@@ -142,8 +233,13 @@ enum Templates {
     }
 
     /// A label whose left edge is at x (labels are placed by their middle).
-    private static func label(_ text: String, x: Double, y: Double, height: Double = 2) -> Part {
+    static func label(_ text: String, x: Double, y: Double, height: Double = 2) -> Part {
         Part(gate: "AA_LABEL", x: x + Double(text.count) * 0.3 * height, y: y, label: text)
+    }
+
+    /// A label whose right edge is at x.
+    static func label(_ text: String, right x: Double, y: Double, height: Double = 2) -> Part {
+        label(text, x: x - Double(text.count) * 0.6 * height, y: y, height: height)
     }
 
     private static func labPage(name: String) -> String {
@@ -205,6 +301,530 @@ enum Templates {
               label("Segments", x: 64, y: 17)]
         return build(p, w, big: ["7-Segment Decoder": 3])
     }
+
+    // MARK: Flip-flops and latches
+
+    private static func flipFlops() -> [CircuitTemplate] {
+        func t(_ id: String, _ name: String, _ detail: String, _ text: String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-ff-" + id, name: name, detail: detail, text: text, folder: nil, group: "Flip-Flops and Latches")
+        }
+        // A clocked one: manual (Step Clock) as given, running or a pulse button as the choice.
+        func t(_ id: String, _ name: String, _ detail: String, _ make: (TemplateClock) -> String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-ff-" + id, name: name, detail: detail, text: make(.manual), folder: nil,
+                            group: "Flip-Flops and Latches", runningText: make(.running), pulseText: make(.pulse))
+        }
+        return [
+            t("d", "D Flip-Flop", "Q takes D on each rising clock edge; PRE' and CLR' act at once. Page 2: built from NAND gates",
+              { flipFlop("AE_DFF_LOW", title: "D Flip-Flop", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1), clock: $0, more: "d-flip-flop") }),
+            t("d-nt", "D Flip-Flop, Falling Edge", "The same, triggered as the clock falls from 1 to 0",
+              { flipFlop("AE_DFF_LOW_NT", title: "D Flip-Flop, Falling Edge", inputs: [("D", "IN_0", 2)], clockY: -1, q: ("OUT_0", 2), nq: ("OUTINV_0", -1), clock: $0) }),
+            t("d-ce", "D Flip-Flop with Clock Enable", "Q takes D on a rising edge only while CE is 1",
+              { flipFlop("AF_DFF_LOW", title: "D Flip-Flop with Clock Enable", inputs: [("D", "IN_0", 2), ("CE", "clock_enable", -2)], clockY: 0,
+                       q: ("OUT_0", 2), nq: ("OUTINV_0", -1), clock: $0) }),
+            t("jk", "J-K Flip-Flop", "Each rising edge: J sets, K resets, both toggle, neither holds. Page 2: master-slave from NANDs",
+              { flipFlop("BE_JKFF_LOW", title: "J-K Flip-Flop", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2), clock: $0, more: "jk-flip-flop") }),
+            t("jk-nt", "J-K Flip-Flop, Falling Edge", "The same, triggered as the clock falls from 1 to 0",
+              { flipFlop("BE_JKFF_LOW_NT", title: "J-K Flip-Flop, Falling Edge", inputs: [("J", "J", 2), ("K", "K", -2)], clockY: 0, q: ("Q", 2), nq: ("nQ", -2), clock: $0) }),
+            t("t", "T Flip-Flop", "A J-K with J and K tied: while T is 1, Q flips each rising edge. Page 2: a D flip-flop and an XOR",
+              { flipFlop("BE_JKFF_LOW", title: "T Flip-Flop", inputs: [("T", "J", 2)], tied: "K", clockY: 0, q: ("Q", 2), nq: ("nQ", -2), clock: $0, more: "t-flip-flop") }),
+            t("sr", "SR Latch", "Two NOR gates holding one bit: S sets it, R resets it, no clock",
+              srLatch()),
+            t("gated-d", "Gated D Latch", "Four NAND gates and an inverter: Q follows D while EN is 1 and holds when it's 0",
+              gatedDLatch()),
+            t("sr-enable", "SR Latch with Enable", "The NAND latch with two more NANDs: S and R act only while EN is 1",
+              example("sr-latch-enable")),
+            t("edge", "Edge Detector", "A D flip-flop and an AND gate: Edge lights when X has just gone from 0 to 1",
+              example("edge-detector")),
+        ]
+    }
+
+    /// A flip-flop from the library at (24, 0) with a switch for each data
+    /// input (left), a clock (manual: it moves only on Step Clock; or a
+    /// pulse button, clicked to clock it), PRE'
+    /// and CLR' switches (above and below, on, so the flip-flop runs) and
+    /// lights on Q and Q'. `inputs` are (name, pin, the pin's height); `tied`
+    /// is a second pin the first switch also drives.
+    private static func flipFlop(_ gate: String, title: String, inputs: [(String, String, Double)], tied: String? = nil,
+                                 clockY: Double, q: (String, Double), nq: (String, Double), clock: TemplateClock,
+                                 more: String? = nil) -> String {
+        let fx = 24.0
+        var p: [Part] = [Part(gate: gate, x: fx, y: 0),
+                         clockPart(clock, x: 4, y: clockY),
+                         Part(gate: "AA_TOGGLE", x: 6, y: 14, on: true),
+                         Part(gate: "AA_TOGGLE", x: 6, y: -14, on: true),
+                         Part(gate: "GA_LED", x: 34, y: q.1),
+                         Part(gate: "GA_LED", x: 34, y: nq.1)]
+        var w = [Wire(from: 1, fromPin: clockPin(clock), to: 0, toPin: "clock"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 0, toPin: "set"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 0, toPin: "clear"),
+                 Wire(from: 0, fromPin: q.0, to: 4, toPin: "N_in0"),
+                 Wire(from: 0, fromPin: nq.0, to: 5, toPin: "N_in0")]
+        p += [label("PRE'", right: 3.6, y: 14), label("CLR'", right: 3.6, y: -14),
+              clock == .pulse ? label("Clock", x: 3.6, y: clockY - 2.6) : label("Clock", x: 1, y: clockY - 4.2),
+              label("Q", x: 36, y: q.1), label("Q'", x: 36, y: nq.1)]
+        for (name, pin, y) in inputs {
+            let sy = y > 0 ? 8.0 : -8.0
+            p.append(Part(gate: "AA_TOGGLE", x: 6, y: sy))
+            w.append(Wire(from: p.count - 1, fromPin: "OUT_0", to: 0, toPin: pin))
+            if let tied, pin == inputs[0].1 { w.append(Wire(from: p.count - 1, fromPin: "OUT_0", to: 0, toPin: tied)) }
+            p.append(label(name, right: 3.6, y: sy))
+        }
+        // The key named as a key, so it isn't read as the K switch.
+        let step = ShortcutStore.shared.combo(.stepClock).map { "The \($0.label) key" } ?? "Simulation \u{25B8} Step Clock"
+        let first: String
+        switch clock {
+        case .manual: first = "\(step) steps the clock."
+        case .running: first = "The clock runs by itself."
+        case .pulse: first = "Click the Clock button to clock it once."
+        }
+        let hint = first + " Turn PRE' or CLR' off to set or clear Q."
+        p += [label(title, x: 0, y: 21, height: 3), label(hint, x: 0, y: -19.5, height: 1.4)]
+        return build(p, w, big: [title: 3, hint: 1.4], manualClock: clock == .manual,
+                     firstPage: more == nil ? nil : "Using the part", more: more.map { examplePages($0, from: 1, clock: clock) } ?? [])
+    }
+
+    // MARK: The website's examples
+
+    /// An example's pages as the website has them (TemplatesExamples.swift),
+    /// from page `from` on; with a pulse button for the clock if that's the
+    /// choice (a running clock is a clock not set to Step Clock: build's
+    /// manualClock).
+    static func examplePages(_ key: String, from: Int = 0, clock: TemplateClock = .manual) -> [ExamplePage] {
+        let pages = Array((websiteExamples[key] ?? []).dropFirst(from))
+        guard clock == .pulse else { return pages }
+        return pages.map { pg in
+            var parts = pg.parts, clocks = Set<Int>()
+            for (i, p) in parts.enumerated() where p.gate == "BB_CLOCK" { parts[i] = clockPart(.pulse, x: p.x, y: p.y); clocks.insert(i) }
+            let wires = pg.wires.map { clocks.contains($0.from) ? Wire(from: $0.from, fromPin: "OUT_0", to: $0.to, toPin: $0.toPin) : $0 }
+            return ExamplePage(name: pg.name, parts: parts, wires: wires, big: pg.big)
+        }
+    }
+
+    /// A whole example from the website, every page, its clocks moving only on Step Clock.
+    static func example(_ key: String) -> String {
+        let pages = examplePages(key)
+        guard let first = pages.first else { return "" }
+        return build(first.parts, first.wires, big: first.big, manualClock: true,
+                     firstPage: first.name, more: Array(pages.dropFirst()))
+    }
+
+    /// Combinational circuits: each the library's part on page 1 and the same
+    /// built from gates (or 1-bit adders) on page 2, and two from gates.
+    private static func combinational() -> [CircuitTemplate] {
+        func t(_ id: String, _ name: String, _ detail: String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-comb-" + id, name: name, detail: detail, text: example(id), folder: nil, group: "Combinational")
+        }
+        return [
+            t("adder-4bit", "4-Bit Adder", "Adds two 4-bit numbers and a carry. Page 2: four 1-bit full adders, carry to carry"),
+            t("decoder-2to4", "2-to-4 Decoder", "Two inputs pick one of four outputs while EN is 1. Page 2: two inverters and four ANDs"),
+            t("mux-4to1", "4-to-1 Multiplexer", "S1 and S0 choose which of four inputs reaches Y. Page 2: AND gates and an OR"),
+            t("comparator-2bit", "2-Bit Comparator", "Is A bigger, equal or smaller than B? XNORs, ANDs, an OR and a NOR"),
+            t("parity", "Parity Generator", "Three XOR gates: P makes the number of 1s even, a check bit for data"),
+        ]
+    }
+
+    private static func counters() -> [CircuitTemplate] {
+        [CircuitTemplate(id: "builtin-count-3bit", name: "3-Bit Counter",
+                         detail: "A counting register stepping 0 to 7. Page 2: a ripple counter of three J-K flip-flops",
+                         text: example("counter-3bit"), folder: nil, group: "Counters and Displays")]
+    }
+
+    /// The clock part: the square-wave clock (its output at x + 4), or, for
+    /// a pulse button, a Single-Pulse Generator placed so its output (at
+    /// x + 2 of its own middle) lands in the same spot.
+    private static func clockPart(_ clock: TemplateClock, x: Double, y: Double, params: [String: String] = [:]) -> Part {
+        clock == .pulse ? Part(gate: "CC_PULSE", x: x + 2, y: y) : Part(gate: "BB_CLOCK", x: x, y: y, params: params)
+    }
+    private static func clockPin(_ clock: TemplateClock) -> String { clock == .pulse ? "OUT_0" : "CLK" }
+    /// The clock part's index in `parts`.
+    private static func clockIndex(_ parts: [Part]) -> Int {
+        parts.firstIndex { $0.gate == "BB_CLOCK" || $0.gate == "CC_PULSE" }!
+    }
+
+    // MARK: Registers
+
+    /// Five registers from the library's parts, the same circuits as
+    /// CedarLogic Online's Registers examples (the website's
+    /// docs/REGISTER-EXAMPLES.md): parts, places, settings and wires as
+    /// listed there, each clock moving only on Step Clock (or running, as
+    /// the picker's Clock line chooses).
+    private static func registers() -> [CircuitTemplate] {
+        func t(_ id: String, _ name: String, _ detail: String, _ make: (TemplateClock) -> String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-reg-" + id, name: name, detail: detail, text: make(.manual), folder: nil,
+                            group: "Registers", runningText: make(.running), pulseText: make(.pulse))
+        }
+        return [
+            t("register", "4-Bit Register (Load and Hold)",
+              "Load on: each clock stores D3-D0; off, it holds. Page 2: four D flip-flops with clock enable", register4),
+            t("shift", "4-Bit Shift Register",
+              "Shift on: each clock moves the bits left or right, Serial In coming in. Shift off holds; Load and Clear too", shiftRegister),
+            t("sipo", "Serial-In, Parallel-Out",
+              "Four D flip-flops in a chain: each clock moves every bit one along", serialInParallelOut),
+            t("ring", "Ring Counter",
+              "A shift register whose last bit comes back to the start: load a 1 and it goes round", ringCounter),
+            t("johnson", "Johnson Counter",
+              "Four flip-flops with Q3' fed back: 0001, 0011, 0111, 1111, 1110, 1100, 1000, 0000", johnsonCounter),
+        ]
+    }
+
+    /// The clock every register uses: HALF_CYCLE 20, as the website's (or a pulse button).
+    private static func regClock(_ clock: TemplateClock, _ x: Double, _ y: Double) -> Part {
+        clockPart(clock, x: x, y: y, params: ["HALF_CYCLE": "20"])
+    }
+    /// The Clock label under a register's pulse button.
+    private static func regPulseLabel(_ clock: TemplateClock, _ x: Double, _ y: Double) -> [Part] {
+        clock == .pulse ? [Part(gate: "AA_LABEL", x: x + 2, y: y - 2.4, label: "Clock")] : []
+    }
+    /// A named switch (its name a label on its left; turned round, on its right).
+    private static func regSwitch(_ name: String, _ x: Double, _ y: Double, on: Bool = false, turned: Bool = false) -> [Part] {
+        [Part(gate: "AA_TOGGLE", x: x, y: y, on: on, angle: turned ? 180 : 0),
+         turned ? label(name, x: x + 2.2, y: y, height: 1.4) : label(name, right: x - 2.2, y: y, height: 1.4)]
+    }
+    /// A named light, its name on its right (or under it).
+    private static func regLight(_ name: String, _ x: Double, _ y: Double, below: Bool = false) -> [Part] {
+        [Part(gate: "GA_LED", x: x, y: y),
+         below ? Part(gate: "AA_LABEL", x: x, y: y - 2.6, label: name) : label(name, x: x + 2, y: y, height: 1.4)]
+    }
+    /// The line of text at the top (TEXT_HEIGHT 1), placed by its middle.
+    private static func regTitle(_ text: String, _ x: Double, _ y: Double) -> Part { Part(gate: "AA_LABEL", x: x, y: y, label: text) }
+
+    /// The names of `parts` (labels at 1.4, the title at 1).
+    private static func regSizes(_ parts: [Part], title: String) -> [String: Double] {
+        var big: [String: Double] = [title: 1]
+        for p in parts where p.gate == "AA_LABEL" && p.label != title { if let l = p.label { big[l] = 1.4 } }
+        return big
+    }
+
+    /// The register's (or flip-flop's) index in `parts`, by what's built where.
+    private static func index(_ parts: [Part], _ gate: String, _ x: Double, _ y: Double) -> Int {
+        parts.firstIndex { $0.gate == gate && $0.x == x && $0.y == y }!
+    }
+    private static func indexOfSwitch(_ parts: [Part], _ name: String) -> Int {
+        let l = parts.firstIndex { $0.gate == "AA_LABEL" && $0.label == name }!
+        return l - 1
+    }
+
+    private static func register4(_ clock: TemplateClock) -> String {
+        let title = clock == .pulse ? "Load on: a click on Clock stores D3-D0. Load off: it holds."
+                                    : "Load on: Step Clock stores D3-D0. Load off: it holds."
+        var p: [Part] = [Part(gate: "AA_REGISTER4", x: 30, y: -20)]
+        p += regSwitch("Load", 14, -9, on: true)
+        p += regSwitch("D3", 14, -13)
+        p += regSwitch("D2", 14, -17, on: true)
+        p += regSwitch("D1", 14, -23)
+        p += regSwitch("D0", 14, -27, on: true)
+        p.append(regClock(clock, 20, -31))
+        p += regPulseLabel(clock, 20, -31)
+        p += regSwitch("Clear", 19, -36)
+        for (n, y) in [("Q3", -13.0), ("Q2", -17.0), ("Q1", -23.0), ("Q0", -27.0)] { p += regLight(n, 46, y) }
+        p.append(regTitle(title, 30, -3))
+        let r = 0
+        var w = [Wire(from: indexOfSwitch(p, "Load"), fromPin: "OUT_0", to: r, toPin: "load"),
+                 Wire(from: clockIndex(p), fromPin: clockPin(clock), to: r, toPin: "clock"),
+                 Wire(from: indexOfSwitch(p, "Clear"), fromPin: "OUT_0", to: r, toPin: "clear")]
+        for b in 0..<4 {
+            w.append(Wire(from: indexOfSwitch(p, "D\(b)"), fromPin: "OUT_0", to: r, toPin: "IN_\(b)"))
+            w.append(Wire(from: r, fromPin: "OUT_\(b)", to: index(p, "GA_LED", 46, [-27.0, -23, -17, -13][b]), toPin: "N_in0"))
+        }
+        return build(p, w, big: regSizes(p, title: title), manualClock: clock == .manual,
+                     firstPage: "Using the part", more: examplePages("register", from: 1, clock: clock))
+    }
+
+    /// The shift register and its switches, shared with the ring counter.
+    private static func shiftRegisterParts(_ clock: TemplateClock, serialIn: Bool, clear: Bool, load: Bool, left: Bool, d: [Bool]) -> [Part] {
+        var p: [Part] = [Part(gate: "BA_SHIFT_REGISTER_4", x: 30, y: -20)]
+        if clear { p += regSwitch("Clear", 19, -20) }
+        p.append(regClock(clock, 14, -26))
+        p += regPulseLabel(clock, 14, -26)
+        if serialIn { p += regSwitch("Serial In", 46, -15, on: true, turned: true) }
+        p += regSwitch("Shift", 46, -20, on: true, turned: true)
+        p += regSwitch("Load", 46, -25, on: load, turned: true)
+        if left { p += regSwitch("Left", 46, -30, on: true, turned: true) }
+        for (b, y) in [(3, -12.0), (2, -9.0), (1, -6.0), (0, -3.0)] { p += regSwitch("D\(b)", 22, y, on: d[b]) }
+        for (b, x) in [(3, 21.0), (2, 27.0), (1, 33.0), (0, 39.0)] { p += regLight("Q\(b)", x, -32, below: true) }
+        return p
+    }
+
+    private static func shiftRegisterWires(_ p: [Part]) -> [Wire] {
+        let r = 0
+        let k = clockIndex(p)
+        var w = [Wire(from: k, fromPin: p[k].gate == "CC_PULSE" ? "OUT_0" : "CLK", to: r, toPin: "clock")]
+        for (name, pin) in [("Clear", "clear"), ("Serial In", "carry_in"), ("Shift", "shift_enable"), ("Load", "load"), ("Left", "shift_left")]
+            where p.contains(where: { $0.label == name }) {
+            w.append(Wire(from: indexOfSwitch(p, name), fromPin: "OUT_0", to: r, toPin: pin))
+        }
+        for (b, x) in [(3, 21.0), (2, 27.0), (1, 33.0), (0, 39.0)] {
+            w.append(Wire(from: indexOfSwitch(p, "D\(b)"), fromPin: "OUT_0", to: r, toPin: "IN_\(b)"))
+            w.append(Wire(from: r, fromPin: "OUT_\(b)", to: index(p, "GA_LED", x, -32), toPin: "N_in3"))
+        }
+        return w
+    }
+
+    private static func shiftRegister(_ clock: TemplateClock) -> String {
+        let title = clock == .pulse ? "Shift on: each click on Clock moves the bits. Shift off: they hold."
+                                    : "Shift on: each Step Clock moves the bits. Shift off: they hold."
+        var p = shiftRegisterParts(clock, serialIn: true, clear: true, load: false, left: true, d: [true, false, true, false])
+        p.append(regTitle(title, 30, 1))
+        return build(p, shiftRegisterWires(p), big: regSizes(p, title: title), manualClock: clock == .manual)
+    }
+
+    private static func ringCounter(_ clock: TemplateClock) -> String {
+        let title = clock == .pulse ? "Click Clock once to load D3-D0, turn Load off, then click again: the 1 goes round."
+                                    : "Step Clock once to load D3-D0, turn Load off, then step: the 1 goes round."
+        var p = shiftRegisterParts(clock, serialIn: false, clear: false, load: true, left: false, d: [true, false, false, false])
+        p.append(Part(gate: "DE_TO", x: 18, y: -15, angle: 180, params: ["JUNCTION_ID": "Q3"]))
+        p.append(Part(gate: "DA_FROM", x: 41, y: -16, angle: 180, params: ["JUNCTION_ID": "Q3"]))
+        p.append(regTitle(title, 30, 1))
+        var w = shiftRegisterWires(p)
+        // The feedback: what shifts out of Q3 comes back in, through a TO and a FROM.
+        w.append(Wire(from: 0, fromPin: "carry_out", to: index(p, "DE_TO", 18, -15), toPin: "IN_0"))
+        w.append(Wire(from: index(p, "DA_FROM", 41, -16), fromPin: "IN_0", to: 0, toPin: "carry_in"))
+        return build(p, w, big: regSizes(p, title: title), manualClock: clock == .manual)
+    }
+
+    /// Four D flip-flops in a chain with their PRE', CLR' and clock shared,
+    /// the first one's D from `first`.
+    private static func chain(_ clock: TemplateClock, title: String, firstSwitch: Bool) -> (parts: [Part], wires: [Wire]) {
+        var p: [Part] = [24.0, 36, 48, 60].map { Part(gate: "AE_DFF_LOW", x: $0, y: -20) }
+        if firstSwitch { p += regSwitch("Serial In", 15, -18, on: true) }
+        else { p.append(Part(gate: "DA_FROM", x: 16, y: -18, params: ["JUNCTION_ID": "Q3'"])) }
+        p += regSwitch("PRE'", 15, -10, on: true)
+        p += regSwitch("CLR'", 11, -29, on: true)
+        p.append(regClock(clock, 12, -35))
+        p += regPulseLabel(clock, 12, -35)
+        for (b, x) in [(0, 30.0), (1, 42.0), (2, 54.0), (3, 66.0)] { p += regLight("Q\(b)", x, -12) }
+        p.append(regTitle(title, 42, -3))
+        let k = clockIndex(p)
+        var w: [Wire] = []
+        for i in 0..<3 { w.append(Wire(from: i, fromPin: "OUT_0", to: i + 1, toPin: "IN_0")) }
+        w.append(firstSwitch ? Wire(from: indexOfSwitch(p, "Serial In"), fromPin: "OUT_0", to: 0, toPin: "IN_0")
+                             : Wire(from: index(p, "DA_FROM", 16, -18), fromPin: "IN_0", to: 0, toPin: "IN_0"))
+        for (i, x) in [30.0, 42, 54, 66].enumerated() {
+            w.append(Wire(from: indexOfSwitch(p, "PRE'"), fromPin: "OUT_0", to: i, toPin: "set"))
+            w.append(Wire(from: indexOfSwitch(p, "CLR'"), fromPin: "OUT_0", to: i, toPin: "clear"))
+            w.append(Wire(from: k, fromPin: clockPin(clock), to: i, toPin: "clock"))
+            w.append(Wire(from: i, fromPin: "OUT_0", to: index(p, "GA_LED", x, -12), toPin: "N_in2"))
+        }
+        return (p, w)
+    }
+
+    private static func serialInParallelOut(_ clock: TemplateClock) -> String {
+        let title = clock == .pulse ? "Each click on Clock moves every bit one flip-flop to the right."
+                                    : "Each Step Clock moves every bit one flip-flop to the right."
+        let c = chain(clock, title: title, firstSwitch: true)
+        return build(c.parts, c.wires, big: regSizes(c.parts, title: title), manualClock: clock == .manual)
+    }
+
+    private static func johnsonCounter(_ clock: TemplateClock) -> String {
+        let title = clock == .pulse ? "Each click on Clock passes Q3' back to the start: 4 ones in, then 4 zeros."
+                                    : "Each Step Clock passes Q3' back to the start: 4 ones in, then 4 zeros."
+        var c = chain(clock, title: title, firstSwitch: false)
+        c.parts.append(Part(gate: "DE_TO", x: 68, y: -21, params: ["JUNCTION_ID": "Q3'"]))
+        c.wires.append(Wire(from: 3, fromPin: "OUTINV_0", to: c.parts.count - 1, toPin: "IN_0"))
+        return build(c.parts, c.wires, big: regSizes(c.parts, title: title), manualClock: clock == .manual)
+    }
+
+    // MARK: Classic mistakes
+
+    /// Four small circuits that each show a classic mistake in the
+    /// simulator, with a big "What's wrong here?" and a hint that doesn't
+    /// give the answer away.
+    private static func classicMistakes() -> [CircuitTemplate] {
+        func t(_ id: String, _ name: String, _ detail: String, _ text: String) -> CircuitTemplate {
+            CircuitTemplate(id: "builtin-mistake-" + id, name: name, detail: detail, text: text, folder: nil, group: mistakesGroup)
+        }
+        return [
+            t("latch", "J-K Latch from Gates", "A J-K latch made from gates. Turn Reset off and EN on, then watch Q and Q'",
+              mistakeLatch()),
+            t("gated-clock", "Every Other Count", "A counter that should go up on every other press of Step Clock. Press it and watch the count",
+              mistakeGatedClock()),
+            t("floating", "A and B Light", "A light that should come on when A and B are both on. Try every combination",
+              mistakeFloating()),
+            t("two-outputs", "Two-Switch Light", "A light that A and B both control. Try every combination",
+              mistakeTwoOutputs()),
+        ]
+    }
+
+    /// The big question and the hint under it, at the top left of a mistake
+    /// template (the labels are scaled by `build`).
+    private static func mistakeLabels(_ hint: String, x: Double, y: Double) -> (parts: [Part], big: [String: Double]) {
+        let question = "What's wrong here?"
+        return ([label(question, x: x, y: y, height: 3), label(hint, x: x, y: y - 5, height: 1.4)], [question: 3, hint: 1.4])
+    }
+
+    /// A J-K latch from gates: S = J.EN.Q' and R = K.EN.Q feed a pair of
+    /// cross-coupled NOR gates. With J = K = 1 and EN on, each change of Q
+    /// switches the other gate on, so Q never settles. Reset (an extra input
+    /// on Q's NOR gate, and inverted on S's AND gate so Q' holds too) starts
+    /// it at Q = 0, since a latch like this has no way to start from
+    /// nothing; it starts reset, with J = K = 1 and EN off.
+    private static func mistakeLatch() -> String {
+        var p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 15, on: true),    // 0 Reset
+            Part(gate: "AA_TOGGLE", x: 0, y: 8, on: true),     // 1 K
+            Part(gate: "AA_TOGGLE", x: 0, y: 0),               // 2 EN
+            Part(gate: "AA_TOGGLE", x: 0, y: -8, on: true),    // 3 J
+            Part(gate: "AA_AND3", x: 12, y: 8),                // 4 R = K.EN.Q
+            Part(gate: "AA_AND4", x: 12, y: -8),               // 5 S = J.EN.Q'.Reset'
+            Part(gate: "BE_NOR3", x: 26, y: 8),                // 6 Q
+            Part(gate: "BE_NOR2", x: 26, y: -8),               // 7 Q'
+            Part(gate: "GA_LED", x: 36, y: 8),                 // 8
+            Part(gate: "GA_LED", x: 36, y: -8),                // 9
+            Part(gate: "AA_INVERTER", x: 6, y: -15),           // 10 Reset'
+        ]
+        p += [label("Reset", right: -2.4, y: 15), label("K", right: -2.4, y: 8),
+              label("EN", right: -2.4, y: 0), label("J", right: -2.4, y: -8),
+              label("Q", x: 38, y: 8), label("Q'", x: 38, y: -8)]
+        let w = [Wire(from: 1, fromPin: "OUT_0", to: 4, toPin: "IN_0"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 4, toPin: "IN_1"),
+                 Wire(from: 6, fromPin: "OUT", to: 4, toPin: "IN_2"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 5, toPin: "IN_0"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 5, toPin: "IN_1"),
+                 Wire(from: 7, fromPin: "OUT", to: 5, toPin: "IN_2"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 10, toPin: "IN_0"),
+                 Wire(from: 10, fromPin: "OUT_0", to: 5, toPin: "IN_3"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 6, toPin: "IN_0"),
+                 Wire(from: 4, fromPin: "OUT", to: 6, toPin: "IN_1"),
+                 Wire(from: 7, fromPin: "OUT", to: 6, toPin: "IN_2"),
+                 Wire(from: 5, fromPin: "OUT", to: 7, toPin: "IN_0"),
+                 Wire(from: 6, fromPin: "OUT", to: 7, toPin: "IN_1"),
+                 Wire(from: 6, fromPin: "OUT", to: 8, toPin: "N_in0"),
+                 Wire(from: 7, fromPin: "OUT", to: 9, toPin: "N_in0")]
+        let (labels, big) = mistakeLabels("Turn Reset off, then switch EN on. Watch Q and Q'.", x: -4, y: 26)
+        return build(p + labels, w, big: big)
+    }
+
+    /// A toggle flip-flop (J = K = 1) makes Enable alternate 1, 0, 1, 0 right
+    /// after each rising edge, while the clock is still high, and an AND
+    /// gate passes the clock to the counter only while Enable is 1. When
+    /// Enable is 0 at the edge and turns on a moment later, the AND gate's
+    /// output rises: an extra edge, so the counter counts on every press
+    /// instead of every other one.
+    private static func mistakeGatedClock() -> String {
+        var p: [Part] = [
+            Part(gate: "BB_CLOCK", x: 0, y: 0),                // 0
+            Part(gate: "BE_JKFF_LOW", x: 16, y: 0),            // 1 toggles
+            Part(gate: "EE_VDD", x: 12, y: 11),                // 2 J and PRE'
+            Part(gate: "EE_VDD", x: 12, y: -11),               // 3 K and CLR'
+            Part(gate: "AA_AND2", x: 32, y: 0),                // 4 the gated clock
+            Part(gate: "AA_REGISTER4", x: 48, y: 0),           // 5 the counter
+            Part(gate: "EE_VDD", x: 42, y: 11),                // 6
+            Part(gate: "FF_GND", x: 42, y: -11),               // 7
+            Part(gate: "GE_LED_DISPLAY_4BIT", x: 64, y: 0),    // 8
+            Part(gate: "GA_LED", x: 24, y: 8),                 // 9 Enable
+        ]
+        p += [label("Clock", x: 1, y: -4.2), label("Enable", x: 20.4, y: 11), label("Count", x: 61, y: -5)]
+        let w = [Wire(from: 0, fromPin: "CLK", to: 1, toPin: "clock"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 1, toPin: "J"),
+                 Wire(from: 2, fromPin: "OUT_0", to: 1, toPin: "set"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 1, toPin: "K"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 1, toPin: "clear"),
+                 Wire(from: 1, fromPin: "Q", to: 4, toPin: "IN_0"),
+                 Wire(from: 0, fromPin: "CLK", to: 4, toPin: "IN_1"),
+                 Wire(from: 1, fromPin: "Q", to: 9, toPin: "N_in0"),
+                 Wire(from: 4, fromPin: "OUT", to: 5, toPin: "clock"),
+                 Wire(from: 6, fromPin: "OUT_0", to: 5, toPin: "count_enable"),
+                 Wire(from: 6, fromPin: "OUT_0", to: 5, toPin: "count_up"),
+                 Wire(from: 7, fromPin: "OUT_0", to: 5, toPin: "load"),
+                 Wire(from: 7, fromPin: "OUT_0", to: 5, toPin: "clear")]
+        var wires = w
+        for i in 0..<4 { wires.append(Wire(from: 5, fromPin: "OUT_\(i)", to: 8, toPin: "IN_\(i)")) }
+        // The key named as a key, as on the flip-flops (it can be changed in
+        // Settings > Shortcuts, or have none).
+        let press = ShortcutStore.shared.combo(.stepClock).map { "Press Step Clock (the \($0.label) key)" } ?? "Choose Simulation \u{25B8} Step Clock"
+        let (labels, big) = mistakeLabels("Enable should let the count go up only on every other press. \(press) eight times.", x: -4, y: 24)
+        return build(p + labels, wires, big: big, manualClock: true)
+    }
+
+    /// A 3-input AND gate with one input left unwired. While A or B is 0 the
+    /// output is 0 whatever the open input is; with both on it is unknown.
+    private static func mistakeFloating() -> String {
+        var p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 4, on: true),     // 0 A
+            Part(gate: "AA_TOGGLE", x: 0, y: -4, on: true),    // 1 B
+            Part(gate: "AA_AND3", x: 14, y: 0),                // 2
+            Part(gate: "GA_LED", x: 26, y: 0),                 // 3
+        ]
+        p += [label("A", right: -2.4, y: 4), label("B", right: -2.4, y: -4), label("Light", x: 24.2, y: 4)]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 2, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 3, toPin: "N_in0")]
+        let (labels, big) = mistakeLabels("Try every combination of A and B. Does the light always make sense?", x: -4, y: 14)
+        return build(p + labels, w, big: big)
+    }
+
+    /// An AND gate and an OR gate, both fed by A and B, both wired to one
+    /// light. Where they differ (A and B different) the wire is in conflict.
+    private static func mistakeTwoOutputs() -> String {
+        var p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 6, on: true),     // 0 A
+            Part(gate: "AA_TOGGLE", x: 0, y: -6),              // 1 B
+            Part(gate: "AA_AND2", x: 14, y: 6),                // 2
+            Part(gate: "AE_OR2", x: 14, y: -6),                // 3
+            Part(gate: "GA_LED", x: 28, y: 0),                 // 4
+        ]
+        p += [label("A", right: -2.4, y: 6), label("B", right: -2.4, y: -6), label("Light", x: 26.2, y: 4)]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 2, toPin: "IN_1"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 3, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 3, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 4, toPin: "N_in0"),
+                 Wire(from: 3, fromPin: "OUT", to: 4, toPin: "N_in0")]
+        let (labels, big) = mistakeLabels("Watch the light as you change A and B.", x: -4, y: 16)
+        return build(p + labels, w, big: big)
+    }
+
+    private static func srLatch() -> String {
+        let p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 6, on: true),   // 0 R (on: it starts reset)
+            Part(gate: "AA_TOGGLE", x: 0, y: -6),            // 1 S
+            Part(gate: "BE_NOR2", x: 16, y: 5),              // 2 Q
+            Part(gate: "BE_NOR2", x: 16, y: -5),             // 3 Q'
+            Part(gate: "GA_LED", x: 26, y: 5),               // 4
+            Part(gate: "GA_LED", x: 26, y: -5),              // 5
+            label("R", right: -2.4, y: 6), label("S", right: -2.4, y: -6),
+            label("Q", x: 28, y: 5), label("Q'", x: 28, y: -5),
+            label("SR Latch", x: -4, y: 14, height: 3),
+            label("S = 1 sets Q, R = 1 resets it, both 0 holds. Both 1 isn't allowed.", x: -4, y: -12, height: 1.4),
+        ]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 3, fromPin: "OUT", to: 2, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 3, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 3, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 4, toPin: "N_in0"),
+                 Wire(from: 3, fromPin: "OUT", to: 5, toPin: "N_in0")]
+        return build(p, w, big: ["SR Latch": 3, "S = 1 sets Q, R = 1 resets it, both 0 holds. Both 1 isn't allowed.": 1.4])
+    }
+
+    private static func gatedDLatch() -> String {
+        let p: [Part] = [
+            Part(gate: "AA_TOGGLE", x: 0, y: 7),             // 0 D
+            Part(gate: "AA_TOGGLE", x: 0, y: -1, on: true),  // 1 EN
+            Part(gate: "BA_NAND2", x: 15, y: 6),             // 2 S'
+            Part(gate: "AA_INVERTER", x: 10, y: -9),         // 3 D'
+            Part(gate: "BA_NAND2", x: 19, y: -6),            // 4 R'
+            Part(gate: "BA_NAND2", x: 30, y: 4),             // 5 Q
+            Part(gate: "BA_NAND2", x: 30, y: -4),            // 6 Q'
+            Part(gate: "GA_LED", x: 40, y: 4),               // 7
+            Part(gate: "GA_LED", x: 40, y: -4),              // 8
+            label("D", right: -2.4, y: 7), label("EN", right: -2.4, y: -1),
+            label("Q", x: 42, y: 4), label("Q'", x: 42, y: -4),
+            label("Gated D Latch", x: -4, y: 15, height: 3),
+            label("While EN is 1, Q follows D. Turn EN off and Q keeps its last value.", x: -4, y: -15, height: 1.4),
+        ]
+        let w = [Wire(from: 0, fromPin: "OUT_0", to: 2, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 2, toPin: "IN_1"),
+                 Wire(from: 0, fromPin: "OUT_0", to: 3, toPin: "IN_0"),
+                 Wire(from: 1, fromPin: "OUT_0", to: 4, toPin: "IN_0"),
+                 Wire(from: 3, fromPin: "OUT_0", to: 4, toPin: "IN_1"),
+                 Wire(from: 2, fromPin: "OUT", to: 5, toPin: "IN_0"),
+                 Wire(from: 6, fromPin: "OUT", to: 5, toPin: "IN_1"),
+                 Wire(from: 5, fromPin: "OUT", to: 6, toPin: "IN_0"),
+                 Wire(from: 4, fromPin: "OUT", to: 6, toPin: "IN_1"),
+                 Wire(from: 5, fromPin: "OUT", to: 7, toPin: "N_in0"),
+                 Wire(from: 6, fromPin: "OUT", to: 8, toPin: "N_in0")]
+        return build(p, w, big: ["Gated D Latch": 3, "While EN is 1, Q follows D. Turn EN off and Q keeps its last value.": 1.4])
+    }
 }
 
 // MARK: - The picker
@@ -213,13 +833,24 @@ struct TemplatePicker: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var prefs = Prefs.shared
     @State private var mine: [CircuitTemplate] = []
-    @State private var selection: String = Templates.builtIn[0].id
+    @State private var selection: String
+    /// The flip-flops' Clock line: manual (Step Clock) unless you pick
+    /// running or a pulse button. (It was a yes/no "running" before.)
+    @AppStorage("cl.templateClock") private var clockChoice =
+        UserDefaults.standard.bool(forKey: "cl.templateClockRunning") ? TemplateClock.running.rawValue : TemplateClock.manual.rawValue
+    private var clock: TemplateClock { TemplateClock(rawValue: clockChoice) ?? .manual }
+
+    init(selection: String? = nil) {
+        _selection = State(initialValue: selection ?? Templates.builtIn[0].id)
+    }
 
     private var dark: Bool { prefs.dark }
     private var paper: Color { dark ? CLChrome.rgb(28, 31, 37) : CLChrome.rgb(250, 250, 252) }
     private var ink: Color { dark ? CLChrome.rgb(226, 230, 238) : CLChrome.rgb(30, 33, 40) }
     private var all: [CircuitTemplate] { Templates.builtIn + mine }
     private var selected: CircuitTemplate? { all.first { $0.id == selection } }
+    /// The selected one, with the clock the Clock line picks.
+    private var chosen: CircuitTemplate? { selected.map { $0.with(clock: clock) } }
 
     var body: some View {
         let accent = prefs.accentColor(dark: dark)
@@ -232,8 +863,10 @@ struct TemplatePicker: View {
             HStack(spacing: 14) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        heading("Built In")
-                        ForEach(Templates.builtIn) { row($0, accent: accent) }
+                        ForEach(Templates.builtInGroups, id: \.name) { group in
+                            heading(group.name)
+                            ForEach(group.list) { row($0, accent: accent) }
+                        }
                         heading("Yours")
                         if mine.isEmpty {
                             Text("None yet.").font(.system(size: 12)).foregroundStyle(ink.opacity(0.5))
@@ -244,13 +877,25 @@ struct TemplatePicker: View {
                     .padding(.vertical, 6)
                 }
                 .frame(width: 320)
-                TemplatePreview(text: selected?.text, dark: dark, ink: ink)
+                TemplatePreview(text: chosen?.text, dark: dark, ink: ink)
             }
             .padding(14)
             HStack(spacing: 8) {
                 if let t = selected, t.folder != nil {
                     Button("Rename\u{2026}") { rename(t) }
                     Button("Delete\u{2026}") { delete(t) }
+                }
+                if selected?.runningText != nil {
+                    Text("Clock").font(.system(size: 13, weight: .semibold)).foregroundStyle(ink)
+                    Picker("Clock", selection: $clockChoice) {
+                        Text("Manual").tag(TemplateClock.manual.rawValue)
+                        Text("Running").tag(TemplateClock.running.rawValue)
+                        Text("Pulse button").tag(TemplateClock.pulse.rawValue)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .help(clockHelp)
+                    Text(clockNote)
+                        .font(.system(size: 12)).foregroundStyle(ink.opacity(0.55))
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -292,8 +937,21 @@ struct TemplatePicker: View {
         if selected == nil { selection = Templates.builtIn[0].id }
     }
 
+    private var stepClockName: String { ShortcutStore.shared.combo(.stepClock).map { "the \($0.label) key" } ?? "Simulation \u{25B8} Step Clock" }
+    private var clockHelp: String {
+        "Manual: the clock holds still, and each Step Clock (\(stepClockName)) makes one full cycle. Running: it ticks by itself. "
+            + "Pulse button: a button on the circuit labeled Clock; each click (or tap) clocks it once."
+    }
+    private var clockNote: String {
+        switch clock {
+        case .manual: "It moves only on Step Clock (\(stepClockName))."
+        case .running: "It ticks by itself."
+        case .pulse: "Click the Clock button on the circuit."
+        }
+    }
+
     private func useSelected() {
-        guard let t = selected else { return }
+        guard let t = chosen else { return }
         dismiss()
         DispatchQueue.main.async { Templates.use(t) }
     }

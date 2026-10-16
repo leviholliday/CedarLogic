@@ -12,7 +12,7 @@ using namespace std;
 
 
 // Initialize the half cycle:
-Gate_CLOCK::Gate_CLOCK( TimeType newHalfCycle ) : Gate(), halfCycle(newHalfCycle) {
+Gate_CLOCK::Gate_CLOCK( TimeType newHalfCycle ) : Gate(), halfCycle(newHalfCycle), manual(false) {
 	theState = ZERO;
 	
 	// Declare the output:
@@ -25,7 +25,9 @@ void Gate_CLOCK::gateProcess( void ) {
 	
 	TimeType now = getSimTime();
 	
-	if( (halfCycle > 0) && ( now % halfCycle == 0 ) ) {
+	// A manual clock never changes by itself: it holds the level that
+	// MANUAL_LEVEL last gave it (Step Clock).
+	if( !manual && (halfCycle > 0) && ( now % halfCycle == 0 ) ) {
 		if( theState == ZERO ) theState = ONE;
 		else theState = ZERO;
 	}
@@ -34,12 +36,27 @@ void Gate_CLOCK::gateProcess( void ) {
 }
 
 
-// Set the clock rate:
+// Set the clock rate, and whether it only moves when told to:
+// MANUAL "true" makes it a manual clock, which starts at 0 and holds still;
+// MANUAL_LEVEL "1" or "0" then sets its level (not saved: the apps send it
+// for Step Clock). Older versions don't know MANUAL and run the clock.
 bool Gate_CLOCK::setParameter( string paramName, string value ) {
 	istringstream iss(value);
 	if( paramName == "HALF_CYCLE" ) {
 		iss >> halfCycle;
 		return false;
+	} else if( paramName == "MANUAL" ) {
+		bool wasManual = manual;
+		manual = (value == "true" || value == "TRUE" || value == "1");
+		if( manual && !wasManual ) theState = ZERO;
+		// A manual clock's update only re-sends its level, so it is safe to ask
+		// for one now. A running clock is polled every step already, and an
+		// extra update in the same step would toggle it twice.
+		return manual;
+	} else if( paramName == "MANUAL_LEVEL" ) {
+		if( !manual ) return false;
+		theState = (value == "1") ? ONE : ZERO;
+		return true;
 	} else {
 		return Gate::setParameter( paramName, value );
 	}
@@ -52,6 +69,10 @@ string Gate_CLOCK::getParameter( string paramName ) {
 	if( paramName == "HALF_CYCLE" ) {
 		oss << halfCycle;
 		return oss.str();
+	} else if( paramName == "MANUAL" ) {
+		return manual ? "true" : "false";
+	} else if( paramName == "MANUAL_LEVEL" ) {
+		return theState == ONE ? "1" : "0";
 	} else {
 		return Gate::getParameter( paramName );
 	}

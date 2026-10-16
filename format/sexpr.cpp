@@ -33,11 +33,17 @@ static void writeAtom(const SNode &n, std::string &out) {
 		out += n.text;
 		return;
 	}
-	// String: quote it, escaping backslash and double-quote.
+	// String: quote it, escaping backslash and double-quote, and the character
+	// after every '<' (the website's DRAWING-NOTES.md 3.4): every app looks for
+	// "<version>" in a file's raw bytes before reading it, so a label or a note
+	// holding that text must never put those bytes in the file. Every reader
+	// takes \c as c, so the text reads back the same.
 	out += '"';
+	bool afterLt = false;
 	for (char c : n.text) {
-		if (c == '\\' || c == '"') out += '\\';
+		if (c == '\\' || c == '"' || afterLt) out += '\\';
 		out += c;
+		afterLt = c == '<';
 	}
 	out += '"';
 }

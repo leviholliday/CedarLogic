@@ -30,7 +30,8 @@ file(GLOB CL_COMMANDS "${ROOT}/src/gui/command/*.cpp")
 list(FILTER CL_COMMANDS EXCLUDE REGEX "cmd(AddTab|DeleteTab)\\.cpp$")
 file(GLOB CL_LOGIC "${ROOT}/logic/src/*.cpp")
 file(GLOB CL_CEDARCORE "${ROOT}/mac/CedarCore/*.cpp")
-list(FILTER CL_CEDARCORE EXCLUDE REGEX "CGScene\\.cpp$")
+# CGScene is the Mac's; the classroom (CLASSROOM.md) isn't in the Windows app.
+list(FILTER CL_CEDARCORE EXCLUDE REGEX "(CGScene|Classroom[A-Za-z]*)\\.cpp$")
 
 add_library(CedarCore STATIC
 	${ROOT}/src/gui/guiGate.cpp ${ROOT}/src/gui/guiWire.cpp ${ROOT}/src/gui/wireSegment.cpp
@@ -41,7 +42,7 @@ add_library(CedarCore STATIC
 	${ROOT}/src/gui/route/TrunkRouter.cpp ${ROOT}/src/gui/route/GridRouter.cpp ${ROOT}/src/gui/route/Layout.cpp
 	${CL_COMMANDS}
 	${CL_LOGIC}
-	${ROOT}/format/circuit_file_io.cpp ${ROOT}/format/legacy_cdl.cpp ${ROOT}/format/migrate.cpp
+	${ROOT}/format/circuit_file_io.cpp ${ROOT}/format/ink.cpp ${ROOT}/format/legacy_cdl.cpp ${ROOT}/format/migrate.cpp
 	${ROOT}/format/numeric.cpp ${ROOT}/format/sexpr.cpp
 	${CL_CEDARCORE}
 	CedarCore/D2DScene.cpp

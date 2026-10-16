@@ -47,6 +47,16 @@ struct CLLayout: View {
     @StateObject private var split = SplitState()
 
     private var chrome: CLChrome { CLChrome(dark: prefs.dark) }
+    /// The card plays once the window is in place (and drawn); whatever
+    /// its timeline does (the window ordered out, or moving into full
+    /// screen), its cover goes soon after.
+    private func startOpeningCard() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { opening = Date() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08 + OpeningCard.total + 0.7) {
+            if covered { covered = false; opening = nil; canvas.playAppear() }
+        }
+    }
+
     /// What the opening card says under the name.
     private var openingDetail: String {
         let tabs = document.pageCount
@@ -80,7 +90,15 @@ struct CLLayout: View {
                                         onReveal: { canvas.playAppear() }, onDone: { covered = false; opening = nil })
                         }
                     }
+                // The student's notes for the circuit (Notes.swift).
+                if canvas.showNotes && !focusMode {
+                    Rectangle().fill(chrome.sash).frame(width: 1)
+                    NotesPanel(canvas: canvas, document: document)
+                        .frame(width: 280)
+                        .transition(.move(edge: .trailing))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: canvas.showNotes)
             if prefs.showStatus || !canvas.statusMessage.isEmpty || !canvas.routed.statusMessage.isEmpty {
                 // The side you're working in: its zoom, pointer and count.
                 CLStatusBar(document: document, canvas: canvas.routed, status: canvas.routed.status)
@@ -126,6 +144,7 @@ struct CLLayout: View {
         .onReceive(split.controller.$locked) { v in if canvas.locked != v { canvas.locked = v } }
         .onReceive(canvas.$simView) { v in if split.controller.simView != v { split.controller.simView = v } }
         .onReceive(split.controller.$simView) { v in if canvas.simView != v { canvas.simView = v } }
+        .modifier(DrawingWindowSync(canvas: canvas, split: split, focusMode: $focusMode))
         .onChange(of: prefs.classicTabs) { _, classic in if classic { split.close(document, leftPage: $page) } }
         // Revealed by the launch screen: the grid fades in as it goes.
         .onReceive(NotificationCenter.default.publisher(for: .clSplashDone)) { _ in canvas.playAppear() }
@@ -155,6 +174,10 @@ struct CLLayout: View {
         .sheet(isPresented: $canvas.showExportImage) {
             ExportImageView(document: document, page: canvas.exportPage, fileName: windowTitle)
                 .onClickOutside { canvas.showExportImage = false }
+        }
+        .sheet(isPresented: $canvas.showExportReport) {
+            ExportReportView(document: document, fileName: windowTitle)
+                .onClickOutside { canvas.showExportReport = false }
         }
         .sheet(item: Binding(get: { canvas.ramGate.map { RamRef(id: $0) } }, set: { canvas.ramGate = $0?.id })) { ref in
             RamEditorView(document: document, gate: ref.id, canvas: canvas)
@@ -223,7 +246,7 @@ struct CLLayout: View {
             }
             canvas.playAppear()
             // The card plays once the window is in place (and drawn).
-            if covered { DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { opening = Date() } }
+            if covered { startOpeningCard() }
             if !prefs.hasSeenWelcome { openWindow(id: "welcome") }
             else if WhatsNew.shouldShow { openWindow(id: "whatsnew") }
         }
@@ -1004,10 +1027,38 @@ struct CLToolbar: View {
                on: canvas.simView, colored: true) { canvas.simView.toggle() }
     }
 
+    /// Draw on the circuit: a toggle, with a dot while a drawing is hidden.
+    private var drawButton: some View {
+        let _ = canvas.inkVersion
+        return button("pencil.tip.crop.circle", canvas.drawing ? "Done drawing (Esc)" : tip("Draw on the circuit", .draw),
+                      on: canvas.drawing) { canvas.toggleDrawing() }
+            .overlay(alignment: .topTrailing) {
+                if canvas.hasHiddenDrawing && !canvas.drawing {
+                    Circle().fill(accent).frame(width: 6, height: 6).offset(x: -5, y: 6).allowsHitTesting(false)
+                        .help("This circuit has a drawing that's hidden")
+                }
+            }
+            .accessibilityLabel("Draw on the circuit")
+            .accessibilityAddTraits(canvas.drawing ? .isSelected : [])
+    }
+
+    private var notesButton: some View {
+        button("note.text", canvas.showNotes ? "Hide notes" : tip("Notes for this circuit", .notes),
+               on: canvas.showNotes) { canvas.perform(.notes) }
+            .accessibilityLabel(canvas.showNotes ? "Hide notes" : "Show notes")
+    }
+
     private var pauseButton: some View {
         button(canvas.isRunning ? "pause.fill" : "play.fill",
                canvas.isRunning ? "Pause the simulation" : "Resume the simulation",
                on: !canvas.isRunning) { canvas.toggleRunning() }
+    }
+
+    /// Step Clock: off until the page has a clock set to move only on it.
+    private var stepClockButton: some View {
+        let ready = canvas.routed.hasManualClock
+        return button("clock.arrow.2.circlepath", ready ? tip("Step Clock", .stepClock) : CanvasController.stepClockOffTip,
+                      disabled: !ready) { canvas.perform(.stepClock) }
     }
 
     @ViewBuilder private var leftTools: some View {
@@ -1044,10 +1095,12 @@ struct CLToolbar: View {
             group {
                 pauseButton
                 button("forward.frame.fill", tip("Step once", .step)) { canvas.stepOnce() }
+                if prefs.showStepClock { stepClockButton }
                 TBSpeed(stepMs: $canvas.stepMs, ink: ink, quiet: style == .seamless)
             }
         }
         if prefs.shown(.run) { group { runButton } }
+        if prefs.shown(.draw) { group { drawButton; notesButton } }
         if prefs.shown(.lock) {
             group {
                 button(canvas.locked ? "lock.fill" : "lock.open",
@@ -1104,6 +1157,7 @@ struct CLToolbar: View {
                     Button("Zoom to Fit") { canvas.zoomToFit() }
                     Divider()
                     Button("Step") { canvas.stepOnce() }
+                    Button("Step Clock") { canvas.perform(.stepClock) }.disabled(!canvas.routed.hasManualClock)
                     Button(canvas.locked ? "Unlock" : "Lock") { canvas.locked.toggle() }
                     Button("New Tab") { canvas.newPage() }
                     Button(focusMode ? "Leave Focus Mode" : "Focus Mode") { focusMode.toggle() }
@@ -1820,6 +1874,14 @@ struct CLTabStrip: View {
                         .lineLimit(1).truncationMode(.tail)
                         .padding(.leading, 9)
                 }
+                // Pages whose TO/FROM links connect share a dot's colour
+                // (docs/PAGE-LINKS.md); none while every page connects.
+                let mark = Int(cl_page_link_mark(document.handle, Int32(p)))
+                if mark >= 0 {
+                    Circle().fill(Self.linkColors[mark % Self.linkColors.count])
+                        .frame(width: 6, height: 6).padding(.leading, 6)
+                        .help("Its TO/FROM links connect with the other tabs with this colour")
+                }
                 Spacer(minLength: 26)
             }
             if document.pageCount > 1 && (active || hot) && renaming != id {
@@ -1859,6 +1921,26 @@ struct CLTabStrip: View {
                     if let i = document.pageIndex(of: id) { split.splitWith(i, onRight: true, document, leftPage: $page) }
                 }
             }
+            if document.pageCount > 1 {
+                Divider()
+                // A checklist: the pages this one's TO/FROM links reach.
+                Menu("Connect to") {
+                    ForEach(0..<document.pageCount, id: \.self) { j in
+                        if j != p {
+                            Toggle(document.pageName(j), isOn: Binding(
+                                get: { controller.pagesLinked(p, j) },
+                                set: { on in
+                                    if let i = document.pageIndex(of: id) { controller.setPagesLinked(i, j, on) }
+                                }))
+                        }
+                    }
+                    Divider()
+                    Button("Connect All Pages") { controller.connectAllPages() }
+                        .disabled(!controller.canConnectAllPages)
+                    Button("Disconnect All Pages") { controller.disconnectAllPages() }
+                        .disabled(!controller.canDisconnectAllPages)
+                }
+            }
             Divider()
             Button("Close Tab") {
                 if let i = document.pageIndex(of: id) { controller.closePage(i) }
@@ -1866,6 +1948,9 @@ struct CLTabStrip: View {
             .disabled(document.pageCount < 2)
         }
     }
+
+    /// The link groups' dot colours, in order (cl_page_link_mark).
+    static let linkColors: [Color] = [.blue, .orange, .purple, .pink, .teal, .yellow, .brown, .indigo, .mint, .red]
 
     private func select(_ p: Int) {
         if pane == 0 {
@@ -2059,6 +2144,7 @@ struct CLCanvasArea: View {
                 CLCanvasHost(document: document, page: shown, controller: c)
                     .overlay(alignment: .top) { TidyBanner(canvas: c) }
                     .overlay(alignment: .top) { FindBar(canvas: c, document: document) }
+                    .overlay(alignment: .top) { if p == 0 { AssignmentBar(canvas: c) } }
                     .overlay { EmptyHint(document: document, controller: c, page: shown) }
                     .overlay(alignment: .topTrailing) { LockBadge(canvas: c) }
                     .overlay(alignment: .bottom) {
@@ -2067,7 +2153,13 @@ struct CLCanvasArea: View {
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
+                    // The drawing tools, above Simulation View's bar when it's up.
+                    .overlay(alignment: .bottom) {
+                        DrawingBar(canvas: c)
+                            .padding(.bottom, canvas.simView && p == 0 ? (prefs.projector ? 96 : 78) : 14)
+                    }
                     .animation(.spring(response: 0.34, dampingFraction: 0.86), value: canvas.simView)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.86), value: canvas.drawing)
             } else {
                 chrome.canvas
             }
@@ -2250,5 +2342,22 @@ private struct StatusMessage: View {
                 guard !m.isEmpty else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { if canvas.statusMessage == m { canvas.statusMessage = "" } }
             }
+    }
+}
+
+/// Draw mode is the window's, on both sides of a split; the notes go when
+/// a projector shows Simulation View (the presenter can open them again);
+/// Present in This Window hides the side panel and toolbar while it lasts.
+private struct DrawingWindowSync: ViewModifier {
+    @ObservedObject var canvas: CanvasController
+    @ObservedObject var split: SplitState
+    @Binding var focusMode: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(canvas.$drawing) { v in if split.controller.drawing != v { split.controller.drawing = v } }
+            .onReceive(split.controller.$drawing) { v in if canvas.drawing != v { canvas.drawing = v } }
+            .onChange(of: canvas.simView) { _, on in if on && Prefs.shared.projector { canvas.showNotes = false } }
+            .onChange(of: canvas.presentingHere) { _, on in focusMode = on; if on { canvas.showNotes = false } }
     }
 }

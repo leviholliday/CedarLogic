@@ -92,6 +92,7 @@ enum HelpBook {
                     .p("**{quickCopy} while moving a gate** (dragging it, or with it on the pointer from the palette, Quick Add or a paste) connects its free pins to the pins they're right next to, and keeps it moving. Escape takes back just those connections."),
                     .p("Putting a gate down right next to a free pin connects them too."),
                     .p("**Straighten ({straighten})** tidies the selected wires into clean routes. **Tidy Up ({tidy})** tidies the whole page, showing you first: Return keeps it, Escape doesn't, Tab tries the other way."),
+                    .p("**Lock in Place** (the Edit menu, or right-click a part) keeps a part where it is, with a small lock on it: it can't be moved, rotated or deleted (closing its tab still removes it, and Undo brings it back), but wires to it still work, its settings still change and switches still flip. Teachers: lock the switches and lights, then share the circuit. **Unlock Part** takes the lock off one part, and **Unlock All Parts** in the Edit menu takes every lock off. This is different from **Lock the Circuit** in the Simulation menu, which stops all editing."),
                     .h("Wire colours"),
                     .keys([
                         HelpPage.Key(keys: "Silver", what: "0 (grey on older looks, black on white)"),
@@ -149,8 +150,11 @@ enum HelpBook {
                  line: "It runs while you build.",
                  blocks: [
                     .p("The circuit runs all the time. The toolbar pauses and resumes it, **{step}** steps once, and the speed slider sets how long each step takes."),
+                    .p("**Step Clock ({stepClock})** works a clock by hand, one tick at a time. Double-click a clock and turn on **Only on Step Clock**: it holds still at 0. Each Step Clock then takes it to 1 and back to 0, letting the circuit settle after each, so a flip-flop changes once per press. It works running or paused; the clock button beside Step does the same. The flip-flop templates start this way, unless you pick **Running** on the Clock line in New from Template."),
                     .p("Click a switch to flip it; keypads and pulse generators take clicks too."),
                     .p("**Simulation View ({simView})** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the bar at the bottom shows every switch and light. Space pauses, Escape leaves."),
+                    .p("**Predict** (in Simulation View's bar) covers every light with a ?. Click a light (or Tab to it and press 0 or 1; a display takes a hex digit) to guess what it will show, then **Reveal** (Return): right guesses ring green, wrong ones red. Your guesses stay while you flip switches or step, so you can guess what a light will show after the next step and then check. Once revealed, flipping a switch or stepping covers them again for the next round. A light that shows no clear value gets a dashed ring and isn't scored."),
+                    .p("**Projector mode** (the projector button in the bar, or the View menu) draws Simulation View for the back of a classroom: thick wires, big labels and lights, and a bigger bar. It's remembered on this Mac and never changes the circuit."),
                     .p("**Lock** (in the toolbar) stops edits, so a circuit can be shown and played with but not changed. Switches still work."),
                  ]),
         HelpPage(id: "analysis", title: "Truth Tables and the Oscilloscope", icon: "tablecells",
@@ -158,7 +162,9 @@ enum HelpBook {
                  blocks: [
                     .p("**Truth table ({truthTable})** tries every combination of the page's switches and writes down its lights. Circuits with clocks or flip-flops are read row by row, each after the circuit settles."),
                     .p("Beside the table: each light's **simplest sum of products** and **product of sums**, and its **Karnaugh map** with the groups drawn on (groups of 1s or of 0s). Rows with no clear 0 or 1 count as don't-cares. Copy either formula, or **Build This as a Circuit** to make it again as gates."),
-                    .p("**Oscilloscope ({scope})** records signals over time. Every **TO** label becomes a signal you can watch. Its share button copies a **timing diagram** for a lab report, or saves it as a PNG or PDF (what's on screen, or the whole recording)."),
+                    .p("**Check my circuit ({checkCircuit})** compares the lights with what the assignment asks for: type the formulas (**S = A ^ B ^ Cin**, then **Cout = AB + Cin(A ^ B)**), a minterm list (**F(A,B,C) = Σm(1,3,5) + d(7)**), or paste the truth table you were given. Switches and lights are matched by name (pick by hand under **Names** when they differ), don't-cares are skipped, and wrong rows are shown with what was expected and what the circuit gave. The last check is kept for each circuit."),
+                    .p("Circuits with a clock are checked **clock pulse by clock pulse**: type a count (**0, 3, 5, 6, repeat**, or **Q2 Q1 Q0: 000 011 101 110 ...**), a state table (**Q1 Q0 X | Q1+ Q0+ | Z**, then a row each) or a timing table (**Pulse | X | Z**, then the inputs before each pulse and the lights after it). The check runs a copy of your circuit from the start, so your circuit isn't changed, and shows every step with the first wrong one marked. Lines like **start: Q1 Q0 = 00**, **reset: CLR' = 0**, **set: EN = 1** and **clock: CLK** say where to start, how to reset, which switches to hold and which switch is the clock. A page with no switches, like a counter, opens straight at Check."),
+                    .p("**Oscilloscope ({scope})** records signals over time. Every **TO** label becomes a signal you can watch. Its share button copies a **timing diagram** for a lab report, or saves it as a PNG or PDF (what's on screen, or the whole recording). To make a worksheet, tick the signals students should draw under **Leave blank for students**: those rows come out empty, with the time grid, to fill in on paper. A dark line marks each time the clock changes: a signal named CLK, CLOCK or CP (or, failing that, one that ticks evenly) that isn't left blank. Untick them all for the answer key."),
                     .p("**Point at a wire** and every branch of it lights up; rest there a moment (at once in Simulation View) and a tag shows what it carries: 0, 1, Z (floating: nothing drives it) or ! (a conflict: two outputs disagree)."),
                  ]),
         HelpPage(id: "formula", title: "Build from a Formula", icon: "function",
@@ -189,6 +195,7 @@ enum HelpBook {
                         HelpPage.Key(keys: "{newCircuit}", what: "New circuit"),
                         HelpPage.Key(keys: "{importFile}", what: "Open a .cdl file from anywhere"),
                         HelpPage.Key(keys: "{exportImage}", what: "Export an image (PNG or PDF), with your name under it"),
+                        HelpPage.Key(keys: "{exportReport}", what: "Export a lab report: one PDF with the circuit, truth table, Karnaugh maps and timing diagram"),
                         HelpPage.Key(keys: "{exportFile}", what: "Export as a CedarLogic file"),
                         HelpPage.Key(keys: "{print}", what: "Print"),
                     ]),
@@ -197,7 +204,7 @@ enum HelpBook {
         HelpPage(id: "templates", title: "Templates and My Parts", icon: "square.on.square",
                  line: "Start ahead, and reuse what you've built.",
                  blocks: [
-                    .p("**File > New from Template…** starts a circuit from a **Lab Page** (a title block with your name), a **4-Bit Counter**, a **7-Segment Decoder Starter**, or one of your own. **File > Save as Template…** keeps the circuit you're in as one of yours, every tab of it. Settings > General can make every new circuit start from one."),
+                    .p("**File > New from Template…** starts a circuit from a **Lab Page** (a title block with your name), a **4-Bit Counter**, a **7-Segment Decoder Starter**, any of the flip-flops and latches, one of four **Classic Mistakes** circuits with a problem to find, or one of your own. **File > Save as Template…** keeps the circuit you're in as one of yours, every tab of it. Settings > General can make every new circuit start from one."),
                     .p("**My Parts**: select some gates and choose **Edit > Save as Part…**, and name it. It's at the bottom of the side panel's list (**My Parts**) to drag or click in, and in **Add a Gate ({addGate})** under its name. It drops in as a copy of those gates and wires, so any CedarLogic can open the circuit."),
                     .tip("Right-click a part (in the side panel or in Add a Gate) to rename or delete it. Your templates rename and delete from New from Template."),
                  ]),

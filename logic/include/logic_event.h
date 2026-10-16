@@ -17,6 +17,8 @@
 
 #include "logic_defaults.h"
 
+#include <atomic>
+
 class Event
 {
 public:
@@ -32,8 +34,9 @@ public:
 	IDType gateID{ID_NONE};       // The gate that is having a changed output.
 	std::string gateOutputID{}; // The gate output that is changing.
 	
-	// Tag the creation time, for sorting if there are two at the same simulation time:
-	Event() : myCreationTime(globalCreationTime++) {}
+	// Tag the creation time, for sorting if there are two at the same simulation time.
+	// Atomic: two circuits may be simulated on different threads.
+	Event() : myCreationTime(globalCreationTime.fetch_add(1, std::memory_order_relaxed)) {}
 	TimeType getCreationTime() const;
 
 	// Sort events by time.
@@ -43,7 +46,7 @@ public:
 private:
 	TimeType myCreationTime;
 
-	static TimeType globalCreationTime;
+	static std::atomic<TimeType> globalCreationTime;
 };
 
 

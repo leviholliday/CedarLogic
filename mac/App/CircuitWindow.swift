@@ -28,6 +28,11 @@ struct CircuitWindow: View {
         .focusedSceneObject(canvas)
         .tint(theme.accent.color)
         .onChange(of: undoManager) { _, um in canvas.undoManager = um }
+        // Read again from disk (a circuit changed on another device, SYNC.md
+        // 4.12): the page this window was on may be gone from the new copy.
+        .onChange(of: ObjectIdentifier(document)) { _, _ in
+            if page >= document.pageCount { page = max(0, document.pageCount - 1) }
+        }
         .onAppear {
             let previous = CanvasController.front
             CanvasController.front = canvas
@@ -140,6 +145,7 @@ final class WindowReplacer: NSObject {
     @objc private func document(_ doc: NSDocument, shouldClose: Bool, contextInfo: UnsafeMutableRawPointer?) {
         if shouldClose {
             new.makeKeyAndOrderFront(nil)
+            CanvasController.focusCanvas(in: new)
             doc.close()
             // A full-screen circuit's replacement is full screen too.
             if fullScreen && !new.styleMask.contains(.fullScreen) {

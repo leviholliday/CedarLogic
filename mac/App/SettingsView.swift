@@ -1,13 +1,14 @@
 // Settings (⌘,), laid out like the wx app's Preferences: the system's row of
 // pages in the toolbar, the window easing to each page's height as you switch,
 // and each setting a label on the left with its control and a line of
-// explanation on the right: General, Appearance, Canvas, Toolbar, Shortcuts.
+// explanation on the right: General, Appearance, Canvas, Toolbar, Shortcuts,
+// Sync (SyncSettingsView.swift).
 
 import AppKit
 import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, appearance, canvas, toolbar, shortcuts
+    case general, appearance, canvas, toolbar, shortcuts, sync
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -16,6 +17,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .canvas: "Canvas"
         case .toolbar: "Toolbar"
         case .shortcuts: "Shortcuts"
+        case .sync: "Sync"
         }
     }
     var icon: String {
@@ -25,6 +27,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .canvas: "cursorarrow.rays"
         case .toolbar: "menubar.rectangle"
         case .shortcuts: "keyboard"
+        case .sync: "arrow.triangle.2.circlepath"
         }
     }
 }
@@ -42,6 +45,11 @@ final class PrefsWindow: NSObject, NSToolbarDelegate, NSWindowDelegate {
 
     private var pages: [SettingsPage] { SettingsPage.allCases }
 
+    /// A QR code showing in Settings > Sync (I Have a Code) goes with the window.
+    func windowWillClose(_ notification: Notification) {
+        SyncCenter.shared.settingsClosed()
+    }
+
     func show() {
         if window == nil { build() }
         guard let w = window else { return }
@@ -53,6 +61,34 @@ final class PrefsWindow: NSObject, NSToolbarDelegate, NSWindowDelegate {
         w.appearance = NSAppearance(named: Prefs.shared.dark ? .darkAqua : .aqua)
         w.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    /// Settings, open at `page` (a sync link opens Settings > Sync).
+    func show(page: SettingsPage) {
+        if let w = window, w.isVisible {
+            if current != page { select(page, animated: true) }
+            show()
+        } else {
+            current = page
+            show()
+        }
+    }
+
+    /// The page's content grew or shrank (Sync turning on, say): the window
+    /// eases to its new height, its top edge staying put.
+    func refit() {
+        guard let w = window, w.isVisible, !switching, let c = pageController else { return }
+        let size = c.sizeThatFits(in: NSSize(width: 640, height: 10_000))
+        let contentRect = NSRect(x: 0, y: 0, width: max(size.width, 640), height: size.height)
+        var frame = w.frameRect(forContentRect: contentRect)
+        frame.origin.x = w.frame.origin.x
+        frame.origin.y = w.frame.maxY - frame.height
+        guard abs(frame.height - w.frame.height) > 0.5 else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.25
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            w.animator().setFrame(frame, display: true)
+        }
     }
 
     private func build() {
@@ -184,13 +220,14 @@ struct SettingsPageView: View {
 }
 
 enum SettingsView {
-    @ViewBuilder static func content(_ p: SettingsPage) -> some View {
+    @MainActor @ViewBuilder static func content(_ p: SettingsPage) -> some View {
         switch p {
         case .general: GeneralSettingsView()
         case .appearance: CLAppearanceSettings()
         case .canvas: CLCanvasSettings()
         case .toolbar: CLToolbarSettings()
         case .shortcuts: CLShortcutSettings()
+        case .sync: SyncSettingsView(center: SyncCenter.shared)
         }
     }
 }
@@ -255,7 +292,11 @@ struct GeneralSettingsView: View {
                 Picker("", selection: $prefs.newTemplate) {
                     Text("A blank page").tag("")
                     Divider()
-                    ForEach(Templates.builtIn) { Text($0.name).tag($0.id) }
+                    // Not the Classic Mistakes: a broken circuit is no start for every new one.
+                    ForEach(Templates.builtInGroups.filter { $0.name != Templates.mistakesGroup }, id: \.name) { group in
+                        if group.name != Templates.builtInGroups[0].name { Divider() }
+                        ForEach(group.list) { Text($0.name).tag($0.id) }
+                    }
                     let mine = Templates.yours()
                     if !mine.isEmpty {
                         Divider()
@@ -420,6 +461,13 @@ struct CLCanvasSettings: View {
                 }
                 .labelsHidden().fixedSize()
             }
+            Row("New pages", hint: "TO and FROM links of the same name connect across pages that share links. Right-click a tab to choose which pages connect.") {
+                Picker("", selection: $prefs.newPagesShareLinks) {
+                    Text("Share links with the other pages").tag(true)
+                    Text("Start on their own").tag(false)
+                }
+                .labelsHidden().fixedSize()
+            }
             Row("Tidy Up", hint: "Keeps my layout: lines gates up where they are. Rearranges everything: lays the circuit out by signal flow. The Edit menu always has the other one.") {
                 Picker("", selection: $tidyMode) { Text("Keeps my layout").tag(0); Text("Rearranges everything").tag(1) }
                     .labelsHidden().fixedSize()
@@ -433,7 +481,7 @@ struct CLCanvasSettings: View {
 /// either to choose it), then which tools it shows.
 struct CLToolbarSettings: View {
     @ObservedObject private var prefs = Prefs.shared
-    private let groups: [ToolGroup] = [.file, .undo, .clipboard, .zoom, .sim, .run, .lock, .tab, .feedback]
+    private let groups: [ToolGroup] = [.file, .undo, .clipboard, .zoom, .sim, .run, .draw, .lock, .tab, .feedback]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -448,6 +496,8 @@ struct CLToolbarSettings: View {
                         .toggleStyle(.checkbox)
                 }
                 Toggle("Circuit name", isOn: $prefs.showTitle).toggleStyle(.checkbox)
+                Toggle("Step Clock", isOn: $prefs.showStepClock).toggleStyle(.checkbox)
+                    .help("Show Step Clock in the toolbar and the Simulation View bar. Clicking a clock set to \u{201C}Only on Step Clock\u{201D} steps it too.")
             }
             .padding(.top, 10)
             Text("Applies to every style. Hidden tools are still in the menus and keep their shortcuts.")

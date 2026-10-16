@@ -27,11 +27,11 @@ enum ToolbarStyle: Int, CaseIterable, Identifiable {
 
 /// Tool groups that can be hidden, one bit each (the wx app's cl::tb::Group).
 enum ToolGroup: Int, CaseIterable, Identifiable {
-    case file, undo, clipboard, zoom, sim, run, lock, theme, tab, feedback
+    case file, undo, clipboard, zoom, sim, run, lock, theme, tab, feedback, draw
     var id: Int { rawValue }
     var name: String {
-        ["New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Speed",
-         "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback"][rawValue]
+        ["New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
+         "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback", "Draw and Notes"][rawValue]
     }
 }
 
@@ -89,6 +89,10 @@ final class Prefs: ObservableObject {
     @Published var timingInColor: Bool { didSet { d.set(timingInColor, forKey: "cl.timingColor") } }
     /// Resting on a wire shows what it carries (0, 1, Z...). Off at first.
     @Published var wireValueTag: Bool { didSet { d.set(wireValueTag, forKey: "cl.wireValueTag") } }
+    /// Simulation View drawn for a projector: thick wires, big labels and
+    /// lights, high contrast, a bigger control bar. This Mac only; the
+    /// circuit file never hears of it.
+    @Published var projector: Bool { didSet { d.set(projector, forKey: "cl.projector") } }
     /// Cmd-Q asks first, in a panel in the middle of the screen.
     @Published var confirmQuit: Bool { didSet { d.set(confirmQuit, forKey: "cl.confirmQuit") } }
     @Published var hasSeenWelcome: Bool { didSet { d.set(hasSeenWelcome, forKey: "cl.hasSeenWelcome") } }
@@ -97,11 +101,19 @@ final class Prefs: ObservableObject {
     @Published var showCategoryKeys: Bool { didSet { d.set(showCategoryKeys, forKey: "cl.showCategoryKeys") } }
     /// The circuit's name (and its Rename menu) at the toolbar's top left.
     @Published var showTitle: Bool { didSet { d.set(showTitle, forKey: "cl.showTitle") } }
+    /// The Step Clock button in the toolbar and the Simulation View bar (the
+    /// menu item and its key stay either way).
+    @Published var showStepClock: Bool { didSet { d.set(showStepClock, forKey: "cl.showStepClock") } }
     /// Opening or starting a circuit replaces the one in the window, as in
     /// the wx app (asking to save first); off, each gets its own window.
     @Published var openReplaces: Bool { didSet { d.set(openReplaces, forKey: "cl.openReplaces") } }
     /// What a new circuit starts as: a template's id, or "" for a blank page.
     @Published var newTemplate: String { didSet { d.set(newTemplate, forKey: "cl.newTemplate") } }
+    /// A page added to a circuit joins the pages its TO/FROM links already
+    /// reach (as always), or starts on its own (docs/PAGE-LINKS.md).
+    @Published var newPagesShareLinks: Bool {
+        didSet { d.set(newPagesShareLinks, forKey: "cl.newPagesShareLinks"); cl_set_new_pages_share_links(newPagesShareLinks) }
+    }
 
     private init() {
         Prefs.importWxPrefsOnce()
@@ -143,13 +155,17 @@ final class Prefs: ObservableObject {
         exportInfo = bool("cl.exportInfo", true)
         timingInColor = bool("cl.timingColor", false)
         wireValueTag = bool("cl.wireValueTag", false)
+        projector = bool("cl.projector", false)
         confirmQuit = bool("cl.confirmQuit", true)
         hasSeenWelcome = bool("cl.hasSeenWelcome", false)
         showGateNames = bool("cl.showGateNames", true)
         showCategoryKeys = bool("cl.showCategoryKeys", true)
         showTitle = bool("cl.showTitle", true)
+        showStepClock = bool("cl.showStepClock", true)
         openReplaces = bool("cl.openReplaces", true)
         newTemplate = d.string(forKey: "cl.newTemplate") ?? ""
+        newPagesShareLinks = bool("cl.newPagesShareLinks", true)
+        cl_set_new_pages_share_links(newPagesShareLinks)
         applyThemeMode()
         applyWireDots()
     }

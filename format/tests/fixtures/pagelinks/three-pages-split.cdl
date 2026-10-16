@@ -1,0 +1,57 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic Online")
+  (page 0
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 6 -8)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "DE_TO"
+      (uuid "2")
+      (at 14 -8)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (wire
+      (ids "10")
+      (seg "0" h
+        (pts 8 -8 14 -8)
+        (connect "1" "OUT_0")
+        (connect "2" "IN_0"))))
+  (page 1
+    (gate "DA_FROM"
+      (uuid "3")
+      (at 6 -8)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "GA_LED"
+      (uuid "4")
+      (at 14 -8)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (wire
+      (ids "11")
+      (seg "0" h
+        (pts 8 -8 14 -8)
+        (connect "3" "IN_0")
+        (connect "4" "N_in0"))))
+  (page 2
+    (linkgroup 1)
+    (gate "DA_FROM"
+      (uuid "5")
+      (at 6 -8)
+      (angle 0)
+      (lparam "JUNCTION_ID" "A"))
+    (gate "GA_LED"
+      (uuid "6")
+      (at 14 -8)
+      (angle 0)
+      (gparam "LED_BOX" "-0.76,-0.76,0.76,0.76"))
+    (wire
+      (ids "12")
+      (seg "0" h
+        (pts 8 -8 14 -8)
+        (connect "5" "IN_0")
+        (connect "6" "N_in0")))))

@@ -26,6 +26,9 @@ struct CedarLogicApp: App {
             MenuFixup.install()
             RenderUI.runIfAsked()
             RenderWindow.runIfAsked()
+            RenderPresenter.runIfAsked()
+            RenderClassroom.runIfAsked()
+            LabReport.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
             DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
         }
@@ -81,6 +84,13 @@ struct CedarLogicApp: App {
         .defaultSize(width: 600, height: 540)
         .defaultPosition(.center)
 
+        Window("Classroom", id: "classroom") {
+            ClassroomView()
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 960, height: 680)
+        .defaultPosition(.center)
+
         Window("CedarLogic Help", id: "help") {
             HelpView()
         }
@@ -128,6 +138,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
     /// The launch screen goes up before any window, so they can wait for it.
     func applicationWillFinishLaunching(_ notification: Notification) {
         CrashReports.start()
+        // cedarlogic://open links (ShareLink.swift).
+        MainActor.assumeIsolated { ShareLink.install() }
         Splash.shared.showIfLaunching()
         // Asked once, once the circuit is there to ask over.
         if Splash.shared.active {
@@ -156,6 +168,14 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
         DevSnapshot.runIfAsked()
         BarTest.start()
         FeedbackModel.selfTestIfAsked()
+        // Sync starts once the first window is up (SYNC.md 4.3), never in the
+        // test and picture modes.
+        let env = ProcessInfo.processInfo.environment
+        if !BarTest.on, env["CL_SNAPSHOT"] == nil, env["CL_MENU_DUMP"] == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { SyncCenter.shared.start() } }
+            // Classroom (behind its flag) polls the classes this Mac teaches or is in.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { ClassroomCenter.shared.start() } }
+        }
         // Once anything macOS was asked to open (a file double-clicked in
         // Finder) has arrived: the circuit you were last in (LastCircuit), as
         // the wx app reopens the one you had; else the most recent; else a
@@ -166,6 +186,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             let dc = NSDocumentController.shared
             let launched = { Self.afterFirstDraw { Splash.shared.begin() } }
             guard dc.documents.isEmpty, !CommandLine.arguments.contains("--render-ui") else { launched(); return }
+            // A link that launched the app brings its own circuit.
+            if MainActor.assumeIsolated({ ShareLink.handedOver }) { launched(); return }
             // The toolbar test works on a new circuit, never one of yours.
             if BarTest.on && ProcessInfo.processInfo.environment["CL_BAR_WATCH"] == nil { Self.newHidden(); launched(); return }
             let remembered = LastCircuit.url.map { [$0] } ?? []
@@ -203,6 +225,11 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { then() }
         }
+    }
+
+    /// With sync on, quitting first sends what's changed (at most 5 s; Sync.swift).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated { SyncCenter.shared.terminate() }
     }
 
     /// Clicking the Dock icon with no window open: the same.
@@ -319,6 +346,18 @@ struct NewOpenCommands: Commands {
             Button("New from Template…") { openWindow(id: "templates") }
             Button("Save as Template…") { if let canvas { Templates.saveCurrent(from: canvas) } }
                 .disabled(canvas == nil)
+            if ClassroomFlag.on {
+                Menu("Classroom") {
+                    Button("Classroom…") { openWindow(id: "classroom") }
+                    Button("Create Classroom…") { ClassroomCenter.shared.sheet = .create; openWindow(id: "classroom") }
+                    Button("Join a Class…") { ClassroomCenter.shared.sheet = .join(prefill: ""); openWindow(id: "classroom") }
+                    Button("I Have a Teacher Key…") { ClassroomCenter.shared.sheet = .addTeacherKey(prefill: ""); openWindow(id: "classroom") }
+                    Divider()
+                    Button("Hand In") { ClassroomCenter.shared.handInFront() }
+                        .disabled(canvas == nil)
+                    ProjectorMenuItem()
+                }
+            }
             Divider()
             Button("New Tab") { canvas?.perform(.newTab) }
                 .keyboardShortcut(keys.menu(.newTab))
@@ -337,6 +376,13 @@ struct NewOpenCommands: Commands {
             Button("Switch Pane") { canvas?.perform(.switchPane) }
                 .keyboardShortcut(keys.menu(.switchPane))
                 .disabled(canvas == nil)
+            // Which pages' TO/FROM links connect (docs/PAGE-LINKS.md); a
+            // tab's right-click menu connects pages one by one.
+            Divider()
+            Button("Connect All Pages") { canvas?.connectAllPages() }
+                .disabled(!(canvas?.canConnectAllPages ?? false))
+            Button("Disconnect All Pages") { canvas?.disconnectAllPages() }
+                .disabled(!(canvas?.canDisconnectAllPages ?? false))
         }
     }
 }
@@ -480,9 +526,11 @@ enum MenuFixup {
 
 struct ViewCommands: Commands {
     @FocusedObject private var canvas: CanvasController?
+    @ObservedObject private var ink = InkSettings.shared
     @AppStorage("cl.showGrid") private var showGrid = true
     @AppStorage("cl.wireDots") private var wireDots = true
     @AppStorage("cl.lastDark") private var dark = false
+    @AppStorage("cl.projector") private var projector = false
     @ObservedObject private var keys = ShortcutStore.shared
 
     var body: some Commands {
@@ -511,14 +559,56 @@ struct ViewCommands: Commands {
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .keyboardShortcut(keys.menu(.truthTable))
                 .disabled(canvas == nil)
+            Button("Check My Circuit…") { canvas?.perform(.checkCircuit) }
+                .keyboardShortcut(keys.menu(.checkCircuit))
+                .disabled(canvas == nil)
             Button(canvas?.simView == true ? "Leave Simulation View" : "Simulation View") { canvas?.simView.toggle() }
                 .keyboardShortcut(keys.menu(.simView))
                 .disabled(canvas == nil)
+            // Simulation View drawn big and bright, for a projector (this Mac only).
+            Toggle("Projector Mode", isOn: Binding(get: { projector }, set: { Prefs.shared.projector = $0 }))
             Divider()
             Button(canvas?.showScope == true ? "Hide Oscilloscope" : "Show Oscilloscope") { canvas?.showScope.toggle() }
                 .keyboardShortcut(keys.menu(.scope))
                 .disabled(canvas == nil)
             Divider()
+            // Drawing on the circuit and the notes (Drawing.swift, Notes.swift).
+            let _ = canvas?.inkVersion
+            Button(canvas?.drawing == true ? "Done Drawing" : "Draw on the Circuit") { canvas?.perform(.draw) }
+                .keyboardShortcut(keys.menu(.draw))
+                .disabled(canvas == nil)
+            Menu("Drawing") {
+                ForEach(InkTool.allCases, id: \.self) { t in
+                    Button("\(t.name) (\(t.key))") {
+                        InkSettings.shared.tool = t
+                        if canvas?.drawing != true { canvas?.drawing = true }
+                    }
+                }
+                Divider()
+                // The line's width (1, 2, 3 while drawing).
+                ForEach(0..<3, id: \.self) { i in
+                    Toggle("\(InkSettings.widthNames[i]) Line (\(i + 1))", isOn: Binding(
+                        get: { ink.widthIndex == i },
+                        set: { if $0 { ink.setWidthIndex(i) } }))
+                }
+                .disabled(ink.tool == .eraser)
+                Divider()
+                Button("Clear Drawing on This Page") { canvas?.routed.clearDrawing() }
+                    .disabled(canvas?.routed.pageHasInk != true || canvas?.routed.pageIsInkReadOnly == true)
+            }
+            .disabled(canvas == nil)
+            Button(canvas?.drawingShown == false ? "Show Drawing" : "Hide Drawing") { canvas?.perform(.showDrawing) }
+                .keyboardShortcut(keys.menu(.showDrawing))
+                .disabled(canvas == nil)
+            Button(canvas?.sheetHost.showNotes == true ? "Hide Notes" : "Show Notes") { canvas?.perform(.notes) }
+                .keyboardShortcut(keys.menu(.notes))
+                .disabled(canvas == nil)
+            Divider()
+            PresentMenu(canvas: canvas)
+            Divider()
+            // If clicks ever stop editing: everything back to plain editing.
+            Button("Make This Window Editable") { canvas?.makeEditable() }
+                .disabled(canvas == nil)
         }
     }
 }
@@ -536,9 +626,21 @@ struct SimulationCommands: Commands {
             Button("Step") { canvas?.stepOnce() }
                 .keyboardShortcut(keys.menu(.step))
                 .disabled(canvas == nil)
+            Button("Step Clock") { canvas?.perform(.stepClock) }
+                .keyboardShortcut(keys.menu(.stepClock))
+                .help("\(keys.combo(.stepClock).map { $0.label + ": " } ?? "")each clock set to \u{201C}Only on Step Clock\u{201D} makes one full cycle")
+                .disabled(canvas?.routed.hasManualClock != true)
+            Divider()
+            Button(canvas?.predict.on == true ? "Stop Predicting" : "Predict, Then Reveal") { canvas?.togglePredict() }
+                .disabled(canvas?.simView != true || (canvas?.predict.on != true && canvas?.predictLights.isEmpty != false))
+            Button(canvas?.predict.revealed == true ? "Cover the Lights Again" : "Reveal") { canvas?.revealOrCoverAgain() }
+                .disabled(canvas?.simView != true || canvas?.predict.on != true || canvas?.predict.locked == true)
             Divider()
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .help("T: every combination of the page's switches (or the selected ones) and what the lights show")
+                .disabled(canvas == nil)
+            Button("Check My Circuit…") { canvas?.perform(.checkCircuit) }
+                .help("Shift-T: compare the lights with a formula or truth table the assignment gives")
                 .disabled(canvas == nil)
             Divider()
             Button(canvas?.locked == true ? "Unlock the Circuit" : "Lock the Circuit") { canvas?.locked.toggle() }
@@ -593,6 +695,12 @@ struct EditCommands: Commands {
             Button("Rotate") { canvas?.perform(.rotate) }
                 .keyboardShortcut(keys.menu(.rotate))
                 .disabled(canvas?.hasGateSelection != true)
+            // Parts locked in place stay put: a teacher's starter parts.
+            Button(canvas?.routed.lockMenuUnlocks == true ? canvas?.routed.unlockPartsTitle ?? "Unlock Part" : "Lock in Place") { canvas?.routed.toggleLockInPlace() }
+                .disabled(canvas?.routed.hasGateSelection != true)
+                .help("Locked parts can't be moved, rotated or deleted. Wires to them still work.")
+            Button("Unlock All Parts") { canvas?.routed.unlockAll() }
+                .disabled(canvas?.routed.hasLockedParts != true)
             Menu("Find") {
                 Button("Find…") { canvas?.perform(.find) }
                     .keyboardShortcut(keys.menu(.find))
@@ -627,8 +735,13 @@ struct FileCommands: Commands {
             Button("Export as Image…") { canvas?.perform(.exportImage) }
                 .keyboardShortcut(keys.menu(.exportImage))
                 .disabled(canvas == nil)
+            Button("Export Lab Report…") { canvas?.perform(.exportReport) }
+                .keyboardShortcut(keys.menu(.exportReport))
+                .disabled(canvas == nil)
             Button("Export as CedarLogic File…") { canvas?.perform(.exportFile) }
                 .keyboardShortcut(keys.menu(.exportFile))
+                .disabled(canvas == nil)
+            Button("Share Link…") { if let canvas { ShareLink.copy(from: canvas) } }
                 .disabled(canvas == nil)
             Button("Version History…") { openWindow(id: "versions") }
                 .disabled(canvas == nil)

@@ -19,9 +19,12 @@ const float EPS = 1e-3f;
 
 // Prices, in grid steps of wire length. Tuned for looks: a crossing is worth a
 // long detour, a bend a short one, and lying on another wire's line (which
-// reads as one wire) is a last resort.
+// reads as one wire) is a last resort. CROSS was 8: at 16 the straighten lab
+// (mac/Tools/straighten_lab.cpp, 164 fixed cases) has 7% fewer crossings after
+// Straighten and Tidy Up for 2% more bends, other measures unchanged; at 24
+// wires start sharing lines and running through parts instead.
 const float BEND = 3.0f;
-const float CROSS = 8.0f;
+const float CROSS = 16.0f;
 const float OVERLAP = 150.0f;       // same line as another wire
 const float TOUCH = 150.0f;         // a corner or junction sitting on another wire
 const float PARALLEL_NEAR = 3.0f;   // another wire one step to the side, same way

@@ -1,0 +1,1401 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.1.0-native")
+  (page 0
+    (gate "DD_KEYPAD_HEX"
+      (uuid "1")
+      (at 0 29)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "2")
+      (at 0 17)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AE_FULLADDER_4BIT"
+      (uuid "3")
+      (at 12 6)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_AND2"
+      (uuid "4")
+      (at 9 -4)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_AND2"
+      (uuid "5")
+      (at 9 -9)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AE_OR3"
+      (uuid "6")
+      (at -4 -6)
+      (angle 180)
+      (lparam "INPUT_BITS" "3"))
+    (gate "FF_GND"
+      (uuid "7")
+      (at 5 -14)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AE_FULLADDER_4BIT"
+      (uuid "8")
+      (at 12 -17)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "GE_LED_DISPLAY_4BIT"
+      (uuid "9")
+      (at 18 -26)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "10")
+      (at 42 29)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "11")
+      (at 42 17)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AE_FULLADDER_4BIT"
+      (uuid "12")
+      (at 54 6)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_AND2"
+      (uuid "13")
+      (at 51 -4)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_AND2"
+      (uuid "14")
+      (at 51 -9)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AE_OR3"
+      (uuid "15")
+      (at 38 -6)
+      (angle 180)
+      (lparam "INPUT_BITS" "3"))
+    (gate "FF_GND"
+      (uuid "16")
+      (at 47 -14)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AE_FULLADDER_4BIT"
+      (uuid "17")
+      (at 54 -17)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "GE_LED_DISPLAY_4BIT"
+      (uuid "18")
+      (at 60 -26)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "19")
+      (at 84 29)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "20")
+      (at 84 17)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AE_FULLADDER_4BIT"
+      (uuid "21")
+      (at 96 6)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_AND2"
+      (uuid "22")
+      (at 93 -4)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_AND2"
+      (uuid "23")
+      (at 93 -9)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AE_OR3"
+      (uuid "24")
+      (at 80 -6)
+      (angle 180)
+      (lparam "INPUT_BITS" "3"))
+    (gate "FF_GND"
+      (uuid "25")
+      (at 89 -14)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AE_FULLADDER_4BIT"
+      (uuid "26")
+      (at 96 -17)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "GE_LED_DISPLAY_4BIT"
+      (uuid "27")
+      (at 102 -26)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 7.5 12.5 10 12.5)
+        (cross 7.5 "2")
+        (cross 10 "3"))
+      (seg "1" h
+        (pts 5 26 7.5 26)
+        (connect "1" "OUT_0")
+        (cross 7.5 "2"))
+      (seg "2" v
+        (pts 7.5 12.5 7.5 26)
+        (cross 12.5 "0")
+        (cross 26 "1"))
+      (seg "3" v
+        (pts 10 10 10 12.5)
+        (connect "3" "IN_0")
+        (cross 12.5 "0")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 5 14 17 14)
+        (connect "2" "OUT_0")
+        (cross 17 "1"))
+      (seg "1" v
+        (pts 17 10 17 14)
+        (connect "3" "IN_B_0")
+        (cross 14 "0")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 10 -12.5 12.5 -12.5)
+        (cross 10 "2")
+        (cross 12.5 "3"))
+      (seg "1" h
+        (pts 12.5 -12 13.5 -12)
+        (cross 12.5 "3")
+        (cross 13.5 "4"))
+      (seg "2" v
+        (pts 10 -13 10 -12.5)
+        (connect "8" "IN_0")
+        (cross -12.5 "0"))
+      (seg "3" v
+        (pts 12.5 -12.5 12.5 -12)
+        (cross -12.5 "0")
+        (cross -12 "1"))
+      (seg "4" v
+        (pts 13.5 -12 13.5 2)
+        (connect "3" "OUT_0")
+        (cross -12 "1")))
+    (wire
+      (ids "4")
+      (seg "0" h
+        (pts 13.5 -27 15 -27)
+        (connect "9" "IN_0")
+        (cross 13.5 "1"))
+      (seg "1" v
+        (pts 13.5 -27 13.5 -21)
+        (connect "8" "OUT_0")
+        (cross -27 "0")))
+    (wire
+      (ids "5")
+      (seg "0" h
+        (pts 8.5 11.5 9 11.5)
+        (cross 8.5 "2")
+        (cross 9 "3"))
+      (seg "1" h
+        (pts 5 28 8.5 28)
+        (connect "1" "OUT_1")
+        (cross 8.5 "2"))
+      (seg "2" v
+        (pts 8.5 11.5 8.5 28)
+        (cross 11.5 "0")
+        (cross 28 "1"))
+      (seg "3" v
+        (pts 9 10 9 11.5)
+        (connect "3" "IN_1")
+        (cross 11.5 "0")))
+    (wire
+      (ids "6")
+      (seg "0" h
+        (pts 10.5 13 16 13)
+        (cross 10.5 "2")
+        (cross 16 "3"))
+      (seg "1" h
+        (pts 5 16 10.5 16)
+        (connect "2" "OUT_1")
+        (cross 10.5 "2"))
+      (seg "2" v
+        (pts 10.5 13 10.5 16)
+        (cross 13 "0")
+        (cross 16 "1"))
+      (seg "3" v
+        (pts 16 10 16 13)
+        (connect "3" "IN_B_1")
+        (cross 13 "0")))
+    (wire
+      (ids "7")
+      (seg "0" v
+        (pts 9 -13 9 -5.5)
+        (connect "8" "IN_1")
+        (cross -10 "3")
+        (cross -5.5 "2"))
+      (seg "1" v
+        (pts 12.5 -5.5 12.5 2)
+        (connect "3" "OUT_1")
+        (cross -5.5 "2"))
+      (seg "2" h
+        (pts 9 -5.5 12.5 -5.5)
+        (cross 9 "0")
+        (cross 12.5 "1"))
+      (seg "3" h
+        (pts 6 -10 9 -10)
+        (connect "5" "IN_1")
+        (cross 9 "0")))
+    (wire
+      (ids "8")
+      (seg "0" h
+        (pts 12.5 -26 15 -26)
+        (connect "9" "IN_1")
+        (cross 12.5 "1"))
+      (seg "1" v
+        (pts 12.5 -26 12.5 -21)
+        (connect "8" "OUT_1")
+        (cross -26 "0")))
+    (wire
+      (ids "9")
+      (seg "0" h
+        (pts 6.5 11.5 8 11.5)
+        (cross 6.5 "2")
+        (cross 8 "3"))
+      (seg "1" h
+        (pts 5 30 6.5 30)
+        (connect "1" "OUT_2")
+        (cross 6.5 "2"))
+      (seg "2" v
+        (pts 6.5 11.5 6.5 30)
+        (cross 11.5 "0")
+        (cross 30 "1"))
+      (seg "3" v
+        (pts 8 10 8 11.5)
+        (connect "3" "IN_2")
+        (cross 11.5 "0")))
+    (wire
+      (ids "10")
+      (seg "0" h
+        (pts 5 18 15 18)
+        (connect "2" "OUT_2")
+        (cross 15 "1"))
+      (seg "1" v
+        (pts 15 10 15 18)
+        (connect "3" "IN_B_2")
+        (cross 18 "0")))
+    (wire
+      (ids "11")
+      (seg "0" h
+        (pts 4.5 -11.5 8 -11.5)
+        (cross 4.5 "3")
+        (cross 8 "4"))
+      (seg "1" h
+        (pts 4.5 -5 6 -5)
+        (connect "4" "IN_1")
+        (cross 4.5 "3"))
+      (seg "2" h
+        (pts 4.5 0 11.5 0)
+        (cross 4.5 "3")
+        (cross 11.5 "5"))
+      (seg "3" v
+        (pts 4.5 -11.5 4.5 0)
+        (cross -11.5 "0")
+        (cross -5 "1")
+        (cross 0 "2"))
+      (seg "4" v
+        (pts 8 -13 8 -11.5)
+        (connect "8" "IN_2")
+        (cross -11.5 "0"))
+      (seg "5" v
+        (pts 11.5 0 11.5 2)
+        (connect "3" "OUT_2")
+        (cross 0 "2")))
+    (wire
+      (ids "12")
+      (seg "0" h
+        (pts 11.5 -25 15 -25)
+        (connect "9" "IN_2")
+        (cross 11.5 "1"))
+      (seg "1" v
+        (pts 11.5 -25 11.5 -21)
+        (connect "8" "OUT_2")
+        (cross -25 "0")))
+    (wire
+      (ids "13")
+      (seg "0" h
+        (pts 7 11 11.5 11)
+        (cross 7 "3")
+        (cross 11.5 "5"))
+      (seg "1" h
+        (pts 9.5 21 11.5 21)
+        (cross 9.5 "4")
+        (cross 11.5 "5"))
+      (seg "2" h
+        (pts 5 32 9.5 32)
+        (connect "1" "OUT_3")
+        (cross 9.5 "4"))
+      (seg "3" v
+        (pts 7 10 7 11)
+        (connect "3" "IN_3")
+        (cross 11 "0"))
+      (seg "4" v
+        (pts 9.5 21 9.5 32)
+        (cross 21 "1")
+        (cross 32 "2"))
+      (seg "5" v
+        (pts 11.5 11 11.5 21)
+        (cross 11 "0")
+        (cross 21 "1")))
+    (wire
+      (ids "14")
+      (seg "0" h
+        (pts 9.5 17 14 17)
+        (cross 9.5 "2")
+        (cross 14 "3"))
+      (seg "1" h
+        (pts 5 20 9.5 20)
+        (connect "2" "OUT_3")
+        (cross 9.5 "2"))
+      (seg "2" v
+        (pts 9.5 17 9.5 20)
+        (cross 17 "0")
+        (cross 20 "1"))
+      (seg "3" v
+        (pts 14 10 14 17)
+        (connect "3" "IN_B_3")
+        (cross 17 "0")))
+    (wire
+      (ids "15")
+      (seg "0" h
+        (pts 3.5 -12 7 -12)
+        (cross 3.5 "6")
+        (cross 7 "9"))
+      (seg "1" h
+        (pts 2.5 -9 4 -9)
+        (cross 2.5 "5")
+        (cross 3.5 "6")
+        (cross 4 "7"))
+      (seg "2" h
+        (pts 4 -8 6 -8)
+        (connect "5" "IN_0")
+        (cross 4 "7"))
+      (seg "3" h
+        (pts 2.5 -3 6 -3)
+        (connect "4" "IN_0")
+        (cross 2.5 "5")
+        (cross 5.5 "8"))
+      (seg "4" h
+        (pts 5.5 1.5 10.5 1.5)
+        (cross 5.5 "8")
+        (cross 10.5 "10"))
+      (seg "5" v
+        (pts 2.5 -9 2.5 -3)
+        (cross -9 "1")
+        (cross -3 "3"))
+      (seg "6" v
+        (pts 3.5 -12 3.5 -9)
+        (cross -12 "0")
+        (cross -9 "1"))
+      (seg "7" v
+        (pts 4 -9 4 -8)
+        (cross -9 "1")
+        (cross -8 "2"))
+      (seg "8" v
+        (pts 5.5 -3 5.5 1.5)
+        (cross -3 "3")
+        (cross 1.5 "4"))
+      (seg "9" v
+        (pts 7 -13 7 -12)
+        (connect "8" "IN_3")
+        (cross -12 "0"))
+      (seg "10" v
+        (pts 10.5 1.5 10.5 2)
+        (connect "3" "OUT_3")
+        (cross 1.5 "4")))
+    (wire
+      (ids "16")
+      (seg "0" h
+        (pts 10.5 -24 15 -24)
+        (connect "9" "IN_3")
+        (cross 10.5 "1"))
+      (seg "1" v
+        (pts 10.5 -24 10.5 -21)
+        (connect "8" "OUT_3")
+        (cross -24 "0")))
+    (wire
+      (ids "17")
+      (seg "0" h
+        (pts -0.9999973178 -8 3.5 -8)
+        (connect "6" "IN_0")
+        (cross 3.5 "3"))
+      (seg "1" h
+        (pts 12 -4 12.5 -4)
+        (connect "4" "OUT")
+        (cross 12.5 "4"))
+      (seg "2" h
+        (pts 3.5 -1 12.5 -1)
+        (cross 3.5 "3")
+        (cross 12.5 "4"))
+      (seg "3" v
+        (pts 3.5 -8 3.5 -1)
+        (cross -8 "0")
+        (cross -1 "2"))
+      (seg "4" v
+        (pts 12.5 -4 12.5 -1)
+        (cross -4 "1")
+        (cross -1 "2")))
+    (wire
+      (ids "18")
+      (seg "0" h
+        (pts 12 -9 12.5 -9)
+        (connect "5" "OUT")
+        (cross 12.5 "4"))
+      (seg "1" h
+        (pts 0.5 -6.5 12.5 -6.5)
+        (cross 0.5 "3")
+        (cross 12.5 "4"))
+      (seg "2" h
+        (pts -1 -6.000003815 0.5 -6.000003815)
+        (connect "6" "IN_1")
+        (cross 0.5 "3"))
+      (seg "3" v
+        (pts 0.5 -6.5 0.5 -6.000003815)
+        (cross -6.5 "1")
+        (cross -6.000003815 "2"))
+      (seg "4" v
+        (pts 12.5 -9 12.5 -6.5)
+        (cross -9 "0")
+        (cross -6.5 "1")))
+    (wire
+      (ids "19")
+      (seg "0" h
+        (pts -1.000002742 -4 1.5 -4)
+        (connect "6" "IN_2")
+        (cross 1.5 "2"))
+      (seg "1" h
+        (pts 1.5 7 4 7)
+        (connect "3" "carry_out")
+        (cross 1.5 "2"))
+      (seg "2" v
+        (pts 1.5 -4 1.5 7)
+        (cross -4 "0")
+        (cross 7 "1")))
+    (wire
+      (ids "20")
+      (seg "0" h
+        (pts 15 -12.5 16 -12.5)
+        (cross 15 "7")
+        (cross 16 "9"))
+      (seg "1" h
+        (pts 15 -10.5 15.5 -10.5)
+        (cross 15 "7")
+        (cross 15.5 "8"))
+      (seg "2" h
+        (pts -7.5 -6.000003815 -7 -6.000003815)
+        (connect "6" "OUT")
+        (cross -7.5 "5"))
+      (seg "3" h
+        (pts -7.5 -2 2.5 -2)
+        (cross -7.5 "5")
+        (cross 2.5 "6"))
+      (seg "4" h
+        (pts 2.5 1 15.5 1)
+        (cross 2.5 "6")
+        (cross 15.5 "8"))
+      (seg "5" v
+        (pts -7.5 -6.000003815 -7.5 -2)
+        (cross -6.000003815 "2")
+        (cross -2 "3"))
+      (seg "6" v
+        (pts 2.5 -2 2.5 1)
+        (cross -2 "3")
+        (cross 1 "4"))
+      (seg "7" v
+        (pts 15 -13 15 -10.5)
+        (connect "8" "IN_B_2")
+        (cross -12.5 "0")
+        (cross -10.5 "1"))
+      (seg "8" v
+        (pts 15.5 -10.5 15.5 1)
+        (cross -10.5 "1")
+        (cross 1 "4"))
+      (seg "9" v
+        (pts 16 -13 16 -12.5)
+        (connect "8" "IN_B_1")
+        (cross -12.5 "0")))
+    (wire
+      (ids "21")
+      (seg "1" h
+        (pts 5 -13 20 -13)
+        (connect "8" "IN_B_3")
+        (connect "8" "IN_B_0")
+        (connect "7" "OUT_0")
+        (cross 20 "4"))
+      (seg "4" v
+        (pts 20 -16 20 -13)
+        (connect "8" "carry_in")
+        (cross -13 "1")))
+    (wire
+      (ids "22")
+      (seg "0" h
+        (pts 49.5 12.5 52 12.5)
+        (cross 49.5 "2")
+        (cross 52 "3"))
+      (seg "1" h
+        (pts 47 26 49.5 26)
+        (connect "10" "OUT_0")
+        (cross 49.5 "2"))
+      (seg "2" v
+        (pts 49.5 12.5 49.5 26)
+        (cross 12.5 "0")
+        (cross 26 "1"))
+      (seg "3" v
+        (pts 52 10 52 12.5)
+        (connect "12" "IN_0")
+        (cross 12.5 "0")))
+    (wire
+      (ids "23")
+      (seg "0" h
+        (pts 47 14 59 14)
+        (connect "11" "OUT_0")
+        (cross 59 "1"))
+      (seg "1" v
+        (pts 59 10 59 14)
+        (connect "12" "IN_B_0")
+        (cross 14 "0")))
+    (wire
+      (ids "24")
+      (seg "0" h
+        (pts 52 -12.5 54.5 -12.5)
+        (cross 52 "2")
+        (cross 54.5 "3"))
+      (seg "1" h
+        (pts 54.5 -12 55.5 -12)
+        (cross 54.5 "3")
+        (cross 55.5 "4"))
+      (seg "2" v
+        (pts 52 -13 52 -12.5)
+        (connect "17" "IN_0")
+        (cross -12.5 "0"))
+      (seg "3" v
+        (pts 54.5 -12.5 54.5 -12)
+        (cross -12.5 "0")
+        (cross -12 "1"))
+      (seg "4" v
+        (pts 55.5 -12 55.5 2)
+        (connect "12" "OUT_0")
+        (cross -12 "1")))
+    (wire
+      (ids "25")
+      (seg "0" h
+        (pts 55.5 -27 57 -27)
+        (connect "18" "IN_0")
+        (cross 55.5 "1"))
+      (seg "1" v
+        (pts 55.5 -27 55.5 -21)
+        (connect "17" "OUT_0")
+        (cross -27 "0")))
+    (wire
+      (ids "26")
+      (seg "0" h
+        (pts 50.5 11.5 51 11.5)
+        (cross 50.5 "2")
+        (cross 51 "3"))
+      (seg "1" h
+        (pts 47 28 50.5 28)
+        (connect "10" "OUT_1")
+        (cross 50.5 "2"))
+      (seg "2" v
+        (pts 50.5 11.5 50.5 28)
+        (cross 11.5 "0")
+        (cross 28 "1"))
+      (seg "3" v
+        (pts 51 10 51 11.5)
+        (connect "12" "IN_1")
+        (cross 11.5 "0")))
+    (wire
+      (ids "27")
+      (seg "0" h
+        (pts 52.5 13 58 13)
+        (cross 52.5 "2")
+        (cross 58 "3"))
+      (seg "1" h
+        (pts 47 16 52.5 16)
+        (connect "11" "OUT_1")
+        (cross 52.5 "2"))
+      (seg "2" v
+        (pts 52.5 13 52.5 16)
+        (cross 13 "0")
+        (cross 16 "1"))
+      (seg "3" v
+        (pts 58 10 58 13)
+        (connect "12" "IN_B_1")
+        (cross 13 "0")))
+    (wire
+      (ids "28")
+      (seg "0" v
+        (pts 51 -13 51 -5.5)
+        (connect "17" "IN_1")
+        (cross -10 "3")
+        (cross -5.5 "2"))
+      (seg "1" v
+        (pts 54.5 -5.5 54.5 2)
+        (connect "12" "OUT_1")
+        (cross -5.5 "2"))
+      (seg "2" h
+        (pts 51 -5.5 54.5 -5.5)
+        (cross 51 "0")
+        (cross 54.5 "1"))
+      (seg "3" h
+        (pts 48 -10 51 -10)
+        (connect "14" "IN_1")
+        (cross 51 "0")))
+    (wire
+      (ids "29")
+      (seg "0" h
+        (pts 54.5 -26 57 -26)
+        (connect "18" "IN_1")
+        (cross 54.5 "1"))
+      (seg "1" v
+        (pts 54.5 -26 54.5 -21)
+        (connect "17" "OUT_1")
+        (cross -26 "0")))
+    (wire
+      (ids "30")
+      (seg "0" h
+        (pts 48.5 11.5 50 11.5)
+        (cross 48.5 "2")
+        (cross 50 "3"))
+      (seg "1" h
+        (pts 47 30 48.5 30)
+        (connect "10" "OUT_2")
+        (cross 48.5 "2"))
+      (seg "2" v
+        (pts 48.5 11.5 48.5 30)
+        (cross 11.5 "0")
+        (cross 30 "1"))
+      (seg "3" v
+        (pts 50 10 50 11.5)
+        (connect "12" "IN_2")
+        (cross 11.5 "0")))
+    (wire
+      (ids "31")
+      (seg "0" h
+        (pts 47 18 57 18)
+        (connect "11" "OUT_2")
+        (cross 57 "1"))
+      (seg "1" v
+        (pts 57 10 57 18)
+        (connect "12" "IN_B_2")
+        (cross 18 "0")))
+    (wire
+      (ids "32")
+      (seg "0" h
+        (pts 46.5 -11.5 50 -11.5)
+        (cross 46.5 "3")
+        (cross 50 "4"))
+      (seg "1" h
+        (pts 46.5 -5 48 -5)
+        (connect "13" "IN_1")
+        (cross 46.5 "3"))
+      (seg "2" h
+        (pts 46.5 0 53.5 0)
+        (cross 46.5 "3")
+        (cross 53.5 "5"))
+      (seg "3" v
+        (pts 46.5 -11.5 46.5 0)
+        (cross -11.5 "0")
+        (cross -5 "1")
+        (cross 0 "2"))
+      (seg "4" v
+        (pts 50 -13 50 -11.5)
+        (connect "17" "IN_2")
+        (cross -11.5 "0"))
+      (seg "5" v
+        (pts 53.5 0 53.5 2)
+        (connect "12" "OUT_2")
+        (cross 0 "2")))
+    (wire
+      (ids "33")
+      (seg "0" h
+        (pts 53.5 -25 57 -25)
+        (connect "18" "IN_2")
+        (cross 53.5 "1"))
+      (seg "1" v
+        (pts 53.5 -25 53.5 -21)
+        (connect "17" "OUT_2")
+        (cross -25 "0")))
+    (wire
+      (ids "34")
+      (seg "0" h
+        (pts 49 11 53.5 11)
+        (cross 49 "3")
+        (cross 53.5 "5"))
+      (seg "1" h
+        (pts 51.5 21 53.5 21)
+        (cross 51.5 "4")
+        (cross 53.5 "5"))
+      (seg "2" h
+        (pts 47 32 51.5 32)
+        (connect "10" "OUT_3")
+        (cross 51.5 "4"))
+      (seg "3" v
+        (pts 49 10 49 11)
+        (connect "12" "IN_3")
+        (cross 11 "0"))
+      (seg "4" v
+        (pts 51.5 21 51.5 32)
+        (cross 21 "1")
+        (cross 32 "2"))
+      (seg "5" v
+        (pts 53.5 11 53.5 21)
+        (cross 11 "0")
+        (cross 21 "1")))
+    (wire
+      (ids "35")
+      (seg "0" h
+        (pts 51.5 17 56 17)
+        (cross 51.5 "2")
+        (cross 56 "3"))
+      (seg "1" h
+        (pts 47 20 51.5 20)
+        (connect "11" "OUT_3")
+        (cross 51.5 "2"))
+      (seg "2" v
+        (pts 51.5 17 51.5 20)
+        (cross 17 "0")
+        (cross 20 "1"))
+      (seg "3" v
+        (pts 56 10 56 17)
+        (connect "12" "IN_B_3")
+        (cross 17 "0")))
+    (wire
+      (ids "36")
+      (seg "0" h
+        (pts 47.5 -12.5 49 -12.5)
+        (cross 47.5 "10")
+        (cross 49 "13"))
+      (seg "1" h
+        (pts 47 -11 47.5 -11)
+        (cross 47 "8")
+        (cross 47.5 "10"))
+      (seg "2" h
+        (pts 47 -9 47.5 -9)
+        (cross 47 "8")
+        (cross 47.5 "11"))
+      (seg "3" h
+        (pts 47.5 -8 48 -8)
+        (connect "14" "IN_0")
+        (cross 47.5 "11"))
+      (seg "4" h
+        (pts 47 -6.000003815 47.5 -6.000003815)
+        (cross 47 "9")
+        (cross 47.5 "11"))
+      (seg "5" h
+        (pts 47 -4 47.5 -4)
+        (cross 47 "9")
+        (cross 47.5 "12"))
+      (seg "6" h
+        (pts 47.5 -3 48 -3)
+        (connect "13" "IN_0")
+        (cross 47.5 "12"))
+      (seg "7" h
+        (pts 47.5 1.5 52.5 1.5)
+        (cross 47.5 "12")
+        (cross 52.5 "14"))
+      (seg "8" v
+        (pts 47 -11 47 -9)
+        (cross -11 "1")
+        (cross -9 "2"))
+      (seg "9" v
+        (pts 47 -6.000003815 47 -4)
+        (cross -6.000003815 "4")
+        (cross -4 "5"))
+      (seg "10" v
+        (pts 47.5 -12.5 47.5 -11)
+        (cross -12.5 "0")
+        (cross -11 "1"))
+      (seg "11" v
+        (pts 47.5 -9 47.5 -6.000003815)
+        (cross -9 "2")
+        (cross -8 "3")
+        (cross -6.000003815 "4"))
+      (seg "12" v
+        (pts 47.5 -4 47.5 1.5)
+        (cross -4 "5")
+        (cross -3 "6")
+        (cross 1.5 "7"))
+      (seg "13" v
+        (pts 49 -13 49 -12.5)
+        (connect "17" "IN_3")
+        (cross -12.5 "0"))
+      (seg "14" v
+        (pts 52.5 1.5 52.5 2)
+        (connect "12" "OUT_3")
+        (cross 1.5 "7")))
+    (wire
+      (ids "37")
+      (seg "0" h
+        (pts 52.5 -24 57 -24)
+        (connect "18" "IN_3")
+        (cross 52.5 "1"))
+      (seg "1" v
+        (pts 52.5 -24 52.5 -21)
+        (connect "17" "OUT_3")
+        (cross -24 "0")))
+    (wire
+      (ids "38")
+      (seg "0" h
+        (pts 41.00000381 -8 45.5 -8)
+        (connect "15" "IN_0")
+        (cross 45.5 "3"))
+      (seg "1" h
+        (pts 54 -4 54.5 -4)
+        (connect "13" "OUT")
+        (cross 54.5 "4"))
+      (seg "2" h
+        (pts 45.5 -0.5 54.5 -0.5)
+        (cross 45.5 "3")
+        (cross 54.5 "4"))
+      (seg "3" v
+        (pts 45.5 -8 45.5 -0.5)
+        (cross -8 "0")
+        (cross -0.5 "2"))
+      (seg "4" v
+        (pts 54.5 -4 54.5 -0.5)
+        (cross -4 "1")
+        (cross -0.5 "2")))
+    (wire
+      (ids "39")
+      (seg "0" h
+        (pts 54 -9 54.5 -9)
+        (connect "14" "OUT")
+        (cross 54.5 "4"))
+      (seg "1" h
+        (pts 42.5 -6.5 54.5 -6.5)
+        (cross 42.5 "3")
+        (cross 54.5 "4"))
+      (seg "2" h
+        (pts 41 -6.000003815 42.5 -6.000003815)
+        (connect "15" "IN_1")
+        (cross 42.5 "3"))
+      (seg "3" v
+        (pts 42.5 -6.5 42.5 -6.000003815)
+        (cross -6.5 "1")
+        (cross -6.000003815 "2"))
+      (seg "4" v
+        (pts 54.5 -9 54.5 -6.5)
+        (cross -9 "0")
+        (cross -6.5 "1")))
+    (wire
+      (ids "40")
+      (seg "0" h
+        (pts 40.99999619 -4 43.5 -4)
+        (connect "15" "IN_2")
+        (cross 43.5 "2"))
+      (seg "1" h
+        (pts 43.5 7 46 7)
+        (connect "12" "carry_out")
+        (cross 43.5 "2"))
+      (seg "2" v
+        (pts 43.5 -4 43.5 7)
+        (cross -4 "0")
+        (cross 7 "1")))
+    (wire
+      (ids "41")
+      (seg "0" h
+        (pts 57 -12 58 -12)
+        (cross 57 "6")
+        (cross 57.5 "7")
+        (cross 58 "8"))
+      (seg "1" h
+        (pts 27.5 -6.000003815 35 -6.000003815)
+        (connect "15" "OUT")
+        (cross 27.5 "4")
+        (cross 34 "5"))
+      (seg "2" h
+        (pts 34 -1.5 57.5 -1.5)
+        (cross 34 "5")
+        (cross 57.5 "7"))
+      (seg "3" h
+        (pts 20 7 27.5 7)
+        (connect "3" "carry_in")
+        (cross 27.5 "4"))
+      (seg "4" v
+        (pts 27.5 -6.000003815 27.5 7)
+        (cross -6.000003815 "1")
+        (cross 7 "3"))
+      (seg "5" v
+        (pts 34 -6.000003815 34 -1.5)
+        (cross -6.000003815 "1")
+        (cross -1.5 "2"))
+      (seg "6" v
+        (pts 57 -13 57 -12)
+        (connect "17" "IN_B_2")
+        (cross -12 "0"))
+      (seg "7" v
+        (pts 57.5 -12 57.5 -1.5)
+        (cross -12 "0")
+        (cross -1.5 "2"))
+      (seg "8" v
+        (pts 58 -13 58 -12)
+        (connect "17" "IN_B_1")
+        (cross -12 "0")))
+    (wire
+      (ids "42")
+      (seg "1" h
+        (pts 47 -13 62 -13)
+        (connect "17" "IN_B_3")
+        (connect "17" "IN_B_0")
+        (connect "16" "OUT_0")
+        (cross 62 "4"))
+      (seg "4" v
+        (pts 62 -16 62 -13)
+        (connect "17" "carry_in")
+        (cross -13 "1")))
+    (wire
+      (ids "43")
+      (seg "0" h
+        (pts 91.5 12.5 94 12.5)
+        (cross 91.5 "2")
+        (cross 94 "3"))
+      (seg "1" h
+        (pts 89 26 91.5 26)
+        (connect "19" "OUT_0")
+        (cross 91.5 "2"))
+      (seg "2" v
+        (pts 91.5 12.5 91.5 26)
+        (cross 12.5 "0")
+        (cross 26 "1"))
+      (seg "3" v
+        (pts 94 10 94 12.5)
+        (connect "21" "IN_0")
+        (cross 12.5 "0")))
+    (wire
+      (ids "44")
+      (seg "0" h
+        (pts 89 14 101 14)
+        (connect "20" "OUT_0")
+        (cross 101 "1"))
+      (seg "1" v
+        (pts 101 10 101 14)
+        (connect "21" "IN_B_0")
+        (cross 14 "0")))
+    (wire
+      (ids "45")
+      (seg "0" h
+        (pts 94 -12.5 96.5 -12.5)
+        (cross 94 "2")
+        (cross 96.5 "3"))
+      (seg "1" h
+        (pts 96.5 -12 97.5 -12)
+        (cross 96.5 "3")
+        (cross 97.5 "4"))
+      (seg "2" v
+        (pts 94 -13 94 -12.5)
+        (connect "26" "IN_0")
+        (cross -12.5 "0"))
+      (seg "3" v
+        (pts 96.5 -12.5 96.5 -12)
+        (cross -12.5 "0")
+        (cross -12 "1"))
+      (seg "4" v
+        (pts 97.5 -12 97.5 2)
+        (connect "21" "OUT_0")
+        (cross -12 "1")))
+    (wire
+      (ids "46")
+      (seg "0" h
+        (pts 97.5 -27 99 -27)
+        (connect "27" "IN_0")
+        (cross 97.5 "1"))
+      (seg "1" v
+        (pts 97.5 -27 97.5 -21)
+        (connect "26" "OUT_0")
+        (cross -27 "0")))
+    (wire
+      (ids "47")
+      (seg "0" h
+        (pts 92.5 11.5 93 11.5)
+        (cross 92.5 "2")
+        (cross 93 "3"))
+      (seg "1" h
+        (pts 89 28 92.5 28)
+        (connect "19" "OUT_1")
+        (cross 92.5 "2"))
+      (seg "2" v
+        (pts 92.5 11.5 92.5 28)
+        (cross 11.5 "0")
+        (cross 28 "1"))
+      (seg "3" v
+        (pts 93 10 93 11.5)
+        (connect "21" "IN_1")
+        (cross 11.5 "0")))
+    (wire
+      (ids "48")
+      (seg "0" h
+        (pts 94.5 13 100 13)
+        (cross 94.5 "2")
+        (cross 100 "3"))
+      (seg "1" h
+        (pts 89 16 94.5 16)
+        (connect "20" "OUT_1")
+        (cross 94.5 "2"))
+      (seg "2" v
+        (pts 94.5 13 94.5 16)
+        (cross 13 "0")
+        (cross 16 "1"))
+      (seg "3" v
+        (pts 100 10 100 13)
+        (connect "21" "IN_B_1")
+        (cross 13 "0")))
+    (wire
+      (ids "49")
+      (seg "0" v
+        (pts 93 -13 93 -5.5)
+        (connect "26" "IN_1")
+        (cross -10 "3")
+        (cross -5.5 "2"))
+      (seg "1" v
+        (pts 96.5 -5.5 96.5 2)
+        (connect "21" "OUT_1")
+        (cross -5.5 "2"))
+      (seg "2" h
+        (pts 93 -5.5 96.5 -5.5)
+        (cross 93 "0")
+        (cross 96.5 "1"))
+      (seg "3" h
+        (pts 90 -10 93 -10)
+        (connect "23" "IN_1")
+        (cross 93 "0")))
+    (wire
+      (ids "50")
+      (seg "0" h
+        (pts 96.5 -26 99 -26)
+        (connect "27" "IN_1")
+        (cross 96.5 "1"))
+      (seg "1" v
+        (pts 96.5 -26 96.5 -21)
+        (connect "26" "OUT_1")
+        (cross -26 "0")))
+    (wire
+      (ids "51")
+      (seg "0" h
+        (pts 90.5 11.5 92 11.5)
+        (cross 90.5 "2")
+        (cross 92 "3"))
+      (seg "1" h
+        (pts 89 30 90.5 30)
+        (connect "19" "OUT_2")
+        (cross 90.5 "2"))
+      (seg "2" v
+        (pts 90.5 11.5 90.5 30)
+        (cross 11.5 "0")
+        (cross 30 "1"))
+      (seg "3" v
+        (pts 92 10 92 11.5)
+        (connect "21" "IN_2")
+        (cross 11.5 "0")))
+    (wire
+      (ids "52")
+      (seg "0" h
+        (pts 89 18 99 18)
+        (connect "20" "OUT_2")
+        (cross 99 "1"))
+      (seg "1" v
+        (pts 99 10 99 18)
+        (connect "21" "IN_B_2")
+        (cross 18 "0")))
+    (wire
+      (ids "53")
+      (seg "0" h
+        (pts 88.5 -11.5 92 -11.5)
+        (cross 88.5 "3")
+        (cross 92 "4"))
+      (seg "1" h
+        (pts 88.5 -5 90 -5)
+        (connect "22" "IN_1")
+        (cross 88.5 "3"))
+      (seg "2" h
+        (pts 88.5 0 95.5 0)
+        (cross 88.5 "3")
+        (cross 95.5 "5"))
+      (seg "3" v
+        (pts 88.5 -11.5 88.5 0)
+        (cross -11.5 "0")
+        (cross -5 "1")
+        (cross 0 "2"))
+      (seg "4" v
+        (pts 92 -13 92 -11.5)
+        (connect "26" "IN_2")
+        (cross -11.5 "0"))
+      (seg "5" v
+        (pts 95.5 0 95.5 2)
+        (connect "21" "OUT_2")
+        (cross 0 "2")))
+    (wire
+      (ids "54")
+      (seg "0" h
+        (pts 95.5 -25 99 -25)
+        (connect "27" "IN_2")
+        (cross 95.5 "1"))
+      (seg "1" v
+        (pts 95.5 -25 95.5 -21)
+        (connect "26" "OUT_2")
+        (cross -25 "0")))
+    (wire
+      (ids "55")
+      (seg "0" h
+        (pts 91 11 95.5 11)
+        (cross 91 "3")
+        (cross 95.5 "5"))
+      (seg "1" h
+        (pts 93.5 21 95.5 21)
+        (cross 93.5 "4")
+        (cross 95.5 "5"))
+      (seg "2" h
+        (pts 89 32 93.5 32)
+        (connect "19" "OUT_3")
+        (cross 93.5 "4"))
+      (seg "3" v
+        (pts 91 10 91 11)
+        (connect "21" "IN_3")
+        (cross 11 "0"))
+      (seg "4" v
+        (pts 93.5 21 93.5 32)
+        (cross 21 "1")
+        (cross 32 "2"))
+      (seg "5" v
+        (pts 95.5 11 95.5 21)
+        (cross 11 "0")
+        (cross 21 "1")))
+    (wire
+      (ids "56")
+      (seg "0" h
+        (pts 93.5 17 98 17)
+        (cross 93.5 "2")
+        (cross 98 "3"))
+      (seg "1" h
+        (pts 89 20 93.5 20)
+        (connect "20" "OUT_3")
+        (cross 93.5 "2"))
+      (seg "2" v
+        (pts 93.5 17 93.5 20)
+        (cross 17 "0")
+        (cross 20 "1"))
+      (seg "3" v
+        (pts 98 10 98 17)
+        (connect "21" "IN_B_3")
+        (cross 17 "0")))
+    (wire
+      (ids "57")
+      (seg "0" h
+        (pts 89.5 -12.5 91 -12.5)
+        (cross 89.5 "10")
+        (cross 91 "13"))
+      (seg "1" h
+        (pts 89 -11 89.5 -11)
+        (cross 89 "8")
+        (cross 89.5 "10"))
+      (seg "2" h
+        (pts 89 -9 89.5 -9)
+        (cross 89 "8")
+        (cross 89.5 "11"))
+      (seg "3" h
+        (pts 89.5 -8 90 -8)
+        (connect "23" "IN_0")
+        (cross 89.5 "11"))
+      (seg "4" h
+        (pts 89 -6.000003815 89.5 -6.000003815)
+        (cross 89 "9")
+        (cross 89.5 "11"))
+      (seg "5" h
+        (pts 89 -4 89.5 -4)
+        (cross 89 "9")
+        (cross 89.5 "12"))
+      (seg "6" h
+        (pts 89.5 -3 90 -3)
+        (connect "22" "IN_0")
+        (cross 89.5 "12"))
+      (seg "7" h
+        (pts 89.5 1.5 94.5 1.5)
+        (cross 89.5 "12")
+        (cross 94.5 "14"))
+      (seg "8" v
+        (pts 89 -11 89 -9)
+        (cross -11 "1")
+        (cross -9 "2"))
+      (seg "9" v
+        (pts 89 -6.000003815 89 -4)
+        (cross -6.000003815 "4")
+        (cross -4 "5"))
+      (seg "10" v
+        (pts 89.5 -12.5 89.5 -11)
+        (cross -12.5 "0")
+        (cross -11 "1"))
+      (seg "11" v
+        (pts 89.5 -9 89.5 -6.000003815)
+        (cross -9 "2")
+        (cross -8 "3")
+        (cross -6.000003815 "4"))
+      (seg "12" v
+        (pts 89.5 -4 89.5 1.5)
+        (cross -4 "5")
+        (cross -3 "6")
+        (cross 1.5 "7"))
+      (seg "13" v
+        (pts 91 -13 91 -12.5)
+        (connect "26" "IN_3")
+        (cross -12.5 "0"))
+      (seg "14" v
+        (pts 94.5 1.5 94.5 2)
+        (connect "21" "OUT_3")
+        (cross 1.5 "7")))
+    (wire
+      (ids "58")
+      (seg "0" h
+        (pts 94.5 -24 99 -24)
+        (connect "27" "IN_3")
+        (cross 94.5 "1"))
+      (seg "1" v
+        (pts 94.5 -24 94.5 -21)
+        (connect "26" "OUT_3")
+        (cross -24 "0")))
+    (wire
+      (ids "59")
+      (seg "0" h
+        (pts 83 -8 87.5 -8)
+        (connect "24" "IN_0")
+        (cross 87.5 "3"))
+      (seg "1" h
+        (pts 96 -4 96.5 -4)
+        (connect "22" "OUT")
+        (cross 96.5 "4"))
+      (seg "2" h
+        (pts 87.5 -0.5 96.5 -0.5)
+        (cross 87.5 "3")
+        (cross 96.5 "4"))
+      (seg "3" v
+        (pts 87.5 -8 87.5 -0.5)
+        (cross -8 "0")
+        (cross -0.5 "2"))
+      (seg "4" v
+        (pts 96.5 -4 96.5 -0.5)
+        (cross -4 "1")
+        (cross -0.5 "2")))
+    (wire
+      (ids "60")
+      (seg "0" h
+        (pts 96 -9 96.5 -9)
+        (connect "23" "OUT")
+        (cross 96.5 "4"))
+      (seg "1" h
+        (pts 84.5 -6.5 96.5 -6.5)
+        (cross 84.5 "3")
+        (cross 96.5 "4"))
+      (seg "2" h
+        (pts 83 -6.000003815 84.5 -6.000003815)
+        (connect "24" "IN_1")
+        (cross 84.5 "3"))
+      (seg "3" v
+        (pts 84.5 -6.5 84.5 -6.000003815)
+        (cross -6.5 "1")
+        (cross -6.000003815 "2"))
+      (seg "4" v
+        (pts 96.5 -9 96.5 -6.5)
+        (cross -9 "0")
+        (cross -6.5 "1")))
+    (wire
+      (ids "61")
+      (seg "0" h
+        (pts 83 -4 85.5 -4)
+        (connect "24" "IN_2")
+        (cross 85.5 "2"))
+      (seg "1" h
+        (pts 85.5 7 88 7)
+        (connect "21" "carry_out")
+        (cross 85.5 "2"))
+      (seg "2" v
+        (pts 85.5 -4 85.5 7)
+        (cross -4 "0")
+        (cross 7 "1")))
+    (wire
+      (ids "62")
+      (seg "0" h
+        (pts 99 -12 100 -12)
+        (cross 99 "6")
+        (cross 99.5 "7")
+        (cross 100 "8"))
+      (seg "1" h
+        (pts 69.5 -6.000003815 77 -6.000003815)
+        (connect "24" "OUT")
+        (cross 69.5 "4")
+        (cross 76 "5"))
+      (seg "2" h
+        (pts 76 -1.5 99.5 -1.5)
+        (cross 76 "5")
+        (cross 99.5 "7"))
+      (seg "3" h
+        (pts 62 7 69.5 7)
+        (connect "12" "carry_in")
+        (cross 69.5 "4"))
+      (seg "4" v
+        (pts 69.5 -6.000003815 69.5 7)
+        (cross -6.000003815 "1")
+        (cross 7 "3"))
+      (seg "5" v
+        (pts 76 -6.000003815 76 -1.5)
+        (cross -6.000003815 "1")
+        (cross -1.5 "2"))
+      (seg "6" v
+        (pts 99 -13 99 -12)
+        (connect "26" "IN_B_2")
+        (cross -12 "0"))
+      (seg "7" v
+        (pts 99.5 -12 99.5 -1.5)
+        (cross -12 "0")
+        (cross -1.5 "2"))
+      (seg "8" v
+        (pts 100 -13 100 -12)
+        (connect "26" "IN_B_1")
+        (cross -12 "0")))
+    (wire
+      (ids "63")
+      (seg "1" h
+        (pts 89 -13 104 -13)
+        (connect "26" "IN_B_3")
+        (connect "26" "IN_B_0")
+        (connect "25" "OUT_0")
+        (cross 104 "4"))
+      (seg "4" v
+        (pts 104 -16 104 -13)
+        (connect "26" "carry_in")
+        (cross -13 "1")))))

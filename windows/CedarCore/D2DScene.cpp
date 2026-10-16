@@ -260,12 +260,14 @@ ID2D1StrokeStyle* D2DScene::strokeStyle(const render::Stroke& s) {
 	// and over, every frame. A style belongs to the factory that made it, so
 	// the factory is part of the key.
 	const float w = s.width > 0 ? s.width : 1.0f;
-	const auto key = std::make_tuple((void*)factory, (int)s.cap, s.dashed, s.dashed ? (int)std::lround(w * 100) : 0);
-	static std::map<std::tuple<void*, int, bool, int>, ID2D1StrokeStyle*> cache;
+	const auto key = std::make_tuple((void*)factory, (int)s.cap, s.dashed, s.dashed ? (int)std::lround(w * 100) : 0, s.roundJoin);
+	static std::map<std::tuple<void*, int, bool, int, bool>, ID2D1StrokeStyle*> cache;
 	auto it = cache.find(key);
 	if (it != cache.end()) return it->second;
 	const D2D1_CAP_STYLE cap = toCap(s.cap);
-	D2D1_STROKE_STYLE_PROPERTIES p = D2D1::StrokeStyleProperties(cap, cap, cap, D2D1_LINE_JOIN_MITER, 10.0f,
+	// Round joins for a hand-drawn stroke (the drawing on a circuit), as CGScene.
+	const D2D1_LINE_JOIN join = s.roundJoin ? D2D1_LINE_JOIN_ROUND : D2D1_LINE_JOIN_MITER;
+	D2D1_STROKE_STYLE_PROPERTIES p = D2D1::StrokeStyleProperties(cap, cap, cap, join, 10.0f,
 	                                                             s.dashed ? D2D1_DASH_STYLE_CUSTOM : D2D1_DASH_STYLE_SOLID, 0.0f);
 	ID2D1StrokeStyle* style = nullptr;
 	if (s.dashed) {

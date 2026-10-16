@@ -10,10 +10,13 @@
 #include "logic_gate.h"
 #include "logic_wire.h"
 
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
 namespace {
+// Locked: Check My Circuit opens and closes its copies on another thread.
+std::mutex hostsLock;
 std::unordered_map<const GUICircuit*, LogicHost*>& hosts() {
 	static std::unordered_map<const GUICircuit*, LogicHost*> map;
 	return map;
@@ -21,11 +24,13 @@ std::unordered_map<const GUICircuit*, LogicHost*>& hosts() {
 }
 
 LogicHost* logicHostFor(const GUICircuit* circuit) {
+	std::lock_guard<std::mutex> hold(hostsLock);
 	auto it = hosts().find(circuit);
 	return it == hosts().end() ? nullptr : it->second;
 }
 
 void registerLogicHost(const GUICircuit* circuit, LogicHost* host) {
+	std::lock_guard<std::mutex> hold(hostsLock);
 	if (host == nullptr) hosts().erase(circuit);
 	else hosts()[circuit] = host;
 }
@@ -93,7 +98,10 @@ void LogicHost::deliver(const klsMessage::Message& input) {
 	}
 	case MT_SET_GATE_PARAM: {
 		const Message_SET_GATE_PARAM& msg = input.as<Message_SET_GATE_PARAM>();
-		cir->setGateParameter(msg.gateId, msg.paramName, msg.paramValue);
+		if (msg.paramName == "JUNCTION_ID" && linkGroupOf)
+			cir->setGateParameter(msg.gateId, msg.paramName, linkKey(linkGroupOf(msg.gateId), msg.paramValue));
+		else
+			cir->setGateParameter(msg.gateId, msg.paramName, msg.paramValue);
 		break;
 	}
 	case MT_STEPSIM:
@@ -126,11 +134,28 @@ int LogicHost::applyResults(const ID_SET<IDType>* changedWires) {
 	for (const changedParam& p : params) {
 		const std::string value = cir->getGateParameter(p.gateID, p.paramName);
 		if (value.empty()) continue;
+		if (p.paramName == "JUNCTION_ID") continue;   // the engine's key, not the name
 		if (guiGate* gate = circuit.getGate(p.gateID)) gate->setLogicParam(p.paramName, value);
 		if (p.paramName == "PAUSE_SIM") pauseRequested = true;
 		changed++;
 	}
 	return changed;
+}
+
+std::string LogicHost::linkKey(int group, const std::string& name) {
+	// Group 0 keeps the plain name, so a circuit with one group runs exactly
+	// as before. Others get a prefix no typed name has (unit separators).
+	if (group == 0) return name;
+	return "\x1f" + std::to_string(group) + "\x1f" + name;
+}
+
+void LogicHost::relinkJunctions() {
+	if (!linkGroupOf) return;
+	for (auto& g : circuit.gates()) {
+		if (g.second == nullptr || dynamic_cast<guiTO_FROM*>(g.second.get()) == nullptr) continue;
+		cir->setGateParameter(g.first, "JUNCTION_ID",
+		                      linkKey(linkGroupOf(g.first), g.second->getLogicParam("JUNCTION_ID")));
+	}
 }
 
 int LogicHost::step(int steps) {
@@ -147,13 +172,14 @@ int LogicHost::step(int steps) {
 	return ran;
 }
 
-bool LogicHost::settle(int maxSteps) {
+bool LogicHost::settle(int maxSteps, bool record) {
 	int quiet = 0;
 	for (int i = 0; i < maxSteps && quiet < 3; i++) {
 		ID_SET<IDType> changedWires;
 		cir->step(&changedWires);
 		stepCount++;
 		quiet = applyResults(&changedWires) == 0 ? quiet + 1 : 0;
+		if (record && afterStep) afterStep();
 	}
 	pauseRequested = false;
 	return quiet >= 3;

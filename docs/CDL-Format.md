@@ -658,6 +658,43 @@ Reference-reader lenience. None of it is a guarantee, and a writer MUST NOT rely
   `(uuid …)` is ignored, while gparams and lparams are collected by full scan, so duplicate
   params are all kept.
 
+### 5.3.1 The drawing and the notes
+
+Three optional nodes carry what a student draws on a page and the notes they keep with the
+circuit. They are specified, with test vectors, in the website's `docs/DRAWING-NOTES.md`
+(fixtures in `format/tests/fixtures/drawing/`, `drawref.py` the reference); in short:
+
+```scheme
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (notes "Half adder\nS = A xor B")             ; one string; raw LF inside it
+  (show-drawing no)                             ; only when hidden and there is a drawing
+  (page 0
+    (name "Adder")
+    (gate …) (wire …)
+    (drawing 1                                  ; per page, after the wires
+      (stroke highlighter yellow 1.2 "4ShyBwlBV4SK")
+      (stroke pen ink 0.25 "gyBzdoBA…" "TZfpwy…"))))   ; points (base64url VLQ), pressure
+```
+
+- `(notes "…")`: the first one counts; normalized on read and write; written only when it
+  holds something other than space, tab and LF.
+- `(show-drawing no)`: the first one counts; anything but `no` means shown.
+- `(drawing 1 (stroke tool color width "points" ["pressure"]) …)`: world centi-units,
+  y up, delta-coded; unreadable strokes are left out with one load warning. A page whose
+  drawings include any other version (`(drawing 2 …)`) is read-only: all its drawing
+  nodes are kept whole and written back, never drawn or changed.
+- No format version change: readers from before ignore these nodes (§14) and drop them on
+  save. `format/` reads and writes them (`circuit_file.hpp` `PageInk`, `CircuitFile::notes`,
+  `inkHidden`; `ink.cpp`), so every app built on it keeps them.
+
+**Strings: `<` escapes the character after it.** Every string the writer writes (labels,
+names, notes) puts a `\` before `\`, `"` and before the character that follows any `<`:
+`x < y` is written `"x <\ y"`. Every reader takes `\c` as `c`, so the text is unchanged,
+but the bytes `<version>` can no longer appear inside a string, where the newer-version guard
+(§8.1) would find them and refuse the file in every app.
+
 ### 5.4 What v3 drops on purpose
 
 - The decoy circuit. A v1/v2 reader given a v3 file finds no `<circuit>` and errors, which
@@ -1075,7 +1112,9 @@ future version of the format promises to leave alone, and what it does not.
 
 The promise is that unknown children are ignored, at every level, in every version. A later
 writer can add child nodes or params, and every reader alive today will drop them without
-complaint. That is the whole extension mechanism. It follows that anything a reader must not
+complaint. That is the whole extension mechanism. (The drawing and notes of §5.3.1 are such
+an addition: older readers open those files and drop the nodes when they save. The apps
+keep drawing nodes of a version they don't know, but no other unknown node yet.) It follows that anything a reader must not
 be free to drop cannot be added this way and needs a new version instead.
 
 Positional fields are outside the promise. `(gate <libName> …)`, `(page <index> …)`, and

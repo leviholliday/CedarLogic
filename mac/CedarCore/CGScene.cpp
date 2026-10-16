@@ -94,6 +94,7 @@ void CGScene::stroke(CGPathRef path, const render::Stroke& s0) {
 	CGContextAddPath(ctx, path);
 	CGContextSetLineWidth(ctx, s.width);   // device pixels, like the wx app
 	CGContextSetLineCap(ctx, toCap(s.cap));
+	if (s.roundJoin) CGContextSetLineJoin(ctx, kCGLineJoinRound);
 	if (s.dashed) {
 		const CGFloat dash[] = { 3.0, 3.0 };
 		CGContextSetLineDash(ctx, 0, dash, 2);

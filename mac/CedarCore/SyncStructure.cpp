@@ -9,12 +9,14 @@
 #include "SyncInternal.h"
 
 #include "circuit_file_io.hpp"
+#include "ink.hpp"
 #include "legacy_cdl.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <locale>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -146,7 +148,39 @@ std::string structureText(const std::string& cdl, const GateDefaults& defaults) 
 			for (const std::string& e : es) line += " " + e;
 			lines.push_back(line);
 		}
+		// The drawing (the website's DRAWING-NOTES.md 3.6): a line a stroke, so
+		// drawing and erasing are real edits. Foreign drawings add nothing,
+		// and a page without strokes adds no line, so a circuit without a
+		// drawing keeps today's text.
+		for (const cl::InkStroke& st : pg.ink.strokes) {
+			std::string line = "D " + std::to_string(pg.index) + " " + esc(st.tool) + " " + esc(st.color) + " " +
+			                   std::to_string((long long)st.widthCenti * 10) + " ";
+			for (size_t i = 0; i < st.xy.size(); i++) {
+				if (i) line += ",";
+				line += std::to_string(st.xy[i]);
+			}
+			if (!st.pressure.empty()) line += " p:" + st.pressure;
+			lines.push_back(line);
+		}
 	}
+	// Page link groups (docs/PAGE-LINKS.md): which pages' TO/FROM links
+	// connect changes what the circuit does. Only when not every page is in
+	// one group (so today's texts stay), a line a page: `L <page> <n>`, n
+	// counting groups from 0 in page order.
+	{
+		std::map<int, int> canonical;
+		std::vector<std::pair<int, int>> pageGroup;
+		for (const cl::Page& pg : cf.pages) {
+			auto it = canonical.find(pg.linkGroup);
+			const int n = it != canonical.end() ? it->second : (int)canonical.size();
+			canonical.emplace(pg.linkGroup, n);
+			pageGroup.push_back({ pg.index, n });
+		}
+		if (canonical.size() > 1)
+			for (auto& e : pageGroup) lines.push_back("L " + std::to_string(e.first) + " " + std::to_string(e.second));
+	}
+	// The notes, when there's something in them.
+	if (cl::ink::notesWorthWriting(cf.notes)) lines.push_back("N " + esc(cf.notes));
 	} catch (const std::exception&) {
 		return "cedarlogic-structure/1 unparsed\n" + t;
 	}

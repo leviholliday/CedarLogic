@@ -1,0 +1,151 @@
+{
+ "alphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+ "good": [
+  {
+   "value": 0,
+   "text": "A"
+  },
+  {
+   "value": 1,
+   "text": "C"
+  },
+  {
+   "value": -1,
+   "text": "D"
+  },
+  {
+   "value": 15,
+   "text": "e"
+  },
+  {
+   "value": -15,
+   "text": "f"
+  },
+  {
+   "value": 16,
+   "text": "gB"
+  },
+  {
+   "value": -16,
+   "text": "hB"
+  },
+  {
+   "value": 31,
+   "text": "-B"
+  },
+  {
+   "value": 32,
+   "text": "gC"
+  },
+  {
+   "value": 100,
+   "text": "oG"
+  },
+  {
+   "value": -100,
+   "text": "pG"
+  },
+  {
+   "value": 511,
+   "text": "-f"
+  },
+  {
+   "value": 512,
+   "text": "ggB"
+  },
+  {
+   "value": 1000,
+   "text": "w-B"
+  },
+  {
+   "value": -1000,
+   "text": "x-B"
+  },
+  {
+   "value": 16383,
+   "text": "-_f"
+  },
+  {
+   "value": 16384,
+   "text": "gggB"
+  },
+  {
+   "value": 123456,
+   "text": "gkxH"
+  },
+  {
+   "value": -123456,
+   "text": "hkxH"
+  },
+  {
+   "value": 1048575,
+   "text": "-___B"
+  },
+  {
+   "value": 1048576,
+   "text": "ggggC"
+  },
+  {
+   "value": 33554431,
+   "text": "-____B"
+  },
+  {
+   "value": 33554432,
+   "text": "gggggC"
+  },
+  {
+   "value": 100000000,
+   "text": "gww3-F"
+  },
+  {
+   "value": -100000000,
+   "text": "hww3-F"
+  }
+ ],
+ "lenient": [
+  {
+   "text": "B",
+   "values": [
+    0
+   ],
+   "why": "minus zero reads as 0; writers never make it"
+  },
+  {
+   "text": "gA",
+   "values": [
+    0
+   ],
+   "why": "a needless continuation: the value is what counts"
+  }
+ ],
+ "bad": [
+  {
+   "text": "g",
+   "error": "cut-short"
+  },
+  {
+   "text": "A+",
+   "error": "bad-char"
+  },
+  {
+   "text": "A=",
+   "error": "bad-char"
+  },
+  {
+   "text": "A A",
+   "error": "bad-char"
+  },
+  {
+   "text": "gggggggA",
+   "error": "too-long"
+  },
+  {
+   "text": "ggggggA",
+   "error": "too-long"
+  },
+  {
+   "text": "iww3-F",
+   "error": "out-of-range"
+  }
+ ]
+}

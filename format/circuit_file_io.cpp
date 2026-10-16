@@ -1,4 +1,5 @@
 #include "circuit_file_io.hpp"
+#include "ink.hpp"
 #include "numeric.hpp"
 #include "sexpr.hpp"
 
@@ -95,14 +96,25 @@ std::string writeCircuitFile(const CircuitFile &cf) {
 	root.add(SNode::sym("cedarlogic"));
 	root.add(kv("version", num(cf.formatVersion)));
 	root.add(kv("generator", SNode::str(cf.generator)));
+	// The notes and the hidden flag (DRAWING-NOTES 3.1, 3.7, 3.8): each only
+	// when it has something to say, so a circuit without them keeps its bytes.
+	const std::string notes = ink::normalizeNotes(cf.notes);
+	if (ink::notesWorthWriting(notes)) root.add(kv("notes", SNode::str(notes)));
+	bool anyInk = false;
+	for (const Page &pg : cf.pages) anyInk = anyInk || !pg.ink.empty();
+	if (cf.inkHidden && anyInk) root.add(kv("show-drawing", SNode::sym("no")));
 	for (const Page &pg : cf.pages) {
 		SNode pn = SNode::list();
 		pn.add(SNode::sym("page"));
 		pn.add(num(pg.index));
 		// Written only when there is one, so untouched files do not change.
 		if (!pg.name.empty()) pn.add(kv("name", SNode::str(pg.name)));
+		// Its link group (docs/PAGE-LINKS.md), only when not the shared one,
+		// so a circuit whose pages all connect keeps its bytes.
+		if (pg.linkGroup > 0) pn.add(kv("linkgroup", num(pg.linkGroup)));
 		for (const GateInstance &g : pg.gates) pn.add(gateNode(g));
 		for (const WireInstance &w : pg.wires) pn.add(wireNode(w));
+		for (SNode &d : ink::pageInkNodes(pg.ink)) pn.add(std::move(d));
 		root.add(std::move(pn));
 	}
 	return writeSexpr(root);
@@ -180,6 +192,20 @@ static WireInstance readWire(const SNode &n) {
 	return w;
 }
 
+// A page's (linkgroup N): a whole number 0..9999; anything else (a newer
+// writer's idea, a hand edit) reads as the shared group, never an error.
+static int readLinkGroup(const SNode &e) {
+	if (e.items.size() < 2 || e.items[1].isList()) return 0;
+	const std::string &t = e.items[1].text;
+	if (t.empty() || t.size() > 4) return 0;
+	int v = 0;
+	for (char ch : t) {
+		if (ch < '0' || ch > '9') return 0;
+		v = v * 10 + (ch - '0');
+	}
+	return v;
+}
+
 CircuitFile readCircuitFile(const std::string &text) {
 	size_t end = 0;
 	SNode root = parseSexpr(text, &end);
@@ -199,6 +225,22 @@ CircuitFile readCircuitFile(const std::string &text) {
 		                         std::to_string(cf.formatVersion));
 	cf.generator = kvStr(root, "generator");
 
+	// The drawing and the notes: the first (notes ...) and (show-drawing ...)
+	// count; strokes that can't be read are left out and counted.
+	bool notesSeen = false, flagSeen = false;
+	size_t docPoints = 0;
+	for (const SNode &c : root.items) {
+		if (!c.isList()) continue;
+		if (c.head() == "notes" && !notesSeen) {
+			notesSeen = true;
+			if (c.items.size() > 1 && !c.items[1].isList())
+				cf.notes = ink::normalizeNotes(c.items[1].text, ink::kReadNotesChars);
+		} else if (c.head() == "show-drawing" && !flagSeen) {
+			flagSeen = true;
+			cf.inkHidden = c.items.size() > 1 && !c.items[1].isList() && c.items[1].text == "no";
+		}
+	}
+
 	for (const SNode &c : root.items) {
 		if (!c.isList() || c.head() != "page") continue;
 		Page pg;
@@ -206,9 +248,11 @@ CircuitFile readCircuitFile(const std::string &text) {
 		for (const SNode &e : c.items) {
 			if (!e.isList()) continue;
 			if (e.head() == "name") pg.name = item(e, 1);
+			else if (e.head() == "linkgroup") pg.linkGroup = readLinkGroup(e);
 			else if (e.head() == "gate") pg.gates.push_back(readGate(e));
 			else if (e.head() == "wire") pg.wires.push_back(readWire(e));
 		}
+		ink::readPageInk(c, pg.ink, cf.inkDropped, docPoints);
 		cf.pages.push_back(std::move(pg));
 	}
 	return cf;
