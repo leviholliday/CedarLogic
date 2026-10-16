@@ -145,11 +145,14 @@ struct CanvasBench {
 	}
 
 	// Part 1: one kind of drag at one scale, one way of drawing.
-	void stepped(const char* label, int steps, int scale, int path, bool fast, int kind, double gx, double gy) {
+	void stepped(const char* label, int steps, int scale, int path, bool fast, int kind, double gx, double gy, bool whole = false) {
 		const Canvas::View saved = c->view();
 		c->scaleOverride = scale;
 		c->pathOverride = path;
 		c->fastDrag = fast;
+		const bool keepAll = c->drawAll;
+		c->drawAll = whole || keepAll;
+		c->layerFrames = c->layerBuilds = 0;
 		const int pw = (int)std::ceil(c->width() * scale), ph = (int)std::ceil(c->height() * scale);
 		// The window's own image: ARGB, as Wayland's buffers are.
 		cairo_surface_t* target = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, std::max(1, pw), std::max(1, ph));
@@ -181,8 +184,65 @@ struct CanvasBench {
 		c->setView(saved);
 		c->scaleOverride = c->pathOverride = 0;
 		c->fastDrag = false;
+		c->drawAll = keepAll;
 		cairo_surface_destroy(target);
 		printRow(label, summarize(draws), summarize(handlers));
+		if (kind != 2 && !whole && !keepAll)
+			printf("  %-30s (%d of %d frames from the kept layer, %d layer%s made)\n", "", c->layerFrames, steps, c->layerBuilds,
+			       c->layerBuilds == 1 ? "" : "s");
+	}
+
+	// Whether static + moving looks like the page drawn whole: one gate moved
+	// along part of the path, then the canvas drawn both ways at scale 1.
+	// They differ only where the moving gate overlaps something drawn after
+	// it in id order (it's on top now).
+	void compareLayers(double gx, double gy) {
+		const Canvas::View saved = c->view();
+		c->scaleOverride = 1;
+		c->pathOverride = 2;
+		const int pw = (int)std::ceil(c->width()), ph = (int)std::ceil(c->height());
+		auto picture = [&](bool whole) {
+			cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, std::max(1, pw), std::max(1, ph));
+			c->drawAll = whole;
+			if (whole) c->dropLayer();
+			cairo_t* cr = cairo_create(s);
+			c->draw(cr);
+			cairo_destroy(cr);
+			cairo_surface_flush(s);
+			return s;
+		};
+		press(gx, gy, 1);
+		for (int i = 0; i < 12; i++) {
+			double x, y;
+			pathPoint(i, 48, gx, gy, x, y);
+			move(x, y, 1);
+			cairo_surface_destroy(picture(false));
+		}
+		c->layerFrames = 0;
+		cairo_surface_t* layered = picture(false);
+		const int fromLayer = c->layerFrames;
+		cairo_surface_t* whole = picture(true);
+		long differ = 0;
+		const int stride = cairo_image_surface_get_stride(layered);
+		const unsigned char* a = cairo_image_surface_get_data(layered);
+		const unsigned char* b = cairo_image_surface_get_data(whole);
+		for (int y = 0; y < ph; y++)
+			for (int x = 0; x < pw; x++) {
+				const unsigned char* pa = a + y * stride + x * 4;
+				const unsigned char* pb = b + y * stride + x * 4;
+				int d = 0;
+				for (int k = 0; k < 3; k++) d = std::max(d, std::abs((int)pa[k] - (int)pb[k]));
+				if (d > 24) differ++;
+			}
+		printf("\nStatic + moving against the page drawn whole (one gate moved, scale 1): %ld of %ld pixels differ (%.3f%%)%s\n", differ,
+		       (long)pw * ph, 100.0 * differ / std::max(1L, (long)pw * ph), fromLayer ? "" : "  [the layer wasn't used!]");
+		cairo_surface_destroy(layered);
+		cairo_surface_destroy(whole);
+		c->drawAll = false;
+		endDrag(1);
+		cl_edit_select_none(doc, page);
+		c->setView(saved);
+		c->scaleOverride = c->pathOverride = 0;
 	}
 
 	// Part 2: a drag on the frame clock, drawn by GTK.
@@ -271,18 +331,23 @@ int dragBenchmark(CircuitWindow* window, int steps) {
 			const std::string frame = std::string(k.name) + ", through frame";
 			const std::string direct = std::string(k.name) + ", straight";
 			const std::string fast = std::string(k.name) + ", straight + fast AA";
+			const std::string whole = std::string(k.name) + ", straight, whole page";
 			b.stepped(frame.c_str(), steps, scale, 1, false, k.id, gx, gy);
 			b.stepped(direct.c_str(), steps, scale, 2, false, k.id, gx, gy);
 			if (k.id != 2) b.stepped(fast.c_str(), steps, scale, 2, true, k.id, gx, gy);
+			// Every frame drawn whole, as before the static layer (CEDARLOGIC_DRAW_ALL=1).
+			if (k.id != 2) b.stepped(whole.c_str(), steps, scale, 2, false, k.id, gx, gy, true);
 		}
 	}
+	b.compareLayers(gx, gy);
 
 	printf("\nLive, on the frame clock, at the screen's scale (%d), the way this display draws:\n", screenScale);
 	printf(header, "", "mean", "median", "p95", "worst", "handler");
 	b.live("one gate: canvas draw", steps, false, gx, gy);
 	b.live("select all: canvas draw", steps, true, gx, gy);
 	printf("\n\"through frame\" is how X11 draws (and every display did before);\n"
-	       "\"straight\" is how Wayland draws now. \"fast AA\" is CEDARLOGIC_FAST_DRAG=1 (off by default).\n");
+	       "\"straight\" is how Wayland draws now. \"fast AA\" is CEDARLOGIC_FAST_DRAG=1 (off by default).\n"
+	       "\"whole page\" draws every part every frame, as before the kept static layer (CEDARLOGIC_DRAW_ALL=1).\n");
 	fflush(stdout);
 	return 0;
 }

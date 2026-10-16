@@ -30,6 +30,10 @@ public:
 	int page() const;
 
 	void redraw();
+	// The same, for something drawn over the circuit (a fade, the opening
+	// card, a note): what's under it is as it was, so a drag's static layer
+	// (below) is kept.
+	void redrawOver();
 	// World <-> view points.
 	void worldPoint(double vx, double vy, double& wx, double& wy) const;
 	double width() const;
@@ -150,6 +154,37 @@ private:
 	gint64 lastMiniMap = 0;
 	// --bench-drag: each draw's time, in ms, while set.
 	std::vector<double>* drawTimes = nullptr;
+
+	// Draw only what moves (SMOOTHNESS.md): while parts are dragged, the page
+	// without them -- background, grid, every other wire and gate, the
+	// drawing -- is kept in `staticLayer`, made on the drag's first moving
+	// frame (cl_document_draw_layer), and each frame copies it and draws the
+	// moving parts on top. It's made again whenever its key changes (the
+	// camera, the size, the theme and look, the grid, what's moving, an edit)
+	// or anything else asks for a redraw (redraw(), not redrawOver(): the
+	// simulation changing a wire, a menu command...). Made again three
+	// frames running (a running clock, a zoom), it isn't worth it: the rest
+	// of that drag is drawn whole, as it always was. CEDARLOGIC_DRAW_ALL=1
+	// (and --bench-drag's "whole page" rows) turn it off.
+	struct LayerKey {
+		GridKey grid;
+		double accent, wireScale;
+		unsigned stamp;
+		unsigned long long moving;
+		bool operator==(const LayerKey& o) const {
+			return grid == o.grid && accent == o.accent && wireScale == o.wireScale && stamp == o.stamp && moving == o.moving;
+		}
+	};
+	cairo_surface_t* staticLayer = nullptr;
+	LayerKey layerKey{};
+	bool layerValid = false, layersOff = false, rebuiltLastFrame = false, drawAll = false;
+	int rebuildsInARow = 0;
+	// Counts kept for --bench-drag: frames drawn from the layer, and layers made.
+	int layerFrames = 0, layerBuilds = 0;
+	void dropLayer();
+	bool drawLayered(cairo_t* cr, int scale, const CLDrawOptions& o, const GridKey& grid);
+	void drawBackground(cairo_t* cr, int scale, const Palette& pal, const GridKey& key, double fade);
+	void drawSceneTop(cairo_t* cr, int scale, bool sim, bool dark, bool projector);
 
 	void draw(cairo_t* cr);
 	// Over the circuit: the banner and its buttons, the note.

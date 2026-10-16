@@ -80,8 +80,10 @@ built-in Adwaita when the theme hasn't one.
 The canvas draws each frame into an image in memory (on Wayland straight
 onto the window's own), keeps the grid in a layer of its own, and only
 redraws when the simulation changed something on screen (`CL_TICK_SHOWN`),
-so a running circuit that isn't changing costs next to nothing. What a drag
-costs, and what would make it cheaper: `SMOOTHNESS.md`.
+so a running circuit that isn't changing costs next to nothing. While parts
+are dragged it keeps everything that isn't moving in an image and draws only
+the moving parts each frame (`cl_document_draw_layer`). What a drag costs,
+and what would make it cheaper: `SMOOTHNESS.md`.
 
 Checks, without opening the app (built with it; `-DCL_BUILD_TOOLS=OFF` skips
 them): `cl_check`, `edit_check`, `sim_check`, `tt_check`, `save_check`,

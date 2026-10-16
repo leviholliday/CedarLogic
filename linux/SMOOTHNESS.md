@@ -224,9 +224,24 @@ use the Pi or the Fedora laptop for verdicts.
    - the camera, theme or selection fade changes.
 
    The moving parts are then painted over static gates, which differs from
-   id order where they overlap during the drag. It was left out of this
-   change because it touches the shared engine and can't be tested here
-   (this machine can't build or run the Linux engine).
+   id order where they overlap during the drag.
+
+   **Done (2026-10-16).** The engine has `cl_document_draw_layer` and
+   `cl_document_moving_signature` (`mac/CedarCore/Extras.cpp`; the moving
+   set is the gesture's gates, its selected wires, the wires reshaping with
+   the parts, and any wire on a moving pin). `Canvas::drawLayered` keeps the
+   static layer (background, grid, every other part, the drawing) from the
+   drag's first moving frame and draws the moving parts over it. It's made
+   again when its key changes (camera, size, scale, theme, grid, accent,
+   wire weight, what's moving, an edit) or when anything calls
+   `Canvas::redraw()` (the simulation's `CL_TICK_SHOWN`, every command);
+   fades and notes over the circuit use `redrawOver()` and keep it. Made
+   again three frames running, the rest of that drag is drawn whole.
+   No static gate changes look during a drag (the pin box and connection
+   line are `cl_edit_draw_overlay`'s, drawn every frame), and a halo fading
+   in is on the selection, which is what moves. `CEDARLOGIC_DRAW_ALL=1`
+   turns it off; `--bench-drag` prints "whole page" rows beside the others
+   and compares a frame drawn both ways.
 3. **Labels as cached glyphs.** `CairoScene::text` fills glyph outlines so
    labels measure and sit exactly as the Skia and Mac apps draw them.
    `cairo_show_glyphs` with the same font matrix, unhinted, is about 12×

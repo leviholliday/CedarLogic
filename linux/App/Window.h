@@ -138,6 +138,9 @@ public:
 	void fadeOutDragBox(double l, double b, double r, double t);
 
 	void redraw();
+	// Something over the circuit changed (a fade, a note): the canvases keep
+	// a drag's static layer (Canvas::redrawOver).
+	void redrawOver();
 	void pointerMoved(double wx, double wy);
 	void selectionChanged();
 	// After any edit: redraw, the title, the menus' state.

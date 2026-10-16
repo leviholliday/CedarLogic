@@ -75,6 +75,8 @@ Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageK
 	g_signal_connect(area, "drag-motion", G_CALLBACK(dragMotionCb), this);
 	const char* fast = g_getenv("CEDARLOGIC_FAST_DRAG");
 	fastDrag = fast && strcmp(fast, "1") == 0;
+	const char* all = g_getenv("CEDARLOGIC_DRAW_ALL");
+	drawAll = all && strcmp(all, "1") == 0;
 }
 
 Canvas::~Canvas() {
@@ -91,11 +93,25 @@ void Canvas::dropBuffers() {
 	frame = gridLayer = nullptr;
 	gridValid = false;
 	frameWhole = frameFresh = false;
+	dropLayer();
+}
+
+void Canvas::dropLayer() {
+	if (staticLayer) cairo_surface_destroy(staticLayer);
+	staticLayer = nullptr;
+	layerValid = false;
 }
 
 int Canvas::page() const { return cl_document_page_index(win->document(), key); }
 
 void Canvas::redraw() {
+	// Something may have changed under the moving parts: the drag's static
+	// layer is made again (see Canvas.h).
+	layerValid = false;
+	redrawOver();
+}
+
+void Canvas::redrawOver() {
 	// GTK draws once per frame however often this is asked, so a burst of
 	// pointer moves costs one draw.
 	gtk_widget_queue_draw(area);
@@ -541,15 +557,8 @@ bool Canvas::overlayPress(double x, double y) {
 	return false;
 }
 
-void Canvas::drawScene(cairo_t* cr, int scale) {
-	const bool sim = win->simView();
-	const bool dark = prefs().dark || sim;
-	const Palette pal{ dark, sim };
-
+void Canvas::drawBackground(cairo_t* cr, int scale, const Palette& pal, const GridKey& key, double fade) {
 	// The background and grid: from the layer while nothing about them changed.
-	const double fade = win->appearProgress();
-	const GridKey key{ originX, originY, upp, fade, (int)width(), (int)height(), scale, prefs().gridStyle,
-	                   dark, sim, prefs().majorGrid, prefs().showGrid };
 	// While the camera moves, the layer would be redrawn and copied every
 	// frame: the grid is drawn straight in until it has stayed put a frame.
 	const bool settled = (gridValid && key == gridKey) || (lastGridKeySet && key == lastGridKey);
@@ -574,10 +583,77 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 		cairo_paint(cr);
 		if (prefs().showGrid) drawGrid(cr, pal, scale, fade);
 	}
+}
+
+// While parts are dragged: everything else from the layer kept for this
+// drag, then the moving parts over it. False: draw the page whole.
+bool Canvas::drawLayered(cairo_t* cr, int scale, const CLDrawOptions& o, const GridKey& grid) {
+	if (drag != Drag::Edit || layersOff || drawAll || o.simView) return false;
+	CLDocument* doc = win->document();
+	const int p = page();
+	const unsigned long long moving = cl_document_moving_signature(doc, p);
+	if (moving == 0) return false;
+	const int pw = (int)std::ceil(width() * scale), ph = (int)std::ceil(height() * scale);
+	const LayerKey key{ grid, (double)o.accent, o.wireScale, win->editStamp(), moving };
+	const bool fits = staticLayer && cairo_image_surface_get_width(staticLayer) == pw && cairo_image_surface_get_height(staticLayer) == ph;
+	if (!layerValid || !fits || !(key == layerKey)) {
+		if (rebuiltLastFrame && ++rebuildsInARow >= 3) {
+			// Changing every frame: kept images only add a copy.
+			layersOff = true;
+			dropLayer();
+			return false;
+		}
+		if (!rebuiltLastFrame) rebuildsInARow = 1;
+		if (!fits) {
+			dropLayer();
+			staticLayer = cairo_image_surface_create(CAIRO_FORMAT_RGB24, pw, ph);
+			cairo_surface_set_device_scale(staticLayer, scale, scale);
+		}
+		if (cairo_surface_status(staticLayer) != CAIRO_STATUS_SUCCESS) {
+			layersOff = true;
+			dropLayer();
+			return false;
+		}
+		cairo_t* lc = cairo_create(staticLayer);
+		const Palette pal{ o.dark, o.simView };
+		drawBackground(lc, scale, pal, grid, grid.fade);
+		const bool ok = cl_document_draw_layer(doc, p, lc, scale, originX, originY, upp, &o, CL_LAYER_STATIC);
+		cairo_destroy(lc);
+		if (!ok) { layerValid = false; return false; }
+		cairo_surface_flush(staticLayer);
+		layerKey = key;
+		layerValid = true;
+		rebuiltLastFrame = true;
+		layerBuilds++;
+	} else {
+		rebuiltLastFrame = false;
+		rebuildsInARow = 0;
+	}
+	cairo_save(cr);
+	cairo_set_source_surface(cr, staticLayer, 0, 0);
+	cairo_paint(cr);
+	cairo_restore(cr);
+	const bool coarse = fastDrag;
+	if (coarse) {
+		cairo_save(cr);
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
+	}
+	cl_document_draw_layer(doc, p, cr, scale, originX, originY, upp, &o, CL_LAYER_MOVING);
+	if (coarse) cairo_restore(cr);
+	layerFrames++;
+	return true;
+}
+
+void Canvas::drawScene(cairo_t* cr, int scale) {
+	const bool sim = win->simView();
+	const bool dark = prefs().dark || sim;
+	const Palette pal{ dark, sim };
+	const double fade = win->appearProgress();
+	const GridKey key{ originX, originY, upp, fade, (int)width(), (int)height(), scale, prefs().gridStyle,
+	                   dark, sim, prefs().majorGrid, prefs().showGrid };
 
 	CLDocument* doc = win->document();
 	const int p = page();
-	if (doc == nullptr || p < 0) return;
 	CLDrawOptions o{};
 	o.dark = dark;
 	o.accent = prefs().accent;
@@ -587,6 +663,20 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	o.showSelection = true;
 	o.selectionFade = win->selectionFade();
 	o.ink = CL_INK_FOLLOW;
+	const bool projector = sim && prefs().projector;
+	if (doc != nullptr && p >= 0 && drawLayered(cr, scale, o, key)) {
+		drawSceneTop(cr, scale, sim, dark, projector);
+		return;
+	}
+	if (drag != Drag::Edit) {
+		// A drag's layer isn't kept past it; the next one starts afresh.
+		if (staticLayer) dropLayer();
+		layersOff = false;
+		rebuiltLastFrame = false;
+		rebuildsInARow = 0;
+	}
+	drawBackground(cr, scale, pal, key, fade);
+	if (doc == nullptr || p < 0) return;
 	// CEDARLOGIC_FAST_DRAG=1: coarser antialiasing while a drag is moving
 	// things (see SMOOTHNESS.md); the release draws it properly again.
 	const bool coarse = fastDrag && drag == Drag::Edit;
@@ -594,7 +684,6 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 		cairo_save(cr);
 		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
 	}
-	const bool projector = sim && prefs().projector;
 	if (projector) {
 		// Projector Mode: Simulation View drawn big and bright (the Mac's).
 		CLSimViewStyle st{};
@@ -608,6 +697,14 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 		cl_document_draw_ex(doc, p, cr, scale, originX, originY, upp, &o);
 	}
 	if (coarse) cairo_restore(cr);
+	drawSceneTop(cr, scale, sim, dark, projector);
+}
+
+// Over the parts: Simulation View's marching dashes, or the pins and the
+// connection being made and the selection box; and a stroke being drawn.
+void Canvas::drawSceneTop(cairo_t* cr, int scale, bool sim, bool dark, bool projector) {
+	CLDocument* doc = win->document();
+	const int p = page();
 	// The stroke being drawn and the hover preview, over everything else.
 	const bool live = cl_ink_live_page(doc) == p;
 	if (sim) {
@@ -1044,6 +1141,11 @@ bool Canvas::onPress(GdkEventButton* e) {
 		return TRUE;
 	}
 	cl_edit_press(doc, p, wx, wy, modifiersOf(e->state), upp);
+	// A new drag: its static layer is made afresh on its first moving frame.
+	dropLayer();
+	layersOff = false;
+	rebuiltLastFrame = false;
+	rebuildsInARow = 0;
 	drag = Drag::Edit;
 	redraw();
 	win->selectionChanged();
@@ -1072,7 +1174,8 @@ bool Canvas::onMotion(GdkEventMotion* e) {
 		break;
 	case Drag::Edit:
 		cl_edit_drag(doc, wx, wy);
-		redraw();
+		// Only the moving parts changed: the static layer stays.
+		redrawOver();
 		break;
 	case Drag::Ink:
 		inkMotion(e);

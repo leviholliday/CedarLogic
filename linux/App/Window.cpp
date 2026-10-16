@@ -1028,10 +1028,12 @@ void CircuitWindow::tick() {
 		redraw();
 	}
 	// Fades in progress (a new selection's halo, a page appearing, the drag box).
+	// (A page appearing fades the grid, which a drag's layer keys on; a halo
+	// fading in is on the selection, which is what moves.)
 	if (secondsSince(selectionChangedAt) < kSelectionFadeTime || secondsSince(appearStart) < kAppearTime ||
 	    (hasDragFade && secondsSince(dragFadeStart) < kDragFadeTime))
-		redraw();
-	if (hasDragFade && secondsSince(dragFadeStart) >= kDragFadeTime) { hasDragFade = false; redraw(); }
+		redrawOver();
+	if (hasDragFade && secondsSince(dragFadeStart) >= kDragFadeTime) { hasDragFade = false; redrawOver(); }
 
 	// Simulation View's dashes march at the simulation's speed: 40 points a
 	// second at 25 ms a step, faster as steps get shorter.
@@ -1062,9 +1064,9 @@ void CircuitWindow::tick() {
 	// A note on the canvas: redrawn while it fades in and out.
 	if (messageAt) {
 		const double age = secondsSince(messageAt);
-		if (age < 0.25 || (age > kNoteTime - 0.55 && age < kNoteTime + 0.1)) redraw();
+		if (age < 0.25 || (age > kNoteTime - 0.55 && age < kNoteTime + 0.1)) redrawOver();
 	}
-	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; redraw(); }
+	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; redrawOver(); }
 	if (statusBar) statusBar->tick();
 }
 
@@ -1096,6 +1098,11 @@ void CircuitWindow::redraw() {
 	// Both sides of a split show the same circuit running.
 	for (int pane = 0; pane < 2; pane++)
 		if (Canvas* c = paneCanvas(pane)) c->redraw();
+}
+
+void CircuitWindow::redrawOver() {
+	for (int pane = 0; pane < 2; pane++)
+		if (Canvas* c = paneCanvas(pane)) c->redrawOver();
 }
 
 void CircuitWindow::redrawMiniMap() {
