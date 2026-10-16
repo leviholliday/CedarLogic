@@ -60,6 +60,12 @@ struct Prefs {
 	bool showGateNames = true;
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
+	// Drawing on the circuit: the last tool (0 pen, 1 highlighter, 2 eraser),
+	// and each drawing tool's colour (a palette token) and width (world units),
+	// as the Mac's InkSettings.
+	int inkTool = 0;
+	std::string penColor = "ink", highlighterColor = "yellow";
+	double penWidth = 0.25, highlighterWidth = 1.2;
 	bool newPagesShareLinks = true;  // a new page's TO/FROM links connect with the others' (docs/PAGE-LINKS.md)
 	bool showCategoryKeys = true; // Shift+1...0 beside the side panel's categories
 	int gateSize = 48;            // the side panel's gates (36...96; 48 is the standard size)
@@ -93,6 +99,7 @@ struct Prefs {
 	bool reportCircuit = true, reportTable = true, reportFormulas = true, reportTiming = true, reportColor = true;
 	// Export as Image's last choices.
 	bool exportGrid = false, exportColor = true, exportInfo = true, exportWorks = true;   // exportInfo: the name-and-result strip
+	bool exportInk = true;                        // the drawing on the circuit, when the page has one
 	int exportScale = 4;                          // 2, 4 or 6 pixels a point
 	std::string exportProblem;                    // "does not work because…"
 	// Send Feedback's draft, kept until it's sent.

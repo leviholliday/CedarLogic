@@ -40,6 +40,12 @@ enum Command {
 	// Tabs > Connect All Pages and Disconnect All Pages: which pages' TO/FROM
 	// links connect (docs/PAGE-LINKS.md; a tab's right-click menu does it page by page).
 	CMD_CONNECT_ALL_PAGES, CMD_DISCONNECT_ALL_PAGES,
+	// Drawing on the circuit (the Mac's Drawing.swift): Draw mode on or off,
+	// Show or Hide Drawing, Clear Drawing on This Page; the drawing bar's
+	// tools, its three widths and the tool's colours (by place).
+	CMD_DRAW, CMD_SHOW_DRAWING, CMD_CLEAR_DRAWING, CMD_INK_PEN, CMD_INK_HIGHLIGHTER, CMD_INK_ERASER,
+	CMD_INK_WIDTH, CMD_INK_WIDTH_LAST = CMD_INK_WIDTH + 2,
+	CMD_INK_COLOR, CMD_INK_COLOR_LAST = CMD_INK_COLOR + 5,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 };

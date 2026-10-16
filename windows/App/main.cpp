@@ -10,6 +10,7 @@
 #include "DragLog.h"
 #include "Feedback.h"
 #include "Help.h"
+#include "Ink.h"
 #include "Integration.h"
 #include "Library.h"
 #include "Palette.h"
@@ -186,6 +187,8 @@ const std::vector<ClickCase>& clickCases() {
 		{ "Resume", CMD_RUNNING, false, [](CircuitWindow* w) -> long { return w->running(); }, flipped, nullptr },
 		{ "Simulation View on", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
 		{ "Simulation View off", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
+		{ "Draw on", CMD_DRAW, false, [](CircuitWindow* w) -> long { return w->drawing(); }, flipped, nullptr },
+		{ "Draw off", CMD_DRAW, false, [](CircuitWindow* w) -> long { return w->drawing(); }, flipped, nullptr },
 		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
 		{ "Unlock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
 		{ "Dark mode switch", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
@@ -253,6 +256,48 @@ void dragTest(CircuitWindow* w) {
 	SetCursorPos(before.x, before.y);
 }
 
+// Drawing on the circuit: in Draw mode, a stroke drawn on the canvas with
+// the mouse as Windows sends it (press, moves, release); it's saved with the
+// circuit and read back; the eraser dragged along it takes it away; Undo
+// brings it back.
+void inkTest(CircuitWindow* w) {
+	Canvas* c = w->currentCanvas();
+	CLDocument* doc = w->document();
+	if (c == nullptr || doc == nullptr) { report("FAIL", "Draw a stroke: no canvas"); return; }
+	const int page = w->currentPage();
+	w->setDrawing(true);
+	ink::setTool(ink::Pen);
+	const HWND h = c->widget();
+	RECT cr;
+	GetClientRect(h, &cr);
+	const int x0 = cr.right / 3, y0 = cr.bottom / 3;
+	auto drag = [&] {
+		SendMessageW(h, WM_MOUSEMOVE, 0, MAKELPARAM(x0, y0));
+		SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(x0, y0));
+		for (int i = 1; i <= 10; i++) SendMessageW(h, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x0 + i * 14, y0 + i * 6));
+		SendMessageW(h, WM_LBUTTONUP, 0, MAKELPARAM(x0 + 140, y0 + 60));
+	};
+	const int before = cl_ink_stroke_count(doc, page);
+	drag();
+	const int drawn = cl_ink_stroke_count(doc, page);
+	report(drawn == before + 1 ? "PASS" : "FAIL", strf("Draw a stroke with the mouse: %d strokes, then %d", before, drawn));
+	const std::string text = cl_document_save_text_ex(doc, 0);
+	char err[256] = "";
+	CLDocument* back = cl_document_open_text(text.c_str(), (long)text.size(), err, sizeof err);
+	const int kept = back ? cl_ink_stroke_count(back, page) : -1;
+	if (back) cl_document_close(back);
+	report(kept == drawn ? "PASS" : "FAIL", strf("The drawing saved with the circuit: %d strokes read back", kept));
+	w->setInkTool(ink::Eraser);
+	drag();
+	const int erased = cl_ink_stroke_count(doc, page);
+	report(erased == before ? "PASS" : "FAIL", strf("Erase it: %d strokes, then %d", drawn, erased));
+	w->undo();
+	const int undone = cl_ink_stroke_count(doc, page);
+	report(undone == drawn ? "PASS" : "FAIL", strf("Undo the erase: %d strokes", undone));
+	w->setInkTool(ink::Pen);
+	w->setDrawing(false);
+}
+
 // After the message loop: the drawn Close's result, and the summary.
 int finishClickTest() {
 	if (gClickClosing) report(IsWindow(gClickWindow) ? "FAIL" : "PASS", "Close (drawn): the window closed");
@@ -301,6 +346,7 @@ int clickTestStep() {
 	// The drag a moment after the last case put things back (focus mode's
 	// toolbar and side panel sliding in again), with the panel in place.
 	if (!gClickDragNext) { gClickDragNext = true; return 500; }
+	inkTest(w);
 	dragTest(w);
 	// Last, the drawn Close: the window goes, and with it the app (the
 	// result is read once the message loop ends).
@@ -891,7 +937,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (!gRun.empty() && !circuitWindows().empty())
 		for (size_t at = 0; at <= gRun.size();) {
 			const size_t comma = std::min(gRun.find(',', at), gRun.size());
-			if (const shortcuts::Action* act = shortcuts::find(gRun.substr(at, comma - at))) circuitWindows().back()->run(act->command);
+			const std::string id = gRun.substr(at, comma - at);
+			// The drawing bar's tools aren't shortcuts of their own (P, H, E while drawing).
+			const int tool = id == "inkPen" ? CMD_INK_PEN : id == "inkHighlighter" ? CMD_INK_HIGHLIGHTER : id == "inkEraser" ? CMD_INK_ERASER : 0;
+			if (tool) circuitWindows().back()->run(tool);
+			else if (const shortcuts::Action* act = shortcuts::find(id)) circuitWindows().back()->run(act->command);
 			at = comma + 1;
 		}
 	if (!gNote.empty() && !circuitWindows().empty()) circuitWindows().back()->note(gNote);

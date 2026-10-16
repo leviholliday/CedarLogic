@@ -237,6 +237,11 @@ void Prefs::load() {
 	showStepClock = r.b("showStepClock", showStepClock);
 	newPagesShareLinks = r.b("newPagesShareLinks", newPagesShareLinks);
 	applyPageLinks();
+	inkTool = r.i("inkTool", inkTool, 0, 2);
+	penColor = r.s("penColor", penColor);
+	highlighterColor = r.s("highlighterColor", highlighterColor);
+	penWidth = r.d("penWidth", penWidth, 0.05, 3);
+	highlighterWidth = r.d("highlighterWidth", highlighterWidth, 0.05, 3);
 	openReplaces = r.b("openReplaces", openReplaces);
 	newTemplate = r.s("newTemplate", newTemplate);
 	templateClock = r.i("templateClock", templateClock, 0, 2);
@@ -260,6 +265,7 @@ void Prefs::load() {
 	timingWhole = r.b("timingWhole", timingWhole);
 	timingInColor = r.b("timingInColor", timingInColor);
 	reportCircuit = r.b("reportCircuit", reportCircuit);
+	exportInk = r.b("exportInk", exportInk);
 	reportTable = r.b("reportTable", reportTable);
 	reportFormulas = r.b("reportFormulas", reportFormulas);
 	reportTiming = r.b("reportTiming", reportTiming);
@@ -330,6 +336,11 @@ void Prefs::save() const {
 	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
 	o << "showStepClock=" << b(showStepClock) << "\n";
 	o << "newPagesShareLinks=" << b(newPagesShareLinks) << "\n";
+	o << "inkTool=" << inkTool << "\n";
+	o << "penColor=" << penColor << "\n";
+	o << "highlighterColor=" << highlighterColor << "\n";
+	o << "penWidth=" << penWidth << "\n";
+	o << "highlighterWidth=" << highlighterWidth << "\n";
 	o << "openReplaces=" << b(openReplaces) << "\n";
 	o << "newTemplate=" << newTemplate << "\n";
 	o << "templateClock=" << templateClock << "\n";
@@ -353,6 +364,7 @@ void Prefs::save() const {
 	o << "timingWhole=" << b(timingWhole) << "\n";
 	o << "timingInColor=" << b(timingInColor) << "\n";
 	o << "reportCircuit=" << b(reportCircuit) << "\n";
+	o << "exportInk=" << b(exportInk) << "\n";
 	o << "reportTable=" << b(reportTable) << "\n";
 	o << "reportFormulas=" << b(reportFormulas) << "\n";
 	o << "reportTiming=" << b(reportTiming) << "\n";

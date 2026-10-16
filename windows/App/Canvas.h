@@ -66,6 +66,11 @@ public:
 	void cancelDrag();
 	bool isDragging() const { return drag != Drag::None; }
 
+	// Draw mode came or went (Ink.h), or the tool, its colour or width
+	// changed: the pointer's preview follows.
+	void drawingChanged();
+	void inkToolChanged();
+
 	// Called when the window's circuit changed under it (undo, a new page).
 	void noteFit() { needsFit = true; }
 	// Let go of the drawing surface (a tab that isn't in front).
@@ -81,7 +86,7 @@ public:
 	bool showWireTagNow();
 
 private:
-	enum class Drag { None, Edit, Pan, Slider };
+	enum class Drag { None, Edit, Pan, Slider, Ink };
 
 	CircuitWindow* win;
 	HWND hwnd = nullptr;
@@ -137,6 +142,23 @@ private:
 	void drawOpeningCard(ID2D1RenderTarget* rt, float w, float h, double t);
 	bool overlayPress(double vx, double vy);
 	void setSpeedAt(double vx);
+
+	// Drawing (Ink.h): a stroke or an eraser drag in progress, from the mouse
+	// or a pen (WM_POINTER, with its pressure and its eraser end).
+	bool inkErasing = false;
+	bool tabletEraser = false;        // the pen's eraser end (or its barrel button) is what's down or near
+	double penPressure = -1;          // 0..1 while a pen draws; -1 a mouse
+	double eraserRadius() const { return 10 * upp; }   // 10 points on screen
+	bool erases() const;
+	bool inkPress(double vx, double vy);
+	void inkMotion(double vx, double vy);
+	void inkRelease(double vx, double vy);
+	void inkSample(double vx, double vy);
+	void inkHover(double vx, double vy);
+	void inkMenu(POINT screen);
+	bool inkKey(UINT vk);
+	bool onPointer(UINT msg, WPARAM wp, LPARAM lp);
+	void drawDrawingBar(ID2D1RenderTarget* rt, float w, float h);
 
 	// What the wire under the pointer carries, in a chip beside it once the
 	// pointer has rested there a moment (Settings > Canvas), as the Mac's.

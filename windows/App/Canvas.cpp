@@ -4,6 +4,7 @@
 #include "Brand.h"
 #include "Chrome.h"
 #include "DragLog.h"
+#include "Ink.h"
 #include "Shortcuts.h"
 #include "Window.h"
 
@@ -240,6 +241,8 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 		if (cl_edit_box(doc, &l, &b, &r, &t)) drawBox(rt, l, b, r, t, a, 1);
 		else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(rt, l, b, r, t, a, alpha);
 	}
+	// The stroke being drawn and what the pointer would draw, over everything.
+	if (cl_ink_live_page(doc) == p) cl_ink_draw_live(doc, rt, scale, originX, originY, upp, dark, false);
 	drawOverlays(rt, (float)w, (float)h);
 }
 
@@ -364,7 +367,9 @@ void Canvas::drawOverlays(ID2D1RenderTarget* rt, float w, float h) {
 	// banner is the side's you're working in.
 	const bool working = win->currentCanvas() == this;
 	if (win->simView()) { if (win->paneOf(this) == 0) drawSimBar(rt, w, h); }
-	else if (working) drawBanner(rt, w);
+	else if (working && !win->drawing()) drawBanner(rt, w);
+	// The drawing tools, above Simulation View's bar when it's up.
+	if (working && win->drawing()) drawDrawingBar(rt, w, h);
 	drawWireTag(rt, w, h);   // over the bars, as it's beside the pointer
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(rt, w, h, t);
@@ -524,6 +529,113 @@ void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
 	};
 	row("IN", ins);
 	row("OUT", outs);
+}
+
+// The drawing tools while Draw is on (the Mac's DrawingBar): pen,
+// highlighter, eraser; the tool's colours and its three widths; Clear;
+// Show or Hide; Done. A capsule over the bottom of the canvas.
+void Canvas::drawDrawingBar(ID2D1RenderTarget* rt, float w, float h) {
+	const bool dark = prefs().dark || win->simView();
+	const Chrome c{ dark };
+	const D2D1_COLOR_F ink = c.barInk(), accent = d2dColor(accentColor(dark));
+	const D2D1_COLOR_F dim = withAlpha(ink, 0.55f);
+	const std::string blocked = win->inkBlockedReason();
+	const bool readOnly = win->pageInkReadOnly();
+	const int tool = ink::tool();
+	const bool hl = ink::drawsWithHighlighter();
+	const std::vector<std::string>& colors = ink::colors();
+	const float btnW = 28, btnH = 26, colorW = 26, widthW = 30, gap = 9;
+	const char* eraserText = "Erases whole marks";
+	const float doneW = textWidth("Done", 12, true) + 16;
+	float rowW = 3 * btnW + gap;
+	if (tool == ink::Eraser) rowW += textWidth(eraserText, 11) + 12;
+	else rowW += colorW * colors.size() + gap + textWidth("Width", 11, true) + 6 + 3 * widthW;
+	rowW += gap + 2 * btnW + doneW;
+	const float padX = 10, rowH = 38, noteH = blocked.empty() ? 0.0f : 18.0f;
+	const float barW = std::max(rowW, blocked.empty() ? 0.0f : textWidth(blocked, 11) + 8) + 2 * padX;
+	if (barW > w - 16) return;
+	const float barH = rowH + noteH;
+	const float lift = win->simView() && win->paneOf(this) == 0 ? 14 + 52 + 10 : 14;
+	const float x0 = std::floor((w - barW) / 2), y0 = h - lift - barH;
+	const D2D1_RECT_F pill = D2D1::RectF(x0, y0, x0 + barW, y0 + barH);
+	const float radius = blocked.empty() ? barH / 2 : 16;
+	fillRound(rt, D2D1::RectF(pill.left, pill.top + 2, pill.right, pill.bottom + 3), radius, D2D1::ColorF(0, 0, 0, dark ? 0.35f : 0.12f));
+	fillRound(rt, pill, radius, dark ? rgb255(40, 43, 50, 0.97f) : D2D1::ColorF(1, 1, 1, 0.97f));
+	strokeRound(rt, pill, radius, withAlpha(ink, dark ? 0.16f : 0.12f));
+	if (!blocked.empty()) drawText(rt, blocked, D2D1::RectF(pill.left + padX, y0 + 6, pill.right - padX, y0 + 6 + 14), 11, dim, TextAlign::Center);
+	const float cy = y0 + noteH + rowH / 2;
+	float x = x0 + padX + (barW - 2 * padX - rowW) / 2;
+	auto divider = [&] { fillRect(rt, D2D1::RectF(x + 4, cy - 9, x + 5, cy + 9), withAlpha(ink, 0.18f)); x += gap; };
+	auto hot = [&]() { return hotHit == (int)hits.size(); };
+	// A tool: on in the accent.
+	const wchar_t toolGlyph[3] = { 0xE76D, 0xE7E6, 0xE75C };   // InkingTool, Highlight, EraseTool
+	for (int t = 0; t < 3; t++) {
+		const D2D1_RECT_F r = D2D1::RectF(x, cy - btnH / 2, x + btnW, cy + btnH / 2);
+		const bool on = tool == t;
+		const bool off = readOnly || (t != ink::Eraser && !blocked.empty());
+		if (on) fillRound(rt, r, 6, withAlpha(accent, 0.16f));
+		else if (!off && hot()) fillRound(rt, r, 6, withAlpha(ink, 0.08f));
+		drawIcon(rt, toolGlyph[t], r, 14, off ? withAlpha(ink, 0.3f) : on ? accent : withAlpha(ink, 0.8f));
+		if (!off) hits.push_back({ r, CMD_INK_PEN + t });
+		x += btnW;
+	}
+	divider();
+	if (tool == ink::Eraser) {
+		drawText(rt, eraserText, D2D1::RectF(x + 6, cy - 9, x + 6 + textWidth(eraserText, 11) + 2, cy + 9), 11, dim);
+		x += textWidth(eraserText, 11) + 12;
+	} else {
+		const std::string current = ink::color();
+		for (size_t i = 0; i < colors.size(); i++) {
+			const D2D1_POINT_2F m = D2D1::Point2F(x + colorW / 2, cy);
+			const bool on = colors[i] == current;
+			if (on) {
+				ID2D1SolidColorBrush* b = nullptr;
+				if (SUCCEEDED(rt->CreateSolidColorBrush(accent, &b))) { rt->DrawEllipse(D2D1::Ellipse(m, 11, 11), b, 2); b->Release(); }
+			} else if (hot()) {
+				fillCircle(rt, m, 12, withAlpha(ink, 0.08f));
+			}
+			fillCircle(rt, m, 8, ink::swatch(colors[i], hl, dark));
+			ID2D1SolidColorBrush* edge = nullptr;
+			if (SUCCEEDED(rt->CreateSolidColorBrush(withAlpha(ink, 0.25f), &edge))) { rt->DrawEllipse(D2D1::Ellipse(m, 8, 8), edge, 0.5f); edge->Release(); }
+			hits.push_back({ D2D1::RectF(x, cy - 13, x + colorW, cy + 13), CMD_INK_COLOR + (int)i });
+			x += colorW;
+		}
+		divider();
+		const float lw = textWidth("Width", 11, true);
+		drawText(rt, "Width", D2D1::RectF(x + 2, cy - 9, x + 2 + lw + 2, cy + 9), 11, dim, TextAlign::Leading, true);
+		x += lw + 6;
+		const D2D1_COLOR_F lineColor = ink::swatch(current, hl, dark);
+		const float thick[3] = { 2, 4, 7 };
+		const int at = ink::widthIndex();
+		for (int i = 0; i < 3; i++) {
+			const D2D1_RECT_F r = D2D1::RectF(x, cy - btnH / 2, x + widthW, cy + btnH / 2);
+			const bool on = at == i;
+			if (on) {
+				fillRound(rt, r, 6, withAlpha(accent, 0.16f));
+				strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 6, withAlpha(accent, 0.7f));
+			} else if (hot()) {
+				fillRound(rt, r, 6, withAlpha(ink, 0.08f));
+			}
+			const float mx = (r.left + r.right) / 2;
+			fillRound(rt, D2D1::RectF(mx - 9, cy - thick[i] / 2, mx + 9, cy + thick[i] / 2), thick[i] / 2, withAlpha(lineColor, on ? 1.0f : 0.6f));
+			hits.push_back({ r, CMD_INK_WIDTH + i });
+			x += widthW;
+		}
+	}
+	divider();
+	auto iconButton = [&](wchar_t glyph, int command, bool enabled) {
+		const D2D1_RECT_F r = D2D1::RectF(x, cy - btnH / 2, x + btnW, cy + btnH / 2);
+		if (enabled && hot()) fillRound(rt, r, 6, withAlpha(ink, 0.08f));
+		drawIcon(rt, glyph, r, 13, withAlpha(ink, enabled ? 0.8f : 0.3f));
+		if (enabled) hits.push_back({ r, command });
+		x += btnW;
+	};
+	iconButton(0xE74D, CMD_CLEAR_DRAWING, win->pageHasInk() && !readOnly);   // Delete
+	iconButton(win->drawingShown() ? 0xE890 : 0xED1A, CMD_SHOW_DRAWING, true);   // View, Hide
+	const D2D1_RECT_F done = D2D1::RectF(x, cy - btnH / 2, x + doneW, cy + btnH / 2);
+	if (hot()) fillRound(rt, done, 6, withAlpha(ink, 0.08f));
+	drawText(rt, "Done", done, 12, ink, TextAlign::Center, true);
+	hits.push_back({ done, CMD_DRAW });
 }
 
 // Tidy Up's preview and Lock: a bar over the top of the canvas with what's
@@ -816,6 +928,7 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_MOUSELEAVE:
 		pointerInside = false;
 		hideWireTag();
+		if (drag == Drag::None && win->drawing()) { cl_ink_hover_clear(win->document()); InvalidateRect(hwnd, nullptr, FALSE); }
 		if (drag == Drag::None && cl_edit_hover_clear(win->document())) redraw();
 		return 0;
 	case WM_TIMER:
@@ -863,6 +976,11 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;   // no beep for letters the canvas has no use for
 	case WM_GETDLGCODE:
 		return DLGC_WANTALLKEYS;
+	case WM_POINTERDOWN:
+	case WM_POINTERUPDATE:
+	case WM_POINTERUP:
+		if (onPointer(msg, wp, lp)) return 0;
+		break;
 	}
 	return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -878,8 +996,14 @@ void Canvas::cancelDrag() {
 		cl_edit_release_ex(win->document(), wx, wy, false);   // a gesture cut short: no clock steps
 		win->edited();
 	}
+	if (was == Drag::Ink) {
+		// What was drawn so far is kept (one step), as a release would.
+		if (inkErasing) { if (cl_ink_erase_end(win->document()) > 0) win->inkEdited(); }
+		else if (cl_ink_end(win->document()) > 0) win->inkEdited();
+		inkErasing = false;
+	}
 	if (GetCapture() == hwnd) ReleaseCapture();
-	setCursor(nullptr);
+	setCursor(win->drawing() ? IDC_CROSS : nullptr);
 	redraw();
 }
 
@@ -904,6 +1028,7 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 		return;
 	}
 	if (button == 3) {
+		if (win->drawing()) { POINT screen; GetCursorPos(&screen); inkMenu(screen); return; }
 		if (win->simView()) return;
 		if (win->locked()) { win->lockNudge(); return; }
 		const int target = cl_edit_context(doc, p, wx, wy, upp);
@@ -920,6 +1045,8 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 	}
 	if (button != 1) return;
 	if (overlayPress(vx, vy)) return;
+	// Draw mode: the pointer draws (Space or Ctrl held moves around, as ever).
+	if (win->drawing() && !spaceDown && !(keys & MK_CONTROL)) { inkPress(vx, vy); return; }
 
 	// Windows sends the second press of a double-click as a double-click
 	// only; GTK and AppKit send it as a press too. Take it as a press first.
@@ -990,8 +1117,12 @@ void Canvas::onMotion(double vx, double vy) {
 		int h = -1;
 		for (int i = 0; i < (int)hits.size(); i++) if (inRect(hits[i].rect, (float)vx, (float)vy)) h = i;
 		if (h != hotHit) { hotHit = h; InvalidateRect(hwnd, nullptr, FALSE); }
-		if (h >= 0 || inRect(sliderTrack, (float)vx, (float)vy)) { setCursor(IDC_HAND); return; }
-		if (cursorNow == IDC_HAND && !spaceDown) setCursor(nullptr);
+		if (h >= 0 || inRect(sliderTrack, (float)vx, (float)vy)) {
+			if (win->drawing()) { cl_ink_hover_clear(doc); InvalidateRect(hwnd, nullptr, FALSE); }
+			setCursor(IDC_HAND);
+			return;
+		}
+		if (cursorNow == IDC_HAND && !spaceDown) setCursor(win->drawing() ? IDC_CROSS : nullptr);
 	}
 	switch (drag) {
 	case Drag::Slider:
@@ -1000,6 +1131,9 @@ void Canvas::onMotion(double vx, double vy) {
 	case Drag::Pan:
 		pan(dx, dy);
 		paceFrame();
+		break;
+	case Drag::Ink:
+		inkMotion(vx, vy);
 		break;
 	case Drag::Edit: {
 		const double t0 = draglog::on() ? nowSeconds() : 0;
@@ -1011,6 +1145,7 @@ void Canvas::onMotion(double vx, double vy) {
 		break;
 	}
 	case Drag::None: {
+		if (win->drawing()) { if (!spaceDown) inkHover(vx, vy); break; }
 		if (win->hasPendingGate() && win->placePendingGate(wx, wy)) { redraw(); break; }
 		// Gates on the pointer float on their own side: the other one only
 		// watches them go by.
@@ -1046,6 +1181,9 @@ void Canvas::onRelease(int button, double vx, double vy) {
 		win->edited();
 		win->noteLockedHeld();   // a drag that left locked parts behind says why
 		if (stepped) win->advancedByHand();
+	} else if (drag == Drag::Ink && button == 1) {
+		inkRelease(vx, vy);
+		return;
 	} else if (drag == Drag::Slider && button == 1) {
 		drag = Drag::None;
 		if (GetCapture() == hwnd) ReleaseCapture();
@@ -1053,7 +1191,7 @@ void Canvas::onRelease(int button, double vx, double vy) {
 		drag = Drag::None;
 		if (GetCapture() == hwnd) ReleaseCapture();
 	}
-	setCursor(spaceDown ? IDC_HAND : nullptr);
+	setCursor(spaceDown ? IDC_HAND : win->drawing() ? IDC_CROSS : nullptr);
 	redraw();
 }
 
@@ -1087,6 +1225,203 @@ void Canvas::onWheel(int delta, bool horizontal, WPARAM keys, POINT screen) {
 	}
 }
 
+// ---- Drawing on the circuit (Ink.h) -----------------------------------------
+
+void Canvas::drawingChanged() {
+	CLDocument* doc = win->document();
+	if (!win->drawing()) {
+		if (drag == Drag::Ink) {
+			cl_ink_cancel(doc);
+			if (inkErasing) cl_ink_erase_end(doc);
+			inkErasing = false;
+			drag = Drag::None;
+			if (GetCapture() == hwnd) ReleaseCapture();
+		}
+		tabletEraser = false;
+		setCursor(nullptr);
+	} else {
+		if (drag == Drag::Edit) cancelDrag();
+		hideWireTag();
+		if (cl_edit_hover_clear(doc)) redraw();
+		setCursor(IDC_CROSS);
+		inkToolChanged();
+	}
+	InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void Canvas::inkToolChanged() {
+	if (!win->drawing() || drag != Drag::None || !pointerInside) return;
+	POINT p;
+	GetCursorPos(&p);
+	double vx, vy;
+	screenToView(p, vx, vy);
+	inkHover(vx, vy);
+}
+
+// The eraser tool, or a pen's eraser end.
+bool Canvas::erases() const { return ink::tool() == ink::Eraser || tabletEraser; }
+
+void Canvas::inkSample(double vx, double vy) {
+	double wx, wy;
+	worldPoint(vx, vy, wx, wy);
+	CLInkPoint pt = { wx, wy, penPressure };
+	// Cut at the cap: what's drawn so far is kept.
+	if (cl_ink_add(win->document(), &pt, 1) == CL_INK_FULL) win->note(ink::fullNote());
+}
+
+bool Canvas::inkPress(double vx, double vy) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	if (doc == nullptr || p < 0) return false;
+	SetFocus(hwnd);
+	hideWireTag();
+	zooming = false;
+	lastX = vx;
+	lastY = vy;
+	cl_ink_hover_clear(doc);
+	double wx, wy;
+	worldPoint(vx, vy, wx, wy);
+	if (erases()) {
+		if (cl_ink_page_read_only(doc, p)) { win->note(ink::readOnlyNote()); return true; }
+		cl_ink_erase_begin(doc, p);
+		inkErasing = true;
+		cl_ink_erase_to(doc, wx, wy, eraserRadius());
+	} else {
+		const int r = cl_ink_begin(doc, p, ink::drawsWithHighlighter() ? CL_INK_HIGHLIGHTER : CL_INK_PEN, ink::color().c_str(), ink::width(), upp);
+		if (r != CL_INK_OK) {
+			win->note(r == CL_INK_FULL ? ink::fullNote() : ink::readOnlyNote());
+			MessageBeep(MB_OK);
+			return true;
+		}
+		inkErasing = false;
+		inkSample(vx, vy);
+	}
+	drag = Drag::Ink;
+	noteFrameRate();
+	SetCapture(hwnd);
+	InvalidateRect(hwnd, nullptr, FALSE);
+	return true;
+}
+
+void Canvas::inkMotion(double vx, double vy) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	if (doc == nullptr || p < 0) return;
+	if (inkErasing) {
+		double wx, wy;
+		worldPoint(vx, vy, wx, wy);
+		const int before = cl_ink_stroke_count(doc, p);
+		cl_ink_erase_to(doc, wx, wy, eraserRadius());
+		cl_ink_hover(doc, p, wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+		if (cl_ink_stroke_count(doc, p) != before) win->redrawMiniMap();
+	} else {
+		inkSample(vx, vy);
+	}
+	redrawWhileMoving();
+}
+
+void Canvas::inkRelease(double vx, double vy) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	drag = Drag::None;
+	if (GetCapture() == hwnd) ReleaseCapture();
+	if (doc == nullptr) return;
+	if (inkErasing) {
+		inkErasing = false;
+		if (cl_ink_erase_end(doc) > 0) win->inkEdited();
+	} else {
+		inkSample(vx, vy);
+		if (cl_ink_end(doc) > 0) win->inkEdited();
+		if (p >= 0 && cl_ink_can_draw(doc, p) == CL_INK_FULL) win->note(ink::fullNote());
+	}
+	inkHover(vx, vy);
+	setCursor(IDC_CROSS);
+	redraw();
+}
+
+// What the pointer would draw: a dot of the stroke, or the eraser's ring.
+void Canvas::inkHover(double vx, double vy) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	if (doc == nullptr || p < 0) return;
+	double wx, wy;
+	worldPoint(vx, vy, wx, wy);
+	if (erases()) cl_ink_hover(doc, p, wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+	else cl_ink_hover(doc, p, wx, wy, ink::drawsWithHighlighter() ? CL_INK_HIGHLIGHTER : CL_INK_PEN, ink::color().c_str(), ink::width());
+	if (cursorNow != IDC_CROSS && !spaceDown) setCursor(IDC_CROSS);
+	InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// A right-click while drawing: what the Mac's offers.
+void Canvas::inkMenu(POINT screen) {
+	HMENU m = CreatePopupMenu();
+	const bool canClear = win->pageHasInk() && !win->pageInkReadOnly();
+	AppendMenuW(m, MF_STRING | (canClear ? 0 : MF_GRAYED), CMD_CLEAR_DRAWING, L"&Clear Drawing on This Page");
+	AppendMenuW(m, MF_STRING, CMD_SHOW_DRAWING, L"&Hide Drawing");
+	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(m, MF_STRING, CMD_DRAW, L"&Done Drawing");
+	const int cmd = (int)TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON, screen.x, screen.y, 0, hwnd, nullptr);
+	DestroyMenu(m);
+	if (cmd) win->run(cmd);
+}
+
+// P, H and E pick a tool, 1, 2 and 3 a width; Escape ends a stroke, then Draw mode.
+bool Canvas::inkKey(UINT vk) {
+	CLDocument* doc = win->document();
+	if (vk == VK_ESCAPE) {
+		if (drag == Drag::Ink) {
+			if (inkErasing) { if (cl_ink_erase_end(doc) > 0) win->inkEdited(); }
+			else cl_ink_cancel(doc);
+			inkErasing = false;
+			drag = Drag::None;
+			if (GetCapture() == hwnd) ReleaseCapture();
+			redraw();
+		} else {
+			win->setDrawing(false);
+		}
+		return true;
+	}
+	if (!bareKey() || down(VK_SHIFT)) return false;
+	if (vk >= '1' && vk <= '3') { win->setInkWidth((int)(vk - '1')); return true; }
+	if (vk == 'P') { win->setInkTool(ink::Pen); return true; }
+	if (vk == 'H') { win->setInkTool(ink::Highlighter); return true; }
+	if (vk == 'E') { win->setInkTool(ink::Eraser); return true; }
+	return false;
+}
+
+// A pen (WM_POINTER): its pressure thins the line a little, and its eraser
+// end erases. Only while drawing, and only a pen: otherwise Windows makes
+// the usual mouse messages from it.
+bool Canvas::onPointer(UINT msg, WPARAM wp, LPARAM lp) {
+	(void)lp;
+	if (!win->drawing()) return false;
+	const UINT32 id = GET_POINTERID_WPARAM(wp);
+	POINTER_INPUT_TYPE type = PT_POINTER;
+	if (!GetPointerType(id, &type) || type != PT_PEN) return false;
+	POINTER_PEN_INFO info = {};
+	if (!GetPointerPenInfo(id, &info)) return false;
+	const bool wasEraser = tabletEraser;
+	tabletEraser = (info.penFlags & (PEN_FLAG_ERASER | PEN_FLAG_INVERTED)) != 0;
+	penPressure = (info.penMask & PEN_MASK_PRESSURE) ? std::min(1.0, info.pressure / 1024.0) : -1;
+	double vx, vy;
+	screenToView(info.pointerInfo.ptPixelLocation, vx, vy);
+	if (msg == WM_POINTERDOWN) {
+		if (overlayPress(vx, vy)) return true;
+		inkPress(vx, vy);
+	} else if (msg == WM_POINTERUPDATE) {
+		lastX = vx;
+		lastY = vy;
+		if (drag == Drag::Ink) inkMotion(vx, vy);
+		else if (drag == Drag::Slider) setSpeedAt(vx);
+		else if (drag == Drag::None) { if (wasEraser != tabletEraser || !(info.pointerInfo.pointerFlags & POINTER_FLAG_INCONTACT)) inkHover(vx, vy); }
+	} else {
+		if (drag == Drag::Ink) inkRelease(vx, vy);
+		else if (drag == Drag::Slider) { drag = Drag::None; if (GetCapture() == hwnd) ReleaseCapture(); }
+		penPressure = -1;
+	}
+	return true;
+}
+
 // ---- Keys ----------------------------------------------------------------------
 
 bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
@@ -1103,6 +1438,8 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 	// S, Shift+S, T, C, V, X, D, unless they've been changed), if any.
 	const shortcuts::Action* act = shortcuts::match(shortcuts::pressed(vk), true);
 	auto is = [&](const char* id) { return act && std::strcmp(act->id, id) == 0; };
+	// Draw mode's own keys first: P, H, E, 1, 2, 3 and Escape.
+	if (win->drawing() && inkKey(vk)) return true;
 
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {

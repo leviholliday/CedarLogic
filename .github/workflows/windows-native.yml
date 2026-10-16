@@ -177,6 +177,17 @@ jobs:
           timeout 90 "$A" --dark --screenshot "$PWD/renders/lock-in-place-dark.png" format/tests/fixtures/web-online2.cdl || true
           timeout 90 "$A" --light --run nextTab,stepClock --screenshot "$PWD/renders/step-clock.png" format/tests/fixtures/web-online2.cdl || true
           timeout 90 "$A" --dark --sim-view --run nextTab --screenshot "$PWD/renders/step-clock-sim.png" format/tests/fixtures/web-online2.cdl || true
+          # Drawing on the circuit: a circuit with a drawing (shown), in Draw mode
+          # with the drawing bar (the pen; the highlighter in dark; the eraser
+          # above Simulation View's bar), one whose drawing is hidden (a dot on
+          # Draw), and Export as Image offering to include it.
+          D=format/tests/fixtures/drawing/cdl
+          timeout 90 "$A" --light --screenshot "$PWD/renders/drawing.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --light --run draw,inkPen --screenshot "$PWD/renders/drawing-bar.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --dark --run draw,inkHighlighter --screenshot "$PWD/renders/drawing-bar-highlighter-dark.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --dark --sim-view --run draw,inkEraser --screenshot "$PWD/renders/drawing-bar-sim.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --light --screenshot "$PWD/renders/drawing-hidden.png" $D/hidden-drawing.cdl || true
+          timeout 90 "$A" --dialog export --screenshot "$PWD/renders/export-image-drawing.png" $D/drawing-and-notes.cdl || true
           # Split view (lab6: a circuit on each of its first tabs), focus mode
           # (the tabs as the title row), both, and a tab being renamed in place.
           timeout 90 "$A" --split --screenshot "$PWD/renders/window-split.png" format/tests/fixtures/lab6.cdl || true
@@ -360,8 +371,9 @@ jobs:
 
       # Clicks on the toolbar's buttons, the tabs' +, and the window's drawn
       # Minimize (on the toolbar, and on the tabs in focus mode) and Close,
-      # as Windows sends them (press, then release), and a gate dragged from
-      # the side panel onto the canvas, each checked for its effect: a
+      # as Windows sends them (press, then release), a stroke drawn on the
+      # canvas in Draw mode (saved and read back, erased, the erase undone),
+      # and a gate dragged from the side panel onto the canvas, each checked for its effect: a
       # picture can't show that a button does nothing. Once in each toolbar
       # style (Minimal leaves most tools to its ••• menu, so they're skipped).
       - name: Click test

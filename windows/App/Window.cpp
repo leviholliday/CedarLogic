@@ -23,6 +23,7 @@
 #include "Integration.h"
 #include "ShareLink.h"
 #include "SyncApp.h"
+#include "Ink.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -320,6 +321,20 @@ void CircuitWindow::buildMenus() {
 	item(view, CMD_FOCUS_MODE, "&Focus Mode\tCtrl+.");
 	item(view, CMD_PALETTE, "Gate &Palette");
 	item(view, CMD_STATUS_BAR, "&Status Bar");
+	// Drawing on the circuit (Ink.h), as the Mac's View menu has it.
+	separator(view);
+	item(view, CMD_DRAW, "Dra&w on the Circuit\tCtrl+Alt+P");
+	HMENU drawingMenu = submenu(view, "Drawin&g");
+	item(drawingMenu, CMD_INK_PEN, "&Pen\tP");
+	item(drawingMenu, CMD_INK_HIGHLIGHTER, "&Highlighter\tH");
+	item(drawingMenu, CMD_INK_ERASER, "&Eraser\tE");
+	separator(drawingMenu);
+	item(drawingMenu, CMD_INK_WIDTH, "&Thin Line\t1");
+	item(drawingMenu, CMD_INK_WIDTH + 1, "&Medium Line\t2");
+	item(drawingMenu, CMD_INK_WIDTH + 2, "Thic&k Line\t3");
+	separator(drawingMenu);
+	item(drawingMenu, CMD_CLEAR_DRAWING, "&Clear Drawing on This Page");
+	item(view, CMD_SHOW_DRAWING, "&Hide Drawing\tCtrl+Shift+H");
 
 	HMENU sim = submenu(menuBar, "&Simulate");
 	item(sim, CMD_RUNNING, "&Running");
@@ -1236,6 +1251,8 @@ bool CircuitWindow::commandEnabled(int command) const {
 	case CMD_DISCONNECT_ALL_PAGES: return cl_document_page_count(doc) > 1 && !cl_pages_none_linked(doc);
 	case CMD_GATE_SETTINGS: return cl_edit_single_gate(doc, currentPage()) >= 0;
 	case CMD_REOPEN_TAB: return cl_edit_undo_is_close_page(doc);
+	case CMD_CLEAR_DRAWING: return pageHasInk() && !pageInkReadOnly();
+	case CMD_INK_WIDTH: case CMD_INK_WIDTH + 1: case CMD_INK_WIDTH_LAST: return ink::tool() != ink::Eraser;
 	case CMD_SWITCH_PANE: case CMD_CLOSE_SPLIT: return splitOpen();
 	case CMD_PASTE: case CMD_ADD_GATE: case CMD_STRAIGHTEN: case CMD_TIDY: case CMD_TIDY_FLOW: case CMD_CONNECT_NEARBY:
 		return edit;
@@ -1253,6 +1270,8 @@ int CircuitWindow::commandChecked(int command) const {
 	case CMD_FOCUS_MODE: return focusOn;
 	case CMD_SPLIT_VIEW: return splitOpen();
 	case CMD_STATUS_BAR: return prefs().showStatus;
+	case CMD_INK_PEN: case CMD_INK_HIGHLIGHTER: case CMD_INK_ERASER: return drawOn && ink::tool() == command - CMD_INK_PEN;
+	case CMD_INK_WIDTH: case CMD_INK_WIDTH + 1: case CMD_INK_WIDTH_LAST: return ink::tool() != ink::Eraser && ink::widthIndex() == command - CMD_INK_WIDTH;
 	default: return -1;
 	}
 }
@@ -1270,6 +1289,12 @@ void CircuitWindow::updateMenu(HMENU menu) {
 		if (id == CMD_LOCK_IN_PLACE)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
 			            W((lockMenuUnlocks() ? unlockPartsTitle() : std::string("&Lock in Place")) + shortcuts::menuKeys(CMD_LOCK_IN_PLACE)).c_str());
+		if (id == CMD_DRAW)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(drawOn ? "Done Dra&wing" : "Dra&w on the Circuit") + shortcuts::menuKeys(CMD_DRAW)).c_str());
+		if (id == CMD_SHOW_DRAWING)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(drawingShown() ? "&Hide Drawing" : "S&how Drawing") + shortcuts::menuKeys(CMD_SHOW_DRAWING)).c_str());
 		EnableMenuItem(menu, i, MF_BYPOSITION | (commandEnabled((int)id) ? MF_ENABLED : MF_GRAYED));
 		const int check = commandChecked((int)id);
 		if (check >= 0) CheckMenuItem(menu, i, MF_BYPOSITION | (check ? MF_CHECKED : MF_UNCHECKED));
@@ -1930,6 +1955,12 @@ void CircuitWindow::run(int command) {
 	case CMD_STEP_CLOCK: stepClock(); break;
 	case CMD_SIM_VIEW: toggleSimView(); break;
 	case CMD_LOCK: toggleLock(); break;
+	case CMD_DRAW: toggleDrawing(); break;
+	case CMD_SHOW_DRAWING: setDrawingShown(!drawingShown()); break;
+	case CMD_CLEAR_DRAWING: clearDrawing(); break;
+	case CMD_INK_PEN: setInkTool(ink::Pen); break;
+	case CMD_INK_HIGHLIGHTER: setInkTool(ink::Highlighter); break;
+	case CMD_INK_ERASER: setInkTool(ink::Eraser); break;
 	case CMD_TRUTH_TABLE: makeTruthTable(); break;
 	case CMD_CHECK_CIRCUIT: checkCircuit(); break;
 	case CMD_SCOPE: toggleScope(); break;
@@ -1954,7 +1985,10 @@ void CircuitWindow::run(int command) {
 	case CMD_FEEDBACK: feedback::show(this); break;
 	case CMD_START_MENU: if (integration::offered()) integration::menuCommand(this); break;
 	case CMD_ABOUT: about::show(this); break;
-	default: break;
+	default:
+		if (command >= CMD_INK_WIDTH && command <= CMD_INK_WIDTH_LAST) setInkWidth(command - CMD_INK_WIDTH);
+		else if (command >= CMD_INK_COLOR && command <= CMD_INK_COLOR_LAST) setInkColor(command - CMD_INK_COLOR);
+		break;
 	}
 }
 
@@ -2307,6 +2341,9 @@ void CircuitWindow::refreshAfterHistory() {
 			appearStart = nowSeconds();
 		}
 	}
+	// A drawing step: its page in front.
+	const int inkPage = cl_ink_history_page(doc);
+	if (inkPage >= 0 && inkPage < (int)canvases.size() && inkPage != currentPage()) showPage(inkPage);
 	edited();
 }
 
@@ -2645,6 +2682,91 @@ void CircuitWindow::toggleLock() {
 	updateActions();
 	updateBanner();
 	if (Canvas* c = currentCanvas()) c->focus();
+}
+
+// ---- Drawing on the circuit (Ink.h) ------------------------------------------
+
+std::string CircuitWindow::inkBlockedReason() const {
+	switch (cl_ink_can_draw(doc, currentPage())) {
+	case CL_INK_READ_ONLY: return ink::readOnlyNote();
+	case CL_INK_FULL: return ink::fullNote();
+	default: return std::string();
+	}
+}
+
+void CircuitWindow::markEdited() {
+	forceDirty = true;
+	edited();
+}
+
+void CircuitWindow::inkEdited() {
+	edited();
+}
+
+void CircuitWindow::setDrawing(bool on) {
+	if (on == drawOn) return;
+	drawOn = on;
+	for (Canvas* c : canvases) c->drawingChanged();
+	if (on) {
+		if (isFloating()) cancelFloating();
+		pendingGate.clear();
+		cl_edit_cancel(doc);
+		if (cl_edit_tidy_active(doc)) { cl_edit_tidy_end(doc, true); edited(); }
+		if (!cl_ink_shown(doc)) {
+			cl_ink_set_shown(doc, true);
+			markEdited();
+			note("Drawing shown.");
+		} else {
+			note("Draw: P pen, H highlighter, E eraser, 1 2 3 width. Escape when you're done.");
+		}
+		const std::string why = inkBlockedReason();
+		if (!why.empty()) note(why);
+	} else {
+		cl_ink_cancel(doc);
+		cl_ink_hover_clear(doc);
+		note("");
+	}
+	updateActions();
+	for (Canvas* c : canvases) c->redraw();
+	if (Canvas* c = currentCanvas()) c->focus();
+}
+
+void CircuitWindow::setDrawingShown(bool shown) {
+	if (cl_ink_shown(doc) == shown) return;
+	if (!shown && drawOn) setDrawing(false);
+	cl_ink_set_shown(doc, shown);
+	markEdited();
+	for (Canvas* c : canvases) c->redraw();
+	note(shown ? "Drawing shown." : "Drawing hidden.");
+}
+
+void CircuitWindow::clearDrawing() {
+	if (pageInkReadOnly()) { note(ink::readOnlyNote()); return; }
+	const int n = cl_ink_clear(doc, currentPage());
+	if (n <= 0) { note("Nothing drawn on this page."); return; }
+	inkEdited();
+	note("Cleared the drawing on this page. Undo brings it back.");
+}
+
+void CircuitWindow::setInkTool(int tool) {
+	ink::setTool(tool);
+	note(ink::toolName(tool));
+	if (!drawOn) setDrawing(true);
+	for (Canvas* c : canvases) c->inkToolChanged();
+}
+
+void CircuitWindow::setInkWidth(int index) {
+	if (ink::tool() == ink::Eraser) return;
+	ink::setWidthIndex(index);
+	note(std::string(ink::widthName(index)) + " line");
+	for (Canvas* c : canvases) c->inkToolChanged();
+}
+
+void CircuitWindow::setInkColor(int index) {
+	if (ink::tool() == ink::Eraser || index < 0 || index >= (int)ink::colors().size()) return;
+	ink::setColor(ink::colors()[index]);
+	note(ink::colorName(ink::colors()[index], ink::drawsWithHighlighter()));
+	for (Canvas* c : canvases) c->inkToolChanged();
 }
 
 void CircuitWindow::makeTruthTable() { showTruthTable(this, currentPage()); redraw(); }

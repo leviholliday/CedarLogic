@@ -23,7 +23,7 @@ class CircuitWindow;
 
 // Tool groups that can be hidden, one bit each in prefs().toolbarHidden (the
 // Mac's ToolGroup).
-enum ToolGroup { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTheme, TGTab, TGFeedback, TGCount };
+enum ToolGroup { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTheme, TGTab, TGFeedback, TGDraw, TGCount };
 const char* toolGroupName(int g);
 // The styles (prefs().toolbarStyle), as the Mac numbers them.
 enum ToolbarStyle { TSClassic = 0, TSMinimal = 2, TSSeamless = 3 };

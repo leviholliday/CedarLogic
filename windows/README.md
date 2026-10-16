@@ -31,8 +31,12 @@ it compiles without a Windows machine:
   (renamed in place), dragged down onto the canvas into a split view of two
   sides, each with its strip; focus mode, where the toolbar and the side
   panel slide away and the tabs become the title row; a `Canvas` per page
-  (with the Tidy Up and Lock banner, Simulation View's control bar, and a
-  wire's value when the pointer rests on it, drawn over the circuit); the
+  (with the Tidy Up and Lock banner, Simulation View's control bar, the
+  drawing bar, and a wire's value when the pointer rests on it, drawn over
+  the circuit); drawing on the circuit with a pen, a highlighter and an
+  eraser, from the mouse or a pen's pressure and eraser end (`Ink.h`, the
+  core's `cl_ink_*`; Draw in the toolbar, Ctrl+Alt+P, then P, H, E and 1, 2,
+  3), saved with the circuit; the
   status bar where notes appear (`StatusBar`); the side
   panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
   (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
@@ -155,7 +159,9 @@ Direct2D here. And:
   (`--truth-tab N`, `--formula "..."`, `--check "..."` for what Check compares
   with, `--page N` for the welcome, What's New
   or Settings (0 General ... 5 Sync), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
-  `--timing out.png [--timing-color]` with the oscilloscope); `--note "text"`
+  `--timing out.png [--timing-color]` with the oscilloscope); `--run a,b`
+  runs commands by their Shortcuts id first (`draw`, `stepClock`, and the
+  drawing bar's `inkPen`, `inkHighlighter`, `inkEraser`); `--note "text"`
   puts a note in the status bar, and `--wire-tag` rests the pointer on a wire
   to show its value. `--toolbar-style seamless|classic|minimal` shows the
   toolbar in that style for the run (with the click test too).
@@ -163,9 +169,11 @@ Direct2D here. And:
   while, then its lab report (File > Export Lab Report) written without a
   window; `bw` for black and white (CI runs it and keeps the PDFs).
 - `CedarLogic.exe --click-test` -- clicks the toolbar's buttons (Zoom In, New
-  Tab, Pause and Resume, Simulation View, Lock, the dark mode switch, New),
+  Tab, Pause and Resume, Simulation View, Draw, Lock, the dark mode switch, New),
   the tabs' +, and the window's drawn Minimize (on the toolbar, and on the
-  tabs in focus mode) and Close the way Windows sends a click, drags a gate
+  tabs in focus mode) and Close the way Windows sends a click, draws a
+  stroke in Draw mode (then saves and reads it back, erases it and undoes
+  the erase), drags a gate
   from the side panel onto the canvas (SKIP where the pointer can't be
   moved), checks each did what it should, prints PASS, FAIL or SKIP for each
   (a tool the style leaves to ••• is a SKIP) and exits 1 if any failed (CI

@@ -1,7 +1,8 @@
 // Export as Image, as the Mac app's (ExportImageView.swift, after the wx
 // app's): a preview, the grid if wanted, and a strip under the circuit with
 // your name and whether it works -- what a grader looks for first -- in
-// colour or black and white, at 2x, 4x or 6x. Copied, or saved as a PNG.
+// colour or black and white, at 2x, 4x or 6x, with the drawing on the
+// circuit or without it. Copied, or saved as a PNG.
 
 #include "Chrome.h"
 #include "Dialogs.h"
@@ -21,7 +22,18 @@ struct ExportInfo {
 	bool enabled = false;
 	std::string name, why, fileName;
 	bool works = true;
+	bool ink = false;   // the drawing on the circuit too (in its print colours)
 };
+
+// The page's extent, with the drawing's when it's included.
+bool pageBox(CLDocument* doc, int page, bool ink, double& l, double& b, double& r, double& t) {
+	const bool parts = cl_document_page_bounds(doc, page, &l, &b, &r, &t);
+	double il, ib, ir, it;
+	if (!ink || !cl_ink_bounds(doc, page, &il, &ib, &ir, &it)) return parts;
+	if (!parts) { l = il; b = ib; r = ir; t = it; return true; }
+	l = std::min(l, il); b = std::min(b, ib); r = std::max(r, ir); t = std::max(t, it);
+	return true;
+}
 
 FormField choiceField(const char* label, std::vector<std::string> items, int active) {
 	FormField x;
@@ -61,7 +73,7 @@ std::vector<std::string> stripLines(const ExportInfo& info, float width, float& 
 // The whole image's size in points; false for an empty page.
 bool imageSize(CLDocument* doc, int page, const ExportInfo& info, float& w, float& h) {
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return false;
+	if (!pageBox(doc, page, info.ink, l, b, r, t)) return false;
 	w = std::max((float)(r - l) * kPointsPerUnit + 2 * kMargin, info.enabled ? 420.0f : 0.0f);
 	h = (float)(t - b) * kPointsPerUnit + 2 * kMargin;
 	if (info.enabled) {
@@ -83,7 +95,7 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 	const float circuitH = h - stripH;
 	fillRect(rt, D2D1::RectF(0, 0, w, h), D2D1::ColorF(1, 1, 1));
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return;
+	if (!pageBox(doc, page, info.ink, l, b, r, t)) return;
 	const double midX = (l + r) / 2, midY = (b + t) / 2;
 	rt->PushAxisAlignedClip(D2D1::RectF(0, 0, w, circuitH), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 	if (grid) {
@@ -104,7 +116,7 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 		}
 	}
 	if (!color) {
-		cl_document_draw_fitted(doc, page, rt, w, circuitH, kMargin, scale, CL_STYLE_PRINT);
+		cl_document_draw_fitted_ink(doc, page, rt, w, circuitH, kMargin, scale, CL_STYLE_PRINT, info.ink);
 	} else {
 		const double upp = std::max((r - l) / (w - 2 * kMargin), (t - b) / (circuitH - 2 * kMargin));
 		CLDrawOptions o = {};
@@ -115,6 +127,7 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 		o.thumbnail = false;
 		o.showSelection = false;
 		o.selectionFade = 1;
+		o.ink = info.ink ? CL_INK_ALWAYS_PRINT : CL_INK_NEVER;
 		cl_document_draw_ex(doc, page, rt, scale, midX - w / 2 * upp, midY + circuitH / 2 * upp, upp, &o);
 	}
 	rt->PopAxisAlignedClip();
@@ -155,15 +168,22 @@ IWICBitmap* makeImage(CLDocument* doc, int page, double multiplier, bool color, 
 
 // For the lab report (LabReport.cpp): a page as Export as Image draws it,
 // without the name strip. `scale` is pixels a point of the picture.
-bool reportCircuitSize(CLDocument* doc, int page, float& w, float& h) { return imageSize(doc, page, ExportInfo(), w, h); }
+// The drawing is in it when it's shown.
+ExportInfo reportInfo(CLDocument* doc) {
+	ExportInfo i;
+	i.ink = cl_ink_shown(doc);
+	return i;
+}
+bool reportCircuitSize(CLDocument* doc, int page, float& w, float& h) { return imageSize(doc, page, reportInfo(doc), w, h); }
 void reportCircuitDraw(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, bool color) {
-	drawImage(rt, doc, page, w, h, scale, color, false, ExportInfo());
+	drawImage(rt, doc, page, w, h, scale, color, false, reportInfo(doc));
 }
 
 void showExportImage(CircuitWindow* win, int page) {
 	CLDocument* doc = win->document();
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) { win->note("This page is empty: nothing to export."); return; }
+	const bool hasInk = cl_ink_stroke_count(doc, page) > 0;
+	if (!pageBox(doc, page, hasInk, l, b, r, t)) { win->note("This page is empty: nothing to export."); return; }
 	Prefs& p = prefs();
 	std::string fileName = win->titleText();
 	if (cl_document_page_count(doc) > 1) fileName += " - " + win->pageName(page);
@@ -183,6 +203,12 @@ void showExportImage(CircuitWindow* win, int page) {
 	gridBox.label = "Include grid lines";
 	gridBox.value = p.exportGrid ? "1" : "";
 	const int gridField = f.add(gridBox);
+	// The drawing on the circuit: offered when this page has one.
+	FormField inkBox;
+	inkBox.kind = FormField::Check;
+	inkBox.label = "Include the drawing";
+	inkBox.value = p.exportInk ? "1" : "";
+	const int inkField = hasInk ? f.add(inkBox) : -1;
 	FormField heading;
 	heading.kind = FormField::Note;
 	heading.label = "Name and result";
@@ -214,6 +240,7 @@ void showExportImage(CircuitWindow* win, int page) {
 	auto state = [&](Form& form) {
 		State s;
 		s.grid = form.checked(gridField);
+		s.info.ink = inkField >= 0 && form.checked(inkField);
 		s.info.enabled = form.checked(infoField);
 		s.info.name = form.text(nameField);
 		s.info.works = form.choice(worksField) == 0;
@@ -226,6 +253,7 @@ void showExportImage(CircuitWindow* win, int page) {
 	};
 	auto keep = [&](const State& s) {
 		p.exportGrid = s.grid;
+		if (inkField >= 0) p.exportInk = s.info.ink;
 		p.exportInfo = s.info.enabled;
 		p.studentName = trimmed(s.info.name);
 		p.exportWorks = s.info.works;
@@ -285,6 +313,7 @@ void showExportImage(CircuitWindow* win, int page) {
 	if (result != IDOK) return;
 	State s;
 	s.grid = !f.fields[gridField].value.empty();
+	s.info.ink = inkField >= 0 && !f.fields[inkField].value.empty();
 	s.info.enabled = !f.fields[infoField].value.empty();
 	s.info.name = f.fields[nameField].value;
 	s.info.works = f.fields[worksField].value == "0";

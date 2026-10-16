@@ -169,6 +169,28 @@ public:
 	void setStepMs(int ms);
 	void toggleSimView();
 	void toggleLock();
+	// Drawing on the circuit (Ink.h): Draw mode, the window's (both sides of
+	// a split); Show or Hide Drawing, saved with the circuit but not an undo
+	// step; Clear Drawing on This Page, one.
+	bool drawing() const { return drawOn; }
+	void setDrawing(bool on);
+	void toggleDrawing() { setDrawing(!drawOn); }
+	void setDrawingShown(bool shown);
+	bool drawingShown() const { return cl_ink_shown(doc); }
+	// A drawing that's hidden: the Draw button shows a dot.
+	bool hasHiddenDrawing() const { return cl_ink_any(doc) && !cl_ink_shown(doc); }
+	void clearDrawing();
+	bool pageHasInk() const { return cl_ink_stroke_count(doc, currentPage()) > 0; }
+	bool pageInkReadOnly() const { return cl_ink_page_read_only(doc, currentPage()); }
+	// Why the tools can't draw on this page, or "".
+	std::string inkBlockedReason() const;
+	void setInkTool(int tool);
+	void setInkWidth(int index);
+	void setInkColor(int index);
+	// The drawing changed (a stroke, an erase): an edit, and redrawn.
+	void inkEdited();
+	// Shown or hidden is saved with the circuit, but isn't an undo step.
+	void markEdited();
 	void makeTruthTable();
 	void checkCircuit();   // the truth table at its Check tab
 	void toggleScope();
@@ -352,6 +374,7 @@ private:
 	bool isRunning = true;
 	bool simViewOn = false;
 	bool lockedOn = false;
+	bool drawOn = false;
 	double phase = 0;                 // Simulation View's marching dashes, in points
 	double lastTick = 0, lastStatus = 0, lastTitle = 0, lastScope = 0;   // seconds (nowSeconds)
 	bool statusDirty = true;
