@@ -1687,12 +1687,18 @@ final class CanvasController: ObservableObject {
     }
 
     // Simulation
-    func toggleRunning() { setRunning(!isRunning) }
+    func toggleRunning() { setRunning(!(document?.isRunning ?? isRunning)) }
 
+    /// Run or pause the circuit: both sides of a split show it (the first
+    /// side's clock is the one that runs it). Space on the second side once
+    /// paused the engine with the first side still saying it ran -- or the
+    /// other way round, a running engine that nothing ticked.
     func setRunning(_ running: Bool) {
         document?.isRunning = running
-        isRunning = running
-        lastTick = CACurrentMediaTime()
+        for side in [self, partner].compactMap({ $0 }) where side === self || side.document === document {
+            side.isRunning = running
+            side.lastTick = CACurrentMediaTime()
+        }
     }
 
     /// One step; pauses first, since stepping a running circuit means little.
@@ -1757,7 +1763,7 @@ final class CanvasController: ObservableObject {
             redraw()
             if showScope && now - lastScopeBump > 1.0 / 15 { lastScopeBump = now; scopeChanged() }
         }
-        if result.paused { isRunning = false }
+        if result.paused { setRunning(false) }
     }
 
     deinit { timer?.invalidate() }
