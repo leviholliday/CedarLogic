@@ -129,6 +129,36 @@ self-test with and without (the "Drag self-test and draw timings" step).
 A hosted runner has no GPU, so Direct2D draws in software there: compare the
 two numbers, don't read them as a PC's.
 
+**Measured on CI** (GitHub's windows runner, x64, run 39198665440, a
+797x614-pixel canvas, whole frames):
+
+| Circuit | Gates | Built every frame | Kept geometry |
+| --- | --- | --- | --- |
+| practice.cdl | 24 | 1.62 ms avg, 2.08 p95 | 1.53 ms avg, 1.92 p95 |
+| Lab5.cdl | 53 | 2.98 ms avg, 3.50 p95 | 2.76 ms avg, 3.22 p95 |
+| lab6.cdl | 54 | 2.58 ms avg, 3.03 p95 | 2.45 ms avg, 2.93 p95 |
+| practice.cdl, Simulation View | 24 | 1.98 ms avg | 1.94 ms avg |
+
+So for circuits of this size the scene is a few milliseconds a frame even
+drawn in software, well under a 60 Hz frame: hypothesis 3 isn't what makes
+parts jump. The kept geometry saves 5-8%, and its pictures are pixel for
+pixel the same as before (CI's window pictures compared). It stays, for big
+circuits and slow machines, with its switch.
+
+The drag self-test on the same runner (real input, 1,222 moves):
+
+| Build | Result | Frame gap p95 / worst | Drawn behind the pointer p95 | draw / present ms avg |
+| --- | --- | --- | --- | --- |
+| As built | PASS, SMOOTH | 6.0 / 28.7 ms | 3.6 px | 0.05 / 0.82 |
+| `CEDARLOGIC_DRAG_OLD=1` | PASS, SMOOTH | 6.1 / 31.7 ms | 3.6 px | 0.05 / 0.83 |
+| `CEDARLOGIC_NO_GEOMETRY_CACHE=1` | PASS, SMOOTH | 6.0 / 16.1 ms | 3.6 px | 0.05 / 0.80 |
+
+Position is right (worst error 0.5 units, the half-unit snap) in every
+build, so the coordinate hypothesis (7) is ruled out on a real Windows
+input stack. The runner has no display refreshing at 60 Hz (presents don't
+wait), so the old drawing's vsync stalls (1, 2) can't show there: a PC with
+a monitor is still the test for those.
+
 ### 4. A quick second press is taken as a double-click and ends the drag. Possible on touchpads; logged, not changed.
 
 The canvas class has `CS_DBLCLKS`. When a press arrives as `WM_LBUTTONDBLCLK`
