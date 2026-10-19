@@ -1143,9 +1143,12 @@ final class CanvasController: ObservableObject {
         if i == page {
             closingStart = CACurrentMediaTime()
             redraw()
+            // By id: another tab closed while this one dims away moves it.
+            let id = document.pageID(i)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.closeTime) { [weak self] in
-                self?.closingStart = nil
-                self?.closePageNow(i)
+                guard let self else { return }
+                self.closingStart = nil
+                if let now = self.document?.pageIndex(of: id) { self.closePageNow(now) }
             }
         } else {
             closePageNow(i)
@@ -1155,11 +1158,14 @@ final class CanvasController: ObservableObject {
     private func closePageNow(_ i: Int) {
         guard let document, document.pageCount > 1 else { return }
         selectNone()
+        // A tab closed from its × while another is in front: that one stays.
+        let shown = i == page ? nil : document.pageID(page)
         if cl_document_close_page(document.handle, Int32(i)) {
             lastPageCount = document.pageCount
             document.objectWillChange.send()
             pageRequestAfterClose = true
-            pageRequest = min(Int(cl_document_page_to_show(document.handle)), document.pageCount - 1)
+            pageRequest = shown.flatMap { document.pageIndex(of: $0) }
+                ?? min(Int(cl_document_page_to_show(document.handle)), document.pageCount - 1)
             edited()
         }
     }
