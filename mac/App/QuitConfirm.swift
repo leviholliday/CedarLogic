@@ -11,6 +11,11 @@ enum QuitConfirm {
     private static var dim: NSWindow?
 
     static func ask() {
+        // Not over a question that's waiting for its answer ("Close Tab?",
+        // an error): ⌘Q still reaches here then, and the dimmed screen and
+        // card covered the question while it kept every click -- a frozen
+        // screen only Y or N got out of. Answer it first, as in any Mac app.
+        guard NSApp.modalWindow == nil else { NSSound.beep(); return }
         guard Prefs.shared.confirmQuit else { terminate(); return }
         if let panel { panel.makeKeyAndOrderFront(nil); return }
         // Roomy enough for the drop and the shadow; the card moves inside it,
