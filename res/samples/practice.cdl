@@ -228,6 +228,7 @@
         (connect "24" "N_in0"))))
   (page 1
     (name "Two Sets")
+    (linkgroup 1)
     (gate "AA_LABEL"
       (uuid "25")
       (at -24 20)
@@ -670,6 +671,7 @@
         (connect "71" "N_in0"))))
   (page 2
     (name "Full Adder")
+    (linkgroup 2)
     (gate "AA_LABEL"
       (uuid "72")
       (at -22 20)
