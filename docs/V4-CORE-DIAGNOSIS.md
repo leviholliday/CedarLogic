@@ -37,7 +37,11 @@ under 0.001 and what clicks and the memory editor set are left out, since those
 aren't undo steps). Several start files may be given (seed s starts from file
 s % count); `CL_FUZZ_CHAIN=1` starts each seed from the previous seed's save;
 `CL_FUZZ_SAYSEED=1` prints each seed as it starts. `CL_FUZZ_DUP=1` now also
-checks that each gate and wire is on one page only.
+checks that each gate and wire is on one page only. `CL_FUZZ_UNDOFIND=1`: when
+the undo-all check would fail, undo k and redo k for k = 1, 2, ... and name the
+steps at the first k that changes the circuit (the deepest is the one whose redo
+is not exact). `CL_FUZZ_WATCH=<wire>` (no gate or pin) prints just that wire, also
+inside the C-while-moving and floating-paste operations.
 
 ## Found and fixed, round 2 (2026-10-15)
 
@@ -118,6 +122,38 @@ Routing Backwards, seeds 1-75: 1 failed (69: save, reopen, save writes a
 `(cross)` where the first save had a `(connect)`). All three fail the same
 way on the engine before the reconcile (5d44307), so they are round-3 bugs
 still open, not from the merge. Wide seeds take 4-15 s each under ASan.
+
+### Fixed (2026-10-19, round 4)
+
+Session flags as above, 300 ops a seed, each seed run alone with a 60 s cap
+(a few seeds paste select-all into itself until the page is huge; those are
+"unfinished", not failures):
+
+| sweep | before (6b007c2) | after (e5fa657) |
+|---|---|---|
+| basic, seeds 1-150 x 250 | 0 failed | 0 failed |
+| wide from new, seeds 1-100 | 9 failed, 9 unfinished | 2 failed, 7 unfinished |
+| wide from Lab5/Broadcast/Routing Backwards, seeds 1-75 | 3 failed | 0 failed |
+
+7. **Redo of a C connection re-routed its wire** (seeds 24 and 40, and 11, 37,
+   46, 53, 60, 67: undo all then redo all changed only wire shapes). A connection
+   made with C mid-move is routed where the part was then and stretched as it
+   moved on; Redo connected the pins again, which routes afresh. The "Connect"
+   step (`CommandGroup`, `mac/CedarCore/Editor.cpp`) now keeps each wire's shape
+   as recorded and Redo puts it back (only on a wire holding exactly those pins).
+   Found with `CL_FUZZ_UNDOFIND` ([Create Gate] [Connect]). cl_check case.
+8. **A drop with no net move left a zero-length jog** (seed 69 from Lab5: save,
+   reopen, save wrote `(connect 39 IN_0)` where the first save had `(cross -72)`;
+   also seeds 17 and 85). Dragging a part away and back, or dropping a float
+   where it began, records no move, so nothing merged the wires stretched on the
+   way; the loader merges the jog away. `finishMove` now gives those wires their
+   shape from before the drag, and merges a wire C joined on the way. cl_check case.
+
+Still open: seeds 31 and 74 from new (`CL_FUZZ_TREE`: "wire in 2 pieces"). 31: a
+three-pin wire inside a floating paste whose two pins are on one gate, reshaped
+by the float, splits on the drop's merge. 74: whole-page Straighten/Tidy turns a
+staircase wire on a RAM's shared DATA_IN_4/DATA_OUT_4 spot into two dots. Both
+fail the same way before these fixes.
 
 ## Next
 
