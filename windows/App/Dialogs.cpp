@@ -28,6 +28,7 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 const int kTabsId = 4000;       // Form::pages' row
+const int kSettingsGap = 12;    // points between settings in the Settings layout (the Mac's)
 const int kStepBase = 5000;     // a stepper's − and +: kStepBase + 2 * field (+ 1 for +)
 const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
 
@@ -329,6 +330,20 @@ HFONT hintFont(UINT dpi) {
 	LOGFONTW lf = {};
 	GetObjectW(uiFont(dpi), sizeof lf, &lf);
 	lf.lfHeight = MulDiv(lf.lfHeight, 11, 12);
+	HFONT f = CreateFontIndirectW(&lf);
+	fonts[dpi] = f;
+	return f;
+}
+
+// A heading in a form (the Mac's bold 13-point section titles): the dialog's
+// font, bold.
+HFONT headingFont(UINT dpi) {
+	static std::map<UINT, HFONT> fonts;
+	auto it = fonts.find(dpi);
+	if (it != fonts.end()) return it->second;
+	LOGFONTW lf = {};
+	GetObjectW(uiFont(dpi), sizeof lf, &lf);
+	lf.lfWeight = FW_SEMIBOLD;
 	HFONT f = CreateFontIndirectW(&lf);
 	fonts[dpi] = f;
 	return f;
@@ -827,7 +842,12 @@ void Form::build() {
 	auto sc = [&](int v) { return scaled(v, dpi); };
 	HFONT font = uiFont(dpi);
 	HFONT tipFont = settingsLayout ? hintFont(dpi) : font;
-	const int margin = sc(16), gap = sc(10), rowH = sc(30), checkH = sc(24), lineH = sc(17);
+	// The Settings layout keeps the Mac's proportions (SettingsView.swift):
+	// 28 points either side, 12 between settings, labels in a column at
+	// least 150 wide, 12 from their controls.
+	const int margin = settingsLayout ? sc(28) : sc(16), gap = settingsLayout ? sc(kSettingsGap) : sc(10), rowH = sc(30), checkH = sc(24),
+	          lineH = sc(17);
+	const int labelGap = settingsLayout ? sc(12) : sc(10);
 	const int width = sc(this->width);
 	const int fullW = width - 2 * margin;
 	const bool iconBar = !pages.empty() && !pageIcons.empty();
@@ -842,6 +862,9 @@ void Form::build() {
 		const std::string& l = x.kind == FormField::Text || x.kind == FormField::Choice ? x.label : x.side;
 		if (!l.empty()) labelW[pageOf(x)] = std::max(labelW[pageOf(x)], textPixels(dialog, font, l));
 	}
+	// Every page's controls start in the same place, as the Mac's do.
+	if (settingsLayout)
+		for (int& w : labelW) if (w > 0) w = std::max(w, sc(150));
 	auto buttonWidth = [&](const std::string& label) { return std::max(sc(88), textPixels(dialog, font, label) + sc(34)); };
 
 	int y = margin;
@@ -851,7 +874,7 @@ void Form::build() {
 		if (iconBar) {
 			tabs = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY, 0, 0, width, sc(68), dialog,
 			                       (HMENU)(INT_PTR)kTabsId, appInstance(), nullptr);
-			y = sc(68) + sc(20);
+			y = sc(68) + (settingsLayout ? sc(22) : sc(20));
 		} else {
 			tabs = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY, margin, y, fullW, sc(34), dialog,
 			                       (HMENU)(INT_PTR)kTabsId, appInstance(), nullptr);
@@ -870,7 +893,7 @@ void Form::build() {
 		const size_t pg = pageOf(x);
 		if (!pages.empty()) y = pageY[pg];
 		const int labelWidth = labelW[pg];
-		const int ctrlX = labelWidth > 0 ? margin + labelWidth + sc(10) : margin;
+		const int ctrlX = labelWidth > 0 ? margin + labelWidth + labelGap : margin;
 		const int ctrlW = width - ctrlX - margin;
 		// A button beside this field takes the end of its row.
 		const bool hasBeside = i + 1 < fields.size() && fields[i + 1].kind == FormField::Button && fields[i + 1].beside &&
@@ -975,8 +998,12 @@ void Form::build() {
 		case FormField::Check: {
 			// A toggle (as Windows 11 and the Mac both show yes/no), and its
 			// words as a label beside it; a click on either flips it.
-			const int colW = inGrid ? ctrlW / x.grid : ctrlW;
-			const int colX = inGrid ? ctrlX + gridCol * colW : ctrlX;
+			// A grid with no label in the left column (under a heading, as the
+			// Mac's Toolbar page has it): the whole width.
+			const bool wide = inGrid && x.wideGrid;
+			const int gridX = wide ? margin : ctrlX, gridW = wide ? fullW : ctrlW;
+			const int colW = inGrid ? gridW / x.grid : ctrlW;
+			const int colX = inGrid ? gridX + gridCol * colW : ctrlX;
 			const int box = sc(44);
 			x.hwnd = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
 			                         colX, y, box, checkH, dialog, id, appInstance(), nullptr);
@@ -1087,7 +1114,12 @@ void Form::build() {
 		// Its tip under it, dimmed, wrapped to its width (a Check in a row of
 		// several: under the row).
 		if (!x.tip.empty()) {
-			if (inGrid) { y = gridRowY + checkH; gridCol = 0; tipX = ctrlX; tipW = ctrlW; }
+			if (inGrid) {
+				y = gridRowY + checkH;
+				gridCol = 0;
+				tipX = x.wideGrid ? margin : ctrlX;
+				tipW = x.wideGrid ? fullW : ctrlW;
+			}
 			// (Elsewhere, a line, as these dialogs have always had.)
 			const int line = wrappedHeight(dialog, tipFont, "Ag", tipW);
 			const int h = settingsLayout ? std::max(wrappedHeight(dialog, tipFont, x.tip, tipW), x.tipLines * line) : lineH;
@@ -1136,13 +1168,15 @@ void Form::build() {
 		footerButtonsAt = lineH + sc(4);
 		footerBelow = btnH + margin;
 	} else {
-		y += margin + sc(4);
-		footerGap = margin + sc(4);
+		const int below = settingsLayout ? sc(22) : margin + sc(4);   // the Mac's 22 under the last setting
+		y += below;
+		footerGap = below;
 		footerButtonsAt = footerBelow = 0;
 	}
 
 	setFontTree(dialog, font);
 	for (FormField& f : fields) {
+		if (f.kind == FormField::Note && f.heading) SendMessageW(f.hwnd, WM_SETFONT, (WPARAM)headingFont(dpi), TRUE);
 		if ((f.kind == FormField::List || f.kind == FormField::Text) && f.mono) SendMessageW(f.hwnd, WM_SETFONT, (WPARAM)monoFont(dpi), TRUE);
 		if (f.tipWindow) SendMessageW(f.tipWindow, WM_SETFONT, (WPARAM)tipFont, TRUE);
 		if (f.kind == FormField::Text && f.arrowsMove >= 0 && f.arrowsMove < (int)fields.size())
@@ -1303,7 +1337,7 @@ void Form::enable(int field, bool on) {
 // taking no room (a button beside another stays on its row).
 void Form::relayout(int pg) {
 	if (dialog == nullptr) return;
-	const int gap = scaled(10, dpiOf(dialog));
+	const int gap = scaled(settingsLayout ? kSettingsGap : 10, dpiOf(dialog));
 	int y = contentTop;
 	bool first = true;
 	int lastDelta = 0;

@@ -34,6 +34,8 @@ struct FormField {
 	std::string placeholder;            // Text: shown dimmed while it's empty
 	bool beside = false;                // Button: at the end of the row before it, not a row of its own
 	int grid = 0;                       // Check: this many to a row, with the Checks after it that say the same
+	bool wideGrid = false;              //   that row across the whole width, not the controls' column
+	bool heading = false;               // Note: a section's title, in bold
 	double lo = 0, hi = 1, step = 0;    // Slider: its range, and its steps (0: any value)
 	std::string format = "%.2f";        // Slider: how its number is shown beside it
 	// Picture: drawn with Direct2D, in points, `height` points tall and the

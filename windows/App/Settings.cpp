@@ -479,7 +479,7 @@ void showPreferencesDialog(HWND parent) {
 	Prefs& p = prefs();
 	Form f;
 	f.title = "Settings";
-	f.width = 620;
+	f.width = 640;   // the Mac's
 	f.okText = "";
 	f.cancelText = "";
 	f.settingsLayout = true;
@@ -634,18 +634,24 @@ void showPreferencesDialog(HWND parent) {
 
 	// ---- Toolbar
 	f.adding = ToolbarPage;
-	const int styles = f.add(picture("Style:", (int)(3 * kStyleH) - 6,
+	// The styles across the page, each by name with its picture, as the Mac's.
+	const int styles = f.add(picture("", (int)(3 * kStyleH) - 6,
 	                                 [&, parent](ID2D1RenderTarget* rt, float w, float h) { paintStyles(parent, rt, w, h, focused(styleField)); }));
 	swatchField = swatches;
 	styleField = styles;
 	// In the Mac's order, then the circuit's name and Step Clock as it has them,
 	// then the dark mode switch (a Windows toolbar's own).
+	// Under a heading, across the page, as the Mac's "Show in the toolbar:".
+	FormField showHeading;
+	showHeading.kind = FormField::Note;
+	showHeading.label = "Show in the toolbar:";
+	showHeading.heading = true;
+	f.add(showHeading);
 	static const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGDraw, TGLock, TGTab, TGFeedback };
-	bool firstGroup = true;
 	for (int g : groups) {
-		FormField c = check(firstGroup ? "Show:" : "", toolGroupName(g), (p.toolbarHidden & (1 << g)) == 0);
+		FormField c = check("", toolGroupName(g), (p.toolbarHidden & (1 << g)) == 0);
 		c.grid = 2;
-		firstGroup = false;
+		c.wideGrid = true;
 		on[f.add(c)] = [g, styles](Form& form, int i) {
 			if (form.checked(i)) prefs().toolbarHidden &= ~(1 << g);
 			else prefs().toolbarHidden |= 1 << g;
@@ -655,14 +661,17 @@ void showPreferencesDialog(HWND parent) {
 	}
 	FormField title = check("", "Circuit name", p.showTitle);
 	title.grid = 2;
+	title.wideGrid = true;
 	on[f.add(title)] = [styles](Form& form, int i) { prefs().showTitle = form.checked(i); apply(); form.refresh(styles); };
 	FormField stepClock = check("", "Step Clock", p.showStepClock);
 	stepClock.grid = 2;
+	stepClock.wideGrid = true;
 	on[f.add(stepClock)] = [styles](Form& form, int i) { prefs().showStepClock = form.checked(i); apply(); form.refresh(styles); };
 	FormField themeSwitch = check("", "Dark mode switch", p.showThemeToggle,
 	                              "Applies to every style. Hidden tools are still in the ••• menu and keep their shortcuts. Step Clock "
 	                              "shows in Simulation View's bar too; clicking a clock set to \u201COnly on Step Clock\u201D steps it.");
 	themeSwitch.grid = 2;
+	themeSwitch.wideGrid = true;
 	on[f.add(themeSwitch)] = [styles](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); form.refresh(styles); };
 
 	// ---- Shortcuts
@@ -672,6 +681,7 @@ void showPreferencesDialog(HWND parent) {
 	FormField search;
 	search.kind = FormField::Text;
 	search.placeholder = "Search shortcuts";
+	search.widthPt = 260;   // the Mac's is a short box, Restore Defaults at the far end
 	list.search = f.add(search);
 	on[list.search] = [&list](Form& form, int i) {
 		list.query = form.text(i);
