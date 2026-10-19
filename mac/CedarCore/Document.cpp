@@ -249,8 +249,8 @@ void cl_document_rename_page(CLDocument* doc, int page, const char* name) {
 void cl_document_delete_page(CLDocument* doc, int page) {
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
 	if (p == nullptr || doc->pages.size() < 2) return;
+	clEndGesture(doc, true);
 	if (doc->tidy.active) cl_edit_tidy_end(doc, true);
-	doc->gesture = EditGesture();
 	// Delete what's on it through the usual command (it tells the simulator),
 	// then drop the page and the history that might point at it.
 	std::vector<unsigned long> gates, wires;

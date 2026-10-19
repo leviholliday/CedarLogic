@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-using namespace clcheck;
+using namespace clcheck;   // list() is called clcheck::list(): with MSVC, std::list is in scope too (the gui headers say using namespace std)
 
 namespace {
 
@@ -261,8 +261,8 @@ struct Checker {
 	CLCheck& noSwitch(const std::vector<std::string>& names) {
 		std::vector<std::string> all;
 		for (int s : switches) all.push_back(port(s).name);
-		const std::string what = names.size() == 1 ? "'s no switch called " + names[0] : " are no switches called " + list(names);
-		res.notes = { { Problem, "There" + what + " (" + (all.empty() ? std::string("this page has no switches") : "the switches are " + list(all)) +
+		const std::string what = names.size() == 1 ? "'s no switch called " + names[0] : " are no switches called " + clcheck::list(names);
+		res.notes = { { Problem, "There" + what + " (" + (all.empty() ? std::string("this page has no switches") : "the switches are " + clcheck::list(all)) +
 		                         "). Pick which switch " + (names.size() == 1 ? "it is" : "each one is") + " under Names, or change a switch's label." } };
 		return fail("no_switch", "Can't check yet: there" + what + ".");
 	}
@@ -271,10 +271,10 @@ struct Checker {
 		for (int l : lights) all.push_back(port(l).name);
 		res.notes.clear();
 		for (const std::string& n : names)
-			res.notes.push_back({ Problem, "There's no light called " + n + " (" + (all.empty() ? std::string("this page has no lights") : "the lights are " + list(all)) +
+			res.notes.push_back({ Problem, "There's no light called " + n + " (" + (all.empty() ? std::string("this page has no lights") : "the lights are " + clcheck::list(all)) +
 			                               "). Pick which light it is under Names, or change a light's label." });
 		const std::string what = names.size() == 1 ? "'s no light called " : " are no lights called ";
-		return fail("no_light", "Can't check yet: there" + what + list(names) + ".");
+		return fail("no_light", "Can't check yet: there" + what + clcheck::list(names) + ".");
 	}
 
 	std::string readPorts(const std::vector<int>& which) { std::string s; for (int p : which) s += sim.read(port(p).gate); return s; }
@@ -282,7 +282,7 @@ struct Checker {
 	std::string setsText(const std::vector<std::pair<int, char>>& sets) {
 		std::vector<std::string> parts;
 		for (auto& s : sets) parts.push_back(port(s.first).name + " to " + s.second);
-		return "To start, the check set " + list(parts) + ", gave one clock pulse and set " + (sets.size() == 1 ? "it" : "them") + " back.";
+		return "To start, the check set " + clcheck::list(parts) + ", gave one clock pulse and set " + (sets.size() == 1 ? "it" : "them") + " back.";
 	}
 	// Set some switches, settle, a pulse, set them back, settle.
 	bool withPulse(const std::vector<std::pair<int, char>>& sets) {
@@ -377,7 +377,7 @@ struct Checker {
 
 	// The notes every kind adds once its names are matched.
 	void matchNotes(const std::vector<int>& usedLights) {
-		if (!paired.empty()) res.notes.push_back({ Info, "Matched by position, as the names differ: " + list(paired) + "." });
+		if (!paired.empty()) res.notes.push_back({ Info, "Matched by position, as the names differ: " + clcheck::list(paired) + "." });
 		std::vector<std::string> names, values;
 		for (int s : control) {
 			if (std::any_of(resetPorts.begin(), resetPorts.end(), [&](auto& x) { return x.first == s; })) continue;
@@ -385,13 +385,13 @@ struct Checker {
 			values.push_back(sim.base[port(s).gate]);
 		}
 		if (!names.empty())
-			res.notes.push_back({ Info, (names.size() == 1 ? "Switch " + names[0] + " isn't" : "Switches " + list(names) + " aren't") +
+			res.notes.push_back({ Info, (names.size() == 1 ? "Switch " + names[0] + " isn't" : "Switches " + clcheck::list(names) + " aren't") +
 			                            " in what was asked for, so " + (names.size() == 1 ? "it stayed as it is" : "they stayed as they are") +
-			                            " on the page (" + list(values) + ")." });
+			                            " on the page (" + clcheck::list(values) + ")." });
 		names.clear();
 		for (int l : lights) if (std::find(usedLights.begin(), usedLights.end(), l) == usedLights.end()) names.push_back(port(l).name);
 		if (!names.empty())
-			res.notes.push_back({ Info, (names.size() == 1 ? "Light " + names[0] + " isn't" : "Lights " + list(names) + " aren't") +
+			res.notes.push_back({ Info, (names.size() == 1 ? "Light " + names[0] + " isn't" : "Lights " + clcheck::list(names) + " aren't") +
 			                            " in what was asked for, so " + (names.size() == 1 ? "it wasn't" : "they weren't") + " checked." });
 	}
 
@@ -741,7 +741,7 @@ CLCheck& Checker::runTiming() {
 			if (w.exp[i] != '-' && w.got[i] != w.exp[i]) parts.push_back(k.outs[i] + " is " + w.got[i] + " instead of " + w.exp[i]);
 		res.verdict = 1;
 		res.summary = "Doesn't match: " + (w.pulse == 0 ? std::string("at the start") : "after clock pulse " + std::to_string(w.pulse)) + ", " +
-		              list(parts) + ".";
+		              clcheck::list(parts) + ".";
 		return res;
 	}
 	res.verdict = 0;
@@ -762,7 +762,7 @@ CLCheck& Checker::runStates() {
 	if (k.hasStart) {
 		if (k.start.names.empty()) {
 			if ((int)k.start.bits.size() != ns)
-				return fail("bad_key", "start: needs " + plural(ns, "value", "values") + ", one for each of " + list(k.state) + ".");
+				return fail("bad_key", "start: needs " + plural(ns, "value", "values") + ", one for each of " + clcheck::list(k.state) + ".");
 			startBits = k.start.bits;
 		} else {
 			startBits = std::string(ns, '?');
@@ -770,7 +770,7 @@ CLCheck& Checker::runStates() {
 				int at = -1;
 				for (int j = 0; j < ns; j++) if (key(k.state[j]) == key(k.start.names[i])) at = j;
 				if (at < 0 || startBits[at] != '?' || (int)k.start.names.size() != ns)
-					return fail("bad_key", "start: gives the state, so it names " + list(k.state) + ".");
+					return fail("bad_key", "start: gives the state, so it names " + clcheck::list(k.state) + ".");
 				startBits[at] = k.start.bits[i];
 			}
 		}
@@ -942,7 +942,7 @@ CLCheck& Checker::runStates() {
 		for (int j = 0; j < no; j++)
 			if (w.exp[ns + j] != '-' && w.got[ns + j] != w.exp[ns + j]) parts.push_back(k.outs[j] + " is " + w.got[ns + j] + " instead of " + w.exp[ns + j]);
 		res.verdict = 1;
-		res.summary = "Doesn't match: in state " + stateText(w.state) + inText(w.in) + " (row " + std::to_string(w.row) + "), " + list(parts) + ".";
+		res.summary = "Doesn't match: in state " + stateText(w.state) + inText(w.in) + " (row " + std::to_string(w.row) + "), " + clcheck::list(parts) + ".";
 		return res;
 	}
 	// Rows never reached.
@@ -951,7 +951,7 @@ CLCheck& Checker::runStates() {
 	for (int q = 0; q < R; q++)
 		if (!done[q]) { left++; if (std::find(states.begin(), states.end(), k.rows[q].st) == states.end()) states.push_back(k.rows[q].st); }
 	if (left > 0 && !stopped)
-		res.notes.push_back({ Warning, (states.size() == 1 ? "State " + states[0] + " was" : "States " + list(states) + " were") +
+		res.notes.push_back({ Warning, (states.size() == 1 ? "State " + states[0] + " was" : "States " + clcheck::list(states) + " were") +
 		                               " never reached: clocking from the start doesn't get there, and no switch sets " +
 		                               (states.size() == 1 ? "it." : "them.") });
 	if (stopped) res.notes.push_back({ Warning, outOfTries ? "The check stopped after starting the circuit again " + std::to_string(maxPowerOns) + " times."
@@ -960,7 +960,7 @@ CLCheck& Checker::runStates() {
 	if (R == 0) res.summary = "Matches, but every value was a don't-care, so nothing was really checked.";
 	else if (left > 0)
 		res.summary = "Matches on every row it reached, but " + plural(left, "row", "rows") + " (" + (states.size() == 1 ? "state " : "states ") +
-		              list(states) + ") " + (left == 1 ? "wasn't reached, so it wasn't checked." : "weren't reached, so they weren't checked.");
+		              clcheck::list(states) + ") " + (left == 1 ? "wasn't reached, so it wasn't checked." : "weren't reached, so they weren't checked.");
 	else res.summary = "Matches: every row of the state table does what was asked for" + (dc > 0 ? dontCares(dc) : std::string("."));
 	return res;
 }

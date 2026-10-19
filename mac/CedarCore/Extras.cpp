@@ -673,8 +673,8 @@ private:
 };
 
 void resetForPageChange(CLDocument* doc) {
+	clEndGesture(doc, true);   // a drag or paste under way lands first
 	if (doc->tidy.active) cl_edit_tidy_end(doc, true);
-	doc->gesture = EditGesture();
 	doc->hoverPin = false;
 }
 

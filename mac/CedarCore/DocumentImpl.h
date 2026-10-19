@@ -197,4 +197,9 @@ extern "C" CLDocument* clOpenText(const char* data, long length, char* error, in
 // document saved (Check My Circuit's copies).
 std::string clSaveText(CLDocument* doc);
 
+// A drag, paste or new part still under way is finished before another edit
+// (`keep`: as its release would; otherwise put back, for Undo and Redo).
+// Editor.cpp.
+void clEndGesture(CLDocument* doc, bool keep);
+
 #endif  // CL_MAC_DOCUMENTIMPL_H
