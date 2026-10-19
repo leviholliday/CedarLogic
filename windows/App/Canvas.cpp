@@ -450,6 +450,17 @@ void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
 	if (barW < 360) return;
 	const float x0 = (w - barW) / 2, y0 = h - 14 - barH, cy = y0 + barH / 2;
 	const D2D1_RECT_F bar = D2D1::RectF(x0, y0, x0 + barW, y0 + barH);
+	// A narrow canvas (the notes open, a split view): the speed's track
+	// shortens, then its "ms / step" goes, then the SIMULATION / LIVE words
+	// (the light stays), so nothing runs into Done.
+	const float buttonsW = (prefs().showStepClock ? 3 : 2) * 40.0f + 6 + 15;
+	const float wordsW = 84, msW = 98, doneRoom = 70 + 18 + 14;
+	float trackW = 150;
+	bool showMs = true, showWords = true;
+	float need = 18 + 28 + wordsW + 15 + buttonsW + trackW + 12 + 15 + msW + doneRoom;
+	if (need > barW) { const float cut = std::min(trackW - 70, need - barW); trackW -= cut; need -= cut; }
+	if (need > barW) { showMs = false; need -= msW; }
+	if (need > barW) { showWords = false; need -= wordsW; }
 	fillRound(rt, D2D1::RectF(bar.left, bar.top + 3, bar.right, bar.bottom + 3), 14, D2D1::ColorF(0, 0, 0, 0.30f));
 	fillRound(rt, bar, 14, D2D1::ColorF(0.055f, 0.070f, 0.090f, 0.94f));
 	strokeRound(rt, bar, 14, withAlpha(on, 0.22f));
@@ -462,9 +473,11 @@ void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
 	fillCircle(rt, D2D1::Point2F(x + 9, cy), 9, withAlpha(light, 0.12f * breathe));
 	fillCircle(rt, D2D1::Point2F(x + 9, cy), 4, withAlpha(light, 0.55f + 0.45f * breathe));
 	x += 28;
-	drawText(rt, "SIMULATION", D2D1::RectF(x, cy - 15, x + 80, cy - 3), 9, dim);
-	drawText(rt, paused ? "PAUSED" : "LIVE", D2D1::RectF(x, cy - 3, x + 80, cy + 13), 13, paused ? amber : ink, TextAlign::Leading, true);
-	x += 70 + 14;
+	if (showWords) {
+		drawText(rt, "SIMULATION", D2D1::RectF(x, cy - 15, x + 80, cy - 3), 9, dim);
+		drawText(rt, paused ? "PAUSED" : "LIVE", D2D1::RectF(x, cy - 3, x + 80, cy + 13), 13, paused ? amber : ink, TextAlign::Leading, true);
+		x += 70 + 14;
+	}
 	auto divider = [&] { fillRect(rt, D2D1::RectF(x, cy - 14, x + 1, cy + 14), D2D1::ColorF(1, 1, 1, 0.08f)); x += 1 + 14; };
 	divider();
 	auto button = [&](wchar_t glyph, bool lit, D2D1_COLOR_F color, int command, bool enabled = true) {
@@ -484,7 +497,7 @@ void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
 	divider();
 	// Speed, fast on the right.
 	drawText(rt, "SPEED", D2D1::RectF(x, cy - 18, x + 60, cy - 6), 9, dim);
-	const float trackW = 150, ty = cy + 5;
+	const float ty = cy + 5;
 	sliderTrack = D2D1::RectF(x, ty - 10, x + trackW, ty + 10);
 	const float f = (float)speedFraction(cl_document_step_ms(win->document()));
 	fillRound(rt, D2D1::RectF(x, ty - 2, x + trackW, ty + 2), 2, D2D1::ColorF(1, 1, 1, 0.12f));
@@ -492,8 +505,10 @@ void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
 	fillCircle(rt, D2D1::Point2F(x + trackW * f, ty), 10, withAlpha(on, 0.14f));
 	fillCircle(rt, D2D1::Point2F(x + trackW * f, ty), 6, D2D1::ColorF(0.92f, 1, 1));
 	x += trackW + 12;
-	drawText(rt, strf("%d ms / step", cl_document_step_ms(win->document())), D2D1::RectF(x, ty - 8, x + 84, ty + 8), 11, ink);
-	x += 84 + 14;
+	if (showMs) {
+		drawText(rt, strf("%d ms / step", cl_document_step_ms(win->document())), D2D1::RectF(x, ty - 8, x + 84, ty + 8), 11, ink);
+		x += 84 + 14;
+	}
 	divider();
 
 	// The Done button at the right end; the chips in what's left.
