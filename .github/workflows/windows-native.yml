@@ -430,6 +430,33 @@ jobs:
           done
           exit $failed
 
+      # Dragging's numbers, for the owner without a PC (windows/DRAG-DIAGNOSIS.md):
+      # the drag self-test (a gate dragged round a circle with real input,
+      # its PASS/FAIL and SMOOTH/CHOPPY lines and the frame, draw and present
+      # times), as built, with the old drawing (CEDARLOGIC_DRAG_OLD=1) and
+      # without the kept gate geometry (CEDARLOGIC_NO_GEOMETRY_CACHE=1); then
+      # the canvas's frame time for a few circuits both ways (--bench-draw).
+      # A hosted runner has no GPU (Direct2D draws in software there), so the
+      # numbers are for comparing, not what a PC gets. Never holds the build back.
+      - name: Drag self-test and draw timings
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          run() { echo "== $1"; shift; "$@"; echo "   (exit $?: 0 PASS, 1 FAIL, 2 SKIP)"; }
+          run "drag self-test" timeout 120 "$A" --drag-selftest "$PWD/renders/drag-new.log" || true
+          run "drag self-test, old drawing" env CEDARLOGIC_DRAG_OLD=1 timeout 120 "$A" --drag-selftest "$PWD/renders/drag-old.log" || true
+          run "drag self-test, no kept geometry" env CEDARLOGIC_NO_GEOMETRY_CACHE=1 timeout 120 "$A" --drag-selftest "$PWD/renders/drag-nocache.log" || true
+          for f in res/samples/practice.cdl format/tests/fixtures/Lab5.cdl format/tests/fixtures/lab6.cdl; do
+            echo "== $f"
+            timeout 120 "$A" --bench-draw 150 "$f" || true
+          done
+          echo "== res/samples/practice.cdl, Simulation View"
+          timeout 120 "$A" --sim-view --bench-draw 150 res/samples/practice.cdl || true
+          exit 0
+
       # The zip's copy adding itself to Start and to .cdl files (as its
       # first-run question's yes does), checked the way Windows looks them
       # up, then taking itself away again.

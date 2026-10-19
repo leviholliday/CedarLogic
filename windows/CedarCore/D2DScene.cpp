@@ -8,9 +8,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <map>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 
 namespace cl {
 namespace d2d {
@@ -174,7 +176,50 @@ float capHeight() {
 	return cap * kGlyphUnits / f.metrics.designUnitsPerEm;
 }
 
+// ---- Kept geometry (D2DScene::cacheGeometry) ------------------------------------
+
+// Per factory: a geometry can only be drawn by render targets of the factory
+// that made it (another's fails the whole frame), and it holds its factory,
+// so a key's factory can't go and come back as another at the same address.
+struct Kept {
+	std::unordered_map<std::string, ID2D1PathGeometry*> shapes;   // local points -> path
+	std::unordered_map<std::string, ID2D1PathGeometry*> glyphs;   // a label's text -> its outline at kGlyphUnits
+	void clear() {
+		for (auto& e : shapes) release(e.second);
+		for (auto& e : glyphs) release(e.second);
+		shapes.clear();
+		glyphs.clear();
+	}
+};
+// Enough for every gate type and label in a big circuit; past this the lot is
+// let go and built again (a circuit with endless distinct labels can't grow it
+// without bound).
+const std::size_t kMaxShapes = 6000, kMaxGlyphs = 3000;
+
+std::map<void*, Kept>& kept() {
+	static std::map<void*, Kept> all;
+	return all;
+}
+
+bool cacheFromEnvironment() {
+	wchar_t v[8] = {};
+	return !(GetEnvironmentVariableW(L"CEDARLOGIC_NO_GEOMETRY_CACHE", v, 8) > 0 && v[0] == L'1');
+}
+
 }  // namespace
+
+bool D2DScene::cacheGeometry = cacheFromEnvironment();
+
+std::size_t D2DScene::cachedGeometries() {
+	std::size_t n = 0;
+	for (auto& k : kept()) n += k.second.shapes.size() + k.second.glyphs.size();
+	return n;
+}
+
+void D2DScene::clearGeometryCache() {
+	for (auto& k : kept()) k.second.clear();
+	kept().clear();
+}
 
 ID2D1Factory* factory() {
 	static ID2D1Factory* f = [] {
@@ -321,6 +366,35 @@ ID2D1Geometry* D2DScene::circle(const Matrix& m, render::Point center, float rad
 	return t;
 }
 
+ID2D1Geometry* D2DScene::keptShape(const Matrix& m, const render::Point* pts, std::size_t count, bool closed, bool filled) {
+	if (!cacheGeometry || stack.empty() || factory == nullptr || count < 2 || !usable(m)) return nullptr;
+	for (std::size_t i = 0; i < count; i++)
+		if (!std::isfinite(pts[i].x) || !std::isfinite(pts[i].y)) return nullptr;
+	// The key: how it's closed and filled, then the points' own bytes.
+	std::string key(2 + count * sizeof(render::Point), '\0');
+	key[0] = closed ? 'c' : 'o';
+	key[1] = filled ? 'f' : 'h';
+	std::memcpy(&key[2], pts, count * sizeof(render::Point));
+	Kept& k = kept()[(void*)factory];
+	ID2D1PathGeometry* g = nullptr;
+	auto it = k.shapes.find(key);
+	if (it != k.shapes.end()) {
+		g = it->second;
+	} else {
+		if (k.shapes.size() >= kMaxShapes) k.clear();
+		std::vector<Point2> local(count);
+		for (std::size_t i = 0; i < count; i++) local[i] = Point2{ pts[i].x, pts[i].y };
+		g = path(local, closed, filled);
+		if (g == nullptr) return nullptr;
+		k.shapes.emplace(std::move(key), g);
+	}
+	// Carried into device pixels; a stroke's width isn't scaled by it, so
+	// widths stay in device pixels, as when the points were carried by hand.
+	ID2D1TransformedGeometry* t = nullptr;
+	if (FAILED(factory->CreateTransformedGeometry(g, (const D2D1_MATRIX_3X2_F*)&m, &t))) return nullptr;
+	return t;
+}
+
 void D2DScene::lines(const render::Point* pts, std::size_t count, const render::Stroke& s) {
 	if (count < 2) return;
 	ID2D1SolidColorBrush* b = paint(s.color);
@@ -337,6 +411,11 @@ void D2DScene::lines(const render::Point* pts, std::size_t count, const render::
 void D2DScene::polyline(const render::Point* pts, std::size_t count, const render::Stroke& s, bool closed) {
 	if (count < 2) return;
 	const Matrix m = current();
+	if (ID2D1Geometry* kept = keptShape(m, pts, count, closed, false)) {
+		strokeGeometry(kept, s);
+		release(kept);
+		return;
+	}
 	std::vector<Point2> out;
 	out.reserve(count);
 	for (std::size_t i = 0; i < count; i++) {
@@ -351,6 +430,11 @@ void D2DScene::polyline(const render::Point* pts, std::size_t count, const rende
 void D2DScene::fillPolygon(const render::Point* pts, std::size_t count, const render::Color& c) {
 	if (count < 3) return;
 	const Matrix m = current();
+	if (ID2D1Geometry* kept = keptShape(m, pts, count, true, true)) {
+		fillGeometry(kept, c);
+		release(kept);
+		return;
+	}
 	std::vector<Point2> out;
 	out.reserve(count);
 	for (std::size_t i = 0; i < count; i++) {
@@ -387,6 +471,20 @@ void D2DScene::arc(render::Point center, float radius, float startDeg, float swe
 	// is laid down as short chords, fine enough (at most 2 degrees) to read
 	// as a curve at any zoom the canvas allows.
 	const int segs = std::max(8, (int)std::ceil(std::fabs(sweepDeg) / 2.0f));
+	if (cacheGeometry && !stack.empty()) {
+		// In a gate's own coordinates (an OR's curves): the chords kept.
+		std::vector<render::Point> local;
+		local.reserve(segs + 1);
+		for (int i = 0; i <= segs; i++) {
+			const double d = (startDeg + sweepDeg * (double)i / segs) * kPi / 180.0;
+			local.push_back(render::Point((float)(center.x + radius * std::sin(d)), (float)(center.y + radius * std::cos(d))));
+		}
+		if (ID2D1Geometry* kept = keptShape(m, local.data(), local.size(), false, false)) {
+			strokeGeometry(kept, s);
+			release(kept);
+			return;
+		}
+	}
 	std::vector<Point2> out;
 	out.reserve(segs + 1);
 	for (int i = 0; i <= segs; i++) {
@@ -409,18 +507,31 @@ void D2DScene::fillRect(render::Point lo, render::Point hi, const render::Color&
 
 // A glyph outline, taken as Direct2D path figures.
 void D2DScene::text(render::Point origin, const char* utf8, float pixelHeight, const render::Color& c) {
-	if (factory == nullptr || !(pixelHeight > 0)) return;
-	Shaped line;
-	if (!shape(utf8, line)) return;
+	if (factory == nullptr || !(pixelHeight > 0) || utf8 == nullptr) return;
+	// The outline, kept by its text (it's the same at every size and place).
 	ID2D1PathGeometry* outline = nullptr;
-	if (FAILED(factory->CreatePathGeometry(&outline))) return;
-	ID2D1GeometrySink* sink = nullptr;
-	if (FAILED(outline->Open(&sink))) { release(outline); return; }
-	const HRESULT hr = labelFont().face->GetGlyphRunOutline(kGlyphUnits, line.glyphs.data(), line.advances.data(),
-	                                                         nullptr, (UINT32)line.glyphs.size(), FALSE, FALSE, sink);
-	sink->Close();
-	release(sink);
-	if (FAILED(hr)) { release(outline); return; }
+	Kept* store = cacheGeometry ? &kept()[(void*)factory] : nullptr;
+	if (store) {
+		auto it = store->glyphs.find(utf8);
+		if (it != store->glyphs.end()) { outline = it->second; outline->AddRef(); }
+	}
+	if (outline == nullptr) {
+		Shaped line;
+		if (!shape(utf8, line)) return;
+		if (FAILED(factory->CreatePathGeometry(&outline))) return;
+		ID2D1GeometrySink* sink = nullptr;
+		if (FAILED(outline->Open(&sink))) { release(outline); return; }
+		const HRESULT hr = labelFont().face->GetGlyphRunOutline(kGlyphUnits, line.glyphs.data(), line.advances.data(),
+		                                                         nullptr, (UINT32)line.glyphs.size(), FALSE, FALSE, sink);
+		sink->Close();
+		release(sink);
+		if (FAILED(hr)) { release(outline); return; }
+		if (store) {
+			if (store->glyphs.size() >= kMaxGlyphs) store->clear();
+			outline->AddRef();   // one for the cache, one for here
+			store->glyphs.emplace(utf8, outline);
+		}
+	}
 	// `origin` is the top of the capitals (see SkiaScene::text): the baseline
 	// sits a cap height below it. Glyph outlines are y-down; the world is y-up.
 	const float k = pixelHeight / kGlyphUnits;

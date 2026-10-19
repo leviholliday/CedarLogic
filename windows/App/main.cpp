@@ -24,6 +24,7 @@
 #include "Updater.h"
 #include "Welcome.h"
 #include "Window.h"
+#include "D2DScene.h"
 
 #include <objbase.h>
 #include <shellapi.h>
@@ -75,6 +76,10 @@ std::string gRun;       // --run a,b,...: those commands, by their Shortcuts id 
 // --drag-selftest [log]: a gate dragged with real input, PASS or FAIL
 // (DragLog.h); --drag-log <file>: every drag measured into the file.
 bool gDragSelfTest = false;
+// --bench-draw [frames] circuit.cdl: the canvas drawn that many times, with
+// the kept gate and label geometry and without (D2DScene::cacheGeometry),
+// timed, printed, and quit (windows/DRAG-DIAGNOSIS.md, hypothesis 3).
+int gBenchDraw = 0;
 // --split, --focus, --rename-tab: the window in split view, in focus mode,
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
@@ -91,6 +96,48 @@ void writeOut(const std::string& text) {
 	}
 	DWORD wrote = 0;
 	if (out && out != INVALID_HANDLE_VALUE) WriteFile(out, text.data(), (DWORD)text.size(), &wrote, nullptr);
+}
+
+// The canvas drawn `gBenchDraw` times each way, every frame timed whole
+// (drawing and presenting: Direct2D does most of its work at EndDraw).
+void CALLBACK benchDrawTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	Canvas* c = w ? w->currentCanvas() : nullptr;
+	if (c) {
+		RECT rc;
+		GetClientRect(c->widget(), &rc);
+		const bool was = cl::d2d::D2DScene::cacheGeometry;
+		auto run = [&](bool cache, std::vector<double>& ms) {
+			cl::d2d::D2DScene::cacheGeometry = cache;
+			cl::d2d::D2DScene::clearGeometryCache();
+			for (int i = 0; i < gBenchDraw + 5; i++) {
+				const double t0 = nowSeconds();
+				RedrawWindow(c->widget(), nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+				if (i >= 5) ms.push_back((nowSeconds() - t0) * 1000);   // the first few warm up
+			}
+		};
+		auto stats = [](std::vector<double> v) {
+			std::sort(v.begin(), v.end());
+			double sum = 0;
+			for (double x : v) sum += x;
+			const double avg = v.empty() ? 0 : sum / v.size();
+			const double p50 = v.empty() ? 0 : v[v.size() / 2], p95 = v.empty() ? 0 : v[std::min(v.size() - 1, v.size() * 95 / 100)];
+			return strf("avg %.2f ms, p50 %.2f, p95 %.2f, max %.2f", avg, p50, p95, v.empty() ? 0.0 : v.back());
+		};
+		std::vector<double> off, on;
+		run(false, off);
+		run(true, on);
+		const size_t kept = cl::d2d::D2DScene::cachedGeometries();
+		cl::d2d::D2DScene::cacheGeometry = was;
+		writeOut(strf("BENCH draw  %d frames of %ldx%ld px, %d gates: built every frame %s\n", gBenchDraw, rc.right, rc.bottom,
+		              cl_document_gate_count(w->document(), w->currentPage()), stats(off).c_str()));
+		writeOut(strf("BENCH draw  kept geometry (%lu shapes and labels kept): %s\n", (unsigned long)kept, stats(on).c_str()));
+	} else {
+		writeOut("BENCH draw  no canvas to draw\n");
+	}
+	for (CircuitWindow* x : std::vector<CircuitWindow*>(circuitWindows())) x->destroy();
+	PostQuitMessage(0);
 }
 
 void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
@@ -802,6 +849,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			}
 			continue;
 		}
+		if (a == "--bench-draw") {
+			gBenchDraw = 120;
+			if (i + 1 < argc && atoi(U(argv[i + 1]).c_str()) > 0) gBenchDraw = std::min(5000, atoi(U(argv[++i]).c_str()));
+			continue;
+		}
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
@@ -869,7 +921,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		draglog::open(U(tmp) + "cedarlogic-drag-selftest.log");
 	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
-	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest;
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0;
 	gTestRun = testRun;
 	if (!testRun && handToRunning(files)) return 0;
 
@@ -891,7 +943,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -946,7 +998,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -1008,6 +1060,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		SetTimer(nullptr, 0, 60000, clickTestWatchdog);
 	} else if (gDragSelfTest) {
 		draglog::startSelfTest();
+	} else if (gBenchDraw > 0) {
+		SetTimer(nullptr, 0, 2000, benchDrawTimer);
 	} else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.

@@ -216,6 +216,13 @@ Direct2D here. And:
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the
   launch screen at that moment; `--card-frame <seconds>` holds the opening card.
+- `CedarLogic.exe --drag-selftest [log]` -- a gate dragged with real input,
+  PASS/FAIL and the frame times (`DRAG-DIAGNOSIS.md`); CI runs it (it never
+  holds the build back) as built, with `CEDARLOGIC_DRAG_OLD=1` and with
+  `CEDARLOGIC_NO_GEOMETRY_CACHE=1`.
+- `CedarLogic.exe --bench-draw [frames] circuit.cdl` -- the canvas drawn that
+  many times (120 by default) with the kept gate and label geometry and
+  without (`D2DScene::cacheGeometry`), both frame times printed (CI runs it).
 - `CedarLogic.exe --version`
 
 CI (`.github/workflows/windows-native.yml`) builds x64 and ARM64 on every push

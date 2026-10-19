@@ -57,6 +57,17 @@ public:
 	static render::Color lowWire;
 	bool wiresPhase = false;
 
+	// Shapes drawn inside a pushTransform (a gate's body, its pins, its
+	// bubbles, in the gate's own coordinates) and every label's glyph outline
+	// are built as Direct2D geometry once and kept, then carried into place
+	// with a transform each frame, rather than built again every frame
+	// (windows/DRAG-DIAGNOSIS.md, hypothesis 3). Wires, drawn in world
+	// coordinates that change as parts move, are built each time as before.
+	// On unless CEDARLOGIC_NO_GEOMETRY_CACHE=1; --bench-draw times both.
+	static bool cacheGeometry;
+	static std::size_t cachedGeometries();   // how many are kept now
+	static void clearGeometryCache();
+
 private:
 	ID2D1RenderTarget* rt;
 	ID2D1Factory* factory = nullptr;
@@ -74,6 +85,10 @@ private:
 	ID2D1PathGeometry* path(const std::vector<Point2>& pts, bool closed, bool filled);
 	// A circle in world space, carried into device pixels.
 	ID2D1Geometry* circle(const Matrix& m, render::Point center, float radius);
+	// The kept shape through these local points, carried by `m` into device
+	// pixels (a new reference the caller releases); null when it isn't kept
+	// (no local transform, caching off), so the caller builds it as before.
+	ID2D1Geometry* keptShape(const Matrix& m, const render::Point* pts, std::size_t count, bool closed, bool filled);
 };
 
 // The render target's transform before DevicePixels scaled it.

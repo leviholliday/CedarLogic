@@ -84,7 +84,7 @@ handed over at each refresh, so nothing tears. The minimap is no longer
 redrawn on each drag move. It shows nothing new until the drop, and the drop's
 `redraw()` updates it.
 
-### 3. Drawing the scene costs more than a frame. Possible; measured, not fixed.
+### 3. Drawing the scene costs more than a frame. Possible; partly fixed (kept geometry), measured on CI.
 
 `D2DScene` (`windows/CedarCore/D2DScene.cpp`) creates a new
 `ID2D1PathGeometry` or `ID2D1TransformedGeometry` for every filled or stroked
@@ -99,9 +99,35 @@ stays steady, though: each frame is drawn with the latest position.
 The dot grid (`gridStyle` 1) can also issue up to 60,000 `FillEllipse` calls
 a frame.
 
-The P lines' `drawMs` column measures this. If it's high, the next step is
-to cache geometry per gate type/label (or use `ID2D1GeometryRealization` on an
-`ID2D1DeviceContext`) and draw labels with `DrawGlyphRun`.
+The P lines' `drawMs` column measures this.
+
+**Change (kept geometry):** the engine draws a gate inside a
+`pushTransform` (its model matrix), in the gate's own coordinates, so every
+gate of a type and rotation hands `D2DScene` the same points each frame.
+`D2DScene` now keeps those shapes (polylines, filled polygons and arcs drawn
+under a local transform) as `ID2D1PathGeometry`, keyed by their local points,
+and every label's glyph outline keyed by its text, and each frame only wraps
+the kept one in an `ID2D1TransformedGeometry` with the current matrix. A
+transformed geometry's stroke width isn't scaled, so widths stay in device
+pixels as before. Nothing needs invalidating: a gate that changes shape or
+rotation hands over different points (another key), and a moved gate only a
+different matrix. Wires, drawn in world coordinates that change as parts
+move, are built each frame as before. The cache is per Direct2D factory (a
+geometry only draws on its own factory's targets) and is let go when it
+passes 6,000 shapes or 3,000 labels. `CEDARLOGIC_NO_GEOMETRY_CACHE=1` turns
+it off (the fallback; the drawing is the old code path).
+
+What it doesn't save: Direct2D still tessellates each geometry when it draws
+it (an `ID2D1HwndRenderTarget` has no geometry realizations; those need an
+`ID2D1DeviceContext1`). It saves building the paths and, for labels, asking
+DirectWrite for the glyph outlines, every frame.
+
+`CedarLogic.exe --bench-draw [frames] circuit.cdl` draws the canvas that many
+times with and without the kept geometry and prints both frame times (whole
+frames, `EndDraw` included); CI runs it for a few circuits, and runs the drag
+self-test with and without (the "Drag self-test and draw timings" step).
+A hosted runner has no GPU, so Direct2D draws in software there: compare the
+two numbers, don't read them as a PC's.
 
 ### 4. A quick second press is taken as a double-click and ends the drag. Possible on touchpads; logged, not changed.
 
