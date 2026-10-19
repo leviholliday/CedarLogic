@@ -25,6 +25,7 @@ struct CedarLogicApp: App {
             TabSwitcher.shared.install()
             MenuFixup.install()
             SessionCheck.runIfAsked()
+            LaunchSelfTest.runIfAsked()
             RenderUI.runIfAsked()
             RenderWindow.runIfAsked()
             RenderPresenter.runIfAsked()
@@ -193,8 +194,7 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             if MainActor.assumeIsolated({ ShareLink.handedOver }) { launched(); return }
             // The toolbar test works on a new circuit, never one of yours.
             if BarTest.on && ProcessInfo.processInfo.environment["CL_BAR_WATCH"] == nil { Self.newHidden(); launched(); return }
-            let remembered = LastCircuit.url.map { [$0] } ?? []
-            if let last = (remembered + dc.recentDocumentURLs).first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            if let last = Self.circuitToReopen(remembered: LastCircuit.url, recents: dc.recentDocumentURLs) {
                 dc.openDocument(withContentsOf: last, display: false) { doc, _, error in
                     if let doc { Self.showHidden(doc) } else { Self.newHidden() }
                     launched()
@@ -204,6 +204,12 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
                 launched()
             }
         }
+    }
+
+    /// The circuit a launch reopens: the one you were last in, else the most
+    /// recent one still there (`--launch-selftest` checks the choice).
+    static func circuitToReopen(remembered: URL?, recents: [URL]) -> URL? {
+        ((remembered.map { [$0] } ?? []) + recents).first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     /// A document's window, made and hidden before it's ever ordered in:

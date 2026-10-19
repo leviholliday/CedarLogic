@@ -191,6 +191,16 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   waited for), memory levels off, both sides of a split agree on run/pause,
   and closing the window lets its controller, clock and circuit go. A copy
   of the app with its own settings and home folder; nothing shows on screen
+- `launch-selftest.sh [rounds]` -- `CedarLogic --launch-selftest`: what a
+  launch decides and does from ten saved states (first launch, after an
+  update, no Your Circuits, the last circuit missing, damaged or empty, work
+  left from before a break, a broken library, damaged sample circuits):
+  welcome or What's New, which circuit reopens and that it opens, Your
+  Circuits, versions, Sync and Classroom starting with no network, nothing
+  holding the main thread up. 30 launches by default, no windows, a copy of
+  the app with its own settings and home folder. `STATES_ONLY=damaged
+  launch-selftest.sh 30` runs only the damaged circuits (an engine crash in
+  `GUICircuit::createWire` on some, see docs/MAC-APP-AUDIT.md)
 - `launch-check.sh [runs]` -- real launches of the built app (a copy with
   settings and folders of its own, so yours are never touched): each must
   open its circuit window, quit by itself and print none of SwiftUI's
