@@ -404,6 +404,35 @@ int discardPendingConnects(CLDocument* doc, EditGesture& g) {
 // Drop what's being moved: record the move, then connect what landed next
 // to a free pin (the wx canvas's forgiving connect on drop).
 void finishMove(CLDocument* doc, GUICanvas* page, EditGesture& g) {
+	if (g.lastDelta.x == 0 && g.lastDelta.y == 0) {
+		// Dropped where it started (dragged away and back, or a paste dropped
+		// where it began to float): no move to record, so nothing tidied the
+		// wires on the parts, which were stretched on the way and kept a jog of
+		// no length where they bent. The next open merges that away, so Save,
+		// Open, Save changed the file. The parts are where they were, so those
+		// wires get the shapes they had (on a wire still holding those pins);
+		// one joined to them since (C mid-move) is merged, as a drop elsewhere
+		// merges it (commitMove).
+		std::set<unsigned long> known;
+		auto put = [&](const std::vector<WireState>& shapes) {
+			for (auto& ws : shapes) {
+				known.insert(ws.id);
+				if (guiWire* w = doc->circuit.getWire(ws.id))
+					if (!ws.oldWireTree.empty() && pinsOf(ws.oldWireTree) == pinsOf(w)) w->setSegmentMap(ws.oldWireTree);
+			}
+		};
+		put(g.preMoveWire);
+		put(g.preMoveAttached);
+		for (auto& gs : g.preMove) {
+			guiGate* gt = doc->circuit.getGate(gs.id);
+			if (gt == nullptr) continue;
+			for (auto& hs : gt->getHotspotList()) {
+				if (!gt->isConnected(hs.first)) continue;
+				guiWire* w = gt->getConnection(hs.first);
+				if (w != nullptr && known.insert(w->getID()).second) w->endSegDrag();
+			}
+		}
+	}
 	if (g.lastDelta.x != 0 || g.lastDelta.y != 0 || g.floating) {
 		if (g.lastDelta.x != 0 || g.lastDelta.y != 0)
 			commitMove(doc, page, g.preMove, g.preMoveWire, g.preMoveAttached, g.lastDelta);

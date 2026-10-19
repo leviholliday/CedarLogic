@@ -289,6 +289,62 @@ int main(int argc, char** argv) {
 		cl_document_close(d);
 	}
 
+	printf("a part dragged away and back to where it started leaves its wires as they were\n");
+	{
+		// The wire stretched with the part and kept a jog of no length where it
+		// bent; the next open merged that away, so Save, Open, Save changed the file.
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "GA_LED", 10, 0);
+		guiGate* led = newest(d, 0);
+		wire(d, sw, "OUT", led, "");
+		cl_edit_select_none(d, 0);
+		const std::string before = cl_document_save_text(d);
+		const int u0 = cl_edit_undo_count(d);
+		float gx, gy;
+		led->getGLcoords(gx, gy);
+		cl_edit_press(d, 0, gx, gy, 0, 0.05);
+		cl_edit_drag(d, gx, gy + 1);
+		cl_edit_drag(d, gx + 1, gy + 2);
+		cl_edit_drag(d, gx, gy);
+		cl_edit_release(d, gx, gy);
+		const std::string after = cl_document_save_text(d);
+		CHECK(cl_edit_undo_count(d) == u0, "no move recorded");
+		CHECK(after == before, "the wire is as it was");
+		char e[256];
+		CLDocument* back = cl_document_open_text(after.c_str(), (long)after.size(), e, sizeof e);
+		CHECK(back && std::string(cl_document_save_text(back)) == after, "Save, Open, Save: the same");
+		if (back) cl_document_close(back);
+		// The same for a part floated away and back, then joined with C to a
+		// switch whose pin is just above its own, and dropped where it began:
+		// the new wire (one upright run) is tidied as a drop anywhere else
+		// tidies it, not left with a jog of no length at the light's pin.
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, -20);
+		guiGate* sw2 = newest(d, 0);
+		float ox, oy, lx, ly, px, py;
+		pin(sw2, "OUT", ox, oy);
+		led->getHotspotCoords(led->getHotspotList().begin()->first, px, py);   // the light's pin, from the light already there
+		float l0x, l0y;
+		led->getGLcoords(l0x, l0y);
+		cl_edit_add_gate(d, 0, "GA_LED", ox + (l0x - px) + 0, oy + (l0y - py) - 0.5f);
+		guiGate* led2 = newest(d, 0);
+		led2->getGLcoords(lx, ly);
+		const int u1 = cl_edit_undo_count(d);
+		CHECK(cl_edit_float_begin(d, 0, lx, ly), "a second light floats");
+		cl_edit_hover(d, 0, lx + 3, ly - 2, 0.05);
+		cl_edit_hover(d, 0, lx, ly, 0.05);
+		CHECK(cl_edit_connect_while_moving(d, 0, 0.05) == 1, "C joins it to the other switch");
+		cl_edit_press(d, 0, lx, ly, 0, 0.05);
+		cl_edit_release(d, lx, ly);
+		CHECK(cl_edit_undo_count(d) == u1 + 1 && !cl_edit_is_floating(d), "dropped where it began: only the connection recorded");
+		const std::string joined = cl_document_save_text(d);
+		back = cl_document_open_text(joined.c_str(), (long)joined.size(), e, sizeof e);
+		CHECK(back && std::string(cl_document_save_text(back)) == joined, "Save, Open, Save: the same");
+		if (back) cl_document_close(back);
+		cl_document_close(d);
+	}
+
 	// Every wire's pins are on gates still on its page (what a save writes).
 	auto wiresHoldLiveGates = [&](CLDocument* d) {
 		for (int p = 0; p < cl_document_page_count(d); p++)
