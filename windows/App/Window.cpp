@@ -447,13 +447,17 @@ void CircuitWindow::layout() {
 	areaTop = top;
 	// The notes, a pane at the right (its own hairline at its left edge).
 	int right = rc.right;
+	// Focus mode slides it away to the right, as the side panel goes left
+	// (the Mac's notes aren't shown in focus mode).
 	if (notes) {
-		if (notesOpen) {
+		const bool shown = notesOpen && away < 1;
+		if (shown) {
 			const int nw = std::min(sc((int)NotesPanel::panelWidth()), std::max(0, (int)(rc.right - left) / 2));
-			place(notes->widget(), rc.right - nw, top, nw, bottom - top);
-			right = rc.right - nw;
+			const int shift = (int)std::lround(nw * away);
+			place(notes->widget(), rc.right - nw + shift, top, nw, bottom - top);
+			right = rc.right - nw + shift;
 		}
-		ShowWindow(notes->widget(), notesOpen ? SW_SHOWNA : SW_HIDE);
+		ShowWindow(notes->widget(), shown ? SW_SHOWNA : SW_HIDE);
 	}
 	// The oscilloscope, docked along the bottom, with a line over it.
 	int below = bottom;
@@ -2702,6 +2706,7 @@ void CircuitWindow::toggleSimView() {
 		pendingGate.clear();
 		if (!isRunning) setRunning(true);   // "Run" means run
 	}
+	if (notes) notes->themeChanged();   // dark in Simulation View, as the canvas is
 	updateActions();
 	updateBanner();
 	for (Canvas* c : canvases) c->redraw();

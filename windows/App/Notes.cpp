@@ -86,7 +86,7 @@ void NotesPanel::load() {
 	const std::string text = cl_notes(win->document());
 	SetWindowTextW(edit, W(withCrlf(text)).c_str());
 	SendMessageW(edit, EM_EMPTYUNDOBUFFER, 0, 0);   // its own undo starts afresh
-	count = GetWindowTextLengthW(edit);
+	count = (int)W(text).size();
 	loading = false;
 	redraw();
 }
@@ -101,7 +101,7 @@ void NotesPanel::changed() {
 	if (text == cl_notes(win->document())) return;
 	cl_notes_set(win->document(), text.c_str());
 	const int was = count;
-	count = GetWindowTextLengthW(edit);
+	count = (int)W(text).size();   // a line break counts once, as the circuit keeps it
 	if (count > kCounterFrom || was > kCounterFrom) redraw();
 	if ((was == 0) != (count == 0)) InvalidateRect(edit, nullptr, TRUE);   // the placeholder comes and goes
 	win->markEdited();
@@ -174,8 +174,13 @@ LRESULT NotesPanel::message(UINT msg, WPARAM wp, LPARAM lp, bool& handled) {
 	if (msg == WM_COMMAND && LOWORD(wp) == kEditId) {
 		if (HIWORD(wp) == EN_CHANGE) changed();
 		else if (HIWORD(wp) == EN_MAXTEXT) {
-			MessageBeep(MB_OK);
-			win->note("The notes hold 20,000 characters, so they're full.");
+			// As the Mac says it: a paste is cut to fit; typing into a full box beeps.
+			if (pasting) {
+				win->note("The notes hold 20,000 characters, so the paste was cut to fit.");
+			} else {
+				MessageBeep(MB_OK);
+				win->note("The notes are full (20,000 characters).");
+			}
 		}
 		handled = true;
 		return 0;
@@ -209,6 +214,12 @@ LRESULT CALLBACK NotesPanel::editProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UI
 	case WM_CHAR:
 		if (wp == 0x1B || wp == 0x01) return 0;   // no beep, no stray character
 		break;
+	case WM_PASTE: {
+		n->pasting = true;
+		const LRESULT r = DefSubclassProc(h, msg, wp, lp);
+		n->pasting = false;
+		return r;
+	}
 	case WM_PAINT: {
 		const LRESULT r = DefSubclassProc(h, msg, wp, lp);
 		if (GetWindowTextLengthW(h) == 0) {

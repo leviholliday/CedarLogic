@@ -41,6 +41,7 @@ private:
 	HBRUSH paper = nullptr;
 	COLORREF paperColor = 0;
 	bool loading = false;
+	bool pasting = false;   // a paste is going in (so a full box says it was cut to fit)
 	int count = 0;
 	bool closeHot = false;
 	D2D1_RECT_F closeBox{};

@@ -36,7 +36,10 @@ it compiles without a Windows machine:
   the circuit); drawing on the circuit with a pen, a highlighter and an
   eraser, from the mouse or a pen's pressure and eraser end (`Ink.h`, the
   core's `cl_ink_*`; Draw in the toolbar, Ctrl+Alt+P, then P, H, E and 1, 2,
-  3), saved with the circuit; the
+  3), saved with the circuit; your notes for the circuit, a pane at the
+  right (`Notes`: View > Show Notes, Ctrl+Alt+N, or Notes beside Draw in the
+  toolbar), plain text saved and synced with it, with its own undo apart from
+  the circuit's, found by Find, and slid away in focus mode, as on the Mac; the
   status bar where notes appear (`StatusBar`); the side
   panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
   (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
@@ -163,7 +166,7 @@ Direct2D here. And:
   with, `--page N` for the welcome, What's New
   or Settings (0 General ... 5 Sync), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--run a,b`
-  runs commands by their Shortcuts id first (`draw`, `stepClock`, `findNext`, and the
+  runs commands by their Shortcuts id first (`draw`, `notes`, `stepClock`, `findNext`, and the
   drawing bar's `inkPen`, `inkHighlighter`, `inkEraser`); `--find "text"` opens
   the find bar looking for it; `--note "text"`
   puts a note in the status bar, and `--wire-tag` rests the pointer on a wire
