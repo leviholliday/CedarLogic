@@ -27,11 +27,19 @@ final class CircuitCanvasNSView: NSView {
     }
     private var missedDraw = false
     private var occlusionWatch: NSObjectProtocol?
+    private var resignWatch: NSObjectProtocol?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let o = occlusionWatch { NotificationCenter.default.removeObserver(o); occlusionWatch = nil }
+        if let o = resignWatch { NotificationCenter.default.removeObserver(o); resignWatch = nil }
         guard let w = window else { return }
+        // Space held when the window stops taking keys (another app, a
+        // sheet): its key-up goes elsewhere, and every click would pan.
+        resignWatch = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
+                                                             object: w, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.letGoOfSpace() }
+        }
         // A newly opened circuit's keys go to its canvas, not to the bare
         // window (nothing had the keyboard until the first click).
         DispatchQueue.main.async { [weak self, weak w] in
@@ -114,6 +122,20 @@ final class CircuitCanvasNSView: NSView {
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok { letGoOfSpace() }
+        return ok
+    }
+    /// Space is only held while this canvas has the keyboard: once it
+    /// hasn't, the key-up never comes here, and a `spaceDown` left on made
+    /// every click pan -- nothing could be selected, moved or drawn until
+    /// Space was pressed again.
+    private func letGoOfSpace() {
+        guard spaceDown else { return }
+        spaceDown = false
+        if case .pan = drag {} else { NSCursor.arrow.set() }
+    }
     override var isOpaque: Bool { true }
 
     override init(frame: NSRect) {
