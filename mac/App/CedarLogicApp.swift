@@ -24,6 +24,7 @@ struct CedarLogicApp: App {
             KeyMonitor.install()
             TabSwitcher.shared.install()
             MenuFixup.install()
+            SessionCheck.runIfAsked()
             RenderUI.runIfAsked()
             RenderWindow.runIfAsked()
             RenderPresenter.runIfAsked()
