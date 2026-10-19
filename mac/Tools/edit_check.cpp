@@ -196,7 +196,10 @@ int main(int argc, char** argv) {
 	printf("oscilloscope\n");
 	cl_scope_clear(doc);
 	cl_document_set_running(doc, true);
-	for (int i = 0; i < 40; i++) cl_document_tick(doc, 100);
+	// 12 seconds: long enough for a slow clock to count a few times (the
+	// practice circuit's counter, on its own page, moves about every 80
+	// steps; its Sum and Carry then change).
+	for (int i = 0; i < 120; i++) cl_document_tick(doc, 100);
 	const int nsig = cl_scope_signal_count(doc);
 	const long long len = cl_scope_length(doc);
 	printf("  %d signals, %lld samples\n", nsig, len);
