@@ -4,10 +4,11 @@
 // Simulation View read from it, connect-nearby, closing and reopening pages,
 // moving pages, memory contents, and the new drawing calls.
 //   cl_check <cl_gatedefs.xml>
+#include "Bitmap.h"   // first: on Windows it brings the system headers
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
-#include <CoreGraphics/CoreGraphics.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -113,19 +114,17 @@ int main(int argc, char** argv) {
 	CHECK(n == 3 && chips[0].isInput && chips[1].isInput && !chips[2].isInput, "inputs first");
 	CHECK(n == 3 && chips[0].lit && chips[1].lit && chips[2].lit, "all lit");
 	{
-		CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-		CGContextRef ctx = CGBitmapContextCreate(nullptr, 400, 300, 8, 0, cs, kCGImageAlphaPremultipliedLast);
+		Bitmap bitmap(400, 300, false);
+		CLContext ctx = bitmap.ctx();
 		CLDrawOptions o = { true, 3, 1.0, true, false, false, 1.0 };
 		cl_document_draw_ex(doc, 0, ctx, 2, -5, 12, 0.1, &o);
 		cl_simview_draw_flow(doc, 0, ctx, 2, -5, 12, 0.1, 7.0, 1.0);
 		o.simView = false; o.thumbnail = true;
 		cl_document_draw_ex(doc, 0, ctx, 2, -5, 12, 0.1, &o);
-		const unsigned char* px = (const unsigned char*)CGBitmapContextGetData(ctx);
+		const std::vector<unsigned char> px = bitmap.pixels();
 		int inked = 0;
 		for (int i = 0; i < 400 * 300; i++) if (px[i * 4 + 3] != 0) inked++;
 		CHECK(inked > 200, "styled, flow and thumbnail drawing put ink down");
-		CGContextRelease(ctx);
-		CGColorSpaceRelease(cs);
 	}
 
 	printf("connect nearby (C)\n");
@@ -447,6 +446,30 @@ int main(int argc, char** argv) {
 		CHECK(std::string(cl_document_save_text(d)) == shaped, "an arrow-key nudge, Undo: the same");
 		(void)sw;
 		cl_document_close(d);
+	}
+
+	printf("a paste dropped where it already sits\n");
+	{
+		// Duplicating onto the very spot moves the copy by nothing; that
+		// used to install an empty wire shape and crash.
+		cl_edit_select_all(doc, 0);
+		float minX = 1e9f, maxY = -1e9f;
+		for (auto& g : *doc->page(0)->getGateList()) {
+			float gx, gy;
+			g.second->getGLcoords(gx, gy);
+			minX = std::min(minX, gx);
+			maxY = std::max(maxY, gy);
+		}
+		const std::string copied = cl_edit_copy(doc, 0);
+		const size_t wiresBefore = doc->page(0)->getWireList()->size();
+		const char* back = nullptr;
+		const bool pasted = cl_edit_paste(doc, 0, copied.c_str(), minX, maxY, false, &back);
+		CHECK(pasted && doc->page(0)->getWireList()->size() == 2 * wiresBefore, "pasted in place, wires and all");
+		bool shaped = true;
+		for (auto& w : *doc->page(0)->getWireList()) shaped = shaped && !w.second->getSegmentMap().empty();
+		CHECK(shaped, "every wire keeps its shape");
+		cl_edit_undo(doc);
+		CHECK(doc->page(0)->getWireList()->size() == wiresBefore, "undo takes the paste back");
 	}
 
 	printf("save round trip keeps it all\n");

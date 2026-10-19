@@ -4,7 +4,7 @@
 
 #include "DocumentImpl.h"
 #include <map>
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "CircuitParse.h"
 #include "GUICanvas.h"
 #include "GUICircuit.h"
@@ -23,6 +23,9 @@
 #include <fstream>
 #include <memory>
 #include <sstream>
+#ifdef _WIN32
+#include <filesystem>
+#endif
 #include <string>
 #include <vector>
 
@@ -31,7 +34,19 @@ namespace {
 bool settleOnOpen = true;
 
 bool readFile(const char* path, std::string& out) {
+#ifdef _WIN32
+	// The Windows app's paths are UTF-8: opened by their wide name, so
+	// C:\Users\José works whatever the system's code page (only Windows 10
+	// 1903 and later honour the manifest's UTF-8 one).
+	std::ifstream in;
+	try {
+		in.open(std::filesystem::u8path(path), std::ios::binary);
+	} catch (...) {
+		in.open(path, std::ios::binary);
+	}
+#else
 	std::ifstream in(path, std::ios::binary);
+#endif
 	if (!in) return false;
 	std::ostringstream ss;
 	ss << in.rdbuf();
@@ -276,36 +291,49 @@ bool cl_document_page_bounds(const CLDocument* doc, int page,
 	return true;
 }
 
-void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
+void clDrawPage(CLDocument* doc, int page, CLContext ctx,
                double backingScale, double originX, double originY,
                double unitsPerPoint, const cl::render::RenderStyle& style, int inkMode, int inkLook) {
+	clDrawPageLayer(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, style, inkMode, inkLook, nullptr, 0);
+}
+
+void clDrawPageLayer(CLDocument* doc, int page, CLContext ctx,
+                     double backingScale, double originX, double originY,
+                     double unitsPerPoint, const cl::render::RenderStyle& style, int inkMode, int inkLook,
+                     const ClMovingSet* moving, int layer) {
+	// Layer 0 (or no set): everything. Otherwise a gate or wire is drawn when
+	// it's in the set for the moving layer, and when it isn't for the static.
+	const bool split = moving != nullptr && (layer == CL_LAYER_STATIC || layer == CL_LAYER_MOVING);
+	auto wanted = [&](const std::vector<unsigned long>& set, unsigned long id) {
+		if (!split) return true;
+		return std::binary_search(set.begin(), set.end(), id) == (layer == CL_LAYER_MOVING);
+	};
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
 	if (p == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	// Work in physical pixels, as the wx app's device space does, so stroke
 	// widths (device pixels) match it exactly.
-	CGContextSaveGState(ctx);
-	CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	cl::native::DevicePixels device(ctx, backingScale);
 	const float scale = (float)(backingScale / unitsPerPoint);
 	cl::render::Transform t;
 	t.a = scale; t.b = 0; t.c = 0; t.d = -scale;
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(t);
 	// The drawing (the website's DRAWING-NOTES.md 4.8): highlighter strokes
 	// under the parts, like a real highlighter, and pen strokes over them.
-	const bool ink = clInkDrawn(doc, inkMode) && !p->ink.strokes.empty();
+	const bool ink = clInkDrawn(doc, inkMode) && !p->ink.strokes.empty() && !(split && layer == CL_LAYER_MOVING);
 	if (ink) clDrawInkLayer(scene, p->ink, true, inkLook, scale, style.projector);
 	// In id order: the page's lists are hash maps, whose order depends on how
 	// they were built, and where things overlap the order shows.
 	std::vector<unsigned long> ids;
-	for (auto& w : *p->getWireList()) if (w.second) ids.push_back(w.first);
+	for (auto& w : *p->getWireList()) if (w.second && wanted(moving ? moving->wires : ids, w.first)) ids.push_back(w.first);
 	std::sort(ids.begin(), ids.end());
 	// Live dark screen only: paper, thumbnails and Simulation View keep theirs.
 	scene.wiresPhase = style.darkMode && style.colorOutput && style.showLiveState && !style.simView;
 	for (unsigned long id : ids) (*p->getWireList())[id]->drawToScene(scene, style);
 	scene.wiresPhase = false;
 	ids.clear();
-	for (auto& g : *p->getGateList()) if (g.second) ids.push_back(g.first);
+	for (auto& g : *p->getGateList()) if (g.second && wanted(moving ? moving->gates : ids, g.first)) ids.push_back(g.first);
 	std::sort(ids.begin(), ids.end());
 	for (unsigned long id : ids) (*p->getGateList())[id]->drawToScene(scene, style);
 	if (ink) clDrawInkLayer(scene, p->ink, false, inkLook, scale, style.projector);
@@ -316,23 +344,22 @@ void clDrawPage(CLDocument* doc, int page, CGContextRef ctx,
 			guiGate* g = (*p->getGateList())[id];
 			if (g->isLocked()) drawLockBadge(scene, g, style, (float)unitsPerPoint, (float)backingScale);
 		}
-	CGContextRestoreGState(ctx);
 }
 
-void cl_document_draw(CLDocument* doc, int page, CGContextRef ctx,
+void cl_document_draw(CLDocument* doc, int page, CLContext ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark) {
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint,
 	           cl::render::RenderStyle::screen(dark), CL_INK_FOLLOW, dark ? kInkLookDark : kInkLookLight);
 }
 
-bool cl_document_draw_fitted(CLDocument* doc, int page, CGContextRef ctx,
+bool cl_document_draw_fitted(CLDocument* doc, int page, CLContext ctx,
                              double width, double height, double margin,
                              double backingScale, int style) {
 	return cl_document_draw_fitted_ink(doc, page, ctx, width, height, margin, backingScale, style, false);
 }
 
-bool cl_document_draw_fitted_ink(CLDocument* doc, int page, CGContextRef ctx,
+bool cl_document_draw_fitted_ink(CLDocument* doc, int page, CLContext ctx,
                                  double width, double height, double margin,
                                  double backingScale, int style, bool ink) {
 	double l, b, r, t;
@@ -371,6 +398,7 @@ int cl_document_tick(CLDocument* doc, double elapsedMs) {
 	if (steps > kMaxCatchUp) { steps = kMaxCatchUp; doc->carryMs = 0; }
 	doc->sim->step(steps);
 	int flags = CL_TICK_CHANGED;
+	if (doc->sim->changesInLastRun() > 0) flags |= CL_TICK_SHOWN;
 	if (doc->sim->takePauseRequest()) { doc->running = false; flags |= CL_TICK_PAUSED; }
 	return flags;
 }

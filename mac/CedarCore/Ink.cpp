@@ -6,7 +6,7 @@
 // (circuit_file.hpp, ink.hpp); the undo steps are src/gui/command/cmdInk.
 
 #include "DocumentImpl.h"
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "CircuitParse.h"
 #include "ink.hpp"
 #include "command/cmdInk.h"
@@ -479,16 +479,15 @@ int cl_ink_live_page(const CLDocument* doc) {
 	return -1;
 }
 
-void cl_ink_draw_live(CLDocument* doc, CGContextRef ctx, double backingScale,
+void cl_ink_draw_live(CLDocument* doc, CLContext ctx, double backingScale,
                       double originX, double originY, double unitsPerPoint, bool dark, bool projector) {
 	if (doc == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
-	CGContextSaveGState(ctx);
-	CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	cl::native::DevicePixels device(ctx, backingScale);
 	const float scale = (float)(backingScale / unitsPerPoint);
 	cl::render::Transform t;
 	t.a = scale; t.b = 0; t.c = 0; t.d = -scale;
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(t);
 	const int look = dark ? kInkLookDark : kInkLookLight;
 	const InkGesture& g = doc->ink;
@@ -520,7 +519,6 @@ void cl_ink_draw_live(CLDocument* doc, CGContextRef ctx, double backingScale,
 			scene.fillCircle(at, std::max((float)h.width * scale, minPx) / scale / 2, c);
 		}
 	}
-	CGContextRestoreGState(ctx);
 }
 
 void cl_ink_color(const char* token, int tool, int look, double* r, double* g, double* b, double* a) {

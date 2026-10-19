@@ -1,10 +1,7 @@
 // Headless check of simulation and clicks: open a page, render it, click the
 // first spot a part takes (scanning the page), step, render again.
 //   sim_check <cl_gatedefs.xml> <in.cdl> <page> <before.png> <after.png>
-#include "CedarCore.h"
-#include <CoreGraphics/CoreGraphics.h>
-#include <ImageIO/ImageIO.h>
-#include <CoreServices/CoreServices.h>
+#include "Bitmap.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -16,16 +13,10 @@ static bool render(CLDocument* doc, int page, const char* out) {
 	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return false;
 	const double wP = W / sf, hP = H / sf;
 	const double upp = std::max((r - l + 4) / wP, (t - b + 4) / hP);
-	CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-	CGContextRef ctx = CGBitmapContextCreate(nullptr, W, H, 8, 0, cs, kCGImageAlphaPremultipliedLast);
-	CGContextSetRGBFillColor(ctx, 1, 1, 1, 1); CGContextFillRect(ctx, CGRectMake(0, 0, W, H));
-	CGContextTranslateCTM(ctx, 0, H); CGContextScaleCTM(ctx, sf, -sf);
-	cl_document_draw(doc, page, ctx, sf, (l + r) / 2 - wP * upp / 2, (b + t) / 2 + hP * upp / 2, upp, false);
-	CGImageRef img = CGBitmapContextCreateImage(ctx);
-	CFURLRef url = CFURLCreateFromFileSystemRepresentation(nullptr, (const UInt8*)out, strlen(out), false);
-	CGImageDestinationRef d = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, nullptr);
-	CGImageDestinationAddImage(d, img, nullptr);
-	return CGImageDestinationFinalize(d);
+	Bitmap bitmap(W, H);
+	bitmap.flip(sf);
+	cl_document_draw(doc, page, bitmap.ctx(), sf, (l + r) / 2 - wP * upp / 2, (b + t) / 2 + hP * upp / 2, upp, false);
+	return bitmap.savePng(out);
 }
 
 int main(int argc, char** argv) {

@@ -5,12 +5,12 @@
 // wx code it's named after (GUICanvas, cmdDeleteTab, RamPopupDialog, Welcome).
 
 #include "DocumentImpl.h"
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "Settings.h"
 #include "guiGate.h"
 #include "guiWire.h"
 #include "render/RenderStyle.h"
-#include "render/SkiaProbe.h"   // measuredTextWidth (Core Text, in CGScene.cpp)
+#include "render/SkiaProbe.h"   // measuredTextWidth (in the platform's scene: CGScene.cpp, CairoScene.cpp...)
 #include "command/cmdCreateWire.h"
 #include "command/cmdDeleteSelection.h"
 #include "command/cmdMoveSelection.h"
@@ -28,16 +28,14 @@ namespace {
 
 // The camera cl_document_draw uses: device pixels, world y up.
 struct Camera {
-	CGContextRef ctx;
+	cl::native::DevicePixels device;
 	cl::render::Transform t;
-	Camera(CGContextRef ctx, double backingScale, double originX, double originY, double unitsPerPoint) : ctx(ctx) {
-		CGContextSaveGState(ctx);
-		CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	Camera(CLContext ctx, double backingScale, double originX, double originY, double unitsPerPoint)
+		: device(ctx, backingScale) {
 		const float scale = (float)(backingScale / unitsPerPoint);
 		t.a = scale; t.b = 0; t.c = 0; t.d = -scale;
 		t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
 	}
-	~Camera() { CGContextRestoreGState(ctx); }
 };
 
 bool firstPinLit(guiGate* g) {
@@ -55,7 +53,7 @@ extern "C" {
 
 // ---- Drawing ----------------------------------------------------------------
 
-void cl_document_draw_ex(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+void cl_document_draw_ex(CLDocument* doc, int page, CLContext ctx, double backingScale,
                          double originX, double originY, double unitsPerPoint,
                          const CLDrawOptions* o) {
 	if (o == nullptr) return;
@@ -74,6 +72,74 @@ void cl_document_draw_ex(CLDocument* doc, int page, CGContextRef ctx, double bac
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, inkMode, look);
 }
 
+// What a move in progress on a page moves: its gates, and the wires that go
+// with them (selected ones moving whole, and those that end on a moving part
+// and reshape). False when nothing is moving there.
+static bool movingSet(const CLDocument* doc, int page, ClMovingSet& out) {
+	if (doc == nullptr) return false;
+	const EditGesture& g = doc->gesture;
+	if (g.mode != EditGesture::Moving || g.page != page || g.preMove.empty()) return false;
+	out.gates.clear();
+	out.wires.clear();
+	for (const GateState& s : g.preMove) out.gates.push_back(s.id);
+	for (const WireState& s : g.preMoveWire) out.wires.push_back(s.id);
+	for (const WireState& s : g.preMoveAttached) out.wires.push_back(s.id);
+	// A floating paste's or a C connection's wires aren't in the snapshot:
+	// every wire on a moving gate's pins goes with it.
+	if (GUICanvas* p = doc->page(page)) {
+		for (unsigned long id : out.gates) {
+			auto it = p->getGateList()->find(id);
+			if (it == p->getGateList()->end() || it->second == nullptr) continue;
+			guiGate* gt = it->second;
+			for (auto& hs : gt->getHotspotList())
+				if (gt->isConnected(hs.first))
+					if (guiWire* w = gt->getConnection(hs.first)) out.wires.push_back(w->getID());
+		}
+	}
+	std::sort(out.gates.begin(), out.gates.end());
+	out.gates.erase(std::unique(out.gates.begin(), out.gates.end()), out.gates.end());
+	std::sort(out.wires.begin(), out.wires.end());
+	out.wires.erase(std::unique(out.wires.begin(), out.wires.end()), out.wires.end());
+	return true;
+}
+
+bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double backingScale,
+                            double originX, double originY, double unitsPerPoint,
+                            const CLDrawOptions* o, int layer) {
+	if (o == nullptr || o->thumbnail || (layer != CL_LAYER_STATIC && layer != CL_LAYER_MOVING)) return false;
+	ClMovingSet moving;
+	if (!movingSet(doc, page, moving)) return false;
+	// The style exactly as cl_document_draw_ex makes it.
+	using cl::render::RenderStyle;
+	RenderStyle s = RenderStyle::screen(o->dark);
+	s.accentIndex = o->accent;
+	s.wireScale = (float)o->wireScale;
+	s.simView = o->simView;
+	s.showSelection = o->showSelection && !o->simView;
+	s.selectionFade = (float)std::min(1.0, std::max(0.0, o->selectionFade));
+	const int look = o->ink == CL_INK_ALWAYS_PRINT ? kInkLookPrint : (o->dark || o->simView) ? kInkLookDark : kInkLookLight;
+	clDrawPageLayer(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, look, &moving, layer);
+	return true;
+}
+
+unsigned long long cl_document_moving_signature(const CLDocument* doc, int page) {
+	ClMovingSet moving;
+	if (!movingSet(doc, page, moving)) return 0;
+	// FNV-1a over the ids, gates then wires, and where the move started.
+	unsigned long long h = 1469598103934665603ULL;
+	auto mix = [&](unsigned long long v) { h ^= v; h *= 1099511628211ULL; };
+	for (unsigned long id : moving.gates) mix(id);
+	mix(0xFFFFFFFFULL);
+	for (unsigned long id : moving.wires) mix(id);
+	float sx = doc->gesture.start.x, sy = doc->gesture.start.y;
+	unsigned int bx, by;
+	std::memcpy(&bx, &sx, sizeof bx);
+	std::memcpy(&by, &sy, sizeof by);
+	mix(bx);
+	mix(by);
+	return h ? h : 1;
+}
+
 void cl_accent_color(int index, bool dark, double* r, double* g, double* b) {
 	cl::render::RenderStyle s;
 	s.darkMode = dark;
@@ -90,8 +156,8 @@ void cl_set_wire_dots(bool atBends, double radius) {
 }
 
 void cl_set_low_wire_color(bool on, double r, double g, double b) {
-	cl::mac::CGScene::remapLowWire = on;
-	cl::mac::CGScene::lowWire = cl::render::Color((float)r, (float)g, (float)b, 1);
+	cl::native::PlatformScene::remapLowWire = on;
+	cl::native::PlatformScene::lowWire = cl::render::Color((float)r, (float)g, (float)b, 1);
 }
 
 int cl_document_gate_count(const CLDocument* doc, int page) {
@@ -104,7 +170,7 @@ int cl_document_gate_count(const CLDocument* doc, int page) {
 // driving pin - phase) mod period is under the dash length, so as the phase
 // grows they march away from the driver, splitting at branches.
 
-void cl_simview_draw_flow(CLDocument* doc, int pageIndex, CGContextRef ctx, double backingScale,
+void cl_simview_draw_flow(CLDocument* doc, int pageIndex, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, double phasePoints,
                           double wireScale) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
@@ -113,7 +179,7 @@ void cl_simview_draw_flow(CLDocument* doc, int pageIndex, CGContextRef ctx, doub
 	using cl::render::Point;
 	using cl::render::Stroke;
 	Camera cam(ctx, backingScale, originX, originY, unitsPerPoint);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(cam.t);
 
 	const float z = (float)unitsPerPoint;
@@ -255,7 +321,7 @@ int cl_simview_chips(CLDocument* doc, int pageIndex, CLSimChip* out, int max) {
 
 // ---- Simulation View in a classroom: projector mode, Predict, then reveal ----------
 
-void cl_simview_draw_page(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+void cl_simview_draw_page(CLDocument* doc, int page, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, const CLSimViewStyle* o) {
 	if (o == nullptr) return;
 	cl::render::RenderStyle s = cl::render::RenderStyle::screen(true);
@@ -269,7 +335,7 @@ void cl_simview_draw_page(CLDocument* doc, int page, CGContextRef ctx, double ba
 	clDrawPage(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, kInkLookDark);
 }
 
-void cl_simview_draw_page_covering(CLDocument* doc, int page, CGContextRef ctx, double backingScale,
+void cl_simview_draw_page_covering(CLDocument* doc, int page, CLContext ctx, double backingScale,
                                    double originX, double originY, double unitsPerPoint, const CLSimViewStyle* o,
                                    const long* gates, int count) {
 	if (o == nullptr) return;
@@ -482,7 +548,7 @@ int cl_simview_light_name(CLDocument* doc, int pageIndex, long gate, char* buf, 
 	return (int)name.size();
 }
 
-void cl_simview_draw_predict(CLDocument* doc, int pageIndex, CGContextRef ctx, double backingScale,
+void cl_simview_draw_predict(CLDocument* doc, int pageIndex, CLContext ctx, double backingScale,
                              double originX, double originY, double unitsPerPoint,
                              const CLPredictMark* marks, int count, bool projector) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
@@ -491,7 +557,7 @@ void cl_simview_draw_predict(CLDocument* doc, int pageIndex, CGContextRef ctx, d
 	using cl::render::Point;
 	using cl::render::Stroke;
 	Camera cam(ctx, backingScale, originX, originY, unitsPerPoint);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(cam.t);
 	const float px = (float)backingScale * (projector ? 1.6f : 1.0f);   // a point, in device pixels
 

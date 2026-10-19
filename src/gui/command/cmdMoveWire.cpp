@@ -31,6 +31,10 @@ cmdMoveWire::cmdMoveWire(GUICircuit* gCircuit, unsigned long wid,
 	this->gCircuit = gCircuit;
 	this->wid = wid;
 	oldSegList = oldList;
+	// A move by nothing (a paste dropped where it already sits) keeps the
+	// shape: Do() installs newSegList when delta is zero, and an empty one
+	// used to crash in guiWire::setSegmentMap.
+	newSegList = oldList;
 	this->delta = delta;
 }
 
