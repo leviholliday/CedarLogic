@@ -2,7 +2,8 @@
 //
 //   CedarLogic --render-classroom <dir>
 //       the Classroom window and its sheets, light and dark, as PNGs, from
-//       made-up classes (no engine, no network).
+//       made-up classes (no engine, no network); then what Print sends for
+//       the recovery sheet and a class pass (PASS/FAIL, exit 1 on a failure).
 //   CL_CLASSROOM_SERVICE=http://localhost:8788 CedarLogic --classroom-e2e <dir>
 //       a teacher and a student (two engines, each with a folder of its own
 //       under <dir>) through the Classroom code the window uses, against a
@@ -15,6 +16,7 @@
 //       pictures the real screens along the way (e2e-*.png), exits 1 on failure.
 
 import AppKit
+import PDFKit
 import SwiftUI
 
 @MainActor
@@ -25,7 +27,7 @@ enum RenderClassroom {
             let dir = URL(fileURLWithPath: args[i + 1], isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             renderAll(dir)
-            exit(0)
+            exit(failures == 0 ? 0 : 1)
         }
         if let i = args.firstIndex(of: "--classroom-e2e"), i + 1 < args.count {
             let dir = URL(fileURLWithPath: args[i + 1], isDirectory: true)
@@ -162,6 +164,61 @@ enum RenderClassroom {
              dark: true, in: dir, size: NSSize(width: 1280, height: 800))
         prefs.dark = saved
         ClassroomFront.override = nil
+        checkPrinted(dir)
+    }
+
+    static var failures = 0
+
+    /// What Print sends (RecoverySheet.pagePDF): a page with the words on it
+    /// and ink on it, not the blank page an unlaid-out hosting view printed.
+    static func checkPrinted(_ dir: URL) {
+        let key = "000G40R40M30E209185GR38E1YZ4", code = "K7QM4XPD2FJ3"
+        let keyLink = ClassroomCenter.webLink(kind: 0, key), passLink = ClassroomCenter.webLink(kind: 1, code)
+        let pages: [(String, AnyView, [String], String)] = [
+            ("recovery-sheet-print", AnyView(RecoverySheetView(className: "Digital Logic 101", key: key, link: keyLink)),
+             ["Digital Logic 101", "teacher key", ClassroomCenter.grouped(key)], keyLink),
+            ("class-pass-print", AnyView(PassPrintView(className: "Digital Logic 101", student: "Ada Lovelace", code: code, link: passLink)),
+             ["Digital Logic 101", "Ada Lovelace", ClassroomCenter.grouped(code)], passLink),
+        ]
+        for (name, view, words, link) in pages {
+            guard let data = RecoverySheet.pagePDF(view) else { print("FAIL \(name): no PDF"); failures += 1; continue }
+            if !verdict(name, data, words, link, dir) { failures += 1 }
+        }
+    }
+
+    /// The words are there (a long key wraps onto two lines), enough of the
+    /// page drawn at 1x on white is ink, and its QR code scans to the link.
+    private static func verdict(_ name: String, _ data: Data, _ words: [String], _ link: String, _ dir: URL) -> Bool {
+        try? data.write(to: dir.appendingPathComponent(name + ".pdf"))
+        guard let page = PDFDocument(data: data)?.page(at: 0) else { print("FAIL \(name): not a PDF"); return false }
+        let squeeze = { (s: String) in s.filter { !$0.isWhitespace } }
+        let text = squeeze(page.string ?? "")
+        let missing = words.filter { !text.contains(squeeze($0)) }
+        let thumb = page.thumbnail(of: NSSize(width: 612, height: 792), for: .mediaBox)
+        var dark = 0, total = 0
+        if let cg = thumb.cgImage(forProposedRect: nil, context: nil, hints: nil),
+           let ctx = CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width,
+                               space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) {
+            ctx.setFillColor(gray: 1, alpha: 1)
+            ctx.fill(CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            if let p = ctx.data?.assumingMemoryBound(to: UInt8.self) {
+                total = cg.width * cg.height
+                for i in 0..<total where p[i] < 128 { dark += 1 }
+            }
+        }
+        let share = total > 0 ? Double(dark) / Double(total) : 0
+        // The QR code is printed and scans back to the link.
+        var scanned = ""
+        if let tiff = thumb.tiffRepresentation, let ci = CIImage(data: tiff),
+           let detector = CIDetector(ofType: CIDetectorTypeQRCode, context: nil, options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]) {
+            scanned = detector.features(in: ci).compactMap { ($0 as? CIQRCodeFeature)?.messageString }.first ?? ""
+        }
+        let qrOK = scanned == link
+        let ok = missing.isEmpty && share > 0.03 && qrOK
+        print(String(format: "%@ %@: %@, %.2f%% ink, QR code %@", ok ? "PASS" : "FAIL", name,
+                     missing.isEmpty ? "every word" : "missing \(missing)", share * 100, qrOK ? "scans" : "doesn't scan"))
+        return ok
     }
 }
 

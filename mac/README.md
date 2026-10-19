@@ -111,7 +111,10 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   and the badge
 - `CedarLogic --render-classroom <dir>` -- the Classroom window (teacher and
   student pages, every sheet, the projector code, the recovery sheet) as
-  PNGs, light and dark, from made-up classes; no network
+  PNGs, light and dark, from made-up classes; no network. Then what Print
+  sends for the recovery sheet and a class pass (`*-print.pdf`): every word
+  there and a QR code that scans back to its link (PASS/FAIL, exit 1 on a
+  failure)
 - `CL_CLASSROOM_SERVICE=http://localhost:8788 CedarLogic --classroom-e2e <dir>`
   -- a teacher and a student (two engines, folders under <dir>) through the
   window's own Classroom code against a running Worker: create, join, post
@@ -169,6 +172,20 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   permission; run it after any change to the title bar row. The app side
   is `CL_BAR_TEST=<dir>` (App/BarTest.swift): a new untitled circuit, tool
   clicks logged instead of done
+- `CedarLogic --undo-check` -- the engine's undo steps reach macOS's undo
+  manager, which is what makes a window edited and autosaved: edits past
+  the engine's 500-step history still mark the circuit edited, and undo
+  and redo still reach the engine (headless, PASS/FAIL, exit 1 on a failure)
+- `CedarLogic --leak-check` -- a circuit window's controller (and with it
+  its circuit and its 60-a-second clock) goes when the window does, after
+  Add a Gate, a split's second side, Simulation View (headless, PASS/FAIL,
+  exit 1 on a failure)
+- `launch-check.sh [runs]` -- real launches of the built app (a copy with
+  settings and folders of its own, so yours are never touched): each must
+  open its circuit window, quit by itself and print none of SwiftUI's
+  "Publishing changes from within view updates" / "Modifying state during
+  view update" warnings; the first is a first launch. The windows show on
+  screen for a few seconds each; nothing is clicked
 - `CL_SNAPSHOT=<dir>` when running the app -- the circuit window draws
   itself to PNGs as it opens, splits (placing a gate on the second side),
   gains a tab and unsplits, and logs both canvases' frames (works when
