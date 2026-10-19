@@ -108,6 +108,17 @@ the model can drift, and a drifting wire is the "glitch" you can see.
   pins, never edited in place) probably is, and the fuzzer is the test that would prove
   it: the target is zero reports with `CL_FUZZ_BOTH=1 CL_FUZZ_REACH=1`.
 
+## Open after round 3 (sweep 2026-10-19, after the engine reconcile bb63022)
+
+Flags: REACH BOTH INVARIANT DUP NOSIM on all; "wide" adds WIDE SIM UNDOSTEP TREE
+REOPEN=25 UNDOALL=50. Basic, seeds 1-150 x 250: 0 failed. Wide from new, seeds
+1-50: 2 failed (24 and 40: undo all then redo all gives a wire a different
+shape, `h` vs `v` run / a bend at another y). Wide from Lab5, Broadcast and
+Routing Backwards, seeds 1-75: 1 failed (69: save, reopen, save writes a
+`(cross)` where the first save had a `(connect)`). All three fail the same
+way on the engine before the reconcile (5d44307), so they are round-3 bugs
+still open, not from the merge. Wide seeds take 4-15 s each under ASan.
+
 ## Next
 
 - Decide: repair the drift in place (find the reroute step after a part drag that skips
