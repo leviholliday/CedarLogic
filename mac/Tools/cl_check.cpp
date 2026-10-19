@@ -252,6 +252,43 @@ int main(int argc, char** argv) {
 		CHECK(!sw->isConnected(opin) && std::fabs(nx - (lx + (ox - px) + 3)) < 1e-3, "the first undo takes back the connection, not the move");
 	}
 
+	printf("a wire C made mid-move: Undo then Redo give it the shape it was dropped with\n");
+	{
+		// C joins the light to the switch where it floats; it moves on, the
+		// wire stretching after it, and is dropped. Redo of the connection
+		// routed the wire afresh from the pins, not the shape it was dropped with.
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		float ox, oy;
+		std::string opin;
+		pin(sw, "OUT", ox, oy, &opin);
+		cl_edit_add_gate(d, 0, "GA_LED", 10, 0);
+		guiGate* led = newest(d, 0);
+		float lx, ly, px, py;
+		led->getGLcoords(lx, ly);
+		pin(led, "", px, py);
+		CHECK(cl_edit_float_begin(d, 0, lx, ly), "the light floats");
+		const float ax = lx + (ox - px) + 1, ay = ly + (oy - py);
+		cl_edit_hover(d, 0, ax, ay, 0.05);
+		CHECK(cl_edit_connect_while_moving(d, 0, 0.05) == 1, "C connects it");
+		cl_edit_hover(d, 0, ax + 6, ay - 9, 0.05);
+		cl_edit_press(d, 0, ax + 6, ay - 9, 0, 0.05);
+		cl_edit_release(d, ax + 6, ay - 9);
+		CHECK(sw->isConnected(opin), "dropped, connected");
+		const std::string dropped = cl_document_save_text(d);
+		cl_edit_undo(d);
+		CHECK(!sw->isConnected(opin), "Undo takes back the connection");
+		cl_edit_redo(d);
+		CHECK(std::string(cl_document_save_text(d)) == dropped, "Redo gives the wire the shape it was dropped with");
+		cl_edit_undo(d);
+		cl_edit_undo(d);
+		cl_edit_redo(d);
+		cl_edit_redo(d);
+		CHECK(std::string(cl_document_save_text(d)) == dropped, "and so do two Undos and two Redos");
+		cl_document_close(d);
+	}
+
 	// Every wire's pins are on gates still on its page (what a save writes).
 	auto wiresHoldLiveGates = [&](CLDocument* d) {
 		for (int p = 0; p < cl_document_page_count(d); p++)

@@ -16,6 +16,8 @@
 #include "command/cmdCreateGate.h"
 #include "command/cmdInk.h"
 #include "command/cmdDeleteWire.h"
+#include "command/cmdConnectWire.h"
+#include "command/cmdCreateWire.h"
 #include "command/cmdDisconnectWire.h"
 #include "command/cmdTidy.h"
 #include "command/cmdWireSegDrag.h"
@@ -253,8 +255,29 @@ public:
 	explicit CommandGroup(const char* name) : klsCommand(true, name) {}
 	std::vector<std::unique_ptr<klsCommand>> parts;
 	bool done = true;   // the parts arrive already applied
+	// The shapes of the wires the parts made or joined, as they are once the
+	// group is recorded. Redoing a connection routes its wire afresh from where
+	// the pins are now, which needn't be the shape it had: a connection made
+	// mid-move (C) was routed where the part was then and stretched as the part
+	// moved on. Redo puts these back, on a wire still holding exactly those pins.
+	std::map<unsigned long, SegmentMap> shapes;
+	void recordShapes(GUICircuit* circuit) {
+		for (auto& c : parts) {
+			unsigned long id = 0;
+			if (auto* cw = dynamic_cast<cmdCreateWire*>(c.get())) { if (!cw->getWireIds().empty()) id = cw->getWireIds()[0]; }
+			else if (auto* cc = dynamic_cast<cmdConnectWire*>(c.get())) id = cc->getWireId();
+			if (guiWire* w = id ? circuit->getWire(id) : nullptr) shapes[w->getID()] = w->getSegmentMap();
+		}
+		gCircuit = circuit;
+	}
 	bool Do() override {
-		if (!done) for (auto& c : parts) c->Do();
+		if (!done) {
+			for (auto& c : parts) c->Do();
+			for (const auto& e : shapes) {
+				guiWire* w = gCircuit ? gCircuit->getWire(e.first) : nullptr;
+				if (w != nullptr && !e.second.empty() && pinsOf(e.second) == pinsOf(w)) w->setSegmentMap(e.second);
+			}
+		}
 		done = true;
 		return true;
 	}
@@ -349,6 +372,7 @@ int connectNearby(CLDocument* doc, GUICanvas* page, float unitsPerPoint, bool mo
 	}
 	const int made = (int)group->parts.size();
 	if (made == 0) { delete group; return 0; }
+	group->recordShapes(&doc->circuit);
 	submit(doc, page, group);
 	page->collisionUpdate();
 	return made;
@@ -361,6 +385,7 @@ void flushPendingConnects(CLDocument* doc, GUICanvas* page, EditGesture& g) {
 	CommandGroup* group = new CommandGroup("Connect");
 	for (klsCommand* c : g.pendingConnects) group->parts.emplace_back(c);
 	g.pendingConnects.clear();
+	group->recordShapes(&doc->circuit);
 	submit(doc, page, group);
 }
 
