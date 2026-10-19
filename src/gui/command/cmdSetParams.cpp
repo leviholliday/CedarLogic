@@ -95,6 +95,10 @@ bool cmdSetParams::Do() {
 		gate->setGUIParam(paramWalk->first, paramWalk->second);
 		paramWalk++;
 	}
+	// A setting that reshapes the gate (a TO/FROM's name, its angle) reseats
+	// its wires' ends; tidy them as a drop does, or the stub left on the pin
+	// is only cleared by the merge a reload does and the file changes.
+	gate->finalizeWirePlacements();
 	if (!fromString && gate->getGUIType() == "TO") gCircuit->oscopeSignalsChanged();
 	return true;
 }
@@ -124,6 +128,7 @@ bool cmdSetParams::Undo() {
 		gate->setGUIParam(paramWalk->first, paramWalk->second);
 		paramWalk++;
 	}
+	gate->finalizeWirePlacements();   // as in Do
 	if (!fromString && gate->getGUIType() == "TO") gCircuit->oscopeSignalsChanged();
 	return true;
 }

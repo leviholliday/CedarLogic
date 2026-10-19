@@ -10,6 +10,7 @@
 // Every string from the other side lands in a Text (§4.10).
 
 import AppKit
+import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -1897,27 +1898,42 @@ struct PassPrintView: View {
     }
 }
 
+/// Printing the recovery sheet and a class pass. The page is drawn into a PDF
+/// first (ImageRenderer, as Export Lab Report does) and the PDF is printed:
+/// an NSHostingView handed straight to NSPrintOperation, outside any window,
+/// has never laid out its SwiftUI content, so it printed a blank page.
 @MainActor
 enum RecoverySheet {
     static func print(className: String, key: String, link: String) {
-        let v = NSHostingView(rootView: RecoverySheetView(className: className, key: key, link: link))
-        v.frame = NSRect(x: 0, y: 0, width: 612, height: 792)
-        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
-        info.topMargin = 0; info.bottomMargin = 0; info.leftMargin = 0; info.rightMargin = 0
-        info.horizontalPagination = .fit; info.verticalPagination = .fit
-        let op = NSPrintOperation(view: v, printInfo: info)
-        op.jobTitle = "\(className) teacher key"
-        op.run()
+        printPage(RecoverySheetView(className: className, key: key, link: link), title: "\(className) teacher key")
     }
     /// A class pass on paper (3.17): the class, the student, the code and its QR code.
     static func printPass(className: String, student: String, code: String, link: String) {
-        let v = NSHostingView(rootView: PassPrintView(className: className, student: student, code: code, link: link))
-        v.frame = NSRect(x: 0, y: 0, width: 612, height: 792)
+        printPage(PassPrintView(className: className, student: student, code: code, link: link), title: "\(className) class pass")
+    }
+
+    /// A US Letter page (612 x 792 points) as a one-page PDF, drawn as vectors.
+    static func pagePDF<V: View>(_ view: V) -> Data? {
+        let r = ImageRenderer(content: view.environment(\.colorScheme, .light))
+        r.proposedSize = ProposedViewSize(width: 612, height: 792)
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        guard let consumer = CGDataConsumer(data: data as CFMutableData),
+              let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
+        ctx.beginPDFPage(nil)
+        r.render { _, draw in draw(ctx) }
+        ctx.endPDFPage()
+        ctx.closePDF()
+        return data as Data
+    }
+
+    private static func printPage<V: View>(_ view: V, title: String) {
+        guard let data = pagePDF(view), let pdf = PDFDocument(data: data) else { NSSound.beep(); return }
         let info = NSPrintInfo.shared.copy() as! NSPrintInfo
         info.topMargin = 0; info.bottomMargin = 0; info.leftMargin = 0; info.rightMargin = 0
         info.horizontalPagination = .fit; info.verticalPagination = .fit
-        let op = NSPrintOperation(view: v, printInfo: info)
-        op.jobTitle = "\(className) class pass"
+        guard let op = pdf.printOperation(for: info, scalingMode: .pageScaleToFit, autoRotate: false) else { NSSound.beep(); return }
+        op.jobTitle = title
         op.run()
     }
 }

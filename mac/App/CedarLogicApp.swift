@@ -29,6 +29,8 @@ struct CedarLogicApp: App {
             RenderPresenter.runIfAsked()
             RenderClassroom.runIfAsked()
             LabReport.runIfAsked()
+            UndoCheck.runIfAsked()
+            LeakCheck.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
             DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
         }

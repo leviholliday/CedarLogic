@@ -719,8 +719,21 @@ final class CanvasController: ObservableObject {
     func attach(_ document: CoreDocument) {
         guard self.document !== document else { return }
         self.document = document
-        isRunning = document.isRunning
-        stepMs = document.stepMs
+        // attach runs inside SwiftUI's view update (CanvasView's makeNSView
+        // and updateNSView), where publishing a change is undefined
+        // behaviour (SwiftUI warned 22 times for every circuit window that
+        // opened). So only what differs is set: run/pause straight away (the
+        // clock below must not run a paused circuit; a new controller and a
+        // new document both start running, so this almost never publishes),
+        // the speed just after the update (the engine already has it; this
+        // copy is for the control bar and the marching dashes).
+        if isRunning != document.isRunning { isRunning = document.isRunning }
+        if stepMs != document.stepMs {
+            DispatchQueue.main.async { [weak self, weak document] in
+                guard let self, let document, self.document === document, self.stepMs != document.stepMs else { return }
+                self.stepMs = document.stepMs
+            }
+        }
         lastPageCount = document.pageCount
         // The second side of a split runs no simulation (its partner does),
         // but still needs the ticks for its own view: the status bar, eased
@@ -839,8 +852,10 @@ final class CanvasController: ObservableObject {
     var sheetHost: CanvasController { isSecondary ? (partner ?? self) : self }
     /// The side commands go to: this one, or the second side when it's active.
     var routed: CanvasController { splitFocus ? (partner ?? self) : self }
-    /// What the sheets act on: the side that asked.
-    var quickAddTarget: CanvasController?
+    /// What the sheets act on: the side that asked. Weak: it's usually this
+    /// controller itself, and holding on to itself kept it, its circuit and
+    /// its clock alive after the window closed (--leak-check).
+    weak var quickAddTarget: CanvasController?
     var exportPage = 0
     var settingsGate: Int?
 
@@ -1283,7 +1298,22 @@ final class CanvasController: ObservableObject {
             undoManager?.setActionName(name)
             mirrored += 1
         }
+        // A full history: the engine keeps its last 500 steps (kLimit in
+        // include/gui/native/NoWxCompat.h), so from then on a new step drops
+        // the oldest and the count stays put -- and counting alone missed
+        // every step after the 500th: nothing was registered, so the window
+        // never became edited, autosave skipped it and quitting lost it.
+        // At the limit, an edit since the last save (the engine's own flag,
+        // which saving clears) is mirrored as one more step. Undo always
+        // takes back the engine's latest step, so one too many here only
+        // means a last Cmd-Z that does nothing; the engine has nothing to
+        // redo at the limit, so no redo is lost.
+        if n == mirrored, n >= Self.engineHistoryLimit, document.isEdited, !document.canRedo {
+            undoManager?.registerUndo(withTarget: self) { $0.engineUndo() }
+            undoManager?.setActionName(document.undoName)
+        }
     }
+    static let engineHistoryLimit = 500
 
     private func engineUndo() {
         guard let document, document.undo() else { return }
