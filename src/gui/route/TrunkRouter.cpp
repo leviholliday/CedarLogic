@@ -65,6 +65,11 @@ RouteResult TrunkRouter::route(const RouteInput &in) const {
 		for (int i = (int)in.pins.size() - 1; i >= 0; i--) {
 			const Pin &v = in.pins[i];
 			if (std::min(v.y, centery) != std::max(v.y, centery)) {
+				// Id 2 is the trunk's. With two pins the branches are 0 and 1;
+				// a third branch (a third pin, or a RAM's DATA_IN_n and
+				// DATA_OUT_n, two pins on one spot) took id 2 and replaced the
+				// trunk, leaving branches with nothing joining them.
+				if (nextId == 2) nextId = 3;
 				Segment s;
 				s.id = nextId; s.vertical = true;
 				s.bx = s.ex = v.x;
@@ -80,7 +85,7 @@ RouteResult TrunkRouter::route(const RouteInput &in) const {
 		}
 		out.segments.push_back(trunk);
 		for (Segment &s : branches) out.segments.push_back(s);
-		out.nextId = 3;
+		out.nextId = std::max(nextId, 3L);
 		return out;
 	}
 

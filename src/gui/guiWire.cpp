@@ -1124,6 +1124,48 @@ void guiWire::mergeSegments() {
 	generateRenderInfo();
 }
 
+// A segment of no length can be the only thing joining two runs: a run
+// across meeting a run up at one point, each recording a crossing with the
+// dot and not with each other (moving a part whose pins are all on one
+// wire, with two of them on one gate, leaves this: each pin moved reshapes
+// the wire in turn). Removing the dot then left the two runs touching but
+// unjoined, and the trim that follows pulled each back to its own pins --
+// one wire drawn as two pieces. Before a dot goes, the runs it joins at
+// its point (through any other dots there) record a crossing with each
+// other. Runs the same way are left to the merge, which joins them.
+void guiWire::bridgeAround(map < long, wireSegment > &segs, const wireSegment &dot) {
+	const GLPoint2f at = dot.begin;
+	auto onIt = [&](const wireSegment &s) {
+		const float l = min(s.begin.x, s.end.x), r = max(s.begin.x, s.end.x);
+		const float b = min(s.begin.y, s.end.y), t = max(s.begin.y, s.end.y);
+		return at.x >= l - EQUALRANGE && at.x <= r + EQUALRANGE && at.y >= b - EQUALRANGE && at.y <= t + EQUALRANGE;
+	};
+	vector < long > runs, todo;
+	set < long > seen;
+	for (const auto &x : dot.intersects) todo.insert(todo.end(), x.second.begin(), x.second.end());
+	seen.insert(dot.id);
+	while (!todo.empty()) {
+		const long id = todo.back();
+		todo.pop_back();
+		if (!seen.insert(id).second) continue;
+		map < long, wireSegment >::iterator s = segs.find(id);
+		if (s == segs.end() || !onIt(s->second)) continue;
+		if (s->second.begin == s->second.end) {
+			for (const auto &x : s->second.intersects) todo.insert(todo.end(), x.second.begin(), x.second.end());
+		}
+		else runs.push_back(id);
+	}
+	for (size_t i = 0; i < runs.size(); i++)
+		for (size_t j = i + 1; j < runs.size(); j++) {
+			wireSegment &a = segs[runs[i]], &b = segs[runs[j]];
+			if (a.isVertical() == b.isVertical()) continue;
+			vector < long > &ab = a.intersects[a.isVertical() ? at.y : at.x];
+			if (find(ab.begin(), ab.end(), b.id) == ab.end()) ab.push_back(b.id);
+			vector < long > &ba = b.intersects[b.isVertical() ? at.y : at.x];
+			if (find(ba.begin(), ba.end(), a.id) == ba.end()) ba.push_back(a.id);
+		}
+}
+
 // Take out the flaring segments of length zero.  They are so annoying that I am dedicating (as you can see) a function to
 //	their ultimate horrible deaths.
 void guiWire::removeZeroLengthSegments() {
@@ -1186,6 +1228,7 @@ void guiWire::removeZeroLengthSegments() {
 			isect = next.begin();
 		}
 		if (!connectionsDone) eraseIDs.pop_back();   // nowhere to hand them: keep it
+		else bridgeAround(newSegMap, segWalk->second);
 		segWalk++;
 	}
 	// DIE A HORRIBLE AND REVOLTING DEATH IN THE DIGITAL DUSTBIN!!!

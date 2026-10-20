@@ -194,6 +194,9 @@ private:
 
 	// Self-explanatory, see comments in source
 	void removeZeroLengthSegments();  // TODO
+	// Before a segment of no length is removed: the runs it joined at its
+	// point record a crossing with each other.
+	static void bridgeAround(map < long, wireSegment > &segs, const wireSegment &dot);
 
 	// Take existing segments and merge concurrent segments
 	void mergeSegments();

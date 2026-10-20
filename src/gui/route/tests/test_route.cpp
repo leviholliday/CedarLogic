@@ -122,6 +122,28 @@ TEST_CASE("both-vertical pins route to a horizontal trunk") {
 	CHECK(b->pins[0] == 1);
 }
 
+// Three branches off a horizontal trunk (a RAM's DATA_IN_n and DATA_OUT_n
+// share one spot, so a wire from it to one more pin has three): the third
+// branch used to take the trunk's id 2 and replace it.
+TEST_CASE("both-vertical with three pins keeps the trunk") {
+	RouteInput in;
+	in.pins = { {-2, 3, true}, {-2, 3, true}, {2, -3, true} };
+	in.snapTrunk = true; in.nextId = 1;
+
+	RouteResult r = TrunkRouter().route(in);
+
+	REQUIRE(r.segments.size() == 4);
+	std::vector<long> ids;
+	for (const Segment &s : r.segments) ids.push_back(s.id);
+	std::sort(ids.begin(), ids.end());
+	CHECK(std::unique(ids.begin(), ids.end()) == ids.end());   // no two share an id
+	const Segment *trunk = byId(r, 2);
+	REQUIRE(trunk);
+	CHECK_FALSE(trunk->vertical);
+	CHECK(trunk->bx == -2.0f); CHECK(trunk->ex == 2.0f);
+	for (const Segment &s : r.segments) CHECK(s.id < r.nextId);
+}
+
 // Degenerate both-vertical (pins share a y) falls through to the case-A builder,
 // exactly like calcShape's `goto fallout`.
 TEST_CASE("both-vertical but collinear falls out to the horizontal builder") {
