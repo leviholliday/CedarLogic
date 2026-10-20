@@ -100,7 +100,29 @@ struct Rng {
 
 // The circuit's text less what running it changes (switches, registers,
 // the app that wrote it), as the Mac's check compares them.
+// A segment's connections in one order: the engine writes them in the order
+// they're held, which a reopened file needn't repeat (the same circuit).
+void sortConnects(std::vector<std::string>& lines) {
+	for (size_t i = 0; i < lines.size();) {
+		auto isConnect = [&](size_t k) { return k < lines.size() && lines[k].find("(connect ") != std::string::npos; };
+		if (!isConnect(i)) { i++; continue; }
+		size_t j = i;
+		while (isConnect(j)) j++;
+		if (j - i > 1) {
+			// The last carries the closing parentheses of what it ends.
+			std::string& last = lines[j - 1];
+			size_t core = last.find(')') + 1;
+			const std::string tail = last.substr(core);
+			last = last.substr(0, core);
+			std::sort(lines.begin() + (long)i, lines.begin() + (long)j);
+			lines[j - 1] += tail;
+		}
+		i = j;
+	}
+}
+
 std::string shape(const std::string& text) {
+	std::vector<std::string> kept;
 	std::string out;
 	size_t at = 0;
 	while (at < text.size()) {
@@ -110,12 +132,12 @@ std::string shape(const std::string& text) {
 		size_t k = 0;
 		while (k < line.size() && (line[k] == ' ' || line[k] == '\t')) k++;
 		const std::string t = line.substr(k);
-		if (t.rfind("(lparam \"OUTPUT_NUM\"", 0) != 0 && t.rfind("(lparam \"CURRENT_VALUE\"", 0) != 0 && t.rfind("(generator ", 0) != 0) {
-			out += line;
-			out += '\n';
-		}
+		if (t.rfind("(lparam \"OUTPUT_NUM\"", 0) != 0 && t.rfind("(lparam \"CURRENT_VALUE\"", 0) != 0 && t.rfind("(generator ", 0) != 0)
+			kept.push_back(line);
 		at = end + 1;
 	}
+	sortConnects(kept);
+	for (const std::string& l : kept) { out += l; out += '\n'; }
 	return out;
 }
 
@@ -497,12 +519,22 @@ struct SessionDriver {
 		bool anyGates = false;
 		for (int p = 0; p < cl_document_page_count(doc()) && !anyGates; p++) anyGates = cl_document_gate_count(doc(), p) > 0;
 		if (w->filePath().empty() && !anyGates) return;   // an empty new circuit isn't kept
-		if (w->isDirty()) pausesUnsaved++;
+		if (w->isDirty()) {
+			pausesUnsaved++;
+			fail(format("pause at action %d: still unsaved (autosave %s, busy %d, floating %d, tidy %d, connecting %d)", at,
+			            w->autosaveId ? "waiting" : "not asked for", w->busyEditing(), w->isFloating(), w->tidyActive(),
+			            cl_edit_is_connecting(doc())));
+		}
 		const std::string onDisk = readFile(w->filePath());
 		const std::string now = text();
 		if (shape(onDisk) != now) {
 			pausesStale++;
-			if (firstStale < 0) { firstStale = at; lastStaleIssue = firstDifference(shape(onDisk), now); }
+			if (firstStale < 0) {
+				firstStale = at;
+				lastStaleIssue = firstDifference(shape(onDisk), now);
+				dump(format("stale-%d-disk.cdl", at), onDisk);
+				dump(format("stale-%d-window.cdl", at), cl_document_save_text_ex(doc(), 0));
+			}
 		}
 		// The file opens again to the same circuit.
 		char err[256] = "";
@@ -543,7 +575,12 @@ struct SessionDriver {
 		const std::string after = text();
 		if (after != before) {
 			roundTripBad++;
-			if (firstRoundTrip < 0) { firstRoundTrip = at; lastRoundTripIssue = format("%d undone and redone: ", undone) + firstDifference(before, after); }
+			if (firstRoundTrip < 0) {
+				firstRoundTrip = at;
+				lastRoundTripIssue = format("%d undone and redone: ", undone) + firstDifference(before, after);
+				dump(format("undo-%d-before.cdl", at), before);
+				dump(format("undo-%d-after.cdl", at), after);
+			}
 		}
 	}
 
@@ -1150,10 +1187,7 @@ struct SessionDriver {
 			pump(220);
 			uint64_t want = 0;
 			TabSwitcher* sw = w->switcher;
-			if (sw && sw->isActive && sw->selected >= 0 && sw->selected < (int)sw->tabs.size()) {
-				const int i = sw->tabs[(size_t)sw->selected];
-				if (i >= 0 && i < (int)w->canvases.size()) want = w->canvases[(size_t)i]->pageKey();
-			}
+			if (sw && sw->isActive && sw->selected >= 0 && sw->selected < (int)sw->keys.size()) want = sw->keys[(size_t)sw->selected];
 			if (rng.chance(0.3)) tap(t, GDK_KEY_w, GDK_CONTROL_MASK);   // with Ctrl still down
 			else if (rng.chance(0.2)) tap(t, GDK_KEY_t, GDK_CONTROL_MASK);
 			pump(20);
