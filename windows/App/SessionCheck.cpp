@@ -346,6 +346,38 @@ std::string shape(const std::string& text) {
 	return out;
 }
 
+// The same text with each run of a segment's (connect ...) lines, and of its
+// (cross ...) lines, in sorted order: the engine writes them in the order the
+// connections were made, which reopening a file changes without changing the
+// circuit.
+std::string sortedRuns(const std::string& text) {
+	std::istringstream in(text);
+	std::string line, out, kind;
+	std::vector<std::string> run;
+	std::string tail;
+	auto flush = [&] {
+		std::sort(run.begin(), run.end());
+		for (size_t i = 0; i < run.size(); i++) out += run[i] + (i + 1 == run.size() ? tail : std::string()) + "\n";
+		run.clear();
+		tail.clear();
+		kind.clear();
+	};
+	while (std::getline(in, line)) {
+		const size_t s = line.find_first_not_of(" \t");
+		const std::string t = s == std::string::npos ? std::string() : line.substr(s);
+		const std::string k = t.rfind("(connect ", 0) == 0 ? "connect" : t.rfind("(cross ", 0) == 0 ? "cross" : "";
+		if (k.empty() || k != kind) flush();
+		if (k.empty()) { out += line + "\n"; continue; }
+		kind = k;
+		// The expression itself, and what closes after it (the segment's end).
+		const size_t close = line.find(')', s);
+		run.push_back(close == std::string::npos ? line : line.substr(0, close + 1));
+		tail = close == std::string::npos ? std::string() : line.substr(close + 1);
+	}
+	flush();
+	return out;
+}
+
 std::string firstDifference(const std::string& a, const std::string& b) {
 	std::istringstream ia(a), ib(b);
 	std::string la, lb;
@@ -542,14 +574,14 @@ private:
 	int editsChecked = 0, editsLost = 0, firstLost = -1;
 	int titleWrong = 0, firstTitleWrong = -1;
 	int pauses = 0, pausesUnsaved = 0, pausesStale = 0, firstStale = -1;
-	int saves = 0, savesDiffer = 0, reopenDiffer = 0;
-	std::string saveDifference, reopenDifference;
+	int saves = 0, savesDiffer = 0, reopenDiffer = 0, reopenReordered = 0;
+	std::string saveDifference, reopenDifference, reorderDifference;
 	int historyBad = 0, firstHistoryBad = -1, maxSteps = 0;
 	int pagesBad = 0, firstPagesBad = -1;
 	std::string pagesWhat;
 	int undos = 0, redos = 0, tabsMade = 0, tabsClosed = 0, tabsMoved = 0, splits = 0, simViews = 0, dialogs = 0, windowsMade = 0;
 	int wiresDrawn = 0, partsPlaced = 0, drags = 0, escapes = 0, reloads = 0, strokes = 0;
-	int windowClosedUnasked = 0, windowGone = -1;
+	int othersClosed = 0, windowGone = -1;
 	bool longHistoryDone = false;
 	bool editedPastFull = true, fullHistoryReached = false, undoAllOk = true, redoAllOk = true;
 	bool longRunDone = false;
@@ -889,8 +921,19 @@ void Session::saveAndReopen(const char* why) {
 	const std::string back = again ? std::string(cl_document_save_text_ex(again, 0)) : std::string("(it didn't open: ") + err + ")";
 	if (again) cl_document_close(again);
 	if (back != disk) {
-		reopenDiffer++;
-		if (reopenDifference.empty()) reopenDifference = strf("%s: %s", why, firstDifference(disk, back).c_str());
+		// Kept for a look: the file, and what it reads back as.
+		const bool first = reopenDiffer == 0 && reopenReordered == 0;
+		if (first) {
+			std::ofstream(W(gDumpDir + strf("\\saved-%llu.cdl", (unsigned long long)gSeed)).c_str(), std::ios::binary) << disk;
+			std::ofstream(W(gDumpDir + strf("\\reopened-%llu.cdl", (unsigned long long)gSeed)).c_str(), std::ios::binary) << back;
+		}
+		if (sortedRuns(back) == sortedRuns(disk)) {
+			reopenReordered++;
+			if (reorderDifference.empty()) reorderDifference = strf("%s: %s", why, firstDifference(disk, back).c_str());
+		} else {
+			reopenDiffer++;
+			if (reopenDifference.empty()) reopenDifference = strf("%s: %s", why, firstDifference(sortedRuns(disk), sortedRuns(back)).c_str());
+		}
 	}
 }
 
@@ -978,7 +1021,7 @@ void Session::longRun() {
 }
 
 void Session::action(int a) {
-	const int roll = rng.below(100);
+	const int roll = rng.below(120);
 	Canvas* c = canvas();
 	const HWND ch = c ? c->widget() : nullptr;
 	auto named = [&](const char* n) { gActionName = n; };
@@ -1204,6 +1247,47 @@ void Session::action(int a) {
 	}
 	case 96: named("connect nearby pins"); selectSomething(); w->run(CMD_CONNECT_NEARBY); break;
 	case 97: named("drop what's on the pointer"); dropFloating(); break;
+	case 100: {
+		named("resize the window");
+		const UINT dpi = dpiOf(w->window());
+		if (IsZoomed(w->window()) || IsIconic(w->window())) ShowWindow(w->window(), SW_RESTORE);
+		SetWindowPos(w->window(), nullptr, 0, 0, scaled(660 + rng.below(420), dpi), scaled(440 + rng.below(300), dpi), SWP_NOZORDER | SWP_NOMOVE);
+		break;
+	}
+	case 101: named("minimize, then restore"); ShowWindow(w->window(), SW_MINIMIZE); pump(0.1); ShowWindow(w->window(), SW_RESTORE); break;
+	case 102: named("maximize, then restore"); ShowWindow(w->window(), SW_MAXIMIZE); pump(0.15); ShowWindow(w->window(), SW_RESTORE); break;
+	case 103: named("Ctrl+Tab"); w->switchTabs(rng.chance(30)); break;
+	case 104: {
+		named("Build from Formula");
+		const char* formulas[] = { "Y = AB + C", "S = A ^ B; C = AB", "F = (A + B)'C", "Q = A'B + AB'" };
+		prefs().lastFormula = formulas[rng.below(4)];
+		expect(rng.chance(70));
+		dialogs++;
+		w->run(CMD_BUILD_FORMULA);
+		unexpect();
+		break;
+	}
+	case 105: named("New from Template"); expect(rng.chance(50)); dialogs++; w->run(CMD_NEW_TEMPLATE); unexpect(); break;
+	case 106: named("Version History"); expect(rng.chance(40)); dialogs++; w->run(CMD_VERSIONS); unexpect(); break;
+	case 107: named("Export as Image (cancelled)"); expect(false); dialogs++; w->run(CMD_EXPORT_IMAGE); unexpect(); break;
+	case 108: named("the keyboard shortcuts"); expect(false); dialogs++; w->run(CMD_SHORTCUTS); unexpect(); break;
+	case 109: named("Your Circuits"); expect(rng.chance(30)); dialogs++; w->run(CMD_OPEN); unexpect(); break;
+	case 110: named("the side panel"); w->run(CMD_PALETTE); break;
+	case 111: named("the status bar"); w->run(CMD_STATUS_BAR); break;
+	case 112: named("hide or show the drawing"); w->run(rng.chance(70) ? CMD_SHOW_DRAWING : CMD_CLEAR_DRAWING); break;
+	case 113: named("connect or disconnect all pages"); w->run(rng.chance(50) ? CMD_CONNECT_ALL_PAGES : CMD_DISCONNECT_ALL_PAGES); break;
+	case 114: {
+		named("a tab's right-click menu");
+		TabStrip* s = w->tabStripWidget(0);
+		POINT p;
+		if (s && s->tabPoint(rng.below(std::max(1, s->tabsShown())), false, p)) {
+			SendMessageW(s->widget(), WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(p.x, p.y));
+			SendMessageW(s->widget(), WM_RBUTTONUP, 0, MAKELPARAM(p.x, p.y));
+		}
+		break;
+	}
+	case 115: case 116: case 117: case 118: case 119:
+		named("place a part from the side panel"); placePart(); break;
 	default: named("click on nothing"); { double x, y; viewSpot(x, y); click(x, y); } break;
 	}
 }
@@ -1252,6 +1336,18 @@ void Session::run(int actions) {
 		pump(0.012 + 0.03 * rng.unit());
 		gProgress++;
 		if (!isCircuitWindow(w)) { windowGone = a; break; }
+		// A window something opened (a template, Your Circuits): closed again,
+		// as its Close button does.
+		if (circuitWindows().size() > 1) {
+			std::vector<CircuitWindow*> others;
+			for (CircuitWindow* o : circuitWindows()) if (o != w) others.push_back(o);
+			for (CircuitWindow* o : others) PostMessageW(o->window(), WM_CLOSE, 0, 0);
+			pump(0.15);
+			for (CircuitWindow* o : others) if (isCircuitWindow(o)) o->destroy();
+			othersClosed += (int)others.size();
+			SetForegroundWindow(w->window());
+			if (!isCircuitWindow(w)) { windowGone = a; break; }
+		}
 		if (health::exceptions > exceptionsBefore && health::exceptions - exceptionsBefore == health::exceptions)
 			sayf("note  the first exception into the app's guard came in action %d (%s)\n", a, gActionName.load());
 		if (health::d2dFailures > d2dBefore && d2dBefore == 0)
@@ -1270,9 +1366,9 @@ void Session::run(int actions) {
 	if (windowGone < 0) sample(actions);
 
 	sayf("session: %d actions, %d parts placed, %d wires drawn, %d drags, %d Escapes, %d undos, %d redos, %d undo steps at most, "
-	     "%d tabs made, %d closed, %d moved, %d splits, %d Simulation Views, %d dialogs, %d windows made, %d reloads, %d strokes, %d pages now\n",
+	     "%d tabs made, %d closed, %d moved, %d splits, %d Simulation Views, %d dialogs, %d windows made, %d others closed, %d reloads, %d strokes, %d pages now\n",
 	     actions, partsPlaced, wiresDrawn, drags, escapes, undos, redos, maxSteps, tabsMade, tabsClosed, tabsMoved, splits, simViews, dialogs,
-	     windowsMade, reloads, strokes, windowGone < 0 ? cl_document_page_count(doc()) : -1);
+	     windowsMade, othersClosed, reloads, strokes, windowGone < 0 ? cl_document_page_count(doc()) : -1);
 	sayf("answered %d dialogs and cards (%d menus closed); kinds:", gCloser.answered, gCloser.menus);
 	for (const std::string& k : gCloser.kinds) sayf(" %s", k.c_str());
 	say("\n");
@@ -1326,6 +1422,9 @@ void Session::run(int actions) {
 	                                          savesDiffer ? strf(", %d differed: %s", savesDiffer, saveDifference.c_str()).c_str() : ""));
 	check(saves > 0 && reopenDiffer == 0, strf("the saved file reopens to the same circuit (%d saves%s)", saves,
 	                                           reopenDiffer ? strf(", %d differed: %s", reopenDiffer, reopenDifference.c_str()).c_str() : ""));
+	if (reopenReordered)
+		sayf("note  %d saved file%s read back with a wire's connections in another order (the same circuit): %s\n", reopenReordered,
+		     reopenReordered == 1 ? "" : "s", reorderDifference.c_str());
 	check(historyBad == 0, strf("the undo history's counts stayed in range (0 to 500, Undo on when there are steps)%s",
 	                            historyBad ? strf(" (%d times not, first at action %d)", historyBad, firstHistoryBad).c_str() : ""));
 	check(pagesBad == 0, strf("every tab and side showed a page that exists%s",
@@ -1361,7 +1460,8 @@ void Session::run(int actions) {
 	for (const std::string& l : left) sayf("  %s\n", l.c_str());
 
 	gExit = failures ? 1 : 0;
-	sayf(failures ? "session-check: %d failed (seed %llu)\n" : "session-check: all passed (seed %llu)\n", failures, (unsigned long long)gSeed);
+	if (failures) sayf("session-check: %d failed (seed %llu)\n", failures, (unsigned long long)gSeed);
+	else sayf("session-check: all passed (seed %llu)\n", (unsigned long long)gSeed);
 }
 
 void removeTree(const std::string& dir) {

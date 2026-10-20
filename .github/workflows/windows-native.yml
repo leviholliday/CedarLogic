@@ -93,10 +93,11 @@ jobs:
         env:
           CL_SESSION_DUMPS: ${{ github.workspace }}/session
           CL_SESSION_TIME_CAP: '420'
+          SESSION_SEEDS: '1 2 3 4 5 6 7 8'
         run: |
           mkdir -p session
           failed=0
-          for seed in 1 2 3 4; do
+          for seed in ${SESSION_SEEDS:-1 2 3 4}; do
             echo "== seed $seed"
             code=0
             timeout 480 windows/build/Release/CedarLogic.exe --session-check 300 $seed > session/seed-$seed.log 2>&1 || code=$?
