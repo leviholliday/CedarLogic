@@ -5,12 +5,11 @@
 // unlocked, Tidy Up and Straighten keeping them where they are, and the lock
 // badge drawn only on the canvas being edited.
 //   lock_check <cl_gatedefs.xml> [out.png]
+#include "Bitmap.h"   // first (see Bitmap.h)
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
-#include <CoreGraphics/CoreGraphics.h>
-#include <ImageIO/ImageIO.h>
-#include <CoreServices/CoreServices.h>
+#include <memory>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -88,28 +87,22 @@ static guiGate* byLibName(CLDocument* doc, int page, const char* name, int nth =
 // Draws a page as the canvas does (or as a picture, or Simulation View) into
 // a bitmap; returns how many pixels differ from a drawing of the same with
 // nothing locked, so the badge is what's counted.
-static CGContextRef drawPage(CLDocument* doc, int W, int H, double ox, double oy, double scaleUpp,
-                             bool showSelection, bool simView) {
-	CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-	CGContextRef ctx = CGBitmapContextCreate(nullptr, W, H, 8, 0, cs, kCGImageAlphaPremultipliedLast);
-	CGColorSpaceRelease(cs);
-	CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
-	CGContextFillRect(ctx, CGRectMake(0, 0, W, H));
-	CGContextTranslateCTM(ctx, 0, H);
-	CGContextScaleCTM(ctx, 2, -2);
-	CLDrawOptions o = { false, 0, 1.0, simView, false, showSelection, 1.0 };
-	cl_document_draw_ex(doc, 0, ctx, 2, ox, oy, scaleUpp, &o);
-	return ctx;
+// (Bitmap: Core Graphics, Cairo or Direct2D, so it runs on each platform.)
+static std::unique_ptr<Bitmap> drawPage(CLDocument* doc, int W, int H, double ox, double oy, double scaleUpp,
+                                        bool showSelection, bool simView) {
+	std::unique_ptr<Bitmap> bitmap(new Bitmap(W, H));
+	bitmap->flip(2);
+	CLDrawOptions o = { false, 0, 1.0, simView, false, showSelection, 1.0, CL_INK_FOLLOW };
+	cl_document_draw_ex(doc, 0, bitmap->ctx(), 2, ox, oy, scaleUpp, &o);
+	return bitmap;
 }
 
-static int diff(CGContextRef a, CGContextRef b, int W, int H) {
-	const unsigned char* pa = (const unsigned char*)CGBitmapContextGetData(a);
-	const unsigned char* pb = (const unsigned char*)CGBitmapContextGetData(b);
-	const size_t rowA = CGBitmapContextGetBytesPerRow(a), rowB = CGBitmapContextGetBytesPerRow(b);
+static int diff(const std::unique_ptr<Bitmap>& a, const std::unique_ptr<Bitmap>& b, int W, int H) {
+	const std::vector<unsigned char> pa = a->pixels(), pb = b->pixels();
 	int n = 0;
 	for (int y = 0; y < H; y++)
 		for (int x = 0; x < W; x++)
-			if (memcmp(pa + y * rowA + x * 4, pb + y * rowB + x * 4, 4) != 0) n++;
+			if (memcmp(&pa[((size_t)y * W + x) * 4], &pb[((size_t)y * W + x) * 4], 4) != 0) n++;
 	return n;
 }
 
@@ -186,7 +179,10 @@ int main(int argc, char** argv) {
 			cl_document_close(re);
 		}
 		for (int format = 2; format >= 1; format--) {
-			const char* path = format == 2 ? "/private/tmp/lock_check_v2.cdl" : "/private/tmp/lock_check_v1.cdl";
+			// Beside the picture (any platform's folder).
+			std::string file = pngPath;
+			file = file.substr(0, file.size() > 4 ? file.size() - 4 : file.size()) + (format == 2 ? "_v2.cdl" : "_v1.cdl");
+			const char* path = file.c_str();
 			const int r = cl_document_export_legacy(doc, path, format, err, sizeof err);
 			CHECK(r >= 0, format == 2 ? "exported as v2" : "exported as v1.x");
 			const std::string legacy = readFile(path);
@@ -424,45 +420,32 @@ int main(int argc, char** argv) {
 		const double u = std::max((r - l + 4) / (W / 2.0), (t - b + 4) / (H / 2.0));
 		const double ox = (l + r) / 2 - W / 4.0 * u, oy = (b + t) / 2 + H / 4.0 * u;
 		cl_edit_select_none(doc, 0);
-		CGContextRef locked = drawPage(doc, W, H, ox, oy, u, true, false);
-		CGContextRef picture = drawPage(doc, W, H, ox, oy, u, false, false);
-		CGContextRef sim = drawPage(doc, W, H, ox, oy, u, true, true);
+		auto locked = drawPage(doc, W, H, ox, oy, u, true, false);
+		auto picture = drawPage(doc, W, H, ox, oy, u, false, false);
+		auto sim = drawPage(doc, W, H, ox, oy, u, true, true);
 		cl_edit_unlock_all(doc, 0);
-		CGContextRef unlocked = drawPage(doc, W, H, ox, oy, u, true, false);
-		CGContextRef pictureU = drawPage(doc, W, H, ox, oy, u, false, false);
-		CGContextRef simU = drawPage(doc, W, H, ox, oy, u, true, true);
+		auto unlocked = drawPage(doc, W, H, ox, oy, u, true, false);
+		auto pictureU = drawPage(doc, W, H, ox, oy, u, false, false);
+		auto simU = drawPage(doc, W, H, ox, oy, u, true, true);
 		cl_edit_undo(doc);
 		const int badge = diff(locked, unlocked, W, H);
 		printf("  badge pixels: canvas %d, picture %d, Simulation View %d\n", badge, diff(picture, pictureU, W, H), diff(sim, simU, W, H));
 		CHECK(badge > 300, "the canvas draws a badge on locked parts");
 		CHECK(diff(picture, pictureU, W, H) == 0, "a picture (no selection shown) draws none");
 		CHECK(diff(sim, simU, W, H) == 0, "Simulation View draws none");
-		CGImageRef img = CGBitmapContextCreateImage(locked);
-		CFURLRef url = CFURLCreateFromFileSystemRepresentation(nullptr, (const UInt8*)pngPath, strlen(pngPath), false);
-		CGImageDestinationRef dest = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, nullptr);
-		CGImageDestinationAddImage(dest, img, nullptr);
-		CHECK(CGImageDestinationFinalize(dest), "wrote the canvas picture");
+		CHECK(locked->savePng(pngPath), "wrote the canvas picture");
 		printf("  %s\n", pngPath);
 		// Dark, zoomed in, too.
-		CGContextRef dark;
 		{
-			CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-			dark = CGBitmapContextCreate(nullptr, 600, 400, 8, 0, cs, kCGImageAlphaPremultipliedLast);
-			CGColorSpaceRelease(cs);
-			CGContextSetRGBFillColor(dark, 0.075, 0.082, 0.098, 1);
-			CGContextFillRect(dark, CGRectMake(0, 0, 600, 400));
-			CGContextTranslateCTM(dark, 0, 400);
-			CGContextScaleCTM(dark, 2, -2);
+			Bitmap dark(600, 400);
+			dark.fill(0.075, 0.082, 0.098);
+			dark.flip(2);
 			float sx, sy; s1->getGLcoords(sx, sy);
-			CLDrawOptions o = { true, 0, 1.0, false, false, true, 1.0 };
-			cl_document_draw_ex(doc, 0, dark, 2, sx - 7.5, sy + 5, 0.05, &o);
-			CGImageRef di = CGBitmapContextCreateImage(dark);
+			CLDrawOptions o = { true, 0, 1.0, false, false, true, 1.0, CL_INK_FOLLOW };
+			cl_document_draw_ex(doc, 0, dark.ctx(), 2, sx - 7.5, sy + 5, 0.05, &o);
 			std::string darkPath = pngPath;
 			darkPath.insert(darkPath.size() - 4, "_dark");
-			CFURLRef du = CFURLCreateFromFileSystemRepresentation(nullptr, (const UInt8*)darkPath.c_str(), darkPath.size(), false);
-			CGImageDestinationRef dd = CGImageDestinationCreateWithURL(du, CFSTR("public.png"), 1, nullptr);
-			CGImageDestinationAddImage(dd, di, nullptr);
-			CHECK(CGImageDestinationFinalize(dd), "wrote a dark, zoomed-in picture");
+			CHECK(dark.savePng(darkPath.c_str()), "wrote a dark, zoomed-in picture");
 			printf("  %s\n", darkPath.c_str());
 		}
 	}

@@ -4,16 +4,19 @@
 // Simulation View read from it, connect-nearby, closing and reopening pages,
 // moving pages, memory contents, and the new drawing calls.
 //   cl_check <cl_gatedefs.xml>
+#include "Bitmap.h"   // first: on Windows it brings the system headers
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
-#include <CoreGraphics/CoreGraphics.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
 static int fails = 0;
+static char err0[256];
 #define CHECK(c, what) do { if (c) printf("  ok   %s\n", what); else { printf("  FAIL %s\n", what); fails++; } } while (0)
 
 static guiGate* newest(CLDocument* doc, int page) {
@@ -112,19 +115,17 @@ int main(int argc, char** argv) {
 	CHECK(n == 3 && chips[0].isInput && chips[1].isInput && !chips[2].isInput, "inputs first");
 	CHECK(n == 3 && chips[0].lit && chips[1].lit && chips[2].lit, "all lit");
 	{
-		CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-		CGContextRef ctx = CGBitmapContextCreate(nullptr, 400, 300, 8, 0, cs, kCGImageAlphaPremultipliedLast);
+		Bitmap bitmap(400, 300, false);
+		CLContext ctx = bitmap.ctx();
 		CLDrawOptions o = { true, 3, 1.0, true, false, false, 1.0 };
 		cl_document_draw_ex(doc, 0, ctx, 2, -5, 12, 0.1, &o);
 		cl_simview_draw_flow(doc, 0, ctx, 2, -5, 12, 0.1, 7.0, 1.0);
 		o.simView = false; o.thumbnail = true;
 		cl_document_draw_ex(doc, 0, ctx, 2, -5, 12, 0.1, &o);
-		const unsigned char* px = (const unsigned char*)CGBitmapContextGetData(ctx);
+		const std::vector<unsigned char> px = bitmap.pixels();
 		int inked = 0;
 		for (int i = 0; i < 400 * 300; i++) if (px[i * 4 + 3] != 0) inked++;
 		CHECK(inked > 200, "styled, flow and thumbnail drawing put ink down");
-		CGContextRelease(ctx);
-		CGColorSpaceRelease(cs);
 	}
 
 	printf("connect nearby (C)\n");
@@ -184,7 +185,33 @@ int main(int argc, char** argv) {
 		cl_document_move_page(doc, 1, 0);
 		CHECK(cl_document_page_index(doc, id1) == 0 && cl_document_page_index(doc, id0) == 1, "moving a tab moves its id with it");
 		cl_document_move_page(doc, 1, 0);
-		CHECK(cl_document_page_index(doc, 123) == -1, "an unknown id finds nothing");
+		CHECK(cl_document_page_index(doc, 1ULL << 60) == -1, "an unknown id finds nothing");
+	}
+
+	printf("Redo of a tab close after the tabs moved closes that same tab\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_document_add_page(d);
+		cl_document_add_page(d);
+		cl_document_rename_page(d, 0, "A");
+		cl_document_rename_page(d, 1, "B");
+		cl_document_rename_page(d, 2, "C");
+		auto names = [&] { std::string n; for (int i = 0; i < cl_document_page_count(d); i++) n += cl_document_page_name(d, i); return n; };
+		CHECK(cl_document_close_page(d, 1) && names() == "AC", "B closed");
+		cl_edit_undo(d);
+		CHECK(names() == "ABC", "Undo: B is back in its place");
+		cl_document_move_page(d, 1, 0);
+		CHECK(names() == "BAC", "B moved to the front");
+		cl_edit_redo(d);
+		CHECK(names() == "AC", "Redo closes B again, not the tab now where it was");
+		cl_edit_undo(d);
+		CHECK(names() == "BAC", "and Undo brings it back where it was closed from");
+		// A page's id is never another's, even one made after a page was freed.
+		const unsigned long long gone = cl_document_page_id(d, 2);
+		cl_document_delete_page(d, 2);
+		const int fresh = cl_document_add_page(d);
+		CHECK(cl_document_page_id(d, fresh) != gone && cl_document_page_index(d, gone) == -1, "a new page never takes a freed page's id");
+		cl_document_close(d);
 	}
 
 	printf("split view: a gesture stays on its own page\n");
@@ -250,6 +277,348 @@ int main(int argc, char** argv) {
 		float nx, ny;
 		led2->getGLcoords(nx, ny);
 		CHECK(!sw->isConnected(opin) && std::fabs(nx - (lx + (ox - px) + 3)) < 1e-3, "the first undo takes back the connection, not the move");
+	}
+
+	printf("a wire C made mid-move: Undo then Redo give it the shape it was dropped with\n");
+	{
+		// C joins the light to the switch where it floats; it moves on, the
+		// wire stretching after it, and is dropped. Redo of the connection
+		// routed the wire afresh from the pins, not the shape it was dropped with.
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		float ox, oy;
+		std::string opin;
+		pin(sw, "OUT", ox, oy, &opin);
+		cl_edit_add_gate(d, 0, "GA_LED", 10, 0);
+		guiGate* led = newest(d, 0);
+		float lx, ly, px, py;
+		led->getGLcoords(lx, ly);
+		pin(led, "", px, py);
+		CHECK(cl_edit_float_begin(d, 0, lx, ly), "the light floats");
+		const float ax = lx + (ox - px) + 1, ay = ly + (oy - py);
+		cl_edit_hover(d, 0, ax, ay, 0.05);
+		CHECK(cl_edit_connect_while_moving(d, 0, 0.05) == 1, "C connects it");
+		cl_edit_hover(d, 0, ax + 6, ay - 9, 0.05);
+		cl_edit_press(d, 0, ax + 6, ay - 9, 0, 0.05);
+		cl_edit_release(d, ax + 6, ay - 9);
+		CHECK(sw->isConnected(opin), "dropped, connected");
+		const std::string dropped = cl_document_save_text(d);
+		cl_edit_undo(d);
+		CHECK(!sw->isConnected(opin), "Undo takes back the connection");
+		cl_edit_redo(d);
+		CHECK(std::string(cl_document_save_text(d)) == dropped, "Redo gives the wire the shape it was dropped with");
+		cl_edit_undo(d);
+		cl_edit_undo(d);
+		cl_edit_redo(d);
+		cl_edit_redo(d);
+		CHECK(std::string(cl_document_save_text(d)) == dropped, "and so do two Undos and two Redos");
+		cl_document_close(d);
+	}
+
+	printf("a part dragged away and back to where it started leaves its wires as they were\n");
+	{
+		// The wire stretched with the part and kept a jog of no length where it
+		// bent; the next open merged that away, so Save, Open, Save changed the file.
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "GA_LED", 10, 0);
+		guiGate* led = newest(d, 0);
+		wire(d, sw, "OUT", led, "");
+		cl_edit_select_none(d, 0);
+		const std::string before = cl_document_save_text(d);
+		const int u0 = cl_edit_undo_count(d);
+		float gx, gy;
+		led->getGLcoords(gx, gy);
+		cl_edit_press(d, 0, gx, gy, 0, 0.05);
+		cl_edit_drag(d, gx, gy + 1);
+		cl_edit_drag(d, gx + 1, gy + 2);
+		cl_edit_drag(d, gx, gy);
+		cl_edit_release(d, gx, gy);
+		const std::string after = cl_document_save_text(d);
+		CHECK(cl_edit_undo_count(d) == u0, "no move recorded");
+		CHECK(after == before, "the wire is as it was");
+		char e[256];
+		CLDocument* back = cl_document_open_text(after.c_str(), (long)after.size(), e, sizeof e);
+		CHECK(back && std::string(cl_document_save_text(back)) == after, "Save, Open, Save: the same");
+		if (back) cl_document_close(back);
+		// The same for a part floated away and back, then joined with C to a
+		// switch whose pin is just above its own, and dropped where it began:
+		// the new wire (one upright run) is tidied as a drop anywhere else
+		// tidies it, not left with a jog of no length at the light's pin.
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, -20);
+		guiGate* sw2 = newest(d, 0);
+		float ox, oy, lx, ly, px, py;
+		pin(sw2, "OUT", ox, oy);
+		led->getHotspotCoords(led->getHotspotList().begin()->first, px, py);   // the light's pin, from the light already there
+		float l0x, l0y;
+		led->getGLcoords(l0x, l0y);
+		cl_edit_add_gate(d, 0, "GA_LED", ox + (l0x - px) + 0, oy + (l0y - py) - 0.5f);
+		guiGate* led2 = newest(d, 0);
+		led2->getGLcoords(lx, ly);
+		const int u1 = cl_edit_undo_count(d);
+		CHECK(cl_edit_float_begin(d, 0, lx, ly), "a second light floats");
+		cl_edit_hover(d, 0, lx + 3, ly - 2, 0.05);
+		cl_edit_hover(d, 0, lx, ly, 0.05);
+		CHECK(cl_edit_connect_while_moving(d, 0, 0.05) == 1, "C joins it to the other switch");
+		cl_edit_press(d, 0, lx, ly, 0, 0.05);
+		cl_edit_release(d, lx, ly);
+		CHECK(cl_edit_undo_count(d) == u1 + 1 && !cl_edit_is_floating(d), "dropped where it began: only the connection recorded");
+		const std::string joined = cl_document_save_text(d);
+		back = cl_document_open_text(joined.c_str(), (long)joined.size(), e, sizeof e);
+		CHECK(back && std::string(cl_document_save_text(back)) == joined, "Save, Open, Save: the same");
+		if (back) cl_document_close(back);
+		cl_document_close(d);
+	}
+
+	printf("a damaged file whose wire lost its id opens with a notice, not a crash\n");
+	{
+		// "(id" where "(ids" belongs (one damaged byte): connecting the gates'
+		// pins made a wire from an empty id list and read past it.
+		const char* text =
+			"(cedarlogic\n  (version 3)\n  (generator \"CedarLogic Online\")\n  (page 0\n"
+			"    (gate \"AA_TOGGLE\"\n      (uuid \"1\")\n      (at 6 -8)\n      (angle 0))\n"
+			"    (gate \"GA_LED\"\n      (uuid \"2\")\n      (at 14 -8)\n      (angle 0))\n"
+			"    (gate \"GA_LED\"\n      (uuid \"3\")\n      (at 14 -4)\n      (angle 0))\n"
+			"    (wire\n      (id \"10\")\n      (seg \"0\" h\n        (pts 8 -8 13 -8)\n"
+			"        (connect \"1\" \"OUT_0\")\n        (connect \"2\" \"N_in0\")))\n"
+			"    (wire\n      (ids \"11\")\n      (seg \"0\" h\n        (pts 8 -4 13 -4)\n"
+			"        (connect \"3\" \"N_in0\")))))\n";
+		char e[256];
+		CLDocument* d = cl_document_open_text(text, (long)strlen(text), e, sizeof e);
+		CHECK(d != nullptr, "it opens");
+		if (d) {
+			bool said = false;
+			for (int i = 0; i < cl_document_notice_count(d); i++) if (strstr(cl_document_notice(d, i), "no id")) said = true;
+			CHECK(said, "with a notice that a wire carries no id");
+			CHECK(d->page(0)->getGateList()->size() == 3, "its parts are all there");
+			const std::string saved = cl_document_save_text(d);
+			CLDocument* back = cl_document_open_text(saved.c_str(), (long)saved.size(), e, sizeof e);
+			CHECK(back && std::string(cl_document_save_text(back)) == saved, "and saves, opens and saves the same");
+			if (back) cl_document_close(back);
+			cl_document_close(d);
+		}
+	}
+
+	// Every wire's pins are on gates still on its page (what a save writes).
+	auto wiresHoldLiveGates = [&](CLDocument* d) {
+		for (int p = 0; p < cl_document_page_count(d); p++)
+			for (auto& w : *d->page(p)->getWireList()) {
+				if (!w.second) continue;
+				for (auto& c : w.second->getConnections()) {
+					auto it = d->page(p)->getGateList()->find(c.gid);
+					if (it == d->page(p)->getGateList()->end() || !it->second) return false;
+				}
+				for (auto& s : w.second->getSegmentMap())
+					for (auto& c : s.second.connections) {
+						auto it = d->page(p)->getGateList()->find(c.gid);
+						if (it == d->page(p)->getGateList()->end() || !it->second) return false;
+					}
+			}
+		return true;
+	};
+
+	printf("Undo while a paste follows the pointer takes the paste back\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "GA_LED", 10, 0);
+		guiGate* led = newest(d, 0);
+		cl_edit_select_all(d, 0);
+		std::string block = cl_edit_copy(d, 0);
+		cl_edit_select_none(d, 0);
+		const int u0 = cl_edit_undo_count(d);
+		const char* back = nullptr;
+		CHECK(cl_edit_paste(d, 0, block.c_str(), 0, 3, true, &back), "pasted");
+		CHECK(cl_edit_float_begin(d, 0, 0, 3), "it follows the pointer");
+		// Bring the pasted light's pin onto the first switch's output and press C.
+		float sx, sy, lx, ly;
+		std::string spin, lpin;
+		pin(sw, "OUT", sx, sy, &spin);
+		guiGate* pastedLed = newest(d, 0);
+		pin(pastedLed, "", lx, ly, &lpin);
+		cl_edit_hover(d, 0, 0 + (sx - lx), 3 + (sy - ly), 0.05);
+		CHECK(cl_edit_connect_while_moving(d, 0, 0.05) >= 1 && sw->isConnected(spin), "C connects it while it floats");
+		cl_edit_undo(d);   // Cmd-Z instead of Escape
+		CHECK(!cl_edit_is_floating(d), "it no longer follows the pointer");
+		CHECK(d->page(0)->getGateList()->size() == 2 && cl_edit_undo_count(d) == u0, "the paste is gone, and only it");
+		CHECK(!sw->isConnected(spin), "and so is the connection C made");
+		cl_edit_press(d, 0, 5, 5, 0, 0.05);   // the next click
+		cl_edit_release(d, 5, 5);
+		CHECK(wiresHoldLiveGates(d) && cl_edit_undo_count(d) == u0, "the next click records nothing");
+		cl_edit_redo(d);
+		CHECK(d->page(0)->getGateList()->size() == 4 && wiresHoldLiveGates(d), "Redo brings the paste back");
+		(void)led;
+		cl_document_close(d);
+	}
+
+	printf("an edit while a paste floats puts the paste down first\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_AND2", 0, 0);
+		guiGate* g = newest(d, 0);
+		const int u0 = cl_edit_undo_count(d);
+		CHECK(cl_edit_float_begin(d, 0, 0, 0), "it floats");
+		cl_edit_hover(d, 0, 4, 2, 0.05);
+		cl_edit_delete(d, 0);   // the Delete key
+		CHECK(!cl_edit_is_floating(d) && d->page(0)->getGateList()->empty(), "dropped, then deleted");
+		cl_edit_undo(d);
+		float gx, gy;
+		g = newest(d, 0);
+		if (g) g->getGLcoords(gx, gy);
+		CHECK(g && std::fabs(gx - 4) < 1e-3 && std::fabs(gy - 2) < 1e-3, "Undo brings it back where it was dropped");
+		cl_edit_undo(d);
+		g = newest(d, 0);
+		if (g) g->getGLcoords(gx, gy);
+		CHECK(g && cl_edit_undo_count(d) == u0 && std::fabs(gx) < 1e-3 && std::fabs(gy) < 1e-3, "and the next Undo takes back the move");
+		cl_document_close(d);
+	}
+
+	printf("a press after a drag whose release never came keeps the drag\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_AND2", 0, 0);
+		guiGate* g = newest(d, 0);
+		const int u0 = cl_edit_undo_count(d);
+		float gx, gy;
+		g->getGLcoords(gx, gy);
+		cl_edit_press(d, 0, gx, gy, 0, 0.05);
+		cl_edit_drag(d, gx + 3, gy + 2);
+		cl_edit_drag(d, gx + 6, gy + 4);
+		cl_edit_press(d, 0, 30, 30, 0, 0.05);   // no release for the drag
+		cl_edit_release(d, 30, 30);
+		float nx, ny;
+		g->getGLcoords(nx, ny);
+		CHECK(std::fabs(nx - gx - 6) < 1e-3 && cl_edit_undo_count(d) == u0 + 1, "the move stays, as one undo step");
+		cl_edit_undo(d);
+		g = newest(d, 0);
+		if (g) g->getGLcoords(nx, ny);
+		CHECK(g && std::fabs(nx - gx) < 1e-3 && std::fabs(ny - gy) < 1e-3, "and Undo takes it back");
+		cl_document_close(d);
+	}
+
+	printf("renaming a wired TO saves the same after a reopen\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "DE_TO", 8, 0);
+		guiGate* to = newest(d, 0);
+		wire(d, sw, "OUT", to, "");
+		CHECK(cl_gate_set_setting(d, (long)to->getID(), "JUNCTION_ID", "Sum"), "renamed");
+		std::string a = cl_document_save_text(d);
+		CLDocument* r = cl_document_open_text(a.c_str(), (long)a.size(), err0, sizeof err0);
+		CHECK(r && std::string(cl_document_save_text(r)) == a, "save, reopen, save: the same text");
+		if (r) cl_document_close(r);
+		cl_edit_undo(d);
+		a = cl_document_save_text(d);
+		r = cl_document_open_text(a.c_str(), (long)a.size(), err0, sizeof err0);
+		CHECK(r && std::string(cl_document_save_text(r)) == a, "and after Undo of the rename");
+		if (r) cl_document_close(r);
+		cl_document_close(d);
+	}
+
+	printf("Undo of a delete or a Disconnect gives the wires back their bends\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", 0, 0);
+		guiGate* sw = newest(d, 0);
+		cl_edit_add_gate(d, 0, "AA_AND2", 12, 6);
+		guiGate* a1 = newest(d, 0);
+		const unsigned long a1id = a1->getID();
+		cl_edit_add_gate(d, 0, "AA_AND2", 12, -6);
+		guiGate* a2 = newest(d, 0);
+		wire(d, sw, "OUT", a1, "IN");
+		guiWire* w = nullptr;
+		for (auto& e : *d->page(0)->getWireList()) if (e.second) w = e.second;
+		auto run = [&](bool vertical, float& rx, float& ry) {
+			for (auto& s : w->getSegmentMap()) {
+				const wireSegment& g = s.second;
+				const float len = vertical ? g.end.y - g.begin.y : g.end.x - g.begin.x;
+				if (g.isVertical() == vertical && len > 1) { rx = (g.begin.x + g.end.x) / 2; ry = (g.begin.y + g.end.y) / 2; return true; }
+			}
+			return false;
+		};
+		float vx = 0, vy = 0;
+		CHECK(w && run(true, vx, vy), "a wire with a vertical run");
+		// Give it a bend of the student's own: drag that run to the left.
+		cl_edit_select_none(d, 0);
+		cl_edit_press(d, 0, vx, vy, 0, 0.05);
+		cl_edit_drag(d, vx - 1.5f, vy);
+		cl_edit_drag(d, vx - 3, vy);
+		cl_edit_release(d, vx - 3, vy);
+		// And the second AND onto it: a wire with three pins.
+		float ix, iy, hx = 0, hy = 0;
+		std::string ipin;
+		pin(a2, "IN", ix, iy, &ipin);
+		CHECK(run(true, hx, hy), "the run moved");
+		cl_edit_press(d, 0, ix, iy, 0, 0.05);
+		cl_edit_drag(d, (ix + hx) / 2, (iy + hy) / 2);
+		cl_edit_drag(d, hx, hy);
+		cl_edit_release(d, hx, hy);
+		CHECK(a2->isConnected(ipin) && a2->getConnection(ipin) == w, "three pins on one wire");
+		const std::string shaped = cl_document_save_text(d);
+		cl_edit_select_none(d, 0);
+		a1->select();
+		cl_edit_delete(d, 0);
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "Delete a part, Undo: the wire's bends are as they were");
+		float px, py;
+		a2->getHotspotCoords(ipin, px, py);
+		CHECK(cl_edit_context(d, 0, px, py, 0.05) == CL_CONTEXT_PIN, "right-click the wired pin");
+		cl_edit_disconnect_pin(d, 0, px, py, 0.05);
+		CHECK(!a2->isConnected(ipin), "Disconnect takes it off");
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "Disconnect, Undo: the same");
+
+		// Drag the first AND down past the bend (and nudge it): Undo gives the
+		// bends back, Redo the shape it was dropped with.
+		float sx, sy;
+		a1 = newest(d, 0) ? d->circuit.getGate(a1id) : nullptr;   // the delete's Undo made it anew
+		a1->getGLcoords(sx, sy);
+		cl_edit_select_none(d, 0);
+		cl_edit_press(d, 0, sx, sy, 0, 0.05);
+		cl_edit_drag(d, sx, sy - 3);
+		cl_edit_drag(d, sx, sy - 6);
+		cl_edit_release(d, sx, sy - 6);
+		const std::string dropped = cl_document_save_text(d);
+		CHECK(dropped != shaped, "the AND moved");
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "drag a part, Undo: its wire's bends are back");
+		cl_edit_redo(d);
+		CHECK(std::string(cl_document_save_text(d)) == dropped, "and Redo gives the shape it was dropped with");
+		cl_edit_undo(d);
+		cl_edit_nudge(d, 0, 0, 3);
+		cl_edit_undo(d);
+		CHECK(std::string(cl_document_save_text(d)) == shaped, "an arrow-key nudge, Undo: the same");
+		(void)sw;
+		cl_document_close(d);
+	}
+
+	printf("a paste dropped where it already sits\n");
+	{
+		// Duplicating onto the very spot moves the copy by nothing; that
+		// used to install an empty wire shape and crash.
+		cl_edit_select_all(doc, 0);
+		float minX = 1e9f, maxY = -1e9f;
+		for (auto& g : *doc->page(0)->getGateList()) {
+			float gx, gy;
+			g.second->getGLcoords(gx, gy);
+			minX = std::min(minX, gx);
+			maxY = std::max(maxY, gy);
+		}
+		const std::string copied = cl_edit_copy(doc, 0);
+		const size_t wiresBefore = doc->page(0)->getWireList()->size();
+		const char* back = nullptr;
+		const bool pasted = cl_edit_paste(doc, 0, copied.c_str(), minX, maxY, false, &back);
+		CHECK(pasted && doc->page(0)->getWireList()->size() == 2 * wiresBefore, "pasted in place, wires and all");
+		bool shaped = true;
+		for (auto& w : *doc->page(0)->getWireList()) shaped = shaped && !w.second->getSegmentMap().empty();
+		CHECK(shaped, "every wire keeps its shape");
+		cl_edit_undo(doc);
+		CHECK(doc->page(0)->getWireList()->size() == wiresBefore, "undo takes the paste back");
 	}
 
 	printf("save round trip keeps it all\n");

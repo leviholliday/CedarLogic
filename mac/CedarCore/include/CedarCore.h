@@ -1,4 +1,4 @@
-// CedarCore -- what the native Mac app asks of the shared C++ engine.
+// CedarCore -- what the native Mac, Linux and Windows apps ask of the shared C++ engine.
 //
 // A plain C interface on purpose: Swift imports it directly, with no C++
 // interop settings, and nothing of the engine's C++ types leaks into Swift.
@@ -7,8 +7,20 @@
 #ifndef CEDARCORE_H
 #define CEDARCORE_H
 
-#include <CoreGraphics/CoreGraphics.h>
 #include <stdbool.h>
+
+// What the drawing calls draw into: a Core Graphics context on the Mac, a
+// Cairo one on Linux, a Direct2D render target on Windows (drawing, between
+// its BeginDraw and EndDraw). Either way its units are points, y down.
+#if defined(__APPLE__)
+#include <CoreGraphics/CoreGraphics.h>
+typedef CGContextRef CLContext;
+#elif defined(_WIN32)
+typedef struct ID2D1RenderTarget *CLContext;
+#else
+#include <cairo.h>
+typedef cairo_t *CLContext;
+#endif
 
 // Sync (SYNC.md): its own header, so the Linux and Windows apps can use it too.
 #include "CedarSync.h"
@@ -64,7 +76,7 @@ bool cl_document_page_bounds(const CLDocument *doc, int page,
 // Draw a page's gates and wires. `ctx` is in view points, y down (a flipped
 // NSView); `backingScale` is points to pixels (2 on Retina). The camera: the
 // world point at the view's top-left corner, and world units per point.
-void cl_document_draw(CLDocument *doc, int page, CGContextRef ctx,
+void cl_document_draw(CLDocument *doc, int page, CLContext ctx,
                       double backingScale, double originX, double originY,
                       double unitsPerPoint, bool dark);
 
@@ -72,7 +84,7 @@ void cl_document_draw(CLDocument *doc, int page, CGContextRef ctx,
 // margin, centered -- for export and printing. PRINT is black line drawings
 // on white. False for an empty page.
 enum { CL_STYLE_LIGHT = 0, CL_STYLE_DARK = 1, CL_STYLE_PRINT = 2 };
-bool cl_document_draw_fitted(CLDocument *doc, int page, CGContextRef ctx,
+bool cl_document_draw_fitted(CLDocument *doc, int page, CLContext ctx,
                              double width, double height, double margin,
                              double backingScale, int style);
 
@@ -80,8 +92,10 @@ bool cl_document_draw_fitted(CLDocument *doc, int page, CGContextRef ctx,
 
 // Advance the simulation by the wall time that has passed (called every frame
 // while the window is up). Steps at the document's step length, at most a
-// frame's worth of catch-up. Returns CL_TICK_* flags.
-enum { CL_TICK_CHANGED = 1, CL_TICK_PAUSED = 2 };
+// frame's worth of catch-up. Returns CL_TICK_* flags: CHANGED when it
+// stepped, SHOWN when a step changed something on screen (a wire's or a
+// part's state) -- a canvas need only redraw then.
+enum { CL_TICK_CHANGED = 1, CL_TICK_PAUSED = 2, CL_TICK_SHOWN = 4 };
 int cl_document_tick(CLDocument *doc, double elapsedMs);
 void cl_document_set_running(CLDocument *doc, bool running);
 bool cl_document_is_running(const CLDocument *doc);
@@ -227,7 +241,7 @@ int cl_edit_tidy_mode(const CLDocument *doc);
 // Draw what goes over the circuit: the Tidy ghost, a connection being made,
 // and the pin under the pointer. Same camera as cl_document_draw; the accent
 // is 0..1 RGB.
-void cl_edit_draw_overlay(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_edit_draw_overlay(CLDocument *doc, int page, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint,
                           double accentR, double accentG, double accentB);
 
@@ -263,6 +277,8 @@ long cl_edit_single_gate(const CLDocument *doc, int page);
 const char *cl_gate_caption(const CLDocument *doc, long gate);
 // The gate's library name ("AA_AND2"), for its picture.
 const char *cl_gate_library_name(const CLDocument *doc, long gate);
+// Where the gate is (world coordinates, its own origin); false if there's no such gate.
+bool cl_gate_position(const CLDocument *doc, long gate, double *x, double *y);
 int cl_gate_setting_count(const CLDocument *doc, long gate);
 typedef struct {
 	const char *label;   // shown to the user
@@ -283,7 +299,7 @@ const char *cl_library_gate(int category, int index);
 const char *cl_library_gate_caption(const char *libGateName);
 // Draw one gate type fitted into a rectangle of `width` x `height` points
 // (y down), for palette tiles.
-void cl_library_draw_gate(const char *libGateName, CGContextRef ctx, double width, double height,
+void cl_library_draw_gate(const char *libGateName, CLContext ctx, double width, double height,
                           double backingScale, bool dark);
 
 // ---- Oscilloscope ------------------------------------------------------------
@@ -443,9 +459,26 @@ typedef struct {
 	double selectionFade;  // 0..1: a new selection's halo fades in
 	int ink;             // the drawing: CL_INK_FOLLOW, _NEVER, _ALWAYS, _ALWAYS_PRINT (below)
 } CLDrawOptions;
-void cl_document_draw_ex(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_document_draw_ex(CLDocument *doc, int page, CLContext ctx, double backingScale,
                          double originX, double originY, double unitsPerPoint,
                          const CLDrawOptions *options);
+// cl_document_draw_ex in two layers while parts are being moved, for a canvas
+// that keeps what isn't moving in an image and draws only what moves each
+// frame (linux/SMOOTHNESS.md). CL_LAYER_STATIC is the page without the parts
+// being moved and their wires (the ones moving and the ones reshaping as the
+// parts go); CL_LAYER_MOVING is only those, to draw over it. Both return
+// false and draw nothing when no move is in progress on that page: draw it
+// whole with cl_document_draw_ex then. Moving parts draw over the others
+// where they overlap, and the drawing (highlighter and pen) stays with the
+// static layer.
+enum { CL_LAYER_STATIC = 1, CL_LAYER_MOVING = 2 };
+bool cl_document_draw_layer(CLDocument *doc, int page, CLContext ctx, double backingScale,
+                            double originX, double originY, double unitsPerPoint,
+                            const CLDrawOptions *options, int layer);
+// What is moving on a page now, as a number: it changes when another move
+// starts or other parts join it. 0 when nothing is moving there. A static
+// layer kept for one value is wrong for any other.
+unsigned long long cl_document_moving_signature(const CLDocument *doc, int page);
 // The accent colour for an index, light or dark variant (0..1 RGB).
 void cl_accent_color(int index, bool dark, double *r, double *g, double *b);
 // The dots drawn on wires: at every bend (or only where wires join), and
@@ -457,7 +490,7 @@ void cl_set_low_wire_color(bool on, double r, double g, double b);
 
 // Simulation View: dashes marching away from each wire's driver along wires
 // that are on, and a bloom around lit lights. `phasePoints` grows with time.
-void cl_simview_draw_flow(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_simview_draw_flow(CLDocument *doc, int page, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, double phasePoints,
                           double wireScale);
 // The switches and lights on a page, top to bottom, left to right, for the
@@ -478,11 +511,11 @@ typedef struct {
 	bool predict;
 	int ink;             // the drawing: CL_INK_FOLLOW, _NEVER or _ALWAYS (below)
 } CLSimViewStyle;
-void cl_simview_draw_page(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_simview_draw_page(CLDocument *doc, int page, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint, const CLSimViewStyle *style);
 // The same, with Predict covering only `gates` (a live class's question names its
 // lights; the others show as ever, and the wires still all draw "off").
-void cl_simview_draw_page_covering(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_simview_draw_page_covering(CLDocument *doc, int page, CLContext ctx, double backingScale,
                                    double originX, double originY, double unitsPerPoint, const CLSimViewStyle *style,
                                    const long *gates, int count);
 
@@ -521,7 +554,7 @@ typedef struct {
 	int mark;       // CL_PREDICT_...
 	bool focused;
 } CLPredictMark;
-void cl_simview_draw_predict(CLDocument *doc, int page, CGContextRef ctx, double backingScale,
+void cl_simview_draw_predict(CLDocument *doc, int page, CLContext ctx, double backingScale,
                              double originX, double originY, double unitsPerPoint,
                              const CLPredictMark *marks, int count, bool projector);
 
@@ -634,7 +667,7 @@ int  cl_ink_history_page(const CLDocument *doc);
 enum { CL_INK_FOLLOW = 0, CL_INK_NEVER = 1, CL_INK_ALWAYS = 2, CL_INK_ALWAYS_PRINT = 3 };
 // cl_document_draw_fitted, with the drawing when `ink` (the bounds include
 // it then): LIGHT in the colour-print colours, PRINT in black and white.
-bool cl_document_draw_fitted_ink(CLDocument *doc, int page, CGContextRef ctx, double width, double height,
+bool cl_document_draw_fitted_ink(CLDocument *doc, int page, CLContext ctx, double width, double height,
                                  double margin, double backingScale, int style, bool ink);
 // What the pointer would draw or erase: a dot of the stroke's width in its
 // colour at half strength, or for CL_INK_ERASER a ring of `width` radius.
@@ -644,7 +677,7 @@ void cl_ink_hover_clear(CLDocument *doc);
 // showing it calls cl_ink_draw_live.
 int  cl_ink_live_page(const CLDocument *doc);
 // The stroke being drawn and the hover preview, over everything else.
-void cl_ink_draw_live(CLDocument *doc, CGContextRef ctx, double backingScale,
+void cl_ink_draw_live(CLDocument *doc, CLContext ctx, double backingScale,
                       double originX, double originY, double unitsPerPoint, bool dark, bool projector);
 // A token's colour for a tool, for the palette buttons. `look`: 0 light,
 // 1 dark, 2 colour print, 3 black and white.

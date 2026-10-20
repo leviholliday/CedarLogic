@@ -10,12 +10,14 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "klsClipboard.h"
-#include "CGScene.h"
+#include "NativeScene.h"
 #include "CircuitEdits.h"
 #include "render/Scene.h"
 #include "command/cmdCreateGate.h"
 #include "command/cmdInk.h"
 #include "command/cmdDeleteWire.h"
+#include "command/cmdConnectWire.h"
+#include "command/cmdCreateWire.h"
 #include "command/cmdDisconnectWire.h"
 #include "command/cmdTidy.h"
 #include "command/cmdWireSegDrag.h"
@@ -80,18 +82,101 @@ void selectedIds(GUICanvas* page, std::vector<unsigned long>& gates, std::vector
 	std::sort(wires.begin(), wires.end());
 }
 
-// Move the selection by `delta` as one undo step: shift the wires, then the
-// gates, then record it. GUICanvas::nudgeSelection and the drop in OnMouseUp
-// do the same, including the Undo after Submit -- the move already happened,
-// and Submit runs Do again.
+// The pins a wire holds, or a saved shape of it records, sorted.
+std::vector<std::pair<unsigned long, std::string>> pinsOf(const SegmentMap& m) {
+	std::vector<std::pair<unsigned long, std::string>> out;
+	for (const auto& s : m) for (const wireConnection& c : s.second.connections) out.emplace_back(c.gid, c.connection);
+	std::sort(out.begin(), out.end());
+	return out;
+}
+std::vector<std::pair<unsigned long, std::string>> pinsOf(guiWire* w) {
+	std::vector<std::pair<unsigned long, std::string>> out;
+	for (const wireConnection& c : w->getConnections()) out.emplace_back(c.gid, c.connection);
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+// A move of the selection, as one undo step, that also gives every wire the
+// move reshaped (the ones moved whole and the ones that only end on a moving
+// part) its exact shape back: Undo the one from before the move, Redo the one
+// it was dropped with. Moving the parts back reshapes those wires on its
+// own, which isn't the shape they had (the bends a student dragged in went
+// elsewhere). A shape is only put back on a wire still holding exactly the
+// pins it records; any other wire is left as the parts' move leaves it.
+class MoveCommand : public klsCommand {
+public:
+	struct Place { unsigned long id; float fromX, fromY, toX, toY; };
+	MoveCommand(GUICircuit* circuit, cmdMoveSelection* move, std::vector<Place> places,
+	            std::map<unsigned long, SegmentMap> before, std::map<unsigned long, SegmentMap> after)
+		: klsCommand(true, "Move Selection"), move(move), places(std::move(places)), before(std::move(before)),
+		  after(std::move(after)) { gCircuit = circuit; }
+	bool Do() override {
+		if (applied) { applied = false; return true; }   // the drop already did it
+		move->Do();
+		// Exactly where they were dropped (moving by -d then +d leaves float
+		// noise: a part a millionth off the grid).
+		for (const Place& p : places) if (guiGate* g = gCircuit->getGate(p.id)) g->setGLcoords(p.toX, p.toY, true);
+		put(after);
+		return true;
+	}
+	bool Undo() override {
+		move->Undo();
+		for (const Place& p : places) if (guiGate* g = gCircuit->getGate(p.id)) g->setGLcoords(p.fromX, p.fromY, true);
+		put(before);
+		return true;
+	}
+private:
+	void put(const std::map<unsigned long, SegmentMap>& shapes) {
+		for (const auto& e : shapes) {
+			guiWire* w = gCircuit->getWire(e.first);
+			if (w != nullptr && !e.second.empty() && pinsOf(e.second) == pinsOf(w)) w->setSegmentMap(e.second);
+		}
+	}
+	std::unique_ptr<cmdMoveSelection> move;
+	std::vector<Place> places;
+	std::map<unsigned long, SegmentMap> before, after;
+	bool applied = true;
+};
+
+// The wires that end on one of these gates but aren't among `whole` (moved
+// whole): they reshape as the gates move. Their shapes now.
+std::vector<WireState> attachedWires(CLDocument* doc, const std::vector<GateState>& gates, const std::vector<WireState>& whole) {
+	std::set<unsigned long> seen;
+	for (auto& ws : whole) seen.insert(ws.id);
+	std::vector<WireState> out;
+	for (auto& gs : gates) {
+		guiGate* gt = doc->circuit.getGate(gs.id);
+		if (gt == nullptr) continue;
+		for (auto& hs : gt->getHotspotList()) {
+			if (!gt->isConnected(hs.first)) continue;
+			guiWire* w = gt->getConnection(hs.first);
+			if (w == nullptr || !seen.insert(w->getID()).second) continue;
+			out.emplace_back((unsigned int)w->getID(), GLPoint2f(), w->getSegmentMap());
+		}
+	}
+	return out;
+}
+
+// Record a move of the selection by `delta`, already made, as one undo step
+// (attached: the shapes before the move of the wires that end on the moving
+// parts).
 void commitMove(CLDocument* doc, GUICanvas* page, std::vector<GateState>& moved,
-                std::vector<WireState>& movedWires, GLPoint2f delta) {
+                std::vector<WireState>& movedWires, const std::vector<WireState>& attached, GLPoint2f delta) {
 	if (moved.empty()) return;
+	for (auto& gs : moved) if (guiGate* g = doc->circuit.getGate(gs.id)) g->updateConnectionMerges();
+	std::map<unsigned long, SegmentMap> before, after;
+	for (auto& ws : movedWires) before[ws.id] = ws.oldWireTree;
+	for (auto& ws : attached) before.emplace(ws.id, ws.oldWireTree);
+	for (auto& e : before) if (guiWire* w = doc->circuit.getWire(e.first)) after[e.first] = w->getSegmentMap();
+	std::vector<MoveCommand::Place> places;
+	for (auto& gs : moved) {
+		float x = gs.x + delta.x, y = gs.y + delta.y;
+		if (guiGate* g = doc->circuit.getGate(gs.id)) g->getGLcoords(x, y);
+		places.push_back({ gs.id, gs.x, gs.y, x, y });
+	}
 	cmdMoveSelection* mc = new cmdMoveSelection(&doc->circuit, moved, movedWires,
 		moved[0].x, moved[0].y, moved[0].x + delta.x, moved[0].y + delta.y);
-	for (auto& gs : moved) if (guiGate* g = doc->circuit.getGate(gs.id)) g->updateConnectionMerges();
-	submit(doc, page, mc);
-	mc->Undo();
+	submit(doc, page, new MoveCommand(&doc->circuit, mc, std::move(places), std::move(before), std::move(after)));
 	page->collisionUpdate();
 }
 
@@ -170,8 +255,29 @@ public:
 	explicit CommandGroup(const char* name) : klsCommand(true, name) {}
 	std::vector<std::unique_ptr<klsCommand>> parts;
 	bool done = true;   // the parts arrive already applied
+	// The shapes of the wires the parts made or joined, as they are once the
+	// group is recorded. Redoing a connection routes its wire afresh from where
+	// the pins are now, which needn't be the shape it had: a connection made
+	// mid-move (C) was routed where the part was then and stretched as the part
+	// moved on. Redo puts these back, on a wire still holding exactly those pins.
+	std::map<unsigned long, SegmentMap> shapes;
+	void recordShapes(GUICircuit* circuit) {
+		for (auto& c : parts) {
+			unsigned long id = 0;
+			if (auto* cw = dynamic_cast<cmdCreateWire*>(c.get())) { if (!cw->getWireIds().empty()) id = cw->getWireIds()[0]; }
+			else if (auto* cc = dynamic_cast<cmdConnectWire*>(c.get())) id = cc->getWireId();
+			if (guiWire* w = id ? circuit->getWire(id) : nullptr) shapes[w->getID()] = w->getSegmentMap();
+		}
+		gCircuit = circuit;
+	}
 	bool Do() override {
-		if (!done) for (auto& c : parts) c->Do();
+		if (!done) {
+			for (auto& c : parts) c->Do();
+			for (const auto& e : shapes) {
+				guiWire* w = gCircuit ? gCircuit->getWire(e.first) : nullptr;
+				if (w != nullptr && !e.second.empty() && pinsOf(e.second) == pinsOf(w)) w->setSegmentMap(e.second);
+			}
+		}
 		done = true;
 		return true;
 	}
@@ -266,6 +372,7 @@ int connectNearby(CLDocument* doc, GUICanvas* page, float unitsPerPoint, bool mo
 	}
 	const int made = (int)group->parts.size();
 	if (made == 0) { delete group; return 0; }
+	group->recordShapes(&doc->circuit);
 	submit(doc, page, group);
 	page->collisionUpdate();
 	return made;
@@ -278,6 +385,7 @@ void flushPendingConnects(CLDocument* doc, GUICanvas* page, EditGesture& g) {
 	CommandGroup* group = new CommandGroup("Connect");
 	for (klsCommand* c : g.pendingConnects) group->parts.emplace_back(c);
 	g.pendingConnects.clear();
+	group->recordShapes(&doc->circuit);
 	submit(doc, page, group);
 }
 
@@ -296,14 +404,78 @@ int discardPendingConnects(CLDocument* doc, EditGesture& g) {
 // Drop what's being moved: record the move, then connect what landed next
 // to a free pin (the wx canvas's forgiving connect on drop).
 void finishMove(CLDocument* doc, GUICanvas* page, EditGesture& g) {
+	if (g.lastDelta.x == 0 && g.lastDelta.y == 0) {
+		// Dropped where it started (dragged away and back, or a paste dropped
+		// where it began to float): no move to record, so nothing tidied the
+		// wires on the parts, which were stretched on the way and kept a jog of
+		// no length where they bent. The next open merges that away, so Save,
+		// Open, Save changed the file. The parts are where they were, so those
+		// wires get the shapes they had (on a wire still holding those pins);
+		// one joined to them since (C mid-move) is merged, as a drop elsewhere
+		// merges it (commitMove).
+		std::set<unsigned long> known;
+		auto put = [&](const std::vector<WireState>& shapes) {
+			for (auto& ws : shapes) {
+				known.insert(ws.id);
+				if (guiWire* w = doc->circuit.getWire(ws.id))
+					if (!ws.oldWireTree.empty() && pinsOf(ws.oldWireTree) == pinsOf(w)) w->setSegmentMap(ws.oldWireTree);
+			}
+		};
+		put(g.preMoveWire);
+		put(g.preMoveAttached);
+		for (auto& gs : g.preMove) {
+			guiGate* gt = doc->circuit.getGate(gs.id);
+			if (gt == nullptr) continue;
+			for (auto& hs : gt->getHotspotList()) {
+				if (!gt->isConnected(hs.first)) continue;
+				guiWire* w = gt->getConnection(hs.first);
+				if (w != nullptr && known.insert(w->getID()).second) w->endSegDrag();
+			}
+		}
+	}
 	if (g.lastDelta.x != 0 || g.lastDelta.y != 0 || g.floating) {
 		if (g.lastDelta.x != 0 || g.lastDelta.y != 0)
-			commitMove(doc, page, g.preMove, g.preMoveWire, g.lastDelta);
+			commitMove(doc, page, g.preMove, g.preMoveWire, g.preMoveAttached, g.lastDelta);
 		connectNearby(doc, page, g.unitsPerPoint, true);
 	}
 	flushPendingConnects(doc, page, g);
 }
 
+}  // namespace
+
+// Something else is about to change the circuit while a gesture is still under
+// way: a key pressed mid-drag, a paste or new part still following the
+// pointer, a press whose drag never got its release. Finish the gesture first
+// (`keep`: what it moved goes on the undo stack, as its release would have
+// done), or put it back (Undo and Redo). Left as it was, the gesture would
+// later record a move of parts the edit removed or renumbered, and the
+// connections C made mid-move would stay applied with no undo step.
+void clEndGesture(CLDocument* doc, bool keep) {
+	if (doc == nullptr) return;
+	EditGesture& g = doc->gesture;
+	if (g.mode == EditGesture::None) return;
+	GUICanvas* page = doc->page(g.page);
+	if (!keep || page == nullptr) { cl_edit_cancel(doc); return; }
+	if (g.mode == EditGesture::Moving) {
+		finishMove(doc, page, g);
+	} else if (g.mode == EditGesture::WireSeg) {
+		if (guiWire* w = doc->circuit.getWire(g.wire)) {
+			if (g.moved) {
+				w->endSegDrag();
+				submit(doc, page, new cmdWireSegDrag(&doc->circuit, page, g.wire));
+			} else {
+				w->setSegmentMap(w->getOldSegmentMap());
+			}
+		}
+	}
+	discardPendingConnects(doc, g);   // none left after a move; a stray set otherwise
+	page->collisionUpdate();
+	g = EditGesture();
+}
+
+namespace {
+// Any edit first finishes a gesture still under way (see clEndGesture).
+void settleGesture(CLDocument* doc) { clEndGesture(doc, true); }
 }  // namespace
 
 extern "C" {
@@ -319,12 +491,10 @@ int cl_edit_press(CLDocument* doc, int pageIndex, double x, double y, int modifi
 	// another page whose points mean nothing to it: a click there leaves a
 	// floating gate where it was, drops an unfinished wire, and then acts on
 	// that side as usual.
-	if (g.page != pageIndex && (g.mode == EditGesture::Moving || g.mode == EditGesture::Connect)) {
-		if (g.mode == EditGesture::Moving && g.floating) {
-			if (GUICanvas* p = doc->page(g.page)) { finishMove(doc, p, g); p->collisionUpdate(); }
-		}
-		g = EditGesture();
-	}
+	// A drag whose release never came (the window lost the mouse-up) is
+	// finished as its release would have finished it.
+	if (g.page != pageIndex || !((g.mode == EditGesture::Moving && g.floating) || (g.mode == EditGesture::Connect && g.sticky)))
+		clEndGesture(doc, true);
 	if (g.mode == EditGesture::Connect && g.sticky) {
 		if (GUICanvas* p = doc->page(g.page)) finishConnection(doc, p, (float)x, (float)y);
 		g = EditGesture();
@@ -449,21 +619,8 @@ void cl_edit_drag(CLDocument* doc, double x, double y) {
 		g.preMoveAttached.clear();
 		snapshotSelection(doc, page, g.preMove, g.preMoveWire);
 		// The wires that end on a moving part but aren't moving whole: remember their
-		// shape, so Escape can put them back with the part.
-		{
-			std::set<unsigned long> whole;
-			for (auto& ws : g.preMoveWire) whole.insert(ws.id);
-			for (auto& gs : g.preMove) {
-				guiGate* gt = doc->circuit.getGate(gs.id);
-				if (gt == nullptr) continue;
-				for (auto& hs : gt->getHotspotList()) {
-					if (!gt->isConnected(hs.first)) continue;
-					guiWire* w = gt->getConnection(hs.first);
-					if (w == nullptr || !whole.insert(w->getID()).second) continue;
-					g.preMoveAttached.emplace_back((unsigned int)w->getID(), GLPoint2f(), w->getSegmentMap());
-				}
-			}
-		}
+		// shape, so Escape (and Undo) can put them back with the part.
+		g.preMoveAttached = attachedWires(doc, g.preMove, g.preMoveWire);
 		// A drag that started on a lone wire waits for stage 3 (segment drags).
 		g.mode = g.preMove.empty() ? EditGesture::None : EditGesture::Moving;
 	}
@@ -606,6 +763,7 @@ int cl_edit_selected_wire_count(const CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_delete(CLDocument* doc, int pageIndex) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
@@ -625,6 +783,7 @@ void cl_edit_delete(CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_rotate(CLDocument* doc, int pageIndex) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
@@ -656,6 +815,7 @@ void cl_edit_rotate(CLDocument* doc, int pageIndex) {
 }
 
 void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
@@ -664,13 +824,15 @@ void cl_edit_nudge(CLDocument* doc, int pageIndex, double dx, double dy) {
 	doc->lockedHeld = false;
 	snapshotSelection(doc, page, moved, movedWires);
 	if (moved.empty()) return;
+	const std::vector<WireState> attached = attachedWires(doc, moved, movedWires);
 	const GLPoint2f d((float)dx, (float)dy);
 	for (auto& ws : movedWires) if (guiWire* w = doc->circuit.getWire(ws.id)) w->move(ws.point, d);
 	for (auto& gs : moved) if (guiGate* g = doc->circuit.getGate(gs.id)) g->setGLcoords(gs.x + d.x, gs.y + d.y);
-	commitMove(doc, page, moved, movedWires, d);
+	commitMove(doc, page, moved, movedWires, attached, d);
 }
 
 bool cl_edit_add_gate(CLDocument* doc, int pageIndex, const char* libGateName, double x, double y) {
+	settleGesture(doc);
 	settleTidy(doc);
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr || libGateName == nullptr) return false;
@@ -707,6 +869,7 @@ bool cl_edit_paste(CLDocument* doc, int pageIndex, const char* text, double x, d
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (clipboardOut) *clipboardOut = "";
 	if (page == nullptr || text == nullptr) return false;
+	settleGesture(doc);
 	settleTidy(doc);
 	klsClipboard::shiftHeld = shift;
 	klsClipboard::rewrittenText.clear();
@@ -757,6 +920,7 @@ static void noteInkHistory(CLDocument* doc, wxCommand* done) {
 
 bool cl_edit_undo(CLDocument* doc) {
 	if (doc == nullptr) return false;
+	clEndGesture(doc, false);   // a paste still on the pointer is put back, then taken back
 	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Undo();
 	noteInkHistory(doc, ok ? doc->circuit.GetCommandProcessor()->GetRedoCommand() : nullptr);
@@ -767,6 +931,7 @@ bool cl_edit_undo(CLDocument* doc) {
 
 bool cl_edit_redo(CLDocument* doc) {
 	if (doc == nullptr) return false;
+	clEndGesture(doc, false);
 	settleTidy(doc);
 	const bool ok = doc->circuit.GetCommandProcessor()->Redo();
 	noteInkHistory(doc, ok ? doc->circuit.GetCommandProcessor()->GetUndoCommand() : nullptr);
@@ -830,6 +995,16 @@ const char* cl_gate_library_name(const CLDocument* doc, long gate) {
 	return scratch.c_str();
 }
 
+bool cl_gate_position(const CLDocument* doc, long gate, double* x, double* y) {
+	guiGate* g = doc && gate >= 0 ? doc->circuit.getGate((unsigned long)gate) : nullptr;
+	if (g == nullptr) return false;
+	float gx = 0, gy = 0;
+	g->getGLcoords(gx, gy);
+	if (x) *x = gx;
+	if (y) *y = gy;
+	return true;
+}
+
 int cl_gate_setting_count(const CLDocument* doc, long gate) {
 	const LibraryGate* lg = libraryGateOf(doc, gate);
 	return lg ? (int)lg->dlgParams.size() : 0;
@@ -857,6 +1032,7 @@ bool cl_gate_set_setting(CLDocument* doc, long gate, const char* name, const cha
 	if (lg == nullptr || name == nullptr || value == nullptr) return false;
 	for (const lgDlgParam& p : lg->dlgParams) {
 		if (p.name != name) continue;
+		settleGesture(doc);
 		settleTidy(doc);
 		ParameterMap m;
 		m[name] = value;
@@ -953,12 +1129,14 @@ bool cl_edit_float_begin(CLDocument* doc, int pageIndex, double x, double y) {
 	if (page == nullptr) return false;
 	EditGesture& g = doc->gesture;
 	const float upp = g.unitsPerPoint > 0 ? g.unitsPerPoint : 0.05f;
+	settleGesture(doc);
 	g = EditGesture();
 	g.page = pageIndex;
 	g.start = g.current = GLPoint2f((float)x, (float)y);
 	g.unitsPerPoint = upp;
 	snapshotSelection(doc, page, g.preMove, g.preMoveWire);
 	if (g.preMove.empty()) return false;
+	g.preMoveAttached = attachedWires(doc, g.preMove, g.preMoveWire);
 	g.mode = EditGesture::Moving;
 	g.floating = true;
 	return true;
@@ -993,6 +1171,7 @@ int cl_edit_take_back_connects(CLDocument* doc) {
 int cl_edit_connect_nearby(CLDocument* doc, int pageIndex, double unitsPerPoint) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return 0;
+	settleGesture(doc);
 	return connectNearby(doc, page, (float)unitsPerPoint, false);
 }
 
@@ -1014,6 +1193,7 @@ int cl_edit_selected_locked_count(const CLDocument* doc, int pageIndex, bool loc
 int cl_edit_lock_selection(CLDocument* doc, int pageIndex, bool lock) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return 0;
+	settleGesture(doc);
 	settleTidy(doc);
 	std::vector<unsigned long> ids;
 	for (auto& g : *page->getGateList())
@@ -1035,6 +1215,7 @@ int cl_document_locked_count(const CLDocument* doc) {
 
 int cl_edit_unlock_all(CLDocument* doc, int pageIndex) {
 	if (doc == nullptr) return 0;
+	settleGesture(doc);
 	settleTidy(doc);
 	std::vector<unsigned long> ids;
 	for (auto& p : doc->pages)
@@ -1068,8 +1249,8 @@ bool cl_edit_is_connecting(const CLDocument* doc) {
 int cl_edit_context(CLDocument* doc, int pageIndex, double x, double y, double unitsPerPoint) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return CL_CONTEXT_NOTHING;
+	settleGesture(doc);
 	settleTidy(doc);
-	doc->gesture = EditGesture();
 	unsigned long gate = 0;
 	std::string pin;
 	if (pinAt(page, (float)x, (float)y, (float)(kPinPoints * unitsPerPoint), gate, pin)) {
@@ -1098,6 +1279,7 @@ void cl_edit_disconnect_pin(CLDocument* doc, int pageIndex, double x, double y, 
 	unsigned long gate = 0;
 	std::string pin;
 	if (!pinAt(page, (float)x, (float)y, (float)(kPinPoints * unitsPerPoint), gate, pin)) return;
+	settleGesture(doc);
 	guiGate* g = doc->circuit.getGate(gate);
 	if (!g->isConnected(pin)) return;
 	guiWire* w = g->getConnection(pin);
@@ -1111,6 +1293,7 @@ void cl_edit_disconnect_pin(CLDocument* doc, int pageIndex, double x, double y, 
 void cl_edit_straighten(CLDocument* doc, int pageIndex) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return;
+	settleGesture(doc);
 	settleTidy(doc);
 	std::vector<unsigned long> ids;
 	for (auto& w : *page->getWireList()) if (w.second && w.second->isSelected()) ids.push_back(w.first);
@@ -1135,7 +1318,7 @@ bool cl_edit_tidy_begin(CLDocument* doc, int pageIndex, int mode) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr) return false;
 	if (doc->tidy.active) cl_edit_tidy_end(doc, false);
-	doc->gesture = EditGesture();
+	settleGesture(doc);
 	edits::TidyPlan plan = edits::applyTidy(page, mode);
 	page->collisionUpdate();
 	if (plan.empty()) return false;
@@ -1159,20 +1342,19 @@ void cl_edit_tidy_end(CLDocument* doc, bool keep) {
 bool cl_edit_tidy_active(const CLDocument* doc) { return doc && doc->tidy.active; }
 int cl_edit_tidy_mode(const CLDocument* doc) { return doc ? doc->tidy.mode : 0; }
 
-void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, double backingScale,
+void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CLContext ctx, double backingScale,
                           double originX, double originY, double unitsPerPoint,
                           double ar, double ag, double ab) {
 	if (doc == nullptr || ctx == nullptr || unitsPerPoint <= 0) return;
 	using cl::render::Color;
 	using cl::render::Point;
 	using cl::render::Stroke;
-	CGContextSaveGState(ctx);
-	CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
+	cl::native::DevicePixels device(ctx, backingScale);
 	const float scale = (float)(backingScale / unitsPerPoint);
 	cl::render::Transform t;
 	t.a = scale; t.d = -scale;
 	t.e = (float)(-originX * scale); t.f = (float)(originY * scale);
-	cl::mac::CGScene scene(ctx);
+	cl::native::PlatformScene scene(ctx);
 	scene.setViewport(t);
 	const float px = (float)backingScale;   // one point, in the device pixels strokes use
 
@@ -1223,7 +1405,6 @@ void cl_edit_draw_overlay(CLDocument* doc, int pageIndex, CGContextRef ctx, doub
 		Point pts[4] = { Point(c.x - r, c.y + r), Point(c.x + r, c.y + r), Point(c.x + r, c.y - r), Point(c.x - r, c.y - r) };
 		scene.polyline(pts, 4, Stroke(Color(1.0f, 0.0f, 0.0f, 1.0f), px), true);
 	}
-	CGContextRestoreGState(ctx);
 }
 
 }  // extern "C"
@@ -1236,8 +1417,8 @@ int cl_edit_build(CLDocument* doc, int pageIndex, const CLBuildGate* gates, int 
                   const CLBuildWire* wires, int wireCount, const char* undoName) {
 	GUICanvas* page = doc ? doc->page(pageIndex) : nullptr;
 	if (page == nullptr || gates == nullptr || gateCount <= 0) return -1;
+	settleGesture(doc);
 	settleTidy(doc);
-	doc->gesture = EditGesture();
 	std::vector<klsCommand*> steps;
 	auto run = [&](klsCommand* c) { c->setCanvas(page); c->Do(); steps.push_back(c); };
 
