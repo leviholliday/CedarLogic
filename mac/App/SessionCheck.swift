@@ -1,0 +1,349 @@
+// `CedarLogic --session-check [actions] [seed]`: a long working session in
+// one circuit window, headless. The real window (CircuitWindow, so the
+// toolbar, tabs, palette, minimap, status bar and canvas all update) is put
+// in an NSWindow that's never ordered in, over a document that autosaves in
+// place into Your Circuits, the way a circuit window does. Then a few
+// thousand edits a few hundredths of a second apart, as a student would make
+// them over ten minutes or more: parts placed, moved, wired, deleted,
+// undone and redone, tabs opened, switched and closed, a split opened and
+// closed and used, Simulation View and the scope on and off, the clock run
+// and stepped -- with a pause every so often for autosave.
+//
+// Checked all along: an edit always leaves the window edited (or autosave
+// skips it: the 500th-undo bug was one way), each pause leaves it saved with
+// the file on disk the circuit as it is, the engine's undo steps and the
+// window's stay in step, each side shows a page that exists, Version History
+// keeps a version after a break (the break is made by backdating the file,
+// not by waiting), memory doesn't grow without bound, and closing the
+// window lets the controller, its clock and the circuit go.
+//
+// It writes into Your Circuits, so it only runs with a home folder of its
+// own (CFFIXED_USER_HOME, as mac/Tools/session-check.sh sets): never in
+// yours. PASS or FAIL for each; exit 1 on a failure.
+
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// A circuit file, as macOS's document handling sees one: saved in place,
+/// as the engine writes it.
+private final class SessionFile: NSDocument {
+    let core: CoreDocument
+    init(core: CoreDocument) { self.core = core; super.init() }
+    override class var autosavesInPlace: Bool { true }
+    override class var readableTypes: [String] { [UTType.cedarLogicCircuit.identifier] }
+    override class var writableTypes: [String] { [UTType.cedarLogicCircuit.identifier] }
+    override class func isNativeType(_ type: String) -> Bool { true }
+    override func data(ofType typeName: String) throws -> Data { Data(core.saveText().utf8) }
+    override func read(from data: Data, ofType typeName: String) throws {}
+}
+
+/// The window hands out its document's undo manager, as a document window does.
+private final class SessionWindowDelegate: NSObject, NSWindowDelegate {
+    weak var file: NSDocument?
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { file?.undoManager }
+}
+
+@MainActor
+enum SessionCheck {
+    static func runIfAsked() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--session-check") else { return }
+        let actions = args.count > i + 1 ? Int(args[i + 1]) ?? 2000 : 2000
+        let seed = args.count > i + 2 ? UInt64(args[i + 2]) ?? 1 : 1
+        setvbuf(stdout, nil, _IOLBF, 0)
+        guard isolatedHome() else {
+            print("session-check: needs a home folder of its own (CFFIXED_USER_HOME); run mac/Tools/session-check.sh")
+            exit(2)
+        }
+        exit(run(actions: actions, seed: seed) ? 0 : 1)
+    }
+
+    /// Your Circuits is inside CFFIXED_USER_HOME, so nothing of the owner's is touched.
+    static func isolatedHome() -> Bool {
+        guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"], !home.isEmpty else { return false }
+        let h = URL(fileURLWithPath: home).standardizedFileURL.path
+        return Library.root.standardizedFileURL.path.hasPrefix(h + "/")
+    }
+
+    /// The memory the system counts against the app (Activity Monitor's).
+    static func footprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let r = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        return r == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : 0
+    }
+
+    struct Random {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state &+= 0x9E3779B97F4A7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            return z ^ (z >> 31)
+        }
+        mutating func int(_ n: Int) -> Int { Int(next() % UInt64(max(n, 1))) }
+        mutating func unit() -> Double { Double(next() % 1_000_000) / 1_000_000 }
+    }
+
+    static func run(actions: Int, seed: UInt64) -> Bool {
+        var failures = 0
+        func check(_ ok: Bool, _ what: String) {
+            print((ok ? "PASS " : "FAIL ") + what)
+            if !ok { failures += 1 }
+        }
+        func turn(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
+
+        splitRunChecks(check)
+
+        // No welcome, What's New or tour on top (they're windows of their own).
+        Prefs.shared.hasSeenWelcome = true
+        WhatsNew.markSeen()
+        let prefs = Prefs.shared
+        let savedOpenReplaces = prefs.openReplaces
+        prefs.openReplaces = false
+
+        // A circuit in Your Circuits, open in a window.
+        let core0 = CoreDocument()
+        guard let item = try? Library.create(named: "Session check", text: core0.saveText()) else {
+            print("FAIL couldn't make a circuit in Your Circuits at \(Library.root.path)")
+            return false
+        }
+        weak var goneCanvas: CanvasController?
+        weak var goneCore: CoreDocument?
+        weak var goneFile: NSDocument?
+        weak var goneWindow: NSWindow?
+        weak var goneHost: NSView?
+        var editsChecked = 0, editsLost = 0, firstLost = -1
+        var pausesChecked = 0, pausesUnsaved = 0, pausesStale = 0, firstStale = -1
+        var stepMismatch = 0, firstMismatch = -1
+        var badPage = 0, firstBadPage = -1
+        var maxSteps = 0, splits = 0, tabsMade = 0, tabsClosed = 0, undos = 0, redos = 0
+        var versionAfterBreak: Bool?
+        var memory: [Double] = []
+        let delegate = SessionWindowDelegate()
+
+        autoreleasepool { MainActor.assumeIsolated {
+            guard let data = try? Data(contentsOf: item.circuit), let core = try? CoreDocument(data: data) else {
+                print("FAIL couldn't open the circuit just made")
+                failures += 1
+                return
+            }
+            let file = SessionFile(core: core)
+            file.fileURL = item.circuit
+            file.fileType = UTType.cedarLogicCircuit.identifier
+            file.fileModificationDate = (try? item.circuit.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            delegate.file = file
+            let size = NSSize(width: 1280, height: 800)
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
+                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                               backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            win.delegate = delegate
+            let wc = NSWindowController(window: win)
+            file.addWindowController(wc)
+            NSDocumentController.shared.addDocument(file)
+            let host = NSHostingView(rootView: CircuitWindow(document: core).environmentObject(LookStore.shared))
+            host.frame = NSRect(origin: .zero, size: size)
+            win.contentView = host
+            host.layoutSubtreeIfNeeded()
+            turn(1.0)
+
+            @MainActor func findCanvas(_ v: NSView) -> CircuitCanvasNSView? {
+                if let c = v as? CircuitCanvasNSView, c.controller?.drivesClock == true { return c }
+                for s in v.subviews { if let c = findCanvas(s) { return c } }
+                return nil
+            }
+            guard let canvasView = findCanvas(host), let canvas = canvasView.controller else {
+                print("FAIL the window has no canvas")
+                failures += 1
+                return
+            }
+            check(canvas.undoManager === file.undoManager, "the canvas uses the document's undo manager")
+            if canvas.undoManager !== file.undoManager { canvas.undoManager = file.undoManager }
+            goneCanvas = canvas; goneCore = core; goneFile = file; goneWindow = win; goneHost = host
+
+            var rng = Random(state: seed)
+            let parts = ["AA_AND2", "AE_OR2", "AA_INVERTER", "AI_XOR2", "AA_TOGGLE", "GA_LED", "BB_CLOCK", "AA_DFF"]
+            /// The side edits go to: the first, or the second while a split has it.
+            @MainActor func side() -> CanvasController { canvas.routed }
+            @MainActor func gates(_ c: CanvasController) -> Int { Int(cl_document_gate_count(core.handle, Int32(c.page))) }
+            @MainActor func spot(_ c: CanvasController) -> CGPoint {
+                let b = core.bounds(ofPage: c.page) ?? CGRect(x: -20, y: -20, width: 40, height: 40)
+                return CGPoint(x: b.minX - 6 + rng.unit() * (b.width + 12), y: b.minY - 6 + rng.unit() * (b.height + 12))
+            }
+            @MainActor func checkPages(_ at: Int) {
+                let n = core.pageCount
+                var ok = canvas.page >= 0 && canvas.page < n
+                if let p = canvas.partner, p.view != nil { ok = ok && p.page >= 0 && p.page < n }
+                if !ok { badPage += 1; if firstBadPage < 0 { firstBadPage = at } }
+            }
+            /// The circuit changed: the window must be edited now, or autosave
+            /// and closing would leave it unsaved. (Not the engine's own
+            /// flag: an undo back to the saved circuit leaves that on, and
+            /// the window rightly unedited.)
+            @MainActor func checkEdited(_ at: Int, from before: String) {
+                guard shape(core.shareText(flags: 0)) != before else { return }
+                editsChecked += 1
+                if !file.isDocumentEdited { editsLost += 1; if firstLost < 0 { firstLost = at } }
+            }
+            @MainActor func pause(_ at: Int) {
+                turn(2.6)   // autosave comes 2 s after the last change
+                pausesChecked += 1
+                if file.isDocumentEdited { pausesUnsaved += 1 }
+                let disk = (try? String(contentsOf: item.circuit, encoding: .utf8)).map(shape)
+                if disk != shape(core.shareText(flags: 0)) { pausesStale += 1; if firstStale < 0 { firstStale = at } }
+            }
+
+            memory.append(footprintMB())
+            for a in 0..<actions {
+                let c = side()
+                let roll = rng.int(100)
+                var isEdit = false
+                let before = shape(core.shareText(flags: 0))
+                switch roll {
+                case 0..<22:   // place a part
+                    if gates(c) > 36 {
+                        c.selectAll(); c.deleteSelection()
+                    } else {
+                        c.addGate(parts[rng.int(parts.count)], at: spot(c))
+                    }
+                    isEdit = true
+                case 22..<36:  // drag something (or a box), as the mouse does
+                    let from = spot(c), to = CGPoint(x: from.x + CGFloat(rng.int(13)) - 6, y: from.y + CGFloat(rng.int(13)) - 6)
+                    if c.canEdit {
+                        _ = core.press(page: c.page, at: from, modifiers: [], unitsPerPoint: c.view?.unitsPerPoint ?? 0.1)
+                        core.drag(to: CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2))
+                        core.drag(to: to)
+                        core.release(at: to)
+                        c.edited()
+                        isEdit = true
+                    }
+                case 36..<42: c.connectNearby(quietly: true); isEdit = true
+                case 42..<46: c.nudge(dx: CGFloat(rng.int(3)) - 1, dy: CGFloat(rng.int(3)) - 1); isEdit = true
+                case 46..<49: c.rotate(); isEdit = true
+                case 49..<52:  // delete what's selected
+                    c.deleteSelection(); isEdit = true
+                case 52..<62 where rng.int(3) == 0:
+                    for _ in 0..<(1 + rng.int(4)) { if canvas.canUndo { canvas.undo(); undos += 1 } }
+                case 62..<68 where rng.int(3) == 0:
+                    for _ in 0..<(1 + rng.int(3)) { if canvas.canRedo { canvas.redo(); redos += 1 } }
+                case 52..<68: c.addGate(parts[rng.int(parts.count)], at: spot(c)); isEdit = true
+                case 68..<71: _ = core.click(page: c.page, at: spot(c)); c.redraw()
+                case 71..<73: c.perform(.newTab); tabsMade += 1
+                case 73..<76: c.perform(.nextTab)
+                case 76..<78:  // close the tab if it's empty (one with parts asks first)
+                    if core.pageCount > 1 && gates(c) == 0 { c.perform(.closeTab); tabsClosed += 1 }
+                case 78: c.perform(.reopenTab)
+                case 79..<81: canvas.perform(.splitView); splits += 1
+                case 81..<83: canvas.perform(.switchPane)
+                case 83..<85: c.perform(.simView)
+                case 85..<87: c.perform(.scope)
+                case 87..<89: canvas.setRunning(!canvas.isRunning)
+                case 89..<91: c.perform(.step)
+                case 91..<93: c.straighten(); isEdit = true
+                case 93..<95: c.perform(.selectAll)
+                case 95..<97: c.perform(.zoomFit)
+                default: c.selectNone()
+                }
+                turn(0.02 + 0.03 * rng.unit())
+                if isEdit { checkEdited(a, from: before) }
+                if core.mirroredUndo != core.undoCount { stepMismatch += 1; if firstMismatch < 0 { firstMismatch = a } }
+                maxSteps = max(maxSteps, core.undoCount)
+                checkPages(a)
+                if a % 40 == 39 {
+                    // Simulation View stops editing; a student turns it off to carry on.
+                    for s in [canvas, canvas.partner].compactMap({ $0 }) where s.simView { s.simView = false }
+                    pause(a)
+                }
+                if a == actions / 2 {
+                    // Coming back after a break: the last save was 11 minutes ago.
+                    let pending = item.versionsFolder.appendingPathComponent(".pending.cdl")
+                    let versionsBefore = Library.versions(of: item).count
+                    try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-11 * 60)], ofItemAtPath: pending.path)
+                    let shapeBefore = shape(core.shareText(flags: 0))
+                    c.addGate("AA_AND2", at: spot(c))
+                    turn(0.03)   // the window's edited state follows as the run loop turns
+                    checkEdited(a, from: shapeBefore)
+                    pause(a)
+                    turn(2.2)   // the save is noticed on the next 2-second look
+                    // Only if the circuit changed since the newest version
+                    // (the same circuit twice in a row isn't kept).
+                    versionAfterBreak = Library.versions(of: item).count > versionsBefore
+                }
+                if a == actions / 4 || a == actions - 1 { memory.append(footprintMB()) }
+            }
+            if canvas.isRunning == false { canvas.setRunning(true) }
+            turn(1)
+            print(String(format: "session: %d actions, %d undo steps at most, %d undos, %d redos, %d splits, %d tabs made, %d closed, %d pages now",
+                         actions, maxSteps, undos, redos, splits, tabsMade, tabsClosed, core.pageCount))
+
+            // Closing the window, as the red button does (it's saved by now).
+            file.close()
+            win.contentView = nil
+            delegate.file = nil
+        } }
+        turn(1.5)
+
+        check(editsChecked > 0 && editsLost == 0,
+              "every edit leaves the window edited, so autosave saves it (\(editsChecked - editsLost) of \(editsChecked)\(firstLost >= 0 ? ", first lost at action \(firstLost)" : ""))")
+        check(pausesChecked > 0 && pausesUnsaved == 0, "autosave saved the circuit at every pause (\(pausesChecked - pausesUnsaved) of \(pausesChecked))")
+        check(pausesStale == 0, "the file on disk is the circuit as it is, at every pause (\(pausesChecked - pausesStale) of \(pausesChecked)\(firstStale >= 0 ? ", first stale at action \(firstStale)" : ""))")
+        check(stepMismatch == 0, "the window's undo steps match the engine's after every action\(firstMismatch >= 0 ? " (\(stepMismatch) mismatches, first at action \(firstMismatch))" : "")")
+        check(badPage == 0, "each side shows a page that exists\(firstBadPage >= 0 ? " (\(badPage) times not, first at action \(firstBadPage))" : "")")
+        check(maxSteps >= CanvasController.engineHistoryLimit || actions < 2000, "the session reached the engine's full history (\(maxSteps) steps)")
+        if let v = versionAfterBreak { check(v, "Version History kept a version after an 11-minute break") }
+        let versions = Library.versions(of: item).count
+        check(versions >= 1, "the circuit has versions (\(versions))")
+        if memory.count >= 3 {
+            let growth = memory[2] - memory[1]
+            print(String(format: "memory: %.0f MB at the start, %.0f MB a quarter in, %.0f MB at the end", memory[0], memory[1], memory[2]))
+            check(growth < 150, String(format: "memory over the last three quarters grew %.0f MB (under 150)", growth))
+        }
+        print("after closing: window \(goneWindow == nil ? "gone" : "kept"), its view \(goneHost == nil ? "gone" : "kept"), document \(goneFile == nil ? "gone" : "kept")")
+        check(goneCanvas == nil, "the window's controller (and its 60-a-second clock) went with the window")
+        check(goneCore == nil, "the circuit went with the window")
+        check(goneFile == nil || !NSDocumentController.shared.documents.contains { $0 === goneFile }, "the document closed")
+        prefs.openReplaces = savedOpenReplaces
+        print(failures == 0 ? "session-check: all passed" : "session-check: \(failures) failed")
+        return failures == 0
+    }
+
+    /// Run and pause from either side of a split: both sides and the engine
+    /// agree (Space on the second side once paused only the engine and that
+    /// side; the first side, whose clock runs the circuit, still said
+    /// running -- or the other way round, a running engine nothing ticked).
+    static func splitRunChecks(_ check: (Bool, String) -> Void) {
+        let core = CoreDocument()
+        let main = CanvasController(), side = CanvasController()
+        side.drivesClock = false
+        main.partner = side; side.partner = main
+        main.attach(core); side.attach(core)
+        func agree() -> Bool { main.isRunning == core.isRunning && side.isRunning == core.isRunning }
+        side.toggleRunning()
+        check(agree() && !core.isRunning, "split: Space on the second side pauses both sides")
+        side.toggleRunning()
+        check(agree() && core.isRunning, "split: and runs both again")
+        main.toggleRunning()
+        check(agree() && !core.isRunning, "split: pausing on the first side pauses the second too")
+        side.simView = true
+        check(agree() && core.isRunning, "split: Simulation View on the second side runs both")
+        side.stepOnce()
+        check(agree() && !core.isRunning, "split: a step on the second side pauses both")
+        side.simView = false
+        main.partner = nil; side.partner = nil
+    }
+
+    /// A circuit's text less what running it changes (as Version History
+    /// compares them): switches, registers, the app that wrote it.
+    static func shape(_ text: String) -> String {
+        text.split(separator: "\n").filter { line in
+            let t = line.drop { $0 == " " }
+            return !(t.hasPrefix("(lparam \"OUTPUT_NUM\"") || t.hasPrefix("(lparam \"CURRENT_VALUE\"")
+                     || t.hasPrefix("(generator "))
+        }.joined(separator: "\n")
+    }
+}
