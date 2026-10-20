@@ -24,6 +24,7 @@ public:
 	bool active() const { return isActive; }
 
 private:
+	friend struct SessionDriver;   // --session-check reads which tab is picked
 	CircuitWindow* win;
 	bool isActive = false;
 	std::vector<int> tabs;   // tab indexes, most recent first

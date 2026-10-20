@@ -8,6 +8,7 @@
 #include "Notes.h"
 #include "Settings.h"
 #include "TabStrip.h"
+#include "TabSwitcher.h"
 #include "Window.h"
 
 #include <execinfo.h>
@@ -213,6 +214,8 @@ struct SessionDriver {
 	int historyBad = 0, firstHistory = -1, maxUndo = 0;
 	int pagesBad = 0, firstPages = -1;
 	int stuckWindows = 0;
+	int switches = 0, switchesWrong = 0, staleStamps = 0;
+	std::string lastSwitchIssue;
 	int prefsChecks = 0, prefsUnsaved = 0;
 	bool settingsClosed = false;
 	int modalsSeen = 0, menusSeen = 0, menuItemsRun = 0;
@@ -332,8 +335,12 @@ struct SessionDriver {
 		gdk_event_free(e);
 	}
 	static void tap(GtkWidget* toplevel, guint keyval, guint state = 0) {
+		if (toplevel == nullptr) return;
+		// The key may close the window (Escape): the release then goes nowhere.
+		g_object_ref(toplevel);
 		key(toplevel, keyval, state, true);
-		key(toplevel, keyval, state, false);
+		if (!gtk_widget_in_destruction(toplevel)) key(toplevel, keyval, state, false);
+		g_object_unref(toplevel);
 	}
 
 	// ---- The canvas, in view points --------------------------------------------
@@ -613,11 +620,16 @@ struct SessionDriver {
 		const double now = nowMs();
 		GList* all = gtk_window_list_toplevels();
 		std::vector<GtkWidget*> tops;
-		for (GList* l = all; l; l = l->next) tops.push_back(GTK_WIDGET(l->data));
+		// Held while looked at: closing one can take others with it (its popups).
+		for (GList* l = all; l; l = l->next) tops.push_back(GTK_WIDGET(g_object_ref(l->data)));
 		g_list_free(all);
+		struct Unref {
+			std::vector<GtkWidget*>& v;
+			~Unref() { for (GtkWidget* t : v) g_object_unref(t); }
+		} unref{ tops };
 		std::set<GtkWidget*> present;
 		for (GtkWidget* t : tops) {
-			if (!gtk_widget_get_visible(t) || isCircuitWindow(t)) continue;
+			if (gtk_widget_in_destruction(t) || !gtk_widget_get_visible(t) || isCircuitWindow(t)) continue;
 			GtkWidget* menu = menuIn(t);
 			const bool popup = gtk_window_get_window_type(GTK_WINDOW(t)) == GTK_WINDOW_POPUP;
 			if (popup && !menu) continue;   // a tooltip
@@ -972,8 +984,15 @@ struct SessionDriver {
 		settle();
 		if (w->filePath().empty() || w->isDirty()) { tap(top(), GDK_KEY_s, GDK_CONTROL_MASK); pump(40); }
 		if (w->filePath().empty()) return;
+		const unsigned stamp = w->editStamp();
 		if (rng.chance(0.5)) w->reloadForSync("Reloaded by the session check.");
 		else w->reloadFromDisk("");
+		// The pictures kept of the circuit (the minimap's) are keyed on the
+		// edit stamp: a circuit replaced in place has to move it.
+		if (w->editStamp() == stamp) {
+			staleStamps++;
+			if (staleStamps == 1) fail(format("action %d: the circuit was reloaded in place and the window's edit stamp didn't move (the minimap keeps the old picture)", (int)gStep));
+		}
 	}
 
 	void act(int a) {
@@ -984,7 +1003,7 @@ struct SessionDriver {
 			"run or pause", "step", "Step Clock", "scope", "truth table", "find", "gate settings", "Settings",
 			"draw", "notes", "Straighten", "Tidy Up", "lock", "lock in place", "save", "reload", "zoom and pan",
 			"right-click", "select all", "the ••• menu", "connect nearby", "dark mode", "focus mode", "add a gate (A)",
-			"canvas drawing path", "duplicate the circuit",
+			"canvas drawing path", "duplicate the circuit", "Ctrl+Tab held",
 		};
 		static const int weights[] = {
 			12, 7, 4, 10, 3, 4, 3,
@@ -993,7 +1012,7 @@ struct SessionDriver {
 			2, 2, 1, 2, 1, 2, 2, 1,
 			2, 1, 2, 2, 1, 1, 1, 1, 4,
 			3, 2, 1, 1, 1, 1, 1,
-			1, 1,
+			1, 1, 2,
 		};
 		static_assert(G_N_ELEMENTS(names) == G_N_ELEMENTS(weights), "a weight for each action");
 		int total = 0;
@@ -1101,6 +1120,39 @@ struct SessionDriver {
 			for (Canvas* k : w->canvases) { k->pathOverride = rng.below(3); k->drawAll = rng.chance(0.3); k->dropBuffers(); k->redraw(); }
 			break;
 		}
+		case 50: {
+			// Ctrl held, Tab a few times (the switcher comes up), maybe Ctrl+W
+			// or Ctrl+T on the way, then Ctrl let go: the card picked is the
+			// tab shown.
+			key(t, GDK_KEY_Control_L, 0, true);
+			for (int i = 1 + rng.below(3); i > 0; i--) {
+				key(t, GDK_KEY_Tab, GDK_CONTROL_MASK, true);
+				key(t, GDK_KEY_Tab, GDK_CONTROL_MASK, false);
+				pump(40);
+			}
+			pump(220);
+			uint64_t want = 0;
+			TabSwitcher* sw = w->switcher;
+			if (sw && sw->isActive && sw->selected >= 0 && sw->selected < (int)sw->tabs.size()) {
+				const int i = sw->tabs[(size_t)sw->selected];
+				if (i >= 0 && i < (int)w->canvases.size()) want = w->canvases[(size_t)i]->pageKey();
+			}
+			if (rng.chance(0.3)) tap(t, GDK_KEY_w, GDK_CONTROL_MASK);   // with Ctrl still down
+			else if (rng.chance(0.2)) tap(t, GDK_KEY_t, GDK_CONTROL_MASK);
+			pump(20);
+			key(t, GDK_KEY_Control_L, GDK_CONTROL_MASK, false);
+			pump(20);
+			if (want && cl_document_page_index(doc(), want) >= 0 && canvas()) {
+				switches++;
+				if (canvas()->pageKey() != want) {
+					switchesWrong++;
+					if (lastSwitchIssue.empty())
+						lastSwitchIssue = format("action %d: the card picked was page %d, the tab shown is page %d", (int)gStep,
+						                         cl_document_page_index(doc(), want), w->currentPage());
+				}
+			}
+			break;
+		}
 		case 49: {
 			// A copy in a window of its own, closed again: windows come and go mid-session.
 			const int before = CircuitWindow::liveCount;
@@ -1129,6 +1181,8 @@ struct SessionDriver {
 		pump(500);
 		w = circuitWindows().front();
 		gtk_window_present(w->window());
+		// The settings file as it starts: what Settings changes later is compared with it.
+		prefs().save();
 		pump(300);
 		const int windowsAtStart = CircuitWindow::liveCount;
 		long rss[3] = { residentKB(), 0, 0 };
@@ -1176,6 +1230,8 @@ struct SessionDriver {
 		                              firstHistory >= 0 ? format("; wrong at action %d", firstHistory).c_str() : ""));
 		check(pagesBad == 0, format("every tab is a page that exists, on its side (%d wrong", pagesBad) +
 		                         (firstPages >= 0 ? format(", first at action %d: %s)", firstPages, lastPageIssue.c_str()) : std::string(")")));
+		check(switchesWrong == 0, format("Ctrl+Tab shows the tab picked (%d of %d", switches - switchesWrong, switches) +
+		                              (lastSwitchIssue.empty() ? std::string(")") : "; " + lastSwitchIssue + ")"));
 		check(stuckWindows == 0, format("every window over the circuit closed when asked (%d seen, %d stuck)", modalsSeen, stuckWindows));
 		check(prefsUnsaved == 0, format("a setting changed in Settings is saved (%d checks", prefsChecks) +
 		                             (lastPrefsIssue.empty() ? std::string(")") : ": " + lastPrefsIssue + ")"));
@@ -1267,6 +1323,8 @@ void prepare() {
 #else
 	for (int sig : { SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL }) sigaction(sig, &sa, nullptr);
 #endif
+	// G_DEBUG=fatal-criticals stops at a critical with a breakpoint trap.
+	sigaction(SIGTRAP, &sa, nullptr);
 	g_log_set_writer_func(logWriter, nullptr, nullptr);
 }
 
