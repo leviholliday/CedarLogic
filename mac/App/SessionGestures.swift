@@ -94,10 +94,7 @@ extension SessionCheck {
 
     /// Change one of a gate's settings, as its Settings sheet's controls do.
     static func applySetting(_ c: CanvasController, gate: Int, name: String, value: String) {
-        c.document?.setSetting(gate: gate, name: name, value: value)
-        c.redraw()
-        c.editsChanged()
-        c.selectionChanged()
+        c.changeSetting(gate: gate, name: name, value: value)
     }
 
     /// The scripted gestures, on a new tab of the session's window. `edited`

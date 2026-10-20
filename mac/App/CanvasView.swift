@@ -1715,6 +1715,16 @@ final class CanvasController: ObservableObject {
         if mode != tidyMode { tidyMode = mode }
     }
 
+    /// One of a gate's settings changed in its Settings sheet: an undo step
+    /// like any edit, so the window is edited and autosaves. (It once only
+    /// redrew: the step wasn't mirrored into the window's undo, so a
+    /// setting changed last -- a label's text, a clock's speed -- was never
+    /// saved, and quitting or closing the window lost it.)
+    func changeSetting(gate: Int, name: String, value: String) {
+        document?.setSetting(gate: gate, name: name, value: value)
+        edited()
+    }
+
     func showSettings() {
         guard let g = document?.singleSelectedGate(page: page) else { return }
         sheetHost.settingsGate = g

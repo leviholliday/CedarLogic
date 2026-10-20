@@ -40,10 +40,7 @@ struct GateSettingsSheet: View {
                         ForEach(Array(settings.enumerated()), id: \.element.id) { i, s in
                             if i > 0 { Rectangle().fill(line).frame(height: 1).padding(.leading, 14) }
                             SettingRow(setting: s, ink: ink, accent: accent, dark: dark, done: done) { value in
-                                document.setSetting(gate: gate, name: s.name, value: value)
-                                controller.redraw()
-                                controller.editsChanged()
-                                controller.selectionChanged()
+                                controller.changeSetting(gate: gate, name: s.name, value: value)
                             }
                         }
                     }
