@@ -149,11 +149,40 @@ Session flags as above, 300 ops a seed, each seed run alone with a 60 s cap
    way; the loader merges the jog away. `finishMove` now gives those wires their
    shape from before the drag, and merges a wire C joined on the way. cl_check case.
 
-Still open: seeds 31 and 74 from new (`CL_FUZZ_TREE`: "wire in 2 pieces"). 31: a
-three-pin wire inside a floating paste whose two pins are on one gate, reshaped
-by the float, splits on the drop's merge. 74: whole-page Straighten/Tidy turns a
-staircase wire on a RAM's shared DATA_IN_4/DATA_OUT_4 spot into two dots. Both
-fail the same way before these fixes.
+Still open after round 4: seeds 31 and 74 from new (`CL_FUZZ_TREE`: "wire in
+2 pieces"). Both failed the same way before the round-4 fixes. Fixed in round 5.
+
+### Fixed (2026-10-20, round 5)
+
+9. **A wire on a RAM's shared data spot routed the simple way lost its trunk**
+   (seed 74: a whole-page Tidy Up with full rearrange turned a staircase wire on
+   an AE_RAM_8x8's DATA_IN_4/DATA_OUT_4 into two dots). The page router found no
+   way for it, so it fell back to `TrunkRouter`. For pins facing up/down that
+   makes a horizontal trunk with id 2 and numbers the branches from 0, and a
+   third branch took id 2 and replaced the trunk. A RAM's DATA_IN_n and
+   DATA_OUT_n share one spot and the wire holds both, so any wire from that
+   spot to one more pin has three branches. Listing the spot twice in the
+   router input is correct, because each segment must carry both pins. The fix:
+   branches skip id 2 (`src/gui/route/TrunkRouter.cpp`). cl_check and
+   test_route cases.
+10. **A wire stayed in two pieces when the dot joining its runs was merged away**
+    (seed 31: a floated copy of two overlapping encoders, one wire on IN_5 and
+    IN_6 of one and IN_1 of the other, dropped). The parts' move moves the wire
+    whole, and then each pin moved reshapes it in turn
+    (`updateConnectionPos`), which leaves zero-length dots behind. One dot was
+    the only join between the run across and the run up. On the drop,
+    `removeZeroLengthSegments` removed it along with the crossings to it, and
+    the trim pulled the run across back to its own pin. The fix: before a dot
+    goes, the runs that cross at its point record a crossing with each other
+    (`guiWire::bridgeAround`, `src/gui/guiWire.cpp`). cl_check case.
+
+Sweeps after both fixes (the machine was heavily loaded, so more seeds hit the
+60 s cap than in round 4): basic, seeds 1-150 x 250, 0 failed; session flags
+from new, seeds 1-60 x 300, 60 s cap: 54 passed, 0 failed, 6 unfinished (5, 14,
+15, 31, 33, 38). After fix 9 alone: 50 passed, 0 failed, 10 unfinished. Seeds 31
+and 74 both get past the op that failed. 31 passes when run alone (about 6
+minutes). 74 then pastes the page into itself and was still running at op 283
+of 300 after 15 minutes (unfinished, not failed).
 
 ## Next
 
