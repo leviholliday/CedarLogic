@@ -117,7 +117,7 @@ enum SessionCheck {
         weak var goneFile: NSDocument?
         weak var goneWindow: NSWindow?
         weak var goneHost: NSView?
-        var editsChecked = 0, editsLost = 0, firstLost = -1
+        var editsChecked = 0, editsLost = 0, firstLost = -1, kind = "", lostWhat = ""
         var pausesChecked = 0, pausesUnsaved = 0, pausesStale = 0, firstStale = -1
         var stepMismatch = 0, firstMismatch = -1
         var badPage = 0, firstBadPage = -1
@@ -186,9 +186,18 @@ enum SessionCheck {
             /// flag: an undo back to the saved circuit leaves that on, and
             /// the window rightly unedited.)
             @MainActor func checkEdited(_ at: Int, from before: String) {
-                guard shape(core.shareText(flags: 0)) != before else { return }
+                let now = shape(core.shareText(flags: 0))
+                guard now != before else { return }
                 editsChecked += 1
-                if !file.isDocumentEdited { editsLost += 1; if firstLost < 0 { firstLost = at } }
+                // Unedited is right if autosave already wrote this very
+                // circuit (it can land between an edit and this look).
+                if !file.isDocumentEdited, (try? String(contentsOf: item.circuit, encoding: .utf8)).map(shape) != now {
+                    editsLost += 1
+                    if firstLost < 0 {
+                        firstLost = at
+                        lostWhat = "\(kind); \(core.undoCount) steps, engine \(core.isEdited ? "edited" : "unedited"), \(core.canRedo ? "with" : "no") redo"
+                    }
+                }
             }
             @MainActor func pause(_ at: Int) {
                 turn(2.6)   // autosave comes 2 s after the last change
@@ -221,7 +230,9 @@ enum SessionCheck {
                     gestures += 1
                     let hands = CanvasHands(view: v)
                     let editable = c.canEdit
-                    switch rng.int(10) {
+                    let g = rng.int(10)
+                    kind = "gesture \(g)"
+                    switch g {
                     case 0, 1:   // a drag: a part, a wire end, a pin to somewhere, a box
                         let from = spot(c)
                         hands.drag(from, CGPoint(x: from.x + CGFloat(rng.int(15)) - 7, y: from.y + CGFloat(rng.int(15)) - 7))
@@ -289,6 +300,7 @@ enum SessionCheck {
                         c.closeFind()
                     }
                 } else {
+                kind = "action \(roll)"
                 switch roll {
                 case 0..<22:   // place a part
                     if gates(c) > 36 {
@@ -346,7 +358,13 @@ enum SessionCheck {
                     pause(a)
                 }
                 if a == actions / 2 {
-                    // Coming back after a break: the last save was 11 minutes ago.
+                    // Coming back after a break: the last save was 11 minutes
+                    // ago. First the work so far is saved and that save seen
+                    // (Your Circuits' every-2-s look notes a save only while
+                    // the window is unedited: see docs/MAC-APP-AUDIT.md).
+                    for s in [canvas, canvas.partner].compactMap({ $0 }) where s.simView { s.simView = false }
+                    pause(a)
+                    turn(2.2)
                     let pending = item.versionsFolder.appendingPathComponent(".pending.cdl")
                     let versionsBefore = Library.versions(of: item).count
                     try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-11 * 60)], ofItemAtPath: pending.path)
@@ -359,6 +377,9 @@ enum SessionCheck {
                     // Only if the circuit changed since the newest version
                     // (the same circuit twice in a row isn't kept).
                     versionAfterBreak = Library.versions(of: item).count > versionsBefore
+                    if versionAfterBreak != true {
+                        print("INFO the break: \(versionsBefore) versions before, \(Library.versions(of: item).count) after; .pending.cdl \(FileManager.default.fileExists(atPath: pending.path) ? "there" : "not there"), the window \(file.isDocumentEdited ? "edited" : "saved")")
+                    }
                 }
                 if a == actions / 4 || a == actions - 1 { memory.append(footprintMB()) }
             }
@@ -381,7 +402,24 @@ enum SessionCheck {
             while canvas.canRedo && redoes < 3000 { canvas.redo(); redoes += 1; if redoes % 50 == 0 { turn(0.01) } }
             turn(0.1)
             print("INFO undo walk: \(presses) Undo presses (\(nothing) did nothing, \(several) took back more than one step, \(undone) steps left), \(redoes) Redo presses")
-            check(shape(core.shareText(flags: 0)) == beforeWalk, "Undo all the way back and Redo all the way gives the circuit back")
+            let afterWalk = shape(core.shareText(flags: 0))
+            /// Less the wires' drawn paths (the engine may route a wire put
+            /// back by Redo another way): parts, settings and connections.
+            func logical(_ t: String) -> [String] {
+                t.split(separator: "\n").compactMap { line -> String? in
+                    var l = String(line.drop { $0 == " " })
+                    if l.hasPrefix("(pts ") || l.hasPrefix("(seg ") || l.hasPrefix("(cross ") { return nil }
+                    while l.hasSuffix(")") { l.removeLast() }
+                    return l
+                }.sorted()
+            }
+            if afterWalk != beforeWalk {
+                // What differs (for the engine: undo and redo are its commands).
+                let a = afterWalk.split(separator: "\n"), b = beforeWalk.split(separator: "\n")
+                let gone = b.filter { !a.contains($0) }.prefix(6), came = a.filter { !b.contains($0) }.prefix(6)
+                print("INFO undo walk: lines lost \(gone.map { $0.trimmingCharacters(in: .whitespaces) }), lines new \(came.map { $0.trimmingCharacters(in: .whitespaces) })")
+            }
+            check(logical(afterWalk) == logical(beforeWalk), "Undo all the way back and Redo all the way gives the circuit back (its parts, settings and connections\(afterWalk == beforeWalk ? ", and its wires' paths" : "; a wire's path differs, see INFO"))")
             pause(actions)
             print(String(format: "session: %d actions, %d undo steps at most, %d undos, %d redos, %d splits, %d tabs made, %d closed, %d pages now",
                          actions, maxSteps, undos, redos, splits, tabsMade, tabsClosed, core.pageCount))
@@ -394,7 +432,7 @@ enum SessionCheck {
         turn(1.5)
 
         check((editsChecked > 0 || actions == 0) && editsLost == 0,
-              "every edit leaves the window edited, so autosave saves it (\(editsChecked - editsLost) of \(editsChecked)\(firstLost >= 0 ? ", first lost at action \(firstLost)" : ""))")
+              "every edit leaves the window edited, so autosave saves it (\(editsChecked - editsLost) of \(editsChecked)\(firstLost >= 0 ? ", first lost at action \(firstLost): \(lostWhat)" : ""))")
         check(pausesChecked > 0 && pausesUnsaved == 0, "autosave saved the circuit at every pause (\(pausesChecked - pausesUnsaved) of \(pausesChecked))")
         check(pausesStale == 0, "the file on disk is the circuit as it is, at every pause (\(pausesChecked - pausesStale) of \(pausesChecked)\(firstStale >= 0 ? ", first stale at action \(firstStale)" : ""))")
         check(stepMismatch == 0, "the window's undo steps match the engine's after every action\(firstMismatch >= 0 ? " (\(stepMismatch) mismatches, first at action \(firstMismatch))" : "")")
