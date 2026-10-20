@@ -22,6 +22,7 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <vector>
 
@@ -670,10 +671,12 @@ private:
 		return ok.empty() ? -1 : ok[rng.below((int)ok.size())];
 	}
 	bool partSpot(int i, double& x, double& y) { return i >= 0 && cl_gate_position(doc(), placed[i].id, &x, &y); }
-	// Near a part (or anywhere in the view).
+	// Near a part (or somewhere on the page's circuit, or anywhere in the view).
 	void spot(double& x, double& y) {
-		const int i = rng.chance(65) ? partHere() : -1;
+		const int i = rng.chance(55) ? partHere() : -1;
+		double l, b, r, t;
 		if (partSpot(i, x, y)) { x += rng.unit() * 2 - 1; y += rng.unit() * 2 - 1; }
+		else if (rng.chance(60) && cl_document_page_bounds(doc(), page(), &l, &b, &r, &t)) { x = l + rng.unit() * (r - l); y = b + rng.unit() * (t - b); }
 		else viewSpot(x, y);
 	}
 	int gatesHere() { return cl_document_gate_count(doc(), page()); }
@@ -681,7 +684,8 @@ private:
 		const int i = partHere();
 		double x, y;
 		if (partSpot(i, x, y)) click(x, y);
-		else w->run(CMD_SELECT_ALL);
+		else if (rng.chance(50)) { spot(x, y); click(x, y); }
+		if (!w->hasSelection()) w->run(CMD_SELECT_ALL);
 	}
 	// Whatever is on the pointer goes down where it is, or (sometimes) back with Escape.
 	void dropFloating() {
@@ -714,6 +718,20 @@ private:
 	void pause(int a);
 	void saveAndReopen(const char* why);
 	void sample(int a) { use.push_back(useNow()); useAt.push_back(a); }
+	// A window something opened (a template, Your Circuits, New): closed
+	// again, as its Close button does.
+	void closeOthers() {
+		if (circuitWindows().size() <= 1) return;
+		std::vector<CircuitWindow*> others;
+		for (CircuitWindow* o : circuitWindows()) if (o != w) others.push_back(o);
+		for (CircuitWindow* o : others) PostMessageW(o->window(), WM_CLOSE, 0, 0);
+		pump(0.15);
+		for (CircuitWindow* o : others) if (isCircuitWindow(o)) o->destroy();
+		othersClosed += (int)others.size();
+		if (isCircuitWindow(w)) SetForegroundWindow(w->window());
+	}
+	void leakLoops();
+	std::string startedFrom = "a new circuit";
 	std::string textNow() { return cl_document_save_text_ex(doc(), 0); }
 };
 
@@ -1020,6 +1038,82 @@ void Session::longRun() {
 	if (w->scopeShown()) w->run(CMD_SCOPE);
 }
 
+// Each thing a student opens and closes again and again, eight times after
+// a first: GDI and USER objects must come back each time (a slow leak would
+// pass the session's levelling-off check and still run out after hours).
+void Session::leakLoops() {
+	struct Loop { const char* name; std::function<void()> once; };
+	auto dialog = [&](int command) { return [this, command] { expect(false); w->run(command); unexpect(); }; };
+	auto twice = [&](int command) { return [this, command] { w->run(command); pump(0.05); w->run(command); }; };
+	const std::vector<Loop> loops = {
+		{ "Settings", dialog(CMD_PREFERENCES) },
+		{ "the truth table", dialog(CMD_TRUTH_TABLE) },
+		{ "Check My Circuit", dialog(CMD_CHECK_CIRCUIT) },
+		{ "gate settings", [this] {
+			  const int p = partHere();
+			  double x, y;
+			  if (partSpot(p, x, y)) click(x, y);
+			  expect(false);
+			  w->run(CMD_GATE_SETTINGS);
+			  unexpect();
+		  } },
+		{ "the shortcuts sheet", dialog(CMD_SHORTCUTS) },
+		{ "Export as Image", dialog(CMD_EXPORT_IMAGE) },
+		{ "Add a Gate", dialog(CMD_ADD_GATE) },
+		{ "Version History", dialog(CMD_VERSIONS) },
+		{ "Your Circuits", dialog(CMD_OPEN) },
+		{ "New from Template", dialog(CMD_NEW_TEMPLATE) },
+		{ "Build from Formula", dialog(CMD_BUILD_FORMULA) },
+		{ "a new tab, closed", [this] { w->run(CMD_NEW_TAB); pump(0.03); w->run(CMD_CLOSE_TAB); } },
+		{ "split view", twice(CMD_SPLIT_VIEW) },
+		{ "the oscilloscope", twice(CMD_SCOPE) },
+		{ "notes", twice(CMD_NOTES) },
+		{ "find", [this] { w->openFind("AND"); pump(0.03); if (FindBar* b = w->findBarWidget()) b->close(); } },
+		{ "Simulation View", twice(CMD_SIM_VIEW) },
+		{ "Draw mode", twice(CMD_DRAW) },
+		{ "dark mode", twice(CMD_DARK) },
+		{ "focus mode", [this] { w->run(CMD_FOCUS_MODE); pump(0.35); w->run(CMD_FOCUS_MODE); pump(0.35); } },
+		{ "a drag", [this] { dragPart(false); } },
+		{ "a right-click menu", [this] {
+			  double x, y;
+			  spot(x, y);
+			  if (Canvas* c = canvas()) { mouse(c, c->widget(), WM_RBUTTONDOWN, x, y, MK_RBUTTON); mouse(c, c->widget(), WM_RBUTTONUP, x, y); }
+		  } },
+		{ "a new window, closed", [this] { w->run(CMD_NEW); pump(0.1); closeOthers(); } },
+		{ "minimize and restore", [this] { ShowWindow(w->window(), SW_MINIMIZE); pump(0.05); ShowWindow(w->window(), SW_RESTORE); } },
+		{ "the window resized", [this] {
+			  const UINT dpi = dpiOf(w->window());
+			  SetWindowPos(w->window(), nullptr, 0, 0, scaled(700 + rng.below(300), dpi), scaled(480 + rng.below(200), dpi), SWP_NOZORDER | SWP_NOMOVE);
+		  } },
+	};
+	int leaking = 0;
+	for (const Loop& l : loops) {
+		if (!isCircuitWindow(w)) return;
+		gActionName = l.name;
+		settle();
+		l.once();
+		pump(0.15);
+		closeOthers();
+		pump(0.05);
+		const Use u0 = useNow();
+		for (int k = 0; k < 8 && isCircuitWindow(w); k++) {
+			l.once();
+			pump(0.08);
+			closeOthers();
+		}
+		settle();
+		pump(0.2);
+		const Use u1 = useNow();
+		const long gdi = (long)u1.gdi - (long)u0.gdi, user = (long)u1.user - (long)u0.user;
+		if (gdi > 2 || user > 2) {
+			leaking++;
+			sayf("FAIL %s, opened and closed 8 times, kept %+ld GDI and %+ld USER objects\n", l.name, gdi, user);
+			failures++;
+		}
+	}
+	if (leaking == 0) say(strf("PASS opening and closing each of %d things 8 times kept no GDI or USER objects\n", (int)loops.size()));
+}
+
 void Session::action(int a) {
 	const int roll = rng.below(120);
 	Canvas* c = canvas();
@@ -1315,7 +1409,16 @@ void Session::run(int actions) {
 	           health::liveWindows, health::liveCanvases));
 
 	gActionName = "opening the window";
-	w = newCircuitWindow();
+	// Every other seed starts from the practice circuit (wires and parts of
+	// its own to work on), imported into Your Circuits as Open does it.
+	const std::string practice = resourcesDir() + "\\samples\\practice.cdl";
+	if (gSeed % 2 == 0 && fileExists(practice) && openCircuit(practice, nullptr) && !circuitWindows().empty()) {
+		w = circuitWindows().back();
+		startedFrom = "the practice circuit";
+	} else {
+		w = newCircuitWindow();
+	}
+	sayf("starting from %s\n", startedFrom.c_str());
 	const HWND hwnd = w->window();
 	// Clear of the pointer, so a real mouse can't step in mid-drag.
 	SetWindowPos(hwnd, nullptr, 0, 0, scaled(1000, dpiOf(hwnd)), scaled(700, dpiOf(hwnd)), SWP_NOZORDER);
@@ -1336,18 +1439,8 @@ void Session::run(int actions) {
 		pump(0.012 + 0.03 * rng.unit());
 		gProgress++;
 		if (!isCircuitWindow(w)) { windowGone = a; break; }
-		// A window something opened (a template, Your Circuits): closed again,
-		// as its Close button does.
-		if (circuitWindows().size() > 1) {
-			std::vector<CircuitWindow*> others;
-			for (CircuitWindow* o : circuitWindows()) if (o != w) others.push_back(o);
-			for (CircuitWindow* o : others) PostMessageW(o->window(), WM_CLOSE, 0, 0);
-			pump(0.15);
-			for (CircuitWindow* o : others) if (isCircuitWindow(o)) o->destroy();
-			othersClosed += (int)others.size();
-			SetForegroundWindow(w->window());
-			if (!isCircuitWindow(w)) { windowGone = a; break; }
-		}
+		closeOthers();
+		if (!isCircuitWindow(w)) { windowGone = a; break; }
 		if (health::exceptions > exceptionsBefore && health::exceptions - exceptionsBefore == health::exceptions)
 			sayf("note  the first exception into the app's guard came in action %d (%s)\n", a, gActionName.load());
 		if (health::d2dFailures > d2dBefore && d2dBefore == 0)
@@ -1361,6 +1454,11 @@ void Session::run(int actions) {
 		if (a == actions * 3 / 5 && !longRunDone) longRun();
 		if (a == actions / 4 || a == actions / 2 || a == actions * 3 / 4) sample(a);
 		if (a == actions - 1) { settle(); pause(a); saveAndReopen("the last save"); }
+	}
+	if (windowGone < 0 && isCircuitWindow(w)) {
+		gAction = actions;
+		leakLoops();
+		if (!isCircuitWindow(w)) windowGone = actions;
 	}
 	gActionName = "closing the window";
 	if (windowGone < 0) sample(actions);
