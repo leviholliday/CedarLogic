@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -343,6 +344,35 @@ int main(int argc, char** argv) {
 		CHECK(back && std::string(cl_document_save_text(back)) == joined, "Save, Open, Save: the same");
 		if (back) cl_document_close(back);
 		cl_document_close(d);
+	}
+
+	printf("a damaged file whose wire lost its id opens with a notice, not a crash\n");
+	{
+		// "(id" where "(ids" belongs (one damaged byte): connecting the gates'
+		// pins made a wire from an empty id list and read past it.
+		const char* text =
+			"(cedarlogic\n  (version 3)\n  (generator \"CedarLogic Online\")\n  (page 0\n"
+			"    (gate \"AA_TOGGLE\"\n      (uuid \"1\")\n      (at 6 -8)\n      (angle 0))\n"
+			"    (gate \"GA_LED\"\n      (uuid \"2\")\n      (at 14 -8)\n      (angle 0))\n"
+			"    (gate \"GA_LED\"\n      (uuid \"3\")\n      (at 14 -4)\n      (angle 0))\n"
+			"    (wire\n      (id \"10\")\n      (seg \"0\" h\n        (pts 8 -8 13 -8)\n"
+			"        (connect \"1\" \"OUT_0\")\n        (connect \"2\" \"N_in0\")))\n"
+			"    (wire\n      (ids \"11\")\n      (seg \"0\" h\n        (pts 8 -4 13 -4)\n"
+			"        (connect \"3\" \"N_in0\")))))\n";
+		char e[256];
+		CLDocument* d = cl_document_open_text(text, (long)strlen(text), e, sizeof e);
+		CHECK(d != nullptr, "it opens");
+		if (d) {
+			bool said = false;
+			for (int i = 0; i < cl_document_notice_count(d); i++) if (strstr(cl_document_notice(d, i), "no id")) said = true;
+			CHECK(said, "with a notice that a wire carries no id");
+			CHECK(d->page(0)->getGateList()->size() == 3, "its parts are all there");
+			const std::string saved = cl_document_save_text(d);
+			CLDocument* back = cl_document_open_text(saved.c_str(), (long)saved.size(), e, sizeof e);
+			CHECK(back && std::string(cl_document_save_text(back)) == saved, "and saves, opens and saves the same");
+			if (back) cl_document_close(back);
+			cl_document_close(d);
+		}
 	}
 
 	// Every wire's pins are on gates still on its page (what a save writes).
