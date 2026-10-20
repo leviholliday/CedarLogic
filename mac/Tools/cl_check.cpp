@@ -597,6 +597,61 @@ int main(int argc, char** argv) {
 		cl_document_close(d);
 	}
 
+	printf("a wire on a RAM's data pin keeps its trunk when straightened\n");
+	{
+		// A RAM's DATA_IN_n and DATA_OUT_n share one spot and a wire holds
+		// both, so a wire from it to one more pin has three. Routed the simple
+		// way (what Straighten and Tidy Up fall back to when the page router
+		// finds no way through), the third branch took the trunk's id and the
+		// wire came out as two dots, one on each part.
+		CLDocument* d = cl_document_new();
+		cl_edit_add_gate(d, 0, "AE_RAM_8x8", 0, 0);
+		guiGate* r = newest(d, 0);
+		cl_edit_add_gate(d, 0, "AA_TOGGLE", -20, -15);
+		guiGate* sw = newest(d, 0);
+		wire(d, r, "DATA_IN_0", sw, "OUT");
+		guiWire* w = r->getConnection("DATA_IN_0");
+		CHECK(w && w == r->getConnection("DATA_OUT_0") && w == sw->getConnection("OUT_0") && w->getConnections().size() == 3,
+			"the switch is wired to the shared spot: three pins on one wire");
+		if (w) {
+			w->straightenRoute();
+			std::vector<wireSegment> segs;
+			for (const auto& sg : w->getSegmentMap()) segs.push_back(sg.second);
+			auto on = [](const wireSegment& a, float x, float y) {
+				return x > std::min(a.begin.x, a.end.x) - 0.02f && x < std::max(a.begin.x, a.end.x) + 0.02f &&
+				       y > std::min(a.begin.y, a.end.y) - 0.02f && y < std::max(a.begin.y, a.end.y) + 0.02f;
+			};
+			std::vector<int> up(segs.size());
+			for (size_t i = 0; i < up.size(); i++) up[i] = (int)i;
+			auto find = [&](int i) { while (up[(size_t)i] != i) i = up[(size_t)i]; return i; };
+			for (size_t i = 0; i < segs.size(); i++)
+				for (size_t j = i + 1; j < segs.size(); j++)
+					if (on(segs[i], segs[j].begin.x, segs[j].begin.y) || on(segs[i], segs[j].end.x, segs[j].end.y) ||
+					    on(segs[j], segs[i].begin.x, segs[i].begin.y) || on(segs[j], segs[i].end.x, segs[i].end.y))
+						up[(size_t)find((int)i)] = find((int)j);
+			int pieces = 0;
+			for (size_t i = 0; i < up.size(); i++) if (find((int)i) == (int)i) pieces++;
+			CHECK(pieces == 1, "the straightened wire is one piece");
+			bool carried = true;
+			for (const wireConnection& c : w->getConnections()) {
+				float x, y;
+				d->circuit.getGate(c.gid)->getHotspotCoords(c.connection, x, y);
+				bool found = false;
+				for (const wireSegment& sg : segs)
+					for (const wireConnection& k : sg.connections)
+						if (k.gid == c.gid && k.connection == c.connection && on(sg, x, y)) found = true;
+				carried = carried && found;
+			}
+			CHECK(carried, "and every pin is on a segment that holds it");
+			const std::string t = cl_document_save_text(d);
+			char e[256];
+			CLDocument* back = cl_document_open_text(t.c_str(), (long)t.size(), e, sizeof e);
+			CHECK(back && std::string(cl_document_save_text(back)) == t, "Save, Open, Save: the same");
+			if (back) cl_document_close(back);
+		}
+		cl_document_close(d);
+	}
+
 	printf("a paste dropped where it already sits\n");
 	{
 		// Duplicating onto the very spot moves the copy by nothing; that
