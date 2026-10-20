@@ -189,8 +189,20 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   the file on disk the circuit as it is, the undo steps stay in step, each
   side shows a real page, a version is kept after a break (backdated, not
   waited for), memory levels off, both sides of a split agree on run/pause,
-  and closing the window lets its controller, clock and circuit go. A copy
-  of the app with its own settings and home folder; nothing shows on screen
+  and closing the window lets its controller, clock and circuit go. First,
+  scripted through the canvas's own mouse, key and scroll handlers
+  (`App/SessionGestures.swift`): wires pin to pin and pin to wire, C while
+  dragging (and Escape taking it back), Escape mid-drag, a double-click for
+  a part's settings and a setting changed, the arrows, Cmd-D and the click
+  that places the copy, the palette's drag and drop, scroll and pinch, the
+  find bar, Straighten, Tidy Up's Keep / Put Back / Tab; a status message
+  that goes again, the scope redrawing only itself, the notes pane, a
+  hidden sheet put away by Make This Window Editable, Cmd-W under a sheet.
+  A quarter of the random actions are such gestures too, and the session
+  ends with Undo all the way back and Redo all the way. `session-check.sh 0`
+  runs just the scripted part (about a minute). A copy of the app with its
+  own settings and home folder; nothing shows on screen (the window is only
+  ordered in, transparent and far off every display, for its sheets)
 - `launch-selftest.sh [rounds]` -- `CedarLogic --launch-selftest`: what a
   launch decides and does from ten saved states (first launch, after an
   update, no Your Circuits, the last circuit missing, damaged or empty, work

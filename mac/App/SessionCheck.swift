@@ -167,7 +167,7 @@ enum SessionCheck {
             goneCanvas = canvas; goneCore = core; goneFile = file; goneWindow = win; goneHost = host
 
             var rng = Random(state: seed)
-            let parts = ["AA_AND2", "AE_OR2", "AA_INVERTER", "AI_XOR2", "AA_TOGGLE", "GA_LED", "BB_CLOCK", "AA_DFF"]
+            let parts = ["AA_AND2", "AE_OR2", "AA_INVERTER", "AI_XOR2", "AA_TOGGLE", "GA_LED", "BB_CLOCK", "AA_DFF", "AA_LABEL"]
             /// The side edits go to: the first, or the second while a split has it.
             @MainActor func side() -> CanvasController { canvas.routed }
             @MainActor func gates(_ c: CanvasController) -> Int { Int(cl_document_gate_count(core.handle, Int32(c.page))) }
@@ -198,12 +198,97 @@ enum SessionCheck {
                 if disk != shape(core.shareText(flags: 0)) { pausesStale += 1; if firstStale < 0 { firstStale = at } }
             }
 
+            // The window's own checks, then the gestures students use most,
+            // scripted (SessionGestures.swift), before the random session.
+            windowChecks(canvas, core, check: check, turn: turn)
+            gestureChecks(canvas, core, file, win, check: check, turn: turn,
+                          edited: { what, before in
+                              guard shape(core.shareText(flags: 0)) != before else { return }
+                              check(file.isDocumentEdited, "gestures: \(what) leaves the window edited")
+                          }, pause: { pause(-1) })
+            check(pausesChecked == 1 && pausesUnsaved == 0 && pausesStale == 0, "gestures: autosave saved them, and the file on disk is the circuit")
+            pausesChecked = 0; pausesUnsaved = 0; pausesStale = 0; firstStale = -1
+            var gestures = 0, escapeChanged = 0, putBackChanged = 0, firstPutBack = -1
+
             memory.append(footprintMB())
             for a in 0..<actions {
                 let c = side()
                 let roll = rng.int(100)
                 var isEdit = false
                 let before = shape(core.shareText(flags: 0))
+                if rng.int(4) == 0, let v = c.view {
+                    // A gesture through the canvas's own handlers.
+                    gestures += 1
+                    let hands = CanvasHands(view: v)
+                    let editable = c.canEdit
+                    switch rng.int(10) {
+                    case 0, 1:   // a drag: a part, a wire end, a pin to somewhere, a box
+                        let from = spot(c)
+                        hands.drag(from, CGPoint(x: from.x + CGFloat(rng.int(15)) - 7, y: from.y + CGFloat(rng.int(15)) - 7))
+                        isEdit = true
+                    case 2:   // Escape in the middle of a drag: nothing changes
+                        let from = spot(c)
+                        hands.drag(from, CGPoint(x: from.x + 5, y: from.y - 3), before: { hands.key(CanvasHands.escape) })
+                        if editable && shape(core.shareText(flags: 0)) != before { escapeChanged += 1 }
+                    case 3:   // the arrows
+                        hands.click(spot(c))
+                        hands.key(CanvasHands.arrow(UInt16(123 + rng.int(4))), flags: rng.int(3) == 0 ? .shift : [])
+                        isEdit = true
+                    case 4:   // scroll, pinch
+                        if rng.int(2) == 0 { hands.scroll(dx: Int32(rng.int(41)) - 20, dy: Int32(rng.int(41)) - 20) }
+                        else { v.zoom(by: 0.8 + 0.4 * rng.unit(), at: NSPoint(x: v.bounds.midX, y: v.bounds.midY)) }
+                    case 5:   // a part's settings: a label's text
+                        hands.click(spot(c))
+                        if let g = core.singleSelectedGate(page: c.page),
+                           let s = core.settings(ofGate: g).first(where: { $0.name.contains("LABEL_TEXT") }) {
+                            applySetting(c, gate: g, name: s.name, value: "L\(rng.int(50))")
+                            isEdit = true
+                        }
+                    case 6:   // Cmd-D, then a click places it, or Escape takes it back
+                        if c.hasSelection && c.canEdit {
+                            c.perform(.duplicate)
+                            if rng.int(2) == 0 {
+                                let at = spot(c)
+                                hands.move(at); hands.click(at)
+                                isEdit = true
+                            } else {
+                                hands.key(CanvasHands.escape)
+                                if shape(core.shareText(flags: 0)) != before { escapeChanged += 1 }
+                            }
+                        } else {
+                            hands.click(spot(c))
+                        }
+                    case 7:   // out of the palette: dropped, or let go off the canvas
+                        let at = spot(c)
+                        if c.addGateFloating(parts[rng.int(parts.count)], at: at) {
+                            if rng.int(3) == 0 {
+                                c.cancelFloating()
+                            } else {
+                                _ = core.hover(page: c.page, at: CGPoint(x: at.x + 2, y: at.y), unitsPerPoint: v.unitsPerPoint)
+                                _ = core.press(page: c.page, at: CGPoint(x: at.x + 2, y: at.y), modifiers: [], unitsPerPoint: v.unitsPerPoint)
+                                core.release(at: CGPoint(x: at.x + 2, y: at.y))
+                                c.edited()
+                            }
+                        }
+                        isEdit = true
+                    case 8:   // Tidy Up's preview: put back, or kept
+                        hands.key(1, "S", flags: .shift)
+                        if rng.int(3) == 0 { hands.key(CanvasHands.tab) }
+                        if rng.int(2) == 0 {
+                            hands.key(CanvasHands.escape)
+                            if editable && shape(core.shareText(flags: 0)) != before { putBackChanged += 1; if firstPutBack < 0 { firstPutBack = a } }
+                        } else {
+                            hands.key(CanvasHands.returnKey)
+                            isEdit = true
+                        }
+                    default:   // the find bar
+                        c.perform(.find)
+                        c.findQuery = rng.int(2) == 0 ? "L\(rng.int(50))" : "AND"
+                        c.runFind(jump: true)
+                        c.findStep(1)
+                        c.closeFind()
+                    }
+                } else {
                 switch roll {
                 case 0..<22:   // place a part
                     if gates(c) > 36 {
@@ -249,6 +334,7 @@ enum SessionCheck {
                 case 95..<97: c.perform(.zoomFit)
                 default: c.selectNone()
                 }
+                }
                 turn(0.02 + 0.03 * rng.unit())
                 if isEdit { checkEdited(a, from: before) }
                 if core.mirroredUndo != core.undoCount { stepMismatch += 1; if firstMismatch < 0 { firstMismatch = a } }
@@ -278,6 +364,25 @@ enum SessionCheck {
             }
             if canvas.isRunning == false { canvas.setRunning(true) }
             turn(1)
+            check(escapeChanged == 0, "Escape mid-drag or on an unplaced copy changed nothing (\(escapeChanged) times it did, of \(gestures) gestures)")
+            check(putBackChanged == 0, "Tidy Up's Put Back left the circuit as it was\(firstPutBack >= 0 ? " (\(putBackChanged) times not, first at action \(firstPutBack))" : "")")
+            // Undo all the way back, then Redo all the way: one press, one step.
+            for s in [canvas, canvas.partner].compactMap({ $0 }) where s.simView { s.simView = false }
+            let beforeWalk = shape(core.shareText(flags: 0))
+            var presses = 0, nothing = 0, several = 0
+            while canvas.canUndo && presses < 3000 {
+                let n = core.undoCount
+                canvas.undo(); presses += 1
+                if core.undoCount == n { nothing += 1 } else if n - core.undoCount > 1 { several += 1 }
+                if presses % 50 == 0 { turn(0.01) }
+            }
+            let undone = core.undoCount
+            var redoes = 0
+            while canvas.canRedo && redoes < 3000 { canvas.redo(); redoes += 1; if redoes % 50 == 0 { turn(0.01) } }
+            turn(0.1)
+            print("INFO undo walk: \(presses) Undo presses (\(nothing) did nothing, \(several) took back more than one step, \(undone) steps left), \(redoes) Redo presses")
+            check(shape(core.shareText(flags: 0)) == beforeWalk, "Undo all the way back and Redo all the way gives the circuit back")
+            pause(actions)
             print(String(format: "session: %d actions, %d undo steps at most, %d undos, %d redos, %d splits, %d tabs made, %d closed, %d pages now",
                          actions, maxSteps, undos, redos, splits, tabsMade, tabsClosed, core.pageCount))
 
@@ -288,7 +393,7 @@ enum SessionCheck {
         } }
         turn(1.5)
 
-        check(editsChecked > 0 && editsLost == 0,
+        check((editsChecked > 0 || actions == 0) && editsLost == 0,
               "every edit leaves the window edited, so autosave saves it (\(editsChecked - editsLost) of \(editsChecked)\(firstLost >= 0 ? ", first lost at action \(firstLost)" : ""))")
         check(pausesChecked > 0 && pausesUnsaved == 0, "autosave saved the circuit at every pause (\(pausesChecked - pausesUnsaved) of \(pausesChecked))")
         check(pausesStale == 0, "the file on disk is the circuit as it is, at every pause (\(pausesChecked - pausesStale) of \(pausesChecked)\(firstStale >= 0 ? ", first stale at action \(firstStale)" : ""))")
