@@ -1433,6 +1433,9 @@ final class CanvasController: ObservableObject {
             }
         }
         redraw(); selectionChanged(); editsChanged(); syncTidy()
+        // Saved like any edit, 2 s on: an undone or redone circuit waited
+        // for the next edit (or the window closing) to reach its file.
+        sheetHost.scheduleAutosave()
     }
     /// The page count last seen, kept on the document so both sides of a
     /// split agree on it.
