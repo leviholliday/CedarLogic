@@ -488,6 +488,8 @@ struct SessionDriver {
 	}
 
 	void checkEdited(int at, const std::string& before) {
+		// Tidy Up's preview isn't an edit until it's kept (Return, or the next edit).
+		if (w->tidyActive()) return;
 		const std::string after = text();
 		if (after == before) return;
 		editsChecked++;
@@ -502,6 +504,7 @@ struct SessionDriver {
 	// Nothing half-done (autosave waits for a drag, a gate on the pointer,
 	// Tidy Up's preview), then a pause for autosave.
 	void settle() {
+		pump(150);   // a paste asked for lands (the clipboard answers later)
 		Canvas* c = canvas();
 		if (c && c->isDragging()) c->cancelDrag();
 		if (w->hasPendingGate()) w->clearPendingGate();

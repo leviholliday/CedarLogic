@@ -317,7 +317,7 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1
           SESSION_TIMEOUT: 900
         run: |
-          SESSION_LOGS=session-logs-asan linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 5 6 7 8
+          SESSION_LOGS=session-logs-asan linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 5 6 7 8 9 10 11 12
       - name: Upload the session logs
         if: always()
         uses: actions/upload-artifact@v7
