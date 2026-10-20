@@ -52,6 +52,28 @@ jobs:
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build linux/build
 
+      # A long working session in the window (linux/App/SessionCheck.cpp): seeded
+      # random clicks, drags, keys and commands through the app's own handlers, with
+      # windows over it poked at and closed, checked all along (no crash or GTK
+      # warning, autosave, the file on disk, undo and redo, tabs and split view,
+      # memory, the window freed on close). Seeds 1-4, then again with
+      # G_DEBUG=fatal-criticals; each run capped at 7 minutes.
+      - name: Session check
+        if: matrix.arch == 'x86_64'
+        # Numbers only until it's green (it then fails the build).
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
+
+      - name: Upload the session logs
+        if: always() && matrix.arch == 'x86_64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Native-linux-session-logs
+          path: session-logs
+          if-no-files-found: warn
+
       # The engine through the C interface the app uses: editing, wires,
       # simulation, truth tables, and saving without changing a circuit.
       # (jmSGTZM is left out of save_check: it reopens identical, but two
@@ -264,6 +286,44 @@ jobs:
         with:
           name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
           path: renders
+          if-no-files-found: warn
+
+  # The same session with AddressSanitizer and UndefinedBehaviorSanitizer in the
+  # app and the engine: memory used after it's freed, or read past its end, is
+  # reported where it happens instead of crashing later (or never). Other seeds
+  # than the build's, so between them seeds 1-8 run on every push.
+  session-sanitizers:
+    name: session check with sanitizers (x86_64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            xvfb xauth fonts-dejavu-core fonts-liberation
+      - name: Build with sanitizers
+        run: |
+          cmake -S linux -B linux/build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCL_BUILD_TOOLS=OFF \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build linux/build-asan
+      - name: Session check with sanitizers
+        continue-on-error: true
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:symbolize=1
+          UBSAN_OPTIONS: print_stacktrace=1
+          SESSION_TIMEOUT: 900
+        run: |
+          SESSION_LOGS=session-logs-asan linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 5 6 7 8
+      - name: Upload the session logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Native-linux-session-logs-asan
+          path: session-logs-asan
           if-no-files-found: warn
 
   # The .deb on the newer systems it has to run on: Ubuntu 24.04 (where OpenSSL's package is named
