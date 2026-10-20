@@ -98,8 +98,8 @@ jobs:
           failed=0
           for seed in 1 2 3 4; do
             echo "== seed $seed"
-            timeout 480 windows/build/Release/CedarLogic.exe --session-check 300 $seed > session/seed-$seed.log 2>&1
-            code=$?
+            code=0
+            timeout 480 windows/build/Release/CedarLogic.exe --session-check 300 $seed > session/seed-$seed.log 2>&1 || code=$?
             cat session/seed-$seed.log
             echo "   (exit $code)"
             [ $code = 0 ] || failed=1

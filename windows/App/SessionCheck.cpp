@@ -419,6 +419,7 @@ struct Closer {
 	bool poked = false;
 	HWND seen = nullptr;
 	double seenAt = 0, askedAt = 0;
+	bool askedOk = false;
 	int answered = 0, menus = 0, stuck = 0, unexpected = 0;
 	std::vector<std::string> unexpectedTitles;
 	std::vector<std::string> kinds;
@@ -458,12 +459,19 @@ void CALLBACK closerTick(HWND, UINT, UINT_PTR, DWORD) {
 	HWND owner = nullptr;
 	const HWND p = popupNow(owner);
 	const double now = nowSeconds();
-	if (p == nullptr) { c.seen = nullptr; c.askedAt = 0; return; }
-	if (p != c.seen) { c.seen = p; c.seenAt = now; c.askedAt = 0; return; }
+	if (p == nullptr) { c.seen = nullptr; c.askedAt = 0; c.askedOk = false; return; }
+	if (p != c.seen) { c.seen = p; c.seenAt = now; c.askedAt = 0; c.askedOk = false; return; }
 	if (now - c.seenAt < 0.25) return;
 	const std::string kind = className(p);
 	const bool dialog = kind == "#32770";
 	if (c.askedAt > 0) {
+		// Its OK did nothing (a form that applies as you go has none): closed instead.
+		if (c.askedOk && now - c.askedAt > 1) {
+			c.askedOk = false;
+			c.askedAt = now;
+			PostMessageW(p, WM_CLOSE, 0, 0);
+			return;
+		}
 		if (now - c.askedAt < 5) return;
 		// Asked to close five seconds ago and still there.
 		c.stuck++;
@@ -486,7 +494,8 @@ void CALLBACK closerTick(HWND, UINT, UINT_PTR, DWORD) {
 		if (c.unexpectedTitles.size() < 8) c.unexpectedTitles.push_back(strf("“%s” (%s) at action %ld (%s)", t.c_str(), kind.c_str(), gAction.load(), gActionName.load()));
 	}
 	if (std::find(c.kinds.begin(), c.kinds.end(), kind) == c.kinds.end()) c.kinds.push_back(kind);
-	if (c.accept && c.expected) {
+	c.askedOk = c.accept && c.expected;
+	if (c.askedOk) {
 		if (dialog) PostMessageW(p, WM_COMMAND, IDOK, 0);
 		else PostMessageW(p, WM_KEYDOWN, VK_RETURN, 0);
 	} else {
@@ -544,6 +553,7 @@ private:
 	bool longHistoryDone = false;
 	bool editedPastFull = true, fullHistoryReached = false, undoAllOk = true, redoAllOk = true;
 	bool longRunDone = false;
+	int historyAfterEdits = 0, undoneSteps = 0, redoneSteps = 0;
 	long scopeLengthAfter = 0;
 	std::vector<Use> use;
 	std::vector<int> useAt;
@@ -890,14 +900,25 @@ void Session::longHistory(int at) {
 	longHistoryDone = true;
 	gActionName = "500+ edits in a row";
 	settle();
-	w->run(CMD_SELECT_ALL);
-	if (!w->hasSelection()) { placePart(); w->run(CMD_SELECT_ALL); }
+	// A part of its own to move (the others may be locked in place, which
+	// stay put and make no step).
+	w->run(CMD_UNLOCK_ALL_PARTS);
+	double x, y;
+	viewSpot(x, y);
+	w->addGateOnNextMove("AA_AND2");
+	moveTo(x, y);
+	click(x, y);
+	if (!w->hasSelection()) w->run(CMD_SELECT_ALL);
 	for (int i = 0; i < 540; i++) {
 		canvasKey(i % 2 ? VK_LEFT : VK_RIGHT);
 		if (i % 25 == 0) pump(0.01);
 	}
 	pump(0.05);
-	fullHistoryReached = cl_edit_undo_count(doc()) == 500;
+	historyAfterEdits = cl_edit_undo_count(doc());
+	fullHistoryReached = historyAfterEdits == 500;
+	if (!fullHistoryReached)
+		sayf("note  after 540 arrow presses: %d undo steps, %d gates selected (%d locked), Simulation View %d, locked %d, drawing %d\n",
+		     historyAfterEdits, cl_edit_selected_gate_count(doc(), page()), w->selectedLockedCount(true), w->simView(), w->locked(), w->drawing());
 	checkHistory(at);
 	pause(at);
 	// One more change with the history full: the window must be edited again.
@@ -909,12 +930,14 @@ void Session::longHistory(int at) {
 	int n = 0;
 	while (cl_edit_can_undo(doc()) && n < 700) { w->run(CMD_UNDO); n++; if (n % 50 == 0) pump(0.01); }
 	undos += n;
+	undoneSteps = n;
 	undoAllOk = n == 500 && !cl_edit_can_undo(doc()) && cl_edit_undo_count(doc()) == 0;
 	checkPages(at);
 	gActionName = "redo everything";
 	n = 0;
 	while (cl_edit_can_redo(doc()) && n < 700) { w->run(CMD_REDO); n++; if (n % 50 == 0) pump(0.01); }
 	redos += n;
+	redoneSteps = n;
 	redoAllOk = n == 500 && cl_edit_undo_count(doc()) == 500;
 	checkPages(at);
 	checkHistory(at);
@@ -1308,10 +1331,10 @@ void Session::run(int actions) {
 	check(pagesBad == 0, strf("every tab and side showed a page that exists%s",
 	                          pagesBad ? strf(" (%d times not; first at action %d: %s)", pagesBad, firstPagesBad, pagesWhat.c_str()).c_str() : ""));
 	if (longHistoryDone) {
-		check(fullHistoryReached, "540 edits in a row filled the 500-step history");
+		check(fullHistoryReached, strf("540 edits in a row filled the 500-step history (%d steps)", historyAfterEdits));
 		check(editedPastFull, "an edit with the history full still left the window edited");
-		check(undoAllOk, "Undo went back all 500 steps, and no further");
-		check(redoAllOk, "Redo came forward all 500 steps again");
+		check(undoAllOk, strf("Undo went back all 500 steps, and no further (%d)", undoneSteps));
+		check(redoAllOk, strf("Redo came forward all 500 steps again (%d)", redoneSteps));
 	}
 	if (longRunDone) check(scopeLengthAfter > 0 && scopeLengthAfter <= 60000, strf("the oscilloscope kept its recording within 60,000 steps (%ld after 62,000)", scopeLengthAfter));
 	if (use.size() >= 2) {
