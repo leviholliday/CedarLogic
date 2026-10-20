@@ -78,6 +78,43 @@ jobs:
           # Page link groups in the engine (TO/FROM between linked pages only).
           $B/pagelinks_check.exe $L format/tests/fixtures/pagelinks
 
+      # A long working session in one window, a few hundred seeded random
+      # actions through the app's own code (windows/App/SessionCheck.h): parts,
+      # wires, drags, undo past the 500-step history, tabs, split view,
+      # Simulation View, the dialogs, saving and reopening -- checked for
+      # crashes, hangs, the edited state, autosave, the file reopening the same,
+      # page indices, GDI/USER objects and memory, and that closing the window
+      # stops its timers and frees its documents. The exe's .pdb names a crash's
+      # stack; a crash's minidump, the exe and the .pdb are kept with the logs.
+      - name: Session check
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        env:
+          CL_SESSION_DUMPS: ${{ github.workspace }}/session
+          CL_SESSION_TIME_CAP: '420'
+        run: |
+          mkdir -p session
+          failed=0
+          for seed in 1 2 3 4; do
+            echo "== seed $seed"
+            timeout 480 windows/build/Release/CedarLogic.exe --session-check 300 $seed > session/seed-$seed.log 2>&1
+            code=$?
+            cat session/seed-$seed.log
+            echo "   (exit $code)"
+            [ $code = 0 ] || failed=1
+          done
+          if [ $failed != 0 ]; then cp windows/build/Release/CedarLogic.exe windows/build/Release/CedarLogic.pdb session/ 2>/dev/null || true; fi
+          exit $failed
+
+      - name: Upload the session check's logs
+        if: always() && matrix.run
+        uses: actions/upload-artifact@v7
+        with:
+          name: CedarLogic-Windows-session-check
+          path: session
+          if-no-files-found: warn
+
       # A folder that runs as it is: the exe, and res beside it with the gate
       # library, the help and the samples.
       - name: Package

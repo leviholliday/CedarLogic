@@ -57,6 +57,9 @@ if(MSVC)
 	# Sources are UTF-8; /bigobj for the long command files; big stacks are
 	# normal in the router.
 	target_compile_options(CedarCore PUBLIC /utf-8 /bigobj /EHsc /W3 /wd4244 /wd4267 /wd4305 /wd4996 /wd4018 /wd4101)
+	# Debug information for the .pdb (the app's link step makes it): crash
+	# stacks by name in --session-check.
+	target_compile_options(CedarCore PUBLIC $<$<CONFIG:Release>:/Zi>)
 else()
 	target_compile_options(CedarCore PRIVATE -Wno-deprecated-declarations)
 endif()
@@ -91,6 +94,9 @@ if(CL_BUILD_APP)
 	if(MSVC)
 		# The manifest is in the resources (res/CedarLogic.manifest).
 		target_link_options(CedarLogic PRIVATE /MANIFEST:NO)
+		# A .pdb beside the exe (not shipped), so a crash in --session-check
+		# prints its stack by name; the exe itself stays as optimized as before.
+		target_link_options(CedarLogic PRIVATE $<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
 	else()
 		target_link_options(CedarLogic PRIVATE -municode -static)
 	endif()

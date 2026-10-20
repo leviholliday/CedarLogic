@@ -15,6 +15,7 @@
 #include "Library.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "SessionCheck.h"
 #include "ShareLink.h"
 #include "Shortcuts.h"
 #include "SyncApp.h"
@@ -84,6 +85,12 @@ int gBenchDraw = 0;
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
 int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar in that style, for this run
+
+// --session-check [actions] [seed]: a long random session in one window
+// (SessionCheck.h).
+bool gSessionCheck = false;
+int gSessionActions = 400;
+uint64_t gSessionSeed = 1;
 
 bool gTestRun = false;   // a picture or test run: no card is left waiting for an answer
 
@@ -838,6 +845,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			return ok ? 0 : 1;
 		}
 		if (a == "--click-test") { gClickTest = true; continue; }
+		if (a == "--session-check") {
+			gSessionCheck = true;
+			if (i + 1 < argc && atoi(U(argv[i + 1]).c_str()) > 0) gSessionActions = atoi(U(argv[++i]).c_str());
+			if (i + 1 < argc && _wtoi64(argv[i + 1]) > 0) gSessionSeed = (uint64_t)_wtoi64(argv[++i]);
+			continue;
+		}
 		if (a == "--drag-log" && i + 1 < argc) { draglog::open(U(argv[++i])); continue; }
 		if (a == "--drag-selftest") {
 			gDragSelfTest = true;
@@ -921,7 +934,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		draglog::open(U(tmp) + "cedarlogic-drag-selftest.log");
 	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
-	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0;
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0 || gSessionCheck;
+	// Its own home folder (so not your settings or Your Circuits), and its crash handlers, before anything is read.
+	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
 	gTestRun = testRun;
 	if (!testRun && handToRunning(files)) return 0;
 
@@ -943,7 +958,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -998,7 +1013,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -1006,7 +1021,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		}
 		if (!last.empty()) openCircuit(last, nullptr);
 	}
-	if (circuitWindows().empty()) newCircuitWindow();
+	if (circuitWindows().empty() && !gSessionCheck) newCircuitWindow();
 	// The launch screen says what it's opening.
 	if (!circuitWindows().empty() && !circuitWindows().front()->filePath().empty())
 		splash::setOpening(circuitWindows().front()->titleText());
@@ -1062,6 +1077,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		draglog::startSelfTest();
 	} else if (gBenchDraw > 0) {
 		SetTimer(nullptr, 0, 2000, benchDrawTimer);
+	} else if (gSessionCheck) {
+		sessioncheck::start(gSessionActions, gSessionSeed);
 	} else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.
@@ -1105,5 +1122,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;
+	if (gSessionCheck) {
+		prefs() = gPrefsBefore;
+		return sessioncheck::exitCode();
+	}
 	return gScreenshot.empty() ? (int)msg.wParam : gExitCode;
 }

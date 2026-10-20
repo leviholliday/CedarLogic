@@ -25,6 +25,7 @@
 #include "SyncApp.h"
 #include "Ink.h"
 #include "Notes.h"
+#include "SessionCheck.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -113,6 +114,7 @@ void registerWindowClasses() {
 // ---- Building the window -----------------------------------------------------------
 
 CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path(p) {
+	health::liveWindows++;
 	isRunning = cl_document_is_running(doc);
 	circuitWindows().push_back(this);
 	openMaximized = prefs().windowMaximized;   // before build() sizes the hidden window
@@ -204,6 +206,7 @@ CircuitWindow::~CircuitWindow() {
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
 	recovery::remove(recoveryBase);
 	if (doc) cl_document_close(doc);
+	health::liveWindows--;
 }
 
 void CircuitWindow::build() {

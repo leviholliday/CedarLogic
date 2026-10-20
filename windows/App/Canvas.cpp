@@ -6,6 +6,7 @@
 #include "DragLog.h"
 #include "Ink.h"
 #include "Shortcuts.h"
+#include "SessionCheck.h"
 #include "Window.h"
 
 #include <imm.h>
@@ -69,6 +70,7 @@ void registerCanvasClass() {
 }
 
 Canvas::Canvas(CircuitWindow* window, HWND parent, uint64_t pageKey) : win(window), key(pageKey) {
+	health::liveCanvases++;
 	hwnd = CreateWindowExW(0, kClass, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 10, 10, parent, nullptr, appInstance(), this);
 	// No input method here: nothing is typed on the canvas, and a Chinese,
 	// Japanese or Korean one would take its single keys (A, R, S...) as
@@ -81,6 +83,7 @@ Canvas::~Canvas() {
 		SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 		DestroyWindow(hwnd);
 	}
+	health::liveCanvases--;
 }
 
 LRESULT CALLBACK Canvas::proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {

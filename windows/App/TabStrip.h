@@ -38,6 +38,10 @@ public:
 	// strip's pixels. False when it isn't shown.
 	enum { kPlusButton = 1, kMinimizeButton, kCloseButton };
 	bool buttonPoint(int which, POINT& p);
+	// For --session-check: the middle of this strip's k-th tab (its close X
+	// when `closeButton`), in the strip's pixels; and how many tabs it has.
+	bool tabPoint(int k, bool closeButton, POINT& p);
+	int tabsShown();
 
 protected:
 	void paint(ID2D1RenderTarget* rt, float w, float h) override;

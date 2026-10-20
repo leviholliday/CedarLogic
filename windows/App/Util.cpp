@@ -4,6 +4,7 @@
 #include <d2d1_1.h>
 #include "Window.h"
 #include "DragLog.h"
+#include "SessionCheck.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -112,9 +113,21 @@ const std::string& resourcesDir() {
 	return dir;
 }
 
+// CEDARLOGIC_HOME, when set, holds everything instead (the session check's
+// home folder of its own: SessionCheck.h).
+std::string homeOverride() {
+	wchar_t env[MAX_PATH * 2];
+	const DWORD n = GetEnvironmentVariableW(L"CEDARLOGIC_HOME", env, (DWORD)(sizeof env / sizeof env[0]));
+	return n > 0 && n < sizeof env / sizeof env[0] ? U(std::wstring(env, n)) : std::string();
+}
+
 std::string settingsDir() {
 	PWSTR p = nullptr;
-	std::string dir;
+	std::string dir = homeOverride();
+	if (!dir.empty()) {
+		CreateDirectoryW(W(dir).c_str(), nullptr);
+		return dir;
+	}
 	if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p)) && p) dir = U(p) + "\\CedarLogic";
 	if (p) CoTaskMemFree(p);
 	if (dir.empty()) dir = exeDir();
@@ -530,8 +543,11 @@ ID2D1HwndRenderTarget* WindowSurface::begin(HWND hwnd) {
 		// each refresh, so nothing tears. CEDARLOGIC_DRAG_OLD=1 puts the old
 		// way back, to compare (windows/DRAG-DIAGNOSIS.md).
 		const D2D1_PRESENT_OPTIONS present = draglog::legacy() ? D2D1_PRESENT_OPTIONS_NONE : D2D1_PRESENT_OPTIONS_IMMEDIATELY;
-		if (FAILED(f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h), present), &rt)))
+		const HRESULT hr = f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h), present), &rt);
+		if (FAILED(hr)) {
+			health::noteD2dFailure(hr, "CreateHwndRenderTarget");
 			return rt = nullptr;
+		}
 		static unsigned long long count = 0;
 		made = ++count;
 	} else {
@@ -551,7 +567,9 @@ void WindowSurface::end() {
 	// The frame didn't make it: the display took the target away (a driver
 	// update, a remote session) or something in it failed. A new target, and
 	// the frame again (a few times in a row at most).
-	if (FAILED(rt->EndDraw())) {
+	const HRESULT hr = rt->EndDraw();
+	if (FAILED(hr)) {
+		health::noteD2dFailure(hr, "EndDraw");
 		release();
 		if (failures++ < 3) InvalidateRect(window, nullptr, FALSE);
 	} else {
@@ -686,6 +704,7 @@ void setWindowText(HWND hwnd, const std::string& text) {
 // showMessage and askYesNo are the app's alert card (Alert.cpp).
 
 void reportException(const char* where, const char* what) {
+	if (health::exceptions++ == 0) health::firstException = strf("%s: %s", where, what);
 	OutputDebugStringW(W(strf("CedarLogic: %s failed: %s\n", where, what)).c_str());
 	// Tell the user once a minute at most, in every window's status bar.
 	static ULONGLONG lastTold = 0;

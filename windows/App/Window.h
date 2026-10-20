@@ -281,6 +281,8 @@ public:
 	// pointer to the window there.
 	bool onDivider(POINT screen) const;
 	TabStrip* tabStripWidget(int pane) const { return pane == 0 || pane == 1 ? strips[pane] : nullptr; }   // for --click-test
+	FindBar* findBarWidget() const { return findBar; }   // for --session-check
+	bool scopeShown() const { return scope && scopeOpen; }
 
 	// ---- Focus mode ----
 	// The Mac's: the toolbar and the side panel slide away, and the tab

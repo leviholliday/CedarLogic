@@ -418,6 +418,20 @@ bool TabStrip::buttonPoint(int which, POINT& p) {
 	return true;
 }
 
+bool TabStrip::tabPoint(int k, bool closeButton, POINT& p) {
+	layout((float)width());
+	if (k < 0 || k >= (int)cards.size()) return false;
+	const D2D1_RECT_F r = closeButton ? closeRect(k) : cards[k];
+	const double s = scale();
+	p = { (LONG)((r.left + r.right) / 2 * s), (LONG)((r.top + r.bottom) / 2 * s) };
+	return true;
+}
+
+int TabStrip::tabsShown() {
+	layout((float)width());
+	return (int)cards.size();
+}
+
 // ---- Renaming in place -----------------------------------------------------------
 
 void TabStrip::beginRename(int page) {

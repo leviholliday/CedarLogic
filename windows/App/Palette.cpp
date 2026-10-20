@@ -7,6 +7,7 @@
 #include "Collections.h"
 #include "DragLog.h"
 #include "Window.h"
+#include "SessionCheck.h"
 
 #include <algorithm>
 #include <cmath>
@@ -726,7 +727,8 @@ void MiniMap::paint() {
 					o.selectionFade = 1;
 					cl_document_draw_ex(win->document(), page, cache, s, left, top, upp, &o);
 				}
-				if (FAILED(cache->EndDraw())) { cache->Release(); cache = nullptr; }
+				const HRESULT hr = cache->EndDraw();
+				if (FAILED(hr)) { health::noteD2dFailure(hr, "the minimap's EndDraw"); cache->Release(); cache = nullptr; }
 				cacheKey = key;
 			}
 		}

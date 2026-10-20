@@ -220,6 +220,19 @@ Direct2D here. And:
   PASS/FAIL and the frame times (`DRAG-DIAGNOSIS.md`); CI runs it (it never
   holds the build back) as built, with `CEDARLOGIC_DRAG_OLD=1` and with
   `CEDARLOGIC_NO_GEOMETRY_CACHE=1`.
+- `CedarLogic.exe --session-check [actions] [seed]` -- a long working
+  session in one window (`App/SessionCheck.h`, the Mac's `--session-check`):
+  seeded random actions through the app's own code (the canvas's and the tab
+  strip's mouse and keys, the window's commands: parts from the side panel,
+  wires, drags, Escape mid-drag, undo past the 500-step history, tabs, split
+  view, Simulation View, the oscilloscope, the dialogs, drawing, Tidy Up,
+  saving and reopening), checked for crashes (the action, a stack and a
+  minidump in `CL_SESSION_DUMPS`), hangs, the window's edited state,
+  autosave, the saved file reopening the same, page indices, GDI/USER
+  objects and memory, and that closing the window stops its timers and frees
+  its documents. PASS or FAIL for each, exit 1 on a failure. It works in a
+  home folder of its own in `%TEMP%` (`CEDARLOGIC_HOME`), never in yours. CI
+  runs seeds 1-4.
 - `CedarLogic.exe --bench-draw [frames] circuit.cdl` -- the canvas drawn that
   many times (120 by default) with the kept gate and label geometry and
   without (`D2DScene::cacheGeometry`), both frame times printed (CI runs it).

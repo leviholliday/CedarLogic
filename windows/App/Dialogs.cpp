@@ -3,6 +3,7 @@
 #include "Dialogs.h"
 #include "Alert.h"
 #include "Window.h"
+#include "SessionCheck.h"
 #include "Chrome.h"
 #include "Brand.h"
 #include "Collections.h"
@@ -73,7 +74,9 @@ void drawOnDC(HDC dc, const RECT& r, UINT dpi, const std::function<void(ID2D1Ren
 	rt->BeginDraw();
 	rt->SetTransform(D2D1::Matrix3x2F::Scale(s, s));
 	draw(rt, (r.right - r.left) / s, (r.bottom - r.top) / s);
-	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
+	const HRESULT hr = rt->EndDraw();
+	if (FAILED(hr)) health::noteD2dFailure(hr, "a dialog's EndDraw");
+	if (hr == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
 }
 
 // A toggle's state (owner-drawn buttons keep none of their own).
@@ -318,7 +321,9 @@ void paintPicture(const FormField& x, const DRAWITEMSTRUCT* di) {
 	const COLORREF back = darkColors().back;
 	rt->Clear(D2D1::ColorF(GetRValue(back) / 255.0f, GetGValue(back) / 255.0f, GetBValue(back) / 255.0f));
 	if (x.paint) x.paint(rt, (r.right - r.left) / s, (r.bottom - r.top) / s);
-	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
+	const HRESULT hr = rt->EndDraw();
+	if (FAILED(hr)) health::noteD2dFailure(hr, "a dialog's EndDraw");
+	if (hr == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
 }
 
 // The tips under fields in the Settings layout: the message font, a size
