@@ -250,6 +250,14 @@ struct CLLayout: View {
             if !prefs.hasSeenWelcome { openWindow(id: "welcome") }
             else if WhatsNew.shouldShow { openWindow(id: "whatsnew") }
         }
+        // The window's openWindow holds on to the window's views, and so to
+        // its controllers: kept on them, it kept every closed window's
+        // controller, its circuit and its 60-a-second clock running for the
+        // rest of the session (--session-check).
+        .onDisappear {
+            canvas.openWindow = nil
+            split.controller.openWindow = nil
+        }
     }
 }
 

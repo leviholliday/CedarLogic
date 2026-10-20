@@ -27,11 +27,19 @@ final class CircuitCanvasNSView: NSView {
     }
     private var missedDraw = false
     private var occlusionWatch: NSObjectProtocol?
+    private var resignWatch: NSObjectProtocol?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let o = occlusionWatch { NotificationCenter.default.removeObserver(o); occlusionWatch = nil }
+        if let o = resignWatch { NotificationCenter.default.removeObserver(o); resignWatch = nil }
         guard let w = window else { return }
+        // Space held when the window stops taking keys (another app, a
+        // sheet): its key-up goes elsewhere, and every click would pan.
+        resignWatch = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
+                                                             object: w, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.letGoOfSpace() }
+        }
         // A newly opened circuit's keys go to its canvas, not to the bare
         // window (nothing had the keyboard until the first click).
         DispatchQueue.main.async { [weak self, weak w] in
@@ -114,6 +122,20 @@ final class CircuitCanvasNSView: NSView {
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok { letGoOfSpace() }
+        return ok
+    }
+    /// Space is only held while this canvas has the keyboard: once it
+    /// hasn't, the key-up never comes here, and a `spaceDown` left on made
+    /// every click pan -- nothing could be selected, moved or drawn until
+    /// Space was pressed again.
+    private func letGoOfSpace() {
+        guard spaceDown else { return }
+        spaceDown = false
+        if case .pan = drag {} else { NSCursor.arrow.set() }
+    }
     override var isOpaque: Bool { true }
 
     override init(frame: NSRect) {
@@ -1121,9 +1143,12 @@ final class CanvasController: ObservableObject {
         if i == page {
             closingStart = CACurrentMediaTime()
             redraw()
+            // By id: another tab closed while this one dims away moves it.
+            let id = document.pageID(i)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.closeTime) { [weak self] in
-                self?.closingStart = nil
-                self?.closePageNow(i)
+                guard let self else { return }
+                self.closingStart = nil
+                if let now = self.document?.pageIndex(of: id) { self.closePageNow(now) }
             }
         } else {
             closePageNow(i)
@@ -1133,11 +1158,14 @@ final class CanvasController: ObservableObject {
     private func closePageNow(_ i: Int) {
         guard let document, document.pageCount > 1 else { return }
         selectNone()
+        // A tab closed from its × while another is in front: that one stays.
+        let shown = i == page ? nil : document.pageID(page)
         if cl_document_close_page(document.handle, Int32(i)) {
             lastPageCount = document.pageCount
             document.objectWillChange.send()
             pageRequestAfterClose = true
-            pageRequest = min(Int(cl_document_page_to_show(document.handle)), document.pageCount - 1)
+            pageRequest = shown.flatMap { document.pageIndex(of: $0) }
+                ?? min(Int(cl_document_page_to_show(document.handle)), document.pageCount - 1)
             edited()
         }
     }
@@ -1687,12 +1715,18 @@ final class CanvasController: ObservableObject {
     }
 
     // Simulation
-    func toggleRunning() { setRunning(!isRunning) }
+    func toggleRunning() { setRunning(!(document?.isRunning ?? isRunning)) }
 
+    /// Run or pause the circuit: both sides of a split show it (the first
+    /// side's clock is the one that runs it). Space on the second side once
+    /// paused the engine with the first side still saying it ran -- or the
+    /// other way round, a running engine that nothing ticked.
     func setRunning(_ running: Bool) {
         document?.isRunning = running
-        isRunning = running
-        lastTick = CACurrentMediaTime()
+        for side in [self, partner].compactMap({ $0 }) where side === self || side.document === document {
+            side.isRunning = running
+            side.lastTick = CACurrentMediaTime()
+        }
     }
 
     /// One step; pauses first, since stepping a running circuit means little.
@@ -1757,7 +1791,7 @@ final class CanvasController: ObservableObject {
             redraw()
             if showScope && now - lastScopeBump > 1.0 / 15 { lastScopeBump = now; scopeChanged() }
         }
-        if result.paused { isRunning = false }
+        if result.paused { setRunning(false) }
     }
 
     deinit { timer?.invalidate() }

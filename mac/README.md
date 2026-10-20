@@ -180,6 +180,27 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   its circuit and its 60-a-second clock) goes when the window does, after
   Add a Gate, a split's second side, Simulation View (headless, PASS/FAIL,
   exit 1 on a failure)
+- `session-check.sh [actions] [seeds...]` -- `CedarLogic --session-check`:
+  a long session in a real circuit window that's never shown (default 2000
+  actions, a quarter hour of a student's work, about 4 minutes per seed):
+  parts placed, moved, wired, deleted, undone and redone past the 500-step
+  history, tabs, split view, Simulation View, the scope, run and step, with
+  autosave pauses. Every change leaves the window edited, every pause leaves
+  the file on disk the circuit as it is, the undo steps stay in step, each
+  side shows a real page, a version is kept after a break (backdated, not
+  waited for), memory levels off, both sides of a split agree on run/pause,
+  and closing the window lets its controller, clock and circuit go. A copy
+  of the app with its own settings and home folder; nothing shows on screen
+- `launch-selftest.sh [rounds]` -- `CedarLogic --launch-selftest`: what a
+  launch decides and does from ten saved states (first launch, after an
+  update, no Your Circuits, the last circuit missing, damaged or empty, work
+  left from before a break, a broken library, damaged sample circuits):
+  welcome or What's New, which circuit reopens and that it opens, Your
+  Circuits, versions, Sync and Classroom starting with no network, nothing
+  holding the main thread up. 30 launches by default, no windows, a copy of
+  the app with its own settings and home folder. `STATES_ONLY=damaged
+  launch-selftest.sh 30` runs only the damaged circuits (an engine crash in
+  `GUICircuit::createWire` on some, see docs/MAC-APP-AUDIT.md)
 - `launch-check.sh [runs]` -- real launches of the built app (a copy with
   settings and folders of its own, so yours are never touched): each must
   open its circuit window, quit by itself and print none of SwiftUI's
