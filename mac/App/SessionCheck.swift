@@ -118,7 +118,7 @@ enum SessionCheck {
         weak var goneWindow: NSWindow?
         weak var goneHost: NSView?
         var editsChecked = 0, editsLost = 0, firstLost = -1, kind = "", lostWhat = ""
-        var pausesChecked = 0, pausesUnsaved = 0, pausesStale = 0, firstStale = -1
+        var pausesChecked = 0, pausesUnsaved = 0, pausesStale = 0, firstStale = -1, firstUnsaved = -1
         var stepMismatch = 0, firstMismatch = -1
         var badPage = 0, firstBadPage = -1
         var maxSteps = 0, splits = 0, tabsMade = 0, tabsClosed = 0, undos = 0, redos = 0
@@ -202,7 +202,7 @@ enum SessionCheck {
             @MainActor func pause(_ at: Int) {
                 turn(2.6)   // autosave comes 2 s after the last change
                 pausesChecked += 1
-                if file.isDocumentEdited { pausesUnsaved += 1 }
+                if file.isDocumentEdited { pausesUnsaved += 1; if firstUnsaved < 0 { firstUnsaved = at } }
                 let disk = (try? String(contentsOf: item.circuit, encoding: .utf8)).map(shape)
                 if disk != shape(core.shareText(flags: 0)) { pausesStale += 1; if firstStale < 0 { firstStale = at } }
             }
@@ -216,7 +216,7 @@ enum SessionCheck {
                               check(file.isDocumentEdited, "gestures: \(what) leaves the window edited")
                           }, pause: { pause(-1) })
             check(pausesChecked == 1 && pausesUnsaved == 0 && pausesStale == 0, "gestures: autosave saved them, and the file on disk is the circuit")
-            pausesChecked = 0; pausesUnsaved = 0; pausesStale = 0; firstStale = -1
+            pausesChecked = 0; pausesUnsaved = 0; pausesStale = 0; firstStale = -1; firstUnsaved = -1
             var gestures = 0, escapeChanged = 0, putBackChanged = 0, firstPutBack = -1
 
             memory.append(footprintMB())
@@ -389,7 +389,7 @@ enum SessionCheck {
             check(putBackChanged == 0, "Tidy Up's Put Back left the circuit as it was\(firstPutBack >= 0 ? " (\(putBackChanged) times not, first at action \(firstPutBack))" : "")")
             // Undo all the way back, then Redo all the way: one press, one step.
             for s in [canvas, canvas.partner].compactMap({ $0 }) where s.simView { s.simView = false }
-            let beforeWalk = shape(core.shareText(flags: 0))
+            let beforeWalk = shape(core.shareText(flags: 0)), stepsBeforeWalk = core.undoCount
             var presses = 0, nothing = 0, several = 0
             while canvas.canUndo && presses < 3000 {
                 let n = core.undoCount
@@ -398,8 +398,10 @@ enum SessionCheck {
                 if presses % 50 == 0 { turn(0.01) }
             }
             let undone = core.undoCount
+            // Back to where the walk started -- not past it, into steps the
+            // session itself had undone before the walk.
             var redoes = 0
-            while canvas.canRedo && redoes < 3000 { canvas.redo(); redoes += 1; if redoes % 50 == 0 { turn(0.01) } }
+            while canvas.canRedo && core.undoCount < stepsBeforeWalk && redoes < 3000 { canvas.redo(); redoes += 1; if redoes % 50 == 0 { turn(0.01) } }
             turn(0.1)
             print("INFO undo walk: \(presses) Undo presses (\(nothing) did nothing, \(several) took back more than one step, \(undone) steps left), \(redoes) Redo presses")
             let afterWalk = shape(core.shareText(flags: 0))
@@ -433,7 +435,7 @@ enum SessionCheck {
 
         check((editsChecked > 0 || actions == 0) && editsLost == 0,
               "every edit leaves the window edited, so autosave saves it (\(editsChecked - editsLost) of \(editsChecked)\(firstLost >= 0 ? ", first lost at action \(firstLost): \(lostWhat)" : ""))")
-        check(pausesChecked > 0 && pausesUnsaved == 0, "autosave saved the circuit at every pause (\(pausesChecked - pausesUnsaved) of \(pausesChecked))")
+        check(pausesChecked > 0 && pausesUnsaved == 0, "autosave saved the circuit at every pause (\(pausesChecked - pausesUnsaved) of \(pausesChecked)\(firstUnsaved >= 0 ? ", first unsaved at action \(firstUnsaved)" : ""))")
         check(pausesStale == 0, "the file on disk is the circuit as it is, at every pause (\(pausesChecked - pausesStale) of \(pausesChecked)\(firstStale >= 0 ? ", first stale at action \(firstStale)" : ""))")
         check(stepMismatch == 0, "the window's undo steps match the engine's after every action\(firstMismatch >= 0 ? " (\(stepMismatch) mismatches, first at action \(firstMismatch))" : "")")
         check(badPage == 0, "each side shows a page that exists\(firstBadPage >= 0 ? " (\(badPage) times not, first at action \(firstBadPage))" : "")")
