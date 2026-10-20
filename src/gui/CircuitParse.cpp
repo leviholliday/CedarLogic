@@ -269,6 +269,10 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 		for (const cl::WireInstance &w : pg.wires) {
 			vector<IDType> wireIds;
 			for (const string &id : w.ids) wireIds.push_back(strtoull(id.c_str(), nullptr, 10));
+			// A wire with no id (a damaged file: "(id" for "(ids") can't be made;
+			// connecting its pins created a wire from an empty id list and read
+			// past it. It is left out, and applyWireShape says so.
+			if (wireIds.empty()) continue;
 			std::set<std::pair<string, string>> seen; // distinct (gate, pin) endpoints
 			for (const cl::WireSegment &s : w.segments) {
 				for (const cl::WireConn &c : s.connects) {
@@ -472,6 +476,7 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 	GUICircuit *gCircuit = gCanvas->getCircuit();
 	for (unsigned int i = 0; i < inputs.size(); i++) {
 
+		if (inputs[i].wireIds.empty()) continue;   // no wire to make (see applyCircuitFile)
 		guiWire *wire = gCircuit->createWire(inputs[i].wireIds);
 
 		cmdConnectWire::sendMessagesToConnect(gCircuit, wire->getID(),
@@ -481,6 +486,7 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 	}
 	for (unsigned int i = 0; i < outputs.size(); i++) {
 
+		if (outputs[i].wireIds.empty()) continue;   // no wire to make (see applyCircuitFile)
 		guiWire *wire = gCircuit->createWire(outputs[i].wireIds);
 
 		cmdConnectWire::sendMessagesToConnect(gCircuit, wire->getID(),

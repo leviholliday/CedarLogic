@@ -37,6 +37,127 @@ The last two are the best matches for "after 10 minutes": 500 undo steps
 come quickly (every move, wire and pen stroke), and every window closed or
 replaced after pressing A left its simulation running.
 
+## Round 2 (2026-10-19): fixed
+
+| Commit | What | Check that keeps it fixed |
+| --- | --- | --- |
+| Let a closed circuit window's controller, circuit and clock go | the window's SwiftUI `openWindow`, kept on its controllers, held the window's views, which held the controllers: no circuit window was ever freed, so every closed or replaced window kept simulating at 60 Hz for the rest of the session | `mac/Tools/session-check.sh` (before: FAIL controller and circuit kept, even with no edits) |
+| Keep both sides of a split view in step when the circuit runs or pauses | Space/Step/Simulation View on the second side changed only that side and the engine: the first side (which runs the clock) could show Pause over a stopped circuit, or leave a "running" circuit frozen | `session-check.sh` (its five split lines) |
+| Let go of a held Space when the canvas loses the keyboard | a Space key-up that went elsewhere (Cmd-Tab, a sheet) left `spaceDown` on: every click panned, nothing could be selected or moved | hand test below |
+| Close the tab you meant, and keep the tab in front, when closing tabs | a second close within the first's 140 ms fade closed a different tab (by stale index, without its question); closing a background tab switched you to another tab | hand test below |
+| Don't crash the oscilloscope's Option-Left after its recording is trimmed | after 60,000 steps the recording drops 10,000 and the cursor wasn't clamped: Option-Left read past the end and the app quit | hand test below |
+| Don't put the Quit card over a question that's waiting for its answer | Cmd-Q during an app-modal question (Close Tab?) covered it with the dimmed screen and a card that couldn't be clicked | hand test below |
+
+The first is the best match yet for "every time I use it for more than ten
+minutes": each circuit opened over another (Settings > General > Opening a
+circuit: replace) or closed kept a hidden simulation running.
+
+### New headless checks (round 2)
+
+- `mac/Tools/session-check.sh [actions] [seeds...]` (`CedarLogic
+  --session-check`): the real circuit window, never shown, over a document
+  that autosaves into Your Circuits, through 2000 random actions (a quarter
+  hour of work; ~4 min per seed). Seeds 1-4 pass: every change leaves the
+  window edited (past the 500-step history too), the file on disk matches
+  the circuit at all 51 autosave pauses, undo steps stay in step, pages in
+  range, a version is kept after an (11-minute, backdated) break, memory
+  levels off (44 MB at start, ~110 MB after the first quarter, no growth
+  after), no SwiftUI runtime warnings, and closing frees everything.
+- `mac/Tools/launch-selftest.sh [rounds]` (`CedarLogic --launch-selftest`):
+  ten saved states (first launch, normal, after an update, no Your Circuits,
+  last circuit missing / damaged / empty, work waiting from before a break,
+  a broken library, damaged circuits), 30 launches, all PASS: the right
+  greeting, the right circuit reopened or a new one, Your Circuits and its
+  versions, Sync and Classroom starting offline, nothing holding the main
+  thread up (every step under 0.02 s).
+
+### Found in the engine (for the engine's owner; not fixed here)
+
+- **Crash opening some damaged circuits**: a null pointer in
+  `GUICircuit::createWire` (called from `CircuitParse::parseGateToSend`,
+  `applyCircuitFile`, `clOpenText`). About 1 in 900 damaged copies of the
+  sample circuits, always with changed bytes (cut-short files are refused
+  cleanly). If it were the circuit you were last in, the app would crash at
+  every launch. Reproduce: `STATES_ONLY=damaged mac/Tools/launch-selftest.sh
+  30` (rounds 9, 14, 25 and 27 crash; each leaves the circuit it crashed on
+  as `crash<n>.cdl` in its folder).
+- **Redo of a tab close after tabs were reordered closes the wrong tab**:
+  `ClosePageCommand` (CedarCore/Extras.cpp) keeps a page index, and moving a
+  tab isn't an undo step. Tabs A, B, C; close B; Cmd-Z; drag B to the end;
+  Shift-Cmd-Z: C closes, with its work and no question. Holding the page by
+  pointer (as the other commands do) would fix it.
+- **Page ids are memory addresses** (`cl_document_page_id`): a page freed
+  when its close falls off the 500-step history can have its address reused
+  by a new tab, which then opens with the old tab's camera. Cosmetic.
+
+### Ruled out (round 2)
+
+- **Sync's engine thread waiting on the main thread** (old item 9): the
+  hooks that use `DispatchQueue.main.sync` are called from `core->sync`
+  outside the engine's mutex (SyncEngine.cpp `runCycle`), and the main
+  thread's only waits on the engine thread are bounded (3 s in `~Engine`,
+  8 s quit fallback). No deadlock path.
+- **Quit leaving every window transparent while the app keeps running**
+  (old item 6): if `NSApp.terminate` returns (a save question, a cancel),
+  QuitConfirm puts every window back; with sync on, quitting always
+  finishes within 8 s. (The related Cmd-Q-over-a-question case is fixed
+  above.)
+- **A split side showing a page that doesn't exist** (old item 8): every
+  page index is clamped or checked (`reconcile`, `paneView`, the tab
+  switcher, the engine's `page(i)`); `session-check` saw none in 8000
+  actions with 35-51 split toggles per seed.
+- **Autosave and versions over a long session**: covered by
+  `session-check` (above); the 500th-undo fix holds in a real window.
+- **Launch with a missing, damaged or empty last circuit, no library, a
+  broken library, offline Sync/Classroom**: `launch-selftest` (above).
+- **The updater offline**: not run (the test copies have no update key, and
+  the feed address is fixed). Sparkle's scheduled checks don't show errors;
+  only Check for Updates... does. Hand test below.
+
+### Still suspected (not fixed; low impact or not provable headlessly)
+
+- A status-bar message that never clears with Settings > "Show zoom,
+  cursor position, and counts" off (`CLWindow.swift` clears messages with
+  an `onChange` that doesn't fire for the bar's first value).
+- A sheet cancelled by "Never stuck" (`checkHiddenSheet`/`makeEditable`
+  call `endSheet` behind SwiftUI's back) may leave its flag set, so the
+  same sheet (Add a Gate, a gate's Settings) won't open again in that
+  window.
+- At the full 500-step history, a plain click (no change) within 2 s of
+  an edit registers one more do-nothing Undo entry; Undo can stay enabled
+  for a few presses that do nothing.
+- With the oscilloscope open and running, the whole window re-renders 15
+  times a second (`scopeVersion` on the controller), reading `name.txt`
+  twice each time: sluggish, not wrong.
+- Cmd-W while a Truth Table / Build from Formula / Export sheet is up may
+  close the tab (or the window) under the sheet.
+- "Replace the current one" + an edited untitled circuit + a file that was
+  imported before + more than 2 s to answer "save?": the hidden new window
+  can be closed and replaced under the question, leaving a window with no
+  document.
+
+### Hand tests for round 2 (only the owner can confirm)
+
+1. **Closed windows stop running**: open five circuits one after another
+   from Your Circuits (with "replace" on), then look at CedarLogic in
+   Activity Monitor: CPU should settle near 0 with one paused circuit,
+   instead of climbing with each circuit opened.
+2. **Split run/pause**: split view, click the right side, press Space:
+   both sides show paused; Space again: both run and the circuit moves.
+3. **Held Space**: hold Space over the canvas, Cmd-Tab to another app, let
+   go, come back, click a part: it selects (before: the click panned).
+4. **Tabs**: four tabs, C in front; click C's x and A's x quickly: A and C
+   close, B and D stay. Then with A in front, close D from its x: A stays
+   in front.
+5. **Oscilloscope**: Simulation > fastest speed, scope open (Cmd-G), put
+   the cursor near the right end, wait a minute or two, press Option-Left:
+   no crash.
+6. **Cmd-Q over a question**: put a part on a tab, close that tab (the
+   "All work on this tab will be lost" question), press Cmd-Q: a beep, the
+   question stays usable.
+7. **Updater offline**: Wi-Fi off, launch: no update alert; Check for
+   Updates... shows Sparkle's own "can't reach" message.
+
 ## Already fixed before this round (please confirm by hand)
 
 These were on the 2026-10-08 list; the code shows fixes that came later.
@@ -67,7 +188,7 @@ These were on the 2026-10-08 list; the code shows fixes that came later.
    clicks: does View › Make This Window Editable bring it back? Is a
    question sheet hidden behind something? Note what was on screen.
 
-## Suspected, not verified (exact steps to try)
+## Suspected after round 1 (see Round 2 above for 6, 8, 9)
 
 4. **"Modifying state during view update"** (once, 15 Oct 09:51:40, source
    unknown). To find it: run `mac/Tools/launch-check.sh` style under `lldb`

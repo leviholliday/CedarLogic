@@ -305,7 +305,9 @@ struct ScopeView: View {
 
     private func handle(_ press: KeyPress, signals: [String], length: Int) -> KeyPress.Result {
         guard length > 0 || press.characters == " " else { return .ignored }
-        let current = model.cursor ?? (length - 1)
+        // The cursor can be past the end: the recording drops its oldest
+        // 10,000 steps when it's full (Scope.cpp), and the cursor stays.
+        let current = min(model.cursor ?? (length - 1), max(length - 1, 0))
         let shift = press.modifiers.contains(.shift), option = press.modifiers.contains(.option)
         switch press.key {
         case .leftArrow:
@@ -342,6 +344,7 @@ struct ScopeView: View {
     private func change(from index: Int, forward: Bool) -> Int {
         let length = Int(cl_scope_length(document.handle))
         guard length > 1 else { return index }
+        let index = min(max(index, 0), length - 1)
         var all = [UInt8](repeating: 0, count: length)
         _ = cl_scope_samples(document.handle, Int32(model.chosen), 0, Int32(length), &all)
         let here = all[min(max(index, 0), length - 1)]

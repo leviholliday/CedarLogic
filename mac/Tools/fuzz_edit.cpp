@@ -26,6 +26,9 @@
 //   CL_FUZZ_CHAIN=1     each seed starts from the circuit the previous one saved
 //   CL_FUZZ_SAYSEED=1   print each seed as it starts (to find the one that crashed)
 //   CL_FUZZ_TREE=1      every wire is one connected piece
+//   CL_FUZZ_UNDOFIND=1  when UNDOALL would fail, find the fewest steps that show
+//                       it (undo k, redo k) and name them; with _DUMP, keeps both
+//   CL_FUZZ_WATCH=<wire>[:<gate>:<pin>]  print that wire (and pin) as it changes
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
@@ -75,13 +78,20 @@ static void watchPrint(CLDocument* doc, const char* when) {
 	const char* w = getenv("CL_FUZZ_WATCH");
 	if (!w) return;
 	unsigned long wid = 0, gid = 0; char pin[64] = "";
-	if (sscanf(w, "%lu:%lu:%63s", &wid, &gid, pin) != 3) return;
+	const int got = sscanf(w, "%lu:%lu:%63s", &wid, &gid, pin);   // or just <wire>
+	if (got != 3 && got != 1) return;
 	for (int p = 0; p < cl_document_page_count(doc); p++) {
 		auto* wl = doc->page(p)->getWireList(); auto* gl = doc->page(p)->getGateList();
 		auto wi = wl->find(wid); auto gi = gl->find(gid);
-		if (wi == wl->end() || gi == gl->end() || !wi->second || !gi->second) continue;
-		float px = 0, py = 0; gi->second->getHotspotCoords(pin, px, py);
-		printf("      [%s] pin (%.2f, %.2f) selected=%d; wire:", when, px, py, (int)gi->second->isSelected());
+		if (wi == wl->end() || !wi->second || (got == 3 && (gi == gl->end() || !gi->second))) continue;
+		if (got == 3) {
+			float px = 0, py = 0; gi->second->getHotspotCoords(pin, px, py);
+			printf("      [%s] pin (%.2f, %.2f) selected=%d; wire:", when, px, py, (int)gi->second->isSelected());
+		} else {
+			printf("      [%s] page %d wire:", when, p);
+			for (auto& c : wi->second->getConnections()) printf(" %lu:%s", c.gid, c.connection.c_str());
+			printf(";");
+		}
 		for (const auto& seg : wi->second->getSegmentMap())
 			printf(" [%ld %c %.2f,%.2f->%.2f,%.2f]", seg.first, seg.second.isVertical() ? 'v' : 'h', seg.second.begin.x, seg.second.begin.y, seg.second.end.x, seg.second.end.y);
 		printf("\n");
@@ -211,14 +221,16 @@ static void wideOp(CLDocument*& doc, int op, int page, int pages) {
 		if (!g) break;
 		double x, y; centre(g, x, y);
 		cl_edit_press(doc, page, x, y, 0, upp);
+		if (getenv("CL_FUZZ_TRACE")) printf("    press gate %lu at (%.2f, %.2f)\n", g->getID(), x, y);
 		frame(doc);
 		double tx = x, ty = y;
-		for (int i = 0, n = 1 + ri(4); i < n; i++) { tx += rf(-3, 3); ty += rf(-3, 3); cl_edit_drag(doc, tx, ty); frame(doc); }
+		for (int i = 0, n = 1 + ri(4); i < n; i++) { tx += rf(-3, 3); ty += rf(-3, 3); cl_edit_drag(doc, tx, ty); watchPrint(doc, "drag"); frame(doc); }
 		cl_edit_connect_while_moving(doc, page, upp);
-		for (int i = 0, n = ri(3); i < n; i++) { tx += rf(-2, 2); ty += rf(-2, 2); cl_edit_drag(doc, tx, ty); frame(doc); }
-		if (ri(3) == 0) cl_edit_connect_while_moving(doc, page, upp);
-		if (ri(4) == 0) cl_edit_take_back_connects(doc);
-		if (ri(5) == 0) cl_edit_cancel(doc); else cl_edit_release(doc, tx, ty);
+		watchPrint(doc, "C");
+		for (int i = 0, n = ri(3); i < n; i++) { tx += rf(-2, 2); ty += rf(-2, 2); cl_edit_drag(doc, tx, ty); watchPrint(doc, "drag"); frame(doc); }
+		if (ri(3) == 0) { cl_edit_connect_while_moving(doc, page, upp); watchPrint(doc, "C"); }
+		if (ri(4) == 0) { cl_edit_take_back_connects(doc); watchPrint(doc, "take back"); }
+		if (ri(5) == 0) { cl_edit_cancel(doc); watchPrint(doc, "cancel"); } else { cl_edit_release(doc, tx, ty); watchPrint(doc, "released"); }
 		break; }
 	case 3: {   // connect nearby with what's selected
 		if (ri(2)) { guiGate* g = randomGate(doc, page); if (g) { cl_edit_select_none(doc, page); g->select(); } }
@@ -236,13 +248,16 @@ static void wideOp(CLDocument*& doc, int op, int page, int pages) {
 			const char* back = nullptr;
 			if (!t.empty()) made = cl_edit_paste(doc, page, t.c_str(), ax, ay, true, &back);
 		}
+		if (getenv("CL_FUZZ_TRACE")) printf("    %s floats at (%.2f, %.2f)\n", how == 0 ? "a new part" : "a paste", ax, ay);
 		if (!made || !cl_edit_float_begin(doc, page, ax, ay)) break;
-		for (int i = 0, n = 1 + ri(6); i < n; i++) { ax += rf(-4, 4); ay += rf(-4, 4); cl_edit_hover(doc, page, ax, ay, upp); frame(doc); }
-		if (ri(3) == 0) cl_edit_connect_while_moving(doc, page, upp);
+		watchPrint(doc, "float");
+		for (int i = 0, n = 1 + ri(6); i < n; i++) { ax += rf(-4, 4); ay += rf(-4, 4); cl_edit_hover(doc, page, ax, ay, upp); watchPrint(doc, "hover"); frame(doc); }
+		if (ri(3) == 0) { cl_edit_connect_while_moving(doc, page, upp); watchPrint(doc, "C"); }
 		const int end = ri(10);
-		if (end < 6) { cl_edit_press(doc, page, ax, ay, 0, upp); cl_edit_release(doc, ax, ay); }
+		if (end < 6) { cl_edit_press(doc, page, ax, ay, 0, upp); cl_edit_release(doc, ax, ay); watchPrint(doc, "dropped"); }
 		else if (end < 8) {   // Escape: first the connections, then the whole thing
 			if (cl_edit_take_back_connects(doc) == 0) { cl_edit_cancel(doc); if (cl_edit_can_undo(doc)) cl_edit_undo(doc); }
+			watchPrint(doc, "escaped");
 		}
 		// else: left on the pointer; whatever comes next happens with it floating
 		break; }
@@ -729,6 +744,29 @@ static bool sameCircuit(const std::string& a, const std::string& b) {
 // then redo everything: the circuit must save as it did before.
 static bool undoAllCheck(CLDocument* doc, std::string& what) {
 	std::string a = canonical(cl_document_save_text(doc));
+	// CL_FUZZ_UNDOFIND=1: undo k then redo k for k = 1, 2, ... and stop at the
+	// first k that changes the circuit, naming the steps: the k-th is the culprit
+	// (or the one it was redone on top of).
+	if (getenv("CL_FUZZ_UNDOFIND")) {
+		std::vector<std::string> names;
+		for (int k = 1; cl_edit_undo_count(doc) >= k; k++) {
+			names.clear();
+			for (int i = 0; i < k; i++) { names.push_back(cl_edit_undo_name(doc)); cl_edit_undo(doc); }
+			for (int i = 0; i < k; i++) cl_edit_redo(doc);
+			std::string b = canonical(cl_document_save_text(doc));
+			if (!sameCircuit(a, b)) {
+				what = "undo " + std::to_string(k) + " then redo " + std::to_string(k) + " changed it at " + firstWordDiff(semantic(a), semantic(b)) + "; steps (newest first):";
+				for (auto& n : names) what += " [" + n + "]";
+				if (const char* dir = getenv("CL_FUZZ_DUMP")) {
+					for (int w = 0; w < 2; w++) {
+						std::string path = std::string(dir) + (w ? "/undofind-b.cdl" : "/undofind-a.cdl");
+						if (FILE* f = fopen(path.c_str(), "w")) { const std::string& t = w ? b : a; fwrite(t.data(), 1, t.size(), f); fclose(f); }
+					}
+				}
+				return false;
+			}
+		}
+	}
 	int undone = 0;
 	while (cl_edit_can_undo(doc) && undone < 100000) { cl_edit_undo(doc); undone++; }
 	if (getenv("CL_FUZZ_INVARIANT") && danglingConnection(doc, what)) { what = "after undoing all " + std::to_string(undone) + " steps: " + what; return false; }
