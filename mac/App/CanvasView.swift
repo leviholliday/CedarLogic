@@ -1001,6 +1001,7 @@ final class CanvasController: ObservableObject {
         hiddenSheetSeen = false
         NSLog("CedarLogic: ended a sheet that couldn't be seen (%@)", sheet.title)
         w.endSheet(sheet, returnCode: .cancel)
+        putAwaySheets()
         w.makeFirstResponder(view)
         note("A question that couldn't be seen was closed, so you can keep editing.")
     }
@@ -1023,12 +1024,33 @@ final class CanvasController: ObservableObject {
         }
         Self.pendingGate = nil
         if let w = host.view?.window {
-            if let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 { w.endSheet(sheet, returnCode: .cancel) }
+            if let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 {
+                w.endSheet(sheet, returnCode: .cancel)
+                host.putAwaySheets()
+            }
             w.makeKeyAndOrderFront(nil)
             w.makeFirstResponder(host.view)
         }
         host.redraw()
         host.note("Ready to edit.")
+    }
+
+    /// What asks for this window's SwiftUI sheets and alerts, all let go of
+    /// (after a sheet that couldn't be seen was ended). Ending one with
+    /// endSheet behind SwiftUI's back isn't enough: while what asked for it
+    /// is still set, SwiftUI puts the very same sheet straight back up --
+    /// as unseen as before -- so the window stayed blocked.
+    func putAwaySheets() {
+        if showQuickAdd { showQuickAdd = false }
+        if showShortcuts { showShortcuts = false }
+        if showExportImage { showExportImage = false }
+        if showExportReport { showExportReport = false }
+        if ramGate != nil { ramGate = nil }
+        if truthTable != nil { truthTable = nil }
+        if truthTableProblem != nil { truthTableProblem = nil }
+        if formulaRequest != nil { formulaRequest = nil }
+        // The window's own (a gate's Settings, the load notices).
+        NotificationCenter.default.post(name: .clPutAwaySheets, object: self)
     }
 
     /// Gives a circuit window's canvas the keyboard (after it's shown).

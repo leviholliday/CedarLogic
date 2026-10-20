@@ -48,6 +48,9 @@ struct CircuitWindow: View {
             TourModel.shared.windowAppeared(canvas)
         }
         .onDisappear { TourModel.shared.windowClosed(canvas) }
+        .onReceive(NotificationCenter.default.publisher(for: .clPutAwaySheets)) { n in
+            if (n.object as? CanvasController) === canvas, showNotices { showNotices = false }
+        }
         .sheet(item: $canvas.truthTable) { t in
             TruthTableView(table: t) { canvas.buildFromTable($0) }.onClickOutside { canvas.truthTable = nil }
         }
