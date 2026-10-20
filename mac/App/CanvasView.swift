@@ -954,6 +954,10 @@ final class CanvasController: ObservableObject {
         case .lock: locked.toggle()
         case .newTab: newPage()
         case .closeTab:
+            // Not under a sheet (Truth Table, Build from Formula, Export...):
+            // the menu's Cmd-W reaches here with one up, and closed the tab
+            // behind it -- or, on the last tab, asked to close the window.
+            if sheetHost.view?.window?.attachedSheet != nil { NSSound.beep(); return }
             if (document?.pageCount ?? 1) > 1 { closePage(page) } else { view?.window?.performClose(nil) }
         case .reopenTab: reopenPage()
         case .splitView: NotificationCenter.default.post(name: .clSplit, object: self)
