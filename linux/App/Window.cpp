@@ -1606,6 +1606,9 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	cl_document_close(doc);
 	doc = newDoc;
 	path = newPath;
+	// A different circuit: every picture kept of it (the minimap's, keyed on
+	// the edit stamp) is drawn again.
+	changes++;
 	drawingOn = false;
 	if (notes) notes->load();
 	forceDirty = false;
