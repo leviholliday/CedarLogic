@@ -204,13 +204,16 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   own settings and home folder; nothing shows on screen (the window is only
   ordered in, transparent and far off every display, for its sheets)
 - `launch-selftest.sh [rounds]` -- `CedarLogic --launch-selftest`: what a
-  launch decides and does from ten saved states (first launch, after an
+  launch decides and does from eleven saved states (first launch, after an
   update, no Your Circuits, the last circuit missing, damaged or empty, work
-  left from before a break, a broken library, damaged sample circuits):
-  welcome or What's New, which circuit reopens and that it opens, Your
-  Circuits, versions, Sync and Classroom starting with no network, nothing
-  holding the main thread up. 30 launches by default, no windows, a copy of
-  the app with its own settings and home folder. `STATES_ONLY=damaged
+  left from before a break, a broken library, damaged sample circuits, no
+  network): welcome or What's New, which circuit reopens and that it opens,
+  Your Circuits, versions, Sync and Classroom starting with no network, in
+  "offline" the updater and crash reports too (CL_UPDATE_FEED and
+  CL_SENTRY_DSN, honoured only by a test copy, point them at names that
+  never resolve: Sparkle's scheduled check must give up with no alert or
+  window), nothing holding the main thread up. 33 launches by default, no
+  windows, a copy of the app with its own settings and home folder. `STATES_ONLY=damaged
   launch-selftest.sh 30` runs only the damaged circuits (an engine crash in
   `GUICircuit::createWire` on some, see docs/MAC-APP-AUDIT.md)
 - `launch-check.sh [runs]` -- real launches of the built app (a copy with
