@@ -681,7 +681,11 @@ final class CanvasController: ObservableObject {
     /// When the file on disk changes from a save, a circuit from Your
     /// Circuits keeps a version.
     private func noticeSaves() {
-        if !adopted, let w = view?.window, let d = NSDocumentController.shared.document(for: w) {
+        // Not while this window waits, out of sight, for the circuit it
+        // replaces to be answered for: taking it into Your Circuits can
+        // close it (a file imported before opens its copy there instead),
+        // and the question's answer then brought back a window with no circuit.
+        if !adopted, let w = view?.window, !WindowReplacer.isWaiting(w), let d = NSDocumentController.shared.document(for: w) {
             adopted = adoptIntoLibrary(d)
         }
         guard let w = view?.window, let d = NSDocumentController.shared.document(for: w),
