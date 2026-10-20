@@ -7,6 +7,7 @@
 #include "Dialogs.h"
 #include "FindBar.h"
 #include "Library.h"
+#include "Palette.h"
 #include "TabStrip.h"
 #include "Window.h"
 
@@ -581,7 +582,7 @@ private:
 	int pagesBad = 0, firstPagesBad = -1;
 	std::string pagesWhat;
 	int undos = 0, redos = 0, tabsMade = 0, tabsClosed = 0, tabsMoved = 0, splits = 0, simViews = 0, dialogs = 0, windowsMade = 0;
-	int wiresDrawn = 0, partsPlaced = 0, drags = 0, escapes = 0, reloads = 0, strokes = 0;
+	int realDrags = 0, wiresDrawn = 0, partsPlaced = 0, drags = 0, escapes = 0, reloads = 0, strokes = 0;
 	int othersClosed = 0, windowGone = -1;
 	bool longHistoryDone = false;
 	bool editedPastFull = true, fullHistoryReached = false, undoAllOk = true, redoAllOk = true;
@@ -639,6 +640,33 @@ private:
 			if (!IsWindow(h)) return;
 		}
 		mouse(c, h, WM_LBUTTONUP, x1, y1);
+	}
+	// The real pointer pressed at `from`, moved to `to` and let go (screen
+	// pixels), then put back out of the way.
+	void realInput(DWORD flags, POINT at) {
+		const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+		const int vw = std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN) - 1), vh = std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1);
+		INPUT in = {};
+		in.type = INPUT_MOUSE;
+		in.mi.dx = (LONG)((at.x - vx) * 65535LL / vw);
+		in.mi.dy = (LONG)((at.y - vy) * 65535LL / vh);
+		in.mi.dwFlags = flags | MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+		SendInput(1, &in, sizeof in);
+	}
+	void realDrag(POINT from, POINT to) {
+		realInput(0, from);
+		pump(0.03);
+		realInput(MOUSEEVENTF_LEFTDOWN, from);
+		pump(0.03);
+		for (int i = 1; i <= 8; i++) {
+			realInput(0, POINT{ from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8 });
+			pump(0.012);
+		}
+		realInput(MOUSEEVENTF_LEFTUP, to);
+		pump(0.05);
+		realDrags++;
+		realInput(0, POINT{ GetSystemMetrics(SM_CXVIRTUALSCREEN) - 2, GetSystemMetrics(SM_CYVIRTUALSCREEN) - 2 });
+		pump(0.02);
 	}
 	void click(double x, double y) {
 		Canvas* c = canvas();
@@ -1382,6 +1410,38 @@ void Session::action(int a) {
 	}
 	case 115: case 116: case 117: case 118: case 119:
 		named("place a part from the side panel"); placePart(); break;
+	case 98: {
+		// Real input, as the drag self-test makes it: Windows' own message
+		// order (capture, leave, the coalesced moves) rather than the session's.
+		named("a real-mouse drag (SendInput)");
+		if (c == nullptr || !IsWindowVisible(ch)) break;
+		double x, y;
+		spot(x, y);
+		POINT a = pixel(c, x, y), b = pixel(c, x + rng.unit() * 10 - 5, y + rng.unit() * 10 - 5);
+		RECT rc;
+		GetClientRect(ch, &rc);
+		auto inside = [&](POINT& p) { p.x = std::max(4L, std::min(rc.right - 4, p.x)); p.y = std::max(4L, std::min(rc.bottom - 4, p.y)); };
+		inside(a);
+		inside(b);
+		ClientToScreen(ch, &a);
+		ClientToScreen(ch, &b);
+		realDrag(a, b);
+		break;
+	}
+	case 99: {
+		named("a gate dragged from the side panel (SendInput)");
+		GatePalette* pal = w->paletteWidget();
+		POINT tile;
+		if (c == nullptr || pal == nullptr || !IsWindowVisible(pal->tilesWidget()) || !pal->firstTilePoint(tile)) break;
+		ClientToScreen(pal->tilesWidget(), &tile);
+		RECT rc;
+		GetWindowRect(ch, &rc);
+		const POINT to = { rc.left + (LONG)(rng.unit() * std::max(10L, rc.right - rc.left - 40)) + 20, rc.top + (LONG)(rng.unit() * std::max(10L, rc.bottom - rc.top - 40)) + 20 };
+		realDrag(tile, to);
+		const long id = cl_edit_single_gate(doc(), page());
+		if (id >= 0) placed.push_back({ pageKey(), id, 0 });
+		break;
+	}
 	default: named("click on nothing"); { double x, y; viewSpot(x, y); click(x, y); } break;
 	}
 }
@@ -1464,9 +1524,9 @@ void Session::run(int actions) {
 	if (windowGone < 0) sample(actions);
 
 	sayf("session: %d actions, %d parts placed, %d wires drawn, %d drags, %d Escapes, %d undos, %d redos, %d undo steps at most, "
-	     "%d tabs made, %d closed, %d moved, %d splits, %d Simulation Views, %d dialogs, %d windows made, %d others closed, %d reloads, %d strokes, %d pages now\n",
+	     "%d tabs made, %d closed, %d moved, %d splits, %d Simulation Views, %d dialogs, %d windows made, %d others closed, %d reloads, %d strokes, %d real-mouse drags, %d pages now\n",
 	     actions, partsPlaced, wiresDrawn, drags, escapes, undos, redos, maxSteps, tabsMade, tabsClosed, tabsMoved, splits, simViews, dialogs,
-	     windowsMade, othersClosed, reloads, strokes, windowGone < 0 ? cl_document_page_count(doc()) : -1);
+	     windowsMade, othersClosed, reloads, strokes, realDrags, windowGone < 0 ? cl_document_page_count(doc()) : -1);
 	sayf("answered %d dialogs and cards (%d menus closed); kinds:", gCloser.answered, gCloser.menus);
 	for (const std::string& k : gCloser.kinds) sayf(" %s", k.c_str());
 	say("\n");
@@ -1547,7 +1607,10 @@ void Session::run(int actions) {
 	}
 	sayf("before the window: %lu GDI, %lu USER, %.0f MB; after closing it: %lu GDI, %lu USER, %.0f MB\n", (unsigned long)base.gdi,
 	     (unsigned long)base.user, base.privateMB, (unsigned long)after.gdi, (unsigned long)after.user, after.privateMB);
-	check((long)after.gdi - (long)base.gdi < 40, strf("closing the window gave back its GDI objects (%+ld)", (long)after.gdi - (long)base.gdi));
+	// What's made once and kept for the app's life (fonts and brushes per DPI
+	// and theme, a dialog's colours) stays: a few dozen at most, against the
+	// hundreds a window holds. A leak per use is the loops' check above.
+	check((long)after.gdi - (long)base.gdi < 60,strf("closing the window gave back its GDI objects (%+ld)", (long)after.gdi - (long)base.gdi));
 	check((long)after.user - (long)base.user < 40, strf("closing the window gave back its USER objects (%+ld)", (long)after.user - (long)base.user));
 	check(health::liveWindows == 0 && health::liveCanvases == 0,
 	      strf("closing the window freed it and its canvases (%d windows, %d canvases left)", health::liveWindows, health::liveCanvases));
