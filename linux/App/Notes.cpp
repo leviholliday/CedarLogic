@@ -123,6 +123,7 @@ bool NotesPane::shown() const { return gtk_revealer_get_reveal_child(GTK_REVEALE
 
 void NotesPane::setShown(bool on) {
 	gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), on);
+	if (on) readyForKeys(revealer, view);
 	if (on) gtk_widget_grab_focus(view);
 }
 

@@ -68,6 +68,7 @@ void FindBar::open(const std::string& query) {
 	if (!query.empty()) gtk_entry_set_text(GTK_ENTRY(entry), query.c_str());
 	gtk_widget_show_all(revealer);
 	gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), TRUE);
+	readyForKeys(revealer, entry);
 	gtk_widget_grab_focus(entry);
 	gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
 	run(gtk_entry_get_text_length(GTK_ENTRY(entry)) > 0);

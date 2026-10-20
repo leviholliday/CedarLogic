@@ -233,3 +233,14 @@ void applyStyle() {
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);
 }
+
+// Sliding in, but ready for the keyboard at once: a revealer shows its child
+// only from the slide's first frame, so keys typed straight after the
+// shortcut (Ctrl+F and on with the word) went to a field not made yet -- a
+// GTK critical each, and the keys lost.
+void readyForKeys(GtkWidget* revealer, GtkWidget* field) {
+	GtkWidget* child = gtk_bin_get_child(GTK_BIN(revealer));
+	if (child == nullptr || gtk_widget_get_realized(field) || !gtk_widget_get_realized(revealer)) return;
+	gtk_widget_set_child_visible(child, TRUE);
+	gtk_widget_realize(field);
+}

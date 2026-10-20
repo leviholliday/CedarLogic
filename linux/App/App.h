@@ -162,6 +162,10 @@ void rebuildRecentMenus();
 // A file people chose, into the desktop's recent list.
 void noteDesktopRecent(const std::string& path);
 
+// A field in a GtkRevealer that's sliding in, made now so it takes keys at
+// once (FindBar, Notes; Style.cpp).
+void readyForKeys(GtkWidget* revealer, GtkWidget* field);
+
 // Open a URL or a file in the desktop's default app.
 void openExternally(GtkWindow* parent, const std::string& uri);
 
