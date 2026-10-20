@@ -30,7 +30,7 @@ run() {
 	shift 2
 	local log="$OUT/session-$name.log"
 	# (NO_AT_BRIDGE: no accessibility bus on a virtual display, and no warning about it.)
-	env NO_AT_BRIDGE=1 "$@" xvfb-run -a -s "-screen 0 1600x1000x24" timeout -k 10 "$CAP" "$APP" --session-check "$ACTIONS" "$seed" >"$log" 2>&1
+	env NO_AT_BRIDGE=1 SESSION_DUMP="$OUT/$name" "$@" xvfb-run -a -s "-screen 0 1600x1000x24" timeout -k 10 "$CAP" "$APP" --session-check "$ACTIONS" "$seed" >"$log" 2>&1
 	local code=$?
 	local warnings
 	warnings=$(grep -c -E "(CRITICAL|WARNING) \*\*" "$log")

@@ -234,6 +234,17 @@ struct SessionDriver {
 	}
 
 	CLDocument* doc() const { return w->document(); }
+	bool alive() const { return std::find(circuitWindows().begin(), circuitWindows().end(), w) != circuitWindows().end(); }
+	int windowCloses = 0;
+	// A circuit's texts, kept for a FAIL (SESSION_DUMP names a folder for them).
+	void dump(const std::string& name, const std::string& text) {
+		const char* dir = g_getenv("SESSION_DUMP");
+		if (dir == nullptr || *dir == 0) return;
+		g_mkdir_with_parents(dir, 0755);
+		const std::string file = std::string(dir) + "/" + name;
+		g_file_set_contents(file.c_str(), text.data(), (gssize)text.size(), nullptr);
+		printf("  (kept %s)\n", file.c_str());
+	}
 	Canvas* canvas() const { return w->currentCanvas(); }
 	GtkWidget* top() const { return GTK_WIDGET(w->window()); }
 
@@ -496,11 +507,17 @@ struct SessionDriver {
 		// The file opens again to the same circuit.
 		char err[256] = "";
 		CLDocument* again = cl_document_open_text(onDisk.data(), (long)onDisk.size(), err, sizeof err);
-		const std::string reread = again ? shape(cl_document_save_text_ex(again, 0)) : std::string("(didn't open: ") + err + ")";
+		const std::string rereadFull = again ? std::string(cl_document_save_text_ex(again, 0)) : std::string("(didn't open: ") + err + ")";
+		const std::string reread = again ? shape(rereadFull) : rereadFull;
 		if (again) cl_document_close(again);
 		if (reread != shape(onDisk)) {
 			reopenMismatch++;
-			if (firstReopen < 0) { firstReopen = at; lastReopenIssue = firstDifference(shape(onDisk), reread); }
+			if (firstReopen < 0) {
+				firstReopen = at;
+				lastReopenIssue = firstDifference(shape(onDisk), reread);
+				dump(format("reopen-%d-saved.cdl", at), onDisk);
+				dump(format("reopen-%d-reopened.cdl", at), rereadFull);
+			}
 		}
 	}
 
@@ -1140,6 +1157,7 @@ struct SessionDriver {
 			if (rng.chance(0.3)) tap(t, GDK_KEY_w, GDK_CONTROL_MASK);   // with Ctrl still down
 			else if (rng.chance(0.2)) tap(t, GDK_KEY_t, GDK_CONTROL_MASK);
 			pump(20);
+			if (!alive()) break;   // Ctrl+W on the last tab closes the window
 			key(t, GDK_KEY_Control_L, GDK_CONTROL_MASK, false);
 			pump(20);
 			if (want && cl_document_page_index(doc(), want) >= 0 && canvas()) {
@@ -1196,8 +1214,22 @@ struct SessionDriver {
 				break;
 			}
 			const std::string before = text();
+			const std::string pathBefore = w->filePath();
 			guarded("a session action", [&] { act(a); });
 			pump(15 + rng.below(30));
+			if (!alive()) {
+				// Ctrl+W on its last tab closes the window (saving it): opened
+				// again from Your Circuits, as a person would, and on from there.
+				windowCloses++;
+				if (CircuitWindow::liveCount != windowsAtStart - 1)
+					fail(format("action %d: the window closed with Ctrl+W, and %d circuit windows are still alive", a, CircuitWindow::liveCount));
+				if (!pathBefore.empty() && g_file_test(pathBefore.c_str(), G_FILE_TEST_EXISTS)) openCircuit(app, pathBefore, nullptr);
+				if (circuitWindows().empty()) newCircuitWindow(app);
+				w = circuitWindows().back();
+				pump(300);
+				checkPages(a);
+				continue;
+			}
 			checkEdited(a, before);
 			checkPages(a);
 			if (settingsClosed) { settingsClosed = false; checkPrefs(); }
@@ -1213,8 +1245,8 @@ struct SessionDriver {
 		for (int i = 0; i < 40 && !seen.empty(); i++) pump(100);
 		pause(actions);
 		rss[2] = residentKB();
-		printf("session: %d actions in %.0f s; %d undo steps at most; %d pauses; %d windows over it, %d menus (%d items run); %d pages now\n",
-		       actions, (nowMs() - started) / 1000, maxUndo, pauses, modalsSeen, menusSeen, menuItemsRun, cl_document_page_count(doc()));
+		printf("session: %d actions in %.0f s; %d undo steps at most; %d pauses; %d windows over it, %d menus (%d items run); %d pages now; the window closed and reopened %d times\n",
+		       actions, (nowMs() - started) / 1000, maxUndo, pauses, modalsSeen, menusSeen, menuItemsRun, cl_document_page_count(doc()), windowCloses);
 
 		check(editsChecked > 0 && editsLost == 0,
 		      format("every edit leaves the window unsaved until it's saved (%d of %d", editsChecked - editsLost, editsChecked) +
