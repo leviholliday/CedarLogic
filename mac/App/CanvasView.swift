@@ -642,6 +642,12 @@ final class CanvasStatus: ObservableObject {
     @Published var version = 0
 }
 
+/// The oscilloscope's recording grew (or was cleared): watched by its panel.
+@MainActor
+final class ScopeTicker: ObservableObject {
+    @Published var version = 0
+}
+
 @MainActor
 final class CanvasController: ObservableObject {
     /// The canvas in the frontmost circuit window.
@@ -658,10 +664,13 @@ final class CanvasController: ObservableObject {
     @Published private(set) var editVersion = 0
     @Published var settingsRequested = false
     /// Bumped as the oscilloscope records (throttled), so its panel redraws.
-    @Published private(set) var scopeVersion = 0
+    /// Its own object, watched by the panel alone: a @Published count here
+    /// redrew the whole window -- toolbar, palette, tabs, its title read
+    /// from disk -- 15 times a second while the scope was open.
+    let scopeTicker = ScopeTicker()
     @Published var showScope = false
     private var lastScopeBump = CACurrentMediaTime()
-    func scopeChanged() { scopeVersion += 1 }
+    func scopeChanged() { scopeTicker.version += 1 }
 
     private var timer: Timer?
     private var lastTick = CACurrentMediaTime()

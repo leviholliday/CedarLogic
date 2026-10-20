@@ -34,17 +34,24 @@ final class ScopeModel: ObservableObject {
 struct ScopeView: View {
     let document: CoreDocument
     @ObservedObject var canvas: CanvasController
+    @ObservedObject private var ticker: ScopeTicker
     @StateObject private var model = ScopeModel()
     @ObservedObject private var prefs = Prefs.shared
     @State private var showShare = false
     @FocusState private var focused: Bool
+
+    init(document: CoreDocument, canvas: CanvasController) {
+        self.document = document
+        _canvas = ObservedObject(wrappedValue: canvas)
+        _ticker = ObservedObject(wrappedValue: canvas.scopeTicker)
+    }
 
     private let nameWidth: CGFloat = 130
     private let laneHeight: CGFloat = 30
     private let rulerHeight: CGFloat = 22
 
     var body: some View {
-        let _ = canvas.scopeVersion   // redraw as the simulation records
+        let _ = ticker.version   // redraw as the simulation records
         let signals = (0..<Int(cl_scope_signal_count(document.handle))).map { String(cString: cl_scope_signal(document.handle, Int32($0))) }
         let length = Int(cl_scope_length(document.handle))
         VStack(spacing: 0) {
