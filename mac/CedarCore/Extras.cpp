@@ -638,8 +638,15 @@ public:
 	ClosePageCommand(CLDocument* doc, int index) : klsCommand(true, "Close Page"), doc(doc), index(index) {}
 
 	bool Do() override {
+		// Redo closes the page it closed before, wherever the tabs have moved it
+		// since (by index it closed whichever page had moved into that place).
+		if (page != nullptr) {
+			index = -1;
+			for (size_t i = 0; i < doc->pages.size(); i++) if (doc->pages[i].get() == page) index = (int)i;
+		}
 		if (index < 0 || index >= (int)doc->pages.size() || doc->pages.size() < 2) return false;
 		GUICanvas* p = doc->pages[index].get();
+		page = p;
 		std::vector<unsigned long> gates, wires;
 		for (auto& g : *p->getGateList()) gates.push_back(g.first);
 		for (auto& w : *p->getWireList()) wires.push_back(w.first);
@@ -658,6 +665,7 @@ public:
 
 	bool Undo() override {
 		if (!held) return false;
+		index = std::min(index, (int)doc->pages.size());   // where it was, as near as the tabs allow
 		doc->pages.insert(doc->pages.begin() + index, std::move(held));
 		if (del) del->Undo();
 		del.reset();
@@ -667,7 +675,8 @@ public:
 
 private:
 	CLDocument* doc;
-	int index;
+	int index;                                // where it is (open) or was (closed)
+	GUICanvas* page = nullptr;                // the page it closes, once it has
 	std::unique_ptr<GUICanvas> held;          // while closed
 	std::unique_ptr<cmdDeleteSelection> del;  // what was on it
 };
@@ -708,13 +717,13 @@ void cl_document_move_page(CLDocument* doc, int from, int to) {
 
 unsigned long long cl_document_page_id(const CLDocument* doc, int page) {
 	GUICanvas* p = doc ? doc->page(page) : nullptr;
-	return (unsigned long long)(uintptr_t)p;
+	return p ? p->uid : 0;
 }
 
 int cl_document_page_index(const CLDocument* doc, unsigned long long id) {
 	if (doc == nullptr || id == 0) return -1;
 	for (size_t i = 0; i < doc->pages.size(); i++)
-		if ((unsigned long long)(uintptr_t)doc->pages[i].get() == id) return (int)i;
+		if (doc->pages[i] && doc->pages[i]->uid == id) return (int)i;
 	return -1;
 }
 

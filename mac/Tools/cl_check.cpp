@@ -185,7 +185,33 @@ int main(int argc, char** argv) {
 		cl_document_move_page(doc, 1, 0);
 		CHECK(cl_document_page_index(doc, id1) == 0 && cl_document_page_index(doc, id0) == 1, "moving a tab moves its id with it");
 		cl_document_move_page(doc, 1, 0);
-		CHECK(cl_document_page_index(doc, 123) == -1, "an unknown id finds nothing");
+		CHECK(cl_document_page_index(doc, 1ULL << 60) == -1, "an unknown id finds nothing");
+	}
+
+	printf("Redo of a tab close after the tabs moved closes that same tab\n");
+	{
+		CLDocument* d = cl_document_new();
+		cl_document_add_page(d);
+		cl_document_add_page(d);
+		cl_document_rename_page(d, 0, "A");
+		cl_document_rename_page(d, 1, "B");
+		cl_document_rename_page(d, 2, "C");
+		auto names = [&] { std::string n; for (int i = 0; i < cl_document_page_count(d); i++) n += cl_document_page_name(d, i); return n; };
+		CHECK(cl_document_close_page(d, 1) && names() == "AC", "B closed");
+		cl_edit_undo(d);
+		CHECK(names() == "ABC", "Undo: B is back in its place");
+		cl_document_move_page(d, 1, 0);
+		CHECK(names() == "BAC", "B moved to the front");
+		cl_edit_redo(d);
+		CHECK(names() == "AC", "Redo closes B again, not the tab now where it was");
+		cl_edit_undo(d);
+		CHECK(names() == "BAC", "and Undo brings it back where it was closed from");
+		// A page's id is never another's, even one made after a page was freed.
+		const unsigned long long gone = cl_document_page_id(d, 2);
+		cl_document_delete_page(d, 2);
+		const int fresh = cl_document_add_page(d);
+		CHECK(cl_document_page_id(d, fresh) != gone && cl_document_page_index(d, gone) == -1, "a new page never takes a freed page's id");
+		cl_document_close(d);
 	}
 
 	printf("split view: a gesture stays on its own page\n");
