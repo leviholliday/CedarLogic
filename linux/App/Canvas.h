@@ -23,6 +23,8 @@ class Canvas {
 public:
 	Canvas(CircuitWindow* window, uint64_t pageKey);
 	~Canvas();
+	// How many canvases exist (--session-check: all gone with their window).
+	static int liveCount;
 
 	GtkWidget* widget() const { return area; }
 	uint64_t pageKey() const { return key; }
@@ -77,8 +79,10 @@ public:
 	void dropBuffers();
 
 private:
-	// --bench-drag (Bench.cpp) drives the real handlers and draw() directly.
+	// --bench-drag (Bench.cpp) drives the real handlers and draw() directly;
+	// --session-check (SessionCheck.cpp) looks inside to check what it did.
 	friend struct CanvasBench;
+	friend struct SessionDriver;
 	enum class Drag { None, Edit, Pan, Ink };
 
 	CircuitWindow* win;

@@ -176,8 +176,11 @@ void setChecked(GtkWidget* win, const char* name, bool on) {
 
 // ---- Building the window -----------------------------------------------------------
 
+int CircuitWindow::liveCount = 0;
+
 CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const std::string& p)
 	: app(application), doc(d), path(p) {
+	liveCount++;
 	isRunning = cl_document_is_running(doc);
 	build();
 	circuitWindows().push_back(this);
@@ -245,6 +248,7 @@ CircuitWindow::~CircuitWindow() {
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
 	recovery::remove(recoveryBase);
 	if (doc) cl_document_close(doc);
+	liveCount--;
 }
 
 void CircuitWindow::build() {

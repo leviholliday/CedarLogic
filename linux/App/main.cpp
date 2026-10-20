@@ -7,6 +7,7 @@
 #include "Bench.h"
 #include "Canvas.h"
 #include "Recovery.h"
+#include "SessionCheck.h"
 #include "ShareLink.h"
 #include "Splash.h"
 #include "Updater.h"
@@ -70,6 +71,10 @@ bool gPrimary = false;
 // temporary folder, so the person's own are never touched.
 int gBench = 0;
 std::string gBenchHome;
+// --session-check [actions] [seed]: a long session in the window, checked
+// (SessionCheck.cpp); as --bench-drag runs, with a home of its own.
+int gSession = 0;
+unsigned long long gSessionSeed = 1;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -438,6 +443,13 @@ gboolean screenshotCb(gpointer app) {
 		cairo_surface_destroy(s);
 		fprintf(stderr, "%s %s (%dx%d)\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str(), width, height);
 	}
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
+	g_application_quit(G_APPLICATION(app));
+	return G_SOURCE_REMOVE;
+}
+
+gboolean sessionCb(gpointer app) {
+	gExitCode = session::run(GTK_APPLICATION(app), gSession, gSessionSeed);
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
 	g_application_quit(G_APPLICATION(app));
 	return G_SOURCE_REMOVE;
@@ -935,7 +947,8 @@ void activateCb(GApplication* gapp, gpointer) {
 		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
+			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -994,7 +1007,8 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
+			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1214,6 +1228,12 @@ int main(int argc, char** argv) {
 			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gBench = std::max(5, atoi(argv[++i]));
 			continue;
 		}
+		if (strcmp(argv[i], "--session-check") == 0) {
+			gSession = 300;
+			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSession = std::max(1, atoi(argv[++i]));
+			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSessionSeed = strtoull(argv[++i], nullptr, 10);
+			continue;
+		}
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
 		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this
 		// machine's hooks (libcrypto, zlib, curl); with a server, also against a mock one.
@@ -1249,10 +1269,11 @@ int main(int argc, char** argv) {
 	args.push_back(nullptr);
 	argc = (int)args.size() - 1;
 	argv = args.data();
-	if (gBench > 0) {
+	if (gSession > 0) session::prepare();
+	if (gBench > 0 || gSession > 0) {
 		// Settings and Your Circuits in a folder of its own (removed at the end),
 		// and the screenshot runs' quiet start; the picture itself isn't taken.
-		gchar* home = g_dir_make_tmp("cl-bench-XXXXXX", nullptr);
+		gchar* home = g_dir_make_tmp(gSession > 0 ? "cl-session-XXXXXX" : "cl-bench-XXXXXX", nullptr);
 		if (home == nullptr) { fprintf(stderr, "bench-drag: no temporary folder\n"); return 2; }
 		gBenchHome = home;
 		g_free(home);

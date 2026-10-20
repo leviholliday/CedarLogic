@@ -43,7 +43,10 @@ void setCursor(GtkWidget* w, const char* name) {
 
 }  // namespace
 
+int Canvas::liveCount = 0;
+
 Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageKey) {
+	liveCount++;
 	area = gtk_drawing_area_new();
 	g_object_ref_sink(area);
 	g_object_set_data(G_OBJECT(area), "cl-window", window);
@@ -85,6 +88,7 @@ Canvas::~Canvas() {
 	g_signal_handlers_disconnect_by_data(area, this);
 	g_object_unref(area);
 	dropBuffers();
+	liveCount--;
 }
 
 void Canvas::dropBuffers() {

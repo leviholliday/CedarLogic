@@ -31,6 +31,9 @@ class CircuitWindow {
 public:
 	CircuitWindow(GtkApplication* app, CLDocument* doc, const std::string& path);
 	~CircuitWindow();
+	// How many circuit windows exist (--session-check: each closed one is
+	// freed, its circuit and clock with it).
+	static int liveCount;
 
 	GtkWindow* window() const { return GTK_WINDOW(win); }
 	GtkApplication* application() const { return app; }
@@ -456,6 +459,7 @@ private:
 	friend class Canvas;
 	friend class StatusBar;
 	friend class ScopeWindow;
+	friend struct SessionDriver;
 };
 
 #endif  // CL_LINUX_WINDOW_H
