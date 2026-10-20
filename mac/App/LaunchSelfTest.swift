@@ -11,7 +11,8 @@
 // emptylast (it's an empty file), unsaved (edited after its last version,
 // as a quit mid-session leaves it), brokenlibrary (folders with no circuit,
 // unreadable names, a damaged circuit, a versions "folder" that's a file),
-// damaged (as normal, then damaged copies of the sample circuits).
+// damaged (as normal, then damaged copies of the sample circuits), offline
+// (as normal, with Sparkle's last update check a month ago).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -19,7 +20,9 @@
 // to a new one, Your Circuits' list and its rows, the launch's clean-up of
 // repeated versions, the first save's version, Sync and Classroom starting
 // with the network unreachable (CL_CLASSROOM_SERVICE points nowhere) --
-// none of which may block the main thread for more than a second -- and, in
+// none of which may block the main thread for more than a second; in
+// `offline` the updater and crash reports with no network (pointed at
+// addresses that can't be looked up) start and stay quiet -- and, in
 // `damaged`, copies of the sample circuits cut short or with bytes changed
 // (CL_DAMAGE_ROUND picks which), each opening or being refused, never
 // crashing. PASS or FAIL for each; exit 1 on a failure.
@@ -28,7 +31,7 @@ import AppKit
 
 @MainActor
 enum LaunchSelfTest {
-    static let realBundle = "com.leviholliday.cedarlogic.native"
+    nonisolated static let realBundle = "com.leviholliday.cedarlogic.native"
 
     static func runIfAsked() {
         let args = CommandLine.arguments
@@ -64,7 +67,14 @@ enum LaunchSelfTest {
             d.set(true, forKey: "cl.hasSeenWelcome")
             d.set(true, forKey: "cl.firstLaunchPlayed")
             d.set(state == "updated" ? "0.2" : WhatsNew.version, forKey: "cl.whatsNewSeen")
-            d.set(false, forKey: "cl.crashReports")
+            d.set(state == "offline", forKey: "cl.crashReports")
+        }
+        if state == "offline" {
+            // Sparkle's own record: launched before, last looked a long time
+            // ago, so its schedule looks again straight away.
+            d.set(true, forKey: "SUHasLaunchedBefore")
+            d.set(true, forKey: "SUEnableAutomaticChecks")
+            d.set(Date(timeIntervalSinceNow: -30 * 86400), forKey: "SULastCheckTime")
         }
         if state == "first" || state == "nolibrary" { d.synchronize(); return }
         var made: [LibraryItem] = []
@@ -106,6 +116,37 @@ enum LaunchSelfTest {
         default: break
         }
         d.synchronize()
+    }
+
+    // MARK: offline
+
+    /// No network: the updater (pointed by launch-selftest.sh at a feed whose
+    /// name can't be looked up, as with Wi-Fi off) and crash reports (at an
+    /// address that can't be either) start, Sparkle's scheduled check fails
+    /// quietly -- no alert, no window, nothing holding the main thread -- and
+    /// the launch carries on.
+    static func offlineChecks(check: (Bool, String) -> Void, timed: (String, Double, () -> Void) -> Void, turn: (Double) -> Void) {
+        let updates = Updates.shared
+        check(Updates.testFeed != nil, "the updater's feed is the test's (\(Updates.testFeed ?? "none"))")
+        timed("the updater starts", 1.0) { updates.start() }
+        check(updates.started, "the updater is running")
+        timed("crash reports start", 1.0) { CrashReports.start() }
+        check(CrashReports.isStarted || !CrashReports.available, "crash reports are \(CrashReports.isStarted ? "running" : "not built in")")
+        // Sparkle's own schedule looks first (the last look was a month ago);
+        // if it hasn't within 8 s, the same background check is asked for.
+        var waited = 0.0
+        while updates.checksFinished == 0 && waited < 8 { turn(0.25); waited += 0.25 }
+        let scheduled = updates.checksFinished > 0
+        if !scheduled { timed("a background update check is asked for", 1.0) { updates.checkInBackground() } }
+        waited = 0
+        while updates.checksFinished == 0 && waited < 20 { turn(0.25); waited += 0.25 }
+        print("INFO offline: \(scheduled ? "Sparkle's scheduled check" : "a background check") ended: \(updates.lastCheckError ?? "no error")")
+        check(updates.checksFinished > 0, "the update check gave up (within \(Int(waited)) s)")
+        check(updates.lastCheckError != nil, "and knew it couldn't reach the feed")
+        turn(1.0)
+        let shown = NSApp.windows.filter { $0.isVisible }
+        check(shown.isEmpty, "no alert or window came up (\(shown.map { $0.title.isEmpty ? String(describing: type(of: $0)) : $0.title }))")
+        check(NSApp.modalWindow == nil, "no question waits for an answer")
     }
 
     // MARK: check
@@ -193,6 +234,7 @@ enum LaunchSelfTest {
         // can't be reached): neither may hold the launch up.
         timed("Sync starts") { SyncCenter.shared.start() }
         timed("Classroom starts") { ClassroomCenter.shared.start() }
+        if state == "offline" { offlineChecks(check: check, timed: timed, turn: turn) }
         turn(2.5)
         check(NSApp?.modalWindow == nil, "no question was left up")
 

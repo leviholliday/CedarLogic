@@ -50,7 +50,32 @@ final class Updates: NSObject, SPUUpdaterDelegate {
     }
 
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
+        if let feed = Self.testFeed { return feed }
         let raw = UserDefaults.standard.string(forKey: "testingGroup") ?? ""
         return (TestingGroup(rawValue: raw) ?? .normal).feed
+    }
+
+    // MARK: For the launch self-test (mac/Tools/launch-selftest.sh)
+
+    /// CL_UPDATE_FEED: a feed for a test copy of the app (its own bundle id;
+    /// never the app itself), such as one that can't be reached.
+    nonisolated static var testFeed: String? {
+        guard Bundle.main.bundleIdentifier != LaunchSelfTest.realBundle,
+              let feed = ProcessInfo.processInfo.environment["CL_UPDATE_FEED"], !feed.isEmpty else { return nil }
+        return feed
+    }
+    var started: Bool { controller != nil }
+    /// Update checks finished, and how the last one ended.
+    private(set) var checksFinished = 0
+    private(set) var lastCheckError: String?
+    /// The check Sparkle makes on its schedule (not Check for Updates...).
+    func checkInBackground() { controller?.updater.checkForUpdatesInBackground() }
+
+    nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        let text = error.map { ($0 as NSError).domain + " " + String(($0 as NSError).code) + ": " + $0.localizedDescription }
+        MainActor.assumeIsolated {
+            checksFinished += 1
+            lastCheckError = text
+        }
     }
 }
