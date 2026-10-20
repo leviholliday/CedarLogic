@@ -183,6 +183,13 @@ CLDocument* clOpenText(const char* data, long length, char* error, int errorLen,
 
 void cl_document_close(CLDocument* doc) { delete doc; }
 
+extern "C++" std::atomic<int>& clLiveDocuments() {
+	static std::atomic<int> n{ 0 };
+	return n;
+}
+
+int cl_document_live_count(void) { return clLiveDocuments().load(); }
+
 void cl_set_settle_on_open(bool settle) { settleOnOpen = settle; }
 
 CLDocument* cl_document_new(void) {

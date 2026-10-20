@@ -42,6 +42,9 @@ CLDocument *cl_document_open(const char *path, char *error, int errorLen);
 // The same, from a file's contents already in memory.
 CLDocument *cl_document_open_text(const char *text, long length, char *error, int errorLen);
 void cl_document_close(CLDocument *doc);
+// How many documents are open now, every way they were made (a leak check:
+// an app's session check counts them before and after closing a window).
+int cl_document_live_count(void);
 // Whether opening runs the simulation until it settles (on by default). The
 // save round-trip check turns it off: settling moves counters and clocks on,
 // which a saved file rightly records.

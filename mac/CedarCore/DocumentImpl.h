@@ -15,6 +15,7 @@
 #include "render/Scene.h"
 #include "circuit_file.hpp"
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -97,6 +98,9 @@ int clNewPageLinkGroup(const CLDocument* doc);
 class guiGate;
 bool isManualClock(guiGate* gate);
 
+// How many documents are open (cl_document_live_count).
+std::atomic<int>& clLiveDocuments();
+
 struct CLDocument {
 	GUICircuit circuit;
 	std::unique_ptr<LogicHost> sim;
@@ -108,6 +112,7 @@ struct CLDocument {
 	double carryMs = 0;
 
 	CLDocument() : sim(new LogicHost(circuit)) {
+		++clLiveDocuments();
 		registerLogicHost(&circuit, sim.get());
 		sim->afterStep = [this] { recordScope(); };
 		sim->linkGroupOf = [this](unsigned long gate) { return clLinkGroupOfGate(this, gate); };
@@ -118,6 +123,7 @@ struct CLDocument {
 		circuit.GetCommandProcessor()->ClearCommands();
 		pages.clear();
 		registerLogicHost(&circuit, nullptr);
+		--clLiveDocuments();
 	}
 
 	EditGesture gesture;
