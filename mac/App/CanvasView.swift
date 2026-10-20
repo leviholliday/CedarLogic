@@ -849,8 +849,23 @@ final class CanvasController: ObservableObject {
     @Published var showExportImage = false
     @Published var showExportReport = false
     @Published var ramGate: Int?
-    /// A one-line message for the status bar ("Saved.", "Nothing to paste.").
-    @Published var statusMessage = ""
+    /// A one-line message for the status bar ("Saved.", "Nothing to paste."),
+    /// gone again after 4 seconds. Cleared here, not by the bar: with the
+    /// bar's figures off (Settings), the bar is only there while there's a
+    /// message, so it first appears with the message already in it, and its
+    /// onChange never saw a change -- the message, and the bar, stayed.
+    @Published var statusMessage = "" {
+        didSet {
+            messageToken &+= 1
+            guard !statusMessage.isEmpty else { return }
+            let token = messageToken
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                guard let self, self.messageToken == token else { return }
+                self.statusMessage = ""
+            }
+        }
+    }
+    private var messageToken = 0
     /// Called every clock tick (the guided tour watches from here).
     var onTick: (() -> Void)?
 

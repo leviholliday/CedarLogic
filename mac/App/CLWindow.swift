@@ -2338,7 +2338,8 @@ struct CLStatusBar: View {
     }
 }
 
-/// The status line's message, fading in, and out again after a while.
+/// The status line's message, fading in, and out again after a while (the
+/// controller clears it: CanvasController.statusMessage).
 private struct StatusMessage: View {
     @ObservedObject var canvas: CanvasController
     var body: some View {
@@ -2346,10 +2347,6 @@ private struct StatusMessage: View {
             .id(canvas.statusMessage)
             .transition(.opacity)
             .animation(.easeOut(duration: 0.2), value: canvas.statusMessage)
-            .onChange(of: canvas.statusMessage) { _, m in
-                guard !m.isEmpty else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { if canvas.statusMessage == m { canvas.statusMessage = "" } }
-            }
     }
 }
 
