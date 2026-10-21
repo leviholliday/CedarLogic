@@ -121,6 +121,43 @@ void sortConnects(std::vector<std::string>& lines) {
 	}
 }
 
+// A wire's segments numbered in the order they're written: an undone and
+// redone wire is made again with new segment numbers (the same wire).
+void renumberSegments(std::vector<std::string>& lines) {
+	auto quoted = [](const std::string& l, size_t from, size_t& a, size_t& b) {
+		a = l.find('"', from);
+		b = a == std::string::npos ? a : l.find('"', a + 1);
+		return a != std::string::npos && b != std::string::npos;
+	};
+	for (size_t i = 0; i < lines.size(); i++) {
+		if (lines[i].find("(wire") == std::string::npos) continue;
+		size_t j = i + 1;
+		const size_t indent = lines[i].find('(');
+		while (j < lines.size() && lines[j].find('(') > indent && lines[j].find("(wire") == std::string::npos &&
+		       lines[j].find("(gate") == std::string::npos && lines[j].find("(page") == std::string::npos) j++;
+		std::map<std::string, std::string> ids;
+		for (size_t k = i + 1; k < j; k++) {
+			const size_t at = lines[k].find("(seg ");
+			size_t a, b;
+			if (at != std::string::npos && quoted(lines[k], at, a, b)) {
+				const std::string id = lines[k].substr(a + 1, b - a - 1);
+				if (!ids.count(id)) ids[id] = std::to_string(ids.size());
+			}
+		}
+		for (size_t k = i + 1; k < j; k++) {
+			for (const char* tag : { "(seg ", "(cross " }) {
+				const size_t at = lines[k].find(tag);
+				size_t a, b;
+				if (at == std::string::npos || !quoted(lines[k], at, a, b)) continue;
+				const std::string id = lines[k].substr(a + 1, b - a - 1);
+				auto it = ids.find(id);
+				if (it != ids.end()) lines[k] = lines[k].substr(0, a + 1) + "s" + it->second + lines[k].substr(b);
+			}
+		}
+		i = j - 1;
+	}
+}
+
 std::string shape(const std::string& text) {
 	std::vector<std::string> kept;
 	std::string out;
@@ -136,6 +173,7 @@ std::string shape(const std::string& text) {
 			kept.push_back(line);
 		at = end + 1;
 	}
+	renumberSegments(kept);
 	sortConnects(kept);
 	for (const std::string& l : kept) { out += l; out += '\n'; }
 	return out;
@@ -236,7 +274,7 @@ struct SessionDriver {
 	int historyBad = 0, firstHistory = -1, maxUndo = 0;
 	int pagesBad = 0, firstPages = -1;
 	int stuckWindows = 0;
-	int switches = 0, switchesWrong = 0, staleStamps = 0;
+	int switches = 0, switchesWrong = 0, staleStamps = 0, escapes = 0, escapesBack = 0;
 	std::string lastSwitchIssue;
 	int prefsChecks = 0, prefsUnsaved = 0;
 	bool settingsClosed = false;
@@ -561,11 +599,14 @@ struct SessionDriver {
 		settle();
 		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
 		const std::string before = text();
-		int undone = 0;
+		int undone = 0, missed = 0;
 		for (int i = 0; i < k; i++) {
 			if (!cl_edit_can_undo(doc())) break;
+			const int was = cl_edit_undo_count(doc());
 			tap(top(), GDK_KEY_z, GDK_CONTROL_MASK);
-			undone++;
+			// (Simulation View takes no undo: nothing to redo then either.)
+			if (cl_edit_undo_count(doc()) < was) undone++;
+			else missed++;
 			if (i % 3 == 2) pump(5);
 		}
 		for (int i = 0; i < undone; i++) {
@@ -580,7 +621,7 @@ struct SessionDriver {
 			roundTripBad++;
 			if (firstRoundTrip < 0) {
 				firstRoundTrip = at;
-				lastRoundTripIssue = format("%d undone and redone: ", undone) + firstDifference(before, after);
+				lastRoundTripIssue = format("%d undone and redone (%d presses undid nothing): ", undone, missed) + firstDifference(before, after);
 				dump(format("undo-%d-before.cdl", at), before);
 				dump(format("undo-%d-after.cdl", at), after);
 			}
@@ -795,7 +836,28 @@ struct SessionDriver {
 		pump(10);
 		motion(c->widget(), vx, vy, 0);
 		pump(10);
-		if (rng.chance(0.08)) { tap(top(), GDK_KEY_Escape); return; }   // changed their mind
+		if (rng.chance(0.08)) {
+			// Changed their mind: Escape. The gate was never placed, so Redo
+			// mustn't bring it back.
+			const bool floating = w->isFloating();
+			const bool couldRedo = cl_edit_can_redo(doc());
+			const int gatesBefore = cl_document_gate_count(doc(), w->currentPage());
+			tap(top(), GDK_KEY_Escape);
+			pump(10);
+			if (floating && !couldRedo) {
+				escapes++;
+				const int gatesAfterEscape = cl_document_gate_count(doc(), w->currentPage());
+				tap(top(), GDK_KEY_Z, GDK_CONTROL_MASK | GDK_SHIFT_MASK);
+				pump(10);
+				if (cl_document_gate_count(doc(), w->currentPage()) > gatesAfterEscape) {
+					escapesBack++;
+					if (escapesBack == 1)
+						fail(format("action %d: a gate on the pointer, Escape, then Redo: the gate came back (%d gates, %d before)", (int)gStep,
+						            cl_document_gate_count(doc(), w->currentPage()), gatesBefore - 1));
+				}
+			}
+			return;
+		}
 		click(c, vx, vy);
 	}
 
@@ -1301,6 +1363,7 @@ struct SessionDriver {
 		                         (firstPages >= 0 ? format(", first at action %d: %s)", firstPages, lastPageIssue.c_str()) : std::string(")")));
 		check(switchesWrong == 0, format("Ctrl+Tab shows the tab picked (%d of %d", switches - switchesWrong, switches) +
 		                              (lastSwitchIssue.empty() ? std::string(")") : "; " + lastSwitchIssue + ")"));
+		check(escapesBack == 0, format("Redo after Escape doesn't bring back a gate that was never placed (%d of %d)", escapes - escapesBack, escapes));
 		check(stuckWindows == 0, format("every window over the circuit closed when asked (%d seen, %d stuck)", modalsSeen, stuckWindows));
 		check(prefsUnsaved == 0, format("a setting changed in Settings is saved (%d checks", prefsChecks) +
 		                             (lastPrefsIssue.empty() ? std::string(")") : ": " + lastPrefsIssue + ")"));

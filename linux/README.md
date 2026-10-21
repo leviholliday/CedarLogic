@@ -106,6 +106,17 @@ every shape and gate style and checks each circuit's truth table. And:
 - `cedarlogic --bench-drag [steps] circuit.cdl` -- times the canvas while
   dragging one gate, everything, and the view, and prints ms per frame
   (`SMOOTHNESS.md` says how to read it); nothing is saved
+- `cedarlogic --session-check [actions] [seed]` -- a long working session in
+  the window (`App/SessionCheck.cpp`, the Mac's `--session-check`): seeded
+  random clicks, drags, keys and commands through the app's own handlers,
+  with the windows that open over it poked at and closed, and PASS/FAIL for
+  each check (no crash or GTK warning, autosave and the file on disk, undo
+  and redo, tabs and split view, Ctrl+Tab, Settings saved, memory, the
+  window and its circuit freed on close); exit 1 on a failure. Its settings
+  and Your Circuits are in a temporary folder. `linux/Tools/session-check.sh
+  <cedarlogic> [actions] [seeds...]` runs it under Xvfb for each seed, again
+  with `G_DEBUG=fatal-criticals`, with a time cap; CI runs seeds 1-4, and
+  more on a build with AddressSanitizer
 - `cedarlogic --splash-frame <seconds> out.png [--first]` -- the launch screen
 - `cedarlogic --feedback-probe` -- asks the feedback site with a wrong key
   (expects 403) and sends nothing
