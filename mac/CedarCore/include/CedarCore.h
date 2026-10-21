@@ -174,6 +174,10 @@ bool cl_edit_paste(CLDocument *doc, int page, const char *text, double x, double
 // How many steps are on the undo stack (the app mirrors each into macOS's
 // undo manager, so the window knows it's edited and autosaves).
 int cl_edit_undo_count(const CLDocument *doc);
+// How many undo steps have been made in this document, ever (Undo and Redo
+// don't make one). At the full 500-step history cl_edit_undo_count stays
+// put while each new step drops the oldest: this still counts them.
+long cl_edit_steps_made(const CLDocument *doc);
 bool cl_edit_undo(CLDocument *doc);
 bool cl_edit_redo(CLDocument *doc);
 bool cl_edit_can_undo(const CLDocument *doc);
