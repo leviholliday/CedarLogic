@@ -600,6 +600,10 @@ int cl_document_page_index(const CLDocument *doc, unsigned long long id);
 // drops it (the selection floats). The anchor is where the pointer is now.
 bool cl_edit_float_begin(CLDocument *doc, int page, double x, double y);
 bool cl_edit_is_floating(const CLDocument *doc);
+// Escape while it floats: it was never placed, so it's taken back -- the
+// gesture cancelled and its step undone -- and not kept for Redo (which
+// would bring back a gate the person never put down). False when nothing floats.
+bool cl_edit_take_back_float(CLDocument *doc);
 // Connect the selected gates' free pins to unambiguously close free pins
 // (the C key while dragging). Returns how many connections were made.
 // C while something is being moved (dragged, or floating on the pointer):
