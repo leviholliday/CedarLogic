@@ -573,7 +573,7 @@ private:
 	int failures = 0;
 
 	// What was seen along the way.
-	int editsChecked = 0, editsLost = 0, firstLost = -1;
+	int editsChecked = 0, editsLost = 0, firstLost = -1, editsReordered = 0;
 	int titleWrong = 0, firstTitleWrong = -1;
 	int pauses = 0, pausesUnsaved = 0, pausesStale = 0, firstStale = -1;
 	int saves = 0, savesDiffer = 0, reopenDiffer = 0, reopenReordered = 0;
@@ -869,13 +869,27 @@ void Session::tabStripClick(int pane, int k, bool closeButton, bool dragAlong, b
 void Session::checkEdited(int a, const std::string& before) {
 	const std::string now = shape(textNow());
 	if (now == before) return;
+	// The same circuit with a wire's connections listed in another order (a
+	// circuit read back from its file lists them as it made them): no change.
+	if (sortedRuns(now) == sortedRuns(before)) {
+		if (editsReordered++ < 3)
+			sayf("note  action %d (%s) left the circuit the same but for the order of a wire's connections: %s\n", a, gActionName.load(),
+			     firstDifference(before, now).c_str());
+		return;
+	}
 	editsChecked++;
 	if (w->isDirty()) return;
 	// Saved already (autosave came during the pause after it): fine, if what's
 	// on disk is the circuit now.
-	if (!w->filePath().empty() && shape(readFile(w->filePath())) == now) return;
+	const std::string disk = w->filePath().empty() ? std::string() : shape(readFile(w->filePath()));
+	if (!disk.empty() && sortedRuns(disk) == sortedRuns(now)) return;
 	editsLost++;
 	if (firstLost < 0) firstLost = a;
+	if (editsLost <= 3)
+		sayf("note  a change left the window unedited at action %d (%s): the engine's edited flag %d, the last undo step \u201C%s\u201D, "
+		     "the file %s; what changed: %s; the file against the circuit: %s\n",
+		     a, gActionName.load(), cl_document_is_edited(doc()), cl_edit_undo_name(doc()), w->filePath().empty() ? "(none)" : "in Your Circuits",
+		     firstDifference(before, now).c_str(), disk.empty() ? "(no file)" : firstDifference(disk, now).c_str());
 }
 
 void Session::checkTitle(int a) {
