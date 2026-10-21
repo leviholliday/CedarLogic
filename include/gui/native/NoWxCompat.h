@@ -71,6 +71,9 @@ public:
 	wxString GetUndoName() const { return undoStack.empty() ? wxString() : undoStack.back()->GetName(); }
 	wxString GetRedoName() const { return redoStack.empty() ? wxString() : redoStack.back()->GetName(); }
 	void ClearCommands() { undoStack.clear(); redoStack.clear(); }
+	// Forget the step a Redo would do again (one just undone that was never
+	// really made: a paste or a new gate taken back off the pointer).
+	void DropRedo() { if (!redoStack.empty()) redoStack.pop_back(); }
 	// The step an Undo would take back, and the one a Redo would do again
 	// (just after an undo, the one it undid).
 	wxCommand* GetUndoCommand() const { return undoStack.empty() ? nullptr : undoStack.back().get(); }

@@ -940,6 +940,14 @@ bool cl_edit_redo(CLDocument* doc) {
 	return ok;
 }
 
+bool cl_edit_take_back_float(CLDocument* doc) {
+	if (doc == nullptr || !cl_edit_is_floating(doc)) return false;
+	cl_edit_cancel(doc);
+	if (!cl_edit_undo(doc)) return false;
+	doc->circuit.GetCommandProcessor()->DropRedo();
+	return true;
+}
+
 bool cl_edit_can_undo(const CLDocument* doc) {
 	return doc && const_cast<GUICircuit&>(doc->circuit).GetCommandProcessor()->CanUndo();
 }
