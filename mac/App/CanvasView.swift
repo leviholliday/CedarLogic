@@ -1106,14 +1106,21 @@ final class CanvasController: ObservableObject {
     }
     var isFloating: Bool { document.map { cl_edit_is_floating($0.handle) } ?? false }
 
-    /// Escape while something floats: it was never placed, so take it back.
+    /// Escape while something floats: it was never placed, so take it back
+    /// -- and not keep it for Redo, which brought back a copy or a part the
+    /// person never put down. The window's last step is the float's: its
+    /// undo, with `takingBack` set, has the engine take it back for good
+    /// (cl_edit_take_back_float) and registers no Redo.
     func cancelFloating() {
         guard let document, isFloating else { return }
-        document.cancelGesture()
+        takingBack = true
         undo()
+        takingBack = false
+        if isFloating { document.cancelGesture() }   // no step to take back: just put it down where it was
         NSCursor.arrow.set()
         edited()
     }
+    private var takingBack = false
 
     /// A new gate on the pointer (or at `world`, when a palette tile is
     /// being dragged there), following it until a click drops it.
@@ -1402,7 +1409,15 @@ final class CanvasController: ObservableObject {
     static let engineHistoryLimit = 500
 
     private func engineUndo() {
-        guard let document, document.undo() else { return }
+        guard let document else { return }
+        if takingBack {
+            takingBack = false
+            guard cl_edit_take_back_float(document.handle) else { return }
+            mirrored -= 1
+            refreshAfterHistory()
+            return
+        }
+        guard document.undo() else { return }
         mirrored -= 1
         let name = document.redoName
         undoManager?.registerUndo(withTarget: self) { $0.engineRedo() }

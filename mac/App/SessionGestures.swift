@@ -5,7 +5,8 @@
 // middle of a drag, a double-click for a part's settings and a setting
 // changed there, the arrows nudging, Cmd-D and the click that places the
 // copy, a part pulled out of the palette (dropped, or let go off the
-// canvas), scrolling and pinching, the find bar, Straighten, and Tidy Up's
+// canvas), a copy, paste or part taken back with Escape (and Redo then
+// bringing nothing back), scrolling and pinching, the find bar, Straighten, and Tidy Up's
 // preview kept or put back. Then the window's own: a status message that has
 // to go again, the oscilloscope redrawing only itself, the notes pane, a
 // sheet that can't be seen cancelled by Make This Window Editable, and Cmd-W
@@ -300,9 +301,36 @@ extension SessionCheck {
         turn(0.05)
         check(!canvas.isFloating && gateCount(core, page) == gates && shape() == before, "gestures: Escape takes back a copy that wasn't placed")
         inStep("duplicate then Escape")
+        /// Redo after a copy or part taken back off the pointer brings nothing
+        /// back (it was never put down; the step stayed for Redo before).
+        func redoBringsNothing(_ what: String) {
+            let engineRedo = core.canRedo, windowRedo = canvas.canRedo
+            canvas.redo()
+            turn(0.05)
+            check(!engineRedo && !windowRedo && !canvas.isFloating && gateCount(core, page) == gates && shape() == before,
+                  "gestures: Redo after \(what) brings nothing back (Redo \(engineRedo ? "on" : "off") in the engine, \(windowRedo ? "on" : "off") in the window; \(gates) to \(gateCount(core, page)) parts)")
+            inStep("Redo after \(what)")
+        }
+        redoBringsNothing("Escape on a copy from Cmd-D")
+        // The same with Paste.
+        canvas.perform(.selectAll)
+        canvas.perform(.copy)
+        canvas.selectNone()
+        turn(0.05)
+        gates = gateCount(core, page)
+        before = shape()
+        canvas.perform(.paste)
+        turn(0.05)
+        let pasteFloated = canvas.isFloating
+        hands.key(CanvasHands.escape)
+        turn(0.05)
+        check(pasteFloated && !canvas.isFloating && gateCount(core, page) == gates && shape() == before, "gestures: Escape takes back a paste that wasn't placed (floated \(pasteFloated))")
+        inStep("paste then Escape")
+        redoBringsNothing("Escape on a paste")
 
         // A part pulled out of the palette (what PaletteGrid's drag does):
         // dropped on the canvas, then one let go off it.
+        gates = gateCount(core, page)
         before = shape()
         if canvas.addGateFloating("AE_OR2", at: CGPoint(x: -14, y: -12)) {
             for i in 1...4 { _ = core.hover(page: page, at: CGPoint(x: -14 + Double(i), y: -12), unitsPerPoint: view.unitsPerPoint) }
@@ -319,6 +347,7 @@ extension SessionCheck {
         turn(0.05)
         check(!canvas.isFloating && gateCount(core, page) == gates && shape() == before, "gestures: a part let go off the canvas isn't added")
         inStep("palette let go off the canvas")
+        redoBringsNothing("a part let go off the canvas")
 
         // Scrolling, pinching and smart zoom move the camera only.
         before = shape()
