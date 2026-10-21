@@ -57,11 +57,9 @@ jobs:
       # windows over it poked at and closed, checked all along (no crash or GTK
       # warning, autosave, the file on disk, undo and redo, tabs and split view,
       # memory, the window freed on close). Seeds 1-4, then again with
-      # G_DEBUG=fatal-criticals; each run capped at 7 minutes.
+      # G_DEBUG=fatal-criticals; each run capped at 7 minutes. A FAIL fails the build.
       - name: Session check
         if: matrix.arch == 'x86_64'
-        # Numbers only until it's green (it then fails the build).
-        continue-on-error: true
         timeout-minutes: 30
         run: |
           SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
@@ -311,13 +309,21 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
           cmake --build linux/build-asan
       - name: Session check with sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:symbolize=1
+          UBSAN_OPTIONS: print_stacktrace=1
+          SESSION_TIMEOUT: 900
+        run: |
+          SESSION_LOGS=session-logs-asan linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 5 6 7 8
+      # Further seeds, to find what's left: read, never failing the build.
+      - name: Session check with sanitizers, more seeds (numbers only)
         continue-on-error: true
         env:
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:symbolize=1
           UBSAN_OPTIONS: print_stacktrace=1
           SESSION_TIMEOUT: 900
         run: |
-          SESSION_LOGS=session-logs-asan linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 5 6 7 8 9 10 11 12
+          SESSION_LOGS=session-logs-asan/more linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 9 10 11 12
       - name: Upload the session logs
         if: always()
         uses: actions/upload-artifact@v7
