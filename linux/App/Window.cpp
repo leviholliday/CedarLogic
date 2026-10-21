@@ -1900,9 +1900,9 @@ bool CircuitWindow::isFloating() const { return cl_edit_is_floating(doc); }
 
 void CircuitWindow::cancelFloating() {
 	if (!isFloating()) return;
-	// It was never placed, so take it back.
-	cl_edit_cancel(doc);
-	cl_edit_undo(doc);
+	// It was never placed, so take it back (and not to Redo: that would
+	// bring back a gate never put down).
+	cl_edit_take_back_float(doc);
 	edited();
 }
 

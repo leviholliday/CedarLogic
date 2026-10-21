@@ -45,7 +45,9 @@ void TabSwitcher::commit(int index) {
 	if (!isActive) return;
 	const int target = index >= 0 && index < (int)keys.size() ? pageOf((size_t)index) : -1;
 	cancel();
-	if (target >= 0 && index != 0) win->showTab(target);
+	// The first card is the tab you were on: back to it, should a new tab
+	// (Ctrl+T, Ctrl still down) or a closed one have put another in front.
+	if (target >= 0 && target != win->currentTab()) win->showTab(target);
 }
 
 void TabSwitcher::cancel() {
