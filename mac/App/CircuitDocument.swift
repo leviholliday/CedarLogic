@@ -15,6 +15,11 @@ final class CoreDocument: ObservableObject {
     let handle: OpaquePointer
     /// Engine undo steps mirrored into the window's UndoManager (CanvasController).
     var mirroredUndo = 0
+    /// The engine's count of steps made (cl_edit_steps_made) when they were
+    /// last mirrored: at the full history, the only way to tell a new step.
+    /// (First asked when the first step is mirrored: every step there is
+    /// then is new, as `mirroredUndo` starting at 0 says.)
+    lazy var stepsMirrored = Int(cl_edit_steps_made(handle)) - undoCount
     /// The page count the window last showed (see CanvasController).
     var shownPageCount = 1
     /// Which pages connect, as the tabs last showed it (cl_pages_link_signature).
