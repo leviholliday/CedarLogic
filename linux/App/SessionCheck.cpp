@@ -536,7 +536,12 @@ struct SessionDriver {
 		const std::string disk = w->filePath().empty() ? std::string() : shape(readFile(w->filePath()));
 		if (disk == after) return;
 		editsLost++;
-		if (firstLost < 0) { firstLost = at; fail(format("action %d (%s): the circuit changed, the window says saved, the file is older", at, (const char*)gWhat)); }
+		if (firstLost < 0) {
+			firstLost = at;
+			fail(format("action %d (%s): the circuit changed, the window says saved, the file is older: ", at, (const char*)gWhat) + firstDifference(before, after));
+			dump(format("lost-%d-before.cdl", at), before);
+			dump(format("lost-%d-after.cdl", at), after);
+		}
 	}
 
 	// Nothing half-done (autosave waits for a drag, a gate on the pointer,
@@ -600,9 +605,11 @@ struct SessionDriver {
 		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
 		const std::string before = text();
 		int undone = 0, missed = 0;
+		std::string steps;
 		for (int i = 0; i < k; i++) {
 			if (!cl_edit_can_undo(doc())) break;
 			const int was = cl_edit_undo_count(doc());
+			steps += std::string(steps.empty() ? "" : ", ") + cl_edit_undo_name(doc());
 			tap(top(), GDK_KEY_z, GDK_CONTROL_MASK);
 			// (Simulation View takes no undo: nothing to redo then either.)
 			if (cl_edit_undo_count(doc()) < was) undone++;
@@ -621,7 +628,8 @@ struct SessionDriver {
 			roundTripBad++;
 			if (firstRoundTrip < 0) {
 				firstRoundTrip = at;
-				lastRoundTripIssue = format("%d undone and redone (%d presses undid nothing): ", undone, missed) + firstDifference(before, after);
+				lastRoundTripIssue = format("%d undone and redone (%d presses undid nothing; the steps, last first: %s): ", undone, missed, steps.c_str()) +
+				                     firstDifference(before, after);
 				dump(format("undo-%d-before.cdl", at), before);
 				dump(format("undo-%d-after.cdl", at), after);
 			}
