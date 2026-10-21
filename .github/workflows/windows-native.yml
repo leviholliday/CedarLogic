@@ -94,7 +94,7 @@ jobs:
         env:
           CL_SESSION_DUMPS: ${{ github.workspace }}/session
           CL_SESSION_TIME_CAP: '420'
-          SESSION_SEEDS: '1 2 3 4'
+          SESSION_SEEDS: '3 3 3 3 3 3 1 2 4'
         run: |
           mkdir -p session
           failed=0
