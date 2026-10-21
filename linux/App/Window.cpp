@@ -2401,14 +2401,21 @@ void CircuitWindow::setStepMs(int ms) {
 
 void CircuitWindow::toggleSimView() {
 	simViewOn = !simViewOn;
+	bool changed = false;
 	if (simViewOn) {
 		if (Canvas* c = currentCanvas()) c->cancelDrag();
+		// Parts on the pointer (a paste, a duplicate, a new gate) were never
+		// put down: taken back, as Escape does. (Cancelling only the gesture
+		// left them at the paste's first spot, unsaved and unmarked: a file
+		// saved meanwhile had them where the pointer was.)
+		if (isFloating()) { cancelFloating(); changed = true; }
 		cl_edit_cancel(doc);
-		if (cl_edit_tidy_active(doc)) cl_edit_tidy_end(doc, true);
+		if (cl_edit_tidy_active(doc)) { cl_edit_tidy_end(doc, true); changed = true; }
 		cl_edit_select_none(doc, currentPage());
 		pendingGate.clear();
 		if (!isRunning) setRunning(true);   // "Run" means run
 	}
+	if (changed) edited();   // saved as any edit is
 	updateActions();
 	updateBanner();
 	for (Canvas* c : canvases) c->redraw();
