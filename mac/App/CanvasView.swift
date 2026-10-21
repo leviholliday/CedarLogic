@@ -1098,6 +1098,11 @@ final class CanvasController: ObservableObject {
     /// Put the selection on the pointer until the next click drops it.
     private func floatSelection(at point: CGPoint? = nil) {
         guard let document, let at = point ?? placePoint else { return }
+        // A paste, Duplicate or a new part while drawing: back to editing,
+        // as turning Draw on puts anything floating away. Left in Draw, the
+        // pointer drew instead of placing it and Escape only ended Draw:
+        // the copy stayed on the pointer, to drop at the next click.
+        if drawing { drawing = false }
         if cl_edit_float_begin(document.handle, Int32(page), at.x, at.y) {
             view?.window?.makeFirstResponder(view)
             NSCursor.closedHand.set()

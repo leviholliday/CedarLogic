@@ -6,7 +6,7 @@
 // changed there, the arrows nudging, Cmd-D and the click that places the
 // copy, a part pulled out of the palette (dropped, or let go off the
 // canvas), a copy, paste or part taken back with Escape (and Redo then
-// bringing nothing back), scrolling and pinching, the find bar, Straighten, and Tidy Up's
+// bringing nothing back), Cmd-D while drawing, scrolling and pinching, the find bar, Straighten, and Tidy Up's
 // preview kept or put back. Then the window's own: a status message that has
 // to go again, the oscilloscope redrawing only itself, the notes pane, a
 // sheet that can't be seen cancelled by Make This Window Editable, and Cmd-W
@@ -327,6 +327,24 @@ extension SessionCheck {
         check(pasteFloated && !canvas.isFloating && gateCount(core, page) == gates && shape() == before, "gestures: Escape takes back a paste that wasn't placed (floated \(pasteFloated))")
         inStep("paste then Escape")
         redoBringsNothing("Escape on a paste")
+        // Cmd-D while drawing: back to editing, the copy on the pointer, and
+        // Escape takes it back (the pointer drew instead, and Escape only
+        // ended drawing: the copy stayed on the pointer).
+        canvas.perform(.selectAll)
+        canvas.drawing = true
+        turn(0.05)
+        gates = gateCount(core, page)
+        before = shape()
+        canvas.perform(.duplicate)
+        turn(0.05)
+        let drewOn = canvas.drawing
+        hands.key(CanvasHands.escape)
+        turn(0.05)
+        check(!drewOn && !canvas.isFloating && gateCount(core, page) == gates && shape() == before,
+              "gestures: Cmd-D while drawing goes back to editing, and Escape takes the copy back (drawing \(drewOn ? "still on" : "off"), \(canvas.isFloating ? "still floating" : "put away"))")
+        if canvas.isFloating { canvas.cancelFloating() }
+        canvas.drawing = false
+        inStep("Cmd-D while drawing")
 
         // A part pulled out of the palette (what PaletteGrid's drag does):
         // dropped on the canvas, then one let go off it.
