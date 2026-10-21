@@ -1133,13 +1133,17 @@ final class CanvasController: ObservableObject {
         return true
     }
 
+    /// Where Cut, Copy and Paste go: the system's clipboard (the session
+    /// check gives them one of its own, so a test never touches yours).
+    static var clipboard: NSPasteboard = .general
+
     func pasteFloating() {
-        guard canEdit, let document, let text = NSPasteboard.general.string(forType: .string), let at = placePoint else { return }
+        guard canEdit, let document, let text = Self.clipboard.string(forType: .string), let at = placePoint else { return }
         let shift = NSEvent.modifierFlags.contains(.shift)
         guard let back = document.paste(text, page: page, at: at, shift: shift) else { note("Nothing to paste."); return }
         if !back.isEmpty {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(back, forType: .string)
+            Self.clipboard.clearContents()
+            Self.clipboard.setString(back, forType: .string)
         }
         floatSelection()
     }
@@ -1149,8 +1153,8 @@ final class CanvasController: ObservableObject {
         let text = document.copySelection(page: page)
         guard !text.isEmpty else { return }
         if Prefs.shared.duplicateUsesClipboard {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            Self.clipboard.clearContents()
+            Self.clipboard.setString(text, forType: .string)
         }
         _ = document.paste(text, page: page, at: at, shift: false)
         floatSelection()
@@ -1746,8 +1750,8 @@ final class CanvasController: ObservableObject {
 
     func copy() {
         guard let text = document?.copySelection(page: page), !text.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        Self.clipboard.clearContents()
+        Self.clipboard.setString(text, forType: .string)
     }
 
     /// Locked parts stay, and stay off the clipboard (copying them is fine).
@@ -1760,12 +1764,12 @@ final class CanvasController: ObservableObject {
 
     /// Paste in the middle of the view.
     func paste() {
-        guard let document, let text = NSPasteboard.general.string(forType: .string), let view else { return }
+        guard let document, let text = Self.clipboard.string(forType: .string), let view else { return }
         let shift = NSEvent.modifierFlags.contains(.shift)
         if let back = document.paste(text, page: page, at: view.visibleCenter, shift: shift) {
             if !back.isEmpty {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(back, forType: .string)
+                Self.clipboard.clearContents()
+                Self.clipboard.setString(back, forType: .string)
             }
             edited()
         }

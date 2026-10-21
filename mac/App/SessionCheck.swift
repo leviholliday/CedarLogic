@@ -123,8 +123,12 @@ enum SessionCheck {
         Prefs.shared.hasSeenWelcome = true
         WhatsNew.markSeen()
         let prefs = Prefs.shared
-        let savedOpenReplaces = prefs.openReplaces
+        let savedOpenReplaces = prefs.openReplaces, savedDark = prefs.dark
         prefs.openReplaces = false
+        // Cut, Copy and Paste on a clipboard of the check's own, never the system's.
+        let clipboard = NSPasteboard(name: NSPasteboard.Name("com.leviholliday.cedarlogic.sessioncheck.\(getpid())"))
+        CanvasController.clipboard = clipboard
+        defer { CanvasController.clipboard = .general; clipboard.releaseGlobally() }
 
         // A circuit in Your Circuits, open in a window.
         guard let text = autoreleasepool(invoking: { startText(start) }) else {
@@ -222,6 +226,11 @@ enum SessionCheck {
                 let now = shape(core.shareText(flags: 0))
                 guard now != before else { return }
                 editsChecked += 1
+                // The window's edited dot follows its undo group closing, at
+                // the end of a turn of the run loop: an edit made late in the
+                // last turn (a tab closing after its 140 ms fade) shows on the
+                // next one.
+                if !file.isDocumentEdited { turn(0.05) }
                 // Unedited is right if autosave already wrote this very
                 // circuit (it can land between an edit and this look).
                 if !file.isDocumentEdited, (try? String(contentsOf: item.circuit, encoding: .utf8)).map(shape) != now {
@@ -229,6 +238,11 @@ enum SessionCheck {
                     if firstLost < 0 {
                         firstLost = at
                         lostWhat = "\(kind); \(core.undoCount) steps, engine \(core.isEdited ? "edited" : "unedited"), \(core.canRedo ? "with" : "no") redo"
+                        // What changed, against the circuit before and the file.
+                        let n = now.split(separator: "\n"), b = before.split(separator: "\n")
+                        let disk = ((try? String(contentsOf: item.circuit, encoding: .utf8)).map(shape) ?? "").split(separator: "\n")
+                        func trim(_ l: [Substring]) -> [String] { l.prefix(4).map { $0.trimmingCharacters(in: .whitespaces) } }
+                        print("INFO the edit lost at action \(at): new lines \(trim(n.filter { !b.contains($0) })), gone \(trim(b.filter { !n.contains($0) })); against the file: new \(trim(n.filter { !disk.contains($0) })), gone \(trim(disk.filter { !n.contains($0) }))")
                     }
                 }
             }
@@ -251,14 +265,81 @@ enum SessionCheck {
             check(pausesChecked == 1 && pausesUnsaved == 0 && pausesStale == 0, "gestures: autosave saved them, and the file on disk is the circuit")
             pausesChecked = 0; pausesUnsaved = 0; pausesStale = 0; firstStale = -1; firstUnsaved = -1
             var gestures = 0, escapeChanged = 0, putBackChanged = 0, firstPutBack = -1
+            var extras = 0, lockedChanged = 0, firstLocked = -1, firstEscape = -1, escapeWhat = ""
+            // CL_SESSION_EXTRAS=0: without them, as rounds 2 and 3 ran (a seed
+            // from then takes the same path again). Their dice are their own.
+            let withExtras = ProcessInfo.processInfo.environment["CL_SESSION_EXTRAS"] != "0"
+            var dice = Random(state: seed ^ 0x5E55_1011)
+            // CL_SESSION_TRACE=from-to prints what each of those actions did.
+            let trace: ClosedRange<Int>? = {
+                let t = (ProcessInfo.processInfo.environment["CL_SESSION_TRACE"] ?? "").split(separator: "-").compactMap { Int($0) }
+                return t.count == 2 && t[0] <= t[1] ? t[0]...t[1] : nil
+            }()
 
             memory.append(footprintMB())
             for a in 0..<actions {
                 let c = side()
                 let roll = rng.int(100)
                 var isEdit = false
-                let before = shape(core.shareText(flags: 0))
-                if rng.int(4) == 0, let v = c.view {
+                let before = shape(core.shareText(flags: 0)), stepsBefore = core.undoCount
+                var traceNote = ""
+                if withExtras, dice.int(8) == 0, let v = c.view {
+                    // The rest of what a student does in a long session:
+                    // the clipboard, the lock, tabs moved and renamed,
+                    // links between pages, drawing, notes, dark mode.
+                    extras += 1
+                    let hands = CanvasHands(view: v)
+                    let e = dice.int(14)
+                    kind = "extra \(e)"
+                    switch e {
+                    case 0: c.perform(.copy)
+                    case 1: c.perform(.cut); isEdit = true
+                    case 2:   // Paste: on the pointer, then a click puts it down, or Escape takes it back
+                        c.perform(.paste)
+                        if c.isFloating {
+                            if rng.int(3) == 0 {
+                                hands.key(CanvasHands.escape)
+                                if shape(core.shareText(flags: 0)) != before { escapeChanged += 1; if firstEscape < 0 { firstEscape = a; escapeWhat = kind } }
+                            } else {
+                                let at = spot(c)
+                                hands.move(at); hands.click(at)
+                                isEdit = true
+                            }
+                        }
+                    case 3:   // Lock: nothing can be edited until it's off again
+                        c.perform(.lock)
+                        if c.locked {
+                            c.selectAll()
+                            c.perform(.cut); c.perform(.paste); c.perform(.rotate); c.perform(.duplicate)
+                            hands.key(CanvasHands.arrow(UInt16(123 + rng.int(4))))
+                            hands.key(51, "\u{7F}")   // Delete
+                            if c.isFloating { c.cancelFloating() }
+                            if shape(core.shareText(flags: 0)) != before { lockedChanged += 1; if firstLocked < 0 { firstLocked = a } }
+                            c.perform(.lock)
+                        }
+                    case 4: c.perform(.previousTab)
+                    case 5: c.perform(.stepClock)
+                    case 6: c.perform([.zoomIn, .zoomOut, .zoomActual][rng.int(3)])
+                    case 7: prefs.dark.toggle()
+                    case 8: canvas.perform(.closeSplit)
+                    case 9:   // rename a tab, as its name field does
+                        let i = rng.int(core.pageCount)
+                        core.renamePage(i, to: rng.int(4) == 0 ? "Tab \u{201C}\(rng.int(9))\u{201D} \u{2014} \u{00E9}" : "Part \(rng.int(30))")
+                        core.objectWillChange.send()
+                        c.markEdited()
+                        isEdit = true
+                    case 10:   // drag a tab to another place (not in a split: its strip moves it)
+                        if canvas.partner?.view == nil, core.pageCount > 1 {
+                            canvas.movePage(from: rng.int(core.pageCount), to: rng.int(core.pageCount))
+                            isEdit = true
+                        }
+                    case 11:
+                        if rng.int(2) == 0 { c.connectAllPages() } else { c.disconnectAllPages() }
+                        isEdit = true
+                    case 12: c.perform(.draw)
+                    default: c.perform(.notes)
+                    }
+                } else if rng.int(4) == 0, let v = c.view {
                     // A gesture through the canvas's own handlers.
                     gestures += 1
                     let hands = CanvasHands(view: v)
@@ -273,7 +354,7 @@ enum SessionCheck {
                     case 2:   // Escape in the middle of a drag: nothing changes
                         let from = spot(c)
                         hands.drag(from, CGPoint(x: from.x + 5, y: from.y - 3), before: { hands.key(CanvasHands.escape) })
-                        if editable && shape(core.shareText(flags: 0)) != before { escapeChanged += 1 }
+                        if editable && shape(core.shareText(flags: 0)) != before { escapeChanged += 1; if firstEscape < 0 { firstEscape = a; escapeWhat = kind } }
                     case 3:   // the arrows
                         hands.click(spot(c))
                         hands.key(CanvasHands.arrow(UInt16(123 + rng.int(4))), flags: rng.int(3) == 0 ? .shift : [])
@@ -290,14 +371,17 @@ enum SessionCheck {
                         }
                     case 6:   // Cmd-D, then a click places it, or Escape takes it back
                         if c.hasSelection && c.canEdit {
+                            let copied = core.copySelection(page: c.page)
                             c.perform(.duplicate)
+                            traceNote = "Cmd-D: \(copied.count) characters copied (\(copied.split(separator: "\n").count) lines), \(core.undoCount) steps, \(c.isFloating ? "floating" : "not floating"), undo group level \(file.undoManager?.groupingLevel ?? -1)"
+                            if trace?.contains(a) == true { print("TRACE \(a) copied: \(copied.replacingOccurrences(of: "\n", with: " | "))") }
                             if rng.int(2) == 0 {
                                 let at = spot(c)
                                 hands.move(at); hands.click(at)
                                 isEdit = true
                             } else {
                                 hands.key(CanvasHands.escape)
-                                if shape(core.shareText(flags: 0)) != before { escapeChanged += 1 }
+                                if shape(core.shareText(flags: 0)) != before { escapeChanged += 1; if firstEscape < 0 { firstEscape = a; escapeWhat = kind } }
                             }
                         } else {
                             hands.click(spot(c))
@@ -381,6 +465,10 @@ enum SessionCheck {
                 }
                 }
                 turn(0.02 + 0.03 * rng.unit())
+                if trace?.contains(a) == true {
+                    if !traceNote.isEmpty { print("TRACE \(a) \(traceNote)") }
+                    print("TRACE \(a) \(kind): \(shape(core.shareText(flags: 0)) == before ? "same" : "changed"), \(core.undoCount) steps (\(stepsBefore) before), mirrored \(core.mirroredUndo), engine \(core.isEdited ? "edited" : "unedited")\(core.canRedo ? ", redo" : ""), window \(file.isDocumentEdited ? "edited" : "unedited"), page \(c.page) \(gates(c)) parts, \(c.isFloating ? "floating" : "")")
+                }
                 if isEdit { checkEdited(a, from: before) }
                 if core.mirroredUndo != core.undoCount { stepMismatch += 1; if firstMismatch < 0 { firstMismatch = a } }
                 maxSteps = max(maxSteps, core.undoCount)
@@ -418,7 +506,8 @@ enum SessionCheck {
             }
             if canvas.isRunning == false { canvas.setRunning(true) }
             turn(1)
-            check(escapeChanged == 0, "Escape mid-drag or on an unplaced copy changed nothing (\(escapeChanged) times it did, of \(gestures) gestures)")
+            check(escapeChanged == 0, "Escape mid-drag or on an unplaced copy changed nothing (\(escapeChanged) times it did, of \(gestures) gestures and \(extras) other actions\(firstEscape >= 0 ? "; first at action \(firstEscape), \(escapeWhat)" : ""))")
+            check(lockedChanged == 0, "with the window locked, Cut, Paste, Rotate, Duplicate, the arrows and Delete changed nothing\(firstLocked >= 0 ? " (\(lockedChanged) times not, first at action \(firstLocked))" : "")")
             check(putBackChanged == 0, "Tidy Up's Put Back left the circuit as it was\(firstPutBack >= 0 ? " (\(putBackChanged) times not, first at action \(firstPutBack))" : "")")
             // Undo all the way back, then Redo all the way: one press, one step.
             for s in [canvas, canvas.partner].compactMap({ $0 }) where s.simView { s.simView = false }
@@ -489,6 +578,7 @@ enum SessionCheck {
               "the engine's open documents are back to where they were before the window opened (\(documentsAtStart) before, \(documentsOpen) with the window open, \(documentsAfter) after)")
         check(goneFile == nil || !NSDocumentController.shared.documents.contains { $0 === goneFile }, "the document closed")
         prefs.openReplaces = savedOpenReplaces
+        prefs.dark = savedDark
         print(failures == 0 ? "session-check: all passed" : "session-check: \(failures) failed")
         return failures == 0
     }

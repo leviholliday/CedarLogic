@@ -47,7 +47,7 @@ for seed in "${SEEDS[@]}"; do
 		"$APP/Contents/MacOS/CedarLogic" --session-check "$ACTIONS" "$seed" ${START:+"$START"} >"$log" 2>&1
 	code=$?
 	warnings=$(grep -c -E "Publishing changes from within view updates|Modifying state during view update" "$log")
-	grep -E "^(PASS|FAIL|session|memory|after|INFO)" "$log" | sed "s/^/[seed $seed] /"
+	grep -E "^(PASS|FAIL|session|memory|after|INFO|TRACE)" "$log" | sed "s/^/[seed $seed] /"
 	if [ "$code" = 0 ] && [ "$warnings" = 0 ]; then
 		echo "PASS session, seed $seed"
 	else
