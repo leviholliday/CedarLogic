@@ -10,7 +10,15 @@
 # screen and nothing is clicked. A run passes when every check passes and
 # SwiftUI printed none of its "Publishing changes from within view updates"
 # / "Modifying state during view update" warnings.
+#
+# START=<file.cdl> starts each session from that circuit (as importing it
+# would put it in Your Circuits); START=template:<id>[:running|:pulse] from
+# a built-in template (ids in App/Templates.swift, e.g. builtin-counter,
+# builtin-ff-jk, builtin-reg-shift). Each run of this script has a bundle
+# id of its own, so two can run at once.
 set -uo pipefail
+START=${START:-}
+[ -z "$START" ] || [[ "$START" == template:* ]] || START=$(cd "$(dirname "$START")" && pwd)/$(basename "$START")
 cd "$(dirname "$0")/../.."
 SRC=mac/build/CedarLogic.app
 [ -d "$SRC" ] || { echo "Build first: mac/build.sh"; exit 1; }
@@ -20,7 +28,7 @@ SEEDS=("$@")
 [ ${#SEEDS[@]} -gt 0 ] || SEEDS=(1)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/cl-session-check.XXXXXX")
 APP="$WORK/CedarLogicSessionCheck.app"
-ID=com.leviholliday.cedarlogic.native.sessioncheck
+ID=com.leviholliday.cedarlogic.native.sessioncheck.p$$
 ditto "$SRC" "$APP"
 P="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set CFBundleIdentifier $ID" "$P"
@@ -36,10 +44,10 @@ for seed in "${SEEDS[@]}"; do
 	defaults delete $ID >/dev/null 2>&1
 	log="$WORK/session-$seed.log"
 	OS_ACTIVITY_DT_MODE=1 CFFIXED_USER_HOME="$home" CL_CLASSROOM=0 \
-		"$APP/Contents/MacOS/CedarLogic" --session-check "$ACTIONS" "$seed" >"$log" 2>&1
+		"$APP/Contents/MacOS/CedarLogic" --session-check "$ACTIONS" "$seed" ${START:+"$START"} >"$log" 2>&1
 	code=$?
 	warnings=$(grep -c -E "Publishing changes from within view updates|Modifying state during view update" "$log")
-	grep -E "^(PASS|FAIL|session|memory|after)" "$log" | sed "s/^/[seed $seed] /"
+	grep -E "^(PASS|FAIL|session|memory|after|INFO)" "$log" | sed "s/^/[seed $seed] /"
 	if [ "$code" = 0 ] && [ "$warnings" = 0 ]; then
 		echo "PASS session, seed $seed"
 	else

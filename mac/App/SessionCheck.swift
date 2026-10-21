@@ -1,5 +1,6 @@
-// `CedarLogic --session-check [actions] [seed]`: a long working session in
-// one circuit window, headless. The real window (CircuitWindow, so the
+// `CedarLogic --session-check [actions] [seed] [start]`: a long working
+// session in one circuit window, headless, on a new circuit or one started
+// from `start` (a .cdl file, or template:<id>: see startText). The real window (CircuitWindow, so the
 // toolbar, tabs, palette, minimap, status bar and canvas all update) is put
 // in an NSWindow that's never ordered in, over a document that autosaves in
 // place into Your Circuits, the way a circuit window does. Then a few
@@ -15,7 +16,9 @@
 // window's stay in step, each side shows a page that exists, Version History
 // keeps a version after a break (the break is made by backdating the file,
 // not by waiting), memory doesn't grow without bound, and closing the
-// window lets the controller, its clock and the circuit go.
+// window lets the controller, its clock and the circuit go -- and the
+// engine's count of open documents (cl_document_live_count) comes back to
+// where it was before the window opened.
 //
 // It writes into Your Circuits, so it only runs with a home folder of its
 // own (CFFIXED_USER_HOME, as mac/Tools/session-check.sh sets): never in
@@ -51,12 +54,29 @@ enum SessionCheck {
         guard let i = args.firstIndex(of: "--session-check") else { return }
         let actions = args.count > i + 1 ? Int(args[i + 1]) ?? 2000 : 2000
         let seed = args.count > i + 2 ? UInt64(args[i + 2]) ?? 1 : 1
+        let start = args.count > i + 3 && !args[i + 3].hasPrefix("-") ? args[i + 3] : nil
         setvbuf(stdout, nil, _IOLBF, 0)
         guard isolatedHome() else {
             print("session-check: needs a home folder of its own (CFFIXED_USER_HOME); run mac/Tools/session-check.sh")
             exit(2)
         }
-        exit(run(actions: actions, seed: seed) ? 0 : 1)
+        exit(run(actions: actions, seed: seed, start: start) ? 0 : 1)
+    }
+
+    /// The circuit a session starts from, as Your Circuits would hold it:
+    /// a file (as importing it makes it: opened by the engine and written
+    /// back), `template:<id>` (a built-in template; `:running` or `:pulse`
+    /// after it for that Clock choice), or nil for a new, empty one.
+    static func startText(_ start: String?) -> String? {
+        guard let start else { return CoreDocument().saveText() }
+        if start.hasPrefix("template:") {
+            let parts = start.dropFirst("template:".count).split(separator: ":").map(String.init)
+            guard let id = parts.first, let t = Templates.template(id: id) else { return nil }
+            let clock = parts.count > 1 ? TemplateClock(rawValue: parts[1]) ?? .manual : .manual
+            return t.with(clock: clock).text
+        }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: start)), let doc = try? CoreDocument(data: data) else { return nil }
+        return doc.saveText()
     }
 
     /// Your Circuits is inside CFFIXED_USER_HOME, so nothing of the owner's is touched.
@@ -89,7 +109,7 @@ enum SessionCheck {
         mutating func unit() -> Double { Double(next() % 1_000_000) / 1_000_000 }
     }
 
-    static func run(actions: Int, seed: UInt64) -> Bool {
+    static func run(actions: Int, seed: UInt64, start: String? = nil) -> Bool {
         var failures = 0
         func check(_ ok: Bool, _ what: String) {
             print((ok ? "PASS " : "FAIL ") + what)
@@ -107,11 +127,20 @@ enum SessionCheck {
         prefs.openReplaces = false
 
         // A circuit in Your Circuits, open in a window.
-        let core0 = CoreDocument()
-        guard let item = try? Library.create(named: "Session check", text: core0.saveText()) else {
+        guard let text = autoreleasepool(invoking: { startText(start) }) else {
+            print("FAIL couldn't read the circuit to start from: \(start ?? "")")
+            return false
+        }
+        guard let item = try? Library.create(named: "Session check", text: text) else {
             print("FAIL couldn't make a circuit in Your Circuits at \(Library.root.path)")
             return false
         }
+        if let start { print("session: starting from \(start)") }
+        // The engine's open documents now; closing the window must bring
+        // the count back here (any document the window or its sheets,
+        // thumbnails, versions or checks opened, and didn't close, shows).
+        let documentsAtStart = Int(cl_document_live_count())
+        var documentsOpen = 0
         weak var goneCanvas: CanvasController?
         weak var goneCore: CoreDocument?
         weak var goneFile: NSDocument?
@@ -151,6 +180,7 @@ enum SessionCheck {
             win.contentView = host
             host.layoutSubtreeIfNeeded()
             turn(1.0)
+            documentsOpen = Int(cl_document_live_count())
 
             @MainActor func findCanvas(_ v: NSView) -> CircuitCanvasNSView? {
                 if let c = v as? CircuitCanvasNSView, c.controller?.drivesClock == true { return c }
@@ -167,6 +197,9 @@ enum SessionCheck {
             goneCanvas = canvas; goneCore = core; goneFile = file; goneWindow = win; goneHost = host
 
             var rng = Random(state: seed)
+            // A page fuller than this is cleared (Select All, Delete): past
+            // what a circuit started from a file already has on a page.
+            let crowded = max(36, (0..<core.pageCount).map { Int(cl_document_gate_count(core.handle, Int32($0))) }.max() ?? 0) + 12
             let parts = ["AA_AND2", "AE_OR2", "AA_INVERTER", "AI_XOR2", "AA_TOGGLE", "GA_LED", "BB_CLOCK", "AA_DFF", "AA_LABEL"]
             /// The side edits go to: the first, or the second while a split has it.
             @MainActor func side() -> CanvasController { canvas.routed }
@@ -303,7 +336,7 @@ enum SessionCheck {
                 kind = "action \(roll)"
                 switch roll {
                 case 0..<22:   // place a part
-                    if gates(c) > 36 {
+                    if gates(c) > crowded {
                         c.selectAll(); c.deleteSelection()
                     } else {
                         c.addGate(parts[rng.int(parts.count)], at: spot(c))
@@ -451,6 +484,9 @@ enum SessionCheck {
         print("after closing: window \(goneWindow == nil ? "gone" : "kept"), its view \(goneHost == nil ? "gone" : "kept"), document \(goneFile == nil ? "gone" : "kept")")
         check(goneCanvas == nil, "the window's controller (and its 60-a-second clock) went with the window")
         check(goneCore == nil, "the circuit went with the window")
+        let documentsAfter = Int(cl_document_live_count())
+        check(documentsOpen > documentsAtStart && documentsAfter == documentsAtStart,
+              "the engine's open documents are back to where they were before the window opened (\(documentsAtStart) before, \(documentsOpen) with the window open, \(documentsAfter) after)")
         check(goneFile == nil || !NSDocumentController.shared.documents.contains { $0 === goneFile }, "the document closed")
         prefs.openReplaces = savedOpenReplaces
         print(failures == 0 ? "session-check: all passed" : "session-check: \(failures) failed")
