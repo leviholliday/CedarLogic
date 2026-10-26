@@ -1265,6 +1265,10 @@ struct SessionDriver {
 			else if (rng.chance(0.2)) tap(t, GDK_KEY_t, GDK_CONTROL_MASK);
 			pump(20);
 			if (!alive()) break;   // Ctrl+W on the last tab closes the window
+			// Ctrl+W on a tab with work on it asks first; that card takes the
+			// window's focus, which dismisses the switcher, and Cancel keeps the
+			// tab you were on. Nothing was picked then.
+			if (want && sw && !sw->isActive) want = 0;
 			key(t, GDK_KEY_Control_L, GDK_CONTROL_MASK, false);
 			pump(20);
 			if (want && cl_document_page_index(doc(), want) >= 0 && canvas()) {
