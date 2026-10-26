@@ -199,9 +199,9 @@ extension SessionCheck {
         // is closed: its Return puts back what its field still holds).
         if let label, let setting = core.settings(ofGate: label).first(where: { $0.name.contains("LABEL_TEXT") }) {
             before = shape()
-            applySetting(canvas, gate: label, name: setting.name, value: "Q1")
+            applySetting(canvas, gate: label, name: setting.name, value: "Session Q1")
             turn(0.05)
-            check(core.shareText(flags: 0).contains("\"Q1\""), "gestures: the setting changed")
+            check(core.shareText(flags: 0).contains("\"Session Q1\""), "gestures: the setting changed")
             edited("a setting changed", before); inStep("a setting changed")
         } else {
             check(false, "gestures: the label has a text setting")
@@ -259,7 +259,7 @@ extension SessionCheck {
         // Find: the label, then back to the canvas.
         canvas.selectNone()
         canvas.perform(.find)
-        canvas.findQuery = "Q1"
+        canvas.findQuery = "Session Q1"
         canvas.runFind(jump: true)
         turn(0.3)
         check(canvas.findActive && canvas.findTotal >= 1 && label != nil && core.singleSelectedGate(page: canvas.page) == label,

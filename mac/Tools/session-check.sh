@@ -14,8 +14,8 @@
 # START=<file.cdl> starts each session from that circuit (as importing it
 # would put it in Your Circuits); START=template:<id>[:running|:pulse] from
 # a built-in template (ids in App/Templates.swift, e.g. builtin-counter,
-# builtin-ff-jk, builtin-reg-shift). Each run of this script has a bundle
-# id of its own, so two can run at once.
+# builtin-ff-jk, builtin-reg-shift). CHECK_TAG=<word> gives the copy a
+# bundle id of its own, so two runs with different tags can go at once.
 set -uo pipefail
 START=${START:-}
 [ -z "$START" ] || [[ "$START" == template:* ]] || START=$(cd "$(dirname "$START")" && pwd)/$(basename "$START")
@@ -28,7 +28,7 @@ SEEDS=("$@")
 [ ${#SEEDS[@]} -gt 0 ] || SEEDS=(1)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/cl-session-check.XXXXXX")
 APP="$WORK/CedarLogicSessionCheck.app"
-ID=com.leviholliday.cedarlogic.native.sessioncheck.p$$
+ID=com.leviholliday.cedarlogic.native.sessioncheck${CHECK_TAG:+.$CHECK_TAG}
 ditto "$SRC" "$APP"
 P="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set CFBundleIdentifier $ID" "$P"
@@ -56,6 +56,7 @@ for seed in "${SEEDS[@]}"; do
 	fi
 done
 defaults delete $ID >/dev/null 2>&1
+[ -n "${CHECK_TAG:-}" ] && rm -f "$HOME/Library/Preferences/$ID.plist"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$APP" 2>/dev/null
 [ $fail = 0 ] && rm -rf "$WORK"
 exit $fail
