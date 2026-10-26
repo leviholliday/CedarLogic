@@ -213,10 +213,17 @@ enum SessionCheck {
                 return CGPoint(x: b.minX - 6 + rng.unit() * (b.width + 12), y: b.minY - 6 + rng.unit() * (b.height + 12))
             }
             @MainActor func checkPages(_ at: Int) {
-                let n = core.pageCount
-                var ok = canvas.page >= 0 && canvas.page < n
-                if let p = canvas.partner, p.view != nil { ok = ok && p.page >= 0 && p.page < n }
-                if !ok { badPage += 1; if firstBadPage < 0 { firstBadPage = at } }
+                func ok() -> Bool {
+                    let n = core.pageCount
+                    var ok = canvas.page >= 0 && canvas.page < n
+                    if let p = canvas.partner, p.view != nil { ok = ok && p.page >= 0 && p.page < n }
+                    return ok
+                }
+                // A tab that closes after its 140 ms fade, late in the last
+                // turn of the run loop, has the side shown its next page on
+                // the next turn (the window's tabs pass it on): look again then.
+                if !ok() { turn(0.05) }
+                if !ok() { badPage += 1; if firstBadPage < 0 { firstBadPage = at } }
             }
             /// The circuit changed: the window must be edited now, or autosave
             /// and closing would leave it unsaved. (Not the engine's own
@@ -467,7 +474,7 @@ enum SessionCheck {
                 turn(0.02 + 0.03 * rng.unit())
                 if trace?.contains(a) == true {
                     if !traceNote.isEmpty { print("TRACE \(a) \(traceNote)") }
-                    print("TRACE \(a) \(kind): \(shape(core.shareText(flags: 0)) == before ? "same" : "changed"), \(core.undoCount) steps (\(stepsBefore) before), mirrored \(core.mirroredUndo), engine \(core.isEdited ? "edited" : "unedited")\(core.canRedo ? ", redo" : ""), window \(file.isDocumentEdited ? "edited" : "unedited"), page \(c.page) \(gates(c)) parts, \(c.isFloating ? "floating" : "")")
+                    print("TRACE \(a) \(kind): \(shape(core.shareText(flags: 0)) == before ? "same" : "changed"), \(core.undoCount) steps (\(stepsBefore) before), mirrored \(core.mirroredUndo), engine \(core.isEdited ? "edited" : "unedited")\(core.canRedo ? ", redo" : ""), window \(file.isDocumentEdited ? "edited" : "unedited"), page \(c.page) \(gates(c)) parts (sides on \(canvas.page) and \(canvas.partner?.view != nil ? String(canvas.partner?.page ?? -1) : "-"), of \(core.pageCount)), \(c.isFloating ? "floating" : "")")
                 }
                 if isEdit { checkEdited(a, from: before) }
                 if core.mirroredUndo != core.undoCount { stepMismatch += 1; if firstMismatch < 0 { firstMismatch = a } }
