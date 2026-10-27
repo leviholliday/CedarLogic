@@ -126,6 +126,11 @@ every shape and gate style and checks each circuit's truth table. And:
 - `CEDAR_FONT_FILE=<font.ttf>` -- the face for circuit labels (text it has
   no glyphs for, and scripts that need shaping, go through Pango and the
   desktop's fallback fonts)
+- Drawing switches, for comparing (`SMOOTHNESS.md`): `CEDARLOGIC_GLYPH_TEXT=0`
+  labels as filled outlines instead of Cairo's cached glyphs;
+  `CEDARLOGIC_DRAW_ALL=1` the whole page every frame of a drag;
+  `CEDARLOGIC_CANVAS_FRAME=1` always through the canvas's own image;
+  `CEDARLOGIC_FAST_DRAG=1` coarser antialiasing while dragging
 
 CI (`.github/workflows/linux-native.yml`) builds x86_64 and aarch64 on Ubuntu
 22.04, runs the checks, packages both AppImages and .debs, starts them for the

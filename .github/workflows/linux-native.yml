@@ -171,9 +171,10 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
           # Labels drawn both ways (linux/SMOOTHNESS.md step 3): on x86_64 each picture
-          # below is taken again, straight after, with labels as Cairo's cached glyphs
-          # (CEDARLOGIC_GLYPH_TEXT=1), into renders/glyphs/, to compare pixel by pixel.
-          AGAIN_ENV=CEDARLOGIC_GLYPH_TEXT=1 AGAIN_DIR=renders/glyphs
+          # below is taken again, straight after, with labels as filled outlines, as
+          # before Cairo's cached glyphs were the default (CEDARLOGIC_GLYPH_TEXT=0),
+          # into renders/outlines/, to compare pixel by pixel.
+          AGAIN_ENV=CEDARLOGIC_GLYPH_TEXT=0 AGAIN_DIR=renders/outlines
           mkdir -p "$AGAIN_DIR"
           again() {
             [ "$(uname -m)" = x86_64 ] || return 0
@@ -301,21 +302,15 @@ jobs:
           mkdir -p renders
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
             --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag.txt || true
-          # Labels as Cairo's cached glyphs (CEDARLOGIC_GLYPH_TEXT=1, not the default yet):
-          # the same picture and the same benchmark, to compare.
-          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" \
-            timeout 60 "$APPIMAGE" --screenshot renders/window-Lab5-glyphs.png format/tests/fixtures/Lab5.cdl || true
-          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" \
-            timeout 60 "$APPIMAGE" --screenshot renders/window-practice-glyphs.png res/samples/practice.cdl || true
-          xvfb-run -a -s "-screen 0 1600x1000x24" \
-            timeout 60 "$APPIMAGE" --screenshot renders/window-practice-paths.png res/samples/practice.cdl || true
-          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
-            --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag-glyphs.txt || true
+          # Labels as filled outlines, as before Cairo's cached glyphs were the default
+          # (CEDARLOGIC_GLYPH_TEXT=0): the same benchmark, to compare.
+          CEDARLOGIC_GLYPH_TEXT=0 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag-outlines.txt || true
           # Lab5 (53 gates, 40 wires), the circuit of the Zorin OS desktop test (linux/DESKTOP-TEST.md).
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
             --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5.txt || true
-          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
-            --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5-glyphs.txt || true
+          CEDARLOGIC_GLYPH_TEXT=0 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5-outlines.txt || true
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7

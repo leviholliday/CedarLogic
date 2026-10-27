@@ -248,6 +248,20 @@ use the Pi or the Fedora laptop for verdicts.
    faster (table above). The rasterisation differs slightly (glyph masks,
    pixel-rounded positions). Check it against CI's screenshots before
    switching. This is Linux-only code (`linux/CedarCore/CairoScene.cpp`).
+
+   **Done (2026-10-27): cached glyphs are the default.** CI (run
+   40451913845) took every `--show` picture, the Pi themes' and the
+   practice window twice in a row, and `render_png` drew Lab5, lab6,
+   jmSGTZM and practice (light at 2x, the dark and print exports) both
+   ways. Windows without a circuit are identical. In the rest, only label
+   pixels differ: 0.3-1.4% of the picture, every one on a glyph's edge.
+   The largest difference is 193 of 255 in the light pictures and under
+   20 in the dark ones. The same glyphs sit in the same places; only the
+   edge shading differs, and side by side at 6x zoom the letters look the
+   same. Lab5 select-all drag on CI went from 5.27 to 3.47 ms a frame at
+   scale 1 and from 9.41 to 6.38 at scale 2. `CEDARLOGIC_GLYPH_TEXT=0`
+   fills the outlines as before, and CI keeps taking the pictures that
+   way into `renders/outlines/` to compare.
 4. **A GPU canvas, only if 2 and 3 aren't enough.** Inside GTK 3: a
    `GtkGLArea` with Skia's GL backend. The repo already draws the scene with
    Skia for the wx app (`src/gui/render/SkiaScene.cpp`). Keep Cairo as the

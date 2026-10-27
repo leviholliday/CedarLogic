@@ -396,10 +396,11 @@ void CairoScene::text(render::Point origin, const char* utf8, float pixelHeight,
 	const cairo_matrix_t m = current();
 	cairo_matrix_multiply(&full, &place, &m);
 	cairo_new_path(ctx);
-	// CEDARLOGIC_GLYPH_TEXT=1: Cairo's cached glyphs (cairo_show_glyphs, about
-	// 12x faster, SMOOTHNESS.md) in place of each glyph's outline filled as a
-	// path. Off until pictures drawn both ways look the same.
-	static const bool cachedGlyphs = [] { const char* v = getenv("CEDARLOGIC_GLYPH_TEXT"); return v && strcmp(v, "1") == 0; }();
+	// Cairo's cached glyphs (cairo_show_glyphs, about 12x faster, SMOOTHNESS.md)
+	// in place of each glyph's outline filled as a path: the same glyphs in the
+	// same places, only their edges' shading differs (CI pictures both ways).
+	// CEDARLOGIC_GLYPH_TEXT=0 fills the outlines, as before.
+	static const bool cachedGlyphs = [] { const char* v = getenv("CEDARLOGIC_GLYPH_TEXT"); return !(v && strcmp(v, "0") == 0); }();
 	if (usable(full) && cachedGlyphs) {
 		const render::Color mc = mapped(c);
 		cairo_save(ctx);
