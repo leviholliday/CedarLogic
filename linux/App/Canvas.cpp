@@ -138,6 +138,14 @@ void Canvas::worldPoint(double vx, double vy, double& wx, double& wy) const {
 void Canvas::center(double& wx, double& wy) const { worldPoint(width() / 2, height() / 2, wx, wy); }
 
 bool Canvas::pointerWorld(double& wx, double& wy) const {
+	// Where the canvas last saw the pointer, while it's inside: GDK's own
+	// answer isn't reliable right after a window over the canvas closes
+	// (Wayland says 0, 0 until the pointer moves, so a gate chosen with A
+	// appeared in the top left corner).
+	if (pointerInside && lastX >= 0 && lastY >= 0 && lastX < width() && lastY < height()) {
+		worldPoint(lastX, lastY, wx, wy);
+		return true;
+	}
 	GdkWindow* w = gtk_widget_get_window(area);
 	if (w == nullptr) return false;
 	GdkDisplay* display = gdk_window_get_display(w);
@@ -147,6 +155,7 @@ bool Canvas::pointerWorld(double& wx, double& wy) const {
 	double x = 0, y = 0;
 	gdk_window_get_device_position_double(w, pointer, &x, &y, nullptr);
 	if (x < 0 || y < 0 || x >= width() || y >= height()) return false;
+	if (x == 0 && y == 0) return false;   // not known yet
 	worldPoint(x, y, wx, wy);
 	return true;
 }
@@ -1011,6 +1020,10 @@ gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 
 gboolean Canvas::crossingCb(GtkWidget*, GdkEventCrossing* e, gpointer self) {
 	static_cast<Canvas*>(self)->pointerInside = e->type == GDK_ENTER_NOTIFY;
+	if (e->type == GDK_ENTER_NOTIFY) {
+		static_cast<Canvas*>(self)->lastX = e->x;
+		static_cast<Canvas*>(self)->lastY = e->y;
+	}
 	if (e->type == GDK_LEAVE_NOTIFY) {
 		Canvas* c = static_cast<Canvas*>(self);
 		c->hideWireTag();
