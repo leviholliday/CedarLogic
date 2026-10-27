@@ -206,6 +206,12 @@ jobs:
               timeout 60 "$APPIMAGE" $flag --show "$show" --screenshot "$out.png" format/tests/fixtures/Lab5.cdl > "$out.log" 2>&1 || rc=$?
             echo "Lab5 $show $flag: exit $rc" | tee -a "$out.log"
           done
+          # The oscilloscope fills its dock and has Lab5's TO labels in it (it once drew
+          # nothing: its area had no height).
+          grep -h "oscilloscope:" renders/show-scope-Lab5-*.log || true
+          for f in renders/show-scope-Lab5-*.log; do
+            grep -Eq "oscilloscope: drawn [0-9]+ x [1-9][0-9]* in .*, [1-9][0-9]* signal" "$f" || { echo "::error::the oscilloscope wasn't drawn ($f)"; exit 1; }
+          done
           # Settings > Sync with sync turned on, against the stand-in server: the code is in the
           # sync folder as a turned-on computer has it, and the app syncs while it's pictured.
           python3 linux/Tools/sync_mock.py --port 0 > mock-show.log &

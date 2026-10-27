@@ -168,9 +168,21 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	if (what == "combo") top = settings::window();
+	if (what == "scope" && !circuitWindows().empty())
+		if (ScopeWindow* scope = circuitWindows().back()->scopeWindow()) scope->describe();
 	const bool ok = top && (what == "menu" || what == "submenu" || what == "combo" || what == "primary" ? writeWindowWithMenu(top, gScreenshot)
 	                                                                                                      : writeWindow(top, gScreenshot));
-	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
+	if (!top) {
+		fprintf(stderr, "nothing to picture for --show %s; the windows open:", gShow.c_str());
+		GList* all = gtk_window_list_toplevels();
+		for (GList* l = all; l; l = l->next)
+			if (gtk_widget_get_visible(GTK_WIDGET(l->data))) {
+				const char* t = gtk_window_get_title(GTK_WINDOW(l->data));
+				fprintf(stderr, " \"%s\" (%s)", t ? t : "", gtk_widget_get_name(GTK_WIDGET(l->data)));
+			}
+		g_list_free(all);
+		fprintf(stderr, "\n");
+	}
 	prefs().save();
 	fflush(stderr);
 	_exit(ok ? 0 : 1);

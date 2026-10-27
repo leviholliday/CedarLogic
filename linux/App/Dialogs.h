@@ -47,6 +47,8 @@ public:
 	void close();
 	bool visible() const;
 	GtkWidget* widget() const { return win; }   // the panel, docked under the canvas
+	// For --show scope: how big it's drawn and what's in it, on stderr.
+	void describe() const;
 
 private:
 	struct Button { RectF r; int id; };

@@ -50,6 +50,8 @@ public:
 
 	// ---- For the canvas ----
 	Canvas* currentCanvas() const;
+	// The docked oscilloscope, once it has been opened (else null).
+	ScopeWindow* scopeWindow() const { return scope; }
 	int currentPage() const;                // the engine's index of the page in front
 	// For the guided tour, to point a bubble at each: the palette, the run
 	// button, the tab strip. currentCanvas()->widget() is the fourth.
