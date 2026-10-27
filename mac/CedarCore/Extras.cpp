@@ -103,30 +103,16 @@ static bool movingSet(const CLDocument* doc, int page, ClMovingSet& out) {
 	return true;
 }
 
-// The moving set in two (CL_LAYER_MOVING_RIGID and _LIVE): the gates, with
-// the wires that slide whole with them -- selected (moved whole, see
-// cl_edit_drag) and with every end on a moving gate -- and the other wires,
-// which reshape.
-static void splitRigid(const CLDocument* doc, int page, const ClMovingSet& all, ClMovingSet& rigid, ClMovingSet& live) {
+// The moving set in two (CL_LAYER_MOVING_RIGID and _LIVE): the gates, which
+// only change place as the move goes on, and the wires. Not even a selected
+// wire with both ends on moving gates is rigid: cl_edit_drag moves it whole
+// and then the gates' pins pull its ends (guiWire::move, updateConnectionPos),
+// and pictures of a select-all drag showed its ends a step off.
+static void splitRigid(const ClMovingSet& all, ClMovingSet& rigid, ClMovingSet& live) {
 	rigid.gates = all.gates;
 	rigid.wires.clear();
 	live.gates.clear();
-	live.wires.clear();
-	std::vector<unsigned long> whole;
-	for (const WireState& s : doc->gesture.preMoveWire) whole.push_back(s.id);
-	std::sort(whole.begin(), whole.end());
-	GUICanvas* p = doc->page(page);
-	for (unsigned long id : all.wires) {
-		bool slides = std::binary_search(whole.begin(), whole.end(), id);
-		if (slides && p) {
-			auto it = p->getWireList()->find(id);
-			if (it == p->getWireList()->end() || it->second == nullptr) slides = false;
-			else
-				for (const wireConnection& c : it->second->getConnections())
-					if (!std::binary_search(all.gates.begin(), all.gates.end(), c.gid)) { slides = false; break; }
-		}
-		(slides ? rigid : live).wires.push_back(id);
-	}
+	live.wires = all.wires;
 }
 
 bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double backingScale,
@@ -139,7 +125,7 @@ bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double bac
 	if (!movingSet(doc, page, moving)) return false;
 	if (layer == CL_LAYER_MOVING_RIGID || layer == CL_LAYER_MOVING_LIVE) {
 		ClMovingSet rigid, live;
-		splitRigid(doc, page, moving, rigid, live);
+		splitRigid(moving, rigid, live);
 		moving = layer == CL_LAYER_MOVING_RIGID ? rigid : live;
 		layer = CL_LAYER_MOVING;
 	}
@@ -160,7 +146,7 @@ bool cl_document_moving_rigid(const CLDocument* doc, int page, double* dx, doubl
                               double* left, double* bottom, double* right, double* top) {
 	ClMovingSet moving, rigid, live;
 	if (!movingSet(doc, page, moving)) return false;
-	splitRigid(doc, page, moving, rigid, live);
+	splitRigid(moving, rigid, live);
 	GUICanvas* p = doc->page(page);
 	if (p == nullptr) return false;
 	klsBBox box;
@@ -173,10 +159,6 @@ bool cl_document_moving_rigid(const CLDocument* doc, int page, double* dx, doubl
 	for (unsigned long id : rigid.gates) {
 		auto it = p->getGateList()->find(id);
 		if (it != p->getGateList()->end() && it->second) add(it->second->getBBox());
-	}
-	for (unsigned long id : rigid.wires) {
-		auto it = p->getWireList()->find(id);
-		if (it != p->getWireList()->end() && it->second) add(it->second->getBBox());
 	}
 	if (!any) return false;
 	if (dx) *dx = doc->gesture.lastDelta.x;

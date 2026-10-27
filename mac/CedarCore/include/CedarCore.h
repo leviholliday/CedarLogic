@@ -476,17 +476,16 @@ bool cl_document_draw_layer(CLDocument *doc, int page, CLContext ctx, double bac
                             double originX, double originY, double unitsPerPoint,
                             const CLDrawOptions *options, int layer);
 // The moving layer in two, for a canvas that keeps a picture of what moves
-// as well: CL_LAYER_MOVING_RIGID is the gates being moved and the wires that
-// slide whole with them (selected, every end on a moving gate), which only
-// change place as the move goes on; CL_LAYER_MOVING_LIVE is the rest of the
-// moving layer, the wires that reshape. Together they are CL_LAYER_MOVING,
-// but for the order where they overlap (draw LIVE first: gates go over wires).
+// as well: CL_LAYER_MOVING_RIGID is the gates being moved, which only change
+// place as the move goes on; CL_LAYER_MOVING_LIVE is the moving layer's
+// wires, which can reshape (even selected ones: the pins pull their ends).
+// LIVE, then RIGID over it, is CL_LAYER_MOVING.
 enum { CL_LAYER_MOVING_RIGID = 3, CL_LAYER_MOVING_LIVE = 4 };
 // How far the parts being moved on a page have gone since the move started
-// (dx, dy in world units, whole snap steps), and the box round the rigid
-// ones where they are now (their bounding boxes; what's drawn for them --
-// halos, lock badges, wire dots -- reaches a little past it). False when
-// nothing is moving there. Any pointer may be null.
+// (dx, dy in world units, whole snap steps), and the box round the moving
+// gates where they are now (their bounding boxes; what's drawn for them --
+// halos, lock badges -- reaches a little past it). False when nothing is
+// moving there. Any pointer may be null.
 bool cl_document_moving_rigid(const CLDocument *doc, int page, double *dx, double *dy,
                               double *left, double *bottom, double *right, double *top);
 // What is moving on a page now, as a number: it changes when another move

@@ -188,11 +188,10 @@ private:
 	int layerFrames = 0, layerBuilds = 0;
 	void dropLayer();
 
-	// And the moving parts that only slide (cl_document_moving_rigid: the
-	// gates and the wires that go whole with them -- all of it for a select
-	// all): drawn once into `movingImage`, when the static layer is made, and
-	// copied each frame, moved by whole pixels; the wires that reshape are
-	// drawn live under it. It's made again with the static layer (the same
+	// And the moving gates, which only slide (cl_document_moving_rigid):
+	// drawn once into `movingImage`, when the static layer is made, and
+	// copied each frame, moved by whole pixels; the moving wires, which can
+	// reshape, are drawn live under it. It's made again with the static layer (the same
 	// key, and redraw()), and not used while a new selection's halo fades in
 	// (those frames draw the moving parts as before), for fewer than 8
 	// selected gates (cheap to draw, and then exact), when it would be too

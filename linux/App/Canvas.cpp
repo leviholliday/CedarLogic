@@ -657,9 +657,9 @@ bool Canvas::drawLayered(cairo_t* cr, int scale, const CLDrawOptions& o, const G
 	return true;
 }
 
-// The moving parts over the static layer from their image (see Canvas.h):
-// the wires that reshape, drawn, then the parts that slide, copied. False:
-// draw them as they are instead.
+// The moving parts over the static layer, the gates from their image (see
+// Canvas.h): the wires drawn, then the gates copied over them, the order the
+// page is drawn in. False: draw them as they are instead.
 bool Canvas::drawMovingImage(cairo_t* cr, int scale, const CLDrawOptions& o) {
 	if (imagesOff || imagesDisabled || o.selectionFade < 1) return false;
 	CLDocument* doc = win->document();
@@ -672,8 +672,8 @@ bool Canvas::drawMovingImage(cairo_t* cr, int scale, const CLDrawOptions& o) {
 	const double k = scale / upp;   // device pixels a world unit
 	if (movingImage == nullptr || imageGeneration != layerGeneration || imageScale != scale) {
 		dropMovingImage();
-		// Room round the parts' boxes for what's drawn past them (halos,
-		// lock badges, wire dots).
+		// Room round the gates' boxes for what's drawn past them (halos,
+		// lock badges).
 		const double margin = 40.0 * scale;
 		const double x0 = std::floor((l - originX) * k - margin), y0 = std::floor((originY - t) * k - margin);
 		const double iw = std::ceil((r - l) * k + 2 * margin), ih = std::ceil((t - b) * k + 2 * margin);
