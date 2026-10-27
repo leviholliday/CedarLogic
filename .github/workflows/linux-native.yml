@@ -307,7 +307,10 @@ jobs:
           CEDARLOGIC_GLYPH_TEXT=0 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
             --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag-outlines.txt || true
           # Lab5 (53 gates, 40 wires), the circuit of the Zorin OS desktop test (linux/DESKTOP-TEST.md).
-          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+          # The frames it compares (layered and drawn whole, one gate and everything moved)
+          # go with the renders, to look at.
+          mkdir -p renders/bench-Lab5
+          CEDARLOGIC_BENCH_PICTURES=renders/bench-Lab5 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
             --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5.txt || true
           CEDARLOGIC_GLYPH_TEXT=0 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
             --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5-outlines.txt || true

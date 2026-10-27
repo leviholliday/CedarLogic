@@ -194,7 +194,8 @@ private:
 	// copied each frame, moved by whole pixels; the wires that reshape are
 	// drawn live under it. It's made again with the static layer (the same
 	// key, and redraw()), and not used while a new selection's halo fades in
-	// (those frames draw the moving parts as before), when it would be too
+	// (those frames draw the moving parts as before), for fewer than 8
+	// selected gates (cheap to draw, and then exact), when it would be too
 	// big (zoomed far in), or with CEDARLOGIC_DRAG_IMAGE=0. Off by at most
 	// half a pixel until the drop draws it exactly.
 	cairo_surface_t* movingImage = nullptr;

@@ -664,6 +664,9 @@ bool Canvas::drawMovingImage(cairo_t* cr, int scale, const CLDrawOptions& o) {
 	if (imagesOff || imagesDisabled || o.selectionFade < 1) return false;
 	CLDocument* doc = win->document();
 	const int p = page();
+	// A few gates cost next to nothing to draw (one: 0.03 ms on CI), and
+	// drawn they sit exactly where they are: the image is for many.
+	if (cl_edit_selected_gate_count(doc, p) < 8) return false;
 	double dx = 0, dy = 0, l = 0, b = 0, r = 0, t = 0;
 	if (!cl_document_moving_rigid(doc, p, &dx, &dy, &l, &b, &r, &t)) return false;
 	const double k = scale / upp;   // device pixels a world unit

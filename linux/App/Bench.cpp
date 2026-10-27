@@ -237,6 +237,12 @@ struct CanvasBench {
 		cairo_surface_t* layered = picture(false);
 		const int fromLayer = c->layerFrames, fromImage = c->imageFrames;
 		cairo_surface_t* whole = picture(true);
+		// CEDARLOGIC_BENCH_PICTURES=<folder>: both pictures, to look at.
+		if (const char* dir = g_getenv("CEDARLOGIC_BENCH_PICTURES")) {
+			const std::string base = std::string(dir) + (all ? "/compare-all-" : "/compare-one-");
+			cairo_surface_write_to_png(layered, (base + "layered.png").c_str());
+			cairo_surface_write_to_png(whole, (base + "whole.png").c_str());
+		}
 		long differ = 0, faint = 0;
 		int most = 0;
 		const int stride = cairo_image_surface_get_stride(layered);
