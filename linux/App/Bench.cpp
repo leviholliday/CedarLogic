@@ -11,6 +11,10 @@
 //     GTK as a real drag is, at the screen's own scale and the way this
 //     display draws; the canvas's draw times and the time between frames.
 //
+// Then both again with the simulation running (the circuit's clock going), as
+// in normal use: the steps that change a wire's colour ask for a redraw(), which
+// drops the drag's static layer; those rows count the layers made again.
+//
 // Everything dragged is put back (cl_edit_cancel), nothing is saved.
 
 #include "Bench.h"
@@ -145,8 +149,10 @@ struct CanvasBench {
 	}
 
 	// Part 1: one kind of drag at one scale, one way of drawing.
+	// sim: the simulation runs between the moves, as CircuitWindow::tick runs it
+	// at 60 frames a second (stepMs: the step length for the row, 0: the circuit's).
 	void stepped(const char* label, int steps, int scale, int path, bool fast, int kind, double gx, double gy, bool whole = false,
-	             bool noImage = false) {
+	             bool noImage = false, bool sim = false, int stepMs = 0) {
 		const Canvas::View saved = c->view();
 		c->scaleOverride = scale;
 		c->pathOverride = path;
@@ -170,6 +176,12 @@ struct CanvasBench {
 			return t;
 		};
 		const guint button = kind == 2 ? 2 : 1;
+		const int keepStepMs = cl_document_step_ms(doc);
+		if (sim) {
+			if (stepMs > 0) cl_document_set_step_ms(doc, stepMs);
+			cl_document_set_running(doc, true);
+			for (int i = 0; i < 30; i++) cl_document_tick(doc, 1000.0 / 60);   // past the start
+		}
 		if (kind == 1) cl_edit_select_all(doc, page);
 		press(gx, gy, button);
 		if (kind == 1 && cl_edit_selected_gate_count(doc, page) < 2)
@@ -178,12 +190,25 @@ struct CanvasBench {
 		// real drag; while it does, the moving parts are drawn each frame.
 		if (kind != 2) settleFade();
 		drawOnce();   // the first frame makes the images; not counted
-		std::vector<double> draws, handlers;
+		const int frames0 = c->layerFrames, builds0 = c->layerBuilds, imageBuilds0 = c->imageBuilds;
+		std::vector<double> draws, handlers, ticks;
+		int shown = 0;
 		for (int i = 0; i < steps; i++) {
 			double x, y;
 			pathPoint(i, steps, gx, gy, x, y);
 			handlers.push_back(move(x, y, button));
+			if (sim) {
+				const double t0 = nowMs();
+				const int r = cl_document_tick(doc, 1000.0 / 60);
+				ticks.push_back(nowMs() - t0);
+				// Window::tick: a step that changed what shows redraws.
+				if (r & CL_TICK_SHOWN) { c->redraw(); shown++; }
+			}
 			draws.push_back(drawOnce());
+		}
+		if (sim) {
+			cl_document_set_running(doc, false);
+			cl_document_set_step_ms(doc, keepStepMs);
 		}
 		endDrag(button);
 		cl_edit_select_none(doc, page);
@@ -194,7 +219,15 @@ struct CanvasBench {
 		c->imagesDisabled = keepImages;
 		cairo_surface_destroy(target);
 		printRow(label, summarize(draws), summarize(handlers));
-		if (kind != 2 && !whole && !keepAll)
+		if (sim && kind != 2) {
+			const int kept = c->layerFrames - frames0;
+			char layers[200] = "";
+			if (!whole && !keepAll)
+				snprintf(layers, sizeof layers, "%d of %d frames from the kept layer, %d drawn whole, %d static layer%s rebuilt (%d with the image), ",
+				         kept, steps, steps - kept, c->layerBuilds - builds0, c->layerBuilds - builds0 == 1 ? "" : "s", c->imageBuilds - imageBuilds0);
+			printf("  %-30s (%sthe sim changed the picture on %d of %d frames; the sim's tick: mean %.2f ms, worst %.2f)\n", "", layers,
+			       shown, steps, summarize(ticks).mean, summarize(ticks).worst);
+		} else if (kind != 2 && !whole && !keepAll)
 			printf("  %-30s (%d of %d frames from the kept layer, %d layer%s made; %d with the moving parts' image, %d made)\n", "",
 			       c->layerFrames, steps, c->layerBuilds, c->layerBuilds == 1 ? "" : "s", c->imageFrames, c->imageBuilds);
 	}
@@ -291,17 +324,20 @@ struct CanvasBench {
 		l->i++;
 		return G_SOURCE_CONTINUE;
 	}
-	void live(const char* label, int steps, bool all, double gx, double gy) {
+	// sim: the window's own timer runs the simulation meanwhile (Run).
+	void live(const char* label, int steps, bool all, double gx, double gy, bool sim = false) {
 		std::vector<double> draws;
 		Live l;
 		l.b = this;
 		l.n = steps;
 		l.gx = gx;
 		l.gy = gy;
+		if (sim) w->setRunning(true);
 		if (all) cl_edit_select_all(doc, page);
 		press(gx, gy, 1);
 		pump(100);
 		settleFade();
+		c->layerFrames = c->layerBuilds = c->imageFrames = c->imageBuilds = 0;
 		c->drawTimes = &draws;
 		const guint tick = gtk_widget_add_tick_callback(c->area, liveTick, &l, nullptr);
 		const double giveUp = nowMs() + 60000;
@@ -309,6 +345,7 @@ struct CanvasBench {
 		if (!l.done) gtk_widget_remove_tick_callback(c->area, tick);   // it points at `l`
 		pump(50);
 		c->drawTimes = nullptr;
+		if (sim) w->setRunning(false);
 		endDrag(1);
 		cl_edit_select_none(doc, page);
 		c->redraw();
@@ -317,6 +354,9 @@ struct CanvasBench {
 		printRow(label, d, summarize(l.handlers));
 		printf("  %-30s %7.2f %7.2f %7.2f %7.2f   (%.0f frames a second, %zu draws for %d moves)\n", "  time between frames",
 		       f.mean, f.median, f.p95, f.worst, f.mean > 0 ? 1000 / f.mean : 0.0, d.n, steps);
+		if (sim)
+			printf("  %-30s (%d of %zu draws from the kept layer, %zu drawn whole, %d static layer%s made, the first included (%d with the image))\n", "",
+			       c->layerFrames, d.n, d.n - std::min((size_t)c->layerFrames, d.n), c->layerBuilds, c->layerBuilds == 1 ? "" : "s", c->imageBuilds);
 	}
 };
 
@@ -375,10 +415,34 @@ int dragBenchmark(CircuitWindow* window, int steps) {
 	printf(header, "", "mean", "median", "p95", "worst", "handler");
 	b.live("one gate: canvas draw", steps, false, gx, gy);
 	b.live("select all: canvas draw", steps, true, gx, gy);
+
+	// The same drag with the simulation running (the circuit's clock going): the
+	// kept static layer is dropped whenever a step changes a wire's colour.
+	printf("\nWith the simulation running (%d ms a step, ticked at 60 frames a second; the 1 ms rows step up to 17 times a frame):\n",
+	       cl_document_step_ms(b.doc));
+	for (int scale : { 1, 2 }) {
+		printf("\nStep by step at scale %d, simulation running, ms per frame:\n", scale);
+		printf(header, "", "mean", "median", "p95", "worst", "handler");
+		for (const Kind& k : kinds) {
+			if (k.id == 2) continue;
+			const std::string run = std::string(k.name) + ", straight, sim";
+			const std::string whole = std::string(k.name) + ", straight, whole page, sim";
+			const std::string quick = std::string(k.name) + ", straight, sim 1 ms steps";
+			b.stepped(run.c_str(), steps, scale, 2, false, k.id, gx, gy, false, false, true);
+			b.stepped(whole.c_str(), steps, scale, 2, false, k.id, gx, gy, true, false, true);
+			b.stepped(quick.c_str(), steps, scale, 2, false, k.id, gx, gy, false, false, true, 1);
+		}
+	}
+	printf("\nLive, on the frame clock, at the screen's scale (%d), simulation running:\n", screenScale);
+	printf(header, "", "mean", "median", "p95", "worst", "handler");
+	b.live("one gate: canvas draw, sim", steps, false, gx, gy, true);
+	b.live("select all: canvas draw, sim", steps, true, gx, gy, true);
 	printf("\n\"through frame\" is how X11 draws (and every display did before);\n"
 	       "\"straight\" is how Wayland draws now. \"fast AA\" is CEDARLOGIC_FAST_DRAG=1 (off by default).\n"
 	       "\"whole page\" draws every part every frame, as before the kept static layer (CEDARLOGIC_DRAW_ALL=1).\n"
-	       "\"no image\" draws the moving parts every frame, as before their kept image (CEDARLOGIC_DRAG_IMAGE=0).\n");
+	       "\"no image\" draws the moving parts every frame, as before their kept image (CEDARLOGIC_DRAG_IMAGE=0).\n"
+	       "\"sim\" rows run the simulation between moves, as Window::tick does, and redraw() when a step changed what shows;\n"
+	       "\"rebuilt\" counts the static layers made again after the first (a clock's wire colours changing under the drag).\n");
 	fflush(stdout);
 	return 0;
 }
