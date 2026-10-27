@@ -1285,10 +1285,13 @@ struct SessionDriver {
 		case 49: {
 			// A copy in a window of its own, closed again: windows come and go mid-session.
 			const int before = CircuitWindow::liveCount;
+			const std::vector<CircuitWindow*> had = circuitWindows();
 			w->duplicateCircuit();
 			pump(200);
+			// Only the copy: a window that was already open (another action
+			// opened it) stays.
 			for (CircuitWindow* o : std::vector<CircuitWindow*>(circuitWindows()))
-				if (o != w) gtk_window_close(o->window());
+				if (std::find(had.begin(), had.end(), o) == had.end()) gtk_window_close(o->window());
 			pump(100);
 			if (CircuitWindow::liveCount != before) fail(format("a duplicate's window, closed, left %d windows alive (%d before)", CircuitWindow::liveCount, before));
 			break;
