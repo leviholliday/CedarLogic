@@ -269,6 +269,9 @@ void TileGrid::dragTo(float x, float y) {
 	w->pointerMoved(wx, wy);
 	if (!placed) {
 		placed = w->addGateFloatingOn(c, palette->shownGates()[pressed].name, wx, wy);
+		// The canvas takes the keys while the gate is on the pointer, so C
+		// (drop it and connect it) and the rest work without dropping it first.
+		if (placed) gtk_widget_grab_focus(c->widget());
 	} else if (w->isFloating()) {
 		const int p = c->page();
 		if (p >= 0 && cl_edit_hover(w->document(), p, wx, wy, c->unitsPerPoint())) c->redraw();
