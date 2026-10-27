@@ -83,10 +83,17 @@ Wayland display for 12 s (clean exit by timeout, nothing on stderr).
   "3-input N...") for most gates. It looks deliberate (ellipsis) but a long
   label is hard to tell apart. Not changed.
 - The Simulation View scope dock rendered as an empty dark panel in the
-  `scope` screenshot for Lab5. That may just mean no probe is set; I did not
-  prove it either way.
-- The `truth` window didn't render with the screenshot flag for Lab5 (exit
-  non-zero; not looked into).
+  `scope` screenshot, on Lab5 and on the SR latch template, with no
+  "Oscilloscope" header or close button, although `Scope.cpp` draws both.
+  I tried to see it through a real X framebuffer grab (xdotool Ctrl+G, `xwd`)
+  but that grab was unusable (a black rectangle where a window hadn't painted).
+  So I can't say whether the dock is blank in a real window or only in
+  `--screenshot`'s capture. Worth a look by eye.
+- `--show truth` on Lab5 prints "nothing to picture": Lab5's first page has
+  no switch-to-light table, so the app shows its "A truth table couldn't be
+  made" message instead of the Truth Table window. That is expected. On
+  `res/templates/template-builtin-ff-sr.cdl` the window renders cleanly
+  (2 switches, 2 lights, 4 rows, tabs for Karnaugh Map, Formulas and Check).
 - The PNG captures have black pixels in the window's rounded corners. That is
   the capture, not the window.
 
@@ -117,8 +124,14 @@ Both are changes to `SessionCheck.cpp` only. I found no app bug.
   looking at screenshots, not by a person.
 - No HiDPI or fractional scaling: this screen is scale 1.0. Scale 2 numbers
   are the benchmark's simulation.
-- Seed 8 fatal-criticals on X11 was not rerun after the Duplicate fix.
-- The scope dock and the `truth` window screenshot are unresolved.
+- Seed 8 with `G_DEBUG=fatal-criticals` on Xvfb X11 is intermittent after the
+  Duplicate fix: 2 of 4 runs through `session-check.sh` failed the last check
+  ("the window closed, and was freed with its circuit (1 circuit windows alive,
+  1 before)", 0 expected) and 4 of 4 direct runs passed, including one with
+  debug output that would have listed the window left. No GTK warning. I could
+  not capture a failing run with output, so I don't know whether a second
+  window is left over or the close takes longer than the check waits (1.5 s).
+- The scope dock being blank in `--screenshot` is unresolved (above).
 
 ## Left to look at
 
