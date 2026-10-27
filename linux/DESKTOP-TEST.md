@@ -151,5 +151,15 @@ Both are changes to `SessionCheck.cpp` only. I found no app bug.
 - Ctrl+Tab cards: works; the owner would like them to look more like the Mac
   app's. Not changed; to be talked through first.
 
-Both fixes build and pass session-check seeds 1 and 2 (plain, fatal-criticals,
-frame-whole) on Xvfb X11. Neither is covered by an automated check.
+The first fixes for A and C (71d3b78, 1a552bb, a8e2e8b) didn't fix them on
+Wayland. Debug output from the owner's run showed why: after the picker
+closed, the canvas thought the pointer was outside and GDK's answer was stale
+(A), and C's key did reach the canvas but needed the canvas to have seen the
+pointer come in, which a drag from the panel never gives it. The fix that
+worked is in the commit after the Ctrl+Tab one; the owner confirmed both on
+Wayland. Neither is covered by an automated check.
+
+Ctrl+Tab (c3b338d): rounded, shadowed, slightly see-through panel that fades,
+cards drawn at each tab's own zoom, an accent ring, and a fix for a resting
+pointer picking a card. Session check passes on Xvfb and on Wayland; the look
+is for the owner to judge.
