@@ -139,3 +139,17 @@ Both are changes to `SessionCheck.cpp` only. I found no app bug.
   case; `SMOOTHNESS.md` step 3 (labels as cached glyphs) is where it would
   come from.
 - A person on this laptop should try Wayland dragging at 1366x768 by hand.
+
+## Found by hand, then fixed (owner testing, same laptop)
+
+- A on the keyboard put the gate in the top left corner until the mouse moved
+  (GDK reports 0, 0 for the pointer on Wayland after the picker closes). It
+  uses the canvas's own last pointer position now.
+- Dragging a gate in from the side panel, C did nothing until the gate was
+  dropped and picked up again (focus stayed on the panel). The canvas takes the
+  focus when the gate lands on it.
+- Ctrl+Tab cards: works; the owner would like them to look more like the Mac
+  app's. Not changed; to be talked through first.
+
+Both fixes build and pass session-check seeds 1 and 2 (plain, fatal-criticals,
+frame-whole) on Xvfb X11. Neither is covered by an automated check.
