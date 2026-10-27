@@ -170,17 +170,41 @@ jobs:
             timeout 60 "$APPIMAGE" --dark --sim-view --screenshot renders/window-sim.png res/samples/practice.cdl || true
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
+          # Labels drawn both ways (linux/SMOOTHNESS.md step 3): on x86_64 each picture
+          # below is taken again, straight after, with labels as Cairo's cached glyphs
+          # (CEDARLOGIC_GLYPH_TEXT=1), into renders/glyphs/, to compare pixel by pixel.
+          AGAIN_ENV=CEDARLOGIC_GLYPH_TEXT=1 AGAIN_DIR=renders/glyphs
+          mkdir -p "$AGAIN_DIR"
+          again() {
+            [ "$(uname -m)" = x86_64 ] || return 0
+            local out=$1; shift
+            env "$AGAIN_ENV" xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 60 "$APPIMAGE" "$@" --screenshot "$AGAIN_DIR/$out" res/samples/practice.cdl > /dev/null 2>&1 || true
+          }
+          again window-practice.png --light
           # The Mac's windows, as ported: one picture each.
           for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 help truth feedback templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu primary stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
+            again "show-$name.png" --show "$show"
           done
           # Check My Circuit clock pulse by clock pulse, on the 3-bit counter template.
           for show in checkclocked:0 checkclocked:1 checkclocked:2; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/templates/template-builtin-count-3bit.cdl || echo "no $show"
+          done
+          # A larger circuit (10 switches, a clock, TO labels): the truth table window
+          # and the oscilloscope with signals in it, in both themes and Simulation View.
+          # What each run said goes with the pictures.
+          for run in truth:--light scope:--light scope:--dark scope:--sim-view; do
+            show=${run%%:*}; flag=${run##*:}
+            out="renders/show-$show-Lab5-${flag#--}"
+            rc=0
+            xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 60 "$APPIMAGE" $flag --show "$show" --screenshot "$out.png" format/tests/fixtures/Lab5.cdl > "$out.log" 2>&1 || rc=$?
+            echo "Lab5 $show $flag: exit $rc" | tee -a "$out.log"
           done
           # Settings > Sync with sync turned on, against the stand-in server: the code is in the
           # sync folder as a turned-on computer has it, and the app syncs while it's pictured.
@@ -223,6 +247,7 @@ jobs:
                 name=$(echo "$show" | tr ':' '-')
                 xvfb-run -a -s "-screen 0 1600x1000x24" \
                   timeout 60 "$APPIMAGE" --$mode --show "$show" --screenshot "renders/pi-$theme-$mode-$name.png" res/samples/practice.cdl || echo "no pi $show"
+                again "pi-$theme-$mode-$name.png" --$mode --show "$show"
               done
             done
             rm -f ~/.config/gtk-3.0/settings.ini
@@ -246,6 +271,16 @@ jobs:
           done
           "$APPIMAGE" --feedback-probe || echo "feedback probe failed"
           linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
+          # The canvas alone, both ways, with nothing running (the same picture every time):
+          # light at 2x, and the dark and print exports.
+          for f in format/tests/fixtures/Lab5.cdl format/tests/fixtures/lab6.cdl format/tests/fixtures/jmSGTZM.cdl res/samples/practice.cdl; do
+            n=$(basename "$f" .cdl)
+            for look in screen dark print; do
+              fit=; [ $look = screen ] || fit=CL_RENDER_FITTED=$look
+              env $fit linux/build/render_png res/cl_gatedefs.xml "$f" 0 "renders/canvas-$n-$look.png" > /dev/null
+              env "$AGAIN_ENV" $fit linux/build/render_png res/cl_gatedefs.xml "$f" 0 "$AGAIN_DIR/canvas-$n-$look.png" > /dev/null
+            done
+          done
           cp before.png after.png renders/
 
       # How smooth dragging is (linux/SMOOTHNESS.md): ms per frame while
@@ -270,6 +305,11 @@ jobs:
             timeout 60 "$APPIMAGE" --screenshot renders/window-practice-paths.png res/samples/practice.cdl || true
           CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
             --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag-glyphs.txt || true
+          # Lab5 (53 gates, 40 wires), the circuit of the Zorin OS desktop test (linux/DESKTOP-TEST.md).
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5.txt || true
+          CEDARLOGIC_GLYPH_TEXT=1 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5-glyphs.txt || true
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7
