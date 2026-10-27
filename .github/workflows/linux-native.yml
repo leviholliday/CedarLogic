@@ -38,7 +38,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install dependencies
         run: |
@@ -66,7 +66,7 @@ jobs:
 
       - name: Upload the session logs
         if: always() && matrix.arch == 'x86_64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: CedarLogic-Native-linux-session-logs
           path: session-logs
@@ -117,8 +117,16 @@ jobs:
 
       - name: Package AppImage
         run: |
+          # Pinned: the 1-alpha-20251107-1 release (not the moving "continuous"
+          # one), and checked against its sha256 before it is ever run.
+          case "${{ matrix.arch }}" in
+            x86_64)  LD_SHA=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d ;;
+            aarch64) LD_SHA=620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff ;;
+            *) echo "no pinned linuxdeploy for ${{ matrix.arch }}" >&2; exit 1 ;;
+          esac
           curl -fsSL -o linuxdeploy \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-${{ matrix.arch }}.AppImage
+          echo "$LD_SHA  linuxdeploy" | sha256sum -c -
           chmod +x linuxdeploy
           set -o pipefail
           OUT=$(LINUXDEPLOY="$PWD/linuxdeploy" linux/package.sh linux/build-release | tail -1)
@@ -143,7 +151,7 @@ jobs:
           test -f /usr/share/icons/hicolor/256x256/apps/cedarlogic.png
 
       - name: Upload .deb
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs/*.deb
@@ -243,8 +251,10 @@ jobs:
           # light PibotoLt face, from the Raspberry Pi archive): Settings, the
           # menus and the cards, as they look on a Pi.
           if [ "$(uname -m)" = x86_64 ] &&
-             curl -fsSL -o /tmp/piboto.deb http://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
-             curl -fsSL -o /tmp/pixflat.deb http://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb; then
+             curl -fsSL -o /tmp/piboto.deb https://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
+             curl -fsSL -o /tmp/pixflat.deb https://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb &&
+             echo "ae9418e029e654e2fbe9ce33768ea5985fa91441d1f8ac2cf7e015f0f2539fad  /tmp/piboto.deb" | sha256sum -c - &&
+             echo "56e518b2321a1784b39566885df595661b99781b26e439dd09a6ba1d56858c66  /tmp/pixflat.deb" | sha256sum -c -; then
             sudo dpkg-deb -x /tmp/piboto.deb / && sudo dpkg-deb -x /tmp/pixflat.deb / && fc-cache -f > /dev/null
             mkdir -p ~/.config/gtk-3.0
             for look in PiXflat:light PiXnoir:dark PiXflat:dark; do
@@ -316,7 +326,7 @@ jobs:
             --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5-outlines.txt || true
 
       - name: Upload AppImage
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: CedarLogic-Native-linux-appimage-${{ matrix.arch }}
           path: linux/build-release/CedarLogic-Native-*-${{ matrix.arch }}.AppImage
@@ -324,7 +334,7 @@ jobs:
 
       - name: Upload renders
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
           path: renders
@@ -339,7 +349,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -370,7 +380,7 @@ jobs:
           SESSION_LOGS=session-logs-asan/more linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 9 10 11 12
       - name: Upload the session logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: CedarLogic-Native-linux-session-logs-asan
           path: session-logs-asan
@@ -392,7 +402,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs
@@ -421,7 +431,7 @@ jobs:
     container: debian:12
     timeout-minutes: 20
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs
@@ -446,17 +456,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download both AppImages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: CedarLogic-Native-linux-appimage-*
           path: appimages
           merge-multiple: true
 
       - name: Download both .debs
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: CedarLogic-Native-linux-deb-*
           path: appimages
