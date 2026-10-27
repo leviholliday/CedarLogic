@@ -147,7 +147,14 @@ gboolean showCaptureCb(gpointer) {
 	if (what == "welcome") top = welcome::window();
 	else if (what == "whatsnew") top = whatsnew::window();
 	else if (what == "help") top = help::window();
-	else if (what == "truth") top = toplevelTitled("Truth Table");
+	else if (what == "truth") {
+		// A page with no truth table to make -- a clocked circuit with more
+		// than 8 switches (Lab5 has 10) or none -- opens Check My Circuit on
+		// its own instead, as the Mac's does: that's the window to picture.
+		top = toplevelTitled("Truth Table");
+		if (!top && (top = toplevelTitled("Check My Circuit")))
+			fprintf(stderr, "truth: no truth table for this page; Check My Circuit opened by itself, pictured instead\n");
+	}
 	else if (what == "checkclocked") top = toplevelTitled("Check My Circuit") ? toplevelTitled("Check My Circuit") : toplevelTitled("Truth Table");
 	else if (what == "feedback") top = toplevelTitled("Send Feedback");
 	else if (what == "templates") top = toplevelTitled("New from Template");
