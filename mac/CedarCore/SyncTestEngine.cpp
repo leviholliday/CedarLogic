@@ -370,7 +370,10 @@ void engineEndToEnd(Crypto& cr, const std::string& dir) {
 	ECHECK(waitFor([&] { return a.engine->status().kind == Status::Synced && liveCircuits(server) == 4; }, 5000));
 	ui.sync([&] { a.engine->turnOff(true); });
 	ECHECK(waitFor([&] { return folderNames(a.root).empty(); }, 5000));
-	ECHECK(!a.engine->enabled() && a.host.loadSecret().empty());
+	// The circuits go first; the secret only after this device leaves the
+	// server's list, a request a slow machine can still be making here.
+	ECHECK(!a.engine->enabled());
+	ECHECK(waitFor([&] { return a.host.loadSecret().empty(); }, 5000));
 
 	// Destroying engines mid-way never hangs.
 	ui.sync([&] {
