@@ -79,6 +79,7 @@ public:
 	// ---- Tabs, and split view (the Mac's SplitState) ----
 	// A tab is a page; its number is the page's index in the document.
 	int tabCount() const { return (int)canvases.size(); }
+	Canvas* canvasOfPage(int page) const { return page >= 0 && page < (int)canvases.size() ? canvases[(size_t)page] : nullptr; }
 	std::string tabName(int page) const { return pageName(page); }
 	std::string pageName(int page) const;
 	int currentTab() const { return currentPage(); }

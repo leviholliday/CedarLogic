@@ -135,6 +135,25 @@ void Canvas::worldPoint(double vx, double vy, double& wx, double& wy) const {
 	wy = originY - vy * upp;
 }
 
+bool Canvas::drawThumbnail(cairo_t* cr, double tw, double th, int scale, bool dark, double vw, double vh) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	if (doc == nullptr || p < 0 || needsFit) return false;
+	if (width() > 50 && height() > 50) { vw = width(); vh = height(); }
+	if (vw < 50 || vh < 50) return false;
+	const double tupp = std::max(vw * upp / tw, vh * upp / th);
+	const double cx = originX + vw * upp / 2, cy = originY - vh * upp / 2;
+	CLDrawOptions o{};
+	o.dark = dark;
+	o.accent = prefs().accent;
+	o.wireScale = prefs().wireScale();
+	o.showSelection = false;
+	o.selectionFade = 1;
+	o.ink = CL_INK_FOLLOW;
+	cl_document_draw_ex(doc, p, cr, scale, cx - tw / 2 * tupp, cy + th / 2 * tupp, tupp, &o);
+	return true;
+}
+
 void Canvas::center(double& wx, double& wy) const { worldPoint(width() / 2, height() / 2, wx, wy); }
 
 bool Canvas::pointerWorld(double& wx, double& wy) const {

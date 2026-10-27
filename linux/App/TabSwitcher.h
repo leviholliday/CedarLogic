@@ -37,6 +37,16 @@ private:
 	GtkWidget* panel = nullptr;
 	GtkWidget* area = nullptr;
 	guint showTimer = 0;
+	guint fadeTimer = 0;
+	gint64 fadeStart = 0;
+	// The panel floats (rounded, with a shadow, a little see-through) when the
+	// desktop composites; on one that doesn't it's a plain card.
+	bool glass = false;
+	float margin = 0;
+	// The pointer resting under the panel as it comes up isn't a pick: it has
+	// to move first (the Mac's does the same).
+	bool haveBase = false, armed = false;
+	double baseX = 0, baseY = 0;
 	std::vector<RectF> cards;
 
 	void commit(int index);
