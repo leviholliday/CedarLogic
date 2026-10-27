@@ -145,6 +145,7 @@ struct CLLayout: View {
         .onReceive(canvas.$simView) { v in if split.controller.simView != v { split.controller.simView = v } }
         .onReceive(split.controller.$simView) { v in if canvas.simView != v { canvas.simView = v } }
         .modifier(DrawingWindowSync(canvas: canvas, split: split, focusMode: $focusMode))
+        .modifier(PutAwaySheet(canvas: canvas, settingsFor: $settingsFor))
         .onChange(of: prefs.classicTabs) { _, classic in if classic { split.close(document, leftPage: $page) } }
         // Revealed by the launch screen: the grid fades in as it goes.
         .onReceive(NotificationCenter.default.publisher(for: .clSplashDone)) { _ in canvas.playAppear() }
@@ -280,6 +281,8 @@ extension Notification.Name {
     static let clSplit = Notification.Name("clSplit")
     static let clSwitchPane = Notification.Name("clSwitchPane")
     static let clCloseSplit = Notification.Name("clCloseSplit")
+    /// A window's sheets were put away (CanvasController.putAwaySheets): object the controller.
+    static let clPutAwaySheets = Notification.Name("clPutAwaySheets")
 }
 
 /// Split View, Switch Pane and Close Split, wherever the command comes from
@@ -2338,7 +2341,8 @@ struct CLStatusBar: View {
     }
 }
 
-/// The status line's message, fading in, and out again after a while.
+/// The status line's message, fading in, and out again after a while (the
+/// controller clears it: CanvasController.statusMessage).
 private struct StatusMessage: View {
     @ObservedObject var canvas: CanvasController
     var body: some View {
@@ -2346,10 +2350,19 @@ private struct StatusMessage: View {
             .id(canvas.statusMessage)
             .transition(.opacity)
             .animation(.easeOut(duration: 0.2), value: canvas.statusMessage)
-            .onChange(of: canvas.statusMessage) { _, m in
-                guard !m.isEmpty else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { if canvas.statusMessage == m { canvas.statusMessage = "" } }
-            }
+    }
+}
+
+/// A gate's Settings sheet, let go of when the window's sheets are put
+/// away (a sheet that couldn't be seen was ended).
+private struct PutAwaySheet: ViewModifier {
+    let canvas: CanvasController
+    @Binding var settingsFor: CanvasController?
+
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .clPutAwaySheets)) { n in
+            if (n.object as? CanvasController) === canvas, settingsFor != nil { settingsFor = nil }
+        }
     }
 }
 

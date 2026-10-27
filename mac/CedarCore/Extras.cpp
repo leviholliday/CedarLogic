@@ -103,12 +103,32 @@ static bool movingSet(const CLDocument* doc, int page, ClMovingSet& out) {
 	return true;
 }
 
+// The moving set in two (CL_LAYER_MOVING_RIGID and _LIVE): the gates, which
+// only change place as the move goes on, and the wires. Not even a selected
+// wire with both ends on moving gates is rigid: cl_edit_drag moves it whole
+// and then the gates' pins pull its ends (guiWire::move, updateConnectionPos),
+// and pictures of a select-all drag showed its ends a step off.
+static void splitRigid(const ClMovingSet& all, ClMovingSet& rigid, ClMovingSet& live) {
+	rigid.gates = all.gates;
+	rigid.wires.clear();
+	live.gates.clear();
+	live.wires = all.wires;
+}
+
 bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double backingScale,
                             double originX, double originY, double unitsPerPoint,
                             const CLDrawOptions* o, int layer) {
-	if (o == nullptr || o->thumbnail || (layer != CL_LAYER_STATIC && layer != CL_LAYER_MOVING)) return false;
+	if (o == nullptr || o->thumbnail) return false;
+	if (layer != CL_LAYER_STATIC && layer != CL_LAYER_MOVING && layer != CL_LAYER_MOVING_RIGID && layer != CL_LAYER_MOVING_LIVE)
+		return false;
 	ClMovingSet moving;
 	if (!movingSet(doc, page, moving)) return false;
+	if (layer == CL_LAYER_MOVING_RIGID || layer == CL_LAYER_MOVING_LIVE) {
+		ClMovingSet rigid, live;
+		splitRigid(moving, rigid, live);
+		moving = layer == CL_LAYER_MOVING_RIGID ? rigid : live;
+		layer = CL_LAYER_MOVING;
+	}
 	// The style exactly as cl_document_draw_ex makes it.
 	using cl::render::RenderStyle;
 	RenderStyle s = RenderStyle::screen(o->dark);
@@ -119,6 +139,34 @@ bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double bac
 	s.selectionFade = (float)std::min(1.0, std::max(0.0, o->selectionFade));
 	const int look = o->ink == CL_INK_ALWAYS_PRINT ? kInkLookPrint : (o->dark || o->simView) ? kInkLookDark : kInkLookLight;
 	clDrawPageLayer(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, look, &moving, layer);
+	return true;
+}
+
+bool cl_document_moving_rigid(const CLDocument* doc, int page, double* dx, double* dy,
+                              double* left, double* bottom, double* right, double* top) {
+	ClMovingSet moving, rigid, live;
+	if (!movingSet(doc, page, moving)) return false;
+	splitRigid(moving, rigid, live);
+	GUICanvas* p = doc->page(page);
+	if (p == nullptr) return false;
+	klsBBox box;
+	bool any = false;
+	auto add = [&](klsBBox b) {
+		if (b.empty()) return;
+		if (!any) box = b; else box.addBBox(b);
+		any = true;
+	};
+	for (unsigned long id : rigid.gates) {
+		auto it = p->getGateList()->find(id);
+		if (it != p->getGateList()->end() && it->second) add(it->second->getBBox());
+	}
+	if (!any) return false;
+	if (dx) *dx = doc->gesture.lastDelta.x;
+	if (dy) *dy = doc->gesture.lastDelta.y;
+	if (left) *left = box.getLeft();
+	if (right) *right = box.getRight();
+	if (bottom) *bottom = box.getBottom();
+	if (top) *top = box.getTop();
 	return true;
 }
 

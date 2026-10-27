@@ -174,6 +174,10 @@ bool cl_edit_paste(CLDocument *doc, int page, const char *text, double x, double
 // How many steps are on the undo stack (the app mirrors each into macOS's
 // undo manager, so the window knows it's edited and autosaves).
 int cl_edit_undo_count(const CLDocument *doc);
+// How many undo steps have been made in this document, ever (Undo and Redo
+// don't make one). At the full 500-step history cl_edit_undo_count stays
+// put while each new step drops the oldest: this still counts them.
+long cl_edit_steps_made(const CLDocument *doc);
 bool cl_edit_undo(CLDocument *doc);
 bool cl_edit_redo(CLDocument *doc);
 bool cl_edit_can_undo(const CLDocument *doc);
@@ -478,6 +482,19 @@ enum { CL_LAYER_STATIC = 1, CL_LAYER_MOVING = 2 };
 bool cl_document_draw_layer(CLDocument *doc, int page, CLContext ctx, double backingScale,
                             double originX, double originY, double unitsPerPoint,
                             const CLDrawOptions *options, int layer);
+// The moving layer in two, for a canvas that keeps a picture of what moves
+// as well: CL_LAYER_MOVING_RIGID is the gates being moved, which only change
+// place as the move goes on; CL_LAYER_MOVING_LIVE is the moving layer's
+// wires, which can reshape (even selected ones: the pins pull their ends).
+// LIVE, then RIGID over it, is CL_LAYER_MOVING.
+enum { CL_LAYER_MOVING_RIGID = 3, CL_LAYER_MOVING_LIVE = 4 };
+// How far the parts being moved on a page have gone since the move started
+// (dx, dy in world units, whole snap steps), and the box round the moving
+// gates where they are now (their bounding boxes; what's drawn for them --
+// halos, lock badges -- reaches a little past it). False when nothing is
+// moving there. Any pointer may be null.
+bool cl_document_moving_rigid(const CLDocument *doc, int page, double *dx, double *dy,
+                              double *left, double *bottom, double *right, double *top);
 // What is moving on a page now, as a number: it changes when another move
 // starts or other parts join it. 0 when nothing is moving there. A static
 // layer kept for one value is wrong for any other.
@@ -600,6 +617,10 @@ int cl_document_page_index(const CLDocument *doc, unsigned long long id);
 // drops it (the selection floats). The anchor is where the pointer is now.
 bool cl_edit_float_begin(CLDocument *doc, int page, double x, double y);
 bool cl_edit_is_floating(const CLDocument *doc);
+// Escape while it floats: it was never placed, so it's taken back -- the
+// gesture cancelled and its step undone -- and not kept for Redo (which
+// would bring back a gate the person never put down). False when nothing floats.
+bool cl_edit_take_back_float(CLDocument *doc);
 // Connect the selected gates' free pins to unambiguously close free pins
 // (the C key while dragging). Returns how many connections were made.
 // C while something is being moved (dragged, or floating on the pointer):

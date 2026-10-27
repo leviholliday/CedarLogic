@@ -71,6 +71,40 @@ enum UndoCheck {
         check(gates() == count0 - 5 && core.canRedo, "five undos take back five gates")
         edit()
         check(gates() == count0 - 4 && !um.canRedo && !core.canRedo, "a new edit after undos drops redo on both sides")
+
+        // One Cmd-Z, one step, at and around the full history: the step that
+        // reaches 500, an edit told twice (a paste or a drop is: on the
+        // pointer, then put down), and a look that changed nothing. Each
+        // once registered one more Undo, so one press took back two steps.
+        let fresh = CoreDocument()
+        let canvas2 = CanvasController()
+        canvas2.attach(fresh)
+        let um2 = UndoManager()
+        canvas2.undoManager = um2
+        var placed2 = 0
+        func add() {
+            let x = CGFloat(placed2 % 40) * 8, y = CGFloat(placed2 / 40) * 8
+            if fresh.addGate("AA_AND2", page: 0, at: CGPoint(x: x, y: y)) { placed2 += 1 }
+        }
+        let gates2 = { Int(cl_document_gate_count(fresh.handle, 0)) }
+        for _ in 0..<(CanvasController.engineHistoryLimit - 1) { add(); canvas2.edited(); turn() }
+        add(); canvas2.edited(); turn()   // the 500th step
+        var n = gates2()
+        um2.undo(); turn()
+        check(gates2() == n - 1, "Undo after the step that fills the history takes back one part (\(n) to \(gates2()))")
+        um2.redo(); turn()
+        add(); canvas2.edited(); canvas2.edited(); turn()   // at the limit, told twice
+        n = gates2()
+        um2.undo(); turn()
+        check(gates2() == n - 1, "at a full history, Undo after an edit told twice takes back one part (\(n) to \(gates2()))")
+        um2.redo(); turn()
+        add(); canvas2.edited(); turn()
+        canvas2.edited(); turn(); canvas2.edited(); turn()   // nothing changed
+        n = gates2()
+        um2.undo(); turn()
+        check(gates2() == n - 1, "at a full history, looks that change nothing add no Undo (\(n) to \(gates2()) parts)")
+        um2.undo(); turn()
+        check(gates2() == n - 2, "and the next Undo takes back the part before (\(gates2()) parts)")
         print(failures == 0 ? "undo-check: all passed" : "undo-check: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

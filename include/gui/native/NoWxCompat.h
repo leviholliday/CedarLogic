@@ -45,6 +45,7 @@ public:
 		undoStack.emplace_back(cmd);
 		if (undoStack.size() > kLimit) undoStack.erase(undoStack.begin());
 		changed = true;
+		stored++;
 	}
 	bool Undo() {
 		if (undoStack.empty()) return false;
@@ -71,6 +72,9 @@ public:
 	wxString GetUndoName() const { return undoStack.empty() ? wxString() : undoStack.back()->GetName(); }
 	wxString GetRedoName() const { return redoStack.empty() ? wxString() : redoStack.back()->GetName(); }
 	void ClearCommands() { undoStack.clear(); redoStack.clear(); }
+	// Forget the step a Redo would do again (one just undone that was never
+	// really made: a paste or a new gate taken back off the pointer).
+	void DropRedo() { if (!redoStack.empty()) redoStack.pop_back(); }
 	// The step an Undo would take back, and the one a Redo would do again
 	// (just after an undo, the one it undid).
 	wxCommand* GetUndoCommand() const { return undoStack.empty() ? nullptr : undoStack.back().get(); }
@@ -78,7 +82,12 @@ public:
 	// Whether anything was done or undone since the flag was last cleared
 	// (the document's "edited" dot).
 	bool changed = false;
+	// Steps stored since the processor was made: at the full history the
+	// count stays put as each new step drops the oldest, so this tells a
+	// new step from none (cl_edit_steps_made).
+	unsigned long StepsMade() const { return stored; }
 private:
+	unsigned long stored = 0;
 	static const size_t kLimit = 500;
 	std::vector<std::unique_ptr<wxCommand>> undoStack, redoStack;
 };

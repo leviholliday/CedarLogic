@@ -5,12 +5,13 @@
 #   mac/build.sh && mac/Tools/launch-selftest.sh [rounds]
 #
 # A copy of mac/build/CedarLogic.app with its own bundle id and home folder
-# (your settings and Your Circuits are never touched; no updater, no crash
-# reports; Classroom pointed at an address nothing answers) is set up in
-# each saved state and then "launched" with --launch-selftest, `rounds`
-# times over (default 3, so 30 launches): the welcome / What's New choice,
+# (your settings and Your Circuits are never touched; Classroom, the
+# updater and crash reports pointed at addresses nothing answers) is set up
+# in each saved state and then "launched" with --launch-selftest, `rounds`
+# times over (default 3, so 33 launches): the welcome / What's New choice,
 # which circuit reopens and that it opens, Your Circuits, versions, Sync and
-# Classroom starting offline, and (the "damaged" state) damaged circuits.
+# Classroom starting offline, the updater and crash reports with no network
+# ("offline"), and (the "damaged" state) damaged circuits.
 # No window opens. A launch
 # passes when it exits 0 within 60 s.
 set -uo pipefail
@@ -18,7 +19,7 @@ cd "$(dirname "$0")/../.."
 SRC=mac/build/CedarLogic.app
 [ -d "$SRC" ] || { echo "Build first: mac/build.sh"; exit 1; }
 ROUNDS=${1:-3}
-STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged)
+STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline)
 # STATES_ONLY="damaged" mac/Tools/launch-selftest.sh 40: only those states.
 [ -n "${STATES_ONLY:-}" ] && read -ra STATES <<<"$STATES_ONLY"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/cl-launch-selftest.XXXXXX")
@@ -27,7 +28,8 @@ ID=com.leviholliday.cedarlogic.native.launchselftest
 ditto "$SRC" "$APP"
 P="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set CFBundleIdentifier $ID" "$P"
-/usr/libexec/PlistBuddy -c "Delete SUPublicEDKey" "$P" 2>/dev/null
+# The update key stays (the updater only starts in the offline state, at a
+# feed that can't be reached: CL_UPDATE_FEED); crash reports go nowhere real.
 /usr/libexec/PlistBuddy -c "Delete SentryDSN" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete CFBundleURLTypes" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete CFBundleDocumentTypes" "$P" 2>/dev/null
@@ -36,6 +38,8 @@ mkdir -p "$WORK/home"
 run() {   # run <log> <args...>: the app, killed after 60 s
 	local log=$1; shift
 	CFFIXED_USER_HOME="$WORK/home" CL_CLASSROOM=1 CL_CLASSROOM_SERVICE=http://127.0.0.1:9 \
+		CL_UPDATE_FEED=https://updates.cedarlogic-offline.invalid/appcast.xml \
+		CL_SENTRY_DSN=https://00000000000000000000000000000000@reports.cedarlogic-offline.invalid/1 \
 		"$APP/Contents/MacOS/CedarLogic" "$@" >"$log" 2>&1 &
 	local pid=$!
 	( sleep 60; kill -9 $pid 2>/dev/null ) &

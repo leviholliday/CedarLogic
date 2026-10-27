@@ -22,7 +22,14 @@ enum CrashReports {
         return false
         #endif
     }
-    private static var dsn: String { Bundle.main.object(forInfoDictionaryKey: "SentryDSN") as? String ?? "" }
+    private static var dsn: String {
+        // CL_SENTRY_DSN: an address for a test copy of the app (its own
+        // bundle id; never the app itself), such as one that can't be reached.
+        if Bundle.main.bundleIdentifier != LaunchSelfTest.realBundle,
+           let test = ProcessInfo.processInfo.environment["CL_SENTRY_DSN"], !test.isEmpty { return test }
+        return Bundle.main.object(forInfoDictionaryKey: "SentryDSN") as? String ?? ""
+    }
+    static var isStarted: Bool { started }
     /// The tester said yes (nil: not asked yet).
     static var allowed: Bool? {
         get { UserDefaults.standard.object(forKey: key) == nil ? nil : UserDefaults.standard.bool(forKey: key) }
