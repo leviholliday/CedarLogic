@@ -129,6 +129,8 @@ every shape and gate style and checks each circuit's truth table. And:
 - Drawing switches, for comparing (`SMOOTHNESS.md`): `CEDARLOGIC_GLYPH_TEXT=0`
   labels as filled outlines instead of Cairo's cached glyphs;
   `CEDARLOGIC_DRAW_ALL=1` the whole page every frame of a drag;
+  `CEDARLOGIC_DRAG_IMAGE=0` the moving parts drawn every frame instead of
+  copied from their image;
   `CEDARLOGIC_CANVAS_FRAME=1` always through the canvas's own image;
   `CEDARLOGIC_FAST_DRAG=1` coarser antialiasing while dragging
 

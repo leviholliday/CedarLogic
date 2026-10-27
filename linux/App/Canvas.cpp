@@ -80,6 +80,8 @@ Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageK
 	fastDrag = fast && strcmp(fast, "1") == 0;
 	const char* all = g_getenv("CEDARLOGIC_DRAW_ALL");
 	drawAll = all && strcmp(all, "1") == 0;
+	const char* image = g_getenv("CEDARLOGIC_DRAG_IMAGE");
+	imagesDisabled = image && strcmp(image, "0") == 0;
 }
 
 Canvas::~Canvas() {
@@ -104,6 +106,12 @@ void Canvas::dropLayer() {
 	if (staticLayer) cairo_surface_destroy(staticLayer);
 	staticLayer = nullptr;
 	layerValid = false;
+	dropMovingImage();
+}
+
+void Canvas::dropMovingImage() {
+	if (movingImage) cairo_surface_destroy(movingImage);
+	movingImage = nullptr;
 }
 
 int Canvas::page() const { return cl_document_page_index(win->document(), key); }
@@ -629,6 +637,7 @@ bool Canvas::drawLayered(cairo_t* cr, int scale, const CLDrawOptions& o, const G
 		layerValid = true;
 		rebuiltLastFrame = true;
 		layerBuilds++;
+		layerGeneration++;
 	} else {
 		rebuiltLastFrame = false;
 		rebuildsInARow = 0;
@@ -642,9 +651,69 @@ bool Canvas::drawLayered(cairo_t* cr, int scale, const CLDrawOptions& o, const G
 		cairo_save(cr);
 		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
 	}
-	cl_document_draw_layer(doc, p, cr, scale, originX, originY, upp, &o, CL_LAYER_MOVING);
+	if (!drawMovingImage(cr, scale, o)) cl_document_draw_layer(doc, p, cr, scale, originX, originY, upp, &o, CL_LAYER_MOVING);
 	if (coarse) cairo_restore(cr);
 	layerFrames++;
+	return true;
+}
+
+// The moving parts over the static layer from their image (see Canvas.h):
+// the wires that reshape, drawn, then the parts that slide, copied. False:
+// draw them as they are instead.
+bool Canvas::drawMovingImage(cairo_t* cr, int scale, const CLDrawOptions& o) {
+	if (imagesOff || imagesDisabled || o.selectionFade < 1) return false;
+	CLDocument* doc = win->document();
+	const int p = page();
+	double dx = 0, dy = 0, l = 0, b = 0, r = 0, t = 0;
+	if (!cl_document_moving_rigid(doc, p, &dx, &dy, &l, &b, &r, &t)) return false;
+	const double k = scale / upp;   // device pixels a world unit
+	if (movingImage == nullptr || imageGeneration != layerGeneration || imageScale != scale) {
+		dropMovingImage();
+		// Room round the parts' boxes for what's drawn past them (halos,
+		// lock badges, wire dots).
+		const double margin = 40.0 * scale;
+		const double x0 = std::floor((l - originX) * k - margin), y0 = std::floor((originY - t) * k - margin);
+		const double iw = std::ceil((r - l) * k + 2 * margin), ih = std::ceil((t - b) * k + 2 * margin);
+		// Zoomed far in, the parts are bigger than the window: drawing what
+		// shows of them beats an image of all of them.
+		if (!(iw >= 1 && ih >= 1) || iw > 8192 || ih > 8192 || iw * ih > 16e6) {
+			imagesOff = true;
+			return false;
+		}
+		cairo_surface_t* image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)iw, (int)ih);
+		if (cairo_surface_status(image) != CAIRO_STATUS_SUCCESS) {
+			cairo_surface_destroy(image);
+			imagesOff = true;
+			return false;
+		}
+		cairo_surface_set_device_scale(image, scale, scale);
+		cairo_t* ic = cairo_create(image);
+		cairo_translate(ic, -x0 / scale, -y0 / scale);
+		if (fastDrag) cairo_set_antialias(ic, CAIRO_ANTIALIAS_FAST);
+		const bool ok = cl_document_draw_layer(doc, p, ic, scale, originX, originY, upp, &o, CL_LAYER_MOVING_RIGID);
+		cairo_destroy(ic);
+		if (!ok) {
+			cairo_surface_destroy(image);
+			return false;
+		}
+		cairo_surface_flush(image);
+		movingImage = image;
+		imageX = x0;
+		imageY = y0;
+		imageDX = dx;
+		imageDY = dy;
+		imageGeneration = layerGeneration;
+		imageScale = scale;
+		imageBuilds++;
+	}
+	cl_document_draw_layer(doc, p, cr, scale, originX, originY, upp, &o, CL_LAYER_MOVING_LIVE);
+	// By whole device pixels, so it's a copy, never resampled.
+	const double ox = std::round((dx - imageDX) * k), oy = std::round(-(dy - imageDY) * k);
+	cairo_save(cr);
+	cairo_set_source_surface(cr, movingImage, (imageX + ox) / scale, (imageY + oy) / scale);
+	cairo_paint(cr);
+	cairo_restore(cr);
+	imageFrames++;
 	return true;
 }
 
@@ -676,6 +745,7 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 		// A drag's layer isn't kept past it; the next one starts afresh.
 		if (staticLayer) dropLayer();
 		layersOff = false;
+		imagesOff = false;
 		rebuiltLastFrame = false;
 		rebuildsInARow = 0;
 	}
@@ -1148,6 +1218,7 @@ bool Canvas::onPress(GdkEventButton* e) {
 	// A new drag: its static layer is made afresh on its first moving frame.
 	dropLayer();
 	layersOff = false;
+	imagesOff = false;
 	rebuiltLastFrame = false;
 	rebuildsInARow = 0;
 	drag = Drag::Edit;

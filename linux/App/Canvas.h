@@ -183,9 +183,29 @@ private:
 	LayerKey layerKey{};
 	bool layerValid = false, layersOff = false, rebuiltLastFrame = false, drawAll = false;
 	int rebuildsInARow = 0;
+	unsigned layerGeneration = 0;   // one more each time the static layer is made
 	// Counts kept for --bench-drag: frames drawn from the layer, and layers made.
 	int layerFrames = 0, layerBuilds = 0;
 	void dropLayer();
+
+	// And the moving parts that only slide (cl_document_moving_rigid: the
+	// gates and the wires that go whole with them -- all of it for a select
+	// all): drawn once into `movingImage`, when the static layer is made, and
+	// copied each frame, moved by whole pixels; the wires that reshape are
+	// drawn live under it. It's made again with the static layer (the same
+	// key, and redraw()), and not used while a new selection's halo fades in
+	// (those frames draw the moving parts as before), when it would be too
+	// big (zoomed far in), or with CEDARLOGIC_DRAG_IMAGE=0. Off by at most
+	// half a pixel until the drop draws it exactly.
+	cairo_surface_t* movingImage = nullptr;
+	double imageX = 0, imageY = 0, imageDX = 0, imageDY = 0;   // its corner in device pixels; the move's offset then
+	unsigned imageGeneration = 0;
+	int imageScale = 0;
+	bool imagesOff = false, imagesDisabled = false;
+	// Counts kept for --bench-drag: frames drawn with the image, and images made.
+	int imageFrames = 0, imageBuilds = 0;
+	void dropMovingImage();
+	bool drawMovingImage(cairo_t* cr, int scale, const CLDrawOptions& o);
 	bool drawLayered(cairo_t* cr, int scale, const CLDrawOptions& o, const GridKey& grid);
 	void drawBackground(cairo_t* cr, int scale, const Palette& pal, const GridKey& key, double fade);
 	void drawSceneTop(cairo_t* cr, int scale, bool sim, bool dark, bool projector);

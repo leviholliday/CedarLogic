@@ -103,12 +103,46 @@ static bool movingSet(const CLDocument* doc, int page, ClMovingSet& out) {
 	return true;
 }
 
+// The moving set in two (CL_LAYER_MOVING_RIGID and _LIVE): the gates, with
+// the wires that slide whole with them -- selected (moved whole, see
+// cl_edit_drag) and with every end on a moving gate -- and the other wires,
+// which reshape.
+static void splitRigid(const CLDocument* doc, int page, const ClMovingSet& all, ClMovingSet& rigid, ClMovingSet& live) {
+	rigid.gates = all.gates;
+	rigid.wires.clear();
+	live.gates.clear();
+	live.wires.clear();
+	std::vector<unsigned long> whole;
+	for (const WireState& s : doc->gesture.preMoveWire) whole.push_back(s.id);
+	std::sort(whole.begin(), whole.end());
+	GUICanvas* p = doc->page(page);
+	for (unsigned long id : all.wires) {
+		bool slides = std::binary_search(whole.begin(), whole.end(), id);
+		if (slides && p) {
+			auto it = p->getWireList()->find(id);
+			if (it == p->getWireList()->end() || it->second == nullptr) slides = false;
+			else
+				for (const wireConnection& c : it->second->getConnections())
+					if (!std::binary_search(all.gates.begin(), all.gates.end(), c.gid)) { slides = false; break; }
+		}
+		(slides ? rigid : live).wires.push_back(id);
+	}
+}
+
 bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double backingScale,
                             double originX, double originY, double unitsPerPoint,
                             const CLDrawOptions* o, int layer) {
-	if (o == nullptr || o->thumbnail || (layer != CL_LAYER_STATIC && layer != CL_LAYER_MOVING)) return false;
+	if (o == nullptr || o->thumbnail) return false;
+	if (layer != CL_LAYER_STATIC && layer != CL_LAYER_MOVING && layer != CL_LAYER_MOVING_RIGID && layer != CL_LAYER_MOVING_LIVE)
+		return false;
 	ClMovingSet moving;
 	if (!movingSet(doc, page, moving)) return false;
+	if (layer == CL_LAYER_MOVING_RIGID || layer == CL_LAYER_MOVING_LIVE) {
+		ClMovingSet rigid, live;
+		splitRigid(doc, page, moving, rigid, live);
+		moving = layer == CL_LAYER_MOVING_RIGID ? rigid : live;
+		layer = CL_LAYER_MOVING;
+	}
 	// The style exactly as cl_document_draw_ex makes it.
 	using cl::render::RenderStyle;
 	RenderStyle s = RenderStyle::screen(o->dark);
@@ -119,6 +153,38 @@ bool cl_document_draw_layer(CLDocument* doc, int page, CLContext ctx, double bac
 	s.selectionFade = (float)std::min(1.0, std::max(0.0, o->selectionFade));
 	const int look = o->ink == CL_INK_ALWAYS_PRINT ? kInkLookPrint : (o->dark || o->simView) ? kInkLookDark : kInkLookLight;
 	clDrawPageLayer(doc, page, ctx, backingScale, originX, originY, unitsPerPoint, s, o->ink, look, &moving, layer);
+	return true;
+}
+
+bool cl_document_moving_rigid(const CLDocument* doc, int page, double* dx, double* dy,
+                              double* left, double* bottom, double* right, double* top) {
+	ClMovingSet moving, rigid, live;
+	if (!movingSet(doc, page, moving)) return false;
+	splitRigid(doc, page, moving, rigid, live);
+	GUICanvas* p = doc->page(page);
+	if (p == nullptr) return false;
+	klsBBox box;
+	bool any = false;
+	auto add = [&](klsBBox b) {
+		if (b.empty()) return;
+		if (!any) box = b; else box.addBBox(b);
+		any = true;
+	};
+	for (unsigned long id : rigid.gates) {
+		auto it = p->getGateList()->find(id);
+		if (it != p->getGateList()->end() && it->second) add(it->second->getBBox());
+	}
+	for (unsigned long id : rigid.wires) {
+		auto it = p->getWireList()->find(id);
+		if (it != p->getWireList()->end() && it->second) add(it->second->getBBox());
+	}
+	if (!any) return false;
+	if (dx) *dx = doc->gesture.lastDelta.x;
+	if (dy) *dy = doc->gesture.lastDelta.y;
+	if (left) *left = box.getLeft();
+	if (right) *right = box.getRight();
+	if (bottom) *bottom = box.getBottom();
+	if (top) *top = box.getTop();
 	return true;
 }
 
