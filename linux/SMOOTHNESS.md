@@ -298,7 +298,15 @@ use the Pi or the Fedora laptop for verdicts.
    |---|---|---|
    | before (outlines, drawn every frame) | 5.27 | 9.41 |
    | cached glyphs | 3.47 | 6.38 |
-   | + gates and wires from an image (the first version) | 0.61 | 2.63 |
+   | + gates and wires from an image (the first version, wrong) | 0.61 | 2.63 |
+   | + the moving gates from an image (now) | 1.38 | 4.18 |
+
+   On aarch64 the same rows are 4.88, 3.68 and 2.40 ms at scale 1. At
+   scale 2 there the image doesn't help (7.06 ms against 7.04 drawn): copying
+   a large image costs what drawing the gates does. Lab5's select-all frame
+   against the page drawn whole: 1.07% of pixels differ by more than 24 of
+   255, at most 112, all on gate edges (wires and the static layer exact);
+   one gate (not from the image) 16 pixels, as before.
 
    The Zorin OS laptop was about 2.2 times slower than CI on the same
    rows (11.65 ms against 5.27).
