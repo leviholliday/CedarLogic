@@ -157,25 +157,13 @@ bool Canvas::drawThumbnail(cairo_t* cr, double tw, double th, int scale, bool da
 void Canvas::center(double& wx, double& wy) const { worldPoint(width() / 2, height() / 2, wx, wy); }
 
 bool Canvas::pointerWorld(double& wx, double& wy) const {
-	// Where the canvas last saw the pointer, while it's inside: GDK's own
+	// Where the canvas last saw the pointer, while it's inside. GDK's own
 	// answer isn't reliable right after a window over the canvas closes
-	// (Wayland says 0, 0 until the pointer moves, so a gate chosen with A
-	// appeared in the top left corner).
-	if (pointerInside && lastX >= 0 && lastY >= 0 && lastX < width() && lastY < height()) {
-		worldPoint(lastX, lastY, wx, wy);
-		return true;
-	}
-	GdkWindow* w = gtk_widget_get_window(area);
-	if (w == nullptr) return false;
-	GdkDisplay* display = gdk_window_get_display(w);
-	GdkSeat* seat = display ? gdk_display_get_default_seat(display) : nullptr;
-	GdkDevice* pointer = seat ? gdk_seat_get_pointer(seat) : nullptr;
-	if (pointer == nullptr) return false;
-	double x = 0, y = 0;
-	gdk_window_get_device_position_double(w, pointer, &x, &y, nullptr);
-	if (x < 0 || y < 0 || x >= width() || y >= height()) return false;
-	if (x == 0 && y == 0) return false;   // not known yet
-	worldPoint(x, y, wx, wy);
+	// (on Wayland it's stale until the pointer moves, so a gate chosen with A
+	// appeared in the top left corner); until the canvas sees the pointer come
+	// back, the gate waits for it (crossingCb).
+	if (!pointerInside || lastX < 0 || lastY < 0 || lastX >= width() || lastY >= height()) return false;
+	worldPoint(lastX, lastY, wx, wy);
 	return true;
 }
 
@@ -1040,8 +1028,16 @@ gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 gboolean Canvas::crossingCb(GtkWidget*, GdkEventCrossing* e, gpointer self) {
 	static_cast<Canvas*>(self)->pointerInside = e->type == GDK_ENTER_NOTIFY;
 	if (e->type == GDK_ENTER_NOTIFY) {
-		static_cast<Canvas*>(self)->lastX = e->x;
-		static_cast<Canvas*>(self)->lastY = e->y;
+		Canvas* c = static_cast<Canvas*>(self);
+		c->lastX = e->x;
+		c->lastY = e->y;
+		// Back from the window that chose a gate (Add a Gate, A): it appears
+		// where the pointer is, without waiting for it to move.
+		if (c->win->hasPendingGate() && c->page() == c->win->currentPage()) {
+			double wx, wy;
+			c->worldPoint(e->x, e->y, wx, wy);
+			guarded("placing a gate", [&] { if (c->win->placePendingGate(wx, wy)) c->redraw(); });
+		}
 	}
 	if (e->type == GDK_LEAVE_NOTIFY) {
 		Canvas* c = static_cast<Canvas*>(self);
@@ -1421,7 +1417,9 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		// connect it to the pins it's next to and keep moving. The
 		// connections are kept at the drop; Escape takes back just them.
 		if (moving()) {
-			if (win->canEdit() && pointerInside) {
+			// A gate dragged in from the side panel: the panel has the pointer,
+			// so this canvas never saw it come in, but the gate is on it.
+			if (win->canEdit() && (pointerInside || win->isFloating())) {
 				const int p = page();
 				const int n = cl_edit_connect_while_moving(doc, p, upp);
 				if (n > 0) win->note(format("Connected %d pin%s. Escape takes it back.", n, n == 1 ? "" : "s"));
