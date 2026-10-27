@@ -43,6 +43,11 @@ public:
 	double unitsPerPoint() const { return upp; }
 	// The middle of the view, in the world.
 	void center(double& wx, double& wy) const;
+	// The tab as you last saw it, for the Ctrl+Tab cards (the Mac's
+	// renderThumbnail): the same centre and zoom as its view, scaled so what was
+	// visible fits tw x th points. (vw, vh): the size of the view it was shown
+	// in, when it has none now. False for a tab never looked at: draw it fitted.
+	bool drawThumbnail(cairo_t* cr, double tw, double th, int scale, bool dark, double vw, double vh);
 	// The top-left world point the camera is at (for the minimap).
 	void origin(double& ox, double& oy) const { ox = originX; oy = originY; }
 	// Jump the camera to centre on a world point, keeping the current zoom
@@ -91,7 +96,7 @@ private:
 	double originX = -20, originY = 20, upp = 0.05;
 	bool needsFit = true;
 	Drag drag = Drag::None;
-	double lastX = 0, lastY = 0;       // the pointer, in view points
+	double lastX = -1, lastY = -1;     // the pointer, in view points (-1: not seen yet)
 	bool spaceDown = false, pannedWhileSpaceDown = false;
 	bool pointerInside = false;
 	// Settings > Canvas > Wires: what a wire carries, after resting on it.
