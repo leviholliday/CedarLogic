@@ -642,6 +642,12 @@ final class CanvasStatus: ObservableObject {
     @Published var version = 0
 }
 
+/// The oscilloscope's recording grew (or was cleared): watched by its panel.
+@MainActor
+final class ScopeTicker: ObservableObject {
+    @Published var version = 0
+}
+
 @MainActor
 final class CanvasController: ObservableObject {
     /// The canvas in the frontmost circuit window.
@@ -658,10 +664,13 @@ final class CanvasController: ObservableObject {
     @Published private(set) var editVersion = 0
     @Published var settingsRequested = false
     /// Bumped as the oscilloscope records (throttled), so its panel redraws.
-    @Published private(set) var scopeVersion = 0
+    /// Its own object, watched by the panel alone: a @Published count here
+    /// redrew the whole window -- toolbar, palette, tabs, its title read
+    /// from disk -- 15 times a second while the scope was open.
+    let scopeTicker = ScopeTicker()
     @Published var showScope = false
     private var lastScopeBump = CACurrentMediaTime()
-    func scopeChanged() { scopeVersion += 1 }
+    func scopeChanged() { scopeTicker.version += 1 }
 
     private var timer: Timer?
     private var lastTick = CACurrentMediaTime()
@@ -672,7 +681,11 @@ final class CanvasController: ObservableObject {
     /// When the file on disk changes from a save, a circuit from Your
     /// Circuits keeps a version.
     private func noticeSaves() {
-        if !adopted, let w = view?.window, let d = NSDocumentController.shared.document(for: w) {
+        // Not while this window waits, out of sight, for the circuit it
+        // replaces to be answered for: taking it into Your Circuits can
+        // close it (a file imported before opens its copy there instead),
+        // and the question's answer then brought back a window with no circuit.
+        if !adopted, let w = view?.window, !WindowReplacer.isWaiting(w), let d = NSDocumentController.shared.document(for: w) {
             adopted = adoptIntoLibrary(d)
         }
         guard let w = view?.window, let d = NSDocumentController.shared.document(for: w),
@@ -849,8 +862,23 @@ final class CanvasController: ObservableObject {
     @Published var showExportImage = false
     @Published var showExportReport = false
     @Published var ramGate: Int?
-    /// A one-line message for the status bar ("Saved.", "Nothing to paste.").
-    @Published var statusMessage = ""
+    /// A one-line message for the status bar ("Saved.", "Nothing to paste."),
+    /// gone again after 4 seconds. Cleared here, not by the bar: with the
+    /// bar's figures off (Settings), the bar is only there while there's a
+    /// message, so it first appears with the message already in it, and its
+    /// onChange never saw a change -- the message, and the bar, stayed.
+    @Published var statusMessage = "" {
+        didSet {
+            messageToken &+= 1
+            guard !statusMessage.isEmpty else { return }
+            let token = messageToken
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                guard let self, self.messageToken == token else { return }
+                self.statusMessage = ""
+            }
+        }
+    }
+    private var messageToken = 0
     /// Called every clock tick (the guided tour watches from here).
     var onTick: (() -> Void)?
 
@@ -930,6 +958,10 @@ final class CanvasController: ObservableObject {
         case .lock: locked.toggle()
         case .newTab: newPage()
         case .closeTab:
+            // Not under a sheet (Truth Table, Build from Formula, Export...):
+            // the menu's Cmd-W reaches here with one up, and closed the tab
+            // behind it -- or, on the last tab, asked to close the window.
+            if sheetHost.view?.window?.attachedSheet != nil { NSSound.beep(); return }
             if (document?.pageCount ?? 1) > 1 { closePage(page) } else { view?.window?.performClose(nil) }
         case .reopenTab: reopenPage()
         case .splitView: NotificationCenter.default.post(name: .clSplit, object: self)
@@ -986,6 +1018,7 @@ final class CanvasController: ObservableObject {
         hiddenSheetSeen = false
         NSLog("CedarLogic: ended a sheet that couldn't be seen (%@)", sheet.title)
         w.endSheet(sheet, returnCode: .cancel)
+        putAwaySheets()
         w.makeFirstResponder(view)
         note("A question that couldn't be seen was closed, so you can keep editing.")
     }
@@ -1008,12 +1041,33 @@ final class CanvasController: ObservableObject {
         }
         Self.pendingGate = nil
         if let w = host.view?.window {
-            if let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 { w.endSheet(sheet, returnCode: .cancel) }
+            if let sheet = w.attachedSheet, !sheet.isVisible || sheet.alphaValue == 0 {
+                w.endSheet(sheet, returnCode: .cancel)
+                host.putAwaySheets()
+            }
             w.makeKeyAndOrderFront(nil)
             w.makeFirstResponder(host.view)
         }
         host.redraw()
         host.note("Ready to edit.")
+    }
+
+    /// What asks for this window's SwiftUI sheets and alerts, all let go of
+    /// (after a sheet that couldn't be seen was ended). Ending one with
+    /// endSheet behind SwiftUI's back isn't enough: while what asked for it
+    /// is still set, SwiftUI puts the very same sheet straight back up --
+    /// as unseen as before -- so the window stayed blocked.
+    func putAwaySheets() {
+        if showQuickAdd { showQuickAdd = false }
+        if showShortcuts { showShortcuts = false }
+        if showExportImage { showExportImage = false }
+        if showExportReport { showExportReport = false }
+        if ramGate != nil { ramGate = nil }
+        if truthTable != nil { truthTable = nil }
+        if truthTableProblem != nil { truthTableProblem = nil }
+        if formulaRequest != nil { formulaRequest = nil }
+        // The window's own (a gate's Settings, the load notices).
+        NotificationCenter.default.post(name: .clPutAwaySheets, object: self)
     }
 
     /// Gives a circuit window's canvas the keyboard (after it's shown).
@@ -1044,6 +1098,11 @@ final class CanvasController: ObservableObject {
     /// Put the selection on the pointer until the next click drops it.
     private func floatSelection(at point: CGPoint? = nil) {
         guard let document, let at = point ?? placePoint else { return }
+        // A paste, Duplicate or a new part while drawing: back to editing,
+        // as turning Draw on puts anything floating away. Left in Draw, the
+        // pointer drew instead of placing it and Escape only ended Draw:
+        // the copy stayed on the pointer, to drop at the next click.
+        if drawing { drawing = false }
         if cl_edit_float_begin(document.handle, Int32(page), at.x, at.y) {
             view?.window?.makeFirstResponder(view)
             NSCursor.closedHand.set()
@@ -1052,14 +1111,21 @@ final class CanvasController: ObservableObject {
     }
     var isFloating: Bool { document.map { cl_edit_is_floating($0.handle) } ?? false }
 
-    /// Escape while something floats: it was never placed, so take it back.
+    /// Escape while something floats: it was never placed, so take it back
+    /// -- and not keep it for Redo, which brought back a copy or a part the
+    /// person never put down. The window's last step is the float's: its
+    /// undo, with `takingBack` set, has the engine take it back for good
+    /// (cl_edit_take_back_float) and registers no Redo.
     func cancelFloating() {
         guard let document, isFloating else { return }
-        document.cancelGesture()
+        takingBack = true
         undo()
+        takingBack = false
+        if isFloating { document.cancelGesture() }   // no step to take back: just put it down where it was
         NSCursor.arrow.set()
         edited()
     }
+    private var takingBack = false
 
     /// A new gate on the pointer (or at `world`, when a palette tile is
     /// being dragged there), following it until a click drops it.
@@ -1079,13 +1145,17 @@ final class CanvasController: ObservableObject {
         return true
     }
 
+    /// Where Cut, Copy and Paste go: the system's clipboard (the session
+    /// check gives them one of its own, so a test never touches yours).
+    static var clipboard: NSPasteboard = .general
+
     func pasteFloating() {
-        guard canEdit, let document, let text = NSPasteboard.general.string(forType: .string), let at = placePoint else { return }
+        guard canEdit, let document, let text = Self.clipboard.string(forType: .string), let at = placePoint else { return }
         let shift = NSEvent.modifierFlags.contains(.shift)
         guard let back = document.paste(text, page: page, at: at, shift: shift) else { note("Nothing to paste."); return }
         if !back.isEmpty {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(back, forType: .string)
+            Self.clipboard.clearContents()
+            Self.clipboard.setString(back, forType: .string)
         }
         floatSelection()
     }
@@ -1095,8 +1165,8 @@ final class CanvasController: ObservableObject {
         let text = document.copySelection(page: page)
         guard !text.isEmpty else { return }
         if Prefs.shared.duplicateUsesClipboard {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            Self.clipboard.clearContents()
+            Self.clipboard.setString(text, forType: .string)
         }
         _ = document.paste(text, page: page, at: at, shift: false)
         floatSelection()
@@ -1315,6 +1385,11 @@ final class CanvasController: ObservableObject {
     private func mirrorNewSteps() {
         guard let document else { return }
         let n = document.undoCount
+        // Steps the engine made since the last look (Undo and Redo make none).
+        let made = Int(cl_edit_steps_made(document.handle))
+        let fresh = made - document.stepsMirrored
+        document.stepsMirrored = made
+        var registered = 0
         if n < mirrored {
             // The engine dropped history (a page was deleted): so must macOS.
             undoManager?.removeAllActions()
@@ -1325,26 +1400,39 @@ final class CanvasController: ObservableObject {
             undoManager?.registerUndo(withTarget: self) { $0.engineUndo() }
             undoManager?.setActionName(name)
             mirrored += 1
+            registered += 1
         }
         // A full history: the engine keeps its last 500 steps (kLimit in
         // include/gui/native/NoWxCompat.h), so from then on a new step drops
         // the oldest and the count stays put -- and counting alone missed
         // every step after the 500th: nothing was registered, so the window
         // never became edited, autosave skipped it and quitting lost it.
-        // At the limit, an edit since the last save (the engine's own flag,
-        // which saving clears) is mirrored as one more step. Undo always
-        // takes back the engine's latest step, so one too many here only
-        // means a last Cmd-Z that does nothing; the engine has nothing to
-        // redo at the limit, so no redo is lost.
-        if n == mirrored, n >= Self.engineHistoryLimit, document.isEdited, !document.canRedo {
-            undoManager?.registerUndo(withTarget: self) { $0.engineUndo() }
-            undoManager?.setActionName(document.undoName)
+        // So each step made that the count didn't show is one more here.
+        // (This once went by the engine's edited flag, and registered one
+        // more on every edited() at the limit: the step that reached 500
+        // twice, an edit told twice -- a paste, a drop -- twice, a click
+        // that changed nothing once. Cmd-Z then took back two steps at a
+        // time, and Escape on a paste at the 500th step also took back the
+        // edit before it.)
+        if n >= Self.engineHistoryLimit {
+            for _ in 0..<max(0, fresh - registered) {
+                undoManager?.registerUndo(withTarget: self) { $0.engineUndo() }
+                undoManager?.setActionName(document.undoName)
+            }
         }
     }
     static let engineHistoryLimit = 500
 
     private func engineUndo() {
-        guard let document, document.undo() else { return }
+        guard let document else { return }
+        if takingBack {
+            takingBack = false
+            guard cl_edit_take_back_float(document.handle) else { return }
+            mirrored -= 1
+            refreshAfterHistory()
+            return
+        }
+        guard document.undo() else { return }
         mirrored -= 1
         let name = document.redoName
         undoManager?.registerUndo(withTarget: self) { $0.engineRedo() }
@@ -1379,6 +1467,9 @@ final class CanvasController: ObservableObject {
             }
         }
         redraw(); selectionChanged(); editsChanged(); syncTidy()
+        // Saved like any edit, 2 s on: an undone or redone circuit waited
+        // for the next edit (or the window closing) to reach its file.
+        sheetHost.scheduleAutosave()
     }
     /// The page count last seen, kept on the document so both sides of a
     /// split agree on it.
@@ -1665,6 +1756,16 @@ final class CanvasController: ObservableObject {
         if mode != tidyMode { tidyMode = mode }
     }
 
+    /// One of a gate's settings changed in its Settings sheet: an undo step
+    /// like any edit, so the window is edited and autosaves. (It once only
+    /// redrew: the step wasn't mirrored into the window's undo, so a
+    /// setting changed last -- a label's text, a clock's speed -- was never
+    /// saved, and quitting or closing the window lost it.)
+    func changeSetting(gate: Int, name: String, value: String) {
+        document?.setSetting(gate: gate, name: name, value: value)
+        edited()
+    }
+
     func showSettings() {
         guard let g = document?.singleSelectedGate(page: page) else { return }
         sheetHost.settingsGate = g
@@ -1679,8 +1780,8 @@ final class CanvasController: ObservableObject {
 
     func copy() {
         guard let text = document?.copySelection(page: page), !text.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        Self.clipboard.clearContents()
+        Self.clipboard.setString(text, forType: .string)
     }
 
     /// Locked parts stay, and stay off the clipboard (copying them is fine).
@@ -1693,12 +1794,12 @@ final class CanvasController: ObservableObject {
 
     /// Paste in the middle of the view.
     func paste() {
-        guard let document, let text = NSPasteboard.general.string(forType: .string), let view else { return }
+        guard let document, let text = Self.clipboard.string(forType: .string), let view else { return }
         let shift = NSEvent.modifierFlags.contains(.shift)
         if let back = document.paste(text, page: page, at: view.visibleCenter, shift: shift) {
             if !back.isEmpty {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(back, forType: .string)
+                Self.clipboard.clearContents()
+                Self.clipboard.setString(back, forType: .string)
             }
             edited()
         }

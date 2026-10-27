@@ -118,7 +118,11 @@ struct NotesTextView: NSViewRepresentable {
             loadedFrom = parent.document
             undo.removeAllActions()
             placeholder(tv)
-            parent.onCount(text.unicodeScalars.count)
+            // The count is the pane's @State, and load() runs inside
+            // SwiftUI's view update (makeNSView, updateNSView): setting it
+            // there is "Modifying state during view update". Just after.
+            let count = text.unicodeScalars.count, report = parent.onCount
+            DispatchQueue.main.async { report(count) }
         }
 
         func undoManager(for view: NSTextView) -> UndoManager? { undo }

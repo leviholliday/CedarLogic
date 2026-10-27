@@ -1,4 +1,4 @@
-# Mac app audit (v4/mac-app, 2026-10-16)
+# Mac app audit (v4/mac-app, 2026-10-16; rounds 2 and 3 2026-10-19/20)
 
 The owner: the Mac app "hits a bug about every other time I open it, or
 every time I use it for more than 10 minutes". This round looked at the
@@ -110,11 +110,10 @@ circuit: replace) or closed kept a hidden simulation running.
   `session-check` (above); the 500th-undo fix holds in a real window.
 - **Launch with a missing, damaged or empty last circuit, no library, a
   broken library, offline Sync/Classroom**: `launch-selftest` (above).
-- **The updater offline**: not run (the test copies have no update key, and
-  the feed address is fixed). Sparkle's scheduled checks don't show errors;
-  only Check for Updates... does. Hand test below.
+- **The updater offline**: done in round 3 (`launch-selftest`'s offline
+  state, below).
 
-### Still suspected (not fixed; low impact or not provable headlessly)
+### Still suspected after round 2 (all six settled in round 3, below)
 
 - A status-bar message that never clears with Settings > "Show zoom,
   cursor position, and counts" off (`CLWindow.swift` clears messages with
@@ -158,6 +157,252 @@ circuit: replace) or closed kept a hidden simulation running.
 7. **Updater offline**: Wi-Fi off, launch: no update alert; Check for
    Updates... shows Sparkle's own "can't reach" message.
 
+## Round 3 (2026-10-20)
+
+Every suspect left open by rounds 1 and 2 is now fixed or ruled out, and
+`session-check` drives the canvas through the gestures students use most.
+
+### Fixed
+
+| Commit | What | Check that keeps it fixed |
+| --- | --- | --- |
+| Let a status message go again when the bar's figures are off | with Settings > "Show zoom, cursor position, and counts" off, the bar is made with its message already in it, so its onChange never fired and the message (and the bar) stayed; the same closure held the window's controller for 4 s after the window closed | `session-check` "a status message goes again" (FAIL before) |
+| Set the notes pane's character count after SwiftUI's update, not in it | the notes view set the pane's @State from makeNSView: **audit item 4**, the one "Modifying state during view update" in the owner's log (it comes whenever Notes opens on a circuit with notes) | `session-check.sh` counts SwiftUI warnings (1 before, 0 after) |
+| Put a sheet that can't be seen away for good, not straight back up | "never stuck" and Make This Window Editable used `endSheet`; for SwiftUI sheets the flag stayed set and SwiftUI re-attached the same (still invisible) sheet at once, so the window stayed blocked | `session-check` "a sheet that can't be seen goes" (2 FAIL before) |
+| Redraw only the oscilloscope as it records, not the whole window | the scope's counter was @Published on the window's controller: the whole window re-rendered ~13 times a second with the scope open on a running circuit | `session-check` (26 change notices in 2 s before, under 6 after) |
+| Don't close a tab, or the window, under a sheet with Cmd-W | the menu's Close Tab reached the controller with a sheet up | `session-check` "Cmd-W with a sheet up" (FAIL before); the menu path: hand test 3 |
+| Save a gate's setting changed in its Settings sheet | the sheet changed the setting (an engine undo step) but never called `edited()`: not mirrored into undo, no autosave, so a setting changed last was lost on quit or close | `session-check` "a setting changed: undo steps match" (FAIL before) |
+| Don't bring back an empty window after a replaced circuit's question | the hidden new window was taken into Your Circuits (closed, its copy opened) while the old one asked "save?"; the answer then showed the dead window | by code; hand test 4 |
+| Autosave after Undo and Redo, as after any edit | only edits scheduled the 2-s autosave: an undone or redone circuit reached its file (and Your Circuits, Sync, versions) only with the next edit or the window closing | `session-check`'s pause after its undo walk (seeds 1 and 4 at 2000: unsaved / stale before) |
+| Check the updater and crash reports start quietly with no network | (a check, not a fix) `CL_UPDATE_FEED`/`CL_SENTRY_DSN`, honoured only by a test copy | `STATES_ONLY=offline launch-selftest.sh`: PASS, Sparkle's scheduled check ends with SUSparkleErrorDomain 2001, no window or alert |
+
+**The leak seen after the round-2 merge** (`session-check.sh 300 1` on
+v4/mac 998c132: controller and circuit kept): the status bar's old 4-s
+clear-the-message closure (first row) held the window's controller
+strongly; a session that ends within 4 s of a status message (more likely
+in a short run) found it still alive 1.5 s after closing. Not a lasting
+leak (it went after 4 s), and gone with the first fix: on v4/mac-app merged with v4/mac a169112,
+`session-check.sh` at 300, 1000 and 2000 actions, seeds 1-4, frees the
+controller and the circuit every time (results below).
+
+### Ruled out
+
+- **Item 5, RenderBox "precondition failure" near Share** (15 Oct): Share
+  is a plain `NSSharingServicePicker` over a PNG file
+  (`ExportImageView.share`): no SwiftUI state of the app's changes as it
+  opens, so the line comes from the system's own drawing of the picker
+  (RenderBox is SwiftUI's renderer, which the share menu uses), and the
+  session went on and ended normally. Not reproducible headlessly (the
+  picker needs a window on screen); nothing in the app to change.
+- **Extra do-nothing Undo entries at the full 500-step history** (round 4
+  found they weren't harmless: two in one undo group made one Cmd-Z, or
+  Escape on a paste, take back two steps; fixed there): measured
+  by the new undo walk at the end of each 2000-action session: of 517-655
+  Undo presses, 61-187 did nothing -- all of them only after the 500 real
+  steps were undone (each entry undoes the engine's latest step, so they
+  pile up at the far end). A student would have to press Undo 500 times
+  in a row to meet one; Redo is unaffected (the walk's Redo restores the
+  circuit). Left alone: telling a do-nothing click from a real step at the
+  limit needs the engine (a change counter), and the cost is one menu item
+  staying enabled.
+- **Cmd-Q / Shift-Cmd-W under a sheet** (old item 7): KeyMonitor only acts
+  when the circuit window itself is key, and with a sheet up the sheet is;
+  Close Circuit then goes to the sheet, which has no close button. Cmd-Q
+  under an app-modal question was fixed in round 2.
+
+### Found, not fixed (for the owner or the engine)
+
+- **Version History can keep a stale "before the break" version** (app,
+  CanvasController.noticeSaves): Your Circuits notes a save only at its
+  2-second look while the window is unedited. In steady work the window is
+  edited again before the look, so most autosaves aren't noted and
+  `.pending.cdl` keeps an older circuit; after a break that older circuit
+  is the version kept -- or none, if it equals the newest version. The
+  circuit itself is always saved. Noting every save whose date changed
+  (dropping `!d.isDocumentEdited`) would fix it, but also makes Sync hear
+  of every autosave; left for a decision. (The session check now saves
+  and lets the look see it before its break.)
+### Session check, round 3
+
+New scripted part (App/SessionGestures.swift, through the canvas's own
+mouse, key and scroll handlers, in the hidden real window): wires pin to
+pin and pin to wire; C while dragging, and Escape taking it back; Escape
+mid-drag; a double-click opening a part's settings, and a setting
+changed; the arrows (and Shift); Cmd-D and the click that places the
+copy, or Escape; a part from the palette dropped or let go off the canvas;
+trackpad scroll and pinch; the find bar; Straighten; Tidy Up's preview put
+back (Escape), switched (Tab), kept (Return). Then the window's own
+checks (status message, scope, notes, hidden sheet, Cmd-W under a sheet).
+A quarter of the random actions are now such gestures (495-516 per 2000),
+with two more invariants (Escape and Put Back change nothing: 0 times),
+and each session ends by undoing all the way back and redoing all the way.
+
+Results on v4/mac-app with v4/mac a169112 merged in (the current engine),
+`session-check.sh N 1 2 3 4`: **all 12 PASS** at N = 300, 1000 and 2000
+(every change left the window edited or already saved, every pause saved
+and the file on disk the circuit, undo steps in step, pages in range, a
+version after the break, no SwiftUI warnings, the walk back and forth
+giving the circuit back, and the closed window's controller and circuit
+freed every time). At 2000: 24-30 tabs and 25-34 splits per seed, memory
+80-85 MB at the start, about 150 MB a quarter in, 89-102 MB at the end.
+The undo walk at 2000 (before the redo fix, same numbers): 515-655 Undo
+presses, 60-187 of them doing nothing (see "Ruled out"), 31-48 taking back
+more than one step (several engine steps made in one turn of the main
+loop are one Undo, as on screen). `launch-selftest.sh 3`: 33 of 33 PASS,
+the offline launches included. `--undo-check` 8 PASS, `--leak-check` 4
+PASS. `session-check.sh 0 1` (scripted part only, about a minute): PASS.
+
+The checks found three of their own mistakes on the way, now fixed in the
+check: an autosave can land between an edit and the look; a break taken
+before the last save was noticed; the redo walk going past its start.
+
+### Hand tests for round 3 (only the owner can confirm)
+
+1. **Status message**: Settings > uncheck "Show zoom, cursor position, and
+   counts"; press Cmd-S: the message shows, and is gone 4 s later.
+2. **Setting saved**: double-click a label, change its text, Done, then
+   Cmd-Q at once: reopen, the new text is there.
+3. **Cmd-W under a sheet**: two tabs; Simulation > Truth Table (T); press
+   Cmd-W: a beep, both tabs stay. Same with File > Export as Image.
+4. **Replace, no ghost**: Settings > Opening a circuit: replace. A new
+   circuit with a part on it; File > Import File... a .cdl imported once
+   before; wait 5 s before answering "save?" (Don't Save): one window, the
+   imported circuit's copy, taking edits.
+5. **Scope**: open the scope (Cmd-G) on a running circuit with a clock:
+   the window stays as quick as without it (Activity Monitor: CPU lower
+   than before this round).
+
+## Round 4 (2026-10-20/26, branch v4/mac-sweep from the 0.3.18 beta)
+
+The session check run wide and long, from new circuits, the fixtures and
+the templates, and widened to the rest of a long session.
+
+### What the check does now
+
+- **Open documents counted**: the engine's own count
+  (`cl_document_live_count`, from the Windows check) before the window
+  opens, with it open, and after it closes must go 0, 1, 0. Every run
+  so far: 0, 1, 0.
+- **Starts from a file or a template**: `START=<file.cdl>` (imported into
+  Your Circuits as File > Import does) or `START=template:<id>[:running|:pulse]`.
+- **More of a session**: one random action in eight is Cut, Copy, Paste
+  (placed or Escaped), the lock (with Cut, Paste, Rotate, Duplicate, the
+  arrows and Delete changing nothing while it's on), Previous Tab, Step
+  Clock, zoom, dark mode, Close Split, a tab renamed or moved, links
+  between pages, Draw, Notes. They have their own dice:
+  `CL_SESSION_EXTRAS=0` replays a round-3 seed exactly. The clipboard is
+  the check's own (`CanvasController.clipboard`), never the system's.
+- **Scripted**: Escape on a Cmd-D copy, a paste and a part let go off the
+  canvas, each then Redo (nothing comes back); Cmd-D while drawing.
+- **Triage**: `CL_SESSION_TRACE=from-to` prints each action's effect;
+  a lost edit prints the lines that changed; an Escape that changed
+  something names its action. `CHECK_TAG=<word>` for two runs at once.
+- `--undo-check` has one-press-one-step cases at the 500-step limit.
+
+### Fixed
+
+| Commit | What | How a user hits it | Check that keeps it fixed |
+| --- | --- | --- | --- |
+| Don't bring back a copy or part taken back with Escape on Redo (engine: aed3164 from the Linux check) | Escape undid the float's step but left it for Redo, in the engine and the window's undo manager | paste or pick a part, Escape, later Shift-Cmd-Z: the part reappears | scripted "Redo after Escape on ..." x3 (FAIL before) |
+| Go back to editing when a copy or part is put on the pointer while drawing | in Draw, Cmd-D / Cmd-V / A / the palette floated a copy the pointer couldn't place; Escape only ended Draw, the copy stayed on the pointer (`floatSelection` now turns Draw off) | draw, then Cmd-D with something selected, then Escape | scripted "Cmd-D while drawing ..." (FAIL before); found by seed 1 at 1000 with extras |
+| Mirror each new step once at the full undo history (engine: cl_edit_steps_made) | at 500 steps, `mirrorNewSteps` registered one more Undo on every `edited()` while the engine's edited flag was on: the step reaching 500 twice, a paste or drop (told twice) twice, so one Cmd-Z undid two steps and Escape on a paste at the 500th step also undid the edit before it | after about a quarter hour of work (500 steps), paste and Escape: the part placed just before goes too | `--undo-check` "Undo after the step that fills the history ..." and "... an edit told twice" (FAIL before: 500 to 498, 501 to 499 parts); seeds 11, 23 and the counter template (FAIL before) |
+
+The third is a match for "every time I use it for more than ten
+minutes": the history fills in about that time, and from then on Undo
+and Escape could each take away one more thing than asked.
+
+Check fixes (not app bugs): a lost-edit look and a page-in-range look
+now wait one more short turn of the run loop when they fail (seed 21
+and seed 110 from the shift register: a tab closing after its 140 ms
+fade, late in a turn; the window's edited dot and the side's next page
+follow on the next turn), and the scripted label is "Session Q1" (the
+shift-register template has a Q1 label, so the find bar found that one).
+
+### Found, not fixed
+
+- **A part placed on a tab within 140 ms of Close Tab closes with it**
+  (CanvasController.closePage): the "All work on this tab will be lost"
+  question is asked when Close Tab is pressed (the tab was empty then),
+  and the close comes after the fade. Seen in the seed-110 trace (a part
+  placed during the fade). Reopen Tab or Undo brings it back; a person
+  can hardly be that quick. Asking again (or cancelling) when the fade
+  ends on a tab that gained parts would close it.
+- **Previews kept for the session** (memory, below).
+- **Undo presses that do nothing at the far end** (below).
+
+### Sweep
+
+On the 0.3.18 beta plus the engine counter (checks as in round 3,
+extras off), 2000 actions unless said:
+
+- Seeds 5-24: 16 PASS; 4 FAIL: 11 and 23 (Escape on a Cmd-D copy at the
+  500th step: the limit bug above), 21 (the check's timing, above), 16
+  (one lost edit after a palette part, not seen again in a rerun; it ran
+  with four checks at once).
+- Fixtures (Broadcast, Lab5, Routing Backwards, jmSGTZM, lab6,
+  web-online2, res/samples/practice): 7 PASS.
+- Templates (counter, J-K running, shift register, 4-bit adder, J-K
+  latch mistake, lab page, D with pulse): 5 PASS; the counter FAIL (the
+  limit bug), the shift register FAIL (the Q1 label).
+- 6000 actions: seed 1 PASS, seed 2 FAIL (its log was lost to a cleared
+  temporary folder; seed 2 at 6000 PASSES on the fixed build).
+
+On the fixed build (ceb5966 / 9262b28, one check at a time, `nice -n 15`):
+every earlier failure rerun PASSES -- seeds 11, 16, 21, 23 (extras
+off, the same paths), the counter and shift-register templates, seed 2
+at 6000 -- and so do seed 5 with the extras on, seed 1 at 1000 with the
+extras on, seed 11 at 2000 and seed 1 at 1000 with all four fixes
+(fixed1), `session-check.sh 0 1` (the scripted part), `--undo-check`
+(12 PASS), `--leak-check` (4 PASS) and `launch-selftest.sh 10` (110 of
+110 PASS). One failure on the way, seed 110 from the shift register
+("a page that exists", once): the check's timing, fixed in the check
+(above); its rerun PASSES. Not run in this round for want of time (the
+owner's CPU was busy): seeds 6-14 with the extras on, seeds 3-4 at
+6000, `launch-selftest.sh 30`.
+
+### Long-session evidence
+
+- **Memory**: 2000-action sessions start at 62-78 MB, peak at 75-150 MB
+  (more with several checks running at once), end at 81-95 MB; 6000
+  actions: 62, 82, 95 MB. No growth that keeps going. Not covered: Your
+  Circuits' and Version History's previews keep every picture drawn
+  (`VersionPreview.cache`, `TemplatePreview`'s cache: about 4 MB each,
+  1200x820) for the session; browsing 50 versions holds about 200 MB.
+- **Timers**: every closed window's controller, clock and document go
+  (all runs); CLWindow's 0.25 s title-bar look is invalidated on close.
+  Each window, the split's second side included, still ticks 60 times a
+  second while hidden or minimised (round 1 item 10: battery only).
+- **Undo walk**: after the limit fix, Undo presses that do nothing at
+  the far end fell (seed 11: 116 to 61; seeds 5, 16, 23, 110: 82-159 of
+  547-619 presses); at 6000 actions 1032 of 1500.
+  They are the window's entries for steps the engine has already dropped
+  (it keeps 500; the window keeps one per step). Only after 500 Undos in
+  a row. `levelsOfUndo` on the window's undo manager would trim them;
+  left for now.
+- **Autosave and versions**: every pause saved, the file the circuit,
+  in every run on the fixed build; once on the old build, under four
+  checks at once, autosave was late at the break (passed on rerun). The
+  round-3 Version History item (a stale "before the break" version)
+  stands.
+- **Sync with no network**: not run in a window session: it needs a
+  pairing secret in the keychain, and the check won't touch the owner's.
+  By code: a failed cycle backs off 30 s, 1, 2, 5, 10 then every 15 min
+  (SyncEngine.cpp Scheduler), on the engine's thread; launch-selftest's
+  offline state starts it offline; `sync-selftest.sh` covers the rest.
+
+### Hand tests for round 4 (only the owner can confirm)
+
+1. **Escape then Redo**: select a part, Cmd-C, Cmd-V, Escape, then
+   Shift-Cmd-Z: nothing appears and Redo is greyed out. Same with a
+   part dragged from the palette and let go off the canvas, and with A.
+2. **Drawing**: Draw on (the pen), select a part (Cmd-A), Cmd-D: drawing
+   turns off and the copy follows the pointer; Escape takes it back.
+3. **Long session**: on a circuit with a lot of work (or after 15
+   minutes of editing), place a part, press Cmd-Z once: only that part
+   goes. Paste something and press Escape: only the paste goes.
+4. **Lock**: lock the circuit, select all, press Delete and the arrows:
+   nothing moves or goes.
+
 ## Already fixed before this round (please confirm by hand)
 
 These were on the 2026-10-08 list; the code shows fixes that came later.
@@ -190,12 +435,14 @@ These were on the 2026-10-08 list; the code shows fixes that came later.
 
 ## Suspected after round 1 (see Round 2 above for 6, 8, 9)
 
-4. **"Modifying state during view update"** (once, 15 Oct 09:51:40, source
+4. **"Modifying state during view update"** -- found and fixed in round 3
+   (the notes pane). Originally: (once, 15 Oct 09:51:40, source
    unknown). To find it: run `mac/Tools/launch-check.sh` style under `lldb`
    with a breakpoint on `write` with `$x0 == 2` (that's how the launch
    warnings were traced) while doing what you were doing then. By hand: if
    something looked wrong around a sheet closing or a toolbar toggle, note it.
-5. **RenderBox "precondition failure" near the Share menu**. To try: Export
+5. **RenderBox "precondition failure" near the Share menu** -- ruled out
+   in round 3. To try: Export
    as Image › Share… several times, pick Messages / AirDrop / cancel; watch
    for the sheet or the export window drawing wrongly or freezing.
 6. **Quit while a circuit is still unsaved**. QuitConfirm fades every window

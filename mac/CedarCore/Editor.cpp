@@ -908,6 +908,10 @@ int cl_edit_undo_count(const CLDocument* doc) {
 	return doc ? (int)const_cast<GUICircuit&>(doc->circuit).GetCommandProcessor()->UndoCount() : 0;
 }
 
+long cl_edit_steps_made(const CLDocument* doc) {
+	return doc ? (long)const_cast<GUICircuit&>(doc->circuit).GetCommandProcessor()->StepsMade() : 0;
+}
+
 // The page a drawing step was on, after it's undone or redone, for the
 // window to show (other steps: -1).
 static void noteInkHistory(CLDocument* doc, wxCommand* done) {

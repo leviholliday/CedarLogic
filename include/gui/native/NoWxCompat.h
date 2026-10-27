@@ -45,6 +45,7 @@ public:
 		undoStack.emplace_back(cmd);
 		if (undoStack.size() > kLimit) undoStack.erase(undoStack.begin());
 		changed = true;
+		stored++;
 	}
 	bool Undo() {
 		if (undoStack.empty()) return false;
@@ -81,7 +82,12 @@ public:
 	// Whether anything was done or undone since the flag was last cleared
 	// (the document's "edited" dot).
 	bool changed = false;
+	// Steps stored since the processor was made: at the full history the
+	// count stays put as each new step drops the oldest, so this tells a
+	// new step from none (cl_edit_steps_made).
+	unsigned long StepsMade() const { return stored; }
 private:
+	unsigned long stored = 0;
 	static const size_t kLimit = 500;
 	std::vector<std::unique_ptr<wxCommand>> undoStack, redoStack;
 };

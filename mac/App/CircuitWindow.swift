@@ -48,6 +48,9 @@ struct CircuitWindow: View {
             TourModel.shared.windowAppeared(canvas)
         }
         .onDisappear { TourModel.shared.windowClosed(canvas) }
+        .onReceive(NotificationCenter.default.publisher(for: .clPutAwaySheets)) { n in
+            if (n.object as? CanvasController) === canvas, showNotices { showNotices = false }
+        }
         .sheet(item: $canvas.truthTable) { t in
             TruthTableView(table: t) { canvas.buildFromTable($0) }.onClickOutside { canvas.truthTable = nil }
         }
@@ -98,6 +101,9 @@ struct TidyBanner: View {
 @MainActor
 final class WindowReplacer: NSObject {
     private static var pending: [WindowReplacer] = []
+    /// A new circuit's window, put out of sight while the one it replaces
+    /// asks about its unsaved changes.
+    static func isWaiting(_ w: NSWindow) -> Bool { pending.contains { $0.new === w } }
     private let old: NSWindow, new: NSWindow
     private let newDoc: NSDocument
     var fullScreen = false
@@ -143,6 +149,13 @@ final class WindowReplacer: NSObject {
     }
 
     @objc private func document(_ doc: NSDocument, shouldClose: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        // The new circuit closed while the question was up: nothing of it to
+        // show (bringing its window back showed an empty, dead one).
+        if !NSDocumentController.shared.documents.contains(where: { $0 === newDoc }) {
+            if shouldClose { doc.close() } else { old.makeKeyAndOrderFront(nil) }
+            Self.pending.removeAll { $0 === self }
+            return
+        }
         if shouldClose {
             new.makeKeyAndOrderFront(nil)
             CanvasController.focusCanvas(in: new)

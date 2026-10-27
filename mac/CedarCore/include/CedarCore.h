@@ -42,6 +42,9 @@ CLDocument *cl_document_open(const char *path, char *error, int errorLen);
 // The same, from a file's contents already in memory.
 CLDocument *cl_document_open_text(const char *text, long length, char *error, int errorLen);
 void cl_document_close(CLDocument *doc);
+// How many documents are open now, every way they were made (a leak check:
+// an app's session check counts them before and after closing a window).
+int cl_document_live_count(void);
 // Whether opening runs the simulation until it settles (on by default). The
 // save round-trip check turns it off: settling moves counters and clocks on,
 // which a saved file rightly records.
@@ -171,6 +174,10 @@ bool cl_edit_paste(CLDocument *doc, int page, const char *text, double x, double
 // How many steps are on the undo stack (the app mirrors each into macOS's
 // undo manager, so the window knows it's edited and autosaves).
 int cl_edit_undo_count(const CLDocument *doc);
+// How many undo steps have been made in this document, ever (Undo and Redo
+// don't make one). At the full 500-step history cl_edit_undo_count stays
+// put while each new step drops the oldest: this still counts them.
+long cl_edit_steps_made(const CLDocument *doc);
 bool cl_edit_undo(CLDocument *doc);
 bool cl_edit_redo(CLDocument *doc);
 bool cl_edit_can_undo(const CLDocument *doc);
