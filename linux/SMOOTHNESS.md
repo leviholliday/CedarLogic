@@ -269,6 +269,45 @@ use the Pi or the Fedora laptop for verdicts.
    only GLES 2, and some Wayland/NVIDIA setups misbehave. It is a large
    dependency for the AppImage and .deb.
 
+   **Not needed for dragging (2026-10-27): the moving parts are kept as
+   an image.** After steps 2 and 3, a select-all drag still drew every
+   moving gate, wire and label each frame. Most of what moves only slides:
+   the gates and the selected wires with every end on a moving gate
+   (`CL_LAYER_MOVING_RIGID`; the wires that reshape are
+   `CL_LAYER_MOVING_LIVE`). `Canvas::drawMovingImage` draws those once
+   into an image when the static layer is made and copies it each frame,
+   moved by the drag's offset (`cl_document_moving_rigid`) in whole device
+   pixels. The reshaping wires are drawn under it every frame. It's made
+   again with the static layer (its key, every `redraw()`). It isn't used
+   while a new selection's halo fades in, for fewer than 8 selected gates
+   (cheap to draw anyway), when it would be over 8192 pixels a side or 16
+   megapixels, or with `CEDARLOGIC_DRAG_IMAGE=0`.
+
+   The cost: whole pixels put the sliding parts up to half a device pixel
+   off until the drop draws them exactly. On Lab5 the select-all frame
+   against the page drawn whole differs in 1.6% of its pixels by more than
+   24 of 255, all on edges. `--bench-drag` prints that comparison, and
+   `CEDARLOGIC_BENCH_PICTURES=<folder>` saves both frames.
+
+   Lab5 select all, `--bench-drag` on CI (x86_64, "straight"), mean ms a
+   frame:
+
+   | | scale 1 | scale 2 |
+   |---|---|---|
+   | before (outlines, drawn every frame) | 5.27 | 9.41 |
+   | cached glyphs | 3.47 | 6.38 |
+   | cached glyphs + the moving image | 0.61 | 2.63 |
+
+   The Zorin OS laptop was about 2.2 times slower than CI on the same
+   rows (11.65 ms against 5.27), so expect about 1.5 ms there at scale 1.
+
+   Left as it was: a running simulation that changes what's on screen
+   calls `redraw()`, which makes the static layer and the image again.
+   When that happens three frames running, the rest of the drag is drawn
+   whole. A clocked circuit like Lab5 may do that while it runs. That
+   hasn't been measured: the stepped rows run no simulation between
+   frames, and the live rows don't count layers.
+
 ## GTK 3 or GTK 4?
 
 The owner asked why GTK 3 when GTK 4 exists. Nobody recorded a reason. The
