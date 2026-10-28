@@ -23,9 +23,11 @@ clsync::Crypto& crypto();
 // headers in a 0600 temp file (`-H @file`) and its body in another, so a
 // token is never in the command line other users can read in /proc. HTTPS
 // only; plain http only to localhost, 127.0.0.1 or ::1 (a test server, CL_SYNC_URL).
+// No redirects, no ~/.curlrc, answers past 64 MB refused, `maxSeconds` in all.
 // Every temp file is gone when it returns, on every path. CL_SYNC_CURL names
 // another curl (the tests put a wrapper there that logs the arguments).
-clsync::HttpResponse http(const clsync::HttpRequest& r);
+// Send Feedback talks to the site through this too.
+clsync::HttpResponse http(const clsync::HttpRequest& r, int maxSeconds = 60);
 bool curlAvailable();
 // True for http://localhost..., http://127.0.0.1... and http://[::1]...
 bool isLocalHttp(const std::string& url);

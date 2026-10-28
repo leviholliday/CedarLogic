@@ -136,7 +136,10 @@ std::string trimmed(const std::string& s) {
 	return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
 }
 
-bool readAll(const std::string& path, std::string& out, size_t limit = 64u << 20) {
+// The most an answer may be: curl stops past it (--max-filesize), and so does reading it back.
+const size_t kMaxResponse = 64u << 20;
+
+bool readAll(const std::string& path, std::string& out, size_t limit = kMaxResponse) {
 	gchar* data = nullptr;
 	gsize len = 0;
 	out.clear();
@@ -181,7 +184,8 @@ std::string curlPath() {
 	return out;
 }
 
-// A temp file made 0600 by the system (mkstemp), removed when this goes.
+// A temp file made 0600 by the system (mkstemp) in the user's runtime folder (XDG_RUNTIME_DIR: owner
+// only, and emptied at logout, so one left by a crash doesn't linger), removed when this goes.
 struct TempFile {
 	std::string path;
 	TempFile() = default;
@@ -192,11 +196,13 @@ struct TempFile {
 	}
 	// Made, with `content` in it; false if that failed.
 	bool make(const std::string& content) {
-		gchar* name = nullptr;
-		const int fd = g_file_open_tmp("cedarlogic-sync-XXXXXX", &name, nullptr);
-		if (fd < 0) return false;
-		path = name;
+		// (Without XDG_RUNTIME_DIR, GLib gives the cache folder, which may not exist yet.)
+		g_mkdir_with_parents(g_get_user_runtime_dir(), 0700);
+		gchar* name = g_build_filename(g_get_user_runtime_dir(), "cedarlogic-sync-XXXXXX", nullptr);
+		const int fd = g_mkstemp_full(name, O_RDWR | O_CLOEXEC, 0600);
+		if (fd >= 0) path = name;
 		g_free(name);
+		if (fd < 0) return false;
 		const bool ok = content.empty() || writeAll(fd, content.data(), content.size());
 		::close(fd);
 		return ok;
@@ -255,7 +261,7 @@ bool isLocalHttp(const std::string& url) {
 
 bool curlAvailable() { return !curlPath().empty(); }
 
-clsync::HttpResponse http(const clsync::HttpRequest& r) {
+clsync::HttpResponse http(const clsync::HttpRequest& r, int maxSeconds) {
 	clsync::HttpResponse out;
 	const bool local = isLocalHttp(r.url);
 	if (r.url.compare(0, 8, "https://") != 0 && !local) return out;   // never plain http to anywhere else
@@ -276,7 +282,8 @@ clsync::HttpResponse http(const clsync::HttpRequest& r) {
 	if (hasBody && !bodyIn.make(r.body)) return out;
 
 	std::vector<std::string> args = { curl, "-q", "-sS", "--proto", local ? "=http,https" : "=https", "--proto-redir", "=https",
-	                                  "--max-redirs", "0", "--max-time", "60", "--connect-timeout", "20", "-X", r.method,
+	                                  "--max-redirs", "0", "--max-time", std::to_string(maxSeconds), "--connect-timeout", "20",
+	                                  "--max-filesize", std::to_string(kMaxResponse), "-X", r.method,
 	                                  "-H", "@" + headersIn.path, "-D", headersOut.path, "-o", bodyOut.path,
 	                                  "-w", "%{http_code}" };
 	if (local) {

@@ -5,6 +5,7 @@
 #include "Feedback.h"
 #include "Brand.h"
 #include "Canvas.h"
+#include "SyncPlatform.h"
 #include "Window.h"
 
 #include <glib/gstdio.h>
@@ -343,38 +344,22 @@ std::string envOr(const char* name, const char* fallback) {
 
 struct Reply { int status = 0; std::string body; bool reached = false; };
 
-// One request, through curl: the body from a file, the answer into another.
+// One request, through curl as sync makes them (SyncPlatform.h): https only (plain http only to this
+// computer, for a test server), no redirects, no ~/.curlrc, and the headers -- the upload token among
+// them -- in an owner-only file, never on curl's command line where anyone can read it in /proc.
 Reply request(const std::string& method, const std::string& pathAndQuery, const std::string& type, const std::string& token,
               const std::string& body) {
+	clsync::HttpRequest req;
+	req.method = method;
+	req.url = envOr("CL_FEEDBACK_URL", CL_FEEDBACK_URL) + pathAndQuery;
+	req.headers = { { "content-type", type }, { "x-cedarlogic-key", envOr("CL_FEEDBACK_KEY", CL_FEEDBACK_KEY) } };
+	if (!token.empty()) req.headers.push_back({ "x-upload-token", token });
+	req.body = body;
+	const clsync::HttpResponse got = syncplatform::http(req, 120);   // screenshots on a slow connection
 	Reply r;
-	gchar* curl = g_find_program_in_path("curl");
-	if (curl == nullptr) return r;
-	const std::string base = folder() + "/" + uniqueId();
-	const std::string in = base + ".body", out = base + ".reply";
-	writeAll(in, body);
-	std::vector<std::string> args = { curl, "-sS", "-X", method, "--max-time", "120", "--connect-timeout", "20",
-	                                  "-H", "content-type: " + type, "-H", "x-cedarlogic-key: " + envOr("CL_FEEDBACK_KEY", CL_FEEDBACK_KEY),
-	                                  "-A", "CedarLogic", "-o", out, "-w", "%{http_code}" };
-	if (!token.empty()) { args.push_back("-H"); args.push_back("x-upload-token: " + token); }
-	if (!body.empty()) { args.push_back("--data-binary"); args.push_back("@" + in); }
-	args.push_back(envOr("CL_FEEDBACK_URL", CL_FEEDBACK_URL) + pathAndQuery);
-	g_free(curl);
-	std::vector<gchar*> argv;
-	for (std::string& a : args) argv.push_back(&a[0]);
-	argv.push_back(nullptr);
-	gchar* stdoutText = nullptr;
-	gint exit = 0;
-	if (g_spawn_sync(nullptr, argv.data(), nullptr, G_SPAWN_STDERR_TO_DEV_NULL, nullptr, nullptr, &stdoutText, nullptr, &exit, nullptr)) {
-		const int code = stdoutText ? atoi(stdoutText) : 0;
-		if (code > 0) {
-			r.reached = true;
-			r.status = code;
-			r.body = readAll(out);
-		}
-	}
-	g_free(stdoutText);
-	g_remove(in.c_str());
-	g_remove(out.c_str());
+	r.reached = got.status > 0;
+	r.status = got.status;
+	r.body = got.body;
 	return r;
 }
 

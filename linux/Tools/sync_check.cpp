@@ -96,10 +96,11 @@ bool waitFor(int ms, const std::function<bool()>& cond) {
 // ---- --curl-check -----------------------------------------------------------------------
 
 int curlCheck(const std::string& url, const std::string& dir) {
-	// Where temp files go is decided once, before anything asks: a folder of our own, to see it empty.
+	// Where temp files go (the user's runtime folder) is decided once, before anything asks: a
+	// folder of our own, to see it empty.
 	const std::string tmp = dir + "/tmp";
 	g_mkdir_with_parents(tmp.c_str(), 0700);
-	g_setenv("TMPDIR", tmp.c_str(), TRUE);
+	g_setenv("XDG_RUNTIME_DIR", tmp.c_str(), TRUE);
 	const std::string log = dir + "/curl.log", wrapper = dir + "/curl-wrapper.sh";
 	gchar* real = g_find_program_in_path("curl");
 	if (!real) {
@@ -128,6 +129,11 @@ int curlCheck(const std::string& url, const std::string& dir) {
 	   "the token and the key aren't on curl's command line");
 	ok(text.find("ARG -H\nARG @") != std::string::npos, "the headers go in a file (-H @file)");
 	ok(text.find("MODE -rw-------") != std::string::npos, "...a file only its owner can read");
+	ok(text.find("ARG -H\nARG @" + tmp + "/cedarlogic-sync-") != std::string::npos, "...in the user's runtime folder");
+	ok(text.compare(0, 7, "ARG -q\n") == 0, "curl reads no ~/.curlrc (-q comes first)");
+	ok(text.find("ARG --proto\nARG =http,https\n") != std::string::npos && text.find("ARG --proto-redir\nARG =https\n") != std::string::npos &&
+	   text.find("ARG --max-redirs\nARG 0\n") != std::string::npos, "...http only to this computer, no redirects");
+	ok(text.find("ARG --max-filesize\nARG 67108864\n") != std::string::npos, "...and no answer past 64 MB");
 	ok(listDir(tmp).empty(), "no temp file is left after a request");
 
 	// A POST with a body, then one that can't connect (nothing listens on port 9).
