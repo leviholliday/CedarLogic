@@ -78,6 +78,34 @@ jobs:
           # Page link groups in the engine (TO/FROM between linked pages only).
           $B/pagelinks_check.exe $L format/tests/fixtures/pagelinks
 
+      # Signed updates (update-signing/UpdateSignature.h): the signature check (built
+      # with MSVC here) on RFC 8032's vectors and the ways a signature must fail; the app's
+      # public key against the signing script's; the updater's own code against fake
+      # releases (good, bad signature, stale manifest, wrong hash, downgrade...); and the
+      # signing script's dry run, with a throwaway key and Git's openssl, checked by the app.
+      - name: Signed update checks
+        if: matrix.run
+        shell: bash
+        run: |
+          B=windows/build/Release
+          $B/verify_check.exe
+          KEY=$($B/verify_check.exe --print-key | tr -d '\r')
+          echo "public key: $KEY"
+          grep -qx "PUBHEX=$KEY" scripts/sign-preview.sh || { echo "::error::sign-preview.sh has another public key"; exit 1; }
+          timeout 120 $B/CedarLogic.exe --update-self-test | tee update-self-test.log
+          grep -q "update self-test.*all passed" update-self-test.log
+          mkdir -p fake-release
+          printf 'a zip for the test\n' > fake-release/CedarLogic-Windows-native-x64.zip
+          printf 'an installer for the test\n' > fake-release/CedarLogic-Windows-Setup-x64.exe
+          TEST_KEY=$(scripts/sign-preview.sh --dry-run fake-release --tag windows-native-testing --commit "$GITHUB_SHA" --build 2 --test-key | tr -d '\r')
+          FAKE=$(cygpath -w "$PWD/fake-release")
+          timeout 60 $B/CedarLogic.exe --update-self-test --release "$FAKE" --key "$TEST_KEY" | tee signed-folder.log
+          grep -q "all passed" signed-folder.log
+          # Not with the real key (the test key signed it), and not once a file has changed.
+          if timeout 60 $B/CedarLogic.exe --update-self-test --release "$FAKE" --key "$KEY"; then echo "::error::verified with the wrong key"; exit 1; fi
+          printf 'changed\n' >> fake-release/CedarLogic-Windows-native-x64.zip
+          if timeout 60 $B/CedarLogic.exe --update-self-test --release "$FAKE" --key "$TEST_KEY"; then echo "::error::a changed file passed"; exit 1; fi
+
       # A long working session in one window, a few hundred seeded random
       # actions through the app's own code (windows/App/SessionCheck.h): parts,
       # wires, drags, undo past the 500-step history, tabs, split view,
@@ -698,6 +726,14 @@ jobs:
             # The first time: the tag is made here, on this commit.
             gh release create "$TAG" --prerelease --target "$GITHUB_SHA" --title "Native Windows test build" --notes "$NOTES"
           fi
+          # CI never signs. The app installs only a zip a signed SHA256SUMS names, and the key is
+          # only on the owner's Mac: after this run, scripts/sign-preview.sh windows checks the
+          # release and signs it. Until then the build reaches no one. The last build's manifest
+          # goes first, so the release is plainly unsigned while it changes (a stale one couldn't
+          # pass anyway: it names the old commit and the old files' hashes).
+          for a in SHA256SUMS SHA256SUMS.sig; do
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$a"; then gh release delete-asset "$TAG" "$a" -y; fi
+          done
           # The zips (what the updater downloads) before the installers.
           gh release upload "$TAG" zips/*.zip --clobber
           setups=(zips/*.exe)

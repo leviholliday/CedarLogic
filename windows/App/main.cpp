@@ -844,6 +844,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			writeOut(report);
 			return ok ? 0 : 1;
 		}
+		if (a == "--update-self-test") {   // [--release <folder> --key <hex>]: signed updates (Updater.h)
+			std::string release, key;
+			for (int j = i + 1; j + 1 < argc; j++) {
+				if (U(argv[j]) == "--release") release = U(argv[++j]);
+				else if (U(argv[j]) == "--key") key = U(argv[++j]);
+			}
+			std::string report;
+			const bool ok = updater::runSelfTest(report, release, key);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
 		if (a == "--click-test") { gClickTest = true; continue; }
 		if (a == "--session-check") {
 			gSessionCheck = true;

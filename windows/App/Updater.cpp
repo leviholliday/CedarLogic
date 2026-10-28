@@ -2,9 +2,15 @@
 //
 //   1. ask GitHub for the commit the "windows-native-testing" tag points at
 //   2. compare it with CL_GIT_COMMIT, baked in at build time
-//   3. different -> ask; yes -> download this CPU's zip from that release,
-//      check its size against what GitHub reported, and unpack it (with the
-//      tar that comes with Windows 10 and 11)
+//   3. different -> fetch the release's SHA256SUMS and SHA256SUMS.sig and
+//      check them (update-signing/UpdateSignature.h): signed with the preview
+//      key built in here, for this tag and the tag's commit, a build newer
+//      than this one (CL_BUILD_TIME), with this CPU's zip in it. Anything
+//      less: no update is offered, and why goes to update.log in the
+//      settings folder
+//   4. verified -> ask; yes -> download that zip, check its size and SHA-256
+//      against the manifest before anything else touches it, and unpack it
+//      (with the tar that comes with Windows 10 and 11)
 //   4. move the running CedarLogic.exe aside (Windows lets a running program
 //      be renamed, not replaced), put the new one and its res folder in its
 //      place, and offer to restart -- through the app's normal Quit, so
@@ -23,14 +29,25 @@
 #include "Alert.h"
 #include "Window.h"
 
+#include "UpdateSignature.h"
+
+#include <bcrypt.h>
 #include <winhttp.h>
 
 #include <atomic>
+#include <ctime>
+#include <functional>
 #include <memory>
 #include <thread>
+#include <vector>
 
 #ifndef CL_GIT_COMMIT
 #define CL_GIT_COMMIT "unknown"
+#endif
+// The commit's committer time (Unix seconds): the build number the signed
+// manifest's must be above. 0 when it isn't known (a build outside git).
+#ifndef CL_BUILD_TIME
+#define CL_BUILD_TIME 0
 #endif
 
 namespace updater {
@@ -123,13 +140,116 @@ bool jsonString(const std::string& json, const std::string& key, std::string& ou
 	return false;
 }
 
-long long jsonNumber(const std::string& json, const std::string& key, size_t beforePos) {
-	const std::string needle = "\"" + key + "\":";
-	const size_t at = json.rfind(needle, beforePos);
-	return at == std::string::npos ? 0 : strtoll(json.c_str() + at + needle.size(), nullptr, 10);
+// ---- Verifying ------------------------------------------------------------------
+
+// Why a check found no update, or a download was refused: a line in
+// update.log in the settings folder (the last 64 KB kept), and the debugger.
+void logUpdate(const std::string& what) {
+	time_t now = time(nullptr);
+	char when[32] = "";
+	struct tm t;
+	if (gmtime_s(&t, &now) == 0) strftime(when, sizeof when, "%Y-%m-%d %H:%M:%SZ", &t);
+	const std::string line = std::string(when) + " " + what + "\r\n";
+	OutputDebugStringW(W("CedarLogic update: " + line).c_str());
+	const std::wstring path = W(settingsDir() + "\\update.log");
+	WIN32_FILE_ATTRIBUTE_DATA a;
+	if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a) && (a.nFileSizeHigh || a.nFileSizeLow > 64 * 1024))
+		DeleteFileW(path.c_str());
+	HANDLE f = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (f == INVALID_HANDLE_VALUE) return;
+	DWORD wrote = 0;
+	WriteFile(f, line.data(), (DWORD)line.size(), &wrote, nullptr);
+	CloseHandle(f);
 }
 
-struct Asset { std::string url; long long size = 0; };
+// SHA-256 with Windows' own BCrypt, over bytes handed to `feed`.
+bool sha256With(const std::function<bool(BCRYPT_HASH_HANDLE)>& feed, std::string& hex) {
+	BCRYPT_ALG_HANDLE alg = nullptr;
+	BCRYPT_HASH_HANDLE hash = nullptr;
+	unsigned char digest[32];
+	bool ok = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
+	          BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0 && feed(hash) &&
+	          BCryptFinishHash(hash, digest, sizeof digest, 0) == 0;
+	if (hash) BCryptDestroyHash(hash);
+	if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+	if (ok) hex = updatesig::toHex(digest, sizeof digest);
+	return ok;
+}
+
+std::string sha256Bytes(const std::string& bytes) {
+	std::string hex;
+	sha256With([&](BCRYPT_HASH_HANDLE h) {
+		return bytes.empty() || BCryptHashData(h, (PUCHAR)bytes.data(), (ULONG)bytes.size(), 0) == 0;
+	}, hex);
+	return hex;
+}
+
+// A file's SHA-256 and size, read through once.
+bool sha256File(const std::string& path, std::string& hex, long long& size) {
+	HANDLE f = CreateFileW(W(path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (f == INVALID_HANDLE_VALUE) return false;
+	size = 0;
+	const bool ok = sha256With([&](BCRYPT_HASH_HANDLE h) {
+		std::vector<unsigned char> chunk(64 * 1024);
+		DWORD got = 0;
+		while (ReadFile(f, chunk.data(), (DWORD)chunk.size(), &got, nullptr)) {
+			if (got == 0) return true;
+			size += got;
+			if (BCryptHashData(h, chunk.data(), got, 0) != 0) return false;
+		}
+		return false;
+	}, hex);
+	CloseHandle(f);
+	return ok;
+}
+
+// A downloaded file against the signed manifest's entry for it.
+bool verifyFile(const std::string& path, const updatesig::File& expected, std::string& why) {
+	std::string hex;
+	long long size = 0;
+	if (!sha256File(path, hex, size)) {
+		why = "couldn't read " + path;
+		return false;
+	}
+	return updatesig::checkDownload(expected, size, hex, why);
+}
+
+// This CPU's zip among the manifest's names.
+bool isOurs(const std::string& name) { return name == std::string("CedarLogic-Windows-native-") + kArch + ".zip"; }
+
+std::string releaseFileUrl(const std::string& name) {
+	return strf("https://github.com/%s/releases/download/%s/%s", kOwnerRepo, kTag, name.c_str());
+}
+
+struct Asset {
+	std::string url;
+	updatesig::File file;
+};
+
+// The release's manifest and signature through `get` (the release's
+// download URLs, or a folder in the self-test), and the decision on them.
+updatesig::Decision findVerified(const std::function<bool(const std::string& name, std::string& out)>& get, const unsigned char key[32],
+                                 const std::string& releaseCommit, const std::string& runningCommit, long long runningBuild, Asset* out) {
+	std::string manifest, signature;
+	bool haveManifest = false, haveSignature = false;
+	if (releaseCommit != runningCommit) {
+		haveManifest = get(updatesig::kManifestName, manifest);
+		haveSignature = haveManifest && get(updatesig::kSignatureName, signature);
+	}
+	const updatesig::Decision d = updatesig::decide(haveManifest, manifest, haveSignature, signature, key, kTag, releaseCommit, runningCommit,
+	                                                runningBuild, isOurs);
+	if (out && d.result == updatesig::Result::Offer) {
+		out->url = releaseFileUrl(d.file.name);
+		out->file = d.file;
+	}
+	return d;
+}
+
+bool fetchReleaseFile(const std::string& name, std::string& out) {
+	if (!updatesig::safeName(name)) return false;
+	out.clear();
+	return httpGet(releaseFileUrl(name), &out, "", 64 * 1024) && !out.empty();
+}
 
 struct Check {
 	std::thread worker;
@@ -137,6 +257,7 @@ struct Check {
 	bool interactive = false;
 	HWND parent = nullptr;
 	std::string commit;   // "" when GitHub couldn't be asked
+	updatesig::Decision decision;
 	Asset asset;
 };
 
@@ -147,21 +268,9 @@ void runCheck(Check* c) {
 	std::string body;
 	if (httpGet(strf("https://api.github.com/repos/%s/commits/%s", kOwnerRepo, kTag), &body, "", 4u << 20))
 		jsonString(body, "sha", c->commit);   // the first "sha" is the commit's own
-	if (!c->commit.empty() && c->commit != CL_GIT_COMMIT) {
-		std::string rel;
-		if (httpGet(strf("https://api.github.com/repos/%s/releases/tags/%s", kOwnerRepo, kTag), &rel, "", 4u << 20)) {
-			const std::string suffix = std::string("-") + kArch + ".zip";
-			size_t at = 0, start = 0, end = 0;
-			std::string url;
-			while (jsonString(rel, "browser_download_url", url, at, &end, &start)) {
-				at = end;
-				if (url.size() >= suffix.size() && url.compare(url.size() - suffix.size(), suffix.size(), suffix) == 0) {
-					c->asset.url = url;
-					c->asset.size = jsonNumber(rel, "size", start);
-					break;
-				}
-			}
-		}
+	if (!c->commit.empty()) {
+		c->decision = findVerified(fetchReleaseFile, updatesig::kPublicKey, c->commit, CL_GIT_COMMIT, (long long)CL_BUILD_TIME, &c->asset);
+		logUpdate(c->decision.why);
 	}
 	c->done.store(true);
 }
@@ -332,15 +441,24 @@ void install(HWND parent, const Asset& asset) {
 		            "Updating needs Windows 10 version 1803 or later. Download the new build from the release page instead.");
 		return;
 	}
+	// Nothing is unpacked, let alone run, before the zip is the one the
+	// signed manifest names: its size and SHA-256.
+	bool verified = false;
+	std::string why;
 	const bool got = withProgress(parent, "Downloading the update…", [&] {
 		if (!httpGet(asset.url, nullptr, U(zip), 512u << 20)) return false;
-		WIN32_FILE_ATTRIBUTE_DATA a;
-		if (!GetFileAttributesExW(zip.c_str(), GetFileExInfoStandard, &a)) return false;
-		const long long size = ((long long)a.nFileSizeHigh << 32) | a.nFileSizeLow;
-		if (asset.size > 0 && size != asset.size) return false;
+		if (!verifyFile(U(zip), asset.file, why)) return false;
+		verified = true;
 		return runHidden(tar, L"-xf \"" + zip + L"\" -C \"" + work + L"\"");
 	});
 	DeleteFileW(zip.c_str());
+	if (!verified && !why.empty()) {
+		removeTree(work);
+		logUpdate("the download didn't verify, not installing it: " + why);
+		showMessage(parent, Tone::Warning, "The update didn't pass its check",
+		            "The downloaded file isn't the one the signed list of this build names, so it wasn't installed. (" + why + ")");
+		return;
+	}
 	const std::wstring fresh = unpacked(work);
 	if (!got || GetFileAttributesW((fresh + L"\\CedarLogic.exe").c_str()) == INVALID_FILE_ATTRIBUTES) {
 		removeTree(work);
@@ -409,18 +527,23 @@ void finish(HWND parent) {
 	const bool interactive = c->interactive;
 	const std::string commit = c->commit;
 	const Asset asset = c->asset;
+	const updatesig::Result result = c->decision.result;
 	g_check->worker.join();
 	g_check.reset();
 	if (commit.empty()) {
 		if (interactive) showMessage(parent, Tone::Warning, "Couldn't check for updates", "Check your connection and try again.");
 		return;
 	}
-	if (commit == CL_GIT_COMMIT) {
+	if (result == updatesig::Result::UpToDate) {
 		if (interactive) showMessage(parent, Tone::Info, "CedarLogic is up to date", "You have the newest version.");
 		return;
 	}
-	if (asset.url.empty()) {
-		if (interactive) showMessage(parent, Tone::Warning, "A new build is on its way", "It isn't ready to download yet. Try again in a few minutes.");
+	// A new build that isn't signed yet, or one that doesn't verify
+	// (update.log says which): never offered.
+	if (result != updatesig::Result::Offer || asset.url.empty()) {
+		if (interactive)
+			showMessage(parent, Tone::Info, "No verified update yet",
+			            "There's a newer test build, but it hasn't been signed yet, so CedarLogic won't install it. Try again later.");
 		return;
 	}
 	if (!interactive && g_offered == commit) return;
@@ -473,7 +596,69 @@ void CALLBACK laterCheck(HWND, UINT, UINT_PTR, DWORD) {
 	if (prefs().checkUpdates) begin(nullptr, false);
 }
 
+// ---- Self-test -------------------------------------------------------------------
+
+std::string joinPath(const std::string& dir, const std::string& name) { return dir + "\\" + name; }
+
+bool readWhole(const std::string& path, std::string& bytes) {
+	HANDLE f = CreateFileW(W(path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (f == INVALID_HANDLE_VALUE) return false;
+	bytes.clear();
+	char chunk[65536];
+	DWORD got = 0;
+	bool ok = true;
+	while ((ok = ReadFile(f, chunk, sizeof chunk, &got, nullptr) != 0) && got > 0) bytes.append(chunk, got);
+	CloseHandle(f);
+	return ok;
+}
+
+bool writeWhole(const std::string& path, const std::string& bytes) {
+	HANDLE f = CreateFileW(W(path).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (f == INVALID_HANDLE_VALUE) return false;
+	DWORD wrote = 0;
+	const bool ok = bytes.empty() || (WriteFile(f, bytes.data(), (DWORD)bytes.size(), &wrote, nullptr) && wrote == bytes.size());
+	CloseHandle(f);
+	return ok;
+}
+
+updatesig::SelfTestHooks selfTestHooks() {
+	updatesig::SelfTestHooks h;
+	h.tag = kTag;
+	h.assetName = std::string("CedarLogic-Windows-native-") + kArch + ".zip";
+	h.makeDir = [](const std::string& d) { return CreateDirectoryW(W(d).c_str(), nullptr) != 0; };
+	h.writeFile = writeWhole;
+	h.sha256Hex = sha256Bytes;
+	h.join = joinPath;
+	h.find = [](const std::string& dir, const unsigned char key[32], const std::string& releaseCommit, const std::string& runningCommit,
+	            long long runningBuild) {
+		auto fromDir = [&dir](const std::string& name, std::string& out) { return readWhole(joinPath(dir, name), out); };
+		return findVerified(fromDir, key, releaseCommit, runningCommit, runningBuild, nullptr);
+	};
+	h.verifyFile = verifyFile;
+	return h;
+}
+
 }  // namespace
+
+bool runSelfTest(std::string& report, const std::string& release, const std::string& key) {
+	bool ok;
+	if (!release.empty()) {
+		report += "Signed folder " + release + "\n";
+		ok = updatesig::checkSignedFolder(release, key, selfTestHooks(), readWhole, report);
+	} else {
+		wchar_t tmp[MAX_PATH];
+		GetTempPathW(MAX_PATH, tmp);
+		const std::wstring dir = std::wstring(tmp) + L"CedarLogic-update-test-" + std::to_wstring(GetCurrentProcessId());
+		removeTree(dir);
+		CreateDirectoryW(dir.c_str(), nullptr);
+		report += "Zip updates\n";
+		ok = updatesig::selfTest(U(dir), selfTestHooks(), report);
+		removeTree(dir);
+	}
+	report += strf("update self-test (this build: %s, build %lld): %s\n", CL_GIT_COMMIT, (long long)CL_BUILD_TIME,
+	               ok ? "all passed" : "FAILED");
+	return ok;
+}
 
 void start() {
 	// The exe a finished update moved aside, and the res folder it replaced.

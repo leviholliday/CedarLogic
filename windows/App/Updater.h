@@ -14,6 +14,17 @@ void checkNow(HWND parent);
 // Quitting: let go of a check that's still running.
 void shutdown();
 
+// Updates are taken only when signed (update-signing/UpdateSignature.h):
+// a build on the release is offered once its SHA256SUMS, signed with the
+// preview key, names this tag, the tag's commit and a newer build, and the
+// zip downloaded matches it.
+//
+// --update-self-test [--release <folder> --key <hex>]: the update check's
+// own code against fake releases in a temporary folder (good, bad signature,
+// stale manifest, wrong hash, downgrade...); or, given a folder the signing
+// script signed, that one. True when everything did what it should.
+bool runSelfTest(std::string& report, const std::string& release, const std::string& key);
+
 }  // namespace updater
 
 #endif  // CL_WINDOWS_UPDATER_H
