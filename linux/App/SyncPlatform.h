@@ -1,7 +1,7 @@
 // What the sync engine needs from this machine (SYNC.md 6.4, Linux): OpenSSL's
 // libcrypto for the hashes and AES-GCM, GIO's zlib for deflate, the curl
-// program for HTTP (the secrets never on its command line), a 0600 file for
-// the sync code and a lock on the sync folder. GLib and OpenSSL only -- no
+// program for HTTP (the secrets never on its command line), the keyring or a
+// 0600 file for the sync code and a lock on the sync folder. GLib and OpenSSL only -- no
 // GTK -- so Tools/sync_check.cpp runs the engine's self-test with the very
 // hooks the app uses, on a machine with no display.
 
@@ -41,10 +41,15 @@ std::string clientName();       // "linux/0.4.0+abc1234", for x-cedarlogic-clien
 std::string defaultDeviceName();
 
 // ---- The secret at rest, and the lock (SYNC.md 2.5) ----------------------------------
-// The 28-symbol code in `dir`/secret, mode 0600 (the folder 0700).
-std::string loadSecret(const std::string& dir);
-bool saveSecret(const std::string& dir, const std::string& code);
-void forgetSecret(const std::string& dir);
+// The 28-symbol code. With `useKeyring` (the app), in the desktop's keyring
+// (Keyring.h) when one is unlocked to keep it in; otherwise -- and always for
+// the tests and tools -- in `dir`/secret, mode 0600 (the folder 0700).
+// Whenever that file is there it's the newest copy: it moves into the keyring
+// the next time it's read, and is deleted once the keyring gives it back. A
+// keyring that is missing, locked or says no never costs the code.
+std::string loadSecret(const std::string& dir, bool useKeyring = false);
+bool saveSecret(const std::string& dir, const std::string& code, bool useKeyring = false);
+void forgetSecret(const std::string& dir, bool useKeyring = false);
 // flock(LOCK_EX | LOCK_NB) on the file; false when another process holds it.
 bool tryLock(const std::string& path);
 void unlock();

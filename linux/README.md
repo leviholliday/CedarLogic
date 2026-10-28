@@ -28,8 +28,10 @@ Sync talks to the website through the `curl` program, as Send Feedback does.
 Sync (Your Circuits on every device, `docs/SYNC.md`) is the shared engine in
 `mac/CedarCore/Sync*.cpp` with this machine's hooks (`App/SyncPlatform`:
 OpenSSL's libcrypto for the hashes and AES-GCM, GIO's zlib, curl with the
-headers and body in 0600 temp files, the code in a 0600 file under
-`~/.local/share/CedarLogic/Sync`) behind the app's windows (`App/SyncApp`:
+headers and body in 0600 temp files in the runtime folder, the code in the
+desktop's keyring through libsecret when it's installed and unlocked
+(`App/Keyring`), else in a 0600 file under `~/.local/share/CedarLogic/Sync`)
+behind the app's windows (`App/SyncApp`:
 saving open circuits first, holding a change that would land on unsaved work,
 reloading a window in place) and Settings > Sync, the code sheet with its QR
 code, the link preview, and the line under Your Circuits (`App/SyncUI`).

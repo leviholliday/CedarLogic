@@ -2,15 +2,20 @@
 // (App/SyncPlatform.cpp: libcrypto, GIO's zlib, the curl program), no window needed.
 //
 //   sync_check [--temp <dir>] [--only <name>] [--server <url>]
-//              [--curl-check <url>] [--roundtrip <url> [<a.cdl> <b.cdl>]] [--new-code]
+//              [--curl-check <url>] [--roundtrip <url> [<a.cdl> <b.cdl>]] [--keyring-check] [--new-code]
 //
 //   (no options)   the engine's self-test: SYNC.md 7.1's vectors and 7.2's scenarios on its
 //                  in-process server, and the engine's threads and C interface.
 //   --server       the same, and the single-device scenarios again over HTTP against the
 //                  website's mock server (cedarlogic-site: scripts/sync-mock-server.mjs).
 //   --curl-check   one request through the curl program with a bearer token, and one that fails:
-//                  the token is never on curl's command line, its header file is 0600, and every
-//                  temp file is gone afterwards. Against any server (Tools/sync_mock.py will do).
+//                  the token is never on curl's command line, its header file is 0600 in the
+//                  user's runtime folder, curl is held to https without redirects or ~/.curlrc,
+//                  and every temp file is gone afterwards. Against any server (Tools/sync_mock.py
+//                  will do).
+//   --keyring-check  the secret as the app keeps it: in the desktop's keyring, a secret file
+//                  from before moved in. Needs an unlocked keyring (the workflow starts one in a
+//                  throwaway D-Bus session); without one, it checks the file is kept instead.
 //   --roundtrip    two libraries and two engines against a server: turn on, preview, link,
 //                  rename, add, delete, delete the synced copy. Against any server.
 //
@@ -18,6 +23,7 @@
 //
 // Exit status 0 when everything passed. See Tools/sync-check.sh and the workflow.
 
+#include "../App/Keyring.h"
 #include "../App/SyncPlatform.h"
 #include "Sync.h"
 
@@ -153,6 +159,34 @@ int curlCheck(const std::string& url, const std::string& dir) {
 	return gFails ? 1 : 0;
 }
 
+// ---- --keyring-check -------------------------------------------------------------------------
+
+int keyringCheck(const std::string& dir) {
+	const std::string folder = dir + "/Sync", file = folder + "/secret";
+	const std::string code = clsync::newCode(syncplatform::crypto()), older = clsync::newCode(syncplatform::crypto());
+	std::string got;
+	if (!keyring::store(folder, "CedarLogic sync_check", code)) {
+		// No keyring to keep it in: the file, as before, and nothing lost.
+		printf("INFO no unlocked keyring here: checking the file is kept instead\n");
+		ok(syncplatform::saveSecret(folder, code, true) && g_file_test(file.c_str(), G_FILE_TEST_EXISTS), "no keyring: the code is saved to the file");
+		ok(syncplatform::loadSecret(folder, true) == code && g_file_test(file.c_str(), G_FILE_TEST_EXISTS), "...and read back from it, the file kept");
+		syncplatform::forgetSecret(folder, true);
+		ok(syncplatform::loadSecret(folder, true).empty(), "...and forgotten");
+		return gFails ? 1 : 0;
+	}
+	keyring::clear(folder);
+	ok(syncplatform::saveSecret(folder, code, true) && !g_file_test(file.c_str(), G_FILE_TEST_EXISTS), "the code goes into the keyring, not a file");
+	ok(keyring::lookup(folder, got) == keyring::Lookup::Found && got == code, "...where the keyring has it");
+	ok(syncplatform::loadSecret(folder, true) == code, "...and it reads back");
+	ok(syncplatform::saveSecret(folder, older) && g_file_test(file.c_str(), G_FILE_TEST_EXISTS), "a secret file from before (a tool's save)");
+	ok(syncplatform::loadSecret(folder, true) == older && !g_file_test(file.c_str(), G_FILE_TEST_EXISTS),
+	   "...is read first, moved into the keyring and deleted");
+	ok(syncplatform::loadSecret(folder, true) == older, "...and the keyring has it now");
+	syncplatform::forgetSecret(folder, true);
+	ok(keyring::lookup(folder, got) == keyring::Lookup::Missing && syncplatform::loadSecret(folder, true).empty(), "forgotten: gone from the keyring");
+	return gFails ? 1 : 0;
+}
+
 // ---- --roundtrip ---------------------------------------------------------------------------
 
 struct Device {
@@ -283,6 +317,7 @@ int roundTrip(const std::string& url, const std::string& dir, const std::string&
 }  // namespace
 
 int main(int argc, char** argv) {
+	bool keyringOnly = false;
 	std::string temp, server, only, curlUrl, roundUrl, cdlA = "res/samples/practice.cdl", cdlB = "format/tests/fixtures/lab6.cdl";
 	for (int i = 1; i < argc; i++) {
 		const std::string a = argv[i];
@@ -294,6 +329,7 @@ int main(int argc, char** argv) {
 			return 0;
 		}
 		else if (a == "--curl-check" && i + 1 < argc) curlUrl = argv[++i];
+		else if (a == "--keyring-check") keyringOnly = true;
 		else if (a == "--roundtrip" && i + 1 < argc) {
 			roundUrl = argv[++i];
 			if (i + 2 < argc && argv[i + 1][0] != '-') { cdlA = argv[++i]; cdlB = argv[++i]; }
@@ -311,7 +347,9 @@ int main(int argc, char** argv) {
 	}
 	g_mkdir_with_parents(temp.c_str(), 0700);
 	int status = 0;
-	if (!curlUrl.empty()) {
+	if (keyringOnly) {
+		status |= keyringCheck(temp);
+	} else if (!curlUrl.empty()) {
 		status |= curlCheck(curlUrl, temp);
 	} else if (!roundUrl.empty()) {
 		status |= roundTrip(roundUrl, temp, cdlA, cdlB);

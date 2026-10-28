@@ -1,6 +1,7 @@
 // What the sync engine needs from this machine (see SyncPlatform.h).
 
 #include "SyncPlatform.h"
+#include "Keyring.h"
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -377,13 +378,10 @@ std::string defaultDeviceName() {
 
 // ---- The secret and the lock ----------------------------------------------------------------------
 
-std::string loadSecret(const std::string& dir) {
-	std::string text;
-	if (dir.empty() || !readAll(dir + "/secret", text, 4096)) return std::string();
-	return trimmed(text);
-}
+namespace {
+const char* const kSecretLabel = "CedarLogic sync code";
 
-bool saveSecret(const std::string& dir, const std::string& code) {
+bool writeSecretFile(const std::string& dir, const std::string& code) {
 	if (!makePrivateFolder(dir)) return false;
 	// A temp file made 0600 and moved over the old one: never readable by anyone else, not for an instant.
 	const std::string tmp = dir + "/secret.tmp" + std::to_string((long)getpid());
@@ -396,9 +394,37 @@ bool saveSecret(const std::string& dir, const std::string& code) {
 	if (!ok) g_remove(tmp.c_str());
 	return ok;
 }
+}  // namespace
 
-void forgetSecret(const std::string& dir) {
-	if (!dir.empty()) g_remove((dir + "/secret").c_str());
+std::string loadSecret(const std::string& dir, bool useKeyring) {
+	if (dir.empty()) return std::string();
+	std::string text;
+	if (readAll(dir + "/secret", text, 4096)) {
+		// The newest copy: into the keyring, and the file gone once the keyring gives it back.
+		const std::string code = trimmed(text);
+		std::string back;
+		if (useKeyring && !code.empty() && keyring::store(dir, kSecretLabel, code) &&
+		    keyring::lookup(dir, back) == keyring::Lookup::Found && back == code)
+			g_remove((dir + "/secret").c_str());
+		return code;
+	}
+	std::string code;
+	if (useKeyring && keyring::lookup(dir, code) == keyring::Lookup::Found) return trimmed(code);
+	return std::string();
+}
+
+bool saveSecret(const std::string& dir, const std::string& code, bool useKeyring) {
+	if (useKeyring && keyring::store(dir, kSecretLabel, code)) {
+		g_remove((dir + "/secret").c_str());
+		return true;
+	}
+	return writeSecretFile(dir, code);
+}
+
+void forgetSecret(const std::string& dir, bool useKeyring) {
+	if (dir.empty()) return;
+	if (useKeyring) keyring::clear(dir);
+	g_remove((dir + "/secret").c_str());
 }
 
 namespace {

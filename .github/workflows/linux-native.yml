@@ -45,7 +45,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
-            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation
+            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
+            gnome-keyring dbus
 
       - name: Build
         run: |
@@ -140,6 +141,14 @@ jobs:
           $B/sync_check --curl-check "$URL"
           $B/sync_check --roundtrip "$URL"
           kill $MOCK
+
+      # The sync code as the app keeps it: in the desktop's keyring (libsecret, loaded at run
+      # time), here a throwaway GNOME Keyring in a D-Bus session of its own. Without a keyring
+      # the check falls back to the file, which would pass too, so insist this one was used.
+      - name: Sync code in a keyring
+        run: |
+          dbus-run-session -- sh -c 'printf throwaway | gnome-keyring-daemon --unlock --components=secrets >/dev/null && linux/build/sync_check --keyring-check' | tee keyring.log
+          ! grep -q "no unlocked keyring" keyring.log
 
       - name: Package AppImage
         run: |

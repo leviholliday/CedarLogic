@@ -163,9 +163,9 @@ public:
 		}
 	}
 
-	std::string loadSecret() override { return syncplatform::loadSecret(syncplatform::syncFolder()); }
-	bool saveSecret(const std::string& code) override { return syncplatform::saveSecret(syncplatform::syncFolder(), code); }
-	void forgetSecret() override { syncplatform::forgetSecret(syncplatform::syncFolder()); }
+	std::string loadSecret() override { return syncplatform::loadSecret(syncplatform::syncFolder(), true); }
+	bool saveSecret(const std::string& code) override { return syncplatform::saveSecret(syncplatform::syncFolder(), code, true); }
+	void forgetSecret() override { syncplatform::forgetSecret(syncplatform::syncFolder(), true); }
 	bool tryLock(const std::string& path) override { return syncplatform::tryLock(path); }
 	void unlock() override { syncplatform::unlock(); }
 
