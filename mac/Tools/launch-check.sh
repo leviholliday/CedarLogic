@@ -50,6 +50,8 @@ for i in $(seq 1 "$RUNS"); do
 		fail=1
 	fi
 done
+# Any Keychain items the copy made (its own service: its bundle id), gone too.
+while security delete-generic-password -s com.leviholliday.cedarlogic.native.launchcheck >/dev/null 2>&1; do :; done
 # The copy unregistered, so Finder never offers it for .cdl files.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$APP" 2>/dev/null
 [ $fail = 0 ] && rm -rf "$WORK"

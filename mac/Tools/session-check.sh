@@ -56,6 +56,8 @@ for seed in "${SEEDS[@]}"; do
 	fi
 done
 defaults delete $ID >/dev/null 2>&1
+# Any Keychain items the copy made (its own service: its bundle id), gone too.
+while security delete-generic-password -s "$ID" >/dev/null 2>&1; do :; done
 [ -n "${CHECK_TAG:-}" ] && rm -f "$HOME/Library/Preferences/$ID.plist"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$APP" 2>/dev/null
 [ $fail = 0 ] && rm -rf "$WORK"

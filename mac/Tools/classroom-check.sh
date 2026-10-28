@@ -25,7 +25,7 @@ ARCH=$(uname -m)
 echo "Building $OUT/classroom-check..."
 swiftc -O -parse-as-library -target "$ARCH-apple-macos14.0" \
 	-import-objc-header mac/CedarCore/include/CedarCore.h \
-	mac/App/SyncHooks.swift mac/App/ClassroomHooks.swift mac/Tools/classroom-check.swift mac/build/libCedarCore.a -lc++ \
+	mac/App/SyncHooks.swift mac/App/ClassroomHooks.swift mac/App/KeychainFile.swift mac/Tools/classroom-check.swift mac/build/libCedarCore.a -lc++ \
 	-o "$OUT/classroom-check"
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/cl-classroom-check.XXXXXX")

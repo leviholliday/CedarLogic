@@ -30,7 +30,7 @@ ARCH=$(uname -m)
 echo "Building $OUT/sync-check..."
 swiftc -O -parse-as-library -target "$ARCH-apple-macos14.0" \
 	-import-objc-header mac/CedarCore/include/CedarCore.h \
-	mac/App/SyncHooks.swift mac/Tools/sync-check.swift mac/build/libCedarCore.a -lc++ \
+	mac/App/SyncHooks.swift mac/App/KeychainFile.swift mac/Tools/sync-check.swift mac/build/libCedarCore.a -lc++ \
 	-o "$OUT/sync-check"
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/cl-sync-check.XXXXXX")

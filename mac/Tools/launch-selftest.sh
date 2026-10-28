@@ -68,6 +68,8 @@ for r in $(seq 1 "$ROUNDS"); do
 	done
 done
 defaults delete $ID >/dev/null 2>&1
+# Any Keychain items the copy made (its own service: its bundle id), gone too.
+while security delete-generic-password -s "$ID" >/dev/null 2>&1; do :; done
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$APP" 2>/dev/null
 [ $fail = 0 ] && rm -rf "$WORK"
 exit $fail

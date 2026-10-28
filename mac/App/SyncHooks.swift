@@ -1,7 +1,8 @@
 // The sync engine's platform hooks on the Mac (SYNC.md 6.4), the part that
 // needs no window: CryptoKit for SHA-256, HMAC and AES-GCM, SecRandomCopyBytes,
 // Compression's raw deflate, URLSession for HTTP (on the engine's thread, so
-// it waits), the secret in a 0600 file and the sync folder's flock. The app
+// it waits), the secret in the Keychain (KeychainFile.swift; a 0600 file
+// when there's no Keychain to use) and the sync folder's flock. The app
 // adds its window hooks on top (Sync.swift); mac/Tools/sync-check.swift uses
 // these as they are to run the engine's self-test.
 
@@ -13,10 +14,16 @@ import Security
 final class SyncPlatform {
     /// ~/Library/Application Support/CedarLogic/Sync: per machine, outside the library (2.5).
     let syncDir: URL
+    /// The Keychain service secrets go under: the app's bundle id, a test's
+    /// own name, or nil (a command-line tool) for the 0600 file alone.
+    let keychainService: String?
     private var lockFD: Int32 = -1
     private let lockGuard = NSLock()
 
-    init(syncDir: URL) { self.syncDir = syncDir }
+    init(syncDir: URL, keychainService: String? = Bundle.main.bundleIdentifier) {
+        self.syncDir = syncDir
+        self.keychainService = keychainService
+    }
 
     static var defaultSyncDir: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -266,26 +273,45 @@ final class SyncPlatform {
     // MARK: The secret and the lock
 
     private var secretURL: URL { syncDir.appendingPathComponent("secret") }
+    private var keychainSecret: KeychainFile? {
+        keychainService.map { KeychainFile(service: $0, file: secretURL, label: "CedarLogic sync code") }
+    }
 
-    /// The sync folder, only this user's (0700).
+    /// The sync folder, only this user's (0700), and out of backups.
     @discardableResult
     func makeSyncDir() -> Bool {
         try? FileManager.default.createDirectory(at: syncDir, withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
+        syncDir.excludeFromBackup()
         return chmod(syncDir.path, 0o700) == 0
     }
 
+    /// The Keychain's code (one still in the file moves there now), or the
+    /// file's. A Keychain that won't answer reads as no code: sync stays off
+    /// this time and nothing is changed, so the code is there next time.
     func loadSecret() -> UnsafeMutablePointer<CChar>? {
-        guard let text = try? String(contentsOf: secretURL, encoding: .utf8) else { return nil }
+        var data: Data?
+        if let keychain = keychainSecret {
+            if case .data(let d) = keychain.load() { data = d }
+        } else {
+            data = FileManager.default.contents(atPath: secretURL.path)
+        }
+        guard let data, let text = String(data: data, encoding: .utf8) else { return nil }
         let code = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return code.isEmpty ? nil : strdup(code)
     }
 
-    /// Written to a 0600 temporary file, then renamed over the old one: never
-    /// half written, never readable by anyone else for a moment.
+    /// Into the Keychain; failing that (or for a tool), the 0600 file.
     func saveSecret(_ code: UnsafePointer<CChar>?) -> Bool {
         guard let code, makeSyncDir() else { return false }
         let text = String(cString: code) + "\n"
+        if let keychain = keychainSecret, keychain.save(Data(text.utf8)) { return true }
+        return writeSecretFile(text)   // the newest copy then: read before the Keychain's
+    }
+
+    /// Written to a 0600 temporary file, then renamed over the old one: never
+    /// half written, never readable by anyone else for a moment.
+    private func writeSecretFile(_ text: String) -> Bool {
         let tmp = syncDir.appendingPathComponent(".secret-\(getpid()).tmp")
         unlink(tmp.path)
         let fd = Darwin.open(tmp.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
@@ -298,7 +324,10 @@ final class SyncPlatform {
         return true
     }
 
-    func forgetSecret() { unlink(secretURL.path) }
+    func forgetSecret() {
+        keychainSecret?.delete()
+        unlink(secretURL.path)
+    }
 
     func tryLock(_ path: UnsafePointer<CChar>?) -> Bool {
         guard let path else { return false }

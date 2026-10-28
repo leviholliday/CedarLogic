@@ -23,6 +23,7 @@
 //       Against the mock server named by CL_SYNC_URL.
 
 import Foundation
+import Security
 
 @main
 enum SyncCheck {
@@ -101,6 +102,28 @@ enum SyncCheck {
         }
         p.forgetSecret()
         check("secret forgotten", p.loadSecret() == nil)
+        // The app's way: the Keychain (a service of this run's own, never the app's, deleted
+        // at the end), with a secret file from before moved into it the first time it's read.
+        let service = "com.leviholliday.cedarlogic.test.sync-check.\(getpid())"
+        defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary) }
+        let keychained = SyncPlatform(syncDir: dir, keychainService: service)
+        let secretFile = dir.appendingPathComponent("secret").path
+        func loaded(_ p: SyncPlatform) -> String? {
+            guard let s = p.loadSecret() else { return nil }
+            defer { free(s) }
+            return String(cString: s)
+        }
+        check("Keychain: secret saved, and no file", keychained.saveSecret("000G40R40M30E209185GR38E1YZ4")
+              && !FileManager.default.fileExists(atPath: secretFile))
+        check("Keychain: secret reads back", loaded(keychained) == "000G40R40M30E209185GR38E1YZ4")
+        check("Keychain: the folder is kept out of backups",
+              (try? dir.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true)
+        check("a secret file from before (a tool's save)", p.saveSecret("1111111111111111111111111111")
+              && FileManager.default.fileExists(atPath: secretFile))
+        check("Keychain: is read first, moved in and deleted", loaded(keychained) == "1111111111111111111111111111"
+              && !FileManager.default.fileExists(atPath: secretFile) && loaded(keychained) == "1111111111111111111111111111")
+        keychained.forgetSecret()
+        check("Keychain: secret forgotten", loaded(keychained) == nil && loaded(p) == nil)
         // One lock per sync folder.
         let lock = dir.appendingPathComponent("lock").path
         let other = SyncPlatform(syncDir: dir)
