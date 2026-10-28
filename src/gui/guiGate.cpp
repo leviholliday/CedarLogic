@@ -323,8 +323,11 @@ void guiGate::setGLcoords( float x, float y, bool noUpdateWires ) {
 	// finite is held at the doors instead -- the loader and a paste bring
 	// parts in to WORLD_LIMIT -- so that moves stay rigid.)
 	if (!std::isfinite(x) || !std::isfinite(y)) { updateBBoxes(noUpdateWires); return; }
-	this->myX = x;
-	this->myY = y;
+	// Kept to the precision a save writes (gl_defs.h savedPrecision), so its
+	// pins are where they will be after a reopen: rounding the part and its
+	// wire's end apart could land them a digit apart (-20.5357, -20.5358).
+	this->myX = (float)savedPrecision(x);
+	this->myY = (float)savedPrecision(y);
 
 	// Update the matrices and bounding box:
 	updateBBoxes(noUpdateWires);
