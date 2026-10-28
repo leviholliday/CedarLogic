@@ -1,0 +1,104 @@
+name: Core hardening
+
+# The shared engine (src/gui, include/gui, logic, format, mac/CedarCore) built
+# headless with AddressSanitizer + UndefinedBehaviorSanitizer: its unit tests,
+# the regression checks, and a few minutes of each fuzzer. docs/CORE-HARDENING.md
+# says what each part looks for.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sanitizers:
+    name: Engine under ASan/UBSan (tests + fuzz)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CC: clang
+      CXX: clang++
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build
+
+      - name: logic/ and format/ unit tests
+        run: |
+          cmake -S logic -B build/logic -G Ninja -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
+          cmake --build build/logic
+          ctest --test-dir build/logic --output-on-failure
+          cmake -S format -B build/format -G Ninja -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
+          cmake --build build/format
+          ctest --test-dir build/format --output-on-failure
+
+      - name: Build the headless engine, checks and fuzzers
+        run: |
+          cmake -S mac/Tools/headless -B build/headless -G Ninja -DCL_SANITIZE=ON -DCL_LIBFUZZER=ON
+          cmake --build build/headless
+
+      - name: Engine checks (core_check, clipboard format, short fuzz runs)
+        run: ctest --test-dir build/headless --output-on-failure
+
+      - name: Fuzz edits (every invariant, 300 operations a seed)
+        env:
+          CL_FUZZ_CHECK: 1
+          CL_FUZZ_BOTH: 1
+          CL_FUZZ_REACH: 1
+          CL_FUZZ_INVARIANT: 1
+          CL_FUZZ_DUP: 1
+          CL_FUZZ_TREE: 1
+          CL_FUZZ_NOSIM: 1
+        run: |
+          python3 mac/Tools/fuzz-sweep.py --timeout 120 --logs fuzz-logs/edit build/headless/fuzz_edit 1 80 300
+          CL_FUZZ_WIDE=1 CL_FUZZ_SIM=1 CL_FUZZ_UNDOSTEP=1 CL_FUZZ_REOPEN=25 CL_FUZZ_UNDOALL=50 \
+            python3 mac/Tools/fuzz-sweep.py --timeout 120 --logs fuzz-logs/wide build/headless/fuzz_edit 1 40 300 \
+            format/tests/fixtures/Lab5.cdl format/tests/fixtures/Broadcast.cdl "format/tests/fixtures/Routing Backwards.cdl"
+
+      - name: Fuzz files (damaged .cdl files and clipboard text)
+        env:
+          CL_FUZZ_DUMP: fuzz-logs/load
+        run: |
+          mkdir -p fuzz-logs/load
+          python3 mac/Tools/fuzz-sweep.py --timeout 120 --logs fuzz-logs/load build/headless/fuzz_load 1 60 100 \
+            format/tests/fixtures/*.cdl format/tests/fixtures/pagelinks/*.cdl tests/fixtures/*.cdl
+
+      - name: libFuzzer on the loader (2 minutes)
+        env:
+          CL_GATEDEFS: ${{ github.workspace }}/res/cl_gatedefs.xml
+        run: |
+          mkdir -p fuzz-logs/libfuzzer corpus
+          cp format/tests/fixtures/*.cdl format/tests/fixtures/pagelinks/*.cdl tests/fixtures/*.cdl corpus/
+          build/headless/fuzz_load_libfuzzer corpus -max_total_time=120 -timeout=20 -rss_limit_mb=4096 \
+            -max_len=400000 -artifact_prefix=fuzz-logs/libfuzzer/ -print_final_stats=1
+
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-logs
+          path: fuzz-logs
+
+  release-asserts-off:
+    name: Engine checks with asserts compiled out
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build
+      - name: Build (NDEBUG, sanitizers on)
+        run: |
+          cmake -S mac/Tools/headless -B build/headless -G Ninja -DCL_SANITIZE=ON -DCL_NDEBUG=ON
+          cmake --build build/headless
+      - name: Checks
+        run: ctest --test-dir build/headless --output-on-failure

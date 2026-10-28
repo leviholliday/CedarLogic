@@ -82,7 +82,18 @@ if(CL_LIBFUZZER)
 	target_link_libraries(fuzz_load_libfuzzer PRIVATE CedarCoreHeadless)
 endif()
 
+# The clipboard's line format, on its own (doctest, as format/ and logic/ use).
+include(FetchContent)
+FetchContent_Declare(doctest GIT_REPOSITORY https://github.com/doctest/doctest.git GIT_TAG v2.4.11 GIT_SHALLOW 1)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(DOCTEST_NO_INSTALL ON)
+FetchContent_MakeAvailable(doctest)
+add_executable(test_cmdserialize ${ROOT}/src/gui/tests/test_cmdserialize.cpp ${ROOT}/src/gui/command/cmdSerialize.cpp)
+target_include_directories(test_cmdserialize PRIVATE ${ROOT}/include/gui/command ${ROOT}/logic/include)
+target_link_libraries(test_cmdserialize PRIVATE doctest::doctest)
+
 enable_testing()
+add_test(NAME test_cmdserialize COMMAND test_cmdserialize)
 set(GATEDEFS ${ROOT}/res/cl_gatedefs.xml)
 file(GLOB FIXTURES ${ROOT}/format/tests/fixtures/*.cdl)
 add_test(NAME core_check COMMAND core_check ${GATEDEFS} ${ROOT}/format/tests/fixtures)
