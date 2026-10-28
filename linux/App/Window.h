@@ -319,6 +319,18 @@ public:
 	// Projector Mode (Simulation menu, and the Simulation View bar): on, it
 	// opens Simulation View too; Escape or Done leaves it as ever.
 	void toggleProjector();
+	// Predict, then reveal (Predict.cpp): the lights covered in Simulation
+	// View, guessed, then revealed and scored.
+	bool predictOn() const { return predict.on; }
+	bool predictRevealed() const { return predict.revealed; }
+	bool predictCovers() const;
+	void togglePredict();
+	void revealOrCoverAgain();
+	// A switch, Step or Step Clock moved the circuit on (a new round once revealed).
+	void circuitAdvancedByUser();
+	bool predictTap(double wx, double wy);
+	bool predictKey(const GdkEventKey* e);
+	std::vector<CLPredictMark> predictMarks();
 	void toggleLock();
 	void makeTruthTable();
 	void checkCircuit();   // the truth table at its Check tab
@@ -416,6 +428,14 @@ private:
 
 	bool isRunning = true;
 	bool simViewOn = false;
+	struct PredictState {
+		bool on = false, revealed = false;
+		std::map<long, int> guesses, answers;   // by gate: 0/1, or a display's number (-1 no clear value)
+		long focus = -1;
+		int page = -1;
+	} predict;
+	std::vector<CLSimLight> predictLights() const;
+	void predictNewRound();
 	bool lockedOn = false;
 	double phase = 0;                 // Simulation View's marching dashes, in points
 	guint timer = 0;

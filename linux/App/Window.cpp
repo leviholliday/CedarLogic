@@ -141,6 +141,8 @@ const Command kCommands[] = {
 	{ "step-clock", [](CircuitWindow* w) { w->stepClock(); }, false },
 	{ "sim-view", [](CircuitWindow* w) { w->toggleSimView(); }, true },
 	{ "projector", [](CircuitWindow* w) { w->toggleProjector(); }, true },
+	{ "predict", [](CircuitWindow* w) { w->togglePredict(); }, true },
+	{ "reveal", [](CircuitWindow* w) { w->revealOrCoverAgain(); }, false },
 	{ "lock", [](CircuitWindow* w) { w->toggleLock(); }, true },
 	{ "truth-table", [](CircuitWindow* w) { w->makeTruthTable(); }, false },
 	{ "check-circuit", [](CircuitWindow* w) { w->checkCircuit(); }, false },
@@ -1420,6 +1422,9 @@ void CircuitWindow::updateActions() {
 	setChecked(win, "running", isRunning);
 	setChecked(win, "sim-view", simViewOn);
 	setChecked(win, "projector", prefs().projector);
+	setChecked(win, "predict", predict.on);
+	setEnabled(win, "predict", simViewOn || predict.on);
+	setEnabled(win, "reveal", simViewOn && predict.on);
 	setChecked(win, "lock", lockedOn);
 	setChecked(win, "dark", prefs().dark);
 	setChecked(win, "palette", prefs().showPalette);
@@ -1440,6 +1445,9 @@ void CircuitWindow::updateActions() {
 	if (GMenuModel* bar = appMenubar())
 		if (gtk_window_is_active(GTK_WINDOW(win)) || circuitWindows().size() == 1)
 			relabel(bar, "win.lock-in-place", lockMenuUnlocks() ? (std::string("_") + unlockPartsTitle()).c_str() : "_Lock in Place");
+	if (GMenuModel* bar = appMenubar())
+		if (gtk_window_is_active(GTK_WINDOW(win)) || circuitWindows().size() == 1)
+			relabel(bar, "win.reveal", predict.revealed ? "_Cover the Lights Again" : "Re_veal");
 	if (menuRow) menuRow->redraw();
 	// The menus' Undo and Redo say what they undo.
 	(void)edit;
@@ -2390,6 +2398,7 @@ void CircuitWindow::stepOnce() {
 	// Stepping a running circuit means little: pause first.
 	if (isRunning) setRunning(false);
 	cl_document_step(doc);
+	circuitAdvancedByUser();
 	redraw();
 	if (scope) scope->update();
 }
@@ -2407,6 +2416,7 @@ void CircuitWindow::stepClock() {
 }
 
 void CircuitWindow::clockStepped() {
+	circuitAdvancedByUser();
 	redraw();
 	if (scope) scope->update();
 }

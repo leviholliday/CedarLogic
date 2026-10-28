@@ -119,6 +119,9 @@ void applyStyle() {
 	s += "dialog .dialog-action-area { padding: 6px 12px 12px 12px; }\n";
 	s += "dialog entry, dialog spinbutton, dialog textview, dialog combobox button { border-radius: 7px; background-image: none; background-color: " +
 	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
+	// A multi-line field (Send Feedback's details) as the one-line ones: filled, rounded, lit when focused.
+	s += "dialog frame > border { border-radius: 3px; border: 1px solid " + css(line) + "; }\n";
+	s += "dialog frame textview text { background-color: " + css(fieldFill) + "; color: " + css(text) + "; }\n";
 	s += "dialog entry:focus, dialog spinbutton:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
 	s += "dialog button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
 	     "; border: none; box-shadow: none; min-height: 30px; padding: 0 14px; text-shadow: none; }\n";

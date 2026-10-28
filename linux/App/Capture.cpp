@@ -50,6 +50,9 @@ GdkRectangle frameOf(GtkWindow* w) {
 
 cairo_surface_t* window(GtkWindow* w, int maxWidth) {
 	if (w == nullptr || !gtk_widget_get_realized(GTK_WIDGET(w))) return nullptr;
+	// A change just made (Simulation View, a panel) is laid out first: GTK
+	// draws only a window whose sizes are settled.
+	gtk_container_check_resize(GTK_CONTAINER(w));
 	const GdkRectangle f = frameOf(w);
 	if (f.width <= 0 || f.height <= 0) return nullptr;
 	double scale = std::max(1, gtk_widget_get_scale_factor(GTK_WIDGET(w)));

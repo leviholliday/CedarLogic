@@ -1245,7 +1245,21 @@ struct SessionDriver {
 		case 40: zoomAround(); break;
 		case 41: rightClick(); break;
 		case 42: tap(t, GDK_KEY_a, GDK_CONTROL_MASK); break;
-		case 43: tap(t, GDK_KEY_F10, rng.chance(0.3) ? GDK_SHIFT_MASK : 0); break;   // every menu, or the canvas's
+		case 43: {
+			// Every menu (the menu bar's File), or the canvas's; then dealt with
+			// at once, as a person would: an open menu bar menu takes the next
+			// keys typed as its items' letters (N would be New Circuit).
+			tap(t, GDK_KEY_F10, rng.chance(0.3) ? GDK_SHIFT_MASK : 0);
+			pump(60);
+			GList* all = gtk_window_list_toplevels();
+			std::vector<GtkWidget*> menus;
+			for (GList* l = all; l; l = l->next)
+				if (gtk_widget_get_visible(GTK_WIDGET(l->data)))
+					if (GtkWidget* m = menuIn(GTK_WIDGET(l->data))) menus.push_back(m);
+			g_list_free(all);
+			if (!menus.empty()) pokeMenu(menus.back());
+			break;
+		}
 		case 44: w->runAction("win.connect-nearby"); break;
 		case 45: tap(t, GDK_KEY_D, GDK_CONTROL_MASK | GDK_SHIFT_MASK); break;
 		case 46: tap(t, GDK_KEY_period, GDK_CONTROL_MASK); break;

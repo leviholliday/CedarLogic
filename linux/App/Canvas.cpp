@@ -761,13 +761,15 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 		cairo_save(cr);
 		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
 	}
-	if (projector) {
-		// Projector Mode: Simulation View drawn big and bright (the Mac's).
+	const bool covering = sim && win->predictCovers();
+	if (projector || covering) {
+		// Projector Mode: Simulation View drawn big and bright (the Mac's);
+		// Predict: the lights dark and every wire "off" until Reveal.
 		CLSimViewStyle st{};
 		st.accent = prefs().accent;
 		st.wireScale = prefs().wireScale();
-		st.projector = true;
-		st.predict = false;
+		st.projector = projector;
+		st.predict = covering;
 		st.ink = CL_INK_FOLLOW;
 		cl_simview_draw_page(doc, p, cr, scale, originX, originY, upp, &st);
 	} else {
@@ -775,6 +777,10 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	}
 	if (coarse) cairo_restore(cr);
 	drawSceneTop(cr, scale, sim, dark, projector);
+	if (sim) {
+		const std::vector<CLPredictMark> marks = win->predictMarks();
+		if (!marks.empty()) cl_simview_draw_predict(doc, p, cr, scale, originX, originY, upp, marks.data(), (int)marks.size(), projector);
+	}
 }
 
 // Over the parts: Simulation View's marching dashes, or the pins and the
@@ -785,8 +791,10 @@ void Canvas::drawSceneTop(cairo_t* cr, int scale, bool sim, bool dark, bool proj
 	// The stroke being drawn and the hover preview, over everything else.
 	const bool live = cl_ink_live_page(doc) == p;
 	if (sim) {
-		cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(),
-		                     prefs().wireScale() * (projector ? CL_PROJECTOR_WIRE_SCALE : 1));
+		// (Not while Predict covers the lights: the flow would give the answer away.)
+		if (!win->predictCovers())
+			cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(),
+			                     prefs().wireScale() * (projector ? CL_PROJECTOR_WIRE_SCALE : 1));
 		if (live) cl_ink_draw_live(doc, cr, scale, originX, originY, upp, dark, projector);
 		return;
 	}
@@ -1208,7 +1216,9 @@ bool Canvas::onPress(GdkEventButton* e) {
 	// Simulation View and Lock: parts still take clicks (switches, keypads);
 	// anywhere else, a drag moves around.
 	if (win->simView() || win->locked()) {
+		if (win->simView() && win->predictTap(wx, wy)) return TRUE;   // a guess on a covered light
 		if (cl_document_click(doc, p, wx, wy)) {
+			if (win->simView()) win->circuitAdvancedByUser();
 			win->redraw();
 		} else {
 			drag = Drag::Pan;
@@ -1370,6 +1380,7 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {
+		if (win->predictKey(e)) return TRUE;   // Predict's guesses, Tab and Return
 		if (!bare) return FALSE;
 		if (k == GDK_KEY_Escape) win->toggleSimView();
 		else if (k == GDK_KEY_space) { if (!spaceDown) { spaceDown = true; win->toggleRunning(); } }

@@ -275,6 +275,20 @@ gboolean showCb(gpointer) {
 			return G_SOURCE_REMOVE;
 		}, nullptr);
 	}
+	else if (what == "predict") {
+		// Predict, then reveal: the lights covered with a guess on the first
+		// (:0), then revealed and scored (:1), each reported.
+		w->toggleSimView();
+		w->togglePredict();
+		CLSimLight lights[64];
+		const int n = cl_simview_lights(w->document(), w->currentPage(), lights, 64);
+		if (n > 0) w->predictTap((lights[0].left + lights[0].right) / 2, (lights[0].bottom + lights[0].top) / 2);
+		fprintf(stderr, "predict: %d light(s), covered %d\n", n, w->predictCovers());
+		if (page == 1) {
+			w->revealOrCoverAgain();
+			fprintf(stderr, "predict: revealed %d\n", w->predictRevealed());
+		}
+	}
 	else if (what == "submenu" || what == "primary" || what == "menu") {
 		// The menu bar's menus, open as Alt and a letter opens them: menu:N
 		// the Nth (0 File ... 5 Help); primary Help; submenu View with its
@@ -625,6 +639,9 @@ GMenuModel* buildMenubar() {
 	add(s, "_Running", "win.running");
 	add(s, "S_tep Once", "win.step");
 	add(s, "Step _Clock", "win.step-clock");
+	s = section(sim);
+	add(s, "_Predict, Then Reveal", "win.predict");
+	add(s, "Re_veal", "win.reveal", "Return");
 	s = section(sim);
 	add(s, "_Truth Table…", "win.truth-table");
 	add(s, "C_heck My Circuit…", "win.check-circuit");
