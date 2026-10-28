@@ -167,6 +167,14 @@ void commitMove(CLDocument* doc, GUICanvas* page, std::vector<GateState>& moved,
 	std::map<unsigned long, SegmentMap> before, after;
 	for (auto& ws : movedWires) before[ws.id] = ws.oldWireTree;
 	for (auto& ws : attached) before.emplace(ws.id, ws.oldWireTree);
+	// The wires stretch with the parts, a pin at a time, and the merge after
+	// tidies them. Now and then (several pins of one part on one wire, runs
+	// left lying along each other) that left a wire in two pieces, or a pin
+	// off its end, until Save and Reopen. Such a wire is routed fresh from its
+	// pins instead -- the pins are what it means -- as part of this step.
+	for (auto& e : before)
+		if (guiWire* w = doc->circuit.getWire(e.first))
+			if (!w->isSoundShape()) w->straightenRoute();
 	for (auto& e : before) if (guiWire* w = doc->circuit.getWire(e.first)) after[e.first] = w->getSegmentMap();
 	std::vector<MoveCommand::Place> places;
 	for (auto& gs : moved) {
