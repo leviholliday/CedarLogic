@@ -11,8 +11,11 @@
 
 // What the drawing calls draw into: a Core Graphics context on the Mac, a
 // Cairo one on Linux, a Direct2D render target on Windows (drawing, between
-// its BeginDraw and EndDraw). Either way its units are points, y down.
-#if defined(__APPLE__)
+// its BeginDraw and EndDraw). Either way its units are points, y down. A
+// headless build (CL_HEADLESS: the tests and fuzzers) draws nothing.
+#if defined(CL_HEADLESS)
+typedef struct CLHeadlessContext *CLContext;
+#elif defined(__APPLE__)
 #include <CoreGraphics/CoreGraphics.h>
 typedef CGContextRef CLContext;
 #elif defined(_WIN32)
@@ -726,6 +729,14 @@ typedef struct {
 	int andInputsWired;
 } CLTourStatus;
 void cl_tour_status(CLDocument *doc, int page, CLTourStatus *out);
+
+// ---- Self-check -------------------------------------------------------------------
+// True when the document's gates and wires agree with each other (each pin a wire
+// holds is the gate's record too, and is recorded on the segment that reaches
+// it; no gate or wire on two pages; every position a number). False names the
+// first thing wrong in `why`. For tests and fuzzers (Consistency.cpp); the apps
+// need not call it.
+bool cl_document_check(const CLDocument *doc, char *why, int whyLen);
 
 #ifdef __cplusplus
 }
