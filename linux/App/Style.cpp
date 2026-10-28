@@ -244,6 +244,21 @@ void applyStyle() {
 	s += "#notes .notes-count { font-size: 0.85em; color: " + css(hint) + "; }\n";
 	s += "#notes .notes-count.full { color: rgb(245,148,33); }\n";
 	s += "#notes-close { min-height: 22px; min-width: 22px; padding: 0; border-radius: 6px; }\n";
+	// Send Feedback's recording bar over the canvas (Capture.cpp): the Mac's
+	// dark capsule, whatever the theme.
+	s += "#rec-hud { background-color: rgba(30,32,38,0.94); border: 1px solid rgba(255,255,255,0.12); border-radius: 24px; "
+	     "padding: 6px 7px 6px 16px; box-shadow: 0 3px 12px rgba(0,0,0,0.30); }\n";
+	s += "#rec-hud label { color: white; }\n";
+	s += "#rec-hud .rec-title { font-weight: bold; font-size: 0.92em; }\n";
+	s += "#rec-hud .rec-time { color: rgba(255,255,255,0.68); font-size: 0.85em; font-feature-settings: \"tnum\"; }\n";
+	s += "#rec-hud button { border: none; box-shadow: none; background-image: none; text-shadow: none; outline-color: rgba(255,255,255,0.5); }\n";
+	s += "#rec-hud button.rec-stop { background-color: rgb(229,72,77); border-radius: 15px; min-height: 26px; padding: 0 16px; }\n";
+	s += "#rec-hud button.rec-stop:hover { background-color: rgb(240,90,94); }\n";
+	s += "#rec-hud button.rec-stop label { color: white; font-weight: bold; }\n";
+	s += "#rec-hud button.rec-cancel { background-color: transparent; border-radius: 13px; min-height: 26px; min-width: 26px; padding: 0; "
+	     "color: rgba(255,255,255,0.75); }\n";
+	s += "#rec-hud button.rec-cancel:hover { background-color: rgba(255,255,255,0.12); }\n";
+	s += "#rec-hud button.rec-cancel image { color: rgba(255,255,255,0.8); }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);

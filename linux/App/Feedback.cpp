@@ -5,6 +5,7 @@
 #include "Feedback.h"
 #include "Brand.h"
 #include "Canvas.h"
+#include "Capture.h"
 #include "SyncPlatform.h"
 #include "Window.h"
 
@@ -29,6 +30,7 @@ namespace {
 const char* const kTags[] = { "Bug", "Idea", "Design", "Toolbar", "Canvas & wiring", "Simulation", "Files & saving", "Performance", "Other" };
 const int kTagCount = 9;
 const int kMaxImages = 3;
+const int kRecordResponse = 101;   // Record, from the form
 
 struct Priority { const char* id; const char* name; const char* hint; Color color; };
 const Priority kPriorities[] = {
@@ -108,9 +110,10 @@ std::string uniqueId() {
 }
 
 struct Attachment {
-	enum Kind { Screenshot, Image, Circuit } kind = Image;
+	enum Kind { Screenshot, Image, Circuit, Recording } kind = Image;
 	std::string file, name, type;
 	GdkPixbuf* thumb = nullptr;
+	double seconds = 0;   // a recording's length
 };
 
 // The draft, kept in the settings between openings (and launches) until sent.
@@ -177,8 +180,12 @@ struct Draft {
 	}
 	int imageCount() const {
 		int n = 0;
-		for (const Attachment& a : attachments) if (a.kind != Attachment::Circuit) n++;
+		for (const Attachment& a : attachments) if (a.kind == Attachment::Screenshot || a.kind == Attachment::Image) n++;
 		return n;
+	}
+	int recordingAt() const {
+		for (size_t i = 0; i < attachments.size(); i++) if (attachments[i].kind == Attachment::Recording) return (int)i;
+		return -1;
 	}
 	std::string freeName(const char* base, const char* ext) const {
 		for (int n = 1;; n++) {
@@ -188,13 +195,16 @@ struct Draft {
 			if (!used) return name;
 		}
 	}
-	void add(Attachment::Kind kind, const std::string& file, const std::string& name, const std::string& type) {
+	// `thumb` (taken over) when the picture is at hand; else read from the file.
+	void add(Attachment::Kind kind, const std::string& file, const std::string& name, const std::string& type, GdkPixbuf* thumb = nullptr,
+	         double seconds = 0) {
 		Attachment a;
 		a.kind = kind;
 		a.file = file;
 		a.name = name;
 		a.type = type;
-		a.thumb = gdk_pixbuf_new_from_file_at_scale(file.c_str(), 264, 168, TRUE, nullptr);
+		a.seconds = seconds;
+		a.thumb = thumb ? thumb : gdk_pixbuf_new_from_file_at_scale(file.c_str(), 264, 168, TRUE, nullptr);
 		attachments.push_back(a);
 	}
 	void remove(size_t i) {
@@ -591,29 +601,30 @@ void paintPriority(cairo_t* cr, float width) {
 	drawTextMid(cr, kPriorities[draft().priority].hint, rectF(0, 38, width, 54), 11.5f, l.dim);
 }
 
-const float kTileW = 116, kTileH = 72, kThumbW = 112;
+const float kTileW = 116, kTileH = 72, kThumbW = 112, kThumbTop = 90;
 
+// Screenshot, Record and Add image… in a row; what's attached in a row under them.
 RectF tileRect(int i) { return rectF(i * (kTileW + 10), 6, i * (kTileW + 10) + kTileW, 6 + kTileH); }
-RectF thumbRect(size_t i) {
-	const float x0 = 2 * (kTileW + 10) + 8;
-	return rectF(x0 + i * (kThumbW + 12), 6, x0 + i * (kThumbW + 12) + kThumbW, 6 + kTileH);
-}
+RectF thumbRect(size_t i) { return rectF(2 + i * (kThumbW + 12), kThumbTop, 2 + i * (kThumbW + 12) + kThumbW, kThumbTop + kTileH); }
 RectF closeRect(size_t i) {
 	const RectF t = thumbRect(i);
 	return rectF(t.right - 12, t.top - 6, t.right + 6, t.top + 12);
 }
+int shotsHeight() { return draft().attachments.empty() ? 84 : (int)(kThumbTop + kTileH + 8); }
 
 void paintAttachments(cairo_t* cr, float) {
 	const Look l = look();
 	const bool more = draft().imageCount() < kMaxImages;
-	const char* icons[] = { "camera-photo-symbolic", "image-x-generic-symbolic" };
-	const char* labels[] = { "Screenshot", "Add image…" };
-	for (int i = 0; i < 2; i++) {
+	const bool haveRecording = draft().recordingAt() >= 0;
+	const char* icons[] = { "camera-photo-symbolic", "media-record-symbolic", "image-x-generic-symbolic" };
+	const char* labels[] = { "Screenshot", haveRecording ? "Record again" : "Record", "Add image…" };
+	for (int i = 0; i < 3; i++) {
 		const RectF r = tileRect(i);
-		const float a = more ? 1 : 0.45f;
+		const float a = more || i == 1 ? 1 : 0.45f;
 		fillRound(cr, r, 11, l.card);
 		strokeRound(cr, rectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 11, l.line);
-		drawIcon(cr, icons[i], rectF(r.left, r.top + 12, r.right, r.top + 38), 19, withAlpha(l.accent, a));
+		const Color iconColor = i == 1 ? rgb255(229, 72, 77) : l.accent;
+		drawIcon(cr, icons[i], rectF(r.left, r.top + 12, r.right, r.top + 38), 19, withAlpha(iconColor, a));
 		drawTextMid(cr, labels[i], rectF(r.left, r.top + 44, r.right, r.bottom - 6), 12, withAlpha(l.ink, a), TextAlign::Center);
 	}
 	for (size_t i = 0; i < draft().attachments.size(); i++) {
@@ -631,6 +642,22 @@ void paintAttachments(cairo_t* cr, float) {
 			gdk_cairo_set_source_pixbuf(cr, a.thumb, 0, 0);
 			cairo_paint(cr);
 			cairo_restore(cr);
+		}
+		if (a.kind == Attachment::Recording) {
+			// A play mark and the length, as a video's thumbnail has.
+			const PointF mid = pointF((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+			fillCircle(cr, mid, 15, colorF(0, 0, 0, 0.55f));
+			cairo_move_to(cr, mid.x - 4.5, mid.y - 7);
+			cairo_line_to(cr, mid.x + 7.5, mid.y);
+			cairo_line_to(cr, mid.x - 4.5, mid.y + 7);
+			cairo_close_path(cr);
+			cairo_set_source_rgb(cr, 1, 1, 1);
+			cairo_fill(cr);
+			const std::string len = format("%d:%02d", (int)a.seconds / 60, (int)a.seconds % 60);
+			const float tw = textWidth(len, 10.5f, true) + 10;
+			const RectF pill = rectF(r.right - tw - 5, r.bottom - 21, r.right - 5, r.bottom - 5);
+			fillRound(cr, pill, 8, colorF(0, 0, 0, 0.6f));
+			drawTextMid(cr, len, pill, 10.5f, colorF(1, 1, 1), TextAlign::Center, true);
 		}
 		strokeRound(cr, rectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 9, l.line);
 		const RectF c = closeRect(i);
@@ -742,6 +769,11 @@ GtkWidget* heading(const char* text) {
 	return l;
 }
 
+void shotsChanged(Form* f) {
+	gtk_widget_set_size_request(f->shots, -1, shotsHeight());
+	gtk_widget_queue_draw(f->shots);
+}
+
 void attachScreenshot(Form* f) {
 	Draft& d = draft();
 	if (d.imageCount() >= kMaxImages || d.win == nullptr) { gtk_widget_error_bell(f->dialog); return; }
@@ -760,6 +792,46 @@ void attachScreenshot(Form* f) {
 	cairo_surface_destroy(s);
 	if (ok) d.add(Attachment::Screenshot, file, name, "image/png");
 	else gtk_widget_error_bell(f->dialog);
+	shotsChanged(f);   // the row of attachments under the tiles
+}
+
+// Record: the form goes away and the circuit window records until Stop (or
+// a minute), as on the Mac; then the form comes back with the recording on
+// it. False if the circuit window closed meanwhile (the form goes too, its
+// draft kept).
+bool recordInto(Form* f) {
+	Draft& d = draft();
+	if (d.win == nullptr || !windowAlive(d.win)) { gtk_widget_error_bell(f->dialog); return true; }
+	collect(f);
+	capture::Recording got;
+	GMainLoop* loop = g_main_loop_new(nullptr, FALSE);
+	const bool started = capture::record(d.win, folder(), [&got, loop](const capture::Recording& r) {
+		got = r;
+		g_main_loop_quit(loop);
+	});
+	if (!started) {
+		g_main_loop_unref(loop);
+		gtk_label_set_text(GTK_LABEL(f->problem), "The recording couldn't start (is there room on the disk?).");
+		gtk_widget_error_bell(f->dialog);
+		return true;
+	}
+	gtk_window_set_modal(GTK_WINDOW(f->dialog), FALSE);
+	gtk_widget_hide(f->dialog);
+	gtk_window_present(d.win->window());
+	g_main_loop_run(loop);   // the window works as usual meanwhile
+	g_main_loop_unref(loop);
+	if (!got.file.empty()) {
+		const int old = d.recordingAt();
+		if (old >= 0) d.remove((size_t)old);
+		d.add(Attachment::Recording, got.file, "recording." + got.ext, got.type, got.thumb, got.seconds);
+	}
+	if (!windowAlive(d.win)) return false;
+	gtk_label_set_text(GTK_LABEL(f->problem), got.why.c_str());
+	gtk_window_set_modal(GTK_WINDOW(f->dialog), TRUE);
+	gtk_widget_show(f->dialog);
+	gtk_window_present(GTK_WINDOW(f->dialog));
+	shotsChanged(f);
+	return true;
 }
 
 void attachImages(Form* f) {
@@ -824,8 +896,12 @@ void startSending(Form* f) {
 		}
 	}
 	std::string list = "[";
-	for (size_t i = 0; i < files.size(); i++)
-		list += (i ? "," : "") + Json().text("name", files[i].name).text("type", files[i].type).number("size", fileSize(files[i].file)).str();
+	for (size_t i = 0; i < files.size(); i++) {
+		Json one;
+		one.text("name", files[i].name).text("type", files[i].type).number("size", fileSize(files[i].file));
+		if (files[i].seconds > 0) one.raw("duration", format("%.1f", files[i].seconds));
+		list += (i ? "," : "") + one.str();
+	}
 	list += "]";
 	std::string tagList = "[", autoList = "[";
 	for (const std::string& t : d.tags()) tagList += (tagList.size() > 1 ? "," : "") + jsonQuote(t);
@@ -880,6 +956,10 @@ int probe() {
 }
 
 void show(CircuitWindow* win) {
+	if (capture::recording()) {
+		win->note("Stop the recording first: Stop is on the bar over the canvas.");
+		return;
+	}
 	if (inFlight()) {
 		win->note("Still sending your last feedback…");
 		return;
@@ -942,7 +1022,7 @@ void show(CircuitWindow* win) {
 	f.priority = picture(56, paintPriority);
 	gtk_box_pack_start(GTK_BOX(box), f.priority, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box), heading("SHOW IT  ·  only the CedarLogic window is captured"), FALSE, FALSE, 0);
-	f.shots = picture(84, paintAttachments);
+	f.shots = picture(shotsHeight(), paintAttachments);
 	gtk_box_pack_start(GTK_BOX(box), f.shots, FALSE, FALSE, 0);
 	f.circuit = gtk_check_button_new_with_label("Send this circuit too (makes a problem easy to repeat; it's only sent with this)");
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(f.circuit), d.includeCircuit);
@@ -1007,7 +1087,7 @@ void show(CircuitWindow* win) {
 		const float x = (float)e->x, y = (float)e->y;
 		guarded("Send Feedback", [&] {
 			for (size_t i = 0; i < dd.attachments.size(); i++)
-				if (inRect(closeRect(i), x, y)) { dd.remove(i); return; }
+				if (inRect(closeRect(i), x, y)) { dd.remove(i); shotsChanged(form); return; }
 			for (size_t i = 0; i < dd.attachments.size(); i++)
 				if (inRect(thumbRect(i), x, y)) {
 					gchar* uri = g_filename_to_uri(dd.attachments[i].file.c_str(), nullptr, nullptr);
@@ -1015,7 +1095,8 @@ void show(CircuitWindow* win) {
 					return;
 				}
 			if (inRect(tileRect(0), x, y)) attachScreenshot(form);
-			else if (inRect(tileRect(1), x, y)) attachImages(form);
+			else if (inRect(tileRect(1), x, y)) gtk_dialog_response(GTK_DIALOG(form->dialog), kRecordResponse);
+			else if (inRect(tileRect(2), x, y)) { attachImages(form); shotsChanged(form); }
 		});
 		gtk_widget_queue_draw(w);
 		return TRUE;
@@ -1029,6 +1110,14 @@ void show(CircuitWindow* win) {
 	for (;;) {
 		const int r = gtk_dialog_run(GTK_DIALOG(f.dialog));
 		if (r == 100) { guarded("Send Feedback", [&] { startSending(&f); }); continue; }
+		if (r == kRecordResponse) {
+			bool stillOpen = true;
+			if (!f.sending) guarded("Send Feedback", [&] { stillOpen = recordInto(&f); });
+			if (stillOpen) continue;
+			g_source_remove(f.timer);
+			gtk_widget_destroy(f.dialog);
+			return;   // the circuit window closed while recording (the draft and the recording are kept)
+		}
 		if (r == GTK_RESPONSE_OK) break;
 		// Closing while it sends: it carries on sending in the background.
 		break;

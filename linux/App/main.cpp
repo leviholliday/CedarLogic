@@ -27,6 +27,7 @@
 #include "FindBar.h"
 #include "Toolbar.h"
 #include "MenuBar.h"
+#include "Capture.h"
 #include "Notes.h"
 #include "Window.h"
 
@@ -65,6 +66,7 @@ std::string gSplashFile;
 bool gFirstLaunch = false;
 // --hold <seconds>: wait this long before the screenshot (the drag test moves the pointer meanwhile).
 int gHold = 2;
+std::string gCaptureTest;   // --capture-test <folder>
 // This process is the running CedarLogic (not a launch that handed over to
 // it): it loaded the settings, so it may save them.
 bool gPrimary = false;
@@ -468,6 +470,17 @@ gboolean screenshotCb(gpointer app) {
 
 gboolean sessionCb(gpointer app) {
 	gExitCode = session::run(GTK_APPLICATION(app), gSession, gSessionSeed);
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
+	g_application_quit(G_APPLICATION(app));
+	return G_SOURCE_REMOVE;
+}
+
+// --capture-test <folder>: Send Feedback's screenshot and recording of the
+// window, checked (Capture.h), the files left in the folder; then quits.
+gboolean captureTestCb(gpointer app) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	gExitCode = 1;
+	if (w) guarded("the capture test", [&] { gExitCode = capture::selfTest(w, gCaptureTest); });
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
 	g_application_quit(G_APPLICATION(app));
 	return G_SOURCE_REMOVE;
@@ -1068,6 +1081,7 @@ void activateCb(GApplication* gapp, gpointer) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1128,6 +1142,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1345,6 +1360,11 @@ int main(int argc, char** argv) {
 		}
 		if (strcmp(argv[i], "--first") == 0) { gFirstLaunch = true; continue; }
 		if (strcmp(argv[i], "--hold") == 0 && i + 1 < argc) { gHold = std::max(1, atoi(argv[++i])); continue; }
+		if (strcmp(argv[i], "--capture-test") == 0 && i + 1 < argc) {
+			gCaptureTest = argv[++i];
+			if (gScreenshot.empty()) gScreenshot = gCaptureTest + "/window.png";   // runs as a picture run does
+			continue;
+		}
 		if (strcmp(argv[i], "--bench-drag") == 0) {
 			gBench = 60;
 			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gBench = std::max(5, atoi(argv[++i]));

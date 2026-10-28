@@ -228,12 +228,28 @@ jobs:
           }
           again window-practice.png --light
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 help truth feedback templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu primary stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
+          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 help truth feedback templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu menu:1 menu:2 menu:3 menu:4 primary stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
             again "show-$name.png" --show "$show"
           done
+          # Send Feedback's recording (linux/App/Capture.h): with no ffmpeg an animated PNG,
+          # with ffmpeg an MP4 made from the app's own movie; each checked by the app, then
+          # read back by ffprobe. The files go with the renders.
+          mkdir -p renders/capture-png renders/capture-mp4
+          CL_CAPTURE_NO_FFMPEG=1 xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 120 "$APPIMAGE" --capture-test renders/capture-png res/samples/practice.cdl 2>&1 | tee renders/capture-png/log.txt
+          grep -q "capture: recording .* ok" renders/capture-png/log.txt || { echo "::error::the recording (animated PNG) failed"; exit 1; }
+          if [ "$(uname -m)" = x86_64 ] && sudo apt-get install -y -qq ffmpeg > /dev/null; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 200 "$APPIMAGE" --capture-test renders/capture-mp4 res/samples/practice.cdl 2>&1 | tee renders/capture-mp4/log.txt
+            grep -q "capture: recording .*video/mp4.* ok" renders/capture-mp4/log.txt || { echo "::error::the recording (MP4) failed"; exit 1; }
+            for f in renders/capture-png/capture-recording.png renders/capture-mp4/capture-recording.mp4; do
+              ffprobe -v error -count_frames -show_entries stream=codec_name,width,height,nb_read_frames "$f" | tee -a renders/capture-mp4/log.txt
+              ffmpeg -v error -i "$f" -f null - || { echo "::error::$f doesn't decode"; exit 1; }
+            done
+          fi
           # Check My Circuit clock pulse by clock pulse, on the 3-bit counter template.
           for show in checkclocked:0 checkclocked:1 checkclocked:2; do
             name=$(echo "$show" | tr ':' '-')
