@@ -223,8 +223,9 @@ static const double kMaxCoordinate = WORLD_LIMIT;
 
 // An id as the engine holds it, or false for one it can't: past kMaxId
 // (a damaged file; real ids count up from 1), where reading it into the
-// engine's integer types wrapped round to another id.
-static const IDType kMaxId = 4000000000ULL;
+// engine's integer types wrapped round to another id. (Some paths read a
+// gate id as a long, 32 bits on Windows.)
+static const IDType kMaxId = 2147483647ULL;
 static bool idOf(const string &text, IDType &out) {
 	errno = 0;
 	char *end = nullptr;

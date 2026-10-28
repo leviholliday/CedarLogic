@@ -7,8 +7,8 @@ is pasted, and whatever a student does. It follows on from
 `docs/V4-CORE-DIAGNOSIS.md` (rounds 1 to 5), which explains the edit fuzzer.
 
 In short: three new kinds of check (a file fuzzer, a self-check of the circuit,
-and a set of regression cases) found 35 bugs; all are fixed, each has a test, and
-the checks run in CI on every push.
+and a set of regression cases) and much longer fuzz runs found 33 bugs; all are
+fixed, each has a test, and the checks run in CI on every push.
 
 ## The wire question: repair or replace?
 
@@ -98,23 +98,25 @@ the numbers section.
 | 24 | Wire saved twice over the same crossing, different after reopening | Float noise kept one crossing under two positions | Crossings kept once, where the crossed run lies |
 | 25 | Straighten makes a wire whose middle vanishes | The straight-trunk route could give a branch the trunk's id 0 | Branches skip the trunk's id |
 | 26 | Same file saved twice, different bytes | Pin order in a segment wasn't fixed | Written in a fixed order |
+| 27 | Save, reopen, save gives different numbers (18 vs 17.99999428) | A rotated part's pins sit a few millionths off the grid; a reopen trims wire ends to them | Positions saved to a ten-thousandth of a grid unit |
 
 ### Simulation
 
 | # | Seen as | Cause | Fix |
 |---|---|---|---|
-| 27 | App quits when a counter with MAX_COUNT at the largest number counts up | `maxCount + 1` wrapped to 0, then divided by it | Handled |
-| 28 | Undefined behaviour on every step of a priority encoder with no inputs | Output width worked out as log(0) | Uses the width already set |
-| 29 | RAM memory grows without bound; huge saves | Reading an address made an entry for it | Reads leave memory alone |
-| 30 | App quits showing a wide register | More than 8 hex digits asked of an 8-digit string | Digits held to 8 |
-| 31 | File differs after a Pauseulator fires | Its pause request was saved as a setting | Not saved |
-| 32 | Crash on opening a RAM part with a short file name set | `substr` on a name under 3 characters | Checked |
+| 28 | App quits when a counter with MAX_COUNT at the largest number counts up | `maxCount + 1` wrapped to 0, then divided by it | Handled |
+| 29 | Undefined behaviour on every step of a priority encoder with no inputs | Output width worked out as log(0) | Uses the width already set |
+| 30 | RAM memory grows without bound; huge saves | Reading an address made an entry for it | Reads leave memory alone |
+| 31 | App quits showing a wide register | More than 8 hex digits asked of an 8-digit string | Digits held to 8 |
+| 32 | File differs after a Pauseulator fires | Its pause request was saved as a setting | Not saved |
+| 33 | Crash on opening a RAM part with a short file name set | `substr` on a name under 3 characters | Checked |
 
-### Earlier on this branch's base (from `V4-CORE-DIAGNOSIS.md`)
+### Already fixed before this round
 
-33. Uninitialised `wireSegment` fields; 34. a pin able to belong to two wires;
-35. the `preMoveAttached` Escape fix. These were already committed on v4/mac
-before this round (the patch handed over had been applied), so nothing to redo.
+The two fixes in the hand-over patch (`wireSegment` fields left uninitialised,
+and a pin able to belong to two wires, with its Escape companion in
+`Editor.cpp`) were already on v4/mac when this round started, as were the
+fuzzer and `bench_drag` it described, so there was nothing to apply.
 
 ## How it is checked
 
