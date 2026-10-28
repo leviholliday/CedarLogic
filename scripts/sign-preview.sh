@@ -6,6 +6,7 @@
 #       --yes                                don't ask before signing (still shows what it signs)
 #       --skip-ci-compare                    don't compare the release with the CI run's artifacts
 #                                            (only when they've expired; everything else is checked)
+#       --check-only                         every check, then stop: no key, no signing, no upload
 #
 #   scripts/sign-preview.sh --dry-run DIR [--tag T] [--commit C] [--build N] [--test-key] [--out D]
 #                                            sign a manifest of the files in DIR locally; uploads
@@ -202,11 +203,12 @@ fi
 # ---- The real thing ---------------------------------------------------------------
 PLATFORM=${1:-}
 shift || true
-YES=0 SKIP_CI=0
+YES=0 SKIP_CI=0 CHECK_ONLY=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--yes) YES=1 ;;
 		--skip-ci-compare) SKIP_CI=1 ;;
+		--check-only) CHECK_ONLY=1 ;;
 		*) die "unknown option $1" ;;
 	esac
 	shift
@@ -330,6 +332,10 @@ if [ -n "$LAST_COMMIT" ] && [ "$LAST_COMMIT" != "$COMMIT" ]; then
 	gh api "repos/$REPO/compare/$LAST_COMMIT...$COMMIT" --jq '.commits[] | "      " + .sha[0:9] + " " + (.commit.message | split("\n")[0])' >&2 || say "      (couldn't list them)"
 fi
 sed 's/^/      /' "$WORK/SHA256SUMS" >&2
+if [ "$CHECK_ONLY" = 1 ]; then
+	say "--check-only: everything checks out; nothing signed, nothing uploaded"
+	exit 0
+fi
 if [ "$YES" = 0 ]; then
 	printf 'Sign and upload? Every tester gets this build. [y/N] ' >&2
 	read -r answer
