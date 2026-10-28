@@ -18,6 +18,7 @@
 class Canvas;
 class GatePalette;
 class Toolbar;
+class MenuRow;
 class TabStrip;
 class ScopeWindow;
 class StatusBar;
@@ -66,14 +67,13 @@ public:
 	// whether it's enabled now.
 	void runAction(const char* name);
 	bool actionEnabled(const char* name) const;
-	// Every menu (•••), and the circuit's own (its name), under `anchor`
-	// (points in `from`).
+	// Every menu in one popup under `anchor` (points in `from`): the menu
+	// bar's, for F10 in focus mode, when the bar is away. And the circuit's
+	// own menu (its name in the toolbar).
 	void moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
 	void titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
-	// The header bar's primary menu (☰): Settings, Keyboard Shortcuts, Help,
-	// What's New, About, as GTK apps keep them.
-	void primaryMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
-	// F10: every menu from the keyboard; Shift+F10 or the Menu key: the
+	// F10 in focus mode: every menu from the keyboard (with the menu row
+	// showing, GTK's own F10 opens it); Shift+F10 or the Menu key: the
 	// canvas's menu for what's selected.
 	void menusFromKeyboard();
 	void contextMenuFromKeyboard();
@@ -119,6 +119,9 @@ public:
 	// the window's left edge makes room for buttons there).
 	bool focusMode() const { return focusOn; }
 	Toolbar* toolbarWidget() const { return toolbar; }
+	MenuRow* menuRowWidget() const { return menuRow; }
+	void toggleFullScreen();
+	bool fullScreen() const { return fullScreenOn; }
 	void toggleFocusMode();
 	bool stripIsLeftmost(int pane) const;
 	bool stripIsRightmost(int pane) const;
@@ -313,7 +316,7 @@ public:
 	static const char* stepClockOffTip;
 	void setStepMs(int ms);
 	void toggleSimView();
-	// Projector Mode (Simulate menu, and the Simulation View bar): on, it
+	// Projector Mode (Simulation menu, and the Simulation View bar): on, it
 	// opens Simulation View too; Escape or Done leaves it as ever.
 	void toggleProjector();
 	void toggleLock();
@@ -343,6 +346,7 @@ public:
 	bool hasSelection() const;
 
 private:
+	friend class MenuRow;
 	GtkWidget* win = nullptr;
 	GtkApplication* app;
 	CLDocument* doc;
@@ -376,6 +380,7 @@ private:
 	anim::Tween hintFade;
 	DropHint hintShown;               // the last one drawn, kept while it fades out
 	bool focusOn = false;
+	bool fullScreenOn = false;
 	int paletteWidth() const;
 	// A tab one place along its side (the tab menu's Move Left and Right).
 	void moveTabBy(int page, int delta);
@@ -389,6 +394,7 @@ private:
 	guint autosaveId = 0;             // saving as you go, a moment after the last change
 	static gboolean autosaveCb(gpointer self);
 	Toolbar* toolbar = nullptr;
+	MenuRow* menuRow = nullptr;   // the menu bar's row, over the toolbar
 	int lastZoomShown = -1;
 	GtkWidget* banner = nullptr;      // Tidy Up's keep/undo bar, Simulation View's
 	GtkWidget* bannerLabel = nullptr;

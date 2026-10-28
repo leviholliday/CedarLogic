@@ -218,6 +218,21 @@ void applyStyle() {
 		s += "popover { border-radius: 12px; border: 1px solid " + css(line) + "; background-color: " + css(menuBg) + "; padding: 4px; }\n";
 		s += "popover modelbutton { padding: 5px 10px; border-radius: 6px; min-height: 20px; }\n";
 		s += "popover modelbutton:hover { background-color: " + css(c.accent()) + "; color: " + css(c.onAccent()) + "; }\n";
+		// The menu bar (MenuBar.h): bare titles on the toolbar's colour, in
+		// its ink whatever the desktop theme greys (PiXflat greys a window
+		// that isn't in front), the open one lit as the menus' rows are.
+		s += "menubar.cl-bar { background: transparent; background-image: none; box-shadow: none; border: none; padding: 0; margin: 0; "
+		     "min-height: 0; }\n";
+		s += "menubar.cl-bar > menuitem { padding: 3px 9px; margin: 0 1px; min-height: 20px; border-radius: 6px; border: none; "
+		     "box-shadow: none; text-shadow: none; background-image: none; background-color: transparent; }\n";
+		for (const bool onDark : { false, true }) {
+			const Color barInk = Chrome{ onDark }.barInk();
+			const std::string cls = onDark ? "menubar.cl-bar.on-dark" : "menubar.cl-bar.on-light";
+			s += cls + " > menuitem > label { color: " + css(withAlpha(barInk, 0.92f)) + "; }\n";
+			s += cls + " > menuitem:disabled > label { color: " + css(withAlpha(barInk, 0.4f)) + "; }\n";
+		}
+		s += "menubar.cl-bar > menuitem:hover { background-color: " + css(c.accent()) + "; box-shadow: none; }\n";
+		s += "menubar.cl-bar > menuitem:hover > label { color: " + css(c.onAccent()) + "; }\n";
 	}
 	// The notes pane at the right of the canvas (Notes.cpp): the panel's
 	// colour, its text in the canvas's ink.

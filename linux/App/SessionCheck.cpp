@@ -678,7 +678,16 @@ struct SessionDriver {
 			menuItemsRun++;
 			gtk_menu_shell_activate_item(GTK_MENU_SHELL(menu), it, TRUE);
 		} else {
-			gtk_menu_shell_cancel(GTK_MENU_SHELL(menu));
+			// Closed from its top: a menu bar's menu closed on its own would
+			// leave the bar holding the pointer and the keys.
+			GtkWidget* top = menu;
+			for (int depth = 0; depth < 8 && GTK_IS_MENU(top); depth++) {
+				GtkWidget* item = gtk_menu_get_attach_widget(GTK_MENU(top));
+				GtkWidget* parent = item ? gtk_widget_get_parent(item) : nullptr;
+				if (!parent || !GTK_IS_MENU_SHELL(parent)) break;
+				top = parent;
+			}
+			gtk_menu_shell_cancel(GTK_MENU_SHELL(top));
 		}
 	}
 

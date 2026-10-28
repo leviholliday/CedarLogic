@@ -462,7 +462,7 @@ GtkWidget* toolbarPage() {
 	static const Style styles[] = {
 		{ 3, "Seamless", "Blends into the canvas like one surface. Tools stay quiet until you point at them." },
 		{ 0, "Classic", "Tools in tidy rounded groups, everything in reach." },
-		{ 2, "Minimal", "Just the essentials and your file name; the rest is behind the ••• menu." },
+		{ 2, "Minimal", "Just the essentials and your file name; the rest is in the menus." },
 	};
 	GSList* group = nullptr;
 	for (const Style& st : styles) {
@@ -523,7 +523,7 @@ GtkWidget* toolbarPage() {
 	gtk_grid_attach(GTK_GRID(grid), check("Dark mode switch", prefs().showThemeToggle, [](bool on) { prefs().showThemeToggle = on; apply(); }),
 	                i % 3, i / 3, 1, 1);
 	gtk_box_pack_start(GTK_BOX(box), grid, FALSE, FALSE, 0);
-	GtkWidget* hint = gtk_label_new("Applies to every style. Hidden tools are still in the ••• menus and keep their shortcuts.");
+	GtkWidget* hint = gtk_label_new("Applies to every style. Hidden tools are still in the menus and keep their shortcuts.");
 	gtk_style_context_add_class(gtk_widget_get_style_context(hint), "hint");
 	gtk_label_set_xalign(GTK_LABEL(hint), 0);
 	gtk_label_set_line_wrap(GTK_LABEL(hint), TRUE);

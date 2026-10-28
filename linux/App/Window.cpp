@@ -28,6 +28,7 @@
 #include "Recovery.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
+#include "MenuBar.h"
 
 #include <cairo-pdf.h>
 #include <cairo-svg.h>
@@ -119,6 +120,22 @@ const Command kCommands[] = {
 		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
 	}, true },
 	{ "preferences", [](CircuitWindow* w) { w->showPreferences(); }, false },
+	// View's settings that the Mac's View menu has too (Settings > Canvas
+	// keeps them as well).
+	{ "show-grid", [](CircuitWindow*) {
+		prefs().showGrid = !prefs().showGrid;
+		prefs().save();
+		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
+	}, true },
+	{ "wire-dots", [](CircuitWindow*) {
+		prefs().wireDots = !prefs().wireDots;
+		prefs().applyWireDots();
+		prefs().save();
+		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
+	}, true },
+	{ "fullscreen", [](CircuitWindow* w) { w->toggleFullScreen(); }, true },
+	{ "minimize", [](CircuitWindow* w) { gtk_window_iconify(w->window()); }, false },
+	{ "welcome", [](CircuitWindow* w) { prefs().hasSeenWelcome = false; welcome::offer(w); }, false },
 	{ "running", [](CircuitWindow* w) { w->toggleRunning(); }, true },
 	{ "step", [](CircuitWindow* w) { w->stepOnce(); }, false },
 	{ "step-clock", [](CircuitWindow* w) { w->stepClock(); }, false },
@@ -239,6 +256,7 @@ CircuitWindow::~CircuitWindow() {
 	delete palette;
 	delete miniMap;
 	delete toolbar;
+	delete menuRow;
 	delete strips[0];
 	delete strips[1];
 	delete statusBar;
@@ -249,6 +267,7 @@ CircuitWindow::~CircuitWindow() {
 	recovery::remove(recoveryBase);
 	if (doc) cl_document_close(doc);
 	liveCount--;
+	rebuildWindowMenu();
 }
 
 void CircuitWindow::build() {
@@ -279,14 +298,24 @@ void CircuitWindow::build() {
 
 	GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(win), v);
-	// The toolbar is the title bar (the Mac's and the Windows app's), and
-	// every menu is behind its •••. Focus mode slides it away.
+	// The title bar: the menu row (the menus, and the window's buttons where
+	// the desktop puts them) over the toolbar (the Mac's and the Windows
+	// app's), both on the toolbar's colour. Focus mode slides them away.
 	toolbar = new Toolbar(this);
+	toolbar->setWindowButtons(false);
+	menuRow = new MenuRow(this);
+	GtkWidget* titleRows = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_pack_start(GTK_BOX(titleRows), menuRow->outer(), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(titleRows), toolbar->widget(), FALSE, FALSE, 0);
 	titleRevealer = gtk_revealer_new();
 	gtk_revealer_set_transition_type(GTK_REVEALER(titleRevealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
 	gtk_revealer_set_transition_duration(GTK_REVEALER(titleRevealer), 240);
 	gtk_revealer_set_reveal_child(GTK_REVEALER(titleRevealer), TRUE);
-	gtk_container_add(GTK_CONTAINER(titleRevealer), toolbar->widget());
+	gtk_container_add(GTK_CONTAINER(titleRevealer), titleRows);
+	// A window coming to the front: the menus' wording follows it.
+	g_signal_connect(win, "notify::is-active", CL_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
+		static_cast<CircuitWindow*>(self)->updateActions();
+	}), this);
 	gtk_widget_show_all(titleRevealer);
 	gtk_window_set_titlebar(GTK_WINDOW(win), titleRevealer);
 	gtk_application_window_set_show_menubar(GTK_APPLICATION_WINDOW(win), FALSE);
@@ -862,43 +891,17 @@ static void relabel(GMenuModel* model, const char* action, const char* label) {
 }
 
 void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
-	GMenuModel* bar = gtk_application_get_menubar(app);
+	GMenuModel* bar = appMenubar();
 	if (bar == nullptr) return;
-	// Edit's Lock in Place says Unlock Part when every selected part is locked.
 	updateActions();
-	const std::string lockLabel = lockMenuUnlocks() ? std::string("_") + unlockPartsTitle() : std::string("_Lock in Place");
-	relabel(bar, "win.lock-in-place", lockLabel.c_str());
 	popupModel(win, bar, from, anchor, e, true);
 }
 
-void CircuitWindow::primaryMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
-	static GMenu* model = [] {
-		GMenu* m = g_menu_new();
-		GMenu* a = g_menu_new();
-		g_menu_append(a, "_Settings", "win.preferences");
-		g_menu_append(a, "_Keyboard Shortcuts", "win.shortcuts");
-		g_menu_append_section(m, nullptr, G_MENU_MODEL(a));
-		GMenu* b = g_menu_new();
-		g_menu_append(b, "CedarLogic _Help", "win.help");
-		g_menu_append(b, "_What's New", "win.whats-new");
-		g_menu_append(b, "Send _Feedback…", "win.feedback");
-		g_menu_append_section(m, nullptr, G_MENU_MODEL(b));
-		GMenu* c = g_menu_new();
-		g_menu_append(c, "_About CedarLogic", "win.about");
-		g_menu_append_section(m, nullptr, G_MENU_MODEL(c));
-		return m;
-	}();
-	updateActions();
-	popupModel(win, G_MENU_MODEL(model), from, anchor, e, true);
-}
-
-// GTK's own F10 belongs to a menu bar, and there is none: the menus are
-// behind •••, so F10 opens them there (at the top right in focus mode, with
-// the bar away).
+// F10 with the menu row away (focus mode, full screen): every menu, in one
+// popup at the top right. With the row showing, F10 opens File, as GTK's does.
 void CircuitWindow::menusFromKeyboard() {
-	GdkRectangle r;
-	if (!focusOn && toolbar && toolbar->moreRect(r)) moreMenu(toolbar->widget(), r, nullptr);
-	else moreMenu(win, GdkRectangle{ gtk_widget_get_allocated_width(win) - 48, 6, 32, 32 }, nullptr);
+	if (menuRow && menuRow->showing()) { menuRow->openMenu(0); return; }
+	moreMenu(win, GdkRectangle{ gtk_widget_get_allocated_width(win) - 48, 6, 32, 32 }, nullptr);
 }
 
 void CircuitWindow::contextMenuFromKeyboard() {
@@ -1183,7 +1186,7 @@ bool CircuitWindow::bannerFor(std::string& text, std::vector<BannerButton>& butt
 
 void CircuitWindow::lockNudge() {
 	if (simViewOn) note("Leave Simulation View (Escape) to edit.");
-	else note("The circuit is locked. Unlock it (Simulate > Lock) to edit.");
+	else note("The circuit is locked. Unlock it (Simulation \u25B8 Lock the Circuit) to edit.");
 	gtk_widget_error_bell(win);
 }
 
@@ -1372,6 +1375,7 @@ void CircuitWindow::updateTitle() {
 	if (now == nullptr || t != now) {
 		gtk_window_set_title(GTK_WINDOW(win), t.c_str());
 		if (toolbar) toolbar->layoutNow();
+		rebuildWindowMenu();
 	}
 }
 
@@ -1424,10 +1428,19 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "switch-pane", splitOpen());
 	setEnabled(win, "close-split", splitOpen());
 	setChecked(win, "status-bar", prefs().showStatus);
+	setChecked(win, "show-grid", prefs().showGrid);
+	setChecked(win, "wire-dots", prefs().wireDots);
+	setChecked(win, "fullscreen", fullScreenOn);
 	setChecked(win, "draw", drawingOn);
 	setChecked(win, "show-drawing", drawingShown());
 	setChecked(win, "notes", notesShown());
 	setEnabled(win, "clear-drawing", pageHasInk() && !pageIsInkReadOnly());
+	// The menu bar is one model for every window: Edit's Lock in Place says
+	// Unlock Part(s) when every selected part is locked, for the window in front.
+	if (GMenuModel* bar = appMenubar())
+		if (gtk_window_is_active(GTK_WINDOW(win)) || circuitWindows().size() == 1)
+			relabel(bar, "win.lock-in-place", lockMenuUnlocks() ? (std::string("_") + unlockPartsTitle()).c_str() : "_Lock in Place");
+	if (menuRow) menuRow->redraw();
 	// The menus' Undo and Redo say what they undo.
 	(void)edit;
 	if (toolbar) toolbar->redraw();
@@ -1474,6 +1487,7 @@ void CircuitWindow::updateBanner() {
 
 void CircuitWindow::themeChanged() {
 	updateActions();
+	if (menuRow) menuRow->refresh();
 	if (palette) palette->themeChanged();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
@@ -1485,6 +1499,7 @@ void CircuitWindow::prefsChanged() {
 	gtk_widget_set_size_request(paletteBox, paletteWidth(), -1);
 	if (statusBar) statusBar->settingsChanged();
 	if (toolbar) toolbar->layoutNow();
+	refreshMenuKeys();   // Tidy Up's key follows Settings' way
 	themeChanged();
 }
 
@@ -1559,8 +1574,14 @@ gboolean CircuitWindow::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) 
 	return FALSE;
 }
 
-gboolean CircuitWindow::stateCb(GtkWidget*, GdkEventWindowState* e, gpointer) {
-	prefs().windowMaximized = (e->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+gboolean CircuitWindow::stateCb(GtkWidget*, GdkEventWindowState* e, gpointer self) {
+	CircuitWindow* w = static_cast<CircuitWindow*>(self);
+	const bool full = (e->new_window_state & GDK_WINDOW_STATE_FULLSCREEN) != 0;
+	if (!full) prefs().windowMaximized = (e->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+	if (full != w->fullScreenOn) {
+		w->fullScreenOn = full;
+		w->updateActions();
+	}
 	return FALSE;
 }
 
@@ -2525,6 +2546,19 @@ void CircuitWindow::cyclePage(int delta) {
 // ---- Focus mode ----------------------------------------------------------------
 // The Mac's: the toolbar and the side panel slide away, and the tab strips
 // become the window's top row (dragging it, with its buttons).
+
+// View > Full Screen (F11): the desktop's full screen. The title bar goes
+// with it (GTK hides it), so F10 opens every menu in one popup, as in focus mode.
+void CircuitWindow::toggleFullScreen() {
+	if (fullScreenOn) gtk_window_unfullscreen(GTK_WINDOW(win));
+	else {
+		gtk_window_fullscreen(GTK_WINDOW(win));
+		const shortcuts::Action* a = shortcuts::find("fullScreen");
+		const std::string key = a ? shortcuts::label(shortcuts::keys(*a)) : std::string();
+		note(key.empty() ? std::string("Full screen. View \u25B8 Full Screen leaves it; F10 opens the menus.")
+		                 : "Full screen. " + key + " leaves it; F10 opens the menus.");
+	}
+}
 
 void CircuitWindow::toggleFocusMode() {
 	focusOn = !focusOn;

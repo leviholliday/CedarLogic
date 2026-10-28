@@ -144,6 +144,7 @@ const std::vector<Action>& all() {
 		{ "zoomFit", "Moving around", "Zoom to fit", "win.zoom-fit", "<Primary>0|<Primary>KP_0" },
 		{ "zoomActual", "Moving around", "Actual size", "win.zoom-actual", "<Primary>1|<Primary>KP_1" },
 		{ "focusMode", "Moving around", "Focus mode: hide the toolbar and side panel", "win.focus-mode", "<Primary>period" },
+		{ "fullScreen", "Moving around", "Full screen", "win.fullscreen", "F11" },
 		{ "simView", "Simulation", "Simulation view", "win.sim-view", "<Primary>r" },
 		{ "step", "Simulation", "Step once", "win.step", "<Primary><Shift>r" },
 		{ "stepClock", "Simulation", "Step Clock: one full cycle of each manual clock", nullptr, "k" },
@@ -244,6 +245,7 @@ void apply(GtkApplication* app) {
 		list.push_back(nullptr);
 		gtk_application_set_accels_for_action(app, a.gaction, list.data());
 	}
+	refreshMenuKeys();   // the canvas's keys, written on their menu items
 }
 
 std::string fromEvent(const GdkEventKey* e) {

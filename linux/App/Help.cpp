@@ -46,7 +46,7 @@ const std::vector<Page>& pages() {
 		      "switches you can click, lights that show what's happening, wires that change colour with their signals."),
 		    p("The window has three parts: the **side panel** of gates down the left (with a small map of the page under it), the "
 		      "**canvas** where you build, and the **toolbar** across the top. Each circuit can have several **tabs** (pages), shown "
-		      "above the canvas. Every menu is behind **•••** at the right of the toolbar."),
+		      "above the canvas. The menu bar over it has every command: File, Edit, View, Simulation, Window and Help (F10 or Alt and a letter opens them)."),
 		    tip("New here? Help ▸ Guided Tour shows you around, one part at a time.") },
 		  true },
 		{ "first", "Your First Circuit", "dialog-information-symbolic", "Two switches, an AND gate and a light.",
@@ -104,7 +104,7 @@ const std::vector<Page>& pages() {
 		      "can't be moved, rotated or deleted (closing its tab still removes it, and Undo brings it back), but wires to it still work, "
 		      "its settings still change and switches still flip. Teachers: lock the switches and lights, then share the circuit. **Unlock "
 		      "Part** takes the lock off one part, and **Unlock All Parts** in the Edit menu takes every lock off. This is different from "
-		      "**Lock the Circuit** in the Simulate menu, which stops all editing.") },
+		      "**Lock the Circuit** in the Simulation menu, which stops all editing.") },
 		  false },
 		{ "drawing", "Drawing and Notes", "document-edit-symbolic", "Mark up a circuit, and keep notes with it.",
 		  { p("**Draw on the Circuit (Ctrl+Alt+P)** (the View menu, or the pencil in the toolbar) turns the pointer into a pen. Draw "
@@ -143,7 +143,7 @@ const std::vector<Page>& pages() {
 		    p("Double-click a tab to rename it; drag it along the strip to put it in order."),
 		    p("TO and FROM links of the same name connect across pages that share links. Right-click a tab and choose **Connect to** "
 		      "to pick which pages connect; tabs that connect share a coloured dot. **Connect All Pages** and **Disconnect All Pages** "
-		      "are in the Tabs menu.") },
+		      "are in the Window menu.") },
 		  false },
 		{ "sim", "Running the Simulation", "media-playback-start-symbolic", "It runs while you build.",
 		  { p("The circuit runs all the time. The toolbar pauses and resumes it (so does **Space** on the canvas), **Ctrl+Shift+R** steps "
@@ -154,7 +154,7 @@ const std::vector<Page>& pages() {
 		    p("Click a switch to flip it; keypads and pulse generators take clicks too."),
 		    p("**Simulation View (Ctrl+R)** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the "
 		      "bar at the bottom shows every switch and light. Space pauses, Escape leaves."),
-		    p("**Projector Mode** (the Simulate menu, or the projector button on that bar) draws Simulation View for the back of the "
+		    p("**Projector Mode** (the Simulation menu, or the projector button on that bar) draws Simulation View for the back of the "
 		      "room: thick wires, big labels and lights. Escape still leaves Simulation View, and the button turns it off."),
 		    p("**Lock** (in the toolbar) stops edits, so a circuit can be shown and played with but not changed. Switches still work.") },
 		  false },
@@ -208,7 +208,7 @@ const std::vector<Page>& pages() {
 		      "panel's list (**My Parts**) to drag or click in, and in **Add a Gate (A)** under its name. It drops in as a copy of those "
 		      "gates and wires, so any CedarLogic can open the circuit.") },
 		  false },
-		{ "settings", "Settings", "preferences-system-symbolic", "Make it yours (Ctrl+,), from ☰ or the Edit menu.",
+		{ "settings", "Settings", "preferences-system-symbolic", "Make it yours (Ctrl+,), from Edit \u25B8 Settings.",
 		  { p("Your name (for exports and the Lab Page), the theme and accent colour, the grid, wires, the side panel, what the wheel "
 		      "and touchpad do, right-click, duplicating, Tidy Up, and whether Ctrl+Q asks first."),
 		    p("**Ctrl+Shift+D** switches between light and dark any time.") },

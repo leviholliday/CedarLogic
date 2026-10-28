@@ -26,6 +26,7 @@
 #include "LibraryWindow.h"
 #include "FindBar.h"
 #include "Toolbar.h"
+#include "MenuBar.h"
 #include "Notes.h"
 #include "Window.h"
 
@@ -40,6 +41,8 @@
 namespace {
 
 GMenu* gRecentMenu = nullptr;
+GMenu* gWindowMenu = nullptr;   // Window's list of the open circuits
+GMenuModel* gMenubar = nullptr;
 bool gLibraryLoaded = false;
 GtkWidget* gSplash = nullptr;
 // --screenshot <out.png>: once the window is up, draw it to a PNG and quit
@@ -270,41 +273,37 @@ gboolean showCb(gpointer) {
 			return G_SOURCE_REMOVE;
 		}, nullptr);
 	}
-	else if (what == "submenu") {
-		// The ••• menu with Tabs open, over Simulation View, as on the Pi.
-		w->toggleSimView();
-		GtkWidget* top = GTK_WIDGET(w->window());
-		GdkRectangle r = { gtk_widget_get_allocated_width(top) / 2, 6, 32, 32 };   // room for the submenu in the picture
-		w->moreMenu(top, r, nullptr);
-		g_timeout_add(500, +[](gpointer) -> gboolean {
-			GList* all = gtk_window_list_toplevels();
-			for (GList* l = all; l; l = l->next) {
-				GtkWidget* child = gtk_bin_get_child(GTK_BIN(l->data));
-				if (!gtk_widget_get_visible(GTK_WIDGET(l->data)) || !child || !GTK_IS_MENU(child)) continue;
-				GList* items = gtk_container_get_children(GTK_CONTAINER(child));
-				for (GList* i = items; i; i = i->next) {
-					const char* label = gtk_menu_item_get_label(GTK_MENU_ITEM(i->data));
-					if (label && strstr(label, "Tabs")) {
-						gtk_menu_shell_select_item(GTK_MENU_SHELL(child), GTK_WIDGET(i->data));
-						g_signal_emit_by_name(i->data, "activate-item");   // opens its submenu now
-					}
-				}
-				g_list_free(items);
-			}
-			g_list_free(all);
+	else if (what == "submenu" || what == "primary" || what == "menu") {
+		// The menu bar's menus, open as Alt and a letter opens them: menu:N
+		// the Nth (0 File ... 5 Help); primary Help; submenu View with its
+		// Drawing submenu open, over Simulation View, as on the Pi.
+		static int open = 0;
+		open = what == "primary" ? 5 : what == "submenu" ? 2 : page;
+		if (what == "submenu") w->toggleSimView();
+		g_timeout_add(400, +[](gpointer data) -> gboolean {
+			CircuitWindow* cw = circuitWindows().empty() ? nullptr : circuitWindows().back();
+			if (!cw || !cw->menuRowWidget() || !cw->menuRowWidget()->openMenu(open)) fprintf(stderr, "menu: no menu %d\n", open);
 			return G_SOURCE_REMOVE;
 		}, nullptr);
-	}
-	else if (what == "primary") {
-		// The header bar's primary menu (☰), open under its button.
-		GdkRectangle r;
-		if (w->toolbarWidget() && w->toolbarWidget()->primaryRect(r)) w->primaryMenu(w->toolbarWidget()->widget(), r, nullptr);
-		else fprintf(stderr, "primary menu: no button in the toolbar\n");
-	}
-	else if (what == "menu") {
-		GtkWidget* top = GTK_WIDGET(w->window());
-		GdkRectangle r = { gtk_widget_get_allocated_width(top) - 48, 6, 32, 32 };
-		w->moreMenu(top, r, nullptr);
+		if (what == "submenu")
+			g_timeout_add(900, +[](gpointer) -> gboolean {
+				GList* all = gtk_window_list_toplevels();
+				for (GList* l = all; l; l = l->next) {
+					GtkWidget* child = gtk_bin_get_child(GTK_BIN(l->data));
+					if (!gtk_widget_get_visible(GTK_WIDGET(l->data)) || !child || !GTK_IS_MENU(child)) continue;
+					GList* items = gtk_container_get_children(GTK_CONTAINER(child));
+					for (GList* i = items; i; i = i->next) {
+						const char* label = GTK_IS_MENU_ITEM(i->data) ? gtk_menu_item_get_label(GTK_MENU_ITEM(i->data)) : nullptr;
+						if (label && strstr(label, "Dra_wing")) {
+							gtk_menu_shell_select_item(GTK_MENU_SHELL(child), GTK_WIDGET(i->data));
+							g_signal_emit_by_name(i->data, "activate-item");   // opens its submenu now
+						}
+					}
+					g_list_free(items);
+				}
+				g_list_free(all);
+				return G_SOURCE_REMOVE;
+			}, nullptr);
 	}
 	else if (what == "ram") {
 		// An 8x8 RAM with something in it.
@@ -485,153 +484,247 @@ gboolean benchCb(gpointer app) {
 
 std::string samplesDir() { return resourcesDir() + "/samples"; }
 
-// The whole menu bar. Bare-key shortcuts (R, S, T...) are the canvas's own,
-// so they're only mentioned in the labels, never bound here.
+// The menu bar every window shows under its title bar: File, Edit, View,
+// Simulation, Window and Help, the Mac app's menus in its order, with the
+// desktop's habits (mnemonics, Quit in File, Settings at the foot of Edit as
+// Firefox and Inkscape keep it, About in Help). Keys show at the right of
+// each item: a command's own come from the app (and follow Settings >
+// Shortcuts by themselves); the canvas's single keys (A, R, S, T...) are
+// written on their items here (an "accel" attribute, shown but never bound:
+// the model isn't the application's menubar, so GTK doesn't take them as
+// shortcuts) and follow Settings too (refreshMenuKeys).
+GMenu* section(GMenu* menu) {
+	GMenu* s = g_menu_new();
+	g_menu_append_section(menu, nullptr, G_MENU_MODEL(s));
+	g_object_unref(s);
+	return s;
+}
+
+void add(GMenu* menu, const char* label, const char* action, const char* shownKeys = nullptr) {
+	GMenuItem* item = g_menu_item_new(label, action);
+	if (shownKeys) g_menu_item_set_attribute(item, "accel", "s", shownKeys);
+	g_menu_append_item(menu, item);
+	g_object_unref(item);
+}
+
+GMenu* submenu(GMenu* menu, const char* label) {
+	GMenu* sub = g_menu_new();
+	g_menu_append_submenu(menu, label, G_MENU_MODEL(sub));
+	g_object_unref(sub);
+	return sub;
+}
+
 GMenuModel* buildMenubar() {
 	GMenu* bar = g_menu_new();
 
-	GMenu* file = g_menu_new();
-	GMenu* s1 = g_menu_new();
-	g_menu_append(s1, "_New Circuit", "app.new");
-	g_menu_append(s1, "New from _Template…", "win.new-template");
-	g_menu_append(s1, "Your _Circuits…", "app.open");
-	g_menu_append(s1, "_Import a File…", "app.import");
-	gRecentMenu = g_menu_new();
-	g_menu_append_submenu(s1, "Open _Recent", G_MENU_MODEL(gRecentMenu));
-	g_menu_append(s1, "Open the _Practice Circuit", "app.open-sample");
-	g_menu_append_section(file, nullptr, G_MENU_MODEL(s1));
-	GMenu* s2 = g_menu_new();
-	g_menu_append(s2, "_Save a Version", "win.save");
-	g_menu_append(s2, "_Version History…", "win.versions");
-	g_menu_append(s2, "_Rename…", "win.rename-circuit");
-	g_menu_append(s2, "Du_plicate Circuit", "win.duplicate-circuit");
-	g_menu_append(s2, "E_xport as CedarLogic File…", "win.save-as");
-	g_menu_append(s2, "Share _Link…", "app.share-link");
-	g_menu_append(s2, "Save as Te_mplate…", "win.save-template");
-	g_menu_append(s2, "_Export as Image…", "win.export-image");
-	g_menu_append(s2, "Export _Lab Report…", "win.export-report");
-	GMenu* older = g_menu_new();
-	g_menu_append(older, "For CedarLogic _2…", "win.export-v2");
-	g_menu_append(older, "For CedarLogic _1.x…", "win.export-v1");
-	g_menu_append_submenu(s2, "Export for _Older CedarLogic", G_MENU_MODEL(older));
-	g_menu_append(s2, "_Print…", "win.print");
-	g_menu_append_section(file, nullptr, G_MENU_MODEL(s2));
-	GMenu* s3 = g_menu_new();
-	g_menu_append(s3, "_Close Window", "win.close");
-	g_menu_append(s3, "_Quit", "app.quit");
-	g_menu_append_section(file, nullptr, G_MENU_MODEL(s3));
-	g_menu_append_submenu(bar, "_File", G_MENU_MODEL(file));
+	GMenu* file = submenu(bar, "_File");
+	GMenu* s = section(file);
+	add(s, "_New Circuit", "app.new");
+	add(s, "New from _Template…", "win.new-template");
+	add(s, "Your _Circuits…", "app.open");
+	add(s, "_Import a File…", "app.import");
+	gRecentMenu = submenu(s, "Open _Recent");
+	add(s, "Open the _Practice Circuit", "app.open-sample");
+	s = section(file);
+	add(s, "_Save a Version", "win.save");
+	add(s, "Re_name…", "win.rename-circuit");
+	add(s, "Du_plicate Circuit", "win.duplicate-circuit");
+	add(s, "_Version History…", "win.versions");
+	s = section(file);
+	add(s, "_Export as Image…", "win.export-image");
+	add(s, "Export _Lab Report…", "win.export-report");
+	add(s, "Export as CedarLogic _File…", "win.save-as");
+	GMenu* older = submenu(s, "Export for _Older CedarLogic");
+	add(older, "For CedarLogic _2…", "win.export-v2");
+	add(older, "For CedarLogic _1.x…", "win.export-v1");
+	add(s, "Share Lin_k…", "app.share-link");
+	add(s, "Save as Te_mplate…", "win.save-template");
+	s = section(file);
+	add(s, "P_rint…", "win.print");
+	s = section(file);
+	add(s, "_Close Window", "win.close");
+	add(s, "_Quit", "app.quit");
 
-	GMenu* edit = g_menu_new();
-	GMenu* e1 = g_menu_new();
-	g_menu_append(e1, "_Undo", "win.undo");
-	g_menu_append(e1, "_Redo", "win.redo");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e1));
-	GMenu* e2 = g_menu_new();
-	g_menu_append(e2, "Cu_t", "win.cut");
-	g_menu_append(e2, "_Copy", "win.copy");
-	g_menu_append(e2, "_Paste", "win.paste");
-	g_menu_append(e2, "D_uplicate", "win.duplicate");
-	g_menu_append(e2, "_Delete", "win.delete");
-	g_menu_append(e2, "Select _All", "win.select-all");
-	g_menu_append(e2, "_Find…", "win.find");
-	g_menu_append(e2, "Find _Next", "win.find-next");
-	g_menu_append(e2, "Find Pre_vious", "win.find-previous");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e2));
-	GMenu* e3 = g_menu_new();
-	g_menu_append(e3, "Add a _Gate…   (A)", "win.add-gate");
-	g_menu_append(e3, "Gate _Settings…", "win.gate-settings");
-	g_menu_append(e3, "_Rotate   (R)", "win.rotate");
-	g_menu_append(e3, "_Lock in Place", "win.lock-in-place");
-	g_menu_append(e3, "Unlock All _Parts", "win.unlock-all");
-	g_menu_append(e3, "Straighten _Wires   (S)", "win.straighten");
-	g_menu_append(e3, "_Tidy Up   (Shift+S)", "win.tidy");
-	g_menu_append(e3, "Tidy Up by Signal _Flow", "win.tidy-flow");
-	g_menu_append(e3, "Connect _Nearby Pins", "win.connect-nearby");
-	g_menu_append(e3, "Save as _Part…", "win.save-part");
-	g_menu_append(e3, "_Build from Formula…", "win.build-formula");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e3));
-	GMenu* e4 = g_menu_new();
-	g_menu_append(e4, "_Settings", "win.preferences");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e4));
-	g_menu_append_submenu(bar, "_Edit", G_MENU_MODEL(edit));
+	GMenu* edit = submenu(bar, "_Edit");
+	s = section(edit);
+	add(s, "_Undo", "win.undo");
+	add(s, "_Redo", "win.redo");
+	s = section(edit);
+	add(s, "Cu_t", "win.cut");
+	add(s, "_Copy", "win.copy");
+	add(s, "_Paste", "win.paste");
+	add(s, "D_uplicate", "win.duplicate");
+	add(s, "_Delete", "win.delete", "Delete");
+	add(s, "Select _All", "win.select-all");
+	s = section(edit);
+	add(s, "Add a _Gate…", "win.add-gate");
+	add(s, "R_otate", "win.rotate");
+	add(s, "_Lock in Place", "win.lock-in-place");
+	add(s, "Unlock All Pa_rts", "win.unlock-all");
+	add(s, "Gate _Settings…", "win.gate-settings");
+	s = section(edit);
+	GMenu* find = submenu(s, "_Find");
+	add(find, "_Find…", "win.find");
+	add(find, "Find _Next", "win.find-next");
+	add(find, "Find _Previous", "win.find-previous");
+	s = section(edit);
+	add(s, "Save as Par_t…", "win.save-part");
+	add(s, "_Build from Formula…", "win.build-formula");
+	add(s, "Straighten _Wires", "win.straighten");
+	add(s, "Tidy Up: _Keep My Layout", "win.tidy");
+	add(s, "Tidy Up: _Full Rearrange", "win.tidy-flow");
+	add(s, "Connect _Nearby Pins", "win.connect-nearby");
+	s = section(edit);
+	add(s, "S_ettings…", "win.preferences");
 
-	GMenu* view = g_menu_new();
-	GMenu* v1 = g_menu_new();
-	g_menu_append(v1, "Zoom _In", "win.zoom-in");
-	g_menu_append(v1, "Zoom _Out", "win.zoom-out");
-	g_menu_append(v1, "Zoom to _Fit", "win.zoom-fit");
-	g_menu_append(v1, "_Actual Size", "win.zoom-actual");
-	g_menu_append_section(view, nullptr, G_MENU_MODEL(v1));
-	GMenu* v2 = g_menu_new();
-	g_menu_append(v2, "_Dark Mode", "win.dark");
-	g_menu_append(v2, "_Focus Mode", "win.focus-mode");
-	g_menu_append(v2, "Side _Panel", "win.palette");
-	g_menu_append(v2, "_Status Bar", "win.status-bar");
-	g_menu_append_section(view, nullptr, G_MENU_MODEL(v2));
-	// Drawing on the circuit and the notes (Ink.h, Notes.h), as the Mac's View menu.
-	GMenu* v3 = g_menu_new();
-	g_menu_append(v3, "Draw on the _Circuit", "win.draw");
-	GMenu* drawing = g_menu_new();
-	g_menu_append(drawing, "_Pen   (P)", "win.ink-pen");
-	g_menu_append(drawing, "_Highlighter   (H)", "win.ink-highlighter");
-	g_menu_append(drawing, "_Eraser   (E)", "win.ink-eraser");
-	GMenu* clear = g_menu_new();
-	g_menu_append(clear, "_Clear Drawing on This Page", "win.clear-drawing");
-	g_menu_append_section(drawing, nullptr, G_MENU_MODEL(clear));
-	g_menu_append_submenu(v3, "Dra_wing", G_MENU_MODEL(drawing));
-	g_menu_append(v3, "Show D_rawing", "win.show-drawing");
-	g_menu_append(v3, "Show _Notes", "win.notes");
-	g_menu_append_section(view, nullptr, G_MENU_MODEL(v3));
-	g_menu_append_submenu(bar, "_View", G_MENU_MODEL(view));
+	GMenu* view = submenu(bar, "_View");
+	s = section(view);
+	add(s, "Zoom _In", "win.zoom-in");
+	add(s, "Zoom _Out", "win.zoom-out");
+	add(s, "Zoom to _Fit", "win.zoom-fit");
+	add(s, "_Actual Size", "win.zoom-actual");
+	s = section(view);
+	add(s, "Focus _Mode", "win.focus-mode");
+	add(s, "F_ull Screen", "win.fullscreen");
+	add(s, "Side _Panel", "win.palette");
+	add(s, "Status _Bar", "win.status-bar");
+	add(s, "_Gridlines", "win.show-grid");
+	add(s, "Wire Connection _Dots", "win.wire-dots");
+	add(s, "Dar_k Mode", "win.dark");
+	s = section(view);
+	add(s, "_Simulation View", "win.sim-view");
+	add(s, "Pro_jector Mode", "win.projector");
+	add(s, "Osci_lloscope", "win.scope");
+	s = section(view);
+	add(s, "Draw on the _Circuit", "win.draw");
+	GMenu* drawing = submenu(s, "Dra_wing");
+	GMenu* tools = section(drawing);
+	add(tools, "_Pen", "win.ink-pen", "p");
+	add(tools, "_Highlighter", "win.ink-highlighter", "h");
+	add(tools, "_Eraser", "win.ink-eraser", "e");
+	add(section(drawing), "_Clear Drawing on This Page", "win.clear-drawing");
+	add(s, "Show D_rawing", "win.show-drawing");
+	add(s, "Show _Notes", "win.notes");
 
-	GMenu* sim = g_menu_new();
-	GMenu* m1 = g_menu_new();
-	g_menu_append(m1, "_Running", "win.running");
-	g_menu_append(m1, "_Step Once", "win.step");
-	g_menu_append(m1, "Step _Clock   (K)", "win.step-clock");
-	g_menu_append(m1, "Simulation _View", "win.sim-view");
-	g_menu_append(m1, "_Projector Mode", "win.projector");
-	g_menu_append(m1, "_Lock the Circuit", "win.lock");
-	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m1));
-	GMenu* m2 = g_menu_new();
-	g_menu_append(m2, "_Truth Table   (T)", "win.truth-table");
-	g_menu_append(m2, "_Check My Circuit   (Shift+T)", "win.check-circuit");
-	g_menu_append(m2, "_Oscilloscope", "win.scope");
-	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m2));
-	g_menu_append_submenu(bar, "_Simulate", G_MENU_MODEL(sim));
+	GMenu* sim = submenu(bar, "_Simulation");
+	s = section(sim);
+	add(s, "_Simulation View", "win.sim-view");
+	add(s, "_Running", "win.running");
+	add(s, "S_tep Once", "win.step");
+	add(s, "Step _Clock", "win.step-clock");
+	s = section(sim);
+	add(s, "_Truth Table…", "win.truth-table");
+	add(s, "C_heck My Circuit…", "win.check-circuit");
+	add(s, "_Oscilloscope", "win.scope");
+	s = section(sim);
+	add(s, "_Lock the Circuit", "win.lock");
 
-	GMenu* tabs = g_menu_new();
-	g_menu_append(tabs, "_New Tab", "win.new-tab");
-	g_menu_append(tabs, "_Close Tab", "win.close-tab");
-	g_menu_append(tabs, "_Reopen Closed Tab", "win.reopen-tab");
-	g_menu_append(tabs, "Re_name Tab…", "win.rename-tab");
-	g_menu_append(tabs, "Ne_xt Tab", "win.next-tab");
-	g_menu_append(tabs, "_Previous Tab", "win.previous-tab");
-	GMenu* splitSection = g_menu_new();
-	g_menu_append(splitSection, "_Split View", "win.split-view");
-	g_menu_append(splitSection, "S_witch Side", "win.switch-pane");
-	g_menu_append(splitSection, "Close Split Vie_w", "win.close-split");
-	g_menu_append_section(tabs, nullptr, G_MENU_MODEL(splitSection));
+	// Tabs live here (the Mac keeps them in File, under its own Window menu's
+	// tab commands); then the open circuits, to bring one forward.
+	GMenu* window = submenu(bar, "_Window");
+	s = section(window);
+	add(s, "_New Tab", "win.new-tab");
+	add(s, "_Close Tab", "win.close-tab");
+	add(s, "_Reopen Closed Tab", "win.reopen-tab");
+	add(s, "Re_name Tab…", "win.rename-tab");
+	add(s, "Ne_xt Tab", "win.next-tab");
+	add(s, "_Previous Tab", "win.previous-tab");
+	s = section(window);
+	add(s, "_Split View", "win.split-view");
+	add(s, "S_witch Side", "win.switch-pane");
+	add(s, "Close Split _View", "win.close-split");
 	// Which pages' TO/FROM links connect (docs/PAGE-LINKS.md); a tab's
 	// right-click menu connects pages one by one.
-	GMenu* linkSection = g_menu_new();
-	g_menu_append(linkSection, "Connect _All Pages", "win.connect-all-pages");
-	g_menu_append(linkSection, "_Disconnect All Pages", "win.disconnect-all-pages");
-	g_menu_append_section(tabs, nullptr, G_MENU_MODEL(linkSection));
-	g_menu_append_submenu(bar, "_Tabs", G_MENU_MODEL(tabs));
+	s = section(window);
+	add(s, "Connect _All Pages", "win.connect-all-pages");
+	add(s, "_Disconnect All Pages", "win.disconnect-all-pages");
+	s = section(window);
+	add(s, "_Minimize", "win.minimize");
+	gWindowMenu = section(window);
 
-	GMenu* help = g_menu_new();
-	g_menu_append(help, "_Keyboard Shortcuts", "win.shortcuts");
-	g_menu_append(help, "Guided _Tour", "app.guided-tour");
-	g_menu_append(help, "CedarLogic _Help", "win.help");
-	g_menu_append(help, "_What's New in CedarLogic", "win.whats-new");
-	g_menu_append(help, "Send _Feedback…", "win.feedback");
-	g_menu_append(help, "Check for _Updates…", "app.check-updates");
-	g_menu_append(help, "_About CedarLogic", "win.about");
-	g_menu_append_submenu(bar, "_Help", G_MENU_MODEL(help));
+	GMenu* help = submenu(bar, "_Help");
+	s = section(help);
+	add(s, "CedarLogic _Help", "win.help");
+	add(s, "_Keyboard Shortcuts", "win.shortcuts");
+	add(s, "Guided _Tour", "app.guided-tour");
+	s = section(help);
+	add(s, "_What's New in CedarLogic", "win.whats-new");
+	add(s, "W_elcome to CedarLogic", "win.welcome");
+	s = section(help);
+	add(s, "Send _Feedback…", "win.feedback");
+	add(s, "Check for _Updates…", "app.check-updates");
+	s = section(help);
+	add(s, "_About CedarLogic", "win.about");
 	return G_MENU_MODEL(bar);
 }
+
+// The keys a canvas command has now, as an accelerator ("" none).
+std::string canvasKeys(const char* id) {
+	const shortcuts::Action* a = shortcuts::find(id);
+	return a ? shortcuts::keys(*a) : std::string();
+}
+
+// An item's shown keys set to `keys` (in every menu under `model`).
+void showKeys(GMenuModel* model, const char* action, const std::string& keys) {
+	for (int i = 0; i < g_menu_model_get_n_items(model); i++) {
+		gchar* a = nullptr;
+		if (g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_ACTION, "s", &a) && a && std::strcmp(a, action) == 0 && G_IS_MENU(model)) {
+			gchar* now = nullptr;
+			g_menu_model_get_item_attribute(model, i, "accel", "s", &now);
+			if (keys != (now ? now : "")) {
+				GMenuItem* item = g_menu_item_new_from_model(model, i);
+				if (keys.empty()) g_menu_item_set_attribute_value(item, "accel", nullptr);
+				else g_menu_item_set_attribute(item, "accel", "s", keys.c_str());
+				g_menu_remove(G_MENU(model), i);
+				g_menu_insert_item(G_MENU(model), i, item);
+				g_object_unref(item);
+			}
+			g_free(now);
+		}
+		g_free(a);
+		GMenuLinkIter* links = g_menu_model_iterate_item_links(model, i);
+		GMenuModel* sub = nullptr;
+		while (g_menu_link_iter_get_next(links, nullptr, &sub)) {
+			showKeys(sub, action, keys);
+			g_object_unref(sub);
+		}
+		g_object_unref(links);
+	}
+}
+
+}  // namespace
+
+GMenuModel* appMenubar() { return gMenubar; }
+
+void refreshMenuKeys() {
+	if (gMenubar == nullptr) return;
+	static const struct { const char* action; const char* id; } kCanvasKeys[] = {
+		{ "win.add-gate", "addGate" }, { "win.rotate", "rotate" }, { "win.straighten", "straighten" },
+		{ "win.step-clock", "stepClock" }, { "win.truth-table", "truthTable" }, { "win.check-circuit", "checkCircuit" },
+	};
+	for (const auto& k : kCanvasKeys) showKeys(gMenubar, k.action, canvasKeys(k.id));
+	// Tidy's key runs the way Settings > Editing picks; the other way is a click.
+	const std::string tidy = canvasKeys("tidy");
+	showKeys(gMenubar, "win.tidy", prefs().tidyMode == 0 ? tidy : std::string());
+	showKeys(gMenubar, "win.tidy-flow", prefs().tidyMode == 1 ? tidy : std::string());
+}
+
+void rebuildWindowMenu() {
+	if (gWindowMenu == nullptr) return;
+	g_menu_remove_all(gWindowMenu);
+	const std::vector<CircuitWindow*>& all = circuitWindows();
+	for (size_t i = 0; i < all.size() && i < 20; i++) {
+		std::string label = all[i]->titleText();
+		std::string escaped;
+		for (char c : label) { if (c == '_') escaped += '_'; escaped += c; }
+		GMenuItem* item = g_menu_item_new(escaped.c_str(), nullptr);
+		g_menu_item_set_action_and_target_value(item, "app.show-window", g_variant_new_int32((gint32)i));
+		g_menu_append_item(gWindowMenu, item);
+		g_object_unref(item);
+	}
+}
+
+namespace {
 
 // Every command's keys: the defaults, with Settings > Shortcuts' changes.
 void setAccels(GtkApplication* app) { shortcuts::apply(app); }
@@ -843,13 +936,20 @@ void startupCb(GApplication* gapp, gpointer) {
 		  nullptr, nullptr, nullptr, { 0 } },
 		{ "guided-tour", [](GSimpleAction*, GVariant*, gpointer app) { startTour(activeWindow(GTK_APPLICATION(app))); },
 		  nullptr, nullptr, nullptr, { 0 } },
+		// Window > (an open circuit): that window to the front.
+		{ "show-window", [](GSimpleAction*, GVariant* v, gpointer) {
+			const int i = g_variant_get_int32(v);
+			if (i >= 0 && i < (int)circuitWindows().size()) gtk_window_present(circuitWindows()[i]->window());
+		  }, "i", nullptr, nullptr, { 0 } },
 	};
 	g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
 	setAccels(app);
-	GMenuModel* bar = buildMenubar();
-	gtk_application_set_menubar(app, bar);
-	g_object_unref(bar);
+	// Each window shows the bar itself (Window.cpp); it isn't the
+	// application's menubar, so the canvas keys written on it stay unbound.
+	gMenubar = buildMenubar();
+	refreshMenuKeys();
 	rebuildRecentMenus();
+	rebuildWindowMenu();
 	// Not in the screenshot runs: an update question would outlive them.
 	if (gScreenshot.empty()) {
 		Updater_Initialize(app);

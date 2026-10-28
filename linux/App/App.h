@@ -159,6 +159,14 @@ std::vector<CircuitWindow*>& circuitWindows();
 // Choose a file and open it.
 void chooseAndOpen(GtkApplication* app, GtkWindow* parent);
 void rebuildRecentMenus();
+// The menu bar's model, one for every window (main.cpp); nullptr before the
+// app has started.
+GMenuModel* appMenubar();
+// The canvas's single keys (and Tidy Up's, which follows Settings) written
+// on their menu items again, after Settings > Shortcuts or Settings changed.
+void refreshMenuKeys();
+// Window's list of the open circuits, again (a window came, went or was renamed).
+void rebuildWindowMenu();
 // A file people chose, into the desktop's recent list.
 void noteDesktopRecent(const std::string& path);
 

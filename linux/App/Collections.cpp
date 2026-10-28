@@ -292,7 +292,7 @@ std::vector<Template> builtIn() {
 std::string stepClockName() {
 	const shortcuts::Action* a = shortcuts::find("stepClock");
 	const std::string k = a ? shortcuts::label(shortcuts::keys(*a)) : std::string();
-	return k.empty() ? std::string("Simulate \u25B8 Step Clock") : "the " + k + " key";
+	return k.empty() ? std::string("Simulation \u25B8 Step Clock") : "the " + k + " key";
 }
 
 std::string clockNote(int clock) {
@@ -312,7 +312,7 @@ void showPicker(CircuitWindow* from, const std::string& select) {
 	auto all = [&] { std::vector<Template> a = built; a.insert(a.end(), mine.begin(), mine.end()); return a; };
 	picker::Picker p;
 	p.title = "New from Template";
-	p.line = "Start a circuit from one of these. Save your own with Save as Template, in the ••• menu's File.";
+	p.line = "Start a circuit from one of these. Save your own with Save as Template, in the File menu.";
 	p.search = false;
 	p.width = 940;
 	p.height = 620;
