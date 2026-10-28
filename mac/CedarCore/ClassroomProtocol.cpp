@@ -17,6 +17,7 @@ using clsync::b64u;
 using clsync::hex;
 using clsync::isHex;
 using clsync::isUuid;
+using clsync::secureWipe;
 using clsync::sha256Hex;
 using clsync::sha256Hex;
 using clsync::unb64u;
@@ -180,7 +181,7 @@ std::string newCode(Crypto& cr, CodeKind k) {
 	uint8_t secret[16];
 	if (!cr.random(secret, codeBytes(k))) return std::string();
 	const std::string s = encodeCode(cr, k, secret);
-	memset(secret, 0, sizeof secret);
+	secureWipe(secret, sizeof secret);
 	return s;
 }
 
@@ -240,8 +241,8 @@ bool pbkdf2Loop(Crypto& cr, const uint8_t* pw, size_t pwLen, const uint8_t* salt
 		memcpy(u, next, 32);
 		for (int j = 0; j < 32; j++) out[j] ^= u[j];
 	}
-	memset(u, 0, 32);
-	memset(next, 0, 32);
+	secureWipe(u, 32);
+	secureWipe(next, 32);
 	return true;
 }
 
@@ -268,7 +269,7 @@ JoinKeys joinKeys(Crypto& cr, Curve& curve, const Bytes& secret) {
 	uint8_t s[32];
 	if (!curve.pbkdf2Sha256(cr, secret.data(), secret.size(), (const uint8_t*)kJoinSalt, strlen(kJoinSalt), kJoinRounds, s)) return k;
 	k.stretched.assign(s, s + 32);
-	memset(s, 0, sizeof s);
+	secureWipe(s, sizeof s);
 	k.joinId = hex(hkdf(cr, k.stretched, "join-id", 16));
 	k.joinToken = b64u(hkdf(cr, k.stretched, "join-token", 32));
 	k.joinKey = hkdf(cr, k.stretched, "join-key", 32);
@@ -368,7 +369,7 @@ bool sealPub(Crypto& cr, Curve& curve, const Bytes& pub, const uint8_t ed[32], c
 	if (!curve.p256Public(ed, E)) { why = "point"; return false; }
 	if (!curve.p256Ecdh(ed, pub.data(), x)) { why = "point"; return false; }
 	Bytes key = sealKeyOf(cr, x, E, pub.data());
-	memset(x, 0, sizeof x);
+	secureWipe(x, sizeof x);
 	int flags = 0;
 	const Bytes plain = plainOf(cr, payload, compress, deflated, flags);
 	Bytes ct;
@@ -405,7 +406,7 @@ bool sealTo(Crypto& cr, Curve& curve, const Bytes& pub, const std::string& kind,
 	if (!cr.random(nonce, 12)) { why = "rng"; return false; }
 	if (!curve.p256Generate(ed, E)) { why = "rng"; return false; }   // a fresh ephemeral key, forgotten below
 	const bool ok = sealPub(cr, curve, pub, ed, kind, classId, id, ver, payload, compress, Bytes(), nonce, env, why);
-	memset(ed, 0, sizeof ed);
+	secureWipe(ed, sizeof ed);
 	if (!ok) { env.clear(); return false; }
 	if (env.size() > maxEnvelope) { why = "too big"; env.clear(); return false; }
 	return true;
@@ -456,7 +457,7 @@ bool open(Crypto& cr, Curve& curve, const Bytes& env, const std::string& kind, c
 		uint8_t x[32];
 		if (!curve.p256Ecdh(k.d.data(), env.data() + 2, x)) { why = "point"; return false; }
 		Bytes key = sealKeyOf(cr, x, env.data() + 2, k.pub.data());
-		memset(x, 0, sizeof x);
+		secureWipe(x, sizeof x);
 		const bool ok =
 			cr.aesGcmOpen(key.data(), env.data() + 67, Bytes(aad.begin(), aad.end()), Bytes(env.begin() + 79, env.end()), plain);
 		std::fill(key.begin(), key.end(), 0);

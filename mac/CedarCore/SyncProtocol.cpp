@@ -2,6 +2,8 @@
 // hex, the record envelope, payloads, fileText and the hashes, HTTP dates.
 // Checked byte for byte by the vectors of SYNC.md 7.1 (SyncTest.cpp).
 
+#define __STDC_WANT_LIB_EXT1__ 1   // memset_s, for secureWipe (before anything includes <string.h>)
+
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
 #define _CRT_SECURE_NO_WARNINGS   // snprintf/sscanf/localtime/getenv are used with care
 #endif
@@ -66,6 +68,18 @@ std::string charAt(const std::string& s, size_t i) {
 }  // namespace
 
 // ---- bytes ------------------------------------------------------------------------
+
+void secureWipe(void* p, size_t n) {
+#if defined(__APPLE__)
+	memset_s(p, n, 0, n);
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 25))
+	explicit_bzero(p, n);
+#else
+	// Writes through a volatile pointer: each one has to happen.
+	volatile uint8_t* b = static_cast<volatile uint8_t*>(p);
+	while (n--) *b++ = 0;
+#endif
+}
 
 std::string hex(const uint8_t* p, size_t n) {
 	static const char d[] = "0123456789abcdef";
@@ -432,7 +446,7 @@ Keys keysForCode(Crypto& cr, const std::string& code) {
 	std::string why;
 	if (!decodeCode(cr, code, secret, why)) return Keys();
 	Keys k = deriveKeys(cr, secret);
-	memset(secret, 0, sizeof secret);
+	secureWipe(secret, sizeof secret);
 	return k;
 }
 
