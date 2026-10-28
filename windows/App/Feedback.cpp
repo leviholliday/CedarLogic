@@ -6,10 +6,12 @@
 #include "Canvas.h"
 #include "Chrome.h"
 #include "Dialogs.h"
+#include "FeedbackCapture.h"
 #include "Images.h"
 #include "SyncApp.h"
 #include "Window.h"
 
+#include <dwmapi.h>
 #include <winhttp.h>
 
 #include <algorithm>
@@ -78,9 +80,10 @@ std::vector<std::string> split(const std::string& s, char by) {
 }
 
 struct Attachment {
-	enum Kind { Screenshot, Image, Circuit } kind = Image;
+	enum Kind { Screenshot, Image, Circuit, Recording } kind = Image;
 	std::string file, name, type;
 	IWICBitmap* thumb = nullptr;
+	double seconds = 0;   // a recording's length
 };
 
 // Whole files, by UTF-8 name.
@@ -193,8 +196,12 @@ struct Draft {
 	}
 	int imageCount() const {
 		int n = 0;
-		for (const Attachment& a : attachments) if (a.kind != Attachment::Circuit) n++;
+		for (const Attachment& a : attachments) if (a.kind == Attachment::Screenshot || a.kind == Attachment::Image) n++;
 		return n;
+	}
+	bool hasRecording() const {
+		for (const Attachment& a : attachments) if (a.kind == Attachment::Recording) return true;
+		return false;
 	}
 	std::string freeName(const char* base, const char* ext) const {
 		for (int n = 1;; n++) {
@@ -204,13 +211,15 @@ struct Draft {
 			if (!used) return name;
 		}
 	}
-	void add(Attachment::Kind kind, const std::string& file, const std::string& name, const std::string& type) {
+	void add(Attachment::Kind kind, const std::string& file, const std::string& name, const std::string& type,
+	         const std::string& thumbFrom = "", double seconds = 0) {
 		Attachment a;
 		a.kind = kind;
 		a.file = file;
 		a.name = name;
 		a.type = type;
-		a.thumb = images::load(file, 264, 168);
+		a.seconds = seconds;
+		a.thumb = images::load(thumbFrom.empty() ? file : thumbFrom, 264, 168);
 		attachments.push_back(a);
 	}
 	void remove(size_t i) {
@@ -642,15 +651,17 @@ void paintPriority(ID2D1RenderTarget* rt, float width) {
 	drawText(rt, kPriorities[draft().priority].hint, D2D1::RectF(0, 38, width, 54), 11.5f, l.dim);
 }
 
-const float kTileW = 116, kTileH = 72, kThumbW = 112;
+const float kTileW = 116, kTileH = 72, kThumbW = 112, kThumbTop = 90, kShotsHeight = 168;
+const int kTiles = 3;   // Screenshot, Record, Add image…
 
+// The three tiles along the top, then what's attached on a row of its own.
 D2D1_RECT_F tileRect(int i) { return D2D1::RectF(i * (kTileW + 10), 6, i * (kTileW + 10) + kTileW, 6 + kTileH); }
-// The pictures after the two tiles, narrower if all three wouldn't fit (the
-// last one's × too, which stands 6 points past it).
+// The attachments' row, narrower if they wouldn't all fit (the last one's ×
+// too, which stands 6 points past it).
 D2D1_RECT_F thumbRect(size_t i, float width) {
-	const float x0 = 2 * (kTileW + 10) + 8, gap = 12;
-	const float tw = std::max(40.0f, std::min(kThumbW, (width - x0 - 6 - (kMaxImages - 1) * gap) / kMaxImages));
-	return D2D1::RectF(x0 + i * (tw + gap), 6, x0 + i * (tw + gap) + tw, 6 + kTileH);
+	const float gap = 14;
+	const float tw = std::max(40.0f, std::min(kThumbW, (width - 6 - (kMaxImages) * gap) / (kMaxImages + 1)));
+	return D2D1::RectF(i * (tw + gap), kThumbTop, i * (tw + gap) + tw, kThumbTop + kTileH);
 }
 D2D1_RECT_F closeRect(size_t i, float width) {
 	const D2D1_RECT_F t = thumbRect(i, width);
@@ -659,19 +670,44 @@ D2D1_RECT_F closeRect(size_t i, float width) {
 
 void paintAttachments(ID2D1RenderTarget* rt, float width) {
 	const Look l = look();
-	const bool more = draft().imageCount() < kMaxImages;
-	const wchar_t glyphs[] = { 0xE722, 0xEB9F };   // camera, photo
-	const char* labels[] = { "Screenshot", "Add image…" };
-	for (int i = 0; i < 2; i++) {
+	const Draft& d = draft();
+	const bool more = d.imageCount() < kMaxImages, rec = capture::recording();
+	const wchar_t glyphs[] = { 0xE722, 0xE7C8, 0xEB9F };   // camera, record, photo
+	const std::string labels[] = { "Screenshot", d.hasRecording() ? "Record again" : "Record", "Add image\u2026" };
+	const bool enabled[] = { more && !rec, !rec, more && !rec };
+	for (int i = 0; i < kTiles; i++) {
 		const D2D1_RECT_F r = tileRect(i);
-		const float a = more ? 1 : 0.45f;
+		const float a = enabled[i] ? 1 : 0.45f;
 		fillRound(rt, r, 11, l.card);
 		strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 11, l.line);
-		drawIcon(rt, glyphs[i], D2D1::RectF(r.left, r.top + 12, r.right, r.top + 38), 19, withAlpha(l.accent, a));
+		const D2D1_COLOR_F tint = i == 1 ? D2D1::ColorF(0.91f, 0.25f, 0.21f) : l.accent;
+		drawIcon(rt, glyphs[i], D2D1::RectF(r.left, r.top + 12, r.right, r.top + 38), 19, withAlpha(tint, a));
 		drawText(rt, labels[i], D2D1::RectF(r.left, r.top + 44, r.right, r.bottom), 12, withAlpha(l.ink, a), TextAlign::Center);
 	}
-	for (size_t i = 0; i < draft().attachments.size(); i++) {
-		const Attachment& a = draft().attachments[i];
+	if (d.attachments.empty()) {
+		// Nothing yet: what the row is for.
+		const D2D1_RECT_F e = D2D1::RectF(0, kThumbTop, width - 2, kThumbTop + kTileH);
+		ID2D1Factory* f = nullptr;
+		rt->GetFactory(&f);
+		ID2D1StrokeStyle* dashed = nullptr;
+		const float dashes[] = { 4, 3 };
+		if (f) f->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_ROUND,
+		                                                         10, D2D1_DASH_STYLE_CUSTOM, 0), dashes, 2, &dashed);
+		ID2D1SolidColorBrush* b = nullptr;
+		if (SUCCEEDED(rt->CreateSolidColorBrush(withAlpha(l.ink, 0.18f), &b))) {
+			rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(e.left + 0.5f, e.top + 0.5f, e.right - 0.5f, e.bottom - 0.5f), 10, 10), b, 1, dashed);
+			b->Release();
+		}
+		if (dashed) dashed->Release();
+		if (f) f->Release();
+		drawText(rt, "Nothing attached yet. A picture or a minute's recording often says more than words.",
+		         D2D1::RectF(e.left + 16, e.top + 18, e.right - 16, e.top + 36), 12, l.dim, TextAlign::Center);
+		drawText(rt, "Up to three pictures and one recording. Only the CedarLogic window is captured, never the rest of your screen.",
+		         D2D1::RectF(e.left + 16, e.top + 38, e.right - 16, e.bottom - 6), 11, withAlpha(l.dim, 0.85f), TextAlign::Center);
+		return;
+	}
+	for (size_t i = 0; i < d.attachments.size(); i++) {
+		const Attachment& a = d.attachments[i];
 		const D2D1_RECT_F r = thumbRect(i, width);
 		fillRound(rt, r, 9, D2D1::ColorF(0, 0, 0, 0.3f));
 		if (a.thumb) {
@@ -694,6 +730,18 @@ void paintAttachments(ID2D1RenderTarget* rt, float width) {
 				if (f) f->Release();
 				bmp->Release();
 			}
+		}
+		if (a.kind == Attachment::Recording) {
+			// A play button over it, and its length.
+			const D2D1_POINT_2F c = D2D1::Point2F((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+			fillCircle(rt, c, 15, D2D1::ColorF(0, 0, 0, 0.55f));
+			drawIcon(rt, 0xE768, D2D1::RectF(c.x - 15 + 2, c.y - 15, c.x + 15 + 2, c.y + 15), 13, D2D1::ColorF(1, 1, 1));
+			const int secs = (int)std::lround(a.seconds);
+			const std::string len = strf("%d:%02d", secs / 60, secs % 60);
+			const float lw = textWidth(len, 10.5f, true) + 10;
+			fillRound(rt, D2D1::RectF(r.right - lw - 5, r.bottom - 21, r.right - 5, r.bottom - 5), 5, D2D1::ColorF(0, 0, 0, 0.6f));
+			drawText(rt, len, D2D1::RectF(r.right - lw - 5, r.bottom - 20, r.right - 5, r.bottom - 5), 10.5f, D2D1::ColorF(1, 1, 1),
+			         TextAlign::Center, true);
 		}
 		strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 9, l.line);
 		const D2D1_RECT_F c = closeRect(i, width);
@@ -751,6 +799,48 @@ void attachScreenshot(Form& form) {
 	else MessageBeep(MB_ICONWARNING);
 }
 
+int g_shotsField = -1;   // the attachments' picture field, for a recording that finishes later
+
+// Record: this window steps away and the circuit window works as usual
+// (Windows has it switched off behind this one, so it's switched on) until
+// Stop, the ×, or a minute; then this window comes back with the recording
+// on it. One recording at a time; Record Again replaces it.
+void recordFromForm(Form& form) {
+	Draft& d = draft();
+	if (d.win == nullptr || capture::recording()) return;
+	const HWND owner = d.win->window(), dialog = form.dialog;
+	const std::string file = folder() + "\\" + uniqueId() + "-recording.mp4";
+	Form* f = &form;
+	ShowWindow(dialog, SW_HIDE);
+	EnableWindow(owner, TRUE);
+	SetForegroundWindow(owner);
+	std::string why;
+	const bool started = capture::startRecording(owner, file,
+		[f, dialog, owner](const std::string& made, double seconds, const std::string& first, const std::string& problem) {
+			if (!IsWindow(dialog)) return;
+			EnableWindow(owner, FALSE);
+			ShowWindow(dialog, SW_SHOW);
+			SetForegroundWindow(dialog);
+			Draft& dr = draft();
+			if (!made.empty()) {
+				for (size_t i = 0; i < dr.attachments.size(); i++)
+					if (dr.attachments[i].kind == Attachment::Recording) { dr.remove(i); break; }
+				dr.add(Attachment::Recording, made, "recording.mp4", "video/mp4", first, seconds);
+			}
+			if (!first.empty()) DeleteFileW(W(first).c_str());
+			f->setProblem(problem);
+			if (g_shotsField >= 0) f->refresh(g_shotsField);
+		},
+		why);
+	if (!started) {
+		EnableWindow(owner, FALSE);
+		ShowWindow(dialog, SW_SHOW);
+		SetForegroundWindow(dialog);
+		form.setProblem(why);
+		MessageBeep(MB_ICONWARNING);
+	}
+}
+
 void attachImages(Form& form) {
 	Draft& d = draft();
 	const std::vector<std::string> files = chooseOpenFiles(form.dialog, "Pictures to Go With Your Feedback",
@@ -770,6 +860,103 @@ void attachImages(Form& form) {
 
 }  // namespace
 
+// --feedback-capture-test: Send Feedback opened, then, a step at a time
+// from its timer, a screenshot, a three-second recording with the window
+// zooming as it records (and a picture of the recording bar), the
+// recording read back (its length and first frame), and a picture of the
+// form with both on it. Each step says PASS or FAIL.
+struct SelfTest {
+	bool on = false;
+	std::string dir;
+	std::function<void(const std::string&)> say;
+	int step = 0, failures = 0;
+	double at = 0;   // when the next step is due
+	void check(bool ok, const std::string& what) {
+		say(std::string(ok ? "PASS " : "FAIL ") + what + "\n");
+		if (!ok) failures++;
+	}
+};
+SelfTest g_test;
+
+const Attachment* attachmentOf(Attachment::Kind kind) {
+	for (const Attachment& a : draft().attachments) if (a.kind == kind) return &a;
+	return nullptr;
+}
+
+void selfTestStep(Form& form) {
+	SelfTest& t = g_test;
+	if (nowSeconds() < t.at) return;
+	Draft& d = draft();
+	switch (t.step++) {
+	case 0: {
+		attachScreenshot(form);
+		const Attachment* a = attachmentOf(Attachment::Screenshot);
+		t.check(a && fileSize(a->file) > 2000, "Screenshot: the window's picture is attached");
+		t.check(a && a->thumb, "Screenshot: its thumbnail shows");
+		if (a) CopyFileW(W(a->file).c_str(), W(t.dir + "\\feedback-screenshot.png").c_str(), FALSE);
+		t.at = nowSeconds() + 0.5;
+		break;
+	}
+	case 1:
+		recordFromForm(form);
+		t.check(capture::recording(), "Record: recording started");
+		t.check(!IsWindowVisible(form.dialog), "Record: the form stepped out of the way");
+		t.check(IsWindowEnabled(d.win->window()), "Record: the circuit window can be used while it records");
+		t.at = nowSeconds() + 1.2;
+		break;
+	case 2: {
+		// Something happening in the window while it records.
+		d.win->run(CMD_ZOOM_IN);
+		IWICBitmap* bar = capture::recordingBar() ? capture::window(capture::recordingBar()) : nullptr;
+		t.check(bar != nullptr, "Record: the recording bar is up");
+		if (bar) {
+			capture::savePng(bar, t.dir + "\\recording-bar.png");
+			bar->Release();
+		}
+		t.at = nowSeconds() + 1.8;
+		break;
+	}
+	case 3: {
+		capture::stopRecording(true);
+		t.check(!capture::recording(), "Stop: the recording ended");
+		t.check(IsWindowVisible(form.dialog), "Stop: the form came back");
+		const Attachment* a = attachmentOf(Attachment::Recording);
+		t.check(a && a->seconds >= 2.5, strf("Stop: the recording is attached (%.1f s)", a ? a->seconds : 0.0));
+		if (a) {
+			const long long size = fileSize(a->file);
+			t.check(size > 2000 && size < 55000000, strf("The recording's file is a sensible size (%lld bytes)", size));
+			const double secs = capture::probeVideo(a->file, t.dir + "\\feedback-recording-frame.png");
+			t.check(secs >= 2.0, strf("The MP4 reads back (%.2f s long)", secs));
+			t.check(fileSize(t.dir + "\\feedback-recording-frame.png") > 2000, "The MP4's first frame decodes");
+			CopyFileW(W(a->file).c_str(), W(t.dir + "\\feedback-recording.mp4").c_str(), FALSE);
+		}
+		t.at = nowSeconds() + 0.6;
+		break;
+	}
+	case 4: {
+		IWICBitmap* shot = capture::window(form.dialog);
+		if (shot) {
+			capture::savePng(shot, t.dir + "\\feedback-attached.png");
+			shot->Release();
+		}
+		// Thrown away (the ×): nothing kept, nothing attached.
+		recordFromForm(form);
+		t.at = nowSeconds() + 0.8;
+		break;
+	}
+	case 5: {
+		const size_t before = d.attachments.size();
+		capture::stopRecording(false);
+		t.check(d.attachments.size() == before && attachmentOf(Attachment::Recording) != nullptr,
+		        "The \u00D7: a recording thrown away leaves the one before");
+		d.clearAttachments();
+		EndDialog(form.dialog, IDCANCEL);
+		break;
+	}
+	default: break;
+	}
+}
+
 int probe() {
 	SetEnvironmentVariableA("CL_FEEDBACK_KEY", "probe-not-a-key");
 	const Reply r = request("POST", "/api/feedback", "application/json", "", "{}");
@@ -777,6 +964,12 @@ int probe() {
 }
 
 void show(CircuitWindow* win) {
+	// Recording for it already (Send Feedback chosen again from the menus or
+	// the toolbar): that's Stop.
+	if (capture::recording()) {
+		capture::stopRecording(true);
+		return;
+	}
 	Draft& d = draft();
 	d.win = win;
 	d.load();
@@ -830,9 +1023,10 @@ void show(CircuitWindow* win) {
 	heading("SHOW IT  ·  only the CedarLogic window is captured");
 	FormField shots;
 	shots.kind = FormField::Picture;
-	shots.height = 84;
+	shots.height = (int)kShotsHeight;
 	shots.paint = [](ID2D1RenderTarget* rt, float w, float) { paintAttachments(rt, w); };
 	const int shotsField = f.add(shots);
+	g_shotsField = shotsField;
 	FormField circuit;
 	circuit.kind = FormField::Check;
 	circuit.label = "Send this circuit too (makes a problem easy to repeat; it's only sent with this)";
@@ -915,8 +1109,10 @@ void show(CircuitWindow* win) {
 				if (inRect(closeRect(i, w), x, y)) { d.remove(i); form.refresh(field); return; }
 			for (size_t i = 0; i < d.attachments.size(); i++)
 				if (inRect(thumbRect(i, w), x, y)) { openExternally(form.dialog, d.attachments[i].file); return; }
+			if (capture::recording()) return;
 			if (inRect(tileRect(0), x, y)) attachScreenshot(form);
-			else if (inRect(tileRect(1), x, y)) attachImages(form);
+			else if (inRect(tileRect(1), x, y)) recordFromForm(form);
+			else if (inRect(tileRect(2), x, y)) attachImages(form);
 		}
 		form.refresh(field);
 	};
@@ -944,8 +1140,12 @@ void show(CircuitWindow* win) {
 			}
 		}
 		std::string list = "[";
-		for (size_t i = 0; i < files.size(); i++)
-			list += (i ? "," : "") + Json().text("name", files[i].name).text("type", files[i].type).number("size", fileSize(files[i].file)).str();
+		for (size_t i = 0; i < files.size(); i++) {
+			Json item;
+			item.text("name", files[i].name).text("type", files[i].type).number("size", fileSize(files[i].file));
+			if (files[i].kind == Attachment::Recording) item.number("duration", std::max(1LL, (long long)std::lround(files[i].seconds)));
+			list += (i ? "," : "") + item.str();
+		}
 		list += "]";
 		std::string tagList = "[", autoList = "[";
 		for (const std::string& t : d.tags()) tagList += (tagList.size() > 1 ? "," : "") + jsonQuote(t);
@@ -964,6 +1164,7 @@ void show(CircuitWindow* win) {
 		return false;
 	};
 	f.onTimer = [&](Form& form) {
+		if (g_test.on) { selfTestStep(form); return; }
 		if (!sending) return;
 		if (sending->state == 0) {
 			std::lock_guard<std::mutex> g(sending->lock);
@@ -991,6 +1192,9 @@ void show(CircuitWindow* win) {
 		MessageBeep(MB_ICONWARNING);
 	};
 	const int r = f.run(win->window());
+	// (A recording can't outlive the form it attaches to.)
+	if (capture::recording()) capture::stopRecording(false);
+	g_shotsField = -1;
 	if (r != IDOK && !sending) {
 		// Kept as a draft for next time.
 		d.title = f.fields[titleField].value;
@@ -1004,6 +1208,22 @@ void show(CircuitWindow* win) {
 	}
 	// Closed while sending: finished without it.
 	if (sending) g_watch = SetTimer(nullptr, 0, 400, watchSend);
+}
+
+bool recording() { return capture::recording(); }
+
+void stopRecording() { capture::stopRecording(true); }
+
+int captureSelfTest(CircuitWindow* win, const std::string& dir, std::function<void(const std::string&)> say) {
+	g_test = SelfTest();
+	g_test.on = true;
+	g_test.dir = dir;
+	g_test.say = std::move(say);
+	g_test.at = nowSeconds() + 1.0;
+	show(win);
+	g_test.on = false;
+	if (g_test.step < 6) g_test.check(false, strf("The test finished every step (it stopped at %d)", g_test.step));
+	return g_test.failures;
 }
 
 }  // namespace feedback

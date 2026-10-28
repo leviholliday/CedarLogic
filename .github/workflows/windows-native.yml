@@ -173,7 +173,7 @@ jobs:
 
           The first time, CedarLogic asks whether to add itself to the Start
           menu and open .cdl files. Say yes and keep this folder where it is;
-          the ••• menu's Help > Remove from Start Menu undoes it. Otherwise
+          Help > Remove from Start Menu undoes it. Otherwise
           nothing is installed: delete the folder to remove it.
 
           For a normal install instead, use CedarLogic-Windows-Setup from the
@@ -442,6 +442,45 @@ jobs:
           timeout 90 "$A" --light --toolbar-style classic --split --screenshot "$PWD/renders/toolbar-classic-split.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --dark --toolbar-style minimal --split --screenshot "$PWD/renders/toolbar-minimal-split-dark.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --light --toolbar-style minimal --focus --screenshot "$PWD/renders/toolbar-minimal-focus.png" format/tests/fixtures/lab6.cdl || true
+
+      # The menu bar: each menu open (by its keys) in light and dark, a
+      # narrow window, focus mode (where the bar has slid away and Alt opens
+      # File under the tabs), then the menu bar driven by its keys -- Alt,
+      # the arrows, Escape, Alt+letter, a letter in a menu -- each step PASS
+      # or FAIL (--menu-test). New, so for now it doesn't hold the zips back.
+      - name: Menu bar
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          for m in 0 1 2 3 4 5 6; do
+            timeout 90 "$A" --light --menu $m --screenshot "$PWD/renders/menu-$m.png" res/samples/practice.cdl || true
+          done
+          for m in 0 3; do
+            timeout 90 "$A" --dark --menu $m --screenshot "$PWD/renders/menu-$m-dark.png" res/samples/practice.cdl || true
+          done
+          timeout 90 "$A" --dark --sim-view --menu 4 --screenshot "$PWD/renders/menu-4-sim-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --focus --menu 0 --screenshot "$PWD/renders/menu-0-focus.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --light --toolbar-style classic --menu 1 --screenshot "$PWD/renders/menu-1-classic.png" res/samples/practice.cdl || true
+          timeout 120 "$A" --menu-test res/samples/practice.cdl | tee menu-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+
+      # Send Feedback's recording: through the form, a screenshot, three
+      # seconds recorded while the window zooms (the recording bar's picture
+      # taken), the MP4 read back (its length, its first frame as a PNG), a
+      # picture of the form with both attached, and a recording thrown away.
+      # The video and pictures are kept with the renders. New, so for now it
+      # doesn't hold the zips back.
+      - name: Feedback recording
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders
+          timeout 180 package/CedarLogic/CedarLogic.exe --feedback-capture-test "$(cygpath -w "$PWD/renders")" res/samples/practice.cdl | tee feedback-capture.log
+          test "${PIPESTATUS[0]}" -eq 0
 
       # Export Lab Report without a window (--lab-report): a circuit run a
       # while, then its PDF -- in colour and in black and white, and for a

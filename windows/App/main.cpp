@@ -9,6 +9,7 @@
 #include "Dialogs.h"
 #include "DragLog.h"
 #include "Feedback.h"
+#include "FeedbackCapture.h"
 #include "Help.h"
 #include "Ink.h"
 #include "Integration.h"
@@ -92,6 +93,13 @@ bool gSessionCheck = false;
 int gSessionActions = 400;
 uint64_t gSessionSeed = 1;
 
+// --menu N: the menu bar's menu N open (by the keys) for the picture.
+int gMenuShot = -1;
+// --menu-test: the menu bar driven by its keys (Alt, the arrows, Escape,
+// Alt+letter, a letter in a menu), each step PASS or FAIL.
+bool gMenuTest = false;
+// --feedback-capture-test <dir>: Send Feedback's screenshot and recording, through the form.
+std::string gFeedbackTest;
 bool gTestRun = false;   // a picture or test run: no card is left waiting for an answer
 
 Prefs gPrefsBefore;     // the settings as loaded: put back after a test run changed them for itself
@@ -147,9 +155,38 @@ void CALLBACK benchDrawTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	PostQuitMessage(0);
 }
 
+// This thread's open popup menu (Windows' class for them is #32768).
+HWND openPopupMenu() {
+	HWND found = nullptr;
+	EnumThreadWindows(GetCurrentThreadId(), [](HWND h, LPARAM lp) -> BOOL {
+		wchar_t cls[16] = L"";
+		GetClassNameW(h, cls, 16);
+		if (wcscmp(cls, L"#32768") == 0 && IsWindowVisible(h)) { *reinterpret_cast<HWND*>(lp) = h; return FALSE; }
+		return TRUE;
+	}, reinterpret_cast<LPARAM>(&found));
+	return found;
+}
+
+void CALLBACK menuShotStart(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w && w->toolbarWidget()) w->toolbarWidget()->openMenu(gMenuShot, true);   // returns when the picture's taken
+}
+
 void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (gMenuShot >= 0) {
+		// The window with its menu open (the menu is a window of its own).
+		const HWND popup = openPopupMenu();
+		IWICBitmap* b = w ? capture::windowAndPopup(w->window(), popup) : nullptr;
+		const bool ok = b && popup && capture::savePng(b, gScreenshot);
+		if (b) b->Release();
+		writeOut(strf("%s %s%s\n", ok ? "wrote" : "couldn't write", gScreenshot.c_str(), popup ? "" : " (no menu open)"));
+		prefs() = gPrefsBefore;
+		prefs().save();
+		ExitProcess(ok ? 0 : 1);
+	}
 	gExitCode = 1;
 	HWND dialog = w ? GetLastActivePopup(w->window()) : nullptr;
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
@@ -170,6 +207,119 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	}
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gExitCode);
+}
+
+// --menu-test (see gMenuTest): a step every half second, each sent as
+// Windows sends the keys (posted, so the menus' own loop reads them).
+int gMenuStep = 0, gMenuFailures = 0;
+bool gMenuDarkBefore = false;
+
+void menuCheck(bool ok, const std::string& what) {
+	writeOut(strf("%s %s\n", ok ? "PASS" : "FAIL", what.c_str()));
+	if (!ok) gMenuFailures++;
+}
+
+void CALLBACK menuTestTick(HWND, UINT, UINT_PTR id, DWORD) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	Toolbar* t = w ? w->toolbarWidget() : nullptr;
+	if (!t) { KillTimer(nullptr, id); gMenuFailures++; PostQuitMessage(1); return; }
+	const HWND h = w->window(), bar = t->widget();
+	switch (gMenuStep++) {
+	case 0: {
+		// The menus as built: seven, in Windows' order, Settings and Exit in File, About in Help.
+		const HMENU m = w->menuBarMenus();
+		std::string names;
+		for (int i = 0; i < GetMenuItemCount(m); i++) {
+			wchar_t buf[64] = L"";
+			GetMenuStringW(m, (UINT)i, buf, 63, MF_BYPOSITION);
+			names += (i ? " " : "") + U(buf);
+		}
+		menuCheck(names == "&File &Edit &Circuit &View &Simulate &Window &Help", "The menu bar: " + names);
+		auto has = [&](int menu, int command) {
+			const HMENU sub = GetSubMenu(m, menu);
+			for (int i = 0; sub && i < GetMenuItemCount(sub); i++) if (GetMenuItemID(sub, i) == (UINT)command) return true;
+			return false;
+		};
+		menuCheck(has(0, CMD_PREFERENCES) && has(0, CMD_QUIT), "File has Settings and Exit");
+		menuCheck(has(6, CMD_ABOUT), "Help has About");
+		// Alt alone, as Windows sends it when Alt is let go.
+		SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 0);
+		break;
+	}
+	case 1:
+		menuCheck(t->keyMenuIndex() == 0 && GetFocus() == bar, "Alt: the menu bar has the keys, on File");
+		PostMessageW(bar, WM_KEYDOWN, VK_RIGHT, 0);
+		break;
+	case 2:
+		menuCheck(t->keyMenuIndex() == 1, "Right: on Edit");
+		PostMessageW(bar, WM_KEYDOWN, VK_DOWN, 0);   // opens Edit (the timer goes on inside the menu's loop)
+		break;
+	case 3:
+		menuCheck(t->openMenuIndex() == 1, "Down: Edit opens");
+		PostMessageW(h, WM_KEYDOWN, VK_RIGHT, 0);
+		break;
+	case 4:
+		menuCheck(t->openMenuIndex() == 2, "Right in an open menu: Circuit opens instead");
+		PostMessageW(h, WM_KEYDOWN, VK_LEFT, 0);
+		break;
+	case 5:
+		menuCheck(t->openMenuIndex() == 1, "Left: back to Edit");
+		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
+		break;
+	case 6:
+		menuCheck(t->openMenuIndex() == -1 && t->keyMenuIndex() == 1, "Escape: Edit closes, the bar keeps the keys on Edit");
+		PostMessageW(bar, WM_KEYDOWN, VK_ESCAPE, 0);
+		break;
+	case 7:
+		menuCheck(!t->menuKeysActive(), "Escape again: the bar lets go");
+		gMenuDarkBefore = prefs().dark;
+		PostMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 'v');   // Alt+V
+		break;
+	case 8:
+		menuCheck(t->openMenuIndex() == 3, "Alt+V: View opens");
+		PostMessageW(h, WM_CHAR, 'd', 0);   // its Dark Mode
+		break;
+	case 9:
+		menuCheck(t->openMenuIndex() == -1 && prefs().dark != gMenuDarkBefore, "D in View: Dark Mode switches, the menu closes");
+		menuCheck(!t->menuKeysActive(), "A command chosen: the bar lets go of the keys");
+		w->run(CMD_DARK);
+		// The keys Settings gives a command show in its menu: one changed, then the menu opened.
+		{
+			const shortcuts::Action* a = shortcuts::find("zoomFit");
+			menuCheck(a != nullptr, "Zoom to Fit has a shortcut to change");
+		}
+		PostMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 'w');   // Alt+W: Window, with the open circuits listed
+		break;
+	case 10: {
+		bool listed = false;
+		const HMENU win = GetSubMenu(w->menuBarMenus(), 5);
+		for (int i = 0; win && i < GetMenuItemCount(win); i++) listed = listed || GetMenuItemID(win, i) == (UINT)CMD_WINDOW_LIST;
+		menuCheck(t->openMenuIndex() == 5 && listed, "Alt+W: Window opens, listing this circuit");
+		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
+		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
+		break;
+	}
+	default:
+		KillTimer(nullptr, id);
+		menuCheck(!t->menuKeysActive() && t->openMenuIndex() == -1, "Everything closed again");
+		writeOut(strf("menu test: %d failed\n", gMenuFailures));
+		prefs() = gPrefsBefore;
+		prefs().save();
+		for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+		PostQuitMessage(gMenuFailures ? 1 : 0);
+		break;
+	}
+}
+
+void CALLBACK feedbackTestStart(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	const int failed = w ? feedback::captureSelfTest(w, gFeedbackTest, [](const std::string& line) { writeOut(line); }) : 1;
+	writeOut(strf("feedback capture test: %d failed\n", failed));
+	prefs() = gPrefsBefore;
+	prefs().save();
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+	PostQuitMessage(failed ? 1 : 0);
 }
 
 // --click-test: clicks on the toolbar's buttons and the window's drawn
@@ -412,7 +562,7 @@ int clickTestStep() {
 		// Not clicked: what the case set up goes back for the ones after it
 		// (focus mode would hide the side panel from the drag).
 		if (c.tidy) c.tidy(w);
-		// Minimal leaves most tools to the ••• menu (the tab strip's buttons are always there).
+		// Minimal leaves most tools to the menus (the tab strip's buttons are always there).
 		if (c.button > kStrip / 2 && w->toolbarWidget() && !w->toolbarWidget()->hasButton(c.button)) {
 			report("SKIP", strf("%s: not in this style of toolbar", c.name));
 			continue;
@@ -553,6 +703,8 @@ CircuitWindow* windowFor(HWND h) {
 
 bool handleShortcut(CircuitWindow* w, const MSG& msg) {
 	if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) return false;
+	// The menu bar has the keys (Alt or F10): letters are its menus'.
+	if (w->menuKeysActive()) return false;
 	const bool ctrl = down(VK_CONTROL), shift = down(VK_SHIFT), alt = down(VK_MENU);
 	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
 	if (msg.wParam == VK_TAB && ctrl && !alt) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
@@ -592,6 +744,11 @@ CircuitWindow* newCircuitWindow() { return new CircuitWindow(cl_document_new(), 
 
 // Each window asks about its own changes; stop at the first "Cancel".
 bool quitApp() {
+	// Recording for Send Feedback: Exit is Stop first (the form comes back).
+	if (feedback::recording()) {
+		feedback::stopRecording();
+		return false;
+	}
 	std::vector<CircuitWindow*> all = circuitWindows();
 	// A window with a dialog or the truth table up is in the middle of it
 	// (its code is waiting on that): not yet. The dialog comes forward.
@@ -879,6 +1036,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			continue;
 		}
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
+		if (a == "--menu" && i + 1 < argc) { gMenuShot = atoi(U(argv[++i]).c_str()); continue; }
+		if (a == "--menu-test") { gMenuTest = true; continue; }
+		if (a == "--feedback-capture-test" && i + 1 < argc) { gFeedbackTest = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
 		if (a == "--split") { gSplit = true; continue; }
@@ -945,7 +1105,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		draglog::open(U(tmp) + "cedarlogic-drag-selftest.log");
 	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
-	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0 || gSessionCheck;
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0 || gSessionCheck ||
+	                     gMenuTest || !gFeedbackTest.empty();
 	// Its own home folder (so not your settings or Your Circuits), and its crash handlers, before anything is read.
 	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
 	gTestRun = testRun;
@@ -969,7 +1130,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty()) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -1024,7 +1185,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty()) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -1080,7 +1241,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -8) SetTimer(nullptr, 0, 400, badLinkTimer);
 	if (gDialog == -9) SetTimer(nullptr, 0, 400, syncSheetTimer);
 	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
+	if (gMenuShot >= 0 && !gScreenshot.empty()) SetTimer(nullptr, 0, 1200, menuShotStart);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
+	else if (gMenuTest) SetTimer(nullptr, 0, 500, menuTestTick);
+	else if (!gFeedbackTest.empty()) SetTimer(nullptr, 0, 1500, feedbackTestStart);
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);
 		SetTimer(nullptr, 0, 60000, clickTestWatchdog);

@@ -8,6 +8,9 @@
 #ifndef CL_WINDOWS_FEEDBACK_H
 #define CL_WINDOWS_FEEDBACK_H
 
+#include <functional>
+#include <string>
+
 class CircuitWindow;
 
 namespace feedback {
@@ -15,6 +18,14 @@ void show(CircuitWindow* window);
 // --feedback-probe: asks the site with a wrong key (it should say 403) and
 // sends nothing. The HTTP status, or 0 when it couldn't be reached.
 int probe();
+// A recording for Send Feedback is going (FeedbackCapture.h): closing a
+// window or quitting stops it first (kept) instead.
+bool recording();
+void stopRecording();
+// --feedback-capture-test: screenshot and recording through the form, each
+// step said as PASS or FAIL, pictures and the video written to `dir`.
+// Returns how many failed.
+int captureSelfTest(CircuitWindow* window, const std::string& dir, std::function<void(const std::string&)> say);
 }
 
 #endif  // CL_WINDOWS_FEEDBACK_H
