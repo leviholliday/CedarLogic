@@ -454,12 +454,12 @@ jobs:
           # A .deb that isn't the one signed for.
           printf 'x' >> "fake/$DEB"
           if bash linux/install.sh; then echo "::error::install.sh installed a changed .deb"; exit 1; fi
-          if command -v cedarlogic; then echo "::error::cedarlogic got installed"; exit 1; fi
+          if dpkg-query -W -f='${Status}' cedarlogic 2>/dev/null | grep -q "ok installed" || [ -e /usr/bin/cedarlogic ]; then echo "::error::cedarlogic got installed"; exit 1; fi
           cp pristine.deb "fake/$DEB"
           # A bad signature.
           python3 -c "import sys; p='fake/SHA256SUMS.sig'; b=bytearray(open(p,'rb').read()); b[7]^=1; open(p,'wb').write(b)"
           if bash linux/install.sh; then echo "::error::install.sh took a bad signature"; exit 1; fi
-          if command -v cedarlogic; then echo "::error::cedarlogic got installed"; exit 1; fi
+          if dpkg-query -W -f='${Status}' cedarlogic 2>/dev/null | grep -q "ok installed" || [ -e /usr/bin/cedarlogic ]; then echo "::error::cedarlogic got installed"; exit 1; fi
           if ls /var/tmp | grep cedarlogic; then echo "::error::a root copy was left behind"; exit 1; fi
       - name: Install the .deb
         run: |
