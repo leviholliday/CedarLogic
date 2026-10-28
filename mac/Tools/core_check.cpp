@@ -90,12 +90,310 @@ static void textRoundTrip() {
 	CHECK(bad == 0, "every text came back exactly, through save and through copy/paste");
 }
 
+// ---- Helpers for the cases below ------------------------------------------------
+
+static bool consistent(CLDocument* doc, const char* when) {
+	char why[512] = "";
+	if (cl_document_check(doc, why, sizeof why)) return true;
+	printf("    inconsistent %s: %s\n", when, why);
+	return false;
+}
+
+static CLDocument* openText(const std::string& text, std::string* error = nullptr) {
+	char err[512] = "";
+	CLDocument* doc = cl_document_open_text(text.data(), (long)text.size(), err, sizeof err);
+	if (error) *error = err;
+	return doc;
+}
+
+// Saved, reopened and saved again: the same text.
+static bool saveIsStable(CLDocument* doc) {
+	const std::string a = cl_document_save_text(doc);
+	CLDocument* back = openText(a);
+	if (back == nullptr) return false;
+	const std::string b = cl_document_save_text(back);
+	cl_document_close(back);
+	if (a != b) printf("    saves differ (%zu vs %zu bytes)\n", a.size(), b.size());
+	return a == b;
+}
+
+static int noticeCount(CLDocument* doc) { return (int)doc->notices.size(); }
+
+static std::string page0(const std::string& body) {
+	return "(cedarlogic\n  (version 3)\n  (generator \"core_check\")\n  (page 0\n" + body + "))\n";
+}
+
+static std::string gate(const char* type, const char* id, const char* x, const char* y, const std::string& extra = "") {
+	return std::string("    (gate \"") + type + "\" (uuid \"" + id + "\") (at " + x + " " + y + ") (angle 0)" + extra + ")\n";
+}
+
+// ---- Files that are damaged or crafted --------------------------------------------
+
+static void hostileFiles() {
+	printf("damaged and crafted files open safely or are refused\n");
+	std::string err;
+
+	CLDocument* doc = openText(page0(gate("AA_TOGGLE", "1", "nan", "0")), &err);
+	CHECK(doc == nullptr && err.find("out of range") != std::string::npos, "a position of nan is refused with a message");
+	if (doc) cl_document_close(doc);
+	doc = openText(page0(gate("AA_TOGGLE", "1", "inf", "0")));
+	CHECK(doc == nullptr, "an infinite position is refused");
+	if (doc) cl_document_close(doc);
+
+	doc = openText(page0(gate("AA_TOGGLE", "1", "1e30", "-4e12")));
+	CHECK(doc != nullptr, "a part far outside the page opens");
+	if (doc) {
+		double x = 0, y = 0;
+		cl_gate_position(doc, 1, &x, &y);
+		CHECK(std::fabs(x) <= WORLD_LIMIT && std::fabs(y) <= WORLD_LIMIT && noticeCount(doc) > 0, "... brought to the edge, with a notice");
+		CHECK(saveIsStable(doc), "... and saves stably");
+		cl_document_close(doc);
+	}
+
+	// A memory's READ_FILE / WRITE_FILE from a file: never acted on.
+	const std::string target = fixtures.empty() ? "/tmp/cl-core-check-written.cdm" : fixtures + "/../cl-core-check-written.cdm";
+	remove(target.c_str());
+	doc = openText(page0(gate("AE_RAM_8x8", "1", "0", "0", " (lparam \"WRITE_FILE\" \"" + target + "\") (lparam \"READ_FILE\" \"/etc/hosts\")")));
+	FILE* written = fopen(target.c_str(), "r");
+	CHECK(doc != nullptr && written == nullptr, "a file's WRITE_FILE setting writes nothing");
+	if (written) { fclose(written); remove(target.c_str()); }
+	if (doc) {
+		CHECK(std::string(cl_document_save_text(doc)).find("hosts") == std::string::npos, "... and READ_FILE reads nothing");
+		cl_document_close(doc);
+	}
+
+	doc = openText(page0(gate("AA_AND2", "1", "0", "0", " (lparam \"INPUT_BITS\" \"999999999\")") +
+	                     gate("AA_AND2", "2", "10", "0", " (lparam \"INPUT_BITS\" \"-1\")")));
+	CHECK(doc != nullptr, "a part with a width of 999999999 (and one of -1) opens");
+	if (doc) {
+		CHECK(doc->circuit.getGate(1)->getLogicParam("INPUT_BITS") == "32" && doc->circuit.getGate(2)->getLogicParam("INPUT_BITS") == "0",
+		      "... held to 32 and 0");
+		cl_document_set_running(doc, true);
+		for (int i = 0; i < 5; i++) cl_document_tick(doc, 50);
+		CHECK(consistent(doc, "after running") && saveIsStable(doc), "... runs, and saves stably");
+		cl_document_close(doc);
+	}
+
+	doc = openText(page0(gate("AA_TOGGLE", "1", "0", "0") + gate("GA_LED", "1", "10", "0") + gate("GA_LED", "007", "20", "0") +
+	                     gate("GA_LED", "99999999999999999999", "30", "0")));
+	CHECK(doc != nullptr && doc->circuit.getGate(7) != nullptr && doc->page(0)->getGateList()->size() == 2 && noticeCount(doc) >= 2,
+	      "a second gate with a used id, and an id too large, are left out with notices");
+	if (doc) { CHECK(consistent(doc, "after open") && saveIsStable(doc), "... and the rest saves stably"); cl_document_close(doc); }
+
+	// Wires: to a gate that isn't there, to a pin the gate doesn't have, a pin
+	// claimed by two wires, a crossing with nothing, a segment far off its pin,
+	// a segment id far out of range.
+	const std::string parts = gate("AA_TOGGLE", "1", "0", "0") + gate("AA_INVERTER", "2", "10", "0") + gate("GA_LED", "3", "20", "0");
+	const char* wires[] = {
+		"    (wire (ids \"5\") (seg \"0\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\") (connect \"9\" \"IN_0\")))\n",
+		"    (wire (ids \"5\") (seg \"0\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\") (connect \"2\" \"NOPE\")))\n",
+		"    (wire (ids \"5\") (seg \"0\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\") (connect \"2\" \"IN_0\")))\n"
+		"    (wire (ids \"6\") (seg \"0\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\") (connect \"3\" \"N_in0\")))\n",
+		"    (wire (ids \"5\") (seg \"0\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\") (connect \"2\" \"IN_0\") (cross 3 \"44\")))\n",
+		"    (wire (ids \"5\") (seg \"0\" h (pts 100 50 200 50) (connect \"1\" \"OUT_0\") (connect \"2\" \"IN_0\")))\n",
+		"    (wire (ids \"5\") (seg \"9223372036854775807\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\") (connect \"2\" \"IN_0\")))\n",
+		"    (wire (ids \"5\") (seg \"0\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\")) (seg \"1\" h (pts 1.5 0 7 0) (connect \"2\" \"IN_0\")))\n",
+		"    (wire (ids \"5 5\") (seg \"0\" h (pts 1.5 0 7 0) (connect \"1\" \"OUT_0\") (connect \"2\" \"IN_0\")))\n",
+	};
+	int bad = 0;
+	for (const char* w : wires) {
+		doc = openText(page0(parts + w));
+		if (doc == nullptr) continue;   // refused: fine
+		if (!consistent(doc, "after open") || !saveIsStable(doc)) { printf("    with: %s", w); bad++; }
+		cl_document_close(doc);
+	}
+	CHECK(bad == 0, "damaged wires open consistent (or are refused), and save stably");
+
+	// Deep nesting, a NUL byte, angles that aren't usable, an enormous file.
+	doc = openText("(cedarlogic (version 3) (generator \"x\") " + std::string(100000, '(') + std::string(100000, ')') + ")");
+	CHECK(doc == nullptr, "100,000 levels of nesting are refused (no stack overflow)");
+	std::string withNul = page0(gate("AA_LABEL", "1", "0", "0", " (gparam \"LABEL_TEXT\" \"ab\")"));
+	withNul.insert(withNul.find("\"ab\"") + 2, 1, '\0');
+	doc = openText(withNul);
+	CHECK(doc != nullptr && saveIsStable(doc), "a NUL byte in a label is dropped, and the save reads back");
+	if (doc) cl_document_close(doc);
+	doc = openText(page0(gate("AA_TOGGLE", "1", "0", "0") +
+	                     "    (gate \"AA_TOGGLE\" (uuid \"2\") (at 5 5) (angle 1e-320))\n"
+	                     "    (gate \"AA_TOGGLE\" (uuid \"3\") (at 9 9) (angle -2147483647.5))\n"));
+	CHECK(doc != nullptr && saveIsStable(doc), "tiny and huge angles open, and save stably");
+	if (doc) cl_document_close(doc);
+	std::string big;
+	for (int i = 1; i <= 3000; i++) big += gate("GA_LED", std::to_string(i).c_str(), std::to_string(i % 100).c_str(), std::to_string(i / 100).c_str());
+	doc = openText(page0(big));
+	CHECK(doc != nullptr && doc->page(0)->getGateList()->size() == 3000, "3,000 parts open");
+	if (doc) {
+		cl_edit_select_all(doc, 0);
+		cl_edit_delete(doc, 0);
+		cl_edit_undo(doc);
+		CHECK(doc->page(0)->getGateList()->size() == 3000, "... and delete all, then undo, brings them back");
+		cl_document_close(doc);
+	}
+}
+
+// ---- Clipboard text from anywhere ---------------------------------------------------
+
+static void hostileClipboard() {
+	printf("damaged clipboard text pastes safely\n");
+	const char* texts[] = {
+		"movewire 1 hsegment 0 0,0,1,0 connection\n",
+		"setparams 1 4000000000,4000000000 A\n",
+		"createwire connectwire 1 1 OUT_0 connectwire 1 2 IN_0\n",
+		"creategate 1 AA_TOGGLE 0 0\nconnectwire 77 1 OUT_0\nsetparams 55 1,0 angle nan\t\n",
+		"creategate 1 AA_TOGGLE 0 0\ncreategate 1 AA_TOGGLE 4 0\ncreategate 2 GA_LED 10 0\n"
+		"createwire 5 connectwire 5 1 OUT_0 connectwire 5 2 N_in0\ncreatewire 5 connectwire 5 1 OUT_0 connectwire 5 2 N_in0\n",
+		"creategate 1 AA_TOGGLE 1e30 nan\ncreategate 2 GA_LED 10 0\n"
+		"createwire 5 connectwire 5 1 OUT_0 connectwire 5 2 N_in0\nmovewire 5 hsegment 9223372036854775807 0,0,1,0 connection 1 OUT_0 isect 3 44  done \n",
+		"creategate 1 AE_RAM_8x8 0 0\nsetparams 1 0,3 DATA_BITS 4000000000\tREAD_FILE x\tWRITE_FILE /tmp/cl-core-check-paste.cdm\t\n",
+	};
+	int bad = 0;
+	for (const char* t : texts) {
+		CLDocument* doc = cl_document_new();
+		cl_edit_add_gate(doc, 0, "AA_TOGGLE", -20, 0);
+		const char* back = nullptr;
+		cl_edit_paste(doc, 0, t, 5, 5, false, &back);
+		bool ok = consistent(doc, "after the paste");
+		while (cl_edit_can_undo(doc)) cl_edit_undo(doc);
+		while (cl_edit_can_redo(doc)) cl_edit_redo(doc);
+		ok = ok && consistent(doc, "after undo all, redo all") && saveIsStable(doc);
+		if (!ok) { printf("    pasting: %s", t); bad++; }
+		cl_document_close(doc);
+	}
+	FILE* written = fopen("/tmp/cl-core-check-paste.cdm", "r");
+	CHECK(bad == 0 && written == nullptr, "each pastes (or not) with the circuit consistent, undoes and saves stably, and writes no file");
+	if (written) fclose(written);
+
+	// A lone pasted TO/FROM counts its name on, as text: past what an int holds too.
+	CLDocument* doc = cl_document_new();
+	cl_edit_add_gate(doc, 0, "DE_TO", 0, 0);
+	const long to = newest(doc, 0);
+	cl_gate_set_setting(doc, to, "JUNCTION_ID", "bus99999999999999999999");
+	cl_edit_select_all(doc, 0);
+	std::string text = cl_edit_copy(doc, 0);
+	const char* next = nullptr;
+	cl_edit_paste(doc, 0, text.c_str(), 10, 10, false, &next);
+	CHECK(setting(doc, newest(doc, 0), "JUNCTION_ID") == "bus100000000000000000000", "a pasted link named bus99999999999999999999 becomes bus100000000000000000000");
+	cl_document_close(doc);
+}
+
+// ---- The simulation at its edges ----------------------------------------------------
+
+static void simulationEdges() {
+	printf("the simulation at its edges\n");
+	// An inverter feeding itself, with no delay: oscillates for ever, so each
+	// step must stop on its own.
+	std::string loop = page0(gate("AA_INVERTER", "1", "0", "0", " (lparam \"DEFAULT_DELAY\" \"0\")") +
+	                         "    (wire (ids \"5\") (seg \"0\" h (pts -3 0 3 0) (connect \"1\" \"IN_0\") (connect \"1\" \"OUT_0\")))\n");
+	CLDocument* doc = openText(loop);
+	CHECK(doc != nullptr, "a zero-delay inverter loop opens (its settle stops)");
+	if (doc) {
+		cl_document_set_running(doc, true);
+		for (int i = 0; i < 200; i++) cl_document_tick(doc, 50);
+		cl_document_step(doc);
+		CHECK(consistent(doc, "after running"), "... and runs 10 s of ticks");
+		cl_document_close(doc);
+	}
+
+	// Pages with nothing on them.
+	doc = cl_document_new();
+	cl_document_add_page(doc);
+	cl_document_add_page(doc);
+	cl_document_set_running(doc, true);
+	for (int i = 0; i < 20; i++) cl_document_tick(doc, 50);
+	cl_document_step(doc);
+	CHECK(cl_document_page_count(doc) == 3 && saveIsStable(doc), "three empty pages run and save stably");
+	cl_document_close(doc);
+
+	// A RAM read at every address: reading makes no entries (the memory had one
+	// per address read, all saved with the circuit).
+	doc = openText(page0(gate("AE_RAM_8x8", "1", "0", "0")));
+	CHECK(doc != nullptr, "a RAM opens");
+	if (doc) {
+		guiGate* ram = doc->circuit.getGate(1);
+		const size_t before = std::string(cl_document_save_text(doc)).size();
+		for (int a = 0; a < 256; a++) {
+			doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM,
+				new klsMessage::Message_SET_GATE_PARAM(1, "lastRead", std::to_string(a))));
+			cl_document_tick(doc, 20);
+		}
+		(void)ram;
+		CHECK(std::string(cl_document_save_text(doc)).size() == before, "... and reading it leaves the save as it was");
+		cl_document_close(doc);
+	}
+
+	// A Pauseulator's pause is a request, not saved with the circuit.
+	doc = openText(page0(gate("AA_TOGGLE", "1", "0", "0", " (lparam \"OUTPUT_NUM\" \"1\")") + gate("Pauseulator", "2", "10", "0") +
+	                     "    (wire (ids \"5\") (seg \"0\" h (pts 1.5 0 5 0) (connect \"1\" \"OUT_0\") (connect \"2\" \"signal\")))\n"));
+	CHECK(doc != nullptr, "a Pauseulator on a switch opens");
+	if (doc) {
+		cl_document_set_running(doc, true);
+		for (int i = 0; i < 10; i++) cl_document_tick(doc, 50);
+		CHECK(std::string(cl_document_save_text(doc)).find("PAUSE_SIM") == std::string::npos && saveIsStable(doc),
+		      "... and its PAUSE_SIM isn't saved");
+		cl_document_close(doc);
+	}
+
+	// Undo and redo, over and over, after a busy session.
+	doc = cl_document_new();
+	for (int i = 0; i < 30; i++) cl_edit_add_gate(doc, 0, i % 2 ? "AA_AND2" : "AA_TOGGLE", (i % 6) * 8.0, (i / 6) * 8.0);
+	cl_edit_select_all(doc, 0);
+	std::string all = cl_edit_copy(doc, 0);
+	const char* back = nullptr;
+	cl_edit_paste(doc, 0, all.c_str(), 60, 0, false, &back);
+	cl_edit_select_all(doc, 0);
+	cl_edit_rotate(doc, 0);
+	cl_edit_delete(doc, 0);
+	bool ok = true;
+	for (int round = 0; round < 50 && ok; round++) {
+		while (cl_edit_can_undo(doc)) cl_edit_undo(doc);
+		ok = consistent(doc, "after undo all");
+		while (cl_edit_can_redo(doc)) cl_edit_redo(doc);
+		ok = ok && consistent(doc, "after redo all");
+	}
+	CHECK(ok && saveIsStable(doc), "50 rounds of undo all, redo all");
+	cl_document_close(doc);
+}
+
+// ---- Wires ------------------------------------------------------------------------
+
+static void wireCases() {
+	printf("wires\n");
+	// A RAM's DATA_IN_n and DATA_OUT_n share a spot, and a wire holds both. Taking
+	// that spot off a wire with one other pin left a wire holding one pin, whose
+	// shape still recorded the two taken off.
+	CLDocument* doc = cl_document_new();
+	cl_edit_add_gate(doc, 0, "AE_RAM_8x8", 0, 0);
+	const long ram = newest(doc, 0);
+	cl_edit_add_gate(doc, 0, "AA_TOGGLE", -20, 0);
+	const long sw = newest(doc, 0);
+	guiGate* r = doc->circuit.getGate(ram);
+	guiGate* t = doc->circuit.getGate(sw);
+	float rx = 0, ry = 0, tx = 0, ty = 0;
+	r->getHotspotCoords("DATA_IN_0", rx, ry);
+	t->getHotspotCoords("OUT_0", tx, ty);
+	cl_edit_press(doc, 0, tx, ty, 0, 0.05);
+	cl_edit_drag(doc, (tx + rx) / 2, (ty + ry) / 2);
+	cl_edit_drag(doc, rx, ry);
+	cl_edit_release(doc, rx, ry);
+	const bool joined = r->isConnected("DATA_IN_0") && r->isConnected("DATA_OUT_0");
+	CHECK(joined, "a wire to a RAM's data spot holds DATA_IN_0 and DATA_OUT_0");
+	cl_edit_disconnect_pin(doc, 0, rx, ry, 0.05);
+	CHECK(!r->isConnected("DATA_IN_0") && !r->isConnected("DATA_OUT_0") && !t->isConnected("OUT_0") && consistent(doc, "after Disconnect"),
+	      "Disconnect on that spot takes the whole wire (one pin would be left)");
+	cl_edit_undo(doc);
+	CHECK(r->isConnected("DATA_IN_0") && consistent(doc, "after Undo"), "... and Undo puts it back");
+	cl_document_close(doc);
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
 	cl_set_settle_on_open(true);
 
 	textRoundTrip();
+	hostileFiles();
+	hostileClipboard();
+	simulationEdges();
+	wireCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;

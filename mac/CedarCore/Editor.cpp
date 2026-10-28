@@ -1296,8 +1296,13 @@ void cl_edit_disconnect_pin(CLDocument* doc, int pageIndex, double x, double y, 
 	if (!g->isConnected(pin)) return;
 	guiWire* w = g->getConnection(pin);
 	// As the wx canvas does it: off the pin, or the whole wire when this was
-	// one of its only two ends.
-	if (w->numConnections() > 2) submit(doc, page, new cmdDisconnectWire(&doc->circuit, w->getID(), gate, pin));
+	// one of its only two ends. A pin sharing its spot (a RAM's DATA_IN_n and
+	// DATA_OUT_n) comes off with it, so it counts too: a wire left holding one
+	// pin joined nothing, and its shape still recorded the pins taken off.
+	long leaving = 1;
+	const std::string pal = g->getHotspotPal(pin);
+	if (!pal.empty() && g->isConnected(pal) && g->getConnection(pal) == w) leaving++;
+	if (w->numConnections() - leaving >= 2) submit(doc, page, new cmdDisconnectWire(&doc->circuit, w->getID(), gate, pin));
 	else submit(doc, page, new cmdDeleteWire(&doc->circuit, page, w->getID()));
 	page->collisionUpdate();
 }

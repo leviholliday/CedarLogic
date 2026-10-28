@@ -159,7 +159,19 @@ void guiWire::removeConnection(IDType gid, string connection) {
 			break;
 		}
 	}
-	if (connectPoints.size() < 2) return;
+	if (connectPoints.size() < 2) {
+		// Too few ends left to reshape around, but no segment may go on
+		// recording the pin: a save writes the records, and the reload would
+		// join it again.
+		this->detachSubObjects();
+		for (auto &seg : segMap) {
+			vector < wireConnection > &conns = seg.second.connections;
+			for (auto c = conns.begin(); c != conns.end(); )
+				c = (c->gid == gid && c->connection == connection) ? conns.erase(c) : c + 1;
+		}
+		calcBBox();
+		return;
+	}
 	this->detachSubObjects(); // prevent coll checker pointers from invalidating
 	// Now I need to find the segment with this thing and update the tree
 	long segID = 0; bool found = false;

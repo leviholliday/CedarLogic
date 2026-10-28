@@ -135,8 +135,12 @@ int LogicHost::applyResults(const ID_SET<IDType>* changedWires) {
 		const std::string value = cir->getGateParameter(p.gateID, p.paramName);
 		if (value.empty()) continue;
 		if (p.paramName == "JUNCTION_ID") continue;   // the engine's key, not the name
+		// A Pauseulator's PAUSE_SIM is a request, not a setting: kept on the
+		// gate it was saved with the circuit, so a file saved after a pause
+		// (or reopened after one, since opening settles) differed from one
+		// saved before it.
+		if (p.paramName == "PAUSE_SIM") { pauseRequested = true; changed++; continue; }
 		if (guiGate* gate = circuit.getGate(p.gateID)) gate->setLogicParam(p.paramName, value);
-		if (p.paramName == "PAUSE_SIM") pauseRequested = true;
 		changed++;
 	}
 	return changed;

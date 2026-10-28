@@ -42,6 +42,12 @@ Gate_RAM::Gate_RAM( ) : Gate() {
 }
 
 
+// A word of the memory; an address never written holds 0.
+unsigned long Gate_RAM::readMemory( unsigned long address ) const {
+	map< unsigned long, unsigned long >::const_iterator word = memory.find( address );
+	return word == memory.end() ? 0 : word->second;
+}
+
 // Handle gate events:
 void Gate_RAM::gateProcess( void ) {
 	
@@ -94,7 +100,10 @@ void Gate_RAM::gateProcess( void ) {
 		}
 	} else {
 		// Read from the RAM, and write the data to the outputs.
-		vector< StateType > ramReadData = ulong_to_bus( memory[address], dataBits );
+		// Read without writing: memory[] made an entry for every address
+		// read, so a counter sweeping a wide address grew the memory without
+		// bound, and every entry was then saved with the circuit.
+		vector< StateType > ramReadData = ulong_to_bus( readMemory( address ), dataBits );
 		setOutputBusState( "DATA_OUT", ramReadData );
 //***********************************************************************
 //Edit by Joshua Lansford 4/22/06
@@ -203,7 +212,7 @@ string Gate_RAM::getParameter( string paramName ) {
 		istringstream iss( paramName.substr( 8 ) );
 		unsigned long addressOfDataToReturn = 0;
 		iss >> addressOfDataToReturn;
-		unsigned long dataToReturn = memory[ addressOfDataToReturn ];
+		unsigned long dataToReturn = readMemory( addressOfDataToReturn );
 		ostringstream oss;
 		oss << dataToReturn;
 		
