@@ -34,11 +34,16 @@
 #   - the release has exactly the files a build makes (no more, no fewer)
 #   - each file's sha256 matches GitHub's digest for it, and the file of the
 #     same name the CI run for that commit uploaded as an artifact
-#     (install.sh: the one in the repo at that commit)
 #   - the build (the commit's committer time) is newer than the last one this
 #     Mac signed for that platform (~/.config/cedarlogic-signing/)
 #   - the Keychain key's public half is the one the apps have built in, and
 #     the signature it makes verifies against that public key
+#
+# Linux's install.sh is the exception to "CI publishes": people run it with
+# curl | bash, before any signature can be checked, so CI never uploads it.
+# This script takes it from the repo at the signed commit, signs it with the
+# rest and uploads it just before the manifest. Whatever the release holds
+# under that name is only ever replaced here.
 #
 # The key: Keychain item, account "cedarlogic-preview", service
 # "CedarLogic preview update signing (Ed25519, PEM)". It's read into a
@@ -272,14 +277,24 @@ PENDING=$(gh run list -R "$REPO" --workflow "$WORKFLOW" --branch "$BRANCH" --lim
 
 BEFORE=$(release_state)
 [ -n "$BEFORE" ] || die "the release has no files"
-cut -d' ' -f1 <<<"$BEFORE" | expected_files || die "the release's files aren't what a build publishes: not signing"
+# CI's files: on Linux, everything but install.sh, which comes from the repo below.
+BUILT=$BEFORE
+[ "$PLATFORM" != linux ] || BUILT=$(grep -v '^install\.sh ' <<<"$BEFORE" || true)
+[ -n "$BUILT" ] || die "the release has no build files"
+{ cut -d' ' -f1 <<<"$BUILT"; [ "$PLATFORM" != linux ] || echo install.sh; } | expected_files \
+	|| die "the release's files aren't what a build publishes: not signing"
 
 say "downloading the release's files"
 mkdir -p "$WORK/release"
 while read -r name _; do
 	safe_name "$name" || die "a file name the apps would refuse: $name"
 	gh release download "$TAG" -R "$REPO" -D "$WORK/release" --pattern "$name" --clobber < /dev/null
-done <<<"$BEFORE"
+done <<<"$BUILT"
+if [ "$PLATFORM" = linux ]; then
+	gh api "repos/$REPO/contents/linux/install.sh?ref=$COMMIT" -H "Accept: application/vnd.github.raw" > "$WORK/release/install.sh" \
+		|| die "couldn't read linux/install.sh at ${COMMIT:0:12}"
+	[ "$(size_of "$WORK/release/install.sh")" -gt 0 ] || die "linux/install.sh at ${COMMIT:0:12} is empty"
+fi
 
 while read -r name size digest _; do
 	f="$WORK/release/$name"
@@ -287,7 +302,7 @@ while read -r name size digest _; do
 	[ "$(size_of "$f")" = "$size" ] || die "$name is $(size_of "$f") bytes, GitHub says $size"
 	h=$(sha256_of "$f")
 	[ -z "$digest" ] || [ "$digest" = "sha256:$h" ] || die "$name's sha256 is $h, GitHub's digest says $digest"
-done <<<"$BEFORE"
+done <<<"$BUILT"
 
 if [ "$SKIP_CI" = 0 ]; then
 	say "comparing with the artifacts of run $RUN (the CI run for ${COMMIT:0:12})"
@@ -295,15 +310,11 @@ if [ "$SKIP_CI" = 0 ]; then
 	for a in "${ARTIFACTS[@]}"; do
 		gh run download "$RUN" -R "$REPO" -n "$a" -D "$WORK/ci/$a" || die "couldn't download artifact $a of run $RUN (expired? then --skip-ci-compare)"
 	done
-	if [ "$PLATFORM" = linux ]; then
-		gh api "repos/$REPO/contents/linux/install.sh?ref=$COMMIT" -H "Accept: application/vnd.github.raw" > "$WORK/ci/install.sh" \
-			|| die "couldn't read linux/install.sh at ${COMMIT:0:12}"
-	fi
 	while read -r name _; do
 		ci=$(find "$WORK/ci" -type f -name "$name" | head -2)
 		[ "$(printf '%s\n' "$ci" | grep -c .)" = 1 ] || die "the CI run has no single $name to compare with"
 		[ "$(sha256_of "$ci")" = "$(sha256_of "$WORK/release/$name")" ] || die "$name on the release isn't the file CI run $RUN built"
-	done <<<"$BEFORE"
+	done <<<"$BUILT"
 fi
 
 # Still the same release and commit after all that.
@@ -332,6 +343,16 @@ if [ -n "$LAST_COMMIT" ] && [ "$LAST_COMMIT" != "$COMMIT" ]; then
 	gh api "repos/$REPO/compare/$LAST_COMMIT...$COMMIT" --jq '.commits[] | "      " + .sha[0:9] + " " + (.commit.message | split("\n")[0])' >&2 || say "      (couldn't list them)"
 fi
 sed 's/^/      /' "$WORK/SHA256SUMS" >&2
+if [ "$PLATFORM" = linux ]; then
+	if ! grep -q '^install\.sh ' <<<"$BEFORE"; then
+		say "  install.sh: not on the release yet; signing uploads the commit's copy"
+	elif gh release download "$TAG" -R "$REPO" -D "$WORK/old" --pattern install.sh --clobber < /dev/null \
+			&& cmp -s "$WORK/old/install.sh" "$WORK/release/install.sh"; then
+		say "  install.sh: the release's copy is already the commit's"
+	else
+		say "  install.sh: signing replaces the release's copy with the commit's"
+	fi
+fi
 if [ "$CHECK_ONLY" = 1 ]; then
 	say "--check-only: everything checks out; nothing signed, nothing uploaded"
 	exit 0
@@ -346,6 +367,8 @@ sign_with_keychain "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.sig"
 verify_sig "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.sig" "$PUBHEX" || die "the signature doesn't verify with the apps' public key: not uploading"
 [ "$(gh api "repos/$REPO/commits/$TAG" --jq .sha)" = "$COMMIT" ] || die "the tag moved while this ran: not uploading"
 
+# install.sh first: the manifest that names it goes up last.
+if [ "$PLATFORM" = linux ]; then gh release upload "$TAG" -R "$REPO" "$WORK/release/install.sh" --clobber; fi
 gh release upload "$TAG" -R "$REPO" "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.sig" --clobber
 
 # What testers will download: the same, and verifying.
@@ -353,6 +376,10 @@ mkdir -p "$WORK/back"
 gh release download "$TAG" -R "$REPO" -D "$WORK/back" --pattern 'SHA256SUMS*'
 cmp -s "$WORK/back/SHA256SUMS" "$WORK/SHA256SUMS" && cmp -s "$WORK/back/SHA256SUMS.sig" "$WORK/SHA256SUMS.sig" \
 	|| die "what's on the release now isn't what was uploaded: look at it"
+if [ "$PLATFORM" = linux ]; then
+	gh release download "$TAG" -R "$REPO" -D "$WORK/back" --pattern install.sh
+	cmp -s "$WORK/back/install.sh" "$WORK/release/install.sh" || die "the release's install.sh isn't the one uploaded: look at it"
+fi
 verify_sig "$WORK/back/SHA256SUMS" "$WORK/back/SHA256SUMS.sig" "$PUBHEX" || die "the uploaded signature doesn't verify: look at it"
 
 mkdir -p "$STATE_DIR"

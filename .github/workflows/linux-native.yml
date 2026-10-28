@@ -576,11 +576,12 @@ jobs:
           for a in SHA256SUMS SHA256SUMS.sig; do
             if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$a"; then gh release delete-asset "$TAG" "$a" -y; fi
           done
-          cp linux/install.sh appimages/install.sh
-          gh release upload "$TAG" appimages/*.AppImage appimages/*.deb appimages/install.sh --clobber
+          # Not install.sh: people pipe it into bash before anything is checked, so
+          # only sign-preview.sh uploads it, from the commit it signs.
+          gh release upload "$TAG" appimages/*.AppImage appimages/*.deb --clobber
           # Drop anything this run didn't make (older versions), so only the
-          # current pair is offered.
-          keep=$(cd appimages && ls *.AppImage *.deb install.sh)
+          # current pair is offered, and the signed install.sh stays.
+          keep=$(cd appimages && ls *.AppImage *.deb; echo install.sh)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done

@@ -15,7 +15,9 @@ built by the main CMake project, and nothing here affects the other builds.
 People install it with `linux/install.sh` (the one-line command on the
 release page): it fetches the .deb for their processor and installs it, and
 updates come the same way. The AppImage works too, and adds itself to the
-applications menu the first time it runs.
+applications menu the first time it runs. CI publishes the builds but never
+`install.sh`: people pipe it into bash before any signature is checked, so only
+`scripts/sign-preview.sh` uploads it, from the commit it signs.
 
 Needs a compiler with C++17, CMake, and the GTK 3, Cairo, Pango, fontconfig,
 FreeType and OpenSSL development files (`libgtk-3-dev libcairo2-dev
