@@ -116,14 +116,10 @@ void cmdCreateWire::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 
 	// remap ids.
 	// notice the difference between wireIds and wireids.
+	// New ids always, as for a pasted gate (cmdCreateGate::setPointers).
 	for (IDType &id : wireIds) {
-		if (wireids.find(id) != wireids.end()) {
-			id = wireids[id];
-		}
-		else {
-			wireids[id] = gCircuit->getNextAvailableWireID();
-			id = wireids[id];
-		}
+		wireids[id] = gCircuit->getNextAvailableWireID();
+		id = wireids[id];
 	}
 
 	conn1->setPointers(gCircuit, gCanvas, gateids, wireids);

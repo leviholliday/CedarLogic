@@ -30,14 +30,20 @@ struct GLLine2f {
 #define EQUALRANGE 0.00125
 
 // How far from the origin a part may be, in world units: a thousand times the
-// size of any real circuit, and well inside a float's precision. A damaged file
-// or clipboard text can say anything; a part beyond this is brought to the edge.
+// size of any real circuit, and where a float still holds the 0.5 grid exactly.
+// A damaged file can say anything; the loader brings a part beyond this to the
+// edge. Moves aren't held to it, so they stay rigid.
 #define WORLD_LIMIT 1.0e6f
 
-// A coordinate held inside +/-WORLD_LIMIT (NaN becomes 0).
-inline float worldClamp(float v) {
+// Where a paste may put a part: well inside WORLD_LIMIT, so a pasted block
+// (dropped where the pointer is) still lies inside it, and saves and reopens
+// the same.
+#define PASTE_LIMIT (WORLD_LIMIT / 10)
+
+// A coordinate held inside +/-limit (NaN becomes 0).
+inline float worldClamp(float v, float limit = WORLD_LIMIT) {
 	if (v != v) return 0.0f;
-	return v < -WORLD_LIMIT ? -WORLD_LIMIT : v > WORLD_LIMIT ? WORLD_LIMIT : v;
+	return v < -limit ? -limit : v > limit ? limit : v;
 }
 
 #endif /*GL_DEFS_H_*/

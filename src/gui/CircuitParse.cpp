@@ -498,7 +498,10 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 		wireSegment seg;
 		seg.verticalSeg = ms.vertical;
 		seg.id = segId(ms.id);
-		auto inBounds = [](double v) { return (float)(std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, v)); };
+		// Twice as far as a part may be: a part at the edge has pins beyond it,
+		// and a wire must still reach them. (Only a float's range matters here;
+		// a segment that misses its pin is redrawn below.)
+		auto inBounds = [](double v) { return (float)(std::max)(-2 * kMaxCoordinate, (std::min)(2 * kMaxCoordinate, v)); };
 		seg.begin = GLPoint2f(inBounds(ms.begin.x), inBounds(ms.begin.y));
 		seg.end = GLPoint2f(inBounds(ms.end.x), inBounds(ms.end.y));
 		seg.calcBBox();
@@ -691,11 +694,26 @@ static cl::WireInstance buildWire(guiWire *w) {
 		ws.vertical = s.verticalSeg;
 		ws.begin = { s.begin.x, s.begin.y };
 		ws.end = { s.end.x, s.end.y };
-		for (const wireConnection &c : s.connections)
+		// In a fixed order (gate id, then pin): the engine keeps a segment's
+		// pins in the order they were joined, which a reroute and a reload
+		// needn't agree on, and two saves of one circuit should be the same.
+		vector<wireConnection> pins = s.connections;
+		std::sort(pins.begin(), pins.end(), [](const wireConnection &a, const wireConnection &b) {
+			return a.gid != b.gid ? a.gid < b.gid : a.connection < b.connection;
+		});
+		for (const wireConnection &c : pins)
 			ws.connects.push_back({ to_string(c.gid), c.connection });
+		// Where a crossing is comes from the run it crosses (its x, or its y),
+		// not the number kept beside it, which can carry float noise a reload
+		// then drops (-34.50000381 saved, -34.5 the next time).
 		for (const auto &isect : s.intersects)
-			for (long segId : isect.second)
-				ws.intersections.push_back({ (double)isect.first, to_string(segId) });
+			for (long segId : isect.second) {
+				double at = isect.first;
+				auto other = segMap.find(segId);
+				if (other != segMap.end() && other->second.verticalSeg != s.verticalSeg)
+					at = s.verticalSeg ? other->second.begin.y : other->second.begin.x;
+				ws.intersections.push_back({ at, to_string(segId) });
+			}
 		wi.segments.push_back(ws);
 	}
 	return wi;

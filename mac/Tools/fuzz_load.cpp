@@ -111,6 +111,11 @@ bool tryFile(const std::string& text, std::string& why) {
 				return false;
 			}
 			if (cl_edit_can_undo(doc)) cl_edit_undo(doc);
+			if (!cl_document_check(doc, bad, sizeof bad)) {
+				why = std::string("inconsistent after undoing a paste: ") + bad;
+				cl_document_close(doc);
+				return false;
+			}
 			// The clipboard is text from anywhere: a damaged copy must paste safely too.
 			// Damaged as the file's own text decides, so rerunning a kept file repeats it.
 			const unsigned long long saved = rs;
@@ -134,6 +139,10 @@ bool tryFile(const std::string& text, std::string& why) {
 	if (back == nullptr) {
 		why = std::string("its save did not reopen: ") + err;
 		ok = false;
+		if (const char* dir = getenv("CL_FUZZ_DUMP")) {   // the save, to look at
+			std::ofstream out(std::string(dir) + "/first.cdl", std::ios::binary);
+			out << a;
+		}
 	} else {
 		const std::string b = cl_document_save_text(back);
 		const std::string ca = withoutSimState(a), cb = withoutSimState(b);
@@ -266,11 +275,14 @@ void damage(std::string& t) {
 		t.insert(ri(t.size() + 1), kTags[ri(sizeof kTags / sizeof *kTags)]);
 		break; }
 	case 14: {   // a whole span repeated many times (an enormous file)
-		if (t.empty()) break;
+		// Up to a few megabytes. (Thousands of TO/FROM parts sharing one name
+		// are slow to join -- each join walks the whole group -- which is a
+		// known limit, docs/CORE-HARDENING.md, not what this looks for.)
+		if (t.empty() || t.size() > 2000000) break;
 		size_t a = ri(t.size()), n = 1 + ri(std::min<size_t>(t.size() - a, 400));
 		const std::string piece = t.substr(a, n);
 		std::string many;
-		for (size_t k = 50 + ri(500); k > 0; k--) many += piece;
+		for (size_t k = 20 + ri(200); k > 0; k--) many += piece;
 		t.insert(a, many);
 		break; }
 	case 15: {   // a string's text replaced outright

@@ -107,6 +107,10 @@ bool cl_document_check(const CLDocument* constDoc, char* why, int whyLen) {
 			}
 			for (const auto& k : heldSet)
 				if (!recorded.count(k)) return fail(why, whyLen, name + " holds " + pinName(k.first, k.second) + " but no segment records it (a save would lose it)");
+			// The rest of what a shape must be (guiWire::isSoundShape): one piece,
+			// each run along its own direction, no crossing with nothing, no dead end.
+			std::string unsound;
+			if (!w->isSoundShape(&unsound)) return fail(why, whyLen, name + "'s shape is unsound: " + unsound);
 		}
 	}
 	return true;

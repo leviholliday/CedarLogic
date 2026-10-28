@@ -1,5 +1,7 @@
 #include "migrate.hpp"
 
+#include <algorithm>
+
 #include "circuit_file_io.hpp"
 
 #include <cctype>
@@ -170,8 +172,12 @@ LoadResult loadCircuit(const std::string &text) {
 	LoadResult r;
 	r.source = detectFormat(text);
 	// The readers start at the first real byte, so a byte order mark never
-	// reaches them. Detection already looked past it.
-	const std::string body = text.substr(bomLength(text));
+	// reaches them. Detection already looked past it. No NUL byte means
+	// anything in either format, and one kept in a name or a label cut every
+	// save after it short where the apps pass the text on as a C string, so
+	// the file saved couldn't be read back. They are left out.
+	std::string body = text.substr(bomLength(text));
+	body.erase(std::remove(body.begin(), body.end(), '\0'), body.end());
 	switch (r.source) {
 	case SourceFormat::SexprV3:
 		r.file = readCircuitFile(body); // already the target format; no migration

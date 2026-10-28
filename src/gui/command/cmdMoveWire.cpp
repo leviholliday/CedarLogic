@@ -44,7 +44,8 @@ cmdMoveWire::cmdMoveWire(string def) : klsCommand(true, "Move Wire") {
 	cmdser::parse(def, m);
 	wid = m.wid;
 	for (const cmdser::MoveWireSeg &s : m.segments) {
-		wireSegment seg(GLPoint2f(s.bx, s.by), GLPoint2f(s.ex, s.ey), s.vertical, s.id);
+		wireSegment seg(GLPoint2f(worldClamp(s.bx, PASTE_LIMIT), worldClamp(s.by, PASTE_LIMIT)),
+		                GLPoint2f(worldClamp(s.ex, PASTE_LIMIT), worldClamp(s.ey, PASTE_LIMIT)), s.vertical, s.id);
 		for (const auto &conn : s.connections) {
 			wireConnection wc;
 			wc.gid = conn.first;
@@ -125,7 +126,7 @@ void cmdMoveWire::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 		TranslationMap &gateids, TranslationMap &wireids) {
 
 	this->gCircuit = gCircuit;
-	wid = wireids[wid];
+	wid = translatedId(wireids, wid);
 	// The pins the pasted wire really holds (its connectwire lines ran first).
 	// The text is from the clipboard and may be damaged: a shape naming a pin
 	// the wire doesn't hold sent the merge after a gate that isn't there.

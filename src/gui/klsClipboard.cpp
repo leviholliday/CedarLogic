@@ -14,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <set>
 #include <unordered_map>   // removed .h  KAS
 
 #ifndef CL_NO_WX
@@ -136,6 +137,11 @@ cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas
 		
 		TranslationMap gateids;
 		TranslationMap wireids;
+		// The gates and wires there before, to tell the pasted ones (the id
+		// maps keep only the newest for an id a damaged text names twice).
+		std::set<unsigned long> gatesBefore, wiresBefore;
+		for (const auto &g : *gCanvas->getGateList()) gatesBefore.insert(g.first);
+		for (const auto &w : *gCanvas->getWireList()) wiresBefore.insert(w.first);
     	while (getline( iss, temp, '\n' )) {
     		// The setparams line for a lone pasted gate gets its JUNCTION_ID
     		// bumped before the command is rebuilt (this also rewrites the
@@ -155,35 +161,30 @@ cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas
 		// (so Redo does them again): a pasted wire left holding fewer than two
 		// pins joins nothing and goes; one whose shape doesn't match the pins it
 		// holds is routed fresh from them.
-		for (const auto &w : wireids) {
-			guiWire *wire = gCircuit->getWire(w.second);
+		std::vector<unsigned long> pasted;
+		for (const auto &w : *gCanvas->getWireList())
+			if (w.second != nullptr && !wiresBefore.count(w.first)) pasted.push_back(w.first);
+		for (unsigned long id : pasted) {
+			guiWire *wire = gCircuit->getWire(id);
 			if (wire == nullptr) continue;
 			if (wire->numConnections() < 2) {
-				klsCommand *gone = new cmdDeleteWire(gCircuit, gCanvas, w.second);
+				klsCommand *gone = new cmdDeleteWire(gCircuit, gCanvas, id);
 				gone->Do();
 				cmdList.push_back(gone);
 				continue;
 			}
 			if (wire->isSoundShape()) continue;
-			const map < long, wireSegment > before = wire->getSegmentMap();
+			const map < long, wireSegment > shape = wire->getSegmentMap();
 			wire->straightenRoute();
-			cmdList.push_back(new cmdMoveWire(gCircuit, w.second, before, wire->getSegmentMap()));
+			cmdList.push_back(new cmdMoveWire(gCircuit, id, shape, wire->getSegmentMap()));
 		}
+		// What was pasted is selected, so it moves as one.
 		gCanvas->unselectAllGates();
 		gCanvas->unselectAllWires();
-		TranslationMap::iterator gateWalk = gateids.begin();
-		while (gateWalk != gateids.end()) {
-			if (guiGate *g = gCircuit->getGate(gateWalk->second)) g->select();
-			gateWalk++;
-		}
-		TranslationMap::iterator wireWalk = wireids.begin();
-		while (wireWalk != wireids.end()) {
-			guiWire *wire = gCircuit->getWire(wireWalk->second);
-			if (wire != nullptr) {
-				wire->select();
-			}
-			wireWalk++;
-		}
+		for (const auto &g : *gCanvas->getGateList())
+			if (g.second != nullptr && !gatesBefore.count(g.first)) g.second->select();
+		for (const auto &w : *gCanvas->getWireList())
+			if (w.second != nullptr && !wiresBefore.count(w.first)) w.second->select();
 		gCircuit->oscopeSignalsChanged();
     }
 

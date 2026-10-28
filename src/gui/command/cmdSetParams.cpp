@@ -149,7 +149,7 @@ string cmdSetParams::toString() const {
 void cmdSetParams::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 		TranslationMap &gateids, TranslationMap &wireids) {
 
-	gid = gateids[gid];
+	gid = translatedId(gateids, gid);
 	this->gCircuit = gCircuit;
 	this->gCanvas = gCanvas;
 }

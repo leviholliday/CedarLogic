@@ -18,6 +18,7 @@
 #include "route/WireRoute.h"
 #include "Settings.h"
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -597,7 +598,9 @@ void guiWire::setSegmentMap(map < long, wireSegment > newSegMap) {
 	if (newSegMap.empty()) return;
 	commitSegMap(std::move(newSegMap));
 	headSegment = ((segMap.begin())->first);
-	nextSegID = ((segMap.rbegin())->first) + 1;
+	// (An id of LONG_MAX, from damaged text, has no next.)
+	const long last = (segMap.rbegin())->first;
+	nextSegID = last < LONG_MAX ? last + 1 : last;
 	endSegDrag();
 };
 
@@ -609,15 +612,33 @@ bool guiWire::isSoundShape(const map < long, wireSegment > &shape, std::string *
 	const float slack = 0.05f;
 	for (const auto &entry : shape) {
 		const wireSegment &s = entry.second;
+		// A wire's segments are numbered from 0 as it is drawn; the loader
+		// renumbers ids past this, so one here (a paste) saved differently.
+		if (entry.first < 0 || entry.first > 1000000) return no("a segment's id is out of range");
 		if (!std::isfinite(s.begin.x) || !std::isfinite(s.begin.y) || !std::isfinite(s.end.x) || !std::isfinite(s.end.y))
 			return no("a segment has an end that isn't a number");
 		if (s.isVertical() ? std::fabs(s.begin.x - s.end.x) > slack : std::fabs(s.begin.y - s.end.y) > slack)
 			return no("a segment runs across its own direction");
 		for (const auto &x : s.intersects) {
 			if (!std::isfinite(x.first)) return no("a crossing isn't at a number");
-			for (long other : x.second)
+			for (long other : x.second) {
 				if (other == entry.first || shape.count(other) == 0) return no("a crossing names a segment that isn't there");
+				// Recorded on both runs: a one-sided crossing is lost or redrawn on
+				// the next load.
+				bool back = false;
+				for (const auto &y : shape.at(other).intersects)
+					for (long id : y.second) back = back || id == entry.first;
+				if (!back) return no("a crossing is recorded on one run only");
+			}
 		}
+		// Two straight runs cross once at most.
+		std::vector<long> crossed;
+		for (const auto &x : s.intersects) crossed.insert(crossed.end(), x.second.begin(), x.second.end());
+		std::sort(crossed.begin(), crossed.end());
+		if (std::adjacent_find(crossed.begin(), crossed.end()) != crossed.end()) return no("a crossing is recorded twice");
+		// A run of no length among others is merged away by the next load.
+		if (shape.size() > 1 && std::fabs(s.begin.x - s.end.x) <= EQUALRANGE && std::fabs(s.begin.y - s.end.y) <= EQUALRANGE)
+			return no("a segment has no length");
 	}
 	// Each held pin recorded once, on a segment reaching it; nothing else recorded.
 	std::vector<bool> recorded(connectPoints.size(), false);
@@ -640,6 +661,14 @@ bool guiWire::isSoundShape(const map < long, wireSegment > &shape, std::string *
 	}
 	for (size_t i = 0; i < connectPoints.size(); i++)
 		if (!recorded[i] && !shape.empty()) return no("a pin it holds is on no segment");
+	// No dead end: a segment with no pin joins at least two others (a run left
+	// where a pin was refused leads nowhere, and the next load trims it).
+	if (shape.size() > 1)
+		for (const auto &entry : shape) {
+			size_t joins = 0;
+			for (const auto &x : entry.second.intersects) joins += x.second.size();
+			if (entry.second.connections.empty() && joins < 2) return no("a segment leads nowhere");
+		}
 	// One piece: segments that touch are joined.
 	std::vector<const wireSegment *> segs;
 	for (const auto &entry : shape) segs.push_back(&entry.second);
@@ -665,6 +694,9 @@ void guiWire::calcShape() {
 
 	// Get rid of the old shape
 	segMap.clear();
+	// The shape is new, so its numbering may start again: an id far out of
+	// range (a damaged paste) would otherwise be carried on into it.
+	if (nextSegID < 1 || nextSegID > 1000000) nextSegID = 1;
 
 	// If there are less than 2 connect points then there is no reason to create a shape
 	if (connectPoints.size() < 2) return;
@@ -1163,6 +1195,7 @@ void guiWire::mergeSegments() {
 		segWalk++;
 	}
 
+	canonicalCrossings(newSegMap);
 	commitSegMap(std::move(newSegMap));  // Assign the new tree
 
 	// Trimming above can shrink a segment to a point (a branch whose junction
@@ -1183,6 +1216,28 @@ void guiWire::mergeSegments() {
 	}
 
 	generateRenderInfo();
+}
+
+// Each crossing kept once, at the place the run it crosses fixes (that run's
+// x, or its y). Moves and merges leave the number beside a crossing slightly
+// off, and the same crossing then landed under two numbers -- saved twice, and
+// once after a reload. A crossing with a run that isn't there, or one the same
+// way, is left where it is: the merge deals with those.
+void guiWire::canonicalCrossings(map < long, wireSegment > &segs) {
+	for (auto &entry : segs) {
+		wireSegment &s = entry.second;
+		map < GLfloat, vector < long > > fresh;
+		set < long > kept;
+		for (const auto &x : s.intersects)
+			for (long id : x.second) {
+				map < long, wireSegment >::const_iterator other = segs.find(id);
+				const bool across = other != segs.end() && other->second.isVertical() != s.isVertical();
+				if (across && !kept.insert(id).second) continue;
+				const GLfloat at = !across ? x.first : s.isVertical() ? other->second.begin.y : other->second.begin.x;
+				fresh[at].push_back(id);
+			}
+		s.intersects = fresh;
+	}
 }
 
 // A segment of no length can be the only thing joining two runs: a run

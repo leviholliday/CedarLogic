@@ -19,6 +19,16 @@ class GUICanvas;
 // TODO TYLER: Find out why, make replacement, remove TODO and description.
 typedef std::unordered_map<unsigned long, unsigned long> TranslationMap;
 
+// The id a pasted line's reference is given when it names nothing pasted
+// before it (a damaged paste). Looking it up with [] gave it 0 -- a real gate
+// in some files -- and recorded old id -> 0, so a part pasted later under
+// that old id was made as gate 0 too.
+const unsigned long PASTE_NO_SUCH_ID = ~0UL;
+inline unsigned long translatedId(const TranslationMap &ids, unsigned long id) {
+	auto it = ids.find(id);
+	return it == ids.end() ? PASTE_NO_SUCH_ID : it->second;
+}
+
 // klsCommand - base class for commands.
 class klsCommand : public wxCommand {
 public:

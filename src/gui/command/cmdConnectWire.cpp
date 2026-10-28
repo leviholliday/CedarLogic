@@ -96,8 +96,8 @@ std::string cmdConnectWire::toString() const {
 void cmdConnectWire::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 		TranslationMap &gateids, TranslationMap &wireids) {
 
-	gateId = gateids[gateId];
-	wireId = wireids[wireId];
+	gateId = translatedId(gateids, gateId);
+	wireId = translatedId(wireids, wireId);
 	this->gCircuit = gCircuit;
 	this->gCanvas = gCanvas;
 }
@@ -123,6 +123,10 @@ void cmdConnectWire::sendMessagesToConnect(GUICircuit *gCircuit, IDType wireId,
 	// the library lacks has none at all). The wire then held a pin with no
 	// place, drawn at the origin and written back out on every save.
 	if (gate == nullptr || wire == nullptr || gate->getHotspot(hotspot) == nullptr) return;
+	// A pin is on one wire (see gateWireConnection). A file or paste naming a
+	// pin twice, for two wires, left the first holding a pin the gate gave
+	// the second.
+	if (gate->isConnected(hotspot) && gate->getConnection(hotspot) != wire) return;
 
 	// Grab the bus-lines from the wire.
 	std::vector<IDType> wireIds = wire->getIDs();
@@ -167,6 +171,10 @@ void cmdConnectWire::sendMessagesToDisconnect(GUICircuit *gCircuit,
 	// the library lacks has none at all). The wire then held a pin with no
 	// place, drawn at the origin and written back out on every save.
 	if (gate == nullptr || wire == nullptr || gate->getHotspot(hotspot) == nullptr) return;
+	// A pin is on one wire (see gateWireConnection). A file or paste naming a
+	// pin twice, for two wires, left the first holding a pin the gate gave
+	// the second.
+	if (gate->isConnected(hotspot) && gate->getConnection(hotspot) != wire) return;
 
 	// Grab the bus-lines from the wire.
 	std::vector<IDType> wireIds = wire->getIDs();

@@ -205,6 +205,8 @@ private:
 	// Before a segment of no length is removed: the runs it joined at its
 	// point record a crossing with each other.
 	static void bridgeAround(map < long, wireSegment > &segs, const wireSegment &dot);
+	// Each crossing recorded once, keyed where the run it crosses lies.
+	static void canonicalCrossings(map < long, wireSegment > &segs);
 
 	// Take existing segments and merge concurrent segments
 	void mergeSegments();

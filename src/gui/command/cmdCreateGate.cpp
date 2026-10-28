@@ -37,8 +37,9 @@ cmdCreateGate::cmdCreateGate(string def) : klsCommand(true, "Create Gate") {
 	cmdser::parse(def, d);
 	gid = d.gid;
 	gateType = d.gateType;
-	x = d.x;
-	y = d.y;
+	// Pasted text can put a part anywhere, as a file can: in to PASTE_LIMIT.
+	x = worldClamp(d.x, PASTE_LIMIT);
+	y = worldClamp(d.y, PASTE_LIMIT);
 	this->fromString = true;
 }
 
@@ -116,14 +117,12 @@ std::string cmdCreateGate::toString() const {
 void cmdCreateGate::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 		TranslationMap &gateids, TranslationMap &wireids) {
 
-	// Find myself an appropriate ID for a new environment
-	if (gateids.find(gid) != gateids.end()) {
-		gid = gateids[gid];
-	}
-	else {
-		gateids[gid] = gCircuit->getNextAvailableGateID();
-		gid = gateids[gid];
-	}
+	// Find myself an appropriate ID for a new environment. Always a new one:
+	// a damaged paste can name the same part twice, and giving the second
+	// the first's id made it over the top of it. Later lines naming that id
+	// mean the newest.
+	gateids[gid] = gCircuit->getNextAvailableGateID();
+	gid = gateids[gid];
 	this->gCircuit = gCircuit;
 	this->gCanvas = gCanvas;
 }

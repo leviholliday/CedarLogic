@@ -24,7 +24,7 @@ jobs:
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build
@@ -80,7 +80,7 @@ jobs:
 
       - name: Keep what failed
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-logs
           path: fuzz-logs
@@ -93,7 +93,7 @@ jobs:
       CC: clang
       CXX: clang++
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install toolchain
         run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build
       - name: Build (NDEBUG, sanitizers on)
