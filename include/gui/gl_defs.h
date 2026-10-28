@@ -44,6 +44,7 @@ struct GLLine2f {
 // how one is taken in from a file or a paste, so what is in memory is what a
 // save writes and a reopen reads back.
 inline double savedPrecision(double v) {
+	if (!(v > -1e12 && v < 1e12)) return v;   // far past WORLD_LIMIT (or NaN): held there, not here
 	const double r = (double)(long long)(v * 10000.0 + (v < 0 ? -0.5 : 0.5)) / 10000.0;
 	return r == 0 ? 0.0 : r;   // no "-0"
 }
