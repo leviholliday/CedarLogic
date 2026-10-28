@@ -234,8 +234,13 @@ public:
 	std::string titleText() const { return displayName(); }
 	int stepMs() const;
 	void titleMenu(POINT screen);
-	// Every menu, as a popup (the toolbar's •••, Alt, F10).
-	void moreMenu(POINT screen, bool rightAligned);
+	// The menu bar's menus (File, Edit...), each a submenu, for the toolbar
+	// that draws the bar; and where its popups open when the bar has slid
+	// away for focus mode (the bottom of the tabs, client pixels).
+	HMENU menuBarMenus() const { return menus; }
+	int menuDropY() const { return captionBottom; }
+	// The menu bar has the keys (Alt or F10): the shortcuts wait.
+	bool menuKeysActive() const;
 	// A tab is a page: its index in the document, as the canvases are in
 	// the document's order.
 	int tabCount() const { return (int)canvases.size(); }
@@ -400,7 +405,7 @@ private:
 	int lastPageCount = 1;
 	uint64_t tidyKey = 0;             // the page Tidy Up's preview is on
 	std::map<uint64_t, bool> seenPages;
-	HMENU menus = nullptr, recentMenu = nullptr;
+	HMENU menus = nullptr, recentMenu = nullptr, windowMenu = nullptr;
 	std::vector<std::string> recentPaths;   // Open Recent's circuits, as the menu shows them
 
 	void build();
@@ -437,6 +442,7 @@ private:
 	void pasteText(const std::string& text, bool floating, bool shift);
 	std::string displayName() const;
 	void rebuildRecentMenu();
+	void rebuildWindowList();
 	LRESULT frameHitTest(LPARAM lp);
 	void renameFile();
 	void duplicateCircuit();

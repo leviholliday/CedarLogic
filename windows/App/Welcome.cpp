@@ -591,7 +591,12 @@ LRESULT CALLBACK nameProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWOR
 }  // namespace
 
 bool offer(CircuitWindow* window) {
-	if (prefs().hasSeenWelcome || window == nullptr || g_welcome) return false;
+	if (prefs().hasSeenWelcome) return false;
+	return show(window);
+}
+
+bool show(CircuitWindow* window) {
+	if (window == nullptr || g_welcome) return false;
 	g_welcome = new Welcome();
 	Welcome* w = g_welcome;
 	w->window = window;

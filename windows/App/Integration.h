@@ -24,7 +24,7 @@ bool installed();
 // whatever was answered before. An installed copy updated from inside the app
 // tells Settings > Apps its new version.
 void start(bool now = false);
-// The ••• menu's Help > Add to Start Menu / Remove from Start Menu: there
+// Help > Add to Start Menu / Remove from Start Menu: there
 // for a copy run from the zip, while no installed CedarLogic is about.
 bool offered();
 std::string menuLabel();

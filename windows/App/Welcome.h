@@ -30,6 +30,8 @@ namespace welcome {
 // Shown once, the first time the app has a window open (prefs().hasSeenWelcome).
 // Offers the guided tour on its last page. False when it wasn't shown.
 bool offer(CircuitWindow* window);
+// Help > Welcome to CedarLogic: the same pages again, seen before or not.
+bool show(CircuitWindow* window);
 // The guided tour, on this circuit's window.
 void startTour(CircuitWindow* window);
 // Help > Guided Tour: the tour on a circuit of its own (this one if it's

@@ -260,8 +260,13 @@ void CircuitWindow::build() {
 	SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-// Every menu, in one popup: the toolbar's •••, and Alt or F10. (The window
-// has no menu bar: its title bar is the toolbar.)
+// The menu bar's menus, as Windows apps have them: File, Edit, Circuit,
+// View, Simulate, Window and Help, with the Mac app's commands (its File,
+// Edit, View, Simulation, Window and Help menus) sorted the Windows way --
+// Settings and Exit in File, About in Help, the tabs in Window. The toolbar
+// draws the bar from this menu's items (Toolbar::openMenu); each menu is a
+// real popup, so its keys, its letters and the Alt and F10 keys work as in
+// any Windows app. Each letter after & is used once in its menu.
 void CircuitWindow::buildMenus() {
 	menus = CreatePopupMenu();
 	HMENU menuBar = menus;
@@ -271,28 +276,31 @@ void CircuitWindow::buildMenus() {
 	item(file, CMD_OPEN, "Your &Circuits\u2026\tCtrl+O");
 	recentMenu = submenu(file, "Open &Recent");
 	item(file, CMD_IMPORT, "&Import a File\u2026\tCtrl+I");
-	item(file, CMD_OPEN_SAMPLE, "Open the &Practice Circuit");
+	item(file, CMD_OPEN_SAMPLE, "Open the Practice Circ&uit");
 	separator(file);
 	item(file, CMD_SAVE, "&Save a Version\tCtrl+S");
 	item(file, CMD_VERSIONS, "&Version History\u2026");
-	item(file, CMD_SAVE_AS, "E&xport\u2026\tCtrl+Shift+S");
+	// What the circuit's name in the toolbar offers, for when it's hidden.
+	item(file, CMD_RENAME_CIRCUIT, "Ren&ame\u2026");
+	item(file, CMD_DUPLICATE_CIRCUIT, "&Duplicate");
 	item(file, CMD_SAVE_TEMPLATE, "Save as Te&mplate\u2026");
-	item(file, CMD_EXPORT_IMAGE, "&Export as Image…\tCtrl+E");
-	item(file, CMD_EXPORT_REPORT, "Export &Lab Report…");
+	separator(file);
+	item(file, CMD_EXPORT_IMAGE, "Export as Ima&ge\u2026\tCtrl+E");
+	item(file, CMD_EXPORT_REPORT, "Export &Lab Report\u2026");
+	item(file, CMD_SAVE_AS, "Export as CedarLogic &File\u2026\tCtrl+Shift+S");
 	HMENU older = submenu(file, "Export for &Older CedarLogic");
-	item(older, CMD_EXPORT_V2, "For CedarLogic &2…");
-	item(older, CMD_EXPORT_V1, "For CedarLogic &1.x…");
-	item(file, CMD_SHARE_LINK, "S&hare Link\u2026");   // (L is Export Lab Report's)
-	item(file, CMD_PRINT, "&Print…\tCtrl+P");
+	item(older, CMD_EXPORT_V2, "For CedarLogic &2\u2026");
+	item(older, CMD_EXPORT_V1, "For CedarLogic &1.x\u2026");
+	item(file, CMD_SHARE_LINK, "S&hare Link\u2026");
+	separator(file);
+	item(file, CMD_PRINT, "&Print\u2026\tCtrl+P");
 	separator(file);
 	// Settings, where a Windows app keeps it (the toolbar's gear opens it too).
-	item(file, CMD_PREFERENCES, "Se&ttings\u2026\tCtrl+,");
+	item(file, CMD_PREFERENCES, "S&ettings\u2026\tCtrl+,");
 	separator(file);
-	item(file, CMD_CLOSE_WINDOW, "&Close Window\tCtrl+Shift+W");
+	item(file, CMD_CLOSE_WINDOW, "Close &Window\tCtrl+Shift+W");
 	item(file, CMD_QUIT, "E&xit\tCtrl+Q");
 
-	// Bare-key shortcuts (R, S, T...) are the canvas's own; the labels only
-	// mention them.
 	HMENU edit = submenu(menuBar, "&Edit");
 	item(edit, CMD_UNDO, "&Undo\tCtrl+Z");
 	item(edit, CMD_REDO, "&Redo\tCtrl+Y");
@@ -300,25 +308,37 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_CUT, "Cu&t\tCtrl+X");
 	item(edit, CMD_COPY, "&Copy\tCtrl+C");
 	item(edit, CMD_PASTE, "&Paste\tCtrl+V");
-	item(edit, CMD_DUPLICATE, "D&uplicate\tCtrl+D");
+	item(edit, CMD_DUPLICATE, "Dup&licate\tCtrl+D");
 	item(edit, CMD_DELETE, "&Delete\tDel");
 	item(edit, CMD_SELECT_ALL, "Select &All\tCtrl+A");
+	separator(edit);
 	item(edit, CMD_FIND, "&Find\u2026\tCtrl+F");
 	item(edit, CMD_FIND_NEXT, "Find &Next\tF3");
 	item(edit, CMD_FIND_PREVIOUS, "Find Pre&vious\tShift+F3");
-	separator(edit);
-	item(edit, CMD_ADD_GATE, "Add a &Gate…\tA");
-	item(edit, CMD_GATE_SETTINGS, "Gate &Settings…");
-	item(edit, CMD_ROTATE, "R&otate\tR");
+
+	// What changes the circuit itself (the Mac keeps these in Edit). Bare-key
+	// shortcuts (A, R, S...) are the canvas's own; the labels only mention them.
+	HMENU circuit = submenu(menuBar, "&Circuit");
+	item(circuit, CMD_ADD_GATE, "Add a &Gate\u2026\tA");
+	item(circuit, CMD_GATE_SETTINGS, "Gate &Settings\u2026");
+	item(circuit, CMD_ROTATE, "R&otate\tR");
+	separator(circuit);
 	// Parts locked in place stay put: a teacher's starter parts.
-	item(edit, CMD_LOCK_IN_PLACE, "&Lock in Place");
-	item(edit, CMD_UNLOCK_ALL_PARTS, "Unloc&k All Parts");
-	item(edit, CMD_STRAIGHTEN, "Straighten &Wires\tS");
-	item(edit, CMD_TIDY, "T&idy Up\tShift+S");
-	item(edit, CMD_TIDY_FLOW, "Tidy Up by Signal &Flow");
-	item(edit, CMD_CONNECT_NEARBY, "Connect &Nearby Pins");
-	item(edit, CMD_SAVE_PART, "Save as &Part\u2026");
-	item(edit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
+	item(circuit, CMD_LOCK_IN_PLACE, "&Lock in Place");
+	item(circuit, CMD_UNLOCK_ALL_PARTS, "Unloc&k All Parts");
+	separator(circuit);
+	item(circuit, CMD_STRAIGHTEN, "Straighten &Wires\tS");
+	item(circuit, CMD_TIDY, "T&idy Up\tShift+S");
+	item(circuit, CMD_TIDY_FLOW, "Tidy Up by Signal &Flow");
+	item(circuit, CMD_CONNECT_NEARBY, "Connect &Nearby Pins");
+	separator(circuit);
+	item(circuit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
+	item(circuit, CMD_SAVE_PART, "Save as &Part\u2026");
+	// Which pages' TO/FROM links connect; a tab's right-click menu connects
+	// pages one by one.
+	separator(circuit);
+	item(circuit, CMD_CONNECT_ALL_PAGES, "Connect &All Pages");
+	item(circuit, CMD_DISCONNECT_ALL_PAGES, "&Disconnect All Pages");
 
 	HMENU view = submenu(menuBar, "&View");
 	item(view, CMD_ZOOM_IN, "Zoom &In\tCtrl+=");
@@ -327,13 +347,15 @@ void CircuitWindow::buildMenus() {
 	item(view, CMD_ZOOM_ACTUAL, "&Actual Size\tCtrl+1");
 	separator(view);
 	item(view, CMD_DARK, "&Dark Mode\tCtrl+Shift+D");
-	item(view, CMD_FOCUS_MODE, "&Focus Mode\tCtrl+.");
+	item(view, CMD_FOCUS_MODE, "Focus &Mode\tCtrl+.");
 	item(view, CMD_PALETTE, "Gate &Palette");
 	item(view, CMD_STATUS_BAR, "&Status Bar");
+	item(view, CMD_SHOW_GRID, "Show &Grid");
+	item(view, CMD_WIRE_DOTS, "Dots at Wire &Bends");
 	// Drawing on the circuit (Ink.h), as the Mac's View menu has it.
 	separator(view);
 	item(view, CMD_DRAW, "Dra&w on the Circuit\tCtrl+Alt+P");
-	HMENU drawingMenu = submenu(view, "Drawin&g");
+	HMENU drawingMenu = submenu(view, "Drawing &Tools");
 	item(drawingMenu, CMD_INK_PEN, "&Pen\tP");
 	item(drawingMenu, CMD_INK_HIGHLIGHTER, "&Highlighter\tH");
 	item(drawingMenu, CMD_INK_ERASER, "&Eraser\tE");
@@ -354,37 +376,63 @@ void CircuitWindow::buildMenus() {
 	item(sim, CMD_LOCK, "&Lock the Circuit");
 	separator(sim);
 	item(sim, CMD_TRUTH_TABLE, "&Truth Table\tT");
-	item(sim, CMD_CHECK_CIRCUIT, "&Check My Circuit\u2026\tShift+T");
+	item(sim, CMD_CHECK_CIRCUIT, "Check &My Circuit\u2026\tShift+T");
 	item(sim, CMD_SCOPE, "&Oscilloscope\tCtrl+G");
 
-	HMENU tabsMenu = submenu(menuBar, "&Tabs");
-	item(tabsMenu, CMD_NEW_TAB, "&New Tab\tCtrl+T");
-	item(tabsMenu, CMD_CLOSE_TAB, "&Close Tab\tCtrl+W");
-	item(tabsMenu, CMD_REOPEN_TAB, "&Reopen Closed Tab\tCtrl+Shift+T");
-	item(tabsMenu, CMD_RENAME_TAB, "Re&name Tab");
-	item(tabsMenu, CMD_NEXT_TAB, "Ne&xt Tab\tCtrl+Tab");
-	item(tabsMenu, CMD_PREVIOUS_TAB, "&Previous Tab\tCtrl+Shift+Tab");
-	separator(tabsMenu);
-	item(tabsMenu, CMD_SPLIT_VIEW, "&Split View\tCtrl+Alt+S");
-	item(tabsMenu, CMD_SWITCH_PANE, "S&witch Side\tF6");
-	item(tabsMenu, CMD_CLOSE_SPLIT, "Close Split Vie&w\tCtrl+Alt+W");
-	// Which pages' TO/FROM links connect; a tab's right-click menu connects
-	// pages one by one.
-	separator(tabsMenu);
-	item(tabsMenu, CMD_CONNECT_ALL_PAGES, "Connect &All Pages");
-	item(tabsMenu, CMD_DISCONNECT_ALL_PAGES, "&Disconnect All Pages");
+	// The tabs, the split, and the open circuits (as the Mac's Window menu
+	// lists its windows); the list is made as the menu opens.
+	windowMenu = submenu(menuBar, "&Window");
+	item(windowMenu, CMD_NEW_TAB, "&New Tab\tCtrl+T");
+	item(windowMenu, CMD_CLOSE_TAB, "&Close Tab\tCtrl+W");
+	item(windowMenu, CMD_REOPEN_TAB, "&Reopen Closed Tab\tCtrl+Shift+T");
+	item(windowMenu, CMD_RENAME_TAB, "Rena&me Tab");
+	item(windowMenu, CMD_NEXT_TAB, "Ne&xt Tab\tCtrl+Tab");
+	item(windowMenu, CMD_PREVIOUS_TAB, "&Previous Tab\tCtrl+Shift+Tab");
+	separator(windowMenu);
+	item(windowMenu, CMD_SPLIT_VIEW, "&Split View\tCtrl+Alt+S");
+	item(windowMenu, CMD_SWITCH_PANE, "S&witch Side\tF6");
+	item(windowMenu, CMD_CLOSE_SPLIT, "Close Spli&t View\tCtrl+Alt+W");
+	separator(windowMenu);
+	item(windowMenu, CMD_MINIMIZE, "Minimi&ze");
 
 	HMENU help = submenu(menuBar, "&Help");
+	item(help, CMD_HELP, "CedarLogic &Help\tF1");
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
 	item(help, CMD_TOUR, "Guided &Tour");
-	item(help, CMD_HELP, "CedarLogic &Help\tF1");
-	item(help, CMD_WHATS_NEW, "&What's New in CedarLogic");
+	item(help, CMD_WELCOME, "&Welcome to CedarLogic\u2026");
+	item(help, CMD_WHATS_NEW, "What's &New in CedarLogic");
 	separator(help);
 	item(help, CMD_FEEDBACK, "Send &Feedback\u2026");
 	item(help, CMD_CHECK_UPDATES, "Check for &Updates\u2026");
 	if (integration::offered()) item(help, CMD_START_MENU, integration::menuLabel().c_str());
+	separator(help);
 	item(help, CMD_ABOUT, "&About CedarLogic");
 }
+
+// Window's list of the open circuits, after its last separator: one item
+// each, with a tick on this one (&1 to &9, then the rest unnumbered).
+void CircuitWindow::rebuildWindowList() {
+	if (!windowMenu) return;
+	for (int i = GetMenuItemCount(windowMenu) - 1; i >= 0; i--) {
+		const UINT id = GetMenuItemID(windowMenu, i);
+		if ((id >= CMD_WINDOW_LIST && id <= CMD_WINDOW_LIST_LAST) || (id == 0 && i == GetMenuItemCount(windowMenu) - 1))
+			DeleteMenu(windowMenu, (UINT)i, MF_BYPOSITION);
+		else if (id != 0) break;
+	}
+	const std::vector<CircuitWindow*>& all = circuitWindows();
+	if (all.empty()) return;
+	separator(windowMenu);
+	for (size_t i = 0; i < all.size() && (int)i <= CMD_WINDOW_LIST_LAST - CMD_WINDOW_LIST; i++) {
+		std::string name = all[i]->displayName();
+		// An & in a name is shown, not taken as the item's letter.
+		std::string shown;
+		for (char ch : name) { if (ch == '&') shown += '&'; shown += ch; }
+		const std::string label = i < 9 ? strf("&%d  %s", (int)i + 1, shown.c_str()) : shown;
+		AppendMenuW(windowMenu, MF_STRING | (all[i] == this ? MF_CHECKED : 0), CMD_WINDOW_LIST + (UINT)i, W(label).c_str());
+	}
+}
+
+bool CircuitWindow::menuKeysActive() const { return toolbar && toolbar->menuKeysActive(); }
 
 int CircuitWindow::toolbarHeight() const { return (int)std::lround(Toolbar::barHeight() * dpi / 96.0); }
 
@@ -1294,6 +1342,8 @@ int CircuitWindow::commandChecked(int command) const {
 	case CMD_FOCUS_MODE: return focusOn;
 	case CMD_SPLIT_VIEW: return splitOpen();
 	case CMD_STATUS_BAR: return prefs().showStatus;
+	case CMD_SHOW_GRID: return prefs().showGrid;
+	case CMD_WIRE_DOTS: return prefs().wireDots;
 	case CMD_INK_PEN: case CMD_INK_HIGHLIGHTER: case CMD_INK_ERASER: return drawOn && ink::tool() == command - CMD_INK_PEN;
 	case CMD_INK_WIDTH: case CMD_INK_WIDTH + 1: case CMD_INK_WIDTH_LAST: return ink::tool() != ink::Eraser && ink::widthIndex() == command - CMD_INK_WIDTH;
 	default: return -1;
@@ -1301,13 +1351,15 @@ int CircuitWindow::commandChecked(int command) const {
 }
 
 void CircuitWindow::updateMenu(HMENU menu) {
+	if (menu == windowMenu) rebuildWindowList();
 	shortcuts::relabel(menu);   // the keys each command has now (Settings > Shortcuts)
 	const int n = GetMenuItemCount(menu);
 	for (int i = 0; i < n; i++) {
 		const UINT id = GetMenuItemID(menu, i);
 		// A popup of its own (a tab's menu, the oscilloscope's) numbers its
-		// items from 1 and greys them itself: only commands are looked at.
-		if (id == (UINT)-1 || id < CMD_NEW || (id >= CMD_RECENT && id <= CMD_RECENT_LAST)) continue;
+		// items from 1 and greys them itself: only commands are looked at
+		// (not the recent circuits or the open windows either).
+		if (id == (UINT)-1 || id < CMD_NEW || id >= CMD_RECENT) continue;
 		if (id == CMD_START_MENU)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id, W(integration::menuLabel() + shortcuts::menuKeys(CMD_START_MENU)).c_str());
 		if (id == CMD_LOCK_IN_PLACE)
@@ -1505,15 +1557,21 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		maxPressed = false;
 		break;
 	case WM_SYSCOMMAND:
-		// Alt or F10 on its own: every menu, from the toolbar's •••.
-		if ((wp & 0xFFF0) == SC_KEYMENU && lp != VK_SPACE) {
-			RECT rc;
-			GetClientRect(hwnd, &rc);
-			POINT p = { rc.right - scaled(150, dpi), captionBottom };
-			ClientToScreen(hwnd, &p);
-			moreMenu(p, true);
+		// The menu bar's keys: Alt or F10 alone puts the bar under the keys
+		// (again lets go), Alt+letter opens that menu. (Alt+Space is the
+		// window menu, Windows' own.)
+		if ((wp & 0xFFF0) == SC_KEYMENU && lp != VK_SPACE && toolbar) {
+			if (lp == 0) {
+				if (toolbar->menuKeysActive()) toolbar->endMenuKeys();
+				else toolbar->startMenuKeys();
+			} else if (!toolbar->openMnemonic((wchar_t)lp)) {
+				MessageBeep(MB_OK);
+			}
 			return 0;
 		}
+		break;
+	case WM_MENUSELECT:
+		if (toolbar) toolbar->menuSelect((HMENU)lp, HIWORD(wp));
 		break;
 	case WM_TIMER:
 		if (wp == kClockTimer) tick();
@@ -1606,6 +1664,17 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 			if (i < recentPaths.size()) openCircuit(recentPaths[i], this);
 			return 0;
 		}
+		if (id >= CMD_WINDOW_LIST && id <= CMD_WINDOW_LIST_LAST) {
+			// Window's list: that circuit's window in front (restored if minimized).
+			const std::vector<CircuitWindow*>& all = circuitWindows();
+			const size_t i = (size_t)(id - CMD_WINDOW_LIST);
+			if (i < all.size()) {
+				const HWND other = all[i]->window();
+				if (IsIconic(other)) ShowWindow(other, SW_RESTORE);
+				SetForegroundWindow(other);
+			}
+			return 0;
+		}
 		if (id >= CMD_NEW && id < CMD_RECENT) {
 			run(id);
 			return 0;
@@ -1685,6 +1754,12 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	}
 	case WM_CLOSE:
+		// Recording for Send Feedback: Close is Stop (the form, which is
+		// this window's dialog, comes back with the recording).
+		if (feedback::recording()) {
+			feedback::stopRecording();
+			return 0;
+		}
 		// Not while one of its dialogs is up (the taskbar can still ask):
 		// the dialog comes forward instead.
 		if (!IsWindowEnabled(hwnd)) {
@@ -2027,20 +2102,23 @@ void CircuitWindow::run(int command) {
 	case CMD_FEEDBACK: feedback::show(this); break;
 	case CMD_START_MENU: if (integration::offered()) integration::menuCommand(this); break;
 	case CMD_ABOUT: about::show(this); break;
+	case CMD_WELCOME: welcome::show(this); break;
+	case CMD_RENAME_CIRCUIT: renameFile(); break;
+	case CMD_DUPLICATE_CIRCUIT: duplicateCircuit(); break;
+	case CMD_MINIMIZE: ShowWindow(hwnd, SW_MINIMIZE); break;
+	case CMD_SHOW_GRID: case CMD_WIRE_DOTS:
+		// As Settings > Canvas's switches: every window, at once.
+		if (command == CMD_SHOW_GRID) prefs().showGrid = !prefs().showGrid;
+		else prefs().wireDots = !prefs().wireDots;
+		prefs().applyWireDots();
+		prefs().save();
+		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
+		break;
 	default:
 		if (command >= CMD_INK_WIDTH && command <= CMD_INK_WIDTH_LAST) setInkWidth(command - CMD_INK_WIDTH);
 		else if (command >= CMD_INK_COLOR && command <= CMD_INK_COLOR_LAST) setInkColor(command - CMD_INK_COLOR);
 		break;
 	}
-}
-
-void CircuitWindow::moreMenu(POINT screen, bool rightAligned) {
-	SetForegroundWindow(hwnd);
-	const int cmd = TrackPopupMenu(menus, TPM_RETURNCMD | (rightAligned ? TPM_RIGHTALIGN : TPM_LEFTALIGN) | TPM_TOPALIGN,
-	                               screen.x, screen.y, 0, hwnd, nullptr);
-	// Posted, so it runs once whatever opened the menu (the toolbar's •••)
-	// is done with it: Exit and Close take the window, the toolbar too, away.
-	if (cmd) PostMessageW(hwnd, WM_COMMAND, cmd, 0);
 }
 
 // The circuit's name in the toolbar: what a Mac window's title offers.

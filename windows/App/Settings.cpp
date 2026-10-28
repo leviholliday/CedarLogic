@@ -121,7 +121,7 @@ struct Style { int id; const char* name; const char* blurb; };
 const Style kStyles[] = {
 	{ 3, "Seamless", "Blends into the canvas like one surface. Tools stay quiet until you point at them." },
 	{ 0, "Classic", "Tools in tidy rounded groups, everything in reach." },
-	{ 2, "Minimal", "Just the essentials and your circuit's name; the rest is behind the ••• menu." },
+	{ 2, "Minimal", "Just the essentials and your circuit's name; the rest is in the menus." },
 };
 const float kStyleH = 88;
 
@@ -144,7 +144,7 @@ void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float, bool focused
 		drawText(rt, st.blurb, D2D1::RectF(24, top + 21, w, top + 39), 11.5f, look.dim);
 		// The bar itself, drawn in that style a size smaller.
 		const D2D1_RECT_F pr = D2D1::RectF(24, top + 42, w - 2, top + 80);
-		const float k = (pr.bottom - pr.top) / Toolbar::barHeight();
+		const float k = (pr.bottom - pr.top) / Toolbar::toolsHeight();
 		ID2D1Factory* factory = nullptr;
 		rt->GetFactory(&factory);
 		ID2D1RoundedRectangleGeometry* clip = nullptr;
@@ -155,7 +155,7 @@ void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float, bool focused
 			rt->GetTransform(&base);
 			rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), clip), layer);
 			rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(pr.left, pr.top) * base);
-			bar->paintPicture(rt, (pr.right - pr.left) / k, Toolbar::barHeight(), st.id);
+			bar->paintPicture(rt, (pr.right - pr.left) / k, Toolbar::toolsHeight(), st.id);
 			rt->SetTransform(base);
 			rt->PopLayer();
 		} else {
@@ -668,7 +668,7 @@ void showPreferencesDialog(HWND parent) {
 	stepClock.wideGrid = true;
 	on[f.add(stepClock)] = [styles](Form& form, int i) { prefs().showStepClock = form.checked(i); apply(); form.refresh(styles); };
 	FormField themeSwitch = check("", "Dark mode switch", p.showThemeToggle,
-	                              "Applies to every style. Hidden tools are still in the ••• menu and keep their shortcuts. Step Clock "
+	                              "Applies to every style. Hidden tools are still in the menus and keep their shortcuts. Step Clock "
 	                              "shows in Simulation View's bar too; clicking a clock set to \u201COnly on Step Clock\u201D steps it.");
 	themeSwitch.grid = 2;
 	themeSwitch.wideGrid = true;

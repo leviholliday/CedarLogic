@@ -6,7 +6,7 @@
 // .cdl files opening in it and an uninstaller in Settings > Apps, and notes
 // where it put it (HKCU\Software\CedarLogic\Native, InstallDir). A copy run
 // from the zip does the first two for itself when asked -- once, the first
-// time it runs, or from Help in the ••• menu -- for this user only, under the
+// time it runs, or from the Help menu -- for this user only, under the
 // names the installer uses (an installer run later takes them over):
 //
 //   HKCU\Software\Classes\.cdl                  -> CedarLogic.Circuit
@@ -254,7 +254,7 @@ bool ask(CircuitWindow* w, bool firstTime) {
 	a.heading = "Add CedarLogic to the Start menu?";
 	a.text = "It'll be in Start with your other apps, and double-clicking a .cdl file, or Open in the App on the website, "
 	         "will open it in CedarLogic. It still runs from this folder, so keep the folder where it is.";
-	if (firstTime) a.text += "\n\nYou can change this later in Settings, or under Help in the \u2022\u2022\u2022 menu.";
+	if (firstTime) a.text += "\n\nYou can change this later in Settings, or in the Help menu.";
 	a.buttons = { { "Add to Start", 1, 1 }, { firstTime ? "No Thanks" : "Cancel", 0, 0 } };
 	a.enter = 1;
 	a.escape = 0;

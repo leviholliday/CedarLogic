@@ -286,7 +286,7 @@ void showPicker(CircuitWindow* from) {
 	auto all = [&] { std::vector<Template> a = built; a.insert(a.end(), mine.begin(), mine.end()); return a; };
 	picker::Picker p;
 	p.title = "New from Template";
-	p.line = "Start a circuit from one of these. Save your own with Save as Template, in the ••• menu's File.";
+	p.line = "Start a circuit from one of these. Save your own with File > Save as Template.";
 	p.search = false;
 	p.width = 940;
 	p.height = 620;

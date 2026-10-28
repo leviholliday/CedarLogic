@@ -51,8 +51,15 @@ enum Command {
 	CMD_FIND_NEXT, CMD_FIND_PREVIOUS,
 	// View > Show Notes (Notes.h): the circuit's notes in a pane at the right.
 	CMD_NOTES,
+	// The menu bar's own (what the circuit's name and Settings offered
+	// before): File > Rename and Duplicate, View's grid and wire dots, Help
+	// > Welcome, and Window > Minimize.
+	CMD_RENAME_CIRCUIT, CMD_DUPLICATE_CIRCUIT, CMD_SHOW_GRID, CMD_WIRE_DOTS, CMD_WELCOME, CMD_MINIMIZE,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
+	// Window > the open circuits (CMD_WINDOW_LIST + i).
+	CMD_WINDOW_LIST = 1920,
+	CMD_WINDOW_LIST_LAST = 1939,
 };
 
 #endif  // CL_WINDOWS_COMMANDS_H

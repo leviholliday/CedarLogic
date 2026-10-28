@@ -43,8 +43,9 @@ const std::vector<Page>& pages() {
 		  { p("CedarLogic is a digital logic simulator. You put gates on a page, wire them together, and the circuit runs as you build it: "
 		      "switches you can click, lights that show what's happening, wires that change colour with their signals."),
 		    p("The window has three parts: the **side panel** of gates down the left (with a small map of the page under it), the "
-		      "**canvas** where you build, and the **toolbar** across the top. Each circuit can have several **tabs** (pages), shown "
-		      "above the canvas. Every menu is behind **•••** at the right of the toolbar (or press Alt)."),
+		      "**canvas** where you build, and across the top the **menu bar** (File, Edit, Circuit, View, Simulate, Window, Help) "
+		      "with the **toolbar** under it. Each circuit can have several **tabs** (pages), shown above the canvas. Press **Alt** "
+		      "or **F10** to reach the menus from the keyboard; **Settings** is in File (Ctrl+,)."),
 		    tip("New here? Help ▸ Guided Tour shows you around, one part at a time.") },
 		  true },
 		{ "first", "Your First Circuit", 0xEA80, "Two switches, an AND gate and a light.",
@@ -206,7 +207,7 @@ const std::vector<Page>& pages() {
 		      "app's colour, the grid, wires, and the side panel. **Canvas**: a wire's value where you rest the pointer, what the "
 		      "wheel and touchpad do, right-click, duplicating, and Tidy Up."),
 		    p("**Toolbar**: Seamless (one surface with the canvas), Classic (tools in rounded groups) or Minimal (the essentials, "
-		      "the rest in •••), and which tools it shows. **Shortcuts**: click one and press new keys; Restore Defaults puts "
+		      "the rest in the menus), and which tools it shows. **Shortcuts**: click one and press new keys; Restore Defaults puts "
 		      "them all back. **Ctrl+/** lists them all."),
 		    p("**Ctrl+Shift+D** switches between light and dark any time.") },
 		  false },
