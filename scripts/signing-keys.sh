@@ -38,6 +38,21 @@ CIPHER=(enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt)
 die() { echo "signing-keys: $*" >&2; exit 1; }
 say() { echo "signing-keys: $*"; }
 
+# The passphrase into $PASS, asked here (nothing shows as you type), so openssl gets it
+# through the environment instead of its own terse prompt.
+ask_pass() {
+	local again
+	while :; do
+		read -r -s -p "Passphrase (nothing shows as you type): " PASS </dev/tty; echo
+		[ "${1:-}" = new ] || break
+		[ ${#PASS} -ge 8 ] || { say "use at least 8 characters"; continue; }
+		read -r -s -p "Same passphrase again: " again </dev/tty; echo
+		[ "$PASS" = "$again" ] && break
+		say "those two didn't match; try again"
+	done
+	export PASS
+}
+
 # A Keychain item's secret as `security -w` prints it (hex when it isn't plain text).
 read_item() { security find-generic-password -a "$1" -s "$2" -w 2>/dev/null; }
 
@@ -57,28 +72,30 @@ backup() {
 	sparkle=$(read_item "$SPARKLE_ACCOUNT" "$SPARKLE_SERVICE") || die "no Mac (Sparkle) key in the Keychain"
 	preview=$(read_item "$PREVIEW_ACCOUNT" "$PREVIEW_SERVICE") || die "no Windows/Linux preview key in the Keychain"
 	mkdir -p "$DIR"
-	say "choose a passphrase (typed twice) and save it in the Passwords app"
-	# Plain text goes straight from here into openssl's pipe; the passphrase is asked on the terminal.
-	printf 'sparkle %s\npreview %s\n' "$sparkle" "$preview" | "$OSSL" "${CIPHER[@]}" -out "$BACKUP.new" \
+	say "choose a passphrase and save it in the Passwords app as \"CedarLogic signing keys backup\""
+	ask_pass new
+	# Plain text goes straight from here into openssl's pipe, never to disk.
+	printf 'sparkle %s\npreview %s\n' "$sparkle" "$preview" | "$OSSL" "${CIPHER[@]}" -pass env:PASS -out "$BACKUP.new" \
 		|| { rm -f "$BACKUP.new"; die "openssl didn't write the backup"; }
 	sparkle= preview=
 	mv -f "$BACKUP.new" "$BACKUP"
 	cp -f "$0" "$DIR/signing-keys.sh"
 	say "saved $BACKUP"
-	say "checking that it opens: type the passphrase once more"
-	"$OSSL" "${CIPHER[@]}" -d -in "$BACKUP" | grep -c '^\(sparkle\|preview\) ' | grep -qx 2 \
+	"$OSSL" "${CIPHER[@]}" -d -pass env:PASS -in "$BACKUP" | grep -c '^\(sparkle\|preview\) ' | grep -qx 2 \
 		&& say "the backup opens and holds both keys" \
-		|| die "the backup didn't open with that passphrase; run backup again"
+		|| die "the backup didn't open again; run backup again"
+	PASS=
 }
 
 restore() {
 	local plain sparkle preview have got
 	[ -f "$BACKUP" ] || die "no backup at $BACKUP (is iCloud Drive done downloading it?)"
-	say "type the backup's passphrase"
-	plain=$("$OSSL" "${CIPHER[@]}" -d -in "$BACKUP" 2>/dev/null | tr -d '\000') || die "wrong passphrase, or the file is damaged"
+	say "type the backup's passphrase (it's in the Passwords app)"
+	ask_pass
+	plain=$("$OSSL" "${CIPHER[@]}" -d -pass env:PASS -in "$BACKUP" 2>/dev/null | tr -d '\000') || die "wrong passphrase, or the file is damaged"
 	sparkle=$(printf '%s\n' "$plain" | sed -n 's/^sparkle //p')
 	preview=$(printf '%s\n' "$plain" | sed -n 's/^preview //p')
-	plain=
+	plain= PASS=
 	[ -n "$sparkle" ] && [ -n "$preview" ] || die "the backup opened but doesn't hold both keys"
 	if got=$(preview_pubhex "$preview"); then
 		[ "$got" = "$PREVIEW_PUBHEX" ] || die "the preview key in the backup isn't the one the apps trust; not restoring"
