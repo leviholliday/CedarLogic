@@ -535,7 +535,7 @@ void Canvas::drawSimBar(ID2D1RenderTarget* rt, float w, float h) {
 	fillRound(rt, done, 9, D2D1::ColorF(1, 1, 1, doneHot ? 0.12f : 0.07f));
 	strokeRound(rt, done, 9, D2D1::ColorF(1, 1, 1, 0.10f));
 	drawText(rt, "Done", D2D1::RectF(done.left + 13, done.top, done.left + 46, done.bottom), 12, ink);
-	drawText(rt, "esc", D2D1::RectF(done.left + 44, done.top + 1, done.right, done.bottom), 9, dim);
+	drawText(rt, "Esc", D2D1::RectF(done.left + 44, done.top + 1, done.right, done.bottom), 9, dim);
 	hits.push_back({ done, CMD_SIM_VIEW });
 
 	CLSimChip chips[64];

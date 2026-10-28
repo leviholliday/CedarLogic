@@ -39,7 +39,7 @@ void showYourCircuits(CircuitWindow* from) {
 	std::vector<library::Item> all = library::items();
 	Picker p;
 	p.title = "Your Circuits";
-	p.line = "Everything here saves itself. Use Import to bring in a .cdl file, and Export (in the title's menu) to get one out.";
+	p.line = "Everything here saves itself. Use Import to bring in a .cdl file, and File > Export as CedarLogic File to get one out.";
 	p.leftButtons = { "Import File…", "Rename…", "Delete…" };
 	p.rightButtons = { "Cancel", "Open" };
 	p.rows = [&](const std::string& query) {

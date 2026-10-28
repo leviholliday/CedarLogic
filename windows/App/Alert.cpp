@@ -66,7 +66,7 @@ struct Card {
 	explicit Card(Alert& alert) : a(alert) {}
 
 	const char* keyOf(const AlertButton& b) const {
-		return b.answer == a.enter ? kEnterKey : b.answer == a.escape ? "esc" : nullptr;
+		return b.answer == a.enter ? kEnterKey : b.answer == a.escape ? "Esc" : nullptr;
 	}
 	float pillWidth(const AlertButton& b) const {
 		const char* key = keyOf(b);
