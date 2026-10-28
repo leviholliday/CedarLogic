@@ -672,7 +672,7 @@ LRESULT Toolbar::message(UINT msg, WPARAM wp, LPARAM, bool& handled) {
 		case VK_ESCAPE: endMenuKeys(); break;
 		case VK_MENU: case VK_F10:
 			// Alt or F10 again lets go (and its release opens nothing).
-			swallowKeyUp = true;
+			swallowUntil = GetTickCount() + 2000;
 			endMenuKeys();
 			break;
 		// Other keys are the bar's too (their letters come as WM_CHAR), but
@@ -682,7 +682,7 @@ LRESULT Toolbar::message(UINT msg, WPARAM wp, LPARAM, bool& handled) {
 		return 0;
 	}
 	case WM_SYSKEYUP: case WM_KEYUP:
-		if (swallowKeyUp && (wp == VK_MENU || wp == VK_F10)) { swallowKeyUp = false; handled = true; return 0; }
+		if ((wp == VK_MENU || wp == VK_F10) && takeSwallowedKey()) { handled = true; return 0; }
 		break;
 	case WM_CHAR: case WM_SYSCHAR:
 		// A menu's letter, with Alt or without, while the bar has the keys.
@@ -707,6 +707,12 @@ LRESULT CALLBACK menuHook(int code, WPARAM wp, LPARAM lp) {
 	return CallNextHookEx(nullptr, code, wp, lp);
 }
 }  // namespace
+
+bool Toolbar::takeSwallowedKey() {
+	const bool swallow = swallowUntil != 0 && (LONG)(swallowUntil - GetTickCount()) > 0;
+	swallowUntil = 0;
+	return swallow;
+}
 
 bool Toolbar::cuesShown() const {
 	if (keyMenu >= 0 || tracking) return true;
@@ -856,7 +862,7 @@ bool Toolbar::menuMessage(const MSG& m) {
 		if (m.wParam == VK_MENU || m.wParam == VK_F10) {
 			nextMenu = -1;
 			escaped = false;
-			swallowKeyUp = true;
+			swallowUntil = GetTickCount() + 2000;
 			EndMenu();
 			return true;
 		}

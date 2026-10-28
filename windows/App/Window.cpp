@@ -1564,6 +1564,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		// window menu, Windows' own.)
 		if ((wp & 0xFFF0) == SC_KEYMENU && lp != VK_SPACE && toolbar) {
 			if (lp == 0) {
+				if (toolbar->takeSwallowedKey()) return 0;   // the release of the Alt that just closed them
 				if (toolbar->menuKeysActive()) toolbar->endMenuKeys();
 				else toolbar->startMenuKeys();
 			} else if (!toolbar->openMnemonic((wchar_t)lp)) {

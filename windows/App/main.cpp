@@ -274,6 +274,12 @@ void CALLBACK menuTestTick(HWND, UINT, UINT_PTR id, DWORD) {
 		break;
 	case 7:
 		menuCheck(!t->menuKeysActive(), "Escape again: the bar lets go");
+		// Alt, then Alt again (its press lets go; its release, which reaches
+		// whatever has the keys by then, mustn't take the bar again).
+		SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 0);
+		SendMessageW(GetFocus(), WM_SYSKEYDOWN, VK_MENU, 0x20000000);
+		SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 0);
+		menuCheck(!t->menuKeysActive(), "Alt, then Alt again: the bar lets go and stays let go");
 		gMenuDarkBefore = prefs().dark;
 		PostMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 'v');   // Alt+V
 		break;

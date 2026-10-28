@@ -79,6 +79,9 @@ public:
 	bool menuKeysActive() const { return keyMenu >= 0 || tracking; }
 	int openMenuIndex() const { return openIndex; }   // for --menu-test
 	int keyMenuIndex() const { return keyMenu; }
+	// The release of the Alt or F10 that just let go of the bar (whichever
+	// window it reaches): true once, and it should open nothing.
+	bool takeSwallowedKey();
 	// WM_MENUSELECT, from the window (which owns the popups): what's picked,
 	// so Left and Right know whether they're in a submenu.
 	void menuSelect(HMENU menu, UINT flags);
@@ -126,7 +129,7 @@ private:
 	int nextMenu = -1;            // the menu to open when this one has closed
 	bool nextKeyboard = false;    //   with its first item picked
 	bool escaped = false;         // closed by Escape: back to the bar's keys
-	bool swallowKeyUp = false;    // the Alt or F10 that let go of the bar: no menu on its release
+	DWORD swallowUntil = 0;       // the Alt or F10 that let go of the bar: its release opens nothing (until then)
 	HMENU trackTop = nullptr, selMenu = nullptr;
 	bool selPopup = false;        // what's picked opens a submenu
 	POINT lastHookPoint{ -1, -1 };
