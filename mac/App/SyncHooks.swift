@@ -196,6 +196,9 @@ final class SyncPlatform {
         .clientCertificateRejected, .clientCertificateRequired, .appTransportSecurityRequiresSecureConnection,
     ]
 
+    /// The most a reply may be.
+    static let maxResponse = 64 << 20
+
     /// HTTPS, or http to this computer only (CL_SYNC_URL for the mock server).
     static func allowed(_ url: URL) -> Bool {
         switch url.scheme?.lowercased() {
@@ -253,8 +256,10 @@ final class SyncPlatform {
             return
         }
         if let resp = reply.response as? HTTPURLResponse {
-            status?.pointee = Int32(resp.statusCode)
             sent?.pointee = true
+            // An answer that big is no answer of ours: none at all (as curl's --max-filesize on Linux).
+            guard (reply.data?.count ?? 0) <= maxResponse else { return }
+            status?.pointee = Int32(resp.statusCode)
             var lines = ""
             for (k, v) in resp.allHeaderFields { lines += "\(k): \(v)\r\n" }
             respHeaders?.pointee = strdup(lines)
