@@ -1,6 +1,7 @@
 #include "numeric.hpp"
 
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -37,6 +38,9 @@ double parseDouble(const std::string &text, const std::string &what) {
 	const double v = std::strtod(text.c_str(), &end);
 	if (end == text.c_str() || !onlySpaceLeft(end)) bad(text, what, "malformed number");
 	if (errno == ERANGE) bad(text, what, "number out of range");
+	// strtod reads "nan" and "inf" too. No coordinate or angle is either, and
+	// one let through reaches geometry that can't hold it.
+	if (!std::isfinite(v)) bad(text, what, "number out of range");
 	return v;
 }
 

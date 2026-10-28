@@ -176,6 +176,7 @@ public:
 	void clear();
 	
 private:
+	void purgeFromOverlaps( klsCollisionObject* obj );
 	CollisionGroup collisionObjects;
 };
 

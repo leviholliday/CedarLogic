@@ -12,6 +12,7 @@
 #include "GateLibrary.h"
 #include <iomanip>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #ifndef CL_NO_WX
 #include "wx/wx.h"
@@ -67,6 +68,19 @@ string guiGate::getGUIType() {
 
 
 // Update the position matrices, and
+string guiGate::normalizedAngle( const string& value ) {
+	char* end = nullptr;
+	const double a = strtod(value.c_str(), &end);
+	if (end == value.c_str() || !std::isfinite(a)) return "0";
+	if (a >= 0 && a < 360) return value;   // as given, so a file's text is kept
+	double n = std::fmod(a, 360.0);
+	if (n < 0) n += 360.0;
+	if (n >= 360.0) n = 0;   // -1e-20 + 360 rounds to 360
+	ostringstream oss;
+	oss << n;
+	return oss.str();
+}
+
 // update the world-space bounding box and hotspots.
 // This is called once whenever the gate's position
 // or angle changes.
@@ -77,7 +91,7 @@ void guiGate::updateBBoxes( bool noUpdateWires ) {
 
 	// Get the angle vars:
 	istringstream iss(gparams["angle"]);
-	GLfloat angle;
+	GLfloat angle = 0;
 	iss >> angle;
 
 	// Build the gate's model matrix directly (column-major) instead of
@@ -300,8 +314,8 @@ void guiGate::drawToScene(cl::render::Scene& scene,
 }
 
 void guiGate::setGLcoords( float x, float y, bool noUpdateWires ) {
-	this->myX = x;
-	this->myY = y;
+	this->myX = worldClamp(x);
+	this->myY = worldClamp(y);
 
 	// Update the matrices and bounding box:
 	updateBBoxes(noUpdateWires);
@@ -1206,6 +1220,9 @@ void guiLabel::setGUIParam( string paramName, string value ) {
 
 			if( textHeight < 0 ) textHeight = -textHeight;
 			if( textHeight < 0.01 ) textHeight = 0.01;
+			// As tall as a page, at most: a huge height made the label's box
+			// huge, and an infinite one made it no box at all.
+			if( !(textHeight <= 1000) ) textHeight = 1000;
 			
 			ostringstream oss;
 			oss << textHeight;

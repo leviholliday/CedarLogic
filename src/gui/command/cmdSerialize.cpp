@@ -96,12 +96,49 @@ bool parse(const std::string &line, CreateWire &out) {
 	return true;
 }
 
+// A value is written up to its tab and the line up to its newline, so those
+// can't appear in it as they are: a label with two lines cut the paste in half
+// and the half-line left threw out_of_range, which ended the app. A backslash
+// starts an escape (\\ \t \n \r); any other backslash is taken as it is, as
+// it was in blocks copied before escapes existed.
+static std::string escapeValue(const std::string &v) {
+	std::string out;
+	out.reserve(v.size());
+	for (char c : v) {
+		switch (c) {
+		case '\\': out += "\\\\"; break;
+		case '\t': out += "\\t"; break;
+		case '\n': out += "\\n"; break;
+		case '\r': out += "\\r"; break;
+		default: out += c;
+		}
+	}
+	return out;
+}
+
+static std::string unescapeValue(const std::string &v) {
+	std::string out;
+	out.reserve(v.size());
+	for (size_t i = 0; i < v.size(); i++) {
+		if (v[i] == '\\' && i + 1 < v.size()) {
+			const char n = v[i + 1];
+			if (n == '\\' || n == 't' || n == 'n' || n == 'r') {
+				out += n == 't' ? '\t' : n == 'n' ? '\n' : n == 'r' ? '\r' : '\\';
+				i++;
+				continue;
+			}
+		}
+		out += v[i];
+	}
+	return out;
+}
+
 std::string emit(const SetParams &c) {
 	std::ostringstream oss;
 	oss << "setparams " << c.gid << " " << c.guiParams.size() << ","
 	    << c.logicParams.size() << " ";
-	for (const auto &p : c.guiParams) oss << p.first << " " << p.second << "\t";
-	for (const auto &p : c.logicParams) oss << p.first << " " << p.second << "\t";
+	for (const auto &p : c.guiParams) oss << p.first << " " << escapeValue(p.second) << "\t";
+	for (const auto &p : c.logicParams) oss << p.first << " " << escapeValue(p.second) << "\t";
 	return oss.str();
 }
 
@@ -109,25 +146,24 @@ bool parse(const std::string &line, SetParams &out) {
 	std::istringstream iss(line);
 	std::string kw;
 	char comma;
-	unsigned long numGui, numLogic;
+	unsigned long numGui = 0, numLogic = 0;
 	iss >> kw;
 	if (kw != "setparams") return false;
 	iss >> out.gid >> numGui >> comma >> numLogic;
 	// A value can contain spaces, so read the name with >> but the value up to
 	// its tab; the value carries a leading space from the "name value" join,
-	// which substr(1) drops -- exactly as the original inline parse did.
-	for (unsigned long i = 0; i < numGui; i++) {
+	// which is dropped. The counts come from the text, which may be damaged:
+	// stop at the end of the line, not after however many it claims.
+	auto readParam = [&iss](std::map<std::string, std::string> &into) {
 		std::string name, val;
-		iss >> name;
+		if (!(iss >> name)) return false;
 		std::getline(iss, val, '\t');
-		out.guiParams[name] = val.substr(1, val.size() - 1);
-	}
-	for (unsigned long i = 0; i < numLogic; i++) {
-		std::string name, val;
-		iss >> name;
-		std::getline(iss, val, '\t');
-		out.logicParams[name] = val.substr(1, val.size() - 1);
-	}
+		if (!val.empty() && val[0] == ' ') val.erase(0, 1);
+		into[name] = unescapeValue(val);
+		return true;
+	};
+	for (unsigned long i = 0; i < numGui && readParam(out.guiParams); i++) {}
+	for (unsigned long i = 0; i < numLogic && readParam(out.logicParams); i++) {}
 	return true;
 }
 
@@ -154,24 +190,26 @@ bool parse(const std::string &line, MoveWire &out) {
 	iss >> temp;
 	if (temp != "movewire") return false;
 	iss >> out.wid >> temp;
-	while (temp == "vsegment" || temp == "hsegment") {
+	// Each record is read only while the line lasts: at its end >> leaves
+	// temp as it was, and a line cut after "connection" looped for ever.
+	while (iss && (temp == "vsegment" || temp == "hsegment")) {
 		MoveWireSeg s;
 		s.vertical = (temp == "vsegment");
 		iss >> s.id >> s.bx >> dump >> s.by >> dump >> s.ex >> dump >> s.ey;
-		iss >> temp;
+		if (!(iss >> temp)) temp.clear();
 		while (temp == "connection") {
-			unsigned long gid;
+			unsigned long gid = 0;
 			std::string name;
-			iss >> gid >> name;
+			if (!(iss >> gid >> name)) { temp.clear(); break; }
 			s.connections.push_back({ gid, name });
-			iss >> temp;
+			if (!(iss >> temp)) temp.clear();
 		}
 		while (temp == "isect") {
-			float key;
-			long sid;
-			iss >> key >> sid;
+			float key = 0;
+			long sid = 0;
+			if (!(iss >> key >> sid)) { temp.clear(); break; }
 			s.intersects.push_back({ key, sid });
-			iss >> temp;
+			if (!(iss >> temp)) temp.clear();
 		}
 		out.segments.push_back(s);
 	}

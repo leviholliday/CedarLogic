@@ -44,7 +44,9 @@
 #include "GUICanvas.h"
 #include "command/cmdSetParams.h"
 #include "command/cmdConnectWire.h"
+#include "command/cmdDeleteWire.h"
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -216,6 +218,73 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 	return gCanvases;
 }
 
+// How far from the origin a loaded part or wire may be (gl_defs.h).
+static const double kMaxCoordinate = WORLD_LIMIT;
+
+// An id as the engine holds it, or false for one it can't: past kMaxId
+// (a damaged file; real ids count up from 1), where reading it into the
+// engine's integer types wrapped round to another id.
+static const IDType kMaxId = 4000000000ULL;
+static bool idOf(const string &text, IDType &out) {
+	errno = 0;
+	char *end = nullptr;
+	const unsigned long long v = strtoull(text.c_str(), &end, 10);
+	if (text.empty() || end == text.c_str() || *end != 0 || errno == ERANGE || v > kMaxId) return false;
+	out = v;
+	return true;
+}
+
+// A page's gates and wires minus any whose id can't be used: out of range,
+// or given out already (on this page or one before). Pins on a wire left out
+// are free; connections naming a gate left out are dropped later, as for any
+// gate that isn't on the page. Ids are written back in their plain form, so
+// "007" and "7" are the same gate.
+static cl::Page withoutDuplicateIds(const cl::Page &page, std::set<IDType> &gateIds, std::set<IDType> &wireIds,
+                                    std::vector<cl::MigrationNotice> &notices) {
+	auto note = [&notices](const string &summary) {
+		cl::MigrationNotice n;
+		n.severity = cl::Severity::Warning;
+		n.summary = summary;
+		n.detail = "It was left out. The rest of the circuit loaded normally.";
+		notices.push_back(std::move(n));
+	};
+	cl::Page pg = page;
+	pg.gates.clear();
+	pg.wires.clear();
+	for (cl::GateInstance g : page.gates) {
+		IDType id = 0;
+		if (!idOf(g.uuid, id)) { note("Gate " + g.uuid + " has an id that can't be used."); continue; }
+		if (!gateIds.insert(id).second) { note("A second gate with id " + g.uuid + " was found."); continue; }
+		g.uuid = to_string(id);
+		pg.gates.push_back(std::move(g));
+	}
+	for (cl::WireInstance w : page.wires) {
+		vector<IDType> ids;
+		bool usable = !w.ids.empty();
+		for (const string &text : w.ids) {
+			IDType id = 0;
+			usable = usable && idOf(text, id) && wireIds.count(id) == 0 &&
+			         std::find(ids.begin(), ids.end(), id) == ids.end();
+			ids.push_back(id);
+		}
+		if (!usable) {
+			// No id at all is reported where the wire is laid in (applyWireShape).
+			if (w.ids.empty()) { pg.wires.push_back(std::move(w)); continue; }
+			note("Wire " + w.ids.front() + " has an id that can't be used, or one another wire has.");
+			continue;
+		}
+		wireIds.insert(ids.begin(), ids.end());
+		for (size_t i = 0; i < ids.size(); i++) w.ids[i] = to_string(ids[i]);
+		for (cl::WireSegment &seg : w.segments)
+			for (cl::WireConn &c : seg.connects) {
+				IDType gid = 0;
+				if (idOf(c.gateUuid, gid)) c.gateUuid = to_string(gid);
+			}
+		pg.wires.push_back(std::move(w));
+	}
+	return pg;
+}
+
 // Build the GUI from a parsed circuit model: one canvas per page, every gate
 // (which in turn creates and connects its wires), then each wire's routed shape.
 void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
@@ -232,8 +301,14 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 	// hand-edited one can.
 	const int kMaxPageIndex = 255;
 
-	for (const cl::Page &pg : cf.pages) {
-		if (pg.index < 0 || pg.index > kMaxPageIndex) continue;
+	// Ids already given out, across every page: a gate or wire is one object,
+	// so a second with the same id (a damaged file, or two pages pasted
+	// together by hand) is left out rather than merged into the first.
+	std::set<IDType> gateIdsTaken, wireIdsTaken;
+
+	for (const cl::Page &page : cf.pages) {
+		if (page.index < 0 || page.index > kMaxPageIndex) continue;
+		cl::Page pg = withoutDuplicateIds(page, gateIdsTaken, wireIdsTaken, applyNotices);
 
 		// Grow the set until this index exists, then use it. Growing one canvas
 		// at a time regardless of the index put page 5 of a {0,5} file onto page
@@ -303,7 +378,21 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 		}
 
 		// Create every gate (and, through its connectors, its wires).
-		for (const cl::GateInstance &g : pg.gates) {
+		for (const cl::GateInstance &g0 : pg.gates) {
+			// A part far outside any page (a damaged or hand-edited file) is
+			// brought in to the edge: geometry that far out loses its precision
+			// as a float, and the routers and the collision grid can't hold it.
+			cl::GateInstance g = g0;
+			if (std::fabs(g.at.x) > kMaxCoordinate || std::fabs(g.at.y) > kMaxCoordinate) {
+				g.at.x = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.x));
+				g.at.y = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.y));
+				cl::MigrationNotice n;
+				n.severity = cl::Severity::Warning;
+				n.gateUuid = g.uuid;
+				n.libName = g.libName;
+				n.summary = "Gate " + g.uuid + " was far outside the page and was moved to its edge.";
+				applyNotices.push_back(std::move(n));
+			}
 			vector<parameter> params;
 			for (const cl::Param &p : g.params) params.push_back(parameter(p.name, p.value, p.gui));
 			ostringstream angle;
@@ -321,6 +410,40 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 
 		// Lay in each wire's routed shape now that its gates and wire exist.
 		for (const cl::WireInstance &w : pg.wires) applyWireShape(w);
+
+		// A shape that doesn't match the pins its wire holds (a damaged or
+		// hand-edited file: a segment that misses its pin, a pin no segment
+		// records, a crossing with nothing) is only a drawing, and a wrong one:
+		// a pin no segment records was lost on the next save. The pins are what
+		// the file means, so such a wire is routed fresh from them.
+		// A wire left holding fewer than two pins (its other gates are missing
+		// or lack the pins it names) joins nothing, and goes.
+		int redrawn = 0;
+		vector<IDType> joinsNothing;
+		for (auto &entry : *gCanvas->getWireList()) {
+			guiWire *wire = entry.second;
+			if (wire == nullptr) continue;
+			if (wire->numConnections() < 2) { joinsNothing.push_back(entry.first); continue; }
+			if (wire->isSoundShape()) continue;
+			wire->straightenRoute();
+			redrawn++;
+		}
+		for (IDType id : joinsNothing) {
+			cmdDeleteWire(gCanvas->getCircuit(), gCanvas, id).Do();
+			cl::MigrationNotice n;
+			n.severity = cl::Severity::Warning;
+			n.summary = "Wire " + to_string(id) + " was removed, because it connected fewer than two pins.";
+			applyNotices.push_back(std::move(n));
+		}
+		if (redrawn > 0) {
+			cl::MigrationNotice n;
+			n.severity = cl::Severity::Info;
+			n.summary = to_string(redrawn) + (redrawn == 1 ? " wire was" : " wires were") +
+			            " redrawn, because the routing saved for " + (redrawn == 1 ? "it" : "them") +
+			            " didn't match " + (redrawn == 1 ? "its" : "their") + " connections.";
+			n.detail = "The connections are as saved; only the wires' paths changed.";
+			applyNotices.push_back(std::move(n));
+		}
 	}
 }
 
@@ -353,13 +476,31 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 		return;
 	}
 
+	// Segment ids are the wire's own small numbers. One far out of range (a
+	// damaged file) overflowed the next id the wire gives out, so then all are
+	// numbered afresh in order, and the crossings follow them.
+	std::map<long, long> renumber;
+	bool fresh = false;
+	for (const cl::WireSegment &ms : w.segments) {
+		const long id = strtol(ms.id.c_str(), nullptr, 10);
+		if (id < 0 || id > 1000000) fresh = true;
+		renumber.emplace(id, (long)renumber.size());
+	}
+	auto segId = [&](const string &text) {
+		const long id = strtol(text.c_str(), nullptr, 10);
+		if (!fresh) return id;
+		auto it = renumber.find(id);
+		return it == renumber.end() ? -1L : it->second;
+	};
+
 	map<long, wireSegment> shape;
 	for (const cl::WireSegment &ms : w.segments) {
 		wireSegment seg;
 		seg.verticalSeg = ms.vertical;
-		seg.id = strtol(ms.id.c_str(), nullptr, 10);
-		seg.begin = GLPoint2f(ms.begin.x, ms.begin.y);
-		seg.end = GLPoint2f(ms.end.x, ms.end.y);
+		seg.id = segId(ms.id);
+		auto inBounds = [](double v) { return (float)(std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, v)); };
+		seg.begin = GLPoint2f(inBounds(ms.begin.x), inBounds(ms.begin.y));
+		seg.end = GLPoint2f(inBounds(ms.end.x), inBounds(ms.end.y));
 		seg.calcBBox();
 		for (const cl::WireConn &c : ms.connects) {
 			wireConnection nwc;
@@ -382,7 +523,7 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 			seg.connections.push_back(nwc);
 		}
 		for (const cl::Intersection &x : ms.intersections)
-			seg.intersects[(GLfloat)x.at].push_back(strtol(x.segment.c_str(), nullptr, 10));
+			seg.intersects[(GLfloat)x.at].push_back(segId(x.segment));
 		shape[seg.id] = seg;
 	}
 
@@ -439,6 +580,10 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 
 	for (unsigned int i = 0; i < params.size(); i++) {
 		if (!(params[i].isGUI)) {
+			// A memory's READ_FILE and WRITE_FILE are actions, taken when the
+			// user picks a file, not settings: sent from a file, they had the
+			// engine read or overwrite whatever path the file named, on open.
+			if (params[i].paramName == "READ_FILE" || params[i].paramName == "WRITE_FILE") continue;
 			newGate->setLogicParam( params[i].paramName, params[i].paramValue );
 			gCanvas->getCircuit()->sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM, new klsMessage::Message_SET_GATE_PARAM(id, params[i].paramName, params[i].paramValue)));
 		} else if (!libGateParams.ownsGUIParam( params[i].paramName )) {
@@ -577,8 +722,17 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 		pg.ink = glc[i]->ink;
 		for (const auto &entry : *glc[i]->getGateList())
 			pg.gates.push_back(buildGate(entry.second));
-		for (const auto &entry : *glc[i]->getWireList())
+		for (const auto &entry : *glc[i]->getWireList()) {
+			// The loader makes a wire from the pins its segments record, so a
+			// wire with none recorded can't be read back, and writing one made
+			// the next save differ. (Only damaged input leaves one: a wire with
+			// no pins, or one pin and no shape. It carries no connection.)
+			if (entry.second == nullptr) continue;
+			bool records = false;
+			for (const auto &seg : entry.second->getSegmentMap()) records = records || !seg.second.connections.empty();
+			if (!records) continue;
 			pg.wires.push_back(buildWire(entry.second));
+		}
 
 		// Both lists come out of unordered_map iteration, so without this two
 		// saves of an unchanged circuit reshuffle and every .cdl diff is noise.

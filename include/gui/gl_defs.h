@@ -29,4 +29,15 @@ struct GLLine2f {
 #define DEG2RAD 0.0174533
 #define EQUALRANGE 0.00125
 
+// How far from the origin a part may be, in world units: a thousand times the
+// size of any real circuit, and well inside a float's precision. A damaged file
+// or clipboard text can say anything; a part beyond this is brought to the edge.
+#define WORLD_LIMIT 1.0e6f
+
+// A coordinate held inside +/-WORLD_LIMIT (NaN becomes 0).
+inline float worldClamp(float v) {
+	if (v != v) return 0.0f;
+	return v < -WORLD_LIMIT ? -WORLD_LIMIT : v > WORLD_LIMIT ? WORLD_LIMIT : v;
+}
+
 #endif /*GL_DEFS_H_*/

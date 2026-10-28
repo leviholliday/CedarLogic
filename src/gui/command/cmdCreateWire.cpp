@@ -42,7 +42,9 @@ cmdCreateWire::~cmdCreateWire() {
 
 bool cmdCreateWire::Do() {
 
+	// A pasted line may carry no id at all.
 	guiWire *wire = gCircuit->createWire(wireIds);
+	if (wire == nullptr) return false;
 	gCanvas->insertWire(wire);
 
 	for (IDType wireId : wireIds) {
@@ -57,6 +59,7 @@ bool cmdCreateWire::Do() {
 }
 
 bool cmdCreateWire::Undo() {
+	if (wireIds.empty()) return false;   // Do made nothing
 
 	conn1->Undo();
 	conn2->Undo();

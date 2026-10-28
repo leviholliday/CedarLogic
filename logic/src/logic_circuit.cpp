@@ -11,6 +11,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "logic_circuit.h"
+#include "logic_params.h"
 #include <iostream>
 #include <algorithm>
 #include <stack>
@@ -671,7 +672,7 @@ void Circuit::destroyAllEvents( void ) {
 
 void Circuit::setGateParameter( IDType gateID, const string &paramName, const string &value ) {
 	if( gateList.find( gateID ) != gateList.end() ) {
-		if( gateList[gateID]->setParameter( paramName, value ) ) {
+		if( gateList[gateID]->setParameter( paramName, boundedGateParameter( paramName, value ) ) ) {
 			// If the gate has changed parameters and needs updated, then
 			// add it to the gateUpdateList:
 			gateUpdateList.insert( gateID );

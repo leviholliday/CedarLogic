@@ -133,7 +133,7 @@ bool Gate_RAM::setParameter( string paramName, string value ) {
 	} else if( paramName == "WRITE_FILE" ) {
 		outputMemoryFile(value);
 	} else if( paramName == "READ_FILE" ) {
-		if( value.substr( value.length() - 3 ) == "cdm" ){ 
+		if( value.size() >= 3 && value.compare( value.size() - 3, 3, "cdm" ) == 0 ){ 
 			inputMemoryFile(value);
 		//*********************************************
 		//Edit by Joshua Lansford. 1/22/06

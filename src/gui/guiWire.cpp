@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <stack>
 #include <utility>
 #include "guiGate.h"
@@ -103,6 +104,10 @@ void guiWire::addConnection(guiGate* iGate, string connection, bool openMode) {
 	// Fill all necessary items - need a pointer to the gate, an id for copy/paste
 	temp.gid = iGate->getID();
 	temp.connection = connection;
+	// A pin is held once. A damaged paste can connect the same pin twice; the
+	// second record outlived the first's removal and named a pin left free.
+	for (const wireConnection &c : connectPoints)
+		if (c.gid == temp.gid && c.connection == temp.connection) return;
 	connectPoints.push_back(temp);
 	if (openMode) return; // On open, don't calc shape until the seg tree is explicity set
 	if (connectPoints.size() < 3) { setVerticalBar = true; calcShape(); return; }
@@ -597,6 +602,62 @@ void guiWire::setSegmentMap(map < long, wireSegment > newSegMap) {
 };
 
 map < long, wireSegment > guiWire::getOldSegmentMap(void) { return oldSegMap; };
+
+bool guiWire::isSoundShape(const map < long, wireSegment > &shape, std::string *why) {
+	auto no = [why](const std::string &text) { if (why != nullptr) *why = text; return false; };
+	if (connectPoints.size() >= 2 && shape.empty()) return no("it has no shape");
+	const float slack = 0.05f;
+	for (const auto &entry : shape) {
+		const wireSegment &s = entry.second;
+		if (!std::isfinite(s.begin.x) || !std::isfinite(s.begin.y) || !std::isfinite(s.end.x) || !std::isfinite(s.end.y))
+			return no("a segment has an end that isn't a number");
+		if (s.isVertical() ? std::fabs(s.begin.x - s.end.x) > slack : std::fabs(s.begin.y - s.end.y) > slack)
+			return no("a segment runs across its own direction");
+		for (const auto &x : s.intersects) {
+			if (!std::isfinite(x.first)) return no("a crossing isn't at a number");
+			for (long other : x.second)
+				if (other == entry.first || shape.count(other) == 0) return no("a crossing names a segment that isn't there");
+		}
+	}
+	// Each held pin recorded once, on a segment reaching it; nothing else recorded.
+	std::vector<bool> recorded(connectPoints.size(), false);
+	for (const auto &entry : shape) {
+		const wireSegment &s = entry.second;
+		for (const wireConnection &c : s.connections) {
+			size_t i = 0;
+			while (i < connectPoints.size() && !(connectPoints[i].gid == c.gid && connectPoints[i].connection == c.connection)) i++;
+			if (i == connectPoints.size()) return no("it records a pin it doesn't hold");
+			if (recorded[i]) return no("it records a pin twice");
+			recorded[i] = true;
+			guiGate *g = gCircuit != nullptr ? gCircuit->getGate(c.gid) : nullptr;
+			if (g == nullptr) return no("it records a pin of a gate that isn't there");
+			float px = 0, py = 0;
+			g->getHotspotCoords(c.connection, px, py);
+			if (px < (std::min)(s.begin.x, s.end.x) - slack || px > (std::max)(s.begin.x, s.end.x) + slack ||
+			    py < (std::min)(s.begin.y, s.end.y) - slack || py > (std::max)(s.begin.y, s.end.y) + slack)
+				return no("a segment records a pin it doesn't reach");
+		}
+	}
+	for (size_t i = 0; i < connectPoints.size(); i++)
+		if (!recorded[i] && !shape.empty()) return no("a pin it holds is on no segment");
+	// One piece: segments that touch are joined.
+	std::vector<const wireSegment *> segs;
+	for (const auto &entry : shape) segs.push_back(&entry.second);
+	std::vector<size_t> up(segs.size());
+	for (size_t i = 0; i < up.size(); i++) up[i] = i;
+	std::function<size_t(size_t)> root = [&](size_t i) { return up[i] == i ? i : up[i] = root(up[i]); };
+	for (size_t i = 0; i < segs.size(); i++)
+		for (size_t j = i + 1; j < segs.size(); j++) {
+			const wireSegment &a = *segs[i], &b = *segs[j];
+			const bool touch =
+				(std::min)((std::max)(a.begin.x, a.end.x), (std::max)(b.begin.x, b.end.x)) + slack >= (std::max)((std::min)(a.begin.x, a.end.x), (std::min)(b.begin.x, b.end.x)) &&
+				(std::min)((std::max)(a.begin.y, a.end.y), (std::max)(b.begin.y, b.end.y)) + slack >= (std::max)((std::min)(a.begin.y, a.end.y), (std::min)(b.begin.y, b.end.y));
+			if (touch) up[root(i)] = root(j);
+		}
+	for (size_t i = 1; i < segs.size(); i++)
+		if (root(i) != root(0)) return no("it is in pieces");
+	return true;
+}
 
 // Calculates a default three-segment shape for the wire, from source to destination, squared halfway
 void guiWire::calcShape() {
