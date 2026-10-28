@@ -648,13 +648,22 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 // The inverse of applyCircuitFile: read the GUI back into a plain circuit model
 // so the format library can serialize it. Mirrors what saveGate/saveWire persist.
 
+// A position as saved: to a ten-thousandth of a grid unit. A rotated part's
+// pins sit a few millionths off the grid, and a reopen trims a wire's end to
+// the pin, so the digits past that differed between a save and the save
+// after reopening it (18 one time, 17.99999428 the next).
+static double savedCoordinate(double v) {
+	const double r = std::round(v * 10000.0) / 10000.0;
+	return r == 0 ? 0.0 : r;   // no "-0"
+}
+
 static cl::GateInstance buildGate(guiGate *g) {
 	cl::GateInstance gi;
 	gi.uuid = to_string(g->getID());
 	gi.libName = g->getLibraryGateName();
 	float x, y;
 	g->getGLcoords(x, y);
-	gi.at = { x, y };
+	gi.at = { savedCoordinate(x), savedCoordinate(y) };
 
 	LibraryGate lg = gateLibrary().libraries[g->getLibraryName()][g->getLibraryGateName()];
 
@@ -692,8 +701,8 @@ static cl::WireInstance buildWire(guiWire *w) {
 		cl::WireSegment ws;
 		ws.id = to_string(s.id);
 		ws.vertical = s.verticalSeg;
-		ws.begin = { s.begin.x, s.begin.y };
-		ws.end = { s.end.x, s.end.y };
+		ws.begin = { savedCoordinate(s.begin.x), savedCoordinate(s.begin.y) };
+		ws.end = { savedCoordinate(s.end.x), savedCoordinate(s.end.y) };
 		// In a fixed order (gate id, then pin): the engine keeps a segment's
 		// pins in the order they were joined, which a reroute and a reload
 		// needn't agree on, and two saves of one circuit should be the same.
@@ -712,7 +721,7 @@ static cl::WireInstance buildWire(guiWire *w) {
 				auto other = segMap.find(segId);
 				if (other != segMap.end() && other->second.verticalSeg != s.verticalSeg)
 					at = s.verticalSeg ? other->second.begin.y : other->second.begin.x;
-				ws.intersections.push_back({ at, to_string(segId) });
+				ws.intersections.push_back({ savedCoordinate(at), to_string(segId) });
 			}
 		wi.segments.push_back(ws);
 	}
