@@ -26,8 +26,11 @@ it compiles without a Windows machine:
   drawing calls take a Direct2D render target here (`mac/CedarCore/NativeScene.h`).
 - `App/` -- the app, drawn to look like the Mac app (its colours and layout
   are in `Chrome`): a window per circuit (`Window`) whose title bar is the
-  `Toolbar` (the circuit's name and menu, the tools in the style Settings
-  picks, a gear for Settings and ••• for every menu, Windows' own window buttons); `TabStrip`, a tab card per page
+  `Toolbar`: a Windows 11 title row with the icon, the menu bar (File, Edit,
+  Circuit, View, Simulate, Window, Help: real Win32 menus, with Alt, F10 and
+  the letters; Settings in File, Ctrl+,) and Windows' own window buttons,
+  and under it the tools (the circuit's name and menu, the tools in the
+  style Settings picks, a gear for Settings); `TabStrip`, a tab card per page
   (renamed in place), dragged down onto the canvas into a split view of two
   sides, each with its strip; focus mode, where the toolbar and the side
   panel slide away and the tabs become the title row; a `Canvas` per page
@@ -59,7 +62,8 @@ it compiles without a Windows machine:
   cedarlogic:// links (`ShareLink`; the link format is `ShareCodec`, over
   `Deflate`, a deflate compressor and decompressor of its own, since Windows
   has no zlib), Sync (below), Send Feedback (`Feedback`, to
-  cedarlogic.netlify.app), and Help with search (`Help`); the launch screen with the first launch's sound
+  cedarlogic.netlify.app, with screenshots and a recording of the window:
+  `FeedbackCapture`, Media Foundation's H.264 MP4), and Help with search (`Help`); the launch screen with the first launch's sound
   (`Splash`), the first-run welcome, What's New and the guided tour that
   builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
   build (`Updater`); recovery copies of unsaved work (`Recovery`); the Start
@@ -117,8 +121,8 @@ CI makes two ways to get it, for each processor (x64 and ARM64):
   unzipped. The first time, when nothing else is on screen, it asks once
   whether to add itself to the Start menu and open .cdl files and cedarlogic://
   links (the same names the installer uses, pointing at this copy); Settings > General's
-  Start menu switch, or Help > Add to Start Menu / Remove from Start Menu
-  in the ••• menu, changes that later. A copy
+  Start menu switch, or Help > Add to Start Menu / Remove from Start Menu,
+  changes that later. A copy
   that was added and then moved (a newer zip unzipped elsewhere, the old
   folder gone) follows itself. An installed CedarLogic has these already,
   so a zip copy beside one doesn't ask.
