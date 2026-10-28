@@ -237,6 +237,7 @@ void Prefs::load() {
 	if (!r.b("drawnStatusBar", false)) showStatus = true;
 	showGateNames = r.b("showGateNames", showGateNames);
 	wireValueTag = r.b("wireValueTag", wireValueTag);
+	projector = r.b("projector", projector);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	showCategoryKeys = r.b("showCategoryKeys", showCategoryKeys);
 	gateSize = r.i("gateSize", gateSize, 36, 96);
@@ -340,6 +341,7 @@ void Prefs::save() const {
 	o << "drawnStatusBar=1\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
 	o << "wireValueTag=" << b(wireValueTag) << "\n";
+	o << "projector=" << b(projector) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "showCategoryKeys=" << b(showCategoryKeys) << "\n";
 	o << "gateSize=" << gateSize << "\n";

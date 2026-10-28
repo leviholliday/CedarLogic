@@ -59,6 +59,7 @@ struct Prefs {
 	bool showStatus = true;       // the status bar's readout (zoom, pointer, counts), as on the Mac
 	bool showGateNames = true;
 	bool wireValueTag = false;    // resting on a wire shows what it carries
+	bool projector = false;       // Simulation View's projector mode: thick wires, big labels and lights (View menu)
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	// Drawing on the circuit: the last tool (0 pen, 1 highlighter, 2 eraser),
 	// and each drawing tool's colour (a palette token) and width (world units),

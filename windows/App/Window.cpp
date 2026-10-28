@@ -352,6 +352,7 @@ void CircuitWindow::buildMenus() {
 	item(view, CMD_STATUS_BAR, "&Status Bar");
 	item(view, CMD_SHOW_GRID, "Show &Grid");
 	item(view, CMD_WIRE_DOTS, "Dots at Wire &Bends");
+	item(view, CMD_PROJECTOR, "Pro&jector Mode");
 	// Drawing on the circuit (Ink.h), as the Mac's View menu has it.
 	separator(view);
 	item(view, CMD_DRAW, "Dra&w on the Circuit\tCtrl+Alt+P");
@@ -1344,6 +1345,7 @@ int CircuitWindow::commandChecked(int command) const {
 	case CMD_STATUS_BAR: return prefs().showStatus;
 	case CMD_SHOW_GRID: return prefs().showGrid;
 	case CMD_WIRE_DOTS: return prefs().wireDots;
+	case CMD_PROJECTOR: return prefs().projector;
 	case CMD_INK_PEN: case CMD_INK_HIGHLIGHTER: case CMD_INK_ERASER: return drawOn && ink::tool() == command - CMD_INK_PEN;
 	case CMD_INK_WIDTH: case CMD_INK_WIDTH + 1: case CMD_INK_WIDTH_LAST: return ink::tool() != ink::Eraser && ink::widthIndex() == command - CMD_INK_WIDTH;
 	default: return -1;
@@ -2106,6 +2108,15 @@ void CircuitWindow::run(int command) {
 	case CMD_RENAME_CIRCUIT: renameFile(); break;
 	case CMD_DUPLICATE_CIRCUIT: duplicateCircuit(); break;
 	case CMD_MINIMIZE: ShowWindow(hwnd, SW_MINIMIZE); break;
+	case CMD_PROJECTOR:
+		// For a class: Simulation View with thick wires and big lights. On
+		// from the editor, it turns Simulation View on too.
+		prefs().projector = !prefs().projector;
+		prefs().save();
+		if (prefs().projector && !simViewOn) toggleSimView();
+		for (CircuitWindow* o : circuitWindows()) o->redraw();
+		note(prefs().projector ? "Projector mode: thick wires and big lights in Simulation View." : "Projector mode is off.");
+		break;
 	case CMD_SHOW_GRID: case CMD_WIRE_DOTS:
 		// As Settings > Canvas's switches: every window, at once.
 		if (command == CMD_SHOW_GRID) prefs().showGrid = !prefs().showGrid;

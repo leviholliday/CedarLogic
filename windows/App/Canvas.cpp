@@ -231,9 +231,23 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 	o.showSelection = true;
 	o.selectionFade = win->selectionFade();
 	o.ink = CL_INK_FOLLOW;
-	cl_document_draw_ex(doc, p, rt, scale, originX, originY, upp, &o);
+	const bool projector = sim && prefs().projector;
 	if (sim) {
-		cl_simview_draw_flow(doc, p, rt, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
+		// Simulation View as the Mac draws it, so projector mode (much
+		// thicker wires and outlines, bigger labels and lights) comes too.
+		CLSimViewStyle st{};
+		st.accent = prefs().accent;
+		st.wireScale = prefs().wireScale();
+		st.projector = projector;
+		st.predict = false;
+		st.ink = CL_INK_FOLLOW;
+		cl_simview_draw_page(doc, p, rt, scale, originX, originY, upp, &st);
+	} else {
+		cl_document_draw_ex(doc, p, rt, scale, originX, originY, upp, &o);
+	}
+	if (sim) {
+		cl_simview_draw_flow(doc, p, rt, scale, originX, originY, upp, win->flowPhase(),
+		                     prefs().wireScale() * (projector ? CL_PROJECTOR_WIRE_SCALE : 1));
 		// The wire under the pointer, lit up whole.
 		const RGBA a = accentColor(true);
 		cl_edit_draw_overlay(doc, p, rt, scale, originX, originY, upp, a.r, a.g, a.b);
@@ -245,7 +259,7 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 		else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(rt, l, b, r, t, a, alpha);
 	}
 	// The stroke being drawn and what the pointer would draw, over everything.
-	if (cl_ink_live_page(doc) == p) cl_ink_draw_live(doc, rt, scale, originX, originY, upp, dark, false);
+	if (cl_ink_live_page(doc) == p) cl_ink_draw_live(doc, rt, scale, originX, originY, upp, dark, projector);
 	drawOverlays(rt, (float)w, (float)h);
 }
 

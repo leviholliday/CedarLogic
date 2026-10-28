@@ -247,6 +247,7 @@ jobs:
           test -s renders/window-new.png
           timeout 90 "$A" --dark --screenshot "$PWD/renders/window-Lab5-dark.png" format/tests/fixtures/Lab5.cdl
           timeout 90 "$A" --dark --sim-view --screenshot "$PWD/renders/window-sim.png" res/samples/practice.cdl
+          timeout 90 "$A" --dark --sim-view --projector --screenshot "$PWD/renders/window-sim-projector.png" res/samples/practice.cdl || true
           timeout 90 "$A" --light --screenshot "$PWD/renders/window-practice.png" res/samples/practice.cdl
           # A circuit from CedarLogic Online with parts locked in place (their
           # badges), and its second page's clock set to "Only on Step Clock":
