@@ -10,6 +10,9 @@ Windows or Linux builds.
     mac/package.sh            # build, then mac/build/CedarLogic-<version>-Mac.dmg
 
 Needs only the Xcode Command Line Tools (Swift 6), macOS 14 or later.
+`build.sh` downloads its pinned Sparkle once (checked against the SHA-256 it
+names) and signs the app ad hoc with the hardened runtime (`sign-app.sh`,
+entitlements in `App/CedarLogic.entitlements`).
 
 - `CedarCore/` -- the engine for the app: a Core Graphics backend for the
   render Scene (`CGScene`), the document loader (`Document.cpp`) and the plain C

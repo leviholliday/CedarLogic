@@ -26,7 +26,7 @@ P="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Delete SUPublicEDKey" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete SentryDSN" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete CFBundleURLTypes" "$P" 2>/dev/null
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1
+mac/sign-app.sh "$APP"
 mkdir -p "$WORK/home"
 # The copy's own settings, from nothing: launch 1 is a first launch (the
 # welcome, the first-launch sound), the rest ordinary ones.

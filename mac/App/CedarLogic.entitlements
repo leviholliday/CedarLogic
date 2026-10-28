@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  What the hardened runtime (mac/sign-app.sh) has to allow, and nothing else.
+
+  disable-library-validation: the app is signed ad hoc, so it has no Team ID,
+  and the runtime's library check refuses any framework without the app's
+  Team ID: dyld won't load Sparkle or Sentry ("different Team IDs"). Once the
+  app has a Developer ID, sign the frameworks with it and drop this.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

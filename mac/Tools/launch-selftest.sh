@@ -33,7 +33,7 @@ P="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Delete SentryDSN" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete CFBundleURLTypes" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete CFBundleDocumentTypes" "$P" 2>/dev/null
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1
+mac/sign-app.sh "$APP"
 mkdir -p "$WORK/home"
 run() {   # run <log> <args...>: the app, killed after 60 s
 	local log=$1; shift
