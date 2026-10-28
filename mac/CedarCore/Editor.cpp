@@ -905,6 +905,23 @@ bool cl_edit_paste(CLDocument* doc, int pageIndex, const char* text, double x, d
 		mw->Do();
 		block->addCommand(mw);
 	}
+	// A wire the move didn't carry whole (one on a part locked in place, which
+	// stays) is left stretched between a part that moved and one that didn't;
+	// one whose shape that broke is routed fresh from its pins, in the paste.
+	{
+		std::set<unsigned long> seen;
+		for (auto& gs : gates) {
+			guiGate* gt = doc->circuit.getGate(gs.id);
+			if (gt == nullptr) continue;
+			for (auto& hs : gt->getHotspotList()) {
+				guiWire* w = gt->isConnected(hs.first) ? gt->getConnection(hs.first) : nullptr;
+				if (w == nullptr || !seen.insert(w->getID()).second || w->isSoundShape()) continue;
+				const SegmentMap shape = w->getSegmentMap();
+				w->straightenRoute();
+				block->addCommand(new cmdMoveWire(&doc->circuit, w->getID(), shape, w->getSegmentMap()));
+			}
+		}
+	}
 	submit(doc, page, block);
 	page->collisionUpdate();
 	scratch = klsClipboard::rewrittenText;

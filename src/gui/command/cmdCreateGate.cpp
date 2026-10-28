@@ -38,8 +38,8 @@ cmdCreateGate::cmdCreateGate(string def) : klsCommand(true, "Create Gate") {
 	gid = d.gid;
 	gateType = d.gateType;
 	// Pasted text can put a part anywhere, as a file can: in to PASTE_LIMIT.
-	x = worldClamp(d.x, PASTE_LIMIT);
-	y = worldClamp(d.y, PASTE_LIMIT);
+	x = (float)savedPrecision(worldClamp(d.x, PASTE_LIMIT));
+	y = (float)savedPrecision(worldClamp(d.y, PASTE_LIMIT));
 	this->fromString = true;
 }
 

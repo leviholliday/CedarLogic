@@ -48,6 +48,7 @@ jobs:
 
       - name: Fuzz edits (every invariant, 300 operations a seed)
         env:
+          CL_FUZZ_DUMP: ${{ github.workspace }}/fuzz-logs/dump
           CL_FUZZ_CHECK: 1
           CL_FUZZ_BOTH: 1
           CL_FUZZ_REACH: 1
@@ -56,6 +57,7 @@ jobs:
           CL_FUZZ_TREE: 1
           CL_FUZZ_NOSIM: 1
         run: |
+          mkdir -p fuzz-logs/dump
           python3 mac/Tools/fuzz-sweep.py --timeout 120 --logs fuzz-logs/edit build/headless/fuzz_edit 1 80 300
           CL_FUZZ_WIDE=1 CL_FUZZ_SIM=1 CL_FUZZ_UNDOSTEP=1 CL_FUZZ_REOPEN=25 CL_FUZZ_UNDOALL=50 \
             python3 mac/Tools/fuzz-sweep.py --timeout 120 --logs fuzz-logs/wide build/headless/fuzz_edit 1 40 300 \

@@ -384,6 +384,8 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 			// brought in to the edge: geometry that far out loses its precision
 			// as a float, and the routers and the collision grid can't hold it.
 			cl::GateInstance g = g0;
+			g.at.x = savedPrecision(g.at.x);
+			g.at.y = savedPrecision(g.at.y);
 			if (std::fabs(g.at.x) > kMaxCoordinate || std::fabs(g.at.y) > kMaxCoordinate) {
 				g.at.x = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.x));
 				g.at.y = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.y));
@@ -502,7 +504,7 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 		// Twice as far as a part may be: a part at the edge has pins beyond it,
 		// and a wire must still reach them. (Only a float's range matters here;
 		// a segment that misses its pin is redrawn below.)
-		auto inBounds = [](double v) { return (float)(std::max)(-2 * kMaxCoordinate, (std::min)(2 * kMaxCoordinate, v)); };
+		auto inBounds = [](double v) { return (float)savedPrecision((std::max)(-2 * kMaxCoordinate, (std::min)(2 * kMaxCoordinate, v))); };
 		seg.begin = GLPoint2f(inBounds(ms.begin.x), inBounds(ms.begin.y));
 		seg.end = GLPoint2f(inBounds(ms.end.x), inBounds(ms.end.y));
 		seg.calcBBox();
@@ -649,14 +651,11 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 // The inverse of applyCircuitFile: read the GUI back into a plain circuit model
 // so the format library can serialize it. Mirrors what saveGate/saveWire persist.
 
-// A position as saved: to a ten-thousandth of a grid unit. A rotated part's
-// pins sit a few millionths off the grid, and a reopen trims a wire's end to
-// the pin, so the digits past that differed between a save and the save
-// after reopening it (18 one time, 17.99999428 the next).
-static double savedCoordinate(double v) {
-	const double r = std::round(v * 10000.0) / 10000.0;
-	return r == 0 ? 0.0 : r;   // no "-0"
-}
+// A position as saved: to a ten-thousandth of a grid unit (gl_defs.h). A
+// rotated part's pins sit a few millionths off the grid, and a reopen trims a
+// wire's end to the pin, so the digits past that differed between a save and
+// the save after reopening it (18 one time, 17.99999428 the next).
+static double savedCoordinate(double v) { return savedPrecision(v); }
 
 static cl::GateInstance buildGate(guiGate *g) {
 	cl::GateInstance gi;

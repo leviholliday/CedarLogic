@@ -28,6 +28,9 @@ Gate_ADDER::Gate_ADDER() : Gate_PASS() {
 
 // Handle gate events:
 void Gate_ADDER::gateProcess( void ) {
+	// No bits, nothing to add (and no top bit to read the sign from: a file
+	// can set INPUT_BITS to 0).
+	if( inBits == 0 ) return;
 	vector< StateType > inBusA = getInputBusState("IN");
 	unsigned long inA = bus_to_ulong( inBusA );
 

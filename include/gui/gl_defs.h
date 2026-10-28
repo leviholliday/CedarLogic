@@ -40,6 +40,14 @@ struct GLLine2f {
 // the same.
 #define PASTE_LIMIT (WORLD_LIMIT / 10)
 
+// A coordinate to a ten-thousandth of a grid unit: how a save writes one, and
+// how one is taken in from a file or a paste, so what is in memory is what a
+// save writes and a reopen reads back.
+inline double savedPrecision(double v) {
+	const double r = (double)(long long)(v * 10000.0 + (v < 0 ? -0.5 : 0.5)) / 10000.0;
+	return r == 0 ? 0.0 : r;   // no "-0"
+}
+
 // A coordinate held inside +/-limit (NaN becomes 0).
 inline float worldClamp(float v, float limit = WORLD_LIMIT) {
 	if (v != v) return 0.0f;

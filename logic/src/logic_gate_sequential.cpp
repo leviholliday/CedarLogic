@@ -54,6 +54,9 @@ Gate_REGISTER::Gate_REGISTER() : Gate_PASS() {
 
 // Handle gate events:
 void Gate_REGISTER::gateProcess( void ) {
+	// No bits, nothing to hold (a file can set INPUT_BITS to 0; shifting
+	// then wrote the top bit of an empty bus).
+	if( inBits == 0 ) return;
 	vector< StateType > outBus;
 	StateType carryOut = ZERO; // Assume that carry out is reset.
 
