@@ -87,12 +87,21 @@ bool installedFromDeb() {
 }
 
 // curl, or wget where curl is missing (a stock Ubuntu desktop has only
-// wget). The URL is ours and quoted; one with a quote in it is refused.
+// wget). The URL is ours and quoted; one with a quote in it is refused, and
+// so is anything but https. Neither reads the user's ~/.curlrc or ~/.wgetrc,
+// and curl won't follow a redirect off https either. (wget has no switch for
+// that; what it brings is still checked against the signed manifest.)
+bool fetchable(const std::string& url) {
+	return url.compare(0, 8, "https://") == 0 && url.find('\'') == std::string::npos;
+}
+const char* const kCurl = "curl -q -fsSL --proto =https --proto-redir =https";
+const char* const kWget = "wget --no-config -q";
+
 std::string fetch(const std::string& url) {
-	if (url.find('\'') != std::string::npos) return {};
+	if (!fetchable(url)) return {};
 	const std::string cmds[] = {
-		"curl -fsSL --max-time 15 -H 'User-Agent: CedarLogic' '" + url + "' 2>/dev/null",
-		"wget -q -T 15 -U CedarLogic -O - '" + url + "' 2>/dev/null",
+		std::string(kCurl) + " --max-time 15 -H 'User-Agent: CedarLogic' '" + url + "' 2>/dev/null",
+		std::string(kWget) + " -T 15 -U CedarLogic -O - '" + url + "' 2>/dev/null",
 	};
 	for (const std::string& cmd : cmds) {
 		FILE* p = popen(cmd.c_str(), "r");
@@ -107,10 +116,10 @@ std::string fetch(const std::string& url) {
 }
 
 bool download(const std::string& url, const std::string& dest) {
-	if (url.find('\'') != std::string::npos || dest.find('\'') != std::string::npos) return false;
+	if (!fetchable(url) || dest.find('\'') != std::string::npos) return false;
 	const std::string cmds[] = {
-		"curl -fsSL --max-time 300 -o '" + dest + "' '" + url + "' 2>/dev/null",
-		"wget -q -T 120 -O '" + dest + "' '" + url + "' 2>/dev/null",
+		std::string(kCurl) + " --max-time 300 -o '" + dest + "' '" + url + "' 2>/dev/null",
+		std::string(kWget) + " -T 120 -O '" + dest + "' '" + url + "' 2>/dev/null",
 	};
 	for (const std::string& cmd : cmds) {
 		if (std::system(cmd.c_str()) == 0) return true;
@@ -864,6 +873,17 @@ void Updater_IntegrateAppImage() {
 	const std::string image = runningAppImage();
 	const char* appdir = std::getenv("APPDIR");
 	if (image.empty() || appdir == nullptr) return;
+	// The path as one quoted Exec argument (the Desktop Entry spec): \ before " ` $ and \, % as %%,
+	// then every \ doubled for the key file's own escaping. A control character (a newline would
+	// start a line of its own in the entry) can't be written at all, so no entry then.
+	std::string quoted;
+	for (char c : image) {
+		if ((unsigned char)c < 0x20 || c == 0x7f) return;
+		if (c == '"' || c == '`' || c == '$') quoted += "\\\\";
+		else if (c == '\\') quoted += "\\\\\\";
+		else if (c == '%') quoted += '%';
+		quoted += c;
+	}
 	g_mkdir_with_parents(apps.c_str(), 0755);
 	g_mkdir_with_parents(icons.c_str(), 0755);
 	g_mkdir_with_parents(mime.c_str(), 0755);
@@ -876,11 +896,6 @@ void Updater_IntegrateAppImage() {
 	};
 	copy(std::string(appdir) + "/usr/share/icons/hicolor/256x256/apps/cedarlogic.png", icons + "/cedarlogic.png");
 	copy(std::string(appdir) + "/usr/share/mime/packages/cedarlogic-mime.xml", mime + "/cedarlogic-mime.xml");
-	std::string quoted;
-	for (char c : image) {
-		if (c == '"' || c == '\\' || c == '`' || c == '$') quoted += '\\';
-		quoted += c;
-	}
 	// Without FUSE, the menu and .cdl files start it the way this launch was
 	// started, or each of them would fail silently.
 	const std::string exec = std::string(extractedAndRun() ? "env APPIMAGE_EXTRACT_AND_RUN=1 " : "") + "\"" + quoted + "\" %U";

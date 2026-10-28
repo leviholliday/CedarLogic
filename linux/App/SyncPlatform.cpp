@@ -166,7 +166,7 @@ bool writeAll(int fd, const char* p, size_t n) {
 bool makePrivateFolder(const std::string& dir) {
 	if (dir.empty()) return false;
 	const std::string parent = parentOf(dir);
-	if (!parent.empty()) g_mkdir_with_parents(parent.c_str(), 0755);
+	if (!parent.empty()) g_mkdir_with_parents(parent.c_str(), 0700);
 	if (g_mkdir(dir.c_str(), 0700) != 0 && !g_file_test(dir.c_str(), G_FILE_TEST_IS_DIR)) return false;
 	g_chmod(dir.c_str(), 0700);
 	return true;

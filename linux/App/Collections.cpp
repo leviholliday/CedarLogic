@@ -44,8 +44,10 @@ std::string lowerCase(const std::string& s) {
 }
 
 std::string dataDir(const char* name) {
+	// Owner-only (0700), like the Library: a folder made before that is tightened too.
 	const std::string dir = std::string(g_get_user_data_dir()) + "/CedarLogic/" + name;
-	g_mkdir_with_parents(dir.c_str(), 0755);
+	g_mkdir_with_parents(dir.c_str(), 0700);
+	g_chmod(dir.c_str(), 0700);
 	return dir;
 }
 
@@ -69,7 +71,7 @@ bool recycle(const std::string& folder) {
 	gchar* name = g_path_get_basename(folder.c_str());
 	const std::string trash = std::string(parent) + "/.Trash";
 	g_free(parent);
-	g_mkdir_with_parents(trash.c_str(), 0755);
+	g_mkdir_with_parents(trash.c_str(), 0700);
 	std::string dest = trash + "/" + name;
 	for (int n = 2; fileExists(dest); n++) dest = trash + "/" + name + format(" %d", n);
 	g_free(name);
@@ -469,7 +471,7 @@ void saveCurrent(CircuitWindow* window) {
 	    name.empty())
 		return;
 	const std::string folder = root() + "/" + newId();
-	g_mkdir_with_parents(folder.c_str(), 0755);
+	g_mkdir_with_parents(folder.c_str(), 0700);
 	const bool wasDirty = window->isDirty();
 	const std::string text = cl_document_save_text(window->document());
 	if (wasDirty) window->saveQuietly(false);   // asking for the text marked it saved
@@ -555,7 +557,7 @@ void saveSelection(CircuitWindow* window) {
 	             "Name your part. It'll be in the side panel under My Parts, and in Add a Gate (A).", name) || name.empty())
 		return;
 	const std::string folder = root() + "/" + newId();
-	g_mkdir_with_parents(folder.c_str(), 0755);
+	g_mkdir_with_parents(folder.c_str(), 0700);
 	if (writeFile(folder + "/name.txt", name) && writeFile(folder + "/part.txt", text)) {
 		window->note("Saved “" + name + "” to My Parts.");
 		for (CircuitWindow* w : circuitWindows()) w->partsChanged();

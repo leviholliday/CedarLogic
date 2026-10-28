@@ -138,8 +138,10 @@ void thin(const Item& item) {
 
 std::string root() {
 	static std::string r = [] {
+		// Your circuits are yours alone: owner-only (0700), a folder made before that tightened too.
 		const std::string dir = std::string(g_get_user_data_dir()) + "/CedarLogic/Library";
-		g_mkdir_with_parents(dir.c_str(), 0755);
+		g_mkdir_with_parents(dir.c_str(), 0700);
+		g_chmod(dir.c_str(), 0700);
 		return dir;
 	}();
 	return r;
@@ -205,7 +207,7 @@ bool create(const std::string& name, const std::string& text, const std::string&
 	out.folder = root() + "/" + id;
 	out.name = name;
 	out.modified = now();
-	g_mkdir_with_parents(out.versionsFolder().c_str(), 0755);
+	g_mkdir_with_parents(out.versionsFolder().c_str(), 0700);
 	if (!writeFile(out.folder + "/name.txt", name) || !writeFile(out.circuit(), text)) return false;
 	if (!source.empty()) writeFile(out.folder + "/source.txt", sourceMark(source, readFile(source)));
 	syncapp::libraryChanged();
@@ -229,7 +231,7 @@ void rename(const Item& item, const std::string& name) {
 
 bool moveToTrash(const Item& item) {
 	const std::string trash = root() + "/.Trash";
-	g_mkdir_with_parents(trash.c_str(), 0755);
+	g_mkdir_with_parents(trash.c_str(), 0700);
 	std::string dest = trash + "/" + item.id;
 	for (int n = 2; fileExists(dest); n++) dest = trash + "/" + item.id + format(" %d", n);
 	const bool moved = ::g_rename(item.folder.c_str(), dest.c_str()) == 0;
@@ -244,7 +246,7 @@ bool moveToTrash(const Item& item) {
 bool noteSaved(const std::string& path, bool explicitSave) {
 	Item item;
 	if (!itemFor(path, item)) return false;
-	g_mkdir_with_parents(item.versionsFolder().c_str(), 0755);
+	g_mkdir_with_parents(item.versionsFolder().c_str(), 0700);
 	const std::string pending = item.versionsFolder() + "/.pending.cdl";
 	const double t = now();
 	const std::vector<Version> vs = versions(item);
@@ -274,7 +276,7 @@ bool noteSaved(const std::string& path, bool explicitSave) {
 }
 
 bool restore(const Item& item, const Version& v) {
-	g_mkdir_with_parents(item.versionsFolder().c_str(), 0755);
+	g_mkdir_with_parents(item.versionsFolder().c_str(), 0700);
 	copyFile(item.circuit(), item.versionsFolder() + "/" + stamp(now()) + ".cdl");
 	const std::string text = readFile(v.path);
 	const bool ok = !text.empty() && writeFile(item.circuit(), text);
