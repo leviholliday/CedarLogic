@@ -28,4 +28,19 @@ void Updater_CheckNow(GtkApplication* app);
 // Run as an AppImage: add it to the applications menu with its icon.
 void Updater_IntegrateAppImage();
 
+// Updates are taken only when signed (update-signing/UpdateSignature.h):
+// a build on the release is offered once its SHA256SUMS, signed with the
+// preview key, names this tag, the tag's commit and a newer build, and the
+// download matches it.
+
+// --update-self-test [--release <folder> --key <hex>]: the update check's
+// own code against fake releases in a temporary folder (good, bad signature,
+// stale manifest, wrong hash, downgrade...), and the .deb's root step with a
+// stand-in for apt; or, given a folder the signing script signed, that one.
+int Updater_SelfTest(int argc, char** argv);
+
+// --install-update <deb> <manifest> <signature> <name>, as root through
+// pkexec: the .deb's install, checked again on a copy only root can write.
+int Updater_InstallUpdateAsRoot(int argc, char** argv);
+
 #endif  // CL_LINUX_UPDATER_H

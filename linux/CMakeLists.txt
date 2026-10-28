@@ -60,6 +60,10 @@ target_include_directories(CedarCore PUBLIC
 target_compile_options(CedarCore PRIVATE -Wno-deprecated-declarations)
 target_link_libraries(CedarCore PUBLIC PkgConfig::CAIRO)
 
+# Signed preview updates, shared with the Windows app: the signature check,
+# its checks (verify_check) and CL_BUILD_TIME.
+include("${ROOT}/update-signing/UpdateSigning.cmake")
+
 # ---- The app -------------------------------------------------------------------
 option(CL_BUILD_APP "Build the GTK app" ON)
 if(CL_BUILD_APP)
@@ -73,7 +77,9 @@ if(CL_BUILD_APP)
 	if(NOT CL_GIT_RC EQUAL 0 OR CL_GIT_COMMIT STREQUAL "")
 		set(CL_GIT_COMMIT "unknown")
 	endif()
-	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}")
+	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}" CL_BUILD_TIME=${CL_BUILD_TIME}LL)
+	# Updates are signed (update-signing/UpdateSignature.h).
+	target_link_libraries(CedarLogic PRIVATE cl_updatesig)
 	set(CL_FEEDBACK_URL "https://cedarlogic.netlify.app" CACHE STRING "Where Send Feedback sends to")
 	set(CL_FEEDBACK_KEY "96611596304230a4c3c21e22b1b3e523" CACHE STRING "Sent with feedback so the site knows it's from the app")
 	target_compile_definitions(CedarLogic PRIVATE CL_FEEDBACK_URL="${CL_FEEDBACK_URL}" CL_FEEDBACK_KEY="${CL_FEEDBACK_KEY}")

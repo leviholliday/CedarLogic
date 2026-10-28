@@ -52,6 +52,32 @@ jobs:
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build linux/build
 
+      # Signed updates (update-signing/UpdateSignature.h): the signature check on RFC 8032's
+      # vectors and the ways a signature must fail; the one public key everywhere it's written
+      # down (the app, the signing script, install.sh); the updater's own code against fake
+      # releases (good, bad signature, stale manifest, wrong hash, downgrade...) and the .deb's
+      # root step; and the signing script's dry run, with a throwaway key, checked by the app.
+      - name: Signed update checks
+        run: |
+          B=linux/build
+          $B/verify_check
+          KEY=$($B/verify_check --print-key)
+          echo "public key: $KEY"
+          grep -qx "PUBHEX=$KEY" scripts/sign-preview.sh || { echo "::error::sign-preview.sh has another public key"; exit 1; }
+          INSTALL_KEY=$(sed -n '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/p' linux/install.sh | openssl pkey -pubin -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')
+          [ "$INSTALL_KEY" = "$KEY" ] || { echo "::error::install.sh has another public key ($INSTALL_KEY)"; exit 1; }
+          $B/cedarlogic --update-self-test
+          # The signing script's manifest and openssl signature, read by the app's own check.
+          mkdir -p fake-release
+          printf 'a .deb for the test\n' > fake-release/cedarlogic_amd64.deb
+          printf 'an AppImage for the test\n' > fake-release/CedarLogic-Native-0.4.0-x86_64.AppImage
+          TEST_KEY=$(scripts/sign-preview.sh --dry-run fake-release --tag linux-native-testing --commit "$GITHUB_SHA" --build 2 --test-key)
+          $B/cedarlogic --update-self-test --release fake-release --key "$TEST_KEY"
+          # Not with the real key (the test key signed it), and not once a file has changed.
+          if $B/cedarlogic --update-self-test --release fake-release --key "$KEY"; then echo "::error::verified with the wrong key"; exit 1; fi
+          printf 'changed\n' >> fake-release/cedarlogic_amd64.deb
+          if $B/cedarlogic --update-self-test --release fake-release --key "$TEST_KEY"; then echo "::error::a changed file passed"; exit 1; fi
+
       # A long working session in the window (linux/App/SessionCheck.cpp): seeded
       # random clicks, drags, keys and commands through the app's own handlers, with
       # windows over it poked at and closed, checked all along (no crash or GTK
@@ -166,6 +192,7 @@ jobs:
           mkdir -p renders
           "$APPIMAGE" --version
           "$APPIMAGE" --sync-test
+          "$APPIMAGE" --update-self-test
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --screenshot renders/window-Lab5.png format/tests/fixtures/Lab5.cdl
           test -s renders/window-Lab5.png
@@ -402,17 +429,56 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs
+      # The one-line install (linux/install.sh) against a fake release on this machine, signed
+      # by the signing script's dry run with a throwaway key: it installs the signed .deb, and
+      # refuses a changed .deb or a bad signature without installing anything.
+      - name: install.sh, against a signed fake release
+        run: |
+          sudo apt-get update
+          mkdir -p fake
+          cp debs/*.deb linux/install.sh fake/
+          DEB=$(cd fake && ls *.deb)
+          cp "fake/$DEB" pristine.deb
+          scripts/sign-preview.sh --dry-run fake --tag linux-native-testing --commit "$GITHUB_SHA" --build 2 --test-key > /dev/null
+          (cd fake && exec python3 -m http.server 8765 --bind 127.0.0.1) > http.log 2>&1 &
+          for i in $(seq 1 50); do curl -fs -o /dev/null http://127.0.0.1:8765/SHA256SUMS && break; sleep 0.2; done
+          export CEDARLOGIC_TEST_RELEASE=http://127.0.0.1:8765 CEDARLOGIC_TEST_KEY=$PWD/fake/test-key.pub.pem
+          bash linux/install.sh
+          cedarlogic --version
+          sudo apt-get remove -y cedarlogic
+          # A .deb that isn't the one signed for.
+          printf 'x' >> "fake/$DEB"
+          if bash linux/install.sh; then echo "::error::install.sh installed a changed .deb"; exit 1; fi
+          if command -v cedarlogic; then echo "::error::cedarlogic got installed"; exit 1; fi
+          cp pristine.deb "fake/$DEB"
+          # A bad signature.
+          python3 -c "import sys; p='fake/SHA256SUMS.sig'; b=bytearray(open(p,'rb').read()); b[7]^=1; open(p,'wb').write(b)"
+          if bash linux/install.sh; then echo "::error::install.sh took a bad signature"; exit 1; fi
+          if command -v cedarlogic; then echo "::error::cedarlogic got installed"; exit 1; fi
+          if ls /var/tmp | grep cedarlogic; then echo "::error::a root copy was left behind"; exit 1; fi
       - name: Install the .deb
         run: |
           sudo apt-get update
           sudo apt-get install -y ./debs/*.deb xvfb curl
           cedarlogic --version
           cedarlogic --sync-test
+          cedarlogic --update-self-test
           dpkg -l | grep -E 'libssl3(t64)?\b'
+          # The .deb update's root step, for real as root: something unsigned is refused (3),
+          # with nothing left behind; and it won't run as anyone else.
+          printf 'not a package' > /tmp/x.deb
+          printf 'not a manifest\n' > /tmp/m
+          head -c 64 /dev/zero > /tmp/s
+          code=0; sudo cedarlogic --install-update /tmp/x.deb /tmp/m /tmp/s "cedarlogic_$(dpkg --print-architecture).deb" || code=$?
+          [ "$code" = 3 ] || { echo "::error::the root step answered $code to an unsigned file"; exit 1; }
+          code=0; cedarlogic --install-update /tmp/x.deb /tmp/m /tmp/s "cedarlogic_$(dpkg --print-architecture).deb" || code=$?
+          [ "$code" = 3 ] || { echo "::error::the root step ran as a user ($code)"; exit 1; }
+          if ls /var/tmp | grep cedarlogic-update; then echo "::error::a root copy was left behind"; exit 1; fi
       - name: Start it
         run: |
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 cedarlogic --screenshot window.png /usr/share/CedarLogic/samples/practice.cdl
@@ -502,6 +568,14 @@ jobs:
             git push -f origin "refs/tags/$TAG"
             gh release create "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
           fi
+          # CI never signs. The apps install only files a signed SHA256SUMS names, and the key is
+          # only on the owner's Mac: after this run, scripts/sign-preview.sh linux checks the
+          # release and signs it. Until then the build reaches no one. The last build's manifest
+          # goes first, so the release is plainly unsigned while it changes (a stale one couldn't
+          # pass anyway: it names the old commit and the old files' hashes).
+          for a in SHA256SUMS SHA256SUMS.sig; do
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$a"; then gh release delete-asset "$TAG" "$a" -y; fi
+          done
           cp linux/install.sh appimages/install.sh
           gh release upload "$TAG" appimages/*.AppImage appimages/*.deb appimages/install.sh --clobber
           # Drop anything this run didn't make (older versions), so only the

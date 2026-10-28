@@ -1,20 +1,32 @@
-// The AppImage updater (see Updater.h).
+// The AppImage and .deb updater (see Updater.h).
 //
 //   1. ask GitHub for the commit the "linux-native-testing" tag points at now
 //   2. compare it with CL_GIT_COMMIT, baked in at build time
-//   3. different -> ask; yes -> download this CPU's AppImage next to the
-//      running one, check its size against what GitHub reported, make it
-//      executable and rename it over the old file
-//   4. offer to restart, through the app's normal Quit (so unsaved work is
+//   3. different -> fetch the release's SHA256SUMS and SHA256SUMS.sig and
+//      check them (update-signing/UpdateSignature.h): signed with the preview
+//      key built in here, for this tag and the tag's commit, a build newer
+//      than this one (CL_BUILD_TIME), with one file for this CPU and kind.
+//      Anything less: no update is offered, and why goes to stderr.
+//   4. verified -> ask; yes -> download that file next to the running one,
+//      check its size and SHA-256 against the manifest, make it executable
+//      and rename it over the old file (the AppImage); or download the .deb
+//      and hand it to this program's own --install-update through pkexec,
+//      which copies it somewhere only root can write, checks it all again
+//      there, and only then runs apt on that copy
+//   5. offer to restart, through the app's normal Quit (so unsaved work is
 //      asked about first) -- then relaunch the new file
 
 #include "Updater.h"
 #include "Alert.h"
 
+#include "UpdateSignature.h"
+
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <functional>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
@@ -26,11 +38,18 @@
 #ifndef CL_GIT_COMMIT
 #define CL_GIT_COMMIT "unknown"
 #endif
+// The commit's committer time (Unix seconds): the build number the signed
+// manifest's must be above. 0 when it isn't known (a build outside git).
+#ifndef CL_BUILD_TIME
+#define CL_BUILD_TIME 0
+#endif
 
 namespace {
 
 const char* kOwnerRepo = "leviholliday/CedarLogic";
 const char* kTag = "linux-native-testing";
+
+void logUpdate(const std::string& what) { fprintf(stderr, "CedarLogic update: %s\n", what.c_str()); }
 
 std::string cpuArch() {
 	struct utsname u;
@@ -133,16 +152,6 @@ bool jsonString(const std::string& json, const std::string& key, std::string& ou
 	return false;   // no closing quote: malformed
 }
 
-long long jsonNumber(const std::string& json, const std::string& key, size_t beforePos) {
-	const std::string needle = "\"" + key + "\":";
-	// GitHub lists an asset's "size" before its "browser_download_url", so
-	// the nearest one *before* the url's own start is this asset's, not the
-	// next one's.
-	size_t at = json.rfind(needle, beforePos);
-	if (at == std::string::npos) return 0;
-	return strtoll(json.c_str() + at + needle.size(), nullptr, 10);
-}
-
 // The commit this repo's testing tag points at right now, or "" on failure.
 std::string latestCommit() {
 	const std::string body = fetch(format("https://api.github.com/repos/%s/commits/%s", kOwnerRepo, kTag));
@@ -153,23 +162,201 @@ std::string latestCommit() {
 	return sha;
 }
 
-// This CPU's AppImage in the release, or a download url of "" if the release
-// or the asset can't be found.
-struct Asset { std::string url; long long size = 0; };
-Asset findAsset(const std::string& suffix) {
-	const std::string body = fetch(format("https://api.github.com/repos/%s/releases/tags/%s", kOwnerRepo, kTag));
-	Asset out;
-	size_t at = 0, start = 0, end = 0;
-	std::string url;
-	while (jsonString(body, "browser_download_url", url, at, &end, &start)) {
-		at = end;
-		if (url.size() >= suffix.size() && url.compare(url.size() - suffix.size(), suffix.size(), suffix) == 0) {
-			out.url = url;
-			out.size = jsonNumber(body, "size", start);
-			return out;
-		}
+// ---- Verifying ------------------------------------------------------------------
+
+enum class Kind { AppImage, Deb };
+
+std::string debName() { return cpuArch() == "aarch64" ? "cedarlogic_arm64.deb" : "cedarlogic_amd64.deb"; }
+
+// This copy's file among the manifest's names: the .deb for this CPU, or
+// this CPU's AppImage (whose name has the version in it).
+bool isOurs(const std::string& name, Kind kind) {
+	if (kind == Kind::Deb) return name == debName();
+	const std::string prefix = "CedarLogic-Native-", suffix = "-" + cpuArch() + ".AppImage";
+	return name.size() > prefix.size() + suffix.size() && name.compare(0, prefix.size(), prefix) == 0 &&
+	       name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string releaseFileUrl(const std::string& name) {
+	return format("https://github.com/%s/releases/download/%s/%s", kOwnerRepo, kTag, name.c_str());
+}
+
+// A file's SHA-256 (GLib's) and size, read through once.
+bool sha256File(const std::string& path, std::string& hex, long long& size) {
+	FILE* f = fopen(path.c_str(), "rb");
+	if (!f) return false;
+	GChecksum* sum = g_checksum_new(G_CHECKSUM_SHA256);
+	unsigned char chunk[65536];
+	size_t got;
+	size = 0;
+	while ((got = fread(chunk, 1, sizeof chunk, f)) > 0) {
+		g_checksum_update(sum, chunk, got);
+		size += (long long)got;
 	}
+	const bool ok = !ferror(f);
+	fclose(f);
+	hex = g_checksum_get_string(sum);
+	g_checksum_free(sum);
+	return ok;
+}
+
+std::string sha256Bytes(const std::string& bytes) {
+	gchar* s = g_compute_checksum_for_data(G_CHECKSUM_SHA256, reinterpret_cast<const guchar*>(bytes.data()), bytes.size());
+	std::string out = s;
+	g_free(s);
 	return out;
+}
+
+// A downloaded file against the signed manifest's entry for it.
+bool verifyFile(const std::string& path, const updatesig::File& expected, std::string& why) {
+	std::string hex;
+	long long size = 0;
+	if (!sha256File(path, hex, size)) {
+		why = "couldn't read " + path;
+		return false;
+	}
+	return updatesig::checkDownload(expected, size, hex, why);
+}
+
+// What an update check found: the file to download and the signed manifest
+// it came from (the .deb's root step checks that again itself).
+struct Asset {
+	std::string url;
+	updatesig::File file;
+	std::string manifest, signature;
+};
+
+// The release's manifest and signature through `get` (the release's
+// download URLs, or a folder in the self-test), and the decision on them.
+updatesig::Decision findVerified(const std::function<bool(const std::string& name, std::string& out)>& get, const unsigned char key[32],
+                                 const std::string& releaseCommit, const std::string& runningCommit, long long runningBuild, Kind kind,
+                                 Asset* out) {
+	std::string manifest, signature;
+	bool haveManifest = false, haveSignature = false;
+	if (releaseCommit != runningCommit) {
+		haveManifest = get(updatesig::kManifestName, manifest);
+		haveSignature = haveManifest && get(updatesig::kSignatureName, signature);
+	}
+	const updatesig::Decision d = updatesig::decide(haveManifest, manifest, haveSignature, signature, key, kTag, releaseCommit, runningCommit,
+	                                                runningBuild, [kind](const std::string& n) { return isOurs(n, kind); });
+	if (out && d.result == updatesig::Result::Offer) {
+		out->url = releaseFileUrl(d.file.name);
+		out->file = d.file;
+		out->manifest = manifest;
+		out->signature = signature;
+	}
+	return d;
+}
+
+bool fetchReleaseFile(const std::string& name, std::string& out) {
+	if (!updatesig::safeName(name)) return false;
+	out = fetch(releaseFileUrl(name));
+	return !out.empty();
+}
+
+// ---- The .deb's root step ---------------------------------------------------------
+// pkexec /usr/bin/cedarlogic --install-update <deb> <manifest> <signature> <name>
+//
+// Run as root, by the installed (root-owned) program itself. The files it's
+// given are the user's, which anything running as that user could change
+// at any moment; so each is copied into a new folder only root can write
+// (mkdtemp makes it 0700, root's), and everything is checked on those
+// copies: the signature with the built-in key, the tag, a build newer than
+// this installed one, the name being this CPU's .deb, its size and SHA-256.
+// Only then does apt get the copy (the folder opened to 0755 for apt's own
+// user to read it, still writable only by root).
+
+const int kNotVerified = 3;   // (pkexec itself uses 126 and 127)
+
+// A regular file, not a link, at most `limit` bytes, into `bytes`.
+bool readRegular(const std::string& path, size_t limit, std::string& bytes, std::string& why) {
+	const int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0) { why = "can't open " + path + ": " + strerror(errno); return false; }
+	struct stat st;
+	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 || (unsigned long long)st.st_size > limit) {
+		close(fd);
+		why = path + " isn't a regular file of a sensible size";
+		return false;
+	}
+	bytes.clear();
+	bytes.reserve((size_t)st.st_size);
+	char chunk[65536];
+	ssize_t got;
+	while ((got = read(fd, chunk, sizeof chunk)) > 0) {
+		bytes.append(chunk, (size_t)got);
+		if (bytes.size() > limit) { close(fd); why = path + " is too big"; return false; }
+	}
+	close(fd);
+	if (got < 0) { why = "can't read " + path; return false; }
+	return true;
+}
+
+bool writeNew(const std::string& path, const std::string& bytes) {
+	const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+	if (fd < 0) return false;
+	size_t at = 0;
+	while (at < bytes.size()) {
+		const ssize_t n = write(fd, bytes.data() + at, bytes.size() - at);
+		if (n <= 0) { close(fd); return false; }
+		at += (size_t)n;
+	}
+	return close(fd) == 0;
+}
+
+// The checks and the hand-over, with the key, this build, where the private
+// folder goes and what runs apt given (the self-test passes its own).
+int installVerifiedDeb(const std::string& deb, const std::string& manifestPath, const std::string& signaturePath, const std::string& name,
+                       const unsigned char key[32], long long runningBuild, const std::string& tempBase,
+                       const std::function<int(const std::string& copy)>& runApt, std::string& why) {
+	if (!updatesig::safeName(name) || !isOurs(name, Kind::Deb)) { why = "\"" + name + "\" isn't this computer's .deb"; return kNotVerified; }
+	std::string folder = tempBase + "/cedarlogic-update-XXXXXX";
+	if (!g_mkdtemp_full(&folder[0], 0700)) { why = "can't make a private folder in " + tempBase; return kNotVerified; }
+	const std::string copy = folder + "/" + name;
+	std::string manifest, signature, bytes;
+	auto done = [&](int code) {
+		g_remove(copy.c_str());
+		g_rmdir(folder.c_str());
+		return code;
+	};
+	if (!readRegular(manifestPath, 64 * 1024, manifest, why) || !readRegular(signaturePath, 64, signature, why) ||
+	    !readRegular(deb, 512u << 20, bytes, why))
+		return done(kNotVerified);
+	if (!writeNew(copy, bytes)) { why = "can't write " + copy; return done(kNotVerified); }
+	bytes.clear();
+	if (!updatesig::verifySignature(manifest, signature, key)) { why = "the manifest's signature doesn't verify"; return done(kNotVerified); }
+	updatesig::Manifest m;
+	if (!updatesig::parseManifest(manifest, m, why)) return done(kNotVerified);
+	if (m.tag != kTag) { why = "the manifest is for " + m.tag; return done(kNotVerified); }
+	if (m.build <= runningBuild) {
+		why = "build " + std::to_string(m.build) + " isn't newer than the installed one (" + std::to_string(runningBuild) + ")";
+		return done(kNotVerified);
+	}
+	const updatesig::File* entry = nullptr;
+	for (const updatesig::File& f : m.files)
+		if (f.name == name) entry = &f;
+	if (!entry) { why = "the manifest doesn't list " + name; return done(kNotVerified); }
+	if (!verifyFile(copy, *entry, why)) return done(kNotVerified);
+	// apt reads it as its own user: into the folder, which stays root's.
+	if (chmod(folder.c_str(), 0755) != 0) { why = "can't open the private folder to apt"; return done(kNotVerified); }
+	return done(runApt(copy));
+}
+
+int aptInstall(const std::string& copy) {
+	// apt waits a minute for another install (unattended-upgrades, the
+	// software updater) rather than failing at once. --allow-downgrades
+	// stays as before: the signed build number above already refuses
+	// anything older than this.
+	gchar* argv[] = { (gchar*)"/usr/bin/apt-get", (gchar*)"install", (gchar*)"-y", (gchar*)"--allow-downgrades",
+	                  (gchar*)"-o", (gchar*)"DPkg::Lock::Timeout=60", const_cast<gchar*>(copy.c_str()), nullptr };
+	gint status = 1;
+	GError* e = nullptr;
+	// apt's errors go to this process's stderr, which pkexec's caller reads.
+	if (!g_spawn_sync(nullptr, argv, nullptr, G_SPAWN_STDOUT_TO_DEV_NULL, nullptr, nullptr, nullptr, nullptr, &status, &e)) {
+		fprintf(stderr, "E: CedarLogic: couldn't run apt-get: %s\n", e ? e->message : "?");
+		if (e) g_error_free(e);
+		return 1;
+	}
+	return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
 }
 
 // The updated copy, started as this one quits. It waits for this process to
@@ -229,8 +416,22 @@ bool runWithProgress(GtkWindow* parent, const char* text, const std::function<bo
 	return ok;
 }
 
-bool installWithProgress(GtkWindow* parent, const std::string& url, const std::string& dest) {
-	return runWithProgress(parent, "Downloading the update…", [&] { return download(url, dest); });
+// Downloaded and checked against the signed manifest; `why` says what failed.
+enum class Got { Ok, NoDownload, NotVerified };
+Got downloadVerified(GtkWindow* parent, const Asset& asset, const std::string& dest, std::string& why) {
+	Got got = Got::NoDownload;
+	runWithProgress(parent, "Downloading the update…", [&] {
+		if (!download(asset.url, dest)) return false;
+		got = verifyFile(dest, asset.file, why) ? Got::Ok : Got::NotVerified;
+		return true;
+	});
+	if (got == Got::NotVerified) logUpdate("the download didn't verify, not installing it: " + why);
+	return got;
+}
+
+void showNotVerified(GtkWindow* parent, const std::string& why) {
+	showMessage(parent, GTK_MESSAGE_WARNING, "The update didn't pass its check",
+	            "The downloaded file isn't the one the signed list of this build names, so it wasn't installed. (" + why + ")");
 }
 
 // What apt said last: its error ("E: ..."), or else its last line.
@@ -247,8 +448,9 @@ std::string lastAptLine(const char* out) {
 	return error.empty() ? last : error;
 }
 
-// The .deb: downloaded, then installed by apt through pkexec (which asks for
-// the password in the desktop's own dialog).
+// The .deb: downloaded and checked, then installed through pkexec (which
+// asks for the password in the desktop's own dialog) by this program's own
+// root step, which checks it all again on a copy only root can change.
 void installDeb(GtkApplication* app, const Asset& asset) {
 	GtkWindow* parent = gtk_application_get_active_window(app);
 	const std::string page = format("https://github.com/%s/releases/tag/%s", kOwnerRepo, kTag);
@@ -260,23 +462,33 @@ void installDeb(GtkApplication* app, const Asset& asset) {
 	const std::string dir = std::string(g_get_user_cache_dir()) + "/CedarLogic";
 	g_mkdir_with_parents(dir.c_str(), 0755);
 	const std::string file = dir + "/cedarlogic-update.deb";
-	struct stat st;
-	if (!installWithProgress(parent, asset.url, file) || stat(file.c_str(), &st) != 0 || (asset.size > 0 && st.st_size != asset.size)) {
+	const std::string manifestFile = dir + "/cedarlogic-update.SHA256SUMS", signatureFile = dir + "/cedarlogic-update.SHA256SUMS.sig";
+	auto clean = [&] {
 		std::remove(file.c_str());
+		std::remove(manifestFile.c_str());
+		std::remove(signatureFile.c_str());
+	};
+	std::string why;
+	const Got got = downloadVerified(parent, asset, file, why);
+	if (got != Got::Ok || !g_file_set_contents(manifestFile.c_str(), asset.manifest.data(), (gssize)asset.manifest.size(), nullptr) ||
+	    !g_file_set_contents(signatureFile.c_str(), asset.signature.data(), (gssize)asset.signature.size(), nullptr)) {
+		clean();
 		g_free(pkexec);
-		showMessage(parent, GTK_MESSAGE_WARNING, "The update couldn't be downloaded", "Check your connection and try again.");
+		if (got == Got::NotVerified) showNotVerified(parent, why);
+		else showMessage(parent, GTK_MESSAGE_WARNING, "The update couldn't be downloaded", "Check your connection and try again.");
 		return;
 	}
-	// apt reads the file as its own user: make it readable.
+	// Readable by anyone (a home folder over NFS can hide it from root).
 	chmod(dir.c_str(), 0755);
 	chmod(file.c_str(), 0644);
-	// apt waits a minute for another install (unattended-upgrades, the
-	// software updater) rather than failing at once.
-	gchar* argv[] = { pkexec, (gchar*)"apt-get", (gchar*)"install", (gchar*)"-y", (gchar*)"--allow-downgrades",
-	                  (gchar*)"-o", (gchar*)"DPkg::Lock::Timeout=60", const_cast<gchar*>(file.c_str()), nullptr };
+	chmod(manifestFile.c_str(), 0644);
+	chmod(signatureFile.c_str(), 0644);
+	gchar* argv[] = { pkexec, (gchar*)"/usr/bin/cedarlogic", (gchar*)"--install-update", const_cast<gchar*>(file.c_str()),
+	                  const_cast<gchar*>(manifestFile.c_str()), const_cast<gchar*>(signatureFile.c_str()),
+	                  const_cast<gchar*>(asset.file.name.c_str()), nullptr };
 	gint status = 1;
 	bool ran = false;
-	std::string why;
+	why.clear();
 	runWithProgress(parent, "Installing the update…", [&] {
 		gchar* err = nullptr;
 		GError* e = nullptr;
@@ -287,13 +499,16 @@ void installDeb(GtkApplication* app, const Asset& asset) {
 		return ran;
 	});
 	g_free(pkexec);
-	std::remove(file.c_str());
+	clean();
 	const int code = !ran ? -1 : WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 	if (code != 0) {
 		// pkexec: 126, the password was cancelled; 127, it couldn't be asked
-		// for or wasn't accepted. Anything else is apt's own trouble.
+		// for or wasn't accepted. 3, the root step's own check refused it.
+		// Anything else is apt's own trouble.
+		if (code == kNotVerified) logUpdate("the root step refused the update: " + why);
 		const std::string text = code == 126 ? "Installing it needs your password, and that was cancelled."
 		                       : code == 127 ? "Installing it needs an administrator's password, and the system couldn't ask for it or didn't accept it."
+		                       : code == kNotVerified ? "It didn't pass its check" + (why.empty() ? std::string(".") : ": " + why)
 		                       : "apt couldn't install it" + (why.empty() ? std::string(".") : ": " + why);
 		if (askConfirm(parent, "The update wasn't installed", text + " Open the download page to install it by hand?", "Open Page", "Not Now"))
 			openExternally(parent, page);
@@ -323,11 +538,11 @@ void install(GtkApplication* app, const Asset& asset) {
 	}();
 	const std::string temp = format("%s/.CedarLogic-update-%d", dir.c_str(), (int)getpid());
 
-	const bool ok = installWithProgress(parent, asset.url, temp);
-	struct stat st;
-	const bool sizeOk = ok && stat(temp.c_str(), &st) == 0 && (asset.size <= 0 || st.st_size == asset.size);
-	if (!sizeOk) {
+	std::string why;
+	const Got got = downloadVerified(parent, asset, temp, why);
+	if (got != Got::Ok) {
 		std::remove(temp.c_str());
+		if (got == Got::NotVerified) { showNotVerified(parent, why); return; }
 		showMessage(parent, GTK_MESSAGE_WARNING, "The update couldn't be downloaded",
 		            "Check your connection and try again. (CedarLogic needs curl or wget, and permission to "
 		            "write to " + dir + ".)");
@@ -354,6 +569,7 @@ struct CheckResult {
 	std::atomic<bool> done{ false };
 	bool fetched = false;
 	std::string sha;
+	updatesig::Decision decision;
 	Asset asset;
 };
 
@@ -367,12 +583,15 @@ gboolean pollCheck(gpointer data) {
 	// (the daily one, Check for Updates).
 	struct Done { ~Done() { g_checking.store(false); } } done;
 	GtkWindow* parent = gtk_application_get_active_window(r->app);
-	const bool newer = r->fetched && !r->asset.url.empty();
+	const bool newer = r->fetched && r->decision.result == updatesig::Result::Offer;
 	if (!newer) {
 		if (r->interactive) {
 			if (!r->fetched)
 				showMessage(parent, GTK_MESSAGE_WARNING, "Couldn't check for updates",
 				            "CedarLogic couldn't reach the update feed. Check your connection and try again.");
+			else if (r->decision.result == updatesig::Result::NotVerified)
+				showMessage(parent, GTK_MESSAGE_INFO, "No verified update yet",
+				            "There's a newer test build, but it hasn't been signed yet, so CedarLogic won't install it. Try again later.");
 			else
 				showMessage(parent, GTK_MESSAGE_INFO, "You're up to date", "This is the latest version.");
 		}
@@ -399,16 +618,205 @@ void check(GtkApplication* app, bool interactive) {
 	r->worker = std::thread([r] {
 		const std::string sha = latestCommit();
 		r->fetched = !sha.empty();
-		if (r->fetched && sha.compare(0, strlen(CL_GIT_COMMIT), CL_GIT_COMMIT) != 0) {
+		if (r->fetched) {
 			r->sha = sha;
-			r->asset = findAsset(installedFromDeb() ? (cpuArch() == "aarch64" ? "_arm64.deb" : "_amd64.deb") : "-" + cpuArch() + ".AppImage");
+			r->decision = findVerified(fetchReleaseFile, updatesig::kPublicKey, sha, CL_GIT_COMMIT, (long long)CL_BUILD_TIME,
+			                           installedFromDeb() ? Kind::Deb : Kind::AppImage, &r->asset);
+			logUpdate(r->decision.why);
 		}
 		r->done.store(true);
 	});
 	g_timeout_add(150, pollCheck, r);
 }
 
+// ---- Self-test -------------------------------------------------------------------
+
+std::string joinPath(const std::string& dir, const std::string& name) { return dir + "/" + name; }
+
+bool readWhole(const std::string& path, std::string& bytes) {
+	gchar* data = nullptr;
+	gsize len = 0;
+	if (!g_file_get_contents(path.c_str(), &data, &len, nullptr)) return false;
+	bytes.assign(data, len);
+	g_free(data);
+	return true;
+}
+
+updatesig::SelfTestHooks hooksFor(Kind kind, const std::string& assetName) {
+	updatesig::SelfTestHooks h;
+	h.tag = kTag;
+	h.assetName = assetName;
+	h.makeDir = [](const std::string& d) { return g_mkdir_with_parents(d.c_str(), 0700) == 0; };
+	h.writeFile = [](const std::string& p, const std::string& b) { return g_file_set_contents(p.c_str(), b.data(), (gssize)b.size(), nullptr) == TRUE; };
+	h.sha256Hex = sha256Bytes;
+	h.join = joinPath;
+	h.find = [kind](const std::string& dir, const unsigned char key[32], const std::string& releaseCommit, const std::string& runningCommit,
+	                long long runningBuild) {
+		auto fromDir = [&dir](const std::string& name, std::string& out) { return readWhole(joinPath(dir, name), out); };
+		return findVerified(fromDir, key, releaseCommit, runningCommit, runningBuild, kind, nullptr);
+	};
+	h.verifyFile = verifyFile;
+	return h;
+}
+
+// The .deb's root step with a test key and a stand-in for apt.
+bool rootStepTest(const std::string& dir, std::string& report) {
+	bool all = true;
+	auto expect = [&](const std::string& label, bool ok, const std::string& detail) {
+		report += std::string(ok ? "  ok   " : "  FAIL ") + label + (detail.empty() ? "" : " -- " + detail) + "\n";
+		all = all && ok;
+	};
+	unsigned char seed[32], pub[32];
+	for (int i = 0; i < 32; i++) seed[i] = (unsigned char)(i * 3 + 1);
+	const std::string name = debName();
+	std::string deb = "!<arch>\nthe new build's .deb, for the self-test\n";
+	while (deb.size() < 2048) deb += "deb ";
+	updatesig::Manifest m;
+	m.tag = kTag;
+	m.commit = std::string(40, '2');
+	m.build = 2000;
+	m.files.push_back({ name, (long long)deb.size(), sha256Bytes(deb) });
+	const std::string manifest = updatesig::formatManifest(m);
+	const std::string signature = updatesig::testSign(manifest, seed, pub);
+	const std::string base = joinPath(dir, "root");
+	g_mkdir_with_parents(base.c_str(), 0700);
+	int n = 0;
+	struct Ran { bool called = false; std::string copy, bytes; mode_t folderMode = 0; };
+	auto run = [&](const std::string& debBytes, const std::string& man, const std::string& sig, const std::string& asName, long long running,
+	               bool linkTheDeb, std::function<void(const std::string& debPath)> meanwhile, Ran& ran, std::string& why) {
+		const std::string d = joinPath(dir, "user-" + std::to_string(++n));
+		g_mkdir_with_parents(d.c_str(), 0700);
+		const std::string debPath = joinPath(d, "cedarlogic-update.deb"), manPath = joinPath(d, "m"), sigPath = joinPath(d, "s");
+		g_file_set_contents(manPath.c_str(), man.data(), (gssize)man.size(), nullptr);
+		g_file_set_contents(sigPath.c_str(), sig.data(), (gssize)sig.size(), nullptr);
+		if (linkTheDeb) {
+			const std::string real = joinPath(d, "real.deb");
+			g_file_set_contents(real.c_str(), debBytes.data(), (gssize)debBytes.size(), nullptr);
+			if (symlink(real.c_str(), debPath.c_str()) != 0) return -1;
+		} else {
+			g_file_set_contents(debPath.c_str(), debBytes.data(), (gssize)debBytes.size(), nullptr);
+		}
+		auto apt = [&](const std::string& copy) {
+			ran.called = true;
+			ran.copy = copy;
+			readWhole(copy, ran.bytes);
+			gchar* folder = g_path_get_dirname(copy.c_str());
+			struct stat st;
+			if (stat(folder, &st) == 0) ran.folderMode = st.st_mode & 07777;
+			g_free(folder);
+			// What a swap of the user's file now would do: nothing to the copy apt has.
+			if (meanwhile) meanwhile(debPath);
+			std::string again;
+			readWhole(copy, again);
+			return again == ran.bytes ? 0 : 99;
+		};
+		return installVerifiedDeb(debPath, manPath, sigPath, asName, pub, running, base, apt, why);
+	};
+	{
+		Ran ran;
+		std::string why;
+		const int code = run(deb, manifest, signature, name, 1000, false,
+		                     [](const std::string& p) { g_file_set_contents(p.c_str(), "evil", 4, nullptr); }, ran, why);
+		const bool inBase = ran.copy.compare(0, base.size() + 1, base + "/") == 0;
+		expect("root step: a good .deb goes to apt as a private copy", code == 0 && ran.called && ran.bytes == deb && inBase && ran.folderMode == 0755,
+		       why);
+		gchar* folder = ran.copy.empty() ? nullptr : g_path_get_dirname(ran.copy.c_str());
+		expect("root step: the private copy is gone afterwards", folder && !g_file_test(folder, G_FILE_TEST_EXISTS), "");
+		g_free(folder);
+	}
+	{
+		Ran ran;
+		std::string why, swapped = deb;
+		swapped[20] ^= 1;   // changed after the app checked it, before the root step
+		const int code = run(swapped, manifest, signature, name, 1000, false, nullptr, ran, why);
+		expect("root step: a .deb changed after the app's check is refused", code == kNotVerified && !ran.called, why);
+	}
+	{
+		Ran ran;
+		std::string why, bad = signature;
+		bad[5] ^= 1;
+		const int code = run(deb, manifest, bad, name, 1000, false, nullptr, ran, why);
+		expect("root step: a bad signature is refused", code == kNotVerified && !ran.called, why);
+	}
+	{
+		Ran ran;
+		std::string why;
+		const int code = run(deb, manifest, signature, name, 2000, false, nullptr, ran, why);
+		expect("root step: a build no newer than the installed one is refused", code == kNotVerified && !ran.called, why);
+	}
+	{
+		Ran ran;
+		std::string why;
+		const int code = run(deb, manifest, signature, "../" + name, 1000, false, nullptr, ran, why);
+		expect("root step: a name that isn't this computer's .deb is refused", code == kNotVerified && !ran.called, why);
+	}
+	{
+		Ran ran;
+		std::string why;
+		const int code = run(deb, manifest, signature, name, 1000, true, nullptr, ran, why);
+		expect("root step: a symlink for the .deb is refused", code == kNotVerified && !ran.called, why);
+	}
+	return all;
+}
+
+void removeTree(const std::string& path) {
+	if (g_file_test(path.c_str(), G_FILE_TEST_IS_DIR) && !g_file_test(path.c_str(), G_FILE_TEST_IS_SYMLINK)) {
+		if (GDir* d = g_dir_open(path.c_str(), 0, nullptr)) {
+			while (const gchar* n = g_dir_read_name(d)) removeTree(path + "/" + n);
+			g_dir_close(d);
+		}
+		g_rmdir(path.c_str());
+	} else {
+		g_remove(path.c_str());
+	}
+}
+
 }  // namespace
+
+int Updater_SelfTest(int argc, char** argv) {
+	std::string release, key;
+	for (int i = 1; i + 1 < argc; i++) {
+		if (strcmp(argv[i], "--release") == 0) release = argv[++i];
+		else if (strcmp(argv[i], "--key") == 0) key = argv[++i];
+	}
+	std::string report;
+	bool ok = true;
+	if (!release.empty()) {
+		// A folder the signing script signed (with a key made for the test).
+		report += "Signed folder " + release + "\n";
+		ok = updatesig::checkSignedFolder(release, key, hooksFor(Kind::Deb, debName()), readWhole, report);
+	} else {
+		gchar* dir = g_dir_make_tmp("cl-update-test-XXXXXX", nullptr);
+		if (!dir) { fprintf(stderr, "no temporary folder\n"); return 2; }
+		report += "AppImage updates\n";
+		ok = updatesig::selfTest(std::string(dir) + "/appimage", hooksFor(Kind::AppImage, "CedarLogic-Native-0.4.0-" + cpuArch() + ".AppImage"),
+		                         report) && ok;
+		report += ".deb updates\n";
+		ok = updatesig::selfTest(std::string(dir) + "/deb", hooksFor(Kind::Deb, debName()), report) && ok;
+		ok = rootStepTest(std::string(dir) + "/rootstep", report) && ok;
+		removeTree(dir);
+		g_free(dir);
+	}
+	fputs(report.c_str(), stdout);
+	printf("update self-test (this build: %s, build %lld): %s\n", CL_GIT_COMMIT, (long long)CL_BUILD_TIME, ok ? "all passed" : "FAILED");
+	return ok ? 0 : 1;
+}
+
+int Updater_InstallUpdateAsRoot(int argc, char** argv) {
+	if (argc != 6) {
+		fprintf(stderr, "E: CedarLogic: usage: cedarlogic --install-update <deb> <manifest> <signature> <name>\n");
+		return kNotVerified;
+	}
+	if (geteuid() != 0) {
+		fprintf(stderr, "E: CedarLogic: --install-update runs as root (through pkexec)\n");
+		return kNotVerified;
+	}
+	std::string why;
+	const int code = installVerifiedDeb(argv[2], argv[3], argv[4], argv[5], updatesig::kPublicKey, (long long)CL_BUILD_TIME, "/var/tmp",
+	                                    aptInstall, why);
+	if (code == kNotVerified) fprintf(stderr, "E: CedarLogic: the update didn't verify, not installing it: %s\n", why.c_str());
+	return code;
+}
 
 void Updater_Initialize(GtkApplication* app) {
 	if (g_timer) return;

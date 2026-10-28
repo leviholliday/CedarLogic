@@ -1226,6 +1226,9 @@ static int syncTest(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+	// The .deb update's root step (Updater.h), run by pkexec: before anything
+	// else, and nothing but that.
+	if (argc >= 2 && strcmp(argv[1], "--install-update") == 0) return Updater_InstallUpdateAsRoot(argc, argv);
 	// Our own options, taken out before GTK sees the rest (files to open).
 	std::vector<char*> args;
 	for (int i = 0; i < argc; i++) {
@@ -1257,6 +1260,8 @@ int main(int argc, char** argv) {
 		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this
 		// machine's hooks (libcrypto, zlib, curl); with a server, also against a mock one.
 		if (strcmp(argv[i], "--sync-test") == 0) return syncTest(argc, argv);
+		// --update-self-test [--release <folder> --key <hex>]: signed updates (Updater.h).
+		if (strcmp(argv[i], "--update-self-test") == 0) return Updater_SelfTest(argc, argv);
 		if (strcmp(argv[i], "--feedback-probe") == 0) {
 			const int code = feedback::probe();
 			printf("feedback server: %d\n", code);
