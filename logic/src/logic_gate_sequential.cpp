@@ -6,6 +6,7 @@
 #include <cmath>
 using namespace std;
 #include "logic_gate.h"
+#include <climits>
 #include "logic_circuit.h"
 
 // ******************************** Register GATE ***********************************
@@ -109,7 +110,9 @@ void Gate_REGISTER::gateProcess( void ) {
 				outBus = ulong_to_bus( currentValue, inBits );
 			} else {
 				// Increment the counter:
-				currentValue = (currentValue + 1) % (maxCount + 1);
+				// (A MAX_COUNT of the largest number has no count past it:
+				// maxCount + 1 is 0, and dividing by it ended the app.)
+				currentValue = (maxCount == ULONG_MAX) ? currentValue + 1 : (currentValue + 1) % (maxCount + 1);
 				outBus = ulong_to_bus( currentValue, inBits );
 			}
 		}

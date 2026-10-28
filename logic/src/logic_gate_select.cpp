@@ -159,6 +159,10 @@ bool Gate_DECODER::setParameter( string paramName, string value ) {
 	istringstream iss(value);
 	if( paramName == "INPUT_BITS" ) {
 		iss >> inBits;
+		// 2^inBits outputs: the library's widest decoder has 4 inputs, and a
+		// file asking for 32 declared four billion outputs (a hang, then the
+		// memory gone). 12 inputs is 4,096 outputs, far past any real one.
+		if( inBits > 12 ) inBits = 12;
 
 		// Declare the selection pins!
 		if( inBits > 0 ) {
@@ -211,7 +215,10 @@ void Gate_PRI_ENCODER::gateProcess(void) {
 
 	vector< StateType > outBus(outBits, ZERO); // All bits are 0
 
-	int outBusSize = (unsigned long)ceil(log((double)inBits) / log(2.0)); // The size of output will be lg of input size
+	// The size of output is lg of the input size (outBits, set with it; worked
+	// out here from inBits it was log(0) for a part with no inputs, and
+	// converting -infinity is undefined).
+	int outBusSize = (int)outBits;
 
 	bool enabled = true;
 	bool isValid = false;

@@ -293,6 +293,30 @@ static void simulationEdges() {
 		cl_document_close(doc);
 	}
 
+	// A counter whose MAX_COUNT is the largest number (maxCount + 1 is 0, and
+	// counting up divided by it), an encoder with no inputs (log 0), a decoder
+	// asked for 32 inputs (four billion outputs).
+	auto wire = [](const char* id, const char* g1, const char* p1, const char* g2, const char* p2) {
+		// Any shape: one that misses its pins is redrawn from them on open.
+		return std::string("    (wire (ids \"") + id + "\") (seg \"0\" h (pts 0 0 1 0) (connect \"" + g1 + "\" \"" + p1 +
+		       "\") (connect \"" + g2 + "\" \"" + p2 + "\")))\n";
+	};
+	doc = openText(page0(gate("AA_REGISTER4", "1", "0", "0", " (lparam \"MAX_COUNT\" \"18446744073709551615\") (lparam \"CURRENT_VALUE\" \"18446744073709551614\")") +
+	                     gate("BB_CLOCK", "2", "-20", "0", " (lparam \"HALF_CYCLE\" \"1\")") +
+	                     gate("AA_TOGGLE", "3", "-20", "6", " (lparam \"OUTPUT_NUM\" \"1\")") +
+	                     gate("AA_TOGGLE", "4", "-20", "12", " (lparam \"OUTPUT_NUM\" \"1\")") +
+	                     gate("CB_PRI_ENCODER_4x2", "8", "20", "0", " (lparam \"INPUT_BITS\" \"0\")") +
+	                     gate("BA_DECODER_2x4", "9", "40", "0", " (lparam \"INPUT_BITS\" \"32\")") +
+	                     wire("5", "2", "CLK", "1", "clock") + wire("6", "3", "OUT_0", "1", "count_enable") + wire("7", "4", "OUT_0", "1", "count_up")));
+	CHECK(doc != nullptr, "a counter to the largest number, an encoder with no inputs and a 32-input decoder open");
+	if (doc) {
+		CHECK(doc->circuit.getGate(1)->isConnected("clock") && doc->circuit.getGate(1)->isConnected("count_up"), "... the counter wired up");
+		cl_document_set_running(doc, true);
+		for (int i = 0; i < 100; i++) cl_document_tick(doc, 50);
+		CHECK(consistent(doc, "after running"), "... and count and run for 5 s");
+		cl_document_close(doc);
+	}
+
 	// Pages with nothing on them.
 	doc = cl_document_new();
 	cl_document_add_page(doc);

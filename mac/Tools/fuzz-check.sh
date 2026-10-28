@@ -1,7 +1,13 @@
 #!/bin/bash
 # Build the engine and fuzz_edit with AddressSanitizer + UndefinedBehaviorSanitizer and run it.
-#   fuzz-check.sh <first-seed> <seed-count> <ops-per-seed> [start.cdl]
+#   fuzz-check.sh <first-seed> <seed-count> <ops-per-seed> [start.cdl...]
+# (For many seeds in parallel, each with a time cap, run the binary this builds
+# through fuzz-sweep.py; mac/Tools/headless builds it for any machine.)
 set -euo pipefail
+if [ $# -lt 3 ]; then
+	echo "usage: $0 <first-seed> <seed-count> <ops-per-seed> [start.cdl...]" >&2
+	exit 2
+fi
 cd "$(dirname "$0")/../.."
 OBJ=mac/build/fuzz-obj; mkdir -p "$OBJ"
 SAN=address,undefined
