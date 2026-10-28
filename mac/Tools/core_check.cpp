@@ -5,6 +5,7 @@
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
+#include "route/WireRoute.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -408,6 +409,63 @@ static void wireCases() {
 	cl_document_close(doc);
 }
 
+// ---- Smaller things the fuzzers found ------------------------------------------------
+
+static void smallerCases() {
+	printf("smaller things\n");
+	// A version or page number past an int: refused or left out, not wrapped.
+	CLDocument* doc = openText("(cedarlogic (version 4294967299) (generator \"x\") (page 0))");
+	CHECK(doc == nullptr, "a version of 4294967299 isn't read as 3");
+	if (doc) cl_document_close(doc);
+	doc = openText("(cedarlogic (version 3) (generator \"x\") (page 4294967296" + gate("AA_TOGGLE", "1", "0", "0") + "))");
+	CHECK(doc != nullptr && doc->page(0)->getGateList()->empty(), "a page 4294967296 isn't read as page 0");
+	if (doc) cl_document_close(doc);
+
+	// A register as wide as a bus may be shows 8 digits, not a crash.
+	doc = openText(page0(gate("AA_REGISTER4", "1", "0", "0", " (lparam \"INPUT_BITS\" \"64\") (lparam \"CURRENT_VALUE\" \"-7\")")));
+	CHECK(doc != nullptr && consistent(doc, "after open"), "a register 64 bits wide opens");
+	if (doc) cl_document_close(doc);
+
+	// The same crossing kept under two positions (float noise): kept once.
+	const std::string parts = gate("AA_TOGGLE", "1", "0", "0") + gate("AA_INVERTER", "2", "10", "10") + gate("GA_LED", "3", "20", "-10");
+	doc = openText(page0(parts + "    (wire (ids \"5\")\n"
+		"      (seg \"0\" v (pts 4 -10 4 10) (cross -10 \"2\") (cross 0 \"1\") (cross 0.0000004 \"1\") (cross 10 \"3\"))\n"
+		"      (seg \"1\" h (pts 1.5 0 4 0) (connect \"1\" \"OUT_0\") (cross 4 \"0\"))\n"
+		"      (seg \"2\" h (pts 4 -10 19.24 -10) (connect \"3\" \"N_in0\") (cross 4 \"0\"))\n"
+		"      (seg \"3\" h (pts 4 10 7 10) (connect \"2\" \"IN_0\") (cross 4 \"0\")))\n"));
+	CHECK(doc != nullptr && consistent(doc, "after open") && saveIsStable(doc), "a crossing recorded twice opens once, and saves stably");
+	if (doc) cl_document_close(doc);
+
+	// Routing a straight trunk with the next id 0 gave a branch the trunk's id.
+	cl::route::RouteInput in;
+	in.pins = { { 0, 0, false }, { 10, 5, false }, { 0, 10, false } };
+	in.snapTrunk = true;
+	in.nextId = 0;
+	cl::route::RouteResult out = cl::route::TrunkRouter().route(in);
+	bool unique = true;
+	for (size_t i = 0; i < out.segments.size(); i++)
+		for (size_t j = i + 1; j < out.segments.size(); j++) unique = unique && out.segments[i].id != out.segments[j].id;
+	CHECK(unique && out.segments.size() == 4, "a three-pin trunk route gives every segment its own id");
+
+	// A rotated part's pins sit a few millionths off the grid: saves still agree.
+	doc = cl_document_new();
+	cl_edit_add_gate(doc, 0, "AA_AND2", 0, 0);
+	guiGate* a = doc->circuit.getGate(newest(doc, 0));
+	cl_edit_add_gate(doc, 0, "GA_LED", 12, 7);
+	guiGate* led = doc->circuit.getGate(newest(doc, 0));
+	cl_edit_select_none(doc, 0);
+	a->select();
+	for (int i = 0; i < 3; i++) cl_edit_rotate(doc, 0);
+	float ax = 0, ay = 0, lx = 0, ly = 0;
+	a->getHotspotCoords("OUT", ax, ay);
+	led->getHotspotCoords("N_in0", lx, ly);
+	cl_edit_press(doc, 0, ax, ay, 0, 0.05);
+	cl_edit_drag(doc, lx, ly);
+	cl_edit_release(doc, lx, ly);
+	CHECK(a->isConnected("OUT") && consistent(doc, "after wiring") && saveIsStable(doc), "a wire on a rotated part saves the same after reopening");
+	cl_document_close(doc);
+}
+
 // A part drag that broke a wire (fuzz_edit seed 147, a 2000-op session,
 // saved just before with CL_FUZZ_SAVEBEFORE): the circuit, and the same drag.
 // (Seed 104, a wire in two pieces, needs the session's own history to happen
@@ -444,6 +502,7 @@ int main(int argc, char** argv) {
 	hostileClipboard();
 	simulationEdges();
 	wireCases();
+	smallerCases();
 	if (!fixtures.empty()) dragCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
