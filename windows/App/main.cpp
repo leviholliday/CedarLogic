@@ -303,12 +303,13 @@ void CALLBACK menuTestTick(HWND, UINT, UINT_PTR id, DWORD) {
 		const HMENU win = GetSubMenu(w->menuBarMenus(), 5);
 		for (int i = 0; win && i < GetMenuItemCount(win); i++) listed = listed || GetMenuItemID(win, i) == (UINT)CMD_WINDOW_LIST;
 		menuCheck(t->openMenuIndex() == 5 && listed, "Alt+W: Window opens, listing this circuit");
-		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
-		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
+		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);   // Window closes; the bar keeps the keys
 		break;
 	}
 	default:
 		KillTimer(nullptr, id);
+		menuCheck(t->openMenuIndex() == -1 && t->keyMenuIndex() == 5, "Escape: Window closes, the bar keeps the keys on Window");
+		SendMessageW(bar, WM_KEYDOWN, VK_ESCAPE, 0);
 		menuCheck(!t->menuKeysActive() && t->openMenuIndex() == -1, "Everything closed again");
 		writeOut(strf("menu test: %d failed\n", gMenuFailures));
 		prefs() = gPrefsBefore;

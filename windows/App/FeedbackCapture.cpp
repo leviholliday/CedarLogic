@@ -729,30 +729,46 @@ double probeVideo(const std::string& file, const std::string& framePng) {
 		hr = reader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, &flags, &ts, &sample);
 		if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 		if (!sample) continue;
+		// The decoder pads its rows (H.264 works in 16-pixel blocks): each row
+		// is read at the buffer's own pitch, which is negative when the rows
+		// run bottom up.
 		IMFMediaBuffer* buf = nullptr;
+		IMF2DBuffer* flat = nullptr;
 		BYTE* data = nullptr;
 		DWORD len = 0;
-		if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buf)) && SUCCEEDED(buf->Lock(&data, nullptr, &len)) && len >= w * h * 4 && w && h) {
+		LONG pitch = 0;
+		bool locked2d = false, locked = false;
+		if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buf)) && w && h) {
+			if (SUCCEEDED(buf->QueryInterface(IID_PPV_ARGS(&flat))) && SUCCEEDED(flat->Lock2D(&data, &pitch))) locked2d = true;
+			else if (SUCCEEDED(buf->Lock(&data, nullptr, &len)) && len >= w * h * 4) {
+				locked = true;
+				pitch = (LONG)(len / h);
+				if (!topDown) { data += (size_t)(h - 1) * pitch; pitch = -pitch; }
+			}
+		}
+		if (locked2d || locked) {
 			Dib d;
 			std::vector<uint32_t> px((size_t)w * h);
-			for (UINT32 y = 0; y < h; y++)
-				memcpy(&px[(size_t)(topDown ? y : h - 1 - y) * w], data + (size_t)y * w * 4, (size_t)w * 4);
+			for (UINT32 y = 0; y < h; y++) memcpy(&px[(size_t)y * w], data + (ptrdiff_t)y * pitch, (size_t)w * 4);
 			d.bits = px.data();
 			d.w = (int)w;
 			d.h = (int)h;
 			const RECT all = { 0, 0, (LONG)w, (LONG)h };
-			IWICBitmap* b = toWic(d, all);
+			IWICBitmap* bmp = toWic(d, all);
 			d.bits = nullptr;
 			d.w = d.h = 0;
-			if (b) {
-				savePng(b, framePng);
-				b->Release();
+			if (bmp) {
+				savePng(bmp, framePng);
+				bmp->Release();
 			}
-			buf->Unlock();
+			if (locked2d) flat->Unlock2D();
+			else buf->Unlock();
+			release(flat);
 			release(buf);
 			release(sample);
 			break;
 		}
+		release(flat);
 		release(buf);
 		release(sample);
 	}
