@@ -1,7 +1,9 @@
 // Crash reports, through Sentry (the service the wx app reports to), into
 // the project whose address build.sh writes into Info.plist (SentryDSN).
 // A report says where the app was when it crashed: the stack, macOS, the
-// version. Never a circuit, a file or a name. Testers are asked once, and
+// version. Never a circuit, a file or a name: Sentry's automatic trail of
+// clicks, network requests and failed requests is off, and a path in the
+// home folder loses its user name before it goes. Testers are asked once, and
 // Settings > General turns it on or off; a lab can switch it off for
 // everyone with the wx app's policy key, DisableCrashReporting.
 
@@ -53,6 +55,14 @@ enum CrashReports {
             // Crashes only: "app hanging" reports (any 2 s the main thread is
             // busy, a save panel open included) read as errors and aren't.
             o.enableAppHangTracking = false
+            // No trail of what led up to it (clicks, windows, the addresses
+            // the app talked to), and no reports of failed requests: none of
+            // that is "where it went wrong", and the question promises no more.
+            o.enableAutoBreadcrumbTracking = false
+            o.enableNetworkBreadcrumbs = false
+            o.enableNetworkTracking = false
+            o.enableCaptureFailedRequests = false
+            o.beforeSend = scrubUserNames
         }
         started = true
         // Development: CL_TEST_CRASH=1 crashes the app a few seconds after
@@ -63,6 +73,50 @@ enum CrashReports {
         #endif
     }
     private static var started = false
+
+    #if canImport(Sentry)
+    /// /Users/<name>/ becomes /Users/<user>/ in every path the report carries
+    /// (the app, its frameworks and anything in a message), wherever the app
+    /// was opened from.
+    nonisolated static func scrubUserNames(_ event: Event) -> Event? {
+        event.message?.message = scrubbed(event.message?.message)
+        for e in event.exceptions ?? [] {
+            e.value = scrubbed(e.value)
+            scrub(e.stacktrace)
+        }
+        for t in event.threads ?? [] { scrub(t.stacktrace) }
+        scrub(event.stacktrace)
+        for image in event.debugMeta ?? [] { image.codeFile = scrubbed(image.codeFile) }
+        for crumb in event.breadcrumbs ?? [] {
+            crumb.message = scrubbed(crumb.message)
+            for (key, value) in scrubbed(crumb.data ?? [:]) { crumb.setData(value: value, key: key) }
+        }
+        event.extra = event.extra.map(scrubbed)
+        event.context = event.context?.mapValues(scrubbed)
+        return event
+    }
+
+    private nonisolated static func scrub(_ stack: SentryStacktrace?) {
+        for f in stack?.frames ?? [] {
+            f.package = scrubbed(f.package)
+            f.fileName = scrubbed(f.fileName)
+        }
+    }
+
+    private nonisolated static func scrubbed(_ values: [String: Any]) -> [String: Any] {
+        values.mapValues { v in
+            if let s = v as? String { return scrubbed(s) }
+            if let d = v as? [String: Any] { return scrubbed(d) }
+            if let a = v as? [Any] { return a.map { ($0 as? String).map(scrubbed) ?? $0 } }
+            return v
+        }
+    }
+    #endif
+
+    nonisolated static func scrubbed(_ text: String) -> String {
+        text.replacingOccurrences(of: "/Users/[^/]+/", with: "/Users/<user>/", options: .regularExpression)
+    }
+    private nonisolated static func scrubbed(_ text: String?) -> String? { text.map { scrubbed($0) } }
 
     /// Settings: on or off. Off takes effect from the next launch, so a
     /// report already being written still goes.
