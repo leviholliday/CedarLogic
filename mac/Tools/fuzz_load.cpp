@@ -19,7 +19,8 @@
 //
 // Environment: CL_FUZZ_DUMP=<dir> keeps the file that failed (or crashed, or
 // hung) as <dir>/load-seed<s>.cdl, to rerun as above; CL_FUZZ_TRACE=1
-// prints each try; CL_FUZZ_HANG=<seconds> is how long one file may take (20).
+// prints each try; CL_FUZZ_HANG=<seconds> is how long one file may take (60:
+// under ASan, on a busy machine, a few-megabyte file can take 20).
 #include "DocumentImpl.h"
 #include <csignal>
 #include <cstdio>
@@ -354,7 +355,7 @@ int main(int argc, char** argv) {
 	if (starts.empty()) starts.push_back(builtIn());
 	const bool trace = getenv("CL_FUZZ_TRACE") != nullptr;
 	const char* hang = getenv("CL_FUZZ_HANG");
-	const unsigned hangSeconds = hang ? (unsigned)atoi(hang) : 20;
+	const unsigned hangSeconds = hang ? (unsigned)atoi(hang) : 60;
 	cl_set_settle_on_open(true);
 
 	signal(SIGALRM, onFatal);
