@@ -287,3 +287,38 @@ Settings... (Cmd+,) in the app menu (`CedarLogicApp.swift:61`, `PrefsWindow.shar
 - Examples are generated in Swift (`Templates.swift`, `TemplatesExamples.swift` via `mac/Tools/make-example-templates.mjs`); Windows and Linux build templates in C++ (`Collections.cpp`). A shared C++ example generator would serve all three.
 - Web items to unlock are exactly the V4 checklist's: scope, split, formula, history, Straighten, wire dragging; the `APP_ONLY` lists in `scripts/build_pages.py:213` and `sim.js:590` must shrink in step (checked by `test_sim_files.mjs`).
 - Windows and Linux already have 0.4 What's New and tour text that mention Check My Circuit, lab reports, share links and sync (`Welcome.cpp`); update it when the missing features land.
+
+## 6. Windows re-checked, 2026-10-28 (branch ui/windows-menubar)
+
+Sections 1 to 4 above are from 2026-10-15 and are stale for Windows: the
+core has since been merged (Ink, PageLinks, CheckClocked, Sync device
+removal and profile name are all in `mac/CedarCore`, and 5dbb585 is an
+ancestor). Every Windows "no" or "partial" row, read again in
+`windows/App`:
+
+| Row | Windows now | Evidence |
+|---|---|---|
+| Lock in Place (part), Unlock All | yes | `CMD_LOCK_IN_PLACE`, Circuit menu, right-click menu |
+| Find Next / Previous | yes | Edit menu, F3 / Shift+F3 (`CMD_FIND_NEXT`) |
+| Page links, Connect/Disconnect All Pages | yes | Circuit menu, tab menu (`cl_pages_*` in `Window.cpp`) |
+| Drawing on the circuit; Notes | yes | `Ink.h`, `Notes.cpp`, View menu |
+| Straighten / Tidy Up on the fixed core | yes | core includes 5dbb585 |
+| Step Clock, click a clock, toolbar button | yes | `CMD_STEP_CLOCK`, `cl_document_clock_step`, `showStepClock` |
+| Check My Circuit, clocked | yes | `cl_check_clocked*` in `TruthTableWindow.cpp`; CI `check-timing*.png` |
+| Sync: remove a device, name on every device | yes | `SyncApp.cpp` removeDevice / profileName |
+| New pages share links | yes | `prefs().newPagesShareLinks` |
+| Examples | yes (26, the Mac's own files) | `res/templates/templates.txt` |
+| Projector mode | **closed on this branch** | View > Projector Mode, `cl_simview_draw_page` |
+| Feedback screen recording | **closed on this branch** | `FeedbackCapture.cpp` |
+| Menu bar / Settings location | **closed on this branch** | real menu bar, File > Settings (Ctrl+,) |
+| Help > Welcome to CedarLogic | **closed on this branch** | `welcome::show` |
+| Predict, then Reveal | no | core has it (`cl_simview_draw_predict`, `cl_simview_light_at`); Windows needs the guess/reveal UI of the Mac's `Predict.swift`. No core change needed; a UI round of its own |
+| Export as Image: Match Window (dark) look, Share | partial | PNG and PDF, Colour / B&W, drawing included (`Export.cpp`); no dark look, no Windows share sheet |
+| Tabs Modern / Classic setting | no | low impact; Windows tabs are the Modern cards |
+| Beta / normal testing group | no | planned for the 0.4 release phase (updater channel + Settings choice) |
+| Crash reports | no | no reporting service on Windows |
+| Screen reader labels, high contrast | no | owner-drawn UI has no UI Automation; a project of its own |
+| Classroom, Sync side records | no | Classroom is out of 0.4 |
+| Presenter mode | n/a | Mac only |
+
+Nothing found here needs a change to the shared core.
