@@ -697,6 +697,20 @@ bool guiWire::isSoundShape(const map < long, wireSegment > &shape, std::string *
 		}
 	for (size_t i = 1; i < segs.size(); i++)
 		if (root(i) != root(0)) return no("it is in pieces");
+	// Two runs along one line that meet are one run: the merge a load does
+	// joins them.
+	for (size_t i = 0; i < segs.size(); i++)
+		for (size_t j = i + 1; j < segs.size(); j++) {
+			const wireSegment &a = *segs[i], &b = *segs[j];
+			if (a.isVertical() != b.isVertical()) continue;
+			const bool v = a.isVertical();
+			if (std::fabs(v ? a.begin.x - b.begin.x : a.begin.y - b.begin.y) > EQUALRANGE) continue;
+			const float alo = v ? (std::min)(a.begin.y, a.end.y) : (std::min)(a.begin.x, a.end.x);
+			const float ahi = v ? (std::max)(a.begin.y, a.end.y) : (std::max)(a.begin.x, a.end.x);
+			const float blo = v ? (std::min)(b.begin.y, b.end.y) : (std::min)(b.begin.x, b.end.x);
+			const float bhi = v ? (std::max)(b.begin.y, b.end.y) : (std::max)(b.begin.x, b.end.x);
+			if (alo <= bhi + EQUALRANGE && blo <= ahi + EQUALRANGE) return no("two runs lie along one line");
+		}
 	return true;
 }
 
