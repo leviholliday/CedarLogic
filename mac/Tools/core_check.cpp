@@ -408,6 +408,32 @@ static void wireCases() {
 	cl_document_close(doc);
 }
 
+// A part drag that broke a wire (fuzz_edit seed 147, a 2000-op session,
+// saved just before with CL_FUZZ_SAVEBEFORE): the circuit, and the same drag.
+// (Seed 104, a wire in two pieces, needs the session's own history to happen
+// again; the fuzz runs in CI cover it.)
+static void dragCases() {
+	printf("a part drag never leaves a wire broken\n");
+	struct Case { const char* file; int page; bool all; double x0, y0, x1, y1; int steps; const char* what; };
+	const Case cases[] = {
+		{ "drag-leaves-a-dot.cdl", 4, false, 22.50, 28.85, 21.10, 17.50, 5, "a wire on a part's pins leaves no run of no length" },
+	};
+	for (const Case& c : cases) {
+		const std::string text = readFile(fixtures + "/../../../tests/fixtures/core/" + c.file);
+		CLDocument* doc = openText(text);
+		if (doc == nullptr) { CHECK(false, c.file); continue; }
+		if (c.all) cl_edit_select_all(doc, c.page); else cl_edit_select_none(doc, c.page);
+		cl_edit_press(doc, c.page, c.x0, c.y0, 0, 0.05);
+		for (int i = 1; i <= c.steps; i++)
+			cl_edit_drag(doc, c.x0 + (c.x1 - c.x0) * i / c.steps, c.y0 + (c.y1 - c.y0) * i / c.steps);
+		cl_edit_release(doc, c.x1, c.y1);
+		CHECK(consistent(doc, "after the drag") && saveIsStable(doc), c.what);
+		cl_edit_undo(doc);
+		CHECK(consistent(doc, "after Undo"), "... and Undo puts it back whole");
+		cl_document_close(doc);
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
@@ -418,6 +444,7 @@ int main(int argc, char** argv) {
 	hostileClipboard();
 	simulationEdges();
 	wireCases();
+	if (!fixtures.empty()) dragCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;

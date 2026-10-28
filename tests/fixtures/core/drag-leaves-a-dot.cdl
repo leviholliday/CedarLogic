@@ -1,0 +1,2596 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AI_XOR2"
+      (uuid "40")
+      (at -23.20084 -3.505120039)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BA_DECODER_2x4"
+      (uuid "43")
+      (at -6.064439774 14.68920135)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_LABEL"
+      (uuid "45")
+      (at 23.79916 33.49488068)
+      (angle 180)
+      (gparam "LABEL_TEXT" "Text")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "BB_CLOCK"
+      (uuid "53")
+      (at 2.799160004 -9.505120277)
+      (angle 0)
+      (lparam "HALF_CYCLE" "5"))
+    (gate "DA_FROM"
+      (uuid "55")
+      (at 16.29916 -3.005120039)
+      (angle 180)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BA_ROM_4x4"
+      (uuid "59")
+      (at -11.20084 33.49488068)
+      (angle 270)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "DM_NOR8"
+      (uuid "61")
+      (at -27.70084 -9.505120277)
+      (angle 180)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BE_DECODER_3x8"
+      (uuid "62")
+      (at -5.200839996 -5.505120277)
+      (angle 180)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_DFF_LOW_NT"
+      (uuid "64")
+      (at 13.79916 -23.00511932)
+      (angle 270)
+      (lparam "CURRENT_VALUE" "1")
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "GA_LED"
+      (uuid "65")
+      (at -24.20084 13.99487972)
+      (angle 270))
+    (gate "AA_AND4"
+      (uuid "66")
+      (at -0.7008399963 14.99488068)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_AND4"
+      (uuid "67")
+      (at 23.49999809 -21.5)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DA_AND8"
+      (uuid "68")
+      (at 28 5)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "AE_OR4"
+      (uuid "69")
+      (at 32.72983932 -31.47559929)
+      (angle 270)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_FULLADDER_1BIT"
+      (uuid "70")
+      (at 9 1)
+      (angle 270)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DU_NORX8"
+      (uuid "71")
+      (at -6.5 -16.5)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BA_ROM_4x4"
+      (uuid "72")
+      (at 20 10.5)
+      (angle 180)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "BE_NOR3"
+      (uuid "73")
+      (at -28.5 -8.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AI_XOR2"
+      (uuid "74")
+      (at 33.29920197 -17.00001907)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BA_DECODER_2x4"
+      (uuid "75")
+      (at 36.43560028 17.1942997)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_LABEL"
+      (uuid "76")
+      (at 80.29920197 20)
+      (angle 180)
+      (gparam "LABEL_TEXT" "Text")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "BB_CLOCK"
+      (uuid "77")
+      (at 53.79916 -14.00002003)
+      (angle 0)
+      (lparam "HALF_CYCLE" "5"))
+    (gate "DA_FROM"
+      (uuid "78")
+      (at 54.55812073 -1.387260079)
+      (angle 90)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BA_ROM_4x4"
+      (uuid "79")
+      (at 45.29920197 20)
+      (angle 270)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "DM_NOR8"
+      (uuid "80")
+      (at 39.29920197 -15.50002003)
+      (angle 180)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BE_DECODER_3x8"
+      (uuid "81")
+      (at 51.29916 -19.00001907)
+      (angle 180)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_DFF_LOW_NT"
+      (uuid "82")
+      (at 70.29920197 -36.5)
+      (angle 270)
+      (lparam "CURRENT_VALUE" "1")
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "GA_LED"
+      (uuid "83")
+      (at 32.29920197 0.5)
+      (angle 270))
+    (gate "AA_AND4"
+      (uuid "84")
+      (at 40.79920197 2.5)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_AND4"
+      (uuid "85")
+      (at 80 -34.99489975)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DA_AND8"
+      (uuid "86")
+      (at 65.5 -7.49489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "AE_OR4"
+      (uuid "87")
+      (at 84 -41.49489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_FULLADDER_1BIT"
+      (uuid "88")
+      (at 65.5 -12.49489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DU_NORX8"
+      (uuid "89")
+      (at 66.63183594 -23.66958046)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BA_ROM_4x4"
+      (uuid "90")
+      (at 80 0.5051002502)
+      (angle 180)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "BE_NOR3"
+      (uuid "91")
+      (at 14.5 -35.99489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_SMALL_INVERTER"
+      (uuid "92")
+      (at -28 -7.5)
+      (angle 0)
+      (lparam "DEFAULT_DELAY" "1")
+      (lparam "INPUT_BITS" "1"))
+    (gate "BM_NORX3"
+      (uuid "93")
+      (at -21 -20)
+      (angle 270)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_OR2"
+      (uuid "95")
+      (at 24.5 1)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AE_RAM_8x8"
+      (uuid "96")
+      (at 0.5 11.5)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "8")
+      (lparam "DATA_BITS" "8"))
+    (gate "DE_TO"
+      (uuid "97")
+      (at -6 -18)
+      (angle 0)
+      (lparam "JUNCTION_ID" "TO"))
+    (gate "AI_INVERTER_4BIT"
+      (uuid "98")
+      (at 13.5 15.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DM_NOR8"
+      (uuid "99")
+      (at 1.5 -15.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BB_CLOCK"
+      (uuid "100")
+      (at 16.5 0.5)
+      (angle 0)
+      (lparam "HALF_CYCLE" "5"))
+    (gate "BI_ROM_12x16"
+      (uuid "101")
+      (at 26 -6.5)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "12")
+      (lparam "DATA_BITS" "16"))
+    (gate "DM_NOR8"
+      (uuid "104")
+      (at -15 -18.5)
+      (angle 180)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BE_NOR3"
+      (uuid "124")
+      (at 8.5 -4.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AA_TOGGLE"
+      (uuid "140")
+      (at -23 20)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DA_FROM"
+      (uuid "143")
+      (at 12 -20.5)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BE_DECODER_3x8"
+      (uuid "144")
+      (at -30 19)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "CD_PRI_ENCODER_16x4"
+      (uuid "145")
+      (at 29 8.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "16"))
+    (gate "BI_NANDX3"
+      (uuid "152")
+      (at -0.5 24)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AA_LABEL"
+      (uuid "153")
+      (at -4 4)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Text")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "BE_COMPARATOR_4BIT"
+      (uuid "154")
+      (at 19 20.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_RAM_4x4"
+      (uuid "159")
+      (at 24.5 -27.5)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "GI_LED_DISPLAY_8BIT"
+      (uuid "166")
+      (at 20 9.5)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "8")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "CA_SMALL_TGATE"
+      (uuid "167")
+      (at 21 27)
+      (angle 0)
+      (lparam "DEFAULT_DELAY" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "179")
+      (at -18 20)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "BA_NAND4"
+      (uuid "182")
+      (at 19 -10)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DA_FROM"
+      (uuid "183")
+      (at -1 13)
+      (angle 270)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BW_8X1_BUS_END"
+      (uuid "188")
+      (at 26 23)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "AA_AND3"
+      (uuid "192")
+      (at 7.5 -28)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AI_XOR2"
+      (uuid "203")
+      (at -7.700799942 -34.00001907)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BA_DECODER_2x4"
+      (uuid "204")
+      (at 9.435560226 -15.80569935)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_LABEL"
+      (uuid "205")
+      (at 39.29920197 3)
+      (angle 180)
+      (gparam "LABEL_TEXT" "Text")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "BB_CLOCK"
+      (uuid "206")
+      (at 18.29916 -40.00001907)
+      (angle 0)
+      (lparam "HALF_CYCLE" "5"))
+    (gate "DA_FROM"
+      (uuid "207")
+      (at 31.79920006 -33.50001907)
+      (angle 180)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BA_ROM_4x4"
+      (uuid "208")
+      (at 4.299200058 3)
+      (angle 270)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "DM_NOR8"
+      (uuid "209")
+      (at -12.20079994 -40.00001907)
+      (angle 180)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BE_DECODER_3x8"
+      (uuid "210")
+      (at 10.29916 -36.00001907)
+      (angle 180)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_DFF_LOW_NT"
+      (uuid "211")
+      (at 29.29920006 -53.5)
+      (angle 270)
+      (lparam "CURRENT_VALUE" "1")
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "GA_LED"
+      (uuid "212")
+      (at -8.700799942 -16.5)
+      (angle 270))
+    (gate "AA_AND4"
+      (uuid "213")
+      (at 14.79916 -15.5)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_AND4"
+      (uuid "214")
+      (at 39 -51.99489975)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DA_AND8"
+      (uuid "215")
+      (at 43.5 -25.49489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "AE_OR4"
+      (uuid "216")
+      (at 48.22980118 -61.97049713)
+      (angle 270)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_FULLADDER_1BIT"
+      (uuid "217")
+      (at 24.5 -29.49489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DU_NORX8"
+      (uuid "218")
+      (at 9 -46.99489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BA_ROM_4x4"
+      (uuid "219")
+      (at 35.5 -19.99489975)
+      (angle 180)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "BE_NOR3"
+      (uuid "220")
+      (at -13 -38.99489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AI_XOR2"
+      (uuid "221")
+      (at 48.79919815 -47.49489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BA_DECODER_2x4"
+      (uuid "222")
+      (at 51.93560028 -13.30060005)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_LABEL"
+      (uuid "223")
+      (at 95.79920197 -10.49489975)
+      (angle 180)
+      (gparam "LABEL_TEXT" "Text")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "BB_CLOCK"
+      (uuid "224")
+      (at 69.29919434 -44.49489975)
+      (angle 0)
+      (lparam "HALF_CYCLE" "5"))
+    (gate "DA_FROM"
+      (uuid "225")
+      (at 70.05810547 -31.88216019)
+      (angle 90)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BA_ROM_4x4"
+      (uuid "226")
+      (at 60.79919815 -10.49489975)
+      (angle 270)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "DM_NOR8"
+      (uuid "227")
+      (at 54.79919815 -45.99489975)
+      (angle 180)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BE_DECODER_3x8"
+      (uuid "228")
+      (at 66.79919434 -49.49489975)
+      (angle 180)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_DFF_LOW_NT"
+      (uuid "229")
+      (at 85.79920197 -66.99490356)
+      (angle 270)
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "GA_LED"
+      (uuid "230")
+      (at 47.79919815 -29.99489975)
+      (angle 270))
+    (gate "AA_AND4"
+      (uuid "231")
+      (at 56.29919815 -27.99489975)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_AND4"
+      (uuid "232")
+      (at 95.5 -65.4897995)
+      (angle 180)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DA_AND8"
+      (uuid "233")
+      (at 81 -37.9897995)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "AE_OR4"
+      (uuid "234")
+      (at 99.5 -71.9897995)
+      (angle 270)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_FULLADDER_1BIT"
+      (uuid "235")
+      (at 81 -42.9897995)
+      (angle 270)
+      (lparam "INPUT_BITS" "1"))
+    (gate "DU_NORX8"
+      (uuid "236")
+      (at 82.13179779 -54.16449738)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BA_ROM_4x4"
+      (uuid "237")
+      (at 95.5 -29.9897995)
+      (angle 180)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "BE_NOR3"
+      (uuid "238")
+      (at 30 -66.4897995)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_SMALL_INVERTER"
+      (uuid "239")
+      (at -12.5 -37.99489975)
+      (angle 0)
+      (lparam "DEFAULT_DELAY" "1")
+      (lparam "INPUT_BITS" "1"))
+    (gate "BM_NORX3"
+      (uuid "240")
+      (at -5.5 -50.49489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_OR2"
+      (uuid "241")
+      (at 40 -29.49489975)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AE_RAM_8x8"
+      (uuid "242")
+      (at 16 -18.99489975)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "8")
+      (lparam "DATA_BITS" "8"))
+    (gate "DE_TO"
+      (uuid "243")
+      (at 9.5 -48.49489975)
+      (angle 0)
+      (lparam "JUNCTION_ID" "TO"))
+    (gate "AI_INVERTER_4BIT"
+      (uuid "244")
+      (at 29 -14.99489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DM_NOR8"
+      (uuid "245")
+      (at 17 -45.99489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BB_CLOCK"
+      (uuid "246")
+      (at 32 -29.99489975)
+      (angle 0)
+      (lparam "HALF_CYCLE" "5"))
+    (gate "BI_ROM_12x16"
+      (uuid "247")
+      (at 41.5 -36.99489975)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "12")
+      (lparam "DATA_BITS" "16"))
+    (gate "DM_NOR8"
+      (uuid "248")
+      (at 0.5 -48.99489975)
+      (angle 180)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BE_NOR3"
+      (uuid "249")
+      (at 13.5 -22.99489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AA_TOGGLE"
+      (uuid "250")
+      (at -7.5 -10.49489975)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DA_FROM"
+      (uuid "251")
+      (at 29.5 -46.49489975)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BE_DECODER_3x8"
+      (uuid "252")
+      (at -14.5 -11.49489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "CD_PRI_ENCODER_16x4"
+      (uuid "253")
+      (at 42.5 -18.99489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "16"))
+    (gate "BI_NANDX3"
+      (uuid "254")
+      (at 15 -6.49489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AA_LABEL"
+      (uuid "255")
+      (at 11.5 -26.49489975)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Text")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "BE_COMPARATOR_4BIT"
+      (uuid "256")
+      (at 34.5 -9.99489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AA_RAM_4x4"
+      (uuid "257")
+      (at 40 -57.99489975)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "GI_LED_DISPLAY_8BIT"
+      (uuid "258")
+      (at 35.5 -20.99489975)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "8")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "CA_SMALL_TGATE"
+      (uuid "259")
+      (at 36.5 -3.49489975)
+      (angle 0)
+      (lparam "DEFAULT_DELAY" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "260")
+      (at -2.5 -10.49489975)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "BA_NAND4"
+      (uuid "261")
+      (at 34.5 -40.49489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DA_FROM"
+      (uuid "262")
+      (at 14.5 -17.49489975)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BW_8X1_BUS_END"
+      (uuid "263")
+      (at 41.5 -7.49489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "AA_AND3"
+      (uuid "264")
+      (at 23 -58.49489975)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AA_FULLADDER_1BIT"
+      (uuid "271")
+      (at 11.5 -20.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "AE_MUX_4x1"
+      (uuid "273")
+      (at 27 3.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "CB_PRI_ENCODER_4x2"
+      (uuid "274")
+      (at 26.5 -22.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DA_AND8"
+      (uuid "275")
+      (at -16.5 15.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BM_NORX2"
+      (uuid "278")
+      (at -8 6)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "CC_PULSE"
+      (uuid "289")
+      (at 8 -24.5)
+      (angle 0)
+      (gparam "PULSE_WIDTH" "1"))
+    (gate "AE_OR2"
+      (uuid "304")
+      (at 0.5 2)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "CB_PRI_ENCODER_4x2"
+      (uuid "309")
+      (at -28.5 12)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (wire
+      (ids "30")
+      (seg "0" v
+        (pts -23.20084 -3.505120039 -23.20084 -2.505120039)
+        (cross -3.505120039 "1")
+        (cross -2.505120039 "2"))
+      (seg "1" h
+        (pts -23.20084 -3.505120039 -20.20084 -3.505120039)
+        (connect "40" "OUT")
+        (cross -23.20084 "0"))
+      (seg "2" h
+        (pts -26.20084 -2.505120039 -23.20084 -2.505120039)
+        (connect "40" "IN_0")
+        (cross -23.20084 "0")))
+    (wire
+      (ids "32")
+      (seg "0" v
+        (pts -4.564433575 -9.505120277 -4.564433575 11.68920422)
+        (connect "43" "OUT_3")
+        (cross -9.505120277 "1")
+        (cross -4.505120277 "2"))
+      (seg "1" h
+        (pts -4.564433575 -9.505120277 6.799160004 -9.505120277)
+        (connect "53" "CLK")
+        (cross -4.564433575 "0"))
+      (seg "2" h
+        (pts -26.20084 -4.505120277 -4.564433575 -4.505120277)
+        (connect "40" "IN_1")
+        (cross -25.5 "3")
+        (cross -4.564433575 "0"))
+      (seg "3" v
+        (pts -25.5 -8.5 -25.5 -4.505120277)
+        (connect "73" "OUT")
+        (cross -4.505120277 "2")))
+    (wire
+      (ids "33")
+      (seg "0" v
+        (pts 12.79915428 -23.00512695 12.79915428 -20.00512123)
+        (connect "64" "clock")
+        (cross -23.00512695 "1"))
+      (seg "1" h
+        (pts 9.799160004 -23.00512695 12.79915428 -23.00512695)
+        (connect "64" "clear")
+        (cross 12.79915428 "0")))
+    (wire
+      (ids "34")
+      (seg "0" v
+        (pts -17.5 -7.5 -17.5 32.99486923)
+        (cross -7.5 "6")
+        (cross -5.005124092 "2")
+        (cross 13.99488449 "3")
+        (cross 32.99486923 "1"))
+      (seg "1" h
+        (pts -17.5 32.99486923 -16.20083809 32.99486923)
+        (connect "59" "DATA_OUT_1")
+        (cross -17.5 "0"))
+      (seg "2" h
+        (pts -17.5 -5.005124092 -8.20084095 -5.005124092)
+        (connect "62" "OUT_3")
+        (cross -17.5 "0"))
+      (seg "3" h
+        (pts -17.5 13.99488449 2.299161434 13.99488449)
+        (connect "66" "IN_1")
+        (cross -17.5 "0"))
+      (seg "6" h
+        (pts -26 -7.5 -17.5 -7.5)
+        (connect "92" "OUT_0")
+        (cross -17.5 "0")))
+    (wire
+      (ids "35")
+      (seg "0" v
+        (pts -3.5 -23.00511169 -3.5 13.99487782)
+        (cross -23.00511169 "2")
+        (cross -3.005116224 "3")
+        (cross 13.99487782 "1"))
+      (seg "1" h
+        (pts -25.20084 13.99487782 -3.5 13.99487782)
+        (connect "65" "N_in2")
+        (cross -3.5 "0"))
+      (seg "2" h
+        (pts -3.5 -23.00511169 17.79916 -23.00511169)
+        (connect "64" "set")
+        (cross -3.5 "0"))
+      (seg "3" h
+        (pts -3.5 -3.005116224 -2.200843334 -3.005116224)
+        (connect "62" "IN_1")
+        (cross -3.5 "0")))
+    (wire
+      (ids "36")
+      (seg "0" v
+        (pts 33.29920197 -17.00001907 33.29920197 -16.00001907)
+        (cross -17.00001907 "1")
+        (cross -16.00001907 "2"))
+      (seg "1" h
+        (pts 33.29920197 -17.00001907 36.29920197 -17.00001907)
+        (connect "74" "OUT")
+        (cross 33.29920197 "0"))
+      (seg "2" h
+        (pts 30.29920197 -16.00001907 33.29920197 -16.00001907)
+        (connect "74" "IN_0")
+        (cross 33.29920197 "0")))
+    (wire
+      (ids "37")
+      (seg "0" v
+        (pts 37.93560028 -18.00001907 37.93560028 14.19430256)
+        (connect "75" "OUT_3")
+        (cross -18.00001907 "2")
+        (cross -14.00002003 "1"))
+      (seg "1" h
+        (pts 37.93560028 -14.00002003 57.79916 -14.00002003)
+        (connect "77" "CLK")
+        (cross 37.93560028 "0"))
+      (seg "2" h
+        (pts 0.2991600037 -18.00001907 37.93560028 -18.00001907)
+        (connect "74" "IN_1")
+        (cross 0.2991600037 "5")
+        (cross 31 "3")
+        (cross 37.93560028 "0"))
+      (seg "3" v
+        (pts 31 -35.99489975 31 -18.00001907)
+        (cross -35.99489975 "4")
+        (cross -18.00001907 "2"))
+      (seg "4" h
+        (pts 17.5 -35.99489975 31 -35.99489975)
+        (connect "91" "OUT")
+        (cross 31 "3"))
+      (seg "5" v
+        (pts 0.2991600037 -18.00001907 0.2991600037 -3.005122662)
+        (cross -18.00001907 "2")
+        (cross -3.005122662 "6"))
+      (seg "6" h
+        (pts 0.2991600037 -3.005122662 14.29916 -3.005122662)
+        (connect "55" "IN_0")
+        (cross 0.2991600037 "5")))
+    (wire
+      (ids "38")
+      (seg "0" v
+        (pts 69.29920197 -36.5 69.29920197 -33.50000381)
+        (connect "82" "clock")
+        (cross -36.5 "1"))
+      (seg "1" h
+        (pts 66.29920197 -36.5 69.29920197 -36.5)
+        (connect "82" "clear")
+        (cross 69.29920197 "0")))
+    (wire
+      (ids "39")
+      (seg "0" v
+        (pts 39 -18.50001907 39 19.5)
+        (cross -18.50001907 "2")
+        (cross 19.5 "1"))
+      (seg "1" h
+        (pts 39 19.5 40.29920197 19.5)
+        (connect "79" "DATA_OUT_1")
+        (cross 39 "0"))
+      (seg "2" h
+        (pts 39 -18.50001907 48.29916 -18.50001907)
+        (connect "81" "OUT_3")
+        (cross 39 "0")))
+    (wire
+      (ids "40")
+      (seg "0" v
+        (pts 53 -36.5 53 0.5)
+        (cross -36.5 "2")
+        (cross 0.5 "1"))
+      (seg "1" h
+        (pts 31.29920197 0.5 53 0.5)
+        (connect "83" "N_in2")
+        (cross 53 "0"))
+      (seg "2" h
+        (pts 53 -36.5 74.29920197 -36.5)
+        (connect "82" "set")
+        (cross 53 "0")))
+    (wire
+      (ids "41")
+      (seg "0" v
+        (pts 35.93559265 -12.49490547 35.93559265 20.19429779)
+        (connect "75" "IN_1")
+        (cross -12.49490547 "1")
+        (cross 13.99488163 "2"))
+      (seg "1" h
+        (pts 35.93559265 -12.49490547 62.5 -12.49490547)
+        (connect "88" "OUT_0")
+        (cross 35.93559265 "0"))
+      (seg "2" h
+        (pts -23.20084 13.99488163 35.93559265 13.99488163)
+        (connect "65" "N_in3")
+        (cross 35.93559265 "0")))
+    (wire
+      (ids "42")
+      (seg "0" v
+        (pts -15 -6.005116463 -15 33.99486923)
+        (cross -6.005116463 "1")
+        (cross 33.99486923 "2"))
+      (seg "1" h
+        (pts -24.70084381 -6.005116463 -15 -6.005116463)
+        (connect "61" "IN_4")
+        (cross -15 "0"))
+      (seg "2" h
+        (pts -16.2008419 33.99486923 -15 33.99486923)
+        (connect "59" "DATA_OUT_2")
+        (cross -15 "0")))
+    (wire
+      (ids "43")
+      (seg "0" v
+        (pts 86.99999237 -38.49489212 86.99999237 31.99487114)
+        (connect "87" "IN_0")
+        (cross 31.99487114 "1"))
+      (seg "1" h
+        (pts -16.20083618 31.99487114 86.99999237 31.99487114)
+        (connect "59" "DATA_OUT_0")
+        (cross 86.99999237 "0")))
+    (wire
+      (ids "45")
+      (seg "0" v
+        (pts 37.5 -14.00001621 37.5 0.5000020266)
+        (cross -14.00001621 "2")
+        (cross 0.5000020266 "1"))
+      (seg "1" h
+        (pts 33.29920197 0.5000020266 37.5 0.5000020266)
+        (connect "83" "N_in3")
+        (cross 37.5 "0"))
+      (seg "2" h
+        (pts 37.5 -14.00001621 42.29919815 -14.00001621)
+        (connect "80" "IN_6")
+        (cross 37.5 "0")))
+    (wire
+      (ids "46")
+      (seg "0" v
+        (pts 65.50000763 -18.50000572 65.50000763 -16.49489975)
+        (connect "88" "carry_in")
+        (cross -18.50000572 "1"))
+      (seg "1" h
+        (pts -19 -18.50000572 65.50000763 -18.50000572)
+        (connect "104" "OUT")
+        (cross 65.50000763 "0")))
+    (wire
+      (ids "60")
+      (seg "0" v
+        (pts -4.000006199 -13.49999523 -4.000006199 -2)
+        (connect "71" "IN_1")
+        (cross -2 "1"))
+      (seg "1" h
+        (pts -4.000006199 -2 17 -2)
+        (connect "101" "ADDRESS_10")
+        (cross -4.000006199 "0")))
+    (wire
+      (ids "62")
+      (seg "0" v
+        (pts 31.49999428 8.000006676 31.49999428 22.5)
+        (connect "68" "IN_0")
+        (cross 22.5 "1"))
+      (seg "1" h
+        (pts -33 22.5 31.49999428 22.5)
+        (connect "144" "ENABLE")
+        (cross 31.49999428 "0")))
+    (wire
+      (ids "68")
+      (seg "0" v
+        (pts 43.79919052 20 43.79919052 24.99999619)
+        (connect "79" "ADDRESS_0")
+        (cross 20 "1"))
+      (seg "1" h
+        (pts -21 20 43.79919052 20)
+        (connect "140" "OUT_0")
+        (cross 43.79919052 "0")))
+    (wire
+      (ids "81")
+      (seg "0" v
+        (pts 56 -13.49489403 56 3.500004053)
+        (cross -13.49489403 "1")
+        (cross 3.500004053 "2"))
+      (seg "1" h
+        (pts 56 -13.49489403 68.5 -13.49489403)
+        (connect "88" "IN_0")
+        (cross 56 "0"))
+      (seg "2" h
+        (pts 43.79920197 3.500004053 56 3.500004053)
+        (connect "84" "IN_2")
+        (cross 56 "0")))
+    (wire
+      (ids "82")
+      (seg "1" h
+        (pts 16 -7 17 -7)
+        (connect "101" "ADDRESS_5")
+        (connect "182" "IN_0")))
+    (wire
+      (ids "83")
+      (seg "1" h
+        (pts 16 -9 17 -9)
+        (connect "101" "ADDRESS_3")
+        (connect "182" "IN_1")))
+    (wire
+      (ids "84")
+      (seg "1" h
+        (pts 16 -11 17 -11)
+        (connect "101" "ADDRESS_1")
+        (connect "182" "IN_2")))
+    (wire
+      (ids "91")
+      (seg "0" v
+        (pts -4 14.99487686 -4 15)
+        (cross 14.99487686 "2")
+        (cross 15 "1"))
+      (seg "1" h
+        (pts -4.5 15 -4 15)
+        (connect "96" "ADDRESS_7")
+        (cross -4 "0"))
+      (seg "2" h
+        (pts -4 14.99487686 -3.700839996 14.99487686)
+        (connect "66" "OUT")
+        (cross -4 "0")))
+    (wire
+      (ids "92")
+      (seg "0" v
+        (pts -1 -20.66957283 -1 4.5)
+        (connect "96" "DATA_IN_5")
+        (connect "96" "DATA_OUT_5")
+        (cross -20.66957283 "1"))
+      (seg "1" h
+        (pts -1 -20.66957283 70.13182831 -20.66957283)
+        (connect "89" "IN_0")
+        (cross -1 "0")))
+    (wire
+      (ids "99")
+      (seg "0" v
+        (pts -7.700799942 -34.00001907 -7.700799942 -33.00001907)
+        (cross -34.00001907 "1")
+        (cross -33.00001907 "2"))
+      (seg "1" h
+        (pts -7.700799942 -34.00001907 -4.700799942 -34.00001907)
+        (connect "203" "OUT")
+        (cross -7.700799942 "0"))
+      (seg "2" h
+        (pts -10.70079994 -33.00001907 -7.700799942 -33.00001907)
+        (connect "203" "IN_0")
+        (cross -7.700799942 "0")))
+    (wire
+      (ids "100")
+      (seg "0" v
+        (pts 10.93556976 -40.00001907 10.93556976 -18.80569649)
+        (connect "204" "OUT_3")
+        (cross -40.00001907 "1")
+        (cross -35.00001907 "2"))
+      (seg "1" h
+        (pts 10.93556976 -40.00001907 22.29916 -40.00001907)
+        (connect "206" "CLK")
+        (cross 10.93556976 "0"))
+      (seg "2" h
+        (pts -10.70079994 -35.00001907 10.93556976 -35.00001907)
+        (connect "203" "IN_1")
+        (cross -10 "3")
+        (cross 10.93556976 "0"))
+      (seg "3" v
+        (pts -10 -38.99489975 -10 -35.00001907)
+        (connect "220" "OUT")
+        (cross -35.00001907 "2")))
+    (wire
+      (ids "101")
+      (seg "0" v
+        (pts 28.29920006 -53.5 28.29920006 -50.50000381)
+        (connect "211" "clock")
+        (cross -53.5 "1"))
+      (seg "1" h
+        (pts 25.29920006 -53.5 28.29920006 -53.5)
+        (connect "211" "clear")
+        (cross 28.29920006 "0")))
+    (wire
+      (ids "102")
+      (seg "0" v
+        (pts -2 -37.99489975 -2 2.5)
+        (cross -37.99489975 "6")
+        (cross -35.50001907 "2")
+        (cross -16.5 "3")
+        (cross 2.5 "1"))
+      (seg "1" h
+        (pts -2 2.5 -0.7007989287 2.5)
+        (connect "208" "DATA_OUT_1")
+        (cross -2 "0"))
+      (seg "2" h
+        (pts -2 -35.50001907 7.299159527 -35.50001907)
+        (connect "210" "OUT_3")
+        (cross -2 "0"))
+      (seg "3" h
+        (pts -2 -16.5 17.79916191 -16.5)
+        (connect "213" "IN_1")
+        (cross -2 "0"))
+      (seg "6" h
+        (pts -10.5 -37.99489975 -2 -37.99489975)
+        (connect "239" "OUT_0")
+        (cross -2 "0")))
+    (wire
+      (ids "103")
+      (seg "0" v
+        (pts 12 -53.5 12 -16.5)
+        (cross -53.5 "2")
+        (cross -33.50001907 "3")
+        (cross -16.5 "1"))
+      (seg "1" h
+        (pts -9.700799942 -16.5 12 -16.5)
+        (connect "212" "N_in2")
+        (cross 12 "0"))
+      (seg "2" h
+        (pts 12 -53.5 33.29919815 -53.5)
+        (connect "211" "set")
+        (cross 12 "0"))
+      (seg "3" h
+        (pts 12 -33.50001907 13.29915619 -33.50001907)
+        (connect "210" "IN_1")
+        (cross 12 "0")))
+    (wire
+      (ids "104")
+      (seg "0" v
+        (pts 48.79919815 -47.49489975 48.79919815 -46.49489975)
+        (cross -47.49489975 "1")
+        (cross -46.49489975 "2"))
+      (seg "1" h
+        (pts 48.79919815 -47.49489975 51.79919815 -47.49489975)
+        (connect "221" "OUT")
+        (cross 48.79919815 "0"))
+      (seg "2" h
+        (pts 45.79919815 -46.49489975 48.79919815 -46.49489975)
+        (connect "221" "IN_0")
+        (cross 48.79919815 "0")))
+    (wire
+      (ids "105")
+      (seg "0" v
+        (pts 53.43560028 -48.49489975 53.43560028 -16.30059624)
+        (connect "222" "OUT_3")
+        (cross -48.49489975 "2")
+        (cross -44.49489975 "1"))
+      (seg "1" h
+        (pts 53.43560028 -44.49489975 73.29919434 -44.49489975)
+        (connect "224" "CLK")
+        (cross 53.43560028 "0"))
+      (seg "2" h
+        (pts 15.79916 -48.49489975 53.43560028 -48.49489975)
+        (connect "221" "IN_1")
+        (cross 15.79916 "5")
+        (cross 46.5 "3")
+        (cross 53.43560028 "0"))
+      (seg "3" v
+        (pts 46.5 -66.4897995 46.5 -48.49489975)
+        (cross -66.4897995 "4")
+        (cross -48.49489975 "2"))
+      (seg "4" h
+        (pts 33 -66.4897995 46.5 -66.4897995)
+        (connect "238" "OUT")
+        (cross 46.5 "3"))
+      (seg "5" v
+        (pts 15.79916 -48.49489975 15.79916 -33.50001907)
+        (cross -48.49489975 "2")
+        (cross -33.50001907 "6"))
+      (seg "6" h
+        (pts 15.79916 -33.50001907 29.79920006 -33.50001907)
+        (connect "207" "IN_0")
+        (cross 15.79916 "5")))
+    (wire
+      (ids "106")
+      (seg "0" v
+        (pts 84.79920197 -66.99490356 84.79920197 -63.99490738)
+        (connect "229" "clock")
+        (cross -66.99490356 "1"))
+      (seg "1" h
+        (pts 81.79920197 -66.99490356 84.79920197 -66.99490356)
+        (connect "229" "clear")
+        (cross 84.79920197 "0")))
+    (wire
+      (ids "107")
+      (seg "0" v
+        (pts 54.5 -48.99489975 54.5 -10.99489975)
+        (cross -48.99489975 "2")
+        (cross -10.99489975 "1"))
+      (seg "1" h
+        (pts 54.5 -10.99489975 55.79919815 -10.99489975)
+        (connect "226" "DATA_OUT_1")
+        (cross 54.5 "0"))
+      (seg "2" h
+        (pts 54.5 -48.99489975 63.79919434 -48.99489975)
+        (connect "228" "OUT_3")
+        (cross 54.5 "0")))
+    (wire
+      (ids "108")
+      (seg "0" v
+        (pts 68.5 -66.99490356 68.5 -29.99489975)
+        (cross -66.99490356 "2")
+        (cross -29.99489975 "1"))
+      (seg "1" h
+        (pts 46.79919815 -29.99489975 68.5 -29.99489975)
+        (connect "230" "N_in2")
+        (cross 68.5 "0"))
+      (seg "2" h
+        (pts 68.5 -66.99490356 89.79920197 -66.99490356)
+        (connect "229" "set")
+        (cross 68.5 "0")))
+    (wire
+      (ids "109")
+      (seg "0" v
+        (pts 51.43560028 -42.9897995 51.43560028 -10.30060101)
+        (connect "222" "IN_1")
+        (cross -42.9897995 "1")
+        (cross -16.5 "2"))
+      (seg "1" h
+        (pts 51.43560028 -42.9897995 78 -42.9897995)
+        (connect "235" "OUT_0")
+        (cross 51.43560028 "0"))
+      (seg "2" h
+        (pts -7.700799942 -16.5 51.43560028 -16.5)
+        (connect "212" "N_in3")
+        (cross 51.43560028 "0")))
+    (wire
+      (ids "110")
+      (seg "0" v
+        (pts 0.5 -36.50001907 0.5 3.5)
+        (cross -36.50001907 "1")
+        (cross 3.5 "2"))
+      (seg "1" h
+        (pts -9.20080471 -36.50001907 0.5 -36.50001907)
+        (connect "209" "IN_4")
+        (cross 0.5 "0"))
+      (seg "2" h
+        (pts -0.7008009553 3.5 0.5 3.5)
+        (connect "208" "DATA_OUT_2")
+        (cross 0.5 "0")))
+    (wire
+      (ids "111")
+      (seg "0" v
+        (pts 102.5 -68.98979187 102.5 1.5)
+        (connect "234" "IN_0")
+        (cross 1.5 "1"))
+      (seg "1" h
+        (pts -0.7007969022 1.5 102.5 1.5)
+        (connect "208" "DATA_OUT_0")
+        (cross 102.5 "0")))
+    (wire
+      (ids "112")
+      (seg "0" v
+        (pts 53 -44.49489975 53 -29.99489784)
+        (cross -44.49489975 "2")
+        (cross -29.99489784 "1"))
+      (seg "1" h
+        (pts 48.79919815 -29.99489784 53 -29.99489784)
+        (connect "230" "N_in3")
+        (cross 53 "0"))
+      (seg "2" h
+        (pts 53 -44.49489975 57.79919434 -44.49489975)
+        (connect "227" "IN_6")
+        (cross 53 "0")))
+    (wire
+      (ids "113")
+      (seg "0" v
+        (pts 81 -48.99489975 81 -46.9897995)
+        (connect "235" "carry_in")
+        (cross -48.99489975 "1"))
+      (seg "1" h
+        (pts -3.5 -48.99489975 81 -48.99489975)
+        (connect "248" "OUT")
+        (cross 81 "0")))
+    (wire
+      (ids "114")
+      (seg "0" v
+        (pts 11.49999046 -43.99489594 11.49999046 -32.49489975)
+        (connect "218" "IN_1")
+        (cross -32.49489975 "1"))
+      (seg "1" h
+        (pts 11.49999046 -32.49489975 32.5 -32.49489975)
+        (connect "247" "ADDRESS_10")
+        (cross 11.49999046 "0")))
+    (wire
+      (ids "115")
+      (seg "0" v
+        (pts 47 -22.49489212 47 -7.99489975)
+        (connect "215" "IN_0")
+        (cross -7.99489975 "1"))
+      (seg "1" h
+        (pts -17.5 -7.99489975 47 -7.99489975)
+        (connect "252" "ENABLE")
+        (cross 47 "0")))
+    (wire
+      (ids "116")
+      (seg "0" v
+        (pts 59.29919815 -10.49489975 59.29919815 -5.494902611)
+        (connect "226" "ADDRESS_0")
+        (cross -10.49489975 "1"))
+      (seg "1" h
+        (pts -5.5 -10.49489975 59.29919815 -10.49489975)
+        (connect "250" "OUT_0")
+        (cross 59.29919815 "0")))
+    (wire
+      (ids "117")
+      (seg "0" v
+        (pts 71.5 -43.9897995 71.5 -26.99489975)
+        (cross -43.9897995 "1")
+        (cross -26.99489975 "2"))
+      (seg "1" h
+        (pts 71.5 -43.9897995 84 -43.9897995)
+        (connect "235" "IN_0")
+        (cross 71.5 "0"))
+      (seg "2" h
+        (pts 59.29919815 -26.99489975 71.5 -26.99489975)
+        (connect "231" "IN_2")
+        (cross 71.5 "0")))
+    (wire
+      (ids "118")
+      (seg "1" h
+        (pts 31.5 -37.49489975 32.5 -37.49489975)
+        (connect "247" "ADDRESS_5")
+        (connect "261" "IN_0")))
+    (wire
+      (ids "119")
+      (seg "1" h
+        (pts 31.5 -39.49489975 32.5 -39.49489975)
+        (connect "247" "ADDRESS_3")
+        (connect "261" "IN_1")))
+    (wire
+      (ids "120")
+      (seg "1" h
+        (pts 31.5 -41.49489975 32.5 -41.49489975)
+        (connect "247" "ADDRESS_1")
+        (connect "261" "IN_2")))
+    (wire
+      (ids "121")
+      (seg "0" v
+        (pts 11.5 -15.5 11.5 -15.49489975)
+        (cross -15.5 "2")
+        (cross -15.49489975 "1"))
+      (seg "1" h
+        (pts 11 -15.49489975 11.5 -15.49489975)
+        (connect "242" "ADDRESS_7")
+        (cross 11.5 "0"))
+      (seg "2" h
+        (pts 11.5 -15.5 11.79916 -15.5)
+        (connect "213" "OUT")
+        (cross 11.5 "0")))
+    (wire
+      (ids "122")
+      (seg "0" v
+        (pts 14.5 -51.16449738 14.5 -25.99489975)
+        (connect "242" "DATA_IN_5")
+        (connect "242" "DATA_OUT_5")
+        (cross -51.16449738 "1"))
+      (seg "1" h
+        (pts 14.5 -51.16449738 85.63179016 -51.16449738)
+        (connect "236" "IN_0")
+        (cross 14.5 "0")))
+    (wire
+      (ids "126")
+      (seg "0" v
+        (pts 2.5 -38.99489975 2.5 -20.99489975)
+        (cross -38.99489975 "2")
+        (cross -20.99489975 "1"))
+      (seg "1" h
+        (pts 2.5 -20.99489975 10.5 -20.99489975)
+        (connect "249" "IN_0")
+        (cross 2.5 "0"))
+      (seg "2" h
+        (pts -16 -38.99489975 2.5 -38.99489975)
+        (connect "220" "IN_1")
+        (cross 2.5 "0")))
+    (wire
+      (ids "127")
+      (seg "1" h
+        (pts 25 10.00000668 26 10.00000668)
+        (connect "72" "ADDRESS_2")
+        (connect "145" "IN_10")))
+    (wire
+      (ids "128")
+      (seg "1" h
+        (pts 25 11.00000668 26 11.00000668)
+        (connect "72" "ADDRESS_1")
+        (connect "145" "IN_11")))
+    (wire
+      (ids "129")
+      (seg "1" h
+        (pts 25.49999428 4 26 4)
+        (connect "95" "IN_0")
+        (connect "145" "IN_4")))
+    (wire
+      (ids "130")
+      (seg "1" h
+        (pts 25.00000191 9.000006676 26 9.000006676)
+        (connect "72" "ADDRESS_3")
+        (connect "145" "IN_9")))
+    (wire
+      (ids "131")
+      (seg "0" v
+        (pts 32.29920578 -0.5 32.29920578 0)
+        (connect "83" "N_in1")
+        (cross 0 "1"))
+      (seg "1" h
+        (pts 32 0 32.29920578 0)
+        (connect "145" "OUT_0")
+        (cross 32.29920578 "0")))
+    (wire
+      (ids "142")
+      (seg "0" v
+        (pts 10.5 -22.99489975 10.5 -22.49489975)
+        (connect "249" "IN_1")
+        (cross -22.49489975 "1"))
+      (seg "1" h
+        (pts 10.5 -22.49489975 11 -22.49489975)
+        (connect "242" "ADDRESS_0")
+        (cross 10.5 "0")))
+    (wire
+      (ids "143")
+      (seg "0" v
+        (pts 10 -24.99489975 10 -24.5)
+        (connect "289" "OUT_0")
+        (cross -24.99489975 "1"))
+      (seg "1" h
+        (pts 10 -24.99489975 10.5 -24.99489975)
+        (connect "249" "IN_2")
+        (cross 10 "0")))
+    (wire
+      (ids "144")
+      (seg "0" v
+        (pts 11.5 -4.5 11.5 -4.49489975)
+        (connect "124" "OUT")
+        (cross -4.49489975 "1"))
+      (seg "1" h
+        (pts 11.5 -4.49489975 12 -4.49489975)
+        (connect "254" "IN_0")
+        (cross 11.5 "0")))
+    (wire
+      (ids "147")
+      (seg "0" v
+        (pts 3.5 -18 3.5 9.5)
+        (cross -18 "2")
+        (cross 9.5 "1"))
+      (seg "1" h
+        (pts 3.5 9.5 15 9.5)
+        (connect "166" "IN_3")
+        (cross 3.5 "0"))
+      (seg "2" h
+        (pts -8 -18 3.5 -18)
+        (connect "97" "IN_0")
+        (cross 3.5 "0")))
+    (wire
+      (ids "149")
+      (seg "0" v
+        (pts 4.5 -58.49489975 4.5 7)
+        (cross -58.49489975 "2")
+        (cross 7 "1"))
+      (seg "1" h
+        (pts -11 7 4.5 7)
+        (connect "278" "IN_0")
+        (cross 4.5 "0"))
+      (seg "2" h
+        (pts 4.5 -58.49489975 20 -58.49489975)
+        (connect "264" "IN_1")
+        (cross 4.5 "0"))))
+  (page 1
+    (gate "AE_OR3"
+      (uuid "102")
+      (at -9.996199608 -18.61615944)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_OR3"
+      (uuid "103")
+      (at -32.49620056 0.8838396072)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "HE_JUNC_4"
+      (uuid "108")
+      (at 1.003800392 -5.116160393)
+      (angle 0))
+    (gate "BM_NORX4"
+      (uuid "111")
+      (at -19.99620056 21.38383865)
+      (angle 270)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AM_REGISTER16"
+      (uuid "118")
+      (at 7.003799438 13.88383961)
+      (angle 270)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "16")
+      (lparam "MAX_COUNT" "65536")
+      (lparam "SYNC_CLEAR" "true")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "CC_PULSE"
+      (uuid "119")
+      (at -6.996199608 25.38384056)
+      (angle 270)
+      (gparam "PULSE_WIDTH" "1"))
+    (gate "BA_NAND3"
+      (uuid "123")
+      (at -10.49619961 27.88384056)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AO_XNOR2"
+      (uuid "125")
+      (at -27.49620056 31.38384056)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BM_NORX2"
+      (uuid "128")
+      (at -29.99620056 25.88384056)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BA_NAND3"
+      (uuid "129")
+      (at 8.003799438 11.88384056)
+      (angle 270)
+      (lparam "INPUT_BITS" "3"))
+    (gate "3x8 Decoder Chip"
+      (uuid "130")
+      (at -16.99620056 -0.6161603928)
+      (angle 270)
+      (lparam "INPUT_BITS" "3"))
+    (gate "BW_8X1_BUS_END"
+      (uuid "135")
+      (at -40.49620056 8.883839607)
+      (angle 270)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BE_ROM_8x8"
+      (uuid "137")
+      (at -30.99620056 7.383840084)
+      (angle 270)
+      (lparam "ADDRESS_BITS" "8")
+      (lparam "DATA_BITS" "8"))
+    (gate "AO_XNOR2"
+      (uuid "146")
+      (at -24.49620056 -8.616159439)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BM_ROM_16x16"
+      (uuid "151")
+      (at 4.003800392 29.88384056)
+      (angle 270)
+      (lparam "ADDRESS_BITS" "16")
+      (lparam "DATA_BITS" "16"))
+    (gate "AM_MUX_16x1"
+      (uuid "170")
+      (at -31.99620056 1.883839607)
+      (angle 0)
+      (lparam "INPUT_BITS" "16"))
+    (gate "BI_DECODER_4x16"
+      (uuid "176")
+      (at -32.99620056 9.383839607)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "BM_ROM_16x16"
+      (uuid "178")
+      (at -28.99620056 -9.116159439)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "16")
+      (lparam "DATA_BITS" "16"))
+    (gate "GF_LED_DISPLAY_4BIT_OUT"
+      (uuid "180")
+      (at -52.49620056 5.883840084)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "BA_TRI_STATE"
+      (uuid "185")
+      (at -12.49620056 18.88383865)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "BA_TRI_STATE"
+      (uuid "186")
+      (at -53.99620056 30.38384056)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "BU_TRI_STATE_16BIT"
+      (uuid "193")
+      (at -3.996199608 13.88383961)
+      (angle 0)
+      (lparam "INPUT_BITS" "16"))
+    (gate "BM_NORX2"
+      (uuid "194")
+      (at 16.50379944 16.38383865)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "DA_FROM"
+      (uuid "272")
+      (at 8.503799438 -17.11615944)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (gate "BE_ROM_8x8"
+      (uuid "286")
+      (at -16.49620056 14.38383961)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "8")
+      (lparam "DATA_BITS" "8"))
+    (gate "BV_4x1_BUS_END"
+      (uuid "290")
+      (at -6.996199608 -1.616160393)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "DU_NORX8"
+      (uuid "293")
+      (at -26.49620056 -0.6161603928)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "AA_FULLADDER_1BIT"
+      (uuid "310")
+      (at 3 0.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (wire
+      (ids "44")
+      (seg "0" v
+        (pts -24.99620056 -16.61615944 -24.99620056 0.8838396072)
+        (cross -16.61615944 "1")
+        (cross 0.8838396072 "2"))
+      (seg "1" h
+        (pts -24.99620056 -16.61615944 0.003799438477 -16.61615944)
+        (connect "102" "IN_0")
+        (cross -24.99620056 "0")
+        (cross 0.003799438477 "3"))
+      (seg "2" h
+        (pts -29.49620056 0.8838396072 -24.99620056 0.8838396072)
+        (connect "103" "OUT")
+        (cross -24.99620056 "0"))
+      (seg "3" v
+        (pts 0.003799438477 -16.61615944 0.003799438477 -5.116160393)
+        (connect "108" "N_in0")
+        (cross -16.61615944 "1")))
+    (wire
+      (ids "47")
+      (seg "0" v
+        (pts -6.996199608 -20.61615944 -6.996199608 -5.116160393)
+        (cross -20.61615944 "1")
+        (cross -5.116160393 "2"))
+      (seg "1" h
+        (pts -12.99619961 -20.61615944 -6.996199608 -20.61615944)
+        (connect "102" "IN_2")
+        (cross -6.996199608 "0"))
+      (seg "2" h
+        (pts -6.996199608 -5.116160393 8.003805161 -5.116160393)
+        (connect "108" "N_in1")
+        (cross -6.996199608 "0")
+        (cross 8.003805161 "3"))
+      (seg "3" v
+        (pts 8.003805161 -5.116160393 8.003805161 8.883840561)
+        (connect "129" "OUT")
+        (cross -5.116160393 "2")))
+    (wire
+      (ids "51")
+      (seg "1" h
+        (pts -30.99620628 27.88384056 -7.496199608 27.88384056)
+        (connect "123" "IN_1")
+        (connect "123" "OUT")
+        (cross -30.99620628 "5"))
+      (seg "5" v
+        (pts -30.99620628 27.88384056 -30.99620628 28.88383865)
+        (connect "128" "IN_1")
+        (cross 27.88384056 "1")))
+    (wire
+      (ids "55")
+      (seg "0" v
+        (pts -12.99620056 -18.61615944 -12.99620056 25.88384056)
+        (connect "102" "IN_1")
+        (cross 25.88384056 "1"))
+      (seg "1" h
+        (pts -13.49619961 25.88384056 -12.99620056 25.88384056)
+        (connect "123" "IN_2")
+        (cross -12.99620056 "0")))
+    (wire
+      (ids "65")
+      (seg "0" v
+        (pts -24.49619484 -11.61615944 -24.49619484 9.883826256)
+        (connect "146" "OUT")
+        (cross 9.883826256 "1"))
+      (seg "1" h
+        (pts -37.99620438 9.883826256 -24.49619484 9.883826256)
+        (connect "137" "DATA_OUT_6")
+        (cross -24.49619484 "0")))
+    (wire
+      (ids "66")
+      (seg "0" v
+        (pts -6.996195793 23.38381767 -6.996195793 23.38384056)
+        (connect "119" "OUT_0")
+        (connect "151" "DATA_OUT_1")))
+    (wire
+      (ids "69")
+      (seg "0" v
+        (pts 6.00379324 6.883842945 6.00379324 18.88384438)
+        (connect "129" "IN_2")
+        (cross 6.883842945 "3")
+        (cross 18.88384438 "4"))
+      (seg "3" h
+        (pts -15.49621582 6.883842945 6.00379324 6.883842945)
+        (connect "130" "IN_2")
+        (cross 6.00379324 "0"))
+      (seg "4" h
+        (pts 6.00379324 18.88384438 9.503788948 18.88384438)
+        (connect "118" "IN_10")
+        (cross 6.00379324 "0")))
+    (wire
+      (ids "70")
+      (seg "0" v
+        (pts 8.003793716 14.88384056 8.003793716 18.8838501)
+        (connect "129" "IN_1")
+        (cross 18.8838501 "1"))
+      (seg "1" h
+        (pts 8.003793716 18.8838501 11.50378895 18.8838501)
+        (connect "118" "IN_12")
+        (cross 8.003793716 "0")))
+    (wire
+      (ids "71")
+      (seg "0" v
+        (pts 10.00379372 14.88384438 10.00379372 18.88385391)
+        (connect "129" "IN_0")
+        (cross 18.88385391 "1"))
+      (seg "1" h
+        (pts 10.00379372 18.88385391 13.50378895 18.88385391)
+        (connect "118" "IN_14")
+        (cross 10.00379372 "0")))
+    (wire
+      (ids "90")
+      (seg "0" v
+        (pts -25.49620628 -5.616161346 -25.49620628 14.88383961)
+        (connect "146" "IN_1")
+        (cross 14.88383961 "1"))
+      (seg "1" h
+        (pts -29.99620056 14.88383961 -25.49620628 14.88383961)
+        (connect "176" "OUT_13")
+        (cross -25.49620628 "0")))
+    (wire
+      (ids "124")
+      (seg "0" v
+        (pts -21.49620056 -20.11615944 -21.49620056 0.8838396072)
+        (connect "178" "DATA_OUT_0")
+        (cross 0.8838396072 "1"))
+      (seg "1" h
+        (pts -35.49620056 0.8838396072 -21.49620056 0.8838396072)
+        (connect "103" "IN_1")
+        (cross -21.49620056 "0")))
+    (wire
+      (ids "135")
+      (seg "0" v
+        (pts -32.49620056 -0.6161603928 -32.49620056 11.88383961)
+        (cross -0.6161603928 "2")
+        (cross 11.88383961 "1"))
+      (seg "1" h
+        (pts -32.49620056 11.88383961 -29.99620056 11.88383961)
+        (connect "176" "OUT_10")
+        (cross -32.49620056 "0"))
+      (seg "2" h
+        (pts -34.99620056 -0.6161603928 -32.49620056 -0.6161603928)
+        (connect "170" "IN_5")
+        (cross -32.49620056 "0"))))
+  (page 2
+    (gate "BE_COMPARATOR_4BIT"
+      (uuid "109")
+      (at -0.5 18)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "BM_NORX4"
+      (uuid "110")
+      (at -3.5 -12.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "BE_TRI_STATE_LOW"
+      (uuid "112")
+      (at 17 40.5)
+      (angle 270)
+      (lparam "INPUT_BITS" "1"))
+    (gate "HE_JUNC_4"
+      (uuid "115")
+      (at -25.5 -24.5)
+      (angle 0))
+    (gate "AE_DFF_LOW_NT"
+      (uuid "116")
+      (at 21.5 -21)
+      (angle 0)
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "GI_LED_DISPLAY_8BIT"
+      (uuid "121")
+      (at -27 -8)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "8")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_LOAD" "false")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "BE_NOR3"
+      (uuid "122")
+      (at 25.5 4)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AI_RAM_12x16"
+      (uuid "126")
+      (at -1.74940002 25.18544006)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "12")
+      (lparam "DATA_BITS" "16"))
+    (gate "AA_AND2"
+      (uuid "131")
+      (at -12.56863976 -20.54203987)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "CD_PRI_ENCODER_16x4"
+      (uuid "134")
+      (at -5.5 -29.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "16"))
+    (gate "AO_XNOR2"
+      (uuid "136")
+      (at 9 -7)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BM_NORX3"
+      (uuid "142")
+      (at 30 20.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "149")
+      (at -5.5 22)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "4")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "BI_NANDX2"
+      (uuid "266")
+      (at 21.93136024 27.95796013)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AA_AND2"
+      (uuid "269")
+      (at -20 -37)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BI_NANDX2"
+      (uuid "270")
+      (at 14.5 11.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "BE_JKFF_LOW"
+      (uuid "277")
+      (at 27.5 4.5)
+      (angle 0)
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_SET" "false"))
+    (gate "BA_ROM_4x4"
+      (uuid "283")
+      (at 27 23.5)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "4")
+      (lparam "DATA_BITS" "4"))
+    (gate "AE_REGISTER8"
+      (uuid "288")
+      (at 22.5 -13.5)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "8")
+      (lparam "MAX_COUNT" "255")
+      (lparam "SYNC_CLEAR" "true")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "HA_JUNC_2"
+      (uuid "307")
+      (at 13 -6.5)
+      (angle 0))
+    (gate "BE_JKFF_LOW"
+      (uuid "311")
+      (at -17.5 -0.5)
+      (angle 0)
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_SET" "false"))
+    (gate "3x8 Decoder Chip"
+      (uuid "313")
+      (at 25 -15)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (wire
+      (ids "48")
+      (seg "0" v
+        (pts 7.5 -13.5 7.5 22.5)
+        (connect "109" "in_A_equal_B")
+        (cross -13.5 "3")
+        (cross 22.5 "1"))
+      (seg "1" h
+        (pts 7.5 22.5 17.00000572 22.5)
+        (cross 7.5 "0")
+        (cross 17.00000572 "2"))
+      (seg "2" v
+        (pts 17.00000572 22.5 17.00000572 38)
+        (connect "112" "OUT_0")
+        (cross 22.5 "1"))
+      (seg "3" h
+        (pts -6.5 -13.5 7.5 -13.5)
+        (connect "110" "IN_2")
+        (cross 7.5 "0")))
+    (wire
+      (ids "50")
+      (seg "0" v
+        (pts 2.5 2 2.5 22)
+        (connect "109" "IN_B_2")
+        (cross 2 "1"))
+      (seg "1" h
+        (pts 2.5 2 22.5 2)
+        (connect "122" "IN_2")
+        (cross 2.5 "0")))
+    (wire
+      (ids "52")
+      (seg "0" v
+        (pts -0.5 -11.5 -0.5 18)
+        (cross -11.5 "2")
+        (cross 18 "1"))
+      (seg "1" h
+        (pts -8.5 18 -0.5 18)
+        (connect "109" "A_equal_B")
+        (cross -0.5 "0"))
+      (seg "2" h
+        (pts -6.5 -11.5 -0.5 -11.5)
+        (connect "110" "IN_1")
+        (cross -0.5 "0")))
+    (wire
+      (ids "54")
+      (seg "0" v
+        (pts 21.5 -25 21.5 -20.54203987)
+        (connect "116" "clear")
+        (cross -20.54203987 "1"))
+      (seg "1" h
+        (pts -9.568639755 -20.54203987 21.5 -20.54203987)
+        (connect "131" "OUT")
+        (cross -0.5 "2")
+        (cross 21.5 "0"))
+      (seg "2" v
+        (pts -0.5 -20.54203987 -0.5 21)
+        (connect "149" "OUT_1")
+        (cross -20.54203987 "1")))
+    (wire
+      (ids "56")
+      (seg "0" v
+        (pts -13 -10 -13 -6)
+        (cross -10 "2")
+        (cross -6 "1"))
+      (seg "1" h
+        (pts -13 -6 22.5 -6)
+        (connect "136" "IN_0")
+        (cross -13 "0")
+        (cross 22.5 "3"))
+      (seg "2" h
+        (pts -32 -10 -13 -10)
+        (connect "121" "IN_1")
+        (cross -13 "0"))
+      (seg "3" v
+        (pts 22.5 -6 22.5 6)
+        (connect "122" "IN_0")
+        (cross -6 "1")))
+    (wire
+      (ids "58")
+      (seg "1" h
+        (pts -15.56863976 19.68544006 -8.5 19.68544006)
+        (connect "126" "ADDRESS_0")
+        (cross -15.56863976 "3")
+        (cross -8.5 "2"))
+      (seg "2" v
+        (pts -8.5 19.68544006 -8.5 20)
+        (connect "109" "A_greater_B")
+        (cross 19.68544006 "1"))
+      (seg "3" v
+        (pts -15.56863976 -19.54203987 -15.56863976 19.68544006)
+        (connect "131" "IN_0")
+        (cross 19.68544006 "1")))
+    (wire
+      (ids "93")
+      (seg "0" v
+        (pts -13 -8 -13 -6)
+        (cross -8 "1")
+        (cross -6 "2"))
+      (seg "1" h
+        (pts -13 -8 6 -8)
+        (connect "136" "IN_1")
+        (cross -13 "0"))
+      (seg "2" h
+        (pts -32 -6 -13 -6)
+        (connect "121" "IN_5")
+        (cross -13 "0")))
+    (wire
+      (ids "123")
+      (seg "0" v
+        (pts -9.249400139 -7 -9.249400139 14.18544006)
+        (connect "126" "DATA_IN_15")
+        (connect "126" "DATA_OUT_15")
+        (cross -7 "1"))
+      (seg "1" h
+        (pts -9.249400139 -7 12 -7)
+        (connect "136" "OUT")
+        (cross -9.249400139 "0")))
+    (wire
+      (ids "140")
+      (seg "0" v
+        (pts -25.5 -25.5 -25.5 -24.5)
+        (connect "115" "N_in2")
+        (cross -24.5 "1"))
+      (seg "1" h
+        (pts -25.5 -24.5 -24.5 -24.5)
+        (connect "115" "N_in1")
+        (cross -25.5 "0")))
+    (wire
+      (ids "150")
+      (seg "1" h
+        (pts 17.5 -14.5 18.5 -14.5)
+        (connect "288" "IN_2")
+        (connect "313" "ENABLE")))
+    (wire
+      (ids "151")
+      (seg "1" h
+        (pts 17.5 -15.5 18.5 -15.5)
+        (connect "288" "IN_1")
+        (connect "313" "ENABLE_B")))
+    (wire
+      (ids "152")
+      (seg "1" h
+        (pts 17.5 -16.5 18.5 -16.5)
+        (connect "288" "IN_0")
+        (connect "313" "ENABLE_C")))
+    (wire
+      (ids "153")
+      (seg "1" h
+        (pts 17.5 -11.5 18.5 -11.5)
+        (connect "288" "IN_5")
+        (connect "313" "IN_0")))
+    (wire
+      (ids "154")
+      (seg "1" h
+        (pts 17.5 -12.5 18.5 -12.5)
+        (connect "288" "IN_4")
+        (connect "313" "IN_1")))
+    (wire
+      (ids "155")
+      (seg "1" h
+        (pts 17.5 -13.5 18.5 -13.5)
+        (connect "288" "IN_3")
+        (connect "313" "IN_2"))))
+  (page 3
+    (gate "AI_MUX_8x1"
+      (uuid "158")
+      (at -9.794119835 11.17880058)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "3x8 Decoder Chip"
+      (uuid "161")
+      (at 21.70587921 14.67880058)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "BX_16X1_BUS_END"
+      (uuid "163")
+      (at 22.20587921 10.17880058)
+      (angle 0)
+      (lparam "INPUT_BITS" "16"))
+    (gate "BE_ROM_8x8"
+      (uuid "164")
+      (at -29.27452087 -9.653120041)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "8")
+      (lparam "DATA_BITS" "8"))
+    (gate "HE_JUNC_4"
+      (uuid "168")
+      (at -18.79412079 -34.82119751)
+      (angle 0))
+    (gate "BI_ROM_12x16"
+      (uuid "169")
+      (at -2.294119835 1.178799629)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "12")
+      (lparam "DATA_BITS" "16"))
+    (gate "AM_REGISTER16"
+      (uuid "189")
+      (at -9.294119835 -5.821199894)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "16")
+      (lparam "MAX_COUNT" "65536")
+      (lparam "SYNC_CLEAR" "true")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "AI_MUX_8x1"
+      (uuid "195")
+      (at 21.6862793 -17.32120132)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "3x8 Decoder Chip"
+      (uuid "196")
+      (at 59.1862793 -15.32119942)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "BX_16X1_BUS_END"
+      (uuid "197")
+      (at 50.6862793 -26.32120132)
+      (angle 0)
+      (lparam "INPUT_BITS" "16"))
+    (gate "BE_ROM_8x8"
+      (uuid "198")
+      (at 9.705879211 -34.15312195)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "8")
+      (lparam "DATA_BITS" "8"))
+    (gate "HE_JUNC_4"
+      (uuid "199")
+      (at 12.6862793 -63.32120132)
+      (angle 0))
+    (gate "BI_ROM_12x16"
+      (uuid "200")
+      (at 28.05983925 -28.9396801)
+      (angle 0)
+      (lparam "ADDRESS_BITS" "12")
+      (lparam "DATA_BITS" "16"))
+    (gate "AM_REGISTER16"
+      (uuid "201")
+      (at 22.1862793 -34.32119751)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "16")
+      (lparam "MAX_COUNT" "65536")
+      (lparam "SYNC_CLEAR" "true")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "BE_DECODER_3x8"
+      (uuid "291")
+      (at 5.5 22.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "HE_JUNC_4"
+      (uuid "300")
+      (at 17.5 14)
+      (angle 0))
+    (gate "DO_NANDX8"
+      (uuid "301")
+      (at -2 22)
+      (angle 0)
+      (lparam "INPUT_BITS" "8"))
+    (gate "BA_NAND4"
+      (uuid "303")
+      (at -30 28)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "AO_XNOR2"
+      (uuid "312")
+      (at -25.5 -15.5)
+      (angle 270)
+      (lparam "INPUT_BITS" "2"))
+    (wire
+      (ids "61")
+      (seg "0" h
+        (pts -6.794119835 11.17880058 7.205879211 11.17880058)
+        (connect "158" "OUT")
+        (cross 7.205879211 "6"))
+      (seg "1" h
+        (pts -5.794119835 12.17880058 7.205879211 12.17880058)
+        (cross -5.794119835 "5")
+        (cross 7.205879211 "6"))
+      (seg "2" h
+        (pts -13.29411983 14.67880058 -12.79411983 14.67880058)
+        (connect "158" "IN_7")
+        (cross -13.29411983 "4"))
+      (seg "3" h
+        (pts -13.29411983 18.17880058 -5.794119835 18.17880058)
+        (cross -13.29411983 "4")
+        (cross -5.794119835 "5"))
+      (seg "4" v
+        (pts -13.29411983 14.67880058 -13.29411983 18.17880058)
+        (cross 14.67880058 "2")
+        (cross 18.17880058 "3"))
+      (seg "5" v
+        (pts -5.794119835 12.17880058 -5.794119835 18.17880058)
+        (cross 12.17880058 "1")
+        (cross 18.17880058 "3"))
+      (seg "6" v
+        (pts 7.205879211 11.17880058 7.205879211 12.17880058)
+        (cross 11.17880058 "0")
+        (cross 12.17880058 "1")))
+    (wire
+      (ids "64")
+      (seg "0" h
+        (pts -20.27452087 -34.82119751 -19.79412079 -34.82119751)
+        (connect "168" "N_in0")
+        (cross -20.27452087 "4"))
+      (seg "1" h
+        (pts -20.27452087 -23.82119751 0.2058792114 -23.82119751)
+        (cross -20.27452087 "4")
+        (cross 0.2058792114 "5"))
+      (seg "2" h
+        (pts 0.2058792114 -11.32119751 13.20587826 -11.32119751)
+        (cross 0.2058792114 "5")
+        (cross 13.20587826 "6"))
+      (seg "3" h
+        (pts 13.20587826 11.17880058 14.20587921 11.17880058)
+        (connect "161" "ENABLE_0")
+        (cross 13.20587826 "6"))
+      (seg "4" v
+        (pts -20.27452087 -34.82119751 -20.27452087 -23.82119751)
+        (cross -34.82119751 "0")
+        (cross -23.82119751 "1"))
+      (seg "5" v
+        (pts 0.2058792114 -23.82119751 0.2058792114 -11.32119751)
+        (cross -23.82119751 "1")
+        (cross -11.32119751 "2"))
+      (seg "6" v
+        (pts 13.20587826 -11.32119751 13.20587826 11.17880058)
+        (cross -11.32119751 "2")
+        (cross 11.17880058 "3")))
+    (wire
+      (ids "67")
+      (seg "0" h
+        (pts -28.77452087 -22.82120132 -15.79412079 -22.82120132)
+        (cross -28.77452087 "2")
+        (cross -15.79412079 "3"))
+      (seg "1" h
+        (pts -15.79412079 -18.32120132 -8.794119835 -18.32120132)
+        (cross -15.79412079 "3")
+        (cross -8.794119835 "4"))
+      (seg "2" v
+        (pts -28.77452087 -22.82120132 -28.77452087 -16.65312004)
+        (connect "164" "DATA_OUT_3")
+        (cross -22.82120132 "0"))
+      (seg "3" v
+        (pts -15.79412079 -22.82120132 -15.79412079 -18.32120132)
+        (cross -22.82120132 "0")
+        (cross -18.32120132 "1"))
+      (seg "4" v
+        (pts -8.794119835 -18.32120132 -8.794119835 -9.821200371)
+        (connect "169" "DATA_OUT_14")
+        (cross -18.32120132 "1")))
+    (wire
+      (ids "86")
+      (seg "0" h
+        (pts -34.27452087 -8.153120041 -28.79412079 -8.153120041)
+        (connect "164" "ADDRESS_5")
+        (cross -28.79412079 "5"))
+      (seg "1" h
+        (pts -28.79412079 -5.321199894 -15.79412079 -5.321199894)
+        (cross -28.79412079 "5")
+        (cross -15.79412079 "6"))
+      (seg "2" h
+        (pts -15.79412079 4.678800583 -14.29412079 4.678800583)
+        (cross -15.79412079 "6")
+        (cross -14.29412079 "7"))
+      (seg "3" h
+        (pts -4.794120789 17.17880058 14.20587921 17.17880058)
+        (connect "161" "IN_1")
+        (cross -4.794120789 "8"))
+      (seg "4" h
+        (pts -14.29412079 19.17880058 -4.794120789 19.17880058)
+        (cross -14.29412079 "7")
+        (cross -4.794120789 "8"))
+      (seg "5" v
+        (pts -28.79412079 -8.153120041 -28.79412079 -5.321199894)
+        (cross -8.153120041 "0")
+        (cross -5.321199894 "1"))
+      (seg "6" v
+        (pts -15.79412079 -5.321199894 -15.79412079 4.678800583)
+        (cross -5.321199894 "1")
+        (cross 4.678800583 "2"))
+      (seg "7" v
+        (pts -14.29412079 4.678800583 -14.29412079 19.17880058)
+        (cross 4.678800583 "2")
+        (cross 19.17880058 "4"))
+      (seg "8" v
+        (pts -4.794120789 17.17880058 -4.794120789 19.17880058)
+        (cross 17.17880058 "3")
+        (cross 19.17880058 "4")))
+    (wire
+      (ids "89")
+      (seg "0" v
+        (pts -9.294119835 -13.32119942 -9.294119835 -12.32119942)
+        (cross -13.32119942 "1")
+        (cross -12.32119942 "2"))
+      (seg "1" h
+        (pts -14.29411983 -13.32119942 -9.294119835 -13.32119942)
+        (connect "189" "IN_0")
+        (cross -9.294119835 "0"))
+      (seg "2" h
+        (pts -9.294119835 -12.32119942 -4.294119835 -12.32119942)
+        (connect "189" "OUT_1")
+        (cross -9.294119835 "0")))
+    (wire
+      (ids "94")
+      (seg "0" h
+        (pts 24.6862793 -17.32120132 38.20587921 -17.32120132)
+        (connect "195" "OUT")
+        (cross 38.20587921 "6"))
+      (seg "1" h
+        (pts 25.1862793 -16.32120132 38.20587921 -16.32120132)
+        (cross 25.1862793 "5")
+        (cross 38.20587921 "6"))
+      (seg "2" h
+        (pts 18.20587921 -13.82120132 18.6862793 -13.82120132)
+        (connect "195" "IN_7")
+        (cross 18.20587921 "4"))
+      (seg "3" h
+        (pts 18.20587921 -10.82120132 25.1862793 -10.82120132)
+        (cross 18.20587921 "4")
+        (cross 25.1862793 "5"))
+      (seg "4" v
+        (pts 18.20587921 -13.82120132 18.20587921 -10.82120132)
+        (cross -13.82120132 "2")
+        (cross -10.82120132 "3"))
+      (seg "5" v
+        (pts 25.1862793 -16.32120132 25.1862793 -10.82120132)
+        (cross -16.32120132 "1")
+        (cross -10.82120132 "3"))
+      (seg "6" v
+        (pts 38.20587921 -17.32120132 38.20587921 -16.32120132)
+        (cross -17.32120132 "0")
+        (cross -16.32120132 "1")))
+    (wire
+      (ids "95")
+      (seg "0" h
+        (pts 11.20587921 -63.32120132 13.6862793 -63.32120132)
+        (connect "199" "N_in0")
+        (connect "199" "N_in1")
+        (cross 11.20587921 "6"))
+      (seg "1" h
+        (pts 4.205879211 -50.32120132 29.70587921 -50.32120132)
+        (cross 4.205879211 "5")
+        (cross 11.20587921 "6")
+        (cross 29.70587921 "7"))
+      (seg "2" h
+        (pts 29.70587921 -39.82120132 39.20587921 -39.82120132)
+        (cross 29.70587921 "7")
+        (cross 39.20587921 "8"))
+      (seg "3" h
+        (pts 4.205879211 -37.65312195 4.705879211 -37.65312195)
+        (connect "198" "ADDRESS_0")
+        (cross 4.205879211 "5"))
+      (seg "4" h
+        (pts 39.20587921 -18.82119942 51.6862793 -18.82119942)
+        (connect "196" "ENABLE_0")
+        (cross 39.20587921 "8"))
+      (seg "5" v
+        (pts 4.205879211 -50.32120132 4.205879211 -37.65312195)
+        (cross -50.32120132 "1")
+        (cross -37.65312195 "3"))
+      (seg "6" v
+        (pts 11.20587921 -63.32120132 11.20587921 -50.32120132)
+        (cross -63.32120132 "0")
+        (cross -50.32120132 "1"))
+      (seg "7" v
+        (pts 29.70587921 -50.32120132 29.70587921 -39.82120132)
+        (cross -50.32120132 "1")
+        (cross -39.82120132 "2"))
+      (seg "8" v
+        (pts 39.20587921 -39.82120132 39.20587921 -18.82119942)
+        (cross -39.82120132 "2")
+        (cross -18.82119942 "4")))
+    (wire
+      (ids "96")
+      (seg "0" h
+        (pts 16.5 -45 21.55983925 -45)
+        (cross 16.5 "3")
+        (cross 21.55983925 "4"))
+      (seg "1" h
+        (pts 10.20587921 -42.5 16.5 -42.5)
+        (cross 10.20587921 "2")
+        (cross 16.5 "3"))
+      (seg "2" v
+        (pts 10.20587921 -42.5 10.20587921 -41.15312195)
+        (connect "198" "DATA_OUT_3")
+        (cross -42.5 "1"))
+      (seg "3" v
+        (pts 16.5 -45 16.5 -42.5)
+        (cross -45 "0")
+        (cross -42.5 "1"))
+      (seg "4" v
+        (pts 21.55983925 -45 21.55983925 -39.93968201)
+        (connect "200" "DATA_OUT_14")
+        (cross -45 "0")))
+    (wire
+      (ids "97")
+      (seg "0" h
+        (pts 3.205880165 -32.65312195 4.705879211 -32.65312195)
+        (connect "198" "ADDRESS_5")
+        (cross 3.205880165 "4"))
+      (seg "1" h
+        (pts 3.205880165 -22.82120132 17.20587921 -22.82120132)
+        (cross 3.205880165 "4")
+        (cross 17.20587921 "5"))
+      (seg "2" h
+        (pts 27.70587921 -12.82119942 51.6862793 -12.82119942)
+        (connect "196" "IN_1")
+        (cross 27.70587921 "6"))
+      (seg "3" h
+        (pts 17.20587921 -9.821201324 27.70587921 -9.821201324)
+        (cross 17.20587921 "5")
+        (cross 27.70587921 "6"))
+      (seg "4" v
+        (pts 3.205880165 -32.65312195 3.205880165 -22.82120132)
+        (cross -32.65312195 "0")
+        (cross -22.82120132 "1"))
+      (seg "5" v
+        (pts 17.20587921 -22.82120132 17.20587921 -9.821201324)
+        (cross -22.82120132 "1")
+        (cross -9.821201324 "3"))
+      (seg "6" v
+        (pts 27.70587921 -12.82119942 27.70587921 -9.821201324)
+        (cross -12.82119942 "2")
+        (cross -9.821201324 "3")))
+    (wire
+      (ids "98")
+      (seg "0" v
+        (pts 22.1862793 -41.82119751 22.1862793 -40.82119751)
+        (cross -41.82119751 "1")
+        (cross -40.82119751 "2"))
+      (seg "1" h
+        (pts 17.1862793 -41.82119751 22.1862793 -41.82119751)
+        (connect "201" "IN_0")
+        (cross 22.1862793 "0"))
+      (seg "2" h
+        (pts 22.1862793 -40.82119751 27.1862793 -40.82119751)
+        (connect "201" "OUT_1")
+        (cross 22.1862793 "0")))
+    (wire
+      (ids "133")
+      (seg "0" h
+        (pts 13.20587826 -41.5 16 -41.5)
+        (cross 13.20587826 "2")
+        (cross 16 "3"))
+      (seg "1" h
+        (pts 16 -30.4396801 19.05983925 -30.4396801)
+        (connect "200" "ADDRESS_4")
+        (cross 16 "3"))
+      (seg "2" v
+        (pts 13.20587826 -41.5 13.20587826 -41.15312195)
+        (connect "198" "DATA_OUT_0")
+        (cross -41.5 "0"))
+      (seg "3" v
+        (pts 16 -41.5 16 -30.4396801)
+        (cross -41.5 "0")
+        (cross -30.4396801 "1")))
+    (wire
+      (ids "136")
+      (seg "0" v
+        (pts 35 -29.82120132 35 -17.82120132)
+        (cross -29.82120132 "2")
+        (cross -17.82120132 "1"))
+      (seg "1" h
+        (pts 18.6862793 -17.82120132 35 -17.82120132)
+        (connect "195" "IN_3")
+        (cross 35 "0"))
+      (seg "2" h
+        (pts 35 -29.82120132 48.6862793 -29.82120132)
+        (connect "197" "IN_4")
+        (cross 35 "0")))
+    (wire
+      (ids "141")
+      (seg "0" v
+        (pts 7.5 -26.82120132 7.5 29)
+        (cross -26.82120132 "1")
+        (cross 29 "2"))
+      (seg "1" h
+        (pts 7.5 -26.82120132 48.6862793 -26.82120132)
+        (connect "197" "IN_7")
+        (cross 7.5 "0"))
+      (seg "2" h
+        (pts -33 29 7.5 29)
+        (connect "303" "IN_1")
+        (cross 7.5 "0")))
+    (wire
+      (ids "146")
+      (seg "0" v
+        (pts 11.20587921 -41.15312195 11.20587921 3.678800583)
+        (connect "198" "DATA_OUT_2")
+        (cross 3.678800583 "1"))
+      (seg "1" h
+        (pts 11.20587921 3.678800583 20.20587921 3.678800583)
+        (connect "163" "IN_1")
+        (cross 11.20587921 "0"))))
+  (page 4
+    (gate "BE_NOR3"
+      (uuid "279")
+      (at 23 11)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "VA_NMOS"
+      (uuid "280")
+      (at 22.5 28)
+      (angle 0)
+      (lparam "DEFAULT_DELAY" "1"))
+    (gate "BA_SHIFT_REGISTER_4"
+      (uuid "285")
+      (at 15.5 26.5)
+      (angle 0)
+      (lparam "CURRENT_VALUE" "0")
+      (lparam "INPUT_BITS" "4")
+      (lparam "MAX_COUNT" "15")
+      (lparam "SYNC_CLEAR" "true")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "UNKNOWN_OUTPUTS" "false"))
+    (gate "BA_NAND3"
+      (uuid "299")
+      (at 25 19.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AE_DFF_LOW_NT"
+      (uuid "306")
+      (at 1.5 22.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "1")
+      (lparam "NO_HOLD" "true")
+      (lparam "SYNC_CLEAR" "false")
+      (lparam "SYNC_LOAD" "true")
+      (lparam "SYNC_SET" "false"))
+    (gate "DA_FROM"
+      (uuid "308")
+      (at -5 27.5)
+      (angle 0)
+      (lparam "JUNCTION_ID" "F"))
+    (wire
+      (ids "134")
+      (seg "0" h
+        (pts 1.5 27 21.5 27)
+        (connect "280" "T_in")
+        (cross 1.5 "8")
+        (cross 21 "4"))
+      (seg "1" h
+        (pts 21 27.5 21.5 27.5)
+        (cross 21 "4")
+        (cross 21.5 "6"))
+      (seg "2" h
+        (pts 21 28.5 21.5 28.5)
+        (cross 21 "5")
+        (cross 21.5 "6"))
+      (seg "3" h
+        (pts 21 30.5 22.5 30.5)
+        (cross 21 "5")
+        (cross 22.5 "7"))
+      (seg "4" v
+        (pts 21 27 21 27.5)
+        (cross 27 "0")
+        (cross 27.5 "1"))
+      (seg "5" v
+        (pts 21 28.5 21 30.5)
+        (cross 28.5 "2")
+        (cross 30.5 "3"))
+      (seg "6" v
+        (pts 21.5 27.5 21.5 28.5)
+        (cross 27.5 "1")
+        (cross 28.5 "2"))
+      (seg "7" v
+        (pts 22.5 30 22.5 30.5)
+        (connect "280" "T_ctrl")
+        (cross 30.5 "3"))
+      (seg "8" v
+        (pts 1.5 26.5 1.5 27)
+        (connect "306" "set")
+        (cross 27 "0")))
+    (wire
+      (ids "138")
+      (seg "0" h
+        (pts 20 19.5 28 19.5)
+        (connect "299" "OUT")
+        (cross 20 "2"))
+      (seg "2" v
+        (pts 20 13 20 19.5)
+        (connect "279" "IN_0")
+        (cross 19.5 "0")))
+    (wire
+      (ids "148")
+      (seg "0" v
+        (pts 24 11 24 17.5)
+        (cross 11 "2")
+        (cross 17.5 "1"))
+      (seg "1" h
+        (pts 22 17.5 24 17.5)
+        (connect "299" "IN_2")
+        (cross 24 "0"))
+      (seg "2" h
+        (pts 24 11 26 11)
+        (connect "279" "OUT")
+        (cross 24 "0"))))
+  (page 5
+    (gate "AA_FULLADDER_1BIT"
+      (uuid "315")
+      (at 23 -5.5)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))))
