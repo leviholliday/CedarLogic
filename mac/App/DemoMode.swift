@@ -378,7 +378,7 @@ enum DemoMode {
         turn(1.6)
         shot(win, "5-simview")
         click(CGPoint(x: -18, y: 7)); turn(1.4)
-        badge(win, keys: "Space", label: "Back to Editing", hold: 0.7)
+        badge(win, keys: "esc", label: "Done", hold: 0.7)
         canvas.perform(.simView)
         turn(0.6)
 
@@ -404,6 +404,11 @@ enum DemoMode {
         check(Int(cl_document_gate_count(core.handle, Int32(page2))) >= 6, "the counter's parts are on the new tab (\(cl_document_gate_count(core.handle, Int32(page2))))")
         let win2 = win, view2 = view, canvas2 = canvas
         view2.needsFit = false
+        // It lands off to one side: Space glides the view onto it.
+        turn(0.6)
+        badge(win, keys: "Space", label: "Fit to Window", hold: 0.5)
+        view2.animateZoomToFit()
+        turn(0.6)
         badge(win, keys: "⌘R", label: "Simulation View", hold: 0.7)
         canvas2.perform(.simView)
         turn(0.4)
@@ -431,7 +436,6 @@ enum DemoMode {
         turn(0.6)
         // The camera: fit the whole circuit, ease in on the middle, back out.
         view2.needsFit = false
-        view2.zoomToFit()
         turn(0.4)
         let fitUPP = view2.unitsPerPoint
         let box = canvas2.document?.fitBounds(ofPage: canvas2.page) ?? .zero
