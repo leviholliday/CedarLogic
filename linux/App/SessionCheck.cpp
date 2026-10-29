@@ -671,6 +671,9 @@ struct SessionDriver {
 			if (!GTK_IS_MENU_ITEM(it) || GTK_IS_SEPARATOR_MENU_ITEM(it) || !gtk_widget_is_sensitive(it) || !gtk_widget_get_visible(it)) continue;
 			if (gtk_menu_item_get_submenu(GTK_MENU_ITEM(it))) continue;
 			const char* action = GTK_IS_ACTIONABLE(it) ? gtk_actionable_get_action_name(GTK_ACTIONABLE(it)) : nullptr;
+			// A menu bar's items (made from its model) don't say their action:
+			// never run blind (File's would print, open or quit).
+			if (action == nullptr && strcmp(G_OBJECT_TYPE_NAME(it), "GtkModelMenuItem") == 0) continue;
 			if (safeMenuAction(action)) items.push_back(it);
 		}
 		g_list_free(kids);
@@ -1260,7 +1263,9 @@ struct SessionDriver {
 			g_list_free(all);
 			if (!menus.empty()) pokeMenu(menus.back());
 			// A bar still holding the keys with its menu not up yet: let go too.
-			if (MenuRow* row = w->menuRowWidget()) gtk_menu_shell_cancel(GTK_MENU_SHELL(row->bar()));
+			// (Every window's: the menu's item may have replaced this one.)
+			for (CircuitWindow* c : circuitWindows())
+				if (MenuRow* row = c->menuRowWidget()) gtk_menu_shell_cancel(GTK_MENU_SHELL(row->bar()));
 			break;
 		}
 		case 44: w->runAction("win.connect-nearby"); break;
