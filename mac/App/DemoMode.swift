@@ -160,6 +160,39 @@ enum DemoMode {
         })
     }
 
+    // MARK: - Real clicks, for screen recorders that zoom on clicks
+    //
+    // The gestures go straight to the canvas, so the system never sees a
+    // click. Each press and release is also posted as a real one, landing on
+    // a clear shield over the window that swallows it (so nothing acts twice
+    // and nothing else on screen can be clicked).
+    static var shield: NSPanel?
+    static var realClicks = false
+    static func raiseShield(over win: NSWindow) {
+        guard !checking else { return }
+        realClicks = CGPreflightPostEventAccess() || CGRequestPostEventAccess()
+        guard realClicks else { print("demo: no permission to post clicks; your recorder won't see them"); return }
+        let p = NSPanel(contentRect: win.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false
+        p.backgroundColor = NSColor(white: 0, alpha: 0.001)   // clear, but still takes clicks
+        p.hasShadow = false
+        p.contentView = ClickSink()
+        win.addChildWindow(p, ordered: .above)
+        p.orderFront(nil)
+        shield = p
+    }
+    static func real(_ type: CGEventType) {
+        guard realClicks, let shield, shield.frame.contains(windowPoint(shield, pointer)) || true else { return }
+        let src = CGEventSource(stateID: .hidSystemState)
+        CGEvent(mouseEventSource: src, mouseType: type, mouseCursorPosition: pointer, mouseButton: .left)?.post(tap: .cghidEventTap)
+    }
+    final class ClickSink: NSView {
+        override func mouseDown(with event: NSEvent) {}
+        override func mouseDragged(with event: NSEvent) {}
+        override func mouseUp(with event: NSEvent) {}
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    }
+
     static func glide(to: CGPoint, _ seconds: Double, each: (CGPoint) -> Void = { _ in }) {
         let from = pointer
         let dx = to.x - from.x, dy = to.y - from.y
@@ -226,6 +259,7 @@ enum DemoMode {
             }
         }
         turn(0.8)
+        raiseShield(over: win)
 
         // The page: empty, the build area filling the view.
         view.needsFit = false
@@ -250,7 +284,8 @@ enum DemoMode {
             let tile = screen(win, NSPoint(x: f.midX, y: content.bounds.height - f.midY))
             glide(to: tile, 0.45)
             turn(0.12)
-            guard canvas.addGateFloating(name, at: world(tile)) else { return }
+            real(.leftMouseDown)
+            guard canvas.addGateFloating(name, at: world(tile)) else { real(.leftMouseUp); return }
             glide(to: at(spot), 0.55) { p in
                 let w = world(p)
                 canvas.pointerMoved(w)
@@ -258,7 +293,7 @@ enum DemoMode {
                 view.needsDisplay = true
             }
             _ = core.press(page: page, at: spot, modifiers: [], unitsPerPoint: view.unitsPerPoint)
-            core.release(at: spot)
+            core.release(at: spot); real(.leftMouseUp)
             NSCursor.arrow.set()   // the hand let go: back to the arrow
             canvas.edited()
             win.makeFirstResponder(view)
@@ -269,11 +304,11 @@ enum DemoMode {
             think()
             glide(to: at(a), 0.35) { p in hands.move(world(p)) }
             turn(0.08)
-            hands.down(a)
+            hands.down(a); real(.leftMouseDown)
             glide(to: at(b), 0.5) { p in
                 if let e = hands.mouse(.leftMouseDragged, world(p)) { view.mouseDragged(with: e) }
             }
-            hands.up(b)
+            hands.up(b); real(.leftMouseUp)
             NSCursor.arrow.set()   // the hand let go: back to the arrow
             turn(0.15)
         }
@@ -285,12 +320,12 @@ enum DemoMode {
             think()
             glide(to: at(from), 0.4) { p in hands.move(world(p)) }
             turn(0.15)
-            hands.down(from)
+            hands.down(from); real(.leftMouseDown)
             turn(0.12)
             glide(to: at(to), 0.6) { p in
                 if let e = hands.mouse(.leftMouseDragged, world(p)) { view.mouseDragged(with: e) }
             }
-            hands.up(to)
+            hands.up(to); real(.leftMouseUp)
             NSCursor.arrow.set()   // the hand let go: back to the arrow
             turn(0.2)
         }
@@ -299,7 +334,7 @@ enum DemoMode {
             think()
             glide(to: at(w), 0.35) { p in hands.move(world(p)) }
             turn(0.06)
-            hands.click(w)
+            real(.leftMouseDown); hands.click(w); real(.leftMouseUp)
             NSCursor.arrow.set()   // the hand let go: back to the arrow
         }
         pointer = at(CGPoint(x: 8, y: -12))
@@ -417,12 +452,14 @@ enum DemoMode {
             think()
             glide(to: onScreen(x(canvas2.stepMs)), 0.7)
             turn(0.25)
+            real(.leftMouseDown)
             glide(to: onScreen(x(60)), 0.6) { p in
                 let local = windowPoint(win, p).x - f.minX
                 let frac = min(1, max(0, Double(local / f.width)))
                 canvas2.stepMs = max(1, min(500, Int(pow(500, 1 - frac).rounded())))
             }
             canvas2.stepMs = 60
+            real(.leftMouseUp)
             NSCursor.arrow.set()
         } else {
             canvas2.stepMs = 60
