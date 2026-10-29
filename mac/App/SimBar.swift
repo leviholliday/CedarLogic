@@ -251,6 +251,16 @@ private struct SimSpeedSlider: View {
             Circle().fill(Color(.sRGB, red: 0.92, green: 1, blue: 1)).frame(width: 12 * scale, height: 12 * scale).offset(x: w * fraction - 6 * scale)
         }
         .frame(width: w, height: 20 * scale)
+        .background {
+            // `--demo` drags this slider: where it is.
+            if DemoMode.on {
+                GeometryReader { g in
+                    Color.clear
+                        .onAppear { DemoMode.speedSlider = g.frame(in: .global) }
+                        .onChange(of: g.frame(in: .global)) { _, f in DemoMode.speedSlider = f }
+                }
+            }
+        }
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in
             let f = min(1, max(0, v.location.x / w))

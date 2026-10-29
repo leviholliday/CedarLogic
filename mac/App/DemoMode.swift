@@ -26,6 +26,8 @@ enum DemoMode {
     /// Palette tiles by gate name, in SwiftUI's global space (the window's
     /// content, top left), kept by CLGateTile while the demo runs.
     static var tiles: [String: CGRect] = [:]
+    /// The Simulation bar's speed slider, the same way.
+    static var speedSlider: CGRect?
 
     static func runIfAsked() {
         guard on else { return }
@@ -366,10 +368,12 @@ enum DemoMode {
 
         // Simulation View on the half adder for a moment.
         glide(to: at(CGPoint(x: 6, y: 0)), 0.6)
+        badge(win, keys: "⌘R", label: "Simulation View", hold: 0.7)
         canvas.perform(.simView)
         turn(1.6)
         shot(win, "5-simview")
         click(CGPoint(x: -18, y: 7)); turn(1.4)
+        badge(win, keys: "⌘R", label: "Simulation View", hold: 0.7)
         canvas.perform(.simView)
         turn(0.6)
 
@@ -377,6 +381,7 @@ enum DemoMode {
         guard let counter = Templates.template(id: "builtin-counter") else { check(false, "the counter template"); finish(failures); return }
         // As a new tab of this same window (a second window plays its
         // opening animation first, and that needs a window on screen).
+        badge(win, keys: "⌘T", label: "New Tab", hold: 0.6)
         canvas.perform(.newTab)
         turn(0.6)
         let page2 = canvas.page
@@ -386,6 +391,7 @@ enum DemoMode {
             temp.selectAll(page: 0)
             copied = temp.copySelection(page: 0)
         }
+        badge(win, keys: "⌘V", label: "Paste a 4-Bit Counter", hold: 0.8)
         check(core.paste(copied, page: page2, at: CGPoint(x: 0, y: 0), shift: false) != nil, "the counter pasted into a new tab")
         canvas.edited()
         canvas.selectNone()
@@ -393,10 +399,30 @@ enum DemoMode {
         check(Int(cl_document_gate_count(core.handle, Int32(page2))) >= 6, "the counter's parts are on the new tab (\(cl_document_gate_count(core.handle, Int32(page2))))")
         let win2 = win, view2 = view, canvas2 = canvas
         view2.needsFit = false
+        badge(win, keys: "⌘R", label: "Simulation View", hold: 0.7)
         canvas2.perform(.simView)
         turn(0.4)
-        canvas2.stepMs = 60   // a slower clock, easy to follow
         canvas2.setRunning(true)
+        turn(1.2)
+        // Slow it down where the viewer can see it: the pointer goes to the
+        // Speed slider and drags its knob left.
+        if let f = speedSlider, let content = win.contentView {
+            func x(_ ms: Int) -> CGFloat { f.minX + f.width * (1 - CGFloat(log(Double(ms)) / log(500))) }
+            func onScreen(_ px: CGFloat) -> CGPoint { screen(win, NSPoint(x: px, y: content.bounds.height - f.midY)) }
+            think()
+            glide(to: onScreen(x(canvas2.stepMs)), 0.7)
+            turn(0.25)
+            glide(to: onScreen(x(60)), 0.6) { p in
+                let local = windowPoint(win, p).x - f.minX
+                let frac = min(1, max(0, Double(local / f.width)))
+                canvas2.stepMs = max(1, min(500, Int(pow(500, 1 - frac).rounded())))
+            }
+            canvas2.stepMs = 60
+            NSCursor.arrow.set()
+        } else {
+            canvas2.stepMs = 60
+        }
+        turn(0.6)
         turn(0.6)
         // The camera: fit the whole circuit, ease in on the middle, back out.
         view2.needsFit = false
