@@ -25,6 +25,7 @@ struct CedarLogicApp: App {
             TabSwitcher.shared.install()
             MenuFixup.install()
             SessionCheck.runIfAsked()
+            DemoMode.runIfAsked()
             LaunchSelfTest.runIfAsked()
             RenderUI.runIfAsked()
             RenderWindow.runIfAsked()

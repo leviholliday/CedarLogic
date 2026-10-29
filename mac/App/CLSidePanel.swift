@@ -152,6 +152,16 @@ struct CLGateTile: View {
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 6).fill(prefs.accentColor(dark: dark).opacity(hover ? 0.10 : 0)))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(prefs.accentColor(dark: dark).opacity(hover ? 0.9 : 0), lineWidth: 1.5))
+        .background {
+            // `--demo` pulls parts from where their tiles are.
+            if DemoMode.on {
+                GeometryReader { g in
+                    Color.clear
+                        .onAppear { DemoMode.tiles[gate.name] = g.frame(in: .global) }
+                        .onChange(of: g.frame(in: .global)) { _, f in DemoMode.tiles[gate.name] = f }
+                }
+            }
+        }
         .contentShape(Rectangle())
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
         .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
