@@ -236,14 +236,9 @@ enum DemoMode {
 
         // The steps.
 
-        var lastCategory = -1
         func fromPalette(_ name: String, to spot: CGPoint) {
             think()
             if let cat = GateLibrary.categories.first(where: { GateLibrary.gates(in: $0).contains { $0.name == name } }) {
-                if lastCategory != cat.index {
-                    lastCategory = cat.index
-                    badge(win, keys: "⇧\(cat.index + 1)", label: cat.title, hold: 0.5)
-                }
                 NotificationCenter.default.post(name: .clPaletteCategory, object: canvas, userInfo: ["index": cat.index])
             }
             turn(0.25)
