@@ -112,7 +112,7 @@ enum DemoMode {
             let p = pointer
             leg(from: p, to: CGPoint(x: p.x + jitter(90), y: p.y + jitter(60)), 0.5 + abs(jitter(0.3)), bow: CGFloat(jitter(20)), each: { _ in })
         }
-        turn(0.15 + abs(jitter(0.45)) + (r < -0.7 ? 0.6 : 0))
+        turn(0.35 + abs(jitter(0.6)) + (r < -0.6 ? 0.8 : 0))
     }
 
     /// Move the pointer the way a thumb on a trackball with a fast pointer
@@ -172,7 +172,7 @@ enum DemoMode {
         // The flick stops a little short (or past) and to one side.
         let reach = 0.86 + jitter(0.07)
         let miss = CGPoint(x: from.x + dx * reach + jitter(10), y: from.y + dy * reach + jitter(10))
-        leg(from: from, to: miss, seconds * 0.42, bow: CGFloat(jitter(10)), each: each)
+        leg(from: from, to: miss, 0.11 + dist / 7000, bow: CGFloat(jitter(10)), each: each)
         turn(0.05 + abs(jitter(0.06)))   // the thumb catching the ball
         leg(from: miss, to: to, 0.22 + min(0.25, hypot(to.x - miss.x, to.y - miss.y) / 400), bow: CGFloat(jitter(3)), each: each)
     }
@@ -236,9 +236,14 @@ enum DemoMode {
 
         // The steps.
 
+        var lastCategory = -1
         func fromPalette(_ name: String, to spot: CGPoint) {
             think()
             if let cat = GateLibrary.categories.first(where: { GateLibrary.gates(in: $0).contains { $0.name == name } }) {
+                if lastCategory != cat.index {
+                    lastCategory = cat.index
+                    badge(win, keys: "⇧\(cat.index + 1)", label: cat.title, hold: 0.5)
+                }
                 NotificationCenter.default.post(name: .clPaletteCategory, object: canvas, userInfo: ["index": cat.index])
             }
             turn(0.25)
@@ -344,7 +349,7 @@ enum DemoMode {
         canvas.perform(.selectAll)
         badge(win, keys: "⌘A", label: "Select All")
         turn(0.3)
-        canvas.straighten()
+        canvas.perform(.straighten)
         badge(win, keys: "S", label: "Straighten")
         turn(0.3)
         canvas.selectNone()
@@ -373,7 +378,7 @@ enum DemoMode {
         turn(1.6)
         shot(win, "5-simview")
         click(CGPoint(x: -18, y: 7)); turn(1.4)
-        badge(win, keys: "⌘R", label: "Simulation View", hold: 0.7)
+        badge(win, keys: "Space", label: "Back to Editing", hold: 0.7)
         canvas.perform(.simView)
         turn(0.6)
 
@@ -433,7 +438,7 @@ enum DemoMode {
         let middle = CGPoint(x: box.midX, y: box.midY)
         check(view2.visibleWorldRect.contains(box), "the whole counter is in view (\(box) in \(view2.visibleWorldRect))")
         shot(win2, "6-counter")
-        warp(screen(win2, view2.convert(NSPoint(x: view2.bounds.midX + 120, y: view2.bounds.midY + 80), to: nil)))
+        glide(to: screen(win2, view2.convert(NSPoint(x: view2.bounds.midX + 120, y: view2.bounds.midY + 80), to: nil)), 0.3)
         turn(2.0)
         turn(2.5)
         turn(3.0)
