@@ -10,6 +10,7 @@
 #include "TabStrip.h"
 #include "TabSwitcher.h"
 #include "Window.h"
+#include "MenuBar.h"
 
 #include <execinfo.h>
 #include <signal.h>
@@ -1138,7 +1139,7 @@ struct SessionDriver {
 			"close tab", "next tab", "reopen tab", "tab strip", "split view", "switch side", "Simulation View",
 			"run or pause", "step", "Step Clock", "scope", "truth table", "find", "gate settings", "Settings",
 			"draw", "notes", "Straighten", "Tidy Up", "lock", "lock in place", "save", "reload", "zoom and pan",
-			"right-click", "select all", "the ••• menu", "connect nearby", "dark mode", "focus mode", "add a gate (A)",
+			"right-click", "select all", "F10 (the menus)", "connect nearby", "dark mode", "focus mode", "add a gate (A)",
 			"canvas drawing path", "duplicate the circuit", "Ctrl+Tab held",
 		};
 		static const int weights[] = {
@@ -1250,7 +1251,7 @@ struct SessionDriver {
 			// at once, as a person would: an open menu bar menu takes the next
 			// keys typed as its items' letters (N would be New Circuit).
 			tap(t, GDK_KEY_F10, rng.chance(0.3) ? GDK_SHIFT_MASK : 0);
-			pump(60);
+			pump(250);
 			GList* all = gtk_window_list_toplevels();
 			std::vector<GtkWidget*> menus;
 			for (GList* l = all; l; l = l->next)
@@ -1258,6 +1259,8 @@ struct SessionDriver {
 					if (GtkWidget* m = menuIn(GTK_WIDGET(l->data))) menus.push_back(m);
 			g_list_free(all);
 			if (!menus.empty()) pokeMenu(menus.back());
+			// A bar still holding the keys with its menu not up yet: let go too.
+			if (MenuRow* row = w->menuRowWidget()) gtk_menu_shell_cancel(GTK_MENU_SHELL(row->bar()));
 			break;
 		}
 		case 44: w->runAction("win.connect-nearby"); break;
