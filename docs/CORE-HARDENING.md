@@ -219,7 +219,7 @@ Known limits.
   after: pastes of copies with a locked part at each end of a wire and a wire
   holding two pins of one part (18 cases), 27 locked parts with awkward
   settings copied and pasted, 14 damaged LOCKED lines in two orders, locking
-  a floating paste mid-move, and 300 fuzz sessions with a print in the safety
+  a floating paste mid-move, and about 360 fuzz sessions with a print in the safety
   net: nothing broke, nothing stayed locked, the net never fired. The seed and
   operation that found it weren't recorded, so the exact sequence can't be
   replayed. If the net ever fires, the fuzzers' consistency check will say so.
