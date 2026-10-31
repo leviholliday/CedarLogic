@@ -117,6 +117,7 @@ void Prefs::load() {
 		lastFolder = readString(k, "lastFolder", lastFolder);
 		lastCircuit = readString(k, "lastCircuit", lastCircuit);
 		studentName = readString(k, "studentName", studentName);
+		feedbackInstallId = readString(k, "feedbackInstallId", feedbackInstallId);
 		templateClock = readInt(k, "templateClock", templateClock, 0, 2);
 		inkTool = readInt(k, "inkTool", inkTool, 0, 2);
 		inkPenColor = readString(k, "inkPenColor", inkPenColor);
@@ -223,6 +224,7 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "lastFolder", lastFolder.c_str());
 	g_key_file_set_string(k, kGroup, "lastCircuit", lastCircuit.c_str());
 	g_key_file_set_string(k, kGroup, "studentName", studentName.c_str());
+	if (!feedbackInstallId.empty()) g_key_file_set_string(k, kGroup, "feedbackInstallId", feedbackInstallId.c_str());
 	g_key_file_set_integer(k, kGroup, "templateClock", templateClock);
 	g_key_file_set_integer(k, kGroup, "inkTool", inkTool);
 	g_key_file_set_string(k, kGroup, "inkPenColor", inkPenColor.c_str());

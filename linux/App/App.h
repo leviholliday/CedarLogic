@@ -79,6 +79,10 @@ struct Prefs {
 	bool projector = false;        // Export as Image: the drawing too, when there is one
 	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string studentName;                      // for the Lab Page template and exports
+	// Send Feedback's id for this install (made once, kept): the server
+	// counts reports by it, so a school's computers behind one address
+	// aren't one sender.
+	std::string feedbackInstallId;
 	// Build from Formula: what was typed last, and how to build it.
 	std::string lastFormula = "F = A'B + AC";
 	int buildShape = 0, buildStyle = 0;

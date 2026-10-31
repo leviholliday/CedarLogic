@@ -13,7 +13,7 @@ class CircuitWindow;
 
 namespace feedback {
 // `demo` (--show feedback:N) pictures a state without sending: 1 sending,
-// 2 sent, 3 failed.
+// 2 sent, 3 failed, 4 over the allowance (Request More), 5 no summary.
 void show(CircuitWindow* window, int demo = 0);
 // --feedback-probe: asks the site with a wrong key (it should say 403) and
 // sends nothing. The HTTP status, or 0 when it couldn't be reached.

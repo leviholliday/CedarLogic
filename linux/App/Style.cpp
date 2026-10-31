@@ -157,6 +157,7 @@ void applyStyle() {
 	s += "#settings label, #gate-settings label, dialog label { color: " + css(text) + "; }\n";
 	// A dialog's problem (Send Feedback couldn't send) in red; its progress in the accent.
 	s += "dialog label.problem { color: rgb(229,72,77); }\n";
+	s += "dialog entry.problem, dialog entry.problem:focus { border-color: rgb(229,72,77); box-shadow: 0 0 0 1px rgb(229,72,77); }\n";
 	s += "dialog progressbar progress { background-image: none; background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) +
 	     "; border-radius: 3px; min-height: 6px; }\n";
 	s += "dialog progressbar trough { background-image: none; background-color: " + css(withAlpha(text, 0.10f)) +
