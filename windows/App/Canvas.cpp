@@ -183,6 +183,15 @@ bool Canvas::pointerWorld(double& wx, double& wy) const {
 	return true;
 }
 
+bool Canvas::pointerOver() const {
+	if (!IsWindowVisible(hwnd)) return false;
+	POINT p;
+	GetCursorPos(&p);
+	double vx, vy;
+	screenToView(p, vx, vy);
+	return vx >= 0 && vy >= 0 && vx < width() && vy < height();
+}
+
 void Canvas::setCursor(LPCWSTR which) {
 	cursorNow = which;
 	POINT p;
@@ -1522,8 +1531,14 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 			// C while something is moving (dragged, or floating on the pointer):
 			// connect it to the pins it's next to and keep moving. The
 			// connections are kept at the drop; Escape takes back just them.
+			// (Not while it's still over the side panel, as on the Mac: it
+			// would land out of sight. Asked of the pointer's place: a gate
+			// dragged from the panel never sends this canvas a mouse move, so
+			// pointerInside stayed false and C did nothing -- only the drop's
+			// own connection of pins that touch.) Within the Mac's reach, 20
+			// points on screen, at any zoom.
 			if (moving()) {
-				if (win->canEdit() && pointerInside) {
+				if (win->canEdit() && pointerOver()) {
 					const int n = cl_edit_connect_while_moving(doc, page(), upp);
 					if (n > 0) win->note(strf("Connected %d pin%s. Escape takes it back.", n, n == 1 ? "" : "s"));
 					else if (n == 0) win->note("Nothing close enough to connect.");

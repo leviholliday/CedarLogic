@@ -50,6 +50,10 @@ public:
 	// Where the pointer is over this canvas, in the world; false when it's
 	// somewhere else.
 	bool pointerWorld(double& wx, double& wy) const;
+	// The pointer is inside this canvas's rectangle -- by where it is, not by
+	// which window has it (a gate dragged from the side panel leaves the
+	// pointer captured by the panel the whole way).
+	bool pointerOver() const;
 	// A screen pixel to view points.
 	void screenToView(POINT screen, double& vx, double& vy) const;
 
