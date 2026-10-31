@@ -212,7 +212,16 @@ CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const s
 	updateActions();
 	updateRunUI();
 	updateBanner();
-	gtk_widget_show_all(win);
+	// Behind the launch screen it's made but not put on screen: it comes in
+	// as the launch screen dissolves (main.cpp). Mapping it now, only to
+	// hide it again, flashed it up (with the desktop's window animation)
+	// around the launch screen, and cost a map the launch didn't need.
+	if (splashHoldsWindows()) {
+		gtk_widget_show_all(gtk_bin_get_child(GTK_BIN(win)));
+		if (GtkWidget* bar = gtk_window_get_titlebar(GTK_WINDOW(win))) gtk_widget_show_all(bar);
+	} else {
+		gtk_widget_show_all(win);
+	}
 	gtk_widget_set_visible(paneBoxes[1], splitOpen());
 	gtk_revealer_set_reveal_child(GTK_REVEALER(statusBar->outer()), prefs().showStatus);
 	updateBanner();

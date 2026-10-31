@@ -45,10 +45,17 @@ struct Timeline {
 	struct Step { double at; std::string text; double progress; };
 	std::vector<Step> steps;
 
-	void plan(int gates, int families, const std::string& opening) {
+	// `head`: the seconds the launch's work already took with the panel up
+	// (still clear). The Mac counts its timeline from the launch, so slow
+	// work shortens what's left of it; here the work blocks the drawing, so
+	// the panel plays after it, quicker by what the work took: the steps
+	// close up (to 0.2 s apart) and it dissolves at 1.8 s at the earliest,
+	// once the icon, traces and name are all in.
+	void plan(int gates, int families, const std::string& opening, double head = 0) {
 		fadeTime = first ? 1.1 : 0.42;
 		if (calm) dissolveAt = 1.1;
-		const double spacing = calm ? 0.12 : first ? 0.72 : 0.32;
+		const double target = std::max(1.8, 2.3 - std::max(0.0, head));
+		const double spacing = calm ? 0.12 : first ? 0.72 : std::min(0.32, std::max(0.2, (target - 0.6) / 6));
 		double at = 0;
 		auto step = [&](const std::string& text, double progress) {
 			at += spacing;
@@ -61,7 +68,7 @@ struct Timeline {
 		step(opening.empty() ? std::string("Opening a new circuit") : "Opening “" + opening + "”", 0.86);
 		step("Ready", 1);
 		readyAt = at + 0.3;
-		dissolveAt = first ? std::max(4.9, std::min(7.0, readyAt + 0.3)) : std::min(6.0, std::max(calm ? 1.1 : 2.3, readyAt + 0.3));
+		dissolveAt = first ? std::max(4.9, std::min(7.0, readyAt + 0.3)) : std::min(6.0, std::max(calm ? 1.1 : target, readyAt + 0.3));
 	}
 
 	void status(double t, std::string& now, std::string& before, double& mix) const {
@@ -344,6 +351,7 @@ struct Splash {
 	GtkWidget* area = nullptr;
 	Timeline tl;
 	double start = -1;            // when it began playing (-1: not yet)
+	double shownAt = 0;           // when it went up (clear), before the launch's work
 	bool presented = false;       // the windows it held are in
 	bool composited = false;
 	GSourceFunc then = nullptr;
@@ -362,7 +370,8 @@ void libraryCounts(int& gates, int& families) {
 }
 
 void destroy(Splash* s) {
-	if (s->tick) g_source_remove(s->tick);
+	if (s->tick && s->area) gtk_widget_remove_tick_callback(s->area, s->tick);
+	s->tick = 0;
 	if (s->win) gtk_widget_destroy(s->win);
 	if (g_splash == s) g_splash = nullptr;
 	delete s;
@@ -393,7 +402,9 @@ gboolean drawCb(GtkWidget* w, cairo_t* cr, gpointer data) {
 	return TRUE;
 }
 
-gboolean tickCb(gpointer data) {
+// Once a frame, in step with the screen (the frame clock), not on a timer
+// of its own that drifts against it.
+gboolean tickCb(GtkWidget*, GdkFrameClock*, gpointer data) {
 	Splash* s = static_cast<Splash*>(data);
 	gtk_widget_queue_draw(s->area);
 	if (s->start < 0) return G_SOURCE_CONTINUE;
@@ -408,7 +419,11 @@ gboolean tickCb(gpointer data) {
 	}
 	if (t >= s->tl.dissolveAt + s->tl.fadeTime + 0.05) {
 		s->tick = 0;
-		destroy(s);
+		// Gone after this frame (not from inside its own frame callback).
+		g_idle_add([](gpointer p) -> gboolean {
+			if (g_splash == p) destroy(static_cast<Splash*>(p));
+			return G_SOURCE_REMOVE;
+		}, s);
 		return G_SOURCE_REMOVE;
 	}
 	return G_SOURCE_CONTINUE;
@@ -440,12 +455,26 @@ GtkWidget* showSplash() {
 	} else {
 		gtk_window_set_default_size(GTK_WINDOW(s->win), (int)kW, (int)kH);
 	}
+	// Before GTK draws it the window is its CSS background (the desktop
+	// theme's, light grey or white): a pale box flashed up where the panel
+	// was about to be. Clear where it composites, the panel's ground where
+	// it doesn't.
+	{
+		GtkCssProvider* css = gtk_css_provider_new();
+		const std::string ground = s->composited ? "transparent"
+		                                         : format("rgb(%d,%d,%d)", (int)(kGroundBottom.r * 255), (int)(kGroundBottom.g * 255),
+		                                                  (int)(kGroundBottom.b * 255));
+		gtk_css_provider_load_from_data(css, ("window { background: " + ground + "; box-shadow: none; border: none; }").c_str(), -1, nullptr);
+		gtk_style_context_add_provider(gtk_widget_get_style_context(s->win), GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+		g_object_unref(css);
+	}
 	s->area = gtk_drawing_area_new();
 	gtk_container_add(GTK_CONTAINER(s->win), s->area);
 	g_signal_connect(s->area, "draw", G_CALLBACK(drawCb), s);
 	g_splash = s;
 	gtk_widget_show_all(s->win);
-	s->tick = g_timeout_add(16, tickCb, s);
+	s->tick = gtk_widget_add_tick_callback(s->area, tickCb, s, nullptr);
+	s->shownAt = now();
 	// Shown (clear) at once, before the slow work starts on this thread.
 	while (gtk_events_pending()) gtk_main_iteration_do(FALSE);
 	return s->win;
@@ -472,8 +501,8 @@ void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden, gpointer data) {
 	s->thenData = data;
 	int gates = 0, families = 0;
 	libraryCounts(gates, families);
-	s->tl.plan(gates, families, s->opening);
 	s->start = now();
+	s->tl.plan(gates, families, s->opening, s->start - s->shownAt);
 	if (s->tl.first) {
 		// The first launch's sound: once ever.
 		prefs().firstLaunchPlayed = true;
