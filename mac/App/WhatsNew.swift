@@ -1,9 +1,9 @@
 // What's New: after an update, a walk through what's new since 0.3
 // (Recently Deleted, Clear Drawing asking, the Practice Circuit, steadier
-// clicks and wires, the feedback limit, the Keychain), in the launch
-// screen's look, a page a theme. Shown once per version (new
-// installs get the welcome instead); Help > What's New in CedarLogic brings
-// it back.
+// clicks and wires, Check My Circuit, the lab report, Share Link, sync and
+// scanning to add a device, the Keychain, the feedback limit), in the launch
+// screen's look, a page a theme. Shown once per version (new installs get the
+// welcome instead); Help > What's New in CedarLogic brings it back.
 
 import AppKit
 import SwiftUI
@@ -50,11 +50,20 @@ struct WhatsNewView: View {
                     ("cursorarrow.click", "Clicks pick the same pin", "Where two pins sit close, or a wire turns a corner, you get the same one every time you open the app."),
                     ("hare", "Connect Nearby, quicker", "Holding C while you move parts, or Connect Nearby Pins, no longer stops to think on a big page."),
                 ], tryTitle: nil),
-        Chapter(eyebrow: "Feedback and sync", title: "Fair, and kept safe",
-                line: "A fair share of reports for everyone, and your codes locked away.",
+        Chapter(eyebrow: "Check your work", title: "Check it, then hand it in",
+                line: "Compare your circuit with the assignment, then hand in a PDF or send a link.",
                 points: [
-                    ("exclamationmark.bubble", "Send Feedback: 10 a day", "Write a short summary and Send turns on. At the limit, Request more gives you 10 more, once a day."),
+                    ("checkmark.seal", "Check My Circuit, \u{21E7}T", "Type the formulas or a minterm list, or paste the truth table you were given. Wrong rows show what was expected."),
+                    ("doc.richtext", "Export Lab Report", "One PDF with your name, the circuit, its truth table, Karnaugh maps and timing diagram. You tick what goes in."),
+                    ("link", "Share Link", "Also in the File menu. It copies a link that opens the circuit in any browser. The circuit is in the link; your notes stay out."),
+                ], tryTitle: "Check My Circuit"),
+        Chapter(eyebrow: "Sync and feedback", title: "On every device, kept safe",
+                line: "Your circuits on all your devices, your codes locked away, and a fair share of reports.",
+                points: [
+                    ("arrow.triangle.2.circlepath", "Your circuits on every device", "Settings \u{25B8} Sync \u{25B8} Turn On Sync. There's no account: a code links your devices, and circuits are encrypted on this Mac first."),
+                    ("qrcode.viewfinder", "Scan to add a device", "On the new one, Settings \u{25B8} Sync \u{25B8} I Have a Code shows a QR code. A phone that syncs scans it, or you type the code."),
                     ("key", "Your sync code is in the Keychain", "So are class keys. They used to sit in a file that backups carried along."),
+                    ("exclamationmark.bubble", "Send Feedback: 10 a day", "Write a short summary and Send turns on. At the limit, Request more gives you 10 more, once a day."),
                 ], tryTitle: nil),
     ]
 
@@ -147,7 +156,7 @@ struct WhatsNewView: View {
                 Text("WHAT'S NEW").font(.system(size: 11, weight: .bold)).kerning(1.8).foregroundStyle(Brand.neon)
                 Text("CedarLogic \(WhatsNew.version)").font(.system(size: 34, weight: .bold)).foregroundStyle(Brand.silver)
                     .shadow(color: Brand.neon.opacity(0.3), radius: 10)
-                Text("Circuits you delete can come back, clicks and wires behave the same every time, and your codes are kept safer. Here's what's new since 0.3, a minute's read.")
+                Text("Circuits you delete can come back, you can check your work and hand it in, and your circuits can follow you to your other devices. Here's what's new since 0.3, a couple of minutes' read.")
                     .font(.system(size: 14)).foregroundStyle(BrandText.secondary).fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(Self.chapters.enumerated()), id: \.offset) { i, c in
@@ -194,7 +203,10 @@ struct WhatsNewView: View {
                 }
                 .padding(.top, 4)
                 if let t = c.tryTitle {
+                    let noCircuit = Self.needsCircuit(index) && CanvasController.front == nil
                     Button(t) { tryIt(index) }.buttonStyle(BrandButtonStyle(primary: false))
+                        .disabled(noCircuit)
+                        .help(noCircuit ? "Open a circuit first." : "")
                         .padding(.top, 2)
                 }
             }
@@ -204,9 +216,17 @@ struct WhatsNewView: View {
         .padding(.horizontal, 48).padding(.top, 34)
     }
 
+    /// Check My Circuit works on a circuit, so it needs one open.
+    private static func needsCircuit(_ index: Int) -> Bool { index == 2 }
+
     private func tryIt(_ index: Int) {
         switch index {
         case 0: openWindow(id: "library")
+        case 2:
+            // The window comes forward so the check it starts is seen.
+            guard let canvas = CanvasController.front else { return }
+            canvas.view?.window?.makeKeyAndOrderFront(nil)
+            canvas.perform(.checkCircuit)
         default: break
         }
     }
@@ -218,6 +238,9 @@ struct WhatsNewView: View {
                 .padding(.bottom, 8)
             finaleTile("Open the Practice Circuit", "A circuit of your own to try things on.", "graduationcap") {
                 finish(); Templates.openPractice()
+            }
+            finaleTile("Turn on sync", "Settings \u{25B8} Sync. Your circuits on every device.", "arrow.triangle.2.circlepath") {
+                finish(); PrefsWindow.shared.show(page: .sync)
             }
             finaleTile("Take the guided tour again", "Two switches, a gate and a light, on a circuit of its own.", "figure.walk") {
                 finish(); TourModel.shared.start()
@@ -281,9 +304,12 @@ private struct ChapterArt: View {
         switch index {
         case 0: deleted
         case 1: pins
-        default: feedback
+        case 2: check
+        default: sync
         }
     }
+
+    private static let wrong = Color(.sRGB, red: 1, green: 0.5, blue: 0.42)
 
     private func caption(_ icon: String, _ text: String) -> some View {
         HStack(spacing: 6) {
@@ -405,21 +431,117 @@ private struct ChapterArt: View {
         }
     }
 
-    // MARK: Feedback and the Keychain
+    // MARK: Check My Circuit, the lab report and Share Link
 
-    private var feedback: some View {
-        VStack(spacing: 12) {
-            BrandCard(radius: 14) {
-                VStack(alignment: .leading, spacing: 10) {
+    /// The asked-for formula against the circuit's table, one row wrong, then
+    /// the two ways to hand it over.
+    private var check: some View {
+        let rows: [(String, String, String, Bool)] = [("0 0", "0", "0", true), ("0 1", "1", "1", true), ("1 0", "1", "0", false), ("1 1", "0", "0", true)]
+        return VStack(spacing: 10) {
+            caption("checkmark.seal", "CHECK MY CIRCUIT \u{00B7} \u{21E7}T").padding(.bottom, 2)
+            BrandCard(radius: 10) {
+                Text("S = A ^ B").font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundStyle(BrandText.primary)
+                    .frame(width: 290, height: 34)
+            }
+            BrandCard(radius: 12) {
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("A B").frame(width: 70, alignment: .leading)
+                        Text("Asked").frame(width: 56)
+                        Text("Circuit").frame(width: 56)
+                        Spacer()
+                    }
+                    .font(.system(size: 10, weight: .bold)).foregroundStyle(BrandText.faint)
+                    ForEach(rows, id: \.0) { r in
+                        HStack {
+                            Text(r.0).frame(width: 70, alignment: .leading)
+                            Text(r.1).frame(width: 56)
+                            Text(r.2).frame(width: 56)
+                            Spacer()
+                            Image(systemName: r.3 ? "checkmark" : "xmark").font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(r.3 ? Brand.neon : Self.wrong)
+                        }
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(r.3 ? BrandText.primary : Self.wrong)
+                        .padding(.horizontal, 8).frame(height: 24)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(r.3 ? Color.white.opacity(0.04) : Self.wrong.opacity(0.14)))
+                    }
+                }
+                .padding(12).frame(width: 290)
+            }
+            HStack(spacing: 10) {
+                handIn("doc.richtext", "Lab Report", "One PDF", lit: true)
+                handIn("link", "Share Link", "In a browser", lit: false)
+            }
+            .padding(.top, 4)
+        }
+        .frame(width: 290)
+    }
+
+    private func handIn(_ icon: String, _ title: String, _ line: String, lit: Bool) -> some View {
+        BrandCard(lit: lit, radius: 12) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 7).fill(Brand.neon.opacity(0.16)).frame(width: 28, height: 28)
+                    .overlay(Image(systemName: icon).font(.system(size: 12)).foregroundStyle(Brand.neon))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 11.5, weight: .bold)).foregroundStyle(BrandText.primary)
+                    Text(line).font(.system(size: 9.5)).foregroundStyle(BrandText.faint).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).frame(width: 140, height: 50)
+        }
+    }
+
+    // MARK: Sync, the Keychain and feedback
+
+    private func device(_ icon: String, _ name: String, _ detail: String, lit: Bool = false) -> some View {
+        BrandCard(lit: lit, radius: 11) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 7).fill(Brand.neon.opacity(0.16)).frame(width: 28, height: 28)
+                    .overlay(Image(systemName: icon).font(.system(size: 12)).foregroundStyle(Brand.neon))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
+                    Text(detail).font(.system(size: 10)).foregroundStyle(BrandText.faint)
+                }
+                Spacer()
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 13)).foregroundStyle(Brand.neon)
+            }
+            .padding(.horizontal, 12).frame(width: 290, height: 44)
+        }
+    }
+
+    private var sync: some View {
+        VStack(spacing: 7) {
+            caption("lock.fill", "ENCRYPTED \u{00B7} SAME CIRCUITS EVERYWHERE").padding(.bottom, 3)
+            device("laptopcomputer", "This Mac", "Lab 5: Traffic Light \u{00B7} just now", lit: true)
+            device("iphone", "Phone", "Up to date")
+            device("globe", "CedarLogic Online", "Up to date")
+            BrandCard(lit: true, radius: 12) {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 7).fill(Brand.neon.opacity(0.16)).frame(width: 28, height: 28)
+                        .overlay(Image(systemName: "key.fill").font(.system(size: 13)).foregroundStyle(Brand.neon))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sync code").font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
+                        Text("In your login Keychain").font(.system(size: 10)).foregroundStyle(BrandText.faint)
+                    }
+                    Spacer()
+                    Image(systemName: "lock.fill").font(.system(size: 13)).foregroundStyle(Brand.neon)
+                }
+                .padding(.horizontal, 12).frame(width: 290, height: 48)
+            }
+            .padding(.top, 5)
+            BrandCard(radius: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.bubble.fill").font(.system(size: 14)).foregroundStyle(Brand.neon)
-                        Text("Send Feedback").font(.system(size: 13, weight: .bold)).foregroundStyle(BrandText.primary)
+                        Image(systemName: "exclamationmark.bubble.fill").font(.system(size: 13)).foregroundStyle(Brand.neon)
+                        Text("Send Feedback").font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
                         Spacer()
                         Text("10 of 10 today").font(.system(size: 10, weight: .semibold)).foregroundStyle(BrandText.faint)
                     }
                     HStack(spacing: 3) {
                         ForEach(0..<10, id: \.self) { _ in
-                            Capsule().fill(Brand.neon.opacity(0.85)).frame(height: 6)
+                            Capsule().fill(Brand.neon.opacity(0.85)).frame(height: 5)
                         }
                     }
                     HStack {
@@ -428,21 +550,10 @@ private struct ChapterArt: View {
                         pill("Request more", filled: true)
                     }
                 }
-                .padding(14).frame(width: 290)
+                .padding(12).frame(width: 290)
             }
-            BrandCard(lit: true, radius: 12) {
-                HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 7).fill(Brand.neon.opacity(0.16)).frame(width: 32, height: 32)
-                        .overlay(Image(systemName: "key.fill").font(.system(size: 14)).foregroundStyle(Brand.neon))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sync code").font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
-                        Text("In your login Keychain").font(.system(size: 10)).foregroundStyle(BrandText.faint)
-                    }
-                    Spacer()
-                    Image(systemName: "lock.fill").font(.system(size: 13)).foregroundStyle(Brand.neon)
-                }
-                .padding(.horizontal, 14).frame(width: 290, height: 56)
-            }
+            .padding(.top, 5)
         }
+        .frame(width: 290)
     }
 }
