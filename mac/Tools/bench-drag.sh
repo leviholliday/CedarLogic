@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 OBJ=mac/build/bench-obj; mkdir -p "$OBJ"
-FLAGS=(-std=c++17 -O2 -DCL_NO_WX -D_PRODUCTION_ -Wno-deprecated-declarations -Wno-inconsistent-missing-override
+FLAGS=(-std=c++17 -O2 -DCL_NO_WX -D_PRODUCTION_ -Wno-deprecated-declarations
 	-Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include)
 SRC=$(sed -n '/^CORE=(/,/^)/p' mac/build.sh | grep -v '^CORE=(\|^)\|^\s*#')
 SRC=$(eval echo $SRC)
