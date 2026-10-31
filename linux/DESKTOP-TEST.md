@@ -83,10 +83,17 @@ Wayland display for 12 s (clean exit by timeout, nothing on stderr).
   "3-input N...") for most gates. It looks deliberate (ellipsis) but a long
   label is hard to tell apart. Not changed.
 - The Simulation View scope dock rendered as an empty dark panel in the
-  `scope` screenshot for Lab5. That may just mean no probe is set; I did not
-  prove it either way.
-- The `truth` window didn't render with the screenshot flag for Lab5 (exit
-  non-zero; not looked into).
+  `scope` screenshot, on Lab5 and on the SR latch template, with no
+  "Oscilloscope" header or close button, although `Scope.cpp` draws both.
+  I tried to see it through a real X framebuffer grab (xdotool Ctrl+G, `xwd`)
+  but that grab was unusable (a black rectangle where a window hadn't painted).
+  So I can't say whether the dock is blank in a real window or only in
+  `--screenshot`'s capture. Worth a look by eye.
+- `--show truth` on Lab5 prints "nothing to picture": Lab5's first page has
+  no switch-to-light table, so the app shows its "A truth table couldn't be
+  made" message instead of the Truth Table window. That is expected. On
+  `res/templates/template-builtin-ff-sr.cdl` the window renders cleanly
+  (2 switches, 2 lights, 4 rows, tabs for Karnaugh Map, Formulas and Check).
 - The PNG captures have black pixels in the window's rounded corners. That is
   the capture, not the window.
 
@@ -117,8 +124,14 @@ Both are changes to `SessionCheck.cpp` only. I found no app bug.
   looking at screenshots, not by a person.
 - No HiDPI or fractional scaling: this screen is scale 1.0. Scale 2 numbers
   are the benchmark's simulation.
-- Seed 8 fatal-criticals on X11 was not rerun after the Duplicate fix.
-- The scope dock and the `truth` window screenshot are unresolved.
+- Seed 8 with `G_DEBUG=fatal-criticals` on Xvfb X11 is intermittent after the
+  Duplicate fix: 2 of 4 runs through `session-check.sh` failed the last check
+  ("the window closed, and was freed with its circuit (1 circuit windows alive,
+  1 before)", 0 expected) and 4 of 4 direct runs passed, including one with
+  debug output that would have listed the window left. No GTK warning. I could
+  not capture a failing run with output, so I don't know whether a second
+  window is left over or the close takes longer than the check waits (1.5 s).
+- The scope dock being blank in `--screenshot` is unresolved (above).
 
 ## Left to look at
 
@@ -126,3 +139,32 @@ Both are changes to `SessionCheck.cpp` only. I found no app bug.
   case; `SMOOTHNESS.md` step 3 (labels as cached glyphs) is where it would
   come from.
 - A person on this laptop should try Wayland dragging at 1366x768 by hand.
+
+## Found by hand, then fixed (owner testing, same laptop)
+
+- A on the keyboard put the gate in the top left corner until the mouse moved
+  (GDK reports 0, 0 for the pointer on Wayland after the picker closes). It
+  uses the canvas's own last pointer position now.
+- Dragging a gate in from the side panel, C did nothing until the gate was
+  dropped and picked up again (focus stayed on the panel). The canvas takes the
+  focus when the gate lands on it.
+- Ctrl+Tab cards: works; the owner would like them to look more like the Mac
+  app's. Not changed; to be talked through first.
+
+The first fixes for A and C (71d3b78, 1a552bb, a8e2e8b) didn't fix them on
+Wayland. Debug output from the owner's run showed why: after the picker
+closed, the canvas thought the pointer was outside and GDK's answer was stale
+(A), and C's key did reach the canvas but needed the canvas to have seen the
+pointer come in, which a drag from the panel never gives it. The fix that
+worked is in the commit after the Ctrl+Tab one; the owner confirmed both on
+Wayland. Neither is covered by an automated check.
+
+Ctrl+Tab (c3b338d): rounded, shadowed, slightly see-through panel that fades,
+cards drawn at each tab's own zoom, an accent ring, and a fix for a resting
+pointer picking a card. Session check passes on Xvfb and on Wayland; the look
+is for the owner to judge.
+
+Note: the commit ids in the last two sections (71d3b78, 1a552bb, a8e2e8b,
+c3b338d) are from the branch `linux/native-v4-desktop`, kept as the tag
+`archive/linux/native-v4-desktop`. The A/C-key and Ctrl+Tab code was redone on
+this branch (c5d4155, 011095b); only these notes were carried over.
