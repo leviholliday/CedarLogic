@@ -131,6 +131,8 @@ void applyStyle() {
 	s += "dialog button.default label, dialog button.suggested-action label { color: " + css(c.onAccent()) + "; }\n";
 	s += "dialog button.default:hover, dialog button.suggested-action:hover { background-color: " + css(withAlpha(c.accent(), 0.88f)) + "; }\n";
 	s += "dialog button.destructive-action { background-color: rgba(229,72,77,0.14); color: rgb(229,72,77); }\n";
+	// Off (Send Feedback with no summary yet): plainly off, not just unclickable.
+	s += "dialog button:disabled { opacity: 0.45; }\n";
 	s += "switch { border-radius: 14px; } switch:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; }\n";
 	s += "check:checked, radio:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; color: " +
 	     css(c.onAccent()) + "; }\n";
