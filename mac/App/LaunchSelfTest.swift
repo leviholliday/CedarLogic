@@ -12,7 +12,10 @@
 // as a quit mid-session leaves it), brokenlibrary (folders with no circuit,
 // unreadable names, a damaged circuit, a versions "folder" that's a file),
 // damaged (as normal, then damaged copies of the sample circuits), offline
-// (as normal, with Sparkle's last update check a month ago).
+// (as normal, with Sparkle's last update check a month ago), trash (a
+// circuit deleted from Your Circuits, one deleted 31 days ago, one moved
+// into the trash by sync with no date, a second copy of a circuit that's
+// still in the library, and the "repeated versions" folder).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -25,7 +28,9 @@
 // addresses that can't be looked up) start and stay quiet -- and, in
 // `damaged`, copies of the sample circuits cut short or with bytes changed
 // (CL_DAMAGE_ROUND picks which), each opening or being refused, never
-// crashing. PASS or FAIL for each; exit 1 on a failure.
+// crashing; in `trash`, Recently Deleted: the list, the 30-day sweep,
+// Restore (under its own id, or a new one when that's taken) and Delete Now.
+// PASS or FAIL for each; exit 1 on a failure.
 
 import AppKit
 
@@ -113,6 +118,22 @@ enum LaunchSelfTest {
             try? "(circuit (page".write(to: bad.appendingPathComponent("circuit.cdl"), atomically: true, encoding: .utf8)
             try? Data("versions".utf8).write(to: bad.appendingPathComponent("versions"))
             try? Data("x".utf8).write(to: root.appendingPathComponent("a-file-not-a-folder"))
+        case "trash":
+            if made.count == 3 { Library.moveToTrash(made[2]) }   // "Counter", deleted just now
+            let bin = RecentlyDeleted.trash(in: Library.root)
+            func trashed(_ folder: String, _ name: String, deleted: Date?) {
+                let f = bin.appendingPathComponent(folder, isDirectory: true)
+                try? fm.createDirectory(at: f.appendingPathComponent("versions"), withIntermediateDirectories: true)
+                try? name.write(to: f.appendingPathComponent("name.txt"), atomically: true, encoding: .utf8)
+                try? circuitText(gates: 3).write(to: f.appendingPathComponent("circuit.cdl"), atomically: true, encoding: .utf8)
+                if let deleted { RecentlyDeleted.stamp(f, at: deleted) }
+            }
+            trashed("20240101-120000-11111", "Old one", deleted: Date(timeIntervalSinceNow: -31 * 86400))
+            trashed("20250101-120000-22222", "From the phone", deleted: nil)
+            trashed(last.id + " 2", "Half adder again", deleted: Date(timeIntervalSinceNow: -86400))
+            let repeated = bin.appendingPathComponent("repeated versions/\(last.id)", isDirectory: true)
+            try? fm.createDirectory(at: repeated, withIntermediateDirectories: true)
+            try? circuitText(gates: 1).write(to: repeated.appendingPathComponent("20240101-000000.cdl"), atomically: true, encoding: .utf8)
         default: break
         }
         d.synchronize()
@@ -147,6 +168,58 @@ enum LaunchSelfTest {
         let shown = NSApp.windows.filter { $0.isVisible }
         check(shown.isEmpty, "no alert or window came up (\(shown.map { $0.title.isEmpty ? String(describing: type(of: $0)) : $0.title }))")
         check(NSApp.modalWindow == nil, "no question waits for an answer")
+    }
+
+    // MARK: trash
+
+    /// Recently Deleted, from what setUp("trash") left in the library's trash.
+    static func trashChecks(check: (Bool, String) -> Void, timed: (String, Double, () -> Void) -> Void) {
+        let fm = FileManager.default
+        let bin = RecentlyDeleted.trash(in: Library.root)
+        var before: [DeletedCircuit] = []
+        timed("Recently Deleted lists the trash", 1.0) { before = RecentlyDeleted.list() }
+        let names = Set(before.map(\.name))
+        check(before.count == 4 && names == ["Counter", "Old one", "From the phone", "Half adder again"],
+              "Recently Deleted shows the 4 deleted circuits (\(before.map(\.name)))")
+        check(["Counter", "From the phone"].contains(before.first?.name ?? ""), "newest first (\(before.first?.name ?? "none"))")
+        check(!before.contains { $0.id == "repeated versions" } && fm.fileExists(atPath: bin.appendingPathComponent("repeated versions").path),
+              "the repeated versions folder isn't listed, and is left alone")
+        if let c = before.first(where: { $0.name == "Counter" }) {
+            check(abs(c.deleted.timeIntervalSinceNow) < 600, "a circuit deleted from Your Circuits is dated when it was deleted")
+        }
+        if let p = before.first(where: { $0.name == "From the phone" }) {
+            check(fm.fileExists(atPath: p.folder.appendingPathComponent(RecentlyDeleted.stampFile).path) && abs(p.deleted.timeIntervalSinceNow) < 600,
+                  "one sync moved there with no date is dated when it was moved, and stamped")
+        }
+        var swept = 0
+        timed("the 30-day sweep", 1.0) { swept = RecentlyDeleted.sweep() }
+        let after = RecentlyDeleted.list()
+        check(swept == 1 && !after.contains { $0.name == "Old one" }, "the sweep deleted the one from 31 days ago, only (\(swept))")
+        check(RecentlyDeleted.sweep() == 0, "a second sweep deletes nothing")
+
+        // Restore: under its own id when that's free.
+        if let c = after.first(where: { $0.name == "Counter" }) {
+            let id = RecentlyDeleted.restore(c)
+            let back = Library.items().first { $0.id == id }
+            check(id == c.id && back?.name == "Counter", "Restore puts \u{201C}Counter\u{201D} back in Your Circuits under its own id")
+            check(back.map { !fm.fileExists(atPath: $0.folder.appendingPathComponent(RecentlyDeleted.stampFile).path) } ?? false,
+                  "without its deleted date")
+            check(Library.items().first?.name == "Counter", "at the top of Your Circuits")
+        } else { check(false, "Counter is in Recently Deleted") }
+        // ...and under a new one when its id is taken (a second copy).
+        if let c = after.first(where: { $0.name == "Half adder again" }) {
+            let taken = String(c.id.dropLast(2))
+            let id = RecentlyDeleted.restore(c)
+            let items = Library.items()
+            check(id != nil && id != taken && id?.contains(" ") == false && items.contains { $0.id == taken } && items.contains { $0.id == id && $0.name == "Half adder again" },
+                  "a second copy of a circuit that's still there comes back beside it, under a new id (\(id ?? "none"))")
+        } else { check(false, "the second copy is in Recently Deleted") }
+        check(Library.items().count == 4, "Your Circuits has 4 circuits now (\(Library.items().count))")
+        // Delete Now.
+        if let c = RecentlyDeleted.list().first(where: { $0.name == "From the phone" }) {
+            check(RecentlyDeleted.deleteNow(c) && !fm.fileExists(atPath: c.folder.path), "Delete Now deletes it for good")
+        } else { check(false, "the sync-trashed circuit is in Recently Deleted") }
+        check(RecentlyDeleted.list().isEmpty, "Recently Deleted is empty")
     }
 
     // MARK: check
@@ -212,7 +285,7 @@ enum LaunchSelfTest {
                 _ = Library.versions(of: item)
                 _ = Library.displayName(for: item.circuit)
             }
-            let expected = ["first": 0, "nolibrary": 0, "missinglast": 2, "brokenlibrary": 5][state] ?? 3
+            let expected = ["first": 0, "nolibrary": 0, "missinglast": 2, "brokenlibrary": 5, "trash": 2][state] ?? 3
             check(items.count == expected, "Your Circuits shows \(items.count) circuit(s) (expected \(expected))")
         }
         // The launch's clean-up (on a background queue there, here directly).
@@ -235,6 +308,7 @@ enum LaunchSelfTest {
         timed("Sync starts") { SyncCenter.shared.start() }
         timed("Classroom starts") { ClassroomCenter.shared.start() }
         if state == "offline" { offlineChecks(check: check, timed: timed, turn: turn) }
+        if state == "trash" { trashChecks(check: check, timed: timed) }
         turn(2.5)
         check(NSApp?.modalWindow == nil, "no question was left up")
 

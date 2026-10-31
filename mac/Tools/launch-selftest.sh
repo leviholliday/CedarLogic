@@ -19,7 +19,7 @@ cd "$(dirname "$0")/../.."
 SRC=mac/build/CedarLogic.app
 [ -d "$SRC" ] || { echo "Build first: mac/build.sh"; exit 1; }
 ROUNDS=${1:-3}
-STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline)
+STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline trash)
 # STATES_ONLY="damaged" mac/Tools/launch-selftest.sh 40: only those states.
 [ -n "${STATES_ONLY:-}" ] && read -ra STATES <<<"$STATES_ONLY"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/cl-launch-selftest.XXXXXX")
