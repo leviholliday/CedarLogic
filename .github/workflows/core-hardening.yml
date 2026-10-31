@@ -104,3 +104,28 @@ jobs:
           cmake --build build/headless
       - name: Checks
         run: ctest --test-dir build/headless --output-on-failure
+
+  thread-sanitizer:
+    name: Engine threads under TSan (Check My Circuit's check, the sync engine)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CC: clang
+      CXX: clang++
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang cmake ninja-build libssl-dev zlib1g-dev libcurl4-openssl-dev
+          # ThreadSanitizer can't map its shadow memory with Ubuntu 24.04's
+          # address randomisation at 32 bits ("unexpected memory mapping").
+          sudo sysctl vm.mmap_rnd_bits=28
+      - name: Build (ThreadSanitizer)
+        run: |
+          cmake -S mac/Tools/headless -B build/tsan -G Ninja -DCL_TSAN=ON
+          cmake --build build/tsan --target thread_check
+      - name: Check My Circuit's off-main-thread check, many at once
+        run: build/tsan/thread_check res/cl_gatedefs.xml tests/check-sequential/cases.json 5 8
+      - name: Sync engine self-test (its own threads)
+        run: OUT=build/sync-tsan TSAN=1 mac/Tools/sync-selftest.sh
