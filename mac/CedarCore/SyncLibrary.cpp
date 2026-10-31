@@ -21,6 +21,7 @@
 #include <mutex>
 #include <sstream>
 #include <system_error>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -63,6 +64,21 @@ int64_t fileEpochOffsetUs() {
 	return offset;
 }
 
+// A rename, tried again for a short while when it fails and the source is still
+// there. On Windows a folder can't be renamed while any file in it is open, and
+// virus scanners and the search indexer open files that were just written for a
+// moment: the first try fails, a later one works. Elsewhere the first try
+// decides (a failure that lasts is still a failure, after about a second).
+bool renameRetrying(const fs::path& from, const fs::path& to, std::error_code& ec) {
+	for (int attempt = 0;; attempt++) {
+		fs::rename(from, to, ec);
+		if (!ec || attempt >= 20) return !ec;
+		std::error_code ec2;
+		if (!fs::exists(from, ec2)) return false;
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	}
+}
+
 }  // namespace
 
 std::string join(const std::string& a, const std::string& b) {
@@ -102,7 +118,7 @@ bool writeAtomic(const std::string& path, const std::string& data) {
 		// Some standard libraries won't rename over an existing file on Windows.
 		std::error_code ec2;
 		fs::remove(P(path), ec2);
-		fs::rename(P(tmp), P(path), ec);
+		renameRetrying(P(tmp), P(path), ec);
 		if (ec) {
 			fs::remove(P(tmp), ec2);
 			return false;
@@ -147,8 +163,7 @@ bool removeAll(const std::string& path) {
 
 bool rename(const std::string& from, const std::string& to) {
 	std::error_code ec;
-	fs::rename(P(from), P(to), ec);
-	return !ec;
+	return renameRetrying(P(from), P(to), ec);
 }
 
 std::vector<std::string> listDir(const std::string& path) {

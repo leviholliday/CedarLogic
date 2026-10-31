@@ -414,7 +414,12 @@ struct Client {
 		files::writeAtomic(p, name);
 		files::setMtimeMs(p, now());
 	}
-	void remove(const std::string& lid) { lib->trash(lid); }
+	// A trash that fails (on Windows, a file in the folder held open for a moment by a
+	// virus scanner) would leave the circuit in the library, and a later check would
+	// fail far from the cause: it fails here, saying so.
+	void remove(const std::string& lid) {
+		if (!lib->trash(lid)) throw Fail("couldn't move " + lid + " to the trash");
+	}
 	void vanish(const std::string& lid) {
 		if (mem) mem->lib.erase(lid);
 		else files::removeAll(files::join(root, lid));
