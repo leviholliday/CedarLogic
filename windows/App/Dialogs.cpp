@@ -803,7 +803,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		// Tips under fields dimmed; what's wrong in red.
 		HWND ctl = (HWND)lp;
 		COLORREF ink = c.text;
-		if (ctl == f->problem) ink = RGB(220, 64, 64);
+		if (ctl == f->problem || GetPropW(ctl, L"clTipProblem")) ink = RGB(220, 64, 64);
 		else if (GetPropW(ctl, L"clTip") || GetPropW(ctl, L"clDim")) ink = c.dim;
 		if (msg == WM_CTLCOLORSTATIC && !IsWindowEnabled(ctl)) ink = c.dim;
 		// A disabled or read-only box asks here too: it keeps its field colour.
@@ -1514,6 +1514,14 @@ void Form::setTip(int field, const std::string& text) {
 	FormField& x = fields[field];
 	x.tip = text;
 	if (x.tipWindow) SetWindowTextW(x.tipWindow, W(text).c_str());
+}
+
+void Form::markTip(int field, bool problem) {
+	HWND tip = fields[field].tipWindow;
+	if (tip == nullptr) return;
+	if (problem) SetPropW(tip, L"clTipProblem", (HANDLE)1);
+	else RemovePropW(tip, L"clTipProblem");
+	InvalidateRect(tip, nullptr, TRUE);
 }
 
 void Form::retheme() {

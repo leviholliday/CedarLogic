@@ -1118,9 +1118,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : d == "switcher" ? -10 : 0;
-			if (d == "feedback-sending" || d == "feedback-failed" || d == "feedback-sent") {
+			if (d == "feedback-sending" || d == "feedback-failed" || d == "feedback-sent" || d == "feedback-capped" || d == "feedback-summary") {
 				gDialog = -11;
-				gFeedbackSample = d == "feedback-sending" ? 1 : d == "feedback-failed" ? 2 : 3;
+				gFeedbackSample = d == "feedback-sending" ? 1 : d == "feedback-failed" ? 2 : d == "feedback-sent" ? 3 : d == "feedback-capped" ? 4 : 5;
 			}
 			if (d == "sync" || d == "sync-on") { gDialog = CMD_PREFERENCES; gSyncDialog = d; }
 			if (d == "sync-code" || d == "sync-link" || d == "sync-pair" || d == "sync-pair-expired" || d == "sync-remove") { gDialog = -9; gSyncDialog = d; }

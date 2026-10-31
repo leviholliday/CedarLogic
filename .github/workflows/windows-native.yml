@@ -394,6 +394,8 @@ jobs:
           timeout 90 "$A" --dialog feedback-sending --screenshot "$PWD/renders/feedback-sending.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog feedback-failed --screenshot "$PWD/renders/feedback-failed.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog feedback-sent --screenshot "$PWD/renders/feedback-sent.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog feedback-capped --screenshot "$PWD/renders/feedback-capped.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog feedback-summary --screenshot "$PWD/renders/feedback-summary.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog feedback-sent --screenshot "$PWD/renders/feedback-sent-dark.png" res/samples/practice.cdl || true
           # The 0.4 tour: the intro, six chapters and the last page. (It's drawn in the
           # brand's own look, so the dark run is the same pictures, kept to show it.)

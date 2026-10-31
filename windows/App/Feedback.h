@@ -26,9 +26,11 @@ void stopRecording();
 // step said as PASS or FAIL, pictures and the video written to `dir`.
 // Returns how many failed.
 int captureSelfTest(CircuitWindow* window, const std::string& dir, std::function<void(const std::string&)> say);
-// --dialog feedback-sending, feedback-failed, feedback-sent (CI's pictures):
-// the form as it looks mid-send or after a failed one (nothing is sent), or
-// the thank-you card. 1 sending, 2 failed, 3 sent.
+// --dialog feedback-sending, feedback-failed, feedback-sent, feedback-capped,
+// feedback-summary (CI's pictures): the form as it looks mid-send, after a
+// failed one, over the daily cap (with Request More) or sent without a
+// summary (nothing is sent), or the thank-you card. 1 sending, 2 failed,
+// 3 sent, 4 capped, 5 no summary.
 void showSample(CircuitWindow* window, int state);
 }
 

@@ -273,6 +273,7 @@ void Prefs::load() {
 	lastFolder = r.s("lastFolder", lastFolder);
 	lastCircuit = r.s("lastCircuit", lastCircuit);
 	studentName = r.s("studentName", studentName);
+	installId = r.s("installId", installId);
 	lastFormula = manyLines(r.s("lastFormula", lastFormula));
 	buildShape = r.i("buildShape", buildShape, 0, 2);
 	buildStyle = r.i("buildStyle", buildStyle, 0, 2);
@@ -374,6 +375,7 @@ void Prefs::save() const {
 	o << "lastFolder=" << lastFolder << "\n";
 	o << "lastCircuit=" << lastCircuit << "\n";
 	o << "studentName=" << studentName << "\n";
+	o << "installId=" << installId << "\n";
 	o << "lastFormula=" << oneLine(lastFormula) << "\n";
 	o << "buildShape=" << buildShape << "\n";
 	o << "buildStyle=" << buildStyle << "\n";

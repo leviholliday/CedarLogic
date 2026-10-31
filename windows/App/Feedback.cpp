@@ -3,6 +3,7 @@
 // its own), and the window.
 
 #include "Feedback.h"
+#include "Alert.h"
 #include "Canvas.h"
 #include "Chrome.h"
 #include "Dialogs.h"
@@ -12,6 +13,7 @@
 #include "SyncApp.h"
 #include "Window.h"
 
+#include <bcrypt.h>
 #include <dwmapi.h>
 #include <winhttp.h>
 
@@ -427,6 +429,36 @@ std::string jsonField(const std::string& json, const char* key) {
 	return out;
 }
 
+bool jsonTrue(const std::string& json, const char* key) {
+	const std::string needle = "\"" + std::string(key) + "\"";
+	size_t at = json.find(needle);
+	if (at == std::string::npos) return false;
+	at = json.find(':', at + needle.size());
+	if (at == std::string::npos) return false;
+	while (++at < json.size() && json[at] == ' ') {}
+	return json.compare(at, 4, "true") == 0;
+}
+
+// This install's name to the feedback server, the same for every report
+// from it (its daily cap counts by it, not by the school network's one
+// address): 32 hex digits made once and kept in the settings.
+std::string installId() {
+	std::string& id = prefs().installId;
+	bool ok = id.size() >= 8 && id.size() <= 64;
+	for (char c : id) ok = ok && (isalnum((unsigned char)c) || c == '_' || c == '-');
+	if (ok) return id;
+	unsigned char bytes[16] = {};
+	if (!BCRYPT_SUCCESS(BCryptGenRandom(nullptr, bytes, sizeof bytes, BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+		LARGE_INTEGER t;
+		QueryPerformanceCounter(&t);
+		for (int i = 0; i < 16; i++) bytes[i] = (unsigned char)((t.QuadPart >> (i % 8 * 8)) ^ (GetCurrentProcessId() * (i + 7)) ^ GetTickCount());
+	}
+	id.clear();
+	for (unsigned char b : bytes) id += strf("%02x", b);
+	prefs().save();
+	return id;
+}
+
 std::string percent(const std::string& s) {
 	std::string o;
 	for (unsigned char c : s) {
@@ -443,6 +475,9 @@ struct Sending {
 	double fraction = 0;
 	std::atomic<int> state{ 0 };   // 0 going, 1 sent, 2 failed
 	std::string failure;
+	// Failed because this sender is over the server's daily cap ("sender_cap"),
+	// and whether it may ask for more (POST /api/feedback/more). Set before state.
+	bool capped = false, canRequestMore = false;
 	void set(const std::string& n, double f) {
 		std::lock_guard<std::mutex> g(lock);
 		note = n;
@@ -464,6 +499,10 @@ Reply perform(const std::string& method, const std::string& path, const std::str
 		if (r.reached) {
 			const std::string why = jsonField(r.body, "error");
 			failure = why.empty() ? strf("The feedback server said no (%d).", r.status) : why;
+			// Over this sender's daily cap, or given more already: asking
+			// again won't help (another 429, too busy, is tried again as before).
+			const std::string code = r.status == 429 ? jsonField(r.body, "code") : std::string();
+			if (code == "sender_cap" || code == "more_used") return r;
 			if (r.status < 500 && r.status != 429) return r;
 			if (!repeatable && r.status != 429 && r.status != 503) break;
 		} else {
@@ -494,6 +533,10 @@ void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment
 	};
 	std::string failure;
 	const Reply created = perform("POST", "/api/feedback", "application/json", "", body, failure, false);
+	if (created.status == 429 && jsonField(created.body, "code") == "sender_cap") {
+		s->capped = true;
+		s->canRequestMore = jsonTrue(created.body, "canRequestMore");
+	}
 	if (created.status < 200 || created.status >= 300) { fail(failure); return; }
 	const std::string id = jsonField(created.body, "id"), token = jsonField(created.body, "uploadToken");
 	const long long chunk = std::max(65536LL, atoll(jsonField(created.body, "chunkSize").c_str()));
@@ -517,6 +560,28 @@ void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment
 	s->state = 1;
 }
 
+// Request More, over the cap: one POST /api/feedback/more, on a thread.
+struct Asking {
+	std::mutex lock;
+	std::atomic<int> state{ 0 };   // 0 going, 1 given more, 2 refused
+	std::string refusal;           // the server's words, refused
+	long granted = 10;
+};
+
+void askForMore(std::shared_ptr<Asking> a, std::string body) {
+	std::string failure;
+	const Reply r = perform("POST", "/api/feedback/more", "application/json", "", body, failure, false);
+	std::lock_guard<std::mutex> g(a->lock);
+	if (r.status >= 200 && r.status < 300) {
+		const long n = atol(jsonField(r.body, "granted").c_str());
+		if (n > 0) a->granted = n;
+		a->state = 1;
+	} else {
+		a->refusal = failure;
+		a->state = 2;
+	}
+}
+
 // The send going on, if any: it carries on when the window is closed, and
 // is finished here then -- the draft cleared, or a note that it wasn't sent
 // (Send Feedback shows why next time it opens).
@@ -525,7 +590,11 @@ std::shared_ptr<Sending>& inFlight() {
 	return s;
 }
 UINT_PTR g_watch = 0;
-int g_sample = 0;   // showSample's state: the form opens looking like it (1 sending, 2 failed)
+int g_sample = 0;   // showSample's state: the form opens looking like it (1 sending, 2 failed, 4 over the cap)
+bool g_lastCanMore = false;   // the send that failed with the window closed was over the cap, and more may be asked for
+// The form's buttons (Form::buttons, 100 on): Request More (shown only over
+// the daily cap), then Send Feedback.
+const int kMoreButton = 100, kSendButton = 101;
 std::string g_lastFailure;
 
 // Sent: the draft is cleared for next time.
@@ -562,7 +631,8 @@ void CALLBACK watchSend(HWND, UINT, UINT_PTR, DWORD) {
 	}
 	{
 		std::lock_guard<std::mutex> g(s->lock);
-		g_lastFailure = s->failure;
+		g_lastFailure = s->capped ? s->failure : "Your feedback wasn't sent. " + s->failure;
+		g_lastCanMore = s->capped && s->canRequestMore;
 	}
 	if (w) w->note("Your feedback wasn't sent. Open Send Feedback to try again.");
 	MessageBeep(MB_ICONWARNING);
@@ -1076,7 +1146,7 @@ void show(CircuitWindow* win) {
 	f.width = 600;
 	f.okText = "";
 	f.cancelText = "Close";
-	f.buttons = { "Send Feedback" };
+	f.buttons = { "Request More", "Send Feedback" };
 	f.timerMs = 120;
 
 	FormField band;
@@ -1095,7 +1165,9 @@ void show(CircuitWindow* win) {
 	title.kind = FormField::Text;
 	title.label = "Summary";
 	title.value = d.title;
-	title.tip = "A short summary, like “C doesn't connect the wire”";
+	title.placeholder = "Required";
+	const std::string titleTip = "A short summary, like “C doesn't connect the wire”";
+	title.tip = titleTip;
 	const int titleField = f.add(title);
 	FormField details;
 	details.kind = FormField::Text;
@@ -1151,6 +1223,8 @@ void show(CircuitWindow* win) {
 	f.add(also);
 
 	std::shared_ptr<Sending>& sending = inFlight();
+	std::shared_ptr<Asking> asking;   // Request More, going
+	bool summaryMissing = false;      // its tip says so, in red
 	bool sentNow = false;     // sent while it was open
 	std::string sentEmail;    // where a reply would go (if they said so)
 	// This window follows a send that's still going.
@@ -1173,21 +1247,36 @@ void show(CircuitWindow* win) {
 	f.onInit = [&](Form& form) {
 		refreshTagsHeading(form);
 		form.enable(contactField, !trimmed(d.email).empty());
+		// Request More only shows over the cap.
+		HWND more = GetDlgItem(form.dialog, kMoreButton);
+		if (more) ShowWindow(more, SW_HIDE);
 		if (sending) {
-			if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
+			if (HWND send = GetDlgItem(form.dialog, kSendButton)) EnableWindow(send, FALSE);
 			std::lock_guard<std::mutex> g(sending->lock);
 			form.setProgress(sending->fraction, sending->note);
 		} else if (!g_lastFailure.empty()) {
-			if (HWND send = GetDlgItem(form.dialog, 100)) SetWindowTextW(send, L"Try Again");
+			if (HWND send = GetDlgItem(form.dialog, kSendButton)) SetWindowTextW(send, L"Try Again");
 			form.setProblem(g_lastFailure);
+			if (more && g_lastCanMore) ShowWindow(more, SW_SHOWNA);
 		}
 		g_lastFailure.clear();
+		g_lastCanMore = false;
 		if (g_sample == 1) {
-			if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
+			if (HWND send = GetDlgItem(form.dialog, kSendButton)) EnableWindow(send, FALSE);
 			form.setProgress(0.42, "Sending screenshot.png… 0.4 of 1.0 MB");
 		} else if (g_sample == 2) {
-			if (HWND send = GetDlgItem(form.dialog, 100)) SetWindowTextW(send, L"Try Again");
+			if (HWND send = GetDlgItem(form.dialog, kSendButton)) SetWindowTextW(send, L"Try Again");
 			form.setProblem("Your feedback wasn't sent. Couldn't reach the feedback server. Check the internet connection and try again.");
+		} else if (g_sample == 4) {
+			if (HWND send = GetDlgItem(form.dialog, kSendButton)) SetWindowTextW(send, L"Try Again");
+			form.setProblem("You've sent 5 reports in the last day. Tap 'Request more' if you have another problem.");
+			if (more) ShowWindow(more, SW_SHOWNA);
+		} else if (g_sample == 5) {
+			form.setText(titleField, "");
+			summaryMissing = true;
+			form.setTip(titleField, "Needed before it can be sent: " + titleTip);
+			form.markTip(titleField, true);
+			form.setProblem("Write a short summary first.");
 		}
 	};
 	f.onChange = [&](Form& form, int field) {
@@ -1198,6 +1287,12 @@ void show(CircuitWindow* win) {
 			form.refresh(tagsField);
 		}
 		if (field == emailField) form.enable(contactField, !trimmed(form.text(emailField)).empty());
+		// A summary typed: its tip is a tip again.
+		if (field == titleField && summaryMissing && !trimmed(form.text(titleField)).empty()) {
+			summaryMissing = false;
+			form.setTip(titleField, titleTip);
+			form.markTip(titleField, false);
+		}
 		form.setProblem("");
 	};
 	f.onClick = [&](Form& form, int field, float x, float y) {
@@ -1222,10 +1317,36 @@ void show(CircuitWindow* win) {
 		}
 		form.refresh(field);
 	};
-	f.onButton = [&](Form& form, int) {
-		if (sending) return false;
+	f.onButton = [&](Form& form, int button) {
+		if (sending || asking) return false;
 		collect(form);
+		if (button == kMoreButton - 100) {
+			// Over the cap: ask the server for more (a note for the developer
+			// is optional), then send again.
+			Alert a;
+			a.title = "Request More";
+			a.heading = "Ask for more today?";
+			a.text = "If you have another problem to report, say what it is (if you like) and you can send more today.";
+			a.field = true;
+			a.placeholder = "Optional";
+			a.buttons = { { "Request More", 1, 1 }, { "Cancel", 0, 0 } };
+			if (runAlert(form.dialog, a) != 1) return false;
+			Json ask;
+			ask.text("installId", installId()).text("message", trimmed(a.value).substr(0, 500)).text("name", prefs().studentName)
+				.text("email", trimmed(d.email)).text("platform", "windows");
+			asking = std::make_shared<Asking>();
+			std::thread(askForMore, asking, ask.str()).detach();
+			if (HWND more = GetDlgItem(form.dialog, kMoreButton)) EnableWindow(more, FALSE);
+			if (HWND send = GetDlgItem(form.dialog, kSendButton)) EnableWindow(send, FALSE);
+			form.setProblem("");
+			form.setProgress(0, "Asking for more…");
+			return false;
+		}
 		if (trimmed(d.title).empty()) {
+			// The server wants one too ("summary_required"): said at the field.
+			summaryMissing = true;
+			form.setTip(titleField, "Needed before it can be sent: " + titleTip);
+			form.markTip(titleField, true);
 			form.setProblem("Write a short summary first.");
 			SetFocus(form.fields[titleField].hwnd);
 			MessageBeep(MB_ICONWARNING);
@@ -1260,12 +1381,13 @@ void show(CircuitWindow* win) {
 		Json body;
 		body.text("title", trimmed(d.title)).text("details", trimmed(d.details)).raw("tags", tagList + "]").raw("autoTags", autoList + "]")
 			.text("priority", kPriorities[d.priority].id).text("name", prefs().studentName).text("email", mail)
-			.flag("contactOK", d.contactOK && !mail.empty()).text("platform", "windows").raw("attachments", list)
+			.flag("contactOK", d.contactOK && !mail.empty()).text("platform", "windows").text("installId", installId()).raw("attachments", list)
 			.raw("app", dev.app).raw("system", dev.system).raw("context", dev.context);
 		sending = std::make_shared<Sending>();
 		std::thread(upload, sending, body.str(), files).detach();
 		// Close stays: it carries on without the window.
-		if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
+		if (HWND send = GetDlgItem(form.dialog, kSendButton)) EnableWindow(send, FALSE);
+		if (HWND more = GetDlgItem(form.dialog, kMoreButton)) ShowWindow(more, SW_HIDE);
 		form.setProblem("");
 		form.setProgress(0, "Sending…");
 		sentEmail = d.contactOK ? mail : std::string();
@@ -1273,6 +1395,24 @@ void show(CircuitWindow* win) {
 	};
 	f.onTimer = [&](Form& form) {
 		if (g_test.on) { selfTestStep(form); return; }
+		if (asking && asking->state != 0) {
+			const std::shared_ptr<Asking> a = asking;
+			asking.reset();
+			form.setProgress(-1);
+			if (HWND send = GetDlgItem(form.dialog, kSendButton)) EnableWindow(send, TRUE);
+			// Given more or not, there's no asking again today.
+			if (HWND more = GetDlgItem(form.dialog, kMoreButton)) { EnableWindow(more, TRUE); ShowWindow(more, SW_HIDE); }
+			std::lock_guard<std::mutex> g(a->lock);
+			if (a->state == 1) {
+				form.setProblem("");
+				showMessage(form.dialog, Tone::Info, strf("You can send %ld more", a->granted),
+				            "Send it again when you're ready: what you wrote is all still here.");
+			} else {
+				form.setProblem(a->refusal);
+				MessageBeep(MB_ICONWARNING);
+			}
+			return;
+		}
 		if (!sending) return;
 		if (sending->state == 0) {
 			std::lock_guard<std::mutex> g(sending->lock);
@@ -1294,18 +1434,24 @@ void show(CircuitWindow* win) {
 			return;
 		}
 		std::string why;
+		bool capped = false, canMore = false;
 		{
 			std::lock_guard<std::mutex> g(sending->lock);
 			why = sending->failure;
+			capped = sending->capped;
+			canMore = sending->canRequestMore;
 		}
 		sending.reset();
 		form.setProgress(-1);
-		if (HWND send = GetDlgItem(form.dialog, 100)) {
+		if (HWND send = GetDlgItem(form.dialog, kSendButton)) {
 			EnableWindow(send, TRUE);
 			SetWindowTextW(send, L"Try Again");
 		}
-		// In red over the buttons; what was written is all still here.
-		form.setProblem("Your feedback wasn't sent. " + why);
+		// In red over the buttons; what was written is all still here. Over
+		// the daily cap: the server's own words, and Request More if it may.
+		form.setProblem(capped ? why : "Your feedback wasn't sent. " + why);
+		if (capped && canMore)
+			if (HWND more = GetDlgItem(form.dialog, kMoreButton)) ShowWindow(more, SW_SHOWNA);
 		MessageBeep(MB_ICONWARNING);
 	};
 	const int r = f.run(win->window());
