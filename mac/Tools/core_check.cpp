@@ -464,6 +464,41 @@ static void smallerCases() {
 	cl_edit_release(doc, lx, ly);
 	CHECK(a->isConnected("OUT") && consistent(doc, "after wiring") && saveIsStable(doc), "a wire on a rotated part saves the same after reopening");
 	cl_document_close(doc);
+
+	// A part at a position finer than a save writes, wired: the part was saved
+	// rounded one way and the wire's end at its pin the other (2.0001, then 2).
+	doc = openText(page0(gate("AA_TOGGLE", "1", "0.00005", "0.00015") + gate("GA_LED", "2", "20.33335", "7.77775") +
+	                     "    (wire (ids \"5\") (seg \"0\" h (pts 0 0 1 0) (connect \"1\" \"OUT_0\") (connect \"2\" \"N_in0\")))\n"));
+	CHECK(doc != nullptr && saveIsStable(doc), "a wired part at 0.00005 saves the same after reopening");
+	if (doc) cl_document_close(doc);
+
+	// An adder or a register with no bits (or one) from a file, given inputs
+	// and a clock: read past an empty bus (the adder's sign bit at index -1,
+	// the register's shift into the top of no bits).
+	const char* widths[] = { "0", "1" };
+	for (const char* bits : widths) {
+		const std::string width = std::string(" (lparam \"INPUT_BITS\" \"") + bits + "\")";
+		const std::string on = " (lparam \"OUTPUT_NUM\" \"1\")";
+		auto link = [](const char* id, const char* g1, const char* p1, const char* g2, const char* p2) {
+			return std::string("    (wire (ids \"") + id + "\") (seg \"0\" h (pts 0 0 1 0) (connect \"" + g1 + "\" \"" + p1 +
+			       "\") (connect \"" + g2 + "\" \"" + p2 + "\")))\n";
+		};
+		doc = openText(page0(gate("AE_FULLADDER_4BIT", "10", "0", "0", width) + gate("AA_REGISTER4", "20", "0", "20", width) +
+		                     gate("BA_SHIFT_REGISTER_4", "30", "0", "40", width) + gate("BB_CLOCK", "1", "-20", "30", " (lparam \"HALF_CYCLE\" \"1\")") +
+		                     gate("AA_TOGGLE", "2", "-20", "0", on) + gate("AA_TOGGLE", "3", "-20", "10", on) +
+		                     gate("AA_TOGGLE", "4", "-20", "20", on) + gate("AA_TOGGLE", "6", "-20", "40", on) +
+		                     link("50", "2", "OUT_0", "10", "carry_in") + link("51", "3", "OUT_0", "30", "shift_enable") +
+		                     link("52", "4", "OUT_0", "20", "count_enable") + link("53", "6", "OUT_0", "30", "carry_in") +
+		                     "    (wire (ids \"54\") (seg \"0\" h (pts 0 0 1 0) (connect \"1\" \"CLK\") (connect \"20\" \"clock\") (connect \"30\" \"clock\")))\n"));
+		CHECK(doc != nullptr, (std::string("an adder and registers ") + bits + " bits wide open").c_str());
+		if (!doc) continue;
+		cl_document_set_running(doc, true);
+		for (int i = 0; i < 60; i++) cl_document_tick(doc, 50);
+		cl_document_step(doc);
+		// (Not saveIsStable: opening runs a clocked counter on, by design.)
+		CHECK(consistent(doc, "after running"), "... and add, count and shift for 3 s");
+		cl_document_close(doc);
+	}
 }
 
 // A part drag that broke a wire (fuzz_edit seed 147, a 2000-op session,
