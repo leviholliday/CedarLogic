@@ -5,8 +5,10 @@
 
 #include <glib/gstdio.h>
 #include <sys/stat.h>
+#include <utime.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -230,13 +232,218 @@ void rename(const Item& item, const std::string& name) {
 }
 
 bool moveToTrash(const Item& item) {
-	const std::string trash = root() + "/.Trash";
+	const std::string trash = trashFolder();
 	g_mkdir_with_parents(trash.c_str(), 0700);
 	std::string dest = trash + "/" + item.id;
 	for (int n = 2; fileExists(dest); n++) dest = trash + "/" + item.id + format(" %d", n);
 	const bool moved = ::g_rename(item.folder.c_str(), dest.c_str()) == 0;
-	if (moved) syncapp::libraryChanged();
+	if (moved) {
+		stampDeleted(dest, now());
+		syncapp::libraryChanged();
+	}
 	return moved;
+}
+
+// ---- Recently Deleted (docs/RECENTLY-DELETED.md) --------------------------------------
+
+namespace {
+
+const char* kStampFile = "deleted.txt";
+
+// A folder and everything in it.
+bool removeTree(const std::string& path) {
+	if (g_file_test(path.c_str(), G_FILE_TEST_IS_SYMLINK) || !g_file_test(path.c_str(), G_FILE_TEST_IS_DIR))
+		return g_remove(path.c_str()) == 0;
+	if (GDir* d = g_dir_open(path.c_str(), 0, nullptr)) {
+		while (const gchar* n = g_dir_read_name(d)) removeTree(path + "/" + n);
+		g_dir_close(d);
+	}
+	return g_rmdir(path.c_str()) == 0;
+}
+
+// When it was deleted: its stamp, or (none yet) the time it was moved into
+// the trash (the folder's status-change time) when that's within 30 days,
+// else now, so an old one still gets its 30 days in the list. Stamped then.
+double deletedTime(const std::string& folder) {
+	const std::string text = trim(readFile(folder + "/" + kStampFile));
+	if (!text.empty()) {
+		GTimeZone* utc = g_time_zone_new_utc();
+		GDateTime* t = g_date_time_new_from_iso8601(text.c_str(), utc);
+		g_time_zone_unref(utc);
+		if (t) {
+			const double s = (double)g_date_time_to_unix(t);
+			g_date_time_unref(t);
+			return s;
+		}
+	}
+	const double n = now();
+	struct stat st;
+	const double moved = stat(folder.c_str(), &st) == 0 ? (double)st.st_ctim.tv_sec : n;
+	const double d = moved <= n && n - moved < kKeepDays * 86400.0 ? moved : n;
+	stampDeleted(folder, d);
+	return d;
+}
+
+}  // namespace
+
+std::string trashFolder() { return root() + "/.Trash"; }
+
+void stampDeleted(const std::string& folder, double when) {
+	GDateTime* t = g_date_time_new_from_unix_utc((gint64)when);
+	if (t == nullptr) return;
+	gchar* s = g_date_time_format(t, "%Y-%m-%dT%H:%M:%SZ");
+	g_date_time_unref(t);
+	if (s) writeFile(folder + "/" + kStampFile, std::string(s) + "\n");
+	g_free(s);
+}
+
+std::vector<Deleted> recentlyDeleted() {
+	std::vector<Deleted> out;
+	const std::string bin = trashFolder();
+	GDir* d = g_dir_open(bin.c_str(), 0, nullptr);
+	if (d == nullptr) return out;
+	while (const gchar* n = g_dir_read_name(d)) {
+		const std::string id = n;
+		if (id.empty() || id[0] == '.') continue;
+		Deleted c;
+		c.id = id;
+		c.folder = bin + "/" + id;
+		if (!g_file_test(c.folder.c_str(), G_FILE_TEST_IS_DIR) || !fileExists(c.circuit())) continue;
+		c.name = trim(readFile(c.folder + "/name.txt"));
+		if (c.name.empty()) c.name = "Untitled";
+		c.deleted = deletedTime(c.folder);
+		out.push_back(c);
+	}
+	g_dir_close(d);
+	std::sort(out.begin(), out.end(), [](const Deleted& a, const Deleted& b) { return a.deleted > b.deleted; });
+	return out;
+}
+
+int sweepDeleted() {
+	const double limit = now() - kKeepDays * 86400.0;
+	int n = 0;
+	for (const Deleted& c : recentlyDeleted())
+		if (c.deleted < limit && removeTree(c.folder)) n++;
+	return n;
+}
+
+std::string restoreDeleted(const Deleted& c) {
+	// "<id> 2" was the second circuit with that id in the trash.
+	std::string id = c.id;
+	const size_t sp = id.find_last_of(' ');
+	if (sp != std::string::npos && sp + 1 < id.size() && id.find_first_not_of("0123456789", sp + 1) == std::string::npos) id = id.substr(0, sp);
+	if (id.empty() || fileExists(root() + "/" + id)) id = stamp(now()) + format("-%d", 1000 + g_random_int_range(0, 99000));
+	const std::string dest = root() + "/" + id;
+	if (::g_rename(c.folder.c_str(), dest.c_str()) != 0) return "";
+	g_remove((dest + "/" + kStampFile).c_str());
+	g_utime((dest + "/circuit.cdl").c_str(), nullptr);   // now: the top of Your Circuits
+	syncapp::libraryChanged();
+	return id;
+}
+
+bool deleteNow(const Deleted& c) { return removeTree(c.folder); }
+
+int trashCheck() {
+	int fails = 0;
+	auto check = [&](bool ok, const std::string& what) {
+		printf("%s %s\n", ok ? "PASS" : "FAIL", what.c_str());
+		if (!ok) fails++;
+	};
+	auto circuitText = [](int gates) {
+		std::string t = "(circuit\n";
+		for (int g = 0; g < gates; g++) t += format("  (gate \"%s\" (uuid \"%d\") (at %d 0))\n", g % 2 == 0 ? "AA_AND2" : "AA_TOGGLE", g + 1, g * 8);
+		return t + ")\n";
+	};
+	// The Mac's `trash` state: three circuits, the newest ("Counter") deleted
+	// just now; one deleted 31 days ago; one moved there by sync with no
+	// date; a second copy of a circuit still in the library; and the
+	// "repeated versions" folder.
+	Item made[3];
+	const char* names[] = { "Half adder", "Traffic light", "Counter" };
+	for (int i = 0; i < 3; i++) {
+		create(names[i], circuitText(3), "", made[i]);
+		g_usleep(1100000);   // (ids and times a second apart)
+	}
+	moveToTrash(made[2]);
+	const std::string bin = trashFolder();
+	auto trashed = [&](const std::string& folder, const std::string& name, double deleted) {
+		const std::string f = bin + "/" + folder;
+		g_mkdir_with_parents((f + "/versions").c_str(), 0700);
+		writeFile(f + "/name.txt", name);
+		writeFile(f + "/circuit.cdl", circuitText(3));
+		if (deleted > 0) stampDeleted(f, deleted);
+	};
+	trashed("20240101-120000-11111", "Old one", now() - 31 * 86400.0);
+	trashed("20250101-120000-22222", "From the phone", 0);
+	trashed(made[0].id + " 2", "Half adder again", now() - 86400.0);
+	const std::string repeated = bin + "/repeated versions/" + made[0].id;
+	g_mkdir_with_parents(repeated.c_str(), 0700);
+	writeFile(repeated + "/20240101-000000.cdl", circuitText(1));
+
+	const gint64 t0 = g_get_monotonic_time();
+	const std::vector<Deleted> before = recentlyDeleted();
+	check((g_get_monotonic_time() - t0) < 1000000, "Recently Deleted lists the trash in under a second");
+	std::set<std::string> got;
+	std::string listed;
+	for (const Deleted& c : before) { got.insert(c.name); listed += (listed.empty() ? "" : ", ") + c.name; }
+	check(before.size() == 4 && got == std::set<std::string>{ "Counter", "Old one", "From the phone", "Half adder again" },
+	      "Recently Deleted shows the 4 deleted circuits (" + listed + ")");
+	check(!before.empty() && (before[0].name == "Counter" || before[0].name == "From the phone"),
+	      "newest first (" + (before.empty() ? std::string("none") : before[0].name) + ")");
+	bool listsRepeats = false;
+	for (const Deleted& c : before) listsRepeats = listsRepeats || c.id == "repeated versions";
+	check(!listsRepeats && fileExists(bin + "/repeated versions"), "the repeated versions folder isn't listed, and is left alone");
+	for (const Deleted& c : before) {
+		if (c.name == "Counter") check(std::abs(c.deleted - now()) < 600, "a circuit deleted from Your Circuits is dated when it was deleted");
+		if (c.name == "From the phone")
+			check(fileExists(c.folder + "/" + kStampFile) && std::abs(c.deleted - now()) < 600,
+			      "one sync moved there with no date is dated when it was moved, and stamped");
+	}
+	const int swept = sweepDeleted();
+	std::vector<Deleted> after = recentlyDeleted();
+	bool oldThere = false;
+	for (const Deleted& c : after) oldThere = oldThere || c.name == "Old one";
+	check(swept == 1 && !oldThere, format("the sweep deleted the one from 31 days ago, only (%d)", swept));
+	check(sweepDeleted() == 0, "a second sweep deletes nothing");
+
+	// Restore: under its own id when that's free...
+	auto findIn = [](const std::vector<Deleted>& v, const char* name, Deleted& out) {
+		for (const Deleted& c : v) if (c.name == name) { out = c; return true; }
+		return false;
+	};
+	Deleted c;
+	if (findIn(after, "Counter", c)) {
+		const std::string id = restoreDeleted(c);
+		const std::vector<Item> items = library::items();
+		const Item* back = nullptr;
+		for (const Item& it : items) if (it.id == id) back = &it;
+		check(id == c.id && back && back->name == "Counter", "Restore puts “Counter” back in Your Circuits under its own id");
+		check(back && !fileExists(back->folder + "/" + kStampFile), "without its deleted date");
+		check(!items.empty() && items[0].name == "Counter", "at the top of Your Circuits");
+	} else {
+		check(false, "Counter is in Recently Deleted");
+	}
+	// ...and under a new one when its id is taken (a second copy).
+	if (findIn(after, "Half adder again", c)) {
+		const std::string taken = c.id.substr(0, c.id.size() - 2);
+		const std::string id = restoreDeleted(c);
+		bool takenThere = false, newThere = false;
+		for (const Item& it : library::items()) {
+			takenThere = takenThere || it.id == taken;
+			newThere = newThere || (it.id == id && it.name == "Half adder again");
+		}
+		check(!id.empty() && id != taken && id.find(' ') == std::string::npos && takenThere && newThere,
+		      "a second copy of a circuit that's still there comes back beside it, under a new id (" + (id.empty() ? std::string("none") : id) + ")");
+	} else {
+		check(false, "the second copy is in Recently Deleted");
+	}
+	check(library::items().size() == 4, format("Your Circuits has 4 circuits now (%d)", (int)library::items().size()));
+	// Delete Now.
+	if (findIn(recentlyDeleted(), "From the phone", c)) check(deleteNow(c) && !fileExists(c.folder), "Delete Now deletes it for good");
+	else check(false, "the sync-trashed circuit is in Recently Deleted");
+	check(recentlyDeleted().empty(), "Recently Deleted is empty");
+	printf("%s\n", fails == 0 ? "trash-check: all passed" : format("trash-check: %d failed", fails).c_str());
+	return fails == 0 ? 0 : 1;
 }
 
 // It saves itself every few seconds, so not every save is a version: the

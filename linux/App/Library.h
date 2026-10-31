@@ -45,8 +45,36 @@ bool create(const std::string& name, const std::string& text, const std::string&
 // The circuit already imported from a file as it is now, if there is one.
 bool imported(const std::string& file, Item& out);
 void rename(const Item& item, const std::string& name);
-// Into the library's own trash folder (the wx app's too).
+// Into the library's own trash folder (the wx app's too), dated for
+// Recently Deleted.
 bool moveToTrash(const Item& item);
+
+// Recently Deleted (docs/RECENTLY-DELETED.md, the Mac's RecentlyDeleted.swift):
+// the circuits in <library>/.Trash, kept 30 days after they were deleted.
+const int kKeepDays = 30;
+struct Deleted {
+	std::string id;       // the folder's name in .Trash ("<id>", or "<id> 2")
+	std::string name, folder;
+	double deleted = 0;   // seconds since 1970
+	std::string circuit() const { return folder + "/circuit.cdl"; }
+};
+std::string trashFolder();
+// Notes when a circuit went into the trash: deleted.txt, ISO 8601 UTC.
+void stampDeleted(const std::string& folder, double when);
+// Newest first. One with no date (moved there by sync, or an older app) is
+// dated the first time it's seen. Folders without circuit.cdl ("repeated
+// versions") aren't circuits: never listed, never swept.
+std::vector<Deleted> recentlyDeleted();
+// Those deleted over 30 days ago go for good; how many went.
+int sweepDeleted();
+// Back into Your Circuits, under its own id (or a new one if that's taken),
+// at the top of the list. Its id, or "" if it couldn't be moved.
+std::string restoreDeleted(const Deleted& d);
+// Gone for good, now.
+bool deleteNow(const Deleted& d);
+// --trash-check: the Mac's launch-selftest `trash` state, on this code, in
+// the library at $XDG_DATA_HOME. 0 when every check passes.
+int trashCheck();
 
 // A library circuit was saved: keep a version when it's due (or now, if
 // `explicitSave`), and thin out old ones. True when a version was kept.

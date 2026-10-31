@@ -54,6 +54,10 @@ public:
 	// link at its right end ("" for none), asked each time it's drawn; footerAction when the link is pressed.
 	std::function<std::pair<std::string, std::string>()> footer;
 	std::function<void()> footerAction;
+	// A link at the right end of the title (Your Circuits' "Recently Deleted (N)"),
+	// asked each time it's drawn ("" for none); titleLinkAction when it's pressed.
+	std::function<std::string()> titleLink;
+	std::function<void()> titleLinkAction;
 	// Draws a row's tile in place of the gate silhouette (Add a Gate draws the gate itself).
 	std::function<void(cairo_t*, const Row&, const RectF&)> drawTile;
 

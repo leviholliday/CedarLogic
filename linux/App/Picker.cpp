@@ -183,6 +183,13 @@ void Picker::paint(cairo_t* cr) {
 		}
 		drawText(cr, f.first, rectF(kMargin, by - 20, right, by - 4), 11.5f, look.ink(0.55f));
 	}
+	if (titleLink) {
+		const std::string t = titleLink();
+		if (!t.empty()) {
+			const float lw = textWidth(t, 11.5f, true) + 10;
+			buttons.push_back({ rectF(w - kMargin - lw, kMargin + 6, w - kMargin, kMargin + 24), 201, t, false });
+		}
+	}
 	for (size_t i = 0; i < buttons.size(); i++) {
 		const Button& b = buttons[i];
 		if (i >= footerAt) {
@@ -215,8 +222,9 @@ int Picker::buttonAt(float x, float y) const {
 }
 
 void Picker::press(int id) {
-	if (id == 200) {
-		if (footerAction) footerAction();
+	if (id == 200 || id == 201) {
+		if (id == 200 && footerAction) footerAction();
+		if (id == 201 && titleLinkAction) titleLinkAction();
 		redraw();
 		return;
 	}

@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <thread>
 
 namespace {
 
@@ -1080,6 +1081,9 @@ void activateCb(GApplication* gapp, gpointer) {
 		g_application_quit(gapp);
 		return;
 	}
+	// Recently Deleted: circuits deleted over 30 days ago go for good, off
+	// the main thread (files only).
+	if (gScreenshot.empty()) std::thread([] { library::sweepDeleted(); }).detach();
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
 	if (gScreenshot.empty()) {
@@ -1401,6 +1405,8 @@ int main(int argc, char** argv) {
 		// --update-self-test [--release <folder> --key <hex>]: signed updates (Updater.h).
 		if (strcmp(argv[i], "--update-self-test") == 0) return Updater_SelfTest(argc, argv);
 		if (strcmp(argv[i], "--feedback-check") == 0) return feedback::check();
+		// --trash-check: Recently Deleted's files, in the library at $XDG_DATA_HOME (the Mac's launch-selftest `trash`).
+		if (strcmp(argv[i], "--trash-check") == 0) return library::trashCheck();
 		if (strcmp(argv[i], "--feedback-probe") == 0) {
 			const int code = feedback::probe();
 			printf("feedback server: %d\n", code);

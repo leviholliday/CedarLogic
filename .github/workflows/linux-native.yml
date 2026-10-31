@@ -94,6 +94,13 @@ jobs:
           kill $SERVER || true
           exit $rc
 
+      # Recently Deleted's files (docs/RECENTLY-DELETED.md), as the Mac's launch-selftest
+      # `trash` state: the list, the 30-day sweep, Restore and Delete Now, in a library of its own.
+      - name: Recently Deleted check
+        run: |
+          D=$(mktemp -d)
+          XDG_DATA_HOME="$D/data" XDG_CONFIG_HOME="$D/config" timeout 60 linux/build/cedarlogic --trash-check
+
       # A long working session in the window (linux/App/SessionCheck.cpp): seeded
       # random clicks, drags, keys and commands through the app's own handlers, with
       # windows over it poked at and closed, checked all along (no crash or GTK
