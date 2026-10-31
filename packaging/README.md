@@ -208,10 +208,13 @@ ones (`/get/linux-x86_64-appimage`, `/get/linux-aarch64-appimage`).
   (`homebrew/README.md`). On Windows, SmartScreen warns about the browser
   download only; winget and `install.ps1` don't trigger it.
 - **Apple silicon only** on Mac (see above).
-- **Publisher.** The Windows installer says `Cedarville University`
-  (`AppPublisher` in `CedarLogic.iss`), so the winget manifest does too; the
-  package id is `LeviHolliday.CedarLogic`. Change both together if you want
-  your name there.
+- **Publisher.** Users see `CedarLogic` (the project) as the publisher
+  everywhere: `AppPublisher` in `CedarLogic.iss`, `CompanyName` in the
+  Windows exe, the winget manifest's `Publisher`/`Author`, the Mac's
+  copyright line and the .deb's `Maintainer` name. The winget package id
+  stays `LeviHolliday.CedarLogic`, because winget ids are tied to the
+  submitting account (`winget/README.md`). Change the .iss and the manifest
+  together, or winget's publisher match breaks.
 - **Where installed apps update from.** The Linux app has the Mac's
   testing groups (Settings > General > Testing group; below): a Normal
   tester's updater follows the versioned releases here, a Beta tester's
