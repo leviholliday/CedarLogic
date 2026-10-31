@@ -22,6 +22,7 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O1 -g")
 get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
 option(CL_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+option(CL_TSAN "Build with ThreadSanitizer (instead of CL_SANITIZE): for thread_check" OFF)
 option(CL_LIBFUZZER "Also build fuzz_load_libfuzzer (clang's -fsanitize=fuzzer)" OFF)
 # Release builds compile asserts out; the engine must handle bad state without
 # them, so the checks are run both ways.
@@ -33,6 +34,14 @@ if(CL_SANITIZE)
 	# copies of the same std:: template.
 	add_compile_options(-fsanitize=address,undefined -fno-sanitize=vptr -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
 	add_link_options(-fsanitize=address,undefined -fno-sanitize=vptr)
+endif()
+
+if(CL_TSAN)
+	if(CL_SANITIZE)
+		message(FATAL_ERROR "CL_TSAN and CL_SANITIZE can't be on together (ThreadSanitizer excludes AddressSanitizer)")
+	endif()
+	add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+	add_link_options(-fsanitize=thread)
 endif()
 
 # The engine: the same sources as mac/build.sh's CORE list, minus the drawing.
@@ -74,6 +83,11 @@ foreach(tool core_check fuzz_edit fuzz_load)
 	target_link_libraries(${tool} PRIVATE CedarCoreHeadless)
 endforeach()
 
+# Check My Circuit's off-main-thread check, many at once while the main thread
+# works (the ThreadSanitizer run). Reads its cases with the sync engine's JSON.
+add_executable(thread_check ${ROOT}/mac/Tools/thread_check.cpp ${ROOT}/mac/CedarCore/SyncJson.cpp)
+target_link_libraries(thread_check PRIVATE CedarCoreHeadless)
+
 if(CL_LIBFUZZER)
 	add_executable(fuzz_load_libfuzzer ${ROOT}/mac/Tools/fuzz_load.cpp)
 	target_compile_definitions(fuzz_load_libfuzzer PRIVATE CL_LIBFUZZER)
@@ -97,6 +111,7 @@ add_test(NAME test_cmdserialize COMMAND test_cmdserialize)
 set(GATEDEFS ${ROOT}/res/cl_gatedefs.xml)
 file(GLOB FIXTURES ${ROOT}/format/tests/fixtures/*.cdl)
 add_test(NAME core_check COMMAND core_check ${GATEDEFS} ${ROOT}/format/tests/fixtures)
+add_test(NAME thread_check COMMAND thread_check ${GATEDEFS} ${ROOT}/tests/check-sequential/cases.json 1 4)
 # Short fuzz runs, so a regression the long runs found once stays found. The
 # workflow runs longer ones as a step of its own.
 add_test(NAME fuzz_edit_short COMMAND fuzz_edit ${GATEDEFS} 1 6 200)
