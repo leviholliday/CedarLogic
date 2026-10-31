@@ -99,6 +99,7 @@ struct Prefs {
 	std::string seenWhatsNew;
 	// Export as Image: the grid, the name-and-result strip, the style and size.
 	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;
+	int exportLook = -1;          // Export as Image's look: 0 Match Window, 1 Light, 2 Black & White (-1: from exportColor)
 	std::string exportProblem;
 	int exportScale = 4;
 	// The oscilloscope's timing diagrams: the whole recording or what's on screen; colour or black and white.

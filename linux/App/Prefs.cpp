@@ -147,6 +147,7 @@ void Prefs::load() {
 		exportInfo = readBool(k, "exportInfo", exportInfo);
 		exportWorks = readBool(k, "exportWorks", exportWorks);
 		exportColor = readBool(k, "exportColor", exportColor);
+		exportLook = readInt(k, "exportLook", exportLook, -1, 2);
 		exportProblem = readString(k, "exportProblem", exportProblem);
 		exportScale = readInt(k, "exportScale", exportScale, 2, 6);
 		reportCircuit = readBool(k, "reportCircuit", reportCircuit);
@@ -254,6 +255,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "exportInfo", exportInfo);
 	g_key_file_set_boolean(k, kGroup, "exportWorks", exportWorks);
 	g_key_file_set_boolean(k, kGroup, "exportColor", exportColor);
+	g_key_file_set_integer(k, kGroup, "exportLook", exportLook);
 	g_key_file_set_string(k, kGroup, "exportProblem", exportProblem.c_str());
 	g_key_file_set_integer(k, kGroup, "exportScale", exportScale);
 	g_key_file_set_boolean(k, kGroup, "reportCircuit", reportCircuit);
