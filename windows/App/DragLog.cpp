@@ -317,6 +317,36 @@ void CALLBACK step(HWND, UINT, UINT_PTR id, DWORD);
 
 void next(UINT afterMs) { SetTimer(nullptr, 0, afterMs, step); }
 
+// The test's own window in front, even when it was started from a shell in
+// the background: Windows' foreground lock refuses SetForegroundWindow to a
+// process that hasn't had the last input, so the window would only flash on
+// the taskbar and the test would skip. First by joining the front window's
+// input for a moment (allowed to take the focus from it), then, if that
+// wasn't enough, with a tap of Alt sent from here (the "last input" is then
+// ours). The tap goes to the window in front before ours comes up, and the
+// queue is let drain before ours does, so it never opens CedarLogic's menu bar.
+bool bringToFront(HWND root) {
+	if (GetForegroundWindow() == root) return true;
+	if (IsIconic(root)) ShowWindow(root, SW_RESTORE);
+	HWND front = GetForegroundWindow();
+	const DWORD mine = GetCurrentThreadId(), theirs = front ? GetWindowThreadProcessId(front, nullptr) : 0;
+	const bool joined = theirs && theirs != mine && AttachThreadInput(mine, theirs, TRUE);
+	SetForegroundWindow(root);
+	BringWindowToTop(root);
+	SetActiveWindow(root);
+	if (joined) AttachThreadInput(mine, theirs, FALSE);
+	if (GetForegroundWindow() == root) return true;
+	INPUT alt[2] = {};
+	alt[0].type = alt[1].type = INPUT_KEYBOARD;
+	alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
+	alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+	SendInput(2, alt, sizeof(INPUT));
+	Sleep(60);
+	SetForegroundWindow(root);
+	BringWindowToTop(root);
+	return GetForegroundWindow() == root;
+}
+
 bool setUp(std::string& why) {
 	SelfTest& t = *gTest;
 	t.win = circuitWindows().empty() ? nullptr : circuitWindows().front();
@@ -324,7 +354,7 @@ bool setUp(std::string& why) {
 	if (c == nullptr) { why = "no canvas"; return false; }
 	t.root = t.win->window();
 	t.canvas = c->widget();
-	SetForegroundWindow(t.root);
+	bringToFront(t.root);
 	// 100%, the world's origin in the middle of the canvas.
 	const double upp = 0.1;
 	c->setCamera(-c->width() / 2 * upp, c->height() / 2 * upp, upp);
