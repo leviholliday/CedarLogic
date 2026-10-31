@@ -21,7 +21,6 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
-#include <functional>
 #include <stack>
 #include <utility>
 #include "guiGate.h"
@@ -618,85 +617,106 @@ void guiWire::setSegmentMap(map < long, wireSegment > newSegMap) {
 
 map < long, wireSegment > guiWire::getOldSegmentMap(void) { return oldSegMap; };
 
+// How close a pin or a touching run must be to count (the shapes a drag
+// leaves are a little off the grid).
+static const float kSoundSlack = 0.05f;
+
 bool guiWire::isSoundShape(const map < long, wireSegment > &shape, std::string *why) {
-	auto no = [why](const std::string &text) { if (why != nullptr) *why = text; return false; };
-	if (connectPoints.size() >= 2 && shape.empty()) return no("it has no shape");
-	const float slack = 0.05f;
+	const char *flaw = nullptr;
+	if (connectPoints.size() >= 2 && shape.empty()) flaw = "it has no shape";
+	if (flaw == nullptr) flaw = segmentFlaw(shape);
+	if (flaw == nullptr) flaw = pinFlaw(shape);
+	if (flaw == nullptr) flaw = layoutFlaw(shape);
+	if (flaw != nullptr && why != nullptr) *why = flaw;
+	return flaw == nullptr;
+}
+
+const char *guiWire::segmentFlaw(const map < long, wireSegment > &shape) {
 	for (const auto &entry : shape) {
 		const wireSegment &s = entry.second;
-		// A wire's segments are numbered from 0 as it is drawn; the loader
-		// renumbers ids past this, so one here (a paste) saved differently.
-		if (entry.first < 0 || entry.first > 1000000) return no("a segment's id is out of range");
+		// The loader renumbers ids past the limit, so one here (a paste) saved differently.
+		if (entry.first < 0 || entry.first > MAX_SEGMENT_ID) return "a segment's id is out of range";
 		if (!std::isfinite(s.begin.x) || !std::isfinite(s.begin.y) || !std::isfinite(s.end.x) || !std::isfinite(s.end.y))
-			return no("a segment has an end that isn't a number");
-		if (s.isVertical() ? std::fabs(s.begin.x - s.end.x) > slack : std::fabs(s.begin.y - s.end.y) > slack)
-			return no("a segment runs across its own direction");
+			return "a segment has an end that isn't a number";
+		if (s.isVertical() ? std::fabs(s.begin.x - s.end.x) > kSoundSlack : std::fabs(s.begin.y - s.end.y) > kSoundSlack)
+			return "a segment runs across its own direction";
 		for (const auto &x : s.intersects) {
-			if (!std::isfinite(x.first)) return no("a crossing isn't at a number");
+			if (!std::isfinite(x.first)) return "a crossing isn't at a number";
 			for (long other : x.second) {
-				if (other == entry.first || shape.count(other) == 0) return no("a crossing names a segment that isn't there");
+				if (other == entry.first || shape.count(other) == 0) return "a crossing names a segment that isn't there";
 				// Recorded on both runs: a one-sided crossing is lost or redrawn on
 				// the next load.
 				bool back = false;
 				for (const auto &y : shape.at(other).intersects)
 					for (long id : y.second) back = back || id == entry.first;
-				if (!back) return no("a crossing is recorded on one run only");
+				if (!back) return "a crossing is recorded on one run only";
 			}
 		}
 		// Two straight runs cross once at most.
 		std::vector<long> crossed;
 		for (const auto &x : s.intersects) crossed.insert(crossed.end(), x.second.begin(), x.second.end());
 		std::sort(crossed.begin(), crossed.end());
-		if (std::adjacent_find(crossed.begin(), crossed.end()) != crossed.end()) return no("a crossing is recorded twice");
+		if (std::adjacent_find(crossed.begin(), crossed.end()) != crossed.end()) return "a crossing is recorded twice";
 		// A run of no length among others is merged away by the next load.
 		if (shape.size() > 1 && std::fabs(s.begin.x - s.end.x) <= EQUALRANGE && std::fabs(s.begin.y - s.end.y) <= EQUALRANGE)
-			return no("a segment has no length");
+			return "a segment has no length";
 	}
-	// Each held pin recorded once, on a segment reaching it; nothing else recorded.
+	return nullptr;
+}
+
+// Each held pin recorded once, on a segment reaching it; nothing else recorded.
+const char *guiWire::pinFlaw(const map < long, wireSegment > &shape) {
 	std::vector<bool> recorded(connectPoints.size(), false);
 	for (const auto &entry : shape) {
 		const wireSegment &s = entry.second;
 		for (const wireConnection &c : s.connections) {
 			size_t i = 0;
 			while (i < connectPoints.size() && !(connectPoints[i].gid == c.gid && connectPoints[i].connection == c.connection)) i++;
-			if (i == connectPoints.size()) return no("it records a pin it doesn't hold");
-			if (recorded[i]) return no("it records a pin twice");
+			if (i == connectPoints.size()) return "it records a pin it doesn't hold";
+			if (recorded[i]) return "it records a pin twice";
 			recorded[i] = true;
 			guiGate *g = gCircuit != nullptr ? gCircuit->getGate(c.gid) : nullptr;
-			if (g == nullptr) return no("it records a pin of a gate that isn't there");
+			if (g == nullptr) return "it records a pin of a gate that isn't there";
 			float px = 0, py = 0;
 			g->getHotspotCoords(c.connection, px, py);
-			if (px < (std::min)(s.begin.x, s.end.x) - slack || px > (std::max)(s.begin.x, s.end.x) + slack ||
-			    py < (std::min)(s.begin.y, s.end.y) - slack || py > (std::max)(s.begin.y, s.end.y) + slack)
-				return no("a segment records a pin it doesn't reach");
+			if (px < (std::min)(s.begin.x, s.end.x) - kSoundSlack || px > (std::max)(s.begin.x, s.end.x) + kSoundSlack ||
+			    py < (std::min)(s.begin.y, s.end.y) - kSoundSlack || py > (std::max)(s.begin.y, s.end.y) + kSoundSlack)
+				return "a segment records a pin it doesn't reach";
 		}
 	}
 	for (size_t i = 0; i < connectPoints.size(); i++)
-		if (!recorded[i] && !shape.empty()) return no("a pin it holds is on no segment");
+		if (!recorded[i] && !shape.empty()) return "a pin it holds is on no segment";
+	return nullptr;
+}
+
+const char *guiWire::layoutFlaw(const map < long, wireSegment > &shape) {
 	// No dead end: a segment with no pin joins at least two others (a run left
 	// where a pin was refused leads nowhere, and the next load trims it).
 	if (shape.size() > 1)
 		for (const auto &entry : shape) {
 			size_t joins = 0;
 			for (const auto &x : entry.second.intersects) joins += x.second.size();
-			if (entry.second.connections.empty() && joins < 2) return no("a segment leads nowhere");
+			if (entry.second.connections.empty() && joins < 2) return "a segment leads nowhere";
 		}
-	// One piece: segments that touch are joined.
+	// One piece: segments that touch are joined (union-find over the pairs).
 	std::vector<const wireSegment *> segs;
 	for (const auto &entry : shape) segs.push_back(&entry.second);
 	std::vector<size_t> up(segs.size());
 	for (size_t i = 0; i < up.size(); i++) up[i] = i;
-	std::function<size_t(size_t)> root = [&](size_t i) { return up[i] == i ? i : up[i] = root(up[i]); };
+	auto root = [&up](size_t i) {
+		while (up[i] != i) i = up[i] = up[up[i]];
+		return i;
+	};
 	for (size_t i = 0; i < segs.size(); i++)
 		for (size_t j = i + 1; j < segs.size(); j++) {
 			const wireSegment &a = *segs[i], &b = *segs[j];
 			const bool touch =
-				(std::min)((std::max)(a.begin.x, a.end.x), (std::max)(b.begin.x, b.end.x)) + slack >= (std::max)((std::min)(a.begin.x, a.end.x), (std::min)(b.begin.x, b.end.x)) &&
-				(std::min)((std::max)(a.begin.y, a.end.y), (std::max)(b.begin.y, b.end.y)) + slack >= (std::max)((std::min)(a.begin.y, a.end.y), (std::min)(b.begin.y, b.end.y));
+				(std::min)((std::max)(a.begin.x, a.end.x), (std::max)(b.begin.x, b.end.x)) + kSoundSlack >= (std::max)((std::min)(a.begin.x, a.end.x), (std::min)(b.begin.x, b.end.x)) &&
+				(std::min)((std::max)(a.begin.y, a.end.y), (std::max)(b.begin.y, b.end.y)) + kSoundSlack >= (std::max)((std::min)(a.begin.y, a.end.y), (std::min)(b.begin.y, b.end.y));
 			if (touch) up[root(i)] = root(j);
 		}
 	for (size_t i = 1; i < segs.size(); i++)
-		if (root(i) != root(0)) return no("it is in pieces");
+		if (root(i) != root(0)) return "it is in pieces";
 	// Two runs along one line that meet are one run: the merge a load does
 	// joins them.
 	for (size_t i = 0; i < segs.size(); i++)
@@ -709,9 +729,9 @@ bool guiWire::isSoundShape(const map < long, wireSegment > &shape, std::string *
 			const float ahi = v ? (std::max)(a.begin.y, a.end.y) : (std::max)(a.begin.x, a.end.x);
 			const float blo = v ? (std::min)(b.begin.y, b.end.y) : (std::min)(b.begin.x, b.end.x);
 			const float bhi = v ? (std::max)(b.begin.y, b.end.y) : (std::max)(b.begin.x, b.end.x);
-			if (alo <= bhi + EQUALRANGE && blo <= ahi + EQUALRANGE) return no("two runs lie along one line");
+			if (alo <= bhi + EQUALRANGE && blo <= ahi + EQUALRANGE) return "two runs lie along one line";
 		}
-	return true;
+	return nullptr;
 }
 
 // Calculates a default three-segment shape for the wire, from source to destination, squared halfway
@@ -722,7 +742,7 @@ void guiWire::calcShape() {
 	segMap.clear();
 	// The shape is new, so its numbering may start again: an id far out of
 	// range (a damaged paste) would otherwise be carried on into it.
-	if (nextSegID < 1 || nextSegID > 1000000) nextSegID = 1;
+	if (nextSegID < 1 || nextSegID > MAX_SEGMENT_ID) nextSegID = 1;
 
 	// If there are less than 2 connect points then there is no reason to create a shape
 	if (connectPoints.size() < 2) return;
