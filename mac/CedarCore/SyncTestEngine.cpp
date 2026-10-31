@@ -484,19 +484,25 @@ struct PairWatch {
 	std::function<void(const std::string&)> show() {
 		return [this](const std::string& l) {
 			if (!ui.onThisThread()) offUi++;
-			std::lock_guard<std::mutex> lock(mu);
-			link = l;
+			{
+				std::lock_guard<std::mutex> lock(mu);
+				link = l;
+			}
+			// Counted after the unlock: a test waiting for the count may end this
+			// PairWatch's scope at once, so nothing may touch it after (TSan).
 			shows++;
 		};
 	}
 	std::function<void(int, const std::string&, const std::string&)> done() {
 		return [this](int r, const std::string& t, const std::string& f) {
 			if (!ui.onThisThread()) offUi++;
-			std::lock_guard<std::mutex> lock(mu);
-			result = r;
-			text = t;
-			from = f;
-			dones++;
+			{
+				std::lock_guard<std::mutex> lock(mu);
+				result = r;
+				text = t;
+				from = f;
+			}
+			dones++;   // after the unlock, as in show()
 		};
 	}
 	std::string getLink() {

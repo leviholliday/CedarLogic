@@ -292,7 +292,11 @@ function Install-CedarLogicFromRelease {
 
 		Say 'Installing...'
 		$log = Join-Path $dir 'setup.log'
-		$proc = Start-Process -FilePath $file -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/LOG=`"$log`"" -Wait -PassThru
+		# The testing group a first run starts in (the setup writes it to
+		# {app}\install-channel): a versioned release is "normal"; only -Tag can
+		# pick the rolling test build (no version in its name), which is "beta".
+		$channel = if ($name -match '^CedarLogic-\d') { 'normal' } else { 'beta' }
+		$proc = Start-Process -FilePath $file -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/CHANNEL=$channel", "/LOG=`"$log`"" -Wait -PassThru
 		if ($proc.ExitCode -ne 0) {
 			$tail = if (Test-Path -LiteralPath $log) { (Get-Content -LiteralPath $log -Tail 15) -join "`n" } else { '(no log)' }
 			$what = switch ($proc.ExitCode) {

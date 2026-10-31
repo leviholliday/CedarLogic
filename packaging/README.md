@@ -217,6 +217,14 @@ ones (`/get/linux-x86_64-appimage`, `/get/linux-aarch64-appimage`).
   `windows-native-testing` only, so someone who installs 0.4 with winget
   or `install.ps1` gets later signed test builds through the app. winget is
   fine with that: it just sees a newer installed version.
+- **`/CHANNEL=normal` on the Windows setup.** The setup writes
+  `{app}\install-channel` (the testing group a first run starts in) from
+  `/CHANNEL=`, else from its own file name (`windows/installer/CedarLogic.iss`
+  on `ui/windows-channel`). winget caches the installer under a name of its
+  own and a download can be renamed, so the winget manifest passes
+  `/CHANNEL=normal` (`InstallerSwitches: Custom`) for each installer, and
+  `install.ps1` passes `/CHANNEL=normal` for a versioned release (`beta`
+  only when `-Tag` picks the test build, whose setup name has no version).
 - **Classrooms and GitHub's API limit** (60 requests an hour per network,
   without a token): `install.sh` falls back to the release page and the
   signed list; `install.ps1` says to wait or use the download page.
