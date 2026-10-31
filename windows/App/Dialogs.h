@@ -113,6 +113,9 @@ public:
 	int selectedRow(int field) const;
 	void selectRow(int field, int row);
 	void setProblem(const std::string& text);
+	// Something going on (a send): a bar, `fraction` (0...1) of the way
+	// along, with `note` over it, left of the buttons. Negative: put away.
+	void setProgress(double fraction, const std::string& note = std::string());
 	void refresh(int field);                  // a Picture: draw it again
 	void enable(int field, bool on);
 	double number(int field) const;           // a Slider's
@@ -122,6 +125,9 @@ public:
 
 	// For the dialog procedure.
 	HWND problem = nullptr;
+	HWND progress = nullptr;
+	double progressValue = -1;
+	std::string progressNote;
 	std::vector<HWND> buttonWindows;
 	void build();
 	void capture();

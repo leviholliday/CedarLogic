@@ -6,6 +6,7 @@
 #include "Canvas.h"
 #include "Chrome.h"
 #include "Dialogs.h"
+#include "Fade.h"
 #include "FeedbackCapture.h"
 #include "Images.h"
 #include "SyncApp.h"
@@ -524,6 +525,7 @@ std::shared_ptr<Sending>& inFlight() {
 	return s;
 }
 UINT_PTR g_watch = 0;
+int g_sample = 0;   // showSample's state: the form opens looking like it (1 sending, 2 failed)
 std::string g_lastFailure;
 
 // Sent: the draft is cleared for next time.
@@ -963,6 +965,100 @@ int probe() {
 	return r.reached ? r.status : 0;
 }
 
+// ---- Sent ----------------------------------------------------------------------
+// The Mac's thank-you (FeedbackView's `sent`): a check that draws itself in
+// a ring, "Thank you!" (with the first name they gave), where a reply would
+// go, and Send Another or Done. True for Send Another.
+
+namespace {
+
+// A ring drawn from the top clockwise, `t` (0...1) of the way round, and the
+// check in it once the ring's half done -- as the Mac's SentCheck, 88 points
+// across, centred on (cx, cy).
+void paintSentCheck(ID2D1RenderTarget* rt, float cx, float cy, double t, const D2D1_COLOR_F& color) {
+	ID2D1Factory* f = nullptr;
+	rt->GetFactory(&f);
+	ID2D1SolidColorBrush* b = nullptr;
+	ID2D1StrokeStyle* round = nullptr;
+	if (f == nullptr || FAILED(rt->CreateSolidColorBrush(color, &b))) { if (f) f->Release(); return; }
+	const D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
+	                                                                    D2D1_LINE_JOIN_ROUND);
+	f->CreateStrokeStyle(sp, nullptr, 0, &round);
+	const float r = 42;   // inside the 88-point frame, the 4-point line's middle
+	const double ring = std::min(1.0, std::max(0.0, t));
+	if (ring > 0) {
+		ID2D1PathGeometry* g = nullptr;
+		ID2D1GeometrySink* s = nullptr;
+		if (SUCCEEDED(f->CreatePathGeometry(&g)) && SUCCEEDED(g->Open(&s))) {
+			auto at = [&](double a) { return D2D1::Point2F(cx + r * (float)std::sin(a), cy - r * (float)std::cos(a)); };
+			const double end = ring * 2 * 3.14159265358979;
+			s->BeginFigure(at(0), D2D1_FIGURE_BEGIN_HOLLOW);
+			// In halves: one arc can't go all the way round.
+			const double mid = std::min(end, 3.14159265358979);
+			s->AddArc(D2D1::ArcSegment(at(mid), D2D1::SizeF(r, r), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+			if (end > mid)
+				s->AddArc(D2D1::ArcSegment(at(end), D2D1::SizeF(r, r), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+			s->EndFigure(D2D1_FIGURE_END_OPEN);
+			s->Close();
+			rt->DrawGeometry(g, b, 4, round);
+		}
+		if (s) s->Release();
+		if (g) g->Release();
+	}
+	// The check: (27,45) (39,57) (62,32) in the frame, drawn along its length.
+	const double tick = std::max(0.0, std::min(1.0, (t - 0.5) * 2));
+	if (tick > 0) {
+		const D2D1_POINT_2F p[3] = { { cx - 44 + 27, cy - 44 + 45 }, { cx - 44 + 39, cy - 44 + 57 }, { cx - 44 + 62, cy - 44 + 32 } };
+		const float l1 = std::hypot(p[1].x - p[0].x, p[1].y - p[0].y), l2 = std::hypot(p[2].x - p[1].x, p[2].y - p[1].y);
+		float left = (float)tick * (l1 + l2);
+		const float a = std::min(left, l1);
+		rt->DrawLine(p[0], D2D1::Point2F(p[0].x + (p[1].x - p[0].x) * a / l1, p[0].y + (p[1].y - p[0].y) * a / l1), b, 5, round);
+		left -= l1;
+		if (left > 0)
+			rt->DrawLine(p[1], D2D1::Point2F(p[1].x + (p[2].x - p[1].x) * left / l2, p[1].y + (p[2].y - p[1].y) * left / l2), b, 5, round);
+	}
+	if (round) round->Release();
+	b->Release();
+	f->Release();
+}
+
+bool showSent(CircuitWindow* win, const std::string& replyTo) {
+	const double shown = nowSeconds();
+	const bool calm = !fade::animations();
+	std::string first = trimmed(prefs().studentName);
+	first = first.substr(0, first.find(' '));
+	const std::string heading = first.empty() ? "Thank you!" : "Thank you, " + first + "!";
+	const std::string text = "Your feedback is on its way." + (replyTo.empty() ? std::string() : " If there's a question, the reply goes to " + replyTo + ".");
+
+	Form f;
+	f.title = "Send Feedback";
+	f.width = 600;
+	f.okText = "Done";
+	f.cancelText = "";
+	f.buttons = { "Send Another" };
+	f.timerMs = 16;
+	FormField card;
+	card.kind = FormField::Picture;
+	card.height = 300;
+	card.paint = [&](ID2D1RenderTarget* rt, float w, float) {
+		const FormLook look = formLook();
+		// The ease the Mac's has (0.9 s, in and out).
+		const double u = calm ? 1 : std::min(1.0, (nowSeconds() - shown) / 0.9);
+		const double t = u < 0.5 ? 2 * u * u : 1 - std::pow(-2 * u + 2, 2) / 2;
+		paintSentCheck(rt, w / 2, 76, t, D2D1::ColorF(0.05f, 0.78f, 0.26f));
+		drawText(rt, heading, D2D1::RectF(16, 140, w - 16, 174), 24, look.ink, TextAlign::Center, true);
+		drawText(rt, text, D2D1::RectF((w - 380) / 2, 186, (w + 380) / 2, 250), 13.5f, look.dim, TextAlign::Center);
+	};
+	const int cardField = f.add(card);
+	f.onTimer = [&](Form& form) {
+		if (nowSeconds() - shown < 1.0) form.refresh(cardField);
+	};
+	f.onButton = [](Form&, int) { return true; };
+	return f.run(win->window()) == 100;
+}
+
+}  // namespace
+
 void show(CircuitWindow* win) {
 	// Recording for it already (Send Feedback chosen again from the menus or
 	// the toolbar): that's Stop.
@@ -1055,6 +1151,8 @@ void show(CircuitWindow* win) {
 	f.add(also);
 
 	std::shared_ptr<Sending>& sending = inFlight();
+	bool sentNow = false;     // sent while it was open
+	std::string sentEmail;    // where a reply would go (if they said so)
 	// This window follows a send that's still going.
 	if (g_watch) {
 		KillTimer(nullptr, g_watch);
@@ -1077,12 +1175,20 @@ void show(CircuitWindow* win) {
 		form.enable(contactField, !trimmed(d.email).empty());
 		if (sending) {
 			if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
-			form.setProblem("Sending…");
+			std::lock_guard<std::mutex> g(sending->lock);
+			form.setProgress(sending->fraction, sending->note);
 		} else if (!g_lastFailure.empty()) {
 			if (HWND send = GetDlgItem(form.dialog, 100)) SetWindowTextW(send, L"Try Again");
 			form.setProblem(g_lastFailure);
 		}
 		g_lastFailure.clear();
+		if (g_sample == 1) {
+			if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
+			form.setProgress(0.42, "Sending screenshot.png… 0.4 of 1.0 MB");
+		} else if (g_sample == 2) {
+			if (HWND send = GetDlgItem(form.dialog, 100)) SetWindowTextW(send, L"Try Again");
+			form.setProblem("Your feedback wasn't sent. Couldn't reach the feedback server. Check the internet connection and try again.");
+		}
 	};
 	f.onChange = [&](Form& form, int field) {
 		if (field == titleField || field == detailsField) {
@@ -1160,7 +1266,9 @@ void show(CircuitWindow* win) {
 		std::thread(upload, sending, body.str(), files).detach();
 		// Close stays: it carries on without the window.
 		if (HWND send = GetDlgItem(form.dialog, 100)) EnableWindow(send, FALSE);
-		form.setProblem("Sending…");
+		form.setProblem("");
+		form.setProgress(0, "Sending…");
+		sentEmail = d.contactOK ? mail : std::string();
 		return false;
 	};
 	f.onTimer = [&](Form& form) {
@@ -1168,13 +1276,20 @@ void show(CircuitWindow* win) {
 		if (!sending) return;
 		if (sending->state == 0) {
 			std::lock_guard<std::mutex> g(sending->lock);
-			form.setProblem(sending->note);
+			form.setProgress(sending->fraction, sending->note);
 			return;
 		}
 		if (sending->state == 1) {
 			sending.reset();
 			clearSentDraft();
-			win->note("Feedback sent. Thank you!");
+			form.setProgress(1, "Sent");
+			sentNow = true;
+			// The form dissolves into the thank-you card (shown below, once
+			// it's gone), as the Mac's turns into it.
+			RECT dr;
+			GetWindowRect(form.dialog, &dr);
+			MapWindowPoints(nullptr, win->window(), (POINT*)&dr, 2);
+			fade::crossfade(win->window(), &dr, 260);
 			EndDialog(form.dialog, IDOK);
 			return;
 		}
@@ -1184,11 +1299,13 @@ void show(CircuitWindow* win) {
 			why = sending->failure;
 		}
 		sending.reset();
+		form.setProgress(-1);
 		if (HWND send = GetDlgItem(form.dialog, 100)) {
 			EnableWindow(send, TRUE);
 			SetWindowTextW(send, L"Try Again");
 		}
-		form.setProblem(why);
+		// In red over the buttons; what was written is all still here.
+		form.setProblem("Your feedback wasn't sent. " + why);
 		MessageBeep(MB_ICONWARNING);
 	};
 	const int r = f.run(win->window());
@@ -1208,6 +1325,18 @@ void show(CircuitWindow* win) {
 	}
 	// Closed while sending: finished without it.
 	if (sending) g_watch = SetTimer(nullptr, 0, 400, watchSend);
+	// Sent with the window up: the thank-you, and perhaps another.
+	if (sentNow && showSent(win, sentEmail)) show(win);
+}
+
+void showSample(CircuitWindow* win, int state) {
+	if (state == 3) {
+		showSent(win, "student@example.edu");
+		return;
+	}
+	g_sample = state;
+	show(win);
+	g_sample = 0;
 }
 
 bool recording() { return capture::recording(); }

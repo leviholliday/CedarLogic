@@ -30,6 +30,7 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 const int kTabsId = 4000;       // Form::pages' row
+const int kProgressId = 4001;   // Form::setProgress's bar
 const int kSettingsGap = 12;    // points between settings in the Settings layout (the Mac's)
 const int kStepBase = 5000;     // a stepper's − and +: kStepBase + 2 * field (+ 1 for +)
 const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
@@ -668,6 +669,25 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_DRAWITEM: {
 		const DRAWITEMSTRUCT* di = reinterpret_cast<const DRAWITEMSTRUCT*>(lp);
+		if (di->CtlID == kProgressId) {
+			// A note over a slim bar in the accent, as the Mac's ProgressView
+			// with its note under it.
+			const DialogColors& c = darkColors();
+			const Chrome ch = chrome();
+			guarded("a dialog", [&] {
+				drawOnDC(di->hDC, di->rcItem, dpiOf(di->hwndItem), [&](ID2D1RenderTarget* rt, float w, float h) {
+					rt->Clear(d2d(c.back));
+					const float barW = std::min(w, 220.0f), barY = h / 2 + 3;
+					drawText(rt, f->progressNote, D2D1::RectF(0, barY - 20, w, barY - 3), 11.5f, d2d(c.dim));
+					fillRound(rt, D2D1::RectF(0, barY, barW, barY + 5), 2.5f, d2d(c.line));
+					const float done = (float)std::min(1.0, std::max(0.0, f->progressValue));
+					// Never quite empty: something is happening.
+					const float fill = std::max(10.0f, barW * done);
+					fillRound(rt, D2D1::RectF(0, barY, fill, barY + 5), 2.5f, ch.accent());
+				});
+			});
+			return TRUE;
+		}
 		if (di->CtlID == kTabsId) {
 			const DialogColors& c = darkColors();
 			const Chrome ch = chrome();
@@ -1172,6 +1192,11 @@ void Form::build() {
 			buttonWindows.push_back(b);
 			x -= sc(8);
 		}
+		// Room left of the buttons for setProgress (hidden until then).
+		if (x - sc(4) > margin + sc(60)) {
+			progress = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | SS_OWNERDRAW, margin, y, x - sc(4) - margin, btnH, dialog,
+			                           (HMENU)(INT_PTR)kProgressId, appInstance(), nullptr);
+		}
 		y += btnH + margin;
 		footerGap = gap;
 		footerButtonsAt = lineH + sc(4);
@@ -1427,7 +1452,9 @@ void Form::showPage(int to) {
 			MapWindowPoints(nullptr, dialog, (POINT*)&pr, 2);
 			SetWindowPos(problem, nullptr, pr.left, problemY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 		}
-		for (HWND b : buttonWindows) {
+		std::vector<HWND> moving = buttonWindows;
+		if (progress) moving.push_back(progress);
+		for (HWND b : moving) {
 			RECT br;
 			GetWindowRect(b, &br);
 			MapWindowPoints(nullptr, dialog, (POINT*)&br, 2);
@@ -1609,6 +1636,14 @@ void Form::selectRow(int field, int row) {
 	it.state = LVIS_SELECTED | LVIS_FOCUSED;
 	SendMessageW(list, LVM_SETITEMSTATE, row, (LPARAM)&it);
 	SendMessageW(list, LVM_ENSUREVISIBLE, row, FALSE);
+}
+
+void Form::setProgress(double fraction, const std::string& note) {
+	progressValue = fraction;
+	progressNote = note;
+	if (progress == nullptr) return;
+	ShowWindow(progress, fraction < 0 ? SW_HIDE : SW_SHOWNA);
+	InvalidateRect(progress, nullptr, FALSE);
 }
 
 void Form::setProblem(const std::string& text) {
