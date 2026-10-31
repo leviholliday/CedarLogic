@@ -1,4 +1,4 @@
-// Checks for Build from Formula (App/Formula.cpp), without the app: the
+// Checks for Build from Formula (mac/CedarCore/Formula.cpp), without the app: the
 // formula reader on known answers, and circuits planned in every shape and
 // gate style, built in the real engine, whose truth tables must match the
 // formula. The Linux twin of mac/Tools/formula-check.

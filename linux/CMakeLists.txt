@@ -90,7 +90,7 @@ if(CL_BUILD_APP)
 
 	include(GNUInstallDirs)
 	install(TARGETS CedarLogic RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-	install(FILES ${ROOT}/res/cl_gatedefs.xml res/cedarlogic.png res/FirstLaunch.wav DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
+	install(FILES ${ROOT}/res/cl_gatedefs.xml res/cedarlogic.png ${ROOT}/res/FirstLaunch.wav DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
 	install(DIRECTORY ${ROOT}/res/help ${ROOT}/res/samples ${ROOT}/res/templates DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
 	install(FILES res/cedarlogic.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 	install(FILES res/cedarlogic.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
@@ -108,9 +108,8 @@ if(CL_BUILD_TOOLS)
 		endif()
 		target_link_libraries(${t} PRIVATE CedarCore)
 	endforeach()
-	# Build from Formula's planner (App/Formula.cpp), built in the engine.
-	add_executable(formula_check Tools/formula_check.cpp App/Formula.cpp)
-	target_include_directories(formula_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/App)
+	# Build from Formula's planner (mac/CedarCore/Formula.cpp, in CedarCore).
+	add_executable(formula_check Tools/formula_check.cpp)
 	target_link_libraries(formula_check PRIVATE CedarCore)
 	# Sync's checks with the hooks the app uses (App/SyncPlatform.cpp: libcrypto, GIO's zlib and
 	# the curl program): the engine's self-test, the curl program's use, two libraries syncing.
