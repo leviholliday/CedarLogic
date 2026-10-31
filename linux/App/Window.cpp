@@ -1570,6 +1570,12 @@ static bool isShortcut(GtkApplication* app, const GdkEventKey* e) {
 gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
 	w->noteInput();
+	// C while a part moves goes to its canvas, wherever the keyboard is (the
+	// side panel's search, after a drag from the panel): it connects there,
+	// rather than typing a c into the search or doing nothing.
+	for (int pane = 0; pane < 2; pane++)
+		if (Canvas* c = w->paneCanvas(pane))
+			if (guarded("a key", [&] { return c->connectKeyWhileMoving(e); })) return TRUE;
 	// Text boxes get their keys before the menus' shortcuts, so Ctrl+C in
 	// the palette's search copies text rather than gates.
 	GtkWidget* focus = gtk_window_get_focus(GTK_WINDOW(widget));

@@ -60,6 +60,10 @@ public:
 	// stutter, so it's left out.
 	double lastDrawMs = 0;
 	bool slowFrames() const { return lastDrawMs > 34; }
+	// C while a part is moving here (dragged, or on the pointer from the side
+	// panel, Quick Add or a paste), wherever the keyboard is: connect it to
+	// the pins in reach, as on the Mac. True when the key was that.
+	bool connectKeyWhileMoving(GdkEventKey* e);
 
 	// Camera. The animated ones ease over 140 ms, as the wx app's zoom does.
 	void zoomToFit(bool animate);

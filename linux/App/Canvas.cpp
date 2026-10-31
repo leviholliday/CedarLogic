@@ -171,6 +171,11 @@ gboolean Canvas::drawCb(GtkWidget*, cairo_t* cr, gpointer self) {
 	return TRUE;
 }
 
+bool Canvas::connectKeyWhileMoving(GdkEventKey* e) {
+	if (!moving() || shortcuts::canvasAction(e) != "quickCopy") return false;
+	return onKeyPress(e);
+}
+
 void Canvas::crossfade() {
 	if (fadeFrom) { cairo_surface_destroy(fadeFrom); fadeFrom = nullptr; }
 	fadeOut.set(0);
@@ -1515,7 +1520,11 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		// connect it to the pins it's next to and keep moving. The
 		// connections are kept at the drop; Escape takes back just them.
 		if (moving()) {
-			if (win->canEdit() && pointerInside) {
+			// The pointer over this canvas now (asked, as the Mac does: a drag
+			// from the side panel holds the pointer there, so this canvas never
+			// heard it come in), not while it's still over the panel.
+			double px = 0, py = 0;
+			if (win->canEdit() && pointerWorld(px, py)) {
 				const int p = page();
 				const int n = cl_edit_connect_while_moving(doc, p, upp);
 				if (n > 0) win->note(format("Connected %d pin%s. Escape takes it back.", n, n == 1 ? "" : "s"));
