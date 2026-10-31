@@ -271,7 +271,8 @@ struct SessionDriver {
 	// Counters for the invariants (checked at the end).
 	int editsChecked = 0, editsLost = 0, firstLost = -1;
 	int pauses = 0, pausesUnsaved = 0, pausesStale = 0, firstStale = -1, reopenMismatch = 0, firstReopen = -1;
-	int roundTrips = 0, roundTripBad = 0, firstRoundTrip = -1;
+	int roundTrips = 0, roundTripBad = 0, firstRoundTrip = -1, roundTripsInterrupted = 0;
+	std::string lastInterruptedIssue;
 	int historyBad = 0, firstHistory = -1, maxUndo = 0;
 	int pagesBad = 0, firstPages = -1;
 	int stuckWindows = 0;
@@ -605,6 +606,9 @@ struct SessionDriver {
 		settle();
 		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
 		const std::string before = text();
+		// A step made meanwhile (a late clipboard event storing an edit while
+		// this undoes) clears Redo: then the round trip was interrupted, not wrong.
+		const long madeBefore = cl_edit_steps_made(doc());
 		int undone = 0, missed = 0;
 		std::string steps;
 		for (int i = 0; i < k; i++) {
@@ -623,6 +627,14 @@ struct SessionDriver {
 			if (i % 3 == 2) pump(5);
 		}
 		pump(10);
+		const long madeAfter = cl_edit_steps_made(doc());
+		if (madeAfter != madeBefore) {
+			roundTripsInterrupted++;
+			if (lastInterruptedIssue.empty())
+				lastInterruptedIssue = format("first at action %d: %ld new step(s) made during %d undone and redone (the steps, last first: %s)", at,
+				                              madeAfter - madeBefore, undone, steps.c_str());
+			return;
+		}
 		roundTrips++;
 		const std::string after = text();
 		if (after != before) {
@@ -1403,6 +1415,10 @@ struct SessionDriver {
 		                               (firstReopen >= 0 ? format(", first at action %d: %s)", firstReopen, lastReopenIssue.c_str()) : std::string(")")));
 		check(roundTripBad == 0, format("undo then redo brings the circuit back (%d of %d", roundTrips - roundTripBad, roundTrips) +
 		                             (firstRoundTrip >= 0 ? format("; first wrong at action %d: %s)", firstRoundTrip, lastRoundTripIssue.c_str()) : std::string(")")));
+		// Not a failure: a step made during the round trip (Redo is cleared then), reported only.
+		if (roundTripsInterrupted > 0)
+			printf("session: undo then redo interrupted %d time(s) by a new edit step, not compared (%s)\n", roundTripsInterrupted,
+			       lastInterruptedIssue.c_str());
 		check(historyBad == 0, format("the undo history stays within 500 steps (%d at most%s)", maxUndo,
 		                              firstHistory >= 0 ? format("; wrong at action %d", firstHistory).c_str() : ""));
 		check(pagesBad == 0, format("every tab is a page that exists, on its side (%d wrong", pagesBad) +
