@@ -2219,7 +2219,7 @@ void CircuitWindow::showAbout() {
 		brand::text(cr, "CedarLogic", 0, 152, 28, brand::Bold, brand::kPrimary, w, TextAlign::Center);
 		brand::text(cr, std::string("Version ") + CL_VERSION + "  ·  native Linux test build  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0,
 		            192, 12, brand::Medium, brand::kNeon, w, TextAlign::Center);
-		brand::text(cr, "A digital logic simulator, from Cedarville University. Rebuilt natively for Linux: GTK and Cairo on the shared "
+		brand::text(cr, "A digital logic simulator, based on the original CedarLogic from Cedarville University. Rebuilt natively for Linux: GTK and Cairo on the shared "
 		                "CedarLogic engine, with no OpenGL, so it runs the same on a Raspberry Pi as on a PC.",
 		            40, 222, 13, brand::Normal, brand::kSecondary, w - 80, TextAlign::Center);
 		const RectF site = rectF(w / 2 - 170, h - 70, w / 2 - 60, h - 36);
