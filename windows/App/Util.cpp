@@ -290,6 +290,8 @@ void Prefs::load() {
 	reportColor = r.b("reportColor", reportColor);
 	exportGrid = r.b("exportGrid", exportGrid);
 	exportColor = r.b("exportColor", exportColor);
+	// (Before Match Window: Color is what the window shows in light mode.)
+	exportLook = r.i("exportLook", exportColor ? 0 : 2, 0, 2);
 	exportInfo = r.b("exportInfo", exportInfo);
 	// The name-and-result strip is in an exported picture to begin with, as
 	// on the Mac and Linux (it was left out here, once).
@@ -392,6 +394,7 @@ void Prefs::save() const {
 	o << "reportColor=" << b(reportColor) << "\n";
 	o << "exportGrid=" << b(exportGrid) << "\n";
 	o << "exportColor=" << b(exportColor) << "\n";
+	o << "exportLook=" << exportLook << "\n";
 	o << "exportInfo=" << b(exportInfo) << "\n";
 	o << "exportStripOn=1\n";
 	o << "exportWorks=" << b(exportWorks) << "\n";

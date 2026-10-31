@@ -101,6 +101,7 @@ struct Prefs {
 	bool reportCircuit = true, reportTable = true, reportFormulas = true, reportTiming = true, reportColor = true;
 	// Export as Image's last choices.
 	bool exportGrid = false, exportColor = true, exportInfo = true, exportWorks = true;   // exportInfo: the name-and-result strip
+	int exportLook = 0;           // Export as Image's look: 0 Match Window, 1 Light, 2 Black & White (the Mac's)
 	bool exportInk = true;                        // the drawing on the circuit, when the page has one
 	int exportScale = 4;                          // 2, 4 or 6 pixels a point
 	std::string exportProblem;                    // "does not work because…"

@@ -19,6 +19,9 @@ namespace {
 
 const float kPointsPerUnit = 12, kMargin = 24;
 const float kPad = 22, kBody = 17, kSmall = 11, kGap = 8;
+// The picture's look (Prefs::exportLook), as the Mac's ExportLook: as the
+// window shows it (its light or dark canvas), light, or black and white.
+enum { kLookWindow = 0, kLookLight = 1, kLookPrint = 2 };
 
 struct ExportInfo {
 	bool enabled = false;
@@ -89,13 +92,17 @@ bool imageSize(CLDocument* doc, int page, const ExportInfo& info, float& w, floa
 }
 
 // Into a target in points, y down, `w` x `h` points; `scale` is pixels a point.
-void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, bool color, bool grid,
+void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, int look, bool grid,
                const ExportInfo& info) {
 	float stripH = 0;
 	std::vector<std::string> lines;
 	if (info.enabled) lines = stripLines(info, w, stripH);
 	const float circuitH = h - stripH;
+	// Match Window: the canvas the window draws on now (dark in dark mode).
+	const bool windowDark = look == kLookWindow && prefs().dark;
+	const Palette pal{ windowDark, false };
 	fillRect(rt, D2D1::RectF(0, 0, w, h), D2D1::ColorF(1, 1, 1));
+	if (look == kLookWindow) fillRect(rt, D2D1::RectF(0, 0, w, circuitH), d2dColor(pal.canvas()));
 	double l, b, r, t;
 	if (!pageBox(doc, page, info.ink, l, b, r, t)) return;
 	const double midX = (l + r) / 2, midY = (b + t) / 2;
@@ -103,7 +110,7 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 	if (grid) {
 		const double upp = 1 / kPointsPerUnit;
 		const double ox = midX - w / 2 * upp, oy = midY + circuitH / 2 * upp;
-		const D2D1_COLOR_F line = D2D1::ColorF(0, 0, 0.2f, 0.2f);
+		const D2D1_COLOR_F line = look == kLookWindow ? d2dColor(pal.grid(windowDark ? 0.2 : 0.28)) : D2D1::ColorF(0, 0, 0.2f, 0.2f);
 		ID2D1SolidColorBrush* br = nullptr;
 		if (SUCCEEDED(rt->CreateSolidColorBrush(line, &br))) {
 			for (double x = std::ceil(ox); x < ox + w * upp; x += 1) {
@@ -117,12 +124,12 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 			br->Release();
 		}
 	}
-	if (!color) {
+	if (look == kLookPrint) {
 		cl_document_draw_fitted_ink(doc, page, rt, w, circuitH, kMargin, scale, CL_STYLE_PRINT, info.ink);
 	} else {
 		const double upp = std::max((r - l) / (w - 2 * kMargin), (t - b) / (circuitH - 2 * kMargin));
 		CLDrawOptions o = {};
-		o.dark = false;
+		o.dark = windowDark;
 		o.accent = prefs().accent;
 		o.wireScale = 1;
 		o.simView = false;
@@ -158,12 +165,12 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 	for (const std::string& line : lines) { text(line, kPad, y, kBody, ink); y += kBody + kGap; }
 }
 
-IWICBitmap* makeImage(CLDocument* doc, int page, double multiplier, bool color, bool grid, const ExportInfo& info) {
+IWICBitmap* makeImage(CLDocument* doc, int page, double multiplier, int look, bool grid, const ExportInfo& info) {
 	float w, h;
 	if (!imageSize(doc, page, info, w, h)) return nullptr;
 	double scale = multiplier;
 	if (std::max(w, h) * scale > 12000) scale = 12000 / std::max(w, h);
-	return images::render(w, h, scale, true, [&](ID2D1RenderTarget* rt) { drawImage(rt, doc, page, w, h, scale, color, grid, info); });
+	return images::render(w, h, scale, true, [&](ID2D1RenderTarget* rt) { drawImage(rt, doc, page, w, h, scale, look, grid, info); });
 }
 
 }  // namespace
@@ -176,7 +183,7 @@ bool writeExportImage(CLDocument* doc, const std::string& name, const std::strin
 	info.fileName = name;
 	float w = 0, h = 0;
 	if (!imageSize(doc, 0, info, w, h)) { error = "the page is empty"; return false; }
-	IWICBitmap* bmp = makeImage(doc, 0, prefs().exportScale, prefs().exportColor, prefs().exportGrid, info);
+	IWICBitmap* bmp = makeImage(doc, 0, prefs().exportScale, prefs().exportLook, prefs().exportGrid, info);
 	if (bmp == nullptr) { error = "the picture couldn't be made"; return false; }
 	const bool asPdf = file.size() > 4 && _stricmp(file.c_str() + file.size() - 4, ".pdf") == 0;
 	const bool ok = asPdf ? images::savePdf(bmp, w, h, name, file) : images::savePng(bmp, file);
@@ -195,7 +202,7 @@ ExportInfo reportInfo(CLDocument* doc) {
 }
 bool reportCircuitSize(CLDocument* doc, int page, float& w, float& h) { return imageSize(doc, page, reportInfo(doc), w, h); }
 void reportCircuitDraw(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, bool color) {
-	drawImage(rt, doc, page, w, h, scale, color, false, reportInfo(doc));
+	drawImage(rt, doc, page, w, h, scale, color ? kLookLight : kLookPrint, false, reportInfo(doc));
 }
 
 void showExportImage(CircuitWindow* win, int page) {
@@ -250,12 +257,12 @@ void showExportImage(CircuitWindow* win, int page) {
 	whyBox.value = p.exportProblem;
 	whyBox.tip = "Explain what doesn't work (required)";
 	const int whyField = f.add(whyBox);
-	const int styleField = f.add(choiceField("Output style", { "Color", "Black & White" }, p.exportColor ? 0 : 1));
+	const int styleField = f.add(choiceField("Look", { "Match Window", "Light", "Black & White" }, std::min(2, std::max(0, p.exportLook))));
 	const int resField = f.add(choiceField("Resolution", { "Screen (2×)", "Print (4×)", "High Quality (6×)" },
 	                                       p.exportScale <= 2 ? 0 : p.exportScale >= 6 ? 2 : 1));
 
 	// The choices as they stand in the open dialog.
-	struct State { ExportInfo info; bool color, grid; int multiplier; };
+	struct State { ExportInfo info; int look; bool grid; int multiplier; };
 	auto state = [&](Form& form) {
 		State s;
 		s.grid = form.checked(gridField);
@@ -265,7 +272,7 @@ void showExportImage(CircuitWindow* win, int page) {
 		s.info.works = form.choice(worksField) == 0;
 		s.info.why = form.text(whyField);
 		s.info.fileName = fileName;
-		s.color = form.choice(styleField) == 0;
+		s.look = form.choice(styleField);
 		const int res = form.choice(resField);
 		s.multiplier = res == 0 ? 2 : res == 2 ? 6 : 4;
 		return s;
@@ -277,7 +284,8 @@ void showExportImage(CircuitWindow* win, int page) {
 		p.studentName = trimmed(s.info.name);
 		p.exportWorks = s.info.works;
 		p.exportProblem = s.info.why;
-		p.exportColor = s.color;
+		p.exportLook = s.look;
+		p.exportColor = s.look != kLookPrint;
 		p.exportScale = s.multiplier;
 		p.save();
 		syncapp::nameChanged();
@@ -306,7 +314,7 @@ void showExportImage(CircuitWindow* win, int page) {
 		D2D1_MATRIX_3X2_F was;
 		rt->GetTransform(&was);
 		rt->SetTransform(D2D1::Matrix3x2F::Scale(fit, fit) * D2D1::Matrix3x2F::Translation(x, y) * was);
-		drawImage(rt, doc, page, w, h, fit * dpiOf(f.dialog) / 96.0f, s.color, s.grid, s.info);
+		drawImage(rt, doc, page, w, h, fit * dpiOf(f.dialog) / 96.0f, s.look, s.grid, s.info);
 		rt->SetTransform(was);
 		strokeRound(rt, D2D1::RectF(x, y, x + w * fit, y + h * fit), 1, D2D1::ColorF(0, 0, 0, 0.15f), 0.5f);
 	};
@@ -322,7 +330,7 @@ void showExportImage(CircuitWindow* win, int page) {
 		const std::string bad = problem(s);
 		if (!bad.empty()) { form.setProblem(bad); MessageBeep(MB_ICONWARNING); return false; }
 		keep(s);
-		IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.color, s.grid, s.info);
+		IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.look, s.grid, s.info);
 		const bool ok = bmp && images::copyToClipboard(form.dialog, bmp);
 		if (bmp) bmp->Release();
 		if (!ok) { form.setProblem("The image couldn't be copied."); return false; }
@@ -339,7 +347,7 @@ void showExportImage(CircuitWindow* win, int page) {
 	s.info.works = f.fields[worksField].value == "0";
 	s.info.why = f.fields[whyField].value;
 	s.info.fileName = fileName;
-	s.color = f.fields[styleField].value == "0";
+	s.look = atoi(f.fields[styleField].value.c_str());
 	const int res = atoi(f.fields[resField].value.c_str());
 	s.multiplier = res == 0 ? 2 : res == 2 ? 6 : 4;
 	keep(s);
@@ -347,7 +355,7 @@ void showExportImage(CircuitWindow* win, int page) {
 	                                        { { "PNG Image (*.png)", "*.png" }, { "PDF Document (*.pdf)", "*.pdf" } }, ".png");
 	if (file.empty()) return;
 	const bool asPdf = file.size() > 4 && _stricmp(file.c_str() + file.size() - 4, ".pdf") == 0;
-	IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.color, s.grid, s.info);
+	IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.look, s.grid, s.info);
 	float w = 0, h = 0;
 	imageSize(doc, page, s.info, w, h);
 	const bool ok = bmp && (asPdf ? images::savePdf(bmp, w, h, fileName, file) : images::savePng(bmp, file));
