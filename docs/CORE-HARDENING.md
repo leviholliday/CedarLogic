@@ -224,6 +224,24 @@ Known limits.
   operation that found it weren't recorded, so the exact sequence can't be
   replayed. If the net ever fires, the fuzzers' consistency check will say so.
 
+- **Linux session check, seed 9, action 165** (run 41222327466 on
+  linux/native-polish 38c7ea5; the same seed passed on the base branch and in
+  run 41227191708): after six steps undone and redone (Paste, its drop, Delete
+  Selection, Create Gate, its drop, Paste) a pasted toggle was missing. Not
+  reproduced in the engine: the same six steps, as a `core_check` case (one
+  page or two, deleting one part or all), come back exactly, and about 8,000
+  random sessions of pastes, drops, take-backs, deletes, cuts, new parts,
+  locks and drags on the dumped circuit, each undone and redone 1 to 8 steps,
+  never differed. What fits the dump exactly (the newest Paste and its drop
+  gone, nothing else changed) is a new step stored partway through the undoing:
+  a new step clears Redo (`wxCommandProcessor::Store`), so the steps undone
+  before it can't come back. Only the window can store one there, from an
+  event that lands while the check pumps the main loop between key presses (a
+  clipboard answer to an earlier Ctrl+V, or the like). Suggested for the Linux
+  check (not changed here): note `cl_edit_steps_made` before the undoing and
+  after the redoing, and when it moved, report the round trip as interrupted
+  rather than as a mismatch.
+
 ## Known limits (left as they are)
 
 - **Opening a circuit runs the simulation until it settles.** A counter on a

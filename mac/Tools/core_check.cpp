@@ -545,6 +545,51 @@ static void straightenCases() {
 	cl_document_close(doc);
 }
 
+// The six steps the Linux session check undid and redid when a toggle went
+// missing (seed 9, action 165): Paste, its drop (Move Selection), Delete
+// Selection, Create Gate, its drop, Paste. In the engine they come back: what
+// lost the last two there was a new step stored in the middle of the
+// undoing (a new step clears Redo), which only the window can do.
+static void pasteDeleteUndoCases() {
+	printf("paste, delete, add, paste: undone and redone, all come back\n");
+	for (int variant = 0; variant < 4; variant++) {
+		CLDocument* doc = cl_document_new();
+		if (variant >= 2) cl_document_add_page(doc);
+		const int pg = variant >= 2 ? 1 : 0;
+		cl_edit_add_gate(doc, pg, "AA_TOGGLE", -10, 0);
+		cl_edit_add_gate(doc, pg, "AA_AND2", 0, 0);
+		cl_edit_add_gate(doc, pg, "GA_LED", 10, 0);
+		cl_edit_select_all(doc, pg);
+		const std::string block = cl_edit_copy(doc, pg);
+		auto floatAndDrop = [&](double x, double y) {
+			if (!cl_edit_float_begin(doc, pg, x, y)) return;
+			cl_edit_hover(doc, pg, x + 3, y + 2, 0.05);
+			cl_edit_press(doc, pg, x + 3, y + 2, 0, 0.05);
+			cl_edit_release(doc, x + 3, y + 2);
+		};
+		const char* back = nullptr;
+		cl_edit_paste(doc, pg, block.c_str(), 20, 10, false, &back);
+		floatAndDrop(20, 10);
+		if (variant % 2) cl_edit_select_all(doc, pg); else { cl_edit_select_none(doc, pg); doc->circuit.getGate(newest(doc, pg))->select(); }
+		cl_edit_delete(doc, pg);
+		cl_edit_add_gate(doc, pg, "AA_TOGGLE", 16.5, -7.5);
+		floatAndDrop(16.5, -7.5);
+		cl_edit_select_none(doc, pg);
+		doc->circuit.getGate(newest(doc, pg))->select();
+		const std::string one = cl_edit_copy(doc, pg);
+		cl_edit_paste(doc, pg, one.c_str(), -20, 15, false, &back);
+		const std::string before = cl_document_save_text(doc);
+		int undone = 0;
+		for (int i = 0; i < 6 && cl_edit_undo(doc); i++) undone++;
+		for (int i = 0; i < undone; i++) cl_edit_redo(doc);
+		const std::string after = cl_document_save_text(doc);
+		CHECK(undone == 6 && after == before && consistent(doc, "after redo"),
+		      (std::string("six steps undone and redone give the circuit back (") + (variant >= 2 ? "second page, " : "") +
+		       (variant % 2 ? "delete all)" : "delete one)")).c_str());
+		cl_document_close(doc);
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
@@ -558,6 +603,7 @@ int main(int argc, char** argv) {
 	smallerCases();
 	if (!fixtures.empty()) dragCases();
 	if (!fixtures.empty()) straightenCases();
+	pasteDeleteUndoCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;
