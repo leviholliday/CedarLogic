@@ -10,7 +10,27 @@ by the main CMake project, and nothing here affects the other builds.
     cmake --build windows/build --config Release
     windows\build\Release\CedarLogic.exe [circuit.cdl ...]
 
-It needs Visual Studio 2019 or later (the C++ desktop workload) and CMake.
+It needs Visual Studio 2019 or later (the C++ desktop workload) and CMake,
+and a **Windows SDK**: in the Visual Studio Installer, the "Windows 11 SDK"
+(or 10) component of the C++ desktop workload. Visual Studio can be installed
+without one; then configuring fails with `No CMAKE_C_COMPILER could be found`,
+and the configure log says `WindowsSDKDir property is not defined` and
+`LNK1181: cannot open input file 'kernel32.lib'`.
+
+Without admin rights to add the SDK, the one in Microsoft's NuGet packages
+works (this is how the real-PC test in `windows/PC-TEST.md`, on the
+`windows/pc-test` branch, built it): download `Microsoft.Windows.SDK.CPP` and
+`Microsoft.Windows.SDK.CPP.x64` (10.0.26100 or later) from nuget.org, unzip
+them, and in a "x64 Native Tools" prompt add the SDK's `include\<version>\{ucrt,um,shared,winrt}`
+folders to `INCLUDE`, its `lib\<version>\{ucrt,um}\x64` folders to `LIB`, and
+its `bin\<version>\x64` folder (rc.exe, mt.exe) to `PATH`. The Visual Studio
+generator only takes an installed SDK, so use Ninja (it comes with Visual
+Studio); Ninja Multi-Config writes the same `windows/build/Release/`:
+
+    cmake -S windows -B windows/build -G "Ninja Multi-Config" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+          -DCMAKE_RC_COMPILER=rc -DCMAKE_MT=mt -DCL_BUILD_TOOLS=ON
+    cmake --build windows/build --config Release --parallel
+
 MinGW-w64 builds it too, including from a Mac, which is handy for checking that
 it compiles without a Windows machine:
 
@@ -223,7 +243,15 @@ Direct2D here. And:
 - `CedarLogic.exe --drag-selftest [log]` -- a gate dragged with real input,
   PASS/FAIL and the frame times (`DRAG-DIAGNOSIS.md`); CI runs it (it never
   holds the build back) as built, with `CEDARLOGIC_DRAG_OLD=1` and with
-  `CEDARLOGIC_NO_GEOMETRY_CACHE=1`.
+  `CEDARLOGIC_NO_GEOMETRY_CACHE=1`. Started from a shell in the background,
+  Windows' foreground lock would keep its window from coming to the front
+  (it used to SKIP: "CedarLogic isn't the window in front"); it now brings
+  itself forward (joining the front window's input for a moment, else a tap
+  of Alt sent first) before it starts. A window that still can't come up --
+  a locked screen, something holding the focus -- still skips.
+  While dragging, the canvas draws one frame a display refresh (an earlier
+  WM_PAINT is put off to the next refresh), so a drag log's paints are about
+  the refresh rate, not one per move.
 - `CedarLogic.exe --session-check [actions] [seed]` -- a long working
   session in one window (`App/SessionCheck.h`, the Mac's `--session-check`):
   seeded random actions through the app's own code (the canvas's and the tab
