@@ -526,9 +526,6 @@ if(APPLE)
             "${CMAKE_SOURCE_DIR}/res/LICENSE.txt"
             "$<TARGET_BUNDLE_DIR:CedarLogic>/Contents/Resources/res/"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/res/bitmaps"
-            "$<TARGET_BUNDLE_DIR:CedarLogic>/Contents/Resources/res/bitmaps"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/res/help"
             "$<TARGET_BUNDLE_DIR:CedarLogic>/Contents/Resources/res/help"
     )
