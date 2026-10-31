@@ -302,12 +302,13 @@ void PageBar::paint(cairo_t* cr, float w, float h) {
 
 struct SettingsWindow {
 	GtkWidget* win = nullptr;
-	GtkWidget* holder = nullptr;   // the page, sized as it eases
+	GtkWidget* holder = nullptr;
+	// The page scrolls when it's taller than the screen has room for.
+	GtkWidget* scroll = nullptr;
 	GtkWidget* pageWidget = nullptr;
 	PageBar* bar = nullptr;
 	int page = General;
-	anim::Tween height, opacity;
-	guint tick = 0;
+	bool swapping = false;   // the old page fading out, the new one not in yet
 	// The Shortcuts page: the action being given new keys.
 	const shortcuts::Action* recording = nullptr;
 	GtkWidget* recordButton = nullptr;
@@ -706,42 +707,67 @@ GtkWidget* buildPage(SettingsWindow* s, int page) {
 	}
 }
 
-// The Mac's page switch: the old page goes, the window eases to the new
-// one's height, then the new page fades in.
+// The most a page can be before it scrolls: the screen's work area (without
+// its panels) under the page bar, with a little room for the window's frame.
+int roomForPage(SettingsWindow* s) {
+	GdkDisplay* display = gdk_display_get_default();
+	GdkMonitor* mon = nullptr;
+	if (GdkWindow* gw = gtk_widget_get_window(s->win)) mon = gdk_display_get_monitor_at_window(display, gw);
+	if (!mon)
+		if (GtkWindow* parent = gtk_window_get_transient_for(GTK_WINDOW(s->win)))
+			if (GdkWindow* pw = gtk_widget_get_window(GTK_WIDGET(parent))) mon = gdk_display_get_monitor_at_window(display, pw);
+	if (!mon && display) mon = gdk_display_get_primary_monitor(display);
+	if (!mon && display && gdk_display_get_n_monitors(display) > 0) mon = gdk_display_get_monitor(display, 0);
+	if (!mon) return 4000;
+	GdkRectangle area;
+	gdk_monitor_get_workarea(mon, &area);
+	return std::max(220, area.height - (int)kBarH - 40);
+}
+
+// The page's height: its own, or as much as the screen has room for (it
+// scrolls then), so every setting can be reached on a small screen.
+void fitPage(SettingsWindow* s) {
+	if (s->pageWidget == nullptr) return;
+	int minH = 0, natH = 0;
+	gtk_widget_get_preferred_height_for_width(s->pageWidget, (int)kWidth, &minH, &natH);
+	gtk_widget_set_size_request(s->scroll, (int)kWidth, std::min(natH, roomForPage(s)));
+}
+
+void putPage(SettingsWindow* s) {
+	if (s->pageWidget) gtk_widget_destroy(s->pageWidget);
+	GtkWidget* pg = buildPage(s, s->page);
+	gtk_widget_show_all(pg);
+	s->pageWidget = pg;
+	gtk_container_add(GTK_CONTAINER(s->scroll), pg);
+	gtk_adjustment_set_value(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(s->scroll)), 0);
+	fitPage(s);
+}
+
+// The page switch, as the Mac's: the old page fades out, the window takes
+// the new one's height (in one step, while nothing shows, so a slow screen
+// doesn't resize it frame by frame), then the new page fades in. About
+// 0.25 s in all; none of it without the desktop's animations, and a slow
+// frame skips to the end (anim::fadeTo).
 void select(SettingsWindow* s, int page, bool animated) {
 	s->page = page;
 	s->bar->page = page;
 	s->bar->redraw();
 	gtk_window_set_title(GTK_WINDOW(s->win), kTitles[page]);
-	if (s->pageWidget) gtk_widget_destroy(s->pageWidget);
-	GtkWidget* pg = buildPage(s, page);
-	gtk_widget_show_all(pg);
-	int minH = 0, natH = 0;
-	gtk_widget_get_preferred_height_for_width(pg, (int)kWidth, &minH, &natH);
-	s->pageWidget = pg;
-	gtk_container_add(GTK_CONTAINER(s->holder), pg);
-	const double now = s->height.value();
-	if (!animated || now <= 0) {
-		s->height.set(natH);
-		s->opacity.set(1);
-		gtk_widget_set_size_request(s->holder, (int)kWidth, natH);
-		gtk_widget_set_opacity(pg, 1);
+	if (!animated || !anim::enabled() || s->pageWidget == nullptr || !gtk_widget_get_mapped(s->scroll)) {
+		s->swapping = false;
+		putPage(s);
+		anim::fadeTo(s->scroll, 1, 0);
 		return;
 	}
-	s->height.set(now);
-	s->height.go(natH, 0.32, true);
-	s->opacity.set(0);
-	gtk_widget_set_opacity(pg, 0);
-	if (s->tick == 0)
-		s->tick = gtk_widget_add_tick_callback(s->win, [](GtkWidget*, GdkFrameClock*, gpointer data) -> gboolean {
-			SettingsWindow* s = static_cast<SettingsWindow*>(data);
-			gtk_widget_set_size_request(s->holder, (int)kWidth, (int)s->height.value());
-			if (!s->height.active() && s->opacity.to == 0) s->opacity.go(1, 0.28);
-			if (s->pageWidget) gtk_widget_set_opacity(s->pageWidget, s->opacity.value());
-			if (s->height.active() || s->opacity.active() || s->opacity.to == 0) return G_SOURCE_CONTINUE;
-			s->tick = 0;
-			return G_SOURCE_REMOVE;
-		}, s, nullptr);
+	if (s->swapping) return;   // already on its way out: the newest page goes in
+	s->swapping = true;
+	anim::fadeTo(s->scroll, 0, 0.09, [](GtkWidget* scroll, gpointer data) {
+		SettingsWindow* s = static_cast<SettingsWindow*>(data);
+		if (g_settings != s) return;
+		s->swapping = false;
+		putPage(s);
+		anim::fadeTo(scroll, 1, 0.16);
+	}, s);
 }
 
 void PageBar::mouseDown(int b, float x, float y, bool, GdkEventButton* e) {
@@ -775,6 +801,10 @@ void show(CircuitWindow* from, int page) {
 	gtk_window_set_titlebar(GTK_WINDOW(s->win), s->bar->widget());
 	s->holder = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(s->win), s->holder);
+	s->scroll = gtk_scrolled_window_new(nullptr, nullptr);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(s->scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(s->scroll), GTK_SHADOW_NONE);
+	gtk_box_pack_start(GTK_BOX(s->holder), s->scroll, TRUE, TRUE, 0);
 	g_signal_connect(s->win, "key-press-event", CL_CALLBACK(+[](GtkWidget* w, GdkEventKey* e, gpointer data) -> gboolean {
 		SettingsWindow* s = static_cast<SettingsWindow*>(data);
 		if (s->recording) {
@@ -829,24 +859,17 @@ void show(CircuitWindow* from, int page) {
 		delete s;
 	}), s);
 	select(s, page >= 0 ? page : General, false);
+	// The window fades in, as a sheet arrives (transparent from its first frame).
+	anim::fadeIn(s->win, 0.18);
 	gtk_widget_show_all(s->win);
-	// The window fades in, as a sheet arrives.
-	gtk_widget_set_opacity(s->win, 0);
-	gtk_widget_add_tick_callback(s->win, [](GtkWidget* w, GdkFrameClock*, gpointer) -> gboolean {
-		const double o = std::min(1.0, gtk_widget_get_opacity(w) + (anim::enabled() ? 0.12 : 1));
-		gtk_widget_set_opacity(w, o);
-		return o < 1 ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
-	}, nullptr, nullptr);
+	fitPage(s);   // now it's on a screen: that screen's room
 }
 
 GtkWidget* window() { return g_settings ? g_settings->win : nullptr; }
 
 void pageChanged() {
-	if (g_settings == nullptr || g_settings->pageWidget == nullptr || g_settings->height.active()) return;
-	int minH = 0, natH = 0;
-	gtk_widget_get_preferred_height_for_width(g_settings->pageWidget, (int)kWidth, &minH, &natH);
-	g_settings->height.set(natH);
-	gtk_widget_set_size_request(g_settings->holder, (int)kWidth, natH);
+	if (g_settings == nullptr || g_settings->swapping) return;
+	fitPage(g_settings);
 }
 
 void themeChanged() {
