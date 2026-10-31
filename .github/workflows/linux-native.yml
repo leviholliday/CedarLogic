@@ -164,7 +164,23 @@ jobs:
             "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
           # The templates this app ships (res/templates, the Mac's own): Step Clock on the
           # flip-flops (manual, running and pulse-button clocks), the examples' second pages,
-          # the registers and the Classic Mistakes each do what they say.
+          # the registers and the Classic Mistakes each do what they say. First: every
+          # template index.tsv names is there with its Clock files (50 files in all).
+          python3 - <<'PY'
+          import os, sys
+          d = "res/templates"
+          rows = [l.split("\t") for l in open(os.path.join(d, "index.tsv"), encoding="utf-8").read().splitlines() if l]
+          want = []
+          for f in rows:
+              want.append("template-%s.cdl" % f[0])
+              choices = f[4] if len(f) > 4 else ""
+              want += ["template-%s-%s.cdl" % (f[0], c) for c in ("running", "pulse") if c in choices]
+          have = sorted(n for n in os.listdir(d) if n.endswith(".cdl"))
+          missing, extra = sorted(set(want) - set(have)), sorted(set(have) - set(want))
+          print("%d templates, %d files" % (len(rows), len(have)))
+          if missing or extra or len(have) != 50:
+              sys.exit("templates: missing %s, not in index.tsv %s" % (missing, extra))
+          PY
           for t in clock_check examples_check register_check mistakes_check; do
             $B/$t $L res/templates > $t.log 2>&1 || { cat $t.log; exit 1; }
             echo "$t: $(grep -c '^PASS\|  ok ' $t.log) passed"
