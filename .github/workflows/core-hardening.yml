@@ -46,6 +46,9 @@ jobs:
       - name: Engine checks (core_check, clipboard format, short fuzz runs)
         run: ctest --test-dir build/headless --output-on-failure
 
+      - name: The same edits give the same circuit (40 sessions, 4 runs each)
+        run: mac/Tools/fuzz-determinism.sh build/headless/fuzz_edit
+
       - name: Fuzz edits (every invariant, 300 operations a seed)
         env:
           CL_FUZZ_DUMP: ${{ github.workspace }}/fuzz-logs/dump
