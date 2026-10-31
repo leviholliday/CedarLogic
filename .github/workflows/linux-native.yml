@@ -274,7 +274,7 @@ jobs:
           # A larger circuit (10 switches, a clock, TO labels): the truth table window
           # and the oscilloscope with signals in it, in both themes and Simulation View.
           # What each run said goes with the pictures.
-          for run in truth:--light scope:--light scope:--dark scope:--sim-view; do
+          for run in truth:--light scope:--light scope:--dark scope:--sim-view export:--dark; do
             show=${run%%:*}; flag=${run##*:}
             out="renders/show-$show-Lab5-${flag#--}"
             rc=0
