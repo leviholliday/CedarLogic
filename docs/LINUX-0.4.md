@@ -14,8 +14,8 @@ Everything they held is in the menus.
 
 | Menu | What's in it |
 |---|---|
-| **File** | New Circuit (Ctrl+N), New from Template…, Your Circuits… (Ctrl+O), Import a File… (Ctrl+I), Open Recent, Open the Practice Circuit · Save a Version (Ctrl+S), Rename…, Duplicate Circuit, Version History… · Export as Image… (Ctrl+E), Export Lab Report…, Export as CedarLogic File… (Ctrl+Shift+S), Export for Older CedarLogic, Share Link…, Save as Template… · Print… (Ctrl+P) · Close Window (Ctrl+Shift+W), Quit (Ctrl+Q) |
-| **Edit** | Undo, Redo · Cut, Copy, Paste, Duplicate, Delete, Select All · Add a Gate… (A), Rotate (R), Lock in Place (Ctrl+L), Unlock All Parts, Gate Settings… · Find ▸ (Find…, Find Next, Find Previous) · Save as Part…, Build from Formula…, Straighten Wires (S), Tidy Up: Keep My Layout, Tidy Up: Full Rearrange, Connect Nearby Pins · **Settings… (Ctrl+,)** |
+| **File** | New Circuit (Ctrl+N), New from Template…, Your Circuits… (Ctrl+O), Import a File… (Ctrl+I), Open Recent, Open the Practice Circuit · Save a Version (Ctrl+S), Rename…, Duplicate Circuit, Version History… · Export as Image… (Ctrl+E), Export Lab Report…, Export as CedarLogic File… (Ctrl+Shift+S), Export for Older CedarLogic, Share Link…, Save as Template… · Print… (Ctrl+P) · **Settings… (Ctrl+,)** · Close Window (Ctrl+Shift+W), Quit (Ctrl+Q) |
+| **Edit** | Undo, Redo · Cut, Copy, Paste, Duplicate, Delete, Select All · Add a Gate… (A), Rotate (R), Lock in Place (Ctrl+L), Unlock All Parts, Gate Settings… · Find ▸ (Find…, Find Next, Find Previous) · Save as Part…, Build from Formula…, Straighten Wires (S), Tidy Up: Keep My Layout, Tidy Up: Full Rearrange, Connect Nearby Pins |
 | **View** | Zoom In, Zoom Out, Zoom to Fit, Actual Size · Focus Mode (Ctrl+.), Full Screen (F11), Side Panel, Status Bar, Gridlines, Wire Connection Dots, Dark Mode (Ctrl+Shift+D) · Simulation View, Projector Mode, Oscilloscope · Draw on the Circuit, Drawing ▸, Show Drawing, Show Notes |
 | **Simulation** | Simulation View (Ctrl+R), Running, Step Once, Step Clock (K) · Predict, Then Reveal, Reveal · Truth Table… (T), Check My Circuit… (Shift+T), Oscilloscope · Lock the Circuit |
 | **Window** | New Tab (Ctrl+T), Close Tab (Ctrl+W), Reopen Closed Tab, Rename Tab…, Next Tab, Previous Tab · Split View, Switch Side, Close Split View · Connect All Pages, Disconnect All Pages · Minimize · the open circuits, to bring one to the front |
@@ -24,13 +24,11 @@ Everything they held is in the menus.
 The menus and their order follow the Mac app (File, Edit, View, Simulation,
 Window, Help). The Mac's own CedarLogic menu has no Linux equivalent, so its
 items moved to where Linux programs keep them: Quit in File, About and Check
-for Updates in Help, and Settings in Edit.
+for Updates in Help, and Settings in File.
 
-**Why Settings is Edit > Settings…:** that's where most Linux programs with a
-menu bar keep it (Firefox and Thunderbird call it Edit > Settings; Inkscape
-and GIMP call it Edit > Preferences). The app already calls the window
-"Settings", as the Mac app does, so the menu uses that name too. Ctrl+,
-opens it, as before.
+**Why Settings is File > Settings…:** the owner asked for it there, next to
+the other app-wide commands (Print, Quit). The app already calls the window "Settings", as the
+Mac app does, so the menu uses that name too. Ctrl+, opens it, as before.
 
 How it works:
 

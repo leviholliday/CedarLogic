@@ -513,10 +513,9 @@ std::string samplesDir() { return resourcesDir() + "/samples"; }
 
 // The menu bar every window shows under its title bar: File, Edit, View,
 // Simulation, Window and Help, the Mac app's menus in its order, with the
-// desktop's habits (mnemonics, Quit in File, Settings at the foot of Edit as
-// Firefox and Inkscape keep it, About in Help). Keys show at the right of
-// each item: a command's own come from the app (and follow Settings >
-// Shortcuts by themselves); the canvas's single keys (A, R, S, T...) are
+// desktop's habits (mnemonics, Settings and Quit in File, About in Help).
+// Keys show at the right of each item: a command's own come from the app
+// (and follow Settings > Shortcuts by themselves); the canvas's single keys (A, R, S, T...) are
 // written on their items here (an "accel" attribute, shown but never bound:
 // the model isn't the application's menubar, so GTK doesn't take them as
 // shortcuts) and follow Settings too (refreshMenuKeys).
@@ -569,6 +568,8 @@ GMenuModel* buildMenubar() {
 	s = section(file);
 	add(s, "P_rint…", "win.print");
 	s = section(file);
+	add(s, "Settin_gs…", "win.preferences");
+	s = section(file);
 	add(s, "_Close Window", "win.close");
 	add(s, "_Quit", "app.quit");
 
@@ -601,8 +602,6 @@ GMenuModel* buildMenubar() {
 	add(s, "Tidy Up: _Keep My Layout", "win.tidy");
 	add(s, "Tidy Up: _Full Rearrange", "win.tidy-flow");
 	add(s, "Connect _Nearby Pins", "win.connect-nearby");
-	s = section(edit);
-	add(s, "S_ettings…", "win.preferences");
 
 	GMenu* view = submenu(bar, "_View");
 	s = section(view);

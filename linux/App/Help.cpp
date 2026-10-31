@@ -208,7 +208,7 @@ const std::vector<Page>& pages() {
 		      "panel's list (**My Parts**) to drag or click in, and in **Add a Gate (A)** under its name. It drops in as a copy of those "
 		      "gates and wires, so any CedarLogic can open the circuit.") },
 		  false },
-		{ "settings", "Settings", "preferences-system-symbolic", "Make it yours (Ctrl+,), from Edit \u25B8 Settings.",
+		{ "settings", "Settings", "preferences-system-symbolic", "Make it yours (Ctrl+,), from File \u25B8 Settings.",
 		  { p("Your name (for exports and the Lab Page), the theme and accent colour, the grid, wires, the side panel, what the wheel "
 		      "and touchpad do, right-click, duplicating, Tidy Up, and whether Ctrl+Q asks first."),
 		    p("**Ctrl+Shift+D** switches between light and dark any time.") },
