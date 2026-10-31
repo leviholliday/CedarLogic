@@ -131,7 +131,11 @@ struct Sim {
 
 	~Sim() { if (doc) cl_document_close(doc); }
 
+	// No document after a powerOn() that was cancelled (or failed): a few callers
+	// read the lights after an unchecked powerOn() for a "can't check" result, which
+	// nobody reads once cancelled, so everything here is a no-op without one.
 	guiGate* gate(long id) {
+		if (!doc) return nullptr;
 		for (size_t p = 0; p < doc->pages.size(); p++) {
 			auto* gl = doc->page((int)p)->getGateList();
 			auto it = gl->find((unsigned long)id);
@@ -140,6 +144,7 @@ struct Sim {
 		return nullptr;
 	}
 	void send(long id, const std::string& name, const std::string& value) {
+		if (!doc) return;
 		doc->circuit.sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM,
 			new klsMessage::Message_SET_GATE_PARAM(id, name, value)));
 	}
@@ -150,7 +155,7 @@ struct Sim {
 		send(id, name, value);
 	}
 	// A cancelled check stops as though it never settled; nobody reads it.
-	bool settle() { if (cancelled() || !doc->sim->settle(1000)) settled = false; return settled; }
+	bool settle() { if (cancelled() || !doc || !doc->sim->settle(1000)) settled = false; return settled; }
 	bool powerOn() {
 		if (doc) cl_document_close(doc);
 		doc = nullptr;
