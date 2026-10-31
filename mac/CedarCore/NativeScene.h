@@ -1,15 +1,18 @@
 // NativeScene -- the platform's render Scene and the device-pixel setup every
 // drawing call shares: Core Graphics on the Mac (CGScene), Cairo on Linux
 // (linux/CedarCore/CairoScene), Direct2D on Windows (windows/CedarCore/
-// D2DScene). The drawing code in this directory names only these, so the same
-// engine draws for every front end.
+// D2DScene), or nothing at all in a headless build (CL_HEADLESS, NullScene: the
+// tests and fuzzers). The drawing code in this directory names only these, so
+// the same engine draws for every front end.
 
 #ifndef CL_NATIVE_SCENE_H
 #define CL_NATIVE_SCENE_H
 
 #include "CedarCore.h"
 
-#if defined(__APPLE__)
+#if defined(CL_HEADLESS)
+#include "NullScene.h"
+#elif defined(__APPLE__)
 #include "CGScene.h"
 #elif defined(_WIN32)
 #include "D2DScene.h"
@@ -20,7 +23,9 @@
 namespace cl {
 namespace native {
 
-#if defined(__APPLE__)
+#if defined(CL_HEADLESS)
+using PlatformScene = headless::NullScene;
+#elif defined(__APPLE__)
 using PlatformScene = mac::CGScene;
 #elif defined(_WIN32)
 using PlatformScene = d2d::D2DScene;
@@ -33,7 +38,9 @@ using PlatformScene = cairo::CairoScene;
 struct DevicePixels {
 	CLContext ctx;
 	DevicePixels(CLContext ctx, double backingScale) : ctx(ctx) {
-#if defined(__APPLE__)
+#if defined(CL_HEADLESS)
+		(void)backingScale;
+#elif defined(__APPLE__)
 		CGContextSaveGState(ctx);
 		CGContextScaleCTM(ctx, 1.0 / backingScale, 1.0 / backingScale);
 #elif defined(_WIN32)
@@ -44,7 +51,8 @@ struct DevicePixels {
 #endif
 	}
 	~DevicePixels() {
-#if defined(__APPLE__)
+#if defined(CL_HEADLESS)
+#elif defined(__APPLE__)
 		CGContextRestoreGState(ctx);
 #elif defined(_WIN32)
 		d2d::restoreTransform(ctx, saved);

@@ -10,6 +10,9 @@ Windows or Linux builds.
     mac/package.sh            # build, then mac/build/CedarLogic-<version>-Mac.dmg
 
 Needs only the Xcode Command Line Tools (Swift 6), macOS 14 or later.
+`build.sh` downloads its pinned Sparkle once (checked against the SHA-256 it
+names) and signs the app ad hoc with the hardened runtime (`sign-app.sh`,
+entitlements in `App/CedarLogic.entitlements`).
 
 - `CedarCore/` -- the engine for the app: a Core Graphics backend for the
   render Scene (`CGScene`), the document loader (`Document.cpp`) and the plain C
@@ -159,7 +162,8 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   sanitizers, `CL_SYNC_URL=<mock server>` to run the scenarios over HTTP
   too, `GATES=1` (after `build.sh`) to check the gate library's defaults
 - `sync-check.sh` -- the app's own sync hooks (`App/SyncHooks.swift`:
-  CryptoKit, Compression, URLSession, the 0600 secret file, flock) through
+  CryptoKit, Compression, URLSession, the secret in the Keychain or a 0600
+  file, flock) through
   the engine's self-test, then, with the website's mock server
   (`CL_SITE=<cedarlogic-site>` or found beside this checkout), the same over
   HTTP and two real engines linking two libraries through it. The app

@@ -186,7 +186,7 @@ of 300 after 15 minutes (unfinished, not failed).
 
 ## Next
 
-- Decide: repair the drift in place (find the reroute step after a part drag that skips
-  a wire) or replace the model.
-- Run longer sessions (2000 operations) and the other fixtures as start documents:
-  `fuzz-check.sh <seed> <count> <ops> format/tests/fixtures/Lab5.cdl`.
+Done in the core hardening round (2026-10-28): see `docs/CORE-HARDENING.md`
+for the decision on the wire model (repaired in place, with the pins as the
+truth and a redraw from them as the safety net), the file fuzzer, the
+self-check `CL_FUZZ_CHECK`, the longer runs and what is left.

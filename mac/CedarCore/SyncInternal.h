@@ -36,6 +36,10 @@ extern const char* const kAppBase;               // cedarlogic://sync
 
 // ---- Bytes and text (SyncProtocol.cpp) ----------------------------------------------
 
+// Zeroes a secret that is done with. A plain memset of a buffer that is never read again is a
+// dead store the compiler may drop; this one it can't.
+void secureWipe(void* p, size_t n);
+
 std::string hex(const uint8_t* p, size_t n);
 inline std::string hex(const Bytes& b) { return hex(b.data(), b.size()); }
 inline std::string hexOf(const std::string& s) { return hex((const uint8_t*)s.data(), s.size()); }

@@ -157,6 +157,7 @@ void GUICircuit::deleteGate(unsigned long gid, bool waitToUpdate) {
 }
 
 guiWire* GUICircuit::createWire(const std::vector<IDType> &wireIds) {
+	if (wireIds.empty()) return nullptr;   // a wire is named by its ids; none, no wire
 	if (guiWire *existing = getWire(wireIds[0])) return existing;
 
 	auto wire = std::make_unique<guiWire>();
@@ -201,6 +202,7 @@ std::unique_ptr<guiGate> GUICircuit::releaseGate(unsigned long gid) {
 guiWire* GUICircuit::setWireConnection(const vector<IDType> &wireIds, long gid, string connection, bool openMode) {
 	if (getGate(gid) == nullptr) return NULL; // error: gate not found
 	guiWire *wire = createWire(wireIds); // do we need to init the wire first? if not then no effect.
+	if (wire == nullptr) return NULL; // error: no wire ids
 	wire->addConnection(getGate(gid), connection, openMode);
 	getGate(gid)->addConnection(connection, wire);
 	return wire;

@@ -180,10 +180,15 @@ find_package(OpenGL REQUIRED)
 # macOS: Download and setup Sparkle framework for auto-updates
 if(APPLE)
     include(FetchContent)
-    set(SPARKLE_VERSION "2.6.4")
+    # 2.9.6: the newest that still runs on macOS 11, this app's minimum (2.10
+    # needs 12); it has the fixes for CVE-2025-10015/10016 (2.7.2) and later
+    # local-attack hardening. The hash is Sparkle's published SHA-256. The
+    # native Mac app pins its own copy in mac/build.sh.
+    set(SPARKLE_VERSION "2.9.6")
     FetchContent_Declare(
         Sparkle
         URL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+        URL_HASH SHA256=52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(Sparkle)

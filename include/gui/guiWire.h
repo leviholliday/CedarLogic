@@ -140,6 +140,17 @@ public:
 	// Throw away any hand-edited shape and route the wire fresh from its
 	// current pins, as when it was first connected.
 	void straightenRoute() { setVerticalBar = true; calcShape(); }
+	// Whether a shape can be trusted as it stands: each pin the wire holds is
+	// recorded once, on a segment that reaches it, and no other pin is; each
+	// segment runs along its own direction; each crossing names a segment of
+	// the shape; and the segments touch as one piece. A shape from a file or a
+	// paste that fails this is thrown away and the wire routed fresh from its
+	// pins (straightenRoute): the pins are the truth, the shape only a drawing.
+	bool isSoundShape(const map < long, wireSegment > &shape, std::string *why = nullptr);
+	bool isSoundShape(std::string *why = nullptr) { return isSoundShape(segMap, why); }
+	// A wire's segments are numbered from 0 as it is drawn. An id past this
+	// (damaged text) is renumbered on load, and a fresh route starts again.
+	static const long MAX_SEGMENT_ID = 1000000;
 	// Route fresh with the trunk (the long middle run) at `pos` instead of
 	// halfway -- to move it off another wire.
 	void routeWithTrunkAt(float pos) { setVerticalBar = false; trunkHint = pos; calcShape(); }
@@ -197,6 +208,14 @@ private:
 	// Before a segment of no length is removed: the runs it joined at its
 	// point record a crossing with each other.
 	static void bridgeAround(map < long, wireSegment > &segs, const wireSegment &dot);
+	// Each crossing recorded once, keyed where the run it crosses lies.
+	static void canonicalCrossings(map < long, wireSegment > &segs);
+	// The parts of isSoundShape: what is wrong with the segments one by one,
+	// with the pins they record, and with how they lie together; nullptr for
+	// nothing.
+	static const char *segmentFlaw(const map < long, wireSegment > &shape);
+	const char *pinFlaw(const map < long, wireSegment > &shape);
+	static const char *layoutFlaw(const map < long, wireSegment > &shape);
 
 	// Take existing segments and merge concurrent segments
 	void mergeSegments();

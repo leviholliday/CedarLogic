@@ -81,6 +81,10 @@ bool cmdSetParams::Do() {
 		if (lg.dlgParams[i].isGui) continue;
 		if (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") dontSendMessages.push_back(lg.dlgParams[i].name);
 	}
+	// Whatever the library lists: a pasted line can name them for any gate
+	// (see CircuitParse::parseGateToSend).
+	dontSendMessages.push_back("READ_FILE");
+	dontSendMessages.push_back("WRITE_FILE");
 	while (paramWalk != newLogicParamList.end()) {
 		gate->setLogicParam(paramWalk->first, paramWalk->second);
 		bool found = false;
@@ -114,6 +118,10 @@ bool cmdSetParams::Undo() {
 		if (lg.dlgParams[i].isGui) continue;
 		if (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") dontSendMessages.push_back(lg.dlgParams[i].name);
 	}
+	// Whatever the library lists: a pasted line can name them for any gate
+	// (see CircuitParse::parseGateToSend).
+	dontSendMessages.push_back("READ_FILE");
+	dontSendMessages.push_back("WRITE_FILE");
 	while (paramWalk != oldLogicParamList.end()) {
 		gate->setLogicParam(paramWalk->first, paramWalk->second);
 		bool found = false;
@@ -141,7 +149,7 @@ string cmdSetParams::toString() const {
 void cmdSetParams::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 		TranslationMap &gateids, TranslationMap &wireids) {
 
-	gid = gateids[gid];
+	gid = translatedId(gateids, gid);
 	this->gCircuit = gCircuit;
 	this->gCanvas = gCanvas;
 }

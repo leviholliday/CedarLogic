@@ -12,6 +12,7 @@
 
 import CryptoKit
 import Foundation
+import Security
 
 @main
 enum ClassroomCheck {
@@ -30,7 +31,11 @@ enum ClassroomCheck {
 
     static func selfTest(tempDir: String, server: String?, live: String?) -> Bool {
         let base = URL(fileURLWithPath: tempDir)
-        let sync = SyncPlatform(syncDir: base.appendingPathComponent("sync-folder"))
+        // teaching.json goes into the Keychain under a service of this run's own (never the
+        // app's), deleted again at the end.
+        let keychainService = "com.leviholliday.cedarlogic.test.classroom-check.\(getpid())"
+        defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: keychainService] as CFDictionary) }
+        let sync = SyncPlatform(syncDir: base.appendingPathComponent("sync-folder"), keychainService: keychainService)
         let platform = ClassroomPlatform(dir: base.appendingPathComponent("Classroom"), sync: sync)
         var hooks = platform.hooks()
         var report: UnsafeMutablePointer<CChar>?
@@ -88,6 +93,23 @@ enum ClassroomCheck {
               !platform.saveFile("/tmp/x", "x"))
         platform.removeTree("cache/0123")
         check("removeTree removes a class's cache", !FileManager.default.fileExists(atPath: file.path))
+        // teaching.json (the class keys): in the Keychain, not the folder; one left in the folder
+        // from before moves into the Keychain when it's read; the folder is out of backups.
+        let teaching = platform.dir.appendingPathComponent("teaching.json")
+        let loadText = { (name: String) -> String? in
+            guard let p = platform.loadFile(name) else { return nil }
+            defer { free(p) }
+            return String(cString: p)
+        }
+        check("teaching.json is saved into the Keychain, not the folder",
+              platform.saveFile("teaching.json", "{\"v\":1}") && !FileManager.default.fileExists(atPath: teaching.path))
+        check("and loads back from it", loadText("teaching.json") == "{\"v\":1}")
+        FileManager.default.createFile(atPath: teaching.path, contents: Data("{\"v\":2}".utf8), attributes: [.posixPermissions: 0o600])
+        check("a teaching.json from before is read, moved into the Keychain and deleted",
+              loadText("teaching.json") == "{\"v\":2}" && !FileManager.default.fileExists(atPath: teaching.path)
+                  && loadText("teaching.json") == "{\"v\":2}")
+        let excluded = (try? platform.dir.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup
+        check("the Classroom folder is kept out of backups", excluded == true)
         // The lock: one holder at a time.
         let lockPath = platform.dir.appendingPathComponent("lock").path
         let other = ClassroomPlatform(dir: platform.dir, sync: sync)
