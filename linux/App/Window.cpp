@@ -450,6 +450,16 @@ void CircuitWindow::redrawStrips() {
 	for (TabStrip* t : strips) if (t) t->redraw();
 }
 
+void CircuitWindow::showSwitcherForScreenshot() {
+	for (int i = 0; i < 3 && tabCount() < 3; i++) runAction("win.new-tab");
+	if (switcher) switcher->key(false);
+}
+
+Canvas* CircuitWindow::canvasWithKey(uint64_t key) const {
+	for (Canvas* c : canvases) if (c->pageKey() == key) return c;
+	return nullptr;
+}
+
 int CircuitWindow::paneOf(const Canvas* c) const { return c && sideKeys.count(c->pageKey()) ? 1 : 0; }
 
 std::vector<int> CircuitWindow::panePages(int pane) const {

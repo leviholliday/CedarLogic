@@ -38,6 +38,12 @@ private:
 	GtkWidget* area = nullptr;
 	guint showTimer = 0;
 	std::vector<RectF> cards;
+	std::vector<cairo_surface_t*> thumbs;   // each tab's picture, made as it shows
+	bool composited = false, dark = false;
+	float margin = 0;                       // room for the shadow
+	// The pointer picks only once it moves (not as the panel opens under it).
+	bool hoverArmed = false;
+	double hoverX = -1e9, hoverY = 0;
 
 	void commit(int index);
 	void show();

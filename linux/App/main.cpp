@@ -178,6 +178,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "rename") top = toplevelTitled("Rename Circuit");
 	else if (what == "ram") top = toplevelNamed("cl-sheet-ram");
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
+	else if (what == "switcher") top = toplevelNamed("tab-switcher");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	if (what == "combo") top = settings::window();
 	if (what == "scope" && !circuitWindows().empty())
@@ -256,6 +257,7 @@ gboolean showCb(gpointer) {
 	else if (what == "dark-split") { w->toggleSplit(); }
 	else if (what == "scope") w->toggleScope();
 	else if (what == "about") w->showAbout();
+	else if (what == "switcher") w->showSwitcherForScreenshot();
 	else if (what == "rename") w->renameFile();
 	else if (what == "combo") {
 		// Settings' first dropdown, open.

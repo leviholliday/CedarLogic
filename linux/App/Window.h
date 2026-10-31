@@ -98,6 +98,10 @@ public:
 	std::vector<int> panePages(int pane) const;
 	int shownPage(int pane) const;
 	Canvas* paneCanvas(int pane) const;
+	// The canvas showing the page with this key (its camera), or null.
+	Canvas* canvasWithKey(uint64_t key) const;
+	// --show switcher: Ctrl+Tab's panel, held open (three tabs at least).
+	void showSwitcherForScreenshot();
 	// A click in a side: work there.
 	void activatePane(int pane);
 	void toggleSplit();
