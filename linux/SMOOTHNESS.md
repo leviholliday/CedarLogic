@@ -314,9 +314,26 @@ use the Pi or the Fedora laptop for verdicts.
    Left as it was: a running simulation that changes what's on screen
    calls `redraw()`, which makes the static layer and the image again.
    When that happens three frames running, the rest of the drag is drawn
-   whole. A clocked circuit like Lab5 may do that while it runs. That
-   hasn't been measured: the stepped rows run no simulation between
-   frames, and the live rows don't count layers.
+   whole. **Measured (2026-10-27, run 40523841149):** `--bench-drag` now
+   has "sim" rows that tick the simulation between moves (25 ms a step at
+   60 frames a second, as `CircuitWindow::tick` does) and count the layers
+   rebuilt. Lab5 and lab6 both have a running clock. On CI (x86_64,
+   "straight"), mean ms a frame, Lab5, stopped / running:
+
+   | | scale 1 | scale 2 |
+   |---|---|---|
+   | one gate | 0.40 / 0.84 | 1.38 / 2.34 |
+   | select all | 1.45 / 2.43 | 4.48 / 6.31 |
+
+   The static layer is made again on 16 of 60 frames at 25 ms a step (9 of
+   60 on lab6): the frames where a step changed a wire. Those frames cost
+   about what the page drawn whole does (select all at scale 2: p95 10.5 ms,
+   against 6.3 whole). At 1 ms a step something changes every frame, the
+   three-in-a-row rule turns the layer off after two builds, and the frames
+   are the whole-page ones (3.5 and 6.4 ms for select all). Live, one gate
+   on Lab5 tripped the rule at the start and drew the rest whole (2.4 ms);
+   the sticky rule matters for a big circuit, where whole is the expensive
+   draw. Nothing at scale 1 was over 8.4 ms.
 
 ## GTK 3 or GTK 4?
 
