@@ -87,6 +87,7 @@ struct Prefs {
 	// settings from before there was a choice stay beta (Prefs::loadFrom).
 	bool betaTester = false;
 	bool testingGroupNotice = false;   // made a beta tester that way: the updater says so once
+	std::string installedRelease;      // the versioned release the updater last installed, "<tag> <build>": never offered again
 	bool hasSeenWelcome = false;
 	bool firstLaunchPlayed = false;               // the launch screen's sound, once ever
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units
@@ -123,8 +124,9 @@ struct Prefs {
 	double wireScale() const;
 	void load();
 	void save() const;
-	// load() and save(), on any file and text (for --channel-check).
-	void loadFrom(const std::string& path);
+	// load() and save(), on any file and text (for --channel-check, which
+	// passes the install marker too; else it's read: installMarker()).
+	void loadFrom(const std::string& path, const std::string* marker = nullptr);
 	std::string text() const;
 	// Tell the engine about the wire settings.
 	void applyWireDots() const;
@@ -133,6 +135,12 @@ struct Prefs {
 	void noteRecent(const std::string& path);
 };
 Prefs& prefs();
+
+// What installed this copy said its testing group starts as: "beta" (the
+// test build) or "normal" (a release), from a file named install-channel in
+// the settings folder (%APPDATA%\CedarLogic) or beside the exe; "" when
+// there's neither. Only a first run reads it (Prefs::loadFrom).
+std::string installMarker();
 
 // Whether Windows is set to dark for apps.
 bool systemPrefersDark();

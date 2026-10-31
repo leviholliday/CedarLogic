@@ -69,6 +69,9 @@
 #ifndef CL_BUILD_TIME
 #define CL_BUILD_TIME 0
 #endif
+#ifndef CL_VERSION
+#define CL_VERSION "0"
+#endif
 
 namespace updater {
 
@@ -261,6 +264,7 @@ std::string releaseFileUrl(const Source& src, const Target& t, const std::string
 struct Asset {
 	std::string url;
 	updatesig::File file;
+	std::string installed;   // a versioned release's "<tag> <build>" (Prefs::installedRelease), else ""
 };
 
 // The release's manifest and signature through `get` (the release's
@@ -455,7 +459,9 @@ std::string normalAsset(const std::string& version) { return "CedarLogic-" + ver
 enum class Pick { Found, None, Unreadable };
 
 // The newest full release (not a draft, not a pre-release) with a versioned
-// tag and this CPU's zip, from GitHub's list of the Releases repo's releases.
+// tag, this CPU's zip and a signed list (SHA256SUMS and its .sig), from
+// GitHub's list of the Releases repo's releases: newest by version, not by
+// date. (The Linux app's rule, with its files.)
 Pick pickNormal(const std::string& json, Target& out) {
 	Json list;
 	if (!parseJson(json, list) || list.kind != Json::Array) return Pick::Unreadable;
@@ -470,10 +476,16 @@ Pick pickNormal(const std::string& json, Target& out) {
 		const std::string tag = r.str("tag_name");
 		if (!versionOf(tag, parts)) continue;
 		const std::string asset = normalAsset(tag.substr(1));
-		bool has = false;
+		bool has = false, manifest = false, signature = false;
 		if (const Json* assets = r.get("assets"))
-			for (const Json& a : assets->items) has = has || (a.kind == Json::Object && a.str("name") == asset);
-		if (!has) continue;
+			for (const Json& a : assets->items) {
+				if (a.kind != Json::Object) continue;
+				const std::string name = a.str("name");
+				has = has || name == asset;
+				manifest = manifest || name == updatesig::kManifestName;
+				signature = signature || name == updatesig::kSignatureName;
+			}
+		if (!has || !manifest || !signature) continue;
 		if (!found || compareVersions(parts, best) > 0) {
 			best = parts;
 			out = { kReleasesRepo, tag, tag.substr(1), asset };
@@ -493,11 +505,20 @@ struct Found {
 	updatesig::Decision decision;
 	Asset asset;              // Offer: what to download
 	std::string why;          // for the log
+	std::string key;          // what was found, for offering it once: the test build's commit, or "<tag> <build>"
+};
+
+// This copy, as the check sees it.
+struct Running {
+	std::string commit;      // CL_GIT_COMMIT
+	long long build = 0;     // CL_BUILD_TIME
+	std::string version;     // CL_VERSION
+	std::string installed;   // Prefs::installedRelease
 };
 
 // What there is for this testing group, checked: the code a real check and
 // --channel-check both run.
-Found lookFor(const Source& src, bool beta, const std::string& runningCommit, long long runningBuild) {
+Found lookFor(const Source& src, bool beta, const Running& me) {
 	Found f;
 	std::string body;
 	if (beta) f.target = betaTarget();
@@ -515,7 +536,7 @@ Found lookFor(const Source& src, bool beta, const std::string& runningCommit, lo
 			f.asked = true;
 			f.noRelease = true;
 			f.decision.result = updatesig::Result::UpToDate;
-			f.why = "no versioned release has a Windows zip for " + std::string(kArch) + " yet";
+			f.why = "no full release in " + std::string(kReleasesRepo) + " has a signed Windows zip for " + kArch + " yet";
 			return f;
 		}
 	}
@@ -533,10 +554,25 @@ Found lookFor(const Source& src, bool beta, const std::string& runningCommit, lo
 		out.clear();
 		return httpGet(releaseFileUrl(src, t, name), &out, "", 64 * 1024) && !out.empty();
 	};
-	f.decision = findVerified(get, src.key, t.tag, t.assetName, f.commit, runningCommit, runningBuild);
+	f.decision = findVerified(get, src.key, t.tag, t.assetName, f.commit, me.commit, me.build);
+	f.key = beta ? f.commit : t.tag + " " + std::to_string(f.decision.manifest.build);
+	if (f.decision.result == updatesig::Result::Offer && !beta) {
+		// Never back to an older version than this one (a beta tester's newer
+		// test build is refused by its build already), nor the release this
+		// updater installed.
+		std::vector<long> mine, theirs;
+		if (versionOf("v" + me.version, mine) && versionOf(t.tag, theirs) && compareVersions(theirs, mine) < 0) {
+			f.decision.result = updatesig::Result::UpToDate;
+			f.decision.why = t.tag + " is an older version than this one (" + me.version + "): not going back";
+		} else if (f.key == me.installed) {
+			f.decision.result = updatesig::Result::UpToDate;
+			f.decision.why = t.tag + " (build " + std::to_string(f.decision.manifest.build) + ") is the release installed";
+		}
+	}
 	if (f.decision.result == updatesig::Result::Offer) {
 		f.asset.url = releaseFileUrl(src, t, f.decision.file.name);
 		f.asset.file = f.decision.file;
+		if (!beta) f.asset.installed = f.key;
 	}
 	f.why = t.tag + ": " + f.decision.why;
 	return f;
@@ -547,6 +583,7 @@ struct Check {
 	std::atomic<bool> done{ false };
 	bool interactive = false;
 	bool beta = false;   // the testing group it looked for
+	Running running;     // (filled on the main thread: the worker doesn't touch prefs)
 	HWND parent = nullptr;
 	Found found;
 };
@@ -556,7 +593,7 @@ std::string g_offered;   // a background check offers each build once
 std::string g_status;    // how the last check went, for Settings
 
 void runCheck(Check* c) {
-	c->found = lookFor(Source(), c->beta, CL_GIT_COMMIT, (long long)CL_BUILD_TIME);
+	c->found = lookFor(Source(), c->beta, c->running);
 	logUpdate(std::string(c->beta ? "beta: " : "normal: ") + c->found.why);
 	c->done.store(true);
 }
@@ -786,6 +823,11 @@ void install(HWND parent, const Asset& asset) {
 	}
 	removeTree(resOld);
 	removeTree(work);
+	// A versioned release, once installed: never offered again.
+	if (!asset.installed.empty()) {
+		prefs().installedRelease = asset.installed;
+		prefs().save();
+	}
 	if (askConfirm(parent, "The update is installed", "Restart CedarLogic now to use it? Your circuits are saved.", "Restart Now", "Later")) {
 		// Asked from Settings' Check Now: Settings closes first (its loop
 		// ends before the restart's turn comes).
@@ -887,9 +929,8 @@ void finish(HWND parent) {
 			                 : "There's a newer version, but it hasn't been signed yet, so CedarLogic won't install it. Try again later.");
 		return;
 	}
-	const std::string offer = found.target.tag + " " + found.commit;
-	if (!interactive && g_offered == offer) return;
-	g_offered = offer;
+	if (!interactive && g_offered == found.key) return;
+	g_offered = found.key;
 	const std::string text =
 	    beta ? strf("Build %s is out (you have %s). Download and install it now?", shortCommit(found.commit).c_str(),
 	                shortCommit(CL_GIT_COMMIT).c_str())
@@ -925,6 +966,7 @@ void begin(HWND parent, bool interactive) {
 	g_check->interactive = interactive;
 	g_check->parent = parent;
 	g_check->beta = prefs().betaTester;   // (read here: the worker doesn't touch prefs)
+	g_check->running = { CL_GIT_COMMIT, (long long)CL_BUILD_TIME, CL_VERSION, prefs().installedRelease };
 	Check* c = g_check.get();
 	c->worker = std::thread([c] { runCheck(c); });
 	SetTimer(nullptr, 0, 200, pollTimer);
@@ -1124,14 +1166,18 @@ bool runChannelCheck(std::string& report, const std::string& server, const std::
 	Source src;
 	src.api = src.web = server;
 	src.key = fx.publicKey;
-	const std::string running = std::string(40, '1');   // never a release's commit
+	// This copy: never on a release's commit, version 0.4.0 (CL_VERSION's
+	// form), at `build`.
+	auto me = [](long long build, const std::string& version = "0.4.0", const std::string& installed = "") {
+		return Running{ std::string(40, '1'), build, version, installed };
+	};
 	const char* names[] = { "Offer", "UpToDate", "NotVerified" };
 	auto resultName = [&](const Found& f) { return std::string(names[(int)f.decision.result]) + " (" + f.why + ")"; };
 
 	// One case: what the check found, and for an offer, the file downloaded
 	// and checked as an install would.
-	auto check = [&](const std::string& name, bool beta, long long build, updatesig::Result want, const std::string& wantTag) {
-		const Found f = lookFor(src, beta, running, build);
+	auto check = [&](const std::string& name, bool beta, const Running& running, updatesig::Result want, const std::string& wantTag) {
+		const Found f = lookFor(src, beta, running);
 		bool ok = f.asked && !f.noRelease && f.decision.result == want && (wantTag.empty() || f.target.tag == wantTag);
 		std::string detail = resultName(f) + ", from " + f.target.tag;
 		if (ok && want == updatesig::Result::Offer) {
@@ -1166,7 +1212,7 @@ bool runChannelCheck(std::string& report, const std::string& server, const std::
 	report += "Normal testers, before there's a Windows release\n";
 	fx.write(releases);
 	{
-		const Found f = lookFor(src, false, running, 2000);
+		const Found f = lookFor(src, false, me(2000));
 		expect(f.asked && f.noRelease && f.decision.result == updatesig::Result::UpToDate, "no Windows release yet: nothing offered, and says so",
 		       resultName(f));
 	}
@@ -1184,20 +1230,28 @@ bool runChannelCheck(std::string& report, const std::string& server, const std::
 	                              normalRelease("v0.4", 2200) })
 		releases.push_back(r);
 	fx.write(releases);
-	check("normal: the newest full release with Windows files (v0.4.10), not the pre-releases, the draft or a Mac-only one", false, 2000,
+	check("normal: the newest full release with Windows files (v0.4.10), not the pre-releases, the draft or a Mac-only one", false, me(2000),
 	      updatesig::Result::Offer, "v0.4.10");
-	check("beta: the test build, a pre-release", true, 2000, updatesig::Result::Offer, kTag);
-	check("normal: the release this copy is (same build): up to date", false, 2600, updatesig::Result::UpToDate, "v0.4.10");
-	check("beta: the test build this copy is: up to date", true, 3100, updatesig::Result::UpToDate, kTag);
+	check("beta: the test build, a pre-release", true, me(2000), updatesig::Result::Offer, kTag);
+	check("normal: the release this copy is (same build): up to date", false, me(2600), updatesig::Result::UpToDate, "v0.4.10");
+	check("beta: the test build this copy is: up to date", true, me(3100), updatesig::Result::UpToDate, kTag);
 
 	report += "Switching from beta to normal doesn't go back\n";
 	{
-		const Found f = check("normal, on the test build (newer than v0.4.10): stays", false, 3100, updatesig::Result::UpToDate, "v0.4.10");
+		const Found f = check("normal, on the test build (newer than v0.4.10): stays", false, me(3100), updatesig::Result::UpToDate, "v0.4.10");
 		expect(f.decision.manifest.build == 2600, "it saw v0.4.10's build and kept this one", resultName(f));
 	}
 	releases.push_back(normalRelease("v0.5.0", 3200));
 	fx.write(releases);
-	check("normal, on the test build: takes v0.5.0 once it's newer", false, 3100, updatesig::Result::Offer, "v0.5.0");
+	check("normal, on the test build: takes v0.5.0 once it's newer", false, me(3100), updatesig::Result::Offer, "v0.5.0");
+	{
+		const Found f = lookFor(src, false, me(3100));
+		expect(f.asset.installed == "v0.5.0 3200", "what an install of it remembers is \"v0.5.0 3200\"", f.asset.installed);
+	}
+	check("normal: never an older version than this one (0.5.1)", false, me(1000, "0.5.1"), updatesig::Result::UpToDate, "v0.5.0");
+	check("normal: never the release this updater installed", false, me(1000, "0.4.0", "v0.5.0 3200"), updatesig::Result::UpToDate, "v0.5.0");
+	check("normal: a re-signed release with a newer build isn't the one installed", false, me(1000, "0.4.0", "v0.5.0 3000"),
+	      updatesig::Result::Offer, "v0.5.0");
 
 	report += "Bad signatures are refused\n";
 	auto withNewest = [&](FakeRelease r) {
@@ -1208,26 +1262,27 @@ bool runChannelCheck(std::string& report, const std::string& server, const std::
 	FakeRelease bad = normalRelease("v0.5.1", 4000);
 	bad.signing = FakeRelease::OtherKey;
 	withNewest(bad);
-	check("normal: signed with another key", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	check("normal: signed with another key", false, me(3100), updatesig::Result::NotVerified, "v0.5.1");
 	bad.signing = FakeRelease::Edited;
 	withNewest(bad);
-	check("normal: the manifest changed after signing", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	check("normal: the manifest changed after signing", false, me(3100), updatesig::Result::NotVerified, "v0.5.1");
 	bad.signing = FakeRelease::OtherTag;
 	withNewest(bad);
-	check("normal: another release's signed manifest", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	check("normal: another release's signed manifest", false, me(3100), updatesig::Result::NotVerified, "v0.5.1");
 	withNewest(normalRelease("v0.5.1", 0));
-	check("normal: not signed yet", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	check("normal: a newer release not signed yet is passed over (v0.5.0 is the newest signed)", false, me(3100), updatesig::Result::Offer,
+	      "v0.5.0");
 	{
 		std::vector<FakeRelease> v = today;
 		FakeRelease t = testRelease(4000);
 		t.signing = FakeRelease::OtherKey;
 		v.push_back(t);
 		fx.write(v);
-		check("beta: signed with another key", true, 3100, updatesig::Result::NotVerified, kTag);
+		check("beta: signed with another key", true, me(3100), updatesig::Result::NotVerified, kTag);
 	}
 	{
 		fx.write(releases);
-		const Found f = lookFor(src, false, running, 3100);
+		const Found f = lookFor(src, false, me(3100));
 		const Target t = f.target;
 		fx.put(t.repo + "/releases/download/" + t.tag + "/" + t.assetName, "not the signed file\n");
 		const std::string file = fx.root + "\\download.zip";
@@ -1239,22 +1294,22 @@ bool runChannelCheck(std::string& report, const std::string& server, const std::
 
 	report += "When GitHub can't be read\n";
 	fx.write(releases, "<html>rate limited</html>");
-	expect(!lookFor(src, false, running, 2000).asked, "a list that isn't JSON: no answer (not \"up to date\")");
+	expect(!lookFor(src, false, me(2000)).asked, "a list that isn't JSON: no answer (not \"up to date\")");
 	{
 		Source nowhere = src;
 		nowhere.api = nowhere.web = "http://127.0.0.1:9";
-		expect(!lookFor(nowhere, false, running, 2000).asked && !lookFor(nowhere, true, running, 2000).asked, "no server: no answer");
+		expect(!lookFor(nowhere, false, me(2000)).asked && !lookFor(nowhere, true, me(2000)).asked, "no server: no answer");
 	}
 
 	report += "The testing group for each kind of install\n";
 	{
 		const std::string dir = fx.root + "\\prefs";
 		makeDirs(dir);
-		auto loaded = [&](const std::string& name, const std::string* text) {
+		auto loaded = [&](const std::string& name, const std::string* text, const std::string& marker = std::string()) {
 			const std::string path = dir + "\\" + name + ".ini";
 			if (text) writeWhole(path, *text);
 			Prefs p;
-			p.loadFrom(path);
+			p.loadFrom(path, &marker);
 			return p;
 		};
 		const Prefs fresh = loaded("none", nullptr);
@@ -1275,6 +1330,20 @@ bool runChannelCheck(std::string& report, const std::string& server, const std::
 		const std::string chose = old + "testingGroup=normal\ntestingGroupNotice=true\n";
 		const Prefs normal = loaded("chose-normal", &chose);
 		expect(!normal.betaTester && !normal.testingGroupNotice, "chose Normal tester: stays normal");
+		// What installed it said (install-channel), before the guesses.
+		expect(loaded("marker-new-beta", nullptr, "beta").betaTester, "a new install marked beta (the test build's installer): beta");
+		const Prefs markedNormal = loaded("marker-old-normal", &old, "normal");
+		expect(!markedNormal.betaTester && !markedNormal.testingGroupNotice,
+		       "settings from a test build, then a release installed over it (marked normal): normal");
+		const Prefs markedBeta = loaded("marker-old-beta", &old, "beta");
+		expect(markedBeta.betaTester && !markedBeta.testingGroupNotice, "marked beta: beta, nothing to say");
+		expect(!loaded("marker-chosen", &chose, "beta").betaTester, "a group chosen in Settings beats the marker");
+		expect(!loaded("marker-junk", nullptr, "nightly").betaTester, "a marker that isn't beta or normal: ignored");
+		std::string inst = fresh.text();
+		Prefs withRelease = fresh;
+		withRelease.installedRelease = "v0.5.0 3200";
+		inst = withRelease.text();
+		expect(loaded("installed", &inst).installedRelease == "v0.5.0 3200", "the release installed is kept");
 	}
 
 	removeTree(W(fx.root));

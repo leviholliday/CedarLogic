@@ -211,7 +211,16 @@ std::string manyLines(std::string text) {
 
 void Prefs::load() { loadFrom(prefsPath()); }
 
-void Prefs::loadFrom(const std::string& path) {
+std::string installMarker() {
+	for (const std::string& dir : { settingsDir(), exeDir() }) {
+		std::ifstream in(W(dir + "\\install-channel").c_str(), std::ios::binary);
+		std::string word;
+		if (in >> word && (word == "beta" || word == "normal")) return word;
+	}
+	return "";
+}
+
+void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	Reader r{ readIni(path) };
 	themeMode = r.i("themeMode", themeMode, 0, 3);
 	dark = r.b("lastDark", dark);
@@ -273,13 +282,22 @@ void Prefs::loadFrom(const std::string& path) {
 	// getting the builds they had, and the updater says so once. No settings
 	// at all is a new install: a normal tester. (The build itself can't tell:
 	// a versioned release's Windows files are the test build's, renamed.)
+	// In order (as the Linux app's): a group chosen or decided before, as it
+	// is; else what installed this copy said (installMarker: install.ps1 or
+	// the installer); else settings from before the choice, beta; else (a
+	// new install) normal.
+	const std::string mark = r.has("testingGroup") ? std::string() : marker ? *marker : installMarker();
 	if (r.has("testingGroup")) {
 		betaTester = r.s("testingGroup", "") == "beta";
 		testingGroupNotice = betaTester && r.b("testingGroupNotice", false);
+	} else if (mark == "beta" || mark == "normal") {
+		betaTester = mark == "beta";
+		testingGroupNotice = false;
 	} else {
 		betaTester = !r.m.empty();
 		testingGroupNotice = betaTester;
 	}
+	installedRelease = r.s("installedRelease", "");
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
@@ -401,6 +419,7 @@ std::string Prefs::text() const {
 	o << "checkUpdates=" << b(checkUpdates) << "\n";
 	o << "testingGroup=" << (betaTester ? "beta" : "normal") << "\n";
 	o << "testingGroupNotice=" << b(testingGroupNotice) << "\n";
+	o << "installedRelease=" << installedRelease << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
