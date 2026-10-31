@@ -268,6 +268,16 @@ if [ -n "$SIZE" ] && [ "$(size_of "$FILE")" != "$SIZE" ]; then die "the download
 say "Checked against $( [ "$SIGNED" = 1 ] && echo "the release's signed list" || echo "GitHub's SHA-256 for it (this release has no signed list)")."
 if [ -n "${CEDARLOGIC_DRY_RUN:-}" ]; then say "Dry run: $NAME is downloaded and checked; not installed."; exit 0; fi
 
+# Which testing group this install starts in (Settings > General > Testing
+# group): "beta" from the test build, "normal" from a release. The app reads
+# it only on its first run, when no group has been chosen yet; a choice made
+# in Settings always wins. Never fatal.
+mark_channel() {
+	if [ "$TAG" = "$PREVIEW_TAG" ]; then group=beta; else group=normal; fi
+	{ mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/CedarLogic" &&
+		printf '%s\n' "$group" > "${XDG_CONFIG_HOME:-$HOME/.config}/CedarLogic/install-channel"; } 2>/dev/null || true
+}
+
 graphical() { [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ -z "${CEDARLOGIC_NO_LAUNCH:-}" ]; }
 start_detached() {   # program [env assignment]
 	if command -v setsid >/dev/null 2>&1; then setsid "$@" >/dev/null 2>&1 < /dev/null &
@@ -289,6 +299,7 @@ if [ "$FORMAT" = deb ]; then
 	$SUDO chmod 755 "$ROOTDIR"
 	$SUDO chmod 644 "$ROOTDIR/$NAME"
 	$SUDO apt-get install -y "$ROOTDIR/$NAME" || die "apt couldn't install it (see above). If it says it's a downgrade, a newer CedarLogic is already installed."
+	mark_channel
 	say "Done. CedarLogic is in your applications menu (under Education), and it keeps itself up to date."
 	if graphical && command -v cedarlogic >/dev/null 2>&1; then start_detached cedarlogic; fi
 	exit 0
@@ -303,6 +314,7 @@ mkdir -p "$DEST_DIR"
 cp "$FILE" "$DEST_DIR/.CedarLogic.AppImage.new"
 chmod 755 "$DEST_DIR/.CedarLogic.AppImage.new"
 mv -f "$DEST_DIR/.CedarLogic.AppImage.new" "$DEST"
+mark_channel
 say "Installed $DEST. It updates itself there."
 
 # AppImages need FUSE 2 to start quickly; without it they can still unpack
