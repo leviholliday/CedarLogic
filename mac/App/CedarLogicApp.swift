@@ -34,7 +34,8 @@ struct CedarLogicApp: App {
             UndoCheck.runIfAsked()
             LeakCheck.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
-            DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
+            // Recently Deleted: circuits deleted over 30 days ago go for good.
+            DispatchQueue.global(qos: .utility).async { Library.removeRepeats(); RecentlyDeleted.sweep() }
         }
     }
 
@@ -353,6 +354,7 @@ struct NewOpenCommands: Commands {
         CommandGroup(after: .newItem) {
             Button("Your Circuits…") { openWindow(id: "library") }
             Button("New from Template…") { openWindow(id: "templates") }
+            Button("Open the Practice Circuit") { Templates.openPractice() }
             Button("Save as Template…") { if let canvas { Templates.saveCurrent(from: canvas) } }
                 .disabled(canvas == nil)
             if ClassroomFlag.on {
@@ -791,6 +793,7 @@ struct HelpCommands: Commands {
             Button("Welcome to CedarLogic…") { openWindow(id: "welcome") }
             Button("Set Up CedarLogic…") { WelcomeRequest.setup(); openWindow(id: "welcome") }
             Button("Guided Tour") { TourModel.shared.start() }
+            Button("Open the Practice Circuit") { Templates.openPractice() }
         }
     }
 }
