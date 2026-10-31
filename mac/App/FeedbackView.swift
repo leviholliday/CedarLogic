@@ -95,7 +95,17 @@ struct FeedbackView: View {
                         .font(.system(size: 15, weight: .medium))
                         .padding(.horizontal, 12).frame(height: 38)
                         .background(field)
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(model.summaryNeeded ? FeedbackPriority.high.color.opacity(0.8) : .clear, lineWidth: 1.5))
                         .focused($titleFocused)
+                    if model.titleBlank && (model.summaryNeeded || !model.details.isEmpty || !model.attachments.isEmpty) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "pencil").font(.system(size: 10.5, weight: .semibold))
+                            Text("Add a short summary to send it. A few words is plenty.").font(.system(size: 11.5))
+                        }
+                        .foregroundStyle(model.summaryNeeded ? FeedbackPriority.high.color : dim)
+                        .transition(.opacity)
+                    }
                     ZStack(alignment: .topLeading) {
                         if model.details.isEmpty {
                             Text("What happened, what you expected, and how to make it happen again (if you know).")
@@ -327,21 +337,81 @@ struct FeedbackView: View {
                     Button {
                         model.send()
                     } label: {
-                        Text(model.phase == .writing || model.phase == .sent ? "Send Feedback" : "Try Again")
+                        Text(sendLabel)
                             .font(.system(size: 13, weight: .semibold)).padding(.horizontal, 6)
                     }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canSend)
+                    .help(model.titleBlank ? "Add a short summary first" : "")
                 }
             }
             .padding(.horizontal, 22).frame(height: 58)
-            if case .failed(let why) = model.phase {
-                Text(why).font(.system(size: 11.5)).foregroundStyle(Color(.sRGB, red: 0.92, green: 0.3, blue: 0.27))
+            switch model.phase {
+            case .failed(let why):
+                Text(why).font(.system(size: 11.5)).foregroundStyle(red)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 22).padding(.bottom, 12)
+            case .capped(let why, let canMore):
+                capped(why, canMore).padding(.horizontal, 22).padding(.bottom, 14)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            default:
+                if let note = model.notice {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 11))
+                        Text(note).font(.system(size: 11.5, weight: .medium))
+                    }
+                    .foregroundStyle(Brand.neonDeep)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 22).padding(.bottom, 12)
+                }
             }
         }
         .background(paper)
+        .animation(.easeOut(duration: 0.2), value: model.phase)
+    }
+
+    private var sendLabel: String {
+        switch model.phase {
+        case .failed, .capped(_, canRequestMore: false): "Try Again"
+        default: "Send Feedback"
+        }
+    }
+
+    private var red: Color { Color(.sRGB, red: 0.92, green: 0.3, blue: 0.27) }
+
+    /// Ten reports in a day already: what the server said, and (once a day)
+    /// a way to ask for more, with a line saying why if they like.
+    private func capped(_ why: String, _ canMore: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Image(systemName: "hourglass").font(.system(size: 12)).foregroundStyle(FeedbackPriority.high.color)
+                Text(why).font(.system(size: 12.5)).foregroundStyle(ink).fixedSize(horizontal: false, vertical: true)
+            }
+            if canMore {
+                HStack(spacing: 8) {
+                    TextField("What's it about? (optional)", text: $model.moreReason)
+                        .textFieldStyle(.plain).font(.system(size: 12.5))
+                        .padding(.horizontal, 10).frame(height: 30).background(field)
+                        .onSubmit { model.requestMore() }
+                        .disabled(model.more == .asking)
+                    if model.more == .asking {
+                        ProgressView().controlSize(.small).frame(width: 110)
+                    } else {
+                        Button { model.requestMore() } label: {
+                            Text("Request more").font(.system(size: 12.5, weight: .semibold)).padding(.horizontal, 4)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .frame(width: 110)
+                    }
+                }
+                if case .failed(let whyNot) = model.more {
+                    Text(whyNot).font(.system(size: 11.5)).foregroundStyle(red)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(FeedbackPriority.high.color.opacity(dark ? 0.12 : 0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(FeedbackPriority.high.color.opacity(0.35)))
     }
 
     private var deviceList: some View {

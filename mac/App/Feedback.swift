@@ -52,13 +52,41 @@ final class FeedbackModel: ObservableObject {
         case sending(Double, String)
         case sent
         case failed(String)
+        /// Ten reports in a day already: the server's sentence, and whether
+        /// a Request More would work (it does once a day).
+        case capped(String, canRequestMore: Bool)
+    }
+
+    /// Asking for more, after a .capped.
+    enum MoreAsk: Equatable {
+        case idle
+        case asking
+        case failed(String)
     }
 
     static let tags = ["Bug", "Idea", "Design", "Toolbar", "Canvas & wiring", "Simulation", "Files & saving", "Performance", "Other"]
     static let maxImages = 3
 
     // The draft, kept between openings (and launches) until it's sent.
-    @Published var title = UserDefaults.standard.string(forKey: "cl.feedbackTitle") ?? "" { didSet { save() } }
+    @Published var title = UserDefaults.standard.string(forKey: "cl.feedbackTitle") ?? "" {
+        didSet {
+            save()
+            // The server asked for a summary and now there is one.
+            if summaryNeeded, !titleBlank {
+                summaryNeeded = false
+                if case .failed = phase { phase = .writing }
+            }
+        }
+    }
+    var titleBlank: Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// The server said the summary was empty (the form doesn't send one
+    /// without it, but just in case).
+    @Published var summaryNeeded = false
+    /// A line under the buttons, like "You can send 10 more."
+    @Published var notice: String?
+    @Published var more = MoreAsk.idle
+    /// Why more is wanted, if the tester says (one line, optional).
+    @Published var moreReason = ""
     @Published var details = UserDefaults.standard.string(forKey: "cl.feedbackDetails") ?? "" { didSet { save() } }
     @Published var chosen = Set(UserDefaults.standard.stringArray(forKey: "cl.feedbackTags") ?? []) { didSet { save() } }
     /// Suggested tags the tester turned off.
@@ -206,6 +234,8 @@ final class FeedbackModel: ObservableObject {
         let prefs = Prefs.shared
         var app: [String: Any] = [
             "name": "CedarLogic for Mac",
+            // (Also sent on its own as installId: FeedbackServer.create.)
+            "installId": FeedbackServer.installId,
             "version": info["CFBundleShortVersionString"] as? String ?? "?",
             "build": info["CFBundleVersion"] as? String ?? "?",
             "channel": prefs.testingGroup.name,
@@ -256,7 +286,9 @@ final class FeedbackModel: ObservableObject {
 
     var canSend: Bool {
         if case .sending = phase { return false }
-        return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && recording == nil
+        // Capped with Request More on offer: that's the way on, not sending again.
+        if case .capped(_, true) = phase { return false }
+        return !titleBlank && recording == nil
     }
 
     func send() {
@@ -286,6 +318,7 @@ final class FeedbackModel: ObservableObject {
             },
         ]
         for (k, v) in device { body[k] = v }
+        notice = nil
         phase = .sending(0, "Sending…")
         Task { await upload(body, files) }
     }
@@ -311,8 +344,58 @@ final class FeedbackModel: ObservableObject {
             }
             try await FeedbackServer.complete(created)
             finished()
+        } catch let f as FeedbackServer.Failure {
+            switch f.code {
+            case "sender_cap":
+                more = .idle
+                phase = .capped(f.message, canRequestMore: f.canRequestMore)
+            case "summary_required":
+                summaryNeeded = true
+                phase = .failed(f.message)
+            default:
+                phase = .failed(f.message)
+            }
         } catch {
-            phase = .failed((error as? FeedbackServer.Failure)?.message ?? "It couldn't be sent: \(error.localizedDescription)")
+            phase = .failed("It couldn't be sent: \(error.localizedDescription)")
+        }
+    }
+
+    /// After a .capped: asks the server for 10 more (POST /api/feedback/more),
+    /// with the tester's reason if they gave one.
+    func requestMore() {
+        guard case .capped(_, true) = phase, more != .asking else { return }
+        more = .asking
+        let info = Bundle.main.infoDictionary ?? [:]
+        var extra: [String: Any] = [
+            "name": Prefs.shared.studentName.trimmingCharacters(in: .whitespaces),
+            "platform": "macos",
+            "app": ["version": info["CFBundleShortVersionString"] as? String ?? "?", "build": info["CFBundleVersion"] as? String ?? "?"],
+        ]
+        let mail = email.trimmingCharacters(in: .whitespaces)
+        if contactOK, !mail.isEmpty { extra["email"] = mail }
+        let reason = moreReason
+        Task {
+            do {
+                let n = try await FeedbackServer.more(message: reason, extra: extra)
+                moreReason = ""
+                more = .idle
+                notice = "You can send \(n) more."
+                phase = .writing
+            } catch let f as FeedbackServer.Failure {
+                switch f.code {
+                case "not_capped":   // room after all (one aged out): say so and carry on
+                    more = .idle
+                    notice = f.message
+                    phase = .writing
+                case "more_used":
+                    more = .idle
+                    phase = .capped(f.message, canRequestMore: false)
+                default:
+                    more = .failed(f.message)
+                }
+            } catch {
+                more = .failed("It couldn't be asked: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -328,69 +411,6 @@ final class FeedbackModel: ObservableObject {
             includeCircuit = false
             phase = .sent
         }
-    }
-}
-
-/// cedarlogic.netlify.app's /api/feedback (the cedarlogic-site repository).
-enum FeedbackServer {
-    struct Created: Decodable { let id: String; let uploadToken: String; let chunkSize: Int }
-    struct Failure: Error { let message: String }
-
-    static var base: String {
-        ProcessInfo.processInfo.environment["CL_FEEDBACK_URL"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "FeedbackURL") as? String ?? "https://cedarlogic.netlify.app"
-    }
-    static var key: String {
-        ProcessInfo.processInfo.environment["CL_FEEDBACK_KEY"] ?? Bundle.main.object(forInfoDictionaryKey: "FeedbackKey") as? String ?? ""
-    }
-
-    private static func request(_ path: String, method: String, token: String? = nil, body: Data?, type: String) -> URLRequest {
-        var r = URLRequest(url: URL(string: base + path)!, timeoutInterval: 60)
-        r.httpMethod = method
-        r.httpBody = body
-        r.setValue(type, forHTTPHeaderField: "content-type")
-        r.setValue(key, forHTTPHeaderField: "x-cedarlogic-key")
-        if let token { r.setValue(token, forHTTPHeaderField: "x-upload-token") }
-        return r
-    }
-
-    /// Tried again a few times: a flaky connection shouldn't lose a report.
-    private static func perform(_ r: URLRequest, tries: Int = 3) async throws -> Data {
-        var last: Error = Failure(message: "It couldn't be sent.")
-        for attempt in 0..<tries {
-            do {
-                let (data, resp) = try await URLSession.shared.data(for: r)
-                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                if (200..<300).contains(code) { return data }
-                let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-                last = Failure(message: msg ?? "The feedback server said no (\(code)).")
-                if code < 500 && code != 429 { throw last }
-            } catch let f as Failure {
-                throw f
-            } catch {
-                last = Failure(message: "Couldn't reach the feedback server. Check the internet connection and try again.")
-            }
-            try await Task.sleep(nanoseconds: UInt64(pow(2, Double(attempt)) * 700_000_000))
-        }
-        throw last
-    }
-
-    static func create(_ body: [String: Any]) async throws -> Created {
-        let data = try JSONSerialization.data(withJSONObject: body)
-        let out = try await perform(request("/api/feedback", method: "POST", body: data, type: "application/json"))
-        return try JSONDecoder().decode(Created.self, from: out)
-    }
-
-    static func piece(_ c: Created, file: String, index: Int, total: Int, data: Data) async throws {
-        var q = URLComponents()
-        q.queryItems = [.init(name: "id", value: c.id), .init(name: "file", value: file),
-                        .init(name: "index", value: String(index)), .init(name: "total", value: String(total))]
-        _ = try await perform(request("/api/feedback/upload?\(q.percentEncodedQuery ?? "")", method: "PUT", token: c.uploadToken,
-                                      body: data, type: "application/octet-stream"))
-    }
-
-    static func complete(_ c: Created) async throws {
-        _ = try await perform(request("/api/feedback/complete?id=\(c.id)", method: "POST", token: c.uploadToken, body: nil, type: "application/json"))
     }
 }
 
@@ -429,7 +449,7 @@ extension FeedbackModel {
                             say("SENT")
                             (m.title, m.details, m.chosen, m.priority) = keep
                             exit(0)
-                        case .failed(let why):
+                        case .failed(let why), .capped(let why, _):
                             say("FAILED: \(why)")
                             (m.title, m.details, m.chosen, m.priority) = keep
                             exit(1)
