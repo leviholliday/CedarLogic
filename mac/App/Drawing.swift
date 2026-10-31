@@ -134,8 +134,33 @@ extension CanvasController {
 
     func toggleDrawing() { drawing.toggle() }
 
-    /// Clear Drawing: this page's strokes, one undo step, without asking.
+    /// Clear Drawing: asks first, since it all goes at once (as the website,
+    /// Windows and Linux do), then this page's strokes go in one undo step.
     func clearDrawing() {
+        guard let document else { return }
+        if pageIsInkReadOnly { note(Self.inkReadOnlyNote); return }
+        let strokes = document.inkStrokeCount(page: page)
+        guard strokes > 0 else { note("Nothing drawn on this page."); return }
+        let a = NSAlert()
+        a.messageText = "Clear all drawing on this page?"
+        let pageName = document.pageName(page)
+        let what = strokes == 1 ? "The 1 stroke drawn on \u{201C}\(pageName)\u{201D} goes"
+                                : "All \(strokes) strokes drawn on \u{201C}\(pageName)\u{201D} go"
+        let undoKeys = ShortcutStore.shared.combo(.undo).map { " (\($0.label))" } ?? ""
+        a.informativeText = "\(what). Changed your mind afterwards? Edit \u{25B8} Undo\(undoKeys) brings it back."
+        a.addButton(withTitle: "Clear")
+        a.addButton(withTitle: "Cancel")
+        a.buttons[0].hasDestructiveAction = true
+        let onPage = page
+        let go: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard r == .alertFirstButtonReturn, let self, self.page == onPage else { return }
+            self.clearDrawingNow()
+        }
+        if let w = view?.window { a.beginSheetModal(for: w, completionHandler: go) } else { go(a.runModal()) }
+    }
+
+    /// Clear Drawing without asking: this page's strokes, one undo step.
+    func clearDrawingNow() {
         guard let document else { return }
         if pageIsInkReadOnly { note(Self.inkReadOnlyNote); return }
         let n = Int(cl_ink_clear(document.handle, Int32(page)))
