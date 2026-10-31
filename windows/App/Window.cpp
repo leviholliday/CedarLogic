@@ -26,6 +26,7 @@
 #include "Ink.h"
 #include "Notes.h"
 #include "SessionCheck.h"
+#include "Fade.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -1067,11 +1068,16 @@ void CircuitWindow::tabDropped(int page, const DropHint& h) {
 
 void CircuitWindow::toggleFocusMode() {
 	const double from = focusAmount();
+	// A short cross-fade, the window laid out for the new mode at once under
+	// it: smoother than sliding the toolbar and panel, which laid out (and
+	// drew) the whole window a frame at a time.
+	const bool faded = fade::crossfade(hwnd, nullptr, 190) != nullptr;
 	focusOn = !focusOn;
 	focusFrom = from;
 	focusTo = focusOn ? 1 : 0;
-	// No slide when Windows' animations are off: it happens at the next tick.
-	focusStart = nowSeconds() - (reduceMotion() ? kSlideTime : 0);
+	// No slide when Windows' animations are off, or under a fade: it happens
+	// at the next tick (or the one below).
+	focusStart = nowSeconds() - (reduceMotion() || faded ? kSlideTime : 0);
 	// Coming back, the bars are there to slide in.
 	if (!focusOn) {
 		ShowWindow(toolbar->widget(), SW_SHOWNA);
@@ -2789,6 +2795,8 @@ void CircuitWindow::setStepMs(int ms) {
 }
 
 void CircuitWindow::toggleSimView() {
+	// The look changes with a short fade (the Mac eases its bar over 0.18 s).
+	fade::crossfade(hwnd, nullptr, 180);
 	simViewOn = !simViewOn;
 	cl_edit_hover_clear(doc);   // what was lit belongs to the other mode
 	if (simViewOn) {
@@ -3021,6 +3029,8 @@ void CircuitWindow::toggleDark() {
 void CircuitWindow::togglePalette() {
 	// In focus mode: the panel comes back with the toolbar.
 	if (focusOn) { toggleFocusMode(); if (prefs().showPalette) return; }
+	// The panel comes and goes with a short fade, as the Mac's.
+	fade::crossfade(hwnd, nullptr, 170);
 	prefs().showPalette = !prefs().showPalette;
 	prefs().save();
 	for (CircuitWindow* w : circuitWindows()) w->prefsChanged();

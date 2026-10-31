@@ -473,7 +473,7 @@ HWND popupNow(HWND& owner) {
 		const HWND p = GetLastActivePopup(w->window());
 		if (p && p != w->window() && IsWindowVisible(p)) {
 			const std::string c = className(p);
-			if (c == "CedarLogicDropHint" || c == "tooltips_class32") continue;
+			if (c == "CedarLogicDropHint" || c == "tooltips_class32" || c == "CedarLogicFade") continue;
 			owner = w->window();
 			return p;
 		}

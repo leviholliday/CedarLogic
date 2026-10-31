@@ -8,6 +8,7 @@
 #include "Brand.h"
 #include "Collections.h"
 #include "Formula.h"
+#include "Fade.h"
 
 #include <uxtheme.h>
 
@@ -525,6 +526,9 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (f->onInit) f->onInit(*f);
 		});
 		if (f->timerMs > 0) SetTimer(d, kFormTimer, (UINT)f->timerMs, nullptr);
+		// It comes up with a short fade, as the Mac's windows do (rather
+		// than a control at a time as they draw).
+		fade::fadeIn(d);
 		// The first box to type in, or the first list, has the keyboard (on
 		// the page showing: one hidden on another would take the typing).
 		for (FormField& x : f->fields) {
@@ -1392,8 +1396,12 @@ void Form::setHidden(int field, bool hide) {
 }
 
 void Form::showPage(int to) {
+	const int was = page;
 	page = std::max(0, std::min((int)pages.size() - 1, to));
 	if (dialog == nullptr) return;
+	// Another page: the one going dissolves into it (the window fits the new
+	// page at once; the picture is cut to it).
+	const HWND picture = page != was ? fade::crossfade(dialog, nullptr, 150) : nullptr;
 	// Back to the top first: the fields are placed as if never scrolled.
 	if (scrollY != 0) scrollTo(0);
 	HWND focus = nullptr;
@@ -1470,6 +1478,7 @@ void Form::showPage(int to) {
 		SetWindowPos(dialog, nullptr, at.left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 	}
 	InvalidateRect(dialog, nullptr, TRUE);
+	fade::clipTo(picture, dialog);
 }
 
 double Form::number(int field) const { return atof(fields[field].value.c_str()); }

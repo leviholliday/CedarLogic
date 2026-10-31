@@ -8,6 +8,7 @@
 #include "DragLog.h"
 #include "Window.h"
 #include "SessionCheck.h"
+#include "Fade.h"
 
 #include <algorithm>
 #include <cmath>
@@ -163,6 +164,9 @@ void GatePalette::chooseCategory(POINT screen) {
 
 void GatePalette::showCategory(int index) {
 	if (index < 0 || index >= (int)categories.size()) return;
+	// The gates of the new category fade in over the old ones (the Mac's
+	// grid changes with an .opacity transition, 0.15 s).
+	if (index != category || GetWindowTextLengthW(search) > 0) fade::crossfade(tiles, nullptr, 150);
 	category = index;
 	if (GetWindowTextLengthW(search) > 0) SetWindowTextW(search, L"");   // fills
 	else fill();
