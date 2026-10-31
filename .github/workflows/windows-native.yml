@@ -715,6 +715,9 @@ jobs:
             $info = (Get-Item $exe).VersionInfo
             if ($info.ProductVersion -ne $want -or $info.FileVersion -ne $want) { throw "the exe's version info says $($info.FileVersion) / $($info.ProductVersion), not $want" }
             Write-Output "version $want in Settings > Apps and in the exe"
+            # The test build's setup (by its name) marks a first run a beta tester.
+            $mark = Get-Content "$dir\install-channel" -ErrorAction SilentlyContinue
+            if ($mark -ne 'beta') { throw "install-channel says '$mark', not beta" }
             $open = (Get-Item "$prog\shell\open\command").GetValue('')
             if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
             if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }
