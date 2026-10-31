@@ -53,6 +53,8 @@
 #include <winhttp.h>
 
 #include <atomic>
+#include <cctype>
+#include <cstring>
 #include <ctime>
 #include <functional>
 #include <memory>

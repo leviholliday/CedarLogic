@@ -939,8 +939,10 @@ void Form::build() {
 			int bx = ctrlX + ctrlW - bw;
 			if (before.kind == FormField::Check && before.grid == 0)
 				bx = std::min(bx, ctrlX + sc(44) + sc(6) + textPixels(dialog, font, before.label) + sc(14));
-			// After a button: right beside it.
-			if (before.kind == FormField::Button && before.hwnd) {
+			// After a button, or a choice (as wide as its longest item in
+			// Settings, as the Mac's Testing group picker and its Check Now):
+			// right beside it.
+			if ((before.kind == FormField::Button || before.kind == FormField::Choice) && before.hwnd) {
 				RECT br;
 				GetWindowRect(before.hwnd, &br);
 				MapWindowPoints(nullptr, dialog, (POINT*)&br, 2);
