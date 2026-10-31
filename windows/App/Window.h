@@ -294,6 +294,18 @@ public:
 	// strips become the window's top row.
 	bool focusMode() const { return focusOn; }
 	void toggleFocusMode();
+	// Predict, then reveal (Predict.cpp, the Mac's Predict.swift): the lights
+	// covered in Simulation View, guessed, then revealed and scored.
+	bool predictOn() const { return predict.on; }
+	bool predictRevealed() const { return predict.revealed; }
+	bool predictCovers() const;
+	void togglePredict();
+	void revealOrCoverAgain();
+	// A switch, Step or Step Clock moved the circuit on (a new round once revealed).
+	void circuitAdvancedByUser();
+	bool predictTap(double wx, double wy);
+	bool predictKey(UINT vk);
+	std::vector<CLPredictMark> predictMarks();
 
 	// Ctrl+Tab: the switcher (TabSwitcher.h). Its tabs, most recently used
 	// first, and the page a tab shows.
@@ -392,6 +404,14 @@ private:
 
 	bool isRunning = true;
 	bool simViewOn = false;
+	struct PredictState {
+		bool on = false, revealed = false;
+		std::map<long, int> guesses, answers;   // by gate: 0/1, or a display's number (-1 no clear value)
+		long focus = -1;
+		int page = -1;
+	} predict;
+	std::vector<CLSimLight> predictLights() const;
+	void predictNewRound();
 	bool lockedOn = false;
 	bool drawOn = false;
 	double phase = 0;                 // Simulation View's marching dashes, in points

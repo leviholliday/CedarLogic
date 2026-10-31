@@ -259,15 +259,21 @@ void Canvas::drawInto(ID2D1RenderTarget* rt, double scale) {
 		st.accent = prefs().accent;
 		st.wireScale = prefs().wireScale();
 		st.projector = projector;
-		st.predict = false;
+		// Predict: the lights dark and every wire "off" until Reveal.
+		st.predict = win->predictCovers();
 		st.ink = CL_INK_FOLLOW;
 		cl_simview_draw_page(doc, p, rt, scale, originX, originY, upp, &st);
 	} else {
 		cl_document_draw_ex(doc, p, rt, scale, originX, originY, upp, &o);
 	}
 	if (sim) {
-		cl_simview_draw_flow(doc, p, rt, scale, originX, originY, upp, win->flowPhase(),
-		                     prefs().wireScale() * (projector ? CL_PROJECTOR_WIRE_SCALE : 1));
+		// (Not while Predict covers the lights: the flow would give the answer away.)
+		if (!win->predictCovers())
+			cl_simview_draw_flow(doc, p, rt, scale, originX, originY, upp, win->flowPhase(),
+			                     prefs().wireScale() * (projector ? CL_PROJECTOR_WIRE_SCALE : 1));
+		// Predict's covers' guesses, or the rings after Reveal.
+		const std::vector<CLPredictMark> marks = win->predictMarks();
+		if (!marks.empty()) cl_simview_draw_predict(doc, p, rt, scale, originX, originY, upp, marks.data(), (int)marks.size(), projector);
 		// The wire under the pointer, lit up whole.
 		const RGBA a = accentColor(true);
 		cl_edit_draw_overlay(doc, p, rt, scale, originX, originY, upp, a.r, a.g, a.b);
@@ -1142,6 +1148,7 @@ void Canvas::onPress(int button, double vx, double vy, bool doubleClick, WPARAM 
 		// Simulation View and Lock: parts still take clicks (switches,
 		// keypads); anywhere else, a drag moves around.
 		if (win->simView() || win->locked()) {
+			if (win->simView() && win->predictTap(wx, wy)) return;   // a guess on a covered light
 			if (cl_document_click(doc, p, wx, wy)) {
 				win->advancedByHand();   // a switch, a keypad, or a clock set to "Only on Step Clock"
 			} else {
@@ -1520,6 +1527,7 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {
+		if (win->predictKey(vk)) return true;   // Predict's guesses, Tab and Enter
 		if (!bare && !act) return false;
 		if (vk == VK_ESCAPE) win->toggleSimView();
 		else if (vk == VK_SPACE) { if (!spaceDown && !repeat) { spaceDown = true; win->toggleRunning(); } }

@@ -377,6 +377,9 @@ void CircuitWindow::buildMenus() {
 	item(sim, CMD_SIM_VIEW, "Simulation &View\tCtrl+R");
 	item(sim, CMD_LOCK, "&Lock the Circuit");
 	separator(sim);
+	item(sim, CMD_PREDICT, "&Predict, Then Reveal");
+	item(sim, CMD_REVEAL, "Rev&eal\tEnter");
+	separator(sim);
 	item(sim, CMD_TRUTH_TABLE, "&Truth Table\tT");
 	item(sim, CMD_CHECK_CIRCUIT, "Check &My Circuit\u2026\tShift+T");
 	item(sim, CMD_SCOPE, "&Oscilloscope\tCtrl+G");
@@ -1319,6 +1322,8 @@ bool CircuitWindow::commandEnabled(int command) const {
 	switch (command) {
 	case CMD_UNDO: return cl_edit_can_undo(doc) && !simViewOn;
 	case CMD_REDO: return cl_edit_can_redo(doc) && !simViewOn;
+	case CMD_PREDICT: return simViewOn || predict.on;
+	case CMD_REVEAL: return simViewOn && predict.on;
 	case CMD_CUT: return edit && sel;
 	case CMD_COPY: return sel;
 	case CMD_DUPLICATE: return edit && sel;
@@ -1352,6 +1357,7 @@ int CircuitWindow::commandChecked(int command) const {
 	case CMD_SHOW_GRID: return prefs().showGrid;
 	case CMD_WIRE_DOTS: return prefs().wireDots;
 	case CMD_PROJECTOR: return prefs().projector;
+	case CMD_PREDICT: return predict.on;
 	case CMD_INK_PEN: case CMD_INK_HIGHLIGHTER: case CMD_INK_ERASER: return drawOn && ink::tool() == command - CMD_INK_PEN;
 	case CMD_INK_WIDTH: case CMD_INK_WIDTH + 1: case CMD_INK_WIDTH_LAST: return ink::tool() != ink::Eraser && ink::widthIndex() == command - CMD_INK_WIDTH;
 	default: return -1;
@@ -1376,6 +1382,9 @@ void CircuitWindow::updateMenu(HMENU menu) {
 		if (id == CMD_DRAW)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
 			            W(std::string(drawOn ? "Done Dra&wing" : "Dra&w on the Circuit") + shortcuts::menuKeys(CMD_DRAW)).c_str());
+		if (id == CMD_REVEAL)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(predict.revealed ? "Cover the Lights Ag&ain" : "Rev&eal") + "\tEnter").c_str());
 		if (id == CMD_NOTES)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
 			            W(std::string(notesOpen ? "Hide &Notes" : "Show &Notes") + shortcuts::menuKeys(CMD_NOTES)).c_str());
@@ -2077,6 +2086,8 @@ void CircuitWindow::run(int command) {
 		break;
 	case CMD_RUNNING: toggleRunning(); break;
 	case CMD_STEP: stepOnce(); break;
+	case CMD_PREDICT: togglePredict(); break;
+	case CMD_REVEAL: revealOrCoverAgain(); break;
 	case CMD_STEP_CLOCK: stepClock(); break;
 	case CMD_SIM_VIEW: toggleSimView(); break;
 	case CMD_LOCK: toggleLock(); break;
@@ -2775,6 +2786,7 @@ void CircuitWindow::stepOnce() {
 	// Stepping a running circuit means little: pause first.
 	if (isRunning) setRunning(false);
 	cl_document_step(doc);
+	circuitAdvancedByUser();
 	redraw();
 	if (scope) scope->update();
 }
@@ -2790,6 +2802,7 @@ void CircuitWindow::stepClock() {
 }
 
 void CircuitWindow::advancedByHand() {
+	circuitAdvancedByUser();   // Predict: once revealed, a new round
 	redraw();
 	if (scope) scope->update();
 }

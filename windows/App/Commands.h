@@ -57,6 +57,8 @@ enum Command {
 	CMD_RENAME_CIRCUIT, CMD_DUPLICATE_CIRCUIT, CMD_SHOW_GRID, CMD_WIRE_DOTS, CMD_WELCOME, CMD_MINIMIZE,
 	// View > Projector Mode (Simulation View for the back of the room, as the Mac's).
 	CMD_PROJECTOR,
+	// Simulate > Predict, Then Reveal and Reveal (Cover the Lights Again), as the Mac's.
+	CMD_PREDICT, CMD_REVEAL,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 	// Window > the open circuits (CMD_WINDOW_LIST + i).

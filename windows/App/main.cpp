@@ -45,6 +45,7 @@ int gExitCode = 0;
 // For the screenshot runs: --dark or --light for this run, --sim-view on.
 int gTheme = -1;
 bool gSimView = false;
+std::string gPredict;   // --predict [reveal]: Predict, Then Reveal on (and revealed), for the pictures
 // --dialog <preferences|shortcuts|truth-table|add-gate|scope|...>: open it, and the
 // screenshot is of it.
 int gDialog = 0;
@@ -1075,6 +1076,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--feedback-capture-test" && i + 1 < argc) { gFeedbackTest = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
+		if (a == "--predict") {
+			gPredict = "cover";
+			if (i + 1 < argc && U(argv[i + 1]) == "reveal") { gPredict = "reveal"; i++; }
+			continue;
+		}
 		if (a == "--split") { gSplit = true; continue; }
 		if (a == "--focus") { gFocus = true; continue; }
 		if (a == "--rename-tab") { gRenameTab = true; continue; }
@@ -1239,6 +1245,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (!circuitWindows().empty() && !circuitWindows().front()->filePath().empty())
 		splash::setOpening(circuitWindows().front()->titleText());
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
+	// --predict (with --sim-view): Predict on, a guess on the first light;
+	// --predict reveal: then revealed and scored. For CI's pictures.
+	if (!gPredict.empty() && !circuitWindows().empty()) {
+		CircuitWindow* w = circuitWindows().back();
+		w->togglePredict();
+		CLSimLight lights[64];
+		const int n = cl_simview_lights(w->document(), w->currentPage(), lights, 64);
+		if (n > 0) w->predictTap((lights[0].left + lights[0].right) / 2, (lights[0].bottom + lights[0].top) / 2);
+		if (gPredict == "reveal") w->revealOrCoverAgain();
+		writeOut(strf("predict: %d light(s), covered %d, revealed %d\n", n, w->predictCovers() ? 1 : 0, w->predictRevealed() ? 1 : 0));
+	}
 	if (gSplit && !circuitWindows().empty()) circuitWindows().back()->toggleSplit();
 	if (gFocus && !circuitWindows().empty()) circuitWindows().back()->toggleFocusMode();
 	if (gRenameTab && !circuitWindows().empty()) circuitWindows().back()->run(CMD_RENAME_TAB);
