@@ -408,6 +408,7 @@ struct Sending {
 	std::mutex lock;
 	std::string note = "Sending…";
 	std::atomic<int> state{ 0 };   // 0 going, 1 sent, 2 failed
+	std::atomic<double> fraction{ 0 };   // how much is sent, 0 to 1 (attachments by their bytes)
 	std::string failure;
 	std::string circuitCopy;   // the circuit, copied for this send alone (removed when it's done)
 	void set(const std::string& n) {
@@ -444,6 +445,7 @@ bool sendAll(Sending* s, const std::string& body, const std::vector<Attachment>&
 	if (id.empty() || token.empty()) { failure = "The feedback server's answer didn't make sense."; return false; }
 	long long total = 1, done = 0;
 	for (const Attachment& a : files) total += fileSize(a.file);
+	s->fraction = 0.05;
 	for (const Attachment& a : files) {
 		const std::string data = readAll(a.file);
 		const long long pieces = std::max(1LL, (long long)((data.size() + chunk - 1) / chunk));
@@ -453,10 +455,13 @@ bool sendAll(Sending* s, const std::string& body, const std::vector<Attachment>&
 			const Reply r = perform("PUT", q, "application/octet-stream", token, part, failure);
 			if (r.status < 200 || r.status >= 300) return false;
 			done += (long long)part.size();
+			s->fraction = 0.05 + 0.9 * (double)done / (double)total;
 			s->set(format("Sending %s… %.1f of %.1f MB", a.name.c_str(), done / 1e6, total / 1e6));
 		}
 	}
+	s->set("Finishing…");
 	const Reply r = perform("POST", "/api/feedback/complete?id=" + percent(id), "application/json", token, "", failure);
+	if (r.status >= 200 && r.status < 300) s->fraction = 1;
 	return r.status >= 200 && r.status < 300;
 }
 
@@ -706,6 +711,20 @@ struct Form {
 	GtkWidget* problem = nullptr;
 	GtkWidget* send = nullptr;
 	GtkWidget* close = nullptr;
+	// Under the form, always in view: while it sends, a spinner, what it's
+	// doing and (with attachments) how far it's got.
+	GtkWidget* busy = nullptr;
+	GtkWidget* spinner = nullptr;
+	GtkWidget* busyNote = nullptr;
+	GtkWidget* bar = nullptr;
+	// Sent: the form gives way to a thank-you page, as on the Mac.
+	GtkWidget* stack = nullptr;
+	GtkWidget* check = nullptr;
+	GtkWidget* thanks = nullptr;
+	GtkWidget* onItsWay = nullptr;
+	GtkWidget* another = nullptr;
+	GtkWidget* done = nullptr;
+	double checkStart = -1;
 	Device dev;
 	std::shared_ptr<Sending> sending;
 	guint timer = 0;
@@ -740,6 +759,7 @@ void wordsChanged(Form* f) {
 	gtk_label_set_text(GTK_LABEL(f->tagsHeading), d.suggested().empty() ? "TAGS" : "TAGS  ·  ✦ suggested from what you wrote");
 	gtk_widget_queue_draw(f->tags);
 	gtk_label_set_text(GTK_LABEL(f->problem), "");
+	gtk_widget_hide(f->problem);
 }
 
 void emailChanged(Form* f) { gtk_widget_set_sensitive(f->contact, !trimmed(gtk_entry_get_text(GTK_ENTRY(f->email))).empty()); }
@@ -865,12 +885,113 @@ void attachImages(Form* f) {
 	g_object_unref(c);
 }
 
+const int kAnotherResponse = 102;   // Send Another, from the thank-you page
+
+// The check on the thank-you page, drawing itself in a ring (the Mac's
+// SentCheck): the ring first, then the tick, over 0.9 s.
+void paintCheck(cairo_t* cr, float w, float h, double t) {
+	const Color c = brand::kNeonDeep;
+	const float size = 88, x0 = (w - size) / 2, y0 = (h - size) / 2;
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
+	if (t > 0) {
+		cairo_set_line_width(cr, 4);
+		cairo_new_path(cr);
+		cairo_arc(cr, x0 + size / 2, y0 + size / 2, size / 2 - 2, -G_PI / 2, -G_PI / 2 + 2 * G_PI * std::min(1.0, t));
+		cairo_stroke(cr);
+	}
+	const double tick = std::max(0.0, std::min(1.0, (t - 0.5) * 2));
+	if (tick <= 0) return;
+	const double px[] = { 27, 39, 62 }, py[] = { 45, 57, 32 };
+	const double l1 = std::hypot(px[1] - px[0], py[1] - py[0]), l2 = std::hypot(px[2] - px[1], py[2] - py[1]);
+	double left = tick * (l1 + l2);
+	cairo_set_line_width(cr, 5);
+	cairo_new_path(cr);
+	cairo_move_to(cr, x0 + px[0], y0 + py[0]);
+	for (int i = 0; i < 2 && left > 0; i++) {
+		const double len = i == 0 ? l1 : l2, k = std::min(1.0, left / len);
+		cairo_line_to(cr, x0 + px[i] + (px[i + 1] - px[i]) * k, y0 + py[i] + (py[i + 1] - py[i]) * k);
+		left -= len;
+	}
+	cairo_stroke(cr);
+}
+
+double checkProgress(const Form* f) {
+	if (f->checkStart < 0) return 0;
+	if (!anim::enabled()) return 1;
+	return anim::easeInOut((anim::now() - f->checkStart) / 0.9);
+}
+
+enum class Phase { Writing, Sending, Sent, Failed };
+
+// The window as the send stands: the buttons, the status under the form,
+// and (once it's gone) the thank-you page in place of the form.
+void setPhase(Form* f, Phase p, const std::string& why = "") {
+	const bool sending = p == Phase::Sending, sent = p == Phase::Sent;
+	gtk_widget_set_visible(f->busy, sending);
+	if (sending) gtk_spinner_start(GTK_SPINNER(f->spinner));
+	else gtk_spinner_stop(GTK_SPINNER(f->spinner));
+	gtk_widget_set_visible(f->send, !sending && !sent);
+	gtk_widget_set_visible(f->close, !sent);
+	gtk_widget_set_visible(f->another, sent);
+	gtk_widget_set_visible(f->done, sent);
+	gtk_button_set_label(GTK_BUTTON(f->send), p == Phase::Failed ? "Try Again" : "Send Feedback");
+	gtk_label_set_text(GTK_LABEL(f->problem), why.c_str());
+	gtk_widget_set_visible(f->problem, !why.empty() && !sent);
+	if (sent) {
+		gtk_stack_set_visible_child_name(GTK_STACK(f->stack), "sent");
+		f->checkStart = anim::now();
+		gtk_widget_queue_draw(f->check);
+		if (anim::enabled())
+			gtk_widget_add_tick_callback(f->check, [](GtkWidget* w, GdkFrameClock*, gpointer data) -> gboolean {
+				const Form* form = static_cast<Form*>(data);
+				gtk_widget_queue_draw(w);
+				return form->checkStart >= 0 && anim::now() - form->checkStart < 1.0 ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+			}, f, nullptr);
+		gtk_widget_grab_focus(f->done);
+	} else if (p == Phase::Writing) {
+		gtk_stack_set_visible_child_name(GTK_STACK(f->stack), "form");
+		f->checkStart = -1;
+	}
+}
+
+// A note for the writer under the form (empty hides it).
+void say(Form* f, const std::string& text) {
+	gtk_label_set_text(GTK_LABEL(f->problem), text.c_str());
+	gtk_widget_set_visible(f->problem, !text.empty());
+}
+
+// Send Another: the form, empty again (the name and email stay).
+void startAnother(Form* f) {
+	const Draft& d = draft();
+	gtk_entry_set_text(GTK_ENTRY(f->title), d.title.c_str());
+	gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(f->details)), d.details.c_str(), -1);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(f->circuit), d.includeCircuit);
+	f->sent = false;
+	setPhase(f, Phase::Writing);
+	shotsChanged(f);
+	gtk_widget_queue_draw(f->priority);
+	gtk_widget_grab_focus(f->title);
+}
+
+// The thank-you page's words, from what was just sent.
+void fillThanks(Form* f) {
+	const std::string name = trimmed(prefs().studentName);
+	const std::string first = name.substr(0, name.find(' '));
+	gtk_label_set_text(GTK_LABEL(f->thanks), first.empty() ? "Thank you!" : ("Thank you, " + first + "!").c_str());
+	const std::string mail = trimmed(gtk_entry_get_text(GTK_ENTRY(f->email)));
+	const bool reply = !mail.empty() && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(f->contact));
+	const std::string words = "Your feedback is on its way." + (reply ? " If there's a question, the reply goes to " + mail + "." : std::string());
+	gtk_label_set_text(GTK_LABEL(f->onItsWay), words.c_str());
+}
+
 void startSending(Form* f) {
 	if (f->sending) return;
 	Draft& d = draft();
 	collect(f);
 	if (trimmed(d.title).empty()) {
-		gtk_label_set_text(GTK_LABEL(f->problem), "Write a short summary first.");
+		say(f, "Write a short summary first.");
 		gtk_widget_grab_focus(f->title);
 		gtk_widget_error_bell(f->dialog);
 		return;
@@ -914,9 +1035,11 @@ void startSending(Form* f) {
 		.raw("app", f->dev.app).raw("system", f->dev.system).raw("context", f->dev.context);
 	f->sending = std::make_shared<Sending>();
 	f->sending->circuitCopy = circuitCopy;
+	gtk_label_set_text(GTK_LABEL(f->busyNote), "Sending…");
+	gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(f->bar), 0);
+	gtk_widget_set_visible(f->bar, !files.empty());
+	setPhase(f, Phase::Sending);
 	std::thread(upload, f->sending, body.str(), files).detach();
-	gtk_widget_set_sensitive(f->send, FALSE);
-	gtk_label_set_text(GTK_LABEL(f->problem), "Sending…");
 }
 
 gboolean timerCb(gpointer data) {
@@ -925,13 +1048,16 @@ gboolean timerCb(gpointer data) {
 	Draft& d = draft();
 	if (f->sending->state == 0) {
 		std::lock_guard<std::mutex> g(f->sending->lock);
-		gtk_label_set_text(GTK_LABEL(f->problem), f->sending->note.c_str());
+		gtk_label_set_text(GTK_LABEL(f->busyNote), f->sending->note.c_str());
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(f->bar), f->sending->fraction.load());
 		return G_SOURCE_CONTINUE;
 	}
 	if (f->sending->state == 1) {
+		fillThanks(f);
 		d.reset();
 		f->sent = true;
-		gtk_dialog_response(GTK_DIALOG(f->dialog), GTK_RESPONSE_OK);
+		f->sending.reset();
+		setPhase(f, Phase::Sent);
 		return G_SOURCE_CONTINUE;
 	}
 	std::string why;
@@ -940,9 +1066,7 @@ gboolean timerCb(gpointer data) {
 		why = f->sending->failure;
 	}
 	f->sending.reset();
-	gtk_widget_set_sensitive(f->send, TRUE);
-	gtk_button_set_label(GTK_BUTTON(f->send), "Try Again");
-	gtk_label_set_text(GTK_LABEL(f->problem), why.c_str());
+	setPhase(f, Phase::Failed, why.empty() ? "It couldn't be sent. Your feedback is kept, so you can try again." : why);
 	gtk_widget_error_bell(f->dialog);
 	return G_SOURCE_CONTINUE;
 }
@@ -955,7 +1079,7 @@ int probe() {
 	return r.reached ? r.status : 0;
 }
 
-void show(CircuitWindow* win) {
+void show(CircuitWindow* win, int demo) {
 	if (capture::recording()) {
 		win->note("Stop the recording first: Stop is on the bar over the canvas.");
 		return;
@@ -979,12 +1103,31 @@ void show(CircuitWindow* win) {
 	f.close = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "_Close", GTK_RESPONSE_CLOSE);
 	f.send = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "Send Feedback", 100);
 	gtk_style_context_add_class(gtk_widget_get_style_context(f.send), "suggested-action");
+	f.another = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "Send _Another", kAnotherResponse);
+	f.done = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "_Done", GTK_RESPONSE_OK);
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.done), "suggested-action");
+	for (GtkWidget* b : { f.another, f.done }) gtk_widget_set_no_show_all(b, TRUE);
 	GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(f.dialog));
+	// The form, and the thank-you page that takes its place once it's sent
+	// (a cross-fade; GtkStack skips it when the desktop's animations are off).
+	f.stack = gtk_stack_new();
+	gtk_stack_set_transition_type(GTK_STACK(f.stack), GTK_STACK_TRANSITION_TYPE_CROSSFADE);
+	gtk_stack_set_transition_duration(GTK_STACK(f.stack), 200);
+	gtk_box_pack_start(GTK_BOX(content), f.stack, TRUE, TRUE, 0);
 	GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 	gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
-	gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 640);
-	gtk_box_pack_start(GTK_BOX(content), scroll, TRUE, TRUE, 0);
+	// As tall as the form, but never taller than the screen has room for
+	// (the title bar, the status row and the buttons need about 200 px).
+	int room = 640;
+	if (GdkWindow* gw = gtk_widget_get_window(GTK_WIDGET(win->window())))
+		if (GdkMonitor* mon = gdk_display_get_monitor_at_window(gdk_window_get_display(gw), gw)) {
+			GdkRectangle area;
+			gdk_monitor_get_workarea(mon, &area);
+			room = std::max(280, std::min(640, area.height - 200));
+		}
+	gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), room);
+	gtk_stack_add_named(GTK_STACK(f.stack), scroll, "form");
 	GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
 	gtk_container_set_border_width(GTK_CONTAINER(box), 18);
 	gtk_container_add(GTK_CONTAINER(scroll), box);
@@ -1057,10 +1200,61 @@ void show(CircuitWindow* win) {
 	gtk_style_context_add_class(gtk_widget_get_style_context(also), "dim-label");
 	gtk_widget_set_margin_top(also, 6);
 	gtk_box_pack_start(GTK_BOX(box), also, FALSE, FALSE, 0);
+
+	// The thank-you page (the Mac's): a check drawing itself, then the words.
+	GtkWidget* sentPage = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+	gtk_widget_set_valign(sentPage, GTK_ALIGN_CENTER);
+	gtk_widget_set_halign(sentPage, GTK_ALIGN_CENTER);
+	f.check = gtk_drawing_area_new();
+	gtk_widget_set_size_request(f.check, 96, 96);
+	g_signal_connect(f.check, "draw", CL_CALLBACK(+[](GtkWidget* w, cairo_t* cr, gpointer data) -> gboolean {
+		Form* form = static_cast<Form*>(data);
+		paintCheck(cr, (float)gtk_widget_get_allocated_width(w), (float)gtk_widget_get_allocated_height(w), checkProgress(form));
+		return TRUE;
+	}), &f);
+	gtk_box_pack_start(GTK_BOX(sentPage), f.check, FALSE, FALSE, 0);
+	f.thanks = gtk_label_new("Thank you!");
+	PangoAttrList* big = pango_attr_list_new();
+	pango_attr_list_insert(big, pango_attr_weight_new(PANGO_WEIGHT_SEMIBOLD));
+	pango_attr_list_insert(big, pango_attr_scale_new(1.8));
+	gtk_label_set_attributes(GTK_LABEL(f.thanks), big);
+	pango_attr_list_unref(big);
+	gtk_box_pack_start(GTK_BOX(sentPage), f.thanks, FALSE, FALSE, 0);
+	f.onItsWay = gtk_label_new("Your feedback is on its way.");
+	gtk_label_set_line_wrap(GTK_LABEL(f.onItsWay), TRUE);
+	gtk_label_set_justify(GTK_LABEL(f.onItsWay), GTK_JUSTIFY_CENTER);
+	gtk_label_set_max_width_chars(GTK_LABEL(f.onItsWay), 48);
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.onItsWay), "dim-label");
+	gtk_box_pack_start(GTK_BOX(sentPage), f.onItsWay, FALSE, FALSE, 0);
+	gtk_stack_add_named(GTK_STACK(f.stack), sentPage, "sent");
+
+	// Under the form, never scrolled away: how the send is going, or why it
+	// couldn't go.
+	GtkWidget* status = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	gtk_widget_set_margin_start(status, 18);
+	gtk_widget_set_margin_end(status, 18);
+	gtk_box_pack_start(GTK_BOX(content), status, FALSE, FALSE, 0);
+	f.busy = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	f.spinner = gtk_spinner_new();
+	gtk_box_pack_start(GTK_BOX(f.busy), f.spinner, FALSE, FALSE, 0);
+	f.busyNote = gtk_label_new("Sending…");
+	gtk_label_set_xalign(GTK_LABEL(f.busyNote), 0);
+	gtk_label_set_ellipsize(GTK_LABEL(f.busyNote), PANGO_ELLIPSIZE_MIDDLE);
+	gtk_box_pack_start(GTK_BOX(f.busy), f.busyNote, TRUE, TRUE, 0);
+	f.bar = gtk_progress_bar_new();
+	gtk_widget_set_size_request(f.bar, 150, -1);
+	gtk_widget_set_valign(f.bar, GTK_ALIGN_CENTER);
+	gtk_box_pack_end(GTK_BOX(f.busy), f.bar, FALSE, FALSE, 0);
+	gtk_widget_show_all(f.busy);
+	gtk_widget_set_no_show_all(f.busy, TRUE);
+	gtk_widget_hide(f.busy);
+	gtk_box_pack_start(GTK_BOX(status), f.busy, FALSE, FALSE, 0);
 	f.problem = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(f.problem), 0);
 	gtk_label_set_line_wrap(GTK_LABEL(f.problem), TRUE);
-	gtk_box_pack_start(GTK_BOX(box), f.problem, FALSE, FALSE, 0);
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.problem), "problem");
+	gtk_widget_set_no_show_all(f.problem, TRUE);
+	gtk_box_pack_start(GTK_BOX(status), f.problem, FALSE, FALSE, 0);
 
 	g_signal_connect_swapped(f.title, "changed", G_CALLBACK(wordsChanged), &f);
 	g_signal_connect_swapped(gtk_text_view_get_buffer(GTK_TEXT_VIEW(f.details)), "changed", G_CALLBACK(wordsChanged), &f);
@@ -1107,9 +1301,24 @@ void show(CircuitWindow* win) {
 	f.timer = g_timeout_add(120, timerCb, &f);
 	gtk_widget_show_all(f.dialog);
 	gtk_widget_grab_focus(f.title);
+	// --show feedback:N pictures a state without sending anything: 1 sending,
+	// 2 sent, 3 couldn't send.
+	if (demo == 1) {
+		f.sending = std::make_shared<Sending>();
+		f.sending->set("Sending screenshot-1.png… 0.4 of 1.1 MB");
+		f.sending->fraction = 0.38;
+		setPhase(&f, Phase::Sending);
+	} else if (demo == 2) {
+		fillThanks(&f);
+		f.sent = true;
+		setPhase(&f, Phase::Sent);
+	} else if (demo == 3) {
+		setPhase(&f, Phase::Failed, "Couldn't reach the feedback server. Check the internet connection (and that curl is installed) and try again.");
+	}
 	for (;;) {
 		const int r = gtk_dialog_run(GTK_DIALOG(f.dialog));
 		if (r == 100) { guarded("Send Feedback", [&] { startSending(&f); }); continue; }
+		if (r == kAnotherResponse) { startAnother(&f); continue; }
 		if (r == kRecordResponse) {
 			bool stillOpen = true;
 			if (!f.sending) guarded("Send Feedback", [&] { stillOpen = recordInto(&f); });
@@ -1125,9 +1334,8 @@ void show(CircuitWindow* win) {
 	g_source_remove(f.timer);
 	if (!f.sent && !f.sending) collect(&f);   // kept as a draft for next time
 	gtk_widget_destroy(f.dialog);
-	if (f.sent) {
-		win->note("Feedback sent. Thank you!");
-	} else if (f.sending) {
+	// Sent: the thank-you page said so. Still sending: told when it's done.
+	if (!f.sent && f.sending) {
 		// Told about when it's done; the draft goes then, or stays if it failed.
 		inFlight() = f.sending;
 		g_timeout_add(250, inFlightCb, nullptr);

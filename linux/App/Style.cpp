@@ -155,6 +155,12 @@ void applyStyle() {
 	// and the hints a solid grey strong enough to read in small type.
 	const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
 	s += "#settings label, #gate-settings label, dialog label { color: " + css(text) + "; }\n";
+	// A dialog's problem (Send Feedback couldn't send) in red; its progress in the accent.
+	s += "dialog label.problem { color: rgb(229,72,77); }\n";
+	s += "dialog progressbar progress { background-image: none; background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) +
+	     "; border-radius: 3px; min-height: 6px; }\n";
+	s += "dialog progressbar trough { background-image: none; background-color: " + css(withAlpha(text, 0.10f)) +
+	     "; border: none; border-radius: 3px; min-height: 6px; }\n";
 	s += "#settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
 	// Unticked boxes and rings outlined, so they show on a dark page too.
 	s += "#settings check:not(:checked), #settings radio:not(:checked), #gate-settings check:not(:checked) { background-image: none; "

@@ -223,7 +223,7 @@ gboolean showCb(gpointer) {
 		        cl_check_clocked_page(w->document(), w->currentPage()) ? "can" : "can't");
 		w->checkCircuit();
 	}
-	else if (what == "feedback") feedback::show(w);
+	else if (what == "feedback") feedback::show(w, page);
 	else if (what == "templates") templates::showPicker(w, page == 1 ? "builtin-ff-d" : "");
 	else if (what == "tour") welcome::startTour(w);
 	else if (what == "find" && page == 1) {
