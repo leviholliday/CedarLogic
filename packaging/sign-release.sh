@@ -9,7 +9,7 @@
 #       --sign-preview PATH   scripts/sign-preview.sh (default: this checkout's, else the copy on
 #                       the private/windows/native branch)
 #
-# packaging/linux/install.sh and packaging/windows/install.ps1 check a
+# linux/install.sh and packaging/windows/install.ps1 check a
 # release's SHA256SUMS against its .sig with the update key (the one the apps'
 # updaters trust) when the release has them, and its "tag" line must be the
 # release's own tag. This writes that manifest for every file on the release,

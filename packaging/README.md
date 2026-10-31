@@ -9,7 +9,7 @@ builds), and all checking what they download.
 | Mac | `brew install --cask leviholliday/cedarlogic/cedarlogic` | `homebrew/` (cask, `bump.sh`, README) |
 | Windows | `winget install --id LeviHolliday.CedarLogic -e` | `winget/` (manifests, `bump.sh`, `validate.py`, README) |
 | Windows | `irm https://cedarlogic.netlify.app/install.ps1 \| iex` | `windows/install.ps1` (+ README) |
-| Linux | `curl -fsSL https://cedarlogic.netlify.app/install.sh \| sh` | `linux/install.sh` (+ README) |
+| Linux | `curl -fsSL https://cedarlogic.netlify.app/install.sh \| sh` | the repo's `linux/install.sh`: one script for releases and the test build (`--preview`); `packaging/linux/` has a symlink to it and the README |
 | all | signed `SHA256SUMS` for a release | `sign-release.sh` |
 
 Each folder's README has the details and what was tested. Nothing here
@@ -42,8 +42,8 @@ out.
 2. **winget-pkgs fork.** `gh repo fork microsoft/winget-pkgs --clone=false`
    (makes `leviholliday/winget-pkgs`). On the first PR, accept Microsoft's
    CLA when the bot asks (`@microsoft-github-policy-service agree`).
-3. **The site** serves the two scripts (copies of `windows/install.ps1` and
-   `linux/install.sh` in `public/`), as plain text. In the site's
+3. **The site** serves the two scripts (copies of `packaging/windows/install.ps1`
+   and the repo's `linux/install.sh` in `public/`), as plain text. In the site's
    `netlify.toml`:
    ```toml
    [[headers]]
@@ -60,7 +60,10 @@ out.
    Make sure no `_redirects` rule or the 404 page catches them (`curl -sI
    https://cedarlogic.netlify.app/install.sh` must say `200` and
    `text/plain`). Fallback URLs, once `pkg/installers` is merged to `main`:
-   `https://raw.githubusercontent.com/leviholliday/CedarLogic/main/packaging/{linux/install.sh,windows/install.ps1}`.
+   `https://raw.githubusercontent.com/leviholliday/CedarLogic/main/linux/install.sh` and
+   `.../main/packaging/windows/install.ps1`. `linux/install.sh` is the same file
+   `sign-preview.sh` uploads to `linux-native-testing`. Merging this branch into
+   `linux/native` conflicts on it once: take this branch's (`packaging/linux/README.md`).
 
 No other repos, secrets or CI changes are needed.
 
@@ -83,9 +86,9 @@ After docs/RELEASE-0.4.md steps 1 to 3 (Mac, Windows, Linux files on `v0.4`):
    Any file added to v0.4 later (a fixed DMG, say) means running this again,
    or the installers refuse that file.
 3. **Try the one-liners against the real release** before the site shows them:
-   - Linux (Zorin laptop, the Pi): `CEDARLOGIC_DRY_RUN=1 sh packaging/linux/install.sh`,
+   - Linux (Zorin laptop, the Pi): `sh linux/install.sh --dry-run`,
      then the real `curl -fsSL https://cedarlogic.netlify.app/install.sh | sh`
-     once the site has it (or `sh packaging/linux/install.sh` before).
+     once the site has it (or `sh linux/install.sh` before).
    - Windows: `powershell -ExecutionPolicy Bypass -File packaging\windows\install.ps1 -SelfTest`,
      then `-DryRun`, then a real install (`windows/README.md`).
 4. **Homebrew:** `packaging/homebrew/bump.sh 0.4 --cask <tap checkout>/Casks/cedarlogic.rb`,
