@@ -1441,7 +1441,7 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 	text(rt, "Version " CL_VERSION "  ·  native Windows  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0, 192, 12,
 	     kMedium, kNeon, w, DWRITE_TEXT_ALIGNMENT_CENTER);
 	text(rt,
-	     "A digital logic simulator, from Cedarville University. Rebuilt natively for Windows: plain Windows controls and Direct2D on "
+	     "A digital logic simulator, based on the original CedarLogic from Cedarville University. Rebuilt natively for Windows: plain Windows controls and Direct2D on "
 	     "the shared CedarLogic engine, with nothing else to install.",
 	     40, 222, 13, kNormal, kSecondary, w - 80, DWRITE_TEXT_ALIGNMENT_CENTER);
 	const D2D1_RECT_F site = D2D1::RectF(w / 2 - 170, h - 70, w / 2 - 60, h - 34);

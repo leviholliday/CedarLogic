@@ -57,10 +57,12 @@ AppId={{59AB891F-9536-471C-BAE2-13C34308A7C3}
 AppName=CedarLogic
 AppVersion={#AppVersion}
 AppVerName=CedarLogic {#AppVersion}
-AppPublisher=Cedarville University
+AppPublisher=CedarLogic
 AppPublisherURL=https://cedarlogic.netlify.app
 AppSupportURL=https://cedarlogic.netlify.app
 AppUpdatesURL=https://github.com/leviholliday/CedarLogic/releases
+AppCopyright=Copyright (C) 2026 CedarLogic
+VersionInfoCompany=CedarLogic
 VersionInfoDescription=CedarLogic Setup
 VersionInfoProductName=CedarLogic
 ; This user only: nothing needs an administrator.

@@ -23,9 +23,10 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "CompanyName", "Cedarville University"
+      VALUE "CompanyName", "CedarLogic"
       VALUE "FileDescription", "CedarLogic"
       VALUE "FileVersion", "@PROJECT_VERSION@"
+      VALUE "LegalCopyright", "Copyright (C) 2026 CedarLogic"
       VALUE "ProductName", "CedarLogic"
       VALUE "ProductVersion", "@PROJECT_VERSION@"
       VALUE "OriginalFilename", "CedarLogic.exe"
