@@ -120,8 +120,9 @@ public:
 	void enable(int field, bool on);
 	double number(int field) const;           // a Slider's
 	void setTip(int field, const std::string& text);
-	// Its tip in red, saying what's wrong with the field (false: dimmed again).
-	void markTip(int field, bool problem);
+	// Its tip coloured to say something needs doing: 1 orange, 2 red (0:
+	// dimmed again, as a tip).
+	void markTip(int field, int tone);
 	// The theme changed while it's open: its title bar, fields and paper.
 	void retheme();
 

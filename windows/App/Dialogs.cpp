@@ -803,7 +803,9 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		// Tips under fields dimmed; what's wrong in red.
 		HWND ctl = (HWND)lp;
 		COLORREF ink = c.text;
-		if (ctl == f->problem || GetPropW(ctl, L"clTipProblem")) ink = RGB(220, 64, 64);
+		const INT_PTR tone = (INT_PTR)GetPropW(ctl, L"clTipProblem");
+		if (ctl == f->problem || tone == 2) ink = RGB(220, 64, 64);
+		else if (tone == 1) ink = RGB(242, 140, 31);   // the High priority's orange: needs doing
 		else if (GetPropW(ctl, L"clTip") || GetPropW(ctl, L"clDim")) ink = c.dim;
 		if (msg == WM_CTLCOLORSTATIC && !IsWindowEnabled(ctl)) ink = c.dim;
 		// A disabled or read-only box asks here too: it keeps its field colour.
@@ -1166,6 +1168,9 @@ void Form::build() {
 	if (!pages.empty()) {
 		pageBottoms = pageY;
 		y = *std::max_element(pageY.begin(), pageY.end());
+	} else {
+		// One page, for fields shown and put away (setHidden).
+		pageBottoms.assign(1, y);
 	}
 
 	// What's wrong, and the buttons along the bottom on the right: the extra
@@ -1249,15 +1254,17 @@ void Form::build() {
 		}
 
 	// Fields that start out hidden take no room.
-	for (size_t pg = 0; pg < pageCount && !pages.empty(); pg++) {
+	bool anyHidden = false;
+	for (size_t pg = 0; pg < pageCount; pg++) {
 		bool any = false;
 		for (const FormField& f : fields) any = any || (f.hidden && (size_t)f.page == pg);
 		if (any) relayout((int)pg);
+		anyHidden = anyHidden || any;
 	}
 
 	// Size the window around what's in it (the page it opens on, with pages),
 	// centred on its owner.
-	if (!pages.empty() && page >= 0 && page < (int)pageBottoms.size())
+	if (page >= 0 && page < (int)pageBottoms.size())
 		y = pageBottoms[page] + footerGap + footerButtonsAt + footerBelow;
 	RECT rc = { 0, 0, width, y };
 	const DWORD style = (DWORD)GetWindowLongW(dialog, GWL_STYLE), ex = (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE);
@@ -1297,7 +1304,8 @@ void Form::build() {
 		top = std::max<int>(mi.rcWork.top, std::min<int>(top, mi.rcWork.bottom - wh));
 	}
 	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE | (scrollHeight > 0 ? SWP_FRAMECHANGED : 0));
-	if (!pages.empty()) showPage(page);
+	// (Without pages, only to put away the fields that start hidden.)
+	if (!pages.empty() || anyHidden) showPage(page);
 }
 
 void Form::scrollTo(int to) {
@@ -1408,7 +1416,7 @@ void Form::relayout(int pg) {
 }
 
 void Form::hiddenChanged(int pg) {
-	if (dialog == nullptr || pages.empty()) return;
+	if (dialog == nullptr) return;
 	if (pg == page && scrollY != 0) scrollTo(0);
 	relayout(pg);
 	if (pg == page) showPage(page);
@@ -1516,10 +1524,10 @@ void Form::setTip(int field, const std::string& text) {
 	if (x.tipWindow) SetWindowTextW(x.tipWindow, W(text).c_str());
 }
 
-void Form::markTip(int field, bool problem) {
+void Form::markTip(int field, int tone) {
 	HWND tip = fields[field].tipWindow;
 	if (tip == nullptr) return;
-	if (problem) SetPropW(tip, L"clTipProblem", (HANDLE)1);
+	if (tone) SetPropW(tip, L"clTipProblem", (HANDLE)(INT_PTR)tone);
 	else RemovePropW(tip, L"clTipProblem");
 	InvalidateRect(tip, nullptr, TRUE);
 }

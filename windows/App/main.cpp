@@ -1007,6 +1007,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			writeOut(strf("feedback server: %s (%d)\n", status == 403 ? "reachable, key checked" : status ? "answered" : "unreachable", status));
 			return status == 403 ? 0 : 1;
 		}
+		if (a == "--feedback-check") {
+			prefs().load();
+			return feedback::serverCheck([](const std::string& s) { writeOut(s); }) == 0 ? 0 : 1;
+		}
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
 		if (a == "--start-menu-test") {
 			std::string report;

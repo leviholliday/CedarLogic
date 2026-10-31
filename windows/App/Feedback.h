@@ -18,6 +18,11 @@ void show(CircuitWindow* window);
 // --feedback-probe: asks the site with a wrong key (it should say 403) and
 // sends nothing. The HTTP status, or 0 when it couldn't be reached.
 int probe();
+// --feedback-check: the client's side of the server's rules (install id,
+// required summary, the daily cap not retried, Request more, other 429s
+// retried), the Mac's mac/Tools/feedback-check cases, against its stand-in
+// server.py at CL_FEEDBACK_URL. Returns how many failed.
+int serverCheck(std::function<void(const std::string&)> say);
 // A recording for Send Feedback is going (FeedbackCapture.h): closing a
 // window or quitting stops it first (kept) instead.
 bool recording();

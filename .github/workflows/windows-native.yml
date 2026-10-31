@@ -603,6 +603,24 @@ jobs:
       # window it opens: the circuit, named from the link). New and not yet seen
       # on a real Windows, so for now it doesn't hold the zips back (take
       # continue-on-error off once it has passed).
+      # Send Feedback's side of the server's rules, against the Mac's stand-in
+      # (mac/Tools/feedback-check/server.py): the install id, the required
+      # summary, the 10-a-day cap answered once and not retried, Request more,
+      # and other 429s still retried -- the Mac's feedback-check cases.
+      - name: Feedback server check
+        if: matrix.run
+        shell: bash
+        run: |
+          PY=$(command -v python || command -v python3)
+          rm -f fbport
+          "$PY" mac/Tools/feedback-check/server.py fbport &
+          SERVER=$!
+          for _ in $(seq 100); do [ -s fbport ] && break; sleep 0.1; done
+          code=0
+          CL_FEEDBACK_URL="http://127.0.0.1:$(cat fbport)" CL_FEEDBACK_KEY=check timeout 120 package/CedarLogic/CedarLogic.exe --feedback-check || code=$?
+          kill $SERVER 2>/dev/null || true
+          exit $code
+
       - name: Share link test
         if: matrix.run
         shell: bash
