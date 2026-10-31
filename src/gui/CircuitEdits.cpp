@@ -334,10 +334,17 @@ std::vector<WireReshape> rerouteWires(GUICanvas* page, const std::vector<unsigne
 				if (!shapeIsSound(page, w, w->getSegmentMap())) w->setSegmentMap(fresh);
 			}
 		}
+		// The shape the wire is left in is the one Redo will give it:
+		// setSegmentMap tidies what it's given (endSegDrag merges runs and
+		// trims ends to the crossings), and a step whose first Do keeps what's
+		// on screen (cmdPasteBlock, cmdTidy) would otherwise keep the untidied
+		// shape, which Redo then changes (a run's end at -28.4989 where the run
+		// it meets is at -28.5: fuzz_edit wide seed 21).
 		WireReshape r;
 		r.id = wireIds[k];
 		r.before = before;
 		r.after = w->getSegmentMap();
+		w->setSegmentMap(r.after);
 		steps.push_back(std::move(r));
 	}
 	return steps;

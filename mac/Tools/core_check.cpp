@@ -527,6 +527,24 @@ static void dragCases() {
 	}
 }
 
+// Straighten Wires on many wires at once, then Undo and Redo: Redo gave a
+// run's end at -28.5 where the step itself had left -28.4989 (fuzz_edit wide
+// seed 21, op 292; the circuit's first page, cut to the two wires it needs).
+static void straightenCases() {
+	printf("Redo of Straighten Wires gives what the step gave\n");
+	const std::string text = readFile(fixtures + "/../../../tests/fixtures/core/straighten-redo.cdl");
+	CLDocument* doc = openText(text);
+	if (doc == nullptr) { CHECK(false, "straighten-redo.cdl opens"); return; }
+	cl_edit_select_all(doc, 0);
+	cl_edit_straighten(doc, 0);
+	const std::string done = cl_document_save_text(doc);
+	cl_edit_undo(doc);
+	cl_edit_redo(doc);
+	const std::string redone = cl_document_save_text(doc);
+	CHECK(done == redone && consistent(doc, "after Redo"), "two wires straightened at once: Redo gives the same shapes");
+	cl_document_close(doc);
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
@@ -539,6 +557,7 @@ int main(int argc, char** argv) {
 	wireCases();
 	smallerCases();
 	if (!fixtures.empty()) dragCases();
+	if (!fixtures.empty()) straightenCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;
