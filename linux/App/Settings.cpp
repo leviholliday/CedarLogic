@@ -734,7 +734,10 @@ void fitPage(SettingsWindow* s) {
 }
 
 void putPage(SettingsWindow* s) {
-	if (s->pageWidget) gtk_widget_destroy(s->pageWidget);
+	// The old page goes with the viewport the scroller wrapped it in (the
+	// scroller's child), so the new one has the place to itself.
+	if (GtkWidget* old = gtk_bin_get_child(GTK_BIN(s->scroll))) gtk_widget_destroy(old);
+	s->pageWidget = nullptr;
 	GtkWidget* pg = buildPage(s, s->page);
 	gtk_widget_show_all(pg);
 	s->pageWidget = pg;
