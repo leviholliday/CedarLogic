@@ -15,6 +15,11 @@ on:
         description: 'Version tag to build (e.g., v2.3.8); leave empty for a dry run'
         required: false
 
+# Least privilege: the jobs only read the repository (upload-release asks
+# for its own write permissions).
+permissions:
+  contents: read
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -37,7 +42,7 @@ jobs:
       exe_size: ${{ steps.package.outputs.exe_size }}
       winsparkle_signature: ${{ steps.sign.outputs.signature }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Get version
         id: version
@@ -65,13 +70,13 @@ jobs:
           if (-not (Test-Path $makensis)) { throw "NSIS did not install: $makensis is missing" }
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: windows-msvc
           variant: sccache
 
       - name: Cache wxWidgets
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/_deps
           key: wxwidgets-windows-${{ hashFiles('CMakeLists.txt') }}
@@ -86,7 +91,7 @@ jobs:
       # back to the legacy fixed-function GL path. The dist is x86 to match this
       # 32-bit build (see cmake/skia-args/windows.gn).
       - name: Download Skia dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: skia-windows
           path: skia-dist
@@ -198,7 +203,7 @@ jobs:
           Compress-Archive -Path $pdb.FullName -DestinationPath "build/CedarLogic-$ver-win32.pdb.zip" -Force
 
       - name: Upload Windows Installer
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-installer
           path: |
@@ -210,7 +215,7 @@ jobs:
     # matches skia build and allows running on older glibc versions
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Get version
         id: version
@@ -227,12 +232,12 @@ jobs:
             libgl1-mesa-dev libfontconfig1-dev
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: linux-gcc
 
       - name: Cache wxWidgets
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/_deps
           key: wxwidgets-linux-${{ hashFiles('CMakeLists.txt') }}
@@ -240,7 +245,7 @@ jobs:
             wxwidgets-linux-
 
       - name: Download Skia dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: skia-linux
           path: skia-dist
@@ -261,7 +266,7 @@ jobs:
           cpack -G TGZ
 
       - name: Upload Linux Archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-archive
           path: build/CedarLogic-*-Linux.tar.gz
@@ -274,7 +279,7 @@ jobs:
       dmg_size: ${{ steps.sparkle_sign.outputs.dmg_size }}
       sparkle_signature: ${{ steps.sparkle_sign.outputs.signature }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Get version
         id: version
@@ -306,12 +311,12 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: macos-clang
 
       - name: Cache wxWidgets
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/_deps
           key: wxwidgets-macos-${{ hashFiles('CMakeLists.txt') }}
@@ -319,7 +324,7 @@ jobs:
             wxwidgets-macos-
 
       - name: Download Skia dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: skia-macos
           path: skia-dist
@@ -444,7 +449,7 @@ jobs:
           echo "signature=$SIGNATURE" >> $GITHUB_OUTPUT
 
       - name: Upload macOS DMG
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-dmg
           path: build/CedarLogic-*-Darwin.dmg
@@ -452,7 +457,7 @@ jobs:
   build-wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Get version
         id: version
@@ -462,13 +467,13 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Emscripten
-        uses: emscripten-core/setup-emsdk@v16
+        uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
           version: latest
           actions-cache-folder: emsdk-cache
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2.20
         with:
           key: wasm-emscripten
 
@@ -496,7 +501,7 @@ jobs:
           tar -czf ../CedarLogic-${VERSION}-wasm.tar.gz .
 
       - name: Upload WASM artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wasm-bundle
           path: CedarLogic-*-wasm.tar.gz
@@ -512,7 +517,7 @@ jobs:
       # RELEASE_TOKEN is an admin-owned PAT. The default GITHUB_TOKEN cannot
       # push the appcast commit: master's ruleset requires signatures and
       # passing status checks, and only repository admins bypass it.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: master
           token: ${{ secrets.RELEASE_TOKEN }}
@@ -525,7 +530,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
 
@@ -556,7 +561,7 @@ jobs:
           } > release-notes.md
 
       - name: Publish release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.VERSION }}
           name: ${{ env.VERSION }}
@@ -588,7 +593,7 @@ jobs:
           git push
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
