@@ -86,12 +86,27 @@ private:
 	// klsBBox getters are non-const, so take the box by value.
 	CellSpan cellsOf(klsBBox box) const {
 		CellSpan s;
-		s.x0 = (int)std::floor(box.getLeft() / cellSize);
-		s.y0 = (int)std::floor(box.getBottom() / cellSize);
-		s.x1 = (int)std::floor(box.getRight() / cellSize);
-		s.y1 = (int)std::floor(box.getTop() / cellSize);
+		s.x0 = cell(box.getLeft());
+		s.y0 = cell(box.getBottom());
+		s.x1 = cell(box.getRight());
+		s.y1 = cell(box.getTop());
 		s.tooMany = (long long)(s.x1 - s.x0 + 1) * (s.y1 - s.y0 + 1) > MAX_CELLS_PER_OBJECT;
+		// A box with a NaN edge spans no cells honestly; park it as oversized.
+		if (std::isnan(box.getLeft()) || std::isnan(box.getRight()) ||
+		    std::isnan(box.getBottom()) || std::isnan(box.getTop()))
+			s.tooMany = true;
 		return s;
+	}
+
+	// The cell a coordinate falls in, held well inside int: a part far off in a
+	// damaged file (or an infinite one) converted out of range, which is
+	// undefined, and the spans' arithmetic overflowed after it.
+	int cell(float v) const {
+		const double c = std::floor((double)v / cellSize);
+		const double limit = 1 << 28;
+		if (!(c > -limit)) return -(1 << 28);   // also NaN
+		if (c > limit) return 1 << 28;
+		return (int)c;
 	}
 
 	float cellSize;
@@ -409,8 +424,17 @@ void klsCollisionChecker::addObject(klsCollisionObject* newObj) {
 
 void klsCollisionChecker::removeObject( klsCollisionObject* oldObj ) {
 	collisionObjects.erase( oldObj );
+	// Out of the last update's results too, so they name nothing removed and
+	// a removal needs no full update() after it: one per wire made taking
+	// back a large paste quadratic (thousands of wires: minutes).
+	purgeFromOverlaps( oldObj );
 	oldObj->detachSubObjects();
 	oldObj->detachFromCollisions();
+}
+
+void klsCollisionChecker::purgeFromOverlaps( klsCollisionObject* obj ) {
+	for( auto& group : overlaps ) group.second.erase( obj );
+	for( klsCollisionObject* sub : obj->getSubObjects() ) purgeFromOverlaps( sub );
 }
 
 void klsCollisionChecker::clear() {

@@ -132,6 +132,8 @@ RouteResult TrunkRouter::route(const RouteInput &in) const {
 	trunk.by = miny; trunk.ey = maxy;
 
 	std::vector<Segment> branches;
+	// Id 0 is the trunk's (as id 2 is in the case above).
+	if (nextId < 1) nextId = 1;
 	for (int i = (int)in.pins.size() - 1; i >= 0; i--) {
 		const Pin &v = in.pins[i];
 		if (std::min(v.x, centerx) != std::max(v.x, centerx)) {

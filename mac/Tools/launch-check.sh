@@ -26,7 +26,7 @@ P="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Delete SUPublicEDKey" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete SentryDSN" "$P" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Delete CFBundleURLTypes" "$P" 2>/dev/null
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1
+mac/sign-app.sh "$APP"
 mkdir -p "$WORK/home"
 # The copy's own settings, from nothing: launch 1 is a first launch (the
 # welcome, the first-launch sound), the rest ordinary ones.
@@ -50,6 +50,8 @@ for i in $(seq 1 "$RUNS"); do
 		fail=1
 	fi
 done
+# Any Keychain items the copy made (its own service: its bundle id), gone too.
+while security delete-generic-password -s com.leviholliday.cedarlogic.native.launchcheck >/dev/null 2>&1; do :; done
 # The copy unregistered, so Finder never offers it for .cdl files.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$APP" 2>/dev/null
 [ $fail = 0 ] && rm -rf "$WORK"

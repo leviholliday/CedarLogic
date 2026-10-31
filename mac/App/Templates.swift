@@ -86,6 +86,31 @@ enum Templates {
         pendingText = nil
     }
 
+    /// The practice circuit (res/samples/practice.cdl, in the app's
+    /// Resources; a dev build without a bundle reads the repo's), as a new
+    /// circuit of your own, as Windows and Linux open it.
+    static var practiceURL: URL? {
+        var candidates: [URL] = []
+        if let bundled = Bundle.main.url(forResource: "practice", withExtension: "cdl") { candidates.append(bundled) }
+        candidates.append(URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("res/samples/practice.cdl"))
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    static func openPractice() {
+        guard let url = practiceURL, let data = try? Data(contentsOf: url),
+              (try? CoreDocument(data: data)) != nil, let text = String(data: data, encoding: .utf8) else {
+            let a = NSAlert()
+            a.messageText = "The practice circuit couldn't be opened"
+            a.informativeText = "It should come with CedarLogic, but it's missing from this copy. Downloading CedarLogic again puts it back."
+            a.alertStyle = .warning
+            a.runModal()
+            return
+        }
+        use(CircuitTemplate(id: "practice", name: "Practice Circuit", detail: "", text: text, folder: nil))
+    }
+
 
     static func saveCurrent(from canvas: CanvasController) {
         guard let document = canvas.document else { return }

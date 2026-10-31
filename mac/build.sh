@@ -61,8 +61,29 @@ done
 rm -f "$OUT/libCedarCore.a"
 ar rcs "$OUT/libCedarCore.a" "${OBJS[@]}"
 
-# Sparkle.framework: the copy the wx build downloads (configure it once).
-SPARKLE_DIR="${SPARKLE_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/build/_deps/sparkle-src}"
+# Sparkle.framework, for updates: this app's own pinned copy, downloaded once
+# and checked against Sparkle's published SHA-256 before it's unpacked. (The
+# wx app pins its own in CMakeLists.txt: it still runs on macOS 11, which
+# Sparkle 2.10 dropped.) Bump both lines together, from the release page.
+SPARKLE_VERSION=2.10.1
+SPARKLE_SHA256=1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27
+DEPS="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/build/_deps"
+SPARKLE_DIR="${SPARKLE_DIR:-$DEPS/sparkle-native-$SPARKLE_VERSION}"
+if [ ! -d "$SPARKLE_DIR/Sparkle.framework" ]; then
+    echo "Downloading Sparkle $SPARKLE_VERSION..."
+    archive=$(mktemp "${TMPDIR:-/tmp}/sparkle.XXXXXX")
+    curl -fsSL --proto =https --proto-redir =https -o "$archive" \
+        "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+    if [ "$(shasum -a 256 "$archive" | cut -d' ' -f1)" != "$SPARKLE_SHA256" ]; then
+        rm -f "$archive"
+        echo "Sparkle-$SPARKLE_VERSION.tar.xz doesn't match its SHA-256; not using it."
+        exit 1
+    fi
+    rm -rf "$SPARKLE_DIR.partial"; mkdir -p "$SPARKLE_DIR.partial"
+    tar -xJf "$archive" -C "$SPARKLE_DIR.partial"
+    rm -f "$archive"
+    mv "$SPARKLE_DIR.partial" "$SPARKLE_DIR"
+fi
 [ -d "$SPARKLE_DIR/Sparkle.framework" ] || { echo "Sparkle.framework not found in $SPARKLE_DIR (set SPARKLE_DIR)"; exit 1; }
 
 # Sentry.framework, for crash reports (App/CrashReports.swift): the Mac part
@@ -85,6 +106,10 @@ swiftc -O -parse-as-library -target "$ARCH-apple-macos$MIN" \
 # Sparkle, for updates (see App/Updates.swift).
 rm -rf "$APP/Contents/Frameworks"; mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+# Its Downloader and Installer XPC services are only for sandboxed apps
+# (Sparkle's sandboxing guide); this one isn't, so they'd be dead weight.
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" \
+    "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
 if [ ${#SENTRY_FLAGS[@]} -gt 0 ]; then
 	# Just what runs, for this Mac's architecture (it's 29 MB whole).
 	ditto --arch "$ARCH" "$SENTRY_DIR/Sentry.framework" "$APP/Contents/Frameworks/Sentry.framework"
@@ -104,6 +129,8 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" mac/App/
 /usr/libexec/PlistBuddy -c "Add CLCommit string $COMMIT" "$APP/Contents/Info.plist"
 cp res/cl_gatedefs.xml "$APP/Contents/Resources/"
 cp mac/App/CedarLogic.icns mac/App/CedarLogicDocument.icns mac/App/LaunchIcon.png mac/App/FirstLaunch.m4a "$APP/Contents/Resources/"
+# Help > Open the Practice Circuit (the one Windows and Linux ship too).
+cp res/samples/practice.cdl "$APP/Contents/Resources/"
 # The original CedarLogic help pages, for Help > Classic Help. (The icons,
 # LaunchIcon.png included, come from mac/Tools/make-icons.sh.)
 rm -rf "$APP/Contents/Resources/ClassicHelp"
@@ -118,7 +145,7 @@ rm -f "$APP/Contents/Resources/CedarLogicNative.icns"
 # expects (its APP_KEY: not a secret, it keeps out passers-by).
 /usr/libexec/PlistBuddy -c "Add FeedbackURL string ${FEEDBACK_URL:-https://cedarlogic.netlify.app}" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add FeedbackKey string ${FEEDBACK_KEY:-96611596304230a4c3c21e22b1b3e523}" "$APP/Contents/Info.plist"
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1
+mac/sign-app.sh "$APP"
 echo "Built $APP"
 [ "${OPEN:-0}" = 1 ] && open "$APP"
 exit 0

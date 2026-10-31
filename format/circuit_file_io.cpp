@@ -219,7 +219,10 @@ CircuitFile readCircuitFile(const std::string &text) {
 		throw std::runtime_error("circuit file: trailing content after the document");
 
 	CircuitFile cf;
-	cf.formatVersion = static_cast<int>(kvNum(root, "version"));
+	// Any version but 3 is refused below; one too big for an int must not
+	// become 3 on the way (converting it is undefined).
+	const double version = kvNum(root, "version");
+	cf.formatVersion = (version >= 0 && version <= 1000) ? static_cast<int>(version) : -1;
 	if (cf.formatVersion != 3)
 		throw std::runtime_error("circuit file: unsupported formatVersion " +
 		                         std::to_string(cf.formatVersion));
@@ -244,7 +247,10 @@ CircuitFile readCircuitFile(const std::string &text) {
 	for (const SNode &c : root.items) {
 		if (!c.isList() || c.head() != "page") continue;
 		Page pg;
-		pg.index = static_cast<int>(parseLong(item(c, 1), "(page ...)"));
+		// An index past int is no page (the loader skips negative ones), not
+		// whatever page its low bits happen to name.
+		const long index = parseLong(item(c, 1), "(page ...)");
+		pg.index = (index >= 0 && index <= 1000000) ? static_cast<int>(index) : -1;
 		for (const SNode &e : c.items) {
 			if (!e.isList()) continue;
 			if (e.head() == "name") pg.name = item(e, 1);

@@ -15,8 +15,7 @@ void GUICanvas::insertGate(unsigned long id, guiGate* gate, float x, float y) {
 void GUICanvas::removeGate(unsigned long id) {
 	auto it = gateList.find(id);
 	if (it == gateList.end()) return;
-	collisionChecker.removeObject(it->second);
-	collisionChecker.update();
+	collisionChecker.removeObject(it->second);   // (no update(): see removeObject)
 	gateList.erase(it);
 }
 
@@ -30,8 +29,7 @@ void GUICanvas::removeWire(unsigned long wireId) {
 	auto it = wireList.find(wireId);
 	if (it == wireList.end()) return;
 	guiWire* wire = it->second;
-	collisionChecker.removeObject(wire);
-	collisionChecker.update();
+	collisionChecker.removeObject(wire);   // (no update(): see removeObject)
 	for (IDType busLineId : wire->getIDs()) wireList.erase(busLineId);
 }
 

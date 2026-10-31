@@ -29,6 +29,9 @@
 //   CL_FUZZ_UNDOFIND=1  when UNDOALL would fail, find the fewest steps that show
 //                       it (undo k, redo k) and name them; with _DUMP, keeps both
 //   CL_FUZZ_WATCH=<wire>[:<gate>:<pin>]  print that wire (and pin) as it changes
+//   CL_FUZZ_SAVEBEFORE=n  with _DUMP: keep the circuit before op n (to make a case of it)
+//   CL_FUZZ_CHECK=1     after every op, cl_document_check: gates and wires agree,
+//                       and each pin a wire holds is recorded on a segment reaching it
 #include "DocumentImpl.h"
 #include "guiGate.h"
 #include "guiWire.h"
@@ -817,6 +820,12 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 		if (getenv("CL_FUZZ_TRACE")) printf("  op %d: case %d (page %d of %d)%s\n", n, op, page, pages, cl_edit_is_floating(doc) ? " floating" : "");
 		// CL_FUZZ_UNDOSTEP=1: an operation that adds one undo step is undone and
 		// redone at once: Undo must give back the circuit before it, Redo after it.
+		// CL_FUZZ_SAVEBEFORE=<op>: keep the circuit as it is before that op, as
+		// <CL_FUZZ_DUMP>/before-op.cdl, to make a regression case from it.
+		if (const char* at = getenv("CL_FUZZ_SAVEBEFORE")) if (atoi(at) == n && getenv("CL_FUZZ_DUMP")) {
+			const std::string text = cl_document_save_text(doc);
+			if (FILE* f = fopen((std::string(getenv("CL_FUZZ_DUMP")) + "/before-op.cdl").c_str(), "w")) { fwrite(text.data(), 1, text.size(), f); fclose(f); }
+		}
 		const bool stepCheck = undoStep && idle(doc);
 		CLDocument* const before = doc;
 		std::string pre;
@@ -907,6 +916,10 @@ static bool oneSeed(unsigned long long seed, int ops, const char* startFile, std
 		}
 		if (simFrames) for (int i = 0, k = 1 + ri(3); i < k; i++) cl_document_tick(doc, 16.7);
 		{ std::string what; if (getenv("CL_FUZZ_INVARIANT") && danglingConnection(doc, what)) { printf("seed %llu: after op %d (case %d): %s\n", seed, n, op, what.c_str()); cl_document_close(doc); return false; } }
+		if (getenv("CL_FUZZ_CHECK") && idle(doc)) {
+			char why[512];
+			if (!cl_document_check(doc, why, sizeof why)) { printf("seed %llu: after op %d (case %d): %s\n", seed, n, op, why); cl_document_close(doc); return false; }
+		}
 		if (reopenEvery > 0 && (n + 1) % reopenEvery == 0 && idle(doc)) {
 			std::string what;
 			if (!reopenCheck(doc, what)) { printf("seed %llu: after op %d (case %d): %s\n", seed, n, op, what.c_str()); cl_document_close(doc); return false; }

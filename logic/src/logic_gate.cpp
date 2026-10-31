@@ -785,7 +785,10 @@ void Gate_EQUIVALENCE::gateProcess( void ) {
 	
 	StateType outState;
 	
-	if( (inputStates[0] == ONE && inputStates[1] == ONE)
+	// It compares two inputs; a file can give it fewer.
+	if( inputStates.size() < 2 ) {
+		outState = UNKNOWN;
+	} else if( (inputStates[0] == ONE && inputStates[1] == ONE)
 	  ||(inputStates[0] == ZERO && inputStates[1] == ZERO )){
 		outState = ONE;
 	}else if( (inputStates[0] == ZERO && inputStates[1] == ONE)

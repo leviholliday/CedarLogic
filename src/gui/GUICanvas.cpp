@@ -212,7 +212,7 @@ void GUICanvas::removeWire(unsigned long wireId) {
 	collisionChecker.update();
 
 	// Release ID's owned by the wire.
-	for (int busLineId : wire->getIDs()) {
+	for (IDType busLineId : wire->getIDs()) {
 		auto thisWire = wireList.find(busLineId);
 		if (thisWire != wireList.end()) {
 			wireList.erase(thisWire);
