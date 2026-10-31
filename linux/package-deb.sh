@@ -40,7 +40,7 @@ cat > "$ROOT/DEBIAN/control" <<EOT
 Package: cedarlogic
 Version: $DEBVERSION
 Architecture: $DEBARCH
-Maintainer: CedarLogic <leviholliday7@gmail.com>
+Maintainer: CedarLogic <224852181+leviholliday@users.noreply.github.com>
 Installed-Size: $SIZE
 Depends: libc6 (>= 2.35), libgtk-3-0, libcairo2, libfontconfig1, libfreetype6, libstdc++6, libssl3 (>= 3.0.0) | libssl3t64 (>= 3.0.0)
 Recommends: curl
