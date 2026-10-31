@@ -2894,6 +2894,11 @@ void CircuitWindow::setDrawingShown(bool shown) {
 
 void CircuitWindow::clearDrawing() {
 	if (pageInkReadOnly()) { note(ink::readOnlyNote()); return; }
+	if (!pageHasInk()) { note("Nothing drawn on this page."); return; }
+	// Asked first, as the website does (it's one Undo away, and says so).
+	if (!askConfirm(hwnd, "Clear all drawing on this page?", "Every pen and highlighter stroke on this page goes. You can undo this.",
+	                "Clear Drawing", "Cancel", true))
+		return;
 	const int n = cl_ink_clear(doc, currentPage());
 	if (n <= 0) { note("Nothing drawn on this page."); return; }
 	inkEdited();

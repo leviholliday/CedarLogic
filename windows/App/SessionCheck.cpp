@@ -1410,7 +1410,15 @@ void Session::action(int a) {
 	case 109: named("Your Circuits"); expect(rng.chance(30)); dialogs++; w->run(CMD_OPEN); unexpect(); break;
 	case 110: named("the side panel"); w->run(CMD_PALETTE); break;
 	case 111: named("the status bar"); w->run(CMD_STATUS_BAR); break;
-	case 112: named("hide or show the drawing"); w->run(rng.chance(70) ? CMD_SHOW_DRAWING : CMD_CLEAR_DRAWING); break;
+	case 112: {
+		named("hide or show the drawing");
+		const bool clear = !rng.chance(70);
+		// Clearing asks first (when there's something to clear): answered yes.
+		if (clear) expect(true);
+		w->run(clear ? CMD_CLEAR_DRAWING : CMD_SHOW_DRAWING);
+		if (clear) unexpect();
+		break;
+	}
 	case 113: named("connect or disconnect all pages"); w->run(rng.chance(50) ? CMD_CONNECT_ALL_PAGES : CMD_DISCONNECT_ALL_PAGES); break;
 	case 114: {
 		named("a tab's right-click menu");
