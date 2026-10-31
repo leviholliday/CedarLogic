@@ -521,20 +521,23 @@ string guiGate::checkHotspots( GLfloat x, GLfloat y, GLfloat delta ) {
 	mBox.extendRight( delta );
 	mouse.setBBox( mBox );
 
-	// Check if any hotspots hit the mouse:
+	// Of the hotspots that hit the mouse, the nearest (ties: the first by
+	// name). The hits come in a set ordered by address, so taking the first
+	// of them picked one of two close pins at random, run to run.
 	CollisionGroup results = this->checkSubsToObj( &mouse );
-	CollisionGroup::iterator rs = results.begin();
-	while( rs != results.end() ) {
-		// If there were any hotspots that hit, then return
-		// the first one to the caller:
-		if( (*rs)->getType() == COLL_GATE_HOTSPOT ) {
-			return ((gateHotspot*) *rs)->name;
+	gateHotspot* best = nullptr;
+	float bestDist = 0;
+	for( klsCollisionObject* hit : results ) {
+		if( hit->getType() != COLL_GATE_HOTSPOT ) continue;
+		gateHotspot* hs = (gateHotspot*) hit;
+		const GLPoint2f at = hs->getLocation();
+		const float d = (at.x - x) * (at.x - x) + (at.y - y) * (at.y - y);
+		if( best == nullptr || d < bestDist || (d == bestDist && hs->name < best->name) ) {
+			best = hs;
+			bestDist = d;
 		}
-
-		rs++;
 	}
-
-	return "";
+	return best != nullptr ? best->name : string();
 }
 
 

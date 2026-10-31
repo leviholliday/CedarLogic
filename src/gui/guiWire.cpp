@@ -826,8 +826,23 @@ bool guiWire::startSegDrag(klsCollisionObject* mouse) {
 	// If there are no segments then we shouldn't drag one
 	if (cg.size() == 0) return false;
 	this->detachSubObjects(); // prevent coll checker pointers from invalidating	
-	// Otherwise just grab the first one found and fix the connection points with new segments
+	// Take the segment nearest the pointer (ties: the lowest id), and fix the
+	// connection points with new segments. (The hits come in a set ordered by
+	// address: taking the first of them, at a corner where two runs meet,
+	// dragged one or the other at random, run to run.)
+	const GLPoint2f at((mouse->getBBox().getLeft() + mouse->getBBox().getRight()) / 2,
+	                   (mouse->getBBox().getBottom() + mouse->getBBox().getTop()) / 2);
+	auto distanceTo = [&at](const wireSegment* s) {
+		const float cx = (std::max)((std::min)(s->begin.x, s->end.x), (std::min)(at.x, (std::max)(s->begin.x, s->end.x)));
+		const float cy = (std::max)((std::min)(s->begin.y, s->end.y), (std::min)(at.y, (std::max)(s->begin.y, s->end.y)));
+		return (cx - at.x) * (cx - at.x) + (cy - at.y) * (cy - at.y);
+	};
 	CollisionGroup::iterator cgWalk = cg.begin();
+	for (CollisionGroup::iterator it = cg.begin(); it != cg.end(); ++it) {
+		const wireSegment *a = (wireSegment*)(*it), *b = (wireSegment*)(*cgWalk);
+		const float da = distanceTo(a), db = distanceTo(b);
+		if (da < db || (da == db && a->id < b->id)) cgWalk = it;
+	}
 	GLPoint2f vertex;
 	// Don't mess up the pointers; just add to this vector until we don't need the pointer anymore
 	vector < wireSegment > segsToAddWhenFound;
@@ -850,7 +865,7 @@ bool guiWire::startSegDrag(klsCollisionObject* mouse) {
 		}
 	}
 	((wireSegment*)(*cgWalk))->connections.clear();
-	currentDragSegment = ((wireSegment*)(*(cg.begin())))->id;
+	currentDragSegment = ((wireSegment*)(*cgWalk))->id;
 	for (unsigned int i = 0; i < segsToAddWhenFound.size(); i++) {
 		segMap[segsToAddWhenFound[i].id] = segsToAddWhenFound[i];
 	}
