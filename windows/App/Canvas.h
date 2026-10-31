@@ -105,7 +105,9 @@ private:
 	double lastW = 0, lastH = 0;
 	double lastPaintAt = 0;            // nowSeconds() of the last paint
 	double frameSeconds = 1.0 / 60;    // the display's refresh, read as a drag starts
+	bool frameOwed = false;            // a WM_PAINT put off till the next refresh
 	void paceFrame();
+	bool pacingFrames() const;
 	void noteFrameRate();
 
 	// An eased zoom in progress.

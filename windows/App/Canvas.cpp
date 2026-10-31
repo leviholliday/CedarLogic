@@ -21,6 +21,7 @@ const double kMinUpp = 0.004;   // very close
 const double kMaxUpp = 1.0;     // very far
 const double kZoomTime = 0.14;  // seconds, as the wx app's eased zoom
 const UINT_PTR kTagTimer = 1;   // the pointer has rested on a wire
+const UINT_PTR kOwedFrameTimer = 2;   // a frame put off while dragging (see WM_PAINT)
 
 // The WM_MOUSEMOVE being handled, for the drag log.
 LPARAM gMoveLp = 0;
@@ -122,7 +123,17 @@ void Canvas::redrawWhileMoving() {
 
 void Canvas::paceFrame() {
 	if (draglog::legacy()) return;
-	if (nowSeconds() - lastPaintAt >= frameSeconds * 0.9) UpdateWindow(hwnd);
+	if (nowSeconds() - lastPaintAt >= frameSeconds * 0.9) {
+		// A frame put off (WM_PAINT below) left nothing to update: asked again.
+		if (frameOwed) InvalidateRect(hwnd, nullptr, FALSE);
+		UpdateWindow(hwnd);
+	}
+}
+
+// A drag, a pan, or gates on the pointer: frames go at the display's pace.
+bool Canvas::pacingFrames() const {
+	if (draglog::legacy()) return false;
+	return drag == Drag::Edit || drag == Drag::Pan || win->isFloating();
 }
 
 void Canvas::noteFrameRate() {
@@ -932,6 +943,24 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 	double vx, vy;
 	switch (msg) {
 	case WM_PAINT:
+		// While something follows the pointer: one frame a display refresh.
+		// Windows also paints whenever the queue empties between two moves
+		// -- after nearly every move, with draws this quick -- so a drag drew
+		// some 330 frames a second on a 60 Hz screen, four in five of them
+		// never shown (windows/PC-TEST.md). One that comes sooner than the
+		// screen could show it is put off: the next move's paceFrame draws
+		// it at the refresh (as before, so moves still can't starve the
+		// paint), or, if the pointer has stopped, the timer does.
+		if (pacingFrames() && nowSeconds() - lastPaintAt < frameSeconds * 0.9) {
+			ValidateRect(hwnd, nullptr);
+			if (!frameOwed) {
+				frameOwed = true;
+				const double wait = frameSeconds - (nowSeconds() - lastPaintAt);
+				SetTimer(hwnd, kOwedFrameTimer, (UINT)std::max(1.0, std::ceil(wait * 1000)), nullptr);
+			}
+			return 0;
+		}
+		if (frameOwed) { KillTimer(hwnd, kOwedFrameTimer); frameOwed = false; }
 		paint();
 		return 0;
 	case WM_ERASEBKGND:
@@ -973,6 +1002,13 @@ LRESULT Canvas::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		if (drag == Drag::None && cl_edit_hover_clear(win->document())) redraw();
 		return 0;
 	case WM_TIMER:
+		if (wp == kOwedFrameTimer) {
+			// The frame put off below: due now (the pointer stopped, so no
+			// move will ask for it).
+			KillTimer(hwnd, kOwedFrameTimer);
+			frameOwed = false;
+			InvalidateRect(hwnd, nullptr, FALSE);
+		}
 		if (wp == kTagTimer) {
 			KillTimer(hwnd, kTagTimer);
 			tagWaiting = false;
