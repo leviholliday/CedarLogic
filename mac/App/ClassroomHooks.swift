@@ -1,7 +1,9 @@
 // The classroom core's platform hooks on the Mac (CLASSROOM.md 6.4), the part
 // that needs no window: CryptoKit's P-256 for the class's key pair and the
 // sealed envelopes, CommonCrypto's PBKDF2 for the join code, the Classroom
-// folder (0700) with its files written atomically at 0600, its flock, and the
+// folder (0700, out of backups) with its files written atomically at 0600 --
+// but teaching.json, a teacher's class keys, in the Keychain
+// (KeychainFile.swift) -- its flock, and the
 // live connection's WebSockets (URLSessionWebSocketTask, 3.14). The crypto,
 // HTTP and main-thread hooks are Sync's (SyncHooks.swift) as they are.
 // The app adds its UI hooks on top (Group 7); mac/Tools/classroom-check.swift
@@ -19,6 +21,9 @@ final class ClassroomPlatform {
     private let syncHooks: UnsafeMutablePointer<CLSyncHooks>
     private var lockFD: Int32 = -1
     private let lockGuard = NSLock()
+    /// The Keychain wouldn't give teaching.json back this run: saving over it
+    /// could only lose classes, so it isn't saved until the next launch.
+    private var teachingUnreadable = false
     /// The live connection's sockets (3.14).
     let sockets = ClassroomSockets()
 
@@ -127,15 +132,34 @@ final class ClassroomPlatform {
         return parts.reduce(dir) { $0.appendingPathComponent(String($1)) }
     }
 
-    /// A folder only this user can open (0700), and its parents.
+    /// A folder only this user can open (0700), and its parents; the
+    /// Classroom folder itself is kept out of backups.
     @discardableResult
     func makeDir(_ url: URL) -> Bool {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        if url == dir { url.excludeFromBackup() }
         return chmod(url.path, 0o700) == 0
     }
 
+    /// teaching.json, in the Keychain (nil for a tool with no Keychain service, or any other file).
+    private func keychainFile(_ u: URL) -> KeychainFile? {
+        guard u.path == dir.appendingPathComponent("teaching.json").path, let service = sync.keychainService else { return nil }
+        return KeychainFile(service: service, file: u, label: "CedarLogic Classroom: classes you teach")
+    }
+
     func loadFile(_ name: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
-        guard let u = url(name), let data = FileManager.default.contents(atPath: u.path) else { return nil }
+        guard let u = url(name) else { return nil }
+        var found: Data?
+        if let keychain = keychainFile(u) {
+            switch keychain.load() {
+            case .data(let d): found = d
+            case .none: break
+            case .unreadable: teachingUnreadable = true
+            }
+        } else {
+            found = FileManager.default.contents(atPath: u.path)
+        }
+        guard let data = found else { return nil }
         return data.withUnsafeBytes { raw -> UnsafeMutablePointer<CChar>? in
             guard let buf = malloc(data.count + 1)?.assumingMemoryBound(to: CChar.self) else { return nil }
             if data.count > 0 { memcpy(buf, raw.baseAddress!, data.count) }
@@ -144,10 +168,16 @@ final class ClassroomPlatform {
         }
     }
 
-    /// Written to a 0600 temporary file beside it, then renamed over the old one: never half
+    /// teaching.json into the Keychain. Anything else -- and teaching.json when the Keychain says
+    /// no -- to a 0600 temporary file beside it, then renamed over the old one: never half
     /// written, never readable by anyone else for a moment (as Sync's secret).
     func saveFile(_ name: UnsafePointer<CChar>?, _ text: UnsafePointer<CChar>?) -> Bool {
         guard let u = url(name), let text, makeDir(dir), makeDir(u.deletingLastPathComponent()) else { return false }
+        if let keychain = keychainFile(u) {
+            if teachingUnreadable { return false }
+            if keychain.save(Data(bytes: text, count: strlen(text))) { return true }
+            // Else the file below, the newest copy then: read before the Keychain's.
+        }
         let tmp = u.deletingLastPathComponent().appendingPathComponent(".\(u.lastPathComponent)-\(getpid()).tmp")
         unlink(tmp.path)
         let fd = Darwin.open(tmp.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
