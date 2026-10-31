@@ -3,8 +3,10 @@
 #
 #   packaging/homebrew/bump.sh               the newest full release that has a Mac DMG
 #   packaging/homebrew/bump.sh 0.4           that version (release v0.4)
-#       --cask FILE      the cask to rewrite (default: Casks/cedarlogic.rb next to this script;
-#                        point it at the tap's checkout to bump the tap itself)
+#       --tap DIR        a checkout of the tap, github.com/leviholliday/homebrew-tap
+#                        (default $CEDARLOGIC_TAP): bump this repo's copy, then copy it to
+#                        DIR/Casks/cedarlogic.rb, so the two stay the same file
+#       --cask FILE      the cask to rewrite (default: Casks/cedarlogic.rb next to this script)
 #       --repo O/R       the releases repo (default leviholliday/CedarLogic-Releases)
 #       --no-mount       don't open the DMG to check the app inside it
 #       --dry-run        check everything, print the new lines, change nothing
@@ -13,14 +15,17 @@
 # (CedarLogic-<version>-Mac.dmg), downloads it, checks it against the sha256
 # GitHub keeps for the file, opens it read-only and checks it holds
 # CedarLogic.app with that version and bundle id (and says which CPUs it runs
-# on), then writes the version and sha256 into the cask. It never pushes:
-# commit and push the tap yourself (packaging/homebrew/README.md).
+# on), then writes the version and sha256 into the cask (and the tap's copy,
+# with --tap). It never commits or pushes: commit and push the tap yourself
+# (packaging/homebrew/README.md).
 set -euo pipefail
 
 REPO=leviholliday/CedarLogic-Releases
 HERE=$(cd "$(dirname "$0")" && pwd)
 CASK=$HERE/Casks/cedarlogic.rb
 BUNDLE_ID=com.leviholliday.cedarlogic.native
+TAP=${CEDARLOGIC_TAP:-}
+TAP_URL=github.com/leviholliday/homebrew-tap
 VERSION='' MOUNT=1 DRY=0
 
 die() { echo "bump: $*" >&2; exit 1; }
@@ -28,16 +33,33 @@ say() { echo "bump: $*" >&2; }
 
 while [ $# -gt 0 ]; do
 	case "$1" in
+		--tap) TAP=$2; shift 2 ;;
 		--cask) CASK=$2; shift 2 ;;
 		--repo) REPO=$2; shift 2 ;;
 		--no-mount) MOUNT=0; shift ;;
 		--dry-run) DRY=1; shift ;;
-		-h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		-*) die "unknown option $1" ;;
 		*) [ -z "$VERSION" ] || die "two versions given"; VERSION=${1#v}; shift ;;
 	esac
 done
 [ -f "$CASK" ] || die "no cask at $CASK"
+TAP_CASK=
+if [ -n "$TAP" ]; then
+	TAP=${TAP%/}
+	[ -d "$TAP/.git" ] || die "$TAP isn't a git checkout (clone https://$TAP_URL there first)"
+	case "$(git -C "$TAP" remote get-url origin 2>/dev/null)" in
+		*"$TAP_URL"|*"$TAP_URL.git"|*"${TAP_URL#github.com/}"|*"${TAP_URL#github.com/}.git") ;;
+		*) say "note: $TAP's origin isn't $TAP_URL" ;;
+	esac
+	[ -z "$(git -C "$TAP" status --porcelain -- Casks/cedarlogic.rb)" ] || die "$TAP/Casks/cedarlogic.rb has uncommitted changes"
+	TAP_CASK=$TAP/Casks/cedarlogic.rb
+	# The tap's copy should be this repo's copy (apart from version/sha256, if it's behind).
+	if [ -f "$TAP_CASK" ] && ! diff -q <(grep -vE '^  (version|sha256) "' "$CASK") <(grep -vE '^  (version|sha256) "' "$TAP_CASK") >/dev/null; then
+		diff -u "$TAP_CASK" "$CASK" >&2 || true
+		die "the tap's cask differs from $CASK beyond version/sha256 (above): make them the same first"
+	fi
+fi
 command -v curl >/dev/null || die "needs curl"
 command -v python3 >/dev/null || die "needs python3"
 
@@ -127,14 +149,23 @@ OLD_V=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$CASK" | head -1)
 OLD_S=$(sed -n 's/^  sha256 "\(.*\)"$/\1/p' "$CASK" | head -1)
 [ -n "$OLD_V" ] && [ -n "$OLD_S" ] || die "couldn't find the cask's version and sha256 lines"
 if [ "$DRY" = 1 ]; then
-	say "dry run: would change version $OLD_V -> $VERSION, sha256 $OLD_S -> $SHA in $CASK"
+	say "dry run: would change version $OLD_V -> $VERSION, sha256 $OLD_S -> $SHA in $CASK${TAP_CASK:+ and $TAP_CASK}"
 	exit 0
 fi
 TMPC="$WORK/cask.rb"
 sed -e "s/^  version \".*\"$/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"$/  sha256 \"$SHA\"/" "$CASK" > "$TMPC"
 cat "$TMPC" > "$CASK"
 say "updated $CASK: version $OLD_V -> $VERSION"
+if [ -n "$TAP_CASK" ]; then
+	mkdir -p "$TAP/Casks"
+	cat "$CASK" > "$TAP_CASK"
+	say "updated $TAP_CASK (the same file)"
+fi
 if [ "$OLD_V" = "$VERSION" ] && [ "$OLD_S" != "$SHA" ] && [ "$OLD_S" != "$(printf "%064d" 0)" ]; then
 	say "WARNING: same version, different sha256: the release's DMG was replaced. Homebrew users with the old one cached will see a checksum error until they 'brew update'."
 fi
-say "next: check it (brew style / brew audit, see README), then commit and push the tap"
+if [ -n "$TAP_CASK" ]; then
+	say "next: check it (brew style / brew audit leviholliday/tap/cedarlogic, see README), then commit and push $TAP"
+else
+	say "next: check it (brew style / brew audit, see README), then bump the tap (--tap DIR), commit and push it"
+fi
