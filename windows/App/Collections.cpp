@@ -196,16 +196,19 @@ std::string withStepClockKey(std::string text) {
 	return text;
 }
 
-// The Mac's built-in templates, as files in res\templates (made from the Mac
-// app's by windows/make-templates.py): templates.txt lists each one's id,
-// group, name, line and whether it has a Clock choice. Read once.
+// The Mac's built-in templates, as files in res\templates (written by
+// mac/Tools/export-templates.sh from the Mac's own Templates.swift; the
+// Linux app and the headless checks read the same folder): index.tsv lists
+// each one's id, group, name, line and its Clock choices ("running,pulse");
+// the files are template-<id>.cdl (and -running, -pulse). The Lab Page is
+// built here instead, with your name on it. Read once.
 const std::vector<Template>& shipped() {
 	static std::vector<Template> list;
 	static bool read = false;
 	if (read) return list;
 	read = true;
 	const std::string dir = resourcesDir().empty() ? std::string() : resourcesDir() + "\\templates";
-	std::istringstream lines(readFile(dir + "\\templates.txt"));
+	std::istringstream lines(readFile(dir + "\\index.tsv"));
 	std::string line;
 	while (std::getline(lines, line)) {
 		if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -217,18 +220,17 @@ const std::vector<Template>& shipped() {
 			if (tab == std::string::npos) break;
 			at = tab + 1;
 		}
-		if (f.size() < 4) continue;
+		if (f.size() < 4 || f[0].empty() || f[0] == "builtin-lab") continue;
 		Template t;
 		t.id = f[0];
 		t.group = f[1];
 		t.name = f[2];
 		t.detail = f[3];
-		t.text = readFile(dir + "\\" + t.id + ".cdl");
+		t.text = readFile(dir + "\\template-" + t.id + ".cdl");
 		if (t.text.empty()) continue;
-		if (f.size() > 4 && f[4] == "clock") {
-			t.runningText = readFile(dir + "\\" + t.id + "-running.cdl");
-			t.pulseText = readFile(dir + "\\" + t.id + "-pulse.cdl");
-		}
+		const std::string choices = f.size() > 4 ? f[4] : "";
+		if (choices.find("running") != std::string::npos) t.runningText = readFile(dir + "\\template-" + t.id + "-running.cdl");
+		if (choices.find("pulse") != std::string::npos) t.pulseText = readFile(dir + "\\template-" + t.id + "-pulse.cdl");
 		list.push_back(t);
 	}
 	return list;
