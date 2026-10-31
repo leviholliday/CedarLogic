@@ -29,6 +29,7 @@
 #include "command/cmdSetParams.h"
 
 #include <algorithm>
+#include <map>
 #include <cfloat>
 #include <cmath>
 #include <sstream>
@@ -167,6 +168,14 @@ void commitMove(CLDocument* doc, GUICanvas* page, std::vector<GateState>& moved,
 	std::map<unsigned long, SegmentMap> before, after;
 	for (auto& ws : movedWires) before[ws.id] = ws.oldWireTree;
 	for (auto& ws : attached) before.emplace(ws.id, ws.oldWireTree);
+	// The wires stretch with the parts, a pin at a time, and the merge after
+	// tidies them. Now and then (several pins of one part on one wire, runs
+	// left lying along each other) that left a wire in two pieces, or a pin
+	// off its end, until Save and Reopen. Such a wire is routed fresh from its
+	// pins instead -- the pins are what it means -- as part of this step.
+	for (auto& e : before)
+		if (guiWire* w = doc->circuit.getWire(e.first))
+			if (!w->isSoundShape()) w->straightenRoute();
 	for (auto& e : before) if (guiWire* w = doc->circuit.getWire(e.first)) after[e.first] = w->getSegmentMap();
 	std::vector<MoveCommand::Place> places;
 	for (auto& gs : moved) {
@@ -314,8 +323,47 @@ struct Nearby { unsigned long srcGate; std::string srcPin; unsigned long dstGate
 // connected to, not from.
 std::vector<Nearby> findNearby(GUICanvas* page, float radius, bool moving) {
 	const float tie = 1.1f;
-	std::vector<Nearby> cands;
 	auto isMoving = [moving](guiGate* g) { return g->isSelected() && !(moving && g->isLocked()); };
+
+	// The free pins that could be connected to, each placed once, in the order
+	// the page lists them; then a grid of cells twice the radius across, so
+	// each moving pin looks only at the 3 x 3 cells around it. (Every pin
+	// against every pin took minutes with a few thousand parts on a page.)
+	// A pin outside the cells is more than the radius away, and the pins in
+	// them are tried in the page's order, so the result is the same as trying
+	// them all: ties go the same way.
+	struct Pin { guiGate* gate; std::string name; float x, y; };   // (getHotspotList is a copy)
+	std::vector<Pin> targets;
+	for (auto& de : *page->getGateList()) {
+		guiGate* dst = de.second;
+		if (dst == nullptr || isMoving(dst)) continue;
+		for (auto& dhs : dst->getHotspotList()) {
+			if (dst->isConnected(dhs.first)) continue;
+			Pin p{ dst, dhs.first, 0, 0 };
+			dst->getHotspotCoords(dhs.first, p.x, p.y);
+			targets.push_back(p);
+		}
+	}
+	const double cell = (std::max)(2.0 * (double)radius, 1e-3);
+	// A cell's key; false for a place too far out (or not a number) for one.
+	auto cellOf = [cell](float x, float y, long long& cx, long long& cy) {
+		const double fx = std::floor(x / cell), fy = std::floor(y / cell);
+		if (!(std::fabs(fx) < 1e15 && std::fabs(fy) < 1e15)) return false;
+		cx = (long long)fx;
+		cy = (long long)fy;
+		return true;
+	};
+	auto key = [](long long cx, long long cy) { return std::make_pair(cx, cy); };
+	std::map<std::pair<long long, long long>, std::vector<size_t>> grid;
+	std::vector<size_t> anywhere;   // pins with no cell: tried by every pin
+	for (size_t i = 0; i < targets.size(); i++) {
+		long long cx, cy;
+		if (cellOf(targets[i].x, targets[i].y, cx, cy)) grid[key(cx, cy)].push_back(i);
+		else anywhere.push_back(i);
+	}
+
+	std::vector<Nearby> cands;
+	std::vector<size_t> near;
 	for (auto& se : *page->getGateList()) {
 		guiGate* src = se.second;
 		if (src == nullptr || !isMoving(src)) continue;
@@ -323,21 +371,29 @@ std::vector<Nearby> findNearby(GUICanvas* page, float radius, bool moving) {
 			if (src->isConnected(shs.first)) continue;
 			float sx, sy;
 			src->getHotspotCoords(shs.first, sx, sy);
+			near = anywhere;
+			long long cx, cy;
+			if (cellOf(sx, sy, cx, cy)) {
+				for (long long gx = cx - 1; gx <= cx + 1; gx++)
+					for (long long gy = cy - 1; gy <= cy + 1; gy++) {
+						auto it = grid.find(key(gx, gy));
+						if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+					}
+			} else {
+				near.resize(targets.size());
+				for (size_t i = 0; i < near.size(); i++) near[i] = i;
+			}
+			std::sort(near.begin(), near.end());
+			near.erase(std::unique(near.begin(), near.end()), near.end());
 			guiGate* best = nullptr;
 			std::string bestPin;
 			float bestDist = -1, second = -1;
-			for (auto& de : *page->getGateList()) {
-				guiGate* dst = de.second;
-				if (dst == nullptr || dst == src || isMoving(dst)) continue;
-				for (auto& dhs : dst->getHotspotList()) {
-					if (dst->isConnected(dhs.first)) continue;
-					float dx, dy;
-					dst->getHotspotCoords(dhs.first, dx, dy);
-					const float d = std::sqrt((dx - sx) * (dx - sx) + (dy - sy) * (dy - sy));
-					if (d > radius) continue;
-					if (bestDist < 0 || d < bestDist) { second = bestDist; bestDist = d; best = dst; bestPin = dhs.first; }
-					else if (second < 0 || d < second) second = d;
-				}
+			for (size_t i : near) {
+				const Pin& t = targets[i];
+				const float d = std::sqrt((t.x - sx) * (t.x - sx) + (t.y - sy) * (t.y - sy));
+				if (d > radius) continue;
+				if (bestDist < 0 || d < bestDist) { second = bestDist; bestDist = d; best = t.gate; bestPin = t.name; }
+				else if (second < 0 || d < second) second = d;
 			}
 			if (best == nullptr) continue;
 			if (second >= 0 && second < bestDist * tie) continue;
@@ -897,6 +953,23 @@ bool cl_edit_paste(CLDocument* doc, int pageIndex, const char* text, double x, d
 		mw->Do();
 		block->addCommand(mw);
 	}
+	// A wire the move didn't carry whole (one on a part locked in place, which
+	// stays) is left stretched between a part that moved and one that didn't;
+	// one whose shape that broke is routed fresh from its pins, in the paste.
+	{
+		std::set<unsigned long> seen;
+		for (auto& gs : gates) {
+			guiGate* gt = doc->circuit.getGate(gs.id);
+			if (gt == nullptr) continue;
+			for (auto& hs : gt->getHotspotList()) {
+				guiWire* w = gt->isConnected(hs.first) ? gt->getConnection(hs.first) : nullptr;
+				if (w == nullptr || !seen.insert(w->getID()).second || w->isSoundShape()) continue;
+				const SegmentMap shape = w->getSegmentMap();
+				w->straightenRoute();
+				block->addCommand(new cmdMoveWire(&doc->circuit, w->getID(), shape, w->getSegmentMap()));
+			}
+		}
+	}
 	submit(doc, page, block);
 	page->collisionUpdate();
 	scratch = klsClipboard::rewrittenText;
@@ -1296,8 +1369,13 @@ void cl_edit_disconnect_pin(CLDocument* doc, int pageIndex, double x, double y, 
 	if (!g->isConnected(pin)) return;
 	guiWire* w = g->getConnection(pin);
 	// As the wx canvas does it: off the pin, or the whole wire when this was
-	// one of its only two ends.
-	if (w->numConnections() > 2) submit(doc, page, new cmdDisconnectWire(&doc->circuit, w->getID(), gate, pin));
+	// one of its only two ends. A pin sharing its spot (a RAM's DATA_IN_n and
+	// DATA_OUT_n) comes off with it, so it counts too: a wire left holding one
+	// pin joined nothing, and its shape still recorded the pins taken off.
+	long leaving = 1;
+	const std::string pal = g->getHotspotPal(pin);
+	if (!pal.empty() && g->isConnected(pal) && g->getConnection(pal) == w) leaving++;
+	if (w->numConnections() - leaving >= 2) submit(doc, page, new cmdDisconnectWire(&doc->circuit, w->getID(), gate, pin));
 	else submit(doc, page, new cmdDeleteWire(&doc->circuit, page, w->getID()));
 	page->collisionUpdate();
 }

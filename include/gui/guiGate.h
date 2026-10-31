@@ -31,6 +31,7 @@ class guiWire;
 #include "gl_wrapper.h"
 #endif
 #include "logic_values.h"
+#include "logic_params.h"
 #include "XMLParser.h"
 #include "klsCollisionChecker.h"
 #include "klsMessage.h"
@@ -146,6 +147,7 @@ public:
 	virtual void doParamsDialog( void* gc, wxCommandProcessor* wxcmd );
 	// Set and get param virtual functions, simply assigns a string
 	virtual void setGUIParam( string paramName, string value ) {
+		if( paramName == "angle" ) value = normalizedAngle(value);
 		gparams[paramName] = value;
 		if( paramName == "angle" ) {
 			// Update the matrices and bounding box:
@@ -154,9 +156,13 @@ public:
 		}
 	};
 	virtual string getGUIParam( string paramName ) { return gparams[paramName]; };
+	// An angle as a number of degrees in [0, 360). A paste or file can carry
+	// anything: "nan" left the gate's matrix unset, and a huge angle lost its
+	// digits as a float, so it saved differently each time.
+	static string normalizedAngle( const string& value );
 	map < string, string >* getAllGUIParams() { return &gparams; };
 	virtual void setLogicParam( string paramName, string value ) {
-		lparams[paramName] = value;
+		lparams[paramName] = boundedGateParameter(paramName, value);   // as the engine has it
 	};
 	virtual string getLogicParam( string paramName ) { return lparams[paramName]; };
 	map < string, string >* getAllLogicParams() { return &lparams; };
