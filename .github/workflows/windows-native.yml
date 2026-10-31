@@ -627,6 +627,31 @@ jobs:
           kill $SERVER 2>/dev/null || true
           exit $code
 
+      # The testing groups (Settings > General, Updater.h): the update check's
+      # own code over HTTP against a stand-in for GitHub
+      # (windows/Tools/update-channel-server.py), with fake releases signed by
+      # a test key -- normal testers take the newest full release with Windows
+      # zips and pass over pre-releases and drafts, beta testers take the test
+      # build, switching from beta to normal never goes back, settings from
+      # before the choice make a beta tester (said once) and a new install a
+      # normal one, and bad signatures, other releases' manifests and changed
+      # downloads are refused.
+      - name: Testing group check
+        if: matrix.run
+        shell: bash
+        run: |
+          PY=$(command -v python || command -v python3)
+          rm -rf chanroot chanport
+          mkdir chanroot
+          "$PY" windows/Tools/update-channel-server.py chanroot chanport &
+          SERVER=$!
+          for _ in $(seq 100); do [ -s chanport ] && break; sleep 0.1; done
+          code=0
+          timeout 180 package/CedarLogic/CedarLogic.exe --channel-check --server "http://127.0.0.1:$(cat chanport)" \
+            --root "$(cygpath -w "$PWD/chanroot")" | tee channel-check.log || code=$?
+          kill $SERVER 2>/dev/null || true
+          [ $code = 0 ] && grep -q "channel check.*all passed" channel-check.log
+
       # Recently Deleted without a window: the Mac's launch-selftest `trash`
       # state (the list and its dates, the 30-day sweep, Restore, Delete Now)
       # in a library of its own.
@@ -690,6 +715,9 @@ jobs:
             $info = (Get-Item $exe).VersionInfo
             if ($info.ProductVersion -ne $want -or $info.FileVersion -ne $want) { throw "the exe's version info says $($info.FileVersion) / $($info.ProductVersion), not $want" }
             Write-Output "version $want in Settings > Apps and in the exe"
+            # The test build's setup (by its name) marks a first run a beta tester.
+            $mark = Get-Content "$dir\install-channel" -ErrorAction SilentlyContinue
+            if ($mark -ne 'beta') { throw "install-channel says '$mark', not beta" }
             $open = (Get-Item "$prog\shell\open\command").GetValue('')
             if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
             if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }

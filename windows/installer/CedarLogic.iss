@@ -143,3 +143,41 @@ Type: filesandordirs; Name: "{app}\res"
 Type: filesandordirs; Name: "{app}\res.new"
 Type: filesandordirs; Name: "{app}\res.old"
 Type: files; Name: "{app}\{#AppExe}.old"
+Type: files; Name: "{app}\install-channel"
+
+; Which testing group (Settings > General) a first run starts in, for the
+; app's installMarker(): {app}\install-channel, "beta" or "normal". The
+; same setup is published twice under two names, so the name says which:
+; the test build's is CedarLogic-Windows-Setup-<arch>.exe, a versioned
+; release's CedarLogic-<version>-Windows-Setup-<arch>.exe (docs/RELEASE-0.4.md
+; step 2). /CHANNEL=beta or /CHANNEL=normal says it outright (install.ps1,
+; or a name a download changed). A group already chosen in Settings stays.
+[Code]
+function InstallChannel(): String;
+var
+  Name: String;
+begin
+  Result := Lowercase(ExpandConstant('{param:CHANNEL|}'));
+  if (Result = 'beta') or (Result = 'normal') then Exit;
+  Name := Lowercase(ExtractFileName(ExpandConstant('{srcexe}')));
+  if Pos('cedarlogic-windows-setup-', Name) = 1 then
+    Result := 'beta'
+  else if (Pos('cedarlogic-', Name) = 1) and (Pos('-windows-setup-', Name) > 0) then
+    Result := 'normal'
+  else
+    Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Channel: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    Channel := InstallChannel();
+    if Channel <> '' then
+      SaveStringToFile(ExpandConstant('{app}\install-channel'), Channel, False)
+    else
+      DeleteFile(ExpandConstant('{app}\install-channel'));
+  end;
+end;

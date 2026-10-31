@@ -617,7 +617,28 @@ void showPreferencesDialog(HWND parent) {
 		prefs().checkUpdates = form.checked(i);
 		prefs().save();
 	};
+	// The testing group, as the Mac's row (its words), with Check Now beside
+	// it; under it, how the last check went (and, once, why a copy from the
+	// test builds is a beta tester).
+	auto groupTip = [] {
+		const std::string status = updater::status();
+		return std::string("Beta testers get new versions first, before they're ready for everyone. Normal testers get them once "
+		                   "they're settled. Updates install from inside the app.") +
+		       (status.empty() ? "" : " " + status);
+	};
+	FormField group = choice("Testing group:", { "Normal tester", "Beta tester" }, p.betaTester ? 1 : 0, groupTip());
+	group.tipLines = 4;
+	const int groupField = f.add(group);
+	on[groupField] = [groupTip](Form& form, int i) {
+		prefs().betaTester = form.choice(i) == 1;
+		prefs().testingGroupNotice = false;
+		prefs().save();
+		updater::groupChanged();
+		form.setTip(i, groupTip());
+	};
 	on[f.add(button("Check Now", true))] = [](Form& form, int) { updater::checkNow(form.dialog); };
+	// Shown here: said.
+	updater::noticeSeen();
 
 	// ---- Appearance
 	f.adding = Appearance;

@@ -1050,6 +1050,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			writeOut(report);
 			return ok ? 0 : 1;
 		}
+		if (a == "--channel-check") {   // --server <url> --root <folder>: the testing groups (Updater.h)
+			std::string server, root;
+			for (int j = i + 1; j + 1 < argc; j++) {
+				if (U(argv[j]) == "--server") server = U(argv[++j]);
+				else if (U(argv[j]) == "--root") root = U(argv[++j]);
+			}
+			std::string report;
+			const bool ok = updater::runChannelCheck(report, server, root);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
 		if (a == "--click-test") { gClickTest = true; continue; }
 		if (a == "--session-check") {
 			gSessionCheck = true;
