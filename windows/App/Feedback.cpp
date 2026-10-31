@@ -1420,6 +1420,9 @@ void show(CircuitWindow* win) {
 		}
 		layoutCap(form);
 		updateSend(form);
+		// Over the cap with more on offer: the line saying why has the
+		// keyboard (and the form scrolls down to it).
+		if (phase == Capped && canMore) PostMessageW(form.dialog, WM_NEXTDLGCTL, (WPARAM)form.fields[reasonField].hwnd, TRUE);
 		MessageBeep(MB_ICONWARNING);
 	};
 	f.onInit = [&](Form& form) {
