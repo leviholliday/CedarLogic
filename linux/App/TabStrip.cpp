@@ -67,7 +67,22 @@ void TabStrip::setTitleRow(bool on) {
 	titleRow = on;
 	buttons.load();
 	hover.setHot(-1);
-	redraw();
+	// The window's buttons fade in as the title rows slide away, and out as
+	// they come back (the tabs ease to their new places meanwhile).
+	buttonsIn.go(on ? 1 : 0, win->slowFrames() ? 0 : 0.2);
+	animate();
+}
+
+void TabStrip::paintButtons(cairo_t* cr, float w, float h) {
+	const float a = (float)buttonsIn.value();
+	if (a < 0.01f) return;
+	if (!titleRow) buttons.layout(w, h);   // fading out: where they were
+	const Chrome c = chrome();
+	if (a > 0.99f) { buttons.paint(cr, win->window(), c.barInk()); return; }
+	cairo_push_group(cr);
+	buttons.paint(cr, win->window(), c.barInk());
+	cairo_pop_group_to_source(cr);
+	cairo_paint_with_alpha(cr, a);
 }
 
 bool TabStrip::activeSide() const { return !win->splitOpen() || win->focusedPane() == pane; }
@@ -141,7 +156,7 @@ bool TabStrip::onClose(int k, float x) const {
 }
 
 bool TabStrip::animating() {
-	bool any = hover.active() || closeHover.active() || card.active() || stepBack.active() || buttons.animating();
+	bool any = hover.active() || closeHover.active() || card.active() || stepBack.active() || buttonsIn.active() || buttons.animating();
 	for (auto& kv : xs) any = kv.second.step() || any;
 	return any;
 }
@@ -256,8 +271,8 @@ void TabStrip::paint(cairo_t* cr, float w, float h) {
 	const float sb = (float)stepBack.value();
 	if (sb > 0.01f) fillRect(cr, rectF(0, 0, w, h - 1), withAlpha(c.tabBar(), 0.45f * sb));
 
-	if (titleRow) buttons.paint(cr, win->window(), c.barInk());
-	if (springs || hover.active() || closeHover.active() || card.active()) animate();
+	paintButtons(cr, w, stripHeight());
+	if (springs || hover.active() || closeHover.active() || card.active() || buttonsIn.active()) animate();
 
 	std::vector<Tip> tips;
 	tips.push_back({ plus, "New tab (Ctrl+T)" });
@@ -311,7 +326,7 @@ void TabStrip::paintClassic(cairo_t* cr, float w, float h) {
 	const RectF plus = rectF(w - rightInset - 8 - kPlusW, (h - kTabH) / 2, w - rightInset - 8, (h + kTabH) / 2);
 	drawIcon(cr, Icon::Add, plus, 13, withAlpha(ink, 0.75f));
 	fillRect(cr, rectF(0, h - 1, w, h), withAlpha(ink, 0.12f));
-	if (titleRow) buttons.paint(cr, win->window(), c.barInk());
+	paintButtons(cr, w, h);
 }
 
 // ---- The pointer -------------------------------------------------------------------

@@ -51,6 +51,15 @@ public:
 	// Where the pointer is over this canvas, in the world; false when it's
 	// somewhere else.
 	bool pointerWorld(double& wx, double& wy) const;
+	// The canvas as it looks now, kept and faded out over what it draws
+	// next (Simulation View coming or going): a cross-fade, not a jump.
+	// Called before the change. Skipped without the desktop's animations,
+	// and when a frame takes long (slowFrames()).
+	void crossfade();
+	// How long the last frame took to draw, in ms; slow means a fade would
+	// stutter, so it's left out.
+	double lastDrawMs = 0;
+	bool slowFrames() const { return lastDrawMs > 34; }
 
 	// Camera. The animated ones ease over 140 ms, as the wx app's zoom does.
 	void zoomToFit(bool animate);
@@ -217,6 +226,10 @@ private:
 	void drawBanner(cairo_t* cr, float w);
 	// The banner and the Simulation View bar come and go with a little motion.
 	anim::Tween bannerFade, simBarIn;
+	// crossfade(): the picture fading out, and how much of it is left.
+	cairo_surface_t* fadeFrom = nullptr;
+	anim::Tween fadeOut;
+	void paintCrossfade(cairo_t* cr, float w, float h);
 	std::string bannerText;
 	std::vector<std::pair<std::string, const char*>> bannerButtons;
 	bool bannerLocked = false;

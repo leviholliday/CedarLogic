@@ -90,6 +90,7 @@ Canvas::~Canvas() {
 	g_signal_handlers_disconnect_by_data(area, this);
 	g_object_unref(area);
 	dropBuffers();
+	if (fadeFrom) cairo_surface_destroy(fadeFrom);
 	liveCount--;
 }
 
@@ -163,10 +164,48 @@ bool Canvas::pointerWorld(double& wx, double& wy) const {
 
 gboolean Canvas::drawCb(GtkWidget*, cairo_t* cr, gpointer self) {
 	Canvas* c = static_cast<Canvas*>(self);
-	const gint64 start = c->drawTimes ? g_get_monotonic_time() : 0;
+	const gint64 start = g_get_monotonic_time();
 	guarded("drawing", [&] { c->draw(cr); });
-	if (c->drawTimes) c->drawTimes->push_back((g_get_monotonic_time() - start) / 1000.0);
+	c->lastDrawMs = (g_get_monotonic_time() - start) / 1000.0;
+	if (c->drawTimes) c->drawTimes->push_back(c->lastDrawMs);
 	return TRUE;
+}
+
+void Canvas::crossfade() {
+	if (fadeFrom) { cairo_surface_destroy(fadeFrom); fadeFrom = nullptr; }
+	fadeOut.set(0);
+	if (!anim::enabled() || slowFrames() || !gtk_widget_get_mapped(area)) return;
+	const double w = width(), h = height();
+	const int scale = std::max(1, gtk_widget_get_scale_factor(area));
+	const int pw = (int)std::ceil(w * scale), ph = (int)std::ceil(h * scale);
+	if (pw <= 0 || ph <= 0) return;
+	cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_RGB24, pw, ph);
+	if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) { cairo_surface_destroy(s); return; }
+	cairo_surface_set_device_scale(s, scale, scale);
+	cairo_t* cr = cairo_create(s);
+	guarded("drawing", [&] { drawScene(cr, scale); });
+	cairo_destroy(cr);
+	fadeFrom = s;
+	fadeOut.set(1);
+	fadeOut.go(0, 0.2);
+	keepMoving();
+}
+
+void Canvas::paintCrossfade(cairo_t* cr, float w, float h) {
+	if (fadeFrom == nullptr) return;
+	const double a = fadeOut.value();
+	double sx = 1, sy = 1;
+	cairo_surface_get_device_scale(fadeFrom, &sx, &sy);
+	const bool sameSize = std::fabs(cairo_image_surface_get_width(fadeFrom) / sx - w) < 1 && std::fabs(cairo_image_surface_get_height(fadeFrom) / sy - h) < 1;
+	if (a <= 0.01 || !sameSize) {
+		cairo_surface_destroy(fadeFrom);
+		fadeFrom = nullptr;
+		return;
+	}
+	cairo_save(cr);
+	cairo_set_source_surface(cr, fadeFrom, 0, 0);
+	cairo_paint_with_alpha(cr, a);
+	cairo_restore(cr);
 }
 
 bool Canvas::canDrawDirect(cairo_t* cr, int scale) const {
@@ -216,6 +255,7 @@ void Canvas::draw(cairo_t* cr) {
 		drawScene(cr, scale);
 		cairo_restore(cr);
 		frameWhole = false;   // `frame` is out of date now
+		paintCrossfade(cr, (float)w, (float)h);
 		drawOverlays(cr, (float)w, (float)h);
 		return;
 	}
@@ -240,6 +280,7 @@ void Canvas::draw(cairo_t* cr) {
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 	cairo_restore(cr);
+	paintCrossfade(cr, (float)w, (float)h);
 	drawOverlays(cr, (float)w, (float)h);
 }
 
@@ -499,7 +540,7 @@ void Canvas::keepMoving() {
 	motionTick = gtk_widget_add_tick_callback(area, [](GtkWidget* w, GdkFrameClock*, gpointer self) -> gboolean {
 		Canvas* c = static_cast<Canvas*>(self);
 		gtk_widget_queue_draw(w);
-		if (c->bannerFade.active() || c->simBarIn.active()) return G_SOURCE_CONTINUE;
+		if (c->bannerFade.active() || c->simBarIn.active() || c->fadeOut.active()) return G_SOURCE_CONTINUE;
 		c->motionTick = 0;
 		return G_SOURCE_REMOVE;
 	}, this, nullptr);

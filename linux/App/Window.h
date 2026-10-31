@@ -135,6 +135,12 @@ public:
 	unsigned editStamp() const { return changes; }
 	void redrawMiniMap();
 	bool simView() const { return simViewOn; }
+	// How far into Simulation View the toolbar's colour is, 0 to 1 (it
+	// eases there in 0.18 s, as the Mac's does).
+	double simMix() const { return simTween.value(); }
+	// Frames are slow here (a big circuit, a Raspberry Pi): the chrome's
+	// fades and slides are left out rather than stutter.
+	bool slowFrames() const;
 	bool locked() const { return lockedOn; }
 	bool canEdit() const { return !lockedOn && !simViewOn; }
 	bool running() const { return isRunning; }
@@ -428,6 +434,11 @@ private:
 
 	bool isRunning = true;
 	bool simViewOn = false;
+	anim::Tween simTween;
+	bool chromeEasing = false;   // the toolbar and menu row redrawn each tick while it eases
+	// The title rows or the side panel coming or going: a slide with a fade
+	// (none when frames are slow or the desktop's animations are off).
+	void revealChrome(GtkWidget* revealer, bool show);
 	struct PredictState {
 		bool on = false, revealed = false;
 		std::map<long, int> guesses, answers;   // by gate: 0/1, or a display's number (-1 no clear value)

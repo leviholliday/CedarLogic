@@ -92,10 +92,15 @@ public:
 		hover.out = 0.2;
 	}
 	~TileGrid() override { if (fadeTimer) g_source_remove(fadeTimer); }
+	// A new list (another family, a search): the old tiles fade out as the
+	// new ones fade in, as the Mac's side panel cross-fades. The fade starts
+	// once the new tiles' pictures are made (the first frame), so making
+	// them doesn't eat into it and it doesn't jump.
 	void reset() {
+		if (appear.value() > 0.5) { leaving = drawn; leavingScroll = (float)scroll.x; }
 		scroll.snap(0);
 		appear.set(0);
-		appear.go(1, 0.15);
+		appearPending = true;
 		hover.setHot(-1);
 		animate();
 	}
@@ -107,12 +112,16 @@ protected:
 	void mouseDown(int button, float x, float y, bool doubleClick, GdkEventButton* e) override;
 	void mouseUp(int button, float x, float y) override;
 	void wheel(double dy, float, float) override;
-	bool animating() override { return hover.active() || appear.active() || scroll.step() || barFade.active(); }
+	bool animating() override { return hover.active() || appear.active() || appearPending || scroll.step() || barFade.active(); }
 
 private:
 	GatePalette* palette;
 	anim::HoverFade hover;
 	anim::Tween appear, barFade;
+	bool appearPending = false;
+	std::vector<GatePalette::Gate> drawn, leaving;   // the tiles last drawn; the ones fading out
+	float leavingScroll = 0;
+	void paintTiles(cairo_t* cr, const std::vector<GatePalette::Gate>& gates, float w, float h, float top, std::vector<Tip>* tips);
 	anim::Spring scroll;          // points down the list
 	int pressed = -1;
 	bool dragging = false, placed = false;
@@ -124,10 +133,11 @@ private:
 	float tileW() const { return (float)prefs().gateSize; }
 	float tileH() const { return tileW() * 0.8f + (palette->showingParts() || prefs().showGateNames ? 14 : 0) + 4; }
 	int columns(float w) const { return std::max(1, (int)((w - 12 + 2) / (tileW() + 4 + 2))); }
-	RectF tileRect(int i, float w) const {
+	RectF tileRect(int i, float w) const { return tileRectAt(i, w, (float)scroll.x); }
+	RectF tileRectAt(int i, float w, float top) const {
 		const int cols = columns(w);
 		const float cellW = (w - 12 - (cols - 1) * 2) / cols;
-		const float x = 6 + (i % cols) * (cellW + 2), y = 2 + (i / cols) * (tileH() + 2) - (float)scroll.x;
+		const float x = 6 + (i % cols) * (cellW + 2), y = 2 + (i / cols) * (tileH() + 2) - top;
 		return rectF(x, y, x + cellW, y + tileH());
 	}
 	float contentHeight(float w) const {
@@ -160,20 +170,65 @@ void TileGrid::paint(cairo_t* cr, float w, float h) {
 		                             : "No gates match.";
 		if (palette->showingParts()) drawIcon(cr, "package-x-generic-symbolic", rectF(0, 24, w, 52), 22, dim);
 		drawWrapped(cr, text, rectF(16, palette->showingParts() ? 60 : 24, w - 16, h), 11.5f, dim, false, TextAlign::Center);
+		appearPending = false;
+		appear.set(1);
+		drawn.clear();
+		leaving.clear();
 		return;
 	}
-	const Color accent = c.accent();
-	const int scale = std::max(1, gtk_widget_get_scale_factor(area));
+	if (appearPending) {
+		// The new tiles' pictures, made now (they're kept): the fade is
+		// timed from here. Without animations, or when frames are slow, no fade.
+		const int scale = std::max(1, gtk_widget_get_scale_factor(area));
+		for (int i = 0; i < (int)gates.size(); i++) {
+			const RectF r = tileRect(i, w);
+			if (r.bottom >= 0 && r.top <= h) tileImage(gates[i].name, tileW(), tileW() * 0.8f, scale, dark);
+		}
+		appearPending = false;
+		const bool slow = palette->window() && palette->window()->slowFrames();
+		appear.go(1, slow ? 0 : 0.15);
+		if (!appear.active()) leaving.clear();
+	}
 	const float a = (float)appear.value();
+	std::vector<Tip> tips;
+	if (a < 1 && !leaving.empty()) {
+		cairo_push_group(cr);
+		paintTiles(cr, leaving, w, h, leavingScroll, nullptr);
+		cairo_pop_group_to_source(cr);
+		cairo_paint_with_alpha(cr, 1 - a);
+	} else {
+		leaving.clear();
+	}
 	cairo_save(cr);
 	if (a < 1) cairo_push_group(cr);
+	paintTiles(cr, gates, w, h, (float)scroll.x, &tips);
+	if (a < 1) {
+		cairo_pop_group_to_source(cr);
+		cairo_paint_with_alpha(cr, a);
+	}
+	cairo_restore(cr);
+	drawn = gates;
+	// A slim scroller while the list moves.
+	const float total = contentHeight(w);
+	const float bar = (float)barFade.value();
+	if (total > h && bar > 0.01f) {
+		const float th = std::max(24.0f, h * h / total), ty = (float)scroll.x / (total - h) * (h - th);
+		fillRound(cr, rectF(w - 6, ty + 2, w - 2, ty + th - 2), 2, withAlpha(c.barInk(), 0.35f * bar));
+	}
+	setTips(tips);
+}
+
+void TileGrid::paintTiles(cairo_t* cr, const std::vector<GatePalette::Gate>& gates, float w, float h, float top, std::vector<Tip>* tips) {
+	const Chrome c = chrome();
+	const bool dark = c.dark;
+	const Color accent = c.accent();
+	const int scale = std::max(1, gtk_widget_get_scale_factor(area));
 	const bool names = palette->showingParts() || prefs().showGateNames;
 	const float artW = tileW(), artH = tileW() * 0.8f;
-	std::vector<Tip> tips;
 	for (int i = 0; i < (int)gates.size(); i++) {
-		const RectF r = tileRect(i, w);
+		const RectF r = tileRectAt(i, w, top);
 		if (r.bottom < 0 || r.top > h) continue;
-		const float hot = (float)hover.amount(i);
+		const float hot = tips ? (float)hover.amount(i) : 0;
 		if (hot > 0.01f) {
 			fillRound(cr, r, 6, withAlpha(accent, 0.10f * hot));
 			strokeRound(cr, r, 6, withAlpha(accent, 0.9f * hot), 1.5f);
@@ -185,21 +240,8 @@ void TileGrid::paint(cairo_t* cr, float w, float h) {
 		if (names)
 			drawText(cr, gates[i].caption, rectF(r.left + 1, iy + artH, r.right - 1, iy + artH + 14), 9.5f, withAlpha(c.barInk(), 0.72f),
 			         TextAlign::Center);
-		tips.push_back({ r, parts::isPart(gates[i].name) ? gates[i].caption + " — right-click to rename or delete" : gates[i].caption });
+		if (tips) tips->push_back({ r, parts::isPart(gates[i].name) ? gates[i].caption + " — right-click to rename or delete" : gates[i].caption });
 	}
-	if (a < 1) {
-		cairo_pop_group_to_source(cr);
-		cairo_paint_with_alpha(cr, a);
-	}
-	cairo_restore(cr);
-	// A slim scroller while the list moves.
-	const float total = contentHeight(w);
-	const float bar = (float)barFade.value();
-	if (total > h && bar > 0.01f) {
-		const float th = std::max(24.0f, h * h / total), ty = (float)scroll.x / (total - h) * (h - th);
-		fillRound(cr, rectF(w - 6, ty + 2, w - 2, ty + th - 2), 2, withAlpha(c.barInk(), 0.35f * bar));
-	}
-	setTips(tips);
 }
 
 void TileGrid::wheel(double dy, float, float) {

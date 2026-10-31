@@ -266,10 +266,11 @@ void Toolbar::draw(cairo_t* cr, float w, float h, int style, bool live) {
 	const bool active = !live || gtk_window_is_active(topWindow());
 	const bool quiet = style == kSeamless;
 	Color bg = style == kClassic ? c.bar() : style == kMinimal ? c.minimalBar() : c.canvas();
-	if (style == kSeamless && win->simView()) bg = fromRGBA(Palette{ true, true }.canvas());
+	// Seamless: the canvas's own colour, easing to Simulation View's with it.
+	if (style == kSeamless) bg = mixColor(bg, fromRGBA(Palette{ true, true }.canvas()), live ? (float)win->simMix() : win->simView() ? 1.0f : 0.0f);
 	fillRect(cr, rectF(0, 0, w, h), bg);
 	if (style != kSeamless) fillRect(cr, rectF(0, h - 1, w, h), dark ? colorF(0, 0, 0, 0.35f) : colorF(0, 0, 0, 0.08f));
-	const Chrome ic{ dark || (style == kSeamless && win->simView()) };
+	const Chrome ic{ dark || (style == kSeamless && (live ? win->simMix() > 0.5 : win->simView())) };
 	const Color ink = ic.barInk();
 	const Color accent = c.accent();
 	const Color green = ic.dark ? rgb255(64, 214, 110) : rgb255(36, 168, 76);
@@ -385,11 +386,11 @@ GdkRectangle Toolbar::actionRect(const char* action) const {
 Color Toolbar::barColor() const {
 	const Chrome c = chrome();
 	const int style = prefs().toolbarStyle;
-	if (style == kSeamless && win->simView()) return fromRGBA(Palette{ true, true }.canvas());
+	if (style == kSeamless) return mixColor(c.canvas(), fromRGBA(Palette{ true, true }.canvas()), (float)win->simMix());
 	return style == kClassic ? c.bar() : style == kMinimal ? c.minimalBar() : c.canvas();
 }
 
-bool Toolbar::barIsDark() const { return chrome().dark || (prefs().toolbarStyle == kSeamless && win->simView()); }
+bool Toolbar::barIsDark() const { return chrome().dark || (prefs().toolbarStyle == kSeamless && win->simMix() > 0.5); }
 
 void Toolbar::setWindowButtons(bool on) {
 	ownButtons = on;

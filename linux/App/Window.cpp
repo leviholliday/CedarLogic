@@ -1038,6 +1038,12 @@ void CircuitWindow::tick() {
 	lastTick = t;
 	Canvas* c = currentCanvas();
 	if (c) c->stepAnimation();
+	// The toolbar easing into or out of Simulation View's colour.
+	if (chromeEasing) {
+		chromeEasing = simTween.active();
+		if (toolbar) toolbar->redraw();
+		if (menuRow) menuRow->redraw();
+	}
 	// The opening card: the circuit fades up as it lifts away.
 	if (openingAt >= 0) {
 		const double ot = t / 1e6 - openingAt;
@@ -1512,7 +1518,7 @@ void CircuitWindow::themeChanged() {
 }
 
 void CircuitWindow::prefsChanged() {
-	if (!focusOn) gtk_revealer_set_reveal_child(GTK_REVEALER(sideRevealer), prefs().showPalette);
+	if (!focusOn) revealChrome(sideRevealer, prefs().showPalette);
 	gtk_widget_set_size_request(paletteBox, paletteWidth(), -1);
 	if (statusBar) statusBar->settingsChanged();
 	if (toolbar) toolbar->layoutNow();
@@ -2439,8 +2445,38 @@ void CircuitWindow::setStepMs(int ms) {
 	note(format("Each step is now %d ms of circuit time.", cl_document_step_ms(doc)));
 }
 
+bool CircuitWindow::slowFrames() const {
+	const Canvas* c = currentCanvas();
+	return c && c->slowFrames();
+}
+
+void CircuitWindow::revealChrome(GtkWidget* revealer, bool show) {
+	GtkRevealer* r = GTK_REVEALER(revealer);
+	GtkWidget* child = gtk_bin_get_child(GTK_BIN(revealer));
+	const bool smooth = anim::enabled() && !slowFrames() && gtk_widget_get_mapped(revealer);
+	const guint ms = smooth ? 200 : 0;
+	gtk_revealer_set_transition_duration(r, ms);
+	if (gtk_revealer_get_reveal_child(r) == show) {
+		if (show && child && !smooth) gtk_widget_set_opacity(child, 1);
+		return;
+	}
+	if (child) {
+		// It fades as it slides: in from clear, out to clear a little ahead.
+		if (show) anim::fadeIn(child, ms / 1000.0);
+		else anim::fadeTo(child, 0, ms / 1000.0 * 0.8);
+	}
+	gtk_revealer_set_reveal_child(r, show);
+	if (show && child && !smooth) gtk_widget_set_opacity(child, 1);
+}
+
 void CircuitWindow::toggleSimView() {
+	// The canvas as it was fades out over the new look (the Mac's eases).
+	for (int pane = 0; pane < 2; pane++)
+		if (pane == 0 || splitOpen())
+			if (Canvas* c = paneCanvas(pane)) c->crossfade();
 	simViewOn = !simViewOn;
+	simTween.go(simViewOn ? 1 : 0, slowFrames() ? 0 : 0.18);
+	chromeEasing = true;
 	bool changed = false;
 	if (simViewOn) {
 		if (Canvas* c = currentCanvas()) c->cancelDrag();
@@ -2581,8 +2617,8 @@ void CircuitWindow::toggleFullScreen() {
 
 void CircuitWindow::toggleFocusMode() {
 	focusOn = !focusOn;
-	gtk_revealer_set_reveal_child(GTK_REVEALER(titleRevealer), !focusOn);
-	gtk_revealer_set_reveal_child(GTK_REVEALER(sideRevealer), !focusOn && prefs().showPalette);
+	revealChrome(titleRevealer, !focusOn);
+	revealChrome(sideRevealer, !focusOn && prefs().showPalette);
 	for (TabStrip* t : strips) if (t) t->setTitleRow(focusOn);
 	updateActions();
 	if (focusOn) note("Focus mode. Ctrl+. brings the toolbar and the side panel back.");

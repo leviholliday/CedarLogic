@@ -57,6 +57,8 @@ private:
 	anim::HoverFade closeHover;
 	anim::HoverFade card;         // the active card, crossfading as it moves
 	anim::Tween stepBack;         // the other side of a split, dimmed
+	anim::Tween buttonsIn;        // the window's buttons, fading in and out with focus mode
+	void paintButtons(cairo_t* cr, float w, float h);
 	// A tab held.
 	uint64_t heldKey = 0;
 	float pressX = 0, pressY = 0, dragDX = 0;
