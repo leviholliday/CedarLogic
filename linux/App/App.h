@@ -58,7 +58,16 @@ struct Prefs {
 	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
-	bool checkUpdates = true;     // look for a new test build now and then
+	bool checkUpdates = true;     // look for a new version now and then
+	// Settings > General > Testing group, as on the Mac: 0 Normal tester (the
+	// versioned releases), 1 Beta tester (the rolling test build). A copy that
+	// ran before there was a choice came from the test build, so it starts as
+	// a Beta tester and says so once (channelNotice); see Updater.h.
+	int updateChannel = 0;
+	bool channelNotice = false;
+	// The versioned release this copy's updater installed ("<tag> <build>"),
+	// so the same one is never offered again.
+	std::string installedRelease;
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	bool hasSeenWelcome = false;
 	int windowWidth = 1180, windowHeight = 780;
@@ -115,6 +124,12 @@ struct Prefs {
 	void noteRecent(const std::string& path);
 };
 Prefs& prefs();
+
+// The testing group a copy starts in (Prefs::load), from what its settings
+// file had (whether there was one, and a group in it) and linux/install.sh's
+// install-channel marker ("beta", "normal" or ""). Updater.h has the why.
+struct ChannelStart { int channel; bool notice; };
+ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChannel, bool storedNotice, const std::string& marker);
 
 // Whether the desktop asks for dark (GNOME's color-scheme, or a "-dark"
 // theme name).

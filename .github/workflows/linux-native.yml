@@ -78,6 +78,32 @@ jobs:
           if $B/cedarlogic --update-self-test --release fake-release --key "$KEY"; then echo "::error::verified with the wrong key"; exit 1; fi
           printf 'changed\n' >> fake-release/cedarlogic_amd64.deb
           if $B/cedarlogic --update-self-test --release fake-release --key "$TEST_KEY"; then echo "::error::a changed file passed"; exit 1; fi
+          # A versioned release signed the way packaging/sign-release.sh signs one (sign-preview.sh's
+          # --dry-run with the release's tag), read by a Normal tester's check; not under another tag.
+          mkdir -p fake-v041
+          printf 'a .deb for the test\n' > fake-v041/cedarlogic_0.4.1_amd64.deb
+          printf 'an arm .deb for the test\n' > fake-v041/cedarlogic_0.4.1_arm64.deb
+          printf 'a DMG for the test\n' > fake-v041/CedarLogic-0.4.1-Mac.dmg
+          REL_KEY=$(scripts/sign-preview.sh --dry-run fake-v041 --tag v0.4.1 --commit "$GITHUB_SHA" --build 2 --test-key)
+          $B/cedarlogic --update-self-test --release fake-v041 --key "$REL_KEY" --tag v0.4.1
+          if $B/cedarlogic --update-self-test --release fake-v041 --key "$REL_KEY" --tag v0.4; then echo "::error::a v0.4.1 list passed as v0.4's"; exit 1; fi
+
+      # The testing groups (Settings > General > Testing group, linux/App/Updater.h), through the
+      # updater's own check and curl against a static stand-in for GitHub: Normal takes the newest
+      # full release and ignores pre-releases, Beta takes the test build, no downgrade on a switch,
+      # the group a copy starts in (test-build copies stay Beta), bad signatures refused.
+      - name: Testing group check
+        run: |
+          D=$(mktemp -d)
+          mkdir -p "$D/www"
+          python3 -m http.server 8767 --bind 127.0.0.1 --directory "$D/www" > "$D/http.log" 2>&1 &
+          SERVER=$!
+          for _ in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:8767/ && break; sleep 0.1; done
+          rc=0
+          XDG_CONFIG_HOME="$D/config" timeout 120 linux/build/cedarlogic --channel-check --server http://127.0.0.1:8767 --root "$D/www" || rc=$?
+          kill $SERVER || true
+          [ "$rc" = 0 ] || tail -40 "$D/http.log"
+          exit $rc
 
       # Send Feedback's client against the Mac's stand-in for the site's /api/feedback
       # (mac/Tools/feedback-check/server.py): the install id, the required summary, the

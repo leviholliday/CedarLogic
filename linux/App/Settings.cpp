@@ -9,6 +9,7 @@
 #include "SyncUI.h"
 #include "TitleButtons.h"
 #include "Toolbar.h"
+#include "Updater.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -379,13 +380,26 @@ GtkWidget* generalPage() {
 	      "Ctrl+Q shows a question first: Enter quits, Escape doesn't.");
 	r.add("Status bar", check("Show zoom, cursor position, and counts", p.showStatus, [](bool on) { prefs().showStatus = on; apply(); }),
 	      "The readout in the bottom-right corner of the window. Notes (Saved, Copied…) still show there for a moment either way.");
-	GtkWidget* upd = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-	gtk_box_pack_start(GTK_BOX(upd), check("Check for new versions", p.checkUpdates, [](bool on) { prefs().checkUpdates = on; prefs().save(); }),
-	                   FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(upd), button("Check Now", [] {
+	// The Mac's Testing group row (Normal / Beta tester), with Check Now.
+	GtkWidget* group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	GtkWidget** groupHint = new GtkWidget*(nullptr);
+	const std::string groupText = "Beta testers get new versions first, before they're ready for everyone. Normal testers get them once "
+	                              "they're settled. Updates install from inside the app.";
+	gtk_box_pack_start(GTK_BOX(group), combo({ "Normal tester", "Beta tester" }, p.updateChannel == 1 ? 1 : 0, [groupHint, groupText](int i) {
+		if (i < 0 || i == prefs().updateChannel) return;
+		prefs().updateChannel = i;
+		prefs().save();
+		if (*groupHint) gtk_label_set_text(GTK_LABEL(*groupHint), groupText.c_str());
+		if (CircuitWindow* w = front()) Updater_ChannelChanged(w->application());
+	}), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(group), button("Check Now", [] {
 		if (CircuitWindow* w = front()) g_action_group_activate_action(G_ACTION_GROUP(w->application()), "check-updates", nullptr);
 	}), FALSE, FALSE, 0);
-	r.add("Updates", upd, "New versions install from inside the app: it asks first, and keeps your circuits.");
+	// A test build's copy, made a Beta tester: said here too until it's been said.
+	const char* notice = Updater_ChannelNotice();
+	*groupHint = r.add("Testing group", group, notice ? std::string(notice) : groupText);
+	r.add("Updates", check("Check for new versions", p.checkUpdates, [](bool on) { prefs().checkUpdates = on; prefs().save(); }),
+	      "New versions install from inside the app: it asks first, and keeps your circuits.");
 	return r.grid;
 }
 

@@ -67,9 +67,43 @@ std::string readString(GKeyFile* k, const char* key, const std::string& fallback
 }
 }  // namespace
 
+ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChannel, bool storedNotice, const std::string& marker) {
+	// A group chosen (or decided) before: as it is.
+	if (hasChannel) return { storedChannel == 1 ? 1 : 0, storedNotice };
+	// Installed by linux/install.sh, which says where from: that.
+	if (marker == "beta") return { 1, false };
+	if (marker == "normal") return { 0, false };
+	// Settings from before there was a choice: every Linux build until now
+	// came from the rolling test build (linux-native-testing), so it stays a
+	// Beta tester and keeps getting them, and says so once.
+	if (prefsExisted) return { 1, true };
+	// A new install: Normal, as on the Mac.
+	return { 0, false };
+}
+
+// What linux/install.sh wrote for the group this install starts in ("beta"
+// or "normal"), or "".
+static std::string installChannelMarker() {
+	gchar* file = g_build_filename(g_get_user_config_dir(), "CedarLogic", "install-channel", nullptr);
+	gchar* text = nullptr;
+	std::string s;
+	if (g_file_get_contents(file, &text, nullptr, nullptr)) s = g_strstrip(text);
+	g_free(text);
+	g_free(file);
+	return s;
+}
+
 void Prefs::load() {
 	GKeyFile* k = g_key_file_new();
-	if (g_key_file_load_from_file(k, prefsPath().c_str(), G_KEY_FILE_NONE, nullptr)) {
+	const bool existed = g_key_file_load_from_file(k, prefsPath().c_str(), G_KEY_FILE_NONE, nullptr);
+	{
+		const bool hasChannel = existed && g_key_file_has_key(k, kGroup, "updateChannel", nullptr);
+		const ChannelStart c = startingChannel(existed, hasChannel, hasChannel ? readInt(k, "updateChannel", 0, 0, 1) : 0,
+		                                       existed && readBool(k, "channelNotice", false), installChannelMarker());
+		updateChannel = c.channel;
+		channelNotice = c.notice;
+	}
+	if (existed) {
 		themeMode = readInt(k, "themeMode", themeMode, 0, 3);
 		dark = readBool(k, "lastDark", dark);
 		accent = readInt(k, "accent", accent, 0, 6);
@@ -106,6 +140,7 @@ void Prefs::load() {
 		newTemplate = readString(k, "newTemplate", newTemplate);
 		shortcuts = readString(k, "shortcuts", shortcuts);
 		checkUpdates = readBool(k, "checkUpdates", checkUpdates);
+		installedRelease = readString(k, "installedRelease", installedRelease);
 		// The second round of the Mac's look: its status bar is on.
 		if (readInt(k, "prefsVersion", 1, 0, 100) < 2) showStatus = true;
 		tidyMode = readInt(k, "tidyMode", tidyMode, 0, 1);
@@ -218,6 +253,9 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "newTemplate", newTemplate.c_str());
 	g_key_file_set_string(k, kGroup, "shortcuts", shortcuts.c_str());
 	g_key_file_set_boolean(k, kGroup, "checkUpdates", checkUpdates);
+	g_key_file_set_integer(k, kGroup, "updateChannel", updateChannel);
+	g_key_file_set_boolean(k, kGroup, "channelNotice", channelNotice);
+	g_key_file_set_string(k, kGroup, "installedRelease", installedRelease.c_str());
 	g_key_file_set_integer(k, kGroup, "windowWidth", windowWidth);
 	g_key_file_set_integer(k, kGroup, "windowHeight", windowHeight);
 	g_key_file_set_boolean(k, kGroup, "windowMaximized", windowMaximized);

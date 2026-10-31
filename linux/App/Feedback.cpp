@@ -301,7 +301,7 @@ Device device(CircuitWindow* win) {
 	const std::string os = osName();
 	Json app;
 	app.text("name", "CedarLogic for Linux").text("installId", installId()).text("version", CL_VERSION).text("build", CL_GIT_COMMIT)
-		.text("commit", CL_GIT_COMMIT).text("channel", "Native testing");
+		.text("commit", CL_GIT_COMMIT).text("channel", prefs().updateChannel == 1 ? "Beta tester" : "Normal tester");
 	d.app = app.str();
 	std::string model = trimmed(readAll("/sys/devices/virtual/dmi/id/product_name"));
 	const std::string maker = trimmed(readAll("/sys/devices/virtual/dmi/id/sys_vendor"));

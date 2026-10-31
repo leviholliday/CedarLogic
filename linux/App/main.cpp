@@ -1404,6 +1404,8 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--sync-test") == 0) return syncTest(argc, argv);
 		// --update-self-test [--release <folder> --key <hex>]: signed updates (Updater.h).
 		if (strcmp(argv[i], "--update-self-test") == 0) return Updater_SelfTest(argc, argv);
+		// --channel-check --server <url> --root <folder>: the Normal/Beta testing groups (Updater.h).
+		if (strcmp(argv[i], "--channel-check") == 0) return Updater_ChannelCheck(argc, argv);
 		if (strcmp(argv[i], "--feedback-check") == 0) return feedback::check();
 		// --trash-check: Recently Deleted's files, in the library at $XDG_DATA_HOME (the Mac's launch-selftest `trash`).
 		if (strcmp(argv[i], "--trash-check") == 0) return library::trashCheck();
