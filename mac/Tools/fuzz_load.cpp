@@ -36,8 +36,19 @@
 #endif
 
 // The sanitizers call this just before they end the process, so the file that
-// set them off is kept (declared weak: absent in a plain build).
-extern "C" void __sanitizer_set_death_callback(void (*)(void)) __attribute__((weak));
+// set them off is kept. Only declared in a sanitizer build: a weak reference to
+// a symbol nothing defines doesn't link on macOS.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(undefined_behavior_sanitizer) || __has_feature(thread_sanitizer)
+#define CL_HAVE_SANITIZER 1
+#endif
+#endif
+#if !defined(CL_HAVE_SANITIZER) && (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__))
+#define CL_HAVE_SANITIZER 1
+#endif
+#if defined(CL_HAVE_SANITIZER)
+extern "C" void __sanitizer_set_death_callback(void (*)(void));
+#endif
 
 namespace {
 
@@ -361,7 +372,9 @@ int main(int argc, char** argv) {
 	signal(SIGALRM, onFatal);
 	signal(SIGABRT, onFatal);
 	signal(SIGSEGV, onFatal);
-	if (__sanitizer_set_death_callback) __sanitizer_set_death_callback(keepCurrent);
+#if defined(CL_HAVE_SANITIZER)
+	__sanitizer_set_death_callback(keepCurrent);
+#endif
 
 	int bad = 0;
 	if (tries == 0) {

@@ -7,8 +7,10 @@ is pasted, and whatever a student does. It follows on from
 `docs/V4-CORE-DIAGNOSIS.md` (rounds 1 to 5), which explains the edit fuzzer.
 
 In short: three new kinds of check (a file fuzzer, a self-check of the circuit,
-and a set of regression cases) and much longer fuzz runs found 33 bugs; all are
-fixed, each has a test, and the checks run in CI on every push.
+and a set of regression cases) and much longer fuzz runs found 35 bugs. All are
+fixed; nearly all have a case in `core_check` or the clipboard tests, and the
+rest (two that need a long session's history to happen) are covered by the fuzz
+runs. Everything runs in CI on every push.
 
 ## The wire question: repair or replace?
 
@@ -98,18 +100,20 @@ the numbers section.
 | 24 | Wire saved twice over the same crossing, different after reopening | Float noise kept one crossing under two positions | Crossings kept once, where the crossed run lies |
 | 25 | Straighten makes a wire whose middle vanishes | The straight-trunk route could give a branch the trunk's id 0 | Branches skip the trunk's id |
 | 26 | Same file saved twice, different bytes | Pin order in a segment wasn't fixed | Written in a fixed order |
-| 27 | Save, reopen, save gives different numbers (18 vs 17.99999428) | A rotated part's pins sit a few millionths off the grid; a reopen trims wire ends to them | Positions saved to a ten-thousandth of a grid unit |
+| 27 | Save, reopen, save gives different numbers (18 vs 17.99999428; -20.5357 vs -20.5358) | A rotated part's pins sit a few millionths off the grid; a reopen trims wire ends to them; the part and the wire's end were rounded apart | Positions kept, taken in and saved to a ten-thousandth of a grid unit (`savedPrecision`) |
+| 28 | A pasted wire left stretched and broken | A wire on a pasted part locked in place isn't carried by the paste's move | Redrawn from its pins, in the paste's undo step |
 
 ### Simulation
 
 | # | Seen as | Cause | Fix |
 |---|---|---|---|
-| 28 | App quits when a counter with MAX_COUNT at the largest number counts up | `maxCount + 1` wrapped to 0, then divided by it | Handled |
-| 29 | Undefined behaviour on every step of a priority encoder with no inputs | Output width worked out as log(0) | Uses the width already set |
-| 30 | RAM memory grows without bound; huge saves | Reading an address made an entry for it | Reads leave memory alone |
-| 31 | App quits showing a wide register | More than 8 hex digits asked of an 8-digit string | Digits held to 8 |
-| 32 | File differs after a Pauseulator fires | Its pause request was saved as a setting | Not saved |
-| 33 | Crash on opening a RAM part with a short file name set | `substr` on a name under 3 characters | Checked |
+| 29 | App quits when a counter with MAX_COUNT at the largest number counts up | `maxCount + 1` wrapped to 0, then divided by it | Handled |
+| 30 | Undefined behaviour on every step of a priority encoder with no inputs | Output width worked out as log(0) | Uses the width already set |
+| 31 | RAM memory grows without bound; huge saves | Reading an address made an entry for it | Reads leave memory alone |
+| 32 | App quits showing a wide register | More than 8 hex digits asked of an 8-digit string | Digits held to 8 |
+| 33 | File differs after a Pauseulator fires | Its pause request was saved as a setting | Not saved |
+| 34 | Crash on opening a RAM part with a short file name set | `substr` on a name under 3 characters | Checked |
+| 35 | Reads past a bus (undefined behaviour, can crash) for an adder, register or equivalence gate with 0 or 1 inputs from a file | Code assumed at least the library's width | Guarded |
 
 ### Already fixed before this round
 
