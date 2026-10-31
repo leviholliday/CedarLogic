@@ -1129,6 +1129,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gToolbarStyle;
 	// The click test wants every tool on the bar (the dark mode switch too),
 	// and New in a window of its own.
+	// The session check opens new windows too (as the Mac's does for its run).
+	if (gSessionCheck) prefs().openReplaces = false;
 	if (gClickTest) {
 		prefs().toolbarHidden = 0;
 		prefs().showThemeToggle = true;

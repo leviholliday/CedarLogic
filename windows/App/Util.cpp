@@ -256,7 +256,10 @@ void Prefs::load() {
 	highlighterColor = r.s("highlighterColor", highlighterColor);
 	penWidth = r.d("penWidth", penWidth, 0.05, 3);
 	highlighterWidth = r.d("highlighterWidth", highlighterWidth, 0.05, 3);
-	openReplaces = r.b("openReplaces", openReplaces);
+	// Replacing the circuit you're in is the default, as on the Mac. Every
+	// launch before this one wrote "false" whether or not anyone chose it, so
+	// those ini files take the new default once; a choice made after sticks.
+	openReplaces = r.b("openReplacesSet", false) ? r.b("openReplaces", openReplaces) : true;
 	newTemplate = r.s("newTemplate", newTemplate);
 	templateClock = r.i("templateClock", templateClock, 0, 2);
 	shortcuts = r.s("shortcuts", shortcuts);
@@ -357,6 +360,7 @@ void Prefs::save() const {
 	o << "penWidth=" << penWidth << "\n";
 	o << "highlighterWidth=" << highlighterWidth << "\n";
 	o << "openReplaces=" << b(openReplaces) << "\n";
+	o << "openReplacesSet=1\n";
 	o << "newTemplate=" << newTemplate << "\n";
 	o << "templateClock=" << templateClock << "\n";
 	o << "shortcuts=" << shortcuts << "\n";
