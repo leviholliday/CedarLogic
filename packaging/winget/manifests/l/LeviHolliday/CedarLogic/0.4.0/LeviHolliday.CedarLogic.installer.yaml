@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+# packaging/winget/bump.sh writes the URLs, hashes and date from the release:
+# the zeros below are placeholders until v0.4 has its Windows installers.
+
+PackageIdentifier: LeviHolliday.CedarLogic
+PackageVersion: 0.4.0
+Platform:
+- Windows.Desktop
+MinimumOSVersion: 10.0.0.0
+InstallerType: inno
+Scope: user
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+UpgradeBehavior: install
+FileExtensions:
+- cdl
+Protocols:
+- cedarlogic
+ProductCode: '{59AB891F-9536-471C-BAE2-13C34308A7C3}_is1'
+ReleaseDate: 2026-11-01
+AppsAndFeaturesEntries:
+- DisplayName: CedarLogic
+  Publisher: Cedarville University
+  DisplayVersion: 0.4.0
+  ProductCode: '{59AB891F-9536-471C-BAE2-13C34308A7C3}_is1'
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-Setup-x64.exe
+  InstallerSha256: '0000000000000000000000000000000000000000000000000000000000000000'
+- Architecture: arm64
+  InstallerUrl: https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-Setup-ARM64.exe
+  InstallerSha256: '0000000000000000000000000000000000000000000000000000000000000000'
+ManifestType: installer
+ManifestVersion: 1.12.0
