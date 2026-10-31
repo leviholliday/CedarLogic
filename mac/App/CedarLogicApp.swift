@@ -34,7 +34,8 @@ struct CedarLogicApp: App {
             UndoCheck.runIfAsked()
             LeakCheck.runIfAsked()
             DispatchQueue.main.async { Updates.shared.start() }
-            DispatchQueue.global(qos: .utility).async { Library.removeRepeats() }
+            // Recently Deleted: circuits deleted over 30 days ago go for good.
+            DispatchQueue.global(qos: .utility).async { Library.removeRepeats(); RecentlyDeleted.sweep() }
         }
     }
 

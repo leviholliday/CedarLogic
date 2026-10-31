@@ -131,7 +131,8 @@ enum Library {
     }
 
     /// Into the library's own trash folder, where the wx app puts deleted
-    /// circuits too. False if it couldn't be moved.
+    /// circuits too: Recently Deleted (RecentlyDeleted.swift) lists them
+    /// for 30 days. False if it couldn't be moved.
     @discardableResult
     static func moveToTrash(_ item: LibraryItem) -> Bool {
         let fm = FileManager.default
@@ -141,7 +142,7 @@ enum Library {
         var n = 2
         while fm.fileExists(atPath: dest.path) { dest = trash.appendingPathComponent("\(item.id) \(n)"); n += 1 }
         let moved = (try? fm.moveItem(at: item.folder, to: dest)) != nil
-        if moved { SyncCenter.libraryChanged() }
+        if moved { RecentlyDeleted.stamp(dest); SyncCenter.libraryChanged() }
         return moved
     }
 
@@ -493,6 +494,9 @@ struct LibraryView: View {
     @State private var search = ""
     @State private var keys = PickerKeys()
     @FocusState private var searchFocused: Bool
+    /// Recently Deleted: how many, and whether its sheet is up.
+    @State private var deletedCount = 0
+    @State private var showDeleted = false
 
     /// `sync` is SyncCenter.shared but for pictures (SyncRender).
     init(sync: SyncCenter? = nil) { self.sync = sync ?? .shared }
@@ -512,8 +516,14 @@ struct LibraryView: View {
     var body: some View {
         let open = Library.openIDs()
         VStack(alignment: .leading, spacing: 0) {
-            Text("Your Circuits").font(.system(size: 19, weight: .bold)).foregroundStyle(look.ink)
-                .padding(.horizontal, 22).padding(.top, 22)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Your Circuits").font(.system(size: 19, weight: .bold)).foregroundStyle(look.ink)
+                Spacer()
+                Button(deletedCount > 0 ? "Recently Deleted (\(deletedCount))" : "Recently Deleted") { showDeleted = true }
+                    .buttonStyle(.link).font(.system(size: 12))
+                    .help("Circuits you deleted, kept for \(RecentlyDeleted.keepDays) days so you can bring them back")
+            }
+            .padding(.horizontal, 22).padding(.top, 22)
             Text("Everything here saves itself. Use Import to bring in a .cdl file, and File \u{25B8} Export to get one out.")
                 .font(.system(size: 13)).foregroundStyle(look.dim)
                 .padding(.horizontal, 22).padding(.top, 10)
@@ -548,12 +558,14 @@ struct LibraryView: View {
             // Newest first each time it opens; while it's open, the order
             // holds (a circuit saving itself doesn't jump it to the top).
             items = Library.items()
+            deletedCount = RecentlyDeleted.list().count
             selectedID = nil
             searchFocused = true
             keys.install(window: "library") { e in handleKey(e) }
         }
         .onDisappear { keys.remove() }
         .onChange(of: search) { _, _ in selectedID = nil }
+        .sheet(isPresented: $showDeleted, onDismiss: reload) { RecentlyDeletedView(look: look, accent: accent) }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in reload() }
         .onReceive(NotificationCenter.default.publisher(for: .clLibraryChanged)) { _ in reload() }
     }
@@ -566,6 +578,7 @@ struct LibraryView: View {
         let kept = items.compactMap { byID[$0.id] }
         let known = Set(items.map(\.id))
         items = fresh.filter { !known.contains($0.id) } + kept
+        deletedCount = RecentlyDeleted.list().count
     }
 
     private func openSelected() {
@@ -626,6 +639,7 @@ struct LibraryView: View {
 
     /// Type to search, arrows to move, Return to open, wherever the focus is.
     private func handleKey(_ e: NSEvent) -> Bool {
+        if showDeleted { return false }   // the Recently Deleted sheet has the keys
         let cmd = e.modifierFlags.contains(.command)
         let n = shown.count
         let i = selectionIndex.wrappedValue
@@ -646,6 +660,89 @@ struct LibraryView: View {
         case "i": importFile(); return true
         case "f": searchFocused = true; return true
         default: return false
+        }
+    }
+}
+
+// MARK: - Recently Deleted
+
+/// The sheet over Your Circuits (the web's Recently Deleted sheet): the
+/// circuits in the library's trash, newest first, to restore or delete now.
+/// The files are RecentlyDeleted's (RecentlyDeleted.swift).
+private struct RecentlyDeletedView: View {
+    let look: PickerLook
+    let accent: Color
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [DeletedCircuit] = []
+    @State private var selectedID: String?
+    @State private var note: String?
+
+    private var selected: DeletedCircuit? { items.first { $0.id == selectedID } ?? items.first }
+    private var selectionIndex: Binding<Int> {
+        Binding(get: { items.firstIndex { $0.id == selected?.id } ?? 0 },
+                set: { i in if items.indices.contains(i) { selectedID = items[i].id } })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Recently Deleted").font(.system(size: 19, weight: .bold)).foregroundStyle(look.ink)
+                .padding(.horizontal, 22).padding(.top, 22)
+            Text("Kept \(RecentlyDeleted.keepDays) days on this Mac, then deleted for good. These aren\u{2019}t synced.")
+                .font(.system(size: 13)).foregroundStyle(look.dim)
+                .padding(.horizontal, 22).padding(.top, 10)
+            PickerList(rows: items.map { c in
+                let gates = GateCounter.count(c.circuit).map { " \u{00B7} \($0) gate\($0 == 1 ? "" : "s")" } ?? ""
+                return PickerRowData(id: c.id, title: c.name, subtitle: "Deleted \(friendlyTime(c.deleted))" + gates, badge: nil)
+            }, selection: selectionIndex, look: look, accent: accent, empty: "Nothing here.", onActivate: restore)
+                .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 6)
+            Text(note ?? " ").font(.system(size: 11)).foregroundStyle(look.dim).lineLimit(1)
+                .padding(.horizontal, 22).padding(.bottom, 12)
+            HStack(spacing: 8) {
+                Button("Delete Now\u{2026}", action: deleteNow).help("Delete the selected circuit for good").disabled(selected == nil)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Restore", action: restore).keyboardShortcut(.defaultAction).disabled(selected == nil)
+                    .help("Put it back in Your Circuits")
+            }
+            .padding(.horizontal, 22).padding(.bottom, 22)
+        }
+        .frame(width: 520, height: 460)
+        .background(look.paper)
+        .onAppear { load() }
+    }
+
+    private func load() {
+        RecentlyDeleted.sweep()
+        items = RecentlyDeleted.list()
+        if !items.contains(where: { $0.id == selectedID }) { selectedID = nil }
+    }
+
+    private func restore() {
+        guard let c = selected else { return }
+        if RecentlyDeleted.restore(c) != nil {
+            SyncCenter.libraryChanged()
+            NotificationCenter.default.post(name: .clLibraryChanged, object: nil)
+            note = "\u{201C}\(c.name)\u{201D} is back in Your Circuits."
+        } else {
+            note = "\u{201C}\(c.name)\u{201D} couldn\u{2019}t be restored."
+        }
+        load()
+    }
+
+    /// Asks first: there's no getting it back after this.
+    private func deleteNow() {
+        guard let c = selected else { return }
+        let alert = NSAlert()
+        alert.messageText = "Delete \u{201C}\(c.name)\u{201D} now?"
+        alert.informativeText = "It and all its versions will be deleted for good. This can\u{2019}t be undone."
+        alert.addButton(withTitle: "Delete Now")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        Library.present(alert) { ok in
+            guard ok else { return }
+            note = RecentlyDeleted.deleteNow(c) ? "\u{201C}\(c.name)\u{201D} was deleted for good."
+                                                : "\u{201C}\(c.name)\u{201D} couldn\u{2019}t be deleted."
+            load()
         }
     }
 }
