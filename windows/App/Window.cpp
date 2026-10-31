@@ -2309,10 +2309,16 @@ void CircuitWindow::shareLink() {
 	bool any = false;
 	for (int p = 0; p < cl_document_page_count(doc) && !any; p++) any = cl_document_gate_count(doc, p) > 0;
 	if (!any) { note("There's nothing on the circuit to share yet."); return; }
-	const bool wasDirty = isDirty();
-	const std::string text = cl_document_save_text(doc);
-	forceDirty = forceDirty || wasDirty;   // asking for the text marked it saved
-	sharelink::copyLink(this, text, displayName());
+	// The notes never go in a link (they're the student's own, and links get
+	// pasted into chats); the drawing goes when it's shown and the link still
+	// fits -- as the Mac's and Linux's (the website's DRAWING-NOTES.md 4.11).
+	// (These don't mark the circuit saved, as cl_document_save_text does.)
+	bool ink = false;
+	for (int p = 0; p < cl_document_page_count(doc) && !ink; p++) ink = cl_ink_stroke_count(doc, p) > 0;
+	const bool withInk = ink && cl_ink_shown(doc);
+	const std::string plain = cl_document_save_text_ex(doc, CL_SAVE_NO_NOTES | CL_SAVE_NO_INK);
+	const std::string drawn = withInk ? std::string(cl_document_save_text_ex(doc, CL_SAVE_NO_NOTES)) : std::string();
+	sharelink::copyLink(this, withInk ? drawn : plain, withInk ? plain : std::string(), displayName());
 }
 
 void CircuitWindow::exportOlder(int format) {

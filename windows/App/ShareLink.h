@@ -24,8 +24,10 @@ class CircuitWindow;
 namespace sharelink {
 
 // File > Share Link…: the link for a circuit with this .cdl text and name on
-// the clipboard, with a note in `window`; too long for a link says so.
-void copyLink(CircuitWindow* window, const std::string& text, const std::string& name);
+// the clipboard, with a note in `window`; too long for a link says so. With
+// `withoutDrawing` (the same circuit without its drawing), a link too long
+// with the drawing is made from that instead, and the note says so.
+void copyLink(CircuitWindow* window, const std::string& text, const std::string& withoutDrawing, const std::string& name);
 
 // A cedarlogic: link (an argument that is one, not a file).
 bool isLink(const std::string& arg);

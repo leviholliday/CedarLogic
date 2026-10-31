@@ -166,13 +166,25 @@ void showProblem(HWND parent, const std::string& why) {
 	showMessage(parent, Tone::Error, "That link couldn't be opened", text);
 }
 
-void copyLink(CircuitWindow* window, const std::string& text, const std::string& name) {
-	const std::string data = encode(text);
-	if (data.empty()) {
+void copyLink(CircuitWindow* window, const std::string& text, const std::string& withoutDrawing, const std::string& name) {
+	auto make = [&](const std::string& t) {
+		const std::string data = encode(t);
+		return data.empty() ? std::string() : std::string(kWebBase) + "#" + fragment(data, name == "Untitled" ? std::string() : name);
+	};
+	std::string link = make(text);
+	if (link.empty()) {
 		window->note("Couldn't make a link for this circuit.");
 		return;
 	}
-	const std::string link = std::string(kWebBase) + "#" + fragment(data, name == "Untitled" ? std::string() : name);
+	// Too long with the drawing: without it, and said so.
+	bool leftOutDrawing = false;
+	if (link.size() > kMaxWebLink && !withoutDrawing.empty()) {
+		const std::string plain = make(withoutDrawing);
+		if (!plain.empty()) {
+			link = plain;
+			leftOutDrawing = true;
+		}
+	}
 	if (link.size() > kMaxWebLink) {
 		showMessage(window->window(), Tone::Info, "This circuit is too big for a link",
 		            strf("A link holds the whole circuit, and this one would be about %d KB. Use File \u25B8 Export\u2026 and send the file instead.",
@@ -184,7 +196,10 @@ void copyLink(CircuitWindow* window, const std::string& text, const std::string&
 		            "Windows wouldn't let CedarLogic use the clipboard just now. Try again.");
 		return;
 	}
-	window->note("Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.");
+	if (leftOutDrawing)
+		window->note("Link copied. The link leaves out the drawing; it's too big for a link. Send the file to include it.");
+	else
+		window->note("Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.");
 }
 
 static bool selfTestFiles(std::string& report) {
