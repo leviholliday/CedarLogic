@@ -69,6 +69,7 @@ struct Prefs {
 	double penWidth = 0.25, highlighterWidth = 1.2;
 	bool newPagesShareLinks = true;  // a new page's TO/FROM links connect with the others' (docs/PAGE-LINKS.md)
 	bool showCategoryKeys = true; // Shift+1...0 beside the side panel's categories
+	bool classicTabs = false;     // plain segments instead of the Mac's tab cards (Settings > Appearance)
 	int gateSize = 48;            // the side panel's gates (36...96; 48 is the standard size)
 	int toolbarStyle = 3;         // 0 Classic, 2 Minimal, 3 Seamless (the Mac's styles; new installs get Seamless)
 	int toolbarHidden = 0;        // tool groups hidden, a bit each (ToolGroup, Toolbar.h)

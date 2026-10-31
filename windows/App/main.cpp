@@ -101,6 +101,7 @@ int gMenuShot = -1;
 // Alt+letter, a letter in a menu), each step PASS or FAIL.
 bool gMenuTest = false;
 bool gProjector = false;   // --projector: Simulation View's projector mode, for this run
+bool gClassicTabs = false;   // --classic-tabs: Settings > Appearance > Tabs: Classic, for this run
 // --feedback-capture-test <dir>: Send Feedback's screenshot and recording, through the form.
 std::string gFeedbackTest;
 bool gTestRun = false;   // a picture or test run: no card is left waiting for an answer
@@ -208,6 +209,7 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 		if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
 		if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
 		if (gProjector) prefs().projector = gPrefsBefore.projector;
+		if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
 		prefs().save();
 		ExitProcess((UINT)gExitCode);
 	}
@@ -1073,6 +1075,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--menu" && i + 1 < argc) { gMenuShot = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--menu-test") { gMenuTest = true; continue; }
 		if (a == "--projector") { gProjector = true; continue; }
+		if (a == "--classic-tabs") { gClassicTabs = true; continue; }
 		if (a == "--feedback-capture-test" && i + 1 < argc) { gFeedbackTest = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
@@ -1160,6 +1163,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (gProjector) prefs().projector = true;
+	if (gClassicTabs) prefs().classicTabs = true;
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gToolbarStyle;
 	// The click test wants every tool on the bar (the dark mode switch too),
 	// and New in a window of its own.
@@ -1355,6 +1359,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
 	if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
 	if (gProjector) prefs().projector = gPrefsBefore.projector;
+	if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;

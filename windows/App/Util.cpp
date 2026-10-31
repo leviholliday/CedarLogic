@@ -240,6 +240,7 @@ void Prefs::load() {
 	projector = r.b("projector", projector);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	showCategoryKeys = r.b("showCategoryKeys", showCategoryKeys);
+	classicTabs = r.b("classicTabs", classicTabs);
 	gateSize = r.i("gateSize", gateSize, 36, 96);
 	// Seamless for a new install; whoever had the app before keeps Classic,
 	// the look they knew, until they choose.
@@ -350,6 +351,7 @@ void Prefs::save() const {
 	o << "projector=" << b(projector) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "showCategoryKeys=" << b(showCategoryKeys) << "\n";
+	o << "classicTabs=" << b(classicTabs) << "\n";
 	o << "gateSize=" << gateSize << "\n";
 	o << "toolbarStyle=" << toolbarStyle << "\n";
 	o << "toolbarHidden=" << toolbarHidden << "\n";

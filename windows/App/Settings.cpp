@@ -17,6 +17,8 @@
 #include "Window.h"
 
 #include <imm.h>
+#include <shlobj.h>
+#include <shlwapi.h>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -81,6 +83,23 @@ FormField picture(const char* side, int height, std::function<void(ID2D1RenderTa
 	x.paint = std::move(paint);
 	x.tip = tip;
 	return x;
+}
+
+// What opens a double-clicked .cdl file now: its name, and `us` when it's
+// this copy of CedarLogic.
+std::string cdlHandler(bool& us) {
+	us = false;
+	wchar_t exe[MAX_PATH] = L"";
+	DWORD n = MAX_PATH;
+	if (SUCCEEDED(AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, L".cdl", L"open", exe, &n))) {
+		wchar_t self[MAX_PATH] = L"";
+		GetModuleFileNameW(nullptr, self, MAX_PATH);
+		us = lstrcmpiW(exe, self) == 0;
+	}
+	wchar_t name[256] = L"";
+	n = 256;
+	if (SUCCEEDED(AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_FRIENDLYAPPNAME, L".cdl", L"open", name, &n))) return U(name);
+	return std::string();
 }
 
 FormField button(const char* label, bool beside) {
@@ -544,6 +563,47 @@ void showPreferencesDialog(HWND parent) {
 			            "Windows didn't let it change this account's settings. The installer from the download page does the same, and more.");
 		};
 	}
+	// Double-clicking .cdl files (the Mac's "Opening files" row): which app
+	// opens them now, and Windows' own "Open with" to choose CedarLogic (an
+	// app can't make itself the default on Windows 10 and 11; the person
+	// ticks "Always use this app").
+	auto opensHere = [] {
+		bool us = false;
+		const std::string name = cdlHandler(us);
+		return std::make_pair(us, name);
+	};
+	auto opensTip = [](bool us, const std::string& name) {
+		if (us) return std::string("Double-clicking a .cdl file in File Explorer opens it here.");
+		return (name.empty() ? std::string("Double-clicking a .cdl file in File Explorer doesn't open CedarLogic right now.")
+		                     : "Double-clicking a .cdl file in File Explorer opens it in " + name + " right now.") +
+		       " Choose CedarLogic and tick “Always use this app”.";
+	};
+	{
+		const auto now = opensHere();
+		FormField files = button(now.first ? "CedarLogic opens them" : "Open them with CedarLogic…", false);
+		files.side = "Opening files:";
+		files.tip = opensTip(now.first, now.second);
+		files.tipLines = 2;
+		on[f.add(files)] = [opensHere, opensTip](Form& form, int i) {
+			if (opensHere().first) return;
+			// Windows' Open with, for a .cdl file (an empty one in the temp
+			// folder: nothing is opened, only the choice made).
+			wchar_t tmp[MAX_PATH] = L"";
+			GetTempPathW(MAX_PATH, tmp);
+			const std::wstring file = std::wstring(tmp) + L"CedarLogic circuit.cdl";
+			HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+			if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+			OPENASINFO info = {};
+			info.pcszFile = file.c_str();
+			info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_REGISTER_EXT;
+			SHOpenWithDialog(form.dialog, &info);
+			DeleteFileW(file.c_str());
+			const auto after = opensHere();
+			SetWindowTextW(form.fields[i].hwnd, after.first ? L"CedarLogic opens them" : L"Open them with CedarLogic…");
+			EnableWindow(form.fields[i].hwnd, !after.first);
+			form.setTip(i, opensTip(after.first, after.second));
+		};
+	}
 	on[f.add(check("Quitting:", "Ask before quitting", p.confirmQuit,
 	               keyOf("quit", "Quitting") + " shows a question first: Enter quits, Escape doesn't."))] = [](Form& form, int i) {
 		prefs().confirmQuit = form.checked(i);
@@ -577,6 +637,9 @@ void showPreferencesDialog(HWND parent) {
 	auto focused = [&f](int field) { return field >= 0 && GetFocus() == f.fields[field].hwnd; };
 	const int swatches = f.add(picture("App colour:", 52, [&](ID2D1RenderTarget* rt, float w, float h) { paintSwatches(rt, w, h, focused(swatchField)); },
 	                                   "Selections, highlights and buttons. CedarLogic is the icon's green. Wire colours that show signal state never change."));
+	on[f.add(choice("Tabs:", { "Modern", "Classic" }, p.classicTabs ? 1 : 0,
+	                "Modern tabs drag to reorder or to split the view, and rename with a double-click. Classic are plain segments."))] =
+		[](Form& form, int i) { prefs().classicTabs = form.choice(i) == 1; apply(); };
 	const int showGrid = f.add(check("Canvas:", "Show the grid", p.showGrid, "The background grid gates snap to. Printing never includes it."));
 	const int gridStyle = f.add(choice("Grid style:", { "Lines", "Dots" }, p.gridStyle, "Dots are quieter; lines make alignment easier to see."));
 	const int major = f.add(check("", "Darker line every 5 squares", p.majorGrid, "Makes distances easy to judge at a glance."));
