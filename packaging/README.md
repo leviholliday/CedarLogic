@@ -207,10 +207,12 @@ ones (`/get/linux-x86_64-appimage`, `/get/linux-aarch64-appimage`).
   (`AppPublisher` in `CedarLogic.iss`), so the winget manifest does too; the
   package id is `LeviHolliday.CedarLogic`. Change both together if you want
   your name there.
-- **Where installed apps update from.** The Windows and Linux apps' updaters
-  follow `windows-native-testing` / `linux-native-testing` (by design: those
-  are what `sign-preview.sh` signs). So someone who installs 0.4 with winget
-  or the one-liner gets later signed test builds through the app. winget is
+- **Where installed apps update from.** The Linux app has the Mac's
+  testing groups (Settings > General > Testing group; below): a Normal
+  tester's updater follows the versioned releases here, a Beta tester's
+  `linux-native-testing`. The Windows app's updater still follows
+  `windows-native-testing` only, so someone who installs 0.4 with winget
+  or `install.ps1` gets later signed test builds through the app. winget is
   fine with that: it just sees a newer installed version.
 - **Classrooms and GitHub's API limit** (60 requests an hour per network,
   without a token): `install.sh` falls back to the release page and the
@@ -219,3 +221,84 @@ ones (`/get/linux-x86_64-appimage`, `/get/linux-aarch64-appimage`).
 - **Untested here:** anything that needs Windows or Linux to run (winget,
   PowerShell, apt, the AppImage placement). No `pwsh` on this Mac, and Docker
   isn't running. Step 3 above is that test.
+
+## The Linux app's testing groups, and what sign-release.sh must add
+
+Since `ui/linux-channel`, the Linux app has the Mac's **Testing group** row
+in Settings > General (Normal tester / Beta tester, the Mac's wording and
+hint, with Check Now). Its updater (`linux/App/Updater.h`) then looks in one
+of two places:
+
+| Group | Follows | Offered when |
+|---|---|---|
+| **Beta tester** | `linux-native-testing` in `leviholliday/CedarLogic`, as before | its signed `SHA256SUMS` is for `tag linux-native-testing` and the tag's commit, with a build newer than the app's |
+| **Normal tester** | the newest **full** release `v<version>` in `leviholliday/CedarLogic-Releases` (newest by version, among the 50 most recent releases) that has this computer's file and `SHA256SUMS` + `.sig` | the same checks with that release's tag (`tag v0.4.1`) and the commit its tag is on, a build newer than the app's, a version no older than the app's (`CL_VERSION`), and not the release this updater already installed |
+
+Pre-releases (the Mac's betas, Classic 4.x) and drafts never count for a
+Normal tester. A release with no Linux file for this format (a Mac-only fix)
+is skipped, so a Normal tester gets the newest release that has one. Its
+file names: `cedarlogic_<v>_<amd64|arm64>.deb` (or the test build's
+`cedarlogic_<arch>.deb`), and `CedarLogic-Native-<v>-<x86_64|aarch64>.AppImage`
+(or `CedarLogic-<v>-...`), the names `install.sh` takes. The .deb's root step
+(`--install-update`, through pkexec) accepts either tag kind, with its own
+names, and refuses a build that isn't newer than the installed one.
+
+**Which group a copy starts in** (`linux/App/Prefs.cpp`, `startingChannel`):
+the group chosen in Settings; else what `install.sh` wrote to
+`~/.config/CedarLogic/install-channel` (`beta` with `--preview` or when it
+fell back to the test build, `normal` for a release); else, for a copy whose
+settings file is older than this change (every Linux build until now came
+from `linux-native-testing`), **Beta**, saying so once (a note in the window,
+or with the next update question, and under the row in Settings until then);
+else, a new install, **Normal**. So existing testers keep getting test builds.
+A copy installed from a downloaded .deb or AppImage with no settings yet
+starts Normal; until 0.4 has Linux files, its Check Now says no finished
+version is out yet and points at Beta tester.
+
+### What sign-release.sh must do for the Linux files (required)
+
+`sign-release.sh` writes `build $(date +%s)`, the time it signs. The Linux
+updater compares that number with its own `CL_BUILD_TIME`, which is the
+**committer time of the commit the Linux files were built from**. With the
+signing time:
+
+- a Beta tester on a test build newer than the release's code, but older than
+  the signing time, who switches to Normal would be offered the release:
+  a downgrade (both say 0.4.0, so the version check can't tell);
+- a copy that installed the release by hand (install.sh, a .deb) would be
+  offered the same release once more.
+
+So, before 0.4's manifest is signed, `sign-release.sh` must write **the Linux
+files' commit time** as the build:
+
+1. Add a `--build N` option that replaces `BUILD=$(date +%s)`.
+2. At release time, take N from the test build the Linux files were copied
+   from: it's the `build` line of `linux-native-testing`'s own signed list,
+   checked by hash so it's the same files:
+   ```bash
+   gh release download linux-native-testing -R leviholliday/CedarLogic -p SHA256SUMS -D t
+   sed -n 's/^build //p' t/SHA256SUMS          # e.g. 1761900000
+   grep -E '^file cedarlogic_amd64.deb ' t/SHA256SUMS   # its sha256 must equal v0.4's cedarlogic_0.4_amd64.deb
+   packaging/sign-release.sh v0.4 --build 1761900000 --upload
+   ```
+   (Or `git log -1 --format=%ct <that commit>`; it's the same number.)
+   Refuse to sign if the Linux files' hashes aren't in that list: they were
+   built from another commit, and its time is what's needed.
+3. Keep `tag v<version>` (the app checks it equals the release's tag) and the
+   commit line as it is (the commit the release's tag is on in this repo,
+   which is what the app reads back from GitHub).
+4. The Linux build that's released must say the release's version
+   (`project(CedarLogicNative VERSION 0.4.1)` in `linux/CMakeLists.txt` for
+   v0.4.1): the app never offers a Normal tester a version older than its own.
+
+The Mac and Windows files share that one manifest. The Mac doesn't read it;
+the Windows app doesn't read versioned releases yet. If Windows gets the same
+groups and its files come from another commit, the release needs one build
+number that is right for both (or a manifest per platform), so decide that
+before then.
+
+Nothing else changes: CI's publish job and `scripts/sign-preview.sh` work as
+before for the test build. CI checks all of this headlessly
+(`.github/workflows/linux-native.yml`, "Testing group check":
+`cedarlogic --channel-check` against a static stand-in for GitHub, and the
+signed-folder check with `--tag v0.4.1`, the way `sign-release.sh` signs).
