@@ -221,6 +221,18 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 // How far from the origin a loaded part or wire may be (gl_defs.h).
 static const double kMaxCoordinate = WORLD_LIMIT;
 
+// A notice about the file just opened, for the person opening it.
+static cl::MigrationNotice loadNotice(cl::Severity severity, const string &summary, const string &detail = string(),
+                                      const string &gateUuid = string(), const string &libName = string()) {
+	cl::MigrationNotice n;
+	n.severity = severity;
+	n.summary = summary;
+	n.detail = detail;
+	n.gateUuid = gateUuid;
+	n.libName = libName;
+	return n;
+}
+
 // An id as the engine holds it, or false for one it can't: past kMaxId
 // (a damaged file; real ids count up from 1), where reading it into the
 // engine's integer types wrapped round to another id. (Some paths read a
@@ -243,11 +255,7 @@ static bool idOf(const string &text, IDType &out) {
 static cl::Page withoutDuplicateIds(const cl::Page &page, std::set<IDType> &gateIds, std::set<IDType> &wireIds,
                                     std::vector<cl::MigrationNotice> &notices) {
 	auto note = [&notices](const string &summary) {
-		cl::MigrationNotice n;
-		n.severity = cl::Severity::Warning;
-		n.summary = summary;
-		n.detail = "It was left out. The rest of the circuit loaded normally.";
-		notices.push_back(std::move(n));
+		notices.push_back(loadNotice(cl::Severity::Warning, summary, "It was left out. The rest of the circuit loaded normally."));
 	};
 	cl::Page pg = page;
 	pg.gates.clear();
@@ -368,14 +376,11 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 			const auto &owner = gateLibrary().gateNameToLibrary;
 			auto known = owner.find(g.libName);
 			if (known != owner.end() && !known->second.empty()) continue;
-			cl::MigrationNotice n;
-			n.severity = cl::Severity::Warning;
-			n.gateUuid = g.uuid;
-			n.libName = g.libName;
-			n.summary = "Unknown gate type: " + (g.libName.empty() ? string("(none)") : g.libName);
-			n.detail = "No gate of this type is in the loaded library, so it cannot be drawn "
-			           "or simulated. It is kept in the circuit and written back out on save.";
-			applyNotices.push_back(std::move(n));
+			applyNotices.push_back(loadNotice(cl::Severity::Warning,
+			                                  "Unknown gate type: " + (g.libName.empty() ? string("(none)") : g.libName),
+			                                  "No gate of this type is in the loaded library, so it cannot be drawn "
+			                                  "or simulated. It is kept in the circuit and written back out on save.",
+			                                  g.uuid, g.libName));
 		}
 
 		// Create every gate (and, through its connectors, its wires).
@@ -389,12 +394,9 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 			if (std::fabs(g.at.x) > kMaxCoordinate || std::fabs(g.at.y) > kMaxCoordinate) {
 				g.at.x = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.x));
 				g.at.y = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.y));
-				cl::MigrationNotice n;
-				n.severity = cl::Severity::Warning;
-				n.gateUuid = g.uuid;
-				n.libName = g.libName;
-				n.summary = "Gate " + g.uuid + " was far outside the page and was moved to its edge.";
-				applyNotices.push_back(std::move(n));
+				applyNotices.push_back(loadNotice(cl::Severity::Warning,
+				                                  "Gate " + g.uuid + " was far outside the page and was moved to its edge.",
+				                                  string(), g.uuid, g.libName));
 			}
 			vector<parameter> params;
 			for (const cl::Param &p : g.params) params.push_back(parameter(p.name, p.value, p.gui));
@@ -433,19 +435,16 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 		}
 		for (IDType id : joinsNothing) {
 			cmdDeleteWire(gCanvas->getCircuit(), gCanvas, id).Do();
-			cl::MigrationNotice n;
-			n.severity = cl::Severity::Warning;
-			n.summary = "Wire " + to_string(id) + " was removed, because it connected fewer than two pins.";
-			applyNotices.push_back(std::move(n));
+			applyNotices.push_back(loadNotice(cl::Severity::Warning,
+			                                  "Wire " + to_string(id) + " was removed, because it connected fewer than two pins."));
 		}
 		if (redrawn > 0) {
-			cl::MigrationNotice n;
-			n.severity = cl::Severity::Info;
-			n.summary = to_string(redrawn) + (redrawn == 1 ? " wire was" : " wires were") +
-			            " redrawn, because the routing saved for " + (redrawn == 1 ? "it" : "them") +
-			            " didn't match " + (redrawn == 1 ? "its" : "their") + " connections.";
-			n.detail = "The connections are as saved; only the wires' paths changed.";
-			applyNotices.push_back(std::move(n));
+			const bool one = redrawn == 1;
+			applyNotices.push_back(loadNotice(cl::Severity::Info,
+			                                  to_string(redrawn) + (one ? " wire was" : " wires were") +
+			                                      " redrawn, because the routing saved for " + (one ? "it" : "them") +
+			                                      " didn't match " + (one ? "its" : "their") + " connections.",
+			                                  "The connections are as saved; only the wires' paths changed."));
 		}
 	}
 }
@@ -469,13 +468,11 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 	GUICircuit *gCircuit = gCanvas->getCircuit();
 	const bool made = !ids.empty() && gCircuit->getWire(ids.front()) != nullptr;
 	if (!made) {
-		cl::MigrationNotice n;
-		n.severity = cl::Severity::Warning;
-		n.summary = "Wire " + (w.ids.empty() ? string("(no id)") : w.ids.front()) +
-		            " could not be loaded, because " + wireDropReason(w);
-		n.detail = "The wire and its routing are not in the circuit. Redraw it, or fix the "
-		           "file so that every connection names a gate on the same page.";
-		applyNotices.push_back(std::move(n));
+		applyNotices.push_back(loadNotice(cl::Severity::Warning,
+		                                  "Wire " + (w.ids.empty() ? string("(no id)") : w.ids.front()) +
+		                                      " could not be loaded, because " + wireDropReason(w),
+		                                  "The wire and its routing are not in the circuit. Redraw it, or fix the "
+		                                  "file so that every connection names a gate on the same page."));
 		return;
 	}
 
@@ -486,7 +483,7 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 	bool fresh = false;
 	for (const cl::WireSegment &ms : w.segments) {
 		const long id = strtol(ms.id.c_str(), nullptr, 10);
-		if (id < 0 || id > 1000000) fresh = true;
+		if (id < 0 || id > guiWire::MAX_SEGMENT_ID) fresh = true;
 		renumber.emplace(id, (long)renumber.size());
 	}
 	auto segId = [&](const string &text) {
@@ -496,15 +493,18 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 		return it == renumber.end() ? -1L : it->second;
 	};
 
+	// A segment end, held to twice as far as a part may be: a part at the edge
+	// has pins beyond it, and a wire must still reach them. (Only a float's
+	// range matters here; a segment that misses its pin is redrawn later.)
+	auto inBounds = [](double v) {
+		return (float)savedPrecision((std::max)(-2 * kMaxCoordinate, (std::min)(2 * kMaxCoordinate, v)));
+	};
+
 	map<long, wireSegment> shape;
 	for (const cl::WireSegment &ms : w.segments) {
 		wireSegment seg;
 		seg.verticalSeg = ms.vertical;
 		seg.id = segId(ms.id);
-		// Twice as far as a part may be: a part at the edge has pins beyond it,
-		// and a wire must still reach them. (Only a float's range matters here;
-		// a segment that misses its pin is redrawn below.)
-		auto inBounds = [](double v) { return (float)savedPrecision((std::max)(-2 * kMaxCoordinate, (std::min)(2 * kMaxCoordinate, v))); };
 		seg.begin = GLPoint2f(inBounds(ms.begin.x), inBounds(ms.begin.y));
 		seg.end = GLPoint2f(inBounds(ms.end.x), inBounds(ms.end.y));
 		seg.calcBBox();
@@ -516,13 +516,10 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 			// gate that is not on this page crashed there, a long way from here,
 			// so drop the connection now and say so.
 			if (gCircuit->getGate(nwc.gid) == nullptr) {
-				cl::MigrationNotice n;
-				n.severity = cl::Severity::Warning;
-				n.summary = "A connection on wire " +
-				            (w.ids.empty() ? string("(no id)") : w.ids.front()) +
-				            " names gate " + c.gateUuid + ", which is not on this page.";
-				n.detail = "That connection was dropped. The rest of the wire loaded normally.";
-				applyNotices.push_back(std::move(n));
+				applyNotices.push_back(loadNotice(cl::Severity::Warning,
+				                                  "A connection on wire " + (w.ids.empty() ? string("(no id)") : w.ids.front()) +
+				                                      " names gate " + c.gateUuid + ", which is not on this page.",
+				                                  "That connection was dropped. The rest of the wire loaded normally."));
 				continue;
 			}
 			nwc.connection = c.pin;
@@ -651,11 +648,11 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 // The inverse of applyCircuitFile: read the GUI back into a plain circuit model
 // so the format library can serialize it. Mirrors what saveGate/saveWire persist.
 
-// A position as saved: to a ten-thousandth of a grid unit (gl_defs.h). A
-// rotated part's pins sit a few millionths off the grid, and a reopen trims a
-// wire's end to the pin, so the digits past that differed between a save and
-// the save after reopening it (18 one time, 17.99999428 the next).
-static double savedCoordinate(double v) { return savedPrecision(v); }
+// Positions are saved to a ten-thousandth of a grid unit (savedPrecision,
+// gl_defs.h). A rotated part's pins sit a few millionths off the grid, and a
+// reopen trims a wire's end to the pin, so the digits past that differed
+// between a save and the save after reopening it (18 one time, 17.99999428
+// the next).
 
 static cl::GateInstance buildGate(guiGate *g) {
 	cl::GateInstance gi;
@@ -663,7 +660,7 @@ static cl::GateInstance buildGate(guiGate *g) {
 	gi.libName = g->getLibraryGateName();
 	float x, y;
 	g->getGLcoords(x, y);
-	gi.at = { savedCoordinate(x), savedCoordinate(y) };
+	gi.at = { savedPrecision(x), savedPrecision(y) };
 
 	LibraryGate lg = gateLibrary().libraries[g->getLibraryName()][g->getLibraryGateName()];
 
@@ -701,8 +698,8 @@ static cl::WireInstance buildWire(guiWire *w) {
 		cl::WireSegment ws;
 		ws.id = to_string(s.id);
 		ws.vertical = s.verticalSeg;
-		ws.begin = { savedCoordinate(s.begin.x), savedCoordinate(s.begin.y) };
-		ws.end = { savedCoordinate(s.end.x), savedCoordinate(s.end.y) };
+		ws.begin = { savedPrecision(s.begin.x), savedPrecision(s.begin.y) };
+		ws.end = { savedPrecision(s.end.x), savedPrecision(s.end.y) };
 		// In a fixed order (gate id, then pin): the engine keeps a segment's
 		// pins in the order they were joined, which a reroute and a reload
 		// needn't agree on, and two saves of one circuit should be the same.
@@ -721,7 +718,7 @@ static cl::WireInstance buildWire(guiWire *w) {
 				auto other = segMap.find(segId);
 				if (other != segMap.end() && other->second.verticalSeg != s.verticalSeg)
 					at = s.verticalSeg ? other->second.begin.y : other->second.begin.x;
-				ws.intersections.push_back({ savedCoordinate(at), to_string(segId) });
+				ws.intersections.push_back({ savedPrecision(at), to_string(segId) });
 			}
 		wi.segments.push_back(ws);
 	}
