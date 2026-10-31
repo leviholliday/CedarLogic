@@ -300,6 +300,7 @@ public:
 	void switchTabs(bool backwards);
 	bool switcherActive() const;
 	void cancelSwitcher();
+	TabSwitcher* tabSwitcher() const { return switcher; }   // (--dialog switcher's picture)
 	std::vector<int> recentTabs() const;
 	int pageOfTab(int index) const;
 

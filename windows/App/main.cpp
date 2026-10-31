@@ -22,6 +22,7 @@
 #include "SyncApp.h"
 #include "SyncPlatform.h"
 #include "TabStrip.h"
+#include "TabSwitcher.h"
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
@@ -193,7 +194,9 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
 	if (help::window()) dialog = help::window();
 	if (welcome::tourWindow()) dialog = welcome::tourWindow();
-	if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
+	if (gDialog == -10) {
+		if (w && w->tabSwitcher() && w->tabSwitcher()->saveFrame(gScreenshot)) gExitCode = 0;
+	} else if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
 	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
 	if (!gTiming.empty()) {
 		const bool ok = w && w->scopeWindow() && w->scopeWindow()->saveTimingDiagram(gTiming);
@@ -660,6 +663,14 @@ void CALLBACK badLinkTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w) sharelink::showProblem(w->window(), "the link was cut short");
 }
 
+// --dialog switcher: Ctrl+Tab's panel, up without Ctrl held, for the
+// screenshot (its own picture: it's a layered window of its own).
+void CALLBACK switcherTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w && w->tabSwitcher() && !w->tabSwitcher()->showForTest()) writeOut("the tab switcher didn't open (it needs two tabs or more)\n");
+}
+
 // --dialog sync-code, sync-link: the code sheet, and what linking asks, for the screenshot.
 void CALLBACK syncSheetTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
@@ -1097,7 +1108,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "export" ? CMD_EXPORT_IMAGE : d == "lab-report" ? CMD_EXPORT_REPORT
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
-			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
+			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : d == "switcher" ? -10 : 0;
 			if (d == "sync" || d == "sync-on") { gDialog = CMD_PREFERENCES; gSyncDialog = d; }
 			if (d == "sync-code" || d == "sync-link" || d == "sync-pair" || d == "sync-pair-expired" || d == "sync-remove") { gDialog = -9; gSyncDialog = d; }
 			continue;
@@ -1253,6 +1264,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -7) integration::start(true);
 	if (gDialog == -8) SetTimer(nullptr, 0, 400, badLinkTimer);
 	if (gDialog == -9) SetTimer(nullptr, 0, 400, syncSheetTimer);
+	if (gDialog == -10) SetTimer(nullptr, 0, 900, switcherTimer);
 	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
 	if (gMenuShot >= 0 && !gScreenshot.empty()) SetTimer(nullptr, 0, 1200, menuShotStart);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);

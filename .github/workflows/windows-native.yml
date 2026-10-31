@@ -364,6 +364,9 @@ jobs:
           timeout 60 "$A" --splash-frame 4.0 "$PWD/renders/splash-first-4.0.png" --first-launch || true
           timeout 90 "$A" --card-frame 0.35 --screenshot "$PWD/renders/opening-card.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --card-frame 0.35 --screenshot "$PWD/renders/opening-card-dark.png" res/samples/practice.cdl || true
+          # Ctrl+Tab's panel (its own picture, see-through corners and shadow).
+          timeout 90 "$A" --dialog switcher --screenshot "$PWD/renders/switcher.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --dark --dialog switcher --screenshot "$PWD/renders/switcher-dark.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dialog quit --screenshot "$PWD/renders/quit.png" || true
           timeout 90 "$A" --dark --dialog quit --screenshot "$PWD/renders/quit-dark.png" || true
           # The app's alert card: a delete's question, and a name to type.
