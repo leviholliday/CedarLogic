@@ -1,3 +1,4 @@
+// `CedarLogic --render-whatsnew <dir>` draws just the What's New tour.
 // `CedarLogic --render-ui <dir> [circuit.cdl]`: draws the CedarLogic
 // interface's panels (toolbar styles, tabs, side panel, quick add, the
 // shortcut list, Settings pages, the memory editor, the welcome) to PNGs,
@@ -14,6 +15,19 @@ enum RenderUI {
         // `--render-sync <dir>`: just Settings > Sync and its sheets (SyncRender).
         if let j = args.firstIndex(of: "--render-sync"), j + 1 < args.count {
             SyncRender.run(URL(fileURLWithPath: args[j + 1], isDirectory: true))
+            exit(0)
+        }
+        // `--render-whatsnew <dir>`: every page of the What's New tour.
+        if let j = args.firstIndex(of: "--render-whatsnew"), j + 1 < args.count {
+            let dir = URL(fileURLWithPath: args[j + 1], isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for pg in 0..<WhatsNewView.pageCount {
+                let r = ImageRenderer(content: WhatsNewView(page: pg).frame(width: 820, height: 600))
+                r.scale = 2
+                guard let img = r.cgImage else { continue }
+                try? NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])?
+                    .write(to: dir.appendingPathComponent("whatsnew-\(pg).png"))
+            }
             exit(0)
         }
         guard let i = args.firstIndex(of: "--render-ui"), i + 1 < args.count else { return }
@@ -128,7 +142,7 @@ enum RenderUI {
             save("settings-shortcuts-\(t)", CLShortcutSettings().padding(28), width: 640, height: 520)
             if !dark {   // the welcome and tour are the brand look either way
                 for pg in 0..<5 { save("welcome-\(pg)", WelcomeView(page: pg), width: 780, height: 580) }
-                for pg in 0..<7 { save("whatsnew-\(pg)", WhatsNewView(page: pg), width: 820, height: 600) }
+                for pg in 0..<WhatsNewView.pageCount { save("whatsnew-\(pg)", WhatsNewView(page: pg), width: 820, height: 600) }
                 for st in [0, 8, 10] {
                     TourModel.shared.step = st
                     save("tour-\(st)", TourCard(canvas: canvas).padding(30).background(Color(white: 0.9)), width: 420)
