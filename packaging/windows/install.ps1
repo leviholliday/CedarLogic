@@ -208,7 +208,7 @@ function Install-CedarLogicFromRelease {
 	} catch {
 		if ($Tag -and $_.Exception.Message -match '404') { Fail "there's no release $Tag in $Repo." }
 		$why = $_.Exception.Message
-		if ($why -match '403|429|rate limit') { Fail "GitHub is limiting how often this network can ask (many installs at once, as in a classroom?). Wait an hour, or download the installer from https://cedarlogic.netlify.app ($why)" }
+		if ($why -match '403|429|rate limit') { Fail "GitHub is limiting how often this network can ask (many installs at once, as in a classroom?). Wait an hour, or download the installer from https://cedarlogic.netlify.app/download/windows/ ($why)" }
 		Fail "couldn't reach GitHub to find the release ($why). Check the internet connection and try again."
 	}
 	# Versioned release files are CedarLogic-0.4-Windows-Setup-x64.exe; the
@@ -230,7 +230,7 @@ function Install-CedarLogicFromRelease {
 	}
 	if (-not $release) {
 		if ($Version) { Fail "there's no full release v$Version with a Windows installer for $Arch." }
-		Fail "there's no full release with a Windows installer yet. See https://cedarlogic.netlify.app for the test builds."
+		Fail "there's no full release with a Windows installer yet. See https://cedarlogic.netlify.app/download/windows/ for the test builds."
 	}
 	$relTag = [string]$release.tag_name
 	$name = [string]$asset.name
@@ -282,7 +282,7 @@ function Install-CedarLogicFromRelease {
 			if ([long]$Matches[2] -ne $gotSize -or $Matches[3] -ne $gotSha) { Fail "the download isn't the file the signed list names. Nothing was changed." }
 			$checked += 'the signed list'
 		}
-		if ($checked.Count -eq 0) { Fail "the release gives no checksum to check the download against, so it wasn't run. Download it from https://cedarlogic.netlify.app instead." }
+		if ($checked.Count -eq 0) { Fail "the release gives no checksum to check the download against, so it wasn't run. Download it from https://cedarlogic.netlify.app/download/windows/ instead." }
 		Say ("Checked: " + ($checked -join ' and ') + " (SHA-256 $gotSha).")
 
 		if ($DryRun) { Say "Dry run: $name is downloaded and checked; not installed."; return }

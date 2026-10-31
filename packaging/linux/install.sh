@@ -143,7 +143,7 @@ else
 		done < "$TMP/assets"
 		if [ -z "$TAG" ]; then
 			if [ -n "${CEDARLOGIC_TAG:-}${CEDARLOGIC_VERSION:-}" ]; then die "that release has no $FORMAT for $ARCH."; fi
-			die "there's no full release with a $FORMAT for $ARCH yet. See https://cedarlogic.netlify.app for other ways to get it."
+			die "there's no full release with a $FORMAT for $ARCH yet. See https://cedarlogic.netlify.app/download/linux/ for other ways to get it."
 		fi
 	else
 		# The API refused (it allows 60 requests an hour per network: a
@@ -155,7 +155,7 @@ else
 		else
 			LATEST=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") || die "couldn't reach GitHub. Check the internet connection and try again."
 			TAG=${LATEST##*/tag/}
-			[ "$TAG" != "$LATEST" ] || die "couldn't tell which release is the newest. Try again in an hour, or download it from https://cedarlogic.netlify.app"
+			[ "$TAG" != "$LATEST" ] || die "couldn't tell which release is the newest. Try again in an hour, or download it from https://cedarlogic.netlify.app/download/linux/"
 		fi
 		BASE="https://github.com/$REPO/releases/download/$TAG"
 	fi
@@ -188,7 +188,7 @@ fi
 if [ "$SIGNED" = 0 ]; then
 	case "$DIGEST" in
 		sha256:*) SHA=${DIGEST#sha256:} ;;
-		*) die "release $TAG has no signed list, and GitHub gave no checksum for $NAME, so it can't be checked. Try again in an hour, or download it from https://cedarlogic.netlify.app" ;;
+		*) die "release $TAG has no signed list, and GitHub gave no checksum for $NAME, so it can't be checked. Try again in an hour, or download it from https://cedarlogic.netlify.app/download/linux/" ;;
 	esac
 	printf '%s\n' "$SHA" | grep -Eqx '[0-9a-f]{64}' || die "GitHub's checksum for $NAME looks wrong: $DIGEST"
 fi
