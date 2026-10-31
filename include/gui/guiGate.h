@@ -416,12 +416,12 @@ public:
 	void drawToScene(cl::render::Scene& scene,
 	                 const cl::render::RenderStyle& style) override;
 
-	void setGUIParam( string paramName, string value );
-	void setLogicParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
+	void setLogicParam( string paramName, string value ) override;
 
 	// Toggle the output button on and off:
 	string getState() { return getLogicParam("TOGGLE_STATE"); };
-	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y );
+	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y ) override;
 
 protected:
 	int renderInfo_outputNum;
@@ -433,10 +433,10 @@ public:
 	guiGateKEYPAD();
 	void drawToScene(cl::render::Scene& scene,
 	                 const cl::render::RenderStyle& style) override;
-	void setLogicParam( string paramName, string value );
+	void setLogicParam( string paramName, string value ) override;
 
 	// Toggle the output button on and off:
-	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y );
+	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y ) override;
 protected:
 	GLLine2f renderInfo_valueBox;
 private:
@@ -448,8 +448,8 @@ public:
 	guiGateREGISTER();
 	void drawToScene(cl::render::Scene& scene,
 	                 const cl::render::RenderStyle& style) override;
-	void setGUIParam( string paramName, string value );
-	void setLogicParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
+	void setLogicParam( string paramName, string value ) override;
 protected:
 	GLLine2f renderInfo_valueBox;
 	GLdouble renderInfo_diffx;
@@ -482,7 +482,7 @@ public:
 	// The B&W markers (minimap/print) depend on the driving net's state, so fold
 	// it into the geometry hash or the thumbnail caches a stale marker.
 	unsigned long long geometryHash() const override;
-	void setGUIParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
 protected:
 	GLLine2f renderInfo_ledBox;
 };
@@ -503,7 +503,7 @@ public:
 	                 const cl::render::RenderStyle& style) override;
 
 	// Recalculate the label's bounding box:
-	void calcBBox( void );
+	void calcBBox( void ) override;
 	
 	// A convenience function that translates
 	// TEXT_HEIGHT parameter into a GLdouble:
@@ -518,7 +518,7 @@ public:
 	// A custom setParam function is required because
 	// the object must resize it's bounding box 
 	// each time the LABEL_TEXT or TEXT_HEIGHT parameter is set.
-	void setGUIParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
 
 private:
 	// Draw anchor of the label text, in model space (calcBBox keeps it in sync).
@@ -541,12 +541,12 @@ public:
 	                 const cl::render::RenderStyle& style) override;
 
 	// Recalculate the gate's bounding box:
-	void calcBBox( void );
+	void calcBBox( void ) override;
 	
 	// A custom setParam function is required because
 	// the object must resize it's bounding box 
 	// each time the JUNCTION_ID parameter is set.
-	void setLogicParam( string paramName, string value );
+	void setLogicParam( string paramName, string value ) override;
 
 private:
 	string textString = "Text";

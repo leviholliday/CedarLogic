@@ -295,13 +295,13 @@ public:
 	Gate_N_INPUT();
 	
 	// Handle gate events:
-	void gateProcess( void ) {};
+	void gateProcess( void ) override {};
 
 	// Set the parameters:
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
 	// Get the parameters:
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	vector<ParamDescriptor> paramSchema() const override;
 
@@ -381,13 +381,13 @@ public:
 	Gate_REGISTER();
 
 	// Handle gate events:
-	void gateProcess( void );
+	void gateProcess( void ) override;
 
 	// Set the parameters:
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
 	// Get the parameters:
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate_N_INPUT::paramSchema();
@@ -427,13 +427,13 @@ public:
 	Gate_CLOCK( TimeType newHalfCycle = 0 );
 
 	// Handle gate events:
-	void gateProcess( void );
+	void gateProcess( void ) override;
 
 	// Set the clock rate:
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
 	// Get the clock rate:
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate::paramSchema();
@@ -528,13 +528,13 @@ public:
 	Gate_DRIVER();
 
 	// Handle gate events:
-	void gateProcess( void );
+	void gateProcess( void ) override;
 
 	// Set the current state:
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
 	// Get the current state:
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate::paramSchema();
@@ -598,13 +598,13 @@ public:
 	Gate_JKFF();
 	
 	// Handle gate events:
-	void gateProcess( void );
+	void gateProcess( void ) override;
 
 	// Set the parameters:
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
 	// Get the parameters:
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate::paramSchema();
@@ -627,13 +627,13 @@ public:
 	Gate_RAM();
 
 	// Handle gate events:
-	void gateProcess( void );
+	void gateProcess( void ) override;
 
 	// Set the parameters:
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
 	// Get the parameters:
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate::paramSchema();
@@ -689,13 +689,13 @@ public:
 	virtual ~Gate_JUNCTION();
 
 	// Handle gate events:
-	void gateProcess( void );
+	void gateProcess( void ) override;
 
 	// Set the junction's ID:
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
 	// Get the junction's ID:
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate::paramSchema();
@@ -704,11 +704,11 @@ public:
 	}
 
 	// Connect a wire to the input of this gate:
-	void connectInput( string inputID, IDType wireID );
+	void connectInput( string inputID, IDType wireID ) override;
 
 	// Disconnect a wire from the input of this gate:
 	// (Returns the wireID of the wire that was connected.)
-	IDType disconnectInput( string inputID );
+	IDType disconnectInput( string inputID ) override;
 
 private:
 	string myID;
@@ -824,20 +824,20 @@ public:
 	virtual ~Gate_BUS_END();
 
 	// Handle gate events:
-	void gateProcess();
+	void gateProcess() override;
 
 	// Connect a wire to the input of this gate:
-	void connectInput(string inputID, IDType wireID);
+	void connectInput(string inputID, IDType wireID) override;
 
 	// Disconnect a wire from the input of this gate:
 	// (Returns the wireID of the wire that was connected.)
-	IDType disconnectInput(string inputID);
+	IDType disconnectInput(string inputID) override;
 
 	// Set the parameters:
-	bool setParameter(string paramName, string value);
+	bool setParameter(string paramName, string value) override;
 
 	// Get the parameters:
-	string getParameter(string paramName);
+	string getParameter(string paramName) override;
 
 	vector<ParamDescriptor> paramSchema() const override {
 		auto s = Gate::paramSchema();
@@ -866,11 +866,11 @@ public:
 	Gate_pauseulator();
 	
 	
-	void gateProcess( void );
+	void gateProcess( void ) override;
 
-	bool setParameter( string paramName, string value );
+	bool setParameter( string paramName, string value ) override;
 
-	string getParameter( string paramName );
+	string getParameter( string paramName ) override;
 
 	// No settable params (setParameter is a no-op; getParameter is a signal).
 	vector<ParamDescriptor> paramSchema() const override { return {}; }
