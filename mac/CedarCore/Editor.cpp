@@ -29,6 +29,7 @@
 #include "command/cmdSetParams.h"
 
 #include <algorithm>
+#include <map>
 #include <cfloat>
 #include <cmath>
 #include <sstream>
@@ -322,8 +323,47 @@ struct Nearby { unsigned long srcGate; std::string srcPin; unsigned long dstGate
 // connected to, not from.
 std::vector<Nearby> findNearby(GUICanvas* page, float radius, bool moving) {
 	const float tie = 1.1f;
-	std::vector<Nearby> cands;
 	auto isMoving = [moving](guiGate* g) { return g->isSelected() && !(moving && g->isLocked()); };
+
+	// The free pins that could be connected to, each placed once, in the order
+	// the page lists them; then a grid of cells twice the radius across, so
+	// each moving pin looks only at the 3 x 3 cells around it. (Every pin
+	// against every pin took minutes with a few thousand parts on a page.)
+	// A pin outside the cells is more than the radius away, and the pins in
+	// them are tried in the page's order, so the result is the same as trying
+	// them all: ties go the same way.
+	struct Pin { guiGate* gate; std::string name; float x, y; };   // (getHotspotList is a copy)
+	std::vector<Pin> targets;
+	for (auto& de : *page->getGateList()) {
+		guiGate* dst = de.second;
+		if (dst == nullptr || isMoving(dst)) continue;
+		for (auto& dhs : dst->getHotspotList()) {
+			if (dst->isConnected(dhs.first)) continue;
+			Pin p{ dst, dhs.first, 0, 0 };
+			dst->getHotspotCoords(dhs.first, p.x, p.y);
+			targets.push_back(p);
+		}
+	}
+	const double cell = (std::max)(2.0 * (double)radius, 1e-3);
+	// A cell's key; false for a place too far out (or not a number) for one.
+	auto cellOf = [cell](float x, float y, long long& cx, long long& cy) {
+		const double fx = std::floor(x / cell), fy = std::floor(y / cell);
+		if (!(std::fabs(fx) < 1e15 && std::fabs(fy) < 1e15)) return false;
+		cx = (long long)fx;
+		cy = (long long)fy;
+		return true;
+	};
+	auto key = [](long long cx, long long cy) { return std::make_pair(cx, cy); };
+	std::map<std::pair<long long, long long>, std::vector<size_t>> grid;
+	std::vector<size_t> anywhere;   // pins with no cell: tried by every pin
+	for (size_t i = 0; i < targets.size(); i++) {
+		long long cx, cy;
+		if (cellOf(targets[i].x, targets[i].y, cx, cy)) grid[key(cx, cy)].push_back(i);
+		else anywhere.push_back(i);
+	}
+
+	std::vector<Nearby> cands;
+	std::vector<size_t> near;
 	for (auto& se : *page->getGateList()) {
 		guiGate* src = se.second;
 		if (src == nullptr || !isMoving(src)) continue;
@@ -331,21 +371,29 @@ std::vector<Nearby> findNearby(GUICanvas* page, float radius, bool moving) {
 			if (src->isConnected(shs.first)) continue;
 			float sx, sy;
 			src->getHotspotCoords(shs.first, sx, sy);
+			near = anywhere;
+			long long cx, cy;
+			if (cellOf(sx, sy, cx, cy)) {
+				for (long long gx = cx - 1; gx <= cx + 1; gx++)
+					for (long long gy = cy - 1; gy <= cy + 1; gy++) {
+						auto it = grid.find(key(gx, gy));
+						if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+					}
+			} else {
+				near.resize(targets.size());
+				for (size_t i = 0; i < near.size(); i++) near[i] = i;
+			}
+			std::sort(near.begin(), near.end());
+			near.erase(std::unique(near.begin(), near.end()), near.end());
 			guiGate* best = nullptr;
 			std::string bestPin;
 			float bestDist = -1, second = -1;
-			for (auto& de : *page->getGateList()) {
-				guiGate* dst = de.second;
-				if (dst == nullptr || dst == src || isMoving(dst)) continue;
-				for (auto& dhs : dst->getHotspotList()) {
-					if (dst->isConnected(dhs.first)) continue;
-					float dx, dy;
-					dst->getHotspotCoords(dhs.first, dx, dy);
-					const float d = std::sqrt((dx - sx) * (dx - sx) + (dy - sy) * (dy - sy));
-					if (d > radius) continue;
-					if (bestDist < 0 || d < bestDist) { second = bestDist; bestDist = d; best = dst; bestPin = dhs.first; }
-					else if (second < 0 || d < second) second = d;
-				}
+			for (size_t i : near) {
+				const Pin& t = targets[i];
+				const float d = std::sqrt((t.x - sx) * (t.x - sx) + (t.y - sy) * (t.y - sy));
+				if (d > radius) continue;
+				if (bestDist < 0 || d < bestDist) { second = bestDist; bestDist = d; best = t.gate; bestPin = t.name; }
+				else if (second < 0 || d < second) second = d;
 			}
 			if (best == nullptr) continue;
 			if (second >= 0 && second < bestDist * tie) continue;
