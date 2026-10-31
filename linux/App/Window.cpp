@@ -2084,6 +2084,16 @@ void CircuitWindow::setDrawingShown(bool shown) {
 
 void CircuitWindow::clearDrawing() {
 	if (pageIsInkReadOnly()) { note(ink::kReadOnlyNote); return; }
+	const int strokes = cl_ink_stroke_count(doc, currentPage());
+	if (strokes <= 0) { note("Nothing drawn on this page."); return; }
+	// Asked first: it all goes at once. (It's one step, so Undo does bring it back.)
+	const std::string what = strokes == 1 ? std::string("The 1 stroke drawn on this page goes") : format("All %d strokes drawn on this page go", strokes);
+	const shortcuts::Action* undo = shortcuts::find("undo");
+	const std::string undoKeys = undo ? shortcuts::keys(*undo) : std::string();
+	if (!askConfirm(window(), "Clear the drawing on “" + pageName(currentPage()) + "”?",
+	                what + ". Edit ▸ Undo" + (undoKeys.empty() ? std::string() : " (" + shortcuts::label(undoKeys) + ")") + " brings it back.",
+	                "Clear Drawing", "Cancel", true))
+		return;
 	const int n = cl_ink_clear(doc, currentPage());
 	if (n <= 0) { note("Nothing drawn on this page."); return; }
 	edited();
