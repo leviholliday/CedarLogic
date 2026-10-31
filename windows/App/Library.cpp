@@ -3,6 +3,7 @@
 #include "Library.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
@@ -246,8 +247,258 @@ bool moveToTrash(const Item& item) {
 	std::string dest = trash + "\\" + item.id;
 	for (int n = 2; GetFileAttributesW(W(dest).c_str()) != INVALID_FILE_ATTRIBUTES; n++) dest = trash + "\\" + item.id + strf(" %d", n);
 	const bool moved = MoveFileExW(W(item.folder).c_str(), W(dest).c_str(), 0) != FALSE;
-	if (moved) changed();
+	if (moved) {
+		stampDeleted(dest, now());
+		changed();
+	}
 	return moved;
+}
+
+// ---- Recently Deleted ------------------------------------------------------------------
+
+namespace {
+
+const char* kStampFile = "deleted.txt";
+
+std::string isoTime(double t) {
+	const time_t tt = (time_t)t;
+	struct tm g;
+	gmtime_s(&g, &tt);
+	char buf[32];
+	strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &g);
+	return buf;
+}
+
+bool parseIso(const std::string& s, double& t) {
+	struct tm g = {};
+	if (sscanf_s(s.c_str(), "%d-%d-%dT%d:%d:%d", &g.tm_year, &g.tm_mon, &g.tm_mday, &g.tm_hour, &g.tm_min, &g.tm_sec) != 6) return false;
+	g.tm_year -= 1900;
+	g.tm_mon -= 1;
+	const time_t tt = _mkgmtime(&g);
+	if (tt == (time_t)-1) return false;
+	t = (double)tt;
+	return true;
+}
+
+// When the folder was moved into the trash: its change time (NTFS updates
+// it on a rename or move), else its last write.
+double movedTime(const std::string& folder) {
+	HANDLE h = CreateFileW(W(folder).c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+	                       FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+	double t = 0;
+	if (h != INVALID_HANDLE_VALUE) {
+		FILE_BASIC_INFO info = {};
+		if (GetFileInformationByHandleEx(h, FileBasicInfo, &info, sizeof info) && info.ChangeTime.QuadPart > 0) {
+			FILETIME ft;
+			ft.dwLowDateTime = info.ChangeTime.LowPart;
+			ft.dwHighDateTime = (DWORD)info.ChangeTime.HighPart;
+			t = toSeconds(ft);
+		}
+		CloseHandle(h);
+	}
+	return t > 0 ? t : modifiedTime(folder);
+}
+
+// A folder and everything in it.
+bool removeTree(const std::string& folder) {
+	WIN32_FIND_DATAW fd;
+	HANDLE h = FindFirstFileW(W(folder + "\\*").c_str(), &fd);
+	if (h != INVALID_HANDLE_VALUE) {
+		do {
+			const std::string n = U(fd.cFileName);
+			if (n == "." || n == "..") continue;
+			const std::string p = folder + "\\" + n;
+			if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) removeTree(p);
+			else {
+				SetFileAttributesW(W(p).c_str(), FILE_ATTRIBUTE_NORMAL);
+				DeleteFileW(W(p).c_str());
+			}
+		} while (FindNextFileW(h, &fd));
+		FindClose(h);
+	}
+	return RemoveDirectoryW(W(folder).c_str()) != FALSE;
+}
+
+}  // namespace
+
+void stampDeleted(const std::string& folder, double when) { writeFile(folder + "\\" + kStampFile, isoTime(when) + "\n"); }
+
+std::vector<Deleted> deletedItems(const std::string& libraryRoot, double nowTime) {
+	const std::string bin = (libraryRoot.empty() ? root() : libraryRoot) + "\\.Trash";
+	const double t = nowTime > 0 ? nowTime : now();
+	std::vector<Deleted> out;
+	WIN32_FIND_DATAW fd;
+	HANDLE h = FindFirstFileW(W(bin + "\\*").c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) return out;
+	do {
+		const std::string n = U(fd.cFileName);
+		if (n.empty() || n[0] == '.' || !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+		Deleted d;
+		d.id = n;
+		d.folder = bin + "\\" + n;
+		// Not a circuit ("repeated versions"): left alone.
+		if (!fileExists(d.circuit())) continue;
+		d.name = trim(readFile(d.folder + "\\name.txt"));
+		if (d.name.empty()) d.name = "Untitled";
+		if (!parseIso(trim(readFile(d.folder + "\\" + kStampFile)), d.deleted)) {
+			const double moved = movedTime(d.folder);
+			const bool fresh = moved > 0 && moved <= t && t - moved < kKeepDeletedDays * 86400.0;
+			d.deleted = fresh ? moved : t;
+			stampDeleted(d.folder, d.deleted);
+		}
+		out.push_back(d);
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+	std::sort(out.begin(), out.end(), [](const Deleted& a, const Deleted& b) { return a.deleted > b.deleted; });
+	return out;
+}
+
+int sweepDeleted(const std::string& libraryRoot, double nowTime) {
+	const double t = nowTime > 0 ? nowTime : now();
+	const double limit = t - kKeepDeletedDays * 86400.0;
+	int n = 0;
+	for (const Deleted& d : deletedItems(libraryRoot, t))
+		if (d.deleted < limit && removeTree(d.folder)) n++;
+	return n;
+}
+
+std::string restoreDeleted(const Deleted& d) {
+	// "<id> 2" was the second circuit with that id in the trash.
+	std::string id = d.id;
+	const size_t sp = id.find_last_of(' ');
+	if (sp != std::string::npos && sp + 1 < id.size() && id.find_first_not_of("0123456789", sp + 1) == std::string::npos) id = id.substr(0, sp);
+	const std::string libRoot = d.folder.substr(0, d.folder.rfind("\\.Trash\\"));
+	if (id.empty() || GetFileAttributesW(W(libRoot + "\\" + id).c_str()) != INVALID_FILE_ATTRIBUTES) {
+		static unsigned next = (unsigned)GetCurrentProcessId() * 2654435761u + (unsigned)GetTickCount();
+		for (int tries = 0; tries < 100; tries++) {
+			id = stamp(now()) + strf("-%d", 1000 + (int)(next++ % 99000));
+			if (GetFileAttributesW(W(libRoot + "\\" + id).c_str()) == INVALID_FILE_ATTRIBUTES) break;
+		}
+	}
+	const std::string dest = libRoot + "\\" + id;
+	if (!MoveFileExW(W(d.folder).c_str(), W(dest).c_str(), 0)) return std::string();
+	DeleteFileW(W(dest + "\\" + kStampFile).c_str());
+	// At the top of Your Circuits.
+	HANDLE h = CreateFileW(W(dest + "\\circuit.cdl").c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0,
+	                       nullptr);
+	if (h != INVALID_HANDLE_VALUE) {
+		FILETIME ft;
+		GetSystemTimeAsFileTime(&ft);
+		SetFileTime(h, nullptr, nullptr, &ft);
+		CloseHandle(h);
+	}
+	changed();
+	return id;
+}
+
+bool deleteNow(const Deleted& d) { return removeTree(d.folder); }
+
+int trashSelfTest(std::function<void(const std::string&)> say) {
+	int fails = 0;
+	auto check = [&](bool ok, const std::string& what) {
+		say(std::string(ok ? "PASS  " : "FAIL  ") + what + "\n");
+		if (!ok) fails++;
+	};
+	// A library of its own, in the temp folder.
+	wchar_t tmp[MAX_PATH] = L"";
+	GetTempPathW(MAX_PATH, tmp);
+	const std::string home = U(tmp) + strf("cedarlogic-trash-%lu", GetCurrentProcessId());
+	SetEnvironmentVariableW(L"CEDARLOGIC_HOME", W(home).c_str());
+	removeTree(home);
+	const std::string lib = root();
+	makeDirs(lib);
+	auto circuitText = [](int gates) {
+		std::string s = "\n<circuit>\n<CurrentPage>0</CurrentPage>\n<page 0>\n";
+		for (int i = 0; i < gates; i++) s += strf("<gate>\n<ID>%d</ID>\n<type>AA_AND2</type>\n<position>%d,0</position>\n</gate>\n", i + 1, i * 8);
+		return s + "</page 0>\n</circuit>\n";
+	};
+	// Three circuits, as the Mac's state makes them; "Counter" is deleted from Your Circuits.
+	Item adder, half, counter;
+	create("Adder", circuitText(2), "", adder);
+	create("Half adder", circuitText(2), "", half);
+	create("Counter", circuitText(4), "", counter);
+	check(moveToTrash(counter), "Delete puts “Counter” in the trash");
+	const std::string bin = lib + "\\.Trash";
+	auto trashed = [&](const std::string& folder, const std::string& name, double deleted) {
+		const std::string f = bin + "\\" + folder;
+		makeDirs(f + "\\versions");
+		writeFile(f + "\\name.txt", name);
+		writeFile(f + "\\circuit.cdl", circuitText(3));
+		if (deleted > 0) stampDeleted(f, deleted);
+	};
+	const double t = now();
+	trashed("20240101-120000-11111", "Old one", t - 31 * 86400.0);
+	trashed("20250101-120000-22222", "From the phone", 0);   // sync's: no date
+	trashed(half.id + " 2", "Half adder again", t - 86400.0);
+	makeDirs(bin + "\\repeated versions\\" + half.id);
+	writeFile(bin + "\\repeated versions\\" + half.id + "\\20240101-000000.cdl", circuitText(1));
+
+	std::vector<Deleted> before = deletedItems();
+	std::set<std::string> names;
+	std::string list;
+	for (const Deleted& d : before) { names.insert(d.name); list += (list.empty() ? "" : ", ") + d.name; }
+	check(before.size() == 4 && names == std::set<std::string>{ "Counter", "Old one", "From the phone", "Half adder again" },
+	      "Recently Deleted shows the 4 deleted circuits (" + list + ")");
+	check(!before.empty() && (before[0].name == "Counter" || before[0].name == "From the phone"), "newest first");
+	bool repeatedListed = false;
+	for (const Deleted& d : before) repeatedListed = repeatedListed || d.id == "repeated versions";
+	check(!repeatedListed && GetFileAttributesW(W(bin + "\\repeated versions").c_str()) != INVALID_FILE_ATTRIBUTES,
+	      "the repeated versions folder isn't listed, and is left alone");
+	for (const Deleted& d : before) {
+		if (d.name == "Counter") check(std::fabs(d.deleted - t) < 600, "a circuit deleted from Your Circuits is dated when it was deleted");
+		if (d.name == "From the phone")
+			check(fileExists(d.folder + "\\" + kStampFile) && std::fabs(d.deleted - t) < 600,
+			      "one sync moved there with no date is dated when it was moved, and stamped");
+	}
+	const int swept = sweepDeleted();
+	std::vector<Deleted> after = deletedItems();
+	bool oldThere = false;
+	for (const Deleted& d : after) oldThere = oldThere || d.name == "Old one";
+	check(swept == 1 && !oldThere, strf("the sweep deleted the one from 31 days ago, only (%d)", swept));
+	check(sweepDeleted() == 0, "a second sweep deletes nothing");
+
+	// Restore: under its own id when that's free...
+	bool found = false;
+	for (const Deleted& d : after) {
+		if (d.name != "Counter") continue;
+		found = true;
+		const std::string id = restoreDeleted(d);
+		const std::vector<Item> now = items();
+		check(id == d.id && !now.empty() && now.front().id == id && now.front().name == "Counter",
+		      "Restore puts “Counter” back in Your Circuits under its own id, at the top");
+		check(!fileExists(lib + "\\" + id + "\\" + kStampFile), "without its deleted date");
+	}
+	if (!found) check(false, "Counter is in Recently Deleted");
+	// ...and under a new one when its id is taken (a second copy).
+	found = false;
+	for (const Deleted& d : after) {
+		if (d.name != "Half adder again") continue;
+		found = true;
+		const std::string id = restoreDeleted(d);
+		bool both = false, again = false;
+		for (const Item& it : items()) {
+			both = both || it.id == half.id;
+			again = again || (it.id == id && it.name == "Half adder again");
+		}
+		check(!id.empty() && id != half.id && id.find(' ') == std::string::npos && both && again,
+		      "a second copy of a circuit that's still there comes back beside it, under a new id (" + id + ")");
+	}
+	if (!found) check(false, "the second copy is in Recently Deleted");
+	check(items().size() == 4, strf("Your Circuits has 4 circuits now (%d)", (int)items().size()));
+	// Delete Now.
+	found = false;
+	for (const Deleted& d : deletedItems()) {
+		if (d.name != "From the phone") continue;
+		found = true;
+		check(deleteNow(d) && GetFileAttributesW(W(d.folder).c_str()) == INVALID_FILE_ATTRIBUTES, "Delete Now deletes it for good");
+	}
+	if (!found) check(false, "the sync-trashed circuit is in Recently Deleted");
+	check(deletedItems().empty(), "Recently Deleted is empty");
+
+	removeTree(home);
+	SetEnvironmentVariableW(L"CEDARLOGIC_HOME", nullptr);
+	say(fails == 0 ? "trash-check: all passed\n" : strf("trash-check: %d failed\n", fails));
+	return fails;
 }
 
 // It saves itself every few seconds, so not every save is a version: the

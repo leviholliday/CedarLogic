@@ -627,6 +627,14 @@ jobs:
           kill $SERVER 2>/dev/null || true
           exit $code
 
+      # Recently Deleted without a window: the Mac's launch-selftest `trash`
+      # state (the list and its dates, the 30-day sweep, Restore, Delete Now)
+      # in a library of its own.
+      - name: Recently Deleted check
+        if: matrix.run
+        shell: bash
+        run: timeout 60 package/CedarLogic/CedarLogic.exe --trash-check
+
       - name: Share link test
         if: matrix.run
         shell: bash

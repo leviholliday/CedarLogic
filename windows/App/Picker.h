@@ -86,6 +86,12 @@ public:
 	float footerHeight = 0;
 	std::function<void(ID2D1RenderTarget*, const D2D1_RECT_F&)> footer;
 	std::function<void(Picker&, float x, float y)> onFooterClick;
+	// A link beside the title (Your Circuits' "Recently Deleted (N)"), in the
+	// accent; clicked, onTitleLink. Read again each time it's drawn.
+	std::function<std::string()> titleLink;
+	std::function<void(Picker&)> onTitleLink;
+	D2D1_RECT_F titleLinkRect = D2D1::RectF(0, 0, 0, 0);
+	bool titleLinkHot = false;
 
 	std::vector<Row> shown;
 	int selection = 0;
@@ -231,6 +237,17 @@ private:
 		const float w = clientW(), h = clientH();
 		rt->Clear(look.paper());
 		drawText(rt, title, D2D1::RectF(kMargin, kMargin, w - kMargin, kMargin + 26), 19, look.ink(), TextAlign::Leading, true);
+		titleLinkRect = D2D1::RectF(0, 0, 0, 0);
+		if (titleLink) {
+			const std::string link = titleLink();
+			if (!link.empty()) {
+				const float lx = kMargin + textWidth(title, 19, true) + 16, lw = textWidth(link, 13) + 4;
+				titleLinkRect = D2D1::RectF(lx, kMargin + 4, std::min(w - kMargin, lx + lw), kMargin + 24);
+				drawText(rt, link, titleLinkRect, 13, titleLinkHot ? accent : withAlpha(accent, 0.85f));
+				if (titleLinkHot)
+					fillRect(rt, D2D1::RectF(titleLinkRect.left, titleLinkRect.bottom - 2, titleLinkRect.left + lw - 4, titleLinkRect.bottom - 1), accent);
+			}
+		}
 		// The line under the heading, wrapped.
 		if (IDWriteFactory* dw = dwFactory()) {
 			IDWriteTextFormat* f = nullptr;
@@ -413,6 +430,9 @@ private:
 			TrackMouseEvent(&t);
 			const int row = rowAt(x, y), b = buttonAt(x, y);
 			if (row != hot || b != hotButton) { hot = row; hotButton = b; redraw(); }
+			const bool linkHot = inRect(titleLinkRect, x, y);
+			if (linkHot != titleLinkHot) { titleLinkHot = linkHot; redraw(); }
+			if (linkHot) SetCursor(LoadCursor(nullptr, IDC_HAND));
 			return true;
 		}
 		case WM_MOUSELEAVE: hot = hotButton = -1; redraw(); return true;
@@ -426,6 +446,12 @@ private:
 				press(100 + (int)rightButtons.size() - 1);
 			return true;
 		case WM_LBUTTONUP: {
+			if (onTitleLink && inRect(titleLinkRect, x, y)) {
+				titleLinkHot = false;
+				onTitleLink(*this);
+				redraw();
+				return true;
+			}
 			if (footer && footerHeight > 0 && onFooterClick && inRect(footerRect(), x, y)) {
 				onFooterClick(*this, x, y);
 				return true;

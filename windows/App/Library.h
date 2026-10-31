@@ -44,8 +44,36 @@ bool create(const std::string& name, const std::string& text, const std::string&
 // The circuit already imported from a file as it is now, if there is one.
 bool imported(const std::string& file, Item& out);
 void rename(const Item& item, const std::string& name);
-// Into the library's own trash folder (the wx app's too).
+// Into the library's own trash folder (the wx app's too), dated (deleted.txt).
 bool moveToTrash(const Item& item);
+
+// Recently Deleted (docs/RECENTLY-DELETED.md, the Mac's RecentlyDeleted.swift):
+// the circuits in <library>\.Trash, kept 30 days, then swept. `id` is the
+// folder's name there ("<id>", or "<id> 2" for a second one). The
+// "repeated versions" folder (no circuit.cdl) is never listed or swept.
+const int kKeepDeletedDays = 30;
+struct Deleted {
+	std::string id, name, folder;
+	double deleted = 0;   // seconds since 1970
+	std::string circuit() const { return folder + "\\circuit.cdl"; }
+};
+// Newest first. One with no date (sync, the wx app, an older version put it
+// there) is dated the first time it's listed: when it was moved there if
+// that's within 30 days, else now.
+std::vector<Deleted> deletedItems(const std::string& libraryRoot = std::string(), double nowTime = 0);
+// Those deleted more than 30 days ago go for good; how many went.
+int sweepDeleted(const std::string& libraryRoot = std::string(), double nowTime = 0);
+// Back into Your Circuits under its own id (a new one if that's taken), at
+// the top of the list. Its library id, or "" if it couldn't be moved.
+std::string restoreDeleted(const Deleted& d);
+// Gone for good, now.
+bool deleteNow(const Deleted& d);
+// Writes deleted.txt in a trashed circuit's folder (ISO 8601, UTC).
+void stampDeleted(const std::string& folder, double when);
+// --trash-check: the Mac's launch-selftest `trash` state, in a library of
+// its own: the list and its dates, the 30-day sweep, Restore (its own id, or
+// a new one when taken) and Delete Now. Returns how many failed.
+int trashSelfTest(std::function<void(const std::string&)> say);
 
 // A library circuit was saved: keep a version when it's due (or now, if
 // `explicitSave`), and thin out old ones. True when a version was kept.

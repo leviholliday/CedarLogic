@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <thread>
 
 namespace {
 
@@ -1010,6 +1011,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			writeOut(strf("feedback server: %s (%d)\n", status == 403 ? "reachable, key checked" : status ? "answered" : "unreachable", status));
 			return status == 403 ? 0 : 1;
 		}
+		if (a == "--trash-check") return library::trashSelfTest([](const std::string& s) { writeOut(s); }) == 0 ? 0 : 1;
 		if (a == "--feedback-check") {
 			prefs().load();
 			return feedback::serverCheck([](const std::string& s) { writeOut(s); }) == 0 ? 0 : 1;
@@ -1158,6 +1160,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
 	gTestRun = testRun;
 	if (!testRun && handToRunning(files)) return 0;
+	// Recently Deleted: circuits deleted over 30 days ago go for good, in the
+	// background (files only).
+	if (!testRun) std::thread([] { library::sweepDeleted(); }).detach();
 
 	prefs().load();
 	gPrefsBefore = prefs();
