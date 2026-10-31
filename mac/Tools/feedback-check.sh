@@ -6,7 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/cl-feedback-check.XXXXXX")
-trap '[ -n "${SERVER:-}" ] && { kill $SERVER; wait $SERVER; } 2>/dev/null; defaults delete feedback-check >/dev/null 2>&1; rm -rf "$OUT"' EXIT
+# The cleanup must not set the exit status: under set -e, `wait` on the killed
+# server (143) or `defaults delete` with nothing to delete would end the script
+# with that instead of the checks' own result.
+trap '[ -n "${SERVER:-}" ] && { kill $SERVER; wait $SERVER || true; } 2>/dev/null; defaults delete feedback-check >/dev/null 2>&1 || true; rm -rf "$OUT"' EXIT
 swiftc -O -target "$(uname -m)-apple-macos14" mac/Tools/feedback-check/main.swift mac/App/FeedbackServer.swift -o "$OUT/feedback-check"
 python3 mac/Tools/feedback-check/server.py "$OUT/port" &
 SERVER=$!
