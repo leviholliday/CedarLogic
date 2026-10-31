@@ -550,6 +550,9 @@ struct SessionDriver {
 	// Tidy Up's preview), then a pause for autosave.
 	void settle() {
 		pump(150);   // a paste asked for lands (the clipboard answers later)
+		// ...and on a busy machine later than that: a paste landing during the
+		// pause would float a part, which autosave rightly waits for (CI, seed 4).
+		for (int i = 0; i < 100 && w->pasteWaiting(); i++) pump(50);
 		Canvas* c = canvas();
 		if (c && c->isDragging()) c->cancelDrag();
 		if (w->hasPendingGate()) w->clearPendingGate();

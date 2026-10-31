@@ -1972,6 +1972,7 @@ void CircuitWindow::clipboardCb(GtkClipboard*, const gchar* text, gpointer data)
 	std::unique_ptr<PasteRequest> req(static_cast<PasteRequest*>(data));
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	if (std::find(all.begin(), all.end(), req->window) == all.end()) return;   // closed meanwhile
+	if (req->window->pastesAsked > 0) req->window->pastesAsked--;
 	if (text == nullptr) { req->window->note("Nothing to paste."); return; }
 	guarded("pasting", [&] { req->window->pasteText(text, true, req->shift); });
 }
@@ -1980,6 +1981,7 @@ void CircuitWindow::paste() {
 	if (!canEdit()) { lockNudge(); return; }
 	GdkKeymap* keymap = gdk_keymap_get_for_display(gtk_widget_get_display(win));
 	const bool shift = (gdk_keymap_get_modifier_state(keymap) & GDK_SHIFT_MASK) != 0;
+	pastesAsked++;
 	gtk_clipboard_request_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), clipboardCb, new PasteRequest{ this, shift });
 }
 

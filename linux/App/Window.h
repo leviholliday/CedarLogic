@@ -249,6 +249,9 @@ public:
 	void cut();
 	void copy();
 	void paste();
+	// Pastes asked of the clipboard that haven't answered yet (GTK answers
+	// later, from the main loop): the session check waits for them to land.
+	bool pasteWaiting() const { return pastesAsked > 0; }
 	void duplicate();
 	void selectAll();
 	void selectNone();
@@ -498,6 +501,7 @@ private:
 	static gboolean stateCb(GtkWidget*, GdkEventWindowState*, gpointer);
 	static void sizeCb(GtkWidget*, GdkRectangle*, gpointer);
 	static void clipboardCb(GtkClipboard*, const gchar*, gpointer);
+	int pastesAsked = 0;
 
 	friend class Canvas;
 	friend class StatusBar;
