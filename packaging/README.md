@@ -24,13 +24,53 @@ The installers find files by name in the release `v<version>`:
 |---|---|---|
 | `CedarLogic-<v>-Mac.dmg` | Homebrew cask | `mac/package.sh` (RELEASE-0.4.md step 1) |
 | `CedarLogic-<v>-Windows-Setup-x64.exe`, `-ARM64.exe` | winget, `install.ps1` | renamed from `windows-native-testing` (step 2) |
+| `CedarLogic-<v>-Windows-x64.zip`, `-ARM64.zip` | the Windows app's updater, for normal testers (below) | renamed from `windows-native-testing` (step 2) |
 | `cedarlogic_<v>_amd64.deb`, `_arm64.deb` | `install.sh` (apt systems) | renamed from `linux-native-testing` (step 3) |
 | `CedarLogic-Native-<v>-x86_64.AppImage`, `-aarch64.AppImage` | `install.sh` (Fedora and the rest) | **not in the runbook yet**: add it (below) |
-| `SHA256SUMS`, `SHA256SUMS.sig` | `install.sh`, `install.ps1` | `packaging/sign-release.sh v<v> --upload`, **last** |
+| `SHA256SUMS`, `SHA256SUMS.sig` | `install.sh`, `install.ps1`, the Windows app's updater | `packaging/sign-release.sh v<v> --upload`, **last** |
 
 The release must be a full release (not a pre-release): every installer and
 the cask's livecheck skip pre-releases, which is what keeps the Mac betas
 out.
+
+## The Windows app's testing groups
+
+Settings > General > **Testing group** on Windows works as the Mac's:
+
+- **Beta tester**: updates from the rolling `windows-native-testing`
+  pre-release in `leviholliday/CedarLogic`, signed by
+  `scripts/sign-preview.sh`, as every Windows copy did before (unchanged).
+- **Normal tester** (new installs): updates from the newest **full** release
+  (not a draft, not a pre-release) in `leviholliday/CedarLogic-Releases`
+  whose tag is a version (`v0.4`, `v0.4.1`...) and which has
+  `CedarLogic-<v>-Windows-<x64|ARM64>.zip`, `<v>` being the tag without its
+  `v` (exactly the names step 2 of docs/RELEASE-0.4.md gives). Mac-only
+  releases and the Mac betas (pre-releases) are passed over.
+- Copies that already had settings before this choice existed came from the
+  test builds, so they start as **beta testers** and are told so once.
+
+The app takes a normal release only through its `SHA256SUMS`: signed with
+the update key, `tag` that release's tag, `commit` the commit the tag is on
+in the Releases repo, and `build` newer than the running copy's. That last
+one is what `sign-release.sh` had to change for (on this branch): **for a
+release with Windows files, `build` is now the Windows files' own build
+time** (the committer time of the `leviholliday/CedarLogic` commit they were
+built from: the app's `CL_BUILD_TIME`, and the `build` of the
+`windows-native-testing` manifest that signed them), not the time of
+signing. With the time of signing, a beta tester switching to normal would
+be "updated" to a release older than the test build they already have, and
+signing again after adding a file would offer the same release again to
+everyone on it. By default the script reads the commit and build from
+`windows-native-testing`'s signed manifest and goes on only if the
+release's Windows zips and installers are byte for byte that release's
+files; once the test build has moved on, pass `--windows-commit <sha>` (the
+commit the Windows files were built from). Releases without Windows files
+are signed as before.
+
+So switching from beta to normal never goes back: the app stays on its test
+build until a normal release with a newer build is out. The Windows app's
+`--channel-check` (CI's "Testing group check") runs these rules against a
+stand-in for GitHub.
 
 ## One-time setup (the owner)
 
@@ -84,7 +124,14 @@ After docs/RELEASE-0.4.md steps 1 to 3 (Mac, Windows, Linux files on `v0.4`):
    packaging/sign-release.sh v0.4 --upload   # SHA256SUMS + .sig onto v0.4
    ```
    Any file added to v0.4 later (a fixed DMG, say) means running this again,
-   or the installers refuse that file.
+   or the installers refuse that file. Sign while `windows-native-testing`
+   is still the build whose files step 2 copied (and after
+   `scripts/sign-preview.sh windows` has signed that build): the script reads
+   the Windows files' build from it, and refuses if the files differ. Later,
+   pass `--windows-commit <sha>` (step 2's `gh api
+   repos/leviholliday/CedarLogic/commits/windows-native-testing --jq .sha`,
+   noted at the time). v0.4 must stay a full release (step 1 makes it one):
+   normal testers' apps pass over pre-releases.
 3. **Try the one-liners against the real release** before the site shows them:
    - Linux (Zorin laptop, the Pi): `sh linux/install.sh --dry-run`,
      then the real `curl -fsSL https://cedarlogic.netlify.app/install.sh | sh`
@@ -207,11 +254,14 @@ ones (`/get/linux-x86_64-appimage`, `/get/linux-aarch64-appimage`).
   (`AppPublisher` in `CedarLogic.iss`), so the winget manifest does too; the
   package id is `LeviHolliday.CedarLogic`. Change both together if you want
   your name there.
-- **Where installed apps update from.** The Windows and Linux apps' updaters
-  follow `windows-native-testing` / `linux-native-testing` (by design: those
-  are what `sign-preview.sh` signs). So someone who installs 0.4 with winget
-  or the one-liner gets later signed test builds through the app. winget is
-  fine with that: it just sees a newer installed version.
+- **Where installed apps update from.** On Windows, the testing group
+  (above): someone who installs 0.4 with winget or the one-liner is a normal
+  tester and gets the next versioned release (0.4.1...) through the app;
+  beta testers get the signed test builds. The Linux app's updater still
+  follows `linux-native-testing` only (by design: that's what
+  `sign-preview.sh` signs), so a Linux 0.4 install gets later signed test
+  builds through the app. winget is fine either way: it just sees a newer
+  installed version.
 - **Classrooms and GitHub's API limit** (60 requests an hour per network,
   without a token): `install.sh` falls back to the release page and the
   signed list; `install.ps1` says to wait or use the download page.

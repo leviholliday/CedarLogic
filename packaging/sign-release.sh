@@ -8,6 +8,9 @@
 #       --out DIR       where SHA256SUMS(.sig) are written (default $TMPDIR/cedarlogic-signed-<tag>)
 #       --sign-preview PATH   scripts/sign-preview.sh (default: this checkout's, else the copy on
 #                       the private/windows/native branch)
+#       --windows-commit C    the leviholliday/CedarLogic commit the release's Windows files were
+#                       built from (default: the one windows-native-testing is on, when the release's
+#                       Windows files are byte for byte that release's: see "build" below)
 #
 # linux/install.sh and packaging/windows/install.ps1 check a
 # release's SHA256SUMS against its .sig with the update key (the one the apps'
@@ -16,8 +19,31 @@
 # using scripts/sign-preview.sh's own --dry-run signing (the same key, read
 # from the Keychain, the same format and checks), and verifies it.
 #
-# A manifest for "tag v0.4" can't be replayed to the apps: their updaters only
-# take manifests for their own tag (windows-native-testing, linux-native-testing).
+# The Windows app's normal testers (Settings > General > Testing group) update
+# from the newest full release here with CedarLogic-<v>-Windows-<x64|ARM64>.zip,
+# through this manifest: its tag must be that release's, its commit the one the
+# tag is on in this repo, and its build newer than the running app's. So:
+#
+#   build   for a release with Windows files, their build time: the committer
+#           time (Unix seconds) of the leviholliday/CedarLogic commit they were
+#           built from, the CL_BUILD_TIME baked into them and the "build" of the
+#           windows-native-testing manifest that signed them. Not the time of
+#           signing: then a beta tester switching to normal would be "updated"
+#           to a release older than the test build they have, and signing again
+#           (a file added later) would offer the same release again to everyone
+#           already on it. By default it's read from windows-native-testing's
+#           signed manifest, and only while the release's Windows zips and
+#           installers are byte for byte that release's files (renamed as
+#           docs/RELEASE-0.4.md step 2 does); after the test build has moved on,
+#           pass --windows-commit. Without Windows files, the time of signing, as
+#           before (the installers don't compare builds).
+#
+# The Linux app's updater reads only linux-native-testing, so the build here is
+# the Windows files' even when the Linux files are from another commit.
+#
+# A manifest for "tag v0.4" can't be replayed as a test build: the updaters take
+# a manifest only for the tag they're reading (windows-native-testing,
+# linux-native-testing, or for Windows normal testers that release's own).
 #
 # Sign LAST, after every file is on the release. Once a release has a
 # SHA256SUMS, the installers refuse any file it doesn't name, so a file
@@ -26,7 +52,8 @@
 set -euo pipefail
 
 REPO=leviholliday/CedarLogic-Releases
-TAG='' UPLOAD=0 TESTKEY=0 SIGNER='' OUT=''
+TAG='' UPLOAD=0 TESTKEY=0 SIGNER='' OUT='' WINCOMMIT=''
+SOURCE_REPO=leviholliday/CedarLogic PREVIEW_TAG=windows-native-testing
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 die() { echo "sign-release: $*" >&2; exit 1; }
 say() { echo "sign-release: $*" >&2; }
@@ -38,7 +65,8 @@ while [ $# -gt 0 ]; do
 		--test-key) TESTKEY=1; shift ;;
 		--sign-preview) SIGNER=$2; shift 2 ;;
 		--out) OUT=$2; shift 2 ;;
-		-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		--windows-commit) WINCOMMIT=$2; shift 2 ;;
+		-h|--help) sed -n '2,/^set -e/{/^#/p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		-*) die "unknown option $1" ;;
 		*) [ -z "$TAG" ] || die "two tags given"; TAG=$1; shift ;;
 	esac
@@ -76,6 +104,52 @@ while read -r name size digest; do
 	[ -z "$digest" ] || [ "$digest" = "sha256:$h" ] || die "$name: sha256 $h, but GitHub's digest says $digest"
 	say "  $name  $size  $h"
 done < "$WORK/assets"
+
+# ---- The build: the Windows files' own, when there are any ----------------------
+VERSION=${TAG#v}
+WINFILES=$(cut -d' ' -f1 "$WORK/assets" | grep -E '^CedarLogic-.*-Windows-' || true)
+if [ -n "$WINFILES" ]; then
+	# The apps look for exactly CedarLogic-<v>-Windows-<arch>.zip, <v> being the tag without its "v".
+	while read -r name; do
+		case "$name" in
+			"CedarLogic-$VERSION-Windows-x64.zip"|"CedarLogic-$VERSION-Windows-ARM64.zip"|\
+			"CedarLogic-$VERSION-Windows-Setup-x64.exe"|"CedarLogic-$VERSION-Windows-Setup-ARM64.exe") ;;
+			*) die "$name: the Windows files must be CedarLogic-$VERSION-Windows-{x64,ARM64}.zip and -Windows-Setup-{x64,ARM64}.exe for $TAG" ;;
+		esac
+	done <<<"$WINFILES"
+	grep -qx "CedarLogic-$VERSION-Windows-x64.zip" <<<"$WINFILES" \
+		|| say "warning: no CedarLogic-$VERSION-Windows-x64.zip: Intel/AMD PCs' apps won't update to $TAG"
+	grep -qx "CedarLogic-$VERSION-Windows-ARM64.zip" <<<"$WINFILES" \
+		|| say "warning: no CedarLogic-$VERSION-Windows-ARM64.zip: ARM PCs' apps won't update to $TAG"
+	[ "$(gh release view "$TAG" -R "$REPO" --json isPrerelease --jq .isPrerelease)" = false ] \
+		|| say "warning: $TAG is a pre-release: the Windows app's normal testers pass over it"
+	if [ -z "$WINCOMMIT" ]; then
+		# The test build these are, by their bytes: the release's files, renamed.
+		say "reading the build of the Windows files from $PREVIEW_TAG"
+		mkdir -p "$WORK/preview"
+		gh release download "$PREVIEW_TAG" -R "$SOURCE_REPO" -D "$WORK/preview" --pattern SHA256SUMS --clobber < /dev/null \
+			|| die "couldn't read $PREVIEW_TAG's SHA256SUMS: pass --windows-commit (the commit the Windows files were built from)"
+		PM=$WORK/preview/SHA256SUMS
+		[ "$(sed -n 2p "$PM")" = "tag $PREVIEW_TAG" ] || die "$PREVIEW_TAG's SHA256SUMS isn't for $PREVIEW_TAG"
+		WINCOMMIT=$(sed -n 's/^commit \([0-9a-f]\{40\}\)$/\1/p' "$PM")
+		PBUILD=$(sed -n 's/^build \([0-9]\{1,15\}\)$/\1/p' "$PM")
+		[ -n "$WINCOMMIT" ] && [ -n "$PBUILD" ] || die "$PREVIEW_TAG's SHA256SUMS has no commit or build line"
+		while read -r name; do
+			arch=${name##*-}; arch=${arch%.*}
+			case "$name" in *-Setup-*) orig="CedarLogic-Windows-Setup-$arch.exe" ;; *) orig="CedarLogic-Windows-native-$arch.zip" ;; esac
+			want=$(awk -v n="$orig" '$1 == "file" && $2 == n { print $4 }' "$PM")
+			have=$(shasum -a 256 "$WORK/files/$name" | cut -d' ' -f1)
+			[ -n "$want" ] && [ "$want" = "$have" ] || die "$name isn't $PREVIEW_TAG's signed $orig (it has moved on since?): pass --windows-commit (the commit $name was built from)"
+		done <<<"$WINFILES"
+		say "the Windows files are $PREVIEW_TAG's build ${WINCOMMIT:0:12}, as signed for testers"
+	fi
+	[[ "$WINCOMMIT" =~ ^[0-9a-f]{40}$ ]] || WINCOMMIT=$(gh api "repos/$SOURCE_REPO/commits/$WINCOMMIT" --jq .sha) \
+		|| die "no commit $WINCOMMIT in $SOURCE_REPO"
+	BUILD=$(gh api "repos/$SOURCE_REPO/commits/$WINCOMMIT" --jq '.commit.committer.date | fromdateiso8601') \
+		|| die "couldn't read the time of $WINCOMMIT"
+	[ -z "${PBUILD:-}" ] || [ "$PBUILD" = "$BUILD" ] || die "$PREVIEW_TAG's manifest says build $PBUILD, the commit's time is $BUILD"
+	say "build $BUILD: the Windows files' (${WINCOMMIT:0:12}, $(date -r "$BUILD" 2>/dev/null || date -d "@$BUILD"))"
+fi
 
 ARGS=(--dry-run "$WORK/files" --tag "$TAG" --commit "$COMMIT" --build "$BUILD" --out "$WORK/out")
 [ "$TESTKEY" = 0 ] || ARGS+=(--test-key)
