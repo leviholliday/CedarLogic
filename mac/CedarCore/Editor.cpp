@@ -363,7 +363,7 @@ std::vector<Nearby> findNearby(GUICanvas* page, float radius, bool moving) {
 	}
 
 	std::vector<Nearby> cands;
-	std::vector<size_t> near;
+	std::vector<size_t> pool;
 	for (auto& se : *page->getGateList()) {
 		guiGate* src = se.second;
 		if (src == nullptr || !isMoving(src)) continue;
@@ -371,24 +371,24 @@ std::vector<Nearby> findNearby(GUICanvas* page, float radius, bool moving) {
 			if (src->isConnected(shs.first)) continue;
 			float sx, sy;
 			src->getHotspotCoords(shs.first, sx, sy);
-			near = anywhere;
+			pool = anywhere;
 			long long cx, cy;
 			if (cellOf(sx, sy, cx, cy)) {
 				for (long long gx = cx - 1; gx <= cx + 1; gx++)
 					for (long long gy = cy - 1; gy <= cy + 1; gy++) {
 						auto it = grid.find(key(gx, gy));
-						if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+						if (it != grid.end()) pool.insert(pool.end(), it->second.begin(), it->second.end());
 					}
 			} else {
-				near.resize(targets.size());
-				for (size_t i = 0; i < near.size(); i++) near[i] = i;
+				pool.resize(targets.size());
+				for (size_t i = 0; i < pool.size(); i++) pool[i] = i;
 			}
-			std::sort(near.begin(), near.end());
-			near.erase(std::unique(near.begin(), near.end()), near.end());
+			std::sort(pool.begin(), pool.end());
+			pool.erase(std::unique(pool.begin(), pool.end()), pool.end());
 			guiGate* best = nullptr;
 			std::string bestPin;
 			float bestDist = -1, second = -1;
-			for (size_t i : near) {
+			for (size_t i : pool) {
 				const Pin& t = targets[i];
 				const float d = std::sqrt((t.x - sx) * (t.x - sx) + (t.y - sy) * (t.y - sy));
 				if (d > radius) continue;
