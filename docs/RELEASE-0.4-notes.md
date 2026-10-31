@@ -158,12 +158,12 @@ All four install the versioned release in `leviholliday/CedarLogic-Releases` (ne
 
 | Platform | Command |
 |---|---|
-| Mac | `brew install --cask leviholliday/cedarlogic/cedarlogic` |
+| Mac | `brew install --cask leviholliday/tap/cedarlogic` |
 | Windows | `winget install --id LeviHolliday.CedarLogic -e` |
 | Windows | `irm https://cedarlogic.netlify.app/install.ps1 \| iex` |
 | Linux | `curl -fsSL https://cedarlogic.netlify.app/install.sh \| sh` |
 
-- The Homebrew command assumes the tap is `leviholliday/homebrew-cedarlogic`. If the cask goes in the existing `leviholliday/homebrew-tap`, the command is `brew install --cask leviholliday/tap/cedarlogic`. This is not decided (section 4).
+- The cask lives in the existing tap `leviholliday/homebrew-tap` (decided; `pkg/tap-name`, `packaging/homebrew/README.md`), so the command is `brew install --cask leviholliday/tap/cedarlogic`.
 - Mac: the app is not notarized, so the first launch from Homebrew or the DMG needs System Settings > Privacy & Security > Open Anyway. The cask's caveats say so. The app is Apple silicon only, on macOS 14 or newer.
 - Windows: winget and `install.ps1` install for the current user, with no administrator, and don't show SmartScreen's warning. The installer you download in a browser does ("More info", then "Run anyway"). `install.ps1` checks the installer's size and SHA-256, and the Ed25519 signature on `SHA256SUMS` when the release has one.
 - Linux: on Ubuntu, Debian, Zorin, Mint and Raspberry Pi OS it installs with apt and asks for your password. On Fedora and the rest it puts the AppImage in your home folder. The test build is `sh linux/install.sh --preview`. `--dry-run` shows what it would do.
@@ -240,7 +240,7 @@ None of these is merged to `main` or deployed. The apps' cap handling on all thr
 
 ### Owner decisions still pending
 
-1. **Homebrew tap name.** `leviholliday/homebrew-cedarlogic` (command `brew install --cask leviholliday/cedarlogic/cedarlogic`), or the existing `leviholliday/homebrew-tap` (command `brew install --cask leviholliday/tap/cedarlogic`). The command is printed on the website, so decide before the site goes up. (`packaging/homebrew/README.md`)
-2. **Windows installer publisher.** The installer says `Cedarville University` (`AppPublisher` in `windows/installer/CedarLogic.iss`), so the winget manifest says it too, and the winget package id is `LeviHolliday.CedarLogic`. To put your own name there, change the `.iss` and the manifest together. (`packaging/README.md`)
+1. ~~**Homebrew tap name.**~~ Decided: the existing `leviholliday/homebrew-tap`, command `brew install --cask leviholliday/tap/cedarlogic` (`packaging/homebrew/README.md`). Make sure the website prints this one.
+2. ~~**Publisher.**~~ Decided: users see `CedarLogic` (the project) as the publisher, not Cedarville University or a person: `AppPublisher`/`VersionInfoCompany`/`AppCopyright` in `windows/installer/CedarLogic.iss`, `CompanyName`/`LegalCopyright` in `windows/res/CedarLogic.rc.in`, the winget manifest's `Publisher`/`Author`/`Copyright`, the Mac's `NSHumanReadableCopyright`, and the .deb's `Maintainer` (`CedarLogic <224852181+leviholliday@users.noreply.github.com>`: the site has no mail address). The About boxes keep crediting the original CedarLogic from Cedarville University. The winget id stays `LeviHolliday.CedarLogic` because winget ids follow the submitting account (`packaging/winget/README.md`).
 3. **Gatekeeper handling in the cask.** The cask does not remove the quarantine flag, so a Homebrew install needs Open Anyway on first launch and its caveats say so. A `postflight` with `xattr -dr com.apple.quarantine` would make the first launch smooth because the cask pins the DMG's sha256, but it turns off a macOS safety check on users' Macs. The lasting fix is a Developer ID certificate and notarization. (`packaging/homebrew/README.md`)
 4. **Delete Now confirmation.** In Recently Deleted, Delete Now asks "Delete “Name” now?" with "It and all its versions will be deleted for good. This can't be undone.", then Delete Now or Cancel (`docs/RECENTLY-DELETED.md`). The Mac (`LibraryView.swift`), Windows (`LibraryWindow.cpp`) and Linux (`LibraryWindow.cpp`) all ask. No doc or commit says what is still undecided about it, so I have not guessed.
