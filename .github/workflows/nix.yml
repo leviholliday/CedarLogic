@@ -11,7 +11,7 @@ name: Nix
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - 'flake.nix'
       - 'flake.lock'
