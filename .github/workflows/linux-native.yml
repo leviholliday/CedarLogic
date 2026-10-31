@@ -79,6 +79,21 @@ jobs:
           printf 'changed\n' >> fake-release/cedarlogic_amd64.deb
           if $B/cedarlogic --update-self-test --release fake-release --key "$TEST_KEY"; then echo "::error::a changed file passed"; exit 1; fi
 
+      # Send Feedback's client against the Mac's stand-in for the site's /api/feedback
+      # (mac/Tools/feedback-check/server.py): the install id, the required summary, the
+      # daily cap (asked once, not retried), Request more, plain 429s still retried.
+      - name: Feedback client check
+        run: |
+          D=$(mktemp -d)
+          python3 mac/Tools/feedback-check/server.py "$D/port" &
+          SERVER=$!
+          for _ in $(seq 50); do [ -s "$D/port" ] && break; sleep 0.1; done
+          rc=0
+          XDG_CONFIG_HOME="$D/config" CL_FEEDBACK_URL="http://127.0.0.1:$(cat "$D/port")" CL_FEEDBACK_KEY=check \
+            timeout 120 linux/build/cedarlogic --feedback-check || rc=$?
+          kill $SERVER || true
+          exit $rc
+
       # A long working session in the window (linux/App/SessionCheck.cpp): seeded
       # random clicks, drags, keys and commands through the app's own handlers, with
       # windows over it poked at and closed, checked all along (no crash or GTK

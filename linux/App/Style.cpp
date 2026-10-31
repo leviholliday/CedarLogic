@@ -157,7 +157,14 @@ void applyStyle() {
 	s += "#settings label, #gate-settings label, dialog label { color: " + css(text) + "; }\n";
 	// A dialog's problem (Send Feedback couldn't send) in red; its progress in the accent.
 	s += "dialog label.problem { color: rgb(229,72,77); }\n";
-	s += "dialog entry.problem, dialog entry.problem:focus { border-color: rgb(229,72,77); box-shadow: 0 0 0 1px rgb(229,72,77); }\n";
+	// Send Feedback: the summary's hint (orange when the server asked), "You
+	// can send 10 more.", and the box over the daily cap, in the Mac's High orange.
+	s += "dialog label.hint { font-size: 0.92em; color: " + css(hint) + "; }\n";
+	s += "dialog label.hint.problem { color: rgb(242,140,31); }\n";
+	s += std::string("dialog label.notice { font-weight: bold; color: ") + (dark ? "rgb(64,214,110)" : "rgb(30,150,66)") + "; }\n";
+	s += std::string("#feedback-cap { padding: 12px; border-radius: 11px; border: 1px solid rgba(242,140,31,0.35); background-color: ") +
+	     (dark ? "rgba(242,140,31,0.12)" : "rgba(242,140,31,0.08)") + "; }\n";
+	s += "dialog entry.problem, dialog entry.problem:focus { border-color: rgb(242,140,31); box-shadow: 0 0 0 1px rgb(242,140,31); }\n";
 	s += "dialog progressbar progress { background-image: none; background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) +
 	     "; border-radius: 3px; min-height: 6px; }\n";
 	s += "dialog progressbar trough { background-image: none; background-color: " + css(withAlpha(text, 0.10f)) +

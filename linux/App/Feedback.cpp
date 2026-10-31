@@ -20,6 +20,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -293,12 +294,14 @@ std::string archName() {
 
 struct Device { std::string app, system, context, line; };
 
+std::string installId();   // (below, with the talking to the site)
+
 Device device(CircuitWindow* win) {
 	Device d;
 	const std::string os = osName();
 	Json app;
-	app.text("name", "CedarLogic for Linux").text("version", CL_VERSION).text("build", CL_GIT_COMMIT).text("commit", CL_GIT_COMMIT)
-		.text("channel", "Native testing");
+	app.text("name", "CedarLogic for Linux").text("installId", installId()).text("version", CL_VERSION).text("build", CL_GIT_COMMIT)
+		.text("commit", CL_GIT_COMMIT).text("channel", "Native testing");
 	d.app = app.str();
 	std::string model = trimmed(readAll("/sys/devices/virtual/dmi/id/product_name"));
 	const std::string maker = trimmed(readAll("/sys/devices/virtual/dmi/id/sys_vendor"));
@@ -406,24 +409,28 @@ bool jsonTrue(const std::string& json, const char* key) {
 	return json.compare(at, 4, "true") == 0;
 }
 
-// The server's words for a refusal: its message, else its error.
-std::string serverMessage(const std::string& json) {
-	const std::string m = jsonField(json, "message");
-	return m.empty() ? jsonField(json, "error") : m;
+// --feedback-check: the settings are left alone (the id lives in memory only).
+bool gChecking = false;
+
+bool isInstallId(const std::string& id) {
+	bool ok = id.size() >= 8 && id.size() <= 64;
+	for (char c : id) ok = ok && (unsigned char)c < 128 && (isalnum((unsigned char)c) || c == '_' || c == '-');
+	return ok;
 }
 
-// This install's id for the feedback server (8-64 letters, digits, _ or -):
-// made the first time and kept in the settings.
+// This install's id, as the Mac's (FeedbackServer.installId): made once (a
+// UUID without its dashes, 32 of 0-9 a-f, which the server's 8 to 64 of
+// A-Z a-z 0-9 _ - takes) and kept in the settings. It names nobody; it only
+// lets the server count one computer's reports. One that isn't the right
+// shape (edited by hand) is made again.
 std::string installId() {
 	std::string& id = prefs().feedbackInstallId;
-	bool ok = id.size() >= 8 && id.size() <= 64;
-	for (char c : id) ok = ok && (isalnum((unsigned char)c) || c == '_' || c == '-');
-	if (!ok) {
+	if (!isInstallId(id)) {
 		gchar* u = g_uuid_string_random();
 		id.clear();
 		for (const char* p = u; *p; p++) if (*p != '-') id += *p;
 		g_free(u);
-		prefs().save();
+		if (!gChecking) prefs().save();
 	}
 	return id;
 }
@@ -437,14 +444,35 @@ std::string percent(const std::string& s) {
 	return o;
 }
 
+// What went wrong, with a sentence to show as it is (the Mac's
+// FeedbackServer.Failure). `code` is the server's: "summary_required",
+// "sender_cap", "more_used", "not_capped".
+struct Failure {
+	std::string message, code;
+	int status = 0;
+	bool canRequestMore = false;   // sender_cap: Request more would work
+	int retryAfter = -1;           // seconds until one more report fits
+};
+
+// The server's no, read from its JSON ({ error, code, ... }).
+Failure failureOf(const Reply& r) {
+	Failure f;
+	f.status = r.status;
+	f.message = jsonField(r.body, "error");
+	if (f.message.empty()) f.message = format("The feedback server said no (%d).", r.status);
+	f.code = jsonField(r.body, "code");
+	f.canRequestMore = jsonTrue(r.body, "canRequestMore");
+	const std::string after = jsonField(r.body, "retryAfter");
+	if (!after.empty()) f.retryAfter = atoi(after.c_str());
+	return f;
+}
+
 struct Sending {
 	std::mutex lock;
 	std::string note = "Sending…";
 	std::atomic<int> state{ 0 };   // 0 going, 1 sent, 2 failed
 	std::atomic<double> fraction{ 0 };   // how much is sent, 0 to 1 (attachments by their bytes)
-	std::string failure;
-	// Refused for sending too much (429 "sender_cap"): not tried again; more can be asked for.
-	std::atomic<bool> capped{ false }, canRequestMore{ false }, summaryNeeded{ false };
+	Failure failure;                     // (under the lock)
 	std::string circuitCopy;   // the circuit, copied for this send alone (removed when it's done)
 	void set(const std::string& n) {
 		std::lock_guard<std::mutex> g(lock);
@@ -452,41 +480,68 @@ struct Sending {
 	}
 };
 
-// Tried again a few times: a flaky connection shouldn't lose a report.
-Reply perform(const std::string& method, const std::string& path, const std::string& type, const std::string& token, const std::string& body,
-              std::string& failure) {
-	Reply r;
-	for (int attempt = 0; attempt < 3; attempt++) {
-		r = request(method, path, type, token, body);
-		if (r.reached && r.status >= 200 && r.status < 300) return r;
-		if (r.reached) {
-			const std::string why = serverMessage(r.body);
-			failure = why.empty() ? format("The feedback server said no (%d).", r.status) : why;
-			// Over this install's allowance: trying again wouldn't help.
-			if (r.status < 500 && (r.status != 429 || jsonField(r.body, "code") == "sender_cap")) return r;
+// Tried again a few times: a flaky connection shouldn't lose a report. Not
+// a no with a code: that's the server's considered answer, and asking again
+// gets the same one. Other 429s and 5xx (and no connection) are tried again.
+bool perform(const std::string& method, const std::string& path, const std::string& type, const std::string& token, const std::string& body,
+             Reply& out, Failure& f, int tries = 3) {
+	f = Failure{ "It couldn't be sent." };
+	for (int attempt = 0; attempt < tries; attempt++) {
+		out = request(method, path, type, token, body);
+		if (out.reached && out.status >= 200 && out.status < 300) return true;
+		if (out.reached) {
+			f = failureOf(out);
+			if (!f.code.empty() || (out.status < 500 && out.status != 429)) return false;
 		} else {
-			failure = "Couldn't reach the feedback server. Check the internet connection (and that curl is installed) and try again.";
+			f = Failure{ "Couldn't reach the feedback server. Check the internet connection (and that curl is installed) and try again." };
 		}
-		g_usleep((gulong)(700000 * std::pow(2, attempt)));
+		if (attempt < tries - 1) g_usleep((gulong)(700000 * std::pow(2, attempt)));
 	}
-	r.status = 0;
-	return r;
+	return false;
 }
 
-bool sendAll(Sending* s, const std::string& body, const std::vector<Attachment>& files, std::string& failure) {
-	const Reply created = perform("POST", "/api/feedback", "application/json", "", body, failure);
-	if (created.status < 200 || created.status >= 300) {
-		const std::string code = jsonField(created.body, "code");
-		if (created.status == 429 && code == "sender_cap") {
-			s->capped = true;
-			s->canRequestMore = jsonTrue(created.body, "canRequestMore");
-		}
-		if (code == "summary_required") s->summaryNeeded = true;
-		return false;
-	}
-	const std::string id = jsonField(created.body, "id"), token = jsonField(created.body, "uploadToken");
-	const long long chunk = std::max(65536LL, atoll(jsonField(created.body, "chunkSize").c_str()));
-	if (id.empty() || token.empty()) { failure = "The feedback server's answer didn't make sense."; return false; }
+struct Created { std::string id, token; long long chunk = 0; };
+
+// The report itself (POST /api/feedback). installId is added here, so every report has it.
+bool createReport(const std::string& bodyWithoutClose, Created& c, Failure& f) {
+	const std::string body = bodyWithoutClose + "," + jsonQuote("installId") + ":" + jsonQuote(installId()) + "}";
+	Reply r;
+	if (!perform("POST", "/api/feedback", "application/json", "", body, r, f)) return false;
+	c.id = jsonField(r.body, "id");
+	c.token = jsonField(r.body, "uploadToken");
+	c.chunk = std::max(65536LL, atoll(jsonField(r.body, "chunkSize").c_str()));
+	if (c.id.empty() || c.token.empty()) { f = Failure{ "The feedback server's answer didn't make sense." }; return false; }
+	return true;
+}
+
+bool completeReport(const Created& c, Failure& f) {
+	Reply r;
+	return perform("POST", "/api/feedback/complete?id=" + percent(c.id), "application/json", c.token, "", r, f);
+}
+
+// After a sender_cap: asks for more (POST /api/feedback/more), with a line
+// saying why if there is one, and `extra` (who's asking, for the
+// developer's list: name, platform, app, email) as JSON fields without the
+// braces. How many more can be sent now in `granted` (10).
+bool askMore(const std::string& message, const std::string& extra, int& granted, Failure& f) {
+	std::string body = "{" + jsonQuote("installId") + ":" + jsonQuote(installId());
+	const std::string m = trimmed(message);
+	if (!m.empty()) body += "," + jsonQuote("message") + ":" + jsonQuote(m);
+	if (!extra.empty()) body += "," + extra;
+	body += "}";
+	Reply r;
+	if (!perform("POST", "/api/feedback/more", "application/json", "", body, r, f)) return false;
+	const std::string n = jsonField(r.body, "granted");
+	granted = n.empty() ? 10 : atoi(n.c_str());
+	return true;
+}
+
+bool sendAll(Sending* s, const std::string& body, const std::vector<Attachment>& files, Failure& failure) {
+	// (The report's JSON, its closing brace left for installId.)
+	Created c;
+	if (!createReport(body.substr(0, body.size() - 1), c, failure)) return false;
+	const std::string id = c.id, token = c.token;
+	const long long chunk = c.chunk;
 	long long total = 1, done = 0;
 	for (const Attachment& a : files) total += fileSize(a.file);
 	s->fraction = 0.05;
@@ -496,21 +551,21 @@ bool sendAll(Sending* s, const std::string& body, const std::vector<Attachment>&
 		for (long long i = 0; i < pieces; i++) {
 			const std::string part = data.substr((size_t)(i * chunk), (size_t)chunk);
 			const std::string q = "/api/feedback/upload?id=" + percent(id) + "&file=" + percent(a.name) + format("&index=%lld&total=%lld", i, pieces);
-			const Reply r = perform("PUT", q, "application/octet-stream", token, part, failure);
-			if (r.status < 200 || r.status >= 300) return false;
+			Reply r;
+			if (!perform("PUT", q, "application/octet-stream", token, part, r, failure)) return false;
 			done += (long long)part.size();
 			s->fraction = 0.05 + 0.9 * (double)done / (double)total;
 			s->set(format("Sending %s… %.1f of %.1f MB", a.name.c_str(), done / 1e6, total / 1e6));
 		}
 	}
 	s->set("Finishing…");
-	const Reply r = perform("POST", "/api/feedback/complete?id=" + percent(id), "application/json", token, "", failure);
-	if (r.status >= 200 && r.status < 300) s->fraction = 1;
-	return r.status >= 200 && r.status < 300;
+	if (!completeReport(c, failure)) return false;
+	s->fraction = 1;
+	return true;
 }
 
 void upload(std::shared_ptr<Sending> s, std::string body, std::vector<Attachment> files) {
-	std::string failure;
+	Failure failure;
 	const bool sent = sendAll(s.get(), body, files, failure);
 	// A new copy of the circuit is made for each try.
 	if (!s->circuitCopy.empty()) ::g_remove(s->circuitCopy.c_str());
@@ -771,9 +826,20 @@ struct Form {
 	double checkStart = -1;
 	// The summary is needed: said right under it while it's empty.
 	GtkWidget* titleNote = nullptr;
-	// Over this install's allowance: ask the server for more.
+	bool summaryFlag = false;   // the server asked for one (the hint goes red)
+	// Ten reports in a day already (the Mac's .capped): an orange box with
+	// the server's sentence and, once a day, a reason line and Request more.
+	GtkWidget* capBox = nullptr;
+	GtkWidget* capText = nullptr;
+	GtkWidget* moreRow = nullptr;
+	GtkWidget* reason = nullptr;
 	GtkWidget* more = nullptr;
-	struct MoreAsk { std::atomic<int> state{ 0 }; std::string why; };   // 0 asking, 1 granted, 2 refused
+	GtkWidget* moreSpinner = nullptr;
+	GtkWidget* moreWhy = nullptr;
+	GtkWidget* notice = nullptr;   // green: "You can send 10 more."
+	int phase = 0;                 // a Phase
+	bool canMore = false;
+	struct MoreAsk { std::atomic<int> state{ 0 }; int granted = 10; Failure failure; };   // 0 asking, 1 granted, 2 refused
 	std::shared_ptr<MoreAsk> asking;
 	Device dev;
 	std::shared_ptr<Sending> sending;
@@ -802,6 +868,8 @@ void collect(Form* f) {
 	d.save();
 }
 
+void refreshSend(Form* f);
+
 void wordsChanged(Form* f) {
 	Draft& d = draft();
 	d.title = gtk_entry_get_text(GTK_ENTRY(f->title));
@@ -810,9 +878,10 @@ void wordsChanged(Form* f) {
 	gtk_widget_queue_draw(f->tags);
 	gtk_label_set_text(GTK_LABEL(f->problem), "");
 	gtk_widget_hide(f->problem);
-	if (f->titleNote && !trimmed(d.title).empty()) {
-		gtk_widget_hide(f->titleNote);
-		gtk_style_context_remove_class(gtk_widget_get_style_context(f->title), "problem");
+	if (f->titleNote) {
+		// The server asked for a summary and now there is one.
+		if (!trimmed(d.title).empty()) f->summaryFlag = false;
+		refreshSend(f);
 	}
 }
 
@@ -846,6 +915,7 @@ GtkWidget* heading(const char* text) {
 void shotsChanged(Form* f) {
 	gtk_widget_set_size_request(f->shots, -1, shotsHeight());
 	gtk_widget_queue_draw(f->shots);
+	refreshSend(f);   // (the summary's hint shows once there's something to send)
 }
 
 void attachScreenshot(Form* f) {
@@ -940,7 +1010,6 @@ void attachImages(Form* f) {
 }
 
 const int kAnotherResponse = 102;   // Send Another, from the thank-you page
-const int kMoreResponse = 103;      // Request More, once over the allowance
 
 // The check on the thank-you page, drawing itself in a ring (the Mac's
 // SentCheck): the ring first, then the tick, over 0.9 s.
@@ -978,7 +1047,31 @@ double checkProgress(const Form* f) {
 	return anim::easeInOut((anim::now() - f->checkStart) / 0.9);
 }
 
-enum class Phase { Writing, Sending, Sent, Failed };
+enum class Phase { Writing, Sending, Sent, Failed, Capped };
+
+// Send, as the Mac's: off while the summary is blank (its tooltip says
+// why) and while capped with Request more on offer (that's the way on);
+// "Try Again" after a failure or a cap with no more on offer. And the hint
+// under the summary, once there's something else to send.
+void refreshSend(Form* f) {
+	const Draft& d = draft();
+	const bool blank = trimmed(gtk_entry_get_text(GTK_ENTRY(f->title))).empty();
+	const Phase p = (Phase)f->phase;
+	gtk_widget_set_sensitive(f->send, !blank && p != Phase::Sending && !(p == Phase::Capped && f->canMore));
+	gtk_widget_set_tooltip_text(f->send, blank ? "Add a short summary first" : nullptr);
+	gtk_button_set_label(GTK_BUTTON(f->send), p == Phase::Failed || (p == Phase::Capped && !f->canMore) ? "Try Again" : "Send Feedback");
+	const bool hint = blank && (f->summaryFlag || !trimmed(d.details).empty() || !d.attachments.empty());
+	gtk_widget_set_visible(f->titleNote, hint);
+	GtkStyleContext* note = gtk_widget_get_style_context(f->titleNote);
+	GtkStyleContext* field = gtk_widget_get_style_context(f->title);
+	if (f->summaryFlag) { gtk_style_context_add_class(note, "problem"); gtk_style_context_add_class(field, "problem"); }
+	else { gtk_style_context_remove_class(note, "problem"); gtk_style_context_remove_class(field, "problem"); }
+}
+
+void showNotice(Form* f, const std::string& text) {
+	gtk_label_set_text(GTK_LABEL(f->notice), ("\u2713 " + text).c_str());
+	gtk_widget_set_visible(f->notice, !text.empty());
+}
 
 // The window as the send stands: the buttons, the status under the form,
 // and (once it's gone) the thank-you page in place of the form.
@@ -991,11 +1084,19 @@ void setPhase(Form* f, Phase p, const std::string& why = "") {
 	gtk_widget_set_visible(f->close, !sent);
 	gtk_widget_set_visible(f->another, sent);
 	gtk_widget_set_visible(f->done, sent);
-	gtk_widget_set_visible(f->more, FALSE);
+	f->phase = (int)p;
 	gtk_style_context_add_class(gtk_widget_get_style_context(f->problem), "problem");
-	gtk_button_set_label(GTK_BUTTON(f->send), p == Phase::Failed ? "Try Again" : "Send Feedback");
-	gtk_label_set_text(GTK_LABEL(f->problem), why.c_str());
-	gtk_widget_set_visible(f->problem, !why.empty() && !sent);
+	const bool capped = p == Phase::Capped;
+	gtk_label_set_text(GTK_LABEL(f->problem), capped ? "" : why.c_str());
+	gtk_widget_set_visible(f->problem, !why.empty() && !sent && !capped);
+	gtk_widget_set_visible(f->capBox, capped);
+	if (capped) {
+		gtk_label_set_text(GTK_LABEL(f->capText), why.c_str());
+		gtk_widget_set_visible(f->moreRow, f->canMore);
+		gtk_widget_hide(f->moreWhy);
+	}
+	if (p != Phase::Writing) showNotice(f, "");
+	refreshSend(f);
 	if (sent) {
 		gtk_stack_set_visible_child_name(GTK_STACK(f->stack), "sent");
 		f->checkStart = anim::now();
@@ -1013,40 +1114,69 @@ void setPhase(Form* f, Phase p, const std::string& why = "") {
 	}
 }
 
-// A note for the writer under the form (empty hides it).
-void say(Form* f, const std::string& text, bool problem = true) {
-	gtk_label_set_text(GTK_LABEL(f->problem), text.c_str());
-	gtk_widget_set_visible(f->problem, !text.empty());
-	GtkStyleContext* sc = gtk_widget_get_style_context(f->problem);
-	if (problem) gtk_style_context_add_class(sc, "problem");
-	else gtk_style_context_remove_class(sc, "problem");
-}
-
-// The summary is needed (the server turns a report without one away): said
-// under the field, which lights red, until something's written there.
+// The server said the summary was empty (the form doesn't send one
+// without it, but just in case): the hint and the field go red.
 void summaryNeeded(Form* f) {
-	gtk_widget_show(f->titleNote);
-	gtk_style_context_add_class(gtk_widget_get_style_context(f->title), "problem");
+	f->summaryFlag = true;
+	refreshSend(f);
 	gtk_widget_grab_focus(f->title);
 	gtk_widget_error_bell(f->dialog);
 }
 
-// Request More: this install asks the server for more reports
-// (/api/feedback/more, with the same key as a report).
+// Request more, after a cap: asks the server for 10 more (POST
+// /api/feedback/more) with the tester's reason if they gave one, and who's
+// asking: name, platform, version and build, and the email only when they
+// ticked "You can email me", as the Mac does.
 void askForMore(Form* f) {
-	if (f->asking) return;
+	if (f->asking || (Phase)f->phase != Phase::Capped || !f->canMore) return;
 	f->asking = std::make_shared<Form::MoreAsk>();
-	gtk_widget_set_sensitive(f->more, FALSE);
-	say(f, "Asking for more…", false);
-	Json body;
-	body.text("installId", installId());
-	std::thread([](std::shared_ptr<Form::MoreAsk> a, std::string b) {
-		std::string failure;
-		const Reply r = perform("POST", "/api/feedback/more", "application/json", "", b, failure);
-		if (r.status >= 200 && r.status < 300) { a->state = 1; return; }
-		a->why = failure.empty() ? "More couldn't be asked for just now. Try again later." : failure;
+	gtk_widget_hide(f->more);
+	gtk_widget_show(f->moreSpinner);
+	gtk_spinner_start(GTK_SPINNER(f->moreSpinner));
+	gtk_widget_set_sensitive(f->reason, FALSE);
+	gtk_widget_hide(f->moreWhy);
+	Json app;
+	app.text("version", CL_VERSION).text("build", CL_GIT_COMMIT);
+	std::string extra = jsonQuote("name") + ":" + jsonQuote(trimmed(prefs().studentName)) + "," + jsonQuote("platform") + ":" + jsonQuote("linux") +
+	                    "," + jsonQuote("app") + ":" + app.str();
+	const std::string mail = trimmed(gtk_entry_get_text(GTK_ENTRY(f->email)));
+	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(f->contact)) && !mail.empty()) extra += "," + jsonQuote("email") + ":" + jsonQuote(mail);
+	installId();   // made here, on this thread, if it's new
+	std::thread([](std::shared_ptr<Form::MoreAsk> a, std::string reason, std::string extra) {
+		Failure failure;
+		int granted = 10;
+		if (askMore(reason, extra, granted, failure)) { a->granted = granted; a->state = 1; return; }
+		a->failure = failure;
 		a->state = 2;
-	}, f->asking, body.str()).detach();
+	}, f->asking, std::string(gtk_entry_get_text(GTK_ENTRY(f->reason))), extra).detach();
+}
+
+// What the server said to Request more.
+void moreAnswered(Form* f) {
+	std::shared_ptr<Form::MoreAsk> a = f->asking;
+	f->asking.reset();
+	gtk_spinner_stop(GTK_SPINNER(f->moreSpinner));
+	gtk_widget_hide(f->moreSpinner);
+	gtk_widget_show(f->more);
+	gtk_widget_set_sensitive(f->reason, TRUE);
+	if (a->state == 1) {
+		gtk_entry_set_text(GTK_ENTRY(f->reason), "");
+		setPhase(f, Phase::Writing);
+		showNotice(f, format("You can send %d more.", a->granted));
+		return;
+	}
+	const Failure& no = a->failure;
+	if (no.code == "not_capped") {   // room after all (one aged out): say so and carry on
+		setPhase(f, Phase::Writing);
+		showNotice(f, no.message);
+	} else if (no.code == "more_used") {
+		f->canMore = false;
+		setPhase(f, Phase::Capped, no.message);
+	} else {
+		gtk_label_set_text(GTK_LABEL(f->moreWhy), no.message.c_str());
+		gtk_widget_show(f->moreWhy);
+		gtk_widget_error_bell(f->dialog);
+	}
 }
 
 // Send Another: the form, empty again (the name and email stay).
@@ -1077,8 +1207,10 @@ void startSending(Form* f) {
 	if (f->sending) return;
 	Draft& d = draft();
 	collect(f);
-	if (trimmed(d.title).empty()) {
-		summaryNeeded(f);
+	if (trimmed(d.title).empty()) {   // (Send is off then; Enter in the field could still get here)
+		refreshSend(f);
+		gtk_widget_grab_focus(f->title);
+		gtk_widget_error_bell(f->dialog);
 		return;
 	}
 	std::vector<Attachment> files = d.attachments;
@@ -1116,7 +1248,7 @@ void startSending(Form* f) {
 	Json body;
 	body.text("title", trimmed(d.title)).text("details", trimmed(d.details)).raw("tags", tagList + "]").raw("autoTags", autoList + "]")
 		.text("priority", kPriorities[d.priority].id).text("name", prefs().studentName).text("email", mail)
-		.flag("contactOK", d.contactOK && !mail.empty()).text("platform", "linux").text("installId", installId()).raw("attachments", list)
+		.flag("contactOK", d.contactOK && !mail.empty()).text("platform", "linux").raw("attachments", list)
 		.raw("app", f->dev.app).raw("system", f->dev.system).raw("context", f->dev.context);
 	f->sending = std::make_shared<Sending>();
 	f->sending->circuitCopy = circuitCopy;
@@ -1129,17 +1261,7 @@ void startSending(Form* f) {
 
 gboolean timerCb(gpointer data) {
 	Form* f = static_cast<Form*>(data);
-	if (f->asking && f->asking->state != 0) {
-		if (f->asking->state == 1) {
-			say(f, "You can send 10 more.", false);
-			gtk_widget_hide(f->more);
-		} else {
-			say(f, f->asking->why);
-			gtk_widget_set_sensitive(f->more, TRUE);
-			gtk_widget_error_bell(f->dialog);
-		}
-		f->asking.reset();
-	}
+	if (f->asking && f->asking->state != 0) moreAnswered(f);
 	if (!f->sending) return G_SOURCE_CONTINUE;
 	Draft& d = draft();
 	if (f->sending->state == 0) {
@@ -1156,19 +1278,19 @@ gboolean timerCb(gpointer data) {
 		setPhase(f, Phase::Sent);
 		return G_SOURCE_CONTINUE;
 	}
-	std::string why;
+	Failure no;
 	{
 		std::lock_guard<std::mutex> g(f->sending->lock);
-		why = f->sending->failure;
+		no = f->sending->failure;
 	}
-	const bool capped = f->sending->capped, more = f->sending->canRequestMore, needed = f->sending->summaryNeeded;
 	f->sending.reset();
-	setPhase(f, Phase::Failed, why.empty() ? "It couldn't be sent. Your feedback is kept, so you can try again." : why);
-	if (capped && more) {
-		gtk_widget_set_sensitive(f->more, TRUE);
-		gtk_widget_show(f->more);
+	if (no.code == "sender_cap") {
+		f->canMore = no.canRequestMore;
+		setPhase(f, Phase::Capped, no.message);
+	} else {
+		setPhase(f, Phase::Failed, no.message.empty() ? "It couldn't be sent. Your feedback is kept, so you can try again." : no.message);
 	}
-	if (needed) summaryNeeded(f);
+	if (no.code == "summary_required") summaryNeeded(f);
 	else gtk_widget_error_bell(f->dialog);
 	return G_SOURCE_CONTINUE;
 }
@@ -1179,6 +1301,101 @@ int probe() {
 	g_setenv("CL_FEEDBACK_KEY", "probe-not-a-key", TRUE);
 	const Reply r = request("POST", "/api/feedback", "application/json", "", "{}");
 	return r.reached ? r.status : 0;
+}
+
+// The Mac's mac/Tools/feedback-check (its 16 cases), against the same
+// stand-in server (mac/Tools/feedback-check/server.py), on this app's own
+// client code. The settings file is left alone.
+int check() {
+	gChecking = true;
+	int fails = 0;
+	auto ok = [&](bool c, const std::string& m) {
+		printf("%s%s\n", c ? "ok   " : "FAIL ", m.c_str());
+		if (!c) fails++;
+	};
+	auto hitsOf = [](const char* path) {
+		const Reply r = request("GET", "/stats", "application/json", "", "");
+		return atoi(jsonField(r.body, path).c_str());
+	};
+	auto installsSeen = [] {
+		const Reply r = request("GET", "/stats", "application/json", "", "");
+		std::set<std::string> out;
+		const size_t at = r.body.find("\"installs\"");
+		if (at == std::string::npos) return out;
+		const size_t open = r.body.find('[', at), close = r.body.find(']', open);
+		std::string cur;
+		bool in = false;
+		for (size_t i = open + 1; i < close && open != std::string::npos; i++) {
+			if (r.body[i] == '"') { if (in) out.insert(cur); cur.clear(); in = !in; }
+			else if (in) cur += r.body[i];
+		}
+		out.erase("");
+		return out;
+	};
+	auto report = [](const std::string& title) {
+		Json j;
+		j.text("title", title).text("details", "").text("platform", "linux").raw("attachments", "[]");
+		const std::string s = j.str();
+		return s.substr(0, s.size() - 1);   // (createReport adds installId and the brace)
+	};
+	Created c;
+	Failure f;
+
+	// The install id: made once, kept, and made again if it isn't the right shape.
+	prefs().feedbackInstallId.clear();
+	const std::string id = installId();
+	ok(id.size() == 32 && isInstallId(id) && id.find('-') == std::string::npos, "the install id is 32 letters and digits (" + id + ")");
+	ok(installId() == id, "...and the same the next time");
+	prefs().feedbackInstallId = "not one!";
+	const std::string again = installId();
+	ok(again != "not one!" && isInstallId(again), "one that isn't the right shape is made again");
+	ok(!isInstallId("short") && !isInstallId(std::string(65, 'a')) && isInstallId("abc_DEF-123"), "isInstallId takes 8 to 64 of A-Z a-z 0-9 _ -");
+
+	// The summary.
+	const bool blankSent = createReport(report("  "), c, f);
+	ok(!blankSent && f.code == "summary_required" && f.status == 400 && f.message.compare(0, 13, "Add a summary") == 0,
+	   "an empty summary: 400 summary_required, with the server's sentence");
+
+	// Ten, then the cap: answered once, not tried again.
+	int sent = 0;
+	for (int i = 1; i <= 10; i++)
+		if (createReport(report(format("Report %d", i)), c, f)) { completeReport(c, f); sent++; }
+	ok(sent == 10, format("ten reports go (%d)", sent));
+	const int before = hitsOf("/api/feedback");
+	const gint64 t0 = g_get_monotonic_time();
+	const bool eleventh = createReport(report("Report 11"), c, f);
+	const double took = (g_get_monotonic_time() - t0) / 1e6;
+	const int after = hitsOf("/api/feedback");
+	ok(!eleventh && f.code == "sender_cap" && f.status == 429 && f.canRequestMore && f.retryAfter == 82800,
+	   "the eleventh: 429 sender_cap, canRequestMore, retryAfter");
+	ok(f.message.find("Request more") != std::string::npos, "...with the server's sentence to show (" + f.message + ")");
+	ok(after - before == 1 && took < 1, format("...asked once, not tried again (%d requests)", after - before));
+
+	// Request more: ten more, then not again.
+	int granted = 0;
+	const bool gotMore = askMore("Another bug in the clock", jsonQuote("platform") + ":" + jsonQuote("linux"), granted, f);
+	ok(gotMore && granted == 10, gotMore ? format("Request more gives 10 more (%d)", granted) : "Request more gives 10 more (failed)");
+	ok(createReport(report("Report 11, after asking"), c, f), "...and the next report goes");
+	ok(!askMore("", "", granted, f) && f.code == "not_capped", "asking while there's room: not_capped (" + f.message + ")");
+	for (int i = 12; i <= 20; i++) createReport(report(format("Report %d", i)), c, f);
+	ok(!createReport(report("Report 21"), c, f) && f.code == "sender_cap" && !f.canRequestMore, "capped again: no Request more this time");
+	ok(!askMore("", "", granted, f) && f.code == "more_used" && f.status == 429, "asking again: more_used, not tried again");
+
+	// A 429 without a code (too many at once) is still tried again.
+	request("POST", "/api/feedback/plain429", "application/json", "", "{\"n\": 2}");
+	prefs().feedbackInstallId = "othermac-0001";   // another sender, not capped
+	const int h0 = hitsOf("/api/feedback");
+	const bool retried = createReport(report("After two plain 429s"), c, f);
+	const int h1 = hitsOf("/api/feedback");
+	ok(retried && h1 - h0 == 3, format("a plain 429 is tried again, three tries in all (%d)", h1 - h0));
+
+	const std::set<std::string> ids = installsSeen();
+	std::string seen;
+	for (const std::string& s : ids) seen += (seen.empty() ? "" : ", ") + s;
+	ok(ids == std::set<std::string>{ again, "othermac-0001" }, "every report and Request more carried the install id (" + seen + ")");
+
+	printf(fails == 0 ? "feedback-check: all passed\n" : "feedback-check: %d failed\n", fails);
+	return fails == 0 ? 0 : 1;
 }
 
 void show(CircuitWindow* win, int demo) {
@@ -1205,8 +1422,6 @@ void show(CircuitWindow* win, int demo) {
 	f.close = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "_Close", GTK_RESPONSE_CLOSE);
 	f.send = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "Send Feedback", 100);
 	gtk_style_context_add_class(gtk_widget_get_style_context(f.send), "suggested-action");
-	f.more = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "Request _More", kMoreResponse);
-	gtk_widget_set_no_show_all(f.more, TRUE);
 	f.another = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "Send _Another", kAnotherResponse);
 	f.done = gtk_dialog_add_button(GTK_DIALOG(f.dialog), "_Done", GTK_RESPONSE_OK);
 	gtk_style_context_add_class(gtk_widget_get_style_context(f.done), "suggested-action");
@@ -1249,10 +1464,10 @@ void show(CircuitWindow* win, int demo) {
 	gtk_entry_set_placeholder_text(GTK_ENTRY(f.title), "A short summary, like “C doesn't connect the wire”");
 	gtk_entry_set_text(GTK_ENTRY(f.title), d.title.c_str());
 	gtk_box_pack_start(GTK_BOX(box), f.title, FALSE, FALSE, 0);
-	f.titleNote = gtk_label_new("A short summary is needed: it's the first thing the developer reads.");
+	f.titleNote = gtk_label_new("\u270E Add a short summary to send it. A few words is plenty.");
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.titleNote), "hint");
 	gtk_label_set_xalign(GTK_LABEL(f.titleNote), 0);
 	gtk_label_set_line_wrap(GTK_LABEL(f.titleNote), TRUE);
-	gtk_style_context_add_class(gtk_widget_get_style_context(f.titleNote), "problem");
 	gtk_widget_set_no_show_all(f.titleNote, TRUE);
 	gtk_box_pack_start(GTK_BOX(box), f.titleNote, FALSE, FALSE, 0);
 	f.details = gtk_text_view_new();
@@ -1305,6 +1520,8 @@ void show(CircuitWindow* win, int demo) {
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(f.contact), d.contactOK);
 	gtk_box_pack_start(GTK_BOX(box), f.contact, FALSE, FALSE, 0);
 	GtkWidget* also = gtk_label_new(("Also sent: " + f.dev.line).c_str());
+	gtk_widget_set_tooltip_text(also, ("So we know where it happened. Nothing else leaves your computer.\nThis install's id (it names nobody; "
+	                                   "it lets the server count this computer's reports): " + installId()).c_str());
 	gtk_label_set_xalign(GTK_LABEL(also), 0);
 	gtk_label_set_line_wrap(GTK_LABEL(also), TRUE);
 	gtk_style_context_add_class(gtk_widget_get_style_context(also), "dim-label");
@@ -1365,6 +1582,44 @@ void show(CircuitWindow* win, int demo) {
 	gtk_style_context_add_class(gtk_widget_get_style_context(f.problem), "problem");
 	gtk_widget_set_no_show_all(f.problem, TRUE);
 	gtk_box_pack_start(GTK_BOX(status), f.problem, FALSE, FALSE, 0);
+	f.notice = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(f.notice), 0);
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.notice), "notice");
+	gtk_widget_set_no_show_all(f.notice, TRUE);
+	gtk_box_pack_start(GTK_BOX(status), f.notice, FALSE, FALSE, 0);
+	// The cap's box.
+	f.capBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+	gtk_widget_set_name(f.capBox, "feedback-cap");
+	f.capText = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(f.capText), 0);
+	gtk_label_set_line_wrap(GTK_LABEL(f.capText), TRUE);
+	gtk_box_pack_start(GTK_BOX(f.capBox), f.capText, FALSE, FALSE, 0);
+	f.moreRow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	f.reason = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(f.reason), "What's it about? (optional)");
+	gtk_entry_set_max_length(GTK_ENTRY(f.reason), 300);
+	gtk_box_pack_start(GTK_BOX(f.moreRow), f.reason, TRUE, TRUE, 0);
+	f.more = gtk_button_new_with_label("Request more");
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.more), "suggested-action");
+	gtk_widget_set_size_request(f.more, 110, -1);
+	gtk_box_pack_start(GTK_BOX(f.moreRow), f.more, FALSE, FALSE, 0);
+	f.moreSpinner = gtk_spinner_new();
+	gtk_widget_set_size_request(f.moreSpinner, 110, -1);
+	gtk_box_pack_start(GTK_BOX(f.moreRow), f.moreSpinner, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(f.capBox), f.moreRow, FALSE, FALSE, 0);
+	f.moreWhy = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(f.moreWhy), 0);
+	gtk_label_set_line_wrap(GTK_LABEL(f.moreWhy), TRUE);
+	gtk_style_context_add_class(gtk_widget_get_style_context(f.moreWhy), "problem");
+	gtk_box_pack_start(GTK_BOX(f.capBox), f.moreWhy, FALSE, FALSE, 0);
+	gtk_widget_show_all(f.capBox);
+	gtk_widget_hide(f.moreSpinner);
+	gtk_widget_hide(f.moreWhy);
+	for (GtkWidget* w : { f.capBox, f.moreSpinner, f.moreWhy }) gtk_widget_set_no_show_all(w, TRUE);
+	gtk_widget_hide(f.capBox);
+	gtk_box_pack_start(GTK_BOX(status), f.capBox, FALSE, FALSE, 0);
+	g_signal_connect_swapped(f.more, "clicked", CL_CALLBACK(+[](Form* form) { guarded("Send Feedback", [&] { askForMore(form); }); }), &f);
+	g_signal_connect_swapped(f.reason, "activate", CL_CALLBACK(+[](Form* form) { guarded("Send Feedback", [&] { askForMore(form); }); }), &f);
 
 	g_signal_connect_swapped(f.title, "changed", G_CALLBACK(wordsChanged), &f);
 	g_signal_connect_swapped(gtk_text_view_get_buffer(GTK_TEXT_VIEW(f.details)), "changed", G_CALLBACK(wordsChanged), &f);
@@ -1425,9 +1680,9 @@ void show(CircuitWindow* win, int demo) {
 	} else if (demo == 3) {
 		setPhase(&f, Phase::Failed, "Couldn't reach the feedback server. Check the internet connection (and that curl is installed) and try again.");
 	} else if (demo == 4) {
-		// Over the allowance, with Request More.
-		setPhase(&f, Phase::Failed, "This computer has sent a lot of feedback today. Ask for more, or try again tomorrow.");
-		gtk_widget_show(f.more);
+		// Over the allowance, with Request more (the server's sentence).
+		f.canMore = true;
+		setPhase(&f, Phase::Capped, "You've sent 10 reports in the last day. Tap 'Request more' if you have another problem.");
 	} else if (demo == 5) {
 		gtk_entry_set_text(GTK_ENTRY(f.title), "");
 		summaryNeeded(&f);
@@ -1436,7 +1691,6 @@ void show(CircuitWindow* win, int demo) {
 		const int r = gtk_dialog_run(GTK_DIALOG(f.dialog));
 		if (r == 100) { guarded("Send Feedback", [&] { startSending(&f); }); continue; }
 		if (r == kAnotherResponse) { startAnother(&f); continue; }
-		if (r == kMoreResponse) { guarded("Send Feedback", [&] { askForMore(&f); }); continue; }
 		if (r == kRecordResponse) {
 			bool stillOpen = true;
 			if (!f.sending) guarded("Send Feedback", [&] { stillOpen = recordInto(&f); });

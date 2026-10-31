@@ -1400,6 +1400,7 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--sync-test") == 0) return syncTest(argc, argv);
 		// --update-self-test [--release <folder> --key <hex>]: signed updates (Updater.h).
 		if (strcmp(argv[i], "--update-self-test") == 0) return Updater_SelfTest(argc, argv);
+		if (strcmp(argv[i], "--feedback-check") == 0) return feedback::check();
 		if (strcmp(argv[i], "--feedback-probe") == 0) {
 			const int code = feedback::probe();
 			printf("feedback server: %d\n", code);

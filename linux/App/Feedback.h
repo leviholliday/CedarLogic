@@ -18,6 +18,9 @@ void show(CircuitWindow* window, int demo = 0);
 // --feedback-probe: asks the site with a wrong key (it should say 403) and
 // sends nothing. The HTTP status, or 0 when it couldn't be reached.
 int probe();
+// --feedback-check: the client's checks against the stand-in server at
+// CL_FEEDBACK_URL (mac/Tools/feedback-check/server.py). 0 when all pass.
+int check();
 }
 
 #endif  // CL_LINUX_FEEDBACK_H
