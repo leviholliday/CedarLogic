@@ -55,7 +55,7 @@ struct Prefs {
 	bool classicTabs = false;     // plain segments instead of the Mac's tab cards
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	bool confirmQuit = true;      // Ctrl+Q asks first
-	bool openReplaces = false;    // opening a circuit replaces the one in the window
+	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
 	bool checkUpdates = true;     // look for a new test build now and then
