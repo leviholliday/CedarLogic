@@ -510,7 +510,7 @@ if(APPLE)
     )
 
     # Copy icon into Resources (not in res/ subdirectory)
-    set(MACOS_ICON "${CMAKE_SOURCE_DIR}/res/macos/CedarLogic.icns")
+    set(MACOS_ICON "${CMAKE_SOURCE_DIR}/mac/App/CedarLogic.icns")
     set_source_files_properties(${MACOS_ICON} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
     )
@@ -604,7 +604,7 @@ set(CPACK_PACKAGE_VENDOR "Cedarville University")
 # set(CPACK_PACKAGE_VERSION_MINOR "${CEDARLOGIC_MINOR}")
 # set(CPACK_PACKAGE_VERSION_PATCH "${CEDARLOGIC_PATCH}")
 if(APPLE)
-    set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/res/macos/CedarLogic.icns)
+    set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/mac/App/CedarLogic.icns)
 else()
     set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/cmake\\\\InstallSmall.bmp)
 endif()
@@ -634,7 +634,7 @@ if(APPLE)
     set(CPACK_DMG_FORMAT "UDZO")
     set(CPACK_BUNDLE_NAME "CedarLogic")
     set(CPACK_BUNDLE_PLIST "${CMAKE_SOURCE_DIR}/res/macos/Info.plist.in")
-    set(CPACK_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/res/macos/CedarLogic.icns")
+    set(CPACK_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/mac/App/CedarLogic.icns")
     # The Applications symlink comes for free, but on its own it is only an icon
     # sitting next to another icon: nothing says to drag one onto the other, and
     # opening the app where it lies is the easier thing to do. That copy runs

@@ -1,10 +1,10 @@
 #!/bin/bash
 # Makes every CedarLogic icon from res/macos/icon-artwork.png and puts each
 # where it's used:
-#   mac/App/CedarLogic.icns           the Mac app
+#   mac/App/CedarLogic.icns           the Mac app (and the wx app on the Mac,
+#                                     whose CMakeLists.txt points here)
 #   mac/App/CedarLogicDocument.icns   .cdl files in Finder
 #   mac/App/LaunchIcon.png            the launch screen and welcome
-#   res/macos/CedarLogic.icns         the wx app on the Mac
 #   res/icon.ico, res/icon.png        the wx app on Windows and Linux
 #   mac/build/icons/tile-*.png        for the website (favicons and so on)
 #   mac/Tools/make-icons.sh
@@ -15,7 +15,6 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 swift mac/Tools/make-icons.swift res/macos/icon-artwork.png "$OUT"
 
 iconutil -c icns "$OUT/app.iconset" -o mac/App/CedarLogic.icns
-cp mac/App/CedarLogic.icns res/macos/CedarLogic.icns
 cp "$OUT/LaunchIcon.png" mac/App/LaunchIcon.png
 cp "$OUT/tile-64.png" res/icon.png
 
