@@ -15,6 +15,15 @@ on a screen, so behaviour bugs are out of scope here.
 | Linux | `linux/App/*.cpp`, `linux/res`, `docs/LINUX-0.4.md` | `private/ui/linux-menubar` @ 46d32ba |
 | Web | `public/assets/js/sim*.js`, `public/app/`, `scripts/build_pages.py` in `cedarlogic-site` | `main` @ d900041 |
 
+**Re-checked 2026-10-31 against the 0.4 tips** (`private/v4/mac`,
+`private/windows/native-v4-int3` @ 56ccf0e, `private/linux/native-v4-int3`
+@ 53b67db), following section 16: `mac/CedarCore` is still identical on all
+three, and these rows were re-read and updated: Predict, Then Reveal; drawing
+in share links; Recently Deleted; Export as Image looks; Notes left out of
+Share Link and feedback; "Request more"; testing groups; Tabs Modern/Classic.
+Section 15 marks the gaps that closed. Other rows are still from the commits
+above.
+
 The Windows and Linux branches are being added to by other agents while this
 was written. Anything on that list is marked **In progress** (never "No")
 and collected in section 12.
@@ -92,7 +101,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Step Clock (K), toolbar button, click a manual clock to step it | Yes | Yes | Yes | Yes | Mac `CanvasView.swift:472, 1848`; Windows `Window.cpp:2770`, `Canvas.cpp:1211`, toolbar `Canvas.cpp:512`; Linux `Window.cpp:2406`, `Canvas.cpp:1306`; Web "Step Clock" in the title menu and `K` |
 | Simulation View | Yes | Yes | Yes | Yes | Windows `CMD_SIM_VIEW`; Linux `win.sim-view`; Web `sim.js` |
 | Projector mode | Yes | Yes | Yes | Yes | Windows `CMD_PROJECTOR`; Linux `win.projector`; Web `sim-prefs.js` |
-| Predict, Then Reveal | Yes | **No** | Yes | Yes | Mac `Predict.swift`; Linux `Predict.cpp`, Simulation menu; Web `sim.js` predict. Windows: no code, no menu item (the word appears only in `Canvas.cpp:242` as a state reset) |
+| Predict, Then Reveal | Yes | Yes | Yes | Yes | Mac `Predict.swift`; Windows `Predict.cpp`, Simulate menu (`Window.cpp:380`); Linux `Predict.cpp`, Simulation menu; Web `sim.js` predict |
 | Presenter mode (mirror to a second display) | Yes | No | No | No | Mac `Presenter.swift`, `RenderPresenter.swift`. Mac only by design |
 | Oscilloscope and timing diagrams | Yes | Yes | Yes | Yes | Mac `ScopeView.swift`, `TimingDiagram.swift`; Windows/Linux `Scope.cpp`; Web `sim-scope.js` |
 | Truth table, Karnaugh maps, simplest formulas, CSV | Yes | Yes | Yes | Yes | Mac `TruthTableView.swift`; Windows/Linux `TruthTableWindow.cpp`; Web `sim-truth.js`, `truth-table.js` |
@@ -111,7 +120,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Draw on the circuit: pen, highlighter, eraser, three widths, colours | Yes | Yes | Yes | Yes | Mac `Drawing.swift`; Windows `Canvas.cpp:566` (drawing bar), `Ink.h`; Linux `Ink.cpp`, `Canvas.cpp`; Web `sim-draw.js`. Windows takes pen input (`WM_POINTER*`, `Canvas.cpp:1011`); Linux handles a tablet eraser (`Canvas.cpp:1274`) |
 | Show / Hide Drawing, Done Drawing | Yes | Yes | Yes | Yes | |
 | Clear Drawing on This Page | Yes (no prompt, one Undo step) | Yes | Yes | Yes | Mac `Drawing.swift:137` clears "without asking". A confirmation on Windows/Linux: **In progress**. Mac has none, so decide which behaviour is right and make all three match |
-| Drawing carried in the .cdl, sync, share link (when shown and it fits) | Yes | Partial | Yes | Yes | Linux `main.cpp:801-815` as the Mac. Windows `Window.cpp:2307` calls plain `cl_document_save_text`, so the link always carries the drawing and does not drop it when too long (see the privacy row in section 7) |
+| Drawing carried in the .cdl, sync, share link (when shown and it fits) | Yes | Yes | Yes | Yes | Linux `main.cpp:801-815` as the Mac; Windows `Window.cpp:2330` (a plain and a drawn copy, as the Mac) |
 | Notes for the circuit | Yes | Yes | Yes | Yes | Mac `Notes.swift`; Windows `Notes.cpp`; Linux `Notes.cpp`; Web `sim-notes.js`. Notes never go in a share link (Mac, Linux, Web; see Windows in section 7) |
 
 ## 6. Files and library
@@ -120,7 +129,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 |---|---|---|---|---|---|
 | Your Circuits library, saves as you work | Yes | Yes | Yes | Yes | Mac `LibraryView.swift`; Windows `Library.cpp`, `LibraryWindow.cpp`; Linux same names; Web `sim-library.js` (IndexedDB) |
 | Version History (restore a version) | Yes | Yes | Yes | Yes | Mac `LibraryView.swift:722`; Windows/Linux `LibraryWindow.cpp`; Web `sim-history.js` |
-| Recently Deleted (a list you can restore from) | No | No | No | Yes | **Native apps only move a deleted circuit to a hidden `.Trash` folder inside the library** (Mac `LibraryView.swift:136`, Windows `Library.cpp:243`, Linux `Library.cpp:232`); no window lists it. Web `sim-library.js` has the sheet (30 days). The old file said Yes for Mac, Windows and Linux; that was wrong |
+| Recently Deleted (a list you can restore from) | Yes | Yes | Yes | Yes | Mac sheet over Your Circuits (`LibraryView.swift:667`); Windows `LibraryWindow.cpp:44` ("Recently Deleted (N)" beside the title; `Library.cpp:257`); Linux `LibraryWindow.cpp:46`, `Library.cpp:247`; Web `sim-library.js` (30 days). All follow `docs/RECENTLY-DELETED.md`. Left over on Windows: `SyncApp.cpp:98 forWindows` still rewrites the engine's "Recently Deleted" to "the Trash folder" in sync notices, from before the list existed |
 | Open / import .cdl v1, v2, v3 | Yes | Yes | Yes | Yes | |
 | Save / export .cdl; Export for older CedarLogic (v2, v1.x) | Yes | Yes | Yes | Partial | Web only offers "Download for Classic CedarLogic" when needed (`sim-draw.js`). Windows/Linux submenu "For CedarLogic 2 / 1.x" |
 | Recovery of unsaved work | Yes | Yes | Yes | Yes | Windows/Linux `Recovery.cpp`; Web IndexedDB |
@@ -132,14 +141,14 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Feature | Mac | Windows | Linux | Web | Notes / where |
 |---|---|---|---|---|---|
 | Export as Image: formats | PNG, PDF | PNG, PDF | PNG, PDF, SVG | PNG | Mac `ExportImageView.swift`; Windows `Export.cpp:346`; Linux `ExportImage.cpp:5`; Web `sim-picture.js` (no PDF) |
-| Export as Image: looks | Match Window, Light, Black & White | Colour, Black & White | Colour, Black & White | Screen, Light, Dark, Print | **No "Match Window" on Windows/Linux**: a dark-mode circuit cannot be exported as it looks. Mac `ExportImageView.swift:209` |
+| Export as Image: looks | Match Window, Light, Black & White | Match Window, Light, Black & White | Match Window, Light, Black & White | Screen, Light, Dark, Print | Mac `ExportImageView.swift:209`; Windows `Export.cpp:260`; Linux `ExportImage.cpp:404` |
 | Export as Image: preview, grid lines, Include drawing, name and result strip, Copy | Yes | Yes | Yes | Yes | Windows `Export.cpp:211-253`; Linux `ExportImage.cpp:316-345` |
 | Export as Image: Share (system share sheet) | Yes | No | No | n/a | Mac `ExportImageView.swift:381` (macOS share picker). Web has a separate "Share…" (`sim.js`, Web Share) |
 | Print | Yes | Yes | Yes | Yes | Mac `ExportPrint.swift`; Windows/Linux File > Print; Web through the browser |
 | Export Lab Report (PDF) | Yes | Yes | Yes | No | Mac `LabReport.swift`; Windows `LabReport.cpp` + `Pdf.cpp`; Linux `LabReport.cpp`. Web can save only a timing-diagram picture (`sim-scope.js:76`) |
 | Share Link (copy a link; website opens it) | Yes | Yes | Yes | Yes | Mac `ShareLink.swift`; Windows `ShareLink.cpp`, `Window.cpp:2302`; Linux `main.cpp:795`; Web `sim-share.js` |
-| Share Link leaves out the student's Notes | Yes | **No** | Yes | Yes | Mac `ShareLink.swift:26` (`CL_SAVE_NO_NOTES`); Linux `main.cpp:810`; Windows `Window.cpp:2307` uses `cl_document_save_text(doc)`, which writes notes and drawing (`CedarCore.h:716` says the `_ex` call exists to leave them out). **Pasting a Windows link into a chat shares the student's notes** |
-| Send Feedback > "send this circuit too" leaves out Notes | Yes | **No** | Yes | n/a | Mac `Feedback.swift:268`; Linux `Feedback.cpp:885`; Windows `Feedback.cpp:1132` uses plain `cl_document_save_text` |
+| Share Link leaves out the student's Notes | Yes | Yes | Yes | Yes | Mac `ShareLink.swift:26` (`CL_SAVE_NO_NOTES`); Windows `Window.cpp:2330`; Linux `main.cpp:810` |
+| Send Feedback > "send this circuit too" leaves out Notes | Yes | Yes | Yes | n/a | Mac `Feedback.swift:268`; Windows `Feedback.cpp:1542`; Linux `Feedback.cpp:885` (all `CL_SAVE_NO_NOTES`) |
 
 ## 8. Sync and Classroom
 
@@ -164,7 +173,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Send the circuit too | Yes | Yes | Yes | n/a | Windows version leaks notes, see section 7 |
 | Sending progress, and failure keeps the draft | Yes | Yes | Yes | n/a | Mac progress bar with MB (`Feedback.swift:298`); Windows/Linux text in the form and a "wasn't sent" note |
 | Confirmation screen after sending ("Thank you", Send Another, Done) | Yes | Partial | Partial | n/a | Mac `FeedbackView.swift:379`. Windows/Linux: a one-line note "Feedback sent. Thank you!" and the window closes. **Confirmation screen: In progress** |
-| "Request more" | Not found | In progress | In progress | n/a | The words do not appear in the Mac code or on the site; the nearest thing on the Mac is the sent screen's Send Another. Ask the agent on this what it is meant to match |
+| "Request more" | Not found | Yes | Yes | n/a | Windows `Feedback.cpp:494`, Linux `Feedback.cpp:453` (`sender_cap`: offered while the server caps a sender). Not in the Mac code; the nearest thing is the sent screen's Send Another |
 | Fades on the feedback and other windows | Yes | In progress | In progress | n/a | |
 
 ## 10. Updates, testing groups, diagnostics
@@ -173,7 +182,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 |---|---|---|---|---|---|
 | In-app update check and install | Yes | Yes | Yes | Partial | Mac Sparkle (`Updates.swift`); Windows `Updater.cpp` and Linux `Updater.cpp` (signed manifest, SHA-256, `windows/linux-native-testing` tag). Web `/app/` shows an "Update ready" bar (`app.js:307`); the online page just loads the new site |
 | "Check for new versions" switch | No | Yes | Yes | n/a | Windows `Settings.cpp:555`; Linux `Settings.cpp:382` |
-| Beta / normal testing group (two update feeds) | Yes | No | No | n/a | Mac `Updates.swift:10,52`, `SettingsView.swift:326`. Windows/Linux have one feed (the `*-native-testing` tag) |
+| Beta / normal testing group (two update feeds) | Yes | Yes | Yes | n/a | Mac `Updates.swift:10,52`, `SettingsView.swift:326`; Windows `Updater.cpp`, `Settings.cpp:629`; Linux `Updater.cpp`, `Settings.cpp:400` |
 | Crash reports (opt-in switch, Sentry) | Yes | No | No | No | Mac `CrashReports.swift`, `SettingsView.swift:336`. Windows/Linux `SessionCheck.cpp` is the CI `--session-check`, not a reporter |
 | What's New window | Yes | Yes | Yes | Partial | Mac `WhatsNew.swift`; Windows/Linux `Welcome.cpp`. Web's menu opens the website page `/whats-new/` (`sim.js:1678`) |
 | Welcome / first run, Guided Tour | Yes | Yes | Yes | Partial | Web: first-run toast and coach marks in the `/app/` phone shell only (`sim-mobile.js:1211`); no tour |
@@ -196,11 +205,11 @@ About.
 | Opening .cdl files default-app row | Yes | Partial | Yes | n/a | see section 6 |
 | Ask before quitting | Yes | Yes | Yes | n/a | |
 | Status bar | Yes | Yes | Yes | No | |
-| Testing group (beta / normal) | Yes | No | No | n/a | |
+| Testing group (beta / normal) | Yes | Yes | Yes | n/a | |
 | Crash reports | Yes | No | No | No | |
 | Theme at launch | Yes | Yes | Yes | Partial | Web: Light or Dark only, no follow-system or last-used |
 | App colour (accent) | Yes | Yes | Yes | Yes | Web 7 colours, same names |
-| Tabs: Modern / Classic | Yes | **No** | Yes | No | Mac `Prefs.classicTabs`; Linux `Settings.cpp:404`; no `classicTabs` anywhere in the Windows tree |
+| Tabs: Modern / Classic | Yes | Yes | Yes | No | Mac `Prefs.classicTabs`; Windows `Settings.cpp:661`; Linux `Settings.cpp:404` |
 | Grid on/off, style, darker every 5 | Yes | Yes | Yes | Yes | |
 | Wire thickness, low-wire colour, bend dots, dot size | Yes | Yes | Yes | Partial | Web has no low-wire colour |
 | Gate size, side-panel names and category keys | Yes | Yes | Yes | No | |
@@ -220,7 +229,7 @@ the target is.
 |---|---|---|---|
 | Feedback confirmation screen | `FeedbackView.swift:379` | In progress | In progress |
 | Required summary | yes | on branch tip already | on branch tip already |
-| "Request more" | not found in Mac code | In progress | In progress |
+| "Request more" | not found in Mac code | done (`Feedback.cpp:494`) | done (`Feedback.cpp:453`) |
 | Fades | yes | In progress | In progress |
 | Ctrl+Tab look | `TabSwitcher.swift` | In progress | In progress |
 | C-connect range | `CLCanvas.swift:336` | In progress | In progress |
@@ -253,20 +262,20 @@ Start menu offer, ARM64 build; the CI helpers (`--screenshot`, `--show`,
 Ordered by how soon a student or teacher would run into it. "(IP)" is already
 being worked on.
 
-1. **Windows has no Predict, Then Reveal.** Mac, Linux and Web have it, and it
+1. ~~**Windows has no Predict, Then Reveal.**~~ Done on the int3 tip (`windows/App/Predict.cpp`). Mac, Linux and Web have it, and it
    is the main Simulation View classroom activity. Windows needs the
    `Predict.cpp` equivalent, the Simulation menu items and the cover/ring
    drawing. (`linux/App/Predict.cpp` is the model.)
-2. **Windows leaks the student's Notes.** Share Link (`Window.cpp:2307`) and
+2. ~~**Windows leaks the student's Notes.**~~ Done on the int3 tip (`Window.cpp:2330`, `Feedback.cpp:1542`). Share Link (`Window.cpp:2307`) and
    Send Feedback's "send this circuit" (`Feedback.cpp:1132`) use
    `cl_document_save_text`. Switch to `cl_document_save_text_ex` with
    `CL_SAVE_NO_NOTES` (and the Mac/Linux drawing rules) as `linux/App/main.cpp:795-815`
    does. A student pasting a link into a chat shares their notes; this is the
    one gap that can hurt someone, and it is a few lines.
-3. **Export as Image on Windows and Linux has no Match Window look** (dark
+3. Match Window: done on both int3 tips. Still open: **Export as Image on Windows has no Share** (Linux has `_Share…`). Was: **Export as Image on Windows and Linux has no Match Window look** (dark
    mode circuits export light only) and no Share. Add the third look to
    `Export.cpp` / `ExportImage.cpp`.
-4. **Deleting a circuit has no way back inside any native app.** Windows,
+4. ~~**Deleting a circuit has no way back inside any native app.**~~ Done: Recently Deleted on Mac, Windows and Linux (section 6). Windows,
    Linux and Mac move it to a hidden `.Trash` folder in the library; the web
    has a Recently Deleted sheet. Add a Recently Deleted list to Your Circuits
    (the sync dialogs on all three already promise "Recently Deleted").
@@ -279,7 +288,7 @@ being worked on.
    screen and "Request more", fades, the Ctrl+Tab panel look, the C-connect
    range, Settings under File on Linux, and the clear-drawing confirmation
    (decide whether the Mac should confirm too, since it currently does not).
-7. **Windows Settings is missing Tabs Modern/Classic** and the "Opening .cdl
+7. Tabs Modern/Classic: done on Windows. Was: **Windows Settings is missing Tabs Modern/Classic** and the "Opening .cdl
    files" row; Linux and Mac have both. Web Settings lacks most of the Mac's
    rows (toolbar, gate size, mouse/trackpad, status bar, template for new
    circuits, shortcut editing).
@@ -287,7 +296,7 @@ being worked on.
    reader (owner-drawn UI); Mac covers controls but not the canvas; nobody on
    a native app can pick or wire a part from the keyboard (the web can).
    Neither native app follows high-contrast settings.
-9. **Update channel and diagnostics.** Windows and Linux have one update feed
+9. **Update channel and diagnostics.** Testing groups: done on Windows and Linux (section 10). Still open: crash reporting. Was: Windows and Linux have one update feed
    and no beta/normal setting, and no crash reporting. Only testers and the
    developer notice, but a beta channel is the way to ship a bad build to
    few people first.

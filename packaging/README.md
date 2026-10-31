@@ -6,7 +6,7 @@ builds), and all checking what they download.
 
 | Platform | Command | Files here |
 |---|---|---|
-| Mac | `brew install --cask leviholliday/cedarlogic/cedarlogic` | `homebrew/` (cask, `bump.sh`, README) |
+| Mac | `brew install --cask leviholliday/tap/cedarlogic` | `homebrew/` (cask, `bump.sh`, README) |
 | Windows | `winget install --id LeviHolliday.CedarLogic -e` | `winget/` (manifests, `bump.sh`, `validate.py`, README) |
 | Windows | `irm https://cedarlogic.netlify.app/install.ps1 \| iex` | `windows/install.ps1` (+ README) |
 | Linux | `curl -fsSL https://cedarlogic.netlify.app/install.sh \| sh` | the repo's `linux/install.sh`: one script for releases and the test build (`--preview`); `packaging/linux/` has a symlink to it and the README |
@@ -34,11 +34,12 @@ out.
 
 ## One-time setup (the owner)
 
-1. **Homebrew tap repo.** Create `leviholliday/homebrew-cedarlogic` (public)
-   with `Casks/cedarlogic.rb` from `homebrew/Casks/`, or put the cask in
-   the tap you already have, `leviholliday/homebrew-tap` (then the command
-   is `brew install --cask leviholliday/tap/cedarlogic`). Decide before the
-   site goes up; `homebrew/README.md` has both.
+1. **Homebrew tap repo.** Done: the cask is in your tap,
+   `leviholliday/homebrew-tap` (`Casks/cedarlogic.rb`, next to `glideball`),
+   so the command is `brew install --cask leviholliday/tap/cedarlogic`.
+   Keep a checkout of it for bumps (`git clone
+   https://github.com/leviholliday/homebrew-tap ~/src/homebrew-tap`);
+   `homebrew/README.md` has the details.
 2. **winget-pkgs fork.** `gh repo fork microsoft/winget-pkgs --clone=false`
    (makes `leviholliday/winget-pkgs`). On the first PR, accept Microsoft's
    CLA when the bot asks (`@microsoft-github-policy-service agree`).
@@ -94,8 +95,9 @@ After docs/RELEASE-0.4.md steps 1 to 3 (Mac, Windows, Linux files on `v0.4`):
      once the site has it (or `sh linux/install.sh` before).
    - Windows: `powershell -ExecutionPolicy Bypass -File packaging\windows\install.ps1 -SelfTest`,
      then `-DryRun`, then a real install (`windows/README.md`).
-4. **Homebrew:** `packaging/homebrew/bump.sh 0.4 --cask <tap checkout>/Casks/cedarlogic.rb`,
-   `brew style` / `brew audit`, commit, push the tap. Commit the bumped copy here too.
+4. **Homebrew:** `packaging/homebrew/bump.sh 0.4 --tap ~/src/homebrew-tap`
+   (updates the copy here and the tap's), `brew style` / `brew audit
+   leviholliday/tap/cedarlogic`, commit, push the tap. Commit the bumped copy here too.
 5. **winget:** `packaging/winget/bump.sh 0.4`, test on Windows
    (`winget validate`, `winget install --manifest`), then the PR
    (`winget/README.md`). Merging takes from hours to a few days.
@@ -120,7 +122,7 @@ the script's source on GitHub (`packaging/...` on `main`).
 
 > **Install with Homebrew** (recommended if you use Homebrew)
 >
-> `brew install --cask leviholliday/cedarlogic/cedarlogic`
+> `brew install --cask leviholliday/tap/cedarlogic`
 >
 > Homebrew downloads CedarLogic, checks it and puts it in Applications.
 > CedarLogic then keeps itself up to date.
@@ -206,10 +208,13 @@ ones (`/get/linux-x86_64-appimage`, `/get/linux-aarch64-appimage`).
   (`homebrew/README.md`). On Windows, SmartScreen warns about the browser
   download only; winget and `install.ps1` don't trigger it.
 - **Apple silicon only** on Mac (see above).
-- **Publisher.** The Windows installer says `Cedarville University`
-  (`AppPublisher` in `CedarLogic.iss`), so the winget manifest does too; the
-  package id is `LeviHolliday.CedarLogic`. Change both together if you want
-  your name there.
+- **Publisher.** Users see `CedarLogic` (the project) as the publisher
+  everywhere: `AppPublisher` in `CedarLogic.iss`, `CompanyName` in the
+  Windows exe, the winget manifest's `Publisher`/`Author`, the Mac's
+  copyright line and the .deb's `Maintainer` name. The winget package id
+  stays `LeviHolliday.CedarLogic`, because winget ids are tied to the
+  submitting account (`winget/README.md`). Change the .iss and the manifest
+  together, or winget's publisher match breaks.
 - **Where installed apps update from.** The Linux app has the Mac's
   testing groups (Settings > General > Testing group; below): a Normal
   tester's updater follows the versioned releases here, a Beta tester's

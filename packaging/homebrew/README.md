@@ -3,53 +3,52 @@
 What people type:
 
 ```bash
-brew install --cask leviholliday/cedarlogic/cedarlogic
+brew install --cask leviholliday/tap/cedarlogic
 ```
 
-That taps `leviholliday/homebrew-cedarlogic` (GitHub repo) and installs the
-cask `cedarlogic` from it. The cask installs `CedarLogic.app` from the DMG of
-the newest full release in `leviholliday/CedarLogic-Releases`
+That taps `leviholliday/homebrew-tap` (GitHub repo, the owner's tap for all
+his projects, next to `glideball`) and installs the cask `cedarlogic` from
+it. The cask installs `CedarLogic.app` from the DMG of the newest full
+release in `leviholliday/CedarLogic-Releases`
 (`v<version>/CedarLogic-<version>-Mac.dmg`). After that the app updates itself
 (Sparkle), so the cask says `auto_updates true` and `brew upgrade` leaves it
 alone unless asked (`brew upgrade --cask --greedy cedarlogic`).
 
 ## The tap repo
 
-Create **`leviholliday/homebrew-cedarlogic`** (public; Homebrew needs the
-`homebrew-` prefix, and drops it in the command). Layout:
+**`github.com/leviholliday/homebrew-tap`** (public; Homebrew drops the
+`homebrew-` prefix in the command). Its layout:
 
 ```
-homebrew-cedarlogic/
-  README.md            (one line: brew install --cask leviholliday/cedarlogic/cedarlogic)
+homebrew-tap/
+  README.md            (has a CedarLogic section with the install command)
   Casks/
-    cedarlogic.rb      (a copy of packaging/homebrew/Casks/cedarlogic.rb)
+    cedarlogic.rb      (the same file as packaging/homebrew/Casks/cedarlogic.rb)
+    glideball.rb       (another project's cask: leave it alone)
+  Formula/             (CLI tools; nothing of CedarLogic's)
 ```
 
-Nothing else is needed: no CI, no bottles (a cask downloads the release's
-DMG).
-
-**Or skip the new repo:** you already have `leviholliday/homebrew-tap`
-("the central place for all Homebrew packages", with `glideball`). Put
-`Casks/cedarlogic.rb` there instead and the command becomes
-`brew install --cask leviholliday/tap/cedarlogic`. Everything below works the
-same; only the tap path and the command differ. Pick one before the website
-goes up, since the command is printed there.
+`Casks/cedarlogic.rb` there is what users get; the copy here is its source
+and must stay the same file (`bump.sh --tap` keeps them together). No CI and
+no bottles: a cask downloads the release's DMG.
 
 Current Homebrew (7.x on this Mac) only loads third-party taps the user
 trusts (`brew trust`). Installing with the full name
-(`leviholliday/cedarlogic/cedarlogic`) counts as trusting that one cask for
+(`leviholliday/tap/cedarlogic`) counts as trusting that one cask for
 `install`, `reinstall` and `upgrade` (Homebrew's `trust.rb`). Anything else
-done by the short name may ask for `brew trust leviholliday/cedarlogic` first.
+done by the short name (`brew info`, `brew audit`) may ask for
+`brew trust --cask leviholliday/tap/cedarlogic` first.
 
 ## Bumping it for a release
 
 After the release's DMG is on GitHub (and the release isn't a pre-release):
 
 ```bash
-# in this repo, to check it and update the copy here:
-packaging/homebrew/bump.sh 0.4                  # or no version: the newest full release with a DMG
-# or straight in the tap's checkout:
-packaging/homebrew/bump.sh 0.4 --cask ~/src/homebrew-cedarlogic/Casks/cedarlogic.rb
+git clone https://github.com/leviholliday/homebrew-tap ~/src/homebrew-tap   # once
+git -C ~/src/homebrew-tap pull                                             # each time, before bumping
+# in this repo: check the release, update the copy here and the tap's copy:
+packaging/homebrew/bump.sh 0.4 --tap ~/src/homebrew-tap   # or no version: the newest full release with a DMG
+# (or export CEDARLOGIC_TAP=~/src/homebrew-tap once and leave out --tap)
 ```
 
 `bump.sh` finds release `v0.4` and its `CedarLogic-0.4-Mac.dmg`, downloads it,
@@ -57,18 +56,30 @@ compares its sha256 with the digest GitHub keeps for the file, opens the DMG
 read-only to check it holds `CedarLogic.app` with version 0.4 and bundle id
 `com.leviholliday.cedarlogic.native` (and warns if the CPUs it runs on don't
 match the cask's `depends_on arch`), then rewrites the cask's `version` and
-`sha256` lines. `--dry-run` checks everything and changes nothing. It never
-commits or pushes.
+`sha256` lines, here and (with `--tap`) in the tap's `Casks/cedarlogic.rb`.
+It refuses if the tap's copy has uncommitted changes or differs from this one
+in anything but `version`/`sha256`. `--dry-run` checks everything and changes
+nothing. Without `--tap` it updates only the copy here. It never commits or
+pushes.
 
 Then check the cask and publish the tap:
 
 ```bash
-cd ~/src/homebrew-cedarlogic
+cd ~/src/homebrew-tap
 brew style Casks/cedarlogic.rb
-brew audit --cask --online --strict leviholliday/cedarlogic/cedarlogic   # with the tap installed locally
-brew livecheck --cask leviholliday/cedarlogic/cedarlogic                 # says "<version> ==> <version>"
-git commit -am "cedarlogic <version>" && git push
+brew audit --cask --online --strict leviholliday/tap/cedarlogic   # needs the tap installed (brew tap leviholliday/tap)
+brew livecheck --cask leviholliday/tap/cedarlogic                 # says "<version> ==> <version>"
+git commit -m "CedarLogic <version>" Casks/cedarlogic.rb && git push
 ```
+
+`brew audit` and `brew livecheck` read the installed tap
+(`$(brew --repository)/Library/Taps/leviholliday/homebrew-tap`), not
+`~/src/homebrew-tap`. Either check after pushing, with
+`git -C "$(brew --repository)/Library/Taps/leviholliday/homebrew-tap" pull` first,
+or check before pushing with a temporary tap of the checkout:
+`brew tap cltest/tap ~/src/homebrew-tap`, `brew trust --cask cltest/tap/cedarlogic`,
+audit `cltest/tap/cedarlogic`, then `brew untap cltest/tap`.
+Commit the bumped copy here too.
 
 Someone who already has it gets the new version from the app itself; `brew`
 only matters for new installs, so a day's delay in bumping the tap breaks
@@ -139,3 +150,17 @@ checksum error until the tap is pushed.
 - `brew livecheck`: `0.3.4 ==> 0.3.4`.
 - `brew install --cask --appdir=<scratch>`: installs, shows the caveats; the
   app is quarantined and ad hoc signed, as expected. `brew uninstall`: removes it.
+
+## Published to the tap (2026-10-31)
+
+- `Casks/cedarlogic.rb` (0.3.4) and a CedarLogic section in the README pushed
+  to `leviholliday/homebrew-tap` `main` (commit `9615d0a`); `glideball.rb`
+  untouched.
+- From the installed tap: `brew audit --cask --online --strict
+  leviholliday/tap/cedarlogic` passes, `brew style` finds no offenses in
+  either cask, `brew livecheck` says `0.3.4 ==> 0.3.4`.
+- `brew install --cask --appdir=<scratch>` from a temporary tap of the
+  checkout: installs 0.3.4 (`com.leviholliday.cedarlogic.native`,
+  quarantined), shows the caveats; `brew uninstall` removes it.
+- `bump.sh --tap <checkout>` against v0.3.4: both copies unchanged (already
+  current); refuses a tap copy with uncommitted changes or other differences.

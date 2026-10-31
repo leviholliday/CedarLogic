@@ -22,7 +22,7 @@ ProductCode: '{59AB891F-9536-471C-BAE2-13C34308A7C3}_is1'
 ReleaseDate: 2026-11-01
 AppsAndFeaturesEntries:
 - DisplayName: CedarLogic
-  Publisher: Cedarville University
+  Publisher: CedarLogic
   DisplayVersion: 0.4.0
   ProductCode: '{59AB891F-9536-471C-BAE2-13C34308A7C3}_is1'
 Installers:
