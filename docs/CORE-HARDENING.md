@@ -7,7 +7,7 @@ is pasted, and whatever a student does. It follows on from
 `docs/V4-CORE-DIAGNOSIS.md` (rounds 1 to 5), which explains the edit fuzzer.
 
 In short: three new kinds of check (a file fuzzer, a self-check of the circuit,
-and a set of regression cases) and much longer fuzz runs found 39 bugs. All are
+and a set of regression cases) and much longer fuzz runs found 40 bugs. All are
 fixed; nearly all have a case in `core_check` or the clipboard tests, and the
 rest (a few that need a long session's history to happen) are covered by the
 fuzz runs. Everything runs in CI on every push, including ThreadSanitizer on the
@@ -108,6 +108,7 @@ the numbers section.
 | 28 | A pasted wire left stretched and broken | A wire on a pasted part locked in place isn't carried by the paste's move | Redrawn from its pins, in the paste's undo step |
 | 36 | A click on a pin where two pins are close picks one or the other, differently each time the app runs | The pin was the first hit in a set ordered by memory address | The nearest pin (ties: by name) (`guiGate::checkHotspots`) |
 | 37 | Dragging a wire at a corner drags one run or the other, differently each run | Same: the first segment hit, by address | The nearest segment (ties: the lowest id) (`guiWire::startSegDrag`) |
+| 40 | Redo of Straighten Wires (or Tidy Up, or a Build) on several wires gives a wire slightly different from the step itself (an end at -28.4989 against -28.5) | The router's shape was left on screen, but Redo puts the recorded shape through `setSegmentMap`, which tidies it (merges runs, trims ends); a step of several wires keeps what's on screen on its first Do | Each rerouted wire goes through `setSegmentMap` as the step is made (`rerouteWires`), so the step and its Redo agree (fuzz_edit wide seed 21) |
 | 38 | App stops responding for minutes on Connect while moving, or Connect Nearby, with a few thousand parts | Every free pin of the moving parts against every free pin on the page, each looked up by name | The page's free pins placed once in a grid; each moving pin looks only at the cells near it. Same result, in the same order (checked against the old search at every call in 79 fuzz sessions) |
 
 ### Simulation
@@ -163,6 +164,8 @@ ctest --test-dir build/headless --output-on-failure
   checks, simulates, draws, copies, pastes a damaged copy of the clipboard,
   undoes, saves, reopens and saves again. `fuzz_load gatedefs 0 0 0 file.cdl`
   reruns one kept file.
+- **`fuzz-determinism.sh`**: 40 fuzz_edit sessions run four times each must
+  save the same circuit (in CI, about 90 s under ASan).
 - **`fuzz-sweep.py`**: runs either fuzzer over many seeds in parallel with a
   time cap, keeps the output of any seed that fails:
 
@@ -192,7 +195,7 @@ UNDOSTEP REOPEN=25 UNDOALL=50`). "Unfinished" is a seed past its time cap.
 | fuzz_edit basic, new circuit | 300 x 2000: 296 passed, 4 unfinished | (not rerun; the 4 pass without sanitizers in 9 to 15 min) |
 | fuzz_edit basic, fixtures | 150 x 2000: 148 passed, 2 unfinished | (not rerun) |
 | fuzz_edit wide, new circuit | 200 x 300: 198 passed, 2 unfinished | 200 x 300: 198 passed, 2 unfinished (74, 183) |
-| fuzz_edit wide, fixtures | 1000 ops: seed 21 failed, cut short | seeds 1-55 x 500: 43 passed, **1 failed (21)**, 11 unfinished |
+| fuzz_edit wide, fixtures | 1000 ops: seed 21 failed, cut short | seeds 1-55 x 500: 43 passed, 1 failed (21, then fixed: bug 40), 11 unfinished; after the fix seed 21 passes at 500 and 1000 ops, seeds 1-10 pass |
 | thread_check under TSan | (didn't exist) | 474 jobs on 6 threads, 31 cancelled mid-run: clean |
 | sync self-test under TSan | (not run) | 265 of 265, clean |
 | Same session run 5 times | sessions 16 and 38 differed run to run | 60 wide sessions: identical every time |
@@ -206,17 +209,20 @@ Known limits.
 
 ## Still open
 
-- **fuzz_edit wide seed 21** (fixtures, 500 operations; reproducible now the
-  engine is deterministic): after op 292, Redo of Straighten Wires gives a
-  wire end at -28.4989 where the step itself left -28.5 (a pin of a rotated
-  part, a ten-thousandth off). Probably a route or a redo path that doesn't
-  take its ends in to `savedPrecision`. Rerun:
-  `CL_FUZZ_CHECK=1 CL_FUZZ_BOTH=1 CL_FUZZ_REACH=1 CL_FUZZ_INVARIANT=1 CL_FUZZ_DUP=1 CL_FUZZ_TREE=1 CL_FUZZ_NOSIM=1 CL_FUZZ_WIDE=1 CL_FUZZ_SIM=1 CL_FUZZ_UNDOSTEP=1 CL_FUZZ_REOPEN=25 CL_FUZZ_UNDOALL=50 build/headless/fuzz_edit res/cl_gatedefs.xml 21 1 500 format/tests/fixtures/{Lab5,Broadcast,lab6,jmSGTZM,web-online2}.cdl "format/tests/fixtures/Routing Backwards.cdl"`
-- Bug 28 (a paste's stretched wire on a locked part) has no `core_check`
-  case: a hand-made paste with a locked part didn't break the wire on the
-  engine before the fix, so only the fuzz runs cover it.
-- No check in CI yet that a fuzz session gives the same circuit twice (the
-  determinism above was measured by hand).
+- **Bug 28 has no `core_check` case, and may not be reachable.** The fix (a
+  pasted wire whose shape the paste's move broke is routed fresh, in
+  `cl_edit_paste`) is a safety net that stays. But no sequence found leaves a
+  pasted part locked, which is what its description assumes: a pasted copy
+  always comes unlocked (`withoutLocks` in `klsClipboard.cpp`, since the lock
+  feature itself), the paste selects only what it pasted, and a move takes
+  only selected, unlocked parts. Tried, on the engine before the fix and
+  after: pastes of copies with a locked part at each end of a wire and a wire
+  holding two pins of one part (18 cases), 27 locked parts with awkward
+  settings copied and pasted, 14 damaged LOCKED lines in two orders, locking
+  a floating paste mid-move, and 300 fuzz sessions with a print in the safety
+  net: nothing broke, nothing stayed locked, the net never fired. The seed and
+  operation that found it weren't recorded, so the exact sequence can't be
+  replayed. If the net ever fires, the fuzzers' consistency check will say so.
 
 ## Known limits (left as they are)
 
