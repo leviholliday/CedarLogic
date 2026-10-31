@@ -1,13 +1,31 @@
-// Updates for the test build, the way the Linux app's AppImage updates:
+// Updates, the way the Linux app's AppImage updates, from one of two places
+// (Settings > General > Testing group, as the Mac's):
 //
-//   1. ask GitHub for the commit the "windows-native-testing" tag points at
+//   beta testers    the rolling test build, the "windows-native-testing"
+//                   pre-release in leviholliday/CedarLogic (as before there
+//                   was a choice)
+//   normal testers  the newest versioned release (v0.4, v0.4.1...) in
+//                   leviholliday/CedarLogic-Releases, the repo the Mac's
+//                   releases are in, that has this CPU's zip
+//                   (CedarLogic-<version>-Windows-<x64|ARM64>.zip). Drafts and
+//                   pre-releases (the Mac betas) are passed over.
+//
+// Either way, the same steps:
+//
+//   1. ask GitHub for the commit the release's tag points at
 //   2. compare it with CL_GIT_COMMIT, baked in at build time
 //   3. different -> fetch the release's SHA256SUMS and SHA256SUMS.sig and
 //      check them (update-signing/UpdateSignature.h): signed with the preview
 //      key built in here, for this tag and the tag's commit, a build newer
 //      than this one (CL_BUILD_TIME), with this CPU's zip in it. Anything
 //      less: no update is offered, and why goes to update.log in the
-//      settings folder
+//      settings folder. A versioned release's SHA256SUMS is
+//      packaging/sign-release.sh's: the same format and key, the release's
+//      own tag and the Releases repo's commit for it, and as its build the
+//      build time of the Windows files in it (their commit's, as the test
+//      build's), so a normal release older than the test build someone has
+//      is never "newer": switching from beta to normal stays put until a
+//      normal release passes it
 //   4. verified -> ask; yes -> download that zip, check its size and SHA-256
 //      against the manifest before anything else touches it, and unpack it
 //      (with the tar that comes with Windows 10 and 11)
@@ -56,6 +74,7 @@ namespace {
 
 const char* kOwnerRepo = "leviholliday/CedarLogic";
 const char* kTag = "windows-native-testing";
+const char* kReleasesRepo = "leviholliday/CedarLogic-Releases";
 
 #if defined(_M_ARM64) || defined(__aarch64__)
 const char* kArch = "ARM64";
@@ -214,11 +233,27 @@ bool verifyFile(const std::string& path, const updatesig::File& expected, std::s
 	return updatesig::checkDownload(expected, size, hex, why);
 }
 
-// This CPU's zip among the manifest's names.
-bool isOurs(const std::string& name) { return name == std::string("CedarLogic-Windows-native-") + kArch + ".zip"; }
+// ---- Where updates come from ------------------------------------------------------
 
-std::string releaseFileUrl(const std::string& name) {
-	return strf("https://github.com/%s/releases/download/%s/%s", kOwnerRepo, kTag, name.c_str());
+// GitHub, or for --channel-check a stand-in on this computer (the same paths).
+struct Source {
+	std::string api = "https://api.github.com";
+	std::string web = "https://github.com";
+	const unsigned char* key = updatesig::kPublicKey;
+};
+
+// A release to update from, and the file in it this copy takes.
+struct Target {
+	std::string repo, tag;
+	std::string version;     // a versioned release's ("0.4.1"); "" for the test build
+	std::string assetName;   // this CPU's zip
+};
+
+std::string betaAsset() { return std::string("CedarLogic-Windows-native-") + kArch + ".zip"; }
+Target betaTarget() { return { kOwnerRepo, kTag, "", betaAsset() }; }
+
+std::string releaseFileUrl(const Source& src, const Target& t, const std::string& name) {
+	return src.web + "/" + t.repo + "/releases/download/" + t.tag + "/" + name;
 }
 
 struct Asset {
@@ -229,49 +264,298 @@ struct Asset {
 // The release's manifest and signature through `get` (the release's
 // download URLs, or a folder in the self-test), and the decision on them.
 updatesig::Decision findVerified(const std::function<bool(const std::string& name, std::string& out)>& get, const unsigned char key[32],
-                                 const std::string& releaseCommit, const std::string& runningCommit, long long runningBuild, Asset* out) {
+                                 const std::string& tag, const std::string& assetName, const std::string& releaseCommit,
+                                 const std::string& runningCommit, long long runningBuild) {
 	std::string manifest, signature;
 	bool haveManifest = false, haveSignature = false;
 	if (releaseCommit != runningCommit) {
 		haveManifest = get(updatesig::kManifestName, manifest);
 		haveSignature = haveManifest && get(updatesig::kSignatureName, signature);
 	}
-	const updatesig::Decision d = updatesig::decide(haveManifest, manifest, haveSignature, signature, key, kTag, releaseCommit, runningCommit,
-	                                                runningBuild, isOurs);
-	if (out && d.result == updatesig::Result::Offer) {
-		out->url = releaseFileUrl(d.file.name);
-		out->file = d.file;
-	}
-	return d;
+	return updatesig::decide(haveManifest, manifest, haveSignature, signature, key, tag, releaseCommit, runningCommit, runningBuild,
+	                         [&assetName](const std::string& name) { return name == assetName; });
 }
 
-bool fetchReleaseFile(const std::string& name, std::string& out) {
-	if (!updatesig::safeName(name)) return false;
-	out.clear();
-	return httpGet(releaseFileUrl(name), &out, "", 64 * 1024) && !out.empty();
+// ---- GitHub's list of releases -------------------------------------------------------
+// A small JSON reader, enough for the releases list (nested objects, arrays,
+// escapes); anything it can't read is no list at all.
+
+struct Json {
+	enum Kind { Null, Bool, Number, String, Array, Object } kind = Null;
+	bool boolean = false;
+	std::string text;
+	std::vector<Json> items;
+	std::vector<std::pair<std::string, Json>> fields;
+	const Json* get(const char* key) const {
+		for (const auto& f : fields)
+			if (f.first == key) return &f.second;
+		return nullptr;
+	}
+	bool isTrue(const char* key) const {
+		const Json* v = get(key);
+		return v && v->kind == Bool && v->boolean;
+	}
+	std::string str(const char* key) const {
+		const Json* v = get(key);
+		return v && v->kind == String ? v->text : std::string();
+	}
+};
+
+struct JsonReader {
+	const std::string& t;
+	size_t i = 0;
+	int depth = 0;
+	void space() {
+		while (i < t.size() && (t[i] == ' ' || t[i] == '\t' || t[i] == '\n' || t[i] == '\r')) i++;
+	}
+	bool word(const char* w) {
+		const size_t n = strlen(w);
+		if (t.compare(i, n, w) != 0) return false;
+		i += n;
+		return true;
+	}
+	static void utf8(std::string& out, unsigned cp) {
+		if (cp < 0x80) out += (char)cp;
+		else if (cp < 0x800) {
+			out += (char)(0xC0 | (cp >> 6));
+			out += (char)(0x80 | (cp & 0x3F));
+		} else {
+			out += (char)(0xE0 | (cp >> 12));
+			out += (char)(0x80 | ((cp >> 6) & 0x3F));
+			out += (char)(0x80 | (cp & 0x3F));
+		}
+	}
+	bool string(std::string& out) {
+		if (i >= t.size() || t[i] != '"') return false;
+		i++;
+		while (i < t.size()) {
+			const char c = t[i++];
+			if (c == '"') return true;
+			if ((unsigned char)c < 0x20) return false;
+			if (c != '\\') {
+				out += c;
+				continue;
+			}
+			if (i >= t.size()) return false;
+			const char e = t[i++];
+			switch (e) {
+			case '"': case '\\': case '/': out += e; break;
+			case 'b': out += '\b'; break;
+			case 'f': out += '\f'; break;
+			case 'n': out += '\n'; break;
+			case 'r': out += '\r'; break;
+			case 't': out += '\t'; break;
+			case 'u': {
+				if (i + 4 > t.size()) return false;
+				unsigned cp = 0;
+				for (int k = 0; k < 4; k++) {
+					const char h = t[i++];
+					cp <<= 4;
+					if (h >= '0' && h <= '9') cp |= (unsigned)(h - '0');
+					else if (h >= 'a' && h <= 'f') cp |= (unsigned)(h - 'a' + 10);
+					else if (h >= 'A' && h <= 'F') cp |= (unsigned)(h - 'A' + 10);
+					else return false;
+				}
+				utf8(out, cp);   // (a surrogate half stays as it is: the names read here are plain)
+				break;
+			}
+			default: return false;
+			}
+		}
+		return false;
+	}
+	bool value(Json& v) {
+		space();
+		if (i >= t.size() || depth >= 64) return false;
+		depth++;
+		bool ok = true;
+		const char c = t[i];
+		if (c == '{' || c == '[') {
+			const bool object = c == '{';
+			const char close = object ? '}' : ']';
+			v.kind = object ? Json::Object : Json::Array;
+			i++;
+			space();
+			if (i < t.size() && t[i] == close) i++;
+			else
+				for (;;) {
+					space();
+					std::string key;
+					Json item;
+					if (object) {
+						if (!string(key)) { ok = false; break; }
+						space();
+						if (i >= t.size() || t[i] != ':') { ok = false; break; }
+						i++;
+					}
+					if (!value(item)) { ok = false; break; }
+					if (object) v.fields.emplace_back(std::move(key), std::move(item));
+					else v.items.push_back(std::move(item));
+					space();
+					if (i < t.size() && t[i] == ',') { i++; continue; }
+					if (i < t.size() && t[i] == close) { i++; break; }
+					ok = false;
+					break;
+				}
+		} else if (c == '"') {
+			v.kind = Json::String;
+			ok = string(v.text);
+		} else if (word("true")) {
+			v.kind = Json::Bool;
+			v.boolean = true;
+		} else if (word("false")) v.kind = Json::Bool;
+		else if (word("null")) v.kind = Json::Null;
+		else if (c == '-' || (c >= '0' && c <= '9')) {
+			v.kind = Json::Number;
+			while (i < t.size() && (isdigit((unsigned char)t[i]) || t[i] == '-' || t[i] == '+' || t[i] == '.' || t[i] == 'e' || t[i] == 'E'))
+				v.text += t[i++];
+		} else ok = false;
+		depth--;
+		return ok;
+	}
+};
+
+bool parseJson(const std::string& text, Json& out) {
+	JsonReader r{ text };
+	if (!r.value(out)) return false;
+	r.space();
+	return r.i == text.size();
+}
+
+// "v0.4.1" -> {0, 4, 1}: a versioned release's tag ("v" and one to four
+// numbers); anything else isn't one.
+bool versionOf(const std::string& tag, std::vector<long>& parts) {
+	parts.clear();
+	if (tag.size() < 2 || tag.size() > 40 || tag[0] != 'v') return false;
+	size_t i = 1;
+	for (;;) {
+		size_t j = i;
+		while (j < tag.size() && isdigit((unsigned char)tag[j])) j++;
+		if (j == i || j - i > 6 || parts.size() >= 4) return false;
+		parts.push_back(atol(tag.substr(i, j - i).c_str()));
+		if (j == tag.size()) return true;
+		if (tag[j] != '.') return false;
+		i = j + 1;
+	}
+}
+
+// 0.4 and 0.4.0 are the same version.
+int compareVersions(std::vector<long> a, std::vector<long> b) {
+	while (a.size() < b.size()) a.push_back(0);
+	while (b.size() < a.size()) b.push_back(0);
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// The name docs/RELEASE-0.4.md's step 2 gives the test build's zip on a
+// versioned release.
+std::string normalAsset(const std::string& version) { return "CedarLogic-" + version + "-Windows-" + kArch + ".zip"; }
+
+enum class Pick { Found, None, Unreadable };
+
+// The newest full release (not a draft, not a pre-release) with a versioned
+// tag and this CPU's zip, from GitHub's list of the Releases repo's releases.
+Pick pickNormal(const std::string& json, Target& out) {
+	Json list;
+	if (!parseJson(json, list) || list.kind != Json::Array) return Pick::Unreadable;
+	std::vector<long> best, parts;
+	bool found = false;
+	for (const Json& r : list.items) {
+		if (r.kind != Json::Object) continue;
+		const Json* draft = r.get("draft");
+		const Json* pre = r.get("prerelease");
+		// Only one that says it's neither.
+		if (!draft || draft->kind != Json::Bool || draft->boolean || !pre || pre->kind != Json::Bool || pre->boolean) continue;
+		const std::string tag = r.str("tag_name");
+		if (!versionOf(tag, parts)) continue;
+		const std::string asset = normalAsset(tag.substr(1));
+		bool has = false;
+		if (const Json* assets = r.get("assets"))
+			for (const Json& a : assets->items) has = has || (a.kind == Json::Object && a.str("name") == asset);
+		if (!has) continue;
+		if (!found || compareVersions(parts, best) > 0) {
+			best = parts;
+			out = { kReleasesRepo, tag, tag.substr(1), asset };
+			found = true;
+		}
+	}
+	return found ? Pick::Found : Pick::None;
+}
+
+// ---- One check ---------------------------------------------------------------------
+
+struct Found {
+	bool asked = false;       // GitHub answered (else: no connection)
+	bool noRelease = false;   // normal: no versioned release for Windows yet
+	Target target;
+	std::string commit;       // the commit the release's tag is on
+	updatesig::Decision decision;
+	Asset asset;              // Offer: what to download
+	std::string why;          // for the log
+};
+
+// What there is for this testing group, checked: the code a real check and
+// --channel-check both run.
+Found lookFor(const Source& src, bool beta, const std::string& runningCommit, long long runningBuild) {
+	Found f;
+	std::string body;
+	if (beta) f.target = betaTarget();
+	else {
+		if (!httpGet(src.api + "/repos/" + kReleasesRepo + "/releases?per_page=100", &body, "", 16u << 20)) {
+			f.why = "couldn't list the releases";
+			return f;
+		}
+		const Pick pick = pickNormal(body, f.target);
+		if (pick == Pick::Unreadable) {
+			f.why = "the list of releases couldn't be read";
+			return f;
+		}
+		if (pick == Pick::None) {
+			f.asked = true;
+			f.noRelease = true;
+			f.decision.result = updatesig::Result::UpToDate;
+			f.why = "no versioned release has a Windows zip for " + std::string(kArch) + " yet";
+			return f;
+		}
+	}
+	body.clear();
+	if (httpGet(src.api + "/repos/" + f.target.repo + "/commits/" + f.target.tag, &body, "", 4u << 20))
+		jsonString(body, "sha", f.commit);   // the first "sha" is the commit's own
+	if (f.commit.empty()) {
+		f.why = "couldn't read the commit of " + f.target.tag;
+		return f;
+	}
+	f.asked = true;
+	const Target t = f.target;
+	auto get = [&src, &t](const std::string& name, std::string& out) {
+		if (!updatesig::safeName(name)) return false;
+		out.clear();
+		return httpGet(releaseFileUrl(src, t, name), &out, "", 64 * 1024) && !out.empty();
+	};
+	f.decision = findVerified(get, src.key, t.tag, t.assetName, f.commit, runningCommit, runningBuild);
+	if (f.decision.result == updatesig::Result::Offer) {
+		f.asset.url = releaseFileUrl(src, t, f.decision.file.name);
+		f.asset.file = f.decision.file;
+	}
+	f.why = t.tag + ": " + f.decision.why;
+	return f;
 }
 
 struct Check {
 	std::thread worker;
 	std::atomic<bool> done{ false };
 	bool interactive = false;
+	bool beta = false;   // the testing group it looked for
 	HWND parent = nullptr;
-	std::string commit;   // "" when GitHub couldn't be asked
-	updatesig::Decision decision;
-	Asset asset;
+	Found found;
 };
 
 std::unique_ptr<Check> g_check;
 std::string g_offered;   // a background check offers each build once
+std::string g_status;    // how the last check went, for Settings
 
 void runCheck(Check* c) {
-	std::string body;
-	if (httpGet(strf("https://api.github.com/repos/%s/commits/%s", kOwnerRepo, kTag), &body, "", 4u << 20))
-		jsonString(body, "sha", c->commit);   // the first "sha" is the commit's own
-	if (!c->commit.empty()) {
-		c->decision = findVerified(fetchReleaseFile, updatesig::kPublicKey, c->commit, CL_GIT_COMMIT, (long long)CL_BUILD_TIME, &c->asset);
-		logUpdate(c->decision.why);
-	}
+	c->found = lookFor(Source(), c->beta, CL_GIT_COMMIT, (long long)CL_BUILD_TIME);
+	logUpdate(std::string(c->beta ? "beta: " : "normal: ") + c->found.why);
 	c->done.store(true);
 }
 
@@ -522,20 +806,74 @@ HWND answerParent(const Check* c) {
 	return circuitWindows().empty() ? nullptr : circuitWindows().front()->window();
 }
 
+void begin(HWND parent, bool interactive);
+
+// Said once to a copy that came from the test builds (Prefs::loadFrom).
+const char* kNotice = "This copy came from the test builds, so it's a beta tester and goes on getting them. Choose Normal tester to get "
+                      "only versions that are settled.";
+
+std::string shortCommit(const std::string& c) { return c.substr(0, 7); }
+
+// How a check went, in a sentence (Settings shows the last one).
+std::string statusOf(const Found& f, bool beta) {
+	const std::string group = beta ? "Beta tester" : "Normal tester";
+	if (!f.asked) return "Last check: couldn't reach GitHub.";
+	if (f.noRelease) return "Last check: there's no normal release for Windows yet. Beta testers get the test builds now.";
+	const std::string what = beta ? "test build " + shortCommit(f.commit) : "CedarLogic " + f.target.version;
+	switch (f.decision.result) {
+	case updatesig::Result::Offer: return "Last check (" + group + "): " + what + " is ready to install.";
+	case updatesig::Result::UpToDate:
+		if (!beta && f.decision.manifest.build > 0 && f.decision.manifest.build < (long long)CL_BUILD_TIME)
+			return "Last check (" + group + "): this copy is newer than " + what + ", the newest normal release. It updates once a newer one is out.";
+		return "Last check (" + group + "): up to date.";
+	default: return "Last check (" + group + "): " + what + " isn't signed yet, so it isn't offered.";
+	}
+}
+
 void finish(HWND parent) {
 	Check* c = g_check.get();
 	const bool interactive = c->interactive;
-	const std::string commit = c->commit;
-	const Asset asset = c->asset;
-	const updatesig::Result result = c->decision.result;
+	const bool beta = c->beta;
+	const Found found = c->found;
+	const HWND asker = c->parent;
 	g_check->worker.join();
 	g_check.reset();
-	if (commit.empty()) {
+	// The testing group changed while it looked: look again, for the new one.
+	if (beta != prefs().betaTester) {
+		begin(interactive ? asker : nullptr, interactive);
+		return;
+	}
+	g_status = statusOf(found, beta);
+	// A copy from the test builds, made a beta tester: said once, here too
+	// (and in Settings > General, and update.log).
+	if (prefs().testingGroupNotice) {
+		noticeSeen();
+		for (CircuitWindow* w : circuitWindows()) {
+			w->note("Updates: you're a beta tester, as before (Settings > General)");
+			break;
+		}
+	}
+	const Asset asset = found.asset;
+	const updatesig::Result result = found.decision.result;
+	if (!found.asked) {
 		if (interactive) showMessage(parent, Tone::Warning, "Couldn't check for updates", "Check your connection and try again.");
 		return;
 	}
+	if (found.noRelease) {
+		if (interactive)
+			showMessage(parent, Tone::Info, "No normal release for Windows yet",
+			            "Normal testers get new versions once they're settled, and there isn't one for Windows yet. Beta testers get the "
+			            "test builds now: choose Beta tester in Settings > General to get them.");
+		return;
+	}
 	if (result == updatesig::Result::UpToDate) {
-		if (interactive) showMessage(parent, Tone::Info, "CedarLogic is up to date", "You have the newest version.");
+		if (interactive) {
+			if (!beta && found.decision.manifest.build > 0 && found.decision.manifest.build < (long long)CL_BUILD_TIME)
+				showMessage(parent, Tone::Info, "CedarLogic is up to date",
+				            "This copy is newer than CedarLogic " + found.target.version +
+				                ", the newest normal release, so it stays as it is until a newer one is out.");
+			else showMessage(parent, Tone::Info, "CedarLogic is up to date", "You have the newest version.");
+		}
 		return;
 	}
 	// A new build that isn't signed yet, or one that doesn't verify
@@ -543,16 +881,19 @@ void finish(HWND parent) {
 	if (result != updatesig::Result::Offer || asset.url.empty()) {
 		if (interactive)
 			showMessage(parent, Tone::Info, "No verified update yet",
-			            "There's a newer test build, but it hasn't been signed yet, so CedarLogic won't install it. Try again later.");
+			            beta ? "There's a newer test build, but it hasn't been signed yet, so CedarLogic won't install it. Try again later."
+			                 : "There's a newer version, but it hasn't been signed yet, so CedarLogic won't install it. Try again later.");
 		return;
 	}
-	if (!interactive && g_offered == commit) return;
-	g_offered = commit;
-	if (askConfirm(parent, "A new version of CedarLogic is ready",
-	               strf("Build %s is out (you have %s). Download and install it now?", commit.substr(0, 7).c_str(),
-	                    std::string(CL_GIT_COMMIT).substr(0, 7).c_str()),
-	               "Install", "Not Now"))
-		install(parent, asset);
+	const std::string offer = found.target.tag + " " + found.commit;
+	if (!interactive && g_offered == offer) return;
+	g_offered = offer;
+	const std::string text =
+	    beta ? strf("Build %s is out (you have %s). Download and install it now?", shortCommit(found.commit).c_str(),
+	                shortCommit(CL_GIT_COMMIT).c_str())
+	         : strf("CedarLogic %s is out (you have build %s). Download and install it now?", found.target.version.c_str(),
+	                shortCommit(CL_GIT_COMMIT).c_str());
+	if (askConfirm(parent, "A new version of CedarLogic is ready", text, "Install", "Not Now")) install(parent, asset);
 }
 
 void CALLBACK pollTimer(HWND, UINT, UINT_PTR id, DWORD) {
@@ -581,6 +922,7 @@ void begin(HWND parent, bool interactive) {
 	g_check.reset(new Check());
 	g_check->interactive = interactive;
 	g_check->parent = parent;
+	g_check->beta = prefs().betaTester;   // (read here: the worker doesn't touch prefs)
 	Check* c = g_check.get();
 	c->worker = std::thread([c] { runCheck(c); });
 	SetTimer(nullptr, 0, 200, pollTimer);
@@ -624,7 +966,7 @@ bool writeWhole(const std::string& path, const std::string& bytes) {
 updatesig::SelfTestHooks selfTestHooks() {
 	updatesig::SelfTestHooks h;
 	h.tag = kTag;
-	h.assetName = std::string("CedarLogic-Windows-native-") + kArch + ".zip";
+	h.assetName = betaAsset();
 	h.makeDir = [](const std::string& d) { return CreateDirectoryW(W(d).c_str(), nullptr) != 0; };
 	h.writeFile = writeWhole;
 	h.sha256Hex = sha256Bytes;
@@ -632,11 +974,314 @@ updatesig::SelfTestHooks selfTestHooks() {
 	h.find = [](const std::string& dir, const unsigned char key[32], const std::string& releaseCommit, const std::string& runningCommit,
 	            long long runningBuild) {
 		auto fromDir = [&dir](const std::string& name, std::string& out) { return readWhole(joinPath(dir, name), out); };
-		return findVerified(fromDir, key, releaseCommit, runningCommit, runningBuild, nullptr);
+		return findVerified(fromDir, key, kTag, betaAsset(), releaseCommit, runningCommit, runningBuild);
 	};
 	h.verifyFile = verifyFile;
 	return h;
 }
+
+// ---- --channel-check ---------------------------------------------------------------
+// The testing groups against a stand-in for GitHub (windows/Tools/
+// update-channel-server.py serves a folder at GitHub's paths): this writes
+// fake releases into that folder, signed with a key made for the test, and
+// puts each case through lookFor(), the code a real check runs, over HTTP.
+
+const unsigned char kTestSeed[32] = { 7, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3, 2, 3, 8, 4, 6, 2, 6, 4, 3, 3, 8, 3, 2, 7, 9, 5 };
+const unsigned char kOtherSeed[32] = { 9, 9, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1 };
+
+struct FakeRelease {
+	std::string repo, tag;
+	bool prerelease = false, draft = false;
+	bool windows = true;   // has the Windows zips (else only a Mac file)
+	long long build = 0;   // the signed manifest's build; 0: not signed
+	enum Signing { Good, OtherKey, Edited, OtherTag } signing = Good;
+};
+
+FakeRelease normalRelease(const std::string& tag, long long build) { return { kReleasesRepo, tag, false, false, true, build }; }
+FakeRelease testRelease(long long build) { return { kOwnerRepo, kTag, true, false, true, build }; }
+
+bool makeDirs(const std::string& path) {
+	for (size_t at = path.find('\\', 3); ; at = path.find('\\', at + 1)) {
+		CreateDirectoryW(W(path.substr(0, at)).c_str(), nullptr);
+		if (at == std::string::npos) break;
+	}
+	return GetFileAttributesW(W(path).c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+std::string jsonQuote(const std::string& s) {
+	std::string out = "\"";
+	for (char c : s) {
+		if (c == '"' || c == '\\') out += '\\';
+		out += c;
+	}
+	return out + "\"";
+}
+
+struct Fixture {
+	std::string root;
+	bool ok = true;
+	unsigned char publicKey[32] = {};
+	void put(const std::string& rel, const std::string& bytes) {
+		std::string path = root;
+		for (char c : "\\" + rel) path += c == '/' ? '\\' : c;
+		ok = makeDirs(dirName(path)) && writeWhole(path, bytes) && ok;
+	}
+	static std::string commitOf(const FakeRelease& r) {
+		// A commit per release, as GitHub would say (40 hex digits).
+		const std::string h = sha256Bytes(r.repo + " " + r.tag + " " + std::to_string(r.build));
+		return h.substr(0, 40);
+	}
+	static std::vector<std::string> names(const FakeRelease& r) {
+		std::vector<std::string> n;
+		if (r.repo == kOwnerRepo)
+			n = { "CedarLogic-Windows-Setup-ARM64.exe", "CedarLogic-Windows-Setup-x64.exe", "CedarLogic-Windows-native-ARM64.zip",
+			      "CedarLogic-Windows-native-x64.zip" };
+		else {
+			const std::string v = r.tag.substr(1);
+			n.push_back("CedarLogic-" + v + "-Mac.dmg");
+			if (r.windows) {
+				n.push_back("CedarLogic-" + v + "-Windows-ARM64.zip");
+				n.push_back("CedarLogic-" + v + "-Windows-x64.zip");
+				n.push_back("CedarLogic-" + v + "-Windows-Setup-x64.exe");
+			}
+		}
+		return n;
+	}
+	static std::string bytesOf(const FakeRelease& r, const std::string& name) { return "fake " + name + " of " + r.tag + "\n"; }
+
+	// Everything GitHub would serve for these releases, in place of what was there.
+	void write(const std::vector<FakeRelease>& releases, const std::string& listOverride = std::string()) {
+		removeTree(W(root));
+		ok = makeDirs(root);
+		std::string list = "[";
+		int id = 100;
+		for (const FakeRelease& r : releases) {
+			const std::string commit = commitOf(r);
+			put("repos/" + r.repo + "/commits/" + r.tag,
+			    "{\"sha\":\"" + commit + "\",\"node_id\":\"C_x\",\"commit\":{\"author\":{\"name\":\"someone\"},\"tree\":{\"sha\":\"" +
+			        std::string(40, 'e') + "\"}}}");
+			std::vector<std::string> files = names(r);
+			updatesig::Manifest m;
+			m.tag = r.signing == FakeRelease::OtherTag ? "v0.1" : r.tag;
+			m.commit = commit;
+			m.build = r.build;
+			for (const std::string& n : files) {
+				const std::string b = bytesOf(r, n);
+				put(r.repo + "/releases/download/" + r.tag + "/" + n, b);
+				m.files.push_back({ n, (long long)b.size(), sha256Bytes(b) });
+			}
+			if (r.build > 0) {
+				std::string text = updatesig::formatManifest(m);
+				unsigned char pub[32];
+				const std::string sig = updatesig::testSign(text, r.signing == FakeRelease::OtherKey ? kOtherSeed : kTestSeed, pub);
+				if (r.signing == FakeRelease::Edited) {
+					m.build += 100000;
+					text = updatesig::formatManifest(m);
+				}
+				put(r.repo + "/releases/download/" + r.tag + "/SHA256SUMS", text);
+				put(r.repo + "/releases/download/" + r.tag + "/SHA256SUMS.sig", sig);
+				files.push_back("SHA256SUMS");
+				files.push_back("SHA256SUMS.sig");
+			}
+			if (r.repo != kReleasesRepo) continue;
+			// As GitHub lists it: other fields around, objects inside, notes
+			// that look like JSON.
+			if (list.size() > 1) list += ",";
+			list += strf("{\"url\":\"https://api.github.com/repos/x/releases/%d\",\"id\":%d,\"author\":{\"login\":\"someone\",\"id\":1,"
+			             "\"type\":\"User\",\"site_admin\":false},\"node_id\":\"RE_x\",\"tag_name\":%s,\"target_commitish\":\"main\","
+			             "\"name\":\"CedarLogic %s \\u00e9\",\"draft\":%s,\"immutable\":false,\"prerelease\":%s,"
+			             "\"created_at\":\"2026-10-31T00:00:00Z\",\"assets\":[",
+			             id, id, jsonQuote(r.tag).c_str(), r.tag.c_str(), r.draft ? "true" : "false", r.prerelease ? "true" : "false");
+			id++;
+			for (size_t k = 0; k < files.size(); k++)
+				list += std::string(k ? "," : "") + "{\"id\":" + std::to_string(k + 1) + ",\"name\":" + jsonQuote(files[k]) +
+				        ",\"label\":null,\"uploader\":{\"login\":\"someone\"},\"size\":12,\"download_count\":0}";
+			list += "],\"tarball_url\":null,\"body\":\"Notes: \\\"prerelease\\\":false, \\\"tag_name\\\":\\\"v9.9\\\" [x] {y}\\nline two\"}";
+		}
+		list += "]";
+		put("repos/" + std::string(kReleasesRepo) + "/releases", listOverride.empty() ? list : listOverride);
+	}
+};
+
+}  // namespace
+
+bool runChannelCheck(std::string& report, const std::string& server, const std::string& root) {
+	bool all = true;
+	auto expect = [&](bool ok, const std::string& name, const std::string& detail = std::string()) {
+		report += std::string(ok ? "  ok    " : "  FAIL  ") + name + (ok || detail.empty() ? "" : ": " + detail) + "\n";
+		all = all && ok;
+	};
+	if (server.empty() || root.empty()) {
+		report += "--channel-check needs --server <url> and --root <the folder it serves>\n";
+		return false;
+	}
+	Fixture fx;
+	fx.root = root;
+	while (fx.root.size() > 3 && (fx.root.back() == '\\' || fx.root.back() == '/')) fx.root.pop_back();
+	updatesig::testSign("", kTestSeed, fx.publicKey);
+	Source src;
+	src.api = src.web = server;
+	src.key = fx.publicKey;
+	const std::string running = std::string(40, '1');   // never a release's commit
+	const char* names[] = { "Offer", "UpToDate", "NotVerified" };
+	auto resultName = [&](const Found& f) { return std::string(names[(int)f.decision.result]) + " (" + f.why + ")"; };
+
+	// One case: what the check found, and for an offer, the file downloaded
+	// and checked as an install would.
+	auto check = [&](const std::string& name, bool beta, long long build, updatesig::Result want, const std::string& wantTag) {
+		const Found f = lookFor(src, beta, running, build);
+		bool ok = f.asked && !f.noRelease && f.decision.result == want && (wantTag.empty() || f.target.tag == wantTag);
+		std::string detail = resultName(f) + ", from " + f.target.tag;
+		if (ok && want == updatesig::Result::Offer) {
+			const std::string wantName = beta ? betaAsset() : normalAsset(wantTag.substr(1));
+			const std::string file = fx.root + "\\download.zip";
+			std::string why;
+			ok = f.asset.file.name == wantName && httpGet(f.asset.url, nullptr, file, 1 << 20) && verifyFile(file, f.asset.file, why);
+			if (!ok) detail = "the offered " + f.asset.file.name + " (wanted " + wantName + ") didn't download and verify: " + why;
+			DeleteFileW(W(file).c_str());
+		}
+		expect(ok && fx.ok, name, fx.ok ? detail : "couldn't write the fake releases");
+		return f;
+	};
+
+	report += "Versions\n";
+	std::vector<long> a, b;
+	expect(versionOf("v0.4.1", a) && a == std::vector<long>{ 0, 4, 1 }, "v0.4.1 is a version");
+	expect(!versionOf(kTag, a) && !versionOf("v4.0.0-beta.1", a) && !versionOf("v0.4.", a) && !versionOf("0.4", a) && !versionOf("v", a),
+	       "test-build and other tags aren't");
+	expect(versionOf("v0.4", a) && versionOf("v0.4.0", b) && compareVersions(a, b) == 0, "0.4 is 0.4.0");
+	expect(versionOf("v0.4.10", a) && versionOf("v0.4.9", b) && compareVersions(a, b) > 0, "0.4.10 is after 0.4.9");
+
+	// What the Releases repo has today (Mac betas as pre-releases, a classic
+	// wx pre-release, Mac-only full releases), with Windows releases added.
+	const std::vector<FakeRelease> today = {
+		{ kReleasesRepo, "v0.3.19", true, false, false, 0 },
+		{ kReleasesRepo, "v0.3.4", false, false, false, 0 },
+		{ kReleasesRepo, "v4.0.2", true, false, false, 0 },
+	};
+	std::vector<FakeRelease> releases = today;
+	releases.push_back(testRelease(3100));
+	report += "Normal testers, before there's a Windows release\n";
+	fx.write(releases);
+	{
+		const Found f = lookFor(src, false, running, 2000);
+		expect(f.asked && f.noRelease && f.decision.result == updatesig::Result::UpToDate, "no Windows release yet: nothing offered, and says so",
+		       resultName(f));
+	}
+
+	report += "Normal ignores pre-releases, beta takes them\n";
+	FakeRelease pre = normalRelease("v0.5", 3000);
+	pre.prerelease = true;
+	FakeRelease draft = normalRelease("v0.6", 3500);
+	draft.draft = true;
+	FakeRelease wxPre = normalRelease("v4.0.3", 5000);
+	wxPre.prerelease = true;
+	FakeRelease macOnly = normalRelease("v0.4.11", 0);
+	macOnly.windows = false;
+	for (const FakeRelease& r : { pre, draft, wxPre, macOnly, normalRelease("v0.4.9", 2400), normalRelease("v0.4.10", 2600),
+	                              normalRelease("v0.4", 2200) })
+		releases.push_back(r);
+	fx.write(releases);
+	check("normal: the newest full release with Windows files (v0.4.10), not the pre-releases, the draft or a Mac-only one", false, 2000,
+	      updatesig::Result::Offer, "v0.4.10");
+	check("beta: the test build, a pre-release", true, 2000, updatesig::Result::Offer, kTag);
+	check("normal: the release this copy is (same build): up to date", false, 2600, updatesig::Result::UpToDate, "v0.4.10");
+	check("beta: the test build this copy is: up to date", true, 3100, updatesig::Result::UpToDate, kTag);
+
+	report += "Switching from beta to normal doesn't go back\n";
+	{
+		const Found f = check("normal, on the test build (newer than v0.4.10): stays", false, 3100, updatesig::Result::UpToDate, "v0.4.10");
+		expect(f.decision.manifest.build == 2600, "it saw v0.4.10's build and kept this one", resultName(f));
+	}
+	releases.push_back(normalRelease("v0.5.0", 3200));
+	fx.write(releases);
+	check("normal, on the test build: takes v0.5.0 once it's newer", false, 3100, updatesig::Result::Offer, "v0.5.0");
+
+	report += "Bad signatures are refused\n";
+	auto withNewest = [&](FakeRelease r) {
+		std::vector<FakeRelease> v = releases;
+		v.push_back(r);
+		fx.write(v);
+	};
+	FakeRelease bad = normalRelease("v0.5.1", 4000);
+	bad.signing = FakeRelease::OtherKey;
+	withNewest(bad);
+	check("normal: signed with another key", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	bad.signing = FakeRelease::Edited;
+	withNewest(bad);
+	check("normal: the manifest changed after signing", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	bad.signing = FakeRelease::OtherTag;
+	withNewest(bad);
+	check("normal: another release's signed manifest", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	withNewest(normalRelease("v0.5.1", 0));
+	check("normal: not signed yet", false, 3100, updatesig::Result::NotVerified, "v0.5.1");
+	{
+		std::vector<FakeRelease> v = today;
+		FakeRelease t = testRelease(4000);
+		t.signing = FakeRelease::OtherKey;
+		v.push_back(t);
+		fx.write(v);
+		check("beta: signed with another key", true, 3100, updatesig::Result::NotVerified, kTag);
+	}
+	{
+		fx.write(releases);
+		const Found f = lookFor(src, false, running, 3100);
+		const Target t = f.target;
+		fx.put(t.repo + "/releases/download/" + t.tag + "/" + t.assetName, "not the signed file\n");
+		const std::string file = fx.root + "\\download.zip";
+		std::string why;
+		const bool got = f.decision.result == updatesig::Result::Offer && httpGet(f.asset.url, nullptr, file, 1 << 20);
+		expect(got && !verifyFile(file, f.asset.file, why), "normal: a download that isn't the signed file is refused", why);
+		DeleteFileW(W(file).c_str());
+	}
+
+	report += "When GitHub can't be read\n";
+	fx.write(releases, "<html>rate limited</html>");
+	expect(!lookFor(src, false, running, 2000).asked, "a list that isn't JSON: no answer (not \"up to date\")");
+	{
+		Source nowhere = src;
+		nowhere.api = nowhere.web = "http://127.0.0.1:9";
+		expect(!lookFor(nowhere, false, running, 2000).asked && !lookFor(nowhere, true, running, 2000).asked, "no server: no answer");
+	}
+
+	report += "The testing group for each kind of install\n";
+	{
+		const std::string dir = fx.root + "\\prefs";
+		makeDirs(dir);
+		auto loaded = [&](const std::string& name, const std::string* text) {
+			const std::string path = dir + "\\" + name + ".ini";
+			if (text) writeWhole(path, *text);
+			Prefs p;
+			p.loadFrom(path);
+			return p;
+		};
+		const Prefs fresh = loaded("none", nullptr);
+		expect(!fresh.betaTester && !fresh.testingGroupNotice, "a new install (no settings): normal tester");
+		const std::string old = "[CedarLogic]\nthemeMode=1\naccent=6\nbrandAccentSet=1\ncheckUpdates=true\nhasSeenWelcome=true\n";
+		Prefs moved = loaded("old", &old);
+		expect(moved.betaTester && moved.testingGroupNotice, "settings from a test build (no testing group): beta tester, said once");
+		std::string saved = moved.text();
+		const Prefs again = loaded("old-saved", &saved);
+		expect(again.betaTester && again.testingGroupNotice, "saved before it was said: still beta, still to say");
+		moved.testingGroupNotice = false;
+		saved = moved.text();
+		const Prefs said = loaded("old-said", &saved);
+		expect(said.betaTester && !said.testingGroupNotice, "once said: beta, not said again");
+		saved = fresh.text();
+		const Prefs next = loaded("new-saved", &saved);
+		expect(!next.betaTester && !next.testingGroupNotice, "a new install's next launch: still normal");
+		const std::string chose = old + "testingGroup=normal\ntestingGroupNotice=true\n";
+		const Prefs normal = loaded("chose-normal", &chose);
+		expect(!normal.betaTester && !normal.testingGroupNotice, "chose Normal tester: stays normal");
+	}
+
+	removeTree(W(fx.root));
+	CreateDirectoryW(W(fx.root).c_str(), nullptr);
+	report += strf("channel check (%s): %s\n", kArch, all ? "all passed" : "FAILED");
+	return all;
+}
+
+namespace {
 
 }  // namespace
 
@@ -664,6 +1309,12 @@ void start() {
 	// The exe a finished update moved aside, and the res folder it replaced.
 	DeleteFileW((W(exePath()) + L".old").c_str());
 	removeTree(W(dirName(exePath())) + L"\\res.old");
+	// A copy from the test builds, made a beta tester by Prefs::loadFrom:
+	// Settings says so, and the first check's answer (finish()).
+	if (prefs().testingGroupNotice) {
+		g_status = kNotice;
+		logUpdate(std::string("testing group: ") + kNotice);
+	}
 	// Builds made outside CI (no commit known) don't update themselves.
 	if (std::string(CL_GIT_COMMIT) == "unknown") return;
 	SetTimer(nullptr, 0, 8000, firstCheck);
@@ -671,6 +1322,21 @@ void start() {
 }
 
 void checkNow(HWND parent) { begin(parent, true); }
+
+void groupChanged() {
+	g_offered.clear();
+	g_status.clear();
+	// A check on its way looks again when it's done (finish()); else, now.
+	if (!g_check && prefs().checkUpdates && std::string(CL_GIT_COMMIT) != "unknown") begin(nullptr, false);
+}
+
+std::string status() { return g_status; }
+
+void noticeSeen() {
+	if (!prefs().testingGroupNotice) return;
+	prefs().testingGroupNotice = false;
+	prefs().save();
+}
 
 void shutdown() {
 	if (!g_check) return;

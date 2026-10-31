@@ -209,8 +209,10 @@ std::string manyLines(std::string text) {
 
 }  // namespace
 
-void Prefs::load() {
-	Reader r{ readIni(prefsPath()) };
+void Prefs::load() { loadFrom(prefsPath()); }
+
+void Prefs::loadFrom(const std::string& path) {
+	Reader r{ readIni(path) };
 	themeMode = r.i("themeMode", themeMode, 0, 3);
 	dark = r.b("lastDark", dark);
 	accent = r.i("accent", accent, 0, 6);
@@ -265,6 +267,19 @@ void Prefs::load() {
 	templateClock = r.i("templateClock", templateClock, 0, 2);
 	shortcuts = r.s("shortcuts", shortcuts);
 	checkUpdates = r.b("checkUpdates", checkUpdates);
+	// The testing group. Settings saved before there was one can only be a
+	// copy that came from the test builds (every Windows build until now was
+	// one, from windows-native-testing): those stay beta testers, so they go on
+	// getting the builds they had, and the updater says so once. No settings
+	// at all is a new install: a normal tester. (The build itself can't tell:
+	// a versioned release's Windows files are the test build's, renamed.)
+	if (r.has("testingGroup")) {
+		betaTester = r.s("testingGroup", "") == "beta";
+		testingGroupNotice = betaTester && r.b("testingGroupNotice", false);
+	} else {
+		betaTester = !r.m.empty();
+		testingGroupNotice = betaTester;
+	}
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
@@ -323,6 +338,20 @@ void Prefs::load() {
 }
 
 void Prefs::save() const {
+	const std::string text = this->text();
+	// A temporary beside it, then moved over: a crash mid-write can't leave
+	// the settings half written.
+	const std::wstring path = W(prefsPath()), tmp = path + L".tmp";
+	HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD wrote = 0;
+	const bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size();
+	CloseHandle(h);
+	if (ok) MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
+	else DeleteFileW(tmp.c_str());
+}
+
+std::string Prefs::text() const {
 	std::ostringstream o;
 	auto b = [](bool v) { return v ? "true" : "false"; };
 	o << "[CedarLogic]\n";
@@ -370,6 +399,8 @@ void Prefs::save() const {
 	o << "templateClock=" << templateClock << "\n";
 	o << "shortcuts=" << shortcuts << "\n";
 	o << "checkUpdates=" << b(checkUpdates) << "\n";
+	o << "testingGroup=" << (betaTester ? "beta" : "normal") << "\n";
+	o << "testingGroupNotice=" << b(testingGroupNotice) << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
@@ -412,17 +443,7 @@ void Prefs::save() const {
 	o << "confirmQuit=" << b(confirmQuit) << "\n";
 	o << "startMenu=" << startMenu << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
-	const std::string text = o.str();
-	// A temporary beside it, then moved over: a crash mid-write can't leave
-	// the settings half written.
-	const std::wstring path = W(prefsPath()), tmp = path + L".tmp";
-	HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-	if (h == INVALID_HANDLE_VALUE) return;
-	DWORD wrote = 0;
-	const bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size();
-	CloseHandle(h);
-	if (ok) MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
-	else DeleteFileW(tmp.c_str());
+	return o.str();
 }
 
 void Prefs::applyWireDots() const {
