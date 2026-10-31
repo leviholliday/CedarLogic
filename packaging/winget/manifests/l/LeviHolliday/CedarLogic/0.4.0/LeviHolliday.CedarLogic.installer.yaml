@@ -29,8 +29,12 @@ Installers:
 - Architecture: x64
   InstallerUrl: https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-Setup-x64.exe
   InstallerSha256: '0000000000000000000000000000000000000000000000000000000000000000'
+  InstallerSwitches:
+    Custom: /CHANNEL=normal
 - Architecture: arm64
   InstallerUrl: https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-Setup-ARM64.exe
   InstallerSha256: '0000000000000000000000000000000000000000000000000000000000000000'
+  InstallerSwitches:
+    Custom: /CHANNEL=normal
 ManifestType: installer
 ManifestVersion: 1.12.0

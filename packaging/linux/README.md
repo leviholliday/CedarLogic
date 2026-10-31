@@ -29,8 +29,12 @@ runs this same script.
 The fallback only happens in the plain no-option mode, and only to the
 test build, which is always signed: an unsigned test build is refused ("hasn't
 been signed yet"). Once v0.4 has its .debs and AppImages, the old link
-installs 0.4 too. Its .deb then updates itself from the test build, as the
-updater always does.
+installs 0.4 too. The app then updates itself by its testing group
+(Settings > General): a Normal tester from the versioned releases, a Beta
+tester from the test build. The script writes which one it installed to
+`~/.config/CedarLogic/install-channel` (`beta` for the test build, `normal`
+for a release), and the app starts in that group the first time it runs
+(`packaging/README.md`, "The Linux app's testing groups").
 
 ## What it installs where
 
