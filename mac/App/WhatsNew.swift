@@ -1,6 +1,7 @@
-// What's New: after an update, a walk through everything that's new since
-// the first versions testers installed (0.2), in the launch screen's look,
-// a page a theme, each with a way to try it. Shown once per version (new
+// What's New: after an update, a walk through what's new since 0.3
+// (Recently Deleted, Clear Drawing asking, the Practice Circuit, steadier
+// clicks and wires, the feedback limit, the Keychain), in the launch
+// screen's look, a page a theme. Shown once per version (new
 // installs get the welcome instead); Help > What's New in CedarLogic brings
 // it back.
 
@@ -10,7 +11,7 @@ import SwiftUI
 @MainActor
 enum WhatsNew {
     /// Bumped when there's a new tour of what's new to give.
-    static let version = "0.3"
+    static let version = "0.4"
     private static let key = "cl.whatsNewSeen"
 
     /// Someone who's used CedarLogic before, and hasn't seen this one.
@@ -36,44 +37,30 @@ struct WhatsNewView: View {
     }
 
     private static let chapters: [Chapter] = [
-        Chapter(eyebrow: "Your circuits", title: "Everything in one place",
-                line: "Every circuit lives in Your Circuits and saves itself as you go. No files to lose.",
+        Chapter(eyebrow: "Your circuits", title: "Safe to try things",
+                line: "Deleted a circuit or cleared a drawing by mistake? Both can come back now.",
                 points: [
-                    ("tray.full", "Your Circuits (\u{2318}O)", "Open, rename, delete. A new circuit joins as soon as there's something on it."),
-                    ("doc.on.doc", "Files come in as copies", "Open a .cdl from anywhere and you work on a copy; File \u{25B8} Export gets one out."),
-                    ("clock.arrow.circlepath", "Versions that mean something", "A version only when the circuit changed, not every time a switch flips."),
+                    ("trash", "Recently Deleted", "In Your Circuits. Restore brings a circuit back. It's kept 30 days, on this Mac."),
+                    ("scribble", "Clear Drawing asks first", "It says what will go, and that Edit \u{25B8} Undo brings it back."),
+                    ("graduationcap", "Open the Practice Circuit", "In the File and Help menus. It opens as a new circuit of your own to play with."),
                 ], tryTitle: "Open Your Circuits"),
-        Chapter(eyebrow: "Start ahead", title: "Templates and your own parts",
-                line: "Stop rebuilding the same thing every lab.",
+        Chapter(eyebrow: "On the page", title: "The same every time",
+                line: "Clicks and wires do what you expect, however big the circuit gets.",
                 points: [
-                    ("square.on.square", "New from Template", "A Lab Page with your name on it, a 4-bit counter, a 7-segment starter, or your own."),
-                    ("shippingbox", "My Parts", "Select some gates, Edit \u{25B8} Save as Part, name it. Drag it from the side panel or find it with A."),
-                    ("gearshape", "Start every circuit your way", "Settings \u{25B8} General \u{25B8} New circuits can start each one from a template."),
-                ], tryTitle: "Browse Templates"),
-        Chapter(eyebrow: "Check your work", title: "Truth tables that do the algebra",
-                line: "Press T, and CedarLogic hands you the simplest answer too.",
-                points: [
-                    ("tablecells", "Karnaugh maps and formulas", "The truth table has tabs: the table, a K-map for each light, and the simplest SOP and POS."),
-                    ("function", "Build from a Formula", "Type F = AB + C' (or \u{03A3}m(1,3,5)) and get the gates, wired and labelled."),
-                    ("magnifyingglass", "Find (\u{2318}F)", "Labels, TO/FROM names and parts on every page, one Return away."),
-                ], tryTitle: "Build from a Formula"),
-        Chapter(eyebrow: "See it think", title: "Watch the signals",
-                line: "The circuit shows you what it's doing.",
-                points: [
-                    ("point.3.connected.trianglepath.dotted", "Point at a wire", "Every branch of it lights up, so you can follow it across the page."),
-                    ("waveform.path", "Timing diagrams", "Share the oscilloscope (\u{2318}G) as a picture or a PDF, in colour or black and white."),
-                    ("play.circle", "Simulation View", "Lit wires with the signal marching along them. Press \u{2318}R."),
+                    ("cursorarrow.click", "Clicks pick the same pin", "Where two pins sit close, or a wire turns a corner, you get the same one every time you open the app."),
+                    ("hare", "Connect Nearby, quicker", "Holding C while you move parts, or Connect Nearby Pins, no longer stops to think on a big page."),
                 ], tryTitle: nil),
-        Chapter(eyebrow: "Made for the Mac", title: "Faster, calmer, greener",
-                line: "A new look, and a lot of care in the small things.",
+        Chapter(eyebrow: "Feedback and sync", title: "Fair, and kept safe",
+                line: "A fair share of reports for everyone, and your codes locked away.",
                 points: [
-                    ("paintpalette", "CedarLogic green", "The icon's colour is the app's colour now. Settings \u{25B8} Appearance has the others."),
-                    ("slider.horizontal.3", "Gate settings and memory", "Double-click a gate or a RAM for clean, quick editors. Return is Done."),
-                    ("exclamationmark.bubble", "Send Feedback", "The speech bubble in the toolbar sends a note, a screenshot or a short recording."),
+                    ("exclamationmark.bubble", "Send Feedback: 10 a day", "Write a short summary and Send turns on. At the limit, Request more gives you 10 more, once a day."),
+                    ("key", "Your sync code is in the Keychain", "So are class keys. They used to sit in a file that backups carried along."),
                 ], tryTitle: nil),
     ]
 
-    private var pages: Int { Self.chapters.count + 2 }
+    /// The intro, a page a chapter, and the finale.
+    static var pageCount: Int { chapters.count + 2 }
+    private var pages: Int { Self.pageCount }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -160,7 +147,7 @@ struct WhatsNewView: View {
                 Text("WHAT'S NEW").font(.system(size: 11, weight: .bold)).kerning(1.8).foregroundStyle(Brand.neon)
                 Text("CedarLogic \(WhatsNew.version)").font(.system(size: 34, weight: .bold)).foregroundStyle(Brand.silver)
                     .shadow(color: Brand.neon.opacity(0.3), radius: 10)
-                Text("It has a new name (just CedarLogic), a new icon, and a lot more inside. Here's everything that's new since the first versions, a minute's read.")
+                Text("Circuits you delete can come back, clicks and wires behave the same every time, and your codes are kept safer. Here's what's new since 0.3, a minute's read.")
                     .font(.system(size: 14)).foregroundStyle(BrandText.secondary).fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(Self.chapters.enumerated()), id: \.offset) { i, c in
@@ -220,8 +207,6 @@ struct WhatsNewView: View {
     private func tryIt(_ index: Int) {
         switch index {
         case 0: openWindow(id: "library")
-        case 1: openWindow(id: "templates")
-        case 2: CanvasController.front?.perform(.buildFormula)
         default: break
         }
     }
@@ -229,13 +214,13 @@ struct WhatsNewView: View {
     private var finale: some View {
         VStack(alignment: .leading, spacing: 12) {
             BrandHeading(eyebrow: "That's the tour", title: "Go build something",
-                         line: "Everything here is in Help too, whenever you want it.")
+                         line: "It's under Help \u{25B8} What's New in CedarLogic whenever you want it back.")
                 .padding(.bottom, 8)
-            finaleTile("Take the guided tour again", "It's new too: two switches, a gate and a light, on a circuit of its own.", "figure.walk") {
-                finish(); TourModel.shared.start()
+            finaleTile("Open the Practice Circuit", "A circuit of your own to try things on.", "graduationcap") {
+                finish(); Templates.openPractice()
             }
-            finaleTile("Start from a template", "The Lab Page has your name on it already.", "square.on.square") {
-                finish(); openWindow(id: "templates")
+            finaleTile("Take the guided tour again", "Two switches, a gate and a light, on a circuit of its own.", "figure.walk") {
+                finish(); TourModel.shared.start()
             }
             finaleTile("Open CedarLogic Help", "Every feature, with its keys.", "questionmark.circle") {
                 finish(); openWindow(id: "help")
@@ -294,15 +279,30 @@ private struct ChapterArt: View {
 
     var body: some View {
         switch index {
-        case 0: circuits
-        case 1: templates
-        case 2: kmap
-        case 3: signals
-        default: palette
+        case 0: deleted
+        case 1: pins
+        default: feedback
         }
     }
 
-    private func row(_ name: String, _ detail: String, open: Bool, lit: Bool) -> some View {
+    private func caption(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            Text(text).font(.system(size: 9, weight: .bold)).kerning(0.8)
+        }
+        .foregroundStyle(Brand.neon)
+    }
+
+    private func pill(_ text: String, filled: Bool) -> some View {
+        Text(text).font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(filled ? Brand.ink : BrandText.primary)
+            .padding(.horizontal, 10).frame(height: 22)
+            .background(Capsule().fill(filled ? Brand.neon : Color.white.opacity(0.1)))
+    }
+
+    // MARK: Recently Deleted and Clear Drawing
+
+    private func row(_ name: String, _ detail: String, lit: Bool) -> some View {
         BrandCard(lit: lit, radius: 11) {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 7).fill(Brand.neon.opacity(0.16)).frame(width: 30, height: 30)
@@ -312,145 +312,137 @@ private struct ChapterArt: View {
                     Text(detail).font(.system(size: 10)).foregroundStyle(BrandText.faint)
                 }
                 Spacer()
-                if open {
-                    Text("OPEN").font(.system(size: 8.5, weight: .bold)).foregroundStyle(Brand.neon)
-                        .padding(.horizontal, 7).frame(height: 17).background(Capsule().fill(Brand.neon.opacity(0.16)))
-                }
+                if lit { pill("Restore", filled: true) }
             }
             .padding(.horizontal, 12).frame(height: 50)
         }
     }
 
-    private var circuits: some View {
+    private var deleted: some View {
         VStack(spacing: 8) {
-            row("Lab 5: Traffic Light", "42 gates \u{00B7} Today at 2:14 PM", open: true, lit: true)
-            row("Full Adder", "18 gates \u{00B7} Yesterday", open: false, lit: false)
-            row("BCD to 7 Segment", "96 gates \u{00B7} Sep 24", open: false, lit: false)
-            row("Counter", "12 gates \u{00B7} Sep 22", open: false, lit: false)
+            caption("trash", "RECENTLY DELETED \u{00B7} KEPT 30 DAYS").padding(.bottom, 4)
+            row("Lab 5: Traffic Light", "Deleted today", lit: true)
+            row("Full Adder", "Deleted yesterday", lit: false)
+            BrandCard(radius: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Clear all drawing on this page?").font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
+                    Text("Edit \u{25B8} Undo brings it back.").font(.system(size: 10.5)).foregroundStyle(BrandText.secondary)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        pill("Cancel", filled: false)
+                        pill("Clear", filled: true)
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(14)
+            }
+            .padding(.top, 10)
         }
         .frame(width: 290)
     }
 
-    private var templates: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                tile("doc.text", "Lab Page")
-                tile("123.rectangle", "Counter")
-                tile("8.square", "7-Segment")
+    // MARK: Clicks, wires and Connect Nearby
+
+    /// A gate with two inputs close together: the wire to the top one, round
+    /// its corner, is the one the pointer picks, every time.
+    private var pins: some View {
+        VStack(spacing: 14) {
+            BrandCard(radius: 14) {
+                Canvas { ctx, size in
+                    let top = CGFloat(66), bottom = CGFloat(84), pinX = CGFloat(168)
+                    // The gate: flat back, round front.
+                    var body = Path()
+                    body.move(to: CGPoint(x: 178, y: 50))
+                    body.addLine(to: CGPoint(x: 206, y: 50))
+                    body.addArc(center: CGPoint(x: 206, y: 75), radius: 25, startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: false)
+                    body.addLine(to: CGPoint(x: 178, y: 100))
+                    body.closeSubpath()
+                    ctx.fill(body, with: .color(Color.white.opacity(0.06)))
+                    ctx.stroke(body, with: .color(Color.white.opacity(0.7)), lineWidth: 1.6)
+                    var out = Path(); out.move(to: CGPoint(x: 231, y: 75)); out.addLine(to: CGPoint(x: 262, y: 75))
+                    ctx.stroke(out, with: .color(Color.white.opacity(0.7)), lineWidth: 1.6)
+                    // The other wire, plain.
+                    var other = Path()
+                    other.move(to: CGPoint(x: 24, y: 128)); other.addLine(to: CGPoint(x: 120, y: 128))
+                    other.addLine(to: CGPoint(x: 120, y: bottom)); other.addLine(to: CGPoint(x: 178, y: bottom))
+                    ctx.stroke(other, with: .color(Color.white.opacity(0.45)), lineWidth: 1.6)
+                    // The picked wire, lit.
+                    var picked = Path()
+                    picked.move(to: CGPoint(x: 24, y: 24)); picked.addLine(to: CGPoint(x: 96, y: 24))
+                    picked.addLine(to: CGPoint(x: 96, y: top)); picked.addLine(to: CGPoint(x: 178, y: top))
+                    var glow = ctx
+                    glow.addFilter(.blur(radius: 4))
+                    glow.stroke(picked, with: .color(Brand.neon.opacity(0.7)), lineWidth: 4)
+                    ctx.stroke(picked, with: .color(Brand.neon), lineWidth: 2)
+                    for (p, lit) in [(CGPoint(x: pinX, y: top), true), (CGPoint(x: pinX, y: bottom), false)] {
+                        let r = CGRect(x: p.x - 3.5, y: p.y - 3.5, width: 7, height: 7)
+                        ctx.fill(Path(ellipseIn: r), with: .color(lit ? Brand.neon : Color.white.opacity(0.55)))
+                    }
+                    ctx.fill(Path(ellipseIn: CGRect(x: 92, y: 20, width: 8, height: 8)), with: .color(Brand.neon))
+                }
+                .frame(width: 290, height: 150)
+                .overlay(alignment: .topLeading) {
+                    Image(systemName: "cursorarrow").font(.system(size: 20)).foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.6), radius: 3)
+                        .offset(x: 166, y: 64)
+                }
             }
             BrandCard(lit: true, radius: 12) {
                 HStack(spacing: 12) {
-                    Image(systemName: "shippingbox.fill").font(.system(size: 20)).foregroundStyle(Brand.neon)
+                    Text("C").font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(BrandText.primary)
+                        .frame(width: 32, height: 32)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.1)))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("My Parts").font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
-                        Text("Full Adder \u{00B7} 2-to-4 Decoder \u{00B7} Debouncer").font(.system(size: 10)).foregroundStyle(BrandText.faint)
+                        Text("Connect Nearby").font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
+                        Text("Thousands of parts, no waiting").font(.system(size: 10)).foregroundStyle(BrandText.faint)
                     }
                     Spacer()
+                    Image(systemName: "hare.fill").font(.system(size: 15)).foregroundStyle(Brand.neon)
                 }
-                .padding(14)
-            }
-        }
-        .frame(width: 290)
-    }
-
-    private func tile(_ icon: String, _ name: String) -> some View {
-        BrandCard(radius: 12) {
-            VStack(spacing: 8) {
-                Image(systemName: icon).font(.system(size: 24, weight: .light)).foregroundStyle(Brand.neon)
-                Text(name).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(BrandText.secondary)
-            }
-            .frame(width: 86, height: 92)
-        }
-    }
-
-    /// A 4-variable K-map (rows AB, columns CD) with its two groups circled,
-    /// and the answer under it: A'D is the top two rows' middle columns, BD
-    /// the middle two rows'.
-    private var kmap: some View {
-        let ones: Set<Int> = [1, 3, 5, 7, 13, 15]
-        return VStack(spacing: 14) {
-            ZStack(alignment: .topLeading) {
-                Grid(horizontalSpacing: 4, verticalSpacing: 4) {
-                    ForEach(0..<4, id: \.self) { r in
-                        GridRow {
-                            ForEach(0..<4, id: \.self) { c in
-                                // Rows AB and columns CD in Gray order (00 01 11 10).
-                                let gray = [0, 1, 3, 2]
-                                let m = gray[r] * 4 + gray[c]
-                                Text(ones.contains(m) ? "1" : "0")
-                                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(ones.contains(m) ? Brand.neon : BrandText.faint)
-                                    .frame(width: 48, height: 40)
-                                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
-                            }
-                        }
-                    }
-                }
-                RoundedRectangle(cornerRadius: 10).strokeBorder(Brand.neon, lineWidth: 2)
-                    .frame(width: 104, height: 84).offset(x: 50, y: 0)
-                    .shadow(color: Brand.neon.opacity(0.6), radius: 6)
-                RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.sRGB, red: 0.45, green: 0.8, blue: 1), lineWidth: 2)
-                    .frame(width: 104, height: 84).offset(x: 50, y: 44)
-            }
-            Text("F = A'D + BD").font(.system(size: 17, weight: .bold, design: .monospaced)).foregroundStyle(BrandText.primary)
-        }
-    }
-
-    /// The animated AND circuit over a timing diagram.
-    private var signals: some View {
-        VStack(spacing: 10) {
-            HeroCircuit(accent: Brand.neon, ink: .white).frame(width: 300, height: 120)
-            BrandCard(radius: 12) {
-                Canvas { ctx, size in
-                    let rows: [[Int]] = [[0, 0, 1, 1, 0, 0, 1, 1, 0, 0], [0, 1, 0, 1, 0, 1, 0, 1, 0, 1], [0, 0, 0, 1, 0, 0, 0, 1, 0, 0]]
-                    for (i, bits) in rows.enumerated() {
-                        let top = 14 + CGFloat(i) * 30, h: CGFloat = 16
-                        var p = Path()
-                        let step = (size.width - 20) / CGFloat(bits.count)
-                        for (j, b) in bits.enumerated() {
-                            let x = 10 + CGFloat(j) * step, y = b == 1 ? top : top + h
-                            if j == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
-                            p.addLine(to: CGPoint(x: x + step, y: y))
-                        }
-                        ctx.stroke(p, with: .color(i == 2 ? Brand.neon : Color.white.opacity(0.55)), lineWidth: 1.6)
-                    }
-                }
-                .frame(width: 300, height: 100)
+                .padding(.horizontal, 14).frame(width: 290, height: 56)
             }
         }
     }
 
-    private var palette: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 12) {
-                ForEach(accentOrder, id: \.self) { i in
-                    var r = 0.0, g = 0.0, b = 0.0
-                    let _ = cl_accent_color(Int32(i), true, &r, &g, &b)
-                    Circle().fill(Color(.sRGB, red: r, green: g, blue: b)).frame(width: i == brandAccent ? 34 : 22, height: i == brandAccent ? 34 : 22)
-                        .shadow(color: i == brandAccent ? Brand.neon.opacity(0.8) : .clear, radius: 10)
-                }
-            }
+    // MARK: Feedback and the Keychain
+
+    private var feedback: some View {
+        VStack(spacing: 12) {
             BrandCard(radius: 14) {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)).frame(width: 36, height: 30)
-                            .overlay(Image(systemName: "memorychip").foregroundStyle(Brand.neon))
-                        Text("8x8 RAM").font(.system(size: 13, weight: .bold)).foregroundStyle(BrandText.primary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.bubble.fill").font(.system(size: 14)).foregroundStyle(Brand.neon)
+                        Text("Send Feedback").font(.system(size: 13, weight: .bold)).foregroundStyle(BrandText.primary)
                         Spacer()
-                        Text("Done \u{21A9}").font(.system(size: 11, weight: .semibold)).foregroundStyle(Brand.ink)
-                            .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(Brand.neon))
+                        Text("10 of 10 today").font(.system(size: 10, weight: .semibold)).foregroundStyle(BrandText.faint)
                     }
-                    HStack(spacing: 4) {
-                        ForEach(["00", "07", "0E", "15", "1C", "23"], id: \.self) { v in
-                            Text(v).font(.system(size: 11, design: .monospaced)).foregroundStyle(BrandText.primary)
-                                .frame(width: 34, height: 22)
-                                .background(RoundedRectangle(cornerRadius: 5).fill(v == "0E" ? Brand.neon.opacity(0.35) : Color.white.opacity(0.05)))
+                    HStack(spacing: 3) {
+                        ForEach(0..<10, id: \.self) { _ in
+                            Capsule().fill(Brand.neon.opacity(0.85)).frame(height: 6)
                         }
                     }
+                    HStack {
+                        Text("Need to send more today?").font(.system(size: 10.5)).foregroundStyle(BrandText.secondary)
+                        Spacer()
+                        pill("Request more", filled: true)
+                    }
                 }
-                .padding(14)
+                .padding(14).frame(width: 290)
             }
-            .frame(width: 290)
+            BrandCard(lit: true, radius: 12) {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 7).fill(Brand.neon.opacity(0.16)).frame(width: 32, height: 32)
+                        .overlay(Image(systemName: "key.fill").font(.system(size: 14)).foregroundStyle(Brand.neon))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sync code").font(.system(size: 12, weight: .bold)).foregroundStyle(BrandText.primary)
+                        Text("In your login Keychain").font(.system(size: 10)).foregroundStyle(BrandText.faint)
+                    }
+                    Spacer()
+                    Image(systemName: "lock.fill").font(.system(size: 13)).foregroundStyle(Brand.neon)
+                }
+                .padding(.horizontal, 14).frame(width: 290, height: 56)
+            }
         }
     }
 }

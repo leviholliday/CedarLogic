@@ -3,14 +3,15 @@
 PackageIdentifier: LeviHolliday.CedarLogic
 PackageVersion: 0.4.0
 PackageLocale: en-US
-Publisher: Cedarville University
+Publisher: CedarLogic
 PublisherUrl: https://cedarlogic.netlify.app/
 PublisherSupportUrl: https://cedarlogic.netlify.app/
-Author: Levi Holliday
+Author: CedarLogic
 PackageName: CedarLogic
 PackageUrl: https://cedarlogic.netlify.app/
 License: GPL-3.0
 LicenseUrl: https://github.com/leviholliday/CedarLogic/blob/main/LICENSE
+Copyright: Copyright (c) 2026 CedarLogic
 ShortDescription: Build and simulate digital logic circuits.
 Description: |-
   CedarLogic is a digital logic simulator for students and teachers. Place gates,

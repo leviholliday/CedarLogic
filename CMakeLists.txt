@@ -44,7 +44,7 @@ endif()
 # reports. This is the Mac version's own feed, never upstream's: pointing at
 # upstream would let its updater replace this app with an older design.
 # The updater stays off until a release sets SPARKLE_ED_PUBLIC_KEY.
-set(CEDARLOGIC_PUBLISHER "Levi Holliday" CACHE STRING "Shown in the About window")
+set(CEDARLOGIC_PUBLISHER "CedarLogic" CACHE STRING "Shown in the About window")
 set(CEDARLOGIC_RELEASES_REPO "leviholliday/CedarLogic-Releases" CACHE STRING
     "Public GitHub repo holding release downloads and the update feed")
 set(CEDARLOGIC_APPCAST_URL
