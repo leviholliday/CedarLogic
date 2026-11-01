@@ -329,6 +329,13 @@ extension CircuitCanvasNSView {
     /// then Draw mode.
     func inkKeyDown(_ e: NSEvent) -> Bool {
         guard let controller else { return false }
+        // A Tidy Up on show (Shift-S works while drawing) has Return, Escape
+        // and Tab: keyDown's own, as clKeyDown leaves them. Escape here only
+        // ended Draw, so Put Back never came and the preview stayed up; the
+        // next edit then kept it, and an Undo kept it and took it back in the
+        // engine while the window took back the step before.
+        if controller.tidyActive, e.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+           [36, 76, 53, 48].contains(e.keyCode) { return false }
         let bare = e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
         if e.keyCode == 53 {
             if case .ink = drag {
