@@ -18,7 +18,7 @@ if [ -f "$OUT/lab.pid" ] && kill -0 "$(cat "$OUT/lab.pid")" 2>/dev/null; then
 	echo "already running: PID $(cat "$OUT/lab.pid")"; exit 1
 fi
 clang++ -std=c++17 -O2 -DCL_NO_WX -Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include \
-	-Wno-deprecated-declarations -Wno-inconsistent-missing-override mac/Tools/straighten_lab.cpp mac/build/libCedarCore.a \
+	-Wno-deprecated-declarations mac/Tools/straighten_lab.cpp mac/build/libCedarCore.a \
 	-framework CoreGraphics -framework CoreText -framework ImageIO -framework CoreServices -framework CoreFoundation -framework OpenGL \
 	-o mac/build/straighten_lab
 cp mac/build/straighten_lab "$OUT/straighten_lab"   # the run uses its own copy, so rebuilds don't disturb it

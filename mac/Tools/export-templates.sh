@@ -29,7 +29,7 @@ compile() {
 	o="$OBJ/$(echo "$1" | tr / _).o"
 	[ -f "$o" ] && [ "$o" -nt "$1" ] && return 0
 	clang++ -std=c++17 -O1 -arch "$(uname -m)" -mmacosx-version-min=14.0 -DCL_NO_WX -D_PRODUCTION_ \
-		-Wno-deprecated-declarations -Wno-inconsistent-missing-override \
+		-Wno-deprecated-declarations \
 		-Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include \
 		-c "$1" -o "$o"
 }

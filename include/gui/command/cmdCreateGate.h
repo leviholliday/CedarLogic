@@ -12,9 +12,9 @@ public:
 
 	cmdCreateGate(std::string def);
 
-	bool Do();
+	bool Do() override;
 
-	bool Undo();
+	bool Undo() override;
 
 	virtual std::string toString() const override;
 

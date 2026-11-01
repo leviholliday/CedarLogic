@@ -19,9 +19,9 @@ public:
 
 	cmdMoveWire(std::string def);
 
-	bool Do(void);
+	bool Do(void) override;
 
-	bool Undo(void);
+	bool Undo(void) override;
 
 	virtual std::string toString() const override;
 

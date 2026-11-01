@@ -109,13 +109,13 @@ makes is that layout: `CedarLogic.exe` and `res\` with the gates, help,
 samples and templates.
 
 The built-in templates other than the Lab Page (which carries your name, so
-the app builds it) are the Mac app's, as files in the repo's `res/templates`
-with `templates.txt` naming and grouping them. After the Mac's change, make
-them again from its `--render-ui` output:
+the app builds it) are the Mac app's, as files in the repo's `res/templates`:
+`template-<id>.cdl` (a flip-flop's or register's Clock choices beside it as
+`-running` and `-pulse`), with `index.tsv` naming and grouping them. The
+Linux app and the headless checks read the same folder. After the Mac's
+change, make them again with:
 
-    mac/build.sh
-    mac/build/CedarLogic.app/Contents/MacOS/CedarLogic --render-ui /tmp/ui
-    python3 windows/make-templates.py /tmp/ui
+    mac/Tools/export-templates.sh
 
 ## Installing
 

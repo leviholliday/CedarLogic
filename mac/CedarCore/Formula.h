@@ -1,5 +1,7 @@
 // Boolean algebra for the class, and formula -> circuit: the Mac app's
-// BooleanAlgebra.swift and FormulaCircuit.swift in C++.
+// BooleanAlgebra.swift and FormulaCircuit.swift in C++, shared by the
+// Windows and Linux apps (one copy here, compiled with the rest of
+// mac/CedarCore; the Mac app uses its Swift versions).
 //
 // The simplest sum of products and product of sums for a truth table
 // (Quine-McCluskey, then the smallest cover), reading a formula someone types
@@ -11,8 +13,8 @@
 // Minterm numbers follow the truth table: the first variable is the most
 // significant bit, so row r of the table is minterm r.
 
-#ifndef CL_WINDOWS_FORMULA_H
-#define CL_WINDOWS_FORMULA_H
+#ifndef CL_CEDARCORE_FORMULA_H
+#define CL_CEDARCORE_FORMULA_H
 
 #include <map>
 #include <string>
@@ -116,4 +118,4 @@ Plan plan(const Parsed& formulas, Shape shape, Style style, bool twoInputOnly);
 
 }  // namespace formula
 
-#endif  // CL_WINDOWS_FORMULA_H
+#endif  // CL_CEDARCORE_FORMULA_H

@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
 				const bool lit = cl_edit_hover(doc, page, x, y, upp);
 				char state[70];
 				const int bits = cl_edit_hover_wire_state(doc, page, state, sizeof state);
-				printf("hover wire %lu (%zu segments): lit=%d bits=%d state=%s\n", best->getID(), most, lit, bits, bits ? state : "-");
+				printf("hover wire %llu (%zu segments): lit=%d bits=%d state=%s\n", (unsigned long long)best->getID(), most, lit, bits, bits ? state : "-");
 				cl_edit_draw_overlay(doc, page, ctx, sf, ox, oy, upp, 0.1, 0.5, 1.0);
 			}
 		}
