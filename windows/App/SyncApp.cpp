@@ -614,10 +614,10 @@ void askIncomingDeletes(int count, const std::string& from, std::function<void(b
 	const std::string who = from.empty() ? std::string("Another device") : from;
 	a.heading = st.circuits >= count && st.circuits > 0 ? strf("%s deleted %d of your %d synced circuits", who.c_str(), count, st.circuits)
 	                                                    : strf("%s deleted %d of your synced circuits", who.c_str(), count);
-	a.text = "Move them out of Your Circuits on this PC (they’re kept in its Trash folder), or keep them? "
+	a.text = "Move them out of Your Circuits on this PC (they’re kept in Recently Deleted), or keep them? "
 	         "Kept circuits are sent back to your other devices.";
 	a.badge = 2;
-	a.buttons = { { "Keep Them", 0, 1 }, { "Move Them to the Trash Folder", 1, 0 } };
+	a.buttons = { { "Keep Them", 0, 1 }, { "Move Them to Recently Deleted", 1, 0 } };
 	a.escape = 0;
 	a.enter = 0;
 	const int r = runAlert(frontWindow(), a);
