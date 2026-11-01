@@ -95,14 +95,6 @@ CircuitWindow* windowForFolder(const std::string& folderId) {
 	return nullptr;
 }
 
-// The engine's words say "Recently Deleted", which Windows has no list of: its
-// circuits are kept in the library's Trash folder.
-std::string forWindows(std::string text) {
-	const std::string from = "Recently Deleted", to = "the Trash folder";
-	for (size_t at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size())) text.replace(at, from.size(), to);
-	return text;
-}
-
 // ---- The name across devices (SYNC.md 2.5.2) ----
 
 bool syncedName(std::string& name) {
@@ -227,7 +219,7 @@ public:
 
 	void notice(const std::string& text) override {
 		State& s = S();
-		s.notice = forWindows(text);
+		s.notice = text;
 		s.noticeAt = nowSeconds();
 		// On the window in front, as a note, as Saved and Copied are.
 		CircuitWindow* target = nullptr;
