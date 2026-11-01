@@ -1091,6 +1091,77 @@ struct SessionDriver {
 		}
 	}
 
+	// Tidy Up while drawing, then Undo with its preview up (the Mac's random
+	// session met both at seed 1, action 1788): Escape is the preview's Put
+	// Back, not the end of Draw (it once only ended Draw and left the preview
+	// up); Undo keeps the preview and takes it back, Redo brings it again,
+	// one step each.
+	void tidyWhileDrawing(int at) {
+		settle();
+		if (!w->canEdit()) { if (w->simView()) w->toggleSimView(); if (w->locked()) w->toggleLock(); }
+		if (w->drawing()) w->setDrawing(false);
+		Canvas* c = canvas();
+		if (c == nullptr) return;
+		gtk_widget_grab_focus(c->widget());
+		// Parts of its own for the tidy to move (the page's may all sit tidy,
+		// or locked in place), near the middle of the view.
+		bool tidies = false;
+		for (int i = 0; i < 4 && !tidies; i++) {
+			const double vx = c->width() / 2 + 13 + 37 * i, vy = c->height() / 2 - 11 - 19 * i;
+			w->addGateOnNextMove("AA_AND2");
+			motion(c->widget(), vx - 5, vy - 3, 0);
+			pump(10);
+			motion(c->widget(), vx, vy, 0);
+			pump(10);
+			if (w->isFloating()) click(c, vx, vy);
+			if (w->isFloating()) w->cancelFloating();
+			w->selectNone();
+			w->tidy();
+			pump(10);
+			tidies = w->tidyActive();
+			if (tidies) w->endTidy(false);
+			pump(10);
+		}
+		w->setDrawing(true);
+		pump(10);
+		gtk_widget_grab_focus(c->widget());
+		const std::string before = text();
+		tap(top(), GDK_KEY_S, GDK_SHIFT_MASK);
+		pump(10);
+		const bool drawPreviewed = w->tidyActive();
+		tap(top(), GDK_KEY_Escape);
+		pump(10);
+		const bool stillUp = w->tidyActive(), drawingOn = w->drawing();
+		check(drawPreviewed && !stillUp && text() == before && drawingOn,
+		      format("gestures: Tidy Up's preview while drawing, Put Back (Escape) leaves the circuit as it was (preview %s, %s, drawing %s)",
+		             drawPreviewed ? "up" : "never up", stillUp ? "still up" : "gone", drawingOn ? "still on" : "off"));
+		if (w->tidyActive()) w->endTidy(false);
+		w->setDrawing(false);
+		pump(10);
+		gtk_widget_grab_focus(c->widget());
+		// Undo with the preview up: the tidy is kept (one step), then taken
+		// back. (At the full 500-step history keeping it drops the oldest.)
+		const std::string untidied = text();
+		const int kept = std::min(cl_edit_undo_count(doc()) + 1, 500);
+		tap(top(), GDK_KEY_S, GDK_SHIFT_MASK);
+		pump(10);
+		const bool undoPreviewed = w->tidyActive();
+		const std::string tidied = text();
+		tap(top(), GDK_KEY_z, GDK_CONTROL_MASK);
+		pump(10);
+		const int afterUndo = cl_edit_undo_count(doc());
+		check(undoPreviewed && !w->tidyActive() && text() == untidied && afterUndo == kept - 1 && cl_edit_can_redo(doc()),
+		      format("gestures: Undo with Tidy Up's preview up takes it back, in step (%d undo steps for %d; the preview %s)", afterUndo,
+		             kept - 1, tidied == untidied ? "changed nothing in the file" : "moved things"));
+		tap(top(), GDK_KEY_y, GDK_CONTROL_MASK);
+		pump(10);
+		const int afterRedo = cl_edit_undo_count(doc());
+		check(text() == tidied && afterRedo == kept && !w->tidyActive(),
+		      format("gestures: and Redo brings the tidy back as it was shown, in step (%d undo steps for %d)", afterRedo, kept));
+		checkPages(at);
+		pause(at);
+	}
+
 	// The engine's history, past its 500 steps: every step is still saved, and
 	// undoing everything then redoing it brings the circuit back.
 	void longHistory(int at) {
@@ -1395,6 +1466,7 @@ struct SessionDriver {
 			if (settingsClosed) { settingsClosed = false; checkPrefs(); }
 			if (a % pauseEvery == pauseEvery - 1) { gWhat = "pause for autosave"; pause(a); }
 			if (a == actions / 2) { gWhat = "the long history"; longHistory(a); }
+			if (a == actions / 3) { gWhat = "Tidy Up while drawing"; tidyWhileDrawing(a); }
 			if (a == actions / 4) rss[1] = residentKB();
 			if (a % 50 == 0) printf("session: action %d of %d, %.0f s, %ld MB\n", a, actions, (nowMs() - started) / 1000, residentKB() / 1024);
 		}

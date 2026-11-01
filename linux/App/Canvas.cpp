@@ -1421,8 +1421,13 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 	const guint lower = gdk_keyval_to_lower(k);
 
 	// Draw mode: P, H and E pick a tool, 1, 2 and 3 a width; Escape ends a
-	// stroke, then Draw mode.
-	if (win->drawing() && inkKey(e)) return TRUE;
+	// stroke, then Draw mode. But a Tidy Up on show (Shift+S works while
+	// drawing) has Return, Escape and Tab, just below: Escape here only ended
+	// Draw, so Put Back never came and the preview stayed up, for the next
+	// edit to keep.
+	const bool tidyKey = win->tidyActive() && bare &&
+	                     (isReturn || k == GDK_KEY_Escape || k == GDK_KEY_Tab || k == GDK_KEY_ISO_Left_Tab);
+	if (win->drawing() && !tidyKey && inkKey(e)) return TRUE;
 
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {

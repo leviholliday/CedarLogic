@@ -1903,12 +1903,18 @@ void CircuitWindow::refreshAfterHistory() {
 	edited();
 }
 
+// Undo or Redo with a Tidy Up on show: the engine keeps it first, as any
+// edit does (cl_edit_undo/redo settle it), so it's kept here first, through
+// endTidy, which tells the window. Left to the engine, a Redo kept it (and
+// dropped the redo step) with the window never told: the preview's bar
+// stayed up, and nothing was saved. Undo then takes the kept tidy back.
 void CircuitWindow::undo() {
 	if (simViewOn) return;
 	// Gates still on the pointer (a paste, a duplicate, a new gate): undo
 	// takes them back, as Escape does, and ends the float with them.
 	if (isFloating()) { cancelFloating(); return; }
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
+	if (tidyActive()) endTidy(true);
 	if (cl_edit_undo(doc)) refreshAfterHistory();
 	else gtk_widget_error_bell(win);
 }
@@ -1918,6 +1924,7 @@ void CircuitWindow::redo() {
 	// Nothing to redo past gates still on the pointer (placing them is next).
 	if (isFloating()) { gtk_widget_error_bell(win); return; }
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
+	if (tidyActive()) endTidy(true);
 	if (cl_edit_redo(doc)) refreshAfterHistory();
 	else gtk_widget_error_bell(win);
 }
