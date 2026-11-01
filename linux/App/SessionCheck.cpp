@@ -1104,10 +1104,12 @@ struct SessionDriver {
 		if (c == nullptr) return;
 		gtk_widget_grab_focus(c->widget());
 		// Parts of its own for the tidy to move (the page's may all sit tidy,
-		// or locked in place), near the middle of the view.
+		// or locked in place, or the page be a new one): ANDs piled up in one
+		// column near the middle of the view, which Keep my layout spreads
+		// apart (apart in their own columns they may be tidy already).
 		bool tidies = false;
-		for (int i = 0; i < 4 && !tidies; i++) {
-			const double vx = c->width() / 2 + 13 + 37 * i, vy = c->height() / 2 - 11 - 19 * i;
+		for (int i = 0; i < 5 && !tidies; i++) {
+			const double vx = c->width() / 2 + 3 * i, vy = c->height() / 2 + 7 * i;
 			w->addGateOnNextMove("AA_AND2");
 			motion(c->widget(), vx - 5, vy - 3, 0);
 			pump(10);
@@ -1122,6 +1124,7 @@ struct SessionDriver {
 			if (tidies) w->endTidy(false);
 			pump(10);
 		}
+		if (!tidies) printf("note  Tidy Up found nothing to do with %d gates on the page (mode %d)\n", cl_document_gate_count(doc(), w->currentPage()), prefs().tidyMode);
 		w->setDrawing(true);
 		pump(10);
 		gtk_widget_grab_focus(c->widget());
@@ -1133,8 +1136,9 @@ struct SessionDriver {
 		pump(10);
 		const bool stillUp = w->tidyActive(), drawingOn = w->drawing();
 		check(drawPreviewed && !stillUp && text() == before && drawingOn,
-		      format("gestures: Tidy Up's preview while drawing, Put Back (Escape) leaves the circuit as it was (preview %s, %s, drawing %s)",
-		             drawPreviewed ? "up" : "never up", stillUp ? "still up" : "gone", drawingOn ? "still on" : "off"));
+		      format("gestures: Tidy Up's preview while drawing, Put Back (Escape) leaves the circuit as it was (preview %s, %s, drawing %s; Edit > Tidy Up %s)",
+		             drawPreviewed ? "up" : "never up", stillUp ? "still up" : "gone", drawingOn ? "still on" : "off",
+		             tidies ? "showed one" : "found nothing to do"));
 		if (w->tidyActive()) w->endTidy(false);
 		w->setDrawing(false);
 		pump(10);
