@@ -1072,12 +1072,15 @@ void Session::tidyWhileDrawing(int a) {
 	Canvas* c = canvas();
 	if (c == nullptr) return;
 	// Parts of its own for the tidy to move (the page's may all sit tidy, or
-	// locked in place), off the grid near the middle of the view.
+	// locked in place, or the page be a new one): ANDs piled up in one column
+	// near the middle of the view, which Keep my layout spreads apart (apart
+	// in their own columns they may be tidy already: seed 2's first run
+	// never saw a preview).
 	double cx, cy;
 	c->center(cx, cy);
 	bool tidies = false;
-	for (int i = 0; i < 4 && !tidies; i++) {
-		const double x = cx + 3.3 + 9.7 * i, y = cy - 2.6 - 5.1 * i;
+	for (int i = 0; i < 5 && !tidies; i++) {
+		const double x = cx + 0.7 * i, y = cy - 1.3 * i;
 		w->addGateOnNextMove("AA_AND2");
 		moveTo(x, y);
 		moveTo(x + 0.4, y + 0.3);
@@ -1091,6 +1094,7 @@ void Session::tidyWhileDrawing(int a) {
 		if (tidies) w->endTidy(false);
 		pump(0.03);
 	}
+	if (!tidies) sayf("note  Tidy Up found nothing to do with %d gates on the page (mode %d)\n", gatesHere(), prefs().tidyMode);
 	w->setDrawing(true);
 	pump(0.03);
 	const std::string before = shape(textNow());
@@ -1102,8 +1106,9 @@ void Session::tidyWhileDrawing(int a) {
 	pump(0.05);
 	const bool stillUp = w->tidyActive(), drawingOn = w->drawing();
 	check(drawPreviewed && !stillUp && shape(textNow()) == before && drawingOn,
-	      strf("gestures: Tidy Up's preview while drawing, Put Back (Escape) leaves the circuit as it was (preview %s, %s, drawing %s)",
-	           drawPreviewed ? "up" : "never up", stillUp ? "still up" : "gone", drawingOn ? "still on" : "off"));
+	      strf("gestures: Tidy Up's preview while drawing, Put Back (Escape) leaves the circuit as it was (preview %s, %s, drawing %s; Edit > Tidy Up %s)",
+	           drawPreviewed ? "up" : "never up", stillUp ? "still up" : "gone", drawingOn ? "still on" : "off",
+	           tidies ? "showed one" : "found nothing to do"));
 	if (w->tidyActive()) w->endTidy(false);
 	w->setDrawing(false);
 	pump(0.03);
