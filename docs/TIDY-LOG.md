@@ -99,3 +99,13 @@ https://github.com/leviholliday/CedarLogic/pull/1 was closed automatically by Gi
 Draft PR `v4/mac` -> `main`, "CedarLogic 0.4: Mac app, shared engine, packaging, docs": https://github.com/leviholliday/CedarLogic/pull/2
 
 Not resolved or merged. Body lists the `README.md` conflict (keep `v4/mac`'s, fold `main`'s one edit in) and the four `master` -> `main` lines (`ci.yml:6`, `nix.yml:14`, `release.yml:517`, `skia-app.yml:50`; `skia.yml` is not to be edited).
+
+### 5. The three kept branches folded in (2026-10-31, later)
+
+| Branch | Done |
+|---|---|
+| `tools/signing-keys` (`b4b1406`) | `windows/native-v4-int3`: merged whole (clean, adds `scripts/signing-keys.sh`). `v4/mac`: the script alone (`72d1c7b`), since the full merge conflicts on `linux/install.sh`. The Linux final gets it through `v4/mac` later. Tagged `archive/tools/signing-keys`, branch deleted. |
+| `linux/native-v4-simbench` (`9280d2e`) | Merged into `linux/native-v4-int3` (clean: `linux/App/Bench.cpp`, `linux/SMOOTHNESS.md`). The Linux CI runs on the push (`Linux native build` 41252337576 and `Core hardening` 41252337627) passed. Tagged `archive/linux/native-v4-simbench`, branch deleted. |
+| `linux/native-v4-desktop` (`f5fb814`) | Only `linux/DESKTOP-TEST.md` taken (the branch's version, a superset of the final's, plus a note that the commit ids in it are from the archived branch and the code was redone as `c5d4155`/`011095b`). Committed to `linux/native-v4-int3`. Tagged `archive/linux/native-v4-desktop`, branch deleted. |
+
+Also on `windows/native-v4-int3` (asked for separately): `windows/App/SyncApp.cpp` no longer rewrites "Recently Deleted" to "the Trash folder" in sync notices (`31882da`). The "kept in its Trash folder" wording of the sync delete prompt (`SyncApp.cpp`, around line 615) was left as it was.
