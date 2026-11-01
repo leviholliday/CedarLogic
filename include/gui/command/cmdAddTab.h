@@ -12,9 +12,9 @@ public:
 		std::vector<GUICanvas *> *canvases);
 	~cmdAddTab() override;
 
-	bool Do();
+	bool Do() override;
 
-	bool Undo();
+	bool Undo() override;
 
 	int pageToShow(bool isUndo) const override;
 

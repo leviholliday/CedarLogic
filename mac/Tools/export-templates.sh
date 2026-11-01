@@ -2,8 +2,9 @@
 # Writes the Mac app's built-in templates (File > New from Template: the lab
 # page, the counter, the flip-flops and latches, the registers, the
 # combinational circuits, the counters and the Classic Mistakes) as files in
-# res/templates, for the apps that don't build them in Swift (Linux reads
-# them; see linux/App/Collections.cpp), named as --render-ui names them: template-<id>.cdl, and a flip-flop's
+# res/templates, for the apps that don't build them in Swift (Windows and
+# Linux read them; see windows/App/Collections.cpp, linux/App/Collections.cpp,
+# and the template checks in mac/Tools), named as --render-ui names them: template-<id>.cdl, and a flip-flop's
 # or register's Clock choices template-<id>-running.cdl and -pulse.cdl; index.tsv
 # lists id, group, name, detail and choices in the picker's order.
 #
@@ -29,7 +30,7 @@ compile() {
 	o="$OBJ/$(echo "$1" | tr / _).o"
 	[ -f "$o" ] && [ "$o" -nt "$1" ] && return 0
 	clang++ -std=c++17 -O1 -arch "$(uname -m)" -mmacosx-version-min=14.0 -DCL_NO_WX -D_PRODUCTION_ \
-		-Wno-deprecated-declarations -Wno-inconsistent-missing-override \
+		-Wno-deprecated-declarations \
 		-Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include \
 		-c "$1" -o "$o"
 }

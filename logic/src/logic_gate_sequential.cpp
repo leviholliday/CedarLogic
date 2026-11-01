@@ -377,7 +377,7 @@ void Gate_JKFF::gateProcess( void ) {
 		}
 	} else if( isRisingEdge("clock") ) {
 		if( !J && !K ) {
-			currentState = currentState; // Hold
+			// Hold: currentState keeps its value.
 		} else if( !J && K ) {
 			currentState = ZERO; // Reset
 		} else if( J && !K ) {

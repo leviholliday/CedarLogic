@@ -35,7 +35,7 @@ CORE=(
 	mac/CedarCore/*.cpp
 )
 CXXFLAGS=(-std=c++17 -O2 -arch "$ARCH" -mmacosx-version-min=$MIN -DCL_NO_WX
-	-Wno-deprecated-declarations -Wno-inconsistent-missing-override -D_PRODUCTION_ -Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include)
+	-Wno-deprecated-declarations -D_PRODUCTION_ -Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat -Imac/CedarCore -Imac/CedarCore/include)
 
 echo "Engine..."
 OBJS=()
