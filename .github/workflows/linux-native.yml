@@ -38,7 +38,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install dependencies
         run: |
@@ -141,7 +141,7 @@ jobs:
 
       - name: Upload the session logs
         if: always() && matrix.arch == 'x86_64'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-session-logs
           path: session-logs
@@ -164,7 +164,23 @@ jobs:
             "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
           # The templates this app ships (res/templates, the Mac's own): Step Clock on the
           # flip-flops (manual, running and pulse-button clocks), the examples' second pages,
-          # the registers and the Classic Mistakes each do what they say.
+          # the registers and the Classic Mistakes each do what they say. First: every
+          # template index.tsv names is there with its Clock files (50 files in all).
+          python3 - <<'PY'
+          import os, sys
+          d = "res/templates"
+          rows = [l.split("\t") for l in open(os.path.join(d, "index.tsv"), encoding="utf-8").read().splitlines() if l]
+          want = []
+          for f in rows:
+              want.append("template-%s.cdl" % f[0])
+              choices = f[4] if len(f) > 4 else ""
+              want += ["template-%s-%s.cdl" % (f[0], c) for c in ("running", "pulse") if c in choices]
+          have = sorted(n for n in os.listdir(d) if n.endswith(".cdl"))
+          missing, extra = sorted(set(want) - set(have)), sorted(set(have) - set(want))
+          print("%d templates, %d files" % (len(rows), len(have)))
+          if missing or extra or len(have) != 50:
+              sys.exit("templates: missing %s, not in index.tsv %s" % (missing, extra))
+          PY
           for t in clock_check examples_check register_check mistakes_check; do
             $B/$t $L res/templates > $t.log 2>&1 || { cat $t.log; exit 1; }
             echo "$t: $(grep -c '^PASS\|  ok ' $t.log) passed"
@@ -234,7 +250,7 @@ jobs:
           test -f /usr/share/icons/hicolor/256x256/apps/cedarlogic.png
 
       - name: Upload .deb
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs/*.deb
@@ -426,7 +442,7 @@ jobs:
             --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5-outlines.txt || true
 
       - name: Upload AppImage
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-appimage-${{ matrix.arch }}
           path: linux/build-release/CedarLogic-Native-*-${{ matrix.arch }}.AppImage
@@ -434,7 +450,7 @@ jobs:
 
       - name: Upload renders
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
           path: renders
@@ -449,7 +465,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -480,7 +496,7 @@ jobs:
           SESSION_LOGS=session-logs-asan/more linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 9 10 11 12
       - name: Upload the session logs
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-session-logs-asan
           path: session-logs-asan
@@ -502,8 +518,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs
@@ -570,7 +586,7 @@ jobs:
     container: debian:12
     timeout-minutes: 20
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs
@@ -595,17 +611,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download both AppImages
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: CedarLogic-Native-linux-appimage-*
           path: appimages
           merge-multiple: true
 
       - name: Download both .debs
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: CedarLogic-Native-linux-deb-*
           path: appimages

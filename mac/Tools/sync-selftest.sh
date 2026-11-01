@@ -65,7 +65,7 @@ fi
 # The core's gate defaults against the design's table (needs mac/build/libCedarCore.a).
 if [ "${GATES:-0}" = 1 ]; then
 	CFL=(-std=c++17 -O1 -DCL_NO_WX -D_PRODUCTION_ -Iinclude -Iinclude/gui -Iinclude/gui/command -Ilogic/include -Iformat
-		-Imac/CedarCore -Imac/CedarCore/include -Wno-deprecated-declarations -Wno-inconsistent-missing-override)
+		-Imac/CedarCore -Imac/CedarCore/include -Wno-deprecated-declarations)
 	"$CXX" "${CFL[@]}" mac/Tools/sync_gate_defaults_check.cpp mac/build/libCedarCore.a -framework CoreGraphics \
 		-framework CoreText -framework ImageIO -framework CoreServices -framework CoreFoundation -framework OpenGL \
 		-o "$OUT/sync_gate_defaults_check"
