@@ -1522,8 +1522,12 @@ bool Canvas::onKeyDown(UINT vk, LPARAM lp) {
 	// S, Shift+S, T, C, V, X, D, unless they've been changed), if any.
 	const shortcuts::Action* act = shortcuts::match(shortcuts::pressed(vk), true);
 	auto is = [&](const char* id) { return act && std::strcmp(act->id, id) == 0; };
-	// Draw mode's own keys first: P, H, E, 1, 2, 3 and Escape.
-	if (win->drawing() && inkKey(vk)) return true;
+	// Draw mode's own keys first: P, H, E, 1, 2, 3 and Escape. But a Tidy Up
+	// on show (Shift+S works while drawing) has Return, Escape and Tab, just
+	// below: Escape here only ended Draw, so Put Back never came and the
+	// preview stayed up, for the next edit to keep.
+	const bool tidyKey = win->tidyActive() && bare && (isReturn || vk == VK_ESCAPE || vk == VK_TAB);
+	if (win->drawing() && !tidyKey && inkKey(vk)) return true;
 
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {

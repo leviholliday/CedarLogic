@@ -586,7 +586,7 @@ private:
 	int othersClosed = 0, windowGone = -1;
 	bool longHistoryDone = false;
 	bool editedPastFull = true, fullHistoryReached = false, undoAllOk = true, redoAllOk = true;
-	bool longRunDone = false;
+	bool longRunDone = false, tidyDrawDone = false;
 	int historyAfterEdits = 0, undoneSteps = 0, redoneSteps = 0;
 	long scopeLengthAfter = 0;
 	std::vector<Use> use;
@@ -622,6 +622,19 @@ private:
 		if (IsWindow(h)) SendMessageW(h, WM_KEYUP, vk, (LPARAM)0xC0000001);
 	}
 	void canvasKey(UINT vk) { if (Canvas* c = canvas()) key(c->widget(), vk); }
+	// With Shift held, as GetKeyState sees it (Shift+S is Tidy Up).
+	void shiftedCanvasKey(UINT vk) {
+		BYTE keys[256] = {};
+		GetKeyboardState(keys);
+		const BYTE was = keys[VK_SHIFT], wasLeft = keys[VK_LSHIFT];
+		keys[VK_SHIFT] = keys[VK_LSHIFT] = 0x80;
+		SetKeyboardState(keys);
+		canvasKey(vk);
+		GetKeyboardState(keys);
+		keys[VK_SHIFT] = was;
+		keys[VK_LSHIFT] = wasLeft;
+		SetKeyboardState(keys);
+	}
 	void typeInto(HWND h, const std::string& text) {
 		for (char ch : text) if (IsWindow(h)) SendMessageW(h, WM_CHAR, (WPARAM)(unsigned char)ch, 1);
 	}
@@ -734,6 +747,7 @@ private:
 	void tabStripClick(int pane, int k, bool closeButton, bool dragAlong, bool dragDown);
 	void longHistory(int at);
 	void longRun();
+	void tidyWhileDrawing(int a);
 	void action(int a);
 
 	// ---- The checks ----
@@ -1045,6 +1059,78 @@ void Session::longHistory(int at) {
 	checkPages(at);
 	checkHistory(at);
 	pause(at);
+}
+
+// Tidy Up while drawing, then Undo with its preview up (the Mac's random
+// session met both at seed 1, action 1788): Escape is the preview's Put Back,
+// not the end of Draw (it once only ended Draw and left the preview up); Undo
+// keeps the preview and takes it back, Redo brings it again, one step each.
+void Session::tidyWhileDrawing(int a) {
+	tidyDrawDone = true;
+	gActionName = "Tidy Up while drawing";
+	settle();
+	Canvas* c = canvas();
+	if (c == nullptr) return;
+	// Parts of its own for the tidy to move (the page's may all sit tidy, or
+	// locked in place), off the grid near the middle of the view.
+	double cx, cy;
+	c->center(cx, cy);
+	bool tidies = false;
+	for (int i = 0; i < 4 && !tidies; i++) {
+		const double x = cx + 3.3 + 9.7 * i, y = cy - 2.6 - 5.1 * i;
+		w->addGateOnNextMove("AA_AND2");
+		moveTo(x, y);
+		moveTo(x + 0.4, y + 0.3);
+		if (w->isFloating()) { click(x + 0.4, y + 0.3); partsPlaced++; }
+		if (w->isFloating()) w->cancelFloating();
+		w->selectNone();
+		pump(0.03);
+		w->tidy();
+		pump(0.03);
+		tidies = w->tidyActive();
+		if (tidies) w->endTidy(false);
+		pump(0.03);
+	}
+	w->setDrawing(true);
+	pump(0.03);
+	const std::string before = shape(textNow());
+	shiftedCanvasKey('S');
+	pump(0.05);
+	const bool drawPreviewed = w->tidyActive();
+	canvasKey(VK_ESCAPE);
+	escapes++;
+	pump(0.05);
+	const bool stillUp = w->tidyActive(), drawingOn = w->drawing();
+	check(drawPreviewed && !stillUp && shape(textNow()) == before && drawingOn,
+	      strf("gestures: Tidy Up's preview while drawing, Put Back (Escape) leaves the circuit as it was (preview %s, %s, drawing %s)",
+	           drawPreviewed ? "up" : "never up", stillUp ? "still up" : "gone", drawingOn ? "still on" : "off"));
+	if (w->tidyActive()) w->endTidy(false);
+	w->setDrawing(false);
+	pump(0.03);
+	// Undo with the preview up: the tidy is kept (one step), then taken back.
+	// (At the full 500-step history keeping it drops the oldest.)
+	const std::string untidied = shape(textNow());
+	const int kept = std::min(cl_edit_undo_count(doc()) + 1, 500);
+	shiftedCanvasKey('S');
+	pump(0.05);
+	const bool undoPreviewed = w->tidyActive();
+	const std::string tidied = shape(textNow());
+	w->run(CMD_UNDO);
+	undos++;
+	pump(0.05);
+	const int afterUndo = cl_edit_undo_count(doc());
+	check(undoPreviewed && !w->tidyActive() && shape(textNow()) == untidied && afterUndo == kept - 1 && cl_edit_can_redo(doc()),
+	      strf("gestures: Undo with Tidy Up's preview up takes it back, in step (%d undo steps for %d; the preview %s)", afterUndo, kept - 1,
+	           tidied == untidied ? "changed nothing in the file" : "moved things"));
+	w->run(CMD_REDO);
+	redos++;
+	pump(0.05);
+	const int afterRedo = cl_edit_undo_count(doc());
+	check(shape(textNow()) == tidied && afterRedo == kept && !w->tidyActive(),
+	      strf("gestures: and Redo brings the tidy back as it was shown, in step (%d undo steps for %d)", afterRedo, kept));
+	checkHistory(a);
+	checkPages(a);
+	pause(a);
 }
 
 // The clock run a long time with the oscilloscope open: past its 60,000-step
@@ -1534,6 +1620,7 @@ void Session::run(int actions) {
 		if (a % 40 == 39) pause(a);
 		if (a == actions / 2 && !longHistoryDone) longHistory(a);
 		if (a == actions * 3 / 5 && !longRunDone) longRun();
+		if (a == actions / 3 && !tidyDrawDone) tidyWhileDrawing(a);
 		if (a == actions / 4 || a == actions / 2 || a == actions * 3 / 4) sample(a);
 		if (a == actions - 1) { settle(); pause(a); saveAndReopen("the last save"); }
 	}
