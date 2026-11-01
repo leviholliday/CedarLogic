@@ -462,7 +462,7 @@ void turnOff(HWND parent) {
 	f.add(note("Your circuits stay on this PC. Your other devices keep syncing with each other.", 62));
 	FormField remove;
 	remove.kind = FormField::Check;
-	remove.label = "Also remove the synced circuits from this PC (they go to the library’s Trash folder)";
+	remove.label = "Also remove the synced circuits from this PC (they go to Recently Deleted)";
 	const int removeField = f.add(remove);
 	if (f.run(parent) != IDOK) return;
 	e->turnOff(f.checked(removeField));

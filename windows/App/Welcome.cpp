@@ -990,7 +990,7 @@ const Chapter kChapters[] = {
 	{ "Sync", "Your circuits, on every device", "Turn it on once and Your Circuits follow you: other PCs and Macs, Raspberry Pis, CedarLogic Online and the phone app.",
 	  { { 0xE895, "Turn On Sync", "Settings ▸ Sync ▸ Turn On Sync makes a sync code. There's no account to make." },
 	    { 0xE72E, "Private by design", "Circuits are locked on this PC before they leave it. The website keeps them but can't read them." },
-	    { 0xE81C, "Nothing gets lost", "If two devices edit one circuit, the other edit goes to Version History. A delete goes to the Trash folder." } },
+	    { 0xE81C, "Nothing gets lost", "If two devices edit one circuit, the other edit goes to Version History. A delete goes to Recently Deleted." } },
 	  "Open Sync Settings", kOpenSync },
 	{ "Add a device", "Link a new device by scanning", "A phone that already syncs can give a new device the code: scan, and it's linked.",
 	  { { 0xE772, "I Have a Code", "On the new device, Settings ▸ Sync ▸ I Have a Code shows a QR code." },
