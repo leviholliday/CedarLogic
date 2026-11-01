@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in CedarLogic doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. A security problem? Please don't post it here: see SECURITY.md and use a private report.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Which app?
+      options:
+        - CedarLogic for Mac
+        - CedarLogic for Windows
+        - CedarLogic for Linux
+        - CedarLogic Online (the website)
+        - CedarLogic Classic (the old wx app, retired)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: About CedarLogic shows it (the CedarLogic menu on a Mac, Help on Windows and Linux).
+      placeholder: "0.4 (build 1234)"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Computer and system
+      placeholder: "MacBook Air M2, macOS 15.1 / Windows 11 x64 / Raspberry Pi 5, Raspberry Pi OS"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen
+      placeholder: |
+        1. Open the attached circuit
+        2. Drag the AND gate to the right
+        3. The wire to its input disappears
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: The circuit, and a screenshot
+      description: Please attach the .cdl file (drag it into this box; if GitHub refuses it, zip it first) and a screenshot or short video if it helps. Take anything private out of the circuit first.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I'm on the newest version, or I said above which one I'm on.
