@@ -4,7 +4,7 @@
 
 CedarLogic is a free, open-source digital logic simulator made for classroom teaching. Drag in gates, wire them up and watch the signals move. It has all the basic gates, buses, J-K and D flip-flops, muxes, decoders, RAM and a [Z80 microprocessor](https://en.wikipedia.org/wiki/Zilog_Z80). Press T for the truth table, the Karnaugh maps and the simplest formula, check your circuit against an assignment, and export a lab report. There are native apps for Mac, Windows and Linux, and [CedarLogic Online](https://cedarlogic.netlify.app/online-logic-gate-simulator/) in the browser. At [Cedarville University](https://www.cedarville.edu/) students in Computer Architecture 1 have used it to build and simulate a full [Mano machine](https://en.wikipedia.org/wiki/Mano_machine).
 
-**[Website](https://cedarlogic.netlify.app)** · **[Download](https://cedarlogic.netlify.app/download/)** · [All releases](https://github.com/leviholliday/CedarLogic-Releases/releases) · [What's new](CHANGELOG.md)
+**[Website](https://cedarlogic.netlify.app)** · **[Download](https://cedarlogic.netlify.app/download/)** · [All releases](https://github.com/leviholliday/CedarLogic-Releases/releases) · [Truth table generator](https://cedarlogic.netlify.app/truth-table-generator/) · [What's new](CHANGELOG.md)
 
 <p align="center">
   <img src="https://cedarlogic.netlify.app/assets/img/window-light.webp" alt="CedarLogic for Mac with a full adder circuit" width="49%">
