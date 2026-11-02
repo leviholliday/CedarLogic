@@ -1,0 +1,313 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 0 15)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "2")
+      (at 0 8)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "3")
+      (at 0 0)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_TOGGLE"
+      (uuid "4")
+      (at 0 -8)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_AND3"
+      (uuid "5")
+      (at 12 8)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "AA_AND4"
+      (uuid "6")
+      (at 12 -8)
+      (angle 0)
+      (lparam "INPUT_BITS" "4"))
+    (gate "BE_NOR3"
+      (uuid "7")
+      (at 26 8)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "BE_NOR2"
+      (uuid "8")
+      (at 26 -8)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "GA_LED"
+      (uuid "9")
+      (at 36 8)
+      (angle 0))
+    (gate "GA_LED"
+      (uuid "10")
+      (at 36 -8)
+      (angle 0))
+    (gate "AA_INVERTER"
+      (uuid "11")
+      (at 6 -15)
+      (angle 0)
+      (lparam "INPUT_BITS" "1"))
+    (gate "AA_LABEL"
+      (uuid "12")
+      (at -5.5 15)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Reset")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "13")
+      (at -3 8)
+      (angle 0)
+      (gparam "LABEL_TEXT" "K")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "14")
+      (at -3.5 0)
+      (angle 0)
+      (gparam "LABEL_TEXT" "EN")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "15")
+      (at -3 -8)
+      (angle 0)
+      (gparam "LABEL_TEXT" "J")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "16")
+      (at 38.5 8)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "17")
+      (at 39 -8)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Q'")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "18")
+      (at 12 26)
+      (angle 0)
+      (gparam "LABEL_TEXT" "What's wrong here?")
+      (gparam "TEXT_HEIGHT" "3.0"))
+    (gate "AA_LABEL"
+      (uuid "19")
+      (at 17 21)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Turn Reset off, then switch EN on. Watch Q and Q'.")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 2 8 2.5 8)
+        (connect "2" "OUT_0")
+        (cross 2.5 "2"))
+      (seg "1" h
+        (pts 2.5 10 9 10)
+        (connect "5" "IN_0")
+        (cross 2.5 "2"))
+      (seg "2" v
+        (pts 2.5 8 2.5 10)
+        (cross 8 "0")
+        (cross 10 "1")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 5.5 -7 9 -7)
+        (connect "6" "IN_1")
+        (cross 5.5 "3"))
+      (seg "1" h
+        (pts 2 0 7.5 0)
+        (connect "3" "OUT_0")
+        (cross 5.5 "3")
+        (cross 7.5 "4"))
+      (seg "2" h
+        (pts 7.5 8 9 8)
+        (connect "5" "IN_1")
+        (cross 7.5 "4"))
+      (seg "3" v
+        (pts 5.5 -7 5.5 0)
+        (cross -7 "0")
+        (cross 0 "1"))
+      (seg "4" v
+        (pts 7.5 0 7.5 8)
+        (cross 0 "1")
+        (cross 8 "2")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 21.5 -9 23 -9)
+        (connect "8" "IN_1")
+        (cross 21.5 "5"))
+      (seg "1" h
+        (pts 8.5 4 30 4)
+        (cross 8.5 "4")
+        (cross 21.5 "5")
+        (cross 30 "6"))
+      (seg "2" h
+        (pts 8.5 6 9 6)
+        (connect "5" "IN_2")
+        (cross 8.5 "4"))
+      (seg "3" h
+        (pts 29 8 35 8)
+        (connect "7" "OUT")
+        (connect "9" "N_in0")
+        (cross 30 "6"))
+      (seg "4" v
+        (pts 8.5 4 8.5 6)
+        (cross 4 "1")
+        (cross 6 "2"))
+      (seg "5" v
+        (pts 21.5 -9 21.5 4)
+        (cross -9 "0")
+        (cross 4 "1"))
+      (seg "6" v
+        (pts 30 4 30 8)
+        (cross 4 "1")
+        (cross 8 "3")))
+    (wire
+      (ids "4")
+      (seg "0" h
+        (pts 2 -8 2.5 -8)
+        (connect "4" "OUT_0")
+        (cross 2.5 "2"))
+      (seg "1" h
+        (pts 2.5 -5 9 -5)
+        (connect "6" "IN_0")
+        (cross 2.5 "2"))
+      (seg "2" v
+        (pts 2.5 -8 2.5 -5)
+        (cross -8 "0")
+        (cross -5 "1")))
+    (wire
+      (ids "5")
+      (seg "0" h
+        (pts 7.5 -9 9 -9)
+        (connect "6" "IN_2")
+        (cross 7.5 "5"))
+      (seg "1" h
+        (pts 29 -8 35 -8)
+        (connect "8" "OUT")
+        (connect "10" "N_in0")
+        (cross 30 "7"))
+      (seg "2" h
+        (pts 7.5 -3 22.5 -3)
+        (cross 7.5 "5")
+        (cross 22.5 "6"))
+      (seg "3" h
+        (pts 22.5 -1 30 -1)
+        (cross 22.5 "6")
+        (cross 30 "7"))
+      (seg "4" h
+        (pts 22.5 6 23 6)
+        (connect "7" "IN_2")
+        (cross 22.5 "6"))
+      (seg "5" v
+        (pts 7.5 -9 7.5 -3)
+        (cross -9 "0")
+        (cross -3 "2"))
+      (seg "6" v
+        (pts 22.5 -3 22.5 6)
+        (cross -3 "2")
+        (cross -1 "3")
+        (cross 6 "4"))
+      (seg "7" v
+        (pts 30 -8 30 -1)
+        (cross -8 "1")
+        (cross -1 "3")))
+    (wire
+      (ids "6")
+      (seg "0" h
+        (pts 2.5 -15 3 -15)
+        (connect "11" "IN_0")
+        (cross 2.5 "5"))
+      (seg "1" h
+        (pts 2.5 -9.5 3.5 -9.5)
+        (cross 2.5 "5")
+        (cross 3.5 "7"))
+      (seg "2" h
+        (pts 18.5 10 23 10)
+        (connect "7" "IN_0")
+        (cross 18.5 "8"))
+      (seg "3" h
+        (pts 2.5 12.5 18.5 12.5)
+        (cross 2.5 "6")
+        (cross 3.5 "7")
+        (cross 18.5 "8"))
+      (seg "4" h
+        (pts 2 15 2.5 15)
+        (connect "1" "OUT_0")
+        (cross 2.5 "6"))
+      (seg "5" v
+        (pts 2.5 -15 2.5 -9.5)
+        (cross -15 "0")
+        (cross -9.5 "1"))
+      (seg "6" v
+        (pts 2.5 12.5 2.5 15)
+        (cross 12.5 "3")
+        (cross 15 "4"))
+      (seg "7" v
+        (pts 3.5 -9.5 3.5 12.5)
+        (cross -9.5 "1")
+        (cross 12.5 "3"))
+      (seg "8" v
+        (pts 18.5 10 18.5 12.5)
+        (cross 10 "2")
+        (cross 12.5 "3")))
+    (wire
+      (ids "7")
+      (seg "0" h
+        (pts 9 -15 9.5 -15)
+        (connect "11" "OUT_0")
+        (cross 9.5 "4"))
+      (seg "1" h
+        (pts 8.5 -12.5 9.5 -12.5)
+        (cross 8.5 "3")
+        (cross 9.5 "4"))
+      (seg "2" h
+        (pts 8.5 -11 9 -11)
+        (connect "6" "IN_3")
+        (cross 8.5 "3"))
+      (seg "3" v
+        (pts 8.5 -12.5 8.5 -11)
+        (cross -12.5 "1")
+        (cross -11 "2"))
+      (seg "4" v
+        (pts 9.5 -15 9.5 -12.5)
+        (cross -15 "0")
+        (cross -12.5 "1")))
+    (wire
+      (ids "8")
+      (seg "0" h
+        (pts 15 8 23 8)
+        (connect "5" "OUT")
+        (connect "7" "IN_1")))
+    (wire
+      (ids "9")
+      (seg "0" h
+        (pts 15 -8 15.5 -8)
+        (connect "6" "OUT")
+        (cross 15.5 "2"))
+      (seg "1" h
+        (pts 15.5 -7 23 -7)
+        (connect "8" "IN_0")
+        (cross 15.5 "2"))
+      (seg "2" v
+        (pts 15.5 -8 15.5 -7)
+        (cross -8 "0")
+        (cross -7 "1")))))

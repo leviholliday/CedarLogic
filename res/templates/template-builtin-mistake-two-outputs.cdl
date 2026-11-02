@@ -1,0 +1,127 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 0 6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "2")
+      (at 0 -6)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "AA_AND2"
+      (uuid "3")
+      (at 14 6)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "AE_OR2"
+      (uuid "4")
+      (at 14 -6)
+      (angle 0)
+      (lparam "INPUT_BITS" "2"))
+    (gate "GA_LED"
+      (uuid "5")
+      (at 28 0)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "6")
+      (at -3 6)
+      (angle 0)
+      (gparam "LABEL_TEXT" "A")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "7")
+      (at -3 -6)
+      (angle 0)
+      (gparam "LABEL_TEXT" "B")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "8")
+      (at 29 4)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Light")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "9")
+      (at 12 16)
+      (angle 0)
+      (gparam "LABEL_TEXT" "What's wrong here?")
+      (gparam "TEXT_HEIGHT" "3.0"))
+    (gate "AA_LABEL"
+      (uuid "10")
+      (at 12 11)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Watch the light as you change A and B.")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 9.5 -5 11 -5)
+        (connect "4" "IN_0")
+        (cross 9.5 "4"))
+      (seg "1" h
+        (pts 2 6 2.5 6)
+        (connect "1" "OUT_0")
+        (cross 2.5 "3"))
+      (seg "2" h
+        (pts 2.5 7 11 7)
+        (connect "3" "IN_0")
+        (cross 2.5 "3")
+        (cross 9.5 "4"))
+      (seg "3" v
+        (pts 2.5 6 2.5 7)
+        (cross 6 "1")
+        (cross 7 "2"))
+      (seg "4" v
+        (pts 9.5 -5 9.5 7)
+        (cross -5 "0")
+        (cross 7 "2")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 2.5 -7 11 -7)
+        (connect "4" "IN_1")
+        (cross 2.5 "3")
+        (cross 8.5 "4"))
+      (seg "1" h
+        (pts 2 -6 2.5 -6)
+        (connect "2" "OUT_0")
+        (cross 2.5 "3"))
+      (seg "2" h
+        (pts 8.5 5 11 5)
+        (connect "3" "IN_1")
+        (cross 8.5 "4"))
+      (seg "3" v
+        (pts 2.5 -7 2.5 -6)
+        (cross -7 "0")
+        (cross -6 "1"))
+      (seg "4" v
+        (pts 8.5 -7 8.5 5)
+        (cross -7 "0")
+        (cross 5 "2")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 17 -6 17.5 -6)
+        (connect "4" "OUT")
+        (cross 17.5 "3"))
+      (seg "1" h
+        (pts 17.5 0 27 0)
+        (connect "5" "N_in0")
+        (cross 17.5 "3"))
+      (seg "2" h
+        (pts 17 6 17.5 6)
+        (connect "3" "OUT")
+        (cross 17.5 "3"))
+      (seg "3" v
+        (pts 17.5 -6 17.5 6)
+        (cross -6 "0")
+        (cross 0 "1")
+        (cross 6 "2")))))

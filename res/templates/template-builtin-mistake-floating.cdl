@@ -1,0 +1,91 @@
+(cedarlogic
+  (version 3)
+  (generator "CedarLogic 4.2.0-native")
+  (page 0
+    (gate "AA_TOGGLE"
+      (uuid "1")
+      (at 0 4)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_TOGGLE"
+      (uuid "2")
+      (at 0 -4)
+      (angle 0)
+      (gparam "CLICK_BOX" "-0.76,-0.76,0.76,0.76")
+      (lparam "OUTPUT_BITS" "1")
+      (lparam "OUTPUT_NUM" "1"))
+    (gate "AA_AND3"
+      (uuid "3")
+      (at 14 0)
+      (angle 0)
+      (lparam "INPUT_BITS" "3"))
+    (gate "GA_LED"
+      (uuid "4")
+      (at 26 0)
+      (angle 0))
+    (gate "AA_LABEL"
+      (uuid "5")
+      (at -3 4)
+      (angle 0)
+      (gparam "LABEL_TEXT" "A")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "6")
+      (at -3 -4)
+      (angle 0)
+      (gparam "LABEL_TEXT" "B")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "7")
+      (at 27 4)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Light")
+      (gparam "TEXT_HEIGHT" "2"))
+    (gate "AA_LABEL"
+      (uuid "8")
+      (at 12 14)
+      (angle 0)
+      (gparam "LABEL_TEXT" "What's wrong here?")
+      (gparam "TEXT_HEIGHT" "3.0"))
+    (gate "AA_LABEL"
+      (uuid "9")
+      (at 24 9)
+      (angle 0)
+      (gparam "LABEL_TEXT" "Try every combination of A and B. Does the light always make sense?")
+      (gparam "TEXT_HEIGHT" "1.4"))
+    (wire
+      (ids "1")
+      (seg "0" h
+        (pts 2.5 2 11 2)
+        (connect "3" "IN_0")
+        (cross 2.5 "2"))
+      (seg "1" h
+        (pts 2 4 2.5 4)
+        (connect "1" "OUT_0")
+        (cross 2.5 "2"))
+      (seg "2" v
+        (pts 2.5 2 2.5 4)
+        (cross 2 "0")
+        (cross 4 "1")))
+    (wire
+      (ids "2")
+      (seg "0" h
+        (pts 2 -4 6.5 -4)
+        (connect "2" "OUT_0")
+        (cross 6.5 "2"))
+      (seg "1" h
+        (pts 6.5 0 11 0)
+        (connect "3" "IN_1")
+        (cross 6.5 "2"))
+      (seg "2" v
+        (pts 6.5 -4 6.5 0)
+        (cross -4 "0")
+        (cross 0 "1")))
+    (wire
+      (ids "3")
+      (seg "0" h
+        (pts 17 0 25 0)
+        (connect "3" "OUT")
+        (connect "4" "N_in0")))))

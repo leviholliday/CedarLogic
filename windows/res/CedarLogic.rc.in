@@ -1,0 +1,39 @@
+// CedarLogic for Windows (native): the app's icon, its manifest and its
+// version information. CMake fills in the paths (configure_file), so it
+// builds wherever the build directory is.
+#include <winres.h>
+
+1 ICON "@CL_ICON@"
+// The icon .cdl files carry in Explorer (the Mac's document icon): the
+// exe's second, ",1" in the file association.
+2 ICON "@CL_DOC_ICON@"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "@CL_MANIFEST@"
+// The launch screen's icon (the Mac's LaunchIcon.png) and the first
+// launch's sound (the Mac's FirstLaunch.m4a, as a WAV at its 0.75 volume).
+2 RCDATA "@CL_LAUNCH_ICON@"
+3 WAVE "@CL_LAUNCH_SOUND@"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "CedarLogic"
+      VALUE "FileDescription", "CedarLogic"
+      VALUE "FileVersion", "@PROJECT_VERSION@"
+      VALUE "LegalCopyright", "Copyright (C) 2026 CedarLogic"
+      VALUE "ProductName", "CedarLogic"
+      VALUE "ProductVersion", "@PROJECT_VERSION@"
+      VALUE "OriginalFilename", "CedarLogic.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

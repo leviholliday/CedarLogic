@@ -1,0 +1,222 @@
+// The app's CSS: the Mac app's look for the GTK widgets around the drawn
+// parts (the side panel, its search and family menu, the divider, the
+// dialogs), in the Mac palette's colours for the theme in use. Rebuilt on
+// every theme change (applyTheme).
+
+#include "App.h"
+#include "Chrome.h"
+
+#include <pango/pangocairo.h>
+#include <cstring>
+#include <string>
+
+namespace {
+
+std::string css(const Color& c) {
+	return format("rgba(%d,%d,%d,%.3f)", (int)(c.r * 255 + 0.5f), (int)(c.g * 255 + 0.5f), (int)(c.b * 255 + 0.5f), c.a);
+}
+
+GtkCssProvider* provider() {
+	static GtkCssProvider* p = [] {
+		GtkCssProvider* made = gtk_css_provider_new();
+		gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(made),
+		                                          GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+		return made;
+	}();
+	return p;
+}
+
+}  // namespace
+
+// Raspberry Pi OS sets its desktop in PibotoLt, a light face: thin strokes
+// that wash out in small and grey text. The app uses the regular weight of
+// the same family when it's there (Piboto), and any other "Light" or "Thin"
+// face the same way.
+void sturdyUiFont() {
+	GtkSettings* settings = gtk_settings_get_default();
+	if (!settings) return;
+	gchar* name = nullptr;
+	g_object_get(settings, "gtk-font-name", &name, nullptr);
+	if (!name) return;
+	PangoFontDescription* d = pango_font_description_from_string(name);
+	g_free(name);
+	std::string family = pango_font_description_get_family(d) ? pango_font_description_get_family(d) : "";
+	const bool lightWeight = pango_font_description_get_set_fields(d) & PANGO_FONT_MASK_WEIGHT &&
+	                         pango_font_description_get_weight(d) < PANGO_WEIGHT_NORMAL;
+	std::string regular = family;
+	auto strip = [&](const char* suffix) {
+		const size_t n = strlen(suffix);
+		if (regular.size() > n && regular.compare(regular.size() - n, n, suffix) == 0) regular = regular.substr(0, regular.size() - n);
+	};
+	for (const char* suffix : { " ExtraLight", " Extra Light", " UltraLight", " Light", " Thin", " Lt", "Lt" }) strip(suffix);
+	while (!regular.empty() && regular.back() == ' ') regular.pop_back();
+	if (regular != family || lightWeight) {
+		bool found = regular == family;
+		PangoFontFamily** families = nullptr;
+		int count = 0;
+		pango_font_map_list_families(pango_cairo_font_map_get_default(), &families, &count);
+		for (int i = 0; i < count && !found; i++) found = g_ascii_strcasecmp(pango_font_family_get_name(families[i]), regular.c_str()) == 0;
+		g_free(families);
+		if (found) {
+			pango_font_description_set_family(d, regular.c_str());
+			pango_font_description_set_weight(d, PANGO_WEIGHT_NORMAL);
+			gchar* sturdy = pango_font_description_to_string(d);
+			g_object_set(settings, "gtk-font-name", sturdy, nullptr);
+			g_free(sturdy);
+		}
+	}
+	pango_font_description_free(d);
+}
+
+void applyStyle() {
+	const Chrome c = chrome();
+	const bool dark = c.dark;
+	const Color ink = c.barInk();
+	const Color field = dark ? rgb255(41, 45, 53) : colorF(1, 1, 1);
+	const Color line = dark ? colorF(1, 1, 1, 0.10f) : colorF(0, 0, 0, 0.10f);
+	std::string s;
+	// The side panel.
+	// The side panel is the canvas's own colour, as the Mac's is.
+	s += "#palette, #sidepanel { background-color: " + css(c.canvas()) + "; }\n";
+	s += "#sash { background-color: " + css(c.sash()) + "; }\n";
+	// A tab renamed in place: a bare field on its card.
+	s += "#tab-rename { background: transparent; border: none; box-shadow: none; outline: none; min-height: 20px; padding: 0 2px; "
+	     "font-weight: bold; font-size: 11.5px; color: " + css(c.tabInk()) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#alert-entry { background: transparent; border: none; box-shadow: none; outline: none; min-height: 24px; padding: 0 2px; "
+	     "font-size: 13px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#ram-cell, #ram-jump { background: transparent; border: none; box-shadow: none; outline: none; min-height: 18px; padding: 0 2px; "
+	     "font-family: monospace; font-size: 11.5px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#ram-jump { font-size: 12px; padding-left: 4px; }\n";
+	s += "#palette entry { border-radius: 8px; min-height: 28px; background-color: " + css(field) + "; border: 1px solid " + css(line) +
+	     "; box-shadow: none; }\n";
+	s += "#palette entry:focus { border-color: " + css(c.accent()) + "; }\n";
+	s += "#palette combobox button { border-radius: 8px; min-height: 28px; padding: 0 10px; background-image: none; background-color: " +
+	     css(withAlpha(ink, dark ? 0.08f : 0.05f)) + "; border: 1px solid " + css(line) + "; box-shadow: none; font-weight: bold; }\n";
+	s += "#palette combobox button:hover { background-color: " + css(withAlpha(ink, dark ? 0.13f : 0.09f)) + "; }\n";
+	s += "#palette flowboxchild { padding: 2px; border-radius: 8px; }\n";
+	s += "#palette flowboxchild:hover { background-color: " + css(withAlpha(ink, 0.06f)) + "; }\n";
+	s += "#palette label.dim-label { color: " + css(withAlpha(ink, 0.7f)) + "; opacity: 1; }\n";
+	s += "#palette scrollbar { background: transparent; border: none; }\n";
+	// A hairline between the side panel and the canvas, easy to grab: the
+	// line is 1 point, the handle around it wider and invisible.
+	s += "paned > separator, paned.wide > separator { min-width: 1px; min-height: 1px; background-color: " + css(c.sash()) +
+	     "; background-image: none; margin: 0 -4px; border-left: 4px solid transparent; border-right: 4px solid transparent; "
+	     "background-clip: content-box; }\n";
+	s += "paned > separator:hover { background-color: " + css(withAlpha(c.accent(), 0.6f)) + "; }\n";
+	// The status bar, when it's on.
+	s += "#status { background-color: " + css(c.bar()) + "; }\n";
+	s += "#status label { font-size: 0.9em; }\n";
+	// Dialogs, as the Mac's sheets: paper, filled rounded fields that light
+	// in the accent when focused, soft rounded buttons with the default one
+	// in the accent, switches in the accent.
+	const Color paper = dark ? rgb255(28, 31, 37) : rgb255(250, 250, 252);
+	const Color fieldFill = dark ? rgb255(41, 45, 53) : rgb255(239, 240, 243);
+	const Color text = dark ? rgb255(226, 230, 238) : rgb255(30, 33, 40);
+	s += "dialog, dialog > box, dialog .dialog-vbox, messagedialog .dialog-vbox { background-color: " + css(paper) + "; }\n";
+	s += "dialog .dialog-action-area { padding: 6px 12px 12px 12px; }\n";
+	s += "dialog entry, dialog spinbutton, dialog textview, dialog combobox button { border-radius: 7px; background-image: none; background-color: " +
+	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
+	s += "dialog entry:focus, dialog spinbutton:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
+	s += "dialog button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
+	     "; border: none; box-shadow: none; min-height: 30px; padding: 0 14px; text-shadow: none; }\n";
+	s += "dialog button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
+	s += "dialog button.default, dialog button.suggested-action { background-color: " + css(c.accent()) + "; color: " + css(c.onAccent()) +
+	     "; font-weight: bold; }\n";
+	s += "dialog button.default label, dialog button.suggested-action label { color: " + css(c.onAccent()) + "; }\n";
+	s += "dialog button.default:hover, dialog button.suggested-action:hover { background-color: " + css(withAlpha(c.accent(), 0.88f)) + "; }\n";
+	s += "dialog button.destructive-action { background-color: rgba(229,72,77,0.14); color: rgb(229,72,77); }\n";
+	s += "switch { border-radius: 14px; } switch:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; }\n";
+	s += "check:checked, radio:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; color: " +
+	     css(c.onAccent()) + "; }\n";
+	// The pickers' search: a bare entry over the drawn field.
+	s += "#picker-search { background: transparent; border: none; box-shadow: none; outline: none; min-height: 24px; color: " + css(text) +
+	     "; }\n";
+	// The find bar: a pill floating over the top of the page.
+	s += "#findbar { background-color: " + css(dark ? rgb255(40, 43, 50) : rgb255(250, 250, 252)) + "; border: 1px solid " +
+	     css(withAlpha(ink, 0.18f)) + "; border-radius: 21px; padding: 4px 6px 4px 8px; box-shadow: 0 2px 8px " +
+	     css(colorF(0, 0, 0, dark ? 0.35f : 0.12f)) + "; min-height: 32px; }\n";
+	s += "#findbar entry, #findbar-entry { background: transparent; border: none; box-shadow: none; min-height: 24px; color: " + css(ink) +
+	     "; }\n";
+	s += "#findbar button { border-radius: 8px; background-image: none; border: none; box-shadow: none; min-height: 26px; min-width: 26px; }\n";
+	s += "#findbar-done { background-color: " + css(withAlpha(ink, 0.07f)) + "; padding: 0 12px; }\n";
+	s += "#findbar label.warning { color: rgb(245,148,33); }\n";
+	// The welcome's name box: a bare entry on its drawn field.
+	s += "#welcome-name { background: transparent; border: none; box-shadow: none; outline: none; color: rgb(242,242,242); "
+	     "caret-color: rgb(56,255,107); font-size: 15px; min-height: 28px; }\n";
+	// Settings: paper, with quiet hints and key caps.
+	s += "#settings, #settings > box { background-color: " + css(paper) + "; }\n";
+	// Every label in the app's own colours (not left to the desktop theme),
+	// and the hints a solid grey strong enough to read in small type.
+	const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
+	s += "#settings label, #gate-settings label, dialog label { color: " + css(text) + "; }\n";
+	s += "#settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
+	// Unticked boxes and rings outlined, so they show on a dark page too.
+	s += "#settings check:not(:checked), #settings radio:not(:checked), #gate-settings check:not(:checked) { background-image: none; "
+	     "background-color: " + css(fieldFill) + "; border: 1px solid " + css(withAlpha(text, 0.38f)) + "; box-shadow: none; }\n";
+	s += "#settings check:not(:checked) { border-radius: 4px; } #settings radio:not(:checked) { border-radius: 50%; }\n";
+	// Selected text in any field: the accent, not the desktop theme's colour.
+	s += "entry selection, textview text selection, label selection, spinbutton selection { background-color: " + css(c.accent()) +
+	     "; color: " + css(c.onAccent()) + "; }\n";
+	// Quieter text (a slider's value, notes) dims less than GTK's 55%.
+	s += ".dim-label { opacity: 0.8; }\n";
+	s += "#settings button:disabled, #settings button:disabled label, #settings check:disabled + label { color: " + css(withAlpha(text, 0.6f)) +
+	     "; }\n";
+	s += "#settings .heading, #settings .style-name { font-weight: bold; }\n";
+	s += "#settings .section { font-size: 0.8em; font-weight: bold; color: " + css(c.accent()) + "; }\n";
+	s += "#settings .recording { color: " + css(c.accent()) + "; font-size: 0.9em; }\n";
+	s += ".keycap { border-radius: 5px; padding: 1px 6px; min-width: 14px; font-size: 0.85em; font-weight: bold; background-color: " +
+	     css(withAlpha(text, 0.07f)) + "; border: 1px solid " + css(withAlpha(text, 0.16f)) + "; }\n";
+	s += "#settings #shortcut-keys { padding: 2px 4px; border-radius: 6px; background-color: transparent; min-height: 24px; }\n";
+	s += "#settings #shortcut-keys:hover { background-color: " + css(withAlpha(text, 0.06f)) + "; }\n";
+	s += "#settings entry, #settings combobox button, #settings spinbutton { border-radius: 7px; background-image: none; background-color: " +
+	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
+	s += "#settings entry:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
+	s += "#settings button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
+	     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; }\n";
+	s += "#settings button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
+	s += "#settings scale highlight { background-color: " + css(c.accent()) + "; border: none; }\n";
+	// A gate's settings: the Mac's sheet, its settings in a card.
+	const Color cardColor = dark ? rgb255(36, 40, 47) : rgb255(255, 255, 255);
+	s += "#gate-settings, #gate-settings > box { background-color: " + css(paper) + "; }\n";
+	s += "#gate-settings .sheet-title { font-weight: bold; font-size: 16px; }\n";
+	s += "#gate-settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
+	s += "#gate-settings .problem { color: rgb(229,72,77); }\n";
+	s += "#gate-settings entry.problem { border-color: rgb(229,72,77); }\n";
+	s += "#settings-card { background-color: " + css(cardColor) + "; border: 1px solid " + css(line) + "; border-radius: 12px; }\n";
+	s += "#settings-card separator { background-color: " + css(line) + "; min-height: 1px; }\n";
+	s += "#gate-settings button.destructive-action { background-color: rgba(229,72,77,0.10); color: rgb(229,72,77); }\n";
+	s += "#gate-settings button.destructive-action label { color: rgb(229,72,77); }\n";
+	// Tooltips: small dark rounded labels, as the Mac's.
+	s += "tooltip { border-radius: 6px; background-color: " + css(dark ? rgb255(52, 56, 64, 0.96f) : rgb255(40, 43, 50, 0.94f)) +
+	     "; color: white; padding: 2px; }\n";
+	s += "tooltip label { color: white; }\n";
+	// Menus (right-click, the window menu, the side panel's): the Mac's
+	// rounded panel, rows lit with the accent, shortcuts dimmed.
+	{
+		const Color menuBg = dark ? rgb255(38, 42, 49, 0.98f) : rgb255(250, 250, 252, 0.98f);
+		const Color dimInk = withAlpha(ink, 0.66f);
+		s += "menu, .menu, .context-menu { background-color: " + css(menuBg) + "; border: 1px solid " + css(line) +
+		     "; padding: 5px; }\n";
+		s += ".csd menu, .csd .menu, .csd .context-menu { border-radius: 10px; }\n";
+		s += "menu menuitem { padding: 4px 10px; min-height: 20px; border-radius: 6px; color: " + css(ink) + "; text-shadow: none; }\n";
+		s += "menu menuitem label { color: " + css(ink) + "; }\n";
+		s += "menu menuitem accelerator { color: " + css(dimInk) + "; margin-left: 18px; }\n";
+		s += "menu menuitem:hover { background-color: " + css(c.accent()) + "; background-image: none; box-shadow: none; }\n";
+		// A dropdown's rows (Settings' choices) are cell views, not labels.
+		s += "menu menuitem cellview { color: " + css(ink) + "; }\n";
+		// Only the lit row's own text: an open submenu counts as inside its
+		// lit parent row, so a plain descendant rule would light all of it.
+		s += "menuitem:hover > label, menuitem:hover > label > accelerator, menuitem:hover > box > label, menuitem:hover > arrow, "
+		     "menuitem:hover > cellview, menuitem:hover > accelerator { color: " + css(c.onAccent()) + "; }\n";
+		s += "menuitem:disabled > label, menuitem:disabled > label > accelerator, menuitem:disabled > box > label { color: " + css(withAlpha(ink, 0.5f)) + "; }\n";
+		s += "menu menuitem check, menu menuitem radio { margin-right: 6px; }\n";
+		s += "menu separator { margin: 4px 8px; min-height: 1px; background-color: " + css(line) + "; }\n";
+		s += "menu arrow { min-width: 14px; min-height: 14px; color: " + css(dimInk) + "; }\n";
+		s += "popover { border-radius: 12px; border: 1px solid " + css(line) + "; background-color: " + css(menuBg) + "; padding: 4px; }\n";
+		s += "popover modelbutton { padding: 5px 10px; border-radius: 6px; min-height: 20px; }\n";
+		s += "popover modelbutton:hover { background-color: " + css(c.accent()) + "; color: " + css(c.onAccent()) + "; }\n";
+	}
+	// The notebook holding the pages draws nothing of its own.
+	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
+	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);
+}
