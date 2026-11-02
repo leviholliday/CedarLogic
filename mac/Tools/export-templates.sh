@@ -2,8 +2,9 @@
 # Writes the Mac app's built-in templates (File > New from Template: the lab
 # page, the counter, the flip-flops and latches, the registers, the
 # combinational circuits, the counters and the Classic Mistakes) as files in
-# res/templates, for the apps that don't build them in Swift (Linux reads
-# them; see linux/App/Collections.cpp), named as --render-ui names them: template-<id>.cdl, and a flip-flop's
+# res/templates, for the apps that don't build them in Swift (Windows and
+# Linux read them; see windows/App/Collections.cpp, linux/App/Collections.cpp,
+# and the template checks in mac/Tools), named as --render-ui names them: template-<id>.cdl, and a flip-flop's
 # or register's Clock choices template-<id>-running.cdl and -pulse.cdl; index.tsv
 # lists id, group, name, detail and choices in the picker's order.
 #

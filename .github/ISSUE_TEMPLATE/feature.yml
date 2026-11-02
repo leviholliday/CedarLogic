@@ -1,0 +1,40 @@
+name: Feature idea
+description: Something CedarLogic could do, or do better.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Ideas are talked over here before anyone writes code, so please describe the problem first, then your idea.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Which app?
+      multiple: true
+      options:
+        - All of them
+        - CedarLogic for Mac
+        - CedarLogic for Windows
+        - CedarLogic for Linux
+        - CedarLogic Online (the website)
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: What are you trying to do, and what gets in the way? A class or lab you're working on helps.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: What would you like CedarLogic to do?
+    validations:
+      required: true
+  - type: textarea
+    id: other
+    attributes:
+      label: Anything else
+      description: Other ways you've tried, how another simulator does it, a screenshot or a .cdl file.
