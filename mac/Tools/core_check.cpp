@@ -6,6 +6,7 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "route/WireRoute.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -590,6 +591,167 @@ static void pasteDeleteUndoCases() {
 	}
 }
 
+// ---- One wire on three or more pins (a junction) --------------------------------
+
+// Draw a wire from one pin to another, as a press, a drag and a release.
+static void drawWire(CLDocument* doc, int pg, long ga, const char* pa, long gb, const char* pb) {
+	float ax = 0, ay = 0, bx = 0, by = 0;
+	doc->circuit.getGate(ga)->getHotspotCoords(pa, ax, ay);
+	doc->circuit.getGate(gb)->getHotspotCoords(pb, bx, by);
+	cl_edit_press(doc, pg, ax, ay, 0, 0.05);
+	cl_edit_drag(doc, (ax + bx) / 2, (ay + by) / 2);
+	cl_edit_drag(doc, bx, by);
+	cl_edit_release(doc, bx, by);
+}
+
+static guiWire* wireOn(CLDocument* doc, long g, const char* pin) {
+	guiGate* gt = doc->circuit.getGate(g);
+	return gt && gt->isConnected(pin) ? gt->getConnection(pin) : nullptr;
+}
+
+static int wiresOn(CLDocument* doc, int pg) {
+	int n = 0;
+	for (auto& w : *doc->page(pg)->getWireList()) if (w.second) n++;
+	return n;
+}
+
+// A toggle driving three AND gates over one wire: four pins. Variant 1 has
+// two of them on one part (seed 31's shape: a wire on two pins of one part
+// and one of another); variant 2 turns the AND gates first (their pins sit a
+// little off the grid).
+struct Junction { CLDocument* doc; long ids[4]; };
+static const char* const kJunctionPins[4] = { "OUT_0", "IN_0", "IN_1", "IN_0" };
+static Junction junction(int variant = 0) {
+	Junction j;
+	j.doc = cl_document_new();
+	const char* types[4] = { "AA_TOGGLE", "AA_AND2", "AA_AND2", "AA_AND2" };
+	const double at[4][2] = { { -20, 0 }, { 0, 8 }, { 2, -4 }, { -4, -14 } };
+	for (int i = 0; i < 4; i++) {
+		if (variant == 1 && i == 3) { j.ids[3] = j.ids[2]; continue; }
+		cl_edit_add_gate(j.doc, 0, types[i], at[i][0], at[i][1]);
+		j.ids[i] = newest(j.doc, 0);
+		if (variant == 2 && i > 0) {
+			cl_edit_select_none(j.doc, 0);
+			j.doc->circuit.getGate(j.ids[i])->select();
+			cl_edit_rotate(j.doc, 0);
+		}
+	}
+	cl_edit_select_none(j.doc, 0);
+	drawWire(j.doc, 0, j.ids[0], kJunctionPins[0], j.ids[1], kJunctionPins[1]);
+	drawWire(j.doc, 0, j.ids[2], kJunctionPins[2], j.ids[0], kJunctionPins[0]);   // from a free pin to one on the wire
+	drawWire(j.doc, 0, j.ids[3], kJunctionPins[3], j.ids[0], kJunctionPins[0]);
+	cl_edit_select_none(j.doc, 0);
+	return j;
+}
+
+static void junctionCases() {
+	printf("a wire on three or more pins\n");
+	{
+		Junction j = junction();
+		guiWire* w = wireOn(j.doc, j.ids[0], "OUT_0");
+		bool all = w && w->numConnections() == 4 && wiresOn(j.doc, 0) == 1;
+		for (int i = 1; i < 4; i++) all = all && wireOn(j.doc, j.ids[i], kJunctionPins[i]) == w;
+		CHECK(all && consistent(j.doc, "after drawing"), "three wires drawn to one pin make one wire on four pins");
+		CHECK(saveIsStable(j.doc), "... which saves and reopens the same");
+		CLDocument* back = reopen(j.doc);
+		guiWire* bw = back ? wireOn(back, j.ids[0], "OUT_0") : nullptr;
+		CHECK(bw && bw->numConnections() == 4 && consistent(back, "after reopen"), "... and reopens on all four pins");
+		if (back) cl_document_close(back);
+		cl_document_close(j.doc);
+	}
+	// Copy every subset of the four parts, paste it, float it and drop it
+	// (where it began, or elsewhere): the pasted wire holds just the pasted
+	// pins, or isn't there when fewer than two were pasted.
+	int bad = 0;
+	for (int variant = 0; variant < 3; variant++)
+	for (int mask = 1; mask < 16; mask++)
+		for (int drop = 0; drop < 3; drop++) {
+			Junction j = junction(variant);
+			cl_edit_select_none(j.doc, 0);
+			int chosen = 0;
+			for (int i = 0; i < 4; i++) if (mask & (1 << i)) j.doc->circuit.getGate(j.ids[i])->select();
+			for (int i = 0; i < 4; i++) if (j.doc->circuit.getGate(j.ids[i])->isSelected()) chosen++;
+			const std::string block = cl_edit_copy(j.doc, 0);
+			const int before = wiresOn(j.doc, 0), steps = cl_edit_undo_count(j.doc);
+			guiWire* source = wireOn(j.doc, j.ids[0], "OUT_0");
+			const char* back = nullptr;
+			bool ok = cl_edit_paste(j.doc, 0, block.c_str(), 30, 30, false, &back);
+			if (ok && cl_edit_float_begin(j.doc, 0, 30, 30)) {
+				const double dx = drop == 0 ? 0 : drop == 1 ? 7 : -3.5, dy = drop == 0 ? 0 : drop == 1 ? -5 : 11;
+				cl_edit_hover(j.doc, 0, 30 + dx / 2, 30 + dy / 2, 0.05);
+				cl_edit_hover(j.doc, 0, 30 + dx, 30 + dy, 0.05);
+				cl_edit_press(j.doc, 0, 30 + dx, 30 + dy, 0, 0.05);
+				cl_edit_release(j.doc, 30 + dx, 30 + dy);
+			}
+			const int made = wiresOn(j.doc, 0) - before;
+			ok = ok && made == (chosen >= 2 ? 1 : 0) && source->numConnections() == 4;
+			for (auto& e : *j.doc->page(0)->getWireList())
+				if (e.second && e.second != source) ok = ok && e.second->numConnections() == chosen;
+			ok = ok && consistent(j.doc, "after the drop") && saveIsStable(j.doc);
+			const std::string dropped = cl_document_save_text(j.doc);
+			int undone = 0;
+			while (cl_edit_undo_count(j.doc) > steps && cl_edit_undo(j.doc)) undone++;
+			ok = ok && wiresOn(j.doc, 0) == before && consistent(j.doc, "after Undo");
+			for (int i = 0; i < undone; i++) cl_edit_redo(j.doc);
+			ok = ok && std::string(cl_document_save_text(j.doc)) == dropped && consistent(j.doc, "after Redo");
+			if (!ok) { printf("    variant %d, parts %d, drop %d: %d wires made\n", variant, mask, drop, made); bad++; }
+			cl_document_close(j.doc);
+		}
+	CHECK(bad == 0, "any of its parts copied, pasted and dropped: the copy holds the pasted pins; Undo, Redo");
+	// Disconnect one pin, or Delete one part: Undo and Redo, each time whole.
+	for (int variant = 0; variant < 3; variant++)
+	for (int which = 0; which < 4; which++)
+		for (int del = 0; del < 2; del++) {
+			if (variant == 1 && which == 3) continue;   // the same part as 2
+			Junction j = junction(variant);
+			const std::string first = cl_document_save_text(j.doc);
+			if (del) {
+				cl_edit_select_none(j.doc, 0);
+				j.doc->circuit.getGate(j.ids[which])->select();
+				cl_edit_delete(j.doc, 0);
+			} else {
+				float x = 0, y = 0;
+				j.doc->circuit.getGate(j.ids[which])->getHotspotCoords(kJunctionPins[which], x, y);
+				cl_edit_context(j.doc, 0, x, y, 0.05);
+				cl_edit_disconnect_pin(j.doc, 0, x, y, 0.05);
+			}
+			const int rest = which == 0 ? 1 : 0;
+			guiWire* w = wireOn(j.doc, j.ids[rest], kJunctionPins[rest]);
+			const int left = variant == 1 && del && which == 2 ? 2 : 3;
+			bool ok = w && w->numConnections() == left && consistent(j.doc, "after") && saveIsStable(j.doc);
+			const std::string done = cl_document_save_text(j.doc);
+			cl_edit_undo(j.doc);
+			ok = ok && std::string(cl_document_save_text(j.doc)) == first && consistent(j.doc, "after Undo");
+			cl_edit_redo(j.doc);
+			ok = ok && std::string(cl_document_save_text(j.doc)) == done && consistent(j.doc, "after Redo");
+			CHECK(ok, (std::string(del ? "Delete part " : "Disconnect pin ") + std::to_string(which) + " (variant " + std::to_string(variant) +
+			           "): Undo and Redo give it back").c_str());
+			cl_document_close(j.doc);
+		}
+	// A pin already on one wire is never joined to a second (0.3.4 joined it,
+	// and deleting the part later left a wire on a part that was gone).
+	{
+		Junction j = junction();
+		cl_edit_add_gate(j.doc, 0, "AA_TOGGLE", -20, -25); const long t2 = newest(j.doc, 0);
+		cl_edit_add_gate(j.doc, 0, "AA_AND2", 10, -25); const long d = newest(j.doc, 0);
+		cl_edit_select_none(j.doc, 0);
+		drawWire(j.doc, 0, t2, "OUT_0", d, "IN_0");
+		const int n = wiresOn(j.doc, 0);
+		drawWire(j.doc, 0, j.ids[1], "IN_0", d, "IN_0");
+		drawWire(j.doc, 0, j.ids[2], "IN_1", t2, "OUT_0");
+		CHECK(wiresOn(j.doc, 0) == n && wireOn(j.doc, j.ids[0], "OUT_0")->numConnections() == 4 &&
+		      wireOn(j.doc, t2, "OUT_0")->numConnections() == 2 && consistent(j.doc, "after"),
+		      "a pin on one wire is never joined to a second");
+		cl_edit_select_none(j.doc, 0);
+		j.doc->circuit.getGate(j.ids[1])->select();
+		cl_edit_delete(j.doc, 0);
+		cl_edit_select_all(j.doc, 0);
+		cl_edit_nudge(j.doc, 0, 1, 1);
+		CHECK(consistent(j.doc, "after") && saveIsStable(j.doc), "... and deleting that part, then moving the rest, is safe");
+		cl_document_close(j.doc);
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
@@ -604,6 +766,7 @@ int main(int argc, char** argv) {
 	if (!fixtures.empty()) dragCases();
 	if (!fixtures.empty()) straightenCases();
 	pasteDeleteUndoCases();
+	junctionCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;
