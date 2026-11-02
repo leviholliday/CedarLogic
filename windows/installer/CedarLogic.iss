@@ -2,11 +2,11 @@
 ; CI (.github/workflows/windows-native.yml) from the folder the zip is made
 ; of. For this user only, so no administrator is needed: CedarLogic goes in
 ; %LOCALAPPDATA%\Programs\CedarLogic, with a Start menu entry (and one on
-; the desktop if asked), .cdl files opening in it, and an uninstaller in
-; Settings > Apps. The app's own updates keep working there: the folder is
+; the desktop if asked), .cdl files and cedarlogic:// links opening in it, and an
+; uninstaller in Settings > Apps. The app's own updates keep working there: the folder is
 ; the user's, and they replace the files beside the exe as in the zip.
 ;
-;   ISCC /DAppVersion=0.1.0 /DArch=x64 windows\installer\CedarLogic.iss
+;   ISCC /DAppVersion=0.4.0 /DArch=x64 windows\installer\CedarLogic.iss
 ;
 ; Arch is x64 or ARM64. AppFiles, the folder with CedarLogic.exe and res,
 ; is package\CedarLogic at the repo's root unless given (where CI makes the
@@ -19,7 +19,7 @@
 ; and InstallDir tells the app it was installed.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.4.0"
 #endif
 #ifndef Arch
   #define Arch "x64"
@@ -123,6 +123,15 @@ Root: HKCU; Subkey: "Software\Classes\.cdl\OpenWithProgids"; ValueType: string; 
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "CedarLogic Circuit"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},1"
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+; cedarlogic:// links (the website's Open in the App, a link in a chat, and
+; sync links -- cedarlogic://sync#k=..., which the app asks about before it
+; links anything): a URL
+; protocol, opened in CedarLogic with the link as the argument -- in the one
+; already running when there is one (the app hands it over).
+Root: HKCU; Subkey: "Software\Classes\cedarlogic"; ValueType: string; ValueName: ""; ValueData: "URL:CedarLogic"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\cedarlogic"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\cedarlogic\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"
+Root: HKCU; Subkey: "Software\Classes\cedarlogic\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
 Root: HKCU; Subkey: "Software\CedarLogic"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\CedarLogic\Native"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
 
@@ -136,3 +145,41 @@ Type: filesandordirs; Name: "{app}\res"
 Type: filesandordirs; Name: "{app}\res.new"
 Type: filesandordirs; Name: "{app}\res.old"
 Type: files; Name: "{app}\{#AppExe}.old"
+Type: files; Name: "{app}\install-channel"
+
+; Which testing group (Settings > General) a first run starts in, for the
+; app's installMarker(): {app}\install-channel, "beta" or "normal". The
+; same setup is published twice under two names, so the name says which:
+; the test build's is CedarLogic-Windows-Setup-<arch>.exe, a versioned
+; release's CedarLogic-<version>-Windows-Setup-<arch>.exe (docs/RELEASE-0.4.md
+; step 2). /CHANNEL=beta or /CHANNEL=normal says it outright (install.ps1,
+; or a name a download changed). A group already chosen in Settings stays.
+[Code]
+function InstallChannel(): String;
+var
+  Name: String;
+begin
+  Result := Lowercase(ExpandConstant('{param:CHANNEL|}'));
+  if (Result = 'beta') or (Result = 'normal') then Exit;
+  Name := Lowercase(ExtractFileName(ExpandConstant('{srcexe}')));
+  if Pos('cedarlogic-windows-setup-', Name) = 1 then
+    Result := 'beta'
+  else if (Pos('cedarlogic-', Name) = 1) and (Pos('-windows-setup-', Name) > 0) then
+    Result := 'normal'
+  else
+    Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Channel: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    Channel := InstallChannel();
+    if Channel <> '' then
+      SaveStringToFile(ExpandConstant('{app}\install-channel'), Channel, False)
+    else
+      DeleteFile(ExpandConstant('{app}\install-channel'));
+  end;
+end;

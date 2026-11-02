@@ -1499,8 +1499,16 @@ final class CanvasController: ObservableObject {
     var canUndo: Bool { undoManager?.canUndo ?? false }
     var canRedo: Bool { undoManager?.canRedo ?? false }
 
-    func undo() { undoManager?.undo() }
-    func redo() { undoManager?.redo() }
+    func undo() { keepTidyFirst(); undoManager?.undo() }
+    func redo() { keepTidyFirst(); undoManager?.redo() }
+    /// Undo or Redo with a Tidy Up on show: the engine keeps it first, as
+    /// any edit does (cl_edit_undo/redo settle it), a step the window must
+    /// have too. Left to the engine, Undo kept the tidy and took it back
+    /// there while the window took back the step before (one undo step out
+    /// for the rest of the session), and Redo kept it unseen.
+    private func keepTidyFirst() {
+        if !takingBack, document?.tidyActive == true { endTidy(keep: true) }
+    }
     func selectAll() { document?.selectAll(page: page); redraw(); selectionChanged() }
     func selectNone() { document?.selectNone(page: page); redraw(); selectionChanged() }
     func deleteSelection() { document?.deleteSelection(page: page); edited(); noteLockedHeld() }

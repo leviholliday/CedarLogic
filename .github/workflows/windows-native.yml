@@ -36,7 +36,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build
         shell: bash
@@ -61,6 +61,112 @@ jobs:
           $B/sim_check.exe $L format/tests/fixtures/lab6.cdl 0 before.png after.png
           $B/save_check.exe $L format/tests/fixtures/Broadcast.cdl format/tests/fixtures/Lab5.cdl \
             "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
+          # Parts locked in place: locking, undo, saving, moves that leave them,
+          # and the badge drawn only on the canvas being edited.
+          mkdir -p renders
+          $B/lock_check.exe $L renders/lock-check.png
+          # The built-in templates (res/templates, written from the Mac app's by
+          # mac/Tools/export-templates.sh): every one index.tsv names is there
+          # with its Clock choices, and each does what its labels say, one Step
+          # Clock at a time, with each clock choice.
+          "$(command -v python || command -v python3)" - <<'PY'
+          import os, sys
+          d = "res/templates"
+          rows = [l.split("\t") for l in open(os.path.join(d, "index.tsv"), encoding="utf-8").read().splitlines() if l]
+          want = []
+          for f in rows:
+              want.append("template-%s.cdl" % f[0])
+              choices = f[4] if len(f) > 4 else ""
+              want += ["template-%s-%s.cdl" % (f[0], c) for c in ("running", "pulse") if c in choices]
+          have = sorted(n for n in os.listdir(d) if n.endswith(".cdl"))
+          missing, extra = sorted(set(want) - set(have)), sorted(set(have) - set(want))
+          print("%d templates, %d files" % (len(rows), len(have)))
+          if missing or extra or len(have) != 50:
+              sys.exit("templates: missing %s, not in index.tsv %s" % (missing, extra))
+          PY
+          $B/clock_check.exe $L res/templates
+          $B/register_check.exe $L res/templates
+          $B/mistakes_check.exe $L res/templates
+          $B/examples_check.exe $L res/templates
+          $B/check_seq.exe $L --templates res/templates
+          # Page link groups in the engine (TO/FROM between linked pages only).
+          $B/pagelinks_check.exe $L format/tests/fixtures/pagelinks
+
+      # Signed updates (update-signing/UpdateSignature.h): the signature check (built
+      # with MSVC here) on RFC 8032's vectors and the ways a signature must fail; the app's
+      # public key against the signing script's; the updater's own code against fake
+      # releases (good, bad signature, stale manifest, wrong hash, downgrade...); and the
+      # signing script's dry run, with a throwaway key and Git's openssl, checked by the app.
+      - name: Signed update checks
+        if: matrix.run
+        shell: bash
+        run: |
+          B=windows/build/Release
+          $B/verify_check.exe
+          KEY=$($B/verify_check.exe --print-key | tr -d '\r')
+          echo "public key: $KEY"
+          grep -qx "PUBHEX=$KEY" scripts/sign-preview.sh || { echo "::error::sign-preview.sh has another public key"; exit 1; }
+          timeout 120 $B/CedarLogic.exe --update-self-test | tee update-self-test.log
+          grep -q "update self-test.*all passed" update-self-test.log
+          mkdir -p fake-release
+          printf 'a zip for the test\n' > fake-release/CedarLogic-Windows-native-x64.zip
+          printf 'an installer for the test\n' > fake-release/CedarLogic-Windows-Setup-x64.exe
+          TEST_KEY=$(scripts/sign-preview.sh --dry-run fake-release --tag windows-native-testing --commit "$GITHUB_SHA" --build 2 --test-key | tr -d '\r')
+          FAKE=$(cygpath -w "$PWD/fake-release")
+          timeout 60 $B/CedarLogic.exe --update-self-test --release "$FAKE" --key "$TEST_KEY" | tee signed-folder.log
+          grep -q "all passed" signed-folder.log
+          # Not with the real key (the test key signed it), and not once a file has changed.
+          if timeout 60 $B/CedarLogic.exe --update-self-test --release "$FAKE" --key "$KEY"; then echo "::error::verified with the wrong key"; exit 1; fi
+          printf 'changed\n' >> fake-release/CedarLogic-Windows-native-x64.zip
+          if timeout 60 $B/CedarLogic.exe --update-self-test --release "$FAKE" --key "$TEST_KEY"; then echo "::error::a changed file passed"; exit 1; fi
+
+      # A long working session in one window, a few hundred seeded random
+      # actions through the app's own code (windows/App/SessionCheck.h): parts,
+      # wires, drags, undo past the 500-step history, tabs, split view,
+      # Simulation View, the dialogs, saving and reopening -- checked for
+      # crashes, hangs, the edited state, autosave, the file reopening the same,
+      # page indices, GDI/USER objects and memory, and that closing the window
+      # stops its timers and frees its documents. The exe's .pdb names a crash's
+      # stack; a crash's minidump, the exe and the .pdb are kept with the logs.
+      # A FAIL fails the build. (Seeds 5-8 and a 1500-action seed 9 passed too;
+      # SESSION_SEEDS and SESSION_LONG run them again.)
+      - name: Session check
+        if: matrix.run
+        shell: bash
+        env:
+          CL_SESSION_DUMPS: ${{ github.workspace }}/session
+          CL_SESSION_TIME_CAP: '420'
+          SESSION_SEEDS: '1 2 3 4'
+        run: |
+          mkdir -p session
+          failed=0
+          for seed in ${SESSION_SEEDS:-1 2 3 4}; do
+            echo "== seed $seed"
+            code=0
+            timeout 480 windows/build/Release/CedarLogic.exe --session-check 300 $seed > session/seed-$seed.log 2>&1 || code=$?
+            cat session/seed-$seed.log
+            echo "   (exit $code)"
+            [ $code = 0 ] || failed=1
+          done
+          # And one long one (a quarter of an hour's work), when asked.
+          if [ -n "$SESSION_LONG" ]; then
+            echo "== seed 9, $SESSION_LONG actions"
+            code=0
+            CL_SESSION_TIME_CAP=1100 timeout 1200 windows/build/Release/CedarLogic.exe --session-check $SESSION_LONG 9 > session/seed-9-long.log 2>&1 || code=$?
+            cat session/seed-9-long.log
+            echo "   (exit $code)"
+            [ $code = 0 ] || failed=1
+          fi
+          if [ $failed != 0 ]; then cp windows/build/Release/CedarLogic.exe windows/build/Release/CedarLogic.pdb session/ 2>/dev/null || true; fi
+          exit $failed
+
+      - name: Upload the session check's logs
+        if: always() && matrix.run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Windows-session-check
+          path: session
+          if-no-files-found: warn
 
       # A folder that runs as it is: the exe, and res beside it with the gate
       # library, the help and the samples.
@@ -71,7 +177,7 @@ jobs:
           mkdir -p "$D/res"
           cp windows/build/Release/CedarLogic.exe "$D/"
           cp res/cl_gatedefs.xml "$D/res/"
-          cp -r res/help res/samples "$D/res/"
+          cp -r res/help res/samples res/templates "$D/res/"
           cp LICENSE "$D/LICENSE.txt"
           cat > "$D/README.txt" <<'EOT'
           CedarLogic for Windows (native test build)
@@ -81,7 +187,7 @@ jobs:
 
           The first time, CedarLogic asks whether to add itself to the Start
           menu and open .cdl files. Say yes and keep this folder where it is;
-          the ••• menu's Help > Remove from Start Menu undoes it. Otherwise
+          Help > Remove from Start Menu undoes it. Otherwise
           nothing is installed: delete the folder to remove it.
 
           For a normal install instead, use CedarLogic-Windows-Setup from the
@@ -112,7 +218,9 @@ jobs:
           }
           $iscc = Find-Iscc
           if (-not $iscc) {
-            choco install innosetup -y --no-progress
+            # Only when the runner image doesn't carry it (it has 6.7.1 today), and
+            # then the version CI has been using, not whatever is newest.
+            choco install innosetup --version 6.7.1 -y --no-progress
             $iscc = Find-Iscc
             if (-not $iscc) { throw "Inno Setup couldn't be installed (choco ended with $LASTEXITCODE)" }
           }
@@ -123,6 +231,20 @@ jobs:
           & $iscc "/DAppVersion=$version" "/DArch=${{ matrix.arch }}" windows\installer\CedarLogic.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item CedarLogic-Windows-Setup-${{ matrix.arch }}.exe
+
+      # Sync (docs/SYNC.md): CNG's SHA-256, HMAC and AES-256-GCM against the
+      # standards' answers, the code kept with DPAPI, the lock, the URL rules,
+      # then the engine's own self-test -- the design's test vectors (codes,
+      # keys, envelopes, the structure digest) and its scenarios on an
+      # in-process server -- all with the hooks the app uses. (Against the
+      # mock server too, by hand: --sync-test --server http://localhost:8787/api/sync/v1.)
+      # New and not yet seen on a real Windows, so for now it doesn't hold the
+      # zips back (take continue-on-error off once it has passed).
+      - name: Sync test
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: timeout 300 package/CedarLogic/CedarLogic.exe --sync-test | tee sync-test.log
 
       # Start the packaged app, open a circuit and take a picture of the whole
       # window: catches anything the zip forgot, and shows what it looks like.
@@ -139,7 +261,42 @@ jobs:
           test -s renders/window-new.png
           timeout 90 "$A" --dark --screenshot "$PWD/renders/window-Lab5-dark.png" format/tests/fixtures/Lab5.cdl
           timeout 90 "$A" --dark --sim-view --screenshot "$PWD/renders/window-sim.png" res/samples/practice.cdl
+          timeout 90 "$A" --dark --sim-view --projector --screenshot "$PWD/renders/window-sim-projector.png" res/samples/practice.cdl || true
+          # Classic tabs (Settings > Appearance > Tabs), on a circuit of several pages.
+          timeout 90 "$A" --classic-tabs --screenshot "$PWD/renders/tabs-classic.png" format/tests/fixtures/lab6.cdl || true
+          timeout 90 "$A" --dark --classic-tabs --screenshot "$PWD/renders/tabs-classic-dark.png" format/tests/fixtures/lab6.cdl || true
+          # Predict, Then Reveal: the lights covered with a guess on the first, then revealed and scored.
+          timeout 90 "$A" --dark --sim-view --predict --screenshot "$PWD/renders/predict-covered.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --sim-view --predict reveal --screenshot "$PWD/renders/predict-revealed.png" res/samples/practice.cdl || true
           timeout 90 "$A" --light --screenshot "$PWD/renders/window-practice.png" res/samples/practice.cdl
+          # A circuit from CedarLogic Online with parts locked in place (their
+          # badges), and its second page's clock set to "Only on Step Clock":
+          # the Step Clock button on, after a Step Clock, and in Simulation View's bar.
+          timeout 90 "$A" --light --screenshot "$PWD/renders/lock-in-place.png" format/tests/fixtures/web-online2.cdl || true
+          timeout 90 "$A" --dark --screenshot "$PWD/renders/lock-in-place-dark.png" format/tests/fixtures/web-online2.cdl || true
+          timeout 90 "$A" --light --run nextTab,stepClock --screenshot "$PWD/renders/step-clock.png" format/tests/fixtures/web-online2.cdl || true
+          timeout 90 "$A" --dark --sim-view --run nextTab --screenshot "$PWD/renders/step-clock-sim.png" format/tests/fixtures/web-online2.cdl || true
+          # Drawing on the circuit: a circuit with a drawing (shown), in Draw mode
+          # with the drawing bar (the pen; the highlighter in dark; the eraser
+          # above Simulation View's bar), one whose drawing is hidden (a dot on
+          # Draw), and Export as Image offering to include it.
+          D=format/tests/fixtures/drawing/cdl
+          timeout 90 "$A" --light --screenshot "$PWD/renders/drawing.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --light --run draw,inkPen --screenshot "$PWD/renders/drawing-bar.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --dark --run draw,inkHighlighter --screenshot "$PWD/renders/drawing-bar-highlighter-dark.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --dark --sim-view --run draw,inkEraser --screenshot "$PWD/renders/drawing-bar-sim.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --light --screenshot "$PWD/renders/drawing-hidden.png" $D/hidden-drawing.cdl || true
+          timeout 90 "$A" --dialog export --screenshot "$PWD/renders/export-image-drawing.png" $D/drawing-and-notes.cdl || true
+          # The notes pane (View > Show Notes) open on a circuit's notes, in
+          # each theme and in Simulation View, and one with no notes (its placeholder).
+          timeout 90 "$A" --light --run notes --screenshot "$PWD/renders/notes.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --dark --run notes --screenshot "$PWD/renders/notes-dark.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --sim-view --run notes --screenshot "$PWD/renders/notes-sim.png" $D/drawing-and-notes.cdl || true
+          timeout 90 "$A" --light --run notes --screenshot "$PWD/renders/notes-empty.png" format/tests/fixtures/Lab5.cdl || true
+          # Find: the bar looking for the practice circuit's AND gates, then Find
+          # Next twice (F3: "3 of ..."), and Find Previous from the first (the last one).
+          timeout 90 "$A" --light --find "AND" --run findNext,findNext --screenshot "$PWD/renders/find-next.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --find "AND" --run findPrevious --screenshot "$PWD/renders/find-previous-dark.png" res/samples/practice.cdl || true
           # Split view (lab6: a circuit on each of its first tabs), focus mode
           # (the tabs as the title row), both, and a tab being renamed in place.
           timeout 90 "$A" --split --screenshot "$PWD/renders/window-split.png" format/tests/fixtures/lab6.cdl || true
@@ -155,6 +312,49 @@ jobs:
           timeout 90 "$A" --truth-tab 0 --dark --dialog truth-table --screenshot "$PWD/renders/dialog-truth-table-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 1 --dialog truth-table --screenshot "$PWD/renders/truth-table-kmap.png" res/samples/practice.cdl || true
           timeout 90 "$A" --truth-tab 2 --dialog truth-table --screenshot "$PWD/renders/truth-table-formulas.png" res/samples/practice.cdl || true
+          # Check My Circuit: a half adder's lights against its formula (a match), then
+          # against a wrong one in other names (picked by position, a wrong row in red);
+          # and the practice circuit's (its unknown lights noted).
+          mkdir -p check
+          cat > check/half-adder.cdl <<'EOF'
+          (cedarlogic
+            (version 3)
+            (generator "CedarLogic 4.0.0")
+            (page 0
+              (name "Half Adder")
+              (gate "AA_TOGGLE" (uuid "1") (at -12 4) (angle 0) (lparam "OUTPUT_NUM" "0"))
+              (gate "AA_LABEL" (uuid "2") (at -15 4) (angle 0) (gparam "LABEL_TEXT" "A") (gparam "TEXT_HEIGHT" "2"))
+              (gate "AA_TOGGLE" (uuid "3") (at -12 -2) (angle 0) (lparam "OUTPUT_NUM" "0"))
+              (gate "AA_LABEL" (uuid "4") (at -15 -2) (angle 0) (gparam "LABEL_TEXT" "B") (gparam "TEXT_HEIGHT" "2"))
+              (gate "AI_XOR2" (uuid "5") (at 4 3) (angle 0))
+              (gate "AA_AND2" (uuid "6") (at 4 -3) (angle 0))
+              (gate "GA_LED" (uuid "7") (at 12 3) (angle 0))
+              (gate "AA_LABEL" (uuid "8") (at 15 3) (angle 0) (gparam "LABEL_TEXT" "S") (gparam "TEXT_HEIGHT" "2"))
+              (gate "GA_LED" (uuid "9") (at 12 -3) (angle 0))
+              (gate "AA_LABEL" (uuid "10") (at 16 -3) (angle 0) (gparam "LABEL_TEXT" "Cout") (gparam "TEXT_HEIGHT" "2"))
+              (wire (ids "1001")
+                (seg "0" h (pts -10 4 1 4) (connect "1" "OUT_0") (connect "5" "IN_0") (cross -4 "1"))
+                (seg "1" v (pts -4 -2 -4 4) (connect "6" "IN_0") (cross 4 "0")))
+              (wire (ids "1002")
+                (seg "0" h (pts -10 -2 1 -2) (connect "3" "OUT_0") (connect "6" "IN_1") (cross -6 "1"))
+                (seg "1" v (pts -6 -2 -6 2) (connect "5" "IN_1") (cross -2 "0")))
+              (wire (ids "1003") (seg "0" h (pts 7 3 11 3) (connect "5" "OUT") (connect "7" "N_in0")))
+              (wire (ids "1004") (seg "0" h (pts 7 -3 11 -3) (connect "6" "OUT") (connect "9" "N_in0")))))
+          EOF
+          timeout 90 "$A" --dialog check --check "S = A ^ B; Cout = AB" --screenshot "$PWD/renders/check.png" check/half-adder.cdl || true
+          timeout 90 "$A" --dark --dialog check --check "Sum = A + B; Carry = AB" --screenshot "$PWD/renders/check-wrong-dark.png" check/half-adder.cdl || true
+          timeout 90 "$A" --dialog check --check "Y1 = A ^ B ^ C; Y2 = AB; Y3 = AC; Y4 = BC" --screenshot "$PWD/renders/check-practice.png" res/samples/practice.cdl || true
+          # Clocked circuits, clock pulse by clock pulse (docs/CHECK-SEQUENTIAL.md), with
+          # the step strip: the D flip-flop against a timing table (a match, then a
+          # wrong pulse, in dark), the JK flip-flop against its state table, and the
+          # 3-bit counter against a count (with no switches it has no truth table:
+          # the window opens on Check alone).
+          T=res/templates
+          timeout 90 "$A" --dialog check --check $'Pulse | D | Q\n1 | 1 | 1\n2 | 0 | 0\n3 | 1 | 1' --screenshot "$PWD/renders/check-timing.png" $T/template-builtin-ff-d.cdl || true
+          timeout 90 "$A" --dark --dialog check --check $'Pulse | D | Q\n1 | 1 | 1\n2 | 0 | 1' --screenshot "$PWD/renders/check-timing-wrong-dark.png" $T/template-builtin-ff-d.cdl || true
+          timeout 90 "$A" --dialog check --check $'Q J K | Q+\n0 0 0 | 0\n0 0 1 | 0\n0 1 0 | 1\n0 1 1 | 1\n1 0 0 | 1\n1 0 1 | 0\n1 1 0 | 1\n1 1 1 | 0' --screenshot "$PWD/renders/check-states.png" $T/template-builtin-ff-jk.cdl || true
+          timeout 90 "$A" --dialog check --check "0, 1, 2, 3, 4, 5, 6, 7, repeat" --screenshot "$PWD/renders/check-count.png" $T/template-builtin-count-3bit.cdl || true
+          timeout 90 "$A" --dark --dialog check --check "0, 1, 3, 2, repeat" --screenshot "$PWD/renders/check-count-wrong-dark.png" $T/template-builtin-count-3bit.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
           for p in 0 1 2 3 4; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
           timeout 90 "$A" --dialog tour --screenshot "$PWD/renders/tour.png" || true
@@ -165,6 +365,15 @@ jobs:
           timeout 90 "$A" --dialog versions --screenshot "$PWD/renders/version-history.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog templates --screenshot "$PWD/renders/templates.png" || true
           timeout 90 "$A" --dark --dialog templates --screenshot "$PWD/renders/templates-dark.png" || true
+          # A flip-flop selected (its Clock line), a Classic Mistake, and the D
+          # flip-flop template after a Step Clock.
+          timeout 90 "$A" --template builtin-ff-jk --dialog templates --screenshot "$PWD/renders/templates-flip-flop.png" || true
+          timeout 90 "$A" --dark --template builtin-mistake-gated-clock --dialog templates --screenshot "$PWD/renders/templates-mistake-dark.png" || true
+          timeout 90 "$A" --light --run stepClock --screenshot "$PWD/renders/template-ff-d-stepped.png" res/templates/template-builtin-ff-d.cdl || true
+          # Page links: three pages, two sharing links (the same dot after their
+          # names), one on its own.
+          timeout 90 "$A" --light --screenshot "$PWD/renders/page-links.png" format/tests/fixtures/pagelinks/three-pages-split.cdl || true
+          timeout 90 "$A" --dark --screenshot "$PWD/renders/page-links-dark.png" format/tests/fixtures/pagelinks/three-pages-split.cdl || true
           timeout 90 "$A" --formula "S = A xor B xor Cin; Cout = AB + Cin(A ^ B)" --dialog formula --screenshot "$PWD/renders/build-formula.png" || true
           timeout 90 "$A" --dialog scope --timing "$PWD/renders/timing.png" --screenshot "$PWD/renders/scope.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --dark --dialog scope --timing "$PWD/renders/timing-color.png" --timing-color --screenshot "$PWD/renders/scope-dark.png" res/samples/practice.cdl || true
@@ -175,12 +384,18 @@ jobs:
           timeout 60 "$A" --splash-frame 4.0 "$PWD/renders/splash-first-4.0.png" --first-launch || true
           timeout 90 "$A" --card-frame 0.35 --screenshot "$PWD/renders/opening-card.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --card-frame 0.35 --screenshot "$PWD/renders/opening-card-dark.png" res/samples/practice.cdl || true
+          # Ctrl+Tab's panel (its own picture, see-through corners and shadow).
+          timeout 90 "$A" --dialog switcher --screenshot "$PWD/renders/switcher.png" format/tests/fixtures/Lab5.cdl || true
+          timeout 90 "$A" --dark --dialog switcher --screenshot "$PWD/renders/switcher-dark.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dialog quit --screenshot "$PWD/renders/quit.png" || true
           timeout 90 "$A" --dark --dialog quit --screenshot "$PWD/renders/quit-dark.png" || true
           # The app's alert card: a delete's question, and a name to type.
           timeout 90 "$A" --dialog alert --screenshot "$PWD/renders/alert.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog alert --screenshot "$PWD/renders/alert-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog rename --screenshot "$PWD/renders/alert-rename.png" res/samples/practice.cdl || true
+          # A cedarlogic:// link that can't be opened.
+          timeout 90 "$A" --dialog bad-link --screenshot "$PWD/renders/link-bad.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog bad-link --screenshot "$PWD/renders/link-bad-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog about --screenshot "$PWD/renders/about.png" || true
           # A wire's value, shown where the pointer rests on it (and the whole
           # wire lit, in Simulation View).
@@ -195,7 +410,17 @@ jobs:
           timeout 60 "$A" --feedback-probe || echo "::warning::the feedback probe failed"
           timeout 90 "$A" --dialog feedback --screenshot "$PWD/renders/feedback.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog feedback --screenshot "$PWD/renders/feedback-dark.png" res/samples/practice.cdl || true
-          for p in 0 1 2 3 4 5 6; do timeout 90 "$A" --dialog whatsnew --page $p --screenshot "$PWD/renders/whatsnew-$p.png" || true; done
+          # Its states: mid-send, a send that failed, and the thank-you card (nothing is sent).
+          timeout 90 "$A" --dialog feedback-sending --screenshot "$PWD/renders/feedback-sending.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog feedback-failed --screenshot "$PWD/renders/feedback-failed.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog feedback-sent --screenshot "$PWD/renders/feedback-sent.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog feedback-capped --screenshot "$PWD/renders/feedback-capped.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dialog feedback-summary --screenshot "$PWD/renders/feedback-summary.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog feedback-sent --screenshot "$PWD/renders/feedback-sent-dark.png" res/samples/practice.cdl || true
+          # The 0.4 tour: the intro, six chapters and the last page. (It's drawn in the
+          # brand's own look, so the dark run is the same pictures, kept to show it.)
+          for p in 0 1 2 3 4 5 6 7; do timeout 90 "$A" --dialog whatsnew --page $p --screenshot "$PWD/renders/whatsnew-$p.png" || true; done
+          for p in 0 1 4 7; do timeout 90 "$A" --dark --dialog whatsnew --page $p --screenshot "$PWD/renders/whatsnew-$p-dark.png" || true; done
           timeout 90 "$A" --dialog help --screenshot "$PWD/renders/help.png" || true
           timeout 90 "$A" --dark --dialog help --help-page editing --screenshot "$PWD/renders/help-editing-dark.png" || true
           timeout 90 "$A" --dialog help --help-page first --screenshot "$PWD/renders/help-first.png" || true
@@ -205,6 +430,9 @@ jobs:
           timeout 90 "$A" --dark --place AA_RAM_4x4 --dialog gate-settings --screenshot "$PWD/renders/ram-editor-dark.png" || true
           timeout 90 "$A" --dialog export --screenshot "$PWD/renders/export-image.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --dialog export --screenshot "$PWD/renders/export-image-dark.png" res/samples/practice.cdl || true
+          # Export Lab Report's sheet (practice.cdl has TO labels, so the timing diagram's tick is on).
+          timeout 90 "$A" --dialog lab-report --screenshot "$PWD/renders/lab-report-sheet.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog lab-report --screenshot "$PWD/renders/lab-report-sheet-dark.png" format/tests/fixtures/Lab5.cdl || true
           windows/build/Release/render_png.exe res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           cp before.png after.png renders/
 
@@ -221,6 +449,18 @@ jobs:
             timeout 90 "$A" --light --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p.png" || true
             timeout 90 "$A" --dark --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p-dark.png" || true
           done
+          # Settings > Sync, off and on (sample devices, with Remove), what Remove asks, the code sheet with its QR
+          # code, and what linking asks.
+          for t in light dark; do
+            sfx=$([ $t = dark ] && echo -dark || echo "")
+            timeout 90 "$A" --$t --dialog sync --screenshot "$PWD/renders/sync-off$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-on --screenshot "$PWD/renders/sync-on$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-code --screenshot "$PWD/renders/sync-code$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-link --screenshot "$PWD/renders/sync-link$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-pair --screenshot "$PWD/renders/sync-pair$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-pair-expired --screenshot "$PWD/renders/sync-pair-expired$sfx.png" || true
+            timeout 90 "$A" --$t --dialog sync-remove --screenshot "$PWD/renders/sync-remove$sfx.png" || true
+          done
           timeout 90 "$A" --light --dialog shortcuts --screenshot "$PWD/renders/shortcuts.png" || true
           timeout 90 "$A" --dark --dialog shortcuts --screenshot "$PWD/renders/shortcuts-dark.png" || true
           for s in seamless classic minimal; do
@@ -234,10 +474,98 @@ jobs:
           timeout 90 "$A" --dark --toolbar-style minimal --split --screenshot "$PWD/renders/toolbar-minimal-split-dark.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --light --toolbar-style minimal --focus --screenshot "$PWD/renders/toolbar-minimal-focus.png" format/tests/fixtures/lab6.cdl || true
 
+      # The menu bar: each menu open (by its keys) in light and dark, a
+      # narrow window, focus mode (where the bar has slid away and Alt opens
+      # File under the tabs), then the menu bar driven by its keys -- Alt,
+      # the arrows, Escape, Alt+letter, a letter in a menu -- each step PASS
+      # or FAIL (--menu-test). New, so for now it doesn't hold the zips back.
+      - name: Menu bar
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          for m in 0 1 2 3 4 5 6; do
+            timeout 90 "$A" --light --menu $m --screenshot "$PWD/renders/menu-$m.png" res/samples/practice.cdl || true
+          done
+          for m in 0 3; do
+            timeout 90 "$A" --dark --menu $m --screenshot "$PWD/renders/menu-$m-dark.png" res/samples/practice.cdl || true
+          done
+          timeout 90 "$A" --dark --sim-view --menu 4 --screenshot "$PWD/renders/menu-4-sim-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --focus --menu 0 --screenshot "$PWD/renders/menu-0-focus.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --light --toolbar-style classic --menu 1 --screenshot "$PWD/renders/menu-1-classic.png" res/samples/practice.cdl || true
+          timeout 120 "$A" --menu-test res/samples/practice.cdl | tee menu-test.log
+          test "${PIPESTATUS[0]}" -eq 0
+
+      # Send Feedback's recording: through the form, a screenshot, three
+      # seconds recorded while the window zooms (the recording bar's picture
+      # taken), the MP4 read back (its length, its first frame as a PNG), a
+      # picture of the form with both attached, and a recording thrown away.
+      # The video and pictures are kept with the renders. New, so for now it
+      # doesn't hold the zips back.
+      - name: Feedback recording
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders
+          timeout 180 package/CedarLogic/CedarLogic.exe --feedback-capture-test "$(cygpath -w "$PWD/renders")" res/samples/practice.cdl | tee feedback-capture.log
+          test "${PIPESTATUS[0]}" -eq 0
+
+      # Export Lab Report without a window (--lab-report): a circuit run a
+      # while, then its PDF -- in colour and in black and white, and for a
+      # circuit of several pages -- each checked to be a whole PDF (its
+      # header, its end, at least one page) and kept with the pictures: the
+      # pages are pictures drawn here with Direct2D, so open one to see them.
+      # (A first run on real Windows: a report that fails shows as a warning
+      # and keeps the pictures, but doesn't hold the zips back.)
+      - name: Lab report
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          timeout 180 "$A" --lab-report res/samples/practice.cdl "$PWD/renders/lab-report-practice.pdf"
+          timeout 180 "$A" --lab-report res/samples/practice.cdl "$PWD/renders/lab-report-practice-bw.pdf" bw
+          timeout 180 "$A" --lab-report format/tests/fixtures/lab6.cdl "$PWD/renders/lab-report-lab6.pdf"
+          for f in renders/lab-report-*.pdf; do
+            test -s "$f"
+            head -c 5 "$f" | grep -q '^%PDF-'
+            tail -c 8 "$f" | grep -aq '%%EOF'
+            pages=$(grep -a -o '/Type /Page /Parent' "$f" | wc -l)
+            echo "$f: $(wc -c < "$f") bytes, $pages pages"
+            test "$pages" -ge 1
+          done
+
+      # Export as Image's files without a window (--export-image): a PNG and a
+      # PDF (one page holding the same picture) of a circuit, and a PDF of one
+      # with a drawing; each PDF checked to be whole, with its one page.
+      - name: Export as Image files
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          timeout 90 "$A" --export-image format/tests/fixtures/Lab5.cdl "$PWD/renders/export-Lab5.png"
+          timeout 90 "$A" --export-image format/tests/fixtures/Lab5.cdl "$PWD/renders/export-Lab5.pdf"
+          timeout 90 "$A" --export-image format/tests/fixtures/drawing/cdl/drawing-and-notes.cdl "$PWD/renders/export-drawing.pdf"
+          test -s renders/export-Lab5.png
+          for f in renders/export-*.pdf; do
+            test -s "$f"
+            head -c 5 "$f" | grep -q '^%PDF-'
+            tail -c 8 "$f" | grep -aq '%%EOF'
+            pages=$(grep -a -o '/Type /Page /Parent' "$f" | wc -l)
+            echo "$f: $(wc -c < "$f") bytes, $pages page"
+            test "$pages" -eq 1
+          done
+
       # Clicks on the toolbar's buttons, the tabs' +, and the window's drawn
       # Minimize (on the toolbar, and on the tabs in focus mode) and Close,
-      # as Windows sends them (press, then release), and a gate dragged from
-      # the side panel onto the canvas, each checked for its effect: a
+      # as Windows sends them (press, then release), a stroke drawn on the
+      # canvas in Draw mode (saved and read back, erased, the erase undone),
+      # and a gate dragged from the side panel onto the canvas, each checked for its effect: a
       # picture can't show that a button does nothing. Once in each toolbar
       # style (Minimal leaves most tools to its ••• menu, so they're skipped).
       - name: Click test
@@ -250,6 +578,33 @@ jobs:
           done
           exit $failed
 
+      # Dragging's numbers, for the owner without a PC (windows/DRAG-DIAGNOSIS.md):
+      # the drag self-test (a gate dragged round a circle with real input,
+      # its PASS/FAIL and SMOOTH/CHOPPY lines and the frame, draw and present
+      # times), as built, with the old drawing (CEDARLOGIC_DRAG_OLD=1) and
+      # without the kept gate geometry (CEDARLOGIC_NO_GEOMETRY_CACHE=1); then
+      # the canvas's frame time for a few circuits both ways (--bench-draw).
+      # A hosted runner has no GPU (Direct2D draws in software there), so the
+      # numbers are for comparing, not what a PC gets. Never holds the build back.
+      - name: Drag self-test and draw timings
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p renders
+          A=package/CedarLogic/CedarLogic.exe
+          run() { echo "== $1"; shift; "$@"; echo "   (exit $?: 0 PASS, 1 FAIL, 2 SKIP)"; }
+          run "drag self-test" timeout 120 "$A" --drag-selftest "$PWD/renders/drag-new.log" || true
+          run "drag self-test, old drawing" env CEDARLOGIC_DRAG_OLD=1 timeout 120 "$A" --drag-selftest "$PWD/renders/drag-old.log" || true
+          run "drag self-test, no kept geometry" env CEDARLOGIC_NO_GEOMETRY_CACHE=1 timeout 120 "$A" --drag-selftest "$PWD/renders/drag-nocache.log" || true
+          for f in res/samples/practice.cdl format/tests/fixtures/Lab5.cdl format/tests/fixtures/lab6.cdl; do
+            echo "== $f"
+            timeout 120 "$A" --bench-draw 150 "$f" || true
+          done
+          echo "== res/samples/practice.cdl, Simulation View"
+          timeout 120 "$A" --sim-view --bench-draw 150 res/samples/practice.cdl || true
+          exit 0
+
       # The zip's copy adding itself to Start and to .cdl files (as its
       # first-run question's yes does), checked the way Windows looks them
       # up, then taking itself away again.
@@ -258,6 +613,91 @@ jobs:
         shell: bash
         continue-on-error: true
         run: timeout 60 package/CedarLogic/CedarLogic.exe --start-menu-test
+
+      # Share Link and cedarlogic:// links (windows/App/ShareLink.h). The link
+      # format's own checks (round trips, links python's zlib made -- one of each
+      # kind of deflate block -- and ones that must be refused, and the cache's
+      # files); the link the app makes for a circuit, which python's zlib must
+      # inflate to the circuit; a link python's zlib made of it, which the app
+      # must decode; and the app opening a cedarlogic:// link (a picture of the
+      # window it opens: the circuit, named from the link). New and not yet seen
+      # on a real Windows, so for now it doesn't hold the zips back (take
+      # continue-on-error off once it has passed).
+      # Send Feedback's side of the server's rules, against the Mac's stand-in
+      # (mac/Tools/feedback-check/server.py): the install id, the required
+      # summary, the 10-a-day cap answered once and not retried, Request more,
+      # and other 429s still retried -- the Mac's feedback-check cases.
+      - name: Feedback server check
+        if: matrix.run
+        shell: bash
+        run: |
+          PY=$(command -v python || command -v python3)
+          rm -f fbport
+          "$PY" mac/Tools/feedback-check/server.py fbport &
+          SERVER=$!
+          for _ in $(seq 100); do [ -s fbport ] && break; sleep 0.1; done
+          code=0
+          CL_FEEDBACK_URL="http://127.0.0.1:$(cat fbport)" CL_FEEDBACK_KEY=check timeout 120 package/CedarLogic/CedarLogic.exe --feedback-check || code=$?
+          kill $SERVER 2>/dev/null || true
+          exit $code
+
+      # The testing groups (Settings > General, Updater.h): the update check's
+      # own code over HTTP against a stand-in for GitHub
+      # (windows/Tools/update-channel-server.py), with fake releases signed by
+      # a test key -- normal testers take the newest full release with Windows
+      # zips and pass over pre-releases and drafts, beta testers take the test
+      # build, switching from beta to normal never goes back, settings from
+      # before the choice make a beta tester (said once) and a new install a
+      # normal one, and bad signatures, other releases' manifests and changed
+      # downloads are refused.
+      - name: Testing group check
+        if: matrix.run
+        shell: bash
+        run: |
+          PY=$(command -v python || command -v python3)
+          rm -rf chanroot chanport
+          mkdir chanroot
+          "$PY" windows/Tools/update-channel-server.py chanroot chanport &
+          SERVER=$!
+          for _ in $(seq 100); do [ -s chanport ] && break; sleep 0.1; done
+          code=0
+          timeout 180 package/CedarLogic/CedarLogic.exe --channel-check --server "http://127.0.0.1:$(cat chanport)" \
+            --root "$(cygpath -w "$PWD/chanroot")" | tee channel-check.log || code=$?
+          kill $SERVER 2>/dev/null || true
+          [ $code = 0 ] && grep -q "channel check.*all passed" channel-check.log
+
+      # Recently Deleted without a window: the Mac's launch-selftest `trash`
+      # state (the list and its dates, the 30-day sweep, Restore, Delete Now)
+      # in a library of its own.
+      - name: Recently Deleted check
+        if: matrix.run
+        shell: bash
+        run: timeout 60 package/CedarLogic/CedarLogic.exe --trash-check
+
+      - name: Share link test
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: |
+          A=package/CedarLogic/CedarLogic.exe
+          PY=$(command -v python || command -v python3)
+          mkdir -p renders
+          "$PY" - <<'PY'
+          import base64, zlib
+          raw = open("res/samples/practice.cdl", "rb").read()
+          c = zlib.compressobj(9, zlib.DEFLATED, -15)
+          open("share-python.link", "w").write("c=" + base64.urlsafe_b64encode(c.compress(raw) + c.flush()).decode().rstrip("="))
+          PY
+          timeout 60 "$A" --share-test res/samples/practice.cdl share-app.link share-python.link
+          "$PY" - <<'PY'
+          import base64, zlib
+          app = open("share-app.link").read().strip()
+          made = zlib.decompress(base64.urlsafe_b64decode(app + "=" * (-len(app) % 4)), -15)
+          assert made == open("res/samples/practice.cdl", "rb").read(), "python's zlib inflated the app's link to something else"
+          print("python's zlib inflates the app's link (%d characters) to the circuit (%d bytes)" % (len(app), len(made)))
+          PY
+          timeout 90 "$A" --screenshot "$PWD/renders/link-opened.png" "cedarlogic://open#c=$(cat share-app.link)&n=Shared%20practice"
+          test -s renders/link-opened.png
 
       # Install as someone would (quietly here), check CedarLogic starts from
       # there, is in Start and owns .cdl files; then uninstall and check it's
@@ -280,9 +720,26 @@ jobs:
             foreach ($f in @($exe, "$dir\res\cl_gatedefs.xml", "$dir\unins000.exe", $lnk)) {
               if (-not (Test-Path $f)) { Get-Content setup.log; throw "not installed: $f" }
             }
+            # The version it says everywhere is the CMake project's: Settings > Apps (the
+            # uninstall entry setup wrote) and the exe's own version info.
+            $want = (Select-String -Path windows/CMakeLists.txt -Pattern 'project\(\S+ VERSION ([0-9.]+)' | Select-Object -First 1).Matches[0].Groups[1].Value
+            $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { $_.GetValue('DisplayName') -like 'CedarLogic*' } | Select-Object -First 1
+            if (-not $entry) { throw 'setup left no entry for Settings > Apps' }
+            if ($entry.GetValue('DisplayVersion') -ne $want) { throw "Settings > Apps says version $($entry.GetValue('DisplayVersion')), not $want" }
+            $info = (Get-Item $exe).VersionInfo
+            if ($info.ProductVersion -ne $want -or $info.FileVersion -ne $want) { throw "the exe's version info says $($info.FileVersion) / $($info.ProductVersion), not $want" }
+            Write-Output "version $want in Settings > Apps and in the exe"
+            # The test build's setup (by its name) marks a first run a beta tester.
+            $mark = Get-Content "$dir\install-channel" -ErrorAction SilentlyContinue
+            if ($mark -ne 'beta') { throw "install-channel says '$mark', not beta" }
             $open = (Get-Item "$prog\shell\open\command").GetValue('')
             if ($open -ne "`"$exe`" `"%1`"") { throw ".cdl files open with: $open" }
             if ((Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -ne 'CedarLogic.Circuit') { throw '.cdl isn''t CedarLogic''s' }
+            # cedarlogic:// links: a URL protocol, run with the link as the argument.
+            $scheme = 'HKCU:\Software\Classes\cedarlogic'
+            if ((Get-Item $scheme).GetValueNames() -notcontains 'URL Protocol') { throw 'cedarlogic isn''t a URL protocol' }
+            $link = (Get-Item "$scheme\shell\open\command").GetValue('')
+            if ($link -ne "`"$exe`" `"%1`"") { throw "cedarlogic:// links open with: $link" }
             $p = Start-Process -FilePath $exe -ArgumentList '--screenshot', "`"$PWD\renders\installed.png`"", "`"$PWD\res\samples\practice.cdl`"" -PassThru
             $null = $p.Handle   # so ExitCode is there once it's gone
             $p | Wait-Process -Timeout 90
@@ -292,7 +749,7 @@ jobs:
             # folder away last: wait for that.
             for ($i = 0; $i -lt 90 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
             if (Test-Path $dir) { Write-Output "::warning::left in $dir after uninstalling: $((Get-ChildItem -Recurse -Name $dir) -join ', ')" }
-            foreach ($f in @($exe, "$dir\res", $lnk, $prog, 'HKCU:\Software\CedarLogic\Native')) {
+            foreach ($f in @($exe, "$dir\res", $lnk, $prog, $scheme, 'HKCU:\Software\CedarLogic\Native')) {
               if (Test-Path $f) { throw "still there after uninstalling: $f" }
             }
             if ((Test-Path 'HKCU:\Software\Classes\.cdl') -and (Get-Item 'HKCU:\Software\Classes\.cdl').GetValue('') -eq 'CedarLogic.Circuit') {
@@ -308,7 +765,7 @@ jobs:
           }
 
       - name: Upload zip and installer
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Windows-native-${{ matrix.arch }}
           path: |
@@ -318,7 +775,7 @@ jobs:
 
       - name: Upload renders
         if: always() && matrix.run
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Windows-native-renders
           path: renders
@@ -335,10 +792,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download the zips and installers
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: CedarLogic-Windows-native-*
           path: zips
@@ -348,7 +805,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -f zips/*.png
+          rm -f zips/*.png zips/*.pdf
           shopt -s nullglob
           ls -la zips
           TAG=windows-native-testing
@@ -393,6 +850,14 @@ jobs:
             # The first time: the tag is made here, on this commit.
             gh release create "$TAG" --prerelease --target "$GITHUB_SHA" --title "Native Windows test build" --notes "$NOTES"
           fi
+          # CI never signs. The app installs only a zip a signed SHA256SUMS names, and the key is
+          # only on the owner's Mac: after this run, scripts/sign-preview.sh windows checks the
+          # release and signs it. Until then the build reaches no one. The last build's manifest
+          # goes first, so the release is plainly unsigned while it changes (a stale one couldn't
+          # pass anyway: it names the old commit and the old files' hashes).
+          for a in SHA256SUMS SHA256SUMS.sig; do
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$a"; then gh release delete-asset "$TAG" "$a" -y; fi
+          done
           # The zips (what the updater downloads) before the installers.
           gh release upload "$TAG" zips/*.zip --clobber
           setups=(zips/*.exe)

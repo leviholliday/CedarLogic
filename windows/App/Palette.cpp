@@ -5,7 +5,10 @@
 #include "Chrome.h"
 #include "Drawn.h"
 #include "Collections.h"
+#include "DragLog.h"
 #include "Window.h"
+#include "SessionCheck.h"
+#include "Fade.h"
 
 #include <algorithm>
 #include <cmath>
@@ -161,6 +164,9 @@ void GatePalette::chooseCategory(POINT screen) {
 
 void GatePalette::showCategory(int index) {
 	if (index < 0 || index >= (int)categories.size()) return;
+	// The gates of the new category fade in over the old ones (the Mac's
+	// grid changes with an .opacity transition, 0.15 s).
+	if (index != category || GetWindowTextLengthW(search) > 0) fade::crossfade(tiles, nullptr, 150);
 	category = index;
 	if (GetWindowTextLengthW(search) > 0) SetWindowTextW(search, L"");   // fills
 	else fill();
@@ -429,7 +435,15 @@ void GatePalette::dragTo() {
 		}
 	} else if (win->isFloating()) {
 		const int page = c->page();
-		if (page >= 0 && cl_edit_hover(win->document(), page, wx, wy, c->unitsPerPoint())) c->redraw();
+		const double t0 = draglog::on() ? nowSeconds() : 0;
+		const bool changed = page >= 0 && cl_edit_hover(win->document(), page, wx, wy, c->unitsPerPoint());
+		if (draglog::on() && page >= 0) {
+			double ox, oy;
+			c->origin(ox, oy);
+			draglog::motion(draglog::View{ c->widget(), win->document(), page, ox, oy, c->unitsPerPoint() }, "palette", 0, false, vx, vy, wx,
+			                wy, (nowSeconds() - t0) * 1000);
+		}
+		if (changed) c->redrawWhileMoving();
 	}
 }
 
@@ -451,6 +465,11 @@ void GatePalette::drop() {
 		c->worldPoint(vx, vy, wx, wy);
 		cl_edit_press(win->document(), page, wx, wy, 0, c->unitsPerPoint());
 		cl_edit_release(win->document(), wx, wy);
+		if (draglog::on()) {
+			double ox, oy;
+			c->origin(ox, oy);
+			draglog::release(draglog::View{ c->widget(), win->document(), page, ox, oy, c->unitsPerPoint() }, wx, wy);
+		}
 		win->edited();
 		c->focus();
 	} else {
@@ -712,7 +731,8 @@ void MiniMap::paint() {
 					o.selectionFade = 1;
 					cl_document_draw_ex(win->document(), page, cache, s, left, top, upp, &o);
 				}
-				if (FAILED(cache->EndDraw())) { cache->Release(); cache = nullptr; }
+				const HRESULT hr = cache->EndDraw();
+				if (FAILED(hr)) { health::noteD2dFailure(hr, "the minimap's EndDraw"); cache->Release(); cache = nullptr; }
 				cacheKey = key;
 			}
 		}

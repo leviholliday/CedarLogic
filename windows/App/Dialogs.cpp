@@ -3,10 +3,12 @@
 #include "Dialogs.h"
 #include "Alert.h"
 #include "Window.h"
+#include "SessionCheck.h"
 #include "Chrome.h"
 #include "Brand.h"
 #include "Collections.h"
 #include "Formula.h"
+#include "Fade.h"
 
 #include <uxtheme.h>
 
@@ -28,6 +30,8 @@ const int kBrowseBase = 2000;   // its Choose... button
 const int kButtonBase = 100;    // Form::buttons
 const int kLabelBase = 3000;    // a check box's label (a click on it ticks the box)
 const int kTabsId = 4000;       // Form::pages' row
+const int kProgressId = 4001;   // Form::setProgress's bar
+const int kSettingsGap = 12;    // points between settings in the Settings layout (the Mac's)
 const int kStepBase = 5000;     // a stepper's − and +: kStepBase + 2 * field (+ 1 for +)
 const UINT kShowFocus = WM_APP + 21;   // a scrolling form: bring the focused control into view
 
@@ -72,7 +76,9 @@ void drawOnDC(HDC dc, const RECT& r, UINT dpi, const std::function<void(ID2D1Ren
 	rt->BeginDraw();
 	rt->SetTransform(D2D1::Matrix3x2F::Scale(s, s));
 	draw(rt, (r.right - r.left) / s, (r.bottom - r.top) / s);
-	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
+	const HRESULT hr = rt->EndDraw();
+	if (FAILED(hr)) health::noteD2dFailure(hr, "a dialog's EndDraw");
+	if (hr == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
 }
 
 // A toggle's state (owner-drawn buttons keep none of their own).
@@ -317,7 +323,9 @@ void paintPicture(const FormField& x, const DRAWITEMSTRUCT* di) {
 	const COLORREF back = darkColors().back;
 	rt->Clear(D2D1::ColorF(GetRValue(back) / 255.0f, GetGValue(back) / 255.0f, GetBValue(back) / 255.0f));
 	if (x.paint) x.paint(rt, (r.right - r.left) / s, (r.bottom - r.top) / s);
-	if (rt->EndDraw() == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
+	const HRESULT hr = rt->EndDraw();
+	if (FAILED(hr)) health::noteD2dFailure(hr, "a dialog's EndDraw");
+	if (hr == D2DERR_RECREATE_TARGET) { rt->Release(); rt = nullptr; }
 }
 
 // The tips under fields in the Settings layout: the message font, a size
@@ -329,6 +337,20 @@ HFONT hintFont(UINT dpi) {
 	LOGFONTW lf = {};
 	GetObjectW(uiFont(dpi), sizeof lf, &lf);
 	lf.lfHeight = MulDiv(lf.lfHeight, 11, 12);
+	HFONT f = CreateFontIndirectW(&lf);
+	fonts[dpi] = f;
+	return f;
+}
+
+// A heading in a form (the Mac's bold 13-point section titles): the dialog's
+// font, bold.
+HFONT headingFont(UINT dpi) {
+	static std::map<UINT, HFONT> fonts;
+	auto it = fonts.find(dpi);
+	if (it != fonts.end()) return it->second;
+	LOGFONTW lf = {};
+	GetObjectW(uiFont(dpi), sizeof lf, &lf);
+	lf.lfWeight = FW_SEMIBOLD;
 	HFONT f = CreateFontIndirectW(&lf);
 	fonts[dpi] = f;
 	return f;
@@ -505,10 +527,13 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (f->onInit) f->onInit(*f);
 		});
 		if (f->timerMs > 0) SetTimer(d, kFormTimer, (UINT)f->timerMs, nullptr);
+		// It comes up with a short fade, as the Mac's windows do (rather
+		// than a control at a time as they draw).
+		fade::fadeIn(d);
 		// The first box to type in, or the first list, has the keyboard (on
 		// the page showing: one hidden on another would take the typing).
 		for (FormField& x : f->fields) {
-			if (!f->pages.empty() && x.page != f->page) continue;
+			if ((!f->pages.empty() && x.page != f->page) || x.hidden) continue;
 			if (x.kind == FormField::Text || x.kind == FormField::List) { SetFocus(x.hwnd); return FALSE; }
 		}
 		return TRUE;
@@ -521,6 +546,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			if (f->okText.empty()) return TRUE;
 			std::string bad;
 			guarded("a dialog", [&] { if (f->validate) bad = f->validate(*f); });
+			if (bad == "\n") return TRUE;   // stay open and say nothing: an answer is on its way
 			if (!bad.empty()) { f->setProblem(bad); MessageBeep(MB_ICONWARNING); return TRUE; }
 			f->capture();
 			EndDialog(d, IDOK);
@@ -643,6 +669,25 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 	}
 	case WM_DRAWITEM: {
 		const DRAWITEMSTRUCT* di = reinterpret_cast<const DRAWITEMSTRUCT*>(lp);
+		if (di->CtlID == kProgressId) {
+			// A note over a slim bar in the accent, as the Mac's ProgressView
+			// with its note under it.
+			const DialogColors& c = darkColors();
+			const Chrome ch = chrome();
+			guarded("a dialog", [&] {
+				drawOnDC(di->hDC, di->rcItem, dpiOf(di->hwndItem), [&](ID2D1RenderTarget* rt, float w, float h) {
+					rt->Clear(d2d(c.back));
+					const float barW = std::min(w, 220.0f), barY = h / 2 + 3;
+					drawText(rt, f->progressNote, D2D1::RectF(0, barY - 20, w, barY - 3), 11.5f, d2d(c.dim));
+					fillRound(rt, D2D1::RectF(0, barY, barW, barY + 5), 2.5f, d2d(c.line));
+					const float done = (float)std::min(1.0, std::max(0.0, f->progressValue));
+					// Never quite empty: something is happening.
+					const float fill = std::max(10.0f, barW * done);
+					fillRound(rt, D2D1::RectF(0, barY, fill, barY + 5), 2.5f, ch.accent());
+				});
+			});
+			return TRUE;
+		}
 		if (di->CtlID == kTabsId) {
 			const DialogColors& c = darkColors();
 			const Chrome ch = chrome();
@@ -758,7 +803,9 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 		// Tips under fields dimmed; what's wrong in red.
 		HWND ctl = (HWND)lp;
 		COLORREF ink = c.text;
-		if (ctl == f->problem) ink = RGB(220, 64, 64);
+		const INT_PTR tone = (INT_PTR)GetPropW(ctl, L"clTipProblem");
+		if (ctl == f->problem || tone == 2) ink = RGB(220, 64, 64);
+		else if (tone == 1) ink = RGB(242, 140, 31);   // the High priority's orange: needs doing
 		else if (GetPropW(ctl, L"clTip") || GetPropW(ctl, L"clDim")) ink = c.dim;
 		if (msg == WM_CTLCOLORSTATIC && !IsWindowEnabled(ctl)) ink = c.dim;
 		// A disabled or read-only box asks here too: it keeps its field colour.
@@ -796,7 +843,7 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 			rt->Clear(d2d(c.back));
 			const float s = dpiOf(d) / 96.0f;
 			for (const FormField& x : f->fields) {
-				if (x.frame.right <= x.frame.left || (!f->pages.empty() && x.page != f->page)) continue;
+				if (x.frame.right <= x.frame.left || x.hidden || (!f->pages.empty() && x.page != f->page)) continue;
 				const float top = (float)(x.frame.top - f->scrollY), bottom = (float)(x.frame.bottom - f->scrollY);
 				const D2D1_RECT_F r = D2D1::RectF(x.frame.left / s + 0.5f, top / s + 0.5f, x.frame.right / s - 0.5f, bottom / s - 0.5f);
 				const bool on = focus == x.hwnd;
@@ -826,7 +873,12 @@ void Form::build() {
 	auto sc = [&](int v) { return scaled(v, dpi); };
 	HFONT font = uiFont(dpi);
 	HFONT tipFont = settingsLayout ? hintFont(dpi) : font;
-	const int margin = sc(16), gap = sc(10), rowH = sc(30), checkH = sc(24), lineH = sc(17);
+	// The Settings layout keeps the Mac's proportions (SettingsView.swift):
+	// 28 points either side, 12 between settings, labels in a column at
+	// least 150 wide, 12 from their controls.
+	const int margin = settingsLayout ? sc(28) : sc(16), gap = settingsLayout ? sc(kSettingsGap) : sc(10), rowH = sc(30), checkH = sc(24),
+	          lineH = sc(17);
+	const int labelGap = settingsLayout ? sc(12) : sc(10);
 	const int width = sc(this->width);
 	const int fullW = width - 2 * margin;
 	const bool iconBar = !pages.empty() && !pageIcons.empty();
@@ -841,6 +893,9 @@ void Form::build() {
 		const std::string& l = x.kind == FormField::Text || x.kind == FormField::Choice ? x.label : x.side;
 		if (!l.empty()) labelW[pageOf(x)] = std::max(labelW[pageOf(x)], textPixels(dialog, font, l));
 	}
+	// Every page's controls start in the same place, as the Mac's do.
+	if (settingsLayout)
+		for (int& w : labelW) if (w > 0) w = std::max(w, sc(150));
 	auto buttonWidth = [&](const std::string& label) { return std::max(sc(88), textPixels(dialog, font, label) + sc(34)); };
 
 	int y = margin;
@@ -850,7 +905,7 @@ void Form::build() {
 		if (iconBar) {
 			tabs = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY, 0, 0, width, sc(68), dialog,
 			                       (HMENU)(INT_PTR)kTabsId, appInstance(), nullptr);
-			y = sc(68) + sc(20);
+			y = sc(68) + (settingsLayout ? sc(22) : sc(20));
 		} else {
 			tabs = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY, margin, y, fullW, sc(34), dialog,
 			                       (HMENU)(INT_PTR)kTabsId, appInstance(), nullptr);
@@ -860,6 +915,7 @@ void Form::build() {
 		pageY.assign(pages.size(), y);
 	}
 	const int firstY = y;
+	contentTop = y;
 	std::vector<int> rowTop(fields.size(), y);
 	int gridCol = 0, gridRowY = y;
 	for (size_t i = 0; i < fields.size(); i++) {
@@ -868,7 +924,7 @@ void Form::build() {
 		const size_t pg = pageOf(x);
 		if (!pages.empty()) y = pageY[pg];
 		const int labelWidth = labelW[pg];
-		const int ctrlX = labelWidth > 0 ? margin + labelWidth + sc(10) : margin;
+		const int ctrlX = labelWidth > 0 ? margin + labelWidth + labelGap : margin;
 		const int ctrlW = width - ctrlX - margin;
 		// A button beside this field takes the end of its row.
 		const bool hasBeside = i + 1 < fields.size() && fields[i + 1].kind == FormField::Button && fields[i + 1].beside &&
@@ -883,11 +939,22 @@ void Form::build() {
 			int bx = ctrlX + ctrlW - bw;
 			if (before.kind == FormField::Check && before.grid == 0)
 				bx = std::min(bx, ctrlX + sc(44) + sc(6) + textPixels(dialog, font, before.label) + sc(14));
+			// After a button, or a choice (as wide as its longest item in
+			// Settings, as the Mac's Testing group picker and its Check Now):
+			// right beside it.
+			if ((before.kind == FormField::Button || before.kind == FormField::Choice) && before.hwnd) {
+				RECT br;
+				GetWindowRect(before.hwnd, &br);
+				MapWindowPoints(nullptr, dialog, (POINT*)&br, 2);
+				bx = br.right + sc(8);
+			}
 			x.hwnd = CreateWindowExW(0, L"BUTTON", W(x.label).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, bx,
 			                         rowTop[i - 1] + (before.kind == FormField::Check ? (checkH - rowH) / 2 : 0), bw, rowH, dialog, id,
 			                         appInstance(), nullptr);
 			SetWindowSubclass(x.hwnd, hoverProc, 4, 0);
 			rowTop[i] = rowTop[i - 1];
+			x.top = rowTop[i];
+			x.span = 0;
 			if (!pages.empty()) pageY[pg] = y;
 			continue;
 		}
@@ -964,8 +1031,12 @@ void Form::build() {
 		case FormField::Check: {
 			// A toggle (as Windows 11 and the Mac both show yes/no), and its
 			// words as a label beside it; a click on either flips it.
-			const int colW = inGrid ? ctrlW / x.grid : ctrlW;
-			const int colX = inGrid ? ctrlX + gridCol * colW : ctrlX;
+			// A grid with no label in the left column (under a heading, as the
+			// Mac's Toolbar page has it): the whole width.
+			const bool wide = inGrid && x.wideGrid;
+			const int gridX = wide ? margin : ctrlX, gridW = wide ? fullW : ctrlW;
+			const int colW = inGrid ? gridW / x.grid : ctrlW;
+			const int colX = inGrid ? gridX + gridCol * colW : ctrlX;
 			const int box = sc(44);
 			x.hwnd = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
 			                         colX, y, box, checkH, dialog, id, appInstance(), nullptr);
@@ -991,7 +1062,8 @@ void Form::build() {
 			int w = ctrlW - besideW;
 			if (settingsLayout) {
 				int longest = 0;
-				for (const std::string& c : x.choices) longest = std::max(longest, textPixels(dialog, font, c));
+				// Measured as choiceProc draws it (13 points), not in the dialog's smaller font.
+				for (const std::string& c : x.choices) longest = std::max(longest, sc((int)std::ceil(textWidth(c, 13))));
 				w = std::min(w, std::max(sc(150), longest + sc(48)));
 			}
 			x.hwnd = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
@@ -1075,7 +1147,12 @@ void Form::build() {
 		// Its tip under it, dimmed, wrapped to its width (a Check in a row of
 		// several: under the row).
 		if (!x.tip.empty()) {
-			if (inGrid) { y = gridRowY + checkH; gridCol = 0; tipX = ctrlX; tipW = ctrlW; }
+			if (inGrid) {
+				y = gridRowY + checkH;
+				gridCol = 0;
+				tipX = x.wideGrid ? margin : ctrlX;
+				tipW = x.wideGrid ? fullW : ctrlW;
+			}
 			// (Elsewhere, a line, as these dialogs have always had.)
 			const int line = wrappedHeight(dialog, tipFont, "Ag", tipW);
 			const int h = settingsLayout ? std::max(wrappedHeight(dialog, tipFont, x.tip, tipW), x.tipLines * line) : lineH;
@@ -1086,11 +1163,16 @@ void Form::build() {
 			x.others.push_back(x.tipWindow);
 			y = top + h;
 		}
+		x.top = rowTop[i];
+		x.span = y - rowTop[i];
 		if (!pages.empty()) pageY[pg] = y;
 	}
 	if (!pages.empty()) {
 		pageBottoms = pageY;
 		y = *std::max_element(pageY.begin(), pageY.end());
+	} else {
+		// One page, for fields shown and put away (setHidden).
+		pageBottoms.assign(1, y);
 	}
 
 	// What's wrong, and the buttons along the bottom on the right: the extra
@@ -1117,18 +1199,25 @@ void Form::build() {
 			buttonWindows.push_back(b);
 			x -= sc(8);
 		}
+		// Room left of the buttons for setProgress (hidden until then).
+		if (x - sc(4) > margin + sc(60)) {
+			progress = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | SS_OWNERDRAW, margin, y, x - sc(4) - margin, btnH, dialog,
+			                           (HMENU)(INT_PTR)kProgressId, appInstance(), nullptr);
+		}
 		y += btnH + margin;
 		footerGap = gap;
 		footerButtonsAt = lineH + sc(4);
 		footerBelow = btnH + margin;
 	} else {
-		y += margin + sc(4);
-		footerGap = margin + sc(4);
+		const int below = settingsLayout ? sc(22) : margin + sc(4);   // the Mac's 22 under the last setting
+		y += below;
+		footerGap = below;
 		footerButtonsAt = footerBelow = 0;
 	}
 
 	setFontTree(dialog, font);
 	for (FormField& f : fields) {
+		if (f.kind == FormField::Note && f.heading) SendMessageW(f.hwnd, WM_SETFONT, (WPARAM)headingFont(dpi), TRUE);
 		if ((f.kind == FormField::List || f.kind == FormField::Text) && f.mono) SendMessageW(f.hwnd, WM_SETFONT, (WPARAM)monoFont(dpi), TRUE);
 		if (f.tipWindow) SendMessageW(f.tipWindow, WM_SETFONT, (WPARAM)tipFont, TRUE);
 		if (f.kind == FormField::Text && f.arrowsMove >= 0 && f.arrowsMove < (int)fields.size())
@@ -1166,9 +1255,18 @@ void Form::build() {
 			SendMessageW(f.hwnd, LVM_SETTEXTCOLOR, 0, c.text);
 		}
 
+	// Fields that start out hidden take no room.
+	bool anyHidden = false;
+	for (size_t pg = 0; pg < pageCount; pg++) {
+		bool any = false;
+		for (const FormField& f : fields) any = any || (f.hidden && (size_t)f.page == pg);
+		if (any) relayout((int)pg);
+		anyHidden = anyHidden || any;
+	}
+
 	// Size the window around what's in it (the page it opens on, with pages),
 	// centred on its owner.
-	if (!pages.empty() && page >= 0 && page < (int)pageBottoms.size())
+	if (page >= 0 && page < (int)pageBottoms.size())
 		y = pageBottoms[page] + footerGap + footerButtonsAt + footerBelow;
 	RECT rc = { 0, 0, width, y };
 	const DWORD style = (DWORD)GetWindowLongW(dialog, GWL_STYLE), ex = (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE);
@@ -1208,7 +1306,8 @@ void Form::build() {
 		top = std::max<int>(mi.rcWork.top, std::min<int>(top, mi.rcWork.bottom - wh));
 	}
 	SetWindowPos(dialog, nullptr, left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE | (scrollHeight > 0 ? SWP_FRAMECHANGED : 0));
-	if (!pages.empty()) showPage(page);
+	// (Without pages, only to put away the fields that start hidden.)
+	if (!pages.empty() || anyHidden) showPage(page);
 }
 
 void Form::scrollTo(int to) {
@@ -1278,18 +1377,75 @@ void Form::enable(int field, bool on) {
 	}
 }
 
+// The page's fields in their places, one under another, the hidden ones
+// taking no room (a button beside another stays on its row).
+void Form::relayout(int pg) {
+	if (dialog == nullptr) return;
+	const int gap = scaled(settingsLayout ? kSettingsGap : 10, dpiOf(dialog));
+	int y = contentTop;
+	bool first = true;
+	int lastDelta = 0;
+	auto move = [&](HWND h, int dy) {
+		if (h == nullptr || dy == 0) return;
+		RECT r;
+		GetWindowRect(h, &r);
+		MapWindowPoints(nullptr, dialog, (POINT*)&r, 2);
+		SetWindowPos(h, nullptr, r.left, r.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	};
+	for (size_t i = 0; i < fields.size(); i++) {
+		FormField& x = fields[i];
+		if (x.page != pg) continue;
+		const bool beside = x.kind == FormField::Button && x.beside && i > 0 && fields[i - 1].page == x.page;
+		int delta;
+		if (beside) {
+			delta = lastDelta;   // on the row of the field before it
+		} else {
+			if (x.hidden) { lastDelta = 0; continue; }
+			const int top = first ? contentTop : y + gap;
+			delta = top - x.top;
+			first = false;
+			y = top + x.span;
+			lastDelta = delta;
+		}
+		if (x.hidden) continue;
+		move(x.hwnd, delta);
+		move(x.extra, delta);
+		for (HWND o : x.others) move(o, delta);
+		OffsetRect(&x.frame, 0, delta);
+		x.top += delta;
+	}
+	if (pg >= 0 && pg < (int)pageBottoms.size()) pageBottoms[pg] = y;
+}
+
+void Form::hiddenChanged(int pg) {
+	if (dialog == nullptr) return;
+	if (pg == page && scrollY != 0) scrollTo(0);
+	relayout(pg);
+	if (pg == page) showPage(page);
+}
+
+void Form::setHidden(int field, bool hide) {
+	if (field < 0 || field >= (int)fields.size() || fields[field].hidden == hide) return;
+	fields[field].hidden = hide;
+	hiddenChanged(fields[field].page);
+}
+
 void Form::showPage(int to) {
+	const int was = page;
 	page = std::max(0, std::min((int)pages.size() - 1, to));
 	if (dialog == nullptr) return;
+	// Another page: the one going dissolves into it (the window fits the new
+	// page at once; the picture is cut to it).
+	const HWND picture = page != was ? fade::crossfade(dialog, nullptr, 150) : nullptr;
 	// Back to the top first: the fields are placed as if never scrolled.
 	if (scrollY != 0) scrollTo(0);
 	HWND focus = nullptr;
 	for (FormField& x : fields) {
-		const int show = x.page == page ? SW_SHOW : SW_HIDE;
+		const int show = x.page == page && !x.hidden ? SW_SHOW : SW_HIDE;
 		if (x.hwnd) ShowWindow(x.hwnd, show);
 		if (x.extra) ShowWindow(x.extra, show);
 		for (HWND o : x.others) ShowWindow(o, show);
-		if (!focus && x.page == page && x.hwnd && (x.kind == FormField::Text || x.kind == FormField::Choice || x.kind == FormField::Check))
+		if (!focus && x.page == page && !x.hidden && x.hwnd && (x.kind == FormField::Text || x.kind == FormField::Choice || x.kind == FormField::Check))
 			focus = x.hwnd;
 	}
 	if (HWND tabs = GetDlgItem(dialog, kTabsId)) InvalidateRect(tabs, nullptr, FALSE);
@@ -1306,7 +1462,9 @@ void Form::showPage(int to) {
 			MapWindowPoints(nullptr, dialog, (POINT*)&pr, 2);
 			SetWindowPos(problem, nullptr, pr.left, problemY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 		}
-		for (HWND b : buttonWindows) {
+		std::vector<HWND> moving = buttonWindows;
+		if (progress) moving.push_back(progress);
+		for (HWND b : moving) {
 			RECT br;
 			GetWindowRect(b, &br);
 			MapWindowPoints(nullptr, dialog, (POINT*)&br, 2);
@@ -1357,6 +1515,7 @@ void Form::showPage(int to) {
 		SetWindowPos(dialog, nullptr, at.left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 	}
 	InvalidateRect(dialog, nullptr, TRUE);
+	fade::clipTo(picture, dialog);
 }
 
 double Form::number(int field) const { return atof(fields[field].value.c_str()); }
@@ -1365,6 +1524,14 @@ void Form::setTip(int field, const std::string& text) {
 	FormField& x = fields[field];
 	x.tip = text;
 	if (x.tipWindow) SetWindowTextW(x.tipWindow, W(text).c_str());
+}
+
+void Form::markTip(int field, int tone) {
+	HWND tip = fields[field].tipWindow;
+	if (tip == nullptr) return;
+	if (tone) SetPropW(tip, L"clTipProblem", (HANDLE)(INT_PTR)tone);
+	else RemovePropW(tip, L"clTipProblem");
+	InvalidateRect(tip, nullptr, TRUE);
 }
 
 void Form::retheme() {
@@ -1489,6 +1656,14 @@ void Form::selectRow(int field, int row) {
 	SendMessageW(list, LVM_ENSUREVISIBLE, row, FALSE);
 }
 
+void Form::setProgress(double fraction, const std::string& note) {
+	progressValue = fraction;
+	progressNote = note;
+	if (progress == nullptr) return;
+	ShowWindow(progress, fraction < 0 ? SW_HIDE : SW_SHOWNA);
+	InvalidateRect(progress, nullptr, FALSE);
+}
+
 void Form::setProblem(const std::string& text) {
 	if (problem) SetWindowTextW(problem, W(text).c_str());
 }
@@ -1546,7 +1721,10 @@ void showGateSettings(CircuitWindow* w, long gate) {
 	f.width = 420;
 	f.okText = "Done";
 	f.cancelText = "";
-	f.buttons = { "Rotate", "Delete" };
+	// A part locked in place offers only Unlock Part: it can't be rotated or deleted.
+	const bool locked = cl_gate_is_locked(doc, gate);
+	if (locked) f.buttons = { "Unlock Part" };
+	else f.buttons = { "Rotate", "Lock", "Delete" };
 	FormField head;
 	head.kind = FormField::Picture;
 	head.height = 58;
@@ -1682,17 +1860,27 @@ void showGateSettings(CircuitWindow* w, long gate) {
 		return std::string();
 	};
 	f.onButton = [&](Form& form, int button) {
+		if (locked) {
+			w->lockSelection(false);
+			return true;
+		}
 		if (button == 0) {
 			w->run(CMD_ROTATE);   // through the menus' checks (a locked circuit says so)
 			form.refresh(0);
 			return false;
 		}
+		if (button == 1) {
+			// Lock in Place ("Lock" here, to fit beside the others); the
+			// settings are done with, as the part now stays put.
+			w->lockSelection(true);
+			return true;
+		}
 		w->run(CMD_DELETE);
 		return true;
 	};
-	// Done, Enter, Escape or the close box keeps what was typed last (when
-	// it's valid); Delete took the gate.
-	if (f.run(w->window()) != 101)
+	// Done, Enter, Escape, the close box or Lock keeps what was typed last
+	// (when it's valid); Delete took the gate.
+	if (f.run(w->window()) != (locked ? -1 : 102))
 		for (Setting& s : settings)
 			if (s.type != "BOOL") apply(s, trimmed(f.fields[s.field].value));
 }

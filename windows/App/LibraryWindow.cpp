@@ -6,11 +6,14 @@
 #include "Picker.h"
 #include "Dialogs.h"
 #include "Library.h"
+#include "SyncApp.h"
 #include "Window.h"
 
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <map>
+#include <memory>
 
 using namespace picker;
 
@@ -29,6 +32,80 @@ std::vector<std::string> openIDs() {
 	return ids;
 }
 
+// Recently Deleted (docs/RECENTLY-DELETED.md; the Mac's sheet in
+// LibraryView.swift): the circuits in the library's trash, newest first, to
+// restore or delete now. Swept (30 days) as it opens. True when one came back.
+bool showRecentlyDeleted(HWND owner) {
+	library::sweepDeleted();
+	std::vector<library::Deleted> items = library::deletedItems();
+	std::string note;
+	bool restored = false;
+	Picker p;
+	p.title = "Recently Deleted";
+	p.line = "Kept 30 days on this PC, then deleted for good. These aren’t synced.";
+	p.search = false;
+	p.width = 520;
+	p.height = 460;
+	p.emptyText = "Nothing here.";
+	p.leftButtons = { "Delete Now…" };
+	p.rightButtons = { "Done", "Restore" };
+	p.rows = [&](const std::string&) {
+		std::vector<Row> out;
+		for (const library::Deleted& d : items) {
+			const int n = library::gateCount(d.circuit());
+			out.push_back({ d.id, d.name, "Deleted " + library::friendlyTime(d.deleted) + strf(" · %d gate%s", n, n == 1 ? "" : "s"), "" });
+		}
+		return out;
+	};
+	auto selected = [&](library::Deleted& out) {
+		const Row* r = p.selected();
+		if (r == nullptr) return false;
+		for (const library::Deleted& d : items) if (d.id == r->id) { out = d; return true; }
+		return false;
+	};
+	auto reload = [&](Picker& picker) {
+		library::sweepDeleted();
+		items = library::deletedItems();
+		picker.reload();
+	};
+	p.footerHeight = 22;
+	p.footer = [&note](ID2D1RenderTarget* rt, const D2D1_RECT_F& r) {
+		const Look look{ prefs().dark };
+		drawText(rt, note, D2D1::RectF(r.left + 4, r.top, r.right, r.bottom), 11.5f, look.ink(0.6f));
+	};
+	p.onButton = [&](Picker& picker, int b) -> bool {
+		library::Deleted d;
+		switch (b) {
+		case 0:   // Delete Now…: asked first, there's no getting it back
+			if (!selected(d)) return false;
+			if (!askConfirm(picker.hwnd, "Delete “" + d.name + "” now?",
+			                "It and all its versions will be deleted for good. This can’t be undone.", "Delete Now", "Cancel", true))
+				return false;
+			note = library::deleteNow(d) ? "“" + d.name + "” was deleted for good." : "“" + d.name + "” couldn’t be deleted.";
+			reload(picker);
+			return false;
+		case 100: return true;   // Done
+		case 101:                // Restore
+			if (!selected(d)) return false;
+			if (!library::restoreDeleted(d).empty()) {
+				restored = true;
+				note = "“" + d.name + "” is back in Your Circuits.";
+			} else {
+				note = "“" + d.name + "” couldn’t be restored.";
+			}
+			reload(picker);
+			return false;
+		default: return false;
+		}
+	};
+	p.onKey = [&](Picker& picker, UINT vk, bool) -> bool {
+		if (vk == VK_DELETE) { picker.onButton(picker, 0); picker.redraw(); return true; }
+		return false;
+	};
+	p.run(owner);
+	return restored;
+}
+
 }  // namespace
 
 void showYourCircuits(CircuitWindow* from) {
@@ -36,17 +113,34 @@ void showYourCircuits(CircuitWindow* from) {
 	std::vector<library::Item> all = library::items();
 	Picker p;
 	p.title = "Your Circuits";
-	p.line = "Everything here saves itself. Use Import to bring in a .cdl file, and Export (in the title's menu) to get one out.";
+	p.line = "Everything here saves itself. Use Import to bring in a .cdl file, and File > Export as CedarLogic File to get one out.";
 	p.leftButtons = { "Import File…", "Rename…", "Delete…" };
 	p.rightButtons = { "Cancel", "Open" };
+	// "Recently Deleted (N)" beside the title, as the Mac's.
+	int deletedCount = (int)library::deletedItems().size();
+	p.titleLink = [&deletedCount] { return deletedCount > 0 ? strf("Recently Deleted (%d)", deletedCount) : std::string("Recently Deleted"); };
+	p.onTitleLink = [&](Picker& picker) {
+		if (showRecentlyDeleted(picker.hwnd)) {
+			all = library::items();
+			for (CircuitWindow* w : circuitWindows()) w->libraryChanged();
+		}
+		deletedCount = (int)library::deletedItems().size();
+		picker.reload();
+	};
 	p.rows = [&](const std::string& query) {
 		const std::string q = lowerCase(query);
 		const std::vector<std::string> open = openIDs();
+		// A circuit sync can't keep says so on its second line ("Too big to sync (over 512 KB)").
+		std::map<std::string, std::string> problems;
+		for (const auto& pr : syncapp::status().problems) problems[pr.first] = pr.second;
 		std::vector<Row> out;
 		for (const library::Item& it : all) {
 			if (!q.empty() && lowerCase(it.name).find(q) == std::string::npos) continue;
 			const int n = library::gateCount(it.circuit());
-			out.push_back({ it.id, it.name, strf("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified),
+			auto problem = problems.find(it.id);
+			out.push_back({ it.id, it.name,
+			                problem != problems.end() ? problem->second
+			                                          : strf("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified),
 			                std::find(open.begin(), open.end(), it.id) != open.end() ? "OPEN" : "" });
 		}
 		p.emptyText = all.empty() ? "Nothing here yet." : "No circuits match.";
@@ -112,6 +206,7 @@ void showYourCircuits(CircuitWindow* from) {
 			}
 			if (!library::moveToTrash(it)) showMessage(picker.hwnd, Tone::Warning, "Couldn't delete “" + it.name + "”", "");
 			(void)fromClosed;
+			deletedCount = (int)library::deletedItems().size();
 			const int at = picker.selection;
 			all = library::items();
 			picker.reload();
@@ -138,7 +233,57 @@ void showYourCircuits(CircuitWindow* from) {
 		}
 		return false;
 	};
+	// The sync line under the list: how sync is doing and Sync Now, or a quiet
+	// way into Settings > Sync while it's off.
+	struct SyncLine { D2D1_RECT_F button = D2D1::RectF(0, 0, 0, 0); };
+	auto line = std::make_shared<SyncLine>();
+	p.footerHeight = 28;
+	p.footer = [line](ID2D1RenderTarget* rt, const D2D1_RECT_F& r) {
+		const Look look{ prefs().dark };
+		const D2D1_COLOR_F accent = chrome().accent();
+		const bool on = syncapp::enabled();
+		const clsync::Status st = syncapp::status();
+		drawIcon(rt, 0xE895, D2D1::RectF(r.left, r.top, r.left + 24, r.bottom), 13, on ? accent : look.ink(0.45f));
+		if (!on) {
+			line->button = D2D1::RectF(0, 0, 0, 0);
+			// Stopped (deleted from another device, or a year unused): say so (Settings says why); else a quiet way in.
+			const bool gone = st.kind == clsync::Status::Gone;
+			drawText(rt, gone ? "Sync stopped. Click for details." : "Sync…",
+			         D2D1::RectF(r.left + 26, r.top, r.right - 8, r.bottom), 12.5f, look.ink(gone ? 0.85f : 0.6f), TextAlign::Leading);
+			return;
+		}
+		const std::string text = syncapp::statusLine(st);
+		const std::string notice = syncapp::recentNotice();
+		const float bw = std::max(84.0f, textWidth("Sync Now", 12) + 28), bh = 24;
+		line->button = D2D1::RectF(r.right - bw, r.top + (r.bottom - r.top - bh) / 2, r.right, r.top + (r.bottom - r.top - bh) / 2 + bh);
+		drawText(rt, notice.empty() ? text : notice, D2D1::RectF(r.left + 26, r.top, line->button.left - 10, r.bottom), 12,
+		         st.kind == clsync::Status::Error || st.kind == clsync::Status::Full ? look.ink(0.85f) : look.ink(0.6f), TextAlign::Leading);
+		fillRound(rt, line->button, 7, look.ink(0.07f));
+		strokeRound(rt, line->button, 7, look.ink(0.10f));
+		drawText(rt, "Sync Now", line->button, 12, look.ink(), TextAlign::Center);
+	};
+	p.onFooterClick = [line](Picker& picker, float x, float y) {
+		if (inRect(line->button, x, y)) {
+			syncapp::syncNow();
+			return;
+		}
+		// The line itself: Settings, on its Sync page.
+		setPreferencesPage(5);
+		showPreferencesDialog(picker.hwnd);
+		picker.redraw();
+	};
+	// Circuits that came or went, and how sync is doing, as it happens.
+	const int listener = syncapp::listen([&](syncapp::Event e) {
+		if (e == syncapp::Event::Library) {
+			all = library::items();
+			deletedCount = (int)library::deletedItems().size();   // (a delete from another device lands in the trash)
+			p.reload();
+		} else {
+			p.reload();   // (the problems under the names)
+		}
+	});
 	p.run(from->window());
+	syncapp::unlisten(listener);
 	if (!windowAlive(from)) from = nullptr;
 	if (!toOpen.empty()) openCircuit(toOpen, from);
 	else if (import) chooseAndOpen(from);
@@ -172,8 +317,11 @@ void showVersionHistory(CircuitWindow* window) {
 		std::vector<Row> out;
 		for (size_t i = 0; i < versions.size(); i++) {
 			const int n = library::gateCount(versions[i].path);
+			// What sync kept it for ("From Levi's iPhone"), else how long ago.
+			const std::string why = versions[i].note.substr(0, versions[i].note.find(" · "));
 			out.push_back({ versions[i].path, library::friendlyTime(versions[i].time),
-			                strf("%d gate%s · ", n, n == 1 ? "" : "s") + library::agoText(versions[i].time), i == 0 ? "NEWEST" : "" });
+			                strf("%d gate%s · ", n, n == 1 ? "" : "s") + (why.empty() ? library::agoText(versions[i].time) : why),
+			                i == 0 ? "NEWEST" : "" });
 		}
 		return out;
 	};

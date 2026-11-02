@@ -506,7 +506,7 @@ final class SyncCenter: ObservableObject {
         let alert = NSAlert()
         let total = max(count, circuits)
         alert.messageText = "\(devices.isEmpty ? "Another device" : devices) deleted \(count) of your \(total) synced circuits."
-        alert.informativeText = "Moved to Recently Deleted, they can still be brought back from the library\u{2019}s trash on this Mac."
+        alert.informativeText = "They go to Recently Deleted on this Mac, where they can still be brought back."
         alert.addButton(withTitle: "Move Them to Recently Deleted")
         alert.addButton(withTitle: "Keep Them")
         Library.present(alert) { yes in cl_sync_answer(token, yes) }
@@ -718,7 +718,7 @@ final class SyncCenter: ObservableObject {
         let alert = NSAlert()
         alert.messageText = "Turn off sync on this Mac?"
         alert.informativeText = "Your circuits stay on this Mac. Your other devices keep syncing with each other."
-        let remove = NSButton(checkboxWithTitle: "Also remove the synced circuits from this Mac (they go to the library\u{2019}s trash)",
+        let remove = NSButton(checkboxWithTitle: "Also remove the synced circuits from this Mac (they go to Recently Deleted)",
                               target: nil, action: nil)
         remove.state = .off
         alert.accessoryView = remove

@@ -20,7 +20,11 @@ namespace {
 std::string dir() {
 	PWSTR p = nullptr;
 	std::string d;
-	if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p)) && p) d = U(p) + "\\CedarLogic";
+	// A home folder of its own (CEDARLOGIC_HOME, the session check's): there.
+	wchar_t home[MAX_PATH * 2];
+	const DWORD n = GetEnvironmentVariableW(L"CEDARLOGIC_HOME", home, (DWORD)(sizeof home / sizeof home[0]));
+	if (n > 0 && n < sizeof home / sizeof home[0]) d = settingsDir();
+	else if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p)) && p) d = U(p) + "\\CedarLogic";
 	if (p) CoTaskMemFree(p);
 	if (d.empty()) d = settingsDir();
 	CreateDirectoryW(W(d).c_str(), nullptr);

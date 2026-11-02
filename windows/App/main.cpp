@@ -5,19 +5,29 @@
 #include "App.h"
 #include "Alert.h"
 #include "Canvas.h"
+#include "Collections.h"
 #include "Dialogs.h"
+#include "DragLog.h"
 #include "Feedback.h"
+#include "FeedbackCapture.h"
 #include "Help.h"
+#include "Ink.h"
 #include "Integration.h"
 #include "Library.h"
 #include "Palette.h"
 #include "Recovery.h"
+#include "SessionCheck.h"
+#include "ShareLink.h"
 #include "Shortcuts.h"
+#include "SyncApp.h"
+#include "SyncPlatform.h"
 #include "TabStrip.h"
+#include "TabSwitcher.h"
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Welcome.h"
 #include "Window.h"
+#include "D2DScene.h"
 
 #include <objbase.h>
 #include <shellapi.h>
@@ -25,6 +35,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <thread>
 
 namespace {
 
@@ -35,6 +46,7 @@ int gExitCode = 0;
 // For the screenshot runs: --dark or --light for this run, --sim-view on.
 int gTheme = -1;
 bool gSimView = false;
+std::string gPredict;   // --predict [reveal]: Predict, Then Reveal on (and revealed), for the pictures
 // --dialog <preferences|shortcuts|truth-table|add-gate|scope|...>: open it, and the
 // screenshot is of it.
 int gDialog = 0;
@@ -44,6 +56,11 @@ int gTruthTab = -1;     // --truth-tab: which tab the truth table opens on
 // diagram too; --timing-color for it in color.
 std::string gTiming;
 bool gTimingColor = false;
+// --lab-report <in.cdl> <out.pdf> [bw]: writes a lab report without a window.
+std::string gReportIn, gReportOut;
+// --export-image <in.cdl> <out.png|out.pdf>: Export as Image's file, without a window.
+std::string gExportIn, gExportOut;
+bool gReportBW = false;
 // --splash-frame <seconds> <out.png> [--first-launch]: the launch screen at
 // that moment, drawn to a PNG, and quit.
 double gSplashAt = 0;
@@ -52,13 +69,43 @@ bool gFirstLaunch = false;
 std::string gPlace;     // --place: a gate by library name, put on the page and selected
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
+// --dialog sync, sync-on (Settings on its Sync page, off or on with sample devices),
+// sync-code, sync-link, sync-pair, sync-pair-expired, sync-remove (Remove's question): sync's screens, for the pictures.
+std::string gSyncDialog;
+const int kSyncPage = 5;
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
 bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
+std::string gFind;      // --find: the find bar open, looking for this (then --run findNext steps along)
+std::string gRun;       // --run a,b,...: those commands, by their Shortcuts id (stepClock, lockInPlace), before the picture
+// --drag-selftest [log]: a gate dragged with real input, PASS or FAIL
+// (DragLog.h); --drag-log <file>: every drag measured into the file.
+bool gDragSelfTest = false;
+// --bench-draw [frames] circuit.cdl: the canvas drawn that many times, with
+// the kept gate and label geometry and without (D2DScene::cacheGeometry),
+// timed, printed, and quit (windows/DRAG-DIAGNOSIS.md, hypothesis 3).
+int gBenchDraw = 0;
 // --split, --focus, --rename-tab: the window in split view, in focus mode,
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
 int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar in that style, for this run
+
+// --session-check [actions] [seed]: a long random session in one window
+// (SessionCheck.h).
+bool gSessionCheck = false;
+int gSessionActions = 400;
+uint64_t gSessionSeed = 1;
+
+// --menu N: the menu bar's menu N open (by the keys) for the picture.
+int gMenuShot = -1;
+// --menu-test: the menu bar driven by its keys (Alt, the arrows, Escape,
+// Alt+letter, a letter in a menu), each step PASS or FAIL.
+bool gMenuTest = false;
+bool gProjector = false;   // --projector: Simulation View's projector mode, for this run
+bool gClassicTabs = false;   // --classic-tabs: Settings > Appearance > Tabs: Classic, for this run
+// --feedback-capture-test <dir>: Send Feedback's screenshot and recording, through the form.
+std::string gFeedbackTest;
+bool gTestRun = false;   // a picture or test run: no card is left waiting for an answer
 
 Prefs gPrefsBefore;     // the settings as loaded: put back after a test run changed them for itself
 
@@ -71,15 +118,88 @@ void writeOut(const std::string& text) {
 	if (out && out != INVALID_HANDLE_VALUE) WriteFile(out, text.data(), (DWORD)text.size(), &wrote, nullptr);
 }
 
+// The canvas drawn `gBenchDraw` times each way, every frame timed whole
+// (drawing and presenting: Direct2D does most of its work at EndDraw).
+void CALLBACK benchDrawTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	Canvas* c = w ? w->currentCanvas() : nullptr;
+	if (c) {
+		RECT rc;
+		GetClientRect(c->widget(), &rc);
+		const bool was = cl::d2d::D2DScene::cacheGeometry;
+		auto run = [&](bool cache, std::vector<double>& ms) {
+			cl::d2d::D2DScene::cacheGeometry = cache;
+			cl::d2d::D2DScene::clearGeometryCache();
+			for (int i = 0; i < gBenchDraw + 5; i++) {
+				const double t0 = nowSeconds();
+				RedrawWindow(c->widget(), nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+				if (i >= 5) ms.push_back((nowSeconds() - t0) * 1000);   // the first few warm up
+			}
+		};
+		auto stats = [](std::vector<double> v) {
+			std::sort(v.begin(), v.end());
+			double sum = 0;
+			for (double x : v) sum += x;
+			const double avg = v.empty() ? 0 : sum / v.size();
+			const double p50 = v.empty() ? 0 : v[v.size() / 2], p95 = v.empty() ? 0 : v[std::min(v.size() - 1, v.size() * 95 / 100)];
+			return strf("avg %.2f ms, p50 %.2f, p95 %.2f, max %.2f", avg, p50, p95, v.empty() ? 0.0 : v.back());
+		};
+		std::vector<double> off, on;
+		run(false, off);
+		run(true, on);
+		const size_t kept = cl::d2d::D2DScene::cachedGeometries();
+		cl::d2d::D2DScene::cacheGeometry = was;
+		writeOut(strf("BENCH draw  %d frames of %ldx%ld px, %d gates: built every frame %s\n", gBenchDraw, rc.right, rc.bottom,
+		              cl_document_gate_count(w->document(), w->currentPage()), stats(off).c_str()));
+		writeOut(strf("BENCH draw  kept geometry (%lu shapes and labels kept): %s\n", (unsigned long)kept, stats(on).c_str()));
+	} else {
+		writeOut("BENCH draw  no canvas to draw\n");
+	}
+	for (CircuitWindow* x : std::vector<CircuitWindow*>(circuitWindows())) x->destroy();
+	PostQuitMessage(0);
+}
+
+// This thread's open popup menu (Windows' class for them is #32768).
+HWND openPopupMenu() {
+	HWND found = nullptr;
+	EnumThreadWindows(GetCurrentThreadId(), [](HWND h, LPARAM lp) -> BOOL {
+		wchar_t cls[16] = L"";
+		GetClassNameW(h, cls, 16);
+		if (wcscmp(cls, L"#32768") == 0 && IsWindowVisible(h)) { *reinterpret_cast<HWND*>(lp) = h; return FALSE; }
+		return TRUE;
+	}, reinterpret_cast<LPARAM>(&found));
+	return found;
+}
+
+void CALLBACK menuShotStart(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w && w->toolbarWidget()) w->toolbarWidget()->openMenu(gMenuShot, true);   // returns when the picture's taken
+}
+
 void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (gMenuShot >= 0) {
+		// The window with its menu open (the menu is a window of its own).
+		const HWND popup = openPopupMenu();
+		IWICBitmap* b = w ? capture::windowAndPopup(w->window(), popup) : nullptr;
+		const bool ok = b && popup && capture::savePng(b, gScreenshot);
+		if (b) b->Release();
+		writeOut(strf("%s %s%s\n", ok ? "wrote" : "couldn't write", gScreenshot.c_str(), popup ? "" : " (no menu open)"));
+		prefs() = gPrefsBefore;
+		prefs().save();
+		ExitProcess(ok ? 0 : 1);
+	}
 	gExitCode = 1;
 	HWND dialog = w ? GetLastActivePopup(w->window()) : nullptr;
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
 	if (help::window()) dialog = help::window();
 	if (welcome::tourWindow()) dialog = welcome::tourWindow();
-	if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
+	if (gDialog == -10) {
+		if (w && w->tabSwitcher() && w->tabSwitcher()->saveFrame(gScreenshot)) gExitCode = 0;
+	} else if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
 	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
 	if (!gTiming.empty()) {
 		const bool ok = w && w->scopeWindow() && w->scopeWindow()->saveTimingDiagram(gTiming);
@@ -89,11 +209,133 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (gDialog) {
 		if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
 		if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
+		if (gProjector) prefs().projector = gPrefsBefore.projector;
+		if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
 		prefs().save();
 		ExitProcess((UINT)gExitCode);
 	}
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gExitCode);
+}
+
+// --menu-test (see gMenuTest): a step every half second, each sent as
+// Windows sends the keys (posted, so the menus' own loop reads them).
+int gMenuStep = 0, gMenuFailures = 0;
+bool gMenuDarkBefore = false;
+
+void menuCheck(bool ok, const std::string& what) {
+	writeOut(strf("%s %s\n", ok ? "PASS" : "FAIL", what.c_str()));
+	if (!ok) gMenuFailures++;
+}
+
+void CALLBACK menuTestTick(HWND, UINT, UINT_PTR id, DWORD) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	Toolbar* t = w ? w->toolbarWidget() : nullptr;
+	if (!t) { KillTimer(nullptr, id); gMenuFailures++; PostQuitMessage(1); return; }
+	const HWND h = w->window(), bar = t->widget();
+	switch (gMenuStep++) {
+	case 0: {
+		// The menus as built: seven, in Windows' order, Settings and Exit in File, About in Help.
+		const HMENU m = w->menuBarMenus();
+		std::string names;
+		for (int i = 0; i < GetMenuItemCount(m); i++) {
+			wchar_t buf[64] = L"";
+			GetMenuStringW(m, (UINT)i, buf, 63, MF_BYPOSITION);
+			names += (i ? " " : "") + U(buf);
+		}
+		menuCheck(names == "&File &Edit &Circuit &View &Simulate &Window &Help", "The menu bar: " + names);
+		auto has = [&](int menu, int command) {
+			const HMENU sub = GetSubMenu(m, menu);
+			for (int i = 0; sub && i < GetMenuItemCount(sub); i++) if (GetMenuItemID(sub, i) == (UINT)command) return true;
+			return false;
+		};
+		menuCheck(has(0, CMD_PREFERENCES) && has(0, CMD_QUIT), "File has Settings and Exit");
+		menuCheck(has(6, CMD_ABOUT), "Help has About");
+		// Alt alone, as Windows sends it when Alt is let go.
+		SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 0);
+		break;
+	}
+	case 1:
+		menuCheck(t->keyMenuIndex() == 0 && GetFocus() == bar, "Alt: the menu bar has the keys, on File");
+		PostMessageW(bar, WM_KEYDOWN, VK_RIGHT, 0);
+		break;
+	case 2:
+		menuCheck(t->keyMenuIndex() == 1, "Right: on Edit");
+		PostMessageW(bar, WM_KEYDOWN, VK_DOWN, 0);   // opens Edit (the timer goes on inside the menu's loop)
+		break;
+	case 3:
+		menuCheck(t->openMenuIndex() == 1, "Down: Edit opens");
+		PostMessageW(h, WM_KEYDOWN, VK_RIGHT, 0);
+		break;
+	case 4:
+		menuCheck(t->openMenuIndex() == 2, "Right in an open menu: Circuit opens instead");
+		PostMessageW(h, WM_KEYDOWN, VK_LEFT, 0);
+		break;
+	case 5:
+		menuCheck(t->openMenuIndex() == 1, "Left: back to Edit");
+		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);
+		break;
+	case 6:
+		menuCheck(t->openMenuIndex() == -1 && t->keyMenuIndex() == 1, "Escape: Edit closes, the bar keeps the keys on Edit");
+		PostMessageW(bar, WM_KEYDOWN, VK_ESCAPE, 0);
+		break;
+	case 7:
+		menuCheck(!t->menuKeysActive(), "Escape again: the bar lets go");
+		// Alt, then Alt again (its press lets go; its release, which reaches
+		// whatever has the keys by then, mustn't take the bar again).
+		SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 0);
+		SendMessageW(GetFocus(), WM_SYSKEYDOWN, VK_MENU, 0x20000000);
+		SendMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 0);
+		menuCheck(!t->menuKeysActive(), "Alt, then Alt again: the bar lets go and stays let go");
+		gMenuDarkBefore = prefs().dark;
+		PostMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 'v');   // Alt+V
+		break;
+	case 8:
+		menuCheck(t->openMenuIndex() == 3, "Alt+V: View opens");
+		PostMessageW(h, WM_CHAR, 'd', 0);   // its Dark Mode
+		break;
+	case 9:
+		menuCheck(t->openMenuIndex() == -1 && prefs().dark != gMenuDarkBefore, "D in View: Dark Mode switches, the menu closes");
+		menuCheck(!t->menuKeysActive(), "A command chosen: the bar lets go of the keys");
+		w->run(CMD_DARK);
+		// The keys Settings gives a command show in its menu: one changed, then the menu opened.
+		{
+			const shortcuts::Action* a = shortcuts::find("zoomFit");
+			menuCheck(a != nullptr, "Zoom to Fit has a shortcut to change");
+		}
+		PostMessageW(h, WM_SYSCOMMAND, SC_KEYMENU, 'w');   // Alt+W: Window, with the open circuits listed
+		break;
+	case 10: {
+		bool listed = false;
+		const HMENU win = GetSubMenu(w->menuBarMenus(), 5);
+		for (int i = 0; win && i < GetMenuItemCount(win); i++) listed = listed || GetMenuItemID(win, i) == (UINT)CMD_WINDOW_LIST;
+		menuCheck(t->openMenuIndex() == 5 && listed, "Alt+W: Window opens, listing this circuit");
+		PostMessageW(h, WM_KEYDOWN, VK_ESCAPE, 0);   // Window closes; the bar keeps the keys
+		break;
+	}
+	default:
+		KillTimer(nullptr, id);
+		menuCheck(t->openMenuIndex() == -1 && t->keyMenuIndex() == 5, "Escape: Window closes, the bar keeps the keys on Window");
+		SendMessageW(bar, WM_KEYDOWN, VK_ESCAPE, 0);
+		menuCheck(!t->menuKeysActive() && t->openMenuIndex() == -1, "Everything closed again");
+		writeOut(strf("menu test: %d failed\n", gMenuFailures));
+		prefs() = gPrefsBefore;
+		prefs().save();
+		for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+		PostQuitMessage(gMenuFailures ? 1 : 0);
+		break;
+	}
+}
+
+void CALLBACK feedbackTestStart(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	const int failed = w ? feedback::captureSelfTest(w, gFeedbackTest, [](const std::string& line) { writeOut(line); }) : 1;
+	writeOut(strf("feedback capture test: %d failed\n", failed));
+	prefs() = gPrefsBefore;
+	prefs().save();
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+	PostQuitMessage(failed ? 1 : 0);
 }
 
 // --click-test: clicks on the toolbar's buttons and the window's drawn
@@ -109,6 +351,23 @@ int gClickFailures = 0;
 bool gClickClosing = false;   // the drawn Close was clicked: the window should go
 bool gClickPending = false;   // a case was clicked: its result is read at the next step
 bool gClickDragNext = false;  // the cases are done: the drag next, once things have settled
+bool gSettingsSeen = false;   // the gear's click opened Settings (it's closed again at once)
+
+// Settings opened by the gear: noted, and closed, so the click test goes on.
+void CALLBACK closeSettingsTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	for (CircuitWindow* w : circuitWindows()) {
+		HWND popup = GetLastActivePopup(w->window());
+		wchar_t title[64] = L"";
+		if (popup && popup != w->window()) GetWindowTextW(popup, title, 64);
+		if (wcscmp(title, L"Settings") == 0) {
+			gSettingsSeen = true;
+			PostMessageW(popup, WM_CLOSE, 0, 0);
+			return;
+		}
+	}
+	SetTimer(nullptr, 0, 300, closeSettingsTimer);   // not up yet
+}
 
 void report(const char* result, const std::string& what) {
 	writeOut(strf("%s  %s\n", result, what.c_str()));
@@ -168,8 +427,13 @@ const std::vector<ClickCase>& clickCases() {
 		{ "Resume", CMD_RUNNING, false, [](CircuitWindow* w) -> long { return w->running(); }, flipped, nullptr },
 		{ "Simulation View on", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
 		{ "Simulation View off", CMD_SIM_VIEW, false, [](CircuitWindow* w) -> long { return w->simView(); }, flipped, nullptr },
+		{ "Draw on", CMD_DRAW, false, [](CircuitWindow* w) -> long { return w->drawing(); }, flipped, nullptr },
+		{ "Draw off", CMD_DRAW, false, [](CircuitWindow* w) -> long { return w->drawing(); }, flipped, nullptr },
 		{ "Lock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
 		{ "Unlock", CMD_LOCK, false, [](CircuitWindow* w) -> long { return w->locked(); }, flipped, nullptr },
+		{ "Settings (the gear)", CMD_PREFERENCES, false, [](CircuitWindow*) -> long { return gSettingsSeen; },
+		  [](long, long after) { return after == 1; }, nullptr,
+		  [](CircuitWindow*) { gSettingsSeen = false; SetTimer(nullptr, 0, 700, closeSettingsTimer); } },
 		{ "Dark mode switch", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
 		{ "Dark mode switch back", CMD_DARK, false, [](CircuitWindow*) -> long { return prefs().dark; }, flipped, nullptr },
 		{ "New circuit", CMD_NEW, true, [](CircuitWindow*) -> long { return (long)circuitWindows().size(); }, oneMore,
@@ -235,6 +499,48 @@ void dragTest(CircuitWindow* w) {
 	SetCursorPos(before.x, before.y);
 }
 
+// Drawing on the circuit: in Draw mode, a stroke drawn on the canvas with
+// the mouse as Windows sends it (press, moves, release); it's saved with the
+// circuit and read back; the eraser dragged along it takes it away; Undo
+// brings it back.
+void inkTest(CircuitWindow* w) {
+	Canvas* c = w->currentCanvas();
+	CLDocument* doc = w->document();
+	if (c == nullptr || doc == nullptr) { report("FAIL", "Draw a stroke: no canvas"); return; }
+	const int page = w->currentPage();
+	w->setDrawing(true);
+	ink::setTool(ink::Pen);
+	const HWND h = c->widget();
+	RECT cr;
+	GetClientRect(h, &cr);
+	const int x0 = cr.right / 3, y0 = cr.bottom / 3;
+	auto drag = [&] {
+		SendMessageW(h, WM_MOUSEMOVE, 0, MAKELPARAM(x0, y0));
+		SendMessageW(h, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(x0, y0));
+		for (int i = 1; i <= 10; i++) SendMessageW(h, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x0 + i * 14, y0 + i * 6));
+		SendMessageW(h, WM_LBUTTONUP, 0, MAKELPARAM(x0 + 140, y0 + 60));
+	};
+	const int before = cl_ink_stroke_count(doc, page);
+	drag();
+	const int drawn = cl_ink_stroke_count(doc, page);
+	report(drawn == before + 1 ? "PASS" : "FAIL", strf("Draw a stroke with the mouse: %d strokes, then %d", before, drawn));
+	const std::string text = cl_document_save_text_ex(doc, 0);
+	char err[256] = "";
+	CLDocument* back = cl_document_open_text(text.c_str(), (long)text.size(), err, sizeof err);
+	const int kept = back ? cl_ink_stroke_count(back, page) : -1;
+	if (back) cl_document_close(back);
+	report(kept == drawn ? "PASS" : "FAIL", strf("The drawing saved with the circuit: %d strokes read back", kept));
+	w->setInkTool(ink::Eraser);
+	drag();
+	const int erased = cl_ink_stroke_count(doc, page);
+	report(erased == before ? "PASS" : "FAIL", strf("Erase it: %d strokes, then %d", drawn, erased));
+	w->undo();
+	const int undone = cl_ink_stroke_count(doc, page);
+	report(undone == drawn ? "PASS" : "FAIL", strf("Undo the erase: %d strokes", undone));
+	w->setInkTool(ink::Pen);
+	w->setDrawing(false);
+}
+
 // After the message loop: the drawn Close's result, and the summary.
 int finishClickTest() {
 	if (gClickClosing) report(IsWindow(gClickWindow) ? "FAIL" : "PASS", "Close (drawn): the window closed");
@@ -272,7 +578,7 @@ int clickTestStep() {
 		// Not clicked: what the case set up goes back for the ones after it
 		// (focus mode would hide the side panel from the drag).
 		if (c.tidy) c.tidy(w);
-		// Minimal leaves most tools to the ••• menu (the tab strip's buttons are always there).
+		// Minimal leaves most tools to the menus (the tab strip's buttons are always there).
 		if (c.button > kStrip / 2 && w->toolbarWidget() && !w->toolbarWidget()->hasButton(c.button)) {
 			report("SKIP", strf("%s: not in this style of toolbar", c.name));
 			continue;
@@ -283,6 +589,7 @@ int clickTestStep() {
 	// The drag a moment after the last case put things back (focus mode's
 	// toolbar and side panel sliding in again), with the panel in place.
 	if (!gClickDragNext) { gClickDragNext = true; return 500; }
+	inkTest(w);
 	dragTest(w);
 	// Last, the drawn Close: the window goes, and with it the app (the
 	// result is read once the message loop ends).
@@ -353,6 +660,41 @@ void CALLBACK renameTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w) askText(w->window(), "Rename Circuit", "The name it has in Your Circuits:", name);
 }
 
+// --dialog bad-link: the card a link that can't be opened gets, for the screenshot.
+void CALLBACK badLinkTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w) sharelink::showProblem(w->window(), "the link was cut short");
+}
+
+// --dialog switcher: Ctrl+Tab's panel, up without Ctrl held, for the
+// screenshot (its own picture: it's a layered window of its own).
+void CALLBACK switcherTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w && w->tabSwitcher() && !w->tabSwitcher()->showForTest()) writeOut("the tab switcher didn't open (it needs two tabs or more)\n");
+}
+
+// --dialog feedback-sending, feedback-failed, feedback-sent: Send Feedback's
+// states, for the screenshot (nothing is sent).
+int gFeedbackSample = 0;
+void CALLBACK feedbackSampleTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w) feedback::showSample(w, gFeedbackSample);
+}
+
+// --dialog sync-code, sync-link: the code sheet, and what linking asks, for the screenshot.
+void CALLBACK syncSheetTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	if (w == nullptr) return;
+	if (gSyncDialog == "sync-code") syncapp::showCodeSample(w->window());
+	else if (gSyncDialog == "sync-pair" || gSyncDialog == "sync-pair-expired") syncapp::showPairSample(w->window(), gSyncDialog == "sync-pair-expired");
+	else if (gSyncDialog == "sync-remove") { const std::vector<syncapp::Device> d = syncapp::deviceList(); if (d.size() > 1) syncapp::removeDevice(w->window(), d[1]); }
+	else syncapp::showLinkSample(w->window());
+}
+
 // --wire-tag: once the circuit is in view, the pointer resting on a wire.
 void CALLBACK wireTagTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
@@ -394,6 +736,8 @@ CircuitWindow* windowFor(HWND h) {
 
 bool handleShortcut(CircuitWindow* w, const MSG& msg) {
 	if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN) return false;
+	// The menu bar has the keys (Alt or F10): letters are its menus'.
+	if (w->menuKeysActive()) return false;
 	const bool ctrl = down(VK_CONTROL), shift = down(VK_SHIFT), alt = down(VK_MENU);
 	// Ctrl+Tab: the tab switcher (Escape, while it's up, leaves it).
 	if (msg.wParam == VK_TAB && ctrl && !alt) { guarded("switching tabs", [&] { w->switchTabs(shift); }); return true; }
@@ -433,6 +777,11 @@ CircuitWindow* newCircuitWindow() { return new CircuitWindow(cl_document_new(), 
 
 // Each window asks about its own changes; stop at the first "Cancel".
 bool quitApp() {
+	// Recording for Send Feedback: Exit is Stop first (the form comes back).
+	if (feedback::recording()) {
+		feedback::stopRecording();
+		return false;
+	}
 	std::vector<CircuitWindow*> all = circuitWindows();
 	// A window with a dialog or the truth table up is in the middle of it
 	// (its code is waiting on that): not yet. The dialog comes forward.
@@ -481,7 +830,7 @@ bool openCircuit(const std::string& path, CircuitWindow* from) {
 			target = it.circuit();
 			importedNow = true;
 		}
-		prefs().lastFolder = dirName(path);
+		if (!sharelink::isCacheFile(path)) prefs().lastFolder = dirName(path);
 	}
 	// In the window's place: an untouched new one, or any when Settings says
 	// opening replaces the circuit you're in (saved first).
@@ -498,6 +847,7 @@ bool openCircuit(const std::string& path, CircuitWindow* from) {
 	}
 	if (warning) showMessage(w->window(), Tone::Warning, "Opened, with notes", notes);
 	else if (!notes.empty()) w->note(notes.substr(4, notes.find('\n') - 4));
+	else if (importedNow && sharelink::isCacheFile(path)) w->note("From the link, in Your Circuits now as a new circuit.");
 	else if (importedNow) w->note("In Your Circuits now, as a copy. The file itself is left as it was.");
 	return true;
 }
@@ -510,6 +860,32 @@ void chooseAndOpen(CircuitWindow* from) {
 		openCircuit(file, from);
 		from = nullptr;   // the rest get windows of their own
 	}
+}
+
+// A file to open, or a cedarlogic://open#c=… link (the website's Open in the
+// App, a link in a chat): the link's circuit is put in a file first, which
+// opens as any does, as a new circuit in Your Circuits (ShareLink.h).
+bool openArgument(const std::string& arg, CircuitWindow* from) {
+	// cedarlogic://sync#k=...: a sync code. It checks what the code holds and
+	// asks before linking anything.
+	if (syncapp::isSyncLink(arg)) {
+		// (While the app is still starting, it waits: syncapp::start sends it on.)
+		syncapp::openLink(from ? from->window() : nullptr, arg);
+		return false;
+	}
+	if (!sharelink::isLink(arg)) return openCircuit(arg, from);
+	std::string why;
+	const std::string file = sharelink::fileForLink(arg, why);
+	if (file.empty()) {
+		if (gTestRun) {
+			writeOut("link: couldn't open it (" + why + ")\n");
+			return false;
+		}
+		if (splash::active()) splash::hideSoon(nullptr);   // (it would cover the card)
+		sharelink::showProblem(from ? from->window() : nullptr, why);
+		return false;
+	}
+	return openCircuit(file, from);
 }
 
 // The practice circuit opens as a new, untitled copy, so saving asks where.
@@ -546,7 +922,7 @@ bool handToRunning(const std::vector<std::string>& files) {
 	std::string text;   // full paths: the running one's current folder isn't this one's
 	for (const std::string& f : files) {
 		wchar_t full[MAX_PATH * 4];
-		const DWORD n = GetFullPathNameW(W(f).c_str(), (DWORD)(sizeof full / sizeof full[0]), full, nullptr);
+		const DWORD n = sharelink::isLink(f) ? 0 : GetFullPathNameW(W(f).c_str(), (DWORD)(sizeof full / sizeof full[0]), full, nullptr);
 		text += (n > 0 && n < sizeof full / sizeof full[0] ? U(full) : f) + "\n";
 	}
 	// It may still be starting (no window yet) or on its way out (an
@@ -593,7 +969,7 @@ void openHandedFiles(CircuitWindow* w) {
 	const bool intoThis = !files.empty() && from && (from->isPristine() || prefs().openReplaces);
 	const size_t windowsBefore = circuitWindows().size();
 	for (const std::string& f : files) {
-		openCircuit(f, from);
+		openArgument(f, from);
 		from = nullptr;
 	}
 	// Forward: a new window, else this one when it took the first file or
@@ -623,10 +999,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	std::vector<std::string> files;
 	for (int i = 1; i < argc; i++) {
 		const std::string a = U(argv[i]);
+		// A cedarlogic: link is the last argument that counts: Windows hands the
+		// link over as typed, so whatever follows it (a quote in the link ends
+		// the argument, and options could come after) is not the app's to obey.
+		if (sharelink::isLink(a)) {
+			if (!sharelink::isBareLink(a)) files.push_back(a);   // (a bare one, from an empty board, just asks for the app)
+			break;
+		}
 		if (a == "--feedback-probe") {
 			const int status = feedback::probe();
 			writeOut(strf("feedback server: %s (%d)\n", status == 403 ? "reachable, key checked" : status ? "answered" : "unreachable", status));
 			return status == 403 ? 0 : 1;
+		}
+		if (a == "--trash-check") return library::trashSelfTest([](const std::string& s) { writeOut(s); }) == 0 ? 0 : 1;
+		if (a == "--feedback-check") {
+			prefs().load();
+			return feedback::serverCheck([](const std::string& s) { writeOut(s); }) == 0 ? 0 : 1;
 		}
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
 		if (a == "--start-menu-test") {
@@ -635,17 +1023,99 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			writeOut(report);
 			return ok ? 0 : 1;
 		}
+		if (a == "--share-test") {   // [circuit.cdl [file for its link [a link another program made of it]]]
+			std::vector<std::string> paths;
+			while (i + 1 < argc && paths.size() < 3) paths.push_back(U(argv[++i]));
+			std::string report;
+			const bool ok = sharelink::runSelfTest(report, paths);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
+		if (a == "--sync-test") {   // [--server <url>]: the sync engine's checks (SyncPlatform.h)
+			std::string server;
+			if (i + 2 < argc && U(argv[i + 1]) == "--server") { server = U(argv[i + 2]); i += 2; }
+			std::string report;
+			const bool ok = syncplat::runSelfTest(report, server);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
+		if (a == "--update-self-test") {   // [--release <folder> --key <hex>]: signed updates (Updater.h)
+			std::string release, key;
+			for (int j = i + 1; j + 1 < argc; j++) {
+				if (U(argv[j]) == "--release") release = U(argv[++j]);
+				else if (U(argv[j]) == "--key") key = U(argv[++j]);
+			}
+			std::string report;
+			const bool ok = updater::runSelfTest(report, release, key);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
+		if (a == "--channel-check") {   // --server <url> --root <folder>: the testing groups (Updater.h)
+			std::string server, root;
+			for (int j = i + 1; j + 1 < argc; j++) {
+				if (U(argv[j]) == "--server") server = U(argv[++j]);
+				else if (U(argv[j]) == "--root") root = U(argv[++j]);
+			}
+			std::string report;
+			const bool ok = updater::runChannelCheck(report, server, root);
+			writeOut(report);
+			return ok ? 0 : 1;
+		}
 		if (a == "--click-test") { gClickTest = true; continue; }
+		if (a == "--session-check") {
+			gSessionCheck = true;
+			if (i + 1 < argc && atoi(U(argv[i + 1]).c_str()) > 0) gSessionActions = atoi(U(argv[++i]).c_str());
+			if (i + 1 < argc && _wtoi64(argv[i + 1]) > 0) gSessionSeed = (uint64_t)_wtoi64(argv[++i]);
+			continue;
+		}
+		if (a == "--drag-log" && i + 1 < argc) { draglog::open(U(argv[++i])); continue; }
+		if (a == "--drag-selftest") {
+			gDragSelfTest = true;
+			// The log's file may follow (not another option, and not a circuit).
+			if (i + 1 < argc) {
+				const std::string next = U(argv[i + 1]);
+				const bool circuit = next.size() > 4 && _stricmp(next.c_str() + next.size() - 4, ".cdl") == 0;
+				if (!next.empty() && next[0] != '-' && !circuit) { draglog::open(next); i++; }
+			}
+			continue;
+		}
+		if (a == "--bench-draw") {
+			gBenchDraw = 120;
+			if (i + 1 < argc && atoi(U(argv[i + 1]).c_str()) > 0) gBenchDraw = std::min(5000, atoi(U(argv[++i]).c_str()));
+			continue;
+		}
 		if (a == "--screenshot" && i + 1 < argc) { gScreenshot = U(argv[++i]); continue; }
+		if (a == "--menu" && i + 1 < argc) { gMenuShot = atoi(U(argv[++i]).c_str()); continue; }
+		if (a == "--menu-test") { gMenuTest = true; continue; }
+		if (a == "--projector") { gProjector = true; continue; }
+		if (a == "--classic-tabs") { gClassicTabs = true; continue; }
+		if (a == "--feedback-capture-test" && i + 1 < argc) { gFeedbackTest = U(argv[++i]); continue; }
 		if (a == "--dark" || a == "--light") { gTheme = a == "--dark"; continue; }
 		if (a == "--sim-view") { gSimView = true; continue; }
+		if (a == "--predict") {
+			gPredict = "cover";
+			if (i + 1 < argc && U(argv[i + 1]) == "reveal") { gPredict = "reveal"; i++; }
+			continue;
+		}
 		if (a == "--split") { gSplit = true; continue; }
 		if (a == "--focus") { gFocus = true; continue; }
 		if (a == "--rename-tab") { gRenameTab = true; continue; }
 		if (a == "--formula" && i + 1 < argc) { gFormula = U(argv[++i]); continue; }
 		if (a == "--truth-tab" && i + 1 < argc) { gTruthTab = atoi(U(argv[++i]).c_str()); continue; }
+		if (a == "--check" && i + 1 < argc) { setCheckForTesting(U(argv[++i])); continue; }   // what --dialog check checks against
 		if (a == "--timing" && i + 1 < argc) { gTiming = U(argv[++i]); continue; }
 		if (a == "--timing-color") { gTimingColor = true; continue; }
+		if (a == "--lab-report" && i + 2 < argc) {
+			gReportIn = U(argv[++i]);
+			gReportOut = U(argv[++i]);
+			if (i + 1 < argc && U(argv[i + 1]) == "bw") { gReportBW = true; i++; }
+			continue;
+		}
+		if (a == "--export-image" && i + 2 < argc) {
+			gExportIn = U(argv[++i]);
+			gExportOut = U(argv[++i]);
+			continue;
+		}
 		if (a == "--splash-frame" && i + 2 < argc) { gSplashAt = atof(U(argv[++i]).c_str()); gSplashFile = U(argv[++i]); continue; }
 		if (a == "--first-launch") { gFirstLaunch = true; continue; }
 		if (a == "--card-frame" && i + 1 < argc) { CircuitWindow::cardFreeze = atof(U(argv[++i]).c_str()); continue; }
@@ -655,6 +1125,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--page" && i + 1 < argc) { gPage = atoi(U(argv[++i]).c_str()); continue; }
 		if (a == "--note" && i + 1 < argc) { gNote = U(argv[++i]); continue; }
 		if (a == "--wire-tag") { gWireTag = true; continue; }
+		if (a == "--run" && i + 1 < argc) { gRun = U(argv[++i]); continue; }
+		if (a == "--find" && i + 1 < argc) { gFind = U(argv[++i]); continue; }
+		if (a == "--template" && i + 1 < argc) { templates::preselect(U(argv[++i])); continue; }   // with --dialog templates
 		if (a == "--toolbar-style" && i + 1 < argc) {
 			const std::string v = U(argv[++i]);
 			gToolbarStyle = v == "classic" ? TSClassic : v == "minimal" ? TSMinimal : TSSeamless;
@@ -664,27 +1137,54 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			const std::string d = U(argv[++i]);
 			gDialog = d == "preferences" ? CMD_PREFERENCES : d == "shortcuts" ? CMD_SHORTCUTS
 			        : d == "truth-table" ? CMD_TRUTH_TABLE : d == "add-gate" ? CMD_ADD_GATE
+			        : d == "check" ? CMD_CHECK_CIRCUIT
 			        : d == "library" ? CMD_OPEN : d == "versions" ? CMD_VERSIONS : d == "templates" ? CMD_NEW_TEMPLATE
 			        : d == "formula" ? CMD_BUILD_FORMULA : d == "scope" ? CMD_SCOPE
-			        : d == "export" ? CMD_EXPORT_IMAGE
+			        : d == "export" ? CMD_EXPORT_IMAGE : d == "lab-report" ? CMD_EXPORT_REPORT
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
-			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7
-			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : 0;
+			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
+			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : d == "switcher" ? -10 : 0;
+			if (d == "feedback-sending" || d == "feedback-failed" || d == "feedback-sent" || d == "feedback-capped" || d == "feedback-summary") {
+				gDialog = -11;
+				gFeedbackSample = d == "feedback-sending" ? 1 : d == "feedback-failed" ? 2 : d == "feedback-sent" ? 3 : d == "feedback-capped" ? 4 : 5;
+			}
+			if (d == "sync" || d == "sync-on") { gDialog = CMD_PREFERENCES; gSyncDialog = d; }
+			if (d == "sync-code" || d == "sync-link" || d == "sync-pair" || d == "sync-pair-expired" || d == "sync-remove") { gDialog = -9; gSyncDialog = d; }
 			continue;
 		}
 		files.push_back(a);
 	}
 	LocalFree(argv);
+	if (!draglog::on()) {
+		wchar_t env[MAX_PATH] = L"";
+		if (GetEnvironmentVariableW(L"CEDARLOGIC_DRAG_LOG", env, MAX_PATH) > 0 && env[0]) draglog::open(U(env));
+	}
+	if (gDragSelfTest && !draglog::on()) {
+		wchar_t tmp[MAX_PATH] = L"";
+		GetTempPathW(MAX_PATH, tmp);
+		draglog::open(U(tmp) + "cedarlogic-drag-selftest.log");
+	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
-	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || gClickTest || gDialog != 0;
+	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0 || gSessionCheck ||
+	                     gMenuTest || !gFeedbackTest.empty();
+	// Its own home folder (so not your settings or Your Circuits), and its crash handlers, before anything is read.
+	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
+	gTestRun = testRun;
 	if (!testRun && handToRunning(files)) return 0;
+	// Recently Deleted: circuits deleted over 30 days ago go for good, in the
+	// background (files only).
+	if (!testRun) std::thread([] { library::sweepDeleted(); }).detach();
 
 	prefs().load();
 	gPrefsBefore = prefs();
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
+	if (gProjector) prefs().projector = true;
+	if (gClassicTabs) prefs().classicTabs = true;
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gToolbarStyle;
 	// The click test wants every tool on the bar (the dark mode switch too),
 	// and New in a window of its own.
+	// The session check opens new windows too (as the Mac's does for its run).
+	if (gSessionCheck) prefs().openReplaces = false;
 	if (gClickTest) {
 		prefs().toolbarHidden = 0;
 		prefs().showThemeToggle = true;
@@ -697,7 +1197,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && !gClickTest) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty()) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -713,14 +1213,46 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		return ok ? 0 : 1;
 	}
 	prefs().applyWireDots();
+	if (!gReportIn.empty()) {
+		// Not a window: the circuit run a while, then its lab report.
+		char err[512] = "";
+		CLDocument* doc = cl_document_open(gReportIn.c_str(), err, sizeof err);
+		if (doc == nullptr) { writeOut(strf("couldn't open %s: %s\n", gReportIn.c_str(), err)); return 1; }
+		for (int i = 0; i < 120; i++) cl_document_step(doc);
+		if (prefs().studentName.empty()) prefs().studentName = "Alex Student";
+		LabReportOptions o;
+		o.color = !gReportBW;
+		std::string error;
+		const bool ok = writeLabReport(doc, baseName(gReportIn), o, gReportOut, error);
+		writeOut(ok ? strf("wrote %s\n", gReportOut.c_str()) : strf("couldn't write %s: %s\n", gReportOut.c_str(), error.c_str()));
+		return ok ? 0 : 1;
+	}
+	if (!gExportIn.empty()) {
+		char err[512] = "";
+		CLDocument* doc = cl_document_open(gExportIn.c_str(), err, sizeof err);
+		if (doc == nullptr) { writeOut(strf("couldn't open %s: %s\n", gExportIn.c_str(), err)); return 1; }
+		std::string error;
+		const bool ok = writeExportImage(doc, baseName(gExportIn), gExportOut, error);
+		cl_document_close(doc);
+		writeOut(ok ? strf("wrote %s\n", gExportOut.c_str()) : strf("couldn't write %s: %s\n", gExportOut.c_str(), error.c_str()));
+		return ok ? 0 : 1;
+	}
 	registerWindowClasses();
+	// Sync: the engine (not started yet), unless this run only makes pictures.
+	if (!testRun) syncapp::init();
+	if (gSyncDialog == "sync-on" || gSyncDialog == "sync-code" || gSyncDialog == "sync-link" || gSyncDialog == "sync-remove") syncapp::demo(true);
 	splash::setStatus("Opening the workspace\u2026");
 
 	bool any = false;
-	for (const std::string& f : files) any = openCircuit(f, nullptr) || any;
+	// A sync link waits for the windows (it asks a question over one).
+	std::vector<std::string> syncLinks;
+	for (const std::string& f : files) {
+		if (syncapp::isSyncLink(f)) syncLinks.push_back(f);
+		else any = openArgument(f, nullptr) || any;
+	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty()) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -728,11 +1260,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		}
 		if (!last.empty()) openCircuit(last, nullptr);
 	}
-	if (circuitWindows().empty()) newCircuitWindow();
+	if (circuitWindows().empty() && !gSessionCheck) newCircuitWindow();
 	// The launch screen says what it's opening.
 	if (!circuitWindows().empty() && !circuitWindows().front()->filePath().empty())
 		splash::setOpening(circuitWindows().front()->titleText());
 	if (gSimView && !circuitWindows().empty()) circuitWindows().back()->toggleSimView();
+	// --predict (with --sim-view): Predict on, a guess on the first light;
+	// --predict reveal: then revealed and scored. For CI's pictures.
+	if (!gPredict.empty() && !circuitWindows().empty()) {
+		CircuitWindow* w = circuitWindows().back();
+		w->togglePredict();
+		CLSimLight lights[64];
+		const int n = cl_simview_lights(w->document(), w->currentPage(), lights, 64);
+		if (n > 0) w->predictTap((lights[0].left + lights[0].right) / 2, (lights[0].bottom + lights[0].top) / 2);
+		if (gPredict == "reveal") w->revealOrCoverAgain();
+		writeOut(strf("predict: %d light(s), covered %d, revealed %d\n", n, w->predictCovers() ? 1 : 0, w->predictRevealed() ? 1 : 0));
+	}
 	if (gSplit && !circuitWindows().empty()) circuitWindows().back()->toggleSplit();
 	if (gFocus && !circuitWindows().empty()) circuitWindows().back()->toggleFocusMode();
 	if (gRenameTab && !circuitWindows().empty()) circuitWindows().back()->run(CMD_RENAME_TAB);
@@ -748,8 +1291,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			cl_edit_select_gate(w->document(), found.page, found.gate);
 		}
 	}
+	if (!gFind.empty() && !circuitWindows().empty()) circuitWindows().back()->openFind(gFind);
+	if (!gRun.empty() && !circuitWindows().empty())
+		for (size_t at = 0; at <= gRun.size();) {
+			const size_t comma = std::min(gRun.find(',', at), gRun.size());
+			const std::string id = gRun.substr(at, comma - at);
+			// The drawing bar's tools aren't shortcuts of their own (P, H, E while drawing).
+			const int tool = id == "inkPen" ? CMD_INK_PEN : id == "inkHighlighter" ? CMD_INK_HIGHLIGHTER : id == "inkEraser" ? CMD_INK_ERASER : 0;
+			if (tool) circuitWindows().back()->run(tool);
+			else if (const shortcuts::Action* act = shortcuts::find(id)) circuitWindows().back()->run(act->command);
+			at = comma + 1;
+		}
 	if (!gNote.empty() && !circuitWindows().empty()) circuitWindows().back()->note(gNote);
-	if (gDialog == CMD_PREFERENCES) setPreferencesPage(gPage);
+	if (gDialog == CMD_PREFERENCES) setPreferencesPage(gSyncDialog.empty() || gPage > 0 ? gPage : kSyncPage);
 	if (gDialog > 0 && !circuitWindows().empty()) PostMessageW(circuitWindows().back()->window(), WM_COMMAND, gDialog, 0);
 	if (gDialog == -1 && !circuitWindows().empty()) {
 		prefs().hasSeenWelcome = false;
@@ -762,21 +1316,37 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gDialog == -5) SetTimer(nullptr, 0, 400, alertTimer);
 	if (gDialog == -6) SetTimer(nullptr, 0, 400, renameTimer);
 	if (gDialog == -7) integration::start(true);
+	if (gDialog == -8) SetTimer(nullptr, 0, 400, badLinkTimer);
+	if (gDialog == -9) SetTimer(nullptr, 0, 400, syncSheetTimer);
+	if (gDialog == -10) SetTimer(nullptr, 0, 900, switcherTimer);
+	if (gDialog == -11) SetTimer(nullptr, 0, 400, feedbackSampleTimer);
 	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
+	if (gMenuShot >= 0 && !gScreenshot.empty()) SetTimer(nullptr, 0, 1200, menuShotStart);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
+	else if (gMenuTest) SetTimer(nullptr, 0, 500, menuTestTick);
+	else if (!gFeedbackTest.empty()) SetTimer(nullptr, 0, 1500, feedbackTestStart);
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);
 		SetTimer(nullptr, 0, 60000, clickTestWatchdog);
+	} else if (gDragSelfTest) {
+		draglog::startSelfTest();
+	} else if (gBenchDraw > 0) {
+		SetTimer(nullptr, 0, 2000, benchDrawTimer);
+	} else if (gSessionCheck) {
+		sessioncheck::start(gSessionActions, gSessionSeed);
 	} else {
 		// Once the launch screen goes: the windows, then the welcome the
 		// first time, or work a CedarLogic that stopped unexpectedly left.
-		splash::hideSoon([] {
+		splash::hideSoon([syncLinks] {
 			for (CircuitWindow* w : circuitWindows()) w->present();
 			CircuitWindow* front = circuitWindows().empty() ? nullptr : circuitWindows().front();
 			if (!welcome::offer(front) && !whatsnew::offer(front))
 				SetTimer(nullptr, 0, 300, recoveryTimer);
 			updater::start();
 			integration::start();
+			// Sync starts looking after Your Circuits; a link it was opened with asks first.
+			syncapp::start();
+			for (const std::string& link : syncLinks) syncapp::openLink(front ? front->window() : nullptr, link);
 		});
 	}
 
@@ -787,16 +1357,31 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 				if (IsWindowEnabled(w->window()) && handleShortcut(w, msg)) continue;
 			}
 		}
+		// A key or a click: someone is working here (sync keeps looking, and
+		// leaves a circuit being worked in alone).
+		if (msg.message == WM_KEYDOWN || msg.message == WM_CHAR || msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN ||
+		    msg.message == WM_MOUSEWHEEL) {
+			if (CircuitWindow* w = windowFor(msg.hwnd)) w->noteInput();
+			syncapp::userActive();
+		}
 		TranslateMessage(&msg);
 		DispatchMessageW(&msg);
 	}
 	const int clickResult = gClickTest ? finishClickTest() : 0;
+	draglog::close();
 	updater::shutdown();
+	syncapp::shutdown();
 	// What this run's flags changed for themselves goes back as it was.
 	if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
 	if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
+	if (gProjector) prefs().projector = gPrefsBefore.projector;
+	if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;
+	if (gSessionCheck) {
+		prefs() = gPrefsBefore;
+		return sessioncheck::exitCode();
+	}
 	return gScreenshot.empty() ? (int)msg.wParam : gExitCode;
 }

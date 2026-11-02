@@ -31,7 +31,7 @@
 
 #define CL_APP_NAME "CedarLogic"
 #ifndef CL_VERSION
-#define CL_VERSION "0.1"
+#define CL_VERSION "0.4.0"
 #endif
 
 // ---- Settings ------------------------------------------------------------------
@@ -59,17 +59,35 @@ struct Prefs {
 	bool showStatus = true;       // the status bar's readout (zoom, pointer, counts), as on the Mac
 	bool showGateNames = true;
 	bool wireValueTag = false;    // resting on a wire shows what it carries
+	bool projector = false;       // Simulation View's projector mode: thick wires, big labels and lights (View menu)
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
+	// Drawing on the circuit: the last tool (0 pen, 1 highlighter, 2 eraser),
+	// and each drawing tool's colour (a palette token) and width (world units),
+	// as the Mac's InkSettings.
+	int inkTool = 0;
+	std::string penColor = "ink", highlighterColor = "yellow";
+	double penWidth = 0.25, highlighterWidth = 1.2;
+	bool newPagesShareLinks = true;  // a new page's TO/FROM links connect with the others' (docs/PAGE-LINKS.md)
 	bool showCategoryKeys = true; // Shift+1...0 beside the side panel's categories
+	bool classicTabs = false;     // plain segments instead of the Mac's tab cards (Settings > Appearance)
 	int gateSize = 48;            // the side panel's gates (36...96; 48 is the standard size)
 	int toolbarStyle = 3;         // 0 Classic, 2 Minimal, 3 Seamless (the Mac's styles; new installs get Seamless)
 	int toolbarHidden = 0;        // tool groups hidden, a bit each (ToolGroup, Toolbar.h)
 	bool showTitle = true;        // the circuit's name at the toolbar's left
 	bool showThemeToggle = false; // a dark mode switch in the toolbar
-	bool openReplaces = false;    // opening a circuit replaces the one in the window
+	bool showStepClock = true;    // Step Clock in the toolbar and Simulation View's bar
+	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
+	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
-	bool checkUpdates = true;     // look for a new test build now and then
+	bool checkUpdates = true;     // look for a new version now and then
+	// The testing group (Settings > General), as the Mac's: normal testers
+	// update to the newest versioned release, beta testers to the rolling
+	// test build (windows-native-testing). New installs are normal testers;
+	// settings from before there was a choice stay beta (Prefs::loadFrom).
+	bool betaTester = false;
+	bool testingGroupNotice = false;   // made a beta tester that way: the updater says so once
+	std::string installedRelease;      // the versioned release the updater last installed, "<tag> <build>": never offered again
 	bool hasSeenWelcome = false;
 	bool firstLaunchPlayed = false;               // the launch screen's sound, once ever
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units
@@ -79,15 +97,20 @@ struct Prefs {
 	std::string lastFolder;
 	std::string lastCircuit;                      // the Your Circuits circuit last in front
 	std::string studentName;                      // for the Lab Page template and exports
+	std::string installId;                        // Send Feedback's sender, made once (32 hex digits); the server's daily cap counts it
 	// Build from Formula's last choices.
 	std::string lastFormula;
 	int buildShape = 0, buildStyle = 0;
 	bool buildTwoInput = false, buildNewPage = true;
-	int truthTab = 0;                             // the truth table's tab, as last left
+	int truthTab = 0;                             // the truth table's tab, as last left (3: Check)
 	// Timing diagrams (the oscilloscope's share menu).
 	bool timingWhole = false, timingInColor = false;
+	// Export Lab Report's last choices: what goes in, and colour or black and white.
+	bool reportCircuit = true, reportTable = true, reportFormulas = true, reportTiming = true, reportColor = true;
 	// Export as Image's last choices.
 	bool exportGrid = false, exportColor = true, exportInfo = true, exportWorks = true;   // exportInfo: the name-and-result strip
+	int exportLook = 0;           // Export as Image's look: 0 Match Window, 1 Light, 2 Black & White (the Mac's)
+	bool exportInk = true;                        // the drawing on the circuit, when the page has one
 	int exportScale = 4;                          // 2, 4 or 6 pixels a point
 	std::string exportProblem;                    // "does not work because…"
 	// Send Feedback's draft, kept until it's sent.
@@ -101,11 +124,23 @@ struct Prefs {
 	double wireScale() const;
 	void load();
 	void save() const;
+	// load() and save(), on any file and text (for --channel-check, which
+	// passes the install marker too; else it's read: installMarker()).
+	void loadFrom(const std::string& path, const std::string* marker = nullptr);
+	std::string text() const;
 	// Tell the engine about the wire settings.
 	void applyWireDots() const;
+	// Tell the engine whether new pages share links.
+	void applyPageLinks() const;
 	void noteRecent(const std::string& path);
 };
 Prefs& prefs();
+
+// What installed this copy said its testing group starts as: "beta" (the
+// test build) or "normal" (a release), from a file named install-channel in
+// the settings folder (%APPDATA%\CedarLogic) or beside the exe; "" when
+// there's neither. Only a first run reads it (Prefs::loadFrom).
+std::string installMarker();
 
 // Whether Windows is set to dark for apps.
 bool systemPrefersDark();

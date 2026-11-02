@@ -38,6 +38,10 @@ public:
 	// strip's pixels. False when it isn't shown.
 	enum { kPlusButton = 1, kMinimizeButton, kCloseButton };
 	bool buttonPoint(int which, POINT& p);
+	// For --session-check: the middle of this strip's k-th tab (its close X
+	// when `closeButton`), in the strip's pixels; and how many tabs it has.
+	bool tabPoint(int k, bool closeButton, POINT& p);
+	int tabsShown();
 
 protected:
 	void paint(ID2D1RenderTarget* rt, float w, float h) override;
@@ -75,6 +79,7 @@ private:
 	void layout(float w);
 	void placeEdit();
 	D2D1_RECT_F closeRect(int k) const;
+	static D2D1_COLOR_F linkColor(int mark, bool dark);
 	int tabAt(float x, float y) const;
 	int captionAt(float x, float y) const;
 	bool activeSide() const;

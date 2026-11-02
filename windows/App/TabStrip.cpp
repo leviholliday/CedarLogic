@@ -66,10 +66,25 @@ void TabStrip::layout(float w) {
 		right -= 8;   // room to drag the window by
 	}
 	cards.assign((size_t)n, D2D1_RECT_F{});
+	if (prefs().classicTabs) {
+		// Classic tabs (Settings > Appearance, the Mac's and Linux's): plain
+		// segments in a row, centred, as wide as their names.
+		float total = 0;
+		std::vector<float> ws;
+		for (int k = 0; k < n; k++) { ws.push_back(textWidth(win->pageName(pages[k]), 11.5f) + 26); total += ws.back(); }
+		const float top = std::floor((h - 24) / 2);
+		float x = std::max(8.0f, (right - total) / 2);
+		for (int k = 0; k < n; k++) { cards[k] = D2D1::RectF(x, top, x + ws[k], top + 24); x += ws[k]; }
+		plus = D2D1::RectF(right - 8 - kCardH, std::floor((h - kCardH) / 2) + 1, right - 8, std::floor((h - kCardH) / 2) + 1 + kCardH);
+		if (renamingKey) placeEdit();
+		return;
+	}
 	std::vector<float> want((size_t)n);
 	float total = 0;
 	for (int k = 0; k < n; k++) {
-		want[k] = std::min(kMaxW, std::max(kMinW + 20, textWidth(win->pageName(pages[k]), 12, true) + 50));
+		// (Room for the link dot, when its pages share links with only some others.)
+		const float dot = cl_page_link_mark(win->document(), pages[k]) >= 0 ? 12.0f : 0.0f;
+		want[k] = std::min(kMaxW, std::max(kMinW + 20, textWidth(win->pageName(pages[k]), 12, true) + 50 + dot));
 		total += want[k] + kGap;
 	}
 	// When they don't all fit, the others are squeezed; the one in front
@@ -110,6 +125,17 @@ int TabStrip::captionAt(float x, float y) const {
 	return -1;
 }
 
+// The link groups' dot colours, in order (cl_page_link_mark): the Mac's
+// blue, orange, purple, pink, teal, yellow, brown, indigo, mint and red.
+D2D1_COLOR_F TabStrip::linkColor(int mark, bool dark) {
+	static const int light[][3] = { { 0, 122, 255 }, { 255, 149, 0 }, { 175, 82, 222 }, { 255, 45, 85 }, { 48, 176, 199 },
+	                                { 255, 204, 0 }, { 162, 132, 94 }, { 88, 86, 214 }, { 0, 199, 190 }, { 255, 59, 48 } };
+	static const int night[][3] = { { 10, 132, 255 }, { 255, 159, 10 }, { 191, 90, 242 }, { 255, 55, 95 }, { 64, 200, 224 },
+	                                { 255, 214, 10 }, { 172, 142, 104 }, { 94, 92, 230 }, { 102, 212, 207 }, { 255, 69, 58 } };
+	const int* c = (dark ? night : light)[((mark % 10) + 10) % 10];
+	return rgb255(c[0], c[1], c[2]);
+}
+
 void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 	layout(w);
 	const Chrome c = chrome();
@@ -120,7 +146,27 @@ void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 	const int n = (int)cards.size();
 	const D2D1_COLOR_F green = dark ? rgb255(64, 214, 110) : rgb255(36, 168, 76);
 	CLDocument* doc = win->document();
-	const bool closable = cl_document_page_count(doc) > 1;
+	const bool closable = cl_document_page_count(doc) > 1 && !prefs().classicTabs;
+
+	if (prefs().classicTabs && n > 0) {
+		// Classic: one rounded row, the page in front a card within it.
+		const D2D1_RECT_F all = D2D1::RectF(cards.front().left, cards.front().top, cards.back().right, cards.back().bottom);
+		fillRound(rt, all, 7, withAlpha(ink, 0.06f));
+		strokeRound(rt, all, 7, withAlpha(ink, 0.10f));
+		for (int k = 0; k < n; k++) {
+			const D2D1_RECT_F& s = cards[k];
+			const bool on = pages[k] == shown;
+			const D2D1_RECT_F inner = D2D1::RectF(s.left + 2, s.top + 2, s.right - 2, s.bottom - 2);
+			if (on) {
+				fillRound(rt, inner, 5, dark ? rgb255(44, 48, 56) : D2D1::ColorF(1, 1, 1, 1));
+				strokeRound(rt, inner, 5, withAlpha(ink, 0.12f));
+			} else if (k == hot) {
+				fillRound(rt, inner, 5, withAlpha(ink, 0.05f));
+			}
+			if (renamingKey == cl_document_page_id(doc, pages[k])) continue;
+			drawText(rt, win->pageName(pages[k]), s, 11.5f, withAlpha(ink, on ? 1.0f : 0.7f), TextAlign::Center, on);
+		}
+	}
 
 	auto drawCard = [&](int k, D2D1_RECT_F r) {
 		const int p = pages[k];
@@ -137,16 +183,23 @@ void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 		fillCircle(rt, D2D1::Point2F(r.left + 13, cy), 3, front && win->running() ? green : withAlpha(ink, front ? 0.35f : 0.22f));
 		if (renamingKey == cl_document_page_id(doc, p)) return;   // the text box is over it
 		const bool showClose = closable && (front || k == hot);
-		const float textRight = r.right - (showClose ? 26 : 10);
+		// Pages whose TO/FROM links connect share a dot's colour after the
+		// name (docs/PAGE-LINKS.md); none while every page connects.
+		const int mark = cl_page_link_mark(doc, p);
+		const float textRight = r.right - (showClose ? 26 : 10) - (mark >= 0 ? 12 : 0);
 		drawText(rt, win->pageName(p), D2D1::RectF(r.left + 23, r.top, textRight, r.bottom), 12, withAlpha(ink, front ? 1.0f : 0.62f),
 		         TextAlign::Leading, front);
+		if (mark >= 0) {
+			const float tx = std::min(textRight, r.left + 23 + textWidth(win->pageName(p), 12, front));
+			fillCircle(rt, D2D1::Point2F(tx + 6 + 3, cy), 3, linkColor(mark, dark));
+		}
 		if (showClose) {
 			const D2D1_RECT_F x = closeRect(k);
 			if (k == hotClose) fillRound(rt, x, 5, withAlpha(ink, 0.16f));
 			drawIcon(rt, Icon::Dismiss, x, 8, withAlpha(ink, k == hotClose ? 0.9f : 0.5f));
 		}
 	};
-	for (int k = 0; k < n; k++) {
+	for (int k = 0; k < n && !prefs().classicTabs; k++) {
 		if (dragging && k == pressed) continue;
 		drawCard(k, cards[k]);
 	}
@@ -195,7 +248,9 @@ void TabStrip::paint(ID2D1RenderTarget* rt, float w, float h) {
 
 	std::vector<Tip> tips;
 	tips.push_back({ plus, "New tab" + shortcuts::tipKeys(CMD_NEW_TAB) });
-	for (const D2D1_RECT_F& r : cards) tips.push_back({ r, "Double-click to rename. Drag along to move, or down onto the canvas to split the view" });
+	for (const D2D1_RECT_F& r : cards)
+		tips.push_back({ r, prefs().classicTabs ? "Double-click to rename"
+		                                        : "Double-click to rename. Drag along to move, or down onto the canvas to split the view" });
 	if (capsShown) {
 		tips.push_back({ caps[CapMin], "Minimize" });
 		tips.push_back({ caps[CapClose], "Close" });
@@ -305,6 +360,12 @@ void TabStrip::mouseDown(int button, float x, float y, bool doubleClick) {
 		beginRename(p);
 		return;
 	}
+	// Classic tabs only choose (no close box, no dragging).
+	if (prefs().classicTabs) {
+		win->showPage(p);
+		redraw();
+		return;
+	}
 	if (cl_document_page_count(win->document()) > 1 && inRect(closeRect(k), x, y) && (p == win->shownPage(pane) || k == hot)) {
 		letGo();
 		closedOnPress = true;
@@ -396,6 +457,20 @@ bool TabStrip::buttonPoint(int which, POINT& p) {
 	const double s = scale();
 	p = { (LONG)((r.left + r.right) / 2 * s), (LONG)((r.top + r.bottom) / 2 * s) };
 	return true;
+}
+
+bool TabStrip::tabPoint(int k, bool closeButton, POINT& p) {
+	layout((float)width());
+	if (k < 0 || k >= (int)cards.size()) return false;
+	const D2D1_RECT_F r = closeButton ? closeRect(k) : cards[k];
+	const double s = scale();
+	p = { (LONG)((r.left + r.right) / 2 * s), (LONG)((r.top + r.bottom) / 2 * s) };
+	return true;
+}
+
+int TabStrip::tabsShown() {
+	layout((float)width());
+	return (int)cards.size();
 }
 
 // ---- Renaming in place -----------------------------------------------------------

@@ -406,6 +406,37 @@ extension SessionCheck {
         check(switched && !canvas.tidyActive, "gestures: Tidy Up's preview, the other kind (Tab), then Keep (Return)")
         edited("Tidy Up kept", before); inStep("Tidy Up kept")
 
+        // Tidy Up while drawing: Escape is the preview's Put Back, not the
+        // end of Draw (it once only ended Draw and left the preview up; the
+        // random session met it at seed 1's action 1788 when the run took
+        // that path). Then Undo with a preview up keeps it and takes it back
+        // in the window and the engine alike, and Redo brings it again.
+        canvas.addGate("AA_AND2", at: CGPoint(x: 30, y: -20))
+        canvas.selectNone()
+        canvas.drawing = true
+        before = shape()
+        hands.key(1, "S", flags: .shift)
+        turn(0.05)
+        let drawPreviewed = canvas.tidyActive
+        hands.key(CanvasHands.escape)
+        turn(0.05)
+        check(drawPreviewed && !canvas.tidyActive && shape() == before && canvas.drawing,
+              "gestures: Tidy Up's preview while drawing, Put Back (Escape) leaves the circuit as it was (preview \(drawPreviewed ? "up" : "never up"), \(canvas.tidyActive ? "still up" : "gone"), drawing \(canvas.drawing ? "still on" : "off"))")
+        inStep("Tidy Up put back while drawing")
+        canvas.drawing = false
+        hands.key(1, "S", flags: .shift)
+        turn(0.05)
+        let undoPreviewed = canvas.tidyActive, tidied = shape()
+        canvas.undo()
+        turn(0.05)
+        check(undoPreviewed && !canvas.tidyActive && shape() == before && core.mirroredUndo == core.undoCount,
+              "gestures: Undo with Tidy Up's preview up takes it back, in step (\(core.mirroredUndo) and \(core.undoCount) steps; the preview \(tidied == before ? "changed nothing in the file" : "moved things"))")
+        canvas.redo()
+        turn(0.05)
+        check(shape() == tidied && core.mirroredUndo == core.undoCount,
+              "gestures: and Redo brings the tidy back as it was shown, in step (\(core.mirroredUndo) and \(core.undoCount) steps)")
+        inStep("Tidy Up undone and redone")
+
         pause()
     }
 

@@ -28,6 +28,9 @@ public:
 	int page() const;
 
 	void redraw();
+	// While something follows the pointer (a drag, a gate from the side
+	// panel): the canvas again, drawn now if a frame is due (see Canvas.cpp).
+	void redrawWhileMoving();
 	// World <-> view points.
 	void worldPoint(double vx, double vy, double& wx, double& wy) const;
 	double width() const;    // points
@@ -39,11 +42,18 @@ public:
 	void origin(double& ox, double& oy) const { ox = originX; oy = originY; }
 	// Jump the camera to centre on a world point, keeping the current zoom.
 	void panTo(double wx, double wy);
+	// The camera as it is, and put back (a circuit reloaded in place keeps its view).
+	void camera(double& ox, double& oy, double& unitsPerPoint) const { ox = originX; oy = originY; unitsPerPoint = upp; }
+	void setCamera(double ox, double oy, double unitsPerPoint);
 	// Glide to centre a world point, keeping the zoom (Find's results).
 	void centerOn(double wx, double wy);
 	// Where the pointer is over this canvas, in the world; false when it's
 	// somewhere else.
 	bool pointerWorld(double& wx, double& wy) const;
+	// The pointer is inside this canvas's rectangle -- by where it is, not by
+	// which window has it (a gate dragged from the side panel leaves the
+	// pointer captured by the panel the whole way).
+	bool pointerOver() const;
 	// A screen pixel to view points.
 	void screenToView(POINT screen, double& vx, double& vy) const;
 
@@ -60,6 +70,11 @@ public:
 	void cancelDrag();
 	bool isDragging() const { return drag != Drag::None; }
 
+	// Draw mode came or went (Ink.h), or the tool, its colour or width
+	// changed: the pointer's preview follows.
+	void drawingChanged();
+	void inkToolChanged();
+
 	// Called when the window's circuit changed under it (undo, a new page).
 	void noteFit() { needsFit = true; }
 	// Let go of the drawing surface (a tab that isn't in front).
@@ -75,7 +90,7 @@ public:
 	bool showWireTagNow();
 
 private:
-	enum class Drag { None, Edit, Pan, Slider };
+	enum class Drag { None, Edit, Pan, Slider, Ink };
 
 	CircuitWindow* win;
 	HWND hwnd = nullptr;
@@ -88,6 +103,12 @@ private:
 	bool spaceDown = false, pannedWhileSpaceDown = false;
 	bool pointerInside = false;
 	double lastW = 0, lastH = 0;
+	double lastPaintAt = 0;            // nowSeconds() of the last paint
+	double frameSeconds = 1.0 / 60;    // the display's refresh, read as a drag starts
+	bool frameOwed = false;            // a WM_PAINT put off till the next refresh
+	void paceFrame();
+	bool pacingFrames() const;
+	void noteFrameRate();
 
 	// An eased zoom in progress.
 	bool zooming = false;
@@ -127,6 +148,23 @@ private:
 	void drawOpeningCard(ID2D1RenderTarget* rt, float w, float h, double t);
 	bool overlayPress(double vx, double vy);
 	void setSpeedAt(double vx);
+
+	// Drawing (Ink.h): a stroke or an eraser drag in progress, from the mouse
+	// or a pen (WM_POINTER, with its pressure and its eraser end).
+	bool inkErasing = false;
+	bool tabletEraser = false;        // the pen's eraser end (or its barrel button) is what's down or near
+	double penPressure = -1;          // 0..1 while a pen draws; -1 a mouse
+	double eraserRadius() const { return 10 * upp; }   // 10 points on screen
+	bool erases() const;
+	bool inkPress(double vx, double vy);
+	void inkMotion(double vx, double vy);
+	void inkRelease(double vx, double vy);
+	void inkSample(double vx, double vy);
+	void inkHover(double vx, double vy);
+	void inkMenu(POINT screen);
+	bool inkKey(UINT vk);
+	bool onPointer(UINT msg, WPARAM wp, LPARAM lp);
+	void drawDrawingBar(ID2D1RenderTarget* rt, float w, float h);
 
 	// What the wire under the pointer carries, in a chip beside it once the
 	// pointer has rested there a moment (Settings > Canvas), as the Mac's.

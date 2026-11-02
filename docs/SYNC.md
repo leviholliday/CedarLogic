@@ -1683,7 +1683,7 @@ and §4.5–§4.11 sentences.
 
 > **Turn off sync on this Mac?**
 > Your circuits stay on this Mac. Your other devices keep syncing with each other.
-> [ ] Also remove the synced circuits from this Mac (they go to the library's trash)
+> [ ] Also remove the synced circuits from this Mac (they go to Recently Deleted)
 > [Turn Off]  [Cancel]
 
 **Delete Synced Copy…** →

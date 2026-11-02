@@ -1,6 +1,6 @@
 // Settings (Ctrl+,), laid out as the Mac app's (SettingsView.swift) and the
 // Linux app's: the pages as icons in a bar across the top -- General,
-// Appearance, Canvas, Toolbar, Shortcuts -- the window fitting each page as
+// Appearance, Canvas, Toolbar, Shortcuts, Sync -- the window fitting each page as
 // you switch, and each setting a label on the left with its control and a
 // line of explanation under it. Every change applies at once; Escape or the
 // close box closes it, and Ctrl+Tab steps through the pages.
@@ -11,11 +11,14 @@
 #include "Collections.h"
 #include "Integration.h"
 #include "Shortcuts.h"
+#include "SyncApp.h"
 #include "Toolbar.h"
 #include "Updater.h"
 #include "Window.h"
 
 #include <imm.h>
+#include <shlobj.h>
+#include <shlwapi.h>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -23,7 +26,7 @@
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage, SyncPage };
 
 // Every window takes the change.
 void apply() {
@@ -82,6 +85,23 @@ FormField picture(const char* side, int height, std::function<void(ID2D1RenderTa
 	return x;
 }
 
+// What opens a double-clicked .cdl file now: its name, and `us` when it's
+// this copy of CedarLogic.
+std::string cdlHandler(bool& us) {
+	us = false;
+	wchar_t exe[MAX_PATH] = L"";
+	DWORD n = MAX_PATH;
+	if (SUCCEEDED(AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, L".cdl", L"open", exe, &n))) {
+		wchar_t self[MAX_PATH] = L"";
+		GetModuleFileNameW(nullptr, self, MAX_PATH);
+		us = lstrcmpiW(exe, self) == 0;
+	}
+	wchar_t name[256] = L"";
+	n = 256;
+	if (SUCCEEDED(AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_FRIENDLYAPPNAME, L".cdl", L"open", name, &n))) return U(name);
+	return std::string();
+}
+
 FormField button(const char* label, bool beside) {
 	FormField x;
 	x.kind = FormField::Button;
@@ -120,7 +140,7 @@ struct Style { int id; const char* name; const char* blurb; };
 const Style kStyles[] = {
 	{ 3, "Seamless", "Blends into the canvas like one surface. Tools stay quiet until you point at them." },
 	{ 0, "Classic", "Tools in tidy rounded groups, everything in reach." },
-	{ 2, "Minimal", "Just the essentials and your circuit's name; the rest is behind the ••• menu." },
+	{ 2, "Minimal", "Just the essentials and your circuit's name; the rest is in the menus." },
 };
 const float kStyleH = 88;
 
@@ -143,7 +163,7 @@ void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float, bool focused
 		drawText(rt, st.blurb, D2D1::RectF(24, top + 21, w, top + 39), 11.5f, look.dim);
 		// The bar itself, drawn in that style a size smaller.
 		const D2D1_RECT_F pr = D2D1::RectF(24, top + 42, w - 2, top + 80);
-		const float k = (pr.bottom - pr.top) / Toolbar::barHeight();
+		const float k = (pr.bottom - pr.top) / Toolbar::toolsHeight();
 		ID2D1Factory* factory = nullptr;
 		rt->GetFactory(&factory);
 		ID2D1RoundedRectangleGeometry* clip = nullptr;
@@ -154,7 +174,7 @@ void paintStyles(HWND owner, ID2D1RenderTarget* rt, float w, float, bool focused
 			rt->GetTransform(&base);
 			rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), clip), layer);
 			rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(pr.left, pr.top) * base);
-			bar->paintPicture(rt, (pr.right - pr.left) / k, Toolbar::barHeight(), st.id);
+			bar->paintPicture(rt, (pr.right - pr.left) / k, Toolbar::toolsHeight(), st.id);
 			rt->SetTransform(base);
 			rt->PopLayer();
 		} else {
@@ -478,14 +498,14 @@ void showPreferencesDialog(HWND parent) {
 	Prefs& p = prefs();
 	Form f;
 	f.title = "Settings";
-	f.width = 620;
+	f.width = 640;   // the Mac's
 	f.okText = "";
 	f.cancelText = "";
 	f.settingsLayout = true;
-	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts" };
-	// A gear, a palette, a mouse, ••• (as the Linux app has it), a keyboard.
-	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE765 };
-	f.page = std::max(0, std::min((int)ShortcutsPage, g_page));
+	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts", "Sync" };
+	// A gear, a palette, a mouse, ••• (as the Linux app has it), a keyboard, two circling arrows.
+	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE765, 0xE895 };
+	f.page = std::max(0, std::min((int)SyncPage, g_page));
 	// What each field does when it changes.
 	std::map<int, std::function<void(Form&, int)>> on;
 
@@ -498,7 +518,8 @@ void showPreferencesDialog(HWND parent) {
 	name.widthPt = 260;
 	name.placeholder = "First and last name";
 	name.tip = "Printed under your circuit when you export it as an image, and on the Lab Page template.";
-	on[f.add(name)] = [](Form& form, int i) { prefs().studentName = form.text(i); prefs().save(); };
+	const int nameField = f.add(name);
+	on[nameField] = [](Form& form, int i) { prefs().studentName = form.text(i); prefs().save(); };
 
 	auto openTip = [] {
 		return std::string(prefs().openReplaces
@@ -533,13 +554,54 @@ void showPreferencesDialog(HWND parent) {
 	// A copy run from the zip (an installed one is in Start already).
 	if (integration::offered()) {
 		on[f.add(check("Start menu:", "Add CedarLogic to the Start menu", integration::inStartMenu(),
-		               "In Start with your other apps, and double-clicking a .cdl file opens it here. It runs from this folder, so "
-		               "keep the folder where it is."))] = [](Form& form, int i) {
+		               "In Start with your other apps, and double-clicking a .cdl file, or Open in the App on the website, opens it "
+		               "here. It runs from this folder, so keep the folder where it is."))] = [](Form& form, int i) {
 			const bool want = form.checked(i);
 			if (integration::setInStartMenu(want)) return;
 			form.setChecked(i, integration::inStartMenu());
 			showMessage(form.dialog, Tone::Warning, "CedarLogic couldn't add itself to the Start menu",
 			            "Windows didn't let it change this account's settings. The installer from the download page does the same, and more.");
+		};
+	}
+	// Double-clicking .cdl files (the Mac's "Opening files" row): which app
+	// opens them now, and Windows' own "Open with" to choose CedarLogic (an
+	// app can't make itself the default on Windows 10 and 11; the person
+	// ticks "Always use this app").
+	auto opensHere = [] {
+		bool us = false;
+		const std::string name = cdlHandler(us);
+		return std::make_pair(us, name);
+	};
+	auto opensTip = [](bool us, const std::string& name) {
+		if (us) return std::string("Double-clicking a .cdl file in File Explorer opens it here.");
+		return (name.empty() ? std::string("Double-clicking a .cdl file in File Explorer doesn't open CedarLogic right now.")
+		                     : "Double-clicking a .cdl file in File Explorer opens it in " + name + " right now.") +
+		       " Choose CedarLogic and tick “Always use this app”.";
+	};
+	{
+		const auto now = opensHere();
+		FormField files = button(now.first ? "CedarLogic opens them" : "Open them with CedarLogic…", false);
+		files.side = "Opening files:";
+		files.tip = opensTip(now.first, now.second);
+		files.tipLines = 2;
+		on[f.add(files)] = [opensHere, opensTip](Form& form, int i) {
+			if (opensHere().first) return;
+			// Windows' Open with, for a .cdl file (an empty one in the temp
+			// folder: nothing is opened, only the choice made).
+			wchar_t tmp[MAX_PATH] = L"";
+			GetTempPathW(MAX_PATH, tmp);
+			const std::wstring file = std::wstring(tmp) + L"CedarLogic circuit.cdl";
+			HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+			if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+			OPENASINFO info = {};
+			info.pcszFile = file.c_str();
+			info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_REGISTER_EXT;
+			SHOpenWithDialog(form.dialog, &info);
+			DeleteFileW(file.c_str());
+			const auto after = opensHere();
+			SetWindowTextW(form.fields[i].hwnd, after.first ? L"CedarLogic opens them" : L"Open them with CedarLogic…");
+			EnableWindow(form.fields[i].hwnd, !after.first);
+			form.setTip(i, opensTip(after.first, after.second));
 		};
 	}
 	on[f.add(check("Quitting:", "Ask before quitting", p.confirmQuit,
@@ -551,11 +613,32 @@ void showPreferencesDialog(HWND parent) {
 	               "The readout along the bottom of the window. Notes (Saved, Copied\u2026) still show there for a moment either way."))] =
 		[](Form& form, int i) { prefs().showStatus = form.checked(i); apply(); };
 	on[f.add(check("Updates:", "Check for new versions", p.checkUpdates,
-	               "New test builds install from inside the app: it asks first, and keeps your circuits."))] = [](Form& form, int i) {
+	               "New versions install from inside the app: it asks first, and keeps your circuits."))] = [](Form& form, int i) {
 		prefs().checkUpdates = form.checked(i);
 		prefs().save();
 	};
+	// The testing group, as the Mac's row (its words), with Check Now beside
+	// it; under it, how the last check went (and, once, why a copy from the
+	// test builds is a beta tester).
+	auto groupTip = [] {
+		const std::string status = updater::status();
+		return std::string("Beta testers get new versions first, before they're ready for everyone. Normal testers get them once "
+		                   "they're settled. Updates install from inside the app.") +
+		       (status.empty() ? "" : " " + status);
+	};
+	FormField group = choice("Testing group:", { "Normal tester", "Beta tester" }, p.betaTester ? 1 : 0, groupTip());
+	group.tipLines = 4;
+	const int groupField = f.add(group);
+	on[groupField] = [groupTip](Form& form, int i) {
+		prefs().betaTester = form.choice(i) == 1;
+		prefs().testingGroupNotice = false;
+		prefs().save();
+		updater::groupChanged();
+		form.setTip(i, groupTip());
+	};
 	on[f.add(button("Check Now", true))] = [](Form& form, int) { updater::checkNow(form.dialog); };
+	// Shown here: said.
+	updater::noticeSeen();
 
 	// ---- Appearance
 	f.adding = Appearance;
@@ -575,6 +658,9 @@ void showPreferencesDialog(HWND parent) {
 	auto focused = [&f](int field) { return field >= 0 && GetFocus() == f.fields[field].hwnd; };
 	const int swatches = f.add(picture("App colour:", 52, [&](ID2D1RenderTarget* rt, float w, float h) { paintSwatches(rt, w, h, focused(swatchField)); },
 	                                   "Selections, highlights and buttons. CedarLogic is the icon's green. Wire colours that show signal state never change."));
+	on[f.add(choice("Tabs:", { "Modern", "Classic" }, p.classicTabs ? 1 : 0,
+	                "Modern tabs drag to reorder or to split the view, and rename with a double-click. Classic are plain segments."))] =
+		[](Form& form, int i) { prefs().classicTabs = form.choice(i) == 1; apply(); };
 	const int showGrid = f.add(check("Canvas:", "Show the grid", p.showGrid, "The background grid gates snap to. Printing never includes it."));
 	const int gridStyle = f.add(choice("Grid style:", { "Lines", "Dots" }, p.gridStyle, "Dots are quieter; lines make alignment easier to see."));
 	const int major = f.add(check("", "Darker line every 5 squares", p.majorGrid, "Makes distances easy to judge at a glance."));
@@ -622,22 +708,34 @@ void showPreferencesDialog(HWND parent) {
 	on[f.add(choice("Duplicate:", { "Leaves the clipboard alone", "Copies to the clipboard too" }, p.duplicateUsesClipboard ? 1 : 0,
 	                "Second option: the copy stays on the clipboard, so paste makes more of it."))] =
 		[](Form& form, int i) { prefs().duplicateUsesClipboard = form.choice(i) == 1; apply(); };
+	on[f.add(choice("New pages:", { "Share links with the other pages", "Start on their own" }, p.newPagesShareLinks ? 0 : 1,
+	                "TO and FROM links of the same name connect across pages that share links. Right-click a tab to choose "
+	                "which pages connect."))] =
+		[](Form& form, int i) { prefs().newPagesShareLinks = form.choice(i) == 0; prefs().applyPageLinks(); apply(); };
 	on[f.add(choice("Tidy Up:", { "Keeps my layout", "Rearranges everything" }, p.tidyMode,
 	                "Keeps my layout: lines gates up where they are. Rearranges everything: lays the circuit out by signal flow. "
 	                "The Edit menu has both."))] = [](Form& form, int i) { prefs().tidyMode = form.choice(i); apply(); };
 
 	// ---- Toolbar
 	f.adding = ToolbarPage;
-	const int styles = f.add(picture("Style:", (int)(3 * kStyleH) - 6,
+	// The styles across the page, each by name with its picture, as the Mac's.
+	const int styles = f.add(picture("", (int)(3 * kStyleH) - 6,
 	                                 [&, parent](ID2D1RenderTarget* rt, float w, float h) { paintStyles(parent, rt, w, h, focused(styleField)); }));
 	swatchField = swatches;
 	styleField = styles;
-	static const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGLock, TGTab, TGFeedback };
-	bool firstGroup = true;
+	// In the Mac's order, then the circuit's name and Step Clock as it has them,
+	// then the dark mode switch (a Windows toolbar's own).
+	// Under a heading, across the page, as the Mac's "Show in the toolbar:".
+	FormField showHeading;
+	showHeading.kind = FormField::Note;
+	showHeading.label = "Show in the toolbar:";
+	showHeading.heading = true;
+	f.add(showHeading);
+	static const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGDraw, TGLock, TGTab, TGFeedback };
 	for (int g : groups) {
-		FormField c = check(firstGroup ? "Show:" : "", toolGroupName(g), (p.toolbarHidden & (1 << g)) == 0);
+		FormField c = check("", toolGroupName(g), (p.toolbarHidden & (1 << g)) == 0);
 		c.grid = 2;
-		firstGroup = false;
+		c.wideGrid = true;
 		on[f.add(c)] = [g, styles](Form& form, int i) {
 			if (form.checked(i)) prefs().toolbarHidden &= ~(1 << g);
 			else prefs().toolbarHidden |= 1 << g;
@@ -647,10 +745,17 @@ void showPreferencesDialog(HWND parent) {
 	}
 	FormField title = check("", "Circuit name", p.showTitle);
 	title.grid = 2;
+	title.wideGrid = true;
 	on[f.add(title)] = [styles](Form& form, int i) { prefs().showTitle = form.checked(i); apply(); form.refresh(styles); };
+	FormField stepClock = check("", "Step Clock", p.showStepClock);
+	stepClock.grid = 2;
+	stepClock.wideGrid = true;
+	on[f.add(stepClock)] = [styles](Form& form, int i) { prefs().showStepClock = form.checked(i); apply(); form.refresh(styles); };
 	FormField themeSwitch = check("", "Dark mode switch", p.showThemeToggle,
-	                              "Applies to every style. Hidden tools are still in the ••• menu and keep their shortcuts.");
+	                              "Applies to every style. Hidden tools are still in the menus and keep their shortcuts. Step Clock "
+	                              "shows in Simulation View's bar too; clicking a clock set to \u201COnly on Step Clock\u201D steps it.");
 	themeSwitch.grid = 2;
+	themeSwitch.wideGrid = true;
 	on[f.add(themeSwitch)] = [styles](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); form.refresh(styles); };
 
 	// ---- Shortcuts
@@ -660,6 +765,7 @@ void showPreferencesDialog(HWND parent) {
 	FormField search;
 	search.kind = FormField::Text;
 	search.placeholder = "Search shortcuts";
+	search.widthPt = 260;   // the Mac's is a short box, Restore Defaults at the far end
 	list.search = f.add(search);
 	on[list.search] = [&list](Form& form, int i) {
 		list.query = form.text(i);
@@ -680,6 +786,11 @@ void showPreferencesDialog(HWND parent) {
 	note.lines = 2;
 	list.note = f.add(note);
 	list.list = f.add(picture("", 360, [&list](ID2D1RenderTarget* rt, float w, float h) { paintShortcuts(list, rt, w, h); }));
+
+	// ---- Sync
+	f.adding = SyncPage;
+	syncapp::SettingsPage sync;
+	sync.add(f);
 
 	// A colour or a style picked, by a click or the arrows.
 	auto pickAccent = [&f, swatches](int i) {
@@ -721,12 +832,22 @@ void showPreferencesDialog(HWND parent) {
 		ImmAssociateContextEx(list.hwnd(), nullptr, 0);
 		// Tab reaches the list (the arrows choose a shortcut, Enter changes it).
 		SetWindowLongPtrW(list.hwnd(), GWL_STYLE, GetWindowLongPtrW(list.hwnd(), GWL_STYLE) | WS_TABSTOP);
+		sync.init(form);
+	};
+	// Sync's state is read again every half minute ("Synced 5 min ago").
+	f.timerMs = 30000;
+	f.onTimer = [&](Form& form) { sync.tick(form); };
+	f.onLeave = [&](Form& form, int field) {
+		if (sync.handles(field)) sync.left(form, field);
+		if (field == nameField) syncapp::nameChanged();   // your name, on your other devices too
 	};
 	f.onChange = [&](Form& form, int field) {
+		if (sync.handles(field)) { sync.changed(form, field); return; }
 		auto it = on.find(field);
 		if (it != on.end()) it->second(form, field);
 	};
-	f.onClick = [&](Form&, int field, float x, float y) {
+	f.onClick = [&](Form& form, int field, float x, float y) {
+		if (sync.clicked(form, field, x, y)) return;
 		if (field == swatches && x >= 0) pickAccent((int)(x / kSwatchW));
 		else if (field == styles && y >= 0) pickStyle((int)(y / kStyleH));
 	};
@@ -736,6 +857,8 @@ void showPreferencesDialog(HWND parent) {
 		else if (form.scrollHeight > 0) form.scrollTo(form.scrollY - MulDiv(delta, scaled(90, dpiOf(form.dialog)), WHEEL_DELTA));
 	};
 	f.run(parent);
+	sync.detach();
+	syncapp::nameChanged();
 	g_page = f.page;
-	if (g_page < 0 || g_page > ShortcutsPage) g_page = General;
+	if (g_page < 0 || g_page > SyncPage) g_page = General;
 }

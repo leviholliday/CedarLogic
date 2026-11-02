@@ -81,6 +81,17 @@ public:
 	std::function<bool(Picker&, UINT vk, bool ctrl)> onKey;
 	std::function<void(ID2D1RenderTarget*, const D2D1_RECT_F&)> preview;
 	std::function<void(Picker&)> onSelect;
+	// A strip under the list, above the buttons (Your Circuits' sync line):
+	// drawn in points inside its rectangle, and told of clicks in it.
+	float footerHeight = 0;
+	std::function<void(ID2D1RenderTarget*, const D2D1_RECT_F&)> footer;
+	std::function<void(Picker&, float x, float y)> onFooterClick;
+	// A link beside the title (Your Circuits' "Recently Deleted (N)"), in the
+	// accent; clicked, onTitleLink. Read again each time it's drawn.
+	std::function<std::string()> titleLink;
+	std::function<void(Picker&)> onTitleLink;
+	D2D1_RECT_F titleLinkRect = D2D1::RectF(0, 0, 0, 0);
+	bool titleLinkHot = false;
 
 	std::vector<Row> shown;
 	int selection = 0;
@@ -186,9 +197,14 @@ private:
 	float top() const { return kMargin + 34 + 44 + (search ? 44 : 0); }
 	D2D1_RECT_F listRect() const {
 		const float w = clientW(), h = clientH();
-		if (listWidth > 0 && listOnLeft) return D2D1::RectF(kMargin - 8, top(), kMargin + listWidth, h - kMargin - 30 - 18);
+		const float bottom = h - kMargin - 30 - 18 - footerHeight;
+		if (listWidth > 0 && listOnLeft) return D2D1::RectF(kMargin - 8, top(), kMargin + listWidth, bottom);
 		const float left = listWidth > 0 ? w - kMargin - listWidth : kMargin - 8;
-		return D2D1::RectF(left, top(), w - kMargin + 8, h - kMargin - 30 - 18);
+		return D2D1::RectF(left, top(), w - kMargin + 8, bottom);
+	}
+	D2D1_RECT_F footerRect() const {
+		const float top = clientH() - kMargin - 30 - 18 - footerHeight + 6;
+		return D2D1::RectF(kMargin, top, clientW() - kMargin, top + footerHeight);
 	}
 	void clampScroll() {
 		const D2D1_RECT_F l = listRect();
@@ -221,6 +237,17 @@ private:
 		const float w = clientW(), h = clientH();
 		rt->Clear(look.paper());
 		drawText(rt, title, D2D1::RectF(kMargin, kMargin, w - kMargin, kMargin + 26), 19, look.ink(), TextAlign::Leading, true);
+		titleLinkRect = D2D1::RectF(0, 0, 0, 0);
+		if (titleLink) {
+			const std::string link = titleLink();
+			if (!link.empty()) {
+				const float lx = kMargin + textWidth(title, 19, true) + 16, lw = textWidth(link, 13) + 4;
+				titleLinkRect = D2D1::RectF(lx, kMargin + 4, std::min(w - kMargin, lx + lw), kMargin + 24);
+				drawText(rt, link, titleLinkRect, 13, titleLinkHot ? accent : withAlpha(accent, 0.85f));
+				if (titleLinkHot)
+					fillRect(rt, D2D1::RectF(titleLinkRect.left, titleLinkRect.bottom - 2, titleLinkRect.left + lw - 4, titleLinkRect.bottom - 1), accent);
+			}
+		}
 		// The line under the heading, wrapped.
 		if (IDWriteFactory* dw = dwFactory()) {
 			IDWriteTextFormat* f = nullptr;
@@ -290,6 +317,8 @@ private:
 		if (shown.empty())
 			drawText(rt, emptyText, D2D1::RectF(l.left, l.top + 30, l.right, l.top + 60), 13, look.ink(0.55f), TextAlign::Center);
 		rt->PopAxisAlignedClip();
+
+		if (footer && footerHeight > 0) footer(rt, footerRect());
 
 		// The buttons along the bottom.
 		buttons.clear();
@@ -401,6 +430,9 @@ private:
 			TrackMouseEvent(&t);
 			const int row = rowAt(x, y), b = buttonAt(x, y);
 			if (row != hot || b != hotButton) { hot = row; hotButton = b; redraw(); }
+			const bool linkHot = inRect(titleLinkRect, x, y);
+			if (linkHot != titleLinkHot) { titleLinkHot = linkHot; redraw(); }
+			if (linkHot) SetCursor(LoadCursor(nullptr, IDC_HAND));
 			return true;
 		}
 		case WM_MOUSELEAVE: hot = hotButton = -1; redraw(); return true;
@@ -414,6 +446,16 @@ private:
 				press(100 + (int)rightButtons.size() - 1);
 			return true;
 		case WM_LBUTTONUP: {
+			if (onTitleLink && inRect(titleLinkRect, x, y)) {
+				titleLinkHot = false;
+				onTitleLink(*this);
+				redraw();
+				return true;
+			}
+			if (footer && footerHeight > 0 && onFooterClick && inRect(footerRect(), x, y)) {
+				onFooterClick(*this, x, y);
+				return true;
+			}
 			const int b = buttonAt(x, y);
 			if (b >= 0) press(buttons[b].id);
 			return true;

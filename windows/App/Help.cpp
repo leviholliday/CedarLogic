@@ -43,8 +43,9 @@ const std::vector<Page>& pages() {
 		  { p("CedarLogic is a digital logic simulator. You put gates on a page, wire them together, and the circuit runs as you build it: "
 		      "switches you can click, lights that show what's happening, wires that change colour with their signals."),
 		    p("The window has three parts: the **side panel** of gates down the left (with a small map of the page under it), the "
-		      "**canvas** where you build, and the **toolbar** across the top. Each circuit can have several **tabs** (pages), shown "
-		      "above the canvas. Every menu is behind **•••** at the right of the toolbar (or press Alt)."),
+		      "**canvas** where you build, and across the top the **menu bar** (File, Edit, Circuit, View, Simulate, Window, Help) "
+		      "with the **toolbar** under it. Each circuit can have several **tabs** (pages), shown above the canvas. Press **Alt** "
+		      "or **F10** to reach the menus from the keyboard; **Settings** is in File (Ctrl+,)."),
 		    tip("New here? Help ▸ Guided Tour shows you around, one part at a time.") },
 		  true },
 		{ "first", "Your First Circuit", 0xEA80, "Two switches, an AND gate and a light.",
@@ -97,7 +98,12 @@ const std::vector<Page>& pages() {
 		           { "Arrows", "Nudge the selection a square (Shift: five)" },
 		           { "Ctrl+Z / Ctrl+Y", "Undo and redo" } }),
 		    p("Double-click a gate for its settings (a clock's speed, a label's text). Double-click a RAM or ROM to see and change what's "
-		      "in it.") },
+		      "in it."),
+		    p("**Lock in Place** (the Edit menu, Ctrl+L, or right-click a part) keeps a part where it is, with a small lock on it: it "
+		      "can't be moved, rotated or deleted (closing its tab still removes it, and Undo brings it back), but wires to it still "
+		      "work, its settings still change and switches still flip. Teachers: lock the switches and lights, then share the "
+		      "circuit. **Unlock Part** takes the lock off one part, and **Unlock All Parts** in the Edit menu takes every lock off. "
+		      "This is different from **Lock the Circuit** in the Simulate menu, which stops all editing.") },
 		  false },
 		{ "moving", "Moving Around", 0xE7C2, "Zoom, pan and the minimap.",
 		  { keys({ { "Wheel", "Zoom or move, as set in Settings (touchpads separately)" },
@@ -127,6 +133,10 @@ const std::vector<Page>& pages() {
 		{ "sim", "Running the Simulation", 0xE768, "It runs while you build.",
 		  { p("The circuit runs all the time. The toolbar pauses and resumes it (so does **Space** on the canvas), **Ctrl+Shift+R** steps "
 		      "once, and the speed slider sets how long each step takes."),
+		    p("**Step Clock (K)** works a clock by hand, one tick at a time. Double-click a clock and turn on **Only on Step Clock**: "
+		      "it holds still at 0. Each Step Clock then takes it to 1 and back to 0, letting the circuit settle after each, so a "
+		      "flip-flop changes once per press. It works running or paused; the clock button beside Step does the same, and so "
+		      "does clicking the clock."),
 		    p("Click a switch to flip it; keypads and pulse generators take clicks too."),
 		    p("**Simulation View (Ctrl+R)** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the "
 		      "bar at the bottom shows every switch and light. Point at a wire and all of it lights up. Space pauses, Escape leaves."),
@@ -141,6 +151,10 @@ const std::vector<Page>& pages() {
 		    p("Its other tabs: each light's **Karnaugh map** with the groups drawn on, and its **simplest sum of products** and **product "
 		      "of sums**. Rows with no clear 0 or 1 count as don't-cares. Copy a formula, or **Build This as a Circuit** to make it again "
 		      "as gates."),
+		    p("**Check my circuit (Shift+T)** compares the lights with what the assignment asks for: type the formulas (**S = A ^ B ^ Cin**, "
+		      "then **Cout = AB + Cin(A ^ B)**), a minterm list (**F(A,B,C) = Σm(1,3,5) + d(7)**), or paste the truth table you were "
+		      "given. Switches and lights are matched by name (pick by hand under **Names** when they differ), don't-cares are skipped, "
+		      "and wrong rows are shown with what was asked for and what the circuit gave. The last check is kept for each circuit."),
 		    p("**Oscilloscope (Ctrl+G)** records signals over time, under the canvas (drag the line over it to make it taller): every "
 		      "**TO** label is a signal you can watch. Click or use the arrows "
 		      "to move its time cursor (Alt+arrows jump to the next change), and the names column reads every signal there. Its share "
@@ -166,8 +180,14 @@ const std::vector<Page>& pages() {
 		    p("**Files**: opening a .cdl file (from File Explorer, or **Ctrl+I**) brings in a copy to work on; the file itself isn't "
 		      "touched, and opening it again finds the copy. To get a file out, **Export as CedarLogic File** saves a copy wherever you "
 		      "like."),
+		    p("**Share Link…** (File menu) copies a link to the circuit: whoever opens it gets the whole circuit, in CedarLogic "
+		      "Online or, from its Open in the App button, here, as a new circuit in Your Circuits. Nothing is uploaded, because the "
+		      "link holds the circuit; one too big for a link says so, and Export sends it as a file instead."),
 		    p("**Versions**: **Ctrl+S** keeps a version. Version History (click the circuit's name) shows them with a picture of each; "
 		      "restoring one keeps the current one too."),
+		    p("**Lab reports**: **File ▸ Export Lab Report…** makes one PDF to hand in, with your name and the date: a picture of "
+		      "each page, the truth table, a Karnaugh map and the simplest formulas for each light (2 to 4 switches), and the "
+		      "oscilloscope's timing diagram. Tick what goes in, in colour or black and white."),
 		    keys({ { "Ctrl+N", "New circuit" },
 		           { "Ctrl+I", "Open a .cdl file from anywhere" },
 		           { "Ctrl+E", "Export an image, with your name under it" },
@@ -187,7 +207,7 @@ const std::vector<Page>& pages() {
 		      "app's colour, the grid, wires, and the side panel. **Canvas**: a wire's value where you rest the pointer, what the "
 		      "wheel and touchpad do, right-click, duplicating, and Tidy Up."),
 		    p("**Toolbar**: Seamless (one surface with the canvas), Classic (tools in rounded groups) or Minimal (the essentials, "
-		      "the rest in •••), and which tools it shows. **Shortcuts**: click one and press new keys; Restore Defaults puts "
+		      "the rest in the menus), and which tools it shows. **Shortcuts**: click one and press new keys; Restore Defaults puts "
 		      "them all back. **Ctrl+/** lists them all."),
 		    p("**Ctrl+Shift+D** switches between light and dark any time.") },
 		  false },

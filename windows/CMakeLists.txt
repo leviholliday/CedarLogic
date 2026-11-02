@@ -8,7 +8,7 @@
 # Everything it needs comes with Windows (Direct2D, DirectWrite, WIC, the
 # common controls): no wxWidgets, no Skia, nothing to download.
 cmake_minimum_required(VERSION 3.16)
-project(CedarLogicWindows VERSION 0.1.0 LANGUAGES C CXX RC)
+project(CedarLogicWindows VERSION 0.4.0 LANGUAGES C CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,7 +30,8 @@ file(GLOB CL_COMMANDS "${ROOT}/src/gui/command/*.cpp")
 list(FILTER CL_COMMANDS EXCLUDE REGEX "cmd(AddTab|DeleteTab)\\.cpp$")
 file(GLOB CL_LOGIC "${ROOT}/logic/src/*.cpp")
 file(GLOB CL_CEDARCORE "${ROOT}/mac/CedarCore/*.cpp")
-list(FILTER CL_CEDARCORE EXCLUDE REGEX "CGScene\\.cpp$")
+# CGScene is the Mac's; the classroom (CLASSROOM.md) isn't in the Windows app.
+list(FILTER CL_CEDARCORE EXCLUDE REGEX "(CGScene|Classroom[A-Za-z]*)\\.cpp$")
 
 add_library(CedarCore STATIC
 	${ROOT}/src/gui/guiGate.cpp ${ROOT}/src/gui/guiWire.cpp ${ROOT}/src/gui/wireSegment.cpp
@@ -41,7 +42,7 @@ add_library(CedarCore STATIC
 	${ROOT}/src/gui/route/TrunkRouter.cpp ${ROOT}/src/gui/route/GridRouter.cpp ${ROOT}/src/gui/route/Layout.cpp
 	${CL_COMMANDS}
 	${CL_LOGIC}
-	${ROOT}/format/circuit_file_io.cpp ${ROOT}/format/legacy_cdl.cpp ${ROOT}/format/migrate.cpp
+	${ROOT}/format/circuit_file_io.cpp ${ROOT}/format/ink.cpp ${ROOT}/format/legacy_cdl.cpp ${ROOT}/format/migrate.cpp
 	${ROOT}/format/numeric.cpp ${ROOT}/format/sexpr.cpp
 	${CL_CEDARCORE}
 	CedarCore/D2DScene.cpp
@@ -56,23 +57,33 @@ if(MSVC)
 	# Sources are UTF-8; /bigobj for the long command files; big stacks are
 	# normal in the router.
 	target_compile_options(CedarCore PUBLIC /utf-8 /bigobj /EHsc /W3 /wd4244 /wd4267 /wd4305 /wd4996 /wd4018 /wd4101)
+	# Debug information for the .pdb (the app's link step makes it): crash
+	# stacks by name in --session-check.
+	target_compile_options(CedarCore PUBLIC $<$<CONFIG:Release>:/Zi>)
 else()
 	target_compile_options(CedarCore PRIVATE -Wno-deprecated-declarations)
 endif()
 
+# Signed preview updates, shared with the Linux app: the signature check,
+# its checks (verify_check) and CL_BUILD_TIME.
+include("${ROOT}/update-signing/UpdateSigning.cmake")
+
 # ---- The app -------------------------------------------------------------------
 option(CL_BUILD_APP "Build the app" ON)
 if(CL_BUILD_APP)
+	# Every App/*.cpp, DragLog.cpp included (--drag-log, --drag-selftest:
+	# windows/DRAG-DIAGNOSIS.md; it uses winmm's timeBeginPeriod, linked below).
+	# Re-run the configure step after adding a file, as the list is made then.
 	file(GLOB CL_APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/App/*.cpp")
 	set(CL_ICON "${ROOT}/res/icon.ico")
 	set(CL_DOC_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/CedarLogicDocument.ico")
 	set(CL_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/res/CedarLogic.manifest")
 	set(CL_LAUNCH_ICON "${ROOT}/mac/App/LaunchIcon.png")
-	set(CL_LAUNCH_SOUND "${CMAKE_CURRENT_SOURCE_DIR}/res/FirstLaunch.wav")
+	set(CL_LAUNCH_SOUND "${ROOT}/res/FirstLaunch.wav")
 	configure_file(res/CedarLogic.rc.in "${CMAKE_CURRENT_BINARY_DIR}/CedarLogic.rc" @ONLY)
 	add_executable(CedarLogic WIN32 ${CL_APP_SOURCES} "${CMAKE_CURRENT_BINARY_DIR}/CedarLogic.rc")
 	target_include_directories(CedarLogic PRIVATE App)
-	target_link_libraries(CedarLogic PRIVATE CedarCore windowscodecs ole32 comctl32 comdlg32 shell32 shlwapi dwmapi uxtheme winhttp winmm imm32 dxguid uuid gdi32 user32)
+	target_link_libraries(CedarLogic PRIVATE CedarCore windowscodecs ole32 comctl32 comdlg32 shell32 shlwapi dwmapi uxtheme winhttp winmm imm32 dxguid uuid gdi32 user32 bcrypt crypt32)
 	execute_process(COMMAND git -C "${ROOT}" rev-parse HEAD
 	                OUTPUT_VARIABLE CL_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
 	                RESULT_VARIABLE CL_GIT_RC ERROR_QUIET)
@@ -83,10 +94,15 @@ if(CL_BUILD_APP)
 	set(CL_FEEDBACK_URL "https://cedarlogic.netlify.app" CACHE STRING "Where Send Feedback sends to")
 	set(CL_FEEDBACK_KEY "96611596304230a4c3c21e22b1b3e523" CACHE STRING "Sent with feedback so the site knows it's from the app")
 	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}"
-	                           CL_FEEDBACK_URL="${CL_FEEDBACK_URL}" CL_FEEDBACK_KEY="${CL_FEEDBACK_KEY}")
+	                           CL_FEEDBACK_URL="${CL_FEEDBACK_URL}" CL_FEEDBACK_KEY="${CL_FEEDBACK_KEY}" CL_BUILD_TIME=${CL_BUILD_TIME}LL)
+	# Updates are signed (update-signing/UpdateSignature.h).
+	target_link_libraries(CedarLogic PRIVATE cl_updatesig)
 	if(MSVC)
 		# The manifest is in the resources (res/CedarLogic.manifest).
 		target_link_options(CedarLogic PRIVATE /MANIFEST:NO)
+		# A .pdb beside the exe (not shipped), so a crash in --session-check
+		# prints its stack by name; the exe itself stays as optimized as before.
+		target_link_options(CedarLogic PRIVATE $<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
 	else()
 		target_link_options(CedarLogic PRIVATE -municode -static)
 	endif()
@@ -96,7 +112,7 @@ endif()
 # The Mac app's headless checks (mac/Tools), drawing with Direct2D here.
 option(CL_BUILD_TOOLS "Build the engine's checks" ON)
 if(CL_BUILD_TOOLS)
-	foreach(tool render_png sim_check edit_check save_check tt_check cl_check part_check)
+	foreach(tool render_png sim_check edit_check save_check tt_check cl_check part_check lock_check clock_check register_check mistakes_check examples_check check_seq pagelinks_check)
 		add_executable(${tool} ${ROOT}/mac/Tools/${tool}.cpp)
 		target_include_directories(${tool} PRIVATE ${ROOT}/mac/Tools)
 		target_link_libraries(${tool} PRIVATE CedarCore windowscodecs ole32)

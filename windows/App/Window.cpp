@@ -21,6 +21,12 @@
 #include "LibraryWindow.h"
 #include "Chrome.h"
 #include "Integration.h"
+#include "ShareLink.h"
+#include "SyncApp.h"
+#include "Ink.h"
+#include "Notes.h"
+#include "SessionCheck.h"
+#include "Fade.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -31,12 +37,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
 
 namespace {
 
 const wchar_t* kClass = L"CedarLogicWindow";
 const UINT_PTR kClockTimer = 1, kAutosaveTimer = 2, kSwitchTimer = 3;
 const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18;
+// Why a move, delete, rotate or cut left some parts where they were.
+const char* kLockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock Part.";
 
 double since(double t) { return nowSeconds() - t; }
 
@@ -106,6 +115,7 @@ void registerWindowClasses() {
 // ---- Building the window -----------------------------------------------------------
 
 CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path(p) {
+	health::liveWindows++;
 	isRunning = cl_document_is_running(doc);
 	circuitWindows().push_back(this);
 	openMaximized = prefs().windowMaximized;   // before build() sizes the hidden window
@@ -185,6 +195,8 @@ CircuitWindow::~CircuitWindow() {
 	if (hintWindow) DestroyWindow(hintWindow);
 	delete findBar;
 	findBar = nullptr;
+	delete notes;
+	notes = nullptr;
 	delete switcher;
 	switcher = nullptr;
 	delete statusBar;
@@ -195,6 +207,7 @@ CircuitWindow::~CircuitWindow() {
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
 	recovery::remove(recoveryBase);
 	if (doc) cl_document_close(doc);
+	health::liveWindows--;
 }
 
 void CircuitWindow::build() {
@@ -248,8 +261,13 @@ void CircuitWindow::build() {
 	SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-// Every menu, in one popup: the toolbar's •••, and Alt or F10. (The window
-// has no menu bar: its title bar is the toolbar.)
+// The menu bar's menus, as Windows apps have them: File, Edit, Circuit,
+// View, Simulate, Window and Help, with the Mac app's commands (its File,
+// Edit, View, Simulation, Window and Help menus) sorted the Windows way --
+// Settings and Exit in File, About in Help, the tabs in Window. The toolbar
+// draws the bar from this menu's items (Toolbar::openMenu); each menu is a
+// real popup, so its keys, its letters and the Alt and F10 keys work as in
+// any Windows app. Each letter after & is used once in its menu.
 void CircuitWindow::buildMenus() {
 	menus = CreatePopupMenu();
 	HMENU menuBar = menus;
@@ -259,23 +277,31 @@ void CircuitWindow::buildMenus() {
 	item(file, CMD_OPEN, "Your &Circuits\u2026\tCtrl+O");
 	recentMenu = submenu(file, "Open &Recent");
 	item(file, CMD_IMPORT, "&Import a File\u2026\tCtrl+I");
-	item(file, CMD_OPEN_SAMPLE, "Open the &Practice Circuit");
+	item(file, CMD_OPEN_SAMPLE, "Open the Practice Circ&uit");
 	separator(file);
 	item(file, CMD_SAVE, "&Save a Version\tCtrl+S");
 	item(file, CMD_VERSIONS, "&Version History\u2026");
-	item(file, CMD_SAVE_AS, "E&xport\u2026\tCtrl+Shift+S");
+	// What the circuit's name in the toolbar offers, for when it's hidden.
+	item(file, CMD_RENAME_CIRCUIT, "Ren&ame\u2026");
+	item(file, CMD_DUPLICATE_CIRCUIT, "&Duplicate");
 	item(file, CMD_SAVE_TEMPLATE, "Save as Te&mplate\u2026");
-	item(file, CMD_EXPORT_IMAGE, "&Export as Image…\tCtrl+E");
-	HMENU older = submenu(file, "Export for &Older CedarLogic");
-	item(older, CMD_EXPORT_V2, "For CedarLogic &2…");
-	item(older, CMD_EXPORT_V1, "For CedarLogic &1.x…");
-	item(file, CMD_PRINT, "&Print…\tCtrl+P");
 	separator(file);
-	item(file, CMD_CLOSE_WINDOW, "&Close Window\tCtrl+Shift+W");
+	item(file, CMD_EXPORT_IMAGE, "Export as Ima&ge\u2026\tCtrl+E");
+	item(file, CMD_EXPORT_REPORT, "Export &Lab Report\u2026");
+	item(file, CMD_SAVE_AS, "Export as CedarLogic &File\u2026\tCtrl+Shift+S");
+	HMENU older = submenu(file, "Export for &Older CedarLogic");
+	item(older, CMD_EXPORT_V2, "For CedarLogic &2\u2026");
+	item(older, CMD_EXPORT_V1, "For CedarLogic &1.x\u2026");
+	item(file, CMD_SHARE_LINK, "S&hare Link\u2026");
+	separator(file);
+	item(file, CMD_PRINT, "&Print\u2026\tCtrl+P");
+	separator(file);
+	// Settings, where a Windows app keeps it (the toolbar's gear opens it too).
+	item(file, CMD_PREFERENCES, "S&ettings\u2026\tCtrl+,");
+	separator(file);
+	item(file, CMD_CLOSE_WINDOW, "Close &Window\tCtrl+Shift+W");
 	item(file, CMD_QUIT, "E&xit\tCtrl+Q");
 
-	// Bare-key shortcuts (R, S, T...) are the canvas's own; the labels only
-	// mention them.
 	HMENU edit = submenu(menuBar, "&Edit");
 	item(edit, CMD_UNDO, "&Undo\tCtrl+Z");
 	item(edit, CMD_REDO, "&Redo\tCtrl+Y");
@@ -283,22 +309,37 @@ void CircuitWindow::buildMenus() {
 	item(edit, CMD_CUT, "Cu&t\tCtrl+X");
 	item(edit, CMD_COPY, "&Copy\tCtrl+C");
 	item(edit, CMD_PASTE, "&Paste\tCtrl+V");
-	item(edit, CMD_DUPLICATE, "D&uplicate\tCtrl+D");
+	item(edit, CMD_DUPLICATE, "Dup&licate\tCtrl+D");
 	item(edit, CMD_DELETE, "&Delete\tDel");
 	item(edit, CMD_SELECT_ALL, "Select &All\tCtrl+A");
+	separator(edit);
 	item(edit, CMD_FIND, "&Find\u2026\tCtrl+F");
-	separator(edit);
-	item(edit, CMD_ADD_GATE, "Add a &Gate…\tA");
-	item(edit, CMD_GATE_SETTINGS, "Gate &Settings…");
-	item(edit, CMD_ROTATE, "R&otate\tR");
-	item(edit, CMD_STRAIGHTEN, "Straighten &Wires\tS");
-	item(edit, CMD_TIDY, "T&idy Up\tShift+S");
-	item(edit, CMD_TIDY_FLOW, "Tidy Up by Signal &Flow");
-	item(edit, CMD_CONNECT_NEARBY, "Connect &Nearby Pins");
-	item(edit, CMD_SAVE_PART, "Save as &Part\u2026");
-	item(edit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
-	separator(edit);
-	item(edit, CMD_PREFERENCES, "S&ettings…\tCtrl+,");
+	item(edit, CMD_FIND_NEXT, "Find &Next\tF3");
+	item(edit, CMD_FIND_PREVIOUS, "Find Pre&vious\tShift+F3");
+
+	// What changes the circuit itself (the Mac keeps these in Edit). Bare-key
+	// shortcuts (A, R, S...) are the canvas's own; the labels only mention them.
+	HMENU circuit = submenu(menuBar, "&Circuit");
+	item(circuit, CMD_ADD_GATE, "Add a &Gate\u2026\tA");
+	item(circuit, CMD_GATE_SETTINGS, "Gate &Settings\u2026");
+	item(circuit, CMD_ROTATE, "R&otate\tR");
+	separator(circuit);
+	// Parts locked in place stay put: a teacher's starter parts.
+	item(circuit, CMD_LOCK_IN_PLACE, "&Lock in Place");
+	item(circuit, CMD_UNLOCK_ALL_PARTS, "Unloc&k All Parts");
+	separator(circuit);
+	item(circuit, CMD_STRAIGHTEN, "Straighten &Wires\tS");
+	item(circuit, CMD_TIDY, "T&idy Up\tShift+S");
+	item(circuit, CMD_TIDY_FLOW, "Tidy Up by Signal &Flow");
+	item(circuit, CMD_CONNECT_NEARBY, "Connect &Nearby Pins");
+	separator(circuit);
+	item(circuit, CMD_BUILD_FORMULA, "&Build from Formula\u2026");
+	item(circuit, CMD_SAVE_PART, "Save as &Part\u2026");
+	// Which pages' TO/FROM links connect; a tab's right-click menu connects
+	// pages one by one.
+	separator(circuit);
+	item(circuit, CMD_CONNECT_ALL_PAGES, "Connect &All Pages");
+	item(circuit, CMD_DISCONNECT_ALL_PAGES, "&Disconnect All Pages");
 
 	HMENU view = submenu(menuBar, "&View");
 	item(view, CMD_ZOOM_IN, "Zoom &In\tCtrl+=");
@@ -307,42 +348,96 @@ void CircuitWindow::buildMenus() {
 	item(view, CMD_ZOOM_ACTUAL, "&Actual Size\tCtrl+1");
 	separator(view);
 	item(view, CMD_DARK, "&Dark Mode\tCtrl+Shift+D");
-	item(view, CMD_FOCUS_MODE, "&Focus Mode\tCtrl+.");
+	item(view, CMD_FOCUS_MODE, "Focus &Mode\tCtrl+.");
 	item(view, CMD_PALETTE, "Gate &Palette");
 	item(view, CMD_STATUS_BAR, "&Status Bar");
+	item(view, CMD_SHOW_GRID, "Show &Grid");
+	item(view, CMD_WIRE_DOTS, "Dots at Wire &Bends");
+	item(view, CMD_PROJECTOR, "Pro&jector Mode");
+	// Drawing on the circuit (Ink.h), as the Mac's View menu has it.
+	separator(view);
+	item(view, CMD_DRAW, "Dra&w on the Circuit\tCtrl+Alt+P");
+	HMENU drawingMenu = submenu(view, "Drawing &Tools");
+	item(drawingMenu, CMD_INK_PEN, "&Pen\tP");
+	item(drawingMenu, CMD_INK_HIGHLIGHTER, "&Highlighter\tH");
+	item(drawingMenu, CMD_INK_ERASER, "&Eraser\tE");
+	separator(drawingMenu);
+	item(drawingMenu, CMD_INK_WIDTH, "&Thin Line\t1");
+	item(drawingMenu, CMD_INK_WIDTH + 1, "&Medium Line\t2");
+	item(drawingMenu, CMD_INK_WIDTH + 2, "Thic&k Line\t3");
+	separator(drawingMenu);
+	item(drawingMenu, CMD_CLEAR_DRAWING, "&Clear Drawing on This Page");
+	item(view, CMD_SHOW_DRAWING, "&Hide Drawing\tCtrl+Shift+H");
+	item(view, CMD_NOTES, "Show &Notes\tCtrl+Alt+N");
 
 	HMENU sim = submenu(menuBar, "&Simulate");
 	item(sim, CMD_RUNNING, "&Running");
 	item(sim, CMD_STEP, "&Step Once\tCtrl+Shift+R");
+	item(sim, CMD_STEP_CLOCK, "Step &Clock\tK");
 	item(sim, CMD_SIM_VIEW, "Simulation &View\tCtrl+R");
 	item(sim, CMD_LOCK, "&Lock the Circuit");
 	separator(sim);
+	item(sim, CMD_PREDICT, "&Predict, Then Reveal");
+	item(sim, CMD_REVEAL, "Rev&eal\tEnter");
+	separator(sim);
 	item(sim, CMD_TRUTH_TABLE, "&Truth Table\tT");
+	item(sim, CMD_CHECK_CIRCUIT, "Check &My Circuit\u2026\tShift+T");
 	item(sim, CMD_SCOPE, "&Oscilloscope\tCtrl+G");
 
-	HMENU tabsMenu = submenu(menuBar, "&Tabs");
-	item(tabsMenu, CMD_NEW_TAB, "&New Tab\tCtrl+T");
-	item(tabsMenu, CMD_CLOSE_TAB, "&Close Tab\tCtrl+W");
-	item(tabsMenu, CMD_REOPEN_TAB, "&Reopen Closed Tab\tCtrl+Shift+T");
-	item(tabsMenu, CMD_RENAME_TAB, "Re&name Tab");
-	item(tabsMenu, CMD_NEXT_TAB, "Ne&xt Tab\tCtrl+Tab");
-	item(tabsMenu, CMD_PREVIOUS_TAB, "&Previous Tab\tCtrl+Shift+Tab");
-	separator(tabsMenu);
-	item(tabsMenu, CMD_SPLIT_VIEW, "&Split View\tCtrl+Alt+S");
-	item(tabsMenu, CMD_SWITCH_PANE, "S&witch Side\tF6");
-	item(tabsMenu, CMD_CLOSE_SPLIT, "Close Split Vie&w\tCtrl+Alt+W");
+	// The tabs, the split, and the open circuits (as the Mac's Window menu
+	// lists its windows); the list is made as the menu opens.
+	windowMenu = submenu(menuBar, "&Window");
+	item(windowMenu, CMD_NEW_TAB, "&New Tab\tCtrl+T");
+	item(windowMenu, CMD_CLOSE_TAB, "&Close Tab\tCtrl+W");
+	item(windowMenu, CMD_REOPEN_TAB, "&Reopen Closed Tab\tCtrl+Shift+T");
+	item(windowMenu, CMD_RENAME_TAB, "Rena&me Tab");
+	item(windowMenu, CMD_NEXT_TAB, "Ne&xt Tab\tCtrl+Tab");
+	item(windowMenu, CMD_PREVIOUS_TAB, "&Previous Tab\tCtrl+Shift+Tab");
+	separator(windowMenu);
+	item(windowMenu, CMD_SPLIT_VIEW, "&Split View\tCtrl+Alt+S");
+	item(windowMenu, CMD_SWITCH_PANE, "S&witch Side\tF6");
+	item(windowMenu, CMD_CLOSE_SPLIT, "Close Spli&t View\tCtrl+Alt+W");
+	separator(windowMenu);
+	item(windowMenu, CMD_MINIMIZE, "Minimi&ze");
 
 	HMENU help = submenu(menuBar, "&Help");
+	item(help, CMD_HELP, "CedarLogic &Help\tF1");
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
 	item(help, CMD_TOUR, "Guided &Tour");
-	item(help, CMD_HELP, "CedarLogic &Help\tF1");
-	item(help, CMD_WHATS_NEW, "&What's New in CedarLogic");
+	item(help, CMD_WELCOME, "&Welcome to CedarLogic\u2026");
+	item(help, CMD_WHATS_NEW, "What's &New in CedarLogic");
 	separator(help);
 	item(help, CMD_FEEDBACK, "Send &Feedback\u2026");
 	item(help, CMD_CHECK_UPDATES, "Check for &Updates\u2026");
 	if (integration::offered()) item(help, CMD_START_MENU, integration::menuLabel().c_str());
+	separator(help);
 	item(help, CMD_ABOUT, "&About CedarLogic");
 }
+
+// Window's list of the open circuits, after its last separator: one item
+// each, with a tick on this one (&1 to &9, then the rest unnumbered).
+void CircuitWindow::rebuildWindowList() {
+	if (!windowMenu) return;
+	for (int i = GetMenuItemCount(windowMenu) - 1; i >= 0; i--) {
+		const UINT id = GetMenuItemID(windowMenu, i);
+		if ((id >= CMD_WINDOW_LIST && id <= CMD_WINDOW_LIST_LAST) || (id == 0 && i == GetMenuItemCount(windowMenu) - 1))
+			DeleteMenu(windowMenu, (UINT)i, MF_BYPOSITION);
+		else if (id != 0) break;
+	}
+	const std::vector<CircuitWindow*>& all = circuitWindows();
+	if (all.empty()) return;
+	separator(windowMenu);
+	for (size_t i = 0; i < all.size() && (int)i <= CMD_WINDOW_LIST_LAST - CMD_WINDOW_LIST; i++) {
+		std::string name = all[i]->displayName();
+		// An & in a name is shown, not taken as the item's letter.
+		std::string shown;
+		for (char ch : name) { if (ch == '&') shown += '&'; shown += ch; }
+		const std::string label = i < 9 ? strf("&%d  %s", (int)i + 1, shown.c_str()) : shown;
+		AppendMenuW(windowMenu, MF_STRING | (all[i] == this ? MF_CHECKED : 0), CMD_WINDOW_LIST + (UINT)i, W(label).c_str());
+	}
+}
+
+bool CircuitWindow::menuKeysActive() const { return toolbar && toolbar->menuKeysActive(); }
 
 int CircuitWindow::toolbarHeight() const { return (int)std::lround(Toolbar::barHeight() * dpi / 96.0); }
 
@@ -406,13 +501,27 @@ void CircuitWindow::layout() {
 	}
 	areaLeft = left;
 	areaTop = top;
+	// The notes, a pane at the right (its own hairline at its left edge).
+	int right = rc.right;
+	// Focus mode slides it away to the right, as the side panel goes left
+	// (the Mac's notes aren't shown in focus mode).
+	if (notes) {
+		const bool shown = notesOpen && away < 1;
+		if (shown) {
+			const int nw = std::min(sc((int)NotesPanel::panelWidth()), std::max(0, (int)(rc.right - left) / 2));
+			const int shift = (int)std::lround(nw * away);
+			place(notes->widget(), rc.right - nw + shift, top, nw, bottom - top);
+			right = rc.right - nw + shift;
+		}
+		ShowWindow(notes->widget(), shown ? SW_SHOWNA : SW_HIDE);
+	}
 	// The oscilloscope, docked along the bottom, with a line over it.
 	int below = bottom;
 	scopeY = -1;
 	if (scope && scopeOpen) {
 		const int room = bottom - top;
 		const int sh = std::max(std::min(sc(scopeHeight), room - sc(160)), std::min(sc(110), room / 2));
-		place(scope->widget(), left, bottom - sh, rc.right - left, sh);
+		place(scope->widget(), left, bottom - sh, right - left, sh);
 		below = bottom - sh - 1;
 		scopeY = below;
 	}
@@ -420,15 +529,15 @@ void CircuitWindow::layout() {
 
 	// One side, or two with a line between them.
 	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
-	RECT sides[2] = { { left, top, rc.right, below }, { left, top, rc.right, below } };
+	RECT sides[2] = { { left, top, right, below }, { left, top, right, below } };
 	splitX = -1;
 	if (splitOpen()) {
-		const int areaW = rc.right - left;
+		const int areaW = right - left;
 		const int minW = std::min(sc(200), areaW / 3);
-		const int x = std::max<int>(left + minW, std::min<int>(left + (int)std::lround(areaW * splitAt), rc.right - minW - 1));
+		const int x = std::max<int>(left + minW, std::min<int>(left + (int)std::lround(areaW * splitAt), right - minW - 1));
 		splitX = x;
 		sides[sideFirst ? 1 : 0] = { left, top, x, below };
-		sides[sideFirst ? 0 : 1] = { x + 1, top, rc.right, below };
+		sides[sideFirst ? 0 : 1] = { x + 1, top, right, below };
 	}
 	for (int pane = 0; pane < 2; pane++) {
 		paneRects[pane] = sides[pane];
@@ -700,7 +809,8 @@ void CircuitWindow::moveTabBy(int index, int delta) {
 // A tab's own menu (the Mac's): Rename, the split's moves, moving it along
 // (for a touchpad or a touch screen, where dragging it is awkward), Close.
 void CircuitWindow::tabContextMenu(int index, POINT screen) {
-	enum { RENAME = 1, OTHER_SIDE, OPEN_SPLIT, CLOSE_SPLIT, LEFT, RIGHT, CLOSE, NEW, REOPEN };
+	enum { RENAME = 1, OTHER_SIDE, OPEN_SPLIT, CLOSE_SPLIT, LEFT, RIGHT, CLOSE, NEW, REOPEN, CONNECT_ALL, DISCONNECT_ALL,
+	       CONNECT_TO = 100 };   // + the other page's index
 	const bool onTab = index >= 0 && index < (int)canvases.size();
 	HMENU m = CreatePopupMenu();
 	if (onTab) {
@@ -717,8 +827,21 @@ void CircuitWindow::tabContextMenu(int index, POINT screen) {
 		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(m, MF_STRING | (k > 0 ? 0 : MF_GRAYED), LEFT, L"Move &Left");
 		AppendMenuW(m, MF_STRING | (k + 1 < (int)row.size() ? 0 : MF_GRAYED), RIGHT, L"Move Ri&ght");
+		const int pageCount = cl_document_page_count(doc);
+		if (pageCount > 1) {
+			// A checklist: the pages this one's TO/FROM links reach.
+			AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+			HMENU to = CreatePopupMenu();
+			for (int j = 0; j < pageCount; j++)
+				if (j != index)
+					AppendMenuW(to, MF_STRING | (cl_pages_linked(doc, index, j) ? MF_CHECKED : 0), CONNECT_TO + j, W(pageName(j)).c_str());
+			AppendMenuW(to, MF_SEPARATOR, 0, nullptr);
+			AppendMenuW(to, MF_STRING | (commandEnabled(CMD_CONNECT_ALL_PAGES) ? 0 : MF_GRAYED), CONNECT_ALL, L"Connect &All Pages");
+			AppendMenuW(to, MF_STRING | (commandEnabled(CMD_DISCONNECT_ALL_PAGES) ? 0 : MF_GRAYED), DISCONNECT_ALL, L"&Disconnect All Pages");
+			AppendMenuW(m, MF_POPUP, (UINT_PTR)to, L"Connect &to");
+		}
 		AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-		AppendMenuW(m, MF_STRING | (cl_document_page_count(doc) > 1 ? 0 : MF_GRAYED), CLOSE, W("&Close Tab" + shortcuts::menuKeys(CMD_CLOSE_TAB)).c_str());
+		AppendMenuW(m, MF_STRING | (pageCount > 1 ? 0 : MF_GRAYED), CLOSE, W("&Close Tab" + shortcuts::menuKeys(CMD_CLOSE_TAB)).c_str());
 	} else {
 		AppendMenuW(m, MF_STRING, NEW, W("&New Tab" + shortcuts::menuKeys(CMD_NEW_TAB)).c_str());
 		AppendMenuW(m, MF_STRING | (cl_edit_undo_is_close_page(doc) ? 0 : MF_GRAYED), REOPEN,
@@ -738,8 +861,36 @@ void CircuitWindow::tabContextMenu(int index, POINT screen) {
 	case CLOSE: closePage(index); break;
 	case NEW: newPage(); break;
 	case REOPEN: reopenPage(); break;
-	default: break;
+	case CONNECT_ALL: connectAllPages(); break;
+	case DISCONNECT_ALL: disconnectAllPages(); break;
+	default:
+		if (onTab && cmd >= CONNECT_TO && cmd - CONNECT_TO < cl_document_page_count(doc))
+			setPagesLinked(index, cmd - CONNECT_TO, !cl_pages_linked(doc, index, cmd - CONNECT_TO));
+		break;
 	}
+}
+
+// ---- Page links (docs/PAGE-LINKS.md) ----------------------------------------------
+
+void CircuitWindow::connectAllPages() {
+	if (!cl_pages_connect_all(doc)) return;
+	edited();
+	note("Every page's links connect now.");
+}
+
+void CircuitWindow::disconnectAllPages() {
+	if (!cl_pages_disconnect_all(doc)) return;
+	edited();
+	note("Each page's links stay on that page now.");
+}
+
+void CircuitWindow::setPagesLinked(int page, int other, bool on) {
+	const int n = cl_document_page_count(doc);
+	if (page == other || page < 0 || page >= n || other < 0 || other >= n) return;
+	std::unique_ptr<bool[]> with(new bool[n]);
+	for (int j = 0; j < n; j++) with[j] = j != page && cl_pages_linked(doc, page, j);
+	with[other] = on;
+	if (cl_page_connect_to(doc, page, with.get(), n)) edited();
 }
 
 // Split View from the menu or keys: the tab used most recently beside the
@@ -920,11 +1071,16 @@ void CircuitWindow::tabDropped(int page, const DropHint& h) {
 
 void CircuitWindow::toggleFocusMode() {
 	const double from = focusAmount();
+	// A short cross-fade, the window laid out for the new mode at once under
+	// it: smoother than sliding the toolbar and panel, which laid out (and
+	// drew) the whole window a frame at a time.
+	const bool faded = fade::crossfade(hwnd, nullptr, 190) != nullptr;
 	focusOn = !focusOn;
 	focusFrom = from;
 	focusTo = focusOn ? 1 : 0;
-	// No slide when Windows' animations are off: it happens at the next tick.
-	focusStart = nowSeconds() - (reduceMotion() ? kSlideTime : 0);
+	// No slide when Windows' animations are off, or under a fade: it happens
+	// at the next tick (or the one below).
+	focusStart = nowSeconds() - (reduceMotion() || faded ? kSlideTime : 0);
 	// Coming back, the bars are there to slide in.
 	if (!focusOn) {
 		ShowWindow(toolbar->widget(), SW_SHOWNA);
@@ -1067,7 +1223,22 @@ void CircuitWindow::selectionChanged() {
 	statusDirty = true;
 }
 
+void CircuitWindow::noteInput() {
+	FILETIME ft;
+	GetSystemTimeAsFileTime(&ft);
+	ULARGE_INTEGER u;
+	u.LowPart = ft.dwLowDateTime;
+	u.HighPart = ft.dwHighDateTime;
+	lastInputAt = (int64_t)((u.QuadPart - 116444736000000000ULL) / 10000);
+}
+
+bool CircuitWindow::busyEditing() const {
+	Canvas* c = currentCanvas();
+	return (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
+}
+
 void CircuitWindow::edited() {
+	noteInput();
 	changes++;
 	// Saving as you go: a couple of seconds after the last change.
 	SetTimer(hwnd, kAutosaveTimer, 2000, nullptr);
@@ -1151,13 +1322,21 @@ bool CircuitWindow::commandEnabled(int command) const {
 	switch (command) {
 	case CMD_UNDO: return cl_edit_can_undo(doc) && !simViewOn;
 	case CMD_REDO: return cl_edit_can_redo(doc) && !simViewOn;
+	case CMD_PREDICT: return simViewOn || predict.on;
+	case CMD_REVEAL: return simViewOn && predict.on;
 	case CMD_CUT: return edit && sel;
 	case CMD_COPY: return sel;
 	case CMD_DUPLICATE: return edit && sel;
 	case CMD_DELETE: return edit && sel;
 	case CMD_ROTATE: return edit && cl_edit_selected_gate_count(doc, currentPage()) > 0;
+	case CMD_LOCK_IN_PLACE: case CMD_LOCK_PARTS: case CMD_UNLOCK_PARTS: return cl_edit_selected_gate_count(doc, currentPage()) > 0;
+	case CMD_UNLOCK_ALL_PARTS: return cl_document_locked_count(doc) > 0;
+	case CMD_CONNECT_ALL_PAGES: return cl_document_page_count(doc) > 1 && !cl_pages_all_linked(doc);
+	case CMD_DISCONNECT_ALL_PAGES: return cl_document_page_count(doc) > 1 && !cl_pages_none_linked(doc);
 	case CMD_GATE_SETTINGS: return cl_edit_single_gate(doc, currentPage()) >= 0;
 	case CMD_REOPEN_TAB: return cl_edit_undo_is_close_page(doc);
+	case CMD_CLEAR_DRAWING: return pageHasInk() && !pageInkReadOnly();
+	case CMD_INK_WIDTH: case CMD_INK_WIDTH + 1: case CMD_INK_WIDTH_LAST: return ink::tool() != ink::Eraser;
 	case CMD_SWITCH_PANE: case CMD_CLOSE_SPLIT: return splitOpen();
 	case CMD_PASTE: case CMD_ADD_GATE: case CMD_STRAIGHTEN: case CMD_TIDY: case CMD_TIDY_FLOW: case CMD_CONNECT_NEARBY:
 		return edit;
@@ -1175,20 +1354,43 @@ int CircuitWindow::commandChecked(int command) const {
 	case CMD_FOCUS_MODE: return focusOn;
 	case CMD_SPLIT_VIEW: return splitOpen();
 	case CMD_STATUS_BAR: return prefs().showStatus;
+	case CMD_SHOW_GRID: return prefs().showGrid;
+	case CMD_WIRE_DOTS: return prefs().wireDots;
+	case CMD_PROJECTOR: return prefs().projector;
+	case CMD_PREDICT: return predict.on;
+	case CMD_INK_PEN: case CMD_INK_HIGHLIGHTER: case CMD_INK_ERASER: return drawOn && ink::tool() == command - CMD_INK_PEN;
+	case CMD_INK_WIDTH: case CMD_INK_WIDTH + 1: case CMD_INK_WIDTH_LAST: return ink::tool() != ink::Eraser && ink::widthIndex() == command - CMD_INK_WIDTH;
 	default: return -1;
 	}
 }
 
 void CircuitWindow::updateMenu(HMENU menu) {
+	if (menu == windowMenu) rebuildWindowList();
 	shortcuts::relabel(menu);   // the keys each command has now (Settings > Shortcuts)
 	const int n = GetMenuItemCount(menu);
 	for (int i = 0; i < n; i++) {
 		const UINT id = GetMenuItemID(menu, i);
 		// A popup of its own (a tab's menu, the oscilloscope's) numbers its
-		// items from 1 and greys them itself: only commands are looked at.
-		if (id == (UINT)-1 || id < CMD_NEW || (id >= CMD_RECENT && id <= CMD_RECENT_LAST)) continue;
+		// items from 1 and greys them itself: only commands are looked at
+		// (not the recent circuits or the open windows either).
+		if (id == (UINT)-1 || id < CMD_NEW || id >= CMD_RECENT) continue;
 		if (id == CMD_START_MENU)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id, W(integration::menuLabel() + shortcuts::menuKeys(CMD_START_MENU)).c_str());
+		if (id == CMD_LOCK_IN_PLACE)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W((lockMenuUnlocks() ? unlockPartsTitle() : std::string("&Lock in Place")) + shortcuts::menuKeys(CMD_LOCK_IN_PLACE)).c_str());
+		if (id == CMD_DRAW)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(drawOn ? "Done Dra&wing" : "Dra&w on the Circuit") + shortcuts::menuKeys(CMD_DRAW)).c_str());
+		if (id == CMD_REVEAL)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(predict.revealed ? "Cover the Lights Ag&ain" : "Rev&eal") + "\tEnter").c_str());
+		if (id == CMD_NOTES)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(notesOpen ? "Hide &Notes" : "Show &Notes") + shortcuts::menuKeys(CMD_NOTES)).c_str());
+		if (id == CMD_SHOW_DRAWING)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(drawingShown() ? "&Hide Drawing" : "S&how Drawing") + shortcuts::menuKeys(CMD_SHOW_DRAWING)).c_str());
 		EnableMenuItem(menu, i, MF_BYPOSITION | (commandEnabled((int)id) ? MF_ENABLED : MF_GRAYED));
 		const int check = commandChecked((int)id);
 		if (check >= 0) CheckMenuItem(menu, i, MF_BYPOSITION | (check ? MF_CHECKED : MF_UNCHECKED));
@@ -1232,6 +1434,7 @@ void CircuitWindow::themeChanged() {
 	updateActions();
 	updateTabLabels();
 	if (palette) palette->themeChanged();
+	if (notes) notes->themeChanged();
 	if (statusBar) statusBar->redraw();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
@@ -1371,15 +1574,22 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		maxPressed = false;
 		break;
 	case WM_SYSCOMMAND:
-		// Alt or F10 on its own: every menu, from the toolbar's •••.
-		if ((wp & 0xFFF0) == SC_KEYMENU && lp != VK_SPACE) {
-			RECT rc;
-			GetClientRect(hwnd, &rc);
-			POINT p = { rc.right - scaled(150, dpi), captionBottom };
-			ClientToScreen(hwnd, &p);
-			moreMenu(p, true);
+		// The menu bar's keys: Alt or F10 alone puts the bar under the keys
+		// (again lets go), Alt+letter opens that menu. (Alt+Space is the
+		// window menu, Windows' own.)
+		if ((wp & 0xFFF0) == SC_KEYMENU && lp != VK_SPACE && toolbar) {
+			if (lp == 0) {
+				if (toolbar->takeSwallowedKey()) return 0;   // the release of the Alt that just closed them
+				if (toolbar->menuKeysActive()) toolbar->endMenuKeys();
+				else toolbar->startMenuKeys();
+			} else if (!toolbar->openMnemonic((wchar_t)lp)) {
+				MessageBeep(MB_OK);
+			}
 			return 0;
 		}
+		break;
+	case WM_MENUSELECT:
+		if (toolbar) toolbar->menuSelect((HMENU)lp, HIWORD(wp));
 		break;
 	case WM_TIMER:
 		if (wp == kClockTimer) tick();
@@ -1391,9 +1601,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 			KillTimer(hwnd, kAutosaveTimer);
 			// Not in the middle of something (a drag, a gate on the pointer,
 			// Tidy Up's preview): then a moment later.
-			Canvas* c = currentCanvas();
-			const bool busy = (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
-			if (busy) SetTimer(hwnd, kAutosaveTimer, 1000, nullptr);
+			if (busyEditing()) SetTimer(hwnd, kAutosaveTimer, 1000, nullptr);
 			else if (isDirty()) saveQuietly(false);
 		}
 		return 0;
@@ -1424,10 +1632,14 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		setFontTree(hwnd, uiFont(dpi));
 		if (palette) palette->dpiChanged();
 		if (findBar) findBar->dpiChanged();
+		if (notes) notes->dpiChanged();
 		layout();
 		for (Canvas* c : canvases) c->redraw();
 		return 0;
 	}
+	case WM_ACTIVATEAPP:
+		syncapp::appActivated(wp != FALSE);   // (the app came forward or went away: sync looks again, or sends)
+		break;
 	case WM_ACTIVATE:
 		if (toolbar) toolbar->redraw();
 		updateTabLabels();
@@ -1468,6 +1680,17 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 			// The circuit the menu showed (a save since moves the list).
 			const size_t i = (size_t)(id - CMD_RECENT);
 			if (i < recentPaths.size()) openCircuit(recentPaths[i], this);
+			return 0;
+		}
+		if (id >= CMD_WINDOW_LIST && id <= CMD_WINDOW_LIST_LAST) {
+			// Window's list: that circuit's window in front (restored if minimized).
+			const std::vector<CircuitWindow*>& all = circuitWindows();
+			const size_t i = (size_t)(id - CMD_WINDOW_LIST);
+			if (i < all.size()) {
+				const HWND other = all[i]->window();
+				if (IsIconic(other)) ShowWindow(other, SW_RESTORE);
+				SetForegroundWindow(other);
+			}
 			return 0;
 		}
 		if (id >= CMD_NEW && id < CMD_RECENT) {
@@ -1549,6 +1772,12 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		return 0;
 	}
 	case WM_CLOSE:
+		// Recording for Send Feedback: Close is Stop (the form, which is
+		// this window's dialog, comes back with the recording).
+		if (feedback::recording()) {
+			feedback::stopRecording();
+			return 0;
+		}
 		// Not while one of its dialogs is up (the taskbar can still ask):
 		// the dialog comes forward instead.
 		if (!IsWindowEnabled(hwnd)) {
@@ -1626,6 +1855,39 @@ void CircuitWindow::reloadFromDisk(const std::string& message) {
 	if (fresh == nullptr) { showMessage(hwnd, Tone::Error, "The circuit couldn't be opened again", err); return; }
 	replaceDocument(fresh, path);
 	if (!message.empty()) note(message);
+}
+
+// Another device changed this circuit and it has nothing unsaved here: its
+// file is already the new one. Shown again in place -- the same tab in front,
+// each tab's view as it was -- not as a circuit being opened.
+void CircuitWindow::reloadFromSync(const std::string& fromDevice) {
+	struct View { double x, y, upp; };
+	std::map<int, View> views;
+	const int front = currentPage();
+	for (Canvas* c : canvases) {
+		const int p = c->page();
+		View v;
+		c->camera(v.x, v.y, v.upp);
+		if (p >= 0) views[p] = v;
+	}
+	char err[512] = "";
+	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
+	if (fresh == nullptr) return;   // (the next sync brings it again)
+	replaceDocument(fresh, path);
+	openingAt = -1;   // not the opening card: it was already open
+	for (Canvas* c : canvases) {
+		auto it = views.find(c->page());
+		if (it != views.end()) c->setCamera(it->second.x, it->second.y, it->second.upp);
+	}
+	for (int i = 0; i < (int)canvases.size(); i++)
+		if (canvases[i]->page() == front) showPage(i);
+	note(fromDevice.empty() ? std::string("Updated from another device.") : "Updated from " + fromDevice + ".");
+}
+
+void CircuitWindow::closeForSync() {
+	// The only window: the app stays up, with a new circuit in it.
+	if (circuitWindows().size() <= 1) replaceDocument(cl_document_new(), "");
+	else discard();
 }
 
 void CircuitWindow::startAs(const std::string& name) {
@@ -1711,6 +1973,16 @@ void CircuitWindow::showFoundGate(int page, long gate, double x, double y) {
 	redraw();
 }
 
+void CircuitWindow::findStep(int delta) {
+	if (findBar == nullptr) return;
+	if (findBar->isOpen()) findBar->step(delta);
+	else findBar->open("");
+}
+
+void CircuitWindow::openFind(const std::string& query) {
+	if (findBar) findBar->open(query);
+}
+
 void CircuitWindow::partsChanged() {
 	if (palette) palette->partsChanged();
 }
@@ -1727,7 +1999,12 @@ void CircuitWindow::destroy() {
 	KillTimer(h, kClockTimer);
 	delete this;
 	DestroyWindow(h);
-	if (circuitWindows().empty()) PostQuitMessage(0);
+	if (circuitWindows().empty()) {
+		// The last one: what sync still has to send goes first (every circuit
+		// is saved by now), for a few seconds at most.
+		syncapp::quitting();
+		PostQuitMessage(0);
+	}
 }
 
 // ---- Commands -------------------------------------------------------------------
@@ -1757,13 +2034,17 @@ void CircuitWindow::run(int command) {
 		findBar->open(name ? name : "");
 		break;
 	}
+	case CMD_FIND_NEXT: findStep(1); break;
+	case CMD_FIND_PREVIOUS: findStep(-1); break;
 	case CMD_VERSIONS: showVersionHistory(this); break;
 	case CMD_OPEN_SAMPLE: openPracticeCircuit(this); break;
 	case CMD_SAVE: save(); break;
 	case CMD_SAVE_AS: exportCopy(); break;
 	case CMD_EXPORT_IMAGE: exportImage(); break;
+	case CMD_EXPORT_REPORT: exportReport(); break;
 	case CMD_EXPORT_V2: exportOlder(2); break;
 	case CMD_EXPORT_V1: exportOlder(1); break;
+	case CMD_SHARE_LINK: shareLink(); break;
 	case CMD_PRINT: print(); break;
 	case CMD_CLOSE_WINDOW: PostMessageW(hwnd, WM_CLOSE, 0, 0); break;
 	case CMD_QUIT: if (confirmQuit(hwnd)) quitApp(); break;
@@ -1778,6 +2059,12 @@ void CircuitWindow::run(int command) {
 	case CMD_ADD_GATE: editing(&CircuitWindow::quickAdd); break;
 	case CMD_GATE_SETTINGS: showSettings(); break;
 	case CMD_ROTATE: editing(&CircuitWindow::rotate); break;
+	case CMD_LOCK_IN_PLACE: lockSelection(!lockMenuUnlocks()); break;
+	case CMD_LOCK_PARTS: lockSelection(true); break;
+	case CMD_UNLOCK_PARTS: lockSelection(false); break;
+	case CMD_UNLOCK_ALL_PARTS: unlockAllParts(); break;
+	case CMD_CONNECT_ALL_PAGES: connectAllPages(); break;
+	case CMD_DISCONNECT_ALL_PAGES: disconnectAllPages(); break;
 	case CMD_STRAIGHTEN: editing(&CircuitWindow::straighten); break;
 	case CMD_TIDY: if (canEdit()) tidy(0); else lockNudge(); break;
 	case CMD_TIDY_FLOW: if (canEdit()) tidy(1); else lockNudge(); break;
@@ -1799,9 +2086,20 @@ void CircuitWindow::run(int command) {
 		break;
 	case CMD_RUNNING: toggleRunning(); break;
 	case CMD_STEP: stepOnce(); break;
+	case CMD_PREDICT: togglePredict(); break;
+	case CMD_REVEAL: revealOrCoverAgain(); break;
+	case CMD_STEP_CLOCK: stepClock(); break;
 	case CMD_SIM_VIEW: toggleSimView(); break;
 	case CMD_LOCK: toggleLock(); break;
+	case CMD_DRAW: toggleDrawing(); break;
+	case CMD_SHOW_DRAWING: setDrawingShown(!drawingShown()); break;
+	case CMD_CLEAR_DRAWING: clearDrawing(); break;
+	case CMD_NOTES: toggleNotes(); break;
+	case CMD_INK_PEN: setInkTool(ink::Pen); break;
+	case CMD_INK_HIGHLIGHTER: setInkTool(ink::Highlighter); break;
+	case CMD_INK_ERASER: setInkTool(ink::Eraser); break;
 	case CMD_TRUTH_TABLE: makeTruthTable(); break;
+	case CMD_CHECK_CIRCUIT: checkCircuit(); break;
 	case CMD_SCOPE: toggleScope(); break;
 	case CMD_NEW_TAB: newPage(); break;
 	case CMD_CLOSE_TAB:
@@ -1824,17 +2122,32 @@ void CircuitWindow::run(int command) {
 	case CMD_FEEDBACK: feedback::show(this); break;
 	case CMD_START_MENU: if (integration::offered()) integration::menuCommand(this); break;
 	case CMD_ABOUT: about::show(this); break;
-	default: break;
+	case CMD_WELCOME: welcome::show(this); break;
+	case CMD_RENAME_CIRCUIT: renameFile(); break;
+	case CMD_DUPLICATE_CIRCUIT: duplicateCircuit(); break;
+	case CMD_MINIMIZE: ShowWindow(hwnd, SW_MINIMIZE); break;
+	case CMD_PROJECTOR:
+		// For a class: Simulation View with thick wires and big lights. On
+		// from the editor, it turns Simulation View on too.
+		prefs().projector = !prefs().projector;
+		prefs().save();
+		if (prefs().projector && !simViewOn) toggleSimView();
+		for (CircuitWindow* o : circuitWindows()) o->redraw();
+		note(prefs().projector ? "Projector mode: thick wires and big lights in Simulation View." : "Projector mode is off.");
+		break;
+	case CMD_SHOW_GRID: case CMD_WIRE_DOTS:
+		// As Settings > Canvas's switches: every window, at once.
+		if (command == CMD_SHOW_GRID) prefs().showGrid = !prefs().showGrid;
+		else prefs().wireDots = !prefs().wireDots;
+		prefs().applyWireDots();
+		prefs().save();
+		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
+		break;
+	default:
+		if (command >= CMD_INK_WIDTH && command <= CMD_INK_WIDTH_LAST) setInkWidth(command - CMD_INK_WIDTH);
+		else if (command >= CMD_INK_COLOR && command <= CMD_INK_COLOR_LAST) setInkColor(command - CMD_INK_COLOR);
+		break;
 	}
-}
-
-void CircuitWindow::moreMenu(POINT screen, bool rightAligned) {
-	SetForegroundWindow(hwnd);
-	const int cmd = TrackPopupMenu(menus, TPM_RETURNCMD | (rightAligned ? TPM_RIGHTALIGN : TPM_LEFTALIGN) | TPM_TOPALIGN,
-	                               screen.x, screen.y, 0, hwnd, nullptr);
-	// Posted, so it runs once whatever opened the menu (the toolbar's •••)
-	// is done with it: Exit and Close take the window, the toolbar too, away.
-	if (cmd) PostMessageW(hwnd, WM_COMMAND, cmd, 0);
 }
 
 // The circuit's name in the toolbar: what a Mac window's title offers.
@@ -1921,6 +2234,7 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	isRunning = cl_document_is_running(doc);
 	simViewOn = false;
 	lockedOn = false;
+	if (notes) notes->load();   // the new circuit's notes
 	syncTabs();
 	appearStart = nowSeconds();
 	beginOpening();
@@ -2001,6 +2315,23 @@ bool CircuitWindow::exportCopy() {
 	return true;
 }
 
+// File > Share Link…: the link for the circuit on the clipboard (ShareLink.h).
+void CircuitWindow::shareLink() {
+	bool any = false;
+	for (int p = 0; p < cl_document_page_count(doc) && !any; p++) any = cl_document_gate_count(doc, p) > 0;
+	if (!any) { note("There's nothing on the circuit to share yet."); return; }
+	// The notes never go in a link (they're the student's own, and links get
+	// pasted into chats); the drawing goes when it's shown and the link still
+	// fits -- as the Mac's and Linux's (the website's DRAWING-NOTES.md 4.11).
+	// (These don't mark the circuit saved, as cl_document_save_text does.)
+	bool ink = false;
+	for (int p = 0; p < cl_document_page_count(doc) && !ink; p++) ink = cl_ink_stroke_count(doc, p) > 0;
+	const bool withInk = ink && cl_ink_shown(doc);
+	const std::string plain = cl_document_save_text_ex(doc, CL_SAVE_NO_NOTES | CL_SAVE_NO_INK);
+	const std::string drawn = withInk ? std::string(cl_document_save_text_ex(doc, CL_SAVE_NO_NOTES)) : std::string();
+	sharelink::copyLink(this, withInk ? drawn : plain, withInk ? plain : std::string(), displayName());
+}
+
 void CircuitWindow::exportOlder(int format) {
 	const std::string suggested = displayName() + (format == 1 ? " (v1.x).cdl" : " (v2).cdl");
 	const std::string file = chooseSaveFile(hwnd, format == 1 ? "Export for CedarLogic 1.x" : "Export for CedarLogic 2",
@@ -2045,6 +2376,8 @@ IWICImagingFactory* wicFactory() {
 
 // Export the page in front as a picture (Export.cpp).
 void CircuitWindow::exportImage() { showExportImage(this, currentPage()); }
+// Export Lab Report: LabReport.cpp.
+void CircuitWindow::exportReport() { showExportReport(this); }
 
 void CircuitWindow::print() {
 	const int page = currentPage();
@@ -2164,12 +2497,21 @@ void CircuitWindow::refreshAfterHistory() {
 			appearStart = nowSeconds();
 		}
 	}
+	// A drawing step: its page in front.
+	const int inkPage = cl_ink_history_page(doc);
+	if (inkPage >= 0 && inkPage < (int)canvases.size() && inkPage != currentPage()) showPage(inkPage);
 	edited();
 }
 
+// Undo or Redo with a Tidy Up on show: the engine keeps it first, as any
+// edit does (cl_edit_undo/redo settle it), so it's kept here first, through
+// endTidy, which tells the window. Left to the engine, a Redo kept it (and
+// dropped the redo step) with the window never told: the preview's bar
+// stayed up, and nothing was saved. Undo then takes the kept tidy back.
 void CircuitWindow::undo() {
 	if (simViewOn) return;
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
+	if (tidyActive()) endTidy(true);
 	if (cl_edit_undo(doc)) refreshAfterHistory();
 	else MessageBeep(MB_OK);
 }
@@ -2177,6 +2519,7 @@ void CircuitWindow::undo() {
 void CircuitWindow::redo() {
 	if (simViewOn) return;
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
+	if (tidyActive()) endTidy(true);
 	if (cl_edit_redo(doc)) refreshAfterHistory();
 	else MessageBeep(MB_OK);
 }
@@ -2189,10 +2532,15 @@ void CircuitWindow::copy() {
 }
 
 void CircuitWindow::cut() {
+	// Locked parts stay: copied and taken away are the others.
+	const int held = cl_edit_deselect_locked(doc, currentPage());
 	const std::string text = cl_edit_copy(doc, currentPage());
-	if (text.empty()) return;
-	setClipboardText(hwnd, text);
-	deleteSelection();
+	if (!text.empty()) {
+		setClipboardText(hwnd, text);
+		cl_edit_delete(doc, currentPage());
+	}
+	edited();
+	if (held > 0) note(kLockedNote);
 }
 
 bool CircuitWindow::placePoint(double& wx, double& wy) const {
@@ -2250,10 +2598,35 @@ void CircuitWindow::duplicate() {
 
 void CircuitWindow::selectAll() { cl_edit_select_all(doc, currentPage()); redraw(); selectionChanged(); }
 void CircuitWindow::selectNone() { cl_edit_select_none(doc, currentPage()); redraw(); selectionChanged(); }
-void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); }
-void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); }
+void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); noteLockedHeld(); }
+void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); noteLockedHeld(); }
 void CircuitWindow::straighten() { cl_edit_straighten(doc, currentPage()); edited(); }
-void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); }
+void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); noteLockedHeld(); }
+
+// ---- Parts locked in place ------------------------------------------------------
+
+void CircuitWindow::noteLockedHeld() {
+	if (cl_edit_locked_held(doc)) note(kLockedNote);
+}
+
+int CircuitWindow::selectedLockedCount(bool locked) const { return cl_edit_selected_locked_count(doc, currentPage(), locked); }
+
+void CircuitWindow::lockSelection(bool lock) {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_lock_selection(doc, currentPage(), lock);
+	if (n <= 0) return;
+	edited();
+	const std::string parts = n == 1 ? "1 part" : strf("%d parts", n);
+	note(lock ? "Locked " + parts + " in place." : "Unlocked " + parts + ".");
+}
+
+void CircuitWindow::unlockAllParts() {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_unlock_all(doc, currentPage());
+	if (n <= 0) return;
+	edited();
+	note(n == 1 ? "Unlocked 1 part." : strf("Unlocked all %d parts.", n));
+}
 
 void CircuitWindow::tidy(int mode) {
 	tidyKey = cl_document_page_id(doc, currentPage());
@@ -2362,16 +2735,30 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, POINT scre
 		separator(m);
 		item(m, CMD_DELETE, "&Delete\tDel");
 		break;
-	case CL_CONTEXT_GATE:
+	case CL_CONTEXT_GATE: {
+		// Locked parts (all of the selection): Unlock Part in place of the
+		// things they refuse. "Part", so it isn't taken for the circuit's own
+		// lock (Simulate > Lock the Circuit).
+		const int lockedN = selectedLockedCount(true);
+		const bool locked = lockedN > 0 && selectedLockedCount(false) == 0;
 		item(m, CMD_GATE_SETTINGS, "&Settings…");
-		item(m, CMD_ROTATE, "&Rotate\tR");
+		if (!locked) item(m, CMD_ROTATE, "&Rotate\tR");
 		item(m, CMD_STRAIGHTEN, "Straighten Its &Wires\tS");
 		separator(m);
-		item(m, CMD_CUT, "Cu&t\tCtrl+X");
+		if (!locked) item(m, CMD_CUT, "Cu&t\tCtrl+X");
 		item(m, CMD_COPY, "&Copy\tCtrl+C");
 		item(m, CMD_DUPLICATE, "D&uplicate\tCtrl+D");
-		item(m, CMD_DELETE, "&Delete\tDel");
+		separator(m);
+		if (locked) {
+			item(m, CMD_UNLOCK_PARTS, lockedN > 1 ? "&Unlock Parts" : "&Unlock Part");
+		} else {
+			item(m, CMD_LOCK_PARTS, "&Lock in Place");
+			if (lockedN > 0) item(m, CMD_UNLOCK_PARTS, lockedN > 1 ? "&Unlock Parts" : "&Unlock Part");
+			separator(m);
+			item(m, CMD_DELETE, "&Delete\tDel");
+		}
 		break;
+	}
 	default:
 		item(m, CMD_PASTE, "&Paste\tCtrl+V");
 		item(m, CMD_SELECT_ALL, "Select &All\tCtrl+A");
@@ -2406,6 +2793,23 @@ void CircuitWindow::stepOnce() {
 	// Stepping a running circuit means little: pause first.
 	if (isRunning) setRunning(false);
 	cl_document_step(doc);
+	circuitAdvancedByUser();
+	redraw();
+	if (scope) scope->update();
+}
+
+bool CircuitWindow::hasManualClock() const { return cl_document_manual_clock_count(doc, currentPage()) > 0; }
+
+void CircuitWindow::stepClock() {
+	if (!cl_document_clock_step(doc, currentPage())) {
+		note("No clock here moves on Step Clock. Double-click a clock and turn on \u201COnly on Step Clock\u201D.");
+		return;
+	}
+	advancedByHand();
+}
+
+void CircuitWindow::advancedByHand() {
+	circuitAdvancedByUser();   // Predict: once revealed, a new round
 	redraw();
 	if (scope) scope->update();
 }
@@ -2417,6 +2821,8 @@ void CircuitWindow::setStepMs(int ms) {
 }
 
 void CircuitWindow::toggleSimView() {
+	// The look changes with a short fade (the Mac eases its bar over 0.18 s).
+	fade::crossfade(hwnd, nullptr, 180);
 	simViewOn = !simViewOn;
 	cl_edit_hover_clear(doc);   // what was lit belongs to the other mode
 	if (simViewOn) {
@@ -2427,6 +2833,7 @@ void CircuitWindow::toggleSimView() {
 		pendingGate.clear();
 		if (!isRunning) setRunning(true);   // "Run" means run
 	}
+	if (notes) notes->themeChanged();   // dark in Simulation View, as the canvas is
 	updateActions();
 	updateBanner();
 	for (Canvas* c : canvases) c->redraw();
@@ -2445,7 +2852,116 @@ void CircuitWindow::toggleLock() {
 	if (Canvas* c = currentCanvas()) c->focus();
 }
 
+// ---- Drawing on the circuit (Ink.h) ------------------------------------------
+
+std::string CircuitWindow::inkBlockedReason() const {
+	switch (cl_ink_can_draw(doc, currentPage())) {
+	case CL_INK_READ_ONLY: return ink::readOnlyNote();
+	case CL_INK_FULL: return ink::fullNote();
+	default: return std::string();
+	}
+}
+
+void CircuitWindow::markEdited() {
+	forceDirty = true;
+	edited();
+}
+
+void CircuitWindow::inkEdited() {
+	edited();
+}
+
+void CircuitWindow::setDrawing(bool on) {
+	if (on == drawOn) return;
+	drawOn = on;
+	for (Canvas* c : canvases) c->drawingChanged();
+	if (on) {
+		if (isFloating()) cancelFloating();
+		pendingGate.clear();
+		cl_edit_cancel(doc);
+		if (cl_edit_tidy_active(doc)) { cl_edit_tidy_end(doc, true); edited(); }
+		if (!cl_ink_shown(doc)) {
+			cl_ink_set_shown(doc, true);
+			markEdited();
+			note("Drawing shown.");
+		} else {
+			note("Draw: P pen, H highlighter, E eraser, 1 2 3 width. Escape when you're done.");
+		}
+		const std::string why = inkBlockedReason();
+		if (!why.empty()) note(why);
+	} else {
+		cl_ink_cancel(doc);
+		cl_ink_hover_clear(doc);
+		note("");
+	}
+	updateActions();
+	for (Canvas* c : canvases) c->redraw();
+	if (Canvas* c = currentCanvas()) c->focus();
+}
+
+void CircuitWindow::toggleNotes() {
+	notesOpen = !notesOpen;
+	if (notesOpen && notes == nullptr) {
+		notes = new NotesPanel(this, hwnd);
+		setFontTree(notes->widget(), uiFont(dpi));
+		notes->dpiChanged();
+	}
+	layout();
+	if (notesOpen && notes) notes->focus();
+	else if (Canvas* c = currentCanvas()) c->focus();
+	updateActions();
+}
+
+void CircuitWindow::showNotesMatch(const std::string& query) {
+	if (!notesOpen) toggleNotes();
+	if (notes) notes->select(query);
+}
+
+void CircuitWindow::setDrawingShown(bool shown) {
+	if (cl_ink_shown(doc) == shown) return;
+	if (!shown && drawOn) setDrawing(false);
+	cl_ink_set_shown(doc, shown);
+	markEdited();
+	for (Canvas* c : canvases) c->redraw();
+	note(shown ? "Drawing shown." : "Drawing hidden.");
+}
+
+void CircuitWindow::clearDrawing() {
+	if (pageInkReadOnly()) { note(ink::readOnlyNote()); return; }
+	if (!pageHasInk()) { note("Nothing drawn on this page."); return; }
+	// Asked first, as the website does (it's one Undo away, and says so).
+	if (!askConfirm(hwnd, "Clear all drawing on this page?", "Every pen and highlighter stroke on this page goes. You can undo this.",
+	                "Clear Drawing", "Cancel", true))
+		return;
+	const int n = cl_ink_clear(doc, currentPage());
+	if (n <= 0) { note("Nothing drawn on this page."); return; }
+	inkEdited();
+	note("Cleared the drawing on this page. Undo brings it back.");
+}
+
+void CircuitWindow::setInkTool(int tool) {
+	ink::setTool(tool);
+	note(ink::toolName(tool));
+	if (!drawOn) setDrawing(true);
+	for (Canvas* c : canvases) c->inkToolChanged();
+}
+
+void CircuitWindow::setInkWidth(int index) {
+	if (ink::tool() == ink::Eraser) return;
+	ink::setWidthIndex(index);
+	note(std::string(ink::widthName(index)) + " line");
+	for (Canvas* c : canvases) c->inkToolChanged();
+}
+
+void CircuitWindow::setInkColor(int index) {
+	if (ink::tool() == ink::Eraser || index < 0 || index >= (int)ink::colors().size()) return;
+	ink::setColor(ink::colors()[index]);
+	note(ink::colorName(ink::colors()[index], ink::drawsWithHighlighter()));
+	for (Canvas* c : canvases) c->inkToolChanged();
+}
+
 void CircuitWindow::makeTruthTable() { showTruthTable(this, currentPage()); redraw(); }
+void CircuitWindow::checkCircuit() { showTruthTable(this, currentPage(), true); redraw(); }
 
 // The oscilloscope docks under the canvases, as on the Mac (Ctrl+G again,
 // its close button or Escape in it puts it away).
@@ -2539,6 +3055,8 @@ void CircuitWindow::toggleDark() {
 void CircuitWindow::togglePalette() {
 	// In focus mode: the panel comes back with the toolbar.
 	if (focusOn) { toggleFocusMode(); if (prefs().showPalette) return; }
+	// The panel comes and goes with a short fade, as the Mac's.
+	fade::crossfade(hwnd, nullptr, 170);
 	prefs().showPalette = !prefs().showPalette;
 	prefs().save();
 	for (CircuitWindow* w : circuitWindows()) w->prefsChanged();

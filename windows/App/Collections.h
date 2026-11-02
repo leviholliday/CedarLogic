@@ -2,7 +2,10 @@
 // MyParts.swift).
 //
 // Templates: File > New from Template starts a circuit from a built-in
-// starter (a lab page, a counter, a 7-segment decoder) or one of yours;
+// starter (a lab page, a counter, a 7-segment decoder, each kind of
+// flip-flop and latch, five registers, combinational circuits, a 3-bit
+// counter, and four circuits with a classic mistake to find: the Mac's,
+// shipped in res\templates) or one of yours;
 // File > Save as Template keeps the circuit you're in as one of yours, in
 // %APPDATA%\CedarLogic\Templates (a folder each: name.txt, template.cdl).
 //
@@ -31,6 +34,8 @@ std::vector<std::pair<std::string, std::string>> list();
 // an untouched new one, or when `replace` (saved first); false when there's
 // no such template.
 bool startFrom(const std::string& id, CircuitWindow* from, bool replace);
+// For CI's pictures (--template <id>): the picker opens with this one selected.
+void preselect(const std::string& id);
 }  // namespace templates
 
 namespace parts {

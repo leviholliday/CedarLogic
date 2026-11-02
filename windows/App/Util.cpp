@@ -3,6 +3,8 @@
 #include "App.h"
 #include <d2d1_1.h>
 #include "Window.h"
+#include "DragLog.h"
+#include "SessionCheck.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -111,9 +113,21 @@ const std::string& resourcesDir() {
 	return dir;
 }
 
+// CEDARLOGIC_HOME, when set, holds everything instead (the session check's
+// home folder of its own: SessionCheck.h).
+std::string homeOverride() {
+	wchar_t env[MAX_PATH * 2];
+	const DWORD n = GetEnvironmentVariableW(L"CEDARLOGIC_HOME", env, (DWORD)(sizeof env / sizeof env[0]));
+	return n > 0 && n < sizeof env / sizeof env[0] ? U(std::wstring(env, n)) : std::string();
+}
+
 std::string settingsDir() {
 	PWSTR p = nullptr;
-	std::string dir;
+	std::string dir = homeOverride();
+	if (!dir.empty()) {
+		CreateDirectoryW(W(dir).c_str(), nullptr);
+		return dir;
+	}
 	if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p)) && p) dir = U(p) + "\\CedarLogic";
 	if (p) CoTaskMemFree(p);
 	if (dir.empty()) dir = exeDir();
@@ -195,8 +209,19 @@ std::string manyLines(std::string text) {
 
 }  // namespace
 
-void Prefs::load() {
-	Reader r{ readIni(prefsPath()) };
+void Prefs::load() { loadFrom(prefsPath()); }
+
+std::string installMarker() {
+	for (const std::string& dir : { settingsDir(), exeDir() }) {
+		std::ifstream in(W(dir + "\\install-channel").c_str(), std::ios::binary);
+		std::string word;
+		if (in >> word && (word == "beta" || word == "normal")) return word;
+	}
+	return "";
+}
+
+void Prefs::loadFrom(const std::string& path, const std::string* marker) {
+	Reader r{ readIni(path) };
 	themeMode = r.i("themeMode", themeMode, 0, 3);
 	dark = r.b("lastDark", dark);
 	accent = r.i("accent", accent, 0, 6);
@@ -223,8 +248,10 @@ void Prefs::load() {
 	if (!r.b("drawnStatusBar", false)) showStatus = true;
 	showGateNames = r.b("showGateNames", showGateNames);
 	wireValueTag = r.b("wireValueTag", wireValueTag);
+	projector = r.b("projector", projector);
 	tidyMode = r.i("tidyMode", tidyMode, 0, 1);
 	showCategoryKeys = r.b("showCategoryKeys", showCategoryKeys);
+	classicTabs = r.b("classicTabs", classicTabs);
 	gateSize = r.i("gateSize", gateSize, 36, 96);
 	// Seamless for a new install; whoever had the app before keeps Classic,
 	// the look they knew, until they choose.
@@ -233,10 +260,44 @@ void Prefs::load() {
 	toolbarHidden = r.i("toolbarHidden", toolbarHidden, 0, 1 << 12);
 	showTitle = r.b("showTitle", showTitle);
 	showThemeToggle = r.b("showThemeToggle", showThemeToggle);
-	openReplaces = r.b("openReplaces", openReplaces);
+	showStepClock = r.b("showStepClock", showStepClock);
+	newPagesShareLinks = r.b("newPagesShareLinks", newPagesShareLinks);
+	applyPageLinks();
+	inkTool = r.i("inkTool", inkTool, 0, 2);
+	penColor = r.s("penColor", penColor);
+	highlighterColor = r.s("highlighterColor", highlighterColor);
+	penWidth = r.d("penWidth", penWidth, 0.05, 3);
+	highlighterWidth = r.d("highlighterWidth", highlighterWidth, 0.05, 3);
+	// Replacing the circuit you're in is the default, as on the Mac. Every
+	// launch before this one wrote "false" whether or not anyone chose it, so
+	// those ini files take the new default once; a choice made after sticks.
+	openReplaces = r.b("openReplacesSet", false) ? r.b("openReplaces", openReplaces) : true;
 	newTemplate = r.s("newTemplate", newTemplate);
+	templateClock = r.i("templateClock", templateClock, 0, 2);
 	shortcuts = r.s("shortcuts", shortcuts);
 	checkUpdates = r.b("checkUpdates", checkUpdates);
+	// The testing group. Settings saved before there was one can only be a
+	// copy that came from the test builds (every Windows build until now was
+	// one, from windows-native-testing): those stay beta testers, so they go on
+	// getting the builds they had, and the updater says so once. No settings
+	// at all is a new install: a normal tester. (The build itself can't tell:
+	// a versioned release's Windows files are the test build's, renamed.)
+	// In order (as the Linux app's): a group chosen or decided before, as it
+	// is; else what installed this copy said (installMarker: install.ps1 or
+	// the installer); else settings from before the choice, beta; else (a
+	// new install) normal.
+	const std::string mark = r.has("testingGroup") ? std::string() : marker ? *marker : installMarker();
+	if (r.has("testingGroup")) {
+		betaTester = r.s("testingGroup", "") == "beta";
+		testingGroupNotice = betaTester && r.b("testingGroupNotice", false);
+	} else if (mark == "beta" || mark == "normal") {
+		betaTester = mark == "beta";
+		testingGroupNotice = false;
+	} else {
+		betaTester = !r.m.empty();
+		testingGroupNotice = betaTester;
+	}
+	installedRelease = r.s("installedRelease", "");
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
@@ -246,16 +307,25 @@ void Prefs::load() {
 	lastFolder = r.s("lastFolder", lastFolder);
 	lastCircuit = r.s("lastCircuit", lastCircuit);
 	studentName = r.s("studentName", studentName);
+	installId = r.s("installId", installId);
 	lastFormula = manyLines(r.s("lastFormula", lastFormula));
 	buildShape = r.i("buildShape", buildShape, 0, 2);
 	buildStyle = r.i("buildStyle", buildStyle, 0, 2);
 	buildTwoInput = r.b("buildTwoInput", buildTwoInput);
 	buildNewPage = r.b("buildNewPage", buildNewPage);
-	truthTab = r.i("truthTab", truthTab, 0, 2);
+	truthTab = r.i("truthTab", truthTab, 0, 3);
 	timingWhole = r.b("timingWhole", timingWhole);
 	timingInColor = r.b("timingInColor", timingInColor);
+	reportCircuit = r.b("reportCircuit", reportCircuit);
+	exportInk = r.b("exportInk", exportInk);
+	reportTable = r.b("reportTable", reportTable);
+	reportFormulas = r.b("reportFormulas", reportFormulas);
+	reportTiming = r.b("reportTiming", reportTiming);
+	reportColor = r.b("reportColor", reportColor);
 	exportGrid = r.b("exportGrid", exportGrid);
 	exportColor = r.b("exportColor", exportColor);
+	// (Before Match Window: Color is what the window shows in light mode.)
+	exportLook = r.i("exportLook", exportColor ? 0 : 2, 0, 2);
 	exportInfo = r.b("exportInfo", exportInfo);
 	// The name-and-result strip is in an exported picture to begin with, as
 	// on the Mac and Linux (it was left out here, once).
@@ -286,6 +356,20 @@ void Prefs::load() {
 }
 
 void Prefs::save() const {
+	const std::string text = this->text();
+	// A temporary beside it, then moved over: a crash mid-write can't leave
+	// the settings half written.
+	const std::wstring path = W(prefsPath()), tmp = path + L".tmp";
+	HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD wrote = 0;
+	const bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size();
+	CloseHandle(h);
+	if (ok) MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
+	else DeleteFileW(tmp.c_str());
+}
+
+std::string Prefs::text() const {
 	std::ostringstream o;
 	auto b = [](bool v) { return v ? "true" : "false"; };
 	o << "[CedarLogic]\n";
@@ -311,17 +395,31 @@ void Prefs::save() const {
 	o << "drawnStatusBar=1\n";
 	o << "showGateNames=" << b(showGateNames) << "\n";
 	o << "wireValueTag=" << b(wireValueTag) << "\n";
+	o << "projector=" << b(projector) << "\n";
 	o << "tidyMode=" << tidyMode << "\n";
 	o << "showCategoryKeys=" << b(showCategoryKeys) << "\n";
+	o << "classicTabs=" << b(classicTabs) << "\n";
 	o << "gateSize=" << gateSize << "\n";
 	o << "toolbarStyle=" << toolbarStyle << "\n";
 	o << "toolbarHidden=" << toolbarHidden << "\n";
 	o << "showTitle=" << b(showTitle) << "\n";
 	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
+	o << "showStepClock=" << b(showStepClock) << "\n";
+	o << "newPagesShareLinks=" << b(newPagesShareLinks) << "\n";
+	o << "inkTool=" << inkTool << "\n";
+	o << "penColor=" << penColor << "\n";
+	o << "highlighterColor=" << highlighterColor << "\n";
+	o << "penWidth=" << penWidth << "\n";
+	o << "highlighterWidth=" << highlighterWidth << "\n";
 	o << "openReplaces=" << b(openReplaces) << "\n";
+	o << "openReplacesSet=1\n";
 	o << "newTemplate=" << newTemplate << "\n";
+	o << "templateClock=" << templateClock << "\n";
 	o << "shortcuts=" << shortcuts << "\n";
 	o << "checkUpdates=" << b(checkUpdates) << "\n";
+	o << "testingGroup=" << (betaTester ? "beta" : "normal") << "\n";
+	o << "testingGroupNotice=" << b(testingGroupNotice) << "\n";
+	o << "installedRelease=" << installedRelease << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
@@ -331,6 +429,7 @@ void Prefs::save() const {
 	o << "lastFolder=" << lastFolder << "\n";
 	o << "lastCircuit=" << lastCircuit << "\n";
 	o << "studentName=" << studentName << "\n";
+	o << "installId=" << installId << "\n";
 	o << "lastFormula=" << oneLine(lastFormula) << "\n";
 	o << "buildShape=" << buildShape << "\n";
 	o << "buildStyle=" << buildStyle << "\n";
@@ -339,8 +438,15 @@ void Prefs::save() const {
 	o << "truthTab=" << truthTab << "\n";
 	o << "timingWhole=" << b(timingWhole) << "\n";
 	o << "timingInColor=" << b(timingInColor) << "\n";
+	o << "reportCircuit=" << b(reportCircuit) << "\n";
+	o << "exportInk=" << b(exportInk) << "\n";
+	o << "reportTable=" << b(reportTable) << "\n";
+	o << "reportFormulas=" << b(reportFormulas) << "\n";
+	o << "reportTiming=" << b(reportTiming) << "\n";
+	o << "reportColor=" << b(reportColor) << "\n";
 	o << "exportGrid=" << b(exportGrid) << "\n";
 	o << "exportColor=" << b(exportColor) << "\n";
+	o << "exportLook=" << exportLook << "\n";
 	o << "exportInfo=" << b(exportInfo) << "\n";
 	o << "exportStripOn=1\n";
 	o << "exportWorks=" << b(exportWorks) << "\n";
@@ -356,17 +462,7 @@ void Prefs::save() const {
 	o << "confirmQuit=" << b(confirmQuit) << "\n";
 	o << "startMenu=" << startMenu << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
-	const std::string text = o.str();
-	// A temporary beside it, then moved over: a crash mid-write can't leave
-	// the settings half written.
-	const std::wstring path = W(prefsPath()), tmp = path + L".tmp";
-	HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-	if (h == INVALID_HANDLE_VALUE) return;
-	DWORD wrote = 0;
-	const bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &wrote, nullptr) && wrote == text.size();
-	CloseHandle(h);
-	if (ok) MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
-	else DeleteFileW(tmp.c_str());
+	return o.str();
 }
 
 void Prefs::applyWireDots() const {
@@ -375,6 +471,8 @@ void Prefs::applyWireDots() const {
 	if (lowWire >= 0 && lowWire < 3) cl_set_low_wire_color(true, colors[lowWire][0], colors[lowWire][1], colors[lowWire][2]);
 	else cl_set_low_wire_color(false, 0, 0, 0);
 }
+
+void Prefs::applyPageLinks() const { cl_set_new_pages_share_links(newPagesShareLinks); }
 
 void Prefs::noteRecent(const std::string& path) {
 	if (path.empty()) return;
@@ -490,8 +588,19 @@ ID2D1HwndRenderTarget* WindowSurface::begin(HWND hwnd) {
 		// makes them points.
 		const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
 			D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
-		if (FAILED(f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h)), &rt)))
+		// Presented at once, not held for the display's next refresh: the
+		// default (D2D1_PRESENT_OPTIONS_NONE) makes EndDraw wait for a vblank,
+		// and with a target per window (the canvas, the minimap, the status
+		// bar, the toolbar...) each pointer move during a drag waited for
+		// several in a row. Windows' compositor shows the last frame given at
+		// each refresh, so nothing tears. CEDARLOGIC_DRAG_OLD=1 puts the old
+		// way back, to compare (windows/DRAG-DIAGNOSIS.md).
+		const D2D1_PRESENT_OPTIONS present = draglog::legacy() ? D2D1_PRESENT_OPTIONS_NONE : D2D1_PRESENT_OPTIONS_IMMEDIATELY;
+		const HRESULT hr = f->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(w, h), present), &rt);
+		if (FAILED(hr)) {
+			health::noteD2dFailure(hr, "CreateHwndRenderTarget");
 			return rt = nullptr;
+		}
 		static unsigned long long count = 0;
 		made = ++count;
 	} else {
@@ -511,7 +620,9 @@ void WindowSurface::end() {
 	// The frame didn't make it: the display took the target away (a driver
 	// update, a remote session) or something in it failed. A new target, and
 	// the frame again (a few times in a row at most).
-	if (FAILED(rt->EndDraw())) {
+	const HRESULT hr = rt->EndDraw();
+	if (FAILED(hr)) {
+		health::noteD2dFailure(hr, "EndDraw");
 		release();
 		if (failures++ < 3) InvalidateRect(window, nullptr, FALSE);
 	} else {
@@ -646,6 +757,7 @@ void setWindowText(HWND hwnd, const std::string& text) {
 // showMessage and askYesNo are the app's alert card (Alert.cpp).
 
 void reportException(const char* where, const char* what) {
+	if (health::exceptions++ == 0) health::firstException = strf("%s: %s", where, what);
 	OutputDebugStringW(W(strf("CedarLogic: %s failed: %s\n", where, what)).c_str());
 	// Tell the user once a minute at most, in every window's status bar.
 	static ULONGLONG lastTold = 0;

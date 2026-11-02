@@ -22,9 +22,13 @@ class MiniMap;
 class ScopeWindow;
 class StatusBar;
 class FindBar;
+class NotesPanel;
 class TabSwitcher;
 class TabStrip;
 class Toolbar;
+
+// Step Clock's button, off because the page has no clock set to move only on it.
+inline const char* stepClockOffTip() { return "Step Clock: first turn on \u201COnly on Step Clock\u201D in a clock's settings"; }
 
 class CircuitWindow {
 public:
@@ -94,12 +98,24 @@ public:
 	bool save();
 	bool saveQuietly(bool explicitSave);
 	bool exportCopy();
+	void shareLink();
 	// Close without saving (its circuit was deleted).
 	void discard();
 	// Open the circuit's file again (a version was restored).
 	void reloadFromDisk(const std::string& message);
 	// A circuit in Your Circuits was renamed.
 	void libraryChanged();
+	// Sync (SyncApp.h): when the last key or click went to this window (ms
+	// since 1970); the circuit changed on disk under a window with nothing
+	// unsaved (reloaded in place: the same tab, the same view); and the
+	// circuit went (its window closes, or becomes a new circuit if it's the only one).
+	int64_t lastInputMs() const { return lastInputAt; }
+	void noteInput();
+	// In the middle of something (a drag, a gate on the pointer, Tidy Up's
+	// preview, a wire being drawn): saving now would keep it half done.
+	bool busyEditing() const;
+	void reloadFromSync(const std::string& fromDevice);
+	void closeForSync();
 	// A new circuit from a template: called `name`, and in Your Circuits.
 	void startAs(const std::string& name);
 	// My Parts gained or lost one.
@@ -108,6 +124,7 @@ public:
 	// page's circuit. False when nothing could be built.
 	bool buildPlan(const formula::Plan& plan, bool onNewPage, const std::string& pageName);
 	void exportImage();
+	void exportReport();
 	void exportOlder(int format);
 	void print();
 	void undo();
@@ -121,6 +138,17 @@ public:
 	void deleteSelection();
 	void rotate();
 	void straighten();
+	// Parts locked in place (a teacher's starter parts): they stay put --
+	// moves, Rotate, Delete and Cut leave them -- but wires, settings and
+	// switches work as usual. Lock (or unlock) the selected parts; unlock
+	// every one; after a move, delete or rotate, say why locked ones stayed.
+	void lockSelection(bool lock);
+	void unlockAllParts();
+	void noteLockedHeld();
+	int selectedLockedCount(bool locked) const;
+	// Edit's one item: Unlock Part(s) when every selected part is locked.
+	bool lockMenuUnlocks() const { return selectedLockedCount(true) > 0 && selectedLockedCount(false) == 0; }
+	std::string unlockPartsTitle() const { return selectedLockedCount(true) > 1 ? "Unlock Parts" : "Unlock Part"; }
 	void tidy(int mode = -1);
 	void endTidy(bool keep);
 	void switchTidyMode();
@@ -131,12 +159,53 @@ public:
 	void setRunning(bool run);
 	void toggleRunning() { setRunning(!isRunning); }
 	void stepOnce();
+	// Step Clock: each clock on the page set to "Only on Step Clock" makes one
+	// full cycle (up, settle, down, settle); running or paused, it stays so.
+	void stepClock();
+	// Whether the page has such a clock (the toolbar's button is off without).
+	bool hasManualClock() const;
+	// A click moved the circuit on (a switch flipped, a clock stepped): show
+	// it, and the oscilloscope.
+	void advancedByHand();
 	void setStepMs(int ms);
 	void toggleSimView();
 	void toggleLock();
+	// Drawing on the circuit (Ink.h): Draw mode, the window's (both sides of
+	// a split); Show or Hide Drawing, saved with the circuit but not an undo
+	// step; Clear Drawing on This Page, one.
+	bool drawing() const { return drawOn; }
+	void setDrawing(bool on);
+	void toggleDrawing() { setDrawing(!drawOn); }
+	void setDrawingShown(bool shown);
+	bool drawingShown() const { return cl_ink_shown(doc); }
+	// A drawing that's hidden: the Draw button shows a dot.
+	bool hasHiddenDrawing() const { return cl_ink_any(doc) && !cl_ink_shown(doc); }
+	void clearDrawing();
+	bool pageHasInk() const { return cl_ink_stroke_count(doc, currentPage()) > 0; }
+	bool pageInkReadOnly() const { return cl_ink_page_read_only(doc, currentPage()); }
+	// Why the tools can't draw on this page, or "".
+	std::string inkBlockedReason() const;
+	void setInkTool(int tool);
+	void setInkWidth(int index);
+	void setInkColor(int index);
+	// The drawing changed (a stroke, an erase): an edit, and redrawn.
+	void inkEdited();
+	// The notes pane (Notes.h): shown or put away; Find's match in the notes.
+	bool notesShown() const { return notesOpen; }
+	void toggleNotes();
+	void showNotesMatch(const std::string& query);
+	// Shown or hidden is saved with the circuit, but isn't an undo step.
+	void markEdited();
 	void makeTruthTable();
+	void checkCircuit();   // the truth table at its Check tab
 	void toggleScope();
 	void newPage();
+	// Page links (docs/PAGE-LINKS.md): TO/FROM links connect by name only
+	// between pages that share links. Each change is one undo step.
+	void connectAllPages();
+	void disconnectAllPages();
+	// Page `page` connects to `other` (on) or not; it keeps the others it reaches.
+	void setPagesLinked(int page, int other, bool on);
 	void closePage(int page);
 	void reopenPage();
 	void renamePage(int page);
@@ -165,8 +234,13 @@ public:
 	std::string titleText() const { return displayName(); }
 	int stepMs() const;
 	void titleMenu(POINT screen);
-	// Every menu, as a popup (the toolbar's •••, Alt, F10).
-	void moreMenu(POINT screen, bool rightAligned);
+	// The menu bar's menus (File, Edit...), each a submenu, for the toolbar
+	// that draws the bar; and where its popups open when the bar has slid
+	// away for focus mode (the bottom of the tabs, client pixels).
+	HMENU menuBarMenus() const { return menus; }
+	int menuDropY() const { return captionBottom; }
+	// The menu bar has the keys (Alt or F10): the shortcuts wait.
+	bool menuKeysActive() const;
 	// A tab is a page: its index in the document, as the canvases are in
 	// the document's order.
 	int tabCount() const { return (int)canvases.size(); }
@@ -212,23 +286,42 @@ public:
 	// pointer to the window there.
 	bool onDivider(POINT screen) const;
 	TabStrip* tabStripWidget(int pane) const { return pane == 0 || pane == 1 ? strips[pane] : nullptr; }   // for --click-test
+	FindBar* findBarWidget() const { return findBar; }   // for --session-check
+	bool scopeShown() const { return scope && scopeOpen; }
 
 	// ---- Focus mode ----
 	// The Mac's: the toolbar and the side panel slide away, and the tab
 	// strips become the window's top row.
 	bool focusMode() const { return focusOn; }
 	void toggleFocusMode();
+	// Predict, then reveal (Predict.cpp, the Mac's Predict.swift): the lights
+	// covered in Simulation View, guessed, then revealed and scored.
+	bool predictOn() const { return predict.on; }
+	bool predictRevealed() const { return predict.revealed; }
+	bool predictCovers() const;
+	void togglePredict();
+	void revealOrCoverAgain();
+	// A switch, Step or Step Clock moved the circuit on (a new round once revealed).
+	void circuitAdvancedByUser();
+	bool predictTap(double wx, double wy);
+	bool predictKey(UINT vk);
+	std::vector<CLPredictMark> predictMarks();
 
 	// Ctrl+Tab: the switcher (TabSwitcher.h). Its tabs, most recently used
 	// first, and the page a tab shows.
 	void switchTabs(bool backwards);
 	bool switcherActive() const;
 	void cancelSwitcher();
+	TabSwitcher* tabSwitcher() const { return switcher; }   // (--dialog switcher's picture)
 	std::vector<int> recentTabs() const;
 	int pageOfTab(int index) const;
 
 	// Find's result: its page in front, it selected and in the middle.
 	void showFoundGate(int page, long gate, double x, double y);
+	// Find Next and Find Previous (1, -1): along the results, or the bar opened
+	// on what it last looked for. --find opens it looking for `query`.
+	void findStep(int delta);
+	void openFind(const std::string& query);
 	std::string pageTitle(int page) const { return pageName(page); }
 
 	// For the guided tour: 0 the palette, 1 the canvas, 2 Run, 3 the tabs
@@ -253,6 +346,7 @@ private:
 	std::string recoveryBase;
 	std::string recoveredName;
 	unsigned changes = 0, changesAtRecovery = 0;
+	int64_t lastInputAt = 0;
 	double lastRecovery = 0;
 	void writeRecovery();
 
@@ -260,6 +354,8 @@ private:
 	Toolbar* toolbar = nullptr;
 	TabStrip* strips[2] = { nullptr, nullptr };
 	FindBar* findBar = nullptr;
+	NotesPanel* notes = nullptr;      // made when first shown
+	bool notesOpen = false;
 	TabSwitcher* switcher = nullptr;
 	std::vector<uint64_t> recentKeys;   // pages by when they were last in front, most recent first
 	HWND paletteHost = nullptr;
@@ -308,7 +404,16 @@ private:
 
 	bool isRunning = true;
 	bool simViewOn = false;
+	struct PredictState {
+		bool on = false, revealed = false;
+		std::map<long, int> guesses, answers;   // by gate: 0/1, or a display's number (-1 no clear value)
+		long focus = -1;
+		int page = -1;
+	} predict;
+	std::vector<CLSimLight> predictLights() const;
+	void predictNewRound();
 	bool lockedOn = false;
+	bool drawOn = false;
 	double phase = 0;                 // Simulation View's marching dashes, in points
 	double lastTick = 0, lastStatus = 0, lastTitle = 0, lastScope = 0;   // seconds (nowSeconds)
 	bool statusDirty = true;
@@ -321,7 +426,7 @@ private:
 	int lastPageCount = 1;
 	uint64_t tidyKey = 0;             // the page Tidy Up's preview is on
 	std::map<uint64_t, bool> seenPages;
-	HMENU menus = nullptr, recentMenu = nullptr;
+	HMENU menus = nullptr, recentMenu = nullptr, windowMenu = nullptr;
 	std::vector<std::string> recentPaths;   // Open Recent's circuits, as the menu shows them
 
 	void build();
@@ -358,6 +463,7 @@ private:
 	void pasteText(const std::string& text, bool floating, bool shift);
 	std::string displayName() const;
 	void rebuildRecentMenu();
+	void rebuildWindowList();
 	LRESULT frameHitTest(LPARAM lp);
 	void renameFile();
 	void duplicateCircuit();

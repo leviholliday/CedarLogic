@@ -34,6 +34,8 @@ struct FormField {
 	std::string placeholder;            // Text: shown dimmed while it's empty
 	bool beside = false;                // Button: at the end of the row before it, not a row of its own
 	int grid = 0;                       // Check: this many to a row, with the Checks after it that say the same
+	bool wideGrid = false;              //   that row across the whole width, not the controls' column
+	bool heading = false;               // Note: a section's title, in bold
 	double lo = 0, hi = 1, step = 0;    // Slider: its range, and its steps (0: any value)
 	std::string format = "%.2f";        // Slider: how its number is shown beside it
 	// Picture: drawn with Direct2D, in points, `height` points tall and the
@@ -44,6 +46,8 @@ struct FormField {
 	HWND extra = nullptr;               // the label, or the Choose... button
 	RECT frame{};                       // Text and List: the drawn field around it (dialog pixels)
 	int page = 0;                       // which of Form::pages it's on
+	bool hidden = false;                // not shown, and it takes no room (Form::setHidden)
+	int top = 0, span = 0;              // where it is on its page and how tall (with its tip), in pixels, unscrolled
 	std::vector<HWND> others;           // its tip, its Choose... button, its left label
 	HWND tipWindow = nullptr;
 };
@@ -59,7 +63,7 @@ public:
 	std::function<void(Form&)> onInit;
 	std::function<void(Form&, int field)> onChange;       // a field changed (typing, a choice, a tick)
 	std::function<void(Form&, int field)> onLeave;        // a Text field lost the keyboard
-	std::function<std::string(Form&)> validate;           // on OK: "" to close, else what's wrong
+	std::function<std::string(Form&)> validate;           // on OK: "" to close, else what's wrong ("\n": stay open, say nothing)
 	std::function<bool(Form&, int button)> onButton;      // one of `buttons`: true to close with it
 	std::function<void(Form&, int field, int row)> onActivate;   // a List row double-clicked
 	std::function<void(Form&)> onTimer;
@@ -75,6 +79,11 @@ public:
 	std::vector<std::string> pages;
 	int adding = 0, page = 0;
 	void showPage(int page);
+	// A field shown or put away; the ones after it close up (or open out) to
+	// fit, and the window with them. (Not for the Checks that share a row.)
+	void setHidden(int field, bool hidden);
+	// After several `hidden` flags were changed at once: the page laid out again.
+	void hiddenChanged(int page);
 	// With pages: each an icon over its name, in a bar across the top (the
 	// Mac's Settings), rather than a segmented row.
 	std::vector<wchar_t> pageIcons;
@@ -86,6 +95,8 @@ public:
 	int hotTab = -1;
 	std::vector<int> pageBottoms;       // where each page's fields end (pixels)
 	int footerGap = 0, footerButtonsAt = 0, footerBelow = 0;
+	int contentTop = 0;                 // where the first field of a page is (pixels)
+	void relayout(int page);            // the page's fields in their places, the hidden ones taking none
 	int add(const FormField& f) { fields.push_back(f); fields.back().page = adding; return (int)fields.size() - 1; }
 	// Show it and wait. Returns IDOK, IDCANCEL, or 100 + a button's index.
 	int run(HWND owner);
@@ -102,15 +113,24 @@ public:
 	int selectedRow(int field) const;
 	void selectRow(int field, int row);
 	void setProblem(const std::string& text);
+	// Something going on (a send): a bar, `fraction` (0...1) of the way
+	// along, with `note` over it, left of the buttons. Negative: put away.
+	void setProgress(double fraction, const std::string& note = std::string());
 	void refresh(int field);                  // a Picture: draw it again
 	void enable(int field, bool on);
 	double number(int field) const;           // a Slider's
 	void setTip(int field, const std::string& text);
+	// Its tip coloured to say something needs doing: 1 orange, 2 red (0:
+	// dimmed again, as a tip).
+	void markTip(int field, int tone);
 	// The theme changed while it's open: its title bar, fields and paper.
 	void retheme();
 
 	// For the dialog procedure.
 	HWND problem = nullptr;
+	HWND progress = nullptr;
+	double progressValue = -1;
+	std::string progressNote;
 	std::vector<HWND> buttonWindows;
 	void build();
 	void capture();
@@ -132,7 +152,8 @@ bool askText(HWND parent, const std::string& title, const std::string& prompt, s
 
 void showGateSettings(CircuitWindow* w, long gate);
 void showQuickAdd(CircuitWindow* w);
-void showTruthTable(CircuitWindow* w, int page);
+void showTruthTable(CircuitWindow* w, int page, bool check = false);   // check: at its Check tab
+void setCheckForTesting(const std::string& formula);   // --check: what the Check tab opens with (not kept)
 bool truthTableOpen();   // one is up (the guided tour watches for it)
 void showRamEditor(CircuitWindow* w, long gate);
 // Settings (Settings.cpp): General, Appearance, Canvas, Toolbar, Shortcuts.
@@ -145,6 +166,17 @@ void showBuildFormula(CircuitWindow* w);
 bool confirmQuit(HWND parent);
 // Export as Image (Export.cpp).
 void showExportImage(CircuitWindow* w, int page);
+// --export-image: the first page written as a PNG or a PDF (by the file's ending), without a window.
+bool writeExportImage(CLDocument* doc, const std::string& name, const std::string& file, std::string& error);
+// Export Lab Report (LabReport.cpp): one PDF to hand in.
+struct LabReportOptions {
+	bool circuit = true, truthTable = true, formulas = true, timing = true, color = true;
+	bool pump = false;   // repaint the windows between pages, so a long report doesn't leave them "not responding"
+};
+void showExportReport(CircuitWindow* w);
+// The PDF itself (also --lab-report). False, with `error`, if it couldn't be written.
+bool writeLabReport(CLDocument* doc, const std::string& title, const LabReportOptions& options, const std::string& file, std::string& error);
+bool hasScopeRecording(CLDocument* doc);
 
 // The oscilloscope, redesigned as the Mac app's (ScopeView.swift), docked
 // under the canvases (the window lays it out; the line over it drags): every

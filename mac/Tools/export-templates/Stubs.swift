@@ -7,6 +7,8 @@ import AppKit
 final class CoreDocument {
     let handle: OpaquePointer
     init() { handle = cl_document_new() }
+    // Templates.swift's Practice Circuit opener needs it to compile; never called here.
+    convenience init(data: Data) throws { self.init() }
     deinit { cl_document_close(handle) }
     func saveText() -> String { String(cString: cl_document_save_text(handle)) }
     func libraryName(ofGate gate: Int) -> String { String(cString: cl_gate_library_name(handle, gate)) }

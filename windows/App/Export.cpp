@@ -1,11 +1,14 @@
 // Export as Image, as the Mac app's (ExportImageView.swift, after the wx
-// app's): a preview, the grid if wanted, and a strip under the circuit with
+// app's), as a PNG or a PDF (the file chooser's type, as the Mac's Format;
+// the PDF holds the same picture, at the resolution chosen): a preview, the grid if wanted, and a strip under the circuit with
 // your name and whether it works -- what a grader looks for first -- in
-// colour or black and white, at 2x, 4x or 6x. Copied, or saved as a PNG.
+// colour or black and white, at 2x, 4x or 6x, with the drawing on the
+// circuit or without it. Copied, or saved as a PNG.
 
 #include "Chrome.h"
 #include "Dialogs.h"
 #include "Images.h"
+#include "SyncApp.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -16,12 +19,26 @@ namespace {
 
 const float kPointsPerUnit = 12, kMargin = 24;
 const float kPad = 22, kBody = 17, kSmall = 11, kGap = 8;
+// The picture's look (Prefs::exportLook), as the Mac's ExportLook: as the
+// window shows it (its light or dark canvas), light, or black and white.
+enum { kLookWindow = 0, kLookLight = 1, kLookPrint = 2 };
 
 struct ExportInfo {
 	bool enabled = false;
 	std::string name, why, fileName;
 	bool works = true;
+	bool ink = false;   // the drawing on the circuit too (in its print colours)
 };
+
+// The page's extent, with the drawing's when it's included.
+bool pageBox(CLDocument* doc, int page, bool ink, double& l, double& b, double& r, double& t) {
+	const bool parts = cl_document_page_bounds(doc, page, &l, &b, &r, &t);
+	double il, ib, ir, it;
+	if (!ink || !cl_ink_bounds(doc, page, &il, &ib, &ir, &it)) return parts;
+	if (!parts) { l = il; b = ib; r = ir; t = it; return true; }
+	l = std::min(l, il); b = std::min(b, ib); r = std::max(r, ir); t = std::max(t, it);
+	return true;
+}
 
 FormField choiceField(const char* label, std::vector<std::string> items, int active) {
 	FormField x;
@@ -61,7 +78,7 @@ std::vector<std::string> stripLines(const ExportInfo& info, float width, float& 
 // The whole image's size in points; false for an empty page.
 bool imageSize(CLDocument* doc, int page, const ExportInfo& info, float& w, float& h) {
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return false;
+	if (!pageBox(doc, page, info.ink, l, b, r, t)) return false;
 	w = std::max((float)(r - l) * kPointsPerUnit + 2 * kMargin, info.enabled ? 420.0f : 0.0f);
 	h = (float)(t - b) * kPointsPerUnit + 2 * kMargin;
 	if (info.enabled) {
@@ -75,21 +92,25 @@ bool imageSize(CLDocument* doc, int page, const ExportInfo& info, float& w, floa
 }
 
 // Into a target in points, y down, `w` x `h` points; `scale` is pixels a point.
-void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, bool color, bool grid,
+void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, int look, bool grid,
                const ExportInfo& info) {
 	float stripH = 0;
 	std::vector<std::string> lines;
 	if (info.enabled) lines = stripLines(info, w, stripH);
 	const float circuitH = h - stripH;
+	// Match Window: the canvas the window draws on now (dark in dark mode).
+	const bool windowDark = look == kLookWindow && prefs().dark;
+	const Palette pal{ windowDark, false };
 	fillRect(rt, D2D1::RectF(0, 0, w, h), D2D1::ColorF(1, 1, 1));
+	if (look == kLookWindow) fillRect(rt, D2D1::RectF(0, 0, w, circuitH), d2dColor(pal.canvas()));
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) return;
+	if (!pageBox(doc, page, info.ink, l, b, r, t)) return;
 	const double midX = (l + r) / 2, midY = (b + t) / 2;
 	rt->PushAxisAlignedClip(D2D1::RectF(0, 0, w, circuitH), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 	if (grid) {
 		const double upp = 1 / kPointsPerUnit;
 		const double ox = midX - w / 2 * upp, oy = midY + circuitH / 2 * upp;
-		const D2D1_COLOR_F line = D2D1::ColorF(0, 0, 0.2f, 0.2f);
+		const D2D1_COLOR_F line = look == kLookWindow ? d2dColor(pal.grid(windowDark ? 0.2 : 0.28)) : D2D1::ColorF(0, 0, 0.2f, 0.2f);
 		ID2D1SolidColorBrush* br = nullptr;
 		if (SUCCEEDED(rt->CreateSolidColorBrush(line, &br))) {
 			for (double x = std::ceil(ox); x < ox + w * upp; x += 1) {
@@ -103,18 +124,19 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 			br->Release();
 		}
 	}
-	if (!color) {
-		cl_document_draw_fitted(doc, page, rt, w, circuitH, kMargin, scale, CL_STYLE_PRINT);
+	if (look == kLookPrint) {
+		cl_document_draw_fitted_ink(doc, page, rt, w, circuitH, kMargin, scale, CL_STYLE_PRINT, info.ink);
 	} else {
 		const double upp = std::max((r - l) / (w - 2 * kMargin), (t - b) / (circuitH - 2 * kMargin));
 		CLDrawOptions o = {};
-		o.dark = false;
+		o.dark = windowDark;
 		o.accent = prefs().accent;
 		o.wireScale = 1;
 		o.simView = false;
 		o.thumbnail = false;
 		o.showSelection = false;
 		o.selectionFade = 1;
+		o.ink = info.ink ? CL_INK_ALWAYS_PRINT : CL_INK_NEVER;
 		cl_document_draw_ex(doc, page, rt, scale, midX - w / 2 * upp, midY + circuitH / 2 * upp, upp, &o);
 	}
 	rt->PopAxisAlignedClip();
@@ -143,20 +165,51 @@ void drawImage(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float 
 	for (const std::string& line : lines) { text(line, kPad, y, kBody, ink); y += kBody + kGap; }
 }
 
-IWICBitmap* makeImage(CLDocument* doc, int page, double multiplier, bool color, bool grid, const ExportInfo& info) {
+IWICBitmap* makeImage(CLDocument* doc, int page, double multiplier, int look, bool grid, const ExportInfo& info) {
 	float w, h;
 	if (!imageSize(doc, page, info, w, h)) return nullptr;
 	double scale = multiplier;
 	if (std::max(w, h) * scale > 12000) scale = 12000 / std::max(w, h);
-	return images::render(w, h, scale, true, [&](ID2D1RenderTarget* rt) { drawImage(rt, doc, page, w, h, scale, color, grid, info); });
+	return images::render(w, h, scale, true, [&](ID2D1RenderTarget* rt) { drawImage(rt, doc, page, w, h, scale, look, grid, info); });
 }
 
 }  // namespace
 
+// --export-image in.cdl out.png|out.pdf: the first page as Export as Image
+// writes it with its last choices (and the name strip off), without a window.
+bool writeExportImage(CLDocument* doc, const std::string& name, const std::string& file, std::string& error) {
+	ExportInfo info;
+	info.ink = cl_ink_stroke_count(doc, 0) > 0 && prefs().exportInk;
+	info.fileName = name;
+	float w = 0, h = 0;
+	if (!imageSize(doc, 0, info, w, h)) { error = "the page is empty"; return false; }
+	IWICBitmap* bmp = makeImage(doc, 0, prefs().exportScale, prefs().exportLook, prefs().exportGrid, info);
+	if (bmp == nullptr) { error = "the picture couldn't be made"; return false; }
+	const bool asPdf = file.size() > 4 && _stricmp(file.c_str() + file.size() - 4, ".pdf") == 0;
+	const bool ok = asPdf ? images::savePdf(bmp, w, h, name, file) : images::savePng(bmp, file);
+	bmp->Release();
+	if (!ok) error = "it couldn't be written";
+	return ok;
+}
+
+// For the lab report (LabReport.cpp): a page as Export as Image draws it,
+// without the name strip. `scale` is pixels a point of the picture.
+// The drawing is in it when it's shown.
+ExportInfo reportInfo(CLDocument* doc) {
+	ExportInfo i;
+	i.ink = cl_ink_shown(doc);
+	return i;
+}
+bool reportCircuitSize(CLDocument* doc, int page, float& w, float& h) { return imageSize(doc, page, reportInfo(doc), w, h); }
+void reportCircuitDraw(ID2D1RenderTarget* rt, CLDocument* doc, int page, float w, float h, double scale, bool color) {
+	drawImage(rt, doc, page, w, h, scale, color ? kLookLight : kLookPrint, false, reportInfo(doc));
+}
+
 void showExportImage(CircuitWindow* win, int page) {
 	CLDocument* doc = win->document();
 	double l, b, r, t;
-	if (!cl_document_page_bounds(doc, page, &l, &b, &r, &t)) { win->note("This page is empty: nothing to export."); return; }
+	const bool hasInk = cl_ink_stroke_count(doc, page) > 0;
+	if (!pageBox(doc, page, hasInk, l, b, r, t)) { win->note("This page is empty: nothing to export."); return; }
 	Prefs& p = prefs();
 	std::string fileName = win->titleText();
 	if (cl_document_page_count(doc) > 1) fileName += " - " + win->pageName(page);
@@ -176,6 +229,12 @@ void showExportImage(CircuitWindow* win, int page) {
 	gridBox.label = "Include grid lines";
 	gridBox.value = p.exportGrid ? "1" : "";
 	const int gridField = f.add(gridBox);
+	// The drawing on the circuit: offered when this page has one.
+	FormField inkBox;
+	inkBox.kind = FormField::Check;
+	inkBox.label = "Include the drawing";
+	inkBox.value = p.exportInk ? "1" : "";
+	const int inkField = hasInk ? f.add(inkBox) : -1;
 	FormField heading;
 	heading.kind = FormField::Note;
 	heading.label = "Name and result";
@@ -198,34 +257,38 @@ void showExportImage(CircuitWindow* win, int page) {
 	whyBox.value = p.exportProblem;
 	whyBox.tip = "Explain what doesn't work (required)";
 	const int whyField = f.add(whyBox);
-	const int styleField = f.add(choiceField("Output style", { "Color", "Black & White" }, p.exportColor ? 0 : 1));
+	const int styleField = f.add(choiceField("Look", { "Match Window", "Light", "Black & White" }, std::min(2, std::max(0, p.exportLook))));
 	const int resField = f.add(choiceField("Resolution", { "Screen (2×)", "Print (4×)", "High Quality (6×)" },
 	                                       p.exportScale <= 2 ? 0 : p.exportScale >= 6 ? 2 : 1));
 
 	// The choices as they stand in the open dialog.
-	struct State { ExportInfo info; bool color, grid; int multiplier; };
+	struct State { ExportInfo info; int look; bool grid; int multiplier; };
 	auto state = [&](Form& form) {
 		State s;
 		s.grid = form.checked(gridField);
+		s.info.ink = inkField >= 0 && form.checked(inkField);
 		s.info.enabled = form.checked(infoField);
 		s.info.name = form.text(nameField);
 		s.info.works = form.choice(worksField) == 0;
 		s.info.why = form.text(whyField);
 		s.info.fileName = fileName;
-		s.color = form.choice(styleField) == 0;
+		s.look = form.choice(styleField);
 		const int res = form.choice(resField);
 		s.multiplier = res == 0 ? 2 : res == 2 ? 6 : 4;
 		return s;
 	};
 	auto keep = [&](const State& s) {
 		p.exportGrid = s.grid;
+		if (inkField >= 0) p.exportInk = s.info.ink;
 		p.exportInfo = s.info.enabled;
 		p.studentName = trimmed(s.info.name);
 		p.exportWorks = s.info.works;
 		p.exportProblem = s.info.why;
-		p.exportColor = s.color;
+		p.exportLook = s.look;
+		p.exportColor = s.look != kLookPrint;
 		p.exportScale = s.multiplier;
 		p.save();
+		syncapp::nameChanged();
 	};
 	// A "does not work" answer needs its reason before anything goes out.
 	auto problem = [&](const State& s) -> std::string {
@@ -251,7 +314,7 @@ void showExportImage(CircuitWindow* win, int page) {
 		D2D1_MATRIX_3X2_F was;
 		rt->GetTransform(&was);
 		rt->SetTransform(D2D1::Matrix3x2F::Scale(fit, fit) * D2D1::Matrix3x2F::Translation(x, y) * was);
-		drawImage(rt, doc, page, w, h, fit * dpiOf(f.dialog) / 96.0f, s.color, s.grid, s.info);
+		drawImage(rt, doc, page, w, h, fit * dpiOf(f.dialog) / 96.0f, s.look, s.grid, s.info);
 		rt->SetTransform(was);
 		strokeRound(rt, D2D1::RectF(x, y, x + w * fit, y + h * fit), 1, D2D1::ColorF(0, 0, 0, 0.15f), 0.5f);
 	};
@@ -267,7 +330,7 @@ void showExportImage(CircuitWindow* win, int page) {
 		const std::string bad = problem(s);
 		if (!bad.empty()) { form.setProblem(bad); MessageBeep(MB_ICONWARNING); return false; }
 		keep(s);
-		IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.color, s.grid, s.info);
+		IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.look, s.grid, s.info);
 		const bool ok = bmp && images::copyToClipboard(form.dialog, bmp);
 		if (bmp) bmp->Release();
 		if (!ok) { form.setProblem("The image couldn't be copied."); return false; }
@@ -278,19 +341,24 @@ void showExportImage(CircuitWindow* win, int page) {
 	if (result != IDOK) return;
 	State s;
 	s.grid = !f.fields[gridField].value.empty();
+	s.info.ink = inkField >= 0 && !f.fields[inkField].value.empty();
 	s.info.enabled = !f.fields[infoField].value.empty();
 	s.info.name = f.fields[nameField].value;
 	s.info.works = f.fields[worksField].value == "0";
 	s.info.why = f.fields[whyField].value;
 	s.info.fileName = fileName;
-	s.color = f.fields[styleField].value == "0";
+	s.look = atoi(f.fields[styleField].value.c_str());
 	const int res = atoi(f.fields[resField].value.c_str());
 	s.multiplier = res == 0 ? 2 : res == 2 ? 6 : 4;
 	keep(s);
-	const std::string file = chooseSaveFile(win->window(), "Export as Image", fileName + ".png", { { "PNG pictures (*.png)", "*.png" } }, ".png");
+	const std::string file = chooseSaveFile(win->window(), "Export as Image", fileName + ".png",
+	                                        { { "PNG Image (*.png)", "*.png" }, { "PDF Document (*.pdf)", "*.pdf" } }, ".png");
 	if (file.empty()) return;
-	IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.color, s.grid, s.info);
-	const bool ok = bmp && images::savePng(bmp, file);
+	const bool asPdf = file.size() > 4 && _stricmp(file.c_str() + file.size() - 4, ".pdf") == 0;
+	IWICBitmap* bmp = makeImage(doc, page, s.multiplier, s.look, s.grid, s.info);
+	float w = 0, h = 0;
+	imageSize(doc, page, s.info, w, h);
+	const bool ok = bmp && (asPdf ? images::savePdf(bmp, w, h, fileName, file) : images::savePng(bmp, file));
 	if (bmp) bmp->Release();
 	if (!ok) { showMessage(win->window(), Tone::Error, "The image couldn't be saved", file); return; }
 	win->note("Exported " + baseName(file) + ".");
