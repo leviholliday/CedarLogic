@@ -795,6 +795,31 @@ static void junctionCases() {
 		CHECK(consistent(j.doc, "after") && saveIsStable(j.doc), "... and deleting that part, then moving the rest, is safe");
 		cl_document_close(j.doc);
 	}
+	// A drawing that no longer records one of the wire's pins (the drift
+	// docs/CORE-HARDENING.md describes, which the doors -- open, paste, the
+	// end of a move -- redraw, but any edit that missed one left on screen).
+	// Save wrote the drawing, so the pin was connected on screen and gone
+	// after reopening. Save writes the wire routed from its pins instead.
+	{
+		Junction j = junction();
+		guiWire* w = wireOn(j.doc, j.ids[0], "OUT_0");
+		auto shape = w->getSegmentMap();
+		for (auto& e : shape) {
+			auto& conns = e.second.connections;
+			conns.erase(std::remove_if(conns.begin(), conns.end(), [&](const wireConnection& c) { return (long)c.gid == j.ids[3]; }), conns.end());
+		}
+		w->setSegmentMap(shape);
+		const bool broken = !w->isSoundShape() && w->numConnections() == 4;
+		const size_t onScreen = w->getSegmentMap().size();
+		CLDocument* back = reopen(j.doc);
+		guiWire* bw = back ? wireOn(back, j.ids[3], "IN_0") : nullptr;
+		if (!broken || !bw) printf("    broken %d, reopened pin %s\n", (int)broken, bw ? "on a wire" : "free");
+		CHECK(broken && bw && bw->numConnections() == 4 && consistent(back, "after reopen"),
+		      "a wire whose drawing lost a pin still saves that pin");
+		CHECK(!w->isSoundShape() && w->getSegmentMap().size() == onScreen, "... and saving leaves the circuit on screen as it is");
+		if (back) cl_document_close(back);
+		cl_document_close(j.doc);
+	}
 }
 
 int main(int argc, char** argv) {

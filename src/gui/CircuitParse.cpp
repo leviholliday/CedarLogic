@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <cstdlib>
@@ -752,10 +753,28 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 			// the next save differ. (Only damaged input leaves one: a wire with
 			// no pins, or one pin and no shape. It carries no connection.)
 			if (entry.second == nullptr) continue;
+			guiWire *wire = entry.second;
+			// The pins are what a wire means; the drawing is what's written, and
+			// the loader joins a wire to the pins its drawing records. A drawing
+			// that has drifted from the pins (one no segment records any more)
+			// saved a wire that, reopened, had let go of that pin while it was
+			// still connected on screen. Such a wire is written as it would be
+			// routed from its pins, as opening a file redraws one; the circuit
+			// on screen is left alone. (A copy routes it: a save changes nothing.)
+			std::unique_ptr<guiWire> routed;
+			if (wire->numConnections() >= 2 && !wire->isSoundShape()) {
+				routed = std::make_unique<guiWire>();
+				routed->setCircuit(glc[i]->getCircuit());
+				routed->setIDs(wire->getIDs());
+				for (const wireConnection &c : wire->getConnections())
+					if (guiGate *g = glc[i]->getCircuit()->getGate(c.gid)) routed->addConnection(g, c.connection, true);
+				routed->straightenRoute();
+				if (routed->numConnections() == wire->numConnections() && routed->isSoundShape()) wire = routed.get();
+			}
 			bool records = false;
-			for (const auto &seg : entry.second->getSegmentMap()) records = records || !seg.second.connections.empty();
+			for (const auto &seg : wire->getSegmentMap()) records = records || !seg.second.connections.empty();
 			if (!records) continue;
-			pg.wires.push_back(buildWire(entry.second));
+			pg.wires.push_back(buildWire(wire));
 		}
 
 		// Both lists come out of unordered_map iteration, so without this two
