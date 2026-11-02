@@ -7,13 +7,17 @@
 #include "../GUICanvas.h"
 #include "../guiWire.h"
 #include "../guiGate.h"
+#ifndef CL_NO_WX
 #include "../MainApp.h"
+#endif
 #include "cmdDisconnectWire.h"
 #include "cmdDeleteWire.h"
 #include "cmdMoveGate.h"
 #include "cmdSetParams.h"
 
-DECLARE_APP(MainApp);
+#ifndef CL_NO_WX
+DECLARE_APP(MainApp)
+#endif
 
 cmdDeleteGate::cmdDeleteGate(GUICircuit* gCircuit, GUICanvas* gCanvas,
 		IDType gateId) :

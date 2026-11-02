@@ -36,7 +36,7 @@ jobs:
           - { name: linux,   os: ubuntu-24.04, artifact: skia-linux }
           - { name: windows, os: windows-2022, artifact: skia-windows }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Pull the Skia dist from the latest successful skia.yml run on the supply
       # branch -- the canonical build. Pinning the branch is deterministic:
@@ -47,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          rid="$(gh run list --workflow skia.yml --branch master \
+          rid="$(gh run list --workflow skia.yml --branch main \
                    --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
           echo "Skia dist from run $rid"
           gh run download "$rid" -n ${{ matrix.artifact }} -D skia-dist
@@ -113,7 +113,7 @@ jobs:
 
       - name: Upload test build (Linux)
         if: matrix.name == 'linux'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-linux-skia
           path: |
@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload test build (Windows)
         if: matrix.name == 'windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-windows-x86-skia
           path: dist

@@ -3,8 +3,6 @@
 #include "../GateLibrary.h"
 #include "../GUICircuit.h"
 #include "../guiGate.h"
-#include "../OscopeFrame.h"
-#include "../MainApp.h"
 #include "cmdSerialize.h"
 #include "cmdRegistry.h"
 
@@ -15,7 +13,7 @@ static const bool s_registered_cmdSetParams =
 		return new cmdSetParams(def);
 	});
 
-DECLARE_APP(MainApp);
+
 
 paramSet::paramSet(ParameterMap *g, ParameterMap* l) {
 	gParams = g;
@@ -83,6 +81,10 @@ bool cmdSetParams::Do() {
 		if (lg.dlgParams[i].isGui) continue;
 		if (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") dontSendMessages.push_back(lg.dlgParams[i].name);
 	}
+	// Whatever the library lists: a pasted line can name them for any gate
+	// (see CircuitParse::parseGateToSend).
+	dontSendMessages.push_back("READ_FILE");
+	dontSendMessages.push_back("WRITE_FILE");
 	while (paramWalk != newLogicParamList.end()) {
 		gate->setLogicParam(paramWalk->first, paramWalk->second);
 		bool found = false;
@@ -97,7 +99,11 @@ bool cmdSetParams::Do() {
 		gate->setGUIParam(paramWalk->first, paramWalk->second);
 		paramWalk++;
 	}
-	if (!fromString && gate->getGUIType() == "TO" && gCircuit->getOscope() != NULL) gCircuit->getOscope()->UpdateMenu();
+	// A setting that reshapes the gate (a TO/FROM's name, its angle) reseats
+	// its wires' ends; tidy them as a drop does, or the stub left on the pin
+	// is only cleared by the merge a reload does and the file changes.
+	gate->finalizeWirePlacements();
+	if (!fromString && gate->getGUIType() == "TO") gCircuit->oscopeSignalsChanged();
 	return true;
 }
 
@@ -112,6 +118,10 @@ bool cmdSetParams::Undo() {
 		if (lg.dlgParams[i].isGui) continue;
 		if (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") dontSendMessages.push_back(lg.dlgParams[i].name);
 	}
+	// Whatever the library lists: a pasted line can name them for any gate
+	// (see CircuitParse::parseGateToSend).
+	dontSendMessages.push_back("READ_FILE");
+	dontSendMessages.push_back("WRITE_FILE");
 	while (paramWalk != oldLogicParamList.end()) {
 		gate->setLogicParam(paramWalk->first, paramWalk->second);
 		bool found = false;
@@ -126,7 +136,8 @@ bool cmdSetParams::Undo() {
 		gate->setGUIParam(paramWalk->first, paramWalk->second);
 		paramWalk++;
 	}
-	if (!fromString && gate->getGUIType() == "TO") gCircuit->getOscope()->UpdateMenu();
+	gate->finalizeWirePlacements();   // as in Do
+	if (!fromString && gate->getGUIType() == "TO") gCircuit->oscopeSignalsChanged();
 	return true;
 }
 
@@ -138,7 +149,7 @@ string cmdSetParams::toString() const {
 void cmdSetParams::setPointers(GUICircuit* gCircuit, GUICanvas* gCanvas,
 		TranslationMap &gateids, TranslationMap &wireids) {
 
-	gid = gateids[gid];
+	gid = translatedId(gateids, gid);
 	this->gCircuit = gCircuit;
 	this->gCanvas = gCanvas;
 }

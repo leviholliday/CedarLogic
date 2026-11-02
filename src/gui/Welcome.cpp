@@ -640,7 +640,7 @@ private:
 			gc->DrawText(KEY_CARDS[i].title, x + 16, y + 66);
 			gc->SetFont(wxFont(wxFontInfo(11)), ui::dim());
 			double yy = y + 88;
-			for (const wxString& line : ui::wrap(gc, U(KEY_CARDS[i].line), 180)) {
+			for (const wxString& line : ui::wrap(gc, ui::platformKeys(U(KEY_CARDS[i].line)), 180)) {
 				gc->DrawText(line, x + 16, yy);
 				yy += 15;
 			}
@@ -886,7 +886,7 @@ struct TourStep {
 
 std::vector<TourStep> buildTour() {
 	auto text = [](const char* utf8) {
-		const wxString s = U(utf8);
+		const wxString s = ui::platformKeys(U(utf8));
 		return [s](const TourState&) { return s; };
 	};
 	auto caps = [](std::vector<wxString> k) { return [k](const TourState&) { return k; }; };
@@ -1145,7 +1145,7 @@ private:
 
 		// Progress: a caption, a bar, and a close cross.
 		gc->SetFont(wxFont(wxFontInfo(10).Bold()), accent);
-		const wxString caption = wxString::Format("GUIDED TOUR  ·  %d OF %d", step + 1, (int)steps.size());
+		const wxString caption = wxString::Format(wxString::FromUTF8("GUIDED TOUR  \u00B7  %d OF %d"), step + 1, (int)steps.size());
 		if (paint) gc->DrawText(caption, pad, y);
 		const wxRect closeR(CARD_W - pad - 18, (int)y - 3, 22, 22);
 		if (paint) {

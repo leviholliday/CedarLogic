@@ -12,6 +12,7 @@
 #include "Settings.h"
 #include "RenderMode.h"
 #include "render/RenderStyle.h"
+#include "UiKit.h"
 
 #include <wx/dialog.h>
 #include <wx/scrolwin.h>
@@ -461,7 +462,7 @@ LibraryChoice ShowLibraryDialog(wxWindow* parent, const std::string& currentId) 
 			if (!q.empty() && !d.name.Lower().Contains(q)) continue;
 			const int gates = gateCount(library::circuitPath(d.id));
 			wxString sub = friendlyTime(d.modified);
-			if (gates >= 0) sub = wxString::Format("%d gate%s · ", gates, gates == 1 ? "" : "s") + sub;
+			if (gates >= 0) sub = wxString::Format("%d gate%s", gates, gates == 1 ? "" : "s") + wxString::FromUTF8(" \u00B7 ") + sub;
 			Row r;
 			r.title = d.name;
 			r.subtitle = sub;
@@ -475,9 +476,15 @@ LibraryChoice ShowLibraryDialog(wxWindow* parent, const std::string& currentId) 
 	wxButton* importBtn = new wxButton(p.dlg, wxID_ANY, "Import File...");
 	wxButton* renameBtn = new wxButton(p.dlg, wxID_ANY, "Rename...");
 	wxButton* deleteBtn = new wxButton(p.dlg, wxID_ANY, "Delete");
-	importBtn->SetToolTip("Bring in a .cdl file as a copy  (⌘I)");
-	renameBtn->SetToolTip("Rename the selected circuit  (⌘R)");
-	deleteBtn->SetToolTip("Delete the selected circuit  (⌘⌫)");
+#ifdef __WXOSX__
+	importBtn->SetToolTip(wxString::FromUTF8("Bring in a .cdl file as a copy  (\u2318I)"));
+	renameBtn->SetToolTip(wxString::FromUTF8("Rename the selected circuit  (\u2318R)"));
+	deleteBtn->SetToolTip(wxString::FromUTF8("Delete the selected circuit  (\u2318\u232B)"));
+#else
+	importBtn->SetToolTip("Bring in a .cdl file as a copy  (Ctrl+I)");
+	renameBtn->SetToolTip("Rename the selected circuit  (Ctrl+R)");
+	deleteBtn->SetToolTip("Delete the selected circuit  (Ctrl+Backspace)");
+#endif
 	wxButton* cancelBtn = new wxButton(p.dlg, wxID_CANCEL, "Cancel");
 	wxButton* openBtn = new wxButton(p.dlg, wxID_OK, "Open");
 	openBtn->SetDefault();
@@ -566,8 +573,8 @@ wxString ShowVersionHistoryDialog(wxWindow* parent, const std::string& id) {
 	wxString restorePath;
 	const std::vector<library::Version> versions = library::versions(id);
 	if (versions.empty()) {
-		wxMessageBox("No earlier versions yet. A version is kept each time you save (Cmd+S), "
-		             "and every few minutes while you work.", "Version History",
+		wxMessageBox(ui::platformKeys("No earlier versions yet. A version is kept each time you save (Cmd+S), "
+		             "and every few minutes while you work."), "Version History",
 		             wxOK | wxICON_INFORMATION, parent);
 		return restorePath;
 	}
@@ -608,7 +615,7 @@ wxString ShowVersionHistoryDialog(wxWindow* parent, const std::string& id) {
 	for (const library::Version& v : versions) {
 		const int gates = gateCount(v.path);
 		wxString sub = agoText(v.when);
-		if (gates >= 0) sub = wxString::Format("%d gate%s · ", gates, gates == 1 ? "" : "s") + sub;
+		if (gates >= 0) sub = wxString::Format("%d gate%s", gates, gates == 1 ? "" : "s") + wxString::FromUTF8(" \u00B7 ") + sub;
 		Row r;
 		r.title = friendlyTime(v.when);
 		r.subtitle = sub;
@@ -630,8 +637,13 @@ wxString ShowVersionHistoryDialog(wxWindow* parent, const std::string& id) {
 	p.buttons->Add(closeBtn, 0, wxRIGHT, 8);
 	p.buttons->Add(restoreBtn, 0);
 
-	exportBtn->SetToolTip("Save a copy of the selected version  (⌘E)");
-	restoreBtn->SetToolTip("Bring the selected version back  (↩)");
+#ifdef __WXOSX__
+	exportBtn->SetToolTip(wxString::FromUTF8("Save a copy of the selected version  (\u2318E)"));
+	restoreBtn->SetToolTip(wxString::FromUTF8("Bring the selected version back  (\u21A9)"));
+#else
+	exportBtn->SetToolTip("Save a copy of the selected version  (Ctrl+E)");
+	restoreBtn->SetToolTip("Bring the selected version back  (Enter)");
+#endif
 
 	auto restore = [&]() {
 		const int i = p.list->Selection();

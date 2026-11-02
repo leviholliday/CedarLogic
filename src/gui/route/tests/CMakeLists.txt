@@ -22,7 +22,11 @@ if(BUILD_TESTING)
 
 	add_executable(test_route
 		test_route.cpp
-		"${PROJECT_SOURCE_DIR}/src/gui/route/TrunkRouter.cpp")
+		test_grid_route.cpp
+		test_layout.cpp
+		"${PROJECT_SOURCE_DIR}/src/gui/route/TrunkRouter.cpp"
+		"${PROJECT_SOURCE_DIR}/src/gui/route/GridRouter.cpp"
+		"${PROJECT_SOURCE_DIR}/src/gui/route/Layout.cpp")
 	target_include_directories(test_route PRIVATE "${PROJECT_SOURCE_DIR}/include/gui")
 	target_link_libraries(test_route PRIVATE doctest::doctest)
 	if(ENABLE_SANITIZERS AND NOT MSVC)

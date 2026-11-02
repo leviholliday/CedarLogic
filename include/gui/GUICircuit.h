@@ -19,7 +19,11 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#ifndef CL_NO_WX
 #include "wx/docview.h"
+#else
+#include "native/NoWxCompat.h"
+#endif
 #include "gl_wrapper.h"
 #include "klsMessage.h"
 #include "logic_values.h"
@@ -36,9 +40,20 @@ class OscopeFrame;
 class guiGate;
 class guiWire;
 
+#ifndef CL_NO_WX
 class GUICircuit : public wxDocument
 {
     DECLARE_DYNAMIC_CLASS(GUICircuit)
+#else
+// Without wxWidgets (the native Mac front end) the circuit is a plain model,
+// with its own undo stack in place of wxDocument's.
+class GUICircuit
+{
+public:
+	wxCommandProcessor* GetCommandProcessor() { return &commandProcessor; }
+private:
+	wxCommandProcessor commandProcessor;
+#endif
 	
 public:
     GUICircuit();
@@ -147,7 +162,19 @@ public:
 	// was grinding (overloaded) or nothing was running at all (stalled).
 	int lastLogicTime = 0;
 	
+	// A TO gate came, went or was renamed, so the oscope's list of signals is
+	// stale. Each front end supplies its own (the wx app refreshes the oscope
+	// window, when there is one).
+	void oscopeSignalsChanged();
+
+	// The student's notes for this circuit and whether its drawing is hidden
+	// (the website's DRAWING-NOTES.md 3.7, 3.8): saved with it, not undo steps.
+	// ("circuitNotes", not "notes": Version History's notes are another thing.)
+	std::string circuitNotes;
+	bool inkHidden = false;
+
 private:
+
 	GateMap gateList;
 	WireMap wireList;
 

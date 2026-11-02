@@ -66,9 +66,12 @@ struct Stroke {
 	float width;
 	Cap cap;
 	bool dashed;
-	Stroke() : width(1.0f), cap(Cap::Butt), dashed(false) {}
+	// Round joins where a polyline bends (a hand-drawn stroke); off, the
+	// backend's default. A backend that can't may ignore it.
+	bool roundJoin;
+	Stroke() : width(1.0f), cap(Cap::Butt), dashed(false), roundJoin(false) {}
 	explicit Stroke(const Color& c, float w = 1.0f)
-		: color(c), width(w), cap(Cap::Butt), dashed(false) {}
+		: color(c), width(w), cap(Cap::Butt), dashed(false), roundJoin(false) {}
 };
 
 // The primitive sink. Draw sites call these; a backend records/replays them.

@@ -36,6 +36,10 @@ void drawButton(wxGraphicsContext* gc, const wxRect& r, const wxString& label,
 double drawKeyCap(wxGraphicsContext* gc, double x, double y, double h,
                   const wxString& text, bool measureOnly = false);
 
+// Prose that names Mac keys ("Cmd+S", "Option", "press Return") in the
+// platform's words: unchanged on a Mac, "Ctrl+S", "Alt", "press Enter" elsewhere.
+wxString platformKeys(const wxString& text);
+
 // A shortcut such as {"Cmd", "Shift", "T"} as a row of caps, in the
 // platform's own spelling (⌘ ⇧ ⌥ ⌃ on a Mac). Returns the total width.
 double drawKeys(wxGraphicsContext* gc, double x, double y, double h,

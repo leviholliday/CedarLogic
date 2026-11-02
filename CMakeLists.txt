@@ -23,7 +23,17 @@ endif()
 # macOS: Set deployment target (arm64 only for now)
 if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
-    set(SPARKLE_ED_PUBLIC_KEY "" CACHE STRING "Sparkle EdDSA public key for auto-updates")
+endif()
+
+# One Ed25519 key signs updates for both Sparkle (macOS) and WinSparkle
+# (Windows). A build without it has its updater switched off: on macOS Sparkle
+# refuses to start keyless, and on Windows WinSparkle would install whatever
+# the feed pointed at without checking a signature.
+set(SPARKLE_ED_PUBLIC_KEY "" CACHE STRING "Sparkle EdDSA public key for auto-updates")
+if(SPARKLE_ED_PUBLIC_KEY)
+    set(CEDARLOGIC_UPDATES_SIGNED 1)
+else()
+    set(CEDARLOGIC_UPDATES_SIGNED 0)
 endif()
 
 # This configure file is where we store version info that's auto-populated by cmake configure.
@@ -34,7 +44,7 @@ endif()
 # reports. This is the Mac version's own feed, never upstream's: pointing at
 # upstream would let its updater replace this app with an older design.
 # The updater stays off until a release sets SPARKLE_ED_PUBLIC_KEY.
-set(CEDARLOGIC_PUBLISHER "Levi Holliday" CACHE STRING "Shown in the About window")
+set(CEDARLOGIC_PUBLISHER "CedarLogic" CACHE STRING "Shown in the About window")
 set(CEDARLOGIC_RELEASES_REPO "leviholliday/CedarLogic-Releases" CACHE STRING
     "Public GitHub repo holding release downloads and the update feed")
 set(CEDARLOGIC_APPCAST_URL
@@ -170,10 +180,15 @@ find_package(OpenGL REQUIRED)
 # macOS: Download and setup Sparkle framework for auto-updates
 if(APPLE)
     include(FetchContent)
-    set(SPARKLE_VERSION "2.6.4")
+    # 2.9.6: the newest that still runs on macOS 11, this app's minimum (2.10
+    # needs 12); it has the fixes for CVE-2025-10015/10016 (2.7.2) and later
+    # local-attack hardening. The hash is Sparkle's published SHA-256. The
+    # native Mac app pins its own copy in mac/build.sh.
+    set(SPARKLE_VERSION "2.9.6")
     FetchContent_Declare(
         Sparkle
         URL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+        URL_HASH SHA256=52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(Sparkle)
@@ -277,7 +292,7 @@ set_source_files_properties(${SKIA_SRC_FILES} PROPERTIES
 # include/gui/EmbeddedRes.h); everything else in res/ is still read from disk.
 file(GLOB EMBED_ICONS RELATIVE "${PROJECT_SOURCE_DIR}/res" "${PROJECT_SOURCE_DIR}/res/icons/*.svg")
 embed_resources(EMBEDDED_RES_CPP "${PROJECT_SOURCE_DIR}/res"
-    cl_gatedefs.xml ${EMBED_ICONS})
+    cl_gatedefs.xml samples/practice.cdl ${EMBED_ICONS})
 list(APPEND SRC_FILES "${EMBEDDED_RES_CPP}")
 
 # macOS: Add Objective-C++ sources
@@ -400,6 +415,8 @@ if(WIN32)
     # offer. Linked explicitly rather than relying on wininet.h's self-link
     # pragma, so the Windows build cannot turn on a missing-library surprise.
     target_link_libraries(CedarLogic PRIVATE wininet)
+    # WinAppearance.cpp sets the dark title bar through DWM.
+    target_link_libraries(CedarLogic PRIVATE dwmapi)
     # Stage the DLL beside the exe. It was only handled by install(), so a plain
     # build produced a binary that could not start ("error while loading shared
     # libraries") until the DLL was copied by hand.
@@ -493,7 +510,7 @@ if(APPLE)
     )
 
     # Copy icon into Resources (not in res/ subdirectory)
-    set(MACOS_ICON "${CMAKE_SOURCE_DIR}/res/macos/CedarLogic.icns")
+    set(MACOS_ICON "${CMAKE_SOURCE_DIR}/mac/App/CedarLogic.icns")
     set_source_files_properties(${MACOS_ICON} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
     )
@@ -508,9 +525,6 @@ if(APPLE)
             "${CMAKE_SOURCE_DIR}/res/cl_gatedefs.xml"
             "${CMAKE_SOURCE_DIR}/res/LICENSE.txt"
             "$<TARGET_BUNDLE_DIR:CedarLogic>/Contents/Resources/res/"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/res/bitmaps"
-            "$<TARGET_BUNDLE_DIR:CedarLogic>/Contents/Resources/res/bitmaps"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/res/help"
             "$<TARGET_BUNDLE_DIR:CedarLogic>/Contents/Resources/res/help"
@@ -590,7 +604,7 @@ set(CPACK_PACKAGE_VENDOR "Cedarville University")
 # set(CPACK_PACKAGE_VERSION_MINOR "${CEDARLOGIC_MINOR}")
 # set(CPACK_PACKAGE_VERSION_PATCH "${CEDARLOGIC_PATCH}")
 if(APPLE)
-    set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/res/macos/CedarLogic.icns)
+    set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/mac/App/CedarLogic.icns)
 else()
     set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/cmake\\\\InstallSmall.bmp)
 endif()
@@ -620,7 +634,7 @@ if(APPLE)
     set(CPACK_DMG_FORMAT "UDZO")
     set(CPACK_BUNDLE_NAME "CedarLogic")
     set(CPACK_BUNDLE_PLIST "${CMAKE_SOURCE_DIR}/res/macos/Info.plist.in")
-    set(CPACK_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/res/macos/CedarLogic.icns")
+    set(CPACK_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/mac/App/CedarLogic.icns")
     # The Applications symlink comes for free, but on its own it is only an icon
     # sitting next to another icon: nothing says to drag one onto the other, and
     # opening the app where it lies is the easier thing to do. That copy runs

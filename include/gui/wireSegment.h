@@ -32,7 +32,7 @@ public:
 
 	// Hold the orientation of the wire segment.  Once it is initialized,
 	//	the orientation does not change.
-	bool verticalSeg;
+	bool verticalSeg = false;
 
 	//Whenever "begin" or "end" are changed, calcBBox() must be called
 	// to re-build the bounding box.
@@ -51,7 +51,7 @@ public:
 	map < GLfloat, vector < long > > intersects;
 
 	// ID for this seg in its parent map
-	long id;
+	long id = 0;
 
 	wireSegment();
 

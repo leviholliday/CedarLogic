@@ -1,0 +1,95 @@
+// Stand-ins for the handful of wxWidgets types the shared model and command
+// code name, for the native Mac front end (CL_NO_WX). They do what those
+// classes do for this code and nothing more: a command with Do/Undo, and a
+// processor with an undo stack.
+
+#ifndef CL_NOWXCOMPAT_H
+#define CL_NOWXCOMPAT_H
+
+#ifndef CL_NO_WX
+#error "NoWxCompat.h is only for the native (CL_NO_WX) build"
+#endif
+
+#include <memory>
+#include <string>
+#include <vector>
+
+typedef std::string wxString;
+
+class wxCommand {
+public:
+	wxCommand(bool canUndo = false, const wxString& name = wxString()) : canUndo(canUndo), name(name) {}
+	virtual ~wxCommand() = default;
+	virtual bool Do() = 0;
+	virtual bool Undo() = 0;
+	virtual bool CanUndo() const { return canUndo; }
+	virtual wxString GetName() const { return name; }
+private:
+	bool canUndo;
+	wxString name;
+};
+
+// Owns every command it's given. Submit runs it and keeps it for undo; Store
+// keeps one that has already been applied. A new command drops the redo stack.
+class wxCommandProcessor {
+public:
+	bool Submit(wxCommand* cmd, bool storeIt = true) {
+		if (cmd == nullptr) return false;
+		if (!cmd->Do()) { delete cmd; return false; }
+		if (storeIt) Store(cmd); else delete cmd;
+		return true;
+	}
+	void Store(wxCommand* cmd) {
+		if (cmd == nullptr) return;
+		redoStack.clear();
+		undoStack.emplace_back(cmd);
+		if (undoStack.size() > kLimit) undoStack.erase(undoStack.begin());
+		changed = true;
+		stored++;
+	}
+	bool Undo() {
+		if (undoStack.empty()) return false;
+		std::unique_ptr<wxCommand> cmd = std::move(undoStack.back());
+		undoStack.pop_back();
+		cmd->Undo();
+		redoStack.push_back(std::move(cmd));
+		changed = true;
+		return true;
+	}
+	bool Redo() {
+		if (redoStack.empty()) return false;
+		std::unique_ptr<wxCommand> cmd = std::move(redoStack.back());
+		redoStack.pop_back();
+		cmd->Do();
+		undoStack.push_back(std::move(cmd));
+		changed = true;
+		return true;
+	}
+	bool CanUndo() const { return !undoStack.empty(); }
+	size_t UndoCount() const { return undoStack.size(); }
+	size_t RedoCount() const { return redoStack.size(); }
+	bool CanRedo() const { return !redoStack.empty(); }
+	wxString GetUndoName() const { return undoStack.empty() ? wxString() : undoStack.back()->GetName(); }
+	wxString GetRedoName() const { return redoStack.empty() ? wxString() : redoStack.back()->GetName(); }
+	void ClearCommands() { undoStack.clear(); redoStack.clear(); }
+	// Forget the step a Redo would do again (one just undone that was never
+	// really made: a paste or a new gate taken back off the pointer).
+	void DropRedo() { if (!redoStack.empty()) redoStack.pop_back(); }
+	// The step an Undo would take back, and the one a Redo would do again
+	// (just after an undo, the one it undid).
+	wxCommand* GetUndoCommand() const { return undoStack.empty() ? nullptr : undoStack.back().get(); }
+	wxCommand* GetRedoCommand() const { return redoStack.empty() ? nullptr : redoStack.back().get(); }
+	// Whether anything was done or undone since the flag was last cleared
+	// (the document's "edited" dot).
+	bool changed = false;
+	// Steps stored since the processor was made: at the full history the
+	// count stays put as each new step drops the oldest, so this tells a
+	// new step from none (cl_edit_steps_made).
+	unsigned long StepsMade() const { return stored; }
+private:
+	unsigned long stored = 0;
+	static const size_t kLimit = 500;
+	std::vector<std::unique_ptr<wxCommand>> undoStack, redoStack;
+};
+
+#endif  // CL_NOWXCOMPAT_H

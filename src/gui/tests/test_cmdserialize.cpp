@@ -92,6 +92,16 @@ TEST_CASE("parse consumes the leading keyword and fields") {
 	CHECK(cw.hotspot == "OUT_3");
 }
 
+TEST_CASE("a gate name with spaces round-trips") {
+	CreateGate cg{9, "3x8 Decoder Chip", 22.5f, 26.5f};
+	CreateGate back;
+	REQUIRE(parse(emit(cg), back));
+	CHECK(back.gid == 9);
+	CHECK(back.gateType == "3x8 Decoder Chip");
+	CHECK(back.x == doctest::Approx(22.5));
+	CHECK(back.y == doctest::Approx(26.5));
+}
+
 TEST_CASE("keyword returns the leading token the dispatcher matches on") {
 	CHECK(keyword("creategate 5 AND 1 2") == "creategate");
 	CHECK(keyword("connectwire 3 7 IN_0") == "connectwire");
@@ -135,4 +145,47 @@ TEST_CASE("createwire round-trips its id list and both connections") {
 	CHECK(out.conn2.wireId == cw.conn2.wireId);
 	CHECK(out.conn2.gateId == cw.conn2.gateId);
 	CHECK(out.conn2.hotspot == cw.conn2.hotspot);
+}
+
+TEST_CASE("SetParams: a value's tabs, newlines and backslashes come back exactly") {
+	// A label with two lines cut the copied line in two, and the half left threw
+	// out_of_range when read. Values now escape \ tab newline and CR.
+	const std::string text = "two\nlines\twith a tab, C:\\path\\new \\ and \r";
+	SetParams sp{3, {{"LABEL_TEXT", text}}, {{"JUNCTION_ID", "a\\b"}}};
+	const std::string line = emit(sp);
+	CHECK(line.find('\n') == std::string::npos);
+	CHECK(line == "setparams 3 1,1 LABEL_TEXT two\\nlines\\twith a tab, C:\\\\path\\\\new \\\\ and \\r\t"
+	              "JUNCTION_ID a\\\\b\t");
+	SetParams back;
+	REQUIRE(parse(line, back));
+	CHECK(back.guiParams["LABEL_TEXT"] == text);
+	CHECK(back.logicParams["JUNCTION_ID"] == "a\\b");
+
+	// A backslash not starting an escape reads as itself (as before escapes).
+	SetParams old;
+	REQUIRE(parse("setparams 3 1,0 LABEL_TEXT C:\\x\t", old));
+	CHECK(old.guiParams["LABEL_TEXT"] == "C:\\x");
+}
+
+TEST_CASE("damaged lines read without throwing, hanging or running past their end") {
+	// Counts far beyond what the line holds: stop at its end.
+	SetParams sp;
+	REQUIRE(parse("setparams 3 4000000000,4000000000 A", sp));
+	CHECK(sp.guiParams.size() == 1);
+	CHECK(sp.guiParams["A"] == "");
+	SetParams cut;
+	REQUIRE(parse("setparams 3 1,0 LABEL_TEXT", cut));
+	CHECK(cut.guiParams["LABEL_TEXT"] == "");
+
+	// A movewire cut after "connection" or "isect" looped for ever.
+	MoveWire mw;
+	REQUIRE(parse("movewire 1 hsegment 0 0,0,1,0 connection", mw));
+	CHECK(mw.segments.size() == 1);
+	CHECK(mw.segments[0].connections.empty());
+	MoveWire mw2;
+	REQUIRE(parse("movewire 1 vsegment 0 0,0,0,1 isect 0.5", mw2));
+	CHECK(mw2.segments.size() == 1);
+	MoveWire mw3;
+	REQUIRE(parse("movewire 1 hsegment", mw3));
+	CHECK(mw3.segments.size() <= 1);
 }

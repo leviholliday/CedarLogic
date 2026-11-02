@@ -1,0 +1,66 @@
+[
+ {
+  "name": "plain",
+  "input": "Half adder: S = A xor B, C = A and B.",
+  "normalized": "Half adder: S = A xor B, C = A and B.",
+  "written": true,
+  "node": "(notes \"Half adder: S = A xor B, C = A and B.\")"
+ },
+ {
+  "name": "CRLF and CR to LF",
+  "input": "line 1\r\nline 2\rline 3",
+  "normalized": "line 1\nline 2\nline 3",
+  "written": true,
+  "node": "(notes \"line 1\nline 2\nline 3\")"
+ },
+ {
+  "name": "controls removed, tab kept",
+  "input": "a\u0000b\u0007c\td\u001be\u007ff",
+  "normalized": "abc\tdef",
+  "written": true,
+  "node": "(notes \"abc\tdef\")"
+ },
+ {
+  "name": "leading BOM dropped",
+  "input": "\ufeffhello",
+  "normalized": "hello",
+  "written": true,
+  "node": "(notes \"hello\")"
+ },
+ {
+  "name": "quotes, backslash and <",
+  "input": "He said \"x < y\" \\ <version>9.0</version>",
+  "normalized": "He said \"x < y\" \\ <version>9.0</version>",
+  "written": true,
+  "node": "(notes \"He said \\\"x <\\ y\\\" \\\\ <\\version>9.0<\\/version>\")"
+ },
+ {
+  "name": "unicode kept",
+  "input": "\u00e9 \u00fc \u4e2d\u6587 \ud83d\ude00 \u2028 nbsp:\u00a0.",
+  "normalized": "\u00e9 \u00fc \u4e2d\u6587 \ud83d\ude00 \u2028 nbsp:\u00a0.",
+  "written": true,
+  "node": "(notes \"\u00e9 \u00fc \u4e2d\u6587 \ud83d\ude00 \u2028 nbsp:\u00a0.\")"
+ },
+ {
+  "name": "only whitespace: not written",
+  "input": " \n\t \n",
+  "normalized": " \n\t \n",
+  "written": false
+ },
+ {
+  "name": "lone surrogate becomes U+FFFD",
+  "input": "a\ud83db",
+  "normalized": "a\ufffdb",
+  "written": true,
+  "node": "(notes \"a\ufffdb\")"
+ },
+ {
+  "name": "reader cap",
+  "input_repeat": [
+   "x",
+   200005
+  ],
+  "normalized_length": 200000,
+  "written": true
+ }
+]

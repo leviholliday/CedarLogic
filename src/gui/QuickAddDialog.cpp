@@ -7,6 +7,7 @@
    a picker looks like.
 *****************************************************************************/
 
+#include "UiKit.h"
 #include "QuickAddDialog.h"
 #include "GateLibrary.h"
 #include "Settings.h"
@@ -232,7 +233,7 @@ QuickAddDialog::QuickAddDialog(wxWindow* parent)
 	topSizer->Add(head, 0, wxLEFT | wxRIGHT | wxTOP, 22);
 
 	wxStaticText* hint = new wxStaticText(this, wxID_ANY,
-		"Type to search, then press Return. The gate follows your mouse onto the canvas.");
+		ui::platformKeys("Type to search, then press Return. The gate follows your mouse onto the canvas."));
 	hint->SetForegroundColour(dimColour());
 	topSizer->Add(hint, 0, wxLEFT | wxRIGHT | wxTOP, 22);
 

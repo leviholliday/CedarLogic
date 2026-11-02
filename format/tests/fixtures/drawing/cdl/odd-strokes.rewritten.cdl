@@ -1,0 +1,12 @@
+(cedarlogic
+  (version 3)
+  (generator "hand-written")
+  (notes "first notes wins")
+  (page 0
+    (drawing 1
+      (stroke pen ink 0.25 "AAgDA")
+      (stroke pen blue 0.5 "8DwE")
+      (stroke pen ink 0.02 "8DwE" "z")
+      (stroke pen ink 0.3 "8DwEEE" "AB")
+      (stroke pen ink 0.3 "8DwE" "g")
+      (stroke highlighter pink 2 "AAoBA"))))

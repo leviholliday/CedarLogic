@@ -53,6 +53,10 @@ std::vector<Version> versions(const std::string& id);
 
 void remove(const std::string& id);
 
+// On first run, put the built-in practice circuit (res/samples/practice.cdl,
+// three tabs of gates to play with) into the library.
+void seedSamples();
+
 }  // namespace library
 
 #endif

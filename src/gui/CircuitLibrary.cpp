@@ -4,6 +4,7 @@
 *****************************************************************************/
 
 #include "CircuitLibrary.h"
+#include "EmbeddedRes.h"
 
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
@@ -139,6 +140,20 @@ void remove(const std::string& id) {
 	const wxString trash = root() + wxFILE_SEP_PATH + ".Trash";
 	wxFileName::Mkdir(trash, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
 	wxRenameFile(docDir(id), trash + wxFILE_SEP_PATH + wxString::FromUTF8(id.c_str()), true);
+}
+
+void seedSamples() {
+	// Once per machine, not once per launch: someone who deletes the sample
+	// circuit has said they are done with it, so it must not come back.
+	const wxString marker = root() + wxFILE_SEP_PATH + ".samples-seeded";
+	if (wxFileName::FileExists(marker)) return;
+	const cl::res::Blob blob = cl::res::find("samples/practice.cdl");
+	if (blob.ok()) {
+		const std::string id = create("CedarLogic Practice");
+		wxFile out(circuitPath(id), wxFile::write);
+		if (out.IsOpened()) out.Write(blob.data, blob.size);
+	}
+	wxFile(marker, wxFile::write);
 }
 
 }  // namespace library

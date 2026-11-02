@@ -65,6 +65,11 @@ RouteResult TrunkRouter::route(const RouteInput &in) const {
 		for (int i = (int)in.pins.size() - 1; i >= 0; i--) {
 			const Pin &v = in.pins[i];
 			if (std::min(v.y, centery) != std::max(v.y, centery)) {
+				// Id 2 is the trunk's. With two pins the branches are 0 and 1;
+				// a third branch (a third pin, or a RAM's DATA_IN_n and
+				// DATA_OUT_n, two pins on one spot) took id 2 and replaced the
+				// trunk, leaving branches with nothing joining them.
+				if (nextId == 2) nextId = 3;
 				Segment s;
 				s.id = nextId; s.vertical = true;
 				s.bx = s.ex = v.x;
@@ -80,11 +85,15 @@ RouteResult TrunkRouter::route(const RouteInput &in) const {
 		}
 		out.segments.push_back(trunk);
 		for (Segment &s : branches) out.segments.push_back(s);
-		out.nextId = 3;
+		out.nextId = std::max(nextId, 3L);
 		return out;
 	}
 
-	if (oneVertical != twoVertical) {
+	// The L-bend joins exactly two pins. With more (a third pin added, then
+	// the wire straightened) it used to route pins 0 and 1 only: the rest were
+	// left on no segment, still connected in memory but dropped by the next
+	// save. Those take case A's trunk, which reaches every pin.
+	if (oneVertical != twoVertical && in.pins.size() == 2) {
 		// Case C: one vertical, one horizontal -> an L-bend (ids 0 and 1).
 		const int verticalConn = oneVertical ? 0 : 1;
 		const int horizontalConn = oneVertical ? 1 : 0;
@@ -123,6 +132,8 @@ RouteResult TrunkRouter::route(const RouteInput &in) const {
 	trunk.by = miny; trunk.ey = maxy;
 
 	std::vector<Segment> branches;
+	// Id 0 is the trunk's (as id 2 is in the case above).
+	if (nextId < 1) nextId = 1;
 	for (int i = (int)in.pins.size() - 1; i >= 0; i--) {
 		const Pin &v = in.pins[i];
 		if (std::min(v.x, centerx) != std::max(v.x, centerx)) {

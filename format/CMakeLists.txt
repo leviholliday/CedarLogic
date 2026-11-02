@@ -16,6 +16,8 @@ add_library(CircuitFile STATIC
 	"${PROJECT_SOURCE_DIR}/circuit_file_io.hpp"
 	"${PROJECT_SOURCE_DIR}/legacy_cdl.cpp"
 	"${PROJECT_SOURCE_DIR}/legacy_cdl.hpp"
+	"${PROJECT_SOURCE_DIR}/ink.cpp"
+	"${PROJECT_SOURCE_DIR}/ink.hpp"
 	"${PROJECT_SOURCE_DIR}/numeric.cpp"
 	"${PROJECT_SOURCE_DIR}/numeric.hpp"
 	"${PROJECT_SOURCE_DIR}/migrate.cpp"
@@ -64,7 +66,7 @@ if(BUILD_TESTING)
 	endif()
 
 	add_executable(test_format tests/test_format.cpp tests/test_legacy.cpp
-		tests/test_migrate.cpp tests/test_fixtures.cpp)
+		tests/test_migrate.cpp tests/test_fixtures.cpp tests/test_ink.cpp)
 	target_link_libraries(test_format PRIVATE doctest::doctest CircuitFile)
 	# Let the fixture test find the committed real-world .cdl files by absolute path.
 	target_compile_definitions(test_format PRIVATE

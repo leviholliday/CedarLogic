@@ -6,6 +6,7 @@
 #include <cmath>
 using namespace std;
 #include "logic_gate.h"
+#include <climits>
 #include "logic_circuit.h"
 
 // ******************************** Register GATE ***********************************
@@ -53,6 +54,9 @@ Gate_REGISTER::Gate_REGISTER() : Gate_PASS() {
 
 // Handle gate events:
 void Gate_REGISTER::gateProcess( void ) {
+	// No bits, nothing to hold (a file can set INPUT_BITS to 0; shifting
+	// then wrote the top bit of an empty bus).
+	if( inBits == 0 ) return;
 	vector< StateType > outBus;
 	StateType carryOut = ZERO; // Assume that carry out is reset.
 
@@ -109,7 +113,9 @@ void Gate_REGISTER::gateProcess( void ) {
 				outBus = ulong_to_bus( currentValue, inBits );
 			} else {
 				// Increment the counter:
-				currentValue = (currentValue + 1) % (maxCount + 1);
+				// (A MAX_COUNT of the largest number has no count past it:
+				// maxCount + 1 is 0, and dividing by it ended the app.)
+				currentValue = (maxCount == ULONG_MAX) ? currentValue + 1 : (currentValue + 1) % (maxCount + 1);
 				outBus = ulong_to_bus( currentValue, inBits );
 			}
 		}
@@ -371,7 +377,7 @@ void Gate_JKFF::gateProcess( void ) {
 		}
 	} else if( isRisingEdge("clock") ) {
 		if( !J && !K ) {
-			currentState = currentState; // Hold
+			// Hold: currentState keeps its value.
 		} else if( !J && K ) {
 			currentState = ZERO; // Reset
 		} else if( J && !K ) {

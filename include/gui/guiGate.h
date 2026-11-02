@@ -23,14 +23,33 @@ class guiWire;
 #include <sstream>
 #include <string>
 #include <fstream>
+#ifndef CL_NO_WX
 #include "wx/glcanvas.h"
+#else
+// The native Mac front end builds the model without wxWidgets; the GL types
+// the geometry uses come from the plain OpenGL header.
+#include "gl_wrapper.h"
+#endif
 #include "logic_values.h"
+#include "logic_params.h"
 #include "XMLParser.h"
 #include "klsCollisionChecker.h"
 #include "klsMessage.h"
+#ifndef CL_NO_WX
 #include "wx/docview.h"
-
 #include "RamPopupDialog.h"
+#else
+class wxCommandProcessor;
+// No RAM editor window in the native front end yet: a stand-in the RAM gate
+// can talk to that does nothing.
+class RamPopupDialog {
+public:
+	void updateGridDisplay() {}
+	void notifyAllChanged() {}
+	void Destroy() {}
+	void Show(bool) {}
+};
+#endif
 
 using namespace std;
 
@@ -128,6 +147,7 @@ public:
 	virtual void doParamsDialog( void* gc, wxCommandProcessor* wxcmd );
 	// Set and get param virtual functions, simply assigns a string
 	virtual void setGUIParam( string paramName, string value ) {
+		if( paramName == "angle" ) value = normalizedAngle(value);
 		gparams[paramName] = value;
 		if( paramName == "angle" ) {
 			// Update the matrices and bounding box:
@@ -136,12 +156,30 @@ public:
 		}
 	};
 	virtual string getGUIParam( string paramName ) { return gparams[paramName]; };
+	// An angle as a number of degrees in [0, 360). A paste or file can carry
+	// anything: "nan" left the gate's matrix unset, and a huge angle lost its
+	// digits as a float, so it saved differently each time.
+	static string normalizedAngle( const string& value );
 	map < string, string >* getAllGUIParams() { return &gparams; };
 	virtual void setLogicParam( string paramName, string value ) {
-		lparams[paramName] = value;
+		lparams[paramName] = boundedGateParameter(paramName, value);   // as the engine has it
 	};
 	virtual string getLogicParam( string paramName ) { return lparams[paramName]; };
 	map < string, string >* getAllLogicParams() { return &lparams; };
+
+	// Locked in place (a teacher's starter parts): the GUI param LOCKED, only
+	// ever "true" -- unlocking takes it off, so an unlocked part saves exactly
+	// as before, and older versions keep it without acting on it. Read with
+	// find: getGUIParam("LOCKED") would add an empty one, which v2.x and v1.x
+	// can't read back.
+	bool isLocked() const {
+		map < string, string >::const_iterator it = gparams.find("LOCKED");
+		return it != gparams.end() && it->second == "true";
+	};
+	void setLocked( bool locked ) {
+		if (locked) gparams["LOCKED"] = "true";
+		else gparams.erase("LOCKED");
+	};
 
 	// Extra (name, value) params a gate type persists beyond its gparams/lparams
 	// -- the model-serialization counterpart of saveGateTypeSpecifics(). The base
@@ -378,12 +416,12 @@ public:
 	void drawToScene(cl::render::Scene& scene,
 	                 const cl::render::RenderStyle& style) override;
 
-	void setGUIParam( string paramName, string value );
-	void setLogicParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
+	void setLogicParam( string paramName, string value ) override;
 
 	// Toggle the output button on and off:
 	string getState() { return getLogicParam("TOGGLE_STATE"); };
-	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y );
+	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y ) override;
 
 protected:
 	int renderInfo_outputNum;
@@ -395,10 +433,10 @@ public:
 	guiGateKEYPAD();
 	void drawToScene(cl::render::Scene& scene,
 	                 const cl::render::RenderStyle& style) override;
-	void setLogicParam( string paramName, string value );
+	void setLogicParam( string paramName, string value ) override;
 
 	// Toggle the output button on and off:
-	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y );
+	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y ) override;
 protected:
 	GLLine2f renderInfo_valueBox;
 private:
@@ -410,8 +448,8 @@ public:
 	guiGateREGISTER();
 	void drawToScene(cl::render::Scene& scene,
 	                 const cl::render::RenderStyle& style) override;
-	void setGUIParam( string paramName, string value );
-	void setLogicParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
+	void setLogicParam( string paramName, string value ) override;
 protected:
 	GLLine2f renderInfo_valueBox;
 	GLdouble renderInfo_diffx;
@@ -444,7 +482,7 @@ public:
 	// The B&W markers (minimap/print) depend on the driving net's state, so fold
 	// it into the geometry hash or the thumbnail caches a stale marker.
 	unsigned long long geometryHash() const override;
-	void setGUIParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
 protected:
 	GLLine2f renderInfo_ledBox;
 };
@@ -465,7 +503,7 @@ public:
 	                 const cl::render::RenderStyle& style) override;
 
 	// Recalculate the label's bounding box:
-	void calcBBox( void );
+	void calcBBox( void ) override;
 	
 	// A convenience function that translates
 	// TEXT_HEIGHT parameter into a GLdouble:
@@ -480,7 +518,7 @@ public:
 	// A custom setParam function is required because
 	// the object must resize it's bounding box 
 	// each time the LABEL_TEXT or TEXT_HEIGHT parameter is set.
-	void setGUIParam( string paramName, string value );
+	void setGUIParam( string paramName, string value ) override;
 
 private:
 	// Draw anchor of the label text, in model space (calcBBox keeps it in sync).
@@ -503,12 +541,12 @@ public:
 	                 const cl::render::RenderStyle& style) override;
 
 	// Recalculate the gate's bounding box:
-	void calcBBox( void );
+	void calcBBox( void ) override;
 	
 	// A custom setParam function is required because
 	// the object must resize it's bounding box 
 	// each time the JUNCTION_ID parameter is set.
-	void setLogicParam( string paramName, string value );
+	void setLogicParam( string paramName, string value ) override;
 
 private:
 	string textString = "Text";

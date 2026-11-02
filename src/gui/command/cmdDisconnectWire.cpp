@@ -2,6 +2,7 @@
 #include "cmdDisconnectWire.h"
 #include "../GUICircuit.h"
 #include "../guiGate.h"
+#include "../guiWire.h"
 #include "cmdConnectWire.h"
 #include "cmdSerialize.h"
 
@@ -24,6 +25,7 @@ bool cmdDisconnectWire::Do() {
 
 	guiGate* gate = gCircuit->getGate(gateId);
 	std::string hotspotPal = gate->getHotspotPal(hotspot);
+	shapeBefore = gCircuit->getWire(wireId)->getSegmentMap();
 
 	if (hotspotPal != "") {
 		cmdConnectWire::sendMessagesToDisconnect(gCircuit, wireId, gateId, hotspotPal);
@@ -45,6 +47,9 @@ bool cmdDisconnectWire::Undo() {
 		cmdConnectWire::sendMessagesToConnect(gCircuit, wireId, gateId, hotspotPal, noCalcShape);
 	}
 	cmdConnectWire::sendMessagesToConnect(gCircuit, wireId, gateId, hotspot, noCalcShape);
+	// Reconnecting routes the wire afresh (deleting a part, then Undo, moved
+	// its wires' bends); give it back the shape it had.
+	if (!shapeBefore.empty()) gCircuit->getWire(wireId)->setSegmentMap(shapeBefore);
 
 	return true;
 }

@@ -19,6 +19,11 @@
 #include "QuickAddDialog.h"
 #include "klsClipboard.h"
 #include "guiWire.h"
+#include "CircuitEdits.h"
+#include "route/GridRouter.h"
+#include "route/Layout.h"
+#include <map>
+#include <set>
 #include "render/Scene.h"
 #include "render/RenderStyle.h"
 #ifdef WITH_SKIA
@@ -101,11 +106,12 @@ GUICanvas::GUICanvas(wxWindow *parent, GUICircuit* gCircuit, wxWindowID id,
 
 #ifdef __WXOSX__
 	// Suppress macOS bonk sound for keys handled in OnKeyDown
-	Bind(wxEVT_CHAR, [](wxKeyEvent& evt) {
+	Bind(wxEVT_CHAR, [this](wxKeyEvent& evt) {
+		// Every bare key OnKeyDown's switch handles; add new ones here too.
+		static const wxString handled = "aAcCdDrRsStTvVxX +=-";
 		int key = evt.GetKeyCode();
-		if (key == 'a' || key == 'A' || key == 'r' || key == 'R' ||
-			key == 'c' || key == 'C' ||
-			key == WXK_SPACE || key == '+' || key == '=' || key == '-') {
+		const bool previewKey = tidy.active && (key == WXK_RETURN || key == WXK_TAB || key == WXK_ESCAPE);
+		if (!evt.CmdDown() && !evt.AltDown() && ((key < 128 && handled.Find((wxChar)key) != wxNOT_FOUND) || previewKey)) {
 			// Swallow — already handled in OnKeyDown
 		} else {
 			evt.Skip();
@@ -206,7 +212,7 @@ void GUICanvas::removeWire(unsigned long wireId) {
 	collisionChecker.update();
 
 	// Release ID's owned by the wire.
-	for (int busLineId : wire->getIDs()) {
+	for (IDType busLineId : wire->getIDs()) {
 		auto thisWire = wireList.find(busLineId);
 		if (thisWire != wireList.end()) {
 			wireList.erase(thisWire);
@@ -515,6 +521,7 @@ bool GUICanvas::renderSkiaLive() {
 		self->drawOverlaysInto(s);
 		self->drawEmptyHintInto(s, style, screenT, logicalW, logicalH);
 		if (renderMode().simView) self->drawSimBarInto(s, screenT, logicalW, logicalH);
+		if (self->tidy.active) self->drawTidyBannerInto(s, screenT, logicalW, logicalH);
 	};
 	const cl::render::Color bg = style.background();
 	const unsigned int clearARGB =
@@ -634,6 +641,23 @@ void GUICanvas::drawOverlaysInto(cl::render::Scene& scene) {
 	};
 
 	drawSignalFlowInto(scene);
+
+	// Tidy Up preview: where things were, faintly, under where they're going.
+	if (tidy.active) {
+		const Color ghost(accent.r, accent.g, accent.b, 0.35f);
+		for (size_t i = 0; i + 3 < tidy.ghostRects.size(); i += 4) {
+			const float l = tidy.ghostRects[i], b = tidy.ghostRects[i + 1];
+			const float rr = tidy.ghostRects[i + 2], t = tidy.ghostRects[i + 3];
+			Point pts[4] = { Point(l, b), Point(l, t), Point(rr, t), Point(rr, b) };
+			scene.polyline(pts, 4, Stroke(ghost, 1.0f), true);
+		}
+		std::vector<Point> segs;
+		for (size_t i = 0; i + 3 < tidy.ghostLines.size(); i += 4) {
+			segs.push_back(Point(tidy.ghostLines[i], tidy.ghostLines[i + 1]));
+			segs.push_back(Point(tidy.ghostLines[i + 2], tidy.ghostLines[i + 3]));
+		}
+		if (!segs.empty()) scene.lines(&segs[0], segs.size(), Stroke(Color(accent.r, accent.g, accent.b, 0.22f), 1.0f));
+	}
 	if (renderMode().simView && !simPaused() && !overlayFadeTimer->IsRunning()) {
 		flowLastTick = std::chrono::steady_clock::now();
 		overlayFadeTimer->Start(OVERLAY_FADE_TIMER_RATE_MS);
@@ -1091,6 +1115,7 @@ void GUICanvas::drawEmptyHintInto(cl::render::Scene& scene, const cl::render::Re
 #endif
 
 void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
+	if (tidy.active) finishTidy(true);   // clicking on keeps the preview
 	// In a split, clicking a pane is how you say which side you are working
 	// in -- the menus, toolbar and keyboard all follow the focused canvas.
 	if (MainFrame* mf = wxGetApp().mainframe)
@@ -1294,6 +1319,7 @@ void GUICanvas::mouseLeftDown(wxMouseEvent& event) {
 }
 
 void GUICanvas::mouseRightDown(wxMouseEvent& event) {
+	if (tidy.active) finishTidy(true);
 	GLPoint2f m = getMouseCoords();
 	vector < unsigned long >::iterator sGate;
 
@@ -1362,7 +1388,7 @@ void GUICanvas::mouseRightDown(wxMouseEvent& event) {
 		// Part of a selection with other things in it: the menu acts on all of it.
 		const bool inSelection = std::find(selWires.begin(), selWires.end(), menuWire->getID()) != selWires.end()
 		                         && selWires.size() + selGates.size() > 1;
-		std::vector<unsigned long> targets = inSelection ? selWires : std::vector<unsigned long>{ menuWire->getID() };
+		std::vector<unsigned long> targets = inSelection ? selWires : std::vector<unsigned long>{ static_cast<unsigned long>(menuWire->getID()) };
 		if (inSelection) {
 			for (unsigned long id : selGates) if (guiGate* g = getGate(id)) g->select();
 			for (unsigned long id : selWires) if (guiWire* w = getWire(id)) w->select();
@@ -2111,6 +2137,21 @@ void GUICanvas::cancelDrag() {
 }
 
 void GUICanvas::OnKeyDown(wxKeyEvent& event) {
+	if (tidy.active) {
+		switch (event.GetKeyCode()) {
+		case WXK_RETURN: case WXK_NUMPAD_ENTER: finishTidy(true); return;
+		case WXK_ESCAPE: finishTidy(false); return;
+		case WXK_TAB: { const int other = 1 - tidy.mode; finishTidy(false); startTidy(other); return; }
+		default: {
+			// A modifier on its own doesn't count. (Not case labels: off the Mac,
+			// WXK_RAW_CONTROL is WXK_CONTROL, and a switch can't list it twice.)
+			const int k = event.GetKeyCode();
+			if (k == WXK_SHIFT || k == WXK_CONTROL || k == WXK_ALT || k == WXK_RAW_CONTROL) { event.Skip(); return; }
+			finishTidy(true);   // anything else keeps it, then carries on
+			break;
+		}
+		}
+	}
 	if (renderMode().simView) {
 		MainFrame* mf = wxGetApp().mainframe;
 		switch (event.GetKeyCode()) {
@@ -2242,8 +2283,11 @@ void GUICanvas::OnKeyDown(wxKeyEvent& event) {
 	case 'S':
 	case 's':
 		// Straighten whatever wires are selected.
-		if (bareKey(event) && !this->isLocked()) {
-			const std::vector<unsigned long> ids = selectedWireIds();
+		if (bareKey(event) && !this->isLocked() && event.ShiftDown()) {
+			startTidy(appConfig().appSettings.tidyMode);
+		} else if (bareKey(event) && !this->isLocked()) {
+			std::vector<unsigned long> ids = selectedWireIds();
+			if (ids.empty()) ids = wiresOfSelectedGates();
 			if (!ids.empty()) straightenWires(ids);
 		}
 		break;
@@ -2370,6 +2414,16 @@ void GUICanvas::duplicateSelection() {
 	if (!text.empty()) startPaste( cb.pasteText( gCircuit, this, text, false ) );
 }
 
+void GUICanvas::selectAll() {
+	if (currentDragState != DRAG_NONE || isWithinPaste) return;
+	selectedGates.clear();
+	selectedWires.clear();
+	for (auto& g : gateList) if (g.second) { g.second->select(); selectedGates.push_back(g.first); }
+	for (auto& w : wireList) if (w.second) { w.second->select(); selectedWires.push_back(w.first); }
+	markSelectionChanged();
+	Refresh();
+}
+
 // The pasted gates follow the mouse until the next click drops them.
 void GUICanvas::startPaste( cmdPasteBlock* cmd ) {
 	pasteCommand = cmd;
@@ -2400,25 +2454,20 @@ void GUICanvas::startPaste( cmdPasteBlock* cmd ) {
 		thisGate++;
 	}
 	ref = false;
-	// Try to drag by the top-left-most gate
+	// Drag by the gate nearest the top-left corner. gateList is unordered, so
+	// ties go to the lower id -- otherwise the anchor (and where the block
+	// lands under the mouse) could change from one paste to the next.
 	double minMagnitude = 0.0;
 	thisGate = gateList.begin();
 	while (thisGate != gateList.end()) {
-		GLPoint2f temp;
 		if ((thisGate->second)->isSelected()) {
-			if (ref) {
-				(thisGate->second)->getGLcoords(temp.x, temp.y);
-				float diffx = gatecoord.x - minPoint.x, diffy = gatecoord.y - minPoint.y;
-				double newMag = (diffx * diffx) + (diffy * diffy);
-				if (newMag < minMagnitude) {
-					minMagnitude = newMag;
-					gatecoord = temp;
-					snapToGateID = (thisGate->first);
-				}
-			} else {
-				(thisGate->second)->getGLcoords(gatecoord.x, gatecoord.y);
-				float diffx = gatecoord.x - minPoint.x, diffy = gatecoord.y - minPoint.y;
-				minMagnitude = (diffx * diffx) + (diffy * diffy);
+			GLPoint2f temp;
+			(thisGate->second)->getGLcoords(temp.x, temp.y);
+			float diffx = temp.x - minPoint.x, diffy = temp.y - minPoint.y;
+			double mag = (diffx * diffx) + (diffy * diffy);
+			if (!ref || mag < minMagnitude || (mag == minMagnitude && thisGate->first < snapToGateID)) {
+				minMagnitude = mag;
+				gatecoord = temp;
 				snapToGateID = (thisGate->first);
 				ref = true;
 			}
@@ -2550,18 +2599,44 @@ void GUICanvas::zoomOut() {
 // Straighten every wire in `ids` as one undo step. Shared by the right-click
 // menu and the S key.
 void GUICanvas::straightenWires(const std::vector<unsigned long>& ids) {
-	std::vector<klsCommand*> steps;
-	for (unsigned long id : ids) {
-		guiWire* w = getWire(id);
-		if (w == nullptr) continue;
-		const auto before = w->getSegmentMap();
-		straightenWireAvoiding(w);
-		steps.push_back( new cmdWireSegDrag( gCircuit, this, id, before, w->getSegmentMap() ) );
-	}
+	std::vector<klsCommand*> steps = routeWiresTogether(ids);
 	if (steps.size() == 1) submitCommand(steps[0]);
 	else if (!steps.empty()) submitCommand( new cmdPasteBlock( steps, "Straighten Wires" ) );
 	collisionChecker.update();
 	Refresh();
+}
+
+// Lay out `ids` together with the page-wide router (route/GridRouter.h): every
+// gate is in the way and every other wire stays put. A wire it can't route gets
+// the old one-wire straighten. Returns one before/after step per wire, already
+// applied.
+std::vector<klsCommand*> GUICanvas::routeWiresTogether(const std::vector<unsigned long>& ids) {
+	std::vector<klsCommand*> steps;
+	for (WireReshape& w : rerouteWires(ids))
+		steps.push_back( new cmdWireSegDrag( gCircuit, this, w.id, w.before, w.after ) );
+	return steps;
+}
+
+std::vector<WireReshape> GUICanvas::rerouteWires(const std::vector<unsigned long>& ids,
+                                                 const std::set<unsigned long>* movedGates) {
+	return edits::rerouteWires(this, ids, movedGates);
+}
+
+void GUICanvas::straightenAll() {
+	std::vector<unsigned long> ids;
+	for (const auto& w : wireList) if (w.second != nullptr) ids.push_back(w.first);
+	std::sort(ids.begin(), ids.end());
+	straightenWires(ids);
+}
+
+// Every wire attached to a selected gate.
+std::vector<unsigned long> GUICanvas::wiresOfSelectedGates() const {
+	std::set<unsigned long> ids;
+	for (const auto& g : gateList) {
+		if (g.second == nullptr || !g.second->isSelected()) continue;
+		for (const auto& c : g.second->getConnections()) if (c.second != nullptr) ids.insert(c.second->getID());
+	}
+	return std::vector<unsigned long>(ids.begin(), ids.end());
 }
 
 // Every wire currently selected.
@@ -2573,55 +2648,81 @@ std::vector<unsigned long> GUICanvas::selectedWireIds() const {
 }
 
 void GUICanvas::straightenWireAvoiding(guiWire* wire) {
-	// Every other wire's segments, gathered once.
-	std::vector<wireSegment> others;
-	for (auto& we : wireList)
-		if (we.second != wire)
-			for (const auto& s : we.second->getSegmentMap()) others.push_back(s.second);
+	edits::straightenWireAvoiding(this, wire);
+}
 
-	// How crowded this wire is: length it runs alongside other wires, weighted
-	// by closeness -- fully on top counts in full, fading to nothing at
-	// CLEARANCE apart -- so wires end up with real space between them, not
-	// just technically not touching. Crossings don't count; those are readable.
-	const float CLEARANCE = 2.0f;   // world units (4 grid squares)
-	auto overlap = [&]() {
-		float total = 0.0f;
-		for (const auto& me : wire->getSegmentMap()) {
-			const wireSegment& a = me.second;
-			const bool ah = a.isHorizontal();
-			for (const wireSegment& b : others) {
-				if (b.isHorizontal() != ah) continue;
-				const float gap = ah ? std::fabs(a.begin.y - b.begin.y) : std::fabs(a.begin.x - b.begin.x);
-				if (gap >= CLEARANCE) continue;
-				const float along = ah
-					? std::min(a.end.x, b.end.x) - std::max(a.begin.x, b.begin.x)
-					: std::min(a.end.y, b.end.y) - std::max(a.begin.y, b.begin.y);
-				if (along > 0.0f) total += along * (1.0f - gap / CLEARANCE);
-			}
-		}
-		return total;
-	};
+void GUICanvas::startTidy(int mode, bool preview) {
+	if (tidy.active) finishTidy(false);
+	if (isLocked() || currentDragState != DRAG_NONE || isWithinPaste) return;
+	using namespace cl::route;
 
-	wire->straightenRoute();
-	float best = overlap();
-	float pos, lo, hi;
-	if (best <= 1e-3f || !wire->trunkRange(pos, lo, hi)) return;
+	edits::TidyPlan plan = edits::applyTidy(this, mode);
+	TidyState t;
+	t.mode = mode;
+	t.moves = std::move(plan.moves);
+	t.wires = std::move(plan.wires);
+	t.ghostRects = std::move(plan.ghostRects);
+	t.ghostLines = std::move(plan.ghostLines);
+	collisionChecker.update();
+	if (t.moves.empty() && t.wires.empty()) { Refresh(); return; }
 
-	// Nearest grid positions first, alternating sides, strictly between the
-	// outermost pins so every branch keeps a real length.
-	float bestPos = pos;
-	const float step = 0.5f;
-	for (int k = 1; k * step < (hi - lo); k++) {
-		for (int side = 1; side >= -1; side -= 2) {
-			const float p = pos + side * k * step;
-			if (p <= lo + 1e-3f || p >= hi - 1e-3f) continue;
-			wire->routeWithTrunkAt(p);
-			const float o = overlap();
-			if (o < best - 1e-3f) { best = o; bestPos = p; }
-			if (best <= 1e-3f) return;
-		}
+	if (!preview) {
+		submitCommand( new cmdTidy( gCircuit, this, t.moves, t.wires ) );
+		Refresh();
+		return;
 	}
-	wire->routeWithTrunkAt(bestPos);
+	t.active = true;
+	tidy = std::move(t);
+	SetFocus();
+	Refresh();
+}
+
+void GUICanvas::finishTidy(bool keep) {
+	if (!tidy.active) return;
+	TidyState t = std::move(tidy);
+	tidy = TidyState();
+	if (keep) {
+		submitCommand( new cmdTidy( gCircuit, this, t.moves, t.wires ) );
+	} else {
+		// Gates back first, so each wire's old shape is trimmed to where its
+		// pins really are.
+		for (const cmdTidy::GateMove& m : t.moves)
+			if (guiGate* g = getGate(m.id)) g->setGLcoords(m.fromX, m.fromY, true);
+		for (const WireReshape& w : t.wires)
+			if (guiWire* wire = getWire(w.id)) wire->setSegmentMap(w.before);
+		collisionChecker.update();
+	}
+	Refresh();
+}
+
+void GUICanvas::drawTidyBannerInto(cl::render::Scene& scene, const cl::render::Transform& screenT,
+                                   float W, float H) {
+	using cl::render::Point;
+	using cl::render::Color;
+	using cl::render::measuredTextWidth;
+	scene.setViewport(screenT);
+	auto P = [H](float x, float y) { return Point(x, H - y); };
+	const char* lead = "Tidy Up preview";
+	const char* rest = tidy.mode == 1
+		? "Return keeps it  \u00b7  Esc puts it back  \u00b7  Tab: keep my layout instead"
+		: "Return keeps it  \u00b7  Esc puts it back  \u00b7  Tab: full rearrange instead";
+	const float px = 13.0f, pad = 14.0f, gapW = 12.0f;
+	const float wLead = measuredTextWidth(lead, px), wRest = measuredTextWidth(rest, px);
+	const float w = pad + wLead + gapW + wRest + pad, h = 32.0f;
+	const float x = std::max(8.0f, (W - w) / 2.0f), y = 12.0f;
+	// A dark pill in both themes, like a HUD over the canvas.
+	std::vector<Point> pts;
+	const float r = h / 2.0f;
+	const float cx[2] = { x + w - r, x + r };
+	for (int c = 0; c < 2; c++)
+		for (int i = 0; i <= 12; i++) {
+			const float a = (-90.0f + 180.0f * c + 15.0f * i) * 3.14159265f / 180.0f;
+			pts.push_back(P(cx[c] + r * std::cos(a), y + r + r * std::sin(a)));
+		}
+	scene.fillPolygon(&pts[0], pts.size(), Color(0.10f, 0.11f, 0.13f, 0.94f));
+	const float ty = y + (h - px) / 2.0f;
+	scene.text(P(x + pad, ty), lead, px, Color(1.0f, 1.0f, 1.0f, 1.0f));
+	scene.text(P(x + pad + wLead + gapW, ty), rest, px, Color(1.0f, 1.0f, 1.0f, 0.68f));
 }
 
 bool GUICanvas::tryFinishConnection() {
@@ -2647,91 +2748,11 @@ bool GUICanvas::tryFinishConnection() {
 }
 
 klsCommand * GUICanvas::createGateWireConnectionCommand(IDType gateId, const string &hotspot, IDType wireId) {
-
-	guiGate *gate = getGate(gateId);
-	guiWire *wire = getWire(wireId);
-	if (gate == nullptr || wire == nullptr) return nullptr;
-
-	// Make sure not already connected.
-	if (gate->isConnected(hotspot) &&
-		gate->getConnection(hotspot) == wire) {
-		return nullptr;
-	}
-
-	cmdConnectWire *command = new cmdConnectWire(gCircuit, wireId, gateId, hotspot);
-
-	if (command->validateBusLines()) {
-		return command;
-	}
-	else {
-		delete command;
-		return nullptr;
-	}
+	return edits::gateWireConnection(gCircuit, this, gateId, hotspot, wireId);
 }
 
 klsCommand * GUICanvas::createGateConnectionCommand(IDType gate1Id, const string &hotspot1, IDType gate2Id, const string &hotspot2) {
-
-	guiGate *gate1 = getGate(gate1Id);
-	guiGate *gate2 = getGate(gate2Id);
-	if (gate1 == nullptr || gate2 == nullptr) return nullptr;
-
-	// Don't connect a hotspot to itself.
-	if (gate1 == gate2 && hotspot1 == hotspot2) {
-		return nullptr;
-	}
-
-	// Make sure not already connected.
-	if (gate1->isConnected(hotspot1) &&
-		gate2->isConnected(hotspot2) &&
-		gate1->getConnection(hotspot1) == gate2->getConnection(hotspot2)) {
-		return nullptr;
-	}
-
-	// Neither connected, so create wire.
-	if (!gate1->isConnected(hotspot1) &&
-		!gate2->isConnected(hotspot2)) {
-
-
-		gateHotspot *hs1 = gate1->getHotspot(hotspot1);
-		if (hs1 == nullptr) return nullptr;   // no such pin on this gate
-
-		vector<IDType> wireIds(hs1->getBusLines());
-
-		// Get the correct number of new, unique wire ids.
-		for (int i = 0; i < (int)wireIds.size(); i++) {
-			wireIds[i] = gCircuit->getNextAvailableWireID();
-		}
-
-		cmdConnectWire *connectwire =
-			new cmdConnectWire(gCircuit, wireIds[0], gate1Id, hotspot1);
-
-		cmdConnectWire *connectwire2 =
-			new cmdConnectWire(gCircuit, wireIds[0], gate2Id, hotspot2);
-
-		cmdCreateWire *createWire =
-			new cmdCreateWire(this, gCircuit, wireIds, connectwire, connectwire2);
-
-		if (createWire->validateBusLines()) {
-			return createWire;
-		}
-		else {
-			delete createWire;
-			return nullptr;
-		}
-	}
-	else {
-		
-		// One of the gates is connected.
-		if (gate1->isConnected(hotspot1)) {
-			return createGateWireConnectionCommand(gate2Id,
-				hotspot2, gate1->getConnection(hotspot1)->getID());
-		}
-		else if (gate2->isConnected(hotspot2)) {
-			return createGateWireConnectionCommand(gate1Id,
-				hotspot1, gate2->getConnection(hotspot2)->getID());
-		}
-		return nullptr;
-	}
+	return edits::gateConnection(gCircuit, this, gate1Id, hotspot1, gate2Id, hotspot2);
 }
 
 // One step clockwise on screen. The world is y-up, so the model matrix turns

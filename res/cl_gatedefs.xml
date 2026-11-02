@@ -2477,6 +2477,7 @@
 		<caption>Variable-Rate Square Wave Clock</caption>
 		<logic_type>CLOCK</logic_type>
 		<logic_param>HALF_CYCLE 5</logic_param>
+		<logic_param>MANUAL false</logic_param>
 		<output> <name>CLK</name>
 		          <point>4,0</point> 
 		</output>
@@ -2488,6 +2489,12 @@
 				<varname>LOGIC HALF_CYCLE</varname>
 # range tags list min,max:
 				<range>1,5000000</range>
+			</param>
+# On: the clock holds still and makes one full cycle each Step Clock (K).
+			<param>
+				<type>BOOL</type>
+				<label>Only on Step Clock</label>
+				<varname>LOGIC MANUAL</varname>
 			</param>
 		</param_dlg_data>
 		<shape>

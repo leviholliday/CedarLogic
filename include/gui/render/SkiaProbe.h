@@ -133,4 +133,15 @@ float measuredTextHeight(float pixelHeight);
 }  // namespace cl
 
 #endif  // WITH_SKIA
+
+#if !defined(WITH_SKIA) && defined(CL_NO_WX)
+// The native Mac front end measures text with Core Text instead.
+namespace cl {
+namespace render {
+float measuredTextWidth(const char* utf8, float pixelHeight);
+float measuredTextHeight(float pixelHeight);
+}  // namespace render
+}  // namespace cl
+#endif
+
 #endif  // CL_RENDER_SKIAPROBE_H

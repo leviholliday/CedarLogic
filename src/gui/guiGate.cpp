@@ -12,17 +12,22 @@
 #include "GateLibrary.h"
 #include <iomanip>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#ifndef CL_NO_WX
 #include "wx/wx.h"
 #include "MainApp.h"
-#include "klsCollisionChecker.h"
 #include "paramDialog.h"
+#endif
+#include "klsCollisionChecker.h"
 #include "guiWire.h"
 #include "render/Scene.h"
 #include "render/RenderStyle.h"
 #include "render/SkiaProbe.h"    // measuredTextWidth -- size text hit boxes to what renders
 
+#ifndef CL_NO_WX
 DECLARE_APP(MainApp)
+#endif
 
 guiGate::guiGate() : klsCollisionObject(COLL_GATE) {
 	myX = 1.0;
@@ -63,6 +68,24 @@ string guiGate::getGUIType() {
 
 
 // Update the position matrices, and
+string guiGate::normalizedAngle( const string& value ) {
+	char* end = nullptr;
+	const double a = strtod(value.c_str(), &end);
+	if (end == value.c_str() || !std::isfinite(a)) return "0";
+	double n = std::fmod(a, 360.0);
+	if (n < 0) n += 360.0;
+	// In the form a save writes and a reopen reads back, so the two agree:
+	// six digits ("1.0000001" saved as itself, then read as 1, changed the
+	// file), nothing too small to write (1e-320 couldn't be read back).
+	ostringstream oss;
+	oss << n;
+	n = std::strtod(oss.str().c_str(), nullptr);
+	if (std::fabs(n) < 1e-6 || n >= 360.0) n = 0;
+	oss.str("");
+	oss << n;
+	return oss.str();
+}
+
 // update the world-space bounding box and hotspots.
 // This is called once whenever the gate's position
 // or angle changes.
@@ -73,7 +96,7 @@ void guiGate::updateBBoxes( bool noUpdateWires ) {
 
 	// Get the angle vars:
 	istringstream iss(gparams["angle"]);
-	GLfloat angle;
+	GLfloat angle = 0;
 	iss >> angle;
 
 	// Build the gate's model matrix directly (column-major) instead of
@@ -232,7 +255,7 @@ void guiGate::drawToScene(cl::render::Scene& scene,
 	// near-black/white line. Figma/Sketch-style: selection reads as a color,
 	// not a line-pattern squint.
 	const bool isSelectedNow = selected && style.showSelection;
-	Stroke s(style.gateStroke(GateKind::Generic), 1.0f);
+	Stroke s(style.gateStroke(GateKind::Generic), style.projectorOutline());
 	Stroke halo;
 	if (isSelectedNow) {
 		const Color a = style.accent();
@@ -296,8 +319,15 @@ void guiGate::drawToScene(cl::render::Scene& scene,
 }
 
 void guiGate::setGLcoords( float x, float y, bool noUpdateWires ) {
-	this->myX = x;
-	this->myY = y;
+	// A position that isn't a number is no position: stay put. (Far but
+	// finite is held at the doors instead -- the loader and a paste bring
+	// parts in to WORLD_LIMIT -- so that moves stay rigid.)
+	if (!std::isfinite(x) || !std::isfinite(y)) { updateBBoxes(noUpdateWires); return; }
+	// Kept to the precision a save writes (gl_defs.h savedPrecision), so its
+	// pins are where they will be after a reopen: rounding the part and its
+	// wire's end apart could land them a digit apart (-20.5357, -20.5358).
+	this->myX = (float)savedPrecision(x);
+	this->myY = (float)savedPrecision(y);
 
 	// Update the matrices and bounding box:
 	updateBBoxes(noUpdateWires);
@@ -491,20 +521,23 @@ string guiGate::checkHotspots( GLfloat x, GLfloat y, GLfloat delta ) {
 	mBox.extendRight( delta );
 	mouse.setBBox( mBox );
 
-	// Check if any hotspots hit the mouse:
+	// Of the hotspots that hit the mouse, the nearest (ties: the first by
+	// name). The hits come in a set ordered by address, so taking the first
+	// of them picked one of two close pins at random, run to run.
 	CollisionGroup results = this->checkSubsToObj( &mouse );
-	CollisionGroup::iterator rs = results.begin();
-	while( rs != results.end() ) {
-		// If there were any hotspots that hit, then return
-		// the first one to the caller:
-		if( (*rs)->getType() == COLL_GATE_HOTSPOT ) {
-			return ((gateHotspot*) *rs)->name;
+	gateHotspot* best = nullptr;
+	float bestDist = 0;
+	for( klsCollisionObject* hit : results ) {
+		if( hit->getType() != COLL_GATE_HOTSPOT ) continue;
+		gateHotspot* hs = (gateHotspot*) hit;
+		const GLPoint2f at = hs->getLocation();
+		const float d = (at.x - x) * (at.x - x) + (at.y - y) * (at.y - y);
+		if( best == nullptr || d < bestDist || (d == bestDist && hs->name < best->name) ) {
+			best = hs;
+			bestDist = d;
 		}
-
-		rs++;
 	}
-
-	return "";
+	return best != nullptr ? best->name : string();
 }
 
 
@@ -599,7 +632,7 @@ void guiGate::saveGate(XMLParser* xparse) {
 			if ((lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") &&
 				lg.dlgParams[i].name == pParams->first) found = true;
 		}
-		if (found) { pParams++; continue; }
+		if (found || lg.skipsLogicParam(pParams->first, pParams->second)) { pParams++; continue; }
 		xparse->openTag("lparam");
 		oss.str("");
 		oss << pParams->first << " " << pParams->second;
@@ -676,7 +709,7 @@ void guiGate::saveGateLegacy(XMLParser* xparse) {
 			if ((lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") &&
 				lg.dlgParams[i].name == pParams->first) found = true;
 		}
-		if (found) { pParams++; continue; }
+		if (found || lg.skipsLogicParam(pParams->first, pParams->second)) { pParams++; continue; }
 		xparse->openTag("lparam");
 		oss.str("");
 		oss << pParams->first << " " << pParams->second;
@@ -689,6 +722,9 @@ void guiGate::saveGateLegacy(XMLParser* xparse) {
 }
 
 void guiGate::doParamsDialog( void* gc, wxCommandProcessor* wxcmd ) {
+#ifdef CL_NO_WX
+	(void)gc; (void)wxcmd;   // the native front end has its own inspector
+#else
 	if (gateLibrary().libraries[libName][libGateName].dlgParams.size() == 0) return;
 #ifdef __WXOSX__
 	paramDialog* myDialog = new paramDialog("Parameters", gc, this, wxcmd);
@@ -700,6 +736,7 @@ void guiGate::doParamsDialog( void* gc, wxCommandProcessor* wxcmd ) {
 	paramDialog myDialog("Parameters", gc, this, wxcmd);
 	myDialog.SetFocus();
 	myDialog.ShowModal();
+#endif
 #endif
 }
 
@@ -923,6 +960,7 @@ void guiGateREGISTER::drawToScene(cl::render::Scene& scene,
 	using namespace cl::render;
 	guiGate::drawToScene(scene, style);   // outline + labels
 	if (!style.showLiveState) return;     // print/topology: no lit digits
+	const bool covered = style.covers(gateID);   // Predict: the digits are the answer
 
 	Transform t;
 	t.a = (float)mModel[0];  t.b = (float)mModel[1];
@@ -934,7 +972,8 @@ void guiGateREGISTER::drawToScene(cl::render::Scene& scene,
 	const float bx = renderInfo_valueBox.begin.x, by = renderInfo_valueBox.begin.y;
 	const float ex = renderInfo_valueBox.end.x,   ey = renderInfo_valueBox.end.y;
 	const Point box[] = {Point(bx, by), Point(bx, ey), Point(ex, ey), Point(ex, by)};
-	scene.polyline(box, 4, Stroke(style.gateStroke(GateKind::Generic), 1.0f), true);
+	scene.polyline(box, 4, Stroke(style.gateStroke(GateKind::Generic), style.projectorOutline()), true);
+	if (covered) { scene.popTransform(); return; }
 
 	// Seven-segment digits, mirroring draw()'s GL_LINES pairs. Red normally,
 	// blue when any input is unknown.
@@ -964,37 +1003,36 @@ void guiGateREGISTER::drawToScene(cl::render::Scene& scene,
 		if (c != '2' && c != 'C' && c != 'E' && c != 'F')  // BR
 			{ seg.push_back(Point(R, yB)); seg.push_back(Point(R, yM)); }
 	}
-	if (!seg.empty()) scene.lines(&seg[0], seg.size(), Stroke(segColor, 2.0f));
+	if (!seg.empty()) scene.lines(&seg[0], seg.size(), Stroke(segColor, 2.0f * style.projectorOutline()));
 	scene.popTransform();
 }
 
+// The low `digits` hex digits of a register's value, as it shows them. A
+// width past 32 bits asked for more than the 8 digits there are (substr threw,
+// and the app ended), and a value that isn't a number was read uninitialised.
+static string registerDigits( const string& value, int digits ) {
+	const unsigned int v = (unsigned int)strtoll(value.c_str(), nullptr, 10);
+	string out(8, '0');
+	for (int i = 0; i < 8; i++) out[7 - i] = "0123456789ABCDEF"[(v >> (i * 4)) & 0xF];
+	digits = digits < 1 ? 1 : digits > 8 ? 8 : digits;
+	return out.substr(8 - digits);
+}
+
 void guiGateREGISTER::setLogicParam( string paramName, string value ) {
-	int intVal;
+	value = boundedGateParameter(paramName, value);
 	if (paramName == "INPUT_BITS") {
 		// How many digits should I show? (min of 1)
 		istringstream iss( value );
-		iss >> renderInfo_numDigitsToShow;
-		renderInfo_numDigitsToShow = (int) ceil( ((double) renderInfo_numDigitsToShow) / 4.0 );
-		if (renderInfo_numDigitsToShow == 0) renderInfo_numDigitsToShow = 1;
-		if (getLogicParam("CURRENT_VALUE") != "") {
-			iss.clear(); iss.str( getLogicParam("CURRENT_VALUE") );
-			iss >> intVal;		
-	        ostringstream ossVal;
-	        for (int i=2*sizeof(int) - 1; i>=0; i--) {
-	            ossVal << "0123456789ABCDEF"[((intVal >> i*4) & 0xF)];
-	        }
-	        renderInfo_currentValue = ossVal.str().substr(ossVal.str().size()-renderInfo_numDigitsToShow,renderInfo_numDigitsToShow);
-		}
+		int bits = 0;
+		iss >> bits;
+		renderInfo_numDigitsToShow = (int) ceil( ((double) bits) / 4.0 );
+		if (renderInfo_numDigitsToShow < 1) renderInfo_numDigitsToShow = 1;
+		if (getLogicParam("CURRENT_VALUE") != "")
+			renderInfo_currentValue = registerDigits(getLogicParam("CURRENT_VALUE"), renderInfo_numDigitsToShow);
 	} else if (paramName == "UNKNOWN_OUTPUTS") {
 		renderInfo_drawBlue = (value == "true");
 	} else if (paramName == "CURRENT_VALUE") {
-		istringstream iss( value );
-		iss >> intVal;		
-        ostringstream ossVal;
-        for (int i=2*sizeof(int) - 1; i>=0; i--) {
-            ossVal << "0123456789ABCDEF"[((intVal >> i*4) & 0xF)];
-        }
-        renderInfo_currentValue = ossVal.str().substr(ossVal.str().size()-renderInfo_numDigitsToShow,renderInfo_numDigitsToShow);
+		renderInfo_currentValue = registerDigits(value, renderInfo_numDigitsToShow);
 	}
 	guiGate::setLogicParam(paramName, value);
 }
@@ -1068,8 +1106,14 @@ void guiGateLED::drawToScene(cl::render::Scene& scene,
 	t.c = (float)mModel[4];  t.d = (float)mModel[5];
 	t.e = (float)mModel[12]; t.f = (float)mModel[13];
 	scene.pushTransform(t);
-	const float x1 = renderInfo_ledBox.begin.x, y1 = renderInfo_ledBox.begin.y;
-	const float x2 = renderInfo_ledBox.end.x,   y2 = renderInfo_ledBox.end.y;
+	float x1 = renderInfo_ledBox.begin.x, y1 = renderInfo_ledBox.begin.y;
+	float x2 = renderInfo_ledBox.end.x,   y2 = renderInfo_ledBox.end.y;
+	if (style.simView && style.projector) {
+		// Projector mode: a bigger lit square, about its middle.
+		const float k = style.projectorLight(), cx = (x1 + x2) * 0.5f, cy = (y1 + y2) * 0.5f;
+		x1 = cx + (x1 - cx) * k; x2 = cx + (x2 - cx) * k;
+		y1 = cy + (y1 - cy) * k; y2 = cy + (y2 - cy) * k;
+	}
 
 	if (!style.showLiveState) {
 		// B&W schematic (print/export/minimap): box outline plus a distinct marker
@@ -1095,6 +1139,7 @@ void guiGateLED::drawToScene(cl::render::Scene& scene,
 		// background pure black is indistinguishable from the canvas itself.
 		Color c(0, 0, 0, 1);
 		if (style.simView) {
+			if (style.covers(gateID)) outputState = ZERO;   // Predict: dark until revealed
 			switch (outputState) {
 				case ONE:      c = Color(0.80f, 0.98f, 1.0f); break;   // lit: near-white cyan (bloom is an overlay)
 				case CONFLICT: c = style.simError(); break;
@@ -1167,8 +1212,11 @@ void guiLabel::drawToScene(cl::render::Scene& scene,
 		float cc = 1.0f - (float)SELECTED_LABEL_INTENSITY;
 		textColor = Color(1.0f, cc / 4.0f, cc / 4.0f, (float)SELECTED_LABEL_INTENSITY);
 	}
-	scene.text(Point(textPos.x, textPos.y), txt.c_str(),
-	           (float)getTextHeight() * TEXT_SKIA_SCALE, textColor);
+	// Projector mode: bigger, about the label's middle (textPos is its top left
+	// corner, measured from the middle).
+	const float k = style.simView ? style.projectorLabel() : 1.0f;
+	scene.text(Point(textPos.x * k, textPos.y * k), txt.c_str(),
+	           (float)getTextHeight() * TEXT_SKIA_SCALE * k, textColor);
 	scene.popTransform();
 }
 
@@ -1186,6 +1234,9 @@ void guiLabel::setGUIParam( string paramName, string value ) {
 
 			if( textHeight < 0 ) textHeight = -textHeight;
 			if( textHeight < 0.01 ) textHeight = 0.01;
+			// As tall as a page, at most: a huge height made the label's box
+			// huge, and an infinite one made it no box at all.
+			if( !(textHeight <= 1000) ) textHeight = 1000;
 			
 			ostringstream oss;
 			oss << textHeight;
@@ -1344,11 +1395,15 @@ guiGateRAM::~guiGateRAM(){
 
 
 void guiGateRAM::doParamsDialog( void* gc, wxCommandProcessor* wxcmd ){
+#ifdef CL_NO_WX
+	(void)gc; (void)wxcmd;
+#else
 	if( ramPopupDialog == NULL ){
 		ramPopupDialog = new RamPopupDialog( this, addressBits, (GUICircuit*)gc );
 		ramPopupDialog->updateGridDisplay();
 	}
 	ramPopupDialog->Show( true );
+#endif
 }
 
 //Saves the ram contents to the circuit file

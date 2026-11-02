@@ -8,14 +8,18 @@
    klsClipboard: handles copy and paste of blocks
 *****************************************************************************/
 
+#include <algorithm>
 #include <memory>
 #include "klsClipboard.h"
-#include "OscopeFrame.h"
 #include <fstream>
+#include <sstream>
 #include <map>
+#include <set>
 #include <unordered_map>   // removed .h  KAS
 
+#ifndef CL_NO_WX
 #include "MainApp.h"
+#endif
 #include "commands.h"
 #include "cmdSerialize.h"
 #include "cmdRegistry.h"
@@ -23,6 +27,7 @@
 #include "GUICircuit.h"
 #include "guiGate.h"
 #include "guiWire.h"
+#ifndef CL_NO_WX
 #include "wx/clipbrd.h"
 #include "wx/dataobj.h"
 
@@ -38,38 +43,62 @@ public:
 		if (valid) wxTheClipboard->Close();
 	}
 };
+#else
+// The native front end moves the text on and off the system clipboard itself
+// and says whether Shift is down.
+bool klsClipboard::shiftHeld = false;
+string klsClipboard::rewrittenText;
+#endif
 
 // Paste-specific tweak (Colin Broberg, 10/6/16): when a single gate is pasted,
 // auto-increment a trailing number on its JUNCTION_ID param so repeated pastes
 // don't collide, and rewrite the clipboard so the next paste keeps counting.
 // Skipped when the block holds more than one gate, or when Shift is held.
 // Mutates `line` (the setparams command text) in place.
+//
+// The number is counted up as text, so a name ending in more digits than an int
+// holds (stoi threw, and the app ended) still counts on: "link99" -> "link100".
+static bool bumpTrailingNumber(string &name) {
+	size_t i = name.size();
+	while (i > 0 && isdigit((unsigned char)name[i - 1])) i--;
+	if (i == name.size()) return false;
+	size_t k = name.size();
+	while (k > i && name[k - 1] == '9') name[--k] = '0';
+	if (k > i) name[k - 1]++;
+	else name.insert(i, "1");
+	return true;
+}
+
 static void autoIncrementJunctionId(string &line, const string &pasteText, bool rewriteClipboard) {
 	// More than one creategate in the block, or Shift held -> leave it alone.
-	if (pasteText.find("creategate", pasteText.find("creategate") + 1) != string::npos ||
-		wxGetKeyState(WXK_SHIFT)) {
+#ifdef CL_NO_WX
+	const bool shift = klsClipboard::shiftHeld;
+#else
+	const bool shift = wxGetKeyState(WXK_SHIFT);
+#endif
+	if (pasteText.find("creategate", pasteText.find("creategate") + 1) != string::npos || shift) {
 		return;
 	}
 
-	// Gather the run of digits at the end of the line. line always ends in a
-	// tab, so start one character before it.
-	string numEnd;
-	for (int i = line.length() - 2; i > 0; i--) {
-		if (isdigit(line[i])) numEnd = line[i] + numEnd;
-		else break;
-	}
-	if (numEnd == "" || line.find("JUNCTION_ID") == string::npos) return;
+	cmdser::SetParams d;
+	if (!cmdser::parse(line, d)) return;
+	auto junction = d.logicParams.find("JUNCTION_ID");
+	if (junction == d.logicParams.end() || !bumpTrailingNumber(junction->second)) return;
+	const string bumped = cmdser::emit(d);
 
-	string newPasteText = pasteText; // rewritten to the clipboard so subsequent pastes keep incrementing
-	line.erase(line.length() - 1 - numEnd.length(), numEnd.length() + 1);                  // drop the number and its trailing tab
-	newPasteText.erase(newPasteText.length() - 2 - numEnd.length(), numEnd.length() + 2);  // same, plus the newline
-
-	string s = to_string(stoi(numEnd) + 1) + "\t"; // the point of it all: bump the trailing number by 1
-	line += s;
-	newPasteText += s + "\n";
-	if (rewriteClipboard) wxTheClipboard->AddData(new wxTextDataObject(newPasteText));
+	// The next paste keeps counting: the same line in the clipboard's text, bumped.
+	const size_t at = pasteText.find(line);
+	string newPasteText = pasteText;
+	if (at != string::npos) newPasteText.replace(at, line.size(), bumped);
+	line = bumped;
+#ifdef CL_NO_WX
+	if (rewriteClipboard && at != string::npos) klsClipboard::rewrittenText = newPasteText;
+#else
+	if (rewriteClipboard && at != string::npos) wxTheClipboard->AddData(new wxTextDataObject(newPasteText));
+#endif
 }
 
+#ifndef CL_NO_WX
 cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanvas ) {
 	clipboardCtx clipboard;
 	if ( !clipboard.valid || !wxTheClipboard->IsSupported(wxDF_UNICODETEXT) ) {
@@ -80,9 +109,27 @@ cmdPasteBlock* klsClipboard::pasteBlock( GUICircuit* gCircuit, GUICanvas* gCanva
 	// Still open: the JUNCTION_ID bump in pasteText may rewrite it.
 	return pasteText( gCircuit, gCanvas, text.GetText().ToStdString(), true );
 }
+#endif
 
-cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& pasteText, bool useClipboard ) {
+// A pasted copy of a part locked in place comes unlocked: drop LOCKED from
+// the block's setparams lines (before the JUNCTION_ID bump, which reads the
+// end of the text).
+static string withoutLocks(const string& text) {
+	if (text.find("LOCKED") == string::npos) return text;
+	istringstream iss(text);
+	string out, line;
+	while (getline(iss, line, '\n')) {
+		cmdser::SetParams d;
+		if (cmdser::keyword(line) == "setparams" && cmdser::parse(line, d) && d.guiParams.erase("LOCKED"))
+			line = cmdser::emit(d);
+		out += line + "\n";
+	}
+	return out;
+}
+
+cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas, const string& rawText, bool useClipboard ) {
     vector < klsCommand* > cmdList;
+    const string pasteText = withoutLocks(rawText);
     {
     	if (pasteText.find('\n',0) == string::npos) return NULL;
     	istringstream iss(pasteText);
@@ -90,6 +137,11 @@ cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas
 		
 		TranslationMap gateids;
 		TranslationMap wireids;
+		// The gates and wires there before, to tell the pasted ones (the id
+		// maps keep only the newest for an id a damaged text names twice).
+		std::set<unsigned long> gatesBefore, wiresBefore;
+		for (const auto &g : *gCanvas->getGateList()) gatesBefore.insert(g.first);
+		for (const auto &w : *gCanvas->getWireList()) wiresBefore.insert(w.first);
     	while (getline( iss, temp, '\n' )) {
     		// The setparams line for a lone pasted gate gets its JUNCTION_ID
     		// bumped before the command is rebuilt (this also rewrites the
@@ -105,28 +157,42 @@ cmdPasteBlock* klsClipboard::pasteText( GUICircuit* gCircuit, GUICanvas* gCanvas
     		cg->setPointers( gCircuit, gCanvas, gateids, wireids );
     		cg->Do();
     	}
+		// The text may come from anywhere and be damaged. As steps of the paste
+		// (so Redo does them again): a pasted wire left holding fewer than two
+		// pins joins nothing and goes; one whose shape doesn't match the pins it
+		// holds is routed fresh from them.
+		std::vector<unsigned long> pasted;
+		for (const auto &w : *gCanvas->getWireList())
+			if (w.second != nullptr && !wiresBefore.count(w.first)) pasted.push_back(w.first);
+		for (unsigned long id : pasted) {
+			guiWire *wire = gCircuit->getWire(id);
+			if (wire == nullptr) continue;
+			if (wire->numConnections() < 2) {
+				klsCommand *gone = new cmdDeleteWire(gCircuit, gCanvas, id);
+				gone->Do();
+				cmdList.push_back(gone);
+				continue;
+			}
+			if (wire->isSoundShape()) continue;
+			const map < long, wireSegment > shape = wire->getSegmentMap();
+			wire->straightenRoute();
+			cmdList.push_back(new cmdMoveWire(gCircuit, id, shape, wire->getSegmentMap()));
+		}
+		// What was pasted is selected, so it moves as one.
 		gCanvas->unselectAllGates();
 		gCanvas->unselectAllWires();
-		TranslationMap::iterator gateWalk = gateids.begin();
-		while (gateWalk != gateids.end()) {
-			if (guiGate *g = gCircuit->getGate(gateWalk->second)) g->select();
-			gateWalk++;
-		}
-		TranslationMap::iterator wireWalk = wireids.begin();
-		while (wireWalk != wireids.end()) {
-			guiWire *wire = gCircuit->getWire(wireWalk->second);
-			if (wire != nullptr) {
-				wire->select();
-			}
-			wireWalk++;
-		}
-		gCircuit->getOscope()->UpdateMenu();
+		for (const auto &g : *gCanvas->getGateList())
+			if (g.second != nullptr && !gatesBefore.count(g.first)) g.second->select();
+		for (const auto &w : *gCanvas->getWireList())
+			if (w.second != nullptr && !wiresBefore.count(w.first)) w.second->select();
+		gCircuit->oscopeSignalsChanged();
     }
 
 	if (cmdList.size() > 0) return new cmdPasteBlock ( cmdList );
 	return NULL;
 }
 
+#ifndef CL_NO_WX
 void klsClipboard::copyBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires ) {
 	const string text = serializeBlock( gCircuit, gCanvas, gates, wires );
 	if (text.empty()) return;
@@ -134,6 +200,7 @@ void klsClipboard::copyBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector <
 	wxTheClipboard->AddData(new wxTextDataObject(text));
 	wxTheClipboard->Close();
 }
+#endif
 
 string klsClipboard::serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, vector < unsigned long > gates, vector < unsigned long > wires ) {
 	if (gates.size() == 0) return "";
@@ -185,13 +252,39 @@ string klsClipboard::serializeBlock( GUICircuit* gCircuit, GUICanvas* gCanvas, v
 			// get rid of it
 			wire->removeConnection( wireConns[i].gid, wireConns[i].connection );
 		}
+		// And no segment may still end on a pin outside the copy (removeConnection
+		// can leave one behind), or the paste has an end with no gate.
+		{
+			map < long, wireSegment > shape = wire->getSegmentMap();
+			bool trimmed = false;
+			for (auto &seg : shape) {
+				vector < wireConnection > &conns = seg.second.connections;
+				for (auto c = conns.begin(); c != conns.end(); ) {
+					if (std::find(gates.begin(), gates.end(), c->gid) == gates.end()) { c = conns.erase(c); trimmed = true; }
+					else ++c;
+				}
+			}
+			if (trimmed && !shape.empty()) wire->setSegmentMap(shape);
+		}
 		// Wire should now have a completely valid shape to copy, shove it on the vector
 		copyWires.push_back(std::move(wire));
 		wireWalk++;
 	}
 	// Now actually generate copy of wire
 	for (unsigned int i = 0; i < copyWires.size(); i++) {
-		vector < wireConnection > wconns = copyWires[i]->getConnections();
+		vector < wireConnection > wconns;
+		// Two pins in one spot (a RAM's DATA_IN_n and DATA_OUT_n) are joined
+		// together: connecting either connects both. Writing a connectwire for
+		// each made the paste connect each pin twice, and the doubled records
+		// later turned up as repeated (connect ...) lines in the saved file.
+		for (const wireConnection &c : copyWires[i]->getConnections()) {
+			guiGate *g = gCircuit->getGate(c.gid);
+			const string pal = g != nullptr ? g->getHotspotPal(c.connection) : string();
+			bool palWritten = false;
+			for (const wireConnection &k : wconns)
+				if (k.gid == c.gid && (k.connection == c.connection || (!pal.empty() && k.connection == pal))) palWritten = true;
+			if (!palWritten) wconns.push_back(c);
+		}
 		// A wire needs two ends to be worth copying, and the wire has to still
 		// be in the circuit for its bus ids to be readable. Neither was checked:
 		// a wire left with fewer than two connections read past the end of the

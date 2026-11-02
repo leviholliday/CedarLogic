@@ -17,6 +17,8 @@
 #include "render/RenderStyle.h"
 #include "route/WireRoute.h"
 #include "Settings.h"
+#include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <stack>
@@ -26,8 +28,10 @@
 #include "XMLParser.h"
 #include "gl_defs.h"
 
+#ifndef CL_NO_WX
 class MainApp;
 DECLARE_APP(MainApp)
+#endif
 
 // Returns distance from p1 to p2
 float lineMagnitude(GLPoint2f p1, GLPoint2f p2) {
@@ -100,6 +104,10 @@ void guiWire::addConnection(guiGate* iGate, string connection, bool openMode) {
 	// Fill all necessary items - need a pointer to the gate, an id for copy/paste
 	temp.gid = iGate->getID();
 	temp.connection = connection;
+	// A pin is held once. A damaged paste can connect the same pin twice; the
+	// second record outlived the first's removal and named a pin left free.
+	for (const wireConnection &c : connectPoints)
+		if (c.gid == temp.gid && c.connection == temp.connection) return;
 	connectPoints.push_back(temp);
 	if (openMode) return; // On open, don't calc shape until the seg tree is explicity set
 	if (connectPoints.size() < 3) { setVerticalBar = true; calcShape(); return; }
@@ -150,7 +158,19 @@ void guiWire::removeConnection(IDType gid, string connection) {
 			break;
 		}
 	}
-	if (connectPoints.size() < 2) return;
+	if (connectPoints.size() < 2) {
+		// Too few ends left to reshape around, but no segment may go on
+		// recording the pin: a save writes the records, and the reload would
+		// join it again.
+		this->detachSubObjects();
+		for (auto &seg : segMap) {
+			vector < wireConnection > &conns = seg.second.connections;
+			for (auto c = conns.begin(); c != conns.end(); )
+				c = (c->gid == gid && c->connection == connection) ? conns.erase(c) : c + 1;
+		}
+		calcBBox();
+		return;
+	}
 	this->detachSubObjects(); // prevent coll checker pointers from invalidating
 	// Now I need to find the segment with this thing and update the tree
 	long segID = 0; bool found = false;
@@ -225,9 +245,12 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 	const bool isBus = ids.size() != 1;
 
 	Stroke s;
-	s.width = (isBus ? 4.0f : 1.0f) * style.wireScale;
+	s.width = (isBus ? 4.0f : 1.0f) * style.wireScale * style.projectorWire();
 	bool simLit = false;   // Simulation View: this wire is on, so it glows
-	if (!style.colorOutput || !style.showLiveState) {
+	if (style.simView && style.coverOutputs) {
+		// Predict, then reveal: no wire gives a light's answer away.
+		s.color = style.simOff();
+	} else if (!style.colorOutput || !style.showLiveState) {
 		// Print/topology: black, weight carries bus vs net (state ignored).
 		s = style.wire(WireState::Low, isBus);
 	} else {
@@ -282,8 +305,9 @@ void guiWire::drawToScene(cl::render::Scene& scene,
 		// gate halo without losing that.
 		// Simulation View: a soft neon glow under wires that are on.
 		if (simLit) {
-			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.10f), s.width + 7.0f));
-			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.22f), s.width + 3.0f));
+			const float k = style.projectorWire();
+			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.10f), s.width + 7.0f * k));
+			scene.lines(&pts[0], pts.size(), Stroke(Color(s.color.r, s.color.g, s.color.b, 0.22f), s.width + 3.0f * k));
 		}
 		if (isSelectedNow) {
 			const Color ac = style.accent();
@@ -580,13 +604,135 @@ void guiWire::commitSegMap(map < long, wireSegment > newSegMap) {
 }
 
 void guiWire::setSegmentMap(map < long, wireSegment > newSegMap) {
+	// An empty shape has no head segment to read (begin() and rbegin() below
+	// would be undefined): keep whatever routing the wire already has.
+	if (newSegMap.empty()) return;
 	commitSegMap(std::move(newSegMap));
 	headSegment = ((segMap.begin())->first);
-	nextSegID = ((segMap.rbegin())->first) + 1;
+	// (An id of LONG_MAX, from damaged text, has no next.)
+	const long last = (segMap.rbegin())->first;
+	nextSegID = last < LONG_MAX ? last + 1 : last;
 	endSegDrag();
 };
 
 map < long, wireSegment > guiWire::getOldSegmentMap(void) { return oldSegMap; };
+
+// How close a pin or a touching run must be to count (the shapes a drag
+// leaves are a little off the grid).
+static const float kSoundSlack = 0.05f;
+
+bool guiWire::isSoundShape(const map < long, wireSegment > &shape, std::string *why) {
+	const char *flaw = nullptr;
+	if (connectPoints.size() >= 2 && shape.empty()) flaw = "it has no shape";
+	if (flaw == nullptr) flaw = segmentFlaw(shape);
+	if (flaw == nullptr) flaw = pinFlaw(shape);
+	if (flaw == nullptr) flaw = layoutFlaw(shape);
+	if (flaw != nullptr && why != nullptr) *why = flaw;
+	return flaw == nullptr;
+}
+
+const char *guiWire::segmentFlaw(const map < long, wireSegment > &shape) {
+	for (const auto &entry : shape) {
+		const wireSegment &s = entry.second;
+		// The loader renumbers ids past the limit, so one here (a paste) saved differently.
+		if (entry.first < 0 || entry.first > MAX_SEGMENT_ID) return "a segment's id is out of range";
+		if (!std::isfinite(s.begin.x) || !std::isfinite(s.begin.y) || !std::isfinite(s.end.x) || !std::isfinite(s.end.y))
+			return "a segment has an end that isn't a number";
+		if (s.isVertical() ? std::fabs(s.begin.x - s.end.x) > kSoundSlack : std::fabs(s.begin.y - s.end.y) > kSoundSlack)
+			return "a segment runs across its own direction";
+		for (const auto &x : s.intersects) {
+			if (!std::isfinite(x.first)) return "a crossing isn't at a number";
+			for (long other : x.second) {
+				if (other == entry.first || shape.count(other) == 0) return "a crossing names a segment that isn't there";
+				// Recorded on both runs: a one-sided crossing is lost or redrawn on
+				// the next load.
+				bool back = false;
+				for (const auto &y : shape.at(other).intersects)
+					for (long id : y.second) back = back || id == entry.first;
+				if (!back) return "a crossing is recorded on one run only";
+			}
+		}
+		// Two straight runs cross once at most.
+		std::vector<long> crossed;
+		for (const auto &x : s.intersects) crossed.insert(crossed.end(), x.second.begin(), x.second.end());
+		std::sort(crossed.begin(), crossed.end());
+		if (std::adjacent_find(crossed.begin(), crossed.end()) != crossed.end()) return "a crossing is recorded twice";
+		// A run of no length among others is merged away by the next load.
+		if (shape.size() > 1 && std::fabs(s.begin.x - s.end.x) <= EQUALRANGE && std::fabs(s.begin.y - s.end.y) <= EQUALRANGE)
+			return "a segment has no length";
+	}
+	return nullptr;
+}
+
+// Each held pin recorded once, on a segment reaching it; nothing else recorded.
+const char *guiWire::pinFlaw(const map < long, wireSegment > &shape) {
+	std::vector<bool> recorded(connectPoints.size(), false);
+	for (const auto &entry : shape) {
+		const wireSegment &s = entry.second;
+		for (const wireConnection &c : s.connections) {
+			size_t i = 0;
+			while (i < connectPoints.size() && !(connectPoints[i].gid == c.gid && connectPoints[i].connection == c.connection)) i++;
+			if (i == connectPoints.size()) return "it records a pin it doesn't hold";
+			if (recorded[i]) return "it records a pin twice";
+			recorded[i] = true;
+			guiGate *g = gCircuit != nullptr ? gCircuit->getGate(c.gid) : nullptr;
+			if (g == nullptr) return "it records a pin of a gate that isn't there";
+			float px = 0, py = 0;
+			g->getHotspotCoords(c.connection, px, py);
+			if (px < (std::min)(s.begin.x, s.end.x) - kSoundSlack || px > (std::max)(s.begin.x, s.end.x) + kSoundSlack ||
+			    py < (std::min)(s.begin.y, s.end.y) - kSoundSlack || py > (std::max)(s.begin.y, s.end.y) + kSoundSlack)
+				return "a segment records a pin it doesn't reach";
+		}
+	}
+	for (size_t i = 0; i < connectPoints.size(); i++)
+		if (!recorded[i] && !shape.empty()) return "a pin it holds is on no segment";
+	return nullptr;
+}
+
+const char *guiWire::layoutFlaw(const map < long, wireSegment > &shape) {
+	// No dead end: a segment with no pin joins at least two others (a run left
+	// where a pin was refused leads nowhere, and the next load trims it).
+	if (shape.size() > 1)
+		for (const auto &entry : shape) {
+			size_t joins = 0;
+			for (const auto &x : entry.second.intersects) joins += x.second.size();
+			if (entry.second.connections.empty() && joins < 2) return "a segment leads nowhere";
+		}
+	// One piece: segments that touch are joined (union-find over the pairs).
+	std::vector<const wireSegment *> segs;
+	for (const auto &entry : shape) segs.push_back(&entry.second);
+	std::vector<size_t> up(segs.size());
+	for (size_t i = 0; i < up.size(); i++) up[i] = i;
+	auto root = [&up](size_t i) {
+		while (up[i] != i) i = up[i] = up[up[i]];
+		return i;
+	};
+	for (size_t i = 0; i < segs.size(); i++)
+		for (size_t j = i + 1; j < segs.size(); j++) {
+			const wireSegment &a = *segs[i], &b = *segs[j];
+			const bool touch =
+				(std::min)((std::max)(a.begin.x, a.end.x), (std::max)(b.begin.x, b.end.x)) + kSoundSlack >= (std::max)((std::min)(a.begin.x, a.end.x), (std::min)(b.begin.x, b.end.x)) &&
+				(std::min)((std::max)(a.begin.y, a.end.y), (std::max)(b.begin.y, b.end.y)) + kSoundSlack >= (std::max)((std::min)(a.begin.y, a.end.y), (std::min)(b.begin.y, b.end.y));
+			if (touch) up[root(i)] = root(j);
+		}
+	for (size_t i = 1; i < segs.size(); i++)
+		if (root(i) != root(0)) return "it is in pieces";
+	// Two runs along one line that meet are one run: the merge a load does
+	// joins them.
+	for (size_t i = 0; i < segs.size(); i++)
+		for (size_t j = i + 1; j < segs.size(); j++) {
+			const wireSegment &a = *segs[i], &b = *segs[j];
+			if (a.isVertical() != b.isVertical()) continue;
+			const bool v = a.isVertical();
+			if (std::fabs(v ? a.begin.x - b.begin.x : a.begin.y - b.begin.y) > EQUALRANGE) continue;
+			const float alo = v ? (std::min)(a.begin.y, a.end.y) : (std::min)(a.begin.x, a.end.x);
+			const float ahi = v ? (std::max)(a.begin.y, a.end.y) : (std::max)(a.begin.x, a.end.x);
+			const float blo = v ? (std::min)(b.begin.y, b.end.y) : (std::min)(b.begin.x, b.end.x);
+			const float bhi = v ? (std::max)(b.begin.y, b.end.y) : (std::max)(b.begin.x, b.end.x);
+			if (alo <= bhi + EQUALRANGE && blo <= ahi + EQUALRANGE) return "two runs lie along one line";
+		}
+	return nullptr;
+}
 
 // Calculates a default three-segment shape for the wire, from source to destination, squared halfway
 void guiWire::calcShape() {
@@ -594,6 +740,9 @@ void guiWire::calcShape() {
 
 	// Get rid of the old shape
 	segMap.clear();
+	// The shape is new, so its numbering may start again: an id far out of
+	// range (a damaged paste) would otherwise be carried on into it.
+	if (nextSegID < 1 || nextSegID > MAX_SEGMENT_ID) nextSegID = 1;
 
 	// If there are less than 2 connect points then there is no reason to create a shape
 	if (connectPoints.size() < 2) return;
@@ -623,32 +772,46 @@ void guiWire::calcShape() {
 	{
 		float minx = FLT_MAX, maxx = -FLT_MAX, miny = FLT_MAX, maxy = -FLT_MAX;
 		for (const cl::route::Pin &p : in.pins) {
-			minx = std::min(minx, p.x); maxx = std::max(maxx, p.x);
-			miny = std::min(miny, p.y); maxy = std::max(maxy, p.y);
+			// Parenthesized: windows.h defines min and max as macros.
+			minx = (std::min)(minx, p.x); maxx = (std::max)(maxx, p.x);
+			miny = (std::min)(miny, p.y); maxy = (std::max)(maxy, p.y);
 		}
 		const bool v0 = in.pins[0].verticalHotspot, v1 = in.pins[1].verticalHotspot;
-		hasTrunk = (v0 == v1);
+		hasTrunk = (v0 == v1) || in.pins.size() > 2;   // mixed with 3+ pins: a vertical trunk (TrunkRouter case A)
 		const bool horizontalTrunk = v0 && v1 && miny != maxy;
 		lastTrunk = routed.trunkPos;
 		trunkLo = horizontalTrunk ? miny : minx;
 		trunkHi = horizontalTrunk ? maxy : maxx;
 	}
 
-	// Translate the routed topology back into the segment map: one wireSegment per
-	// routed segment, its connections resolved from pin indices and its junctions
-	// copied into the intersects map.
+	// Make sure the vertical bar is not reset unless I want it to be
+	setVerticalBar = false;
+	buildFromRoute(routed);
+}
+
+void guiWire::adoptRoute(const cl::route::RouteResult &routed) {
+	this->detachSubObjects(); // prevent coll checker pointers from invalidating
+	segMap.clear();
+	// A shape from the page-wide router has no single trunk to slide.
+	hasTrunk = false;
+	setVerticalBar = false;
+	buildFromRoute(routed);
+}
+
+// Translate a routed topology into the segment map: one wireSegment per routed
+// segment, its connections resolved from pin indices and its junctions copied
+// into the intersects map.
+void guiWire::buildFromRoute(const cl::route::RouteResult &routed) {
 	for (const cl::route::Segment &rs : routed.segments) {
 		wireSegment ws(GLPoint2f(rs.bx, rs.by), GLPoint2f(rs.ex, rs.ey), rs.vertical, rs.id);
-		for (int pinIdx : rs.pins) ws.connections.push_back(connectPoints[pinIdx]);
+		for (int pinIdx : rs.pins)
+			if (pinIdx >= 0 && pinIdx < (int)connectPoints.size()) ws.connections.push_back(connectPoints[pinIdx]);
 		for (const std::pair<float, long> &cr : rs.crossings)
 			ws.intersects[cr.first].push_back(cr.second);
 		ws.calcBBox();
 		segMap[rs.id] = ws;
 	}
 	nextSegID = routed.nextId;
-
-	// Make sure the vertical bar is not reset unless I want it to be
-	setVerticalBar = false;
 
 	// Create the bounding box for collision checking
 	mergeSegments();
@@ -663,8 +826,23 @@ bool guiWire::startSegDrag(klsCollisionObject* mouse) {
 	// If there are no segments then we shouldn't drag one
 	if (cg.size() == 0) return false;
 	this->detachSubObjects(); // prevent coll checker pointers from invalidating	
-	// Otherwise just grab the first one found and fix the connection points with new segments
+	// Take the segment nearest the pointer (ties: the lowest id), and fix the
+	// connection points with new segments. (The hits come in a set ordered by
+	// address: taking the first of them, at a corner where two runs meet,
+	// dragged one or the other at random, run to run.)
+	const GLPoint2f at((mouse->getBBox().getLeft() + mouse->getBBox().getRight()) / 2,
+	                   (mouse->getBBox().getBottom() + mouse->getBBox().getTop()) / 2);
+	auto distanceTo = [&at](const wireSegment* s) {
+		const float cx = (std::max)((std::min)(s->begin.x, s->end.x), (std::min)(at.x, (std::max)(s->begin.x, s->end.x)));
+		const float cy = (std::max)((std::min)(s->begin.y, s->end.y), (std::min)(at.y, (std::max)(s->begin.y, s->end.y)));
+		return (cx - at.x) * (cx - at.x) + (cy - at.y) * (cy - at.y);
+	};
 	CollisionGroup::iterator cgWalk = cg.begin();
+	for (CollisionGroup::iterator it = cg.begin(); it != cg.end(); ++it) {
+		const wireSegment *a = (wireSegment*)(*it), *b = (wireSegment*)(*cgWalk);
+		const float da = distanceTo(a), db = distanceTo(b);
+		if (da < db || (da == db && a->id < b->id)) cgWalk = it;
+	}
 	GLPoint2f vertex;
 	// Don't mess up the pointers; just add to this vector until we don't need the pointer anymore
 	vector < wireSegment > segsToAddWhenFound;
@@ -687,7 +865,7 @@ bool guiWire::startSegDrag(klsCollisionObject* mouse) {
 		}
 	}
 	((wireSegment*)(*cgWalk))->connections.clear();
-	currentDragSegment = ((wireSegment*)(*(cg.begin())))->id;
+	currentDragSegment = ((wireSegment*)(*cgWalk))->id;
 	for (unsigned int i = 0; i < segsToAddWhenFound.size(); i++) {
 		segMap[segsToAddWhenFound[i].id] = segsToAddWhenFound[i];
 	}
@@ -931,9 +1109,14 @@ void guiWire::mergeSegments() {
 			wireSegment* nSeg = &(walkNewSegs->second);
 			// Only merge with segs of same orientation
 			if (cSeg->isVertical() != nSeg->isVertical()) { walkNewSegs++; continue; }
-			// Now check channel, if not the same then don't bother
-			if (cSeg->isVertical() && (cSeg->begin.x != nSeg->begin.x)) { walkNewSegs++; continue; }
-			if (cSeg->isHorizontal() && (cSeg->begin.y != nSeg->begin.y)) { walkNewSegs++; continue; }
+			// Now check channel, if not the same then don't bother. "The same" within
+			// EQUALRANGE, as removeZeroLengthSegments judges length: a rotated part's
+			// pins can sit a few millionths off the grid, and a jog that short was
+			// removed there as zero length while the two runs either side of it,
+			// told apart here by those millionths, were never joined -- leaving
+			// the wire in two pieces (each trimmed to a dot on its pin).
+			if (cSeg->isVertical() && std::fabs(cSeg->begin.x - nSeg->begin.x) > EQUALRANGE) { walkNewSegs++; continue; }
+			if (cSeg->isHorizontal() && std::fabs(cSeg->begin.y - nSeg->begin.y) > EQUALRANGE) { walkNewSegs++; continue; }
 			// Now a valid check can be made on endpoints.  Consider that for horizontal
 			//	segments, begin's x is always less than end's x (same for y's in vertical)
 			if (cSeg->isVertical() && ((cSeg->begin.y >= nSeg->begin.y - EQUALRANGE && cSeg->begin.y <= nSeg->end.y + EQUALRANGE) ||
@@ -1034,8 +1217,13 @@ void guiWire::mergeSegments() {
 			else { hsMin = min(hsMin, hsPoint.y); hsMax = max(hsMax, hsPoint.y); }
 		}
 		if (nSeg->intersects.size() > 0) { hsMin = min(hsMin, nSeg->intersects.begin()->first); hsMax = max(hsMax, nSeg->intersects.rbegin()->first); }
-		if (nSeg->isVertical()) { nSeg->begin.y = hsMin; nSeg->end.y = hsMax; }
-		else { nSeg->begin.x = hsMin; nSeg->end.x = hsMax; }
+		// A segment with no pin and no junction has nothing to trim to; trimming
+		// anyway threw it to +/-FLT_MAX, where it still carried the signal but
+		// never drew. Leave its ends where they are.
+		if (hsMin <= hsMax) {
+			if (nSeg->isVertical()) { nSeg->begin.y = hsMin; nSeg->end.y = hsMax; }
+			else { nSeg->begin.x = hsMin; nSeg->end.x = hsMax; }
+		}
 		// now set the intersects
 		map < GLfloat, vector< long > >::iterator isectWalk = (segWalk->second).intersects.begin();
 		while (isectWalk != (segWalk->second).intersects.end()) {
@@ -1054,7 +1242,11 @@ void guiWire::mergeSegments() {
 				if (mapped == mapIDs.end()) continue;
 				map< long, wireSegment >::iterator target = newSegMap.find(mapped->second);
 				if (target == newSegMap.end()) continue;
-				if (target->second.isVertical() != (segWalk->second).isVertical()) newIsectVector.push_back(mapped->second);
+				// Two old segments merged into one map to the same id: keep it once,
+				// or the crossing is saved twice and a reload drops the copy.
+				if (target->second.isVertical() != (segWalk->second).isVertical() &&
+					std::find(newIsectVector.begin(), newIsectVector.end(), mapped->second) == newIsectVector.end())
+					newIsectVector.push_back(mapped->second);
 			}
 			(isectWalk->second) = newIsectVector;
 			isectWalk++;
@@ -1064,9 +1256,91 @@ void guiWire::mergeSegments() {
 		segWalk++;
 	}
 
+	canonicalCrossings(newSegMap);
 	commitSegMap(std::move(newSegMap));  // Assign the new tree
 
+	// Trimming above can shrink a segment to a point (a branch whose junction
+	// is on its pin), and zero-length segments are only cleared at the start.
+	// Left in, the next merge -- the one a reload does -- removes it, so the
+	// wire saved differently after Save and Reopen. One more pass clears it
+	// (or, for a wire that is all one point, settles it as segment 0).
+	static thread_local bool secondPass = false;
+	if (!secondPass) {
+		bool dot = false;
+		for (const auto &s : segMap) if (s.second.begin == s.second.end) dot = true;
+		if (dot) {
+			secondPass = true;
+			mergeSegments();
+			secondPass = false;
+			return;
+		}
+	}
+
 	generateRenderInfo();
+}
+
+// Each crossing kept once, at the place the run it crosses fixes (that run's
+// x, or its y). Moves and merges leave the number beside a crossing slightly
+// off, and the same crossing then landed under two numbers -- saved twice, and
+// once after a reload. A crossing with a run that isn't there, or one the same
+// way, is left where it is: the merge deals with those.
+void guiWire::canonicalCrossings(map < long, wireSegment > &segs) {
+	for (auto &entry : segs) {
+		wireSegment &s = entry.second;
+		map < GLfloat, vector < long > > fresh;
+		set < long > kept;
+		for (const auto &x : s.intersects)
+			for (long id : x.second) {
+				map < long, wireSegment >::const_iterator other = segs.find(id);
+				const bool across = other != segs.end() && other->second.isVertical() != s.isVertical();
+				if (across && !kept.insert(id).second) continue;
+				const GLfloat at = !across ? x.first : s.isVertical() ? other->second.begin.y : other->second.begin.x;
+				fresh[at].push_back(id);
+			}
+		s.intersects = fresh;
+	}
+}
+
+// A segment of no length can be the only thing joining two runs: a run
+// across meeting a run up at one point, each recording a crossing with the
+// dot and not with each other (moving a part whose pins are all on one
+// wire, with two of them on one gate, leaves this: each pin moved reshapes
+// the wire in turn). Removing the dot then left the two runs touching but
+// unjoined, and the trim that follows pulled each back to its own pins --
+// one wire drawn as two pieces. Before a dot goes, the runs it joins at
+// its point (through any other dots there) record a crossing with each
+// other. Runs the same way are left to the merge, which joins them.
+void guiWire::bridgeAround(map < long, wireSegment > &segs, const wireSegment &dot) {
+	const GLPoint2f at = dot.begin;
+	auto onIt = [&](const wireSegment &s) {
+		const float l = min(s.begin.x, s.end.x), r = max(s.begin.x, s.end.x);
+		const float b = min(s.begin.y, s.end.y), t = max(s.begin.y, s.end.y);
+		return at.x >= l - EQUALRANGE && at.x <= r + EQUALRANGE && at.y >= b - EQUALRANGE && at.y <= t + EQUALRANGE;
+	};
+	vector < long > runs, todo;
+	set < long > seen;
+	for (const auto &x : dot.intersects) todo.insert(todo.end(), x.second.begin(), x.second.end());
+	seen.insert(dot.id);
+	while (!todo.empty()) {
+		const long id = todo.back();
+		todo.pop_back();
+		if (!seen.insert(id).second) continue;
+		map < long, wireSegment >::iterator s = segs.find(id);
+		if (s == segs.end() || !onIt(s->second)) continue;
+		if (s->second.begin == s->second.end) {
+			for (const auto &x : s->second.intersects) todo.insert(todo.end(), x.second.begin(), x.second.end());
+		}
+		else runs.push_back(id);
+	}
+	for (size_t i = 0; i < runs.size(); i++)
+		for (size_t j = i + 1; j < runs.size(); j++) {
+			wireSegment &a = segs[runs[i]], &b = segs[runs[j]];
+			if (a.isVertical() == b.isVertical()) continue;
+			vector < long > &ab = a.intersects[a.isVertical() ? at.y : at.x];
+			if (find(ab.begin(), ab.end(), b.id) == ab.end()) ab.push_back(b.id);
+			vector < long > &ba = b.intersects[b.isVertical() ? at.y : at.x];
+			if (find(ba.begin(), ba.end(), a.id) == ba.end()) ba.push_back(a.id);
+		}
 }
 
 // Take out the flaring segments of length zero.  They are so annoying that I am dedicating (as you can see) a function to
@@ -1105,8 +1379,17 @@ void guiWire::removeZeroLengthSegments() {
 		eraseIDs.push_back(segWalk->first);
 		map < GLfloat, vector < long > >::iterator isect = (segWalk->second).intersects.begin(); // Get the intersection
 		bool connectionsDone = false;
+		// A zero-length segment touching nothing (a paste or a drop can leave
+		// one) has nowhere to hand its connections: keep it rather than walk
+		// off the end of an empty map.
+		if (isect == (segWalk->second).intersects.end() || isect->second.empty()) {
+			eraseIDs.pop_back();
+			segWalk++;
+			continue;
+		}
 		// Just hook up the connections to the first one we see...
 		//	THAT ISN'T ANOTHER STUPID ZERO-LENGTH SECTOR THAT DESERVES TO DIE
+		int hops = 0;
 		while (!connectionsDone) {
 			for (unsigned int i = 0; i < (isect->second).size() && !connectionsDone; i++) {
 				if (!connectionsDone && !(newSegMap[(isect->second)[i]].begin == newSegMap[(isect->second)[i]].end)) {
@@ -1114,8 +1397,15 @@ void guiWire::removeZeroLengthSegments() {
 					connectionsDone = true;
 				}
 			}
-			if (!connectionsDone) isect = segMap[(isect->second)[0]].intersects.begin();
+			if (connectionsDone) break;
+			// Follow on to the next segment, if it touches anything (and not
+			// round in circles).
+			auto& next = segMap[(isect->second)[0]].intersects;
+			if (next.empty() || next.begin()->second.empty() || ++hops > 64) break;
+			isect = next.begin();
 		}
+		if (!connectionsDone) eraseIDs.pop_back();   // nowhere to hand them: keep it
+		else bridgeAround(newSegMap, segWalk->second);
 		segWalk++;
 	}
 	// DIE A HORRIBLE AND REVOLTING DEATH IN THE DIGITAL DUSTBIN!!!

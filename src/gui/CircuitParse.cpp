@@ -8,24 +8,33 @@
    CircuitParse: uses XMLParser to load and save user circuit files.
 *****************************************************************************/
 
+#if defined(CL_NO_WX) && defined(_WIN32)
+// Before anything that says `using namespace std`: the Windows headers'
+// `byte` would otherwise clash with std::byte.
+#include <windows.h>
+#endif
 #include "CircuitParse.h"
 #include "PaletteDrag.h"
 #include "RenderMode.h"
 #include "GateLibrary.h"
+#ifndef CL_NO_WX
 #include "OscopeFrame.h"
 #include "MainApp.h"
 #include "MainFrame.h"
-#include <fstream>
 #include <wx/file.h>
+#elif !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#endif
+#include <fstream>
 #include <sstream>
 #include <cerrno>
 #include <cstring>
 
 // Windows doesn't define EDQUOT (disk quota exceeded) - define it for compatibility
-#ifdef _MSC_VER
 #ifndef EDQUOT
 #define EDQUOT 122  // POSIX standard value for disk quota exceeded
-#endif
 #endif
 
 #include "XMLParser.h"
@@ -34,7 +43,10 @@
 #include "GUICircuit.h"
 #include "GUICanvas.h"
 #include "command/cmdSetParams.h"
+#include "command/cmdConnectWire.h"
+#include "command/cmdDeleteWire.h"
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -43,13 +55,21 @@
 #include "migrate.hpp"          // cl::loadCircuit: format detection + migration notices
 #include "circuit_file_io.hpp"  // cl::writeCircuitFile: the v3 serializer
 
+#ifndef CL_NO_WX
 DECLARE_APP(MainApp)
+#endif
 
 CircuitParse::CircuitParse(GUICanvas* glc) {
 	// this constructor did not initialiize all its data members, I corrected that
 	// note:  gCanvases and fileName are initialized by base class default constructors   KAS
 	mParse = nullptr;
 	gCanvas = glc;
+}
+
+CircuitParse::CircuitParse(vector< GUICanvas* > glc) {
+	mParse = nullptr;
+	gCanvases = glc;
+	gCanvas = glc.empty() ? nullptr : glc[0];
 }
 
 CircuitParse::CircuitParse(string fileName, vector< GUICanvas* > glc) {
@@ -99,6 +119,9 @@ static bool hasBreakingVersion(const string& fileVersion, const string& currentV
 // Present the migration notices (gate renames, the decoder-width fix) from a
 // load in one dialog, instead of a modal popup per affected gate.
 static void showMigrationNotices(const std::vector<cl::MigrationNotice> &notices) {
+#ifdef CL_NO_WX
+	(void)notices;   // the native front end shows loadNotices itself
+#else
 	if (notices.empty()) return;
 
 	bool anyWarning = false;
@@ -113,6 +136,7 @@ static void showMigrationNotices(const std::vector<cl::MigrationNotice> &notices
 	}
 	wxMessageBox(msg, wxT("Circuit Updated"),
 	             wxOK | (anyWarning ? wxICON_EXCLAMATION : wxICON_INFORMATION));
+#endif
 }
 
 // The application version written into a v2 export: the last release whose Save
@@ -138,8 +162,10 @@ bool CircuitParse::readCircuit(const string &path, cl::LoadResult &out, string &
 	ifstream in(path.c_str(), ios::in | ios::binary);
 	ostringstream buf;
 	buf << in.rdbuf();
-	string text = buf.str();
+	return readCircuitText(buf.str(), out, error);
+}
 
+bool CircuitParse::readCircuitText(const string &text, cl::LoadResult &out, string &error) {
 	// Keep old builds of Cedar Logic from opening newer, incompatible files.
 	string version = extractVersion(text);
 	if (!version.empty() && hasBreakingVersion(version, VERSION_NUMBER_STRING()) &&
@@ -176,6 +202,7 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 	applyCircuitFile(loaded.file);
 	std::vector<cl::MigrationNotice> all = loaded.notices;
 	all.insert(all.end(), applyNotices.begin(), applyNotices.end());
+	loadNotices = all;
 	if (renderMode().headlessRender) {
 		// A one-shot render has no one to show a dialog to, but the notices are
 		// the only record that the file lost something on the way in. Print them
@@ -187,8 +214,84 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 		showMigrationNotices(all);
 	}
 
-	gCanvas->getCircuit()->getOscope()->UpdateMenu();
+	gCanvas->getCircuit()->oscopeSignalsChanged();
 	return gCanvases;
+}
+
+// How far from the origin a loaded part or wire may be (gl_defs.h).
+static const double kMaxCoordinate = WORLD_LIMIT;
+
+// A notice about the file just opened, for the person opening it.
+static cl::MigrationNotice loadNotice(cl::Severity severity, const string &summary, const string &detail = string(),
+                                      const string &gateUuid = string(), const string &libName = string()) {
+	cl::MigrationNotice n;
+	n.severity = severity;
+	n.summary = summary;
+	n.detail = detail;
+	n.gateUuid = gateUuid;
+	n.libName = libName;
+	return n;
+}
+
+// An id as the engine holds it, or false for one it can't: past kMaxId
+// (a damaged file; real ids count up from 1), where reading it into the
+// engine's integer types wrapped round to another id. (Some paths read a
+// gate id as a long, 32 bits on Windows.)
+static const IDType kMaxId = 2147483647ULL;
+static bool idOf(const string &text, IDType &out) {
+	errno = 0;
+	char *end = nullptr;
+	const unsigned long long v = strtoull(text.c_str(), &end, 10);
+	if (text.empty() || end == text.c_str() || *end != 0 || errno == ERANGE || v > kMaxId) return false;
+	out = v;
+	return true;
+}
+
+// A page's gates and wires minus any whose id can't be used: out of range,
+// or given out already (on this page or one before). Pins on a wire left out
+// are free; connections naming a gate left out are dropped later, as for any
+// gate that isn't on the page. Ids are written back in their plain form, so
+// "007" and "7" are the same gate.
+static cl::Page withoutDuplicateIds(const cl::Page &page, std::set<IDType> &gateIds, std::set<IDType> &wireIds,
+                                    std::vector<cl::MigrationNotice> &notices) {
+	auto note = [&notices](const string &summary) {
+		notices.push_back(loadNotice(cl::Severity::Warning, summary, "It was left out. The rest of the circuit loaded normally."));
+	};
+	cl::Page pg = page;
+	pg.gates.clear();
+	pg.wires.clear();
+	for (cl::GateInstance g : page.gates) {
+		IDType id = 0;
+		if (!idOf(g.uuid, id)) { note("Gate " + g.uuid + " has an id that can't be used."); continue; }
+		if (!gateIds.insert(id).second) { note("A second gate with id " + g.uuid + " was found."); continue; }
+		g.uuid = to_string(id);
+		pg.gates.push_back(std::move(g));
+	}
+	for (cl::WireInstance w : page.wires) {
+		vector<IDType> ids;
+		bool usable = !w.ids.empty();
+		for (const string &text : w.ids) {
+			IDType id = 0;
+			usable = usable && idOf(text, id) && wireIds.count(id) == 0 &&
+			         std::find(ids.begin(), ids.end(), id) == ids.end();
+			ids.push_back(id);
+		}
+		if (!usable) {
+			// No id at all is reported where the wire is laid in (applyWireShape).
+			if (w.ids.empty()) { pg.wires.push_back(std::move(w)); continue; }
+			note("Wire " + w.ids.front() + " has an id that can't be used, or one another wire has.");
+			continue;
+		}
+		wireIds.insert(ids.begin(), ids.end());
+		for (size_t i = 0; i < ids.size(); i++) w.ids[i] = to_string(ids[i]);
+		for (cl::WireSegment &seg : w.segments)
+			for (cl::WireConn &c : seg.connects) {
+				IDType gid = 0;
+				if (idOf(c.gateUuid, gid)) c.gateUuid = to_string(gid);
+			}
+		pg.wires.push_back(std::move(w));
+	}
+	return pg;
 }
 
 // Build the GUI from a parsed circuit model: one canvas per page, every gate
@@ -196,6 +299,10 @@ vector<GUICanvas*> CircuitParse::applyLoaded(const cl::LoadResult &loaded) {
 void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 	// If no library was loaded, then we can't make gates from one.
 	if (gateLibrary().libraries.size() == 0) return;
+	if (gCanvas != nullptr) {
+		gCanvas->getCircuit()->circuitNotes = cf.notes;
+		gCanvas->getCircuit()->inkHidden = cf.inkHidden;
+	}
 
 	// A page index is an index into the canvas vector. A negative one reads out
 	// of bounds, and an enormous one would have us allocate a canvas per step to
@@ -203,20 +310,40 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 	// hand-edited one can.
 	const int kMaxPageIndex = 255;
 
-	for (const cl::Page &pg : cf.pages) {
-		if (pg.index < 0 || pg.index > kMaxPageIndex) continue;
+	// Ids already given out, across every page: a gate or wire is one object,
+	// so a second with the same id (a damaged file, or two pages pasted
+	// together by hand) is left out rather than merged into the first.
+	std::set<IDType> gateIdsTaken, wireIdsTaken;
+
+	for (const cl::Page &page : cf.pages) {
+		if (page.index < 0 || page.index > kMaxPageIndex) continue;
+		cl::Page pg = withoutDuplicateIds(page, gateIdsTaken, wireIdsTaken, applyNotices);
 
 		// Grow the set until this index exists, then use it. Growing one canvas
 		// at a time regardless of the index put page 5 of a {0,5} file onto page
 		// 1: the content silently moved. Honor what the file says instead.
 		while (pg.index > (int)(gCanvases.size() - 1)) {
+#ifdef CL_NO_WX
+			gCanvases.push_back(new GUICanvas(gCanvases[0]->getCircuit()));
+#else
 			gCanvases.push_back(new GUICanvas(gCanvases[0]->GetParent(),
 			                                  gCanvases[0]->getCircuit(), wxID_ANY,
 			                                  wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS));
+#endif
 		}
 		gCanvas = gCanvases[pg.index];
+		// The page's drawing (the website's DRAWING-NOTES.md): kept on the page,
+		// so it moves, closes and reopens with it. The wx app has no drawing
+		// tools yet, but keeps it and writes it back.
+		gCanvas->ink = pg.ink;
+		// Which pages its TO/FROM links reach (docs/PAGE-LINKS.md).
+		gCanvas->linkGroup = pg.linkGroup;
+#ifdef CL_NO_WX
+		gCanvas->name = pg.name;
+#else
 		if (!pg.name.empty() && wxGetApp().mainframe)
 			wxGetApp().mainframe->SetTabName(gCanvas, wxString::FromUTF8(pg.name.c_str()));
+#endif
 
 		// A gate's pin connections live on the wires; collect them per gate so a
 		// gate is created with the same (pin -> wire ids) list the old gate-side
@@ -226,6 +353,10 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 		for (const cl::WireInstance &w : pg.wires) {
 			vector<IDType> wireIds;
 			for (const string &id : w.ids) wireIds.push_back(strtoull(id.c_str(), nullptr, 10));
+			// A wire with no id (a damaged file: "(id" for "(ids") can't be made;
+			// connecting its pins created a wire from an empty id list and read
+			// past it. It is left out, and applyWireShape says so.
+			if (wireIds.empty()) continue;
 			std::set<std::pair<string, string>> seen; // distinct (gate, pin) endpoints
 			for (const cl::WireSegment &s : w.segments) {
 				for (const cl::WireConn &c : s.connects) {
@@ -245,18 +376,28 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 			const auto &owner = gateLibrary().gateNameToLibrary;
 			auto known = owner.find(g.libName);
 			if (known != owner.end() && !known->second.empty()) continue;
-			cl::MigrationNotice n;
-			n.severity = cl::Severity::Warning;
-			n.gateUuid = g.uuid;
-			n.libName = g.libName;
-			n.summary = "Unknown gate type: " + (g.libName.empty() ? string("(none)") : g.libName);
-			n.detail = "No gate of this type is in the loaded library, so it cannot be drawn "
-			           "or simulated. It is kept in the circuit and written back out on save.";
-			applyNotices.push_back(std::move(n));
+			applyNotices.push_back(loadNotice(cl::Severity::Warning,
+			                                  "Unknown gate type: " + (g.libName.empty() ? string("(none)") : g.libName),
+			                                  "No gate of this type is in the loaded library, so it cannot be drawn "
+			                                  "or simulated. It is kept in the circuit and written back out on save.",
+			                                  g.uuid, g.libName));
 		}
 
 		// Create every gate (and, through its connectors, its wires).
-		for (const cl::GateInstance &g : pg.gates) {
+		for (const cl::GateInstance &g0 : pg.gates) {
+			// A part far outside any page (a damaged or hand-edited file) is
+			// brought in to the edge: geometry that far out loses its precision
+			// as a float, and the routers and the collision grid can't hold it.
+			cl::GateInstance g = g0;
+			g.at.x = savedPrecision(g.at.x);
+			g.at.y = savedPrecision(g.at.y);
+			if (std::fabs(g.at.x) > kMaxCoordinate || std::fabs(g.at.y) > kMaxCoordinate) {
+				g.at.x = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.x));
+				g.at.y = (std::max)(-kMaxCoordinate, (std::min)(kMaxCoordinate, g.at.y));
+				applyNotices.push_back(loadNotice(cl::Severity::Warning,
+				                                  "Gate " + g.uuid + " was far outside the page and was moved to its edge.",
+				                                  string(), g.uuid, g.libName));
+			}
 			vector<parameter> params;
 			for (const cl::Param &p : g.params) params.push_back(parameter(p.name, p.value, p.gui));
 			ostringstream angle;
@@ -274,6 +415,37 @@ void CircuitParse::applyCircuitFile(const cl::CircuitFile &cf) {
 
 		// Lay in each wire's routed shape now that its gates and wire exist.
 		for (const cl::WireInstance &w : pg.wires) applyWireShape(w);
+
+		// A shape that doesn't match the pins its wire holds (a damaged or
+		// hand-edited file: a segment that misses its pin, a pin no segment
+		// records, a crossing with nothing) is only a drawing, and a wrong one:
+		// a pin no segment records was lost on the next save. The pins are what
+		// the file means, so such a wire is routed fresh from them.
+		// A wire left holding fewer than two pins (its other gates are missing
+		// or lack the pins it names) joins nothing, and goes.
+		int redrawn = 0;
+		vector<IDType> joinsNothing;
+		for (auto &entry : *gCanvas->getWireList()) {
+			guiWire *wire = entry.second;
+			if (wire == nullptr) continue;
+			if (wire->numConnections() < 2) { joinsNothing.push_back(entry.first); continue; }
+			if (wire->isSoundShape()) continue;
+			wire->straightenRoute();
+			redrawn++;
+		}
+		for (IDType id : joinsNothing) {
+			cmdDeleteWire(gCanvas->getCircuit(), gCanvas, id).Do();
+			applyNotices.push_back(loadNotice(cl::Severity::Warning,
+			                                  "Wire " + to_string(id) + " was removed, because it connected fewer than two pins."));
+		}
+		if (redrawn > 0) {
+			const bool one = redrawn == 1;
+			applyNotices.push_back(loadNotice(cl::Severity::Info,
+			                                  to_string(redrawn) + (one ? " wire was" : " wires were") +
+			                                      " redrawn, because the routing saved for " + (one ? "it" : "them") +
+			                                      " didn't match " + (one ? "its" : "their") + " connections.",
+			                                  "The connections are as saved; only the wires' paths changed."));
+		}
 	}
 }
 
@@ -296,23 +468,45 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 	GUICircuit *gCircuit = gCanvas->getCircuit();
 	const bool made = !ids.empty() && gCircuit->getWire(ids.front()) != nullptr;
 	if (!made) {
-		cl::MigrationNotice n;
-		n.severity = cl::Severity::Warning;
-		n.summary = "Wire " + (w.ids.empty() ? string("(no id)") : w.ids.front()) +
-		            " could not be loaded, because " + wireDropReason(w);
-		n.detail = "The wire and its routing are not in the circuit. Redraw it, or fix the "
-		           "file so that every connection names a gate on the same page.";
-		applyNotices.push_back(std::move(n));
+		applyNotices.push_back(loadNotice(cl::Severity::Warning,
+		                                  "Wire " + (w.ids.empty() ? string("(no id)") : w.ids.front()) +
+		                                      " could not be loaded, because " + wireDropReason(w),
+		                                  "The wire and its routing are not in the circuit. Redraw it, or fix the "
+		                                  "file so that every connection names a gate on the same page."));
 		return;
 	}
+
+	// Segment ids are the wire's own small numbers. One far out of range (a
+	// damaged file) overflowed the next id the wire gives out, so then all are
+	// numbered afresh in order, and the crossings follow them.
+	std::map<long, long> renumber;
+	bool fresh = false;
+	for (const cl::WireSegment &ms : w.segments) {
+		const long id = strtol(ms.id.c_str(), nullptr, 10);
+		if (id < 0 || id > guiWire::MAX_SEGMENT_ID) fresh = true;
+		renumber.emplace(id, (long)renumber.size());
+	}
+	auto segId = [&](const string &text) {
+		const long id = strtol(text.c_str(), nullptr, 10);
+		if (!fresh) return id;
+		auto it = renumber.find(id);
+		return it == renumber.end() ? -1L : it->second;
+	};
+
+	// A segment end, held to twice as far as a part may be: a part at the edge
+	// has pins beyond it, and a wire must still reach them. (Only a float's
+	// range matters here; a segment that misses its pin is redrawn later.)
+	auto inBounds = [](double v) {
+		return (float)savedPrecision((std::max)(-2 * kMaxCoordinate, (std::min)(2 * kMaxCoordinate, v)));
+	};
 
 	map<long, wireSegment> shape;
 	for (const cl::WireSegment &ms : w.segments) {
 		wireSegment seg;
 		seg.verticalSeg = ms.vertical;
-		seg.id = strtol(ms.id.c_str(), nullptr, 10);
-		seg.begin = GLPoint2f(ms.begin.x, ms.begin.y);
-		seg.end = GLPoint2f(ms.end.x, ms.end.y);
+		seg.id = segId(ms.id);
+		seg.begin = GLPoint2f(inBounds(ms.begin.x), inBounds(ms.begin.y));
+		seg.end = GLPoint2f(inBounds(ms.end.x), inBounds(ms.end.y));
 		seg.calcBBox();
 		for (const cl::WireConn &c : ms.connects) {
 			wireConnection nwc;
@@ -322,20 +516,17 @@ void CircuitParse::applyWireShape(const cl::WireInstance &w) {
 			// gate that is not on this page crashed there, a long way from here,
 			// so drop the connection now and say so.
 			if (gCircuit->getGate(nwc.gid) == nullptr) {
-				cl::MigrationNotice n;
-				n.severity = cl::Severity::Warning;
-				n.summary = "A connection on wire " +
-				            (w.ids.empty() ? string("(no id)") : w.ids.front()) +
-				            " names gate " + c.gateUuid + ", which is not on this page.";
-				n.detail = "That connection was dropped. The rest of the wire loaded normally.";
-				applyNotices.push_back(std::move(n));
+				applyNotices.push_back(loadNotice(cl::Severity::Warning,
+				                                  "A connection on wire " + (w.ids.empty() ? string("(no id)") : w.ids.front()) +
+				                                      " names gate " + c.gateUuid + ", which is not on this page.",
+				                                  "That connection was dropped. The rest of the wire loaded normally."));
 				continue;
 			}
 			nwc.connection = c.pin;
 			seg.connections.push_back(nwc);
 		}
 		for (const cl::Intersection &x : ms.intersections)
-			seg.intersects[(GLfloat)x.at].push_back(strtol(x.segment.c_str(), nullptr, 10));
+			seg.intersects[(GLfloat)x.at].push_back(segId(x.segment));
 		shape[seg.id] = seg;
 	}
 
@@ -392,6 +583,10 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 
 	for (unsigned int i = 0; i < params.size(); i++) {
 		if (!(params[i].isGUI)) {
+			// A memory's READ_FILE and WRITE_FILE are actions, taken when the
+			// user picks a file, not settings: sent from a file, they had the
+			// engine read or overwrite whatever path the file named, on open.
+			if (params[i].paramName == "READ_FILE" || params[i].paramName == "WRITE_FILE") continue;
 			newGate->setLogicParam( params[i].paramName, params[i].paramValue );
 			gCanvas->getCircuit()->sendMessageToCore(klsMessage::Message(klsMessage::MT_SET_GATE_PARAM, new klsMessage::Message_SET_GATE_PARAM(id, params[i].paramName, params[i].paramValue)));
 		} else if (!libGateParams.ownsGUIParam( params[i].paramName )) {
@@ -429,6 +624,7 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 	GUICircuit *gCircuit = gCanvas->getCircuit();
 	for (unsigned int i = 0; i < inputs.size(); i++) {
 
+		if (inputs[i].wireIds.empty()) continue;   // no wire to make (see applyCircuitFile)
 		guiWire *wire = gCircuit->createWire(inputs[i].wireIds);
 
 		cmdConnectWire::sendMessagesToConnect(gCircuit, wire->getID(),
@@ -438,6 +634,7 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 	}
 	for (unsigned int i = 0; i < outputs.size(); i++) {
 
+		if (outputs[i].wireIds.empty()) continue;   // no wire to make (see applyCircuitFile)
 		guiWire *wire = gCircuit->createWire(outputs[i].wireIds);
 
 		cmdConnectWire::sendMessagesToConnect(gCircuit, wire->getID(),
@@ -451,13 +648,19 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 // The inverse of applyCircuitFile: read the GUI back into a plain circuit model
 // so the format library can serialize it. Mirrors what saveGate/saveWire persist.
 
+// Positions are saved to a ten-thousandth of a grid unit (savedPrecision,
+// gl_defs.h). A rotated part's pins sit a few millionths off the grid, and a
+// reopen trims a wire's end to the pin, so the digits past that differed
+// between a save and the save after reopening it (18 one time, 17.99999428
+// the next).
+
 static cl::GateInstance buildGate(guiGate *g) {
 	cl::GateInstance gi;
 	gi.uuid = to_string(g->getID());
 	gi.libName = g->getLibraryGateName();
 	float x, y;
 	g->getGLcoords(x, y);
-	gi.at = { x, y };
+	gi.at = { savedPrecision(x), savedPrecision(y) };
 
 	LibraryGate lg = gateLibrary().libraries[g->getLibraryName()][g->getLibraryGateName()];
 
@@ -468,7 +671,8 @@ static cl::GateInstance buildGate(guiGate *g) {
 		if (lg.ownsGUIParam(p.first)) continue;
 		gi.params.push_back({ p.first, p.second, true });
 	}
-	// Logic params, skipping FILE_IN/FILE_OUT (runtime paths, as saveGate does).
+	// Logic params, skipping FILE_IN/FILE_OUT (runtime paths, as saveGate does)
+	// and a clock's MANUAL when off (LibraryGate::skipsLogicParam).
 	for (const auto &p : *g->getAllLogicParams()) {
 		bool isFile = false;
 		for (size_t i = 0; i < lg.dlgParams.size() && !isFile; i++)
@@ -476,7 +680,7 @@ static cl::GateInstance buildGate(guiGate *g) {
 			    (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") &&
 			    lg.dlgParams[i].name == p.first)
 				isFile = true;
-		if (!isFile) gi.params.push_back({ p.first, p.second, false });
+		if (!isFile && !lg.skipsLogicParam(p.first, p.second)) gi.params.push_back({ p.first, p.second, false });
 	}
 	// Gate-type-specific params (e.g. RAM memory contents).
 	vector< pair<string, string> > extra;
@@ -494,13 +698,28 @@ static cl::WireInstance buildWire(guiWire *w) {
 		cl::WireSegment ws;
 		ws.id = to_string(s.id);
 		ws.vertical = s.verticalSeg;
-		ws.begin = { s.begin.x, s.begin.y };
-		ws.end = { s.end.x, s.end.y };
-		for (const wireConnection &c : s.connections)
+		ws.begin = { savedPrecision(s.begin.x), savedPrecision(s.begin.y) };
+		ws.end = { savedPrecision(s.end.x), savedPrecision(s.end.y) };
+		// In a fixed order (gate id, then pin): the engine keeps a segment's
+		// pins in the order they were joined, which a reroute and a reload
+		// needn't agree on, and two saves of one circuit should be the same.
+		vector<wireConnection> pins = s.connections;
+		std::sort(pins.begin(), pins.end(), [](const wireConnection &a, const wireConnection &b) {
+			return a.gid != b.gid ? a.gid < b.gid : a.connection < b.connection;
+		});
+		for (const wireConnection &c : pins)
 			ws.connects.push_back({ to_string(c.gid), c.connection });
+		// Where a crossing is comes from the run it crosses (its x, or its y),
+		// not the number kept beside it, which can carry float noise a reload
+		// then drops (-34.50000381 saved, -34.5 the next time).
 		for (const auto &isect : s.intersects)
-			for (long segId : isect.second)
-				ws.intersections.push_back({ (double)isect.first, to_string(segId) });
+			for (long segId : isect.second) {
+				double at = isect.first;
+				auto other = segMap.find(segId);
+				if (other != segMap.end() && other->second.verticalSeg != s.verticalSeg)
+					at = s.verticalSeg ? other->second.begin.y : other->second.begin.x;
+				ws.intersections.push_back({ savedPrecision(at), to_string(segId) });
+			}
 		wi.segments.push_back(ws);
 	}
 	return wi;
@@ -510,16 +729,34 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 	cl::CircuitFile cf;
 	cf.formatVersion = 3;
 	cf.generator = string("CedarLogic ") + VERSION_NUMBER_STRING();
+	if (!glc.empty() && glc[0] != nullptr) {
+		cf.notes = glc[0]->getCircuit()->circuitNotes;
+		cf.inkHidden = glc[0]->getCircuit()->inkHidden;
+	}
 	for (unsigned int i = 0; i < glc.size(); i++) {
 		cl::Page pg;
 		pg.index = (int)i;
 		// Carry the tab's name, if the user gave it one.
+#ifdef CL_NO_WX
+		pg.name = glc[i]->name;
+#else
 		if (wxGetApp().mainframe)
 			pg.name = wxGetApp().mainframe->SavedTabName(glc[i]).ToStdString();
+#endif
+		pg.ink = glc[i]->ink;
 		for (const auto &entry : *glc[i]->getGateList())
 			pg.gates.push_back(buildGate(entry.second));
-		for (const auto &entry : *glc[i]->getWireList())
+		for (const auto &entry : *glc[i]->getWireList()) {
+			// The loader makes a wire from the pins its segments record, so a
+			// wire with none recorded can't be read back, and writing one made
+			// the next save differ. (Only damaged input leaves one: a wire with
+			// no pins, or one pin and no shape. It carries no connection.)
+			if (entry.second == nullptr) continue;
+			bool records = false;
+			for (const auto &seg : entry.second->getSegmentMap()) records = records || !seg.second.connections.empty();
+			if (!records) continue;
 			pg.wires.push_back(buildWire(entry.second));
+		}
 
 		// Both lists come out of unordered_map iteration, so without this two
 		// saves of an unchanged circuit reshuffle and every .cdl diff is noise.
@@ -541,11 +778,37 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 		          });
 		cf.pages.push_back(std::move(pg));
 	}
+	// Link groups (docs/PAGE-LINKS.md), numbered as written: the first page's
+	// group is 0 (not written), the next group met is 1, and so on. All pages
+	// in one group then write nothing, byte for byte what older apps wrote.
+	std::map<int, int> canonical;
+	for (unsigned int i = 0; i < glc.size(); i++) {
+		const int g = glc[i]->linkGroup;
+		if (!canonical.count(g)) {
+			const int next = (int)canonical.size();
+			canonical[g] = next;
+		}
+		cf.pages[i].linkGroup = canonical[g];
+	}
 	return cf;
 }
 
 bool CircuitParse::saveCircuitV3(string filename, vector< GUICanvas* > glc, unsigned int currPage) {
-	return writeToFile(filename, cl::writeCircuitFile(buildCircuitFile(glc)));
+	return writeToFile(filename, textV3(glc));
+}
+
+string CircuitParse::textV3(vector< GUICanvas* > glc) {
+	return cl::writeCircuitFile(buildCircuitFile(glc));
+}
+
+string CircuitParse::textV3(vector< GUICanvas* > glc, bool withNotes, bool withInk) {
+	cl::CircuitFile cf = buildCircuitFile(glc);
+	if (!withNotes) cf.notes.clear();
+	if (!withInk) {
+		for (cl::Page &pg : cf.pages) pg.ink = cl::PageInk();
+		cf.inkHidden = false;
+	}
+	return cl::writeCircuitFile(cf);
 }
 
 bool CircuitParse::saveCircuit(string filename, vector< GUICanvas* > glc, unsigned int currPage) {
@@ -893,6 +1156,102 @@ bool CircuitParse::writeToFile(const string &filename, const string &text) {
 		}
 	};
 
+#if defined(CL_NO_WX) && defined(_WIN32)
+	// The same atomic write with Win32 calls (what wxTempFile does there): a
+	// temporary beside the target, flushed to disk, then moved over it.
+	auto widen = [](const string& s) {
+		std::wstring w;
+		const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+		if (n > 0) {
+			w.resize((size_t)n);
+			MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], n);
+			w.resize((size_t)n - 1);
+		}
+		return w;
+	};
+	auto fail = [&](const char* stage) {
+		const DWORD e = GetLastError();
+		int errnum = 0;
+		switch (e) {
+		case ERROR_ACCESS_DENIED: case ERROR_SHARING_VIOLATION: case ERROR_LOCK_VIOLATION: errnum = EACCES; break;
+		case ERROR_DISK_FULL: case ERROR_HANDLE_DISK_FULL: errnum = ENOSPC; break;
+		case ERROR_WRITE_PROTECT: errnum = EROFS; break;
+		case ERROR_PATH_NOT_FOUND: case ERROR_FILE_NOT_FOUND: case ERROR_INVALID_DRIVE: errnum = ENOENT; break;
+		default: break;
+		}
+		if (errnum != 0) describe(errnum, stage);
+		else lastError = string(stage) + " (Windows error " + std::to_string((unsigned long)e) + ").";
+		return false;
+	};
+	const std::wstring target = widen(filename);
+	const std::wstring tmp = target + L".saving-" + std::to_wstring((unsigned long)GetCurrentProcessId()) + L"-" +
+	                         std::to_wstring((unsigned long long)GetTickCount64());
+	HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE) return fail("Cannot open file for writing");
+	const char* p = text.data();
+	size_t left = text.size();
+	while (left > 0) {
+		const DWORD chunk = (DWORD)std::min<size_t>(left, 1u << 30);
+		DWORD wrote = 0;
+		if (!WriteFile(h, p, chunk, &wrote, nullptr) || wrote == 0) {
+			fail("Write operation failed");
+			CloseHandle(h); DeleteFileW(tmp.c_str());
+			return false;
+		}
+		p += wrote; left -= wrote;
+	}
+	if (!FlushFileBuffers(h)) {
+		fail("Could not flush the file to disk");
+		CloseHandle(h); DeleteFileW(tmp.c_str());
+		return false;
+	}
+	CloseHandle(h);
+	if (!MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		fail("Could not replace the existing file");
+		DeleteFileW(tmp.c_str());
+		return false;
+	}
+	return true;
+#elif defined(CL_NO_WX)
+	// The same atomic write with POSIX calls: a temporary beside the target,
+	// fsync, then rename over it.
+	const string tmp = filename + ".saving-XXXXXX";
+	std::vector<char> tmpl(tmp.begin(), tmp.end());
+	tmpl.push_back(0);
+	errno = 0;
+	const int fd = mkstemp(tmpl.data());
+	if (fd < 0) { describe(errno, "Cannot open file for writing"); return false; }
+	struct stat st;
+	if (stat(filename.c_str(), &st) == 0) fchmod(fd, st.st_mode & 07777);   // keep the original's permissions
+	else fchmod(fd, 0644);
+	const char* p = text.data();
+	size_t left = text.size();
+	while (left > 0) {
+		errno = 0;
+		const ssize_t n = write(fd, p, left);
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			describe(errno, "Write operation failed");
+			close(fd); unlink(tmpl.data());
+			return false;
+		}
+		p += n; left -= (size_t)n;
+	}
+	errno = 0;
+	if (fsync(fd) != 0) {
+		describe(errno, "Could not flush the file to disk");
+		close(fd); unlink(tmpl.data());
+		return false;
+	}
+	close(fd);
+	errno = 0;
+	if (rename(tmpl.data(), filename.c_str()) != 0) {
+		describe(errno, "Could not replace the existing file");
+		unlink(tmpl.data());
+		return false;
+	}
+	return true;
+#else
 	errno = 0;
 	wxTempFile out;
 	if (!out.Open(filename)) {
@@ -927,4 +1286,5 @@ bool CircuitParse::writeToFile(const string &filename, const string &text) {
 	}
 
 	return true;
+#endif
 }

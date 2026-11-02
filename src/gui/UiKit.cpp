@@ -56,6 +56,18 @@ void drawButton(wxGraphicsContext* gc, const wxRect& r, const wxString& label,
 	gc->DrawText(label, r.x + (r.width - tw) / 2, r.y + (r.height - th) / 2);
 }
 
+wxString platformKeys(const wxString& text) {
+#ifdef __WXOSX__
+	return text;
+#else
+	wxString s = text;
+	s.Replace("Cmd", "Ctrl");
+	s.Replace("Option", "Alt");
+	s.Replace("press Return", "press Enter");
+	return s;
+#endif
+}
+
 wxString keyGlyph(const wxString& token) {
 #ifdef __WXOSX__
 	if (token == "Cmd")    return wxString::FromUTF8("⌘");
