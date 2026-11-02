@@ -821,6 +821,30 @@ struct SessionDriver {
 		return G_SOURCE_REMOVE;
 	}
 
+	// Windows over the circuit window (a question, Settings, a menu), as the
+	// watchdog sees them. A modal one or a menu has the keyboard while it's up
+	// (its grab): keys sent to the circuit window go to it instead.
+	static int windowsOver() {
+		int n = 0;
+		GList* all = gtk_window_list_toplevels();
+		for (GList* l = all; l; l = l->next) {
+			GtkWidget* t = GTK_WIDGET(l->data);
+			if (gtk_widget_in_destruction(t) || !gtk_widget_get_visible(t) || isCircuitWindow(t)) continue;
+			if (gtk_window_get_window_type(GTK_WINDOW(t)) == GTK_WINDOW_POPUP && !menuIn(t)) continue;   // a tooltip
+			n++;
+		}
+		g_list_free(all);
+		return n;
+	}
+
+	// The checks below that type into the window wait for the watchdog to
+	// close what the last action opened over it (it pokes a window a few
+	// times first, so a second or so). Returns how many were still open after.
+	int waitForWindowsOver() {
+		for (int i = 0; i < 100 && windowsOver() > 0; i++) pump(100);
+		return windowsOver();
+	}
+
 	// The settings file has what's in memory (a setting changed in Settings was saved).
 	void checkPrefs() {
 		gchar* file = g_build_filename(g_get_user_config_dir(), "CedarLogic", "native.ini", nullptr);
@@ -1098,6 +1122,7 @@ struct SessionDriver {
 	// one step each.
 	void tidyWhileDrawing(int at) {
 		settle();
+		if (const int over = waitForWindowsOver()) printf("note  Tidy Up while drawing: %d window(s) still over the circuit\n", over);
 		if (!w->canEdit()) { if (w->simView()) w->toggleSimView(); if (w->locked()) w->toggleLock(); }
 		if (w->drawing()) w->setDrawing(false);
 		Canvas* c = canvas();
@@ -1170,13 +1195,24 @@ struct SessionDriver {
 	// undoing everything then redoing it brings the circuit back.
 	void longHistory(int at) {
 		settle();
+		// The action just before may have opened a window over this one (a
+		// question, a menu): while it's up it has the keys, and every nudge
+		// went to it (CI, seed 4: 48 steps, the ones from before, after 520
+		// nudges). Wait for the watchdog to close it, as a person would.
+		const int over = waitForWindowsOver();
 		if (!w->canEdit()) { if (w->simView()) w->toggleSimView(); if (w->locked()) w->toggleLock(); }
 		if (w->drawing()) w->setDrawing(false);
 		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
 		if (cl_document_gate_count(doc(), w->currentPage()) == 0) placePart();
+		settle();   // a part placePart left on the pointer is dropped
 		w->runAction("win.unlock-all");
+		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
 		tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
 		pump(10);
+		const bool selected = w->hasSelection();
+		// Each nudge is a step of its own (the engine merges none), so 520 of
+		// them always fill the history, whatever was on it before.
+		const long made0 = cl_edit_steps_made(doc());
 		const int nudges = 520;
 		for (int i = 0; i < nudges; i++) {
 			tap(top(), (i & 1) ? GDK_KEY_Left : GDK_KEY_Right);
@@ -1184,7 +1220,11 @@ struct SessionDriver {
 		}
 		pump(20);
 		const int steps = cl_edit_undo_count(doc());
-		check(steps == 500, format("the history holds the engine's 500 steps after %d nudges (%d)", nudges, steps));
+		const long made = cl_edit_steps_made(doc()) - made0;
+		check(steps == 500 && made == nudges,
+		      format("the history holds the engine's 500 steps after %d nudges (%d; %ld nudges made a step", nudges, steps, made) +
+		          (selected ? std::string() : std::string("; Ctrl+A selected nothing")) +
+		          (over ? format("; %d window(s) over the circuit didn't close", over) : std::string()) + ")");
 		check(w->isDirty() || shape(readFile(w->filePath())) == text(), "nudges past the 500th step leave the window unsaved");
 		const std::string moved = text();
 		int undone = 0;
