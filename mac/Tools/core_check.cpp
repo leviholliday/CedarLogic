@@ -820,6 +820,32 @@ static void junctionCases() {
 		if (back) cl_document_close(back);
 		cl_document_close(j.doc);
 	}
+	// Disconnect on such a wire, of the pin the drawing lost or of another:
+	// the wire left is drawn whole from the pins left (trimming started from
+	// segment 0 when no segment recorded the pin), and Undo gives all four
+	// pins back.
+	for (int which = 1; which < 4; which++) {
+		Junction j = junction();
+		guiWire* w = wireOn(j.doc, j.ids[0], "OUT_0");
+		auto shape = w->getSegmentMap();
+		for (auto& e : shape) {
+			auto& conns = e.second.connections;
+			conns.erase(std::remove_if(conns.begin(), conns.end(), [&](const wireConnection& c) { return (long)c.gid == j.ids[3]; }), conns.end());
+		}
+		w->setSegmentMap(shape);
+		float x = 0, y = 0;
+		j.doc->circuit.getGate(j.ids[which])->getHotspotCoords(kJunctionPins[which], x, y);
+		cl_edit_context(j.doc, 0, x, y, 0.05);
+		cl_edit_disconnect_pin(j.doc, 0, x, y, 0.05);
+		bool ok = w->numConnections() == 3 && !j.doc->circuit.getGate(j.ids[which])->isConnected(kJunctionPins[which]) &&
+		          consistent(j.doc, "after Disconnect") && saveIsStable(j.doc);
+		cl_edit_undo(j.doc);
+		ok = ok && w->numConnections() == 4 && wireOn(j.doc, j.ids[which], kJunctionPins[which]) == w;
+		cl_edit_redo(j.doc);
+		ok = ok && w->numConnections() == 3 && consistent(j.doc, "after Redo");
+		CHECK(ok, (std::string("Disconnect pin ") + std::to_string(which) + " of a wire whose drawing lost a pin leaves it whole").c_str());
+		cl_document_close(j.doc);
+	}
 }
 
 int main(int argc, char** argv) {
