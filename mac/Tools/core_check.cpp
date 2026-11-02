@@ -698,6 +698,51 @@ static void junctionCases() {
 			cl_document_close(j.doc);
 		}
 	CHECK(bad == 0, "any of its parts copied, pasted and dropped: the copy holds the pasted pins; Undo, Redo");
+	// Each pin joined to the wire, taken back and joined again: the same
+	// drawing as the join made. (Redo can number a branch differently,
+	// since a wire doesn't give an id out twice; the runs are the same.)
+	auto drawing = [](CLDocument* d) {
+		std::vector<std::string> wires;
+		for (auto& e : *d->page(0)->getWireList()) {
+			if (!e.second) continue;
+			std::vector<std::string> segs;
+			for (auto& sg : e.second->getSegmentMap()) {
+				const wireSegment& g = sg.second;
+				char b[160];
+				snprintf(b, sizeof b, "%c %.3f,%.3f %.3f,%.3f", g.isVertical() ? 'v' : 'h', g.begin.x, g.begin.y, g.end.x, g.end.y);
+				std::string k = b;
+				std::vector<std::string> pins;
+				for (const wireConnection& c : g.connections) pins.push_back(std::to_string(c.gid) + c.connection);
+				std::sort(pins.begin(), pins.end());
+				for (auto& pin : pins) k += " " + pin;
+				segs.push_back(k);
+			}
+			std::sort(segs.begin(), segs.end());
+			std::string w = std::to_string(e.first) + ":";
+			for (auto& k : segs) w += " [" + k + "]";
+			wires.push_back(w);
+		}
+		std::sort(wires.begin(), wires.end());
+		std::string all;
+		for (auto& w : wires) all += w + "\n";
+		return all;
+	};
+	for (int variant = 0; variant < 3; variant++) {
+		Junction j = junction(variant);
+		std::vector<std::string> states;
+		states.push_back(drawing(j.doc));
+		bool ok = true;
+		for (int i = 0; i < 2 && ok; i++) {
+			ok = cl_edit_undo(j.doc) && consistent(j.doc, "after Undo");
+			states.push_back(drawing(j.doc));
+		}
+		for (int i = 0; i < 2 && ok; i++) {
+			ok = cl_edit_redo(j.doc) && consistent(j.doc, "after Redo") && drawing(j.doc) == states[1 - i];
+		}
+		ok = ok && saveIsStable(j.doc);
+		CHECK(ok, (std::string("joins to the wire undone and redone give each drawing back (variant ") + std::to_string(variant) + ")").c_str());
+		cl_document_close(j.doc);
+	}
 	// Disconnect one pin, or Delete one part: Undo and Redo, each time whole.
 	for (int variant = 0; variant < 3; variant++)
 	for (int which = 0; which < 4; which++)
