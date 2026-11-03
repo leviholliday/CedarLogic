@@ -243,6 +243,24 @@ GdkPixbuf* iconPixbuf() {
 
 }  // namespace
 
+double iconTile() {
+	static double share = [] {
+		double s = 1;
+		GdkPixbuf* pb = iconPixbuf();
+		if (pb && gdk_pixbuf_get_has_alpha(pb) && gdk_pixbuf_get_n_channels(pb) == 4 && gdk_pixbuf_get_bits_per_sample(pb) == 8) {
+			const int w = gdk_pixbuf_get_width(pb), h = gdk_pixbuf_get_height(pb), stride = gdk_pixbuf_get_rowstride(pb);
+			const guchar* px = gdk_pixbuf_read_pixels(pb);
+			int left = w, right = -1;
+			for (int y = 0; y < h; y++)
+				for (int x = 0; x < w; x++)
+					if (px[y * stride + x * 4 + 3] > 128) { left = std::min(left, x); right = std::max(right, x); }
+			if (right > left && w > 0) s = (right - left + 1) / (double)w;
+		}
+		return s;
+	}();
+	return share;
+}
+
 void icon(cairo_t* cr, float x, float y, float size, float glowAmount) {
 	GdkPixbuf* pb = iconPixbuf();
 	if (glowAmount > 0) {

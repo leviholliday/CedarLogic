@@ -402,6 +402,18 @@ jobs:
           for t in 0.5 1.2 2.0; do
             xvfb-run -a -s "-screen 0 1600x1000x24" timeout 30 "$APPIMAGE" --splash-frame $t "renders/splash-$t.png" || echo "no splash $t"
           done
+          # The 0.4 intro (linux/App/Intro.h), drawn with no display at all: every frame at
+          # 60 fps, dissolving into a dark new circuit's window (pictured first), and the
+          # moments the Mac's stills show kept with the renders. Failing to draw fails the build.
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 "$APPIMAGE" --dark --screenshot renders/window-new-dark.png || true
+          behind=; [ -s renders/window-new-dark.png ] && behind="--behind renders/window-new-dark.png"
+          env -u DISPLAY -u WAYLAND_DISPLAY timeout 600 "$APPIMAGE" --render-intro intro-frames first $behind
+          test "$(ls intro-frames/frame-*.png | wc -l)" -eq 299
+          mkdir -p renders/intro
+          for f in 0012:0.20s 0060:1.00s 0179:2.98s 0228:3.80s 0279:4.65s; do
+            cp "intro-frames/frame-${f%%:*}.png" "renders/intro/intro-${f#*:}.png"
+          done
+          rm -rf intro-frames
           "$APPIMAGE" --feedback-probe || echo "feedback probe failed"
           linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           # The canvas alone, both ways, with nothing running (the same picture every time):

@@ -105,6 +105,10 @@ struct Prefs {
 	std::string lastSeenVersion;
 	bool playLaunchSound = true;                  // the launch screen's chime
 	bool firstLaunchPlayed = false;               // the first launch's slower splash and sound, once ever
+	// The intro (Intro.h), played once each: on the first launch, and on the
+	// first launch after an update (the What's New version it introduced).
+	bool introFirstLaunchPlayed = false;
+	std::string introUpdatePlayed;
 	std::string seenWhatsNew;
 	// Export as Image: the grid, the name-and-result strip, the style and size.
 	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;

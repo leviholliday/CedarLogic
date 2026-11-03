@@ -2,12 +2,18 @@
 // transparency where the desktop composites (so the panel's corners are
 // round and its shadow soft); on one that doesn't, the panel fills the
 // window. Blurs are drawn as fades and soft glows.
+//
+// When the intro is owed (Intro.h), the window is the size of the circuit
+// window and where it will come in: the intro plays in it, then this panel
+// over it, part-way into its own appearance, which dissolves into the window.
 
 #include "Splash.h"
 #include "Brand.h"
+#include "Intro.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -41,9 +47,26 @@ bool reduceMotion() {
 struct Timeline {
 	bool first = false;     // the very first launch: slower, with the sound
 	bool calm = false;      // the desktop's animations are off
+	bool afterIntro = false;   // played after the intro (Intro.h)
 	double dissolveAt = 2.25, fadeTime = 0.42, readyAt = -1;
+	std::string title = "CedarLogic";
 	struct Step { double at; std::string text; double progress; };
 	std::vector<Step> steps;
+
+	// After the intro: "Ready", the version in its title, the rest of its
+	// appearance from intro::kSplashAt on its own clock (the bar filling as it
+	// goes), its sweep at full length, and the dissolve straight after it (as
+	// the Mac's Splash.configureAfterIntro). With `calm`, the still, briefly.
+	void planAfterIntro(bool calm_) {
+		afterIntro = true;
+		first = false;
+		calm = calm_;
+		title = std::string("CedarLogic ") + intro::version();
+		steps = { { -100, "Ready", 1 } };
+		readyAt = 0;
+		dissolveAt = calm ? intro::kCalmHold : intro::kSplashAt + intro::kDissolveAt - intro::kCardIn;
+		fadeTime = calm ? intro::kCalmFade : intro::kFade;
+	}
 
 	// `head`: the seconds the launch's work already took with the panel up
 	// (still clear). The Mac counts its timeline from the launch, so slow
@@ -85,6 +108,12 @@ struct Timeline {
 	}
 
 	double progress(double t) const {
+		// After the intro: gliding home from where it'd be as the panel comes in.
+		if (afterIntro) {
+			if (calm) return 1;
+			const double from = intro::kSplashAt, end = dissolveAt - 0.05;
+			return 0.3 + 0.7 * smooth((t - from) / (end - from));
+		}
 		const double pace = calm ? 0.9 : first ? 3.9 : 2.1;
 		auto early = [&](double x) { return 0.92 * smooth(x / pace); };
 		if (readyAt < 0 || t <= readyAt) return early(t);
@@ -111,7 +140,6 @@ void polyline(cairo_t* cr, const std::vector<PointF>& pts, double progress) {
 	}
 }
 
-const char* kTitle = "CedarLogic";
 const float kTitleSize = 36, kLetterGap = 0.5f;
 
 // The panel itself, 560 x 372 points at the origin, at time t.
@@ -219,6 +247,7 @@ void drawPanel(cairo_t* cr, const Timeline& tl, double t) {
 	{
 		std::vector<float> widths;
 		float titleW = 0;
+		const char* kTitle = tl.title.c_str();
 		for (const char* c = kTitle; *c; c++) {
 			widths.push_back(brand::textWidth(std::string(1, *c), kTitleSize, brand::SemiBold));
 			titleW += widths.back() + kLetterGap;
@@ -358,7 +387,30 @@ struct Splash {
 	gpointer thenData = nullptr;
 	std::string opening;
 	guint tick = 0;
-	double elapsed() const { return start < 0 ? 0 : now() - start; }
+
+	// The intro (Intro.h), when it's owed: `scene` while it plays in this
+	// window (else, with the desktop's animations off, just the still panel).
+	intro::Trigger intro = intro::Trigger::None;
+	intro::Scene* scene = nullptr;
+	intro::WireLook look;
+	float sceneW = 0, sceneH = 0;
+	bool maximized = false;       // the circuit window comes in maximized
+	double freeze = 1e9;
+	// Skipped, or given way to the still panel: when it dissolves, and how long.
+	double cutAt = -1, cutFade = 0;
+	bool still = false;           // gave way: the frames came too slowly
+	double stillAt = 0;
+	double lastTick = -1;
+	int frames = 0, slowDraws = 0, slowGaps = 0;
+
+	double elapsed() const { return start < 0 ? 0 : std::min(now() - start, freeze); }
+	// When it dissolves into the windows it held, and over how long.
+	double dissolveAt() const { return cutAt >= 0 ? cutAt : scene ? intro::kDissolveAt : tl.dissolveAt; }
+	double fadeTime() const {
+		if (cutAt >= 0) return cutFade;
+		if (scene) return composited ? intro::kFade : 0;   // (where nothing's see-through: at once)
+		return tl.fadeTime;
+	}
 };
 
 Splash* g_splash = nullptr;
@@ -374,7 +426,44 @@ void destroy(Splash* s) {
 	s->tick = 0;
 	if (s->win) gtk_widget_destroy(s->win);
 	if (g_splash == s) g_splash = nullptr;
+	delete s->scene;
 	delete s;
+}
+
+// The intro's window, at t: the intro, then the panel over it, part-way into
+// its appearance; or the still panel over the canvas, when it gave way.
+void drawIntro(Splash* s, cairo_t* cr, float w, float h) {
+	if (s->start < 0) {
+		if (!s->composited) fillRect(cr, rectF(0, 0, w, h), colorF(0.075f, 0.082f, 0.098f));
+		return;
+	}
+	if (s->sceneW != w || s->sceneH != h) {
+		// The desktop gave the window another size: laid out again for it.
+		delete s->scene;
+		s->scene = new intro::Scene(w, h, s->look, true);
+		s->sceneW = w;
+		s->sceneH = h;
+	}
+	const double t = s->elapsed();
+	const double fade = s->fadeTime();
+	const double shown = t < s->dissolveAt() ? 0 : fade > 0 ? intro::easeInOut((t - s->dissolveAt()) / fade) : 1;
+	cairo_save(cr);
+	if (s->composited) {
+		roundedPath(cr, rectF(0, 0, w, h), 10);
+		cairo_clip(cr);
+	}
+	const PointF card = intro::cardOrigin(w, h);
+	if (s->still) {
+		s->scene->drawGround(cr, 1 - shown);
+		drawPanelAfterIntro(cr, card.x, card.y, t - s->stillAt, 1 - shown, true);
+	} else {
+		// Fading in as a whole from nothing (where the desktop composites).
+		s->scene->draw(cr, t, (s->composited ? intro::fadeInShown(t) : 1) * (1 - shown));
+		if (t >= intro::kCardIn)
+			drawPanelAfterIntro(cr, card.x, card.y, t - intro::kCardIn + intro::kSplashAt,
+			                    intro::easeInOut((t - intro::kCardIn) / intro::kCardFade) * (1 - shown), false);
+	}
+	cairo_restore(cr);
 }
 
 gboolean drawCb(GtkWidget* w, cairo_t* cr, gpointer data) {
@@ -385,13 +474,24 @@ gboolean drawCb(GtkWidget* w, cairo_t* cr, gpointer data) {
 		cairo_set_source_rgba(cr, 0, 0, 0, 0);
 		cairo_paint(cr);
 		cairo_restore(cr);
+		const float ww = gtk_widget_get_allocated_width(w), wh = gtk_widget_get_allocated_height(w);
+		if (s->scene) {
+			const gint64 began = g_get_monotonic_time();
+			drawIntro(s, cr, ww, wh);
+			// A frame that takes too long, three in a row, and it gives way
+			// (tickCb): a Raspberry Pi shouldn't play it as a slideshow.
+			if (s->start >= 0 && !s->still && s->cutAt < 0 && ++s->frames > 3) {
+				const double ms = (g_get_monotonic_time() - began) / 1000.0;
+				s->slowDraws = ms > 45 ? s->slowDraws + 1 : 0;
+			}
+			return;
+		}
 		const double t = s->elapsed();
 		const double appear = s->start < 0 ? 0 : std::min(1.0, t / 0.2);
 		if (s->composited) {
 			drawAll(cr, s->tl, t, appear, true);
 		} else {
 			// No transparency here: the panel fills the window.
-			const float ww = gtk_widget_get_allocated_width(w), wh = gtk_widget_get_allocated_height(w);
 			fillRect(cr, rectF(0, 0, ww, wh), kGroundBottom);
 			cairo_save(cr);
 			cairo_translate(cr, -kMargin + (ww - kW) / 2, -kMargin + (wh - kH) / 2);
@@ -402,6 +502,16 @@ gboolean drawCb(GtkWidget* w, cairo_t* cr, gpointer data) {
 	return TRUE;
 }
 
+// The intro gives way to the still panel (as with the animations off): held
+// a moment, then the crossfade.
+void giveWay(Splash* s, double t, const char* why) {
+	s->still = true;
+	s->stillAt = t;
+	s->cutAt = t + intro::kCalmHold;
+	s->cutFade = s->composited ? intro::kCalmFade : 0;
+	g_printerr("CedarLogic: the intro gave way to the still launch screen (%s)\n", why);
+}
+
 // Once a frame, in step with the screen (the frame clock), not on a timer
 // of its own that drifts against it.
 gboolean tickCb(GtkWidget*, GdkFrameClock*, gpointer data) {
@@ -409,15 +519,28 @@ gboolean tickCb(GtkWidget*, GdkFrameClock*, gpointer data) {
 	gtk_widget_queue_draw(s->area);
 	if (s->start < 0) return G_SOURCE_CONTINUE;
 	const double t = s->elapsed();
+	if (s->scene && !s->still && s->cutAt < 0) {
+		// Frames far apart (the drawing, or the desktop, can't keep up):
+		// twice, before the bloom, and it gives way.
+		const double n = now();
+		if (s->lastTick >= 0 && t > 0.3 && t < intro::kBloomAt && n - s->lastTick > 0.15) s->slowGaps++;
+		s->lastTick = n;
+		if (s->slowGaps >= 2) giveWay(s, t, "frames far apart");
+		else if (s->slowDraws >= 3 && t < intro::kBloomAt) giveWay(s, t, "frames slow to draw");
+	}
 	// The windows come in as it starts to dissolve, under it.
-	if (!s->presented && t >= s->tl.dissolveAt) {
+	if (!s->presented && t >= s->dissolveAt()) {
 		s->presented = true;
 		GSourceFunc f = s->then;
 		s->then = nullptr;
 		if (f) guarded("opening the windows", [&] { f(s->thenData); });
-		if (g_splash == s && s->win) gtk_window_present(GTK_WINDOW(s->win));
+		if (g_splash == s && s->win) {
+			// Over them as it goes, but the keys are theirs now.
+			if (s->scene) gtk_window_set_accept_focus(GTK_WINDOW(s->win), FALSE);
+			gtk_window_present(GTK_WINDOW(s->win));
+		}
 	}
-	if (t >= s->tl.dissolveAt + s->tl.fadeTime + 0.05) {
+	if (t >= s->dissolveAt() + s->fadeTime() + (s->fadeTime() > 0 ? 0.05 : 0)) {
 		s->tick = 0;
 		// Gone after this frame (not from inside its own frame callback).
 		g_idle_add([](gpointer p) -> gboolean {
@@ -429,6 +552,36 @@ gboolean tickCb(GtkWidget*, GdkFrameClock*, gpointer data) {
 	return G_SOURCE_CONTINUE;
 }
 
+// Any key or click while the intro plays: it goes, quickly.
+gboolean skipCb(GtkWidget*, GdkEvent*, gpointer data) {
+	Splash* s = static_cast<Splash*>(data);
+	if (!s->scene || s->start < 0 || s->presented) return TRUE;
+	const double t = s->elapsed();
+	if (t >= s->dissolveAt()) return TRUE;
+	s->cutAt = t;
+	s->cutFade = s->composited ? intro::kSkipFade : 0;
+	intro::stopSound();
+	return TRUE;
+}
+
+bool isX11() {
+	GdkDisplay* d = gdk_display_get_default();
+	return d && strcmp(G_OBJECT_TYPE_NAME(d), "GdkX11Display") == 0;
+}
+
+// The monitor the pointer is on (where the windows will come in).
+GdkMonitor* pointerMonitor() {
+	GdkDisplay* d = gdk_display_get_default();
+	if (!d) return nullptr;
+	int x = 0, y = 0;
+	if (GdkSeat* seat = gdk_display_get_default_seat(d))
+		if (GdkDevice* p = gdk_seat_get_pointer(seat)) gdk_device_get_position(p, nullptr, &x, &y);
+	GdkMonitor* m = gdk_display_get_monitor_at_point(d, x, y);
+	if (!m) m = gdk_display_get_primary_monitor(d);
+	if (!m && gdk_display_get_n_monitors(d) > 0) m = gdk_display_get_monitor(d, 0);
+	return m;
+}
+
 }  // namespace
 
 GtkWidget* showSplash() {
@@ -436,6 +589,13 @@ GtkWidget* showSplash() {
 	Splash* s = new Splash();
 	s->tl.first = !prefs().hasSeenWelcome && !prefs().firstLaunchPlayed;
 	s->tl.calm = reduceMotion();
+	s->intro = intro::pending();
+	if (s->intro != intro::Trigger::None) {
+		s->tl.planAfterIntro(s->tl.calm);
+		// The first launch's sound, cut to land on the LED, ready by the time it plays.
+		if (s->intro == intro::Trigger::First && prefs().playLaunchSound) intro::prepareSound(s->tl.calm);
+	}
+	const bool introWindow = s->intro != intro::Trigger::None && !s->tl.calm;
 	s->win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_decorated(GTK_WINDOW(s->win), FALSE);
 	gtk_window_set_resizable(GTK_WINDOW(s->win), FALSE);
@@ -443,7 +603,8 @@ GtkWidget* showSplash() {
 	gtk_window_set_type_hint(GTK_WINDOW(s->win), GDK_WINDOW_TYPE_HINT_SPLASHSCREEN);
 	gtk_window_set_position(GTK_WINDOW(s->win), GTK_WIN_POS_CENTER);
 	gtk_window_set_keep_above(GTK_WINDOW(s->win), TRUE);
-	gtk_window_set_accept_focus(GTK_WINDOW(s->win), FALSE);
+	// The intro takes the keys that skip it; the launch screen can't be skipped.
+	gtk_window_set_accept_focus(GTK_WINDOW(s->win), introWindow);
 	gtk_window_set_title(GTK_WINDOW(s->win), "CedarLogic");
 	GdkScreen* screen = gtk_widget_get_screen(s->win);
 	GdkVisual* rgba = gdk_screen_get_rgba_visual(screen);
@@ -451,19 +612,41 @@ GtkWidget* showSplash() {
 	if (s->composited) {
 		gtk_widget_set_visual(s->win, rgba);
 		gtk_widget_set_app_paintable(s->win, TRUE);
+	}
+	if (introWindow) {
+		// Where the circuit window will come in, its size (Window.cpp's),
+		// on the screen with the pointer on it.
+		int w = prefs().windowWidth, h = prefs().windowHeight;
+		s->maximized = prefs().windowMaximized;
+		GdkRectangle area = { 0, 0, 1280, 800 };
+		if (GdkMonitor* m = pointerMonitor()) gdk_monitor_get_workarea(m, &area);
+		if (s->maximized) { w = area.width; h = area.height; }
+		w = std::max(480, std::min(w, area.width));
+		h = std::max(320, std::min(h, area.height));
+		gtk_window_set_default_size(GTK_WINDOW(s->win), w, h);
+		if (s->maximized) {
+			gtk_window_set_position(GTK_WINDOW(s->win), GTK_WIN_POS_NONE);
+			gtk_window_move(GTK_WINDOW(s->win), area.x, area.y);
+		}
+		s->look = intro::WireLook::current();
+		s->scene = new intro::Scene((float)w, (float)h, s->look, true);
+		s->sceneW = (float)w;
+		s->sceneH = (float)h;
+		s->freeze = intro::freezeAt();
+	} else if (s->composited) {
 		gtk_window_set_default_size(GTK_WINDOW(s->win), (int)(kW + 2 * kMargin), (int)(kH + 2 * kMargin));
 	} else {
 		gtk_window_set_default_size(GTK_WINDOW(s->win), (int)kW, (int)kH);
 	}
 	// Before GTK draws it the window is its CSS background (the desktop
 	// theme's, light grey or white): a pale box flashed up where the panel
-	// was about to be. Clear where it composites, the panel's ground where
-	// it doesn't.
+	// was about to be. Clear where it composites, the panel's ground (or the
+	// intro's canvas) where it doesn't.
 	{
 		GtkCssProvider* css = gtk_css_provider_new();
+		const Color under = introWindow ? colorF(0.075f, 0.082f, 0.098f) : kGroundBottom;
 		const std::string ground = s->composited ? "transparent"
-		                                         : format("rgb(%d,%d,%d)", (int)(kGroundBottom.r * 255), (int)(kGroundBottom.g * 255),
-		                                                  (int)(kGroundBottom.b * 255));
+		                                         : format("rgb(%d,%d,%d)", (int)(under.r * 255), (int)(under.g * 255), (int)(under.b * 255));
 		gtk_css_provider_load_from_data(css, ("window { background: " + ground + "; box-shadow: none; border: none; }").c_str(), -1, nullptr);
 		gtk_style_context_add_provider(gtk_widget_get_style_context(s->win), GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
 		g_object_unref(css);
@@ -471,6 +654,11 @@ GtkWidget* showSplash() {
 	s->area = gtk_drawing_area_new();
 	gtk_container_add(GTK_CONTAINER(s->win), s->area);
 	g_signal_connect(s->area, "draw", G_CALLBACK(drawCb), s);
+	if (introWindow) {
+		gtk_widget_add_events(s->area, GDK_BUTTON_PRESS_MASK);
+		g_signal_connect(s->area, "button-press-event", G_CALLBACK(skipCb), s);
+		g_signal_connect(s->win, "key-press-event", G_CALLBACK(skipCb), s);
+	}
 	g_splash = s;
 	gtk_widget_show_all(s->win);
 	s->tick = gtk_widget_add_tick_callback(s->area, tickCb, s, nullptr);
@@ -491,6 +679,16 @@ void splashSetOpening(const std::string& name) {
 	if (g_splash) g_splash->opening = name;
 }
 
+void splashPlaceUnder(GtkWindow* w) {
+	Splash* s = g_splash;
+	// Only X11 lets an app say where its windows go; elsewhere the desktop
+	// places both (centred, as a rule).
+	if (s == nullptr || s->scene == nullptr || w == nullptr || s->maximized || !s->win || !isX11()) return;
+	int x = 0, y = 0;
+	gtk_window_get_position(GTK_WINDOW(s->win), &x, &y);
+	gtk_window_move(w, x, y);
+}
+
 void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden, gpointer data) {
 	Splash* s = g_splash;
 	if (splash == nullptr || s == nullptr || s->win != splash) {
@@ -499,9 +697,21 @@ void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden, gpointer data) {
 	}
 	s->then = onHidden;
 	s->thenData = data;
+	s->start = now();
+	if (s->intro != intro::Trigger::None) {
+		// Played once each: kept now, so a launch that stops part-way doesn't play it again.
+		intro::markPlayed(s->intro);
+		if (s->intro == intro::Trigger::First) {
+			prefs().firstLaunchPlayed = true;
+			if (prefs().playLaunchSound) intro::playSound();
+		}
+		prefs().save();
+		// To the front, for the keys that skip it.
+		if (s->scene) gtk_window_present(GTK_WINDOW(s->win));
+		return;
+	}
 	int gates = 0, families = 0;
 	libraryCounts(gates, families);
-	s->start = now();
 	s->tl.plan(gates, families, s->opening, s->start - s->shownAt);
 	if (s->tl.first) {
 		// The first launch's sound: once ever.
@@ -509,6 +719,18 @@ void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden, gpointer data) {
 		prefs().save();
 		if (prefs().playLaunchSound) brand::playChime();
 	}
+}
+
+void drawPanelAfterIntro(cairo_t* cr, float x, float y, double t, double opacity, bool calm) {
+	static Timeline played, still;
+	if (!played.afterIntro) {
+		played.planAfterIntro(false);
+		still.planAfterIntro(true);
+	}
+	cairo_save(cr);
+	cairo_translate(cr, x - kMargin, y - kMargin);
+	drawAll(cr, calm ? still : played, t, opacity, true);
+	cairo_restore(cr);
 }
 
 bool renderSplashFrame(double t, bool first, const std::string& file) {
