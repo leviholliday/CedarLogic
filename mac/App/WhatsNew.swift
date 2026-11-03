@@ -115,6 +115,7 @@ struct WhatsNewView: View {
         }
         .frame(width: 820, height: 600)
         .background(BrandBackground())
+        .background(Greeting.NotRestored())
         .preferredColorScheme(.dark)
         .tint(Brand.neon)
         .onAppear { WhatsNew.markSeen(); installKeys() }

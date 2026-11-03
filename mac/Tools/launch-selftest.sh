@@ -22,8 +22,9 @@
 # `rounds` times each: its windows show on screen for about 8 s each, and
 # nothing is clicked. Once the launch screen has gone, and the welcome or
 # What's New has been closed, the circuit window must be the key window, its
-# canvas must have the keyboard and File > Export as Image… must be enabled
-# (LaunchFocusCheck); then the same after another window has been in front
+# canvas must have the keyboard, File > Export as Image… must be enabled and
+# its key (⌘E, sent through the app's own event queue) must ask for the
+# export (LaunchFocusCheck); then the same after another window has been in front
 # for a moment. It takes the keyboard for those seconds: run it when you're
 # not typing elsewhere (a launch macOS keeps from the front, as with the
 # screen locked, is a SKIP). HEADLESS=0 FOCUS=1: only those launches.
