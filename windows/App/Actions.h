@@ -56,7 +56,7 @@ bool isDefault();
 
 // The words a search looks in: the name, the menu and the shortcut, as it
 // reads and spelled out ("ctrl control shift t"). Every word typed has to be
-// in them.
+// in them; one of a single letter or digit (a key) has to be a word of its own.
 std::string words(const Def& d);
 bool matches(const Def& d, const std::string& query);
 

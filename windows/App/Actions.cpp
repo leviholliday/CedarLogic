@@ -6,6 +6,7 @@
 #include "Window.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <sstream>
 
@@ -261,10 +262,23 @@ std::string words(const Def& d) {
 
 bool matches(const Def& d, const std::string& query) {
 	const std::string hay = words(d);
+	// Its words on their own, for a key typed alone ("ctrl e": the E key,
+	// not every name with an e in it).
+	std::vector<std::string> tokens;
+	std::string t;
+	for (char c : hay + " ") {
+		if (std::isalnum((unsigned char)c) || (unsigned char)c >= 0x80) t += c;
+		else if (!t.empty()) { tokens.push_back(t); t.clear(); }
+	}
 	std::istringstream in(lowerCase(query));
 	std::string word;
-	while (in >> word)
-		if (hay.find(word) == std::string::npos) return false;
+	while (in >> word) {
+		if (word.size() == 1) {
+			if (std::find(tokens.begin(), tokens.end(), word) == tokens.end() && hay.find(" " + word + " ") == std::string::npos) return false;
+		} else if (hay.find(word) == std::string::npos) {
+			return false;
+		}
+	}
 	return true;
 }
 

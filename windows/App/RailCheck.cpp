@@ -135,6 +135,7 @@ void search() {
 	check(has(ids("ctrl e"), "exportImage") && has(ids("control e"), "exportImage") && has(ids("Ctrl+E"), "exportImage"),
 	      "search: ctrl e, control e and Ctrl+E find Export as Image");
 	check(ids("export lab") == std::vector<std::string>{ "exportReport" }, "search: every word must match (export lab) " + join(ids("export lab")));
+	check(ids("ctrl e") == std::vector<std::string>{ "exportImage" }, "search: a key alone is that key (ctrl e) " + join(ids("ctrl e")));
 	check(ids("zzzz").empty() && ids("").size() == actions::all().size(), "nothing for nonsense, everything for an empty search");
 }
 
