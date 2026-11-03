@@ -6,6 +6,12 @@
 // Then it dissolves into the window. About two and a half seconds, and it
 // can't be skipped.
 //
+// On the very first launch, and the first after an update with a What's
+// New tour, the intro plays first (Intro.swift): the circuit drawing itself
+// over the circuit window, its LED blooming into the icon, which flies into
+// this panel as it fades in, part-way into its own appearance; the panel
+// then plays the rest of it, its sweep at full length, and dissolves.
+//
 // And the smaller card that opens a circuit: its name on glass, a quick
 // sweep, and the circuit fades up (OpeningCard).
 
@@ -89,11 +95,30 @@ final class Splash: ObservableObject {
     private var lastStepAt: Double = 0
 
     static let dissolveTime = 0.42
+    /// The intro, played first (Intro.swift), its panel, and skipped.
+    private(set) var intro: Intro.Trigger?
+    private var introPanel: NSWindow?
+    private var introView: IntroView?
+    private var skipped = false
+    private var skipMonitor: Any?
+    /// When the intro's panel began fading in (it covers the circuit
+    /// window exactly once it's in).
+    private var introPlayed: Date?
+    /// The panel's title, and its sweep of light (when, how long; the
+    /// intro's panel plays the same).
+    @Published private(set) var title = "CedarLogic"
+    static let sweepStart = 0.85
+    static let sweepTime = 0.9
+    private(set) var sweepAt = sweepStart
+    private(set) var sweepLength = sweepTime
     /// The very first launch: slower, with its own sound (FirstLaunch.m4a,
     /// from mac/Tools/make-launch-sound.py), fading into the welcome.
     let firstLaunch = !UserDefaults.standard.bool(forKey: "cl.hasSeenWelcome")
         && !UserDefaults.standard.bool(forKey: "cl.firstLaunchPlayed")
-    var fadeTime: Double { firstLaunch ? 1.1 : Self.dissolveTime }
+    var fadeTime: Double {
+        if intro != nil { return skipped ? 0.3 : Self.reduceMotion ? Intro.calmFade : Intro.fade }
+        return firstLaunch ? 1.1 : Self.dissolveTime
+    }
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     var elapsed: Double { Date().timeIntervalSince(start) }
@@ -114,6 +139,10 @@ final class Splash: ObservableObject {
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
                                                          reason: "The launch screen")
         if Self.reduceMotion { dissolveAt = 1.1 }
+        if let intro = Intro.pending() {
+            configureAfterIntro(intro)
+            SplashDebug.log("intro: " + intro.rawValue)
+        }
         let size = NSSize(width: 560, height: 372)
         // Where you're looking: the screen with the pointer on it.
         let mouse = NSEvent.mouseLocation
@@ -153,6 +182,7 @@ final class Splash: ObservableObject {
         w.alphaValue = 0
         w.orderFrontRegardless()   // unseen: drawn once now, not as it begins
         panel = w
+        if intro != nil && !Self.reduceMotion { makeIntroPanel(below: w) }
         DispatchQueue.main.async { [weak self] in self?.prewarmPalette() }
 
         // Anything else that opens while this is up waits for it: caught as
@@ -176,7 +206,7 @@ final class Splash: ObservableObject {
 
     /// A window arriving while the panel is up: hidden before it's seen.
     func holdEarly(_ w: NSWindow, from: String = "sweep") {
-        guard active, w !== panel, w.level == .normal, !held.contains(where: { $0 === w }) else { return }
+        guard active, w !== panel, w !== introPanel, w.level == .normal, !held.contains(where: { $0 === w }) else { return }
         SplashDebug.log("hold (\(from)) \(w.title) visible=\(w.isVisible)")
         w.alphaValue = 0
         held.append(w)
@@ -189,12 +219,109 @@ final class Splash: ObservableObject {
         began = true
         SplashDebug.log("begin")
         start = Date()
+        if let intro { beginIntro(intro, in: w); return }
         if firstLaunch { playSound() }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.2
             w.animator().alphaValue = 1
         }
         work()
+    }
+
+    /// After the intro (and for its pictures, RenderIntro): "Ready", the
+    /// version in its title, the rest of its appearance from `Intro.splashAt`
+    /// on its own clock (the bar filling as it goes), its sweep at full
+    /// length, and the dissolve straight after it. The same after either
+    /// intro.
+    func configureAfterIntro(_ trigger: Intro.Trigger) {
+        intro = trigger
+        status = "Ready"
+        target = 1
+        readyAt = 0
+        title = "CedarLogic " + Intro.version
+        sweepAt = Self.sweepStart
+        sweepLength = Self.sweepTime
+        dissolveAt = Self.reduceMotion ? Intro.calmHold : Intro.splashAt + Intro.dissolveAt - Intro.cardIn
+    }
+
+    /// The intro's own panel, under this one: laid over the circuit window
+    /// when it plays (`beginIntro`). A click on it skips.
+    private func makeIntroPanel(below card: NSWindow) {
+        let w = NSWindow(contentRect: card.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.hasShadow = true
+        w.level = .floating
+        w.isReleasedWhenClosed = false
+        w.collectionBehavior = card.collectionBehavior
+        w.appearance = NSAppearance(named: .darkAqua)
+        let v = IntroView(frame: NSRect(origin: .zero, size: card.frame.size))
+        w.contentView = v
+        w.alphaValue = 0
+        w.orderFrontRegardless()
+        card.orderFrontRegardless()   // the panel stays above it
+        introPanel = w
+        introView = v
+    }
+
+    /// The intro: its panel laid exactly over the circuit window (where that
+    /// will come in) and played; this panel comes in over its bloom, on its
+    /// own clock at `Intro.splashAt`. Any key or click skips. With Reduce
+    /// Motion, just this panel's still.
+    private func beginIntro(_ trigger: Intro.Trigger, in card: NSWindow) {
+        Intro.markPlayed(trigger)
+        if trigger == .firstLaunch { Intro.playSound(calm: Self.reduceMotion) }
+        skipMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] e in
+            MainActor.assumeIsolated { self?.skipIntro() ?? false } ? nil : e
+        }
+        guard let ip = introPanel, let view = introView else {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                card.animator().alphaValue = 1
+            }
+            return
+        }
+        let screen = card.screen ?? NSScreen.main
+        if let screen { place(held, on: screen) }
+        let doc = held.first { NSDocumentController.shared.document(for: $0) != nil } ?? held.first
+        let vis = screen?.visibleFrame ?? card.frame
+        let frame = doc?.frame ?? NSRect(x: (vis.midX - 640).rounded(), y: (vis.midY - 400).rounded(), width: 1280, height: 800)
+        ip.setFrame(frame, display: false)
+        let corner: CGFloat
+        if #available(macOS 26.0, *) { corner = 16 } else { corner = 10 }
+        view.frame = NSRect(origin: .zero, size: frame.size)
+        // Where this panel's icon is (44 points down from its top), in the
+        // intro's points.
+        let iconAt = CGPoint(x: card.frame.midX - frame.minX, y: card.frame.maxY - 44 - 64 - frame.minY)
+        view.prepare(trigger, size: frame.size, cornerRadius: corner, cardIcon: iconAt)
+        view.play()
+        introPlayed = Date()
+        // The canvas fades in, as a whole, before the wires trace.
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Intro.fadeIn
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ip.animator().alphaValue = 1
+        }
+        start = Date().addingTimeInterval(Intro.cardIn - Intro.splashAt)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Intro.cardIn) { [weak self] in
+            guard let self, self.active, !self.skipped else { return }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Intro.cardFade
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                card.animator().alphaValue = 1
+            }
+        }
+    }
+
+    /// A key or click while the intro plays: it goes, quickly (and the key
+    /// or click with it).
+    private func skipIntro() -> Bool {
+        guard active, intro != nil, !skipped else { return false }
+        SplashDebug.log("intro skipped")
+        skipped = true
+        Intro.fadeSound()
+        finish()
+        return true
     }
 
     /// The palette's pictures for the family it opens on, drawn before the
@@ -278,6 +405,19 @@ final class Splash: ObservableObject {
         if elapsed >= dissolveAt { finish() }
     }
 
+    /// They come in where the launch screen was (the screen you were
+    /// looking at), not wherever macOS put them.
+    private func place(_ windows: [NSWindow], on screen: NSScreen) {
+        let vis = screen.visibleFrame
+        for w in windows where !w.styleMask.contains(.fullScreen) && w.screen !== screen {
+            var f = w.frame
+            f.size.width = min(f.width, vis.width)
+            f.size.height = min(f.height, vis.height)
+            f.origin = NSPoint(x: (vis.midX - f.width / 2).rounded(), y: (vis.midY - f.height / 2).rounded())
+            w.setFrame(f, display: false)
+        }
+    }
+
     private func finish() {
         guard active else { return }
         active = false
@@ -288,26 +428,25 @@ final class Splash: ObservableObject {
         let windows = held
         held = []
         SplashDebug.log("finish: \(windows.count) window(s) coming in")
-        // They come in where the launch screen was (the screen you were
-        // looking at), not wherever macOS put them.
-        if let screen = panel?.screen {
-            let vis = screen.visibleFrame
-            for w in windows where !w.styleMask.contains(.fullScreen) && w.screen !== screen {
-                var f = w.frame
-                f.size.width = min(f.width, vis.width)
-                f.size.height = min(f.height, vis.height)
-                f.origin = NSPoint(x: (vis.midX - f.width / 2).rounded(), y: (vis.midY - f.height / 2).rounded())
-                w.setFrame(f, display: false)
-            }
-        }
+        if let screen = panel?.screen { place(windows, on: screen) }
+        if let m = skipMonitor { NSEvent.removeMonitor(m); skipMonitor = nil }
         // The canvases fade their grid in with the windows (their own appear
         // played while they were hidden).
         NotificationCenter.default.post(name: .clSplashDone, object: nil)
+        // The window the intro's panel covers exactly is put in under it at
+        // once, and the panel fades off it: a true crossfade, with no dip
+        // to the desktop halfway (not while the panel is still fading in).
+        var covered: [NSWindow] = []
+        if let ip = introPanel, let at = introPlayed, Date().timeIntervalSince(at) > Intro.fadeIn + 0.05 {
+            covered = windows.filter { $0.frame == ip.frame }
+        }
+        for w in covered { w.alphaValue = 1 }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = fadeTime
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            for w in windows { w.animator().alphaValue = 1 }
+            for w in windows where !covered.contains(where: { $0 === w }) { w.animator().alphaValue = 1 }
             panel?.animator().alphaValue = 0
+            introPanel?.animator().alphaValue = 0
         }
         // Done on a clock of its own, not the animation's completion: when
         // macOS doesn't run the fade (the windows in Stage Manager's strip,
@@ -315,6 +454,10 @@ final class Splash: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + fadeTime + 0.05) { [weak self] in
             for w in windows where w.alphaValue < 1 { w.alphaValue = 1 }
             SplashDebug.log("dissolved")
+            self?.introView?.stop()
+            self?.introView = nil
+            self?.introPanel?.orderOut(nil)
+            self?.introPanel = nil
             self?.panel?.orderOut(nil)
             self?.panel = nil
             if let a = self?.activity { ProcessInfo.processInfo.endActivity(a); self?.activity = nil }
@@ -332,14 +475,23 @@ final class Splash: ObservableObject {
     }
 }
 
-private struct SplashView: View {
+/// The panel's picture (internal for RenderIntro, which draws it at a
+/// given moment: `at`).
+struct SplashView: View {
     @ObservedObject var model: Splash
+    var at: Double? = nil
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 120, paused: !model.began)) { tl in
-            let t = min(tl.date.timeIntervalSince(model.start), model.freezeAt ?? .infinity)
-            let _ = SplashDebug.frame(t)
-            content(t)
+        Group {
+            if let at {
+                content(at)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 120, paused: !model.began)) { tl in
+                    let t = min(tl.date.timeIntervalSince(model.start), model.freezeAt ?? .infinity)
+                    let _ = SplashDebug.frame(t)
+                    content(t)
+                }
+            }
         }
         .frame(width: 560, height: 372)
     }
@@ -371,7 +523,7 @@ private struct SplashView: View {
                     .blur(radius: calm ? 0 : 16 * (1 - rise))
                     .opacity(rise)
                     .padding(.top, 44)
-                Title(t: t, calm: calm).padding(.top, 20)
+                Title(t: t, calm: calm, text: model.title).padding(.top, 20)
                 Text("LOGIC SIMULATOR  ·  FOR MAC")
                     .font(.system(size: 10, weight: .semibold)).kerning(2.4)
                     .foregroundStyle(Brand.dim.opacity(0.75))
@@ -385,9 +537,9 @@ private struct SplashView: View {
                     .animation(.easeOut(duration: 0.2), value: model.status)
                     .opacity(Self.span(t, 0.5, 0.9))
                     .padding(.bottom, 14)
-                Bar(fill: shownProgress(t)).padding(.horizontal, 30).padding(.bottom, 24)
+                Bar(fill: model.intro != nil ? introProgress(t) : shownProgress(t)).padding(.horizontal, 30).padding(.bottom, 24)
             }
-            if !calm { Sweep(phase: Self.span(t, 0.85, 1.75)) }
+            if !calm { Sweep(phase: Self.span(t, model.sweepAt, model.sweepAt + model.sweepLength)) }
         }
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous)
@@ -412,6 +564,15 @@ private struct SplashView: View {
         let from = early(r)
         let end = max(r + 0.25, model.dissolveAt - 0.05)
         return from + (1 - from) * smooth((t - r) / (end - r))
+    }
+
+    /// After the intro: the bar glides home from where it'd be when the
+    /// panel comes in, as the panel plays (full at once with Reduce Motion).
+    private func introProgress(_ t: Double) -> Double {
+        if Splash.reduceMotion { return 1 }
+        func smooth(_ x: Double) -> Double { let c = min(1, max(0, x)); return c * c * (3 - 2 * c) }
+        let from = Intro.splashAt, end = model.dissolveAt - 0.05
+        return 0.3 + 0.7 * smooth((t - from) / (end - from))
     }
 
     /// The icon's faint grid, strongest in the middle.
@@ -470,9 +631,10 @@ private struct SplashView: View {
     private struct Title: View {
         let t: Double
         let calm: Bool
+        let text: String
         var body: some View {
             HStack(spacing: 0.5) {
-                ForEach(Array("CedarLogic".enumerated()), id: \.offset) { i, ch in
+                ForEach(Array(text.enumerated()), id: \.offset) { i, ch in
                     let p = calm ? SplashView.span(t, 0.2, 0.5) : SplashView.span(t, 0.55 + Double(i) * 0.045, 0.9 + Double(i) * 0.045)
                     Text(String(ch))
                         .font(.system(size: 36, weight: .semibold, design: .default))

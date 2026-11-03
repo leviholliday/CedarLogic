@@ -252,6 +252,12 @@ enum LaunchSelfTest {
         check(!(welcome && whatsNew), "never the welcome and What's New together")
         let firstLaunch = !UserDefaults.standard.bool(forKey: "cl.hasSeenWelcome") && !UserDefaults.standard.bool(forKey: "cl.firstLaunchPlayed")
         check(firstLaunch == (state == "first"), "the launch screen is \(firstLaunch ? "the first launch's" : "the usual one")")
+        // The intro (Intro.swift): owed on the first launch and after the
+        // update, never played in a test run like this one.
+        let owed = Intro.owed()
+        check(owed == (state == "first" ? .firstLaunch : state == "updated" ? .update : nil),
+              "the intro owed: \(owed?.rawValue ?? "none")")
+        check(Intro.pending() == nil, "no intro plays in a self-test")
 
         // Which circuit reopens, and that it opens (or a new one does).
         let recents = (UserDefaults.standard.stringArray(forKey: recentsKey) ?? []).map { URL(fileURLWithPath: $0) }

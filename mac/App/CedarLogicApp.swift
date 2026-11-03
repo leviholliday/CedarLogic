@@ -30,6 +30,7 @@ struct CedarLogicApp: App {
             RenderWindow.runIfAsked()
             RenderPresenter.runIfAsked()
             RenderClassroom.runIfAsked()
+            RenderIntro.runIfAsked()
             LabReport.runIfAsked()
             UndoCheck.runIfAsked()
             LeakCheck.runIfAsked()
