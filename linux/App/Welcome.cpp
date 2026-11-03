@@ -1096,10 +1096,11 @@ void art(cairo_t* cr, int chapter, float x, float y, double) {
 			}
 			drawIcon(cr, icons[i], b, 16, i == 0 ? kNeon : colorF(1, 1, 1, 0.75f));
 		}
-		const RectF tip = rectF(strip.left - 178, strip.top + 12, strip.left - 10, strip.top + 38);
+		const float nameW = textWidth("Check My Circuit", 12, Bold), keyW = textWidth("Shift+T", 11, Normal);
+		const RectF tip = rectF(strip.left - 10 - (10 + nameW + 10 + keyW + 10), strip.top + 12, strip.left - 10, strip.top + 38);
 		card(cr, tip, true, 7);
 		text(cr, "Check My Circuit", tip.left + 10, tip.top + 5, 12, Bold, kPrimary);
-		text(cr, "Shift+T", tip.left + 124, tip.top + 6, 11, Normal, kFaint);
+		text(cr, "Shift+T", tip.left + 20 + nameW, tip.top + 6, 11, Normal, kFaint);
 		text(cr, "Drag one up or down", r.left + 18, r.bottom - 64, 12.5f, SemiBold, kSecondary);
 		text(cr, "to put them in your order.", r.left + 18, r.bottom - 44, 12.5f, Normal, kFaint);
 		break;
