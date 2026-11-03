@@ -188,7 +188,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Welcome / first run, Guided Tour | Yes | Yes | Yes | Partial | Web: first-run toast and coach marks in the `/app/` phone shell only (`sim-mobile.js:1211`); no tour |
 | Help window with search | Yes | Yes | Yes | Partial | Mac `Help.swift`; Windows/Linux `Help.cpp`. Web links to the Learn pages |
 | Launch screen with first-launch sound | Yes | Yes | Yes | No | Mac `Splash.swift`; Windows/Linux `Splash.cpp` |
-| 0.4 intro (the circuit draws itself, the LED and "0.4" light, the icon flies into the launch screen) on the first launch and the first after an update | Yes | Yes | No | No | Mac `Intro.swift`; Windows `Intro.cpp` (added 2026-11-03: same timeline, look and once-only keys `introFirstLaunchPlayed`/`introUpdatePlayed`, `CL_INTRO`/`CL_NO_INTRO`, any key or click skips, Animation effects off = the launch screen's still; `--render-intro <dir>` frames in CI's renders). Linux not yet |
+| 0.4 intro (the circuit draws itself, the LED and "0.4" light, the icon flies into the launch screen) on the first launch and the first after an update | Yes | Yes | Yes | No | Mac `Intro.swift`; Windows and Linux `Intro.cpp` (added 2026-11-03: same timeline, look and once-only keys `introFirstLaunchPlayed`/`introUpdatePlayed`, `CL_INTRO`/`CL_NO_INTRO`, any key or click skips, `--render-intro <dir>` frames in CI's renders). Windows: Animation effects off = the launch screen's still. Linux: one window where the circuit window comes in; gives way to the still launch screen on slow frames |
 | Quit confirmation | Yes | Yes | Yes | n/a | Mac `QuitConfirm.swift`; Linux `QuitConfirm.cpp`; Windows `Window.cpp:2035` |
 
 ## 11. Settings window, row by row

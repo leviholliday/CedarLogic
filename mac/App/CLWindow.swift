@@ -45,6 +45,12 @@ struct CLLayout: View {
     @State private var covered = !Splash.shared.active
     @State private var opening: Date?
     @StateObject private var split = SplitState()
+    /// The window's width, for the Actions rail (it folds when narrow).
+    @State private var windowWidth: CGFloat = 0
+    @State private var railPeek = false
+    /// View > Show/Hide Actions, for the rail.
+    @State private var railToggle = 0
+    @State private var customizingActions = false
 
     private var chrome: CLChrome { CLChrome(dark: prefs.dark) }
     /// The card plays once the window is in place (and drawn); whatever
@@ -97,8 +103,19 @@ struct CLLayout: View {
                         .frame(width: 280)
                         .transition(.move(edge: .trailing))
                 }
+                // The Actions rail (Actions.swift): the palette's mirror.
+                // In focus mode it folds to its tab (and comes back as it was).
+                if prefs.actionsMode == .onScreen {
+                    ActionsRail(canvas: canvas, narrow: windowWidth > 0 && windowWidth < ActionsRail.narrowWidth,
+                                focus: focusMode, peek: $railPeek, toggleRequest: railToggle, onCustomize: { customizingActions = true })
+                        .transition(.move(edge: .trailing))
+                }
             }
             .animation(.easeInOut(duration: 0.2), value: canvas.showNotes)
+            .animation(.easeInOut(duration: 0.24), value: prefs.actionsMode)
+            // The row's width is the window's (the whole layout can measure
+            // wider than its window, by the toolbar's ideal).
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
             if prefs.showStatus || !canvas.statusMessage.isEmpty || !canvas.routed.statusMessage.isEmpty {
                 // The side you're working in: its zoom, pointer and count.
                 CLStatusBar(document: document, canvas: canvas.routed, status: canvas.routed.status)
@@ -145,6 +162,8 @@ struct CLLayout: View {
         .onReceive(canvas.$simView) { v in if split.controller.simView != v { split.controller.simView = v } }
         .onReceive(split.controller.$simView) { v in if canvas.simView != v { canvas.simView = v } }
         .modifier(DrawingWindowSync(canvas: canvas, split: split, focusMode: $focusMode))
+        .modifier(ActionsWindowParts(canvas: canvas, partner: split.controller, width: $windowWidth, focusMode: focusMode,
+                                     peek: $railPeek, toggle: $railToggle, customizing: $customizingActions))
         .modifier(PutAwaySheet(canvas: canvas, settingsFor: $settingsFor))
         .onChange(of: prefs.classicTabs) { _, classic in if classic { split.close(document, leftPage: $page) } }
         // Revealed by the launch screen: the grid fades in as it goes.
@@ -278,6 +297,7 @@ struct RamRef: Identifiable { let id: Int }
 
 extension Notification.Name {
     static let clToggleFocusMode = Notification.Name("clToggleFocusMode")
+    static let clToggleActionsRail = Notification.Name("clToggleActionsRail")
     static let clSplit = Notification.Name("clSplit")
     static let clSwitchPane = Notification.Name("clSwitchPane")
     static let clCloseSplit = Notification.Name("clCloseSplit")
@@ -1072,7 +1092,9 @@ struct CLToolbar: View {
                       disabled: !ready) { canvas.perform(.stepClock) }
     }
 
-    @ViewBuilder private var leftTools: some View {
+    /// `keep` 2: every group; 1: without zoom; 0: without copy and paste too
+    /// (room for the actions put in the toolbar, in a narrower window).
+    @ViewBuilder private func leftTools(keep: Int = 2) -> some View {
         if prefs.shown(.file) {
             group {
                 button("doc.badge.plus", tip("New circuit", .newCircuit)) { canvas.perform(.newCircuit) }
@@ -1086,17 +1108,33 @@ struct CLToolbar: View {
                 button("arrow.uturn.forward", tip("Redo", .redo), disabled: !canvas.canRedo) { canvas.redo() }
             }
         }
-        if prefs.shown(.clipboard) {
+        if keep >= 1 && prefs.shown(.clipboard) {
             group {
                 button("doc.on.doc", tip("Copy", .copy)) { canvas.copy() }
                 button("clipboard", tip("Paste", .paste)) { canvas.perform(.paste) }
             }
         }
-        if prefs.shown(.zoom) {
+        if keep >= 2 && prefs.shown(.zoom) {
             group {
                 button("minus.magnifyingglass", tip("Zoom out", .zoomOut)) { canvas.zoomOut() }
                 ZoomReadout(canvas: canvas, status: status, ink: ink, quiet: style == .seamless)
                 button("plus.magnifyingglass", tip("Zoom in", .zoomIn)) { canvas.zoomIn() }
+            }
+        }
+    }
+
+    /// Settings > Actions > In the toolbar: the rail's items as tools
+    /// (Actions.swift), each with its shortcut in its tip.
+    private var toolbarActions: [ActionID] { prefs.actionsMode == .toolbar ? prefs.railActions : [] }
+
+    @ViewBuilder private var actionTools: some View {
+        let ids = toolbarActions
+        if !ids.isEmpty {
+            group {
+                ForEach(ids) { id in
+                    let a = id.action
+                    button(a.symbol, a.titleWithKey, on: a.isOn?(canvas) ?? false, disabled: !id.enabled(canvas)) { id.run(canvas) }
+                }
             }
         }
     }
@@ -1131,8 +1169,16 @@ struct CLToolbar: View {
         HStack(spacing: 12) {
             Color.clear.frame(width: 74, height: 1)
             if prefs.showTitle { TitleMenu(title: title, subtitle: nil, ink: ink, live: styleOverride == nil) }
+            // In a narrower window the left tools give way, zoom first (it's
+            // in the View menu and on ⌘+ / ⌘−); the actions you put in the
+            // toolbar stay. Without any actions there, as it always was.
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { leftTools }
+                HStack(spacing: 12) { leftTools(); actionTools }
+                if !toolbarActions.isEmpty {
+                    HStack(spacing: 12) { leftTools(keep: 1); actionTools }
+                    HStack(spacing: 12) { leftTools(keep: 0); actionTools }
+                    HStack(spacing: 12) { actionTools }
+                }
                 EmptyView()
             }
             Spacer(minLength: 8)
@@ -1151,6 +1197,10 @@ struct CLToolbar: View {
                     button("arrow.uturn.forward", tip("Redo", .redo), disabled: !canvas.canRedo) { canvas.redo() }
                 }
                 Spacer()
+                ForEach(toolbarActions) { id in
+                    let a = id.action
+                    button(a.symbol, a.titleWithKey, on: a.isOn?(canvas) ?? false, disabled: !id.enabled(canvas)) { id.run(canvas) }
+                }
                 if prefs.shown(.sim) { pauseButton }
                 if prefs.shown(.run) { runButton }
                 Menu {
