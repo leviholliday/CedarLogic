@@ -38,7 +38,7 @@ const std::vector<Item> kAll = {
 	{ "exportFile", "Export as CedarLogic File…", "File", "document-send-symbolic", "win.save-as", "exportFile", 0 },
 	{ "exportV2", "Export for CedarLogic 2…", "File", "document-save-as-symbolic", "win.export-v2", nullptr, 0 },
 	{ "exportV1", "Export for CedarLogic 1.x…", "File", "document-save-as-symbolic", "win.export-v1", nullptr, 0 },
-	{ "shareLink", "Share Link…", "File", "insert-link-symbolic", "app.share-link", nullptr, 0 },
+	{ "shareLink", "Share Link…", "File", Icon::Link, "app.share-link", nullptr, 0 },
 	{ "saveAsTemplate", "Save as Template…", "File", "bookmark-new-symbolic", "win.save-template", nullptr, 0 },
 	{ "print", "Print…", "File", "document-print-symbolic", "win.print", "print", 0 },
 	{ "settings", "Settings…", "File", "preferences-system-symbolic", "win.preferences", "preferences", 0 },

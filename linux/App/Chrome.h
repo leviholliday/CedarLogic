@@ -105,6 +105,8 @@ constexpr const char* Wand = "cedarlogic-wand";
 constexpr const char* Eye = "cedarlogic-eye";
 // A square wave (the oscilloscope, the Mac's waveform.path.ecg).
 constexpr const char* Wave = "cedarlogic-wave";
+// Two links of a chain (Share Link, the Mac's link).
+constexpr const char* Link = "cedarlogic-link";
 }
 // Three lines (the header bar's primary menu, GTK's open-menu).
 void drawHamburgerIcon(cairo_t* cr, const RectF& box, const Color& color);

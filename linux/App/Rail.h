@@ -86,6 +86,10 @@ private:
 	bool edgeHot = false;          // the pointer on the rail's left edge (fold / keep open)
 	bool peekShown = false;
 	int floaterState = 0;          // 0 hidden, 1 peeking, 2 the rail
+	// In focus mode the tab strip is the title row, with the window's
+	// buttons: the strip and the slid-out rail start under it.
+	int inset = 0;
+	int topInset() const;
 	anim::Tween slide;             // 0 in, 1 out
 	cairo_surface_t* slideImage = nullptr;   // the rail as it slides, drawn once
 	// A press on an item: let go where it was, a click; moved kDragStart or

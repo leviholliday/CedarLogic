@@ -243,6 +243,7 @@ void drawRailIcon(cairo_t* cr, const RectF& box, float size, const Color& color)
 void drawPredictIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 void drawWandIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 void drawWaveIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawLinkIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 }  // namespace
 
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color) {
@@ -255,6 +256,7 @@ void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const
 	if (std::strcmp(name, Icon::Wand) == 0) { drawWandIcon(cr, box, size, color); return; }
 	if (std::strcmp(name, Icon::Eye) == 0) { drawEyeIcon(cr, box, color, false); return; }
 	if (std::strcmp(name, Icon::Wave) == 0) { drawWaveIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Link) == 0) { drawLinkIcon(cr, box, size, color); return; }
 	// Loaded at the screen's scale, tinted, and kept.
 	double sx = 1, sy = 1;
 	cairo_user_to_device_distance(cr, &sx, &sy);
@@ -546,6 +548,22 @@ void drawPredictIcon(cairo_t* cr, const RectF& box, float size, const Color& col
 	cairo_new_sub_path(cr);
 	cairo_arc(cr, cx, cy + 4 * k, 0.95 * k, 0, 2 * M_PI);
 	cairo_fill(cr);
+	cairo_restore(cr);
+}
+
+void drawLinkIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.5 * std::max(1.0f, k * 0.9f));
+	cairo_translate(cr, cx, cy);
+	cairo_rotate(cr, -M_PI / 4);
+	// Two rounded links, overlapping in the middle.
+	roundedPath(cr, rectF(-7.2f * k, -2.6f * k, 1.2f * k, 2.6f * k), 2.6f * k);
+	cairo_stroke(cr);
+	roundedPath(cr, rectF(-1.2f * k, -2.6f * k, 7.2f * k, 2.6f * k), 2.6f * k);
+	cairo_stroke(cr);
 	cairo_restore(cr);
 }
 

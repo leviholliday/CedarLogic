@@ -1086,7 +1086,7 @@ void art(cairo_t* cr, int chapter, float x, float y, double) {
 		card(cr, r, false, 12);
 		const RectF strip = rectF(r.right - 52, r.top + 10, r.right - 10, r.bottom - 10);
 		fillRound(cr, strip, 9, colorF(1, 1, 1, 0.05f));
-		const char* const icons[] = { "emblem-ok-symbolic", Icon::Predict, Icon::Wand, "insert-link-symbolic", "image-x-generic-symbolic",
+		const char* const icons[] = { "emblem-ok-symbolic", Icon::Predict, Icon::Wand, Icon::Link, "image-x-generic-symbolic",
 		                              "x-office-document-symbolic" };
 		for (int i = 0; i < 6; i++) {
 			const RectF b = rectF(strip.left + 4, strip.top + 8 + i * 40, strip.right - 4, strip.top + 8 + i * 40 + 34);

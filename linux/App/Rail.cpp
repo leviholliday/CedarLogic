@@ -126,6 +126,12 @@ void Rail::itemCenter(int i, double& x, double& y) const {
 	y = actions::kTop + i * actions::kPitch + actions::kItemH / 2;
 }
 
+int Rail::topInset() const {
+	if (!fold.focus) return 0;
+	GtkWidget* strip = win->tabStripForTour();
+	return strip && gtk_widget_get_mapped(strip) ? gtk_widget_get_allocated_height(strip) : 0;
+}
+
 bool Rail::onScreen() const { return prefs().actionsMode == actions::OnScreen; }
 bool Rail::hoverEnabled() const { return prefs().actionsHoverOpen; }
 bool Rail::folded() const { return fold.folded(prefs().actionsCollapsed || pictureFold); }
@@ -276,6 +282,13 @@ void Rail::tick() {
 		held = true;
 		redrawAll();
 	}
+	// Focus mode's title row: kept clear.
+	const int in = topInset();
+	if (in != inset && floater && labels) {
+		inset = in;
+		gtk_widget_set_margin_top(floater->widget(), in);
+		gtk_widget_set_margin_top(labels->widget(), in);
+	}
 	// A narrow window folds it.
 	if (overlay) {
 		const int w = gtk_widget_get_allocated_width(overlay);
@@ -345,7 +358,8 @@ gboolean Rail::leaveCb(GtkWidget* w, GdkEventCrossing* e, gpointer self) {
 
 void Rail::pointerAt(double x, double y) {
 	if (pictureSlid || picturePeek) return;   // a picture's state stays as it was set
-	const double W = gtk_widget_get_allocated_width(overlay), H = gtk_widget_get_allocated_height(overlay);
+	const double W = gtk_widget_get_allocated_width(overlay), H = gtk_widget_get_allocated_height(overlay) - inset;
+	y -= inset;
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
 	hover.setStrip(f && actions::inHotStrip(x, y, W, H), now, f, hoverEnabled());
