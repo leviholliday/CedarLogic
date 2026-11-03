@@ -84,9 +84,15 @@ enum Library {
         f.dateFormat = "yyyyMMdd-HHmmss"
         let id = "\(f.string(from: Date()))-\(Int.random(in: 1000...99999))"
         let folder = root.appendingPathComponent(id, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder.appendingPathComponent("versions"), withIntermediateDirectories: true)
-        try name.write(to: folder.appendingPathComponent("name.txt"), atomically: true, encoding: .utf8)
-        try text.write(to: folder.appendingPathComponent("circuit.cdl"), atomically: true, encoding: .utf8)
+        do {
+            try FileManager.default.createDirectory(at: folder.appendingPathComponent("versions"), withIntermediateDirectories: true)
+            try name.write(to: folder.appendingPathComponent("name.txt"), atomically: true, encoding: .utf8)
+            try text.write(to: folder.appendingPathComponent("circuit.cdl"), atomically: true, encoding: .utf8)
+        } catch {
+            // Half made (the disk filled up on the way): not left behind.
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
         // The file as it is (not as the engine writes it back), to know it again.
         if let source, let original = try? String(contentsOf: source, encoding: .utf8) {
             try? sourceMark(source, text: original).write(to: folder.appendingPathComponent("source.txt"), atomically: true, encoding: .utf8)

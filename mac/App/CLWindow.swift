@@ -2347,6 +2347,7 @@ private struct StatusMessage: View {
     @ObservedObject var canvas: CanvasController
     var body: some View {
         Text(canvas.statusMessage).lineLimit(1)
+            .help(canvas.statusMessage)   // all of it, in a narrow window
             .id(canvas.statusMessage)
             .transition(.opacity)
             .animation(.easeOut(duration: 0.2), value: canvas.statusMessage)

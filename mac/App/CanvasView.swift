@@ -685,11 +685,17 @@ final class CanvasController: ObservableObject {
         // replaces to be answered for: taking it into Your Circuits can
         // close it (a file imported before opens its copy there instead),
         // and the question's answer then brought back a window with no circuit.
-        if !adopted, let w = view?.window, !WindowReplacer.isWaiting(w), let d = NSDocumentController.shared.document(for: w) {
-            adopted = adoptIntoLibrary(d)
+        let now = CACurrentMediaTime()
+        if !adopted, !adopting, now >= saveRetryAt, let w = view?.window, !WindowReplacer.isWaiting(w),
+           let d = NSDocumentController.shared.document(for: w) {
+            adoptIntoLibrary(d)
         }
-        guard let w = view?.window, let d = NSDocumentController.shared.document(for: w),
-              let date = d.fileModificationDate else { return }
+        guard let w = view?.window, let d = NSDocumentController.shared.document(for: w) else { return }
+        // An autosave that failed is tried again every few seconds, edits or not.
+        if autosaveFailed, adopted, !autosaving, now >= saveRetryAt {
+            if d.isDocumentEdited || d.hasUnautosavedChanges { autosaveNow(d) } else { saveWorked(d, library: false) }
+        }
+        guard let date = d.fileModificationDate else { return }
         if let last = lastSeenSave, date != last, !d.isDocumentEdited {
             // ⌘S keeps a version on the spot (as in wx); saving on its own
             // doesn't say so, and keeps one only now and then (Library).
@@ -702,49 +708,167 @@ final class CanvasController: ObservableObject {
     }
     fileprivate(set) var explicitSaveAt: CFTimeInterval = 0
     private var adopted = false
+    /// Taking it into Your Circuits: its save is under way.
+    private var adopting = false
+    /// A circuit made in Your Circuits whose save into it failed: the next
+    /// try saves into it again, rather than making another.
+    private var adoptItem: LibraryItem?
+    private var autosaving = false
+    private var autosaveFailed = false
+    /// After a failed save, when to try again.
+    private var saveRetryAt: CFTimeInterval = 0
+    /// A save failed and the status bar said so: said once, until one works.
+    private var saveTroubleSaid = false
+    /// How many times a failed save was told (the session check counts them).
+    private(set) var saveTroubleNotes = 0
+    /// How many times a save worked again after that was told (the same).
+    private(set) var saveRecoveries = 0
 
     /// Every circuit lives in Your Circuits: a new one joins it once there's
     /// something on it (so an empty ⌘N leaves nothing behind), and a .cdl
     /// file opened from elsewhere carries on as a copy there (the file
     /// itself is left alone; File ▸ Export gets a file out). Opening the
     /// same file again finds the copy. Old versions' read-only copies (in
-    /// the temporary folder) stay as they are. False to try again later.
-    private func adoptIntoLibrary(_ d: NSDocument) -> Bool {
-        guard let document else { return false }
+    /// the temporary folder) stay as they are. If it can't be written there
+    /// (the disk full, the folder not writable), the status bar says why and
+    /// it's tried again every few seconds until it is.
+    private func adoptIntoLibrary(_ d: NSDocument) {
+        guard let document else { return }
         let type = d.fileType ?? UTType.cedarLogicCircuit.identifier
+        let name: String, source: URL?
         if let url = d.fileURL {
             let temp = FileManager.default.temporaryDirectory.standardizedFileURL.path
-            if Library.contains(url) || url.standardizedFileURL.path.hasPrefix(temp) { return true }
-            if let existing = Library.imported(from: url) {
-                d.close()
-                Library.open(existing.circuit)
-                return true
-            }
-            guard let item = try? Library.create(named: url.deletingPathExtension().lastPathComponent,
-                                                 text: document.saveText(), source: url) else { return true }
-            d.save(to: item.circuit, ofType: type, for: .saveAsOperation) { _ in }
+            if Library.contains(url) || url.standardizedFileURL.path.hasPrefix(temp) { adopted = true; return }
+            name = url.deletingPathExtension().lastPathComponent
+            source = url
         } else {
-            guard document.hasGates else { return false }
-            let name = document.libraryName ?? "Untitled Circuit"
-            guard let item = try? Library.create(named: name, text: document.saveText()) else { return true }
-            d.save(to: item.circuit, ofType: type, for: .saveAsOperation) { _ in }
+            guard document.hasGates else { return }
+            name = document.libraryName ?? "Untitled Circuit"
+            source = nil
         }
-        objectWillChange.send()   // the title reads the library name
-        return true
+        // Tried before, and its circuit made but not saved into: that one.
+        // (Looked for before an earlier import, which would find it.)
+        let item: LibraryItem
+        if let made = adoptItem, FileManager.default.fileExists(atPath: made.folder.path) {
+            item = made
+        } else if let url = source, let existing = Library.imported(from: url) {
+            adopted = true
+            d.close()
+            Library.open(existing.circuit)
+            return
+        } else {
+            do {
+                item = try Library.create(named: name, text: document.saveText(), source: source)
+            } catch {
+                saveFailed(error, name: name, library: true)
+                return
+            }
+        }
+        adopting = true
+        d.save(to: item.circuit, ofType: type, for: .saveAsOperation) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.adopting = false
+                if let error {
+                    self.adoptItem = item
+                    self.saveFailed(error, name: name, library: true)
+                    return
+                }
+                self.adoptItem = nil
+                self.adopted = true
+                self.saveWorked(d, library: true)
+                self.objectWillChange.send()   // the title reads the library name
+            }
+        }
     }
 
     /// Saving as you go, the way Google Docs does: a couple of seconds after
-    /// the last change, the circuit is written to its file.
+    /// the last change, the circuit is written to its file. (Not a file from
+    /// elsewhere that isn't in Your Circuits yet: that file is left alone.)
     private var autosaveWork: DispatchWorkItem?
     private func scheduleAutosave() {
         autosaveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let w = self?.sheetHost.view?.window, let d = NSDocumentController.shared.document(for: w),
-                  d.isDocumentEdited, d.fileURL != nil else { return }
-            d.autosave(withImplicitCancellability: true) { _ in }
+            guard let self, let w = self.sheetHost.view?.window, let d = NSDocumentController.shared.document(for: w),
+                  d.isDocumentEdited, let url = d.fileURL, self.adopted || Library.contains(url) else { return }
+            self.autosaveNow(d)
         }
         autosaveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+
+    private func autosaveNow(_ d: NSDocument) {
+        autosaving = true
+        d.autosave(withImplicitCancellability: true) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.autosaving = false
+                if let error {
+                    // An edit came along mid-save and cancelled it: the next save has it.
+                    let e = error as NSError
+                    if e.domain == NSCocoaErrorDomain && e.code == NSUserCancelledError { return }
+                    self.autosaveFailed = true
+                    self.saveFailed(error, name: Library.displayName(for: d.fileURL) ?? d.displayName, library: false)
+                } else if self.autosaveFailed {
+                    self.saveWorked(d, library: false)
+                }
+            }
+        }
+    }
+
+    /// A save that didn't work: said once in the status bar, in plain
+    /// words, and tried again in a few seconds.
+    private func saveFailed(_ error: Error, name: String, library: Bool) {
+        saveRetryAt = CACurrentMediaTime() + Self.saveRetrySeconds
+        NSLog("CedarLogic: couldn't save %@%@: %@", name, library ? " to Your Circuits" : "", String(describing: error))
+        guard !saveTroubleSaid else { return }
+        saveTroubleSaid = true
+        saveTroubleNotes += 1
+        let (why, room) = Self.saveTrouble(error)
+        let what = library ? "Couldn't save “\(name)” to Your Circuits" : "Couldn't save “\(name)”"
+        routed.note("\(what): \(why). Your work is still here; it will be saved \(room ? "when there's room" : "as soon as it can be").",
+                    for: 15)
+    }
+
+    /// A save worked after one didn't: the status bar says so.
+    private func saveWorked(_ d: NSDocument, library: Bool) {
+        autosaveFailed = false
+        saveRetryAt = 0
+        guard saveTroubleSaid else { return }
+        saveTroubleSaid = false
+        saveRecoveries += 1
+        let name = Library.displayName(for: d.fileURL) ?? d.displayName
+        routed.note(library ? "Saved “\(name)” to Your Circuits." : "Saved “\(name)”.")
+    }
+
+    static let saveRetrySeconds: CFTimeInterval = 5
+
+    /// Why a save failed, as the status bar puts it, and whether it's for
+    /// want of room.
+    static func saveTrouble(_ error: Error) -> (why: String, room: Bool) {
+        var codes: [(domain: String, code: Int)] = []
+        var next: NSError? = error as NSError
+        while let n = next, codes.count < 6 {
+            codes.append((n.domain, n.code))
+            next = n.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        func has(cocoa: [Int], posix: [Int32]) -> Bool {
+            codes.contains {
+                ($0.domain == NSCocoaErrorDomain && cocoa.contains($0.code)) ||
+                    ($0.domain == NSPOSIXErrorDomain && posix.contains(Int32($0.code)))
+            }
+        }
+        if has(cocoa: [NSFileWriteOutOfSpaceError], posix: [ENOSPC, EDQUOT]) { return ("the disk is full", true) }
+        if has(cocoa: [NSFileWriteVolumeReadOnlyError], posix: [EROFS]) { return ("the disk can't be written to", false) }
+        if has(cocoa: [NSFileWriteNoPermissionError, NSFileReadNoPermissionError], posix: [EACCES, EPERM]) {
+            return ("CedarLogic isn't allowed to write to its folder", false)
+        }
+        if has(cocoa: [NSFileNoSuchFileError, NSFileReadNoSuchFileError], posix: [ENOENT, ENOTDIR]) {
+            return ("its folder is missing", false)
+        }
+        var text = (error as NSError).localizedFailureReason ?? error.localizedDescription
+        while text.hasSuffix(".") { text.removeLast() }
+        return (text.isEmpty ? "something went wrong writing it" : text, false)
     }
 
     /// Whether this controller runs the simulation clock (the second side of
@@ -870,15 +994,19 @@ final class CanvasController: ObservableObject {
     @Published var statusMessage = "" {
         didSet {
             messageToken &+= 1
+            let hold = messageHold
+            messageHold = 4
             guard !statusMessage.isEmpty else { return }
             let token = messageToken
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
                 guard let self, self.messageToken == token else { return }
                 self.statusMessage = ""
             }
         }
     }
     private var messageToken = 0
+    /// How long the next message stays (a failed save's is long, and says more).
+    private var messageHold: Double = 4
     /// Called every clock tick (the guided tour watches from here).
     var onTick: (() -> Void)?
 
@@ -999,6 +1127,7 @@ final class CanvasController: ObservableObject {
     }
     func cameraMoved() { statusDirty = true }
     func note(_ message: String) { statusMessage = message }
+    func note(_ message: String, for seconds: Double) { messageHold = seconds; statusMessage = message }
 
     var zoomPercent: Int {
         guard let upp = view?.unitsPerPoint, upp > 0 else { return 100 }
