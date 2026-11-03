@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <cstdlib>
@@ -581,6 +582,27 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 	LibraryGate libGateParams;
 	gateLibrary().libParser.getGate(type, libGateParams);
 
+	// A keypad's width and value are read as numbers to pick the key to light
+	// (guiGateKEYPAD::setLogicParam): "OUTPUT_BITS 2147483647" asked for a
+	// position past the value's 8 digits and ended the app. Such a setting is
+	// the library's own instead, said so.
+	if (libGateParams.guiType == "KEYPAD") {
+		for (unsigned int i = 0; i < params.size(); i++) {
+			if (params[i].isGUI) continue;
+			if (params[i].paramName != "OUTPUT_BITS" && params[i].paramName != "OUTPUT_NUM") continue;
+			if (guiGateKEYPAD::isUsableParam(params[i].paramName, params[i].paramValue)) continue;
+			auto def = libGateParams.logicParams.find(params[i].paramName);
+			const string fixed = (def != libGateParams.logicParams.end()) ? def->second
+				: (params[i].paramName == "OUTPUT_BITS" ? string("4") : string("0"));
+			applyNotices.push_back(loadNotice(cl::Severity::Warning,
+			                                  "Gate " + ID + " has a " + params[i].paramName + " of \"" +
+			                                      (params[i].paramValue.size() > 40 ? params[i].paramValue.substr(0, 40) + "..." : params[i].paramValue) +
+			                                      "\", which a keypad can't use. It was set to " + fixed + ".",
+			                                  string(), ID, type));
+			params[i].paramValue = fixed;
+		}
+	}
+
 	for (unsigned int i = 0; i < params.size(); i++) {
 		if (!(params[i].isGUI)) {
 			// A memory's READ_FILE and WRITE_FILE are actions, taken when the
@@ -752,10 +774,28 @@ static cl::CircuitFile buildCircuitFile(vector<GUICanvas*> &glc) {
 			// the next save differ. (Only damaged input leaves one: a wire with
 			// no pins, or one pin and no shape. It carries no connection.)
 			if (entry.second == nullptr) continue;
+			guiWire *wire = entry.second;
+			// The pins are what a wire means; the drawing is what's written, and
+			// the loader joins a wire to the pins its drawing records. A drawing
+			// that has drifted from the pins (one no segment records any more)
+			// saved a wire that, reopened, had let go of that pin while it was
+			// still connected on screen. Such a wire is written as it would be
+			// routed from its pins, as opening a file redraws one; the circuit
+			// on screen is left alone. (A copy routes it: a save changes nothing.)
+			std::unique_ptr<guiWire> routed;
+			if (wire->numConnections() >= 2 && !wire->isSoundShape()) {
+				routed = std::make_unique<guiWire>();
+				routed->setCircuit(glc[i]->getCircuit());
+				routed->setIDs(wire->getIDs());
+				for (const wireConnection &c : wire->getConnections())
+					if (guiGate *g = glc[i]->getCircuit()->getGate(c.gid)) routed->addConnection(g, c.connection, true);
+				routed->straightenRoute();
+				if (routed->numConnections() == wire->numConnections() && routed->isSoundShape()) wire = routed.get();
+			}
 			bool records = false;
-			for (const auto &seg : entry.second->getSegmentMap()) records = records || !seg.second.connections.empty();
+			for (const auto &seg : wire->getSegmentMap()) records = records || !seg.second.connections.empty();
 			if (!records) continue;
-			pg.wires.push_back(buildWire(entry.second));
+			pg.wires.push_back(buildWire(wire));
 		}
 
 		// Both lists come out of unordered_map iteration, so without this two

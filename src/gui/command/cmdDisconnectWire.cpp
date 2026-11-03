@@ -31,6 +31,12 @@ bool cmdDisconnectWire::Do() {
 		cmdConnectWire::sendMessagesToDisconnect(gCircuit, wireId, gateId, hotspotPal);
 	}
 	cmdConnectWire::sendMessagesToDisconnect(gCircuit, wireId, gateId, hotspot);
+	// What's left is drawn from the pins that are left when trimming the
+	// old drawing doesn't give a sound one (it had drifted from its pins
+	// before): as at the other doors (open, paste, the end of a move).
+	// Undo puts back the drawing from before.
+	guiWire *wire = gCircuit->getWire(wireId);
+	if (wire != nullptr && wire->numConnections() >= 2 && !wire->isSoundShape()) wire->straightenRoute();
 
 	return true;
 }
