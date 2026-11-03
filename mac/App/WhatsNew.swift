@@ -43,6 +43,7 @@ struct WhatsNewView: View {
                     ("trash", "Recently Deleted", "In Your Circuits. Restore brings a circuit back. It's kept 30 days, on this Mac."),
                     ("scribble", "Clear Drawing asks first", "It says what will go, and that Edit \u{25B8} Undo brings it back."),
                     ("graduationcap", "Open the Practice Circuit", "In the File and Help menus. It opens as a new circuit of your own to play with."),
+                    ("sidebar.right", "Actions on the right", "The things you use most, one click away. Drag them into your order; right-click to choose your own."),
                 ], tryTitle: "Open Your Circuits"),
         Chapter(eyebrow: "On the page", title: "The same every time",
                 line: "Clicks and wires do what you expect, however big the circuit gets.",

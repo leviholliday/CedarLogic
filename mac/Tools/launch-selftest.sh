@@ -8,10 +8,12 @@
 # (your settings and Your Circuits are never touched; Classroom, the
 # updater and crash reports pointed at addresses nothing answers) is set up
 # in each saved state and then "launched" with --launch-selftest, `rounds`
-# times over (default 3, so 33 launches): the welcome / What's New choice,
+# times over (default 3, so 39 launches): the welcome / What's New choice,
 # which circuit reopens and that it opens, Your Circuits, versions, Sync and
 # Classroom starting offline, the updater and crash reports with no network
-# ("offline"), and (the "damaged" state) damaged circuits.
+# ("offline"), (the "damaged" state) damaged circuits, and where the Actions
+# rail is: on screen for a first launch, hidden for anyone before, folded as
+# it was left ("actions"), and the toolbar's six buttons in toolbar mode.
 # No window opens. A launch
 # passes when it exits 0 within 60 s.
 #
@@ -30,7 +32,7 @@ cd "$(dirname "$0")/../.."
 SRC=mac/build/CedarLogic.app
 [ -d "$SRC" ] || { echo "Build first: mac/build.sh"; exit 1; }
 ROUNDS=${1:-3}
-STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline trash)
+STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline trash actions)
 # STATES_ONLY="damaged" mac/Tools/launch-selftest.sh 40: only those states.
 [ -n "${STATES_ONLY:-}" ] && read -ra STATES <<<"$STATES_ONLY"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/cl-launch-selftest.XXXXXX")

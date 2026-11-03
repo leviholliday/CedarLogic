@@ -27,6 +27,7 @@ struct CedarLogicApp: App {
             SessionCheck.runIfAsked()
             LaunchSelfTest.runIfAsked()
             RenderUI.runIfAsked()
+            RenderActions.runIfAsked()
             RenderWindow.runIfAsked()
             RenderPresenter.runIfAsked()
             RenderClassroom.runIfAsked()
@@ -355,6 +356,8 @@ struct NewOpenCommands: Commands {
         let _ = { AppActions.openWindow = openWindow }()
         CommandGroup(after: .newItem) {
             Button("Your Circuits…") { openWindow(id: "library") }
+            // Your Circuits, open at its Recently Deleted (Actions.swift).
+            Button("Recently Deleted…") { ActionID.recentlyDeleted.run(canvas) }
             Button("New from Template…") { openWindow(id: "templates") }
             Button("Open the Practice Circuit") { Templates.openPractice() }
             Button("Save as Template…") { if let canvas { Templates.saveCurrent(from: canvas) } }
@@ -362,9 +365,9 @@ struct NewOpenCommands: Commands {
             if ClassroomFlag.on {
                 Menu("Classroom") {
                     Button("Classroom…") { openWindow(id: "classroom") }
-                    Button("Create Classroom…") { ClassroomCenter.shared.sheet = .create; openWindow(id: "classroom") }
-                    Button("Join a Class…") { ClassroomCenter.shared.sheet = .join(prefill: ""); openWindow(id: "classroom") }
-                    Button("I Have a Teacher Key…") { ClassroomCenter.shared.sheet = .addTeacherKey(prefill: ""); openWindow(id: "classroom") }
+                    Button("Create Classroom…") { ActionID.createClassroom.run(canvas) }
+                    Button("Join a Class…") { ActionID.joinClass.run(canvas) }
+                    Button("I Have a Teacher Key…") { ActionID.teacherKey.run(canvas) }
                     Divider()
                     Button("Hand In") { ClassroomCenter.shared.handInFront() }
                         .disabled(canvas == nil)
@@ -644,10 +647,11 @@ struct SimulationCommands: Commands {
                 .help("\(keys.combo(.stepClock).map { $0.label + ": " } ?? "")each clock set to \u{201C}Only on Step Clock\u{201D} makes one full cycle")
                 .disabled(canvas?.routed.hasManualClock != true)
             Divider()
-            Button(canvas?.predict.on == true ? "Stop Predicting" : "Predict, Then Reveal") { canvas?.togglePredict() }
-                .disabled(canvas?.simView != true || (canvas?.predict.on != true && canvas?.predictLights.isEmpty != false))
-            Button(canvas?.predict.revealed == true ? "Cover the Lights Again" : "Reveal") { canvas?.revealOrCoverAgain() }
-                .disabled(canvas?.simView != true || canvas?.predict.on != true || canvas?.predict.locked == true)
+            // Outside Simulation View, Predict goes into it with the lights covered (as the Actions rail's does).
+            Button(canvas?.predict.on == true ? "Stop Predicting" : "Predict, Then Reveal") { ActionID.predict.run(canvas) }
+                .disabled(!ActionID.predict.enabled(canvas))
+            Button(canvas?.predict.revealed == true ? "Cover the Lights Again" : "Reveal") { ActionID.reveal.run(canvas) }
+                .disabled(!ActionID.reveal.enabled(canvas))
             Divider()
             Button("Truth Table…") { canvas?.makeTruthTable() }
                 .help("T: every combination of the page's switches (or the selected ones) and what the lights show")
@@ -754,8 +758,8 @@ struct FileCommands: Commands {
             Button("Export as CedarLogic File…") { canvas?.perform(.exportFile) }
                 .keyboardShortcut(keys.menu(.exportFile))
                 .disabled(canvas == nil)
-            Button("Share Link…") { if let canvas { ShareLink.copy(from: canvas) } }
-                .disabled(canvas == nil)
+            Button("Share Link…") { ActionID.shareLink.run(canvas) }
+                .disabled(!ActionID.shareLink.enabled(canvas))
             Button("Version History…") { openWindow(id: "versions") }
                 .disabled(canvas == nil)
             // As in wx's File menu: copies an older CedarLogic can open
@@ -786,14 +790,14 @@ struct HelpCommands: Commands {
             Button("Contents…") { openWindow(id: "help") }
                 .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF1FunctionKey)!)), modifiers: [])
             Divider()
-            Button("Send Feedback…") { FeedbackModel.aim(); openWindow(id: "feedback") }
+            Button("Send Feedback…") { ActionID.feedback.run(canvas) }
                 .keyboardShortcut(keys.menu(.feedback))
             Divider()
             Button("Keyboard Shortcuts") { (canvas ?? CanvasController.front)?.showShortcuts = true }
             Divider()
             Button("What's New in CedarLogic…") { openWindow(id: "whatsnew") }
             Button("Welcome to CedarLogic…") { openWindow(id: "welcome") }
-            Button("Set Up CedarLogic…") { WelcomeRequest.setup(); openWindow(id: "welcome") }
+            Button("Set Up CedarLogic…") { ActionID.setUp.run(canvas) }
             Button("Guided Tour") { TourModel.shared.start() }
             Button("Open the Practice Circuit") { Templates.openPractice() }
         }

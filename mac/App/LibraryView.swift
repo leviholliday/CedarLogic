@@ -568,6 +568,12 @@ struct LibraryView: View {
             selectedID = nil
             searchFocused = true
             keys.install(window: "library") { e in handleKey(e) }
+            // File > Recently Deleted… (or the Actions rail) opened it for that.
+            if LibraryRequest.wantsRecentlyDeleted { LibraryRequest.wantsRecentlyDeleted = false; showDeleted = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clShowRecentlyDeleted)) { _ in
+            LibraryRequest.wantsRecentlyDeleted = false
+            showDeleted = true
         }
         .onDisappear { keys.remove() }
         .onChange(of: search) { _, _ in selectedID = nil }
