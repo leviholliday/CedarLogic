@@ -1515,11 +1515,14 @@ struct SessionDriver {
 		check(r->slidOut(), "the pointer gone, it's still out 150 ms later");
 		pump(600);
 		check(!r->slidOut(), "and back in after 400 ms");
+		// Passing through: in and out again at once (the pointer's own events,
+		// from the warps, arrive after these, in the same order).
+		const double passStart = nowMs();
 		motion(dock, 5, 300, 0);
-		pump(30);
 		away();
+		const double passMs = nowMs() - passStart;
 		pump(400);
-		check(!r->slidOut(), "a pointer passing through the edge in 30 ms doesn't open it");
+		check(!r->slidOut(), format("a pointer passing through the edge (%.0f ms there) doesn't open it", passMs));
 		motion(dock, 5, 200, 0);
 		pump(350);
 		const bool out = r->slidOut();

@@ -242,6 +242,7 @@ void drawNotesIcon(cairo_t* cr, const RectF& box, float size, const Color& color
 void drawRailIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 void drawPredictIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 void drawWandIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawWaveIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 }  // namespace
 
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color) {
@@ -253,6 +254,7 @@ void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const
 	if (std::strcmp(name, Icon::Predict) == 0) { drawPredictIcon(cr, box, size, color); return; }
 	if (std::strcmp(name, Icon::Wand) == 0) { drawWandIcon(cr, box, size, color); return; }
 	if (std::strcmp(name, Icon::Eye) == 0) { drawEyeIcon(cr, box, color, false); return; }
+	if (std::strcmp(name, Icon::Wave) == 0) { drawWaveIcon(cr, box, size, color); return; }
 	// Loaded at the screen's scale, tinted, and kept.
 	double sx = 1, sy = 1;
 	cairo_user_to_device_distance(cr, &sx, &sy);
@@ -544,6 +546,30 @@ void drawPredictIcon(cairo_t* cr, const RectF& box, float size, const Color& col
 	cairo_new_sub_path(cr);
 	cairo_arc(cr, cx, cy + 4 * k, 0.95 * k, 0, 2 * M_PI);
 	cairo_fill(cr);
+	cairo_restore(cr);
+}
+
+void drawWaveIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	roundedPath(cr, rectF(cx - 7.5f * k, cy - 6.5f * k, cx + 7.5f * k, cy + 6.5f * k), 2 * k);
+	cairo_stroke(cr);
+	// A square wave across it.
+	const float lo = cy + 2.5f * k, hi = cy - 2.5f * k;
+	cairo_move_to(cr, cx - 5.5 * k, lo);
+	cairo_line_to(cr, cx - 3 * k, lo);
+	cairo_line_to(cr, cx - 3 * k, hi);
+	cairo_line_to(cr, cx + 0.5 * k, hi);
+	cairo_line_to(cr, cx + 0.5 * k, lo);
+	cairo_line_to(cr, cx + 3 * k, lo);
+	cairo_line_to(cr, cx + 3 * k, hi);
+	cairo_line_to(cr, cx + 5.5 * k, hi);
+	cairo_stroke(cr);
 	cairo_restore(cr);
 }
 

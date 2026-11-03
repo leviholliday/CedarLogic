@@ -344,6 +344,7 @@ gboolean Rail::leaveCb(GtkWidget* w, GdkEventCrossing* e, gpointer self) {
 }
 
 void Rail::pointerAt(double x, double y) {
+	if (pictureSlid || picturePeek) return;   // a picture's state stays as it was set
 	const double W = gtk_widget_get_allocated_width(overlay), H = gtk_widget_get_allocated_height(overlay);
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
@@ -357,6 +358,7 @@ void Rail::pointerAt(double x, double y) {
 }
 
 void Rail::pointerGone() {
+	if (pictureSlid || picturePeek) return;
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
 	hover.setStrip(false, now, f, hoverEnabled());

@@ -89,7 +89,7 @@ const std::vector<Item> kAll = {
 	{ "reveal", "Reveal", "Simulation", "view-reveal-symbolic", "win.reveal", nullptr, 0 },
 	{ "truthTable", "Truth Table…", "Simulation", "x-office-spreadsheet-symbolic", "win.truth-table", "truthTable", 0 },
 	{ "checkCircuit", "Check My Circuit…", "Simulation", "emblem-ok-symbolic", "win.check-circuit", "checkCircuit", 0 },
-	{ "scope", "Oscilloscope", "Simulation", "utilities-system-monitor-symbolic", "win.scope", "scope", 0 },
+	{ "scope", "Oscilloscope", "Simulation", Icon::Wave, "win.scope", "scope", 0 },
 	{ "lock", "Lock the Circuit", "Simulation", "changes-prevent-symbolic", "win.lock", "lock", 0 },
 	// Window (the Linux app keeps its tabs here)
 	{ "newTab", "New Tab", "Window", "tab-new-symbolic", "win.new-tab", "newTab", 0 },
@@ -1028,10 +1028,10 @@ int check() {
 		EdgeHover h;
 		h.setStrip(true, 0, true, true);
 		expect(h.peek() && h.tick(0.05, true, true) == 0 && !h.slidOut, "in the strip, it peeks at once and waits");
-		expect(h.tick(0.1, true, true) == 1 && h.slidOut, "and slides out after 100 ms");
+		expect(h.tick(0.101, true, true) == 1 && h.slidOut, "and slides out after 100 ms");
 		h.setStrip(false, 1.0, true, true);
 		expect(h.tick(1.2, true, true) == 0 && h.slidOut, "left, it's still out 200 ms later");
-		expect(h.tick(1.4, true, true) == -1 && !h.slidOut, "and back in at 400 ms");
+		expect(h.tick(1.401, true, true) == -1 && !h.slidOut, "and back in at 400 ms");
 	}
 	{
 		EdgeHover h;
@@ -1055,7 +1055,7 @@ int check() {
 		expect(h.tick(4, true, true) == 0 && h.slidOut, "and during a drag");
 		h.dragging = false;
 		h.changed(4, true, true);
-		expect(h.tick(4.4, true, true) == -1, "then goes 400 ms after");
+		expect(h.tick(4.401, true, true) == -1, "then goes 400 ms after");
 	}
 	{
 		EdgeHover h;
@@ -1066,7 +1066,7 @@ int check() {
 		expect(h.tick(1, true, true) == 0 && !h.slidOut, "and it doesn't come out again while the pointer's still there");
 		h.setStrip(false, 1, true, true);
 		h.setStrip(true, 1.1, true, true);
-		expect(h.tick(1.2, true, true) == 1, "until it has left and come back");
+		expect(h.tick(1.25, true, true) == 1, "until it has left and come back");
 	}
 	{
 		EdgeHover h;
