@@ -77,7 +77,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     // Building
     case addGate, rotate, straighten, tidy, quickCopy, quickPaste, quickCut, quickDuplicate, buildFormula
     // Moving around
-    case zoomIn, zoomOut, zoomFit, zoomActual, focusMode, find, findNext, findPrevious
+    case zoomIn, zoomOut, zoomFit, zoomActual, focusMode, toggleActions, find, findNext, findPrevious
     // Simulation
     case simView, step, stepClock, truthTable, checkCircuit, scope, lock
     // Tabs
@@ -94,7 +94,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .newCircuit, .openLibrary, .importFile, .save, .exportImage, .exportReport, .exportFile, .print: "Circuits"
         case .undo, .redo, .cut, .copy, .paste, .duplicate, .selectAll: "Editing"
         case .addGate, .rotate, .straighten, .tidy, .quickCopy, .quickPaste, .quickCut, .quickDuplicate, .buildFormula: "Building"
-        case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode, .find, .findNext, .findPrevious: "Moving around"
+        case .zoomIn, .zoomOut, .zoomFit, .zoomActual, .focusMode, .toggleActions, .find, .findNext, .findPrevious: "Moving around"
         case .simView, .step, .stepClock, .truthTable, .checkCircuit, .scope, .lock: "Simulation"
         case .newTab, .closeTab, .reopenTab, .splitView, .switchPane, .closeSplit, .nextTab, .previousTab: "Tabs and split view"
         case .draw, .showDrawing, .notes, .present: "Drawing and notes"
@@ -133,6 +133,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .zoomFit: "Zoom to fit"
         case .zoomActual: "Actual size"
         case .focusMode: "Focus mode: hide the side panel"
+        case .toggleActions: "Show or hide the Actions rail"
         case .find: "Find a label, a TO/FROM name or a part"
         case .findNext: "Find the next one"
         case .findPrevious: "Find the previous one"
@@ -193,6 +194,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .zoomFit: return KeyCombo(key: "0", mods: c)
         case .zoomActual: return KeyCombo(key: "1", mods: c)
         case .focusMode: return KeyCombo(key: ".", mods: c)
+        // The Mac's own Show/Hide Sidebar keys (Finder, Mail, Notes).
+        case .toggleActions: return KeyCombo(key: "s", mods: c | ctl)
         case .find: return KeyCombo(key: "f", mods: c)
         case .findNext: return nil     // Cmd-G is the oscilloscope's (as in the wx app)
         case .findPrevious: return nil

@@ -2,7 +2,8 @@
 // rail in a whole circuit window drawn off screen, light and dark: open with
 // a label showing, folded to its tab, folded and slid out over the canvas
 // (as on hover), mid-drag (an item moved down, the others making room),
-// folded in focus mode (and slid out there), the Customize sheet searched,
+// folded in focus mode (and slid out there), folded with the pointer at the
+// edge (the tab peeking, in and out of focus mode), the Customize sheet searched,
 // folded by itself in a narrow window,
 // in Simulation View, in the toolbar instead (at 1280 and 1440 wide), and
 // the Customize sheet and Settings > Actions. Each window is laid out at
@@ -98,11 +99,17 @@ enum RenderActions {
             ActionsRail.pictureDrag = nil
             prefs.actionsCollapsed = true
             shoot("rail-collapsed-\(t)")
+            ActionsRail.picturePeek = true
+            shoot("rail-collapsed-peek-\(t)")
+            ActionsRail.picturePeek = false
             ActionsRail.pictureSlidOut = true
             shoot("rail-hover-open-\(t)", label: .tidy)
             ActionsRail.pictureSlidOut = false
             prefs.actionsCollapsed = false
             shoot("rail-focus-\(t)", focus: true)
+            ActionsRail.picturePeek = true
+            shoot("rail-focus-peek-\(t)", focus: true)
+            ActionsRail.picturePeek = false
             ActionsRail.pictureSlidOut = true
             shoot("rail-focus-hover-open-\(t)", focus: true, label: .checkCircuit)
             ActionsRail.pictureSlidOut = false

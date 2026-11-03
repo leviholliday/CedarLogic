@@ -305,11 +305,15 @@ struct ActionsRail: View {
     var focus = false
     /// Unfolded in a narrow window, or in focus mode, by a click on its tab.
     @Binding var peek: Bool
+    /// Bumped by View > Show/Hide Actions (and its shortcut): open or fold it.
+    var toggleRequest = 0
     var onCustomize: () -> Void
     /// Drawn with this item's label showing (--render-actions' pictures).
     static var pictureLabel: ActionID?
     /// Drawn folded with the rail slid out over the canvas, as on hover.
     static var pictureSlidOut = false
+    /// Drawn folded with the pointer at the window's edge: the tab peeking.
+    static var picturePeek = false
     /// Drawn mid-drag: this item held this many points below where it was.
     static var pictureDrag: (id: ActionID, dy: CGFloat)?
     private var showLabel: ActionID? { Self.pictureLabel }
@@ -320,6 +324,7 @@ struct ActionsRail: View {
     @State private var tabHover = false
     // Folded, slid out on hover.
     @State private var slidOut = false
+    /// The pointer is in the edge's hot strip (the tab and a little more).
     @State private var overTab = false
     @State private var overRail = false
     @State private var menuOpen = false
@@ -343,10 +348,17 @@ struct ActionsRail: View {
     static let dragStart: CGFloat = 6
     /// ...or held this long (then any movement drags).
     static let holdTime = 0.45
-    /// Resting on the tab this long slides the rail out (passing doesn't)...
-    static let openDelay = 0.15
-    /// ...and it goes back this long after the pointer leaves it.
-    static let closeDelay = 0.3
+    /// Folded, the strip along the window's right edge, the whole height of
+    /// the canvas, that slides it out: the tab and a little over the canvas,
+    /// to the last column of pixels (pushed against the screen's edge, the
+    /// pointer can't miss it).
+    static let hotWidth: CGFloat = 12
+    /// The tab as the pointer comes into the strip, before the rail is out.
+    static let peekWidth: CGFloat = 10
+    /// In the strip this long slides the rail out (passing through doesn't)...
+    static let openDelay = 0.1
+    /// ...and it goes back this long after the pointer leaves it and the rail.
+    static let closeDelay = 0.4
 
     struct RailDrag { let id: ActionID; let from: Int; var dy: CGFloat }
 
@@ -372,6 +384,37 @@ struct ActionsRail: View {
         .onChange(of: folded) { _, f in if !f { hoverWait?.cancel(); slidOut = false; overRail = false; watchEscape(false) } }
         .onDisappear { watchEscape(false) }
         .onChange(of: prefs.actionsHoverOpen) { _, on in if !on && slidOut { slide(false) } }
+        .onChange(of: toggleRequest) { _, _ in toggle() }
+        // For View > Show/Hide Actions' name.
+        .onChange(of: shown) { _, v in canvas.actionsRailShown = v }
+        .onAppear { canvas.actionsRailShown = shown }
+    }
+
+    /// Open on screen: pinned, or slid out over the canvas.
+    private var shown: Bool { !folded || slidOut }
+
+    /// View > Show/Hide Actions: slid out, back in (and not out again until
+    /// the pointer has left the edge); folded, open; open, folded.
+    private func toggle() {
+        if slidOut {
+            dismissed = overTab || overRail
+            slide(false)
+        } else if folded {
+            unfold()
+        } else {
+            fold()
+        }
+    }
+
+    /// The window's Show/Hide Actions: with the actions somewhere else (or
+    /// nowhere), the rail on screen and open; otherwise the rail's own toggle.
+    static func toggle(mode prefs: Prefs, bump: () -> Void) {
+        if prefs.actionsMode != .onScreen {
+            prefs.actionsCollapsed = false
+            prefs.actionsMode = .onScreen
+        } else {
+            bump()
+        }
     }
 
     @ViewBuilder private var menu: some View {
@@ -441,26 +484,41 @@ struct ActionsRail: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: w)
     }
 
-    /// Folded: a 6-point tab the height of the window, lit under the pointer.
-    /// Resting on it (with Settings > Actions' hover on) slides the rail out
-    /// over the canvas; a click keeps it open.
-    /// In focus mode it's the canvas's own colour, its grip fainter.
+    /// Folded: a 6-point tab the height of the window. As the pointer comes
+    /// into the hot strip along the edge it peeks (lit, a few points wider,
+    /// and all of that clickable) at once; after openDelay there (with
+    /// Settings > Actions' hover on) the rail slides out over the canvas; a
+    /// click keeps it open. In focus mode it's the canvas's own colour, its
+    /// grip fainter, until the pointer comes.
     private var tab: some View {
-        ZStack {
-            Rectangle().fill(tabHover ? accent.opacity(0.35) : focus ? chrome.canvas : chrome.tabBar)
-                .overlay(alignment: .leading) { if !focus || tabHover { Rectangle().fill(chrome.sash).frame(width: 1) } }
-            Capsule().fill(tabHover ? accent : chrome.barInk.opacity(focus ? 0.22 : 0.45))
-                .frame(width: 2, height: 32)
+        let lit = tabHover || Self.picturePeek
+        return ZStack {
+            Rectangle().fill(lit ? accent.opacity(0.35) : focus ? chrome.canvas : chrome.tabBar)
+                .overlay(alignment: .leading) {
+                    if lit { Rectangle().fill(accent.opacity(0.7)).frame(width: 1) }
+                    else if !focus { Rectangle().fill(chrome.sash).frame(width: 1) }
+                }
+            Capsule().fill(lit ? accent : chrome.barInk.opacity(focus ? 0.22 : 0.45))
+                .frame(width: lit ? 3 : 2, height: lit ? 40 : 32)
         }
-        .frame(width: Self.tabWidth)
+        .frame(width: lit ? Self.peekWidth : Self.tabWidth)
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
-        .onHover { h in
-            withAnimation(.easeOut(duration: 0.12)) { tabHover = h }
-            overTab = h
-            hoverChanged()
-        }
         .onTapGesture { unfold() }
+        // It takes only the tab's width from the canvas; peeking, it's over it.
+        .frame(width: Self.tabWidth, alignment: .trailing)
+        // The hot strip: watches the pointer, takes no clicks.
+        .overlay(alignment: .trailing) {
+            EdgeHotStrip { inside in
+                withAnimation(.easeOut(duration: 0.08)) { tabHover = inside }
+                overTab = inside
+                hoverChanged()
+            }
+            .frame(width: Self.hotWidth)
+            .frame(maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .help("Show Actions")
         .accessibilityElement()
         .accessibilityLabel("Show Actions")
@@ -677,6 +735,49 @@ struct ActionsRail: View {
     }
 }
 
+/// The folded rail's hot strip along the window's right edge: told when the
+/// pointer comes into it or leaves (an AppKit tracking area, so it sees the
+/// pointer whatever is drawn over it), and never in the way of a click.
+struct EdgeHotStrip: NSViewRepresentable {
+    var onChange: @MainActor (Bool) -> Void
+
+    func makeNSView(context: Context) -> StripView {
+        let v = StripView()
+        v.onChange = onChange
+        return v
+    }
+    func updateNSView(_ v: StripView, context: Context) { v.onChange = onChange }
+
+    final class StripView: NSView {
+        var onChange: (@MainActor (Bool) -> Void)?
+        private(set) var inside = false
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+                                           owner: self, userInfo: nil))
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func mouseEntered(with e: NSEvent) { pointer(at: e.locationInWindow) }
+        override func mouseMoved(with e: NSEvent) { pointer(at: e.locationInWindow) }
+        override func mouseExited(with e: NSEvent) { pointer(at: e.locationInWindow) }
+
+        /// The pointer is here, in window coordinates: in the strip or not.
+        /// Its right edge counts too (the last column, against the screen's edge).
+        func pointer(at p: NSPoint) {
+            let q = convert(p, from: nil), b = bounds
+            set(q.x >= b.minX && q.x <= b.maxX + 1 && q.y >= b.minY && q.y <= b.maxY)
+        }
+        private func set(_ v: Bool) {
+            guard v != inside else { return }
+            inside = v
+            onChange?(v)
+        }
+    }
+}
+
 // MARK: - Customize
 
 /// Every action in the app, a checkbox each, in the order they'll show
@@ -819,9 +920,14 @@ struct CLActionsSettings: View {
                         ForEach(ActionsMode.allCases) { Text($0.name).tag($0) }
                     }
                     .labelsHidden().fixedSize()
-                    Toggle("Open it when you rest on its folded tab", isOn: $prefs.actionsHoverOpen)
+                    Toggle("Open it when the mouse reaches the right edge", isOn: $prefs.actionsHoverOpen)
                         .toggleStyle(.checkbox)
                         .disabled(prefs.actionsMode != .onScreen)
+                    Text("When it's folded. Move the pointer to the window's right edge (or push it against the screen's) and it slides out over the canvas, then back when you move away.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 360, alignment: .leading)
+                        .padding(.leading, 20)
                     Text(hint).font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 360, alignment: .leading)
@@ -834,9 +940,11 @@ struct CLActionsSettings: View {
         }
     }
 
+    private var toggleKey: String { ShortcutStore.shared.combo(.toggleActions).map { " (\($0.label))" } ?? "" }
+
     private var hint: String {
         switch prefs.actionsMode {
-        case .onScreen: "A strip down the right edge of the window, the palette's mirror. Rest on one for its name and shortcut; drag one up or down to move it. Click its edge to fold it away. Right-click it to choose your own."
+        case .onScreen: "A strip down the right edge of the window, the palette's mirror. Rest on one for its name and shortcut; drag one up or down to move it. Click its edge to fold it away, or use View \u{25B8} Hide Actions\(toggleKey). Right-click it to choose your own."
         case .toolbar: "The same actions as buttons in the toolbar, with no strip on the right."
         case .hidden: "No actions strip. Everything is still in the menus, with its shortcut."
         }
@@ -852,9 +960,13 @@ struct CLActionsSettings: View {
 /// where it is, once.
 struct ActionsWindowParts: ViewModifier {
     let canvas: CanvasController
+    /// The split view's other side, which can ask for Show/Hide Actions too.
+    let partner: CanvasController
     @Binding var width: CGFloat
     let focusMode: Bool
     @Binding var peek: Bool
+    /// The rail's toggleRequest.
+    @Binding var toggle: Int
     /// What `peek` was as the window went into focus mode, for coming out.
     @State private var peekBeforeFocus = false
     @Binding var customizing: Bool
@@ -868,6 +980,13 @@ struct ActionsWindowParts: ViewModifier {
             .onChange(of: width) { _, w in
                 if w >= ActionsRail.narrowWidth && peek && !focusMode { peek = false }
             }
+            // View > Show/Hide Actions, from either side of a split.
+            .onReceive(NotificationCenter.default.publisher(for: .clToggleActionsRail)) { n in
+                if let c = n.object as? CanvasController, c === canvas || c === partner {
+                    ActionsRail.toggle(mode: prefs) { toggle += 1 }
+                }
+            }
+            .onReceive(canvas.$actionsRailShown) { v in if partner.actionsRailShown != v { partner.actionsRailShown = v } }
             // Into focus mode: folded (peek off). Out: as it was before.
             .onChange(of: focusMode) { _, on in
                 if on { peekBeforeFocus = peek; peek = false } else { peek = peekBeforeFocus }

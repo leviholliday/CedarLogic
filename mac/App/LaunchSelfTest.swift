@@ -36,7 +36,9 @@
 // hidden for anyone before), and in `actions` that a folded rail stays
 // folded, a drag on the rail reorders the Customize list too, focus mode
 // folds it (not hides it) and gives back what it was, the Customize
-// list's search finds by name, menu and shortcut, and the rail,
+// list's search finds by name, menu and shortcut, the folded rail's hot
+// strip (a pointer in it opens it, passing through doesn't) and View >
+// Show/Hide Actions, and the rail,
 // its tab (slid out on hover too) and the toolbar's six buttons laid out in
 // real windows off screen (actionsChecks).
 // PASS or FAIL for each; exit 1 on a failure.
@@ -296,6 +298,76 @@ enum LaunchSelfTest {
         let focusFolded = focusWidths(.onScreen, folded: true)
         check(abs(focusFolded.inFocus - focusOpen.inFocus) < 1 && abs(focusFolded.after - folded) < 1 && prefs.actionsCollapsed,
               "a folded rail stays folded through focus mode and after (\(focusFolded.after))")
+
+        // Folded, with hover on: the edge's hot strip, a pointer in it (as its
+        // tracking area hands it on), and View > Show/Hide Actions.
+        do {
+            prefs.actionsHoverOpen = true
+            prefs.actionsMode = .onScreen
+            prefs.actionsCollapsed = true
+            let canvas = CanvasController()
+            canvas.attach(doc)
+            let size = NSSize(width: 1440, height: 800)
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
+                               styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: CLLayout(document: doc, canvas: canvas, page: .constant(0))
+                .frame(width: size.width, height: size.height))
+            win.contentView = host
+            host.frame = NSRect(origin: .zero, size: size)
+            host.layoutSubtreeIfNeeded()
+            turn(1.0)
+            func strip(_ v: NSView) -> EdgeHotStrip.StripView? {
+                if let s = v as? EdgeHotStrip.StripView { return s }
+                for c in v.subviews { if let s = strip(c) { return s } }
+                return nil
+            }
+            if let st = strip(host), let cv = canvas.view {
+                let r = st.convert(st.bounds, to: nil), c = cv.convert(cv.bounds, to: nil)
+                check(abs(r.width - ActionsRail.hotWidth) < 1 && abs(r.maxX - size.width) < 1,
+                      "folded, the hot strip is \(Int(ActionsRail.hotWidth)) points at the window's right edge (\(r))")
+                check(r.height >= c.height - 1, "and the canvas's whole height (\(Int(r.height)) for \(Int(c.height)))")
+                // Off the tab (which is the last 6 points), still in the strip.
+                let offTab = NSPoint(x: r.maxX - ActionsRail.tabWidth - 3, y: r.midY)
+                let away = NSPoint(x: r.minX - 200, y: r.midY)
+                st.pointer(at: offTab)
+                turn(0.35)
+                check(canvas.actionsRailShown, "a pointer in the strip, off the tab, slides the rail out")
+                st.pointer(at: away)
+                turn(0.2)
+                check(canvas.actionsRailShown, "it's still out just after the pointer leaves (the grace)")
+                turn(0.6)
+                check(!canvas.actionsRailShown, "and back in after it")
+                st.pointer(at: offTab)
+                turn(0.04)
+                st.pointer(at: away)
+                turn(0.4)
+                check(!canvas.actionsRailShown, "a pointer passing through the strip doesn't open it")
+                st.pointer(at: NSPoint(x: r.maxX - 0.5, y: r.minY + 20))
+                turn(0.35)
+                check(canvas.actionsRailShown, "the last column of pixels (the screen's edge) opens it, low down too")
+                st.pointer(at: away)
+                turn(0.8)
+            } else {
+                check(false, "the folded rail has its hot strip")
+            }
+            let foldedWidth = canvas.view?.frame.width ?? -1
+            canvas.perform(.toggleActions)
+            turn(0.8)
+            let openWidth = canvas.view?.frame.width ?? -1
+            check(canvas.actionsRailShown && !prefs.actionsCollapsed && abs((foldedWidth - openWidth) - (ActionsRail.width - ActionsRail.tabWidth)) < 2,
+                  "View > Show Actions (\(ShortcutStore.shared.combo(.toggleActions)?.label ?? "no key")) opens it (\(foldedWidth) to \(openWidth))")
+            canvas.perform(.toggleActions)
+            turn(0.8)
+            check(!canvas.actionsRailShown && prefs.actionsCollapsed, "and Hide Actions folds it again")
+            prefs.actionsMode = .hidden
+            turn(0.3)
+            canvas.perform(.toggleActions)
+            turn(0.8)
+            check(prefs.actionsMode == .onScreen && canvas.actionsRailShown, "with the actions hidden, Show Actions puts the rail on screen, open")
+            win.close()
+            prefs.actionsHoverOpen = false
+        }
 
         // Searching the Customize list: by name, by menu, by shortcut (symbols or words).
         let find = { (q: String) in prefs.actionsOrderAll.filter { ActionsCustomizeList.matches($0, q) } }

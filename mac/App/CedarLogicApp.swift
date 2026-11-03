@@ -567,6 +567,10 @@ struct ViewCommands: Commands {
             Button("Focus Mode") { canvas?.perform(.focusMode) }
                 .keyboardShortcut(keys.menu(.focusMode))
                 .disabled(canvas == nil)
+            // The Actions rail (Actions.swift): open or fold it.
+            Button(canvas?.actionsRailShown == true ? "Hide Actions" : "Show Actions") { canvas?.perform(.toggleActions) }
+                .keyboardShortcut(keys.menu(.toggleActions))
+                .disabled(canvas == nil)
             Toggle("Display Gridlines", isOn: Binding(get: { showGrid }, set: { Prefs.shared.showGrid = $0 }))
             Toggle("Display Wire Connection Points", isOn: Binding(get: { wireDots }, set: { Prefs.shared.wireDotsAtBends = $0 }))
             Toggle("Dark Mode", isOn: Binding(get: { dark }, set: { Prefs.shared.dark = $0 }))
