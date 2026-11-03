@@ -25,6 +25,44 @@ enum WelcomeRequest {
     }
 }
 
+/// The welcome and What's New are shown when a launch owes them, never
+/// brought back with the last session's windows: macOS restored one left
+/// open at quit, and it came in over the circuit -- the welcome, say, after
+/// an update instead of What's New -- holding the keys and the menu bar.
+/// Its window isn't restorable, and one an older version saved for the
+/// next launch is closed as that launch begins (`closeRestored`).
+@MainActor
+enum Greeting {
+    static let ids = ["welcome", "whatsnew"]
+
+    /// The greeting this launch owes, if any: read before macOS restores
+    /// the last session's windows (a restored What's New counts itself seen).
+    static var due: String? {
+        !Prefs.shared.hasSeenWelcome ? "welcome" : WhatsNew.shouldShow ? "whatsnew" : nil
+    }
+
+    /// A greeting window up as the launch finishes can only be a restored
+    /// one (the circuit window opens what's owed later): all but the owed one go.
+    static func closeRestored(keeping due: String?) {
+        for w in NSApp.windows {
+            guard let id = w.identifier?.rawValue, let which = ids.first(where: { id.contains($0) }), which != due else { continue }
+            w.close()
+        }
+    }
+
+    /// Its window: never saved with the session.
+    struct NotRestored: NSViewRepresentable {
+        final class Probe: NSView {
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                window?.isRestorable = false
+            }
+        }
+        func makeNSView(context: Context) -> NSView { Probe() }
+        func updateNSView(_ nsView: NSView, context: Context) {}
+    }
+}
+
 struct WelcomeView: View {
     @ObservedObject private var prefs = Prefs.shared
     @Environment(\.dismiss) private var dismiss
@@ -93,6 +131,7 @@ struct WelcomeView: View {
         }
         .frame(width: 780, height: 580)
         .background(BrandBackground())
+        .background(Greeting.NotRestored())
         .preferredColorScheme(.dark)
         .tint(Brand.neon)
         .onAppear {

@@ -24,6 +24,7 @@ struct CedarLogicApp: App {
             KeyMonitor.install()
             TabSwitcher.shared.install()
             MenuFixup.install()
+            MenuRefresh.install()
             SessionCheck.runIfAsked()
             LaunchSelfTest.runIfAsked()
             RenderUI.runIfAsked()
@@ -134,6 +135,10 @@ struct CedarLogicApp: App {
 /// this does too -- no Open panel, no empty "Untitled" on top of it. With
 /// nothing to reopen, a new circuit.
 final class LaunchDelegate: NSObject, NSApplicationDelegate {
+    /// The welcome or What's New this launch owes (Greeting.due), decided
+    /// before the last session's windows come back.
+    private var greetingDue: String?
+
     override init() {
         super.init()
         // Without this, a document app shows an Open panel at launch.
@@ -144,6 +149,7 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
 
     /// The launch screen goes up before any window, so they can wait for it.
     func applicationWillFinishLaunching(_ notification: Notification) {
+        greetingDue = MainActor.assumeIsolated { Greeting.due }
         CrashReports.start()
         // cedarlogic://open links (ShareLink.swift).
         MainActor.assumeIsolated { ShareLink.install() }
@@ -159,6 +165,10 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A welcome or What's New the last session left open, restored with
+        // it: only the one owed now stays (Greeting).
+        let due = greetingDue
+        MainActor.assumeIsolated { Greeting.closeRestored(keeping: due) }
         // CL_MENU_DUMP=<file>: as a menu opens (MenuFixup runs then), write the
         // titles in the File, Edit, View and Window menus to <file> and quit.
         if let out = ProcessInfo.processInfo.environment["CL_MENU_DUMP"] {
@@ -476,15 +486,22 @@ enum MenuFixup {
         }
     }
 
+    /// Only what differs is set: this runs on every refresh (MenuRefresh),
+    /// and each change redraws the menu bar.
     private static func set(_ item: NSMenuItem, _ c: KeyCombo?) {
-        guard let c else { item.keyEquivalent = ""; return }
-        item.keyEquivalent = c.key == "tab" ? "\t" : c.key
+        guard let c else { if !item.keyEquivalent.isEmpty { item.keyEquivalent = "" }; return }
+        let key = c.key == "tab" ? "\t" : c.key
+        if item.keyEquivalent != key { item.keyEquivalent = key }
         var m: NSEvent.ModifierFlags = []
         if c.mods & KeyCombo.shift != 0 { m.insert(.shift) }
         if c.mods & KeyCombo.option != 0 { m.insert(.option) }
         if c.mods & KeyCombo.control != 0 { m.insert(.control) }
         if c.mods & KeyCombo.command != 0 { m.insert(.command) }
-        item.keyEquivalentModifierMask = m
+        if item.keyEquivalentModifierMask != m { item.keyEquivalentModifierMask = m }
+    }
+
+    private static func retitle(_ item: NSMenuItem, _ title: String) {
+        if item.title != title { item.title = title }
     }
 
     /// What the Mac adds to the Edit menu that a circuit editor has no use for,
@@ -522,19 +539,74 @@ enum MenuFixup {
         let keys = ShortcutStore.shared
         for item in file.items {
             if item.action == #selector(NSDocumentController.openDocument(_:)) {
-                item.title = "Import File…"
+                retitle(item, "Import File…")
                 set(item, keys.combo(.importFile))
             } else if item.title == "Your Circuits…" || item.title == "Open…" && item.action != #selector(NSDocumentController.openDocument(_:)) {
-                item.title = "Open…"
+                retitle(item, "Open…")
                 set(item, keys.combo(.openLibrary))
             } else if item.title == "Close Tab" {
                 set(item, keys.combo(.closeTab))
             } else if item.action == NSSelectorFromString("duplicateDocument:") {
                 // Not Edit > Duplicate (the selected parts): a copy of the whole circuit.
-                item.title = "Duplicate Circuit"
+                retitle(item, "Duplicate Circuit")
             } else if item.action == #selector(NSWindow.performClose(_:)) {
-                item.title = "Close Circuit"
+                retitle(item, "Close Circuit")
                 set(item, KeyCombo(key: "w", mods: KeyCombo.command | KeyCombo.shift))
+            }
+        }
+    }
+}
+
+/// SwiftUI fills in each menu of the menu bar -- which items are enabled,
+/// what they act on -- only as that menu opens (its NSMenuDelegate's
+/// menuNeedsUpdate). In between, the items stay as they were made: at
+/// launch, before any circuit window was in front, so every circuit command
+/// disabled. A disabled item has no action left, and AppKit matches key
+/// equivalents against the items as they are: after launch ⌘E (Export as
+/// Image…) did nothing and File > Export as Image… read off, and an item
+/// an edit enables (Undo) stayed disabled, until a menu was opened. (PR #7's
+/// fix had SwiftUI look at the front window again; it did -- the commands
+/// saw the circuit -- but that never reached the items.)
+///
+/// So the menus are brought up to date as they would be by opening them:
+/// whenever a window comes in front or goes, and before each ⌘/⌃ key
+/// (KeyMonitor), which only costs anything when something has changed.
+@MainActor
+enum MenuRefresh {
+    private static var observers: [NSObjectProtocol] = []
+    private static var pending = false
+
+    static func install() {
+        guard observers.isEmpty else { return }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { soon() }
+            })
+        }
+    }
+
+    /// Every menu of the menu bar, filled in from what the commands say now.
+    static func now() {
+        guard let main = NSApp.mainMenu else { return }
+        for item in main.items {
+            if let menu = item.submenu { menu.delegate?.menuNeedsUpdate?(menu) }
+        }
+        // Filling them in can bring back the Mac's own titles and keys.
+        MenuFixup.apply()
+    }
+
+    /// Once SwiftUI has caught up with what just changed (which window is in
+    /// front): its focused values update on its next pass, not inside the
+    /// notification.
+    static func soon() {
+        guard !pending else { return }
+        pending = true
+        DispatchQueue.main.async {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                MainActor.assumeIsolated {
+                    pending = false
+                    now()
+                }
             }
         }
     }
@@ -819,6 +891,9 @@ enum KeyMonitor {
     static func install() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            // A menu key: matched against the menus' items, so first those
+            // are brought up to date (MenuRefresh).
+            if !e.modifierFlags.intersection([.command, .control]).isEmpty { MenuRefresh.now() }
             // F1: Help, as in the wx app.
             if e.keyCode == 122 && e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
                 AppActions.openHelp()

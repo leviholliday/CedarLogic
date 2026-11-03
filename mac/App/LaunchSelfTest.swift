@@ -640,8 +640,9 @@ enum LaunchSelfTest {
 /// and, in `first` and `updated`, the welcome or What's New has been closed as
 /// its last button closes it -- the circuit window has to be the key window,
 /// its canvas has to have the keyboard and the menus have to see the circuit
-/// (File > Export as Image… enabled). The owner's "the top bar is greyed out
-/// until I click the grid" was these failing. PASS or FAIL for each, a TRACE
+/// (File > Export as Image… enabled, and its key, typed, asking for the
+/// export). The owner's "the top bar is greyed out until I click the grid"
+/// was these failing. PASS or FAIL for each, a TRACE
 /// line whenever who has the keys changes; exit 1 on a failure.
 @MainActor
 enum LaunchFocusCheck {
@@ -704,6 +705,23 @@ enum LaunchFocusCheck {
         return NSApp.mainMenu.flatMap(find)
     }
 
+    /// A key press of `combo` for window `w`, as the keyboard sends it.
+    private static func keyDown(_ combo: KeyCombo, in w: NSWindow) -> NSEvent? {
+        var m: NSEvent.ModifierFlags = []
+        if combo.mods & KeyCombo.shift != 0 { m.insert(.shift) }
+        if combo.mods & KeyCombo.option != 0 { m.insert(.option) }
+        if combo.mods & KeyCombo.control != 0 { m.insert(.control) }
+        if combo.mods & KeyCombo.command != 0 { m.insert(.command) }
+        let codes: [String: UInt16] = ["a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11,
+                                       "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35,
+                                       "l": 37, "j": 38, "k": 40, "n": 45, "m": 46]
+        guard combo.key.count == 1, let code = codes[combo.key] else { return nil }
+        let chars = m.contains(.shift) ? combo.key.uppercased() : combo.key
+        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: m, timestamp: ProcessInfo.processInfo.systemUptime,
+                                windowNumber: w.windowNumber, context: nil, characters: chars,
+                                charactersIgnoringModifiers: combo.key, isARepeat: false, keyCode: code)
+    }
+
     /// File > Export as Image…, as the menu bar shows it now.
     static func exportEnabled() -> Bool? {
         func find(_ menu: NSMenu) -> NSMenuItem? {
@@ -735,12 +753,14 @@ enum LaunchFocusCheck {
         await wait(1.0)
         guard NSApp.isActive else { return false }
         check(state, !Splash.shared.showing, String(format: "the launch screen went (%.1f s)", waited))
-        let greeting = NSApp.windows.first { w in
-            w.isVisible && ["welcome", "whatsnew"].contains { w.identifier?.rawValue.contains($0) == true }
+        let greetings = NSApp.windows.filter { w in
+            w.isVisible && Greeting.ids.contains { w.identifier?.rawValue.contains($0) == true }
         }
+        let greeting = greetings.first
+        // Only the one owed: none brought back from the last session.
         let expected = ["first": "welcome", "updated": "whatsnew"][state]
-        check(state, (greeting?.identifier?.rawValue.contains(expected ?? "-") ?? false) == (expected != nil),
-              "\(expected ?? "no greeting") is up (\(name(greeting)))")
+        check(state, expected.map { e in greetings.count == 1 && greeting?.identifier?.rawValue.contains(e) == true } ?? greetings.isEmpty,
+              "\(expected ?? "no greeting") is up (\(greetings.isEmpty ? "none" : greetings.map(name).joined(separator: ", ")))")
         if let greeting {
             check(state, greeting.isKeyWindow, "it has the keys, over the circuit (key: \(name(NSApp.keyWindow)))")
             // As its last page's button does: it closes.
@@ -751,7 +771,7 @@ enum LaunchFocusCheck {
         let w = circuitWindow
         check(state, w != nil, "a circuit window is open")
         guard let w else { return true }
-        func inFront(_ when: String) {
+        func inFront(_ when: String) async {
             check(state, w.isKeyWindow, "\(when): the circuit window is the key window (key: \(name(NSApp.keyWindow)))")
             check(state, w.isMainWindow, "\(when): and the main window (main: \(name(NSApp.mainWindow)))")
             let fr = w.firstResponder
@@ -759,8 +779,22 @@ enum LaunchFocusCheck {
             check(state, CanvasController.front?.view?.window === w, "\(when): it's the front canvas")
             let export = exportEnabled()
             check(state, export == true, "\(when): File > Export as Image… is enabled (\(export.map { $0 ? "on" : "off" } ?? "missing"))")
+            // Its key, typed (through the event queue, as a key press comes):
+            // the export sheet is asked for, then put away again.
+            let combo = ShortcutStore.shared.combo(.exportImage)
+            let key = combo.flatMap { keyDown($0, in: w) }
+            check(state, key != nil, "\(when): Export as Image… has a key to type (\(combo?.label ?? "none"))")
+            if let c = CanvasController.front, c.view?.window === w, let combo, let e = key {
+                c.sheetHost.showExportImage = false
+                NSApp.postEvent(e, atStart: false)
+                var asked = false
+                for _ in 0..<20 where !asked { await wait(0.05); asked = c.sheetHost.showExportImage }
+                check(state, asked, "\(when): \(combo.label) (Export as Image…) works, nothing clicked")
+                c.sheetHost.showExportImage = false
+                await wait(0.6)
+            }
         }
-        inFront("after launch")
+        await inFront("after launch")
         check(state, menuItem("Play the Intro") != nil, "Help > Play the Intro is in the menu bar")
         // Another window in front for a moment, then gone: the circuit's
         // window comes back in front with nothing else changing.
@@ -773,7 +807,7 @@ enum LaunchFocusCheck {
         check(state, other.isKeyWindow, "another window in front takes the keys")
         other.close()
         await wait(1.0)
-        inFront("after another window")
+        await inFront("after another window")
         return true
     }
 }
