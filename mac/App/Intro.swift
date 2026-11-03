@@ -1,25 +1,34 @@
 // The intro: the very first launch, and the first launch after an update
 // with a What's New tour, open with the circuit drawing itself before the
 // launch screen. The same intro both times (only the first launch has the
-// sound). About 5 seconds:
+// sound); Help > Play the Intro plays it again (sound and all), and a
+// setting plays it at every launch. About 6 seconds:
 //
 //   0.00-0.45  over the circuit window, the dark canvas fades in from
-//              nothing, its grid and the two input pins easing in with it.
+//              nothing, the two input pins easing in with it; the grid
+//              comes up after, softer, strongest in the middle, with a few
+//              out-of-focus motes drifting over it and a faint light under
+//              the gate. All of it slowly pushes in (the circuit 4%, the
+//              grid behind it 2%) until the bloom, for depth.
 //   0.40-1.96  two wires trace in from their pins, a bright head running
 //              along them and slowing into each end; the letters of the
 //              icon snap into place as the wires reach them (the C, the D
 //              -- an AND gate -- and the L, which the output runs down to
 //              the LED); a seven-segment display draws in beside it.
-//   1.99-2.58  a clock pulse runs through, the D lights, and as it lands
-//              the LED lights (the sound's bell chord lands here) and the
-//              display spells the version, a digit at a time.
+//   1.99-2.58  a clock pulse runs through, the wires high with a soft wide
+//              glow under their crisp line, the D lights (and the light
+//              under it), and as it lands the LED lights (the sound's bell
+//              chord lands here) and the display spells the version, a
+//              digit at a time.
 //   2.58-3.05  a beat, everything lit, so it registers.
 //   3.05-3.64  the LED blooms into the icon itself, which flies into the
 //              launch screen's panel (Splash.swift) as that fades in over it,
 //              part-way into its own appearance: its traces drawing in, its
 //              name writing itself in, its bar filling ...
 //   3.52-4.42  ... and its sweep of light, at full length, as on any launch;
-//   4.42-4.97  then it dissolves into the window (and the welcome, or What's
+//   4.42-5.52  it holds, finished (the bar full, "CedarLogic 0.4"), long
+//              enough to read;
+//   5.52-6.07  then it dissolves into the window (and the welcome, or What's
 //              New, on top), a crossfade.
 //
 // Any key or click skips it; with Reduce Motion it's just the launch
@@ -47,6 +56,8 @@ enum Intro {
     /// What's New version it introduced).
     static let firstKey = "cl.introFirstLaunchPlayed"
     static let updateKey = "cl.introUpdatePlayed"
+    /// Settings > General: the intro at every launch (off unless chosen).
+    nonisolated static let everyLaunchKey = "cl.introEveryLaunch"
 
     /// The timeline, in seconds (the header has it all). The canvas fades
     /// in over `fadeIn` (the intro's panel, as a whole) ...
@@ -64,8 +75,9 @@ enum Intro {
     /// starting to write itself in) ...
     static let splashAt = 0.65
     /// ... plays the rest of its appearance and its sweep, at full length
-    /// (Splash's own timing) ...
-    static var dissolveAt: Double { cardIn + Splash.sweepStart + Splash.sweepTime - splashAt }
+    /// (Splash's own timing), then holds, finished, to be read ...
+    static let panelHold = 1.1
+    static var dissolveAt: Double { cardIn + Splash.sweepStart + Splash.sweepTime - splashAt + panelHold }
     /// ... and dissolves into the window.
     static let fade = 0.55
     static var total: Double { dissolveAt + fade }
@@ -103,11 +115,17 @@ enum Intro {
         return !CommandLine.arguments.dropFirst().contains { $0.hasPrefix("--") }
     }
 
+    /// What a launch plays, by the saved settings: the intro owed, or, with
+    /// "Play the intro every time CedarLogic opens" on, the first launch's.
+    static func forLaunch(_ d: UserDefaults = .standard) -> Trigger? {
+        owed(d) ?? (d.bool(forKey: everyLaunchKey) ? .firstLaunch : nil)
+    }
+
     /// The intro to play at this launch, if any.
     static func pending() -> Trigger? {
         guard allowed else { return nil }
         if let forced = ProcessInfo.processInfo.environment["CL_INTRO"] { return Trigger(rawValue: forced) ?? .firstLaunch }
-        return owed()
+        return forLaunch()
     }
 
     static func markPlayed(_ t: Trigger) {
@@ -192,8 +210,15 @@ final class IntroScene {
     private let xf: CGAffineTransform
 
     private let ground = CALayer()
+    /// Behind the circuit, pushed in more slowly than it (depth): the grid,
+    /// the light under the gate and the motes.
+    private let backdrop = CALayer()
     private let grid = CAShapeLayer()
+    private let underglow = CALayer()
+    private var motes: [Mote] = []
     private let vignette = CALayer()
+    /// The circuit and its display, pushed in slowly until the bloom.
+    private let stage = CALayer()
     private let circuit = CALayer()   // the wires, pins, letters and LED, faded as one
     private let display = CALayer()   // the seven-segment display, which stays a little longer
     private var wires: [Wire] = []
@@ -210,8 +235,16 @@ final class IntroScene {
     private let icon = CALayer()
 
     /// A wire: drawn in (`draw`), then high behind the clock pulse (`pulse`).
+    /// A soft out-of-focus light drifting slowly over the grid.
+    private struct Mote {
+        let layer = CALayer()
+        let from: CGPoint
+        let drift: CGVector    // points a second
+        let alpha: Float
+        let phase: Double
+    }
     private struct Wire {
-        let rest = CAShapeLayer(), highGlow1 = CAShapeLayer(), highGlow2 = CAShapeLayer(), high = CAShapeLayer()
+        let rest = CAShapeLayer(), highGlow0 = CAShapeLayer(), highGlow1 = CAShapeLayer(), highGlow2 = CAShapeLayer(), high = CAShapeLayer()
         let trail: [CAShapeLayer]
         let trailGlow = CAShapeLayer()
         let head = CALayer()
@@ -289,17 +322,53 @@ final class IntroScene {
         major.strokeColor = Self.gridMajor
         major.lineWidth = 0.75
         grid.addSublayer(major)
-        root.addSublayer(grid)
+        // Strongest in the middle, falling away into the dark at the edges,
+        // so it reads as a surface going back, not a flat backdrop.
+        let gridMask = CALayer()
+        gridMask.frame = CGRect(x: -size.width * 0.15, y: -size.height * 0.2, width: size.width * 1.3, height: size.height * 1.4)
+        gridMask.contents = Self.radial(size: 256, stops: [(0, CGColor(gray: 1, alpha: 1)), (0.35, CGColor(gray: 1, alpha: 0.8)),
+                                                           (0.75, CGColor(gray: 1, alpha: 0.3)), (1, CGColor(gray: 1, alpha: 0.12))])
+        grid.mask = gridMask
+        backdrop.frame = root.bounds
+        root.addSublayer(backdrop)
+        backdrop.addSublayer(grid)
+        // A faint light under the gate, as if the circuit lit the canvas,
+        // brightening as the pulse lands.
+        let glowSide = max(size.width, size.height) * 0.95
+        underglow.bounds = CGRect(x: 0, y: 0, width: glowSide, height: glowSide * 0.72)
+        underglow.position = p(250, 250)
+        underglow.contents = Self.radial(size: 256, stops: [(0, CGColor(srgbRed: 0.1, green: 0.85, blue: 0.34, alpha: 0.11)),
+                                                            (0.3, CGColor(srgbRed: 0.08, green: 0.7, blue: 0.3, alpha: 0.06)),
+                                                            (0.65, CGColor(srgbRed: 0.05, green: 0.5, blue: 0.25, alpha: 0.012)),
+                                                            (1, CGColor(srgbRed: 0.05, green: 0.5, blue: 0.25, alpha: 0))])
+        backdrop.addSublayer(underglow)
+        // A few motes: soft, out of focus, drifting very slowly.
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        func rnd() -> CGFloat {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return CGFloat((seed >> 33) % 10_000) / 10_000
+        }
+        for _ in 0..<9 {
+            let d = 22 + 60 * rnd()
+            let m = Mote(from: CGPoint(x: size.width * (0.12 + 0.76 * rnd()), y: size.height * (0.15 + 0.7 * rnd())),
+                         drift: CGVector(dx: (rnd() - 0.5) * 14, dy: 4 + rnd() * 9), alpha: Float(0.05 + 0.09 * rnd()), phase: Double(rnd()) * 6)
+            m.layer.bounds = CGRect(x: 0, y: 0, width: d, height: d)
+            m.layer.contents = Self.moteImage
+            backdrop.addSublayer(m.layer)
+            motes.append(m)
+        }
         // Darker towards the edges, so the eye goes to the middle.
         vignette.frame = root.bounds
-        vignette.contents = Self.radial(size: 256, stops: [(0, CGColor(gray: 0, alpha: 0)), (0.45, CGColor(gray: 0, alpha: 0.02)),
-                                                          (0.8, CGColor(gray: 0, alpha: 0.16)), (1, CGColor(gray: 0, alpha: 0.3))])
+        vignette.contents = Self.radial(size: 256, stops: [(0, CGColor(gray: 0, alpha: 0)), (0.4, CGColor(gray: 0, alpha: 0.03)),
+                                                          (0.75, CGColor(gray: 0, alpha: 0.22)), (1, CGColor(gray: 0, alpha: 0.42))])
         root.addSublayer(vignette)
 
+        stage.frame = root.bounds
+        root.addSublayer(stage)
         circuit.frame = root.bounds
-        root.addSublayer(circuit)
+        stage.addSublayer(circuit)
         display.frame = root.bounds
-        root.addSublayer(display)
+        stage.addSublayer(display)
 
         // The AND gate's inside, lit when its output goes high (behind all).
         let inside = CGMutablePath()
@@ -437,7 +506,9 @@ final class IntroScene {
         // At rest, as the canvas draws it ...
         stroke(w.rest, path, look.low, look.width)
         for b in bends { circuit.addSublayer(b.low) }
-        // ... high, in green with Simulation View's glow ...
+        // ... high, in green with Simulation View's glow, and a wider, softer
+        // bloom under that ...
+        stroke(w.highGlow0, path, Self.neon.copy(alpha: 0.045)!, look.width + 16, round: true)
         stroke(w.highGlow1, path, Self.neon.copy(alpha: 0.10)!, look.width + 7)
         stroke(w.highGlow2, path, Self.neon.copy(alpha: 0.22)!, look.width + 3)
         stroke(w.high, path, Self.neon, look.width)
@@ -589,8 +660,30 @@ final class IntroScene {
         let S = Self.self
         let bloomAt = Intro.bloomAt
         // The canvas itself fades in with the intro's panel as a whole (in
-        // a picture, `Intro.fadeInShown`); its grid comes up a little after.
-        grid.opacity = Float(S.smooth(t, 0.1, 0.75) * 0.85)
+        // a picture, `Intro.fadeInShown`); its grid comes up after the
+        // wires have set off, softly.
+        grid.opacity = Float(S.smooth(t, 0.3, 1.5) * 0.8)
+
+        // The camera: a slow push-in until the bloom, the circuit 4%, the
+        // backdrop behind it 2% (so they part a little: depth).
+        let push = S.smooth(t, 0, bloomAt + 0.35)
+        let near = 1 + 0.04 * push, far = 1 + 0.02 * push
+        stage.setAffineTransform(CGAffineTransform(scaleX: near, y: near))
+        backdrop.setAffineTransform(CGAffineTransform(scaleX: far, y: far))
+        let mid = CGPoint(x: size.width / 2, y: size.height / 2)
+        func onStage(_ q: CGPoint) -> CGPoint { CGPoint(x: mid.x + (q.x - mid.x) * near, y: mid.y + (q.y - mid.y) * near) }
+
+        // The light under the gate: faint as the canvas comes up, brighter
+        // as the pulse fires the gate and lands in the LED, gone with the
+        // circuit.
+        let under = 0.35 * S.smooth(t, 0.3, 1.6) + 0.4 * S.smooth(t, 2.1, 2.5) + 0.25 * S.smooth(t, Intro.ledAt, Intro.ledAt + 0.3)
+        underglow.opacity = Float(under * (1 - S.smooth(t, bloomAt + 0.1, bloomAt + 0.4)))
+        // The motes drift, each breathing a little.
+        let moteShown = S.smooth(t, 0.4, 1.6) * (1 - S.smooth(t, bloomAt + 0.05, bloomAt + 0.35))
+        for m in motes {
+            m.layer.position = CGPoint(x: m.from.x + m.drift.dx * CGFloat(t), y: m.from.y + m.drift.dy * CGFloat(t))
+            m.layer.opacity = m.alpha * Float(moteShown * (0.75 + 0.25 * sin(t * 1.3 + m.phase)))
+        }
 
         // The circuit goes as the icon arrives over it; the display (and
         // the canvas) as the launch screen's panel comes in.
@@ -652,11 +745,14 @@ final class IntroScene {
         let bl = S.ease(t, bloomAt, bloomAt + 0.44)
         let bs = 0.04 + 0.96 * bl
         bloom.setAffineTransform(CGAffineTransform(scaleX: bs, y: bs))
+        bloom.position = onStage(p(494, 316))
         bloom.opacity = Float(0.9 * S.smooth(t, bloomAt - 0.02, bloomAt + 0.08) * (1 - S.smooth(t, bloomAt + 0.14, bloomAt + 0.56)))
 
         // The icon: over the circuit, its own art where the circuit was, then
         // flying to where the launch screen's own icon is, and handing over.
-        let big = CGRect(origin: p(0, 512), size: CGSize(width: 512 * k, height: 512 * k))
+        // (Where the circuit is, pushed in.)
+        let art = onStage(p(256, 256)), side = 512 * k * near
+        let big = CGRect(x: art.x - side / 2, y: art.y - side / 2, width: side, height: side)
         let small = Self.cardIconSize
         let target = CGRect(x: cardIcon.x - small / 2, y: cardIcon.y - small / 2, width: small, height: small)
         // (Landed just as the panel is half in, so they don't double up.)
@@ -689,7 +785,7 @@ final class IntroScene {
             b.low.opacity = Float(S.smooth(t, lowAt, lowAt + 0.08))
             b.high.opacity = Float(S.smooth(t, highAt, highAt + 0.08))
         }
-        for l in [w.high, w.highGlow1, w.highGlow2] {
+        for l in [w.high, w.highGlow0, w.highGlow1, w.highGlow2] {
             l.strokeEnd = q
             l.isHidden = q <= 0
         }
@@ -751,6 +847,11 @@ final class IntroScene {
                                                               (0.12, CGColor(srgbRed: 0.6, green: 1, blue: 0.72, alpha: 0.85)),
                                                               (0.4, CGColor(srgbRed: 0.22, green: 1, blue: 0.42, alpha: 0.25)),
                                                               (1, CGColor(srgbRed: 0.22, green: 1, blue: 0.42, alpha: 0))])
+    /// A mote: a soft disc, its edge out of focus.
+    private static let moteImage = radial(size: 64, stops: [(0, CGColor(srgbRed: 0.75, green: 1, blue: 0.82, alpha: 1)),
+                                                             (0.35, CGColor(srgbRed: 0.6, green: 1, blue: 0.72, alpha: 0.75)),
+                                                             (0.7, CGColor(srgbRed: 0.35, green: 0.9, blue: 0.5, alpha: 0.25)),
+                                                             (1, CGColor(srgbRed: 0.3, green: 0.9, blue: 0.5, alpha: 0))])
     private static var iconImage: CGImage? {
         guard let url = Bundle.main.url(forResource: "LaunchIcon", withExtension: "png"),
               let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }

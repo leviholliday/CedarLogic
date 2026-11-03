@@ -10,7 +10,9 @@
 // New tour, the intro plays first (Intro.swift): the circuit drawing itself
 // over the circuit window, its LED blooming into the icon, which flies into
 // this panel as it fades in, part-way into its own appearance; the panel
-// then plays the rest of it, its sweep at full length, and dissolves.
+// then plays the rest of it, its sweep at full length, holds a moment to be
+// read, and dissolves. Help > Play the Intro plays it again over the front
+// circuit window (`playIntroNow`).
 //
 // And the smaller card that opens a circuit: its name on glass, a quick
 // sweep, and the circuit fades up (OpeningCard).
@@ -143,10 +145,60 @@ final class Splash: ObservableObject {
             configureAfterIntro(intro)
             SplashDebug.log("intro: " + intro.rawValue)
         }
-        let size = NSSize(width: 560, height: 372)
         // Where you're looking: the screen with the pointer on it.
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens.first
+        let w = makePanel(on: screen)
+        if intro != nil && !Self.reduceMotion { makeIntroPanel(below: w) }
+        DispatchQueue.main.async { [weak self] in self?.prewarmPalette() }
+
+        // Anything else that opens while this is up waits for it: caught as
+        // it becomes key or main (inside its ordering in, before it's drawn),
+        // and swept for every few milliseconds besides. Circuit windows are
+        // caught earlier still (WindowConfigurator calls `holdEarly`).
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] n in
+                MainActor.assumeIsolated { if let w = n.object as? NSWindow { self?.holdEarly(w, from: name.rawValue) } }
+            })
+        }
+        startWatching()
+        // Whatever happens, it plays.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.begin() }
+    }
+
+    /// Help > Play the Intro: the first launch's intro, sound and all, over
+    /// the front circuit window, dissolving back into it. Nothing is hidden
+    /// or held, and the once-only keys are left as they are.
+    func playIntroNow() {
+        guard !showing else { return }
+        replayOver = NSApp.orderedWindows.first { $0.isVisible && NSDocumentController.shared.document(for: $0) != nil }
+        replaying = true
+        active = true
+        began = false
+        skipped = false
+        start = .distantFuture
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "The intro")
+        configureAfterIntro(.firstLaunch)
+        SplashDebug.log("intro: played from the menu")
+        let w = makePanel(on: replayOver?.screen ?? NSScreen.main)
+        if !Self.reduceMotion { makeIntroPanel(below: w) }
+        startWatching()
+        begin()
+    }
+    /// Played from the menu (not at launch), over this window.
+    private(set) var replaying = false
+    private var replayOver: NSWindow?
+
+    private func startWatching() {
+        watcher = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(watcher!, forMode: .common)
+    }
+
+    /// The launch screen's panel, unseen until it plays.
+    private func makePanel(on screen: NSScreen?) -> NSWindow {
+        let size = NSSize(width: 560, height: 372)
         let vis = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let frame = NSRect(x: (vis.midX - size.width / 2).rounded(), y: (vis.midY - size.height / 2 + vis.height * 0.04).rounded(),
                            width: size.width, height: size.height)
@@ -182,31 +234,14 @@ final class Splash: ObservableObject {
         w.alphaValue = 0
         w.orderFrontRegardless()   // unseen: drawn once now, not as it begins
         panel = w
-        if intro != nil && !Self.reduceMotion { makeIntroPanel(below: w) }
-        DispatchQueue.main.async { [weak self] in self?.prewarmPalette() }
-
-        // Anything else that opens while this is up waits for it: caught as
-        // it becomes key or main (inside its ordering in, before it's drawn),
-        // and swept for every few milliseconds besides. Circuit windows are
-        // caught earlier still (WindowConfigurator calls `holdEarly`).
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] n in
-                MainActor.assumeIsolated { if let w = n.object as? NSWindow { self?.holdEarly(w, from: name.rawValue) } }
-            })
-        }
-        watcher = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
-        RunLoop.main.add(watcher!, forMode: .common)
-        // Whatever happens, it plays.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.begin() }
+        return w
     }
     private var observers: [NSObjectProtocol] = []
     private var activity: NSObjectProtocol?
 
     /// A window arriving while the panel is up: hidden before it's seen.
     func holdEarly(_ w: NSWindow, from: String = "sweep") {
-        guard active, w !== panel, w !== introPanel, w.level == .normal, !held.contains(where: { $0 === w }) else { return }
+        guard active, !replaying, w !== panel, w !== introPanel, w.level == .normal, !held.contains(where: { $0 === w }) else { return }
         SplashDebug.log("hold (\(from)) \(w.title) visible=\(w.isVisible)")
         w.alphaValue = 0
         held.append(w)
@@ -269,7 +304,7 @@ final class Splash: ObservableObject {
     /// own clock at `Intro.splashAt`. Any key or click skips. With Reduce
     /// Motion, just this panel's still.
     private func beginIntro(_ trigger: Intro.Trigger, in card: NSWindow) {
-        Intro.markPlayed(trigger)
+        if !replaying { Intro.markPlayed(trigger) }
         if trigger == .firstLaunch { Intro.playSound(calm: Self.reduceMotion) }
         skipMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] e in
             MainActor.assumeIsolated { self?.skipIntro() ?? false } ? nil : e
@@ -283,7 +318,7 @@ final class Splash: ObservableObject {
         }
         let screen = card.screen ?? NSScreen.main
         if let screen { place(held, on: screen) }
-        let doc = held.first { NSDocumentController.shared.document(for: $0) != nil } ?? held.first
+        let doc = replayOver ?? held.first { NSDocumentController.shared.document(for: $0) != nil } ?? held.first
         let vis = screen?.visibleFrame ?? card.frame
         let frame = doc?.frame ?? NSRect(x: (vis.midX - 640).rounded(), y: (vis.midY - 400).rounded(), width: 1280, height: 800)
         ip.setFrame(frame, display: false)
@@ -399,7 +434,7 @@ final class Splash: ObservableObject {
 
     private func tick() {
         guard active else { return }
-        for w in NSApp.windows where w.isVisible { holdEarly(w) }
+        if !replaying { for w in NSApp.windows where w.isVisible { holdEarly(w) } }
         guard began else { return }
         if let at = freezeAt, elapsed >= at { return }
         if elapsed >= dissolveAt { finish() }
@@ -461,13 +496,16 @@ final class Splash: ObservableObject {
             self?.panel?.orderOut(nil)
             self?.panel = nil
             if let a = self?.activity { ProcessInfo.processInfo.endActivity(a); self?.activity = nil }
+            let replayed = self?.replaying == true
+            self?.replaying = false
+            self?.replayOver = nil
             windows.first(where: { NSDocumentController.shared.document(for: $0) != nil })?.makeKeyAndOrderFront(nil)
             // The welcome (or What's New) goes on top of the circuit, not
             // behind it where it can't be seen.
             let greeting = NSApp.windows.first { w in
                 w.isVisible && ["welcome", "whatsnew"].contains { w.identifier?.rawValue.contains($0) == true }
             }
-            greeting?.makeKeyAndOrderFront(nil)
+            if !replayed { greeting?.makeKeyAndOrderFront(nil) }
             // A circuit window that was key all along (behind the panel)
             // hears nothing from the line above: told now (windowBecameKey).
             NotificationCenter.default.post(name: .clSplashGone, object: nil)
@@ -571,7 +609,8 @@ struct SplashView: View {
     private func introProgress(_ t: Double) -> Double {
         if Splash.reduceMotion { return 1 }
         func smooth(_ x: Double) -> Double { let c = min(1, max(0, x)); return c * c * (3 - 2 * c) }
-        let from = Intro.splashAt, end = model.dissolveAt - 0.05
+        // Full as the sweep ends, then held there while the panel is read.
+        let from = Intro.splashAt, end = Splash.sweepStart + Splash.sweepTime
         return 0.3 + 0.7 * smooth((t - from) / (end - from))
     }
 

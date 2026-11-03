@@ -320,6 +320,9 @@ struct GeneralSettingsView: View {
                 }
                 .disabled(opensCDL)
             }
+            Row("Launch screen", hint: "The circuit drawing itself, then the launch screen, as on the first launch. Help > Play the Intro plays it any time.") {
+                Toggle("Play the intro every time CedarLogic opens", isOn: $prefs.introEveryLaunch)
+            }
             Row("Quitting", hint: "⌘Q shows a question in the middle of the screen first: Return quits, Escape doesn't.") {
                 Toggle("Ask before quitting", isOn: $prefs.confirmQuit)
             }

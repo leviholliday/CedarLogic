@@ -26,7 +26,7 @@ enum ActionID: String, CaseIterable, Identifiable {
     // Simulation
     case pause, step, stepClock, predict, reveal, lock
     // Help and the app
-    case help, feedback, shortcuts, whatsNew, welcome, setUp, tour, settings, checkForUpdates
+    case help, feedback, shortcuts, whatsNew, playIntro, welcome, setUp, tour, settings, checkForUpdates
 
     var id: String { rawValue }
     @MainActor var action: AppAction { ActionRegistry.action(self) }
@@ -237,6 +237,8 @@ enum ActionRegistry {
                   enabled: { ($0 ?? CanvasController.front) != nil }, run: { c in (c ?? CanvasController.front)?.showShortcuts = true }),
         AppAction(id: .whatsNew, title: "What\u{2019}s New in CedarLogic\u{2026}", menu: "Help", symbol: "sparkles",
                   enabled: anyWindow, run: { _ in open("whatsnew") }),
+        AppAction(id: .playIntro, title: "Play the Intro", menu: "Help", symbol: "play.circle",
+                  enabled: { _ in !Splash.shared.showing }, run: { _ in Splash.shared.playIntroNow() }),
         AppAction(id: .welcome, title: "Welcome to CedarLogic\u{2026}", menu: "Help", symbol: "hand.wave",
                   enabled: anyWindow, run: { _ in open("welcome") }),
         AppAction(id: .setUp, title: "Set Up CedarLogic\u{2026}", menu: "Help", symbol: "slider.horizontal.3",
