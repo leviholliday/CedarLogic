@@ -10,6 +10,7 @@
 #include "SessionCheck.h"
 #include "ShareLink.h"
 #include "Splash.h"
+#include "Intro.h"
 #include "Updater.h"
 #include "Welcome.h"
 #include "Collections.h"
@@ -1098,7 +1099,12 @@ void activateCb(GApplication* gapp, gpointer) {
 	if (gSplash && w && !w->filePath().empty()) splashSetOpening(w->titleText());
 	if (gSplash && w) gtk_widget_hide(GTK_WIDGET(w->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
-		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
+		for (CircuitWindow* c : circuitWindows()) {
+			// Where the intro played (Splash.h), so it dissolves into it.
+			if (c == circuitWindows().front()) splashPlaceUnder(c->window());
+			gtk_widget_show(GTK_WIDGET(c->window()));
+			if (gScreenshot.empty()) c->beginOpening();
+		}
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
@@ -1159,7 +1165,12 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
 	if (gSplash) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
-		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
+		for (CircuitWindow* c : circuitWindows()) {
+			// Where the intro played (Splash.h), so it dissolves into it.
+			if (c == circuitWindows().front()) splashPlaceUnder(c->window());
+			gtk_widget_show(GTK_WIDGET(c->window()));
+			if (gScreenshot.empty()) c->beginOpening();
+		}
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
@@ -1366,6 +1377,8 @@ int main(int argc, char** argv) {
 	// The .deb update's root step (Updater.h), run by pkexec: before anything
 	// else, and nothing but that.
 	if (argc >= 2 && strcmp(argv[1], "--install-update") == 0) return Updater_InstallUpdateAsRoot(argc, argv);
+	// A run with a `--` option is a test or a picture: never the intro.
+	intro::noteArgs(argc, argv);
 	// Our own options, taken out before GTK sees the rest (files to open).
 	std::vector<char*> args;
 	for (int i = 0; i < argc; i++) {
@@ -1397,6 +1410,17 @@ int main(int argc, char** argv) {
 			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSession = std::max(1, atoi(argv[++i]));
 			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSessionSeed = strtoull(argv[++i], nullptr, 10);
 			continue;
+		}
+		// --render-intro <dir> [first|update] [--behind <png>]: the intro's frames at 60 fps, with no display (Intro.h).
+		if (strcmp(argv[i], "--render-intro") == 0 && i + 1 < argc) {
+			const std::string dir = argv[i + 1];
+			intro::Trigger trigger = intro::Trigger::First;
+			std::string behind;
+			for (int j = i + 2; j < argc; j++) {
+				if (strcmp(argv[j], "update") == 0) trigger = intro::Trigger::Update;
+				else if (strcmp(argv[j], "--behind") == 0 && j + 1 < argc) behind = argv[++j];
+			}
+			return intro::render(dir, trigger, behind);
 		}
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
 		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this

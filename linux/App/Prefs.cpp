@@ -177,6 +177,8 @@ void Prefs::load() {
 		lastSeenVersion = readString(k, "lastSeenVersion", lastSeenVersion);
 		playLaunchSound = readBool(k, "playLaunchSound", playLaunchSound);
 		firstLaunchPlayed = readBool(k, "firstLaunchPlayed", firstLaunchPlayed);
+		introFirstLaunchPlayed = readBool(k, "introFirstLaunchPlayed", introFirstLaunchPlayed);
+		introUpdatePlayed = readString(k, "introUpdatePlayed", introUpdatePlayed);
 		seenWhatsNew = readString(k, "seenWhatsNew", seenWhatsNew);
 		exportGrid = readBool(k, "exportGrid", exportGrid);
 		exportInfo = readBool(k, "exportInfo", exportInfo);
@@ -288,6 +290,8 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "lastSeenVersion", lastSeenVersion.c_str());
 	g_key_file_set_boolean(k, kGroup, "playLaunchSound", playLaunchSound);
 	g_key_file_set_boolean(k, kGroup, "firstLaunchPlayed", firstLaunchPlayed);
+	g_key_file_set_boolean(k, kGroup, "introFirstLaunchPlayed", introFirstLaunchPlayed);
+	g_key_file_set_string(k, kGroup, "introUpdatePlayed", introUpdatePlayed.c_str());
 	g_key_file_set_string(k, kGroup, "seenWhatsNew", seenWhatsNew.c_str());
 	g_key_file_set_boolean(k, kGroup, "exportGrid", exportGrid);
 	g_key_file_set_boolean(k, kGroup, "exportInfo", exportInfo);

@@ -52,6 +52,8 @@ void label(cairo_t* cr, float x, float y, const std::string& s);
 
 // The app's icon at size points, with an optional green glow.
 void icon(cairo_t* cr, float x, float y, float size, float glow = 0);
+// How much of that square its tile fills (the rest is a clear margin).
+double iconTile();
 
 // The app's own subject, alive: two switches stepping through 00, 01, 10,
 // 11 into an AND gate, and a lamp that lights only for the last. t in seconds.

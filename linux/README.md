@@ -70,7 +70,11 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   Export as Image (`ExportImage`), Send Feedback (`Feedback`), Help
   (`Help`), Settings > Sync, the link preview and the sync line in Your
   Circuits (`SyncApp`, `SyncUI`, `SyncPlatform`), and the brand's launch screen, welcome, guided tour and What's
-  New (`Brand`, `Splash`, `Welcome`). Motion follows the Mac's curves
+  New (`Brand`, `Splash`, `Welcome`), with the Mac's 0.4 intro before the
+  launch screen on the first launch and the first after an update (`Intro`:
+  the circuit drawing itself into the icon, then the launch screen; any key
+  or click skips it, and it gives way to the still launch screen when the
+  animations are off or the frames come too slowly). Motion follows the Mac's curves
   (`Anim.h`) and stops when the desktop asks for no animations. Settings
   (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`; circuits in
   `~/.local/share/CedarLogic/Library`.
@@ -122,6 +126,11 @@ every shape and gate style and checks each circuit's truth table. And:
   with `G_DEBUG=fatal-criticals`, with a time cap; CI runs seeds 1-4, and
   more on a build with AddressSanitizer
 - `cedarlogic --splash-frame <seconds> out.png [--first]` -- the launch screen
+- `cedarlogic --render-intro <dir> [first|update] [--behind <window.png>]` --
+  the intro, every frame at 60 fps (1280 x 800 at 2x), with no display; CI
+  keeps the frames at 0.2, 1.0, 2.98, 3.8 and 4.65 s with the renders.
+  `CL_INTRO=first|update` plays it on a normal launch, `CL_NO_INTRO=1` never,
+  `CL_INTRO_FREEZE=<seconds>` holds it at a moment
 - `cedarlogic --feedback-probe` -- asks the feedback site with a wrong key
   (expects 403) and sends nothing
 - `cedarlogic --version`

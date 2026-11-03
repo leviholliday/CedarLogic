@@ -188,6 +188,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Welcome / first run, Guided Tour | Yes | Yes | Yes | Partial | Web: first-run toast and coach marks in the `/app/` phone shell only (`sim-mobile.js:1211`); no tour |
 | Help window with search | Yes | Yes | Yes | Partial | Mac `Help.swift`; Windows/Linux `Help.cpp`. Web links to the Learn pages |
 | Launch screen with first-launch sound | Yes | Yes | Yes | No | Mac `Splash.swift`; Windows/Linux `Splash.cpp` |
+| 0.4 intro (circuit draws itself, blooms into the launch screen; first launch and first after an update) | Yes | No | Yes | No | Mac `Intro.swift` (`--render-intro`); Linux `Intro.cpp` with `Splash.cpp` (same timeline, keys `introFirstLaunchPlayed`/`introUpdatePlayed`, `CL_INTRO`/`CL_NO_INTRO`, `--render-intro`, frames in CI's renders). Linux plays it in one window where the circuit window comes in, and gives way to the still launch screen on slow frames (added 2026-11-03, `linux/native-v4-intro`) |
 | Quit confirmation | Yes | Yes | Yes | n/a | Mac `QuitConfirm.swift`; Linux `QuitConfirm.cpp`; Windows `Window.cpp:2035` |
 
 ## 11. Settings window, row by row
