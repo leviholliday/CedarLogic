@@ -1,6 +1,8 @@
 // --session-check (see SessionCheck.h).
 
 #include "SessionCheck.h"
+#include "Actions.h"
+#include "Rail.h"
 #include "Canvas.h"
 #include "Dialogs.h"
 #include "FindBar.h"
@@ -1460,6 +1462,113 @@ struct SessionDriver {
 		}
 	}
 
+	// ---- The Actions rail, through the window's own events ---------------------------
+	// (The Mac's launch-selftest `actions` state.) On screen and open; focus
+	// mode folds it to its tab and gives it back; F9 folds and shows it; the
+	// pointer at the window's last column of pixels peeks the tab at once
+	// and slides the rail out over the canvas 100 ms later, which goes 400 ms
+	// after the pointer leaves, and a pass-through doesn't open it; Escape
+	// puts it back; a drag on it reorders it, the Customize list's order the
+	// same; a plain click runs the action. Then back as it was.
+	void railChecks() {
+		gWhat = "the Actions rail";
+		Rail* r = w->rail();
+		if (!check(r != nullptr && r->dockWidget() != nullptr, "the window has an Actions rail")) return;
+		prefs().actionsMode = actions::OnScreen;
+		prefs().actionsCollapsed = false;
+		prefs().actionsHoverOpen = true;
+		actions::reset();
+		pump(400);
+		GtkWidget* dock = r->dockWidget();
+		GtkWidget* floater = r->floaterWidget();
+		auto width = [&] { return gtk_widget_get_allocated_width(dock); };
+		check(gtk_widget_get_mapped(dock) && width() == 46, format("the rail is on screen, 46 points wide (%d)", width()));
+		check(r->itemCount() == 6, format("with the six default actions (%d)", r->itemCount()));
+		w->toggleFocusMode();
+		pump(600);
+		check(gtk_widget_get_mapped(dock) && width() == 6 && prefs().actionsMode == actions::OnScreen && !prefs().actionsCollapsed,
+		      format("focus mode folds it to its 6-point tab, not away, and leaves the saved state (%d wide)", width()));
+		w->toggleFocusMode();
+		pump(600);
+		check(width() == 46, format("leaving focus mode gives it back open (%d wide)", width()));
+		GtkWidget* t = top();
+		tap(t, GDK_KEY_F9);
+		pump(400);
+		check(prefs().actionsCollapsed && width() == 6, format("F9 (View \u25B8 Hide Actions) folds it to its tab (%d wide)", width()));
+		Canvas* c = canvas();
+		if (c == nullptr) return;
+		const int canvasWidth = gtk_widget_get_allocated_width(c->widget());
+		auto away = [&] { motion(c->widget(), c->width() / 2.0, c->height() / 2.0, 0); };
+		away();
+		pump(200);
+		// The tab's last column is the window's (the rail is at the far right).
+		motion(dock, 5, 200, 0);
+		pump(40);
+		check(!r->slidOut() && gtk_widget_get_visible(floater), "at the window's last column of pixels the tab peeks at once");
+		pump(250);
+		check(r->slidOut() && gtk_widget_get_visible(floater), "and the rail slides out over the canvas after 100 ms");
+		pump(250);
+		const int widthNow = gtk_widget_get_allocated_width(c->widget());
+		check(widthNow == canvasWidth, format("the canvas keeps its width under it (%d, %d before)", widthNow, canvasWidth));
+		away();
+		pump(150);
+		check(r->slidOut(), "the pointer gone, it's still out 150 ms later");
+		pump(600);
+		check(!r->slidOut(), "and back in after 400 ms");
+		motion(dock, 5, 300, 0);
+		pump(30);
+		away();
+		pump(400);
+		check(!r->slidOut(), "a pointer passing through the edge in 30 ms doesn't open it");
+		motion(dock, 5, 200, 0);
+		pump(350);
+		const bool out = r->slidOut();
+		tap(t, GDK_KEY_Escape);
+		pump(80);
+		check(out && !r->slidOut(), "Escape puts back a rail slid out on hover");
+		pump(400);
+		check(!r->slidOut(), "and it stays back while the pointer is still at the edge");
+		away();
+		pump(700);
+		tap(t, GDK_KEY_F9);
+		pump(400);
+		check(!prefs().actionsCollapsed && width() == 46, format("F9 again shows it (%d wide)", width()));
+		// A drag on the rail: the first item down two places.
+		double x = 0, y = 0;
+		r->itemCenter(0, x, y);
+		motion(dock, x, y, 0);
+		button(dock, GDK_BUTTON_PRESS, x, y, 1, 0);
+		for (int k = 1; k <= 8; k++) {
+			motion(dock, x, y + k * 10, GDK_BUTTON1_MASK);
+			pump(12);
+		}
+		button(dock, GDK_BUTTON_RELEASE, x, y + 80, 1, GDK_BUTTON1_MASK);
+		pump(300);
+		std::vector<std::string> onRail, inList;
+		for (const actions::Item* a : actions::rail()) onRail.push_back(a->id);
+		for (const actions::Item* a : actions::order()) if (actions::shown(*a)) inList.push_back(a->id);
+		const std::vector<std::string> want = { "predict", "tidy", "checkCircuit", "shareLink", "exportImage", "exportReport" };
+		std::string got;
+		for (const std::string& id : onRail) got += " " + id;
+		check(onRail == want, "a drag on the rail moves Check My Circuit down two places (" + got + " )");
+		check(inList == onRail, "and the Customize list has the same order");
+		// A plain click runs it: Zoom In, put on the rail for this.
+		actions::setShown(*actions::find("zoomIn"), true);
+		pump(300);
+		const int before = c->zoomPercent();
+		r->itemCenter(r->itemCount() - 1, x, y);
+		motion(dock, x, y, 0);
+		button(dock, GDK_BUTTON_PRESS, x, y, 1, 0);
+		button(dock, GDK_BUTTON_RELEASE, x, y, 1, GDK_BUTTON1_MASK);
+		pump(700);
+		check(c->zoomPercent() > before, format("a plain click on the rail runs its action (Zoom In: %d%% to %d%%)", before, c->zoomPercent()));
+		// As it was.
+		actions::reset();
+		w->runAction("win.zoom-fit");
+		away();
+		pump(400);
+	}
+
 	// ---- The session -------------------------------------------------------------
 
 	int run(int actions, unsigned long long seed) {
@@ -1477,6 +1586,8 @@ struct SessionDriver {
 		// The settings file as it starts: what Settings changes later is compared with it.
 		prefs().save();
 		pump(300);
+		guarded("the Actions rail's checks", [&] { railChecks(); });
+		pump(200);
 		const int windowsAtStart = CircuitWindow::liveCount;
 		long rss[3] = { residentKB(), 0, 0 };
 		const double started = nowMs();

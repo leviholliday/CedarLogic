@@ -65,6 +65,21 @@ void CircuitWindow::togglePredict() {
 	redraw();
 }
 
+void CircuitWindow::startPredict() {
+	if (!simViewOn) {
+		if (!predict.on && !hasPredictLights()) { note("Predict needs a light on the page: an LED or a display to guess."); return; }
+		toggleSimView();
+		if (!predict.on) togglePredict();
+		return;
+	}
+	togglePredict();
+}
+
+bool CircuitWindow::hasPredictLights() const {
+	CLSimLight one[1];
+	return cl_simview_lights(doc, currentPage(), one, 1) > 0;
+}
+
 void CircuitWindow::revealOrCoverAgain() {
 	if (!predict.on || !simViewOn) return;
 	if (predict.revealed) {

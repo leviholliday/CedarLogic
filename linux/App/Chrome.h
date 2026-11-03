@@ -95,6 +95,14 @@ constexpr const char* StepClock = "cedarlogic-step-clock";
 // pencil.tip.crop.circle) and a page of lines (Notes, note.text).
 constexpr const char* Draw = "cedarlogic-draw";
 constexpr const char* Notes = "cedarlogic-notes";
+// Drawn for the Actions rail (Actions.h): a window with a strip down its
+// right side (the Mac's sidebar.right), a dashed square with a question mark
+// (Predict, questionmark.square.dashed), a wand with sparkles (Tidy Up,
+// wand.and.stars) and an eye (Show or Hide Drawing).
+constexpr const char* Rail = "cedarlogic-rail";
+constexpr const char* Predict = "cedarlogic-predict";
+constexpr const char* Wand = "cedarlogic-wand";
+constexpr const char* Eye = "cedarlogic-eye";
 }
 // Three lines (the header bar's primary menu, GTK's open-menu).
 void drawHamburgerIcon(cairo_t* cr, const RectF& box, const Color& color);

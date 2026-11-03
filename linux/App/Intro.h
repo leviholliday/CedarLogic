@@ -75,6 +75,9 @@ const char* version();
 // main() tells it the arguments: a run with a `--` option is a test or a
 // picture, and never plays it.
 void noteArgs(int argc, char** argv);
+// This run had a `--` option: a test or a picture (the Actions rail's
+// one-time line waits for a real launch too).
+bool dashRun();
 // Which intro the saved settings say this launch is owed (None as a rule).
 Trigger owed();
 // The intro to play at this launch, if any.

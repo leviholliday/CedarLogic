@@ -464,7 +464,7 @@ void copyText(const std::string& text) {
 	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), text.c_str(), -1);
 }
 
-enum { SyncPage = 5 };
+enum { SyncPage = settings::kSyncPage };
 
 // What's being done for the person while they wait (Setting up…, Checking the code…).
 struct Work {

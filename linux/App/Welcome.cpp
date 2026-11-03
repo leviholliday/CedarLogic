@@ -969,6 +969,11 @@ const Chapter kChapters[] = {
 	    { "x-office-document-symbolic", "Export Lab Report", "File \xE2\x96\xB8 Export Lab Report makes one PDF to hand in. You pick what goes in: the circuit, truth table, K-maps, timing." },
 	    { "insert-link-symbolic", "Share Link", "File \xE2\x96\xB8 Share Link copies a link. Anyone can open it in CedarLogic Online, in any browser. CedarLogic opens cedarlogic:// links too." } },
 	  "Check My Circuit", "win.check-circuit" },
+	{ "Actions", "One click away", "A strip of buttons down the window's right edge, the side panel's mirror.",
+	  { { Icon::Rail, "Actions on the right", "The things you use most, one click away. Drag them into your order; right-click to choose your own." },
+	    { "view-conceal-symbolic", "Folds out of the way", "Click its edge to fold it to a thin tab. Move the pointer to the window's right edge and it slides out. F9 shows or hides it." },
+	    { "preferences-system-symbolic", "Yours to choose", "Settings \xE2\x96\xB8 Actions: anything from any menu, in your order. On screen, in the toolbar, or hidden." } },
+	  "Show the Actions", "win.show-actions" },
 	{ "Tidy Up", "Rebuilt for cleaner layouts", "Tidy Up by Signal Flow lays a page out again, and it's quick.",
 	  { { "view-sort-ascending-symbolic", "Cleaner results", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
 	    { "media-seek-forward-symbolic", "Fast on big pages", "A page with hundreds of parts takes a second or two." },
@@ -980,7 +985,7 @@ const Chapter kChapters[] = {
 	    { "emblem-ok-symbolic", "Build from a Formula", "With NOR only, a formula like (AB)' now builds the right circuit." } },
 	  nullptr, nullptr },
 };
-const int kChapterCount = 5;
+const int kChapterCount = 6;
 const int kPages = kChapterCount + 2;
 
 struct WhatsNew {
@@ -1076,6 +1081,30 @@ void art(cairo_t* cr, int chapter, float x, float y, double) {
 		break;
 	}
 	case 3: {
+		// A window's edge with the rail on it, one action named.
+		const RectF r = rectF(x, y, x + 290, y + 282);
+		card(cr, r, false, 12);
+		const RectF strip = rectF(r.right - 52, r.top + 10, r.right - 10, r.bottom - 10);
+		fillRound(cr, strip, 9, colorF(1, 1, 1, 0.05f));
+		const char* const icons[] = { "emblem-ok-symbolic", Icon::Predict, Icon::Wand, "insert-link-symbolic", "image-x-generic-symbolic",
+		                              "x-office-document-symbolic" };
+		for (int i = 0; i < 6; i++) {
+			const RectF b = rectF(strip.left + 4, strip.top + 8 + i * 40, strip.right - 4, strip.top + 8 + i * 40 + 34);
+			if (i == 0) {
+				fillRound(cr, b, 7, alpha(kNeon, 0.14f));
+				strokeRound(cr, b, 7, alpha(kNeon, 0.8f), 1.5f);
+			}
+			drawIcon(cr, icons[i], b, 16, i == 0 ? kNeon : colorF(1, 1, 1, 0.75f));
+		}
+		const RectF tip = rectF(strip.left - 178, strip.top + 12, strip.left - 10, strip.top + 38);
+		card(cr, tip, true, 7);
+		text(cr, "Check My Circuit", tip.left + 10, tip.top + 5, 12, Bold, kPrimary);
+		text(cr, "Shift+T", tip.left + 124, tip.top + 6, 11, Normal, kFaint);
+		text(cr, "Drag one up or down", r.left + 18, r.bottom - 64, 12.5f, SemiBold, kSecondary);
+		text(cr, "to put them in your order.", r.left + 18, r.bottom - 44, 12.5f, Normal, kFaint);
+		break;
+	}
+	case 4: {
 		// A page before Tidy Up and after: the same gates and wires.
 		const char* const labels[] = { "Before", "After" };
 		const float jitter[2][6] = { { 0, 22, -14, 30, -6, 16 }, { 0, 0, 0, 0, 0, 0 } };
@@ -1120,7 +1149,7 @@ void pageIntro(cairo_t* cr, WhatsNew* wn, double t) {
 	const float x = 56, tw = 380;
 	text(cr, "WHAT'S NEW", x, 92, 11, Bold, kNeon, 0, TextAlign::Leading, 1.8f);
 	float y = 112 + text(cr, "CedarLogic 0.4", x, 112, 34, Bold, colorF(0.88f, 0.9f, 0.89f), tw + 40) + 14;
-	y += text(cr, "Sync your circuits between devices, check your work, hand in a lab report, share a link, and tidy a big page fast. Here's what's new, a minute's read.",
+	y += text(cr, "Sync your circuits between devices, check your work, hand in a lab report, share a link, keep what you use most on the right, and tidy a big page fast. Here's what's new, a minute's read.",
 	          x, y, 14, Normal, kSecondary, tw) + 20;
 	for (int i = 0; i < kChapterCount; i++) {
 		const RectF r = rectF(x - 8, y - 4, x + tw, y + 24);

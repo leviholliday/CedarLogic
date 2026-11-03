@@ -197,6 +197,26 @@ void applyStyle() {
 	     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; }\n";
 	s += "#settings button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
 	s += "#settings scale highlight { background-color: " + css(c.accent()) + "; border: none; }\n";
+	// The Actions rail's Customize Actions window: Settings' look.
+	s += "#customize-actions, #customize-actions > box { background-color: " + css(paper) + "; }\n";
+	s += "#customize-actions label { color: " + css(text) + "; }\n";
+	s += "#customize-actions .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
+	s += "#customize-actions .sheet-title { font-weight: bold; font-size: 15px; }\n";
+	s += "#customize-actions check:not(:checked) { background-image: none; background-color: " + css(fieldFill) + "; border: 1px solid " +
+	     css(withAlpha(text, 0.38f)) + "; box-shadow: none; border-radius: 4px; }\n";
+	s += "#customize-actions entry, #customize-actions combobox button { border-radius: 7px; background-image: none; background-color: " +
+	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
+	s += "#customize-actions entry:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
+	s += "#customize-actions button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
+	     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; }\n";
+	s += "#customize-actions button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
+	s += "#customize-actions button.suggested-action { background-color: " + css(c.accent()) + "; }\n";
+	s += "#customize-actions button.suggested-action label { color: " + css(c.onAccent()) + "; }\n";
+	s += "#customize-actions button:disabled label { color: " + css(withAlpha(text, 0.6f)) + "; }\n";
+	// Its list (and Settings > Actions'): rows on a card, the selected one in the accent's tint.
+	s += "#actions-list { background-color: " + css(fieldFill) + "; }\n";
+	s += "#actions-list row:selected { background-color: " + css(withAlpha(c.accent(), 0.16f)) + "; }\n";
+	s += "#actions-list row:selected label { color: " + css(text) + "; }\n";
 	// A gate's settings: the Mac's sheet, its settings in a card.
 	const Color cardColor = dark ? rgb255(36, 40, 47) : rgb255(255, 255, 255);
 	s += "#gate-settings, #gate-settings > box { background-color: " + css(paper) + "; }\n";

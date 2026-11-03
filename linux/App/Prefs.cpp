@@ -1,6 +1,7 @@
 // Settings, resources, colours and small helpers (see App.h).
 
 #include "App.h"
+#include "Actions.h"
 #include "Alert.h"
 #include "Library.h"
 #include "Settings.h"
@@ -81,6 +82,12 @@ ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChann
 	return { 0, false };
 }
 
+ActionsStart actionsStart(bool usedBefore, bool hasMode, int storedMode, bool storedHint) {
+	if (hasMode) return { std::min(std::max(storedMode, 0), 2), storedHint };
+	if (usedBefore) return { 2, true };
+	return { 0, false };
+}
+
 // What linux/install.sh wrote for the group this install starts in ("beta"
 // or "normal"), or "".
 static std::string installChannelMarker() {
@@ -102,6 +109,29 @@ void Prefs::load() {
 		                                       existed && readBool(k, "channelNotice", false), installChannelMarker());
 		updateChannel = c.channel;
 		channelNotice = c.notice;
+	}
+	{
+		// Before anything here is read: had CedarLogic been used? (Every save
+		// writes brandAccentSet; an older file has the welcome seen at least.)
+		const bool usedBefore = existed && (g_key_file_has_key(k, kGroup, "brandAccentSet", nullptr) || readBool(k, "hasSeenWelcome", false));
+		const bool hasMode = existed && g_key_file_has_key(k, kGroup, "actionsMode", nullptr);
+		const ActionsStart a = actionsStart(usedBefore, hasMode, hasMode ? readInt(k, "actionsMode", 0, 0, 2) : 0,
+		                                    hasMode && readBool(k, "actionsHint", false));
+		actionsMode = a.mode;
+		actionsHint = a.hint;
+		auto list = [&](const char* key, std::vector<std::string>& out) {
+			gsize n = 0;
+			gchar** v = existed ? g_key_file_get_string_list(k, kGroup, key, &n, nullptr) : nullptr;
+			if (!v) return false;
+			out.clear();
+			for (gsize i = 0; i < n; i++) if (v[i][0]) out.push_back(v[i]);
+			g_strfreev(v);
+			return true;
+		};
+		list("actionsOrder", actionsOrder);
+		if (!list("actionsShown", actionsShown)) actionsShown = actions::defaults();
+		actionsCollapsed = existed && readBool(k, "actionsCollapsed", false);
+		actionsHoverOpen = !existed || readBool(k, "actionsHoverOpen", true);
 	}
 	if (existed) {
 		themeMode = readInt(k, "themeMode", themeMode, 0, 3);
@@ -307,6 +337,17 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "reportColor", reportColor);
 	g_key_file_set_boolean(k, kGroup, "timingWhole", timingWhole);
 	g_key_file_set_boolean(k, kGroup, "timingInColor", timingInColor);
+	g_key_file_set_integer(k, kGroup, "actionsMode", actionsMode);
+	g_key_file_set_boolean(k, kGroup, "actionsCollapsed", actionsCollapsed);
+	g_key_file_set_boolean(k, kGroup, "actionsHoverOpen", actionsHoverOpen);
+	g_key_file_set_boolean(k, kGroup, "actionsHint", actionsHint);
+	{
+		std::vector<const gchar*> order, shown;
+		for (const std::string& a : actionsOrder) order.push_back(a.c_str());
+		for (const std::string& a : actionsShown) shown.push_back(a.c_str());
+		g_key_file_set_string_list(k, kGroup, "actionsOrder", order.data(), order.size());
+		g_key_file_set_string_list(k, kGroup, "actionsShown", shown.data(), shown.size());
+	}
 	std::vector<const gchar*> list;
 	for (const std::string& r : recent) list.push_back(r.c_str());
 	g_key_file_set_string_list(k, kGroup, "recent", list.data(), list.size());

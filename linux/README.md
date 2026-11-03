@@ -55,7 +55,8 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   split view (`TabStrip`), focus mode (the bars slide away and the tabs
   become the title row, `TitleButtons`), a canvas per page (`Canvas`), the
   side panel, whose gates drag onto the canvas in one motion (`Palette`),
-  the status bar where notes appear (`StatusBar`), the Mac's five-page
+  the status bar where notes appear (`StatusBar`), the Actions rail on the
+  right edge (`Actions`, `Rail`; below), the Mac's seven-page
   Settings and changeable shortcuts (`Settings`, `Shortcuts`,
   `ShortcutsSheet`), the app's own alert card and quit question (`Alert`,
   `QuitConfirm`), gate settings, Add a Gate and the memory editor
@@ -78,6 +79,37 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   (`Anim.h`) and stops when the desktop asks for no animations. Settings
   (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`; circuits in
   `~/.local/share/CedarLogic/Library`.
+
+The Actions rail (`App/Actions.h`, `App/Rail.h`, the Mac's `mac/App/Actions.swift`):
+a strip of icon buttons down the window's right edge, the side panel's mirror.
+Resting on one shows its name and shortcut; a click runs it; pressing one and
+moving it 6 points (or holding it 0.45 s) picks it up, and dropping it saves
+the order the Customize list shows too. A click on its left edge folds it to
+a 6-point tab, a click on the tab brings it back; a window narrower than 900
+points folds it by itself, and focus mode folds it to a quieter tab (leaving
+focus mode gives it back as it was). Folded, the window's right edge is a
+12-point hot strip the full height of the canvas, last pixel column included:
+the tab lights and widens at once, and after 100 ms there the rail slides out
+over the canvas (a `GtkOverlay`, so the canvas keeps its width), until the
+pointer has been away from it and the strip for 400 ms (not while its menu
+is open or during a drag); Escape puts it back. The strip watches the pointer
+through a motion controller on the whole window in its capture phase, so it
+sees it over the canvas, the notes or the tab alike. Settings > Actions has
+where it goes (On screen, In the toolbar, Hidden), "Open it when the mouse
+reaches the right edge" (on by default) and the Customize list: a box to
+tick for every menu command, drag by the handle (or Alt+Up/Down) to reorder,
+a search by name, menu or shortcut words ("ctrl shift t", any case; no
+dragging while searching; Escape clears it), Reset to Default. The rail's
+right-click menu opens the same list in its own window. View > Show Actions /
+Hide Actions is F9 (the desktop's usual side-pane key; changeable in
+Settings > Shortcuts). New installs start On screen; settings from before the
+rail (the brand accent or the welcome seen in them) start Hidden, with a
+one-time note "New: an Actions rail. Settings ▸ Actions." once no welcome or
+What's New is up. Hover and slides draw nothing new each frame (the sliding
+rail is drawn once and moved), and none of it moves when the desktop's
+animations are off or the frames are slow. Saved as `actionsMode`,
+`actionsCollapsed`, `actionsHoverOpen`, `actionsOrder`, `actionsShown` and
+`actionsHint` in `native.ini`.
 
 GTK 3 on purpose: every Linux desktop has it (Raspberry Pi OS, Ubuntu, Kali,
 Fedora, Mint), it speaks Wayland and X11 natively, and the AppImage uses the
@@ -108,7 +140,16 @@ every shape and gate style and checks each circuit's truth table. And:
   for one of the app's windows: `welcome:N`, `whatsnew:N`, `help`, `truth`,
   `feedback`, `templates`, `tour`, `find`, `find:1` (Find Next and Previous), `export`, `scope`, `focus`,
   `split`, `quit`, `settings:N`, `toolbar:N`, `shortcuts`, `quickadd`,
-  `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `primary` (the ☰ menu), `stepclock:N`, `lockinplace:N`, `pagelinks`, `draw:N`, `projector:N`, `checkclocked:N` (on a counter)
+  `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `primary` (the ☰ menu), `stepclock:N`, `lockinplace:N`, `pagelinks`, `draw:N`, `projector:N`, `checkclocked:N` (on a counter),
+  `rail:N` (the Actions rail: 0 open with a label, 1 folded, 2 peeking, 3 slid
+  out, 4 mid-drag, 5 focus mode, 6 focus mode slid out, 7 narrow, 8 Simulation
+  View, 9 in the toolbar, 10 focus mode peeking), `customize:N` (the Customize
+  window; 1 searched for "export")
+- `cedarlogic --actions-check` -- the Actions rail without a window: where it
+  starts for a new install and an earlier one, the order shared by the rail
+  and the list, the search, the hot strip's geometry and timing, focus mode
+  folding it; settings of its own in a temporary folder. The session check
+  does the same live, through the window's events
 - `cedarlogic --hold <seconds> --screenshot out.png` -- waits before the
   picture (CI drags a gate onto the canvas with xdotool meanwhile)
 - `cedarlogic --bench-drag [steps] circuit.cdl` -- times the canvas while

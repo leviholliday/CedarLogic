@@ -4,7 +4,9 @@
 #include <deque>
 
 #include "App.h"
+#include "Actions.h"
 #include "Bench.h"
+#include "Rail.h"
 #include "Canvas.h"
 #include "Recovery.h"
 #include "SessionCheck.h"
@@ -183,6 +185,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "switcher") top = toplevelNamed("tab-switcher");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	if (what == "combo") top = settings::window();
+	if (what == "customize") top = actions::customizeWindow();
 	if (what == "scope" && !circuitWindows().empty())
 		if (ScopeWindow* scope = circuitWindows().back()->scopeWindow()) scope->describe();
 	const bool ok = top && (what == "menu" || what == "submenu" || what == "combo" || what == "primary" ? writeWindowWithMenu(top, gScreenshot)
@@ -247,6 +250,9 @@ gboolean showCb(gpointer) {
 	else if (what == "export") w->exportImage();
 	else if (what == "report") w->exportReport();
 	else if (what == "settings") settings::show(w, page);
+	// The Actions rail (Rail.h's picture()), and its Customize window (:1 searched for "export").
+	else if (what == "rail") { if (w->rail()) w->rail()->picture(page); }
+	else if (what == "customize") actions::showCustomize(w, page == 1 ? "export" : "");
 	else if (what == "sync" || what == "synccode" || what == "synclink" || what == "syncpair" || what == "syncconfirm") syncui::showForScreenshot(w, what, page);
 	else if (what == "quit") confirmQuitting(w->window());
 	else if (what == "focus") w->toggleFocusMode();
@@ -617,6 +623,7 @@ GMenuModel* buildMenubar() {
 	add(s, "Focus _Mode", "win.focus-mode");
 	add(s, "F_ull Screen", "win.fullscreen");
 	add(s, "Side _Panel", "win.palette");
+	add(s, "Show Ac_tions", "win.toggle-actions");
 	add(s, "Status _Bar", "win.status-bar");
 	add(s, "_Gridlines", "win.show-grid");
 	add(s, "Wire Connection _Dots", "win.wire-dots");
@@ -1431,6 +1438,20 @@ int main(int argc, char** argv) {
 		// --channel-check --server <url> --root <folder>: the Normal/Beta testing groups (Updater.h).
 		if (strcmp(argv[i], "--channel-check") == 0) return Updater_ChannelCheck(argc, argv);
 		if (strcmp(argv[i], "--feedback-check") == 0) return feedback::check();
+		// --actions-check: the Actions rail's order, search, start and edge (Actions.h), with
+		// settings of its own in a temporary folder.
+		if (strcmp(argv[i], "--actions-check") == 0) {
+			gchar* home = g_dir_make_tmp("cl-actions-XXXXXX", nullptr);
+			if (home == nullptr) { fprintf(stderr, "actions-check: no temporary folder\n"); return 2; }
+			g_setenv("XDG_CONFIG_HOME", (std::string(home) + "/config").c_str(), TRUE);
+			g_setenv("XDG_DATA_HOME", (std::string(home) + "/data").c_str(), TRUE);
+			g_setenv("CL_ACTIONS_CHECK_HOME", home, TRUE);
+			gtk_init_check(&argc, &argv);
+			const int code = actions::check();
+			removeTree(home);
+			g_free(home);
+			return code;
+		}
 		// --trash-check: Recently Deleted's files, in the library at $XDG_DATA_HOME (the Mac's launch-selftest `trash`).
 		if (strcmp(argv[i], "--trash-check") == 0) return library::trashCheck();
 		if (strcmp(argv[i], "--feedback-probe") == 0) {
