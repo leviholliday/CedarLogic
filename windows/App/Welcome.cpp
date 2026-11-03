@@ -1274,8 +1274,9 @@ void pageChapter(ID2D1RenderTarget* rt, WhatsNew* wn, int i, double t) {
 	const Chapter& c = kChapters[i];
 	const float x = 48, cw = 420;
 	float y = heading(rt, x, 34, cw, c.eyebrow, c.title, c.line) + 18;
+	const bool four = c.points[3].title != nullptr;   // closer together, to fit
 	for (const Point& p : c.points)
-		if (p.title) y += pointCard(rt, x, y, cw, p.icon, p.title, p.line) + 10;
+		if (p.title) y += pointCard(rt, x, y, cw, p.icon, p.title, p.line) + (four ? 6 : 10);
 	if (c.tryTitle) {
 		const float bw = textWidth(c.tryTitle, 13, kSemi) + 40;
 		const D2D1_RECT_F r = D2D1::RectF(x, y + 6, x + bw, y + 42);

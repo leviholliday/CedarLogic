@@ -24,8 +24,9 @@ const float kMenuText = 12, kMenuPad = 9, kIconSize = 16;
 const wchar_t kMoon = 0xE708, kSun = 0xE706;
 
 // The Actions rail's items, in the toolbar instead (Settings > Actions: In
-// the toolbar): a group of their own, after Copy and Paste, so Zoom gives
-// way first in a narrower window, as on the Mac.
+// the toolbar): a group of their own, after Undo and Redo, so in a narrower
+// window Zoom gives way first, as on the Mac, then Copy and Paste, then the
+// actions themselves one at a time from the end.
 const int kActionsGroup = TGCount;
 
 bool groupShown(int g) {
@@ -86,8 +87,8 @@ void Toolbar::build(int style, bool live) {
 		if (prefs().showTitle) add(Title, 0, -1, false);
 		add(Button, CMD_NEW, TGFile, false); add(Button, CMD_OPEN, TGFile, false); add(Button, CMD_SAVE, TGFile, false);
 		add(Button, CMD_UNDO, TGUndo, false); add(Button, CMD_REDO, TGUndo, false);
-		add(Button, CMD_COPY, TGClipboard, false); add(Button, CMD_PASTE, TGClipboard, false);
 		addActions([&](int command) { add(Button, command, kActionsGroup, false); });
+		add(Button, CMD_COPY, TGClipboard, false); add(Button, CMD_PASTE, TGClipboard, false);
 		add(Button, CMD_ZOOM_OUT, TGZoom, false); add(Zoom, 0, TGZoom, false); add(Button, CMD_ZOOM_IN, TGZoom, false);
 		// The right-hand side, laid out from the right edge.
 		add(Button, CMD_RUNNING, TGSim, true); add(Button, CMD_STEP, TGSim, true);
@@ -227,8 +228,11 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 			if (it.group >= 0) groupEnds.push_back({ it.group, x + pad });
 		}
 		for (const auto& ge : groupEnds)
-			if (ge.second > rightStart - 8)
+			if (ge.second > rightStart - 8 && ge.first != kActionsGroup)
 				for (Item& it : items) if (!it.right && it.group == ge.first) it.shown = false;
+		// The actions: as many as fit.
+		for (Item& it : items)
+			if (it.group == kActionsGroup && it.rect.right + pad > rightStart - 8) it.shown = false;
 		// The name alone, cut short, when even that doesn't fit.
 		for (Item& it : items)
 			if (it.kind == Title) it.rect.right = std::max(it.rect.left + 40, std::min(it.rect.right, rightStart - 8));

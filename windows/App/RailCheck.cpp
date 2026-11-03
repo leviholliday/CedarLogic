@@ -305,16 +305,24 @@ void window() {
 	w->run(CMD_TOGGLE_ACTIONS);
 	pump(0.3);
 	check(prefs().actionsMode == 0 && r->showing() && about(railW(), open), "with the actions hidden, Show Actions puts the rail on screen, open");
-	// (Wide enough for the toolbar to keep every group.)
-	SetWindowPos(w->window(), nullptr, 0, 0, 2000, 700, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 	prefs().actionsMode = 1;
 	actions::changed();
 	pump(0.2);
 	POINT bp;
-	check(!IsWindowVisible(r->widget()) && w->toolbarWidget()->hasButton(CMD_CHECK_CIRCUIT) && w->toolbarWidget()->buttonPoint(CMD_CHECK_CIRCUIT, bp),
-	      "In the toolbar: no rail, the six as toolbar buttons");
+	check(!IsWindowVisible(r->widget()) && w->canvasRight() == clientW() && w->toolbarWidget()->hasButton(CMD_CHECK_CIRCUIT) &&
+	          w->toolbarWidget()->buttonPoint(CMD_CHECK_CIRCUIT, bp),
+	      "In the toolbar: no rail, the actions as toolbar buttons (the first one shown at 1000 px)");
+	// Minimal has room for all six at this width.
+	const int style = prefs().toolbarStyle;
+	prefs().toolbarStyle = TSMinimal;
+	actions::changed();
+	pump(0.2);
+	int shownSix = 0;
+	for (const std::string& id : actions::defaults())
+		if (w->toolbarWidget()->buttonPoint(actions::find(id)->command, bp)) shownSix++;
+	check(shownSix == 6, strf("and all six where there's room (%d shown, Minimal)", shownSix));
+	prefs().toolbarStyle = style;
 	prefs().actionsMode = 0;
-	SetWindowPos(w->window(), nullptr, 0, 0, 1000, 700, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 	actions::changed();
 	pump(0.2);
 
