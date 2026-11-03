@@ -23,6 +23,9 @@ public:
 	// Look again (the circuit changed); jump to the first hit when asked.
 	void run(bool jump);
 	void step(int delta);
+	// Where it is: the hit shown (0-based) and how many there are.
+	int current() const { return index; }
+	int count() const { return (int)hits.size(); }
 
 private:
 	struct Hit { int page; long gate; double x, y; std::string text, kind; };

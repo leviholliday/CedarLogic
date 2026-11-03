@@ -27,6 +27,10 @@ bool parse(const std::string& link, std::string& data, std::string& name);
 // "c=<data>&n=<name>".
 std::string fragment(const std::string& data, const std::string& name);
 
+// A cedarlogic://sync#k=<code> (or ?k=) link: a sync code, not a circuit. It goes to Settings >
+// Sync (SyncApp.cpp), never to a file.
+bool isSyncLink(const std::string& link);
+
 // A cedarlogic:// link as a .cdl file in the cache (named by the circuit, in
 // a folder of its own for this data, so the same link opens the same copy);
 // the file's path, or empty (and why).

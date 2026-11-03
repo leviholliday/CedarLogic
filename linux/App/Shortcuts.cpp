@@ -127,8 +127,11 @@ const std::vector<Action>& all() {
 		{ "duplicate", "Editing", "Duplicate the selection", "win.duplicate", "<Primary>d" },
 		{ "selectAll", "Editing", "Select everything on the page", "win.select-all", "<Primary>a" },
 		{ "find", "Editing", "Find a label, a TO/FROM name or a part", "win.find", "<Primary>f" },
+		{ "findNext", "Editing", "Find the next one", "win.find-next", "F3" },
+		{ "findPrevious", "Editing", "Find the previous one", "win.find-previous", "<Shift>F3" },
 		{ "addGate", "Building", "Add a gate by name", nullptr, "a" },
 		{ "rotate", "Building", "Rotate the selection", nullptr, "r" },
+		{ "lockInPlace", "Building", "Lock in Place (or unlock the selected parts)", "win.lock-in-place", "<Primary>l" },
 		{ "straighten", "Building", "Straighten the selected wires", nullptr, "s" },
 		{ "tidy", "Building", "Tidy up (preview first)", nullptr, "<Shift>s" },
 		{ "quickCopy", "Building", "Copy, or connect while moving (quick key)", nullptr, "c" },
@@ -141,12 +144,17 @@ const std::vector<Action>& all() {
 		{ "zoomFit", "Moving around", "Zoom to fit", "win.zoom-fit", "<Primary>0|<Primary>KP_0" },
 		{ "zoomActual", "Moving around", "Actual size", "win.zoom-actual", "<Primary>1|<Primary>KP_1" },
 		{ "focusMode", "Moving around", "Focus mode: hide the toolbar and side panel", "win.focus-mode", "<Primary>period" },
+		{ "fullScreen", "Moving around", "Full screen", "win.fullscreen", "F11" },
 		{ "simView", "Simulation", "Simulation view", "win.sim-view", "<Primary>r" },
 		{ "step", "Simulation", "Step once", "win.step", "<Primary><Shift>r" },
+		{ "stepClock", "Simulation", "Step Clock: one full cycle of each manual clock", nullptr, "k" },
 		{ "truthTable", "Simulation", "Truth table", nullptr, "t" },
 		{ "checkCircuit", "Simulation", "Check my circuit against a formula or table", nullptr, "<Shift>t" },
 		{ "scope", "Simulation", "Oscilloscope", "win.scope", "<Primary>g" },
 		{ "lock", "Simulation", "Lock the circuit", "win.lock", "" },
+		{ "draw", "Drawing and notes", "Draw on the circuit (then P pen, H highlighter, E eraser)", "win.draw", "<Primary><Alt>p" },
+		{ "showDrawing", "Drawing and notes", "Show or hide the drawing", "win.show-drawing", "<Primary><Shift>h" },
+		{ "notes", "Drawing and notes", "Notes for this circuit", "win.notes", "<Primary><Alt>n" },
 		{ "newTab", "Tabs and split view", "New tab", "win.new-tab", "<Primary>t" },
 		{ "closeTab", "Tabs and split view", "Close tab", "win.close-tab", "<Primary>w" },
 		{ "reopenTab", "Tabs and split view", "Reopen the tab you closed", "win.reopen-tab", "<Primary><Shift>t" },
@@ -237,6 +245,7 @@ void apply(GtkApplication* app) {
 		list.push_back(nullptr);
 		gtk_application_set_accels_for_action(app, a.gaction, list.data());
 	}
+	refreshMenuKeys();   // the canvas's keys, written on their menu items
 }
 
 std::string fromEvent(const GdkEventKey* e) {

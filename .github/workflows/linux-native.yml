@@ -38,19 +38,114 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
-            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev \
-            xvfb xauth xdotool fonts-dejavu-core fonts-liberation
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
+            gnome-keyring dbus
 
       - name: Build
         run: |
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build linux/build
+
+      # Signed updates (update-signing/UpdateSignature.h): the signature check on RFC 8032's
+      # vectors and the ways a signature must fail; the one public key everywhere it's written
+      # down (the app, the signing script, install.sh); the updater's own code against fake
+      # releases (good, bad signature, stale manifest, wrong hash, downgrade...) and the .deb's
+      # root step; and the signing script's dry run, with a throwaway key, checked by the app.
+      - name: Signed update checks
+        run: |
+          B=linux/build
+          $B/verify_check
+          KEY=$($B/verify_check --print-key)
+          echo "public key: $KEY"
+          grep -qx "PUBHEX=$KEY" scripts/sign-preview.sh || { echo "::error::sign-preview.sh has another public key"; exit 1; }
+          INSTALL_KEY=$(sed -n '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/p' linux/install.sh | openssl pkey -pubin -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')
+          [ "$INSTALL_KEY" = "$KEY" ] || { echo "::error::install.sh has another public key ($INSTALL_KEY)"; exit 1; }
+          $B/cedarlogic --update-self-test
+          # The signing script's manifest and openssl signature, read by the app's own check.
+          mkdir -p fake-release
+          printf 'a .deb for the test\n' > fake-release/cedarlogic_amd64.deb
+          printf 'an AppImage for the test\n' > fake-release/CedarLogic-Native-0.4.0-x86_64.AppImage
+          TEST_KEY=$(scripts/sign-preview.sh --dry-run fake-release --tag linux-native-testing --commit "$GITHUB_SHA" --build 2 --test-key)
+          $B/cedarlogic --update-self-test --release fake-release --key "$TEST_KEY"
+          # Not with the real key (the test key signed it), and not once a file has changed.
+          if $B/cedarlogic --update-self-test --release fake-release --key "$KEY"; then echo "::error::verified with the wrong key"; exit 1; fi
+          printf 'changed\n' >> fake-release/cedarlogic_amd64.deb
+          if $B/cedarlogic --update-self-test --release fake-release --key "$TEST_KEY"; then echo "::error::a changed file passed"; exit 1; fi
+          # A versioned release signed the way packaging/sign-release.sh signs one (sign-preview.sh's
+          # --dry-run with the release's tag), read by a Normal tester's check; not under another tag.
+          mkdir -p fake-v041
+          printf 'a .deb for the test\n' > fake-v041/cedarlogic_0.4.1_amd64.deb
+          printf 'an arm .deb for the test\n' > fake-v041/cedarlogic_0.4.1_arm64.deb
+          printf 'a DMG for the test\n' > fake-v041/CedarLogic-0.4.1-Mac.dmg
+          REL_KEY=$(scripts/sign-preview.sh --dry-run fake-v041 --tag v0.4.1 --commit "$GITHUB_SHA" --build 2 --test-key)
+          $B/cedarlogic --update-self-test --release fake-v041 --key "$REL_KEY" --tag v0.4.1
+          if $B/cedarlogic --update-self-test --release fake-v041 --key "$REL_KEY" --tag v0.4; then echo "::error::a v0.4.1 list passed as v0.4's"; exit 1; fi
+
+      # The testing groups (Settings > General > Testing group, linux/App/Updater.h), through the
+      # updater's own check and curl against a static stand-in for GitHub: Normal takes the newest
+      # full release and ignores pre-releases, Beta takes the test build, no downgrade on a switch,
+      # the group a copy starts in (test-build copies stay Beta), bad signatures refused.
+      - name: Testing group check
+        run: |
+          D=$(mktemp -d)
+          mkdir -p "$D/www"
+          python3 -m http.server 8767 --bind 127.0.0.1 --directory "$D/www" > "$D/http.log" 2>&1 &
+          SERVER=$!
+          for _ in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:8767/ && break; sleep 0.1; done
+          rc=0
+          XDG_CONFIG_HOME="$D/config" timeout 120 linux/build/cedarlogic --channel-check --server http://127.0.0.1:8767 --root "$D/www" || rc=$?
+          kill $SERVER || true
+          [ "$rc" = 0 ] || tail -40 "$D/http.log"
+          exit $rc
+
+      # Send Feedback's client against the Mac's stand-in for the site's /api/feedback
+      # (mac/Tools/feedback-check/server.py): the install id, the required summary, the
+      # daily cap (asked once, not retried), Request more, plain 429s still retried.
+      - name: Feedback client check
+        run: |
+          D=$(mktemp -d)
+          python3 mac/Tools/feedback-check/server.py "$D/port" &
+          SERVER=$!
+          for _ in $(seq 50); do [ -s "$D/port" ] && break; sleep 0.1; done
+          rc=0
+          XDG_CONFIG_HOME="$D/config" CL_FEEDBACK_URL="http://127.0.0.1:$(cat "$D/port")" CL_FEEDBACK_KEY=check \
+            timeout 120 linux/build/cedarlogic --feedback-check || rc=$?
+          kill $SERVER || true
+          exit $rc
+
+      # Recently Deleted's files (docs/RECENTLY-DELETED.md), as the Mac's launch-selftest
+      # `trash` state: the list, the 30-day sweep, Restore and Delete Now, in a library of its own.
+      - name: Recently Deleted check
+        run: |
+          D=$(mktemp -d)
+          XDG_DATA_HOME="$D/data" XDG_CONFIG_HOME="$D/config" timeout 60 linux/build/cedarlogic --trash-check
+
+      # A long working session in the window (linux/App/SessionCheck.cpp): seeded
+      # random clicks, drags, keys and commands through the app's own handlers, with
+      # windows over it poked at and closed, checked all along (no crash or GTK
+      # warning, autosave, the file on disk, undo and redo, tabs and split view,
+      # memory, the window freed on close). Seeds 1-4, then again with
+      # G_DEBUG=fatal-criticals; each run capped at 7 minutes. A FAIL fails the build.
+      - name: Session check
+        if: matrix.arch == 'x86_64'
+        timeout-minutes: 30
+        run: |
+          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
+
+      - name: Upload the session logs
+        if: always() && matrix.arch == 'x86_64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-session-logs
+          path: session-logs
+          if-no-files-found: warn
 
       # The engine through the C interface the app uses: editing, wires,
       # simulation, truth tables, and saving without changing a circuit.
@@ -67,12 +162,72 @@ jobs:
           $B/sim_check $L format/tests/fixtures/lab6.cdl 0 before.png after.png
           $B/save_check $L format/tests/fixtures/Broadcast.cdl format/tests/fixtures/Lab5.cdl \
             "format/tests/fixtures/Routing Backwards.cdl" format/tests/fixtures/lab6.cdl res/samples/practice.cdl
+          # The templates this app ships (res/templates, the Mac's own): Step Clock on the
+          # flip-flops (manual, running and pulse-button clocks), the examples' second pages,
+          # the registers and the Classic Mistakes each do what they say. First: every
+          # template index.tsv names is there with its Clock files (50 files in all).
+          python3 - <<'PY'
+          import os, sys
+          d = "res/templates"
+          rows = [l.split("\t") for l in open(os.path.join(d, "index.tsv"), encoding="utf-8").read().splitlines() if l]
+          want = []
+          for f in rows:
+              want.append("template-%s.cdl" % f[0])
+              choices = f[4] if len(f) > 4 else ""
+              want += ["template-%s-%s.cdl" % (f[0], c) for c in ("running", "pulse") if c in choices]
+          have = sorted(n for n in os.listdir(d) if n.endswith(".cdl"))
+          missing, extra = sorted(set(want) - set(have)), sorted(set(have) - set(want))
+          print("%d templates, %d files" % (len(rows), len(have)))
+          if missing or extra or len(have) != 50:
+              sys.exit("templates: missing %s, not in index.tsv %s" % (missing, extra))
+          PY
+          for t in clock_check examples_check register_check mistakes_check; do
+            $B/$t $L res/templates > $t.log 2>&1 || { cat $t.log; exit 1; }
+            echo "$t: $(grep -c '^PASS\|  ok ' $t.log) passed"
+          done
+
+      # Sync (docs/SYNC.md): the engine's own self-test with the app's hooks (libcrypto, zlib, the
+      # curl program) -- the vectors every device must agree on, and the protocol's scenarios --
+      # then the curl program's use (no token on its command line, no temp file left behind), and
+      # two libraries turning sync on, linking, editing and deleting through a small stand-in for
+      # the website (linux/Tools/sync_mock.py). The website's own mock server, which the full
+      # scenarios over HTTP need, is in the private cedarlogic-site repo: SITE=<checkout>
+      # linux/Tools/sync-check.sh runs them.
+      - name: Sync checks
+        run: |
+          B=linux/build
+          $B/sync_check
+          python3 linux/Tools/sync_mock.py --port 0 > mock.log &
+          MOCK=$!
+          for i in $(seq 1 50); do grep -q listening mock.log && break; sleep 0.2; done
+          URL=$(sed -n 's/.*"url":"\([^"]*\)".*/\1/p' mock.log | sed 's/localhost/127.0.0.1/')
+          echo "mock server at $URL"
+          $B/sync_check --curl-check "$URL"
+          $B/sync_check --roundtrip "$URL"
+          kill $MOCK
+
+      # The sync code as the app keeps it: in the desktop's keyring (libsecret, loaded at run
+      # time), here a throwaway GNOME Keyring in a D-Bus session of its own. Without a keyring
+      # the check falls back to the file, which would pass too, so insist this one was used.
+      - name: Sync code in a keyring
+        run: |
+          dbus-run-session -- sh -c 'printf throwaway | gnome-keyring-daemon --unlock --components=secrets >/dev/null && linux/build/sync_check --keyring-check' | tee keyring.log
+          ! grep -q "no unlocked keyring" keyring.log
 
       - name: Package AppImage
         run: |
+          # Pinned: the 1-alpha-20251107-1 release (not the moving "continuous"
+          # one), and checked against its sha256 before it is ever run.
+          case "${{ matrix.arch }}" in
+            x86_64)  LD_SHA=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d ;;
+            aarch64) LD_SHA=620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff ;;
+            *) echo "no pinned linuxdeploy for ${{ matrix.arch }}" >&2; exit 1 ;;
+          esac
           curl -fsSL -o linuxdeploy \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.arch }}.AppImage
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-${{ matrix.arch }}.AppImage
+          echo "$LD_SHA  linuxdeploy" | sha256sum -c -
           chmod +x linuxdeploy
+          set -o pipefail
           OUT=$(LINUXDEPLOY="$PWD/linuxdeploy" linux/package.sh linux/build-release | tail -1)
           echo "APPIMAGE=$OUT" >> "$GITHUB_ENV"
           ls -la "$OUT"
@@ -80,9 +235,12 @@ jobs:
       # The installer: a .deb with the menu entry, icon and .cdl association.
       - name: Package .deb
         run: |
+          set -o pipefail
           DEB=$(linux/package-deb.sh linux/build-release ${{ github.run_number }} | tail -1)
           dpkg-deb --info "$DEB"
           dpkg-deb --contents "$DEB"
+          # An upgrade from every earlier test build (0.1.0+<run number>): this one has to sort higher.
+          dpkg --compare-versions "$(dpkg-deb -f "$DEB" Version)" gt "0.1.0+999999"
           mkdir -p debs
           cp "$DEB" "debs/cedarlogic_$(dpkg-deb -f "$DEB" Architecture).deb"
           # It installs, with its dependencies, and runs.
@@ -92,7 +250,7 @@ jobs:
           test -f /usr/share/icons/hicolor/256x256/apps/cedarlogic.png
 
       - name: Upload .deb
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs/*.deb
@@ -106,6 +264,8 @@ jobs:
         run: |
           mkdir -p renders
           "$APPIMAGE" --version
+          "$APPIMAGE" --sync-test
+          "$APPIMAGE" --update-self-test
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --screenshot renders/window-Lab5.png format/tests/fixtures/Lab5.cdl
           test -s renders/window-Lab5.png
@@ -118,27 +278,109 @@ jobs:
             timeout 60 "$APPIMAGE" --dark --sim-view --screenshot renders/window-sim.png res/samples/practice.cdl || true
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             timeout 60 "$APPIMAGE" --light --screenshot renders/window-practice.png res/samples/practice.cdl || true
+          # Labels drawn both ways (linux/SMOOTHNESS.md step 3): on x86_64 each picture
+          # below is taken again, straight after, with labels as filled outlines, as
+          # before Cairo's cached glyphs were the default (CEDARLOGIC_GLYPH_TEXT=0),
+          # into renders/outlines/, to compare pixel by pixel.
+          AGAIN_ENV=CEDARLOGIC_GLYPH_TEXT=0 AGAIN_DIR=renders/outlines
+          mkdir -p "$AGAIN_DIR"
+          again() {
+            [ "$(uname -m)" = x86_64 ] || return 0
+            local out=$1; shift
+            env "$AGAIN_ENV" xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 60 "$APPIMAGE" "$@" --screenshot "$AGAIN_DIR/$out" res/samples/practice.cdl > /dev/null 2>&1 || true
+          }
+          again window-practice.png --light
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 whatsnew:0 help truth feedback templates tour find export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu; do
+          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 help truth feedback feedback:1 feedback:2 feedback:3 feedback:4 feedback:5 switcher templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu menu:1 menu:2 menu:3 menu:4 primary predict:0 predict:1 stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
+            again "show-$name.png" --show "$show"
           done
+          # Send Feedback's recording (linux/App/Capture.h): with no ffmpeg an animated PNG,
+          # with ffmpeg an MP4 made from the app's own movie; each checked by the app, then
+          # read back by ffprobe. The files go with the renders.
+          mkdir -p renders/capture-png renders/capture-mp4
+          CL_CAPTURE_NO_FFMPEG=1 xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 120 "$APPIMAGE" --capture-test renders/capture-png res/samples/practice.cdl 2>&1 | tee renders/capture-png/log.txt
+          grep -q "capture: recording .* ok" renders/capture-png/log.txt || { echo "::error::the recording (animated PNG) failed"; exit 1; }
+          if [ "$(uname -m)" = x86_64 ] && sudo apt-get install -y -qq ffmpeg > /dev/null; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 200 "$APPIMAGE" --capture-test renders/capture-mp4 res/samples/practice.cdl 2>&1 | tee renders/capture-mp4/log.txt
+            grep -q "capture: recording .*video/mp4.* ok" renders/capture-mp4/log.txt || { echo "::error::the recording (MP4) failed"; exit 1; }
+            for f in renders/capture-png/capture-recording.png renders/capture-mp4/capture-recording.mp4; do
+              ffprobe -v error -count_frames -show_entries stream=codec_name,width,height,nb_read_frames "$f" | tee -a renders/capture-mp4/log.txt
+              ffmpeg -v error -i "$f" -f null - || { echo "::error::$f doesn't decode"; exit 1; }
+            done
+          fi
+          # Check My Circuit clock pulse by clock pulse, on the 3-bit counter template.
+          for show in checkclocked:0 checkclocked:1 checkclocked:2; do
+            name=$(echo "$show" | tr ':' '-')
+            xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/templates/template-builtin-count-3bit.cdl || echo "no $show"
+          done
+          # A larger circuit (10 switches, a clock, TO labels): the truth table window
+          # and the oscilloscope with signals in it, in both themes and Simulation View.
+          # What each run said goes with the pictures.
+          for run in truth:--light scope:--light scope:--dark scope:--sim-view export:--dark; do
+            show=${run%%:*}; flag=${run##*:}
+            out="renders/show-$show-Lab5-${flag#--}"
+            rc=0
+            xvfb-run -a -s "-screen 0 1600x1000x24" \
+              timeout 60 "$APPIMAGE" $flag --show "$show" --screenshot "$out.png" format/tests/fixtures/Lab5.cdl > "$out.log" 2>&1 || rc=$?
+            echo "Lab5 $show $flag: exit $rc" | tee -a "$out.log"
+          done
+          # The oscilloscope fills its dock and has Lab5's TO labels in it (it once drew
+          # nothing: its area had no height).
+          grep -h "oscilloscope:" renders/show-scope-Lab5-*.log || true
+          for f in renders/show-scope-Lab5-*.log; do
+            grep -Eq "oscilloscope: drawn [0-9]+ x [1-9][0-9]* in .*, [1-9][0-9]* signal" "$f" || { echo "::error::the oscilloscope wasn't drawn ($f)"; exit 1; }
+          done
+          # Settings > Sync with sync turned on, against the stand-in server: the code is in the
+          # sync folder as a turned-on computer has it, and the app syncs while it's pictured.
+          python3 linux/Tools/sync_mock.py --port 0 > mock-show.log &
+          MOCK=$!
+          for i in $(seq 1 50); do grep -q listening mock-show.log && break; sleep 0.2; done
+          SYNCURL=$(sed -n 's/.*"url":"\([^"]*\)".*/\1/p' mock-show.log | sed 's/localhost/127.0.0.1/')
+          SYNCHOME=$(mktemp -d)
+          mkdir -p "$SYNCHOME/CedarLogic/Sync"
+          chmod 700 "$SYNCHOME/CedarLogic/Sync"
+          linux/build/sync_check --new-code > "$SYNCHOME/CedarLogic/Sync/secret"
+          chmod 600 "$SYNCHOME/CedarLogic/Sync/secret"
+          # A second "device" with the same code syncs first (its own folder, settings and name, and
+          # the student's name), so the picture lists it with Remove and the name comes across.
+          SECOND=$(mktemp -d)
+          mkdir -p "$SECOND/data/CedarLogic/Sync" "$SECOND/config/CedarLogic"
+          chmod 700 "$SECOND/data/CedarLogic/Sync"
+          cp "$SYNCHOME/CedarLogic/Sync/secret" "$SECOND/data/CedarLogic/Sync/secret"
+          printf '[CedarLogic]\nstudentName=Robin Lab\nhasSeenWelcome=true\n' > "$SECOND/config/CedarLogic/native.ini"
+          XDG_DATA_HOME="$SECOND/data" XDG_CONFIG_HOME="$SECOND/config" CL_SYNC_DEVICE_NAME="Lab PC" CL_SYNC_URL="$SYNCURL" \
+            xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 "$APPIMAGE" --hold 15 --screenshot renders/sync-second-device.png \
+            res/samples/practice.cdl || echo "no second device"
+          rm -rf "$SECOND"
+          XDG_DATA_HOME="$SYNCHOME" CL_SYNC_URL="$SYNCURL" xvfb-run -a -s "-screen 0 1600x1000x24" \
+            timeout 60 "$APPIMAGE" --show sync --screenshot renders/show-sync-on.png res/samples/practice.cdl || echo "no sync-on picture"
+          kill $MOCK
+          rm -rf "$SYNCHOME"
           # The Raspberry Pi's own look (its PiXflat and PiXnoir themes and the
           # light PibotoLt face, from the Raspberry Pi archive): Settings, the
           # menus and the cards, as they look on a Pi.
           if [ "$(uname -m)" = x86_64 ] &&
-             curl -fsSL -o /tmp/piboto.deb http://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
-             curl -fsSL -o /tmp/pixflat.deb http://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb; then
+             curl -fsSL -o /tmp/piboto.deb https://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
+             curl -fsSL -o /tmp/pixflat.deb https://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb &&
+             echo "ae9418e029e654e2fbe9ce33768ea5985fa91441d1f8ac2cf7e015f0f2539fad  /tmp/piboto.deb" | sha256sum -c - &&
+             echo "56e518b2321a1784b39566885df595661b99781b26e439dd09a6ba1d56858c66  /tmp/pixflat.deb" | sha256sum -c -; then
             sudo dpkg-deb -x /tmp/piboto.deb / && sudo dpkg-deb -x /tmp/pixflat.deb / && fc-cache -f > /dev/null
             mkdir -p ~/.config/gtk-3.0
             for look in PiXflat:light PiXnoir:dark PiXflat:dark; do
               theme=${look%%:*}; mode=${look##*:}
               printf '[Settings]\ngtk-theme-name=%s\ngtk-font-name=PibotoLt 12\n' "$theme" > ~/.config/gtk-3.0/settings.ini
-              for show in settings:0 settings:1 settings:2 settings:3 settings:4 menu submenu combo gatesettings rename shortcuts; do
+              for show in settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 menu primary submenu combo gatesettings rename shortcuts draw:0; do
                 name=$(echo "$show" | tr ':' '-')
                 xvfb-run -a -s "-screen 0 1600x1000x24" \
                   timeout 60 "$APPIMAGE" --$mode --show "$show" --screenshot "renders/pi-$theme-$mode-$name.png" res/samples/practice.cdl || echo "no pi $show"
+                again "pi-$theme-$mode-$name.png" --$mode --show "$show"
               done
             done
             rm -f ~/.config/gtk-3.0/settings.ini
@@ -162,10 +404,45 @@ jobs:
           done
           "$APPIMAGE" --feedback-probe || echo "feedback probe failed"
           linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
+          # The canvas alone, both ways, with nothing running (the same picture every time):
+          # light at 2x, and the dark and print exports.
+          for f in format/tests/fixtures/Lab5.cdl format/tests/fixtures/lab6.cdl format/tests/fixtures/jmSGTZM.cdl res/samples/practice.cdl; do
+            n=$(basename "$f" .cdl)
+            for look in screen dark print; do
+              fit=; [ $look = screen ] || fit=CL_RENDER_FITTED=$look
+              env $fit linux/build/render_png res/cl_gatedefs.xml "$f" 0 "renders/canvas-$n-$look.png" > /dev/null
+              env "$AGAIN_ENV" $fit linux/build/render_png res/cl_gatedefs.xml "$f" 0 "$AGAIN_DIR/canvas-$n-$look.png" > /dev/null
+            done
+          done
           cp before.png after.png renders/
 
+      # How smooth dragging is (linux/SMOOTHNESS.md): ms per frame while
+      # dragging one gate, everything, and the view, on a large circuit. Only
+      # numbers to read: GitHub's runners are shared and noisy, so this never
+      # fails the build. The output goes with the renders.
+      - name: Drag benchmark (numbers only)
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          mkdir -p renders
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag.txt || true
+          # Labels as filled outlines, as before Cairo's cached glyphs were the default
+          # (CEDARLOGIC_GLYPH_TEXT=0): the same benchmark, to compare.
+          CEDARLOGIC_GLYPH_TEXT=0 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/lab6.cdl 2>&1 | tee renders/bench-drag-outlines.txt || true
+          # Lab5 (53 gates, 40 wires), the circuit of the Zorin OS desktop test (linux/DESKTOP-TEST.md).
+          # The frames it compares (layered and drawn whole, one gate and everything moved)
+          # go with the renders, to look at.
+          mkdir -p renders/bench-Lab5
+          CEDARLOGIC_BENCH_PICTURES=renders/bench-Lab5 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5.txt || true
+          CEDARLOGIC_GLYPH_TEXT=0 xvfb-run -a -s "-screen 0 1600x1000x24" timeout 300 "$APPIMAGE" \
+            --bench-drag 60 format/tests/fixtures/Lab5.cdl 2>&1 | tee renders/bench-drag-Lab5-outlines.txt || true
+
       - name: Upload AppImage
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-appimage-${{ matrix.arch }}
           path: linux/build-release/CedarLogic-Native-*-${{ matrix.arch }}.AppImage
@@ -173,11 +450,156 @@ jobs:
 
       - name: Upload renders
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
           path: renders
           if-no-files-found: warn
+
+  # The same session with AddressSanitizer and UndefinedBehaviorSanitizer in the
+  # app and the engine: memory used after it's freed, or read past its end, is
+  # reported where it happens instead of crashing later (or never). Other seeds
+  # than the build's, so between them seeds 1-8 run on every push.
+  session-sanitizers:
+    name: session check with sanitizers (x86_64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            xvfb xauth fonts-dejavu-core fonts-liberation
+      - name: Build with sanitizers
+        run: |
+          cmake -S linux -B linux/build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCL_BUILD_TOOLS=OFF \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build linux/build-asan
+      - name: Session check with sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:symbolize=1
+          UBSAN_OPTIONS: print_stacktrace=1
+          SESSION_TIMEOUT: 900
+        run: |
+          SESSION_LOGS=session-logs-asan linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 5 6 7 8
+      # Further seeds, to find what's left: read, never failing the build.
+      - name: Session check with sanitizers, more seeds (numbers only)
+        continue-on-error: true
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:symbolize=1
+          UBSAN_OPTIONS: print_stacktrace=1
+          SESSION_TIMEOUT: 900
+        run: |
+          SESSION_LOGS=session-logs-asan/more linux/Tools/session-check.sh linux/build-asan/cedarlogic 200 9 10 11 12
+      - name: Upload the session logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-session-logs-asan
+          path: session-logs-asan
+          if-no-files-found: warn
+
+  # The .deb on the newer systems it has to run on: Ubuntu 24.04 (where OpenSSL's package is named
+  # libssl3t64) and Debian 12, which Raspberry Pi OS Bookworm is made from. Installed with its
+  # dependencies, started on a virtual display, and sync's self-test run with the system's own
+  # libcrypto and curl.
+  install-ubuntu-24:
+    name: .deb on Ubuntu 24.04 (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-24.04 }
+          - { arch: aarch64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
+          path: debs
+      # The one-line install (linux/install.sh) against a fake release on this machine, signed
+      # by the signing script's dry run with a throwaway key: it installs the signed .deb, and
+      # refuses a changed .deb or a bad signature without installing anything.
+      - name: install.sh, against a signed fake release
+        run: |
+          sudo apt-get update
+          mkdir -p fake
+          cp debs/*.deb linux/install.sh fake/
+          DEB=$(cd fake && ls *.deb)
+          cp "fake/$DEB" pristine.deb
+          scripts/sign-preview.sh --dry-run fake --tag linux-native-testing --commit "$GITHUB_SHA" --build 2 --test-key > /dev/null
+          (cd fake && exec python3 -m http.server 8765 --bind 127.0.0.1) > http.log 2>&1 &
+          for i in $(seq 1 50); do curl -fs -o /dev/null http://127.0.0.1:8765/SHA256SUMS && break; sleep 0.2; done
+          export CEDARLOGIC_TEST_RELEASE=http://127.0.0.1:8765 CEDARLOGIC_TEST_KEY=$PWD/fake/test-key.pub.pem
+          bash linux/install.sh
+          cedarlogic --version
+          sudo apt-get remove -y cedarlogic
+          # A .deb that isn't the one signed for.
+          printf 'x' >> "fake/$DEB"
+          if bash linux/install.sh; then echo "::error::install.sh installed a changed .deb"; exit 1; fi
+          if dpkg-query -W -f='${Status}' cedarlogic 2>/dev/null | grep -q "ok installed" || [ -e /usr/bin/cedarlogic ]; then echo "::error::cedarlogic got installed"; exit 1; fi
+          cp pristine.deb "fake/$DEB"
+          # A bad signature.
+          python3 -c "import sys; p='fake/SHA256SUMS.sig'; b=bytearray(open(p,'rb').read()); b[7]^=1; open(p,'wb').write(b)"
+          if bash linux/install.sh; then echo "::error::install.sh took a bad signature"; exit 1; fi
+          if dpkg-query -W -f='${Status}' cedarlogic 2>/dev/null | grep -q "ok installed" || [ -e /usr/bin/cedarlogic ]; then echo "::error::cedarlogic got installed"; exit 1; fi
+          if ls /var/tmp | grep cedarlogic; then echo "::error::a root copy was left behind"; exit 1; fi
+      - name: Install the .deb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./debs/*.deb xvfb curl
+          cedarlogic --version
+          cedarlogic --sync-test
+          cedarlogic --update-self-test
+          dpkg -l | grep -E 'libssl3(t64)?\b'
+          # The .deb update's root step, for real as root: something unsigned is refused (3),
+          # with nothing left behind; and it won't run as anyone else.
+          printf 'not a package' > /tmp/x.deb
+          printf 'not a manifest\n' > /tmp/m
+          head -c 64 /dev/zero > /tmp/s
+          code=0; sudo cedarlogic --install-update /tmp/x.deb /tmp/m /tmp/s "cedarlogic_$(dpkg --print-architecture).deb" || code=$?
+          [ "$code" = 3 ] || { echo "::error::the root step answered $code to an unsigned file"; exit 1; }
+          code=0; cedarlogic --install-update /tmp/x.deb /tmp/m /tmp/s "cedarlogic_$(dpkg --print-architecture).deb" || code=$?
+          [ "$code" = 3 ] || { echo "::error::the root step ran as a user ($code)"; exit 1; }
+          if ls /var/tmp | grep cedarlogic-update; then echo "::error::a root copy was left behind"; exit 1; fi
+      - name: Start it
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 cedarlogic --screenshot window.png /usr/share/CedarLogic/samples/practice.cdl
+          test -s window.png
+
+  install-debian-12:
+    name: .deb on Debian 12 (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-24.04 }
+          - { arch: aarch64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    container: debian:12
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
+          path: debs
+      - name: Install the .deb
+        run: |
+          apt-get update
+          apt-get install -y ./debs/*.deb xvfb curl
+          cedarlogic --version
+          cedarlogic --sync-test
+      - name: Start it
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 cedarlogic --screenshot window.png /usr/share/CedarLogic/samples/practice.cdl
+          test -s window.png
 
   # A public download for testers without a GitHub account: one rolling
   # pre-release, replaced on every push to linux/native. Its own job, after
@@ -189,17 +611,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download both AppImages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: CedarLogic-Native-linux-appimage-*
           path: appimages
           merge-multiple: true
 
       - name: Download both .debs
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: CedarLogic-Native-linux-deb-*
           path: appimages
@@ -235,11 +657,20 @@ jobs:
             git push -f origin "refs/tags/$TAG"
             gh release create "$TAG" --prerelease --title "Native Linux test build" --notes "$NOTES"
           fi
-          cp linux/install.sh appimages/install.sh
-          gh release upload "$TAG" appimages/*.AppImage appimages/*.deb appimages/install.sh --clobber
+          # CI never signs. The apps install only files a signed SHA256SUMS names, and the key is
+          # only on the owner's Mac: after this run, scripts/sign-preview.sh linux checks the
+          # release and signs it. Until then the build reaches no one. The last build's manifest
+          # goes first, so the release is plainly unsigned while it changes (a stale one couldn't
+          # pass anyway: it names the old commit and the old files' hashes).
+          for a in SHA256SUMS SHA256SUMS.sig; do
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$a"; then gh release delete-asset "$TAG" "$a" -y; fi
+          done
+          # Not install.sh: people pipe it into bash before anything is checked, so
+          # only sign-preview.sh uploads it, from the commit it signs.
+          gh release upload "$TAG" appimages/*.AppImage appimages/*.deb --clobber
           # Drop anything this run didn't make (older versions), so only the
-          # current pair is offered.
-          keep=$(cd appimages && ls *.AppImage *.deb install.sh)
+          # current pair is offered, and the signed install.sh stays.
+          keep=$(cd appimages && ls *.AppImage *.deb; echo install.sh)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             echo "$keep" | grep -qxF "$a" || gh release delete-asset "$TAG" "$a" -y
           done

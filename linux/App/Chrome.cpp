@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <map>
 #include <tuple>
 
@@ -235,8 +236,16 @@ float drawWrapped(cairo_t* cr, const std::string& text, const RectF& box, float 
 
 // ---- Icons ---------------------------------------------------------------------------
 
+namespace {
+void drawDrawIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawNotesIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+}  // namespace
+
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color) {
 	if (name == nullptr || color.a <= 0) return;
+	if (std::strcmp(name, Icon::StepClock) == 0) { drawStepClockIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Draw) == 0) { drawDrawIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Notes) == 0) { drawNotesIcon(cr, box, size, color); return; }
 	// Loaded at the screen's scale, tinted, and kept.
 	double sx = 1, sy = 1;
 	cairo_user_to_device_distance(cr, &sx, &sy);
@@ -405,6 +414,121 @@ void drawGaugeIcon(cairo_t* cr, const RectF& box, const Color& color) {
 	cairo_stroke(cr);
 	cairo_arc(cr, cx, cy, 1.4, 0, 2 * M_PI);
 	cairo_fill(cr);
+	cairo_restore(cr);
+}
+
+void drawStepClockIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f, r = 6.6f * k;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	// The rim, open at the top right where it turns into an arrow head.
+	const double a0 = -M_PI / 2 + 0.55, a1 = -M_PI / 2 + 2 * M_PI - 0.25;
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy, r, a0, a1);
+	cairo_stroke(cr);
+	// The head, at the rim's end, pointing on round (clockwise).
+	const double hx = cx + r * std::cos(a1), hy = cy + r * std::sin(a1);
+	const double tx = -std::sin(a1), ty = std::cos(a1);   // the way the rim runs on
+	const double nx = std::cos(a1), ny = std::sin(a1);    // outward
+	const double len = 2.9 * k, wide = 2.3 * k;
+	cairo_move_to(cr, hx + tx * len, hy + ty * len);
+	cairo_line_to(cr, hx - tx * 0.6 * k + nx * wide, hy - ty * 0.6 * k + ny * wide);
+	cairo_line_to(cr, hx - tx * 0.6 * k - nx * wide, hy - ty * 0.6 * k - ny * wide);
+	cairo_close_path(cr);
+	cairo_fill(cr);
+	// The hands: twelve o'clock and three.
+	cairo_move_to(cr, cx, cy - 3.6 * k);
+	cairo_line_to(cr, cx, cy);
+	cairo_line_to(cr, cx + 2.6 * k, cy);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+namespace {
+
+void drawDrawIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy, 7.2 * k, 0, 2 * M_PI);
+	cairo_stroke(cr);
+	// The pencil's tip, pointing down and left, inside the ring.
+	cairo_translate(cr, cx, cy);
+	cairo_rotate(cr, M_PI / 4);
+	cairo_move_to(cr, -1.8 * k, -5 * k);
+	cairo_line_to(cr, -1.8 * k, 1.5 * k);
+	cairo_line_to(cr, 0, 4.6 * k);
+	cairo_line_to(cr, 1.8 * k, 1.5 * k);
+	cairo_line_to(cr, 1.8 * k, -5 * k);
+	cairo_stroke(cr);
+	cairo_move_to(cr, -1.8 * k, 1.5 * k);
+	cairo_line_to(cr, 1.8 * k, 1.5 * k);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+void drawNotesIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	roundedPath(cr, rectF(cx - 6 * k, cy - 7 * k, cx + 6 * k, cy + 7 * k), 2 * k);
+	cairo_stroke(cr);
+	for (int i = 0; i < 3; i++) {
+		const float y = cy + (-3 + 3 * i) * k;
+		cairo_move_to(cr, cx - 3 * k, y);
+		cairo_line_to(cr, cx + (i == 2 ? 1 : 3) * k, y);
+	}
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+}  // namespace
+
+void drawHamburgerIcon(cairo_t* cr, const RectF& box, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.5);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	for (int i = -1; i <= 1; i++) {
+		cairo_move_to(cr, cx - 6.5, cy + i * 4.5);
+		cairo_line_to(cr, cx + 6.5, cy + i * 4.5);
+	}
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+void drawEyeIcon(cairo_t* cr, const RectF& box, const Color& color, bool hidden) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_move_to(cr, cx - 7.5, cy);
+	cairo_curve_to(cr, cx - 4, cy - 5.5, cx + 4, cy - 5.5, cx + 7.5, cy);
+	cairo_curve_to(cr, cx + 4, cy + 5.5, cx - 4, cy + 5.5, cx - 7.5, cy);
+	cairo_stroke(cr);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy, 2.3, 0, 2 * M_PI);
+	cairo_fill(cr);
+	if (hidden) {
+		cairo_move_to(cr, cx - 6, cy + 6);
+		cairo_line_to(cr, cx + 6, cy - 6);
+		cairo_stroke(cr);
+	}
 	cairo_restore(cr);
 }
 

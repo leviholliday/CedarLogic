@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 
 namespace cl {
@@ -259,6 +260,8 @@ void CairoScene::stroke(const render::Stroke& s0) {
 	// Device pixels, like the wx app; zero is a hairline, as in Skia.
 	cairo_set_line_width(ctx, s0.width > 0 ? s0.width : 1.0);
 	cairo_set_line_cap(ctx, toCap(s0.cap));
+	// A hand-drawn stroke (the drawing layer) bends round, as on the Mac.
+	if (s0.roundJoin) cairo_set_line_join(ctx, CAIRO_LINE_JOIN_ROUND);
 	if (s0.dashed) {
 		const double dash[] = { 3.0, 3.0 };
 		cairo_set_dash(ctx, dash, 2, 0);
@@ -393,7 +396,22 @@ void CairoScene::text(render::Point origin, const char* utf8, float pixelHeight,
 	const cairo_matrix_t m = current();
 	cairo_matrix_multiply(&full, &place, &m);
 	cairo_new_path(ctx);
-	if (usable(full)) {
+	// Cairo's cached glyphs (cairo_show_glyphs, about 12x faster, SMOOTHNESS.md)
+	// in place of each glyph's outline filled as a path: the same glyphs in the
+	// same places, only their edges' shading differs (CI pictures both ways).
+	// CEDARLOGIC_GLYPH_TEXT=0 fills the outlines, as before.
+	static const bool cachedGlyphs = [] { const char* v = getenv("CEDARLOGIC_GLYPH_TEXT"); return !(v && strcmp(v, "0") == 0); }();
+	if (usable(full) && cachedGlyphs) {
+		const render::Color mc = mapped(c);
+		cairo_save(ctx);
+		cairo_transform(ctx, &full);
+		cairo_set_font_face(ctx, labelFace());
+		cairo_set_font_size(ctx, kGlyphUnits);
+		cairo_set_font_options(ctx, outlineOptions());
+		cairo_set_source_rgba(ctx, mc.r, mc.g, mc.b, mc.a);
+		cairo_show_glyphs(ctx, glyphs, n);
+		cairo_restore(ctx);
+	} else if (usable(full)) {
 		cairo_save(ctx);
 		cairo_transform(ctx, &full);
 		cairo_set_font_face(ctx, labelFace());

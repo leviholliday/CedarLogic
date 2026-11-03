@@ -154,7 +154,10 @@ ScopeWindow::ScopeWindow(CircuitWindow* o) : owner(o) {
 	gtk_widget_set_can_focus(area, TRUE);
 	gtk_widget_add_events(area, GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
 	                                GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_KEY_PRESS_MASK);
-	gtk_container_add(GTK_CONTAINER(win), area);
+	// It fills the dock. (gtk_container_add packs into a box without
+	// expanding, so the area kept its natural height, none, and the dock
+	// showed only its empty background.)
+	gtk_box_pack_start(GTK_BOX(win), area, TRUE, TRUE, 0);
 	g_signal_connect(area, "draw", CL_CALLBACK(+[](GtkWidget* a, cairo_t* cr, gpointer self) -> gboolean {
 		guarded("the oscilloscope", [&] {
 			static_cast<ScopeWindow*>(self)->paint(cr, (float)gtk_widget_get_allocated_width(a), (float)gtk_widget_get_allocated_height(a));
@@ -235,6 +238,13 @@ void ScopeWindow::present() {
 	gtk_widget_show_all(win);
 	gtk_widget_grab_focus(area);
 	update();
+}
+
+void ScopeWindow::describe() const {
+	CLDocument* doc = owner->document();
+	fprintf(stderr, "oscilloscope: drawn %d x %d in a %d x %d dock, %d signal(s), %lld step(s) recorded\n",
+	        gtk_widget_get_allocated_width(area), gtk_widget_get_allocated_height(area), gtk_widget_get_allocated_width(win),
+	        gtk_widget_get_allocated_height(win), cl_scope_signal_count(doc), cl_scope_length(doc));
 }
 
 void ScopeWindow::close() { gtk_widget_hide(win); }

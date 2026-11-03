@@ -21,6 +21,10 @@ inline Color colorF(float r, float g, float b, float a = 1) { return Color{ r, g
 inline RectF rectF(float l, float t, float r, float b) { return RectF{ l, t, r, b }; }
 inline PointF pointF(float x, float y) { return PointF{ x, y }; }
 inline Color withAlpha(Color c, float a) { c.a = a; return c; }
+// From a to b by t (0 to 1).
+inline Color mixColor(const Color& a, const Color& b, float t) {
+	return Color{ a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t };
+}
 inline Color rgb255(int r, int g, int b, float a = 1) { return Color{ r / 255.f, g / 255.f, b / 255.f, a }; }
 inline Color fromRGBA(const RGBA& c) { return Color{ (float)c.r, (float)c.g, (float)c.b, (float)c.a }; }
 inline bool inRect(const RectF& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
@@ -84,7 +88,18 @@ constexpr const char* Minimize = "window-minimize-symbolic";
 constexpr const char* Maximize = "window-maximize-symbolic";
 constexpr const char* Restore = "window-restore-symbolic";
 constexpr const char* Feedback = "mail-message-new-symbolic";
+// Drawn by hand (drawIcon knows it): a clock face with a turning arrow, the
+// Mac's clock.arrow.2.circlepath, for Step Clock.
+constexpr const char* StepClock = "cedarlogic-step-clock";
+// Drawn by hand too: a pencil tip in a ring (Draw on the circuit, the Mac's
+// pencil.tip.crop.circle) and a page of lines (Notes, note.text).
+constexpr const char* Draw = "cedarlogic-draw";
+constexpr const char* Notes = "cedarlogic-notes";
 }
+// Three lines (the header bar's primary menu, GTK's open-menu).
+void drawHamburgerIcon(cairo_t* cr, const RectF& box, const Color& color);
+// An eye, struck through when `hidden` (Show and Hide Drawing).
+void drawEyeIcon(cairo_t* cr, const RectF& box, const Color& color, bool hidden);
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color);
 // Drawn: a page with a plus (New circuit), a square with a plus over
 // another (New tab), a folder (Open), a speech bubble (Send Feedback).
@@ -97,6 +112,8 @@ void drawBubbleIcon(cairo_t* cr, const RectF& box, const Color& color);
 void drawZoomIcon(cairo_t* cr, const RectF& box, const Color& color, bool in);
 void drawGaugeIcon(cairo_t* cr, const RectF& box, const Color& color);
 void drawSaveIcon(cairo_t* cr, const RectF& box, const Color& color);
+// A clock face whose rim turns into an arrow (Step Clock), `size` points across.
+void drawStepClockIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 
 // ---- Shapes ---------------------------------------------------------------------------
 

@@ -46,7 +46,7 @@ const std::vector<Page>& pages() {
 		      "switches you can click, lights that show what's happening, wires that change colour with their signals."),
 		    p("The window has three parts: the **side panel** of gates down the left (with a small map of the page under it), the "
 		      "**canvas** where you build, and the **toolbar** across the top. Each circuit can have several **tabs** (pages), shown "
-		      "above the canvas. Every menu is behind **•••** at the right of the toolbar."),
+		      "above the canvas. The menu bar over it has every command: File, Edit, View, Simulation, Window and Help (F10 or Alt and a letter opens them)."),
 		    tip("New here? Help ▸ Guided Tour shows you around, one part at a time.") },
 		  true },
 		{ "first", "Your First Circuit", "dialog-information-symbolic", "Two switches, an AND gate and a light.",
@@ -70,7 +70,7 @@ const std::vector<Page>& pages() {
 		    p("**Add a Gate (A)**: type part of a gate's name, press Enter, and move onto the canvas. The gate appears at the pointer; "
 		      "click to put it down. Escape changes your mind. Your own parts are in it too."),
 		    p("The menu at the top of the side panel picks a family of gates; the search box finds one by name."),
-		    tip("Preferences (Ctrl+,) turns the names under the side panel's gates on or off.") },
+		    tip("Settings (Ctrl+,) turns the names under the side panel's gates on or off.") },
 		  false },
 		{ "wiring", "Wiring", "network-wired-symbolic", "Pin to pin, or let C do it.",
 		  { p("**Drag** from one pin to another. While you drag, a small square marks the pin the wire will join. Or **click** a pin, then "
@@ -99,10 +99,31 @@ const std::vector<Page>& pages() {
 		           { "Arrows", "Nudge the selection a square (Shift: five)" },
 		           { "Ctrl+Z / Ctrl+Y", "Undo and redo" } }),
 		    p("Double-click a gate for its settings (a clock's speed, a label's text). Double-click a RAM or ROM to see and change what's "
-		      "in it.") },
+		      "in it."),
+		    p("**Lock in Place (Ctrl+L)** (the Edit menu, or right-click a part) keeps a part where it is, with a small lock on it: it "
+		      "can't be moved, rotated or deleted (closing its tab still removes it, and Undo brings it back), but wires to it still work, "
+		      "its settings still change and switches still flip. Teachers: lock the switches and lights, then share the circuit. **Unlock "
+		      "Part** takes the lock off one part, and **Unlock All Parts** in the Edit menu takes every lock off. This is different from "
+		      "**Lock the Circuit** in the Simulation menu, which stops all editing.") },
+		  false },
+		{ "drawing", "Drawing and Notes", "document-edit-symbolic", "Mark up a circuit, and keep notes with it.",
+		  { p("**Draw on the Circuit (Ctrl+Alt+P)** (the View menu, or the pencil in the toolbar) turns the pointer into a pen. Draw "
+		      "around a part, circle a wire, write a word: the drawing stays where you put it, saved with the circuit, and editing never "
+		      "moves it. A pen tablet's pressure thins the line a little."),
+		    keys({ { "P", "Pen" },
+		           { "H", "Highlighter: under the parts, so they stay readable" },
+		           { "E", "Eraser: takes away whole marks (a tablet pen's eraser end does too)" },
+		           { "1 2 3", "Thin, medium or thick line" },
+		           { "Space + drag", "Move around without drawing" },
+		           { "Escape", "Done drawing" } }),
+		    p("The bar over the bottom of the canvas has the colours, the widths, **Clear** (this page's drawing, and Undo brings it "
+		      "back) and **Hide Drawing** (Ctrl+Shift+H). Each mark is one step for Undo."),
+		    p("**Show Notes (Ctrl+Alt+N)** opens a pane at the right for your own notes about the circuit. They're saved with it, and "
+		      "Ctrl+Z there undoes typing, not the circuit. Share Link never includes your notes; it includes the drawing when it's "
+		      "shown.") },
 		  false },
 		{ "moving", "Moving Around", "zoom-fit-best-symbolic", "Zoom, pan and the minimap.",
-		  { keys({ { "Wheel", "Zoom or move, as set in Preferences (touchpads separately)" },
+		  { keys({ { "Wheel", "Zoom or move, as set in Settings (touchpads separately)" },
 		           { "Ctrl + wheel", "Always zooms" },
 		           { "Shift + wheel", "Moves sideways" },
 		           { "Space", "Tap to fit the page; hold and drag to move around" },
@@ -119,14 +140,22 @@ const std::vector<Page>& pages() {
 		           { "Ctrl+Shift+T", "Reopen the tab you closed" },
 		           { "Ctrl+Tab", "Switch tabs: tap for the last one, hold Ctrl for a picture of each" },
 		           { "Ctrl+PgDn / PgUp", "Next and previous tab" } }),
-		    p("Double-click a tab to rename it; drag it along the strip to put it in order.") },
+		    p("Double-click a tab to rename it; drag it along the strip to put it in order."),
+		    p("TO and FROM links of the same name connect across pages that share links. Right-click a tab and choose **Connect to** "
+		      "to pick which pages connect; tabs that connect share a coloured dot. **Connect All Pages** and **Disconnect All Pages** "
+		      "are in the Window menu.") },
 		  false },
 		{ "sim", "Running the Simulation", "media-playback-start-symbolic", "It runs while you build.",
 		  { p("The circuit runs all the time. The toolbar pauses and resumes it (so does **Space** on the canvas), **Ctrl+Shift+R** steps "
 		      "once, and the speed slider sets how long each step takes."),
+		    p("**Step Clock (K)** works a clock by hand, one tick at a time. Double-click a clock and turn on **Only on Step Clock**: it "
+		      "holds still at 0. Each Step Clock then takes it to 1 and back to 0, letting the circuit settle after each, so a flip-flop "
+		      "changes once per press. It works running or paused; clicking the clock, or the clock button beside Step, does the same."),
 		    p("Click a switch to flip it; keypads and pulse generators take clicks too."),
 		    p("**Simulation View (Ctrl+R)** is a dark, live presentation of the circuit: signals flow along the wires that are on, and the "
 		      "bar at the bottom shows every switch and light. Space pauses, Escape leaves."),
+		    p("**Projector Mode** (the Simulation menu, or the projector button on that bar) draws Simulation View for the back of the "
+		      "room: thick wires, big labels and lights. Escape still leaves Simulation View, and the button turns it off."),
 		    p("**Lock** (in the toolbar) stops edits, so a circuit can be shown and played with but not changed. Switches still work.") },
 		  false },
 		{ "analysis", "Truth Tables and the Oscilloscope", "view-grid-symbolic", "See what a circuit does.",
@@ -153,7 +182,8 @@ const std::vector<Page>& pages() {
 		  false },
 		{ "find", "Finding Things", "edit-find-symbolic", "Big circuits, found fast.",
 		  { p("**Find (Ctrl+F)** searches every page for labels, **TO/FROM** names and parts (\"flip\", \"AND\", \"LED\"). Enter goes to "
-		      "the next one; each is selected and brought to the middle."),
+		      "the next one; each is selected and brought to the middle. **F3** and **Shift+F3** (Find Next and Find Previous, in the Edit "
+		      "menu) step through them from anywhere in the window."),
 		    p("With a label or a TO/FROM selected, Find opens looking for its name, so a TO's FROMs are an Enter away.") },
 		  false },
 		{ "saving", "Saving, Your Circuits and Versions", "document-open-recent-symbolic", "It keeps itself.",
@@ -178,7 +208,7 @@ const std::vector<Page>& pages() {
 		      "panel's list (**My Parts**) to drag or click in, and in **Add a Gate (A)** under its name. It drops in as a copy of those "
 		      "gates and wires, so any CedarLogic can open the circuit.") },
 		  false },
-		{ "settings", "Preferences", "preferences-system-symbolic", "Make it yours (Ctrl+,).",
+		{ "settings", "Settings", "preferences-system-symbolic", "Make it yours (Ctrl+,), from File \u25B8 Settings.",
 		  { p("Your name (for exports and the Lab Page), the theme and accent colour, the grid, wires, the side panel, what the wheel "
 		      "and touchpad do, right-click, duplicating, Tidy Up, and whether Ctrl+Q asks first."),
 		    p("**Ctrl+Shift+D** switches between light and dark any time.") },

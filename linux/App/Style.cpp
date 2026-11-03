@@ -84,6 +84,9 @@ void applyStyle() {
 	     "font-weight: bold; font-size: 11.5px; color: " + css(c.tabInk()) + "; caret-color: " + css(c.accent()) + "; }\n";
 	s += "#alert-entry { background: transparent; border: none; box-shadow: none; outline: none; min-height: 24px; padding: 0 2px; "
 	     "font-size: 13px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
+	// The sync code, big and selectable (SyncUI.cpp).
+	s += "#sync-code { background: transparent; border: none; box-shadow: none; outline: none; min-height: 34px; padding: 0 2px; "
+	     "font-family: monospace; font-weight: bold; font-size: 20px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
 	s += "#ram-cell, #ram-jump { background: transparent; border: none; box-shadow: none; outline: none; min-height: 18px; padding: 0 2px; "
 	     "font-family: monospace; font-size: 11.5px; color: " + css(ink) + "; caret-color: " + css(c.accent()) + "; }\n";
 	s += "#ram-jump { font-size: 12px; padding-left: 4px; }\n";
@@ -116,6 +119,9 @@ void applyStyle() {
 	s += "dialog .dialog-action-area { padding: 6px 12px 12px 12px; }\n";
 	s += "dialog entry, dialog spinbutton, dialog textview, dialog combobox button { border-radius: 7px; background-image: none; background-color: " +
 	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
+	// A multi-line field (Send Feedback's details) as the one-line ones: filled, rounded, lit when focused.
+	s += "dialog frame > border { border-radius: 3px; border: 1px solid " + css(line) + "; }\n";
+	s += "dialog frame textview text { background-color: " + css(fieldFill) + "; color: " + css(text) + "; }\n";
 	s += "dialog entry:focus, dialog spinbutton:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
 	s += "dialog button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
 	     "; border: none; box-shadow: none; min-height: 30px; padding: 0 14px; text-shadow: none; }\n";
@@ -125,6 +131,8 @@ void applyStyle() {
 	s += "dialog button.default label, dialog button.suggested-action label { color: " + css(c.onAccent()) + "; }\n";
 	s += "dialog button.default:hover, dialog button.suggested-action:hover { background-color: " + css(withAlpha(c.accent(), 0.88f)) + "; }\n";
 	s += "dialog button.destructive-action { background-color: rgba(229,72,77,0.14); color: rgb(229,72,77); }\n";
+	// Off (Send Feedback with no summary yet): plainly off, not just unclickable.
+	s += "dialog button:disabled { opacity: 0.45; }\n";
 	s += "switch { border-radius: 14px; } switch:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; }\n";
 	s += "check:checked, radio:checked { background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) + "; color: " +
 	     css(c.onAccent()) + "; }\n";
@@ -149,6 +157,20 @@ void applyStyle() {
 	// and the hints a solid grey strong enough to read in small type.
 	const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
 	s += "#settings label, #gate-settings label, dialog label { color: " + css(text) + "; }\n";
+	// A dialog's problem (Send Feedback couldn't send) in red; its progress in the accent.
+	s += "dialog label.problem { color: rgb(229,72,77); }\n";
+	// Send Feedback: the summary's hint (orange when the server asked), "You
+	// can send 10 more.", and the box over the daily cap, in the Mac's High orange.
+	s += "dialog label.hint { font-size: 0.92em; color: " + css(hint) + "; }\n";
+	s += "dialog label.hint.problem { color: rgb(242,140,31); }\n";
+	s += std::string("dialog label.notice { font-weight: bold; color: ") + (dark ? "rgb(64,214,110)" : "rgb(30,150,66)") + "; }\n";
+	s += std::string("#feedback-cap { padding: 12px; border-radius: 11px; border: 1px solid rgba(242,140,31,0.35); background-color: ") +
+	     (dark ? "rgba(242,140,31,0.12)" : "rgba(242,140,31,0.08)") + "; }\n";
+	s += "dialog entry.problem, dialog entry.problem:focus { border-color: rgb(242,140,31); box-shadow: 0 0 0 1px rgb(242,140,31); }\n";
+	s += "dialog progressbar progress { background-image: none; background-color: " + css(c.accent()) + "; border-color: " + css(c.accent()) +
+	     "; border-radius: 3px; min-height: 6px; }\n";
+	s += "dialog progressbar trough { background-image: none; background-color: " + css(withAlpha(text, 0.10f)) +
+	     "; border: none; border-radius: 3px; min-height: 6px; }\n";
 	s += "#settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
 	// Unticked boxes and rings outlined, so they show on a dark page too.
 	s += "#settings check:not(:checked), #settings radio:not(:checked), #gate-settings check:not(:checked) { background-image: none; "
@@ -215,8 +237,59 @@ void applyStyle() {
 		s += "popover { border-radius: 12px; border: 1px solid " + css(line) + "; background-color: " + css(menuBg) + "; padding: 4px; }\n";
 		s += "popover modelbutton { padding: 5px 10px; border-radius: 6px; min-height: 20px; }\n";
 		s += "popover modelbutton:hover { background-color: " + css(c.accent()) + "; color: " + css(c.onAccent()) + "; }\n";
+		// The menu bar (MenuBar.h): bare titles on the toolbar's colour, in
+		// its ink whatever the desktop theme greys (PiXflat greys a window
+		// that isn't in front), the open one lit as the menus' rows are.
+		s += "menubar.cl-bar { background: transparent; background-image: none; box-shadow: none; border: none; padding: 0; margin: 0; "
+		     "min-height: 0; }\n";
+		s += "menubar.cl-bar > menuitem { padding: 3px 9px; margin: 0 1px; min-height: 20px; border-radius: 6px; border: none; "
+		     "box-shadow: none; text-shadow: none; background-image: none; background-color: transparent; }\n";
+		for (const bool onDark : { false, true }) {
+			const Color barInk = Chrome{ onDark }.barInk();
+			const std::string cls = onDark ? "menubar.cl-bar.on-dark" : "menubar.cl-bar.on-light";
+			s += cls + " > menuitem > label { color: " + css(withAlpha(barInk, 0.92f)) + "; }\n";
+			s += cls + " > menuitem:disabled > label { color: " + css(withAlpha(barInk, 0.4f)) + "; }\n";
+		}
+		s += "menubar.cl-bar > menuitem:hover { background-color: " + css(c.accent()) + "; box-shadow: none; }\n";
+		s += "menubar.cl-bar > menuitem:hover > label { color: " + css(c.onAccent()) + "; }\n";
 	}
+	// The notes pane at the right of the canvas (Notes.cpp): the panel's
+	// colour, its text in the canvas's ink.
+	s += "#notes, #notes-text, #notes-text text { background-color: " + css(c.panel()) + "; }\n";
+	s += "#notes-text text { color: " + css(text) + "; caret-color: " + css(c.accent()) + "; }\n";
+	s += "#notes label { color: " + css(text) + "; }\n";
+	s += "#notes .notes-title { font-weight: bold; }\n";
+	s += "#notes .notes-placeholder { color: " + css(hint) + "; }\n";
+	s += "#notes .notes-count { font-size: 0.85em; color: " + css(hint) + "; }\n";
+	s += "#notes .notes-count.full { color: rgb(245,148,33); }\n";
+	s += "#notes-close { min-height: 22px; min-width: 22px; padding: 0; border-radius: 6px; }\n";
+	// Send Feedback's recording bar over the canvas (Capture.cpp): the Mac's
+	// dark capsule, whatever the theme.
+	s += "#rec-hud { background-color: rgba(30,32,38,0.94); border: 1px solid rgba(255,255,255,0.12); border-radius: 24px; "
+	     "padding: 6px 7px 6px 16px; box-shadow: 0 3px 12px rgba(0,0,0,0.30); }\n";
+	s += "#rec-hud label { color: white; }\n";
+	s += "#rec-hud .rec-title { font-weight: bold; font-size: 0.92em; }\n";
+	s += "#rec-hud .rec-time { color: rgba(255,255,255,0.68); font-size: 0.85em; font-feature-settings: \"tnum\"; }\n";
+	s += "#rec-hud button { border: none; box-shadow: none; background-image: none; text-shadow: none; outline-color: rgba(255,255,255,0.5); }\n";
+	s += "#rec-hud button.rec-stop { background-color: rgb(229,72,77); border-radius: 15px; min-height: 26px; padding: 0 16px; }\n";
+	s += "#rec-hud button.rec-stop:hover { background-color: rgb(240,90,94); }\n";
+	s += "#rec-hud button.rec-stop label { color: white; font-weight: bold; }\n";
+	s += "#rec-hud button.rec-cancel { background-color: transparent; border-radius: 13px; min-height: 26px; min-width: 26px; padding: 0; "
+	     "color: rgba(255,255,255,0.75); }\n";
+	s += "#rec-hud button.rec-cancel:hover { background-color: rgba(255,255,255,0.12); }\n";
+	s += "#rec-hud button.rec-cancel image { color: rgba(255,255,255,0.8); }\n";
 	// The notebook holding the pages draws nothing of its own.
 	s += "notebook, notebook > stack { background: transparent; border: none; }\n";
 	gtk_css_provider_load_from_data(provider(), s.c_str(), -1, nullptr);
+}
+
+// Sliding in, but ready for the keyboard at once: a revealer shows its child
+// only from the slide's first frame, so keys typed straight after the
+// shortcut (Ctrl+F and on with the word) went to a field not made yet -- a
+// GTK critical each, and the keys lost.
+void readyForKeys(GtkWidget* revealer, GtkWidget* field) {
+	GtkWidget* child = gtk_bin_get_child(GTK_BIN(revealer));
+	if (child == nullptr || gtk_widget_get_realized(field) || !gtk_widget_get_realized(revealer)) return;
+	gtk_widget_set_child_visible(child, TRUE);
+	gtk_widget_realize(field);
 }

@@ -4,8 +4,10 @@
 #include <deque>
 
 #include "App.h"
+#include "Bench.h"
 #include "Canvas.h"
 #include "Recovery.h"
+#include "SessionCheck.h"
 #include "ShareLink.h"
 #include "Splash.h"
 #include "Updater.h"
@@ -17,18 +19,32 @@
 #include "QuitConfirm.h"
 #include "Settings.h"
 #include "Shortcuts.h"
+#include "SyncApp.h"
+#include "SyncPlatform.h"
+#include "SyncUI.h"
 #include "Library.h"
 #include "LibraryWindow.h"
+#include "FindBar.h"
+#include "Toolbar.h"
+#include "MenuBar.h"
+#include "Capture.h"
+#include "Notes.h"
 #include "Window.h"
 
 #include <algorithm>
+#include <glib/gstdio.h>
+
 #include <clocale>
+#include <cmath>
 #include <cstring>
 #include <functional>
+#include <thread>
 
 namespace {
 
 GMenu* gRecentMenu = nullptr;
+GMenu* gWindowMenu = nullptr;   // Window's list of the open circuits
+GMenuModel* gMenubar = nullptr;
 bool gLibraryLoaded = false;
 GtkWidget* gSplash = nullptr;
 // --screenshot <out.png>: once the window is up, draw it to a PNG and quit
@@ -51,9 +67,20 @@ std::string gSplashFile;
 bool gFirstLaunch = false;
 // --hold <seconds>: wait this long before the screenshot (the drag test moves the pointer meanwhile).
 int gHold = 2;
+std::string gCaptureTest;   // --capture-test <folder>
 // This process is the running CedarLogic (not a launch that handed over to
 // it): it loaded the settings, so it may save them.
 bool gPrimary = false;
+// --bench-drag [steps] <circuit.cdl>: times the canvas while dragging and
+// quits (Bench.cpp, linux/SMOOTHNESS.md). It runs as a screenshot run does
+// (no splash, updater or sync), with its settings and Your Circuits in a
+// temporary folder, so the person's own are never touched.
+int gBench = 0;
+std::string gBenchHome;
+// --session-check [actions] [seed]: a long session in the window, checked
+// (SessionCheck.cpp); as --bench-drag runs, with a home of its own.
+int gSession = 0;
+unsigned long long gSessionSeed = 1;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -126,12 +153,23 @@ gboolean showCaptureCb(gpointer) {
 	if (what == "welcome") top = welcome::window();
 	else if (what == "whatsnew") top = whatsnew::window();
 	else if (what == "help") top = help::window();
-	else if (what == "truth") top = toplevelTitled("Truth Table");
+	else if (what == "truth") {
+		// A page with no truth table to make -- a clocked circuit with more
+		// than 8 switches (Lab5 has 10) or none -- opens Check My Circuit on
+		// its own instead, as the Mac's does: that's the window to picture.
+		top = toplevelTitled("Truth Table");
+		if (!top && (top = toplevelTitled("Check My Circuit")))
+			fprintf(stderr, "truth: no truth table for this page; Check My Circuit opened by itself, pictured instead\n");
+	}
+	else if (what == "checkclocked") top = toplevelTitled("Check My Circuit") ? toplevelTitled("Check My Circuit") : toplevelTitled("Truth Table");
 	else if (what == "feedback") top = toplevelTitled("Send Feedback");
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
 	else if (what == "report") top = toplevelTitled("Export Lab Report");
-	else if (what == "settings") top = settings::window();
+	else if (what == "settings" || what == "sync") top = settings::window();
+	else if (what == "synccode") top = toplevelTitled("Your sync code");
+	else if (what == "synclink" || what == "syncpair") top = toplevelTitled("Link this computer");
+	else if (what == "syncconfirm") top = toplevelTitled("Link this computer?");
 	else if (what == "scope" && !circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	else if (what == "quit") top = toplevelTitled("Quit CedarLogic");
 	else if (what == "shortcuts") top = toplevelTitled("Keyboard Shortcuts");
@@ -141,10 +179,24 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "rename") top = toplevelTitled("Rename Circuit");
 	else if (what == "ram") top = toplevelNamed("cl-sheet-ram");
 	else if (what == "gatesettings") top = toplevelNamed("gate-settings");
+	else if (what == "switcher") top = toplevelNamed("tab-switcher");
 	else if (!circuitWindows().empty()) top = GTK_WIDGET(circuitWindows().back()->window());
 	if (what == "combo") top = settings::window();
-	const bool ok = top && (what == "menu" || what == "submenu" || what == "combo" ? writeWindowWithMenu(top, gScreenshot) : writeWindow(top, gScreenshot));
-	if (!top) fprintf(stderr, "nothing to picture for --show %s\n", gShow.c_str());
+	if (what == "scope" && !circuitWindows().empty())
+		if (ScopeWindow* scope = circuitWindows().back()->scopeWindow()) scope->describe();
+	const bool ok = top && (what == "menu" || what == "submenu" || what == "combo" || what == "primary" ? writeWindowWithMenu(top, gScreenshot)
+	                                                                                                      : writeWindow(top, gScreenshot));
+	if (!top) {
+		fprintf(stderr, "nothing to picture for --show %s; the windows open:", gShow.c_str());
+		GList* all = gtk_window_list_toplevels();
+		for (GList* l = all; l; l = l->next)
+			if (gtk_widget_get_visible(GTK_WIDGET(l->data))) {
+				const char* t = gtk_window_get_title(GTK_WINDOW(l->data));
+				fprintf(stderr, " \"%s\" (%s)", t ? t : "", gtk_widget_get_name(GTK_WIDGET(l->data)));
+			}
+		g_list_free(all);
+		fprintf(stderr, "\n");
+	}
 	prefs().save();
 	fflush(stderr);
 	_exit(ok ? 0 : 1);
@@ -162,13 +214,39 @@ gboolean showCb(gpointer) {
 	else if (what == "whatsnew") whatsnew::show(w, page);
 	else if (what == "help") help::show(w, page > 0 ? "analysis" : "");
 	else if (what == "truth") w->makeTruthTable();
-	else if (what == "feedback") feedback::show(w);
-	else if (what == "templates") templates::showPicker(w);
+	else if (what == "checkclocked") {
+		// Check My Circuit clock pulse by clock pulse, on a counter (CI opens
+		// the 3-bit counter template): :0 a count it matches, :1 one it
+		// doesn't (the strip marks the first wrong step), :2 a state table.
+		const char* keys[] = { "0, 1, 2, 3, 4, 5, 6, 7, repeat", "0, 2, 4, 6, repeat",
+		                       "Q2 Q1 Q0 | Q2+ Q1+ Q0+\n0 0 0 | 0 0 1\n0 0 1 | 0 1 0\n0 1 0 | 0 1 1\n0 1 1 | 1 0 0" };
+		setCheckForScreenshot(keys[std::max(0, std::min(2, page))]);
+		fprintf(stderr, "check (clocked): this page %s be checked clock pulse by clock pulse\n",
+		        cl_check_clocked_page(w->document(), w->currentPage()) ? "can" : "can't");
+		w->checkCircuit();
+	}
+	else if (what == "feedback") feedback::show(w, page);
+	else if (what == "templates") templates::showPicker(w, page == 1 ? "builtin-ff-d" : "");
 	else if (what == "tour") welcome::startTour(w);
+	else if (what == "find" && page == 1) {
+		// Find Next and Find Previous: "A" on the practice circuit, then
+		// Next twice and Previous once, each reported.
+		w->runAction("win.find");
+		if (FindBar* fb = w->findBarWidget()) {
+			fb->open("A");
+			fprintf(stderr, "find: %d hit(s), at %d\n", fb->count(), fb->current() + 1);
+			w->runAction("win.find-next");
+			w->runAction("win.find-next");
+			fprintf(stderr, "find: Next twice, at %d\n", fb->current() + 1);
+			w->runAction("win.find-previous");
+			fprintf(stderr, "find: Previous once, at %d\n", fb->current() + 1);
+		}
+	}
 	else if (what == "find") w->runAction("win.find");
 	else if (what == "export") w->exportImage();
 	else if (what == "report") w->exportReport();
 	else if (what == "settings") settings::show(w, page);
+	else if (what == "sync" || what == "synccode" || what == "synclink" || what == "syncpair" || what == "syncconfirm") syncui::showForScreenshot(w, what, page);
 	else if (what == "quit") confirmQuitting(w->window());
 	else if (what == "focus") w->toggleFocusMode();
 	else if (what == "shortcuts") w->showShortcuts();
@@ -180,6 +258,7 @@ gboolean showCb(gpointer) {
 	else if (what == "dark-split") { w->toggleSplit(); }
 	else if (what == "scope") w->toggleScope();
 	else if (what == "about") w->showAbout();
+	else if (what == "switcher") w->showSwitcherForScreenshot();
 	else if (what == "rename") w->renameFile();
 	else if (what == "combo") {
 		// Settings' first dropdown, open.
@@ -199,35 +278,51 @@ gboolean showCb(gpointer) {
 			return G_SOURCE_REMOVE;
 		}, nullptr);
 	}
-	else if (what == "submenu") {
-		// The ••• menu with Tabs open, over Simulation View, as on the Pi.
+	else if (what == "predict") {
+		// Predict, then reveal: the lights covered with a guess on the first
+		// (:0), then revealed and scored (:1), each reported.
 		w->toggleSimView();
-		GtkWidget* top = GTK_WIDGET(w->window());
-		GdkRectangle r = { gtk_widget_get_allocated_width(top) / 2, 6, 32, 32 };   // room for the submenu in the picture
-		w->moreMenu(top, r, nullptr);
-		g_timeout_add(500, +[](gpointer) -> gboolean {
-			GList* all = gtk_window_list_toplevels();
-			for (GList* l = all; l; l = l->next) {
-				GtkWidget* child = gtk_bin_get_child(GTK_BIN(l->data));
-				if (!gtk_widget_get_visible(GTK_WIDGET(l->data)) || !child || !GTK_IS_MENU(child)) continue;
-				GList* items = gtk_container_get_children(GTK_CONTAINER(child));
-				for (GList* i = items; i; i = i->next) {
-					const char* label = gtk_menu_item_get_label(GTK_MENU_ITEM(i->data));
-					if (label && strstr(label, "Tabs")) {
-						gtk_menu_shell_select_item(GTK_MENU_SHELL(child), GTK_WIDGET(i->data));
-						g_signal_emit_by_name(i->data, "activate-item");   // opens its submenu now
-					}
-				}
-				g_list_free(items);
-			}
-			g_list_free(all);
+		w->togglePredict();
+		CLSimLight lights[64];
+		const int n = cl_simview_lights(w->document(), w->currentPage(), lights, 64);
+		if (n > 0) w->predictTap((lights[0].left + lights[0].right) / 2, (lights[0].bottom + lights[0].top) / 2);
+		fprintf(stderr, "predict: %d light(s), covered %d\n", n, w->predictCovers());
+		if (page == 1) {
+			w->revealOrCoverAgain();
+			fprintf(stderr, "predict: revealed %d\n", w->predictRevealed());
+		}
+	}
+	else if (what == "submenu" || what == "primary" || what == "menu") {
+		// The menu bar's menus, open as Alt and a letter opens them: menu:N
+		// the Nth (0 File ... 5 Help); primary Help; submenu View with its
+		// Drawing submenu open, over Simulation View, as on the Pi.
+		static int open = 0;
+		open = what == "primary" ? 5 : what == "submenu" ? 2 : page;
+		if (what == "submenu") w->toggleSimView();
+		g_timeout_add(400, +[](gpointer data) -> gboolean {
+			CircuitWindow* cw = circuitWindows().empty() ? nullptr : circuitWindows().back();
+			if (!cw || !cw->menuRowWidget() || !cw->menuRowWidget()->openMenu(open)) fprintf(stderr, "menu: no menu %d\n", open);
 			return G_SOURCE_REMOVE;
 		}, nullptr);
-	}
-	else if (what == "menu") {
-		GtkWidget* top = GTK_WIDGET(w->window());
-		GdkRectangle r = { gtk_widget_get_allocated_width(top) - 48, 6, 32, 32 };
-		w->moreMenu(top, r, nullptr);
+		if (what == "submenu")
+			g_timeout_add(900, +[](gpointer) -> gboolean {
+				GList* all = gtk_window_list_toplevels();
+				for (GList* l = all; l; l = l->next) {
+					GtkWidget* child = gtk_bin_get_child(GTK_BIN(l->data));
+					if (!gtk_widget_get_visible(GTK_WIDGET(l->data)) || !child || !GTK_IS_MENU(child)) continue;
+					GList* items = gtk_container_get_children(GTK_CONTAINER(child));
+					for (GList* i = items; i; i = i->next) {
+						const char* label = GTK_IS_MENU_ITEM(i->data) ? gtk_menu_item_get_label(GTK_MENU_ITEM(i->data)) : nullptr;
+						if (label && strstr(label, "Dra_wing")) {
+							gtk_menu_shell_select_item(GTK_MENU_SHELL(child), GTK_WIDGET(i->data));
+							g_signal_emit_by_name(i->data, "activate-item");   // opens its submenu now
+						}
+					}
+					g_list_free(items);
+				}
+				g_list_free(all);
+				return G_SOURCE_REMOVE;
+			}, nullptr);
 	}
 	else if (what == "ram") {
 		// An 8x8 RAM with something in it.
@@ -244,6 +339,129 @@ gboolean showCb(gpointer) {
 		// A clock: it has settings of each kind.
 		CLDocument* doc = w->document();
 		if (cl_edit_add_gate(doc, w->currentPage(), "BB_CLOCK", 40, -20)) w->showSettings();
+	}
+	else if (what == "stepclock") {
+		// A clock set to "Only on Step Clock": Step Clock three times, then a
+		// click on the clock (the canvas's own calls), each reported; the
+		// picture shows the toolbar's Step Clock button on (:1 in Simulation
+		// View, with the bar's).
+		CLDocument* doc = w->document();
+		const int pg = w->currentPage();
+		if (cl_edit_add_gate(doc, pg, "BB_CLOCK", 40, -20)) {
+			const long g = cl_edit_single_gate(doc, pg);
+			cl_gate_set_setting(doc, g, "MANUAL", "true");
+			cl_edit_select_none(doc, pg);
+			w->edited();
+		}
+		fprintf(stderr, "step clock: %d manual clock(s) on the page\n", cl_document_manual_clock_count(doc, pg));
+		for (int i = 1; i <= 3; i++) fprintf(stderr, "step clock %d: %s\n", i, cl_document_clock_step(doc, pg) ? "stepped" : "nothing to step");
+		const double upp = w->currentCanvas() ? w->currentCanvas()->unitsPerPoint() : 0.05;
+		cl_edit_press(doc, pg, 40, -20, 0, upp);
+		const int click = cl_edit_release_ex(doc, 40, -20, true);
+		fprintf(stderr, "step clock: a click on the clock %s\n", click == CL_CLICK_CLOCK_STEP ? "stepped it" : "did not step it");
+		w->clockStepped();
+		w->edited();
+		if (page == 1) w->toggleSimView();
+	}
+	else if (what == "pagelinks") {
+		// Page links: every page on its own, then the first two connected
+		// (their tabs share a dot), each reported.
+		CLDocument* doc = w->document();
+		while (cl_document_page_count(doc) < 3) cl_document_add_page(doc);
+		w->disconnectAllPages();
+		fprintf(stderr, "page links: none linked %d\n", cl_pages_none_linked(doc));
+		w->setPagesLinked(0, 1, true);
+		fprintf(stderr, "page links: 1-2 linked %d, 1-3 linked %d, marks %d %d %d\n", cl_pages_linked(doc, 0, 1), cl_pages_linked(doc, 0, 2),
+		        cl_page_link_mark(doc, 0), cl_page_link_mark(doc, 1), cl_page_link_mark(doc, 2));
+		w->edited();
+	}
+	else if (what == "draw") {
+		// Drawing on the circuit: Draw mode on, a pen stroke and a highlighter
+		// stroke round the circuit (through the engine, as the canvas makes
+		// them), saved and opened again, each reported. :0 pictures the
+		// drawing bar; :1 the drawing hidden (the Draw button's dot) and the
+		// notes pane with notes, which Share Link leaves out; :2 the eraser
+		// takes a stroke away and Undo brings it back.
+		CLDocument* doc = w->document();
+		const int pg = w->currentPage();
+		double l = -20, b = -15, r = 20, t = 15;
+		cl_document_page_bounds(doc, pg, &l, &b, &r, &t);
+		const double upp = w->currentCanvas() ? w->currentCanvas()->unitsPerPoint() : 0.05;
+		prefs().inkTool = 0;   // the pen, whatever an earlier run left
+		w->setDrawing(true);
+		auto stroke = [&](int tool, const char* color, double width, double y0, double y1) {
+			cl_ink_begin(doc, pg, tool, color, width, upp);
+			for (int i = 0; i <= 40; i++) {
+				const double f = i / 40.0;
+				CLInkPoint p = { l + (r - l) * f, y0 + (y1 - y0) * f + std::sin(f * 9) * 1.2, -1 };
+				cl_ink_add(doc, &p, 1);
+			}
+			if (cl_ink_end(doc) > 0) w->inkEdited();
+		};
+		stroke(CL_INK_HIGHLIGHTER, "yellow", 1.2, (b + t) / 2, (b + t) / 2);
+		stroke(CL_INK_PEN, "red", 0.25, b - 1, t + 1);
+		fprintf(stderr, "drawing: %d stroke(s) on the page, %ld point(s)\n", cl_ink_stroke_count(doc, pg), cl_ink_point_count(doc, -1));
+		const std::string saved = cl_document_save_text_ex(doc, 0);
+		char err[256] = "";
+		if (CLDocument* again = cl_document_open_text(saved.c_str(), (long)saved.size(), err, sizeof err)) {
+			fprintf(stderr, "drawing: saved and opened again: %d stroke(s)\n", cl_ink_stroke_count(again, pg));
+			cl_document_close(again);
+		} else {
+			fprintf(stderr, "drawing: saved, but it couldn't be opened again: %s\n", err);
+		}
+		if (page == 1) {
+			w->setDrawingShown(false);
+			fprintf(stderr, "drawing: hidden %d, Draw mode %d\n", !cl_ink_shown(doc), w->drawing());
+			cl_notes_set(doc, "Q1: the output is high only when both inputs are.\nTry the clock at a slower speed next time.");
+			w->notesPane()->load();
+			w->toggleNotes();
+			const std::string share = cl_document_save_text_ex(doc, CL_SAVE_NO_NOTES);
+			fprintf(stderr, "notes: %zu character(s); Share Link's copy leaves them out: %s\n", strlen(cl_notes(doc)),
+			        share.find("both inputs") == std::string::npos ? "yes" : "NO");
+		} else if (page == 2) {
+			const int before = cl_ink_stroke_count(doc, pg);
+			cl_ink_erase_begin(doc, pg);
+			for (int i = 0; i <= 20; i++) cl_ink_erase_to(doc, l + (r - l) * i / 20.0, b - 1 + (t - b + 2) * i / 20.0, 1.0);
+			const int erased = cl_ink_erase_end(doc);
+			w->inkEdited();
+			fprintf(stderr, "eraser: %d of %d stroke(s) erased, %d left\n", erased, before, cl_ink_stroke_count(doc, pg));
+			w->undo();
+			fprintf(stderr, "eraser: after Undo, %d stroke(s)\n", cl_ink_stroke_count(doc, pg));
+			w->setInkTool(2);
+		}
+		w->redraw();
+	}
+	else if (what == "projector") {
+		// Projector Mode: on (it opens Simulation View), pictured; Escape's
+		// way out (leaving Simulation View) is run and reported, then it's
+		// shown again for the picture. :1 turns it off again too.
+		prefs().projector = false;
+		w->toggleProjector();
+		fprintf(stderr, "projector: on %d, Simulation View %d\n", prefs().projector, w->simView());
+		w->toggleSimView();
+		fprintf(stderr, "projector: after Escape, Simulation View %d (the editing view is back)\n", w->simView());
+		w->toggleSimView();
+		if (page == 1) {
+			w->toggleProjector();
+			fprintf(stderr, "projector: off again %d\n", !prefs().projector);
+		}
+	}
+	else if (what == "lockinplace") {
+		// Every part locked in place (a lock on each), then a nudge that
+		// leaves them put, each reported; :1 unlocks one again.
+		CLDocument* doc = w->document();
+		const int pg = w->currentPage();
+		cl_edit_select_all(doc, pg);
+		w->lockSelection(true);
+		fprintf(stderr, "lock in place: %d part(s) locked\n", cl_document_locked_count(doc));
+		w->nudge(2, 0);
+		fprintf(stderr, "lock in place: a nudge %s\n", cl_edit_locked_held(doc) ? "left them put" : "moved them");
+		if (page == 1) {
+			cl_edit_select_none(doc, pg);
+			w->unlockAll();
+			fprintf(stderr, "lock in place: %d part(s) locked after Unlock All Parts\n", cl_document_locked_count(doc));
+		}
+		w->selectionChanged();
 	}
 	return G_SOURCE_REMOVE;
 }
@@ -267,129 +485,278 @@ gboolean screenshotCb(gpointer app) {
 	return G_SOURCE_REMOVE;
 }
 
+gboolean sessionCb(gpointer app) {
+	gExitCode = session::run(GTK_APPLICATION(app), gSession, gSessionSeed);
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
+	g_application_quit(G_APPLICATION(app));
+	return G_SOURCE_REMOVE;
+}
+
+// --capture-test <folder>: Send Feedback's screenshot and recording of the
+// window, checked (Capture.h), the files left in the folder; then quits.
+gboolean captureTestCb(gpointer app) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	gExitCode = 1;
+	if (w) guarded("the capture test", [&] { gExitCode = capture::selfTest(w, gCaptureTest); });
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
+	g_application_quit(G_APPLICATION(app));
+	return G_SOURCE_REMOVE;
+}
+
+gboolean benchCb(gpointer app) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	gExitCode = 1;
+	if (w) guarded("the drag benchmark", [&] { gExitCode = bench::dragBenchmark(w, gBench); });
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) gtk_widget_destroy(GTK_WIDGET(c->window()));
+	g_application_quit(G_APPLICATION(app));
+	return G_SOURCE_REMOVE;
+}
+
 std::string samplesDir() { return resourcesDir() + "/samples"; }
 
-// The whole menu bar. Bare-key shortcuts (R, S, T...) are the canvas's own,
-// so they're only mentioned in the labels, never bound here.
+// The menu bar every window shows under its title bar: File, Edit, View,
+// Simulation, Window and Help, the Mac app's menus in its order, with the
+// desktop's habits (mnemonics, Settings and Quit in File, About in Help).
+// Keys show at the right of each item: a command's own come from the app
+// (and follow Settings > Shortcuts by themselves); the canvas's single keys (A, R, S, T...) are
+// written on their items here (an "accel" attribute, shown but never bound:
+// the model isn't the application's menubar, so GTK doesn't take them as
+// shortcuts) and follow Settings too (refreshMenuKeys).
+GMenu* section(GMenu* menu) {
+	GMenu* s = g_menu_new();
+	g_menu_append_section(menu, nullptr, G_MENU_MODEL(s));
+	g_object_unref(s);
+	return s;
+}
+
+void add(GMenu* menu, const char* label, const char* action, const char* shownKeys = nullptr) {
+	GMenuItem* item = g_menu_item_new(label, action);
+	if (shownKeys) g_menu_item_set_attribute(item, "accel", "s", shownKeys);
+	g_menu_append_item(menu, item);
+	g_object_unref(item);
+}
+
+GMenu* submenu(GMenu* menu, const char* label) {
+	GMenu* sub = g_menu_new();
+	g_menu_append_submenu(menu, label, G_MENU_MODEL(sub));
+	g_object_unref(sub);
+	return sub;
+}
+
 GMenuModel* buildMenubar() {
 	GMenu* bar = g_menu_new();
 
-	GMenu* file = g_menu_new();
-	GMenu* s1 = g_menu_new();
-	g_menu_append(s1, "_New Circuit", "app.new");
-	g_menu_append(s1, "New from _Template…", "win.new-template");
-	g_menu_append(s1, "Your _Circuits…", "app.open");
-	g_menu_append(s1, "_Import a File…", "app.import");
-	gRecentMenu = g_menu_new();
-	g_menu_append_submenu(s1, "Open _Recent", G_MENU_MODEL(gRecentMenu));
-	g_menu_append(s1, "Open the _Practice Circuit", "app.open-sample");
-	g_menu_append_section(file, nullptr, G_MENU_MODEL(s1));
-	GMenu* s2 = g_menu_new();
-	g_menu_append(s2, "_Save a Version", "win.save");
-	g_menu_append(s2, "_Version History…", "win.versions");
-	g_menu_append(s2, "_Rename…", "win.rename-circuit");
-	g_menu_append(s2, "Du_plicate Circuit", "win.duplicate-circuit");
-	g_menu_append(s2, "E_xport as CedarLogic File…", "win.save-as");
-	g_menu_append(s2, "Share _Link…", "app.share-link");
-	g_menu_append(s2, "Save as Te_mplate…", "win.save-template");
-	g_menu_append(s2, "_Export as Image…", "win.export-image");
-	g_menu_append(s2, "Export _Lab Report…", "win.export-report");
-	GMenu* older = g_menu_new();
-	g_menu_append(older, "For CedarLogic _2…", "win.export-v2");
-	g_menu_append(older, "For CedarLogic _1.x…", "win.export-v1");
-	g_menu_append_submenu(s2, "Export for _Older CedarLogic", G_MENU_MODEL(older));
-	g_menu_append(s2, "_Print…", "win.print");
-	g_menu_append_section(file, nullptr, G_MENU_MODEL(s2));
-	GMenu* s3 = g_menu_new();
-	g_menu_append(s3, "_Close Window", "win.close");
-	g_menu_append(s3, "_Quit", "app.quit");
-	g_menu_append_section(file, nullptr, G_MENU_MODEL(s3));
-	g_menu_append_submenu(bar, "_File", G_MENU_MODEL(file));
+	GMenu* file = submenu(bar, "_File");
+	GMenu* s = section(file);
+	add(s, "_New Circuit", "app.new");
+	add(s, "New from _Template…", "win.new-template");
+	add(s, "Your _Circuits…", "app.open");
+	add(s, "_Import a File…", "app.import");
+	gRecentMenu = submenu(s, "Open _Recent");
+	add(s, "Open the _Practice Circuit", "app.open-sample");
+	s = section(file);
+	add(s, "_Save a Version", "win.save");
+	add(s, "Re_name…", "win.rename-circuit");
+	add(s, "Du_plicate Circuit", "win.duplicate-circuit");
+	add(s, "_Version History…", "win.versions");
+	s = section(file);
+	add(s, "_Export as Image…", "win.export-image");
+	add(s, "Export _Lab Report…", "win.export-report");
+	add(s, "Export as CedarLogic _File…", "win.save-as");
+	GMenu* older = submenu(s, "Export for _Older CedarLogic");
+	add(older, "For CedarLogic _2…", "win.export-v2");
+	add(older, "For CedarLogic _1.x…", "win.export-v1");
+	add(s, "Share Lin_k…", "app.share-link");
+	add(s, "Save as Te_mplate…", "win.save-template");
+	s = section(file);
+	add(s, "P_rint…", "win.print");
+	s = section(file);
+	add(s, "Settin_gs…", "win.preferences");
+	s = section(file);
+	add(s, "_Close Window", "win.close");
+	add(s, "_Quit", "app.quit");
 
-	GMenu* edit = g_menu_new();
-	GMenu* e1 = g_menu_new();
-	g_menu_append(e1, "_Undo", "win.undo");
-	g_menu_append(e1, "_Redo", "win.redo");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e1));
-	GMenu* e2 = g_menu_new();
-	g_menu_append(e2, "Cu_t", "win.cut");
-	g_menu_append(e2, "_Copy", "win.copy");
-	g_menu_append(e2, "_Paste", "win.paste");
-	g_menu_append(e2, "D_uplicate", "win.duplicate");
-	g_menu_append(e2, "_Delete", "win.delete");
-	g_menu_append(e2, "Select _All", "win.select-all");
-	g_menu_append(e2, "_Find…", "win.find");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e2));
-	GMenu* e3 = g_menu_new();
-	g_menu_append(e3, "Add a _Gate…   (A)", "win.add-gate");
-	g_menu_append(e3, "Gate _Settings…", "win.gate-settings");
-	g_menu_append(e3, "_Rotate   (R)", "win.rotate");
-	g_menu_append(e3, "Straighten _Wires   (S)", "win.straighten");
-	g_menu_append(e3, "_Tidy Up   (Shift+S)", "win.tidy");
-	g_menu_append(e3, "Tidy Up by Signal _Flow", "win.tidy-flow");
-	g_menu_append(e3, "Connect _Nearby Pins", "win.connect-nearby");
-	g_menu_append(e3, "Save as _Part…", "win.save-part");
-	g_menu_append(e3, "_Build from Formula…", "win.build-formula");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e3));
-	GMenu* e4 = g_menu_new();
-	g_menu_append(e4, "Pr_eferences", "win.preferences");
-	g_menu_append_section(edit, nullptr, G_MENU_MODEL(e4));
-	g_menu_append_submenu(bar, "_Edit", G_MENU_MODEL(edit));
+	GMenu* edit = submenu(bar, "_Edit");
+	s = section(edit);
+	add(s, "_Undo", "win.undo");
+	add(s, "_Redo", "win.redo");
+	s = section(edit);
+	add(s, "Cu_t", "win.cut");
+	add(s, "_Copy", "win.copy");
+	add(s, "_Paste", "win.paste");
+	add(s, "D_uplicate", "win.duplicate");
+	add(s, "_Delete", "win.delete", "Delete");
+	add(s, "Select _All", "win.select-all");
+	s = section(edit);
+	add(s, "Add a _Gate…", "win.add-gate");
+	add(s, "R_otate", "win.rotate");
+	add(s, "_Lock in Place", "win.lock-in-place");
+	add(s, "Unlock All Pa_rts", "win.unlock-all");
+	add(s, "Gate _Settings…", "win.gate-settings");
+	s = section(edit);
+	GMenu* find = submenu(s, "_Find");
+	add(find, "_Find…", "win.find");
+	add(find, "Find _Next", "win.find-next");
+	add(find, "Find _Previous", "win.find-previous");
+	s = section(edit);
+	add(s, "Save as Par_t…", "win.save-part");
+	add(s, "_Build from Formula…", "win.build-formula");
+	add(s, "Straighten _Wires", "win.straighten");
+	add(s, "Tidy Up: _Keep My Layout", "win.tidy");
+	add(s, "Tidy Up: _Full Rearrange", "win.tidy-flow");
+	add(s, "Connect _Nearby Pins", "win.connect-nearby");
 
-	GMenu* view = g_menu_new();
-	GMenu* v1 = g_menu_new();
-	g_menu_append(v1, "Zoom _In", "win.zoom-in");
-	g_menu_append(v1, "Zoom _Out", "win.zoom-out");
-	g_menu_append(v1, "Zoom to _Fit", "win.zoom-fit");
-	g_menu_append(v1, "_Actual Size", "win.zoom-actual");
-	g_menu_append_section(view, nullptr, G_MENU_MODEL(v1));
-	GMenu* v2 = g_menu_new();
-	g_menu_append(v2, "_Dark Mode", "win.dark");
-	g_menu_append(v2, "_Focus Mode", "win.focus-mode");
-	g_menu_append(v2, "Side _Panel", "win.palette");
-	g_menu_append(v2, "_Status Bar", "win.status-bar");
-	g_menu_append_section(view, nullptr, G_MENU_MODEL(v2));
-	g_menu_append_submenu(bar, "_View", G_MENU_MODEL(view));
+	GMenu* view = submenu(bar, "_View");
+	s = section(view);
+	add(s, "Zoom _In", "win.zoom-in");
+	add(s, "Zoom _Out", "win.zoom-out");
+	add(s, "Zoom to _Fit", "win.zoom-fit");
+	add(s, "_Actual Size", "win.zoom-actual");
+	s = section(view);
+	add(s, "Focus _Mode", "win.focus-mode");
+	add(s, "F_ull Screen", "win.fullscreen");
+	add(s, "Side _Panel", "win.palette");
+	add(s, "Status _Bar", "win.status-bar");
+	add(s, "_Gridlines", "win.show-grid");
+	add(s, "Wire Connection _Dots", "win.wire-dots");
+	add(s, "Dar_k Mode", "win.dark");
+	s = section(view);
+	add(s, "_Simulation View", "win.sim-view");
+	add(s, "Pro_jector Mode", "win.projector");
+	add(s, "Osci_lloscope", "win.scope");
+	s = section(view);
+	add(s, "Draw on the _Circuit", "win.draw");
+	GMenu* drawing = submenu(s, "Dra_wing");
+	GMenu* tools = section(drawing);
+	add(tools, "_Pen", "win.ink-pen", "p");
+	add(tools, "_Highlighter", "win.ink-highlighter", "h");
+	add(tools, "_Eraser", "win.ink-eraser", "e");
+	add(section(drawing), "_Clear Drawing on This Page", "win.clear-drawing");
+	add(s, "Show D_rawing", "win.show-drawing");
+	add(s, "Show _Notes", "win.notes");
 
-	GMenu* sim = g_menu_new();
-	GMenu* m1 = g_menu_new();
-	g_menu_append(m1, "_Running", "win.running");
-	g_menu_append(m1, "_Step Once", "win.step");
-	g_menu_append(m1, "Simulation _View", "win.sim-view");
-	g_menu_append(m1, "_Lock the Circuit", "win.lock");
-	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m1));
-	GMenu* m2 = g_menu_new();
-	g_menu_append(m2, "_Truth Table   (T)", "win.truth-table");
-	g_menu_append(m2, "_Check My Circuit   (Shift+T)", "win.check-circuit");
-	g_menu_append(m2, "_Oscilloscope", "win.scope");
-	g_menu_append_section(sim, nullptr, G_MENU_MODEL(m2));
-	g_menu_append_submenu(bar, "_Simulate", G_MENU_MODEL(sim));
+	GMenu* sim = submenu(bar, "_Simulation");
+	s = section(sim);
+	add(s, "_Simulation View", "win.sim-view");
+	add(s, "_Running", "win.running");
+	add(s, "S_tep Once", "win.step");
+	add(s, "Step _Clock", "win.step-clock");
+	s = section(sim);
+	add(s, "_Predict, Then Reveal", "win.predict");
+	add(s, "Re_veal", "win.reveal", "Return");
+	s = section(sim);
+	add(s, "_Truth Table…", "win.truth-table");
+	add(s, "C_heck My Circuit…", "win.check-circuit");
+	add(s, "_Oscilloscope", "win.scope");
+	s = section(sim);
+	add(s, "_Lock the Circuit", "win.lock");
 
-	GMenu* tabs = g_menu_new();
-	g_menu_append(tabs, "_New Tab", "win.new-tab");
-	g_menu_append(tabs, "_Close Tab", "win.close-tab");
-	g_menu_append(tabs, "_Reopen Closed Tab", "win.reopen-tab");
-	g_menu_append(tabs, "Re_name Tab…", "win.rename-tab");
-	g_menu_append(tabs, "Ne_xt Tab", "win.next-tab");
-	g_menu_append(tabs, "_Previous Tab", "win.previous-tab");
-	GMenu* splitSection = g_menu_new();
-	g_menu_append(splitSection, "_Split View", "win.split-view");
-	g_menu_append(splitSection, "S_witch Side", "win.switch-pane");
-	g_menu_append(splitSection, "Close Split Vie_w", "win.close-split");
-	g_menu_append_section(tabs, nullptr, G_MENU_MODEL(splitSection));
-	g_menu_append_submenu(bar, "_Tabs", G_MENU_MODEL(tabs));
+	// Tabs live here (the Mac keeps them in File, under its own Window menu's
+	// tab commands); then the open circuits, to bring one forward.
+	GMenu* window = submenu(bar, "_Window");
+	s = section(window);
+	add(s, "_New Tab", "win.new-tab");
+	add(s, "_Close Tab", "win.close-tab");
+	add(s, "_Reopen Closed Tab", "win.reopen-tab");
+	add(s, "Re_name Tab…", "win.rename-tab");
+	add(s, "Ne_xt Tab", "win.next-tab");
+	add(s, "_Previous Tab", "win.previous-tab");
+	s = section(window);
+	add(s, "_Split View", "win.split-view");
+	add(s, "S_witch Side", "win.switch-pane");
+	add(s, "Close Split _View", "win.close-split");
+	// Which pages' TO/FROM links connect (docs/PAGE-LINKS.md); a tab's
+	// right-click menu connects pages one by one.
+	s = section(window);
+	add(s, "Connect _All Pages", "win.connect-all-pages");
+	add(s, "_Disconnect All Pages", "win.disconnect-all-pages");
+	s = section(window);
+	add(s, "_Minimize", "win.minimize");
+	gWindowMenu = section(window);
 
-	GMenu* help = g_menu_new();
-	g_menu_append(help, "_Keyboard Shortcuts", "win.shortcuts");
-	g_menu_append(help, "Guided _Tour", "app.guided-tour");
-	g_menu_append(help, "CedarLogic _Help", "win.help");
-	g_menu_append(help, "_What's New in CedarLogic", "win.whats-new");
-	g_menu_append(help, "Send _Feedback…", "win.feedback");
-	g_menu_append(help, "Check for _Updates…", "app.check-updates");
-	g_menu_append(help, "_About CedarLogic", "win.about");
-	g_menu_append_submenu(bar, "_Help", G_MENU_MODEL(help));
+	GMenu* help = submenu(bar, "_Help");
+	s = section(help);
+	add(s, "CedarLogic _Help", "win.help");
+	add(s, "_Keyboard Shortcuts", "win.shortcuts");
+	add(s, "Guided _Tour", "app.guided-tour");
+	s = section(help);
+	add(s, "_What's New in CedarLogic", "win.whats-new");
+	add(s, "W_elcome to CedarLogic", "win.welcome");
+	s = section(help);
+	add(s, "Send _Feedback…", "win.feedback");
+	add(s, "Check for _Updates…", "app.check-updates");
+	s = section(help);
+	add(s, "_About CedarLogic", "win.about");
 	return G_MENU_MODEL(bar);
 }
+
+// The keys a canvas command has now, as an accelerator ("" none).
+std::string canvasKeys(const char* id) {
+	const shortcuts::Action* a = shortcuts::find(id);
+	return a ? shortcuts::keys(*a) : std::string();
+}
+
+// An item's shown keys set to `keys` (in every menu under `model`).
+void showKeys(GMenuModel* model, const char* action, const std::string& keys) {
+	for (int i = 0; i < g_menu_model_get_n_items(model); i++) {
+		gchar* a = nullptr;
+		if (g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_ACTION, "s", &a) && a && std::strcmp(a, action) == 0 && G_IS_MENU(model)) {
+			gchar* now = nullptr;
+			g_menu_model_get_item_attribute(model, i, "accel", "s", &now);
+			if (keys != (now ? now : "")) {
+				GMenuItem* item = g_menu_item_new_from_model(model, i);
+				if (keys.empty()) g_menu_item_set_attribute_value(item, "accel", nullptr);
+				else g_menu_item_set_attribute(item, "accel", "s", keys.c_str());
+				g_menu_remove(G_MENU(model), i);
+				g_menu_insert_item(G_MENU(model), i, item);
+				g_object_unref(item);
+			}
+			g_free(now);
+		}
+		g_free(a);
+		GMenuLinkIter* links = g_menu_model_iterate_item_links(model, i);
+		GMenuModel* sub = nullptr;
+		while (g_menu_link_iter_get_next(links, nullptr, &sub)) {
+			showKeys(sub, action, keys);
+			g_object_unref(sub);
+		}
+		g_object_unref(links);
+	}
+}
+
+}  // namespace
+
+GMenuModel* appMenubar() { return gMenubar; }
+
+void refreshMenuKeys() {
+	if (gMenubar == nullptr) return;
+	static const struct { const char* action; const char* id; } kCanvasKeys[] = {
+		{ "win.add-gate", "addGate" }, { "win.rotate", "rotate" }, { "win.straighten", "straighten" },
+		{ "win.step-clock", "stepClock" }, { "win.truth-table", "truthTable" }, { "win.check-circuit", "checkCircuit" },
+	};
+	for (const auto& k : kCanvasKeys) showKeys(gMenubar, k.action, canvasKeys(k.id));
+	// Tidy's key runs the way Settings > Editing picks; the other way is a click.
+	const std::string tidy = canvasKeys("tidy");
+	showKeys(gMenubar, "win.tidy", prefs().tidyMode == 0 ? tidy : std::string());
+	showKeys(gMenubar, "win.tidy-flow", prefs().tidyMode == 1 ? tidy : std::string());
+}
+
+void rebuildWindowMenu() {
+	if (gWindowMenu == nullptr) return;
+	g_menu_remove_all(gWindowMenu);
+	const std::vector<CircuitWindow*>& all = circuitWindows();
+	for (size_t i = 0; i < all.size() && i < 20; i++) {
+		std::string label = all[i]->titleText();
+		std::string escaped;
+		for (char c : label) { if (c == '_') escaped += '_'; escaped += c; }
+		GMenuItem* item = g_menu_item_new(escaped.c_str(), nullptr);
+		g_menu_item_set_action_and_target_value(item, "app.show-window", g_variant_new_int32((gint32)i));
+		g_menu_append_item(gWindowMenu, item);
+		g_object_unref(item);
+	}
+}
+
+namespace {
 
 // Every command's keys: the defaults, with Settings > Shortcuts' changes.
 void setAccels(GtkApplication* app) { shortcuts::apply(app); }
@@ -433,10 +800,22 @@ void shareLinkCb(GSimpleAction*, GVariant*, gpointer app) {
 	bool any = false;
 	for (int p = 0; p < cl_document_page_count(doc); p++) any = any || cl_document_gate_count(doc, p) > 0;
 	if (!any) { w->note("There's nothing on the circuit to share yet."); return; }
+	// The notes never go in a link (they're the student's own, and links get
+	// pasted into chats); the drawing goes when it's shown and the link still
+	// fits (the website's DRAWING-NOTES.md 4.11), as on the Mac.
 	const std::string name = w->titleText();
-	const std::string data = sharelink::encode(cl_document_save_text(doc));
-	if (data.empty()) { w->note("Couldn't make a link for this circuit."); return; }
-	const std::string link = std::string(sharelink::kWebBase) + "#" + sharelink::fragment(data, name);
+	auto make = [&](int flags) {
+		const std::string data = sharelink::encode(cl_document_save_text_ex(doc, flags));
+		return data.empty() ? std::string() : std::string(sharelink::kWebBase) + "#" + sharelink::fragment(data, name);
+	};
+	const bool withInk = cl_ink_any(doc) && cl_ink_shown(doc);
+	std::string link = make(withInk ? CL_SAVE_NO_NOTES : CL_SAVE_NO_NOTES | CL_SAVE_NO_INK);
+	if (link.empty()) { w->note("Couldn't make a link for this circuit."); return; }
+	bool leftOutDrawing = false;
+	if (withInk && link.size() > sharelink::kMaxWebLink) {
+		const std::string without = make(CL_SAVE_NO_NOTES | CL_SAVE_NO_INK);
+		if (!without.empty()) { link = without; leftOutDrawing = true; }
+	}
 	if (link.size() > sharelink::kMaxWebLink) {
 		showMessage(w->window(), GTK_MESSAGE_INFO, "This circuit is too big for a link",
 		            format("A link holds the whole circuit, and this one would be about %d KB. Use File \u25B8 Export as CedarLogic File… and send the file instead.",
@@ -444,7 +823,8 @@ void shareLinkCb(GSimpleAction*, GVariant*, gpointer app) {
 		return;
 	}
 	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), link.c_str(), -1);
-	w->note("Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.");
+	w->note(leftOutDrawing ? "Link copied. The link leaves out the drawing; it's too big for a link. Send the file to include it."
+	                       : "Link copied. Anyone who opens it gets this circuit; it isn't stored anywhere.");
 }
 
 void openRecentCb(GSimpleAction*, GVariant* param, gpointer app) {
@@ -511,6 +891,22 @@ bool gLaunching = false;   // in a launch's activate or open, until its windows 
 bool gStarted = false;
 // Files handed over meanwhile, opened once the first windows are made.
 std::vector<std::string> gPendingOpens;
+// cedarlogic://sync links handed over: Settings > Sync with the code, once the windows (and the
+// launch screen) are there. Never linking by themselves.
+std::vector<std::string> gPendingSyncLinks;
+
+gboolean syncLinksCb(gpointer) {
+	if (!gStarted || splashActive()) return G_SOURCE_CONTINUE;
+	std::vector<std::string> links;
+	links.swap(gPendingSyncLinks);
+	for (const std::string& link : links) guarded("a sync link", [&] { syncapp::handleLink(link); });
+	return G_SOURCE_REMOVE;
+}
+
+void routeSyncLink(const std::string& link) {
+	gPendingSyncLinks.push_back(link);
+	g_timeout_add(300, syncLinksCb, nullptr);
+}
 
 bool launchUnderWay() { return gInStartup || gLaunching; }
 
@@ -553,6 +949,12 @@ void startupCb(GApplication* gapp, gpointer) {
 		exit(0);
 	}
 	if (gSplash) splashSetStatus(gSplash, gLibraryLoaded ? "Opening the workspace…" : "Couldn't find the gate library");
+	// Sync (docs/SYNC.md): the engine is made, and syncs if a code is stored. The picture runs leave
+	// the person's own library and code alone, unless they point it at a test server.
+	if (gLibraryLoaded && gSplashFile.empty()) {
+		syncapp::start(app);
+		if (gScreenshot.empty() || g_getenv("CL_SYNC_URL")) syncapp::begin();
+	}
 
 	const GActionEntry entries[] = {
 		{ "new", newCb, nullptr, nullptr, nullptr, { 0 } },
@@ -566,13 +968,20 @@ void startupCb(GApplication* gapp, gpointer) {
 		  nullptr, nullptr, nullptr, { 0 } },
 		{ "guided-tour", [](GSimpleAction*, GVariant*, gpointer app) { startTour(activeWindow(GTK_APPLICATION(app))); },
 		  nullptr, nullptr, nullptr, { 0 } },
+		// Window > (an open circuit): that window to the front.
+		{ "show-window", [](GSimpleAction*, GVariant* v, gpointer) {
+			const int i = g_variant_get_int32(v);
+			if (i >= 0 && i < (int)circuitWindows().size()) gtk_window_present(circuitWindows()[i]->window());
+		  }, "i", nullptr, nullptr, { 0 } },
 	};
 	g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
 	setAccels(app);
-	GMenuModel* bar = buildMenubar();
-	gtk_application_set_menubar(app, bar);
-	g_object_unref(bar);
+	// Each window shows the bar itself (Window.cpp); it isn't the
+	// application's menubar, so the canvas keys written on it stay unbound.
+	gMenubar = buildMenubar();
+	refreshMenuKeys();
 	rebuildRecentMenus();
+	rebuildWindowMenu();
 	// Not in the screenshot runs: an update question would outlive them.
 	if (gScreenshot.empty()) {
 		Updater_Initialize(app);
@@ -623,6 +1032,7 @@ void openHandedOver(GtkApplication* app, const std::vector<std::string>& paths) 
 	};
 	CircuitWindow* blank = activeWindow(app);
 	for (const std::string& path : paths) {
+		if (sharelink::isSyncLink(path)) { routeSyncLink(path); continue; }
 		// Still there and still blank: a question opening a file asks lets
 		// other things happen meanwhile. Not while a dialog or menu is open
 		// (over it, perhaps, working on what it shows): a window of its own then.
@@ -671,6 +1081,9 @@ void activateCb(GApplication* gapp, gpointer) {
 		g_application_quit(gapp);
 		return;
 	}
+	// Recently Deleted: circuits deleted over 30 days ago go for good, off
+	// the main thread (files only).
+	if (gScreenshot.empty()) std::thread([] { library::sweepDeleted(); }).detach();
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
 	if (gScreenshot.empty()) {
@@ -688,7 +1101,10 @@ void activateCb(GApplication* gapp, gpointer) {
 		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
+			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
+			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
+			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
@@ -709,7 +1125,14 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 	std::vector<std::string> paths;
 	for (gint i = 0; i < n; i++) {
 		gchar* path = g_file_get_path(files[i]);
-		if (path) paths.push_back(path);
+		if (path) {
+			paths.push_back(path);
+		} else {
+			// Not a file: a cedarlogic://sync link (the desktop passes it on as an address).
+			gchar* uri = g_file_get_uri(files[i]);
+			if (uri && sharelink::isSyncLink(uri)) paths.push_back(uri);
+			g_free(uri);
+		}
 		g_free(path);
 	}
 	// Handed over while this launch is under way: they open once its windows are made.
@@ -729,14 +1152,20 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 		return;
 	}
 	bool any = false;
-	for (const std::string& path : paths) any = openCircuit(GTK_APPLICATION(gapp), path, nullptr) || any;
+	for (const std::string& path : paths) {
+		if (sharelink::isSyncLink(path)) { routeSyncLink(path); continue; }
+		any = openCircuit(GTK_APPLICATION(gapp), path, nullptr) || any;
+	}
 	if (!any && circuitWindows().empty()) newCircuitWindow(GTK_APPLICATION(gapp));
 	if (gSplash) for (CircuitWindow* c : circuitWindows()) gtk_widget_hide(GTK_WIDGET(c->window()));
 	hideSplashSoon(gSplash, +[](gpointer app) -> gboolean {
 		for (CircuitWindow* c : circuitWindows()) { gtk_widget_show(GTK_WIDGET(c->window())); if (gScreenshot.empty()) c->beginOpening(); }
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
-			if (!gShow.empty()) g_timeout_add(1200, showCb, app);
+			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
+			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
+			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
+			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
 		else if (!prefs().hasSeenWelcome) g_idle_add(offerWelcomeCb, app);
@@ -902,7 +1331,41 @@ void rebuildRecentMenus() {
 	}
 }
 
+// A folder and everything in it, gone.
+static void removeTree(const std::string& path) {
+	if (g_file_test(path.c_str(), G_FILE_TEST_IS_DIR) && !g_file_test(path.c_str(), G_FILE_TEST_IS_SYMLINK)) {
+		if (GDir* d = g_dir_open(path.c_str(), 0, nullptr)) {
+			while (const gchar* n = g_dir_read_name(d)) removeTree(path + "/" + n);
+			g_dir_close(d);
+		}
+		g_rmdir(path.c_str());
+	} else {
+		g_remove(path.c_str());
+	}
+}
+
+static int syncTest(int argc, char** argv) {
+	std::string server, only;
+	if (const char* u = g_getenv("CL_SYNC_URL")) server = u;
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) server = argv[++i];
+		else if (strcmp(argv[i], "--only") == 0 && i + 1 < argc) only = argv[++i];
+	}
+	gchar* dir = g_dir_make_tmp("cl-sync-test-XXXXXX", nullptr);
+	if (!dir) { fprintf(stderr, "no temporary folder\n"); return 2; }
+	std::string report;
+	const bool ok = syncplatform::selfTest(dir, server, only, report);
+	fputs(report.c_str(), stdout);
+	removeTree(dir);
+	g_free(dir);
+	printf("%s\n", ok ? "sync self-test: all passed" : "sync self-test: FAILED");
+	return ok ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
+	// The .deb update's root step (Updater.h), run by pkexec: before anything
+	// else, and nothing but that.
+	if (argc >= 2 && strcmp(argv[1], "--install-update") == 0) return Updater_InstallUpdateAsRoot(argc, argv);
 	// Our own options, taken out before GTK sees the rest (files to open).
 	std::vector<char*> args;
 	for (int i = 0; i < argc; i++) {
@@ -919,7 +1382,33 @@ int main(int argc, char** argv) {
 		}
 		if (strcmp(argv[i], "--first") == 0) { gFirstLaunch = true; continue; }
 		if (strcmp(argv[i], "--hold") == 0 && i + 1 < argc) { gHold = std::max(1, atoi(argv[++i])); continue; }
+		if (strcmp(argv[i], "--capture-test") == 0 && i + 1 < argc) {
+			gCaptureTest = argv[++i];
+			if (gScreenshot.empty()) gScreenshot = gCaptureTest + "/window.png";   // runs as a picture run does
+			continue;
+		}
+		if (strcmp(argv[i], "--bench-drag") == 0) {
+			gBench = 60;
+			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gBench = std::max(5, atoi(argv[++i]));
+			continue;
+		}
+		if (strcmp(argv[i], "--session-check") == 0) {
+			gSession = 300;
+			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSession = std::max(1, atoi(argv[++i]));
+			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSessionSeed = strtoull(argv[++i], nullptr, 10);
+			continue;
+		}
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
+		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this
+		// machine's hooks (libcrypto, zlib, curl); with a server, also against a mock one.
+		if (strcmp(argv[i], "--sync-test") == 0) return syncTest(argc, argv);
+		// --update-self-test [--release <folder> --key <hex>]: signed updates (Updater.h).
+		if (strcmp(argv[i], "--update-self-test") == 0) return Updater_SelfTest(argc, argv);
+		// --channel-check --server <url> --root <folder>: the Normal/Beta testing groups (Updater.h).
+		if (strcmp(argv[i], "--channel-check") == 0) return Updater_ChannelCheck(argc, argv);
+		if (strcmp(argv[i], "--feedback-check") == 0) return feedback::check();
+		// --trash-check: Recently Deleted's files, in the library at $XDG_DATA_HOME (the Mac's launch-selftest `trash`).
+		if (strcmp(argv[i], "--trash-check") == 0) return library::trashCheck();
 		if (strcmp(argv[i], "--feedback-probe") == 0) {
 			const int code = feedback::probe();
 			printf("feedback server: %d\n", code);
@@ -928,6 +1417,15 @@ int main(int argc, char** argv) {
 		// A cedarlogic://open#c=… link (the website's Open in the App, a link
 		// in a chat): its circuit goes in a file, which then opens as any
 		// file handed over does, here or in the CedarLogic already running.
+		// A cedarlogic://sync#k=… link carries the secret code: it's copied out of the process's
+		// arguments (where any user could read them) before it goes on.
+		if (sharelink::isSyncLink(argv[i])) {
+			static std::deque<std::string> syncLinks;
+			syncLinks.push_back(argv[i]);
+			memset(argv[i], 0, strlen(argv[i]));
+			args.push_back(const_cast<char*>(syncLinks.back().c_str()));
+			continue;
+		}
 		if (strncmp(argv[i], "cedarlogic:", 11) == 0) {
 			static std::deque<std::string> linkFiles;   // (they stay where they are as it grows)
 			std::string why;
@@ -942,6 +1440,18 @@ int main(int argc, char** argv) {
 	args.push_back(nullptr);
 	argc = (int)args.size() - 1;
 	argv = args.data();
+	if (gSession > 0) session::prepare();
+	if (gBench > 0 || gSession > 0) {
+		// Settings and Your Circuits in a folder of its own (removed at the end),
+		// and the screenshot runs' quiet start; the picture itself isn't taken.
+		gchar* home = g_dir_make_tmp(gSession > 0 ? "cl-session-XXXXXX" : "cl-bench-XXXXXX", nullptr);
+		if (home == nullptr) { fprintf(stderr, "bench-drag: no temporary folder\n"); return 2; }
+		gBenchHome = home;
+		g_free(home);
+		g_setenv("XDG_DATA_HOME", (gBenchHome + "/data").c_str(), TRUE);
+		g_setenv("XDG_CONFIG_HOME", (gBenchHome + "/config").c_str(), TRUE);
+		gScreenshot = gBenchHome + "/unused.png";
+	}
 	// The window class and the name the desktop shows.
 	g_set_prgname("CedarLogic");
 	g_set_application_name("CedarLogic");
@@ -959,6 +1469,9 @@ int main(int argc, char** argv) {
 	// A launch that handed over never loaded the settings: saving its
 	// defaults would undo the running one's.
 	if (gPrimary) prefs().save();
+	// Every window is closed and saved: what sync hasn't sent yet goes now (five seconds at most).
+	if (gPrimary) syncapp::quit();
 	g_object_unref(app);
+	if (!gBenchHome.empty()) removeTree(gBenchHome);
 	return status ? status : gExitCode;
 }

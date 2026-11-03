@@ -1,6 +1,7 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "SyncApp.h"
 #include "Alert.h"
 #include "Canvas.h"
 #include "Collections.h"
@@ -8,6 +9,8 @@
 #include "Feedback.h"
 #include "FindBar.h"
 #include "Help.h"
+#include "Ink.h"
+#include "Notes.h"
 #include "Settings.h"
 #include "Shortcuts.h"
 #include "Brand.h"
@@ -25,6 +28,7 @@
 #include "Recovery.h"
 #include "TabStrip.h"
 #include "Toolbar.h"
+#include "MenuBar.h"
 
 #include <cairo-pdf.h>
 #include <cairo-svg.h>
@@ -39,6 +43,9 @@ namespace {
 const double kSelectionFadeTime = 0.13, kAppearTime = 0.32, kDragFadeTime = 0.18, kNoteTime = 4.0;
 
 double secondsSince(gint64 t) { return (g_get_monotonic_time() - t) / 1e6; }
+
+// Parts locked in place stayed put through a move, delete, rotate or cut.
+const char* kLockedNote = "Locked parts stay where they are. To move one, right-click it and choose Unlock Part.";
 
 // Every command, whichever way it arrives, by action name.
 struct Command {
@@ -59,6 +66,8 @@ const Command kCommands[] = {
 	{ "save-part", [](CircuitWindow* w) { parts::saveSelection(w); }, false },
 	{ "build-formula", [](CircuitWindow* w) { if (w->canEdit()) showBuildFormula(w); else w->lockNudge(); }, false },
 	{ "find", [](CircuitWindow* w) { w->find(); }, false },
+	{ "find-next", [](CircuitWindow* w) { w->findStep(1); }, false },
+	{ "find-previous", [](CircuitWindow* w) { w->findStep(-1); }, false },
 	{ "feedback", [](CircuitWindow* w) { feedback::show(w); }, false },
 	{ "whats-new", [](CircuitWindow* w) { whatsnew::show(w); }, false },
 	{ "export-image", [](CircuitWindow* w) { w->exportImage(); }, false },
@@ -85,6 +94,16 @@ const Command kCommands[] = {
 	{ "tidy-switch", [](CircuitWindow* w) { w->switchTidyMode(); }, false },
 	{ "connect-nearby", [](CircuitWindow* w) { if (w->canEdit()) w->connectNearby(false); else w->lockNudge(); }, false },
 	{ "gate-settings", [](CircuitWindow* w) { w->showSettings(); }, false },
+	{ "lock-in-place", [](CircuitWindow* w) { w->toggleLockInPlace(); }, false },
+	{ "unlock-parts", [](CircuitWindow* w) { w->lockSelection(false); }, false },
+	{ "unlock-all", [](CircuitWindow* w) { w->unlockAll(); }, false },
+	{ "draw", [](CircuitWindow* w) { w->toggleDrawing(); }, true },
+	{ "show-drawing", [](CircuitWindow* w) { w->toggleDrawingShown(); }, true },
+	{ "notes", [](CircuitWindow* w) { w->toggleNotes(); }, true },
+	{ "ink-pen", [](CircuitWindow* w) { w->setInkTool(ink::Pen); }, false },
+	{ "ink-highlighter", [](CircuitWindow* w) { w->setInkTool(ink::Highlighter); }, false },
+	{ "ink-eraser", [](CircuitWindow* w) { w->setInkTool(ink::Eraser); }, false },
+	{ "clear-drawing", [](CircuitWindow* w) { w->clearDrawing(); }, false },
 	{ "zoom-in", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->animateZoom(1 / 0.75); }, false },
 	{ "zoom-out", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->animateZoom(0.75); }, false },
 	{ "zoom-fit", [](CircuitWindow* w) { if (Canvas* c = w->currentCanvas()) c->zoomToFit(true); }, false },
@@ -101,9 +120,29 @@ const Command kCommands[] = {
 		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
 	}, true },
 	{ "preferences", [](CircuitWindow* w) { w->showPreferences(); }, false },
+	// View's settings that the Mac's View menu has too (Settings > Canvas
+	// keeps them as well).
+	{ "show-grid", [](CircuitWindow*) {
+		prefs().showGrid = !prefs().showGrid;
+		prefs().save();
+		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
+	}, true },
+	{ "wire-dots", [](CircuitWindow*) {
+		prefs().wireDots = !prefs().wireDots;
+		prefs().applyWireDots();
+		prefs().save();
+		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
+	}, true },
+	{ "fullscreen", [](CircuitWindow* w) { w->toggleFullScreen(); }, true },
+	{ "minimize", [](CircuitWindow* w) { gtk_window_iconify(w->window()); }, false },
+	{ "welcome", [](CircuitWindow* w) { prefs().hasSeenWelcome = false; welcome::offer(w); }, false },
 	{ "running", [](CircuitWindow* w) { w->toggleRunning(); }, true },
 	{ "step", [](CircuitWindow* w) { w->stepOnce(); }, false },
+	{ "step-clock", [](CircuitWindow* w) { w->stepClock(); }, false },
 	{ "sim-view", [](CircuitWindow* w) { w->toggleSimView(); }, true },
+	{ "projector", [](CircuitWindow* w) { w->toggleProjector(); }, true },
+	{ "predict", [](CircuitWindow* w) { w->togglePredict(); }, true },
+	{ "reveal", [](CircuitWindow* w) { w->revealOrCoverAgain(); }, false },
 	{ "lock", [](CircuitWindow* w) { w->toggleLock(); }, true },
 	{ "truth-table", [](CircuitWindow* w) { w->makeTruthTable(); }, false },
 	{ "check-circuit", [](CircuitWindow* w) { w->checkCircuit(); }, false },
@@ -114,6 +153,8 @@ const Command kCommands[] = {
 		else gtk_window_close(w->window());
 	}, false },
 	{ "reopen-tab", [](CircuitWindow* w) { w->reopenPage(); }, false },
+	{ "connect-all-pages", [](CircuitWindow* w) { w->connectAllPages(); }, false },
+	{ "disconnect-all-pages", [](CircuitWindow* w) { w->disconnectAllPages(); }, false },
 	{ "rename-tab", [](CircuitWindow* w) { w->renamePage(w->currentPage()); }, false },
 	{ "next-tab", [](CircuitWindow* w) { w->cyclePage(1); }, false },
 	{ "previous-tab", [](CircuitWindow* w) { w->cyclePage(-1); }, false },
@@ -154,8 +195,11 @@ void setChecked(GtkWidget* win, const char* name, bool on) {
 
 // ---- Building the window -----------------------------------------------------------
 
+int CircuitWindow::liveCount = 0;
+
 CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const std::string& p)
 	: app(application), doc(d), path(p) {
+	liveCount++;
 	isRunning = cl_document_is_running(doc);
 	build();
 	circuitWindows().push_back(this);
@@ -168,7 +212,16 @@ CircuitWindow::CircuitWindow(GtkApplication* application, CLDocument* d, const s
 	updateActions();
 	updateRunUI();
 	updateBanner();
-	gtk_widget_show_all(win);
+	// Behind the launch screen it's made but not put on screen: it comes in
+	// as the launch screen dissolves (main.cpp). Mapping it now, only to
+	// hide it again, flashed it up (with the desktop's window animation)
+	// around the launch screen, and cost a map the launch didn't need.
+	if (splashHoldsWindows()) {
+		gtk_widget_show_all(gtk_bin_get_child(GTK_BIN(win)));
+		if (GtkWidget* bar = gtk_window_get_titlebar(GTK_WINDOW(win))) gtk_widget_show_all(bar);
+	} else {
+		gtk_widget_show_all(win);
+	}
 	gtk_widget_set_visible(paneBoxes[1], splitOpen());
 	gtk_revealer_set_reveal_child(GTK_REVEALER(statusBar->outer()), prefs().showStatus);
 	updateBanner();
@@ -214,6 +267,7 @@ CircuitWindow::~CircuitWindow() {
 	delete palette;
 	delete miniMap;
 	delete toolbar;
+	delete menuRow;
 	delete strips[0];
 	delete strips[1];
 	delete statusBar;
@@ -223,6 +277,8 @@ CircuitWindow::~CircuitWindow() {
 	// Closed on purpose (saved, or the changes let go): no copy to offer back.
 	recovery::remove(recoveryBase);
 	if (doc) cl_document_close(doc);
+	liveCount--;
+	rebuildWindowMenu();
 }
 
 void CircuitWindow::build() {
@@ -253,14 +309,24 @@ void CircuitWindow::build() {
 
 	GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(win), v);
-	// The toolbar is the title bar (the Mac's and the Windows app's), and
-	// every menu is behind its •••. Focus mode slides it away.
+	// The title bar: the menu row (the menus, and the window's buttons where
+	// the desktop puts them) over the toolbar (the Mac's and the Windows
+	// app's), both on the toolbar's colour. Focus mode slides them away.
 	toolbar = new Toolbar(this);
+	toolbar->setWindowButtons(false);
+	menuRow = new MenuRow(this);
+	GtkWidget* titleRows = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_pack_start(GTK_BOX(titleRows), menuRow->outer(), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(titleRows), toolbar->widget(), FALSE, FALSE, 0);
 	titleRevealer = gtk_revealer_new();
 	gtk_revealer_set_transition_type(GTK_REVEALER(titleRevealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
 	gtk_revealer_set_transition_duration(GTK_REVEALER(titleRevealer), 240);
 	gtk_revealer_set_reveal_child(GTK_REVEALER(titleRevealer), TRUE);
-	gtk_container_add(GTK_CONTAINER(titleRevealer), toolbar->widget());
+	gtk_container_add(GTK_CONTAINER(titleRevealer), titleRows);
+	// A window coming to the front: the menus' wording follows it.
+	g_signal_connect(win, "notify::is-active", CL_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
+		static_cast<CircuitWindow*>(self)->updateActions();
+	}), this);
 	gtk_widget_show_all(titleRevealer);
 	gtk_window_set_titlebar(GTK_WINDOW(win), titleRevealer);
 	gtk_application_window_set_show_menubar(GTK_APPLICATION_WINDOW(win), FALSE);
@@ -346,6 +412,9 @@ void CircuitWindow::build() {
 	g_object_set(scopePaned, "wide-handle", TRUE, nullptr);
 	gtk_paned_pack1(GTK_PANED(scopePaned), area, TRUE, FALSE);
 	gtk_box_pack_start(GTK_BOX(row), scopePaned, TRUE, TRUE, 0);
+	// The notes, at the right (View > Show Notes).
+	notes = new NotesPane(this);
+	gtk_box_pack_start(GTK_BOX(row), notes->widget(), FALSE, FALSE, 0);
 
 	statusBar = new StatusBar(this);
 	gtk_box_pack_start(GTK_BOX(v), statusBar->outer(), FALSE, FALSE, 0);
@@ -379,6 +448,16 @@ void CircuitWindow::updateTabLabels() { redrawStrips(); }
 
 void CircuitWindow::redrawStrips() {
 	for (TabStrip* t : strips) if (t) t->redraw();
+}
+
+void CircuitWindow::showSwitcherForScreenshot() {
+	for (int i = 0; i < 3 && tabCount() < 3; i++) runAction("win.new-tab");
+	if (switcher) switcher->key(false);
+}
+
+Canvas* CircuitWindow::canvasWithKey(uint64_t key) const {
+	for (Canvas* c : canvases) if (c->pageKey() == key) return c;
+	return nullptr;
 }
 
 int CircuitWindow::paneOf(const Canvas* c) const { return c && sideKeys.count(c->pageKey()) ? 1 : 0; }
@@ -803,17 +882,47 @@ static void popupModel(GtkWidget* attach, GMenuModel* model, GtkWidget* from, Gd
 	if (e == nullptr) gtk_menu_shell_select_first(GTK_MENU_SHELL(menu), FALSE);
 }
 
-void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
-	if (GMenuModel* bar = gtk_application_get_menubar(app)) popupModel(win, bar, from, anchor, e, true);
+// The menus are one model for every window: an item whose wording follows
+// the window in front gets it just before they open.
+static void relabel(GMenuModel* model, const char* action, const char* label) {
+	for (int i = 0; i < g_menu_model_get_n_items(model); i++) {
+		gchar* a = nullptr;
+		if (G_IS_MENU(model) && g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_ACTION, "s", &a) && a &&
+		    std::strcmp(a, action) == 0) {
+			gchar* now = nullptr;
+			g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_LABEL, "s", &now);
+			if (!now || std::strcmp(now, label) != 0) {
+				GMenuItem* item = g_menu_item_new_from_model(model, i);
+				g_menu_item_set_label(item, label);
+				g_menu_remove(G_MENU(model), i);
+				g_menu_insert_item(G_MENU(model), i, item);
+				g_object_unref(item);
+			}
+			g_free(now);
+		}
+		g_free(a);
+		GMenuLinkIter* links = g_menu_model_iterate_item_links(model, i);
+		GMenuModel* sub = nullptr;
+		while (g_menu_link_iter_get_next(links, nullptr, &sub)) {
+			relabel(sub, action, label);
+			g_object_unref(sub);
+		}
+		g_object_unref(links);
+	}
 }
 
-// GTK's own F10 belongs to a menu bar, and there is none: the menus are
-// behind •••, so F10 opens them there (at the top right in focus mode, with
-// the bar away).
+void CircuitWindow::moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e) {
+	GMenuModel* bar = appMenubar();
+	if (bar == nullptr) return;
+	updateActions();
+	popupModel(win, bar, from, anchor, e, true);
+}
+
+// F10 with the menu row away (focus mode, full screen): every menu, in one
+// popup at the top right. With the row showing, F10 opens File, as GTK's does.
 void CircuitWindow::menusFromKeyboard() {
-	GdkRectangle r;
-	if (!focusOn && toolbar && toolbar->moreRect(r)) moreMenu(toolbar->widget(), r, nullptr);
-	else moreMenu(win, GdkRectangle{ gtk_widget_get_allocated_width(win) - 48, 6, 32, 32 }, nullptr);
+	if (menuRow && menuRow->showing()) { menuRow->openMenu(0); return; }
+	moreMenu(win, GdkRectangle{ gtk_widget_get_allocated_width(win) - 48, 6, 32, 32 }, nullptr);
 }
 
 void CircuitWindow::contextMenuFromKeyboard() {
@@ -845,6 +954,9 @@ void CircuitWindow::titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e)
 }
 
 struct TabMenuData { CircuitWindow* w; int page; };
+
+// A tab menu's Connect to item: the two pages, by their identities.
+struct PageLink { CircuitWindow* w; unsigned long long from, to; };
 
 static void tabMenuItem(GtkWidget* menu, const char* label, void (*act)(CircuitWindow*, int), CircuitWindow* w, int page, bool enabled = true) {
 	GtkWidget* item = gtk_menu_item_new_with_mnemonic(label);
@@ -881,6 +993,33 @@ void CircuitWindow::tabContextMenu(int page, GdkEvent* e) {
 		const int k = (int)(std::find(row.begin(), row.end(), page) - row.begin());
 		tabMenuItem(menu, "Move _Left", [](CircuitWindow* w, int p) { w->moveTabBy(p, -1); }, this, page, k > 0 && k < (int)row.size());
 		tabMenuItem(menu, "Move Ri_ght", [](CircuitWindow* w, int p) { w->moveTabBy(p, 1); }, this, page, k + 1 < (int)row.size());
+		const int n = cl_document_page_count(doc);
+		if (n > 1) {
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+			// A checklist: the pages this one's TO/FROM links reach.
+			GtkWidget* sub = gtk_menu_new();
+			for (int j = 0; j < n; j++) {
+				if (j == page) continue;
+				GtkWidget* item = gtk_check_menu_item_new_with_label(pageName(j).c_str());
+				gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(item), cl_pages_linked(doc, page, j));
+				// By the pages' identities, which outlast pages moving.
+				g_object_set_data_full(G_OBJECT(item), "cl-link", new PageLink{ this, cl_document_page_id(doc, page), cl_document_page_id(doc, j) },
+				                       [](gpointer d) { delete static_cast<PageLink*>(d); });
+				g_signal_connect(item, "toggled", CL_CALLBACK(+[](GtkCheckMenuItem* it, gpointer) {
+					const PageLink l = *static_cast<PageLink*>(g_object_get_data(G_OBJECT(it), "cl-link"));
+					const int from = cl_document_page_index(l.w->document(), l.from), to = cl_document_page_index(l.w->document(), l.to);
+					const bool on = gtk_check_menu_item_get_active(it);
+					guarded("a tab's menu", [&] { l.w->setPagesLinked(from, to, on); });
+				}), nullptr);
+				gtk_menu_shell_append(GTK_MENU_SHELL(sub), item);
+			}
+			gtk_menu_shell_append(GTK_MENU_SHELL(sub), gtk_separator_menu_item_new());
+			tabMenuItem(sub, "Connect _All Pages", [](CircuitWindow* w, int) { w->connectAllPages(); }, this, page, canConnectAllPages());
+			tabMenuItem(sub, "_Disconnect All Pages", [](CircuitWindow* w, int) { w->disconnectAllPages(); }, this, page, canDisconnectAllPages());
+			GtkWidget* connect = gtk_menu_item_new_with_mnemonic("Co_nnect to");
+			gtk_menu_item_set_submenu(GTK_MENU_ITEM(connect), sub);
+			gtk_menu_shell_append(GTK_MENU_SHELL(menu), connect);
+		}
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 		tabMenuItem(menu, "_Close Tab", [](CircuitWindow* w, int p) { w->closePage(p); }, this, page, cl_document_page_count(doc) > 1);
 	} else {
@@ -909,6 +1048,12 @@ void CircuitWindow::tick() {
 	lastTick = t;
 	Canvas* c = currentCanvas();
 	if (c) c->stepAnimation();
+	// The toolbar easing into or out of Simulation View's colour.
+	if (chromeEasing) {
+		chromeEasing = simTween.active();
+		if (toolbar) toolbar->redraw();
+		if (menuRow) menuRow->redraw();
+	}
 	// The opening card: the circuit fades up as it lifts away.
 	if (openingAt >= 0) {
 		const double ot = t / 1e6 - openingAt;
@@ -917,10 +1062,12 @@ void CircuitWindow::tick() {
 		redraw();
 	}
 	// Fades in progress (a new selection's halo, a page appearing, the drag box).
+	// (A page appearing fades the grid, which a drag's layer keys on; a halo
+	// fading in is on the selection, which is what moves.)
 	if (secondsSince(selectionChangedAt) < kSelectionFadeTime || secondsSince(appearStart) < kAppearTime ||
 	    (hasDragFade && secondsSince(dragFadeStart) < kDragFadeTime))
-		redraw();
-	if (hasDragFade && secondsSince(dragFadeStart) >= kDragFadeTime) { hasDragFade = false; redraw(); }
+		redrawOver();
+	if (hasDragFade && secondsSince(dragFadeStart) >= kDragFadeTime) { hasDragFade = false; redrawOver(); }
 
 	// Simulation View's dashes march at the simulation's speed: 40 points a
 	// second at 25 ms a step, faster as steps get shorter.
@@ -951,9 +1098,9 @@ void CircuitWindow::tick() {
 	// A note on the canvas: redrawn while it fades in and out.
 	if (messageAt) {
 		const double age = secondsSince(messageAt);
-		if (age < 0.25 || (age > kNoteTime - 0.55 && age < kNoteTime + 0.1)) redraw();
+		if (age < 0.25 || (age > kNoteTime - 0.55 && age < kNoteTime + 0.1)) redrawOver();
 	}
-	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; redraw(); }
+	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; redrawOver(); }
 	if (statusBar) statusBar->tick();
 }
 
@@ -985,6 +1132,11 @@ void CircuitWindow::redraw() {
 	// Both sides of a split show the same circuit running.
 	for (int pane = 0; pane < 2; pane++)
 		if (Canvas* c = paneCanvas(pane)) c->redraw();
+}
+
+void CircuitWindow::redrawOver() {
+	for (int pane = 0; pane < 2; pane++)
+		if (Canvas* c = paneCanvas(pane)) c->redrawOver();
 }
 
 void CircuitWindow::redrawMiniMap() {
@@ -1061,7 +1213,7 @@ bool CircuitWindow::bannerFor(std::string& text, std::vector<BannerButton>& butt
 
 void CircuitWindow::lockNudge() {
 	if (simViewOn) note("Leave Simulation View (Escape) to edit.");
-	else note("The circuit is locked. Unlock it (Simulate > Lock) to edit.");
+	else note("The circuit is locked. Unlock it (Simulation \u25B8 Lock the Circuit) to edit.");
 	gtk_widget_error_bell(win);
 }
 
@@ -1086,9 +1238,7 @@ gboolean CircuitWindow::autosaveCb(gpointer self) {
 	guarded("saving", [&] {
 		// Not in the middle of something (a drag, a gate on the pointer,
 		// Tidy Up's preview): then a moment later.
-		Canvas* c = w->currentCanvas();
-		const bool busy = (c && c->isDragging()) || w->isFloating() || w->tidyActive() || cl_edit_is_connecting(w->doc);
-		if (busy) w->autosaveId = g_timeout_add(1000, autosaveCb, w);
+		if (w->busyEditing()) w->autosaveId = g_timeout_add(1000, autosaveCb, w);
 		else if (w->isDirty()) w->saveQuietly(false);
 	});
 	return G_SOURCE_REMOVE;
@@ -1180,6 +1330,36 @@ void CircuitWindow::reloadFromDisk(const std::string& message) {
 	if (!message.empty()) note(message);
 }
 
+bool CircuitWindow::busyEditing() const {
+	Canvas* c = currentCanvas();
+	return (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
+}
+
+void CircuitWindow::noteInput() {
+	lastInputMsec = g_get_real_time() / 1000;
+	syncapp::userInput();
+}
+
+void CircuitWindow::reloadForSync(const std::string& message) {
+	char err[512] = "";
+	CLDocument* fresh = cl_document_open(path.c_str(), err, sizeof err);
+	if (fresh == nullptr) {
+		note("Couldn't open the update from your other device.");
+		return;
+	}
+	// The same page and the same view: only what's on it changes.
+	std::vector<Canvas::View> views;
+	for (Canvas* c : canvases) views.push_back(c->view());
+	const int page = currentPage();
+	replaceDocument(fresh, path);
+	openingAt = -1;   // (not the opening card: this window was open already)
+	openingRevealed = true;
+	appearStart = 0;
+	for (size_t i = 0; i < canvases.size() && i < views.size(); i++) canvases[i]->setView(views[i]);
+	if (page >= 0 && page < tabCount()) showPage(page);
+	if (!message.empty()) note(message);
+}
+
 void CircuitWindow::libraryChanged() {
 	rebuildRecentMenus();   // Open Recent names circuits by their names in Your Circuits
 	nameValid = false;
@@ -1222,6 +1402,7 @@ void CircuitWindow::updateTitle() {
 	if (now == nullptr || t != now) {
 		gtk_window_set_title(GTK_WINDOW(win), t.c_str());
 		if (toolbar) toolbar->layoutNow();
+		rebuildWindowMenu();
 	}
 }
 
@@ -1254,9 +1435,21 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "delete", edit && sel);
 	setEnabled(win, "rotate", edit && cl_edit_selected_gate_count(doc, currentPage()) > 0);
 	setEnabled(win, "gate-settings", cl_edit_single_gate(doc, currentPage()) >= 0);
+	setEnabled(win, "lock-in-place", cl_edit_selected_gate_count(doc, currentPage()) > 0);
+	setEnabled(win, "unlock-parts", selectedLocked() > 0);
+	setEnabled(win, "unlock-all", cl_document_locked_count(doc) > 0);
 	setEnabled(win, "reopen-tab", cl_edit_undo_is_close_page(doc));
+	setEnabled(win, "connect-all-pages", canConnectAllPages());
+	setEnabled(win, "disconnect-all-pages", canDisconnectAllPages());
+	// Off until the page has a clock set to "Only on Step Clock" (its key
+	// still says why, through the canvas).
+	setEnabled(win, "step-clock", hasManualClock());
 	setChecked(win, "running", isRunning);
 	setChecked(win, "sim-view", simViewOn);
+	setChecked(win, "projector", prefs().projector);
+	setChecked(win, "predict", predict.on);
+	setEnabled(win, "predict", simViewOn || predict.on);
+	setEnabled(win, "reveal", simViewOn && predict.on);
 	setChecked(win, "lock", lockedOn);
 	setChecked(win, "dark", prefs().dark);
 	setChecked(win, "palette", prefs().showPalette);
@@ -1265,6 +1458,22 @@ void CircuitWindow::updateActions() {
 	setEnabled(win, "switch-pane", splitOpen());
 	setEnabled(win, "close-split", splitOpen());
 	setChecked(win, "status-bar", prefs().showStatus);
+	setChecked(win, "show-grid", prefs().showGrid);
+	setChecked(win, "wire-dots", prefs().wireDots);
+	setChecked(win, "fullscreen", fullScreenOn);
+	setChecked(win, "draw", drawingOn);
+	setChecked(win, "show-drawing", drawingShown());
+	setChecked(win, "notes", notesShown());
+	setEnabled(win, "clear-drawing", pageHasInk() && !pageIsInkReadOnly());
+	// The menu bar is one model for every window: Edit's Lock in Place says
+	// Unlock Part(s) when every selected part is locked, for the window in front.
+	if (GMenuModel* bar = appMenubar())
+		if (gtk_window_is_active(GTK_WINDOW(win)) || circuitWindows().size() == 1)
+			relabel(bar, "win.lock-in-place", lockMenuUnlocks() ? (std::string("_") + unlockPartsTitle()).c_str() : "_Lock in Place");
+	if (GMenuModel* bar = appMenubar())
+		if (gtk_window_is_active(GTK_WINDOW(win)) || circuitWindows().size() == 1)
+			relabel(bar, "win.reveal", predict.revealed ? "_Cover the Lights Again" : "Re_veal");
+	if (menuRow) menuRow->redraw();
 	// The menus' Undo and Redo say what they undo.
 	(void)edit;
 	if (toolbar) toolbar->redraw();
@@ -1311,6 +1520,7 @@ void CircuitWindow::updateBanner() {
 
 void CircuitWindow::themeChanged() {
 	updateActions();
+	if (menuRow) menuRow->refresh();
 	if (palette) palette->themeChanged();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
@@ -1318,10 +1528,11 @@ void CircuitWindow::themeChanged() {
 }
 
 void CircuitWindow::prefsChanged() {
-	if (!focusOn) gtk_revealer_set_reveal_child(GTK_REVEALER(sideRevealer), prefs().showPalette);
+	if (!focusOn) revealChrome(sideRevealer, prefs().showPalette);
 	gtk_widget_set_size_request(paletteBox, paletteWidth(), -1);
 	if (statusBar) statusBar->settingsChanged();
 	if (toolbar) toolbar->layoutNow();
+	refreshMenuKeys();   // Tidy Up's key follows Settings' way
 	themeChanged();
 }
 
@@ -1358,6 +1569,13 @@ static bool isShortcut(GtkApplication* app, const GdkEventKey* e) {
 
 gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
+	w->noteInput();
+	// C while a part moves goes to its canvas, wherever the keyboard is (the
+	// side panel's search, after a drag from the panel): it connects there,
+	// rather than typing a c into the search or doing nothing.
+	for (int pane = 0; pane < 2; pane++)
+		if (Canvas* c = w->paneCanvas(pane))
+			if (guarded("a key", [&] { return c->connectKeyWhileMoving(e); })) return TRUE;
 	// Text boxes get their keys before the menus' shortcuts, so Ctrl+C in
 	// the palette's search copies text rather than gates.
 	GtkWidget* focus = gtk_window_get_focus(GTK_WINDOW(widget));
@@ -1395,8 +1613,14 @@ gboolean CircuitWindow::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) 
 	return FALSE;
 }
 
-gboolean CircuitWindow::stateCb(GtkWidget*, GdkEventWindowState* e, gpointer) {
-	prefs().windowMaximized = (e->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+gboolean CircuitWindow::stateCb(GtkWidget*, GdkEventWindowState* e, gpointer self) {
+	CircuitWindow* w = static_cast<CircuitWindow*>(self);
+	const bool full = (e->new_window_state & GDK_WINDOW_STATE_FULLSCREEN) != 0;
+	if (!full) prefs().windowMaximized = (e->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+	if (full != w->fullScreenOn) {
+		w->fullScreenOn = full;
+		w->updateActions();
+	}
 	return FALSE;
 }
 
@@ -1442,6 +1666,11 @@ void CircuitWindow::replaceDocument(CLDocument* newDoc, const std::string& newPa
 	cl_document_close(doc);
 	doc = newDoc;
 	path = newPath;
+	// A different circuit: every picture kept of it (the minimap's, keyed on
+	// the edit stamp) is drawn again.
+	changes++;
+	drawingOn = false;
+	if (notes) notes->load();
 	forceDirty = false;
 	recovery::remove(recoveryBase);
 	recoveredName.clear();
@@ -1668,15 +1897,24 @@ void CircuitWindow::refreshAfterHistory() {
 			appearStart = g_get_monotonic_time();
 		}
 	}
+	// An undo or redo of a drawing step shows the page it was on.
+	const int inkPage = cl_ink_history_page(doc);
+	if (inkPage >= 0 && inkPage < tabCount() && inkPage != currentPage()) showPage(inkPage);
 	edited();
 }
 
+// Undo or Redo with a Tidy Up on show: the engine keeps it first, as any
+// edit does (cl_edit_undo/redo settle it), so it's kept here first, through
+// endTidy, which tells the window. Left to the engine, a Redo kept it (and
+// dropped the redo step) with the window never told: the preview's bar
+// stayed up, and nothing was saved. Undo then takes the kept tidy back.
 void CircuitWindow::undo() {
 	if (simViewOn) return;
 	// Gates still on the pointer (a paste, a duplicate, a new gate): undo
 	// takes them back, as Escape does, and ends the float with them.
 	if (isFloating()) { cancelFloating(); return; }
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
+	if (tidyActive()) endTidy(true);
 	if (cl_edit_undo(doc)) refreshAfterHistory();
 	else gtk_widget_error_bell(win);
 }
@@ -1686,6 +1924,7 @@ void CircuitWindow::redo() {
 	// Nothing to redo past gates still on the pointer (placing them is next).
 	if (isFloating()) { gtk_widget_error_bell(win); return; }
 	if (Canvas* c = currentCanvas()) if (c->isDragging()) c->cancelDrag();
+	if (tidyActive()) endTidy(true);
 	if (cl_edit_redo(doc)) refreshAfterHistory();
 	else gtk_widget_error_bell(win);
 }
@@ -1698,10 +1937,16 @@ void CircuitWindow::copy() {
 }
 
 void CircuitWindow::cut() {
+	// Locked parts stay: out of the selection before it's copied.
+	const int held = cl_edit_deselect_locked(doc, currentPage());
 	const std::string text = cl_edit_copy(doc, currentPage());
-	if (text.empty()) return;
+	if (text.empty()) {
+		if (held > 0) { edited(); note(kLockedNote); }
+		return;
+	}
 	gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), text.c_str(), (gint)text.size());
 	deleteSelection();
+	if (held > 0) note(kLockedNote);
 }
 
 bool CircuitWindow::placePoint(double& wx, double& wy) const {
@@ -1722,9 +1967,9 @@ bool CircuitWindow::isFloating() const { return cl_edit_is_floating(doc); }
 
 void CircuitWindow::cancelFloating() {
 	if (!isFloating()) return;
-	// It was never placed, so take it back.
-	cl_edit_cancel(doc);
-	cl_edit_undo(doc);
+	// It was never placed, so take it back (and not to Redo: that would
+	// bring back a gate never put down).
+	cl_edit_take_back_float(doc);
 	edited();
 }
 
@@ -1734,6 +1979,7 @@ void CircuitWindow::clipboardCb(GtkClipboard*, const gchar* text, gpointer data)
 	std::unique_ptr<PasteRequest> req(static_cast<PasteRequest*>(data));
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	if (std::find(all.begin(), all.end(), req->window) == all.end()) return;   // closed meanwhile
+	if (req->window->pastesAsked > 0) req->window->pastesAsked--;
 	if (text == nullptr) { req->window->note("Nothing to paste."); return; }
 	guarded("pasting", [&] { req->window->pasteText(text, true, req->shift); });
 }
@@ -1742,6 +1988,7 @@ void CircuitWindow::paste() {
 	if (!canEdit()) { lockNudge(); return; }
 	GdkKeymap* keymap = gdk_keymap_get_for_display(gtk_widget_get_display(win));
 	const bool shift = (gdk_keymap_get_modifier_state(keymap) & GDK_SHIFT_MASK) != 0;
+	pastesAsked++;
 	gtk_clipboard_request_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), clipboardCb, new PasteRequest{ this, shift });
 }
 
@@ -1769,10 +2016,137 @@ void CircuitWindow::duplicate() {
 
 void CircuitWindow::selectAll() { cl_edit_select_all(doc, currentPage()); redraw(); selectionChanged(); }
 void CircuitWindow::selectNone() { cl_edit_select_none(doc, currentPage()); redraw(); selectionChanged(); }
-void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); }
-void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); }
+void CircuitWindow::deleteSelection() { cl_edit_delete(doc, currentPage()); edited(); noteLockedHeld(); }
+void CircuitWindow::rotate() { cl_edit_rotate(doc, currentPage()); edited(); noteLockedHeld(); }
 void CircuitWindow::straighten() { cl_edit_straighten(doc, currentPage()); edited(); }
-void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); }
+void CircuitWindow::nudge(double dx, double dy) { cl_edit_nudge(doc, currentPage(), dx, dy); edited(); noteLockedHeld(); }
+
+// ---- Parts locked in place ---------------------------------------------------------
+
+void CircuitWindow::noteLockedHeld() {
+	if (cl_edit_locked_held(doc)) note(kLockedNote);
+}
+
+int CircuitWindow::selectedLocked() const { return cl_edit_selected_locked_count(doc, currentPage(), true); }
+int CircuitWindow::selectedUnlocked() const { return cl_edit_selected_locked_count(doc, currentPage(), false); }
+
+void CircuitWindow::lockSelection(bool lock) {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_lock_selection(doc, currentPage(), lock);
+	if (n <= 0) return;
+	edited();
+	const std::string parts = n == 1 ? std::string("1 part") : format("%d parts", n);
+	note(lock ? "Locked " + parts + " in place." : "Unlocked " + parts + ".");
+}
+
+void CircuitWindow::unlockAll() {
+	if (!canEdit()) { lockNudge(); return; }
+	const int n = cl_edit_unlock_all(doc, currentPage());
+	if (n <= 0) return;
+	edited();
+	note(n == 1 ? std::string("Unlocked 1 part.") : format("Unlocked all %d parts.", n));
+}
+
+// ---- Drawing on the circuit, and the notes -----------------------------------------
+
+void CircuitWindow::markEdited() {
+	changes++;
+	if (autosaveId) g_source_remove(autosaveId);
+	autosaveId = g_timeout_add(2000, autosaveCb, this);
+	updateTitle();
+}
+
+void CircuitWindow::setDrawing(bool on) {
+	if (on == drawingOn) return;
+	if (on) {
+		ink::validate();
+		// Out of whatever was in progress: a gate on the pointer, a drag, Tidy Up's preview.
+		if (hasPendingGate()) clearPendingGate();
+		if (isFloating()) cancelFloating();
+		for (Canvas* c : canvases) if (c->isDragging()) c->cancelDrag();
+		if (tidyActive()) endTidy(true);
+		drawingOn = true;
+		if (!cl_ink_shown(doc)) {
+			cl_ink_set_shown(doc, true);
+			markEdited();
+			note("Drawing shown.");
+		} else {
+			note("Draw: P pen, H highlighter, E eraser, 1 2 3 width. Escape when you're done.");
+		}
+		if (const char* why = inkBlockedReason()) note(why);
+	} else {
+		drawingOn = false;
+		cl_ink_cancel(doc);
+		cl_ink_hover_clear(doc);
+		if (noteText.rfind("Draw", 0) == 0 || noteText.rfind("This drawing", 0) == 0) note("");
+	}
+	for (Canvas* c : canvases) c->drawingChanged();
+	updateActions();
+	redraw();
+}
+
+bool CircuitWindow::drawingShown() const { return cl_ink_shown(doc); }
+
+void CircuitWindow::setDrawingShown(bool shown) {
+	if (cl_ink_shown(doc) == shown) { updateActions(); return; }
+	if (!shown && drawingOn) setDrawing(false);
+	cl_ink_set_shown(doc, shown);
+	markEdited();
+	updateActions();
+	redraw();
+	note(shown ? "Drawing shown." : "Drawing hidden.");
+}
+
+void CircuitWindow::clearDrawing() {
+	if (pageIsInkReadOnly()) { note(ink::kReadOnlyNote); return; }
+	const int strokes = cl_ink_stroke_count(doc, currentPage());
+	if (strokes <= 0) { note("Nothing drawn on this page."); return; }
+	// Asked first: it all goes at once. (It's one step, so Undo does bring it back.)
+	const std::string what = strokes == 1 ? std::string("The 1 stroke drawn on this page goes") : format("All %d strokes drawn on this page go", strokes);
+	const shortcuts::Action* undo = shortcuts::find("undo");
+	const std::string undoKeys = undo ? shortcuts::keys(*undo) : std::string();
+	if (!askConfirm(window(), "Clear the drawing on “" + pageName(currentPage()) + "”?",
+	                what + ". Edit ▸ Undo" + (undoKeys.empty() ? std::string() : " (" + shortcuts::label(undoKeys) + ")") + " brings it back.",
+	                "Clear Drawing", "Cancel", true))
+		return;
+	const int n = cl_ink_clear(doc, currentPage());
+	if (n <= 0) { note("Nothing drawn on this page."); return; }
+	edited();
+	note("Cleared the drawing on this page. Undo brings it back.");
+}
+
+void CircuitWindow::setInkTool(int tool) {
+	ink::validate();
+	ink::setTool(tool);
+	if (!drawingOn) setDrawing(true);
+	note(ink::toolName(tool));
+	for (Canvas* c : canvases) c->drawingChanged();
+	redraw();
+}
+
+const char* CircuitWindow::inkBlockedReason() const {
+	switch (cl_ink_can_draw(doc, currentPage())) {
+	case CL_INK_READ_ONLY: return ink::kReadOnlyNote;
+	case CL_INK_FULL: return ink::kFullNote;
+	default: return nullptr;
+	}
+}
+
+bool CircuitWindow::pageHasInk() const { return cl_ink_stroke_count(doc, currentPage()) > 0; }
+bool CircuitWindow::pageIsInkReadOnly() const { return cl_ink_page_read_only(doc, currentPage()); }
+bool CircuitWindow::hasHiddenDrawing() const { return cl_ink_any(doc) && !cl_ink_shown(doc); }
+
+void CircuitWindow::inkEdited() { edited(); }
+
+bool CircuitWindow::notesShown() const { return notes && notes->shown(); }
+
+void CircuitWindow::toggleNotes() {
+	if (!notes) return;
+	const bool on = !notes->shown();
+	notes->setShown(on);
+	if (!on) if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget());
+	updateActions();
+}
 
 void CircuitWindow::tidy(int mode) {
 	if (!cl_edit_tidy_begin(doc, currentPage(), mode < 0 ? prefs().tidyMode : mode)) note("Nothing to tidy on this page.");
@@ -1905,6 +2279,12 @@ void CircuitWindow::find() {
 	findBar->open(name ? name : "");
 }
 
+void CircuitWindow::findStep(int delta) {
+	if (!findBar) return;
+	if (!findBar->isOpen()) { find(); return; }
+	findBar->step(delta);
+}
+
 void CircuitWindow::partsChanged() {
 	if (palette) palette->partsChanged();
 }
@@ -1949,6 +2329,22 @@ static void disconnectCb(GtkMenuItem*, gpointer data) {
 	});
 }
 
+// Right-click while drawing: the drawing's own menu.
+void CircuitWindow::showInkMenu(GdkEventButton* e) {
+	GtkWidget* menu = gtk_menu_new();
+	gtk_menu_attach_to_widget(GTK_MENU(menu), win, nullptr);
+	updateActions();
+	menuItem(menu, "_Clear Drawing on This Page", "win.clear-drawing");
+	menuItem(menu, "_Hide Drawing", "win.show-drawing");
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+	menuItem(menu, "_Done Drawing", "win.draw");
+	gtk_widget_show_all(menu);
+	g_signal_connect(menu, "deactivate", CL_CALLBACK(+[](GtkMenuShell* m, gpointer) {
+		g_idle_add([](gpointer w) -> gboolean { gtk_widget_destroy(GTK_WIDGET(w)); return G_SOURCE_REMOVE; }, m);
+	}), nullptr);
+	gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent*)e);
+}
+
 void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventButton* e) {
 	GtkWidget* menu = gtk_menu_new();
 	gtk_menu_attach_to_widget(GTK_MENU(menu), win, nullptr);
@@ -1966,16 +2362,29 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventBu
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 		menuItem(menu, "_Delete", "win.delete");
 		break;
-	case CL_CONTEXT_GATE:
+	case CL_CONTEXT_GATE: {
+		// Locked parts (all of the selection): Unlock Part in place of the
+		// things they refuse. "Part", so it isn't taken for the circuit's own
+		// lock (Unlock the Circuit).
+		const bool locked = lockMenuUnlocks();
+		const std::string unlockTitle = std::string("_") + unlockPartsTitle();
 		menuItem(menu, "_Settings…", "win.gate-settings");
-		menuItem(menu, "_Rotate", "win.rotate");
+		if (!locked) menuItem(menu, "_Rotate", "win.rotate");
 		menuItem(menu, "Straighten Its _Wires", "win.straighten");
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
-		menuItem(menu, "Cu_t", "win.cut");
+		if (locked) {
+			menuItem(menu, unlockTitle.c_str(), "win.unlock-parts");
+		} else {
+			menuItem(menu, "_Lock in Place", "win.lock-in-place");
+			if (selectedLocked() > 0) menuItem(menu, unlockTitle.c_str(), "win.unlock-parts");
+		}
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+		if (!locked) menuItem(menu, "Cu_t", "win.cut");
 		menuItem(menu, "_Copy", "win.copy");
 		menuItem(menu, "D_uplicate", "win.duplicate");
-		menuItem(menu, "_Delete", "win.delete");
+		if (!locked) menuItem(menu, "_Delete", "win.delete");
 		break;
+	}
 	default:
 		menuItem(menu, "_Paste", "win.paste");
 		menuItem(menu, "Select _All", "win.select-all");
@@ -2000,6 +2409,32 @@ void CircuitWindow::showContextMenu(int target, double wx, double wy, GdkEventBu
 	}
 }
 
+// ---- Page links ----------------------------------------------------------------------
+
+bool CircuitWindow::canConnectAllPages() const { return cl_document_page_count(doc) > 1 && !cl_pages_all_linked(doc); }
+bool CircuitWindow::canDisconnectAllPages() const { return cl_document_page_count(doc) > 1 && !cl_pages_none_linked(doc); }
+
+void CircuitWindow::connectAllPages() {
+	if (!cl_pages_connect_all(doc)) return;
+	edited();
+	note("Every page's links connect now.");
+}
+
+void CircuitWindow::disconnectAllPages() {
+	if (!cl_pages_disconnect_all(doc)) return;
+	edited();
+	note("Each page's links stay on that page now.");
+}
+
+void CircuitWindow::setPagesLinked(int p, int other, bool on) {
+	const int n = cl_document_page_count(doc);
+	if (p == other || p < 0 || p >= n || other < 0 || other >= n) return;
+	std::unique_ptr<bool[]> with(new bool[n]);
+	for (int j = 0; j < n; j++) with[j] = j != p && cl_pages_linked(doc, p, j);
+	with[other] = on;
+	if (cl_page_connect_to(doc, p, with.get(), n)) edited();
+}
+
 // ---- Simulation --------------------------------------------------------------------
 
 void CircuitWindow::setRunning(bool run) {
@@ -2013,6 +2448,25 @@ void CircuitWindow::stepOnce() {
 	// Stepping a running circuit means little: pause first.
 	if (isRunning) setRunning(false);
 	cl_document_step(doc);
+	circuitAdvancedByUser();
+	redraw();
+	if (scope) scope->update();
+}
+
+const char* CircuitWindow::stepClockOffTip = "Step Clock: first turn on “Only on Step Clock” in a clock’s settings";
+
+bool CircuitWindow::hasManualClock() const { return cl_document_manual_clock_count(doc, currentPage()) > 0; }
+
+void CircuitWindow::stepClock() {
+	if (!cl_document_clock_step(doc, currentPage())) {
+		note("No clock here moves on Step Clock. Double-click a clock and turn on “Only on Step Clock”.");
+		return;
+	}
+	clockStepped();
+}
+
+void CircuitWindow::clockStepped() {
+	circuitAdvancedByUser();
 	redraw();
 	if (scope) scope->update();
 }
@@ -2026,19 +2480,64 @@ void CircuitWindow::setStepMs(int ms) {
 	note(format("Each step is now %d ms of circuit time.", cl_document_step_ms(doc)));
 }
 
+bool CircuitWindow::slowFrames() const {
+	const Canvas* c = currentCanvas();
+	return c && c->slowFrames();
+}
+
+void CircuitWindow::revealChrome(GtkWidget* revealer, bool show) {
+	GtkRevealer* r = GTK_REVEALER(revealer);
+	GtkWidget* child = gtk_bin_get_child(GTK_BIN(revealer));
+	const bool smooth = anim::enabled() && !slowFrames() && gtk_widget_get_mapped(revealer);
+	const guint ms = smooth ? 200 : 0;
+	gtk_revealer_set_transition_duration(r, ms);
+	if (gtk_revealer_get_reveal_child(r) == show) {
+		if (show && child && !smooth) gtk_widget_set_opacity(child, 1);
+		return;
+	}
+	if (child) {
+		// It fades as it slides: in from clear, out to clear a little ahead.
+		if (show) anim::fadeIn(child, ms / 1000.0);
+		else anim::fadeTo(child, 0, ms / 1000.0 * 0.8);
+	}
+	gtk_revealer_set_reveal_child(r, show);
+	if (show && child && !smooth) gtk_widget_set_opacity(child, 1);
+}
+
 void CircuitWindow::toggleSimView() {
+	// The canvas as it was fades out over the new look (the Mac's eases).
+	for (int pane = 0; pane < 2; pane++)
+		if (pane == 0 || splitOpen())
+			if (Canvas* c = paneCanvas(pane)) c->crossfade();
 	simViewOn = !simViewOn;
+	simTween.go(simViewOn ? 1 : 0, slowFrames() ? 0 : 0.18);
+	chromeEasing = true;
+	bool changed = false;
 	if (simViewOn) {
 		if (Canvas* c = currentCanvas()) c->cancelDrag();
+		// Parts on the pointer (a paste, a duplicate, a new gate) were never
+		// put down: taken back, as Escape does. (Cancelling only the gesture
+		// left them at the paste's first spot, unsaved and unmarked: a file
+		// saved meanwhile had them where the pointer was.)
+		if (isFloating()) { cancelFloating(); changed = true; }
 		cl_edit_cancel(doc);
-		if (cl_edit_tidy_active(doc)) cl_edit_tidy_end(doc, true);
+		if (cl_edit_tidy_active(doc)) { cl_edit_tidy_end(doc, true); changed = true; }
 		cl_edit_select_none(doc, currentPage());
 		pendingGate.clear();
 		if (!isRunning) setRunning(true);   // "Run" means run
 	}
+	if (changed) edited();   // saved as any edit is
 	updateActions();
 	updateBanner();
 	for (Canvas* c : canvases) c->redraw();
+}
+
+void CircuitWindow::toggleProjector() {
+	prefs().projector = !prefs().projector;
+	prefs().save();
+	if (prefs().projector && !simViewOn) toggleSimView();
+	for (CircuitWindow* o : circuitWindows()) { o->updateActions(); o->redraw(); }
+	note(prefs().projector ? "Projector Mode: thick wires, big labels and lights. Escape leaves Simulation View." : "Projector Mode off.");
 }
 
 void CircuitWindow::toggleLock() {
@@ -2138,10 +2637,23 @@ void CircuitWindow::cyclePage(int delta) {
 // The Mac's: the toolbar and the side panel slide away, and the tab strips
 // become the window's top row (dragging it, with its buttons).
 
+// View > Full Screen (F11): the desktop's full screen. The title bar goes
+// with it (GTK hides it), so F10 opens every menu in one popup, as in focus mode.
+void CircuitWindow::toggleFullScreen() {
+	if (fullScreenOn) gtk_window_unfullscreen(GTK_WINDOW(win));
+	else {
+		gtk_window_fullscreen(GTK_WINDOW(win));
+		const shortcuts::Action* a = shortcuts::find("fullScreen");
+		const std::string key = a ? shortcuts::label(shortcuts::keys(*a)) : std::string();
+		note(key.empty() ? std::string("Full screen. View \u25B8 Full Screen leaves it; F10 opens the menus.")
+		                 : "Full screen. " + key + " leaves it; F10 opens the menus.");
+	}
+}
+
 void CircuitWindow::toggleFocusMode() {
 	focusOn = !focusOn;
-	gtk_revealer_set_reveal_child(GTK_REVEALER(titleRevealer), !focusOn);
-	gtk_revealer_set_reveal_child(GTK_REVEALER(sideRevealer), !focusOn && prefs().showPalette);
+	revealChrome(titleRevealer, !focusOn);
+	revealChrome(sideRevealer, !focusOn && prefs().showPalette);
 	for (TabStrip* t : strips) if (t) t->setTitleRow(focusOn);
 	updateActions();
 	if (focusOn) note("Focus mode. Ctrl+. brings the toolbar and the side panel back.");
@@ -2217,7 +2729,7 @@ void CircuitWindow::showAbout() {
 		const float k = (float)anim::easeOut(t / 0.5);
 		brand::icon(cr, w / 2 - 48, 40 + 8 * (1 - k), 96, 0.55f * k);
 		brand::text(cr, "CedarLogic", 0, 152, 28, brand::Bold, brand::kPrimary, w, TextAlign::Center);
-		brand::text(cr, std::string("Version ") + CL_VERSION + "  ·  native Linux test build  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0,
+		brand::text(cr, std::string("Version ") + CL_VERSION + "  ·  native Linux  ·  " + std::string(CL_GIT_COMMIT).substr(0, 7), 0,
 		            192, 12, brand::Medium, brand::kNeon, w, TextAlign::Center);
 		brand::text(cr, "A digital logic simulator, based on the original CedarLogic from Cedarville University. Rebuilt natively for Linux: GTK and Cairo on the shared "
 		                "CedarLogic engine, with no OpenGL, so it runs the same on a Raspberry Pi as on a PC.",

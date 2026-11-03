@@ -19,7 +19,7 @@
 #define CL_CALLBACK(...) G_CALLBACK((__VA_ARGS__))
 #define CL_APP_ID "edu.cedarville.CedarLogic"
 #ifndef CL_VERSION
-#define CL_VERSION "0.1"
+#define CL_VERSION "0.4.0"
 #endif
 
 // ---- Settings ------------------------------------------------------------------
@@ -51,13 +51,23 @@ struct Prefs {
 	int toolbarHidden = 0;        // tool groups hidden, a bit each (ToolGroup)
 	bool showTitle = true;        // the circuit's name at the toolbar's left
 	bool showThemeToggle = false; // a dark mode switch in the toolbar
+	bool showStepClock = true;    // Step Clock in the toolbar and the Simulation View bar (the menu item and key stay)
 	bool classicTabs = false;     // plain segments instead of the Mac's tab cards
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	bool confirmQuit = true;      // Ctrl+Q asks first
-	bool openReplaces = false;    // opening a circuit replaces the one in the window
+	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
-	bool checkUpdates = true;     // look for a new test build now and then
+	bool checkUpdates = true;     // look for a new version now and then
+	// Settings > General > Testing group, as on the Mac: 0 Normal tester (the
+	// versioned releases), 1 Beta tester (the rolling test build). A copy that
+	// ran before there was a choice came from the test build, so it starts as
+	// a Beta tester and says so once (channelNotice); see Updater.h.
+	int updateChannel = 0;
+	bool channelNotice = false;
+	// The versioned release this copy's updater installed ("<tag> <build>"),
+	// so the same one is never offered again.
+	std::string installedRelease;
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	bool hasSeenWelcome = false;
 	int windowWidth = 1180, windowHeight = 780;
@@ -66,7 +76,22 @@ struct Prefs {
 	std::vector<std::string> recent;   // most recent first
 	std::string lastFolder;
 	std::string lastCircuit;                      // the Your Circuits circuit last in front
+	bool newPagesShareLinks = true; // a page added later joins the pages' shared TO/FROM links (docs/PAGE-LINKS.md)
+	// Drawing on the circuit (Canvas, Ink.cpp): the last tool, colour and width.
+	int inkTool = 0;              // 0 pen, 1 highlighter, 2 eraser
+	std::string inkPenColor = "ink", inkHighlighterColor = "yellow";
+	double inkPenWidth = 0.25, inkHighlighterWidth = 1.2;
+	bool exportInk = true;
+	// Simulation View drawn for a projector (the Mac's Projector Mode): thick
+	// wires, big labels and lights, brighter colours. Only in Simulation View,
+	// so Escape (leaving it) puts the laptop's view back.
+	bool projector = false;        // Export as Image: the drawing too, when there is one
+	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
 	std::string studentName;                      // for the Lab Page template and exports
+	// Send Feedback's id for this install (made once, kept): the server
+	// counts reports by it, so a school's computers behind one address
+	// aren't one sender.
+	std::string feedbackInstallId;
 	// Build from Formula: what was typed last, and how to build it.
 	std::string lastFormula = "F = A'B + AC";
 	int buildShape = 0, buildStyle = 0;
@@ -83,6 +108,7 @@ struct Prefs {
 	std::string seenWhatsNew;
 	// Export as Image: the grid, the name-and-result strip, the style and size.
 	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;
+	int exportLook = -1;          // Export as Image's look: 0 Match Window, 1 Light, 2 Black & White (-1: from exportColor)
 	std::string exportProblem;
 	int exportScale = 4;
 	// The oscilloscope's timing diagrams: the whole recording or what's on screen; colour or black and white.
@@ -93,11 +119,17 @@ struct Prefs {
 	double wireScale() const;
 	void load();
 	void save() const;
-	// Tell the engine about the wire settings.
+	// Tell the engine about the wire settings (and whether new pages share links).
 	void applyWireDots() const;
 	void noteRecent(const std::string& path);
 };
 Prefs& prefs();
+
+// The testing group a copy starts in (Prefs::load), from what its settings
+// file had (whether there was one, and a group in it) and linux/install.sh's
+// install-channel marker ("beta", "normal" or ""). Updater.h has the why.
+struct ChannelStart { int channel; bool notice; };
+ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChannel, bool storedNotice, const std::string& marker);
 
 // Whether the desktop asks for dark (GNOME's color-scheme, or a "-dark"
 // theme name).
@@ -147,8 +179,20 @@ std::vector<CircuitWindow*>& circuitWindows();
 // Choose a file and open it.
 void chooseAndOpen(GtkApplication* app, GtkWindow* parent);
 void rebuildRecentMenus();
+// The menu bar's model, one for every window (main.cpp); nullptr before the
+// app has started.
+GMenuModel* appMenubar();
+// The canvas's single keys (and Tidy Up's, which follows Settings) written
+// on their menu items again, after Settings > Shortcuts or Settings changed.
+void refreshMenuKeys();
+// Window's list of the open circuits, again (a window came, went or was renamed).
+void rebuildWindowMenu();
 // A file people chose, into the desktop's recent list.
 void noteDesktopRecent(const std::string& path);
+
+// A field in a GtkRevealer that's sliding in, made now so it takes keys at
+// once (FindBar, Notes; Style.cpp).
+void readyForKeys(GtkWidget* revealer, GtkWidget* field);
 
 // Open a URL or a file in the desktop's default app.
 void openExternally(GtkWindow* parent, const std::string& uri);

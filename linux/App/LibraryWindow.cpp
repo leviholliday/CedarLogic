@@ -5,6 +5,8 @@
 #include "Dialogs.h"
 #include "Library.h"
 #include "Picker.h"
+#include "SyncApp.h"
+#include "SyncUI.h"
 #include "Window.h"
 
 #include <algorithm>
@@ -33,6 +35,65 @@ std::string lowered(const std::string& s) {
 	return out;
 }
 
+// Recently Deleted (docs/RECENTLY-DELETED.md), over Your Circuits: the
+// circuits in the library's trash, newest first, to restore or delete now.
+// The 30-day sweep runs as it opens.
+void showRecentlyDeleted(GtkWindow* over) {
+	library::sweepDeleted();
+	std::vector<library::Deleted> items = library::recentlyDeleted();
+	std::string note;
+	Picker p;
+	p.title = "Recently Deleted";
+	p.line = format("Kept %d days on this computer, then deleted for good. These aren\u2019t synced.", library::kKeepDays);
+	p.search = false;
+	p.width = 520;
+	p.height = 460;
+	p.emptyText = "Nothing here.";
+	p.leftButtons = { "Delete Now\u2026" };
+	p.rightButtons = { "Done", "Restore" };
+	p.rows = [&](const std::string&) {
+		std::vector<Row> out;
+		for (const library::Deleted& c : items) {
+			const int n = library::gateCount(c.circuit());
+			out.push_back({ c.id, c.name, "Deleted " + library::friendlyTime(c.deleted) + format(" \u00B7 %d gate%s", n, n == 1 ? "" : "s"), "" });
+		}
+		return out;
+	};
+	p.footer = [&] { return std::make_pair(note, std::string()); };
+	auto selected = [&](library::Deleted& out) {
+		const Row* r = p.selected();
+		if (r == nullptr) return false;
+		for (const library::Deleted& c : items) if (c.id == r->id) { out = c; return true; }
+		return false;
+	};
+	auto reload = [&](Picker& picker) {
+		library::sweepDeleted();
+		items = library::recentlyDeleted();
+		const int at = picker.selection;
+		picker.reload();
+		picker.select(std::min(at, std::max(0, (int)items.size() - 1)));
+	};
+	p.onButton = [&](Picker& picker, int b) -> bool {
+		library::Deleted c;
+		if (b == 100) return true;   // Done
+		if (!selected(c)) return false;
+		if (b == 101) {   // Restore
+			note = !library::restoreDeleted(c).empty() ? "\u201C" + c.name + "\u201D is back in Your Circuits."
+			                                            : "\u201C" + c.name + "\u201D couldn\u2019t be restored.";
+			reload(picker);
+			return false;
+		}
+		// Delete Now: asked first, there's no getting it back after this.
+		if (!askConfirm(GTK_WINDOW(picker.window), "Delete \u201C" + c.name + "\u201D now?",
+		                "It and all its versions will be deleted for good. This can\u2019t be undone.", "Delete Now", "Cancel", true))
+			return false;
+		note = library::deleteNow(c) ? "\u201C" + c.name + "\u201D was deleted for good." : "\u201C" + c.name + "\u201D couldn\u2019t be deleted.";
+		reload(picker);
+		return false;
+	};
+	p.run(over);
+}
+
 }  // namespace
 
 void showYourCircuits(CircuitWindow* from) {
@@ -51,7 +112,10 @@ void showYourCircuits(CircuitWindow* from) {
 		for (const library::Item& it : all) {
 			if (!q.empty() && lowered(it.name).find(q) == std::string::npos) continue;
 			const int n = library::gateCount(it.circuit());
-			out.push_back({ it.id, it.name, format("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified),
+			// A circuit sync can't carry says so on its second line.
+			const std::string problem = syncui::problemFor(it.id);
+			out.push_back({ it.id, it.name,
+			                problem.empty() ? format("%d gate%s · ", n, n == 1 ? "" : "s") + library::friendlyTime(it.modified) : problem,
 			                std::find(open.begin(), open.end(), it.id) != open.end() ? "OPEN" : "" });
 		}
 		p.emptyText = all.empty() ? "Nothing here yet." : "No circuits match.";
@@ -121,10 +185,36 @@ void showYourCircuits(CircuitWindow* from) {
 		}
 		return false;
 	};
+	// Recently Deleted, beside the title, with how many are there.
+	p.titleLink = [] {
+		const size_t n = library::recentlyDeleted().size();
+		return n > 0 ? format("Recently Deleted (%d)", (int)n) : std::string("Recently Deleted");
+	};
+	p.titleLinkAction = [&] {
+		showRecentlyDeleted(GTK_WINDOW(p.window));
+		all = library::items();
+		p.reload();
+		for (CircuitWindow* w : circuitWindows()) w->libraryChanged();
+	};
+	// The sync line under the list, and the changes sync makes while it's open.
+	bool openSync = false;
+	p.footer = [] { const syncui::Line l = syncui::yourCircuitsLine(); return std::make_pair(l.text, l.button); };
+	p.footerAction = [&] {
+		const syncui::Line l = syncui::yourCircuitsLine();
+		if (l.on) { syncui::yourCircuitsAction(from); return; }
+		openSync = true;   // Settings can't be used while this window holds the pointer: it closes first
+		p.close();
+	};
+	const guint listener = syncapp::addLibraryListener([&] {
+		all = library::items();
+		p.reload();
+	});
 	p.run(from->window());
+	syncapp::removeListener(listener);
 	if (!windowAlive(from)) from = nullptr;
 	if (!toOpen.empty()) openCircuit(app, toOpen, from);
 	else if (import) chooseAndOpen(app, from ? from->window() : nullptr);
+	else if (openSync) syncui::yourCircuitsAction(from);
 }
 
 void showVersionHistory(CircuitWindow* window) {
@@ -154,8 +244,11 @@ void showVersionHistory(CircuitWindow* window) {
 		std::vector<Row> out;
 		for (size_t i = 0; i < versions.size(); i++) {
 			const int n = library::gateCount(versions[i].path);
+			// One sync made says where it came from.
+			const std::string note = library::versionNote(versions[i]);
 			out.push_back({ versions[i].path, library::friendlyTime(versions[i].time),
-			                format("%d gate%s · ", n, n == 1 ? "" : "s") + library::agoText(versions[i].time), i == 0 ? "NEWEST" : "" });
+			                format("%d gate%s · ", n, n == 1 ? "" : "s") + library::agoText(versions[i].time) + (note.empty() ? "" : " · " + note),
+			                i == 0 ? "NEWEST" : "" });
 		}
 		return out;
 	};

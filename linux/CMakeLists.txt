@@ -7,7 +7,7 @@
 #
 # Drawing is Cairo on the processor, so nothing here needs OpenGL.
 cmake_minimum_required(VERSION 3.16)
-project(CedarLogicNative VERSION 0.1.0 LANGUAGES C CXX)
+project(CedarLogicNative VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +21,10 @@ get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 find_package(PkgConfig REQUIRED)
 # Pango only for circuit labels the label face can't draw alone (CairoScene).
 pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo cairo-ft fontconfig freetype2 pangocairo)
+# Sync (docs/SYNC.md): libcrypto for the hashes and AES-GCM (no TLS from OpenSSL is used:
+# the curl program does the talking), GIO for deflate and the files.
+find_package(OpenSSL REQUIRED)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
 
 # ---- The engine --------------------------------------------------------------
 # The model, drawing, routing and loading/saving, shared with the wx app; the
@@ -31,6 +35,9 @@ list(FILTER CL_COMMANDS EXCLUDE REGEX "cmd(AddTab|DeleteTab)\\.cpp$")
 file(GLOB CL_LOGIC "${ROOT}/logic/src/*.cpp")
 file(GLOB CL_CEDARCORE "${ROOT}/mac/CedarCore/*.cpp")
 list(FILTER CL_CEDARCORE EXCLUDE REGEX "CGScene\\.cpp$")
+# Classroom (docs/CLASSROOM.md) is not in this app yet (it is out of 0.4) and
+# nothing else in the engine calls it, so its files stay out of the build.
+list(FILTER CL_CEDARCORE EXCLUDE REGEX "/Classroom[^/]*\\.cpp$")
 
 add_library(CedarCore STATIC
 	${ROOT}/src/gui/guiGate.cpp ${ROOT}/src/gui/guiWire.cpp ${ROOT}/src/gui/wireSegment.cpp
@@ -41,7 +48,7 @@ add_library(CedarCore STATIC
 	${ROOT}/src/gui/route/TrunkRouter.cpp ${ROOT}/src/gui/route/GridRouter.cpp ${ROOT}/src/gui/route/Layout.cpp
 	${CL_COMMANDS}
 	${CL_LOGIC}
-	${ROOT}/format/circuit_file_io.cpp ${ROOT}/format/legacy_cdl.cpp ${ROOT}/format/migrate.cpp
+	${ROOT}/format/circuit_file_io.cpp ${ROOT}/format/ink.cpp ${ROOT}/format/legacy_cdl.cpp ${ROOT}/format/migrate.cpp
 	${ROOT}/format/numeric.cpp ${ROOT}/format/sexpr.cpp
 	${CL_CEDARCORE}
 	CedarCore/CairoScene.cpp
@@ -52,6 +59,10 @@ target_include_directories(CedarCore PUBLIC
 	${ROOT}/mac/CedarCore ${ROOT}/mac/CedarCore/include ${CMAKE_CURRENT_SOURCE_DIR}/CedarCore)
 target_compile_options(CedarCore PRIVATE -Wno-deprecated-declarations)
 target_link_libraries(CedarCore PUBLIC PkgConfig::CAIRO)
+
+# Signed preview updates, shared with the Windows app: the signature check,
+# its checks (verify_check) and CL_BUILD_TIME.
+include("${ROOT}/update-signing/UpdateSigning.cmake")
 
 # ---- The app -------------------------------------------------------------------
 option(CL_BUILD_APP "Build the GTK app" ON)
@@ -66,19 +77,21 @@ if(CL_BUILD_APP)
 	if(NOT CL_GIT_RC EQUAL 0 OR CL_GIT_COMMIT STREQUAL "")
 		set(CL_GIT_COMMIT "unknown")
 	endif()
-	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}")
+	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}" CL_BUILD_TIME=${CL_BUILD_TIME}LL)
+	# Updates are signed (update-signing/UpdateSignature.h).
+	target_link_libraries(CedarLogic PRIVATE cl_updatesig)
 	set(CL_FEEDBACK_URL "https://cedarlogic.netlify.app" CACHE STRING "Where Send Feedback sends to")
 	set(CL_FEEDBACK_KEY "96611596304230a4c3c21e22b1b3e523" CACHE STRING "Sent with feedback so the site knows it's from the app")
 	target_compile_definitions(CedarLogic PRIVATE CL_FEEDBACK_URL="${CL_FEEDBACK_URL}" CL_FEEDBACK_KEY="${CL_FEEDBACK_KEY}")
 	find_package(Threads REQUIRED)
-	target_link_libraries(CedarLogic PRIVATE Threads::Threads)
+	target_link_libraries(CedarLogic PRIVATE Threads::Threads OpenSSL::Crypto PkgConfig::GIO ${CMAKE_DL_LIBS})
 	target_compile_options(CedarLogic PRIVATE -Wall -Wno-deprecated-declarations -Wno-missing-field-initializers)
 	set_target_properties(CedarLogic PROPERTIES OUTPUT_NAME cedarlogic)
 
 	include(GNUInstallDirs)
 	install(TARGETS CedarLogic RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-	install(FILES ${ROOT}/res/cl_gatedefs.xml res/cedarlogic.png res/FirstLaunch.wav DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
-	install(DIRECTORY ${ROOT}/res/help ${ROOT}/res/samples DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
+	install(FILES ${ROOT}/res/cl_gatedefs.xml res/cedarlogic.png ${ROOT}/res/FirstLaunch.wav DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
+	install(DIRECTORY ${ROOT}/res/help ${ROOT}/res/samples ${ROOT}/res/templates DESTINATION ${CMAKE_INSTALL_DATADIR}/CedarLogic)
 	install(FILES res/cedarlogic.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 	install(FILES res/cedarlogic.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
 	install(FILES res/cedarlogic-mime.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages)
@@ -87,7 +100,7 @@ endif()
 # ---- The checks (no window needed) -------------------------------------------
 option(CL_BUILD_TOOLS "Build the headless check tools" ON)
 if(CL_BUILD_TOOLS)
-	foreach(t render_png sim_check edit_check save_check tt_check cl_check)
+	foreach(t render_png sim_check edit_check save_check tt_check cl_check clock_check examples_check register_check mistakes_check)
 		if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Tools/${t}.cpp")
 			add_executable(${t} Tools/${t}.cpp)
 		else()
@@ -95,8 +108,14 @@ if(CL_BUILD_TOOLS)
 		endif()
 		target_link_libraries(${t} PRIVATE CedarCore)
 	endforeach()
-	# Build from Formula's planner (App/Formula.cpp), built in the engine.
-	add_executable(formula_check Tools/formula_check.cpp App/Formula.cpp)
-	target_include_directories(formula_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/App)
+	# Build from Formula's planner (mac/CedarCore/Formula.cpp, in CedarCore).
+	add_executable(formula_check Tools/formula_check.cpp)
 	target_link_libraries(formula_check PRIVATE CedarCore)
+	# Sync's checks with the hooks the app uses (App/SyncPlatform.cpp: libcrypto, GIO's zlib and
+	# the curl program): the engine's self-test, the curl program's use, two libraries syncing.
+	find_package(Threads REQUIRED)
+	add_executable(sync_check Tools/sync_check.cpp App/SyncPlatform.cpp App/Keyring.cpp)
+	target_include_directories(sync_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/App)
+	target_compile_definitions(sync_check PRIVATE CL_VERSION="${PROJECT_VERSION}")
+	target_link_libraries(sync_check PRIVATE CedarCore OpenSSL::Crypto PkgConfig::GIO Threads::Threads ${CMAKE_DL_LIBS})
 endif()

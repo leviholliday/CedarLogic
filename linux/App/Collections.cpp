@@ -4,6 +4,7 @@
 #include "Alert.h"
 #include "Dialogs.h"
 #include "Picker.h"
+#include "Shortcuts.h"
 #include "Window.h"
 
 #include <glib/gstdio.h>
@@ -43,8 +44,10 @@ std::string lowerCase(const std::string& s) {
 }
 
 std::string dataDir(const char* name) {
+	// Owner-only (0700), like the Library: a folder made before that is tightened too.
 	const std::string dir = std::string(g_get_user_data_dir()) + "/CedarLogic/" + name;
-	g_mkdir_with_parents(dir.c_str(), 0755);
+	g_mkdir_with_parents(dir.c_str(), 0700);
+	g_chmod(dir.c_str(), 0700);
 	return dir;
 }
 
@@ -68,7 +71,7 @@ bool recycle(const std::string& folder) {
 	gchar* name = g_path_get_basename(folder.c_str());
 	const std::string trash = std::string(parent) + "/.Trash";
 	g_free(parent);
-	g_mkdir_with_parents(trash.c_str(), 0755);
+	g_mkdir_with_parents(trash.c_str(), 0700);
 	std::string dest = trash + "/" + name;
 	for (int n = 2; fileExists(dest); n++) dest = trash + "/" + name + format(" %d", n);
 	g_free(name);
@@ -104,7 +107,24 @@ namespace {
 
 struct Template {
 	std::string id, name, detail, text, folder;   // folder: "" for a built-in one
+	std::string group = "Built In";               // the picker's heading for a built-in one
+	// A flip-flop's or register's text with a running clock (`text`'s moves
+	// only on Step Clock) and with a pulse button in its place: the picker's
+	// Clock line chooses.
+	std::string running, pulse;
+	bool hasClockChoice() const { return !running.empty(); }
+	// This one with the clock the Clock line chose (prefs().templateClock).
+	Template withClock(int clock) const {
+		Template t = *this;
+		if (clock == 1 && !running.empty()) t.text = running;
+		if (clock == 2 && !pulse.empty()) t.text = pulse;
+		return t;
+	}
 };
+
+// The group of circuits with a mistake to find: offered in New from
+// Template, but never as the start of every new circuit.
+const char* const kMistakesGroup = "Classic Mistakes";
 
 std::string root() { return dataDir("Templates"); }
 
@@ -212,25 +232,87 @@ std::string sevenSegment() {
 	return build(p, w, { { "7-Segment Decoder", 3 } });
 }
 
+// The Mac app's built-in templates, as files (res/templates, written by
+// mac/Tools/export-templates.sh from the Mac's own Templates.swift, so the
+// two apps start from the same circuits): index.tsv lists id, group, name,
+// detail and the Clock choices; the files are template-<id>.cdl (-running, -pulse). The Lab
+// Page is built here instead, with your name on it.
+std::vector<Template> fromFiles() {
+	std::vector<Template> out;
+	const std::string dir = resourcesDir() + "/templates";
+	const std::string index = readFile(dir + "/index.tsv");
+	size_t at = 0;
+	while (at < index.size()) {
+		size_t end = index.find('\n', at);
+		if (end == std::string::npos) end = index.size();
+		const std::string line = index.substr(at, end - at);
+		at = end + 1;
+		std::vector<std::string> f;
+		size_t from = 0;
+		for (;;) {
+			const size_t tab = line.find('\t', from);
+			f.push_back(line.substr(from, tab == std::string::npos ? std::string::npos : tab - from));
+			if (tab == std::string::npos) break;
+			from = tab + 1;
+		}
+		if (f.size() < 4 || f[0].empty() || f[0] == "builtin-lab") continue;
+		Template t;
+		t.id = f[0];
+		t.group = f[1];
+		t.name = f[2];
+		t.detail = f[3];
+		t.text = readFile(dir + "/template-" + t.id + ".cdl");
+		if (t.text.empty()) continue;
+		const std::string choices = f.size() > 4 ? f[4] : "";
+		if (choices.find("running") != std::string::npos) t.running = readFile(dir + "/template-" + t.id + "-running.cdl");
+		if (choices.find("pulse") != std::string::npos) t.pulse = readFile(dir + "/template-" + t.id + "-pulse.cdl");
+		out.push_back(t);
+	}
+	return out;
+}
+
 std::vector<Template> builtIn() {
-	return {
+	std::vector<Template> out = {
 		{ "builtin-lab", "Lab Page", "A title, your name, the date and the course, with room for inputs and outputs", labPage(), "" },
-		{ "builtin-counter", "4-Bit Counter", "A clock driving a counting register, shown on a hex display", counter(), "" },
-		{ "builtin-7seg", "7-Segment Decoder Starter", "Four switches and seven segment lights: build the decoder between them",
-		  sevenSegment(), "" },
 	};
+	std::vector<Template> files = fromFiles();
+	if (files.empty()) {
+		// No files beside the app (an old install): the two this app always had.
+		files = {
+			{ "builtin-counter", "4-Bit Counter", "A clock driving a counting register, shown on a hex display", counter(), "" },
+			{ "builtin-7seg", "7-Segment Decoder Starter", "Four switches and seven segment lights: build the decoder between them",
+			  sevenSegment(), "" },
+		};
+	}
+	out.insert(out.end(), files.begin(), files.end());
+	return out;
+}
+
+// The Clock line's words, as the Mac's picker has them.
+std::string stepClockName() {
+	const shortcuts::Action* a = shortcuts::find("stepClock");
+	const std::string k = a ? shortcuts::label(shortcuts::keys(*a)) : std::string();
+	return k.empty() ? std::string("Simulation \u25B8 Step Clock") : "the " + k + " key";
+}
+
+std::string clockNote(int clock) {
+	switch (clock) {
+	case 1: return "Clock: Running. It ticks by itself.";
+	case 2: return "Clock: Pulse button. Click the Clock button on the circuit.";
+	default: return "Clock: Manual. It moves only on Step Clock (" + stepClockName() + ").";
+	}
 }
 
 }  // namespace
 
-void showPicker(CircuitWindow* from) {
+void showPicker(CircuitWindow* from, const std::string& select) {
 	if (from == nullptr) return;
 	const std::vector<Template> built = builtIn();
 	std::vector<Template> mine = yours();
 	auto all = [&] { std::vector<Template> a = built; a.insert(a.end(), mine.begin(), mine.end()); return a; };
 	picker::Picker p;
 	p.title = "New from Template";
-	p.line = "Start a circuit from one of these. Save your own with Save as Template, in the ••• menu's File.";
+	p.line = "Start a circuit from one of these. Save your own with Save as Template, in the File menu.";
 	p.search = false;
 	p.width = 940;
 	p.height = 620;
@@ -242,9 +324,20 @@ void showPicker(CircuitWindow* from) {
 		std::vector<picker::Row> out;
 		picker::Row h;
 		h.heading = true;
-		h.title = "Built In";
-		out.push_back(h);
-		for (const Template& t : built) { picker::Row r; r.id = t.id; r.title = t.name; r.subtitle = t.detail; r.tile = false; out.push_back(r); }
+		std::string group;
+		for (const Template& t : built) {
+			if (t.group != group) {
+				group = t.group;
+				h.title = group;
+				out.push_back(h);
+			}
+			picker::Row r;
+			r.id = t.id;
+			r.title = t.name;
+			r.subtitle = t.detail;
+			r.tile = false;
+			out.push_back(r);
+		}
 		h.title = "Yours";
 		h.subtitle = mine.empty() ? "None yet." : "";
 		out.push_back(h);
@@ -256,8 +349,22 @@ void showPicker(CircuitWindow* from) {
 	auto selectedTemplate = [&](Template& out) {
 		const picker::Row* r = p.selected();
 		if (r == nullptr) return false;
-		for (const Template& t : all()) if (t.id == r->id) { out = t; return true; }
+		for (const Template& t : all()) if (t.id == r->id) { out = t.withClock(prefs().templateClock); return true; }
 		return false;
+	};
+	// The flip-flops' and registers' Clock line: manual (Step Clock) unless
+	// you pick Running or a Pulse button; kept for next time.
+	auto hasChoice = [&] {
+		const picker::Row* r = p.selected();
+		if (r == nullptr) return false;
+		for (const Template& t : built) if (t.id == r->id) return t.hasClockChoice();
+		return false;
+	};
+	p.footer = [&]() -> std::pair<std::string, std::string> {
+		if (!hasChoice()) return { std::string(), std::string() };
+		static const char* next[] = { "Make It Running", "Use a Pulse Button", "Make It Manual" };
+		const int c = std::max(0, std::min(2, prefs().templateClock));
+		return { clockNote(c), next[c] };
 	};
 	p.onSelect = [&](picker::Picker&) {
 		Template t;
@@ -270,6 +377,12 @@ void showPicker(CircuitWindow* from) {
 			char err[256];
 			shown = cl_document_open_text(t.text.c_str(), (long)t.text.size(), err, sizeof err);
 		}
+	};
+	p.footerAction = [&] {
+		prefs().templateClock = (std::max(0, std::min(2, prefs().templateClock)) + 1) % 3;
+		prefs().save();
+		shownId.clear();
+		if (p.onSelect) p.onSelect(p);
 	};
 	p.preview = [&](cairo_t* cr, const RectF& box) {
 		double sx = 1, sy = 1;
@@ -308,6 +421,12 @@ void showPicker(CircuitWindow* from) {
 		}
 		return false;
 	};
+	if (!select.empty()) {
+		// The rows, with that one chosen: run's first reload keeps it.
+		p.shown = p.rows(std::string());
+		for (int i = 0; i < (int)p.shown.size(); i++)
+			if (!p.shown[i].heading && p.shown[i].id == select) p.selection = i;
+	}
 	p.run(from->window());
 	if (shown) cl_document_close(shown);
 	if (useText.empty()) return;
@@ -322,7 +441,8 @@ void showPicker(CircuitWindow* from) {
 
 std::vector<std::pair<std::string, std::string>> list() {
 	std::vector<std::pair<std::string, std::string>> out;
-	for (const Template& t : builtIn()) out.push_back({ t.id, t.name });
+	for (const Template& t : builtIn())
+		if (t.group != kMistakesGroup) out.push_back({ t.id, t.name });
 	for (const Template& t : yours()) out.push_back({ t.id, t.name });
 	return out;
 }
@@ -330,8 +450,9 @@ std::vector<std::pair<std::string, std::string>> list() {
 bool startFrom(const std::string& id, CircuitWindow* from, GtkApplication* app, bool replace) {
 	std::vector<Template> all = builtIn();
 	for (const Template& t : yours()) all.push_back(t);
-	for (const Template& t : all) {
-		if (t.id != id) continue;
+	for (const Template& t0 : all) {
+		if (t0.id != id) continue;
+		const Template t = t0.withClock(prefs().templateClock);
 		char err[512] = "";
 		CLDocument* doc = cl_document_open_text(t.text.c_str(), (long)t.text.size(), err, sizeof err);
 		if (doc == nullptr) return false;
@@ -350,7 +471,7 @@ void saveCurrent(CircuitWindow* window) {
 	    name.empty())
 		return;
 	const std::string folder = root() + "/" + newId();
-	g_mkdir_with_parents(folder.c_str(), 0755);
+	g_mkdir_with_parents(folder.c_str(), 0700);
 	const bool wasDirty = window->isDirty();
 	const std::string text = cl_document_save_text(window->document());
 	if (wasDirty) window->saveQuietly(false);   // asking for the text marked it saved
@@ -436,7 +557,7 @@ void saveSelection(CircuitWindow* window) {
 	             "Name your part. It'll be in the side panel under My Parts, and in Add a Gate (A).", name) || name.empty())
 		return;
 	const std::string folder = root() + "/" + newId();
-	g_mkdir_with_parents(folder.c_str(), 0755);
+	g_mkdir_with_parents(folder.c_str(), 0700);
 	if (writeFile(folder + "/name.txt", name) && writeFile(folder + "/part.txt", text)) {
 		window->note("Saved “" + name + "” to My Parts.");
 		for (CircuitWindow* w : circuitWindows()) w->partsChanged();

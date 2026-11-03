@@ -20,10 +20,11 @@ bool is(const char* a, const char* b) { return a && b && std::strcmp(a, b) == 0;
 bool groupShown(int g) { return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0; }
 
 // " (Ctrl+N)": the keys an action has now (Settings > Shortcuts changes
-// them), or nothing when it has none.
+// them), or nothing when it has none. `action` is its GTK action, or the id
+// of a canvas key ("stepClock").
 std::string keysFor(const char* action) {
 	for (const shortcuts::Action& a : shortcuts::all()) {
-		if (!is(a.gaction, action)) continue;
+		if (!is(a.gaction, action) && !is(a.id, action)) continue;
 		const std::string k = shortcuts::label(shortcuts::keys(a));
 		return k.empty() ? std::string() : " (" + k + ")";
 	}
@@ -33,8 +34,8 @@ std::string keysFor(const char* action) {
 }  // namespace
 
 const char* toolGroupName(int g) {
-	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Speed",
-	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback" };
+	static const char* names[] = { "New, Open, Save", "Undo and Redo", "Copy and Paste", "Zoom", "Pause, Step, Step Clock, Speed",
+	                               "Run (Simulation View)", "Lock", "Dark mode", "New tab", "Send feedback", "Draw and Notes" };
 	return g >= 0 && g < TGCount ? names[g] : "";
 }
 
@@ -55,7 +56,6 @@ void Toolbar::build(int style) {
 		add(Button, "win.undo", TGUndo, false); add(Button, "win.redo", TGUndo, false);
 		add(Button, "win.running", TGSim, true);
 		add(Button, "win.sim-view", TGRun, true);
-		add(More, nullptr, -1, true);
 		return;
 	}
 	if (prefs().showTitle) add(Title, nullptr, -1, false);
@@ -63,13 +63,15 @@ void Toolbar::build(int style) {
 	add(Button, "win.undo", TGUndo, false); add(Button, "win.redo", TGUndo, false);
 	add(Button, "win.copy", TGClipboard, false); add(Button, "win.paste", TGClipboard, false);
 	add(Button, "win.zoom-out", TGZoom, false); add(Zoom, nullptr, TGZoom, false); add(Button, "win.zoom-in", TGZoom, false);
-	add(Button, "win.running", TGSim, true); add(Button, "win.step", TGSim, true); add(Speed, nullptr, TGSim, true);
+	add(Button, "win.running", TGSim, true); add(Button, "win.step", TGSim, true);
+	if (prefs().showStepClock) add(Button, "win.step-clock", TGSim, true);
+	add(Speed, nullptr, TGSim, true);
 	add(Button, "win.sim-view", TGRun, true);
+	add(Button, "win.draw", TGDraw, true); add(Button, "win.notes", TGDraw, true);
 	add(Button, "win.lock", TGLock, true);
 	if (prefs().showThemeToggle) add(Button, "win.dark", TGTheme, true);
 	add(Button, "win.new-tab", TGTab, true);
 	add(Button, "win.feedback", TGFeedback, true);
-	add(More, nullptr, -1, true);
 }
 
 void Toolbar::layout(float w, float h, int style, bool live) {
@@ -94,7 +96,7 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 	const float leftEdge = live && buttons.leftRoom() > 0 ? buttons.leftRoom() : 10;
 	const float rightEdge = w - (live && buttons.rightRoom() > 0 ? buttons.rightRoom() - 4 : 10);
 
-	// From the right edge: •••, then the groups, last first.
+	// From the right edge: the groups, last first.
 	float x = rightEdge;
 	int lastGroup = -2;
 	for (int i = (int)items.size() - 1; i >= 0; i--) {
@@ -124,7 +126,7 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 		}
 	} else {
 		// From the left: the name, then the groups while they fit; the ones
-		// that don't are left out, last first (everything is in ••• too).
+		// that don't are left out, last first (everything is in the menus too).
 		x = leftEdge;
 		lastGroup = -2;
 		std::vector<std::pair<int, float>> groupEnds;
@@ -156,6 +158,8 @@ bool Toolbar::isOn(const Item& it) const {
 	if (is(it.action, "win.running")) return !win->running();
 	if (is(it.action, "win.sim-view")) return win->simView();
 	if (is(it.action, "win.lock")) return win->locked();
+	if (is(it.action, "win.draw")) return win->drawing();
+	if (is(it.action, "win.notes")) return win->notesShown();
 	if (is(it.action, "win.dark")) return prefs().dark;
 	return false;
 }
@@ -166,7 +170,6 @@ bool Toolbar::isEnabled(const Item& it) const {
 }
 
 const char* Toolbar::iconFor(const Item& it) const {
-	if (it.kind == More) return Icon::More;
 	const char* a = it.action;
 	if (is(a, "app.new")) return Icon::Page;
 	if (is(a, "app.open")) return Icon::Open;
@@ -179,8 +182,11 @@ const char* Toolbar::iconFor(const Item& it) const {
 	if (is(a, "win.zoom-in")) return Icon::ZoomIn;
 	if (is(a, "win.running")) return win->running() ? Icon::Pause : Icon::Play;
 	if (is(a, "win.step")) return Icon::Step;
+	if (is(a, "win.step-clock")) return Icon::StepClock;
 	if (is(a, "win.sim-view")) return win->simView() ? Icon::StopSolid : Icon::Play;
 	if (is(a, "win.lock")) return win->locked() ? Icon::Lock : Icon::Unlock;
+	if (is(a, "win.draw")) return Icon::Draw;
+	if (is(a, "win.notes")) return Icon::Notes;
 	if (is(a, "win.dark")) return prefs().dark ? "weather-clear-night-symbolic" : "weather-clear-symbolic";
 	if (is(a, "win.new-tab")) return Icon::NewTab;
 	if (is(a, "win.feedback")) return Icon::Feedback;
@@ -190,7 +196,6 @@ const char* Toolbar::iconFor(const Item& it) const {
 std::string Toolbar::tipFor(const Item& it) const {
 	switch (it.kind) {
 	case Zoom: return "Zoom level. Click for 100%";
-	case More: return "Every menu (F10)";
 	case Title: return "This circuit: rename it, see its versions";
 	default: break;
 	}
@@ -206,8 +211,13 @@ std::string Toolbar::tipFor(const Item& it) const {
 	if (is(a, "win.zoom-in")) return "Zoom in" + keysFor(a);
 	if (is(a, "win.running")) return win->running() ? "Pause the simulation" : "Resume the simulation";
 	if (is(a, "win.step")) return "Step once" + keysFor(a);
+	if (is(a, "win.step-clock")) return win->hasManualClock() ? "Step Clock" + keysFor("stepClock") : std::string(CircuitWindow::stepClockOffTip);
 	if (is(a, "win.sim-view")) return win->simView() ? "Leave Simulation View (Esc)" : "Simulation View" + keysFor(a);
 	if (is(a, "win.lock")) return win->locked() ? "Unlock the circuit" : "Lock the circuit so it can't be edited";
+	if (is(a, "win.draw"))
+		return win->drawing() ? std::string("Done drawing (Esc)")
+		                      : "Draw on the circuit" + keysFor(a) + (win->hasHiddenDrawing() ? ". It has a drawing that's hidden" : "");
+	if (is(a, "win.notes")) return win->notesShown() ? std::string("Hide notes") : "Notes for this circuit" + keysFor(a);
 	if (is(a, "win.dark")) return "Dark mode" + keysFor(a);
 	if (is(a, "win.new-tab")) return "New tab" + keysFor(a);
 	if (is(a, "win.feedback")) return "Send feedback: a bug, an idea, anything";
@@ -256,10 +266,11 @@ void Toolbar::draw(cairo_t* cr, float w, float h, int style, bool live) {
 	const bool active = !live || gtk_window_is_active(topWindow());
 	const bool quiet = style == kSeamless;
 	Color bg = style == kClassic ? c.bar() : style == kMinimal ? c.minimalBar() : c.canvas();
-	if (style == kSeamless && win->simView()) bg = fromRGBA(Palette{ true, true }.canvas());
+	// Seamless: the canvas's own colour, easing to Simulation View's with it.
+	if (style == kSeamless) bg = mixColor(bg, fromRGBA(Palette{ true, true }.canvas()), live ? (float)win->simMix() : win->simView() ? 1.0f : 0.0f);
 	fillRect(cr, rectF(0, 0, w, h), bg);
 	if (style != kSeamless) fillRect(cr, rectF(0, h - 1, w, h), dark ? colorF(0, 0, 0, 0.35f) : colorF(0, 0, 0, 0.08f));
-	const Chrome ic{ dark || (style == kSeamless && win->simView()) };
+	const Chrome ic{ dark || (style == kSeamless && (live ? win->simMix() > 0.5 : win->simView())) };
 	const Color ink = ic.barInk();
 	const Color accent = c.accent();
 	const Color green = ic.dark ? rgb255(64, 214, 110) : rgb255(36, 168, 76);
@@ -349,7 +360,9 @@ void Toolbar::draw(cairo_t* cr, float w, float h, int style, bool live) {
 			else if (is(it.action, "app.open")) drawFolderIcon(cr, r, fg);
 			else if (is(it.action, "win.save")) drawSaveIcon(cr, r, fg);
 			else if (is(it.action, "win.zoom-in") || is(it.action, "win.zoom-out")) drawZoomIcon(cr, r, fg, is(it.action, "win.zoom-in"));
-			else drawIcon(cr, iconFor(it), r, colored && on ? 13 : (it.kind == More ? 15 : 16), fg);
+			else drawIcon(cr, iconFor(it), r, colored && on ? 13 : 16, fg);
+			// A drawing that's hidden: a dot on Draw, as the Mac's.
+			if (is(it.action, "win.draw") && !on && win->hasHiddenDrawing()) fillCircle(cr, pointF(r.right - 8, r.top + 7), 3, accent);
 			break;
 		}
 		}
@@ -370,14 +383,20 @@ GdkRectangle Toolbar::actionRect(const char* action) const {
 	return out;
 }
 
-bool Toolbar::moreRect(GdkRectangle& out) const {
-	if (!gtk_widget_get_mapped(area)) return false;
-	for (const Item& it : items) {
-		if (it.kind != More || rectWidth(it.rect) <= 0) continue;
-		out = { (int)it.rect.left, (int)it.rect.top, (int)rectWidth(it.rect), (int)rectHeight(it.rect) };
-		return true;
-	}
-	return false;
+Color Toolbar::barColor() const {
+	const Chrome c = chrome();
+	const int style = prefs().toolbarStyle;
+	if (style == kSeamless) return mixColor(c.canvas(), fromRGBA(Palette{ true, true }.canvas()), (float)win->simMix());
+	return style == kClassic ? c.bar() : style == kMinimal ? c.minimalBar() : c.canvas();
+}
+
+bool Toolbar::barIsDark() const { return chrome().dark || (prefs().toolbarStyle == kSeamless && win->simMix() > 0.5); }
+
+void Toolbar::setWindowButtons(bool on) {
+	ownButtons = on;
+	buttons.load();
+	if (!on) buttons.list.clear();
+	layoutNow();
 }
 
 void Toolbar::mouseMove(float x, float y) {
@@ -417,12 +436,11 @@ void Toolbar::mouseDown(int button, float x, float y, bool doubleClick, GdkEvent
 	}
 	pressed = i;
 	redraw();
-	// Menus open on the press, as menus do, under their button.
-	if (items[i].kind == Title || items[i].kind == More) {
+	// The name's menu opens on the press, as menus do, under it.
+	if (items[i].kind == Title) {
 		pressed = -1;
 		GdkRectangle anchor = { (int)items[i].rect.left, (int)items[i].rect.top, (int)rectWidth(items[i].rect), (int)rectHeight(items[i].rect) };
-		if (items[i].kind == Title) win->titleMenu(area, anchor, (GdkEvent*)e);
-		else win->moreMenu(area, anchor, (GdkEvent*)e);
+		win->titleMenu(area, anchor, (GdkEvent*)e);
 		hot = -1;
 		fade.setHot(-1);
 		animate();

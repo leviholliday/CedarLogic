@@ -118,6 +118,16 @@ std::string fragment(const std::string& data, const std::string& name) {
 	return f;
 }
 
+bool isSyncLink(const std::string& link) {
+	// "cedarlogic:" in any case, then "//sync" and the end, a '#', a '?' or a '/'.
+	static const char prefix[] = "cedarlogic://sync";
+	const size_t n = sizeof prefix - 1;
+	if (link.size() < n) return false;
+	for (size_t i = 0; i < n; i++)
+		if (g_ascii_tolower(link[i]) != prefix[i]) return false;
+	return link.size() == n || link[n] == '#' || link[n] == '?' || link[n] == '/';
+}
+
 std::string fileForLink(const std::string& link, std::string& why) {
 	std::string data, name, text;
 	if (!parse(link, data, name) || !decode(data, text, why)) { if (why.empty()) why = "not a CedarLogic link"; return ""; }

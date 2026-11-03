@@ -8,6 +8,7 @@
 #define CL_LINUX_TABSWITCHER_H
 
 #include "Chrome.h"
+#include <cstdint>
 #include <vector>
 
 class CircuitWindow;
@@ -24,14 +25,25 @@ public:
 	bool active() const { return isActive; }
 
 private:
+	friend struct SessionDriver;   // --session-check reads which tab is picked
 	CircuitWindow* win;
 	bool isActive = false;
-	std::vector<int> tabs;   // tab indexes, most recent first
+	// The tabs' pages, most recent first: by their keys, which stay with a page
+	// when a tab closes or moves while Ctrl is held (indexes would shift).
+	std::vector<uint64_t> keys;
+	// Where each is now (-1: closed meanwhile).
+	int pageOf(size_t i) const;
 	int selected = 0;
 	GtkWidget* panel = nullptr;
 	GtkWidget* area = nullptr;
 	guint showTimer = 0;
 	std::vector<RectF> cards;
+	std::vector<cairo_surface_t*> thumbs;   // each tab's picture, made as it shows
+	bool composited = false, dark = false;
+	float margin = 0;                       // room for the shadow
+	// The pointer picks only once it moves (not as the panel opens under it).
+	bool hoverArmed = false;
+	double hoverX = -1e9, hoverY = 0;
 
 	void commit(int index);
 	void show();

@@ -18,18 +18,23 @@
 class Canvas;
 class GatePalette;
 class Toolbar;
+class MenuRow;
 class TabStrip;
 class ScopeWindow;
 class StatusBar;
 class Sash;
 class FindBar;
 class TabSwitcher;
+class NotesPane;
 namespace formula { struct Plan; }
 
 class CircuitWindow {
 public:
 	CircuitWindow(GtkApplication* app, CLDocument* doc, const std::string& path);
 	~CircuitWindow();
+	// How many circuit windows exist (--session-check: each closed one is
+	// freed, its circuit and clock with it).
+	static int liveCount;
 
 	GtkWindow* window() const { return GTK_WINDOW(win); }
 	GtkApplication* application() const { return app; }
@@ -46,6 +51,8 @@ public:
 
 	// ---- For the canvas ----
 	Canvas* currentCanvas() const;
+	// The docked oscilloscope, once it has been opened (else null).
+	ScopeWindow* scopeWindow() const { return scope; }
 	int currentPage() const;                // the engine's index of the page in front
 	// For the guided tour, to point a bubble at each: the palette, the run
 	// button, the tab strip. currentCanvas()->widget() is the fourth.
@@ -60,11 +67,13 @@ public:
 	// whether it's enabled now.
 	void runAction(const char* name);
 	bool actionEnabled(const char* name) const;
-	// Every menu (•••), and the circuit's own (its name), under `anchor`
-	// (points in `from`).
+	// Every menu in one popup under `anchor` (points in `from`): the menu
+	// bar's, for F10 in focus mode, when the bar is away. And the circuit's
+	// own menu (its name in the toolbar).
 	void moreMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
 	void titleMenu(GtkWidget* from, GdkRectangle anchor, GdkEvent* e);
-	// F10: every menu from the keyboard; Shift+F10 or the Menu key: the
+	// F10 in focus mode: every menu from the keyboard (with the menu row
+	// showing, GTK's own F10 opens it); Shift+F10 or the Menu key: the
 	// canvas's menu for what's selected.
 	void menusFromKeyboard();
 	void contextMenuFromKeyboard();
@@ -89,6 +98,10 @@ public:
 	std::vector<int> panePages(int pane) const;
 	int shownPage(int pane) const;
 	Canvas* paneCanvas(int pane) const;
+	// The canvas showing the page with this key (its camera), or null.
+	Canvas* canvasWithKey(uint64_t key) const;
+	// --show switcher: Ctrl+Tab's panel, held open (three tabs at least).
+	void showSwitcherForScreenshot();
 	// A click in a side: work there.
 	void activatePane(int pane);
 	void toggleSplit();
@@ -110,6 +123,9 @@ public:
 	// the window's left edge makes room for buttons there).
 	bool focusMode() const { return focusOn; }
 	Toolbar* toolbarWidget() const { return toolbar; }
+	MenuRow* menuRowWidget() const { return menuRow; }
+	void toggleFullScreen();
+	bool fullScreen() const { return fullScreenOn; }
 	void toggleFocusMode();
 	bool stripIsLeftmost(int pane) const;
 	bool stripIsRightmost(int pane) const;
@@ -123,6 +139,12 @@ public:
 	unsigned editStamp() const { return changes; }
 	void redrawMiniMap();
 	bool simView() const { return simViewOn; }
+	// How far into Simulation View the toolbar's colour is, 0 to 1 (it
+	// eases there in 0.18 s, as the Mac's does).
+	double simMix() const { return simTween.value(); }
+	// Frames are slow here (a big circuit, a Raspberry Pi): the chrome's
+	// fades and slides are left out rather than stutter.
+	bool slowFrames() const;
 	bool locked() const { return lockedOn; }
 	bool canEdit() const { return !lockedOn && !simViewOn; }
 	bool running() const { return isRunning; }
@@ -134,6 +156,9 @@ public:
 	void fadeOutDragBox(double l, double b, double r, double t);
 
 	void redraw();
+	// Something over the circuit changed (a fade, a note): the canvases keep
+	// a drag's static layer (Canvas::redrawOver).
+	void redrawOver();
 	void pointerMoved(double wx, double wy);
 	void selectionChanged();
 	// After any edit: redraw, the title, the menus' state.
@@ -176,12 +201,28 @@ public:
 	// Something in Your Circuits changed (a rename): the title follows.
 	void libraryChanged();
 
+	// ---- Sync (SyncApp.cpp) ----
+	// The person did something here: when (ms since 1970), for holding back a change
+	// to a circuit they're working in, and for polling while they work.
+	void noteInput();
+	int64_t lastInputMs() const { return lastInputMsec; }
+	// In the middle of something (a drag, a gate on the pointer, Tidy Up's preview):
+	// not a moment to save.
+	bool busyEditing() const;
+	// The circuit changed on disk (another device's edit): reloaded in place, on the same
+	// page and with the same view, and a quiet note.
+	void reloadForSync(const std::string& message);
+
 	// ---- Templates, My Parts, Build from Formula ----
 	// A circuit just made from a template: into Your Circuits under its name.
 	void startAs(const std::string& name);
 	void partsChanged();
 	// ---- Find (Ctrl+F) and Ctrl+Tab ----
 	void find();
+	// Find Next and Find Previous (F3, Shift+F3, as GTK apps have them): the
+	// next or the one before, or the find bar when it isn't open.
+	void findStep(int delta);
+	FindBar* findBarWidget() const { return findBar; }
 	void showFoundGate(int page, long gate, double x, double y);
 	std::vector<int> recentTabs() const;   // tab indexes, most recently used first
 	// The opening card (the Mac's OpeningCard): seconds since it began, while
@@ -208,6 +249,9 @@ public:
 	void cut();
 	void copy();
 	void paste();
+	// Pastes asked of the clipboard that haven't answered yet (GTK answers
+	// later, from the main loop): the session check waits for them to land.
+	bool pasteWaiting() const { return pastesAsked > 0; }
 	void duplicate();
 	void selectAll();
 	void selectNone();
@@ -223,9 +267,83 @@ public:
 	void quickAdd();
 	void setRunning(bool run);
 	void toggleRunning() { setRunning(!isRunning); }
+	// Parts locked in place (a teacher's starter parts): they stay put --
+	// moves, Rotate, Delete and Cut leave them -- but wires, settings and
+	// switches work as usual. Lock in Place locks the selection, or unlocks
+	// it when every selected part is locked already (the menu says which).
+	void lockSelection(bool lock);
+	void toggleLockInPlace() { lockSelection(!lockMenuUnlocks()); }
+	void unlockAll();
+	int selectedLocked() const;
+	int selectedUnlocked() const;
+	bool lockMenuUnlocks() const { return selectedLocked() > 0 && selectedUnlocked() == 0; }
+	const char* unlockPartsTitle() const { return selectedLocked() > 1 ? "Unlock Parts" : "Unlock Part"; }
+	// After a move, delete or rotate: say why locked parts didn't go along.
+	void noteLockedHeld();
+
+	// Page links (docs/PAGE-LINKS.md): which pages' TO/FROM links connect by
+	// name. Each change is one undo step.
+	bool canConnectAllPages() const;
+	bool canDisconnectAllPages() const;
+	void connectAllPages();
+	void disconnectAllPages();
+	// Connect page `p` to page `other` (or take it off): `p` keeps the pages
+	// it reaches now, give or take that one.
+	void setPagesLinked(int p, int other, bool on);
+
+	// Drawing on the circuit (Ink.h) and the notes (Notes.h). Draw mode: the
+	// pointer draws with a pen or a highlighter, or erases whole strokes,
+	// instead of editing. Show/Hide is saved with the circuit (not an undo
+	// step); each stroke, erase or Clear is one.
+	bool drawing() const { return drawingOn; }
+	void setDrawing(bool on);
+	void toggleDrawing() { setDrawing(!drawingOn); }
+	bool drawingShown() const;
+	void setDrawingShown(bool shown);
+	void toggleDrawingShown() { setDrawingShown(!drawingShown()); }
+	void clearDrawing();
+	void setInkTool(int tool);
+	// Why the tools can't draw on this page (a cap, a newer drawing), or nullptr.
+	const char* inkBlockedReason() const;
+	bool pageHasInk() const;
+	bool pageIsInkReadOnly() const;
+	// A drawing that's hidden: the Draw button shows a dot.
+	bool hasHiddenDrawing() const;
+	// After a stroke or an erase landed: one undo step, saved as ever.
+	void inkEdited();
+	void showInkMenu(GdkEventButton* e);
+	bool notesShown() const;
+	void toggleNotes();
+	NotesPane* notesPane() const { return notes; }
+	// A change that isn't an undo step (the notes, Show/Hide Drawing): saved
+	// as after any edit.
+	void markEdited();
+
 	void stepOnce();
+	// Step Clock: every clock on the page set to "Only on Step Clock" makes
+	// one full cycle (up, settle, down, settle), running or paused.
+	void stepClock();
+	// After a click stepped such a clock (the engine already did the step).
+	void clockStepped();
+	bool hasManualClock() const;
+	static const char* stepClockOffTip;
 	void setStepMs(int ms);
 	void toggleSimView();
+	// Projector Mode (Simulation menu, and the Simulation View bar): on, it
+	// opens Simulation View too; Escape or Done leaves it as ever.
+	void toggleProjector();
+	// Predict, then reveal (Predict.cpp): the lights covered in Simulation
+	// View, guessed, then revealed and scored.
+	bool predictOn() const { return predict.on; }
+	bool predictRevealed() const { return predict.revealed; }
+	bool predictCovers() const;
+	void togglePredict();
+	void revealOrCoverAgain();
+	// A switch, Step or Step Clock moved the circuit on (a new round once revealed).
+	void circuitAdvancedByUser();
+	bool predictTap(double wx, double wy);
+	bool predictKey(const GdkEventKey* e);
+	std::vector<CLPredictMark> predictMarks();
 	void toggleLock();
 	void makeTruthTable();
 	void checkCircuit();   // the truth table at its Check tab
@@ -253,6 +371,7 @@ public:
 	bool hasSelection() const;
 
 private:
+	friend class MenuRow;
 	GtkWidget* win = nullptr;
 	GtkApplication* app;
 	CLDocument* doc;
@@ -264,6 +383,7 @@ private:
 	std::string recoveredName;
 	unsigned changes = 0, changesAtRecovery = 0;
 	gint64 lastRecovery = 0;
+	int64_t lastInputMsec = 0;
 	void writeRecovery();
 
 	GtkWidget* notebooks[2] = { nullptr, nullptr };
@@ -285,6 +405,7 @@ private:
 	anim::Tween hintFade;
 	DropHint hintShown;               // the last one drawn, kept while it fades out
 	bool focusOn = false;
+	bool fullScreenOn = false;
 	int paletteWidth() const;
 	// A tab one place along its side (the tab menu's Move Left and Right).
 	void moveTabBy(int page, int delta);
@@ -298,6 +419,7 @@ private:
 	guint autosaveId = 0;             // saving as you go, a moment after the last change
 	static gboolean autosaveCb(gpointer self);
 	Toolbar* toolbar = nullptr;
+	MenuRow* menuRow = nullptr;   // the menu bar's row, over the toolbar
 	int lastZoomShown = -1;
 	GtkWidget* banner = nullptr;      // Tidy Up's keep/undo bar, Simulation View's
 	GtkWidget* bannerLabel = nullptr;
@@ -307,6 +429,8 @@ private:
 	class MiniMap* miniMap = nullptr;
 	ScopeWindow* scope = nullptr;
 	FindBar* findBar = nullptr;
+	NotesPane* notes = nullptr;
+	bool drawingOn = false;
 	GtkWidget* pageOverlay = nullptr;
 	double openingAt = -1;            // when the opening card began (monotonic seconds; -1: none)
 	bool openingRevealed = false;
@@ -317,6 +441,19 @@ private:
 
 	bool isRunning = true;
 	bool simViewOn = false;
+	anim::Tween simTween;
+	bool chromeEasing = false;   // the toolbar and menu row redrawn each tick while it eases
+	// The title rows or the side panel coming or going: a slide with a fade
+	// (none when frames are slow or the desktop's animations are off).
+	void revealChrome(GtkWidget* revealer, bool show);
+	struct PredictState {
+		bool on = false, revealed = false;
+		std::map<long, int> guesses, answers;   // by gate: 0/1, or a display's number (-1 no clear value)
+		long focus = -1;
+		int page = -1;
+	} predict;
+	std::vector<CLSimLight> predictLights() const;
+	void predictNewRound();
 	bool lockedOn = false;
 	double phase = 0;                 // Simulation View's marching dashes, in points
 	guint timer = 0;
@@ -364,10 +501,12 @@ private:
 	static gboolean stateCb(GtkWidget*, GdkEventWindowState*, gpointer);
 	static void sizeCb(GtkWidget*, GdkRectangle*, gpointer);
 	static void clipboardCb(GtkClipboard*, const gchar*, gpointer);
+	int pastesAsked = 0;
 
 	friend class Canvas;
 	friend class StatusBar;
 	friend class ScopeWindow;
+	friend struct SessionDriver;
 };
 
 #endif  // CL_LINUX_WINDOW_H

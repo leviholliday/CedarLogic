@@ -67,9 +67,43 @@ std::string readString(GKeyFile* k, const char* key, const std::string& fallback
 }
 }  // namespace
 
+ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChannel, bool storedNotice, const std::string& marker) {
+	// A group chosen (or decided) before: as it is.
+	if (hasChannel) return { storedChannel == 1 ? 1 : 0, storedNotice };
+	// Installed by linux/install.sh, which says where from: that.
+	if (marker == "beta") return { 1, false };
+	if (marker == "normal") return { 0, false };
+	// Settings from before there was a choice: every Linux build until now
+	// came from the rolling test build (linux-native-testing), so it stays a
+	// Beta tester and keeps getting them, and says so once.
+	if (prefsExisted) return { 1, true };
+	// A new install: Normal, as on the Mac.
+	return { 0, false };
+}
+
+// What linux/install.sh wrote for the group this install starts in ("beta"
+// or "normal"), or "".
+static std::string installChannelMarker() {
+	gchar* file = g_build_filename(g_get_user_config_dir(), "CedarLogic", "install-channel", nullptr);
+	gchar* text = nullptr;
+	std::string s;
+	if (g_file_get_contents(file, &text, nullptr, nullptr)) s = g_strstrip(text);
+	g_free(text);
+	g_free(file);
+	return s;
+}
+
 void Prefs::load() {
 	GKeyFile* k = g_key_file_new();
-	if (g_key_file_load_from_file(k, prefsPath().c_str(), G_KEY_FILE_NONE, nullptr)) {
+	const bool existed = g_key_file_load_from_file(k, prefsPath().c_str(), G_KEY_FILE_NONE, nullptr);
+	{
+		const bool hasChannel = existed && g_key_file_has_key(k, kGroup, "updateChannel", nullptr);
+		const ChannelStart c = startingChannel(existed, hasChannel, hasChannel ? readInt(k, "updateChannel", 0, 0, 1) : 0,
+		                                       existed && readBool(k, "channelNotice", false), installChannelMarker());
+		updateChannel = c.channel;
+		channelNotice = c.notice;
+	}
+	if (existed) {
 		themeMode = readInt(k, "themeMode", themeMode, 0, 3);
 		dark = readBool(k, "lastDark", dark);
 		accent = readInt(k, "accent", accent, 0, 6);
@@ -98,6 +132,7 @@ void Prefs::load() {
 		toolbarHidden = readInt(k, "toolbarHidden", toolbarHidden, 0, 1 << 12);
 		showTitle = readBool(k, "showTitle", showTitle);
 		showThemeToggle = readBool(k, "showThemeToggle", showThemeToggle);
+		showStepClock = readBool(k, "showStepClock", showStepClock);
 		classicTabs = readBool(k, "classicTabs", classicTabs);
 		wireValueTag = readBool(k, "wireValueTag", wireValueTag);
 		confirmQuit = readBool(k, "confirmQuit", confirmQuit);
@@ -105,6 +140,7 @@ void Prefs::load() {
 		newTemplate = readString(k, "newTemplate", newTemplate);
 		shortcuts = readString(k, "shortcuts", shortcuts);
 		checkUpdates = readBool(k, "checkUpdates", checkUpdates);
+		installedRelease = readString(k, "installedRelease", installedRelease);
 		// The second round of the Mac's look: its status bar is on.
 		if (readInt(k, "prefsVersion", 1, 0, 100) < 2) showStatus = true;
 		tidyMode = readInt(k, "tidyMode", tidyMode, 0, 1);
@@ -116,6 +152,16 @@ void Prefs::load() {
 		lastFolder = readString(k, "lastFolder", lastFolder);
 		lastCircuit = readString(k, "lastCircuit", lastCircuit);
 		studentName = readString(k, "studentName", studentName);
+		feedbackInstallId = readString(k, "feedbackInstallId", feedbackInstallId);
+		templateClock = readInt(k, "templateClock", templateClock, 0, 2);
+		inkTool = readInt(k, "inkTool", inkTool, 0, 2);
+		inkPenColor = readString(k, "inkPenColor", inkPenColor);
+		inkHighlighterColor = readString(k, "inkHighlighterColor", inkHighlighterColor);
+		inkPenWidth = readDouble(k, "inkPenWidth", inkPenWidth, 0.05, 3);
+		inkHighlighterWidth = readDouble(k, "inkHighlighterWidth", inkHighlighterWidth, 0.05, 5);
+		exportInk = readBool(k, "exportInk", exportInk);
+		projector = readBool(k, "projector", projector);
+		newPagesShareLinks = readBool(k, "newPagesShareLinks", newPagesShareLinks);
 		lastFormula = readString(k, "lastFormula", lastFormula);
 		buildShape = readInt(k, "buildShape", buildShape, 0, 2);
 		buildStyle = readInt(k, "buildStyle", buildStyle, 0, 2);
@@ -136,6 +182,7 @@ void Prefs::load() {
 		exportInfo = readBool(k, "exportInfo", exportInfo);
 		exportWorks = readBool(k, "exportWorks", exportWorks);
 		exportColor = readBool(k, "exportColor", exportColor);
+		exportLook = readInt(k, "exportLook", exportLook, -1, 2);
 		exportProblem = readString(k, "exportProblem", exportProblem);
 		exportScale = readInt(k, "exportScale", exportScale, 2, 6);
 		reportCircuit = readBool(k, "reportCircuit", reportCircuit);
@@ -198,6 +245,7 @@ void Prefs::save() const {
 	g_key_file_set_integer(k, kGroup, "toolbarHidden", toolbarHidden);
 	g_key_file_set_boolean(k, kGroup, "showTitle", showTitle);
 	g_key_file_set_boolean(k, kGroup, "showThemeToggle", showThemeToggle);
+	g_key_file_set_boolean(k, kGroup, "showStepClock", showStepClock);
 	g_key_file_set_boolean(k, kGroup, "classicTabs", classicTabs);
 	g_key_file_set_boolean(k, kGroup, "wireValueTag", wireValueTag);
 	g_key_file_set_boolean(k, kGroup, "confirmQuit", confirmQuit);
@@ -205,6 +253,9 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "newTemplate", newTemplate.c_str());
 	g_key_file_set_string(k, kGroup, "shortcuts", shortcuts.c_str());
 	g_key_file_set_boolean(k, kGroup, "checkUpdates", checkUpdates);
+	g_key_file_set_integer(k, kGroup, "updateChannel", updateChannel);
+	g_key_file_set_boolean(k, kGroup, "channelNotice", channelNotice);
+	g_key_file_set_string(k, kGroup, "installedRelease", installedRelease.c_str());
 	g_key_file_set_integer(k, kGroup, "windowWidth", windowWidth);
 	g_key_file_set_integer(k, kGroup, "windowHeight", windowHeight);
 	g_key_file_set_boolean(k, kGroup, "windowMaximized", windowMaximized);
@@ -212,6 +263,16 @@ void Prefs::save() const {
 	g_key_file_set_string(k, kGroup, "lastFolder", lastFolder.c_str());
 	g_key_file_set_string(k, kGroup, "lastCircuit", lastCircuit.c_str());
 	g_key_file_set_string(k, kGroup, "studentName", studentName.c_str());
+	if (!feedbackInstallId.empty()) g_key_file_set_string(k, kGroup, "feedbackInstallId", feedbackInstallId.c_str());
+	g_key_file_set_integer(k, kGroup, "templateClock", templateClock);
+	g_key_file_set_integer(k, kGroup, "inkTool", inkTool);
+	g_key_file_set_string(k, kGroup, "inkPenColor", inkPenColor.c_str());
+	g_key_file_set_string(k, kGroup, "inkHighlighterColor", inkHighlighterColor.c_str());
+	g_key_file_set_double(k, kGroup, "inkPenWidth", inkPenWidth);
+	g_key_file_set_double(k, kGroup, "inkHighlighterWidth", inkHighlighterWidth);
+	g_key_file_set_boolean(k, kGroup, "exportInk", exportInk);
+	g_key_file_set_boolean(k, kGroup, "projector", projector);
+	g_key_file_set_boolean(k, kGroup, "newPagesShareLinks", newPagesShareLinks);
 	g_key_file_set_string(k, kGroup, "lastFormula", lastFormula.c_str());
 	g_key_file_set_integer(k, kGroup, "buildShape", buildShape);
 	g_key_file_set_integer(k, kGroup, "buildStyle", buildStyle);
@@ -232,6 +293,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "exportInfo", exportInfo);
 	g_key_file_set_boolean(k, kGroup, "exportWorks", exportWorks);
 	g_key_file_set_boolean(k, kGroup, "exportColor", exportColor);
+	g_key_file_set_integer(k, kGroup, "exportLook", exportLook);
 	g_key_file_set_string(k, kGroup, "exportProblem", exportProblem.c_str());
 	g_key_file_set_integer(k, kGroup, "exportScale", exportScale);
 	g_key_file_set_boolean(k, kGroup, "reportCircuit", reportCircuit);
@@ -249,6 +311,7 @@ void Prefs::save() const {
 }
 
 void Prefs::applyWireDots() const {
+	cl_set_new_pages_share_links(newPagesShareLinks);
 	cl_set_wire_dots(wireDots, wireDotSize);
 	static const double colors[][3] = { { 0.62, 0.67, 0.76 }, { 0.47, 0.58, 0.84 }, { 0.86, 0.87, 0.90 } };
 	if (lowWire >= 0 && lowWire < 3) cl_set_low_wire_color(true, colors[lowWire][0], colors[lowWire][1], colors[lowWire][2]);

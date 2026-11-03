@@ -3,11 +3,13 @@
 #include "Canvas.h"
 #include "Brand.h"
 #include "Chrome.h"
+#include "Ink.h"
 #include "Shortcuts.h"
 #include "Window.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -41,7 +43,10 @@ void setCursor(GtkWidget* w, const char* name) {
 
 }  // namespace
 
+int Canvas::liveCount = 0;
+
 Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageKey) {
+	liveCount++;
 	area = gtk_drawing_area_new();
 	g_object_ref_sink(area);
 	g_object_set_data(G_OBJECT(area), "cl-window", window);
@@ -71,6 +76,12 @@ Canvas::Canvas(CircuitWindow* window, uint64_t pageKey) : win(window), key(pageK
 	gtk_drag_dest_set(area, GTK_DEST_DEFAULT_ALL, targets, 2, GDK_ACTION_COPY);
 	g_signal_connect(area, "drag-data-received", G_CALLBACK(dragReceivedCb), this);
 	g_signal_connect(area, "drag-motion", G_CALLBACK(dragMotionCb), this);
+	const char* fast = g_getenv("CEDARLOGIC_FAST_DRAG");
+	fastDrag = fast && strcmp(fast, "1") == 0;
+	const char* all = g_getenv("CEDARLOGIC_DRAW_ALL");
+	drawAll = all && strcmp(all, "1") == 0;
+	const char* image = g_getenv("CEDARLOGIC_DRAG_IMAGE");
+	imagesDisabled = image && strcmp(image, "0") == 0;
 }
 
 Canvas::~Canvas() {
@@ -79,6 +90,8 @@ Canvas::~Canvas() {
 	g_signal_handlers_disconnect_by_data(area, this);
 	g_object_unref(area);
 	dropBuffers();
+	if (fadeFrom) cairo_surface_destroy(fadeFrom);
+	liveCount--;
 }
 
 void Canvas::dropBuffers() {
@@ -86,12 +99,40 @@ void Canvas::dropBuffers() {
 	if (gridLayer) cairo_surface_destroy(gridLayer);
 	frame = gridLayer = nullptr;
 	gridValid = false;
+	frameWhole = frameFresh = false;
+	dropLayer();
+}
+
+void Canvas::dropLayer() {
+	if (staticLayer) cairo_surface_destroy(staticLayer);
+	staticLayer = nullptr;
+	layerValid = false;
+	dropMovingImage();
+}
+
+void Canvas::dropMovingImage() {
+	if (movingImage) cairo_surface_destroy(movingImage);
+	movingImage = nullptr;
 }
 
 int Canvas::page() const { return cl_document_page_index(win->document(), key); }
 
 void Canvas::redraw() {
+	// Something may have changed under the moving parts: the drag's static
+	// layer is made again (see Canvas.h).
+	layerValid = false;
+	redrawOver();
+}
+
+void Canvas::redrawOver() {
+	// GTK draws once per frame however often this is asked, so a burst of
+	// pointer moves costs one draw.
 	gtk_widget_queue_draw(area);
+	if (drag != Drag::None) {
+		const gint64 t = g_get_monotonic_time();
+		if (t - lastMiniMap < 100000) return;   // the release redraws it
+		lastMiniMap = t;
+	}
 	win->redrawMiniMap();
 }
 
@@ -122,16 +163,81 @@ bool Canvas::pointerWorld(double& wx, double& wy) const {
 // ---- Drawing -------------------------------------------------------------------
 
 gboolean Canvas::drawCb(GtkWidget*, cairo_t* cr, gpointer self) {
-	guarded("drawing", [&] { static_cast<Canvas*>(self)->draw(cr); });
+	Canvas* c = static_cast<Canvas*>(self);
+	const gint64 start = g_get_monotonic_time();
+	guarded("drawing", [&] { c->draw(cr); });
+	c->lastDrawMs = (g_get_monotonic_time() - start) / 1000.0;
+	if (c->drawTimes) c->drawTimes->push_back(c->lastDrawMs);
 	return TRUE;
+}
+
+bool Canvas::connectKeyWhileMoving(GdkEventKey* e) {
+	if (!moving() || shortcuts::canvasAction(e) != "quickCopy") return false;
+	return onKeyPress(e);
+}
+
+void Canvas::crossfade() {
+	if (fadeFrom) { cairo_surface_destroy(fadeFrom); fadeFrom = nullptr; }
+	fadeOut.set(0);
+	if (!anim::enabled() || slowFrames() || !gtk_widget_get_mapped(area)) return;
+	const double w = width(), h = height();
+	const int scale = std::max(1, gtk_widget_get_scale_factor(area));
+	const int pw = (int)std::ceil(w * scale), ph = (int)std::ceil(h * scale);
+	if (pw <= 0 || ph <= 0) return;
+	cairo_surface_t* s = cairo_image_surface_create(CAIRO_FORMAT_RGB24, pw, ph);
+	if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) { cairo_surface_destroy(s); return; }
+	cairo_surface_set_device_scale(s, scale, scale);
+	cairo_t* cr = cairo_create(s);
+	guarded("drawing", [&] { drawScene(cr, scale); });
+	cairo_destroy(cr);
+	fadeFrom = s;
+	fadeOut.set(1);
+	fadeOut.go(0, 0.2);
+	keepMoving();
+}
+
+void Canvas::paintCrossfade(cairo_t* cr, float w, float h) {
+	if (fadeFrom == nullptr) return;
+	const double a = fadeOut.value();
+	double sx = 1, sy = 1;
+	cairo_surface_get_device_scale(fadeFrom, &sx, &sy);
+	const bool sameSize = std::fabs(cairo_image_surface_get_width(fadeFrom) / sx - w) < 1 && std::fabs(cairo_image_surface_get_height(fadeFrom) / sy - h) < 1;
+	if (a <= 0.01 || !sameSize) {
+		cairo_surface_destroy(fadeFrom);
+		fadeFrom = nullptr;
+		return;
+	}
+	cairo_save(cr);
+	cairo_set_source_surface(cr, fadeFrom, 0, 0);
+	cairo_paint_with_alpha(cr, a);
+	cairo_restore(cr);
+}
+
+bool Canvas::canDrawDirect(cairo_t* cr, int scale) const {
+	if (pathOverride != 0) return pathOverride == 2;
+	static const bool off = [] { const char* v = g_getenv("CEDARLOGIC_CANVAS_FRAME"); return v && strcmp(v, "1") == 0; }();
+	if (off) return false;
+	// An image in memory at the same scale (Wayland's shared-memory buffers,
+	// GTK's own offscreen drawing). On X11 the window is the X server's, and
+	// one image sent there beats every shape sent one by one: the frame stays.
+	cairo_surface_t* target = cairo_get_group_target(cr);
+	if (target == nullptr || cairo_surface_get_type(target) != CAIRO_SURFACE_TYPE_IMAGE) return false;
+	double sx = 0, sy = 0;
+	cairo_surface_get_device_scale(target, &sx, &sy);
+	if (sx != scale || sy != scale) return false;
+	// The glass panels blur the frame under them.
+	if (win->simView() || simBarIn.to > 0 || simBarIn.value() > 0.01) return false;
+	if (bannerFade.to > 0 || bannerFade.value() > 0.01) return false;
+	return true;
 }
 
 void Canvas::draw(cairo_t* cr) {
 	const double w = width(), h = height();
 	if (needsFit && w > 1 && h > 1) zoomToFit(false);
-	const int scale = std::max(1, gtk_widget_get_scale_factor(area));
+	const int scale = scaleOverride > 0 ? scaleOverride : std::max(1, gtk_widget_get_scale_factor(area));
 	const int pw = (int)std::ceil(w * scale), ph = (int)std::ceil(h * scale);
 	if (pw <= 0 || ph <= 0) return;
+	frameFresh = false;
 	if (frame == nullptr || cairo_image_surface_get_width(frame) != pw || cairo_image_surface_get_height(frame) != ph) {
 		dropBuffers();
 		frame = cairo_image_surface_create(CAIRO_FORMAT_RGB24, pw, ph);
@@ -145,15 +251,41 @@ void Canvas::draw(cairo_t* cr) {
 		drawScene(cr, scale);
 		return;
 	}
+	if (canDrawDirect(cr, scale)) {
+		// Straight onto the window's own image: one full-size copy fewer
+		// each frame. GTK has clipped it to what needs drawing.
+		cairo_save(cr);
+		cairo_rectangle(cr, 0, 0, w, h);
+		cairo_clip(cr);
+		drawScene(cr, scale);
+		cairo_restore(cr);
+		frameWhole = false;   // `frame` is out of date now
+		paintCrossfade(cr, (float)w, (float)h);
+		drawOverlays(cr, (float)w, (float)h);
+		return;
+	}
 	cairo_t* fc = cairo_create(frame);
+	// Only the part GTK asked for (another widget over the canvas changed),
+	// when the rest of the frame is still what's on screen. Anything that
+	// changes the circuit or the camera asks for all of it.
+	double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+	cairo_clip_extents(cr, &x1, &y1, &x2, &y2);
+	if (frameWhole && x2 > x1 && y2 > y1 && (x1 > 0 || y1 > 0 || x2 < w || y2 < h)) {
+		x1 = std::floor(std::max(0.0, x1));
+		y1 = std::floor(std::max(0.0, y1));
+		cairo_rectangle(fc, x1, y1, std::ceil(std::min(w, x2)) - x1, std::ceil(std::min(h, y2)) - y1);
+		cairo_clip(fc);
+	}
 	drawScene(fc, scale);
 	cairo_destroy(fc);
 	cairo_surface_flush(frame);
+	frameWhole = frameFresh = true;
 	cairo_save(cr);
 	cairo_set_source_surface(cr, frame, 0, 0);
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 	cairo_restore(cr);
+	paintCrossfade(cr, (float)w, (float)h);
 	drawOverlays(cr, (float)w, (float)h);
 }
 
@@ -176,6 +308,7 @@ void Canvas::drawOverlays(cairo_t* cr, float w, float h) {
 		if (simIn < 1) hits.clear();
 	}
 	if (win->currentCanvas() == this) drawBanner(cr, w);
+	if (win->drawing() && win->currentCanvas() == this) drawInkBar(cr, w, h);
 	drawWireTag(cr, w, h);
 	double t;
 	if (win->openingCard(t)) drawOpeningCard(cr, w, h, t);
@@ -287,6 +420,11 @@ void Canvas::drawSimBar(cairo_t* cr, float w, float h) {
 	};
 	button(paused ? Icon::Play : Icon::Pause, paused, paused ? on : ink, "win.running");
 	button(Icon::Step, false, ink, "win.step");
+	if (prefs().showStepClock) {
+		const bool ready = win->hasManualClock();
+		button(Icon::StepClock, false, withAlpha(ink, ready ? 1.0f : 0.35f), "win.step-clock");
+	}
+	button("video-display-symbolic", prefs().projector, prefs().projector ? on : ink, "win.projector");
 	x += 6;
 	divider();
 	// Speed, fast on the right.
@@ -407,7 +545,7 @@ void Canvas::keepMoving() {
 	motionTick = gtk_widget_add_tick_callback(area, [](GtkWidget* w, GdkFrameClock*, gpointer self) -> gboolean {
 		Canvas* c = static_cast<Canvas*>(self);
 		gtk_widget_queue_draw(w);
-		if (c->bannerFade.active() || c->simBarIn.active()) return G_SOURCE_CONTINUE;
+		if (c->bannerFade.active() || c->simBarIn.active() || c->fadeOut.active()) return G_SOURCE_CONTINUE;
 		c->motionTick = 0;
 		return G_SOURCE_REMOVE;
 	}, this, nullptr);
@@ -417,6 +555,12 @@ void Canvas::keepMoving() {
 // blur, done the cheap way), inside the panel's rounded shape.
 void Canvas::frosted(cairo_t* cr, const RectF& r, float radius) {
 	if (frame == nullptr) return;
+	if (!frameFresh) {
+		// Drawn straight to the window this time (a panel just appeared):
+		// the next frame goes through `frame`, glass and all.
+		gtk_widget_queue_draw(area);
+		return;
+	}
 	const float rw = r.right - r.left, rh = r.bottom - r.top;
 	if (rw < 2 || rh < 2) return;
 	const int sw = std::max(2, (int)(rw / 10)), sh = std::max(2, (int)(rh / 10));
@@ -464,23 +608,21 @@ bool Canvas::overlayPress(double x, double y) {
 	}
 	for (const OverlayHit& h : hits) {
 		if (x < h.left || x >= h.right || y < h.top || y >= h.bottom) continue;
-		win->runAction(h.action);
+		if (!inkBarAction(h.action)) win->runAction(h.action);
 		redraw();
 		return true;
 	}
 	return false;
 }
 
-void Canvas::drawScene(cairo_t* cr, int scale) {
-	const bool sim = win->simView();
-	const bool dark = prefs().dark || sim;
-	const Palette pal{ dark, sim };
-
+void Canvas::drawBackground(cairo_t* cr, int scale, const Palette& pal, const GridKey& key, double fade) {
 	// The background and grid: from the layer while nothing about them changed.
-	const double fade = win->appearProgress();
-	const GridKey key{ originX, originY, upp, fade, (int)width(), (int)height(), scale, prefs().gridStyle,
-	                   dark, sim, prefs().majorGrid, prefs().showGrid };
-	if (gridLayer) {
+	// While the camera moves, the layer would be redrawn and copied every
+	// frame: the grid is drawn straight in until it has stayed put a frame.
+	const bool settled = (gridValid && key == gridKey) || (lastGridKeySet && key == lastGridKey);
+	lastGridKey = key;
+	lastGridKeySet = true;
+	if (gridLayer && settled) {
 		if (!gridValid || !(key == gridKey)) {
 			cairo_t* gc = cairo_create(gridLayer);
 			const RGBA bg = pal.canvas();
@@ -499,11 +641,142 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 		cairo_paint(cr);
 		if (prefs().showGrid) drawGrid(cr, pal, scale, fade);
 	}
+}
+
+// While parts are dragged: everything else from the layer kept for this
+// drag, then the moving parts over it. False: draw the page whole.
+bool Canvas::drawLayered(cairo_t* cr, int scale, const CLDrawOptions& o, const GridKey& grid) {
+	if (drag != Drag::Edit || layersOff || drawAll || o.simView) return false;
+	CLDocument* doc = win->document();
+	const int p = page();
+	const unsigned long long moving = cl_document_moving_signature(doc, p);
+	if (moving == 0) return false;
+	const int pw = (int)std::ceil(width() * scale), ph = (int)std::ceil(height() * scale);
+	const LayerKey key{ grid, (double)o.accent, o.wireScale, win->editStamp(), moving };
+	const bool fits = staticLayer && cairo_image_surface_get_width(staticLayer) == pw && cairo_image_surface_get_height(staticLayer) == ph;
+	if (!layerValid || !fits || !(key == layerKey)) {
+		if (rebuiltLastFrame && ++rebuildsInARow >= 3) {
+			// Changing every frame: kept images only add a copy.
+			layersOff = true;
+			dropLayer();
+			return false;
+		}
+		if (!rebuiltLastFrame) rebuildsInARow = 1;
+		if (!fits) {
+			dropLayer();
+			staticLayer = cairo_image_surface_create(CAIRO_FORMAT_RGB24, pw, ph);
+			cairo_surface_set_device_scale(staticLayer, scale, scale);
+		}
+		if (cairo_surface_status(staticLayer) != CAIRO_STATUS_SUCCESS) {
+			layersOff = true;
+			dropLayer();
+			return false;
+		}
+		cairo_t* lc = cairo_create(staticLayer);
+		const Palette pal{ o.dark, o.simView };
+		drawBackground(lc, scale, pal, grid, grid.fade);
+		const bool ok = cl_document_draw_layer(doc, p, lc, scale, originX, originY, upp, &o, CL_LAYER_STATIC);
+		cairo_destroy(lc);
+		if (!ok) { layerValid = false; return false; }
+		cairo_surface_flush(staticLayer);
+		layerKey = key;
+		layerValid = true;
+		rebuiltLastFrame = true;
+		layerBuilds++;
+		layerGeneration++;
+	} else {
+		rebuiltLastFrame = false;
+		rebuildsInARow = 0;
+	}
+	cairo_save(cr);
+	cairo_set_source_surface(cr, staticLayer, 0, 0);
+	cairo_paint(cr);
+	cairo_restore(cr);
+	const bool coarse = fastDrag;
+	if (coarse) {
+		cairo_save(cr);
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
+	}
+	if (!drawMovingImage(cr, scale, o)) cl_document_draw_layer(doc, p, cr, scale, originX, originY, upp, &o, CL_LAYER_MOVING);
+	if (coarse) cairo_restore(cr);
+	layerFrames++;
+	return true;
+}
+
+// The moving parts over the static layer, the gates from their image (see
+// Canvas.h): the wires drawn, then the gates copied over them, the order the
+// page is drawn in. False: draw them as they are instead.
+bool Canvas::drawMovingImage(cairo_t* cr, int scale, const CLDrawOptions& o) {
+	if (imagesOff || imagesDisabled || o.selectionFade < 1) return false;
+	CLDocument* doc = win->document();
+	const int p = page();
+	// A few gates cost next to nothing to draw (one: 0.03 ms on CI), and
+	// drawn they sit exactly where they are: the image is for many.
+	if (cl_edit_selected_gate_count(doc, p) < 8) return false;
+	double dx = 0, dy = 0, l = 0, b = 0, r = 0, t = 0;
+	if (!cl_document_moving_rigid(doc, p, &dx, &dy, &l, &b, &r, &t)) return false;
+	const double k = scale / upp;   // device pixels a world unit
+	if (movingImage == nullptr || imageGeneration != layerGeneration || imageScale != scale) {
+		dropMovingImage();
+		// Room round the gates' boxes for what's drawn past them (halos,
+		// lock badges).
+		const double margin = 40.0 * scale;
+		const double x0 = std::floor((l - originX) * k - margin), y0 = std::floor((originY - t) * k - margin);
+		const double iw = std::ceil((r - l) * k + 2 * margin), ih = std::ceil((t - b) * k + 2 * margin);
+		// Zoomed far in, the parts are bigger than the window: drawing what
+		// shows of them beats an image of all of them.
+		if (!(iw >= 1 && ih >= 1) || iw > 8192 || ih > 8192 || iw * ih > 16e6) {
+			imagesOff = true;
+			return false;
+		}
+		cairo_surface_t* image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)iw, (int)ih);
+		if (cairo_surface_status(image) != CAIRO_STATUS_SUCCESS) {
+			cairo_surface_destroy(image);
+			imagesOff = true;
+			return false;
+		}
+		cairo_surface_set_device_scale(image, scale, scale);
+		cairo_t* ic = cairo_create(image);
+		cairo_translate(ic, -x0 / scale, -y0 / scale);
+		if (fastDrag) cairo_set_antialias(ic, CAIRO_ANTIALIAS_FAST);
+		const bool ok = cl_document_draw_layer(doc, p, ic, scale, originX, originY, upp, &o, CL_LAYER_MOVING_RIGID);
+		cairo_destroy(ic);
+		if (!ok) {
+			cairo_surface_destroy(image);
+			return false;
+		}
+		cairo_surface_flush(image);
+		movingImage = image;
+		imageX = x0;
+		imageY = y0;
+		imageDX = dx;
+		imageDY = dy;
+		imageGeneration = layerGeneration;
+		imageScale = scale;
+		imageBuilds++;
+	}
+	cl_document_draw_layer(doc, p, cr, scale, originX, originY, upp, &o, CL_LAYER_MOVING_LIVE);
+	// By whole device pixels, so it's a copy, never resampled.
+	const double ox = std::round((dx - imageDX) * k), oy = std::round(-(dy - imageDY) * k);
+	cairo_save(cr);
+	cairo_set_source_surface(cr, movingImage, (imageX + ox) / scale, (imageY + oy) / scale);
+	cairo_paint(cr);
+	cairo_restore(cr);
+	imageFrames++;
+	return true;
+}
+
+void Canvas::drawScene(cairo_t* cr, int scale) {
+	const bool sim = win->simView();
+	const bool dark = prefs().dark || sim;
+	const Palette pal{ dark, sim };
+	const double fade = win->appearProgress();
+	const GridKey key{ originX, originY, upp, fade, (int)width(), (int)height(), scale, prefs().gridStyle,
+	                   dark, sim, prefs().majorGrid, prefs().showGrid };
 
 	CLDocument* doc = win->document();
 	const int p = page();
-	if (doc == nullptr || p < 0) return;
-	CLDrawOptions o;
+	CLDrawOptions o{};
 	o.dark = dark;
 	o.accent = prefs().accent;
 	o.wireScale = prefs().wireScale();
@@ -511,9 +784,64 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	o.thumbnail = false;
 	o.showSelection = true;
 	o.selectionFade = win->selectionFade();
-	cl_document_draw_ex(doc, p, cr, scale, originX, originY, upp, &o);
+	o.ink = CL_INK_FOLLOW;
+	const bool projector = sim && prefs().projector;
+	if (doc != nullptr && p >= 0 && drawLayered(cr, scale, o, key)) {
+		drawSceneTop(cr, scale, sim, dark, projector);
+		return;
+	}
+	if (drag != Drag::Edit) {
+		// A drag's layer isn't kept past it; the next one starts afresh.
+		if (staticLayer) dropLayer();
+		layersOff = false;
+		imagesOff = false;
+		rebuiltLastFrame = false;
+		rebuildsInARow = 0;
+	}
+	drawBackground(cr, scale, pal, key, fade);
+	if (doc == nullptr || p < 0) return;
+	// CEDARLOGIC_FAST_DRAG=1: coarser antialiasing while a drag is moving
+	// things (see SMOOTHNESS.md); the release draws it properly again.
+	const bool coarse = fastDrag && drag == Drag::Edit;
+	if (coarse) {
+		cairo_save(cr);
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
+	}
+	const bool covering = sim && win->predictCovers();
+	if (projector || covering) {
+		// Projector Mode: Simulation View drawn big and bright (the Mac's);
+		// Predict: the lights dark and every wire "off" until Reveal.
+		CLSimViewStyle st{};
+		st.accent = prefs().accent;
+		st.wireScale = prefs().wireScale();
+		st.projector = projector;
+		st.predict = covering;
+		st.ink = CL_INK_FOLLOW;
+		cl_simview_draw_page(doc, p, cr, scale, originX, originY, upp, &st);
+	} else {
+		cl_document_draw_ex(doc, p, cr, scale, originX, originY, upp, &o);
+	}
+	if (coarse) cairo_restore(cr);
+	drawSceneTop(cr, scale, sim, dark, projector);
 	if (sim) {
-		cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(), prefs().wireScale());
+		const std::vector<CLPredictMark> marks = win->predictMarks();
+		if (!marks.empty()) cl_simview_draw_predict(doc, p, cr, scale, originX, originY, upp, marks.data(), (int)marks.size(), projector);
+	}
+}
+
+// Over the parts: Simulation View's marching dashes, or the pins and the
+// connection being made and the selection box; and a stroke being drawn.
+void Canvas::drawSceneTop(cairo_t* cr, int scale, bool sim, bool dark, bool projector) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	// The stroke being drawn and the hover preview, over everything else.
+	const bool live = cl_ink_live_page(doc) == p;
+	if (sim) {
+		// (Not while Predict covers the lights: the flow would give the answer away.)
+		if (!win->predictCovers())
+			cl_simview_draw_flow(doc, p, cr, scale, originX, originY, upp, win->flowPhase(),
+			                     prefs().wireScale() * (projector ? CL_PROJECTOR_WIRE_SCALE : 1));
+		if (live) cl_ink_draw_live(doc, cr, scale, originX, originY, upp, dark, projector);
 		return;
 	}
 	const RGBA a = accentColor(dark);
@@ -521,6 +849,7 @@ void Canvas::drawScene(cairo_t* cr, int scale) {
 	double l, b, r, t, alpha;
 	if (cl_edit_box(doc, &l, &b, &r, &t)) drawBox(cr, l, b, r, t, a, 1);
 	else if (win->dragFadeBox(l, b, r, t, alpha) && alpha > 0) drawBox(cr, l, b, r, t, a, alpha);
+	if (live) cl_ink_draw_live(doc, cr, scale, originX, originY, upp, dark, false);
 }
 
 void Canvas::drawBox(cairo_t* cr, double l, double b, double r, double t, const RGBA& accent, double alpha) {
@@ -751,6 +1080,16 @@ void Canvas::pan(double dx, double dy) {
 	win->statusDirty = true;
 }
 
+void Canvas::setView(const View& v) {
+	zooming = false;
+	originX = v.originX;
+	originY = v.originY;
+	upp = v.upp;
+	needsFit = v.needsFit;
+	gridValid = false;
+	redraw();
+}
+
 void Canvas::panTo(double wx, double wy) {
 	zooming = false;
 	originX = wx - width() / 2 * upp;
@@ -777,6 +1116,7 @@ void Canvas::onSizeChanged(int oldW, int oldH, int w, int h) {
 // ---- Pointer -------------------------------------------------------------------
 
 gboolean Canvas::pressCb(GtkWidget*, GdkEventButton* e, gpointer self) {
+	static_cast<Canvas*>(self)->win->noteInput();
 	return guarded("a click", [&] { return static_cast<Canvas*>(self)->onPress(e); });
 }
 gboolean Canvas::releaseCb(GtkWidget*, GdkEventButton* e, gpointer self) {
@@ -789,6 +1129,7 @@ gboolean Canvas::scrollCb(GtkWidget*, GdkEventScroll* e, gpointer self) {
 	return guarded("scrolling", [&] { return static_cast<Canvas*>(self)->onScroll(e); });
 }
 gboolean Canvas::keyPressCb(GtkWidget*, GdkEventKey* e, gpointer self) {
+	static_cast<Canvas*>(self)->win->noteInput();
 	return guarded("a key", [&] { return static_cast<Canvas*>(self)->onKeyPress(e); });
 }
 gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
@@ -797,7 +1138,14 @@ gboolean Canvas::keyReleaseCb(GtkWidget*, GdkEventKey* e, gpointer self) {
 
 gboolean Canvas::crossingCb(GtkWidget*, GdkEventCrossing* e, gpointer self) {
 	static_cast<Canvas*>(self)->pointerInside = e->type == GDK_ENTER_NOTIFY;
-	if (e->type == GDK_LEAVE_NOTIFY) static_cast<Canvas*>(self)->hideWireTag();
+	if (e->type == GDK_LEAVE_NOTIFY) {
+		Canvas* c = static_cast<Canvas*>(self);
+		c->hideWireTag();
+		if (c->drag != Drag::Ink && c->win->document() && cl_ink_live_page(c->win->document()) >= 0) {
+			cl_ink_hover_clear(c->win->document());
+			c->redraw();
+		}
+	}
 	return FALSE;
 }
 
@@ -826,9 +1174,12 @@ void Canvas::cancelDrag() {
 	if (drag == Drag::Edit) {
 		double wx, wy;
 		worldPoint(lastX, lastY, wx, wy);
-		cl_edit_release(win->document(), wx, wy);
+		// Ended from outside (the pointer was taken away): never a click
+		// that steps a clock.
+		cl_edit_release_ex(win->document(), wx, wy, false);
 		win->edited();
 	}
+	if (drag == Drag::Ink) endInkStroke(true);
 	drag = Drag::None;
 	setCursor(area, nullptr);
 	redraw();
@@ -856,6 +1207,15 @@ bool Canvas::onPress(GdkEventButton* e) {
 		setCursor(area, "grabbing");
 		return TRUE;
 	}
+	// Draw mode: the pointer draws (Space or Ctrl held still moves around).
+	if (win->drawing() && e->button == 3) {
+		if (e->type == GDK_BUTTON_PRESS) win->showInkMenu(e);
+		return TRUE;
+	}
+	if (win->drawing() && e->button == 1 && !spaceDown && !(e->state & GDK_CONTROL_MASK)) {
+		if (e->type != GDK_BUTTON_PRESS) return TRUE;
+		return inkPress(e);
+	}
 	if (e->button == 3) {
 		if (e->type != GDK_BUTTON_PRESS) return TRUE;
 		if (win->simView()) return TRUE;
@@ -876,7 +1236,9 @@ bool Canvas::onPress(GdkEventButton* e) {
 		// The second press of a double-click already began a gesture: end
 		// it in place, then open the gate's settings, or fit the page.
 		if (win->isFloating()) return TRUE;
-		if (drag == Drag::Edit) cl_edit_release(doc, wx, wy);
+		// The first click already stepped a clock set to "Only on Step
+		// Clock"; this one only opens its settings.
+		if (drag == Drag::Edit) cl_edit_release_ex(doc, wx, wy, false);
 		drag = Drag::None;
 		if (win->simView() || win->locked()) return TRUE;
 		if (cl_edit_single_gate(doc, p) >= 0) win->showSettings();
@@ -900,7 +1262,9 @@ bool Canvas::onPress(GdkEventButton* e) {
 	// Simulation View and Lock: parts still take clicks (switches, keypads);
 	// anywhere else, a drag moves around.
 	if (win->simView() || win->locked()) {
+		if (win->simView() && win->predictTap(wx, wy)) return TRUE;   // a guess on a covered light
 		if (cl_document_click(doc, p, wx, wy)) {
+			if (win->simView()) win->circuitAdvancedByUser();
 			win->redraw();
 		} else {
 			drag = Drag::Pan;
@@ -910,6 +1274,12 @@ bool Canvas::onPress(GdkEventButton* e) {
 		return TRUE;
 	}
 	cl_edit_press(doc, p, wx, wy, modifiersOf(e->state), upp);
+	// A new drag: its static layer is made afresh on its first moving frame.
+	dropLayer();
+	layersOff = false;
+	imagesOff = false;
+	rebuiltLastFrame = false;
+	rebuildsInARow = 0;
 	drag = Drag::Edit;
 	redraw();
 	win->selectionChanged();
@@ -938,9 +1308,19 @@ bool Canvas::onMotion(GdkEventMotion* e) {
 		break;
 	case Drag::Edit:
 		cl_edit_drag(doc, wx, wy);
-		redraw();
+		// Only the moving parts changed: the static layer stays.
+		redrawOver();
+		break;
+	case Drag::Ink:
+		inkMotion(e);
 		break;
 	case Drag::None:
+		if (win->drawing()) {
+			GdkDevice* d = gdk_event_get_source_device((GdkEvent*)e);
+			tabletEraser = d && gdk_device_get_source(d) == GDK_SOURCE_ERASER;
+			inkHover(e->x, e->y);
+			break;
+		}
 		if (win->hasPendingGate() && win->placePendingGate(wx, wy)) { redraw(); break; }
 		if (win->simView()) {
 			if (prefs().wireValueTag && cl_edit_hover_wire(doc, p, wx, wy, upp)) redraw();
@@ -959,23 +1339,30 @@ bool Canvas::onRelease(GdkEventButton* e) {
 	CLDocument* doc = win->document();
 	lastX = e->x;
 	lastY = e->y;
+	if (drag == Drag::Ink) {
+		if (e->button == 1) inkRelease(e);
+		return TRUE;
+	}
 	if (drag == Drag::Edit && e->button == 1 && doc) {
 		double l, b, r, t;
 		if (cl_edit_box(doc, &l, &b, &r, &t)) win->fadeOutDragBox(l, b, r, t);
 		double wx, wy;
 		worldPoint(e->x, e->y, wx, wy);
-		cl_edit_release(doc, wx, wy);
+		// A click (no drag) on a clock set to "Only on Step Clock" steps it.
+		const bool stepped = cl_edit_release_ex(doc, wx, wy, true) == CL_CLICK_CLOCK_STEP;
 		drag = Drag::None;
+		if (stepped) win->clockStepped();
 		win->edited();
+		win->noteLockedHeld();
 	} else if (drag == Drag::Pan && (e->button == 1 || e->button == 2)) {
 		drag = Drag::None;
 	}
-	setCursor(area, spaceDown ? "grab" : nullptr);
+	setCursor(area, spaceDown ? "grab" : win->drawing() ? "crosshair" : nullptr);
 	redraw();
 	return TRUE;
 }
 
-// Per device (Preferences > Canvas): a wheel mouse zooms and a touchpad moves
+// Per device (Settings > Canvas): a wheel mouse zooms and a touchpad moves
 // around, by default. Ctrl+scroll always zooms; Shift+scroll moves sideways.
 bool Canvas::onScroll(GdkEventScroll* e) {
 	zooming = false;
@@ -1033,8 +1420,18 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 	const bool isDelete = k == GDK_KEY_Delete || k == GDK_KEY_BackSpace || k == GDK_KEY_KP_Delete;
 	const guint lower = gdk_keyval_to_lower(k);
 
+	// Draw mode: P, H and E pick a tool, 1, 2 and 3 a width; Escape ends a
+	// stroke, then Draw mode. But a Tidy Up on show (Shift+S works while
+	// drawing) has Return, Escape and Tab, just below: Escape here only ended
+	// Draw, so Put Back never came and the preview stayed up, for the next
+	// edit to keep.
+	const bool tidyKey = win->tidyActive() && bare &&
+	                     (isReturn || k == GDK_KEY_Escape || k == GDK_KEY_Tab || k == GDK_KEY_ISO_Left_Tab);
+	if (win->drawing() && !tidyKey && inkKey(e)) return TRUE;
+
 	// Simulation View: Escape leaves, Space runs and pauses, arrows move around.
 	if (win->simView()) {
+		if (win->predictKey(e)) return TRUE;   // Predict's guesses, Tab and Return
 		if (!bare) return FALSE;
 		if (k == GDK_KEY_Escape) win->toggleSimView();
 		else if (k == GDK_KEY_space) { if (!spaceDown) { spaceDown = true; win->toggleRunning(); } }
@@ -1043,6 +1440,7 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		else if (k == GDK_KEY_minus || k == GDK_KEY_KP_Subtract) animateZoom(0.75);
 		else if (shortcuts::canvasAction(e) == "truthTable") win->makeTruthTable();
 		else if (shortcuts::canvasAction(e) == "checkCircuit") win->checkCircuit();
+		else if (shortcuts::canvasAction(e) == "stepClock") win->stepClock();
 		else if (k == GDK_KEY_question) win->showShortcuts();
 		return TRUE;
 	}
@@ -1127,7 +1525,11 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 		// connect it to the pins it's next to and keep moving. The
 		// connections are kept at the drop; Escape takes back just them.
 		if (moving()) {
-			if (win->canEdit() && pointerInside) {
+			// The pointer over this canvas now (asked, as the Mac does: a drag
+			// from the side panel holds the pointer there, so this canvas never
+			// heard it come in), not while it's still over the panel.
+			double px = 0, py = 0;
+			if (win->canEdit() && pointerWorld(px, py)) {
 				const int p = page();
 				const int n = cl_edit_connect_while_moving(doc, p, upp);
 				if (n > 0) win->note(format("Connected %d pin%s. Escape takes it back.", n, n == 1 ? "" : "s"));
@@ -1142,6 +1544,8 @@ bool Canvas::onKeyPress(GdkEventKey* e) {
 	if (act.empty()) return FALSE;
 	if (act == "truthTable") { win->makeTruthTable(); return TRUE; }
 	if (act == "checkCircuit") { win->checkCircuit(); return TRUE; }
+	// Step Clock works on a locked circuit too, as switches do.
+	if (act == "stepClock") { win->stepClock(); return TRUE; }
 	if (!win->canEdit()) { win->lockNudge(); return TRUE; }
 	if (act == "quickPaste") win->paste();
 	else if (act == "quickCut") win->cut();
@@ -1201,4 +1605,346 @@ void Canvas::dragReceivedCb(GtkWidget*, GdkDragContext* ctx, gint x, gint y, Gtk
 		}
 	});
 	gtk_drag_finish(ctx, ok, FALSE, time);
+}
+
+// ---- Drawing on the circuit (Ink.h) --------------------------------------------------
+
+void Canvas::drawingChanged() {
+	if (!win->drawing()) {
+		if (drag == Drag::Ink) {
+			endInkStroke(false);
+			drag = Drag::None;
+		}
+		if (pointerInside) setCursor(area, nullptr);
+	} else if (pointerInside) {
+		setCursor(area, "crosshair");
+		inkHoverAtPointer();
+	}
+	redraw();
+}
+
+// A tablet pen's eraser end erases, whatever the tool.
+bool Canvas::erasesWith(GdkEvent* e) {
+	GdkDevice* d = gdk_event_get_source_device(e);
+	tabletEraser = d && gdk_device_get_source(d) == GDK_SOURCE_ERASER;
+	return ink::tool() == ink::Eraser || tabletEraser;
+}
+
+// A pen tablet's pressure (0...1); a mouse, touchpad or touch screen has none (-1).
+double Canvas::pressureOf(GdkEvent* e) const {
+	GdkDevice* d = gdk_event_get_source_device(e);
+	const GdkInputSource s = d ? gdk_device_get_source(d) : GDK_SOURCE_MOUSE;
+	if (s != GDK_SOURCE_PEN && s != GDK_SOURCE_ERASER) return -1;
+	double p = 0;
+	if (!gdk_event_get_axis(e, GDK_AXIS_PRESSURE, &p) || !std::isfinite(p)) return -1;
+	return std::min(1.0, std::max(0.0, p));
+}
+
+void Canvas::inkSample(GdkEvent* e, double vx, double vy) {
+	double wx, wy;
+	worldPoint(vx, vy, wx, wy);
+	CLInkPoint pt = { wx, wy, pressureOf(e) };
+	// Cut at the cap: what's drawn so far is kept.
+	if (cl_ink_add(win->document(), &pt, 1) == CL_INK_FULL) win->note(ink::kFullNote);
+}
+
+bool Canvas::inkPress(GdkEventButton* e) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	double wx, wy;
+	worldPoint(e->x, e->y, wx, wy);
+	cl_ink_hover_clear(doc);
+	if (erasesWith((GdkEvent*)e)) {
+		if (cl_ink_page_read_only(doc, p)) { win->note(ink::kReadOnlyNote); return TRUE; }
+		cl_ink_erase_begin(doc, p);
+		inkErasing = true;
+		cl_ink_erase_to(doc, wx, wy, eraserRadius());
+		cl_ink_hover(doc, p, wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+	} else {
+		const int r = cl_ink_begin(doc, p, ink::engineTool(), ink::color().c_str(), ink::width(), upp);
+		if (r != CL_INK_OK) {
+			win->note(r == CL_INK_FULL ? ink::kFullNote : ink::kReadOnlyNote);
+			gtk_widget_error_bell(area);
+			return TRUE;
+		}
+		inkErasing = false;
+		inkSample((GdkEvent*)e, e->x, e->y);
+	}
+	drag = Drag::Ink;
+	// Every sample, not just one a frame: a line follows the pen.
+	if (GdkWindow* gw = gtk_widget_get_window(area)) gdk_window_set_event_compression(gw, FALSE);
+	redraw();
+	return TRUE;
+}
+
+void Canvas::inkMotion(GdkEventMotion* e) {
+	CLDocument* doc = win->document();
+	if (inkErasing) {
+		double wx, wy;
+		worldPoint(e->x, e->y, wx, wy);
+		cl_ink_erase_to(doc, wx, wy, eraserRadius());
+		cl_ink_hover(doc, page(), wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+	} else {
+		inkSample((GdkEvent*)e, e->x, e->y);
+	}
+	redraw();
+}
+
+// The stroke or the eraser drag ends: kept as one undo step (a pen stroke
+// Escape ends is taken back instead, as on the Mac).
+void Canvas::endInkStroke(bool keep) {
+	CLDocument* doc = win->document();
+	if (GdkWindow* gw = gtk_widget_get_window(area)) gdk_window_set_event_compression(gw, TRUE);
+	if (doc == nullptr) return;
+	if (inkErasing) {
+		inkErasing = false;
+		if (cl_ink_erase_end(doc) > 0) win->inkEdited();
+	} else if (keep) {
+		if (cl_ink_end(doc) > 0) win->inkEdited();
+		if (cl_ink_can_draw(doc, page()) == CL_INK_FULL) win->note(ink::kFullNote);
+	} else {
+		cl_ink_cancel(doc);
+	}
+}
+
+void Canvas::inkRelease(GdkEventButton* e) {
+	if (!inkErasing) inkSample((GdkEvent*)e, e->x, e->y);
+	endInkStroke(true);
+	drag = Drag::None;
+	inkHover(e->x, e->y);
+	redraw();
+}
+
+// The hover where the pointer really is (not where it last moved: a key or
+// the menu can change the tool before any move), when it's over the canvas.
+void Canvas::inkHoverAtPointer() {
+	GdkWindow* w = gtk_widget_get_window(area);
+	GdkDisplay* display = w ? gdk_window_get_display(w) : nullptr;
+	GdkSeat* seat = display ? gdk_display_get_default_seat(display) : nullptr;
+	GdkDevice* pointer = seat ? gdk_seat_get_pointer(seat) : nullptr;
+	if (pointer == nullptr) return;
+	double x = 0, y = 0;
+	gdk_window_get_device_position_double(w, pointer, &x, &y, nullptr);
+	if (x < 0 || y < 0 || x >= width() || y >= height()) return;
+	inkHover(x, y);
+}
+
+// What the pointer would draw: a dot of the stroke, or the eraser's ring.
+void Canvas::inkHover(double vx, double vy) {
+	CLDocument* doc = win->document();
+	const int p = page();
+	if (doc == nullptr || p < 0) return;
+	double wx, wy;
+	worldPoint(vx, vy, wx, wy);
+	if (ink::tool() == ink::Eraser || tabletEraser) cl_ink_hover(doc, p, wx, wy, CL_INK_ERASER, "ink", eraserRadius());
+	else cl_ink_hover(doc, p, wx, wy, ink::engineTool(), ink::color().c_str(), ink::width());
+	setCursor(area, "crosshair");
+	redraw();
+}
+
+bool Canvas::inkKey(GdkEventKey* e) {
+	const guint mods = e->state & gtk_accelerator_get_default_mod_mask();
+	if (e->keyval == GDK_KEY_Escape && mods == 0) {
+		if (drag == Drag::Ink) {
+			endInkStroke(false);
+			drag = Drag::None;
+			redraw();
+		} else {
+			win->setDrawing(false);
+		}
+		return true;
+	}
+	if (mods != 0) return false;
+	const guint k = gdk_keyval_to_lower(e->keyval);
+	int width = -1;
+	if (k == GDK_KEY_1 || k == GDK_KEY_KP_1) width = 0;
+	else if (k == GDK_KEY_2 || k == GDK_KEY_KP_2) width = 1;
+	else if (k == GDK_KEY_3 || k == GDK_KEY_KP_3) width = 2;
+	if (width >= 0) {
+		if (ink::tool() == ink::Eraser) return true;
+		ink::setWidthIndex(width);
+		win->note(std::string(ink::widthName(width)) + " line");
+		inkHoverAtPointer();
+		return true;
+	}
+	const int tool = k == GDK_KEY_p ? ink::Pen : k == GDK_KEY_h ? ink::Highlighter : k == GDK_KEY_e ? ink::Eraser : -1;
+	if (tool < 0) return false;
+	win->setInkTool(tool);
+	inkHoverAtPointer();
+	return true;
+}
+
+namespace {
+
+// The bar's own buttons, by name (a hit's action).
+const char* const kToolActs[] = { "ink:tool:0", "ink:tool:1", "ink:tool:2" };
+const char* const kColorActs[] = { "ink:color:0", "ink:color:1", "ink:color:2", "ink:color:3", "ink:color:4", "ink:color:5" };
+const char* const kWidthActs[] = { "ink:width:0", "ink:width:1", "ink:width:2" };
+
+// Pen, highlighter and eraser, drawn small, as the Mac's pencil.tip,
+// highlighter and eraser.
+void drawToolGlyph(cairo_t* cr, int tool, const RectF& box, const Color& c) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	cairo_save(cr);
+	cairo_translate(cr, cx, cy);
+	cairo_rotate(cr, -G_PI / 4);
+	setColor(cr, c);
+	cairo_set_line_width(cr, 1.3);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	if (tool == ink::Pen) {
+		// A pencil: the body, and its point to the lower left.
+		cairo_rectangle(cr, -2.5, -7, 5, 9.5);
+		cairo_stroke(cr);
+		cairo_move_to(cr, -2.5, 2.5);
+		cairo_line_to(cr, 0, 7);
+		cairo_line_to(cr, 2.5, 2.5);
+		cairo_stroke(cr);
+		cairo_move_to(cr, -2.5, -4.5);
+		cairo_line_to(cr, 2.5, -4.5);
+		cairo_stroke(cr);
+	} else if (tool == ink::Highlighter) {
+		// A marker with a chisel tip.
+		cairo_rectangle(cr, -3.5, -7, 7, 8);
+		cairo_stroke(cr);
+		cairo_move_to(cr, -3.5, 1);
+		cairo_line_to(cr, -2, 4.5);
+		cairo_line_to(cr, 2, 4.5);
+		cairo_line_to(cr, 3.5, 1);
+		cairo_stroke(cr);
+		cairo_rectangle(cr, -2, 4.5, 4, 2.3);
+		cairo_fill(cr);
+	} else {
+		// A block, its working end filled.
+		cairo_rectangle(cr, -3.5, -6.5, 7, 13);
+		cairo_stroke(cr);
+		cairo_rectangle(cr, -3.5, 1.5, 7, 5);
+		cairo_fill(cr);
+	}
+	cairo_restore(cr);
+}
+
+}  // namespace
+
+bool Canvas::inkBarAction(const char* action) {
+	if (action == nullptr || std::strncmp(action, "ink:", 4) != 0) return false;
+	const char* what = action + 4;
+	const int n = atoi(std::strrchr(action, ':') + 1);
+	if (std::strncmp(what, "tool:", 5) == 0) {
+		win->setInkTool(n);
+	} else if (std::strncmp(what, "color:", 6) == 0) {
+		const std::vector<std::string>& cs = ink::colors();
+		if (n >= 0 && n < (int)cs.size()) ink::setColor(cs[n]);
+	} else if (std::strncmp(what, "width:", 6) == 0) {
+		ink::setWidthIndex(n);
+	}
+	redraw();
+	return true;
+}
+
+// The tools while Draw is on (the Mac's DrawingBar): pen, highlighter,
+// eraser; the tool's colours and three widths; Clear; Show/Hide; Done. A
+// capsule over the bottom of the canvas.
+void Canvas::drawInkBar(cairo_t* cr, float w, float h) {
+	const bool dark = prefs().dark || win->simView();
+	const Chrome c{ dark };
+	const Color ink = c.barInk(), accent = c.accent();
+	const Color dim = withAlpha(ink, 0.62f);
+	const int tool = ink::tool();
+	const bool hl = ink::highlighter();
+	const char* blocked = win->inkBlockedReason();
+	const bool readOnly = win->pageIsInkReadOnly();
+	const std::vector<std::string>& colors = ink::colors();
+
+	// Its width first, to centre it.
+	const float tb = 28, cb = 26, wb = 30, gap = 4, divW = 9;
+	float total = 10 + 3 * (tb + gap) + divW;
+	if (tool == ink::Eraser) total += textWidth("Erases whole marks", 11) + 12;
+	else total += colors.size() * (cb + gap) + divW + textWidth("Width", 11, true) + 6 + 3 * (wb + gap);
+	const float doneW = textWidth("Done", 12, true) + 18;
+	total += divW + 2 * (tb + gap) + doneW + 8;
+	const float barH = 38;
+	const float bottom = h - 14 - (win->simView() ? 52 + 14 : 0);
+	const float x0 = std::max(8.0f, (w - total) / 2), y0 = bottom - barH;
+	const RectF bar = rectF(x0, y0, x0 + total, bottom);
+	if (blocked) {
+		const float bw = std::min(w - 16, textWidth(blocked, 11) + 24);
+		const RectF note = rectF((w - bw) / 2, y0 - 30, (w + bw) / 2, y0 - 6);
+		fillRound(cr, note, 12, dark ? rgb255(40, 43, 50, 0.95f) : colorF(1, 1, 1, 0.95f));
+		strokeRound(cr, note, 12, withAlpha(ink, 0.14f));
+		drawText(cr, blocked, rectF(note.left + 12, note.top + 5, note.right - 12, note.bottom), 11, dim, TextAlign::Center);
+	}
+	fillRound(cr, rectF(bar.left, bar.top + 2, bar.right, bar.bottom + 3), barH / 2, colorF(0, 0, 0, dark ? 0.32f : 0.12f));
+	fillRound(cr, bar, barH / 2, dark ? rgb255(40, 43, 50, 0.97f) : colorF(0.985f, 0.985f, 0.99f, 0.97f));
+	strokeRound(cr, bar, barH / 2, withAlpha(ink, dark ? 0.16f : 0.12f));
+	const float cy = (bar.top + bar.bottom) / 2;
+	float x = x0 + 10;
+	auto hot = [&] { return hotHit == (int)hits.size(); };
+	auto divider = [&] { fillRect(cr, rectF(x + 4, cy - 9, x + 5, cy + 9), withAlpha(ink, 0.22f)); x += divW; };
+
+	for (int t = 0; t < 3; t++) {
+		const RectF r = rectF(x, cy - 13, x + tb, cy + 13);
+		const bool on = tool == t;
+		const bool off = readOnly || (t != ink::Eraser && blocked != nullptr);
+		if (on) fillRound(cr, r, 6, withAlpha(accent, 0.16f));
+		else if (hot() && !off) fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+		drawToolGlyph(cr, t, r, off ? withAlpha(ink, 0.3f) : on ? accent : withAlpha(ink, 0.8f));
+		if (!off) hits.push_back({ r.left, r.top, r.right, r.bottom, kToolActs[t] });
+		x += tb + gap;
+	}
+	divider();
+	if (tool == ink::Eraser) {
+		drawText(cr, "Erases whole marks", rectF(x + 6, cy - 8, x + 6 + textWidth("Erases whole marks", 11) + 2, cy + 8), 11, dim);
+		x += textWidth("Erases whole marks", 11) + 12;
+	} else {
+		for (size_t i = 0; i < colors.size() && i < 6; i++) {
+			const RectF r = rectF(x, cy - 13, x + cb, cy + 13);
+			const PointF mid = pointF((r.left + r.right) / 2, cy);
+			fillCircle(cr, mid, 8, ink::swatch(colors[i], hl, dark));
+			strokeCircle(cr, mid, 8, withAlpha(ink, 0.25f), 0.5f);
+			if (colors[i] == ink::color()) strokeCircle(cr, mid, 11, accent, 2);
+			else if (hot()) strokeCircle(cr, mid, 11, withAlpha(ink, 0.25f), 1);
+			hits.push_back({ r.left, r.top, r.right, r.bottom, kColorActs[i] });
+			x += cb + gap;
+		}
+		divider();
+		drawText(cr, "Width", rectF(x + 2, cy - 8, x + 2 + textWidth("Width", 11, true) + 2, cy + 8), 11, dim, TextAlign::Leading, true);
+		x += textWidth("Width", 11, true) + 6;
+		const Color line = ink::swatch(ink::color(), hl, dark);
+		const float thick[] = { 2, 4, 7 };
+		for (int i = 0; i < 3; i++) {
+			const RectF r = rectF(x, cy - 13, x + wb, cy + 13);
+			const bool on = ink::widthIndex() == i;
+			if (on) {
+				fillRound(cr, r, 6, withAlpha(accent, 0.16f));
+				strokeRound(cr, rectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 6, withAlpha(accent, 0.7f));
+			} else if (hot()) {
+				fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+			}
+			fillRound(cr, rectF(r.left + 6, cy - thick[i] / 2, r.right - 6, cy + thick[i] / 2), thick[i] / 2, withAlpha(line, on ? 1.0f : 0.6f));
+			hits.push_back({ r.left, r.top, r.right, r.bottom, kWidthActs[i] });
+			x += wb + gap;
+		}
+	}
+	divider();
+	{
+		const RectF r = rectF(x, cy - 13, x + tb, cy + 13);
+		const bool off = !win->pageHasInk() || readOnly;
+		if (hot() && !off) fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+		drawIcon(cr, "user-trash-symbolic", r, 14, withAlpha(ink, off ? 0.3f : 0.8f));
+		if (!off) hits.push_back({ r.left, r.top, r.right, r.bottom, "win.clear-drawing" });
+		x += tb + gap;
+	}
+	{
+		const RectF r = rectF(x, cy - 13, x + tb, cy + 13);
+		if (hot()) fillRound(cr, r, 6, withAlpha(ink, 0.08f));
+		drawEyeIcon(cr, r, withAlpha(ink, 0.8f), !win->drawingShown());
+		hits.push_back({ r.left, r.top, r.right, r.bottom, "win.show-drawing" });
+		x += tb + gap;
+	}
+	{
+		const RectF r = rectF(x, cy - 13, x + doneW, cy + 13);
+		if (hot()) fillRound(cr, r, 7, withAlpha(ink, 0.08f));
+		drawText(cr, "Done", rectF(r.left, cy - 8, r.right, cy + 9), 12, ink, TextAlign::Center, true);
+		hits.push_back({ r.left, r.top, r.right, r.bottom, "win.draw" });
+	}
 }
