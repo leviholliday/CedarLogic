@@ -32,7 +32,9 @@
 // (CL_DAMAGE_ROUND picks which), each opening or being refused, never
 // crashing; in `trash`, Recently Deleted: the list, the 30-day sweep,
 // Restore (under its own id, or a new one when that's taken) and Delete Now;
-// in every state, where the Actions rail is (on screen for a first launch,
+// in every state, the intro owed, "Play the intro every time CedarLogic
+// opens" (off unless chosen; on, a later launch plays it) and Help > Play
+// the Intro in the menu bar; where the Actions rail is (on screen for a first launch,
 // hidden for anyone before), and in `actions` that a folded rail stays
 // folded, a drag on the rail reorders the Customize list too, focus mode
 // folds it (not hides it) and gives back what it was, the Customize
@@ -506,6 +508,25 @@ enum LaunchSelfTest {
         check(owed == (state == "first" ? .firstLaunch : state == "updated" ? .update : nil),
               "the intro owed: \(owed?.rawValue ?? "none")")
         check(Intro.pending() == nil, "no intro plays in a self-test")
+        // Settings > General > "Play the intro every time CedarLogic opens":
+        // off unless chosen; on, a launch that's owed nothing plays the
+        // first launch's intro (tried on settings of its own).
+        check(!Prefs.shared.introEveryLaunch, "the intro doesn't play at every launch unless chosen")
+        let suite = "cl.selftest.intro"
+        if let s = UserDefaults(suiteName: suite) {
+            s.removePersistentDomain(forName: suite)
+            for key in ["cl.hasSeenWelcome", "cl.firstLaunchPlayed", Intro.firstKey] { s.set(true, forKey: key) }
+            let due: Intro.Trigger? = state == "updated" ? .update : nil
+            check(Intro.forLaunch(s) == due, "a later launch plays \(due.map { "the \($0.rawValue) intro" } ?? "no intro") with the setting off")
+            s.set(true, forKey: Intro.everyLaunchKey)
+            let every = Intro.forLaunch(s)
+            check(every == (due ?? .firstLaunch), "with the setting on, a later launch plays the intro (\(every?.rawValue ?? "none"))")
+            s.removePersistentDomain(forName: suite)
+        } else {
+            check(false, "settings of its own for the intro check")
+        }
+        let play = ActionID.playIntro.action
+        check(play.menu == "Help" && play.title == "Play the Intro", "Play the Intro is among the actions, in Help")
 
         // Which circuit reopens, and that it opens (or a new one does).
         let recents = (UserDefaults.standard.stringArray(forKey: recentsKey) ?? []).map { URL(fileURLWithPath: $0) }
@@ -663,6 +684,19 @@ enum LaunchFocusCheck {
         NSApp.windows.first { $0.isVisible && NSDocumentController.shared.document(for: $0) != nil }
     }
 
+    /// A menu bar item by its title, anywhere in the menus.
+    static func menuItem(_ title: String) -> NSMenuItem? {
+        func find(_ menu: NSMenu) -> NSMenuItem? {
+            menu.update()
+            for item in menu.items {
+                if item.title == title { return item }
+                if let sub = item.submenu, let f = find(sub) { return f }
+            }
+            return nil
+        }
+        return NSApp.mainMenu.flatMap(find)
+    }
+
     /// File > Export as Image…, as the menu bar shows it now.
     static func exportEnabled() -> Bool? {
         func find(_ menu: NSMenu) -> NSMenuItem? {
@@ -720,6 +754,7 @@ enum LaunchFocusCheck {
             check(state, export == true, "\(when): File > Export as Image… is enabled (\(export.map { $0 ? "on" : "off" } ?? "missing"))")
         }
         inFront("after launch")
+        check(state, menuItem("Play the Intro") != nil, "Help > Play the Intro is in the menu bar")
         // Another window in front for a moment, then gone: the circuit's
         // window comes back in front with nothing else changing.
         let other = NSWindow(contentRect: NSRect(x: w.frame.midX - 160, y: w.frame.midY - 90, width: 320, height: 180),

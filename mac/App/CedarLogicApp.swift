@@ -800,6 +800,7 @@ struct HelpCommands: Commands {
             Button("Keyboard Shortcuts") { (canvas ?? CanvasController.front)?.showShortcuts = true }
             Divider()
             Button("What's New in CedarLogic…") { openWindow(id: "whatsnew") }
+            Button("Play the Intro") { Splash.shared.playIntroNow() }
             Button("Welcome to CedarLogic…") { openWindow(id: "welcome") }
             Button("Set Up CedarLogic…") { ActionID.setUp.run(canvas) }
             Button("Guided Tour") { TourModel.shared.start() }
