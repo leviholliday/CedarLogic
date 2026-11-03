@@ -21,10 +21,11 @@ struct CircuitWindow: View {
         CLLayout(document: document, canvas: canvas, page: $page)
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { n in
             if (n.object as? NSWindow) === canvas.view?.window {
-                CanvasController.front = canvas
+                canvas.windowBecameKey()
                 LastCircuit.note(canvas.view?.window)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .clSplashGone)) { _ in canvas.windowBecameKey() }
         .focusedSceneObject(canvas)
         .tint(theme.accent.color)
         .onChange(of: undoManager) { _, um in canvas.undoManager = um }

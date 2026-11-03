@@ -348,3 +348,135 @@ enum LaunchSelfTest {
         return failures == 0
     }
 }
+
+// MARK: - Focus after launch (a real launch)
+
+/// `CL_FOCUS_CHECK=<state>`, in a copy of the app set up by `--launch-selftest
+/// setup <state>` (mac/Tools/launch-selftest.sh with FOCUS=1): a real launch,
+/// its windows on screen, nothing clicked. Once the launch screen has gone --
+/// and, in `first` and `updated`, the welcome or What's New has been closed as
+/// its last button closes it -- the circuit window has to be the key window,
+/// its canvas has to have the keyboard and the menus have to see the circuit
+/// (File > Export as Image… enabled). The owner's "the top bar is greyed out
+/// until I click the grid" was these failing. PASS or FAIL for each, a TRACE
+/// line whenever who has the keys changes; exit 1 on a failure.
+@MainActor
+enum LaunchFocusCheck {
+    private static var failures = 0
+    private static var lastTrace = ""
+    private static let t0 = CACurrentMediaTime()
+
+    static func startIfAsked() {
+        guard let state = ProcessInfo.processInfo.environment["CL_FOCUS_CHECK"], !state.isEmpty else { return }
+        setvbuf(stdout, nil, _IOLBF, 0)
+        guard let id = Bundle.main.bundleIdentifier, id != LaunchSelfTest.realBundle, SessionCheck.isolatedHome() else {
+            print("focus-check: only in a copy of the app with a home folder of its own; run FOCUS=1 mac/Tools/launch-selftest.sh")
+            exit(2)
+        }
+        let trace = Timer(timeInterval: 0.05, repeats: true) { _ in MainActor.assumeIsolated { traceKeys() } }
+        RunLoop.main.add(trace, forMode: .common)
+        Task { @MainActor in
+            guard await run(state) else {
+                // Nothing to check: macOS kept another app in front (the
+                // screen locked, or you typing elsewhere as it launched).
+                let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+                print("SKIP focus-check \(state): CedarLogic wasn't brought to the front (\(locked ? "the screen is locked" : "another app kept it"))")
+                exit(3)
+            }
+            print(failures == 0 ? "focus-check \(state): all passed" : "focus-check \(state): \(failures) failed")
+            exit(failures == 0 ? 0 : 1)
+        }
+    }
+
+    private static func check(_ state: String, _ ok: Bool, _ what: String) {
+        print((ok ? "PASS " : "FAIL ") + "\(state): " + what)
+        if !ok { failures += 1 }
+    }
+
+    private static func wait(_ seconds: Double) async {
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
+
+    private static func name(_ w: NSWindow?) -> String {
+        guard let w else { return "none" }
+        if NSDocumentController.shared.document(for: w) != nil { return "circuit" }
+        if let id = w.identifier?.rawValue, !id.isEmpty { return id.components(separatedBy: "-").first ?? id }
+        return w.title.isEmpty ? String(describing: type(of: w)) : w.title
+    }
+
+    static var circuitWindow: NSWindow? {
+        NSApp.windows.first { $0.isVisible && NSDocumentController.shared.document(for: $0) != nil }
+    }
+
+    /// File > Export as Image…, as the menu bar shows it now.
+    static func exportEnabled() -> Bool? {
+        func find(_ menu: NSMenu) -> NSMenuItem? {
+            menu.update()
+            for item in menu.items {
+                if item.title.hasPrefix("Export as Image") { return item }
+                if let sub = item.submenu, let f = find(sub) { return f }
+            }
+            return nil
+        }
+        guard let main = NSApp.mainMenu, let item = find(main) else { return nil }
+        return item.isEnabled
+    }
+
+    private static func traceKeys() {
+        let fr = NSApp.keyWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
+        let line = "active=\(NSApp.isActive) key=\(name(NSApp.keyWindow)) main=\(name(NSApp.mainWindow)) firstResponder=\(fr) "
+            + "export=\(exportEnabled().map { $0 ? "on" : "off" } ?? "missing") splash=\(Splash.shared.showing)"
+        guard line != lastTrace else { return }
+        lastTrace = line
+        print(String(format: "TRACE %5.2f s ", CACurrentMediaTime() - t0) + line)
+    }
+
+    /// False when the app never came to the front, so there's nothing to check.
+    private static func run(_ state: String) async -> Bool {
+        // The launch screen plays, then dissolves into the window.
+        var waited = 0.0
+        while (Splash.shared.showing || circuitWindow == nil) && waited < 20 { await wait(0.1); waited += 0.1 }
+        await wait(1.0)
+        guard NSApp.isActive else { return false }
+        check(state, !Splash.shared.showing, String(format: "the launch screen went (%.1f s)", waited))
+        let greeting = NSApp.windows.first { w in
+            w.isVisible && ["welcome", "whatsnew"].contains { w.identifier?.rawValue.contains($0) == true }
+        }
+        let expected = ["first": "welcome", "updated": "whatsnew"][state]
+        check(state, (greeting?.identifier?.rawValue.contains(expected ?? "-") ?? false) == (expected != nil),
+              "\(expected ?? "no greeting") is up (\(name(greeting)))")
+        if let greeting {
+            check(state, greeting.isKeyWindow, "it has the keys, over the circuit (key: \(name(NSApp.keyWindow)))")
+            // As its last page's button does: it closes.
+            greeting.close()
+            await wait(1.0)
+        }
+        check(state, NSApp.isActive, "CedarLogic is the active app")
+        let w = circuitWindow
+        check(state, w != nil, "a circuit window is open")
+        guard let w else { return true }
+        func inFront(_ when: String) {
+            check(state, w.isKeyWindow, "\(when): the circuit window is the key window (key: \(name(NSApp.keyWindow)))")
+            check(state, w.isMainWindow, "\(when): and the main window (main: \(name(NSApp.mainWindow)))")
+            let fr = w.firstResponder
+            check(state, fr is CircuitCanvasNSView, "\(when): its canvas has the keyboard (\(fr.map { String(describing: type(of: $0)) } ?? "none"))")
+            check(state, CanvasController.front?.view?.window === w, "\(when): it's the front canvas")
+            let export = exportEnabled()
+            check(state, export == true, "\(when): File > Export as Image… is enabled (\(export.map { $0 ? "on" : "off" } ?? "missing"))")
+        }
+        inFront("after launch")
+        // Another window in front for a moment, then gone: the circuit's
+        // window comes back in front with nothing else changing.
+        let other = NSWindow(contentRect: NSRect(x: w.frame.midX - 160, y: w.frame.midY - 90, width: 320, height: 180),
+                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        other.isReleasedWhenClosed = false
+        other.title = "Focus check"
+        other.makeKeyAndOrderFront(nil)
+        await wait(0.6)
+        check(state, other.isKeyWindow, "another window in front takes the keys")
+        other.close()
+        await wait(1.0)
+        inFront("after another window")
+        return true
+    }
+}
