@@ -6,6 +6,10 @@
 // Then it dissolves into the window. About two and a half seconds, and it
 // can't be skipped.
 //
+// On the very first launch, and the first after an update with a What's
+// New tour, the intro plays in its place (Intro.swift): the circuit drawing
+// itself, over the circuit window, dissolving into it.
+//
 // And the smaller card that opens a circuit: its name on glass, a quick
 // sweep, and the circuit fades up (OpeningCard).
 
@@ -85,11 +89,19 @@ final class Splash: ObservableObject {
     private var lastStepAt: Double = 0
 
     static let dissolveTime = 0.42
+    /// The intro, playing instead of the panel (Intro.swift), and skipped.
+    private(set) var intro: Intro.Trigger?
+    private var introView: IntroView?
+    private var skipped = false
+    private var skipMonitor: Any?
     /// The very first launch: slower, with its own sound (FirstLaunch.m4a,
     /// from mac/Tools/make-launch-sound.py), fading into the welcome.
     let firstLaunch = !UserDefaults.standard.bool(forKey: "cl.hasSeenWelcome")
         && !UserDefaults.standard.bool(forKey: "cl.firstLaunchPlayed")
-    var fadeTime: Double { firstLaunch ? 1.1 : Self.dissolveTime }
+    var fadeTime: Double {
+        if intro != nil { return skipped ? 0.3 : Self.reduceMotion ? Intro.calmFade : Intro.fade }
+        return firstLaunch ? 1.1 : Self.dissolveTime
+    }
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     var elapsed: Double { Date().timeIntervalSince(start) }
@@ -110,6 +122,11 @@ final class Splash: ObservableObject {
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
                                                          reason: "The launch screen")
         if Self.reduceMotion { dissolveAt = 1.1 }
+        intro = Intro.pending()
+        if let intro {
+            dissolveAt = Self.reduceMotion ? Intro.calmHold : Intro.dissolveAt
+            SplashDebug.log("intro: " + intro.rawValue)
+        }
         let size = NSSize(width: 560, height: 372)
         // Where you're looking: the screen with the pointer on it.
         let mouse = NSEvent.mouseLocation
@@ -126,25 +143,34 @@ final class Splash: ObservableObject {
         w.isReleasedWhenClosed = false
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         w.appearance = NSAppearance(named: .darkAqua)
-        let host = NSHostingView(rootView: SplashView(model: self))
-        host.frame = NSRect(origin: .zero, size: size)
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView(frame: host.frame)
-            glass.cornerRadius = 30
-            glass.style = .regular
-            glass.tintColor = NSColor(srgbRed: 0.02, green: 0.07, blue: 0.04, alpha: 0.72)
-            glass.contentView = host
-            w.contentView = glass
+        if intro != nil {
+            // The intro's panel: laid over the circuit window once that's
+            // there (`begin`); a click on it skips.
+            w.ignoresMouseEvents = false
+            let v = IntroView(frame: NSRect(origin: .zero, size: size))
+            w.contentView = v
+            introView = v
         } else {
-            let blur = NSVisualEffectView(frame: host.frame)
-            blur.material = .hudWindow
-            blur.blendingMode = .behindWindow
-            blur.state = .active
-            blur.wantsLayer = true
-            blur.layer?.cornerRadius = 30
-            blur.layer?.masksToBounds = true
-            blur.addSubview(host)
-            w.contentView = blur
+            let host = NSHostingView(rootView: SplashView(model: self))
+            host.frame = NSRect(origin: .zero, size: size)
+            if #available(macOS 26.0, *) {
+                let glass = NSGlassEffectView(frame: host.frame)
+                glass.cornerRadius = 30
+                glass.style = .regular
+                glass.tintColor = NSColor(srgbRed: 0.02, green: 0.07, blue: 0.04, alpha: 0.72)
+                glass.contentView = host
+                w.contentView = glass
+            } else {
+                let blur = NSVisualEffectView(frame: host.frame)
+                blur.material = .hudWindow
+                blur.blendingMode = .behindWindow
+                blur.state = .active
+                blur.wantsLayer = true
+                blur.layer?.cornerRadius = 30
+                blur.layer?.masksToBounds = true
+                blur.addSubview(host)
+                w.contentView = blur
+            }
         }
         w.alphaValue = 0
         w.orderFrontRegardless()   // unseen: drawn once now, not as it begins
@@ -185,12 +211,46 @@ final class Splash: ObservableObject {
         began = true
         SplashDebug.log("begin")
         start = Date()
+        if let intro { beginIntro(intro, in: w); return }
         if firstLaunch { playSound() }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.2
             w.animator().alphaValue = 1
         }
         work()
+    }
+
+    /// The intro: its panel laid exactly over the circuit window (where that
+    /// will come in), then played; any key or click skips it.
+    private func beginIntro(_ trigger: Intro.Trigger, in panel: NSWindow) {
+        Intro.markPlayed(trigger)
+        let screen = panel.screen ?? NSScreen.main
+        if let screen { place(held, on: screen) }
+        let doc = held.first { NSDocumentController.shared.document(for: $0) != nil } ?? held.first
+        let vis = screen?.visibleFrame ?? panel.frame
+        let frame = doc?.frame ?? NSRect(x: (vis.midX - 640).rounded(), y: (vis.midY - 400).rounded(), width: 1280, height: 800)
+        panel.setFrame(frame, display: false)
+        let corner: CGFloat
+        if #available(macOS 26.0, *) { corner = 16 } else { corner = 10 }
+        introView?.frame = NSRect(origin: .zero, size: frame.size)
+        introView?.prepare(trigger, size: frame.size, cornerRadius: corner)
+        panel.alphaValue = 1
+        introView?.play(calm: Self.reduceMotion)
+        if trigger == .firstLaunch { Intro.playSound(calm: Self.reduceMotion) }
+        skipMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] e in
+            MainActor.assumeIsolated { self?.skipIntro() ?? false } ? nil : e
+        }
+    }
+
+    /// A key or click while the intro plays: it goes, quickly (and the key
+    /// or click with it).
+    private func skipIntro() -> Bool {
+        guard active, intro != nil, !skipped else { return false }
+        SplashDebug.log("intro skipped")
+        skipped = true
+        Intro.fadeSound()
+        finish()
+        return true
     }
 
     /// The palette's pictures for the family it opens on, drawn before the
@@ -274,6 +334,19 @@ final class Splash: ObservableObject {
         if elapsed >= dissolveAt { finish() }
     }
 
+    /// They come in where the launch screen was (the screen you were
+    /// looking at), not wherever macOS put them.
+    private func place(_ windows: [NSWindow], on screen: NSScreen) {
+        let vis = screen.visibleFrame
+        for w in windows where !w.styleMask.contains(.fullScreen) && w.screen !== screen {
+            var f = w.frame
+            f.size.width = min(f.width, vis.width)
+            f.size.height = min(f.height, vis.height)
+            f.origin = NSPoint(x: (vis.midX - f.width / 2).rounded(), y: (vis.midY - f.height / 2).rounded())
+            w.setFrame(f, display: false)
+        }
+    }
+
     private func finish() {
         guard active else { return }
         active = false
@@ -284,26 +357,19 @@ final class Splash: ObservableObject {
         let windows = held
         held = []
         SplashDebug.log("finish: \(windows.count) window(s) coming in")
-        // They come in where the launch screen was (the screen you were
-        // looking at), not wherever macOS put them.
-        if let screen = panel?.screen {
-            let vis = screen.visibleFrame
-            for w in windows where !w.styleMask.contains(.fullScreen) && w.screen !== screen {
-                var f = w.frame
-                f.size.width = min(f.width, vis.width)
-                f.size.height = min(f.height, vis.height)
-                f.origin = NSPoint(x: (vis.midX - f.width / 2).rounded(), y: (vis.midY - f.height / 2).rounded())
-                w.setFrame(f, display: false)
-            }
-        }
+        if let screen = panel?.screen { place(windows, on: screen) }
+        if let m = skipMonitor { NSEvent.removeMonitor(m); skipMonitor = nil }
         // The canvases fade their grid in with the windows (their own appear
         // played while they were hidden).
         NotificationCenter.default.post(name: .clSplashDone, object: nil)
+        // (The intro fades itself out as it plays, unless it's cut short or
+        // it's the Reduce Motion still.)
+        let panelFades = intro == nil || skipped || Self.reduceMotion
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = fadeTime
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             for w in windows { w.animator().alphaValue = 1 }
-            panel?.animator().alphaValue = 0
+            if panelFades { panel?.animator().alphaValue = 0 }
         }
         // Done on a clock of its own, not the animation's completion: when
         // macOS doesn't run the fade (the windows in Stage Manager's strip,
@@ -311,6 +377,8 @@ final class Splash: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + fadeTime + 0.05) { [weak self] in
             for w in windows where w.alphaValue < 1 { w.alphaValue = 1 }
             SplashDebug.log("dissolved")
+            self?.introView?.stop()
+            self?.introView = nil
             self?.panel?.orderOut(nil)
             self?.panel = nil
             if let a = self?.activity { ProcessInfo.processInfo.endActivity(a); self?.activity = nil }
