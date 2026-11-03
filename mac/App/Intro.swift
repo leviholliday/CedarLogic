@@ -1,16 +1,29 @@
 // The intro: the very first launch, and the first launch after an update
 // with a What's New tour, open with the circuit drawing itself before the
-// launch screen. Over the circuit window, on a dark canvas, two wires trace
-// in from their pins, a bright head running along them and slowing into
-// each end; the letters of the icon snap into place as the wires reach them
-// (the C, the D -- an AND gate -- and the L, which the output runs down); a
-// clock pulse runs through, the D lights, and as the pulse lands the LED
-// lights and a seven-segment display beside it spells the version. The LED
-// blooms into the icon itself, which flies into the launch screen's panel
-// (Splash.swift), and that plays its sweep of light, shortened, and
-// dissolves into the window (and the welcome, or What's New, on top).
-// About 3.4 seconds; any key or click skips it; with Reduce Motion it's
-// just the launch screen's still panel and a 0.4 s crossfade.
+// launch screen. The same intro both times (only the first launch has the
+// sound). About 5 seconds:
+//
+//   0.00-0.45  over the circuit window, the dark canvas fades in from
+//              nothing, its grid and the two input pins easing in with it.
+//   0.40-1.96  two wires trace in from their pins, a bright head running
+//              along them and slowing into each end; the letters of the
+//              icon snap into place as the wires reach them (the C, the D
+//              -- an AND gate -- and the L, which the output runs down to
+//              the LED); a seven-segment display draws in beside it.
+//   1.99-2.58  a clock pulse runs through, the D lights, and as it lands
+//              the LED lights (the sound's bell chord lands here) and the
+//              display spells the version, a digit at a time.
+//   2.58-3.05  a beat, everything lit, so it registers.
+//   3.05-3.64  the LED blooms into the icon itself, which flies into the
+//              launch screen's panel (Splash.swift) as that fades in over it,
+//              part-way into its own appearance: its traces drawing in, its
+//              name writing itself in, its bar filling ...
+//   3.52-4.42  ... and its sweep of light, at full length, as on any launch;
+//   4.42-4.97  then it dissolves into the window (and the welcome, or What's
+//              New, on top), a crossfade.
+//
+// Any key or click skips it; with Reduce Motion it's just the launch
+// screen's still panel and a 0.4 s crossfade.
 //
 // Once drawn, the wires are the canvas's own: 1 pt lines in the dark
 // canvas's low-wire colour with a dot where each meets its pin, and
@@ -35,22 +48,34 @@ enum Intro {
     static let firstKey = "cl.introFirstLaunchPlayed"
     static let updateKey = "cl.introUpdatePlayed"
 
-    /// The timeline, in seconds. The LED lights at `ledAt`; the first
-    /// launch's sound starts part-way in so its bell chord (4.0 s into
-    /// FirstLaunch.m4a) lands on it.
-    static let ledAt = 1.95
+    /// The timeline, in seconds (the header has it all). The canvas fades
+    /// in over `fadeIn` (the intro's panel, as a whole) ...
+    static let fadeIn = 0.45
+    /// ... and the LED lights at `ledAt`; the first launch's sound starts
+    /// part-way in so its bell chord (4.0 s into FirstLaunch.m4a) lands on it.
+    static let ledAt = 2.58
     static let soundHit = 4.0
+    /// It holds, lit, until it blooms.
+    static let bloomAt = ledAt + 0.47
     /// The launch screen's panel comes in over the bloom ...
-    static let cardIn = 2.12
-    static let cardFade = 0.25
-    /// ... at this moment of its own clock (everything in it already up) ...
-    static let splashAt = 1.5
-    /// ... plays its sweep, half its usual length ...
-    static let sweep = 0.45
+    static let cardIn = bloomAt + 0.27
+    static let cardFade = 0.32
+    /// ... at this moment of its own clock (its icon up, its name just
+    /// starting to write itself in) ...
+    static let splashAt = 0.65
+    /// ... plays the rest of its appearance and its sweep, at full length
+    /// (Splash's own timing) ...
+    static var dissolveAt: Double { cardIn + Splash.sweepStart + Splash.sweepTime - splashAt }
     /// ... and dissolves into the window.
-    static var dissolveAt: Double { cardIn + cardFade + sweep }
     static let fade = 0.55
     static var total: Double { dissolveAt + fade }
+    /// How far the intro's panel has faded in, `t` seconds in: it's faded
+    /// in as a whole by the window server (ease in and out), so it can't be
+    /// missed if the first frames are slow; a picture of it uses this.
+    static func fadeInShown(_ t: Double) -> Double {
+        let c = min(1, max(0, t / fadeIn))
+        return c < 0.5 ? 2 * c * c : 1 - pow(-2 * c + 2, 2) / 2
+    }
     /// Reduce Motion: the launch screen's still, briefly, then a crossfade.
     static let calmHold = 0.5
     static let calmFade = 0.4
@@ -290,11 +315,11 @@ final class IntroScene {
         // bends: two inputs through the C into the D (an AND gate), and its
         // output down the L to the LED.
         wires = [makeWire([CGPoint(x: 20, y: 217.5), CGPoint(x: 124, y: 217.5), CGPoint(x: 124, y: 206), CGPoint(x: 196, y: 206)],
-                          draw: (0.14, 0.88), pulse: (1.46, 1.70)),
+                          draw: (0.40, 1.29), pulse: (1.99, 2.29)),
                  makeWire([CGPoint(x: 20, y: 253.5), CGPoint(x: 132, y: 253.5), CGPoint(x: 132, y: 288), CGPoint(x: 196, y: 288)],
-                          draw: (0.18, 0.90), pulse: (1.46, 1.70)),
+                          draw: (0.45, 1.31), pulse: (1.99, 2.29)),
                  makeWire([CGPoint(x: 351, y: 247), CGPoint(x: 376, y: 247), CGPoint(x: 376, y: 316), CGPoint(x: 486, y: 316)],
-                          draw: (1.0, 1.44), pulse: (1.72, Intro.ledAt))]
+                          draw: (1.43, 1.96), pulse: (2.31, Intro.ledAt))]
 
         // The input pins: small rings, as in the icon.
         for y in [217.5, 253.5] as [CGFloat] {
@@ -326,9 +351,9 @@ final class IntroScene {
         l.addLines(between: [CGPoint(x: 395, y: 172), CGPoint(x: 419, y: 172), CGPoint(x: 377, y: 325),
                              CGPoint(x: 470, y: 325), CGPoint(x: 455, y: 350), CGPoint(x: 345, y: 350)])
         l.closeSubpath()
-        letters = [makeLetter(cOutline, popAt: 0.34, trace: (0.26, 0.74)),
-                   makeLetter(dOutline, popAt: 0.86, trace: (0.80, 1.12)),
-                   makeLetter(l, popAt: 1.10, trace: (1.04, 1.38))]
+        letters = [makeLetter(cOutline, popAt: 0.64, trace: (0.54, 1.12)),
+                   makeLetter(dOutline, popAt: 1.26, trace: (1.19, 1.58)),
+                   makeLetter(l, popAt: 1.55, trace: (1.48, 1.89))]
 
         // The LED at the end of the output.
         let ledC = p(494, 316), lr = 8 * k
@@ -512,7 +537,7 @@ final class IntroScene {
             dim.path = off
             dim.fillColor = Self.neon.copy(alpha: 0.07)
             display.addSublayer(dim)
-            let d = Digit(at: Intro.ledAt + 0.07 * Double(order))
+            let d = Digit(at: Intro.ledAt + 0.1 * Double(order))
             d.glow.frame = root.bounds
             d.glow.path = on
             d.glow.fillColor = nil
@@ -550,7 +575,7 @@ final class IntroScene {
     }
     /// A snap into place: from small up past full size and back.
     private static func pop(_ t: Double, _ at: Double, from: Double = 0.6) -> Double {
-        let u = clamp((t - at) / 0.26)
+        let u = clamp((t - at) / 0.3)
         if u <= 0 { return from }
         let s = 1 - pow(1 - u, 3)
         return from + (1 - from) * s + 0.22 * sin(u * .pi) * (1 - u)
@@ -562,18 +587,20 @@ final class IntroScene {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         let S = Self.self
-        ground.opacity = Float(S.smooth(t, 0, 0.22))
-        grid.opacity = Float(S.smooth(t, 0.04, 0.5) * 0.85)
-        vignette.opacity = ground.opacity
+        let bloomAt = Intro.bloomAt
+        // The canvas itself fades in with the intro's panel as a whole (in
+        // a picture, `Intro.fadeInShown`); its grid comes up a little after.
+        grid.opacity = Float(S.smooth(t, 0.1, 0.75) * 0.85)
 
         // The circuit goes as the icon arrives over it; the display (and
         // the canvas) as the launch screen's panel comes in.
-        circuit.opacity = Float(1 - S.smooth(t, 2.06, 2.24))
-        display.opacity = Float(S.smooth(t, 1.38, 1.5) * (1 - S.smooth(t, Intro.cardIn, Intro.cardIn + Intro.cardFade)))
+        circuit.opacity = Float(1 - S.smooth(t, bloomAt + 0.12, bloomAt + 0.32))
+        display.opacity = Float(S.smooth(t, 1.86, 2.0) * (1 - S.smooth(t, Intro.cardIn, Intro.cardIn + Intro.cardFade)))
 
+        // The pins ease in with the canvas, just before the wires leave them.
         for (i, pin) in pins.enumerated() {
-            let at = 0.08 + 0.05 * Double(i)
-            pin.opacity = Float(S.smooth(t, at, at + 0.08))
+            let at = 0.16 + 0.07 * Double(i)
+            pin.opacity = Float(S.smooth(t, at, at + 0.2))
             pin.setAffineTransform(CGAffineTransform(scaleX: S.pop(t, at, from: 0.2), y: S.pop(t, at, from: 0.2)))
         }
 
@@ -590,49 +617,58 @@ final class IntroScene {
             }
             // Filled faintly once outlined: silver glass.
             l.outline.fillColor = Self.silver.copy(alpha: 0.13 * S.smooth(t, l.trace.1 - 0.15, l.trace.1 + 0.1))
-            // The clock pulse catches the outlines as it passes.
-            l.glow.strokeColor = Self.neon.copy(alpha: 0.22 + 0.4 * S.smooth(t, 1.6, 1.8) * (1 - S.smooth(t, 1.9, 2.1)))
+            // The clock pulse catches the outlines as it passes, and they
+            // stay lit until the bloom.
+            l.glow.strokeColor = Self.neon.copy(alpha: 0.22 + 0.4 * S.smooth(t, 2.16, 2.4) * (1 - S.smooth(t, bloomAt, bloomAt + 0.2)))
         }
         // The gate fires: its inside glows green.
-        gateGlow.opacity = Float(0.08 + 0.32 * S.ease(t, 1.70, 1.84))
-        gateGlow.isHidden = t < 0.86
+        gateGlow.opacity = Float(0.08 + 0.32 * S.ease(t, 2.29, 2.45))
+        gateGlow.isHidden = t < 1.26
 
-        // The LED: in when the output reaches it, lit as the pulse lands.
-        let ledIn = S.pop(t, 1.42, from: 0.3)
+        // The LED: in when the output reaches it, lit as the pulse lands
+        // with a flash that settles, held lit, then swelling into the bloom.
+        let ledIn = S.pop(t, 1.91, from: 0.3)
         ledRing.setAffineTransform(CGAffineTransform(scaleX: ledIn, y: ledIn))
-        ledRing.opacity = Float(S.smooth(t, 1.40, 1.48))
+        ledRing.opacity = Float(S.smooth(t, 1.88, 1.98))
         let lit = S.ease(t, Intro.ledAt, Intro.ledAt + 0.06)
         ledCore.opacity = Float(lit)
+        let core = S.pop(t, Intro.ledAt, from: 0.7)
+        ledCore.setAffineTransform(CGAffineTransform(scaleX: core, y: core))
         ledGlow.opacity = Float(lit)
-        let g = 0.6 + 0.8 * lit
+        let fu = S.clamp((t - Intro.ledAt) / 0.45)
+        let flash = fu > 0 ? pow(1 - fu, 2) * min(1, fu / 0.08) : 0
+        let g = 0.6 + 0.8 * lit + 0.55 * flash + 0.4 * S.smooth(t, bloomAt - 0.22, bloomAt)
         ledGlow.setAffineTransform(CGAffineTransform(scaleX: g, y: g))
 
-        // The version, a digit at a time.
-        housing.strokeEnd = S.smooth(t, 1.36, 1.6)
+        // The version, a digit at a time, each flaring as it lights.
+        housing.strokeEnd = S.smooth(t, 1.84, 2.13)
         for d in digits {
             let on = S.ease(t, d.at, d.at + 0.06)
             d.lit.opacity = Float(on)
-            d.glow.opacity = Float(on * (0.6 + 0.4 * (1 - S.smooth(t, d.at + 0.06, d.at + 0.3))))
+            d.glow.opacity = Float(on * (0.6 + 0.4 * (1 - S.smooth(t, d.at + 0.06, d.at + 0.36))))
         }
 
         // The bloom: a flash out of the LED that fills the canvas.
-        let bl = S.ease(t, Intro.ledAt + 0.02, Intro.ledAt + 0.34)
+        let bl = S.ease(t, bloomAt, bloomAt + 0.44)
         let bs = 0.04 + 0.96 * bl
         bloom.setAffineTransform(CGAffineTransform(scaleX: bs, y: bs))
-        bloom.opacity = Float(0.9 * S.smooth(t, Intro.ledAt, Intro.ledAt + 0.06) * (1 - S.smooth(t, Intro.ledAt + 0.1, Intro.ledAt + 0.42)))
+        bloom.opacity = Float(0.9 * S.smooth(t, bloomAt - 0.02, bloomAt + 0.08) * (1 - S.smooth(t, bloomAt + 0.14, bloomAt + 0.56)))
 
         // The icon: over the circuit, its own art where the circuit was, then
         // flying to where the launch screen's own icon is, and handing over.
         let big = CGRect(origin: p(0, 512), size: CGSize(width: 512 * k, height: 512 * k))
         let small = Self.cardIconSize
         let target = CGRect(x: cardIcon.x - small / 2, y: cardIcon.y - small / 2, width: small, height: small)
-        let fly = S.smooth(t, 2.12, 2.4)
+        // (Landed just as the panel is half in, so they don't double up.)
+        let fly = S.smooth(t, bloomAt + 0.14, bloomAt + 0.44)
         func mix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * fly }
         let frame = CGRect(x: mix(big.minX, target.minX), y: mix(big.minY, target.minY),
                            width: mix(big.width, target.width), height: mix(big.height, target.height))
         icon.bounds = CGRect(origin: .zero, size: frame.size)
         icon.position = CGPoint(x: frame.midX, y: frame.midY)
-        icon.opacity = Float(S.smooth(t, Intro.ledAt + 0.04, Intro.ledAt + 0.22) * (1 - S.smooth(t, 2.34, 2.44)))
+        // Gone into the panel's own icon as the panel finishes coming in.
+        let landed = Intro.cardIn + Intro.cardFade
+        icon.opacity = Float(S.smooth(t, bloomAt + 0.05, bloomAt + 0.26) * (1 - S.smooth(t, landed - 0.14, landed)))
         iconGlow.bounds = CGRect(x: 0, y: 0, width: frame.width * 1.9, height: frame.height * 1.9)
         iconGlow.position = icon.position
         iconGlow.opacity = icon.opacity * Float(0.55 + 0.25 * (1 - fly))
@@ -771,7 +807,7 @@ final class IntroView: NSView {
 // MARK: - Rendering it
 
 /// `CedarLogic --render-intro <dir> [first|update]`: the intro at 60 fps,
-/// a PNG a frame (frame-0000.png on), at 2x: the intro over a picture of a
+/// a PNG a frame (frame-0000.png on), at 2x, on black: the intro over a picture of a
 /// new circuit's window (dark), with the launch screen's panel drawn over
 /// it from its own view, fading into the window as they do on screen. Also
 /// wire-compare.png: a wire as the canvas draws it (a real canvas, at its
@@ -818,14 +854,20 @@ enum RenderIntro {
             let t = Double(f) / 60
             scene.apply(t)
             let ctx = context()
-            // The window under it all, coming in over the dissolve (Splash
-            // fades it in, ease in and out) as the panels go.
+            // On black: the intro fades in from nothing (over the desktop,
+            // on screen), and a video can't show see-through.
+            ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+            ctx.fill(CGRect(origin: .zero, size: size))
+            // The window under it all: put in under the intro's panel as the
+            // dissolve begins (Splash), the panels fading off it.
             let shown = ease((t - Intro.dissolveAt) / Intro.fade)
-            if let behind {
-                ctx.setAlpha(shown)
+            if let behind, t >= Intro.dissolveAt {
+                ctx.setAlpha(1)
                 ctx.draw(behind, in: CGRect(origin: .zero, size: size))
             }
-            ctx.setAlpha(1 - shown)
+            // The intro's panel, fading in at first as a whole (as Splash
+            // fades its window in).
+            ctx.setAlpha((1 - shown) * Intro.fadeInShown(t))
             ctx.beginTransparencyLayer(auxiliaryInfo: nil)
             scene.root.render(in: ctx)
             ctx.endTransparencyLayer()
@@ -851,7 +893,7 @@ enum RenderIntro {
             ctx.draw(reference, in: CGRect(origin: .zero, size: size))
             let real = ctx.makeImage()?.cropping(to: CGRect(x: (size.width / 2 - crop.width / 2) * scale, y: (size.height / 2 - crop.height / 2) * scale,
                                                             width: crop.width * scale, height: crop.height * scale))
-            scene.apply(1.45)
+            scene.apply(1.8)
             let ctx2 = context()
             scene.root.render(in: ctx2)
             let b = scene.firstWireBend

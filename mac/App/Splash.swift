@@ -9,7 +9,8 @@
 // On the very first launch, and the first after an update with a What's
 // New tour, the intro plays first (Intro.swift): the circuit drawing itself
 // over the circuit window, its LED blooming into the icon, which flies into
-// this panel; the panel then plays its sweep (half as long) and dissolves.
+// this panel as it fades in, part-way into its own appearance; the panel
+// then plays the rest of it, its sweep at full length, and dissolves.
 //
 // And the smaller card that opens a circuit: its name on glass, a quick
 // sweep, and the circuit fades up (OpeningCard).
@@ -96,10 +97,16 @@ final class Splash: ObservableObject {
     private var introView: IntroView?
     private var skipped = false
     private var skipMonitor: Any?
-    /// The panel's title, and its sweep of light (when, how long).
+    /// When the intro's panel began fading in (it covers the circuit
+    /// window exactly once it's in).
+    private var introPlayed: Date?
+    /// The panel's title, and its sweep of light (when, how long; the
+    /// intro's panel plays the same).
     @Published private(set) var title = "CedarLogic"
-    private(set) var sweepAt = 0.85
-    private(set) var sweepLength = 0.9
+    static let sweepStart = 0.85
+    static let sweepTime = 0.9
+    private(set) var sweepAt = sweepStart
+    private(set) var sweepLength = sweepTime
     /// The very first launch: slower, with its own sound (FirstLaunch.m4a,
     /// from mac/Tools/make-launch-sound.py), fading into the welcome.
     let firstLaunch = !UserDefaults.standard.bool(forKey: "cl.hasSeenWelcome")
@@ -217,18 +224,20 @@ final class Splash: ObservableObject {
         work()
     }
 
-    /// After the intro (and for its pictures, RenderIntro): everything in
-    /// the panel already up, "Ready", the version in its title, the sweep
-    /// half as long, and the dissolve straight after it.
+    /// After the intro (and for its pictures, RenderIntro): "Ready", the
+    /// version in its title, the rest of its appearance from `Intro.splashAt`
+    /// on its own clock (the bar filling as it goes), its sweep at full
+    /// length, and the dissolve straight after it. The same after either
+    /// intro.
     func configureAfterIntro(_ trigger: Intro.Trigger) {
         intro = trigger
         status = "Ready"
         target = 1
         readyAt = 0
         title = "CedarLogic " + Intro.version
-        sweepAt = Intro.splashAt + Intro.cardFade
-        sweepLength = Intro.sweep
-        dissolveAt = Self.reduceMotion ? Intro.calmHold : Intro.splashAt + Intro.cardFade + Intro.sweep
+        sweepAt = Self.sweepStart
+        sweepLength = Self.sweepTime
+        dissolveAt = Self.reduceMotion ? Intro.calmHold : Intro.splashAt + Intro.dissolveAt - Intro.cardIn
     }
 
     /// The intro's own panel, under this one: laid over the circuit window
@@ -281,8 +290,14 @@ final class Splash: ObservableObject {
         // intro's points.
         let iconAt = CGPoint(x: card.frame.midX - frame.minX, y: card.frame.maxY - 44 - 64 - frame.minY)
         view.prepare(trigger, size: frame.size, cornerRadius: corner, cardIcon: iconAt)
-        ip.alphaValue = 1
         view.play()
+        introPlayed = Date()
+        // The canvas fades in, as a whole, before the wires trace.
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Intro.fadeIn
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ip.animator().alphaValue = 1
+        }
         start = Date().addingTimeInterval(Intro.cardIn - Intro.splashAt)
         DispatchQueue.main.asyncAfter(deadline: .now() + Intro.cardIn) { [weak self] in
             guard let self, self.active, !self.skipped else { return }
@@ -414,10 +429,18 @@ final class Splash: ObservableObject {
         // The canvases fade their grid in with the windows (their own appear
         // played while they were hidden).
         NotificationCenter.default.post(name: .clSplashDone, object: nil)
+        // The window the intro's panel covers exactly is put in under it at
+        // once, and the panel fades off it: a true crossfade, with no dip
+        // to the desktop halfway (not while the panel is still fading in).
+        var covered: [NSWindow] = []
+        if let ip = introPanel, let at = introPlayed, Date().timeIntervalSince(at) > Intro.fadeIn + 0.05 {
+            covered = windows.filter { $0.frame == ip.frame }
+        }
+        for w in covered { w.alphaValue = 1 }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = fadeTime
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            for w in windows { w.animator().alphaValue = 1 }
+            for w in windows where !covered.contains(where: { $0 === w }) { w.animator().alphaValue = 1 }
             panel?.animator().alphaValue = 0
             introPanel?.animator().alphaValue = 0
         }
@@ -507,7 +530,7 @@ struct SplashView: View {
                     .animation(.easeOut(duration: 0.2), value: model.status)
                     .opacity(Self.span(t, 0.5, 0.9))
                     .padding(.bottom, 14)
-                Bar(fill: model.intro != nil ? 1 : shownProgress(t)).padding(.horizontal, 30).padding(.bottom, 24)
+                Bar(fill: model.intro != nil ? introProgress(t) : shownProgress(t)).padding(.horizontal, 30).padding(.bottom, 24)
             }
             if !calm { Sweep(phase: Self.span(t, model.sweepAt, model.sweepAt + model.sweepLength)) }
         }
@@ -534,6 +557,15 @@ struct SplashView: View {
         let from = early(r)
         let end = max(r + 0.25, model.dissolveAt - 0.05)
         return from + (1 - from) * smooth((t - r) / (end - r))
+    }
+
+    /// After the intro: the bar glides home from where it'd be when the
+    /// panel comes in, as the panel plays (full at once with Reduce Motion).
+    private func introProgress(_ t: Double) -> Double {
+        if Splash.reduceMotion { return 1 }
+        func smooth(_ x: Double) -> Double { let c = min(1, max(0, x)); return c * c * (3 - 2 * c) }
+        let from = Intro.splashAt, end = model.dissolveAt - 0.05
+        return 0.3 + 0.7 * smooth((t - from) / (end - from))
     }
 
     /// The icon's faint grid, strongest in the middle.
