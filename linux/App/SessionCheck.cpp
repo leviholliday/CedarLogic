@@ -349,10 +349,10 @@ struct SessionDriver {
 		gdk_event_free(e);
 	}
 
-	static void motion(GtkWidget* widget, double x, double y, guint state) {
+	static void motion(GtkWidget* widget, double x, double y, guint state, bool warpToo = true) {
 		GdkWindow* gw = gtk_widget_get_window(widget);
 		if (gw == nullptr || !gtk_widget_get_mapped(widget)) return;
-		warp(gw, x, y);
+		if (warpToo) warp(gw, x, y);
 		GdkEvent* e = gdk_event_new(GDK_MOTION_NOTIFY);
 		e->motion.window = GDK_WINDOW(g_object_ref(gw));
 		e->motion.time = eventTime();
@@ -1515,11 +1515,13 @@ struct SessionDriver {
 		check(r->slidOut(), "the pointer gone, it's still out 150 ms later");
 		pump(600);
 		check(!r->slidOut(), "and back in after 400 ms");
-		// Passing through: in and out again at once (the pointer's own events,
-		// from the warps, arrive after these, in the same order).
+		// Passing through: in and out again at once. (Events only, the
+		// pointer itself left where it is, away: the display's own events
+		// for a warp there and back come later and on their own schedule.)
+		pump(300);
 		const double passStart = nowMs();
-		motion(dock, 5, 300, 0);
-		away();
+		motion(dock, 5, 300, 0, false);
+		motion(c->widget(), c->width() / 2.0, c->height() / 2.0, 0, false);
 		const double passMs = nowMs() - passStart;
 		pump(400);
 		check(!r->slidOut(), format("a pointer passing through the edge (%.0f ms there) doesn't open it", passMs));
