@@ -566,8 +566,18 @@ struct SessionDriver {
 	}
 
 	void pause(int at) {
+		// A window the last action opened over this one first (its keys can
+		// put a part on the pointer, which autosave rightly waits for).
+		waitForWindowsOver();
 		settle();
 		pump(2700);
+		// Something landed during the pause (a paste answered late, or a key
+		// to a window as it closed): dropped, as a person would, and the
+		// pause given again (CI, seed 4, once the Actions rail narrowed the canvas).
+		if (w->isFloating() || w->busyEditing()) {
+			settle();
+			pump(2700);
+		}
 		pauses++;
 		bool anyGates = false;
 		for (int p = 0; p < cl_document_page_count(doc()) && !anyGates; p++) anyGates = cl_document_gate_count(doc(), p) > 0;
@@ -1211,6 +1221,14 @@ struct SessionDriver {
 		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
 		tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
 		pump(10);
+		if (!w->hasSelection()) {
+			// Something still had the keys (a window going, a part on the pointer): once more.
+			waitForWindowsOver();
+			settle();
+			if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
+			tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
+			pump(30);
+		}
 		const bool selected = w->hasSelection();
 		// Each nudge is a step of its own (the engine merges none), so 520 of
 		// them always fill the history, whatever was on it before.
