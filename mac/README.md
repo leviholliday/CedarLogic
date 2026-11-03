@@ -170,8 +170,9 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   draws Settings > Sync and its sheets with `CedarLogic --render-sync <dir>`,
   and the What's New tour's pages with `CedarLogic --render-whatsnew <dir>`,
   and the Actions rail (`App/Actions.swift`) in whole windows -- open with a
-  label, mid-drag, folded, folded and slid out over the canvas (as on
-  hover), folded in focus mode, folded by itself in a narrow window, in
+  label, mid-drag, folded, folded with its tab peeking (the pointer in the
+  hot strip along the window's right edge, which slides it out), folded and
+  slid out over the canvas, folded in focus mode, folded by itself in a narrow window, in
   Simulation View, in the toolbar instead, the Customize sheet (and
   searched) and Settings > Actions, light and dark -- with `CedarLogic --render-actions <dir>` (part of `--render-ui` too)
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones

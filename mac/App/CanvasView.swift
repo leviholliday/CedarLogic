@@ -669,6 +669,8 @@ final class CanvasController: ObservableObject {
     /// from disk -- 15 times a second while the scope was open.
     let scopeTicker = ScopeTicker()
     @Published var showScope = false
+    /// The window's Actions rail is open on screen (pinned or slid out), for View > Show/Hide Actions.
+    @Published var actionsRailShown = false
     private var lastScopeBump = CACurrentMediaTime()
     func scopeChanged() { scopeTicker.version += 1 }
 
@@ -1073,6 +1075,7 @@ final class CanvasController: ObservableObject {
         case .zoomFit: zoomToFit()
         case .zoomActual: zoomActual()
         case .focusMode: NotificationCenter.default.post(name: .clToggleFocusMode, object: self)
+        case .toggleActions: NotificationCenter.default.post(name: .clToggleActionsRail, object: self)
         case .simView: simView.toggle()
         case .step: stepOnce()
         case .stepClock: stepClock()

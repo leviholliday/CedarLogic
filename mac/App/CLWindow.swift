@@ -48,6 +48,8 @@ struct CLLayout: View {
     /// The window's width, for the Actions rail (it folds when narrow).
     @State private var windowWidth: CGFloat = 0
     @State private var railPeek = false
+    /// View > Show/Hide Actions, for the rail.
+    @State private var railToggle = 0
     @State private var customizingActions = false
 
     private var chrome: CLChrome { CLChrome(dark: prefs.dark) }
@@ -105,7 +107,7 @@ struct CLLayout: View {
                 // In focus mode it folds to its tab (and comes back as it was).
                 if prefs.actionsMode == .onScreen {
                     ActionsRail(canvas: canvas, narrow: windowWidth > 0 && windowWidth < ActionsRail.narrowWidth,
-                                focus: focusMode, peek: $railPeek, onCustomize: { customizingActions = true })
+                                focus: focusMode, peek: $railPeek, toggleRequest: railToggle, onCustomize: { customizingActions = true })
                         .transition(.move(edge: .trailing))
                 }
             }
@@ -160,7 +162,8 @@ struct CLLayout: View {
         .onReceive(canvas.$simView) { v in if split.controller.simView != v { split.controller.simView = v } }
         .onReceive(split.controller.$simView) { v in if canvas.simView != v { canvas.simView = v } }
         .modifier(DrawingWindowSync(canvas: canvas, split: split, focusMode: $focusMode))
-        .modifier(ActionsWindowParts(canvas: canvas, width: $windowWidth, focusMode: focusMode, peek: $railPeek, customizing: $customizingActions))
+        .modifier(ActionsWindowParts(canvas: canvas, partner: split.controller, width: $windowWidth, focusMode: focusMode,
+                                     peek: $railPeek, toggle: $railToggle, customizing: $customizingActions))
         .modifier(PutAwaySheet(canvas: canvas, settingsFor: $settingsFor))
         .onChange(of: prefs.classicTabs) { _, classic in if classic { split.close(document, leftPage: $page) } }
         // Revealed by the launch screen: the grid fades in as it goes.
@@ -294,6 +297,7 @@ struct RamRef: Identifiable { let id: Int }
 
 extension Notification.Name {
     static let clToggleFocusMode = Notification.Name("clToggleFocusMode")
+    static let clToggleActionsRail = Notification.Name("clToggleActionsRail")
     static let clSplit = Notification.Name("clSplit")
     static let clSwitchPane = Notification.Name("clSwitchPane")
     static let clCloseSplit = Notification.Name("clCloseSplit")
