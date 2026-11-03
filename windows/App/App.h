@@ -90,6 +90,10 @@ struct Prefs {
 	std::string installedRelease;      // the versioned release the updater last installed, "<tag> <build>": never offered again
 	bool hasSeenWelcome = false;
 	bool firstLaunchPlayed = false;               // the launch screen's sound, once ever
+	// The intro (Intro.cpp), played once each: the first launch's, and an
+	// update's (the What's New version it introduced).
+	bool introFirstLaunchPlayed = false;
+	std::string introUpdatePlayed;
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units
 	bool windowMaximized = false;
 	int paletteWidth = 210;                       // in 96-dpi units

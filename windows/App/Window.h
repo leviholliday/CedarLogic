@@ -329,6 +329,8 @@ public:
 	RECT tourAnchor(int which) const;
 	// Show it (after the launch screen).
 	void present();
+	// It will open maximized (as the last window was), for the intro.
+	bool opensMaximized() const { return openMaximized; }
 
 	// ---- For the canvas's overlays ----
 	// The bar over the top of the canvas (Tidy Up's preview, Lock): its text

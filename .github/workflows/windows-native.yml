@@ -382,6 +382,13 @@ jobs:
           # The launch screen, moment by moment (as the Mac's timeline).
           for t in 0.25 0.6 0.9 1.2 1.6 2.2 2.7; do timeout 60 "$A" --splash-frame $t "$PWD/renders/splash-$t.png" || true; done
           timeout 60 "$A" --splash-frame 4.0 "$PWD/renders/splash-first-4.0.png" --first-launch || true
+          # The 0.4 intro (Intro.cpp, the Mac's Intro.swift), every frame at 60 fps over a
+          # new circuit's window; the moments the Mac's stills show are kept, by time.
+          timeout 900 "$A" --render-intro "$PWD/intro-frames" first
+          test "$(ls intro-frames/frame-*.png | wc -l)" -ge 299
+          for f in 0.20:0012 0.95:0057 1.00:0060 1.70:0102 2.98:0179 3.20:0192 3.80:0228 4.65:0279; do
+            cp "intro-frames/frame-${f#*:}.png" "renders/intro-${f%%:*}s.png"
+          done
           timeout 90 "$A" --card-frame 0.35 --screenshot "$PWD/renders/opening-card.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --card-frame 0.35 --screenshot "$PWD/renders/opening-card-dark.png" res/samples/practice.cdl || true
           # Ctrl+Tab's panel (its own picture, see-through corners and shadow).

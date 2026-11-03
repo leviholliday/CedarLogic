@@ -7,6 +7,13 @@
 // and a half seconds; the very first time, slower, with its own sound (the
 // Mac's FirstLaunch, built in as a WAV), fading into the welcome.
 //
+// On the very first launch, and the first after an update with a What's New
+// tour, the intro plays first (Intro.cpp): the circuit drawing itself over
+// the circuit window, its LED blooming into the icon, which flies into this
+// panel as it fades in, part-way into its own appearance ("CedarLogic 0.4",
+// "Ready", the bar filling); the panel then plays the rest of it, its sweep
+// at full length, and dissolves with the intro into the window.
+//
 // It's a layered window drawn with Direct2D 1.1 (effects for the blurs and
 // glows) into a bitmap with real transparency, so the panel's corners are
 // round and its shadow soft. Without Direct2D 1.1 it draws the same, minus
@@ -15,6 +22,7 @@
 #include "Welcome.h"
 #include "Chrome.h"
 #include "Images.h"
+#include "Intro.h"
 
 #include <d2d1_1.h>
 #include <d2d1effects.h>
@@ -52,6 +60,8 @@ double smooth(double x) { const double c = std::min(1.0, std::max(0.0, x)); retu
 struct Timeline {
 	bool first = false;     // the very first launch: slower, with the sound
 	bool calm = false;      // Windows' animations are off
+	bool afterIntro = false;   // after the intro (planIntro)
+	std::string title = "CedarLogic";
 	double dissolveAt = 2.25, fadeTime = 0.42, readyAt = -1;
 	struct Step { double at; std::string text; double progress; };
 	std::vector<Step> steps;
@@ -80,6 +90,31 @@ struct Timeline {
 		                   : std::min(6.0, std::max(calm ? 1.1 : 2.3, readyAt + 0.3));
 	}
 
+	// After the intro: "Ready", the version in its title, the rest of its
+	// appearance from intro::kSplashAt on its own clock (the bar filling as it
+	// goes), its sweep at full length, and the dissolve straight after it
+	// (with Windows' animations off: its still, briefly). The same after
+	// either intro (the Mac's Splash.configureAfterIntro).
+	void planIntro() {
+		afterIntro = true;
+		first = false;
+		title = std::string("CedarLogic ") + whatsnew::kVersion;
+		steps.clear();
+		steps.push_back({ -1000, "Ready", 1 });
+		readyAt = 0;
+		dissolveAt = calm ? intro::kCalmHold : intro::kSplashAt + intro::kDissolveAt - intro::kCardIn;
+		fadeTime = calm ? intro::kCalmFade : intro::kFade;
+	}
+
+	// How much of the panel shows at t: in over 0.2 s as it begins; after
+	// the intro, faded in over the intro's bloom (as the Mac fades its
+	// window in) and out with it, as well as its own dissolve.
+	double appear(double t) const {
+		if (!afterIntro) return std::min(1.0, std::max(0.0, t / 0.2));
+		const double in = calm ? std::min(1.0, std::max(0.0, t / 0.2)) : intro::inOut((t - intro::kSplashAt) / intro::kCardFade);
+		return in * (1 - intro::inOut((t - dissolveAt) / fadeTime));
+	}
+
 	// The line showing at t, the one before it, and how far the change has gone.
 	void status(double t, std::string& now, std::string& before, double& mix) const {
 		now = "Starting up";
@@ -97,6 +132,12 @@ struct Timeline {
 	// The bar glides, every frame: along one smooth curve towards 92% while
 	// the work goes on, then from wherever it is to the end once it's done.
 	double progress(double t) const {
+		if (afterIntro) {
+			// The bar glides home from where it'd be when the panel comes in.
+			if (calm) return 1;
+			const double from = intro::kSplashAt, end = dissolveAt - 0.05;
+			return 0.3 + 0.7 * smooth((t - from) / (end - from));
+		}
 		const double pace = calm ? 0.9 : first ? 3.9 : 2.1;
 		auto early = [&](double x) { return 0.92 * smooth(x / pace); };
 		if (readyAt < 0 || t <= readyAt) return early(t);
@@ -172,6 +213,7 @@ struct Resources {
 	std::vector<float> letterW;
 	float titleW = 0;
 	ID2D1StrokeStyle* round = nullptr;
+	std::string title;
 
 	void release() {
 		if (icon) icon->Release();
@@ -182,13 +224,13 @@ struct Resources {
 	}
 };
 
-const char* kTitle = "CedarLogic";
 const float kLetterPadX = 14, kLetterPadY = 12, kTitleSize = 36, kLetterGap = 0.5f;
 
-void prepare(Resources& r, ID2D1RenderTarget* rt) {
-	if (r.owner == rt) return;
+void prepare(Resources& r, ID2D1RenderTarget* rt, const std::string& title) {
+	if (r.owner == rt && r.title == title) return;
 	r.release();
 	r.owner = rt;
+	r.title = title;
 	d2dFactory()->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
 	                                                            D2D1_LINE_JOIN_ROUND), nullptr, 0, &r.round);
 	// The icon, drawn to 128 points (sharp at the screen's scale).
@@ -205,7 +247,7 @@ void prepare(Resources& r, ID2D1RenderTarget* rt) {
 	rt->CreateCompatibleRenderTarget(D2D1::SizeF(kW, kH), &r.panel);
 	// Each letter of the title on its own, in brushed silver.
 	IDWriteTextFormat* f = textFormat(L"Segoe UI Variable Display", kTitleSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-	for (const char* c = kTitle; *c; c++) {
+	for (const char* c = title.c_str(); *c; c++) {
 		const std::wstring ch(1, (wchar_t)*c);
 		const float w = text(nullptr, ch, 0, 0, f, nullptr);
 		r.letterW.push_back(w);
@@ -470,9 +512,9 @@ void drawPanel(ID2D1RenderTarget* rt, Resources& res, const Timeline& tl, double
 // Everything, onto a transparent target (kW + 2 margins wide): the panel's
 // shadow, then the panel, coming in over `appear` and dissolving at the end.
 void drawAll(ID2D1RenderTarget* rt, Resources& res, const Timeline& tl, double t, double appear) {
-	prepare(res, rt);
+	prepare(res, rt, tl.title);
 	rt->Clear(D2D1::ColorF(0, 0, 0, 0));
-	if (res.panel == nullptr) return;
+	if (res.panel == nullptr || appear <= 0.002) return;
 	res.panel->BeginDraw();
 	drawPanel(res.panel, res, tl, t);
 	res.panel->EndDraw();
@@ -502,12 +544,15 @@ struct Splash {
 	ID2D1DCRenderTarget* rt = nullptr;
 	Resources res;
 	Timeline tl;
-	double start = -1;            // when it began playing (-1: not yet)
+	double start = -1;            // its clock's zero (after the intro, before it's seen)
+	bool began = false;           // playing
 	bool presented = false;       // the windows it held are in
+	intro::Trigger introTrigger = intro::Trigger::None;   // played first (Intro.cpp)
+	bool skipped = false;         // the intro was skipped
 	std::function<void()> then;
 	std::string opening;
 
-	double elapsed() const { return start < 0 ? 0 : nowSeconds() - start; }
+	double elapsed() const { return began ? nowSeconds() - start : 0; }
 
 	bool makeSurface() {
 		HDC screen = GetDC(nullptr);
@@ -534,7 +579,7 @@ struct Splash {
 		RECT r = { 0, 0, pw, ph };
 		if (FAILED(rt->BindDC(memDC, &r))) return;
 		const double t = elapsed();
-		const double appear = start < 0 ? 0 : std::min(1.0, t / 0.2);
+		const double appear = began ? tl.appear(t) : 0;
 		rt->BeginDraw();
 		drawAll(rt, res, tl, t, appear);
 		if (rt->EndDraw() == D2DERR_RECREATE_TARGET) {
@@ -581,7 +626,7 @@ LRESULT CALLBACK splashProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 		guarded("the launch screen", [&] {
 			s->frame();
 			const double t = s->elapsed();
-			if (s->start < 0) return;
+			if (!s->began) return;
 			// The windows come in as it starts to dissolve...
 			if (!s->presented && t >= s->tl.dissolveAt) {
 				s->presented = true;
@@ -610,6 +655,8 @@ void show() {
 	Splash* s = new Splash();
 	s->tl.first = !prefs().hasSeenWelcome && !prefs().firstLaunchPlayed;
 	s->tl.calm = reduceMotion();
+	s->introTrigger = intro::pending();
+	if (s->introTrigger != intro::Trigger::None) s->tl.planIntro();
 	// Where you're looking: the screen with the pointer on it.
 	POINT cursor;
 	GetCursorPos(&cursor);
@@ -667,10 +714,31 @@ void hideSoon(std::function<void()> then) {
 	}
 	// The launch's heavy work is done: play it now, on an idle thread.
 	s->then = std::move(then);
+	if (s->introTrigger != intro::Trigger::None) {
+		// The intro first, over the circuit window (unless Windows'
+		// animations are off: then just this panel's still, briefly); this
+		// panel comes in over its bloom, on its own clock at kSplashAt.
+		intro::markPlayed(s->introTrigger);
+		RECT r = {};
+		GetWindowRect(s->hwnd, &r);
+		const POINT icon = { r.left + (LONG)std::lround((kMargin + kW / 2) * s->scale), r.top + (LONG)std::lround((kMargin + 44 + 64) * s->scale) };
+		const double introStart = s->tl.calm ? -1 : intro::play(icon);
+		s->start = introStart >= 0 ? introStart + intro::kCardIn - intro::kSplashAt : nowSeconds();
+		if (introStart < 0 && !s->tl.calm) {
+			// It couldn't play: the panel as after it, from the start.
+			s->tl.calm = true;
+			s->tl.planIntro();
+		}
+		// Only the first launch's has the sound (its bell lands on the LED).
+		if (s->introTrigger == intro::Trigger::First) intro::playSound(s->tl.calm);
+		s->began = true;
+		return;
+	}
 	int gates = 0, families = 0;
 	libraryCounts(gates, families);
 	s->tl.plan(gates, families, s->opening);
 	s->start = nowSeconds();
+	s->began = true;
 	if (s->tl.first) {
 		// The first launch's sound: once ever.
 		prefs().firstLaunchPlayed = true;
@@ -678,6 +746,59 @@ void hideSoon(std::function<void()> then) {
 		PlaySoundW(MAKEINTRESOURCEW(3), appInstance(), SND_RESOURCE | SND_ASYNC | SND_NODEFAULT);
 	}
 }
+
+void raise() {
+	if (g_splash && g_splash->hwnd) SetWindowPos(g_splash->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void skipIntro() {
+	Splash* s = g_splash;
+	if (s == nullptr || !s->began || !s->tl.afterIntro || s->skipped) return;
+	s->skipped = true;
+	// It goes, quickly, with the intro (the windows come in under it now).
+	const double t = s->elapsed();
+	s->tl.fadeTime = intro::kSkipFade;
+	if (t < s->tl.dissolveAt) s->tl.dissolveAt = t;
+}
+
+namespace {
+struct IntroPicture {
+	ID2D1RenderTarget* owner = nullptr;
+	ID2D1BitmapRenderTarget* rt = nullptr;
+	Resources res;
+	Timeline tl;
+	void release() {
+		res.release();
+		if (rt) rt->Release();
+		rt = nullptr;
+		owner = nullptr;
+	}
+} g_introPicture;
+}  // namespace
+
+void drawAfterIntro(ID2D1RenderTarget* target, D2D1_POINT_2F panelAt, double t) {
+	IntroPicture& p = g_introPicture;
+	if (p.owner != target) {
+		p.release();
+		p.owner = target;
+		p.tl = Timeline();
+		p.tl.planIntro();
+		target->CreateCompatibleRenderTarget(D2D1::SizeF(kW + 2 * kMargin, kH + 2 * kMargin), &p.rt);
+	}
+	if (p.rt == nullptr) return;
+	// The panel's own clock: kSplashAt as it begins to come in.
+	const double at = t - intro::kCardIn + intro::kSplashAt;
+	p.rt->BeginDraw();
+	drawAll(p.rt, p.res, p.tl, at, p.tl.appear(at));
+	if (FAILED(p.rt->EndDraw())) return;
+	ID2D1Bitmap* bmp = nullptr;
+	p.rt->GetBitmap(&bmp);
+	if (bmp == nullptr) return;
+	target->DrawBitmap(bmp, D2D1::RectF(panelAt.x - kMargin, panelAt.y - kMargin, panelAt.x + kW + kMargin, panelAt.y + kH + kMargin));
+	bmp->Release();
+}
+
+void releaseIntroPicture() { g_introPicture.release(); }
 
 bool renderFrame(double t, bool first, const std::string& file) {
 	Timeline tl;
