@@ -57,7 +57,8 @@ enum RenderActions {
             ActionsRail.pictureLabel = nil
         }
         func snap<V: View>(_ name: String, _ view: V) {
-            let host = NSHostingView(rootView: view)
+            // On the window's own background, as a sheet or Settings has it.
+            let host = NSHostingView(rootView: view.background(Color(nsColor: .windowBackgroundColor)))
             host.appearance = NSAppearance(named: prefs.dark ? .darkAqua : .aqua)
             let size = host.fittingSize
             host.frame = NSRect(origin: .zero, size: size)
