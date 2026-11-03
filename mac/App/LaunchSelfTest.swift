@@ -32,8 +32,9 @@
 // (CL_DAMAGE_ROUND picks which), each opening or being refused, never
 // crashing; in `trash`, Recently Deleted: the list, the 30-day sweep,
 // Restore (under its own id, or a new one when that's taken) and Delete Now;
-// in every state, the intro owed, "Play the intro every time CedarLogic
-// opens" (off unless chosen; on, a later launch plays it) and Help > Play
+// in every state, the intro owed and its sound (the first launch's and an
+// update's only), "Play the intro every time CedarLogic
+// opens" (off unless chosen; on, a later launch plays it, silently) and Help > Play
 // the Intro in the menu bar; where the Actions rail is (on screen for a first launch,
 // hidden for anyone before), and in `actions` that a folded rail stays
 // folded, a drag on the rail reorders the Customize list too, focus mode
@@ -507,6 +508,8 @@ enum LaunchSelfTest {
         let owed = Intro.owed()
         check(owed == (state == "first" ? .firstLaunch : state == "updated" ? .update : nil),
               "the intro owed: \(owed?.rawValue ?? "none")")
+        // The sound: the first launch's intro and an update's, never any other.
+        if let owed { check(owed.hasSound, "the \(owed.rawValue) intro has the sound") }
         check(Intro.pending() == nil, "no intro plays in a self-test")
         // Settings > General > "Play the intro every time CedarLogic opens":
         // off unless chosen; on, a launch that's owed nothing plays the
@@ -520,11 +523,15 @@ enum LaunchSelfTest {
             check(Intro.forLaunch(s) == due, "a later launch plays \(due.map { "the \($0.rawValue) intro" } ?? "no intro") with the setting off")
             s.set(true, forKey: Intro.everyLaunchKey)
             let every = Intro.forLaunch(s)
-            check(every == (due ?? .firstLaunch), "with the setting on, a later launch plays the intro (\(every?.rawValue ?? "none"))")
+            check(every == (due ?? .everyLaunch), "with the setting on, a later launch plays the intro (\(every?.rawValue ?? "none"))")
+            check(every?.hasSound == (due != nil),
+                  due == nil ? "an every-launch intro has no sound" : "an update's intro has the sound, setting or not")
             s.removePersistentDomain(forName: suite)
         } else {
             check(false, "settings of its own for the intro check")
         }
+        check(Intro.Trigger.firstLaunch.hasSound && Intro.Trigger.update.hasSound && !Intro.Trigger.everyLaunch.hasSound,
+              "sound for the first launch and updates only")
         let play = ActionID.playIntro.action
         check(play.menu == "Help" && play.title == "Play the Intro", "Play the Intro is among the actions, in Help")
 
