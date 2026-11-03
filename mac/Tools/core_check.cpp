@@ -6,6 +6,7 @@
 #include "guiGate.h"
 #include "guiWire.h"
 #include "route/WireRoute.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -590,6 +591,223 @@ static void pasteDeleteUndoCases() {
 	}
 }
 
+// ---- One wire on three or more parts (the 2026-11-02 report) ----------------------
+//
+// A tester on 0.3.4 saw crashes "when three or more elements were connected by
+// one wire", connections not loading and copy/paste glitches on such wires.
+// docs/BUG-REPORT-2026-11-02.md maps each to its fix; these are the flows from
+// that report, as the Mac app drives them, so they stay fixed.
+
+static int wireCount(CLDocument* doc, int pg) { return (int)doc->page(pg)->getWireList()->size(); }
+
+static int connectionCount(CLDocument* doc, int pg) {
+	int n = 0;
+	for (auto& w : *doc->page(pg)->getWireList()) if (w.second) n += (int)w.second->getConnections().size();
+	return n;
+}
+
+static int mostEnds(CLDocument* doc, int pg) {
+	int m = 0;
+	for (auto& w : *doc->page(pg)->getWireList()) if (w.second) m = std::max(m, (int)w.second->getConnections().size());
+	return m;
+}
+
+static void drawBetween(CLDocument* doc, float ax, float ay, float bx, float by) {
+	cl_edit_press(doc, 0, ax, ay, 0, 0.05);
+	cl_edit_drag(doc, (ax + bx) / 2, (ay + by) / 2);
+	cl_edit_drag(doc, bx, by);
+	cl_edit_release(doc, bx, by);
+}
+
+static void drawPins(CLDocument* doc, long a, const char* ap, long b, const char* bp) {
+	float ax = 0, ay = 0, bx = 0, by = 0;
+	doc->circuit.getGate(a)->getHotspotCoords(ap, ax, ay);
+	doc->circuit.getGate(b)->getHotspotCoords(bp, bx, by);
+	drawBetween(doc, ax, ay, bx, by);
+}
+
+static void dragGate(CLDocument* doc, long id, float dx, float dy) {
+	float x = 0, y = 0;
+	doc->circuit.getGate(id)->getGLcoords(x, y);
+	cl_edit_select_none(doc, 0);
+	cl_edit_press(doc, 0, x, y, 0, 0.05);
+	for (int i = 1; i <= 4; i++) cl_edit_drag(doc, x + dx * i / 4, y + dy * i / 4);
+	cl_edit_release(doc, x + dx, y + dy);
+}
+
+// Cmd-V: the paste floats on the pointer until a click drops it.
+static bool pasteAndDrop(CLDocument* doc, const std::string& block, float x, float y, float dx, float dy) {
+	const char* back = nullptr;
+	if (!cl_edit_paste(doc, 0, block.c_str(), x, y, false, &back) || !cl_edit_float_begin(doc, 0, x, y)) return false;
+	for (int i = 1; i <= 5; i++) cl_edit_hover(doc, 0, x + dx * i / 5, y + dy * i / 5, 0.05);
+	cl_edit_press(doc, 0, x + dx, y + dy, 0, 0.05);
+	cl_edit_release(doc, x + dx, y + dy);
+	return !cl_edit_is_floating(doc);
+}
+
+// The same wires and connections after a save and reopen.
+static bool reopensWithSameWires(CLDocument* doc) {
+	CLDocument* back = reopen(doc);
+	if (back == nullptr) return false;
+	const bool same = wireCount(back, 0) == wireCount(doc, 0) && connectionCount(back, 0) == connectionCount(doc, 0) &&
+	                  mostEnds(back, 0) == mostEnds(doc, 0) && consistent(back, "after reopening");
+	if (!same) printf("    %d wires / %d connections, reopened %d / %d\n", wireCount(doc, 0), connectionCount(doc, 0), wireCount(back, 0), connectionCount(back, 0));
+	cl_document_close(back);
+	return same;
+}
+
+static void multiWireCases() {
+	printf("one wire on three or more parts (the 2026-11-02 report)\n");
+	{
+		// One switch to four AND inputs, joined every way the app joins a pin
+		// to a wire: from the switch, onto its wired pin, from its wired pin,
+		// and onto the wire itself.
+		CLDocument* doc = cl_document_new();
+		cl_edit_add_gate(doc, 0, "AA_TOGGLE", 0, 0);
+		const long sw = newest(doc, 0);
+		long ands[4];
+		for (int i = 0; i < 4; i++) { cl_edit_add_gate(doc, 0, "AA_AND2", 16, 9 - 8 * i); ands[i] = newest(doc, 0); }
+		cl_edit_select_none(doc, 0);
+		drawPins(doc, sw, "OUT_0", ands[0], "IN_0");
+		drawPins(doc, ands[1], "IN_0", sw, "OUT_0");
+		drawPins(doc, sw, "OUT_0", ands[2], "IN_0");
+		float wx = 0, wy = 0, best = 0, px = 0, py = 0;
+		for (auto& s : doc->page(0)->getWireList()->begin()->second->getSegmentMap()) {
+			const wireSegment& g = s.second;
+			const float len = std::fabs(g.end.x - g.begin.x) + std::fabs(g.end.y - g.begin.y);
+			if (len > best) { best = len; wx = (g.begin.x + g.end.x) / 2; wy = (g.begin.y + g.end.y) / 2; }
+		}
+		doc->circuit.getGate(ands[3])->getHotspotCoords("IN_0", px, py);
+		drawBetween(doc, px, py, wx, wy);
+		CHECK(wireCount(doc, 0) == 1 && mostEnds(doc, 0) == 5 && consistent(doc, "after wiring"), "one switch to four gates: one wire with five ends");
+		CHECK(reopensWithSameWires(doc) && saveIsStable(doc), "... saves and reopens with every connection");
+		dragGate(doc, sw, 0, 6);
+		dragGate(doc, ands[1], 4, -2);
+		CHECK(consistent(doc, "after the drags") && reopensWithSameWires(doc) && saveIsStable(doc), "... and after dragging the switch and a gate on it");
+		cl_edit_select_all(doc, 0);
+		const std::string block = cl_edit_copy(doc, 0);
+		CHECK(pasteAndDrop(doc, block, 0, -40, 3, -4) && wireCount(doc, 0) == 2 && connectionCount(doc, 0) == 10 && consistent(doc, "after the paste"),
+		      "copy, paste, drop: the copy has its own five-end wire");
+		CHECK(reopensWithSameWires(doc) && saveIsStable(doc), "... saves and reopens with every connection");
+		CHECK(pasteAndDrop(doc, block, 0, 0, 0.3f, 0.2f) && consistent(doc, "after a paste on top") && reopensWithSameWires(doc),
+		      "a paste dropped on top of the original: the same");
+		while (cl_edit_can_undo(doc)) cl_edit_undo(doc);
+		while (cl_edit_can_redo(doc)) cl_edit_redo(doc);
+		CHECK(consistent(doc, "after undo all, redo all") && reopensWithSameWires(doc), "undo everything, redo everything: the same");
+		cl_document_close(doc);
+	}
+	{
+		// Drawing between two pins that are each on a different wire put one
+		// pin on both wires (0.3.4); deleting a gate, then dragging, aborted in
+		// guiWire::gateOf. Now the connection is refused.
+		CLDocument* doc = cl_document_new();
+		long g[5];
+		const float at[5][2] = { { 0, 6 }, { 0, -6 }, { 16, 6 }, { 16, -6 }, { 30, 0 } };
+		for (int i = 0; i < 5; i++) { cl_edit_add_gate(doc, 0, i < 2 ? "AA_TOGGLE" : "AA_AND2", at[i][0], at[i][1]); g[i] = newest(doc, 0); }
+		cl_edit_select_none(doc, 0);
+		drawPins(doc, g[0], "OUT_0", g[2], "IN_0");
+		drawPins(doc, g[1], "OUT_0", g[3], "IN_0");
+		drawPins(doc, g[2], "IN_0", g[3], "IN_0");
+		CHECK(wireCount(doc, 0) == 2 && mostEnds(doc, 0) == 2 && consistent(doc, "after joining two wired pins"),
+		      "a wire between two pins already on different wires is refused");
+		drawPins(doc, g[4], "IN_0", g[2], "IN_0");
+		CHECK(mostEnds(doc, 0) == 3 && consistent(doc, "after a third part"), "a third part onto a wired pin joins its wire");
+		cl_edit_select_none(doc, 0);
+		cl_edit_select_gate(doc, 0, g[3]);
+		cl_edit_delete(doc, 0);
+		dragGate(doc, g[1], 0, -4);
+		dragGate(doc, g[0], 0, 4);
+		dragGate(doc, g[2], 2, 0);
+		CHECK(consistent(doc, "after delete and drags") && reopensWithSameWires(doc), "delete a gate, drag the rest: no crash, nothing dangling");
+		cl_document_close(doc);
+	}
+	{
+		// What 0.3.4 saved after that join: AND 4's IN_0 claimed by both wires.
+		// It opens with one claim refused (and the wire left with one pin
+		// removed), and deleting any gate then dragging the rest is safe.
+		// (The wires as 0.3.4 wrote them, gate settings left out.)
+		const std::string text = page0(
+			gate("AA_TOGGLE", "1", "0", "6") + gate("AA_TOGGLE", "2", "0", "-6") + gate("AA_AND2", "3", "16", "6") +
+			gate("AA_AND2", "4", "16", "-6") + gate("AA_AND2", "5", "30", "0") +
+			"    (wire (ids \"1\")\n"
+			"      (seg \"0\" v (pts 7.5 6 7.5 7) (cross 6 \"2\") (cross 7 \"1\"))\n"
+			"      (seg \"1\" h (pts 7.5 7 13 7) (connect \"3\" \"IN_0\") (cross 7.5 \"0\") (cross 13 \"3\"))\n"
+			"      (seg \"2\" h (pts 2 6 7.5 6) (connect \"1\" \"OUT_0\") (cross 7.5 \"0\"))\n"
+			"      (seg \"3\" v (pts 13 -5 13 7) (connect \"4\" \"IN_0\") (cross 1 \"4\") (cross 7 \"1\"))\n"
+			"      (seg \"4\" h (pts 13 1 27 1) (connect \"5\" \"IN_0\") (cross 13 \"3\")))\n"
+			"    (wire (ids \"2\")\n"
+			"      (seg \"0\" v (pts 7.5 -6 7.5 -5) (cross -6 \"2\") (cross -5 \"1\"))\n"
+			"      (seg \"1\" h (pts 7.5 -5 13 -5) (connect \"4\" \"IN_0\") (cross 7.5 \"0\"))\n"
+			"      (seg \"2\" h (pts 2 -6 7.5 -6) (connect \"2\" \"OUT_0\") (cross 7.5 \"0\")))\n");
+		CLDocument* doc = openText(text);
+		CHECK(doc != nullptr && consistent(doc, "after opening") && noticeCount(doc) > 0,
+		      "a 0.3.4 file with a pin on two wires opens consistent, with a notice");
+		for (long id = 1; doc && id <= 5; id++) {
+			CLDocument* d = openText(text);
+			cl_edit_select_none(d, 0);
+			cl_edit_select_gate(d, 0, id);
+			cl_edit_delete(d, 0);
+			std::vector<long> rest;
+			for (auto& gg : *d->page(0)->getGateList()) rest.push_back((long)gg.first);
+			for (long r : rest) dragGate(d, r, 1, 1);
+			if (!consistent(d, "after delete and drags")) CHECK(false, "deleting a gate of it, then dragging the rest");
+			cl_document_close(d);
+		}
+		if (doc) cl_document_close(doc);
+	}
+	{
+		// Cmd-V, C while the paste floats, Cmd-Z, a click, then a drag of what
+		// C connected to: aborted in guiWire::gateOf on 0.3.4.
+		CLDocument* doc = cl_document_new();
+		cl_edit_add_gate(doc, 0, "AA_TOGGLE", 0, 0);
+		const long sw = newest(doc, 0);
+		cl_edit_add_gate(doc, 0, "AA_AND2", 16, 4);
+		const long a = newest(doc, 0);
+		cl_edit_add_gate(doc, 0, "AA_AND2", 16, -4);
+		const long b = newest(doc, 0);
+		cl_edit_add_gate(doc, 0, "GA_LED", 40, 20);
+		const long led = newest(doc, 0);
+		cl_edit_select_none(doc, 0);
+		drawPins(doc, sw, "OUT_0", a, "IN_0");
+		drawPins(doc, b, "IN_0", sw, "OUT_0");
+		cl_edit_select_none(doc, 0);
+		cl_edit_select_gate(doc, 0, a);
+		const std::string one = cl_edit_copy(doc, 0);
+		const char* back = nullptr;
+		cl_edit_paste(doc, 0, one.c_str(), 30, 30, false, &back);
+		guiGate* p = doc->circuit.getGate(newest(doc, 0));
+		float ox = 0, oy = 0, lx = 0, ly = 0;
+		p->getHotspotCoords("OUT", ox, oy);
+		guiGate* l = doc->circuit.getGate(led);
+		l->getHotspotCoords(l->getHotspotList().begin()->first, lx, ly);
+		cl_edit_float_begin(doc, 0, 30, 30);
+		for (int i = 1; i <= 4; i++) cl_edit_hover(doc, 0, 30 + (lx - ox) * i / 4, 30 + (ly - oy) * i / 4, 0.05);
+		const int made = cl_edit_connect_while_moving(doc, 0, 0.05);
+		cl_edit_undo(doc);
+		cl_edit_press(doc, 0, -30, -30, 0, 0.05);
+		cl_edit_release(doc, -30, -30);
+		dragGate(doc, led, 3, 3);
+		CHECK(made == 1 && consistent(doc, "after Cmd-V, C, Cmd-Z, click, drag") && reopensWithSameWires(doc),
+		      "Cmd-V, C, Cmd-Z, a click, then a drag: no crash, nothing dangling");
+		cl_document_close(doc);
+	}
+	if (!fixtures.empty()) {
+		// Lab5 (three wires with three or more ends): copy it all, paste, drop.
+		CLDocument* doc = openText(readFile(fixtures + "/Lab5.cdl"));
+		if (doc == nullptr) { CHECK(false, "Lab5.cdl opens"); return; }
+		const int wires = wireCount(doc, 0), conns = connectionCount(doc, 0);
+		double l = 0, bt = 0, r = 0, t = 0;
+		cl_document_page_bounds(doc, 0, &l, &bt, &r, &t);
+		cl_edit_select_all(doc, 0);
+		const std::string block = cl_edit_copy(doc, 0);
+		CHECK(pasteAndDrop(doc, block, (float)(r + 10), (float)t, 5, -3) && wireCount(doc, 0) == 2 * wires &&
+		      connectionCount(doc, 0) == 2 * conns && consistent(doc, "after pasting Lab5"),
+		      "Lab5 copied, pasted and dropped: every wire and connection twice");
+		CHECK(reopensWithSameWires(doc), "... saves and reopens with every connection");
+		cl_document_close(doc);
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
@@ -604,6 +822,7 @@ int main(int argc, char** argv) {
 	if (!fixtures.empty()) dragCases();
 	if (!fixtures.empty()) straightenCases();
 	pasteDeleteUndoCases();
+	multiWireCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;
