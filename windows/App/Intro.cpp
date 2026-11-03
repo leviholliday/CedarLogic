@@ -1,23 +1,34 @@
-// The intro, as the Mac app's (Intro.swift), moment for moment. About 5
-// seconds:
+// The intro, as the Mac app's (Intro.swift, rounds 4 and 5), moment for
+// moment. About 6 seconds (6.07):
 //
 //   0.00-0.45  over the circuit window, the dark canvas fades in from
-//              nothing, its grid and the two input pins easing in with it.
+//              nothing, the two input pins easing in with it; the grid
+//              comes up after, softer, strongest in the middle, with a few
+//              out-of-focus motes drifting over it and a faint light under
+//              the gate. All of it slowly pushes in (the circuit 4%, the
+//              grid behind it 2%) until the bloom, for depth.
 //   0.40-1.96  two wires trace in from their pins, a bright head running
 //              along them and slowing into each end; the letters of the
 //              icon snap into place as the wires reach them (the C, the D
 //              -- an AND gate -- and the L, which the output runs down to
 //              the LED); a seven-segment display draws in beside it.
-//   1.99-2.58  a clock pulse runs through, the D lights, and as it lands
-//              the LED lights (the sound's bell chord lands here) and the
-//              display spells the version, a digit at a time.
+//   1.99-2.58  a clock pulse runs through, the wires high with a soft wide
+//              glow under their crisp line, the D lights (and the light
+//              under it); just before it lands the canvas draws in a breath
+//              (the light under the gate and the grid dim a touch), and as
+//              it lands the LED lights with a brief lift of light over
+//              everything (the sound's bell lands here, started against the
+//              picture's own clock) and the display spells the version, a
+//              digit at a time.
 //   2.58-3.05  a beat, everything lit, so it registers.
 //   3.05-3.64  the LED blooms into the icon itself, which flies into the
 //              launch screen's panel (Splash.cpp) as that fades in over it,
 //              part-way into its own appearance: its traces drawing in, its
 //              name writing itself in, its bar filling ...
 //   3.52-4.42  ... and its sweep of light, at full length, as on any launch;
-//   4.42-4.97  then it dissolves into the window (and the welcome, or What's
+//   4.42-5.52  it holds, finished (the bar full, "CedarLogic 0.4"), long
+//              enough to read;
+//   5.52-6.07  then it dissolves into the window (and the welcome, or What's
 //              New, on top), a crossfade.
 //
 // Once drawn, the wires are the canvas's own: lines as wide as the canvas
@@ -223,13 +234,16 @@ struct Paint {
 	ID2D1RadialGradientBrush* glow = nullptr;      // a soft green glow, white in the middle
 	ID2D1RadialGradientBrush* bloom = nullptr;     // the LED's flash
 	ID2D1RadialGradientBrush* vignette = nullptr;  // darker towards the edges
+	ID2D1RadialGradientBrush* gridMask = nullptr;  // the grid, strongest in the middle
+	ID2D1RadialGradientBrush* underglow = nullptr; // the faint light under the gate
+	ID2D1RadialGradientBrush* mote = nullptr;      // a soft disc, its edge out of focus
+	ID2D1RadialGradientBrush* hitLift = nullptr;   // the lift of light as the LED lights
 	ID2D1Bitmap* icon = nullptr;
 
 	void release() {
+		for (ID2D1RadialGradientBrush* b : { glow, bloom, vignette, gridMask, underglow, mote, hitLift })
+			if (b) b->Release();
 		if (solid) solid->Release();
-		if (glow) glow->Release();
-		if (bloom) bloom->Release();
-		if (vignette) vignette->Release();
 		if (icon) icon->Release();
 		*this = Paint();
 	}
@@ -278,6 +292,13 @@ private:
 		ID2D1PathGeometry* on = nullptr;
 		double at;
 	};
+	// A soft out-of-focus light drifting slowly over the grid.
+	struct Mote {
+		Pt from;
+		float dx, dy;      // points a second
+		float side;
+		double alpha, phase;
+	};
 
 	float W, H, k;
 	Pt cardIcon;
@@ -286,6 +307,7 @@ private:
 	std::vector<Wire> wires;
 	std::vector<Letter> letters;
 	std::vector<Digit> digits;
+	std::vector<Mote> motes;
 	ID2D1PathGeometry* gateInside = nullptr;
 	Shape housing;
 	ID2D1PathGeometry* housingFill = nullptr;
@@ -412,6 +434,26 @@ Scene::Scene(float w, float h, Pt icon, const WireLook& l) : W(w), H(h), cardIco
 	}
 
 	buildDisplay();
+
+	// A few motes: soft, out of focus, drifting very slowly (the Mac's, from
+	// the same seed, in the same order; its y runs up, so they're flipped).
+	uint64_t seed = 0x9E3779B97F4A7C15ull;
+	auto rnd = [&] {
+		seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+		return float((seed >> 33) % 10000) / 10000;
+	};
+	for (int i = 0; i < 9; i++) {
+		Mote m;
+		m.side = 22 + 60 * rnd();
+		const float fx = W * (0.12f + 0.76f * rnd());
+		const float fy = H * (0.15f + 0.7f * rnd());
+		m.from = D2D1::Point2F(fx, H - fy);
+		m.dx = (rnd() - 0.5f) * 14;
+		m.dy = -(4 + rnd() * 9);
+		m.alpha = 0.05 + 0.09 * rnd();
+		m.phase = rnd() * 6.0;
+		motes.push_back(m);
+	}
 }
 
 Scene::~Scene() {
@@ -514,7 +556,14 @@ void Scene::prepare(ID2D1RenderTarget* rt) {
 	                          { 1, rgb(0.22, 1, 0.42, 0) } });
 	paint.bloom = radial(rt, { { 0, rgb(0.9, 1, 0.93, 1) }, { 0.05f, rgb(0.45, 1, 0.6, 0.7) }, { 0.22f, rgb(0.22, 1, 0.42, 0.16) },
 	                           { 0.5f, rgb(0.22, 1, 0.42, 0.04) }, { 1, rgb(0.22, 1, 0.42, 0) } });
-	paint.vignette = radial(rt, { { 0, rgb(0, 0, 0, 0) }, { 0.45f, rgb(0, 0, 0, 0.02) }, { 0.8f, rgb(0, 0, 0, 0.16) }, { 1, rgb(0, 0, 0, 0.3) } });
+	paint.vignette = radial(rt, { { 0, rgb(0, 0, 0, 0) }, { 0.4f, rgb(0, 0, 0, 0.03) }, { 0.75f, rgb(0, 0, 0, 0.22) }, { 1, rgb(0, 0, 0, 0.42) } });
+	paint.gridMask = radial(rt, { { 0, rgb(1, 1, 1, 1) }, { 0.35f, rgb(1, 1, 1, 0.8) }, { 0.75f, rgb(1, 1, 1, 0.3) }, { 1, rgb(1, 1, 1, 0.12) } });
+	paint.underglow = radial(rt, { { 0, rgb(0.1, 0.85, 0.34, 0.11) }, { 0.3f, rgb(0.08, 0.7, 0.3, 0.06) }, { 0.65f, rgb(0.05, 0.5, 0.25, 0.012) },
+	                               { 1, rgb(0.05, 0.5, 0.25, 0) } });
+	paint.mote = radial(rt, { { 0, rgb(0.75, 1, 0.82, 1) }, { 0.35f, rgb(0.6, 1, 0.72, 0.75) }, { 0.7f, rgb(0.35, 0.9, 0.5, 0.25) },
+	                          { 1, rgb(0.3, 0.9, 0.5, 0) } });
+	paint.hitLift = radial(rt, { { 0, rgb(0.8, 1, 0.85, 0.16) }, { 0.12f, rgb(0.45, 1, 0.6, 0.07) }, { 0.45f, rgb(0.3, 0.9, 0.5, 0.025) },
+	                             { 1, rgb(0.3, 0.9, 0.5, 0.012) } });
 	// The launch screen's icon (the Mac's LaunchIcon.png, 512 pixels).
 	if (IWICBitmap* src = images::loadResource(2, 512, 512)) {
 		rt->CreateBitmapFromWicBitmap(src, D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96),
@@ -559,6 +608,8 @@ void Scene::drawWire(ID2D1RenderTarget* rt, const Wire& w, double t) {
 	// ... high, in green with Simulation View's glow ...
 	if (q > 0) {
 		ID2D1PathGeometry* g = part(w.path, 0, q);
+		// (and a wider, softer bloom under that)
+		stroke(rt, g, withAlpha(kNeon, 0.045), lw + 16, roundAll);
 		stroke(rt, g, withAlpha(kNeon, 0.10), lw + 7);
 		stroke(rt, g, withAlpha(kNeon, 0.22), lw + 3);
 		stroke(rt, g, kNeon, lw);
@@ -592,38 +643,84 @@ void Scene::drawWire(ID2D1RenderTarget* rt, const Wire& w, double t) {
 void Scene::draw(ID2D1RenderTarget* rt, double t) {
 	prepare(rt);
 	if (paint.solid == nullptr) return;
-	D2D1_MATRIX_3X2_F base;
-	rt->GetTransform(&base);
+	D2D1_MATRIX_3X2_F root;
+	rt->GetTransform(&root);
 	const D2D1_RECT_F all = D2D1::RectF(0, 0, W, H);
 	const D2D1_COLOR_F canvas = canvasColor();
+	const double bloomAt = kBloomAt;
+	const Pt mid = D2D1::Point2F(W / 2, H / 2);
+
+	// The camera: a slow push-in until the bloom, the circuit 4%, the
+	// backdrop behind it 2% (so they part a little: depth).
+	const double push = smooth(t, 0, bloomAt + 0.35);
+	const float pushNear = (float)(1 + 0.04 * push), pushFar = (float)(1 + 0.02 * push);
+	auto onStage = [&](Pt q) { return D2D1::Point2F(mid.x + (q.x - mid.x) * pushNear, mid.y + (q.y - mid.y) * pushNear); };
+	// A breath in just before the hit: the light under the gate and the
+	// grid dim a touch for about a tenth of a second, so the LED pops.
+	const double breath = smooth(t, kLedAt - 0.14, kLedAt - 0.03) * (1 - ease(t, kLedAt, kLedAt + 0.08));
 
 	// The canvas itself (it fades in with the window as a whole:
-	// fadeInShown); its grid comes up a little after, minor and major lines
-	// as the app draws it.
+	// fadeInShown).
 	paint.solid->SetColor(canvas);
 	rt->FillRectangle(all, paint.solid);
-	const double gridShown = smooth(t, 0.1, 0.75) * 0.85;
-	if (gridShown > 0) {
+
+	// Behind the circuit, pushed in more slowly than it: the grid, the light
+	// under the gate and the motes.
+	rt->SetTransform(D2D1::Matrix3x2F::Scale(pushFar, pushFar, mid) * root);
+	// The grid comes up after the wires have set off, softly, minor and
+	// major lines as the app draws it; strongest in the middle, falling away
+	// into the dark at the edges, so it reads as a surface going back.
+	const double gridShown = smooth(t, 0.3, 1.5) * 0.8 * (1 - 0.2 * breath);
+	if (gridShown > 0.002) {
+		if (paint.gridMask) {
+			paint.gridMask->SetCenter(mid);
+			paint.gridMask->SetRadiusX(W * 0.65f);
+			paint.gridMask->SetRadiusY(H * 0.7f);
+			paint.gridMask->SetOpacity(1);
+		}
+		rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(),
+		                                    (float)gridShown, paint.gridMask),
+		              nullptr);
 		const float step = 20, cx = W / 2, cy = H / 2;
 		for (int pass = 0; pass < 2; pass++) {
-			paint.solid->SetColor(withAlpha(pass == 0 ? kGridMinor : kGridMajor, gridShown));
+			paint.solid->SetColor(pass == 0 ? kGridMinor : kGridMajor);
 			const float width = pass == 0 ? 0.5f : 0.75f;
 			for (int i = -(int)(cx / step) - 1; i <= (int)(cx / step) + 1; i++)
 				if ((i % 5 == 0) == (pass == 1)) rt->DrawLine(D2D1::Point2F(cx + i * step, 0), D2D1::Point2F(cx + i * step, H), paint.solid, width);
 			for (int i = -(int)(cy / step) - 1; i <= (int)(cy / step) + 1; i++)
 				if ((i % 5 == 0) == (pass == 1)) rt->DrawLine(D2D1::Point2F(0, cy + i * step), D2D1::Point2F(W, cy + i * step), paint.solid, width);
 		}
+		rt->PopLayer();
 	}
+	// A faint light under the gate, as if the circuit lit the canvas: faint
+	// as the canvas comes up, brighter as the pulse fires the gate and lands
+	// in the LED, gone with the circuit.
+	{
+		const double under = 0.35 * smooth(t, 0.3, 1.6) + 0.4 * smooth(t, 2.1, 2.5) + 0.25 * smooth(t, kLedAt, kLedAt + 0.3);
+		const float side = std::max(W, H) * 0.95f;
+		glowAt(rt, paint.underglow, p(250, 250), side / 2, side * 0.72f / 2,
+		       under * (1 - 0.35 * breath) * (1 - smooth(t, bloomAt + 0.1, bloomAt + 0.4)));
+	}
+	// The motes drift, each breathing a little.
+	const double moteShown = smooth(t, 0.4, 1.6) * (1 - smooth(t, bloomAt + 0.05, bloomAt + 0.35));
+	if (moteShown > 0.002)
+		for (const Mote& m : motes)
+			glowAt(rt, paint.mote, D2D1::Point2F(m.from.x + m.dx * (float)t, m.from.y + m.dy * (float)t), m.side / 2, m.side / 2,
+			       m.alpha * moteShown * (0.75 + 0.25 * std::sin(t * 1.3 + m.phase)));
+	rt->SetTransform(root);
+
 	// Darker towards the edges, so the eye goes to the middle.
 	if (paint.vignette) {
-		paint.vignette->SetCenter(D2D1::Point2F(W / 2, H / 2));
+		paint.vignette->SetCenter(mid);
 		paint.vignette->SetRadiusX(W / 2);
 		paint.vignette->SetRadiusY(H / 2);
 		paint.vignette->SetOpacity(1);
 		rt->FillRectangle(all, paint.vignette);
 	}
 
-	const double bloomAt = kBloomAt;
+	// The circuit and its display, pushed in slowly until the bloom.
+	const D2D1_MATRIX_3X2_F base = D2D1::Matrix3x2F::Scale(pushNear, pushNear, mid) * root;
+	rt->SetTransform(base);
 	const Pt ledC = p(494, 316);
 	const float lr = 8 * k;
 
@@ -716,22 +813,39 @@ void Scene::draw(ID2D1RenderTarget* rt, double t) {
 		}
 		rt->PopLayer();
 	}
+	rt->SetTransform(root);
+
+	// The hit: a lift of light, out of the LED, over the whole scene, for
+	// about 150 ms.
+	const double hu = (t - kLedAt) / 0.18;
+	if (hu > 0 && hu < 1 && paint.hitLift) {
+		const double o = std::min(1.0, hu / 0.14) * std::pow(1 - hu, 2);
+		const Pt c = onStage(ledC);
+		const float r = std::max(W, H) * 1.6f / 2;
+		paint.hitLift->SetCenter(c);
+		paint.hitLift->SetRadiusX(r);
+		paint.hitLift->SetRadiusY(r);
+		paint.hitLift->SetOpacity((float)o);
+		rt->FillRectangle(D2D1::RectF(c.x - r, c.y - r, c.x + r, c.y + r), paint.hitLift);
+	}
 
 	// The icon: over the circuit, its own art where the circuit was, then
 	// flying to where the launch screen's own icon is, and handing over
 	// (landed just as the panel is half in, so they don't double up).
+	// (Where the circuit is, pushed in.)
 	const double fly = smooth(t, bloomAt + 0.14, bloomAt + 0.44);
-	const Pt bigAt = p(0, 0);
-	const float bigSide = 512 * k, cardSide = kCardIconSize;
+	const Pt art = onStage(p(256, 256));
+	const float bigSide = 512 * k * pushNear, cardSide = kCardIconSize;
+	const Pt bigAt = D2D1::Point2F(art.x - bigSide / 2, art.y - bigSide / 2);
 	auto mix = [&](float a, float b) { return (float)(a + (b - a) * fly); };
 	const float side = mix(bigSide, cardSide);
 	const float x = mix(bigAt.x, cardIcon.x - cardSide / 2), y = mix(bigAt.y, cardIcon.y - cardSide / 2);
-	const Pt mid = D2D1::Point2F(x + side / 2, y + side / 2);
+	const Pt iconMid = D2D1::Point2F(x + side / 2, y + side / 2);
 	// Gone into the panel's own icon as the panel finishes coming in.
 	const double landed = kCardIn + kCardFade;
 	const double iconShown = smooth(t, bloomAt + 0.05, bloomAt + 0.26) * (1 - smooth(t, landed - 0.14, landed));
 	if (iconShown > 0.002) {
-		glowAt(rt, paint.glow, mid, side * 1.9f / 2, side * 1.9f / 2, iconShown * (0.55 + 0.25 * (1 - fly)));
+		glowAt(rt, paint.glow, iconMid, side * 1.9f / 2, side * 1.9f / 2, iconShown * (0.55 + 0.25 * (1 - fly)));
 		if (paint.icon) rt->DrawBitmap(paint.icon, D2D1::RectF(x, y, x + side, y + side), (float)iconShown, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 	}
 
@@ -740,7 +854,7 @@ void Scene::draw(ID2D1RenderTarget* rt, double t) {
 	const double bs = 0.04 + 0.96 * bl;
 	const double bloomShown = 0.9 * smooth(t, bloomAt - 0.02, bloomAt + 0.08) * (1 - smooth(t, bloomAt + 0.14, bloomAt + 0.56));
 	const float bloomR = (float)(std::max(W, H) * 1.6 / 2 * bs);
-	glowAt(rt, paint.bloom, ledC, bloomR, bloomR, bloomShown);
+	glowAt(rt, paint.bloom, onStage(ledC), bloomR, bloomR, bloomShown);
 }
 
 // ---- Settings and the environment -------------------------------------------------
@@ -764,16 +878,6 @@ bool allowed() {
 		if (wcsncmp(argv[i], L"--", 2) == 0) option = true;
 	if (argv) LocalFree(argv);
 	return !option;
-}
-
-// Which intro the saved settings say this launch is owed (none in the usual
-// case). The same tests as the launch screen's first-launch look and What's
-// New, so it can't disagree with them.
-Trigger owed() {
-	const Prefs& p = prefs();
-	if (!p.hasSeenWelcome && !p.firstLaunchPlayed && !p.introFirstLaunchPlayed) return Trigger::First;
-	if (p.hasSeenWelcome && p.seenWhatsNew != whatsnew::kVersion && p.introUpdatePlayed != whatsnew::kVersion) return Trigger::Update;
-	return Trigger::None;
 }
 
 // ---- Sound ------------------------------------------------------------------------
@@ -818,7 +922,7 @@ std::vector<std::vector<unsigned char>>& soundBuffers() {
 	static std::vector<std::vector<unsigned char>> all;
 	return all;
 }
-double gSoundFrom = 0, gSoundStarted = -1;
+double gSoundFrom = 0, gSoundStarted = -1, gLastSoundFrom = -1;
 
 // The sound from `from` seconds in: `seconds` of it (all the rest: 0),
 // faded up over `fadeUp`, or from `gain` down to nothing (`fadeDown`).
@@ -1005,8 +1109,9 @@ bool windows11() {
 // Where the circuit window will come in (screen pixels, as you'll see it:
 // without Windows' invisible edge), and its scale. On the launch screen's
 // screen when it's somewhere else (and can go without changing size).
-RECT windowArea(HMONITOR splashScreen, float& scale) {
-	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().front();
+// `over` (Help > Play the Intro): that window, as it is, not moved.
+RECT windowArea(HMONITOR splashScreen, float& scale, CircuitWindow* over) {
+	CircuitWindow* w = over ? over : circuitWindows().empty() ? nullptr : circuitWindows().front();
 	MONITORINFO mi = { sizeof mi };
 	if (w == nullptr) {
 		GetMonitorInfoW(splashScreen, &mi);
@@ -1020,7 +1125,8 @@ RECT windowArea(HMONITOR splashScreen, float& scale) {
 	const UINT dpi = dpiOf(h);
 	scale = dpi / 96.0f;
 	HMONITOR m = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
-	if (m != splashScreen && !w->opensMaximized() && monitorDpi(splashScreen) == dpi && GetMonitorInfoW(splashScreen, &mi)) {
+	const bool maximized = over ? IsZoomed(h) != FALSE : w->opensMaximized();
+	if (over == nullptr && m != splashScreen && !w->opensMaximized() && monitorDpi(splashScreen) == dpi && GetMonitorInfoW(splashScreen, &mi)) {
 		RECT r;
 		GetWindowRect(h, &r);
 		const RECT& a = mi.rcWork;
@@ -1028,7 +1134,7 @@ RECT windowArea(HMONITOR splashScreen, float& scale) {
 		SetWindowPos(h, nullptr, (a.left + a.right - ww) / 2, (a.top + a.bottom - wh) / 2, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
 		m = splashScreen;
 	}
-	if (w->opensMaximized()) {
+	if (maximized) {
 		GetMonitorInfoW(m, &mi);
 		return mi.rcWork;
 	}
@@ -1048,11 +1154,29 @@ RECT windowArea(HMONITOR splashScreen, float& scale) {
 
 // ---- What it says ------------------------------------------------------------------
 
+// Which intro the saved settings say a launch is owed (none in the usual
+// case). The same tests as the launch screen's first-launch look and What's
+// New, so it can't disagree with them.
+Trigger owed(const Prefs& p) {
+	if (!p.hasSeenWelcome && !p.firstLaunchPlayed && !p.introFirstLaunchPlayed) return Trigger::First;
+	if (p.hasSeenWelcome && p.seenWhatsNew != whatsnew::kVersion && p.introUpdatePlayed != whatsnew::kVersion) return Trigger::Update;
+	return Trigger::None;
+}
+
+Trigger forLaunch(const Prefs& p) {
+	const Trigger t = owed(p);
+	if (t != Trigger::None) return t;
+	return p.introEveryLaunch ? Trigger::Every : Trigger::None;
+}
+
 Trigger pending() {
 	static const Trigger once = [] {
 		if (!allowed()) return Trigger::None;
-		if (envSet(L"CL_INTRO")) return envValue(L"CL_INTRO") == "update" ? Trigger::Update : Trigger::First;
-		return owed();
+		if (envSet(L"CL_INTRO")) {
+			const std::string v = envValue(L"CL_INTRO");
+			return v == "update" ? Trigger::Update : v == "every" ? Trigger::Every : Trigger::First;
+		}
+		return forLaunch(prefs());
 	}();
 	return once;
 }
@@ -1060,17 +1184,23 @@ Trigger pending() {
 void markPlayed(Trigger t) {
 	if (t == Trigger::First) prefs().introFirstLaunchPlayed = true;
 	else if (t == Trigger::Update) prefs().introUpdatePlayed = whatsnew::kVersion;
-	else return;
+	else return;   // every launch's: nothing to keep
 	prefs().save();
 }
 
-void playSound(bool calm) {
+void playSound(bool calm, double clock) {
 	prefs().firstLaunchPlayed = true;
 	prefs().save();
-	gSoundFrom = calm ? kSoundHit - 0.15 - kCalmHold : kSoundHit - kLedAt;
+	// However long it's been since the picture's clock started, that much
+	// further in: the bell trails the LED, never leads it.
+	const double since = clock >= 0 ? std::max(0.0, nowSeconds() - clock) : 0;
+	gSoundFrom = (calm ? kSoundHit - 0.15 - kCalmHold : kSoundHit - kLedAt) + since;
 	gSoundStarted = nowSeconds();
+	gLastSoundFrom = gSoundFrom;
 	if (!playFrom(gSoundFrom, 0, 0.3, false)) gSoundStarted = -1;
 }
+
+double lastSoundFrom() { return gLastSoundFrom; }
 
 bool active() { return g_player != nullptr; }
 
@@ -1087,16 +1217,17 @@ void skip() {
 	}
 }
 
-double play(POINT cardIcon) {
+double play(POINT cardIcon, CircuitWindow* over) {
 	if (g_player) return -1;
 	HMONITOR splashScreen = MonitorFromPoint(cardIcon, MONITOR_DEFAULTTOPRIMARY);
 	Player* p = new Player();
-	const RECT area = windowArea(splashScreen, p->scale);
+	const RECT area = windowArea(splashScreen, p->scale, over);
 	p->pw = area.right - area.left;
 	p->ph = area.bottom - area.top;
 	if (p->pw < 200 || p->ph < 150) { delete p; return -1; }
 	// Windows 11 rounds a window's corners; 10 doesn't.
-	p->corner = windows11() && !(circuitWindows().size() && circuitWindows().front()->opensMaximized()) ? 8.0f : 0.0f;
+	const bool maximized = over ? IsZoomed(over->window()) != FALSE : circuitWindows().size() && circuitWindows().front()->opensMaximized();
+	p->corner = windows11() && !maximized ? 8.0f : 0.0f;
 	const std::string freeze = envValue(L"CL_INTRO_FREEZE");
 	if (!freeze.empty()) p->freezeAt = atof(freeze.c_str());
 	const Pt icon = D2D1::Point2F((cardIcon.x - area.left) / p->scale, (cardIcon.y - area.top) / p->scale);

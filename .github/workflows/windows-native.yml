@@ -382,11 +382,14 @@ jobs:
           # The launch screen, moment by moment (as the Mac's timeline).
           for t in 0.25 0.6 0.9 1.2 1.6 2.2 2.7; do timeout 60 "$A" --splash-frame $t "$PWD/renders/splash-$t.png" || true; done
           timeout 60 "$A" --splash-frame 4.0 "$PWD/renders/splash-first-4.0.png" --first-launch || true
-          # The 0.4 intro (Intro.cpp, the Mac's Intro.swift), every frame at 60 fps over a
-          # new circuit's window; the moments the Mac's stills show are kept, by time.
+          # The 0.4 intro (Intro.cpp, the Mac's Intro.swift, rounds 4 and 5), every frame at
+          # 60 fps over a new circuit's window: 6.07 s, so 365 frames. The moments the
+          # Mac's v5 stills show are kept, by time (the panel held at 4.95, the dissolve at
+          # 5.80), and the hit on the LED frame by frame (2.50-2.70: the breath, the lift).
           timeout 900 "$A" --render-intro "$PWD/intro-frames" first
-          test "$(ls intro-frames/frame-*.png | wc -l)" -ge 299
-          for f in 0.20:0012 0.95:0057 1.00:0060 1.70:0102 2.98:0179 3.20:0192 3.80:0228 4.65:0279; do
+          test "$(ls intro-frames/frame-*.png | wc -l)" -eq 365
+          for f in 0.20:0012 0.95:0057 1.00:0060 1.70:0102 2.50:0150 2.56:0153 2.60:0156 2.64:0158 2.70:0162 \
+                   2.98:0179 3.20:0192 3.80:0228 4.42:0265 4.95:0297 5.52:0331 5.80:0348; do
             cp "intro-frames/frame-${f#*:}.png" "renders/intro-${f%%:*}s.png"
           done
           timeout 90 "$A" --card-frame 0.35 --screenshot "$PWD/renders/opening-card.png" format/tests/fixtures/Lab5.cdl || true
@@ -490,7 +493,8 @@ jobs:
       # renders/rail. Then --rail-check: new and earlier installs' defaults,
       # one order for the rail's drag and the list, the search, the hot
       # strip's place and the dwell, pass-through and leaving, focus mode
-      # folding (not hiding) and giving it back, and the rest, PASS or FAIL.
+      # folding (not hiding) and giving it back, and the rest, PASS or FAIL;
+      # and the intro's rules and Help > Play the Intro (lines "intro: ...").
       - name: Actions rail
         if: matrix.run
         shell: bash
@@ -522,6 +526,14 @@ jobs:
           timeout 180 "$A" --rail-check | tee rail-check.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "rail check:.*all passed" rail-check.log
+          # (It checks the intro's rules too: the every-time setting off by default, the
+          # update intro with its sound, an every-time launch with none, and Help > Play
+          # the Intro, played over a window. Each of those must be there and pass.)
+          for want in "off by default" "updates only" "after an update plays the update's intro, with the sound" \
+                      "a later launch plays it, with no sound" "Play the Intro is among the actions" \
+                      "Help > Play the Intro is in the menu bar" "Play the Intro plays" "the once-only keys are left"; do
+            grep "^PASS intro: .*$want" rail-check.log > /dev/null || { echo "::error::intro check missing or failed: $want"; exit 1; }
+          done
 
       # The menu bar: each menu open (by its keys) in light and dark, a
       # narrow window, focus mode (where the bar has slid away and Alt opens

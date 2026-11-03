@@ -9,8 +9,12 @@
 // window: the rail's width, folding, focus mode folding it (not hiding it)
 // and giving it back as it was, a narrow window, sliding out over the canvas
 // without moving it, Show/Hide Actions, the toolbar and hidden modes, a click
-// and a drag on the rail, Predict from the rail and its shortcut. One PASS
-// or FAIL line each; the exit code is 0 when all passed.
+// and a drag on the rail, Predict from the rail and its shortcut. Then the
+// intro's rules (Intro.h; the Mac launch-selftest's intro checks): its
+// length, which launch plays which intro and with the sound or not, "Play
+// the intro every time CedarLogic opens" off by default, and Help > Play the
+// Intro in the actions and the menu bar, played over a window. One PASS or
+// FAIL line each; the exit code is 0 when all passed.
 
 #ifndef CL_WINDOWS_RAILCHECK_H
 #define CL_WINDOWS_RAILCHECK_H

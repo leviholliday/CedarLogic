@@ -418,6 +418,7 @@ void CircuitWindow::buildMenus() {
 	item(help, CMD_TOUR, "Guided &Tour");
 	item(help, CMD_WELCOME, "&Welcome to CedarLogic\u2026");
 	item(help, CMD_WHATS_NEW, "What's &New in CedarLogic");
+	item(help, CMD_PLAY_INTRO, "&Play the Intro");
 	separator(help);
 	item(help, CMD_FEEDBACK, "Send &Feedback\u2026");
 	item(help, CMD_CHECK_UPDATES, "Check for &Updates\u2026");
@@ -1355,6 +1356,7 @@ bool CircuitWindow::commandEnabled(int command) const {
 	// From the rail or the menu, outside Simulation View: into it with the lights covered.
 	case CMD_PREDICT: return simViewOn || predict.on || !predictLights().empty();
 	case CMD_REVEAL: return simViewOn && predict.on;
+	case CMD_PLAY_INTRO: return splash::canPlayIntroNow();
 	case CMD_CUT: return edit && sel;
 	case CMD_COPY: return sel;
 	case CMD_DUPLICATE: return edit && sel;
@@ -2200,6 +2202,7 @@ void CircuitWindow::run(int command) {
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
 	case CMD_TOUR: welcome::startTourOn(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
+	case CMD_PLAY_INTRO: splash::playIntroNow(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;
 	case CMD_START_MENU: if (integration::offered()) integration::menuCommand(this); break;
 	case CMD_ABOUT: about::show(this); break;

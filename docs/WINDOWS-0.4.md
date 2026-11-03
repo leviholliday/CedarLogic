@@ -119,15 +119,30 @@ also:
 
 ## The 0.4 intro (added 2026-11-03)
 
-The Mac's intro now plays on Windows too, the same five seconds: on the
-very first launch, and on the first launch after an update that has a
-What's New tour, the circuit draws itself over the circuit window (the two
-wires trace in, the C, D and L snap in, a clock pulse lights the gate, the
-LED and a "0.4" display light up), the LED blooms into the icon, and the
-icon flies into the usual launch screen ("CedarLogic 0.4", "Ready"), which
-plays its sweep and fades into the window, then the welcome or What's New.
-Only the first launch has the sound, its bell landing on the LED. Any key or
-click skips it. With Windows' "Animation effects" off (Settings >
-Accessibility > Visual effects), it's just the launch screen's still for
-half a second and a short fade. Each plays once; `CL_INTRO=first` (or
-`update`) plays it again for testing, `CL_NO_INTRO=1` turns it off.
+The Mac's intro now plays on Windows too, the same six seconds (6.07, the
+Mac's rounds 4 and 5): on the very first launch, and on the first launch
+after an update that has a What's New tour, the circuit draws itself over
+the circuit window (the two wires trace in, the C, D and L snap in, a clock
+pulse lights the gate, the LED and a "0.4" display light up), the LED
+blooms into the icon, and the icon flies into the usual launch screen
+("CedarLogic 0.4", "Ready"), which plays its sweep, holds for a second so
+it can be read, and fades into the window, then the welcome or What's New.
+Behind the circuit the canvas slowly pushes in, the grid fades towards the
+edges, a faint green light sits under the gate, and a few soft motes drift;
+just before the LED lights the scene dims a touch, and as it lights a soft
+lift of light goes over everything. Both of those launches have the sound,
+its bell landing on the LED. Any key or click skips it. With Windows'
+"Animation effects" off (Settings > Accessibility > Visual effects), it's
+just the launch screen's still for half a second and a short fade. Each
+plays once.
+
+Help > Play the Intro (also in the Actions list, so it can go on the rail)
+plays it again over the front window, sound and all. Settings > General >
+Launch screen > "Play the intro every time CedarLogic opens" (off unless
+ticked) plays it on every other launch, silently. For testing,
+`CL_INTRO=first`, `update` or `every` plays that one, and `CL_NO_INTRO=1`
+turns it off.
+
+To try: Help > Play the Intro (the chime's bell should land as the LED
+lights, not before it); tick the setting, quit and start CedarLogic again
+(the intro, no sound); a key press during it skips it.

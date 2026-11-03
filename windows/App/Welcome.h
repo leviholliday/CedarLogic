@@ -31,6 +31,12 @@ bool renderFrame(double t, bool first, const std::string& file);
 // left at `panelAt`.
 void raise();
 void skipIntro();
+// Help > Play the Intro: the first launch's intro, sound and all, over
+// `over` (already on screen), dissolving back into it; nothing is held and
+// the once-only keys are left as they are. Not while the launch screen or
+// an intro is up (canPlayIntroNow).
+void playIntroNow(CircuitWindow* over);
+bool canPlayIntroNow();
 void drawAfterIntro(ID2D1RenderTarget* rt, D2D1_POINT_2F panelAt, double t);
 void releaseIntroPicture();
 }  // namespace splash

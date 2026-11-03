@@ -133,6 +133,7 @@ const std::vector<Def>& all() {
 		{ "tour", "Guided Tour", "Help", 0xE7C1, CMD_TOUR },
 		{ "welcome", "Welcome to CedarLogic…", "Help", 0xE734, CMD_WELCOME },
 		{ "whatsNew", "What's New in CedarLogic", "Help", 0xE789, CMD_WHATS_NEW },
+		{ "playIntro", "Play the Intro", "Help", 0xE714, CMD_PLAY_INTRO },
 		{ "feedback", "Send Feedback…", "Help", 0xED15, CMD_FEEDBACK },
 		{ "checkForUpdates", "Check for Updates…", "Help", 0xE896, CMD_CHECK_UPDATES },
 		{ "about", "About CedarLogic", "Help", 0xE946, CMD_ABOUT },
