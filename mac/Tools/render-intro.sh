@@ -4,8 +4,10 @@
 #   mac/build.sh && mac/Tools/render-intro.sh <out-dir> [first|update]
 #
 # The app draws every frame at 60 fps to <out-dir>/frames (PNGs at 2x,
-# 2560x1600, over a picture of a new circuit's window) and quits; nothing
-# opens on screen. Then, with ffmpeg: <out-dir>/intro-<trigger>.mp4 (1280x800,
+# 2560x1600, over a picture of a new circuit's window, the launch screen's
+# panel drawn from its own view) and quits; nothing opens on screen. Also
+# <out-dir>/wire-compare.png: a real canvas wire (top) over the intro's at
+# rest (bottom), at the same scale. Then, with ffmpeg: <out-dir>/intro-<trigger>.mp4 (1280x800,
 # H.264) and a small GIF beside it; without ffmpeg but with ImageMagick, just
 # the GIF; with neither, the frames alone. Six key frames are copied out as
 # <out-dir>/key-1.png ... key-6.png either way. KEEP_FRAMES=0 deletes the
@@ -23,9 +25,11 @@ rm -rf "$FRAMES"
 "$APP/Contents/MacOS/CedarLogic" --render-intro "$FRAMES" "$TRIGGER"
 
 # The key moments: wires tracing through the C, the D snapping in, the
-# pulse in the lit gate, the bloom, the icon over its name, the sparks.
+# pulse landing in the LED, the LED and the version lit as it blooms, the
+# icon flying into the launch screen's panel, the panel's sweep.
+cp "$FRAMES/wire-compare.png" "$OUT/wire-compare.png"
 i=1
-for t in 0.55 1.00 1.82 2.08 2.48 2.70; do
+for t in 0.55 1.00 1.90 2.02 2.25 2.60; do
 	f=$(printf "%04d" "$(echo "$t * 60 / 1" | bc)")
 	cp "$FRAMES/frame-$f.png" "$OUT/key-$TRIGGER-$i.png"
 	i=$((i + 1))
