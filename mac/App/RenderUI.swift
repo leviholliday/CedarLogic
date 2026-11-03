@@ -366,6 +366,8 @@ enum RenderUI {
         prefs.dark = savedDark
         prefs.toolbarStyle = savedStyle
         prefs.toolbarHidden = savedHidden
+        // The Actions rail, in whole windows (RenderActions.swift).
+        RenderActions.run(dir)
         SyncRender.run(dir)
         exit(0)
     }

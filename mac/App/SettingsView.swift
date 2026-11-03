@@ -8,7 +8,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, appearance, canvas, toolbar, shortcuts, sync
+    case general, appearance, canvas, toolbar, actions, shortcuts, sync
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -16,6 +16,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .appearance: "Appearance"
         case .canvas: "Canvas"
         case .toolbar: "Toolbar"
+        case .actions: "Actions"
         case .shortcuts: "Shortcuts"
         case .sync: "Sync"
         }
@@ -26,6 +27,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .appearance: "paintpalette"
         case .canvas: "cursorarrow.rays"
         case .toolbar: "menubar.rectangle"
+        case .actions: "sidebar.right"
         case .shortcuts: "keyboard"
         case .sync: "arrow.triangle.2.circlepath"
         }
@@ -226,6 +228,7 @@ enum SettingsView {
         case .appearance: CLAppearanceSettings()
         case .canvas: CLCanvasSettings()
         case .toolbar: CLToolbarSettings()
+        case .actions: CLActionsSettings()
         case .shortcuts: CLShortcutSettings()
         case .sync: SyncSettingsView(center: SyncCenter.shared)
         }

@@ -15,7 +15,8 @@
 // (as normal, with Sparkle's last update check a month ago), trash (a
 // circuit deleted from Your Circuits, one deleted 31 days ago, one moved
 // into the trash by sync with no date, a second copy of a circuit that's
-// still in the library, and the "repeated versions" folder).
+// still in the library, and the "repeated versions" folder), actions (as
+// normal, with the Actions rail folded and its items reordered last time).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -29,10 +30,15 @@
 // `damaged`, copies of the sample circuits cut short or with bytes changed
 // (CL_DAMAGE_ROUND picks which), each opening or being refused, never
 // crashing; in `trash`, Recently Deleted: the list, the 30-day sweep,
-// Restore (under its own id, or a new one when that's taken) and Delete Now.
+// Restore (under its own id, or a new one when that's taken) and Delete Now;
+// in every state, where the Actions rail is (on screen for a first launch,
+// hidden for anyone before), and in `actions` that a folded rail stays
+// folded, and the rail, its tab and the toolbar's six buttons laid out in
+// real windows off screen (actionsChecks).
 // PASS or FAIL for each; exit 1 on a failure.
 
 import AppKit
+import SwiftUI
 
 @MainActor
 enum LaunchSelfTest {
@@ -80,6 +86,14 @@ enum LaunchSelfTest {
             d.set(true, forKey: "SUHasLaunchedBefore")
             d.set(true, forKey: "SUEnableAutomaticChecks")
             d.set(Date(timeIntervalSinceNow: -30 * 86400), forKey: "SULastCheckTime")
+        }
+        if state == "actions" {
+            // Someone who folded the rail and put its items in another order.
+            d.set(ActionsMode.onScreen.rawValue, forKey: "cl.actions.mode")
+            d.set(true, forKey: "cl.actions.collapsed")
+            d.set(false, forKey: "cl.actions.hint")
+            d.set(ActionID.defaults.reversed().map(\.rawValue), forKey: "cl.actions.order")
+            d.set(ActionID.defaults.map(\.rawValue), forKey: "cl.actions.shown")
         }
         if state == "first" || state == "nolibrary" { d.synchronize(); return }
         var made: [LibraryItem] = []
@@ -168,6 +182,102 @@ enum LaunchSelfTest {
         let shown = NSApp.windows.filter { $0.isVisible }
         check(shown.isEmpty, "no alert or window came up (\(shown.map { $0.title.isEmpty ? String(describing: type(of: $0)) : $0.title }))")
         check(NSApp.modalWindow == nil, "no question waits for an answer")
+    }
+
+    // MARK: actions
+
+    /// The Actions rail (Actions.swift): on screen for a new install, hidden
+    /// (with the status line's hint due) for someone who had CedarLogic
+    /// before; in `actions`, a rail folded and reordered last time is still
+    /// so, and laid out in a real window (off screen, never shown) it takes
+    /// its width, or its tab's, from the canvas; in the toolbar instead, the
+    /// toolbar has the six buttons and the rail is gone.
+    static func actionsChecks(_ state: String, check: (Bool, String) -> Void, turn: (Double) -> Void) {
+        let prefs = Prefs.shared
+        switch state {
+        case "first":
+            check(prefs.actionsMode == .onScreen, "a first launch has the Actions rail on screen (\(prefs.actionsMode.name))")
+            check(!prefs.actionsCollapsed && prefs.railActions == ActionID.defaults,
+                  "open, with the six default actions (\(prefs.railActions.map(\.rawValue)))")
+            check(!prefs.actionsHintPending, "and no status line about it")
+        case "actions":
+            check(prefs.actionsMode == .onScreen, "the rail is still on screen")
+            check(prefs.actionsCollapsed, "it's still folded, as it was left")
+            check(prefs.railActions == ActionID.defaults.reversed(), "in the order it was given (\(prefs.railActions.map(\.rawValue)))")
+            check(!prefs.actionsHintPending, "no status line (they've seen it)")
+        default:
+            check(prefs.actionsMode == .hidden, "someone who had CedarLogic before keeps their window: no rail (\(prefs.actionsMode.name))")
+            check(prefs.actionsHintPending, "and the status line tells them once where it is")
+        }
+        guard state == "actions" else { return }
+
+        let doc = CoreDocument()
+        _ = doc.addGate("AA_AND2", page: 0, at: .zero)
+        /// The canvas's width in a whole circuit window laid out off screen.
+        func canvasWidth(_ mode: ActionsMode, folded: Bool, width: CGFloat = 1440) -> CGFloat {
+            prefs.actionsMode = mode
+            prefs.actionsCollapsed = folded
+            let canvas = CanvasController()
+            canvas.attach(doc)
+            let size = NSSize(width: width, height: 800)
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
+                               styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: CLLayout(document: doc, canvas: canvas, page: .constant(0))
+                .frame(width: size.width, height: size.height))
+            win.contentView = host
+            host.frame = NSRect(origin: .zero, size: size)
+            host.layoutSubtreeIfNeeded()
+            turn(1.0)
+            let w = canvas.view?.frame.width ?? -1
+            print("INFO actions: a \(Int(width))-point window, \(mode.name)\(folded ? ", folded" : ""): the canvas is \(Int(w)) wide")
+            win.close()
+            return w
+        }
+        let none = canvasWidth(.hidden, folded: false)
+        let open = canvasWidth(.onScreen, folded: false)
+        let folded = canvasWidth(.onScreen, folded: true)
+        let inBar = canvasWidth(.toolbar, folded: false)
+        check(none > 0 && abs((none - open) - ActionsRail.width) < 2, "open, the rail takes its \(Int(ActionsRail.width)) points (\(none) to \(open))")
+        check(abs((none - folded) - ActionsRail.tabWidth) < 2, "folded, just its tab's \(Int(ActionsRail.tabWidth)) (\(folded))")
+        check(abs(none - inBar) < 1, "in the toolbar instead, no rail (\(inBar))")
+        let narrowNone = canvasWidth(.hidden, folded: false, width: 860)
+        let narrowOpen = canvasWidth(.onScreen, folded: false, width: 860)
+        check(abs((narrowNone - narrowOpen) - ActionsRail.tabWidth) < 2, "in a window under \(Int(ActionsRail.narrowWidth)) points it folds by itself (\(narrowNone) to \(narrowOpen))")
+
+        /// The toolbar's buttons that are actions, by their tips (real views: BarClickArea).
+        func toolbarActionButtons(_ mode: ActionsMode, width: CGFloat) -> Int {
+            prefs.actionsMode = mode
+            let canvas = CanvasController()
+            canvas.attach(doc)
+            let size = NSSize(width: width, height: 52)
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
+                               styleMask: [.borderless], backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: CLToolbar(document: doc, canvas: canvas, status: canvas.status, title: "Lab 5",
+                                                         subtitle: "Page 1", focusMode: .constant(false))
+                .frame(width: size.width, height: size.height))
+            win.contentView = host
+            host.frame = NSRect(origin: .zero, size: size)
+            host.layoutSubtreeIfNeeded()
+            turn(0.4)
+            let tips = Set(prefs.railActions.map { $0.action.titleWithKey })
+            var n = 0
+            func walk(_ v: NSView) {
+                if let c = v as? BarControl, let t = c.tip, tips.contains(t) { n += 1 }
+                v.subviews.forEach(walk)
+            }
+            walk(host)
+            win.close()
+            return n
+        }
+        for w in [1280.0, 1000.0] {
+            let n = toolbarActionButtons(.toolbar, width: w)
+            check(n == 6, "in the toolbar, it has the six buttons at \(Int(w)) points wide (\(n))")
+        }
+        check(toolbarActionButtons(.onScreen, width: 1280) == 0, "with the rail on screen, the toolbar has none of them")
+        prefs.actionsMode = .onScreen
+        prefs.actionsCollapsed = true
     }
 
     // MARK: trash
@@ -307,6 +417,7 @@ enum LaunchSelfTest {
         // can't be reached): neither may hold the launch up.
         timed("Sync starts") { SyncCenter.shared.start() }
         timed("Classroom starts") { ClassroomCenter.shared.start() }
+        actionsChecks(state, check: check, turn: turn)
         if state == "offline" { offlineChecks(check: check, timed: timed, turn: turn) }
         if state == "trash" { trashChecks(check: check, timed: timed) }
         turn(2.5)

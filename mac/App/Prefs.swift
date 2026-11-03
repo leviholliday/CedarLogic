@@ -115,9 +115,26 @@ final class Prefs: ObservableObject {
         didSet { d.set(newPagesShareLinks, forKey: "cl.newPagesShareLinks"); cl_set_new_pages_share_links(newPagesShareLinks) }
     }
 
+    // The Actions rail (Actions.swift).
+    /// Where the actions go: the rail, the toolbar, or nowhere.
+    @Published var actionsMode: ActionsMode { didSet { d.set(actionsMode.rawValue, forKey: "cl.actions.mode") } }
+    /// The rail folded to its tab (by a click on its edge), as it was left.
+    @Published var actionsCollapsed: Bool { didSet { d.set(actionsCollapsed, forKey: "cl.actions.collapsed") } }
+    /// Every action, in the order the Customize list has them.
+    @Published private(set) var actionsOrder: [ActionID] { didSet { d.set(actionsOrder.map(\.rawValue), forKey: "cl.actions.order") } }
+    /// The ones ticked there.
+    @Published private(set) var actionsShown: Set<ActionID> { didSet { d.set(actionsShown.map(\.rawValue).sorted(), forKey: "cl.actions.shown") } }
+    /// Someone who used CedarLogic before the rail came: told once, in the
+    /// status bar, where it is (their toolbar stays as it was).
+    @Published var actionsHintPending: Bool { didSet { d.set(actionsHintPending, forKey: "cl.actions.hint") } }
+
     private init() {
-        Prefs.importWxPrefsOnce()
         let d = UserDefaults.standard
+        // Before anything here is written: is this a new install? (Nothing of
+        // CedarLogic's in its settings yet; the wx app's are carried over below.)
+        let newInstall = d.object(forKey: "cl.importedWx") == nil && d.object(forKey: "cl.brandAccentSet") == nil
+            && !d.bool(forKey: "cl.hasSeenWelcome")
+        Prefs.importWxPrefsOnce()
         func int(_ k: String, _ v: Int) -> Int { d.object(forKey: k) == nil ? v : d.integer(forKey: k) }
         func bool(_ k: String, _ v: Bool) -> Bool { d.object(forKey: k) == nil ? v : d.bool(forKey: k) }
         testingGroup = TestingGroup(rawValue: d.string(forKey: "testingGroup") ?? "") ?? .normal
@@ -165,11 +182,61 @@ final class Prefs: ObservableObject {
         openReplaces = bool("cl.openReplaces", true)
         newTemplate = d.string(forKey: "cl.newTemplate") ?? ""
         newPagesShareLinks = bool("cl.newPagesShareLinks", true)
+        // The rail is on screen for a new install; anyone who's used
+        // CedarLogic before keeps the window they know (no rail, the toolbar
+        // as it was) until they look in Settings > Actions, which a status
+        // line tells them once.
+        if let m = d.object(forKey: "cl.actions.mode") as? Int, let mode = ActionsMode(rawValue: m) {
+            actionsMode = mode
+            actionsHintPending = d.bool(forKey: "cl.actions.hint")
+        } else {
+            let mode: ActionsMode = newInstall ? .onScreen : .hidden
+            actionsMode = mode
+            actionsHintPending = !newInstall
+            d.set(mode.rawValue, forKey: "cl.actions.mode")
+            d.set(!newInstall, forKey: "cl.actions.hint")
+        }
+        actionsCollapsed = bool("cl.actions.collapsed", false)
+        let saved = (d.stringArray(forKey: "cl.actions.order") ?? []).compactMap(ActionID.init(rawValue:))
+        actionsOrder = Prefs.completeOrder(saved)
+        if let shown = d.stringArray(forKey: "cl.actions.shown") {
+            actionsShown = Set(shown.compactMap(ActionID.init(rawValue:)))
+        } else {
+            actionsShown = Set(ActionID.defaults)
+        }
         cl_set_new_pages_share_links(newPagesShareLinks)
         applyThemeMode()
         applyWireDots()
     }
 
+
+    // MARK: Actions
+
+    /// A saved order with any actions it doesn't know (new ones) after it.
+    private static func completeOrder(_ saved: [ActionID]) -> [ActionID] {
+        var out: [ActionID] = []
+        for id in (saved.isEmpty ? ActionID.defaults : saved) + ActionID.allCases where !out.contains(id) { out.append(id) }
+        return out
+    }
+    /// The Customize list: every action offered here, in order.
+    var actionsOrderAll: [ActionID] { actionsOrder.filter { $0.action.available() } }
+    /// What the rail (or the toolbar) shows, top to bottom.
+    var railActions: [ActionID] { actionsOrderAll.filter { actionsShown.contains($0) } }
+    func actionShown(_ id: ActionID) -> Bool { actionsShown.contains(id) }
+    func setAction(_ id: ActionID, shown: Bool) {
+        if shown { actionsShown.insert(id) } else { actionsShown.remove(id) }
+    }
+    /// A drag in the Customize list (its indices are actionsOrderAll's).
+    func moveActions(from: IndexSet, to: Int) {
+        var listed = actionsOrderAll
+        listed.move(fromOffsets: from, toOffset: to)
+        actionsOrder = listed + actionsOrder.filter { !listed.contains($0) }
+    }
+    func resetActions() {
+        actionsOrder = Prefs.completeOrder([])
+        actionsShown = Set(ActionID.defaults)
+    }
+    var actionsAreDefault: Bool { actionsShown == Set(ActionID.defaults) && actionsOrder == Prefs.completeOrder([]) }
 
     // MARK: Derived
 
