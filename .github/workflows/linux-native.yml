@@ -414,6 +414,36 @@ jobs:
             cp "intro-frames/frame-${f%%:*}.png" "renders/intro/intro-${f#*:}.png"
           done
           rm -rf intro-frames
+          # And live, as at the first launch after the update (CI never plays it by itself):
+          # on a virtual display, GTK's warnings fatal, with settings of its own that have
+          # seen the welcome and What's New. Its window up, then gone into the circuit
+          # window, the intro marked played; then again, skipped with a click.
+          for how in play skip; do
+            home=$(mktemp -d)
+            mkdir -p "$home/config/CedarLogic"
+            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\n' > "$home/config/CedarLogic/native.ini"
+            HOW=$how xvfb-run -a -s "-screen 0 1600x1000x24" env -u CI CL_INTRO=update G_DEBUG=fatal-criticals \
+              XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" bash -c '
+              up() { xdotool search --onlyvisible --name "$1" > /dev/null 2>&1; }
+              "$APPIMAGE" > "renders/intro-live-$HOW.log" 2>&1 &
+              app=$!
+              for i in $(seq 80); do up "^CedarLogic\$" && break; sleep 0.25; done
+              up "^CedarLogic\$" || { echo "no intro window"; kill $app; exit 1; }
+              tries=60
+              if [ "$HOW" = skip ]; then sleep 1; xdotool mousemove 800 500 click 1; tries=12; fi
+              for i in $(seq $tries); do up "^CedarLogic\$" || break; sleep 0.25; done
+              up "^CedarLogic\$" && { echo "the intro window is still up ($HOW)"; kill $app; exit 1; }
+              kill -0 $app 2> /dev/null || { echo "CedarLogic ended during the intro ($HOW)"; exit 1; }
+              sleep 0.5
+              up " — CedarLogic\$" || { echo "no circuit window after the intro ($HOW)"; kill $app; exit 1; }
+              kill $app
+              wait $app 2> /dev/null
+              exit 0
+            '
+            grep -q "^introUpdatePlayed=0.4" "$home/config/CedarLogic/native.ini"
+            echo "intro live ($how): ok"
+            rm -rf "$home"
+          done
           "$APPIMAGE" --feedback-probe || echo "feedback probe failed"
           linux/build/render_png res/cl_gatedefs.xml format/tests/fixtures/Lab5.cdl 0 renders/Lab5-page1.png
           # The canvas alone, both ways, with nothing running (the same picture every time):
