@@ -620,6 +620,16 @@ void showPreferencesDialog(HWND parent) {
 			form.setTip(i, opensTip(after.first, after.second));
 		};
 	}
+	// The launch screen: the intro (Intro.cpp) at every launch, as the Mac's
+	// row (its words), silently.
+	FormField everyLaunch = check("Launch screen:", "Play the intro every time CedarLogic opens", p.introEveryLaunch,
+	                              "The circuit drawing itself, then the launch screen, as on the first launch, without its sound "
+	                              "(that's for the first launch and updates). Help > Play the Intro plays it any time.");
+	everyLaunch.tipLines = 3;
+	on[f.add(everyLaunch)] = [](Form& form, int i) {
+		prefs().introEveryLaunch = form.checked(i);
+		prefs().save();
+	};
 	on[f.add(check("Quitting:", "Ask before quitting", p.confirmQuit,
 	               keyOf("quit", "Quitting") + " shows a question first: Enter quits, Escape doesn't."))] = [](Form& form, int i) {
 		prefs().confirmQuit = form.checked(i);

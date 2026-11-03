@@ -62,6 +62,8 @@ enum Command {
 	// The Actions rail (Rail.h): View > Show/Hide Actions, and the rail's
 	// right-click Customize Actions... (the sheet).
 	CMD_TOGGLE_ACTIONS, CMD_CUSTOMIZE_ACTIONS,
+	// Help > Play the Intro (Intro.h): the first launch's intro again, over this window.
+	CMD_PLAY_INTRO,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 	// Window > the open circuits (CMD_WINDOW_LIST + i).

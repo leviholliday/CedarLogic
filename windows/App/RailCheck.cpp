@@ -4,9 +4,11 @@
 #include "Actions.h"
 #include "Canvas.h"
 #include "Commands.h"
+#include "Intro.h"
 #include "Rail.h"
 #include "Shortcuts.h"
 #include "Toolbar.h"
+#include "Welcome.h"
 #include "Window.h"
 
 #include <shellapi.h>
@@ -384,6 +386,81 @@ void window() {
 	prefs() = before;
 }
 
+// The intro's rules (Intro.h), the Windows twin of the Mac launch-selftest's
+// intro checks: the timeline's length, which launches play which intro, the
+// sound (the first launch's and an update's, never an every-launch one),
+// "Play the intro every time CedarLogic opens" (off unless chosen), and Help
+// > Play the Intro (in the actions, in the menu bar, and played: sound and
+// all, the once-only keys left alone, gone again by the end).
+void introRules() {
+	const Prefs before = prefs();
+	check(std::fabs(intro::kTotal - 6.07) < 0.005 && std::fabs(intro::kDissolveAt - 5.52) < 0.005,
+	      strf("intro: 6.07 s in all, the panel held to %.2f s (%.2f s)", intro::kDissolveAt, intro::kTotal));
+	check(std::lround(intro::kTotal * 60) + 1 == 365, "intro: --render-intro draws 365 frames");
+	loadText("intro-new.ini", "");
+	check(!prefs().introEveryLaunch, "intro: \"Play the intro every time CedarLogic opens\" is off by default");
+	loadText("intro-every.ini", "[CedarLogic]\nintroEveryLaunch=true\n");
+	check(prefs().introEveryLaunch, "intro: and stays on once chosen");
+	check(intro::hasSound(intro::Trigger::First) && intro::hasSound(intro::Trigger::Update) && !intro::hasSound(intro::Trigger::Every),
+	      "intro: the sound is for the first launch and updates only");
+	Prefs first;
+	check(intro::forLaunch(first) == intro::Trigger::First && intro::hasSound(intro::forLaunch(first)),
+	      "intro: a first launch plays the first launch's intro, with the sound");
+	Prefs later;
+	later.hasSeenWelcome = later.firstLaunchPlayed = later.introFirstLaunchPlayed = true;
+	later.seenWhatsNew = whatsnew::kVersion;
+	check(intro::forLaunch(later) == intro::Trigger::None, "intro: a later launch plays none with the setting off");
+	later.introEveryLaunch = true;
+	check(intro::forLaunch(later) == intro::Trigger::Every && !intro::hasSound(intro::forLaunch(later)),
+	      "intro: with the setting on, a later launch plays it, with no sound");
+	Prefs updated = later;
+	updated.introEveryLaunch = false;
+	updated.seenWhatsNew = "an older version";
+	check(intro::forLaunch(updated) == intro::Trigger::Update && intro::hasSound(intro::forLaunch(updated)),
+	      "intro: the first launch after an update plays the update's intro, with the sound");
+	updated.introEveryLaunch = true;
+	check(intro::forLaunch(updated) == intro::Trigger::Update, "intro: the update's intro (and its sound), setting or not");
+	updated.introUpdatePlayed = whatsnew::kVersion;
+	check(intro::forLaunch(updated) == intro::Trigger::Every, "intro: once played, the update's is the every-launch one again");
+	const actions::Def* play = actions::find("playIntro");
+	check(play && play->command == CMD_PLAY_INTRO && std::string(play->menu) == "Help" && std::string(play->title) == "Play the Intro",
+	      "intro: Play the Intro is among the actions, in Help");
+	prefs() = before;
+}
+
+bool menuHas(HMENU m, UINT command) {
+	for (int i = 0; m && i < GetMenuItemCount(m); i++) {
+		if (GetMenuItemID(m, i) == command) return true;
+		if (HMENU sub = GetSubMenu(m, i)) if (menuHas(sub, command)) return true;
+	}
+	return false;
+}
+
+void introReplay() {
+	const Prefs before = prefs();
+	CircuitWindow* w = newCircuitWindow();
+	if (!w) { check(false, "intro: a circuit window"); return; }
+	w->present();
+	SetWindowPos(w->window(), nullptr, 20, 20, 1000, 700, SWP_NOZORDER | SWP_NOACTIVATE);
+	pump(0.3);
+	check(menuHas(w->menuBarMenus(), CMD_PLAY_INTRO), "intro: Help > Play the Intro is in the menu bar");
+	prefs().introFirstLaunchPlayed = false;
+	prefs().introUpdatePlayed = "";
+	const bool could = w->commandEnabled(CMD_PLAY_INTRO);
+	const double soundBefore = intro::lastSoundFrom();
+	w->run(CMD_PLAY_INTRO);
+	pump(0.4);
+	check(could && splash::active() && !w->commandEnabled(CMD_PLAY_INTRO),
+	      strf("intro: Play the Intro plays (the launch screen up, the intro %s), and can't again while it does", intro::active() ? "up" : "skipped: animations off"));
+	check(intro::lastSoundFrom() >= 0 && intro::lastSoundFrom() != soundBefore, strf("intro: with the sound (%.2f s into it)", intro::lastSoundFrom()));
+	const double until = nowSeconds() + intro::kTotal + 1.5;
+	while ((splash::active() || intro::active()) && nowSeconds() < until) pump(0.1);
+	check(!splash::active() && !intro::active() && IsWindowVisible(w->window()) && w->commandEnabled(CMD_PLAY_INTRO),
+	      "intro: then gone, back into the window, and can be played again");
+	check(!prefs().introFirstLaunchPlayed && prefs().introUpdatePlayed.empty(), "intro: the once-only keys are left as they were");
+	prefs() = before;
+}
+
 }  // namespace
 
 void prepare() {
@@ -404,6 +481,8 @@ int run(const std::function<void(const std::string&)>& out) {
 		geometry();
 		hover();
 		window();
+		introRules();
+		introReplay();
 	});
 	gOut(strf("rail check: %d passed, %d failed%s\n", gPassed, gFailed, gFailed == 0 ? " -- all passed" : ""));
 	removeTree(gHome);

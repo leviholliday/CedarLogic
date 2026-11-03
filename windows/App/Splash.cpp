@@ -12,7 +12,9 @@
 // the circuit window, its LED blooming into the icon, which flies into this
 // panel as it fades in, part-way into its own appearance ("CedarLogic 0.4",
 // "Ready", the bar filling); the panel then plays the rest of it, its sweep
-// at full length, and dissolves with the intro into the window.
+// at full length, holds a moment to be read ("CedarLogic 0.4", the bar
+// full), and dissolves with the intro into the window. Help > Play the
+// Intro plays it again over the front circuit window (playIntroNow).
 //
 // It's a layered window drawn with Direct2D 1.1 (effects for the blurs and
 // glows) into a bitmap with real transparency, so the panel's corners are
@@ -23,6 +25,7 @@
 #include "Chrome.h"
 #include "Images.h"
 #include "Intro.h"
+#include "Window.h"
 
 #include <d2d1_1.h>
 #include <d2d1effects.h>
@@ -92,9 +95,9 @@ struct Timeline {
 
 	// After the intro: "Ready", the version in its title, the rest of its
 	// appearance from intro::kSplashAt on its own clock (the bar filling as it
-	// goes), its sweep at full length, and the dissolve straight after it
-	// (with Windows' animations off: its still, briefly). The same after
-	// either intro (the Mac's Splash.configureAfterIntro).
+	// goes), its sweep at full length, held, finished, to be read, then the
+	// dissolve (with Windows' animations off: its still, briefly). The same
+	// after any intro (the Mac's Splash.configureAfterIntro).
 	void planIntro() {
 		afterIntro = true;
 		first = false;
@@ -133,9 +136,10 @@ struct Timeline {
 	// the work goes on, then from wherever it is to the end once it's done.
 	double progress(double t) const {
 		if (afterIntro) {
-			// The bar glides home from where it'd be when the panel comes in.
+			// The bar glides home from where it'd be when the panel comes in,
+			// full as the sweep ends, then held there while the panel is read.
 			if (calm) return 1;
-			const double from = intro::kSplashAt, end = dissolveAt - 0.05;
+			const double from = intro::kSplashAt, end = intro::kSweepStart + intro::kSweepTime;
 			return 0.3 + 0.7 * smooth((t - from) / (end - from));
 		}
 		const double pace = calm ? 0.9 : first ? 3.9 : 2.1;
@@ -549,6 +553,7 @@ struct Splash {
 	bool presented = false;       // the windows it held are in
 	intro::Trigger introTrigger = intro::Trigger::None;   // played first (Intro.cpp)
 	bool skipped = false;         // the intro was skipped
+	CircuitWindow* replayOver = nullptr;   // Help > Play the Intro, over this window (playIntroNow)
 	std::function<void()> then;
 	std::string opening;
 
@@ -650,17 +655,9 @@ LRESULT CALLBACK splashProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
-void show() {
-	if (g_splash) return;
-	Splash* s = new Splash();
-	s->tl.first = !prefs().hasSeenWelcome && !prefs().firstLaunchPlayed;
-	s->tl.calm = reduceMotion();
-	s->introTrigger = intro::pending();
-	if (s->introTrigger != intro::Trigger::None) s->tl.planIntro();
-	// Where you're looking: the screen with the pointer on it.
-	POINT cursor;
-	GetCursorPos(&cursor);
-	HMONITOR mon = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+namespace {
+// The panel, unseen until it plays (hideSoon), on `mon`.
+Splash* makePanel(Splash* s, HMONITOR mon) {
 	MONITORINFO mi = { sizeof mi };
 	GetMonitorInfoW(mon, &mi);
 	UINT dpiX = 96, dpiY = 96;
@@ -685,12 +682,44 @@ void show() {
 	}
 	s->hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, L"CedarLogicSplash",
 	                          L"CedarLogic", WS_POPUP, x, y, s->pw, s->ph, nullptr, nullptr, appInstance(), nullptr);
-	if (s->hwnd == nullptr || !s->makeSurface()) { s->destroy(); delete s; return; }
+	if (s->hwnd == nullptr || !s->makeSurface()) { s->destroy(); delete s; return nullptr; }
 	g_splash = s;
 	// Up, but unseen (drawn clear) until the launch's work is done and it begins.
 	s->frame();
 	ShowWindow(s->hwnd, SW_SHOWNOACTIVATE);
 	SetTimer(s->hwnd, 1, 10, nullptr);
+	return s;
+}
+}  // namespace
+
+void show() {
+	if (g_splash) return;
+	Splash* s = new Splash();
+	s->tl.first = !prefs().hasSeenWelcome && !prefs().firstLaunchPlayed;
+	s->tl.calm = reduceMotion();
+	s->introTrigger = intro::pending();
+	if (s->introTrigger != intro::Trigger::None) s->tl.planIntro();
+	// Where you're looking: the screen with the pointer on it.
+	POINT cursor;
+	GetCursorPos(&cursor);
+	makePanel(s, MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY));
+}
+
+bool canPlayIntroNow() { return g_splash == nullptr && !intro::active(); }
+
+void playIntroNow(CircuitWindow* over) {
+	if (!canPlayIntroNow() || over == nullptr) return;
+	// The first launch's intro, sound and all, over this window, dissolving
+	// back into it. Nothing is hidden or held, and the once-only keys are
+	// left as they are.
+	Splash* s = new Splash();
+	s->tl.calm = reduceMotion();
+	s->introTrigger = intro::Trigger::First;
+	s->replayOver = over;
+	s->tl.planIntro();
+	if (makePanel(s, MonitorFromWindow(over->window(), MONITOR_DEFAULTTONEAREST)) == nullptr) return;
+	const HWND back = over->window();
+	hideSoon([back] { if (IsWindow(back)) SetForegroundWindow(back); });
 }
 
 bool active() { return g_splash != nullptr; }
@@ -718,19 +747,22 @@ void hideSoon(std::function<void()> then) {
 		// The intro first, over the circuit window (unless Windows'
 		// animations are off: then just this panel's still, briefly); this
 		// panel comes in over its bloom, on its own clock at kSplashAt.
-		intro::markPlayed(s->introTrigger);
+		// (Played again from the menu: nothing is marked.)
+		if (s->replayOver == nullptr) intro::markPlayed(s->introTrigger);
 		RECT r = {};
 		GetWindowRect(s->hwnd, &r);
 		const POINT icon = { r.left + (LONG)std::lround((kMargin + kW / 2) * s->scale), r.top + (LONG)std::lround((kMargin + 44 + 64) * s->scale) };
-		const double introStart = s->tl.calm ? -1 : intro::play(icon);
+		const double introStart = s->tl.calm ? -1 : intro::play(icon, s->replayOver);
 		s->start = introStart >= 0 ? introStart + intro::kCardIn - intro::kSplashAt : nowSeconds();
 		if (introStart < 0 && !s->tl.calm) {
 			// It couldn't play: the panel as after it, from the start.
 			s->tl.calm = true;
 			s->tl.planIntro();
 		}
-		// Only the first launch's has the sound (its bell lands on the LED).
-		if (s->introTrigger == intro::Trigger::First) intro::playSound(s->tl.calm);
+		// The first launch's and an update's have the sound, started on the
+		// picture's own clock (after its first frame) so the bell lands on
+		// the LED; every other launch's is silent.
+		if (intro::hasSound(s->introTrigger)) intro::playSound(s->tl.calm, introStart);
 		s->began = true;
 		return;
 	}
