@@ -240,6 +240,15 @@ Direct2D here. And:
   key (it should answer 403) and sends nothing.
 - `CedarLogic.exe --splash-frame <seconds> out.png [--first-launch]` -- the
   launch screen at that moment; `--card-frame <seconds>` holds the opening card.
+- `CedarLogic.exe --render-intro <dir> [first|update]` -- the 0.4 intro
+  (`App/Intro.cpp`, the Mac's `Intro.swift`), every frame at 60 fps, 1280 x 800
+  at 2x, over a new circuit's window (dark), as `frame-0000.png` on; CI keeps
+  the moments the Mac's stills show (`renders/intro-*.png`). The intro plays on
+  the first launch and the first after an update (once each:
+  `introFirstLaunchPlayed`, `introUpdatePlayed` in the settings);
+  `CL_INTRO=first|update` plays it again, `CL_NO_INTRO=1` (or `CL_NO_SPLASH`)
+  never, `CL_INTRO_FREEZE=<seconds>` holds it at a moment. Never in a run with
+  a `--` option or on CI (`CI` set).
 - `CedarLogic.exe --drag-selftest [log]` -- a gate dragged with real input,
   PASS/FAIL and the frame times (`DRAG-DIAGNOSIS.md`); CI runs it (it never
   holds the build back) as built, with `CEDARLOGIC_DRAG_OLD=1` and with

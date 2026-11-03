@@ -116,3 +116,18 @@ also:
 6. Send Feedback > Record: click around for a few seconds, press Stop, then
    click the recording's picture to play it.
 7. Try at 150% or 200% display scale and with a narrow window.
+
+## The 0.4 intro (added 2026-11-03)
+
+The Mac's intro now plays on Windows too, the same five seconds: on the
+very first launch, and on the first launch after an update that has a
+What's New tour, the circuit draws itself over the circuit window (the two
+wires trace in, the C, D and L snap in, a clock pulse lights the gate, the
+LED and a "0.4" display light up), the LED blooms into the icon, and the
+icon flies into the usual launch screen ("CedarLogic 0.4", "Ready"), which
+plays its sweep and fades into the window, then the welcome or What's New.
+Only the first launch has the sound, its bell landing on the LED. Any key or
+click skips it. With Windows' "Animation effects" off (Settings >
+Accessibility > Visual effects), it's just the launch screen's still for
+half a second and a short fade. Each plays once; `CL_INTRO=first` (or
+`update`) plays it again for testing, `CL_NO_INTRO=1` turns it off.

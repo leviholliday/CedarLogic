@@ -188,6 +188,7 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Welcome / first run, Guided Tour | Yes | Yes | Yes | Partial | Web: first-run toast and coach marks in the `/app/` phone shell only (`sim-mobile.js:1211`); no tour |
 | Help window with search | Yes | Yes | Yes | Partial | Mac `Help.swift`; Windows/Linux `Help.cpp`. Web links to the Learn pages |
 | Launch screen with first-launch sound | Yes | Yes | Yes | No | Mac `Splash.swift`; Windows/Linux `Splash.cpp` |
+| 0.4 intro (the circuit draws itself, the LED and "0.4" light, the icon flies into the launch screen) on the first launch and the first after an update | Yes | Yes | No | No | Mac `Intro.swift`; Windows `Intro.cpp` (added 2026-11-03: same timeline, look and once-only keys `introFirstLaunchPlayed`/`introUpdatePlayed`, `CL_INTRO`/`CL_NO_INTRO`, any key or click skips, Animation effects off = the launch screen's still; `--render-intro <dir>` frames in CI's renders). Linux not yet |
 | Quit confirmation | Yes | Yes | Yes | n/a | Mac `QuitConfirm.swift`; Linux `QuitConfirm.cpp`; Windows `Window.cpp:2035` |
 
 ## 11. Settings window, row by row
@@ -254,7 +255,7 @@ Start menu offer, ARM64 build; the CI helpers (`--screenshot`, `--show`,
 | Screen-reader labels on controls | Partial | No | No | Yes | Mac labels on the drawing tools, sim bar, notes, sync QR, Karnaugh map (`Drawing.swift`, `SimBar.swift`, `TruthTableView.swift:657`); the canvas is exposed only for Predict (`CanvasView.swift:272`). Windows: no UI Automation / `WM_GETOBJECT` code (owner-drawn Direct2D). Linux: one accessible name on the Notes box (`Notes.cpp:71`). Web `aria-*` throughout `sim*.js` |
 | Pick and wire parts from the keyboard | No | No | No | Yes | Web `sim.js:2945 pickNext`, W to wire, arrows. The native canvases have arrow-key nudge but no way to pick a part or make a wire without the mouse |
 | Menus reachable by keyboard | Yes | Yes | Yes | Yes | Windows Alt/F10 + letters; Linux F10 / Alt; Linux also context menu from the keyboard (`Window.cpp:909`, Menu key, Shift+F10) |
-| Reduced motion respected | Partial | Yes | Yes | Yes | Mac only the splash (`Splash.swift:93`); Windows `Welcome.cpp`, `Window.cpp`; Linux `Anim.h`; Web `prefers-reduced-motion` |
+| Reduced motion respected | Partial | Yes | Yes | Yes | Mac only the splash and the intro (`Splash.swift`, `Intro.swift`); Windows `Welcome.cpp`, `Window.cpp`, `Splash.cpp`, `Intro.cpp`; Linux `Anim.h`; Web `prefers-reduced-motion` |
 | High-contrast | No | No | No | Partial | One reference in `sim.js`; nothing in the native apps |
 
 ## 15. Gaps to close before 0.4
