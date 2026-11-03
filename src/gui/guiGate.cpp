@@ -12,6 +12,7 @@
 #include "GateLibrary.h"
 #include <iomanip>
 #include <cmath>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #ifndef CL_NO_WX
@@ -861,36 +862,71 @@ void guiGateKEYPAD::drawToScene(cl::render::Scene& scene,
 	guiGate::drawToScene(scene, style);   // digit grid + outline, on top
 }
 
+// A whole decimal number at the start of `text` (as `iss >> int` read it), or
+// false if there is none. A value too big for long long reads as the largest.
+static bool leadingInteger( const string& text, long long& out ) {
+	char* end = nullptr;
+	const long long v = strtoll( text.c_str(), &end, 10 );
+	if( end == text.c_str() ) return false;
+	out = v;
+	return true;
+}
+
+// Whether a KEYPAD's OUTPUT_BITS / OUTPUT_NUM value from a file or a paste is
+// one it can show: a number, and for the width one of 0..MAX_BUS_BITS.
+// (Anything else used to reach substr with a position past the string: the
+// width is how many of the value's 8 hex digits to look at.)
+bool guiGateKEYPAD::isUsableParam( const string& paramName, const string& value ) {
+	long long n;
+	if( !leadingInteger( value, n ) ) return false;
+	if( paramName == "OUTPUT_BITS" ) return n >= 0 && n <= MAX_BUS_BITS;
+	if( paramName == "OUTPUT_NUM" ) return n >= INT_MIN && n <= (long long)UINT_MAX;
+	return true;
+}
+
 void guiGateKEYPAD::setLogicParam( string paramName, string value ) {
 	if (paramName == "OUTPUT_NUM" || paramName == "OUTPUT_BITS") {
-		istringstream iss(paramName == "OUTPUT_NUM" ? value : lparams["OUTPUT_NUM"]);
-		int intVal;
-		iss >> intVal;
-        ostringstream ossVal, ossParamName;
-		// Convert to hex
-        for (int i=2*sizeof(int) - 1; i>=0; i--) {
-            ossVal << "0123456789ABCDEF"[((intVal >> i*4) & 0xF)];
-        }
-        iss.clear(); iss.str(paramName == "OUTPUT_BITS" ? value : lparams["OUTPUT_BITS"]);
-        iss >> intVal;
-        string currentValue = ossVal.str().substr(ossVal.str().size()-(intVal/4),(intVal/4));		
+		// A value the keypad can't show is replaced, here, by what the gate had
+		// (or the library's default: 4 bits, 0), so the gate, the engine and the
+		// saved file agree. A file's are caught earlier, with a notice
+		// (CircuitParse::parseGateToSend).
+		if (!isUsableParam(paramName, value)) {
+			auto had = lparams.find(paramName);
+			if (had != lparams.end() && isUsableParam(paramName, had->second)) value = had->second;
+			else value = (paramName == "OUTPUT_BITS") ? "4" : "0";
+		}
+		auto usable = [this, &paramName, &value](const char* name, const char* fallback) {
+			if (paramName == name) return value;
+			auto it = lparams.find(name);
+			return (it != lparams.end() && isUsableParam(name, it->second)) ? it->second : string(fallback);
+		};
+		long long num = 0, bits = 4;
+		leadingInteger(usable("OUTPUT_NUM", "0"), num);
+		leadingInteger(usable("OUTPUT_BITS", "4"), bits);
+		// The value's 8 hex digits (32 bits), and the low bits/4 of them.
+		const unsigned int intVal = (unsigned int)num;
+		const size_t digits = (size_t)(bits < 0 ? 0 : bits > MAX_BUS_BITS ? MAX_BUS_BITS : bits) / 4;
+		string hex(8, '0');
+		for (int i = 0; i < 8; i++) hex[7 - i] = "0123456789ABCDEF"[(intVal >> (i * 4)) & 0xF];
+		const string currentValue = hex.substr(8 - digits, digits);
+		ostringstream ossParamName;
 		ossParamName << "KEYPAD_BOX_" << currentValue;
 		if (gparams.find(ossParamName.str()) == gparams.end()) {
 			ossParamName.str("");
 			map < string, string >::iterator gparamWalk = gparams.begin();
 			while (gparamWalk != gparams.end()) {
-				if ((gparamWalk->first).substr(0,11) != "KEYPAD_BOX_") { gparamWalk++; continue; }
+				if ((gparamWalk->first).compare(0, 11, "KEYPAD_BOX_") != 0) { gparamWalk++; continue; }
 				ossParamName << gparamWalk->first;
 				break;
-			}			
+			}
 		}
 		if (ossParamName.str() != "") {
 			string clickBox = getGUIParam( ossParamName.str() );
 			istringstream iss(clickBox);
 			char dump;
-			iss >> renderInfo_valueBox.begin.x >> dump >> renderInfo_valueBox.begin.y >> 
+			iss >> renderInfo_valueBox.begin.x >> dump >> renderInfo_valueBox.begin.y >>
 				dump >> renderInfo_valueBox.end.x >> dump >> renderInfo_valueBox.end.y;
-		}		
+		}
 	}
 
 	guiGate::setLogicParam(paramName, value);

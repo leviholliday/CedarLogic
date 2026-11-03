@@ -434,6 +434,9 @@ public:
 	void drawToScene(cl::render::Scene& scene,
 	                 const cl::render::RenderStyle& style) override;
 	void setLogicParam( string paramName, string value ) override;
+	// Whether OUTPUT_BITS / OUTPUT_NUM (any other name: true) holds a value the
+	// keypad can show. A file or a paste can say anything.
+	static bool isUsableParam( const string& paramName, const string& value );
 
 	// Toggle the output button on and off:
 	klsMessage::Message_SET_GATE_PARAM* checkClick( GLfloat x, GLfloat y ) override;

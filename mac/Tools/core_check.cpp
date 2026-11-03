@@ -848,6 +848,90 @@ static void junctionCases() {
 	}
 }
 
+// ---- A keypad with a width or value it can't show -------------------------------------
+
+// libFuzzer, run 41528025252: a damaged paste gave a keypad an OUTPUT_BITS far
+// past its 8 hex digits, and guiGateKEYPAD::setLogicParam asked substr for a
+// position before the start of the string. (std::out_of_range, and the app ended.)
+static void keypadCases() {
+	printf("a keypad with a width or value it can't show\n");
+	const char* bad[][2] = {
+		{ "OUTPUT_BITS", "2147483647" }, { "OUTPUT_BITS", "36" }, { "OUTPUT_BITS", "-4" }, { "OUTPUT_BITS", "99999999999999999999" },
+		{ "OUTPUT_BITS", "x" }, { "OUTPUT_BITS", "" }, { "OUTPUT_NUM", "x" }, { "OUTPUT_NUM", "" },
+		{ "OUTPUT_NUM", "99999999999999999999" }, { "OUTPUT_NUM", "-99999999999999999999" },
+	};
+
+	// The clipboard's way in (what the fuzzer found): the text of a real keypad, with its width changed.
+	{
+		CLDocument* src = cl_document_new();
+		cl_edit_add_gate(src, 0, "DD_KEYPAD_HEX", 0, 0);
+		cl_edit_select_all(src, 0);
+		const std::string text = cl_edit_copy(src, 0);
+		cl_document_close(src);
+		CHECK(text.find("OUTPUT_BITS") != std::string::npos && text.find("OUTPUT_NUM") != std::string::npos,
+		      "a copied keypad names its OUTPUT_BITS and OUTPUT_NUM");
+		int pasted = 0, badOnes = 0;
+		for (auto& b : bad) {
+			std::string t = text;
+			const size_t n = t.find(b[0]);
+			const size_t v = n == std::string::npos ? n : t.find_first_of("\t ", n);
+			const size_t e = v == std::string::npos ? v : t.find_first_of("\t\n", v + 1);
+			if (e == std::string::npos) { printf("    no place for %s in: %s", b[0], text.c_str()); badOnes++; continue; }
+			t.replace(v + 1, e - v - 1, b[1]);
+			CLDocument* doc = cl_document_new();
+			const char* back = nullptr;
+			cl_edit_paste(doc, 0, t.c_str(), 5, 5, false, &back);
+			bool ok = doc->page(0)->getGateList()->size() == 1 && consistent(doc, "after the paste");
+			if (ok) {
+				guiGate* g = doc->circuit.getGate(newest(doc, 0));
+				ok = g != nullptr && guiGateKEYPAD::isUsableParam("OUTPUT_BITS", g->getLogicParam("OUTPUT_BITS")) &&
+				     guiGateKEYPAD::isUsableParam("OUTPUT_NUM", g->getLogicParam("OUTPUT_NUM"));
+			}
+			while (cl_edit_can_undo(doc)) cl_edit_undo(doc);
+			while (cl_edit_can_redo(doc)) cl_edit_redo(doc);
+			ok = ok && consistent(doc, "after undo all, redo all") && saveIsStable(doc);
+			if (!ok) { printf("    pasting %s %s\n", b[0], b[1]); badOnes++; }
+			pasted++;
+			cl_document_close(doc);
+		}
+		CHECK(pasted == (int)(sizeof bad / sizeof bad[0]) && badOnes == 0,
+		      "pasted with each bad width or value: no crash, a width and value it can show, consistent, saves stably");
+	}
+
+	// The same set directly on a placed keypad (the settings dialog's way).
+	{
+		CLDocument* doc = cl_document_new();
+		cl_edit_add_gate(doc, 0, "DD_KEYPAD_HEX", 0, 0);
+		const long id = newest(doc, 0);
+		bool ok = true;
+		for (auto& b : bad) {
+			doc->circuit.getGate(id)->setLogicParam(b[0], b[1]);
+			ok = ok && guiGateKEYPAD::isUsableParam("OUTPUT_BITS", doc->circuit.getGate(id)->getLogicParam("OUTPUT_BITS")) &&
+			     guiGateKEYPAD::isUsableParam("OUTPUT_NUM", doc->circuit.getGate(id)->getLogicParam("OUTPUT_NUM"));
+		}
+		CHECK(ok && consistent(doc, "after setting"), "set on a placed keypad: a width and value it can show are kept");
+		doc->circuit.getGate(id)->setLogicParam("OUTPUT_BITS", "8");
+		doc->circuit.getGate(id)->setLogicParam("OUTPUT_NUM", "-1");
+		CHECK(doc->circuit.getGate(id)->getLogicParam("OUTPUT_BITS") == "8" && doc->circuit.getGate(id)->getLogicParam("OUTPUT_NUM") == "-1",
+		      "... and a good width and value are kept as given");
+		cl_document_close(doc);
+	}
+
+	// A file's way: the library's setting instead, with a notice for each.
+	for (auto& b : bad) {
+		CLDocument* doc = openText(page0(gate("DD_KEYPAD_HEX", "1", "0", "0", std::string(" (lparam \"") + b[0] + "\" \"" + b[1] + "\")")));
+		bool ok = doc != nullptr;
+		if (ok) {
+			guiGate* g = doc->circuit.getGate(1);
+			const bool bits = std::string(b[0]) == "OUTPUT_BITS";
+			ok = g != nullptr && g->getLogicParam(b[0]) == (bits ? "4" : "0") && noticeCount(doc) >= 1 &&
+			     consistent(doc, "after open") && saveIsStable(doc);
+			cl_document_close(doc);
+		}
+		CHECK(ok, (std::string("a file's keypad with ") + b[0] + " \"" + b[1] + "\" opens with the library's setting and a notice").c_str());
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
@@ -863,6 +947,7 @@ int main(int argc, char** argv) {
 	if (!fixtures.empty()) straightenCases();
 	pasteDeleteUndoCases();
 	junctionCases();
+	keypadCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;

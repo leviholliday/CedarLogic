@@ -582,6 +582,27 @@ void CircuitParse::parseGateToSend(string type, string ID, string position, vect
 	LibraryGate libGateParams;
 	gateLibrary().libParser.getGate(type, libGateParams);
 
+	// A keypad's width and value are read as numbers to pick the key to light
+	// (guiGateKEYPAD::setLogicParam): "OUTPUT_BITS 2147483647" asked for a
+	// position past the value's 8 digits and ended the app. Such a setting is
+	// the library's own instead, said so.
+	if (libGateParams.guiType == "KEYPAD") {
+		for (unsigned int i = 0; i < params.size(); i++) {
+			if (params[i].isGUI) continue;
+			if (params[i].paramName != "OUTPUT_BITS" && params[i].paramName != "OUTPUT_NUM") continue;
+			if (guiGateKEYPAD::isUsableParam(params[i].paramName, params[i].paramValue)) continue;
+			auto def = libGateParams.logicParams.find(params[i].paramName);
+			const string fixed = (def != libGateParams.logicParams.end()) ? def->second
+				: (params[i].paramName == "OUTPUT_BITS" ? string("4") : string("0"));
+			applyNotices.push_back(loadNotice(cl::Severity::Warning,
+			                                  "Gate " + ID + " has a " + params[i].paramName + " of \"" +
+			                                      (params[i].paramValue.size() > 40 ? params[i].paramValue.substr(0, 40) + "..." : params[i].paramValue) +
+			                                      "\", which a keypad can't use. It was set to " + fixed + ".",
+			                                  string(), ID, type));
+			params[i].paramValue = fixed;
+		}
+	}
+
 	for (unsigned int i = 0; i < params.size(); i++) {
 		if (!(params[i].isGUI)) {
 			// A memory's READ_FILE and WRITE_FILE are actions, taken when the
