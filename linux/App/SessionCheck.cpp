@@ -1524,20 +1524,22 @@ struct SessionDriver {
 		motion(c->widget(), c->width() / 2.0, c->height() / 2.0, 0, false);
 		const double passMs = nowMs() - passStart;
 		pump(400);
-		check(!r->slidOut(), format("a pointer passing through the edge (%.0f ms there) doesn't open it", passMs));
-		motion(dock, 5, 200, 0);
+		check(!r->slidOut(), format("a pointer passing through the edge (%.0f ms there) doesn't open it", passMs) + (r->slidOut() ? " (" + r->describe() + ")" : std::string()));
+		// (Events only again, for the same reason.)
+		motion(dock, 5, 200, 0, false);
 		pump(350);
 		const bool out = r->slidOut();
+		const std::string was = r->describe();
 		tap(t, GDK_KEY_Escape);
 		pump(80);
-		check(out && !r->slidOut(), "Escape puts back a rail slid out on hover");
+		check(out && !r->slidOut(), "Escape puts back a rail slid out on hover" + (out && !r->slidOut() ? std::string() : " (" + was + "; then " + r->describe() + ")"));
 		pump(400);
 		check(!r->slidOut(), "and it stays back while the pointer is still at the edge");
-		away();
+		motion(c->widget(), c->width() / 2.0, c->height() / 2.0, 0, false);
 		pump(700);
 		tap(t, GDK_KEY_F9);
 		pump(400);
-		check(!prefs().actionsCollapsed && width() == 46, format("F9 again shows it (%d wide)", width()));
+		check(!prefs().actionsCollapsed && width() == 46, format("F9 again shows it (%d wide; ", width()) + r->describe() + ")");
 		// A drag on the rail: the first item down two places.
 		double x = 0, y = 0;
 		r->itemCenter(0, x, y);

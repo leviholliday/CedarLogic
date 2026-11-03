@@ -132,6 +132,11 @@ int Rail::topInset() const {
 	return strip && gtk_widget_get_mapped(strip) ? gtk_widget_get_allocated_height(strip) : 0;
 }
 
+std::string Rail::describe() const {
+	return format("strip %d, rail %d, out %d, waiting %d, dismissed %d, folded %d, floater %d", hover.overStrip, hover.overRail, hover.slidOut,
+	              hover.pending, hover.dismissed, folded(), floaterState);
+}
+
 bool Rail::onScreen() const { return prefs().actionsMode == actions::OnScreen; }
 bool Rail::hoverEnabled() const { return prefs().actionsHoverOpen; }
 bool Rail::folded() const { return fold.folded(prefs().actionsCollapsed || pictureFold); }

@@ -24,6 +24,7 @@
 #include "Anim.h"
 #include "Drawn.h"
 
+#include <string>
 #include <vector>
 
 class CircuitWindow;
@@ -65,6 +66,8 @@ public:
 	GtkWidget* dockWidget() const;
 	GtkWidget* floaterWidget() const;
 	int itemCount() const { return (int)items.size(); }
+	// The hover's state, for a FAIL line.
+	std::string describe() const;
 	// An item's middle, in the dock's points.
 	void itemCenter(int i, double& x, double& y) const;
 
