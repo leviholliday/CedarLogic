@@ -244,3 +244,15 @@ None of these is merged to `main` or deployed. The apps' cap handling on all thr
 2. ~~**Publisher.**~~ Decided: users see `CedarLogic` (the project) as the publisher, not Cedarville University or a person: `AppPublisher`/`VersionInfoCompany`/`AppCopyright` in `windows/installer/CedarLogic.iss`, `CompanyName`/`LegalCopyright` in `windows/res/CedarLogic.rc.in`, the winget manifest's `Publisher`/`Author`/`Copyright`, the Mac's `NSHumanReadableCopyright`, and the .deb's `Maintainer` (`CedarLogic <224852181+leviholliday@users.noreply.github.com>`: the site has no mail address). The About boxes keep crediting the original CedarLogic from Cedarville University. The winget id stays `LeviHolliday.CedarLogic` because winget ids follow the submitting account (`packaging/winget/README.md`).
 3. **Gatekeeper handling in the cask.** The cask does not remove the quarantine flag, so a Homebrew install needs Open Anyway on first launch and its caveats say so. A `postflight` with `xattr -dr com.apple.quarantine` would make the first launch smooth because the cask pins the DMG's sha256, but it turns off a macOS safety check on users' Macs. The lasting fix is a Developer ID certificate and notarization. (`packaging/homebrew/README.md`)
 4. **Delete Now confirmation.** In Recently Deleted, Delete Now asks "Delete “Name” now?" with "It and all its versions will be deleted for good. This can't be undone.", then Delete Now or Cancel (`docs/RECENTLY-DELETED.md`). The Mac (`LibraryView.swift`), Windows (`LibraryWindow.cpp`) and Linux (`LibraryWindow.cpp`) all ask. No doc or commit says what is still undecided about it, so I have not guessed.
+
+## 5. Release day: merged into main (2026-11-02)
+
+The Mac, Windows and Linux 0.4 lines are merged into `main` (`1cf5a4a`):
+
+- PR #2: `v4/mac` (`1d0c2f2`), merge `92e0407`
+- PR #3: `windows/native-v4-int3` (`6cf80ee`), merge `1b23942`
+- PR #4: `linux/native-v4-int3` (`cc4dfc5`), merge `1cf5a4a`
+
+The branch table in section 4 describes the lines as they were before the merge. Details are in `docs/TIDY-LOG.md`, part 2.
+
+Still open: the CodeQL Swift autobuild setting, and publishing, which still runs only from the `windows/native` and `linux/native` branch names. The fix-up PR moves both to `main`.

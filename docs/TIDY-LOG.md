@@ -109,3 +109,20 @@ Not resolved or merged. Body lists the `README.md` conflict (keep `v4/mac`'s, fo
 | `linux/native-v4-desktop` (`f5fb814`) | Only `linux/DESKTOP-TEST.md` taken (the branch's version, a superset of the final's, plus a note that the commit ids in it are from the archived branch and the code was redone as `c5d4155`/`011095b`). Committed to `linux/native-v4-int3`. Tagged `archive/linux/native-v4-desktop`, branch deleted. |
 
 Also on `windows/native-v4-int3` (asked for separately): `windows/App/SyncApp.cpp` no longer rewrites "Recently Deleted" to "the Trash folder" in sync notices (`31882da`). The sync delete prompt there ("kept in its Trash folder", "Move Them to the Trash Folder") now says Recently Deleted like the Mac and Linux prompts (`0652a2a`); Linux already had the right wording. Windows CI on the tip including both (`b00c42f`): build ARM64 and x64 passed. Left alone: "Trash folder" in `windows/App/Welcome.cpp:993` and `windows/App/SyncUI.cpp:465`.
+
+## Part 2: merged into main (2026-11-02)
+
+The three 0.4 lines are on `main`. Each went in through its PR as a merge commit, with no squash and no force-push. `git merge-base --is-ancestor` confirms that each tip is in `main` (`1cf5a4a`).
+
+| PR | Branch (tip) | Merge commit |
+|---|---|---|
+| #2 | `v4/mac` (`1d0c2f2`) | `92e0407` |
+| #3 | `windows/native-v4-int3` (`6cf80ee`) | `1b23942` |
+| #4 | `linux/native-v4-int3` (`cc4dfc5`) | `1cf5a4a` |
+
+Before #4 merged, its x86_64 Linux build failed the session check at seed 4: "the history holds the engine's 500 steps after 520 nudges (48)". None of the nudges had made a step. The previous action had opened a window over the circuit (a question or a menu), and that window held the keyboard grab until the watchdog closed it. `cc4dfc5` makes the check wait for those windows and count the steps the nudges make. It is a test fix only: the app was not at fault.
+
+Open items, for the fix-up PR:
+
+- **CodeQL:** the Swift autobuild setting.
+- **Publishing still uses the old branch names.** `linux-native.yml` publishes only on `refs/heads/linux/native`, and `windows-native.yml` only on `refs/heads/windows/native`. Move both to `main`. Until then, nothing on `main` publishes, and a push to either old branch still does.
