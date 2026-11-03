@@ -16,7 +16,8 @@
 // circuit deleted from Your Circuits, one deleted 31 days ago, one moved
 // into the trash by sync with no date, a second copy of a circuit that's
 // still in the library, and the "repeated versions" folder), actions (as
-// normal, with the Actions rail folded and its items reordered last time).
+// normal, with the Actions rail folded, hover-to-open off and its items
+// reordered last time).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -33,7 +34,8 @@
 // Restore (under its own id, or a new one when that's taken) and Delete Now;
 // in every state, where the Actions rail is (on screen for a first launch,
 // hidden for anyone before), and in `actions` that a folded rail stays
-// folded, and the rail, its tab and the toolbar's six buttons laid out in
+// folded, a drag on the rail reorders the Customize list too, and the rail,
+// its tab (slid out on hover too) and the toolbar's six buttons laid out in
 // real windows off screen (actionsChecks).
 // PASS or FAIL for each; exit 1 on a failure.
 
@@ -91,6 +93,7 @@ enum LaunchSelfTest {
             // Someone who folded the rail and put its items in another order.
             d.set(ActionsMode.onScreen.rawValue, forKey: "cl.actions.mode")
             d.set(true, forKey: "cl.actions.collapsed")
+            d.set(false, forKey: "cl.actions.hoverOpen")
             d.set(false, forKey: "cl.actions.hint")
             d.set(ActionID.defaults.reversed().map(\.rawValue), forKey: "cl.actions.order")
             d.set(ActionID.defaults.map(\.rawValue), forKey: "cl.actions.shown")
@@ -200,11 +203,23 @@ enum LaunchSelfTest {
             check(!prefs.actionsCollapsed && prefs.railActions == ActionID.defaults,
                   "open, with the six default actions (\(prefs.railActions.map(\.rawValue)))")
             check(!prefs.actionsHintPending, "and no status line about it")
+            check(prefs.actionsHoverOpen, "folded, it slides out on hover (the default)")
         case "actions":
             check(prefs.actionsMode == .onScreen, "the rail is still on screen")
             check(prefs.actionsCollapsed, "it's still folded, as it was left")
             check(prefs.railActions == ActionID.defaults.reversed(), "in the order it was given (\(prefs.railActions.map(\.rawValue)))")
             check(!prefs.actionsHintPending, "no status line (they've seen it)")
+            check(!prefs.actionsHoverOpen, "hover-to-open still off, as it was set")
+            // A drag on the rail: the Customize list has the same order.
+            let before = prefs.railActions
+            prefs.moveRailAction(before[0], to: 2)
+            let after = prefs.railActions
+            check(after == [before[1], before[2], before[0]] + before[3...], "dragging the top one down two places on the rail moves it there (\(after.map(\.rawValue)))")
+            check(prefs.actionsOrderAll.filter { prefs.actionShown($0) } == after, "and the Customize list has that order too")
+            prefs.moveRailAction(before[0], to: 0)
+            check(prefs.railActions == before, "and back to the top again")
+            prefs.moveRailAction(before[5], to: 99)
+            check(prefs.railActions == before, "a drop past the end leaves the last one last")
         default:
             check(prefs.actionsMode == .hidden, "someone who had CedarLogic before keeps their window: no rail (\(prefs.actionsMode.name))")
             check(prefs.actionsHintPending, "and the status line tells them once where it is")
@@ -238,9 +253,13 @@ enum LaunchSelfTest {
         let open = canvasWidth(.onScreen, folded: false)
         let folded = canvasWidth(.onScreen, folded: true)
         let inBar = canvasWidth(.toolbar, folded: false)
+        ActionsRail.pictureSlidOut = true
+        let slid = canvasWidth(.onScreen, folded: true)
+        ActionsRail.pictureSlidOut = false
         check(none > 0 && abs((none - open) - ActionsRail.width) < 2, "open, the rail takes its \(Int(ActionsRail.width)) points (\(none) to \(open))")
         check(abs((none - folded) - ActionsRail.tabWidth) < 2, "folded, just its tab's \(Int(ActionsRail.tabWidth)) (\(folded))")
         check(abs(none - inBar) < 1, "in the toolbar instead, no rail (\(inBar))")
+        check(abs(slid - folded) < 1, "slid out on hover, it's over the canvas, not pushing it (\(slid))")
         let narrowNone = canvasWidth(.hidden, folded: false, width: 860)
         let narrowOpen = canvasWidth(.onScreen, folded: false, width: 860)
         check(abs((narrowNone - narrowOpen) - ActionsRail.tabWidth) < 2, "in a window under \(Int(ActionsRail.narrowWidth)) points it folds by itself (\(narrowNone) to \(narrowOpen))")

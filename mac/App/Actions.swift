@@ -288,9 +288,13 @@ extension Notification.Name {
 
 /// The rail on the window's right edge, the palette's mirror: a narrow strip
 /// of the chosen actions, each named (with its shortcut) as the pointer
-/// rests on it. A click runs it; nothing opens or docks. A click on its left
-/// edge folds it to a 6-point tab, a click on the tab brings it back, and it
-/// stays as it was left. In a narrow window it folds by itself.
+/// rests on it. A click runs it; nothing opens or docks. Dragging one up or
+/// down (past a few points, or after holding it a moment) moves it, the
+/// others making room, in the same order the Customize list keeps. A click
+/// on its left edge folds it to a 6-point tab, a click on the tab brings it
+/// back, and it stays as it was left. Folded, resting on the tab slides it
+/// out over the canvas until the pointer leaves (Settings > Actions, on by
+/// default, as Arc's sidebar does). In a narrow window it folds by itself.
 struct ActionsRail: View {
     @ObservedObject var canvas: CanvasController
     /// The window is too narrow for it: folded unless `peek`.
@@ -300,17 +304,44 @@ struct ActionsRail: View {
     var onCustomize: () -> Void
     /// Drawn with this item's label showing (--render-actions' pictures).
     static var pictureLabel: ActionID?
+    /// Drawn folded with the rail slid out over the canvas, as on hover.
+    static var pictureSlidOut = false
+    /// Drawn mid-drag: this item held this many points below where it was.
+    static var pictureDrag: (id: ActionID, dy: CGFloat)?
     private var showLabel: ActionID? { Self.pictureLabel }
     @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var keys = ShortcutStore.shared
     @State private var hovered: ActionID?
     @State private var edgeHover = false
     @State private var tabHover = false
+    // Folded, slid out on hover.
+    @State private var slidOut = false
+    @State private var overTab = false
+    @State private var overRail = false
+    @State private var menuOpen = false
+    @State private var hoverWait: DispatchWorkItem?
+    // A drag to reorder.
+    @State private var drag: RailDrag?
+    @State private var pressed: ActionID?
+    @State private var held: ActionID?
+    @State private var holdWait: DispatchWorkItem?
 
     static let width: CGFloat = 46
     static let tabWidth: CGFloat = 6
     /// Under this window width the rail folds by itself.
     static let narrowWidth: CGFloat = 900
+    /// One item and the gap under it.
+    static let pitch: CGFloat = 36
+    /// Moved this far with the button down, a press is a drag...
+    static let dragStart: CGFloat = 6
+    /// ...or held this long (then any movement drags).
+    static let holdTime = 0.45
+    /// Resting on the tab this long slides the rail out (passing doesn't)...
+    static let openDelay = 0.15
+    /// ...and it goes back this long after the pointer leaves it.
+    static let closeDelay = 0.3
+
+    struct RailDrag { let id: ActionID; let from: Int; var dy: CGFloat }
 
     var folded: Bool { (prefs.actionsCollapsed || narrow) && !peek }
 
@@ -320,16 +351,25 @@ struct ActionsRail: View {
     var body: some View {
         let _ = canvas.editVersion, _ = canvas.selectionVersion
         Group {
-            if folded { tab } else { rail }
+            if folded { tab } else { rail(slid: false) }
         }
         .animation(.easeInOut(duration: 0.2), value: folded)
         .contextMenu { menu }
+        // Its right-click menu open keeps it out; closed, it goes if the pointer has.
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
+            if slidOut && (overRail || overTab) { menuOpen = true; hoverWait?.cancel() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in
+            if menuOpen { menuOpen = false; hoverChanged() }
+        }
+        .onChange(of: folded) { _, f in if !f { hoverWait?.cancel(); slidOut = false; overRail = false } }
+        .onChange(of: prefs.actionsHoverOpen) { _, on in if !on && slidOut { slide(false) } }
     }
 
     @ViewBuilder private var menu: some View {
         Button("Customize Actions\u{2026}") { onCustomize() }
         Divider()
-        Button(folded ? "Show Actions" : "Fold Actions Away") { folded ? unfold() : fold() }
+        Button(folded ? (slidOut ? "Keep Actions Open" : "Show Actions") : "Fold Actions Away") { folded ? unfold() : fold() }
         Button("Show Them in the Toolbar Instead") { prefs.actionsMode = .toolbar }
         Button("Hide Actions") { prefs.actionsMode = .hidden }
     }
@@ -342,7 +382,36 @@ struct ActionsRail: View {
         }
     }
 
+    // MARK: Slid out on hover
+
+    private func slide(_ out: Bool) {
+        hoverWait?.cancel()
+        withAnimation(.easeOut(duration: 0.18)) { slidOut = out }
+        if !out { hovered = nil; overRail = false }
+    }
+
+    /// The pointer came onto (or left) the tab or the slid-out rail: after
+    /// a moment, out or back, unless it's moved on again by then.
+    private func hoverChanged() {
+        hoverWait?.cancel()
+        guard folded, prefs.actionsHoverOpen else { return }
+        let inside = overTab || overRail
+        if inside && !slidOut {
+            later(Self.openDelay) { if folded && prefs.actionsHoverOpen && (overTab || overRail) { slide(true) } }
+        } else if !inside && slidOut && !menuOpen && drag == nil {
+            later(Self.closeDelay) { if !(overTab || overRail) && !menuOpen && drag == nil { slide(false) } }
+        }
+    }
+
+    private func later(_ seconds: Double, _ f: @escaping @MainActor () -> Void) {
+        let w = DispatchWorkItem { MainActor.assumeIsolated { f() } }
+        hoverWait = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: w)
+    }
+
     /// Folded: a 6-point tab the height of the window, lit under the pointer.
+    /// Resting on it (with Settings > Actions' hover on) slides the rail out
+    /// over the canvas; a click keeps it open.
     private var tab: some View {
         ZStack {
             Rectangle().fill(tabHover ? accent.opacity(0.35) : chrome.tabBar)
@@ -353,39 +422,71 @@ struct ActionsRail: View {
         .frame(width: Self.tabWidth)
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { tabHover = h } }
+        .onHover { h in
+            withAnimation(.easeOut(duration: 0.12)) { tabHover = h }
+            overTab = h
+            hoverChanged()
+        }
         .onTapGesture { unfold() }
         .help("Show Actions")
         .accessibilityElement()
         .accessibilityLabel("Show Actions")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { unfold() }
+        // Over the canvas, not pushing it: the tab's width stays its own.
+        .overlay(alignment: .trailing) {
+            if slidOut || Self.pictureSlidOut {
+                rail(slid: true)
+                    .onHover { h in overRail = h; hoverChanged() }
+                    .transition(.move(edge: .trailing))
+            }
+        }
         .transition(.move(edge: .trailing).combined(with: .opacity))
     }
 
     private var items: [ActionID] { prefs.railActions }
 
-    private var rail: some View {
-        VStack(spacing: 4) {
-            ForEach(items) { id in item(id) }
+    /// `slid`: out over the canvas from the tab (its edge then keeps it open).
+    private func rail(slid: Bool) -> some View {
+        let ids = items
+        let d = activeDrag(ids)
+        return VStack(spacing: 4) {
+            ForEach(Array(ids.enumerated()), id: \.element) { i, id in item(id, index: i, count: ids.count, drag: d) }
             Spacer(minLength: 0)
         }
+        // Where the dragged one will go: a dashed space the others open up.
+        .background(alignment: .top) {
+            if let d {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(accent.opacity(0.07))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(accent.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])))
+                    .frame(width: 34, height: 32)
+                    .offset(y: CGFloat(target(d, count: ids.count)) * Self.pitch)
+                    .animation(.easeOut(duration: 0.16), value: target(d, count: ids.count))
+                    .accessibilityHidden(true)
+            }
+        }
+        .coordinateSpace(name: "rail")
         .padding(.top, 8)
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .background(chrome.canvas)
         // The edge toward the canvas: the palette's sash, which folds the rail.
-        .overlay(alignment: .leading) { edge }
+        .overlay(alignment: .leading) { edge(slid: slid) }
+        // Out over the canvas, a soft shadow on it.
+        .shadow(color: .black.opacity(slid ? (prefs.dark ? 0.4 : 0.14) : 0), radius: 8, x: -2)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Actions")
         .transition(.move(edge: .trailing).combined(with: .opacity))
     }
 
-    private var edge: some View {
-        ZStack {
+    private func edge(slid: Bool) -> some View {
+        let tip = slid ? "Keep Actions open" : "Fold Actions away"
+        return ZStack {
             Rectangle().fill(edgeHover ? accent.opacity(0.6) : chrome.sash).frame(width: edgeHover ? 2 : 1)
             if edgeHover {
-                Image(systemName: "chevron.compact.right").font(.system(size: 13, weight: .semibold))
+                Image(systemName: slid ? "chevron.compact.left" : "chevron.compact.right").font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(accent)
                     .frame(width: 10, height: 30)
                     .background(RoundedRectangle(cornerRadius: 5).fill(chrome.tabCard))
@@ -398,19 +499,92 @@ struct ActionsRail: View {
         .contentShape(Rectangle())
         .offset(x: -Self.tabWidth / 2)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { edgeHover = h } }
-        .onTapGesture { fold() }
-        .help("Fold Actions away")
+        .onTapGesture { slid ? unfold() : fold() }
+        .help(tip)
         .accessibilityElement()
-        .accessibilityLabel("Fold Actions away")
+        .accessibilityLabel(tip)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { fold() }
+        .accessibilityAction { slid ? unfold() : fold() }
     }
 
-    private func item(_ id: ActionID) -> some View {
+    // MARK: Drag to reorder
+
+    private func activeDrag(_ ids: [ActionID]) -> RailDrag? {
+        if let drag { return drag }
+        guard let p = Self.pictureDrag, let i = ids.firstIndex(of: p.id) else { return nil }
+        return RailDrag(id: p.id, from: i, dy: p.dy)
+    }
+    /// The place it would go if let go now.
+    private func target(_ d: RailDrag, count: Int) -> Int {
+        min(max(d.from + Int((d.dy / Self.pitch).rounded()), 0), max(count - 1, 0))
+    }
+    /// How far an item is drawn from its place: the dragged one under the
+    /// pointer (no further than the ends), the others out of its way.
+    private func shift(_ i: Int, count: Int, drag d: RailDrag?) -> CGFloat {
+        guard let d else { return 0 }
+        if i == d.from {
+            return min(max(d.dy, -CGFloat(d.from) * Self.pitch - 4), CGFloat(count - 1 - d.from) * Self.pitch + 4)
+        }
+        let to = target(d, count: count)
+        if d.from < to && i > d.from && i <= to { return -Self.pitch }
+        if to < d.from && i >= to && i < d.from { return Self.pitch }
+        return 0
+    }
+
+    /// A press on an item: let go where it was, a click (the action runs);
+    /// moved past dragStart, or held for holdTime, a drag that moves it.
+    private func press(_ id: ActionID, index: Int, count: Int, enabled: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("rail"))
+            .onChanged { v in
+                if pressed != id {
+                    pressed = id
+                    holdWait?.cancel()
+                    let w = DispatchWorkItem {
+                        MainActor.assumeIsolated {
+                            if pressed == id && drag == nil { withAnimation(.easeOut(duration: 0.12)) { held = id } }
+                        }
+                    }
+                    holdWait = w
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.holdTime, execute: w)
+                }
+                let t = v.translation
+                if drag == nil, hypot(t.width, t.height) >= (held == id ? 1 : Self.dragStart) {
+                    holdWait?.cancel()
+                    hovered = nil
+                    drag = RailDrag(id: id, from: index, dy: t.height)
+                } else if drag?.id == id {
+                    drag?.dy = t.height
+                }
+            }
+            .onEnded { _ in
+                holdWait?.cancel()
+                let wasHeld = held == id
+                pressed = nil
+                if let d = drag, d.id == id {
+                    let to = target(d, count: count)
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        drag = nil
+                        held = nil
+                        prefs.moveRailAction(id, to: to)
+                    }
+                    // Dragged out of a slid-out rail: it goes back now.
+                    hoverChanged()
+                } else {
+                    withAnimation(.easeOut(duration: 0.12)) { held = nil }
+                    // Held to move but not moved: nothing runs.
+                    if enabled && !wasHeld { id.run(canvas) }
+                }
+            }
+    }
+
+    private func item(_ id: ActionID, index: Int, count: Int, drag d: RailDrag?) -> some View {
         let a = id.action
         let enabled = id.enabled(canvas)
         let on = a.isOn?(canvas) ?? false
-        let lit = hovered == id && enabled
+        let dragging = d?.id == id
+        let lifted = dragging || held == id
+        let lit = (hovered == id && enabled) || lifted
+        let dy = shift(index, count: count, drag: d)
         return Image(systemName: a.symbol)
             .font(.system(size: 15, weight: .regular))
             .foregroundStyle(on ? accent : chrome.barInk.opacity(enabled ? 0.92 : 0.3))
@@ -418,20 +592,32 @@ struct ActionsRail: View {
             .background {
                 // The palette tiles' hover: the accent, softly, in their 6-point corners.
                 RoundedRectangle(cornerRadius: 6)
+                    .fill(lifted ? chrome.tabCard : .clear)
+                RoundedRectangle(cornerRadius: 6)
                     .fill(on ? accent.opacity(lit ? 0.24 : 0.18) : accent.opacity(lit ? 0.10 : 0))
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(accent.opacity(lit ? 0.9 : 0), lineWidth: 1.5)
             }
+            .scaleEffect(lifted ? 1.08 : 1)
+            .shadow(color: .black.opacity(lifted ? (prefs.dark ? 0.45 : 0.18) : 0), radius: 5, y: 2)
             .contentShape(Rectangle())
-            .onHover { h in withAnimation(.easeOut(duration: 0.12)) { if h { hovered = id } else if hovered == id { hovered = nil } } }
-            .onTapGesture { if enabled { id.run(canvas) } }
-            .overlay(alignment: .trailing) {
-                if hovered == id || showLabel == id { label(a, enabled: enabled) }
+            .onHover { h in
+                guard drag == nil else { return }
+                withAnimation(.easeOut(duration: 0.12)) { if h { hovered = id } else if hovered == id { hovered = nil } }
             }
+            .gesture(press(id, index: index, count: count, enabled: enabled))
+            .overlay(alignment: .trailing) {
+                if d == nil && (hovered == id || showLabel == id) { label(a, enabled: enabled) }
+            }
+            .offset(y: dy)
+            .animation(dragging ? nil : .easeOut(duration: 0.16), value: dy)
+            .zIndex(dragging ? 1 : 0)
             .accessibilityElement()
             .accessibilityLabel(a.titleWithKey)
             .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { if enabled { id.run(canvas) } }
+            .accessibilityAction(named: "Move Up") { if index > 0 { prefs.moveRailAction(id, to: index - 1) } }
+            .accessibilityAction(named: "Move Down") { if index < count - 1 { prefs.moveRailAction(id, to: index + 1) } }
     }
 
     /// The name and the shortcut, out to the left of the rail over the canvas.
@@ -461,7 +647,7 @@ struct ActionsRail: View {
 // MARK: - Customize
 
 /// Every action in the app, a checkbox each, in the order they'll show
-/// (drag to reorder), and Reset to Default. The rail's right-click opens it
+/// (drag to reorder, here or on the rail itself), and Reset to Default. The rail's right-click opens it
 /// as a sheet; Settings > Actions has it on its page.
 struct ActionsCustomizeList: View {
     @ObservedObject private var prefs = Prefs.shared
@@ -478,7 +664,7 @@ struct ActionsCustomizeList: View {
             .listStyle(.bordered(alternatesRowBackgrounds: true))
             .frame(height: height)
             HStack {
-                Text("\(prefs.railActions.count) shown. Drag to change the order.")
+                Text("\(prefs.railActions.count) shown. Drag to change the order, here or on the rail.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Button("Reset to Default") { withAnimation { prefs.resetActions() } }
@@ -513,7 +699,7 @@ struct ActionsCustomizeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Customize Actions").font(.system(size: 15, weight: .bold))
-            Text("Tick what goes on the Actions rail, anything from any menu. They show in this order, top to bottom.")
+            Text("Tick what goes on the Actions rail, anything from any menu. They show in this order, top to bottom. You can also drag them up or down on the rail itself.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             ActionsCustomizeList(height: 360)
@@ -546,6 +732,9 @@ struct CLActionsSettings: View {
                         ForEach(ActionsMode.allCases) { Text($0.name).tag($0) }
                     }
                     .labelsHidden().fixedSize()
+                    Toggle("Open it when you rest on its folded tab", isOn: $prefs.actionsHoverOpen)
+                        .toggleStyle(.checkbox)
+                        .disabled(prefs.actionsMode != .onScreen)
                     Text(hint).font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 360, alignment: .leading)
@@ -560,7 +749,7 @@ struct CLActionsSettings: View {
 
     private var hint: String {
         switch prefs.actionsMode {
-        case .onScreen: "A strip down the right edge of the window, the palette's mirror. Rest on one for its name and shortcut; click its edge to fold it away. Right-click it to choose your own."
+        case .onScreen: "A strip down the right edge of the window, the palette's mirror. Rest on one for its name and shortcut; drag one up or down to move it. Click its edge to fold it away. Right-click it to choose your own."
         case .toolbar: "The same actions as buttons in the toolbar, with no strip on the right."
         case .hidden: "No actions strip. Everything is still in the menus, with its shortcut."
         }

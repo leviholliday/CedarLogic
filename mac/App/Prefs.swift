@@ -120,6 +120,9 @@ final class Prefs: ObservableObject {
     @Published var actionsMode: ActionsMode { didSet { d.set(actionsMode.rawValue, forKey: "cl.actions.mode") } }
     /// The rail folded to its tab (by a click on its edge), as it was left.
     @Published var actionsCollapsed: Bool { didSet { d.set(actionsCollapsed, forKey: "cl.actions.collapsed") } }
+    /// Folded, the rail slides out over the canvas while the pointer rests
+    /// on its tab (as Arc's sidebar does), and back when it leaves.
+    @Published var actionsHoverOpen: Bool { didSet { d.set(actionsHoverOpen, forKey: "cl.actions.hoverOpen") } }
     /// Every action, in the order the Customize list has them.
     @Published private(set) var actionsOrder: [ActionID] { didSet { d.set(actionsOrder.map(\.rawValue), forKey: "cl.actions.order") } }
     /// The ones ticked there.
@@ -197,6 +200,7 @@ final class Prefs: ObservableObject {
             d.set(!newInstall, forKey: "cl.actions.hint")
         }
         actionsCollapsed = bool("cl.actions.collapsed", false)
+        actionsHoverOpen = bool("cl.actions.hoverOpen", true)
         let saved = (d.stringArray(forKey: "cl.actions.order") ?? []).compactMap(ActionID.init(rawValue:))
         actionsOrder = Prefs.completeOrder(saved)
         if let shown = d.stringArray(forKey: "cl.actions.shown") {
@@ -231,6 +235,26 @@ final class Prefs: ObservableObject {
         var listed = actionsOrderAll
         listed.move(fromOffsets: from, toOffset: to)
         actionsOrder = listed + actionsOrder.filter { !listed.contains($0) }
+    }
+    /// A drag on the rail itself: `id` to place `index` among the rail's
+    /// items (railActions), the rest of the order kept as it is, so the
+    /// Customize list shows the same order.
+    func moveRailAction(_ id: ActionID, to index: Int) {
+        var rail = railActions
+        guard let from = rail.firstIndex(of: id) else { return }
+        rail.remove(at: from)
+        let to = min(max(index, 0), rail.count)
+        guard to != from else { return }
+        var order = actionsOrder
+        order.removeAll { $0 == id }
+        if to < rail.count, let i = order.firstIndex(of: rail[to]) {
+            order.insert(id, at: i)
+        } else if let last = rail.last, let i = order.firstIndex(of: last) {
+            order.insert(id, at: i + 1)
+        } else {
+            order.insert(id, at: 0)
+        }
+        actionsOrder = order
     }
     func resetActions() {
         actionsOrder = Prefs.completeOrder([])

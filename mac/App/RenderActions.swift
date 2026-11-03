@@ -1,6 +1,8 @@
 // `CedarLogic --render-actions <dir>` (and part of --render-ui): the Actions
 // rail in a whole circuit window drawn off screen, light and dark: open with
-// a label showing, folded to its tab, folded by itself in a narrow window,
+// a label showing, folded to its tab, folded and slid out over the canvas
+// (as on hover), mid-drag (an item moved down, the others making room),
+// folded by itself in a narrow window,
 // in Simulation View, in the toolbar instead (at 1280 and 1440 wide), and
 // the Customize sheet and Settings > Actions. Each window is laid out at
 // once, so the PNGs show what a person would see.
@@ -89,8 +91,14 @@ enum RenderActions {
             prefs.actionsCollapsed = false
             shoot("rail-expanded-\(t)", label: .checkCircuit)
             shoot("rail-sim-\(t)", simView: true, label: .tidy)
+            ActionsRail.pictureDrag = (prefs.railActions[1], 52)
+            shoot("rail-drag-\(t)")
+            ActionsRail.pictureDrag = nil
             prefs.actionsCollapsed = true
             shoot("rail-collapsed-\(t)")
+            ActionsRail.pictureSlidOut = true
+            shoot("rail-hover-open-\(t)", label: .tidy)
+            ActionsRail.pictureSlidOut = false
             prefs.actionsCollapsed = false
             shoot("rail-narrow-\(t)", width: 860, height: 640)
             prefs.actionsMode = .toolbar
