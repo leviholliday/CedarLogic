@@ -130,6 +130,9 @@ enum SessionCheck {
         CanvasController.clipboard = clipboard
         defer { CanvasController.clipboard = .general; clipboard.releaseGlobally() }
 
+        // Saves that fail (a read-only folder), told once, and saved once they can be.
+        saveTroubleChecks(check, turn: turn)
+
         // A circuit in Your Circuits, open in a window.
         guard let text = autoreleasepool(invoking: { startText(start) }) else {
             print("FAIL couldn't read the circuit to start from: \(start ?? "")")
@@ -588,6 +591,110 @@ enum SessionCheck {
         prefs.dark = savedDark
         print(failures == 0 ? "session-check: all passed" : "session-check: \(failures) failed")
         return failures == 0
+    }
+
+    /// Saves that fail, and work again: a new circuit with Your Circuits'
+    /// folder made read-only can't join it, and says so in the status bar
+    /// once; with the folder writable again it joins on the next try. Then
+    /// its own folder read-only: autosave fails, says so once however many
+    /// edits come, and saves once it can. (CL_SESSION_SAVE_TROUBLE=0 skips it.)
+    static func saveTroubleChecks(_ check: (Bool, String) -> Void, turn: (Double) -> Void) {
+        guard ProcessInfo.processInfo.environment["CL_SESSION_SAVE_TROUBLE"] != "0" else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Library.root, withIntermediateDirectories: true)
+        func writable(_ url: URL, _ yes: Bool) {
+            try? fm.setAttributes([.posixPermissions: yes ? 0o755 : 0o555], ofItemAtPath: url.path)
+        }
+        func folders() -> Set<String> {
+            Set(((try? fm.contentsOfDirectory(atPath: Library.root.path)) ?? []).filter { !$0.hasPrefix(".") })
+        }
+        let before = folders()
+        let retry = CanvasController.saveRetrySeconds
+        autoreleasepool { MainActor.assumeIsolated {
+            let core = CoreDocument()
+            let file = SessionFile(core: core)
+            file.fileType = UTType.cedarLogicCircuit.identifier
+            let delegate = SessionWindowDelegate()
+            delegate.file = file
+            let size = NSSize(width: 1280, height: 800)
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
+                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                               backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            win.delegate = delegate
+            let wc = NSWindowController(window: win)
+            file.addWindowController(wc)
+            NSDocumentController.shared.addDocument(file)
+            let host = NSHostingView(rootView: CircuitWindow(document: core).environmentObject(LookStore.shared))
+            host.frame = NSRect(origin: .zero, size: size)
+            win.contentView = host
+            host.layoutSubtreeIfNeeded()
+            defer {
+                writable(Library.root, true)
+                if let url = file.fileURL { writable(url.deletingLastPathComponent(), true) }
+                // Nothing of the document's own left to run on a closed window.
+                turn(1.0)
+                file.undoManager?.removeAllActions()
+                file.close()
+                win.contentView = nil
+                delegate.file = nil
+            }
+            turn(0.5)
+            @MainActor func findCanvas(_ v: NSView) -> CircuitCanvasNSView? {
+                if let c = v as? CircuitCanvasNSView, c.controller?.drivesClock == true { return c }
+                for s in v.subviews { if let c = findCanvas(s) { return c } }
+                return nil
+            }
+            guard let canvas = findCanvas(host)?.controller else { check(false, "save trouble: the window has a canvas"); return }
+            if canvas.undoManager !== file.undoManager { canvas.undoManager = file.undoManager }
+
+            // 1. Your Circuits can't be written to: the new circuit can't join it.
+            writable(Library.root, false)
+            canvas.addGate("AA_AND2", at: CGPoint(x: 0, y: 0))
+            turn(2.6)   // the clock looks every 2 s
+            let said = canvas.routed.statusMessage
+            print("INFO save trouble: \(said)")
+            check(file.fileURL == nil, "save trouble: with Your Circuits read-only, the new circuit isn't taken as joined")
+            check(canvas.saveTroubleNotes == 1 && said.hasPrefix("Couldn't save") && said.contains("to Your Circuits")
+                  && said.contains("isn't allowed") && said.contains("Your work is still here"),
+                  "save trouble: the status bar says why it couldn't join Your Circuits")
+            check(folders() == before, "save trouble: no half-made circuit is left in Your Circuits")
+            turn(retry * 2 + 0.5)
+            check(canvas.saveTroubleNotes == 1 && file.fileURL == nil, "save trouble: tried again, said once (\(canvas.saveTroubleNotes) notices)")
+            writable(Library.root, true)
+            turn(retry + 2.5)
+            let joined = file.fileURL.map(Library.contains) ?? false
+            check(joined, "save trouble: with the folder writable again, it joined Your Circuits")
+            if let url = file.fileURL, joined {
+                let disk = (try? String(contentsOf: url, encoding: .utf8)).map(shape)
+                check(disk == shape(core.shareText(flags: 0)), "save trouble: and the file there is the circuit")
+                check(folders().subtracting(before).count == 1, "save trouble: as one circuit, not one per try")
+                check(canvas.saveRecoveries == 1, "save trouble: the status bar said it's saved")
+
+                // 2. Its own folder read-only (the file itself isn't: macOS
+                // treats a locked file as a question of its own): autosave fails.
+                let folder = url.deletingLastPathComponent()
+                writable(folder, false)
+                canvas.addGate("AE_OR2", at: CGPoint(x: 8, y: 0))
+                turn(2.6)
+                print("INFO autosave trouble: \(canvas.routed.statusMessage)\(win.attachedSheet != nil ? " (and macOS put up a sheet)" : "")")
+                check(canvas.saveTroubleNotes == 2 && canvas.routed.statusMessage.hasPrefix("Couldn't save")
+                      && !canvas.routed.statusMessage.contains("Your Circuits"),
+                      "autosave trouble: the status bar says the circuit couldn't be saved")
+                check(file.isDocumentEdited, "autosave trouble: the window stays edited")
+                canvas.addGate("AA_INVERTER", at: CGPoint(x: 16, y: 0))
+                turn(retry + 2.5)
+                check(canvas.saveTroubleNotes == 2, "autosave trouble: more edits and tries, said once (\(canvas.saveTroubleNotes - 1) notices)")
+                writable(folder, true)
+                turn(retry + 2.5)
+                let saved = (try? String(contentsOf: url, encoding: .utf8)).map(shape)
+                check(!file.isDocumentEdited && saved == shape(core.shareText(flags: 0)),
+                      "autosave trouble: with the folder writable again, it saved, and the file is the circuit")
+                check(canvas.saveRecoveries == 2, "autosave trouble: the status bar said it's saved")
+                if let sheet = win.attachedSheet { win.endSheet(sheet) }
+            }
+        } }
+        turn(1.0)
     }
 
     /// Run and pause from either side of a split: both sides and the engine
