@@ -1,11 +1,13 @@
 // Settings (Ctrl+,), laid out as the Mac app's (SettingsView.swift) and the
 // Linux app's: the pages as icons in a bar across the top -- General,
-// Appearance, Canvas, Toolbar, Shortcuts, Sync -- the window fitting each page as
+// Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync -- the window fitting each page as
 // you switch, and each setting a label on the left with its control and a
 // line of explanation under it. Every change applies at once; Escape or the
 // close box closes it, and Ctrl+Tab steps through the pages.
 
 #include "Dialogs.h"
+#include "Actions.h"
+#include "ActionsList.h"
 #include "Chrome.h"
 #include "Alert.h"
 #include "Collections.h"
@@ -26,7 +28,7 @@
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage, SyncPage };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage };
 
 // Every window takes the change.
 void apply() {
@@ -489,10 +491,24 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 }
 
 int g_page = 0;   // the page it opens on (--page, for CI), and the one last shown
+std::string g_actionsSearch;   // Settings > Actions' search as it opens (--actions-search, for CI's pictures)
+
+// Settings > Actions' line under "Actions:", for where they are now.
+std::string railHint() {
+	switch (prefs().actionsMode) {
+	case 0: return "A strip down the right edge of the window, the side panel's mirror. Rest on one for its name and shortcut; "
+	               "drag one up or down to move it. Click its edge to fold it away, or use View \u25B8 Hide Actions" +
+	               shortcuts::tipKeys(CMD_TOGGLE_ACTIONS) + ". Right-click it to choose your own.";
+	case 1: return "The same actions as buttons in the toolbar, with no strip on the right.";
+	default: return "No actions strip. Everything is still in the menus, with its shortcut.";
+	}
+}
 
 }  // namespace
 
 void setPreferencesPage(int page) { g_page = page; }
+void setActionsSearch(const std::string& query) { g_actionsSearch = query; }
+const std::string& actionsSearch() { return g_actionsSearch; }
 
 void showPreferencesDialog(HWND parent) {
 	Prefs& p = prefs();
@@ -502,9 +518,9 @@ void showPreferencesDialog(HWND parent) {
 	f.okText = "";
 	f.cancelText = "";
 	f.settingsLayout = true;
-	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts", "Sync" };
-	// A gear, a palette, a mouse, ••• (as the Linux app has it), a keyboard, two circling arrows.
-	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE765, 0xE895 };
+	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync" };
+	// A gear, a palette, a mouse, ••• (as the Linux app has it), a pane on the right (the rail), a keyboard, two circling arrows.
+	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE90D, 0xE765, 0xE895 };
 	f.page = std::max(0, std::min((int)SyncPage, g_page));
 	// What each field does when it changes.
 	std::map<int, std::function<void(Form&, int)>> on;
@@ -758,6 +774,36 @@ void showPreferencesDialog(HWND parent) {
 	themeSwitch.wideGrid = true;
 	on[f.add(themeSwitch)] = [styles](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); form.refresh(styles); };
 
+	// ---- Actions (the rail, Rail.h; the Mac's CLActionsSettings)
+	f.adding = ActionsPage;
+	ActionsList actionsList;
+	actionsList.query = g_actionsSearch;
+	FormField where = choice("Actions:", { "On screen", "In the toolbar", "Hidden" }, p.actionsMode, railHint());
+	where.tipLines = 3;
+	const int whereField = f.add(where);
+	FormField hoverOpen = check("", "Open it when the mouse reaches the right edge", p.actionsHoverOpen,
+	                            "When it's folded. Move the pointer to the window's right edge (or push it against the screen's) and it "
+	                            "slides out over the canvas, then back when you move away.");
+	hoverOpen.tipLines = 2;
+	const int hoverField = f.add(hoverOpen);
+	FormField orderHeading;
+	orderHeading.kind = FormField::Note;
+	orderHeading.label = "Show these, in this order:";
+	orderHeading.heading = true;
+	f.add(orderHeading);
+	actionsList.add(f, 300);
+	on[whereField] = [&actionsList, hoverField](Form& form, int i) {
+		prefs().actionsMode = std::max(0, std::min(2, form.choice(i)));
+		actions::changed();
+		form.setTip(i, railHint());
+		form.enable(hoverField, prefs().actionsMode == 0);
+		actionsList.setDisabled(prefs().actionsMode == 2);
+	};
+	on[hoverField] = [](Form& form, int i) {
+		prefs().actionsHoverOpen = form.checked(i);
+		actions::changed();
+	};
+
 	// ---- Shortcuts
 	f.adding = ShortcutsPage;
 	ShortcutList list;
@@ -819,6 +865,9 @@ void showPreferencesDialog(HWND parent) {
 
 	f.onInit = [&](Form& form) {
 		form.enable(gridStyle, prefs().showGrid);
+		actionsList.init(form);
+		form.enable(hoverField, prefs().actionsMode == 0);
+		actionsList.setDisabled(prefs().actionsMode == 2);
 		for (const auto& picker : { std::make_pair(swatches, &stepAccent), std::make_pair(styles, &stepStyle) }) {
 			HWND h = form.fields[picker.first].hwnd;
 			SetWindowSubclass(h, arrowPickProc, 2, (DWORD_PTR)picker.second);
@@ -843,6 +892,7 @@ void showPreferencesDialog(HWND parent) {
 	};
 	f.onChange = [&](Form& form, int field) {
 		if (sync.handles(field)) { sync.changed(form, field); return; }
+		if (actionsList.changed(form, field)) return;
 		auto it = on.find(field);
 		if (it != on.end()) it->second(form, field);
 	};
@@ -852,10 +902,13 @@ void showPreferencesDialog(HWND parent) {
 		else if (field == styles && y >= 0) pickStyle((int)(y / kStyleH));
 	};
 	f.onWheel = [&](Form& form, int field, int delta) {
+		if (actionsList.wheel(field, delta)) return;
 		if (field == list.list) list.scrollBy(-delta * 84.0f / WHEEL_DELTA);
 		// Over the colours or the styles: the page scrolls, when it does.
 		else if (form.scrollHeight > 0) form.scrollTo(form.scrollY - MulDiv(delta, scaled(90, dpiOf(form.dialog)), WHEEL_DELTA));
 	};
+	// Escape on Settings > Actions clears its search first.
+	f.onCancel = [&](Form& form) { return !(form.page == ActionsPage && actionsList.clearSearch(form)); };
 	f.run(parent);
 	sync.detach();
 	syncapp::nameChanged();

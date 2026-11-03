@@ -411,7 +411,7 @@ void showShortcutsWindow(HWND parent) {
 	sheet.run(parent);
 	if (sheet.gone) return;   // its window (owner) went with it
 	if (sheet.toSettings) {
-		setPreferencesPage(4);
+		setPreferencesPage(5);   // Shortcuts
 		showPreferencesDialog(parent);
 		return;
 	}

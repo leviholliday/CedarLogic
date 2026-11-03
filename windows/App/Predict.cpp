@@ -52,9 +52,15 @@ std::vector<CLPredictMark> CircuitWindow::predictMarks() {
 }
 
 void CircuitWindow::togglePredict() {
-	if (!simViewOn && !predict.on) {
-		note("Predict works in Simulation View: open it first (Simulate ▸ Simulation View).");
-		return;
+	// Outside Simulation View (from the Actions rail, or the menu): into it,
+	// with the lights covered, as the Mac's.
+	if (!simViewOn) {
+		if (predictLights().empty() && !predict.on) {
+			note("Predict needs a light or a display on the page to guess.");
+			return;
+		}
+		toggleSimView();
+		if (predict.on) return;
 	}
 	predict.on = !predict.on;
 	predict.focus = -1;

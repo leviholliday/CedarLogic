@@ -268,7 +268,7 @@ void showYourCircuits(CircuitWindow* from) {
 			return;
 		}
 		// The line itself: Settings, on its Sync page.
-		setPreferencesPage(5);
+		setPreferencesPage(6);   // Sync
 		showPreferencesDialog(picker.hwnd);
 		picker.redraw();
 	};

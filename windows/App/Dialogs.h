@@ -156,9 +156,11 @@ void showTruthTable(CircuitWindow* w, int page, bool check = false);   // check:
 void setCheckForTesting(const std::string& formula);   // --check: what the Check tab opens with (not kept)
 bool truthTableOpen();   // one is up (the guided tour watches for it)
 void showRamEditor(CircuitWindow* w, long gate);
-// Settings (Settings.cpp): General, Appearance, Canvas, Toolbar, Shortcuts.
+// Settings (Settings.cpp): General, Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync.
 void showPreferencesDialog(HWND parent);
 void setPreferencesPage(int page);   // the page Settings opens on
+void setActionsSearch(const std::string& query);   // what Settings > Actions' search (and the Customize sheet's) has as it opens (CI's pictures)
+const std::string& actionsSearch();
 // Every shortcut, searchable; a row runs its command (ShortcutsSheet.cpp).
 void showShortcutsWindow(HWND parent);
 void showBuildFormula(CircuitWindow* w);

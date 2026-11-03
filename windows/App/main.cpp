@@ -3,6 +3,7 @@
 // open windows.
 
 #include "App.h"
+#include "Actions.h"
 #include "Alert.h"
 #include "Canvas.h"
 #include "Collections.h"
@@ -16,6 +17,8 @@
 #include "Intro.h"
 #include "Library.h"
 #include "Palette.h"
+#include "Rail.h"
+#include "RailCheck.h"
 #include "Recovery.h"
 #include "SessionCheck.h"
 #include "ShareLink.h"
@@ -77,7 +80,7 @@ std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
 // --dialog sync, sync-on (Settings on its Sync page, off or on with sample devices),
 // sync-code, sync-link, sync-pair, sync-pair-expired, sync-remove (Remove's question): sync's screens, for the pictures.
 std::string gSyncDialog;
-const int kSyncPage = 5;
+const int kSyncPage = 6;
 int gPage = 0;          // --page: What's New opens on it (--dialog whatsnew)
 std::string gNote;      // --note: a note in the status bar, as Saved or Copied are
 bool gWireTag = false;  // --wire-tag: the pointer resting on a wire, its value showing
@@ -94,6 +97,15 @@ int gBenchDraw = 0;
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
 int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar in that style, for this run
+// The Actions rail (Rail.h), for this run's picture: --rail open, folded,
+// peek (folded, the pointer at the edge), hover-open (slid out over the
+// canvas), drag (an item held 52 points below its place), narrow (an 860 x
+// 640 window), toolbar or hidden; --rail-label <id>: that item's name and
+// shortcut showing; --actions-search <words>: the Customize list (Settings >
+// Actions, --dialog customize-actions) searched.
+std::string gRail, gRailLabel;
+bool gRailCheck = false;   // --rail-check (RailCheck.h)
+int gRailExit = 0;
 
 // --session-check [actions] [seed]: a long random session in one window
 // (SessionCheck.h).
@@ -113,6 +125,9 @@ std::string gFeedbackTest;
 bool gTestRun = false;   // a picture or test run: no card is left waiting for an answer
 
 Prefs gPrefsBefore;     // the settings as loaded: put back after a test run changed them for itself
+
+// What this run's flags changed for themselves goes back as it was.
+void restoreRunPrefs();
 
 void writeOut(const std::string& text) {
 	HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -200,6 +215,28 @@ void CALLBACK menuShotStart(HWND, UINT, UINT_PTR id, DWORD) {
 	if (w && w->toolbarWidget()) w->toolbarWidget()->openMenu(gMenuShot, true);   // returns when the picture's taken
 }
 
+void restoreRunPrefs() {
+	if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
+	if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
+	if (gProjector) prefs().projector = gPrefsBefore.projector;
+	if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
+	if (!gRail.empty()) {
+		prefs().actionsMode = gPrefsBefore.actionsMode;
+		prefs().actionsCollapsed = gPrefsBefore.actionsCollapsed;
+		prefs().windowWidth = gPrefsBefore.windowWidth;
+		prefs().windowHeight = gPrefsBefore.windowHeight;
+		prefs().windowMaximized = gPrefsBefore.windowMaximized;
+	}
+}
+
+// --rail-check: once the app is up, its checks (RailCheck.h), then quit.
+void CALLBACK railCheckTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	gRailExit = railcheck::run([](const std::string& s) { writeOut(s); });
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+	PostQuitMessage(gRailExit);
+}
+
 void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	KillTimer(nullptr, id);
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
@@ -219,8 +256,14 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
 	if (help::window()) dialog = help::window();
 	if (welcome::tourWindow()) dialog = welcome::tourWindow();
+	// The Actions rail's label is a popup of its own: the window with it over.
+	const HWND railLabel = !gDialog && w && w->railWidget() ? w->railWidget()->labelWindow() : nullptr;
 	if (gDialog == -10) {
 		if (w && w->tabSwitcher() && w->tabSwitcher()->saveFrame(gScreenshot)) gExitCode = 0;
+	} else if (railLabel) {
+		IWICBitmap* b = capture::windowAndPopup(w->window(), railLabel);
+		if (b && capture::savePng(b, gScreenshot)) gExitCode = 0;
+		if (b) b->Release();
 	} else if (w && w->screenshot(gScreenshot, gDialog ? dialog : nullptr)) gExitCode = 0;
 	writeOut(strf("%s %s\n", gExitCode ? "couldn't write" : "wrote", gScreenshot.c_str()));
 	if (!gTiming.empty()) {
@@ -229,10 +272,7 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	}
 	// A dialog is still open (its own loop is running): just stop.
 	if (gDialog) {
-		if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
-		if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
-		if (gProjector) prefs().projector = gPrefsBefore.projector;
-		if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
+		restoreRunPrefs();
 		prefs().save();
 		ExitProcess((UINT)gExitCode);
 	}
@@ -1084,6 +1124,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			return ok ? 0 : 1;
 		}
 		if (a == "--click-test") { gClickTest = true; continue; }
+		if (a == "--rail-check") { gRailCheck = true; continue; }
+		if (a == "--rail" && i + 1 < argc) { gRail = U(argv[++i]); continue; }
+		if (a == "--rail-label" && i + 1 < argc) { gRailLabel = U(argv[++i]); continue; }
+		if (a == "--actions-search" && i + 1 < argc) { setActionsSearch(U(argv[++i])); continue; }
 		if (a == "--session-check") {
 			gSessionCheck = true;
 			if (i + 1 < argc && atoi(U(argv[i + 1]).c_str()) > 0) gSessionActions = atoi(U(argv[++i]).c_str());
@@ -1171,7 +1215,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "export" ? CMD_EXPORT_IMAGE : d == "lab-report" ? CMD_EXPORT_REPORT
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
-			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : d == "switcher" ? -10 : 0;
+			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : d == "switcher" ? -10
+			        : d == "customize-actions" ? CMD_CUSTOMIZE_ACTIONS : 0;
 			if (d == "feedback-sending" || d == "feedback-failed" || d == "feedback-sent" || d == "feedback-capped" || d == "feedback-summary") {
 				gDialog = -11;
 				gFeedbackSample = d == "feedback-sending" ? 1 : d == "feedback-failed" ? 2 : d == "feedback-sent" ? 3 : d == "feedback-capped" ? 4 : 5;
@@ -1194,10 +1239,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
 	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0 || gSessionCheck ||
-	                     gMenuTest || !gFeedbackTest.empty() || !gRenderIntro.empty();
+	                     gMenuTest || !gFeedbackTest.empty() || !gRenderIntro.empty() || gRailCheck;
 	// Its own home folder (so not your settings or Your Circuits), and its crash handlers, before anything is read.
 	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
+	if (gRailCheck) railcheck::prepare();
 	gTestRun = testRun;
+	// Test and picture runs: the rail doesn't follow wherever the runner's
+	// pointer is, and the one-time status line waits for a real launch.
+	if (testRun) {
+		ActionsRail::watchPointer = false;
+		ActionsRail::quiet = true;
+	}
 	if (!testRun && handToRunning(files)) return 0;
 	// Recently Deleted: circuits deleted over 30 days ago go for good, in the
 	// background (files only).
@@ -1231,9 +1283,26 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gTruthTab >= 0) prefs().truthTab = gTruthTab;
 	if (!gTiming.empty()) prefs().timingInColor = gTimingColor;
 	if (gWireTag) prefs().wireValueTag = true;
+	if (!gRail.empty()) {
+		Prefs& q = prefs();
+		q.actionsMode = gRail == "toolbar" ? 1 : gRail == "hidden" ? 2 : 0;
+		q.actionsCollapsed = gRail == "folded" || gRail == "peek" || gRail == "hover-open";
+		ActionsRail::picture.peek = gRail == "peek";
+		ActionsRail::picture.slidOut = gRail == "hover-open";
+		if (gRail == "drag" && actions::rail().size() > 1) {
+			ActionsRail::picture.dragId = actions::rail()[1];
+			ActionsRail::picture.dragDy = 52;
+		}
+		if (gRail == "narrow") {
+			q.windowWidth = 860;
+			q.windowHeight = 640;
+			q.windowMaximized = false;
+		}
+	}
+	ActionsRail::picture.label = gRailLabel;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() && gRenderIntro.empty()) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() && gRenderIntro.empty() && !gRailCheck) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -1289,7 +1358,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
 	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() &&
-	    gRenderIntro.empty()) {
+	    gRenderIntro.empty() && !gRailCheck) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -1362,6 +1431,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
 	else if (!gRenderIntro.empty()) SetTimer(nullptr, 0, 2000, renderIntroTimer);
 	else if (gMenuTest) SetTimer(nullptr, 0, 500, menuTestTick);
+	else if (gRailCheck) SetTimer(nullptr, 0, 500, railCheckTimer);
 	else if (!gFeedbackTest.empty()) SetTimer(nullptr, 0, 1500, feedbackTestStart);
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);
@@ -1392,6 +1462,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
 		if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
 			if (CircuitWindow* w = windowFor(msg.hwnd)) {
+				// Escape puts back an Actions rail that slid out over the canvas.
+				if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE && w->railEscape()) continue;
 				if (IsWindowEnabled(w->window()) && handleShortcut(w, msg)) continue;
 			}
 		}
@@ -1409,14 +1481,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	draglog::close();
 	updater::shutdown();
 	syncapp::shutdown();
-	// What this run's flags changed for themselves goes back as it was.
-	if (gToolbarStyle >= 0) prefs().toolbarStyle = gPrefsBefore.toolbarStyle;
-	if (gWireTag) prefs().wireValueTag = gPrefsBefore.wireValueTag;
-	if (gProjector) prefs().projector = gPrefsBefore.projector;
-	if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
+	restoreRunPrefs();
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;
+	if (gRailCheck) return gRailExit;
 	if (gSessionCheck) {
 		prefs() = gPrefsBefore;
 		return sessioncheck::exitCode();

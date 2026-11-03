@@ -569,7 +569,7 @@ void openLink(HWND parent, const std::string& link) {
 	}
 	// No code in it (cedarlogic://sync): just the place to type one.
 	if (link.find("k=") == std::string::npos) {
-		setPreferencesPage(5);
+		setPreferencesPage(6);   // Sync
 		showPreferencesDialog(parent);
 		return;
 	}

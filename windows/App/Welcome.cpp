@@ -981,7 +981,7 @@ const int kOpenSync = -2;
 struct Point { wchar_t icon; const char* title; const char* line; };
 struct Chapter {
 	const char* eyebrow; const char* title; const char* line;
-	Point points[3];
+	Point points[4];   // three, or four (an empty title: none)
 	const char* tryTitle;
 	int tryCommand;
 };
@@ -1013,7 +1013,8 @@ const Chapter kChapters[] = {
 	    { 0xE9D9, "Fast on big pages", "A page with hundreds of parts used to take half a minute. Now it takes a second or two." } },
 	  "Tidy Up by Signal Flow", CMD_TIDY_FLOW },
 	{ "Also new", "Smaller things", "More that's changed since the last tour.",
-	  { { 0xE8A0, "Split view and focus mode", "Ctrl+Alt+S shows two tabs side by side. Ctrl+. slides the toolbar and side panel away." },
+	  { { 0xE90D, "Actions on the right", "The things you use most, one click away. Drag them into your order; right-click to choose your own." },
+	    { 0xE8A0, "Split view and focus mode", "Ctrl+Alt+S shows two tabs side by side. Ctrl+. slides the toolbar and side panel away." },
 	    { 0xE713, "Your toolbar, your keys", "Settings ▸ Toolbar has Seamless, Classic and Minimal. Settings ▸ Shortcuts changes any key." },
 	    { 0xE73E, "Fixed along the way", "Truth tables with TO and FROM labels, report headings that stay with their content, and NOR-only formulas." } },
 	  nullptr, 0 },
@@ -1043,7 +1044,7 @@ void close(int command) {
 	if (command == CMD_TOUR) {
 		welcome::startTourOn(window);
 	} else if (command == kOpenSync) {
-		setPreferencesPage(5);   // Settings' Sync page
+		setPreferencesPage(6);   // Settings' Sync page
 		PostMessageW(window->window(), WM_COMMAND, CMD_PREFERENCES, 0);
 	} else if (command) {
 		PostMessageW(window->window(), WM_COMMAND, command, 0);
@@ -1273,7 +1274,9 @@ void pageChapter(ID2D1RenderTarget* rt, WhatsNew* wn, int i, double t) {
 	const Chapter& c = kChapters[i];
 	const float x = 48, cw = 420;
 	float y = heading(rt, x, 34, cw, c.eyebrow, c.title, c.line) + 18;
-	for (const Point& p : c.points) y += pointCard(rt, x, y, cw, p.icon, p.title, p.line) + 10;
+	const bool four = c.points[3].title != nullptr;   // closer together, to fit
+	for (const Point& p : c.points)
+		if (p.title) y += pointCard(rt, x, y, cw, p.icon, p.title, p.line) + (four ? 6 : 10);
 	if (c.tryTitle) {
 		const float bw = textWidth(c.tryTitle, 13, kSemi) + 40;
 		const D2D1_RECT_F r = D2D1::RectF(x, y + 6, x + bw, y + 42);

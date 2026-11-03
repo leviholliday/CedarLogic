@@ -63,7 +63,22 @@ it compiles without a Windows machine:
   right (`Notes`: View > Show Notes, Ctrl+Alt+N, or Notes beside Draw in the
   toolbar), plain text saved and synced with it, with its own undo apart from
   the circuit's, found by Find, and slid away in focus mode, as on the Mac; the
-  status bar where notes appear (`StatusBar`); the side
+  status bar where notes appear (`StatusBar`); the Actions rail down the
+  window's right edge, the side panel's mirror (`Rail`, over `Actions`, the
+  list of every menu command it can offer): the actions you choose as icons,
+  each named with its shortcut as the pointer rests on it, dragged up or
+  down on the rail to reorder, folded to a tab by a click on its edge (by
+  itself in a window under 900 points, and in focus mode, where it comes back
+  as it was afterwards), and, folded, slid out over the canvas when the
+  pointer reaches the window's right edge (a 12-point strip the canvas's
+  height, its last column of pixels too: 100 ms there, and it goes 400 ms
+  after the pointer leaves; Escape puts it back); View > Show/Hide Actions,
+  Ctrl+B; Settings > Actions puts it on screen, in the toolbar or nowhere,
+  with the Customize list (`ActionsList`: ticks, drag to reorder, search by
+  name, menu or shortcut, Reset to Default) that the rail's right-click
+  Customize Actions... sheet has too -- new installs get it on screen,
+  earlier ones Hidden and a status line once, as on the Mac (`--rail-check`
+  tries it all; `--rail <state>` makes CI's pictures); the side
   panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
   (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
   the app's own alert card for every question and note (`Alert`);
@@ -88,7 +103,7 @@ it compiles without a Windows machine:
   builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
   build (`Updater`); recovery copies of unsaved work (`Recovery`); the Start
   menu and .cdl files for a copy run from the zip (`Integration`); Settings
-  in the Mac's pages -- General, Appearance, Canvas, Toolbar, Shortcuts, Sync (`Settings`, on `Form`); every command's keys,
+  in the Mac's pages -- General, Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync (`Settings`, on `Form`); every command's keys,
   changeable in Settings > Shortcuts (`Shortcuts`; Ctrl+Alt ones too, such as
   split view's, which a text box leaves to AltGr), and the searchable list
   of them (`ShortcutsSheet`); the toolbar's three styles, Seamless, Classic

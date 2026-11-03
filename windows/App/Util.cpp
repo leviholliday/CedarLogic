@@ -261,6 +261,23 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	showTitle = r.b("showTitle", showTitle);
 	showThemeToggle = r.b("showThemeToggle", showThemeToggle);
 	showStepClock = r.b("showStepClock", showStepClock);
+	// The Actions rail: on screen for a new install (no settings at all);
+	// anyone who had CedarLogic before keeps the window they know (no rail,
+	// the toolbar as it was) until they look in Settings > Actions, which a
+	// status line tells them once -- as the Mac decides it.
+	if (r.has("actionsMode")) {
+		actionsMode = r.i("actionsMode", 0, 0, 2);
+		actionsHint = r.b("actionsHint", false);
+	} else {
+		const bool fresh = r.m.empty();
+		actionsMode = fresh ? 0 : 2;
+		actionsHint = !fresh;
+	}
+	actionsCollapsed = r.b("actionsCollapsed", false);
+	actionsHoverOpen = r.b("actionsHoverOpen", true);
+	actionsOrder = r.s("actionsOrder", "");
+	actionsShownSet = r.has("actionsShown");
+	actionsShown = r.s("actionsShown", "");
 	newPagesShareLinks = r.b("newPagesShareLinks", newPagesShareLinks);
 	applyPageLinks();
 	inkTool = r.i("inkTool", inkTool, 0, 2);
@@ -407,6 +424,12 @@ std::string Prefs::text() const {
 	o << "showTitle=" << b(showTitle) << "\n";
 	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
 	o << "showStepClock=" << b(showStepClock) << "\n";
+	o << "actionsMode=" << actionsMode << "\n";
+	o << "actionsCollapsed=" << b(actionsCollapsed) << "\n";
+	o << "actionsHoverOpen=" << b(actionsHoverOpen) << "\n";
+	o << "actionsOrder=" << actionsOrder << "\n";
+	if (actionsShownSet) o << "actionsShown=" << actionsShown << "\n";
+	o << "actionsHint=" << b(actionsHint) << "\n";
 	o << "newPagesShareLinks=" << b(newPagesShareLinks) << "\n";
 	o << "inkTool=" << inkTool << "\n";
 	o << "penColor=" << penColor << "\n";
