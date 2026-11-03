@@ -171,6 +171,7 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             }
         }
         DevSnapshot.runIfAsked()
+        LaunchFocusCheck.startIfAsked()
         BarTest.start()
         FeedbackModel.selfTestIfAsked()
         // Sync starts once the first window is up (SYNC.md 4.3), never in the

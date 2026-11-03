@@ -55,6 +55,8 @@ enum SplashDebug {
 extension Notification.Name {
     /// The launch screen is going: the windows it held are coming in.
     static let clSplashDone = Notification.Name("clSplashDone")
+    /// ...and it has gone, the windows it held fully in.
+    static let clSplashGone = Notification.Name("clSplashGone")
 }
 
 @MainActor
@@ -69,6 +71,8 @@ final class Splash: ObservableObject {
     /// Up (from launch until it has dissolved): windows opening meanwhile
     /// wait, unseen.
     private(set) var active = false
+    /// Up, or still fading out.
+    var showing: Bool { active || panel != nil }
     /// Its clock: set when it begins, once the heavy work of launching is
     /// done, so nothing can hold up the animation while it plays.
     @Published private(set) var start = Date.distantFuture
@@ -321,6 +325,9 @@ final class Splash: ObservableObject {
                 w.isVisible && ["welcome", "whatsnew"].contains { w.identifier?.rawValue.contains($0) == true }
             }
             greeting?.makeKeyAndOrderFront(nil)
+            // A circuit window that was key all along (behind the panel)
+            // hears nothing from the line above: told now (windowBecameKey).
+            NotificationCenter.default.post(name: .clSplashGone, object: nil)
         }
     }
 }

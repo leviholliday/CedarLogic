@@ -1209,6 +1209,22 @@ final class CanvasController: ObservableObject {
         if let root = window.contentView, let c = find(root) { window.makeFirstResponder(c) }
     }
 
+    /// This circuit's window has just become the key window (opened, or
+    /// back in front after the welcome, What's New, the launch screen or
+    /// another window): its canvas takes the keyboard unless something in
+    /// the window already has it, and SwiftUI is made to look again at which
+    /// window is in front. It reads that -- the menus' circuit, through
+    /// focusedSceneObject -- only on its next update, and when nothing else
+    /// changed after the window came forward (What's New closing, say) the
+    /// whole menu bar stayed greyed out until a click on the grid.
+    func windowBecameKey() {
+        guard let v = view, let w = v.window, w.isKeyWindow else { return }
+        CanvasController.front = self
+        if w.firstResponder == nil || w.firstResponder === w { w.makeFirstResponder(v) }
+        // Not inside whatever made it key (a SwiftUI window closing, mid-update).
+        DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
+    }
+
     func zoomActual() { view?.animateZoom(by: (view?.unitsPerPoint ?? 0.1) / 0.1) }
 
     var canEdit: Bool { !locked && !simView }

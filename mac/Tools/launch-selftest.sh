@@ -14,6 +14,17 @@
 # ("offline"), and (the "damaged" state) damaged circuits.
 # No window opens. A launch
 # passes when it exits 0 within 60 s.
+#
+# FOCUS=1 then also launches the copy for real (through `open`, as the Dock
+# does) in the first, normal and updated states (FOCUS_STATES to choose),
+# `rounds` times each: its windows show on screen for about 8 s each, and
+# nothing is clicked. Once the launch screen has gone, and the welcome or
+# What's New has been closed, the circuit window must be the key window, its
+# canvas must have the keyboard and File > Export as Image… must be enabled
+# (LaunchFocusCheck); then the same after another window has been in front
+# for a moment. It takes the keyboard for those seconds: run it when you're
+# not typing elsewhere (a launch macOS keeps from the front, as with the
+# screen locked, is a SKIP). HEADLESS=0 FOCUS=1: only those launches.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 SRC=mac/build/CedarLogic.app
@@ -48,9 +59,11 @@ run() {   # run <log> <args...>: the app, killed after 60 s
 	kill $killer 2>/dev/null; wait $killer 2>/dev/null
 	return $code
 }
+# HEADLESS=0: only the real launches.
+[ "${HEADLESS:-1}" = 1 ] || STATES=()
 fail=0; n=0
 for r in $(seq 1 "$ROUNDS"); do
-	for s in "${STATES[@]}"; do
+	for s in ${STATES[@]+"${STATES[@]}"}; do
 		n=$((n + 1))
 		log="$WORK/launch$n-$s.log"
 		run "$WORK/setup$n.log" --launch-selftest setup "$s"
@@ -67,6 +80,38 @@ for r in $(seq 1 "$ROUNDS"); do
 		[ "$r" = 1 ] && grep -E "^INFO" "$log" | sed 's/^/    /'
 	done
 done
+# The real launches (FOCUS=1): through Launch Services, so the copy is
+# brought forward the way a click in the Dock brings it.
+if [ "${FOCUS:-0}" = 1 ]; then
+	read -ra FSTATES <<<"${FOCUS_STATES:-first normal updated}"
+	for r in $(seq 1 "$ROUNDS"); do
+		for s in "${FSTATES[@]}"; do
+			n=$((n + 1))
+			log="$WORK/focus$n-$s.log"
+			run "$WORK/setup$n.log" --launch-selftest setup "$s"
+			: >"$log"
+			open -n -W --stdout "$log" --stderr "$log" --env CFFIXED_USER_HOME="$WORK/home" --env CL_FOCUS_CHECK="$s" \
+				--env CL_CLASSROOM=1 --env CL_CLASSROOM_SERVICE=http://127.0.0.1:9 \
+				--env CL_UPDATE_FEED=https://updates.cedarlogic-offline.invalid/appcast.xml "$APP" &
+			opener=$!
+			( sleep 45; pkill -9 -f "$APP/Contents/MacOS/CedarLogic" 2>/dev/null ) &
+			killer=$!
+			wait $opener
+			kill $killer 2>/dev/null; wait $killer 2>/dev/null
+			if grep -q "^focus-check $s: all passed" "$log"; then
+				echo "PASS focus $n ($s)"
+			elif grep -q "^SKIP" "$log"; then
+				# Not brought to the front (a locked screen): not a failure,
+				# but nothing was checked either.
+				grep "^SKIP" "$log" | sed "s/^SKIP /SKIP focus $n: /"
+			else
+				echo "FAIL focus $n ($s) (log: $log)"
+				grep -E "^(FAIL|TRACE)" "$log" | sed 's/^/    /'
+				fail=1
+			fi
+		done
+	done
+fi
 defaults delete $ID >/dev/null 2>&1
 # Any Keychain items the copy made (its own service: its bundle id), gone too.
 while security delete-generic-password -s "$ID" >/dev/null 2>&1; do :; done
