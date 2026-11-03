@@ -1,0 +1,29 @@
+(cedarlogic
+  (version 3)
+  (generator "keypad-bad-param")
+  (page 0
+    (gate "DD_KEYPAD_HEX"
+      (uuid "1")
+      (at 0 0)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "2147483647")
+      (lparam "OUTPUT_NUM" "0"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "2")
+      (at 20 0)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "36")
+      (lparam "OUTPUT_NUM" "x"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "3")
+      (at 40 0)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "-4")
+      (lparam "OUTPUT_NUM" "99999999999999999999"))
+    (gate "DD_KEYPAD_HEX"
+      (uuid "4")
+      (at 60 0)
+      (angle 0)
+      (lparam "OUTPUT_BITS" "8")
+      (lparam "OUTPUT_NUM" "-1")))
+)

@@ -7,7 +7,7 @@ is pasted, and whatever a student does. It follows on from
 `docs/V4-CORE-DIAGNOSIS.md` (rounds 1 to 5), which explains the edit fuzzer.
 
 In short: three new kinds of check (a file fuzzer, a self-check of the circuit,
-and a set of regression cases) and much longer fuzz runs found 40 bugs. All are
+and a set of regression cases) and much longer fuzz runs found 43 bugs. All are
 fixed; nearly all have a case in `core_check` or the clipboard tests, and the
 rest (a few that need a long session's history to happen) are covered by the
 fuzz runs. Everything runs in CI on every push, including ThreadSanitizer on the
@@ -54,7 +54,9 @@ So the work was:
    fuzzers run it after every step.
 3. **A safety net at every door**: a drawing that isn't sound is redrawn from the
    pins when a file is opened, when text is pasted, and when a part move ends.
-   The user sees a tidy wire where they would have seen a broken one.
+   The user sees a tidy wire where they would have seen a broken one. Saving
+   (since 2026-11-02, bug 41) writes such a wire as routed from its pins, so
+   a drawing that drifted between doors can't drop a connection from the file.
 4. **Fixes where the fuzzers found the incremental model going wrong** (below).
 
 Result: zero reports from the edit fuzzer with every check on, over the runs in
@@ -110,6 +112,9 @@ the numbers section.
 | 37 | Dragging a wire at a corner drags one run or the other, differently each run | Same: the first segment hit, by address | The nearest segment (ties: the lowest id) (`guiWire::startSegDrag`) |
 | 40 | Redo of Straighten Wires (or Tidy Up, or a Build) on several wires gives a wire slightly different from the step itself (an end at -28.4989 against -28.5) | The router's shape was left on screen, but Redo puts the recorded shape through `setSegmentMap`, which tidies it (merges runs, trims ends); a step of several wires keeps what's on screen on its first Do | Each rerouted wire goes through `setSegmentMap` as the step is made (`rerouteWires`), so the step and its Redo agree (fuzz_edit wide seed 21) |
 | 38 | App stops responding for minutes on Connect while moving, or Connect Nearby, with a few thousand parts | Every free pin of the moving parts against every free pin on the page, each looked up by name | The page's free pins placed once in a grid; each moving pin looks only at the cells near it. Same result, in the same order (checked against the old search at every call in 79 fuzz sessions) |
+| 41 | A wire connected on screen comes back without one of its pins after Save and Reopen (a 0.3.4 tester: "connections not loading properly") | Save writes a wire's drawing, and the loader joins only the pins the drawing records; a drawing that no longer recorded a pin (the drift above, between two doors) silently saved the wire without it. No fuzz run on main has left such a drawing, so this is a net, not a fix of a known path | Save writes a wire whose drawing isn't sound as routed from its pins, on a copy (the circuit on screen is untouched) (`buildCircuitFile`, `CircuitParse.cpp`). core_check case |
+| 42 | Disconnect on such a wire left it drifted (or trimmed a run that had nothing to do with the pin) | `removeConnection` trimmed from segment 0 when no segment recorded the pin, and followed crossings with `segMap[]`, which makes a segment for a missing id; Disconnect wasn't a door | The trim starts only from the segment that recorded the pin and follows only crossings to segments that are there; Disconnect redraws a wire it leaves unsound from the pins left, and its Undo puts the old drawing back (`guiWire.cpp`, `cmdDisconnectWire.cpp`). core_check case |
+| 43 | App quits pasting (or opening) a keypad with a damaged width: libFuzzer, CI run 41528025252, `std::out_of_range` from `substr` | `guiGateKEYPAD::setLogicParam` takes the low `OUTPUT_BITS / 4` of the value's 8 hex digits with `substr(8 - n, n)`, and read both settings straight from the text: a width of 2147483647 (or 36, or -4) asked for a position before the start of the string, and a value that isn't a number was read uninitialised. Old 2016 code, never guarded | A width or value the keypad can't show (not a number; width outside 0..32; value outside 32 bits) is replaced by what the gate had, or the default (4 bits, 0), in the gate itself (`guiGateKEYPAD::isUsableParam`), and on opening a file the library's setting is used with a notice (`CircuitParse::parseGateToSend`), so the engine and the save agree. Same audit of the other `substr`/`find` parsers in `guiGate.cpp`, `CircuitParse.cpp`, `klsClipboard.cpp` and `logic/`: none other can run off a string (each checks the prefix first, or starts at 0); a RAM's `Address:` data read uninitialised on an empty value, now 0. core_check cases; corpus file `tests/fixtures/keypad-bad-param.cdl` |
 
 ### Simulation
 

@@ -187,10 +187,16 @@ void guiWire::removeConnection(IDType gid, string connection) {
 		segWalk++;
 	}
 
-	// Now trim the segment if necessary and walk back through the tree
-	while (segMap[segID].connections.size() == 0 && segMap[segID].intersects.size() == 1) {
+	// Now trim the segment if necessary and walk back through the tree.
+	// Only from the segment that recorded the pin: when none did (a drawing
+	// that had drifted from the pins), segID was 0 and the walk trimmed, or
+	// made, a segment 0 that had nothing to do with it. And only along
+	// crossings to segments that are there: segMap[] on a missing id makes one.
+	while (found && segMap.count(segID) && segMap[segID].connections.size() == 0 && segMap[segID].intersects.size() == 1) {
 		long oldSegID = segID;
-		segID = (segMap[oldSegID].intersects.begin()->second)[0];
+		const vector < long > &across = segMap[oldSegID].intersects.begin()->second;
+		if (across.empty() || across[0] == oldSegID || segMap.count(across[0]) == 0) break;
+		segID = across[0];
 		GLfloat mapKey = (segMap[segID].isVertical() ? segMap[oldSegID].begin.y : segMap[oldSegID].begin.x);
 		for (unsigned int i = 0; i < segMap[segID].intersects[mapKey].size(); i++) {
 			if (segMap[segID].intersects[mapKey][i] == oldSegID) segMap[segID].intersects[mapKey].erase(segMap[segID].intersects[mapKey].begin() + i);
