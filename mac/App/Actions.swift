@@ -294,12 +294,16 @@ extension Notification.Name {
 /// on its left edge folds it to a 6-point tab, a click on the tab brings it
 /// back, and it stays as it was left. Folded, resting on the tab slides it
 /// out over the canvas until the pointer leaves (Settings > Actions, on by
-/// default, as Arc's sidebar does). In a narrow window it folds by itself.
+/// default, as Arc's sidebar does). In a narrow window, and in focus mode,
+/// it folds by itself: a click on the tab opens it until it's folded again
+/// or the window leaves focus mode, and then it's as it was before.
 struct ActionsRail: View {
     @ObservedObject var canvas: CanvasController
     /// The window is too narrow for it: folded unless `peek`.
     let narrow: Bool
-    /// Unfolded in a narrow window by a click on its tab.
+    /// The window is in focus mode: folded unless `peek`, and its tab quieter.
+    var focus = false
+    /// Unfolded in a narrow window, or in focus mode, by a click on its tab.
     @Binding var peek: Bool
     var onCustomize: () -> Void
     /// Drawn with this item's label showing (--render-actions' pictures).
@@ -320,6 +324,9 @@ struct ActionsRail: View {
     @State private var overRail = false
     @State private var menuOpen = false
     @State private var hoverWait: DispatchWorkItem?
+    /// Escape put it back: it stays in until the pointer has left the tab.
+    @State private var dismissed = false
+    @State private var escapeMonitor: Any?
     // A drag to reorder.
     @State private var drag: RailDrag?
     @State private var pressed: ActionID?
@@ -343,7 +350,7 @@ struct ActionsRail: View {
 
     struct RailDrag { let id: ActionID; let from: Int; var dy: CGFloat }
 
-    var folded: Bool { (prefs.actionsCollapsed || narrow) && !peek }
+    var folded: Bool { (prefs.actionsCollapsed || narrow || focus) && !peek }
 
     private var chrome: CLChrome { CLChrome(dark: prefs.dark) }
     private var accent: Color { prefs.accentColor(dark: prefs.dark) }
@@ -362,7 +369,8 @@ struct ActionsRail: View {
         .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in
             if menuOpen { menuOpen = false; hoverChanged() }
         }
-        .onChange(of: folded) { _, f in if !f { hoverWait?.cancel(); slidOut = false; overRail = false } }
+        .onChange(of: folded) { _, f in if !f { hoverWait?.cancel(); slidOut = false; overRail = false; watchEscape(false) } }
+        .onDisappear { watchEscape(false) }
         .onChange(of: prefs.actionsHoverOpen) { _, on in if !on && slidOut { slide(false) } }
     }
 
@@ -374,9 +382,13 @@ struct ActionsRail: View {
         Button("Hide Actions") { prefs.actionsMode = .hidden }
     }
 
-    private func fold() { withAnimation(.easeInOut(duration: 0.2)) { peek = false; prefs.actionsCollapsed = true } }
+    /// In focus mode these change only `peek`, so leaving it brings back the saved state.
+    private func fold() {
+        withAnimation(.easeInOut(duration: 0.2)) { peek = false; if !focus { prefs.actionsCollapsed = true } }
+    }
     private func unfold() {
         withAnimation(.easeInOut(duration: 0.2)) {
+            if focus { peek = true; return }
             prefs.actionsCollapsed = false
             if narrow { peek = true }
         }
@@ -388,13 +400,33 @@ struct ActionsRail: View {
         hoverWait?.cancel()
         withAnimation(.easeOut(duration: 0.18)) { slidOut = out }
         if !out { hovered = nil; overRail = false }
+        watchEscape(out)
+    }
+
+    /// While it's slid out, Escape in its window puts it back.
+    private func watchEscape(_ on: Bool) {
+        if let m = escapeMonitor { NSEvent.removeMonitor(m); escapeMonitor = nil }
+        guard on else { return }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            guard e.keyCode == 53 else { return e }
+            let window = e.window.map(ObjectIdentifier.init)
+            let took = MainActor.assumeIsolated { () -> Bool in
+                guard slidOut, drag == nil, !menuOpen, let w = canvas.view?.window,
+                      window == ObjectIdentifier(w), w.attachedSheet == nil else { return false }
+                dismissed = true
+                slide(false)
+                return true
+            }
+            return took ? nil : e
+        }
     }
 
     /// The pointer came onto (or left) the tab or the slid-out rail: after
     /// a moment, out or back, unless it's moved on again by then.
     private func hoverChanged() {
         hoverWait?.cancel()
-        guard folded, prefs.actionsHoverOpen else { return }
+        if !(overTab || overRail) { dismissed = false }
+        guard folded, prefs.actionsHoverOpen, !dismissed else { return }
         let inside = overTab || overRail
         if inside && !slidOut {
             later(Self.openDelay) { if folded && prefs.actionsHoverOpen && (overTab || overRail) { slide(true) } }
@@ -412,11 +444,12 @@ struct ActionsRail: View {
     /// Folded: a 6-point tab the height of the window, lit under the pointer.
     /// Resting on it (with Settings > Actions' hover on) slides the rail out
     /// over the canvas; a click keeps it open.
+    /// In focus mode it's the canvas's own colour, its grip fainter.
     private var tab: some View {
         ZStack {
-            Rectangle().fill(tabHover ? accent.opacity(0.35) : chrome.tabBar)
-                .overlay(alignment: .leading) { Rectangle().fill(chrome.sash).frame(width: 1) }
-            Capsule().fill(tabHover ? accent : chrome.barInk.opacity(0.45))
+            Rectangle().fill(tabHover ? accent.opacity(0.35) : focus ? chrome.canvas : chrome.tabBar)
+                .overlay(alignment: .leading) { if !focus || tabHover { Rectangle().fill(chrome.sash).frame(width: 1) } }
+            Capsule().fill(tabHover ? accent : chrome.barInk.opacity(focus ? 0.22 : 0.45))
                 .frame(width: 2, height: 32)
         }
         .frame(width: Self.tabWidth)
@@ -653,18 +686,63 @@ struct ActionsCustomizeList: View {
     @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var keys = ShortcutStore.shared
     var height: CGFloat = 330
+    /// What's typed in its search field (the sheet's Escape clears it first).
+    @Binding var query: String
+
+    /// The words a search looks in: its name, its menu, and its shortcut,
+    /// as symbols and spelled out ("shift cmd t").
+    static func words(_ id: ActionID) -> String {
+        let a = id.action
+        var w = [a.title.replacingOccurrences(of: "\u{2026}", with: ""), a.menu]
+        if let k = a.keyLabel {
+            w.append(k)
+            var spelled: [String] = []
+            for ch in k {
+                switch ch {
+                case "⌘": spelled.append("command cmd")
+                case "⇧": spelled.append("shift")
+                case "⌥": spelled.append("option opt alt")
+                case "⌃": spelled.append("control ctrl")
+                default: spelled.append(String(ch))
+                }
+            }
+            w.append(spelled.joined(separator: " "))
+        }
+        return w.joined(separator: " ").lowercased()
+    }
+    /// Every word typed is somewhere in the action's words.
+    static func matches(_ id: ActionID, _ query: String) -> Bool {
+        let hay = words(id)
+        return query.lowercased().split(whereSeparator: \.isWhitespace).allSatisfy { hay.contains($0) }
+    }
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        let order = prefs.actionsOrderAll
+        let all = prefs.actionsOrderAll
+        let order = searching ? all.filter { Self.matches($0, query) } : all
         VStack(alignment: .leading, spacing: 8) {
+            TextField("Search actions", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .onKeyPress(.escape) {
+                    guard !query.isEmpty else { return .ignored }
+                    query = ""
+                    return .handled
+                }
+                .accessibilityLabel("Search actions by name, menu or shortcut")
             List {
+                // While searching, the list is only some of them: no dragging then.
                 ForEach(order) { id in row(id) }
-                    .onMove { from, to in prefs.moveActions(from: from, to: to) }
+                    .onMove(perform: searching ? nil : { from, to in prefs.moveActions(from: from, to: to) })
+                if order.isEmpty {
+                    Text("No actions match \u{201C}\(query)\u{201D}.").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
             }
             .listStyle(.bordered(alternatesRowBackgrounds: true))
             .frame(height: height)
             HStack {
-                Text("\(prefs.railActions.count) shown. Drag to change the order, here or on the rail.")
+                Text(searching
+                     ? "\(order.count) of \(all.count) match. Clear the search to drag them into order."
+                     : "\(prefs.railActions.count) shown. Drag to change the order, here or on the rail.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Button("Reset to Default") { withAnimation { prefs.resetActions() } }
@@ -684,6 +762,7 @@ struct ActionsCustomizeList: View {
             if let k = a.keyLabel { Text(k).font(.system(size: 11.5)).foregroundStyle(.secondary) }
             Text(a.menu).font(.system(size: 11)).foregroundStyle(.tertiary).frame(width: 70, alignment: .trailing)
             Image(systemName: "line.3.horizontal").font(.system(size: 11)).foregroundStyle(.tertiary)
+                .opacity(searching ? 0 : 1)
         }
         .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
@@ -695,6 +774,11 @@ struct ActionsCustomizeList: View {
 struct ActionsCustomizeSheet: View {
     var done: () -> Void
     @ObservedObject private var prefs = Prefs.shared
+    @State private var query: String
+    init(query: String = "", done: @escaping () -> Void) {
+        _query = State(initialValue: query)
+        self.done = done
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -702,7 +786,7 @@ struct ActionsCustomizeSheet: View {
             Text("Tick what goes on the Actions rail, anything from any menu. They show in this order, top to bottom. You can also drag them up or down on the rail itself.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            ActionsCustomizeList(height: 360)
+            ActionsCustomizeList(height: 360, query: $query)
             HStack {
                 Text("Show:").font(.system(size: 12))
                 Picker("", selection: $prefs.actionsMode) {
@@ -715,13 +799,16 @@ struct ActionsCustomizeSheet: View {
         }
         .padding(20)
         .frame(width: 520)
-        .onEscape { done() }
+        // Escape clears a search first, then closes.
+        .onEscape { if query.isEmpty { done() } else { query = "" } }
     }
 }
 
 /// Settings > Actions.
 struct CLActionsSettings: View {
     @ObservedObject private var prefs = Prefs.shared
+    @State private var query: String
+    init(query: String = "") { _query = State(initialValue: query) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -742,7 +829,7 @@ struct CLActionsSettings: View {
                 Spacer(minLength: 0)
             }
             Text("Show these, in this order:").font(.system(size: 13, weight: .bold)).padding(.top, 6)
-            ActionsCustomizeList(height: 300)
+            ActionsCustomizeList(height: 300, query: $query)
                 .disabled(prefs.actionsMode == .hidden)
         }
     }
@@ -759,13 +846,17 @@ struct CLActionsSettings: View {
 // MARK: - The window's part
 
 /// What a circuit window does for the rail: watches its width (the rail
-/// folds under ActionsRail.narrowWidth and comes back over it), shows the
+/// folds under ActionsRail.narrowWidth and comes back over it) and focus
+/// mode (folded in it, as it was after it), shows the
 /// Customize sheet, and tells someone who used CedarLogic before the rail
 /// where it is, once.
 struct ActionsWindowParts: ViewModifier {
     let canvas: CanvasController
     @Binding var width: CGFloat
+    let focusMode: Bool
     @Binding var peek: Bool
+    /// What `peek` was as the window went into focus mode, for coming out.
+    @State private var peekBeforeFocus = false
     @Binding var customizing: Bool
     @ObservedObject private var prefs = Prefs.shared
 
@@ -775,7 +866,11 @@ struct ActionsWindowParts: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: width) { _, w in
-                if w >= ActionsRail.narrowWidth && peek { peek = false }
+                if w >= ActionsRail.narrowWidth && peek && !focusMode { peek = false }
+            }
+            // Into focus mode: folded (peek off). Out: as it was before.
+            .onChange(of: focusMode) { _, on in
+                if on { peekBeforeFocus = peek; peek = false } else { peek = peekBeforeFocus }
             }
             .sheet(isPresented: $customizing) {
                 ActionsCustomizeSheet { customizing = false }

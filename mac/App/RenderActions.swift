@@ -2,6 +2,7 @@
 // rail in a whole circuit window drawn off screen, light and dark: open with
 // a label showing, folded to its tab, folded and slid out over the canvas
 // (as on hover), mid-drag (an item moved down, the others making room),
+// folded in focus mode (and slid out there), the Customize sheet searched,
 // folded by itself in a narrow window,
 // in Simulation View, in the toolbar instead (at 1280 and 1440 wide), and
 // the Customize sheet and Settings > Actions. Each window is laid out at
@@ -26,7 +27,7 @@ enum RenderActions {
         let doc = (try? CoreDocument(data: Data(Templates.builtIn[1].text.utf8))) ?? CoreDocument()
         for _ in 0..<40 { cl_document_step(doc.handle) }
 
-        func shoot(_ name: String, width: CGFloat = 1440, height: CGFloat = 900, simView: Bool = false, label: ActionID? = nil) {
+        func shoot(_ name: String, width: CGFloat = 1440, height: CGFloat = 900, simView: Bool = false, focus: Bool = false, label: ActionID? = nil) {
             ActionsRail.pictureLabel = label
             let canvas = CanvasController()
             canvas.attach(doc)
@@ -43,6 +44,7 @@ enum RenderActions {
             host.frame = NSRect(origin: .zero, size: size)
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+            if focus { NotificationCenter.default.post(name: .clToggleFocusMode, object: canvas) }
             canvas.simView = simView
             canvas.view?.zoomToFit()
             RunLoop.main.run(until: Date().addingTimeInterval(1.4))
@@ -100,12 +102,17 @@ enum RenderActions {
             shoot("rail-hover-open-\(t)", label: .tidy)
             ActionsRail.pictureSlidOut = false
             prefs.actionsCollapsed = false
+            shoot("rail-focus-\(t)", focus: true)
+            ActionsRail.pictureSlidOut = true
+            shoot("rail-focus-hover-open-\(t)", focus: true, label: .checkCircuit)
+            ActionsRail.pictureSlidOut = false
             shoot("rail-narrow-\(t)", width: 860, height: 640)
             prefs.actionsMode = .toolbar
             shoot("rail-toolbar-\(t)")
             shoot("rail-toolbar-1280-\(t)", width: 1280, height: 800)
             prefs.actionsMode = .onScreen
             snap("rail-customize-\(t)", ActionsCustomizeSheet {})
+            snap("rail-customize-search-\(t)", ActionsCustomizeSheet(query: "export") {})
             snap("settings-actions-\(t)", CLActionsSettings().padding(.horizontal, 28).padding(.vertical, 22).frame(width: 640))
         }
         (prefs.dark, prefs.toolbarStyle, prefs.actionsMode, prefs.actionsCollapsed, prefs.toolbarHidden) = saved

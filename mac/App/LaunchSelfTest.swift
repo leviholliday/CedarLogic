@@ -34,7 +34,9 @@
 // Restore (under its own id, or a new one when that's taken) and Delete Now;
 // in every state, where the Actions rail is (on screen for a first launch,
 // hidden for anyone before), and in `actions` that a folded rail stays
-// folded, a drag on the rail reorders the Customize list too, and the rail,
+// folded, a drag on the rail reorders the Customize list too, focus mode
+// folds it (not hides it) and gives back what it was, the Customize
+// list's search finds by name, menu and shortcut, and the rail,
 // its tab (slid out on hover too) and the toolbar's six buttons laid out in
 // real windows off screen (actionsChecks).
 // PASS or FAIL for each; exit 1 on a failure.
@@ -249,6 +251,32 @@ enum LaunchSelfTest {
             win.close()
             return w
         }
+        /// The canvas's width in focus mode, then out of it again (View > Focus Mode's notification).
+        func focusWidths(_ mode: ActionsMode, folded: Bool) -> (inFocus: CGFloat, after: CGFloat) {
+            prefs.actionsMode = mode
+            prefs.actionsCollapsed = folded
+            let canvas = CanvasController()
+            canvas.attach(doc)
+            let size = NSSize(width: 1440, height: 800)
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
+                               styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: CLLayout(document: doc, canvas: canvas, page: .constant(0))
+                .frame(width: size.width, height: size.height))
+            win.contentView = host
+            host.frame = NSRect(origin: .zero, size: size)
+            host.layoutSubtreeIfNeeded()
+            turn(1.0)
+            NotificationCenter.default.post(name: .clToggleFocusMode, object: canvas)
+            turn(1.0)
+            let inFocus = canvas.view?.frame.width ?? -1
+            NotificationCenter.default.post(name: .clToggleFocusMode, object: canvas)
+            turn(1.0)
+            let after = canvas.view?.frame.width ?? -1
+            print("INFO actions: focus mode, \(mode.name)\(folded ? ", folded" : ""): the canvas is \(Int(inFocus)) wide in it, \(Int(after)) after")
+            win.close()
+            return (inFocus, after)
+        }
         let none = canvasWidth(.hidden, folded: false)
         let open = canvasWidth(.onScreen, folded: false)
         let folded = canvasWidth(.onScreen, folded: true)
@@ -260,6 +288,25 @@ enum LaunchSelfTest {
         check(abs((none - folded) - ActionsRail.tabWidth) < 2, "folded, just its tab's \(Int(ActionsRail.tabWidth)) (\(folded))")
         check(abs(none - inBar) < 1, "in the toolbar instead, no rail (\(inBar))")
         check(abs(slid - folded) < 1, "slid out on hover, it's over the canvas, not pushing it (\(slid))")
+        let focusNone = focusWidths(.hidden, folded: false)
+        let focusOpen = focusWidths(.onScreen, folded: false)
+        check(focusOpen.inFocus > open && abs((focusNone.inFocus - focusOpen.inFocus) - ActionsRail.tabWidth) < 2,
+              "in focus mode an open rail folds to its tab, not gone (\(focusNone.inFocus) to \(focusOpen.inFocus))")
+        check(abs(focusOpen.after - open) < 1 && !prefs.actionsCollapsed, "out of focus mode it's open again, as it was (\(focusOpen.after))")
+        let focusFolded = focusWidths(.onScreen, folded: true)
+        check(abs(focusFolded.inFocus - focusOpen.inFocus) < 1 && abs(focusFolded.after - folded) < 1 && prefs.actionsCollapsed,
+              "a folded rail stays folded through focus mode and after (\(focusFolded.after))")
+
+        // Searching the Customize list: by name, by menu, by shortcut (symbols or words).
+        let find = { (q: String) in prefs.actionsOrderAll.filter { ActionsCustomizeList.matches($0, q) } }
+        let exports = find("export")
+        check(exports.contains(.exportImage) && exports.contains(.exportReport) && !exports.contains(.tidy),
+              "searching \u{201C}export\u{201D} finds the exports only (\(exports.map(\.rawValue)))")
+        check(find("simulation").contains(.predict), "a menu's name finds what's in it")
+        let byKey = ActionID.checkCircuit.action.keyLabel ?? ""
+        check(!byKey.isEmpty && find(byKey).contains(.checkCircuit), "its shortcut finds it (\(byKey))")
+        check(find("cmd e").contains(.exportImage) || ActionID.exportImage.action.keyLabel != "⌘E", "and so does the shortcut in words (cmd e)")
+        check(find("zzzz").isEmpty && find("").count == prefs.actionsOrderAll.count, "nothing for nonsense, everything for an empty search")
         let narrowNone = canvasWidth(.hidden, folded: false, width: 860)
         let narrowOpen = canvasWidth(.onScreen, folded: false, width: 860)
         check(abs((narrowNone - narrowOpen) - ActionsRail.tabWidth) < 2, "in a window under \(Int(ActionsRail.narrowWidth)) points it folds by itself (\(narrowNone) to \(narrowOpen))")

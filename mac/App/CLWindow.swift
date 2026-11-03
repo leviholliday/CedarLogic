@@ -101,11 +101,11 @@ struct CLLayout: View {
                         .frame(width: 280)
                         .transition(.move(edge: .trailing))
                 }
-                // The Actions rail (Actions.swift): the palette's mirror,
-                // hidden with it in focus mode.
-                if prefs.actionsMode == .onScreen && !focusMode {
+                // The Actions rail (Actions.swift): the palette's mirror.
+                // In focus mode it folds to its tab (and comes back as it was).
+                if prefs.actionsMode == .onScreen {
                     ActionsRail(canvas: canvas, narrow: windowWidth > 0 && windowWidth < ActionsRail.narrowWidth,
-                                peek: $railPeek, onCustomize: { customizingActions = true })
+                                focus: focusMode, peek: $railPeek, onCustomize: { customizingActions = true })
                         .transition(.move(edge: .trailing))
                 }
             }
@@ -160,7 +160,7 @@ struct CLLayout: View {
         .onReceive(canvas.$simView) { v in if split.controller.simView != v { split.controller.simView = v } }
         .onReceive(split.controller.$simView) { v in if canvas.simView != v { canvas.simView = v } }
         .modifier(DrawingWindowSync(canvas: canvas, split: split, focusMode: $focusMode))
-        .modifier(ActionsWindowParts(canvas: canvas, width: $windowWidth, peek: $railPeek, customizing: $customizingActions))
+        .modifier(ActionsWindowParts(canvas: canvas, width: $windowWidth, focusMode: focusMode, peek: $railPeek, customizing: $customizingActions))
         .modifier(PutAwaySheet(canvas: canvas, settingsFor: $settingsFor))
         .onChange(of: prefs.classicTabs) { _, classic in if classic { split.close(document, leftPage: $page) } }
         // Revealed by the launch screen: the grid fades in as it goes.

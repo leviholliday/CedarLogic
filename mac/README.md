@@ -171,9 +171,9 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   and the What's New tour's pages with `CedarLogic --render-whatsnew <dir>`,
   and the Actions rail (`App/Actions.swift`) in whole windows -- open with a
   label, mid-drag, folded, folded and slid out over the canvas (as on
-  hover), folded by itself in a narrow window, in Simulation View, in
-  the toolbar instead, the Customize sheet and Settings > Actions, light and
-  dark -- with `CedarLogic --render-actions <dir>` (part of `--render-ui` too)
+  hover), folded in focus mode, folded by itself in a narrow window, in
+  Simulation View, in the toolbar instead, the Customize sheet (and
+  searched) and Settings > Actions, light and dark -- with `CedarLogic --render-actions <dir>` (part of `--render-ui` too)
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
   and top edges included), hover, tooltips, dragging, double-click to fill,
   focus mode's tab strip and full screen, PASS or FAIL for each
