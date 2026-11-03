@@ -1,6 +1,7 @@
 // The toolbar (see Toolbar.h).
 
 #include "Toolbar.h"
+#include "Actions.h"
 #include "Canvas.h"
 #include "Chrome.h"
 #include "Images.h"
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <functional>
 
 namespace {
 
@@ -21,7 +23,21 @@ const float kMenuText = 12, kMenuPad = 9, kIconSize = 16;
 // Glyphs for the dark mode switch: the moon and the sun.
 const wchar_t kMoon = 0xE708, kSun = 0xE706;
 
-bool groupShown(int g) { return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0; }
+// The Actions rail's items, in the toolbar instead (Settings > Actions: In
+// the toolbar): a group of their own, after Copy and Paste, so Zoom gives
+// way first in a narrower window, as on the Mac.
+const int kActionsGroup = TGCount;
+
+bool groupShown(int g) {
+	if (g == kActionsGroup) return prefs().actionsMode == 1;
+	return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0;
+}
+
+void addActions(const std::function<void(int)>& add) {
+	if (prefs().actionsMode != 1) return;
+	for (const std::string& id : actions::rail())
+		if (const actions::Def* d = actions::find(id)) add(d->command);
+}
 
 }  // namespace
 
@@ -62,6 +78,7 @@ void Toolbar::build(int style, bool live) {
 	if (style == TSMinimal) {
 		add(Title, 0, -1, false);
 		add(Button, CMD_UNDO, TGUndo, false); add(Button, CMD_REDO, TGUndo, false);
+		addActions([&](int command) { add(Button, command, kActionsGroup, false); });
 		add(Button, CMD_RUNNING, TGSim, true);
 		add(Button, CMD_SIM_VIEW, TGRun, true);
 		add(Button, CMD_PREFERENCES, -1, true);
@@ -70,6 +87,7 @@ void Toolbar::build(int style, bool live) {
 		add(Button, CMD_NEW, TGFile, false); add(Button, CMD_OPEN, TGFile, false); add(Button, CMD_SAVE, TGFile, false);
 		add(Button, CMD_UNDO, TGUndo, false); add(Button, CMD_REDO, TGUndo, false);
 		add(Button, CMD_COPY, TGClipboard, false); add(Button, CMD_PASTE, TGClipboard, false);
+		addActions([&](int command) { add(Button, command, kActionsGroup, false); });
 		add(Button, CMD_ZOOM_OUT, TGZoom, false); add(Zoom, 0, TGZoom, false); add(Button, CMD_ZOOM_IN, TGZoom, false);
 		// The right-hand side, laid out from the right edge.
 		add(Button, CMD_RUNNING, TGSim, true); add(Button, CMD_STEP, TGSim, true);
@@ -226,6 +244,10 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 
 bool Toolbar::isOn(const Item& it) const {
 	if (it.kind != Button) return false;
+	if (it.group == kActionsGroup) {
+		const actions::Def* d = actions::forCommand(it.command);
+		return d && actions::isOn(win, *d);
+	}
 	switch (it.command) {
 	case CMD_RUNNING: return !win->running();
 	case CMD_SIM_VIEW: return win->simView();
@@ -239,6 +261,10 @@ bool Toolbar::isOn(const Item& it) const {
 
 bool Toolbar::isEnabled(const Item& it) const {
 	if (it.kind != Button) return true;
+	if (it.group == kActionsGroup) {
+		const actions::Def* d = actions::forCommand(it.command);
+		return d && actions::enabled(win, *d);
+	}
 	switch (it.command) {
 	case CMD_UNDO: case CMD_REDO: return win->commandEnabled(it.command);
 	case CMD_STEP_CLOCK: return win->hasManualClock();   // off until the page has a clock set to move only on it
@@ -274,7 +300,10 @@ wchar_t Toolbar::iconFor(const Item& it) const {
 	case CMD_NEW_TAB: return Icon::NewTab;
 	case CMD_FEEDBACK: return Icon::Feedback;
 	case CMD_PREFERENCES: return Icon::Settings;
-	default: return L'?';
+	default: {
+		const actions::Def* d = actions::forCommand(it.command);
+		return d && d->glyph ? d->glyph : L'?';
+	}
 	}
 }
 
@@ -311,7 +340,10 @@ std::string Toolbar::tipFor(const Item& it) const {
 	case CMD_NEW_TAB: return "New tab" + keys;
 	case CMD_FEEDBACK: return "Send feedback: a bug, an idea, anything";
 	case CMD_PREFERENCES: return "Settings" + keys;
-	default: return std::string();
+	default: {
+		const actions::Def* d = actions::forCommand(it.command);
+		return d ? actions::titleWithKey(*d) : std::string();
+	}
 	}
 }
 
@@ -379,7 +411,7 @@ void Toolbar::draw(ID2D1RenderTarget* rt, float w, float h, int style, bool live
 
 	// Classic: the capsules behind each group.
 	if (style == TSClassic) {
-		for (int g = 0; g < TGCount; g++) {
+		for (int g = 0; g <= kActionsGroup; g++) {
 			D2D1_RECT_F u = D2D1::RectF(1e9f, 1e9f, -1e9f, -1e9f);
 			bool any = false;
 			for (const Item& it : items) {

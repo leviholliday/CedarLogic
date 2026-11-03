@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+class ActionsRail;
 class Canvas;
 class GatePalette;
 class MiniMap;
@@ -289,6 +290,20 @@ public:
 	FindBar* findBarWidget() const { return findBar; }   // for --session-check
 	bool scopeShown() const { return scope && scopeOpen; }
 
+	// ---- The Actions rail (Rail.h) ----
+	ActionsRail* railWidget() const { return rail; }
+	// The actions, their order or where they go changed (Actions.h): the
+	// rail, the toolbar and the layout again.
+	void actionsChanged();
+	// The rail folded or opened (the layout again), or only its own width
+	// changed as it slides out or peeks over the canvas (just it moves).
+	void railChanged() { layout(); }
+	void placeRail();
+	// Escape: a rail that slid out over the canvas goes back. True if it did.
+	bool railEscape();
+	// Where the canvases end at the right (client pixels), for --rail-check.
+	int canvasRight() const { return areaRight; }
+
 	// ---- Focus mode ----
 	// The Mac's: the toolbar and the side panel slide away, and the tab
 	// strips become the window's top row.
@@ -359,6 +374,8 @@ private:
 	NotesPanel* notes = nullptr;      // made when first shown
 	bool notesOpen = false;
 	TabSwitcher* switcher = nullptr;
+	ActionsRail* rail = nullptr;
+	int railTop = 0, railBottom = 0, areaRight = 0;
 	std::vector<uint64_t> recentKeys;   // pages by when they were last in front, most recent first
 	HWND paletteHost = nullptr;
 	StatusBar* statusBar = nullptr;   // where notes appear

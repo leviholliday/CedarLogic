@@ -59,6 +59,9 @@ enum Command {
 	CMD_PROJECTOR,
 	// Simulate > Predict, Then Reveal and Reveal (Cover the Lights Again), as the Mac's.
 	CMD_PREDICT, CMD_REVEAL,
+	// The Actions rail (Rail.h): View > Show/Hide Actions, and the rail's
+	// right-click Customize Actions... (the sheet).
+	CMD_TOGGLE_ACTIONS, CMD_CUSTOMIZE_ACTIONS,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 	// Window > the open circuits (CMD_WINDOW_LIST + i).

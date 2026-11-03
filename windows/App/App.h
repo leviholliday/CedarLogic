@@ -76,6 +76,21 @@ struct Prefs {
 	bool showTitle = true;        // the circuit's name at the toolbar's left
 	bool showThemeToggle = false; // a dark mode switch in the toolbar
 	bool showStepClock = true;    // Step Clock in the toolbar and Simulation View's bar
+	// The Actions rail (Actions.h, Rail.h), as the Mac's cl.actions.*: where
+	// the actions go (0 the rail on screen, 1 in the toolbar, 2 hidden); the
+	// rail folded to its tab, as it was left; folded, it slides out when the
+	// pointer reaches the window's right edge; every action's id in the
+	// Customize list's order ("" the default), comma separated; the ticked
+	// ones (actionsShownSet: saved, else the default six); and an earlier
+	// install, told once where the rail is (its window stays as it was).
+	// New installs get the rail on screen; settings from before it, Hidden
+	// (Prefs::loadFrom).
+	int actionsMode = 0;
+	bool actionsCollapsed = false;
+	bool actionsHoverOpen = true;
+	std::string actionsOrder, actionsShown;
+	bool actionsShownSet = false;
+	bool actionsHint = false;
 	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button

@@ -444,7 +444,7 @@ jobs:
           cp before.png after.png renders/
 
       # Settings, page by page (General, Appearance, Canvas, Toolbar,
-      # Shortcuts), the Keyboard Shortcuts list, and the window in each
+      # Actions, Shortcuts), the Keyboard Shortcuts list, and the window in each
       # toolbar style (Seamless is a new install's).
       - name: Settings and toolbar pictures
         if: matrix.run
@@ -452,7 +452,7 @@ jobs:
         run: |
           mkdir -p renders
           A=package/CedarLogic/CedarLogic.exe
-          for p in 0 1 2 3 4; do
+          for p in 0 1 2 3 4 5; do
             timeout 90 "$A" --light --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p.png" || true
             timeout 90 "$A" --dark --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p-dark.png" || true
           done
@@ -480,6 +480,48 @@ jobs:
           timeout 90 "$A" --light --toolbar-style classic --split --screenshot "$PWD/renders/toolbar-classic-split.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --dark --toolbar-style minimal --split --screenshot "$PWD/renders/toolbar-minimal-split-dark.png" format/tests/fixtures/lab6.cdl || true
           timeout 90 "$A" --light --toolbar-style minimal --focus --screenshot "$PWD/renders/toolbar-minimal-focus.png" format/tests/fixtures/lab6.cdl || true
+
+      # The Actions rail (windows/App/Rail.h), as the Mac's --render-actions:
+      # open with an item's label, in Simulation View, mid-drag, folded, the
+      # tab peeking (the pointer at the edge), slid out over the canvas (as
+      # on hover), in focus mode (folded, peeking, slid out), folded by itself
+      # in a narrow window, in the toolbar instead, the Customize sheet (and
+      # searched) and Settings > Actions (and searched), light and dark, into
+      # renders/rail. Then --rail-check: new and earlier installs' defaults,
+      # one order for the rail's drag and the list, the search, the hot
+      # strip's place and the dwell, pass-through and leaving, focus mode
+      # folding (not hiding) and giving it back, and the rest, PASS or FAIL.
+      - name: Actions rail
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders/rail
+          A=package/CedarLogic/CedarLogic.exe
+          C=res/templates/template-builtin-counter.cdl
+          R="$PWD/renders/rail"
+          for t in light dark; do
+            shot() { name=$1; shift; timeout 90 "$A" --$t "$@" --screenshot "$R/$name-$t.png" || true; }
+            shot rail-expanded --rail open --rail-label checkCircuit $C
+            shot rail-sim --rail open --sim-view --rail-label tidy $C
+            shot rail-drag --rail drag $C
+            shot rail-collapsed --rail folded $C
+            shot rail-collapsed-peek --rail peek $C
+            shot rail-hover-open --rail hover-open --rail-label tidy $C
+            shot rail-focus --rail open --focus $C
+            shot rail-focus-peek --rail peek --focus $C
+            shot rail-focus-hover-open --rail hover-open --focus --rail-label checkCircuit $C
+            shot rail-narrow --rail narrow $C
+            shot rail-toolbar --rail toolbar $C
+            shot rail-toolbar-classic --rail toolbar --toolbar-style classic $C
+            shot rail-customize --rail open --dialog customize-actions $C
+            shot rail-customize-search --rail open --dialog customize-actions --actions-search export $C
+            shot settings-actions --rail open --dialog preferences --page 4 $C
+            shot settings-actions-search --rail open --dialog preferences --page 4 --actions-search "ctrl e" $C
+          done
+          ls -l "$R"
+          timeout 180 "$A" --rail-check | tee rail-check.log
+          test "${PIPESTATUS[0]}" -eq 0
+          grep -q "rail check:.*all passed" rail-check.log
 
       # The menu bar: each menu open (by its keys) in light and dark, a
       # narrow window, focus mode (where the bar has slid away and Alt opens

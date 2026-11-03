@@ -1,6 +1,7 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "Actions.h"
 #include "Alert.h"
 #include "Canvas.h"
 #include "Dialogs.h"
@@ -25,6 +26,7 @@
 #include "SyncApp.h"
 #include "Ink.h"
 #include "Notes.h"
+#include "Rail.h"
 #include "SessionCheck.h"
 #include "Fade.h"
 
@@ -191,6 +193,8 @@ CircuitWindow::~CircuitWindow() {
 	miniMap = nullptr;
 	delete toolbar;
 	toolbar = nullptr;
+	delete rail;
+	rail = nullptr;
 	for (TabStrip*& t : strips) { delete t; t = nullptr; }
 	if (hintWindow) DestroyWindow(hintWindow);
 	delete findBar;
@@ -249,8 +253,14 @@ void CircuitWindow::build() {
 	palette = new GatePalette(this, hwnd);
 	paletteHost = palette->widget();
 	miniMap = palette->miniMap();
-	for (int pane = 0; pane < 2; pane++) strips[pane] = new TabStrip(this, hwnd, pane);
+	for (int pane = 0; pane < 2; pane++) {
+		strips[pane] = new TabStrip(this, hwnd, pane);
+		// The Actions rail slides out over the tabs' right end: they keep out from under it.
+		HWND s = strips[pane]->widget();
+		SetWindowLongPtrW(s, GWL_STYLE, GetWindowLongPtrW(s, GWL_STYLE) | WS_CLIPSIBLINGS);
+	}
 	ShowWindow(strips[1]->widget(), SW_HIDE);   // until there's a split
+	rail = new ActionsRail(this, hwnd);
 	findBar = new FindBar(this, hwnd);
 	switcher = new TabSwitcher(this);
 	statusBar = new StatusBar(this, hwnd);
@@ -349,6 +359,8 @@ void CircuitWindow::buildMenus() {
 	separator(view);
 	item(view, CMD_DARK, "&Dark Mode\tCtrl+Shift+D");
 	item(view, CMD_FOCUS_MODE, "Focus &Mode\tCtrl+.");
+	// The Actions rail (Rail.h): named as it is now (Hide while it's open).
+	item(view, CMD_TOGGLE_ACTIONS, "Show A&ctions\tCtrl+B");
 	item(view, CMD_PALETTE, "Gate &Palette");
 	item(view, CMD_STATUS_BAR, "&Status Bar");
 	item(view, CMD_SHOW_GRID, "Show &Grid");
@@ -501,8 +513,20 @@ void CircuitWindow::layout() {
 	}
 	areaLeft = left;
 	areaTop = top;
-	// The notes, a pane at the right (its own hairline at its left edge).
+	// The Actions rail at the right edge, the side panel's mirror (Rail.h):
+	// open, the room it takes; folded, a tab's; slid out over the canvas or
+	// peeking, its window is wider than that, over the canvas.
 	int right = rc.right;
+	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
+	if (rail) {
+		rail->setNarrow(MulDiv(rc.right, 96, (int)dpi) < rail::kNarrowWidth);
+		right -= (int)std::lround(rail->reserve() * dpi / 96.0);
+		// Under the toolbar; in focus mode, under the tabs (they're the title row).
+		railTop = top + (focusOn ? tabH : 0);
+		railBottom = bottom;
+		rail->setBand(railTop, railBottom);
+	}
+	// The notes, a pane at the right (its own hairline at its left edge).
 	// Focus mode slides it away to the right, as the side panel goes left
 	// (the Mac's notes aren't shown in focus mode).
 	if (notes) {
@@ -510,8 +534,8 @@ void CircuitWindow::layout() {
 		if (shown) {
 			const int nw = std::min(sc((int)NotesPanel::panelWidth()), std::max(0, (int)(rc.right - left) / 2));
 			const int shift = (int)std::lround(nw * away);
-			place(notes->widget(), rc.right - nw + shift, top, nw, bottom - top);
-			right = rc.right - nw + shift;
+			place(notes->widget(), right - nw + shift, top, nw, bottom - top);
+			right = right - nw + shift;
 		}
 		ShowWindow(notes->widget(), shown ? SW_SHOWNA : SW_HIDE);
 	}
@@ -527,8 +551,8 @@ void CircuitWindow::layout() {
 	}
 	areaBottom = below;
 
+	areaRight = right;
 	// One side, or two with a line between them.
-	const int tabH = (int)std::lround(TabStrip::stripHeight() * dpi / 96.0);
 	RECT sides[2] = { { left, top, right, below }, { left, top, right, below } };
 	splitX = -1;
 	if (splitOpen()) {
@@ -542,7 +566,10 @@ void CircuitWindow::layout() {
 	for (int pane = 0; pane < 2; pane++) {
 		paneRects[pane] = sides[pane];
 		if (pane == 1 && !splitOpen()) continue;
-		place(strips[pane]->widget(), sides[pane].left, top, sides[pane].right - sides[pane].left, tabH);
+		// In focus mode the tabs are the title row, to the window's edge
+		// (its buttons are at their right end), over the rail's tab.
+		const int stripRight = focusOn && sides[pane].right == right ? rc.right : sides[pane].right;
+		place(strips[pane]->widget(), sides[pane].left, top, stripRight - sides[pane].left, tabH);
 	}
 	for (Canvas* c : canvases) {
 		const RECT& r = sides[paneOf(c)];
@@ -560,6 +587,7 @@ void CircuitWindow::layout() {
 	EndDeferWindowPos(defer);
 	ShowWindow(strips[1]->widget(), splitOpen() ? SW_SHOWNA : SW_HIDE);
 	if (findBar) SetWindowPos(findBar->widget(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	placeRail();
 	toolbar->layoutNow();
 	updateTabLabels();
 	InvalidateRect(hwnd, nullptr, TRUE);
@@ -1076,6 +1104,7 @@ void CircuitWindow::toggleFocusMode() {
 	// drew) the whole window a frame at a time.
 	const bool faded = fade::crossfade(hwnd, nullptr, 190) != nullptr;
 	focusOn = !focusOn;
+	if (rail) rail->setFocus(focusOn);   // folded to its tab in focus mode, as it was after it
 	focusFrom = from;
 	focusTo = focusOn ? 1 : 0;
 	// No slide when Windows' animations are off, or under a fade: it happens
@@ -1129,6 +1158,7 @@ void CircuitWindow::tick() {
 	// Each side's camera eases on its own.
 	for (int pane = 0; pane < 2; pane++) if (Canvas* c = paneCanvas(pane)) c->stepAnimation();
 	stepAnimations();
+	if (rail) rail->tick(t);
 	// The opening card: the circuit fades up as it lifts away.
 	if (openingAt >= 0) {
 		const double ot = t - openingAt;
@@ -1322,7 +1352,8 @@ bool CircuitWindow::commandEnabled(int command) const {
 	switch (command) {
 	case CMD_UNDO: return cl_edit_can_undo(doc) && !simViewOn;
 	case CMD_REDO: return cl_edit_can_redo(doc) && !simViewOn;
-	case CMD_PREDICT: return simViewOn || predict.on;
+	// From the rail or the menu, outside Simulation View: into it with the lights covered.
+	case CMD_PREDICT: return simViewOn || predict.on || !predictLights().empty();
 	case CMD_REVEAL: return simViewOn && predict.on;
 	case CMD_CUT: return edit && sel;
 	case CMD_COPY: return sel;
@@ -1385,6 +1416,9 @@ void CircuitWindow::updateMenu(HMENU menu) {
 		if (id == CMD_REVEAL)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
 			            W(std::string(predict.revealed ? "Cover the Lights Ag&ain" : "Rev&eal") + "\tEnter").c_str());
+		if (id == CMD_TOGGLE_ACTIONS)
+			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
+			            W(std::string(rail && rail->showing() ? "Hide A&ctions" : "Show A&ctions") + shortcuts::menuKeys(CMD_TOGGLE_ACTIONS)).c_str());
 		if (id == CMD_NOTES)
 			ModifyMenuW(menu, i, MF_BYPOSITION | MF_STRING, id,
 			            W(std::string(notesOpen ? "Hide &Notes" : "Show &Notes") + shortcuts::menuKeys(CMD_NOTES)).c_str());
@@ -1400,7 +1434,39 @@ void CircuitWindow::updateMenu(HMENU menu) {
 
 void CircuitWindow::updateActions() {
 	if (toolbar) toolbar->redraw();
+	if (rail) rail->refresh();
 }
+
+void CircuitWindow::actionsChanged() {
+	if (toolbar) toolbar->layoutNow();
+	layout();
+	if (rail) rail->refresh();
+}
+
+// The rail's own window, at the right edge: its width is what it takes
+// (open, or its tab), or more over the canvas while it slides out or peeks.
+// On top of the canvases and tabs it covers then.
+void CircuitWindow::placeRail() {
+	if (!rail) return;
+	if (!rail->onScreen()) {
+		rail->hideLabel();
+		ShowWindow(rail->widget(), SW_HIDE);
+		return;
+	}
+	RECT rc;
+	GetClientRect(hwnd, &rc);
+	const int w = std::min<int>(rc.right, (int)std::lround(rail->widgetWidth() * dpi / 96.0));
+	// Out over the canvas (or the tabs, the notes, the oscilloscope): they
+	// keep out from under it as they draw.
+	if (w > (int)std::lround(rail->reserve() * dpi / 96.0))
+		for (HWND c = GetWindow(hwnd, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
+			const LONG_PTR style = GetWindowLongPtrW(c, GWL_STYLE);
+			if (c != rail->widget() && !(style & WS_CLIPSIBLINGS)) SetWindowLongPtrW(c, GWL_STYLE, style | WS_CLIPSIBLINGS);
+		}
+	SetWindowPos(rail->widget(), HWND_TOP, rc.right - w, railTop, w, std::max(0, railBottom - railTop), SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+bool CircuitWindow::railEscape() { return rail && rail->escape(); }
 
 void CircuitWindow::updateRunUI() {
 	updateActions();
@@ -1436,6 +1502,7 @@ void CircuitWindow::themeChanged() {
 	if (palette) palette->themeChanged();
 	if (notes) notes->themeChanged();
 	if (statusBar) statusBar->redraw();
+	if (rail) rail->refresh();
 	for (Canvas* c : canvases) c->redraw();
 	redrawMiniMap();
 	if (scope) scope->update();
@@ -1644,6 +1711,7 @@ LRESULT CircuitWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 		if (toolbar) toolbar->redraw();
 		updateTabLabels();
 		if (LOWORD(wp) == WA_INACTIVE) {
+			if (rail) rail->hideLabel();
 			// What had the keyboard, to give it back (by the time the window
 			// is active again, Windows has forgotten it).
 			const HWND f = GetFocus();
@@ -2114,6 +2182,19 @@ void CircuitWindow::run(int command) {
 	case CMD_SWITCH_PANE: switchPane(); break;
 	case CMD_CLOSE_SPLIT: closeSplit(); break;
 	case CMD_FOCUS_MODE: toggleFocusMode(); break;
+	case CMD_TOGGLE_ACTIONS:
+		// With the actions in the toolbar (or nowhere): the rail on screen,
+		// open. Otherwise the rail's own: slid out, back; folded, open; open, folded.
+		if (prefs().actionsMode != 0) {
+			prefs().actionsCollapsed = false;
+			prefs().actionsMode = 0;
+			fade::crossfade(hwnd, nullptr, 190);
+			actions::changed();
+		} else if (rail) {
+			rail->toggle();
+		}
+		break;
+	case CMD_CUSTOMIZE_ACTIONS: showCustomizeActions(this); break;
 	case CMD_SHORTCUTS: showShortcuts(); break;
 	case CMD_HELP: help::show(this); break;
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
