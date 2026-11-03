@@ -69,8 +69,9 @@ public:
 	// As the clock does with the pointer: in the strip, over the slid-out rail.
 	void pointerForTest(double now, bool strip, bool over);
 	bool peeking() const { return peek; }
-	// A press, a drag and a release on item `index`, `dy` points down (0: a click).
-	void pressForTest(int index, float dy);
+	// A press, a drag and a release on item `index`, `dy` points down (0: a
+	// click), held `hold` seconds first.
+	void pressForTest(int index, float dy, double hold = 0);
 	// For the pictures: an item's label showing, slid out, peeking, mid-drag.
 	struct Picture {
 		std::string label;

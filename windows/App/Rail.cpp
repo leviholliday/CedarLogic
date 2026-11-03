@@ -162,7 +162,8 @@ void ActionsRail::refresh() {
 }
 
 void ActionsRail::pointerForTest(double now, bool strip, bool over) {
-	if (hov.update(now, strip, over, onScreen() && folded(), prefs().actionsHoverOpen)) startSlide(hov.slidOut, now);
+	// (The slide itself goes by the real clock, as the window's ticks draw it.)
+	if (hov.update(now, strip, over, onScreen() && folded(), prefs().actionsHoverOpen)) startSlide(hov.slidOut, nowSeconds());
 	if (hov.lit() != wasLit) { wasLit = hov.lit(); win->placeRail(); redraw(); }
 }
 
@@ -601,9 +602,13 @@ void ActionsRail::captureLost() {
 	held = false;
 }
 
-void ActionsRail::pressForTest(int index, float dy) {
+void ActionsRail::pressForTest(int index, float dy, double hold) {
 	const float x = contentLeft((float)width()) + 6 + kItemW / 2, y = rail::kItemTop + index * rail::kPitch + kItemH / 2;
 	mouseDown(1, x, y, false);
+	if (hold > 0) {
+		pressAt -= hold;
+		tick(nowSeconds());
+	}
 	if (dy != 0) {
 		mouseMove(x, y + dy / 2);
 		mouseMove(x, y + dy);

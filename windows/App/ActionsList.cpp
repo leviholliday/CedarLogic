@@ -49,7 +49,7 @@ LRESULT CALLBACK listProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWOR
 				break;
 			}
 			const int row = L->rowAt(x, y);
-			if (row != L->hot && GetFocus() != h) { L->hot = row; L->refresh(); }
+			if (row != L->hot && row >= 0) { L->hot = row; L->refresh(); }
 			took = true;
 			break;
 		}

@@ -305,6 +305,8 @@ void window() {
 	w->run(CMD_TOGGLE_ACTIONS);
 	pump(0.3);
 	check(prefs().actionsMode == 0 && r->showing() && about(railW(), open), "with the actions hidden, Show Actions puts the rail on screen, open");
+	// (Wide enough for the toolbar to keep every group.)
+	SetWindowPos(w->window(), nullptr, 0, 0, 2000, 700, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 	prefs().actionsMode = 1;
 	actions::changed();
 	pump(0.2);
@@ -312,6 +314,7 @@ void window() {
 	check(!IsWindowVisible(r->widget()) && w->toolbarWidget()->hasButton(CMD_CHECK_CIRCUIT) && w->toolbarWidget()->buttonPoint(CMD_CHECK_CIRCUIT, bp),
 	      "In the toolbar: no rail, the six as toolbar buttons");
 	prefs().actionsMode = 0;
+	SetWindowPos(w->window(), nullptr, 0, 0, 1000, 700, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 	actions::changed();
 	pump(0.2);
 
@@ -333,7 +336,18 @@ void window() {
 	      "dragged 40 points down it moves one place, and doesn't run " + join(actions::rail()));
 	r->pressForTest(1, 5);
 	pump(0.1);
-	check(actions::rail()[1] == "gridlines" && prefs().showGrid == grid, "moved under 6 points it's neither a drag nor a click");
+	check(actions::rail()[1] == "gridlines" && prefs().showGrid != grid, "moved under 6 points it's still a click, not a drag");
+	r->pressForTest(1, 0);
+	pump(0.1);
+	r->pressForTest(0, 0, 0.5);
+	pump(0.1);
+	check(prefs().showGrid == grid && actions::rail()[0] == "wireDots", "held 0.45 s and let go without moving: picked up, nothing runs");
+	r->pressForTest(1, 2, 0.5);
+	pump(0.1);
+	check(actions::rail()[1] == "gridlines" && prefs().showGrid == grid, "held, 2 points is a drag (dropped in place), not a click");
+	r->pressForTest(1, -36, 0.5);
+	pump(0.1);
+	check(actions::rail()[0] == "gridlines", "held and moved up a place, it goes up " + join(actions::rail()));
 	actions::reset();
 	actions::changed();
 
