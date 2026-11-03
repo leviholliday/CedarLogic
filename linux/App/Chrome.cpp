@@ -239,6 +239,11 @@ float drawWrapped(cairo_t* cr, const std::string& text, const RectF& box, float 
 namespace {
 void drawDrawIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 void drawNotesIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawRailIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawPredictIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawWandIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawWaveIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
+void drawLinkIcon(cairo_t* cr, const RectF& box, float size, const Color& color);
 }  // namespace
 
 void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const Color& color) {
@@ -246,6 +251,12 @@ void drawIcon(cairo_t* cr, const char* name, const RectF& box, float size, const
 	if (std::strcmp(name, Icon::StepClock) == 0) { drawStepClockIcon(cr, box, size, color); return; }
 	if (std::strcmp(name, Icon::Draw) == 0) { drawDrawIcon(cr, box, size, color); return; }
 	if (std::strcmp(name, Icon::Notes) == 0) { drawNotesIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Rail) == 0) { drawRailIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Predict) == 0) { drawPredictIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Wand) == 0) { drawWandIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Eye) == 0) { drawEyeIcon(cr, box, color, false); return; }
+	if (std::strcmp(name, Icon::Wave) == 0) { drawWaveIcon(cr, box, size, color); return; }
+	if (std::strcmp(name, Icon::Link) == 0) { drawLinkIcon(cr, box, size, color); return; }
 	// Loaded at the screen's scale, tinted, and kept.
 	double sx = 1, sy = 1;
 	cairo_user_to_device_distance(cr, &sx, &sy);
@@ -492,6 +503,118 @@ void drawNotesIcon(cairo_t* cr, const RectF& box, float size, const Color& color
 		cairo_line_to(cr, cx + (i == 2 ? 1 : 3) * k, y);
 	}
 	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+void drawRailIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	roundedPath(cr, rectF(cx - 7.5f * k, cy - 6 * k, cx + 7.5f * k, cy + 6 * k), 2 * k);
+	cairo_stroke(cr);
+	cairo_move_to(cr, cx + 2.5f * k, cy - 6 * k);
+	cairo_line_to(cr, cx + 2.5f * k, cy + 6 * k);
+	cairo_stroke(cr);
+	// The strip's buttons, three dots down it.
+	for (int i = -1; i <= 1; i++) {
+		cairo_new_sub_path(cr);
+		cairo_arc(cr, cx + 5 * k, cy + i * 3 * k, 0.9 * k, 0, 2 * M_PI);
+	}
+	cairo_fill(cr);
+	cairo_restore(cr);
+}
+
+void drawPredictIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.2 * std::max(1.0f, k * 0.9f));
+	const double dash[] = { 2.2 * k, 1.8 * k };
+	cairo_set_dash(cr, dash, 2, 0);
+	roundedPath(cr, rectF(cx - 7 * k, cy - 7 * k, cx + 7 * k, cy + 7 * k), 2.5f * k);
+	cairo_stroke(cr);
+	cairo_set_dash(cr, nullptr, 0, 0);
+	// The question mark: a hook and a dot.
+	cairo_set_line_width(cr, 1.4 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy - 1.8 * k, 2.3 * k, M_PI * 1.05, M_PI * 2.35);
+	cairo_line_to(cr, cx, cy + 1.6 * k);
+	cairo_stroke(cr);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, cx, cy + 4 * k, 0.95 * k, 0, 2 * M_PI);
+	cairo_fill(cr);
+	cairo_restore(cr);
+}
+
+void drawLinkIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.5 * std::max(1.0f, k * 0.9f));
+	cairo_translate(cr, cx, cy);
+	cairo_rotate(cr, -M_PI / 4);
+	// Two rounded links, overlapping in the middle.
+	roundedPath(cr, rectF(-7.2f * k, -2.6f * k, 1.2f * k, 2.6f * k), 2.6f * k);
+	cairo_stroke(cr);
+	roundedPath(cr, rectF(-1.2f * k, -2.6f * k, 7.2f * k, 2.6f * k), 2.6f * k);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+void drawWaveIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_width(cr, 1.3 * std::max(1.0f, k * 0.9f));
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	roundedPath(cr, rectF(cx - 7.5f * k, cy - 6.5f * k, cx + 7.5f * k, cy + 6.5f * k), 2 * k);
+	cairo_stroke(cr);
+	// A square wave across it.
+	const float lo = cy + 2.5f * k, hi = cy - 2.5f * k;
+	cairo_move_to(cr, cx - 5.5 * k, lo);
+	cairo_line_to(cr, cx - 3 * k, lo);
+	cairo_line_to(cr, cx - 3 * k, hi);
+	cairo_line_to(cr, cx + 0.5 * k, hi);
+	cairo_line_to(cr, cx + 0.5 * k, lo);
+	cairo_line_to(cr, cx + 3 * k, lo);
+	cairo_line_to(cr, cx + 3 * k, hi);
+	cairo_line_to(cr, cx + 5.5 * k, hi);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
+void drawWandIcon(cairo_t* cr, const RectF& box, float size, const Color& color) {
+	const float cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+	const float k = size / 16.0f;
+	cairo_save(cr);
+	setColor(cr, color);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	// The wand, from the lower left up to the right.
+	cairo_set_line_width(cr, 1.8 * std::max(1.0f, k * 0.9f));
+	cairo_move_to(cr, cx - 6.5 * k, cy + 6.5 * k);
+	cairo_line_to(cr, cx + 1.5 * k, cy - 1.5 * k);
+	cairo_stroke(cr);
+	// Sparkles: four-pointed stars, a big one at the tip and two small.
+	auto star = [&](double x, double y, double r) {
+		cairo_move_to(cr, x, y - r);
+		cairo_curve_to(cr, x + r * 0.15, y - r * 0.15, x + r * 0.15, y - r * 0.15, x + r, y);
+		cairo_curve_to(cr, x + r * 0.15, y + r * 0.15, x + r * 0.15, y + r * 0.15, x, y + r);
+		cairo_curve_to(cr, x - r * 0.15, y + r * 0.15, x - r * 0.15, y + r * 0.15, x - r, y);
+		cairo_curve_to(cr, x - r * 0.15, y - r * 0.15, x - r * 0.15, y - r * 0.15, x, y - r);
+		cairo_close_path(cr);
+	};
+	star(cx + 4 * k, cy - 4 * k, 3.6 * k);
+	star(cx - 3.5 * k, cy - 5 * k, 1.9 * k);
+	star(cx + 5.5 * k, cy + 3 * k, 1.9 * k);
+	cairo_fill(cr);
 	cairo_restore(cr);
 }
 

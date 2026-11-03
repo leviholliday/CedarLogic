@@ -62,6 +62,14 @@ Legend: **Yes**, **Partial** (what is missing is in the Notes), **No**,
 | Focus mode folds the rail to a quiet tab (not hidden), restores it after | Yes | Yes | No | No | Mac `ActionsWindowParts`; Windows `ActionsRail::setFocus` (in focus mode the tabs keep the window's top row, the rail starts under them) |
 | View > Show/Hide Actions, changeable in Settings > Shortcuts | Yes | Yes | No | No | Mac Ctrl+Cmd+S; Windows Ctrl+B (Ctrl+Shift+S is Export as CedarLogic File and Ctrl+Alt+S Split View there) |
 | Keyboard Shortcuts sheet | Yes | Yes | Yes | Partial | Mac `ShortcutsSheet.swift`; Windows/Linux `ShortcutsSheet.cpp`. Web only inside Settings, and the `?` key does not open it |
+| Actions rail on the right edge: icon buttons, hover label with the shortcut, a click on its edge folds it to a tab, folds itself under 900 pt | Yes | No | Yes | No | Mac `Actions.swift` `ActionsRail` (PRs #8, #11). Linux `Actions.cpp` (the list, order, search, timing), `Rail.cpp` (the dock in the window's row, the floater and labels in a `GtkOverlay` over the canvas), added 2026-11-03 on `linux/native-v4-rail`. Windows: not in `windows/App` on main. Web: not checked in `cedarlogic-site` |
+| Actions: On screen / In the toolbar / Hidden; new installs On screen, earlier ones Hidden with a one-time "New: an Actions rail. Settings ▸ Actions." | Yes | No | Yes | No | Mac `Prefs.swift` (`cl.actions.*`; earlier = `cl.importedWx`, `cl.brandAccentSet` or the welcome seen). Linux `Prefs.cpp` `actionsStart` (earlier = `brandAccentSet` or `hasSeenWelcome` in `native.ini`); the line is a canvas note, after any welcome or What's New. In the toolbar: Linux in Classic and Seamless, before the zoom group (which gives way first); not in Minimal |
+| Customize list: tick any menu command, drag to reorder, Reset to Default, search by name, menu or shortcut words; in Settings ▸ Actions and from the rail's right-click menu | Yes | No | Yes | No | Linux `GtkListBox`, drag by a row's handle (GTK drag and drop) or Alt+Up/Down; no dragging while a search is on; Escape clears the search, then closes the window |
+| Drag to reorder on the rail itself (6 pt or 0.45 s picks it up, dashed gap, same order as the list, a plain click still runs) | Yes | No | Yes | No | Mac `Prefs.moveRailAction`; Linux `actions::moveOnRail`. Mac also has VoiceOver Move Up/Down; Linux has no screen-reader actions on the rail |
+| Folded rail opens from the window's right edge: 12 pt full-height strip incl. the last pixel column, 100 ms dwell (pass-through cancels), peek, opens over the canvas, 400 ms close, held by its menu or a drag, Escape | Yes | No | Yes | No | Mac `EdgeHotStrip` (an AppKit tracking area). Linux: a capture-phase `GtkEventControllerMotion` on the whole window (GTK 3.24), plus the window's leave; the resize border past the edge counts too. "Open it when the mouse reaches the right edge" on by default on both |
+| Focus mode folds the rail to a quiet tab (hover and click still open it), leaving restores it | Yes | No | Yes | No | Mac `ActionsWindowParts`; Linux `actions::FoldState` |
+| View ▸ Show Actions / Hide Actions, changeable shortcut | Yes | No | Yes | No | Mac ⌃⌘S. Linux F9 (Ctrl+Shift+S is Export as CedarLogic File there; F9 is GNOME's side-pane key) |
+| Predict, Then Reveal outside Simulation View goes into it with the lights covered (rail and menu) | Yes | No | Yes | No | Linux `CircuitWindow::startPredict`; enabled when the page has a light or Predict is on |
 
 ## 2. Editing
 
@@ -226,6 +234,7 @@ About.
 | Toolbar: three styles (Seamless, Classic, Minimal) with pictures, groups, circuit name, Step Clock | Yes | Yes | Yes | No | Web has only "Show Step Clock in the top bar" |
 | Dark-mode switch as a toolbar option | No | Yes | Yes | n/a | `showThemeToggle` |
 | Shortcuts page: record, conflicts, Restore Defaults | Yes | Yes | Yes | No | |
+| Actions page (where they go, open from the edge, the Customize list) | Yes | No | Yes | No | Linux Settings has seven pages now (Actions before Shortcuts, as the Mac) |
 | Sync page | Yes | Yes | Yes | Yes (sheet) | |
 
 ## 12. In progress on Windows and Linux (do not count as gaps)

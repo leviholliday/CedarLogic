@@ -26,6 +26,7 @@ class Sash;
 class FindBar;
 class TabSwitcher;
 class NotesPane;
+class Rail;
 namespace formula { struct Plan; }
 
 class CircuitWindow {
@@ -230,6 +231,10 @@ public:
 	bool openingCard(double& t) const;
 	std::string openingDetail() const;
 	void beginOpening();
+	// The Actions rail on the right edge (Rail.h), and a change to the
+	// actions (the mode, the order, the choice: Actions.h's changed()).
+	Rail* rail() const { return railParts; }
+	void actionsChanged();
 	// The overlay over the pages (the find bar's, the tour card's).
 	GtkWidget* overlay() const { return pageOverlay; }
 	// The plan's parts and wires, on a new page or beside this page's circuit.
@@ -338,6 +343,10 @@ public:
 	bool predictRevealed() const { return predict.revealed; }
 	bool predictCovers() const;
 	void togglePredict();
+	// Simulation > Predict, Then Reveal and the rail's Predict: outside
+	// Simulation View, into it with the lights covered (as the Mac's).
+	void startPredict();
+	bool hasPredictLights() const;
 	void revealOrCoverAgain();
 	// A switch, Step or Step Clock moved the circuit on (a new round once revealed).
 	void circuitAdvancedByUser();
@@ -430,6 +439,7 @@ private:
 	ScopeWindow* scope = nullptr;
 	FindBar* findBar = nullptr;
 	NotesPane* notes = nullptr;
+	Rail* railParts = nullptr;
 	bool drawingOn = false;
 	GtkWidget* pageOverlay = nullptr;
 	double openingAt = -1;            // when the opening card began (monotonic seconds; -1: none)
@@ -505,6 +515,7 @@ private:
 
 	friend class Canvas;
 	friend class StatusBar;
+	friend class Rail;
 	friend class ScopeWindow;
 	friend struct SessionDriver;
 };

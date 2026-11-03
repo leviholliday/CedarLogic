@@ -1,6 +1,8 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "Actions.h"
+#include "Rail.h"
 #include "SyncApp.h"
 #include "Alert.h"
 #include "Canvas.h"
@@ -89,6 +91,9 @@ const Command kCommands[] = {
 	{ "straighten", [](CircuitWindow* w) { if (w->canEdit()) w->straighten(); else w->lockNudge(); }, false },
 	{ "tidy", [](CircuitWindow* w) { if (w->canEdit()) w->tidy(0); else w->lockNudge(); }, false },
 	{ "tidy-flow", [](CircuitWindow* w) { if (w->canEdit()) w->tidy(1); else w->lockNudge(); }, false },
+	// The Actions rail's Tidy Up: the way Settings says (Shift+S's), and the other.
+	{ "tidy-up", [](CircuitWindow* w) { if (w->canEdit()) w->tidy(-1); else w->lockNudge(); }, false },
+	{ "tidy-other", [](CircuitWindow* w) { if (w->canEdit()) w->tidy(1 - prefs().tidyMode); else w->lockNudge(); }, false },
 	{ "tidy-keep", [](CircuitWindow* w) { w->endTidy(true); }, false },
 	{ "tidy-revert", [](CircuitWindow* w) { w->endTidy(false); }, false },
 	{ "tidy-switch", [](CircuitWindow* w) { w->switchTidyMode(); }, false },
@@ -120,6 +125,10 @@ const Command kCommands[] = {
 		for (CircuitWindow* o : circuitWindows()) o->prefsChanged();
 	}, true },
 	{ "preferences", [](CircuitWindow* w) { w->showPreferences(); }, false },
+	// View > Show/Hide Actions (F9), and the rail's own window and What's New's button.
+	{ "toggle-actions", [](CircuitWindow* w) { if (w->rail()) w->rail()->toggle(); }, false },
+	{ "show-actions", [](CircuitWindow* w) { if (w->rail()) w->rail()->showOpen(); }, false },
+	{ "customize-actions", [](CircuitWindow* w) { actions::showCustomize(w); }, false },
 	// View's settings that the Mac's View menu has too (Settings > Canvas
 	// keeps them as well).
 	{ "show-grid", [](CircuitWindow*) {
@@ -141,7 +150,7 @@ const Command kCommands[] = {
 	{ "step-clock", [](CircuitWindow* w) { w->stepClock(); }, false },
 	{ "sim-view", [](CircuitWindow* w) { w->toggleSimView(); }, true },
 	{ "projector", [](CircuitWindow* w) { w->toggleProjector(); }, true },
-	{ "predict", [](CircuitWindow* w) { w->togglePredict(); }, true },
+	{ "predict", [](CircuitWindow* w) { w->startPredict(); }, true },
 	{ "reveal", [](CircuitWindow* w) { w->revealOrCoverAgain(); }, false },
 	{ "lock", [](CircuitWindow* w) { w->toggleLock(); }, true },
 	{ "truth-table", [](CircuitWindow* w) { w->makeTruthTable(); }, false },
@@ -271,6 +280,8 @@ CircuitWindow::~CircuitWindow() {
 	delete strips[0];
 	delete strips[1];
 	delete statusBar;
+	delete railParts;
+	railParts = nullptr;
 	for (GtkWidget*& b : paneBoxes) if (b) { g_object_unref(b); b = nullptr; }
 	std::vector<CircuitWindow*>& all = circuitWindows();
 	all.erase(std::remove(all.begin(), all.end(), this), all.end());
@@ -342,7 +353,9 @@ void CircuitWindow::build() {
 	gtk_box_pack_start(GTK_BOX(v), banner, FALSE, FALSE, 0);
 
 	GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(v), row, TRUE, TRUE, 0);
+	// In an overlay, which the Actions rail slides out over (Rail.h).
+	railParts = new Rail(this);
+	gtk_box_pack_start(GTK_BOX(v), railParts->wrap(row), TRUE, TRUE, 0);
 	// The side panel (the Mac's CLSidePanel): as wide as its gates need, and
 	// sliding away in focus mode.
 	GtkWidget* leftBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -415,6 +428,8 @@ void CircuitWindow::build() {
 	// The notes, at the right (View > Show Notes).
 	notes = new NotesPane(this);
 	gtk_box_pack_start(GTK_BOX(row), notes->widget(), FALSE, FALSE, 0);
+	// The Actions rail, the side panel's mirror, at the far right.
+	railParts->addDock(row);
 
 	statusBar = new StatusBar(this);
 	gtk_box_pack_start(GTK_BOX(v), statusBar->outer(), FALSE, FALSE, 0);
@@ -1102,6 +1117,7 @@ void CircuitWindow::tick() {
 	}
 	if (messageAt && secondsSince(messageAt) > 5) { messageAt = 0; redrawOver(); }
 	if (statusBar) statusBar->tick();
+	if (railParts) railParts->tick();
 }
 
 double CircuitWindow::selectionFade() const {
@@ -1448,7 +1464,8 @@ void CircuitWindow::updateActions() {
 	setChecked(win, "sim-view", simViewOn);
 	setChecked(win, "projector", prefs().projector);
 	setChecked(win, "predict", predict.on);
-	setEnabled(win, "predict", simViewOn || predict.on);
+	// Outside Simulation View too: it goes there, with the lights covered.
+	setEnabled(win, "predict", predict.on || hasPredictLights());
 	setEnabled(win, "reveal", simViewOn && predict.on);
 	setChecked(win, "lock", lockedOn);
 	setChecked(win, "dark", prefs().dark);
@@ -1473,6 +1490,9 @@ void CircuitWindow::updateActions() {
 	if (GMenuModel* bar = appMenubar())
 		if (gtk_window_is_active(GTK_WINDOW(win)) || circuitWindows().size() == 1)
 			relabel(bar, "win.reveal", predict.revealed ? "_Cover the Lights Again" : "Re_veal");
+	if (GMenuModel* bar = appMenubar())
+		if (gtk_window_is_active(GTK_WINDOW(win)) || circuitWindows().size() == 1)
+			relabel(bar, "win.toggle-actions", railParts && railParts->shownOnScreen() ? "Hide Ac_tions" : "Show Ac_tions");
 	if (menuRow) menuRow->redraw();
 	// The menus' Undo and Redo say what they undo.
 	(void)edit;
@@ -1518,8 +1538,15 @@ void CircuitWindow::updateBanner() {
 	redraw();
 }
 
+void CircuitWindow::actionsChanged() {
+	if (railParts) railParts->refresh();
+	if (toolbar) toolbar->layoutNow();
+	updateActions();
+}
+
 void CircuitWindow::themeChanged() {
 	updateActions();
+	if (railParts) railParts->refresh();
 	if (menuRow) menuRow->refresh();
 	if (palette) palette->themeChanged();
 	for (Canvas* c : canvases) c->redraw();
@@ -1592,6 +1619,8 @@ gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) 
 		return TRUE;
 	}
 	if (w->switcher && w->switcher->active() && e->keyval == GDK_KEY_Escape) { w->switcher->cancel(); return TRUE; }
+	// Escape puts back the Actions rail slid out on hover.
+	if (e->keyval == GDK_KEY_Escape && (e->state & gtk_accelerator_get_default_mod_mask()) == 0 && w->railParts && w->railParts->escape()) return TRUE;
 	// The menus from the keyboard: F10 every menu; Shift+F10 or the Menu key
 	// the canvas's own, for what's selected (unless Settings > Shortcuts gave
 	// that key to a command: then it's the command's).
@@ -2655,6 +2684,8 @@ void CircuitWindow::toggleFocusMode() {
 	revealChrome(titleRevealer, !focusOn);
 	revealChrome(sideRevealer, !focusOn && prefs().showPalette);
 	for (TabStrip* t : strips) if (t) t->setTitleRow(focusOn);
+	// The rail folds to its tab (not away), and comes back as it was.
+	if (railParts) railParts->setFocus(focusOn);
 	updateActions();
 	if (focusOn) note("Focus mode. Ctrl+. brings the toolbar and the side panel back.");
 	if (Canvas* c = currentCanvas()) gtk_widget_grab_focus(c->widget());

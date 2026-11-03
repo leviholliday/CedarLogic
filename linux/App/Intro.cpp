@@ -201,6 +201,8 @@ double fadeInShown(double t) { return easeInOut(t / kFadeIn); }
 
 const char* version() { return whatsnew::kVersion; }
 
+bool dashRun() { return gDashArg; }
+
 void noteArgs(int argc, char** argv) {
 	for (int i = 1; i < argc; i++)
 		if (argv[i] && strncmp(argv[i], "--", 2) == 0) gDashArg = true;

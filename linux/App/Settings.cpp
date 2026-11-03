@@ -1,6 +1,7 @@
 // Settings (see Settings.h).
 
 #include "Settings.h"
+#include "Actions.h"
 #include "Anim.h"
 #include "Canvas.h"
 #include "Collections.h"
@@ -20,11 +21,11 @@ namespace settings {
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ShortcutsPage, SyncPage, PageCount };
-const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Shortcuts", "Sync" };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage, PageCount };
+const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync" };
 const char* kIcons[] = { "preferences-system-symbolic", "applications-graphics-symbolic", "input-mouse-symbolic",
-                         "view-more-horizontal-symbolic", "input-keyboard-symbolic", "emblem-synchronizing-symbolic" };
-static_assert(SyncPage == kSyncPage && PageCount == 6, "Settings.h names the Sync page by number");
+                         "view-more-horizontal-symbolic", Icon::Rail, "input-keyboard-symbolic", "emblem-synchronizing-symbolic" };
+static_assert(SyncPage == kSyncPage && ActionsPage == kActionsPage && PageCount == 7, "Settings.h names the Actions and Sync pages by number");
 const float kBarH = 78, kWidth = 640;
 
 // Every window takes the change.
@@ -715,6 +716,7 @@ GtkWidget* buildPage(SettingsWindow* s, int page) {
 	case Appearance: return appearancePage();
 	case CanvasPage: return canvasPage();
 	case ToolbarPage: return toolbarPage();
+	case ActionsPage: return actions::settingsPage();
 	case ShortcutsPage: return shortcutsPage(s);
 	case SyncPage: return syncui::settingsPage();
 	default: return generalPage();
@@ -857,6 +859,8 @@ void show(CircuitWindow* from, int page) {
 		// Escape closes, as every other window does; a field being typed in lets go first.
 		if (e->keyval == GDK_KEY_Escape) {
 			GtkWidget* focus = gtk_window_get_focus(GTK_WINDOW(w));
+			// A search with something in it: cleared first.
+			if (focus && GTK_IS_SEARCH_ENTRY(focus) && *gtk_entry_get_text(GTK_ENTRY(focus))) { gtk_entry_set_text(GTK_ENTRY(focus), ""); return TRUE; }
 			if (focus && GTK_IS_ENTRY(focus)) { gtk_window_set_focus(GTK_WINDOW(w), nullptr); return TRUE; }
 			gtk_widget_destroy(w);
 			return TRUE;
