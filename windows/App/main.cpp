@@ -13,6 +13,7 @@
 #include "Help.h"
 #include "Ink.h"
 #include "Integration.h"
+#include "Intro.h"
 #include "Library.h"
 #include "Palette.h"
 #include "Recovery.h"
@@ -66,6 +67,10 @@ bool gReportBW = false;
 double gSplashAt = 0;
 std::string gSplashFile;
 bool gFirstLaunch = false;
+// --render-intro <dir> [first|update]: the intro (Intro.h), every frame at 60
+// fps, over a new circuit's window (dark), as PNGs in dir, and quit.
+std::string gRenderIntro;
+intro::Trigger gRenderIntroTrigger = intro::Trigger::First;
 std::string gPlace;     // --place: a gate by library name, put on the page and selected
 std::string gSelect;    // --select: the first part Find finds, selected (for --dialog gate-settings)
 std::string gHelpPage;  // --help-page: Help opens on it (--dialog help)
@@ -116,6 +121,23 @@ void writeOut(const std::string& text) {
 	}
 	DWORD wrote = 0;
 	if (out && out != INVALID_HANDLE_VALUE) WriteFile(out, text.data(), (DWORD)text.size(), &wrote, nullptr);
+}
+
+// --render-intro: once the new circuit's window is up, a picture of it to
+// put in under the intro as it dissolves, then the intro's frames.
+void CALLBACK renderIntroTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	std::string why;
+	IWICBitmap* behind = w ? capture::window(w->window(), &why) : nullptr;
+	if (behind == nullptr) writeOut("render-intro: no picture of the window (" + why + "); drawn on black\n");
+	std::string report;
+	const bool ok = intro::render(gRenderIntro, gRenderIntroTrigger, behind, report);
+	if (behind) behind->Release();
+	writeOut("render-intro: " + report + "\n");
+	prefs() = gPrefsBefore;
+	prefs().save();
+	ExitProcess(ok ? 0 : 1);
 }
 
 // The canvas drawn `gBenchDraw` times each way, every frame timed whole
@@ -1118,6 +1140,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		}
 		if (a == "--splash-frame" && i + 2 < argc) { gSplashAt = atof(U(argv[++i]).c_str()); gSplashFile = U(argv[++i]); continue; }
 		if (a == "--first-launch") { gFirstLaunch = true; continue; }
+		if (a == "--render-intro" && i + 1 < argc) {
+			gRenderIntro = U(argv[++i]);
+			if (i + 1 < argc && (U(argv[i + 1]) == "first" || U(argv[i + 1]) == "update"))
+				gRenderIntroTrigger = U(argv[++i]) == "update" ? intro::Trigger::Update : intro::Trigger::First;
+			continue;
+		}
 		if (a == "--card-frame" && i + 1 < argc) { CircuitWindow::cardFreeze = atof(U(argv[++i]).c_str()); continue; }
 		if (a == "--place" && i + 1 < argc) { gPlace = U(argv[++i]); continue; }
 		if (a == "--select" && i + 1 < argc) { gSelect = U(argv[++i]); continue; }
@@ -1166,7 +1194,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
 	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0 || gSessionCheck ||
-	                     gMenuTest || !gFeedbackTest.empty();
+	                     gMenuTest || !gFeedbackTest.empty() || !gRenderIntro.empty();
 	// Its own home folder (so not your settings or Your Circuits), and its crash handlers, before anything is read.
 	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
 	gTestRun = testRun;
@@ -1177,6 +1205,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
 	prefs().load();
 	gPrefsBefore = prefs();
+	if (!gRenderIntro.empty()) {
+		// The intro's pictures go into a new circuit's window, dark, the
+		// size of the pictures (as the Mac's --render-intro).
+		if (gTheme < 0) gTheme = 1;
+		prefs().windowWidth = 1280;
+		prefs().windowHeight = 800;
+		prefs().windowMaximized = false;
+	}
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	if (gProjector) prefs().projector = true;
 	if (gClassicTabs) prefs().classicTabs = true;
@@ -1197,7 +1233,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty()) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() && gRenderIntro.empty()) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -1252,7 +1288,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
-	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty()) {
+	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() &&
+	    gRenderIntro.empty()) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -1323,6 +1360,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) SetTimer(nullptr, 0, 1500, wireTagTimer);
 	if (gMenuShot >= 0 && !gScreenshot.empty()) SetTimer(nullptr, 0, 1200, menuShotStart);
 	if (!gScreenshot.empty()) SetTimer(nullptr, 0, 2000, screenshotTimer);
+	else if (!gRenderIntro.empty()) SetTimer(nullptr, 0, 2000, renderIntroTimer);
 	else if (gMenuTest) SetTimer(nullptr, 0, 500, menuTestTick);
 	else if (!gFeedbackTest.empty()) SetTimer(nullptr, 0, 1500, feedbackTestStart);
 	else if (gClickTest) {

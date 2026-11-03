@@ -300,6 +300,8 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	installedRelease = r.s("installedRelease", "");
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
+	introFirstLaunchPlayed = r.b("introFirstLaunchPlayed", introFirstLaunchPlayed);
+	introUpdatePlayed = r.s("introUpdatePlayed", introUpdatePlayed);
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
 	windowHeight = r.i("windowHeight", windowHeight, 300, 20000);
 	windowMaximized = r.b("windowMaximized", windowMaximized);
@@ -422,6 +424,8 @@ std::string Prefs::text() const {
 	o << "installedRelease=" << installedRelease << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
+	o << "introFirstLaunchPlayed=" << b(introFirstLaunchPlayed) << "\n";
+	o << "introUpdatePlayed=" << introUpdatePlayed << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
 	o << "windowHeight=" << windowHeight << "\n";
 	o << "windowMaximized=" << b(windowMaximized) << "\n";

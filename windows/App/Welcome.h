@@ -24,6 +24,15 @@ void setOpening(const std::string& name);
 void hideSoon(std::function<void()> then);
 // --splash-frame: the panel at t seconds, as a PNG.
 bool renderFrame(double t, bool first, const std::string& file);
+// For the intro (Intro.cpp), which plays under this panel: keep the panel
+// above the intro's window; a key or click skipped the intro (the panel goes
+// with it, quickly, and the windows come in); and, for --render-intro, the
+// panel (and its shadow) as it is `t` seconds into the intro, with its top
+// left at `panelAt`.
+void raise();
+void skipIntro();
+void drawAfterIntro(ID2D1RenderTarget* rt, D2D1_POINT_2F panelAt, double t);
+void releaseIntroPicture();
 }  // namespace splash
 
 namespace welcome {
