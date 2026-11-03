@@ -305,11 +305,11 @@ final class Splash: ObservableObject {
     /// Motion, just this panel's still.
     private func beginIntro(_ trigger: Intro.Trigger, in card: NSWindow) {
         if !replaying { Intro.markPlayed(trigger) }
-        if trigger == .firstLaunch { Intro.playSound(calm: Self.reduceMotion) }
         skipMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] e in
             MainActor.assumeIsolated { self?.skipIntro() ?? false } ? nil : e
         }
         guard let ip = introPanel, let view = introView else {
+            if trigger.hasSound { Intro.playSound(calm: true) }
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.2
                 card.animator().alphaValue = 1
@@ -330,6 +330,9 @@ final class Splash: ObservableObject {
         let iconAt = CGPoint(x: card.frame.midX - frame.minX, y: card.frame.maxY - 44 - 64 - frame.minY)
         view.prepare(trigger, size: frame.size, cornerRadius: corner, cardIcon: iconAt)
         view.play()
+        // The first launch's and an update's have the sound, on the
+        // picture's clock; every other launch is silent.
+        if trigger.hasSound { Intro.playSound(calm: false, clock: view.startedAt) }
         introPlayed = Date()
         // The canvas fades in, as a whole, before the wires trace.
         NSAnimationContext.runAnimationGroup { ctx in

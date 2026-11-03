@@ -1,8 +1,9 @@
 // The intro: the very first launch, and the first launch after an update
 // with a What's New tour, open with the circuit drawing itself before the
-// launch screen. The same intro both times (only the first launch has the
-// sound); Help > Play the Intro plays it again (sound and all), and a
-// setting plays it at every launch. About 6 seconds:
+// launch screen. The same intro both times, with the sound both times;
+// Help > Play the Intro plays it again (sound and all), and a setting plays
+// it at every launch, silently (the sound is for the first launch and the
+// first after an update only). About 6 seconds:
 //
 //   0.00-0.45  over the circuit window, the dark canvas fades in from
 //              nothing, the two input pins easing in with it; the grid
@@ -17,9 +18,11 @@
 //              the LED); a seven-segment display draws in beside it.
 //   1.99-2.58  a clock pulse runs through, the wires high with a soft wide
 //              glow under their crisp line, the D lights (and the light
-//              under it), and as it lands the LED lights (the sound's bell
-//              chord lands here) and the display spells the version, a
-//              digit at a time.
+//              under it); just before it lands the canvas draws in a breath
+//              (the light under the gate dims a touch), and as it lands the
+//              LED lights with a brief lift of light over everything (the
+//              sound's bell lands here, started against the picture's own
+//              clock) and the display spells the version, a digit at a time.
 //   2.58-3.05  a beat, everything lit, so it registers.
 //   3.05-3.64  the LED blooms into the icon itself, which flies into the
 //              launch screen's panel (Splash.swift) as that fades in over it,
@@ -50,7 +53,15 @@ import SwiftUI
 
 @MainActor
 enum Intro {
-    enum Trigger: String { case firstLaunch = "first", update }
+    /// What it's played for: the first launch, the first after an update,
+    /// or every launch (Settings). CL_INTRO=first|update|every replays one.
+    enum Trigger: String {
+        case firstLaunch = "first", update, everyLaunch = "every"
+        /// The sound: the first launch and an update only; every other
+        /// launch is silent. (Help > Play the Intro plays `.firstLaunch`,
+        /// sound and all.)
+        var hasSound: Bool { self != .everyLaunch }
+    }
 
     /// Played once each: the first launch's, and the update's (keyed by the
     /// What's New version it introduced).
@@ -65,7 +76,8 @@ enum Intro {
     /// ... and the LED lights at `ledAt`; the first launch's sound starts
     /// part-way in so its bell chord (4.0 s into FirstLaunch.m4a) lands on it.
     static let ledAt = 2.58
-    static let soundHit = 4.0
+    /// (Its bell's onset: the swell starts at 3.96 s and peaks by 4.06.)
+    static let soundHit = 3.96
     /// It holds, lit, until it blooms.
     static let bloomAt = ledAt + 0.47
     /// The launch screen's panel comes in over the bloom ...
@@ -118,7 +130,7 @@ enum Intro {
     /// What a launch plays, by the saved settings: the intro owed, or, with
     /// "Play the intro every time CedarLogic opens" on, the first launch's.
     static func forLaunch(_ d: UserDefaults = .standard) -> Trigger? {
-        owed(d) ?? (d.bool(forKey: everyLaunchKey) ? .firstLaunch : nil)
+        owed(d) ?? (d.bool(forKey: everyLaunchKey) ? .everyLaunch : nil)
     }
 
     /// The intro to play at this launch, if any.
@@ -132,6 +144,7 @@ enum Intro {
         switch t {
         case .firstLaunch: UserDefaults.standard.set(true, forKey: firstKey)
         case .update: UserDefaults.standard.set(WhatsNew.version, forKey: updateKey)
+        case .everyLaunch: break
         }
     }
 
@@ -140,14 +153,18 @@ enum Intro {
     /// The first launch's sound, from part-way in (see `ledAt`), faded up;
     /// with Reduce Motion, from just before its bell, as the window comes in.
     /// Off the main thread, as the launch screen's is (Splash.playSound).
-    static func playSound(calm: Bool) {
+    /// `clock`: when the picture's own clock started (CACurrentMediaTime);
+    /// however long the audio takes to get going, it starts that much
+    /// further in, so the bell still lands on the LED.
+    static func playSound(calm: Bool, clock: CFTimeInterval? = nil) {
         UserDefaults.standard.set(true, forKey: "cl.firstLaunchPlayed")
         guard let url = Bundle.main.url(forResource: "FirstLaunch", withExtension: "m4a") else { return }
         let from = calm ? soundHit - 0.15 - calmHold : soundHit - ledAt
+        let since = clock ?? CACurrentMediaTime()
         soundQueue.async {
             guard let p = try? AVAudioPlayer(contentsOf: url) else { return }
             p.prepareToPlay()
-            p.currentTime = from
+            p.currentTime = from + max(0, CACurrentMediaTime() - since)
             p.volume = 0
             p.play()
             p.setVolume(0.75, fadeDuration: 0.3)
@@ -219,6 +236,8 @@ final class IntroScene {
     private let vignette = CALayer()
     /// The circuit and its display, pushed in slowly until the bloom.
     private let stage = CALayer()
+    /// A brief lift of light over everything as the LED lights.
+    private let hitLift = CALayer()
     private let circuit = CALayer()   // the wires, pins, letters and LED, faded as one
     private let display = CALayer()   // the seven-segment display, which stays a little longer
     private var wires: [Wire] = []
@@ -369,6 +388,14 @@ final class IntroScene {
         stage.addSublayer(circuit)
         display.frame = root.bounds
         stage.addSublayer(display)
+        let liftSide = max(size.width, size.height) * 1.6
+        hitLift.bounds = CGRect(x: 0, y: 0, width: liftSide, height: liftSide)
+        hitLift.contents = Self.radial(size: 256, stops: [(0, CGColor(srgbRed: 0.8, green: 1, blue: 0.85, alpha: 0.16)),
+                                                          (0.12, CGColor(srgbRed: 0.45, green: 1, blue: 0.6, alpha: 0.07)),
+                                                          (0.45, CGColor(srgbRed: 0.3, green: 0.9, blue: 0.5, alpha: 0.025)),
+                                                          (1, CGColor(srgbRed: 0.3, green: 0.9, blue: 0.5, alpha: 0.012))])
+        hitLift.opacity = 0
+        root.addSublayer(hitLift)
 
         // The AND gate's inside, lit when its output goes high (behind all).
         let inside = CGMutablePath()
@@ -677,7 +704,15 @@ final class IntroScene {
         // as the pulse fires the gate and lands in the LED, gone with the
         // circuit.
         let under = 0.35 * S.smooth(t, 0.3, 1.6) + 0.4 * S.smooth(t, 2.1, 2.5) + 0.25 * S.smooth(t, Intro.ledAt, Intro.ledAt + 0.3)
-        underglow.opacity = Float(under * (1 - S.smooth(t, bloomAt + 0.1, bloomAt + 0.4)))
+        // A breath in just before the hit: the light under the gate and the
+        // grid dim a touch for about a tenth of a second, so the LED pops.
+        let breath = S.smooth(t, Intro.ledAt - 0.14, Intro.ledAt - 0.03) * (1 - S.ease(t, Intro.ledAt, Intro.ledAt + 0.08))
+        underglow.opacity = Float(under * (1 - 0.35 * breath) * (1 - S.smooth(t, bloomAt + 0.1, bloomAt + 0.4)))
+        grid.opacity *= Float(1 - 0.2 * breath)
+        // The hit: a lift of light, out of the LED, for about 150 ms.
+        let hu = (t - Intro.ledAt) / 0.18
+        hitLift.opacity = hu <= 0 || hu >= 1 ? 0 : Float(min(1, hu / 0.14) * pow(1 - hu, 2))
+        hitLift.position = onStage(p(494, 316))
         // The motes drift, each breathing a little.
         let moteShown = S.smooth(t, 0.4, 1.6) * (1 - S.smooth(t, bloomAt + 0.05, bloomAt + 0.35))
         for m in motes {
@@ -881,6 +916,9 @@ final class IntroView: NSView {
         s.root.cornerCurve = .continuous
         scene = s
     }
+
+    /// When it started (CACurrentMediaTime), for the sound to follow.
+    var startedAt: CFTimeInterval { started }
 
     /// From the start, every frame.
     @MainActor func play() {
