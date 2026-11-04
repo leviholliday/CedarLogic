@@ -1457,6 +1457,8 @@ int main(int argc, char** argv) {
 			}
 			return intro::render(dir, trigger, behind);
 		}
+		// --intro-bench [WxH ...]: how long the intro's frames take to draw, by part (Splash.h).
+		if (strcmp(argv[i], "--intro-bench") == 0) return introBench(std::vector<std::string>(argv + i + 1, argv + argc));
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
 		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this
 		// machine's hooks (libcrypto, zlib, curl); with a server, also against a mock one.

@@ -53,6 +53,18 @@ jobs:
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build linux/build
 
+      # How long the intro's frames take to draw (linux/App/Splash.h, --intro-bench): every
+      # frame at 60 fps, as its window draws them, at 1280x800 and 1920x1080 at scale 1, by
+      # phase and by part. Numbers to read (the runners are shared and noisy): it never
+      # fails the build. A Raspberry Pi 4 is about 3-4 times slower than the arm64 runner.
+      - name: Intro benchmark (numbers only)
+        continue-on-error: true
+        run: |
+          mkdir -p renders bench-res
+          cp res/cl_gatedefs.xml res/FirstLaunch.wav linux/res/cedarlogic.png mac/App/LaunchIcon.png bench-res/
+          env -u DISPLAY -u WAYLAND_DISPLAY CEDARLOGIC_RESOURCES="$PWD/bench-res" timeout 600 \
+            linux/build/cedarlogic --intro-bench 1280x800 1920x1080 2>&1 | tee renders/intro-bench.txt
+
       # Signed updates (update-signing/UpdateSignature.h): the signature check on RFC 8032's
       # vectors and the ways a signature must fail; the one public key everywhere it's written
       # down (the app, the signing script, install.sh); the updater's own code against fake
@@ -559,7 +571,9 @@ jobs:
               fi
               for i in $(seq 80); do up "^CedarLogic\$" && break; sleep 0.25; done
               up "^CedarLogic\$" || { echo "no intro window ($HOW)"; kill $app; exit 1; }
-              tries=60
+              # (Its own clock slows it where frames come slowly, as they may on a
+              # virtual display: up to 30 s.)
+              tries=120
               if [ "$HOW" = skip ]; then sleep 1; xdotool mousemove 800 500 click 1; tries=12; fi
               for i in $(seq $tries); do up "^CedarLogic\$" || break; sleep 0.25; done
               up "^CedarLogic\$" && { echo "the intro window is still up ($HOW)"; kill $app; exit 1; }

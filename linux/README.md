@@ -75,8 +75,11 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   launch screen on the first launch and the first after an update, with the
   chime both times (`Intro`: about 6 s, the circuit drawing itself into the
   icon, then the launch screen, held a moment to be read; any key or click
-  skips it, and it gives way to the still launch screen when the animations
-  are off or the frames come too slowly). Help > Play the Intro plays it
+  skips it; with the animations off it's the still launch screen. It keeps
+  its own clock, which never moves on more than a frame's worth at a time,
+  so a slow machine plays it slower rather than skipping ahead, and draws
+  less on one whose first frames come slowly; `--intro-bench` times its
+  frames). Help > Play the Intro plays it
   again over the front window, and Settings > General > "Play the intro
   every time CedarLogic opens" (off unless chosen) plays it, silently, at
   every launch. Motion follows the Mac's curves
