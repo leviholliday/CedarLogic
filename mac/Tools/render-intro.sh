@@ -1,21 +1,27 @@
 #!/bin/bash
 # The intro (App/Intro.swift), drawn headless and made into a video:
 #
-#   mac/build.sh && mac/Tools/render-intro.sh <out-dir> [first|update]
+#   mac/build.sh && mac/Tools/render-intro.sh <out-dir> [first|update|every|short|classic]
 #
-# The intro is about 6 s (6.07), so about 365 frames.
+# The full intro (first, update, every) is about 6 s (6.07), so about 365
+# frames; the short one (short: every ordinary launch, no launch screen's
+# panel) about 3.5 s (3.55), 214 frames; classic, the launch screen as it
+# was before there was an intro ("Classic launch screen"), 2.72 s, 164.
 # The app draws every frame at 60 fps to <out-dir>/frames (PNGs at 2x,
 # 2560x1600, over a picture of a new circuit's window, the launch screen's
 # panel drawn from its own view) and quits; nothing opens on screen. Also
 # <out-dir>/wire-compare.png: a real canvas wire (top) over the intro's at
 # rest (bottom), at the same scale. Then, with ffmpeg: <out-dir>/intro-<trigger>.mp4 (1280x800,
 # H.264) and a small GIF beside it; without ffmpeg but with ImageMagick, just
-# the GIF; with neither, the frames alone. Eight key frames are copied out as
-# <out-dir>/key-<trigger>-1.png ... -8.png either way. KEEP_FRAMES=0 deletes
-# the frames afterwards (they're about 200 MB).
+# the GIF; with neither, the frames alone. Key frames are copied out either
+# way: eight of the full intro, <out-dir>/key-<trigger>-1.png ... -8.png; of
+# the short one, at 0.2, 1.0, 2.6 and 3.2 s (key-short-0.20.png ...) and its
+# last frame (key-short-last.png); of the classic one, at 0.5, 1.2 and 2.0 s
+# (key-classic-0.50.png ...) and its last. KEEP_FRAMES=0 deletes the frames
+# afterwards (they're about 200 MB).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-OUT=${1:?usage: mac/Tools/render-intro.sh <out-dir> [first|update]}
+OUT=${1:?usage: mac/Tools/render-intro.sh <out-dir> [first|update|every|short|classic]}
 TRIGGER=${2:-first}
 APP=mac/build/CedarLogic.app
 [ -x "$APP/Contents/MacOS/CedarLogic" ] || { echo "Build first: mac/build.sh"; exit 1; }
@@ -29,13 +35,25 @@ rm -rf "$FRAMES"
 # the L and the output, the LED and the version lit (the beat before the
 # bloom), the bloom, the launch screen's panel (the icon gone into it), the
 # panel held, finished, to be read, the dissolve into the window.
-cp "$FRAMES/wire-compare.png" "$OUT/wire-compare.png"
-i=1
-for t in 0.20 0.95 1.70 2.98 3.20 3.80 4.95 5.80; do
-	f=$(printf "%04d" "$(echo "$t * 60 / 1" | bc)")
-	cp "$FRAMES/frame-$f.png" "$OUT/key-$TRIGGER-$i.png"
-	i=$((i + 1))
-done
+# The short one's: the canvas fading in, the wires tracing, the LED lit,
+# the bloom crossfading into the window, and its last frame (the window).
+[ -f "$FRAMES/wire-compare.png" ] && cp "$FRAMES/wire-compare.png" "$OUT/wire-compare.png"
+if [ "$TRIGGER" = short ] || [ "$TRIGGER" = classic ]; then
+	TIMES="0.20 1.00 2.60 3.20"
+	[ "$TRIGGER" = classic ] && TIMES="0.50 1.20 2.00"
+	for t in $TIMES; do
+		f=$(printf "%04d" "$(echo "$t * 60 / 1" | bc)")
+		cp "$FRAMES/frame-$f.png" "$OUT/key-$TRIGGER-$t.png"
+	done
+	cp "$(ls "$FRAMES"/frame-*.png | tail -1)" "$OUT/key-$TRIGGER-last.png"
+else
+	i=1
+	for t in 0.20 0.95 1.70 2.98 3.20 3.80 4.95 5.80; do
+		f=$(printf "%04d" "$(echo "$t * 60 / 1" | bc)")
+		cp "$FRAMES/frame-$f.png" "$OUT/key-$TRIGGER-$i.png"
+		i=$((i + 1))
+	done
+fi
 
 if command -v ffmpeg >/dev/null; then
 	ffmpeg -loglevel error -y -framerate 60 -i "$FRAMES/frame-%04d.png" \
@@ -54,6 +72,6 @@ else
 	# sips can't make an animated GIF; the frames and key frames are it.
 	echo "No ffmpeg or ImageMagick: frames only, in $FRAMES"
 fi
-echo "Key frames: $OUT/key-$TRIGGER-1.png ... key-$TRIGGER-8.png"
+echo "Key frames: $OUT/key-$TRIGGER-*.png"
 [ "${KEEP_FRAMES:-1}" = 0 ] && rm -rf "$FRAMES"
 exit 0

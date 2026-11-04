@@ -95,8 +95,10 @@ final class Prefs: ObservableObject {
     @Published var projector: Bool { didSet { d.set(projector, forKey: "cl.projector") } }
     /// Cmd-Q asks first, in a panel in the middle of the screen.
     @Published var confirmQuit: Bool { didSet { d.set(confirmQuit, forKey: "cl.confirmQuit") } }
-    /// The intro (Intro.swift) at every launch, not just the first.
-    @Published var introEveryLaunch: Bool { didSet { d.set(introEveryLaunch, forKey: Intro.everyLaunchKey) } }
+    /// "When CedarLogic opens" (Intro.swift): the short intro, the full one
+    /// or none at an ordinary launch (the first launch and the first after
+    /// an update play the full one whatever this says).
+    @Published var introAtLaunch: Intro.AtLaunch { didSet { d.set(introAtLaunch.rawValue, forKey: Intro.atLaunchKey) } }
     @Published var hasSeenWelcome: Bool { didSet { d.set(hasSeenWelcome, forKey: "cl.hasSeenWelcome") } }
     /// Names under the palette's gates, and ⇧1...⇧0 beside its categories.
     @Published var showGateNames: Bool { didSet { d.set(showGateNames, forKey: "cl.showGateNames") } }
@@ -178,7 +180,8 @@ final class Prefs: ObservableObject {
         wireValueTag = bool("cl.wireValueTag", false)
         projector = bool("cl.projector", false)
         confirmQuit = bool("cl.confirmQuit", true)
-        introEveryLaunch = bool(Intro.everyLaunchKey, false)
+        // (Settled once from 0.3's checkbox, the first time: Intro.atLaunch.)
+        introAtLaunch = Intro.atLaunch(d)
         hasSeenWelcome = bool("cl.hasSeenWelcome", false)
         showGateNames = bool("cl.showGateNames", true)
         showCategoryKeys = bool("cl.showCategoryKeys", true)

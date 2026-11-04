@@ -20,7 +20,10 @@
 // hover-to-open off and its items reordered last time), migrated (as
 // normal, with the actions In the toolbar, as 0.3.x could), paneloff (as
 // normal, migrated, then the panel turned off), owner (the owner's own
-// settings: the first 0.4 preview's migration done, the panel folded).
+// settings: the first 0.4 preview's migration done, the panel folded),
+// introoff (as normal, with 0.3's "Play the intro every time CedarLogic
+// opens" turned on and off again: an explicit no, kept as the classic launch
+// screen), intronone (as normal, "When CedarLogic opens: None" chosen).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -36,8 +39,12 @@
 // crashing; in `trash`, Recently Deleted: the list, the 30-day sweep,
 // Restore (under its own id, or a new one when that's taken) and Delete Now;
 // in every state, the intro owed and its sound (the first launch's and an
-// update's only), "Play the intro every time CedarLogic
-// opens" (off unless chosen; on, a later launch plays it, silently) and Help > Play
+// update's only, the full intro both times), "When CedarLogic opens" (the
+// short intro for new installs and earlier ones, settled once from 0.3's
+// checkbox: the classic launch screen for someone who turned it off, the
+// full intro for someone who left it on; an ordinary launch plays the short
+// intro, silently, or the full one, or the classic launch screen, or none
+// at all; the choice kept) and Help > Play
 // the Intro in the menu bar; the Actions panel (on for a first launch and
 // for every install before, the old toolbar and hidden modes turned on by
 // 0.4's migration, once, and a choice made after it kept), and in `actions` that a folded rail stays
@@ -146,6 +153,12 @@ enum LaunchSelfTest {
             d.set(783, forKey: "cl.toolbarHidden")
             d.set(3, forKey: "cl.toolbarStyle")
         }
+        if state == "introoff" {
+            // 0.3's checkbox, turned on and then off again (it was only ever
+            // written by a change).
+            d.set(false, forKey: Intro.everyLaunchKey)
+        }
+        if state == "intronone" { d.set(Intro.AtLaunch.none.rawValue, forKey: Intro.atLaunchKey) }
         if state == "first" || state == "nolibrary" { d.synchronize(); return }
         var made: [LibraryItem] = []
         for (n, name) in ["Half adder", "Lab 5", "Counter"].enumerated() {
@@ -677,27 +690,85 @@ enum LaunchSelfTest {
         // The sound: the first launch's intro and an update's, never any other.
         if let owed { check(owed.hasSound, "the \(owed.rawValue) intro has the sound") }
         check(Intro.pending() == nil, "no intro plays in a self-test")
-        // Settings > General > "Play the intro every time CedarLogic opens":
-        // off unless chosen; on, a launch that's owed nothing plays the
-        // first launch's intro (tried on settings of its own).
-        check(!Prefs.shared.introEveryLaunch, "the intro doesn't play at every launch unless chosen")
+        // Settings > General > "When CedarLogic opens": the short intro for
+        // everyone (new installs and earlier ones), but 0.3's checkbox turned
+        // off is kept as the classic launch screen; settled once and saved.
+        let expected: Intro.AtLaunch = state == "introoff" ? .classic : state == "intronone" ? .none : .short
+        let why = state == "first" ? "a new install" : state == "introoff" ? "the old checkbox turned off"
+            : state == "intronone" ? "chosen" : "an earlier install"
+        check(Prefs.shared.introAtLaunch == expected, "When CedarLogic opens: \(Prefs.shared.introAtLaunch.title) (\(why))")
+        check(!Intro.straightIn(), "a self-test never goes straight in (it has the launch screen, as tests always have)")
+        check(UserDefaults.standard.string(forKey: Intro.atLaunchKey) == expected.rawValue, "the choice is saved, once")
+        // The two lengths: the full intro (with the launch screen's panel)
+        // about 6 s, the short one (no panel) about 3.5.
+        check(abs(Intro.length(for: .firstLaunch) - 6.07) < 0.02 && Intro.length(for: .update) == Intro.length(for: .firstLaunch)
+              && Intro.length(for: .everyLaunch) == Intro.length(for: .firstLaunch),
+              String(format: "the full intro is %.2f s", Intro.length(for: .firstLaunch)))
+        check((3.3...3.7).contains(Intro.length(for: .short)) && Intro.Trigger.short.isShort
+              && !Intro.Trigger.firstLaunch.isShort && !Intro.Trigger.update.isShort && !Intro.Trigger.everyLaunch.isShort,
+              String(format: "the short intro is %.2f s, no panel; the first launch's, an update's and the full one have it", Intro.length(for: .short)))
+        check(Intro.shortHoldAt < Intro.bloomAt && Intro.shortDissolveAt > Intro.bloomAt,
+              "the short intro holds before its bloom (on a slow Mac) and dissolves after it")
+        check(Intro.Trigger(rawValue: "short") == .short && Intro.Trigger(rawValue: "every") == .everyLaunch,
+              "CL_INTRO=short and CL_INTRO=every name theirs")
+        // On settings of their own: what each launch plays, by the choice.
         let suite = "cl.selftest.intro"
         if let s = UserDefaults(suiteName: suite) {
             s.removePersistentDomain(forName: suite)
+            // A new install: the first launch's, full, with the sound; the short intro chosen.
+            let first = Intro.forLaunch(s)
+            check(first == .firstLaunch && first?.hasSound == true && first?.isShort == false,
+                  "a new install's first launch plays the full intro, with the sound (\(first?.rawValue ?? "none"))")
+            check(Intro.atLaunch(s) == .short, "a new install is set to the short intro")
             for key in ["cl.hasSeenWelcome", "cl.firstLaunchPlayed", Intro.firstKey] { s.set(true, forKey: key) }
+            s.removeObject(forKey: Intro.atLaunchKey)
+            // An update's is owed whatever the choice (in `updated`).
             let due: Intro.Trigger? = state == "updated" ? .update : nil
-            check(Intro.forLaunch(s) == due, "a later launch plays \(due.map { "the \($0.rawValue) intro" } ?? "no intro") with the setting off")
-            s.set(true, forKey: Intro.everyLaunchKey)
-            let every = Intro.forLaunch(s)
-            check(every == (due ?? .everyLaunch), "with the setting on, a later launch plays the intro (\(every?.rawValue ?? "none"))")
-            check(every?.hasSound == (due != nil),
-                  due == nil ? "an every-launch intro has no sound" : "an update's intro has the sound, setting or not")
+            // Earlier installs, by 0.3's checkbox: never touched, turned off, left on.
+            for (old, choice, plays) in [(nil, Intro.AtLaunch.short, Intro.Trigger.short), (false, .classic, nil), (true, .full, .everyLaunch)] as [(Bool?, Intro.AtLaunch, Intro.Trigger?)] {
+                s.removeObject(forKey: Intro.atLaunchKey)
+                if let old { s.set(old, forKey: Intro.everyLaunchKey) } else { s.removeObject(forKey: Intro.everyLaunchKey) }
+                let was = old.map { $0 ? "on" : "turned off" } ?? "never changed"
+                check(Intro.atLaunch(s) == choice && s.string(forKey: Intro.atLaunchKey) == choice.rawValue,
+                      "0.3's checkbox \(was): \(choice.title), saved")
+                let t = Intro.forLaunch(s)
+                check(t == (due ?? plays), "with \(choice.title), a later launch plays \(t.map { "the \($0.rawValue) intro" } ?? "none")")
+                if let t {
+                    check(t.hasSound == (due != nil), due == nil ? "and silently" : "an update's intro has the sound, whatever the choice")
+                }
+            }
+            // The choice sticks: once saved, the old checkbox is never read
+            // again. And each plays its own: no intro for the classic launch
+            // screen or None (None with no launch screen either: `straightIn`,
+            // checked for real by the focus check, since a test run never is).
+            check(Intro.AtLaunch.allCases == [.short, .full, .classic, .none], "four choices: Short intro, Full intro, Classic launch screen, None")
+            for choice in Intro.AtLaunch.allCases {
+                s.set(choice.rawValue, forKey: Intro.atLaunchKey)
+                s.set(choice == .short || choice == .full, forKey: Intro.everyLaunchKey)
+                check(Intro.atLaunch(s) == choice && Intro.atLaunch(s) == choice, "\(choice.title) chosen stays \(choice.title)")
+                let t = Intro.forLaunch(s), plays: Intro.Trigger? = [.short: .short, .full: .everyLaunch][choice]
+                check(t == (due ?? plays), "\(choice.title): a later launch plays \(t.map { "the \($0.rawValue) intro" } ?? "no intro")")
+            }
             s.removePersistentDomain(forName: suite)
         } else {
             check(false, "settings of its own for the intro check")
         }
-        check(Intro.Trigger.firstLaunch.hasSound && Intro.Trigger.update.hasSound && !Intro.Trigger.everyLaunch.hasSound,
-              "sound for the first launch and updates only")
+        // And through Settings itself: a choice made is saved, and read back.
+        let mine = Prefs.shared.introAtLaunch
+        for choice in Intro.AtLaunch.allCases {
+            Prefs.shared.introAtLaunch = choice
+            check(UserDefaults.standard.string(forKey: Intro.atLaunchKey) == choice.rawValue && Intro.atLaunch(.standard) == choice,
+                  "Settings: \(choice.title) is saved and read back")
+        }
+        Prefs.shared.introAtLaunch = mine
+        check(Intro.Trigger.firstLaunch.hasSound && Intro.Trigger.update.hasSound && !Intro.Trigger.everyLaunch.hasSound
+              && !Intro.Trigger.short.hasSound, "sound for the first launch and updates only")
+        let online = ActionID.learnOnline.action
+        check(online.menu == "Help" && online.title == "Learn Logic Online\u{2026}" && online.available()
+              && AppActions.learnOnlineURL.absoluteString == "https://cedarlogic.netlify.app/learn/",
+              "Learn Logic Online\u{2026} is among the actions, in Help, opening cedarlogic.netlify.app/learn/")
+        check(HelpBook.started.first?.text.contains("https://cedarlogic.netlify.app/learn/") == true,
+              "Help's first page links the website's lessons")
         let play = ActionID.playIntro.action
         check(play.menu == "Help" && play.title == "Play the Intro", "Play the Intro is among the actions, in Help")
 
@@ -950,6 +1021,15 @@ enum LaunchFocusCheck {
         await wait(1.0)
         guard NSApp.isActive else { return false }
         check(state, !Splash.shared.showing, String(format: "the launch screen went (%.1f s)", waited))
+        // The intro that played (with Reduce Motion, as the still): the first launch's and an update's, full, with the sound;
+        // an ordinary launch's, short and silent.
+        // The classic launch screen (introoff) and None (intronone) play no
+        // intro; None has no launch screen at all, nor the opening card.
+        let played: Intro.Trigger? = ["first": .firstLaunch, "updated": .update][state] ?? (["introoff", "intronone"].contains(state) ? nil : .short)
+        check(state, Splash.shared.intro == played, "the \(Splash.shared.intro?.rawValue ?? "no") intro played (\(played?.rawValue ?? "none") expected)")
+        check(state, Intro.soundStarted == (played?.hasSound == true), "\(Intro.soundStarted ? "with" : "without") the sound")
+        check(state, Splash.shared.wentStraightIn == (state == "intronone"),
+              Splash.shared.wentStraightIn ? "no launch screen: straight in" : "a launch screen played")
         let greetings = NSApp.windows.filter { w in
             w.isVisible && Greeting.ids.contains { w.identifier?.rawValue.contains($0) == true }
         }
@@ -1011,6 +1091,7 @@ enum LaunchFocusCheck {
         }
         await inFront("after launch")
         check(state, menuItem("Play the Intro") != nil, "Help > Play the Intro is in the menu bar")
+        check(state, menuItem("Learn Logic Online\u{2026}") != nil, "Help > Learn Logic Online\u{2026} is in the menu bar")
         await showMeAround(state, w)
         // Another window in front for a moment, then gone: the circuit's
         // window comes back in front with nothing else changing.

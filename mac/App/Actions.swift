@@ -26,7 +26,7 @@ enum ActionID: String, CaseIterable, Identifiable {
     // Simulation
     case pause, step, stepClock, predict, reveal, lock
     // Help and the app
-    case help, feedback, shortcuts, whatsNew, playIntro, welcome, setUp, tour, showMeAround, settings, checkForUpdates
+    case help, feedback, shortcuts, whatsNew, playIntro, welcome, setUp, tour, learnOnline, showMeAround, settings, checkForUpdates
 
     var id: String { rawValue }
     @MainActor var action: AppAction { ActionRegistry.action(self) }
@@ -246,6 +246,9 @@ enum ActionRegistry {
                   enabled: anyWindow, run: { _ in WelcomeRequest.setup(); open("welcome") }),
         AppAction(id: .tour, title: "Learn Logic: Guided Tour", menu: "Help", symbol: "figure.walk",
                   enabled: anyWindow, run: { _ in TourModel.shared.start() }),
+        // More lessons, with live circuits, on the website (in the browser).
+        AppAction(id: .learnOnline, title: "Learn Logic Online\u{2026}", menu: "Help", symbol: "globe",
+                  enabled: { _ in true }, run: { _ in AppActions.openLearnOnline() }),
         AppAction(id: .showMeAround, title: "Show Me Around", menu: "Help", symbol: "binoculars",
                   enabled: { ($0 ?? CanvasController.front) != nil },
                   run: { c in if let c = c ?? CanvasController.front { ShowMeAround.shared.start(on: c) } }),
