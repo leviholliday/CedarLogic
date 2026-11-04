@@ -1,9 +1,11 @@
-// The intro: the very first launch, and the first launch after an update
-// with a What's New tour, open with the circuit drawing itself before the
-// launch screen. The same intro both times, with the sound both times;
-// Help > Play the Intro plays it again (sound and all), and a setting plays
-// it at every launch, silently (the sound is for the first launch and the
-// first after an update only). About 6 seconds:
+// The intro: the circuit drawing itself over the circuit window. Two
+// lengths of it.
+//
+// The full intro: the very first launch, and the first launch after an
+// update with a What's New tour, with the sound both times; Help > Play the
+// Intro plays it again (sound and all), and Settings > General > Launch
+// screen > "When CedarLogic opens: Full intro" plays it at every launch,
+// silently. About 6 seconds (6.07):
 //
 //   0.00-0.45  over the circuit window, the dark canvas fades in from
 //              nothing, the two input pins easing in with it; the grid
@@ -34,18 +36,41 @@
 //   5.52-6.07  then it dissolves into the window (and the welcome, or What's
 //              New, on top), a crossfade.
 //
-// Any key or click skips it; with Reduce Motion it's just the launch
+// The short intro: every other launch, unless Settings says otherwise
+// ("When CedarLogic opens": Short intro, everyone's to begin with; Full
+// intro; Classic launch screen; None). Just the
+// drawing, silent, and no launch screen's panel. About 3.5 seconds (3.55):
+//
+//   0.00-3.05  as the full intro: the canvas fading in, the wires, the C, D
+//              and L, the clock pulse, the LED and the version lit, the beat;
+//   3.05-3.15  the bloom flashes out of the LED (no icon) ...
+//   3.15-3.55  ... and the picture crossfades straight into the window, the
+//              bloom still spreading and fading as it goes.
+//
+// On a slow Mac, if the window isn't ready by the end of the beat (3.03),
+// the short intro holds there, everything lit, until it is (10 s at most),
+// then blooms and crossfades: never into an empty window.
+//
+// "Classic launch screen" is the launch screen as it was before there was an
+// intro (Splash's panel alone, its sweep and dissolve, silent, about two and
+// a half seconds); "None", no launch screen at all: the circuit window
+// straight in (not even the card a circuit opens with). Whatever the choice,
+// the first launch and the first after an update play the full intro, with
+// the sound.
+//
+// Any key or click skips either; with Reduce Motion it's just the launch
 // screen's still panel and a 0.4 s crossfade.
 //
 // Once drawn, the wires are the canvas's own: 1 pt lines in the dark
 // canvas's low-wire colour with a dot where each meets its pin, and
 // green while they're high, with the glow Simulation View gives a lit wire.
 //
-// `CedarLogic --render-intro <dir> [first|update]` draws it, frame by frame
-// at 60 fps, to PNGs (mac/Tools/render-intro.sh makes a video), and a still
-// of a real canvas wire beside the intro's for comparison.
-// CL_INTRO=first|update plays it again on a normal launch, for development;
-// CL_NO_INTRO=1 (or CL_NO_SPLASH) never.
+// `CedarLogic --render-intro <dir> [first|update|every|short|classic]` draws it
+// (or, `classic`, the launch screen without it),
+// frame by frame at 60 fps, to PNGs (mac/Tools/render-intro.sh makes a
+// video), and a still of a real canvas wire beside the intro's for
+// comparison. CL_INTRO=first|update|every|short plays one on a normal
+// launch, for development; CL_NO_INTRO=1 (or CL_NO_SPLASH) never.
 
 import AppKit
 import AVFoundation
@@ -54,21 +79,61 @@ import SwiftUI
 @MainActor
 enum Intro {
     /// What it's played for: the first launch, the first after an update,
-    /// or every launch (Settings). CL_INTRO=first|update|every replays one.
+    /// or any other launch (Settings: the full intro, `.everyLaunch`, or the
+    /// short one, `.short`). CL_INTRO=first|update|every|short replays one.
     enum Trigger: String {
-        case firstLaunch = "first", update, everyLaunch = "every"
+        case firstLaunch = "first", update, everyLaunch = "every", short
         /// The sound: the first launch and an update only; every other
         /// launch is silent. (Help > Play the Intro plays `.firstLaunch`,
         /// sound and all.)
-        var hasSound: Bool { self != .everyLaunch }
+        var hasSound: Bool { self == .firstLaunch || self == .update }
+        /// Just the drawing: no launch screen's panel, from the bloom
+        /// straight into the window.
+        var isShort: Bool { self == .short }
+    }
+
+    /// Settings > General > Launch screen, "When CedarLogic opens": what an
+    /// ordinary launch plays (the first launch and the first after an
+    /// update play the full intro whatever it says).
+    enum AtLaunch: String, CaseIterable, Identifiable {
+        /// The short intro (everyone's to begin with); the full one; the
+        /// launch screen as it was before there was an intro (Splash's panel
+        /// on its own, silent); or none at all, straight into the window.
+        case short, full, classic, none
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .short: "Short intro"
+            case .full: "Full intro"
+            case .classic: "Classic launch screen"
+            case .none: "None"
+            }
+        }
     }
 
     /// Played once each: the first launch's, and the update's (keyed by the
     /// What's New version it introduced).
     static let firstKey = "cl.introFirstLaunchPlayed"
     static let updateKey = "cl.introUpdatePlayed"
-    /// Settings > General: the intro at every launch (off unless chosen).
+    /// Settings > General, "When CedarLogic opens" (`AtLaunch`).
+    nonisolated static let atLaunchKey = "cl.introAtLaunch"
+    /// Before 0.4's choice: the checkbox "Play the intro every time
+    /// CedarLogic opens" (off unless chosen). Read once, to settle the choice.
     nonisolated static let everyLaunchKey = "cl.introEveryLaunch"
+
+    /// The choice, from saved settings. The first time they're read without
+    /// one it's settled, once, and saved: the short intro, for new installs
+    /// and earlier ones alike; but anyone who turned the old checkbox off
+    /// (a saved `false`: it was only ever written by a change, and it began
+    /// off, so that's someone who turned it on and then off again) keeps
+    /// what they had, the classic launch screen, and anyone who left it on
+    /// keeps the full intro.
+    nonisolated static func atLaunch(_ d: UserDefaults) -> AtLaunch {
+        if let saved = d.string(forKey: atLaunchKey), let choice = AtLaunch(rawValue: saved) { return choice }
+        let choice: AtLaunch = d.object(forKey: everyLaunchKey) == nil ? .short : d.bool(forKey: everyLaunchKey) ? .full : .classic
+        d.set(choice.rawValue, forKey: atLaunchKey)
+        return choice
+    }
 
     /// The timeline, in seconds (the header has it all). The canvas fades
     /// in over `fadeIn` (the intro's panel, as a whole) ...
@@ -93,6 +158,20 @@ enum Intro {
     /// ... and dissolves into the window.
     static let fade = 0.55
     static var total: Double { dissolveAt + fade }
+
+    /// The short intro: the same up to the bloom, which crossfades straight
+    /// into the window as it flashes (no panel) ...
+    static let shortDissolveAt = bloomAt + 0.1
+    static let shortFade = 0.4
+    static var shortTotal: Double { shortDissolveAt + shortFade }
+    /// ... and on a slow Mac it waits at the end of the beat, everything
+    /// lit, until the window is ready.
+    static let shortHoldAt = bloomAt - 0.02
+    /// The timeline for a trigger: when it starts dissolving into the
+    /// window, how long that takes, and how long it is in all.
+    static func dissolve(for t: Trigger) -> Double { t.isShort ? shortDissolveAt : dissolveAt }
+    static func fadeTime(for t: Trigger) -> Double { t.isShort ? shortFade : fade }
+    static func length(for t: Trigger) -> Double { dissolve(for: t) + fadeTime(for: t) }
     /// How far the intro's panel has faded in, `t` seconds in: it's faded
     /// in as a whole by the window server (ease in and out), so it can't be
     /// missed if the first frames are slow; a picture of it uses this.
@@ -127,10 +206,23 @@ enum Intro {
         return !CommandLine.arguments.dropFirst().contains { $0.hasPrefix("--") }
     }
 
-    /// What a launch plays, by the saved settings: the intro owed, or, with
-    /// "Play the intro every time CedarLogic opens" on, the first launch's.
+    /// What a launch plays, by the saved settings: the intro owed (the
+    /// full one, with the sound), else what "When CedarLogic opens" says.
     static func forLaunch(_ d: UserDefaults = .standard) -> Trigger? {
-        owed(d) ?? (d.bool(forKey: everyLaunchKey) ? .everyLaunch : nil)
+        if let owed = owed(d) { return owed }
+        switch atLaunch(d) {
+        case .short: return .short
+        case .full: return .everyLaunch
+        case .classic, .none: return nil
+        }
+    }
+
+    /// "None": this launch has no launch screen at all (and no opening
+    /// card), the window straight in. Never for a launch owed the intro, a
+    /// test or picture run, or one with CL_INTRO set.
+    static func straightIn(_ d: UserDefaults = .standard) -> Bool {
+        guard allowed, ProcessInfo.processInfo.environment["CL_INTRO"] == nil else { return false }
+        return forLaunch(d) == nil && atLaunch(d) == .none
     }
 
     /// The intro to play at this launch, if any.
@@ -144,7 +236,7 @@ enum Intro {
         switch t {
         case .firstLaunch: UserDefaults.standard.set(true, forKey: firstKey)
         case .update: UserDefaults.standard.set(WhatsNew.version, forKey: updateKey)
-        case .everyLaunch: break
+        case .everyLaunch, .short: break
         }
     }
 
@@ -157,6 +249,7 @@ enum Intro {
     /// however long the audio takes to get going, it starts that much
     /// further in, so the bell still lands on the LED.
     static func playSound(calm: Bool, clock: CFTimeInterval? = nil) {
+        soundStarted = true
         UserDefaults.standard.set(true, forKey: "cl.firstLaunchPlayed")
         guard let url = Bundle.main.url(forResource: "FirstLaunch", withExtension: "m4a") else { return }
         let from = calm ? soundHit - 0.15 - calmHold : soundHit - ledAt
@@ -172,6 +265,9 @@ enum Intro {
             soundQueue.asyncAfter(deadline: .now() + 6) { if player === p { player = nil } }
         }
     }
+    /// Whether this run has started the sound (the launch focus check: the
+    /// first launch's and an update's, never a short intro's).
+    private(set) static var soundStarted = false
     /// Skipped: the sound fades out with the picture.
     static func fadeSound() {
         soundQueue.async { player?.setVolume(0, fadeDuration: 0.35) }
@@ -721,9 +817,12 @@ final class IntroScene {
         }
 
         // The circuit goes as the icon arrives over it; the display (and
-        // the canvas) as the launch screen's panel comes in.
+        // the canvas) as the launch screen's panel comes in. In the short
+        // intro (no icon, no panel), both go together, into the bloom.
         circuit.opacity = Float(1 - S.smooth(t, bloomAt + 0.12, bloomAt + 0.32))
-        display.opacity = Float(S.smooth(t, 1.86, 2.0) * (1 - S.smooth(t, Intro.cardIn, Intro.cardIn + Intro.cardFade)))
+        let displayGoes = trigger.isShort ? S.smooth(t, bloomAt + 0.12, bloomAt + 0.32)
+                                          : S.smooth(t, Intro.cardIn, Intro.cardIn + Intro.cardFade)
+        display.opacity = Float(S.smooth(t, 1.86, 2.0) * (1 - displayGoes))
 
         // The pins ease in with the canvas, just before the wires leave them.
         for (i, pin) in pins.enumerated() {
@@ -798,8 +897,9 @@ final class IntroScene {
         icon.bounds = CGRect(origin: .zero, size: frame.size)
         icon.position = CGPoint(x: frame.midX, y: frame.midY)
         // Gone into the panel's own icon as the panel finishes coming in.
+        // (The short intro has none: its bloom goes straight into the window.)
         let landed = Intro.cardIn + Intro.cardFade
-        icon.opacity = Float(S.smooth(t, bloomAt + 0.05, bloomAt + 0.26) * (1 - S.smooth(t, landed - 0.14, landed)))
+        icon.opacity = trigger.isShort ? 0 : Float(S.smooth(t, bloomAt + 0.05, bloomAt + 0.26) * (1 - S.smooth(t, landed - 0.14, landed)))
         iconGlow.bounds = CGRect(x: 0, y: 0, width: frame.width * 1.9, height: frame.height * 1.9)
         iconGlow.position = icon.position
         iconGlow.opacity = icon.opacity * Float(0.55 + 0.25 * (1 - fly))
@@ -919,6 +1019,12 @@ final class IntroView: NSView {
 
     /// When it started (CACurrentMediaTime), for the sound to follow.
     var startedAt: CFTimeInterval { started }
+    /// Where it is on its own clock (which a hold stops).
+    private(set) var time: Double = 0
+    /// The short intro: at this moment it waits, the frame held, until
+    /// `mayGoOn` says so (the window ready), then plays on from there.
+    var holdAt: Double?
+    var mayGoOn: @MainActor () -> Bool = { true }
 
     /// From the start, every frame.
     @MainActor func play() {
@@ -929,11 +1035,24 @@ final class IntroView: NSView {
     }
 
     @objc private func frame(_ l: CADisplayLink) {
-        let t = min(CACurrentMediaTime() - started, freezeAt ?? .infinity)
-        SplashDebug.frame(t)
         MainActor.assumeIsolated {
+            let now = CACurrentMediaTime()
+            var t = now - started
+            if let h = holdAt, t > h {
+                if mayGoOn() {
+                    holdAt = nil
+                    SplashDebug.log(String(format: "intro: going on (%.2f s past the hold)", t - h))
+                } else {
+                    // Held: its clock stopped at `h` (and on from there once let go).
+                    started = now - h
+                    t = h
+                }
+            }
+            t = min(t, freezeAt ?? .infinity)
+            time = t
+            SplashDebug.frame(t)
             scene?.apply(t)
-            if t >= Intro.total + 0.1 { stop() }
+            if t >= Intro.length(for: scene?.trigger ?? .firstLaunch) + 0.1 { stop() }
         }
     }
 
@@ -945,7 +1064,7 @@ final class IntroView: NSView {
 
 // MARK: - Rendering it
 
-/// `CedarLogic --render-intro <dir> [first|update]`: the intro at 60 fps,
+/// `CedarLogic --render-intro <dir> [first|update|every|short|classic]`: the intro at 60 fps,
 /// a PNG a frame (frame-0000.png on), at 2x, on black: the intro over a picture of a
 /// new circuit's window (dark), with the launch screen's panel drawn over
 /// it from its own view, fading into the window as they do on screen. Also
@@ -988,7 +1107,39 @@ enum RenderIntro {
             CGImageDestinationFinalize(dest)
         }
         func ease(_ u: Double) -> Double { let c = min(1, max(0, u)); return c < 0.5 ? 2 * c * c : 1 - pow(-2 * c + 2, 2) / 2 }
-        let frames = Int((Intro.total * 60).rounded())
+        // `classic`: the launch screen as it was before there was an intro
+        // ("When CedarLogic opens: Classic launch screen"), over the
+        // desktop (black here), the window fading in as the panel dissolves.
+        if i + 2 < args.count, args[i + 2] == "classic" {
+            splash.configureClassicPicture()
+            let total = splash.dissolveAt + splash.fadeTime
+            let frames = Int((total * 60).rounded())
+            for f in 0...frames {
+                let t = Double(f) / 60
+                let ctx = context()
+                ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+                ctx.fill(CGRect(origin: .zero, size: size))
+                if let behind, t >= splash.dissolveAt {
+                    ctx.setAlpha(ease((t - splash.dissolveAt) / splash.fadeTime))
+                    ctx.draw(behind, in: CGRect(origin: .zero, size: size))
+                }
+                let r = ImageRenderer(content: SplashView(model: splash, at: t))
+                r.scale = scale
+                if let img = r.cgImage {
+                    // Its window fades in over 0.2 s as it begins (Splash.begin).
+                    ctx.setAlpha(min(1, t / 0.2))
+                    ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 30, color: CGColor(gray: 0, alpha: 0.5))
+                    ctx.draw(img, in: card)
+                    ctx.setShadow(offset: .zero, blur: 0, color: nil)
+                }
+                save(ctx.makeImage(), String(format: "frame-%04d.png", f))
+            }
+            print("render-intro: \(frames + 1) frames (classic launch screen) in \(dir.path)")
+            exit(0)
+        }
+        // The short intro: no panel, and its own, earlier, crossfade.
+        let dissolveAt = Intro.dissolve(for: trigger), fade = Intro.fadeTime(for: trigger)
+        let frames = Int((Intro.length(for: trigger) * 60).rounded())
         for f in 0...frames {
             let t = Double(f) / 60
             scene.apply(t)
@@ -999,8 +1150,8 @@ enum RenderIntro {
             ctx.fill(CGRect(origin: .zero, size: size))
             // The window under it all: put in under the intro's panel as the
             // dissolve begins (Splash), the panels fading off it.
-            let shown = ease((t - Intro.dissolveAt) / Intro.fade)
-            if let behind, t >= Intro.dissolveAt {
+            let shown = ease((t - dissolveAt) / fade)
+            if let behind, t >= dissolveAt {
                 ctx.setAlpha(1)
                 ctx.draw(behind, in: CGRect(origin: .zero, size: size))
             }
@@ -1011,7 +1162,7 @@ enum RenderIntro {
             scene.root.render(in: ctx)
             ctx.endTransparencyLayer()
             // The launch screen's panel, from its own view at its own time.
-            if t >= Intro.cardIn {
+            if !trigger.isShort, t >= Intro.cardIn {
                 let r = ImageRenderer(content: SplashView(model: splash, at: t - Intro.cardIn + Intro.splashAt))
                 r.scale = scale
                 if let img = r.cgImage {

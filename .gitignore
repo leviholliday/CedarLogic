@@ -44,3 +44,6 @@ crashfile.temp
 # was committed.
 ~*.lck
 mac/build/
+
+# Intro previews (mac/Tools/render-intro.sh)
+mac/Tools/intro-preview/

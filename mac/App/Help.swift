@@ -60,6 +60,7 @@ enum HelpBook {
                     .p("The window has three parts: the **palette** of gates down the left (with a small map of the page under it), the **canvas** where you build, and the **toolbar** across the top. Each circuit can have several **tabs** (pages), shown above the canvas."),
                     .p("Down the right edge is the **Actions panel**: the commands you use most, a click each. Rest on one for its name and shortcut, click its left edge to fold it away, and right-click it to choose what's on it. Settings > Actions turns it off or on."),
                     .tip("New here? Help > Show Me Around points out where everything is in the window, in under a minute. Help > Learn Logic: Guided Tour is a lesson: it builds a working AND circuit with you, a step at a time, in about five."),
+                    .p("More lessons with live circuits: [Learn on the CedarLogic website](https://cedarlogic.netlify.app/learn/)"),
                  ]),
         HelpPage(id: "first", title: "Your First Circuit", icon: "lightbulb",
                  line: "Two switches, an AND gate and a light.",
