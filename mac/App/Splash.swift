@@ -12,7 +12,11 @@
 // this panel as it fades in, part-way into its own appearance; the panel
 // then plays the rest of it, its sweep at full length, holds a moment to be
 // read, and dissolves. Help > Play the Intro plays it again over the front
-// circuit window (`playIntroNow`).
+// circuit window (`playIntroNow`). Every other launch plays the short intro
+// (Settings: "When CedarLogic opens"): just the drawing, which goes from its
+// bloom straight into the window, this panel never shown; with "Classic
+// launch screen", just this panel, as before there was an intro; with
+// "None", nothing: the window straight in.
 //
 // And the smaller card that opens a circuit: its name on glass, a quick
 // sweep, and the circuit fades up (OpeningCard).
@@ -118,7 +122,7 @@ final class Splash: ObservableObject {
     let firstLaunch = !UserDefaults.standard.bool(forKey: "cl.hasSeenWelcome")
         && !UserDefaults.standard.bool(forKey: "cl.firstLaunchPlayed")
     var fadeTime: Double {
-        if intro != nil { return skipped ? 0.3 : Self.reduceMotion ? Intro.calmFade : Intro.fade }
+        if let intro { return skipped ? 0.3 : Self.reduceMotion ? Intro.calmFade : Intro.fadeTime(for: intro) }
         return firstLaunch ? 1.1 : Self.dissolveTime
     }
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -134,6 +138,14 @@ final class Splash: ObservableObject {
         let env = ProcessInfo.processInfo.environment
         guard !active, panel == nil, !args.contains("--render-ui"), env["CL_SNAPSHOT"] == nil,
               env["CL_NO_SPLASH"] == nil else { return }
+        // "When CedarLogic opens: None": no launch screen, and the window
+        // opens without its card (CLWindow), straight in.
+        if Intro.straightIn() {
+            straightIn = true
+            wentStraightIn = true
+            SplashDebug.log("straight in: no launch screen")
+            return
+        }
         active = true
         // Timed to the frame, so no App Nap until it's done: an app launched
         // in the background (behind another app, in Stage Manager's strip)
@@ -162,8 +174,8 @@ final class Splash: ObservableObject {
             })
         }
         startWatching()
-        // Whatever happens, it plays.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.begin() }
+        // Whatever happens, it plays (the windows perhaps not ready yet).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.begin(ready: false) }
     }
 
     /// Help > Play the Intro: the first launch's intro, sound and all, over
@@ -185,6 +197,14 @@ final class Splash: ObservableObject {
         startWatching()
         begin()
     }
+    /// "None": the launch's windows come straight in, without the card a
+    /// circuit opens with (until they're open); and whether this launch did.
+    private(set) var straightIn = false
+    private(set) var wentStraightIn = false
+    /// The circuit window opened and drawn (LaunchDelegate's `begin`).
+    private(set) var windowsReady = false
+    /// The longest the short intro waits, held, for them (from its start).
+    static let holdLimit = 10.0
     /// Played from the menu (not at launch), over this window.
     private(set) var replaying = false
     private var replayOver: NSWindow?
@@ -248,8 +268,13 @@ final class Splash: ObservableObject {
     }
 
     /// The launch's heavy work is done (LaunchDelegate): play the panel now,
-    /// on an otherwise idle main thread.
-    func begin() {
+    /// on an otherwise idle main thread. (`ready: false`: begun anyway, after
+    /// 3 s, with the windows perhaps still to come; the short intro then
+    /// waits for them before it goes, `windowsReady`.)
+    func begin(ready: Bool = true) {
+        if ready { windowsReady = true }
+        // The launch's windows are open: any after them open with their card.
+        straightIn = false
         guard active, !began, let w = panel else { return }
         began = true
         SplashDebug.log("begin")
@@ -268,6 +293,9 @@ final class Splash: ObservableObject {
     /// on its own clock (the bar filling as it goes), its sweep at full
     /// length, and the dissolve straight after it. The same after either
     /// intro.
+    /// The short intro shows none of this panel (but Reduce Motion shows
+    /// its still, as for any intro); it dissolves at `Intro.shortDissolveAt`
+    /// on its own clock.
     func configureAfterIntro(_ trigger: Intro.Trigger) {
         intro = trigger
         status = "Ready"
@@ -276,7 +304,24 @@ final class Splash: ObservableObject {
         title = "CedarLogic " + Intro.version
         sweepAt = Self.sweepStart
         sweepLength = Self.sweepTime
-        dissolveAt = Self.reduceMotion ? Intro.calmHold : Intro.splashAt + Intro.dissolveAt - Intro.cardIn
+        dissolveAt = Self.reduceMotion ? Intro.calmHold
+            : trigger.isShort ? Intro.shortDissolveAt : Intro.splashAt + Intro.dissolveAt - Intro.cardIn
+    }
+
+    /// For its pictures (RenderIntro's `classic`): an ordinary launch's
+    /// panel, before there was an intro: the work done by `readyAt` (its
+    /// six lines, a third of a second apart), the bar gliding home, and the
+    /// dissolve. (The line under the name reads "Ready" throughout.)
+    func configureClassicPicture() {
+        intro = nil
+        title = "CedarLogic"
+        status = "Ready"
+        target = 1
+        sweepAt = Self.sweepStart
+        sweepLength = Self.sweepTime
+        // (markReady's sums for an ordinary launch: the last line at 1.6 s.)
+        readyAt = 1.9
+        dissolveAt = 2.3
     }
 
     /// The intro's own panel, under this one: laid over the circuit window
@@ -329,11 +374,32 @@ final class Splash: ObservableObject {
         // intro's points.
         let iconAt = CGPoint(x: card.frame.midX - frame.minX, y: card.frame.maxY - 44 - 64 - frame.minY)
         view.prepare(trigger, size: frame.size, cornerRadius: corner, cardIcon: iconAt)
+        if trigger.isShort {
+            // On a slow Mac: held at the end of the beat, lit, until the
+            // window's ready (or `holdLimit`), so it never crossfades into an
+            // empty window.
+            view.holdAt = Intro.shortHoldAt
+            view.mayGoOn = { [weak self] in
+                guard let self else { return true }
+                if !self.windowsReady && !self.loggedHold { self.loggedHold = true; SplashDebug.log("intro: held for the window") }
+                return self.windowsReady || self.elapsed > Self.holdLimit
+            }
+        }
         view.play()
         // The first launch's and an update's have the sound, on the
         // picture's clock; every other launch is silent.
         if trigger.hasSound { Intro.playSound(calm: false, clock: view.startedAt) }
         introPlayed = Date()
+        if trigger.isShort {
+            // No panel: the picture, then the window (`tick`).
+            start = Date()
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Intro.fadeIn
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ip.animator().alphaValue = 1
+            }
+            return
+        }
         // The canvas fades in, as a whole, before the wires trace.
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = Intro.fadeIn
@@ -440,8 +506,18 @@ final class Splash: ObservableObject {
         if !replaying { for w in NSApp.windows where w.isVisible { holdEarly(w) } }
         guard began else { return }
         if let at = freezeAt, elapsed >= at { return }
+        if intro?.isShort == true, let v = introView {
+            // The short intro goes on its picture's own clock (which waits,
+            // held, for the window); on the wall clock too, should its frames
+            // stop coming (a second late with the window ready, or the
+            // longest hold).
+            let late = elapsed - dissolveAt
+            if v.time >= dissolveAt || (windowsReady && late > 1) || elapsed > Self.holdLimit + dissolveAt - Intro.shortHoldAt { finish() }
+            return
+        }
         if elapsed >= dissolveAt { finish() }
     }
+    private var loggedHold = false
 
     /// They come in where the launch screen was (the screen you were
     /// looking at), not wherever macOS put them.

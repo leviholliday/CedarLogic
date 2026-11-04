@@ -46,7 +46,10 @@ const std::vector<Page>& pages() {
 		      "**canvas** where you build, and across the top the **menu bar** (File, Edit, Circuit, View, Simulate, Window, Help) "
 		      "with the **toolbar** under it. Each circuit can have several **tabs** (pages), shown above the canvas. Press **Alt** "
 		      "or **F10** to reach the menus from the keyboard; **Settings** is in File (Ctrl+,)."),
-		    tip("New here? Help ▸ Guided Tour shows you around, one part at a time.") },
+		    p("Down the right edge is the **Actions panel**: the commands you use most, a click each. Rest on one for its name and "
+		      "shortcut, click its left edge to fold it away, and right-click it to choose what's on it. Settings ▸ Actions turns it off or on."),
+		    tip("New here? Help ▸ Show Me Around points out where everything is in the window, in under a minute. Help ▸ Learn Logic: "
+		        "Guided Tour is a lesson: it builds a working AND circuit with you, a step at a time, in about five.") },
 		  true },
 		{ "first", "Your First Circuit", 0xEA80, "Two switches, an AND gate and a light.",
 		  { h("1. Two switches"),
@@ -287,7 +290,7 @@ float rich(ID2D1RenderTarget* rt, const std::string& text, float x, float y, flo
 
 const wchar_t* kClass = L"CedarLogicHelp";
 const float kSide = 250, kRow = 30, kSearchH = 30;
-enum Extra { kShortcuts = 1000, kClassic, kWhatsNew, kTour };
+enum Extra { kShortcuts = 1000, kClassic, kWhatsNew, kTour, kShowMe };
 
 struct Row { int page = -1; int extra = 0; std::string heading; D2D1_RECT_F r{}; };
 
@@ -321,7 +324,8 @@ struct HelpWindow {
 		// The rest of Help, found by name (and a few words for it) too.
 		struct More { int extra; const char* name; const char* words; };
 		const More more[] = { { kShortcuts, "Keyboard Shortcuts", "keys hotkeys" },
-		                      { kTour, "Guided Tour", "tutorial walkthrough" },
+		                      { kShowMe, "Show Me Around", "tour walkthrough where window spotlight" },
+		                      { kTour, "Learn Logic: Guided Tour", "tutorial lesson walkthrough" },
 		                      { kWhatsNew, "What's New", "whats new changes release notes" },
 		                      { kClassic, "Classic Help", "old original" } };
 		bool anyMore = false;
@@ -347,6 +351,7 @@ struct HelpWindow {
 		switch (r.extra) {
 		case kShortcuts: if (from) from->showShortcuts(); break;
 		case kTour: if (from) { SetForegroundWindow(from->window()); from->run(CMD_TOUR); } break;
+		case kShowMe: if (from) { SetForegroundWindow(from->window()); from->run(CMD_SHOW_ME_AROUND); } break;
 		case kWhatsNew: if (from) { SetForegroundWindow(from->window()); from->run(CMD_WHATS_NEW); } break;
 		case kClassic: {
 			const std::string file = resourcesDir() + "\\help\\Introduction.htm";

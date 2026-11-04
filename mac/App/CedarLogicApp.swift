@@ -154,14 +154,10 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
         // cedarlogic://open links (ShareLink.swift).
         MainActor.assumeIsolated { ShareLink.install() }
         Splash.shared.showIfLaunching()
-        // Asked once, once the circuit is there to ask over.
-        if Splash.shared.active {
-            NotificationCenter.default.addObserver(forName: .clSplashDone, object: nil, queue: .main) { _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainActor.assumeIsolated { CrashReports.askOnce() } }
-            }
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { CrashReports.askOnce() } }
-        }
+        // Crash reports and usage stats, asked once (Privacy.swift): for
+        // anyone past the welcome who hasn't been, as a sheet over the
+        // circuit once it has the keys (after What's New, before Show Me Around).
+        MainActor.assumeIsolated { PrivacyConsent.askWhenReady() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -193,6 +189,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { SyncCenter.shared.start() } }
             // Classroom (behind its flag) polls the classes this Mac teaches or is in.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { ClassroomCenter.shared.start() } }
+            // Usage stats, if they're on: counted from here, sent in the background (UsageStats.swift).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { MainActor.assumeIsolated { UsageStats.shared.start() } }
         }
         // Once anything macOS was asked to open (a file double-clicked in
         // Finder) has arrived: the circuit you were last in (LastCircuit), as
@@ -327,14 +325,30 @@ enum DevSnapshot {
 
 /// The standard About panel, plus which build this is: the Native app and the
 /// wx app can both be installed, and several builds of either.
-private func showAbout() {
+/// The project's address, for questions (About). Send Feedback stays the
+/// way to report a problem.
+let contactEmail = "cedarlogic@proton.me"
+
+/// About's credits: where CedarLogic came from, its licence and build, and
+/// a quiet line with the project's address (a link that starts a new mail).
+func aboutCredits() -> NSAttributedString {
     let info = Bundle.main.infoDictionary ?? [:]
     let commit = info["CLCommit"] as? String ?? "unknown"
-    let credits = NSAttributedString(
-        string: "CedarLogic began at Cedarville University and was modernized and brought to the Mac by Kieran Klukas. This version was rebuilt and extended with Claude.\nFree software under the GPL-3.0 · build \(commit)",
-        attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                     .foregroundColor: NSColor.secondaryLabelColor])
-    NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
+    let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+    let center = NSMutableParagraphStyle()
+    center.alignment = .center
+    let base: [NSAttributedString.Key: Any] = [.font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: center]
+    let credits = NSMutableAttributedString(
+        string: "CedarLogic began at Cedarville University and was modernized and brought to the Mac by Kieran Klukas. This version was rebuilt and extended with Claude.\nFree software under the GPL-3.0 · build \(commit)\nQuestions? ",
+        attributes: base)
+    var link = base
+    link[.link] = URL(string: "mailto:\(contactEmail)")
+    credits.append(NSAttributedString(string: contactEmail, attributes: link))
+    return credits
+}
+
+private func showAbout() {
+    NSApp.orderFrontStandardAboutPanel(options: [.credits: aboutCredits()])
     NSApp.activate()
 }
 
@@ -437,6 +451,9 @@ enum AppActions {
     static var openWindow: OpenWindowAction?
     static func openLibrary() { openWindow?(id: "library") }
     static func openHelp() { openWindow?(id: "help") }
+    /// Help > Learn Logic Online…: the website's lessons, in the browser.
+    static let learnOnlineURL = URL(string: "https://cedarlogic.netlify.app/learn/")!
+    static func openLearnOnline() { NSWorkspace.shared.open(learnOnlineURL) }
 }
 
 /// Which app opens a .cdl file double-clicked in Finder. The classic
@@ -875,7 +892,10 @@ struct HelpCommands: Commands {
             Button("Play the Intro") { Splash.shared.playIntroNow() }
             Button("Welcome to CedarLogic…") { openWindow(id: "welcome") }
             Button("Set Up CedarLogic…") { ActionID.setUp.run(canvas) }
-            Button("Guided Tour") { TourModel.shared.start() }
+            // Where everything is in the window (ShowMeAround.swift), then the logic lesson.
+            Button("Show Me Around") { ActionID.showMeAround.run(canvas) }
+            Button("Learn Logic: Guided Tour") { TourModel.shared.start() }
+            Button("Learn Logic Online\u{2026}") { AppActions.openLearnOnline() }
             Button("Open the Practice Circuit") { Templates.openPractice() }
         }
     }

@@ -12,6 +12,8 @@ import SwiftUI
 enum RenderUI {
     static func runIfAsked() {
         let args = CommandLine.arguments
+        // `--render-privacy <dir>`: the consent, what's sent and Settings > Privacy (PrivacyRender).
+        PrivacyRender.runIfAsked()
         // `--render-sync <dir>`: just Settings > Sync and its sheets (SyncRender).
         if let j = args.firstIndex(of: "--render-sync"), j + 1 < args.count {
             SyncRender.run(URL(fileURLWithPath: args[j + 1], isDirectory: true))
@@ -141,7 +143,7 @@ enum RenderUI {
             save("settings-toolbar-\(t)", CLToolbarSettings().padding(28), width: 640)
             save("settings-shortcuts-\(t)", CLShortcutSettings().padding(28), width: 640, height: 520)
             if !dark {   // the welcome and tour are the brand look either way
-                for pg in 0..<5 { save("welcome-\(pg)", WelcomeView(page: pg), width: 780, height: 580) }
+                for pg in 0..<WelcomeView.pages { save("welcome-\(pg)", WelcomeView(page: pg), width: 780, height: 580) }
                 for pg in 0..<WhatsNewView.pageCount { save("whatsnew-\(pg)", WhatsNewView(page: pg), width: 820, height: 600) }
                 for st in [0, 8, 10] {
                     TourModel.shared.step = st

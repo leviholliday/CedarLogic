@@ -82,10 +82,11 @@ ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChann
 	return { 0, false };
 }
 
-ActionsStart actionsStart(bool usedBefore, bool hasMode, int storedMode, bool storedHint) {
-	if (hasMode) return { std::min(std::max(storedMode, 0), 2), storedHint };
-	if (usedBefore) return { 2, true };
-	return { 0, false };
+ActionsStart actionsStart(bool existed, bool migrated, bool storedOn, bool opened, bool storedCollapsed) {
+	ActionsStart a{ true, false };
+	if (existed && migrated) a.on = storedOn;
+	if (existed && opened) a.collapsed = storedCollapsed;
+	return a;
 }
 
 // What linux/install.sh wrote for the group this install starts in ("beta"
@@ -111,14 +112,13 @@ void Prefs::load() {
 		channelNotice = c.notice;
 	}
 	{
-		// Before anything here is read: had CedarLogic been used? (Every save
-		// writes brandAccentSet; an older file has the welcome seen at least.)
-		const bool usedBefore = existed && (g_key_file_has_key(k, kGroup, "brandAccentSet", nullptr) || readBool(k, "hasSeenWelcome", false));
-		const bool hasMode = existed && g_key_file_has_key(k, kGroup, "actionsMode", nullptr);
-		const ActionsStart a = actionsStart(usedBefore, hasMode, hasMode ? readInt(k, "actionsMode", 0, 0, 2) : 0,
-		                                    hasMode && readBool(k, "actionsHint", false));
-		actionsMode = a.mode;
-		actionsHint = a.hint;
+		// 0.4's one-time steps (actionsStart): the old actionsMode and
+		// actionsHint are read no more, and go with the next save.
+		const ActionsStart a = actionsStart(existed, existed && readBool(k, "actionsOn04", false), existed && readBool(k, "actionsOn", true),
+		                                    existed && readBool(k, "actionsOpen04", false), existed && readBool(k, "actionsCollapsed", false));
+		actionsOn = a.on;
+		actionsCollapsed = a.collapsed;
+		showMeAroundSeen = existed && readBool(k, "showMeAroundSeen", false);
 		auto list = [&](const char* key, std::vector<std::string>& out) {
 			gsize n = 0;
 			gchar** v = existed ? g_key_file_get_string_list(k, kGroup, key, &n, nullptr) : nullptr;
@@ -130,7 +130,6 @@ void Prefs::load() {
 		};
 		list("actionsOrder", actionsOrder);
 		if (!list("actionsShown", actionsShown)) actionsShown = actions::defaults();
-		actionsCollapsed = existed && readBool(k, "actionsCollapsed", false);
 		actionsHoverOpen = !existed || readBool(k, "actionsHoverOpen", true);
 	}
 	if (existed) {
@@ -339,10 +338,13 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "reportColor", reportColor);
 	g_key_file_set_boolean(k, kGroup, "timingWhole", timingWhole);
 	g_key_file_set_boolean(k, kGroup, "timingInColor", timingInColor);
-	g_key_file_set_integer(k, kGroup, "actionsMode", actionsMode);
+	g_key_file_set_boolean(k, kGroup, "actionsOn", actionsOn);
 	g_key_file_set_boolean(k, kGroup, "actionsCollapsed", actionsCollapsed);
 	g_key_file_set_boolean(k, kGroup, "actionsHoverOpen", actionsHoverOpen);
-	g_key_file_set_boolean(k, kGroup, "actionsHint", actionsHint);
+	// 0.4's steps are done (actionsStart): from here on the choice stays.
+	g_key_file_set_boolean(k, kGroup, "actionsOn04", TRUE);
+	g_key_file_set_boolean(k, kGroup, "actionsOpen04", TRUE);
+	g_key_file_set_boolean(k, kGroup, "showMeAroundSeen", showMeAroundSeen);
 	{
 		std::vector<const gchar*> order, shown;
 		for (const std::string& a : actionsOrder) order.push_back(a.c_str());

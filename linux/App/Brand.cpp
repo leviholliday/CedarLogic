@@ -241,6 +241,24 @@ GdkPixbuf* iconPixbuf() {
 	return pb;
 }
 
+// The icon as an image Cairo paints straight from, made once (setting the
+// pixbuf as a source converts all of it, every time).
+cairo_surface_t* iconSurface() {
+	static cairo_surface_t* surface = [] {
+		GdkPixbuf* pb = iconPixbuf();
+		if (pb == nullptr) return (cairo_surface_t*)nullptr;
+		// (Not gdk_cairo_surface_create_from_pixbuf: that needs a display.)
+		cairo_surface_t* img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, gdk_pixbuf_get_width(pb), gdk_pixbuf_get_height(pb));
+		cairo_t* c = cairo_create(img);
+		gdk_cairo_set_source_pixbuf(c, pb, 0, 0);
+		cairo_set_operator(c, CAIRO_OPERATOR_SOURCE);
+		cairo_paint(c);
+		cairo_destroy(c);
+		return img;
+	}();
+	return surface;
+}
+
 }  // namespace
 
 double iconTile() {
@@ -272,12 +290,13 @@ void icon(cairo_t* cr, float x, float y, float size, float glowAmount) {
 		cairo_fill(cr);
 		cairo_pattern_destroy(halo);
 	}
-	if (pb == nullptr) return;
+	cairo_surface_t* image = iconSurface();
+	if (pb == nullptr || image == nullptr) return;
 	cairo_save(cr);
 	const int pw = gdk_pixbuf_get_width(pb), ph = gdk_pixbuf_get_height(pb);
 	cairo_translate(cr, x, y);
 	cairo_scale(cr, size / pw, size / ph);
-	gdk_cairo_set_source_pixbuf(cr, pb, 0, 0);
+	cairo_set_source_surface(cr, image, 0, 0);
 	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
 	cairo_paint(cr);
 	cairo_restore(cr);

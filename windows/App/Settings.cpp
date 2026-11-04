@@ -493,17 +493,6 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 int g_page = 0;   // the page it opens on (--page, for CI), and the one last shown
 std::string g_actionsSearch;   // Settings > Actions' search as it opens (--actions-search, for CI's pictures)
 
-// Settings > Actions' line under "Actions:", for where they are now.
-std::string railHint() {
-	switch (prefs().actionsMode) {
-	case 0: return "A strip down the right edge of the window, the side panel's mirror. Rest on one for its name and shortcut; "
-	               "drag one up or down to move it. Click its edge to fold it away, or use View \u25B8 Hide Actions" +
-	               shortcuts::tipKeys(CMD_TOGGLE_ACTIONS) + ". Right-click it to choose your own.";
-	case 1: return "The same actions as buttons in the toolbar, with no strip on the right.";
-	default: return "No actions strip. Everything is still in the menus, with its shortcut.";
-	}
-}
-
 }  // namespace
 
 void setPreferencesPage(int page) { g_page = page; }
@@ -624,7 +613,8 @@ void showPreferencesDialog(HWND parent) {
 	// row (its words), silently.
 	FormField everyLaunch = check("Launch screen:", "Play the intro every time CedarLogic opens", p.introEveryLaunch,
 	                              "The circuit drawing itself, then the launch screen, as on the first launch, without its sound "
-	                              "(that's for the first launch and updates). Help > Play the Intro plays it any time.");
+	                              "(that's for the first launch and updates). Any key or click skips it. Turn it off for the launch "
+	                              "screen alone; Help > Play the Intro plays it any time.");
 	everyLaunch.tipLines = 3;
 	on[f.add(everyLaunch)] = [](Form& form, int i) {
 		prefs().introEveryLaunch = form.checked(i);
@@ -784,16 +774,15 @@ void showPreferencesDialog(HWND parent) {
 	themeSwitch.wideGrid = true;
 	on[f.add(themeSwitch)] = [styles](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); form.refresh(styles); };
 
-	// ---- Actions (the rail, Rail.h; the Mac's CLActionsSettings)
+	// ---- Actions (the panel, Rail.h; the Mac's CLActionsSettings)
 	f.adding = ActionsPage;
 	ActionsList actionsList;
 	actionsList.query = g_actionsSearch;
-	FormField where = choice("Actions:", { "On screen", "In the toolbar", "Hidden" }, p.actionsMode, railHint());
-	where.tipLines = 3;
-	const int whereField = f.add(where);
-	FormField hoverOpen = check("", "Open it when the mouse reaches the right edge", p.actionsHoverOpen,
-	                            "When it's folded. Move the pointer to the window's right edge (or push it against the screen's) and it "
-	                            "slides out over the canvas, then back when you move away.");
+	// The panel on or off, and opening on hover under it (greyed when it's off).
+	FormField showPanel = check("Actions:", actions::kShowSwitch, p.actionsOn, p.actionsOn ? actions::showHint() : actions::offHint());
+	showPanel.tipLines = 2;
+	const int showField = f.add(showPanel);
+	FormField hoverOpen = check("", actions::kHoverSwitch, p.actionsHoverOpen, actions::hoverHint());
 	hoverOpen.tipLines = 2;
 	const int hoverField = f.add(hoverOpen);
 	FormField orderHeading;
@@ -802,12 +791,17 @@ void showPreferencesDialog(HWND parent) {
 	orderHeading.heading = true;
 	f.add(orderHeading);
 	actionsList.add(f, 300);
-	on[whereField] = [&actionsList, hoverField](Form& form, int i) {
-		prefs().actionsMode = std::max(0, std::min(2, form.choice(i)));
+	FormField foldNote;
+	foldNote.kind = FormField::Note;
+	foldNote.label = actions::foldHint();
+	foldNote.lines = 2;
+	f.add(foldNote);
+	on[showField] = [&actionsList, hoverField](Form& form, int i) {
+		prefs().actionsOn = form.checked(i);
 		actions::changed();
-		form.setTip(i, railHint());
-		form.enable(hoverField, prefs().actionsMode == 0);
-		actionsList.setDisabled(prefs().actionsMode == 2);
+		form.setTip(i, prefs().actionsOn ? actions::showHint() : actions::offHint());
+		form.enable(hoverField, prefs().actionsOn);
+		actionsList.setDisabled(!prefs().actionsOn);
 	};
 	on[hoverField] = [](Form& form, int i) {
 		prefs().actionsHoverOpen = form.checked(i);
@@ -876,8 +870,8 @@ void showPreferencesDialog(HWND parent) {
 	f.onInit = [&](Form& form) {
 		form.enable(gridStyle, prefs().showGrid);
 		actionsList.init(form);
-		form.enable(hoverField, prefs().actionsMode == 0);
-		actionsList.setDisabled(prefs().actionsMode == 2);
+		form.enable(hoverField, prefs().actionsOn);
+		actionsList.setDisabled(!prefs().actionsOn);
 		for (const auto& picker : { std::make_pair(swatches, &stepAccent), std::make_pair(styles, &stepStyle) }) {
 			HWND h = form.fields[picker.first].hwnd;
 			SetWindowSubclass(h, arrowPickProc, 2, (DWORD_PTR)picker.second);

@@ -4,17 +4,13 @@
 
 If you find a security problem in CedarLogic, please tell us privately first.
 
-- **Best:** open a private report on GitHub: [Report a vulnerability](https://github.com/leviholliday/CedarLogic/security/advisories/new) (the repository's **Security** tab, then **Report a vulnerability**). Only the maintainer sees it.
-- **Or by email:** [cedarlogic@proton.me](mailto:cedarlogic@proton.me), with "Security" in the subject. Only the maintainer reads it.
+- **Best:** email me at cedarlogic@proton.me
+- **Another Option:** open a private report on GitHub: [Report a vulnerability](https://github.com/leviholliday/CedarLogic/security/advisories/new) (the repository's **Security** tab, then **Report a vulnerability**). Only the maintainer sees it.
 - **If it isn't sensitive** (for example, an out-of-date library or a hardening idea), a normal issue is fine. The website's [`security.txt`](https://cedarlogic.netlify.app/.well-known/security.txt) points to the issues of [leviholliday/CedarLogic-Releases](https://github.com/leviholliday/CedarLogic-Releases/issues); issues on this repository work too.
 
 Please don't put details of an unfixed problem in a public issue, a feedback report or a pull request.
 
 Tell us what you found, which app or page and which version, and the steps to see it. A small `.cdl` file or a request that shows it helps a lot.
-
-## What to expect
-
-CedarLogic is a student project, run by one person. You'll get a reply within a week. We'll tell you whether we can reproduce it, and when a fix is out. If you'd like credit in the release notes, say so.
 
 ## In scope
 

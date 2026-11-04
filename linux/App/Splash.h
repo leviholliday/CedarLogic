@@ -14,6 +14,7 @@
 
 #include "App.h"
 #include <string>
+#include <vector>
 
 // Shows the splash (unseen until hideSplashSoon plays it) and returns it.
 GtkWidget* showSplash();
@@ -46,6 +47,12 @@ bool splashShowing();
 // The panel as it plays after the intro: at `t` on its own clock, its
 // top-left at (x, y), the whole at `opacity`; `calm`, the still one.
 void drawPanelAfterIntro(cairo_t* cr, float x, float y, double t, double opacity, bool calm);
+
+// --intro-bench [WxH ...]: the intro drawn as its window draws it, every
+// frame at 60 fps into an image of that size at scale 1 (1280x800 and
+// 1920x1080 if none is given), with no display; prints the time a frame
+// takes, by phase and by part (Intro.h's Part). Returns 0.
+int introBench(const std::vector<std::string>& sizes);
 
 // --splash-frame: the panel at t seconds, as a PNG.
 bool renderSplashFrame(double t, bool first, const std::string& file);

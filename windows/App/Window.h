@@ -339,9 +339,10 @@ public:
 	void openFind(const std::string& query);
 	std::string pageTitle(int page) const { return pageName(page); }
 
-	// For the guided tour: 0 the palette, 1 the canvas, 2 Run, 3 the tabs
-	// (screen pixels).
-	RECT tourAnchor(int which) const;
+	// For Show Me Around (ShowMeAround.h): where its places are, in screen
+	// pixels -- showme::Spot's palette, canvas, toolbar, Actions panel, run
+	// controls, tabs and menu bar; empty when that one isn't showing.
+	RECT tourSpot(int spot) const;
 	// Show it (after the launch screen).
 	void present();
 	// It will open maximized (as the last window was), for the intro.

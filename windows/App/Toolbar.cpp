@@ -23,22 +23,7 @@ const float kMenuText = 12, kMenuPad = 9, kIconSize = 16;
 // Glyphs for the dark mode switch: the moon and the sun.
 const wchar_t kMoon = 0xE708, kSun = 0xE706;
 
-// The Actions rail's items, in the toolbar instead (Settings > Actions: In
-// the toolbar): a group of their own, after Undo and Redo, so in a narrower
-// window Zoom gives way first, as on the Mac, then Copy and Paste, then the
-// actions themselves one at a time from the end.
-const int kActionsGroup = TGCount;
-
-bool groupShown(int g) {
-	if (g == kActionsGroup) return prefs().actionsMode == 1;
-	return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0;
-}
-
-void addActions(const std::function<void(int)>& add) {
-	if (prefs().actionsMode != 1) return;
-	for (const std::string& id : actions::rail())
-		if (const actions::Def* d = actions::find(id)) add(d->command);
-}
+bool groupShown(int g) { return g < 0 || (prefs().toolbarHidden & (1 << g)) == 0; }
 
 }  // namespace
 
@@ -79,7 +64,6 @@ void Toolbar::build(int style, bool live) {
 	if (style == TSMinimal) {
 		add(Title, 0, -1, false);
 		add(Button, CMD_UNDO, TGUndo, false); add(Button, CMD_REDO, TGUndo, false);
-		addActions([&](int command) { add(Button, command, kActionsGroup, false); });
 		add(Button, CMD_RUNNING, TGSim, true);
 		add(Button, CMD_SIM_VIEW, TGRun, true);
 		add(Button, CMD_PREFERENCES, -1, true);
@@ -87,7 +71,6 @@ void Toolbar::build(int style, bool live) {
 		if (prefs().showTitle) add(Title, 0, -1, false);
 		add(Button, CMD_NEW, TGFile, false); add(Button, CMD_OPEN, TGFile, false); add(Button, CMD_SAVE, TGFile, false);
 		add(Button, CMD_UNDO, TGUndo, false); add(Button, CMD_REDO, TGUndo, false);
-		addActions([&](int command) { add(Button, command, kActionsGroup, false); });
 		add(Button, CMD_COPY, TGClipboard, false); add(Button, CMD_PASTE, TGClipboard, false);
 		add(Button, CMD_ZOOM_OUT, TGZoom, false); add(Zoom, 0, TGZoom, false); add(Button, CMD_ZOOM_IN, TGZoom, false);
 		// The right-hand side, laid out from the right edge.
@@ -228,11 +211,8 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 			if (it.group >= 0) groupEnds.push_back({ it.group, x + pad });
 		}
 		for (const auto& ge : groupEnds)
-			if (ge.second > rightStart - 8 && ge.first != kActionsGroup)
+			if (ge.second > rightStart - 8)
 				for (Item& it : items) if (!it.right && it.group == ge.first) it.shown = false;
-		// The actions: as many as fit.
-		for (Item& it : items)
-			if (it.group == kActionsGroup && it.rect.right + pad > rightStart - 8) it.shown = false;
 		// The name alone, cut short, when even that doesn't fit.
 		for (Item& it : items)
 			if (it.kind == Title) it.rect.right = std::max(it.rect.left + 40, std::min(it.rect.right, rightStart - 8));
@@ -248,10 +228,6 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 
 bool Toolbar::isOn(const Item& it) const {
 	if (it.kind != Button) return false;
-	if (it.group == kActionsGroup) {
-		const actions::Def* d = actions::forCommand(it.command);
-		return d && actions::isOn(win, *d);
-	}
 	switch (it.command) {
 	case CMD_RUNNING: return !win->running();
 	case CMD_SIM_VIEW: return win->simView();
@@ -265,10 +241,6 @@ bool Toolbar::isOn(const Item& it) const {
 
 bool Toolbar::isEnabled(const Item& it) const {
 	if (it.kind != Button) return true;
-	if (it.group == kActionsGroup) {
-		const actions::Def* d = actions::forCommand(it.command);
-		return d && actions::enabled(win, *d);
-	}
 	switch (it.command) {
 	case CMD_UNDO: case CMD_REDO: return win->commandEnabled(it.command);
 	case CMD_STEP_CLOCK: return win->hasManualClock();   // off until the page has a clock set to move only on it
@@ -415,7 +387,7 @@ void Toolbar::draw(ID2D1RenderTarget* rt, float w, float h, int style, bool live
 
 	// Classic: the capsules behind each group.
 	if (style == TSClassic) {
-		for (int g = 0; g <= kActionsGroup; g++) {
+		for (int g = 0; g < TGCount; g++) {
 			D2D1_RECT_F u = D2D1::RectF(1e9f, 1e9f, -1e9f, -1e9f);
 			bool any = false;
 			for (const Item& it : items) {
@@ -579,6 +551,30 @@ RECT Toolbar::commandRect(int command) const {
 	RECT r;
 	GetWindowRect(hwnd, &r);
 	return r;
+}
+
+RECT Toolbar::spotRect(Spot which) {
+	RECT out = { 0, 0, 0, 0 };
+	if (!IsWindowVisible(hwnd)) return out;
+	if (relayout || (float)width() != lastW || prefs().toolbarStyle != laidStyle) layout((float)width(), (float)height(), prefs().toolbarStyle);
+	D2D1_RECT_F u = D2D1::RectF(1e9f, 1e9f, -1e9f, -1e9f);
+	bool any = false;
+	for (const Item& it : items) {
+		if (!it.shown || it.rect.right <= it.rect.left) continue;
+		bool in = false;
+		if (which == SpotMenus) in = it.kind == MenuTitle;
+		else if (which == SpotRun) in = it.right && (it.group == TGSim || it.group == TGRun);
+		else in = !it.right && (it.kind == Button || it.kind == Zoom) && it.group >= 0 && groupShown(it.group);
+		if (!in) continue;
+		any = true;
+		u.left = std::min(u.left, it.rect.left); u.top = std::min(u.top, it.rect.top);
+		u.right = std::max(u.right, it.rect.right); u.bottom = std::max(u.bottom, it.rect.bottom);
+	}
+	if (!any) return out;
+	const double s = scale();
+	out = { (LONG)std::floor(u.left * s), (LONG)std::floor(u.top * s), (LONG)std::ceil(u.right * s), (LONG)std::ceil(u.bottom * s) };
+	MapWindowPoints(hwnd, nullptr, (POINT*)&out, 2);
+	return out;
 }
 
 bool Toolbar::buttonPoint(int command, POINT& p) {

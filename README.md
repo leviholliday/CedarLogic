@@ -1,4 +1,4 @@
-<p align="center"><a href="https://cedarlogic.netlify.app"><img src="https://cedarlogic.netlify.app/assets/img/og.png" alt="CedarLogic: Build it. Watch it think. The free logic gate simulator." width="100%"></a></p>
+<p align="center"><a href="https://cedarlogic.netlify.app"><img src="https://cedarlogic.netlify.app/assets/img/og.jpg" alt="CedarLogic: Build it. Watch it think. The free logic gate simulator." width="100%"></a></p>
 
 # CedarLogic
 
@@ -214,6 +214,6 @@ It builds on [Kieran Klukas's modernized CedarLogic](https://github.com/taciturn
 
 ## Credits
 
-CedarLogic began at [Cedarville University](https://www.cedarville.edu/), written by Benjamin Sprague, Matthew Lewellyn, David Knierim, Joshua Lansford and Nathan Harro (2007), and later Tyler Drake, Julian Pernia, Jackson Vaugn and Colin Broberg (2017). [Kieran Klukas](https://github.com/taciturnaxolotl/CedarLogic) modernized it and brought it to the Mac. This version was rebuilt and extended with Claude, Anthropic's AI model.
+CedarLogic began at [Cedarville University](https://www.cedarville.edu/), written by Benjamin Sprague, Matthew Lewellyn, David Knierim, Joshua Lansford and Nathan Harro (2007), and later Tyler Drake, Julian Pernia, Jackson Vaugn and Colin Broberg (2017). [Kieran Klukas](https://github.com/taciturnaxolotl/CedarLogic) modernized it in 2026 and brought it to macOS, Linux and the web. This version was rebuilt and extended with Claude, Anthropic's AI model.
 
 CedarLogic is free software under the [GNU GPL v3](LICENSE). The original Cedarville code's notice is in [`res/LICENSE.txt`](res/LICENSE.txt).
