@@ -394,6 +394,17 @@ jobs:
                    2.98:0179 3.20:0192 3.80:0228 4.42:0265 4.95:0297 5.52:0331 5.80:0348; do
             cp "intro-frames/frame-${f#*:}.png" "renders/intro-${f%%:*}s.png"
           done
+          rm -rf intro-frames
+          # The short intro (every other launch, "When CedarLogic opens: Short intro"):
+          # the same to the LED, "0.4" and the beat, then the bloom crossfades straight
+          # into the window, no panel: 3.55 s, so 214 frames (0 to 213). Stills as the
+          # Mac's PR #28: 0.2, 1.0, 2.6, 3.2 s and the last frame.
+          timeout 600 "$A" --render-intro "$PWD/intro-short" short
+          test "$(ls intro-short/frame-*.png | wc -l)" -eq 214
+          for f in 0.20:0012 1.00:0060 2.60:0156 3.05:0183 3.20:0192 3.40:0204 3.55:0213; do
+            cp "intro-short/frame-${f#*:}.png" "renders/intro-short-${f%%:*}s.png"
+          done
+          rm -rf intro-short
           timeout 90 "$A" --card-frame 0.35 --screenshot "$PWD/renders/opening-card.png" format/tests/fixtures/Lab5.cdl || true
           timeout 90 "$A" --dark --card-frame 0.35 --screenshot "$PWD/renders/opening-card-dark.png" res/samples/practice.cdl || true
           # Ctrl+Tab's panel (its own picture, see-through corners and shadow).
@@ -500,7 +511,11 @@ jobs:
       # one order for the rail's drag and the list, the search, the hot
       # strip's place and the dwell, pass-through and leaving, focus mode
       # folding (not hiding) and giving it back, and the rest, PASS or FAIL;
-      # and the intro's rules and Help > Play the Intro (lines "intro: ...").
+      # and the intro's rules and Help > Play the Intro (lines "intro: ..."),
+      # Help > Learn Logic Online, drags begun in the hot strip (real input:
+      # the canvas's, folded and open, in focus mode and not), text on the
+      # accent at 4.5:1, and Settings on 1024 x 600 and 1280 x 720 screens at
+      # 125% and 150%.
       - name: Actions rail
         if: matrix.run
         shell: bash
@@ -540,16 +555,39 @@ jobs:
             done
           done
           ls -l "$R"
-          timeout 180 "$A" --rail-check | tee rail-check.log
+          timeout 300 "$A" --rail-check | tee rail-check.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "rail check:.*all passed" rail-check.log
-          # (It checks the intro's rules too: the every-time setting on by default (and off once turned off), the
-          # update intro with its sound, an every-time launch with none, and Help > Play
-          # the Intro, played over a window. Each of those must be there and pass.)
-          for want in "on by default" "turned off, it stays off" "by default a later launch plays it, silently" "updates only" "after an update plays the update's intro, with the sound" \
-                      "a later launch plays it, with no sound" "Play the Intro is among the actions" \
-                      "Help > Play the Intro is in the menu bar" "Play the Intro plays" "the once-only keys are left"; do
+          # (It checks the intro's rules too: "When CedarLogic opens" (Short intro for
+          # everyone, settled once from the old checkbox, each choice sticking), which
+          # launch plays which intro and with the sound or not, the short one's length,
+          # and Help > Play the Intro, played over a window, and the short one too.
+          # Each of those must be there and pass.)
+          for want in "the short intro is 3.55 s" "short draws 214 frames" "offers Short intro, Full intro, Classic launch screen and None" \
+                      "a new install opens with the short intro" "settled once from the checkbox never touched" \
+                      "settled once from the checkbox turned on (when it began off): Full intro" \
+                      "settled once from the checkbox left on (when it began on): Short intro" \
+                      "settled once from the checkbox turned off (when it began on): Classic launch screen" \
+                      "each of the four choices sticks" "updates only" "a first launch plays the full intro, with the sound, whatever the choice" \
+                      "by default a later launch plays the short intro, silently" "Full intro: a later launch plays the full intro, with no sound" \
+                      "Classic launch screen: a later launch plays no intro" "None: a later launch has no launch screen at all" \
+                      "after an update plays the update's intro, with the sound, whatever the choice" "None never skips an intro that's owed" \
+                      "Play the Intro is among the actions" "Help > Play the Intro is in the menu bar" "Play the Intro plays" \
+                      "the once-only keys are left" "the short intro plays"; do
             grep "^PASS intro: .*$want" rail-check.log > /dev/null || { echo "::error::intro check missing or failed: $want"; exit 1; }
+          done
+          # Help > Learn Logic Online; the hot strip never takes the canvas's presses
+          # (the Linux bug); text on the accent; Settings on small screens.
+          for want in "learn online: Learn Logic Online" "learn online: Help > Learn Logic Online" \
+                      "right edge: folded, a drag started under the peeking tab" "right edge: folded, a drag started 11 points in" \
+                      "right edge: open, a drag started 3 points in" "right edge: folded, in focus mode, a drag started under the peeking tab" \
+                      "right edge: open, in focus mode, a drag started" "right edge: folded, the wheel in the strip" \
+                      "contrast: the menus" "contrast: a default button's text" "contrast: Settings' page bar" \
+                      "contrast: the ink on a selected row" "contrast: on CedarLogic's green (light) the text is dark ink" \
+                      "contrast: on CedarLogic's green (dark) the text is dark ink" \
+                      "settings: on this screen" "settings: fits a 1024 x 600 screen at 125%" "settings: fits a 1024 x 600 screen at 150%" \
+                      "settings: fits a 1280 x 720 screen at 125%" "settings: fits a 1280 x 720 screen at 150%"; do
+            grep -F "PASS " rail-check.log | grep -F -- "$want" > /dev/null || { echo "::error::check missing or failed: $want"; exit 1; }
           done
           # 0.4's Actions panel and Show Me Around: the migrations from every old
           # setting, no toolbar mode, the walk's keys, stops, panel stop, Escape,

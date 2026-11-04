@@ -168,7 +168,14 @@ void ActionsRail::tick(double now) {
 	if (!onScreen()) return;
 	const bool isFolded = folded();
 	bool strip = hov.overStrip, over = hov.overRail;
-	if (watchPointer) {
+	// A press that began somewhere else (a drag on the canvas, started in
+	// the strip or dragged into it) has the pointer: the rail doesn't come
+	// out under it, or go, until it's let go.
+	const HWND captured = GetCapture();
+	const bool elsewhere = captured && captured != hwnd && captured != label;
+	if (watchPointer && elsewhere) {
+		if (!hov.slidOut) strip = over = false;
+	} else if (watchPointer) {
 		strip = over = false;
 		if (isFolded && IsWindowVisible(win->window())) {
 			POINT p;
@@ -214,6 +221,16 @@ void ActionsRail::tick(double now) {
 }
 
 // ---- Geometry (points, in the rail's window) ----------------------------------------
+
+// The hot strip is no window: the clock watches the pointer (tick). Folded,
+// the tab peeking (a few points wider, over the canvas) takes only its own
+// width's clicks: a press on the rest is the canvas's, as is the wheel, so a
+// drag can start anywhere at the canvas's right edge. Slid out, all of it is
+// the rail's.
+LRESULT ActionsRail::hitTest(float x, float) {
+	if (folded() && slideAmount() <= 0.001 && x < (float)width() - rail::kTabWidth) return HTTRANSPARENT;
+	return HTCLIENT;
+}
 
 float ActionsRail::contentLeft(float w) const { return folded() ? w - rail::kWidth : 0; }
 

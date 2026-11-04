@@ -66,6 +66,9 @@ enum Command {
 	CMD_PLAY_INTRO,
 	// Help > Show Me Around (ShowMeAround.h): a spotlight walk round the window.
 	CMD_SHOW_ME_AROUND,
+	// Help > Learn Logic Online…: the website's lessons, with live circuits,
+	// in the browser (kLearnOnlineUrl, App.h).
+	CMD_LEARN_ONLINE,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 	// Window > the open circuits (CMD_WINDOW_LIST + i).

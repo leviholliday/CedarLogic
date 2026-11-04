@@ -750,7 +750,9 @@ void paintTags(ID2D1RenderTarget* rt, float width) {
 			drawText(rt, "✦", D2D1::RectF(x, r[i].top + 6, x + 12, r[i].bottom), 9, l.accent);
 			x += 13;
 		}
-		drawText(rt, kTags[i], D2D1::RectF(x, r[i].top + 5, r[i].right, r[i].bottom), 12, on ? l.accent : withAlpha(l.ink, 0.75f),
+		const D2D1_COLOR_F paperBack = l.dark ? rgb255(28, 31, 37) : rgb255(250, 250, 252);
+		const D2D1_COLOR_F chipBack = Chrome::over(withAlpha(l.accent, l.dark ? 0.2f : 0.12f), Chrome::over(l.card, paperBack));
+		drawText(rt, kTags[i], D2D1::RectF(x, r[i].top + 5, r[i].right, r[i].bottom), 12, on ? chrome().accentText(chipBack) : withAlpha(l.ink, 0.75f),
 		         TextAlign::Leading, on);
 	}
 	if (dashed) dashed->Release();

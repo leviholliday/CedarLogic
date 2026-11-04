@@ -14,7 +14,12 @@
 // "Ready", the bar filling); the panel then plays the rest of it, its sweep
 // at full length, holds a moment to be read ("CedarLogic 0.4", the bar
 // full), and dissolves with the intro into the window. Help > Play the
-// Intro plays it again over the front circuit window (playIntroNow).
+// Intro plays it again over the front circuit window (playIntroNow). Every
+// other launch plays the short intro (Settings: "When CedarLogic opens"):
+// just the drawing, which goes from its bloom straight into the window,
+// this panel never shown; with "Classic launch screen", just this panel, as
+// before there was an intro; with "None", nothing: the window straight in,
+// without its opening card (straightIn).
 //
 // It's a layered window drawn with Direct2D 1.1 (effects for the blurs and
 // glows) into a bitmap with real transparency, so the panel's corners are
@@ -64,6 +69,7 @@ struct Timeline {
 	bool first = false;     // the very first launch: slower, with the sound
 	bool calm = false;      // Windows' animations are off
 	bool afterIntro = false;   // after the intro (planIntro)
+	bool hidden = false;       // after the short intro: never shown, only its clock kept
 	std::string title = "CedarLogic";
 	double dissolveAt = 2.25, fadeTime = 0.42, readyAt = -1;
 	struct Step { double at; std::string text; double progress; };
@@ -98,21 +104,26 @@ struct Timeline {
 	// goes), its sweep at full length, held, finished, to be read, then the
 	// dissolve (with Windows' animations off: its still, briefly). The same
 	// after any intro (the Mac's Splash.configureAfterIntro).
-	void planIntro() {
+	// The short intro shows none of it (but with the animations off its
+	// still, as for any intro): it dissolves at kShortDissolveAt on the
+	// intro's own clock, the windows coming in under the bloom.
+	void planIntro(bool shortIntro = false) {
 		afterIntro = true;
 		first = false;
 		title = std::string("CedarLogic ") + whatsnew::kVersion;
 		steps.clear();
 		steps.push_back({ -1000, "Ready", 1 });
 		readyAt = 0;
-		dissolveAt = calm ? intro::kCalmHold : intro::kSplashAt + intro::kDissolveAt - intro::kCardIn;
-		fadeTime = calm ? intro::kCalmFade : intro::kFade;
+		hidden = shortIntro && !calm;
+		dissolveAt = calm ? intro::kCalmHold : hidden ? intro::kShortDissolveAt : intro::kSplashAt + intro::kDissolveAt - intro::kCardIn;
+		fadeTime = calm ? intro::kCalmFade : hidden ? intro::kShortFade : intro::kFade;
 	}
 
 	// How much of the panel shows at t: in over 0.2 s as it begins; after
 	// the intro, faded in over the intro's bloom (as the Mac fades its
 	// window in) and out with it, as well as its own dissolve.
 	double appear(double t) const {
+		if (hidden) return 0;
 		if (!afterIntro) return std::min(1.0, std::max(0.0, t / 0.2));
 		const double in = calm ? std::min(1.0, std::max(0.0, t / 0.2)) : intro::inOut((t - intro::kSplashAt) / intro::kCardFade);
 		return in * (1 - intro::inOut((t - dissolveAt) / fadeTime));
@@ -692,13 +703,23 @@ Splash* makePanel(Splash* s, HMONITOR mon) {
 }
 }  // namespace
 
+namespace {
+bool g_straightIn = false;
+}  // namespace
+
 void show() {
-	if (g_splash) return;
+	if (g_splash || g_straightIn) return;
+	// "When CedarLogic opens: None": no launch screen, and the launch's
+	// windows open without their card, straight in.
+	if (intro::straightIn()) {
+		g_straightIn = true;
+		return;
+	}
 	Splash* s = new Splash();
 	s->tl.first = !prefs().hasSeenWelcome && !prefs().firstLaunchPlayed;
 	s->tl.calm = reduceMotion();
 	s->introTrigger = intro::pending();
-	if (s->introTrigger != intro::Trigger::None) s->tl.planIntro();
+	if (s->introTrigger != intro::Trigger::None) s->tl.planIntro(intro::isShort(s->introTrigger));
 	// Where you're looking: the screen with the pointer on it.
 	POINT cursor;
 	GetCursorPos(&cursor);
@@ -707,22 +728,24 @@ void show() {
 
 bool canPlayIntroNow() { return g_splash == nullptr && !intro::active(); }
 
-void playIntroNow(CircuitWindow* over) {
-	if (!canPlayIntroNow() || over == nullptr) return;
+void playIntroNow(CircuitWindow* over, intro::Trigger trigger) {
+	if (!canPlayIntroNow() || over == nullptr || trigger == intro::Trigger::None) return;
 	// The first launch's intro, sound and all, over this window, dissolving
 	// back into it. Nothing is hidden or held, and the once-only keys are
-	// left as they are.
+	// left as they are. (--rail-check plays the short one this way too.)
 	Splash* s = new Splash();
 	s->tl.calm = reduceMotion();
-	s->introTrigger = intro::Trigger::First;
+	s->introTrigger = trigger;
 	s->replayOver = over;
-	s->tl.planIntro();
+	s->tl.planIntro(intro::isShort(trigger));
 	if (makePanel(s, MonitorFromWindow(over->window(), MONITOR_DEFAULTTONEAREST)) == nullptr) return;
 	const HWND back = over->window();
 	hideSoon([back] { if (IsWindow(back)) SetForegroundWindow(back); });
 }
 
 bool active() { return g_splash != nullptr; }
+
+bool straightIn() { return g_straightIn; }
 
 // The work happens before it plays (it lists what was done, a line at a
 // time, once it begins), so what's said meanwhile isn't shown.
@@ -734,7 +757,12 @@ void setOpening(const std::string& name) {
 
 void hideSoon(std::function<void()> then) {
 	Splash* s = g_splash;
-	if (s == nullptr) { if (then) then(); return; }
+	if (s == nullptr) {
+		// (Straight in: the launch's windows are open; any after them open with their card.)
+		g_straightIn = false;
+		if (then) then();
+		return;
+	}
 	if (!then) {   // something went wrong: out of the way at once
 		g_splash = nullptr;
 		s->destroy();
@@ -752,8 +780,10 @@ void hideSoon(std::function<void()> then) {
 		RECT r = {};
 		GetWindowRect(s->hwnd, &r);
 		const POINT icon = { r.left + (LONG)std::lround((kMargin + kW / 2) * s->scale), r.top + (LONG)std::lround((kMargin + 44 + 64) * s->scale) };
-		const double introStart = s->tl.calm ? -1 : intro::play(icon, s->replayOver);
-		s->start = introStart >= 0 ? introStart + intro::kCardIn - intro::kSplashAt : nowSeconds();
+		const double introStart = s->tl.calm ? -1 : intro::play(icon, s->introTrigger, s->replayOver);
+		// The panel's clock: kSplashAt as it begins to come in over the bloom;
+		// after the short intro (no panel), the intro's own clock.
+		s->start = introStart < 0 ? nowSeconds() : s->tl.hidden ? introStart : introStart + intro::kCardIn - intro::kSplashAt;
 		if (introStart < 0 && !s->tl.calm) {
 			// It couldn't play: the panel as after it, from the start.
 			s->tl.calm = true;

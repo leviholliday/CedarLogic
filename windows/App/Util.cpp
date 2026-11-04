@@ -4,6 +4,7 @@
 #include <d2d1_1.h>
 #include "Window.h"
 #include "DragLog.h"
+#include "Intro.h"
 #include "SessionCheck.h"
 
 #include <commdlg.h>
@@ -315,10 +316,18 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	introFirstLaunchPlayed = r.b("introFirstLaunchPlayed", introFirstLaunchPlayed);
 	introUpdatePlayed = r.s("introUpdatePlayed", introUpdatePlayed);
-	// On by default. Every launch before this one wrote "false" whether or
-	// not anyone chose it (it was off to begin with), so those ini files take
-	// the new default once; turned off after that, it stays off.
-	introEveryLaunch = r.b("introEveryLaunchSet", false) ? r.b("introEveryLaunch", true) : true;
+	// "When CedarLogic opens", or, before it, the checkbox "Play the intro
+	// every time CedarLogic opens", settled once: never touched, the short
+	// intro; turned off, the classic launch screen; turned on, the full
+	// intro. The checkbox was off to begin with and every save wrote it, so
+	// a "false" with no introEveryLaunchSet says nothing, and a "true" means
+	// it was turned on; then (from introEveryLaunchSet on) it was on to begin
+	// with, so there a "false" is the one choice it records ("true" might be
+	// the default, so the short intro).
+	const int atLaunch = intro::atLaunchFromKey(r.s("introAtLaunch", ""));
+	if (atLaunch >= 0) introAtLaunch = atLaunch;
+	else if (r.b("introEveryLaunchSet", false)) introAtLaunch = r.b("introEveryLaunch", true) ? intro::AtShort : intro::AtClassic;
+	else introAtLaunch = r.b("introEveryLaunch", false) ? intro::AtFull : intro::AtShort;
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
 	windowHeight = r.i("windowHeight", windowHeight, 300, 20000);
 	windowMaximized = r.b("windowMaximized", windowMaximized);
@@ -451,8 +460,7 @@ std::string Prefs::text() const {
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "introFirstLaunchPlayed=" << b(introFirstLaunchPlayed) << "\n";
 	o << "introUpdatePlayed=" << introUpdatePlayed << "\n";
-	o << "introEveryLaunch=" << b(introEveryLaunch) << "\n";
-	o << "introEveryLaunchSet=1\n";
+	o << "introAtLaunch=" << intro::atLaunchKey(introAtLaunch) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
 	o << "windowHeight=" << windowHeight << "\n";
 	o << "windowMaximized=" << b(windowMaximized) << "\n";

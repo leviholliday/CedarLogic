@@ -113,10 +113,12 @@ struct Prefs {
 	// update's (the What's New version it introduced).
 	bool introFirstLaunchPlayed = false;
 	std::string introUpdatePlayed;
-	// Settings > General > Launch screen: the intro at every launch, not just
-	// the first (silently; the sound is the first launch's and an update's).
-	// On to begin with, for everyone (Prefs::loadFrom); off once turned off.
-	bool introEveryLaunch = true;
+	// Settings > General > "When CedarLogic opens" (intro::AtLaunch): 0 the
+	// short intro (everyone's to begin with), 1 the full intro, 2 the classic
+	// launch screen, 3 none; silent, whichever (the sound is the first
+	// launch's and an update's). Settled once from 0.4's earlier checkbox,
+	// "Play the intro every time CedarLogic opens" (Prefs::loadFrom).
+	int introAtLaunch = 0;
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units
 	bool windowMaximized = false;
 	int paletteWidth = 210;                       // in 96-dpi units
@@ -299,6 +301,8 @@ void chooseAndOpen(CircuitWindow* from);
 void openPracticeCircuit(CircuitWindow* from);
 // Open a URL or a file in its default app.
 void openExternally(HWND parent, const std::string& target);
+// Help > Learn Logic Online…: the website's lessons (the Mac's AppActions.learnOnlineURL).
+const char* const kLearnOnlineUrl = "https://cedarlogic.netlify.app/learn/";
 // Handle a key the whole app answers to (Ctrl+S, Ctrl+Tab...). True when it
 // was one.
 bool handleShortcut(CircuitWindow* w, const MSG& msg);

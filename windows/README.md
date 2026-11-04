@@ -284,11 +284,16 @@ Direct2D here. And:
   and the hit on the LED (2.50-2.70 s) (`renders/intro-*.png`). The intro
   plays on the first launch and the first after an update, both with the
   sound (once each: `introFirstLaunchPlayed`, `introUpdatePlayed` in the
-  settings), and, with `introEveryLaunch` (Settings > General > Launch
-  screen; on by default, `introEveryLaunchSet` marking settings saved since,
-  so older ones take the new default once), on every other launch, silently. Help > Play the Intro (the
+  settings). Every other launch does what Settings > General > "When
+  CedarLogic opens" says (`introAtLaunch`: `short`, the default for everyone,
+  `full`, `classic` or `none`; settled once from 0.4's earlier checkbox
+  `introEveryLaunch`/`introEveryLaunchSet`), silently: the short intro (the
+  drawing to the beat after the LED, then the bloom crossfading straight into
+  the window, no panel: 3.55 s, `--render-intro <dir> short` draws its 214
+  frames), the full one, the launch screen alone, or nothing (and no opening
+  card). Help > Play the Intro (the
   `playIntro` action) plays the first launch's again over the front window,
-  sound and all, and marks nothing. `CL_INTRO=first|update|every` plays that
+  sound and all, and marks nothing. `CL_INTRO=first|update|every|short` plays that
   one, `CL_NO_INTRO=1` (or `CL_NO_SPLASH`) never, `CL_INTRO_FREEZE=<seconds>`
   holds it at a moment. Never in a run with a `--` option or on CI (`CI`
   set). `--rail-check` checks its rules (lines `intro: ...`).

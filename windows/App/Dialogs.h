@@ -140,6 +140,18 @@ public:
 	void showFocus();   // the focused control scrolled into view
 };
 
+// Where a form's window goes on a screen (Form::showPage): what's in it,
+// `clientW` by `contentH` pixels, in a frame `frame` (AdjustWindowRectEx of
+// an empty rectangle) whose top left would be `at`, on the work area
+// `work`: no taller than that (the page scrolling, a scroll bar `scrollW`
+// wider, unless there'd be less than `minClientH` to see), and kept on it,
+// its top left never off it. formFrame: a form's frame at a DPI.
+struct FormFit { bool scrolls = false; int clientH = 0; RECT window{}; };
+FormFit formFit(const RECT& work, POINT at, int clientW, int contentH, const RECT& frame, int scrollW, int minClientH);
+RECT formFrame(UINT dpi);
+// The form with pages that's open now (Settings), for --rail-check.
+Form* openPagedForm();
+
 // The dialogs' colours (paper, text, dimmed text, fields, their edges), for
 // what's drawn in a Picture.
 struct FormLook {
