@@ -236,4 +236,8 @@ private:
 
 void registerDialogClasses();
 
+// --rail-check: the wheel over a closed choice (a combo box, as every Form's
+// Choice is) leaves its value as it was and goes on to the page under it.
+bool wheelOverChoiceCheck(std::string& detail);
+
 #endif  // CL_WINDOWS_DIALOGS_H

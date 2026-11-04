@@ -27,6 +27,7 @@
 #include "Ink.h"
 #include "Notes.h"
 #include "Rail.h"
+#include "ShowMeAround.h"
 #include "SessionCheck.h"
 #include "Fade.h"
 
@@ -169,21 +170,41 @@ void CircuitWindow::present() {
 	UpdateWindow(hwnd);
 	appearStart = nowSeconds();
 	if (Canvas* c = currentCanvas()) c->focus();
+	// Not seen yet: Show Me Around starts once a window is up with the keys.
+	showme::startWhenReady();
 }
 
-RECT CircuitWindow::tourAnchor(int which) const {
+RECT CircuitWindow::tourSpot(int spot) const {
 	RECT r = { 0, 0, 0, 0 };
-	switch (which) {
-	case 0: if (paletteHost && IsWindowVisible(paletteHost)) { GetWindowRect(paletteHost, &r); return r; } break;
-	case 2: if (toolbar) return toolbar->commandRect(CMD_RUNNING); break;
-	case 3: if (strips[0]) { GetWindowRect(strips[0]->widget(), &r); return r; } break;
+	auto of = [&](HWND h) {
+		RECT x = { 0, 0, 0, 0 };
+		if (h && IsWindowVisible(h)) GetWindowRect(h, &x);
+		return x;
+	};
+	switch (spot) {
+	case showme::Palette: r = of(paletteHost); break;
+	case showme::Canvas: if (Canvas* c = currentCanvas()) r = of(c->widget()); break;
+	case showme::ToolbarSpot: if (toolbar) r = toolbar->spotRect(Toolbar::SpotTools); break;
+	case showme::Actions: if (rail && rail->onScreen()) r = of(rail->widget()); break;
+	case showme::Run: if (toolbar) r = toolbar->spotRect(Toolbar::SpotRun); break;
+	case showme::Tabs:
+		for (TabStrip* t : strips) {
+			if (!t) continue;
+			const RECT x = of(t->widget());
+			if (IsRectEmpty(&x)) continue;
+			if (IsRectEmpty(&r)) r = x;
+			else UnionRect(&r, &r, &x);
+		}
+		break;
+	case showme::MenuBar: if (toolbar) r = toolbar->spotRect(Toolbar::SpotMenus); break;
 	default: break;
 	}
-	if (Canvas* c = currentCanvas()) GetWindowRect(c->widget(), &r);
 	return r;
 }
 
 CircuitWindow::~CircuitWindow() {
+	// Its walk round ends with it (not seen yet: it starts again on the next window).
+	showme::windowClosed(this);
 	delete scope;
 	scope = nullptr;
 	for (Canvas* c : canvases) delete c;
@@ -415,7 +436,9 @@ void CircuitWindow::buildMenus() {
 	HMENU help = submenu(menuBar, "&Help");
 	item(help, CMD_HELP, "CedarLogic &Help\tF1");
 	item(help, CMD_SHORTCUTS, "&Keyboard Shortcuts\t?");
-	item(help, CMD_TOUR, "Guided &Tour");
+	// Where everything is in the window (ShowMeAround.h), then the logic lesson.
+	item(help, CMD_SHOW_ME_AROUND, "Show Me &Around");
+	item(help, CMD_TOUR, "Learn Logic: Guided &Tour");
 	item(help, CMD_WELCOME, "&Welcome to CedarLogic\u2026");
 	item(help, CMD_WHATS_NEW, "What's &New in CedarLogic");
 	item(help, CMD_PLAY_INTRO, "&Play the Intro");
@@ -2185,11 +2208,11 @@ void CircuitWindow::run(int command) {
 	case CMD_CLOSE_SPLIT: closeSplit(); break;
 	case CMD_FOCUS_MODE: toggleFocusMode(); break;
 	case CMD_TOGGLE_ACTIONS:
-		// With the actions in the toolbar (or nowhere): the rail on screen,
-		// open. Otherwise the rail's own: slid out, back; folded, open; open, folded.
-		if (prefs().actionsMode != 0) {
+		// With the panel off: on, and open. Otherwise the panel's own: slid
+		// out, back; folded, open; open, folded.
+		if (!prefs().actionsOn) {
 			prefs().actionsCollapsed = false;
-			prefs().actionsMode = 0;
+			prefs().actionsOn = true;
 			fade::crossfade(hwnd, nullptr, 190);
 			actions::changed();
 		} else if (rail) {
@@ -2201,6 +2224,7 @@ void CircuitWindow::run(int command) {
 	case CMD_HELP: help::show(this); break;
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
 	case CMD_TOUR: welcome::startTourOn(this); break;
+	case CMD_SHOW_ME_AROUND: showme::start(this); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
 	case CMD_PLAY_INTRO: splash::playIntroNow(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;

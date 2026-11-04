@@ -169,7 +169,7 @@ const std::vector<Action>& all() {
 		{ "zoomFit", "Moving around", "Zoom to fit", CMD_ZOOM_FIT, false, "Ctrl+0|Ctrl+Num0" },
 		{ "zoomActual", "Moving around", "Actual size", CMD_ZOOM_ACTUAL, false, "Ctrl+1|Ctrl+Num1" },
 		{ "focusMode", "Moving around", "Focus mode: hide the toolbar and side panel", CMD_FOCUS_MODE, false, "Ctrl+Period" },
-		{ "toggleActions", "Moving around", "Show or hide the Actions rail", CMD_TOGGLE_ACTIONS, false, "Ctrl+B" },
+		{ "toggleActions", "Moving around", "Show or hide the Actions panel", CMD_TOGGLE_ACTIONS, false, "Ctrl+B" },
 		{ "palette", "Moving around", "Show or hide the side panel", CMD_PALETTE, false, "" },
 		{ "simView", "Simulation", "Simulation view", CMD_SIM_VIEW, false, "Ctrl+R" },
 		{ "step", "Simulation", "Step once", CMD_STEP, false, "Ctrl+Shift+R" },
