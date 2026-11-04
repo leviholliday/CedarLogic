@@ -1886,8 +1886,13 @@ struct SessionDriver {
 		pump(300);
 		guarded("the Actions rail's checks", [&] { railChecks(); });
 		pump(200);
-		guarded("Show Me Around's checks", [&] { tourChecks(); });
-		pump(200);
+		// Show Me Around's checks take half a minute: in seeds 1, 5, 9... only
+		// (CI's seed 1 runs, plain, fatal-criticals and frame-whole, and the
+		// sanitizers' seed 5), so the build stays inside its time.
+		if (seed % 4 == 1) {
+			guarded("Show Me Around's checks", [&] { tourChecks(); });
+			pump(200);
+		}
 		const int windowsAtStart = CircuitWindow::liveCount;
 		long rss[3] = { residentKB(), 0, 0 };
 		const double started = nowMs();

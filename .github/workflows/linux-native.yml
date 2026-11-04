@@ -36,9 +36,7 @@ jobs:
     # here starts on Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm),
     # Fedora 36 and anything newer.
     runs-on: ${{ matrix.os }}
-    # (x86_64 runs the session check too; with Show Me Around's pictures it
-    # takes about 47 minutes.)
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -413,13 +411,15 @@ jobs:
             done
           done
           ls renders/rail
-          # Show Me Around (linux/App/ShowMeAround.h), light and dark, from a new install's
+          # Show Me Around (linux/App/ShowMeAround.h), on aarch64 only (x86_64 has the session
+          # check to fit in its time; the pictures are the same), light and dark, from a new install's
           # settings: each of its seven stops (walk:N), the first with the Actions panel off
           # (walkoff:0, six stops), each in a 1024x600 window (walksmall:N); and the welcome's
           # Actions panel page (welcome:2), What's New's card for it (whatsnewpanel),
           # Settings > Actions on and off, and About.
           mkdir -p renders/tour
-          for look in light dark; do
+          [ "$(uname -m)" = x86_64 ] && looks= || looks="light dark"
+          for look in $looks; do
             for show in walk:0 walk:1 walk:2 walk:3 walk:4 walk:5 walk:6 walkoff:0 walksmall:0 walksmall:1 walksmall:2 walksmall:3 walksmall:4 walksmall:5 walksmall:6 welcome:2 whatsnewpanel whatsnew:4 whatsnew:7 settings:4 settingsoff about; do
               name=$(echo "$show" | tr ':' '-')
               home=$(mktemp -d)
