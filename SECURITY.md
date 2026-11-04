@@ -12,10 +12,6 @@ Please don't put details of an unfixed problem in a public issue, a feedback rep
 
 Tell us what you found, which app or page and which version, and the steps to see it. A small `.cdl` file or a request that shows it helps a lot.
 
-## What to expect
-
-CedarLogic is a student project, run by one person. You'll get a reply within a week. We'll tell you whether we can reproduce it, and when a fix is out. If you'd like credit in the release notes, say so.
-
 ## In scope
 
 - **The apps:** CedarLogic for Mac, Windows and Linux (the folders `mac/`, `windows/`, `linux/` and the shared engine they run).
