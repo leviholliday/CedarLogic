@@ -436,13 +436,10 @@ GtkWidget* makeButton(const std::string& label, std::function<void()> f, bool su
 	return b;
 }
 
-GtkWidget* hintLabel(const std::string& text, int width = 360) {
+// A line of help on the Sync page, wrapping at the width of what it's in.
+GtkWidget* hintLabel(const std::string& text) {
 	GtkWidget* h = gtk_label_new(text.c_str());
-	gtk_style_context_add_class(gtk_widget_get_style_context(h), "hint");
-	gtk_label_set_xalign(GTK_LABEL(h), 0);
-	gtk_label_set_line_wrap(GTK_LABEL(h), TRUE);
-	gtk_label_set_max_width_chars(GTK_LABEL(h), width / 6);
-	gtk_widget_set_size_request(h, width, -1);
+	settings::hintStyle(h);
 	return h;
 }
 
@@ -875,13 +872,11 @@ struct Form {
 	}
 	void add(const char* label, GtkWidget* control, const std::string& hint = "") {
 		GtkWidget* l = gtk_label_new((std::string(label) + ":").c_str());
-		gtk_label_set_xalign(GTK_LABEL(l), 1);
-		gtk_label_set_yalign(GTK_LABEL(l), 0);
-		gtk_widget_set_size_request(l, 150, -1);
+		settings::formLabel(l);
 		gtk_widget_set_margin_top(l, 5);
-		gtk_widget_set_valign(l, GTK_ALIGN_START);
 		gtk_grid_attach(GTK_GRID(grid), l, 0, row, 1, 1);
 		GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+		gtk_widget_set_hexpand(v, TRUE);
 		gtk_box_pack_start(GTK_BOX(v), control, FALSE, FALSE, 0);
 		if (!hint.empty()) gtk_box_pack_start(GTK_BOX(v), hintLabel(hint), FALSE, FALSE, 0);
 		gtk_grid_attach(GTK_GRID(grid), v, 1, row, 1, 1);
@@ -921,13 +916,12 @@ void buildWorking(Page* p) {
 void buildOff(Page* p, const clsync::Status& st) {
 	GtkWidget* box = pageBox();
 	gtk_box_pack_start(GTK_BOX(box), headingLabel("Sync Your Circuits"), FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box), hintLabel(kWhatItIs, 560), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), hintLabel(kWhatItIs), FALSE, FALSE, 0);
 	if (st.kind == clsync::Status::Gone && !st.text.empty()) {
 		GtkWidget* gone = gtk_label_new(st.text.c_str());
 		gtk_label_set_xalign(GTK_LABEL(gone), 0);
 		gtk_label_set_line_wrap(GTK_LABEL(gone), TRUE);
-		gtk_label_set_max_width_chars(GTK_LABEL(gone), 90);
-		gtk_widget_set_size_request(gone, 560, -1);
+		gtk_label_set_max_width_chars(GTK_LABEL(gone), 20);   // wraps at the page's width
 		gtk_widget_set_margin_top(gone, 4);
 		gtk_box_pack_start(GTK_BOX(box), gone, FALSE, FALSE, 0);
 	}
@@ -936,9 +930,9 @@ void buildOff(Page* p, const clsync::Status& st) {
 	gtk_box_pack_start(GTK_BOX(buttons), makeButton("Turn On Sync", [] { turnOn(); }, true), FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(buttons), makeButton("I Have a Code\xE2\x80\xA6", [] { haveCode(std::string()); }), FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box), buttons, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box), hintLabel(kFreeLine, 560), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), hintLabel(kFreeLine), FALSE, FALSE, 0);
 	if (!syncplatform::curlAvailable())
-		gtk_box_pack_start(GTK_BOX(box), hintLabel("Sync needs the curl program, which isn't installed here (sudo apt install curl).", 560), FALSE, FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(box), hintLabel("Sync needs the curl program, which isn't installed here (sudo apt install curl)."), FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box), makeButton("How Sync Works\xE2\x80\xA6", [] { showHowItWorks(); }), FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(p->box), box, FALSE, FALSE, 0);
 }
@@ -1009,14 +1003,22 @@ void buildOn(Page* p, clsync::Engine* e) {
 	gtk_box_pack_start(GTK_BOX(code), makeButton("Show Code", [] { showCode(false); }), FALSE, FALSE, 0);
 	f.add("Sync code", code);
 	gtk_box_pack_start(GTK_BOX(outer), f.grid, FALSE, FALSE, 0);
-	// The three big ones, and how it works.
-	GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	// The three big ones, and how it works: in a row, or two when the page
+	// is too narrow for one (a large desktop font), rather than widening it.
+	GtkWidget* buttons = gtk_flow_box_new();
+	gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(buttons), GTK_SELECTION_NONE);
+	gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(buttons), 3);
+	gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(buttons), 8);
+	gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(buttons), 8);
 	gtk_widget_set_margin_start(buttons, 28);
 	gtk_widget_set_margin_end(buttons, 28);
 	gtk_widget_set_margin_top(buttons, 18);
-	gtk_box_pack_start(GTK_BOX(buttons), makeButton("Turn Off Sync\xE2\x80\xA6", [] { turnOff(); }), FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(buttons), makeButton("Start Over with a New Code\xE2\x80\xA6", [] { startOver(); }), FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(buttons), makeButton("Delete Synced Copy\xE2\x80\xA6", [] { deleteCopy(); }), FALSE, FALSE, 0);
+	for (GtkWidget* b : { makeButton("Turn Off Sync\xE2\x80\xA6", [] { turnOff(); }),
+	                      makeButton("Start Over with a New Code\xE2\x80\xA6", [] { startOver(); }),
+	                      makeButton("Delete Synced Copy\xE2\x80\xA6", [] { deleteCopy(); }) }) {
+		gtk_container_add(GTK_CONTAINER(buttons), b);
+		gtk_widget_set_can_focus(gtk_widget_get_parent(b), FALSE);   // the button takes the keyboard, not its holder
+	}
 	gtk_box_pack_start(GTK_BOX(outer), buttons, FALSE, FALSE, 0);
 	GtkWidget* how = makeButton("How Sync Works\xE2\x80\xA6", [] { showHowItWorks(); });
 	gtk_widget_set_margin_start(how, 28);

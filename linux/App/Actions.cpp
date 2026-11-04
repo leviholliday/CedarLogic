@@ -3,6 +3,7 @@
 
 #include "Actions.h"
 #include "Dialogs.h"
+#include "Settings.h"
 #include "Shortcuts.h"
 #include "Window.h"
 
@@ -571,7 +572,6 @@ void List::fill() {
 		GtkWidget* menu = dimLabel(a->menu, 0.85);
 		gtk_widget_set_size_request(menu, 76, -1);
 		gtk_label_set_xalign(GTK_LABEL(menu), 1);
-		gtk_widget_set_opacity(menu, 0.75);
 		gtk_box_pack_start(GTK_BOX(line), menu, FALSE, FALSE, 0);
 		// The handle: drag by it (not while searching: the list is only some of them).
 		GtkWidget* handle = gtk_event_box_new();
@@ -692,6 +692,8 @@ GtkWidget* makeList(int height, const std::string& query, GtkWidget** searchOut)
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 	gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(scroll), GTK_SHADOW_IN);
 	gtk_widget_set_size_request(scroll, -1, height);
+	// Settings > Actions makes it shorter on a small screen (Settings.h).
+	g_object_set_data(G_OBJECT(scroll), settings::kFitList, GINT_TO_POINTER(height));
 	l->rows = gtk_list_box_new();
 	gtk_widget_set_name(l->rows, "actions-list");
 	gtk_list_box_set_selection_mode(GTK_LIST_BOX(l->rows), GTK_SELECTION_SINGLE);
@@ -773,12 +775,11 @@ GtkWidget* settingsPage() {
 	GtkWidget* grid = gtk_grid_new();
 	gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
 	GtkWidget* label = gtk_label_new("Actions:");
-	gtk_label_set_xalign(GTK_LABEL(label), 1);
-	gtk_widget_set_size_request(label, 150, -1);
-	gtk_widget_set_valign(label, GTK_ALIGN_START);
+	settings::formLabel(label);
 	gtk_widget_set_margin_top(label, 5);
 	gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 1, 1);
 	GtkWidget* right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	gtk_widget_set_hexpand(right, TRUE);
 	GtkWidget* edge = gtk_check_button_new_with_label("Open it when the mouse reaches the right edge");
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(edge), prefs().actionsHoverOpen);
 	gtk_widget_set_halign(edge, GTK_ALIGN_START);
@@ -789,13 +790,7 @@ GtkWidget* settingsPage() {
 	GtkWidget* edgeHint = gtk_label_new("When it's folded. Move the pointer to the window's right edge (or push it against the screen's) and it "
 	                                    "slides out over the canvas, then back when you move away.");
 	GtkWidget* hint = gtk_label_new(modeHint().c_str());
-	for (GtkWidget* h : { edgeHint, hint }) {
-		gtk_style_context_add_class(gtk_widget_get_style_context(h), "hint");
-		gtk_label_set_xalign(GTK_LABEL(h), 0);
-		gtk_label_set_line_wrap(GTK_LABEL(h), TRUE);
-		gtk_label_set_max_width_chars(GTK_LABEL(h), 58);
-		gtk_widget_set_size_request(h, 360, -1);
-	}
+	for (GtkWidget* h : { edgeHint, hint }) settings::hintStyle(h);
 	gtk_widget_set_margin_start(edgeHint, 26);
 	GtkWidget* list = makeList(300, "", nullptr);
 	struct Parts { GtkWidget *edge, *edgeHint, *hint, *list; };
@@ -853,9 +848,7 @@ void showCustomize(CircuitWindow* w, const std::string& query) {
 	GtkWidget* line = gtk_label_new("Tick what goes on the Actions rail, anything from any menu. They show in this order, top to bottom. "
 	                                "You can also drag them up or down on the rail itself.");
 	gtk_style_context_add_class(gtk_widget_get_style_context(line), "hint");
-	gtk_label_set_xalign(GTK_LABEL(line), 0);
-	gtk_label_set_line_wrap(GTK_LABEL(line), TRUE);
-	gtk_label_set_max_width_chars(GTK_LABEL(line), 64);
+	settings::hintStyle(line);
 	GtkWidget* search = nullptr;
 	GtkWidget* list = makeList(360, query, &search);
 	g_object_set_data(G_OBJECT(win), "cl-search", search);
@@ -871,6 +864,20 @@ void showCustomize(CircuitWindow* w, const std::string& query) {
 	gtk_box_pack_start(GTK_BOX(box), list, TRUE, TRUE, 0);
 	gtk_box_pack_start(GTK_BOX(box), bottom, FALSE, FALSE, 0);
 	gtk_container_add(GTK_CONTAINER(win), box);
+	{
+		GtkWidget* scroll = nullptr;
+		std::function<void(GtkWidget*)> find = [&](GtkWidget* x) {
+			if (!scroll && g_object_get_data(G_OBJECT(x), settings::kFitList)) scroll = x;
+			if (!scroll && GTK_IS_CONTAINER(x)) gtk_container_foreach(GTK_CONTAINER(x), [](GtkWidget* c, gpointer f) {
+				(*static_cast<std::function<void(GtkWidget*)>*>(f))(c); }, &find);
+		};
+		find(list);
+		gtk_widget_show_all(box);
+		int minH = 0, natH = 0;
+		gtk_widget_get_preferred_height_for_width(box, 520 - 40, &minH, &natH);
+		const int over = natH + 40 - usableArea(w ? GTK_WIDGET(w->window()) : nullptr).height;
+		if (scroll && over > 0) gtk_widget_set_size_request(scroll, -1, std::max(150, 360 - over));
+	}
 	// Escape clears a search first, then closes.
 	g_signal_connect(win, "key-press-event", CL_CALLBACK(+[](GtkWidget* self, GdkEventKey* e, gpointer) -> gboolean {
 		if (e->keyval != GDK_KEY_Escape) return FALSE;

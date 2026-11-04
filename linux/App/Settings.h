@@ -16,11 +16,32 @@ namespace settings {
 constexpr int kActionsPage = 4;
 constexpr int kSyncPage = 6;
 void show(CircuitWindow* from, int page = -1);
+// The pages' parts, shared with Settings > Actions and Sync: a setting's name
+// in the label column (right-aligned, the column's 150 points, wrapping
+// rather than widening it), and a line of help under its control (small,
+// solid grey, wrapping at whatever width the page gives it).
+// A list on a page that should take what height the screen leaves (Shortcuts,
+// Actions): its scrolled window carries this, with its tallest as an int.
+constexpr const char* kFitList = "cl-fit-list";
+void formLabel(GtkWidget* label);
+void hintStyle(GtkWidget* label);
 GtkWidget* window();
 // The page's content changed size (Sync's states): the window follows.
 void pageChanged();
 // The theme changed: redraw what's drawn.
 void themeChanged();
+
+// For --settings-check (SettingsCheck.cpp): the pages, one shown at once
+// without its fade, its scroller and its content.
+int pageCount();
+const char* pageTitle(int page);
+void selectNow(int page);
+GtkWidget* pageScroller();
+GtkWidget* currentPage();
+// --settings-check <folder> [tag]: every page and Customize Actions on this
+// screen, pictured into <folder> as <tag>-settings-N.png and checked (they
+// fit, read at 4.5:1, and the wheel never changes a setting). 0 if all passed.
+int check(CircuitWindow* w, const std::string& dir, const std::string& tag);
 }
 
 #endif  // CL_LINUX_SETTINGS_H
