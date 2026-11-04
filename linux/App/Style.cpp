@@ -247,6 +247,8 @@ void applyStyle() {
 			s += all({ "scrollbar", "scrollbar trough" }) + " { background-image: none; background-color: transparent; border: none; box-shadow: none; }\n";
 			s += w + " scrollbar slider { background-image: none; background-color: " + css(withAlpha(text, 0.32f)) + "; border: none; box-shadow: none; }\n";
 			s += w + " scrollbar slider:hover, " + w + " scrollbar slider:active { background-color: " + css(withAlpha(text, 0.5f)) + "; }\n";
+			s += w + " scrollbar button { background-image: none; background-color: transparent; border: none; box-shadow: none; color: " +
+			     css(withAlpha(text, 0.55f)) + "; }\n";
 		}
 		s += "#settings #shortcut-keys { padding: 2px 4px; border-radius: 6px; background-color: transparent; min-height: 24px; }\n";
 		s += "#settings #shortcut-keys:hover { background-color: " + css(withAlpha(text, 0.06f)) + "; }\n";
