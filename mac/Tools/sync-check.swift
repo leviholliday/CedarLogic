@@ -718,6 +718,30 @@ enum KeychainCheck {
         kf.delete()
         check("Keychain: deleted: nothing left", loaded(kf) == nil && otherLoads(file) == "none"
               && !exists(service: service, account: kf.sealedFile.path) && !FileManager.default.fileExists(atPath: kf.sealedFile.path))
+
+        // A path with a space, a double quote and a backslash: escaped on security's line, so
+        // the key item's account is exactly the path (and nothing else got on the line).
+        let oddDir = dir.appendingPathComponent("odd \"dir\\ x", isDirectory: true)
+        try? FileManager.default.createDirectory(at: oddDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let odd = KeychainFile(service: service, file: oddDir.appendingPathComponent("se\"cr\\et"), label: "CedarLogic \"test\" \\ label")
+        check("Keychain: a path with a space, a quote and a backslash is saved",
+              odd.save(Data("7777777777777777777777777777".utf8)) && exists(service: service, account: odd.sealedFile.path))
+        check("Keychain: and reads back, here and in the next build",
+              loaded(odd) == "7777777777777777777777777777" && otherLoads(odd.file) == "data:7777777777777777777777777777")
+        odd.delete()
+        check("Keychain: and is deleted", !exists(service: service, account: odd.sealedFile.path)
+              && !FileManager.default.fileExists(atPath: odd.sealedFile.path))
+        // A line break can't go on the line: no key, so the caller keeps the plain file.
+        check("Keychain: quoting: \\ and \" escaped, a line break refused",
+              KeychainFile.quotedForSecurity(["a b", "q\"u", "b\\s"]) == ["\"a b\"", "\"q\\\"u\"", "\"b\\\\s\""]
+                  && KeychainFile.quotedForSecurity(["x\ny"]) == nil && KeychainFile.quotedForSecurity(["x\r\ny"]) == nil)
+        let nlDir = dir.appendingPathComponent("line\nbreak", isDirectory: true)
+        try? FileManager.default.createDirectory(at: nlDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let nl = KeychainFile(service: service, file: nlDir.appendingPathComponent("secret"), label: "CedarLogic test")
+        FileManager.default.createFile(atPath: nl.file.path, contents: Data("8888888888888888888888888888".utf8), attributes: [.posixPermissions: 0o600])
+        check("Keychain: a path with a line break isn't saved, and its plain file is kept and read",
+              !nl.save(Data("8888888888888888888888888888".utf8)) && loaded(nl) == "8888888888888888888888888888"
+                  && FileManager.default.fileExists(atPath: nl.file.path) && !exists(service: service, account: nl.sealedFile.path))
         unlink(other)
     }
 }

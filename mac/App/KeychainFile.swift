@@ -154,13 +154,14 @@ struct KeychainFile {
             return .key(key)
         case false?:
             guard create else { return .missing }
-            // One line on its stdin (security -i), so the key is never on a command line. The
-            // quoted values can't hold a quote, a backslash or a line break: a path that does
-            // gets no key, and the caller keeps the plain file.
+            // One line on its stdin (security -i), so the key is never on a command line.
+            // Each value is quoted, with \ and " escaped as security's reader takes them
+            // (\\ and \"). A line break can't be in a line at all: a value with one gets no
+            // key, and the caller keeps the plain file.
             let fields = [service, account, label, Self.keyKind]
-            guard !fields.contains(where: { $0.contains(where: { "\"\\\n\r".contains($0) }) }) else { return .failed }
+            guard let quoted = Self.quotedForSecurity(fields) else { return .failed }
             let hex = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }.map { String(format: "%02x", $0) }.joined()
-            let line = "add-generic-password -s \"\(service)\" -a \"\(account)\" -l \"\(label)\" -D \"\(Self.keyKind)\" -w \"\(hex)\"\n"
+            let line = "add-generic-password -s \(quoted[0]) -a \(quoted[1]) -l \(quoted[2]) -D \(quoted[3]) -w \"\(hex)\"\n"
             _ = Self.security(["-i"], input: line)
             // Read back, whatever it said: if another copy added one first, that's the key.
             return key(create: false)
@@ -269,6 +270,17 @@ struct KeychainFile {
         let out = stdout.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         return (p.terminationStatus, out)
+    }
+
+    /// Each value in double quotes for `security -i`, \\ and \" escaped; nil if
+    /// any holds a line break or a NUL, which no quoting gets through.
+    static func quotedForSecurity(_ values: [String]) -> [String]? {
+        var out: [String] = []
+        for v in values {
+            guard !v.unicodeScalars.contains(where: { $0 == "\n" || $0 == "\r" || $0 == "\0" }) else { return nil }
+            out.append("\"" + v.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"")
+        }
+        return out
     }
 
     private static func unhex(_ s: String) -> Data? {
