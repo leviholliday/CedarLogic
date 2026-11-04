@@ -1,5 +1,6 @@
 // What's New: after an update, a walk through what's new since 0.3
-// (Recently Deleted, Clear Drawing asking, the Practice Circuit, steadier
+// (Recently Deleted, Clear Drawing asking, the Practice Circuit, the Actions
+// panel, with its two switches a click away, steadier
 // clicks and wires, Check My Circuit, the lab report, Share Link, sync and
 // scanning to add a device, the Keychain, the feedback limit), in the launch
 // screen's look, a page a theme. Shown once per version (new installs get the
@@ -27,8 +28,13 @@ struct WhatsNewView: View {
     @State private var page: Int
     @State private var forward = true
     @State private var keyMonitor: Any?
+    /// The Actions panel's card: its switches over the page.
+    @State private var panelChoice: Bool
 
-    init(page: Int = 0) { _page = State(initialValue: page) }
+    init(page: Int = 0, panelChoice: Bool = false) {
+        _page = State(initialValue: page)
+        _panelChoice = State(initialValue: panelChoice)
+    }
 
     private struct Chapter {
         let eyebrow: String, title: String, line: String
@@ -43,7 +49,7 @@ struct WhatsNewView: View {
                     ("trash", "Recently Deleted", "In Your Circuits. Restore brings a circuit back. It's kept 30 days, on this Mac."),
                     ("scribble", "Clear Drawing asks first", "It says what will go, and that Edit \u{25B8} Undo brings it back."),
                     ("graduationcap", "Open the Practice Circuit", "In the File and Help menus. It opens as a new circuit of your own to play with."),
-                    ("sidebar.right", "Actions on the right", "The things you use most, one click away. Drag them into your order; right-click to choose your own."),
+                    ("sidebar.right", "The Actions panel", "The commands you use most, one click away on the right edge. Drag them into your order; right-click to choose your own."),
                 ], tryTitle: "Open Your Circuits"),
         Chapter(eyebrow: "On the page", title: "The same every time",
                 line: "Clicks and wires do what you expect, however big the circuit gets.",
@@ -115,6 +121,8 @@ struct WhatsNewView: View {
         }
         .frame(width: 820, height: 600)
         .background(BrandBackground())
+        .overlay { if panelChoice { panelCard.transition(.opacity) } }
+        .animation(.easeOut(duration: 0.18), value: panelChoice)
         .background(Greeting.NotRestored())
         .preferredColorScheme(.dark)
         .tint(Brand.neon)
@@ -141,10 +149,12 @@ struct WhatsNewView: View {
             guard e.window?.identifier?.rawValue.contains("whatsnew") == true,
                   e.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return e }
             switch e.keyCode {
-            case 53: finish(); return nil
-            case 36, 76: if page == pages - 1 { finish() } else { go(1) }; return nil
-            case 123: go(-1); return nil
-            case 124: go(1); return nil
+            case 53: if panelChoice { panelChoice = false } else { finish() }; return nil
+            case 36, 76:
+                if panelChoice { panelChoice = false } else if page == pages - 1 { finish() } else { go(1) }
+                return nil
+            case 123 where !panelChoice: go(-1); return nil
+            case 124 where !panelChoice: go(1); return nil
             default: return e
             }
         }
@@ -196,6 +206,13 @@ struct WhatsNewView: View {
                                     Text(p.1).font(.system(size: 13, weight: .bold)).foregroundStyle(BrandText.primary)
                                     Text(p.2).font(.system(size: 11.5)).foregroundStyle(BrandText.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
+                                    // The panel's card: on or off, open on hover.
+                                    if p.0 == "sidebar.right" {
+                                        Button("Show or Hide It\u{2026}") { panelChoice = true }
+                                            .buttonStyle(.plain)
+                                            .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Brand.neon)
+                                            .padding(.top, 3)
+                                    }
                                 }
                                 Spacer(minLength: 0)
                             }
@@ -244,6 +261,12 @@ struct WhatsNewView: View {
             finaleTile("Turn on sync", "Settings \u{25B8} Sync. Your circuits on every device.", "arrow.triangle.2.circlepath") {
                 finish(); PrefsWindow.shared.show(page: .sync)
             }
+            finaleTile("Show me around", "A minute\u{2019}s walk round the window: where everything is.", "binoculars") {
+                finish()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    MainActor.assumeIsolated { if let c = CanvasController.front { ShowMeAround.shared.start(on: c) } }
+                }
+            }
             finaleTile("Take the guided tour again", "Two switches, a gate and a light, on a circuit of its own.", "figure.walk") {
                 finish(); TourModel.shared.start()
             }
@@ -252,6 +275,29 @@ struct WhatsNewView: View {
             }
         }
         .padding(.horizontal, 56).padding(.top, 34)
+    }
+
+    /// The Actions panel's switches, over the page: the setting itself.
+    private var panelCard: some View {
+        ZStack {
+            Color.black.opacity(0.55).contentShape(Rectangle()).onTapGesture { panelChoice = false }
+            VStack(alignment: .leading, spacing: 18) {
+                BrandHeading(eyebrow: "The Actions panel", title: "Yours to show or hide",
+                             line: "It\u{2019}s on for everyone in \(WhatsNew.version). Flip these to suit you; they change it straight away.")
+                ActionsPanelChoice()
+                HStack {
+                    Spacer()
+                    Button("Done") { panelChoice = false }.buttonStyle(BrandButtonStyle(width: 110))
+                }
+            }
+            .padding(28)
+            .background(BrandBackground(bloom: .init(x: 0.2, y: 0), gridStep: 24))
+            .background(Brand.ink)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.white.opacity(0.14)))
+            .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
+            .padding(.horizontal, 36)
+        }
     }
 
     private func finaleTile(_ title: String, _ line: String, _ icon: String, action: @escaping () -> Void) -> some View {

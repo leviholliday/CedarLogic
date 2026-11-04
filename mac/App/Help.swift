@@ -58,7 +58,8 @@ enum HelpBook {
                  blocks: [
                     .p("CedarLogic is a digital logic simulator. You put gates on a page, wire them together, and the circuit runs as you build it: switches you can click, lights that show what's happening, wires that change colour with their signals."),
                     .p("The window has three parts: the **palette** of gates down the left (with a small map of the page under it), the **canvas** where you build, and the **toolbar** across the top. Each circuit can have several **tabs** (pages), shown above the canvas."),
-                    .tip("New here? Help > Guided Tour builds a working AND circuit with you, a step at a time. It takes about five minutes."),
+                    .p("Down the right edge is the **Actions panel**: the commands you use most, a click each. Rest on one for its name and shortcut, click its left edge to fold it away, and right-click it to choose what's on it. Settings > Actions turns it off or on."),
+                    .tip("New here? Help > Show Me Around points out each part of the window in under a minute, and Help > Guided Tour builds a working AND circuit with you, a step at a time, in about five."),
                  ]),
         HelpPage(id: "first", title: "Your First Circuit", icon: "lightbulb",
                  line: "Two switches, an AND gate and a light.",

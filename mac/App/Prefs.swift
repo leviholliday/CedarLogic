@@ -117,28 +117,25 @@ final class Prefs: ObservableObject {
         didSet { d.set(newPagesShareLinks, forKey: "cl.newPagesShareLinks"); cl_set_new_pages_share_links(newPagesShareLinks) }
     }
 
-    // The Actions rail (Actions.swift).
-    /// Where the actions go: the rail, the toolbar, or nowhere.
-    @Published var actionsMode: ActionsMode { didSet { d.set(actionsMode.rawValue, forKey: "cl.actions.mode") } }
-    /// The rail folded to its tab (by a click on its edge), as it was left.
+    // The Actions panel (Actions.swift).
+    /// Settings > Actions > Show the Actions panel: the strip of actions on
+    /// the window's right edge, or none (everything's still in the menus).
+    @Published var actionsOn: Bool { didSet { d.set(actionsOn, forKey: "cl.actions.on") } }
+    /// The panel folded to its tab (by a click on its edge), as it was left.
     @Published var actionsCollapsed: Bool { didSet { d.set(actionsCollapsed, forKey: "cl.actions.collapsed") } }
-    /// Folded, the rail slides out over the canvas while the pointer rests
-    /// on its tab (as Arc's sidebar does), and back when it leaves.
+    /// Settings > Actions > Open on hover: folded, the panel slides out over
+    /// the canvas while the pointer rests on its tab (as Arc's sidebar does),
+    /// and back when it leaves.
     @Published var actionsHoverOpen: Bool { didSet { d.set(actionsHoverOpen, forKey: "cl.actions.hoverOpen") } }
     /// Every action, in the order the Customize list has them.
     @Published private(set) var actionsOrder: [ActionID] { didSet { d.set(actionsOrder.map(\.rawValue), forKey: "cl.actions.order") } }
     /// The ones ticked there.
     @Published private(set) var actionsShown: Set<ActionID> { didSet { d.set(actionsShown.map(\.rawValue).sorted(), forKey: "cl.actions.shown") } }
-    /// Someone who used CedarLogic before the rail came: told once, in the
-    /// status bar, where it is (their toolbar stays as it was).
-    @Published var actionsHintPending: Bool { didSet { d.set(actionsHintPending, forKey: "cl.actions.hint") } }
+    /// Set once 0.4 has turned the panel on for everyone (`migrateActions`).
+    static let actionsMigrationKey = "cl.actions.on04"
 
     private init() {
         let d = UserDefaults.standard
-        // Before anything here is written: is this a new install? (Nothing of
-        // CedarLogic's in its settings yet; the wx app's are carried over below.)
-        let newInstall = d.object(forKey: "cl.importedWx") == nil && d.object(forKey: "cl.brandAccentSet") == nil
-            && !d.bool(forKey: "cl.hasSeenWelcome")
         Prefs.importWxPrefsOnce()
         func int(_ k: String, _ v: Int) -> Int { d.object(forKey: k) == nil ? v : d.integer(forKey: k) }
         func bool(_ k: String, _ v: Bool) -> Bool { d.object(forKey: k) == nil ? v : d.bool(forKey: k) }
@@ -188,20 +185,8 @@ final class Prefs: ObservableObject {
         openReplaces = bool("cl.openReplaces", true)
         newTemplate = d.string(forKey: "cl.newTemplate") ?? ""
         newPagesShareLinks = bool("cl.newPagesShareLinks", true)
-        // The rail is on screen for a new install; anyone who's used
-        // CedarLogic before keeps the window they know (no rail, the toolbar
-        // as it was) until they look in Settings > Actions, which a status
-        // line tells them once.
-        if let m = d.object(forKey: "cl.actions.mode") as? Int, let mode = ActionsMode(rawValue: m) {
-            actionsMode = mode
-            actionsHintPending = d.bool(forKey: "cl.actions.hint")
-        } else {
-            let mode: ActionsMode = newInstall ? .onScreen : .hidden
-            actionsMode = mode
-            actionsHintPending = !newInstall
-            d.set(mode.rawValue, forKey: "cl.actions.mode")
-            d.set(!newInstall, forKey: "cl.actions.hint")
-        }
+        Prefs.migrateActions(d)
+        actionsOn = bool("cl.actions.on", true)
         actionsCollapsed = bool("cl.actions.collapsed", false)
         actionsHoverOpen = bool("cl.actions.hoverOpen", true)
         let saved = (d.stringArray(forKey: "cl.actions.order") ?? []).compactMap(ActionID.init(rawValue:))
@@ -217,6 +202,21 @@ final class Prefs: ObservableObject {
     }
 
 
+    /// 0.4: the Actions panel on for everyone, once, new installs and
+    /// updated ones alike. Before, it was On screen, In the toolbar or Hidden
+    /// (`cl.actions.mode`), and a copy that was updating started Hidden; now
+    /// it's on, and open unless it was on screen and folded. After this the
+    /// switch is theirs: it's never turned on again.
+    static func migrateActions(_ d: UserDefaults) {
+        guard !d.bool(forKey: actionsMigrationKey) else { return }
+        let wasOnScreen = d.object(forKey: "cl.actions.mode") as? Int == 0
+        if !wasOnScreen { d.removeObject(forKey: "cl.actions.collapsed") }
+        d.set(true, forKey: "cl.actions.on")
+        d.removeObject(forKey: "cl.actions.mode")
+        d.removeObject(forKey: "cl.actions.hint")
+        d.set(true, forKey: actionsMigrationKey)
+    }
+
     // MARK: Actions
 
     /// A saved order with any actions it doesn't know (new ones) after it.
@@ -227,7 +227,7 @@ final class Prefs: ObservableObject {
     }
     /// The Customize list: every action offered here, in order.
     var actionsOrderAll: [ActionID] { actionsOrder.filter { $0.action.available() } }
-    /// What the rail (or the toolbar) shows, top to bottom.
+    /// What the panel shows, top to bottom.
     var railActions: [ActionID] { actionsOrderAll.filter { actionsShown.contains($0) } }
     func actionShown(_ id: ActionID) -> Bool { actionsShown.contains(id) }
     func setAction(_ id: ActionID, shown: Bool) {

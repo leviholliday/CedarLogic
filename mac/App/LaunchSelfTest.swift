@@ -16,8 +16,10 @@
 // circuit deleted from Your Circuits, one deleted 31 days ago, one moved
 // into the trash by sync with no date, a second copy of a circuit that's
 // still in the library, and the "repeated versions" folder), actions (as
-// normal, with the Actions rail folded, hover-to-open off and its items
-// reordered last time).
+// normal, with the Actions rail on screen (before 0.4's migration), folded,
+// hover-to-open off and its items reordered last time), migrated (as
+// normal, with the actions In the toolbar, as 0.3.x could), paneloff (as
+// normal, migrated, then the panel turned off).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -35,15 +37,17 @@
 // in every state, the intro owed and its sound (the first launch's and an
 // update's only), "Play the intro every time CedarLogic
 // opens" (off unless chosen; on, a later launch plays it, silently) and Help > Play
-// the Intro in the menu bar; where the Actions rail is (on screen for a first launch,
-// hidden for anyone before), and in `actions` that a folded rail stays
+// the Intro in the menu bar; the Actions panel (on for a first launch and
+// for every install before, the old toolbar and hidden modes turned on by
+// 0.4's migration, once, and a choice made after it kept), and in `actions` that a folded rail stays
 // folded, a drag on the rail reorders the Customize list too, focus mode
 // folds it (not hides it) and gives back what it was, the Customize
 // list's search finds by name, menu and shortcut, the folded rail's hot
 // strip (a pointer in it opens it, passing through doesn't) and View >
-// Show/Hide Actions, and the rail,
-// its tab (slid out on hover too) and the toolbar's six buttons laid out in
-// real windows off screen (actionsChecks).
+// Show/Hide Actions (turning a panel that's off on), and the panel and
+// its tab (slid out on hover too) laid out in real windows off screen; and
+// Show Me Around there: its places found, the keys stepping it, the panel's
+// stop passed over when it's off, Escape ending it (actionsChecks).
 // PASS or FAIL for each; exit 1 on a failure.
 
 import AppKit
@@ -97,13 +101,26 @@ enum LaunchSelfTest {
             d.set(Date(timeIntervalSinceNow: -30 * 86400), forKey: "SULastCheckTime")
         }
         if state == "actions" {
-            // Someone who folded the rail and put its items in another order.
-            d.set(ActionsMode.onScreen.rawValue, forKey: "cl.actions.mode")
+            // Someone on an 0.4 beta, before the panel was on for everyone,
+            // who had the rail On screen, folded it, turned Open on hover off
+            // and put its items in another order.
+            d.set(0, forKey: "cl.actions.mode")
             d.set(true, forKey: "cl.actions.collapsed")
             d.set(false, forKey: "cl.actions.hoverOpen")
             d.set(false, forKey: "cl.actions.hint")
             d.set(ActionID.defaults.reversed().map(\.rawValue), forKey: "cl.actions.order")
             d.set(ActionID.defaults.map(\.rawValue), forKey: "cl.actions.shown")
+        }
+        if state == "migrated" {
+            // Had the actions In the toolbar (and the rail folded once), and the status line still due.
+            d.set(1, forKey: "cl.actions.mode")
+            d.set(true, forKey: "cl.actions.collapsed")
+            d.set(true, forKey: "cl.actions.hint")
+        }
+        if state == "paneloff" {
+            // Got 0.4's migration, then turned the panel off.
+            d.set(true, forKey: Prefs.actionsMigrationKey)
+            d.set(false, forKey: "cl.actions.on")
         }
         if state == "first" || state == "nolibrary" { d.synchronize(); return }
         var made: [LibraryItem] = []
@@ -196,49 +213,87 @@ enum LaunchSelfTest {
 
     // MARK: actions
 
-    /// The Actions rail (Actions.swift): on screen for a new install, hidden
-    /// (with the status line's hint due) for someone who had CedarLogic
-    /// before; in `actions`, a rail folded and reordered last time is still
-    /// so, and laid out in a real window (off screen, never shown) it takes
-    /// its width, or its tab's, from the canvas; in the toolbar instead, the
-    /// toolbar has the six buttons and the rail is gone.
+    /// The Actions panel (Actions.swift): on for everyone after 0.4's
+    /// migration -- a first launch, an install that never chose (it started
+    /// Hidden before), one that had it In the toolbar or Hidden ("migrated")
+    /// -- and, once migrated, the choice sticks ("paneloff"); in `actions`, a
+    /// panel folded and reordered last time is still so, and laid out in a
+    /// real window (off screen, never shown) it takes its width, or its
+    /// tab's, from the canvas; turned off, it's gone and the toolbar has
+    /// none of its buttons; Show Me Around finds its places in that window,
+    /// steps with the keys, passes over the panel when it's off, and Escape
+    /// ends it.
     static func actionsChecks(_ state: String, check: (Bool, String) -> Void, turn: (Double) -> Void) {
         let prefs = Prefs.shared
+        let d = UserDefaults.standard
+        check(d.bool(forKey: Prefs.actionsMigrationKey), "0.4's Actions panel migration has run (\(Prefs.actionsMigrationKey))")
+        check(d.object(forKey: "cl.actions.mode") == nil && d.object(forKey: "cl.actions.hint") == nil,
+              "and the old On screen / In the toolbar / Hidden setting and its status line are gone")
         switch state {
         case "first":
-            check(prefs.actionsMode == .onScreen, "a first launch has the Actions rail on screen (\(prefs.actionsMode.name))")
+            check(prefs.actionsOn, "a first launch has the Actions panel on")
             check(!prefs.actionsCollapsed && prefs.railActions == ActionID.defaults,
                   "open, with the six default actions (\(prefs.railActions.map(\.rawValue)))")
-            check(!prefs.actionsHintPending, "and no status line about it")
-            check(prefs.actionsHoverOpen, "folded, it slides out on hover (the default)")
+            check(prefs.actionsHoverOpen, "folded, it opens on hover (the default)")
         case "actions":
-            check(prefs.actionsMode == .onScreen, "the rail is still on screen")
+            check(prefs.actionsOn, "the panel is on (it was on screen)")
             check(prefs.actionsCollapsed, "it's still folded, as it was left")
             check(prefs.railActions == ActionID.defaults.reversed(), "in the order it was given (\(prefs.railActions.map(\.rawValue)))")
-            check(!prefs.actionsHintPending, "no status line (they've seen it)")
-            check(!prefs.actionsHoverOpen, "hover-to-open still off, as it was set")
+            check(!prefs.actionsHoverOpen, "Open on hover still off, as it was set")
             // A drag on the rail: the Customize list has the same order.
             let before = prefs.railActions
             prefs.moveRailAction(before[0], to: 2)
             let after = prefs.railActions
-            check(after == [before[1], before[2], before[0]] + before[3...], "dragging the top one down two places on the rail moves it there (\(after.map(\.rawValue)))")
+            check(after == [before[1], before[2], before[0]] + before[3...], "dragging the top one down two places on the panel moves it there (\(after.map(\.rawValue)))")
             check(prefs.actionsOrderAll.filter { prefs.actionShown($0) } == after, "and the Customize list has that order too")
             prefs.moveRailAction(before[0], to: 0)
             check(prefs.railActions == before, "and back to the top again")
             prefs.moveRailAction(before[5], to: 99)
             check(prefs.railActions == before, "a drop past the end leaves the last one last")
+        case "migrated":
+            check(prefs.actionsOn, "a copy that had the actions In the toolbar (or Hidden) has the panel on after the update")
+            check(!prefs.actionsCollapsed, "open, not folded (it was never on screen)")
+        case "paneloff":
+            check(!prefs.actionsOn, "turned off after the migration, it stays off: the choice sticks")
         default:
-            check(prefs.actionsMode == .hidden, "someone who had CedarLogic before keeps their window: no rail (\(prefs.actionsMode.name))")
-            check(prefs.actionsHintPending, "and the status line tells them once where it is")
+            check(prefs.actionsOn, "someone who had CedarLogic before (and never chose) gets the panel on")
+            check(!prefs.actionsCollapsed, "open")
         }
+        // The migration itself, on settings of its own: every old setting
+        // ends up on, and once run it never turns the panel on again.
+        let suite = "cl.selftest.actions"
+        if let s = UserDefaults(suiteName: suite) {
+            for (mode, collapsed, folded) in [(nil, false, false), (0, true, true), (0, false, false), (1, true, false), (2, false, false), (2, true, false)] as [(Int?, Bool, Bool)] {
+                s.removePersistentDomain(forName: suite)
+                if let mode { s.set(mode, forKey: "cl.actions.mode") }
+                s.set(collapsed, forKey: "cl.actions.collapsed")
+                s.set(true, forKey: "cl.actions.hint")
+                Prefs.migrateActions(s)
+                let name = mode.map { ["On screen", "In the toolbar", "Hidden"][$0] } ?? "never chosen"
+                check(s.bool(forKey: "cl.actions.on") && s.bool(forKey: "cl.actions.collapsed") == folded && s.object(forKey: "cl.actions.mode") == nil,
+                      "migrating \(name)\(collapsed ? ", folded" : ""): on, \(folded ? "still folded" : "open")")
+                s.set(false, forKey: "cl.actions.on")
+                Prefs.migrateActions(s)
+                check(!s.bool(forKey: "cl.actions.on"), "and turned off afterwards, a later launch leaves it off")
+            }
+            s.removePersistentDomain(forName: suite)
+        } else {
+            check(false, "settings of its own for the migration check")
+        }
+        check(ActionID.checkForUpdates.action.menu == "CedarLogic" && ActionID.settings.action.menu == "CedarLogic",
+              "Check for Updates and Settings are listed under the CedarLogic menu, where the Mac has them")
+        check(ActionID.showMeAround.action.menu == "Help" && ActionID.showMeAround.action.title == "Show Me Around",
+              "Show Me Around is among the actions, in Help")
+        check((6...8).contains(ShowMeAround.steps.count) && ShowMeAround.steps.allSatisfy { !$0.title.isEmpty && !$0.body(ShowMeAround.shared).isEmpty },
+              "Show Me Around has \(ShowMeAround.steps.count) stops, each with a title and a line")
+        check(Set(ShowMeAround.steps.map(\.spot)) == Set(TourSpot.allCases).subtracting([.root]),
+              "one for each place: \(ShowMeAround.steps.map(\.spot.rawValue).joined(separator: ", "))")
         guard state == "actions" else { return }
 
         let doc = CoreDocument()
         _ = doc.addGate("AA_AND2", page: 0, at: .zero)
-        /// The canvas's width in a whole circuit window laid out off screen.
-        func canvasWidth(_ mode: ActionsMode, folded: Bool, width: CGFloat = 1440) -> CGFloat {
-            prefs.actionsMode = mode
-            prefs.actionsCollapsed = folded
+        /// A whole circuit window laid out off screen (never shown); `body` runs in it.
+        func inWindow(width: CGFloat = 1440, _ body: @MainActor (CanvasController, NSWindow) -> Void) {
             let canvas = CanvasController()
             canvas.attach(doc)
             let size = NSSize(width: width, height: 800)
@@ -251,81 +306,65 @@ enum LaunchSelfTest {
             host.frame = NSRect(origin: .zero, size: size)
             host.layoutSubtreeIfNeeded()
             turn(1.0)
-            let w = canvas.view?.frame.width ?? -1
-            print("INFO actions: a \(Int(width))-point window, \(mode.name)\(folded ? ", folded" : ""): the canvas is \(Int(w)) wide")
+            body(canvas, win)
             win.close()
+        }
+        /// The canvas's width in a whole circuit window laid out off screen.
+        func canvasWidth(on: Bool, folded: Bool, width: CGFloat = 1440) -> CGFloat {
+            prefs.actionsOn = on
+            prefs.actionsCollapsed = folded
+            var w: CGFloat = -1
+            inWindow(width: width) { canvas, _ in w = canvas.view?.frame.width ?? -1 }
+            print("INFO actions: a \(Int(width))-point window, panel \(on ? "on" : "off")\(folded ? ", folded" : ""): the canvas is \(Int(w)) wide")
             return w
         }
         /// The canvas's width in focus mode, then out of it again (View > Focus Mode's notification).
-        func focusWidths(_ mode: ActionsMode, folded: Bool) -> (inFocus: CGFloat, after: CGFloat) {
-            prefs.actionsMode = mode
+        func focusWidths(on: Bool, folded: Bool) -> (inFocus: CGFloat, after: CGFloat) {
+            prefs.actionsOn = on
             prefs.actionsCollapsed = folded
-            let canvas = CanvasController()
-            canvas.attach(doc)
-            let size = NSSize(width: 1440, height: 800)
-            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
-                               styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
-            win.isReleasedWhenClosed = false
-            let host = NSHostingView(rootView: CLLayout(document: doc, canvas: canvas, page: .constant(0))
-                .frame(width: size.width, height: size.height))
-            win.contentView = host
-            host.frame = NSRect(origin: .zero, size: size)
-            host.layoutSubtreeIfNeeded()
-            turn(1.0)
-            NotificationCenter.default.post(name: .clToggleFocusMode, object: canvas)
-            turn(1.0)
-            let inFocus = canvas.view?.frame.width ?? -1
-            NotificationCenter.default.post(name: .clToggleFocusMode, object: canvas)
-            turn(1.0)
-            let after = canvas.view?.frame.width ?? -1
-            print("INFO actions: focus mode, \(mode.name)\(folded ? ", folded" : ""): the canvas is \(Int(inFocus)) wide in it, \(Int(after)) after")
-            win.close()
+            var inFocus: CGFloat = -1, after: CGFloat = -1
+            inWindow { canvas, _ in
+                NotificationCenter.default.post(name: .clToggleFocusMode, object: canvas)
+                turn(1.0)
+                inFocus = canvas.view?.frame.width ?? -1
+                NotificationCenter.default.post(name: .clToggleFocusMode, object: canvas)
+                turn(1.0)
+                after = canvas.view?.frame.width ?? -1
+            }
+            print("INFO actions: focus mode, panel \(on ? "on" : "off")\(folded ? ", folded" : ""): the canvas is \(Int(inFocus)) wide in it, \(Int(after)) after")
             return (inFocus, after)
         }
-        let none = canvasWidth(.hidden, folded: false)
-        let open = canvasWidth(.onScreen, folded: false)
-        let folded = canvasWidth(.onScreen, folded: true)
-        let inBar = canvasWidth(.toolbar, folded: false)
+        let none = canvasWidth(on: false, folded: false)
+        let open = canvasWidth(on: true, folded: false)
+        let folded = canvasWidth(on: true, folded: true)
         ActionsRail.pictureSlidOut = true
-        let slid = canvasWidth(.onScreen, folded: true)
+        let slid = canvasWidth(on: true, folded: true)
         ActionsRail.pictureSlidOut = false
-        check(none > 0 && abs((none - open) - ActionsRail.width) < 2, "open, the rail takes its \(Int(ActionsRail.width)) points (\(none) to \(open))")
+        check(none > 0 && abs((none - open) - ActionsRail.width) < 2, "open, the panel takes its \(Int(ActionsRail.width)) points (\(none) to \(open))")
         check(abs((none - folded) - ActionsRail.tabWidth) < 2, "folded, just its tab's \(Int(ActionsRail.tabWidth)) (\(folded))")
-        check(abs(none - inBar) < 1, "in the toolbar instead, no rail (\(inBar))")
         check(abs(slid - folded) < 1, "slid out on hover, it's over the canvas, not pushing it (\(slid))")
-        let focusNone = focusWidths(.hidden, folded: false)
-        let focusOpen = focusWidths(.onScreen, folded: false)
+        let focusNone = focusWidths(on: false, folded: false)
+        let focusOpen = focusWidths(on: true, folded: false)
         check(focusOpen.inFocus > open && abs((focusNone.inFocus - focusOpen.inFocus) - ActionsRail.tabWidth) < 2,
-              "in focus mode an open rail folds to its tab, not gone (\(focusNone.inFocus) to \(focusOpen.inFocus))")
+              "in focus mode an open panel folds to its tab, not gone (\(focusNone.inFocus) to \(focusOpen.inFocus))")
         check(abs(focusOpen.after - open) < 1 && !prefs.actionsCollapsed, "out of focus mode it's open again, as it was (\(focusOpen.after))")
-        let focusFolded = focusWidths(.onScreen, folded: true)
+        let focusFolded = focusWidths(on: true, folded: true)
         check(abs(focusFolded.inFocus - focusOpen.inFocus) < 1 && abs(focusFolded.after - folded) < 1 && prefs.actionsCollapsed,
-              "a folded rail stays folded through focus mode and after (\(focusFolded.after))")
+              "a folded panel stays folded through focus mode and after (\(focusFolded.after))")
 
-        // Folded, with hover on: the edge's hot strip, a pointer in it (as its
-        // tracking area hands it on), and View > Show/Hide Actions.
-        do {
-            prefs.actionsHoverOpen = true
-            prefs.actionsMode = .onScreen
-            prefs.actionsCollapsed = true
-            let canvas = CanvasController()
-            canvas.attach(doc)
+        // Folded, with Open on hover: the edge's hot strip, a pointer in it
+        // (as its tracking area hands it on), and View > Show/Hide Actions.
+        prefs.actionsHoverOpen = true
+        prefs.actionsOn = true
+        prefs.actionsCollapsed = true
+        inWindow { canvas, _ in
             let size = NSSize(width: 1440, height: 800)
-            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -6000, y: -6000), size: size),
-                               styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
-            win.isReleasedWhenClosed = false
-            let host = NSHostingView(rootView: CLLayout(document: doc, canvas: canvas, page: .constant(0))
-                .frame(width: size.width, height: size.height))
-            win.contentView = host
-            host.frame = NSRect(origin: .zero, size: size)
-            host.layoutSubtreeIfNeeded()
-            turn(1.0)
             func strip(_ v: NSView) -> EdgeHotStrip.StripView? {
                 if let s = v as? EdgeHotStrip.StripView { return s }
                 for c in v.subviews { if let s = strip(c) { return s } }
                 return nil
             }
-            if let st = strip(host), let cv = canvas.view {
+            if let host = canvas.view?.window?.contentView, let st = strip(host), let cv = canvas.view {
                 let r = st.convert(st.bounds, to: nil), c = cv.convert(cv.bounds, to: nil)
                 check(abs(r.width - ActionsRail.hotWidth) < 1 && abs(r.maxX - size.width) < 1,
                       "folded, the hot strip is \(Int(ActionsRail.hotWidth)) points at the window's right edge (\(r))")
@@ -335,7 +374,7 @@ enum LaunchSelfTest {
                 let away = NSPoint(x: r.minX - 200, y: r.midY)
                 st.pointer(at: offTab)
                 turn(0.35)
-                check(canvas.actionsRailShown, "a pointer in the strip, off the tab, slides the rail out")
+                check(canvas.actionsRailShown, "a pointer in the strip, off the tab, slides the panel out")
                 st.pointer(at: away)
                 turn(0.2)
                 check(canvas.actionsRailShown, "it's still out just after the pointer leaves (the grace)")
@@ -352,7 +391,7 @@ enum LaunchSelfTest {
                 st.pointer(at: away)
                 turn(0.8)
             } else {
-                check(false, "the folded rail has its hot strip")
+                check(false, "the folded panel has its hot strip")
             }
             let foldedWidth = canvas.view?.frame.width ?? -1
             canvas.perform(.toggleActions)
@@ -363,14 +402,14 @@ enum LaunchSelfTest {
             canvas.perform(.toggleActions)
             turn(0.8)
             check(!canvas.actionsRailShown && prefs.actionsCollapsed, "and Hide Actions folds it again")
-            prefs.actionsMode = .hidden
-            turn(0.3)
+            prefs.actionsOn = false
+            turn(0.5)
+            check(!canvas.actionsRailShown, "turned off, it's gone (View says Show Actions)")
             canvas.perform(.toggleActions)
             turn(0.8)
-            check(prefs.actionsMode == .onScreen && canvas.actionsRailShown, "with the actions hidden, Show Actions puts the rail on screen, open")
-            win.close()
-            prefs.actionsHoverOpen = false
+            check(prefs.actionsOn && canvas.actionsRailShown, "with the panel off, Show Actions turns it on, open")
         }
+        prefs.actionsHoverOpen = false
 
         // Searching the Customize list: by name, by menu, by shortcut (symbols or words).
         let find = { (q: String) in prefs.actionsOrderAll.filter { ActionsCustomizeList.matches($0, q) } }
@@ -382,13 +421,12 @@ enum LaunchSelfTest {
         check(!byKey.isEmpty && find(byKey).contains(.checkCircuit), "its shortcut finds it (\(byKey))")
         check(find("cmd e").contains(.exportImage) || ActionID.exportImage.action.keyLabel != "⌘E", "and so does the shortcut in words (cmd e)")
         check(find("zzzz").isEmpty && find("").count == prefs.actionsOrderAll.count, "nothing for nonsense, everything for an empty search")
-        let narrowNone = canvasWidth(.hidden, folded: false, width: 860)
-        let narrowOpen = canvasWidth(.onScreen, folded: false, width: 860)
+        let narrowNone = canvasWidth(on: false, folded: false, width: 860)
+        let narrowOpen = canvasWidth(on: true, folded: false, width: 860)
         check(abs((narrowNone - narrowOpen) - ActionsRail.tabWidth) < 2, "in a window under \(Int(ActionsRail.narrowWidth)) points it folds by itself (\(narrowNone) to \(narrowOpen))")
 
         /// The toolbar's buttons that are actions, by their tips (real views: BarClickArea).
-        func toolbarActionButtons(_ mode: ActionsMode, width: CGFloat) -> Int {
-            prefs.actionsMode = mode
+        func toolbarActionButtons(width: CGFloat) -> Int {
             let canvas = CanvasController()
             canvas.attach(doc)
             let size = NSSize(width: width, height: 52)
@@ -402,7 +440,8 @@ enum LaunchSelfTest {
             host.frame = NSRect(origin: .zero, size: size)
             host.layoutSubtreeIfNeeded()
             turn(0.4)
-            let tips = Set(prefs.railActions.map { $0.action.titleWithKey })
+            // Those of the panel's that aren't the toolbar's own tools.
+            let tips = Set(prefs.railActions.filter { ![.simView, .pause, .step, .newTab, .feedback, .lock].contains($0) }.map { $0.action.titleWithKey })
             var n = 0
             func walk(_ v: NSView) {
                 if let c = v as? BarControl, let t = c.tip, tips.contains(t) { n += 1 }
@@ -412,12 +451,51 @@ enum LaunchSelfTest {
             win.close()
             return n
         }
-        for w in [1280.0, 1000.0] {
-            let n = toolbarActionButtons(.toolbar, width: w)
-            check(n == 6, "in the toolbar, it has the six buttons at \(Int(w)) points wide (\(n))")
+        prefs.actionsOn = false
+        check(toolbarActionButtons(width: 1280) == 0, "with the panel off, the toolbar doesn't take its buttons (there's no toolbar mode)")
+        prefs.actionsOn = true
+        check(toolbarActionButtons(width: 1280) == 0, "nor with it on")
+
+        // Show Me Around, in a real window (off screen): its places, the keys, and Escape.
+        let around = ShowMeAround.shared
+        for on in [true, false] {
+            prefs.actionsOn = on
+            prefs.actionsCollapsed = false
+            inWindow { canvas, win in
+                around.start(on: canvas, settle: 0, bringForward: false)
+                turn(0.5)
+                let spots = around.shown.map { ShowMeAround.steps[$0].spot }
+                print("INFO Show Me Around, panel \(on ? "on" : "off"): \(spots.map(\.rawValue)) at \(around.frames.mapValues { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" })")
+                check(around.active && around.target === canvas, "Show Me Around starts on the window (panel \(on ? "on" : "off"))")
+                if on {
+                    check(spots == ShowMeAround.steps.map(\.spot), "it finds every place in a 1440-point window (\(spots.map(\.rawValue)))")
+                    if let p = around.frames[.palette], let c = around.frames[.canvas], let a = around.frames[.actions],
+                       let t = around.frames[.toolbar], let tabs = around.frames[.tabs] {
+                        check(p.maxX <= c.minX + 2 && c.maxX <= a.minX + 2 && t.maxY <= tabs.minY + 2 && tabs.maxY <= c.minY + 2,
+                              "where they are: palette, canvas, panel left to right; toolbar, tabs, canvas top to bottom")
+                        check(abs(a.width - ActionsRail.width) < 2 && abs(a.maxX - win.frame.width) < 2, "the panel's place is the panel (\(a))")
+                    }
+                } else {
+                    check(!spots.contains(.actions) && spots.count == ShowMeAround.steps.count - 1, "with the panel off, its stop is passed over (\(spots.count) stops)")
+                }
+                let first = around.step
+                check(first == around.shown.first, "at the first stop (\(ShowMeAround.steps[first].spot.rawValue))")
+                check(around.key(124, plain: true) && around.step == around.shown.dropFirst().first, "→ goes to the next stop")
+                check(around.key(123, plain: true) && around.step == first, "← back")
+                check(!around.isLast && around.isFirst, "first, not last")
+                var n = 1
+                while around.active && n < 20 { _ = around.key(36, plain: true); n += 1 }
+                check(!around.active && n == around.shown.count + 1, "Return goes through all \(around.shown.count) and Done ends it")
+                around.start(on: canvas, settle: 0, bringForward: false)
+                turn(0.3)
+                check(around.key(0, plain: true), "a plain key (A) doesn't reach the canvas meanwhile")
+                check(!around.key(0, plain: false) || !around.active, "a menu key does")
+                check(around.key(53, plain: true) && !around.active, "Escape ends it")
+                check(!around.key(53, plain: true), "and after that Escape is the window's again")
+            }
         }
-        check(toolbarActionButtons(.onScreen, width: 1280) == 0, "with the rail on screen, the toolbar has none of them")
-        prefs.actionsMode = .onScreen
+        around.stop()
+        prefs.actionsOn = true
         prefs.actionsCollapsed = true
     }
 
@@ -745,6 +823,37 @@ enum LaunchFocusCheck {
         print(String(format: "TRACE %5.2f s ", CACurrentMediaTime() - t0) + line)
     }
 
+    /// A key that isn't a letter (Escape, the arrows), for window `w`.
+    private static func rawKey(_ code: UInt16, _ chars: String, in w: NSWindow) -> NSEvent? {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                         windowNumber: w.windowNumber, context: nil, characters: chars,
+                         charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code)
+    }
+
+    /// Help > Show Me Around in the menu bar, then the walk on the real
+    /// window: on, its stops, → and ← through the event queue, and Escape ending it.
+    private static func showMeAround(_ state: String, _ w: NSWindow) async {
+        check(state, menuItem("Show Me Around") != nil, "Help > Show Me Around is in the menu bar")
+        guard let c = CanvasController.front, c.view?.window === w else { check(state, false, "a front canvas for Show Me Around"); return }
+        let around = ShowMeAround.shared
+        around.start(on: c)
+        await wait(1.0)
+        let stops = around.shown.map { ShowMeAround.steps[$0].spot.rawValue }
+        check(state, around.active && stops.count >= 6, "Show Me Around is on, with \(stops.count) stops (\(stops.joined(separator: ", ")))")
+        let first = around.step
+        func send(_ code: UInt16, _ ch: Int) async {
+            if let e = rawKey(code, String(Character(UnicodeScalar(ch)!)), in: w) { NSApp.postEvent(e, atStart: false) }
+            await wait(0.6)
+        }
+        await send(124, NSRightArrowFunctionKey)
+        check(state, around.active && around.step != first, "→ moves it on (to \(ShowMeAround.steps[around.step].spot.rawValue))")
+        await send(123, NSLeftArrowFunctionKey)
+        check(state, around.step == first, "← brings it back")
+        await send(53, 27)
+        check(state, !around.active, "Escape ends it")
+        await wait(0.4)
+    }
+
     /// False when the app never came to the front, so there's nothing to check.
     private static func run(_ state: String) async -> Bool {
         // The launch screen plays, then dissolves into the window.
@@ -796,6 +905,7 @@ enum LaunchFocusCheck {
         }
         await inFront("after launch")
         check(state, menuItem("Play the Intro") != nil, "Help > Play the Intro is in the menu bar")
+        await showMeAround(state, w)
         // Another window in front for a moment, then gone: the circuit's
         // window comes back in front with nothing else changing.
         let other = NSWindow(contentRect: NSRect(x: w.frame.midX - 160, y: w.frame.midY - 90, width: 320, height: 180),

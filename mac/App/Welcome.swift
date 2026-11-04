@@ -1,7 +1,9 @@
 // The first-run welcome and the guided tour (the wx app's Welcome.cpp). The
-// welcome is five pages: what CedarLogic is, making it yours, your name,
-// six keys worth knowing, and what to do first. The tour builds a working
-// AND circuit with you, one step at a time, moving on as each is done.
+// welcome is six pages: what CedarLogic is, making it yours, the Actions
+// panel (on or off, open on hover), your name, six keys worth knowing, and
+// what to do first; as it closes, Show Me Around is offered
+// (ShowMeAround.swift). The tour builds a working AND circuit with you,
+// one step at a time, moving on as each is done.
 
 import AppKit
 import SwiftUI
@@ -72,6 +74,8 @@ struct WelcomeView: View {
     @State private var readyChoice = 0
     @State private var pressed: Set<String> = []
     @State private var keyMonitor: Any?
+    /// Shown as a first run (not from the Help menu): closing it offers Show Me Around.
+    @State private var firstRun = !Prefs.shared.hasSeenWelcome
     var startAtSetup = false
 
     init(startAtSetup: Bool = false, page: Int = 0) {
@@ -79,7 +83,7 @@ struct WelcomeView: View {
         _page = State(initialValue: page)
     }
 
-    private static let pages = 5
+    static let pages = 6
     private static let readyCount = 4
 
     var body: some View {
@@ -89,8 +93,9 @@ struct WelcomeView: View {
                     switch page {
                     case 0: intro
                     case 1: setup
-                    case 2: name
-                    case 3: keys
+                    case 2: actionsPanel
+                    case 3: name
+                    case 4: keys
                     default: ready
                     }
                 }
@@ -181,7 +186,7 @@ struct WelcomeView: View {
             }
             guard !typing, let k = e.charactersIgnoringModifiers?.lowercased(), k.count == 1 else { return e }
             if k == "?" || (k == "/" && e.modifierFlags.contains(.shift)) { readyAction(3)(); return nil }
-            if page == 3 && "acdrst".contains(k) {
+            if page == 4 && "acdrst".contains(k) {
                 withAnimation(.easeOut(duration: 0.12)) { _ = pressed.insert(k) }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { withAnimation(.easeOut(duration: 0.3)) { _ = pressed.remove(k) } }
                 return nil
@@ -280,7 +285,17 @@ struct WelcomeView: View {
         return Color(.sRGB, red: r, green: g, blue: b)
     }
 
-    // Page 2: your name.
+    // Page 2: the Actions panel, on or off.
+    private var actionsPanel: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            BrandHeading(eyebrow: "One click away", title: "The Actions panel",
+                         line: "Down the window\u{2019}s right edge: Check My Circuit, Tidy Up, Share Link and more. Right-click it to choose your own.")
+            ActionsPanelChoice()
+        }
+        .padding(.horizontal, 56).padding(.top, 34)
+    }
+
+    // Page 3: your name.
     private var name: some View {
         HStack(alignment: .top, spacing: 34) {
             VStack(alignment: .leading, spacing: 16) {
@@ -315,7 +330,7 @@ struct WelcomeView: View {
         .padding(.horizontal, 56).padding(.top, 34)
     }
 
-    // Page 3: the keys.
+    // Page 4: the keys.
     private let keyCards: [(String, String, String)] = [
         ("A", "Add a gate", "Type part of its name, press Return, click to drop it."),
         ("C", "Copy, or connect", "Copies the selection. While dragging a gate, drops it and wires it to pins nearby."),
@@ -346,7 +361,7 @@ struct WelcomeView: View {
         .padding(.horizontal, 56).padding(.top, 34)
     }
 
-    // Page 4: what next.
+    // Page 5: what next.
     /// The ways to start; ↑↓ choose, Return goes (the tour first).
     private var ready: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -355,7 +370,7 @@ struct WelcomeView: View {
                 .padding(.bottom, 6)
             tile("Take the guided tour", "Two switches, a gate and a light, in about five minutes. Recommended.", icon: nil, index: 0)
             tile("Start from a template", "A lab page with your name, a counter, a 7-segment starter, or your own.", icon: "square.on.square", index: 1)
-            tile("Start with a blank canvas", "Jump straight in. Help \u{25B8} Guided Tour replays the tour.", icon: "plus.square", index: 2)
+            tile("Start with a blank canvas", "Jump straight in. Help \u{25B8} Show Me Around points out where things are.", icon: "plus.square", index: 2)
             tile("See every shortcut", "The whole list, searchable.", icon: "keyboard", index: 3)
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.bubble").font(.system(size: 12)).foregroundStyle(Brand.neon)
@@ -369,10 +384,10 @@ struct WelcomeView: View {
 
     private func readyAction(_ i: Int) -> () -> Void {
         switch i {
-        case 0: return { finish(); TourModel.shared.start() }
-        case 1: return { finish(); openWindow(id: "templates") }
+        case 0: return { finish(offer: false); TourModel.shared.start() }
+        case 1: return { finish(offer: false); openWindow(id: "templates") }
         case 2: return { finish() }
-        default: return { finish(); CanvasController.front?.showShortcuts = true }
+        default: return { finish(offer: false); CanvasController.front?.showShortcuts = true }
         }
     }
 
@@ -402,11 +417,15 @@ struct WelcomeView: View {
         .onHover { h in if h { withAnimation(.easeOut(duration: 0.15)) { readyChoice = index } } }
     }
 
-    private func finish() {
+    /// `offer`: on a first run, once it's gone, ask whether to look around
+    /// (not after the guided tour, a template or the shortcut list, which
+    /// have somewhere to go already).
+    private func finish(offer: Bool = true) {
         prefs.hasSeenWelcome = true
         WhatsNew.markSeen()
         dismiss()
         NSApp.windows.first { $0.identifier?.rawValue.contains("welcome") == true }?.close()
+        if offer && firstRun { ShowMeAround.shared.offerAfterWelcome() }
     }
 }
 

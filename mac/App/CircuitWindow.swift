@@ -48,7 +48,7 @@ struct CircuitWindow: View {
             showNotices = !notices.isEmpty
             TourModel.shared.windowAppeared(canvas)
         }
-        .onDisappear { TourModel.shared.windowClosed(canvas) }
+        .onDisappear { TourModel.shared.windowClosed(canvas); ShowMeAround.shared.windowClosed(canvas) }
         .onReceive(NotificationCenter.default.publisher(for: .clPutAwaySheets)) { n in
             if (n.object as? CanvasController) === canvas, showNotices { showNotices = false }
         }

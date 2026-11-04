@@ -133,7 +133,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .zoomFit: "Zoom to fit"
         case .zoomActual: "Actual size"
         case .focusMode: "Focus mode: hide the side panel"
-        case .toggleActions: "Show or hide the Actions rail"
+        case .toggleActions: "Show or hide the Actions panel"
         case .find: "Find a label, a TO/FROM name or a part"
         case .findNext: "Find the next one"
         case .findPrevious: "Find the previous one"
