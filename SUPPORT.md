@@ -18,6 +18,7 @@ Every release is on [GitHub](https://github.com/leviholliday/CedarLogic-Releases
 
 - **Send Feedback in the app** (on the Mac: Help > Send Feedback, or the speech bubble on the toolbar). It's the quickest way to reach the developer, and it can include a screenshot, a short recording and your circuit.
 - **GitHub issues** on [leviholliday/CedarLogic](https://github.com/leviholliday/CedarLogic/issues), for bugs and ideas. The forms ask for what helps.
+- **Email:** [cedarlogic@proton.me](mailto:cedarlogic@proton.me), for anything that doesn't fit an issue.
 - **Security problems:** see [SECURITY.md](SECURITY.md). Please don't post them in public.
 
 CedarLogic is a student project run by one person. Replies usually come within a week.

@@ -21,6 +21,8 @@ It is one app on three computers: native apps for **Mac**, **Windows** and **Lin
 
 ### Mac
 
+With [Homebrew](https://brew.sh):
+
 ```sh
 brew install --cask leviholliday/tap/cedarlogic
 ```
@@ -31,15 +33,28 @@ Needs macOS 14 Sonoma or later on Apple silicon (M1 or later). On an Intel Mac, 
 
 ### Windows
 
-In PowerShell:
+In PowerShell (from 0.4's release day):
 
 ```powershell
 irm https://cedarlogic.netlify.app/install.ps1 | iex
 ```
 
-It picks the installer for your PC (x64 or ARM64), checks it, and installs CedarLogic for you, with no administrator. Or download the installer, `CedarLogic-<version>-Windows-Setup-x64.exe` (or `-ARM64.exe`), from the [download page](https://cedarlogic.netlify.app/download/windows/). If Windows says it protected your PC, click **More info**, then **Run anyway**. The PowerShell line doesn't show that warning.
+It picks the installer for your PC (x64 or ARM64), checks it, and installs CedarLogic for you, with no administrator.
 
-Once the winget listing is approved, this works too: `winget install --id LeviHolliday.CedarLogic -e`.
+With [winget](https://learn.microsoft.com/windows/package-manager/) (after release day, once Microsoft has accepted the listing):
+
+```powershell
+winget install --id LeviHolliday.CedarLogic -e
+```
+
+With [Scoop](https://scoop.sh) (from release day):
+
+```powershell
+scoop bucket add cedarlogic https://github.com/leviholliday/scoop-cedarlogic
+scoop install cedarlogic/cedarlogic
+```
+
+Or download the installer, `CedarLogic-<version>-Windows-Setup-x64.exe` (or `-ARM64.exe`), from the [download page](https://cedarlogic.netlify.app/download/windows/). If Windows says it protected your PC, click **More info**, then **Run anyway**. The commands above don't show that warning. There's also a portable zip, `CedarLogic-<version>-Windows-x64.zip`, to run without installing.
 
 Needs Windows 10 or 11, 64-bit.
 
@@ -51,11 +66,11 @@ In a terminal:
 curl -fsSL https://cedarlogic.netlify.app/install.sh | sh
 ```
 
-On Ubuntu, Debian, Zorin, Mint and Raspberry Pi OS it installs the `.deb` with apt (it asks for your password). On Fedora and the rest it puts the AppImage in your home folder. Either way it checks CedarLogic's signature first, and CedarLogic shows up in your applications menu. `--dry-run` shows what it would do.
+On Ubuntu, Debian, Zorin, Mint and Raspberry Pi OS it installs the `.deb` with apt (it asks for your password). On Fedora and the rest it puts the AppImage in your home folder. Either way it checks CedarLogic's signature first, CedarLogic shows up in your applications menu, and it updates itself from then on. Add `-s -- --dry-run` to see what it would do.
 
-Or download a file from the [download page](https://cedarlogic.netlify.app/download/linux/): `cedarlogic_<version>_amd64.deb`, or `_arm64.deb` for a Raspberry Pi 4 or 5, or the `x86_64` or `aarch64` AppImage.
+Or download a file from the [download page](https://cedarlogic.netlify.app/download/linux/): `cedarlogic_<version>_amd64.deb`, or `_arm64.deb` for a Raspberry Pi 4 or 5, or the `x86_64` or `aarch64` AppImage. They update themselves too.
 
-Needs a 64-bit system: Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm on a Pi 4 or 5), Fedora 36 or newer.
+Needs a 64-bit system: Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm on a Pi 4 or 5), Fedora 36 or newer. There's no apt repository, Flathub or AUR package yet.
 
 [`packaging/README.md`](packaging/README.md) says what each command does and how the releases are signed.
 
@@ -148,6 +163,7 @@ cmake --build build/logic && ctest --test-dir build/logic --output-on-failure
 ## Help and more
 
 - [Support](SUPPORT.md): which versions get fixes, where to ask, and what the apps send. In any of the apps, **Send Feedback** reaches the developer fastest.
+- Contact: [cedarlogic@proton.me](mailto:cedarlogic@proton.me)
 - [Security](SECURITY.md): how to report a problem privately
 - [Contributing](CONTRIBUTING.md): building, checking and sending a change
 - [Changelog](CHANGELOG.md): what changed in each version
