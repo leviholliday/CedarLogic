@@ -420,6 +420,17 @@ int check(CircuitWindow* w, const std::string& dir, const std::string& tag) {
 		pump(450);
 		const std::string where = std::string("Settings > ") + pageTitle(page);
 		shot(format("settings-%d", page));
+		// A page that scrolls: its end too, so the picture shows the last setting.
+		if (GtkWidget* sc = pageScroller()) {
+			GtkAdjustment* v = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sc));
+			if (gtk_adjustment_get_upper(v) > gtk_adjustment_get_page_size(v) + 1) {
+				gtk_adjustment_set_value(v, gtk_adjustment_get_upper(v) - gtk_adjustment_get_page_size(v));
+				pump(250);
+				shot(format("settings-%d-end", page));
+				gtk_adjustment_set_value(v, 0);
+				pump(100);
+			}
+		}
 		checkFits(win, where);
 		const int ww = gtk_widget_get_allocated_width(win);
 		if (width < 0) width = ww;

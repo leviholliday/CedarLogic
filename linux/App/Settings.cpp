@@ -166,13 +166,14 @@ template <class T> GtkWidget* owned(T* d) {
 // ---- The app's colour: a row of swatches ----------------------------------------------
 
 class Swatches : public Drawn {
-	// Centre to centre: the seven fit the value column with room for a scroll
-	// bar that isn't an overlay (PiXflat's): 56 + 150 + 12 + 386 = 604 of 640.
-	static constexpr int kStep = 54;
+	// Centre to centre, and the room at each end for the first and last
+	// names: the seven fit the value column even beside PiXflat's wide scroll
+	// bar (56 + 29 + 150 + 12 + 387 = 634 of 640).
+	static constexpr int kStep = 53, kEnd = 8;
 public:
 	Swatches() {
 		create();
-		gtk_widget_set_size_request(area, 7 * kStep + 8, 52);
+		gtk_widget_set_size_request(area, 7 * kStep + 2 * kEnd, 52);
 		gtk_widget_set_halign(area, GTK_ALIGN_START);
 	}
 
@@ -186,7 +187,7 @@ protected:
 			double r, g, b;
 			cl_accent_color(a, c.dark, &r, &g, &b);
 			const Color col = colorF((float)r, (float)g, (float)b);
-			const PointF mid = pointF(4 + kStep / 2.f + i * kStep, 16);
+			const PointF mid = pointF(kEnd + kStep / 2.f + i * kStep, 16);
 			const bool on = prefs().accent == a;
 			const float hot = (float)fade.amount(i);
 			if (on) strokeCircle(cr, mid, 15, withAlpha(c.barInk(), 0.85f), 2);
@@ -195,12 +196,12 @@ protected:
 			drawText(cr, names[a], rectF(mid.x - 34, h - 16, mid.x + 34, h), 10.5f, withAlpha(c.barInk(), on ? 0.95f : 0.75f), TextAlign::Center, on);
 		}
 	}
-	void mouseMove(float x, float) override { fade.setHot(std::min(6, std::max(0, (int)((x - 4) / kStep)))); animate(); }
+	void mouseMove(float x, float) override { fade.setHot(std::min(6, std::max(0, (int)((x - kEnd) / kStep)))); animate(); }
 	void mouseLeave() override { fade.setHot(-1); animate(); }
 	void mouseDown(int button, float x, float, bool, GdkEventButton*) override {
 		static const int order[] = { 6, 0, 1, 2, 3, 4, 5 };
 		if (button != 1) return;
-		const int i = (int)((x - 4) / kStep);
+		const int i = (int)((x - kEnd) / kStep);
 		if (i < 0 || i > 6) return;
 		prefs().accent = order[i];
 		prefs().save();

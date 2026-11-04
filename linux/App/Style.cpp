@@ -243,6 +243,10 @@ void applyStyle() {
 			s += w + " scrolledwindow.frame { border: 1px solid " + css(withAlpha(text, 0.14f)) + "; }\n";
 			s += w + " separator { background-color: " + css(line) + "; }\n";
 			s += w + " flowboxchild { padding: 0; background-color: transparent; background-image: none; }\n";
+			// The scroll bar in the page's colours (the theme's own is light grey even on the dark page).
+			s += all({ "scrollbar", "scrollbar trough" }) + " { background-image: none; background-color: transparent; border: none; box-shadow: none; }\n";
+			s += w + " scrollbar slider { background-image: none; background-color: " + css(withAlpha(text, 0.32f)) + "; border: none; box-shadow: none; }\n";
+			s += w + " scrollbar slider:hover, " + w + " scrollbar slider:active { background-color: " + css(withAlpha(text, 0.5f)) + "; }\n";
 		}
 		s += "#settings #shortcut-keys { padding: 2px 4px; border-radius: 6px; background-color: transparent; min-height: 24px; }\n";
 		s += "#settings #shortcut-keys:hover { background-color: " + css(withAlpha(text, 0.06f)) + "; }\n";
