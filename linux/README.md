@@ -81,7 +81,7 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   less on one whose first frames come slowly; `--intro-bench` times its
   frames). Help > Play the Intro plays it
   again over the front window, and Settings > General > "Play the intro
-  every time CedarLogic opens" (off unless chosen) plays it, silently, at
+  every time CedarLogic opens" (on unless turned off) plays it, silently, at
   every launch. Motion follows the Mac's curves
   (`Anim.h`) and stops when the desktop asks for no animations. Settings
   (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`; circuits in

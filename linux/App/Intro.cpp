@@ -1566,7 +1566,7 @@ int check(GMenuModel* menubar) {
 
 	// ---- Which launch plays which, and the sound ----
 	launchWith(nullptr);
-	expect(!prefs().introEveryLaunch, "\"Play the intro every time CedarLogic opens\" is off for a new install");
+	expect(prefs().introEveryLaunch, "\"Play the intro every time CedarLogic opens\" is on for a new install");
 	expect(forLaunch(prefs()) == Trigger::First && hasSound(Trigger::First), "the first launch plays the first intro, with the sound");
 	const std::string seen = "[CedarLogic]\nhasSeenWelcome=true\nfirstLaunchPlayed=true\nintroFirstLaunchPlayed=true\n";
 	launchWith((seen + "seenWhatsNew=0.3\n").c_str());
@@ -1575,7 +1575,12 @@ int check(GMenuModel* menubar) {
 	prefs().introEveryLaunch = true;
 	expect(forLaunch(prefs()) == Trigger::Update && hasSound(forLaunch(prefs())), "an update's intro has the sound, setting or not");
 	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\n").c_str());
-	expect(!prefs().introEveryLaunch && forLaunch(prefs()) == Trigger::None, "a later launch plays no intro with the setting off");
+	expect(prefs().introEveryLaunch && forLaunch(prefs()) == Trigger::Every && !hasSound(forLaunch(prefs())),
+	       format("with nothing saved for it, it's on: a later launch plays the intro, silently (%s)", name(forLaunch(prefs()))));
+	prefs().introEveryLaunch = false;
+	prefs().save();
+	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\nintroEveryLaunch=false\n").c_str());
+	expect(!prefs().introEveryLaunch && forLaunch(prefs()) == Trigger::None, "turned off in Settings, it stays off: a later launch plays no intro");
 	prefs().introEveryLaunch = true;
 	prefs().save();
 	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\nintroEveryLaunch=true\n").c_str());

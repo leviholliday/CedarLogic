@@ -1654,16 +1654,25 @@ struct SessionDriver {
 		return cond();
 	}
 
-	void closeWindowsOver() {
+	// Every window over the circuit windows closed, as a person would: Escape,
+	// then (Settings keeps Escape for its search) its close button.
+	static std::vector<GtkWidget*> windowsOverList() {
 		GList* all = gtk_window_list_toplevels();
 		std::vector<GtkWidget*> tops;
 		for (GList* l = all; l; l = l->next) {
 			GtkWidget* t = GTK_WIDGET(l->data);
-			if (!gtk_widget_get_visible(t) || isCircuitWindow(t) || gtk_window_get_window_type(GTK_WINDOW(t)) != GTK_WINDOW_TOPLEVEL) continue;
+			if (gtk_widget_in_destruction(t) || !gtk_widget_get_visible(t) || isCircuitWindow(t) ||
+			    gtk_window_get_window_type(GTK_WINDOW(t)) != GTK_WINDOW_TOPLEVEL)
+				continue;
 			tops.push_back(t);
 		}
 		g_list_free(all);
-		for (GtkWidget* t : tops) tap(t, GDK_KEY_Escape);
+		return tops;
+	}
+	void closeWindowsOver() {
+		for (GtkWidget* t : windowsOverList()) tap(t, GDK_KEY_Escape);
+		pump(300);
+		for (GtkWidget* t : windowsOverList()) gtk_window_close(GTK_WINDOW(t));
 		pump(300);
 	}
 

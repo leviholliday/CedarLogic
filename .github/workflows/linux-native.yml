@@ -152,7 +152,7 @@ jobs:
       # The intro's rules (linux/App/Intro.h), as the Mac's launch-selftest: the timeline
       # (6.07 s, the panel held 1.1 s), which launch plays which intro, the sound (the first
       # launch's and an update's, never an every-launch one), Settings' "Play the intro every
-      # time CedarLogic opens" (off for a new install) and Help > Play the Intro (in the
+      # time CedarLogic opens" (on for a new install) and Help > Play the Intro (in the
       # actions and the menu bar). Settings of its own in a temporary folder.
       - name: Intro check
         run: |
@@ -565,7 +565,7 @@ jobs:
             forced=update
             case $how in
               every) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
-              menu) forced=; printf 'introUpdatePlayed=0.4\n' >> "$ini" ;;
+              menu) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=false\n' >> "$ini" ;;
             esac
             HOW=$how xvfb-run -a -s "-screen 0 1600x1000x24" env -u CI ${forced:+CL_INTRO=$forced} CL_INTRO_LOG=1 G_DEBUG=fatal-criticals \
               XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" bash -c '
@@ -709,39 +709,6 @@ jobs:
         with:
           name: CedarLogic-Native-linux-session-logs-asan
           path: session-logs-asan
-          if-no-files-found: warn
-
-  # TEMPORARY (removed before merging): the session check again and again, to
-  # count how often seed 4's long history check passes.
-  session-repeat:
-    name: session check repeated (x86_64, ${{ matrix.rep }})
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        rep: [1, 2, 3, 4, 5]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build \
-            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
-            xvfb xauth fonts-dejavu-core fonts-liberation
-      - name: Build
-        run: |
-          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
-          cmake --build linux/build
-      - name: Session check, seeds 1-4, then seed 4 four more times
-        run: |
-          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4 4 4 4 4
-      - name: Upload the session logs
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: session-repeat-${{ matrix.rep }}
-          path: session-logs
           if-no-files-found: warn
 
   # The .deb on the newer systems it has to run on: Ubuntu 24.04 (where OpenSSL's package is named
