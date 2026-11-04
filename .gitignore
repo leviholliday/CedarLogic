@@ -44,3 +44,6 @@ crashfile.temp
 # was committed.
 ~*.lck
 mac/build/
+
+# Release-day scripts: downloads and state (scripts/release-day.sh)
+.release-work/

@@ -1,6 +1,8 @@
 #!/bin/bash
 # Push a CedarLogic update to testers' apps: they get it from inside the app
-# (Help > Check for Updates..., or the automatic daily check). No reinstalling.
+# (on the Mac: CedarLogic > Check for Updates..., in the app menu; in the old
+# wx app: Help > Check for Updates...; or the automatic daily check). No
+# reinstalling.
 #
 #   scripts/publish-update.sh beta   4.0.1    beta testers only
 #   scripts/publish-update.sh normal 4.0.1    everyone (beta testers too)
@@ -10,14 +12,21 @@
 # Options (before or after the version):
 #   --notes FILE      what's new, in Markdown (shown in the update window)
 #   --mac FILE        wx Mac DMG      (default: build/CedarLogic-<v>-mac.dmg)
-#   --native APP      native Mac app  (e.g. "mac/build/CedarLogic Native.app")
-#   --no-ci           don't download the Windows/Linux builds from GitHub
+#   --native APP      native Mac app  (e.g. "<abs>/mac/build/CedarLogic.app")
+#   --no-ci           don't download the Windows/Linux builds from GitHub.
+#                     Always give it with --native: the CI download is the old
+#                     wx workflows' (below), and the native Windows and Linux
+#                     apps don't update from these feeds at all. They take the
+#                     signed files on the GitHub release: on release day
+#                     scripts/release-assets.sh puts them there (go-list step 4).
+#                     With --native the CI download is skipped anyway.
 #   --dry-run         build the feeds and show them, publish nothing
 #
 # What it does:
 #   1. collects the builds into dist/<version>/: the Mac DMG from this machine,
-#      the Windows installer and Linux AppImages from the newest green CI runs
-#      of WIN_BRANCH / LINUX_BRANCH (default windows/phase1, linux/port)
+#      the wx Windows installer and Linux AppImages from the newest green runs
+#      of the old "Windows build" / "Linux build" workflows on WIN_BRANCH /
+#      LINUX_BRANCH (default windows/phase1, linux/port): the wx app only
 #   2. signs the Mac and Windows files with the update key in your keychain
 #      (Sparkle's sign_update, account "cedarlogic"); the Linux files get a
 #      SHA-256 in the feed
@@ -42,7 +51,7 @@ LINUX_BRANCH="${LINUX_BRANCH:-linux/port}"
 KEY_ACCOUNT="${KEY_ACCOUNT:-cedarlogic}"
 
 die() { echo "publish-update: $*" >&2; exit 1; }
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
 MODE="${1:-}"; shift || true
 case "$MODE" in beta|normal|promote) ;; *) usage ;; esac
@@ -98,10 +107,18 @@ fetch_ci() {   # workflow branch artifact-pattern
     gh run download "$id" -R "$SOURCE_REPO" -p "$3" -D "$WORK/ci" || { echo "note: download failed; skipping"; return; }
     find "$WORK/ci" -type f \( -name '*.exe' -o -name '*.AppImage' \) -exec cp -f {} "$DIST/" \;
 }
+if [ "$USE_CI" = 1 ] && [ -n "$NATIVE" ]; then
+    echo "note: --native: not downloading the old wx Windows/Linux CI builds (give --no-ci; the native ones go on the release with scripts/release-assets.sh)"
+    USE_CI=0
+fi
 if [ "$USE_CI" = 1 ]; then
     fetch_ci "Windows build" "$WIN_BRANCH" "CedarLogic-windows-installer"
     fetch_ci "Linux build" "$LINUX_BRANCH" "CedarLogic-linux-appimage-*"
 fi
+
+# Where Check for Updates is: the Mac app's app menu, or the wx app's Help menu.
+CHECK_MENU="Help > Check for Updates"
+[ -z "$NATIVE" ] || CHECK_MENU="CedarLogic > Check for Updates…"
 
 NATIVE_ZIP="" NATIVE_BUILD="" NATIVE_SHORT=""
 if [ -n "$NATIVE" ]; then
@@ -176,7 +193,7 @@ if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
 else
     TITLE="CedarLogic $VERSION"; FLAGS=()
     if [ "$MODE" = beta ]; then TITLE="$TITLE beta"; FLAGS+=(--prerelease); fi
-    if [ -n "$NOTES" ]; then FLAGS+=(--notes-file "$NOTES"); else FLAGS+=(--notes "Update $VERSION. Get it from inside CedarLogic: Help > Check for Updates."); fi
+    if [ -n "$NOTES" ]; then FLAGS+=(--notes-file "$NOTES"); else FLAGS+=(--notes "Update $VERSION. Get it from inside CedarLogic: $CHECK_MENU."); fi
     gh release create "$TAG" -R "$REPO" --title "$TITLE" "${FLAGS[@]}"
 fi
 UPLOAD=()
@@ -186,4 +203,4 @@ gh release upload "$TAG" -R "$REPO" --clobber "${UPLOAD[@]}"
 (cd "$WORK/releases" && git add -A && git commit -qm "Publish $VERSION ($MODE)" && git push -q)
 echo
 echo "Published CedarLogic $VERSION to $( [ "$MODE" = beta ] && echo "beta testers" || echo everyone )."
-echo "Testers get it at their next check (daily), or right away with Help > Check for Updates."
+echo "Testers get it at their next check (daily), or right away with $CHECK_MENU."
