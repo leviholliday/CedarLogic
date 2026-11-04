@@ -55,8 +55,8 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   split view (`TabStrip`), focus mode (the bars slide away and the tabs
   become the title row, `TitleButtons`), a canvas per page (`Canvas`), the
   side panel, whose gates drag onto the canvas in one motion (`Palette`),
-  the status bar where notes appear (`StatusBar`), the Actions rail on the
-  right edge (`Actions`, `Rail`; below), the Mac's seven-page
+  the status bar where notes appear (`StatusBar`), the Actions panel on the
+  right edge (`Actions`, `Rail`; below), Help > Show Me Around (`ShowMeAround`; below), the Mac's seven-page
   Settings and changeable shortcuts (`Settings`, `Shortcuts`,
   `ShortcutsSheet`), the app's own alert card and quit question (`Alert`,
   `QuitConfirm`), gate settings, Add a Gate and the memory editor
@@ -70,8 +70,8 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   `TabSwitcher`), the oscilloscope, docked under the canvas (`Scope`),
   Export as Image (`ExportImage`), Send Feedback (`Feedback`), Help
   (`Help`), Settings > Sync, the link preview and the sync line in Your
-  Circuits (`SyncApp`, `SyncUI`, `SyncPlatform`), and the brand's launch screen, welcome, guided tour and What's
-  New (`Brand`, `Splash`, `Welcome`), with the Mac's 0.4 intro before the
+  Circuits (`SyncApp`, `SyncUI`, `SyncPlatform`), and the brand's launch screen, welcome, the lesson
+  ("Learn Logic: Guided Tour") and What's New (`Brand`, `Splash`, `Welcome`), with the Mac's 0.4 intro before the
   launch screen on the first launch and the first after an update, with the
   chime both times (`Intro`: about 6 s, the circuit drawing itself into the
   icon, then the launch screen, held a moment to be read; any key or click
@@ -81,13 +81,13 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   less on one whose first frames come slowly; `--intro-bench` times its
   frames). Help > Play the Intro plays it
   again over the front window, and Settings > General > "Play the intro
-  every time CedarLogic opens" (off unless chosen) plays it, silently, at
+  every time CedarLogic opens" (on unless turned off) plays it, silently, at
   every launch. Motion follows the Mac's curves
   (`Anim.h`) and stops when the desktop asks for no animations. Settings
   (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`; circuits in
   `~/.local/share/CedarLogic/Library`.
 
-The Actions rail (`App/Actions.h`, `App/Rail.h`, the Mac's `mac/App/Actions.swift`):
+The Actions panel (`App/Actions.h`, `App/Rail.h`, the "rail" in the code; the Mac's `mac/App/Actions.swift`):
 a strip of icon buttons down the window's right edge, the side panel's mirror.
 Resting on one shows its name and shortcut; a click runs it; pressing one and
 moving it 6 points (or holding it 0.45 s) picks it up, and dropping it saves
@@ -102,21 +102,52 @@ pointer has been away from it and the strip for 400 ms (not while its menu
 is open or during a drag); Escape puts it back. The strip watches the pointer
 through a motion controller on the whole window in its capture phase, so it
 sees it over the canvas, the notes or the tab alike. Settings > Actions has
-where it goes (On screen, In the toolbar, Hidden), "Open it when the mouse
-reaches the right edge" (on by default) and the Customize list: a box to
+one switch, "Show the Actions panel", and "Open on hover" under it (greyed
+while the panel is off; on by default), then the Customize list: a box to
 tick for every menu command, drag by the handle (or Alt+Up/Down) to reorder,
 a search by name, menu or shortcut words ("ctrl shift t", any case; no
 dragging while searching; Escape clears it), Reset to Default. The rail's
-right-click menu opens the same list in its own window. View > Show Actions /
-Hide Actions is F9 (the desktop's usual side-pane key; changeable in
-Settings > Shortcuts). New installs start On screen; settings from before the
-rail (the brand accent or the welcome seen in them) start Hidden, with a
-one-time note "New: an Actions rail. Settings ▸ Actions." once no welcome or
-What's New is up. Hover and slides draw nothing new each frame (the sliding
-rail is drawn once and moved), and none of it moves when the desktop's
-animations are off or the frames are slow. Saved as `actionsMode`,
-`actionsCollapsed`, `actionsHoverOpen`, `actionsOrder`, `actionsShown` and
-`actionsHint` in `native.ini`.
+right-click menu opens the same list in its own window (with the two
+switches), and has "Turn Off the Actions Panel". There is no toolbar mode.
+View > Show Actions / Hide Actions is F9 (the desktop's usual side-pane key;
+changeable in Settings > Shortcuts); with the panel off it turns it back on.
+0.4 turns the panel on for everyone, new installs and updated ones alike
+(the old On screen / In the toolbar / Hidden choice included), and unfolds
+it, each once (`actionsOn04`, `actionsOpen04`, as the Mac's
+`cl.actions.on04` and `cl.actions.open04`); after that, on or off and
+folded are the person's own and stay as they're left. The welcome has a
+page for it ("The Actions panel": the two switches beside a picture of the
+window), and What's New's card for it a "Show or Hide It…" button that
+opens the same switches over the page. Hover and slides draw nothing new
+each frame (the sliding panel is drawn once and moved), and none of it moves
+when the desktop's animations are off or the frames are slow. Saved as
+`actionsOn`, `actionsCollapsed`, `actionsHoverOpen`, `actionsOrder`,
+`actionsShown`, `actionsOn04` and `actionsOpen04` in `native.ini`.
+
+Show Me Around (`App/ShowMeAround.h`, the Mac's `mac/App/ShowMeAround.swift`;
+Help > Show Me Around): a walk round the window in seven stops -- the side
+panel of parts, the canvas, the toolbar, the Actions panel, the run
+controls, the tabs, and the window's menus (Help, and Settings under File)
+-- each a one-sentence card beside the lit place, in the Mac's words, with
+Next, Back and Skip; Right, Enter and Space step on, Left back, Escape ends
+it. Everything else is dimmed; clicks on the dim do nothing, clicks in the
+lit place reach it. The spotlight slides between stops (a cut inside a quick
+fade of the card when the desktop's animations are off or frames are slow).
+A stop that isn't showing is left out (the panel off, the side panel
+hidden); a folded panel opens for its stop and folds back after. It starts
+by itself until it's been seen once (finished or skipped,
+`showMeAroundSeen`): after the first-run welcome closes, whichever way, after
+What's New on an update's first launch, and on any launch before then --
+only once a circuit window has the keyboard with nothing over it (not the
+launch screen, the intro, the welcome, What's New, a dialog or the lesson).
+Chosen from the welcome (or What's New), the lesson "Learn Logic: Guided
+Tour" starts right after it, and its last stop offers the lesson too. It's
+two drawing layers, one over the title bar and one over the rest, each
+drawing its share of one picture; the card is drawn once per stop into an
+image, and while the spotlight moves only the part of the layers that
+changes is redrawn, with nothing made each frame, so it stays cheap on a
+Raspberry Pi. About has "Questions? cedarlogic@proton.me", the address a
+mailto link.
 
 GTK 3 on purpose: every Linux desktop has it (Raspberry Pi OS, Ubuntu, Kali,
 Fedora, Mint), it speaks Wayland and X11 natively, and the AppImage uses the
@@ -150,13 +181,23 @@ every shape and gate style and checks each circuit's truth table. And:
   `lock`, `about`, `gatesettings`, `rename`, `ram`, `menu`, `primary` (the ☰ menu), `stepclock:N`, `lockinplace:N`, `pagelinks`, `draw:N`, `projector:N`, `checkclocked:N` (on a counter),
   `rail:N` (the Actions rail: 0 open with a label, 1 folded, 2 peeking, 3 slid
   out, 4 mid-drag, 5 focus mode, 6 focus mode slid out, 7 narrow, 8 Simulation
-  View, 9 in the toolbar, 10 focus mode peeking), `customize:N` (the Customize
-  window; 1 searched for "export")
-- `cedarlogic --actions-check` -- the Actions rail without a window: where it
-  starts for a new install and an earlier one, the order shared by the rail
-  and the list, the search, the hot strip's geometry and timing, focus mode
+  View, 9 turned off, 10 focus mode peeking), `customize:N` (the Customize
+  window; 1 searched for "export"), `walk:N` (Show Me Around at stop N, 0-6),
+  `walksmall:N` (the same in a 1024x600 window), `walkoff:N` (with the panel
+  off), `whatsnewpanel` (What's New's Actions panel card), `settingsoff`
+  (Settings > Actions with the panel off)
+- `cedarlogic --actions-check` -- the Actions panel without a window: on and
+  open for a new install and for every earlier setting (before the panel,
+  Hidden, In the toolbar, folded; the old keys gone from the file), the
+  choice kept after the migration, Settings > Actions' two switches (and no
+  toolbar mode), the names of Show Me Around and the lesson, About's mailto,
+  the order shared by the panel and the list, the search, the hot strip's geometry and timing, focus mode
   folding it; settings of its own in a temporary folder. The session check
-  does the same live, through the window's events
+  does the same live, through the window's events, and walks Show Me Around
+  with the keys: its stops, a folded panel opened for its stop and folded
+  back, the panel's stop left out when it's off, Escape and Done counting as
+  seen, starting by itself after each of the welcome's ways out (the lesson
+  after it) and after What's New, never over a window, never again once seen
 - `cedarlogic --hold <seconds> --screenshot out.png` -- waits before the
   picture (CI drags a gate onto the canvas with xdotool meanwhile)
 - `cedarlogic --bench-drag [steps] circuit.cdl` -- times the canvas while

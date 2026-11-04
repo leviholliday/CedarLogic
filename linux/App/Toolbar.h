@@ -34,6 +34,10 @@ public:
 	void layoutNow() { relayout = true; redraw(); }
 	// Where an action's button is, on the screen (the guided tour points at it).
 	GdkRectangle actionRect(const char* action) const;
+	// Show Me Around's places, in the bar's points: the tools on the left
+	// (new, undo, copy and paste, zoom), or the run controls (pause, step,
+	// speed, Simulation View). False when none of them is showing.
+	bool toolsRect(bool run, RectF& out) const;
 	// The bar's colour as drawn now, and whether its ink is the dark theme's
 	// (the menu row above it matches).
 	Color barColor() const;

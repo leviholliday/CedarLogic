@@ -109,8 +109,8 @@ struct Prefs {
 	// first launch after an update (the What's New version it introduced).
 	bool introFirstLaunchPlayed = false;
 	std::string introUpdatePlayed;
-	// Settings > General: the intro at every launch, silently (off unless chosen).
-	bool introEveryLaunch = false;
+	// Settings > General: the intro at every launch, silently (on unless turned off).
+	bool introEveryLaunch = true;
 	std::string seenWhatsNew;
 	// Export as Image: the grid, the name-and-result strip, the style and size.
 	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;
@@ -121,18 +121,21 @@ struct Prefs {
 	// Export Lab Report: what goes in, and colour or black and white.
 	bool reportCircuit = true, reportTable = true, reportFormulas = true, reportTiming = true, reportColor = true;
 	bool timingWhole = false, timingInColor = false;                     // the What's New last shown (whatsnew::kVersion)
-	// The Actions rail (Actions.h), as the Mac's cl.actions.*: where the
-	// actions go (0 On screen, 1 In the toolbar, 2 Hidden), the rail folded to
-	// its tab as it was left, sliding out when the pointer reaches the
-	// window's right edge, every action in the Customize list's order and the
-	// ones ticked there, and the one-time status line for someone who had
-	// CedarLogic before the rail.
-	int actionsMode = 0;
+	// The Actions panel (Actions.h, the "rail" in the code), as the Mac's
+	// cl.actions.*: Settings > Actions > Show the Actions panel (on, or none:
+	// everything is still in the menus), the panel folded to its tab as it
+	// was left, Open on hover (folded, it slides out when the pointer reaches
+	// the window's right edge), every action in the Customize list's order
+	// and the ones ticked there. 0.4 turned it on, and unfolded it, once for
+	// everyone (actionsStart); after that the choice is theirs.
+	bool actionsOn = true;
 	bool actionsCollapsed = false;
 	bool actionsHoverOpen = true;
 	std::vector<std::string> actionsOrder;
 	std::vector<std::string> actionsShown;
-	bool actionsHint = false;
+	// Help > Show Me Around (ShowMeAround.h) has been finished or skipped:
+	// until then it starts by itself.
+	bool showMeAroundSeen = false;
 
 	double wireScale() const;
 	void load();
@@ -149,13 +152,17 @@ Prefs& prefs();
 struct ChannelStart { int channel; bool notice; };
 ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChannel, bool storedNotice, const std::string& marker);
 
-// Where the Actions rail starts (Prefs::load), as the Mac decides it: a
-// choice made before stays; else a new install gets it On screen, and anyone
-// who used CedarLogic before (settings with the brand accent or the welcome
-// seen in them) gets Hidden, so their window doesn't change, and a one-time
-// status line saying where it is.
-struct ActionsStart { int mode; bool hint; };
-ActionsStart actionsStart(bool usedBefore, bool hasMode, int storedMode, bool storedHint);
+// The Actions panel at a launch (Prefs::load), as the Mac's
+// Prefs.migrateActions: 0.4 turns it on for everyone once (new installs and
+// updated ones, whatever the old On screen / In the toolbar / Hidden said:
+// the `actionsOn04` key), and unfolds it once (`actionsOpen04`). After those,
+// what's saved stays. `existed`: there was a settings file.
+struct ActionsStart { bool on; bool collapsed; };
+ActionsStart actionsStart(bool existed, bool migrated, bool storedOn, bool opened, bool storedCollapsed);
+
+// The project's address, for questions (Help > About CedarLogic, as a
+// mailto link). Send Feedback stays the way to report a problem.
+#define CL_CONTACT_EMAIL "cedarlogic@proton.me"
 
 // Whether the desktop asks for dark (GNOME's color-scheme, or a "-dark"
 // theme name).

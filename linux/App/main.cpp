@@ -15,6 +15,7 @@
 #include "Intro.h"
 #include "Updater.h"
 #include "Welcome.h"
+#include "ShowMeAround.h"
 #include "Collections.h"
 #include "Dialogs.h"
 #include "Feedback.h"
@@ -59,7 +60,10 @@ int gTheme = -1;
 bool gSimView = false;
 // --show <what>: for the screenshot runs, a window to open and picture
 // instead of the circuit's (welcome:N, whatsnew:N, help, truth, feedback,
-// templates, tour, find).
+// templates, tour, find; walk:N Show Me Around at stop N, walksmall:N the
+// same in a 1024x600 window, walkoff:N with the Actions panel off;
+// whatsnewpanel What's New's Actions card; settingsoff Settings > Actions
+// with the panel off).
 std::string gShow;
 // --lab-report <in.cdl> <out.pdf> [bw]: writes a lab report without a window.
 std::string gReportIn, gReportOut;
@@ -157,7 +161,7 @@ gboolean showCaptureCb(gpointer) {
 	GtkWidget* top = nullptr;
 	const std::string what = gShow.substr(0, gShow.find(':'));
 	if (what == "welcome") top = welcome::window();
-	else if (what == "whatsnew") top = whatsnew::window();
+	else if (what == "whatsnew" || what == "whatsnewpanel") top = whatsnew::window();
 	else if (what == "help") top = help::window();
 	else if (what == "truth") {
 		// A page with no truth table to make -- a clocked circuit with more
@@ -172,7 +176,7 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
 	else if (what == "report") top = toplevelTitled("Export Lab Report");
-	else if (what == "settings" || what == "sync") top = settings::window();
+	else if (what == "settings" || what == "settingsoff" || what == "sync") top = settings::window();
 	else if (what == "synccode") top = toplevelTitled("Your sync code");
 	else if (what == "synclink" || what == "syncpair") top = toplevelTitled("Link this computer");
 	else if (what == "syncconfirm") top = toplevelTitled("Link this computer?");
@@ -228,6 +232,20 @@ gboolean showCb(gpointer) {
 	g_timeout_add(1800, showCaptureCb, nullptr);
 	if (what == "welcome") { prefs().hasSeenWelcome = false; welcome::offer(w); welcome::pageForScreenshot(page); }
 	else if (what == "whatsnew") whatsnew::show(w, page);
+	// What's New's Actions chapter, its "Show or Hide It" card open.
+	else if (what == "whatsnewpanel") whatsnew::show(w, 4, true);
+	else if (what == "settingsoff") { prefs().actionsOn = false; actions::changed(); settings::show(w, settings::kActionsPage); }
+	// Show Me Around at a stop (ShowMeAround.h): in this window, in a small one, or with the panel off.
+	else if (what == "walk" || what == "walksmall" || what == "walkoff") {
+		if (what == "walkoff") { prefs().actionsOn = false; actions::changed(); }
+		if (what == "walksmall") gtk_window_resize(w->window(), 1024, 600);
+		static int stop = 0;
+		stop = page;
+		g_timeout_add(500, +[](gpointer) -> gboolean {
+			if (!circuitWindows().empty()) showme::preview(circuitWindows().back(), stop);
+			return G_SOURCE_REMOVE;
+		}, nullptr);
+	}
 	else if (what == "help") help::show(w, page > 0 ? "analysis" : "");
 	else if (what == "truth") w->makeTruthTable();
 	else if (what == "checkclocked") {
@@ -698,7 +716,9 @@ GMenuModel* buildMenubar() {
 	s = section(help);
 	add(s, "CedarLogic _Help", "win.help");
 	add(s, "_Keyboard Shortcuts", "win.shortcuts");
-	add(s, "Guided _Tour", "app.guided-tour");
+	// Where everything is in the window (ShowMeAround.h), then the logic lesson.
+	add(s, "_Show Me Around", "win.show-me-around");
+	add(s, "Learn Logic: Guided _Tour", "app.guided-tour");
 	s = section(help);
 	add(s, "_What's New in CedarLogic", "win.whats-new");
 	add(s, "Play the _Intro", "app.play-intro");
@@ -946,6 +966,8 @@ void startupCb(GApplication* gapp, gpointer) {
 	// first launch ever (the slower one, with the sound).
 	prefs().load();
 	gPrimary = true;
+	// Picture and check runs: Show Me Around never starts by itself.
+	showme::setQuiet(!gScreenshot.empty());
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
 	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) gSplash = showSplash();
@@ -1148,6 +1170,10 @@ void activateCb(GApplication* gapp, gpointer) {
 				return G_SOURCE_REMOVE;
 			}, app);
 		}
+		// Not seen yet: Show Me Around starts once a circuit window has the
+		// keyboard with nothing over it (after the welcome, What's New, the
+		// recovery question), never over the launch screen or the intro.
+		if (gScreenshot.empty()) guarded("Show Me Around", [] { showme::startWhenReady(); });
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
@@ -1215,6 +1241,10 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 				return G_SOURCE_REMOVE;
 			}, app);
 		}
+		// Not seen yet: Show Me Around starts once a circuit window has the
+		// keyboard with nothing over it (after the welcome, What's New, the
+		// recovery question), never over the launch screen or the intro.
+		if (gScreenshot.empty()) guarded("Show Me Around", [] { showme::startWhenReady(); });
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;

@@ -14,6 +14,7 @@
 #include "Ink.h"
 #include "Notes.h"
 #include "Settings.h"
+#include "ShowMeAround.h"
 #include "Shortcuts.h"
 #include "Brand.h"
 #include "Sheet.h"
@@ -129,6 +130,8 @@ const Command kCommands[] = {
 	{ "toggle-actions", [](CircuitWindow* w) { if (w->rail()) w->rail()->toggle(); }, false },
 	{ "show-actions", [](CircuitWindow* w) { if (w->rail()) w->rail()->showOpen(); }, false },
 	{ "customize-actions", [](CircuitWindow* w) { actions::showCustomize(w); }, false },
+	// Help > Show Me Around (ShowMeAround.h): where everything is in this window.
+	{ "show-me-around", [](CircuitWindow* w) { showme::start(w); }, false },
 	// View's settings that the Mac's View menu has too (Settings > Canvas
 	// keeps them as well).
 	{ "show-grid", [](CircuitWindow*) {
@@ -262,6 +265,7 @@ std::string CircuitWindow::openingDetail() const {
 }
 
 CircuitWindow::~CircuitWindow() {
+	showme::windowClosed(this);
 	if (timer) g_source_remove(timer);
 	if (autosaveId) g_source_remove(autosaveId);
 	timer = 0;
@@ -319,7 +323,10 @@ void CircuitWindow::build() {
 	addActions();
 
 	GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_container_add(GTK_CONTAINER(win), v);
+	// Over everything, Show Me Around's dim (ShowMeAround.h); another over the title rows.
+	GtkWidget* contentOverlay = gtk_overlay_new();
+	gtk_container_add(GTK_CONTAINER(contentOverlay), v);
+	gtk_container_add(GTK_CONTAINER(win), contentOverlay);
 	// The title bar: the menu row (the menus, and the window's buttons where
 	// the desktop puts them) over the toolbar (the Mac's and the Windows
 	// app's), both on the toolbar's colour. Focus mode slides them away.
@@ -333,7 +340,9 @@ void CircuitWindow::build() {
 	gtk_revealer_set_transition_type(GTK_REVEALER(titleRevealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
 	gtk_revealer_set_transition_duration(GTK_REVEALER(titleRevealer), 240);
 	gtk_revealer_set_reveal_child(GTK_REVEALER(titleRevealer), TRUE);
-	gtk_container_add(GTK_CONTAINER(titleRevealer), titleRows);
+	GtkWidget* titleOverlay = gtk_overlay_new();
+	gtk_container_add(GTK_CONTAINER(titleOverlay), titleRows);
+	gtk_container_add(GTK_CONTAINER(titleRevealer), titleOverlay);
 	// A window coming to the front: the menus' wording follows it.
 	g_signal_connect(win, "notify::is-active", CL_CALLBACK(+[](GObject*, GParamSpec*, gpointer self) {
 		static_cast<CircuitWindow*>(self)->updateActions();
@@ -433,6 +442,7 @@ void CircuitWindow::build() {
 
 	statusBar = new StatusBar(this);
 	gtk_box_pack_start(GTK_BOX(v), statusBar->outer(), FALSE, FALSE, 0);
+	showme::addLayers(this, titleOverlay, contentOverlay);
 }
 
 // The side panel is as wide as its gates need (Settings > Appearance >
@@ -1597,6 +1607,8 @@ static bool isShortcut(GtkApplication* app, const GdkEventKey* e) {
 gboolean CircuitWindow::keyCb(GtkWidget* widget, GdkEventKey* e, gpointer self) {
 	CircuitWindow* w = static_cast<CircuitWindow*>(self);
 	w->noteInput();
+	// Show Me Around on this window: its keys first (and plain keys go no further).
+	if (showme::activeOn(w) && guarded("Show Me Around", [&] { return showme::key(w, e); })) return TRUE;
 	// C while a part moves goes to its canvas, wherever the keyboard is (the
 	// side panel's search, after a drag from the panel): it connects there,
 	// rather than typing a c into the search or doing nothing.
@@ -2747,9 +2759,9 @@ void CircuitWindow::showAbout() {
 	Sheet sh;
 	sh.title = "About CedarLogic";
 	sh.width = 460;
-	sh.height = 420;
+	sh.height = 444;
 	sh.minWidth = 460;
-	sh.minHeight = 420;
+	sh.minHeight = 444;
 	sh.resizable = false;
 	const double opened = anim::now();
 	sh.animating = true;
@@ -2765,6 +2777,17 @@ void CircuitWindow::showAbout() {
 		brand::text(cr, "A digital logic simulator, based on the original CedarLogic from Cedarville University. Rebuilt natively for Linux: GTK and Cairo on the shared "
 		                "CedarLogic engine, with no OpenGL, so it runs the same on a Raspberry Pi as on a PC.",
 		            40, 222, 13, brand::Normal, brand::kSecondary, w - 80, TextAlign::Center);
+		// Questions: the project's address, as a link that starts a new mail.
+		{
+			const std::string ask = "Questions? ", mail = CL_CONTACT_EMAIL;
+			const float aw = brand::textWidth(ask, 12, brand::Normal), mw = brand::textWidth(mail, 12, brand::Medium);
+			const float x0 = w / 2 - (aw + mw) / 2, y0 = h - 106;
+			brand::text(cr, ask, x0, y0, 12, brand::Normal, brand::kFaint);
+			const bool hot = s.hotNext();
+			brand::text(cr, mail, x0 + aw, y0, 12, brand::Medium, hot ? brand::kPrimary : brand::kNeon);
+			fillRect(cr, rectF(x0 + aw, y0 + 16, x0 + aw + mw, y0 + 17), brand::alpha(hot ? brand::kPrimary : brand::kNeon, 0.6f));
+			s.hit(rectF(x0 + aw - 2, y0 - 3, x0 + aw + mw + 2, y0 + 19), [&] { after = "mail"; s.close(); });
+		}
 		const RectF site = rectF(w / 2 - 170, h - 70, w / 2 - 60, h - 36);
 		const RectF news = rectF(w / 2 - 50, h - 70, w / 2 + 60, h - 36);
 		const RectF close = rectF(w / 2 + 70, h - 70, w / 2 + 170, h - 36);
@@ -2783,6 +2806,7 @@ void CircuitWindow::showAbout() {
 	sh.run(GTK_WINDOW(win));
 	if (after == "site") openExternally(GTK_WINDOW(win), "https://cedarlogic.netlify.app");
 	else if (after == "news") whatsnew::show(this);
+	else if (after == "mail") openExternally(GTK_WINDOW(win), std::string("mailto:") + CL_CONTACT_EMAIL);
 }
 
 void CircuitWindow::rebuildRecentMenu() {}
