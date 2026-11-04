@@ -21,6 +21,10 @@
 //       it previews and links with the code that came, as the app does. Also
 //       a cancelled QR code (its slot goes) and a QR code with sync already on.
 //       Against the mock server named by CL_SYNC_URL.
+//   sync-check keychain-other <service> <file>
+//       run by the self-test from a re-signed copy of this tool (another code
+//       hash: the next build, as far as the Keychain can tell) with prompts
+//       turned off: loads <file>'s KeychainFile and prints what it got.
 
 import Foundation
 import Security
@@ -45,6 +49,15 @@ enum SyncCheck {
         case "pair":
             guard args.count >= 4 else { print("pair needs <tempDir> <a.cdl>"); exit(2) }
             exit(EngineRun(tempDir: URL(fileURLWithPath: args[2]), a: args[3], b: args[3]).runPair() ? 0 : 1)
+        case "keychain-other":
+            guard args.count >= 4 else { print("keychain-other needs <service> <file>"); exit(2) }
+            KeychainCheck.noPrompts()
+            switch KeychainFile(service: args[2], file: URL(fileURLWithPath: args[3]), label: "CedarLogic test").load() {
+            case .data(let d): print("data:" + String(decoding: d, as: UTF8.self))
+            case .none: print("none")
+            case .unreadable: print("unreadable")
+            }
+            exit(0)
         default:
             print("unknown mode \(args[1])")
             exit(2)
@@ -104,8 +117,10 @@ enum SyncCheck {
         check("secret forgotten", p.loadSecret() == nil)
         // The app's way: the Keychain (a service of this run's own, never the app's, deleted
         // at the end), with a secret file from before moved into it the first time it's read.
+        // No Keychain prompts in this process: one would fail the check, not wait for a click.
+        KeychainCheck.noPrompts()
         let service = "com.leviholliday.cedarlogic.test.sync-check.\(getpid())"
-        defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary) }
+        defer { KeychainCheck.deleteAll(service: service) }
         let keychained = SyncPlatform(syncDir: dir, keychainService: service)
         let secretFile = dir.appendingPathComponent("secret").path
         func loaded(_ p: SyncPlatform) -> String? {
@@ -116,14 +131,30 @@ enum SyncCheck {
         check("Keychain: secret saved, and no file", keychained.saveSecret("000G40R40M30E209185GR38E1YZ4")
               && !FileManager.default.fileExists(atPath: secretFile))
         check("Keychain: secret reads back", loaded(keychained) == "000G40R40M30E209185GR38E1YZ4")
+        let sealedFile = dir.appendingPathComponent("secret.sealed")
+        let sealedBytes = FileManager.default.contents(atPath: sealedFile.path) ?? Data()
+        check("Keychain: the sealed copy is 0600 and not the code in the clear",
+              stat(sealedFile.path, &st) == 0 && st.st_mode & 0o777 == 0o600 && !sealedBytes.isEmpty
+                  && sealedBytes.range(of: Data("000G40R40M30E209185GR38E1YZ4".utf8)) == nil)
+        let keyAccess = KeychainCheck.access(service: service, account: sealedFile.path)
+        check("Keychain: the key item trusts only /usr/bin/security, partition apple-tool: (\(keyAccess.debug))",
+              keyAccess.decryptApps == ["/usr/bin/security"] && keyAccess.partitions == ["apple-tool:"])
+        check("Keychain: no item holds the code itself (nothing under the plain file's path)",
+              !KeychainCheck.exists(service: service, account: secretFile))
         check("Keychain: the folder is kept out of backups",
               (try? dir.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup == true)
         check("a secret file from before (a tool's save)", p.saveSecret("1111111111111111111111111111")
               && FileManager.default.fileExists(atPath: secretFile))
         check("Keychain: is read first, moved in and deleted", loaded(keychained) == "1111111111111111111111111111"
               && !FileManager.default.fileExists(atPath: secretFile) && loaded(keychained) == "1111111111111111111111111111")
+        // The next build (a re-signed copy of this tool: another code hash) reads it without a
+        // prompt; an item an older build added itself moves into the sealed copy, keeping its data.
+        KeychainCheck.otherBuild(tempDir: URL(fileURLWithPath: tempDir), service: service, check: check)
         keychained.forgetSecret()
         check("Keychain: secret forgotten", loaded(keychained) == nil && loaded(p) == nil)
+        check("Keychain: its key item and sealed copy are gone too",
+              !KeychainCheck.exists(service: service, account: sealedFile.path)
+                  && !FileManager.default.fileExists(atPath: sealedFile.path))
         // One lock per sync folder.
         let lock = dir.appendingPathComponent("lock").path
         let other = SyncPlatform(syncDir: dir)
@@ -507,5 +538,210 @@ final class EngineRun {
         cl_sync_destroy(a.engine)
         print(failed ? "pair run: FAILED" : "pair run: all passed")
         return !failed
+    }
+}
+
+private protocol LegacyCalls {
+    static func noPrompts()
+    static func access(service: String, account: String) -> KeychainCheck.Access
+}
+
+/// The Keychain checks' tools: what an item's access says, and a copy of this
+/// tool with another code hash to read as the next build would.
+enum KeychainCheck {
+    /// Prompts off for this process. The SecKeychain calls the checks need
+    /// are deprecated (the app uses none of them): they're in Legacy, called
+    /// through a protocol so the build doesn't warn about each one.
+    static func noPrompts() { (Legacy.self as LegacyCalls.Type).noPrompts() }
+
+    static func exists(service: String, account: String) -> Bool {
+        SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                             kSecAttrAccount as String: account] as CFDictionary, nil) == errSecSuccess
+    }
+
+    /// Every item of this run's service, gone (by `security`: it deletes any
+    /// app's items without a prompt; SecItemDelete only this tool's own).
+    static func deleteAll(service: String) {
+        for _ in 0..<20 {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            p.arguments = ["delete-generic-password", "-s", service]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            guard (try? p.run()) != nil else { return }
+            p.waitUntilExit()
+            if p.terminationStatus != 0 { return }
+        }
+    }
+
+    /// An item the way builds before the sealed copy added it: by this tool
+    /// itself, the secret in it, trusting only this tool.
+    static func addLegacy(service: String, file: String, _ text: String) -> Bool {
+        SecItemAdd([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                    kSecAttrAccount as String: file, kSecValueData as String: Data(text.utf8),
+                    kSecAttrLabel as String: "CedarLogic test (as an older build)"] as CFDictionary, nil) == errSecSuccess
+    }
+
+    struct Access {
+        var decryptApps: [String]? = nil   // nil: any app (or no item)
+        var partitions: [String] = []
+        var debug = "no item"
+    }
+
+    static func access(service: String, account: String) -> Access {
+        (Legacy.self as LegacyCalls.Type).access(service: service, account: account)
+    }
+
+    private enum Legacy: LegacyCalls {
+        @available(macOS, deprecated: 10.10)
+        static func noPrompts() { SecKeychainSetUserInteractionAllowed(false) }
+
+        /// Who the item's decrypt entry trusts (each app's path) and its partition list.
+        @available(macOS, deprecated: 10.10)
+        static func access(service: String, account: String) -> Access {
+            var result = Access()
+            var ref: CFTypeRef?
+            guard SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                       kSecAttrAccount as String: account, kSecReturnRef as String: true,
+                                       kSecMatchLimit as String: kSecMatchLimitOne] as CFDictionary, &ref) == errSecSuccess,
+                  let ref, CFGetTypeID(ref) == SecKeychainItemGetTypeID() else { return result }
+            var access: SecAccess?
+            guard SecKeychainItemCopyAccess((ref as! SecKeychainItem), &access) == errSecSuccess, let access else {
+                result.debug = "no access"
+                return result
+            }
+            for acl in (SecAccessCopyMatchingACLList(access, kSecACLAuthorizationDecrypt) as? [SecACL]) ?? [] {
+                var apps: CFArray?, desc: CFString?, prompt = SecKeychainPromptSelector()
+                guard SecACLCopyContents(acl, &apps, &desc, &prompt) == errSecSuccess, let list = apps as? [SecTrustedApplication] else { continue }
+                result.decryptApps = list.map { app in
+                    var data: CFData?
+                    guard SecTrustedApplicationCopyData(app, &data) == errSecSuccess, let d = data as Data? else { return "?" }
+                    return String(decoding: d.prefix { $0 != 0 }, as: UTF8.self)
+                }
+            }
+            for acl in (SecAccessCopyMatchingACLList(access, kSecACLAuthorizationPartitionID) as? [SecACL]) ?? [] {
+                var apps: CFArray?, desc: CFString?, prompt = SecKeychainPromptSelector()
+                guard SecACLCopyContents(acl, &apps, &desc, &prompt) == errSecSuccess, let hex = desc as String? else { continue }
+                var bytes = [UInt8]()
+                var i = hex.startIndex
+                while let j = hex.index(i, offsetBy: 2, limitedBy: hex.endIndex), j > i, let b = UInt8(hex[i..<j], radix: 16) {
+                    bytes.append(b); i = j
+                }
+                let plist = try? PropertyListSerialization.propertyList(from: Data(bytes), format: nil) as? [String: Any]
+                result.partitions += plist?["Partitions"] as? [String] ?? []
+            }
+            result.debug = "decrypt \(result.decryptApps ?? ["any app"]), partitions \(result.partitions)"
+            return result
+        }
+    }
+
+    private static func cdhash(_ path: String) -> Data? {
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &code) == errSecSuccess, let code else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(code, [], &info) == errSecSuccess else { return nil }
+        return (info as? [String: Any])?[kSecCodeInfoUnique as String] as? Data
+    }
+
+    /// The checks with a second build: this tool copied and re-signed ad hoc
+    /// under another identifier (another code hash), as an update would be.
+    static func otherBuild(tempDir: URL, service: String, check: (String, Bool) -> Void) {
+        let me = Bundle.main.executablePath ?? CommandLine.arguments[0]
+        let other = tempDir.appendingPathComponent("sync-check-next-build").path
+        try? FileManager.default.removeItem(atPath: other)
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--sign", "-", "--identifier", "com.leviholliday.cedarlogic.test.next-build", other]
+        sign.standardOutput = FileHandle.nullDevice
+        sign.standardError = FileHandle.nullDevice
+        let copied = (try? FileManager.default.copyItem(atPath: me, toPath: other)) != nil
+        let signed = copied && (try? sign.run()) != nil && { sign.waitUntilExit(); return sign.terminationStatus == 0 }()
+        let a = cdhash(me), b = cdhash(other)
+        check("Keychain: a copy of this tool with another code hash (the next build)", signed && a != nil && b != nil && a != b)
+        guard signed else { return }
+        func otherLoads(_ file: URL) -> String {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: other)
+            p.arguments = ["keychain-other", service, file.path]
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = FileHandle.nullDevice
+            guard (try? p.run()) != nil else { return "didn't start" }
+            let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            p.waitUntilExit()
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let dir = tempDir.appendingPathComponent("keychain-builds", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let file = dir.appendingPathComponent("secret")
+        let kf = KeychainFile(service: service, file: file, label: "CedarLogic test")
+        func loaded(_ k: KeychainFile) -> String? {
+            if case .data(let d) = k.load() { return String(decoding: d, as: UTF8.self) }
+            return nil
+        }
+
+        // Saved by this build, read by the next without a prompt (prompts are off there: one would fail).
+        check("Keychain: saved by this build", kf.save(Data("2222222222222222222222222222".utf8)))
+        check("Keychain: the next build reads it without a prompt", otherLoads(file) == "data:2222222222222222222222222222")
+        check("Keychain: and so does this one again", loaded(kf) == "2222222222222222222222222222")
+
+        // An older build's item (it trusts only its own build): the next build can't read it
+        // without a prompt, so it's unreadable there -- and still there, nothing lost.
+        kf.delete()
+        check("Keychain: an older build's item (the secret itself)", addLegacy(service: service, file: file.path, "3333333333333333333333333333"))
+        check("Keychain: another build without the password gets unreadable, not nothing", otherLoads(file) == "unreadable")
+        check("Keychain: and the old item is still there", exists(service: service, account: file.path))
+        // The build that can read it (here: the one that added it; for a person, the next build
+        // once they've typed the password that one last time) moves it into the sealed copy.
+        check("Keychain: the old item is read and keeps its data", loaded(kf) == "3333333333333333333333333333")
+        check("Keychain: it's moved into the sealed copy and deleted",
+              !exists(service: service, account: file.path) && FileManager.default.fileExists(atPath: kf.sealedFile.path)
+                  && access(service: service, account: kf.sealedFile.path).partitions == ["apple-tool:"])
+        check("Keychain: after that, the next build reads it without a prompt", otherLoads(file) == "data:3333333333333333333333333333")
+
+        // Newest copy wins: an older build's item written after the sealed copy (someone
+        // went back to an old build) is read and moved in; one older than it is just deleted.
+        Thread.sleep(forTimeInterval: 1.2)
+        check("Keychain: an older build writes after this one", addLegacy(service: service, file: file.path, "4444444444444444444444444444"))
+        check("Keychain: its newer copy wins and moves in", loaded(kf) == "4444444444444444444444444444"
+              && !exists(service: service, account: file.path) && loaded(kf) == "4444444444444444444444444444")
+        check("Keychain: an older build's item from before the sealed copy", addLegacy(service: service, file: file.path, "5555555555555555555555555555"))
+        let later = Date().addingTimeInterval(5)
+        _ = try? FileManager.default.setAttributes([.modificationDate: later], ofItemAtPath: kf.sealedFile.path)
+        check("Keychain: the sealed copy wins and the stale item goes", loaded(kf) == "4444444444444444444444444444"
+              && !exists(service: service, account: file.path))
+
+        // A plain file (the fallback) is the newest copy, then moves in.
+        FileManager.default.createFile(atPath: file.path, contents: Data("6666666666666666666666666666".utf8), attributes: [.posixPermissions: 0o600])
+        check("Keychain: a plain file is read first and moved in", otherLoads(file) == "data:6666666666666666666666666666"
+              && !FileManager.default.fileExists(atPath: file.path) && loaded(kf) == "6666666666666666666666666666")
+        kf.delete()
+        check("Keychain: deleted: nothing left", loaded(kf) == nil && otherLoads(file) == "none"
+              && !exists(service: service, account: kf.sealedFile.path) && !FileManager.default.fileExists(atPath: kf.sealedFile.path))
+
+        // A path with a space, a double quote and a backslash: escaped on security's line, so
+        // the key item's account is exactly the path (and nothing else got on the line).
+        let oddDir = dir.appendingPathComponent("odd \"dir\\ x", isDirectory: true)
+        try? FileManager.default.createDirectory(at: oddDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let odd = KeychainFile(service: service, file: oddDir.appendingPathComponent("se\"cr\\et"), label: "CedarLogic \"test\" \\ label")
+        check("Keychain: a path with a space, a quote and a backslash is saved",
+              odd.save(Data("7777777777777777777777777777".utf8)) && exists(service: service, account: odd.sealedFile.path))
+        check("Keychain: and reads back, here and in the next build",
+              loaded(odd) == "7777777777777777777777777777" && otherLoads(odd.file) == "data:7777777777777777777777777777")
+        odd.delete()
+        check("Keychain: and is deleted", !exists(service: service, account: odd.sealedFile.path)
+              && !FileManager.default.fileExists(atPath: odd.sealedFile.path))
+        // A line break can't go on the line: no key, so the caller keeps the plain file.
+        check("Keychain: quoting: \\ and \" escaped, a line break refused",
+              KeychainFile.quotedForSecurity(["a b", "q\"u", "b\\s"]) == ["\"a b\"", "\"q\\\"u\"", "\"b\\\\s\""]
+                  && KeychainFile.quotedForSecurity(["x\ny"]) == nil && KeychainFile.quotedForSecurity(["x\r\ny"]) == nil)
+        let nlDir = dir.appendingPathComponent("line\nbreak", isDirectory: true)
+        try? FileManager.default.createDirectory(at: nlDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let nl = KeychainFile(service: service, file: nlDir.appendingPathComponent("secret"), label: "CedarLogic test")
+        FileManager.default.createFile(atPath: nl.file.path, contents: Data("8888888888888888888888888888".utf8), attributes: [.posixPermissions: 0o600])
+        check("Keychain: a path with a line break isn't saved, and its plain file is kept and read",
+              !nl.save(Data("8888888888888888888888888888".utf8)) && loaded(nl) == "8888888888888888888888888888"
+                  && FileManager.default.fileExists(atPath: nl.file.path) && !exists(service: service, account: nl.sealedFile.path))
+        unlink(other)
     }
 }

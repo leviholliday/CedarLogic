@@ -162,8 +162,10 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   sanitizers, `CL_SYNC_URL=<mock server>` to run the scenarios over HTTP
   too, `GATES=1` (after `build.sh`) to check the gate library's defaults
 - `sync-check.sh` -- the app's own sync hooks (`App/SyncHooks.swift`:
-  CryptoKit, Compression, URLSession, the secret in the Keychain or a 0600
-  file, flock) through
+  CryptoKit, Compression, URLSession, the secret sealed with a key the
+  Keychain keeps (`App/KeychainFile.swift`, through `/usr/bin/security` so
+  no update asks for the password; checked from a re-signed copy too) or a
+  0600 file, flock) through
   the engine's self-test, then, with the website's mock server
   (`CL_SITE=<cedarlogic-site>` or found beside this checkout), the same over
   HTTP and two real engines linking two libraries through it. The app
