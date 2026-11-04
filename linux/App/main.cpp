@@ -84,6 +84,9 @@ std::string gBenchHome;
 // (SessionCheck.cpp); as --bench-drag runs, with a home of its own.
 int gSession = 0;
 unsigned long long gSessionSeed = 1;
+// --settings-check <folder> <tag>: Settings' pages on this screen, pictured
+// and checked (SettingsCheck.cpp); a picture run otherwise.
+std::string gSettingsCheckDir, gSettingsCheckTag;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -204,6 +207,15 @@ gboolean showCaptureCb(gpointer) {
 	prefs().save();
 	fflush(stderr);
 	_exit(ok ? 0 : 1);
+	return G_SOURCE_REMOVE;
+}
+
+gboolean settingsCheckCb(gpointer) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	const int code = w ? settings::check(w, gSettingsCheckDir, gSettingsCheckTag) : 1;
+	fflush(stdout);
+	fflush(stderr);
+	_exit(code);
 	return G_SOURCE_REMOVE;
 }
 
@@ -1122,6 +1134,7 @@ void activateCb(GApplication* gapp, gpointer) {
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
+			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1188,6 +1201,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
+			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1399,6 +1413,12 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--dark") == 0 || strcmp(argv[i], "--light") == 0) { gTheme = strcmp(argv[i], "--dark") == 0; continue; }
 		if (strcmp(argv[i], "--sim-view") == 0) { gSimView = true; continue; }
 		if (strcmp(argv[i], "--show") == 0 && i + 1 < argc) { gShow = argv[++i]; continue; }
+		if (strcmp(argv[i], "--settings-check") == 0 && i + 2 < argc) {
+			gSettingsCheckDir = argv[++i];
+			gSettingsCheckTag = argv[++i];
+			if (gScreenshot.empty()) gScreenshot = gSettingsCheckDir + "/unused.png";   // runs as a picture run does
+			continue;
+		}
 		if (strcmp(argv[i], "--lab-report") == 0 && i + 2 < argc) {
 			gReportIn = argv[++i];
 			gReportOut = argv[++i];

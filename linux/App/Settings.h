@@ -21,6 +21,18 @@ GtkWidget* window();
 void pageChanged();
 // The theme changed: redraw what's drawn.
 void themeChanged();
+
+// For --settings-check (SettingsCheck.cpp): the pages, one shown at once
+// without its fade, its scroller and its content.
+int pageCount();
+const char* pageTitle(int page);
+void selectNow(int page);
+GtkWidget* pageScroller();
+GtkWidget* currentPage();
+// --settings-check <folder> [tag]: every page and Customize Actions on this
+// screen, pictured into <folder> as <tag>-settings-N.png and checked (they
+// fit, read at 4.5:1, and the wheel never changes a setting). 0 if all passed.
+int check(CircuitWindow* w, const std::string& dir, const std::string& tag);
 }
 
 #endif  // CL_LINUX_SETTINGS_H

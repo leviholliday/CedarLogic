@@ -902,4 +902,10 @@ void themeChanged() {
 	if (g_settings->pageWidget) gtk_widget_queue_draw(g_settings->pageWidget);
 }
 
+int pageCount() { return PageCount; }
+const char* pageTitle(int page) { return page >= 0 && page < PageCount ? kTitles[page] : ""; }
+void selectNow(int page) { if (g_settings) select(g_settings, page, false); }
+GtkWidget* pageScroller() { return g_settings ? g_settings->scroll : nullptr; }
+GtkWidget* currentPage() { return g_settings ? g_settings->pageWidget : nullptr; }
+
 }  // namespace settings
