@@ -63,8 +63,8 @@ it compiles without a Windows machine:
   right (`Notes`: View > Show Notes, Ctrl+Alt+N, or Notes beside Draw in the
   toolbar), plain text saved and synced with it, with its own undo apart from
   the circuit's, found by Find, and slid away in focus mode, as on the Mac; the
-  status bar where notes appear (`StatusBar`); the Actions rail down the
-  window's right edge, the side panel's mirror (`Rail`, over `Actions`, the
+  status bar where notes appear (`StatusBar`); the Actions panel ("the rail"
+  in the code) down the window's right edge, the side panel's mirror (`Rail`, over `Actions`, the
   list of every menu command it can offer): the actions you choose as icons,
   each named with its shortcut as the pointer rests on it, dragged up or
   down on the rail to reorder, folded to a tab by a click on its edge (by
@@ -73,12 +73,29 @@ it compiles without a Windows machine:
   pointer reaches the window's right edge (a 12-point strip the canvas's
   height, its last column of pixels too: 100 ms there, and it goes 400 ms
   after the pointer leaves; Escape puts it back); View > Show/Hide Actions,
-  Ctrl+B; Settings > Actions puts it on screen, in the toolbar or nowhere,
-  with the Customize list (`ActionsList`: ticks, drag to reorder, search by
-  name, menu or shortcut, Reset to Default) that the rail's right-click
-  Customize Actions... sheet has too -- new installs get it on screen,
-  earlier ones Hidden and a status line once, as on the Mac (`--rail-check`
-  tries it all; `--rail <state>` makes CI's pictures); the side
+  Ctrl+B; Settings > Actions has one switch, "Show the Actions panel", with
+  "Open on hover" under it (greyed when it's off; there is no toolbar mode),
+  and the Customize list (`ActionsList`: ticks, drag to reorder, search by
+  name, menu or shortcut, Reset to Default) that the panel's right-click
+  Customize Actions... sheet has too (with the same two switches) -- on, and
+  open, for everyone in 0.4: one-time migrations (`actionsOn04`,
+  `actionsOpen04` in native.ini, the Mac's `cl.actions.on04` and
+  `cl.actions.open04`) turn it on and unfold it once for every earlier
+  setting (from before the panel, Hidden, In the toolbar, folded), and after
+  that the choice sticks (`--rail-check` tries it all; `--rail <state>` makes
+  CI's pictures); Show Me Around (`ShowMeAround`, Help > Show Me Around): a
+  spotlight walk round the window -- the side panel, the canvas, the toolbar,
+  the Actions panel, the run controls, the tabs, and the menus in the title
+  row for Help and Settings -- a layered popup over the window with a dim,
+  one rounded hole (clicks there reach what's lit), a ring and a card with a
+  pointer; Next, Back and Skip, Right/Enter/Space and Left, Escape stops; the
+  spotlight slides (with "Animation effects" off it cuts, the card fading);
+  the panel's stop is passed over when it's off, and a folded panel opens for
+  it; it starts by itself until it's been seen once (`showMeAroundSeen`):
+  after the first-run welcome however it closes, after What's New, on any
+  launch -- never over the launch screen, the intro, the welcome, What's New,
+  the lesson or a dialog -- and "Learn Logic: Guided Tour", if chosen, runs
+  right after it; the side
   panel with the gate palette, My Parts and minimap (`Palette`); the dialogs
   (`Dialogs`, built with the small `Form` helper there, dark in dark mode);
   the app's own alert card for every question and note (`Alert`);
@@ -99,8 +116,12 @@ it compiles without a Windows machine:
   has no zlib), Sync (below), Send Feedback (`Feedback`, to
   cedarlogic.netlify.app, with screenshots and a recording of the window:
   `FeedbackCapture`, Media Foundation's H.264 MP4), and Help with search (`Help`); the launch screen with the first launch's sound
-  (`Splash`), the first-run welcome, What's New and the guided tour that
-  builds a circuit with you (`Welcome`), all in the brand's look (`Brand`); updates from the test
+  (`Splash`), the first-run welcome (with its Actions panel page: the two
+  switches beside a picture of the window), What's New (its panel card's
+  "Show or Hide It..." opens the same switches) and "Learn Logic: Guided
+  Tour", the lesson that builds a circuit with you (`Welcome`), all in the
+  brand's look (`Brand`); About, with "Questions? cedarlogic@proton.me" as a
+  mailto link; updates from the test
   build (`Updater`); recovery copies of unsaved work (`Recovery`); the Start
   menu and .cdl files for a copy run from the zip (`Integration`); Settings
   in the Mac's pages -- General, Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync (`Settings`, on `Form`); every command's keys,
@@ -199,10 +220,10 @@ Direct2D here. And:
   With `--dark` or `--light` for that run, `--sim-view`, `--split` (split
   view), `--focus` (focus mode), `--rename-tab`, or `--dialog
   preferences|shortcuts|truth-table|check|add-gate|library|versions|templates|
-  formula|scope|export|lab-report|feedback|help|welcome|whatsnew|quit|alert|rename|about|
-  start-menu|bad-link|sync|sync-on|sync-code|sync-link|sync-remove` to capture that instead
+  formula|scope|export|lab-report|feedback|help|welcome|whatsnew|whatsnew-panel|quit|alert|rename|about|
+  start-menu|bad-link|sync|sync-on|sync-code|sync-link|sync-remove|show-me-around` to capture that instead
   (`--truth-tab N`, `--formula "..."`, `--check "..."` for what Check compares
-  with, `--page N` for the welcome, What's New
+  with, `--page N` for the welcome, What's New, Show Me Around's stop (0 to 6)
   or Settings (0 General ... 5 Sync), `--select <text>` or `--place <gate>` for gate settings, `--help-page id`, and
   `--timing out.png [--timing-color]` with the oscilloscope); `--run a,b`
   runs commands by their Shortcuts id first (`draw`, `notes`, `stepClock`, `findNext`, and the

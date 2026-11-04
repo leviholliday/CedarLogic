@@ -6,7 +6,9 @@
 #include "Commands.h"
 #include "Intro.h"
 #include "Rail.h"
+#include "Dialogs.h"
 #include "Shortcuts.h"
+#include "ShowMeAround.h"
 #include "Toolbar.h"
 #include "Welcome.h"
 #include "Window.h"
@@ -80,30 +82,57 @@ std::vector<std::string> ids(const std::string& query) {
 }
 bool has(const std::vector<std::string>& v, const std::string& id) { return std::find(v.begin(), v.end(), id) != v.end(); }
 
+bool hasLine(const std::string& text, const std::string& key) { return text.find("\n" + key + "=") != std::string::npos; }
+
 void defaultsAndOrder() {
 	const Prefs before = prefs();
 	// A new install: no settings at all.
 	loadText("new.ini", "");
-	check(prefs().actionsMode == 0, strf("a new install has the rail on screen (mode %d)", prefs().actionsMode));
+	check(prefs().actionsOn, "a new install has the panel on");
 	check(!prefs().actionsCollapsed && actions::rail() == actions::defaults(), "open, with the six default actions " + join(actions::rail()));
-	check(!prefs().actionsHint, "and no status line about it");
-	check(prefs().actionsHoverOpen, "folded, it slides out at the edge (the default)");
-	// Someone who had CedarLogic before (settings from before the rail).
-	loadText("old.ini", "[CedarLogic]\nhasSeenWelcome=true\ntoolbarStyle=0\n");
-	check(prefs().actionsMode == 2, strf("an earlier install keeps its window: no rail (mode %d)", prefs().actionsMode));
-	check(prefs().actionsHint, "and the status line tells them once where it is");
+	check(prefs().actionsHoverOpen, "folded, it slides out at the edge (Open on hover, the default)");
+	check(!prefs().showMeAroundSeen, "and Show Me Around hasn't been seen");
+	// 0.4's one-time migrations, from every earlier setting: on, and open.
+	struct Old { const char* name; const char* ini; };
+	const Old olds[] = {
+		{ "a build from before the panel", "[CedarLogic]\nhasSeenWelcome=true\ntoolbarStyle=0\n" },
+		{ "the panel Hidden (and the status line pending)", "[CedarLogic]\nhasSeenWelcome=true\nactionsMode=2\nactionsHint=true\n" },
+		{ "In the toolbar", "[CedarLogic]\nhasSeenWelcome=true\nactionsMode=1\nactionsHint=false\n" },
+		{ "On screen, folded", "[CedarLogic]\nhasSeenWelcome=true\nactionsMode=0\nactionsCollapsed=true\n" },
+		{ "Hidden and folded", "[CedarLogic]\nhasSeenWelcome=true\nactionsMode=2\nactionsCollapsed=true\nactionsHoverOpen=false\n" },
+	};
+	for (const Old& o : olds) {
+		loadText("old.ini", o.ini);
+		const std::string saved = prefs().text();
+		check(prefs().actionsOn && !prefs().actionsCollapsed, std::string("migration: ") + o.name + " -> on and open");
+		check(!hasLine(saved, "actionsMode") && !hasLine(saved, "actionsHint") && hasLine(saved, "actionsOn04") && hasLine(saved, "actionsOpen04"),
+		      std::string("migration: ") + o.name + " -> saved without the old mode or status line, both steps marked done");
+	}
+	loadText("old-hover.ini", "[CedarLogic]\nactionsMode=2\nactionsHoverOpen=false\n");
+	check(!prefs().actionsHoverOpen, "migration: Open on hover stays as it was chosen");
+	// After the migration the choice sticks: off stays off, folded stays folded.
+	loadText("migrated.ini", "[CedarLogic]\nhasSeenWelcome=true\nactionsMode=1\n");
+	prefs().actionsOn = false;
+	prefs().actionsCollapsed = true;
+	loadText("after.ini", prefs().text());
+	check(!prefs().actionsOn && prefs().actionsCollapsed, "after the migration: turned off and folded, it stays so at the next launch");
+	prefs().actionsOn = true;
+	loadText("after2.ini", prefs().text());
+	check(prefs().actionsOn && prefs().actionsCollapsed, "and turned on again, it's on and still folded (never unfolded again)");
 	// What was chosen stays, through a save and a launch.
 	std::vector<std::string> reversed = actions::defaults();
 	std::reverse(reversed.begin(), reversed.end());
 	std::string order;
 	for (const std::string& id : reversed) order += (order.empty() ? "" : ",") + id;
-	loadText("kept.ini", "[CedarLogic]\nactionsMode=0\nactionsCollapsed=true\nactionsHoverOpen=false\nactionsHint=false\nactionsOrder=" + order +
+	loadText("kept.ini", "[CedarLogic]\nactionsOn04=1\nactionsOpen04=1\nactionsOn=true\nactionsCollapsed=true\nactionsHoverOpen=false\nactionsOrder=" + order +
 	                         "\nactionsShown=checkCircuit,predict,tidy,shareLink,exportImage,exportReport\n");
-	check(prefs().actionsMode == 0 && prefs().actionsCollapsed, "a folded rail stays folded, as it was left");
+	check(prefs().actionsOn && prefs().actionsCollapsed, "a folded panel stays folded, as it was left");
 	check(actions::rail() == reversed, "in the order it was given " + join(actions::rail()));
-	check(!prefs().actionsHoverOpen && !prefs().actionsHint, "hover-to-open stays off once turned off; no status line (seen)");
+	check(!prefs().actionsHoverOpen, "Open on hover stays off once turned off");
 	loadText("again.ini", prefs().text());
 	check(prefs().actionsCollapsed && !prefs().actionsHoverOpen && actions::rail() == reversed, "and the same after it's saved and read again");
+	loadText("seen.ini", "[CedarLogic]\nshowMeAroundSeen=true\n");
+	check(prefs().showMeAroundSeen, "Show Me Around seen stays seen");
 
 	// The rail's drag and the Customize list: one order.
 	loadText("order.ini", "");
@@ -215,7 +244,7 @@ void window() {
 	ActionsRail* r = w->railWidget();
 	w->present();
 	SetWindowPos(w->window(), nullptr, 20, 20, 1000, 700, SWP_NOZORDER | SWP_NOACTIVATE);
-	prefs().actionsMode = 0;
+	prefs().actionsOn = true;
 	prefs().actionsCollapsed = false;
 	prefs().actionsHoverOpen = true;
 	actions::reset();
@@ -300,33 +329,26 @@ void window() {
 	w->run(CMD_TOGGLE_ACTIONS);
 	pump(0.3);
 	check(!r->showing() && prefs().actionsCollapsed, "and Hide Actions folds it again");
-	prefs().actionsMode = 2;
+	prefs().actionsOn = false;
 	actions::changed();
 	pump(0.2);
-	check(!IsWindowVisible(r->widget()) && w->canvasRight() == clientW(), "Hidden: no rail, the canvas to the edge");
-	check(!w->toolbarWidget()->hasButton(CMD_CHECK_CIRCUIT), "and no actions in the toolbar");
+	check(!IsWindowVisible(r->widget()) && w->canvasRight() == clientW(), "Show the Actions panel off: no panel, the canvas to the edge");
+	// No toolbar mode: none of the actions are toolbar buttons, in any style.
+	const int style = prefs().toolbarStyle;
+	int inToolbar = 0;
+	for (int st : { TSSeamless, TSClassic, TSMinimal }) {
+		prefs().toolbarStyle = st;
+		actions::changed();
+		pump(0.1);
+		for (const std::string& id : actions::defaults())
+			if (w->toolbarWidget()->hasButton(actions::find(id)->command)) inToolbar++;
+	}
+	prefs().toolbarStyle = style;
+	actions::changed();
+	check(inToolbar == 0, strf("no toolbar mode: with the panel off, none of its actions are in the toolbar, in any style (%d)", inToolbar));
 	w->run(CMD_TOGGLE_ACTIONS);
 	pump(0.3);
-	check(prefs().actionsMode == 0 && r->showing() && about(railW(), open), "with the actions hidden, Show Actions puts the rail on screen, open");
-	prefs().actionsMode = 1;
-	actions::changed();
-	pump(0.2);
-	POINT bp;
-	check(!IsWindowVisible(r->widget()) && w->canvasRight() == clientW() && w->toolbarWidget()->hasButton(CMD_CHECK_CIRCUIT) &&
-	          w->toolbarWidget()->buttonPoint(CMD_CHECK_CIRCUIT, bp),
-	      "In the toolbar: no rail, the actions as toolbar buttons (the first one shown at 1000 px)");
-	// Minimal has room for all six at this width.
-	const int style = prefs().toolbarStyle;
-	prefs().toolbarStyle = TSMinimal;
-	actions::changed();
-	pump(0.2);
-	int shownSix = 0;
-	for (const std::string& id : actions::defaults())
-		if (w->toolbarWidget()->buttonPoint(actions::find(id)->command, bp)) shownSix++;
-	check(shownSix == 6, strf("and all six where there's room (%d shown, Minimal)", shownSix));
-	prefs().toolbarStyle = style;
-	prefs().actionsMode = 0;
-	actions::changed();
+	check(prefs().actionsOn && r->showing() && about(railW(), open), "with the panel off, Show Actions turns it on, open");
 	pump(0.2);
 
 	// A click on the rail runs it; a drag moves it (and runs nothing).
@@ -461,6 +483,241 @@ void introReplay() {
 	prefs() = before;
 }
 
+
+// Show Me Around (ShowMeAround.h), the Windows twin of the Mac
+// launch-selftest's: its stops in a real window, the keys, the panel's stop,
+// Escape, starting by itself after each of the welcome's ways out and after
+// What's New (never over them), and never again once seen.
+MSG keyMsg(CircuitWindow* w, UINT vk) {
+	MSG m = {};
+	m.hwnd = w->window();
+	m.message = WM_KEYDOWN;
+	m.wParam = vk;
+	return m;
+}
+
+// Until it's on (or `seconds` pass).
+bool waitActive(double seconds) {
+	const double until = nowSeconds() + seconds;
+	while (!showme::active() && nowSeconds() < until) pump(0.05);
+	pump(0.1);
+	return showme::active();
+}
+
+std::string menuText(HMENU m, UINT command) {
+	for (int i = 0; m && i < GetMenuItemCount(m); i++) {
+		if (GetMenuItemID(m, i) == command) {
+			wchar_t buf[128] = L"";
+			GetMenuStringW(m, (UINT)i, buf, 127, MF_BYPOSITION);
+			return U(buf);
+		}
+		if (HMENU sub = GetSubMenu(m, i)) {
+			const std::string t = menuText(sub, command);
+			if (!t.empty()) return t;
+		}
+	}
+	return "";
+}
+
+// The hole is round the place (give or take the window's edge, where it's
+// kept 2 points in).
+bool holeRound(CircuitWindow* w, int spot) {
+	RECT hole = showme::holeOnScreen(), place = w->tourSpot(spot);
+	if (IsRectEmpty(&place) || IsRectEmpty(&hole)) return false;
+	const int slack = (int)std::lround(4 * dpiOf(w->window()) / 96.0);
+	InflateRect(&hole, slack, slack);
+	RECT both;
+	UnionRect(&both, &hole, &place);
+	return EqualRect(&both, &hole) != FALSE;
+}
+
+void showMeAround() {
+	const Prefs before = prefs();
+	const char* P = "show me around: ";
+	CircuitWindow* w = newCircuitWindow();
+	if (!w) { check(false, std::string(P) + "a circuit window"); return; }
+	w->present();
+	SetWindowPos(w->window(), nullptr, 20, 20, 1100, 760, SWP_NOZORDER | SWP_NOACTIVATE);
+	prefs().actionsOn = true;
+	prefs().actionsCollapsed = false;
+	actions::reset();
+	actions::changed();
+	pump(0.4);
+	const std::string smaLabel = menuText(w->menuBarMenus(), CMD_SHOW_ME_AROUND), tourLabel = menuText(w->menuBarMenus(), CMD_TOUR);
+	check(smaLabel.find("Show Me &Around") == 0 && tourLabel.find("Learn Logic: Guided &Tour") == 0,
+	      std::string(P) + "Help > Show Me Around, and the lesson is Learn Logic: Guided Tour (" + smaLabel + ", " + tourLabel + ")");
+	const actions::Def* sd = actions::find("showMeAround");
+	const actions::Def* td = actions::find("tour");
+	check(sd && sd->command == CMD_SHOW_ME_AROUND && td && std::string(td->title) == "Learn Logic: Guided Tour",
+	      std::string(P) + "both are among the actions, by those names");
+
+	// On a launch before it's been seen: by itself, once the window is up.
+	showme::quiet = false;
+	showme::assumeFront = true;
+	prefs().showMeAroundSeen = false;
+	showme::startWhenReady();
+	const bool started = waitActive(4);
+	check(started && showme::target() == w && showme::overlayShown(), std::string(P) + "starts by itself on a launch before it's been seen");
+	check(showme::shown().size() == 7 && showme::step() == 0 && showme::position() == 1,
+	      strf("%sseven stops, on the side panel first (%zu, stop %d)", P, showme::shown().size(), showme::step() + 1));
+	check(holeRound(w, showme::Palette), std::string(P) + "its hole is round the side panel");
+	bool allPlaces = true;
+	std::string missing;
+	for (int i = 0; i < showme::SpotCount; i++) {
+		const RECT r = w->tourSpot(i);
+		if (IsRectEmpty(&r)) { allPlaces = false; missing += showme::stepTitle(i) + "; "; }
+	}
+	check(allPlaces, std::string(P) + "it finds every place in the window " + missing);
+	check(showme::stepBody(6).find("menus at the top of the window") != std::string::npos && showme::stepBody(6).find("File (Ctrl+,)") != std::string::npos,
+	      std::string(P) + "the last stop points at the menus in the window, Settings under File (Ctrl+,)");
+	// The keys.
+	MSG m = keyMsg(w, VK_RIGHT);
+	const bool took = showme::key(m);
+	pump(0.35);
+	check(took && showme::step() == 1, strf("%sRight steps on (stop %d)", P, showme::step() + 1));
+	m = keyMsg(w, VK_LEFT);
+	showme::key(m);
+	pump(0.35);
+	check(showme::step() == 0, std::string(P) + "Left steps back");
+	m = keyMsg(w, VK_RETURN);
+	showme::key(m);
+	pump(0.35);
+	m = keyMsg(w, VK_SPACE);
+	showme::key(m);
+	pump(0.35);
+	check(showme::step() == 2, strf("%sEnter and Space step on (stop %d)", P, showme::step() + 1));
+	m = keyMsg(w, 'A');
+	check(showme::key(m) && showme::active(), std::string(P) + "a plain key doesn't reach the canvas meanwhile");
+	// The panel's stop opens a folded panel, and it folds back after.
+	ActionsRail* r = w->railWidget();
+	prefs().actionsCollapsed = true;
+	actions::changed();
+	pump(0.3);
+	auto railW = [&] { RECT x; GetWindowRect(r->widget(), &x); return (int)(x.right - x.left); };
+	const double s = dpiOf(w->window()) / 96.0;
+	const int open = (int)std::lround(rail::kWidth * s), tab = (int)std::lround(rail::kTabWidth * s);
+	const bool foldedBefore = std::abs(railW() - tab) <= 1;
+	m = keyMsg(w, VK_RIGHT);
+	showme::key(m);
+	pump(0.45);
+	check(foldedBefore && showme::stepSpot(showme::step()) == showme::Actions && std::abs(railW() - open) <= 1 && prefs().actionsCollapsed,
+	      strf("%sat the panel's stop a folded panel opens (%d px), still folded in Settings", P, railW()));
+	check(showme::stepBody(showme::step()).find("folded") != std::string::npos, std::string(P) + "and its sentence says it's kept folded");
+	check(holeRound(w, showme::Actions), std::string(P) + "its hole is round the open panel");
+	showme::key(m);
+	pump(0.45);
+	check(showme::step() == 4 && std::abs(railW() - tab) <= 1, strf("%sand at the next stop it folds back (%d px)", P, railW()));
+	prefs().actionsCollapsed = false;
+	actions::changed();
+	// Escape quits, and counts as seen.
+	m = keyMsg(w, VK_ESCAPE);
+	showme::key(m);
+	pump(0.4);
+	check(!showme::active() && !showme::overlayShown() && prefs().showMeAroundSeen, std::string(P) + "Escape stops it, and it counts as seen");
+	showme::startWhenReady();
+	pump(1.6);
+	check(!showme::active() && !showme::watching(), std::string(P) + "once seen it never starts by itself again");
+	// The panel off: its stop is passed over.
+	prefs().actionsOn = false;
+	actions::changed();
+	pump(0.2);
+	showme::start(w, 0);
+	pump(0.2);
+	const std::vector<int> six = showme::shown();
+	std::vector<int> visited;
+	std::string notRound;
+	for (int i = 0; i < 6 && showme::active(); i++) {
+		visited.push_back(showme::step());
+		if (!holeRound(w, showme::stepSpot(showme::step()))) notRound += showme::stepTitle(showme::step()) + "; ";
+		showme::next();
+		pump(0.3);
+	}
+	check(six.size() == 6 && std::find(six.begin(), six.end(), 3) == six.end() && visited == six && !showme::active(),
+	      strf("%swith the panel off its stop is passed over (%zu stops), and Done at the last ends it", P, six.size()));
+	check(notRound.empty(), std::string(P) + "at every stop the hole is round its place " + notRound);
+	prefs().actionsOn = true;
+	actions::changed();
+	pump(0.2);
+
+	// After the first-run welcome, whichever way it closes; the lesson after it if chosen.
+	struct Exit { showme::WelcomeExit e; const char* name; };
+	const Exit exits[] = { { showme::WelcomeExit::GuidedTour, "Learn Logic" }, { showme::WelcomeExit::Template, "a template" },
+	                       { showme::WelcomeExit::Blank, "Just Start / a blank canvas" }, { showme::WelcomeExit::Shortcuts, "the shortcuts" },
+	                       { showme::WelcomeExit::Skip, "Skip / Escape" } };
+	for (const Exit& x : exits) {
+		prefs().showMeAroundSeen = false;
+		prefs().hasSeenWelcome = false;
+		welcome::show(w);
+		showme::startWhenReady();
+		pump(1.4);
+		const bool waited = !showme::active() && welcome::isOpen();
+		welcome::finishForTest(x.e);
+		const bool on = waitActive(4);
+		check(waited && on && showme::target() == w,
+		      std::string(P) + "never over the welcome; after it closes by " + x.name + " it starts");
+		if (x.e == showme::WelcomeExit::GuidedTour) {
+			check(showme::hasThen(), std::string(P) + "the lesson waits for it");
+			showme::end();
+			pump(0.6);
+			check(welcome::tourWindow() != nullptr && prefs().showMeAroundSeen, std::string(P) + "and starts right after it");
+			welcome::stopTour();
+		} else {
+			check(!showme::hasThen(), std::string(P) + "nothing after it (" + std::string(x.name) + ")");
+			showme::end();
+			pump(0.3);
+		}
+	}
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows()))
+		if (c != w) c->destroy();
+	pump(0.2);
+	// After What's New (an update's first launch), never over it.
+	prefs().showMeAroundSeen = false;
+	prefs().hasSeenWelcome = true;
+	prefs().seenWhatsNew = "an older version";
+	whatsnew::show(w);
+	showme::startWhenReady();
+	pump(1.4);
+	const bool waitedNews = !showme::active() && whatsnew::isOpen();
+	whatsnew::closeForTest();
+	check(waitedNews && waitActive(4), std::string(P) + "never over What's New; after it closes it starts");
+	// A dialog over the window hides it.
+	EnableWindow(w->window(), FALSE);
+	pump(0.2);
+	const bool hid = !showme::overlayShown();
+	EnableWindow(w->window(), TRUE);
+	pump(0.2);
+	check(hid && showme::overlayShown(), std::string(P) + "under a dialog it's out of sight, and back after");
+	// The last stop's "Next, learn logic" link: the lesson after it.
+	showme::stop();
+	showme::preview(w, 6);
+	check(showme::isLast() && !showme::hasThen(), std::string(P) + "the last stop (Help and Settings)");
+	showme::end();
+	pump(0.3);
+	showme::quiet = true;
+	showme::assumeFront = false;
+	w->destroy();
+	pump(0.2);
+	prefs() = before;
+}
+
+// About's address, and the wheel over a choice.
+void aboutAndWheel() {
+	CircuitWindow* w = newCircuitWindow();
+	if (!w) { check(false, "about: a circuit window"); return; }
+	w->present();
+	pump(0.2);
+	about::show(w);
+	pump(0.4);
+	check(about::isOpen() && about::mailLinkDrawn() && about::mailLink() == "mailto:cedarlogic@proton.me",
+	      "about: \"Questions? cedarlogic@proton.me\", a mailto link (" + about::mailLink() + ")");
+	about::closeNow();
+	pump(0.2);
+	std::string detail;
+	check(wheelOverChoiceCheck(detail), "settings: the wheel over a closed choice leaves its value and scrolls the page (" + detail + ")");
+	w->destroy();
+	pump(0.2);
+}
+
 }  // namespace
 
 void prepare() {
@@ -470,7 +727,7 @@ void prepare() {
 	CreateDirectoryW(W(gHome).c_str(), nullptr);
 	SetEnvironmentVariableW(L"CEDARLOGIC_HOME", W(gHome).c_str());
 	ActionsRail::watchPointer = false;
-	ActionsRail::quiet = true;
+	showme::quiet = true;
 }
 
 int run(const std::function<void(const std::string&)>& out) {
@@ -481,6 +738,8 @@ int run(const std::function<void(const std::string&)>& out) {
 		geometry();
 		hover();
 		window();
+		showMeAround();
+		aboutAndWheel();
 		introRules();
 		introReplay();
 	});

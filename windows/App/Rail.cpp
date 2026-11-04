@@ -1,10 +1,11 @@
-// The Actions rail (see Rail.h).
+// The Actions panel, "the rail" in the code (see Rail.h).
 
 #include "Rail.h"
 #include "Chrome.h"
 #include "Commands.h"
 #include "Fade.h"
 #include "Shortcuts.h"
+#include "ShowMeAround.h"
 #include "Window.h"
 
 #include <dwmapi.h>
@@ -41,14 +42,8 @@ void registerLabelClass() {
 
 ActionsRail::Picture ActionsRail::picture;
 bool ActionsRail::watchPointer = true;
-bool ActionsRail::quiet = false;
 
-ActionsRail::ActionsRail(CircuitWindow* window, HWND parent) : win(window) {
-	create(parent, WS_CHILD | WS_CLIPSIBLINGS);
-	// The one-time status line for someone who had CedarLogic before the
-	// rail: after the launch (and any welcome or What's New over it).
-	if (prefs().actionsHint && !quiet) hintAt = nowSeconds() + 4;
-}
+ActionsRail::ActionsRail(CircuitWindow* window, HWND parent) : win(window) { create(parent, WS_CHILD | WS_CLIPSIBLINGS); }
 
 ActionsRail::~ActionsRail() {
 	labelSurface.release();
@@ -56,6 +51,8 @@ ActionsRail::~ActionsRail() {
 }
 
 // ---- State -------------------------------------------------------------------------
+
+bool ActionsRail::folded() const { return (prefs().actionsCollapsed || narrow || focus) && !peek && !showme::holdsPanelOpen(win); }
 
 float ActionsRail::reserve() const {
 	if (!onScreen()) return 0;
@@ -213,20 +210,6 @@ void ActionsRail::tick(double now) {
 		held = true;
 		hideLabel();
 		redraw();
-	}
-	// The status line, once, when nothing else is over the window.
-	if (hintAt >= 0 && now >= hintAt) {
-		if (!prefs().actionsHint) {
-			hintAt = -1;
-		} else if ((!IsWindowVisible(win->window()) || !IsWindowEnabled(win->window())) && hintTries < 60) {
-			hintTries++;
-			hintAt = now + 2;
-		} else {
-			hintAt = -1;
-			prefs().actionsHint = false;
-			prefs().save();
-			win->note("New: an Actions rail. Settings ▸ Actions.");
-		}
 	}
 }
 
@@ -619,14 +602,13 @@ void ActionsRail::pressForTest(int index, float dy, double hold) {
 // ---- Its menu -------------------------------------------------------------------------
 
 void ActionsRail::menu(POINT screen) {
-	enum { CUSTOMIZE = 1, FOLD, TOOLBAR, HIDE };
+	enum { CUSTOMIZE = 1, FOLD, OFF };
 	const bool f = folded();
 	HMENU m = CreatePopupMenu();
 	AppendMenuW(m, MF_STRING, CUSTOMIZE, L"&Customize Actions…");
 	AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
 	AppendMenuW(m, MF_STRING, FOLD, f ? (hov.slidOut ? L"&Keep Actions Open" : L"&Show Actions") : L"&Fold Actions Away");
-	AppendMenuW(m, MF_STRING, TOOLBAR, L"Show Them in the &Toolbar Instead");
-	AppendMenuW(m, MF_STRING, HIDE, L"&Hide Actions");
+	AppendMenuW(m, MF_STRING, OFF, L"&Turn Off the Actions Panel");
 	// Its menu open keeps a slid-out rail out; closed, it goes if the pointer has.
 	if (hov.slidOut && (hov.overStrip || hov.overRail)) hov.menuOpen = true;
 	hov.pending = 0;
@@ -640,8 +622,7 @@ void ActionsRail::menu(POINT screen) {
 	switch (chosen) {
 	case CUSTOMIZE: PostMessageW(win->window(), WM_COMMAND, CMD_CUSTOMIZE_ACTIONS, 0); break;
 	case FOLD: if (folded()) unfold(); else fold(); break;
-	case TOOLBAR: prefs().actionsMode = 1; actions::changed(); break;
-	case HIDE: prefs().actionsMode = 2; actions::changed(); break;
+	case OFF: prefs().actionsOn = false; actions::changed(); break;
 	default: break;
 	}
 }

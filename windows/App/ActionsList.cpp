@@ -181,7 +181,7 @@ void ActionsList::after() {
 	const int all = (int)actions::listed().size();
 	if (footer >= 0)
 		form->setText(footer, searching() ? strf("%d of %d match. Clear the search to drag them into order.", (int)visible().size(), all)
-		                                  : strf("%d shown. Drag to change the order, here or on the rail.", (int)actions::rail().size()));
+		                                  : strf("%d shown. Drag to change the order, here or on the panel.", (int)actions::rail().size()));
 	if (reset >= 0) form->enable(reset, !actions::isDefault() && !disabled);
 }
 
@@ -217,7 +217,7 @@ void ActionsList::add(Form& f, int height) {
 	list = f.add(pic);
 	FormField note;
 	note.kind = FormField::Note;
-	note.label = strf("%d shown. Drag to change the order, here or on the rail.", (int)actions::rail().size());
+	note.label = strf("%d shown. Drag to change the order, here or on the panel.", (int)actions::rail().size());
 	footer = f.add(note);
 }
 
@@ -361,24 +361,39 @@ void showCustomizeActions(CircuitWindow* w, const std::string& searchFor) {
 	f.cancelText = "";
 	FormField intro;
 	intro.kind = FormField::Note;
-	intro.label = "Tick what goes on the Actions rail, anything from any menu. They show in this order, top to bottom. "
-	              "You can also drag them up or down on the rail itself.";
+	intro.label = "Tick what goes on the Actions panel, anything from any menu. They show in this order, top to bottom. "
+	              "You can also drag them up or down on the panel itself.";
 	intro.lines = 2;
 	f.add(intro);
 	ActionsList list;
 	list.query = searchFor.empty() ? actionsSearch() : searchFor;
 	list.add(f, 360);
+	// The panel's two switches (the Mac's sheet has them beside Done).
 	FormField show;
-	show.kind = FormField::Choice;
-	show.label = "Show:";
-	show.choices = { "On screen", "In the toolbar", "Hidden" };
-	show.value = std::to_string(prefs().actionsMode);
+	show.kind = FormField::Check;
+	show.label = actions::kShowSwitch;
+	show.value = prefs().actionsOn ? "1" : "";
+	show.grid = 2;
 	const int showField = f.add(show);
-	f.onInit = [&](Form& form) { list.init(form); };
+	FormField hover;
+	hover.kind = FormField::Check;
+	hover.label = actions::kHoverSwitch;
+	hover.value = prefs().actionsHoverOpen ? "1" : "";
+	hover.grid = 2;
+	hover.tip = actions::hoverHint();
+	const int hoverField = f.add(hover);
+	f.onInit = [&](Form& form) {
+		list.init(form);
+		form.enable(hoverField, prefs().actionsOn);
+	};
 	f.onChange = [&](Form& form, int field) {
 		if (list.changed(form, field)) return;
 		if (field == showField) {
-			prefs().actionsMode = std::max(0, std::min(2, form.choice(field)));
+			prefs().actionsOn = form.checked(field);
+			form.enable(hoverField, prefs().actionsOn);
+			actions::changed();
+		} else if (field == hoverField) {
+			prefs().actionsHoverOpen = form.checked(field);
 			actions::changed();
 		}
 	};

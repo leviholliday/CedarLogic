@@ -261,19 +261,14 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	showTitle = r.b("showTitle", showTitle);
 	showThemeToggle = r.b("showThemeToggle", showThemeToggle);
 	showStepClock = r.b("showStepClock", showStepClock);
-	// The Actions rail: on screen for a new install (no settings at all);
-	// anyone who had CedarLogic before keeps the window they know (no rail,
-	// the toolbar as it was) until they look in Settings > Actions, which a
-	// status line tells them once -- as the Mac decides it.
-	if (r.has("actionsMode")) {
-		actionsMode = r.i("actionsMode", 0, 0, 2);
-		actionsHint = r.b("actionsHint", false);
-	} else {
-		const bool fresh = r.m.empty();
-		actionsMode = fresh ? 0 : 2;
-		actionsHint = !fresh;
-	}
-	actionsCollapsed = r.b("actionsCollapsed", false);
+	// The Actions panel: on for everyone in 0.4, new installs and updated
+	// ones alike, once (actionsOn04). Before, it was On screen, In the
+	// toolbar or Hidden (actionsMode), and a copy that was updating started
+	// Hidden; and it's unfolded once too (actionsOpen04), so nobody is left
+	// with only its 6-point tab -- the Mac's Prefs.migrateActions. After
+	// that, on or off and folded are theirs, and stick.
+	actionsOn = r.b("actionsOn04", false) ? r.b("actionsOn", true) : true;
+	actionsCollapsed = r.b("actionsOpen04", false) ? r.b("actionsCollapsed", false) : false;
 	actionsHoverOpen = r.b("actionsHoverOpen", true);
 	actionsOrder = r.s("actionsOrder", "");
 	actionsShownSet = r.has("actionsShown");
@@ -316,6 +311,7 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	}
 	installedRelease = r.s("installedRelease", "");
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
+	showMeAroundSeen = r.b("showMeAroundSeen", showMeAroundSeen);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	introFirstLaunchPlayed = r.b("introFirstLaunchPlayed", introFirstLaunchPlayed);
 	introUpdatePlayed = r.s("introUpdatePlayed", introUpdatePlayed);
@@ -425,12 +421,13 @@ std::string Prefs::text() const {
 	o << "showTitle=" << b(showTitle) << "\n";
 	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
 	o << "showStepClock=" << b(showStepClock) << "\n";
-	o << "actionsMode=" << actionsMode << "\n";
+	o << "actionsOn=" << b(actionsOn) << "\n";
+	o << "actionsOn04=1\n";
+	o << "actionsOpen04=1\n";
 	o << "actionsCollapsed=" << b(actionsCollapsed) << "\n";
 	o << "actionsHoverOpen=" << b(actionsHoverOpen) << "\n";
 	o << "actionsOrder=" << actionsOrder << "\n";
 	if (actionsShownSet) o << "actionsShown=" << actionsShown << "\n";
-	o << "actionsHint=" << b(actionsHint) << "\n";
 	o << "newPagesShareLinks=" << b(newPagesShareLinks) << "\n";
 	o << "inkTool=" << inkTool << "\n";
 	o << "penColor=" << penColor << "\n";
@@ -447,6 +444,7 @@ std::string Prefs::text() const {
 	o << "testingGroupNotice=" << b(testingGroupNotice) << "\n";
 	o << "installedRelease=" << installedRelease << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
+	o << "showMeAroundSeen=" << b(showMeAroundSeen) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "introFirstLaunchPlayed=" << b(introFirstLaunchPlayed) << "\n";
 	o << "introUpdatePlayed=" << introUpdatePlayed << "\n";

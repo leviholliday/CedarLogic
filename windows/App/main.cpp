@@ -29,6 +29,7 @@
 #include "TabSwitcher.h"
 #include "Toolbar.h"
 #include "Updater.h"
+#include "ShowMeAround.h"
 #include "Welcome.h"
 #include "Window.h"
 #include "D2DScene.h"
@@ -97,10 +98,10 @@ int gBenchDraw = 0;
 // or renaming its tab.
 bool gSplit = false, gFocus = false, gRenameTab = false;
 int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar in that style, for this run
-// The Actions rail (Rail.h), for this run's picture: --rail open, folded,
+// The Actions panel (Rail.h), for this run's picture: --rail open, folded,
 // peek (folded, the pointer at the edge), hover-open (slid out over the
 // canvas), drag (an item held 52 points below its place), narrow (an 860 x
-// 640 window), toolbar or hidden; --rail-label <id>: that item's name and
+// 640 window), or off (Show the Actions panel turned off); --rail-label <id>: that item's name and
 // shortcut showing; --actions-search <words>: the Customize list (Settings >
 // Actions, --dialog customize-actions) searched.
 std::string gRail, gRailLabel;
@@ -221,7 +222,7 @@ void restoreRunPrefs() {
 	if (gProjector) prefs().projector = gPrefsBefore.projector;
 	if (gClassicTabs) prefs().classicTabs = gPrefsBefore.classicTabs;
 	if (!gRail.empty()) {
-		prefs().actionsMode = gPrefsBefore.actionsMode;
+		prefs().actionsOn = gPrefsBefore.actionsOn;
 		prefs().actionsCollapsed = gPrefsBefore.actionsCollapsed;
 		prefs().windowWidth = gPrefsBefore.windowWidth;
 		prefs().windowHeight = gPrefsBefore.windowHeight;
@@ -235,6 +236,19 @@ void CALLBACK railCheckTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	gRailExit = railcheck::run([](const std::string& s) { writeOut(s); });
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gRailExit);
+}
+
+// --dialog show-me-around [--page N]: Show Me Around on the window at stop N
+// (0 to 6; the first it has from there), for the picture.
+void CALLBACK showMeAroundTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	if (!circuitWindows().empty()) showme::preview(circuitWindows().back(), gPage);
+}
+
+// --dialog whatsnew-panel [--page N]: What's New with the Actions panel's card open.
+void CALLBACK panelCardTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	whatsnew::showPanelCard();
 }
 
 void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
@@ -256,6 +270,15 @@ void CALLBACK screenshotTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	if (dialog == (w ? w->window() : nullptr)) dialog = nullptr;
 	if (help::window()) dialog = help::window();
 	if (welcome::tourWindow()) dialog = welcome::tourWindow();
+	// Show Me Around: the window with the walk over it.
+	if (gDialog == -12) {
+		const bool ok = showme::saveScreenshot(gScreenshot);
+		writeOut(strf("%s %s (Show Me Around, stop %d, %d of %zu)\n", ok ? "wrote" : "couldn't write", gScreenshot.c_str(), showme::step() + 1,
+		              showme::position(), showme::shown().size()));
+		prefs() = gPrefsBefore;
+		prefs().save();
+		ExitProcess(ok ? 0 : 1);
+	}
 	// The Actions rail's label is a popup of its own: the window with it over.
 	const HWND railLabel = !gDialog && w && w->railWidget() ? w->railWidget()->labelWindow() : nullptr;
 	if (gDialog == -10) {
@@ -1216,7 +1239,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : d == "switcher" ? -10
-			        : d == "customize-actions" ? CMD_CUSTOMIZE_ACTIONS : 0;
+			        : d == "customize-actions" ? CMD_CUSTOMIZE_ACTIONS : d == "show-me-around" ? -12 : d == "whatsnew-panel" ? -13 : 0;
 			if (d == "feedback-sending" || d == "feedback-failed" || d == "feedback-sent" || d == "feedback-capped" || d == "feedback-summary") {
 				gDialog = -11;
 				gFeedbackSample = d == "feedback-sending" ? 1 : d == "feedback-failed" ? 2 : d == "feedback-sent" ? 3 : d == "feedback-capped" ? 4 : 5;
@@ -1244,11 +1267,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
 	if (gRailCheck) railcheck::prepare();
 	gTestRun = testRun;
-	// Test and picture runs: the rail doesn't follow wherever the runner's
-	// pointer is, and the one-time status line waits for a real launch.
+	// Test and picture runs: the panel doesn't follow wherever the runner's
+	// pointer is, and Show Me Around never starts by itself.
 	if (testRun) {
 		ActionsRail::watchPointer = false;
-		ActionsRail::quiet = true;
+		showme::quiet = true;
 	}
 	if (!testRun && handToRunning(files)) return 0;
 	// Recently Deleted: circuits deleted over 30 days ago go for good, in the
@@ -1285,7 +1308,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	if (gWireTag) prefs().wireValueTag = true;
 	if (!gRail.empty()) {
 		Prefs& q = prefs();
-		q.actionsMode = gRail == "toolbar" ? 1 : gRail == "hidden" ? 2 : 0;
+		q.actionsOn = gRail != "off" && gRail != "hidden";
 		q.actionsCollapsed = gRail == "folded" || gRail == "peek" || gRail == "hover-open";
 		ActionsRail::picture.peek = gRail == "peek";
 		ActionsRail::picture.slidOut = gRail == "hover-open";
@@ -1417,7 +1440,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		welcome::pageForScreenshot(gPage);
 	}
 	if (gDialog == -4 && !circuitWindows().empty()) welcome::startTour(circuitWindows().back());
+	if (gDialog == -12) SetTimer(nullptr, 0, 900, showMeAroundTimer);
+	if (gDialog == -13) SetTimer(nullptr, 0, 900, panelCardTimer);
 	if (gDialog == -2 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
+	if (gDialog == -13 && !circuitWindows().empty()) whatsnew::show(circuitWindows().back(), gPage);
 	if (gDialog == -3 && !circuitWindows().empty()) help::show(circuitWindows().back(), gHelpPage);
 	if (gDialog == -5) SetTimer(nullptr, 0, 400, alertTimer);
 	if (gDialog == -6) SetTimer(nullptr, 0, 400, renameTimer);
@@ -1460,6 +1486,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
 	MSG msg;
 	while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+		// Show Me Around has the keys while it's on its window.
+		if (msg.message == WM_KEYDOWN && showme::key(msg)) continue;
 		if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
 			if (CircuitWindow* w = windowFor(msg.hwnd)) {
 				// Escape puts back an Actions rail that slid out over the canvas.

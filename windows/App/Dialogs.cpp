@@ -220,6 +220,13 @@ LRESULT CALLBACK choiceProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DW
 		return 0;
 	}
 	if (msg == WM_ERASEBKGND) return 1;
+	// The wheel over a closed choice scrolls the page it's on (Windows sends it
+	// to the control under the pointer, and a combo box would step its value
+	// instead); with its list open, the list scrolls as usual.
+	if ((msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) && !SendMessageW(h, CB_GETDROPPEDSTATE, 0, 0)) {
+		if (HWND parent = GetParent(h)) return SendMessageW(parent, msg, wp, lp);
+		return 0;
+	}
 	if (msg == WM_SETFOCUS || msg == WM_KILLFOCUS || msg == WM_ENABLE) InvalidateRect(h, nullptr, FALSE);
 	if (msg == WM_MOUSEMOVE && !GetPropW(h, L"clHot")) {
 		SetPropW(h, L"clHot", (HANDLE)1);
@@ -235,6 +242,13 @@ LRESULT CALLBACK choiceProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DW
 	return r;
 }
 const UINT_PTR kFormTimer = 1;
+
+// For --rail-check: a parent that counts the wheel notches it's handed.
+int g_wheelsReached = 0;
+LRESULT CALLBACK wheelParentProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+	if (msg == WM_MOUSEWHEEL) { g_wheelsReached++; return 0; }
+	return DefWindowProcW(h, msg, wp, lp);
+}
 
 // A Form's list rows are asked for as they come into view (a virtual list
 // view), so a truth table or a memory with thousands of rows opens at once.
@@ -2546,3 +2560,35 @@ bool confirmQuit(HWND parent) {
 }
 
 // ---- The oscilloscope: Scope.cpp ----
+
+// ---- For --rail-check ---------------------------------------------------------------
+
+bool wheelOverChoiceCheck(std::string& detail) {
+	static bool registered = false;
+	if (!registered) {
+		registered = true;
+		WNDCLASSEXW wc = {};
+		wc.cbSize = sizeof wc;
+		wc.lpfnWndProc = wheelParentProc;
+		wc.hInstance = appInstance();
+		wc.lpszClassName = L"CedarLogicWheelCheck";
+		RegisterClassExW(&wc);
+	}
+	HWND parent = CreateWindowExW(WS_EX_TOOLWINDOW, L"CedarLogicWheelCheck", L"", WS_POPUP, 0, 0, 300, 200, nullptr, nullptr, appInstance(), nullptr);
+	if (!parent) { detail = "no window"; return false; }
+	HWND combo = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST, 10, 10, 200, 200, parent, nullptr,
+	                             appInstance(), nullptr);
+	for (const wchar_t* c : { L"One", L"Two", L"Three", L"Four" }) SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)c);
+	SendMessageW(combo, CB_SETCURSEL, 1, 0);
+	SetWindowSubclass(combo, choiceProc, 5, 0);
+	RECT r;
+	GetWindowRect(combo, &r);
+	g_wheelsReached = 0;
+	for (int delta : { -WHEEL_DELTA, -WHEEL_DELTA, WHEEL_DELTA * 3 })
+		SendMessageW(combo, WM_MOUSEWHEEL, MAKEWPARAM(0, (short)delta), MAKELPARAM((r.left + r.right) / 2, (r.top + r.bottom) / 2));
+	const int sel = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
+	detail = strf("choice %d (was 1), %d of 3 notches reached the page", sel, g_wheelsReached);
+	const bool ok = sel == 1 && g_wheelsReached == 3;
+	DestroyWindow(parent);
+	return ok;
+}

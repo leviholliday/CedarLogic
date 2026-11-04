@@ -1,5 +1,5 @@
-// The actions the Actions rail, the toolbar's version of it and the
-// Customize list offer (the Mac's Actions.swift ActionRegistry): every
+// The actions the Actions panel ("the rail" in the code) and the Customize
+// list offer (the Mac's Actions.swift ActionRegistry): every
 // command the menus have, by the id the Mac saves it under, with its name as
 // its menu has it, its menu, its icon and the command it runs -- and the
 // order and ticks the person chose (prefs().actionsOrder / actionsShown),
@@ -60,8 +60,19 @@ bool isDefault();
 std::string words(const Def& d);
 bool matches(const Def& d, const std::string& query);
 
-// Saved, and every window shows it (its rail, its toolbar, its menus).
+// Saved, and every window shows it (its panel, its menus).
 void changed();
+
+// The panel's two switches as Settings > Actions, the Customize sheet, the
+// welcome and What's New word them (the Mac's ActionsSwitches), and their
+// hints: on, off (with View > Show Actions' keys), open on hover, and the
+// line under Settings' list about folding it.
+extern const char* const kShowSwitch;
+extern const char* const kHoverSwitch;
+std::string showHint();
+std::string offHint();
+std::string hoverHint();
+std::string foldHint();
 
 // In `w` now: whether it can run (dimmed if not), and whether it's switched
 // on (drawn lit, as the toolbar's toggles are).
