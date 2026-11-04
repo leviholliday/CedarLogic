@@ -4,7 +4,8 @@
 
 If you find a security problem in CedarLogic, please tell us privately first.
 
-- **Best:** open a private report on GitHub: [Report a vulnerability](https://github.com/leviholliday/CedarLogic/security/advisories/new) (the repository's **Security** tab, then **Report a vulnerability**). Only the maintainer sees it.
+- **Best:** email me at cedarlogic@proton.me
+- **Another Option:** open a private report on GitHub: [Report a vulnerability](https://github.com/leviholliday/CedarLogic/security/advisories/new) (the repository's **Security** tab, then **Report a vulnerability**). Only the maintainer sees it.
 - **If it isn't sensitive** (for example, an out-of-date library or a hardening idea), a normal issue is fine. The website's [`security.txt`](https://cedarlogic.netlify.app/.well-known/security.txt) points to the issues of [leviholliday/CedarLogic-Releases](https://github.com/leviholliday/CedarLogic-Releases/issues); issues on this repository work too.
 
 There is no security email address. Please don't put details of an unfixed problem in a public issue, a feedback report or a pull request.
