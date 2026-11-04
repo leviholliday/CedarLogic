@@ -1493,15 +1493,16 @@ void pageChapter(ID2D1RenderTarget* rt, WhatsNew* wn, int i, double t) {
 		if (!p.title) continue;
 		// The panel's card: on or off, open on hover, a click away.
 		const bool panel = std::string(p.title) == "The Actions panel";
-		const float h = pointCard(rt, x, y, cw, p.icon, p.title, p.line, 0, panel ? 22 : 0);
+		const float h = pointCard(rt, x, y, cw, p.icon, p.title, p.line);
 		if (panel) {
+			// On its title's row, at the right.
 			const std::string link = "Show or Hide It\u2026";
 			const float lw = textWidth(link, 11.5f, kSemi);
-			const D2D1_RECT_F r = D2D1::RectF(x + 46, y + h - 30, x + 52 + lw, y + h - 10);
-			text(rt, link, x + 48, y + h - 29, 11.5f, kSemi, wn->panel.hot == kPanelCard ? D2D1::ColorF(0.55f, 1, 0.68f) : kNeon);
+			const D2D1_RECT_F r = D2D1::RectF(x + cw - 16 - lw - 4, y + 12, x + cw - 12, y + 32);
+			text(rt, link, r.left + 2, y + 15, 11.5f, kSemi, wn->panel.hot == kPanelCard ? D2D1::ColorF(0.55f, 1, 0.68f) : kNeon);
 			wn->panel.addHit(r, kPanelCard);
 		}
-		y += h + (four ? 6 : 10);
+		y += h + (four ? 4 : 10);
 	}
 	if (c.tryTitle) {
 		const float bw = textWidth(c.tryTitle, 13, kSemi) + 40;
@@ -1516,7 +1517,7 @@ void pageFinale(ID2D1RenderTarget* rt, WhatsNew* wn) {
 	float y = heading(rt, 56, 34, kNW - 112, "That's the tour", "Go build something", "It's under Help ▸ What's New in CedarLogic whenever you want it back.") + 22;
 	struct Tile { const char* title; const char* line; wchar_t icon; };
 	const Tile tiles[] = {
-		{ "Show me around", "A minute\u2019s walk round the window: where everything is.", 0xE8A1 },
+		{ "Show me around", "A minute\u2019s walk round the window: where everything is.", 0xE890 },
 		{ "Learn logic: the Guided Tour", "Two switches, a gate and a light, on a circuit of its own.", 0xE805 },
 		{ "Start from a template", "The Lab Page has your name on it already.", 0xE8C8 },
 		{ "Open CedarLogic Help", "Every feature, with its keys.", 0xE897 },
@@ -1537,7 +1538,7 @@ void pageFinale(ID2D1RenderTarget* rt, WhatsNew* wn) {
 void paintPanelCard(ID2D1RenderTarget* rt, WhatsNew* wn, float w, float h) {
 	fillRect(rt, D2D1::RectF(0, 0, w, h), D2D1::ColorF(0, 0, 0, 0.55f));
 	wn->panel.addHit(D2D1::RectF(0, 0, w, h), kPanelOutside);
-	const D2D1_RECT_F r = D2D1::RectF(36, 92, w - 36, h - 92);
+	const D2D1_RECT_F r = D2D1::RectF(36, 56, w - 36, h - 46);
 	glow(rt, D2D1::RectF(r.left, r.top + 10, r.right, r.bottom + 10), 18, D2D1::ColorF(0, 0, 0, 0.5f), 24);
 	ID2D1RoundedRectangleGeometry* shape = nullptr;
 	if (SUCCEEDED(d2dFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(r, 18, 18), &shape))) {

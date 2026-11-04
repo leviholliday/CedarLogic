@@ -713,7 +713,8 @@ void aboutAndWheel() {
 	about::closeNow();
 	pump(0.2);
 	std::string detail;
-	check(wheelOverChoiceCheck(detail), "settings: the wheel over a closed choice leaves its value and scrolls the page (" + detail + ")");
+	const bool wheelOk = wheelOverChoiceCheck(detail);
+	check(wheelOk, "settings: the wheel over a closed choice leaves its value and scrolls the page (" + detail + ")");
 	w->destroy();
 	pump(0.2);
 }

@@ -11,6 +11,8 @@
 #include "Welcome.h"
 #include "Window.h"
 
+#include <dwmapi.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -897,9 +899,8 @@ CircuitWindow* readyWindow() {
 	CircuitWindow* w = frontWindow();
 	if (!w) return nullptr;
 	HWND h = w->window();
+	// Not under a dialog (a modal one disables it), minimized or hidden.
 	if (!IsWindowVisible(h) || IsIconic(h) || !IsWindowEnabled(h)) return nullptr;
-	// No popup of its own over it (a dialog that doesn't disable it, a menu).
-	if (!assumeFront && GetLastActivePopup(h) != h) return nullptr;
 	return w;
 }
 
@@ -995,11 +996,16 @@ bool saveScreenshot(const std::string& file) {
 					}
 					dst[(size_t)y * w + x] = d;
 				}
+			// Cut to the window you see (not the invisible edges it's resized by).
+			RECT v = wr;
+			if (FAILED(DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &v, sizeof v)) || !IntersectRect(&v, &v, &wr)) v = wr;
+			const int cx = v.left - wr.left, cy = v.top - wr.top, cw = v.right - v.left, chh = v.bottom - v.top;
 			IWICImagingFactory* wic = nullptr;
 			CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
 			IWICBitmap* b = nullptr;
-			if (wic && SUCCEEDED(wic->CreateBitmapFromMemory((UINT)w, (UINT)ht, GUID_WICPixelFormat32bppPBGRA, (UINT)w * 4, (UINT)(w * ht * 4),
-			                                                (BYTE*)px, &b)))
+			if (wic && cw > 0 && chh > 0 &&
+			    SUCCEEDED(wic->CreateBitmapFromMemory((UINT)cw, (UINT)chh, GUID_WICPixelFormat32bppPBGRA, (UINT)w * 4, (UINT)(w * (chh - 1) + cw) * 4,
+			                                          (BYTE*)(dst + (size_t)cy * w + cx), &b)))
 				ok = capture::savePng(b, file);
 			if (b) b->Release();
 			if (wic) wic->Release();
