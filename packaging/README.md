@@ -95,10 +95,10 @@ numbers.
 - Everything for 0.4 is merged into `main` on `private` and CI is green on
   it, including the Actions panel change ("Show the Actions panel", "Open
   on hover", the setup step, Help > Show Me Around).
-- `gh release view v0.4 -R leviholliday/CedarLogic-Releases`: today it's a
-  pre-release holding the Mac's 0.4 beta 1 (build 1077, from 2026-11-01,
-  before the intro and the Actions rail). It stays the release; the steps
-  add to it.
+- `gh release view v0.4 -R leviholliday/CedarLogic-Releases`: on 2026-11-04
+  it's a pre-release holding the Mac's 0.4 beta 2 (build 1702: the intro and
+  the first Actions rail, before the Actions panel change). It stays the
+  release; the steps add to it.
 - On the Mac: the update key and Sparkle's key in the Keychain (account
   `cedarlogic`), a dmgbuild venv, `~/src/homebrew-tap`. A Windows PC, the
   Zorin laptop and the Pi on hand for step 15.
@@ -126,7 +126,7 @@ CLEAN=1 mac/build.sh
 DMGBUILD=<venv>/bin/dmgbuild mac/package.sh        # -> mac/build/CedarLogic-0.4-Mac.dmg
 /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" -c "Print :CFBundleVersion" mac/build/CedarLogic.app/Contents/Info.plist
 ```
-It must say `0.4` and a build above 1077.
+It must say `0.4` and a build above 1702 (beta 2).
 
 **3. The Mac build onto v0.4, to Beta testers first.** From a worktree under
 `.claude/worktrees/` (so `publish-update.sh` finds Sparkle's `sign_update`):
@@ -159,9 +159,8 @@ The installer's name is what makes a fresh install a Normal tester
 
 **5. The release's notes, for all three.** `gh release edit v0.4 -R
 leviholliday/CedarLogic-Releases --notes-file <notes.md>`. Its notes today
-are the Mac beta's ("CedarLogic 0.4 for Mac, beta 1 ... Help > Check for
-Updates", which on a Mac is CedarLogic > Check for Updates). There's no
-public notes file yet: make it from `docs/RELEASE-0.4-notes.md` sections 1
+are the Mac beta's ("CedarLogic 0.4 for Mac, beta 2 (build 1702) ..."),
+for the Mac only. There's no public notes file for all three yet: make it from `docs/RELEASE-0.4-notes.md` sections 1
 and 2, with a download line for each computer.
 
 **6. Sign the release, last of the files.**
