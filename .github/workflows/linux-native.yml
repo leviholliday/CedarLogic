@@ -398,9 +398,8 @@ jobs:
           # settings (a folder of its own, so none of these changes the next): open with a
           # label (rail-0), folded (1), the tab peeking at the window's edge (2), slid out
           # over the canvas as on hover (3), mid-drag (4), focus mode's quiet tab (5), slid
-          # out there (6), a narrow window (7), Simulation View (8), in the toolbar instead
-          # (9), focus mode peeking (10); the Customize window, and searched for "export";
-          # Settings > Actions.
+          # out there (6), a narrow window (7), Simulation View (8), turned off (9), focus
+          # mode peeking (10); the Customize window, and searched for "export"; Settings > Actions.
           mkdir -p renders/rail
           for look in light dark; do
             for show in rail:0 rail:1 rail:2 rail:3 rail:4 rail:5 rail:6 rail:7 rail:8 rail:9 rail:10 customize:0 customize:1 settings:4; do
@@ -412,6 +411,22 @@ jobs:
             done
           done
           ls renders/rail
+          # Show Me Around (linux/App/ShowMeAround.h), light and dark, from a new install's
+          # settings: each of its seven stops (walk:N), the first with the Actions panel off
+          # (walkoff:0, six stops), each in a 1024x600 window (walksmall:N); and the welcome's
+          # Actions panel page (welcome:2), What's New's card for it (whatsnewpanel),
+          # Settings > Actions on and off, and About.
+          mkdir -p renders/tour
+          for look in light dark; do
+            for show in walk:0 walk:1 walk:2 walk:3 walk:4 walk:5 walk:6 walkoff:0 walksmall:0 walksmall:1 walksmall:2 walksmall:3 walksmall:4 walksmall:5 walksmall:6 welcome:2 whatsnewpanel whatsnew:4 whatsnew:7 settings:4 settingsoff about; do
+              name=$(echo "$show" | tr ':' '-')
+              home=$(mktemp -d)
+              XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" xvfb-run -a -s "-screen 0 1600x1000x24" \
+                timeout 60 "$APPIMAGE" --$look --show "$show" --screenshot "renders/tour/$name-$look.png" res/samples/practice.cdl || echo "no $show $look"
+              rm -rf "$home"
+            done
+          done
+          ls renders/tour
           # Send Feedback's recording (linux/App/Capture.h): with no ffmpeg an animated PNG,
           # with ffmpeg an MP4 made from the app's own movie; each checked by the app, then
           # read back by ffprobe. The files go with the renders.
@@ -545,7 +560,8 @@ jobs:
             home=$(mktemp -d)
             mkdir -p "$home/config/CedarLogic"
             ini="$home/config/CedarLogic/native.ini"
-            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\n' > "$ini"
+            # (Show Me Around seen too: these launches are about the intro, and it would start over the window.)
+            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\nshowMeAroundSeen=true\n' > "$ini"
             forced=update
             case $how in
               every) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
@@ -693,6 +709,39 @@ jobs:
         with:
           name: CedarLogic-Native-linux-session-logs-asan
           path: session-logs-asan
+          if-no-files-found: warn
+
+  # TEMPORARY (removed before merging): the session check again and again, to
+  # count how often seed 4's long history check passes.
+  session-repeat:
+    name: session check repeated (x86_64, ${{ matrix.rep }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            xvfb xauth fonts-dejavu-core fonts-liberation
+      - name: Build
+        run: |
+          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
+          cmake --build linux/build
+      - name: Session check, seeds 1-4, then seed 4 four more times
+        run: |
+          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4 4 4 4 4
+      - name: Upload the session logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: session-repeat-${{ matrix.rep }}
+          path: session-logs
           if-no-files-found: warn
 
   # The .deb on the newer systems it has to run on: Ubuntu 24.04 (where OpenSSL's package is named

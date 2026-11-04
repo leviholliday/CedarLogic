@@ -105,7 +105,8 @@ const std::vector<Item> kAll = {
 	// Help
 	{ "help", "CedarLogic Help", "Help", "help-browser-symbolic", "win.help", "help", 0 },
 	{ "shortcuts", "Keyboard Shortcuts", "Help", "input-keyboard-symbolic", "win.shortcuts", "shortcuts", 0 },
-	{ "tour", "Guided Tour", "Help", "find-location-symbolic", "app.guided-tour", nullptr, 0 },
+	{ "showMeAround", "Show Me Around", "Help", "find-location-symbolic", "win.show-me-around", nullptr, 0 },
+	{ "tour", "Learn Logic: Guided Tour", "Help", "applications-science-symbolic", "app.guided-tour", nullptr, 0 },
 	{ "whatsNew", "What's New in CedarLogic", "Help", "starred-symbolic", "win.whats-new", nullptr, 0 },
 	{ "playIntro", "Play the Intro", "Help", "media-playback-start-symbolic", "app.play-intro", nullptr, 0 },
 	{ "welcome", "Welcome to CedarLogic", "Help", "face-smile-symbolic", "win.welcome", nullptr, 0 },
@@ -130,13 +131,8 @@ std::vector<std::string> ids(const std::vector<const Item*>& items) {
 
 }  // namespace
 
-const char* modeName(int mode) {
-	switch (mode) {
-	case InToolbar: return "In the toolbar";
-	case Hidden: return "Hidden";
-	default: return "On screen";
-	}
-}
+const char* const kShowSwitch = "Show the Actions panel";
+const char* const kHoverSwitch = "Open on hover";
 
 const std::vector<Item>& all() { return kAll; }
 const std::vector<std::string>& defaults() { return kDefaults; }
@@ -525,7 +521,7 @@ void List::footerText() {
 	int matching = 0;
 	for (const Item* a : order()) if (!searching() || matches(*a, query)) matching++;
 	const std::string t = searching() ? format("%d of %d match. Clear the search to drag them into order.", matching, total)
-	                                  : format("%d shown. Drag to change the order, here or on the rail.", (int)rail().size());
+	                                  : format("%d shown. Drag to change the order, here or on the panel.", (int)rail().size());
 	gtk_label_set_text(GTK_LABEL(footer), t.c_str());
 	gtk_widget_set_sensitive(resetButton, !isDefault());
 }
@@ -548,7 +544,7 @@ void List::fill() {
 		gtk_widget_set_margin_bottom(line, 2);
 		GtkWidget* tick = gtk_check_button_new();
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tick), shown(*a));
-		gtk_widget_set_tooltip_text(tick, ("Show " + plainTitle(*a) + " on the rail").c_str());
+		gtk_widget_set_tooltip_text(tick, ("Show " + plainTitle(*a) + " on the panel").c_str());
 		g_object_set_data(G_OBJECT(tick), "cl-action", (gpointer)a);
 		g_signal_connect(tick, "toggled", CL_CALLBACK(+[](GtkToggleButton* t, gpointer self) {
 			List* l = static_cast<List*>(self);
@@ -730,36 +726,70 @@ GtkWidget* makeList(int height, const std::string& query, GtkWidget** searchOut)
 	return l->box;
 }
 
-std::string modeHint() {
+std::string toggleKey() {
 	const shortcuts::Action* a = shortcuts::find("toggleActions");
 	const std::string k = a ? shortcuts::label(shortcuts::keys(*a)) : std::string();
-	switch (prefs().actionsMode) {
-	case InToolbar: return "The same actions as buttons in the toolbar, with no strip on the right.";
-	case Hidden: return "No actions strip. Everything is still in the menus, with its shortcut.";
-	default:
-		return "A strip down the right edge of the window, the side panel's mirror. Rest on one for its name and shortcut; drag one up or "
-		       "down to move it. Click its edge to fold it away, or use View ▸ Hide Actions" +
-		       (k.empty() ? std::string() : " (" + k + ")") + ". Right-click it to choose your own.";
-	}
+	return k.empty() ? std::string() : " (" + k + ")";
 }
 
-GtkWidget* modeCombo(std::function<void()> after) {
-	GtkWidget* c = gtk_combo_box_text_new();
-	for (int m = 0; m < 3; m++) gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(c), modeName(m));
-	gtk_combo_box_set_active(GTK_COMBO_BOX(c), prefs().actionsMode);
-	gtk_widget_set_halign(c, GTK_ALIGN_START);
-	auto* fn = new std::function<void()>(std::move(after));
-	g_object_set_data_full(G_OBJECT(c), "cl-after", fn, [](gpointer p) { delete static_cast<std::function<void()>*>(p); });
-	g_signal_connect(c, "changed", CL_CALLBACK(+[](GtkComboBox* box, gpointer) {
-		const int m = gtk_combo_box_get_active(box);
-		if (m < 0 || m == prefs().actionsMode) return;
-		prefs().actionsMode = m;
-		if (m == OnScreen) prefs().actionsHint = false;
-		guarded("Show actions", [] { changed(); });
-		auto* fn = static_cast<std::function<void()>*>(g_object_get_data(G_OBJECT(box), "cl-after"));
-		if (fn) (*fn)();
-	}), nullptr);
-	return c;
+const char* const kShowHint = "The commands you use most, down the right edge of the window. Rest on one for its name and shortcut, click to run "
+                              "it, drag it up or down to move it.";
+const char* const kHoverHint = "When the panel is folded, move the pointer to the window’s right edge and it slides out. Move away and it goes back.";
+std::string offHint() { return "Everything is still in the menus, with its shortcut. View ▸ Show Actions" + toggleKey() + " turns it back on."; }
+std::string foldHint() {
+	return "Click the panel’s left edge to fold it away, or use View ▸ Hide Actions" + toggleKey() +
+	       ". Right-click it to change what’s on it. Help ▸ Show Me Around points it out.";
+}
+
+// The two switches (Settings > Actions, the Customize window): "Show the
+// Actions panel", and "Open on hover" under it, greyed while it's off. They
+// follow a change made anywhere else (F9, the welcome's switches).
+struct Switches {
+	GtkWidget *show = nullptr, *hover = nullptr;
+	GtkWidget *showHint = nullptr, *hoverHint = nullptr;   // Settings' only
+	GtkWidget* list = nullptr;                            // greyed with the panel off
+	int listening = 0;
+	bool busy = false;
+	void follow() {
+		busy = true;
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(show), prefs().actionsOn);
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(hover), prefs().actionsHoverOpen);
+		busy = false;
+		gtk_widget_set_sensitive(hover, prefs().actionsOn);
+		if (hoverHint) gtk_widget_set_sensitive(hoverHint, prefs().actionsOn);
+		if (showHint) gtk_label_set_text(GTK_LABEL(showHint), prefs().actionsOn ? kShowHint : offHint().c_str());
+		if (list) gtk_widget_set_sensitive(list, prefs().actionsOn);
+	}
+};
+
+// Made, wired and destroyed with `owner`.
+Switches* makeSwitches(GtkWidget* owner) {
+	Switches* sw = new Switches();
+	sw->show = gtk_check_button_new_with_label(kShowSwitch);
+	sw->hover = gtk_check_button_new_with_label(kHoverSwitch);
+	gtk_widget_set_name(sw->show, "actions-show");
+	gtk_widget_set_name(sw->hover, "actions-hover");
+	for (GtkWidget* b : { sw->show, sw->hover }) gtk_widget_set_halign(b, GTK_ALIGN_START);
+	gtk_widget_set_tooltip_text(sw->hover, kHoverHint);
+	g_signal_connect(sw->show, "toggled", CL_CALLBACK(+[](GtkToggleButton* t, gpointer self) {
+		Switches* sw = static_cast<Switches*>(self);
+		if (sw->busy) return;
+		prefs().actionsOn = gtk_toggle_button_get_active(t);
+		guarded("Show the Actions panel", [] { changed(); });
+	}), sw);
+	g_signal_connect(sw->hover, "toggled", CL_CALLBACK(+[](GtkToggleButton* t, gpointer self) {
+		Switches* sw = static_cast<Switches*>(self);
+		if (sw->busy) return;
+		prefs().actionsHoverOpen = gtk_toggle_button_get_active(t);
+		guarded("Open on hover", [] { changed(); });
+	}), sw);
+	sw->listening = listen([sw] { sw->follow(); });
+	g_signal_connect(owner, "destroy", CL_CALLBACK(+[](GtkWidget*, gpointer self) {
+		Switches* sw = static_cast<Switches*>(self);
+		unlisten(sw->listening);
+		delete sw;
+	}), sw);
+	return sw;
 }
 
 GtkWidget* g_customize = nullptr;
@@ -780,34 +810,18 @@ GtkWidget* settingsPage() {
 	gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 1, 1);
 	GtkWidget* right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 	gtk_widget_set_hexpand(right, TRUE);
-	GtkWidget* edge = gtk_check_button_new_with_label("Open it when the mouse reaches the right edge");
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(edge), prefs().actionsHoverOpen);
-	gtk_widget_set_halign(edge, GTK_ALIGN_START);
-	g_signal_connect(edge, "toggled", CL_CALLBACK(+[](GtkToggleButton* t, gpointer) {
-		prefs().actionsHoverOpen = gtk_toggle_button_get_active(t);
-		guarded("the edge setting", [] { changed(); });
-	}), nullptr);
-	GtkWidget* edgeHint = gtk_label_new("When it's folded. Move the pointer to the window's right edge (or push it against the screen's) and it "
-	                                    "slides out over the canvas, then back when you move away.");
-	GtkWidget* hint = gtk_label_new(modeHint().c_str());
-	for (GtkWidget* h : { edgeHint, hint }) settings::hintStyle(h);
-	gtk_widget_set_margin_start(edgeHint, 26);
-	GtkWidget* list = makeList(300, "", nullptr);
-	struct Parts { GtkWidget *edge, *edgeHint, *hint, *list; };
-	Parts* parts = new Parts{ edge, edgeHint, hint, list };
-	auto follow = [parts] {
-		const bool on = prefs().actionsMode == OnScreen;
-		gtk_widget_set_sensitive(parts->edge, on);
-		gtk_widget_set_sensitive(parts->edgeHint, on);
-		gtk_label_set_text(GTK_LABEL(parts->hint), modeHint().c_str());
-		gtk_widget_set_sensitive(parts->list, prefs().actionsMode != Hidden);
-	};
-	GtkWidget* combo = modeCombo(follow);
-	g_signal_connect(box, "destroy", CL_CALLBACK(+[](GtkWidget*, gpointer p) { delete static_cast<Parts*>(p); }), parts);
-	gtk_box_pack_start(GTK_BOX(right), combo, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(right), edge, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(right), edgeHint, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(right), hint, FALSE, FALSE, 4);
+	Switches* sw = makeSwitches(box);
+	sw->showHint = gtk_label_new(kShowHint);
+	sw->hoverHint = gtk_label_new(kHoverHint);
+	for (GtkWidget* h : { sw->showHint, sw->hoverHint }) {
+		settings::hintStyle(h);
+		gtk_widget_set_margin_start(h, 26);
+	}
+	gtk_widget_set_margin_top(sw->hover, 6);
+	gtk_box_pack_start(GTK_BOX(right), sw->show, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(right), sw->showHint, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(right), sw->hover, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(right), sw->hoverHint, FALSE, FALSE, 0);
 	gtk_grid_attach(GTK_GRID(grid), right, 1, 0, 1, 1);
 	gtk_box_pack_start(GTK_BOX(box), grid, FALSE, FALSE, 0);
 	GtkWidget* heading = gtk_label_new("Show these, in this order:");
@@ -815,8 +829,12 @@ GtkWidget* settingsPage() {
 	gtk_label_set_xalign(GTK_LABEL(heading), 0);
 	gtk_widget_set_margin_top(heading, 8);
 	gtk_box_pack_start(GTK_BOX(box), heading, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box), list, TRUE, TRUE, 0);
-	follow();
+	sw->list = makeList(300, "", nullptr);
+	gtk_box_pack_start(GTK_BOX(box), sw->list, TRUE, TRUE, 0);
+	GtkWidget* fold = gtk_label_new(foldHint().c_str());
+	settings::hintStyle(fold);
+	gtk_box_pack_start(GTK_BOX(box), fold, FALSE, FALSE, 0);
+	sw->follow();
 	return box;
 }
 
@@ -845,16 +863,20 @@ void showCustomize(CircuitWindow* w, const std::string& query) {
 	GtkWidget* title = gtk_label_new("Customize Actions");
 	gtk_style_context_add_class(gtk_widget_get_style_context(title), "sheet-title");
 	gtk_label_set_xalign(GTK_LABEL(title), 0);
-	GtkWidget* line = gtk_label_new("Tick what goes on the Actions rail, anything from any menu. They show in this order, top to bottom. "
-	                                "You can also drag them up or down on the rail itself.");
+	GtkWidget* line = gtk_label_new("Tick what goes on the Actions panel, anything from any menu. They show in this order, top to bottom. "
+	                                "You can also drag them up or down on the panel itself.");
 	gtk_style_context_add_class(gtk_widget_get_style_context(line), "hint");
 	settings::hintStyle(line);
 	GtkWidget* search = nullptr;
 	GtkWidget* list = makeList(360, query, &search);
 	g_object_set_data(G_OBJECT(win), "cl-search", search);
 	GtkWidget* bottom = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-	gtk_box_pack_start(GTK_BOX(bottom), gtk_label_new("Show:"), FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(bottom), modeCombo([] {}), FALSE, FALSE, 0);
+	{
+		Switches* sw = makeSwitches(win);
+		gtk_box_pack_start(GTK_BOX(bottom), sw->show, FALSE, FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(bottom), sw->hover, FALSE, FALSE, 0);
+		sw->follow();
+	}
 	GtkWidget* done = gtk_button_new_with_label("Done");
 	gtk_style_context_add_class(gtk_widget_get_style_context(done), "suggested-action");
 	g_signal_connect_swapped(done, "clicked", G_CALLBACK(gtk_widget_destroy), win);
@@ -939,32 +961,100 @@ int check() {
 	// Its own settings only (main gives it a folder of its own).
 	if (!g_getenv("CL_ACTIONS_CHECK_HOME")) { printf("FAIL --actions-check runs with a settings folder of its own\n"); return 1; }
 
-	// ---- Where it starts: new install vs existing ----
+	// ---- 0.4: on and open for everyone, once; the choice kept after ----
+	auto fileText = [] {
+		gchar* t = nullptr;
+		std::string out;
+		if (g_file_get_contents(configFile().c_str(), &t, nullptr, nullptr)) out = t;
+		g_free(t);
+		return out;
+	};
+	auto onOpen = [] { return prefs().actionsOn && !prefs().actionsCollapsed; };
+	auto state = [] { return format("on %d, folded %d", prefs().actionsOn, prefs().actionsCollapsed); };
 	launchWith(nullptr);
-	expect(prefs().actionsMode == OnScreen && !prefs().actionsHint, format("a new install has the rail On screen and no status line (%s, hint %d)",
-	                                                                       modeName(prefs().actionsMode), prefs().actionsHint));
-	expect(!prefs().actionsCollapsed && prefs().actionsHoverOpen, "open, and it opens from the edge when folded (the default)");
+	expect(onOpen() && prefs().actionsHoverOpen && !prefs().showMeAroundSeen,
+	       "a new install has the panel on and open, Open on hover on, Show Me Around not seen yet (" + state() + ")");
 	expect(ids(rail()) == kDefaults, "with the six default actions (" + joined(ids(rail())) + ")");
 	relaunch();
-	expect(prefs().actionsMode == OnScreen && !prefs().actionsHint, "the next launch keeps it On screen, with no status line");
-	launchWith("[CedarLogic]\nbrandAccentSet=true\nshowGrid=true\n");
-	expect(prefs().actionsMode == Hidden && prefs().actionsHint, format("someone who used CedarLogic before gets Hidden and the one-time status line (%s, hint %d)",
-	                                                                    modeName(prefs().actionsMode), prefs().actionsHint));
-	launchWith("[CedarLogic]\nhasSeenWelcome=true\n");
-	expect(prefs().actionsMode == Hidden && prefs().actionsHint, "so does an older file with only the welcome seen in it");
-	relaunch();
-	expect(prefs().actionsMode == Hidden && prefs().actionsHint, "decided once: the next launch is the same, the line still owed");
-	prefs().actionsHint = false;
-	prefs().actionsMode = OnScreen;
-	prefs().actionsCollapsed = true;
-	prefs().actionsHoverOpen = false;
-	relaunch();
-	expect(prefs().actionsMode == OnScreen && !prefs().actionsHint && prefs().actionsCollapsed && !prefs().actionsHoverOpen,
-	       "a choice made stays: On screen, folded, edge opening off, line seen");
-	{
-		const ActionsStart a = actionsStart(true, true, InToolbar, false), b = actionsStart(false, false, 0, false), c = actionsStart(true, false, 0, false);
-		expect(a.mode == InToolbar && !a.hint && b.mode == OnScreen && !b.hint && c.mode == Hidden && c.hint, "actionsStart's three cases");
+	expect(onOpen(), "the next launch keeps it on and open (" + state() + ")");
+	struct Old { const char* what; const char* ini; };
+	const Old olds[] = {
+		{ "settings from before the panel (no actionsMode)", "[CedarLogic]\nbrandAccentSet=true\nshowGrid=true\n" },
+		{ "an older file with only the welcome seen", "[CedarLogic]\nhasSeenWelcome=true\n" },
+		{ "Hidden, with the one-time line owed", "[CedarLogic]\nbrandAccentSet=true\nactionsMode=2\nactionsHint=true\n" },
+		{ "In the toolbar", "[CedarLogic]\nbrandAccentSet=true\nactionsMode=1\nactionsHint=false\n" },
+		{ "On screen and folded", "[CedarLogic]\nbrandAccentSet=true\nactionsMode=0\nactionsCollapsed=true\nactionsHoverOpen=false\n" },
+		{ "Hidden and folded", "[CedarLogic]\nbrandAccentSet=true\nactionsMode=2\nactionsCollapsed=true\n" },
+		{ "on but folded, the first step done and not the second", "[CedarLogic]\nactionsOn04=true\nactionsOn=true\nactionsCollapsed=true\n" },
+	};
+	for (const Old& o : olds) {
+		launchWith(o.ini);
+		const bool ok = onOpen();
+		relaunch();
+		const std::string f = fileText();
+		expect(ok && onOpen() && f.find("actionsMode") == std::string::npos && f.find("actionsHint") == std::string::npos &&
+		           f.find("actionsOn04=true") != std::string::npos && f.find("actionsOpen04=true") != std::string::npos,
+		       std::string(o.what) + ": on and open, the old mode gone from the file, both steps marked done (" + state() + ")");
 	}
+	launchWith("[CedarLogic]\nbrandAccentSet=true\nactionsMode=0\nactionsCollapsed=true\nactionsHoverOpen=false\n");
+	expect(!prefs().actionsHoverOpen, "Open on hover, turned off before, stays off");
+	// After the migration, every choice sticks.
+	prefs().actionsOn = false;
+	relaunch();
+	expect(!prefs().actionsOn, "turned off after the migration, it stays off (" + state() + ")");
+	relaunch();
+	expect(!prefs().actionsOn, "and the launch after that too");
+	prefs().actionsOn = true;
+	prefs().actionsCollapsed = true;
+	relaunch();
+	expect(prefs().actionsOn && prefs().actionsCollapsed, "folded after the migration, it stays folded (" + state() + ")");
+	prefs().showMeAroundSeen = true;
+	relaunch();
+	expect(prefs().showMeAroundSeen, "Show Me Around, once seen, stays seen");
+	{
+		const ActionsStart n = actionsStart(false, false, false, false, true), m = actionsStart(true, false, false, false, true),
+		                   d = actionsStart(true, true, false, true, true), h = actionsStart(true, true, true, false, true);
+		expect(n.on && !n.collapsed && m.on && !m.collapsed && !d.on && d.collapsed && h.on && !h.collapsed, "actionsStart's cases");
+	}
+
+	// ---- Settings > Actions: two switches, no toolbar mode ----
+	{
+		launchWith(nullptr);
+		GtkWidget* page = settingsPage();
+		g_object_ref_sink(page);
+		std::vector<GtkWidget*> checks, combos;
+		std::function<void(GtkWidget*)> walk = [&](GtkWidget* x) {
+			if (GTK_IS_CHECK_BUTTON(x) && gtk_widget_get_name(x) && std::string(gtk_widget_get_name(x)).rfind("actions-", 0) == 0) checks.push_back(x);
+			if (GTK_IS_COMBO_BOX(x)) combos.push_back(x);
+			if (GTK_IS_CONTAINER(x))
+				gtk_container_foreach(GTK_CONTAINER(x), [](GtkWidget* c, gpointer f) { (*static_cast<std::function<void(GtkWidget*)>*>(f))(c); }, &walk);
+		};
+		walk(page);
+		auto labelOf = [](GtkWidget* b) { const char* l = gtk_button_get_label(GTK_BUTTON(b)); return std::string(l ? l : ""); };
+		const bool two = checks.size() == 2 && labelOf(checks[0]) == kShowSwitch && labelOf(checks[1]) == kHoverSwitch;
+		expect(two && combos.empty(), format("Settings > Actions has \"Show the Actions panel\" and \"Open on hover\" under it, and no "
+		                                     "On screen / In the toolbar / Hidden choice (%zu switches, %zu dropdowns)", checks.size(), combos.size()));
+		if (two) {
+			expect(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checks[0])) && gtk_widget_get_sensitive(checks[1]), "on, with Open on hover live");
+			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(checks[0]), FALSE);
+			expect(!prefs().actionsOn && !gtk_widget_get_sensitive(checks[1]), "turned off: the panel is off and Open on hover is greyed");
+			relaunch();
+			expect(!prefs().actionsOn, "and that's saved");
+			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(checks[0]), TRUE);
+			expect(prefs().actionsOn && gtk_widget_get_sensitive(checks[1]), "on again: Open on hover is live again");
+			prefs().actionsOn = false;
+			changed();
+			expect(!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checks[0])), "a change made elsewhere (F9, the welcome) shows in Settings too");
+			prefs().actionsOn = true;
+			changed();
+		}
+		g_object_unref(page);
+	}
+	expect(find("showMeAround") && std::string(find("showMeAround")->title) == "Show Me Around" &&
+	           std::string(find("showMeAround")->action) == "win.show-me-around",
+	       "Help ▸ Show Me Around is in the list");
+	expect(find("tour") && std::string(find("tour")->title) == "Learn Logic: Guided Tour", "the lesson is \"Learn Logic: Guided Tour\"");
+	expect(std::string("mailto:") + CL_CONTACT_EMAIL == "mailto:cedarlogic@proton.me", "About's address is mailto:cedarlogic@proton.me");
 
 	// ---- The order: one order for the rail and the list ----
 	launchWith(nullptr);

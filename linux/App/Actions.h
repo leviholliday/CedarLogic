@@ -1,9 +1,10 @@
-// The Actions rail's list (the Mac's mac/App/Actions.swift): every command
+// The Actions panel's list (the Mac's mac/App/Actions.swift): every command
 // the menus offer, each with its name as in its menu, the menu it's in, an
 // icon, its window action ("win.save", "app.new") and its shortcut in
-// Settings > Shortcuts. The rail on the window's right edge (Rail.h), its
-// toolbar version (Toolbar.cpp) and the Customize list (in Settings >
-// Actions, and the rail's Customize Actions... window) all work from it.
+// Settings > Shortcuts. The panel on the window's right edge (Rail.h: the
+// "rail" in the code) and the Customize list (in Settings > Actions, and the
+// panel's Customize Actions... window) work from it. Settings > Actions
+// turns the panel on or off (prefs().actionsOn); there is no toolbar mode.
 //
 // Also here, without a window so --actions-check can try them: the order
 // and the choice (kept in prefs().actionsOrder / actionsShown, shared by the
@@ -22,9 +23,10 @@ class CircuitWindow;
 
 namespace actions {
 
-// Where the actions go (Settings > Actions; prefs().actionsMode).
-enum Mode { OnScreen = 0, InToolbar = 1, Hidden = 2 };
-const char* modeName(int mode);
+// The panel's two switches, as Settings > Actions, the Customize window,
+// the welcome and What's New word them.
+extern const char* const kShowSwitch;    // "Show the Actions panel"
+extern const char* const kHoverSwitch;   // "Open on hover"
 
 // Can't run outside the editing view (dimmed in Simulation View and when locked).
 enum { NeedsEdit = 1 };
@@ -89,8 +91,8 @@ void run(const Item& a, CircuitWindow* w);
 void drawIcon(cairo_t* cr, const Item& a, const RectF& box, float size, const Color& color);
 bool iconMissing(const Item& a);
 
-// The order, the choice or the mode changed: saved, and every window's rail,
-// toolbar and menus, and any open Customize list, follow.
+// The order, the choice or a switch changed: saved, and every window's
+// panel and menus, and any open Customize list, follow.
 void changed();
 // Told of every change (the Customize lists); the number takes it away.
 int listen(std::function<void()> f);
@@ -157,7 +159,8 @@ struct FoldState {
 };
 
 // ---- The Customize list and Settings > Actions ---------------------------------------------
-// Settings > Actions: where they go, the edge setting, and the list.
+// Settings > Actions: the panel on or off, Open on hover under it (greyed
+// while it's off), and the list.
 GtkWidget* settingsPage();
 // The rail's Customize Actions... window, over `w` (with `query` typed in its search).
 void showCustomize(CircuitWindow* w, const std::string& query = "");

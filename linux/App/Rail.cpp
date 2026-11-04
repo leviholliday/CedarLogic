@@ -3,6 +3,7 @@
 #include "Rail.h"
 #include "Intro.h"
 #include "Settings.h"
+#include "ShowMeAround.h"
 #include "Welcome.h"
 #include "Window.h"
 
@@ -58,8 +59,6 @@ private:
 namespace {
 const float kLabelLayer = 320;
 const float kEdgeZone = 5;   // the rail's left edge, which folds it (or, slid out, keeps it)
-
-const char* const kHint = "New: an Actions rail. Settings ▸ Actions.";
 }  // namespace
 
 // ---- Rail ----------------------------------------------------------------------------------
@@ -137,9 +136,10 @@ std::string Rail::describe() const {
 	              hover.pending, hover.dismissed, folded(), floaterState);
 }
 
-bool Rail::onScreen() const { return prefs().actionsMode == actions::OnScreen; }
+bool Rail::onScreen() const { return prefs().actionsOn; }
 bool Rail::hoverEnabled() const { return prefs().actionsHoverOpen; }
-bool Rail::folded() const { return fold.folded(prefs().actionsCollapsed || pictureFold); }
+// Show Me Around opens it for its stop (and it folds back after).
+bool Rail::folded() const { return fold.folded(prefs().actionsCollapsed || pictureFold) && !showme::holdsPanelOpen(win); }
 bool Rail::shownOnScreen() const { return onScreen() && (!folded() || hover.slidOut); }
 
 void Rail::refresh() {
@@ -246,8 +246,7 @@ void Rail::setFocus(bool on) {
 void Rail::toggle() {
 	if (!onScreen()) {
 		prefs().actionsCollapsed = false;
-		prefs().actionsMode = actions::OnScreen;
-		prefs().actionsHint = false;
+		prefs().actionsOn = true;
 		actions::changed();
 		return;
 	}
@@ -263,8 +262,7 @@ void Rail::toggle() {
 }
 
 void Rail::showOpen() {
-	prefs().actionsMode = actions::OnScreen;
-	prefs().actionsHint = false;
+	prefs().actionsOn = true;
 	prefs().actionsCollapsed = false;
 	if (fold.focus || fold.narrow) fold.peek = true;
 	actions::changed();
@@ -306,25 +304,6 @@ void Rail::tick() {
 	// Slid back in: the floater goes (or peeks).
 	if (floaterState == 2 && !slide.active() && !hover.slidOut && !pictureSlid) updateFloater();
 	if (!slide.active() && slideImage) { cairo_surface_destroy(slideImage); slideImage = nullptr; }
-	// Someone who had CedarLogic before the rail: told once where it is,
-	// after the launch (and any welcome or What's New over it).
-	if (prefs().actionsHint && !intro::dashRun() && gtk_widget_get_mapped(GTK_WIDGET(win->window()))) {
-		if (hintAt < 0) {
-			hintAt = now + 4;
-		} else if (now >= hintAt) {
-			GtkWidget* over[] = { welcome::window(), whatsnew::window(), settings::window(), actions::customizeWindow() };
-			bool greeting = false;
-			for (GtkWidget* o : over) greeting = greeting || (o && gtk_widget_get_visible(o));
-			if (greeting && hintTries < 60) {
-				hintTries++;
-				hintAt = now + 2;
-			} else {
-				prefs().actionsHint = false;
-				prefs().save();
-				win->note(kHint);
-			}
-		}
-	}
 }
 
 // ---- The pointer at the window's edge --------------------------------------------------------
@@ -522,12 +501,8 @@ void Rail::showMenu(GdkEventButton* e) {
 	gtk_menu_shell_append(GTK_MENU_SHELL(m), gtk_separator_menu_item_new());
 	const char* foldLabel = folded() ? (hover.slidOut ? "_Keep Actions Open" : "_Show Actions") : "_Fold Actions Away";
 	railMenuItem(m, foldLabel, [](Rail* r) { if (r->folded()) r->unfold(); else r->foldAway(); }, this);
-	railMenuItem(m, "Show Them in the _Toolbar Instead", [](Rail*) {
-		prefs().actionsMode = actions::InToolbar;
-		actions::changed();
-	}, this);
-	railMenuItem(m, "_Hide Actions", [](Rail*) {
-		prefs().actionsMode = actions::Hidden;
+	railMenuItem(m, "_Turn Off the Actions Panel", [](Rail*) {
+		prefs().actionsOn = false;
 		actions::changed();
 	}, this);
 	gtk_widget_show_all(m);
@@ -720,7 +695,7 @@ void Rail::picture(int kind) {
 	case 6: win->toggleFocusMode(); pictureSlid = true; pictureLabel = indexOf("checkCircuit"); break;
 	case 7: gtk_window_resize(win->window(), 860, 640); break;
 	case 8: win->toggleSimView(); pictureLabel = indexOf("tidy"); break;
-	case 9: prefs().actionsMode = actions::InToolbar; actions::changed(); break;
+	case 9: prefs().actionsOn = false; actions::changed(); break;
 	case 10: win->toggleFocusMode(); picturePeek = true; break;
 	default: break;
 	}

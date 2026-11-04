@@ -9,6 +9,8 @@
 #include "Library.h"
 #include "Notes.h"
 #include "Settings.h"
+#include "ShowMeAround.h"
+#include "Welcome.h"
 #include "TabStrip.h"
 #include "TabSwitcher.h"
 #include "Window.h"
@@ -762,7 +764,11 @@ struct SessionDriver {
 
 	// Every window over the circuit window, looked at: poked a few times, then
 	// asked to close (Escape, then its close button); one that won't is a FAIL.
+	// Show Me Around's checks drive the welcome and What's New themselves.
+	bool watchPaused = false;
+
 	void watch() {
+		if (watchPaused) return;
 		const double now = nowMs();
 		GList* all = gtk_window_list_toplevels();
 		std::vector<GtkWidget*> tops;
@@ -1205,6 +1211,54 @@ struct SessionDriver {
 
 	// The engine's history, past its 500 steps: every step is still saved, and
 	// undoing everything then redoing it brings the circuit back.
+	// What has the keys now, for a FAIL line: the window's focus widget,
+	// GTK's grab, the windows over it, and the canvas's state.
+	std::string keyState() {
+		Canvas* c = canvas();
+		GtkWidget* focus = gtk_window_get_focus(w->window());
+		GtkWidget* grab = gtk_grab_get_current();
+		GtkWidget* grabTop = grab ? gtk_widget_get_toplevel(grab) : nullptr;
+		const char* grabTitle = grabTop && GTK_IS_WINDOW(grabTop) ? gtk_window_get_title(GTK_WINDOW(grabTop)) : nullptr;
+		return format("focus %s%s, grab %s (%s), %d window(s) over it, canvas %s, %d gates on page %d, floating %d, pending %d, tidy %d, "
+		              "editable %d, drawing %d, walk %d, welcome %d, active %d",
+		              focus ? G_OBJECT_TYPE_NAME(focus) : "none", focus && c && focus == c->widget() ? " (the canvas)" : "",
+		              grab ? G_OBJECT_TYPE_NAME(grab) : "none", grabTitle ? grabTitle : (grabTop ? gtk_widget_get_name(grabTop) : "-"), windowsOver(),
+		              c ? (gtk_widget_get_mapped(c->widget()) ? "mapped" : "not mapped") : "none", cl_document_gate_count(doc(), w->currentPage()),
+		              w->currentPage(), w->isFloating(), w->hasPendingGate(), w->tidyActive(), w->canEdit(), w->drawing(), showme::active(),
+		              welcome::window() != nullptr, gtk_window_is_active(w->window()));
+	}
+
+	// Ctrl+A, as a person presses it, until it has selected something: first
+	// whatever had the keys is put away (a window over the circuit, a grab,
+	// Show Me Around, a part on the pointer) and the keyboard is on the
+	// canvas, so the nudges after it move something. False (with why) when
+	// three tries selected nothing.
+	bool selectAllByKey(std::string& why) {
+		for (int attempt = 0; attempt < 3; attempt++) {
+			waitForWindowsOver();
+			if (showme::active()) showme::stop();
+			settle();
+			Canvas* c = canvas();
+			if (c == nullptr) { why = "no canvas"; return false; }
+			if (cl_document_gate_count(doc(), w->currentPage()) == 0) { placePart(); settle(); }
+			// The keyboard on the canvas, and no grab elsewhere (a window going
+			// away hands both back on its own time).
+			for (int i = 0; i < 50; i++) {
+				if (gtk_window_get_focus(w->window()) != c->widget()) gtk_widget_grab_focus(c->widget());
+				if (gtk_window_get_focus(w->window()) == c->widget() && gtk_grab_get_current() == nullptr && gtk_widget_get_mapped(c->widget())) break;
+				pump(40);
+			}
+			tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
+			pump(30);
+			if (w->hasSelection()) {
+				if (attempt > 0) printf("  (Ctrl+A selected on try %d; before: %s)\n", attempt + 1, why.c_str());
+				return true;
+			}
+			why += (why.empty() ? "" : "; ") + format("try %d: ", attempt + 1) + keyState();
+		}
+		return false;
+	}
+
 	void longHistory(int at) {
 		settle();
 		// The action just before may have opened a window over this one (a
@@ -1218,18 +1272,9 @@ struct SessionDriver {
 		if (cl_document_gate_count(doc(), w->currentPage()) == 0) placePart();
 		settle();   // a part placePart left on the pointer is dropped
 		w->runAction("win.unlock-all");
-		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
-		tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
-		pump(10);
-		if (!w->hasSelection()) {
-			// Something still had the keys (a window going, a part on the pointer): once more.
-			waitForWindowsOver();
-			settle();
-			if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
-			tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
-			pump(30);
-		}
-		const bool selected = w->hasSelection();
+		std::string why;
+		const bool selected = selectAllByKey(why);
+		if (!selected) printf("  (Ctrl+A: %s)\n", why.c_str());
 		// Each nudge is a step of its own (the engine merges none), so 520 of
 		// them always fill the history, whatever was on it before.
 		const long made0 = cl_edit_steps_made(doc());
@@ -1492,7 +1537,7 @@ struct SessionDriver {
 		gWhat = "the Actions rail";
 		Rail* r = w->rail();
 		if (!check(r != nullptr && r->dockWidget() != nullptr, "the window has an Actions rail")) return;
-		prefs().actionsMode = actions::OnScreen;
+		prefs().actionsOn = true;
 		prefs().actionsCollapsed = false;
 		prefs().actionsHoverOpen = true;
 		actions::reset();
@@ -1504,7 +1549,7 @@ struct SessionDriver {
 		check(r->itemCount() == 6, format("with the six default actions (%d)", r->itemCount()));
 		w->toggleFocusMode();
 		pump(600);
-		check(gtk_widget_get_mapped(dock) && width() == 6 && prefs().actionsMode == actions::OnScreen && !prefs().actionsCollapsed,
+		check(gtk_widget_get_mapped(dock) && width() == 6 && prefs().actionsOn && !prefs().actionsCollapsed,
 		      format("focus mode folds it to its 6-point tab, not away, and leaves the saved state (%d wide)", width()));
 		w->toggleFocusMode();
 		pump(600);
@@ -1594,6 +1639,225 @@ struct SessionDriver {
 		pump(400);
 	}
 
+	// ---- Show Me Around, through the window's own keys ---------------------------
+	// (The Mac's launch-selftest checks of ShowMeAround.swift.) Its stops and
+	// keys; the panel's stop opening a folded panel and folding it back; the
+	// stop left out with the panel off; Escape ending it for good. Then that
+	// it starts by itself after each of the welcome's ways out (the lesson
+	// after it, when that was the choice) and after What's New, never over a
+	// window, and never again once seen; Help > Show Me Around plays it
+	// whenever. The display here has no window manager, so a window counts
+	// as having the keyboard (setAssumeKeys).
+	template <class F>
+	bool waitFor(F cond, int ms) {
+		for (int t = 0; t < ms && !cond(); t += 50) pump(50);
+		return cond();
+	}
+
+	void closeWindowsOver() {
+		GList* all = gtk_window_list_toplevels();
+		std::vector<GtkWidget*> tops;
+		for (GList* l = all; l; l = l->next) {
+			GtkWidget* t = GTK_WIDGET(l->data);
+			if (!gtk_widget_get_visible(t) || isCircuitWindow(t) || gtk_window_get_window_type(GTK_WINDOW(t)) != GTK_WINDOW_TOPLEVEL) continue;
+			tops.push_back(t);
+		}
+		g_list_free(all);
+		for (GtkWidget* t : tops) tap(t, GDK_KEY_Escape);
+		pump(300);
+	}
+
+	void tourChecks() {
+		gWhat = "Show Me Around";
+		watchPaused = true;
+		showme::setAssumeKeys(true);
+		GtkWidget* t = top();
+		Rail* r = w->rail();
+		auto stepName = [] { return std::string(showme::spotName(showme::step())); };
+		// ---- Its stops, by the keys ----
+		prefs().actionsOn = true;
+		prefs().actionsCollapsed = true;   // folded: its stop opens it
+		prefs().showMeAroundSeen = false;
+		actions::changed();
+		pump(300);
+		w->runAction("win.show-me-around");
+		waitFor([] { return showme::active(); }, 2000);
+		pump(500);
+		check(showme::activeOn(w) && showme::step() == showme::Palette && showme::position() == 1 && showme::shown().size() == 7,
+		      format("Help ▸ Show Me Around starts on this window at its first stop, the parts (%s, %d of %zu)", stepName().c_str(),
+		             showme::position(), showme::shown().size()));
+		{
+			RectF f{}, card = showme::cardRect();
+			const bool lit = showme::frame(showme::Palette, f);
+			check(lit && card.left >= f.right, format("the card sits right of the side panel (panel to %.0f, card from %.0f)", f.right, card.left));
+		}
+		check(showme::body(showme::Palette).find("press A and type its name") != std::string::npos &&
+		          showme::title(showme::Menus) == "Help and Settings",
+		      "its words are the Mac's (\"" + showme::body(showme::Palette) + "\")");
+		tap(t, GDK_KEY_Right);
+		pump(200);
+		check(showme::step() == showme::CanvasSpot, "Right goes on to the canvas (" + stepName() + ")");
+		tap(t, GDK_KEY_Left);
+		pump(200);
+		check(showme::step() == showme::Palette, "Left goes back (" + stepName() + ")");
+		tap(t, GDK_KEY_Return);
+		pump(200);
+		tap(t, GDK_KEY_space);
+		pump(200);
+		check(showme::step() == showme::ToolbarSpot, "Enter and Space go on too: the toolbar (" + stepName() + ")");
+		const int canvasGates = cl_document_gate_count(doc(), w->currentPage());
+		tap(t, GDK_KEY_a);
+		pump(200);
+		check(showme::active() && w->hasPendingGate() == false && cl_document_gate_count(doc(), w->currentPage()) == canvasGates &&
+		          (!gtk_window_get_focus(w->window()) || !GTK_IS_ENTRY(gtk_window_get_focus(w->window())) ||
+		           !strlen(gtk_entry_get_text(GTK_ENTRY(gtk_window_get_focus(w->window()))))),
+		      "a plain key (A) doesn't reach the canvas meanwhile");
+		const int foldedWidth = r ? gtk_widget_get_allocated_width(r->dockWidget()) : -1;
+		tap(t, GDK_KEY_Right);
+		pump(700);
+		const int heldWidth = r ? gtk_widget_get_allocated_width(r->dockWidget()) : -1;
+		check(showme::step() == showme::ActionsSpot && foldedWidth == 6 && heldWidth == 46 && prefs().actionsCollapsed,
+		      format("at the Actions panel's stop a folded panel opens (%d wide before, %d now; still saved folded: %d)", foldedWidth, heldWidth,
+		             prefs().actionsCollapsed));
+		check(showme::body(showme::ActionsSpot).find("folded to a thin strip") != std::string::npos, "and the stop says it's kept folded");
+		tap(t, GDK_KEY_Right);
+		pump(700);
+		check(showme::step() == showme::Run && r && gtk_widget_get_allocated_width(r->dockWidget()) == 6,
+		      format("at the next stop it folds back (%s, %d wide)", stepName().c_str(), r ? gtk_widget_get_allocated_width(r->dockWidget()) : -1));
+		tap(t, GDK_KEY_Right);
+		pump(200);
+		tap(t, GDK_KEY_Right);
+		pump(200);
+		check(showme::step() == showme::Menus && showme::position() == 7, "the last stop is the menus, 7 of 7 (" + stepName() + ")");
+		tap(t, GDK_KEY_Escape);
+		pump(300);
+		check(!showme::active() && prefs().showMeAroundSeen, "Escape quits, and counts as seen");
+		check(r && gtk_widget_get_allocated_width(r->dockWidget()) == 6 && prefs().actionsCollapsed, "the panel is folded as it was");
+		prefs().actionsCollapsed = false;
+		actions::changed();
+		// ---- Done at the end counts as seen too ----
+		prefs().showMeAroundSeen = false;
+		showme::start(w, 0);
+		pump(300);
+		for (int i = 0; i < 7 && showme::active(); i++) { tap(t, GDK_KEY_Right); pump(150); }
+		check(!showme::active() && prefs().showMeAroundSeen, "Right past the last stop (Done) ends it, seen");
+		// ---- The panel off: its stop is left out ----
+		prefs().actionsOn = false;
+		actions::changed();
+		pump(300);
+		showme::start(w, 0);
+		pump(400);
+		const std::vector<int> v = showme::shown();
+		check(v.size() == 6 && std::find(v.begin(), v.end(), (int)showme::ActionsSpot) == v.end(),
+		      format("with the panel off there are 6 stops, the panel's left out (%zu)", v.size()));
+		tap(t, GDK_KEY_Escape);
+		pump(200);
+		prefs().actionsOn = true;
+		actions::changed();
+		pump(300);
+		// ---- Seen: never again by itself; Help still plays it ----
+		showme::setQuiet(false);
+		showme::startWhenReady();
+		pump(1600);
+		check(!showme::active() && !showme::watching(), "once seen, it doesn't start by itself");
+		w->runAction("win.show-me-around");
+		waitFor([] { return showme::active(); }, 1500);
+		check(showme::activeOn(w), "Help ▸ Show Me Around plays it again whenever");
+		tap(t, GDK_KEY_Escape);
+		pump(200);
+		// ---- Not seen: it waits for a window over the circuit to go ----
+		prefs().showMeAroundSeen = false;
+		settings::show(w, 0);
+		pump(300);
+		showme::startWhenReady();
+		pump(1800);
+		check(!showme::active() && showme::watching(), "it never starts over a window (Settings), and waits");
+		closeWindowsOver();
+		check(waitFor([&] { return showme::activeOn(w); }, 3000), "it starts once that window has gone");
+		tap(t, GDK_KEY_Escape);
+		pump(200);
+		// ---- After each of the welcome's ways out ----
+		struct Exit { int choice; const char* name; };
+		const Exit exits[] = { { -1, "Skip" }, { 2, "a blank canvas" }, { 1, "a template" }, { 3, "the shortcuts" }, { 0, "Learn Logic" } };
+		for (const Exit& x : exits) {
+			prefs().showMeAroundSeen = false;
+			prefs().hasSeenWelcome = false;
+			welcome::offer(w);
+			pump(400);
+			const bool up = welcome::window() != nullptr;
+			// A template's picker and the shortcuts' list are windows over it, each
+			// with a loop of its own until it closes: looked at from a timer, and
+			// closed from there (no pumping in it), once it's been up a while.
+			static bool s_waited = true;
+			s_waited = true;
+			if (x.choice == 1 || x.choice == 3)
+				g_timeout_add(1500, [](gpointer) -> gboolean {
+					s_waited = !showme::active();
+					GList* all = gtk_window_list_toplevels();
+					std::vector<GtkWidget*> over;
+					for (GList* l = all; l; l = l->next) {
+						GtkWidget* tw = GTK_WIDGET(l->data);
+						if (gtk_widget_get_visible(tw) && !isCircuitWindow(tw) && gtk_window_get_window_type(GTK_WINDOW(tw)) == GTK_WINDOW_TOPLEVEL)
+							over.push_back(tw);
+					}
+					g_list_free(all);
+					for (GtkWidget* tw : over) tap(tw, GDK_KEY_Escape);
+					return G_SOURCE_REMOVE;
+				}, nullptr);
+			if (x.choice < 0) tap(welcome::window(), GDK_KEY_Escape);   // Escape is Skip
+			else welcome::closeForCheck(x.choice);
+			pump(500);
+			const bool waited = s_waited;
+			closeWindowsOver();
+			const bool started = waitFor([&] { return showme::activeOn(w); }, 4000);
+			check(up && waited && started, std::string("after the welcome closes by ") + x.name + ", Show Me Around starts" +
+			                                   (x.choice == 1 || x.choice == 3 ? " (once the window it opened has gone)" : ""));
+			const int before = CircuitWindow::liveCount;
+			tap(top(), GDK_KEY_Escape);
+			pump(500);
+			if (x.choice == 0) {
+				const bool lesson = waitFor([] { return welcome::tourActive(); }, 2000);
+				check(lesson, "and the lesson (Learn Logic: Guided Tour) right after it");
+				welcome::endTourNow();
+				pump(200);
+				// The lesson's circuit of its own, closed again.
+				if (CircuitWindow::liveCount > before && circuitWindows().back() != w) {
+					gtk_window_close(circuitWindows().back()->window());
+					pump(600);
+					closeWindowsOver();
+				}
+				gtk_window_present(w->window());
+				pump(200);
+			} else {
+				check(!welcome::tourActive(), std::string("and no lesson after it (") + x.name + ")");
+			}
+		}
+		// ---- After What's New ----
+		prefs().showMeAroundSeen = false;
+		whatsnew::show(w);
+		pump(400);
+		tap(whatsnew::window(), GDK_KEY_Escape);
+		check(waitFor([&] { return showme::activeOn(w); }, 3000), "after What's New closes, it starts");
+		tap(top(), GDK_KEY_Escape);
+		pump(200);
+		// ---- Seen: the welcome closing doesn't bring it back ----
+		prefs().hasSeenWelcome = false;
+		welcome::offer(w);
+		pump(400);
+		tap(welcome::window(), GDK_KEY_Escape);
+		pump(2000);
+		check(!showme::active(), "once seen, the welcome closing doesn't start it");
+		// As it was.
+		showme::stop();
+		showme::stopWatching();
+		showme::setQuiet(true);
+		showme::setAssumeKeys(false);
+		closeWindowsOver();
+		gtk_window_present(w->window());
+		watchPaused = false;
+		pump(300);
+	}
+
 	// ---- The session -------------------------------------------------------------
 
 	int run(int actions, unsigned long long seed) {
@@ -1612,6 +1876,8 @@ struct SessionDriver {
 		prefs().save();
 		pump(300);
 		guarded("the Actions rail's checks", [&] { railChecks(); });
+		pump(200);
+		guarded("Show Me Around's checks", [&] { tourChecks(); });
 		pump(200);
 		const int windowsAtStart = CircuitWindow::liveCount;
 		long rss[3] = { residentKB(), 0, 0 };

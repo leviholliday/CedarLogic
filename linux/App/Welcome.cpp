@@ -1,5 +1,6 @@
-// The welcome, the guided tour and What's New (see Welcome.h), as the Mac
-// app's Welcome.swift and WhatsNew.swift and the Windows app's: in the
+// The welcome, the lesson ("Learn Logic: Guided Tour") and What's New (see
+// Welcome.h), as the Mac app's Welcome.swift and WhatsNew.swift and the
+// Windows app's: in the
 // brand's look (Brand.h), with the wx and Mac page slide -- the new page
 // drifts in as it fades up, the old one away as it fades out.
 
@@ -7,6 +8,9 @@
 #include "Brand.h"
 #include "Canvas.h"
 #include "Settings.h"
+#include "Actions.h"
+#include "Shortcuts.h"
+#include "ShowMeAround.h"
 #include "Sync.h"
 #include "Window.h"
 
@@ -253,10 +257,11 @@ void glyph(cairo_t* cr, const char* icon, float x, float y, float size, Color c 
 }
 
 // A card with an icon, a title and a line (the Mac's BrandCard rows).
-float pointCard(cairo_t* cr, float x, float y, float w, const char* icon, const std::string& title, const std::string& line, float minH = 0) {
+float pointCard(cairo_t* cr, float x, float y, float w, const char* icon, const std::string& title, const std::string& line, float minH = 0,
+                float extra = 0) {
 	const float textW = w - 66 - 18;
 	const float lh = text(nullptr, line, 0, 0, 12.5f, Normal, kSecondary, textW + 18);
-	const float h = std::max(minH, 16 + 20 + 4 + lh + 16);
+	const float h = std::max(minH, 16 + 20 + 4 + lh + 16 + extra);
 	card(cr, rectF(x, y, x + w, y + h));
 	glyph(cr, icon, x + 14, y + 13, 15);
 	text(cr, title, x + 48, y + 14, 14, Bold, kPrimary, textW + 18);
@@ -268,6 +273,171 @@ void runAction(CircuitWindow* w, const char* action) {
 	if (windowAlive(w)) w->runAction(action);
 }
 
+RectF inflate(const RectF& r, float d) { return rectF(r.left - d, r.top - d, r.right + d, r.bottom + d); }
+
+// ---- The Actions panel's switches and picture ----------------------------------------
+// The welcome's page and What's New's "Show or Hide It" card (the Mac's
+// ActionsPanelChoice): "Show the Actions panel" and "Open on hover" beside a
+// small picture of a window with the panel in it. They change the real
+// setting as they're flipped.
+
+// A neon switch: a capsule with a knob, lit when on.
+void brandSwitch(cairo_t* cr, float x, float y, bool on, bool hot) {
+	const RectF r = rectF(x, y, x + 40, y + 23);
+	if (on) glow(cr, r, 11.5f, alpha(kNeon, 0.45f), 7);
+	fillRound(cr, r, 11.5f, on ? kNeon : colorF(1, 1, 1, hot ? 0.2f : 0.14f));
+	strokeRound(cr, rectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 11, colorF(1, 1, 1, on ? 0.35f : 0.16f));
+	fillCircle(cr, pointF(on ? r.right - 11.5f : r.left + 11.5f, y + 11.5f), 8.5f, on ? kInk : colorF(1, 1, 1, 0.85f));
+}
+
+// A small window, dark: the toolbar, the side panel, a gate and a light on
+// the canvas, and (when on) the panel down the right edge, its first button
+// named as the pointer rests on it. With `hover`, a pointer waits at the edge.
+void panelPicture(cairo_t* cr, float x, float y, bool on, bool hover) {
+	const float W = 300, H = 200;
+	const Chrome ch{ true };
+	const RectF win = rectF(x, y, x + W, y + H);
+	fillRound(cr, rectF(win.left - 4, win.top + 4, win.right + 4, win.bottom + 12), 14, colorF(0, 0, 0, 0.25f));
+	if (on) glow(cr, win, 10, alpha(kNeon, 0.12f), 16);
+	cairo_save(cr);
+	roundedPath(cr, win, 10);
+	cairo_clip(cr);
+	fillRect(cr, win, ch.canvas());
+	// The toolbar.
+	fillRect(cr, rectF(x, y, x + W, y + 22), ch.bar());
+	for (int i = 0; i < 4; i++) fillRound(cr, rectF(x + 10 + i * 17, y + 7, x + 22 + i * 17, y + 15), 2, withAlpha(ch.barInk(), 0.35f));
+	for (int i = 0; i < 3; i++) fillCircle(cr, pointF(x + W - 12 - i * 13, y + 11), 3.5f, withAlpha(ch.barInk(), 0.3f));
+	cairo_move_to(cr, x + W - 54, y + 7);
+	cairo_line_to(cr, x + W - 47, y + 11);
+	cairo_line_to(cr, x + W - 54, y + 15);
+	cairo_close_path(cr);
+	setColor(cr, alpha(kNeon, 0.8f));
+	cairo_fill(cr);
+	// The side panel.
+	const float top = y + 22;
+	fillRect(cr, rectF(x, top, x + 54, y + H), ch.tabBar());
+	fillRect(cr, rectF(x + 54, top, x + 55, y + H), ch.sash());
+	for (int r = 0; r < 5; r++)
+		for (int c = 0; c < 2; c++)
+			strokeRound(cr, rectF(x + 7 + c * 23 + 0.5f, top + 8 + r * 21 + 0.5f, x + 25 + c * 23 - 0.5f, top + 24 + r * 21 - 0.5f), 3,
+			            withAlpha(ch.barInk(), 0.3f));
+	// The canvas: dots, two switches into a gate, and a light.
+	const float cl = x + 55, cr2 = x + W - (on ? 30 : 0);
+	setColor(cr, colorF(1, 1, 1, 0.12f));
+	for (float dx = cl + 8; dx < cr2; dx += 12)
+		for (float dy = top + 8; dy < y + H; dy += 12) cairo_rectangle(cr, dx, dy, 1, 1);
+	cairo_fill(cr);
+	const float cy = top + (H - 22) / 2, gx = (cl + cr2) / 2 - 26;
+	for (float wy : { cy - 10, cy + 10 }) {
+		drawLine(cr, pointF(cl + 18, wy), pointF(gx, wy), kNeon, 1.6f);
+		strokeRound(cr, rectF(cl + 6, wy - 6, cl + 18, wy + 6), 3, kNeon, 1.3f);
+	}
+	drawLine(cr, pointF(gx + 40, cy), pointF(gx + 70, cy), kNeon, 1.6f);
+	cairo_move_to(cr, gx, cy - 18);
+	cairo_line_to(cr, gx + 18, cy - 18);
+	cairo_curve_to(cr, gx + 42, cy - 18, gx + 42, cy + 18, gx + 18, cy + 18);
+	cairo_line_to(cr, gx, cy + 18);
+	cairo_close_path(cr);
+	setColor(cr, alpha(kNeon, 0.12f));
+	cairo_fill_preserve(cr);
+	setColor(cr, kNeon);
+	cairo_set_line_width(cr, 1.6);
+	cairo_stroke(cr);
+	const Color lamp = colorF(1, 0.77f, 0.25f);
+	fillCircle(cr, pointF(gx + 78, cy), 13, alpha(lamp, 0.18f));
+	fillCircle(cr, pointF(gx + 78, cy), 8, lamp);
+	if (on) {
+		// The panel, its first button named.
+		const float rl = x + W - 30;
+		fillRect(cr, rectF(rl, top, x + W, y + H), ch.canvas());
+		fillRect(cr, rectF(rl, top, rl + 1, y + H), hover ? alpha(kNeon, 0.5f) : ch.sash());
+		const std::vector<std::string>& ids = actions::defaults();
+		for (size_t i = 0; i < ids.size(); i++) {
+			const RectF b = rectF(rl + 4, top + 6 + i * 25, rl + 26, top + 27 + i * 25);
+			if (i == 0) {
+				fillRound(cr, b, 4, alpha(kNeon, 0.14f));
+				strokeRound(cr, b, 4, alpha(kNeon, 0.9f), 1);
+			}
+			if (const actions::Item* a = actions::find(ids[i])) actions::drawIcon(cr, *a, b, 10, withAlpha(ch.barInk(), 0.9f));
+		}
+		const float tw = textWidth("Check My Circuit", 8.5f, Medium);
+		const RectF tip = rectF(rl - 8 - tw - 10, top + 9, rl - 8, top + 24);
+		fillRound(cr, tip, 4, ch.tabCard());
+		strokeRound(cr, tip, 4, colorF(1, 1, 1, 0.12f));
+		text(cr, "Check My Circuit", tip.left + 5, tip.top + 2, 8.5f, Medium, ch.tabInk());
+		if (hover) {
+			// A pointer resting at the edge.
+			const float px = rl - 12, py = top + 120;
+			cairo_move_to(cr, px, py);
+			cairo_line_to(cr, px, py + 15);
+			cairo_line_to(cr, px + 4, py + 11);
+			cairo_line_to(cr, px + 7, py + 17);
+			cairo_line_to(cr, px + 9.5f, py + 16);
+			cairo_line_to(cr, px + 6.5f, py + 10);
+			cairo_line_to(cr, px + 11, py + 10);
+			cairo_close_path(cr);
+			setColor(cr, colorF(1, 1, 1));
+			cairo_fill_preserve(cr);
+			setColor(cr, colorF(0, 0, 0, 0.8f));
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+		}
+	}
+	cairo_restore(cr);
+	strokeRound(cr, rectF(win.left + 0.5f, win.top + 0.5f, win.right - 0.5f, win.bottom - 0.5f), 10, colorF(1, 1, 1, 0.16f));
+	text(cr, on ? (hover ? "On, and it opens on hover when folded." : "On. Folded, a click on its edge opens it.") : "Off. Everything is still in the menus.",
+	     x, y + H + 10, 10.5f, SemiBold, on ? kNeon : kFaint, W, TextAlign::Center, 0.4f);
+}
+
+std::string toggleActionsKey() {
+	const shortcuts::Action* a = shortcuts::find("toggleActions");
+	const std::string k = a ? shortcuts::label(shortcuts::keys(*a)) : std::string();
+	return k.empty() ? std::string() : " (" + k + ")";
+}
+
+// The two switch rows and the picture, at (x, y); a click on a row's
+// `showId` / `hoverId` hit flips it (choiceClick). Returns the bottom.
+float panelChoice(cairo_t* cr, Panel& panel, float x, float y, int showId, int hoverId) {
+	const float colW = 290;
+	const bool on = prefs().actionsOn, hover = prefs().actionsHoverOpen;
+	float ry = y;
+	struct Row { const char* title; const char* line; bool value; int id; bool enabled; };
+	const Row rows[] = {
+		{ actions::kShowSwitch, "The commands you use most, a click each, down the window\u2019s right edge.", on, showId, true },
+		{ actions::kHoverSwitch, "Folded away, it slides out when the pointer reaches the right edge, and goes back when you move off.", hover, hoverId, on },
+	};
+	for (const Row& r : rows) {
+		const float lw = colW - 40 - 14;
+		const float lh = text(nullptr, r.line, 0, 0, 11.5f, Normal, kSecondary, lw);
+		const float h = std::max(23.0f, 18 + 4 + lh);
+		if (!r.enabled) cairo_push_group(cr);
+		text(cr, r.title, x, ry, 13.5f, Bold, kPrimary, lw);
+		text(cr, r.line, x, ry + 22, 11.5f, Normal, kSecondary, lw);
+		brandSwitch(cr, x + colW - 40, ry + 1, r.value, panel.hot == r.id);
+		if (!r.enabled) {
+			cairo_pop_group_to_source(cr);
+			cairo_paint_with_alpha(cr, 0.45);
+		} else {
+			panel.addHit(rectF(x - 6, ry - 6, x + colW + 6, ry + h + 6), r.id);
+		}
+		ry += h + 16;
+	}
+	const std::string note = std::string("Change it any time: Settings \u25B8 Actions, or View \u25B8 ") + (on ? "Hide" : "Show") + " Actions" +
+	                         toggleActionsKey() + ".";
+	ry += text(cr, note, x, ry, 11.5f, Normal, kFaint, colW);
+	panelPicture(cr, x + colW + 30, y, on, hover);
+	return std::max(ry, y + 200 + 30);
+}
+
+// A click on one of panelChoice's switches.
+bool choiceClick(int id, int showId, int hoverId) {
+	if (id == showId) prefs().actionsOn = !prefs().actionsOn;
+	else if (id == hoverId && prefs().actionsOn) prefs().actionsHoverOpen = !prefs().actionsHoverOpen;
+	else return false;
+	guarded("the Actions panel", [] { actions::changed(); });
+	return true;
+}
+
 }  // namespace
 
 // ---- The welcome ------------------------------------------------------------------
@@ -276,8 +446,8 @@ namespace welcome {
 
 namespace {
 
-enum { kSkip = 1, kBack, kNext, kJustStart, kTheme0 = 10, kSwatch0 = 20, kGrid0 = 40, kReady0 = 50 };
-const int kPages = 5;
+enum { kSkip = 1, kBack, kNext, kJustStart, kShowSwitch, kHoverSwitch, kTheme0 = 10, kSwatch0 = 20, kGrid0 = 40, kReady0 = 50 };
+const int kPages = 6;
 const float kWW = 780, kWH = 580;
 const int kAccentOrder[] = { 6, 0, 1, 2, 3, 4, 5 };
 const char* kAccentNames[] = { "Blue", "Purple", "Pink", "Orange", "Green", "Graphite", "CedarLogic" };
@@ -304,7 +474,10 @@ struct Welcome {
 };
 Welcome* g_welcome = nullptr;
 
-void finish(const char* then = nullptr) {
+// Closed, by any of its buttons or keys: Show Me Around follows (until it's
+// been seen), then the lesson if that was the choice; a template's picker
+// and the shortcut list open first, and the walk waits for them.
+void finish(showme::WelcomeExit exit, const char* then = nullptr) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
 	g_welcome = nullptr;
@@ -316,8 +489,8 @@ void finish(const char* then = nullptr) {
 	delete w;
 	if (window == nullptr) return;
 	gtk_window_present(window->window());
-	if (then && std::string(then) == "tour") startTourOn(window);
-	else if (then) runAction(window, then);
+	if (then) runAction(window, then);
+	if (!showme::welcomeClosed(exit) && exit == showme::WelcomeExit::GuidedTour) startTourOn(window);
 }
 
 void go(int d) {
@@ -333,10 +506,10 @@ void go(int d) {
 
 void readyAction(int i) {
 	switch (i) {
-	case 0: finish("tour"); break;
-	case 1: finish("win.new-template"); break;
-	case 2: finish(); break;
-	default: finish("win.shortcuts"); break;
+	case 0: finish(showme::WelcomeExit::GuidedTour); break;
+	case 1: finish(showme::WelcomeExit::Template, "win.new-template"); break;
+	case 2: finish(showme::WelcomeExit::Blank); break;
+	default: finish(showme::WelcomeExit::Shortcuts, "win.shortcuts"); break;
 	}
 }
 
@@ -417,6 +590,13 @@ void pageSetup(cairo_t* cr, Panel& panel) {
 	text(cr, blurbs[grid], 56, y + 24 + 34 + 14, 11.5f, Normal, kSecondary);
 }
 
+void pageActions(cairo_t* cr, Panel& panel) {
+	const float y = heading(cr, 56, 34, kWW - 112, "One click away", "The Actions panel",
+	                        "The buttons you use most, down the right edge of every window: Check My Circuit, Tidy Up, Share Link and more. "
+	                        "Show Me Around points it out in a moment.");
+	panelChoice(cr, panel, 56, y + 22, kShowSwitch, kHoverSwitch);
+}
+
 void pageName(cairo_t* cr, Welcome* w) {
 	const float left = 56, colW = 420;
 	float y = heading(cr, left, 34, colW, "One more thing", "Who's handing this in?",
@@ -470,9 +650,9 @@ void pageReady(cairo_t* cr, Welcome* w, double t) {
 	heading(cr, 56, 30, kWW - 112, "Ready", "Build your first circuit", "↑↓ and Enter work here too; ← goes back.");
 	struct Tile { const char* title; const char* line; const char* icon; };
 	const Tile tiles[] = {
-		{ "Take the guided tour", "Two switches, a gate and a light, in about five minutes. Recommended.", nullptr },
+		{ "Learn logic: the Guided Tour", "Build two switches, a gate and a light, in about five minutes. Recommended.", nullptr },
 		{ "Start from a template", "A lab page with your name, a counter, a 7-segment starter, or your own.", "document-new-symbolic" },
-		{ "Start with a blank canvas", "Jump straight in. Help ▸ Guided Tour replays the tour.", "list-add-symbolic" },
+		{ "Start with a blank canvas", "Jump straight in. A quick look around the window comes first.", "list-add-symbolic" },
 		{ "See every shortcut", "The whole list, searchable.", "input-keyboard-symbolic" },
 	};
 	float y = 126;
@@ -502,14 +682,15 @@ void paint(cairo_t* cr, float w, float h) {
 		switch (pg) {
 		case 0: pageIntro(cr, t); break;
 		case 1: pageSetup(cr, wl->panel); break;
-		case 2: pageName(cr, wl); break;
-		case 3: pageKeys(cr, wl); break;
+		case 2: pageActions(cr, wl->panel); break;
+		case 3: pageName(cr, wl); break;
+		case 4: pageKeys(cr, wl); break;
 		default: pageReady(cr, wl, t); break;
 		}
 	});
 	const int page = wl->pager.page;
 	// The name's box, once its page has landed.
-	if (page == 2 && !wl->pager.sliding() && wl->name && !gtk_widget_get_visible(wl->name)) {
+	if (page == 3 && !wl->pager.sliding() && wl->name && !gtk_widget_get_visible(wl->name)) {
 		gtk_widget_set_margin_start(wl->name, (int)wl->nameBox.left + 8);
 		gtk_widget_set_margin_top(wl->name, (int)wl->nameBox.top + 3);
 		gtk_widget_show(wl->name);
@@ -537,7 +718,9 @@ void paint(cairo_t* cr, float w, float h) {
 void click(int id) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
-	if (id == kSkip || id == kJustStart) finish();
+	if (id == kSkip) finish(showme::WelcomeExit::Skip);
+	else if (id == kJustStart) finish(showme::WelcomeExit::Blank);
+	else if (choiceClick(id, kShowSwitch, kHoverSwitch)) {}
 	else if (id == kNext) go(1);
 	else if (id == kBack) go(-1);
 	else if (id >= kTheme0 && id < kTheme0 + 3) setTheme(id - kTheme0);
@@ -558,7 +741,7 @@ bool key(guint k, guint state) {
 	if (w == nullptr) return false;
 	const bool last = w->pager.page == kPages - 1;
 	switch (k) {
-	case GDK_KEY_Escape: finish(); return true;
+	case GDK_KEY_Escape: finish(showme::WelcomeExit::Skip); return true;
 	case GDK_KEY_Return:
 	case GDK_KEY_KP_Enter: if (last) readyAction(w->readyChoice); else go(1); return true;
 	case GDK_KEY_Left: go(-1); return true;
@@ -568,7 +751,7 @@ bool key(guint k, guint state) {
 	case GDK_KEY_question: readyAction(3); return true;
 	default: break;
 	}
-	if (w->pager.page == 3 && !(state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK))) {
+	if (w->pager.page == 4 && !(state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK))) {
 		const guint lower = gdk_keyval_to_lower(k);
 		for (int i = 0; i < 6; i++)
 			if (lower == kKeys[i].keyval) { w->pressedAt[i] = nowSeconds(); w->panel.redraw(); return true; }
@@ -593,7 +776,7 @@ bool offer(CircuitWindow* window) {
 		const int pg = wl->pager.page;
 		bool lit = false;
 		for (double at : wl->pressedAt) lit = lit || nowSeconds() - at < 0.8;
-		return wl->pager.sliding() || pg == 0 || pg == 4 || lit;
+		return wl->pager.sliding() || pg == 0 || pg == kPages - 1 || lit;
 	};
 	p.create(window->window(), (int)kWW, (int)kWH);
 	// The name box: a bare entry on the drawn field.
@@ -625,7 +808,13 @@ bool pageForScreenshot(int page) {
 
 GtkWidget* window() { return g_welcome ? g_welcome->panel.win : nullptr; }
 
-// ---- The guided tour --------------------------------------------------------------
+void closeForCheck(int choice) {
+	if (g_welcome == nullptr) return;
+	if (choice < 0) finish(showme::WelcomeExit::Skip);
+	else readyAction(std::min(3, choice));
+}
+
+// ---- Learn Logic: Guided Tour --------------------------------------------------------------
 // It builds an AND circuit with you on a circuit of its own (a new one, so
 // it never touches your work). Its card sits in the corner of that circuit's
 // window, over the canvas; each step moves on by itself once it's done.
@@ -717,8 +906,8 @@ std::vector<Step>& steps() {
 			  return !g_tour->window->filePath().empty() && n != "Untitled" && n != "Untitled Circuit";
 		  } },
 		{ "You built a working circuit",
-		  [] { return std::string("That's the loop: add, wire, try it, check it. Press Ctrl+? whenever you want every shortcut, and Help ▸ Guided Tour "
-		                          "brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in."); },
+		  [] { return std::string("That's the loop: add, wire, try it, check it. Press Ctrl+? whenever you want every shortcut, and Help ▸ Learn "
+		                          "Logic: Guided Tour brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in."); },
 		  keys({ "Ctrl", "?" }), nullptr },
 	};
 	return s;
@@ -798,7 +987,7 @@ void paintTour(cairo_t* cr, float w, float h) {
 	strokeRound(cr, rectF(0.5f, 0.5f, w - 0.5f, h - 0.5f), 12, alpha(kNeon, 0.18f));
 	float y = 18;
 	icon(cr, 18, y, 18);
-	text(cr, format("GUIDED TOUR  ·  %d OF %d", t->step + 1, count), 44, y + 1, 10.5f, Bold, kNeon, 0, TextAlign::Leading, 1.2f);
+	text(cr, format("LEARN LOGIC  ·  %d OF %d", t->step + 1, count), 44, y + 1, 10.5f, Bold, kNeon, 0, TextAlign::Leading, 1.2f);
 	const RectF close = rectF(w - 18 - 22, y - 2, w - 18, y + 20);
 	fillCircle(cr, pointF((close.left + close.right) / 2, (close.top + close.bottom) / 2), 11, colorF(1, 1, 1, t->hot == Tour::kClose ? 0.16f : 0.08f));
 	drawIcon(cr, Icon::Dismiss, close, 9, kSecondary);
@@ -932,6 +1121,9 @@ void startTourOn(CircuitWindow* from) {
 	welcome::startTour(target);
 }
 
+bool tourActive() { return g_tour != nullptr; }
+void endTourNow() { endTour(); }
+
 }  // namespace welcome
 
 // ---- What's New ------------------------------------------------------------------
@@ -942,7 +1134,7 @@ const char* const kVersion = "0.4";
 
 namespace {
 
-enum { kSkip = 1, kBack, kNext, kTry, kLine0 = 10, kTile0 = 20 };
+enum { kSkip = 1, kBack, kNext, kTry, kPanelLink, kCardDim, kCardBody, kCardDone, kShowSwitch, kHoverSwitch, kLine0 = 10, kTile0 = 20 };
 const float kNW = 820, kNH = 600;
 
 struct Point { const char* icon; const char* title; const char* line; };
@@ -970,9 +1162,9 @@ const Chapter kChapters[] = {
 	    { "insert-link-symbolic", "Share Link", "File \xE2\x96\xB8 Share Link copies a link. Anyone can open it in CedarLogic Online, in any browser. CedarLogic opens cedarlogic:// links too." } },
 	  "Check My Circuit", "win.check-circuit" },
 	{ "Actions", "One click away", "A strip of buttons down the window's right edge, the side panel's mirror.",
-	  { { Icon::Rail, "Actions on the right", "The things you use most, one click away. Drag them into your order; right-click to choose your own." },
+	  { { Icon::Rail, "The Actions panel", "The buttons you use most, down the right edge of the window, one click each. Drag them into your order; right-click to choose your own." },
 	    { "view-conceal-symbolic", "Folds out of the way", "Click its edge to fold it to a thin tab. Move the pointer to the window's right edge and it slides out. F9 shows or hides it." },
-	    { "preferences-system-symbolic", "Yours to choose", "Settings \xE2\x96\xB8 Actions: anything from any menu, in your order. On screen, in the toolbar, or hidden." } },
+	    { "preferences-system-symbolic", "Yours to choose", "Settings \xE2\x96\xB8 Actions: anything from any menu, in your order. One switch there turns the panel off." } },
 	  "Show the Actions", "win.show-actions" },
 	{ "Tidy Up", "Rebuilt for cleaner layouts", "Tidy Up by Signal Flow lays a page out again, and it's quick.",
 	  { { "view-sort-ascending-symbolic", "Cleaner results", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
@@ -993,6 +1185,7 @@ struct WhatsNew {
 	Pager pager;
 	CircuitWindow* window = nullptr;
 	double opened = nowSeconds();
+	bool panelCard = false;   // the Actions panel's switches, over the page
 };
 WhatsNew* g_new = nullptr;
 
@@ -1005,9 +1198,21 @@ void close(const char* action) {
 	delete w;
 	if (window == nullptr) return;
 	gtk_window_present(window->window());
-	if (action && std::string(action) == "tour") welcome::startTourOn(window);
-	else if (action && std::string(action) == "sync") settings::show(window, settings::kSyncPage);
+	const std::string a = action ? action : "";
+	if (a == "showme") {
+		// The finale's Show Me Around, once What's New has gone.
+		g_timeout_add(300, [](gpointer data) -> gboolean {
+			CircuitWindow* cw = static_cast<CircuitWindow*>(data);
+			if (windowAlive(cw)) guarded("Show Me Around", [&] { showme::start(cw); });
+			return G_SOURCE_REMOVE;
+		}, window);
+		return;
+	}
+	if (a == "tour") welcome::startTourOn(window);
+	else if (a == "sync") settings::show(window, settings::kSyncPage);
 	else if (action) runAction(window, action);
+	// Show Me Around follows, the first time (ShowMeAround.h).
+	showme::startWhenReady();
 }
 
 void go(int d) {
@@ -1179,7 +1384,18 @@ void pageChapter(cairo_t* cr, WhatsNew* wn, int i, double t) {
 	const Chapter& c = kChapters[i];
 	const float x = 48, cw = 420;
 	float y = heading(cr, x, 34, cw, c.eyebrow, c.title, c.line) + 18;
-	for (const Point& p : c.points) y += pointCard(cr, x, y, cw, p.icon, p.title, p.line) + 10;
+	for (const Point& p : c.points) {
+		// The panel's card: on or off, open on hover.
+		const bool panel = p.icon == Icon::Rail;
+		const float h = pointCard(cr, x, y, cw, p.icon, p.title, p.line, 0, panel ? 22 : 0);
+		if (panel) {
+			const char* link = "Show or Hide It\u2026";
+			const RectF r = rectF(x + 48, y + h - 34, x + 48 + textWidth(link, 11.5f, SemiBold), y + h - 16);
+			text(cr, link, r.left, r.top, 11.5f, SemiBold, wn->panel.hot == kPanelLink ? kPrimary : kNeon);
+			wn->panel.addHit(inflate(r, 4), kPanelLink);
+		}
+		y += h + 10;
+	}
 	if (c.tryTitle) {
 		const float bw = textWidth(c.tryTitle, 13, SemiBold) + 40;
 		const RectF r = rectF(x, y + 6, x + bw, y + 42);
@@ -1193,11 +1409,12 @@ void pageFinale(cairo_t* cr, WhatsNew* wn) {
 	float y = heading(cr, 56, 34, kNW - 112, "That's the tour", "Go build something", "It's under Help ▸ What's New in CedarLogic whenever you want it back.") + 22;
 	struct Tile { const char* title; const char* line; const char* icon; };
 	const Tile tiles[] = {
-		{ "Take the guided tour", "Two switches, a gate and a light, on a circuit of its own.", "find-location-symbolic" },
+		{ "Show me around", "A minute\u2019s walk round the window: where everything is.", "find-location-symbolic" },
+		{ "Learn logic: the Guided Tour", "Two switches, a gate and a light, on a circuit of its own.", "applications-science-symbolic" },
 		{ "Start from a template", "The Lab Page has your name on it already.", "document-new-symbolic" },
 		{ "Open CedarLogic Help", "Every feature, with its keys.", "help-browser-symbolic" },
 	};
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 4; i++) {
 		const RectF r = rectF(56, y, kNW - 56, y + 66);
 		card(cr, r, wn->panel.hot == kTile0 + i, 13);
 		glyph(cr, tiles[i].icon, r.left + 20, r.top + 21, 15);
@@ -1238,11 +1455,34 @@ void paint(cairo_t* cr, float w, float h) {
 		button(cr, back, "Back", false, wn->panel.hot == kBack);
 		wn->panel.addHit(back, kBack);
 	}
+	if (wn->panelCard) {
+		// The Actions panel's switches, over the page: the setting itself.
+		// Nothing under it takes a click meanwhile.
+		wn->panel.hits.clear();
+		fillRect(cr, rectF(0, 0, w, h), colorF(0, 0, 0, 0.55f));
+		wn->panel.addHit(rectF(0, 0, w, h), kCardDim);
+		const RectF card = rectF(36, 70, w - 36, h - 70);
+		glow(cr, card, 18, colorF(0, 0, 0, 0.5f), 24);
+		cairo_save(cr);
+		roundedPath(cr, card, 18);
+		cairo_clip(cr);
+		cairo_translate(cr, card.left, card.top);
+		ground(cr, rectWidth(card), rectHeight(card), 0.2f, 0, 24);
+		cairo_restore(cr);
+		strokeRound(cr, rectF(card.left + 0.5f, card.top + 0.5f, card.right - 0.5f, card.bottom - 0.5f), 17.5f, colorF(1, 1, 1, 0.14f));
+		wn->panel.addHit(card, kCardBody);
+		const float y = heading(cr, card.left + 28, card.top + 28, rectWidth(card) - 56, "The Actions panel", "Yours to show or hide",
+		                        std::string("It\u2019s on for everyone in ") + kVersion + ". Flip these to suit you; they change it straight away.");
+		panelChoice(cr, wn->panel, card.left + 28, y + 18, kShowSwitch, kHoverSwitch);
+		const RectF done = rectF(card.right - 28 - 110, card.bottom - 28 - 36, card.right - 28, card.bottom - 28);
+		button(cr, done, "Done", true, wn->panel.hot == kCardDone);
+		wn->panel.addHit(done, kCardDone);
+	}
 }
 
 }  // namespace
 
-void show(CircuitWindow* window, int page) {
+void show(CircuitWindow* window, int page, bool panelCard) {
 	if (window == nullptr) return;
 	if (g_new) { gtk_window_present(GTK_WINDOW(g_new->panel.win)); return; }
 	prefs().seenWhatsNew = kVersion;
@@ -1250,23 +1490,40 @@ void show(CircuitWindow* window, int page) {
 	g_new = new WhatsNew();
 	g_new->window = window;
 	g_new->pager.page = std::max(0, std::min(kPages - 1, page));
+	g_new->panelCard = panelCard;
 	Panel& p = g_new->panel;
 	p.paint = paint;
 	p.animating = [] { return g_new && (g_new->pager.sliding() || g_new->pager.page == 0); };
 	p.click = [](int id) {
 		WhatsNew* wn = g_new;
 		if (wn == nullptr) return;
-		if (id == kSkip) close(nullptr);
+		if (wn->panelCard) {
+			if (id == kCardDim || id == kCardDone) wn->panelCard = false;
+			else choiceClick(id, kShowSwitch, kHoverSwitch);
+			wn->panel.redraw();
+			return;
+		}
+		if (id == kPanelLink) wn->panelCard = true;
+		else if (id == kSkip) close(nullptr);
 		else if (id == kBack) go(-1);
 		else if (id == kNext) go(1);
 		else if (id == kTry && wn->pager.page >= 1 && wn->pager.page <= kChapterCount) close(kChapters[wn->pager.page - 1].tryAction);
 		else if (id >= kLine0 && id < kLine0 + kChapterCount) go(id - kLine0 + 1 - wn->pager.page);
-		else if (id == kTile0) close("tour");
-		else if (id == kTile0 + 1) close("win.new-template");
-		else if (id == kTile0 + 2) close("win.help");
+		else if (id == kTile0) close("showme");
+		else if (id == kTile0 + 1) {
+			// Show Me Around first, if it hasn't been seen.
+			if (prefs().showMeAroundSeen) close("tour");
+			else { showme::setThen([](CircuitWindow* cw) { welcome::startTourOn(cw); }); close(nullptr); }
+		}
+		else if (id == kTile0 + 2) close("win.new-template");
+		else if (id == kTile0 + 3) close("win.help");
 		if (g_new) g_new->panel.redraw();
 	};
 	p.key = [](guint k, guint) {
+		if (g_new && g_new->panelCard) {
+			if (k == GDK_KEY_Escape || k == GDK_KEY_Return || k == GDK_KEY_KP_Enter) { g_new->panelCard = false; g_new->panel.redraw(); return true; }
+			return k == GDK_KEY_Left || k == GDK_KEY_Right;
+		}
 		if (k == GDK_KEY_Escape) close(nullptr);
 		else if (k == GDK_KEY_Return || k == GDK_KEY_KP_Enter || k == GDK_KEY_Right) go(1);
 		else if (k == GDK_KEY_Left) go(-1);

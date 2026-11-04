@@ -18,14 +18,7 @@ enum { kClassic = 0, kMinimal = 2, kSeamless = 3 };
 
 bool is(const char* a, const char* b) { return a && b && std::strcmp(a, b) == 0; }
 
-// The Actions rail's items, when Settings > Actions puts them in the toolbar
-// (not a group Settings > Toolbar hides).
-const int kActionsGroup = 40;
-
 bool groupShown(int g) { return g < 0 || g >= TGCount || (prefs().toolbarHidden & (1 << g)) == 0; }
-
-// One of the rail's actions, in the toolbar.
-const actions::Item* railItem(const char* action, int group) { return group == kActionsGroup ? actions::byAction(action) : nullptr; }
 
 // " (Ctrl+N)": the keys an action has now (Settings > Shortcuts changes
 // them), or nothing when it has none. `action` is its GTK action, or the id
@@ -70,9 +63,6 @@ void Toolbar::build(int style) {
 	add(Button, "app.new", TGFile, false); add(Button, "app.open", TGFile, false); add(Button, "win.save", TGFile, false);
 	add(Button, "win.undo", TGUndo, false); add(Button, "win.redo", TGUndo, false);
 	add(Button, "win.copy", TGClipboard, false); add(Button, "win.paste", TGClipboard, false);
-	// Settings > Actions: In the toolbar. Before the zoom, which gives way first.
-	if (prefs().actionsMode == actions::InToolbar)
-		for (const actions::Item* a : actions::rail()) add(Button, a->action, kActionsGroup, false);
 	add(Button, "win.zoom-out", TGZoom, false); add(Zoom, nullptr, TGZoom, false); add(Button, "win.zoom-in", TGZoom, false);
 	add(Button, "win.running", TGSim, true); add(Button, "win.step", TGSim, true);
 	if (prefs().showStepClock) add(Button, "win.step-clock", TGSim, true);
@@ -166,7 +156,6 @@ void Toolbar::layout(float w, float h, int style, bool live) {
 
 bool Toolbar::isOn(const Item& it) const {
 	if (it.kind != Button) return false;
-	if (const actions::Item* a = railItem(it.action, it.group)) return actions::isOn(*a, win);
 	if (is(it.action, "win.running")) return !win->running();
 	if (is(it.action, "win.sim-view")) return win->simView();
 	if (is(it.action, "win.lock")) return win->locked();
@@ -178,7 +167,6 @@ bool Toolbar::isOn(const Item& it) const {
 
 bool Toolbar::isEnabled(const Item& it) const {
 	if (it.kind != Button) return true;
-	if (const actions::Item* a = railItem(it.action, it.group)) return actions::enabled(*a, win);
 	return win->actionEnabled(it.action);
 }
 
@@ -213,7 +201,6 @@ std::string Toolbar::tipFor(const Item& it) const {
 	default: break;
 	}
 	const char* a = it.action;
-	if (const actions::Item* ai = railItem(a, it.group)) return actions::titleWithKey(*ai);
 	if (is(a, "app.new")) return "New circuit" + keysFor(a);
 	if (is(a, "app.open")) return "Your circuits" + keysFor(a);
 	if (is(a, "win.save")) return "Save, and keep a version" + keysFor(a);
@@ -368,8 +355,7 @@ void Toolbar::draw(cairo_t* cr, float w, float h, int style, bool live) {
 			Color fg = withAlpha(ink, isEnabled(it) ? inkA : 0.3f);
 			if (colored) fg = green;
 			else if (on) fg = accent;
-			if (const actions::Item* ai = railItem(it.action, it.group)) actions::drawIcon(cr, *ai, r, 16, fg);
-			else if (is(it.action, "app.new")) drawNewDocIcon(cr, r, fg);
+			if (is(it.action, "app.new")) drawNewDocIcon(cr, r, fg);
 			else if (is(it.action, "win.new-tab")) drawNewTabIcon(cr, r, fg);
 			else if (is(it.action, "win.feedback")) drawBubbleIcon(cr, r, fg);
 			else if (is(it.action, "app.open")) drawFolderIcon(cr, r, fg);
@@ -383,6 +369,20 @@ void Toolbar::draw(cairo_t* cr, float w, float h, int style, bool live) {
 		}
 	}
 	if (live) buttons.paint(cr, topWindow(), ink);
+}
+
+bool Toolbar::toolsRect(bool run, RectF& out) const {
+	bool any = false;
+	for (const Item& it : items) {
+		if (!it.shown || it.kind == Title) continue;
+		const bool isRun = it.group == TGSim || it.group == TGRun;
+		if (run ? !isRun : (it.right || isRun)) continue;
+		if (!any) out = it.rect;
+		else out = rectF(std::min(out.left, it.rect.left), std::min(out.top, it.rect.top), std::max(out.right, it.rect.right),
+		                 std::max(out.bottom, it.rect.bottom));
+		any = true;
+	}
+	return any;
 }
 
 GdkRectangle Toolbar::actionRect(const char* action) const {
@@ -483,8 +483,7 @@ void Toolbar::activate(int index) {
 	switch (it.kind) {
 	case Zoom: win->runAction("win.zoom-actual"); break;
 	case Button:
-		if (const actions::Item* a = railItem(it.action, it.group)) actions::run(*a, win);
-		else if (isEnabled(it)) win->runAction(it.action);
+		if (isEnabled(it)) win->runAction(it.action);
 		break;
 	default: break;
 	}
