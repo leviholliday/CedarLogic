@@ -4,9 +4,15 @@ Written 2026-10-31 from the commits on `private/v4/mac` (tip `2a732c5`, 131 comm
 
 If a line says a thing is on a platform, a commit or doc on the branches in section 4 says so. Where a fix lives on a branch that is not yet in `v4/mac`, the line says so.
 
+Updated 2026-11-03 from `main` (`82da486`, after PRs #7 to #19): the intro, the Actions rail, menus live at launch on the Mac, and the welcome and What's New no longer coming back. These are checked against the code and `docs/V4-PARITY-MATRIX.md`.
+
 ## 1. What's new
 
 ### On every computer
+
+**An intro.** The first time CedarLogic opens, and the first time after an update, the circuit draws itself, the light comes on and "0.4" lights up, with a short chime. Then the launch screen comes in as usual. Any key or click skips it. Help > Play the Intro plays it again, sound and all. Settings > General has "Play the intro every time CedarLogic opens", off at first; that one plays without the sound. With Reduce Motion (Mac) or animations off (Windows), you see the still launch screen instead. (Mac, Windows, Linux.)
+
+**The Actions rail.** The commands you use most, as buttons down the window's right edge. Point at one to see its name and shortcut, and click to run it. Settings > Actions puts the rail On screen, In the toolbar, or Hidden. Drag a button up or down the rail to reorder it, or use the Customize list, which can search every menu command by its name, its menu or its shortcut. Folded away, the rail opens when the pointer reaches the window's right edge, and closes when you move off. Focus mode folds it to a quiet tab. View > Show Actions, or Control-Command-S on the Mac, Ctrl+B on Windows and F9 on Linux (each can be changed in Settings > Shortcuts). A new install starts with the rail on screen. A copy that's updating starts with it hidden, and says once: "New: an Actions rail. Settings ▸ Actions." (Mac, Windows, Linux.)
 
 **Recently Deleted.** Deleting a circuit from Your Circuits no longer ends it. Open "Recently Deleted" in Your Circuits to see what you deleted, newest first. Restore puts a circuit back. Delete Now removes it for good, and asks first. Circuits stay for 30 days, then they go. They stay on that computer. They aren't synced. (Mac, Windows, Linux.)
 
@@ -21,6 +27,10 @@ If a line says a thing is on a platform, a commit or doc on the branches in sect
 **Circuits save the numbers you see.** Part positions are saved to a ten-thousandth of a grid square. Save, reopen and save again gives the same file.
 
 ### Mac
+
+**Menus work from the moment the app opens.** Before, a shortcut such as Cmd-E (Export as Image) did nothing after launch, and Undo stayed off after an edit, until you had opened a menu once. Now the menus are up to date whenever a window comes to the front, and before every Command-key shortcut.
+
+**The welcome and What's New stay closed.** If one of them was open when you quit, macOS used to bring it back at the next launch, so an update could show the welcome over your circuit instead of What's New. Now neither comes back by itself; you see only the one that's due.
 
 **Open the Practice Circuit.** It's in the File menu and the Help menu. It opens as a new circuit of your own, called Practice Circuit.
 
@@ -185,6 +195,9 @@ All four install the versioned release in `leviholliday/CedarLogic-Releases` (ne
 - Windows: the menu bar by keyboard (Alt, F10, arrows, Escape), in dark mode and in focus mode; recording the window; Predict, Then Reveal; Share Link with a note in the circuit, and check the link doesn't carry it.
 - Linux: the menu bar on Zorin and on the Pi (the Pi's themes); recording with and without ffmpeg; the Normal and Beta groups with Check Now.
 - Mac: Open the Practice Circuit; Clear Drawing's question; a long session past 500 steps, then quit and reopen.
+- The intro, on all three: a first launch (it plays with the chime), an update from 0.3.x (it plays once), a second launch (it doesn't); a key or a click part way skips it; Help > Play the Intro; the every-launch setting (no sound).
+- The Actions rail, on all three: On screen, In the toolbar and Hidden; the right edge opening the folded rail; focus mode; dragging a button; searching the Customize list; the shortcut (Control-Command-S, Ctrl+B, F9). Update a copy that had 0.3.x settings and check the rail starts hidden with its one-time line.
+- Mac: straight after launch, before clicking anything, press Cmd-E with a circuit open (the export sheet should open). Quit with the welcome or What's New open, then open the app again (it shouldn't come back).
 
 ## 4. Internal
 
@@ -232,7 +245,7 @@ None of these is merged to `main` or deployed. The apps' cap handling on all thr
 - **The site** needs: `install.sh` and `install.ps1` copied into `public/` and served as plain text (`netlify.toml` headers in `packaging/README.md`); the `/get/` redirects pointed at the `v0.4` files, with AppImage ones added; download-page wording; a production deploy with the owner there.
 - **winget.** Fork `microsoft/winget-pkgs`, accept Microsoft's CLA on the first PR, run `packaging/winget/bump.sh 0.4`. The committed 0.4.0 manifests have placeholder hashes (64 zeros) until then. Merging takes hours to days. Show the winget line on the site only after the PR merges.
 - **Homebrew.** The cask in the repo is at `0.3.4`. Run `packaging/homebrew/bump.sh 0.4` after the DMG is on the release, then push the tap. A day's lag breaks nothing, because the app updates itself.
-- **The Mac's What's New tour** is still version `0.3` in `mac/App/WhatsNew.swift` on `v4/mac`. There is no 0.4 tour on this branch. The old `rel/*-0.4` branches had Windows and Linux 0.4 tours from 2026-10-05; those were not re-read for this file.
+- **The What's New tours** are version `0.4` on `main` on all three (`mac/App/WhatsNew.swift`, `windows/App/Welcome.cpp` and `linux/App/Welcome.cpp`, `kVersion`). They were written before the intro and the Actions rail, so neither tour mentions them (the Windows tour's "Also new" page has "Actions on the right"). The website's 0.4 page adds them in an "Also in 0.4" block (cedarlogic-site branch `release-0.4-copy`).
 - **Apple silicon only on Mac.** `mac/build.sh` builds for the Mac it runs on. Intel Macs get "This app isn't supported". Say so on the download page until a universal build exists.
 - **Core hardening, still open.** Bug 28's fix has no `core_check` case and may not be reachable. The Linux session check's seed 9 mismatch was not reproduced in the engine; `ca3237b` adds the six steps as a `core_check` case, and `7b8648c` on `ui/linux-channel` makes the Linux check report an interrupted undo/redo round trip instead of failing it. Several fuzz seeds are "unfinished" rather than passing: slow, not stuck (a page pasted onto itself until thousands of parts overlap). Known limits are in the doc.
 - **Not run.** Core hardening and `v4/mac` were checked on a Mac. The commit messages for `ui/windows-channel` and `ui/linux-channel` name CI checks (for example `--channel-check`, `--trash-check`, `--feedback-check`). The one real-PC run (`windows/PC-TEST.md`) was on `54f1236`, before the polish commits. I did not run or build anything for this file.

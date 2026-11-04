@@ -8,6 +8,8 @@ Versions 0.2 to 0.3.19 were Mac only. 0.4 is the first version for Mac, Windows 
 
 ### Added
 
+- **An intro** on the first launch and the first launch after an update: the circuit draws itself, the light comes on and "0.4" lights up, with a short chime. Any key or click skips it. **Help > Play the Intro** plays it again, and Settings > General > "Play the intro every time CedarLogic opens" plays it at every launch, without the sound. (Mac, Windows, Linux)
+- **The Actions rail**: the commands you use most, as buttons on the window's right edge. Settings > Actions puts it On screen, In the toolbar or Hidden. Drag a button to reorder it; the Customize list searches every menu command by name, menu or shortcut. Folded, it opens when the pointer reaches the right edge, and focus mode folds it. View > Show Actions is Control-Command-S on the Mac, Ctrl+B on Windows and F9 on Linux. New installs start with it on screen; updated copies start with it hidden and say so once. (Mac, Windows, Linux)
 - **Recently Deleted** in Your Circuits. A deleted circuit can be restored for 30 days, then it goes. Delete Now removes it for good, and asks first. Deleted circuits stay on that computer and aren't synced. (Mac, Windows, Linux)
 - **Open the Practice Circuit** in the File menu (and the Help menu on the Mac). It opens as a new circuit of your own. (Mac, Linux)
 - **A menu bar** on Windows and Linux: File, Edit, View, Simulate and the rest, with Alt and F10. Settings moved into File, and the ••• button is gone.
@@ -49,6 +51,8 @@ Versions 0.2 to 0.3.19 were Mac only. 0.4 is the first version for Mac, Windows 
 - Mac: Cmd-W with a sheet open no longer closes the tab behind it, and Option-Left in the oscilloscope no longer quits after a long recording.
 - Mac: a closed circuit window lets go of its circuit, and a damaged file whose wire lost its id opens with a notice.
 - Mac: the first-launch sound no longer holds up the launch.
+- Mac: menus and their shortcuts work from launch. Before, a shortcut such as Cmd-E did nothing, and Undo stayed off after an edit, until a menu had been opened once.
+- Mac: a welcome or What's New left open when you quit no longer comes back at the next launch (an update could show the welcome instead of What's New).
 - Windows: C now connects a gate you dragged from the side panel, and dragging draws one frame per screen refresh.
 - Windows: Sync no longer fails when a security scanner holds a file for a moment.
 - Windows: key hints say Esc, and pressing Alt again to leave the menu bar works.
