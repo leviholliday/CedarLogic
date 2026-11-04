@@ -219,7 +219,7 @@ About.
 | Opening a circuit (replace / new window) | Yes | Yes | Yes | n/a | |
 | New circuits start from (template) | Yes | Yes | Yes | No | |
 | Opening .cdl files default-app row | Yes | Partial | Yes | n/a | see section 6 |
-| Launch screen: Play the intro every time CedarLogic opens (off by default, silent) | Yes | Yes | Yes | n/a | Mac General (`SettingsView.swift`); Windows General (`Settings.cpp`); Linux General (`Settings.cpp`) |
+| Launch screen: Play the intro every time CedarLogic opens (silent) | Yes | Yes | Yes | n/a | Mac General (`SettingsView.swift`), off by default; Windows General (`Settings.cpp`): on by default since 2026-11-04 (the owner's choice; settings saved before take it once, `introEveryLaunchSet`; off sticks once turned off; still silent, the chime only on the first launch and after an update); Linux General (`Settings.cpp`), off by default |
 | Ask before quitting | Yes | Yes | Yes | n/a | |
 | Status bar | Yes | Yes | Yes | No | |
 | Testing group (beta / normal) | Yes | Yes | Yes | n/a | |

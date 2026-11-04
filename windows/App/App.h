@@ -115,7 +115,8 @@ struct Prefs {
 	std::string introUpdatePlayed;
 	// Settings > General > Launch screen: the intro at every launch, not just
 	// the first (silently; the sound is the first launch's and an update's).
-	bool introEveryLaunch = false;
+	// On to begin with, for everyone (Prefs::loadFrom); off once turned off.
+	bool introEveryLaunch = true;
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units
 	bool windowMaximized = false;
 	int paletteWidth = 210;                       // in 96-dpi units

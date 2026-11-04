@@ -543,10 +543,10 @@ jobs:
           timeout 180 "$A" --rail-check | tee rail-check.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "rail check:.*all passed" rail-check.log
-          # (It checks the intro's rules too: the every-time setting off by default, the
+          # (It checks the intro's rules too: the every-time setting on by default (and off once turned off), the
           # update intro with its sound, an every-time launch with none, and Help > Play
           # the Intro, played over a window. Each of those must be there and pass.)
-          for want in "off by default" "updates only" "after an update plays the update's intro, with the sound" \
+          for want in "on by default" "turned off, it stays off" "by default a later launch plays it, silently" "updates only" "after an update plays the update's intro, with the sound" \
                       "a later launch plays it, with no sound" "Play the Intro is among the actions" \
                       "Help > Play the Intro is in the menu bar" "Play the Intro plays" "the once-only keys are left"; do
             grep "^PASS intro: .*$want" rail-check.log > /dev/null || { echo "::error::intro check missing or failed: $want"; exit 1; }

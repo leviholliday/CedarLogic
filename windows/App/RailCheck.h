@@ -21,7 +21,7 @@
 // Settings choice leaving its value. Then the
 // intro's rules (Intro.h; the Mac launch-selftest's intro checks): its
 // length, which launch plays which intro and with the sound or not, "Play
-// the intro every time CedarLogic opens" off by default, and Help > Play the
+// the intro every time CedarLogic opens" on by default (off once turned off), and Help > Play the
 // Intro in the actions and the menu bar, played over a window. One PASS or
 // FAIL line each; the exit code is 0 when all passed.
 

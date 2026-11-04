@@ -411,7 +411,7 @@ void window() {
 // The intro's rules (Intro.h), the Windows twin of the Mac launch-selftest's
 // intro checks: the timeline's length, which launches play which intro, the
 // sound (the first launch's and an update's, never an every-launch one),
-// "Play the intro every time CedarLogic opens" (off unless chosen), and Help
+// "Play the intro every time CedarLogic opens" (on unless turned off), and Help
 // > Play the Intro (in the actions, in the menu bar, and played: sound and
 // all, the once-only keys left alone, gone again by the end).
 void introRules() {
@@ -420,8 +420,14 @@ void introRules() {
 	      strf("intro: 6.07 s in all, the panel held to %.2f s (%.2f s)", intro::kDissolveAt, intro::kTotal));
 	check(std::lround(intro::kTotal * 60) + 1 == 365, "intro: --render-intro draws 365 frames");
 	loadText("intro-new.ini", "");
-	check(!prefs().introEveryLaunch, "intro: \"Play the intro every time CedarLogic opens\" is off by default");
-	loadText("intro-every.ini", "[CedarLogic]\nintroEveryLaunch=true\n");
+	check(prefs().introEveryLaunch, "intro: \"Play the intro every time CedarLogic opens\" is on by default");
+	loadText("intro-old.ini", "[CedarLogic]\nhasSeenWelcome=true\nintroEveryLaunch=false\n");
+	check(prefs().introEveryLaunch, "intro: settings saved before it was on by default (false, never chosen) take the new default once");
+	loadText("intro-off.ini", "[CedarLogic]\nintroEveryLaunch=false\nintroEveryLaunchSet=1\n");
+	check(!prefs().introEveryLaunch, "intro: turned off, it stays off");
+	loadText("intro-off-again.ini", prefs().text());
+	check(!prefs().introEveryLaunch, "intro: and stays off through a save and a launch");
+	loadText("intro-every.ini", "[CedarLogic]\nintroEveryLaunch=true\nintroEveryLaunchSet=1\n");
 	check(prefs().introEveryLaunch, "intro: and stays on once chosen");
 	check(intro::hasSound(intro::Trigger::First) && intro::hasSound(intro::Trigger::Update) && !intro::hasSound(intro::Trigger::Every),
 	      "intro: the sound is for the first launch and updates only");
@@ -431,6 +437,9 @@ void introRules() {
 	Prefs later;
 	later.hasSeenWelcome = later.firstLaunchPlayed = later.introFirstLaunchPlayed = true;
 	later.seenWhatsNew = whatsnew::kVersion;
+	check(intro::forLaunch(later) == intro::Trigger::Every && !intro::hasSound(intro::forLaunch(later)),
+	      "intro: by default a later launch plays it, silently");
+	later.introEveryLaunch = false;
 	check(intro::forLaunch(later) == intro::Trigger::None, "intro: a later launch plays none with the setting off");
 	later.introEveryLaunch = true;
 	check(intro::forLaunch(later) == intro::Trigger::Every && !intro::hasSound(intro::forLaunch(later)),

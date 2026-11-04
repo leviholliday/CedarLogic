@@ -285,7 +285,8 @@ Direct2D here. And:
   plays on the first launch and the first after an update, both with the
   sound (once each: `introFirstLaunchPlayed`, `introUpdatePlayed` in the
   settings), and, with `introEveryLaunch` (Settings > General > Launch
-  screen), on every other launch, silently. Help > Play the Intro (the
+  screen; on by default, `introEveryLaunchSet` marking settings saved since,
+  so older ones take the new default once), on every other launch, silently. Help > Play the Intro (the
   `playIntro` action) plays the first launch's again over the front window,
   sound and all, and marks nothing. `CL_INTRO=first|update|every` plays that
   one, `CL_NO_INTRO=1` (or `CL_NO_SPLASH`) never, `CL_INTRO_FREEZE=<seconds>`

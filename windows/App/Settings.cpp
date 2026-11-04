@@ -613,7 +613,8 @@ void showPreferencesDialog(HWND parent) {
 	// row (its words), silently.
 	FormField everyLaunch = check("Launch screen:", "Play the intro every time CedarLogic opens", p.introEveryLaunch,
 	                              "The circuit drawing itself, then the launch screen, as on the first launch, without its sound "
-	                              "(that's for the first launch and updates). Help > Play the Intro plays it any time.");
+	                              "(that's for the first launch and updates). Any key or click skips it. Turn it off for the launch "
+	                              "screen alone; Help > Play the Intro plays it any time.");
 	everyLaunch.tipLines = 3;
 	on[f.add(everyLaunch)] = [](Form& form, int i) {
 		prefs().introEveryLaunch = form.checked(i);
