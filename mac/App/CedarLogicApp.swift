@@ -891,9 +891,9 @@ struct HelpCommands: Commands {
             Button("Play the Intro") { Splash.shared.playIntroNow() }
             Button("Welcome to CedarLogic…") { openWindow(id: "welcome") }
             Button("Set Up CedarLogic…") { ActionID.setUp.run(canvas) }
-            Button("Guided Tour") { TourModel.shared.start() }
-            // A walk round the window: where everything is (ShowMeAround.swift).
+            // Where everything is in the window (ShowMeAround.swift), then the logic lesson.
             Button("Show Me Around") { ActionID.showMeAround.run(canvas) }
+            Button("Learn Logic: Guided Tour") { TourModel.shared.start() }
             Button("Open the Practice Circuit") { Templates.openPractice() }
         }
     }

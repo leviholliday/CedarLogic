@@ -244,7 +244,7 @@ enum ActionRegistry {
                   enabled: anyWindow, run: { _ in open("welcome") }),
         AppAction(id: .setUp, title: "Set Up CedarLogic\u{2026}", menu: "Help", symbol: "slider.horizontal.3",
                   enabled: anyWindow, run: { _ in WelcomeRequest.setup(); open("welcome") }),
-        AppAction(id: .tour, title: "Guided Tour", menu: "Help", symbol: "figure.walk",
+        AppAction(id: .tour, title: "Learn Logic: Guided Tour", menu: "Help", symbol: "figure.walk",
                   enabled: anyWindow, run: { _ in TourModel.shared.start() }),
         AppAction(id: .showMeAround, title: "Show Me Around", menu: "Help", symbol: "binoculars",
                   enabled: { ($0 ?? CanvasController.front) != nil },
@@ -309,6 +309,8 @@ struct ActionsRail: View {
     private var showLabel: ActionID? { Self.pictureLabel }
     @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var keys = ShortcutStore.shared
+    /// Show Me Around opens it for its stop.
+    @ObservedObject private var around = ShowMeAround.shared
     @State private var hovered: ActionID?
     @State private var edgeHover = false
     @State private var tabHover = false
@@ -352,7 +354,7 @@ struct ActionsRail: View {
 
     struct RailDrag { let id: ActionID; let from: Int; var dy: CGFloat }
 
-    var folded: Bool { (prefs.actionsCollapsed || narrow || focus) && !peek }
+    var folded: Bool { (prefs.actionsCollapsed || narrow || focus) && !peek && !around.holdsPanelOpen(canvas) }
 
     private var chrome: CLChrome { CLChrome(dark: prefs.dark) }
     private var accent: Color { prefs.accentColor(dark: prefs.dark) }

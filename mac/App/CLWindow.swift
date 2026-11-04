@@ -216,7 +216,7 @@ struct CLLayout: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: tour.active)
-        // Help > Show Me Around, and the first-run welcome's offer of it (ShowMeAround.swift).
+        // Show Me Around (ShowMeAround.swift): its dim, spotlight and bubble.
         .modifier(ShowMeAroundWindowParts(canvas: canvas, focusMode: $focusMode))
         .onAppear {
             canvas.openWindow = { id in openWindow(id: id) }

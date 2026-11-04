@@ -19,7 +19,8 @@
 // normal, with the Actions rail on screen (before 0.4's migration), folded,
 // hover-to-open off and its items reordered last time), migrated (as
 // normal, with the actions In the toolbar, as 0.3.x could), paneloff (as
-// normal, migrated, then the panel turned off).
+// normal, migrated, then the panel turned off), owner (the owner's own
+// settings: the first 0.4 preview's migration done, the panel folded).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -79,6 +80,16 @@ enum LaunchSelfTest {
         return doc.saveText()
     }
     private static let recentsKey = "cl.selftest.recents"
+    /// The order the owner's settings had (build 1702's ActionID list, without Play the Intro or Show Me Around).
+    static let ownerOrder = ["checkCircuit", "predict", "tidy", "shareLink", "exportImage", "exportReport", "newCircuit", "openLibrary",
+        "recentlyDeleted", "importFile", "newFromTemplate", "practice", "saveAsTemplate", "classroom", "createClassroom", "joinClass",
+        "teacherKey", "handIn", "newTab", "closeTab", "reopenTab", "splitView", "closeSplit", "switchPane", "connectAllPages",
+        "disconnectAllPages", "save", "exportFile", "versionHistory", "exportV2", "exportV1", "print", "undo", "redo", "cut", "copy",
+        "paste", "duplicate", "delete", "selectAll", "addGate", "rotate", "lockInPlace", "unlockAllParts", "find", "findNext",
+        "findPrevious", "saveAsPart", "buildFormula", "straighten", "tidyOtherWay", "zoomIn", "zoomOut", "zoomFit", "zoomActual",
+        "focusMode", "gridlines", "wireDots", "darkMode", "truthTable", "simView", "projector", "scope", "draw", "clearDrawing",
+        "showDrawing", "notes", "present", "makeEditable", "pause", "step", "stepClock", "reveal", "lock", "help", "feedback",
+        "shortcuts", "whatsNew", "welcome", "setUp", "tour", "settings", "checkForUpdates"]
 
     // MARK: setup
 
@@ -101,13 +112,13 @@ enum LaunchSelfTest {
             d.set(Date(timeIntervalSinceNow: -30 * 86400), forKey: "SULastCheckTime")
         }
         if state == "actions" {
-            // Someone on an 0.4 beta, before the panel was on for everyone,
-            // who had the rail On screen, folded it, turned Open on hover off
-            // and put its items in another order.
-            d.set(0, forKey: "cl.actions.mode")
+            // Someone on 0.4 (both of its migrations done) who folded the
+            // panel, turned Open on hover off and put its items in another order.
+            d.set(true, forKey: Prefs.actionsMigrationKey)
+            d.set(true, forKey: Prefs.actionsOpenedKey)
+            d.set(true, forKey: "cl.actions.on")
             d.set(true, forKey: "cl.actions.collapsed")
             d.set(false, forKey: "cl.actions.hoverOpen")
-            d.set(false, forKey: "cl.actions.hint")
             d.set(ActionID.defaults.reversed().map(\.rawValue), forKey: "cl.actions.order")
             d.set(ActionID.defaults.map(\.rawValue), forKey: "cl.actions.shown")
         }
@@ -118,9 +129,22 @@ enum LaunchSelfTest {
             d.set(true, forKey: "cl.actions.hint")
         }
         if state == "paneloff" {
-            // Got 0.4's migration, then turned the panel off.
+            // Got 0.4's migrations, then turned the panel off.
             d.set(true, forKey: Prefs.actionsMigrationKey)
+            d.set(true, forKey: Prefs.actionsOpenedKey)
             d.set(false, forKey: "cl.actions.on")
+        }
+        if state == "owner" {
+            // The owner's own settings as he found the panel hard to find:
+            // build 1702's rail folded, then the first 0.4 preview (1703)
+            // turned it on but kept the fold. Read from his defaults, 2026-11-04.
+            d.set(true, forKey: Prefs.actionsMigrationKey)
+            d.set(true, forKey: "cl.actions.on")
+            d.set(true, forKey: "cl.actions.collapsed")
+            d.set(Self.ownerOrder, forKey: "cl.actions.order")
+            d.set(["checkCircuit", "exportImage", "exportReport", "predict", "shareLink", "tidy"], forKey: "cl.actions.shown")
+            d.set(783, forKey: "cl.toolbarHidden")
+            d.set(3, forKey: "cl.toolbarStyle")
         }
         if state == "first" || state == "nolibrary" { d.synchronize(); return }
         var made: [LibraryItem] = []
@@ -226,7 +250,9 @@ enum LaunchSelfTest {
     static func actionsChecks(_ state: String, check: (Bool, String) -> Void, turn: (Double) -> Void) {
         let prefs = Prefs.shared
         let d = UserDefaults.standard
-        check(d.bool(forKey: Prefs.actionsMigrationKey), "0.4's Actions panel migration has run (\(Prefs.actionsMigrationKey))")
+        check(d.bool(forKey: Prefs.actionsMigrationKey) && d.bool(forKey: Prefs.actionsOpenedKey),
+              "0.4's Actions panel migrations have run (\(Prefs.actionsMigrationKey), \(Prefs.actionsOpenedKey))")
+        check(!ShowMeAround.seen, "Show Me Around hasn't been seen: it starts by itself once a circuit window has the keys")
         check(d.object(forKey: "cl.actions.mode") == nil && d.object(forKey: "cl.actions.hint") == nil,
               "and the old On screen / In the toolbar / Hidden setting and its status line are gone")
         switch state {
@@ -236,8 +262,8 @@ enum LaunchSelfTest {
                   "open, with the six default actions (\(prefs.railActions.map(\.rawValue)))")
             check(prefs.actionsHoverOpen, "folded, it opens on hover (the default)")
         case "actions":
-            check(prefs.actionsOn, "the panel is on (it was on screen)")
-            check(prefs.actionsCollapsed, "it's still folded, as it was left")
+            check(prefs.actionsOn, "the panel is on")
+            check(prefs.actionsCollapsed, "folded after 0.4's migrations, it's still folded, as it was left")
             check(prefs.railActions == ActionID.defaults.reversed(), "in the order it was given (\(prefs.railActions.map(\.rawValue)))")
             check(!prefs.actionsHoverOpen, "Open on hover still off, as it was set")
             // A drag on the rail: the Customize list has the same order.
@@ -252,7 +278,13 @@ enum LaunchSelfTest {
             check(prefs.railActions == before, "a drop past the end leaves the last one last")
         case "migrated":
             check(prefs.actionsOn, "a copy that had the actions In the toolbar (or Hidden) has the panel on after the update")
-            check(!prefs.actionsCollapsed, "open, not folded (it was never on screen)")
+            check(!prefs.actionsCollapsed, "open, not folded")
+        case "owner":
+            check(prefs.actionsOn && !prefs.actionsCollapsed, "the owner's settings (on, folded by an earlier build): on and open now, so it shows")
+            check(prefs.railActions == ActionID.defaults, "with the six he had (\(prefs.railActions.map(\.rawValue)))")
+            check(prefs.actionsOrderAll.contains(.showMeAround) && prefs.actionsOrderAll.contains(.playIntro),
+                  "and the Customize list has the actions his order didn't know (Show Me Around, Play the Intro)")
+            check(prefs.toolbarStyle.rawValue == 3 && prefs.toolbarHidden == 783, "his toolbar is as it was")
         case "paneloff":
             check(!prefs.actionsOn, "turned off after the migration, it stays off: the choice sticks")
         default:
@@ -263,18 +295,24 @@ enum LaunchSelfTest {
         // ends up on, and once run it never turns the panel on again.
         let suite = "cl.selftest.actions"
         if let s = UserDefaults(suiteName: suite) {
-            for (mode, collapsed, folded) in [(nil, false, false), (0, true, true), (0, false, false), (1, true, false), (2, false, false), (2, true, false)] as [(Int?, Bool, Bool)] {
+            // Builds up to 1702 (cl.actions.mode, or nothing before the rail:
+            // 1077), and the first 0.4 preview's (1703: on, maybe folded).
+            for (mode, collapsed, preview) in [(nil, false, false), (0, true, false), (0, false, false), (1, true, false), (2, false, false),
+                                               (2, true, false), (nil, true, true), (nil, false, true)] as [(Int?, Bool, Bool)] {
                 s.removePersistentDomain(forName: suite)
-                if let mode { s.set(mode, forKey: "cl.actions.mode") }
+                if let mode { s.set(mode, forKey: "cl.actions.mode"); s.set(true, forKey: "cl.actions.hint") }
                 s.set(collapsed, forKey: "cl.actions.collapsed")
-                s.set(true, forKey: "cl.actions.hint")
+                if preview { s.set(true, forKey: Prefs.actionsMigrationKey); s.set(true, forKey: "cl.actions.on") }
                 Prefs.migrateActions(s)
-                let name = mode.map { ["On screen", "In the toolbar", "Hidden"][$0] } ?? "never chosen"
-                check(s.bool(forKey: "cl.actions.on") && s.bool(forKey: "cl.actions.collapsed") == folded && s.object(forKey: "cl.actions.mode") == nil,
-                      "migrating \(name)\(collapsed ? ", folded" : ""): on, \(folded ? "still folded" : "open")")
+                let name = preview ? "the first 0.4 preview's" : mode.map { ["On screen", "In the toolbar", "Hidden"][$0] } ?? "never chosen"
+                check(s.bool(forKey: "cl.actions.on") && !s.bool(forKey: "cl.actions.collapsed") && s.object(forKey: "cl.actions.mode") == nil
+                      && s.object(forKey: "cl.actions.hint") == nil,
+                      "migrating \(name)\(collapsed ? ", folded" : ""): on and open")
                 s.set(false, forKey: "cl.actions.on")
+                s.set(true, forKey: "cl.actions.collapsed")
                 Prefs.migrateActions(s)
-                check(!s.bool(forKey: "cl.actions.on"), "and turned off afterwards, a later launch leaves it off")
+                check(!s.bool(forKey: "cl.actions.on") && s.bool(forKey: "cl.actions.collapsed"),
+                      "and turned off (and folded) afterwards, a later launch leaves it so")
             }
             s.removePersistentDomain(forName: suite)
         } else {
@@ -284,6 +322,7 @@ enum LaunchSelfTest {
               "Check for Updates and Settings are listed under the CedarLogic menu, where the Mac has them")
         check(ActionID.showMeAround.action.menu == "Help" && ActionID.showMeAround.action.title == "Show Me Around",
               "Show Me Around is among the actions, in Help")
+        check(ActionID.tour.action.title == "Learn Logic: Guided Tour", "and the logic lesson reads differently: \(ActionID.tour.action.title)")
         check((6...8).contains(ShowMeAround.steps.count) && ShowMeAround.steps.allSatisfy { !$0.title.isEmpty && !$0.body(ShowMeAround.shared).isEmpty },
               "Show Me Around has \(ShowMeAround.steps.count) stops, each with a title and a line")
         check(Set(ShowMeAround.steps.map(\.spot)) == Set(TourSpot.allCases).subtracting([.root]),
@@ -495,6 +534,55 @@ enum LaunchSelfTest {
             }
         }
         around.stop()
+
+        // Starting by itself: after the welcome, whichever way it closes
+        // (the lesson after it when that was the choice); never once seen or skipped.
+        let wasSeen = ShowMeAround.seen
+        for exit in ShowMeAround.WelcomeExit.allCases {
+            ShowMeAround.seen = false
+            around.then = nil
+            around.stopWatching()
+            let first = around.welcomeClosed(exit)
+            check(first && around.watching && (around.then != nil) == (exit == .guidedTour),
+                  "the welcome closed (\(exit)): Show Me Around starts once the window has the keys\(exit == .guidedTour ? ", the lesson after it" : "")")
+        }
+        around.stopWatching()
+        around.then = nil
+        prefs.actionsOn = true
+        prefs.actionsCollapsed = true
+        inWindow { canvas, _ in
+            var lesson = false
+            ShowMeAround.seen = false
+            around.then = { lesson = true }
+            around.start(on: canvas, settle: 0, bringForward: false)
+            turn(0.5)
+            if let i = around.shown.firstIndex(where: { ShowMeAround.steps[$0].spot == .actions }) {
+                var k = 0
+                while around.step != around.shown[i] && k < 10 { _ = around.key(124, plain: true); turn(0.15); k += 1 }
+                turn(0.6)
+                check(canvas.actionsRailShown && prefs.actionsCollapsed && (around.frames[.actions]?.width ?? 0) > ActionsRail.width - 2,
+                      "a folded panel opens for its stop (\(Int(around.frames[.actions]?.width ?? 0)) wide), its setting still folded")
+                _ = around.key(124, plain: true)
+                turn(0.6)
+                check(!canvas.actionsRailShown && prefs.actionsCollapsed, "and folds back after it")
+            } else {
+                check(false, "the folded panel has its stop")
+            }
+            _ = around.key(53, plain: true)
+            turn(0.5)
+            check(ShowMeAround.seen && !around.active, "Escape (Skip) ends it, and it counts as seen")
+            check(lesson, "the lesson chosen from the welcome starts after it")
+            around.startWhenReady()
+            check(!around.watching, "seen, it never starts by itself again")
+            check(!around.welcomeClosed(.guidedTour) && around.then == nil, "and the welcome's lesson then starts straight away")
+            ShowMeAround.seen = false
+            around.start(on: canvas, settle: 0, bringForward: false)
+            turn(0.3)
+            var n = 0
+            while around.active && n < 20 { _ = around.key(36, plain: true); n += 1 }
+            check(ShowMeAround.seen, "going through to Done counts as seen too")
+        }
+        ShowMeAround.seen = wasSeen
         prefs.actionsOn = true
         prefs.actionsCollapsed = true
     }
@@ -880,6 +968,24 @@ enum LaunchFocusCheck {
         let w = circuitWindow
         check(state, w != nil, "a circuit window is open")
         guard let w else { return true }
+        // Show Me Around starts by itself the first time: after the welcome
+        // closes (as its Just Start does), after What's New, or on any launch
+        // before it's been seen. Escape ends it and it counts as seen.
+        if state == "first" {
+            Prefs.shared.hasSeenWelcome = true
+            WhatsNew.markSeen()
+            ShowMeAround.shared.welcomeClosed(.blank)
+        }
+        let around = ShowMeAround.shared
+        var waitedAround = 0.0
+        while !around.active && waitedAround < 8 { await wait(0.1); waitedAround += 0.1 }
+        check(state, around.active && around.target?.view?.window === w,
+              String(format: "Show Me Around started by itself on the circuit window (%.1f s)", waitedAround))
+        if around.active, let e = rawKey(53, "\u{1b}", in: w) {
+            NSApp.postEvent(e, atStart: false)
+            await wait(0.8)
+        }
+        check(state, !around.active && ShowMeAround.seen, "Escape ended it, and it won't start by itself again")
         func inFront(_ when: String) async {
             check(state, w.isKeyWindow, "\(when): the circuit window is the key window (key: \(name(NSApp.keyWindow)))")
             check(state, w.isMainWindow, "\(when): and the main window (main: \(name(NSApp.mainWindow)))")

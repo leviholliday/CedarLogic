@@ -178,7 +178,8 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   which also draws everything `CedarLogic --render-tour <dir>` does:
   Settings > Actions (its two switches, Show the Actions panel and Open on
   hover), the welcome's Actions panel page, What's New's card for it, About,
-  the welcome's offer of Show Me Around and each of its stops
+  and each stop of Show Me Around (it starts by itself until it's been
+  seen once, after the welcome or What's New)
   (`App/ShowMeAround.swift`), in a full-size and a small window and with
   the panel off
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones

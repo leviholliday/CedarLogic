@@ -133,6 +133,8 @@ final class Prefs: ObservableObject {
     @Published private(set) var actionsShown: Set<ActionID> { didSet { d.set(actionsShown.map(\.rawValue).sorted(), forKey: "cl.actions.shown") } }
     /// Set once 0.4 has turned the panel on for everyone (`migrateActions`).
     static let actionsMigrationKey = "cl.actions.on04"
+    /// Set once 0.4 has unfolded it for everyone.
+    static let actionsOpenedKey = "cl.actions.open04"
 
     private init() {
         let d = UserDefaults.standard
@@ -204,17 +206,22 @@ final class Prefs: ObservableObject {
 
     /// 0.4: the Actions panel on for everyone, once, new installs and
     /// updated ones alike. Before, it was On screen, In the toolbar or Hidden
-    /// (`cl.actions.mode`), and a copy that was updating started Hidden; now
-    /// it's on, and open unless it was on screen and folded. After this the
-    /// switch is theirs: it's never turned on again.
+    /// (`cl.actions.mode`; builds up to 1702), and a copy that was updating
+    /// started Hidden; the first 0.4 previews (1703) turned it on but kept a
+    /// fold, which left only a 6-point strip few would find. So: on, and
+    /// open, each once (`cl.actions.on04`, `cl.actions.open04`). After that
+    /// both are theirs: it's never turned on or unfolded again.
     static func migrateActions(_ d: UserDefaults) {
-        guard !d.bool(forKey: actionsMigrationKey) else { return }
-        let wasOnScreen = d.object(forKey: "cl.actions.mode") as? Int == 0
-        if !wasOnScreen { d.removeObject(forKey: "cl.actions.collapsed") }
-        d.set(true, forKey: "cl.actions.on")
-        d.removeObject(forKey: "cl.actions.mode")
-        d.removeObject(forKey: "cl.actions.hint")
-        d.set(true, forKey: actionsMigrationKey)
+        if !d.bool(forKey: actionsMigrationKey) {
+            d.set(true, forKey: "cl.actions.on")
+            d.removeObject(forKey: "cl.actions.mode")
+            d.removeObject(forKey: "cl.actions.hint")
+            d.set(true, forKey: actionsMigrationKey)
+        }
+        if !d.bool(forKey: actionsOpenedKey) {
+            d.set(false, forKey: "cl.actions.collapsed")
+            d.set(true, forKey: actionsOpenedKey)
+        }
     }
 
     // MARK: Actions

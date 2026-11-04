@@ -8,8 +8,9 @@
 // the Customize sheet and Settings > Actions; then all of --render-tour.
 //
 // `CedarLogic --render-tour <dir>`: Settings > Actions (on and off), the
-// welcome's Actions panel page (on, off) and What's New's card for it, the
-// welcome's offer, and every stop of Show Me Around in a whole window,
+// welcome's Actions panel page (on, off) and What's New's card for it,
+// About, and every stop of Show Me Around in a whole window (the first
+// with its "a quick look around" line),
 // light and dark, then in a small window (the panel folded) and with the
 // panel off (its stop passed over). Each window is laid out at once, so the
 // PNGs show what a person would see.
@@ -96,7 +97,7 @@ enum RenderActions {
         win.close()
     }
 
-    /// Settings > Actions, the welcome's page, What's New's card, the offer
+    /// Settings > Actions, the welcome's page, What's New's card, About
     /// and Show Me Around's stops (see the top of this file).
     static func runTour(_ dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -128,9 +129,6 @@ enum RenderActions {
                 shoot(dir, "tour-\(n + 1)-\(ShowMeAround.steps[i].spot.rawValue)-\(t)", doc: doc) { c in around.preview(on: c, step: i) }
                 around.stop()
             }
-            // The welcome's offer, over the window it closes onto.
-            shoot(dir, "tour-offer-\(t)", doc: doc) { c in around.offer(on: c) }
-            around.answerOffer(false)
             // A small window: the panel folds by itself; the bubbles still fit.
             for (n, i) in stops.enumerated() where [.palette, .actions, .run].contains(ShowMeAround.steps[i].spot) {
                 shoot(dir, "tour-small-\(n + 1)-\(ShowMeAround.steps[i].spot.rawValue)-\(t)", doc: doc, width: 860, height: 600) { c in

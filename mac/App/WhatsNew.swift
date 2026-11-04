@@ -49,7 +49,7 @@ struct WhatsNewView: View {
                     ("trash", "Recently Deleted", "In Your Circuits. Restore brings a circuit back. It's kept 30 days, on this Mac."),
                     ("scribble", "Clear Drawing asks first", "It says what will go, and that Edit \u{25B8} Undo brings it back."),
                     ("graduationcap", "Open the Practice Circuit", "In the File and Help menus. It opens as a new circuit of your own to play with."),
-                    ("sidebar.right", "The Actions panel", "The commands you use most, one click away on the right edge. Drag them into your order; right-click to choose your own."),
+                    ("sidebar.right", "The Actions panel", "The buttons you use most, down the right edge of the window, one click each. Drag them into your order; right-click to choose your own."),
                 ], tryTitle: "Open Your Circuits"),
         Chapter(eyebrow: "On the page", title: "The same every time",
                 line: "Clicks and wires do what you expect, however big the circuit gets.",
@@ -137,9 +137,11 @@ struct WhatsNewView: View {
         withAnimation(WelcomeView.slide) { page = to }
     }
 
+    /// Closed: Show Me Around follows, the first time (ShowMeAround.swift).
     private func finish() {
         dismiss()
         NSApp.windows.first { $0.identifier?.rawValue.contains("whatsnew") == true }?.close()
+        ShowMeAround.shared.startWhenReady()
     }
 
     /// ← → between pages, Return on, Escape closes.
@@ -267,8 +269,9 @@ struct WhatsNewView: View {
                     MainActor.assumeIsolated { if let c = CanvasController.front { ShowMeAround.shared.start(on: c) } }
                 }
             }
-            finaleTile("Take the guided tour again", "Two switches, a gate and a light, on a circuit of its own.", "figure.walk") {
-                finish(); TourModel.shared.start()
+            finaleTile("Learn logic: the Guided Tour", "Two switches, a gate and a light, on a circuit of its own.", "figure.walk") {
+                // Show Me Around first, if it hasn't been seen.
+                if ShowMeAround.seen { finish(); TourModel.shared.start() } else { ShowMeAround.shared.then = { TourModel.shared.start() }; finish() }
             }
             finaleTile("Open CedarLogic Help", "Every feature, with its keys.", "questionmark.circle") {
                 finish(); openWindow(id: "help")

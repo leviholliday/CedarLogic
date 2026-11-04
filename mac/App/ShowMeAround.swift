@@ -8,10 +8,14 @@
 // A place that isn't in the window just now is passed over: the Actions
 // panel turned off, a toolbar too narrow to show its tools.
 //
-// It's offered once, as the first-run welcome closes ("Show Me Around" /
-// "Not Now"), and Help > Show Me Around plays it any time. The Guided Tour
-// (Welcome.swift) is the other kind: it builds a circuit with you. The
-// walk's last stop offers that.
+// It starts by itself until it has been seen once (finished or skipped:
+// `cl.showMeAroundSeen`): after the first-run welcome closes, whichever way,
+// and for an update's first launch after What's New -- never over the
+// launch screen, the intro or a greeting, only once a circuit window is up
+// and has the keys. Skip and Escape are the way out. Help > Show Me Around
+// plays it again any time. "Learn Logic: Guided Tour" (Welcome.swift) is
+// the other kind, a lesson that builds a circuit with you: chosen from the
+// welcome it starts after this, and this walk's last stop offers it.
 //
 // Kept portable on purpose (Windows and Linux follow this): a dim with one
 // rounded hole, a ring round it, a card with a small pointer, all flat
@@ -74,9 +78,18 @@ final class ShowMeAround: ObservableObject {
     @Published private(set) var fade = 1.0
     /// The window it's walking round.
     private(set) weak var target: CanvasController?
-    /// The welcome's offer, waiting on this window ("Show Me Around" / "Not Now").
-    @Published private(set) var offering = false
-    private(set) weak var offerTarget: CanvasController?
+    /// Set once it has been finished or skipped; until then it starts by itself.
+    static let seenKey = "cl.showMeAroundSeen"
+    static var seen: Bool {
+        get { UserDefaults.standard.bool(forKey: seenKey) }
+        set { UserDefaults.standard.set(newValue, forKey: seenKey) }
+    }
+    /// What comes after it (the welcome's Learn Logic choice: the Guided Tour).
+    var then: (@MainActor () -> Void)?
+    private var autoTimer: Timer?
+    /// Asked to start by itself, and not started yet.
+    private var wanted = false
+    private var readySince: Date?
 
     private var timer: Timer?
     private var keyMonitor: Any?
@@ -105,11 +118,11 @@ final class ShowMeAround: ObservableObject {
              body: { _ in "New, undo, copy and paste, and zoom live up here; rest on a button for its name and shortcut." },
              sides: [.below]),
         Step(spot: .actions, title: "The Actions panel",
-             body: { m in
+             body: { _ in
                  let p = Prefs.shared
-                 return m.panelFolded
-                     ? "Your most-used commands, folded into this edge: \(p.actionsHoverOpen ? "rest the pointer here to slide it out, or click" : "click") to open it, and right-click to choose what's on it."
-                     : "Your most-used commands, a click each: click its left edge to fold it away, and right-click it to choose what's on it."
+                 return p.actionsCollapsed
+                     ? "The buttons you use most, down the right edge. You keep it folded to a thin strip there: \(p.actionsHoverOpen ? "rest the pointer on it or click it" : "click it") to bring it out."
+                     : "The buttons you use most, down the right edge. Click its left edge to fold it away, and right-click it to choose what\u{2019}s on it."
              },
              sides: [.left]),
         Step(spot: .run, title: "Run it",
@@ -139,13 +152,13 @@ final class ShowMeAround: ObservableObject {
 
     // MARK: Starting and stopping
 
-    /// Help > Show Me Around, or the offer's button: on this window, out of
+    /// Help > Show Me Around, or its first time by itself: on this window, out of
     /// focus mode and Simulation View first (they hide the places it shows).
     /// `settle`: how long that takes before the first stop.
     /// `bringForward` false: the self-test's windows, off screen, stay out.
     func start(on c: CanvasController, settle: Double = 0.35, bringForward: Bool = true) {
         stop()
-        offering = false; offerTarget = nil
+        stopWatching()
         if TourModel.shared.active { TourModel.shared.stop() }
         target = c
         if bringForward { c.view?.window?.makeKeyAndOrderFront(nil) }
@@ -178,12 +191,23 @@ final class ShowMeAround: ObservableObject {
 
     /// Once the overlay is up its own frame is the one to measure from
     /// (the window's content can be wider than the window, by the toolbar).
-    private func remeasureSoon() {
-        for t in [0.05, 0.2] {
+    func remeasureSoon() {
+        for t in [0.05, 0.22, 0.4] {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) {
-                MainActor.assumeIsolated { if self.active { withAnimation(nil) { self.measure() } } }
+                MainActor.assumeIsolated { if self.active { withAnimation(Self.move) { self.measure() } } }
             }
         }
+    }
+
+    /// Done, Skip or Escape: it has been seen (it won't start by itself
+    /// again), and whatever was to come after it comes now.
+    func end() {
+        guard active else { return }
+        Self.seen = true
+        stop()
+        let after = then
+        then = nil
+        if let after { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { MainActor.assumeIsolated { after() } } }
     }
 
     func stop() {
@@ -193,10 +217,9 @@ final class ShowMeAround: ObservableObject {
         target = nil
     }
 
-    /// Its window closed: so does the walk (and the offer).
+    /// Its window closed: so does the walk (not seen yet: it starts again next time).
     func windowClosed(_ c: CanvasController) {
         if target === c { stop() }
-        if offerTarget === c { offering = false; offerTarget = nil }
     }
 
     // MARK: Stepping
@@ -211,7 +234,7 @@ final class ShowMeAround: ObservableObject {
 
     func next() {
         guard active else { return }
-        if let n = shown.first(where: { $0 > step }) { go(n) } else { stop() }
+        if let n = shown.first(where: { $0 > step }) { go(n) } else { end() }
     }
     func back() {
         guard active, let n = shown.last(where: { $0 < step }) else { return }
@@ -234,6 +257,8 @@ final class ShowMeAround: ObservableObject {
         } else {
             withAnimation(Self.move) { step = n }
         }
+        // The panel opens for its stop (and folds back after): where things are moves.
+        remeasureSoon()
     }
 
     /// The spotlight's slide: quick, settling without a bounce.
@@ -244,7 +269,7 @@ final class ShowMeAround: ObservableObject {
     func key(_ code: UInt16, plain: Bool) -> Bool {
         guard active else { return false }
         switch code {
-        case 53: stop(); return true                          // Escape
+        case 53: end(); return true                           // Escape
         case 124, 36, 76, 49: next(); return true             // →, Return, Enter, Space
         case 123: back(); return true                         // ←
         default: return plain
@@ -304,44 +329,76 @@ final class ShowMeAround: ObservableObject {
         if out != frames { frames = out }
     }
 
-    // MARK: The welcome's offer
+    // MARK: Starting by itself
 
-    /// As the first-run welcome closes: once its circuit window is in front,
-    /// a card asks whether to look around.
-    func offerAfterWelcome(tries: Int = 0) {
-        guard !ShowMeAround.quiet else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (tries == 0 ? 0.6 : 0.5)) {
-            MainActor.assumeIsolated {
-                guard !self.active, !TourModel.shared.active else { return }
-                let greeting = NSApp.windows.contains { o in
-                    o.isVisible && Greeting.ids.contains { o.identifier?.rawValue.contains($0) == true }
-                }
-                guard let c = CanvasController.front, let w = c.view?.window, w.isVisible, !greeting, !Splash.shared.showing else {
-                    if tries < 40 { self.offerAfterWelcome(tries: tries + 1) }
-                    return
-                }
-                self.offer(on: c)
-            }
+    /// How the first-run welcome was closed.
+    enum WelcomeExit: CaseIterable { case guidedTour, template, blank, shortcuts, skip }
+
+    /// The first-run welcome closed: the walk comes first, whichever way;
+    /// the Guided Tour, if that was the choice, after it. False: it's been
+    /// seen, so the tour (if chosen) should start now.
+    @discardableResult
+    func welcomeClosed(_ exit: WelcomeExit) -> Bool {
+        guard !Self.seen else { return false }
+        if exit == .guidedTour { then = { TourModel.shared.start() } }
+        startWhenReady()
+        return true
+    }
+
+    /// Until it's been seen: watches for the moment a circuit window is up
+    /// with the keys -- no launch screen, intro, welcome, What's New, sheet or
+    /// lesson over it -- and starts there. (A launch, a window appearing, the
+    /// welcome or What's New closing all call this; one watch at a time.)
+    func startWhenReady() {
+        guard !Self.seen, !active else { return }
+        wanted = true
+        guard !Self.quiet, autoTimer == nil else { return }
+        readySince = nil
+        let t = Timer(timeInterval: 0.3, repeats: true) { _ in
+            MainActor.assumeIsolated { ShowMeAround.shared.autoTick() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        autoTimer = t
+    }
+
+    /// Its watch for the moment to start is on.
+    var watching: Bool { wanted }
+    func stopWatching() { autoTimer?.invalidate(); autoTimer = nil; wanted = false }
+
+    private func autoTick() {
+        guard !Self.seen, !active else { stopWatching(); return }
+        guard let c = Self.readyCanvas() else { readySince = nil; return }
+        // Ready for a moment (the window settled, the circuit's card played).
+        if let since = readySince, Date().timeIntervalSince(since) > 0.7 {
+            stopWatching()
+            start(on: c, settle: 0.2)
+        } else if readySince == nil {
+            readySince = Date()
         }
     }
 
-    func offer(on c: CanvasController) {
-        offerTarget = c
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) { offering = true }
+    /// The circuit window it can start on now, if any.
+    static func readyCanvas() -> CanvasController? {
+        guard NSApp.isActive, !Splash.shared.showing, !TourModel.shared.active, NSApp.modalWindow == nil,
+              Greeting.due == nil else { return nil }
+        let greeting = NSApp.windows.contains { o in
+            o.isVisible && Greeting.ids.contains { o.identifier?.rawValue.contains($0) == true }
+        }
+        guard !greeting, let c = CanvasController.front, let w = c.view?.window,
+              w.isVisible, w.isKeyWindow, w.attachedSheet == nil else { return nil }
+        return c
     }
 
-    func answerOffer(_ yes: Bool) {
-        let c = offerTarget
-        withAnimation(.easeOut(duration: 0.18)) { offering = false }
-        offerTarget = nil
-        if yes, let c { start(on: c) }
+    /// The panel is held open for its stop (folded, it opens for it and folds back after).
+    func holdsPanelOpen(_ c: CanvasController) -> Bool {
+        active && target === c && Self.steps[min(step, Self.steps.count - 1)].spot == .actions
     }
 
-    /// Test and picture runs leave the welcome's offer for a real launch.
+    /// Test and picture runs never start it by themselves (the launch
+    /// focus check does, as a real launch would).
     static var quiet: Bool {
         CommandLine.arguments.contains { $0.hasPrefix("--render") || $0.hasSuffix("-check") || $0.hasSuffix("-selftest") }
-            || ProcessInfo.processInfo.environment["CL_SNAPSHOT"] != nil
-            || ProcessInfo.processInfo.environment["CL_FOCUS_CHECK"] != nil
+            || ProcessInfo.processInfo.environment["CL_SNAPSHOT"] != nil || BarTest.on
     }
 }
 
@@ -353,8 +410,7 @@ extension Notification.Name {
 // MARK: - The overlay
 
 /// What a circuit window does for it: the overlay while it's on this
-/// window, the welcome's offer, and out of focus mode and Simulation View
-/// as it starts.
+/// window, and out of focus mode and Simulation View as it starts.
 struct ShowMeAroundWindowParts: ViewModifier {
     let canvas: CanvasController
     @Binding var focusMode: Bool
@@ -366,15 +422,6 @@ struct ShowMeAroundWindowParts: ViewModifier {
             .overlay {
                 if around.active && around.target === canvas {
                     ShowMeAroundOverlay().transition(.opacity)
-                }
-            }
-            .overlay {
-                if around.offering && around.offerTarget === canvas {
-                    ZStack {
-                        Color.black.opacity(prefs.dark ? 0.35 : 0.22).ignoresSafeArea().onTapGesture {}
-                        ShowMeAroundOffer().padding(16)
-                    }
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .clShowMeAroundWillStart)) { n in
@@ -514,10 +561,15 @@ struct ShowMeAroundBubble: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if !last {
-                    Button("Skip") { model.stop() }.buttonStyle(.plain)
+                    Button("Skip") { model.end() }.buttonStyle(.plain)
                         .font(.system(size: 11.5, weight: .medium)).foregroundStyle(BrandText.faint)
                         .help("Stop showing me around (Esc)")
                 }
+            }
+            if pos.index == 1 {
+                Text("A quick look around CedarLogic, \(pos.count) stops. Skip any time.")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandText.primary.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text(step.title).font(.system(size: 16, weight: .bold)).foregroundStyle(BrandText.primary)
             Text(step.body(model)).font(.system(size: 12.5)).foregroundStyle(BrandText.secondary)
@@ -540,10 +592,13 @@ struct ShowMeAroundBubble: View {
             }
             .padding(.top, 2)
             if last {
-                Button { model.stop(); TourModel.shared.start() } label: {
+                Button {
+                    if model.then == nil { model.then = { TourModel.shared.start() } }
+                    model.end()
+                } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "figure.walk").font(.system(size: 11))
-                        Text("Build a circuit with me: the Guided Tour").font(.system(size: 11.5, weight: .medium))
+                        Text("Next, learn logic: the Guided Tour builds a circuit with you").font(.system(size: 11.5, weight: .medium))
                     }
                     .foregroundStyle(Brand.neon.opacity(0.9))
                     .contentShape(Rectangle())
@@ -609,62 +664,6 @@ struct ShowMeAroundBubble: View {
                 }
                 .fill(Brand.ink)
             }
-        }
-    }
-}
-
-/// The welcome's offer, on the circuit window as the welcome closes.
-struct ShowMeAroundOffer: View {
-    @ObservedObject private var model = ShowMeAround.shared
-    @State private var keyMonitor: Any?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: "binoculars.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(Brand.neon)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Brand.neon.opacity(0.12)))
-                Text("Want a quick look around?").font(.system(size: 16, weight: .bold)).foregroundStyle(BrandText.primary)
-            }
-            Text("A few stops, under a minute: where the parts, the controls and the Actions panel are. It\u{2019}s in Help \u{25B8} Show Me Around any time.")
-                .font(.system(size: 12.5)).foregroundStyle(BrandText.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Spacer()
-                Button("Not Now") { model.answerOffer(false) }.buttonStyle(BrandButtonStyle(primary: false, width: 90))
-                Button("Show Me Around") { model.answerOffer(true) }.buttonStyle(BrandButtonStyle(width: 140))
-            }
-            .padding(.top, 4)
-        }
-        .padding(18)
-        .frame(width: 380)
-        .background(Brand.ink)
-        .background(BrandBackground(bloom: .init(x: 0.15, y: 0), gridStep: 22))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.22), Brand.neon.opacity(0.18), Color.white.opacity(0.05)],
-                                         startPoint: .top, endPoint: .bottom), lineWidth: 1))
-        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-        .environment(\.colorScheme, .dark)
-        .onAppear { installKeys() }
-        .onDisappear { if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil } }
-    }
-
-    /// Return: Show Me Around. Escape: Not Now.
-    private func installKeys() {
-        guard keyMonitor == nil else { return }
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
-            let window = e.window.map(ObjectIdentifier.init)
-            let code = e.keyCode
-            let plain = e.modifierFlags.intersection([.command, .control, .option]).isEmpty
-            let took = MainActor.assumeIsolated { () -> Bool in
-                let m = ShowMeAround.shared
-                guard plain, m.offering, let w = m.offerTarget?.view?.window, window == ObjectIdentifier(w),
-                      w.attachedSheet == nil, [53, 36, 76].contains(code) else { return false }
-                m.answerOffer(code != 53)
-                return true
-            }
-            return took ? nil : e
         }
     }
 }

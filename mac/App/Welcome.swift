@@ -1,9 +1,10 @@
 // The first-run welcome and the guided tour (the wx app's Welcome.cpp). The
 // welcome is six pages: what CedarLogic is, making it yours, the Actions
 // panel (on or off, open on hover), your name, six keys worth knowing, and
-// what to do first; as it closes, Show Me Around is offered
-// (ShowMeAround.swift). The tour builds a working AND circuit with you,
-// one step at a time, moving on as each is done.
+// what to do first; as it closes, whichever way, Show Me Around starts
+// (ShowMeAround.swift) unless it's been seen. "Learn Logic: Guided Tour"
+// builds a working AND circuit with you, one step at a time, moving on as
+// each is done; chosen here, it starts after Show Me Around.
 
 import AppKit
 import SwiftUI
@@ -74,8 +75,6 @@ struct WelcomeView: View {
     @State private var readyChoice = 0
     @State private var pressed: Set<String> = []
     @State private var keyMonitor: Any?
-    /// Shown as a first run (not from the Help menu): closing it offers Show Me Around.
-    @State private var firstRun = !Prefs.shared.hasSeenWelcome
     var startAtSetup = false
 
     init(startAtSetup: Bool = false, page: Int = 0) {
@@ -106,7 +105,7 @@ struct WelcomeView: View {
                                         removal: .offset(x: forward ? -60 : 60).combined(with: .opacity)))
                 .id(page)
                 if page < Self.pages - 1 {
-                    Button("Skip") { finish() }.buttonStyle(.plain)
+                    Button("Skip") { finish(.skip) }.buttonStyle(.plain)
                         .font(.system(size: 12.5, weight: .medium)).foregroundStyle(BrandText.faint)
                         .padding(.horizontal, 26).padding(.top, 22)
                 }
@@ -129,7 +128,7 @@ struct WelcomeView: View {
                 if page < Self.pages - 1 {
                     Button(page == 0 ? "Get Started" : "Continue") { go(1) }.buttonStyle(BrandButtonStyle(width: 142))
                 } else {
-                    Button("Just Start") { finish() }.buttonStyle(BrandButtonStyle(primary: false, width: 110))
+                    Button("Just Start") { finish(.blank) }.buttonStyle(BrandButtonStyle(primary: false, width: 110))
                 }
             }
             .padding(.horizontal, 44).frame(height: 74)
@@ -172,7 +171,7 @@ struct WelcomeView: View {
             let mods = e.modifierFlags.intersection([.command, .control, .option])
             guard mods.isEmpty else { return e }
             switch e.keyCode {
-            case 53: finish(); return nil                                   // Escape
+            case 53: finish(.skip); return nil                              // Escape
             case 36, 76:                                                    // Return
                 if page == Self.pages - 1 { readyAction(readyChoice)() } else { go(1) }
                 return nil
@@ -289,7 +288,7 @@ struct WelcomeView: View {
     private var actionsPanel: some View {
         VStack(alignment: .leading, spacing: 22) {
             BrandHeading(eyebrow: "One click away", title: "The Actions panel",
-                         line: "Down the window\u{2019}s right edge: Check My Circuit, Tidy Up, Share Link and more. Right-click it to choose your own.")
+                         line: "The buttons you use most, down the right edge of every window: Check My Circuit, Tidy Up, Share Link and more. Show Me Around points it out in a moment.")
             ActionsPanelChoice()
         }
         .padding(.horizontal, 56).padding(.top, 34)
@@ -368,9 +367,9 @@ struct WelcomeView: View {
             BrandHeading(eyebrow: "Ready", title: "Build your first circuit",
                          line: "↑↓ and Return work here too; ← goes back.")
                 .padding(.bottom, 6)
-            tile("Take the guided tour", "Two switches, a gate and a light, in about five minutes. Recommended.", icon: nil, index: 0)
+            tile("Learn logic: the Guided Tour", "Build two switches, a gate and a light, in about five minutes. Recommended.", icon: nil, index: 0)
             tile("Start from a template", "A lab page with your name, a counter, a 7-segment starter, or your own.", icon: "square.on.square", index: 1)
-            tile("Start with a blank canvas", "Jump straight in. Help \u{25B8} Show Me Around points out where things are.", icon: "plus.square", index: 2)
+            tile("Start with a blank canvas", "Jump straight in. A quick look around the window comes first.", icon: "plus.square", index: 2)
             tile("See every shortcut", "The whole list, searchable.", icon: "keyboard", index: 3)
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.bubble").font(.system(size: 12)).foregroundStyle(Brand.neon)
@@ -384,10 +383,13 @@ struct WelcomeView: View {
 
     private func readyAction(_ i: Int) -> () -> Void {
         switch i {
-        case 0: return { finish(offer: false); TourModel.shared.start() }
-        case 1: return { finish(offer: false); openWindow(id: "templates") }
-        case 2: return { finish() }
-        default: return { finish(offer: false); CanvasController.front?.showShortcuts = true }
+        // Show Me Around comes first, whichever (ShowMeAround.welcomeClosed):
+        // the lesson after it; a template once its circuit is open; the
+        // shortcut list once it's put away.
+        case 0: return { finish(.guidedTour) }
+        case 1: return { finish(.template); openWindow(id: "templates") }
+        case 2: return { finish(.blank) }
+        default: return { finish(.shortcuts); CanvasController.front?.showShortcuts = true }
         }
     }
 
@@ -417,15 +419,14 @@ struct WelcomeView: View {
         .onHover { h in if h { withAnimation(.easeOut(duration: 0.15)) { readyChoice = index } } }
     }
 
-    /// `offer`: on a first run, once it's gone, ask whether to look around
-    /// (not after the guided tour, a template or the shortcut list, which
-    /// have somewhere to go already).
-    private func finish(offer: Bool = true) {
+    /// Closed, by any of its buttons or keys: Show Me Around follows (until
+    /// it's been seen), then the lesson if that was the choice.
+    private func finish(_ exit: ShowMeAround.WelcomeExit) {
         prefs.hasSeenWelcome = true
         WhatsNew.markSeen()
         dismiss()
         NSApp.windows.first { $0.identifier?.rawValue.contains("welcome") == true }?.close()
-        if offer && firstRun { ShowMeAround.shared.offerAfterWelcome() }
+        if !ShowMeAround.shared.welcomeClosed(exit) && exit == .guidedTour { TourModel.shared.start() }
     }
 }
 
@@ -628,7 +629,7 @@ final class TourModel: ObservableObject {
                        let name = Library.displayName(for: url) else { return false }
                  return name != "Untitled Circuit" }),
         Step(title: "You built a working circuit",
-             body: { _, _ in "That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help \u{25B8} Guided Tour brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in." },
+             body: { _, _ in "That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help \u{25B8} Learn Logic: Guided Tour brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in." },
              keys: { _, _ in ["?"] }, check: nil),
     ]
 
@@ -702,7 +703,7 @@ struct TourCard: View {
                 Image(nsImage: Brand.icon).resizable().interpolation(.high)
                     .frame(width: 18, height: 18)
                     .clipShape(RoundedRectangle(cornerRadius: 18 * Brand.corner, style: .continuous))
-                Text("GUIDED TOUR  \u{00B7}  \(tour.step + 1) OF \(count)")
+                Text("LEARN LOGIC  \u{00B7}  \(tour.step + 1) OF \(count)")
                     .font(.system(size: 10.5, weight: .bold)).kerning(1.2).foregroundStyle(Brand.neon)
                 Spacer()
                 Button { tour.stop() } label: {
