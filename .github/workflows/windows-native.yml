@@ -356,7 +356,9 @@ jobs:
           timeout 90 "$A" --dialog check --check "0, 1, 2, 3, 4, 5, 6, 7, repeat" --screenshot "$PWD/renders/check-count.png" $T/template-builtin-count-3bit.cdl || true
           timeout 90 "$A" --dark --dialog check --check "0, 1, 3, 2, repeat" --screenshot "$PWD/renders/check-count-wrong-dark.png" $T/template-builtin-count-3bit.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
-          for p in 0 1 2 3 4; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
+          for p in 0 1 2 3 4 5; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
+          # The welcome's Actions panel page with the panel off, and with Open on hover off.
+          timeout 90 "$A" --rail off --dialog welcome --page 2 --screenshot "$PWD/renders/welcome-2-off.png" || true
           timeout 90 "$A" --dialog tour --screenshot "$PWD/renders/tour.png" || true
           # Your Circuits (by now holding the circuits opened above) and a
           # circuit's versions.
@@ -407,6 +409,9 @@ jobs:
           timeout 90 "$A" --dialog bad-link --screenshot "$PWD/renders/link-bad.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dark --dialog bad-link --screenshot "$PWD/renders/link-bad-dark.png" res/samples/practice.cdl || true
           timeout 90 "$A" --dialog about --screenshot "$PWD/renders/about.png" || true
+          timeout 90 "$A" --dark --dialog about --screenshot "$PWD/renders/about-dark.png" || true
+          # What's New's Actions panel card ("Show or Hide It..." on the Also new page).
+          timeout 90 "$A" --dialog whatsnew-panel --page 6 --screenshot "$PWD/renders/whatsnew-panel-card.png" || true
           # A wire's value, shown where the pointer rests on it (and the whole
           # wire lit, in Simulation View).
           timeout 90 "$A" --wire-tag --screenshot "$PWD/renders/wire-tag.png" res/samples/practice.cdl || true
@@ -488,9 +493,10 @@ jobs:
       # open with an item's label, in Simulation View, mid-drag, folded, the
       # tab peeking (the pointer at the edge), slid out over the canvas (as
       # on hover), in focus mode (folded, peeking, slid out), folded by itself
-      # in a narrow window, in the toolbar instead, the Customize sheet (and
-      # searched) and Settings > Actions (and searched), light and dark, into
-      # renders/rail. Then --rail-check: new and earlier installs' defaults,
+      # in a narrow window, turned off, the Customize sheet (and searched),
+      # Settings > Actions (and searched, and off), and Show Me Around's stops
+      # (folded, off, a small window), light and dark, into renders/rail.
+      # Then --rail-check: new installs' defaults and 0.4's migrations,
       # one order for the rail's drag and the list, the search, the hot
       # strip's place and the dwell, pass-through and leaving, focus mode
       # folding (not hiding) and giving it back, and the rest, PASS or FAIL;
@@ -515,24 +521,53 @@ jobs:
             shot rail-focus-peek --rail peek --focus $C
             shot rail-focus-hover-open --rail hover-open --focus --rail-label checkCircuit $C
             shot rail-narrow --rail narrow $C
-            shot rail-toolbar --rail toolbar $C
-            shot rail-toolbar-classic --rail toolbar --toolbar-style classic $C
+            shot rail-off --rail off $C
             shot rail-customize --rail open --dialog customize-actions $C
             shot rail-customize-search --rail open --dialog customize-actions --actions-search export $C
             shot settings-actions --rail open --dialog preferences --page 4 $C
             shot settings-actions-search --rail open --dialog preferences --page 4 --actions-search "ctrl e" $C
+            shot settings-actions-off --rail off --dialog preferences --page 4 $C
+            # Show Me Around (ShowMeAround.h): each of its seven stops, the panel's
+            # stop passed over when it's off, and a small window's stops.
+            names=(palette canvas toolbar actions run tabs menuBar)
+            for p in 0 1 2 3 4 5 6; do
+              shot tour-$((p + 1))-${names[$p]} --rail open --dialog show-me-around --page $p $C
+            done
+            shot tour-folded-4-actions --rail folded --dialog show-me-around --page 3 $C
+            shot tour-paneloff --rail off --dialog show-me-around --page 3 $C
+            for p in 0 3 4; do
+              shot tour-small-$((p + 1))-${names[$p]} --rail narrow --dialog show-me-around --page $p $C
+            done
           done
           ls -l "$R"
           timeout 180 "$A" --rail-check | tee rail-check.log
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "rail check:.*all passed" rail-check.log
-          # (It checks the intro's rules too: the every-time setting off by default, the
+          # (It checks the intro's rules too: the every-time setting on by default (and off once turned off), the
           # update intro with its sound, an every-time launch with none, and Help > Play
           # the Intro, played over a window. Each of those must be there and pass.)
-          for want in "off by default" "updates only" "after an update plays the update's intro, with the sound" \
+          for want in "on by default" "turned off, it stays off" "by default a later launch plays it, silently" "updates only" "after an update plays the update's intro, with the sound" \
                       "a later launch plays it, with no sound" "Play the Intro is among the actions" \
                       "Help > Play the Intro is in the menu bar" "Play the Intro plays" "the once-only keys are left"; do
             grep "^PASS intro: .*$want" rail-check.log > /dev/null || { echo "::error::intro check missing or failed: $want"; exit 1; }
+          done
+          # 0.4's Actions panel and Show Me Around: the migrations from every old
+          # setting, no toolbar mode, the walk's keys, stops, panel stop, Escape,
+          # starting after each welcome exit and What's New (never again once seen),
+          # the lesson after it; About's mailto; the wheel over a Settings choice.
+          for want in "migration: a build from before the panel -> on and open" "migration: the panel Hidden" "migration: In the toolbar -> on" \
+                      "migration: On screen, folded -> on and open" "after the migration: turned off and folded, it stays" \
+                      "no toolbar mode" "show me around: starts by itself on a launch" "show me around: seven stops" \
+                      "show me around: Right steps on" "show me around: at the panel's stop a folded panel opens" \
+                      "show me around: and at the next stop it folds back" "show me around: Escape stops it" \
+                      "show me around: once seen it never starts by itself again" "show me around: with the panel off its stop is passed over" \
+                      "show me around: at every stop the hole is round its place" \
+                      "after it closes by Learn Logic it starts" "after it closes by a template it starts" \
+                      "after it closes by Just Start / a blank canvas it starts" "after it closes by the shortcuts it starts" \
+                      "after it closes by Skip / Escape it starts" "show me around: and starts right after it" \
+                      "never over What's New; after it closes it starts" "about: \"Questions? cedarlogic@proton.me\", a mailto link" \
+                      "settings: the wheel over a closed choice leaves its value"; do
+            grep -F "PASS " rail-check.log | grep -F -- "$want" > /dev/null || { echo "::error::panel/tour check missing or failed: $want"; exit 1; }
           done
 
       # The menu bar: each menu open (by its keys) in light and dark, a

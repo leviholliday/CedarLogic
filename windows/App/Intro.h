@@ -3,8 +3,8 @@
 // drawing itself before the launch screen. The same intro both times, with
 // the sound both times; Help > Play the Intro plays it again (sound and
 // all, over the front circuit window), and Settings > General > "Play the
-// intro every time CedarLogic opens" plays it at every other launch,
-// silently. About 6 seconds; Intro.cpp has the timeline. Any key or click
+// intro every time CedarLogic opens" (on to begin with) plays it at every
+// other launch, silently. About 6 seconds; Intro.cpp has the timeline. Any key or click
 // skips it; with Windows' animation effects off it's just the launch
 // screen's still panel and a short crossfade.
 //

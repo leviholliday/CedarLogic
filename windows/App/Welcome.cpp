@@ -7,7 +7,10 @@
 #include "Brand.h"
 #include "Chrome.h"
 #include "Commands.h"
+#include "Actions.h"
 #include "Dialogs.h"
+#include "Shortcuts.h"
+#include "ShowMeAround.h"
 #include "SyncApp.h"
 #include "Window.h"
 
@@ -248,17 +251,192 @@ void glyph(ID2D1RenderTarget* rt, wchar_t g, float x, float y, float size, D2D1_
 	drawIcon(rt, g, D2D1::RectF(x, y, x + size * 1.6f, y + size * 1.6f), size, c);
 }
 
-// A card with an icon, a title and a line (the Mac's BrandCard rows).
+// A card with an icon, a title and a line (the Mac's BrandCard rows);
+// `extra` points under the line for a link.
 float pointCard(ID2D1RenderTarget* rt, float x, float y, float w, wchar_t icon, const std::string& title, const std::string& line,
-                float minH = 0) {
+                float minH = 0, float extra = 0) {
 	const float textW = w - 66 - 18;
 	const float lh = text(nullptr, line, 0, 0, 12.5f, kNormal, kSecondary, textW);
-	const float h = std::max(minH, 16 + 20 + 4 + lh + 16);
+	const float h = std::max(minH, 16 + 20 + 4 + lh + 16 + extra);
 	card(rt, D2D1::RectF(x, y, x + w, y + h));
 	glyph(rt, icon, x + 14, y + 13, 15);
 	text(rt, title, x + 48, y + 14, 14, kBold, kPrimary, textW + 18);
 	text(rt, line, x + 48, y + 36, 12.5f, kNormal, kSecondary, textW + 18);
 	return h;
+}
+
+
+// ---- The Actions panel's two switches ----------------------------------------------
+// The welcome's page and What's New's "Show or Hide It" card (the Mac's
+// ActionsPanelChoice): the switches beside a small picture of a window with
+// the panel in it. They change the real setting as they're flipped.
+
+// A neon switch: a capsule with a knob, lit when on.
+void brandSwitch(ID2D1RenderTarget* rt, float x, float y, bool on, bool hot) {
+	const D2D1_RECT_F r = D2D1::RectF(x, y, x + 40, y + 23);
+	if (on) glow(rt, r, 11.5f, alpha(kNeon, 0.45f), 7);
+	fillRound(rt, r, 11.5f, on ? kNeon : D2D1::ColorF(1, 1, 1, hot ? 0.2f : 0.14f));
+	strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 11, D2D1::ColorF(1, 1, 1, on ? 0.35f : 0.16f));
+	fillCircle(rt, D2D1::Point2F(on ? r.right - 11.5f : r.left + 11.5f, y + 11.5f), 8.5f, on ? kInk : D2D1::ColorF(1, 1, 1, 0.85f));
+}
+
+// A switch on the brand ground: its name, a line under it, the switch at the
+// right; returns its height. The whole row is the switch.
+float switchRow(ID2D1RenderTarget* rt, Panel& panel, float x, float y, float w, const std::string& title, const std::string& line, bool on,
+                bool enabled, int id) {
+	const float a = enabled ? 1.0f : 0.45f;
+	const float textW = w - 40 - 14;
+	text(rt, title, x, y, 13.5f, kBold, alpha(kPrimary, kPrimary.a * a), textW);
+	const float lh = text(rt, line, x, y + 22, 11.5f, kNormal, alpha(kSecondary, kSecondary.a * a), textW);
+	rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), a), nullptr);
+	brandSwitch(rt, x + w - 40, y + 1, on, enabled && panel.hot == id);
+	rt->PopLayer();
+	const float h = 22 + lh;
+	if (enabled) panel.addHit(D2D1::RectF(x, y - 4, x + w, y + h + 4), id);
+	return h;
+}
+
+// A small CedarLogic window, dark: the title row and toolbar, the side
+// panel, a gate and a light on the canvas, and (when `on`) the Actions panel
+// down the right edge, its first button named as the pointer rests on it.
+// With `hover` a pointer waits at the edge. 300 x 200 points, and a line under it.
+void panelPicture(ID2D1RenderTarget* rt, float x, float y, bool on, bool hover) {
+	const float w = 300, h = 200;
+	const D2D1_RECT_F box = D2D1::RectF(x, y, x + w, y + h);
+	const Chrome c{ true };
+	glow(rt, D2D1::RectF(box.left, box.top + 8, box.right, box.bottom + 8), 10, D2D1::ColorF(0, 0, 0, 0.5f), 16);
+	if (on) glow(rt, box, 10, alpha(kNeon, 0.12f), 20);
+	ID2D1RoundedRectangleGeometry* shape = nullptr;
+	if (SUCCEEDED(d2dFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(box, 10, 10), &shape)))
+		rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), shape), nullptr);
+	fillRect(rt, box, c.canvas());
+	// The title row and toolbar: tools at the left, the window's buttons and Run at the right.
+	const float barH = 22;
+	fillRect(rt, D2D1::RectF(x, y, x + w, y + barH), c.bar());
+	for (int i = 0; i < 4; i++) fillRound(rt, D2D1::RectF(x + 10 + i * 18, y + 7, x + 22 + i * 18, y + 15), 2, withAlpha(c.barInk(), 0.35f));
+	drawIcon(rt, Icon::Play, D2D1::RectF(x + w - 70, y, x + w - 56, y + barH), 7, alpha(kNeon, 0.85f));
+	fillRect(rt, D2D1::RectF(x + w - 46, y + 11, x + w - 38, y + 12), withAlpha(c.barInk(), 0.6f));
+	strokeRound(rt, D2D1::RectF(x + w - 30, y + 7.5f, x + w - 22, y + 15.5f), 1, withAlpha(c.barInk(), 0.6f));
+	drawIcon(rt, Icon::Close, D2D1::RectF(x + w - 16, y, x + w - 4, y + barH), 7, withAlpha(c.barInk(), 0.6f));
+	// The side panel.
+	const float palW = 54, top = y + barH;
+	fillRect(rt, D2D1::RectF(x, top, x + palW, y + h), c.tabBar());
+	fillRect(rt, D2D1::RectF(x + palW - 1, top, x + palW, y + h), c.sash());
+	for (int r = 0; r < 5; r++)
+		for (int k = 0; k < 2; k++)
+			strokeRound(rt, D2D1::RectF(x + 7.5f + k * 23, top + 8.5f + r * 21, x + 25.5f + k * 23, top + 24.5f + r * 21), 3, withAlpha(c.barInk(), 0.3f));
+	// The canvas: dots, two switches, a gate and a light.
+	const float railW = on ? 30.0f : 0.0f;
+	const float cl = x + palW, cr = x + w - railW;
+	for (float gx = cl + 8; gx < cr; gx += 12)
+		for (float gy = top + 8; gy < y + h; gy += 12) fillRect(rt, D2D1::RectF(gx, gy, gx + 1, gy + 1), D2D1::ColorF(1, 1, 1, 0.12f));
+	const float cy = (top + y + h) / 2, gx = (cl + cr) / 2 - 26;
+	ID2D1SolidColorBrush* b = nullptr;
+	if (SUCCEEDED(rt->CreateSolidColorBrush(kNeon, &b))) {
+		rt->DrawLine(D2D1::Point2F(cl + 18, cy - 10), D2D1::Point2F(gx, cy - 10), b, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cl + 18, cy + 10), D2D1::Point2F(gx, cy + 10), b, 1.6f);
+		rt->DrawLine(D2D1::Point2F(gx + 40, cy), D2D1::Point2F(gx + 70, cy), b, 1.6f);
+		ID2D1PathGeometry* gate = nullptr;
+		ID2D1GeometrySink* sink = nullptr;
+		if (SUCCEEDED(d2dFactory()->CreatePathGeometry(&gate)) && SUCCEEDED(gate->Open(&sink))) {
+			sink->BeginFigure(D2D1::Point2F(gx, cy - 18), D2D1_FIGURE_BEGIN_FILLED);
+			sink->AddLine(D2D1::Point2F(gx + 18, cy - 18));
+			sink->AddBezier(D2D1::BezierSegment(D2D1::Point2F(gx + 42, cy - 18), D2D1::Point2F(gx + 42, cy + 18), D2D1::Point2F(gx + 18, cy + 18)));
+			sink->AddLine(D2D1::Point2F(gx, cy + 18));
+			sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+			sink->Close();
+			b->SetColor(alpha(kNeon, 0.12f));
+			rt->FillGeometry(gate, b);
+			b->SetColor(kNeon);
+			rt->DrawGeometry(gate, b, 1.6f);
+		}
+		if (sink) sink->Release();
+		if (gate) gate->Release();
+		for (float sy : { cy - 10, cy + 10 }) strokeRound(rt, D2D1::RectF(cl + 6, sy - 6, cl + 18, sy + 6), 3, kNeon, 1.3f);
+		b->Release();
+	}
+	const D2D1_COLOR_F lamp = D2D1::ColorF(1, 0.77f, 0.25f);
+	fillCircle(rt, D2D1::Point2F(gx + 78, cy), 13, alpha(lamp, 0.18f));
+	fillCircle(rt, D2D1::Point2F(gx + 78, cy), 8, lamp);
+	// The panel: the default six, the first named.
+	if (on) {
+		fillRect(rt, D2D1::RectF(cr, top, x + w, y + h), c.canvas());
+		fillRect(rt, D2D1::RectF(cr, top, cr + 1, y + h), hover ? alpha(kNeon, 0.5f) : c.sash());
+		const std::vector<std::string>& ids = actions::defaults();
+		for (size_t i = 0; i < ids.size(); i++) {
+			const D2D1_RECT_F r = D2D1::RectF(cr + 4, top + 6 + i * 25, cr + 26, top + 27 + i * 25);
+			if (i == 0) {
+				fillRound(rt, r, 4, alpha(kNeon, 0.14f));
+				strokeRound(rt, r, 4, alpha(kNeon, 0.9f));
+			}
+			if (const actions::Def* d = actions::find(ids[i]))
+				if (d->glyph) drawIcon(rt, d->glyph, r, 10, withAlpha(c.barInk(), 0.9f));
+		}
+		const std::string name = "Check My Circuit";
+		const float tw = textWidth(name, 8.5f, kMedium) + 10;
+		const D2D1_RECT_F tag = D2D1::RectF(cr - 4 - tw, top + 9, cr - 4, top + 24);
+		fillRound(rt, tag, 4, c.tabCard());
+		strokeRound(rt, tag, 4, D2D1::ColorF(1, 1, 1, 0.12f));
+		text(rt, name, tag.left, tag.top + 2, 8.5f, kMedium, c.tabInk(), tw, DWRITE_TEXT_ALIGNMENT_CENTER);
+		if (hover) {
+			// A pointer resting at the edge.
+			const float px = cr - 14, py = y + h - 34;
+			ID2D1PathGeometry* arrow = nullptr;
+			ID2D1GeometrySink* sink = nullptr;
+			ID2D1SolidColorBrush* ab = nullptr;
+			if (SUCCEEDED(d2dFactory()->CreatePathGeometry(&arrow)) && SUCCEEDED(arrow->Open(&sink))) {
+				const D2D1_POINT_2F pts[] = { { px, py }, { px, py + 15 }, { px + 3.6f, py + 11.4f }, { px + 6.3f, py + 17 }, { px + 8.6f, py + 16 },
+				                              { px + 6, py + 10.6f }, { px + 11, py + 10.6f } };
+				sink->BeginFigure(pts[0], D2D1_FIGURE_BEGIN_FILLED);
+				for (int i = 1; i < 7; i++) sink->AddLine(pts[i]);
+				sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+				sink->Close();
+				if (SUCCEEDED(rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1), &ab))) {
+					rt->FillGeometry(arrow, ab);
+					ab->SetColor(D2D1::ColorF(0, 0, 0, 0.8f));
+					rt->DrawGeometry(arrow, ab, 1);
+				}
+			}
+			if (ab) ab->Release();
+			if (sink) sink->Release();
+			if (arrow) arrow->Release();
+		}
+	}
+	if (shape) {
+		rt->PopLayer();
+		shape->Release();
+	}
+	strokeRound(rt, D2D1::RectF(box.left + 0.5f, box.top + 0.5f, box.right - 0.5f, box.bottom - 0.5f), 10, D2D1::ColorF(1, 1, 1, 0.16f));
+	const std::string caption = on ? (hover ? "On, and it opens on hover when folded." : "On. Folded, a click on its edge opens it.")
+	                               : "Off. Everything is still in the menus.";
+	text(rt, caption, x, y + h + 10, 10.5f, kSemi, on ? kNeon : kFaint, w, DWRITE_TEXT_ALIGNMENT_CENTER, 0.4f);
+}
+
+enum { kPanelOn = 900, kPanelHover = 901 };
+
+// The two switches and the picture, from (x, y): 290 points of switches, 30 of
+// room, then the picture.
+void panelChoice(ID2D1RenderTarget* rt, Panel& panel, float x, float y) {
+	const Prefs& p = prefs();
+	float cy = y;
+	cy += switchRow(rt, panel, x, cy, 290, actions::kShowSwitch, "The commands you use most, a click each, down the window’s right edge.",
+	                p.actionsOn, true, kPanelOn) + 18;
+	cy += switchRow(rt, panel, x, cy, 290, actions::kHoverSwitch,
+	                "Folded away, it slides out when the pointer reaches the right edge, and goes back when you move off.", p.actionsHoverOpen,
+	                p.actionsOn, kPanelHover) + 18;
+	text(rt, std::string("Change it any time: Settings ▸ Actions, or View ▸ ") + (p.actionsOn ? "Hide" : "Show") + " Actions" +
+	             shortcuts::tipKeys(CMD_TOGGLE_ACTIONS) + ".",
+	     x, cy, 11.5f, kNormal, kFaint, 290);
+	panelPicture(rt, x + 320, y, p.actionsOn, p.actionsHoverOpen);
+}
+
+// A click on one of them: the setting itself, at once.
+bool panelClick(int id) {
+	if (id == kPanelOn) prefs().actionsOn = !prefs().actionsOn;
+	else if (id == kPanelHover) prefs().actionsHoverOpen = !prefs().actionsHoverOpen;
+	else return false;
+	actions::changed();
+	return true;
 }
 
 }  // namespace
@@ -270,8 +448,10 @@ namespace welcome {
 namespace {
 
 enum { kSkip = 1, kBack, kNext, kJustStart, kTheme0 = 10, kSwatch0 = 20, kGrid0 = 40, kReady0 = 50 };
-const int kPages = 5;
+const int kPages = 6;
 const float kWW = 780, kWH = 580;
+// The pages: what it is, making it yours, the Actions panel, your name, six keys, and what next.
+enum { kPageIntro, kPageSetup, kPageActions, kPageName, kPageKeys, kPageReady };
 const int kAccentOrder[] = { 6, 0, 1, 2, 3, 4, 5 };
 const char* kAccentNames[] = { "Blue", "Purple", "Pink", "Orange", "Green", "Graphite", "CedarLogic" };
 
@@ -301,7 +481,9 @@ Welcome* g_welcome = nullptr;
 
 void startTourFrom(CircuitWindow* w);
 
-void finish(int then = 0) {
+// Closed, by any of its buttons or keys: Show Me Around follows (until it's
+// been seen), then the lesson if that was the choice.
+void finish(int then = 0, showme::WelcomeExit exit = showme::WelcomeExit::Skip) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
 	g_welcome = nullptr;
@@ -316,7 +498,13 @@ void finish(int then = 0) {
 	delete w;
 	if (window == nullptr) return;
 	SetForegroundWindow(window->window());
-	if (then == CMD_TOUR) startTourFrom(window);
+	if (then == CMD_TOUR) exit = showme::WelcomeExit::GuidedTour;
+	else if (then == CMD_NEW_TEMPLATE) exit = showme::WelcomeExit::Template;
+	else if (then == CMD_SHORTCUTS) exit = showme::WelcomeExit::Shortcuts;
+	// The walk first (the template's circuit or the shortcut list put away
+	// first: it waits for them); the lesson after it.
+	const bool walk = showme::welcomeClosed(exit);
+	if (then == CMD_TOUR) { if (!walk) startTourFrom(window); }
 	else if (then) PostMessageW(window->window(), WM_COMMAND, then, 0);
 }
 
@@ -335,7 +523,7 @@ void readyAction(int i) {
 	switch (i) {
 	case 0: finish(CMD_TOUR); break;
 	case 1: finish(CMD_NEW_TEMPLATE); break;
-	case 2: finish(); break;
+	case 2: finish(0, showme::WelcomeExit::Blank); break;
 	default: finish(CMD_SHORTCUTS); break;
 	}
 }
@@ -421,6 +609,13 @@ void pageSetup(ID2D1RenderTarget* rt, Panel& panel) {
 	text(rt, blurbs[grid], 56, y + 24 + 34 + 14, 11.5f, kNormal, kSecondary);
 }
 
+void pageActions(ID2D1RenderTarget* rt, Panel& panel) {
+	const float y = heading(rt, 56, 34, kWW - 112, "One click away", "The Actions panel",
+	                        "The buttons you use most, down the right edge of every window: Check My Circuit, Tidy Up, Share Link and more. "
+	                        "Show Me Around points it out in a moment.");
+	panelChoice(rt, panel, 56, y + 22);
+}
+
 void pageName(ID2D1RenderTarget* rt, Welcome* w) {
 	const float left = 56, colW = 420;
 	float y = heading(rt, left, 34, colW, "One more thing", "Who's handing this in?",
@@ -477,9 +672,9 @@ void pageReady(ID2D1RenderTarget* rt, Welcome* w, double t) {
 	heading(rt, 56, 30, kWW - 112, "Ready", "Build your first circuit", "↑↓ and Enter work here too; ← goes back.");
 	struct Tile { const char* title; const char* line; wchar_t icon; };
 	const Tile tiles[] = {
-		{ "Take the guided tour", "Two switches, a gate and a light, in about five minutes. Recommended.", 0 },
+		{ "Learn logic: the Guided Tour", "Build two switches, a gate and a light, in about five minutes. Recommended.", 0 },
 		{ "Start from a template", "A lab page with your name, a counter, a 7-segment starter, or your own.", 0xE8C8 },
-		{ "Start with a blank canvas", "Jump straight in. Help ▸ Guided Tour replays the tour.", 0xE710 },
+		{ "Start with a blank canvas", "Jump straight in. A quick look around the window comes first.", 0xE710 },
 		{ "See every shortcut", "The whole list, searchable.", 0xE765 },
 	};
 	float y = 126;
@@ -507,16 +702,17 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 	const float footer = h - 74;
 	wl->pager.draw(rt, wl->panel, D2D1::RectF(0, 0, w, footer - 1), [&](int pg) {
 		switch (pg) {
-		case 0: pageIntro(rt, t); break;
-		case 1: pageSetup(rt, wl->panel); break;
-		case 2: pageName(rt, wl); break;
-		case 3: pageKeys(rt, wl); break;
+		case kPageIntro: pageIntro(rt, t); break;
+		case kPageSetup: pageSetup(rt, wl->panel); break;
+		case kPageActions: pageActions(rt, wl->panel); break;
+		case kPageName: pageName(rt, wl); break;
+		case kPageKeys: pageKeys(rt, wl); break;
 		default: pageReady(rt, wl, t); break;
 		}
 	});
 	const int page = wl->pager.page;
 	// The name's box, once its page has landed.
-	if (page == 2 && !wl->pager.sliding() && wl->name) {
+	if (page == kPageName && !wl->pager.sliding() && wl->name) {
 		const UINT dpi = dpiOf(wl->panel.hwnd);
 		const int x = scaled((int)wl->nameBox.left + 13, dpi), y = scaled((int)wl->nameBox.top + 9, dpi);
 		SetWindowPos(wl->name, HWND_TOP, x, y, scaled(274, dpi), scaled(22, dpi), SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -544,7 +740,9 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 void click(int id) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
-	if (id == kSkip || id == kJustStart) finish();
+	if (id == kSkip) finish();
+	else if (id == kJustStart) finish(0, showme::WelcomeExit::Blank);
+	else if (panelClick(id)) {}
 	else if (id == kNext) go(1);
 	else if (id == kBack) go(-1);
 	else if (id >= kTheme0 && id < kTheme0 + 3) setTheme(id - kTheme0);
@@ -573,7 +771,7 @@ bool key(UINT vk) {
 	case VK_UP: if (last) { w->readyChoice = std::max(0, w->readyChoice - 1); w->panel.redraw(); } return true;
 	default: break;
 	}
-	if (w->pager.page == 3) {
+	if (w->pager.page == kPageKeys) {
 		for (int i = 0; i < 6; i++)
 			if (vk == (UINT)kKeys[i].key[0] && !(GetKeyState(VK_SHIFT) & 0x8000)) { w->pressedAt[i] = nowSeconds(); w->panel.redraw(); return true; }
 	}
@@ -613,7 +811,7 @@ bool show(CircuitWindow* window) {
 		const int pg = wl->pager.page;
 		bool lit = false;
 		for (double at : wl->pressedAt) lit = lit || nowSeconds() - at < 0.8;
-		return wl->pager.sliding() || pg == 0 || pg == 4 || lit;
+		return wl->pager.sliding() || pg == kPageIntro || pg == kPageReady || lit;
 	};
 	p.message = [](UINT msg, WPARAM wp, LPARAM lp, LRESULT& r) {
 		Welcome* wl = g_welcome;
@@ -755,8 +953,8 @@ std::vector<Step>& steps() {
 			  return !g_tour->window->filePath().empty() && n != "Untitled" && n != "Untitled Circuit";
 		  } },
 		{ "You built a working circuit",
-		  [] { return std::string("That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help ▸ Guided Tour "
-		                          "brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in."); },
+		  [] { return std::string("That's the loop: add, wire, try it, check it. Press ? whenever you want every shortcut, and Help ▸ Learn Logic: "
+		                          "Guided Tour brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in."); },
 		  keys({ "?" }), nullptr },
 	};
 	return s;
@@ -843,7 +1041,7 @@ void paintTour(ID2D1RenderTarget* rt, float w, float h) {
 	strokeRound(rt, D2D1::RectF(0.5f, 0.5f, w - 0.5f, h - 0.5f), 8, alpha(kNeon, 0.18f));
 	float y = 18;
 	icon(rt, 18, y, 18);
-	text(rt, strf("GUIDED TOUR  ·  %d OF %d", t->step + 1, count), 44, y + 1, 10.5f, kBold, kNeon, 0, DWRITE_TEXT_ALIGNMENT_LEADING, 1.2f);
+	text(rt, strf("LEARN LOGIC  ·  %d OF %d", t->step + 1, count), 44, y + 1, 10.5f, kBold, kNeon, 0, DWRITE_TEXT_ALIGNMENT_LEADING, 1.2f);
 	const D2D1_RECT_F close = D2D1::RectF(w - 18 - 22, y - 2, w - 18, y + 20);
 	fillCircle(rt, D2D1::Point2F((close.left + close.right) / 2, (close.top + close.bottom) / 2), 11,
 	           D2D1::ColorF(1, 1, 1, t->panel.hot == Tour::kClose ? 0.16f : 0.08f));
@@ -962,6 +1160,12 @@ void startTourOn(CircuitWindow* window) { startTourFrom(window); }
 
 HWND tourWindow() { return g_tour ? g_tour->panel.hwnd : nullptr; }
 
+bool isOpen() { return g_welcome != nullptr; }
+
+void stopTour() { endTour(); }
+
+void finishForTest(showme::WelcomeExit exit) { finish(exit == showme::WelcomeExit::GuidedTour ? CMD_TOUR : 0, exit); }
+
 }  // namespace welcome
 
 // ---- What's New ------------------------------------------------------------------
@@ -972,11 +1176,12 @@ const char* const kVersion = "0.4";
 
 namespace {
 
-enum { kSkip = 1, kBack, kNext, kTry, kLine0 = 10, kTile0 = 20 };
+enum { kSkip = 1, kBack, kNext, kTry, kPanelCard, kPanelDone, kPanelOutside, kLine0 = 10, kTile0 = 20 };
 const float kNW = 820, kNH = 600;
 
-// A try button's "command" that isn't one: Settings, on its Sync page.
-const int kOpenSync = -2;
+// A try button's "command" that isn't one: Settings, on its Sync page; and
+// the finale's Show me around.
+const int kOpenSync = -2, kShowMe = -3;
 
 struct Point { wchar_t icon; const char* title; const char* line; };
 struct Chapter {
@@ -1013,7 +1218,7 @@ const Chapter kChapters[] = {
 	    { 0xE9D9, "Fast on big pages", "A page with hundreds of parts used to take half a minute. Now it takes a second or two." } },
 	  "Tidy Up by Signal Flow", CMD_TIDY_FLOW },
 	{ "Also new", "Smaller things", "More that's changed since the last tour.",
-	  { { 0xE90D, "Actions on the right", "The things you use most, one click away. Drag them into your order; right-click to choose your own." },
+	  { { 0xE90D, "The Actions panel", "The buttons you use most, down the right edge of the window, one click each. Drag them into your order; right-click to choose your own." },
 	    { 0xE8A0, "Split view and focus mode", "Ctrl+Alt+S shows two tabs side by side. Ctrl+. slides the toolbar and side panel away." },
 	    { 0xE713, "Your toolbar, your keys", "Settings ▸ Toolbar has Seamless, Classic and Minimal. Settings ▸ Shortcuts changes any key." },
 	    { 0xE73E, "Fixed along the way", "Truth tables with TO and FROM labels, report headings that stay with their content, and NOR-only formulas." } },
@@ -1027,6 +1232,7 @@ struct WhatsNew {
 	Pager pager;
 	CircuitWindow* window = nullptr;
 	double opened = nowSeconds();
+	bool panelCard = false;   // the Actions panel's switches, over the page ("Show or Hide It...")
 };
 WhatsNew* g_new = nullptr;
 WhatsNew* g_newGone = nullptr;   // destroyed with its window: freed at the next show()
@@ -1041,14 +1247,22 @@ void close(int command) {
 	delete w;
 	if (window == nullptr) return;
 	SetForegroundWindow(window->window());
+	if (command == kShowMe) {
+		showme::start(window, 0.3);
+		return;
+	}
 	if (command == CMD_TOUR) {
-		welcome::startTourOn(window);
+		// Show Me Around first, if it hasn't been seen.
+		if (showme::seen()) welcome::startTourOn(window);
+		else showme::setThen([](CircuitWindow* w) { welcome::startTourOn(w); });
 	} else if (command == kOpenSync) {
 		setPreferencesPage(6);   // Settings' Sync page
 		PostMessageW(window->window(), WM_COMMAND, CMD_PREFERENCES, 0);
 	} else if (command) {
 		PostMessageW(window->window(), WM_COMMAND, command, 0);
 	}
+	// Closed: Show Me Around follows, the first time (it waits for whatever opened).
+	showme::startWhenReady();
 }
 
 void go(int d) {
@@ -1275,8 +1489,21 @@ void pageChapter(ID2D1RenderTarget* rt, WhatsNew* wn, int i, double t) {
 	const float x = 48, cw = 420;
 	float y = heading(rt, x, 34, cw, c.eyebrow, c.title, c.line) + 18;
 	const bool four = c.points[3].title != nullptr;   // closer together, to fit
-	for (const Point& p : c.points)
-		if (p.title) y += pointCard(rt, x, y, cw, p.icon, p.title, p.line) + (four ? 6 : 10);
+	for (const Point& p : c.points) {
+		if (!p.title) continue;
+		// The panel's card: on or off, open on hover, a click away.
+		const bool panel = std::string(p.title) == "The Actions panel";
+		const float h = pointCard(rt, x, y, cw, p.icon, p.title, p.line);
+		if (panel) {
+			// On its title's row, at the right.
+			const std::string link = "Show or Hide It\u2026";
+			const float lw = textWidth(link, 11.5f, kSemi);
+			const D2D1_RECT_F r = D2D1::RectF(x + cw - 16 - lw - 4, y + 12, x + cw - 12, y + 32);
+			text(rt, link, r.left + 2, y + 15, 11.5f, kSemi, wn->panel.hot == kPanelCard ? D2D1::ColorF(0.55f, 1, 0.68f) : kNeon);
+			wn->panel.addHit(r, kPanelCard);
+		}
+		y += h + (four ? 4 : 10);
+	}
 	if (c.tryTitle) {
 		const float bw = textWidth(c.tryTitle, 13, kSemi) + 40;
 		const D2D1_RECT_F r = D2D1::RectF(x, y + 6, x + bw, y + 42);
@@ -1290,20 +1517,49 @@ void pageFinale(ID2D1RenderTarget* rt, WhatsNew* wn) {
 	float y = heading(rt, 56, 34, kNW - 112, "That's the tour", "Go build something", "It's under Help ▸ What's New in CedarLogic whenever you want it back.") + 22;
 	struct Tile { const char* title; const char* line; wchar_t icon; };
 	const Tile tiles[] = {
-		{ "Take the guided tour", "Two switches, a gate and a light, on a circuit of its own.", 0xE805 },
+		{ "Show me around", "A minute\u2019s walk round the window: where everything is.", 0xE890 },
+		{ "Learn logic: the Guided Tour", "Two switches, a gate and a light, on a circuit of its own.", 0xE805 },
 		{ "Start from a template", "The Lab Page has your name on it already.", 0xE8C8 },
 		{ "Open CedarLogic Help", "Every feature, with its keys.", 0xE897 },
 	};
-	for (int i = 0; i < 3; i++) {
-		const D2D1_RECT_F r = D2D1::RectF(56, y, kNW - 56, y + 66);
+	for (int i = 0; i < 4; i++) {
+		const D2D1_RECT_F r = D2D1::RectF(56, y, kNW - 56, y + 62);
 		card(rt, r, wn->panel.hot == kTile0 + i, 13);
-		glyph(rt, tiles[i].icon, r.left + 20, r.top + 21, 15);
-		text(rt, tiles[i].title, r.left + 62, r.top + 14, 13.5f, kBold, kPrimary);
-		text(rt, tiles[i].line, r.left + 62, r.top + 36, 11.5f, kNormal, kSecondary);
+		glyph(rt, tiles[i].icon, r.left + 20, r.top + 19, 15);
+		text(rt, tiles[i].title, r.left + 62, r.top + 12, 13.5f, kBold, kPrimary);
+		text(rt, tiles[i].line, r.left + 62, r.top + 34, 11.5f, kNormal, kSecondary);
 		drawIcon(rt, 0xE72A, D2D1::RectF(r.right - 44, r.top, r.right - 14, r.bottom), 12, kFaint);
 		wn->panel.addHit(r, kTile0 + i);
-		y += 78;
+		y += 72;
 	}
+}
+
+// The Actions panel's switches, over the page: the setting itself.
+void paintPanelCard(ID2D1RenderTarget* rt, WhatsNew* wn, float w, float h) {
+	fillRect(rt, D2D1::RectF(0, 0, w, h), D2D1::ColorF(0, 0, 0, 0.55f));
+	wn->panel.addHit(D2D1::RectF(0, 0, w, h), kPanelOutside);
+	const D2D1_RECT_F r = D2D1::RectF(36, 56, w - 36, h - 46);
+	glow(rt, D2D1::RectF(r.left, r.top + 10, r.right, r.bottom + 10), 18, D2D1::ColorF(0, 0, 0, 0.5f), 24);
+	ID2D1RoundedRectangleGeometry* shape = nullptr;
+	if (SUCCEEDED(d2dFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(r, 18, 18), &shape))) {
+		rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), shape), nullptr);
+		D2D1_MATRIX_3X2_F was;
+		rt->GetTransform(&was);
+		rt->SetTransform(D2D1::Matrix3x2F::Translation(r.left, r.top) * was);
+		ground(rt, r.right - r.left, r.bottom - r.top, 0.2f, 0, 24);
+		rt->SetTransform(was);
+		rt->PopLayer();
+		shape->Release();
+	}
+	strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 18, D2D1::ColorF(1, 1, 1, 0.14f));
+	// The card itself takes clicks (not "outside").
+	wn->panel.addHit(r, 0);
+	const float y = heading(rt, r.left + 28, r.top + 28, r.right - r.left - 56, "The Actions panel", "Yours to show or hide",
+	                        std::string("It\u2019s on for everyone in ") + kVersion + ". Flip these to suit you; they change it straight away.");
+	panelChoice(rt, wn->panel, r.left + 28, y + 18);
+	const D2D1_RECT_F done = D2D1::RectF(r.right - 28 - 110, r.bottom - 28 - 36, r.right - 28, r.bottom - 28);
+	button(rt, done, "Done", true, wn->panel.hot == kPanelDone);
+	wn->panel.addHit(done, kPanelDone);
 }
 
 void paint(ID2D1RenderTarget* rt, float w, float h) {
@@ -1335,6 +1591,7 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 		button(rt, back, "Back", false, wn->panel.hot == kBack);
 		wn->panel.addHit(back, kBack);
 	}
+	if (wn->panelCard) paintPanelCard(rt, wn, w, h);
 }
 
 }  // namespace
@@ -1355,14 +1612,22 @@ void show(CircuitWindow* window, int page) {
 	p.click = [](int id) {
 		WhatsNew* wn = g_new;
 		if (wn == nullptr) return;
+		if (wn->panelCard) {
+			// Over the page: its switches, Done, or a click beside it.
+			if (panelClick(id)) wn->panel.redraw();
+			else if (id == kPanelDone || id == kPanelOutside) { wn->panelCard = false; wn->panel.redraw(); }
+			return;
+		}
 		if (id == kSkip) close(0);
+		else if (id == kPanelCard) { wn->panelCard = true; wn->panel.redraw(); }
 		else if (id == kBack) go(-1);
 		else if (id == kNext) go(1);
 		else if (id == kTry && wn->pager.page >= 1 && wn->pager.page <= kChapterCount) close(kChapters[wn->pager.page - 1].tryCommand);
 		else if (id >= kLine0 && id < kLine0 + kChapterCount) go(id - kLine0 + 1 - wn->pager.page);
-		else if (id == kTile0) close(CMD_TOUR);
-		else if (id == kTile0 + 1) close(CMD_NEW_TEMPLATE);
-		else if (id == kTile0 + 2) close(CMD_HELP);
+		else if (id == kTile0) close(kShowMe);
+		else if (id == kTile0 + 1) close(CMD_TOUR);
+		else if (id == kTile0 + 2) close(CMD_NEW_TEMPLATE);
+		else if (id == kTile0 + 3) close(CMD_HELP);
 	};
 	// Alt+F4 is Skip: the circuit window comes back.
 	p.message = [](UINT msg, WPARAM, LPARAM, LRESULT& r) {
@@ -1376,6 +1641,11 @@ void show(CircuitWindow* window, int page) {
 		g_new = nullptr;
 	};
 	p.key = [](UINT vk) {
+		if (g_new && g_new->panelCard) {
+			// Escape or Enter puts the card away; the arrows wait.
+			if (vk == VK_ESCAPE || vk == VK_RETURN) { g_new->panelCard = false; g_new->panel.redraw(); return true; }
+			return vk == VK_LEFT || vk == VK_RIGHT;
+		}
 		if (vk == VK_ESCAPE) close(0);
 		else if (vk == VK_RETURN || vk == VK_RIGHT) go(1);
 		else if (vk == VK_LEFT) go(-1);
@@ -1396,19 +1666,31 @@ bool offer(CircuitWindow* window) {
 	return true;
 }
 
+bool isOpen() { return g_new != nullptr; }
+void closeForTest() { close(0); }
+
+void showPanelCard() {
+	if (!g_new) return;
+	g_new->panelCard = true;
+	g_new->panel.redraw();
+}
+
 }  // namespace whatsnew
 
 // ---- About ------------------------------------------------------------------------
 // A card in the brand's look (the launch screen's colours), as the Linux
-// app's: the icon rising into place, the version, a line about the app, and
-// Website, What's New and Close.
+// app's: the icon rising into place, the version, a line about the app,
+// "Questions? cedarlogic@proton.me" (a link that starts a new mail, as the
+// Mac's About has it), and Website, What's New and Close.
 
 namespace about {
 
 namespace {
 
-enum { kSite = 1, kNews, kClose };
+enum { kSite = 1, kNews, kClose, kMail };
 const float kAW = 460, kAH = 420;
+// The project's address, for questions (Send Feedback stays the way to report a problem).
+const char* const kContactEmail = "cedarlogic@proton.me";
 
 struct About {
 	Panel panel;
@@ -1418,6 +1700,7 @@ struct About {
 };
 About* g_about = nullptr;
 About* g_aboutGone = nullptr;   // destroyed with its window: freed at the next show()
+bool g_mailDrawn = false;       // the address's link was drawn (--rail-check)
 
 void close(int then) {
 	About* a = g_about;
@@ -1430,6 +1713,7 @@ void close(int then) {
 	if (window == nullptr) return;
 	SetForegroundWindow(window->window());
 	if (then == kSite) openExternally(window->window(), "https://cedarlogic.netlify.app");
+	else if (then == kMail) openExternally(window->window(), std::string("mailto:") + kContactEmail);
 	else if (then == kNews) whatsnew::show(window);
 }
 
@@ -1447,6 +1731,19 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 	     "A digital logic simulator, based on the original CedarLogic from Cedarville University. Rebuilt natively for Windows: plain Windows controls and Direct2D on "
 	     "the shared CedarLogic engine, with nothing else to install.",
 	     40, 222, 13, kNormal, kSecondary, w - 80, DWRITE_TEXT_ALIGNMENT_CENTER);
+	// A quiet line with the project's address: a link that starts a new mail.
+	{
+		const std::string ask = "Questions? ";
+		const float aw = textWidth(ask, 12, kNormal), mw = textWidth(kContactEmail, 12, kMedium);
+		const float lx = (w - aw - mw) / 2, ly = h - 106;
+		text(rt, ask, lx, ly, 12, kNormal, kFaint);
+		const bool hot = a->panel.hot == kMail;
+		const D2D1_COLOR_F c = hot ? D2D1::ColorF(0.55f, 1, 0.68f) : kNeon;
+		text(rt, kContactEmail, lx + aw, ly, 12, kMedium, c);
+		fillRect(rt, D2D1::RectF(lx + aw, ly + 16.5f, lx + aw + mw, ly + 17.5f), alpha(c, hot ? 0.9f : 0.45f));
+		a->panel.addHit(D2D1::RectF(lx + aw - 2, ly - 3, lx + aw + mw + 2, ly + 20), kMail);
+		g_mailDrawn = true;
+	}
 	const D2D1_RECT_F site = D2D1::RectF(w / 2 - 170, h - 70, w / 2 - 60, h - 34);
 	const D2D1_RECT_F news = D2D1::RectF(w / 2 - 50, h - 70, w / 2 + 60, h - 34);
 	const D2D1_RECT_F done = D2D1::RectF(w / 2 + 70, h - 70, w / 2 + 170, h - 34);
@@ -1470,7 +1767,14 @@ void show(CircuitWindow* window) {
 	Panel& p = g_about->panel;
 	p.paint = paint;
 	p.animating = [] { return g_about && !g_about->calm && nowSeconds() - g_about->opened < 0.6; };
-	p.click = [](int id) { close(id == kClose ? 0 : id); };
+	p.click = [](int id) {
+		// The address opens a new mail and leaves About up, as the Mac's link does.
+		if (id == kMail) {
+			if (g_about && windowAlive(g_about->window)) openExternally(g_about->panel.hwnd, std::string("mailto:") + kContactEmail);
+			return;
+		}
+		close(id == kClose ? 0 : id);
+	};
 	// Alt+F4 closes it.
 	p.message = [](UINT msg, WPARAM, LPARAM, LRESULT& r) {
 		if (msg != WM_CLOSE || g_about == nullptr) return false;
@@ -1494,5 +1798,10 @@ void show(CircuitWindow* window) {
 	SetForegroundWindow(p.hwnd);
 	SetFocus(p.hwnd);
 }
+
+std::string mailLink() { return std::string("mailto:") + kContactEmail; }
+bool mailLinkDrawn() { return g_mailDrawn; }
+bool isOpen() { return g_about != nullptr; }
+void closeNow() { close(0); }
 
 }  // namespace about
