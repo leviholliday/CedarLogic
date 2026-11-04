@@ -34,7 +34,7 @@ enum ClassroomCheck {
         // teaching.json goes into the Keychain under a service of this run's own (never the
         // app's), deleted again at the end.
         let keychainService = "com.leviholliday.cedarlogic.test.classroom-check.\(getpid())"
-        defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: keychainService] as CFDictionary) }
+        defer { deleteKeychainItems(service: keychainService) }
         let sync = SyncPlatform(syncDir: base.appendingPathComponent("sync-folder"), keychainService: keychainService)
         let platform = ClassroomPlatform(dir: base.appendingPathComponent("Classroom"), sync: sync)
         var hooks = platform.hooks()
@@ -103,6 +103,9 @@ enum ClassroomCheck {
         }
         check("teaching.json is saved into the Keychain, not the folder",
               platform.saveFile("teaching.json", "{\"v\":1}") && !FileManager.default.fileExists(atPath: teaching.path))
+        let sealed = FileManager.default.contents(atPath: platform.dir.appendingPathComponent("teaching.json.sealed").path)
+        check("its sealed copy beside it isn't it in the clear",
+              sealed.map { !$0.isEmpty && $0.range(of: Data("{\"v\":1}".utf8)) == nil } == true)
         check("and loads back from it", loadText("teaching.json") == "{\"v\":1}")
         FileManager.default.createFile(atPath: teaching.path, contents: Data("{\"v\":2}".utf8), attributes: [.posixPermissions: 0o600])
         check("a teaching.json from before is read, moved into the Keychain and deleted",
@@ -119,5 +122,21 @@ enum ClassroomCheck {
         check("and given back", other.tryLock(lockPath))
         other.unlock()
         return ok && pass
+    }
+}
+
+/// Every Keychain item of this run's service, gone: by `security`, which
+/// deletes any program's items without a prompt (SecItemDelete only this
+/// tool's own, and the key items are `security`'s).
+func deleteKeychainItems(service: String) {
+    for _ in 0..<20 {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        p.arguments = ["delete-generic-password", "-s", service]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return }
+        p.waitUntilExit()
+        if p.terminationStatus != 0 { return }
     }
 }
