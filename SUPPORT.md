@@ -21,7 +21,7 @@ Every release is on [GitHub](https://github.com/leviholliday/CedarLogic-Releases
 - **Email:** [cedarlogic@proton.me](mailto:cedarlogic@proton.me), for anything that doesn't fit an issue.
 - **Security problems:** see [SECURITY.md](SECURITY.md). Please don't post them in public.
 
-CedarLogic is a student project run by one person. Replies usually come within a week.
+Replies usually come within a week.
 
 ## Privacy
 
@@ -48,9 +48,11 @@ Your circuits are encrypted on your device before they leave it, with a key made
 
 Classes use codes, not accounts. Names, assignments, hand-ins and answers are encrypted before they leave a device, so the class service (on Cloudflare) can't read them. The design is in [docs/CLASSROOM.md](docs/CLASSROOM.md).
 
-### Crash reports (Mac only, if you say yes)
+### Crash reports and usage stats (Mac only, if you say yes)
 
-The Mac app asks once whether to send crash reports, and Settings > General turns them on or off. A school can turn them off for everyone with the `DisableCrashReporting` setting. Reports go to [Sentry](https://sentry.io) and carry where the app crashed (the stack of each thread), the app version and build, your testing group, and the basic device details Sentry adds (macOS version, Mac model, memory). They don't carry your circuits, files or name: Sentry's trail of clicks, windows and web requests is off, its personal-data option is off, and any `/Users/<your name>/` in a path becomes `/Users/<user>/` before the report leaves. The Windows and Linux apps have no crash reporter.
+Both are off until you say yes. The Mac app asks once, one question for both (the welcome's "A small favour" page, or a sheet after an update), and Settings > Privacy turns each on or off, shows what's sent and deletes what has been. A school can turn them off for everyone with the `DisableCrashReporting` and `DisableUsageStats` settings. [docs/PRIVACY.md](docs/PRIVACY.md) has exactly what each one sends; usage stats are counts and settings, never circuits, files or names.
+
+Crash reports go to [Sentry](https://sentry.io) and carry where the app crashed (the stack of each thread), the app version and build, your testing group, and the basic device details Sentry adds (macOS version, Mac model, memory). They don't carry your circuits, files or name: Sentry's trail of clicks, windows and web requests is off, its personal-data option is off, and any `/Users/<your name>/` in a path becomes `/Users/<user>/` before the report leaves. The Windows and Linux apps have no crash reporter.
 
 ### Updates
 

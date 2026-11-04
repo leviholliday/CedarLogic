@@ -165,6 +165,7 @@ cmake --build build/logic && ctest --test-dir build/logic --output-on-failure
 - [Support](SUPPORT.md): which versions get fixes, where to ask, and what the apps send. In any of the apps, **Send Feedback** reaches the developer fastest.
 - Contact: [cedarlogic@proton.me](mailto:cedarlogic@proton.me)
 - [Security](SECURITY.md): how to report a problem privately
+- [Privacy](docs/PRIVACY.md): the Mac's crash reports and usage stats, both off unless you say yes
 - [Contributing](CONTRIBUTING.md): building, checking and sending a change
 - [Changelog](CHANGELOG.md): what changed in each version
 - [Third-party code](THIRD-PARTY.md): what CedarLogic ships with and its licenses

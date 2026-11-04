@@ -136,6 +136,8 @@ shasum -a 256 CedarLogic-<version>-Mac.dmg
 
 CedarLogic began at [Cedarville University](https://www.cedarville.edu/) and was modernized and brought to the Mac by [Kieran Klukas](https://github.com/taciturnaxolotl/CedarLogic). This version was rebuilt as one app for Mac, Windows and Linux, and extended, with Claude, Anthropic's AI model. Free software under the GPL-3.0; the source is at [leviholliday/CedarLogic](https://github.com/leviholliday/CedarLogic).
 
+The Mac app can send anonymous crash reports and usage stats, but only if you say yes; Settings › Privacy changes it ([what's sent](https://github.com/leviholliday/CedarLogic/blob/main/docs/PRIVACY.md)).
+
 Found a bug or have an idea? Use **Send Feedback** in the app, [open an issue](https://github.com/leviholliday/CedarLogic/issues), or email [cedarlogic@proton.me](mailto:cedarlogic@proton.me). Security problems: see [SECURITY.md](https://github.com/leviholliday/CedarLogic/blob/main/SECURITY.md).
 
 <sub>`appcast-native.xml` and `appcast-native-beta.xml` are the update feeds the Mac app reads; `appcast.xml` and `appcast-beta.xml` are the retired classic app's. The classic CedarLogic 4.x releases are here too, under their own names.</sub>
