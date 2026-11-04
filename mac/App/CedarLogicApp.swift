@@ -451,6 +451,9 @@ enum AppActions {
     static var openWindow: OpenWindowAction?
     static func openLibrary() { openWindow?(id: "library") }
     static func openHelp() { openWindow?(id: "help") }
+    /// Help > Learn Logic Online…: the website's lessons, in the browser.
+    static let learnOnlineURL = URL(string: "https://cedarlogic.netlify.app/learn/")!
+    static func openLearnOnline() { NSWorkspace.shared.open(learnOnlineURL) }
 }
 
 /// Which app opens a .cdl file double-clicked in Finder. The classic
@@ -892,6 +895,7 @@ struct HelpCommands: Commands {
             // Where everything is in the window (ShowMeAround.swift), then the logic lesson.
             Button("Show Me Around") { ActionID.showMeAround.run(canvas) }
             Button("Learn Logic: Guided Tour") { TourModel.shared.start() }
+            Button("Learn Logic Online\u{2026}") { AppActions.openLearnOnline() }
             Button("Open the Practice Circuit") { Templates.openPractice() }
         }
     }

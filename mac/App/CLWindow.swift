@@ -42,7 +42,8 @@ struct CLLayout: View {
     /// first frame (so the circuit never flashes up first), then playing
     /// from `opening`, once the window has landed. Not at launch: the
     /// launch screen does the introducing.
-    @State private var covered = !Splash.shared.active
+    /// ("None" at launch: not that either, straight in.)
+    @State private var covered = !Splash.shared.active && !Splash.shared.straightIn
     @State private var opening: Date?
     @StateObject private var split = SplitState()
     /// The window's width, for the Actions rail (it folds when narrow).

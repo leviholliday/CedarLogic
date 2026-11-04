@@ -277,6 +277,17 @@ struct GeneralSettingsView: View {
     @State private var opensCDL = CDLHandler.isUs
     @State private var cdlApp = CDLHandler.currentName
 
+    /// What each "When CedarLogic opens" choice does.
+    private var launchHint: String {
+        let always = " The first launch and the first after an update always play the full intro, with its sound. Help > Play the Intro plays it any time."
+        switch prefs.introAtLaunch {
+        case .short: return "The circuit draws itself, then the window opens: about three and a half seconds, silent." + always
+        case .full: return "The circuit draws itself, then the launch screen, as on the first launch, without its sound." + always
+        case .classic: return "The launch screen as it was before the intro: CedarLogic's panel, a sweep of light, and the window, silent." + always
+        case .none: return "Straight into the circuit window, no launch screen." + always
+        }
+    }
+
     var body: some View {
         Page {
             Row("Your name", hint: "Printed under your circuit when you export it as an image.") {
@@ -322,8 +333,11 @@ struct GeneralSettingsView: View {
                 }
                 .disabled(opensCDL)
             }
-            Row("Launch screen", hint: "The circuit drawing itself, then the launch screen, as on the first launch, without its sound (that's for the first launch and updates). Help > Play the Intro plays it any time.") {
-                Toggle("Play the intro every time CedarLogic opens", isOn: $prefs.introEveryLaunch)
+            Row("Launch screen", hint: launchHint) {
+                Picker("When CedarLogic opens", selection: $prefs.introAtLaunch) {
+                    ForEach(Intro.AtLaunch.allCases) { Text($0.title).tag($0) }
+                }
+                .fixedSize()
             }
             Row("Quitting", hint: "⌘Q shows a question in the middle of the screen first: Return quits, Escape doesn't.") {
                 Toggle("Ask before quitting", isOn: $prefs.confirmQuit)

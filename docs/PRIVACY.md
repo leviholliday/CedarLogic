@@ -11,6 +11,16 @@ and you are asked about them once:
   circuit window, after What's New.
 - You can change your answer any time in **Settings > Privacy**.
 
+The question reads:
+
+> I work on this version of CedarLogic in my spare time, for free. I can't
+> see what breaks or what people actually use unless you tell me. If you're
+> willing, let the app send anonymous crash reports and usage stats. It would
+> genuinely help, and nothing identifies you: no name, no circuits, no files.
+> Thank you either way.
+>
+> — Levi
+
 This page covers the Mac app. It uses the same words as the app's "See
 exactly what's sent" sheet.
 

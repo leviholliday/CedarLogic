@@ -173,7 +173,7 @@ enum UsageSettings {
         .init(name: "timingColor", key: "cl.timingColor", def: .bool(false)),
         .init(name: "projector", key: "cl.projector", def: .bool(false)),
         .init(name: "confirmQuit", key: "cl.confirmQuit", def: .bool(true)),
-        .init(name: "introEveryLaunch", key: "cl.introEveryLaunch", def: .bool(false)),
+        .init(name: "atLaunch", key: "cl.introAtLaunch", def: .string("short"), words: ["short", "full", "classic", "none"]),   // When CedarLogic opens
         .init(name: "testingGroup", key: "testingGroup", def: .string("normal"), words: ["normal", "beta"]),
         .init(name: "classroomEnabled", key: "ClassroomEnabled", def: .bool(true)),
     ]
