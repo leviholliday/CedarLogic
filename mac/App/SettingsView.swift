@@ -2,13 +2,13 @@
 // pages in the toolbar, the window easing to each page's height as you switch,
 // and each setting a label on the left with its control and a line of
 // explanation on the right: General, Appearance, Canvas, Toolbar, Shortcuts,
-// Sync (SyncSettingsView.swift).
+// Sync (SyncSettingsView.swift), Privacy (Privacy.swift).
 
 import AppKit
 import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, appearance, canvas, toolbar, actions, shortcuts, sync
+    case general, appearance, canvas, toolbar, actions, shortcuts, sync, privacy
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -19,6 +19,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .actions: "Actions"
         case .shortcuts: "Shortcuts"
         case .sync: "Sync"
+        case .privacy: "Privacy"
         }
     }
     var icon: String {
@@ -30,6 +31,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .actions: "sidebar.right"
         case .shortcuts: "keyboard"
         case .sync: "arrow.triangle.2.circlepath"
+        case .privacy: "hand.raised"
         }
     }
 }
@@ -231,12 +233,13 @@ enum SettingsView {
         case .actions: CLActionsSettings()
         case .shortcuts: CLShortcutSettings()
         case .sync: SyncSettingsView(center: SyncCenter.shared)
+        case .privacy: PrivacySettingsView()
         }
     }
 }
 
 /// One setting: "Label:" on the left, the control and a line of help on the right.
-private struct Row<Control: View>: View {
+struct Row<Control: View>: View {
     let label: String
     let hint: String?
     @ViewBuilder let control: () -> Control
@@ -264,13 +267,12 @@ private struct Row<Control: View>: View {
     }
 }
 
-private struct Page<C: View>: View {
+struct Page<C: View>: View {
     @ViewBuilder let content: () -> C
     var body: some View { VStack(alignment: .leading, spacing: 12) { content() } }
 }
 
 struct GeneralSettingsView: View {
-    @AppStorage(CrashReports.key) private var crashReports = false
     @ObservedObject private var prefs = Prefs.shared
     @State private var opensCDL = CDLHandler.isUs
     @State private var cdlApp = CDLHandler.currentName
@@ -336,12 +338,6 @@ struct GeneralSettingsView: View {
                     }
                     .labelsHidden().fixedSize()
                     Button("Check Now") { Updates.shared.checkNow() }
-                }
-            }
-            if CrashReports.available {
-                Row("Crash reports", hint: "If CedarLogic crashes, a report of where it went wrong goes to its developer. Never your circuits, files or name.") {
-                    Toggle("Send crash reports", isOn: $crashReports)
-                        .onChange(of: crashReports) { _, on in CrashReports.set(on) }
                 }
             }
         }

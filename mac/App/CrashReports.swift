@@ -3,9 +3,11 @@
 // A report says where the app was when it crashed: the stack, macOS, the
 // version. Never a circuit, a file or a name: Sentry's automatic trail of
 // clicks, network requests and failed requests is off, and a path in the
-// home folder loses its user name before it goes. Testers are asked once, and
-// Settings > General turns it on or off; a lab can switch it off for
-// everyone with the wx app's policy key, DisableCrashReporting.
+// home folder loses its user name before it goes. They're asked about once,
+// with usage stats, in one consent (Privacy.swift: the welcome's "A small
+// favour" page, or a sheet for an update), and Settings > Privacy turns them
+// on or off; a lab can switch them off for everyone with the wx app's policy
+// key, DisableCrashReporting.
 
 import AppKit
 #if canImport(Sentry)
@@ -125,20 +127,4 @@ enum CrashReports {
         if on { start() }
     }
 
-    /// Once, the first time the app opens with somewhere to send them:
-    /// the question, over the circuit window.
-    static func askOnce() {
-        guard available, allowed == nil, !CommandLine.arguments.contains("--render-ui"),
-              ProcessInfo.processInfo.environment["CL_BAR_TEST"] == nil,
-              ProcessInfo.processInfo.environment["CL_SNAPSHOT"] == nil,
-              let w = NSApp.windows.first(where: { $0.isVisible && NSDocumentController.shared.document(for: $0) != nil }) else { return }
-        let a = NSAlert()
-        a.messageText = "Send crash reports?"
-        a.informativeText = "If CedarLogic crashes, it can send a report of where it went wrong, to help get it fixed. A report never includes your circuits, files or name. You can change this in Settings > General."
-        a.addButton(withTitle: "Send Reports")
-        a.addButton(withTitle: "Don't Send")
-        a.beginSheetModal(for: w) { r in
-            MainActor.assumeIsolated { set(r == .alertFirstButtonReturn) }
-        }
-    }
 }

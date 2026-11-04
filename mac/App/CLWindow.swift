@@ -2411,5 +2411,7 @@ private struct DrawingWindowSync: ViewModifier {
             .onReceive(split.controller.$drawing) { v in if canvas.drawing != v { canvas.drawing = v } }
             .onChange(of: canvas.simView) { _, on in if on && Prefs.shared.projector { canvas.showNotes = false } }
             .onChange(of: canvas.presentingHere) { _, on in focusMode = on; if on { canvas.showNotes = false } }
+            // Read by usage stats (time in focus mode).
+            .onChange(of: focusMode) { _, on in canvas.focusModeOn = on; split.controller.focusModeOn = on }
     }
 }
