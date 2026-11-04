@@ -1525,6 +1525,239 @@ struct SessionDriver {
 		}
 	}
 
+	// ---- The canvas at the window's right edge, with the real pointer -----------------
+	// (The rest of the session hands its events to the widgets themselves;
+	// here the display delivers them, as a mouse would: xdotool moves the
+	// real pointer and presses its button, and GTK finds the window under
+	// it. A layer over the canvas that takes presses shows only this way.)
+	// In each of: the Actions panel open; folded with Open on hover; folded
+	// without it; and focus mode (folded) with and without it: every point
+	// of the canvas along its right edge, across the band the panel's labels
+	// are drawn in, and across the canvas, is the canvas's own under the
+	// pointer, even with the folded tab peeking; a box drawn from inside the
+	// folded panel's 12-point hot strip (or the 12 points beside the open
+	// panel) leftwards selects the part it goes round, and a part pressed
+	// there is dragged left, with the panel never sliding out over the drag;
+	// the wheel there reaches the canvas; and the folded tab itself still
+	// opens the panel with a click.
+	static bool xdo(const std::vector<std::string>& args) {
+		std::vector<gchar*> argv;
+		argv.push_back((gchar*)"xdotool");
+		for (const std::string& a : args) argv.push_back(const_cast<gchar*>(a.c_str()));
+		argv.push_back(nullptr);
+		gint status = 1;
+		const bool ran = g_spawn_sync(nullptr, argv.data(), nullptr, (GSpawnFlags)(G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL),
+		                              nullptr, nullptr, nullptr, nullptr, &status, nullptr);
+		return ran && g_spawn_check_exit_status(status, nullptr);
+	}
+	static std::string num(double v) { return format("%d", (int)std::lround(v)); }
+	// (x, y) in `widget`'s points, on the screen.
+	static bool onScreen(GtkWidget* widget, double x, double y, std::string& rx, std::string& ry) {
+		GdkWindow* gw = gtk_widget_get_window(widget);
+		if (gw == nullptr) return false;
+		int ox = 0, oy = 0;
+		gdk_window_get_origin(gw, &ox, &oy);
+		GtkAllocation a;
+		gtk_widget_get_allocation(widget, &a);
+		if (!gtk_widget_get_has_window(widget)) { ox += a.x; oy += a.y; }
+		rx = num(ox + x);
+		ry = num(oy + y);
+		return true;
+	}
+	// The real pointer to (x, y) in `widget`'s points (it moves there before this returns).
+	static bool pointerTo(GtkWidget* widget, double x, double y) {
+		std::string rx, ry;
+		return onScreen(widget, x, y, rx, ry) && xdo({ "mousemove", "--sync", rx, ry });
+	}
+	// There, and the button down, in one go (as a hand does: no time for the panel to slide out first).
+	static bool pressAt(GtkWidget* widget, double x, double y) {
+		std::string rx, ry;
+		return onScreen(widget, x, y, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "mousedown", "1" });
+	}
+	// The widget whose window is under the real pointer now, as GTK picks it for a press.
+	static GtkWidget* underPointer() {
+		GdkDevice* p = pointer();
+		if (p == nullptr) return nullptr;
+		double wx = 0, wy = 0;
+		GdkWindow* gw = gdk_device_get_window_at_position_double(p, &wx, &wy);
+		gpointer owner = nullptr;
+		if (gw) gdk_window_get_user_data(gw, &owner);
+		return owner ? GTK_WIDGET(owner) : nullptr;
+	}
+
+	void edgeChecks() {
+		gWhat = "the canvas at the window's right edge";
+		Rail* r = w->rail();
+		const bool x11 = strcmp(G_OBJECT_TYPE_NAME(gdk_display_get_default()), "GdkX11Display") == 0;
+		gchar* tool = g_find_program_in_path("xdotool");
+		const bool haveTool = tool != nullptr;
+		g_free(tool);
+		if (!x11) {
+			// (xdotool's pointer is X's: on a Wayland desktop, run it with GDK_BACKEND=x11 under Xvfb.)
+			printf("session: the canvas at the right edge not checked: not an X display (%s)\n", G_OBJECT_TYPE_NAME(gdk_display_get_default()));
+			return;
+		}
+		if (!check(haveTool && r, "xdotool, to move the real pointer (sudo apt install xdotool)")) return;
+		const int page = w->currentPage();
+		struct Setup { const char* name; bool folded, hover, focus; };
+		const Setup setups[] = {
+			{ "the Actions panel open", false, true, false },
+			{ "folded, Open on hover on", true, true, false },
+			{ "folded, Open on hover off", true, false, false },
+			{ "focus mode, Open on hover on", true, true, true },
+			{ "focus mode, Open on hover off", true, false, true },
+		};
+		for (const Setup& su : setups) {
+			const std::string in = std::string(" (") + su.name + ")";
+			prefs().actionsOn = true;
+			prefs().actionsCollapsed = su.folded;
+			prefs().actionsHoverOpen = su.hover;
+			actions::changed();
+			if (su.focus != w->focusMode()) w->toggleFocusMode();
+			pump(700);
+			Canvas* c = canvas();
+			if (c == nullptr) return;
+			GtkWidget* cw = c->widget();
+			const double W = c->width(), H = c->height();
+			auto away = [&] {
+				pointerTo(cw, W / 2, H / 2);
+				pump(60);
+			};
+			away();
+			check(r->folded() == su.folded && !r->slidOut(), "the panel is " + std::string(su.folded ? "folded" : "open") + in + ": " + r->describe());
+			// Every point: the canvas's, under the pointer.
+			std::vector<double> xs = { W - 1, W - 2, W - 3, W - 4, W - 5, W - 6, W - 8, W - 11, W - 12, W - 20, W - 46, W - 60, W - 100, W - 160,
+			                           W - 220, W - 300, W - 360, W - 380 };
+			for (double x = 20; x < W - 380; x += 60) xs.push_back(x);
+			int points = 0, blocked = 0;
+			std::string firstBlocked;
+			for (double y : { 12.0, H / 2, H - 12 }) {
+				for (double x : xs) {
+					if (x < 1) continue;
+					if (!pointerTo(cw, x, y)) continue;
+					pump(25);
+					GtkWidget* got = underPointer();
+					if (got != cw && r->slidOut()) {
+						// Out on hover (as it should after 100 ms in the strip, if this
+						// was slow to get here): back in, and that point again.
+						away();
+						pump(700);
+						if (!pointerTo(cw, x, y)) continue;
+						pump(25);
+						got = r->slidOut() ? cw : underPointer();
+					}
+					points++;
+					if (got != cw) {
+						blocked++;
+						if (firstBlocked.empty())
+							firstBlocked = format(" (first at %.0f, %.0f of %.0f x %.0f: %s)", x, y, W, H, got ? G_OBJECT_TYPE_NAME(got) : "nothing");
+					}
+					// Out of the strip again before the panel would slide out.
+					if (x >= W - 12) away();
+				}
+			}
+			check(points > 0 && blocked == 0, format("every one of %d points along the canvas's right edge, across the labels' band and across the "
+			                                         "canvas is the canvas's under the pointer (%d not)",
+			                                         points, blocked) + firstBlocked + in);
+			// A box drawn leftwards from the edge, round a part.
+			double gx = 0, gy = 0;
+			c->worldPoint(W - 110, H / 2, gx, gy);
+			cl_edit_select_none(doc(), page);
+			const bool placed = cl_edit_add_gate(doc(), page, "AA_AND2", gx, gy);
+			const long gate = cl_edit_single_gate(doc(), page);
+			cl_edit_select_none(doc(), page);
+			c->redraw();
+			pump(150);
+			if (!check(placed && gate >= 0, "a part placed 110 points in from the canvas's right edge" + in)) continue;
+			const double x0 = W - 3, y0 = H / 2 - 70;
+			bool slid = false;
+			bool ok = pressAt(cw, x0, y0);
+			pump(40);
+			for (int k = 1; k <= 8 && ok; k++) {
+				ok = pointerTo(cw, x0 - k * 25, y0 + k * 18);
+				pump(30);
+				slid = slid || r->slidOut();
+			}
+			ok = xdo({ "mouseup", "1" }) && ok;
+			pump(200);
+			const int boxed = cl_edit_selected_gate_count(doc(), page);
+			check(ok && boxed == 1 && !slid, format("a box drawn from 3 points inside the edge, leftwards round the part, selects it (%d selected)%s",
+			                                        boxed, slid ? "; the panel slid out over the drag" : "") + in);
+			away();
+			// The part pressed in the strip and dragged left: moved (through the
+			// engine) so that it reaches into the strip, then a point of it
+			// there found (the hit test a right-click uses) and pressed.
+			double px = 0, py = 0, nx = 0, ny = 0, vx = 0, vy = 0;
+			cl_gate_position(doc(), gate, &px, &py);
+			toView(c, px, py, vx, vy);
+			cl_edit_select_none(doc(), page);
+			if (cl_edit_press(doc(), page, px, py, 0, c->unitsPerPoint()) == CL_PRESS_PART) {
+				const double tx = px + ((W - 8) - vx) * c->unitsPerPoint();
+				cl_edit_drag(doc(), tx, py);
+				cl_edit_release(doc(), tx, py);
+			}
+			cl_edit_select_none(doc(), page);
+			c->redraw();
+			pump(150);
+			double hitX = -1;
+			for (double x = W - 2; x >= W - 11 && hitX < 0; x -= 1) {
+				double wx = 0, wy = 0;
+				c->worldPoint(x, vy, wx, wy);
+				if (cl_edit_context(doc(), page, wx, wy, c->unitsPerPoint()) == CL_CONTEXT_GATE && cl_edit_single_gate(doc(), page) == gate) hitX = x;
+				cl_edit_select_none(doc(), page);
+			}
+			cl_gate_position(doc(), gate, &px, &py);
+			slid = false;
+			ok = hitX > 0 && pressAt(cw, hitX, vy);
+			pump(40);
+			for (int k = 1; k <= 8 && ok; k++) {
+				ok = pointerTo(cw, hitX - k * 20, vy);
+				pump(30);
+				slid = slid || r->slidOut();
+			}
+			ok = xdo({ "mouseup", "1" }) && ok;
+			pump(200);
+			cl_gate_position(doc(), gate, &nx, &ny);
+			const double moved = (px - nx) / c->unitsPerPoint();
+			check(ok && moved > 100 && !slid, format("a part pressed %.0f points inside the edge and dragged left moves with the pointer (%.0f points)%s",
+			                                         hitX > 0 ? W - hitX : -1.0, moved, slid ? "; the panel slid out over the drag" : "") + in);
+			away();
+			// The wheel at the edge: the canvas's (it zooms or moves the view).
+			const Canvas::View before = c->view();
+			{
+				std::string rx, ry;
+				ok = onScreen(cw, W - 4, H / 2, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "5" });
+			}
+			pump(250);
+			const Canvas::View after = c->view();
+			check(ok && (after.upp != before.upp || after.originX != before.originX || after.originY != before.originY),
+			      "the wheel 4 points inside the edge reaches the canvas" + in);
+			c->setView(before);
+			away();
+			// The part goes again.
+			cl_edit_select_none(doc(), page);
+			if (cl_edit_press(doc(), page, nx, ny, 0, c->unitsPerPoint()) == CL_PRESS_PART) cl_edit_release(doc(), nx, ny);
+			if (cl_edit_single_gate(doc(), page) == gate) cl_edit_delete(doc(), page);
+			c->redraw();
+			pump(100);
+			// Folded, the tab itself still takes a click (opening the panel).
+			if (su.folded && !su.focus) {
+				GtkWidget* dock = r->dockWidget();
+				std::string rx, ry;
+				ok = dock && onScreen(dock, 3, gtk_widget_get_allocated_height(dock) / 2.0, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
+				pump(400);
+				check(ok && !r->folded(), "a click on the folded tab opens the panel" + in + ": " + r->describe());
+				away();
+			}
+		}
+		// As it was.
+		if (w->focusMode()) w->toggleFocusMode();
+		prefs().actionsCollapsed = false;
+		prefs().actionsHoverOpen = true;
+		actions::changed();
+		pump(500);
+	}
+
 	// ---- The Actions rail, through the window's own events ---------------------------
 	// (The Mac's launch-selftest `actions` state.) On screen and open; focus
 	// mode folds it to its tab and gives it back; F9 folds and shows it; the
@@ -1884,6 +2117,8 @@ struct SessionDriver {
 		// The settings file as it starts: what Settings changes later is compared with it.
 		prefs().save();
 		pump(300);
+		guarded("the canvas at the right edge", [&] { edgeChecks(); });
+		pump(200);
 		guarded("the Actions rail's checks", [&] { railChecks(); });
 		pump(200);
 		// Show Me Around's checks take half a minute: in seeds 1, 5, 9... only

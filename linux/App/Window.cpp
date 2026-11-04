@@ -429,6 +429,13 @@ void CircuitWindow::build() {
 	g_signal_connect(hintLayer, "draw", G_CALLBACK(drawHintCb), this);
 	gtk_overlay_add_overlay(GTK_OVERLAY(area), hintLayer);
 	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(area), hintLayer, TRUE);
+	{
+		// Drawn over the canvas, never in the way of it (a drawing area has a
+		// window of its own, which an overlay's pass-through doesn't cover).
+		cairo_region_t* none = cairo_region_create();
+		gtk_widget_input_shape_combine_region(hintLayer, none);
+		cairo_region_destroy(none);
+	}
 	// The oscilloscope docks under the canvas, as on the Mac.
 	scopePaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 	g_object_set(scopePaned, "wide-handle", TRUE, nullptr);

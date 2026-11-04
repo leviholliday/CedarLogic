@@ -51,6 +51,9 @@ GMenu* gWindowMenu = nullptr;   // Window's list of the open circuits
 GMenuModel* gMenubar = nullptr;
 bool gLibraryLoaded = false;
 GtkWidget* gSplash = nullptr;
+// Settings > General, "When CedarLogic opens: None" (Intro.h): this launch has
+// no launch screen, and its windows come in without their opening card.
+bool gStraightIn = false;
 // --screenshot <out.png>: once the window is up, draw it to a PNG and quit
 // (a check that a build really starts, drawing and all; used by CI).
 std::string gScreenshot;
@@ -91,6 +94,8 @@ unsigned long long gSessionSeed = 1;
 // --settings-check <folder> <tag>: Settings' pages on this screen, pictured
 // and checked (SettingsCheck.cpp); a picture run otherwise.
 std::string gSettingsCheckDir, gSettingsCheckTag;
+// --menu-check <folder> <tag>: every menu's text, as it is and lit (Settings.h).
+std::string gMenuCheckDir, gMenuCheckTag;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -217,6 +222,16 @@ gboolean showCaptureCb(gpointer) {
 gboolean settingsCheckCb(gpointer) {
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
 	const int code = w ? settings::check(w, gSettingsCheckDir, gSettingsCheckTag) : 1;
+	fflush(stdout);
+	fflush(stderr);
+	_exit(code);
+	return G_SOURCE_REMOVE;
+}
+
+gboolean menuCheckCb(gpointer) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	int code = 1;
+	if (w) guarded("the menu check", [&] { code = settings::menuCheck(w, gMenuCheckDir, gMenuCheckTag); });
 	fflush(stdout);
 	fflush(stderr);
 	_exit(code);
@@ -719,6 +734,7 @@ GMenuModel* buildMenubar() {
 	// Where everything is in the window (ShowMeAround.h), then the logic lesson.
 	add(s, "_Show Me Around", "win.show-me-around");
 	add(s, "Learn Logic: Guided _Tour", "app.guided-tour");
+	add(s, "Learn Logic _Online…", "app.learn-online");
 	s = section(help);
 	add(s, "_What's New in CedarLogic", "win.whats-new");
 	add(s, "Play the _Intro", "app.play-intro");
@@ -970,7 +986,11 @@ void startupCb(GApplication* gapp, gpointer) {
 	showme::setQuiet(!gScreenshot.empty());
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) gSplash = showSplash();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) {
+		gStraightIn = intro::straightIn();
+		if (gStraightIn) intro::log("straight in: no launch screen");
+		else gSplash = showSplash();
+	}
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
 	loadCss();
@@ -1013,6 +1033,11 @@ void startupCb(GApplication* gapp, gpointer) {
 		  nullptr, nullptr, nullptr, { 0 } },
 		{ "guided-tour", [](GSimpleAction*, GVariant*, gpointer app) { startTour(activeWindow(GTK_APPLICATION(app))); },
 		  nullptr, nullptr, nullptr, { 0 } },
+		// Help > Learn Logic Online…: the website's lessons, in the browser.
+		{ "learn-online", [](GSimpleAction*, GVariant*, gpointer app) {
+			CircuitWindow* w = activeWindow(GTK_APPLICATION(app));
+			openExternally(w ? w->window() : nullptr, kLearnOnlineUrl);
+		  }, nullptr, nullptr, nullptr, { 0 } },
 		// Help > Play the Intro: the first launch's, sound and all, over the front circuit window (Splash.h).
 		{ "play-intro", [](GSimpleAction*, GVariant*, gpointer app) {
 			if (CircuitWindow* w = activeWindow(GTK_APPLICATION(app))) guarded("the intro", [&] { splashPlayIntroNow(w->window()); });
@@ -1151,14 +1176,17 @@ void activateCb(GApplication* gapp, gpointer) {
 			// Where the intro played (Splash.h), so it dissolves into it.
 			if (c == circuitWindows().front()) splashPlaceUnder(c->window());
 			gtk_widget_show(GTK_WIDGET(c->window()));
-			if (gScreenshot.empty()) c->beginOpening();
+			if (gScreenshot.empty() && !gStraightIn) c->beginOpening();
 		}
+		// The launch's windows are in: any after them open with their card.
+		gStraightIn = false;
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
 			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
+			else if (!gMenuCheckDir.empty()) g_timeout_add(1500, menuCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1222,14 +1250,17 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 			// Where the intro played (Splash.h), so it dissolves into it.
 			if (c == circuitWindows().front()) splashPlaceUnder(c->window());
 			gtk_widget_show(GTK_WIDGET(c->window()));
-			if (gScreenshot.empty()) c->beginOpening();
+			if (gScreenshot.empty() && !gStraightIn) c->beginOpening();
 		}
+		// The launch's windows are in: any after them open with their card.
+		gStraightIn = false;
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
 			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
+			else if (!gMenuCheckDir.empty()) g_timeout_add(1500, menuCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1445,6 +1476,12 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--dark") == 0 || strcmp(argv[i], "--light") == 0) { gTheme = strcmp(argv[i], "--dark") == 0; continue; }
 		if (strcmp(argv[i], "--sim-view") == 0) { gSimView = true; continue; }
 		if (strcmp(argv[i], "--show") == 0 && i + 1 < argc) { gShow = argv[++i]; continue; }
+		if (strcmp(argv[i], "--menu-check") == 0 && i + 2 < argc) {
+			gMenuCheckDir = argv[++i];
+			gMenuCheckTag = argv[++i];
+			if (gScreenshot.empty()) gScreenshot = gMenuCheckDir + "/unused.png";   // runs as a picture run does
+			continue;
+		}
 		if (strcmp(argv[i], "--settings-check") == 0 && i + 2 < argc) {
 			gSettingsCheckDir = argv[++i];
 			gSettingsCheckTag = argv[++i];
@@ -1475,7 +1512,7 @@ int main(int argc, char** argv) {
 			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSessionSeed = strtoull(argv[++i], nullptr, 10);
 			continue;
 		}
-		// --render-intro <dir> [first|update|every] [--behind <png>]: the intro's frames at 60 fps, with no display (Intro.h).
+		// --render-intro <dir> [first|update|every|short] [--behind <png>]: the intro's frames at 60 fps, with no display (Intro.h).
 		if (strcmp(argv[i], "--render-intro") == 0 && i + 1 < argc) {
 			const std::string dir = argv[i + 1];
 			intro::Trigger trigger = intro::Trigger::First;
@@ -1483,6 +1520,7 @@ int main(int argc, char** argv) {
 			for (int j = i + 2; j < argc; j++) {
 				if (strcmp(argv[j], "update") == 0) trigger = intro::Trigger::Update;
 				else if (strcmp(argv[j], "every") == 0) trigger = intro::Trigger::Every;
+				else if (strcmp(argv[j], "short") == 0) trigger = intro::Trigger::Short;
 				else if (strcmp(argv[j], "--behind") == 0 && j + 1 < argc) behind = argv[++j];
 			}
 			return intro::render(dir, trigger, behind);

@@ -3,6 +3,7 @@
 #include "App.h"
 #include "Actions.h"
 #include "Alert.h"
+#include "Intro.h"
 #include "Library.h"
 #include "Settings.h"
 #include "Window.h"
@@ -208,7 +209,12 @@ void Prefs::load() {
 		firstLaunchPlayed = readBool(k, "firstLaunchPlayed", firstLaunchPlayed);
 		introFirstLaunchPlayed = readBool(k, "introFirstLaunchPlayed", introFirstLaunchPlayed);
 		introUpdatePlayed = readString(k, "introUpdatePlayed", introUpdatePlayed);
-		introEveryLaunch = readBool(k, "introEveryLaunch", introEveryLaunch);
+		{
+			// "When CedarLogic opens"; before there was the choice, settled once from the old checkbox.
+			const int saved = intro::atLaunchFrom(readString(k, "introAtLaunch", ""));
+			const bool hadOld = g_key_file_has_key(k, kGroup, "introEveryLaunch", nullptr);
+			introAtLaunch = saved >= 0 ? saved : intro::settleAtLaunch(hadOld, hadOld && readBool(k, "introEveryLaunch", false));
+		}
 		seenWhatsNew = readString(k, "seenWhatsNew", seenWhatsNew);
 		exportGrid = readBool(k, "exportGrid", exportGrid);
 		exportInfo = readBool(k, "exportInfo", exportInfo);
@@ -322,7 +328,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "firstLaunchPlayed", firstLaunchPlayed);
 	g_key_file_set_boolean(k, kGroup, "introFirstLaunchPlayed", introFirstLaunchPlayed);
 	g_key_file_set_string(k, kGroup, "introUpdatePlayed", introUpdatePlayed.c_str());
-	g_key_file_set_boolean(k, kGroup, "introEveryLaunch", introEveryLaunch);
+	g_key_file_set_string(k, kGroup, "introAtLaunch", intro::atLaunchKey(introAtLaunch));
 	g_key_file_set_string(k, kGroup, "seenWhatsNew", seenWhatsNew.c_str());
 	g_key_file_set_boolean(k, kGroup, "exportGrid", exportGrid);
 	g_key_file_set_boolean(k, kGroup, "exportInfo", exportInfo);

@@ -59,6 +59,26 @@ private:
 namespace {
 const float kLabelLayer = 320;
 const float kEdgeZone = 5;   // the rail's left edge, which folds it (or, slid out, keeps it)
+
+// Only `x` and on (to the right edge) takes the pointer: presses, drags and
+// the wheel anywhere else go through to what's under it (the canvas); an
+// empty `width` takes none at all. (A widget with a window of its own, as a
+// drawing area is, catches every press over it otherwise -- even in an
+// overlay that passes input through, which only passes over its own window,
+// not the widget's.) -1 takes the whole of it again.
+void takesPointerFrom(GtkWidget* w, int x, int width) {
+	if (width < 0) {
+		gtk_widget_input_shape_combine_region(w, nullptr);
+		return;
+	}
+	cairo_region_t* r = cairo_region_create();
+	if (width > 0) {
+		const cairo_rectangle_int_t keep = { x, 0, width, 1 << 20 };
+		cairo_region_union_rectangle(r, &keep);
+	}
+	gtk_widget_input_shape_combine_region(w, r);
+	cairo_region_destroy(r);
+}
 }  // namespace
 
 // ---- Rail ----------------------------------------------------------------------------------
@@ -101,6 +121,10 @@ GtkWidget* Rail::wrap(GtkWidget* row) {
 	gtk_widget_set_no_show_all(l, TRUE);
 	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), l);
 	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(overlay), l, TRUE);
+	// It's 320 points over the canvas, the whole height, left of the rail:
+	// every press there is the canvas's (on the Raspberry Pi and Zorin a band
+	// of the canvas took no presses or drags at all until it did).
+	takesPointerFrom(l, 0, 0);
 	floater = new RailView(this, true);
 	GtkWidget* f = floater->widget();
 	gtk_widget_set_halign(f, GTK_ALIGN_END);
@@ -198,6 +222,12 @@ void Rail::updateFloater() {
 		gtk_widget_hide(f);
 	} else {
 		gtk_widget_set_size_request(f, (int)(want == 2 ? actions::kRailWidth : actions::kPeekWidth), -1);
+		// Peeking, it's drawn a few points over the canvas, but only the tab's
+		// own width (over the dock's tab) takes clicks: the hot strip is the
+		// canvas's for presses, drags and the wheel, as the Mac's is. Slid out,
+		// the rail is the rail.
+		if (want == 1) takesPointerFrom(f, (int)(actions::kPeekWidth - actions::kTabWidth), (int)actions::kTabWidth);
+		else takesPointerFrom(f, 0, -1);
 		gtk_widget_show(f);
 	}
 	if (was == 2 || want == 2) labels->redrawShadow();
@@ -277,6 +307,16 @@ bool Rail::escape() {
 void Rail::tick() {
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
+	// About to slide out, but a button went down in the strip (a press on the
+	// canvas there, not yet moved): it doesn't come out over the press.
+	if (hover.pending == 1 && pressed < 0 && overlay && gtk_widget_get_realized(overlay)) {
+		GdkWindow* gw = gtk_widget_get_window(GTK_WIDGET(win->window()));
+		GdkSeat* seat = gdk_display_get_default_seat(gdk_display_get_default());
+		GdkDevice* p = seat ? gdk_seat_get_pointer(seat) : nullptr;
+		GdkModifierType mask = (GdkModifierType)0;
+		if (gw && p) gdk_window_get_device_position(gw, p, nullptr, nullptr, &mask);
+		if (mask & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK)) pointerGone();
+	}
 	const int r = hover.tick(now, f, hoverEnabled());
 	if (r == 1) startSlide(true);
 	else if (r == -1) startSlide(false);
@@ -325,8 +365,18 @@ void Rail::motionCb(GtkEventControllerMotion*, double, double, gpointer self) {
 		y = py;
 		gw = gdk_window_get_effective_parent(gw);
 	}
+	GdkModifierType state = (GdkModifierType)0;
+	gdk_event_get_state(ev, &state);
 	gdk_event_free(ev);
 	if (!coords || gw != top) return;
+	// A button held (a drag on the canvas, a box being drawn): the edge
+	// neither peeks nor slides the rail out over it, as the Mac's tracking
+	// doesn't during a drag -- unless it's a drag on the rail itself.
+	if ((state & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK)) && r->pressed < 0) {
+		// (Out already, it stays as it was until the button's let go.)
+		if (!r->hover.slidOut) guarded("the rail's edge", [&] { r->pointerGone(); });
+		return;
+	}
 	int ox = 0, oy = 0;
 	if (!gtk_widget_translate_coordinates(r->overlay, GTK_WIDGET(r->win->window()), 0, 0, &ox, &oy)) return;
 	guarded("the rail's edge", [&] { r->pointerAt(x - ox, y - oy); });

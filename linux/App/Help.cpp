@@ -50,7 +50,8 @@ const std::vector<Page>& pages() {
 		    p("Down the right edge is the **Actions panel**: the commands you use most, a click each. Rest on one for its name and shortcut, "
 		      "click its left edge to fold it away, and right-click it to choose what's on it. Settings ▸ Actions turns it off or on."),
 		    tip("New here? Help ▸ Show Me Around points out where everything is in the window, in under a minute. Help ▸ Learn Logic: "
-		        "Guided Tour is a lesson: it builds a working AND circuit with you, a step at a time, in about five.") },
+		        "Guided Tour is a lesson: it builds a working AND circuit with you, a step at a time, in about five."),
+		    p("More lessons with live circuits: Help ▸ **Learn Logic Online…** opens them on the CedarLogic website (cedarlogic.netlify.app/learn) in your browser.") },
 		  true },
 		{ "first", "Your First Circuit", "dialog-information-symbolic", "Two switches, an AND gate and a light.",
 		  { h("1. Two switches"),

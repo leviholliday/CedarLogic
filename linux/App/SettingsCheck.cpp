@@ -10,11 +10,14 @@
 #include "Actions.h"
 #include "Chrome.h"
 #include "Window.h"
+#include "MenuBar.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -186,6 +189,255 @@ void checkText(GtkWidget* root, const std::string& where) {
 	expect(n > 0 && bad == 0, format("%s: all %d pieces of text read at 4.5:1 or better (the lowest %.2f:1)", where.c_str(), n, n ? worst : 0.0));
 }
 
+// ---- Contrast as drawn: lit, pressed, chosen and ticked ----------------------------------
+// The text read off the window as GTK draws it (not from the style's
+// colours alone: a dropdown's row draws its text through a node of its own,
+// which a rule can miss), with the control forced into each state a pointer
+// or a click puts it in. Drawn at twice the size, so a letter's strokes are
+// solid and their colour is the text's own.
+
+struct Shot {
+	cairo_surface_t* s = nullptr;
+	int w = 0, h = 0;
+	static constexpr int kScale = 2;
+	~Shot() { if (s) cairo_surface_destroy(s); }
+};
+
+// `top` drawn whole, on what its own background paints over white.
+void drawShot(GtkWidget* top, Shot& shot) {
+	if (shot.s) cairo_surface_destroy(shot.s);
+	shot.w = std::max(1, gtk_widget_get_allocated_width(top));
+	shot.h = std::max(1, gtk_widget_get_allocated_height(top));
+	shot.s = cairo_image_surface_create(CAIRO_FORMAT_RGB24, shot.w * Shot::kScale, shot.h * Shot::kScale);
+	cairo_surface_set_device_scale(shot.s, Shot::kScale, Shot::kScale);
+	cairo_t* cr = cairo_create(shot.s);
+	const Rgb under = paintOver(top, Rgb{ 1, 1, 1 });
+	cairo_set_source_rgb(cr, under.r, under.g, under.b);
+	cairo_paint(cr);
+	gtk_widget_draw(top, cr);
+	cairo_destroy(cr);
+	cairo_surface_flush(shot.s);
+}
+
+// The text in `text`'s box in the picture of `top`: its ground (the colour
+// most of the box is) and its ink (the pixel that stands out most from it).
+bool readDrawn(GtkWidget* top, const Shot& shot, GtkWidget* text, Reading& out) {
+	int x = 0, y = 0;
+	if (!gtk_widget_translate_coordinates(text, top, 0, 0, &x, &y)) return false;
+	const int w = gtk_widget_get_allocated_width(text), h = gtk_widget_get_allocated_height(text);
+	const int k = Shot::kScale;
+	const int x0 = std::max(0, x * k), y0 = std::max(0, y * k), x1 = std::min(shot.w * k, (x + w) * k), y1 = std::min(shot.h * k, (y + h) * k);
+	if (x1 - x0 < 2 || y1 - y0 < 2) return false;
+	const unsigned char* data = cairo_image_surface_get_data(shot.s);
+	const int stride = cairo_image_surface_get_stride(shot.s);
+	auto at = [&](int px, int py) {
+		const uint32_t v = *reinterpret_cast<const uint32_t*>(data + py * stride + px * 4);
+		return Rgb{ ((v >> 16) & 0xff) / 255.0, ((v >> 8) & 0xff) / 255.0, (v & 0xff) / 255.0 };
+	};
+	std::map<int, int> counts;
+	std::map<int, Rgb> sums;
+	for (int py = y0; py < y1; py++)
+		for (int px = x0; px < x1; px++) {
+			const Rgb c = at(px, py);
+			const int key = ((int)(c.r * 31) << 10) | ((int)(c.g * 31) << 5) | (int)(c.b * 31);
+			counts[key]++;
+			Rgb& sum = sums[key];
+			sum.r += c.r; sum.g += c.g; sum.b += c.b;
+		}
+	int best = -1, most = 0;
+	for (const auto& kv : counts) if (kv.second > most) { most = kv.second; best = kv.first; }
+	if (best < 0) return false;
+	const Rgb sum = sums[best];
+	const Rgb ground{ sum.r / most, sum.g / most, sum.b / most };
+	Rgb ink = ground;
+	double top_ = 1;
+	for (int py = y0; py < y1; py++)
+		for (int px = x0; px < x1; px++) {
+			const Rgb c = at(px, py);
+			const double r = ratio(c, ground);
+			if (r > top_) { top_ = r; ink = c; }
+		}
+	out = Reading{ top_, ink, ground };
+	return true;
+}
+
+// Every piece of text inside `w` (itself included), as drawn.
+void textsIn(GtkWidget* w, std::vector<GtkWidget*>& out) {
+	walk(w, [&](GtkWidget* x) {
+		if (!(GTK_IS_LABEL(x) || GTK_IS_CELL_VIEW(x)) || !showing(x)) return;
+		if (GTK_IS_LABEL(x) && gtk_label_get_text(GTK_LABEL(x))[0] == 0) return;
+		out.push_back(x);
+	});
+}
+
+std::string textOrKind(GtkWidget* w) {
+	const std::string t = textOf(w);
+	return t.empty() ? std::string(G_OBJECT_TYPE_NAME(w)) : "\"" + t + "\"";
+}
+
+struct StateTally { int n = 0, bad = 0; double worst = 100; };
+
+// One state on every control of a kind in `top` at once, the window drawn,
+// each control's text read; then the state taken off again.
+void readInState(GtkWidget* top, const std::vector<GtkWidget*>& controls, GtkStateFlags state, const char* stateName, const std::string& where,
+                 StateTally& tally) {
+	if (controls.empty()) return;
+	for (GtkWidget* c : controls) gtk_widget_set_state_flags(c, state, FALSE);
+	pump(60);
+	Shot shot;
+	drawShot(top, shot);
+	for (GtkWidget* c : controls) {
+		std::vector<GtkWidget*> texts;
+		textsIn(c, texts);
+		for (GtkWidget* t : texts) {
+			Reading r;
+			if (!gtk_widget_is_sensitive(t) || !readDrawn(top, shot, t, r)) continue;
+			tally.n++;
+			tally.worst = std::min(tally.worst, r.ratio);
+			if (r.ratio < 4.5) {
+				tally.bad++;
+				printf("  hard to read on %s, %s: %s %s in a %s: %s on %s, %.2f:1\n", where.c_str(), stateName, G_OBJECT_TYPE_NAME(t), textOrKind(t).c_str(),
+				       G_OBJECT_TYPE_NAME(c), hex(r.fg).c_str(), hex(r.bg).c_str(), r.ratio);
+			}
+		}
+	}
+	for (GtkWidget* c : controls) gtk_widget_unset_state_flags(c, state);
+	pump(30);
+}
+
+// The buttons, ticks, dots, dropdowns and rows of `root`, each lit
+// (:hover), pressed (:active), ticked or open (:checked) and chosen
+// (:selected) as it can be, read as drawn.
+void checkStates(GtkWidget* root, const std::string& where) {
+	std::vector<GtkWidget*> push, toggles, ticks, combos, rows;
+	walk(root, [&](GtkWidget* w) {
+		if (!showing(w) || !gtk_widget_is_sensitive(w)) return;
+		if (GTK_IS_CHECK_BUTTON(w)) ticks.push_back(w);
+		else if (GTK_IS_TOGGLE_BUTTON(w)) {
+			// A dropdown's own button is the dropdown's, below.
+			bool inCombo = false;
+			for (GtkWidget* p = gtk_widget_get_parent(w); p && !inCombo; p = gtk_widget_get_parent(p)) inCombo = GTK_IS_COMBO_BOX(p);
+			(inCombo ? combos : toggles).push_back(w);
+		}
+		else if (GTK_IS_BUTTON(w)) push.push_back(w);
+		else if (GTK_IS_LIST_BOX_ROW(w)) rows.push_back(w);
+	});
+	struct Pass { const std::vector<GtkWidget*>* list; GtkStateFlags state; const char* name; };
+	const Pass passes[] = {
+		{ &push, GTK_STATE_FLAG_PRELIGHT, "a button lit (:hover)" },
+		{ &push, (GtkStateFlags)(GTK_STATE_FLAG_PRELIGHT | GTK_STATE_FLAG_ACTIVE), "a button pressed (:active)" },
+		{ &toggles, GTK_STATE_FLAG_PRELIGHT, "a toggle lit (:hover)" },
+		{ &toggles, GTK_STATE_FLAG_CHECKED, "a toggle on (:checked)" },
+		{ &toggles, (GtkStateFlags)(GTK_STATE_FLAG_ACTIVE | GTK_STATE_FLAG_PRELIGHT), "a toggle pressed (:active)" },
+		{ &ticks, GTK_STATE_FLAG_PRELIGHT, "a box or dot lit (:hover)" },
+		{ &ticks, (GtkStateFlags)(GTK_STATE_FLAG_CHECKED | GTK_STATE_FLAG_PRELIGHT), "a box or dot ticked and lit (:checked)" },
+		{ &ticks, GTK_STATE_FLAG_ACTIVE, "a box or dot pressed (:active)" },
+		{ &combos, GTK_STATE_FLAG_PRELIGHT, "a dropdown lit (:hover)" },
+		{ &combos, GTK_STATE_FLAG_CHECKED, "a dropdown open (:checked)" },
+		{ &rows, GTK_STATE_FLAG_PRELIGHT, "a row lit (:hover)" },
+		{ &rows, GTK_STATE_FLAG_SELECTED, "a row chosen (:selected)" },
+		{ &rows, (GtkStateFlags)(GTK_STATE_FLAG_SELECTED | GTK_STATE_FLAG_PRELIGHT), "a row chosen and lit (:selected:hover)" },
+	};
+	StateTally tally;
+	GtkWidget* top = gtk_widget_get_toplevel(root);
+	for (const Pass& p : passes) readInState(top, *p.list, p.state, p.name, where, tally);
+	expect(tally.n > 0 && tally.bad == 0,
+	       format("%s: lit, pressed, ticked, open and chosen, all %d readings of %zu buttons, %zu toggles, %zu boxes and dots, %zu dropdowns and "
+	              "%zu rows read at 4.5:1 or better (the lowest %.2f:1)",
+	              where.c_str(), tally.n, push.size(), toggles.size(), ticks.size(), combos.size(), rows.size(), tally.n ? tally.worst : 0.0));
+}
+
+// The menu showing now (a dropdown's list, a menu bar's menu): its window.
+GtkWidget* openMenuWindow(GtkWidget* after = nullptr) {
+	GtkWidget* found = nullptr;
+	GList* all = gtk_window_list_toplevels();
+	for (GList* l = all; l; l = l->next) {
+		GtkWidget* pop = GTK_WIDGET(l->data);
+		GtkWidget* child = GTK_IS_BIN(pop) ? gtk_bin_get_child(GTK_BIN(pop)) : nullptr;
+		if (pop == after || !gtk_widget_get_mapped(pop) || !child || !GTK_IS_MENU(child)) continue;
+		found = pop;
+	}
+	g_list_free(all);
+	return found;
+}
+
+// Every row of an open menu (in `pop`, its window), as it is and lit in
+// turn (the pointer on it), read as drawn; `deeper`: a row with a submenu
+// opens it and its rows are read too.
+void readMenu(GtkWidget* pop, const std::string& where, StateTally& plain, StateTally& lit, bool deeper) {
+	GtkWidget* menu = gtk_bin_get_child(GTK_BIN(pop));
+	std::vector<GtkWidget*> items;
+	GList* kids = gtk_container_get_children(GTK_CONTAINER(menu));
+	for (GList* k = kids; k; k = k->next) {
+		GtkWidget* it = GTK_WIDGET(k->data);
+		if (GTK_IS_MENU_ITEM(it) && !GTK_IS_SEPARATOR_MENU_ITEM(it) && gtk_widget_get_visible(it)) items.push_back(it);
+	}
+	g_list_free(kids);
+	gtk_menu_shell_deselect(GTK_MENU_SHELL(menu));
+	pump(60);
+	auto readItem = [&](GtkWidget* it, const Shot& shot, StateTally& t, const char* how) {
+		std::vector<GtkWidget*> texts;
+		textsIn(it, texts);
+		walk(it, [&](GtkWidget* x) { if (GTK_IS_ACCEL_LABEL(x) && std::find(texts.begin(), texts.end(), x) == texts.end()) texts.push_back(x); });
+		for (GtkWidget* tx : texts) {
+			Reading r;
+			if (!readDrawn(pop, shot, tx, r)) continue;
+			t.n++;
+			t.worst = std::min(t.worst, r.ratio);
+			if (r.ratio < 4.5) {
+				t.bad++;
+				printf("  hard to read in %s, %s: %s: %s on %s, %.2f:1\n", where.c_str(), how, textOrKind(tx).c_str(), hex(r.fg).c_str(), hex(r.bg).c_str(), r.ratio);
+			}
+		}
+	};
+	{
+		Shot shot;
+		drawShot(pop, shot);
+		for (GtkWidget* it : items) if (gtk_widget_is_sensitive(it)) readItem(it, shot, plain, "a row");
+	}
+	for (GtkWidget* it : items) {
+		if (!gtk_widget_is_sensitive(it)) continue;
+		gtk_menu_shell_select_item(GTK_MENU_SHELL(menu), it);
+		pump(50);
+		Shot shot;
+		drawShot(pop, shot);
+		readItem(it, shot, lit, "a row lit (the pointer on it)");
+		GtkWidget* sub = gtk_menu_item_get_submenu(GTK_MENU_ITEM(it));
+		if (deeper && sub) {
+			g_signal_emit_by_name(it, "activate-item");   // opens its submenu now
+			pump(250);
+			GtkWidget* subPop = gtk_widget_get_toplevel(sub);
+			if (subPop && gtk_widget_get_mapped(subPop)) {
+				const char* label = gtk_menu_item_get_label(GTK_MENU_ITEM(it));
+				readMenu(subPop, where + " > " + (label ? label : "a submenu"), plain, lit, false);
+				// The parent row stays lit with its submenu open: read again.
+				Shot again;
+				drawShot(pop, again);
+				readItem(it, again, lit, "a row with its submenu open");
+			}
+			gtk_menu_shell_deselect(GTK_MENU_SHELL(sub));
+			gtk_menu_popdown(GTK_MENU(sub));
+			pump(80);
+		}
+	}
+	gtk_menu_shell_deselect(GTK_MENU_SHELL(menu));
+}
+
+// A dropdown on `root`, opened, its rows read as they are and lit in turn.
+void checkDropdownList(GtkWidget* combo, const std::string& where) {
+	gtk_combo_box_popup(GTK_COMBO_BOX(combo));
+	pump(400);
+	GtkWidget* pop = openMenuWindow();
+	if (!pop) { expect(false, where + ": a dropdown's list opens"); return; }
+	StateTally plain, lit;
+	readMenu(pop, where + "'s dropdown", plain, lit, false);
+	gtk_combo_box_popdown(GTK_COMBO_BOX(combo));
+	pump(200);
+	expect(plain.n > 0 && plain.bad == 0 && lit.n > 0 && lit.bad == 0,
+	       format("%s: a dropdown's list, all %d rows as they are and %d lit read at 4.5:1 or better (the lowest %.2f:1, lit %.2f:1)", where.c_str(),
+	              plain.n, lit.n, plain.n ? plain.worst : 0.0, lit.n ? lit.worst : 0.0));
+}
+
 // ---- Fitting ---------------------------------------------------------------------------
 
 bool isControlLike(GtkWidget* w) { return GTK_IS_COMBO_BOX(w) || GTK_IS_BUTTON(w) || GTK_IS_SCALE(w); }
@@ -213,7 +465,24 @@ bool inside(const GdkRectangle& r, const GdkRectangle& area) {
 std::string rect(const GdkRectangle& r) { return format("%dx%d at (%d,%d)", r.width, r.height, r.x, r.y); }
 
 void checkFits(GtkWidget* win, const std::string& where) {
-	const GdkRectangle area = workArea(win), f = frameOf(win);
+	const GdkRectangle area = workArea(win);
+	// Never more than the room it was given (usableArea), whatever its parts ask for.
+	const GdkRectangle room = usableArea(win);
+	int w = 0, h = 0;
+	gtk_window_get_size(GTK_WINDOW(win), &w, &h);
+	expect(w > 0 && w <= room.width && h <= room.height,
+	       format("%s: the window, %dx%d with its own title bar, is no bigger than the %dx%d it has room for", where.c_str(), w, h, room.width, room.height));
+	if (onWayland()) {
+		// The desktop places it (an app can't, nor read where), and may put a
+		// title bar of its own over it and a panel it doesn't tell GTK of:
+		// all of that has to fit.
+		const int titleBar = 36, panel = 44;
+		expect(w <= area.width && h + titleBar + panel <= area.height,
+		       format("%s: on Wayland, the window, %dx%d, with room for a title bar the desktop draws (%d) and a panel (%d), fits the %dx%d screen",
+		              where.c_str(), w, h, titleBar, panel, area.width, area.height));
+		return;
+	}
+	const GdkRectangle f = frameOf(win);
 	expect(f.width > 0 && inside(f, area), where + ": the window, " + rect(f) + ", is on the screen's " + rect(area));
 }
 
@@ -400,6 +669,210 @@ void checkWheelEverywhere() {
 
 }  // namespace
 
+// --menu-check: every menu's text, as it is and lit, as drawn (see Settings.h).
+int menuCheck(CircuitWindow* w, const std::string& dir, const std::string& tag) {
+	setvbuf(stdout, nullptr, _IOLBF, 0);
+	gDir = dir;
+	gTag = tag.empty() ? std::string("screen") : tag;
+	if (!dir.empty()) g_mkdir_with_parents(dir.c_str(), 0755);
+	printf("menu-check: %s, the %s theme, the app %s, the accent's text %s\n", gTag.c_str(), themeName().c_str(), chrome().dark ? "dark" : "light",
+	       chrome().onAccent().r > 0.5f ? "white" : "dark");
+	GtkWidget* top = GTK_WIDGET(w->window());
+	gtk_window_present(w->window());
+	pump(400);
+	MenuRow* row = w->menuRowWidget();
+	GtkWidget* bar = row ? row->bar() : nullptr;
+	expect(bar && showing(bar), "the window has its menu bar");
+	if (!bar) return 1;
+	std::vector<GtkWidget*> titles;
+	{
+		GList* kids = gtk_container_get_children(GTK_CONTAINER(bar));
+		for (GList* k = kids; k; k = k->next) if (GTK_IS_MENU_ITEM(k->data) && gtk_widget_get_visible(GTK_WIDGET(k->data))) titles.push_back(GTK_WIDGET(k->data));
+		g_list_free(kids);
+	}
+	// The titles: as they are, and lit with the pointer on them (no menu open).
+	{
+		StateTally plain, lit;
+		Shot shot;
+		drawShot(top, shot);
+		for (GtkWidget* t : titles) {
+			std::vector<GtkWidget*> texts;
+			textsIn(t, texts);
+			for (GtkWidget* x : texts) {
+				Reading r;
+				if (!readDrawn(top, shot, x, r)) continue;
+				plain.n++;
+				plain.worst = std::min(plain.worst, r.ratio);
+				if (r.ratio < 4.5) { plain.bad++; printf("  hard to read: the title %s: %s on %s, %.2f:1\n", textOrKind(x).c_str(), hex(r.fg).c_str(), hex(r.bg).c_str(), r.ratio); }
+			}
+		}
+		readInState(top, titles, GTK_STATE_FLAG_PRELIGHT, "a title lit (:hover)", "the menu bar", lit);
+		expect(plain.n == (int)titles.size() && plain.bad == 0 && lit.n == (int)titles.size() && lit.bad == 0,
+		       format("the menu bar's %zu titles read at 4.5:1 or better, as they are and lit (the lowest %.2f:1, lit %.2f:1)", titles.size(),
+		              plain.n ? plain.worst : 0.0, lit.n ? lit.worst : 0.0));
+	}
+	// Each menu open (as Alt and its letter opens it), its title lit over it,
+	// and every row as it is and lit, and every submenu's.
+	int opened = 0;
+	for (size_t i = 0; i < titles.size(); i++) {
+		const char* name = gtk_menu_item_get_label(GTK_MENU_ITEM(titles[i]));
+		const std::string where = std::string("the ") + (name ? name : "?") + " menu";
+		if (!row->openMenu((int)i)) continue;
+		pump(450);
+		GtkWidget* pop = openMenuWindow();
+		if (!pop) { expect(false, where + " opens"); continue; }
+		opened++;
+		shot(format("menu-%zu", i));
+		StateTally title, plain, lit;
+		{
+			Shot shot2;
+			drawShot(top, shot2);
+			std::vector<GtkWidget*> texts;
+			textsIn(titles[i], texts);
+			for (GtkWidget* x : texts) {
+				Reading r;
+				if (!readDrawn(top, shot2, x, r)) continue;
+				title.n++;
+				title.worst = std::min(title.worst, r.ratio);
+				if (r.ratio < 4.5) { title.bad++; printf("  hard to read: %s's title, open: %s on %s, %.2f:1\n", where.c_str(), hex(r.fg).c_str(), hex(r.bg).c_str(), r.ratio); }
+			}
+		}
+		readMenu(pop, where, plain, lit, true);
+		expect(title.n > 0 && title.bad == 0, format("%s: its title, lit while it's open, reads at %.2f:1", where.c_str(), title.n ? title.worst : 0.0));
+		expect(plain.n > 0 && plain.bad == 0 && lit.n > 0 && lit.bad == 0,
+		       format("%s: all %d pieces of text as they are and %d lit (the pointer on the row) read at 4.5:1 or better (the lowest %.2f:1, lit %.2f:1)",
+		              where.c_str(), plain.n, lit.n, plain.n ? plain.worst : 0.0, lit.n ? lit.worst : 0.0));
+		gtk_menu_shell_cancel(GTK_MENU_SHELL(bar));
+		pump(250);
+	}
+	expect(opened == (int)titles.size() && opened >= 6, format("every menu opened (%d of %zu)", opened, titles.size()));
+	// The canvas's right-click menus, as the app makes them: on the canvas, and on a part.
+	for (int target : { -1, (int)CL_CONTEXT_GATE }) {
+		const std::string where = target < 0 ? "the canvas's right-click menu" : "a part's right-click menu";
+		GtkWidget* before = openMenuWindow();
+		// (A part's menu with parts selected, so its rows are live.)
+		if (target >= 0) w->runAction("win.select-all");
+		w->showContextMenu(target, 0, 0, nullptr);
+		pump(400);
+		GtkWidget* pop = openMenuWindow(before);
+		if (!pop) { expect(false, where + " opens"); continue; }
+		if (target < 0) shot("menu-context");
+		StateTally plain, lit;
+		readMenu(pop, where, plain, lit, false);
+		expect(plain.n > 0 && plain.bad == 0 && lit.n > 0 && lit.bad == 0,
+		       format("%s: all %d pieces of text as they are and %d lit read at 4.5:1 or better (the lowest %.2f:1, lit %.2f:1)", where.c_str(), plain.n,
+		              lit.n, plain.n ? plain.worst : 0.0, lit.n ? lit.worst : 0.0));
+		gtk_menu_shell_deactivate(GTK_MENU_SHELL(gtk_bin_get_child(GTK_BIN(pop))));
+		pump(250);
+	}
+	// A menu with every kind of row the app's menus have (ticks, dots, a
+	// shortcut, a submenu, one greyed), and a dropdown's list, in a window
+	// of their own; and a menu drawn as a popover.
+	{
+		GtkWidget* win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+		gtk_window_set_default_size(GTK_WINDOW(win), 360, 240);
+		GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+		GtkWidget* combo = gtk_combo_box_text_new();
+		for (const char* t : { "Short intro", "Full intro", "Classic launch screen", "None" }) gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), t);
+		gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+		gtk_widget_set_halign(combo, GTK_ALIGN_START);
+		GtkWidget* anchor = gtk_button_new_with_label("Anchor");
+		gtk_widget_set_halign(anchor, GTK_ALIGN_START);
+		gtk_box_pack_start(GTK_BOX(box), combo, FALSE, FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(box), anchor, FALSE, FALSE, 0);
+		gtk_container_add(GTK_CONTAINER(win), box);
+		gtk_widget_show_all(win);
+		pump(400);
+		checkDropdownList(combo, "a dropdown in a window of its own");
+
+		GtkWidget* menu = gtk_menu_new();
+		GtkAccelGroup* accel = gtk_accel_group_new();
+		gtk_menu_set_accel_group(GTK_MENU(menu), accel);
+		GtkWidget* plainItem = gtk_menu_item_new_with_mnemonic("_Rotate");
+		GtkWidget* keyed = gtk_menu_item_new_with_mnemonic("_Copy");
+		gtk_widget_add_accelerator(keyed, "activate", accel, GDK_KEY_c, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+		GtkWidget* tick = gtk_check_menu_item_new_with_mnemonic("_Show the Grid");
+		gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(tick), TRUE);
+		GtkWidget* dot = gtk_check_menu_item_new_with_mnemonic("_Gates and Wires");
+		gtk_check_menu_item_set_draw_as_radio(GTK_CHECK_MENU_ITEM(dot), TRUE);
+		gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(dot), TRUE);
+		GtkWidget* parent = gtk_menu_item_new_with_mnemonic("Co_nnect to");
+		GtkWidget* sub = gtk_menu_new();
+		for (const char* t : { "Page 1", "Page 2" }) {
+			GtkWidget* it = gtk_check_menu_item_new_with_label(t);
+			gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(it), t[5] == '1');
+			gtk_menu_shell_append(GTK_MENU_SHELL(sub), it);
+		}
+		gtk_menu_item_set_submenu(GTK_MENU_ITEM(parent), sub);
+		GtkWidget* off = gtk_menu_item_new_with_mnemonic("_Unlock Part");
+		gtk_widget_set_sensitive(off, FALSE);
+		for (GtkWidget* it : { plainItem, keyed, tick, dot }) gtk_menu_shell_append(GTK_MENU_SHELL(menu), it);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), parent);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), off);
+		gtk_menu_attach_to_widget(GTK_MENU(menu), win, nullptr);
+		gtk_widget_show_all(menu);
+		gtk_menu_popup_at_widget(GTK_MENU(menu), anchor, GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, nullptr);
+		pump(400);
+		if (GtkWidget* pop = openMenuWindow()) {
+			shot("menu-kinds");
+			StateTally plain, lit;
+			readMenu(pop, "a menu of every kind of row", plain, lit, true);
+			expect(plain.n > 0 && plain.bad == 0 && lit.n > 0 && lit.bad == 0,
+			       format("a menu of every kind of row (ticks, dots, a shortcut, a submenu): all %d pieces of text as they are and %d lit read at "
+			              "4.5:1 or better (the lowest %.2f:1, lit %.2f:1)",
+			              plain.n, lit.n, plain.n ? plain.worst : 0.0, lit.n ? lit.worst : 0.0));
+			gtk_menu_popdown(GTK_MENU(menu));
+			pump(200);
+		} else {
+			expect(false, "a menu of every kind of row opens");
+		}
+		g_object_unref(accel);
+		gtk_widget_destroy(menu);
+		gtk_widget_destroy(win);
+		pump(200);
+	}
+	// A menu drawn as a popover (a model's menu, from a button), its rows as they are and lit.
+	{
+		GMenu* model = g_menu_new();
+		g_menu_append(model, "Zoom to Fit", "win.zoom-fit");
+		g_menu_append(model, "Select All", "win.select-all");
+		g_menu_append(model, "Learn Logic Online…", "app.learn-online");
+		GtkWidget* relative = row->widget();
+		GtkWidget* pover = gtk_popover_new_from_model(relative, G_MENU_MODEL(model));
+		gtk_popover_set_transitions_enabled(GTK_POPOVER(pover), FALSE);
+		gtk_popover_popup(GTK_POPOVER(pover));
+		pump(500);
+		std::vector<GtkWidget*> buttons;
+		walk(pover, [&](GtkWidget* x) { if (G_TYPE_CHECK_INSTANCE_TYPE(x, g_type_from_name("GtkModelButton")) && showing(x)) buttons.push_back(x); });
+		StateTally plain, lit;
+		if (!buttons.empty()) {
+			Shot s0;
+			drawShot(pover, s0);
+			for (GtkWidget* b : buttons) {
+				std::vector<GtkWidget*> texts;
+				textsIn(b, texts);
+				for (GtkWidget* x : texts) {
+					Reading r;
+					if (!readDrawn(pover, s0, x, r)) continue;
+					plain.n++;
+					plain.worst = std::min(plain.worst, r.ratio);
+					if (r.ratio < 4.5) { plain.bad++; printf("  hard to read in a popover: %s: %s on %s, %.2f:1\n", textOrKind(x).c_str(), hex(r.fg).c_str(), hex(r.bg).c_str(), r.ratio); }
+				}
+			}
+			readInState(pover, buttons, GTK_STATE_FLAG_PRELIGHT, "a row lit (:hover)", "a popover", lit);
+		}
+		expect(buttons.size() == 3 && plain.n > 0 && plain.bad == 0 && lit.n > 0 && lit.bad == 0,
+		       format("a menu as a popover: its %zu rows read at 4.5:1 or better, as they are and lit (the lowest %.2f:1, lit %.2f:1)", buttons.size(),
+		              plain.n ? plain.worst : 0.0, lit.n ? lit.worst : 0.0));
+		gtk_widget_destroy(pover);
+		g_object_unref(model);
+		pump(200);
+	}
+	printf("%s\n", gFailed == 0 ? "menu-check: all passed" : format("menu-check: %d failed", gFailed).c_str());
+	return gFailed == 0 ? 0 : 1;
+}
+
 int check(CircuitWindow* w, const std::string& dir, const std::string& tag) {
 	setvbuf(stdout, nullptr, _IOLBF, 0);
 	gDir = dir;
@@ -454,6 +927,31 @@ int check(CircuitWindow* w, const std::string& dir, const std::string& tag) {
 		}
 		if (sc && pg) checkClearOfBar(sc, where);
 		checkText(win, where);
+		checkStates(win, where);
+		// A dropdown's list open (the first on the page, and "When CedarLogic opens").
+		{
+			std::vector<GtkWidget*> combos;
+			walk(win, [&](GtkWidget* x) {
+				if (GTK_IS_COMBO_BOX(x) && showing(x) && gtk_widget_is_sensitive(x) &&
+				    (combos.empty() || strcmp(gtk_widget_get_name(x), "launch-choice") == 0))
+					combos.push_back(x);
+			});
+			// (Not on Wayland: a menu there opens only from a real click, which this has none of.)
+			if (onWayland()) combos.clear();
+			for (GtkWidget* c : combos) {
+				if (GtkWidget* sc2 = scrollerOf(c)) {
+					// In view, as a pointer would need it.
+					GtkAdjustment* v = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sc2));
+					int cx = 0, cy = 0;
+					if (GtkWidget* content = gtk_bin_get_child(GTK_BIN(sc2))) gtk_widget_translate_coordinates(c, content, 0, 0, &cx, &cy);
+					gtk_adjustment_set_value(v, std::max(0.0, std::min(gtk_adjustment_get_upper(v) - gtk_adjustment_get_page_size(v),
+					                                                   cy - gtk_adjustment_get_page_size(v) / 3)));
+					pump(80);
+				}
+				checkDropdownList(c, where + (strcmp(gtk_widget_get_name(c), "launch-choice") == 0 ? " (When CedarLogic opens)" : ""));
+			}
+			if (GtkWidget* sc2 = pageScroller()) gtk_adjustment_set_value(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sc2)), 0);
+		}
 		checkWheel(win, where);
 		if (window() != win) { expect(false, where + ": Settings is still open after the wheel"); return 1; }
 	}
@@ -467,6 +965,7 @@ int check(CircuitWindow* w, const std::string& dir, const std::string& tag) {
 		shot("customize");
 		checkFits(cw, "Customize Actions");
 		checkText(cw, "Customize Actions");
+		checkStates(cw, "Customize Actions");
 		checkWheel(cw, "Customize Actions");
 		if (actions::customizeWindow()) gtk_widget_destroy(actions::customizeWindow());
 		pump(100);

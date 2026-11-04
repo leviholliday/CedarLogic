@@ -42,6 +42,12 @@ GtkWidget* currentPage();
 // screen, pictured into <folder> as <tag>-settings-N.png and checked (they
 // fit, read at 4.5:1, and the wheel never changes a setting). 0 if all passed.
 int check(CircuitWindow* w, const std::string& dir, const std::string& tag);
+// --menu-check <folder> <tag>: every menu's text read off the screen as GTK
+// draws it, as it is and lit (the pointer on it): the menu bar's titles, each
+// menu and its submenus, the canvas's and a part's right-click menus, a
+// menu of every kind of row, a dropdown's list, and a menu as a popover; at
+// 4.5:1 or better. Pictures of the open menus go in <folder>. 0 if all passed.
+int menuCheck(CircuitWindow* w, const std::string& dir, const std::string& tag);
 }
 
 #endif  // CL_LINUX_SETTINGS_H
