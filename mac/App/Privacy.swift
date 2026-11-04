@@ -87,24 +87,59 @@ enum PrivacyConsent {
         return w
     }
 
-    static func present(on w: NSWindow) {
+    /// `unseen`: a self-test's, drawn fully transparent (it still lays out and slides in).
+    ///
+    /// Its size is worked out once, before it goes up, and fixed: as tall as
+    /// the taller of its two ways (Yes / No thanks, or the two switches), so
+    /// nothing in it can resize the window. Build 1736 let SwiftUI size the
+    /// sheet as it went (an NSHostingController with .preferredContentSize):
+    /// its wrapped text's height asked for a new window size while the sheet
+    /// slid in, each resize asked for another constraints pass, and AppKit
+    /// threw ("more Update Constraints in Window passes than there are
+    /// views") and the app crashed, on first launch and after an update.
+    static func present(on w: NSWindow, unseen: Bool = false) {
         guard sheet == nil else { return }
-        let host = NSHostingController(rootView: PrivacyAskSheet())
-        host.sizingOptions = [.preferredContentSize]
-        let s = NSWindow(contentViewController: host)
+        let size = sheetSize()
+        let host = NSHostingView(rootView: PrivacyAskSheet(height: size.height))
+        host.sizingOptions = []
+        host.frame = NSRect(origin: .zero, size: size)
+        host.autoresizingMask = [.width, .height]
+        let s = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered, defer: false)
+        s.isReleasedWhenClosed = false
+        s.contentView = host
+        s.setContentSize(size)
+        s.contentMinSize = size
+        s.contentMaxSize = size
         s.identifier = NSUserInterfaceItemIdentifier("cl.privacyAsk")
         s.appearance = NSAppearance(named: .darkAqua)
+        if unseen { s.alphaValue = 0; s.ignoresMouseEvents = true }
         sheet = s
         sheetParent = w
         w.beginSheet(s)
     }
 
+    /// 640 wide; as tall as the taller of its two ways, measured off screen.
+    static func sheetSize() -> NSSize {
+        func height(_ choosing: Bool) -> CGFloat {
+            let m = NSHostingController(rootView: PrivacyAskSheet(choosing: choosing))
+            m.sizingOptions = []
+            return m.sizeThatFits(in: NSSize(width: PrivacyAskSheet.width, height: 2000)).height
+        }
+        let h = ceil(max(height(false), height(true)))
+        return NSSize(width: PrivacyAskSheet.width, height: min(max(h, 320), 900))
+    }
+
     /// The sheet's buttons.
     static func sheetAnswered(_ choice: PrivacyChoice, crash: Bool, usage: Bool) {
         answer(choice, crash: crash, usage: usage)
+        closeSheet()
+        ShowMeAround.shared.startWhenReady()
+    }
+
+    /// The sheet away (answered, or a self-test done with it).
+    static func closeSheet() {
         if let s = sheet { (sheetParent ?? s.sheetParent)?.endSheet(s); s.orderOut(nil) }
         sheet = nil
-        ShowMeAround.shared.startWhenReady()
     }
 }
 
@@ -258,18 +293,27 @@ struct PrivacyChoiceStyle: ButtonStyle {
 
 /// The updaters' sheet: the same question, over the circuit window. Escape is No thanks.
 struct PrivacyAskSheet: View {
+    static let width: CGFloat = 640
+    /// Fixed by PrivacyConsent.present (nil: as tall as it wants, to measure it).
+    var height: CGFloat? = nil
+    /// The two switches showing at first (only to measure that way).
+    var choosing = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if CrashReports.allowed == true && PrivacyConsent.crashOffered {
                 Label("Crash reports are on, as you chose before. This adds usage stats, if you'd like.", systemImage: "checkmark.circle")
                     .font(.system(size: 11.5)).foregroundStyle(BrandText.secondary)
             }
-            PrivacyAskView(onAnswer: { c, crash, usage in PrivacyConsent.sheetAnswered(c, crash: crash, usage: usage) }, compact: true)
+            PrivacyAskView(onAnswer: { c, crash, usage in PrivacyConsent.sheetAnswered(c, crash: crash, usage: usage) },
+                           compact: true, choosing: choosing)
         }
         .padding(.horizontal, 36).padding(.vertical, 30)
-        .frame(width: 640)
+        .frame(width: Self.width, height: height, alignment: .top)
         .background(BrandBackground())
-        .preferredColorScheme(.dark)
+        // Its own window's look (set on it too), never the circuit window's
+        // under it: .preferredColorScheme would reach for that one.
+        .environment(\.colorScheme, .dark)
         .tint(Brand.neon)
         .onExitCommand { PrivacyConsent.sheetAnswered(.no, crash: CrashReports.allowed ?? false, usage: false) }
     }
