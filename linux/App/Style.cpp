@@ -7,6 +7,8 @@
 #include "Chrome.h"
 
 #include <pango/pangocairo.h>
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <string>
 
@@ -151,8 +153,6 @@ void applyStyle() {
 	// The welcome's name box: a bare entry on its drawn field.
 	s += "#welcome-name { background: transparent; border: none; box-shadow: none; outline: none; color: rgb(242,242,242); "
 	     "caret-color: rgb(56,255,107); font-size: 15px; min-height: 28px; }\n";
-	// Settings: paper, with quiet hints and key caps.
-	s += "#settings, #settings > box { background-color: " + css(paper) + "; }\n";
 	// Every label in the app's own colours (not left to the desktop theme),
 	// and the hints a solid grey strong enough to read in small type.
 	const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
@@ -171,52 +171,82 @@ void applyStyle() {
 	     "; border-radius: 3px; min-height: 6px; }\n";
 	s += "dialog progressbar trough { background-image: none; background-color: " + css(withAlpha(text, 0.10f)) +
 	     "; border: none; border-radius: 3px; min-height: 6px; }\n";
-	s += "#settings .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
-	// Unticked boxes and rings outlined, so they show on a dark page too.
-	s += "#settings check:not(:checked), #settings radio:not(:checked), #gate-settings check:not(:checked) { background-image: none; "
+	s += "#gate-settings check:not(:checked) { background-image: none; "
 	     "background-color: " + css(fieldFill) + "; border: 1px solid " + css(withAlpha(text, 0.38f)) + "; box-shadow: none; }\n";
-	s += "#settings check:not(:checked) { border-radius: 4px; } #settings radio:not(:checked) { border-radius: 50%; }\n";
 	// Selected text in any field: the accent, not the desktop theme's colour.
 	s += "entry selection, textview text selection, label selection, spinbutton selection { background-color: " + css(c.accent()) +
 	     "; color: " + css(c.onAccent()) + "; }\n";
 	// Quieter text (a slider's value, notes) dims less than GTK's 55%.
 	s += ".dim-label { opacity: 0.8; }\n";
-	s += "#settings button:disabled, #settings button:disabled label, #settings check:disabled + label { color: " + css(withAlpha(text, 0.6f)) +
-	     "; }\n";
-	s += "#settings .heading, #settings .style-name { font-weight: bold; }\n";
-	s += "#settings .section { font-size: 0.8em; font-weight: bold; color: " + css(c.accent()) + "; }\n";
-	s += "#settings .recording { color: " + css(c.accent()) + "; font-size: 0.9em; }\n";
 	s += ".keycap { border-radius: 5px; padding: 1px 6px; min-width: 14px; font-size: 0.85em; font-weight: bold; background-color: " +
 	     css(withAlpha(text, 0.07f)) + "; border: 1px solid " + css(withAlpha(text, 0.16f)) + "; }\n";
-	s += "#settings #shortcut-keys { padding: 2px 4px; border-radius: 6px; background-color: transparent; min-height: 24px; }\n";
-	s += "#settings #shortcut-keys:hover { background-color: " + css(withAlpha(text, 0.06f)) + "; }\n";
-	s += "#settings entry, #settings combobox button, #settings spinbutton { border-radius: 7px; background-image: none; background-color: " +
-	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
-	s += "#settings entry:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
-	s += "#settings button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
-	     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; }\n";
-	s += "#settings button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
-	s += "#settings scale highlight { background-color: " + css(c.accent()) + "; border: none; }\n";
-	// The Actions rail's Customize Actions window: Settings' look.
-	s += "#customize-actions, #customize-actions > box { background-color: " + css(paper) + "; }\n";
-	s += "#customize-actions label { color: " + css(text) + "; }\n";
-	s += "#customize-actions .hint { font-size: 0.9em; color: " + css(hint) + "; }\n";
-	s += "#customize-actions .sheet-title { font-weight: bold; font-size: 15px; }\n";
-	s += "#customize-actions check:not(:checked) { background-image: none; background-color: " + css(fieldFill) + "; border: 1px solid " +
-	     css(withAlpha(text, 0.38f)) + "; box-shadow: none; border-radius: 4px; }\n";
-	s += "#customize-actions entry, #customize-actions combobox button { border-radius: 7px; background-image: none; background-color: " +
-	     css(fieldFill) + "; border: 1px solid " + css(line) + "; box-shadow: none; min-height: 28px; color: " + css(text) + "; }\n";
-	s += "#customize-actions entry:focus { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
-	s += "#customize-actions button { border-radius: 8px; background-image: none; background-color: " + css(withAlpha(text, 0.07f)) +
-	     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; }\n";
-	s += "#customize-actions button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
-	s += "#customize-actions button.suggested-action { background-color: " + css(c.accent()) + "; }\n";
-	s += "#customize-actions button.suggested-action label { color: " + css(c.onAccent()) + "; }\n";
-	s += "#customize-actions button:disabled label { color: " + css(withAlpha(text, 0.6f)) + "; }\n";
-	// Its list (and Settings > Actions'): rows on a card, the selected one in the accent's tint.
-	s += "#actions-list { background-color: " + css(fieldFill) + "; }\n";
-	s += "#actions-list row:selected { background-color: " + css(withAlpha(c.accent(), 0.16f)) + "; }\n";
-	s += "#actions-list row:selected label { color: " + css(text) + "; }\n";
+	// Settings and Customize Actions: the app's own paper, ink and fields
+	// throughout, set on every part that shows (text, dropdowns, fields,
+	// buttons, icons, lists, sliders), so nothing is left to the desktop's
+	// theme -- a dark one under the light app, or a light one under the dark
+	// app, would otherwise paint some of it in its own colours, and words
+	// went unreadable. Hints a solid grey, not faded; text in the accent
+	// (section names) darkened or lightened to read at 4.5:1.
+	{
+		const Color accentText = readableOn(c.accent(), paper);
+		const Color hover = withAlpha(text, 0.07f);
+		for (const char* id : { "#settings", "#customize-actions" }) {
+			const std::string w = id;
+			auto all = [&](std::initializer_list<const char*> parts) {
+				std::string sel;
+				for (const char* p : parts) sel += (sel.empty() ? "" : ", ") + w + (*p ? " " : "") + p;
+				return sel;
+			};
+			s += all({ "", "> box" }) + " { background-color: " + css(paper) + "; }\n";
+			s += all({ "scrolledwindow", "viewport", "scrolledwindow undershoot", "scrolledwindow overshoot" }) +
+			     " { background-color: transparent; background-image: none; }\n";
+			s += w + " viewport { border: none; box-shadow: none; }\n";
+			s += all({ "label", "cellview", "image", "arrow" }) + " { color: " + css(text) + "; -gtk-icon-shadow: none; text-shadow: none; }\n";
+			s += all({ ".hint", ".dim-label" }) + " { color: " + css(hint) + "; opacity: 1; }\n";
+			s += all({ ".hint" }) + " { font-size: 0.9em; }\n";
+			s += all({ ".heading", ".style-name", ".sheet-title" }) + " { font-weight: bold; }\n";
+			s += w + " .sheet-title { font-size: 15px; }\n";
+			s += w + " .section { font-size: 0.8em; font-weight: bold; color: " + css(accentText) + "; }\n";
+			s += w + " .recording { color: " + css(accentText) + "; font-size: 0.9em; }\n";
+			// Unticked boxes and rings outlined, so they show on a dark page too.
+			s += all({ "check:not(:checked)", "radio:not(:checked)" }) + " { background-image: none; background-color: " + css(fieldFill) +
+			     "; border: 1px solid " + css(withAlpha(text, 0.38f)) + "; box-shadow: none; }\n";
+			s += w + " check:not(:checked) { border-radius: 4px; } " + w + " radio:not(:checked) { border-radius: 50%; }\n";
+			// Fields and dropdowns: filled, rounded, lit in the accent when focused.
+			s += all({ "entry", "combobox button", "spinbutton", "spinbutton entry" }) +
+			     " { border-radius: 7px; background-image: none; background-color: " + css(fieldFill) + "; border: 1px solid " + css(line) +
+			     "; box-shadow: none; min-height: 28px; color: " + css(text) + "; text-shadow: none; }\n";
+			s += all({ "spinbutton entry" }) + " { border: none; }\n";
+			s += all({ "combobox button:hover", "combobox button:checked" }) + " { background-color: " + css(mixColor(fieldFill, text, 0.06f)) + "; }\n";
+			s += all({ "entry:focus", "spinbutton:focus" }) + " { border-color: " + css(c.accent()) + "; box-shadow: 0 0 0 1px " + css(c.accent()) + "; }\n";
+			s += all({ "entry selection", "spinbutton selection", "label selection" }) + " { background-color: " + css(c.accent()) + "; color: " +
+			     css(c.onAccent()) + "; }\n";
+			// Buttons: soft rounded, the suggested one in the accent.
+			s += w + " button { border-radius: 8px; background-image: none; background-color: " + css(hover) +
+			     "; border: none; box-shadow: none; min-height: 28px; padding: 0 12px; text-shadow: none; color: " + css(text) + "; }\n";
+			s += w + " button:hover { background-color: " + css(withAlpha(text, 0.12f)) + "; }\n";
+			s += all({ "button.suggested-action", "button.suggested-action:hover" }) + " { background-color: " + css(c.accent()) + "; color: " +
+			     css(c.onAccent()) + "; }\n";
+			s += all({ "button.suggested-action label", "button.suggested-action image" }) + " { color: " + css(c.onAccent()) + "; }\n";
+			s += all({ "button:disabled", "button:disabled label", "check:disabled + label", "radio:disabled + label", "label:disabled" }) +
+			     " { color: " + css(withAlpha(text, 0.6f)) + "; }\n";
+			// Sliders in the accent, on a plain track.
+			s += w + " scale trough { background-image: none; background-color: " + css(withAlpha(text, 0.16f)) + "; border: none; }\n";
+			s += w + " scale highlight { background-image: none; background-color: " + css(c.accent()) + "; border: none; }\n";
+			s += w + " scale slider { background-image: none; background-color: " + css(dark ? rgb255(210, 215, 224) : colorF(1, 1, 1)) +
+			     "; border: 1px solid " + css(withAlpha(text, 0.3f)) + "; box-shadow: none; }\n";
+			// Lists (Settings > Actions, Customize Actions): rows on a card.
+			s += all({ "list", "row" }) + " { background-image: none; background-color: transparent; color: " + css(text) + "; }\n";
+			s += w + " row:hover { background-color: " + css(withAlpha(text, 0.05f)) + "; }\n";
+			s += w + " row:selected, " + w + " row:selected:hover { background-color: " + css(withAlpha(c.accent(), 0.16f)) + "; }\n";
+			s += w + " #actions-list { background-color: " + css(fieldFill) + "; }\n";
+			s += w + " scrolledwindow.frame { border: 1px solid " + css(withAlpha(text, 0.14f)) + "; }\n";
+			s += w + " separator { background-color: " + css(line) + "; }\n";
+			s += w + " flowboxchild { padding: 0; background-color: transparent; background-image: none; }\n";
+		}
+		s += "#settings #shortcut-keys { padding: 2px 4px; border-radius: 6px; background-color: transparent; min-height: 24px; }\n";
+		s += "#settings #shortcut-keys:hover { background-color: " + css(withAlpha(text, 0.06f)) + "; }\n";
+	}
 	// A gate's settings: the Mac's sheet, its settings in a card.
 	const Color cardColor = dark ? rgb255(36, 40, 47) : rgb255(255, 255, 255);
 	s += "#gate-settings, #gate-settings > box { background-color: " + css(paper) + "; }\n";
@@ -312,4 +342,76 @@ void readyForKeys(GtkWidget* revealer, GtkWidget* field) {
 	if (child == nullptr || gtk_widget_get_realized(field) || !gtk_widget_get_realized(revealer)) return;
 	gtk_widget_set_child_visible(child, TRUE);
 	gtk_widget_realize(field);
+}
+
+// ---- Contrast ------------------------------------------------------------------------
+
+namespace {
+double linear(float c) { return c <= 0.04045f ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
+double luminance(const Color& c) { return 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b); }
+}  // namespace
+
+double contrastRatio(const Color& a, const Color& b) {
+	const double x = luminance(a), y = luminance(b);
+	return (std::max(x, y) + 0.05) / (std::min(x, y) + 0.05);
+}
+
+Color readableOn(const Color& fg, const Color& bg, double ratio) {
+	const Color solid = withAlpha(fg, 1);
+	if (contrastRatio(solid, bg) >= ratio) return solid;
+	// Darker on a light page, lighter on a dark one, in small steps, keeping its hue.
+	const Color to = luminance(bg) > 0.18 ? colorF(0, 0, 0) : colorF(1, 1, 1);
+	for (int i = 1; i <= 20; i++) {
+		const Color c = mixColor(solid, to, i * 0.05f);
+		if (contrastRatio(c, bg) >= ratio) return c;
+	}
+	return to;
+}
+
+// ---- The mouse wheel over a control ----------------------------------------------------
+
+namespace {
+// Not handled: GTK passes the scroll on to what the control sits in (a
+// scrolled page scrolls), and the control's own handler, which would step
+// its value, never runs.
+gboolean wheelPassesBy(GtkWidget*, GdkEventScroll*) { return FALSE; }
+}  // namespace
+
+void wheelLeavesValuesAlone() {
+	static bool done = false;
+	if (done) return;
+	done = true;
+	// Scrollbars are ranges too, and keep the wheel: only the scales (sliders).
+	for (GType t : { GTK_TYPE_COMBO_BOX, GTK_TYPE_SPIN_BUTTON, GTK_TYPE_SCALE }) {
+		g_type_class_ref(t);   // its signals are known once its class is made (kept for good)
+		g_signal_override_class_handler("scroll-event", t, G_CALLBACK(wheelPassesBy));
+	}
+}
+
+// ---- Room on the screen ------------------------------------------------------------------
+
+GdkRectangle usableArea(GtkWidget* near) {
+	GdkDisplay* d = gdk_display_get_default();
+	GdkMonitor* mon = nullptr;
+	if (d && near) {
+		GtkWidget* top = gtk_widget_get_toplevel(near);
+		if (GdkWindow* gw = gtk_widget_get_window(top)) mon = gdk_display_get_monitor_at_window(d, gw);
+		if (!mon && GTK_IS_WINDOW(top))
+			if (GtkWindow* parent = gtk_window_get_transient_for(GTK_WINDOW(top)))
+				if (GdkWindow* pw = gtk_widget_get_window(GTK_WIDGET(parent))) mon = gdk_display_get_monitor_at_window(d, pw);
+	}
+	if (!mon && d) mon = gdk_display_get_primary_monitor(d);
+	if (!mon && d && gdk_display_get_n_monitors(d) > 0) mon = gdk_display_get_monitor(d, 0);
+	if (!mon) return GdkRectangle{ 0, 0, 4000, 4000 };
+	GdkRectangle work, whole;
+	gdk_monitor_get_workarea(mon, &work);
+	gdk_monitor_get_geometry(mon, &whole);
+	// A margin all round; and where the work area is the whole monitor, room
+	// for a panel at the top or bottom (Raspberry Pi OS's is 36 points).
+	const int margin = 8;
+	const int panel = work.width == whole.width && work.height == whole.height ? 44 : 0;
+	GdkRectangle r{ work.x + margin, work.y + margin + panel / 2, work.width - 2 * margin, work.height - 2 * margin - panel };
+	r.width = std::max(r.width, 320);
+	r.height = std::max(r.height, 240);
+	return r;
 }

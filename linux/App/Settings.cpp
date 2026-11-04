@@ -14,10 +14,34 @@
 #include "Window.h"
 
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace settings {
+
+void formLabel(GtkWidget* l) {
+	gtk_label_set_xalign(GTK_LABEL(l), 1);
+	gtk_label_set_yalign(GTK_LABEL(l), 0);
+	gtk_label_set_justify(GTK_LABEL(l), GTK_JUSTIFY_RIGHT);
+	// Wrapping, and asking for no more than the column: a long name takes two
+	// lines instead of pushing the controls over.
+	gtk_label_set_line_wrap(GTK_LABEL(l), TRUE);
+	gtk_label_set_line_wrap_mode(GTK_LABEL(l), PANGO_WRAP_WORD_CHAR);
+	gtk_label_set_max_width_chars(GTK_LABEL(l), 1);
+	gtk_widget_set_size_request(l, 150, -1);
+	gtk_widget_set_valign(l, GTK_ALIGN_START);
+}
+
+void hintStyle(GtkWidget* h) {
+	gtk_style_context_add_class(gtk_widget_get_style_context(h), "hint");
+	gtk_label_set_xalign(GTK_LABEL(h), 0);
+	gtk_label_set_line_wrap(GTK_LABEL(h), TRUE);
+	gtk_label_set_line_wrap_mode(GTK_LABEL(h), PANGO_WRAP_WORD_CHAR);
+	// Its natural width kept small, so the column's width (not the text's) sets where it wraps.
+	gtk_label_set_max_width_chars(GTK_LABEL(h), 20);
+}
 
 namespace {
 
@@ -26,7 +50,11 @@ const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Actions
 const char* kIcons[] = { "preferences-system-symbolic", "applications-graphics-symbolic", "input-mouse-symbolic",
                          "view-more-horizontal-symbolic", Icon::Rail, "input-keyboard-symbolic", "emblem-synchronizing-symbolic" };
 static_assert(SyncPage == kSyncPage && ActionsPage == kActionsPage && PageCount == 7, "Settings.h names the Actions and Sync pages by number");
+// The window's width (the Mac's) and the page's margins.
 const float kBarH = 78, kWidth = 640;
+const int kMargin = 28;
+// A list on a page (Shortcuts, Actions) is never shorter than this, however small the screen.
+const int kMinList = 150;
 
 // Every window takes the change.
 void apply() {
@@ -104,29 +132,23 @@ struct Rows {
 		grid = gtk_grid_new();
 		gtk_grid_set_row_spacing(GTK_GRID(grid), 12);
 		gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
-		gtk_widget_set_margin_start(grid, 28);
-		gtk_widget_set_margin_end(grid, 28);
+		gtk_widget_set_margin_start(grid, kMargin);
+		gtk_widget_set_margin_end(grid, kMargin);
 		gtk_widget_set_margin_top(grid, 22);
 		gtk_widget_set_margin_bottom(grid, 24);
 	}
 	GtkWidget* add(const char* label, GtkWidget* control, const std::string& hint = "") {
 		GtkWidget* l = gtk_label_new(*label ? (std::string(label) + ":").c_str() : "");
-		gtk_label_set_xalign(GTK_LABEL(l), 1);
-		gtk_label_set_yalign(GTK_LABEL(l), 0);
-		gtk_widget_set_size_request(l, 150, -1);
+		formLabel(l);
 		gtk_widget_set_margin_top(l, 5);
-		gtk_widget_set_valign(l, GTK_ALIGN_START);
 		gtk_grid_attach(GTK_GRID(grid), l, 0, row, 1, 1);
 		GtkWidget* v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+		gtk_widget_set_hexpand(v, TRUE);
 		gtk_box_pack_start(GTK_BOX(v), control, FALSE, FALSE, 0);
 		GtkWidget* h = nullptr;
 		if (!hint.empty()) {
 			h = gtk_label_new(hint.c_str());
-			gtk_style_context_add_class(gtk_widget_get_style_context(h), "hint");
-			gtk_label_set_xalign(GTK_LABEL(h), 0);
-			gtk_label_set_line_wrap(GTK_LABEL(h), TRUE);
-			gtk_label_set_max_width_chars(GTK_LABEL(h), 58);
-			gtk_widget_set_size_request(h, 360, -1);
+			hintStyle(h);
 			gtk_box_pack_start(GTK_BOX(v), h, FALSE, FALSE, 0);
 		}
 		gtk_grid_attach(GTK_GRID(grid), v, 1, row, 1, 1);
@@ -144,10 +166,12 @@ template <class T> GtkWidget* owned(T* d) {
 // ---- The app's colour: a row of swatches ----------------------------------------------
 
 class Swatches : public Drawn {
+	// Centre to centre: the seven fit the value column (150 + 12 + 400 + the margins, of 640).
+	static constexpr int kStep = 56;
 public:
 	Swatches() {
 		create();
-		gtk_widget_set_size_request(area, 7 * 60 + 8, 52);
+		gtk_widget_set_size_request(area, 7 * kStep + 8, 52);
 		gtk_widget_set_halign(area, GTK_ALIGN_START);
 	}
 
@@ -161,7 +185,7 @@ protected:
 			double r, g, b;
 			cl_accent_color(a, c.dark, &r, &g, &b);
 			const Color col = colorF((float)r, (float)g, (float)b);
-			const PointF mid = pointF(34 + i * 60, 16);
+			const PointF mid = pointF(4 + kStep / 2.f + i * kStep, 16);
 			const bool on = prefs().accent == a;
 			const float hot = (float)fade.amount(i);
 			if (on) strokeCircle(cr, mid, 15, withAlpha(c.barInk(), 0.85f), 2);
@@ -170,12 +194,12 @@ protected:
 			drawText(cr, names[a], rectF(mid.x - 34, h - 16, mid.x + 34, h), 10.5f, withAlpha(c.barInk(), on ? 0.95f : 0.75f), TextAlign::Center, on);
 		}
 	}
-	void mouseMove(float x, float) override { fade.setHot(std::min(6, std::max(0, (int)((x - 4) / 60)))); animate(); }
+	void mouseMove(float x, float) override { fade.setHot(std::min(6, std::max(0, (int)((x - 4) / kStep)))); animate(); }
 	void mouseLeave() override { fade.setHot(-1); animate(); }
 	void mouseDown(int button, float x, float, bool, GdkEventButton*) override {
 		static const int order[] = { 6, 0, 1, 2, 3, 4, 5 };
 		if (button != 1) return;
-		const int i = (int)((x - 4) / 60);
+		const int i = (int)((x - 4) / kStep);
 		if (i < 0 || i > 6) return;
 		prefs().accent = order[i];
 		prefs().save();
@@ -287,11 +311,13 @@ void PageBar::paint(cairo_t* cr, float w, float h) {
 	drawTextMid(cr, kTitles[page], rectF(0, 2, w, 24), 12.5f, withAlpha(ink, 0.85f), TextAlign::Center, true);
 	pick.setHot(page);
 	const Color accent = c.accent();
+	// The chosen page's name and icon in the accent, made to read on its tint.
+	const Color accentInk = readableOn(accent, mixColor(bottom, accent, 0.16f));
 	for (int i = 0; i < PageCount; i++) {
 		const RectF r = itemRect(i, w);
 		const float on = (float)pick.amount(i), hot = (float)hover.amount(i);
 		fillRound(cr, r, 9, withAlpha(on > 0.01f ? accent : ink, on > 0.01f ? 0.16f * on : 0.07f * hot));
-		const Color fg = on > 0.5f ? accent : withAlpha(ink, 0.75f + 0.2f * hot);
+		const Color fg = on > 0.5f ? accentInk : withAlpha(ink, 0.8f + 0.2f * hot);
 		drawIcon(cr, kIcons[i], rectF(r.left, r.top + 4, r.right, r.top + 26), 20, fg);
 		drawTextMid(cr, kTitles[i], rectF(r.left, r.top + 28, r.right, r.bottom - 2), 10.5f, fg, TextAlign::Center, on > 0.5f);
 	}
@@ -311,6 +337,7 @@ struct SettingsWindow {
 	PageBar* bar = nullptr;
 	int page = General;
 	bool swapping = false;   // the old page fading out, the new one not in yet
+	guint settle = 0;        // the window's first height, until it's placed (show)
 	// The Shortcuts page: the action being given new keys.
 	const shortcuts::Action* recording = nullptr;
 	GtkWidget* recordButton = nullptr;
@@ -473,8 +500,8 @@ GtkWidget* canvasPage() {
 
 GtkWidget* toolbarPage() {
 	GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_widget_set_margin_start(box, 28);
-	gtk_widget_set_margin_end(box, 28);
+	gtk_widget_set_margin_start(box, kMargin);
+	gtk_widget_set_margin_end(box, kMargin);
 	gtk_widget_set_margin_top(box, 18);
 	gtk_widget_set_margin_bottom(box, 22);
 	struct Style { int id; const char* name; const char* blurb; };
@@ -499,8 +526,7 @@ GtkWidget* toolbarPage() {
 			apply();
 		});
 		GtkWidget* blurb = gtk_label_new(st.blurb);
-		gtk_style_context_add_class(gtk_widget_get_style_context(blurb), "hint");
-		gtk_label_set_xalign(GTK_LABEL(blurb), 0);
+		hintStyle(blurb);
 		gtk_widget_set_margin_start(blurb, 26);
 		StylePicture* pic = new StylePicture(st.id);
 		gtk_widget_set_margin_start(pic->widget(), 26);
@@ -519,6 +545,7 @@ GtkWidget* toolbarPage() {
 	GtkWidget* grid = gtk_grid_new();
 	gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
 	gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
+	gtk_grid_set_column_homogeneous(GTK_GRID(grid), TRUE);   // three even columns; a long name wraps in its own
 	gtk_widget_set_margin_top(grid, 10);
 	const int groups[] = { TGFile, TGUndo, TGClipboard, TGZoom, TGSim, TGRun, TGDraw, TGLock, TGTab, TGFeedback };
 	int i = 0;
@@ -528,7 +555,6 @@ GtkWidget* toolbarPage() {
 			else prefs().toolbarHidden |= 1 << g;
 			apply();
 		});
-		gtk_widget_set_size_request(c, 170, -1);
 		gtk_grid_attach(GTK_GRID(grid), c, i % 3, i / 3, 1, 1);
 		i++;
 	}
@@ -543,9 +569,7 @@ GtkWidget* toolbarPage() {
 	                i % 3, i / 3, 1, 1);
 	gtk_box_pack_start(GTK_BOX(box), grid, FALSE, FALSE, 0);
 	GtkWidget* hint = gtk_label_new("Applies to every style. Hidden tools are still in the menus and keep their shortcuts.");
-	gtk_style_context_add_class(gtk_widget_get_style_context(hint), "hint");
-	gtk_label_set_xalign(GTK_LABEL(hint), 0);
-	gtk_label_set_line_wrap(GTK_LABEL(hint), TRUE);
+	hintStyle(hint);
 	gtk_widget_set_margin_top(hint, 10);
 	gtk_box_pack_start(GTK_BOX(box), hint, FALSE, FALSE, 0);
 	return box;
@@ -679,8 +703,8 @@ void fillShortcuts(SettingsWindow* s) {
 
 GtkWidget* shortcutsPage(SettingsWindow* s) {
 	GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-	gtk_widget_set_margin_start(box, 28);
-	gtk_widget_set_margin_end(box, 28);
+	gtk_widget_set_margin_start(box, kMargin);
+	gtk_widget_set_margin_end(box, kMargin);
 	gtk_widget_set_margin_top(box, 18);
 	gtk_widget_set_margin_bottom(box, 20);
 	GtkWidget* top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -698,13 +722,13 @@ GtkWidget* shortcutsPage(SettingsWindow* s) {
 	gtk_box_pack_end(GTK_BOX(top), restore, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box), top, FALSE, FALSE, 0);
 	s->shortcutNote = gtk_label_new("Click a shortcut, then press the new keys. Keys without Ctrl or Alt work while the canvas has the keyboard.");
-	gtk_style_context_add_class(gtk_widget_get_style_context(s->shortcutNote), "hint");
-	gtk_label_set_xalign(GTK_LABEL(s->shortcutNote), 0);
-	gtk_label_set_line_wrap(GTK_LABEL(s->shortcutNote), TRUE);
+	hintStyle(s->shortcutNote);
 	gtk_box_pack_start(GTK_BOX(box), s->shortcutNote, FALSE, FALSE, 0);
 	GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	// As tall as the screen leaves room for, up to 380 (fitPage).
 	gtk_widget_set_size_request(scroll, -1, 380);
+	g_object_set_data(G_OBJECT(scroll), kFitList, GINT_TO_POINTER(380));
 	s->shortcutList = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 	gtk_container_add(GTK_CONTAINER(scroll), s->shortcutList);
 	gtk_box_pack_start(GTK_BOX(box), scroll, TRUE, TRUE, 0);
@@ -726,30 +750,79 @@ GtkWidget* buildPage(SettingsWindow* s, int page) {
 	}
 }
 
-// The most a page can be before it scrolls: the screen's work area (without
-// its panels) under the page bar, with a little room for the window's frame.
-int roomForPage(SettingsWindow* s) {
-	GdkDisplay* display = gdk_display_get_default();
-	GdkMonitor* mon = nullptr;
-	if (GdkWindow* gw = gtk_widget_get_window(s->win)) mon = gdk_display_get_monitor_at_window(display, gw);
-	if (!mon)
-		if (GtkWindow* parent = gtk_window_get_transient_for(GTK_WINDOW(s->win)))
-			if (GdkWindow* pw = gtk_widget_get_window(GTK_WIDGET(parent))) mon = gdk_display_get_monitor_at_window(display, pw);
-	if (!mon && display) mon = gdk_display_get_primary_monitor(display);
-	if (!mon && display && gdk_display_get_n_monitors(display) > 0) mon = gdk_display_get_monitor(display, 0);
-	if (!mon) return 4000;
-	GdkRectangle area;
-	gdk_monitor_get_workarea(mon, &area);
-	return std::max(220, area.height - (int)kBarH - 40);
+void walk(GtkWidget* w, const std::function<void(GtkWidget*)>& f) {
+	f(w);
+	if (!GTK_IS_CONTAINER(w)) return;
+	GList* kids = gtk_container_get_children(GTK_CONTAINER(w));
+	for (GList* k = kids; k; k = k->next) walk(GTK_WIDGET(k->data), f);
+	g_list_free(kids);
 }
 
-// The page's height: its own, or as much as the screen has room for (it
-// scrolls then), so every setting can be reached on a small screen.
+// A page's checkboxes and choices wrap their words rather than widening it.
+void tidy(GtkWidget* page) {
+	walk(page, [](GtkWidget* w) {
+		if (!GTK_IS_CHECK_BUTTON(w)) return;
+		GtkWidget* l = gtk_bin_get_child(GTK_BIN(w));
+		if (!l || !GTK_IS_LABEL(l) || gtk_label_get_line_wrap(GTK_LABEL(l))) return;
+		gtk_label_set_line_wrap(GTK_LABEL(l), TRUE);
+		gtk_label_set_line_wrap_mode(GTK_LABEL(l), PANGO_WRAP_WORD_CHAR);
+		gtk_label_set_xalign(GTK_LABEL(l), 0);
+	});
+}
+
+// The page's width: the Mac's 640, or the screen's, if that's less. Every
+// page has the same.
+int pageWidth(SettingsWindow* s) { return std::min((int)kWidth, usableArea(s->win).width); }
+
+// The most a page can be before it scrolls: the room on the screen
+// (usableArea) under the page bar.
+int roomForPage(SettingsWindow* s) { return std::max(160, usableArea(s->win).height - (int)kBarH); }
+
+// The page's lists (kFitList) as tall as they can be with all of the page on
+// the screen: their tallest, less what the page is over, down to kMinList.
+void fitLists(SettingsWindow* s, int width, int room) {
+	std::vector<GtkWidget*> lists;
+	walk(s->pageWidget, [&](GtkWidget* w) { if (g_object_get_data(G_OBJECT(w), kFitList)) lists.push_back(w); });
+	if (lists.empty()) return;
+	for (GtkWidget* l : lists) gtk_widget_set_size_request(l, -1, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(l), kFitList)));
+	int minH = 0, natH = 0;
+	gtk_widget_get_preferred_height_for_width(s->pageWidget, width, &minH, &natH);
+	const int over = natH - room;
+	if (over <= 0) return;
+	const int n = (int)lists.size();
+	for (GtkWidget* l : lists) {
+		const int tallest = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(l), kFitList));
+		gtk_widget_set_size_request(l, -1, std::max(kMinList, tallest - (over + n - 1) / n));
+	}
+}
+
+// After a page grows, its bottom stays on the screen: on X, where a window
+// can be moved, it moves up as far as it needs. (Wayland places windows
+// itself; there the first height, show's, keeps it clear.)
+void keepOnScreen(SettingsWindow* s, int height) {
+	if (!gtk_widget_get_realized(s->win) || strcmp(G_OBJECT_TYPE_NAME(gtk_widget_get_display(s->win)), "GdkX11Display") != 0) return;
+	const GdkRectangle a = usableArea(s->win);
+	int x = 0, y = 0;
+	gtk_window_get_position(GTK_WINDOW(s->win), &x, &y);
+	if (y + height > a.y + a.height) gtk_window_move(GTK_WINDOW(s->win), x, std::max(a.y, a.y + a.height - height));
+}
+
+// The page's size: the page width, and its own height or as much as the
+// screen has room for (it scrolls then), so every setting can be reached on
+// a small screen. The window follows (it isn't resizable: it takes the size
+// of what's in it). Until it's placed (show), as tall as there's room for.
 void fitPage(SettingsWindow* s) {
 	if (s->pageWidget == nullptr) return;
+	tidy(s->pageWidget);
+	const int width = pageWidth(s), room = roomForPage(s);
+	fitLists(s, width, room);
 	int minH = 0, natH = 0;
-	gtk_widget_get_preferred_height_for_width(s->pageWidget, (int)kWidth, &minH, &natH);
-	gtk_widget_set_size_request(s->scroll, (int)kWidth, std::min(natH, roomForPage(s)));
+	gtk_widget_get_preferred_height_for_width(s->pageWidget, width, &minH, &natH);
+	const int height = s->settle ? room : std::min(natH, room);
+	gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(s->scroll), width);
+	gtk_widget_set_size_request(s->scroll, width, height);
+	gtk_widget_set_size_request(s->bar->widget(), width, (int)kBarH);
+	keepOnScreen(s, height + (int)kBarH);
 }
 
 void putPage(SettingsWindow* s) {
@@ -824,7 +897,10 @@ void show(CircuitWindow* from, int page) {
 	s->holder = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(s->win), s->holder);
 	s->scroll = gtk_scrolled_window_new(nullptr, nullptr);
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(s->scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	// Across, the page has the window's width and no more (EXTERNAL: no
+	// scroll bar, and the page's own width never widens the window); down,
+	// it scrolls when the screen is too short for it.
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(s->scroll), GTK_POLICY_EXTERNAL, GTK_POLICY_AUTOMATIC);
 	gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(s->scroll), GTK_SHADOW_NONE);
 	gtk_box_pack_start(GTK_BOX(s->holder), s->scroll, TRUE, TRUE, 0);
 	g_signal_connect(s->win, "key-press-event", CL_CALLBACK(+[](GtkWidget* w, GdkEventKey* e, gpointer data) -> gboolean {
@@ -879,9 +955,19 @@ void show(CircuitWindow* from, int page) {
 	g_signal_connect(s->win, "destroy", CL_CALLBACK(+[](GtkWidget*, gpointer data) {
 		SettingsWindow* s = static_cast<SettingsWindow*>(data);
 		if (g_settings == s) g_settings = nullptr;
+		if (s->settle) g_source_remove(s->settle);
 		delete s->bar;
 		delete s;
 	}), s);
+	// It first shows as tall as the screen has room for, so the desktop places
+	// it where every page fits (a page's height changes keep its top where it
+	// is); a moment later, the page's own height.
+	s->settle = g_timeout_add(150, [](gpointer data) -> gboolean {
+		SettingsWindow* s = static_cast<SettingsWindow*>(data);
+		s->settle = 0;
+		fitPage(s);
+		return G_SOURCE_REMOVE;
+	}, s);
 	select(s, page >= 0 ? page : General, false);
 	// The window fades in, as a sheet arrives (transparent from its first frame).
 	anim::fadeIn(s->win, 0.18);

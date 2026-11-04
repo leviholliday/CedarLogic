@@ -167,6 +167,15 @@ void applyStyle();
 // A desktop font in a light weight (Raspberry Pi OS's PibotoLt) swapped for
 // the regular weight of its family, for this app; before anything draws text.
 void sturdyUiFont();
+// The mouse wheel over a dropdown, number box or slider scrolls whatever it
+// sits in (Settings' page, a dialog's list) instead of changing its value,
+// everywhere in the app (Style.cpp). Once, at startup.
+void wheelLeavesValuesAlone();
+// The part of the screen a window over `near` can use (Style.cpp): the
+// monitor's work area, less a margin, and less room for a panel when the
+// desktop doesn't say where its panels are (Wayland, and X without a window
+// manager, report the whole monitor).
+GdkRectangle usableArea(GtkWidget* near);
 
 // ---- Files -----------------------------------------------------------------------
 

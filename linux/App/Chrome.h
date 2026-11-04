@@ -54,6 +54,11 @@ struct Chrome {
 	Color ink(float alpha) const;
 };
 Chrome chrome();   // for the current theme
+// The WCAG contrast ratio of two opaque colours (1 to 21), and `fg` moved
+// towards black or white, whichever reads better on `bg`, until it has at
+// least `ratio` against it (an accent as text on a page; Style.cpp).
+double contrastRatio(const Color& a, const Color& b);
+Color readableOn(const Color& fg, const Color& bg, double ratio = 4.5);
 
 // ---- Icons -------------------------------------------------------------------------
 // The desktop's symbolic icons (Adwaita's names, which every GTK theme

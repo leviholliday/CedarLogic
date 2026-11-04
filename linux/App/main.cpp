@@ -940,6 +940,8 @@ void startupCb(GApplication* gapp, gpointer) {
 	// engine's settings, CSS) in German, French and other comma locales.
 	setlocale(LC_NUMERIC, "C");
 	sturdyUiFont();
+	// The wheel over a dropdown, number box or slider scrolls the page it's on instead.
+	wheelLeavesValuesAlone();
 	// Before the launch screen: it asks the settings whether this is the
 	// first launch ever (the slower one, with the sound).
 	prefs().load();

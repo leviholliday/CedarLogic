@@ -16,6 +16,15 @@ namespace settings {
 constexpr int kActionsPage = 4;
 constexpr int kSyncPage = 6;
 void show(CircuitWindow* from, int page = -1);
+// The pages' parts, shared with Settings > Actions and Sync: a setting's name
+// in the label column (right-aligned, the column's 150 points, wrapping
+// rather than widening it), and a line of help under its control (small,
+// solid grey, wrapping at whatever width the page gives it).
+// A list on a page that should take what height the screen leaves (Shortcuts,
+// Actions): its scrolled window carries this, with its tallest as an int.
+constexpr const char* kFitList = "cl-fit-list";
+void formLabel(GtkWidget* label);
+void hintStyle(GtkWidget* label);
 GtkWidget* window();
 // The page's content changed size (Sync's states): the window follows.
 void pageChanged();
