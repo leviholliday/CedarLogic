@@ -188,6 +188,8 @@ void checkText(GtkWidget* root, const std::string& where) {
 
 // ---- Fitting ---------------------------------------------------------------------------
 
+bool isControlLike(GtkWidget* w) { return GTK_IS_COMBO_BOX(w) || GTK_IS_BUTTON(w) || GTK_IS_SCALE(w); }
+
 GdkRectangle workArea(GtkWidget* win) {
 	GdkDisplay* d = gdk_display_get_default();
 	GdkMonitor* mon = gtk_widget_get_window(win) ? gdk_display_get_monitor_at_window(d, gtk_widget_get_window(win)) : nullptr;
@@ -213,6 +215,31 @@ std::string rect(const GdkRectangle& r) { return format("%dx%d at (%d,%d)", r.wi
 void checkFits(GtkWidget* win, const std::string& where) {
 	const GdkRectangle area = workArea(win), f = frameOf(win);
 	expect(f.width > 0 && inside(f, area), where + ": the window, " + rect(f) + ", is on the screen's " + rect(area));
+}
+
+// When the page scrolls, no text or control runs under the scroll bar GTK
+// lays over its right edge.
+void checkClearOfBar(GtkWidget* sc, const std::string& where) {
+	GtkWidget* sb = gtk_scrolled_window_get_vscrollbar(GTK_SCROLLED_WINDOW(sc));
+	GtkAdjustment* v = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sc));
+	if (!sb || !gtk_widget_get_mapped(sb) || gtk_adjustment_get_upper(v) <= gtk_adjustment_get_page_size(v) + 1) return;
+	int bar = gtk_widget_get_allocated_width(sb);
+	gtk_widget_get_preferred_width(sb, nullptr, &bar);
+	const int clear = gtk_widget_get_allocated_width(sc) - bar;
+	int n = 0, under = 0;
+	walk(sc, [&](GtkWidget* w) {
+		if (!(GTK_IS_LABEL(w) || GTK_IS_ENTRY(w) || isControlLike(w)) || !showing(w)) return;
+		if (GTK_IS_LABEL(w) && gtk_label_get_text(GTK_LABEL(w))[0] == 0) return;
+		int x = 0, y = 0;
+		if (!gtk_widget_translate_coordinates(w, sc, gtk_widget_get_allocated_width(w), 0, &x, &y)) return;
+		n++;
+		if (x > clear) {
+			under++;
+			printf("  under the scroll bar on %s: %s \"%s\" ends at %d, the bar starts at %d\n", where.c_str(), G_OBJECT_TYPE_NAME(w),
+			       GTK_IS_LABEL(w) ? gtk_label_get_text(GTK_LABEL(w)) : "", x, clear);
+		}
+	});
+	expect(under == 0, format("%s: it scrolls, and none of its %d pieces runs under the %d-point scroll bar", where.c_str(), n, bar));
 }
 
 // ---- The wheel -------------------------------------------------------------------------
@@ -414,6 +441,7 @@ int check(CircuitWindow* w, const std::string& dir, const std::string& tag) {
 			       format("%s: all %d points of it can be reached (%d shown, scrolling to %.0f)", where.c_str(), minH,
 			              gtk_widget_get_allocated_height(sc), gtk_adjustment_get_upper(v)));
 		}
+		if (sc && pg) checkClearOfBar(sc, where);
 		checkText(win, where);
 		checkWheel(win, where);
 		if (window() != win) { expect(false, where + ": Settings is still open after the wheel"); return 1; }

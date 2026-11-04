@@ -808,6 +808,19 @@ void keepOnScreen(SettingsWindow* s, int height) {
 	if (y + height > a.y + a.height) gtk_window_move(GTK_WINDOW(s->win), x, std::max(a.y, a.y + a.height - height));
 }
 
+// When the page scrolls, its right margin makes room for the scroll bar,
+// which GTK lays over the page: a thin one (Adwaita's) fits in the margin,
+// a wide one (PiXflat's, 30 points) would cover the ends of the lines.
+void roomForBar(SettingsWindow* s, bool scrolls) {
+	GtkWidget* pg = s->pageWidget;
+	if (!g_object_get_data(G_OBJECT(pg), "cl-margin-end"))
+		g_object_set_data(G_OBJECT(pg), "cl-margin-end", GINT_TO_POINTER(gtk_widget_get_margin_end(pg) + 1));
+	const int own = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pg), "cl-margin-end")) - 1;
+	int bar = 0;
+	if (GtkWidget* sb = gtk_scrolled_window_get_vscrollbar(GTK_SCROLLED_WINDOW(s->scroll))) gtk_widget_get_preferred_width(sb, nullptr, &bar);
+	gtk_widget_set_margin_end(pg, own + (scrolls ? std::max(0, bar - 8) : 0));
+}
+
 // The page's size: the page width, and its own height or as much as the
 // screen has room for (it scrolls then), so every setting can be reached on
 // a small screen. The window follows (it isn't resizable: it takes the size
@@ -816,9 +829,15 @@ void fitPage(SettingsWindow* s) {
 	if (s->pageWidget == nullptr) return;
 	tidy(s->pageWidget);
 	const int width = pageWidth(s), room = roomForPage(s);
+	roomForBar(s, false);
 	fitLists(s, width, room);
 	int minH = 0, natH = 0;
 	gtk_widget_get_preferred_height_for_width(s->pageWidget, width, &minH, &natH);
+	if (natH > room) {
+		roomForBar(s, true);
+		fitLists(s, width, room);
+		gtk_widget_get_preferred_height_for_width(s->pageWidget, width, &minH, &natH);
+	}
 	const int height = s->settle ? room : std::min(natH, room);
 	gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(s->scroll), width);
 	gtk_widget_set_size_request(s->scroll, width, height);
