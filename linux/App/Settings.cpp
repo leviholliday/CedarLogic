@@ -166,8 +166,9 @@ template <class T> GtkWidget* owned(T* d) {
 // ---- The app's colour: a row of swatches ----------------------------------------------
 
 class Swatches : public Drawn {
-	// Centre to centre: the seven fit the value column (150 + 12 + 400 + the margins, of 640).
-	static constexpr int kStep = 56;
+	// Centre to centre: the seven fit the value column with room for a scroll
+	// bar that isn't an overlay (PiXflat's): 56 + 150 + 12 + 386 = 604 of 640.
+	static constexpr int kStep = 54;
 public:
 	Swatches() {
 		create();

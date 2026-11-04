@@ -402,7 +402,10 @@ int check(CircuitWindow* w, const std::string& dir, const std::string& tag) {
 		if (sc && pg) {
 			int minW = 0, natW = 0;
 			gtk_widget_get_preferred_width(pg, &minW, &natW);
-			const int room = gtk_widget_get_allocated_width(sc);
+			// What the page has across: the scroller less its scroll bar, where
+			// the theme's isn't an overlay (PiXflat's takes 30 points).
+			GtkWidget* view = gtk_bin_get_child(GTK_BIN(sc));
+			const int room = gtk_widget_get_allocated_width(view ? view : sc);
 			expect(minW <= room, format("%s: its content needs %d of the %d points it has across", where.c_str(), minW, room));
 			int minH = 0, natH = 0;
 			gtk_widget_get_preferred_height_for_width(pg, room, &minH, &natH);
