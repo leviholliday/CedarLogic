@@ -302,6 +302,47 @@ enum LaunchSelfTest {
         let leaks = report.flatMap { UsageLeakScan.leaks(in: $0, needles: needles) }
         check(leaks.isEmpty, "the usage report holds none of this Mac's names, paths, recent files or codes (\(needles.filter { !$0.isEmpty }.count) looked for)\(leaks.isEmpty ? "" : ": \(leaks)")")
         check(report.allSatisfy { $0.utf8.count <= UsageEngine.maxBytes }, "...and it's 16 KB at most")
+        // The sheet itself, on a real window ordered in on the screen (where
+        // AppKit animates it; transparent and passing clicks through, so
+        // nothing shows and nothing is taken): all the way in, sized to what
+        // it holds, and out again. (Build 1736 crashed here, in Auto
+        // Layout, as the sheet slid in.)
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let win = NSWindow(contentRect: NSRect(x: screen.minX + 40, y: screen.minY + 40, width: 1000, height: 720),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        win.isReleasedWhenClosed = false
+        win.alphaValue = 0
+        win.ignoresMouseEvents = true
+        // A circuit window's own layout under it, in the light theme (the sheet is always dark).
+        let doc = CoreDocument()
+        let canvas = CanvasController()
+        canvas.attach(doc)
+        let savedDark = Prefs.shared.dark
+        Prefs.shared.dark = false
+        let root = NSHostingView(rootView: CLLayout(document: doc, canvas: canvas, page: .constant(0)).frame(minWidth: 800, minHeight: 600))
+        win.contentView = root
+        win.orderFront(nil)
+        turn(0.3)
+        PrivacyConsent.present(on: win, unseen: true)
+        turn(1.5)
+        let sheet = win.attachedSheet
+        let sheetSize = sheet.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "none"
+        print("INFO \(state): the privacy sheet came in at \(sheetSize)")
+        check(sheet?.identifier?.rawValue == "cl.privacyAsk" && sheet?.isVisible == true,
+              "the privacy sheet comes all the way in on a real window (\(sheetSize))")
+        let wanted = PrivacyConsent.sheetSize()
+        let inside = sheet?.contentView?.frame.size ?? .zero
+        check(abs(inside.width - 640) < 1 && abs(inside.height - wanted.height) < 1,
+              "...640 wide and as tall as the taller of its two ways (\(sheetSize), \(Int(wanted.height)) inside)")
+        check(sheet.map { ($0.contentView as? NSHostingView<PrivacyAskSheet>)?.sizingOptions == [] } ?? false,
+              "...a size of its own, never resized by what's in it")
+        turn(1.0)
+        check(sheet.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } == sheetSize, "...and stays that size")
+        PrivacyConsent.closeSheet()
+        turn(0.8)
+        check(win.attachedSheet == nil && !PrivacyConsent.showing, "...and goes again")
+        win.close()
+        Prefs.shared.dark = savedDark
         // Answered once, it isn't asked again; No thanks keeps an earlier yes to crash reports.
         if owedNow {
             let crashBefore = CrashReports.allowed
