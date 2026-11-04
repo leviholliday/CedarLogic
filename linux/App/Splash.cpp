@@ -14,7 +14,10 @@
 #include "Intro.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -446,6 +449,27 @@ void destroy(Splash* s) {
 	delete s;
 }
 
+// The intro's picture at t (the window's, and --intro-bench's): the intro,
+// then the panel over it, part-way into its appearance, dissolving at
+// `dissolveAt` over `fade`.
+void paintIntroFrame(cairo_t* cr, intro::Scene* scene, float w, float h, double t, double dissolveAt, double fade, bool composited) {
+	const double shown = t < dissolveAt ? 0 : fade > 0 ? intro::easeInOut((t - dissolveAt) / fade) : 1;
+	cairo_save(cr);
+	if (composited) {
+		roundedPath(cr, rectF(0, 0, w, h), 10);
+		cairo_clip(cr);
+	}
+	const PointF card = intro::cardOrigin(w, h);
+	// Fading in as a whole from nothing (where the desktop composites).
+	scene->draw(cr, t, (composited ? intro::fadeInShown(t) : 1) * (1 - shown));
+	if (t >= intro::kCardIn) {
+		intro::Timed timed(intro::kPanel);
+		drawPanelAfterIntro(cr, card.x, card.y, t - intro::kCardIn + intro::kSplashAt,
+		                    intro::easeInOut((t - intro::kCardIn) / intro::kCardFade) * (1 - shown), false);
+	}
+	cairo_restore(cr);
+}
+
 // The intro's window, at t: the intro, then the panel over it, part-way into
 // its appearance; or the still panel over the canvas, when it gave way.
 void drawIntro(Splash* s, cairo_t* cr, float w, float h) {
@@ -462,6 +486,10 @@ void drawIntro(Splash* s, cairo_t* cr, float w, float h) {
 	}
 	const double t = s->elapsed();
 	const double fade = s->fadeTime();
+	if (!s->still) {
+		paintIntroFrame(cr, s->scene, w, h, t, s->dissolveAt(), fade, s->composited);
+		return;
+	}
 	const double shown = t < s->dissolveAt() ? 0 : fade > 0 ? intro::easeInOut((t - s->dissolveAt()) / fade) : 1;
 	cairo_save(cr);
 	if (s->composited) {
@@ -469,16 +497,8 @@ void drawIntro(Splash* s, cairo_t* cr, float w, float h) {
 		cairo_clip(cr);
 	}
 	const PointF card = intro::cardOrigin(w, h);
-	if (s->still) {
-		s->scene->drawGround(cr, 1 - shown);
-		drawPanelAfterIntro(cr, card.x, card.y, t - s->stillAt, 1 - shown, true);
-	} else {
-		// Fading in as a whole from nothing (where the desktop composites).
-		s->scene->draw(cr, t, (s->composited ? intro::fadeInShown(t) : 1) * (1 - shown));
-		if (t >= intro::kCardIn)
-			drawPanelAfterIntro(cr, card.x, card.y, t - intro::kCardIn + intro::kSplashAt,
-			                    intro::easeInOut((t - intro::kCardIn) / intro::kCardFade) * (1 - shown), false);
-	}
+	s->scene->drawGround(cr, 1 - shown);
+	drawPanelAfterIntro(cr, card.x, card.y, t - s->stillAt, 1 - shown, true);
 	cairo_restore(cr);
 }
 
@@ -819,4 +839,118 @@ bool renderSplashFrame(double t, bool first, const std::string& file) {
 	const bool ok = cairo_surface_write_to_png(surface, file.c_str()) == CAIRO_STATUS_SUCCESS;
 	cairo_surface_destroy(surface);
 	return ok;
+}
+
+// ---- --intro-bench -------------------------------------------------------------
+
+namespace {
+
+double msSince(std::chrono::steady_clock::time_point a) {
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
+}
+
+// One run of the intro, every frame at 60 fps, drawn as the window draws it
+// (cleared, then the frame); each frame's total and its parts.
+struct Run {
+	std::vector<double> total;
+	std::vector<std::array<double, intro::kParts>> parts;
+};
+
+Run benchRun(cairo_surface_t* surface, intro::Scene* scene, int w, int h) {
+	Run r;
+	const int frames = (int)std::lround(intro::kTotal * 60) + 1;
+	for (int f = 0; f < frames; f++) {
+		const double t = f / 60.0;
+		intro::Prof prof;
+		intro::gProf = &prof;
+		const auto began = std::chrono::steady_clock::now();
+		prof.mark = began;
+		cairo_t* cr = cairo_create(surface);
+		{
+			intro::Timed timed(intro::kClear);
+			cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+			cairo_set_source_rgba(cr, 0, 0, 0, 0);
+			cairo_paint(cr);
+			cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		}
+		paintIntroFrame(cr, scene, (float)w, (float)h, t, intro::kDissolveAt, intro::kFade, true);
+		cairo_destroy(cr);
+		cairo_surface_flush(surface);
+		prof.flush();
+		intro::gProf = nullptr;
+		r.total.push_back(msSince(began));
+		std::array<double, intro::kParts> p;
+		for (int i = 0; i < intro::kParts; i++) p[i] = prof.ms[i];
+		r.parts.push_back(p);
+	}
+	return r;
+}
+
+double meanOf(const std::vector<double>& v, size_t from = 0, size_t to = (size_t)-1) {
+	to = std::min(to, v.size());
+	if (from >= to) return 0;
+	double s = 0;
+	for (size_t i = from; i < to; i++) s += v[i];
+	return s / (to - from);
+}
+
+double quantile(std::vector<double> v, double q) {
+	if (v.empty()) return 0;
+	std::sort(v.begin(), v.end());
+	return v[std::min(v.size() - 1, (size_t)std::max(0.0, std::ceil(v.size() * q) - 1))];
+}
+
+}  // namespace
+
+int introBench(const std::vector<std::string>& args) {
+	setvbuf(stdout, nullptr, _IOLBF, 0);
+	std::vector<std::pair<int, int>> sizes;
+	for (const std::string& a : args) {
+		int w = 0, h = 0;
+		if (sscanf(a.c_str(), "%dx%d", &w, &h) == 2 && w >= 480 && h >= 320 && w <= 8192 && h <= 8192) sizes.push_back({ w, h });
+	}
+	if (sizes.empty()) sizes = { { 1280, 800 }, { 1920, 1080 } };
+	const int frames = (int)std::lround(intro::kTotal * 60) + 1;
+	printf("intro-bench: %d frames at 60 fps (%.2f s), at scale 1, drawn as the intro's window draws them where the desktop composites\n",
+	       frames, intro::kTotal);
+	for (const auto& size : sizes) {
+		const int w = size.first, h = size.second;
+		cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+		const auto built = std::chrono::steady_clock::now();
+		intro::Scene* scene = new intro::Scene((float)w, (float)h, intro::WireLook::current(), true);
+		const double buildMs = msSince(built);
+		// Once cold (the images it keeps made, the fonts loaded), then again: the numbers.
+		const Run cold = benchRun(surface, scene, w, h);
+		const Run run = benchRun(surface, scene, w, h);
+		const size_t panelAt = (size_t)std::ceil(intro::kCardIn * 60);
+		printf("\n%dx%d, full:\n", w, h);
+		printf("  a frame: mean %.2f ms, median %.2f, p95 %.2f, worst %.2f (at %.2f s)\n", meanOf(run.total), quantile(run.total, 0.5),
+		       quantile(run.total, 0.95), *std::max_element(run.total.begin(), run.total.end()),
+		       (std::max_element(run.total.begin(), run.total.end()) - run.total.begin()) / 60.0);
+		struct Phase { const char* name; double a, b; };
+		const Phase phases[] = { { "fade in", 0, intro::kFadeIn }, { "circuit", intro::kFadeIn, intro::kBloomAt },
+		                         { "bloom", intro::kBloomAt, intro::kCardIn + intro::kCardFade },
+		                         { "panel", intro::kCardIn + intro::kCardFade, intro::kDissolveAt }, { "dissolve", intro::kDissolveAt, 99 } };
+		printf("  by phase (mean ms a frame):");
+		for (const Phase& p : phases)
+			printf("  %s %.2f-%.2f s: %.2f", p.name, p.a, std::min(p.b, intro::kTotal),
+			       meanOf(run.total, (size_t)std::ceil(p.a * 60), (size_t)std::ceil(p.b * 60)));
+		printf("\n  by part (mean ms a frame, worst):");
+		double partsSum = 0;
+		for (int i = 0; i < intro::kParts; i++) {
+			std::vector<double> v;
+			for (const auto& p : run.parts) v.push_back(p[i]);
+			partsSum += meanOf(v);
+			printf("  %s %.2f (%.2f)", intro::partName(i), meanOf(v), *std::max_element(v.begin(), v.end()));
+		}
+		printf("  other %.2f\n", meanOf(run.total) - partsSum);
+		printf("  cold: the scene laid out %.2f ms, its first frame %.2f ms, the panel's first %.2f ms; the whole first run %.0f ms\n", buildMs,
+		       cold.total[0], panelAt < cold.total.size() ? cold.total[panelAt] : 0, meanOf(cold.total) * cold.total.size());
+		printf("  at 60 fps: %d of %d frames over 16.7 ms, %d over 33.3 ms\n",
+		       (int)std::count_if(run.total.begin(), run.total.end(), [](double x) { return x > 16.7; }), frames,
+		       (int)std::count_if(run.total.begin(), run.total.end(), [](double x) { return x > 33.3; }));
+		delete scene;
+		cairo_surface_destroy(surface);
+	}
+	return 0;
 }

@@ -57,6 +57,7 @@
 #define CL_LINUX_INTRO_H
 
 #include "Chrome.h"
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -158,6 +159,43 @@ public:
 private:
 	struct Impl;
 	Impl* d;
+};
+
+// ---- Measuring it (--intro-bench, Splash.h) ----
+
+// The parts of a frame, timed apart: each part's time leaves out the parts
+// drawn inside it (a glow inside the circuit is the glows', not the wires').
+enum Part { kClear, kBackdrop, kGrid, kGlows, kMotes, kWires, kDisplay, kIcon, kBloom, kPanel, kGroups, kParts };
+const char* partName(int part);
+// While the bench runs, each part's time so far in ms; null otherwise (and
+// then a Timed costs a test of a pointer).
+struct Prof {
+	double ms[kParts] = {};
+	int cur = -1;
+	std::chrono::steady_clock::time_point mark;
+	void flush() {
+		const auto n = std::chrono::steady_clock::now();
+		if (cur >= 0) ms[cur] += std::chrono::duration<double, std::milli>(n - mark).count();
+		mark = n;
+	}
+};
+extern Prof* gProf;
+// The time from here to the end of the scope is `part`'s.
+struct Timed {
+	int prev = -1;
+	explicit Timed(int part) {
+		if (!gProf) return;
+		gProf->flush();
+		prev = gProf->cur;
+		gProf->cur = part;
+	}
+	~Timed() {
+		if (!gProf) return;
+		gProf->flush();
+		gProf->cur = prev;
+	}
+	Timed(const Timed&) = delete;
+	Timed& operator=(const Timed&) = delete;
 };
 
 // --render-intro: the frames, then 0 (or 1 if a frame couldn't be written).

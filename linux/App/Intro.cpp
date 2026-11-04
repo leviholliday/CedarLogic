@@ -154,6 +154,7 @@ void arc(std::vector<PointF>& out, double cx, double cy, double r, double from, 
 // A soft green glow, white in the middle (wire heads, the LED, the icon).
 void glow(cairo_t* cr, PointF c, double radius, double opacity) {
 	if (opacity <= 0.002 || radius <= 0.1) return;
+	Timed timed(kGlows);
 	cairo_pattern_t* g = cairo_pattern_create_radial(c.x, c.y, 0, c.x, c.y, radius);
 	cairo_pattern_add_color_stop_rgba(g, 0, 1, 1, 1, opacity);
 	cairo_pattern_add_color_stop_rgba(g, 0.12, 0.6, 1, 0.72, 0.85 * opacity);
@@ -193,6 +194,15 @@ double panelTile() { return brand::iconTile(); }
 bool gDashArg = false;
 
 }  // namespace
+
+// ---- Measuring ----------------------------------------------------------------------
+
+Prof* gProf = nullptr;
+
+const char* partName(int part) {
+	static const char* names[kParts] = { "clear", "backdrop", "grid", "glows", "motes", "wires", "display", "icon", "bloom", "panel", "groups" };
+	return part >= 0 && part < kParts ? names[part] : "?";
+}
 
 // ---- When ----------------------------------------------------------------------------
 
@@ -762,16 +772,24 @@ struct Scene::Impl {
 	// at `gridShown`, the light under the gate at `under`, the motes at
 	// `moteShown` where they've drifted to by t.
 	void paintGround(cairo_t* cr, double gridShown, double far = 1, double under = 0, double moteShown = 0, double t = 0) {
-		cairo_set_source_surface(cr, bare, 0, 0);
-		cairo_paint(cr);
+		{
+			Timed timed(kBackdrop);
+			cairo_set_source_surface(cr, bare, 0, 0);
+			cairo_paint(cr);
+		}
 		cairo_save(cr);
 		if (far != 1) about(cr, far);
 		if (gridShown > 0.002) {
+			Timed timed(kGrid);
 			cairo_set_source_surface(cr, grid, 0, 0);
 			if (far != 1) cairo_pattern_set_filter(cairo_get_source(cr), live ? CAIRO_FILTER_BILINEAR : CAIRO_FILTER_GOOD);
 			cairo_paint_with_alpha(cr, gridShown);
 		}
-		paintStretched(cr, underImage, underBox.left, underBox.top, underBox.right - underBox.left, underBox.bottom - underBox.top, under);
+		{
+			Timed timed(kGlows);
+			paintStretched(cr, underImage, underBox.left, underBox.top, underBox.right - underBox.left, underBox.bottom - underBox.top, under);
+		}
+		Timed timed(kMotes);
 		if (moteShown > 0.002)
 			for (const Mote& m : motes) {
 				const double x = m.from.x + m.dx * t, y = m.from.y + m.dy * t;
@@ -860,6 +878,7 @@ struct Scene::Impl {
 	}
 
 	void drawCircuit(cairo_t* cr, double t) {
+		Timed timed(kWires);
 		// The gate fires: its inside glows green.
 		if (t >= 1.26) {
 			inside.whole(cr);
@@ -953,6 +972,7 @@ struct Scene::Impl {
 	}
 
 	void drawDisplay(cairo_t* cr, double t) {
+		Timed timed(kDisplay);
 		housing.whole(cr);
 		set(cr, kSilver, 0.06);
 		cairo_fill(cr);
@@ -990,6 +1010,7 @@ struct Scene::Impl {
 		const double landed = kCardIn + kCardFade;
 		const double o = smooth(t, kBloomAt + 0.05, kBloomAt + 0.26) * (1 - smooth(t, landed - 0.14, landed));
 		if (o <= 0.002) return;
+		Timed timed(kIcon);
 		const double fly = smooth(t, kBloomAt + 0.14, kBloomAt + 0.44);
 		// (From where the circuit is, pushed in.)
 		const double bigSide = 512 * k * near, small = cardIconSize;
@@ -1023,6 +1044,7 @@ struct Scene::Impl {
 	void drawBloom(cairo_t* cr, double t, double near) {
 		const double o = 0.9 * smooth(t, kBloomAt - 0.02, kBloomAt + 0.08) * (1 - smooth(t, kBloomAt + 0.14, kBloomAt + 0.56));
 		if (o <= 0.002) return;
+		Timed timed(kBloom);
 		const double bs = 0.04 + 0.96 * ease(t, kBloomAt, kBloomAt + 0.44);
 		const double r = std::max(w, h) * 1.6 / 2 * bs;
 		const PointF c = onStage(ledC, near);
@@ -1047,10 +1069,14 @@ struct Scene::Impl {
 		if (opacity <= 0.002) return;
 		if (opacity >= 0.998) { f(); return; }
 		cairo_save(cr);
-		cairo_rectangle(cr, box.left, box.top, box.right - box.left, box.bottom - box.top);
-		cairo_clip(cr);
-		cairo_push_group(cr);
+		{
+			Timed timed(kGroups);
+			cairo_rectangle(cr, box.left, box.top, box.right - box.left, box.bottom - box.top);
+			cairo_clip(cr);
+			cairo_push_group(cr);
+		}
 		f();
+		Timed timed(kGroups);
 		cairo_pop_group_to_source(cr);
 		cairo_paint_with_alpha(cr, opacity);
 		cairo_restore(cr);
@@ -1087,6 +1113,7 @@ struct Scene::Impl {
 			// about 150 ms.
 			const double hu = (t - kLedAt) / 0.18;
 			if (hu > 0 && hu < 1) {
+				Timed timed(kGlows);
 				const double side = std::max(w, h) * 1.6;
 				const PointF c = onStage(ledC, near);
 				paintStretched(cr, liftImage, c.x - side / 2, c.y - side / 2, side, side, std::min(1.0, hu / 0.14) * std::pow(1 - hu, 2));
