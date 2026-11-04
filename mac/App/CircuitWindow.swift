@@ -47,8 +47,10 @@ struct CircuitWindow: View {
             notices = document.loadNotices
             showNotices = !notices.isEmpty
             TourModel.shared.windowAppeared(canvas)
+            // Not seen yet: it starts once this window is up with the keys.
+            ShowMeAround.shared.startWhenReady()
         }
-        .onDisappear { TourModel.shared.windowClosed(canvas) }
+        .onDisappear { TourModel.shared.windowClosed(canvas); ShowMeAround.shared.windowClosed(canvas) }
         .onReceive(NotificationCenter.default.publisher(for: .clPutAwaySheets)) { n in
             if (n.object as? CanvasController) === canvas, showNotices { showNotices = false }
         }

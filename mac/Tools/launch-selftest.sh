@@ -11,10 +11,14 @@
 # times over (default 3, so 39 launches): the welcome / What's New choice,
 # which circuit reopens and that it opens, Your Circuits, versions, Sync and
 # Classroom starting offline, the updater and crash reports with no network
-# ("offline"), (the "damaged" state) damaged circuits, and where the Actions
-# rail is: on screen for a first launch, hidden for anyone before, folded as
-# it was left ("actions"), and the toolbar's six buttons in toolbar mode.
-# No window opens. A launch
+# ("offline"), (the "damaged" state) damaged circuits, and the Actions
+# panel: on for a first launch and for every earlier install (0.4's one-time
+# migration, the old In the toolbar and Hidden modes included: "migrated"),
+# a choice made after it kept ("paneloff"), folded as it was left
+# ("actions"), unfolded once for 0.4 (the owner's settings: "owner"), and
+# Show Me Around: its stops, keys and Escape in a real window off screen,
+# the folded panel opening for its stop, starting by itself after each of
+# the welcome's ways out (the lesson after it), never again once seen. No window opens. A launch
 # passes when it exits 0 within 60 s.
 #
 # FOCUS=1 then also launches the copy for real (through `open`, as the Dock
@@ -25,7 +29,11 @@
 # canvas must have the keyboard, File > Export as Image… must be enabled and
 # its key (⌘E, sent through the app's own event queue) must ask for the
 # export (LaunchFocusCheck); then the same after another window has been in front
-# for a moment. It takes the keyboard for those seconds: run it when you're
+# for a moment; Show Me Around starting by itself once the circuit window
+# has the keys (after the welcome or What's New) and Escape ending it for
+# good; and Help > Show Me Around is in the menu bar, and the walk
+# on the real window steps with → and ← and ends with Escape (keys sent
+# through the event queue, nothing clicked). It takes the keyboard for those seconds: run it when you're
 # not typing elsewhere (a launch macOS keeps from the front, as with the
 # screen locked, is a SKIP). HEADLESS=0 FOCUS=1: only those launches.
 set -uo pipefail
@@ -33,7 +41,7 @@ cd "$(dirname "$0")/../.."
 SRC=mac/build/CedarLogic.app
 [ -d "$SRC" ] || { echo "Build first: mac/build.sh"; exit 1; }
 ROUNDS=${1:-3}
-STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline trash actions)
+STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline trash actions migrated paneloff owner)
 # STATES_ONLY="damaged" mac/Tools/launch-selftest.sh 40: only those states.
 [ -n "${STATES_ONLY:-}" ] && read -ra STATES <<<"$STATES_ONLY"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/cl-launch-selftest.XXXXXX")

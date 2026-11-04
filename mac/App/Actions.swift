@@ -1,7 +1,7 @@
-// The Actions rail: every command the app's menus offer, in one list (its
-// name, symbol, shortcut, when it can run and what it runs), so the rail on
-// the window's right edge, the toolbar's version of it and the Customize
-// sheet all work from the same place. What each one runs is the menu's own
+// The Actions panel: every command the app's menus offer, in one list (its
+// name, symbol, shortcut, when it can run and what it runs), so the panel on
+// the window's right edge (the "rail" in the code) and the Customize sheet
+// work from the same place. What each one runs is the menu's own
 // handler: CanvasController.perform for the commands with a shortcut, and
 // the menus' other calls (Share Link, Predict, Recently Deleted...) here,
 // where the menus call them too.
@@ -26,7 +26,7 @@ enum ActionID: String, CaseIterable, Identifiable {
     // Simulation
     case pause, step, stepClock, predict, reveal, lock
     // Help and the app
-    case help, feedback, shortcuts, whatsNew, playIntro, welcome, setUp, tour, settings, checkForUpdates
+    case help, feedback, shortcuts, whatsNew, playIntro, welcome, setUp, tour, showMeAround, settings, checkForUpdates
 
     var id: String { rawValue }
     @MainActor var action: AppAction { ActionRegistry.action(self) }
@@ -34,7 +34,7 @@ enum ActionID: String, CaseIterable, Identifiable {
     /// What the rail starts with, and Reset to Default goes back to.
     static let defaults: [ActionID] = [.checkCircuit, .predict, .tidy, .shareLink, .exportImage, .exportReport]
 
-    /// Runs it, if it can run now (the rail, the toolbar, the menus).
+    /// Runs it, if it can run now (the panel, the menus).
     @MainActor func run(_ canvas: CanvasController?) {
         let a = action
         guard a.available(), a.enabled(canvas) else { NSSound.beep(); return }
@@ -77,7 +77,8 @@ struct AppAction {
 
 @MainActor
 enum ActionRegistry {
-    static let menus = ["File", "Edit", "View", "Simulation", "Help"]
+    /// The menu bar's menus, in its order ("CedarLogic" is the app menu).
+    static let menus = ["CedarLogic", "File", "Edit", "View", "Simulation", "Help"]
 
     static func action(_ id: ActionID) -> AppAction {
         if table.isEmpty { table = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) }) }
@@ -94,7 +95,7 @@ enum ActionRegistry {
     private static let anyWindow: @MainActor (CanvasController?) -> Bool = { _ in true }
     private static var tidyMode: Int { UserDefaults.standard.integer(forKey: "tidyMode") }
 
-    /// In menu order: File, Edit, View, Simulation, Help.
+    /// In menu order: File, Edit, View, Simulation, Help (and the app menu's).
     static let all: [AppAction] = [
         // File
         AppAction(id: .newCircuit, title: "New Circuit", menu: "File", symbol: "doc.badge.plus", shortcut: .newCircuit,
@@ -243,30 +244,17 @@ enum ActionRegistry {
                   enabled: anyWindow, run: { _ in open("welcome") }),
         AppAction(id: .setUp, title: "Set Up CedarLogic\u{2026}", menu: "Help", symbol: "slider.horizontal.3",
                   enabled: anyWindow, run: { _ in WelcomeRequest.setup(); open("welcome") }),
-        AppAction(id: .tour, title: "Guided Tour", menu: "Help", symbol: "figure.walk",
+        AppAction(id: .tour, title: "Learn Logic: Guided Tour", menu: "Help", symbol: "figure.walk",
                   enabled: anyWindow, run: { _ in TourModel.shared.start() }),
-        AppAction(id: .settings, title: "Settings\u{2026}", menu: "Help", symbol: "gearshape", fixedKey: "⌘,",
+        AppAction(id: .showMeAround, title: "Show Me Around", menu: "Help", symbol: "binoculars",
+                  enabled: { ($0 ?? CanvasController.front) != nil },
+                  run: { c in if let c = c ?? CanvasController.front { ShowMeAround.shared.start(on: c) } }),
+        // On the Mac these two are in the app's own menu, CedarLogic.
+        AppAction(id: .settings, title: "Settings\u{2026}", menu: "CedarLogic", symbol: "gearshape", fixedKey: "⌘,",
                   enabled: anyWindow, run: { _ in PrefsWindow.shared.show() }),
-        AppAction(id: .checkForUpdates, title: "Check for Updates\u{2026}", menu: "Help", symbol: "arrow.down.circle",
+        AppAction(id: .checkForUpdates, title: "Check for Updates\u{2026}", menu: "CedarLogic", symbol: "arrow.down.circle",
                   enabled: anyWindow, run: { _ in Updates.shared.checkNow() }),
     ]
-}
-
-/// Where the actions go (Settings > Actions).
-enum ActionsMode: Int, CaseIterable, Identifiable {
-    /// The rail on the window's right edge.
-    case onScreen = 0
-    /// The same items as toolbar buttons; no rail.
-    case toolbar = 1
-    case hidden = 2
-    var id: Int { rawValue }
-    var name: String {
-        switch self {
-        case .onScreen: "On screen"
-        case .toolbar: "In the toolbar"
-        case .hidden: "Hidden"
-        }
-    }
 }
 
 /// Your Circuits, opened at Recently Deleted (File > Recently Deleted…).
@@ -288,15 +276,15 @@ extension Notification.Name {
 
 // MARK: - The rail
 
-/// The rail on the window's right edge, the palette's mirror: a narrow strip
+/// The Actions panel on the window's right edge, the palette's mirror: a narrow strip
 /// of the chosen actions, each named (with its shortcut) as the pointer
 /// rests on it. A click runs it; nothing opens or docks. Dragging one up or
 /// down (past a few points, or after holding it a moment) moves it, the
 /// others making room, in the same order the Customize list keeps. A click
 /// on its left edge folds it to a 6-point tab, a click on the tab brings it
 /// back, and it stays as it was left. Folded, resting on the tab slides it
-/// out over the canvas until the pointer leaves (Settings > Actions, on by
-/// default, as Arc's sidebar does). In a narrow window, and in focus mode,
+/// out over the canvas until the pointer leaves (Settings > Actions > Open on
+/// hover, on by default, as Arc's sidebar does). In a narrow window, and in focus mode,
 /// it folds by itself: a click on the tab opens it until it's folded again
 /// or the window leaves focus mode, and then it's as it was before.
 struct ActionsRail: View {
@@ -321,6 +309,8 @@ struct ActionsRail: View {
     private var showLabel: ActionID? { Self.pictureLabel }
     @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var keys = ShortcutStore.shared
+    /// Show Me Around opens it for its stop.
+    @ObservedObject private var around = ShowMeAround.shared
     @State private var hovered: ActionID?
     @State private var edgeHover = false
     @State private var tabHover = false
@@ -364,7 +354,7 @@ struct ActionsRail: View {
 
     struct RailDrag { let id: ActionID; let from: Int; var dy: CGFloat }
 
-    var folded: Bool { (prefs.actionsCollapsed || narrow || focus) && !peek }
+    var folded: Bool { (prefs.actionsCollapsed || narrow || focus) && !peek && !around.holdsPanelOpen(canvas) }
 
     private var chrome: CLChrome { CLChrome(dark: prefs.dark) }
     private var accent: Color { prefs.accentColor(dark: prefs.dark) }
@@ -384,7 +374,10 @@ struct ActionsRail: View {
             if menuOpen { menuOpen = false; hoverChanged() }
         }
         .onChange(of: folded) { _, f in if !f { hoverWait?.cancel(); slidOut = false; overRail = false; watchEscape(false) } }
-        .onDisappear { watchEscape(false) }
+        // Turned off (Settings > Actions): View's item says Show Actions again.
+        .onDisappear { watchEscape(false); canvas.actionsRailShown = false }
+        // Help > Show Me Around points here.
+        .tourSpot(.actions)
         .onChange(of: prefs.actionsHoverOpen) { _, on in if !on && slidOut { slide(false) } }
         .onChange(of: toggleRequest) { _, _ in toggle() }
         // For View > Show/Hide Actions' name.
@@ -408,12 +401,12 @@ struct ActionsRail: View {
         }
     }
 
-    /// The window's Show/Hide Actions: with the actions somewhere else (or
-    /// nowhere), the rail on screen and open; otherwise the rail's own toggle.
-    static func toggle(mode prefs: Prefs, bump: () -> Void) {
-        if prefs.actionsMode != .onScreen {
+    /// The window's Show/Hide Actions: with the panel off, on and open;
+    /// otherwise the panel's own toggle.
+    static func toggle(_ prefs: Prefs, bump: () -> Void) {
+        if !prefs.actionsOn {
             prefs.actionsCollapsed = false
-            prefs.actionsMode = .onScreen
+            prefs.actionsOn = true
         } else {
             bump()
         }
@@ -423,8 +416,7 @@ struct ActionsRail: View {
         Button("Customize Actions\u{2026}") { onCustomize() }
         Divider()
         Button(folded ? (slidOut ? "Keep Actions Open" : "Show Actions") : "Fold Actions Away") { folded ? unfold() : fold() }
-        Button("Show Them in the Toolbar Instead") { prefs.actionsMode = .toolbar }
-        Button("Hide Actions") { prefs.actionsMode = .hidden }
+        Button("Turn Off the Actions Panel") { prefs.actionsOn = false }
     }
 
     /// In focus mode these change only `peek`, so leaving it brings back the saved state.
@@ -489,7 +481,7 @@ struct ActionsRail: View {
     /// Folded: a 6-point tab the height of the window. As the pointer comes
     /// into the hot strip along the edge it peeks (lit, a few points wider,
     /// and all of that clickable) at once; after openDelay there (with
-    /// Settings > Actions' hover on) the rail slides out over the canvas; a
+    /// Settings > Actions > Open on hover) the panel slides out over the canvas; a
     /// click keeps it open. In focus mode it's the canvas's own colour, its
     /// grip fainter, until the pointer comes.
     private var tab: some View {
@@ -845,7 +837,7 @@ struct ActionsCustomizeList: View {
             HStack {
                 Text(searching
                      ? "\(order.count) of \(all.count) match. Clear the search to drag them into order."
-                     : "\(prefs.railActions.count) shown. Drag to change the order, here or on the rail.")
+                     : "\(prefs.railActions.count) shown. Drag to change the order, here or on the panel.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Button("Reset to Default") { withAnimation { prefs.resetActions() } }
@@ -886,16 +878,15 @@ struct ActionsCustomizeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Customize Actions").font(.system(size: 15, weight: .bold))
-            Text("Tick what goes on the Actions rail, anything from any menu. They show in this order, top to bottom. You can also drag them up or down on the rail itself.")
+            Text("Tick what goes on the Actions panel, anything from any menu. They show in this order, top to bottom. You can also drag them up or down on the panel itself.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             ActionsCustomizeList(height: 360, query: $query)
             HStack {
-                Text("Show:").font(.system(size: 12))
-                Picker("", selection: $prefs.actionsMode) {
-                    ForEach(ActionsMode.allCases) { Text($0.name).tag($0) }
-                }
-                .labelsHidden().fixedSize()
+                Toggle("Show the Actions panel", isOn: $prefs.actionsOn).toggleStyle(.checkbox)
+                Toggle("Open on hover", isOn: $prefs.actionsHoverOpen).toggleStyle(.checkbox)
+                    .disabled(!prefs.actionsOn)
+                    .help(ActionsSwitches.hoverHint)
                 Spacer()
                 Button("Done") { done() }.keyboardShortcut(.defaultAction)
             }
@@ -907,9 +898,23 @@ struct ActionsCustomizeSheet: View {
     }
 }
 
-/// Settings > Actions.
+/// The panel's two switches, as Settings > Actions, the welcome and What's
+/// New word them.
+enum ActionsSwitches {
+    static let show = "Show the Actions panel"
+    static let hover = "Open on hover"
+    static let showHint = "The commands you use most, down the right edge of the window. Rest on one for its name and shortcut, click to run it, drag it up or down to move it."
+    static let hoverHint = "When the panel is folded, move the pointer to the window\u{2019}s right edge and it slides out. Move away and it goes back."
+    @MainActor static var offHint: String {
+        let key = ShortcutStore.shared.combo(.toggleActions).map { " (\($0.label))" } ?? ""
+        return "Everything is still in the menus, with its shortcut. View \u{25B8} Show Actions\(key) turns it back on."
+    }
+}
+
+/// Settings > Actions: the panel on or off, opening on hover, and what's on it.
 struct CLActionsSettings: View {
     @ObservedObject private var prefs = Prefs.shared
+    @ObservedObject private var keys = ShortcutStore.shared
     @State private var query: String
     init(query: String = "") { _query = State(initialValue: query) }
 
@@ -918,38 +923,37 @@ struct CLActionsSettings: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("Actions:").frame(width: 150, alignment: .trailing)
                 VStack(alignment: .leading, spacing: 4) {
-                    Picker("", selection: $prefs.actionsMode) {
-                        ForEach(ActionsMode.allCases) { Text($0.name).tag($0) }
-                    }
-                    .labelsHidden().fixedSize()
-                    Toggle("Open it when the mouse reaches the right edge", isOn: $prefs.actionsHoverOpen)
+                    Toggle(ActionsSwitches.show, isOn: $prefs.actionsOn.animation(.easeInOut(duration: 0.24)))
                         .toggleStyle(.checkbox)
-                        .disabled(prefs.actionsMode != .onScreen)
-                    Text("When it's folded. Move the pointer to the window's right edge (or push it against the screen's) and it slides out over the canvas, then back when you move away.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 360, alignment: .leading)
+                    hint(prefs.actionsOn ? ActionsSwitches.showHint : ActionsSwitches.offHint)
                         .padding(.leading, 20)
-                    Text(hint).font(.system(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 360, alignment: .leading)
+                    Toggle(ActionsSwitches.hover, isOn: $prefs.actionsHoverOpen)
+                        .toggleStyle(.checkbox)
+                        .disabled(!prefs.actionsOn)
+                        .padding(.top, 6)
+                    hint(ActionsSwitches.hoverHint)
+                        .padding(.leading, 20)
+                        .opacity(prefs.actionsOn ? 1 : 0.55)
                 }
                 Spacer(minLength: 0)
             }
             Text("Show these, in this order:").font(.system(size: 13, weight: .bold)).padding(.top, 6)
             ActionsCustomizeList(height: 300, query: $query)
-                .disabled(prefs.actionsMode == .hidden)
+                .disabled(!prefs.actionsOn)
+            Text(foldHint).font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var toggleKey: String { ShortcutStore.shared.combo(.toggleActions).map { " (\($0.label))" } ?? "" }
+    private func hint(_ s: String) -> some View {
+        Text(s).font(.system(size: 11)).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 360, alignment: .leading)
+    }
 
-    private var hint: String {
-        switch prefs.actionsMode {
-        case .onScreen: "A strip down the right edge of the window, the palette's mirror. Rest on one for its name and shortcut; drag one up or down to move it. Click its edge to fold it away, or use View \u{25B8} Hide Actions\(toggleKey). Right-click it to choose your own."
-        case .toolbar: "The same actions as buttons in the toolbar, with no strip on the right."
-        case .hidden: "No actions strip. Everything is still in the menus, with its shortcut."
-        }
+    private var foldHint: String {
+        let key = keys.combo(.toggleActions).map { " (\($0.label))" } ?? ""
+        return "Click the panel\u{2019}s left edge to fold it away, or use View \u{25B8} Hide Actions\(key). Right-click it to change what\u{2019}s on it. Help \u{25B8} Show Me Around points it out."
     }
 }
 
@@ -957,9 +961,7 @@ struct CLActionsSettings: View {
 
 /// What a circuit window does for the rail: watches its width (the rail
 /// folds under ActionsRail.narrowWidth and comes back over it) and focus
-/// mode (folded in it, as it was after it), shows the
-/// Customize sheet, and tells someone who used CedarLogic before the rail
-/// where it is, once.
+/// mode (folded in it, as it was after it), and shows the Customize sheet.
 struct ActionsWindowParts: ViewModifier {
     let canvas: CanvasController
     /// The split view's other side, which can ask for Show/Hide Actions too.
@@ -974,9 +976,6 @@ struct ActionsWindowParts: ViewModifier {
     @Binding var customizing: Bool
     @ObservedObject private var prefs = Prefs.shared
 
-    /// The status line, once, for those who had CedarLogic before the rail.
-    static let hint = "New: an Actions rail. Settings \u{25B8} Actions."
-
     func body(content: Content) -> some View {
         content
             .onChange(of: width) { _, w in
@@ -985,7 +984,7 @@ struct ActionsWindowParts: ViewModifier {
             // View > Show/Hide Actions, from either side of a split.
             .onReceive(NotificationCenter.default.publisher(for: .clToggleActionsRail)) { n in
                 if let c = n.object as? CanvasController, c === canvas || c === partner {
-                    ActionsRail.toggle(mode: prefs) { toggle += 1 }
+                    ActionsRail.toggle(prefs) { toggle += 1 }
                 }
             }
             .onReceive(canvas.$actionsRailShown) { v in if partner.actionsRailShown != v { partner.actionsRailShown = v } }
@@ -997,26 +996,224 @@ struct ActionsWindowParts: ViewModifier {
                 ActionsCustomizeSheet { customizing = false }
                     .onClickOutside { customizing = false }
             }
-            .onAppear { if prefs.actionsHintPending { tellLater(tries: 0) } }
+    }
+}
+
+// MARK: - The welcome's picture and switches
+
+/// The panel's two switches beside a small picture of a window with the
+/// panel in it, in the brand look: the first-run welcome's page and What's
+/// New's "Show or Hide It" card. They change the real setting as they're
+/// flipped. Flat shapes only, so Windows and Linux can draw the same.
+struct ActionsPanelChoice: View {
+    @ObservedObject private var prefs = Prefs.shared
+    @ObservedObject private var keys = ShortcutStore.shared
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 30) {
+            VStack(alignment: .leading, spacing: 16) {
+                BrandSwitchRow(title: ActionsSwitches.show,
+                               line: "The commands you use most, a click each, down the window\u{2019}s right edge.",
+                               isOn: $prefs.actionsOn.animation(.spring(response: 0.38, dampingFraction: 0.86)))
+                BrandSwitchRow(title: ActionsSwitches.hover,
+                               line: "Folded away, it slides out when the pointer reaches the right edge, and goes back when you move off.",
+                               isOn: $prefs.actionsHoverOpen.animation(.easeOut(duration: 0.2)))
+                    .disabled(!prefs.actionsOn)
+                    .opacity(prefs.actionsOn ? 1 : 0.45)
+                Text("Change it any time: Settings \u{25B8} Actions, or View \u{25B8} \(prefs.actionsOn ? "Hide" : "Show") Actions\(keys.combo(.toggleActions).map { " (\($0.label))" } ?? "").")
+                    .font(.system(size: 11.5)).foregroundStyle(BrandText.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: 290, alignment: .leading)
+            ActionsPanelPicture(on: prefs.actionsOn, hover: prefs.actionsHoverOpen)
+        }
+    }
+}
+
+/// A switch on the brand ground: its name, a line under it, and the switch.
+struct BrandSwitchRow: View {
+    let title: String
+    let line: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 13.5, weight: .bold)).foregroundStyle(BrandText.primary)
+                Text(line).font(.system(size: 11.5)).foregroundStyle(BrandText.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .toggleStyle(BrandSwitchStyle())
+        .accessibilityHint(line)
+    }
+}
+
+/// A neon switch: a capsule with a knob, lit when on.
+struct BrandSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            configuration.label
+            Spacer(minLength: 0)
+            Capsule()
+                .fill(configuration.isOn ? AnyShapeStyle(Brand.neon) : AnyShapeStyle(Color.white.opacity(0.14)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(configuration.isOn ? 0.35 : 0.16)))
+                .frame(width: 40, height: 23)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Circle().fill(configuration.isOn ? Brand.ink : Color.white.opacity(0.85))
+                        .frame(width: 17, height: 17).padding(3)
+                }
+                .shadow(color: configuration.isOn ? Brand.neon.opacity(0.45) : .clear, radius: 7)
+                .animation(.easeOut(duration: 0.16), value: configuration.isOn)
+                .padding(.top, 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { configuration.isOn.toggle() }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
+        .accessibilityAction { configuration.isOn.toggle() }
+    }
+}
+
+/// A small CedarLogic window, dark: the toolbar, the palette, a gate and a
+/// light on the canvas, and (when `on`) the Actions panel down the right
+/// edge, one of its buttons named as the pointer rests on it. With `hover`
+/// a pointer waits at the edge.
+struct ActionsPanelPicture: View {
+    let on: Bool
+    let hover: Bool
+
+    private static let w: CGFloat = 300, h: CGFloat = 200
+    private let chrome = CLChrome(dark: true)
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                chrome.canvas
+                VStack(spacing: 0) {
+                    toolbar
+                    HStack(spacing: 0) {
+                        palette
+                        canvas
+                        if on { rail.transition(.move(edge: .trailing).combined(with: .opacity)) }
+                    }
+                }
+            }
+            .frame(width: Self.w, height: Self.h)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Color.white.opacity(0.16)))
+            .shadow(color: .black.opacity(0.5), radius: 16, y: 8)
+            .shadow(color: on ? Brand.neon.opacity(0.12) : .clear, radius: 20)
+            Text(on ? (hover ? "On, and it opens on hover when folded." : "On. Folded, a click on its edge opens it.")
+                    : "Off. Everything is still in the menus.")
+                .font(.system(size: 10.5, weight: .semibold)).kerning(0.4)
+                .foregroundStyle(on ? Brand.neon : BrandText.faint)
+                .frame(width: Self.w)
+        }
+        .accessibilityElement()
+        .accessibilityLabel(on ? "A window with the Actions panel on its right edge" : "A window without the Actions panel")
     }
 
-    /// After the launch (and any welcome or What's New over it) is out of the way.
-    private func tellLater(tries: Int) {
-        guard !Self.quiet else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (tries == 0 ? 4 : 2)) {
-            guard prefs.actionsHintPending, let w = canvas.view?.window, w.isVisible else { return }
-            let greeting = NSApp.windows.contains { o in
-                o.isVisible && ["welcome", "whatsnew"].contains { o.identifier?.rawValue.contains($0) == true }
+    private var toolbar: some View {
+        HStack(spacing: 5) {
+            ForEach([Color(red: 1, green: 0.37, blue: 0.34), Color(red: 1, green: 0.74, blue: 0.18), Color(red: 0.16, green: 0.79, blue: 0.25)], id: \.self) {
+                Circle().fill($0).frame(width: 7, height: 7)
             }
-            if (greeting || w.attachedSheet != nil) && tries < 60 { tellLater(tries: tries + 1); return }
-            prefs.actionsHintPending = false
-            canvas.note(Self.hint, for: 10)
+            ForEach(0..<4, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 2).fill(chrome.barInk.opacity(0.35)).frame(width: 12, height: 8)
+            }
+            .padding(.leading, 6)
+            Spacer()
+            Image(systemName: "play.fill").font(.system(size: 7)).foregroundStyle(Brand.neon.opacity(0.8))
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(chrome.classicBar)
+    }
+
+    private var palette: some View {
+        VStack(spacing: 5) {
+            ForEach(0..<5, id: \.self) { _ in
+                HStack(spacing: 5) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 3).strokeBorder(chrome.barInk.opacity(0.3)).frame(width: 18, height: 16)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 8)
+        .frame(width: 54)
+        .frame(maxHeight: .infinity)
+        .background(chrome.tabBar)
+        .overlay(alignment: .trailing) { Rectangle().fill(chrome.sash).frame(width: 1) }
+    }
+
+    private var canvas: some View {
+        Canvas { ctx, size in
+            var dots = Path()
+            var x: CGFloat = 8
+            while x < size.width { var y: CGFloat = 8; while y < size.height { dots.addRect(CGRect(x: x, y: y, width: 1, height: 1)); y += 12 }; x += 12 }
+            ctx.fill(dots, with: .color(.white.opacity(0.12)))
+            let cy = size.height / 2, gx = size.width / 2 - 26
+            var wires = Path()
+            wires.move(to: CGPoint(x: 18, y: cy - 10)); wires.addLine(to: CGPoint(x: gx, y: cy - 10))
+            wires.move(to: CGPoint(x: 18, y: cy + 10)); wires.addLine(to: CGPoint(x: gx, y: cy + 10))
+            wires.move(to: CGPoint(x: gx + 40, y: cy)); wires.addLine(to: CGPoint(x: gx + 70, y: cy))
+            ctx.stroke(wires, with: .color(Brand.neon), lineWidth: 1.6)
+            var gate = Path()
+            gate.move(to: CGPoint(x: gx, y: cy - 18)); gate.addLine(to: CGPoint(x: gx + 18, y: cy - 18))
+            gate.addCurve(to: CGPoint(x: gx + 18, y: cy + 18), control1: CGPoint(x: gx + 42, y: cy - 18), control2: CGPoint(x: gx + 42, y: cy + 18))
+            gate.addLine(to: CGPoint(x: gx, y: cy + 18)); gate.closeSubpath()
+            ctx.fill(gate, with: .color(Brand.neon.opacity(0.12)))
+            ctx.stroke(gate, with: .color(Brand.neon), lineWidth: 1.6)
+            let lamp = CGRect(x: gx + 70, y: cy - 8, width: 16, height: 16)
+            ctx.fill(Path(ellipseIn: lamp.insetBy(dx: -5, dy: -5)), with: .color(Color(red: 1, green: 0.77, blue: 0.25).opacity(0.18)))
+            ctx.fill(Path(ellipseIn: lamp), with: .color(Color(red: 1, green: 0.77, blue: 0.25)))
+            for y in [cy - 10, cy + 10] {
+                ctx.stroke(Path(roundedRect: CGRect(x: 6, y: y - 6, width: 12, height: 12), cornerRadius: 3), with: .color(Brand.neon), lineWidth: 1.3)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .trailing) {
+            // Open on hover: a pointer resting at the edge (with the panel
+            // off it has nowhere to open, so none).
+            if on && hover {
+                Image(systemName: "cursorarrow").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white).shadow(color: .black.opacity(0.6), radius: 2)
+                    .offset(x: -2, y: 66)
+                    .transition(.opacity)
+            }
         }
     }
 
-    /// The test and picture runs leave the hint for the real launch.
-    static var quiet: Bool {
-        CommandLine.arguments.contains { $0.hasPrefix("--render") || $0.hasSuffix("-check") || $0.hasSuffix("-selftest") }
-            || ProcessInfo.processInfo.environment["CL_SNAPSHOT"] != nil || BarTest.on
+    private var rail: some View {
+        VStack(spacing: 4) {
+            ForEach(Array(ActionID.defaults.enumerated()), id: \.offset) { i, id in
+                Image(systemName: id.action.symbol).font(.system(size: 10))
+                    .foregroundStyle(chrome.barInk.opacity(0.9))
+                    .frame(width: 22, height: 21)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Brand.neon.opacity(i == 0 ? 0.14 : 0)))
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Brand.neon.opacity(i == 0 ? 0.9 : 0), lineWidth: 1))
+                    .overlay(alignment: .trailing) {
+                        if i == 0 {
+                            Text("Check My Circuit").font(.system(size: 8.5, weight: .medium)).foregroundStyle(chrome.tabInk)
+                                .fixedSize()
+                                .padding(.horizontal, 5).frame(height: 15)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(chrome.tabCard))
+                                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.white.opacity(0.12)))
+                                .offset(x: -30)
+                        }
+                    }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 6)
+        .frame(width: 30)
+        .frame(maxHeight: .infinity)
+        .background(chrome.canvas)
+        .overlay(alignment: .leading) { Rectangle().fill(hover ? Brand.neon.opacity(0.5) : chrome.sash).frame(width: 1) }
     }
 }
