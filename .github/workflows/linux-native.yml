@@ -36,7 +36,9 @@ jobs:
     # here starts on Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm),
     # Fedora 36 and anything newer.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # (x86_64 runs the session check too; with Show Me Around's pictures it
+    # takes about 47 minutes.)
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
