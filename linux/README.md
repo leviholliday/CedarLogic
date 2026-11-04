@@ -72,10 +72,14 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   (`Help`), Settings > Sync, the link preview and the sync line in Your
   Circuits (`SyncApp`, `SyncUI`, `SyncPlatform`), and the brand's launch screen, welcome, guided tour and What's
   New (`Brand`, `Splash`, `Welcome`), with the Mac's 0.4 intro before the
-  launch screen on the first launch and the first after an update (`Intro`:
-  the circuit drawing itself into the icon, then the launch screen; any key
-  or click skips it, and it gives way to the still launch screen when the
-  animations are off or the frames come too slowly). Motion follows the Mac's curves
+  launch screen on the first launch and the first after an update, with the
+  chime both times (`Intro`: about 6 s, the circuit drawing itself into the
+  icon, then the launch screen, held a moment to be read; any key or click
+  skips it, and it gives way to the still launch screen when the animations
+  are off or the frames come too slowly). Help > Play the Intro plays it
+  again over the front window, and Settings > General > "Play the intro
+  every time CedarLogic opens" (off unless chosen) plays it, silently, at
+  every launch. Motion follows the Mac's curves
   (`Anim.h`) and stops when the desktop asks for no animations. Settings
   (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`; circuits in
   `~/.local/share/CedarLogic/Library`.
@@ -167,11 +171,17 @@ every shape and gate style and checks each circuit's truth table. And:
   with `G_DEBUG=fatal-criticals`, with a time cap; CI runs seeds 1-4, and
   more on a build with AddressSanitizer
 - `cedarlogic --splash-frame <seconds> out.png [--first]` -- the launch screen
-- `cedarlogic --render-intro <dir> [first|update] [--behind <window.png>]` --
-  the intro, every frame at 60 fps (1280 x 800 at 2x), with no display; CI
-  keeps the frames at 0.2, 1.0, 2.98, 3.8 and 4.65 s with the renders.
-  `CL_INTRO=first|update` plays it on a normal launch, `CL_NO_INTRO=1` never,
-  `CL_INTRO_FREEZE=<seconds>` holds it at a moment
+- `cedarlogic --render-intro <dir> [first|update|every] [--behind <window.png>]` --
+  the intro, every frame at 60 fps (1280 x 800 at 2x, 365 frames), with no
+  display; CI keeps the frames at the Mac's v5 stills (0.2, 0.95, 1.7, 2.98,
+  3.2, 3.8, 4.95 and 5.8 s) and the hit (2.5-2.7 s) with the renders.
+  `CL_INTRO=first|update|every` plays that one on a normal launch,
+  `CL_NO_INTRO=1` never, `CL_INTRO_FREEZE=<seconds>` holds it at a moment,
+  `CL_INTRO_LOG=1` says on stderr which played and whether with the sound
+- `cedarlogic --intro-check` -- the intro's rules with settings of its own:
+  the timeline, which launch plays which intro, the sound (the first
+  launch's and an update's only), the every-launch setting (off for a new
+  install) and Help > Play the Intro in the actions and the menu bar
 - `cedarlogic --feedback-probe` -- asks the feedback site with a wrong key
   (expects 403) and sends nothing
 - `cedarlogic --version`

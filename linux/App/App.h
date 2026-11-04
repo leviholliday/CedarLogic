@@ -109,6 +109,8 @@ struct Prefs {
 	// first launch after an update (the What's New version it introduced).
 	bool introFirstLaunchPlayed = false;
 	std::string introUpdatePlayed;
+	// Settings > General: the intro at every launch, silently (off unless chosen).
+	bool introEveryLaunch = false;
 	std::string seenWhatsNew;
 	// Export as Image: the grid, the name-and-result strip, the style and size.
 	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;

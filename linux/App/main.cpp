@@ -689,6 +689,7 @@ GMenuModel* buildMenubar() {
 	add(s, "Guided _Tour", "app.guided-tour");
 	s = section(help);
 	add(s, "_What's New in CedarLogic", "win.whats-new");
+	add(s, "Play the _Intro", "app.play-intro");
 	add(s, "W_elcome to CedarLogic", "win.welcome");
 	s = section(help);
 	add(s, "Send _Feedback…", "win.feedback");
@@ -976,6 +977,10 @@ void startupCb(GApplication* gapp, gpointer) {
 		  nullptr, nullptr, nullptr, { 0 } },
 		{ "guided-tour", [](GSimpleAction*, GVariant*, gpointer app) { startTour(activeWindow(GTK_APPLICATION(app))); },
 		  nullptr, nullptr, nullptr, { 0 } },
+		// Help > Play the Intro: the first launch's, sound and all, over the front circuit window (Splash.h).
+		{ "play-intro", [](GSimpleAction*, GVariant*, gpointer app) {
+			if (CircuitWindow* w = activeWindow(GTK_APPLICATION(app))) guarded("the intro", [&] { splashPlayIntroNow(w->window()); });
+		  }, nullptr, nullptr, nullptr, { 0 } },
 		// Window > (an open circuit): that window to the front.
 		{ "show-window", [](GSimpleAction*, GVariant* v, gpointer) {
 			const int i = g_variant_get_int32(v);
@@ -1418,13 +1423,14 @@ int main(int argc, char** argv) {
 			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSessionSeed = strtoull(argv[++i], nullptr, 10);
 			continue;
 		}
-		// --render-intro <dir> [first|update] [--behind <png>]: the intro's frames at 60 fps, with no display (Intro.h).
+		// --render-intro <dir> [first|update|every] [--behind <png>]: the intro's frames at 60 fps, with no display (Intro.h).
 		if (strcmp(argv[i], "--render-intro") == 0 && i + 1 < argc) {
 			const std::string dir = argv[i + 1];
 			intro::Trigger trigger = intro::Trigger::First;
 			std::string behind;
 			for (int j = i + 2; j < argc; j++) {
 				if (strcmp(argv[j], "update") == 0) trigger = intro::Trigger::Update;
+				else if (strcmp(argv[j], "every") == 0) trigger = intro::Trigger::Every;
 				else if (strcmp(argv[j], "--behind") == 0 && j + 1 < argc) behind = argv[++j];
 			}
 			return intro::render(dir, trigger, behind);
@@ -1448,6 +1454,21 @@ int main(int argc, char** argv) {
 			g_setenv("CL_ACTIONS_CHECK_HOME", home, TRUE);
 			gtk_init_check(&argc, &argv);
 			const int code = actions::check();
+			removeTree(home);
+			g_free(home);
+			return code;
+		}
+		// --intro-check: which launch plays which intro and with what sound, the setting, and
+		// Help > Play the Intro (Intro.h), with settings of its own in a temporary folder.
+		if (strcmp(argv[i], "--intro-check") == 0) {
+			gchar* home = g_dir_make_tmp("cl-intro-XXXXXX", nullptr);
+			if (home == nullptr) { fprintf(stderr, "intro-check: no temporary folder\n"); return 2; }
+			g_setenv("XDG_CONFIG_HOME", (std::string(home) + "/config").c_str(), TRUE);
+			g_setenv("XDG_DATA_HOME", (std::string(home) + "/data").c_str(), TRUE);
+			gtk_init_check(&argc, &argv);
+			GMenuModel* bar = buildMenubar();
+			const int code = intro::check(bar);
+			g_object_unref(bar);
 			removeTree(home);
 			g_free(home);
 			return code;
