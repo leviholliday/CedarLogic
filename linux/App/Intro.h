@@ -160,9 +160,10 @@ struct WireLook {
 
 // How much of it is drawn. Full: all of it, as the Mac's. Lite, for a machine
 // whose first frames come slowly (a Raspberry Pi drawing at a large window's
-// size): no push-in (held where it was), no motes, and none of the glows
-// that only soften (the light under the gate, the lift of light at the hit,
-// the wires' widest glow); the tracing of the C, the D and the L, the LED,
+// size): no push-in (eased back out from where it was), no motes, none of
+// the glows that only soften (the wires' widest, the icon's as it flies),
+// and the glows and the bloom painted without blending pixels (which an ARM
+// CPU does slowly); the tracing of the C, the D and the L, the LED,
 // the 0.4, the bloom, the panel held and the dissolve are all there.
 enum class Tier { Full, Lite };
 const char* name(Tier t);
@@ -234,7 +235,8 @@ public:
 	double soundTime(double now) const { return soundAt_ < 0 ? -1 : soundOffset_ + (now - soundAt_); }
 	// The intro was skipped or cut short: no more lining up with the sound.
 	void stopSound() { soundOwed_ = false; soundAt_ = -1; }
-	// (For the check: the median of the last frames' gaps and draw times.)
+	// The median of the last frames' gaps (s) and draw times (ms); just after
+	// it went Lite, those that made it.
 	double recentGap() const;
 	double recentDraw() const;
 
@@ -242,7 +244,7 @@ private:
 	double t_ = 0, last_ = -1;
 	int frames_ = 0;
 	Tier tier_ = Tier::Full;
-	double tierAt_ = 0;
+	double tierAt_ = 0, tierGap_ = 0, tierDraw_ = 0;   // when it went Lite, and why
 	bool decided_ = false;
 	std::vector<double> gaps_, draws_, paces_;   // the last few frames'
 	bool soundOwed_ = false;
@@ -254,7 +256,7 @@ private:
 
 // The parts of a frame, timed apart: each part's time leaves out the parts
 // drawn inside it (a glow inside the circuit is the glows', not the wires').
-enum Part { kClear, kBackdrop, kGrid, kGlows, kMotes, kWires, kDisplay, kIcon, kBloom, kPanel, kGroups, kParts };
+enum Part { kClear, kBackdrop, kGrid, kUnder, kGlows, kMotes, kWires, kDisplay, kIcon, kBloom, kPanel, kGroups, kParts };
 const char* partName(int part);
 // While the bench runs, each part's time so far in ms; null otherwise (and
 // then a Timed costs a test of a pointer).

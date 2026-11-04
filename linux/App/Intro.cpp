@@ -171,14 +171,16 @@ cairo_surface_t* radialImage(int side, std::initializer_list<Stop> stops, cairo_
 }
 
 // `img` (clear at its edges) stretched over the circle at c of `radius`, at
-// `opacity`: only the square it covers is touched.
-void paintRound(cairo_t* cr, cairo_surface_t* img, PointF c, double radius, double opacity) {
+// `opacity`: only the square it covers is touched. `fast`: each pixel from
+// the nearest of the image's, not a blend of four (several times cheaper on
+// an ARM CPU, and a soft glow from a large enough image looks the same).
+void paintRound(cairo_t* cr, cairo_surface_t* img, PointF c, double radius, double opacity, bool fast = false) {
 	const int n = cairo_image_surface_get_width(img);
 	cairo_save(cr);
 	cairo_translate(cr, c.x - radius, c.y - radius);
 	cairo_scale(cr, 2 * radius / n, 2 * radius / n);
 	cairo_set_source_surface(cr, img, 0, 0);
-	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+	cairo_pattern_set_filter(cairo_get_source(cr), fast ? CAIRO_FILTER_FAST : CAIRO_FILTER_BILINEAR);
 	cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_NONE);
 	cairo_paint_with_alpha(cr, std::min(1.0, opacity));
 	cairo_restore(cr);
@@ -192,14 +194,21 @@ cairo_surface_t* glowImage(int side) {
 	return radialImage(side, { { 0, 1, 1, 1, 1 }, { 0.12, 0.6, 1, 0.72, 0.85 }, { 0.4, 0.22, 1, 0.42, 0.25 }, { 1, 0.22, 1, 0.42, 0 } },
 	                   CAIRO_EXTEND_NONE);
 }
-void glow(cairo_t* cr, PointF c, double radius, double opacity) {
+void glow(cairo_t* cr, PointF c, double radius, double opacity, bool fast = false) {
 	if (opacity <= 0.002 || radius <= 0.1) return;
 	Timed timed(kGlows);
 	static cairo_surface_t* small = glowImage(64);
 	static cairo_surface_t* large = glowImage(384);
+	static cairo_surface_t* larger = nullptr;   // (for `fast`: as large as the glow gets)
 	double dx = 2 * radius, dy = 0;
 	cairo_user_to_device_distance(cr, &dx, &dy);
-	paintRound(cr, std::hypot(dx, dy) <= 96 ? small : large, c, radius, opacity);
+	const double across = std::hypot(dx, dy);
+	if (fast && across > 384) {
+		if (!larger) larger = glowImage(768);
+		paintRound(cr, larger, c, radius, opacity, true);
+		return;
+	}
+	paintRound(cr, across <= 96 ? small : large, c, radius, opacity, fast && across > 96);
 }
 
 void circle(cairo_t* cr, PointF c, double r) {
@@ -252,8 +261,8 @@ double median(std::vector<double> v) {
 }
 }  // namespace
 
-double Pacer::recentGap() const { return median(gaps_); }
-double Pacer::recentDraw() const { return median(draws_); }
+double Pacer::recentGap() const { return gaps_.empty() ? tierGap_ : median(gaps_); }
+double Pacer::recentDraw() const { return draws_.empty() ? tierDraw_ : median(draws_); }
 
 void Pacer::idle(double now) { if (last_ >= 0) last_ = now; }
 
@@ -293,6 +302,8 @@ void Pacer::judge() {
 	if (decided_ && slow && t_ < kLastDrop) {
 		tier_ = Tier::Lite;
 		tierAt_ = t_;
+		tierGap_ = median(gaps_);
+		tierDraw_ = median(draws_);
 		// The frames to come are another tier's: measured afresh.
 		gaps_.clear();
 		draws_.clear();
@@ -331,7 +342,7 @@ void Pacer::soundStarted(double now, double offset) {
 Prof* gProf = nullptr;
 
 const char* partName(int part) {
-	static const char* names[kParts] = { "clear", "backdrop", "grid", "glows", "motes", "wires", "display", "icon", "bloom", "panel", "groups" };
+	static const char* names[kParts] = { "clear", "backdrop", "grid", "under", "glows", "motes", "wires", "display", "icon", "bloom", "panel", "groups" };
 	return part >= 0 && part < kParts ? names[part] : "?";
 }
 
@@ -904,7 +915,7 @@ struct Scene::Impl {
 			cairo_paint_with_alpha(cr, gridShown);
 		}
 		if (under > 0.002) {
-			Timed timed(kGlows);
+			Timed timed(kUnder);
 			paintUnder(cr, far, under);
 		}
 		Timed timed(kMotes);
@@ -993,7 +1004,7 @@ struct Scene::Impl {
 		}
 		// The head: a soft light that narrows as it lands.
 		const double sc = (pulsing ? 1.15 : 0.9) * (1 - 0.45 * settle);
-		glow(cr, p.point(f), 15 * sc, shown);
+		glow(cr, p.point(f), 15 * sc, shown, tier == Tier::Lite);
 	}
 
 	void drawCircuit(cairo_t* cr, double t) {
@@ -1069,7 +1080,7 @@ struct Scene::Impl {
 		const double fu = clamp01((t - kLedAt) / 0.45);
 		const double flash = fu > 0 ? std::pow(1 - fu, 2) * std::min(1.0, fu / 0.08) : 0;
 		const double g = 0.6 + 0.8 * lit + 0.55 * flash + 0.4 * smooth(t, kBloomAt - 0.22, kBloomAt);
-		glow(cr, ledC, 75 * k * g, lit);
+		glow(cr, ledC, 75 * k * g, lit, tier == Tier::Lite);
 		const double ringO = smooth(t, 1.88, 1.98);
 		if (ringO > 0.002) {
 			const double s = pop(t, 1.91, 0.3);
@@ -1138,7 +1149,8 @@ struct Scene::Impl {
 		const double x = big.x + (cardIcon.x - small / 2 - big.x) * fly, y = big.y + (cardIcon.y - small / 2 - big.y) * fly;
 		const double side = bigSide + (small - bigSide) * fly;
 		const PointF centre = { (float)(x + side / 2), (float)(y + side / 2) };
-		glow(cr, centre, side * 1.9 / 2, o * (0.55 + 0.25 * (1 - fly)));
+		// (Its glow is one of the extras Lite leaves out.)
+		glow(cr, centre, side * 1.9 / 2, o * (0.55 + 0.25 * (1 - fly)) * extras, tier == Tier::Lite);
 		cairo_surface_t* icon = launchIcon();
 		cairo_save(cr);
 		if (icon) {
@@ -1168,10 +1180,16 @@ struct Scene::Impl {
 		const double r = std::max(w, h) * 1.6 / 2 * bs;
 		// (Drawn once and painted stretched, as the glows are; out past its
 		// edge it's clear, and only the canvas it covers is touched.)
-		static cairo_surface_t* image = radialImage(512, { { 0, 0.9, 1, 0.93, 1 }, { 0.05, 0.45, 1, 0.6, 0.7 }, { 0.22, 0.22, 1, 0.42, 0.16 },
-		                                                    { 0.5, 0.22, 1, 0.42, 0.04 }, { 1, 0.22, 1, 0.42, 0 } },
-		                                              CAIRO_EXTEND_NONE);
-		paintRound(cr, image, onStage(ledC, near), r, o);
+		auto bloomImage = [](int side) {
+			return radialImage(side, { { 0, 0.9, 1, 0.93, 1 }, { 0.05, 0.45, 1, 0.6, 0.7 }, { 0.22, 0.22, 1, 0.42, 0.16 }, { 0.5, 0.22, 1, 0.42, 0.04 },
+			                           { 1, 0.22, 1, 0.42, 0 } },
+			                   CAIRO_EXTEND_NONE);
+		};
+		static cairo_surface_t* image = bloomImage(512);
+		static cairo_surface_t* larger = nullptr;   // (Lite's, painted without blending: larger)
+		const bool lite = tier == Tier::Lite;
+		if (lite && !larger) larger = bloomImage(1024);
+		paintRound(cr, lite ? larger : image, onStage(ledC, near), r, o, lite);
 	}
 
 	// A part drawn at `opacity` as a whole (in a group, clipped to `box`, only
