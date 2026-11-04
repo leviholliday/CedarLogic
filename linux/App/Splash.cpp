@@ -5,7 +5,9 @@
 //
 // When the intro is owed (Intro.h), the window is the size of the circuit
 // window and where it will come in: the intro plays in it, then this panel
-// over it, part-way into its own appearance, which dissolves into the window.
+// over it, part-way into its own appearance, which holds a moment to be read
+// and dissolves into the window. Help > Play the Intro puts the same window
+// over the front circuit window (splashPlayIntroNow), dissolving back into it.
 
 #include "Splash.h"
 #include "Brand.h"
@@ -55,8 +57,9 @@ struct Timeline {
 
 	// After the intro: "Ready", the version in its title, the rest of its
 	// appearance from intro::kSplashAt on its own clock (the bar filling as it
-	// goes), its sweep at full length, and the dissolve straight after it (as
-	// the Mac's Splash.configureAfterIntro). With `calm`, the still, briefly.
+	// goes), its sweep at full length, a hold, finished, to be read, and the
+	// dissolve (as the Mac's Splash.configureAfterIntro). With `calm`, the
+	// still, briefly.
 	void planAfterIntro(bool calm_) {
 		afterIntro = true;
 		first = false;
@@ -108,10 +111,11 @@ struct Timeline {
 	}
 
 	double progress(double t) const {
-		// After the intro: gliding home from where it'd be as the panel comes in.
+		// After the intro: gliding home from where it'd be as the panel comes
+		// in, full as the sweep ends, then held there while the panel is read.
 		if (afterIntro) {
 			if (calm) return 1;
-			const double from = intro::kSplashAt, end = dissolveAt - 0.05;
+			const double from = intro::kSplashAt, end = intro::kSweepEnd;
 			return 0.3 + 0.7 * smooth((t - from) / (end - from));
 		}
 		const double pace = calm ? 0.9 : first ? 3.9 : 2.1;
@@ -402,6 +406,13 @@ struct Splash {
 	double stillAt = 0;
 	double lastTick = -1;
 	int frames = 0, slowDraws = 0, slowGaps = 0;
+	// The sound, started on the picture's clock once its first frame is up.
+	bool soundDue = false;
+	int drawn = 0;                // frames drawn since it began
+	// Help > Play the Intro: over this window (a weak pointer), which it
+	// dissolves back into; nothing is held, nothing marked played.
+	bool replay = false;
+	GtkWidget* over = nullptr;
 
 	double elapsed() const { return start < 0 ? 0 : std::min(now() - start, freeze); }
 	// When it dissolves into the windows it held, and over how long.
@@ -426,6 +437,11 @@ void destroy(Splash* s) {
 	s->tick = 0;
 	if (s->win) gtk_widget_destroy(s->win);
 	if (g_splash == s) g_splash = nullptr;
+	// Played from the menu: the window it was over has the keys again.
+	if (s->over) {
+		g_object_remove_weak_pointer(G_OBJECT(s->over), (gpointer*)&s->over);
+		if (gtk_widget_get_visible(s->over)) gtk_window_present(GTK_WINDOW(s->over));
+	}
 	delete s->scene;
 	delete s;
 }
@@ -478,6 +494,7 @@ gboolean drawCb(GtkWidget* w, cairo_t* cr, gpointer data) {
 		if (s->scene) {
 			const gint64 began = g_get_monotonic_time();
 			drawIntro(s, cr, ww, wh);
+			if (s->start >= 0) s->drawn++;
 			// A frame that takes too long, three in a row, and it gives way
 			// (tickCb): a Raspberry Pi shouldn't play it as a slideshow.
 			if (s->start >= 0 && !s->still && s->cutAt < 0 && ++s->frames > 3) {
@@ -519,6 +536,13 @@ gboolean tickCb(GtkWidget*, GdkFrameClock*, gpointer data) {
 	gtk_widget_queue_draw(s->area);
 	if (s->start < 0) return G_SOURCE_CONTINUE;
 	const double t = s->elapsed();
+	// The sound, once the picture's first frame is up: however long that
+	// took, it starts that much further in, so the bell lands on the LED
+	// (a little after the flash, never before it).
+	if (s->soundDue && s->drawn > 0) {
+		s->soundDue = false;
+		if (s->cutAt < 0) intro::playSound(now() - s->start);
+	}
 	if (s->scene && !s->still && s->cutAt < 0) {
 		// Frames far apart (the drawing, or the desktop, can't keep up):
 		// twice, before the bloom, and it gives way.
@@ -560,6 +584,7 @@ gboolean skipCb(GtkWidget*, GdkEvent*, gpointer data) {
 	if (t >= s->dissolveAt()) return TRUE;
 	s->cutAt = t;
 	s->cutFade = s->composited ? intro::kSkipFade : 0;
+	s->soundDue = false;
 	intro::stopSound();
 	return TRUE;
 }
@@ -582,18 +607,23 @@ GdkMonitor* pointerMonitor() {
 	return m;
 }
 
-}  // namespace
-
-GtkWidget* showSplash() {
-	if (g_splash) return g_splash->win;
+// The window, unseen until it plays: the launch screen (`trigger` None), or
+// the intro in a window where the circuit window will come in, its size --
+// or, played from the menu, over `over`, its size.
+Splash* makeSplash(intro::Trigger trigger, GtkWindow* over) {
 	Splash* s = new Splash();
-	s->tl.first = !prefs().hasSeenWelcome && !prefs().firstLaunchPlayed;
+	s->tl.first = !over && !prefs().hasSeenWelcome && !prefs().firstLaunchPlayed;
 	s->tl.calm = reduceMotion();
-	s->intro = intro::pending();
+	s->intro = trigger;
+	s->replay = over != nullptr;
 	if (s->intro != intro::Trigger::None) {
 		s->tl.planAfterIntro(s->tl.calm);
-		// The first launch's sound, cut to land on the LED, ready by the time it plays.
-		if (s->intro == intro::Trigger::First && prefs().playLaunchSound) intro::prepareSound(s->tl.calm);
+		// The first launch's sound and an update's, cut to land on the LED,
+		// ready by the time it plays; every other launch's is silent.
+		if (intro::hasSound(s->intro) && prefs().playLaunchSound) intro::prepareSound(s->tl.calm);
+		intro::log(std::string(intro::name(s->intro)) + (over ? ", from the menu" : "") +
+		           (intro::hasSound(s->intro) ? prefs().playLaunchSound ? ", with the sound" : ", the sound turned off" : ", silent") +
+		           (s->tl.calm ? ", the still panel (animations off)" : ""));
 	}
 	const bool introWindow = s->intro != intro::Trigger::None && !s->tl.calm;
 	s->win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -601,7 +631,8 @@ GtkWidget* showSplash() {
 	gtk_window_set_resizable(GTK_WINDOW(s->win), FALSE);
 	gtk_window_set_skip_taskbar_hint(GTK_WINDOW(s->win), TRUE);
 	gtk_window_set_type_hint(GTK_WINDOW(s->win), GDK_WINDOW_TYPE_HINT_SPLASHSCREEN);
-	gtk_window_set_position(GTK_WINDOW(s->win), GTK_WIN_POS_CENTER);
+	gtk_window_set_position(GTK_WINDOW(s->win), over ? GTK_WIN_POS_CENTER_ON_PARENT : GTK_WIN_POS_CENTER);
+	if (over) gtk_window_set_transient_for(GTK_WINDOW(s->win), over);
 	gtk_window_set_keep_above(GTK_WINDOW(s->win), TRUE);
 	// The intro takes the keys that skip it; the launch screen can't be skipped.
 	gtk_window_set_accept_focus(GTK_WINDOW(s->win), introWindow);
@@ -614,12 +645,17 @@ GtkWidget* showSplash() {
 		gtk_widget_set_app_paintable(s->win, TRUE);
 	}
 	if (introWindow) {
-		// Where the circuit window will come in, its size (Window.cpp's),
-		// on the screen with the pointer on it.
+		// Where the circuit window will come in, its size (Window.cpp's), on
+		// the screen with the pointer on it; or over the window it plays over.
 		int w = prefs().windowWidth, h = prefs().windowHeight;
-		s->maximized = prefs().windowMaximized;
+		s->maximized = over ? gtk_window_is_maximized(over) : prefs().windowMaximized;
 		GdkRectangle area = { 0, 0, 1280, 800 };
-		if (GdkMonitor* m = pointerMonitor()) gdk_monitor_get_workarea(m, &area);
+		GdkMonitor* m = nullptr;
+		if (over && gtk_widget_get_window(GTK_WIDGET(over)))
+			m = gdk_display_get_monitor_at_window(gdk_display_get_default(), gtk_widget_get_window(GTK_WIDGET(over)));
+		if (!m) m = pointerMonitor();
+		if (m) gdk_monitor_get_workarea(m, &area);
+		if (over) gtk_window_get_size(over, &w, &h);
 		if (s->maximized) { w = area.width; h = area.height; }
 		w = std::max(480, std::min(w, area.width));
 		h = std::max(320, std::min(h, area.height));
@@ -627,6 +663,11 @@ GtkWidget* showSplash() {
 		if (s->maximized) {
 			gtk_window_set_position(GTK_WINDOW(s->win), GTK_WIN_POS_NONE);
 			gtk_window_move(GTK_WINDOW(s->win), area.x, area.y);
+		} else if (over && isX11()) {
+			int x = 0, y = 0;
+			gtk_window_get_position(over, &x, &y);
+			gtk_window_set_position(GTK_WINDOW(s->win), GTK_WIN_POS_NONE);
+			gtk_window_move(GTK_WINDOW(s->win), x, y);
 		}
 		s->look = intro::WireLook::current();
 		s->scene = new intro::Scene((float)w, (float)h, s->look, true);
@@ -659,17 +700,50 @@ GtkWidget* showSplash() {
 		g_signal_connect(s->area, "button-press-event", G_CALLBACK(skipCb), s);
 		g_signal_connect(s->win, "key-press-event", G_CALLBACK(skipCb), s);
 	}
+	if (over) {
+		s->over = GTK_WIDGET(over);
+		g_object_add_weak_pointer(G_OBJECT(s->over), (gpointer*)&s->over);
+	}
 	g_splash = s;
 	gtk_widget_show_all(s->win);
 	s->tick = gtk_widget_add_tick_callback(s->area, tickCb, s, nullptr);
 	s->shownAt = now();
+	return s;
+}
+
+// It plays: the intro (its sound once its first frame is up) or, with the
+// animations off, the still panel and the sound from just before its bell.
+void beginIntro(Splash* s) {
+	s->start = now();
+	if (intro::hasSound(s->intro) && prefs().playLaunchSound) {
+		if (s->scene) s->soundDue = true;
+		else intro::playSound();
+	}
+	// To the front, for the keys that skip it.
+	if (s->scene) gtk_window_present(GTK_WINDOW(s->win));
+}
+
+}  // namespace
+
+GtkWidget* showSplash() {
+	if (g_splash) return g_splash->win;
+	Splash* s = makeSplash(intro::pending(), nullptr);
 	// Shown (clear) at once, before the slow work starts on this thread.
 	while (gtk_events_pending()) gtk_main_iteration_do(FALSE);
 	return s->win;
 }
 
-bool splashActive() { return g_splash != nullptr; }
-bool splashHoldsWindows() { return g_splash != nullptr && !g_splash->presented; }
+bool splashActive() { return g_splash != nullptr && !g_splash->replay; }
+bool splashHoldsWindows() { return g_splash != nullptr && !g_splash->replay && !g_splash->presented; }
+bool splashShowing() { return g_splash != nullptr; }
+
+void splashPlayIntroNow(GtkWindow* over) {
+	if (g_splash || !over || !gtk_widget_get_visible(GTK_WIDGET(over))) return;
+	// The first launch's, sound and all; nothing is hidden or held, and the
+	// once-only keys are left as they are.
+	Splash* s = makeSplash(intro::Trigger::First, over);
+	beginIntro(s);
+}
 
 // The work happens before it plays (it lists what was done, a line at a
 // time, once it begins), so what's said meanwhile isn't shown.
@@ -683,7 +757,7 @@ void splashPlaceUnder(GtkWindow* w) {
 	Splash* s = g_splash;
 	// Only X11 lets an app say where its windows go; elsewhere the desktop
 	// places both (centred, as a rule).
-	if (s == nullptr || s->scene == nullptr || w == nullptr || s->maximized || !s->win || !isX11()) return;
+	if (s == nullptr || s->replay || s->scene == nullptr || w == nullptr || s->maximized || !s->win || !isX11()) return;
 	int x = 0, y = 0;
 	gtk_window_get_position(GTK_WINDOW(s->win), &x, &y);
 	gtk_window_move(w, x, y);
@@ -691,25 +765,21 @@ void splashPlaceUnder(GtkWindow* w) {
 
 void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden, gpointer data) {
 	Splash* s = g_splash;
-	if (splash == nullptr || s == nullptr || s->win != splash) {
+	if (splash == nullptr || s == nullptr || s->win != splash || s->replay) {
 		if (onHidden) onHidden(data);
 		return;
 	}
 	s->then = onHidden;
 	s->thenData = data;
-	s->start = now();
 	if (s->intro != intro::Trigger::None) {
 		// Played once each: kept now, so a launch that stops part-way doesn't play it again.
 		intro::markPlayed(s->intro);
-		if (s->intro == intro::Trigger::First) {
-			prefs().firstLaunchPlayed = true;
-			if (prefs().playLaunchSound) intro::playSound();
-		}
+		if (s->intro == intro::Trigger::First) prefs().firstLaunchPlayed = true;
 		prefs().save();
-		// To the front, for the keys that skip it.
-		if (s->scene) gtk_window_present(GTK_WINDOW(s->win));
+		beginIntro(s);
 		return;
 	}
+	s->start = now();
 	int gates = 0, families = 0;
 	libraryCounts(gates, families);
 	s->tl.plan(gates, families, s->opening, s->start - s->shownAt);

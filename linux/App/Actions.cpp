@@ -106,6 +106,7 @@ const std::vector<Item> kAll = {
 	{ "shortcuts", "Keyboard Shortcuts", "Help", "input-keyboard-symbolic", "win.shortcuts", "shortcuts", 0 },
 	{ "tour", "Guided Tour", "Help", "find-location-symbolic", "app.guided-tour", nullptr, 0 },
 	{ "whatsNew", "What's New in CedarLogic", "Help", "starred-symbolic", "win.whats-new", nullptr, 0 },
+	{ "playIntro", "Play the Intro", "Help", "media-playback-start-symbolic", "app.play-intro", nullptr, 0 },
 	{ "welcome", "Welcome to CedarLogic", "Help", "face-smile-symbolic", "win.welcome", nullptr, 0 },
 	{ "feedback", "Send Feedback…", "Help", "mail-message-new-symbolic", "win.feedback", "feedback", 0 },
 	{ "checkForUpdates", "Check for Updates…", "Help", "software-update-available-symbolic", "app.check-updates", nullptr, 0 },

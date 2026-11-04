@@ -6,7 +6,8 @@
 // light passes over the glass. Then it dissolves into the window. About two
 // and a half seconds; the very first time, slower, with its own sound (the
 // Mac's FirstLaunch), fading into the welcome. On the first launch and the
-// first after an update, the intro plays first (Intro.h) and hands over to it.
+// first after an update (and, with the setting, every launch) the intro
+// plays first (Intro.h) and hands over to it.
 
 #ifndef CL_LINUX_SPLASH_H
 #define CL_LINUX_SPLASH_H
@@ -33,6 +34,14 @@ void hideSplashSoon(GtkWidget* splash, GSourceFunc onHidden = nullptr, gpointer 
 // While the intro plays (Intro.h) its window is where the circuit window
 // will come in: the first circuit window is put there before it's shown.
 void splashPlaceUnder(GtkWindow* window);
+
+// Help > Play the Intro: the first launch's intro, sound and all, over
+// `over` (the front circuit window), dissolving back into it. Nothing is
+// hidden or held, and the once-only keys are left as they are. Not while
+// the launch screen (or another intro) is up.
+void splashPlayIntroNow(GtkWindow* over);
+// The launch screen or an intro is up (splashActive is the launch's only).
+bool splashShowing();
 
 // The panel as it plays after the intro: at `t` on its own clock, its
 // top-left at (x, y), the whole at `opacity`; `calm`, the still one.

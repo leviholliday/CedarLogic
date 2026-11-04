@@ -377,6 +377,9 @@ GtkWidget* generalPage() {
 		gtk_widget_set_sensitive(files, !us);
 	});
 	r.add("Opening files", files, "Double-clicking a .cdl file in your files opens it in CedarLogic.");
+	r.add("Launch screen", check("Play the intro every time CedarLogic opens", p.introEveryLaunch, [](bool on) { prefs().introEveryLaunch = on; prefs().save(); }),
+	      "The circuit drawing itself, then the launch screen, as on the first launch, without its sound (that's for the first launch and "
+	      "updates). Help > Play the Intro plays it any time.");
 	r.add("Quitting", check("Ask before quitting", p.confirmQuit, [](bool on) { prefs().confirmQuit = on; prefs().save(); }),
 	      "Ctrl+Q shows a question first: Enter quits, Escape doesn't.");
 	r.add("Status bar", check("Show zoom, cursor position, and counts", p.showStatus, [](bool on) { prefs().showStatus = on; apply(); }),

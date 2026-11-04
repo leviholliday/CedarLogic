@@ -137,6 +137,15 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 linux/build/cedarlogic --actions-check
 
+      # The intro's rules (linux/App/Intro.h), as the Mac's launch-selftest: the timeline
+      # (6.07 s, the panel held 1.1 s), which launch plays which intro, the sound (the first
+      # launch's and an update's, never an every-launch one), Settings' "Play the intro every
+      # time CedarLogic opens" (off for a new install) and Help > Play the Intro (in the
+      # actions and the menu bar). Settings of its own in a temporary folder.
+      - name: Intro check
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 linux/build/cedarlogic --intro-check
+
       # A long working session in the window (linux/App/SessionCheck.cpp): seeded
       # random clicks, drags, keys and commands through the app's own handlers, with
       # windows over it poked at and closed, checked all along (no crash or GTK
@@ -431,32 +440,60 @@ jobs:
             xvfb-run -a -s "-screen 0 1600x1000x24" timeout 30 "$APPIMAGE" --splash-frame $t "renders/splash-$t.png" || echo "no splash $t"
           done
           # The 0.4 intro (linux/App/Intro.h), drawn with no display at all: every frame at
-          # 60 fps, dissolving into a dark new circuit's window (pictured first), and the
-          # moments the Mac's stills show kept with the renders. Failing to draw fails the build.
+          # 60 fps (6.07 s, 365 frames), dissolving into a dark new circuit's window (pictured
+          # first), and the moments the Mac's v5 stills show kept with the renders (the panel
+          # held at 4.95 s, the dissolve at 5.80 s), and the hit, 2.50-2.70 s. Failing to draw
+          # fails the build.
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 "$APPIMAGE" --dark --screenshot renders/window-new-dark.png || true
           behind=; [ -s renders/window-new-dark.png ] && behind="--behind renders/window-new-dark.png"
           env -u DISPLAY -u WAYLAND_DISPLAY timeout 600 "$APPIMAGE" --render-intro intro-frames first $behind
-          test "$(ls intro-frames/frame-*.png | wc -l)" -eq 299
+          test "$(ls intro-frames/frame-*.png | wc -l)" -eq 365
           mkdir -p renders/intro
-          for f in 0012:0.20s 0060:1.00s 0179:2.98s 0228:3.80s 0279:4.65s; do
+          for f in 0012:0.20s 0057:0.95s 0102:1.70s 0178:2.98s 0192:3.20s 0228:3.80s 0297:4.95s 0348:5.80s \
+                   0150:2.50s 0153:2.56s 0156:2.60s 0158:2.64s 0162:2.70s; do
             cp "intro-frames/frame-${f%%:*}.png" "renders/intro/intro-${f#*:}.png"
           done
           rm -rf intro-frames
-          # And live, as at the first launch after the update (CI never plays it by itself):
-          # on a virtual display, GTK's warnings fatal, with settings of its own that have
-          # seen the welcome and What's New. Its window up, then gone into the circuit
-          # window, the intro marked played; then again, skipped with a click.
-          for how in play skip; do
+          # And live (CI never plays it by itself): on a virtual display, GTK's warnings
+          # fatal, with settings of its own that have seen the welcome and What's New.
+          #   play, skip: as at the first launch after the update (CL_INTRO=update), with the
+          #     sound; its window up, then gone into the circuit window, the intro marked
+          #     played; then again, skipped with a click.
+          #   every: nothing owed, "Play the intro every time CedarLogic opens" on: it plays,
+          #     silently, and the once-only keys are left as they were.
+          #   menu: nothing owed and the setting off: no intro; then Help > Play the Intro
+          #     (Alt+H, I) plays the first launch's over the circuit window, with the sound,
+          #     and goes, the window still there, nothing marked played.
+          for how in play skip every menu; do
             home=$(mktemp -d)
             mkdir -p "$home/config/CedarLogic"
-            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\n' > "$home/config/CedarLogic/native.ini"
-            HOW=$how xvfb-run -a -s "-screen 0 1600x1000x24" env -u CI CL_INTRO=update G_DEBUG=fatal-criticals \
+            ini="$home/config/CedarLogic/native.ini"
+            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\n' > "$ini"
+            forced=update
+            case $how in
+              every) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
+              menu) forced=; printf 'introUpdatePlayed=0.4\n' >> "$ini" ;;
+            esac
+            HOW=$how xvfb-run -a -s "-screen 0 1600x1000x24" env -u CI ${forced:+CL_INTRO=$forced} CL_INTRO_LOG=1 G_DEBUG=fatal-criticals \
               XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" bash -c '
               up() { xdotool search --onlyvisible --name "$1" > /dev/null 2>&1; }
               "$APPIMAGE" > "renders/intro-live-$HOW.log" 2>&1 &
               app=$!
+              if [ "$HOW" = menu ]; then
+                # The launch screen, then the circuit window, and no intro.
+                for i in $(seq 80); do up " — CedarLogic\$" && break; sleep 0.25; done
+                up " — CedarLogic\$" || { echo "no circuit window ($HOW)"; kill $app; exit 1; }
+                for i in $(seq 20); do up "^CedarLogic\$" || break; sleep 0.25; done
+                sleep 1
+                grep -q "intro:" "renders/intro-live-$HOW.log" && { echo "an intro played at a launch owed none ($HOW)"; kill $app; exit 1; }
+                xdotool mousemove 800 500
+                sleep 0.3
+                xdotool key alt+h
+                sleep 0.6
+                xdotool key i
+              fi
               for i in $(seq 80); do up "^CedarLogic\$" && break; sleep 0.25; done
-              up "^CedarLogic\$" || { echo "no intro window"; kill $app; exit 1; }
+              up "^CedarLogic\$" || { echo "no intro window ($HOW)"; kill $app; exit 1; }
               tries=60
               if [ "$HOW" = skip ]; then sleep 1; xdotool mousemove 800 500 click 1; tries=12; fi
               for i in $(seq $tries); do up "^CedarLogic\$" || break; sleep 0.25; done
@@ -468,7 +505,14 @@ jobs:
               wait $app 2> /dev/null
               exit 0
             '
-            grep -q "^introUpdatePlayed=0.4" "$home/config/CedarLogic/native.ini"
+            log="renders/intro-live-$how.log"
+            cat "$log"
+            case $how in
+              play|skip) grep -q "^introUpdatePlayed=0.4" "$ini"; grep -q "intro: update, with the sound" "$log" ;;
+              every) grep -q "intro: every, silent" "$log"; grep -q "^introEveryLaunch=true" "$ini" ;;
+              menu) grep -q "intro: first, from the menu, with the sound" "$log" ;;
+            esac
+            if grep -q "^introFirstLaunchPlayed=true" "$ini"; then echo "the first launch's intro was marked played ($how)"; exit 1; fi
             echo "intro live ($how): ok"
             rm -rf "$home"
           done
