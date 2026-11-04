@@ -113,8 +113,8 @@ enum PrivacyConsent {
 enum PrivacyCopy {
     static let eyebrow = "Help improve CedarLogic"
     static let title = "A small favour"
-    static let note = "CedarLogic is built by one person, in spare time, for free. I can't see what breaks or what people actually use unless you tell me. If you're willing, let the app send anonymous crash reports and usage stats. It would genuinely help, and nothing identifies you: no name, no circuits, no files. Thank you either way."
-    static let signature = "The person who makes CedarLogic"
+    static let note = "CedarLogic is maintained by one person, in spare time, for free. I can't see what breaks or what people actually use unless you tell me. If you're willing, let the app send anonymous crash reports and usage stats. It would genuinely help, and nothing identifies you: no name, no circuits, no files. Thank you either way."
+    static let signature = "Levi"
     static let yes = "Yes, send anonymous reports"
     static let no = "No thanks"
     static let later = "You can change this any time in Settings > Privacy."

@@ -1046,7 +1046,7 @@ enum LaunchFocusCheck {
         }
         // The privacy question: once, over the circuit, for anyone not asked
         // (an update; a first launch whose welcome closed before its page).
-        if ["first", "updated"].contains(state) {
+        if ["first", "updated", "privacy"].contains(state) {
             var waitedAsk = 0.0
             while !PrivacyConsent.showing && waitedAsk < 8 { await wait(0.1); waitedAsk += 0.1 }
             check(state, PrivacyConsent.showing && w.attachedSheet?.identifier?.rawValue == "cl.privacyAsk",
