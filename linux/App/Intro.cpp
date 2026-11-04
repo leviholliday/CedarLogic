@@ -1595,7 +1595,8 @@ int check(GMenuModel* menubar) {
 	       "CL_INTRO=first|update|every names each");
 	launchWith((seen + "seenWhatsNew=0.3\n").c_str());
 	markPlayed(Trigger::Update);
-	expect(forLaunch(prefs()) == Trigger::None, "the update intro plays once");
+	expect(owed(prefs()) == Trigger::None && forLaunch(prefs()) == Trigger::Every,
+	       format("the update intro plays once; after it, the every-launch one, silent (%s)", name(forLaunch(prefs()))));
 
 	// ---- Help > Play the Intro ----
 	const actions::Item* a = actions::find("playIntro");
