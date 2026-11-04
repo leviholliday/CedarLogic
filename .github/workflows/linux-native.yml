@@ -506,7 +506,9 @@ jobs:
               fi
               for i in $(seq 80); do up "^CedarLogic\$" && break; sleep 0.25; done
               up "^CedarLogic\$" || { echo "no intro window ($HOW)"; kill $app; exit 1; }
-              tries=60
+              # (Its own clock slows it where frames come slowly, as they may on a
+              # virtual display: up to 30 s.)
+              tries=120
               if [ "$HOW" = skip ]; then sleep 1; xdotool mousemove 800 500 click 1; tries=12; fi
               for i in $(seq $tries); do up "^CedarLogic\$" || break; sleep 0.25; done
               up "^CedarLogic\$" && { echo "the intro window is still up ($HOW)"; kill $app; exit 1; }

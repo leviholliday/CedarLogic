@@ -35,8 +35,18 @@
 //
 // Any key or click skips it. With the desktop's animations off
 // (gtk-enable-animations) it's just the launch screen's still panel and a
-// 0.4 s crossfade, and the same if the first frames come too slowly (an old
-// Raspberry Pi): the intro gives way to the still panel rather than stutter.
+// 0.4 s crossfade.
+//
+// It plays on its own clock (Pacer, below), not the wall's: the clock starts
+// with the first frame that's actually up and moves on by the time between
+// frames, at most a thirtieth of a second a frame, so a late frame slows it
+// for that frame instead of jumping it ahead, and none of it is ever
+// skipped. On a slow machine (a Raspberry Pi drawing a large window) it
+// draws less (Tier::Lite: no push-in, motes or softening glows) rather than
+// give up, and the sound is started for the pace the picture keeps, so the
+// bell still lands on the LED. Only what changes is drawn again: the
+// canvas, the panel's ground and shadow and the title's letters are drawn
+// once and kept, and while only the panel moves only its box is redrawn.
 //
 // Here it's one window, where the circuit window will come in, that draws
 // the intro and then the launch screen's panel (Splash.cpp plays it). Help >
@@ -90,6 +100,10 @@ constexpr double kDissolveAt = kCardIn + kSweepEnd - kSplashAt + kPanelHold;
 constexpr double kFade = 0.55;
 constexpr double kTotal = kDissolveAt + kFade;
 constexpr double kCalmHold = 0.5, kCalmFade = 0.4;
+// From here on only the canvas is left under the panel (the circuit, the
+// display, the icon and the bloom have all gone): the window changes only
+// where the panel is, until the dissolve.
+constexpr double kGroundOnly = kCardIn + kCardFade;
 constexpr double kSkipFade = 0.3;
 
 // The intro window's fade in (as the Mac's window server fades it in).
@@ -144,6 +158,15 @@ struct WireLook {
 	static WireLook current();
 };
 
+// How much of it is drawn. Full: all of it, as the Mac's. Lite, for a machine
+// whose first frames come slowly (a Raspberry Pi drawing at a large window's
+// size): no push-in (held where it was), no motes, and none of the glows
+// that only soften (the light under the gate, the lift of light at the hit,
+// the wires' widest glow); the tracing of the C, the D and the L, the LED,
+// the 0.4, the bloom, the panel held and the dissolve are all there.
+enum class Tier { Full, Lite };
+const char* name(Tier t);
+
 // The intro's picture, laid out for one size; `draw` paints it at a moment.
 class Scene {
 public:
@@ -155,10 +178,76 @@ public:
 	void draw(cairo_t* cr, double t, double opacity);
 	// Just the canvas, its grid in (behind the still panel).
 	void drawGround(cairo_t* cr, double opacity);
+	// From picture time `at`, `tier` (what Lite leaves out fades over 0.3 s).
+	void setTier(Tier tier, double at);
+	Tier tier() const;
+	// Makes the images it keeps (for what `cr` draws on), so the first frame
+	// doesn't have to.
+	void prepare(cairo_t* cr);
 
 private:
 	struct Impl;
 	Impl* d;
+};
+
+// ---- Its clock -------------------------------------------------------------
+
+// The most the picture moves on in one frame: a frame that comes late (the
+// machine busy, a slow draw) slows the picture for that frame rather than
+// jumping it ahead, so nothing is ever skipped. (At 30 frames a second or
+// better it keeps time.)
+constexpr double kMaxStep = 1.0 / 30;
+
+// The intro's own clock and how much it draws, worked out from the frames as
+// they're shown (Splash.cpp feeds it the window's frame clock): the picture
+// starts at 0 with the first frame that's up and moves on by the time
+// between frames, at most kMaxStep a frame. From the first frames it picks
+// the tier (Lite if they come more than ~21 ms apart or take more than 16 ms
+// to draw), and it may still drop to Lite until shortly before the LED. It
+// says when to start the sound and from where in its cut, so the bell lands
+// on the LED on the picture's clock: from the first frames' pace, it starts
+// it so the LED is due just as the bell (near the start of its cut on a
+// fast machine; later in the picture, from the cut's start, on a slow one);
+// from then until the LED the picture keeps to where it should be for that:
+// never ahead (it waits), and catching up (still at most kMaxStep a frame)
+// when it falls behind.
+class Pacer {
+public:
+	// A frame was shown at `now` seconds (the frame clock's), having taken
+	// `drawMs` to draw. Returns how far the picture moved on (0 for the first).
+	double frame(double now, double drawMs);
+	// Time went by without a frame shown (nothing to measure): the next
+	// frame's step counts from `now`.
+	void idle(double now);
+	double t() const { return t_; }
+	int frames() const { return frames_; }
+	Tier tier() const { return tier_; }
+	double tierAt() const { return tierAt_; }
+	// The sound is owed (its cut lands its bell kLedAt into the cut).
+	void soundOwed() { soundOwed_ = true; }
+	// Whether to start the sound now (at `now`), and where in its cut; -1 not yet.
+	double soundStart(double now) const;
+	// It was started at `now`, `offset` seconds into its cut.
+	void soundStarted(double now, double offset);
+	bool soundStarted() const { return soundAt_ >= 0; }
+	// Where the sound is, in the picture's time, at `now` (-1 if not started).
+	double soundTime(double now) const { return soundAt_ < 0 ? -1 : soundOffset_ + (now - soundAt_); }
+	// The intro was skipped or cut short: no more lining up with the sound.
+	void stopSound() { soundOwed_ = false; soundAt_ = -1; }
+	// (For the check: the median of the last frames' gaps and draw times.)
+	double recentGap() const;
+	double recentDraw() const;
+
+private:
+	double t_ = 0, last_ = -1;
+	int frames_ = 0;
+	Tier tier_ = Tier::Full;
+	double tierAt_ = 0;
+	bool decided_ = false;
+	std::vector<double> gaps_, draws_, paces_;   // the last few frames'
+	bool soundOwed_ = false;
+	double soundAt_ = -1, soundOffset_ = 0, soundPace_ = 1;
+	void judge();
 };
 
 // ---- Measuring it (--intro-bench, Splash.h) ----
