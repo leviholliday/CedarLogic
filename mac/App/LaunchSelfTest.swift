@@ -23,7 +23,9 @@
 // settings: the first 0.4 preview's migration done, the panel folded),
 // introoff (as normal, with 0.3's "Play the intro every time CedarLogic
 // opens" turned on and off again: an explicit no, kept as the classic launch
-// screen), intronone (as normal, "When CedarLogic opens: None" chosen).
+// screen), intronone (as normal, "When CedarLogic opens: None" chosen),
+// privacy (as normal, from before the one consent: crash reports said yes
+// to, usage stats on, a name set, and the privacy question not yet asked).
 //
 // `check` then goes through the launch: the welcome or What's New choice
 // and the first-launch screen (CircuitWindow / Splash), which circuit
@@ -55,7 +57,12 @@
 // Show/Hide Actions (turning a panel that's off on), and the panel and
 // its tab (slid out on hover too) laid out in real windows off screen; and
 // Show Me Around there: its places found, the keys stepping it, the panel's
-// stop passed over when it's off, Escape ending it (actionsChecks).
+// stop passed over when it's off, Escape ending it (actionsChecks); and
+// the one consent for crash reports and usage stats (privacyChecks): the
+// welcome's page, Settings > Privacy, who is asked (a first launch on the
+// welcome, an update by the sheet, once), an earlier yes to crash reports
+// kept, the old crash reports question gone, and the leak scan of a real
+// report against this Mac's names, recent files, sync and classroom codes.
 // PASS or FAIL for each; exit 1 on a failure.
 
 import AppKit
@@ -109,7 +116,15 @@ enum LaunchSelfTest {
             d.set(true, forKey: "cl.hasSeenWelcome")
             d.set(true, forKey: "cl.firstLaunchPlayed")
             d.set(state == "updated" ? "0.2" : WhatsNew.version, forKey: "cl.whatsNewSeen")
-            d.set(state == "offline", forKey: "cl.crashReports")
+            d.set(state == "offline" || state == "privacy", forKey: "cl.crashReports")
+            // Asked already, but in an update from before the one consent (and its own state).
+            if !["updated", "privacy"].contains(state) { d.set(true, forKey: PrivacyConsent.askedKey) }
+        }
+        if state == "privacy" {
+            d.set(true, forKey: UsageEngine.onKey)
+            d.set(UsageEngine.newId(), forKey: UsageEngine.idKey)
+            d.set(NSFullUserName(), forKey: "cl.studentName")
+            d.set(false, forKey: "cl.showGrid")
         }
         if state == "offline" {
             // Sparkle's own record: launched before, last looked a long time
@@ -246,6 +261,56 @@ enum LaunchSelfTest {
         let shown = NSApp.windows.filter { $0.isVisible }
         check(shown.isEmpty, "no alert or window came up (\(shown.map { $0.title.isEmpty ? String(describing: type(of: $0)) : $0.title }))")
         check(NSApp.modalWindow == nil, "no question waits for an answer")
+    }
+
+    // MARK: privacy
+
+    /// The one consent (Privacy.swift) and the usage report (UsageReport.swift).
+    static func privacyChecks(_ state: String, check: (Bool, String) -> Void, turn: (Double) -> Void) {
+        check(WelcomeView.pages == 7 && WelcomeView.privacyPage == 5 && WelcomeView.privacyPage < WelcomeView.pages - 1,
+              "the welcome has its \u{201C}A small favour\u{201D} page, before the last")
+        check(SettingsPage.allCases.contains(.privacy) && SettingsPage.privacy.title == "Privacy", "Settings has a Privacy page")
+        let page = NSHostingController(rootView: SettingsPageView(page: .privacy))
+        let size = page.sizeThatFits(in: NSSize(width: 640, height: 10_000))
+        check(size.height > 150, "...which lays out (\(Int(size.height)) points tall)")
+        // Who's asked, and how.
+        let owedNow = PrivacyConsent.owed
+        check(owedNow == ["updated", "privacy"].contains(state),
+              "the privacy question \(owedNow ? "is owed: a sheet over the circuit" : state == "first" ? "is on the welcome" : "was answered before")")
+        if state == "first" { check(!PrivacyConsent.asked && !UsageStats.shared.on, "a first launch: not asked yet, nothing on") }
+        if state == "offline" || state == "privacy" { check(CrashReports.allowed == true, "an earlier yes to crash reports is kept") }
+        // The old crash reports question, gone: nothing asks by itself.
+        turn(0.3)
+        @MainActor func says(_ v: NSView, _ text: String) -> Bool {
+            if let f = v as? NSTextField, f.stringValue.contains(text) { return true }
+            return v.subviews.contains { says($0, text) }
+        }
+        let old = NSApp.windows.contains { w in w.contentView.map { says($0, "Send crash reports?") } ?? false }
+        check(!old, "crash reports' own question no longer shows (one consent asks for both)")
+        // The leak scan, on the report this copy would send now.
+        let engine = UsageStats.shared.engine
+        let report = [UsageStats.shared.preview(),
+                      String(decoding: engine.encoded(engine.nextReport(), id: engine.id ?? "x", sentAt: Date()), as: UTF8.self)]
+        var needles = UsageLeakScan.machineNeedles()
+        needles += NSDocumentController.shared.recentDocumentURLs.map { $0.deletingPathExtension().lastPathComponent }
+        needles += (UserDefaults.standard.stringArray(forKey: recentsKey) ?? []).map { ($0 as NSString).lastPathComponent }
+        needles += Library.items().map(\.name)
+        needles += [Prefs.shared.studentName, NSHomeDirectory(), Library.root.path]
+        let sync = SyncCenter.shared
+        needles += [sync.code, sync.deviceName] + sync.devices.map(\.name)
+        for c in ClassroomCenter.shared.classes { needles += [c.name, c.joinCode, c.teacherKey, c.studentName, c.id] }
+        let leaks = report.flatMap { UsageLeakScan.leaks(in: $0, needles: needles) }
+        check(leaks.isEmpty, "the usage report holds none of this Mac's names, paths, recent files or codes (\(needles.filter { !$0.isEmpty }.count) looked for)\(leaks.isEmpty ? "" : ": \(leaks)")")
+        check(report.allSatisfy { $0.utf8.count <= UsageEngine.maxBytes }, "...and it's 16 KB at most")
+        // Answered once, it isn't asked again; No thanks keeps an earlier yes to crash reports.
+        if owedNow {
+            let crashBefore = CrashReports.allowed
+            PrivacyConsent.answer(.no)
+            check(!PrivacyConsent.owed && PrivacyConsent.asked && PrivacyConsent.choice == .no, "answered (No thanks), it's never asked again")
+            check(CrashReports.allowed == (crashBefore ?? false), "...crash reports as they were (\(crashBefore.map { $0 ? "yes" : "no" } ?? "unasked"))")
+            turn(0.5)   // the switch goes off in the background (it tells the server)
+            check(!UsageStats.shared.on && UsageStats.shared.engine.id == nil, "...usage stats off, the id forgotten")
+        }
     }
 
     // MARK: actions
@@ -829,6 +894,7 @@ enum LaunchSelfTest {
         actionsChecks(state, check: check, turn: turn)
         if state == "offline" { offlineChecks(check: check, timed: timed, turn: turn) }
         if state == "trash" { trashChecks(check: check, timed: timed) }
+        privacyChecks(state, check: check, turn: turn)
         turn(2.5)
         check(NSApp?.modalWindow == nil, "no question was left up")
 
@@ -1055,6 +1121,24 @@ enum LaunchFocusCheck {
             Prefs.shared.hasSeenWelcome = true
             WhatsNew.markSeen()
             ShowMeAround.shared.welcomeClosed(.blank)
+            // As the welcome's finish does when it was closed before "A small favour".
+            PrivacyConsent.askWhenReady()
+        }
+        // The privacy question: once, over the circuit, for anyone not asked
+        // (an update; a first launch whose welcome closed before its page).
+        if ["first", "updated", "privacy"].contains(state) {
+            var waitedAsk = 0.0
+            while !PrivacyConsent.showing && waitedAsk < 8 { await wait(0.1); waitedAsk += 0.1 }
+            check(state, PrivacyConsent.showing && w.attachedSheet?.identifier?.rawValue == "cl.privacyAsk",
+                  String(format: "the privacy question came up as a sheet on the circuit window (%.1f s)", waitedAsk))
+            check(state, !ShowMeAround.shared.active, "Show Me Around waits for it")
+            await wait(0.5)
+            PrivacyConsent.sheetAnswered(.no, crash: false, usage: false)
+            await wait(0.6)
+            check(state, !PrivacyConsent.showing && PrivacyConsent.asked && w.attachedSheet == nil, "No thanks put it away, for good")
+        } else {
+            await wait(1.0)
+            check(state, !PrivacyConsent.showing, "no privacy question (answered before)")
         }
         let around = ShowMeAround.shared
         var waitedAround = 0.0

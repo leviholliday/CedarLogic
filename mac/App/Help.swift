@@ -213,7 +213,7 @@ enum HelpBook {
         HelpPage(id: "settings", title: "Settings", icon: "gearshape",
                  line: "Make it yours (⌘,).",
                  blocks: [
-                    .p("**General**: your name for exports, how circuits open, what new circuits start from, quitting, the status bar, updates and crash reports. **Appearance**: theme, the app's colour (CedarLogic green, or another), tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut."),
+                    .p("**General**: your name for exports, how circuits open, what new circuits start from, quitting, the status bar and updates. **Appearance**: theme, the app's colour (CedarLogic green, or another), tabs, the grid, wires and the palette. **Canvas**: what scrolling does, right-click, duplicating and Tidy Up. **Toolbar**: its style and which tools it shows. **Shortcuts**: change any shortcut. **Privacy**: anonymous crash reports and usage stats, both off unless you turn them on, what's sent, and deleting it."),
                     .p("**{darkMode}** switches between light and dark any time."),
                  ]),
     ]

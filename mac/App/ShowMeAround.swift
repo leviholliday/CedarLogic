@@ -379,8 +379,9 @@ final class ShowMeAround: ObservableObject {
 
     /// The circuit window it can start on now, if any.
     static func readyCanvas() -> CanvasController? {
+        // The privacy question (Privacy.swift), if it's owed, comes first.
         guard NSApp.isActive, !Splash.shared.showing, !TourModel.shared.active, NSApp.modalWindow == nil,
-              Greeting.due == nil else { return nil }
+              Greeting.due == nil, !PrivacyConsent.holdsShowMeAround else { return nil }
         let greeting = NSApp.windows.contains { o in
             o.isVisible && Greeting.ids.contains { o.identifier?.rawValue.contains($0) == true }
         }

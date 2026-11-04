@@ -236,6 +236,13 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   windows, a copy of the app with its own settings and home folder. `STATES_ONLY=damaged
   launch-selftest.sh 30` runs only the damaged circuits (an engine crash in
   `GUICircuit::createWire` on some, see docs/MAC-APP-AUDIT.md)
+- `usage-check.sh [--live]` -- the opt-in usage stats client
+  (`App/UsageReport.swift`) against a local stand-in of `/api/usage`:
+  snapshot, delta, ping, haveSnapshot false, DELETE, reports kept offline,
+  429, policy off, the 16 KB cap and the leak scan. Crash reports and usage
+  stats are off until the user says yes, asked once (welcome or an
+  update's sheet), changed in Settings > Privacy: see docs/PRIVACY.md.
+  `--render-privacy <dir>` draws the consent and Settings > Privacy
 - `launch-check.sh [runs]` -- real launches of the built app (a copy with
   settings and folders of its own, so yours are never touched): each must
   open its circuit window, quit by itself and print none of SwiftUI's

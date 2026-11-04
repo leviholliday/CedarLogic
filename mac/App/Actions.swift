@@ -38,7 +38,7 @@ enum ActionID: String, CaseIterable, Identifiable {
     @MainActor func run(_ canvas: CanvasController?) {
         let a = action
         guard a.available(), a.enabled(canvas) else { NSSound.beep(); return }
-        a.run(canvas)
+        UsageStats.shared.counting(rawValue) { a.run(canvas) }
     }
     @MainActor func enabled(_ canvas: CanvasController?) -> Bool { action.available() && action.enabled(canvas) }
 }

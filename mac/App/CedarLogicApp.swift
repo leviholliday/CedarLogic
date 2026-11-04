@@ -154,14 +154,10 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
         // cedarlogic://open links (ShareLink.swift).
         MainActor.assumeIsolated { ShareLink.install() }
         Splash.shared.showIfLaunching()
-        // Asked once, once the circuit is there to ask over.
-        if Splash.shared.active {
-            NotificationCenter.default.addObserver(forName: .clSplashDone, object: nil, queue: .main) { _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainActor.assumeIsolated { CrashReports.askOnce() } }
-            }
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { CrashReports.askOnce() } }
-        }
+        // Crash reports and usage stats, asked once (Privacy.swift): for
+        // anyone past the welcome who hasn't been, as a sheet over the
+        // circuit once it has the keys (after What's New, before Show Me Around).
+        MainActor.assumeIsolated { PrivacyConsent.askWhenReady() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -193,6 +189,8 @@ final class LaunchDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { MainActor.assumeIsolated { SyncCenter.shared.start() } }
             // Classroom (behind its flag) polls the classes this Mac teaches or is in.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { ClassroomCenter.shared.start() } }
+            // Usage stats, if they're on: counted from here, sent in the background (UsageStats.swift).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { MainActor.assumeIsolated { UsageStats.shared.start() } }
         }
         // Once anything macOS was asked to open (a file double-clicked in
         // Finder) has arrived: the circuit you were last in (LastCircuit), as

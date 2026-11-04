@@ -12,6 +12,8 @@ import SwiftUI
 enum RenderUI {
     static func runIfAsked() {
         let args = CommandLine.arguments
+        // `--render-privacy <dir>`: the consent, what's sent and Settings > Privacy (PrivacyRender).
+        PrivacyRender.runIfAsked()
         // `--render-sync <dir>`: just Settings > Sync and its sheets (SyncRender).
         if let j = args.firstIndex(of: "--render-sync"), j + 1 < args.count {
             SyncRender.run(URL(fileURLWithPath: args[j + 1], isDirectory: true))

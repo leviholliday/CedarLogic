@@ -1,8 +1,10 @@
 // The first-run welcome and the guided tour (the wx app's Welcome.cpp). The
-// welcome is six pages: what CedarLogic is, making it yours, the Actions
-// panel (on or off, open on hover), your name, six keys worth knowing, and
-// what to do first; as it closes, whichever way, Show Me Around starts
-// (ShowMeAround.swift) unless it's been seen. "Learn Logic: Guided Tour"
+// welcome is seven pages: what CedarLogic is, making it yours, the Actions
+// panel (on or off, open on hover), your name, six keys worth knowing, "A
+// small favour" (crash reports and usage stats, asked once: Privacy.swift;
+// a choice has to be made to go on), and what to do first; as it closes,
+// whichever way, Show Me Around starts (ShowMeAround.swift) unless it's
+// been seen. "Learn Logic: Guided Tour"
 // builds a working AND circuit with you, one step at a time, moving on as
 // each is done; chosen here, it starts after Show Me Around.
 
@@ -75,6 +77,7 @@ struct WelcomeView: View {
     @State private var readyChoice = 0
     @State private var pressed: Set<String> = []
     @State private var keyMonitor: Any?
+    @State private var privacyAnswer = PrivacyConsent.choice
     var startAtSetup = false
 
     init(startAtSetup: Bool = false, page: Int = 0) {
@@ -82,7 +85,9 @@ struct WelcomeView: View {
         _page = State(initialValue: page)
     }
 
-    static let pages = 6
+    static let pages = 7
+    /// "A small favour": Yes or No thanks (or the two switches) to go on.
+    static let privacyPage = 5
     private static let readyCount = 4
 
     var body: some View {
@@ -95,6 +100,7 @@ struct WelcomeView: View {
                     case 2: actionsPanel
                     case 3: name
                     case 4: keys
+                    case Self.privacyPage: privacy
                     default: ready
                     }
                 }
@@ -104,7 +110,7 @@ struct WelcomeView: View {
                 .transition(.asymmetric(insertion: .offset(x: forward ? 60 : -60).combined(with: .opacity),
                                         removal: .offset(x: forward ? -60 : 60).combined(with: .opacity)))
                 .id(page)
-                if page < Self.pages - 1 {
+                if page < Self.pages - 1 && page != Self.privacyPage {
                     Button("Skip") { finish(.skip) }.buttonStyle(.plain)
                         .font(.system(size: 12.5, weight: .medium)).foregroundStyle(BrandText.faint)
                         .padding(.horizontal, 26).padding(.top, 22)
@@ -125,7 +131,10 @@ struct WelcomeView: View {
                 if page > 0 {
                     Button("Back") { go(-1) }.buttonStyle(BrandButtonStyle(primary: false, width: 96))
                 }
-                if page < Self.pages - 1 {
+                if page == Self.privacyPage && privacyAnswer == nil {
+                    // No Continue here: the page's own two buttons go on.
+                    Text("Choose one to go on").font(.system(size: 12)).foregroundStyle(BrandText.faint).frame(width: 142)
+                } else if page < Self.pages - 1 {
                     Button(page == 0 ? "Get Started" : "Continue") { go(1) }.buttonStyle(BrandButtonStyle(width: 142))
                 } else {
                     Button("Just Start") { finish(.blank) }.buttonStyle(BrandButtonStyle(primary: false, width: 110))
@@ -154,6 +163,8 @@ struct WelcomeView: View {
     static let slide = Animation.timingCurve(0.33, 1, 0.68, 1, duration: 0.32)
 
     private func go(_ d: Int) {
+        // Past "A small favour" only with an answer.
+        if d > 0 && page == Self.privacyPage && privacyAnswer == nil { return }
         let to = min(Self.pages - 1, max(0, page + d))
         guard to != page else { return }
         forward = d > 0
@@ -171,6 +182,8 @@ struct WelcomeView: View {
             let mods = e.modifierFlags.intersection([.command, .control, .option])
             guard mods.isEmpty else { return e }
             switch e.keyCode {
+            case 53 where page == Self.privacyPage && privacyAnswer == nil:  // Escape: No thanks
+                answerPrivacy(.no, crash: CrashReports.allowed ?? false, usage: false); return nil
             case 53: finish(.skip); return nil                              // Escape
             case 36, 76:                                                    // Return
                 if page == Self.pages - 1 { readyAction(readyChoice)() } else { go(1) }
@@ -360,7 +373,19 @@ struct WelcomeView: View {
         .padding(.horizontal, 56).padding(.top, 34)
     }
 
-    // Page 5: what next.
+    // Page 5: a small favour.
+    private var privacy: some View {
+        PrivacyAskView(onAnswer: { c, crash, usage in answerPrivacy(c, crash: crash, usage: usage) }, answered: privacyAnswer)
+            .padding(.horizontal, 56).padding(.top, 28)
+    }
+
+    private func answerPrivacy(_ c: PrivacyChoice, crash: Bool, usage: Bool) {
+        PrivacyConsent.answer(c, crash: crash, usage: usage)
+        privacyAnswer = c
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { go(1) }
+    }
+
+    // Page 6: what next.
     /// The ways to start; ↑↓ choose, Return goes (the tour first).
     private var ready: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -427,6 +452,8 @@ struct WelcomeView: View {
         dismiss()
         NSApp.windows.first { $0.identifier?.rawValue.contains("welcome") == true }?.close()
         if !ShowMeAround.shared.welcomeClosed(exit) && exit == .guidedTour { TourModel.shared.start() }
+        // Skipped before "A small favour": asked once more, over the circuit.
+        PrivacyConsent.askWhenReady()
     }
 }
 
