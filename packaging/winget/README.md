@@ -54,7 +54,7 @@ given `--placeholders-ok`.
 | `Scope` | `user` | `PrivilegesRequired=lowest`, `{localappdata}\Programs\CedarLogic`, HKCU registry |
 | `ProductCode` | `{59AB891F-9536-471C-BAE2-13C34308A7C3}_is1` | `AppId` + Inno's `_is1`: the Settings > Apps key, so winget sees an installed copy, from any source, as this package |
 | `AppsAndFeaturesEntries` | DisplayName `CedarLogic`, Publisher `CedarLogic`, DisplayVersion = package version | `UninstallDisplayName`, `AppPublisher`, `AppVersion` (CMake's `project(... VERSION 0.4.0)`) |
-| `Publisher` / `Author` / `Copyright` | `CedarLogic` | `AppPublisher` (and `VersionInfoCompany`, `AppCopyright`). The project is the publisher, not the university or a person. winget matches the installed app's publisher against it, so change the .iss and this together or they disagree |
+| `Publisher` / `Author` / `Copyright` | `CedarLogic` (the contact address, cedarlogic@proton.me, has no field: the 1.12 locale schema has none for an email, and its URLs, `PublisherSupportUrl` included, must be http or https, so no `mailto:`) | `AppPublisher` (and `VersionInfoCompany`, `AppCopyright`). The project is the publisher, not the university or a person. winget matches the installed app's publisher against it, so change the .iss and this together or they disagree |
 | `Architecture` | `x64`, `arm64` | `CedarLogic-<v>-Windows-Setup-x64.exe` / `-ARM64.exe` (the x64 one also runs on Windows 11 on ARM, but winget picks arm64 there) |
 | `FileExtensions` / `Protocols` | `cdl` / `cedarlogic` | the `[Registry]` section |
 | `MinimumOSVersion` | `10.0.0.0` | `MinVersion=10.0` |

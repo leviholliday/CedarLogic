@@ -4,9 +4,27 @@ Written 2026-10-31 from the commits on `private/v4/mac` (tip `2a732c5`, 131 comm
 
 If a line says a thing is on a platform, a commit or doc on the branches in section 4 says so. Where a fix lives on a branch that is not yet in `v4/mac`, the line says so.
 
+Updated 2026-11-03 from `main` (`82da486`, after PRs #7 to #19): the intro, the Actions rail, menus live at launch on the Mac, and the welcome and What's New no longer coming back. These are checked against the code and `docs/V4-PARITY-MATRIX.md`.
+
 ## 1. What's new
 
 ### On every computer
+
+**An intro.** The first time CedarLogic opens, and the first time after an update, the circuit draws itself, the light comes on and "0.4" lights up, with a short chime. Then the launch screen comes in as usual. Any key or click skips it. Help > Play the Intro plays it again, sound and all. (Mac, Windows, Linux.)
+
+**An intro every time, if you like.** On the Mac, every other launch plays a short intro: the drawing alone, silent, about 3.5 seconds, going straight into your window. Settings > General > "When CedarLogic opens" picks Short intro (the default), Full intro, Classic launch screen (the panel alone, as before) or None (straight in). On Windows and Linux the full intro plays at every launch, silently; Settings > General > "Play the intro every time CedarLogic opens" turns that off. With Reduce Motion (Mac) or animations off (Windows), you see the still launch screen instead. (Mac, Windows, Linux.)
+
+**The Actions panel.** The commands you use most, as buttons down the window's right edge, on for everyone, updated copies included. Point at one to see its name and shortcut, and click to run it. Settings > Actions has one switch to turn it off, "Show the Actions panel", and "Open on hover" under it (greyed while the panel is off). A page of the welcome, "The Actions panel", has the same two switches beside a picture of the window, and What's New's panel card has "Show or Hide It…". Drag a button up or down to reorder it, or use the Customize list, which can search every menu command by its name, its menu or its shortcut. Folded, it opens when the pointer reaches the right edge, and focus mode folds it to a quiet tab. View > Show Actions turns it back on when it's off: Control-Command-S (⌃⌘S) on the Mac, Ctrl+B on Windows and F9 on Linux (each can be changed in Settings > Shortcuts). (Mac, Windows, Linux.)
+
+**Show Me Around.** A one-minute walk round the window. It starts by itself once, after the first-run welcome (or What's New, after an update), and it's in the Help menu any time. It lights up one place at a time, seven stops: the parts list, the canvas, the toolbar, the Actions panel, the run controls, the tabs, and the menu bar for Help and Settings. Next, Back and Skip, or the arrow keys, Return and Space; Escape stops it. A stop that isn't on screen is skipped, and the last one offers the Guided Tour. (Mac, Windows, Linux.)
+
+**About has a contact address.** "Questions? cedarlogic@proton.me", as a mail link. (Mac.)
+
+**Crash reports and usage stats, if you'd like to send them.** Both are off until you say yes. You're asked once, one question for both: the welcome's "A small favour" page, or a sheet after an update. Settings > Privacy turns each on or off, shows exactly what's sent and deletes what has been. Nothing identifies you: no name, no circuits, no files. `docs/PRIVACY.md` has the details. (Mac.)
+
+**Help > Learn Logic Online.** The website's lessons, in your browser. (Mac.)
+
+*The Actions panel and Show Me Around are on `main` for all three (Mac PR #22; Windows `7a126de3`, Linux `6d43a572`). The short intro and the four "When CedarLogic opens" choices are the Mac's (`82e359fe`); Windows and Linux have the every-launch checkbox, on by default. Crash reports, usage stats and Learn Logic Online are the Mac's (`c320f2f3`, `82e359fe`). On the Mac, Check for Updates and Settings are in the CedarLogic menu, not Help.*
 
 **Recently Deleted.** Deleting a circuit from Your Circuits no longer ends it. Open "Recently Deleted" in Your Circuits to see what you deleted, newest first. Restore puts a circuit back. Delete Now removes it for good, and asks first. Circuits stay for 30 days, then they go. They stay on that computer. They aren't synced. (Mac, Windows, Linux.)
 
@@ -21,6 +39,10 @@ If a line says a thing is on a platform, a commit or doc on the branches in sect
 **Circuits save the numbers you see.** Part positions are saved to a ten-thousandth of a grid square. Save, reopen and save again gives the same file.
 
 ### Mac
+
+**Menus work from the moment the app opens.** Before, a shortcut such as Cmd-E (Export as Image) did nothing after launch, and Undo stayed off after an edit, until you had opened a menu once. Now the menus are up to date whenever a window comes to the front, and before every Command-key shortcut.
+
+**The welcome and What's New stay closed.** If one of them was open when you quit, macOS used to bring it back at the next launch, so an update could show the welcome over your circuit instead of What's New. Now neither comes back by itself; you see only the one that's due.
 
 **Open the Practice Circuit.** It's in the File menu and the Help menu. It opens as a new circuit of your own, called Practice Circuit.
 
@@ -185,6 +207,12 @@ All four install the versioned release in `leviholliday/CedarLogic-Releases` (ne
 - Windows: the menu bar by keyboard (Alt, F10, arrows, Escape), in dark mode and in focus mode; recording the window; Predict, Then Reveal; Share Link with a note in the circuit, and check the link doesn't carry it.
 - Linux: the menu bar on Zorin and on the Pi (the Pi's themes); recording with and without ffmpeg; the Normal and Beta groups with Check Now.
 - Mac: Open the Practice Circuit; Clear Drawing's question; a long session past 500 steps, then quit and reopen.
+- The intro, on all three: a first launch (it plays with the chime), an update from 0.3.x (it plays once), a second launch (it doesn't); a key or a click part way skips it; Help > Play the Intro; the every-launch setting (no sound).
+- The Actions panel, on all three: on for a new install and for a copy updated from 0.3.x (also one that had In the toolbar); the welcome's Actions panel page and What's New's "Show or Hide It…" flip the real setting; "Show the Actions panel" off stays off after a relaunch; "Open on hover" with the panel folded; focus mode; dragging a button; searching the Customize list; the shortcut (⌃⌘S, Ctrl+B, F9).
+- Show Me Around: offered after the first-run welcome ("Show Me Around" / "Not Now", Return / Escape); all seven stops with the keys; the panel's stop skipped when it's off; a narrow window; Reduce Motion (a fade, not a slide); the last stop's Guided Tour. On the Mac, About's mail link opens a new mail.
+- Mac: a second launch plays the short intro; each "When CedarLogic opens" choice; an update from 0.3.x settles the choice from the old checkbox. Windows and Linux: the every-launch intro on by default, off sticks.
+- Mac: the "A small favour" page (Yes, No thanks, Choose what to send), the one-time sheet after an update, Settings > Privacy's switches, See What's Sent and Delete What's Been Sent; Help > Learn Logic Online.
+- Mac: straight after launch, before clicking anything, press Cmd-E with a circuit open (the export sheet should open). Quit with the welcome or What's New open, then open the app again (it shouldn't come back).
 
 ## 4. Internal
 
@@ -228,11 +256,11 @@ None of these is merged to `main` or deployed. The apps' cap handling on all thr
 - **Windows and Linux builds from different commits.** `sign-release.sh` finds the manifest's build number from the two test builds' signed lists and refuses when they disagree. Sign soon after copying the files from the test builds (before another test build publishes), or pass `--build N`. Details in `packaging/README.md` on `ui/linux-channel`.
 - **Stale text in `packaging/README.md`.** On `v4/mac` it says the Windows and Linux updaters follow only the `*-native-testing` builds. `ui/linux-channel` rewrites the Linux part, but its copy still says the Windows updater follows `windows-native-testing` only and doesn't read versioned releases. `ui/windows-channel` makes that wrong, and does not touch `packaging/`, so the README needs one more edit after both are merged.
 - **The release must say its own version.** The released Linux build must have `project(CedarLogicNative VERSION 0.4.x)` to match the release, because the app never offers a Normal tester a version older than its own.
-- **The AppImages** are not in the `RELEASE-0.4.md` runbook, which copies only the `.deb` files. Add them before running `sign-release.sh`. Any file added to `v0.4` after signing means signing again, or the installers refuse that file.
+- **The AppImages** were not in the old `RELEASE-0.4.md` runbook. The go-list in `packaging/README.md` (step 4) copies them, and the Windows zips, before `sign-release.sh`. Any file added to `v0.4` after signing means signing again, or the installers refuse that file.
 - **The site** needs: `install.sh` and `install.ps1` copied into `public/` and served as plain text (`netlify.toml` headers in `packaging/README.md`); the `/get/` redirects pointed at the `v0.4` files, with AppImage ones added; download-page wording; a production deploy with the owner there.
 - **winget.** Fork `microsoft/winget-pkgs`, accept Microsoft's CLA on the first PR, run `packaging/winget/bump.sh 0.4`. The committed 0.4.0 manifests have placeholder hashes (64 zeros) until then. Merging takes hours to days. Show the winget line on the site only after the PR merges.
 - **Homebrew.** The cask in the repo is at `0.3.4`. Run `packaging/homebrew/bump.sh 0.4` after the DMG is on the release, then push the tap. A day's lag breaks nothing, because the app updates itself.
-- **The Mac's What's New tour** is still version `0.3` in `mac/App/WhatsNew.swift` on `v4/mac`. There is no 0.4 tour on this branch. The old `rel/*-0.4` branches had Windows and Linux 0.4 tours from 2026-10-05; those were not re-read for this file.
+- **The What's New tours** are version `0.4` on `main` on all three (`mac/App/WhatsNew.swift`, `windows/App/Welcome.cpp` and `linux/App/Welcome.cpp`, `kVersion`). They were written before the intro and the Actions rail, so neither tour mentions them (the Windows tour's "Also new" page has "Actions on the right"). The website's 0.4 page adds them in an "Also in 0.4" block (cedarlogic-site branch `release-0.4-copy`).
 - **Apple silicon only on Mac.** `mac/build.sh` builds for the Mac it runs on. Intel Macs get "This app isn't supported". Say so on the download page until a universal build exists.
 - **Core hardening, still open.** Bug 28's fix has no `core_check` case and may not be reachable. The Linux session check's seed 9 mismatch was not reproduced in the engine; `ca3237b` adds the six steps as a `core_check` case, and `7b8648c` on `ui/linux-channel` makes the Linux check report an interrupted undo/redo round trip instead of failing it. Several fuzz seeds are "unfinished" rather than passing: slow, not stuck (a page pasted onto itself until thousands of parts overlap). Known limits are in the doc.
 - **Not run.** Core hardening and `v4/mac` were checked on a Mac. The commit messages for `ui/windows-channel` and `ui/linux-channel` name CI checks (for example `--channel-check`, `--trash-check`, `--feedback-check`). The one real-PC run (`windows/PC-TEST.md`) was on `54f1236`, before the polish commits. I did not run or build anything for this file.
@@ -241,7 +269,7 @@ None of these is merged to `main` or deployed. The apps' cap handling on all thr
 ### Owner decisions still pending
 
 1. ~~**Homebrew tap name.**~~ Decided: the existing `leviholliday/homebrew-tap`, command `brew install --cask leviholliday/tap/cedarlogic` (`packaging/homebrew/README.md`). Make sure the website prints this one.
-2. ~~**Publisher.**~~ Decided: users see `CedarLogic` (the project) as the publisher, not Cedarville University or a person: `AppPublisher`/`VersionInfoCompany`/`AppCopyright` in `windows/installer/CedarLogic.iss`, `CompanyName`/`LegalCopyright` in `windows/res/CedarLogic.rc.in`, the winget manifest's `Publisher`/`Author`/`Copyright`, the Mac's `NSHumanReadableCopyright`, and the .deb's `Maintainer` (`CedarLogic <224852181+leviholliday@users.noreply.github.com>`: the site has no mail address). The About boxes keep crediting the original CedarLogic from Cedarville University. The winget id stays `LeviHolliday.CedarLogic` because winget ids follow the submitting account (`packaging/winget/README.md`).
+2. ~~**Publisher.**~~ Decided: users see `CedarLogic` (the project) as the publisher, not Cedarville University or a person: `AppPublisher`/`VersionInfoCompany`/`AppCopyright` in `windows/installer/CedarLogic.iss`, `CompanyName`/`LegalCopyright` in `windows/res/CedarLogic.rc.in`, the winget manifest's `Publisher`/`Author`/`Copyright`, the Mac's `NSHumanReadableCopyright`, and the .deb's `Maintainer` (`CedarLogic <cedarlogic@proton.me>`, the project's contact address since 2026-11-03). The About boxes keep crediting the original CedarLogic from Cedarville University. The winget id stays `LeviHolliday.CedarLogic` because winget ids follow the submitting account (`packaging/winget/README.md`).
 3. **Gatekeeper handling in the cask.** The cask does not remove the quarantine flag, so a Homebrew install needs Open Anyway on first launch and its caveats say so. A `postflight` with `xattr -dr com.apple.quarantine` would make the first launch smooth because the cask pins the DMG's sha256, but it turns off a macOS safety check on users' Macs. The lasting fix is a Developer ID certificate and notarization. (`packaging/homebrew/README.md`)
 4. **Delete Now confirmation.** In Recently Deleted, Delete Now asks "Delete “Name” now?" with "It and all its versions will be deleted for good. This can't be undone.", then Delete Now or Cancel (`docs/RECENTLY-DELETED.md`). The Mac (`LibraryView.swift`), Windows (`LibraryWindow.cpp`) and Linux (`LibraryWindow.cpp`) all ask. No doc or commit says what is still undecided about it, so I have not guessed.
 

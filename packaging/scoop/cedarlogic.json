@@ -1,0 +1,44 @@
+{
+    "version": "0.4",
+    "description": "Free, open-source digital logic simulator: build logic gate circuits, run them live, and check them with truth tables and Karnaugh maps.",
+    "homepage": "https://cedarlogic.netlify.app/",
+    "license": "GPL-3.0-only",
+    "notes": [
+        "CedarLogic keeps itself up to date (Help > Check for Updates...); 'scoop update cedarlogic' works too.",
+        "Your circuits and settings are in %APPDATA%\\CedarLogic, so they stay when you uninstall."
+    ],
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-x64.zip",
+            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "arm64": {
+            "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-ARM64.zip",
+            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    },
+    "extract_dir": "CedarLogic",
+    "shortcuts": [
+        [
+            "CedarLogic.exe",
+            "CedarLogic"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/leviholliday/CedarLogic-Releases"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v$version/CedarLogic-$version-Windows-x64.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v$version/CedarLogic-$version-Windows-ARM64.zip"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/SHA256SUMS",
+            "regex": "file $basename \\d+ $sha256"
+        }
+    }
+}

@@ -2,7 +2,9 @@
 
 # CedarLogic
 
-CedarLogic is a free, open-source digital logic simulator made for classroom teaching. Drag in gates, wire them up and watch the signals move. It has all the basic gates, buses, J-K and D flip-flops, muxes, decoders, RAM and a [Z80 microprocessor](https://en.wikipedia.org/wiki/Zilog_Z80). Press T for the truth table, the Karnaugh maps and the simplest formula, check your circuit against an assignment, and export a lab report. There are native apps for Mac, Windows and Linux, and [CedarLogic Online](https://cedarlogic.netlify.app/online-logic-gate-simulator/) in the browser. At [Cedarville University](https://www.cedarville.edu/) students in Computer Architecture 1 have used it to build and simulate a full [Mano machine](https://en.wikipedia.org/wiki/Mano_machine).
+CedarLogic is a free, open-source digital logic simulator made for classroom teaching. Drag in gates, wire them up and watch the signals move. It has all the basic gates, buses, J-K and D flip-flops, muxes, decoders, RAM and a [Z80 microprocessor](https://en.wikipedia.org/wiki/Zilog_Z80). Press T for the truth table, the Karnaugh maps and the simplest formula, check your circuit against an assignment, and export a lab report.
+
+It is one app on three computers: native apps for **Mac**, **Windows** and **Linux** (the Raspberry Pi too), all on the same simulation engine, and [CedarLogic Online](https://cedarlogic.netlify.app/online-logic-gate-simulator/) in the browser. At [Cedarville University](https://www.cedarville.edu/) students in Computer Architecture 1 have used it to build and simulate a full [Mano machine](https://en.wikipedia.org/wiki/Mano_machine).
 
 **[Website](https://cedarlogic.netlify.app)** · **[Download](https://cedarlogic.netlify.app/download/)** · [All releases](https://github.com/leviholliday/CedarLogic-Releases/releases) · [Truth table generator](https://cedarlogic.netlify.app/truth-table-generator/) · [What's new](CHANGELOG.md)
 
@@ -15,22 +17,64 @@ CedarLogic is a free, open-source digital logic simulator made for classroom tea
 
 ## Install
 
-| Computer | Command |
-|---|---|
-| Mac | `brew install --cask leviholliday/tap/cedarlogic` |
-| Windows | `irm https://cedarlogic.netlify.app/install.ps1 \| iex` (PowerShell) |
-| Windows | `winget install --id LeviHolliday.CedarLogic -e` (coming) |
-| Linux | `curl -fsSL https://cedarlogic.netlify.app/install.sh \| sh` |
+0.4 is the first version for Mac, Windows and Linux together. Every way below installs the same version, and the apps keep themselves up to date after that.
 
-Each command installs the current release and checks what it downloads. The Windows and Linux commands start working with 0.4. Or download the app yourself from **[cedarlogic.netlify.app/download](https://cedarlogic.netlify.app/download/)**.
+### Mac
 
-- **Mac:** macOS 14 Sonoma or later, Apple silicon. The app isn't notarized yet, so the first time you open it, go to System Settings > Privacy & Security and click Open Anyway.
-- **Windows:** Windows 10 or 11, 64-bit (x64 or ARM64). No administrator needed.
-- **Linux:** 64-bit Ubuntu 22.04, Debian 12 (and Raspberry Pi OS on a Pi 4 or 5), Fedora 36 or newer. On apt systems it installs a .deb; elsewhere it puts an AppImage in your home folder.
+With [Homebrew](https://brew.sh):
 
-The apps keep themselves up to date.
+```sh
+brew install --cask leviholliday/tap/cedarlogic
+```
 
-## Which app is which
+Or download `CedarLogic-<version>-Mac.dmg` from the [download page](https://cedarlogic.netlify.app/download/) or the [releases](https://github.com/leviholliday/CedarLogic-Releases/releases), open it and drag CedarLogic to Applications.
+
+Needs macOS 14 Sonoma or later on Apple silicon (M1 or later). On an Intel Mac, use CedarLogic Online. The app isn't notarized yet, so the first time you open it (from Homebrew or the disk image), go to **System Settings > Privacy & Security** and click **Open Anyway**. You only do this once.
+
+### Windows
+
+In PowerShell (from 0.4's release day):
+
+```powershell
+irm https://cedarlogic.netlify.app/install.ps1 | iex
+```
+
+It picks the installer for your PC (x64 or ARM64), checks it, and installs CedarLogic for you, with no administrator.
+
+With [winget](https://learn.microsoft.com/windows/package-manager/) (after release day, once Microsoft has accepted the listing):
+
+```powershell
+winget install --id LeviHolliday.CedarLogic -e
+```
+
+With [Scoop](https://scoop.sh) (from release day):
+
+```powershell
+scoop bucket add cedarlogic https://github.com/leviholliday/scoop-cedarlogic
+scoop install cedarlogic/cedarlogic
+```
+
+Or download the installer, `CedarLogic-<version>-Windows-Setup-x64.exe` (or `-ARM64.exe`), from the [download page](https://cedarlogic.netlify.app/download/windows/). If Windows says it protected your PC, click **More info**, then **Run anyway**. The commands above don't show that warning. There's also a portable zip, `CedarLogic-<version>-Windows-x64.zip`, to run without installing.
+
+Needs Windows 10 or 11, 64-bit.
+
+### Linux and Raspberry Pi
+
+In a terminal:
+
+```sh
+curl -fsSL https://cedarlogic.netlify.app/install.sh | sh
+```
+
+On Ubuntu, Debian, Zorin, Mint and Raspberry Pi OS it installs the `.deb` with apt (it asks for your password). On Fedora and the rest it puts the AppImage in your home folder. Either way it checks CedarLogic's signature first, CedarLogic shows up in your applications menu, and it updates itself from then on. Add `-s -- --dry-run` to see what it would do.
+
+Or download a file from the [download page](https://cedarlogic.netlify.app/download/linux/): `cedarlogic_<version>_amd64.deb`, or `_arm64.deb` for a Raspberry Pi 4 or 5, or the `x86_64` or `aarch64` AppImage. They update themselves too.
+
+Needs a 64-bit system: Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm on a Pi 4 or 5), Fedora 36 or newer. There's no apt repository, Flathub or AUR package yet.
+
+[`packaging/README.md`](packaging/README.md) says what each command does and how the releases are signed.
+
+## One engine, three apps
 
 | App | Folder | Built with | Status |
 |---|---|---|---|
@@ -40,7 +84,7 @@ The apps keep themselves up to date.
 | CedarLogic Online | separate `cedarlogic-site` repository, engine in `wasm/` | JavaScript and WebAssembly | Current |
 | CedarLogic Classic | repository root (`CMakeLists.txt`, `src/`) | wxWidgets and Skia | **Legacy**, retired after 4.0.2 |
 
-All three native apps run the same simulation engine, so a circuit behaves the same everywhere. They read and write the same `.cdl` files.
+The three native apps run the same simulation engine, so a circuit behaves the same on every computer. They read and write the same `.cdl` files, sync Your Circuits with each other, and come out together at the same version. Each one is built for its own system, not wrapped in a browser, so it starts fast and fits in. [`docs/V4-PARITY-MATRIX.md`](docs/V4-PARITY-MATRIX.md) lists, feature by feature, what each app has.
 
 ## Where things are
 
@@ -61,23 +105,68 @@ All three native apps run the same simulation engine, so a circuit behaves the s
 | `docs/` | Format spec, release runbooks, parity matrix, design notes. |
 | `CMakeLists.txt`, `cmake/`, `flake.nix`, `Taskfile.yaml`, `Doxyfile` | The original wxWidgets app's build (legacy; see below). |
 
-## Building
+## Build from source
 
-Each app builds on its own:
+Each app builds on its own kind of computer, from the repository root.
+
+### Mac
+
+Needs macOS 14 or later and the Xcode Command Line Tools (Swift 6). Xcode itself isn't needed.
 
 ```sh
-mac/build.sh                                                  # Mac: mac/build/CedarLogic.app
-cmake -S windows -B windows/build -A x64 && cmake --build windows/build --config Release    # Windows
-cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build linux/build   # Linux
+mac/build.sh              # -> mac/build/CedarLogic.app
+OPEN=1 mac/build.sh       # build, then launch
+CLEAN=1 mac/build.sh      # rebuild everything (after changing a header)
+mac/package.sh            # build, then mac/build/CedarLogic-<version>-Mac.dmg
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) has what each one needs, the checks to run, and how to send a change. The app READMEs ([Mac](mac/README.md), [Windows](windows/README.md), [Linux](linux/README.md)) have the details.
+The first build downloads Sparkle and checks it against its SHA-256. The app builds for the Mac it runs on.
 
-## More
+### Windows
 
-- [Contributing](CONTRIBUTING.md): building, checking and sending a change
+Needs Visual Studio 2019 or later with the C++ desktop workload, CMake, and a Windows SDK (the "Windows 11 SDK" component in the Visual Studio Installer).
+
+```sh
+cmake -S windows -B windows/build -A x64
+cmake --build windows/build --config Release
+windows\build\Release\CedarLogic.exe [circuit.cdl ...]
+```
+
+[`windows/README.md`](windows/README.md) also covers building without admin rights, the installer, and cross-compiling with MinGW-w64 from a Mac.
+
+### Linux
+
+Needs a C++17 compiler, CMake, and the GTK 3, Cairo, Pango, fontconfig, FreeType and OpenSSL development files. On Debian, Ubuntu and Raspberry Pi OS:
+
+```sh
+sudo apt install build-essential cmake ninja-build \
+  libgtk-3-dev libcairo2-dev libpango1.0-dev libfontconfig1-dev libfreetype-dev libssl-dev
+cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build linux/build
+linux/build/cedarlogic [circuit.cdl ...]
+
+linux/package.sh          # an AppImage (needs linuxdeploy)
+linux/package-deb.sh      # a .deb
+```
+
+### The engine's checks
+
+The engine is shared, so a change there reaches all three apps at once. Its unit tests run anywhere with CMake and a C++17 compiler, and CI runs them on every pull request:
+
+```sh
+cmake -S logic -B build/logic -G Ninja -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
+cmake --build build/logic && ctest --test-dir build/logic --output-on-failure
+```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rest (`format/`, the headless engine and its fuzz runs, each app's own checks) and how to send a change. The app READMEs ([Mac](mac/README.md), [Windows](windows/README.md), [Linux](linux/README.md)) have the details.
+
+## Help and more
+
+- [Support](SUPPORT.md): which versions get fixes, where to ask, and what the apps send. In any of the apps, **Send Feedback** reaches the developer fastest.
+- Contact: [cedarlogic@proton.me](mailto:cedarlogic@proton.me)
 - [Security](SECURITY.md): how to report a problem privately
-- [Support](SUPPORT.md): which versions get fixes, where to ask, and what the apps send
+- [Privacy](docs/PRIVACY.md): the Mac's crash reports and usage stats, both off unless you say yes
+- [Contributing](CONTRIBUTING.md): building, checking and sending a change
 - [Changelog](CHANGELOG.md): what changed in each version
 - [Third-party code](THIRD-PARTY.md): what CedarLogic ships with and its licenses
 - [Code of Conduct](CODE_OF_CONDUCT.md)
@@ -86,7 +175,7 @@ cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --bui
 
 ## The legacy wx app (CedarLogic Classic)
 
-The original cross-platform app is still in this repository: the root `CMakeLists.txt`, the wx parts of `src/` and `include/`, `cmake/`, `flake.nix` and `Taskfile.yaml`. CI still builds it, because it shares the engine with the native apps. It is retired: its last release was CedarLogic Classic 4.0.2 (beta), and new work goes into the native apps. To build it, see [docs/Building.md](docs/Building.md).
+The original cross-platform app is still in this repository: the root `CMakeLists.txt`, the wx parts of `src/` and `include/`, `cmake/`, `flake.nix` and `Taskfile.yaml`. CI still builds it, because it shares the engine with the native apps. It is retired: its last release was CedarLogic Classic 4.0.2 (beta), and new work goes into the native apps, which open its `.cdl` files. To build it, see [docs/Building.md](docs/Building.md).
 
 <details>
 <summary>What this fork added to the classic app</summary>
