@@ -471,8 +471,11 @@ int usageCheck(const Out& out) {
 
 	// Every report the server saw fitted the contract, as JSON with no Origin.
 	int bad = 0;
-	for (const json::Value& e : posts())
-		if (!noProblems(e) || !e.str("origin").empty()) bad++;
+	// (One the stand-in answered 503 or 429 before looking at it has no problems listed.)
+	for (const json::Value& e : posts()) {
+		const json::Value* pr = e.get("problems");
+		if ((pr && pr->isArray() && !pr->a.empty()) || !e.str("origin").empty()) bad++;
+	}
 	check(bad == 0, strf("every report fitted the contract (%d didn't)", bad));
 
 	// Samples for the record.
