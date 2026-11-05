@@ -515,8 +515,9 @@ jobs:
             home=$(mktemp -d)
             mkdir -p "$home/config/CedarLogic"
             ini="$home/config/CedarLogic/native.ini"
-            # (Show Me Around seen too: these launches are about the intro, and it would start over the window.)
-            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\nshowMeAroundSeen=true\n' > "$ini"
+            # (Show Me Around seen and the privacy question answered too: these launches are about
+            # the intro, and either would come up over the window and take the keys meant for its menu.)
+            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\nshowMeAroundSeen=true\nprivacyAsked=true\nprivacyChoice=no\n' > "$ini"
             forced=update
             case $how in
               short) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
