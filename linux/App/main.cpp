@@ -29,6 +29,7 @@
 #include "Library.h"
 #include "LibraryWindow.h"
 #include "Privacy.h"
+#include "CrashReports.h"
 #include "PrivacyCheck.h"
 #include "UsageStats.h"
 #include "FindBar.h"
@@ -1008,6 +1009,9 @@ void startupCb(GApplication* gapp, gpointer) {
 	showme::setQuiet(!gScreenshot.empty());
 	privacy::quiet = !gScreenshot.empty();
 	usagestats::testRun = !gScreenshot.empty() || !gSplashFile.empty();
+	// Crash reports, if they were said yes to (CrashReports.h): before anything else can go wrong;
+	// never in a picture or check run.
+	crashreports::start(!gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty());
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
 	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) {
@@ -1526,6 +1530,8 @@ int main(int argc, char** argv) {
 		}
 		// Usage stats' engine against a stand-in or the site's draft (PrivacyCheck.h): no window.
 		if (strcmp(argv[i], "--usage-check") == 0) { usagestats::testRun = true; return privacycheck::usageCheck(); }
+		// Crash reports: the cleaning and Sentry starting and stopping (CrashReports.h); no window.
+		if (strcmp(argv[i], "--crash-check") == 0) { prefs().load(); return crashreports::selfTest(); }
 		if (strcmp(argv[i], "--usage-live") == 0) { usagestats::testRun = true; return privacycheck::usageLive(); }
 		if (strcmp(argv[i], "--privacy-check") == 0) {
 			gPrivacyCheck = true;
@@ -1679,6 +1685,7 @@ int main(int argc, char** argv) {
 	if (gPrimary) prefs().save();
 	// What usage stats counted this time (when they're on), written down.
 	if (gPrimary) usagestats::shutdown();
+	if (gPrimary) crashreports::shutdown();
 	// Every window is closed and saved: what sync hasn't sent yet goes now (five seconds at most).
 	if (gPrimary) syncapp::quit();
 	g_object_unref(app);

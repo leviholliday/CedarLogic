@@ -36,7 +36,11 @@ jobs:
     # here starts on Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm),
     # Fedora 36 and anything newer.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 55
+    env:
+      # Crash reports (linux/App/CrashReports.h): where CI builds sentry-native; CMake reads it, so
+      # the packaging scripts' own configure picks it up too.
+      CL_SENTRY_DIR: ${{ github.workspace }}/sentry-dist
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,12 +54,17 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
             curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
-            gnome-keyring dbus weston
+            gnome-keyring dbus weston unzip
+
+      - uses: ./.github/actions/sentry-native
+        with:
+          arch: ${{ matrix.arch }}
 
       - name: Build
         run: |
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build linux/build
+          grep -E '^CL_SENTRY_DIR' linux/build/CMakeCache.txt
 
       # How long the intro's frames take to draw (linux/App/Splash.h, --intro-bench): every
       # frame at 60 fps, as its window draws them, at 1280x800 and 1920x1080 at scale 1, by
@@ -155,6 +164,33 @@ jobs:
             timeout 180 linux/build/cedarlogic --usage-check || rc=$?
           kill $SERVER || true
           exit $rc
+
+      # Crash reports (linux/App/CrashReports.h): the cleaning on a made-up report full of this
+      # computer's paths and names, Sentry starting and stopping; then a real crash (CL_TEST_CRASH)
+      # of a copy run from under the home folder (so its own path has the user name in it), the
+      # report it left sent at the next launch to a stand-in for Sentry (linux/Tools/sentry-mock.py,
+      # on this computer: nothing goes to Sentry), and that report scanned: the crash is there,
+      # tagged platform=linux, with no user name, host name or home folder in it.
+      - name: Crash reports check
+        run: |
+          mkdir -p renders/privacy crash-res
+          cp res/cl_gatedefs.xml res/FirstLaunch.wav linux/res/cedarlogic.png mac/App/LaunchIcon.png crash-res/
+          D=$(mktemp -d)
+          XDG_CONFIG_HOME="$D/config" XDG_DATA_HOME="$D/data" timeout 120 linux/build/cedarlogic --crash-check
+          python3 linux/Tools/sentry-mock.py "$D/port" "$PWD/renders/privacy/crash-report.txt" &
+          SERVER=$!
+          for _ in $(seq 50); do [ -s "$D/port" ] && break; sleep 0.1; done
+          X="$HOME/cl-crash-check"
+          rm -rf "$X" && mkdir -p "$X" "$D/config/CedarLogic"
+          cp linux/build/cedarlogic "$X/cedarlogic"
+          printf '[CedarLogic]\ncrashReports=1\nprivacyAsked=true\nprivacyChoice=custom\nhasSeenWelcome=true\nshowMeAroundSeen=true\nintroAtLaunch=none\nfirstLaunchPlayed=true\nintroFirstLaunchPlayed=true\ncheckUpdates=false\n' > "$D/config/CedarLogic/native.ini"
+          export NO_AT_BRIDGE=1 XDG_CONFIG_HOME="$D/config" XDG_DATA_HOME="$D/data" CEDARLOGIC_RESOURCES="$PWD/crash-res"
+          export CL_SENTRY_DSN="http://0123456789abcdef0123456789abcdef@127.0.0.1:$(cat "$D/port")/1"
+          if CL_TEST_CRASH=1 xvfb-run -a -s "-screen 0 1280x800x24" timeout 90 "$X/cedarlogic"; then echo "::warning::the test crash didn't crash"; else echo "crashed (exit $?)"; fi
+          find "$D/data" -type f | head -20
+          xvfb-run -a -s "-screen 0 1280x800x24" timeout 25 "$X/cedarlogic" || true
+          kill $SERVER || true
+          python3 linux/Tools/sentry-mock.py --check "$PWD/renders/privacy/crash-report.txt"
 
       # Recently Deleted's files (docs/RECENTLY-DELETED.md), as the Mac's launch-selftest
       # `trash` state: the list, the 30-day sweep, Restore and Delete Now, in a library of its own.
@@ -283,6 +319,9 @@ jobs:
           # It installs, with its dependencies, and runs.
           sudo apt-get install -y "$PWD/$DEB"
           cedarlogic --version
+          # The shipped (stripped) binary has the crash reporter in it, and no library for it.
+          D=$(mktemp -d); XDG_CONFIG_HOME="$D/config" XDG_DATA_HOME="$D/data" cedarlogic --crash-check | tail -3
+          if ldd /usr/bin/cedarlogic | grep -i -E 'sentry|curl|unwind'; then echo '::error::the app needs a library for crash reports'; exit 1; fi
           test -f /usr/share/applications/cedarlogic.desktop
           test -f /usr/share/icons/hicolor/256x256/apps/cedarlogic.png
 
@@ -292,6 +331,16 @@ jobs:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs/*.deb
           if-no-files-found: error
+
+      # The app's own file, not stripped (the .deb's and the AppImage's are): what turns a crash
+      # report's addresses into functions and lines.
+      - name: Upload symbols
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-symbols-${{ matrix.arch }}
+          path: linux/build-release/cedarlogic
+          if-no-files-found: warn
+          retention-days: 90
 
       # Start the packaged app on a virtual display, open a circuit and take a
       # picture of the whole window: catches anything the AppImage forgot.
@@ -658,9 +707,17 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
             curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
-            gnome-keyring dbus weston
+            gnome-keyring dbus weston unzip
+
+      # (As the build job: Settings > Privacy and the consent are pictured and checked with the
+      # crash reporter in the build.)
+      - uses: ./.github/actions/sentry-native
+        with:
+          arch: ${{ matrix.arch }}
 
       - name: Build
+        env:
+          CL_SENTRY_DIR: ${{ github.workspace }}/sentry-dist
         run: |
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
           cmake --build linux/build

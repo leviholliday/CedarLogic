@@ -33,8 +33,12 @@ Settings > Privacy has the two switches, See exactly what's sent, Last
 sent and Delete what's been sent. Usage stats (`UsageReport`, `UsageStats`)
 go once a day at most, at launch in the background, through curl too, to
 `https://cedarlogic.netlify.app/api/usage`; what's counted and the random id
-are in `~/.config/CedarLogic/usage.json` (0600). There's no crash reporter
-in the Linux app yet: the answer is kept for one, and nothing is sent. A
+are in `~/.config/CedarLogic/usage.json` (0600). Crash reports
+(`CrashReports`) are sentry-native's in-process backend, built statically by
+CI (`CL_SENTRY_DIR`; nothing extra to install), written when the app crashes
+and sent at the next launch through the same curl program, with every
+`/home/<name>/` made `/home/<user>/`; `cedarlogic --crash-check` and CI's
+crash on purpose check them. A
 lab can turn either off for everyone with `/etc/cedarlogic/policy.ini`:
 
 ```ini
