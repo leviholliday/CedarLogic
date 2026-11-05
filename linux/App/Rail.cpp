@@ -131,6 +131,9 @@ GtkWidget* Rail::wrap(GtkWidget* row) {
 	gtk_widget_set_valign(f, GTK_ALIGN_FILL);
 	gtk_widget_set_no_show_all(f, TRUE);
 	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), f);
+	// The overlay's own window round it passes everything through; the
+	// floater's takes what its input shape says (takesPointerFrom).
+	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(overlay), f, TRUE);
 	return overlay;
 }
 

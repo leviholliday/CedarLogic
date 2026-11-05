@@ -200,6 +200,7 @@ struct Shot {
 	cairo_surface_t* s = nullptr;
 	int w = 0, h = 0;
 	static constexpr int kScale = 3;
+	int scale = kScale;
 	~Shot() { if (s) cairo_surface_destroy(s); }
 };
 
@@ -217,6 +218,28 @@ void drawShot(GtkWidget* top, Shot& shot) {
 	gtk_widget_draw(top, cr);
 	cairo_destroy(cr);
 	cairo_surface_flush(shot.s);
+}
+
+// `top` as it is on the screen now (the display's own pixels, at its size):
+// for a state GTK only keeps while it's really up (a menu's row with its
+// submenu open draws nothing lit when drawn off screen).
+bool screenShot(GtkWidget* top, Shot& shot) {
+	GdkWindow* gw = gtk_widget_get_window(top);
+	if (!gw) return false;
+	shot.w = std::max(1, gdk_window_get_width(gw));
+	shot.h = std::max(1, gdk_window_get_height(gw));
+	GdkPixbuf* pb = gdk_pixbuf_get_from_window(gw, 0, 0, shot.w, shot.h);
+	if (!pb) return false;
+	if (shot.s) cairo_surface_destroy(shot.s);
+	shot.scale = 1;
+	shot.s = cairo_image_surface_create(CAIRO_FORMAT_RGB24, shot.w, shot.h);
+	cairo_t* cr = cairo_create(shot.s);
+	gdk_cairo_set_source_pixbuf(cr, pb, 0, 0);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_flush(shot.s);
+	g_object_unref(pb);
+	return true;
 }
 
 // The text in `text`'s box in the picture of `top`: its ground (the colour
@@ -254,7 +277,7 @@ bool readDrawn(GtkWidget* top, const Shot& shot, GtkWidget* text, Reading& out) 
 		}
 	}
 	if (cx1 <= cx0 || cy1 <= cy0 || (cx1 - cx0) * (cy1 - cy0) < 0.6 * w * h) return false;
-	const int k = Shot::kScale;
+	const int k = shot.scale;
 	const int x0 = std::max(0, cx0 * k), y0 = std::max(0, cy0 * k), x1 = std::min(shot.w * k, cx1 * k), y1 = std::min(shot.h * k, cy1 * k);
 	if (x1 - x0 < 2 || y1 - y0 < 2) return false;
 	const unsigned char* data = cairo_image_surface_get_data(shot.s);
@@ -441,10 +464,9 @@ void readMenu(GtkWidget* pop, const std::string& where, StateTally& plain, State
 			if (subPop && gtk_widget_get_mapped(subPop)) {
 				const char* label = gtk_menu_item_get_label(GTK_MENU_ITEM(it));
 				readMenu(subPop, where + " > " + (label ? label : "a submenu"), plain, lit, false);
-				// The parent row stays lit with its submenu open: read again.
+				// The parent row stays lit with its submenu open: read again, off the screen.
 				Shot again;
-				drawShot(pop, again);
-				readItem(it, again, lit, "a row with its submenu open");
+				if (screenShot(pop, again)) readItem(it, again, lit, "a row with its submenu open");
 			}
 			gtk_menu_shell_deselect(GTK_MENU_SHELL(sub));
 			gtk_menu_popdown(GTK_MENU(sub));
