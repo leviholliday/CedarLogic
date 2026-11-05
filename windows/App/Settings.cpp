@@ -1,6 +1,6 @@
 // Settings (Ctrl+,), laid out as the Mac app's (SettingsView.swift) and the
 // Linux app's: the pages as icons in a bar across the top -- General,
-// Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync -- the window fitting each page as
+// Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync, Privacy -- the window fitting each page as
 // you switch, and each setting a label on the left with its control and a
 // line of explanation under it. Every change applies at once; Escape or the
 // close box closes it, and Ctrl+Tab steps through the pages.
@@ -12,6 +12,8 @@
 #include "Alert.h"
 #include "Collections.h"
 #include "Integration.h"
+#include "Privacy.h"
+#include "UsageStats.h"
 #include "Intro.h"
 #include "Shortcuts.h"
 #include "SyncApp.h"
@@ -29,7 +31,7 @@
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage, PrivacyPage };
 
 // Every window takes the change.
 void apply() {
@@ -509,10 +511,10 @@ void showPreferencesDialog(HWND parent) {
 	f.okText = "";
 	f.cancelText = "";
 	f.settingsLayout = true;
-	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync" };
-	// A gear, a palette, a mouse, ••• (as the Linux app has it), a pane on the right (the rail), a keyboard, two circling arrows.
-	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE90D, 0xE765, 0xE895 };
-	f.page = std::max(0, std::min((int)SyncPage, g_page));
+	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync", "Privacy" };
+	// A gear, a palette, a mouse, ••• (as the Linux app has it), a pane on the right (the rail), a keyboard, two circling arrows, a lock.
+	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE90D, 0xE765, 0xE895, 0xE72E };
+	f.page = std::max(0, std::min((int)PrivacyPage, g_page));
 	// What each field does when it changes.
 	std::map<int, std::function<void(Form&, int)>> on;
 
@@ -846,6 +848,63 @@ void showPreferencesDialog(HWND parent) {
 	syncapp::SettingsPage sync;
 	sync.add(f);
 
+	// ---- Privacy (Privacy.h, the Mac's Settings > Privacy): crash reports and
+	// usage stats, what's sent, when the last report went, and deleting it.
+	// A lab's policy keys grey either switch out.
+	f.adding = PrivacyPage;
+	FormField crashField = check("Crash reports:", "Send crash reports", privacy::crashAllowed() == 1, privacy::crashHint());
+	crashField.tipLines = 3;
+	const int crashRow = f.add(crashField);
+	FormField usageField = check("Usage stats:", "Send anonymous usage stats", privacy::usageOn(), privacy::usageHint());
+	usageField.tipLines = 4;
+	const int usageRow = f.add(usageField);
+	FormField sentField = button("See What's Sent\u2026", false);
+	sentField.side = "What's sent:";
+	sentField.tip = "The next report exactly as it would go, and what's never sent.";
+	const int sentRow = f.add(sentField);
+	const int lastRow = f.add(picture("Last sent:", 20, [](ID2D1RenderTarget* rt, float w, float h) {
+		drawText(rt, privacy::lastSentLine(), D2D1::RectF(0, 2, w, h), 12.5f, formLook().dim);
+	}));
+	FormField deleteField = button("Delete What's Been Sent\u2026", false);
+	deleteField.side = "Your data:";
+	deleteField.tip = "Deletes every usage report sent from this PC. (Crash reports are deleted by Sentry after its retention period.)";
+	deleteField.tipLines = 2;
+	const int deleteRow = f.add(deleteField);
+	auto privacyEnable = [crashRow, usageRow, deleteRow](Form& form) {
+		form.enable(crashRow, privacy::crashOffered());
+		form.enable(usageRow, privacy::usageOffered());
+		form.enable(deleteRow, usage::Engine::isUsageId(usagestats::engine().id()));
+	};
+	on[crashRow] = [](Form& form, int i) {
+		privacy::record(privacy::Choice::Custom, form.checked(i), privacy::usageOn());
+		form.setTip(i, privacy::crashHint());
+	};
+	on[usageRow] = [lastRow, privacyEnable](Form& form, int i) {
+		privacy::record(privacy::Choice::Custom, privacy::crashAllowed() == 1, form.checked(i));
+		form.refresh(lastRow);
+		privacyEnable(form);
+	};
+	on[sentRow] = [](Form& form, int) { privacy::showWhatsSent(form.dialog); };
+	on[deleteRow] = [deleteRow, lastRow, privacyEnable](Form& form, int) {
+		if (!askYesNo(form.dialog, "Delete what's been sent?",
+		              "The server forgets every usage report sent from this PC. If usage stats stay on, they start again under a new random id."))
+			return;
+		form.enable(deleteRow, false);
+		form.setTip(deleteRow, "Deleting\u2026");
+		usagestats::deleteSent([deleteRow, lastRow, privacyEnable](bool done) {
+			Form* open = openPagedForm();
+			if (open == nullptr) return;
+			open->setTip(deleteRow, done ? std::string("Deleted.") + (privacy::usageOn() ? " Reports start again under a new id." : "")
+			                             : "Couldn't reach the server. It's asked again the next time CedarLogic opens.");
+			open->refresh(lastRow);
+			privacyEnable(*open);
+		});
+	};
+	// A report went (or the switch changed) while it's open: the line again.
+	usagestats::onChange([lastRow] {
+		if (Form* open = openPagedForm()) open->refresh(lastRow);
+	});
+
 	// A colour or a style picked, by a click or the arrows.
 	auto pickAccent = [&f, swatches](int i) {
 		if (i < 0 || i > 6) return;
@@ -890,6 +949,7 @@ void showPreferencesDialog(HWND parent) {
 		// Tab reaches the list (the arrows choose a shortcut, Enter changes it).
 		SetWindowLongPtrW(list.hwnd(), GWL_STYLE, GetWindowLongPtrW(list.hwnd(), GWL_STYLE) | WS_TABSTOP);
 		sync.init(form);
+		privacyEnable(form);
 	};
 	// Sync's state is read again every half minute ("Synced 5 min ago").
 	f.timerMs = 30000;
@@ -918,8 +978,9 @@ void showPreferencesDialog(HWND parent) {
 	// Escape on Settings > Actions clears its search first.
 	f.onCancel = [&](Form& form) { return !(form.page == ActionsPage && actionsList.clearSearch(form)); };
 	f.run(parent);
+	usagestats::onChange(nullptr);
 	sync.detach();
 	syncapp::nameChanged();
 	g_page = f.page;
-	if (g_page < 0 || g_page > SyncPage) g_page = General;
+	if (g_page < 0 || g_page > PrivacyPage) g_page = General;
 }

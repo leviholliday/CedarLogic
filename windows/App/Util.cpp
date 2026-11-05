@@ -370,6 +370,11 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	seenWhatsNew = r.s("seenWhatsNew", seenWhatsNew);
 	confirmQuit = r.b("confirmQuit", confirmQuit);
 	startMenu = r.i("startMenu", startMenu, 0, 2);
+	crashReports = r.i("crashReports", crashReports, -1, 1);
+	usageStats = r.b("usageStats", usageStats);
+	privacyAsked = r.b("privacyAsked", privacyAsked);
+	privacyChoice = r.s("privacyChoice", privacyChoice);
+	if (privacyChoice != "yes" && privacyChoice != "no" && privacyChoice != "custom") privacyChoice.clear();
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
 		const std::string v = r.s(strf("recent%d", i).c_str(), "");
@@ -500,6 +505,10 @@ std::string Prefs::text() const {
 	o << "seenWhatsNew=" << seenWhatsNew << "\n";
 	o << "confirmQuit=" << b(confirmQuit) << "\n";
 	o << "startMenu=" << startMenu << "\n";
+	o << "crashReports=" << crashReports << "\n";
+	o << "usageStats=" << b(usageStats) << "\n";
+	o << "privacyAsked=" << b(privacyAsked) << "\n";
+	o << "privacyChoice=" << privacyChoice << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	return o.str();
 }
