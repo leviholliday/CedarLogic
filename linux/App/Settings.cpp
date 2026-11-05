@@ -5,6 +5,7 @@
 #include "Anim.h"
 #include "Canvas.h"
 #include "Collections.h"
+#include "Intro.h"
 #include "Drawn.h"
 #include "Shortcuts.h"
 #include "SyncUI.h"
@@ -371,6 +372,7 @@ GtkWidget* generalPage() {
 	};
 	*openHint = r.add("Opening a circuit", combo({ "Replace the current one", "Open in a new window" }, p.openReplaces ? 0 : 1, [openHint, openText](int i) {
 		prefs().openReplaces = i == 0;
+		prefs().openReplacesSet = true;
 		prefs().save();
 		if (*openHint) gtk_label_set_text(GTK_LABEL(*openHint), openText().c_str());
 	}), openText());
@@ -406,9 +408,31 @@ GtkWidget* generalPage() {
 		gtk_widget_set_sensitive(files, !us);
 	});
 	r.add("Opening files", files, "Double-clicking a .cdl file in your files opens it in CedarLogic.");
-	r.add("Launch screen", check("Play the intro every time CedarLogic opens", p.introEveryLaunch, [](bool on) { prefs().introEveryLaunch = on; prefs().save(); }),
-	      "On unless you turn it off: the circuit drawing itself, then the launch screen, as on the first launch, without its sound "
-	      "(that's for the first launch and updates). Any key or click skips it. Help > Play the Intro plays it any time.");
+	// "When CedarLogic opens" (the Mac's picker): the short intro, the full one,
+	// the classic launch screen or none (Intro.h's AtLaunch).
+	{
+		GtkWidget* launch = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+		GtkWidget* when = gtk_label_new("When CedarLogic opens:");
+		gtk_label_set_xalign(GTK_LABEL(when), 0);
+		gtk_label_set_line_wrap(GTK_LABEL(when), TRUE);
+		gtk_label_set_line_wrap_mode(GTK_LABEL(when), PANGO_WRAP_WORD_CHAR);
+		gtk_label_set_max_width_chars(GTK_LABEL(when), 24);
+		gtk_widget_set_name(when, "launch-choice-label");
+		std::vector<std::string> choices;
+		for (int i = 0; i < intro::kAtCount; i++) choices.push_back(intro::atLaunchTitle(i));
+		GtkWidget** launchHint = new GtkWidget*(nullptr);
+		GtkWidget* pick = combo(choices, std::max(0, std::min(intro::kAtCount - 1, p.introAtLaunch)), [launchHint](int i) {
+			if (i < 0 || i >= intro::kAtCount) return;
+			prefs().introAtLaunch = i;
+			prefs().save();
+			if (*launchHint) gtk_label_set_text(GTK_LABEL(*launchHint), intro::atLaunchHint(i).c_str());
+		});
+		gtk_widget_set_name(pick, "launch-choice");
+		gtk_box_pack_start(GTK_BOX(launch), when, FALSE, FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(launch), pick, FALSE, FALSE, 0);
+		gtk_widget_set_halign(launch, GTK_ALIGN_START);
+		*launchHint = r.add("Launch screen", launch, intro::atLaunchHint(p.introAtLaunch));
+	}
 	r.add("Quitting", check("Ask before quitting", p.confirmQuit, [](bool on) { prefs().confirmQuit = on; prefs().save(); }),
 	      "Ctrl+Q shows a question first: Enter quits, Escape doesn't.");
 	r.add("Status bar", check("Show zoom, cursor position, and counts", p.showStatus, [](bool on) { prefs().showStatus = on; apply(); }),

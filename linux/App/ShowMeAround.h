@@ -103,6 +103,11 @@ std::string body(int spot);
 bool frame(int spot, RectF& out);
 // The card's rectangle as drawn now, in the same points (for the checks).
 RectF cardRect();
+// For --session-check: the middle of the card's Next (0), Back (1), Skip (2)
+// or lesson (3) button, in the window's points (false: not on the card now);
+// and whether the card and the spotlight have stopped moving.
+bool buttonCenter(int which, double& x, double& y);
+bool settled();
 
 // --show walk:N (CI's pictures): at stop N on this window, nothing watched,
 // no keys taken.

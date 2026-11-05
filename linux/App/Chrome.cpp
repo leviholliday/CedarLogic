@@ -30,7 +30,10 @@ Color Chrome::onAccent() const {
 	auto lin = [](float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
 	const float lum = 0.2126f * lin(a.r) + 0.7152f * lin(a.g) + 0.0722f * lin(a.b);
 	const float onWhite = 1.05f / (lum + 0.05f), onDark = (lum + 0.05f) / 0.054f;
-	return onDark > onWhite * 1.3f ? colorF(0.035f, 0.063f, 0.047f) : colorF(1, 1, 1);
+	// Never under 4.5:1 when the other reads better (WCAG's body text): white
+	// only where it reads at 4.5:1 and the dark ink isn't plainly stronger.
+	const bool white = onWhite >= 4.5f ? !(onDark > onWhite * 1.3f) : onWhite >= onDark;
+	return white ? colorF(1, 1, 1) : colorF(0.035f, 0.063f, 0.047f);
 }
 Color Chrome::ink(float alpha) const { return withAlpha(barInk(), alpha); }
 

@@ -353,6 +353,7 @@ const char* name(Trigger t) {
 	case Trigger::First: return "first";
 	case Trigger::Update: return "update";
 	case Trigger::Every: return "every";
+	case Trigger::Short: return "short";
 	default: return "none";
 	}
 }
@@ -387,7 +388,36 @@ Trigger owed() { return owed(prefs()); }
 Trigger forLaunch(const Prefs& p) {
 	const Trigger t = owed(p);
 	if (t != Trigger::None) return t;
-	return p.introEveryLaunch ? Trigger::Every : Trigger::None;
+	switch (p.introAtLaunch) {
+	case kAtFull: return Trigger::Every;
+	case kAtClassic:
+	case kAtNone: return Trigger::None;
+	default: return Trigger::Short;
+	}
+}
+
+const char* atLaunchKey(int choice) {
+	static const char* keys[kAtCount] = { "short", "full", "classic", "none" };
+	return choice >= 0 && choice < kAtCount ? keys[choice] : keys[kAtShort];
+}
+const char* atLaunchTitle(int choice) {
+	static const char* titles[kAtCount] = { "Short intro", "Full intro", "Classic launch screen", "None" };
+	return choice >= 0 && choice < kAtCount ? titles[choice] : titles[kAtShort];
+}
+int atLaunchFrom(const std::string& saved) {
+	for (int i = 0; i < kAtCount; i++) if (saved == atLaunchKey(i)) return i;
+	return -1;
+}
+int settleAtLaunch(bool, bool) { return kAtShort; }
+std::string atLaunchHint(int choice) {
+	const std::string always = " The first launch and the first after an update always play the full intro, with its sound. Help ▸ Play the "
+	                           "Intro plays it any time.";
+	switch (choice) {
+	case kAtFull: return "The circuit draws itself, then the launch screen, as on the first launch, without its sound." + always;
+	case kAtClassic: return "The launch screen as it was before the intro: CedarLogic's panel, a sweep of light, and the window, silent." + always;
+	case kAtNone: return "Straight into the circuit window, no launch screen." + always;
+	default: return "The circuit draws itself, then the window opens: about three and a half seconds, silent." + always;
+	}
 }
 
 void log(const std::string& what) {
@@ -407,7 +437,13 @@ Trigger pending() {
 	return forLaunch(prefs());
 }
 
-// (Every launch's isn't owed, so there's nothing to keep.)
+bool straightIn(const Prefs& p) { return forLaunch(p) == Trigger::None && p.introAtLaunch == kAtNone; }
+bool straightIn() {
+	if (!allowed() || g_getenv("CL_INTRO")) return false;
+	return straightIn(prefs());
+}
+
+// (Every launch's and the short one aren't owed, so there's nothing to keep.)
 void markPlayed(Trigger t) {
 	if (t == Trigger::First) prefs().introFirstLaunchPlayed = true;
 	if (t == Trigger::Update) prefs().introUpdatePlayed = whatsnew::kVersion;
@@ -602,6 +638,9 @@ struct Scene::Impl {
 		double side, alpha, phase;
 	};
 	std::vector<Mote> motes;
+
+	// The short intro (Scene::setShort): no icon, the display going with the circuit.
+	bool shortIntro = false;
 
 	Impl(float w_, float h_, const WireLook& l, bool live_) : w(w_), h(h_), look(l), live(live_) {
 		// The circuit and its display span about 580 units across.
@@ -1137,6 +1176,8 @@ struct Scene::Impl {
 		// Over the circuit, its own art where the circuit was, then flying to
 		// where the launch screen's own icon is, and handing over (landed just
 		// as the panel is half in, so they don't double up).
+		// (The short intro has none: its bloom goes straight into the window.)
+		if (shortIntro) return;
 		const double landed = kCardIn + kCardFade;
 		const double o = smooth(t, kBloomAt + 0.05, kBloomAt + 0.26) * (1 - smooth(t, landed - 0.14, landed));
 		if (o <= 0.002) return;
@@ -1315,11 +1356,14 @@ struct Scene::Impl {
 			if (pushed && t >= 1.5 && breath <= 0 && under <= 0.002 && moteShown <= 0.002) paintSettled(cr, far, 1);
 			else paintGround(cr, gridShown, far, under, moteShown, t);
 			// The circuit goes as the icon arrives over it; the display (and the
-			// canvas) as the launch screen's panel comes in.
+			// canvas) as the launch screen's panel comes in. In the short intro
+			// (no icon, no panel), both go together, into the bloom.
 			cairo_save(cr);
 			about(cr, near);
-			layer(cr, 1 - smooth(t, kBloomAt + 0.12, kBloomAt + 0.32), circuitBox, [&] { drawCircuit(cr, t); });
-			layer(cr, smooth(t, 1.86, 2.0) * (1 - smooth(t, kCardIn, kCardIn + kCardFade)), displayBox, [&] { drawDisplay(cr, t); });
+			const double circuitGoes = smooth(t, kBloomAt + 0.12, kBloomAt + 0.32);
+			const double displayGoes = shortIntro ? circuitGoes : smooth(t, kCardIn, kCardIn + kCardFade);
+			layer(cr, 1 - circuitGoes, circuitBox, [&] { drawCircuit(cr, t); });
+			layer(cr, smooth(t, 1.86, 2.0) * (1 - displayGoes), displayBox, [&] { drawDisplay(cr, t); });
 			cairo_restore(cr);
 			// The hit: a lift of light out of the LED over everything, for
 			// about 150 ms.
@@ -1341,6 +1385,7 @@ void Scene::setTier(Tier tier, double at) {
 	d->liteAt = std::max(0.0, at);
 }
 Tier Scene::tier() const { return d->tier; }
+void Scene::setShort(bool on) { d->shortIntro = on; }
 void Scene::prepare(cairo_t* cr) { d->ensureGround(cr); }
 void Scene::draw(cairo_t* cr, double t, double opacity) { d->draw(cr, t, opacity); }
 void Scene::drawGround(cairo_t* cr, double opacity) {
@@ -1360,6 +1405,10 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 	const float W = 1280, H = 800;
 	const int scale = 2;
 	Scene scene(W, H, WireLook::current(), false);
+	// The short intro: no panel, and its own, earlier, crossfade.
+	const bool brief = isShort(trigger);
+	scene.setShort(brief);
+	const double dissolveAt = dissolveFor(trigger), fade = fadeFor(trigger);
 	cairo_surface_t* back = nullptr;
 	if (!behind.empty()) {
 		back = cairo_image_surface_create_from_png(behind.c_str());
@@ -1370,7 +1419,7 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 		}
 	}
 	const PointF card = cardOrigin(W, H);
-	const int frames = (int)std::lround(kTotal * 60);
+	const int frames = (int)std::lround(lengthFor(trigger) * 60);
 	int failed = 0;
 	for (int f = 0; f <= frames; f++) {
 		const double t = f / 60.0;
@@ -1379,9 +1428,9 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 		cairo_t* cr = cairo_create(surface);
 		cairo_set_source_rgb(cr, 0, 0, 0);
 		cairo_paint(cr);
-		const double shown = easeInOut((t - kDissolveAt) / kFade);
+		const double shown = easeInOut((t - dissolveAt) / fade);
 		// The window under it all, put in as the dissolve begins.
-		if (t >= kDissolveAt) {
+		if (t >= dissolveAt) {
 			if (back) {
 				const int bw = cairo_image_surface_get_width(back), bh = cairo_image_surface_get_height(back);
 				const double s = std::max(W / bw, H / bh);
@@ -1399,7 +1448,7 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 		// The intro, fading in at first as a whole, and out into the window.
 		scene.draw(cr, t, (1 - shown) * fadeInShown(t));
 		// The launch screen's panel, at its own time.
-		if (t >= kCardIn) drawPanelAfterIntro(cr, card.x, card.y, t - kCardIn + kSplashAt, easeInOut((t - kCardIn) / kCardFade) * (1 - shown), false);
+		if (!brief && t >= kCardIn) drawPanelAfterIntro(cr, card.x, card.y, t - kCardIn + kSplashAt, easeInOut((t - kCardIn) / kCardFade) * (1 - shown), false);
 		cairo_destroy(cr);
 		const std::string file = dir + format("/frame-%04d.png", f);
 		if (cairo_surface_write_to_png(surface, file.c_str()) != CAIRO_STATUS_SUCCESS) failed++;
@@ -1513,7 +1562,9 @@ void expectPlayed(const char* how, const Played& r, double gap, Tier tier, bool 
 
 Trigger parse(const char* s) {
 	if (s == nullptr) return Trigger::None;
-	return strcmp(s, "update") == 0 ? Trigger::Update : strcmp(s, "every") == 0 ? Trigger::Every : Trigger::First;
+	return strcmp(s, "update") == 0 ? Trigger::Update : strcmp(s, "every") == 0 ? Trigger::Every
+	     : strcmp(s, "short") == 0  ? Trigger::Short
+	                                : Trigger::First;
 }
 
 int check(GMenuModel* menubar) {
@@ -1564,39 +1615,91 @@ int check(GMenuModel* menubar) {
 		expectPlayed("quick, then slow from 1 s", later, 0.05, Tier::Lite, false);
 	}
 
+	// ---- The short intro's timeline ----
+	expect(std::fabs(kShortTotal - 3.55) < 0.005 && std::fabs(kShortDissolveAt - 3.15) < 0.005 && std::fabs(kShortFade - 0.4) < 1e-9,
+	       format("the short intro: about 3.5 s in all (%.2f), from the bloom straight into the window at %.2f over %.2f s", kShortTotal,
+	              kShortDissolveAt, kShortFade));
+	expect((int)std::lround(kShortTotal * 60) == 213 && lengthFor(Trigger::Short) == kShortTotal && lengthFor(Trigger::Every) == kTotal &&
+	           lengthFor(Trigger::First) == kTotal,
+	       "213 frames at 60 fps for the short one (frame 0 to 213); the full one for every other trigger");
+	expect(isShort(Trigger::Short) && !isShort(Trigger::Every) && !isShort(Trigger::First) && !hasSound(Trigger::Short),
+	       "the short intro is silent, and only Short is short");
+
 	// ---- Which launch plays which, and the sound ----
 	launchWith(nullptr);
-	expect(prefs().introEveryLaunch, "\"Play the intro every time CedarLogic opens\" is on for a new install");
-	expect(forLaunch(prefs()) == Trigger::First && hasSound(Trigger::First), "the first launch plays the first intro, with the sound");
+	expect(prefs().introAtLaunch == kAtShort, format("\"When CedarLogic opens\" is Short intro for a new install (%s)", atLaunchKey(prefs().introAtLaunch)));
+	expect(forLaunch(prefs()) == Trigger::First && hasSound(Trigger::First), "the first launch plays the full intro, with the sound");
+	for (int c = 0; c < kAtCount; c++) {
+		prefs().introAtLaunch = c;
+		if (forLaunch(prefs()) != Trigger::First || straightIn(prefs()))
+			expect(false, format("the first launch plays the full intro whatever the choice (%s: %s)", atLaunchKey(c), name(forLaunch(prefs()))));
+	}
 	const std::string seen = "[CedarLogic]\nhasSeenWelcome=true\nfirstLaunchPlayed=true\nintroFirstLaunchPlayed=true\n";
 	launchWith((seen + "seenWhatsNew=0.3\n").c_str());
 	expect(forLaunch(prefs()) == Trigger::Update, format("the first launch after an update plays the update intro (%s)", name(forLaunch(prefs()))));
 	expect(hasSound(forLaunch(prefs())), "and it has the sound");
-	prefs().introEveryLaunch = true;
-	expect(forLaunch(prefs()) == Trigger::Update && hasSound(forLaunch(prefs())), "an update's intro has the sound, setting or not");
-	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\n").c_str());
-	expect(prefs().introEveryLaunch && forLaunch(prefs()) == Trigger::Every && !hasSound(forLaunch(prefs())),
-	       format("with nothing saved for it, it's on: a later launch plays the intro, silently (%s)", name(forLaunch(prefs()))));
-	prefs().introEveryLaunch = false;
+	bool updateAlways = true;
+	for (int c = 0; c < kAtCount; c++) {
+		prefs().introAtLaunch = c;
+		updateAlways = updateAlways && forLaunch(prefs()) == Trigger::Update && hasSound(forLaunch(prefs())) && !straightIn(prefs());
+	}
+	expect(updateAlways, "an update's intro plays, with the sound, whatever \"When CedarLogic opens\" says");
+	const std::string later = seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\n";
+	launchWith(later.c_str());
+	expect(prefs().introAtLaunch == kAtShort && forLaunch(prefs()) == Trigger::Short && !hasSound(forLaunch(prefs())) && !straightIn(prefs()),
+	       format("with nothing saved for it, a later launch plays the short intro, silently (%s)", name(forLaunch(prefs()))));
+	// Settled from 0.3's checkbox, which was saved with every save whatever it
+	// was (off by default until 2026-11-04, on after): the short intro either way.
+	launchWith((later + "introEveryLaunch=true\n").c_str());
+	expect(prefs().introAtLaunch == kAtShort && forLaunch(prefs()) == Trigger::Short,
+	       format("the old checkbox saved on: settled to the short intro (%s)", atLaunchKey(prefs().introAtLaunch)));
+	launchWith((later + "introEveryLaunch=false\n").c_str());
+	expect(prefs().introAtLaunch == kAtShort && forLaunch(prefs()) == Trigger::Short,
+	       format("the old checkbox saved off: settled to the short intro too (%s)", atLaunchKey(prefs().introAtLaunch)));
 	prefs().save();
-	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\nintroEveryLaunch=false\n").c_str());
-	expect(!prefs().introEveryLaunch && forLaunch(prefs()) == Trigger::None, "turned off in Settings, it stays off: a later launch plays no intro");
-	prefs().introEveryLaunch = true;
-	prefs().save();
-	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\nintroEveryLaunch=true\n").c_str());
-	expect(prefs().introEveryLaunch, "the setting is kept");
-	expect(forLaunch(prefs()) == Trigger::Every, format("with it on, a later launch plays the intro (%s)", name(forLaunch(prefs()))));
-	expect(!hasSound(forLaunch(prefs())), "an every-launch intro has no sound");
+	{
+		gchar* f = g_build_filename(g_get_user_config_dir(), "CedarLogic", "native.ini", nullptr);
+		gchar* text = nullptr;
+		g_file_get_contents(f, &text, nullptr, nullptr);
+		const std::string saved = text ? text : "";
+		g_free(text);
+		g_free(f);
+		expect(saved.find("introAtLaunch=short") != std::string::npos && saved.find("introEveryLaunch") == std::string::npos,
+		       "settled once: the choice is saved (introAtLaunch=short) and the old checkbox's key goes");
+	}
+	// Each choice, saved and read back.
+	struct Want { int choice; Trigger t; bool straight; };
+	for (const Want& wnt : { Want{ kAtShort, Trigger::Short, false }, Want{ kAtFull, Trigger::Every, false }, Want{ kAtClassic, Trigger::None, false },
+	                         Want{ kAtNone, Trigger::None, true } }) {
+		prefs().introAtLaunch = wnt.choice;
+		prefs().save();
+		launchWith((later + "introAtLaunch=" + atLaunchKey(wnt.choice) + "\nintroEveryLaunch=false\n").c_str());
+		expect(prefs().introAtLaunch == wnt.choice && forLaunch(prefs()) == wnt.t && straightIn(prefs()) == wnt.straight && !hasSound(forLaunch(prefs())),
+		       format("\"%s\" is kept, and a later launch plays %s%s, silently", atLaunchTitle(wnt.choice),
+		              wnt.t == Trigger::None ? (wnt.straight ? "nothing (straight into the window" : "the classic launch screen (no intro") : name(wnt.t),
+		              wnt.t == Trigger::None ? ")" : ""));
+	}
+	expect(atLaunchFrom("short") == kAtShort && atLaunchFrom("full") == kAtFull && atLaunchFrom("classic") == kAtClassic &&
+	           atLaunchFrom("none") == kAtNone && atLaunchFrom("every") < 0 && atLaunchFrom("") < 0,
+	       "saved as short, full, classic or none (the Mac's values); anything else isn't a choice");
+	expect(std::string(atLaunchTitle(kAtShort)) == "Short intro" && std::string(atLaunchTitle(kAtFull)) == "Full intro" &&
+	           std::string(atLaunchTitle(kAtClassic)) == "Classic launch screen" && std::string(atLaunchTitle(kAtNone)) == "None",
+	       "the four choices are named as the Mac's");
+	launchWith((later + "introAtLaunch=full\n").c_str());
 	markPlayed(Trigger::Every);
-	expect(prefs().introFirstLaunchPlayed && prefs().introUpdatePlayed == v, "playing it leaves the once-only keys as they were");
-	expect(hasSound(Trigger::First) && hasSound(Trigger::Update) && !hasSound(Trigger::Every) && !hasSound(Trigger::None),
+	markPlayed(Trigger::Short);
+	expect(prefs().introFirstLaunchPlayed && prefs().introUpdatePlayed == v, "playing the full or the short one leaves the once-only keys as they were");
+	expect(hasSound(Trigger::First) && hasSound(Trigger::Update) && !hasSound(Trigger::Every) && !hasSound(Trigger::Short) && !hasSound(Trigger::None),
 	       "sound for the first launch and updates only");
-	expect(parse("first") == Trigger::First && parse("update") == Trigger::Update && parse("every") == Trigger::Every,
-	       "CL_INTRO=first|update|every names each");
+	expect(parse("first") == Trigger::First && parse("update") == Trigger::Update && parse("every") == Trigger::Every && parse("short") == Trigger::Short,
+	       "CL_INTRO=first|update|every|short names each");
+	launchWith((seen + "seenWhatsNew=0.3\nintroAtLaunch=none\n").c_str());
+	markPlayed(Trigger::Update);
+	expect(owed(prefs()) == Trigger::None && forLaunch(prefs()) == Trigger::None && straightIn(prefs()),
+	       "the update intro plays once; after it, with None, straight in");
 	launchWith((seen + "seenWhatsNew=0.3\n").c_str());
 	markPlayed(Trigger::Update);
-	expect(owed(prefs()) == Trigger::None && forLaunch(prefs()) == Trigger::Every,
-	       format("the update intro plays once; after it, the every-launch one, silent (%s)", name(forLaunch(prefs()))));
+	expect(forLaunch(prefs()) == Trigger::Short, format("and with nothing chosen, the short one (%s)", name(forLaunch(prefs()))));
 
 	// ---- Help > Play the Intro ----
 	const actions::Item* a = actions::find("playIntro");
@@ -1605,6 +1708,24 @@ int check(GMenuModel* menubar) {
 	std::string label, in;
 	const bool there = menuHas(menubar, "app.play-intro", label, in);
 	expect(there && label == "Play the _Intro" && in == "_Help", format("Help > Play the Intro is in the menu bar (\"%s\" in \"%s\")", label.c_str(), in.c_str()));
+
+	// ---- Help > Learn Logic Online… ----
+	const actions::Item* lo = actions::find("learnOnline");
+	expect(lo && strcmp(lo->menu, "Help") == 0 && strcmp(lo->title, "Learn Logic Online…") == 0 && strcmp(lo->action, "app.learn-online") == 0,
+	       "Learn Logic Online… is among the actions, in Help");
+	{
+		// Next to the lesson, in the actions' order and in the menu bar.
+		const std::vector<actions::Item>& every = actions::all();
+		bool after = false;
+		for (size_t i = 0; i + 1 < every.size(); i++)
+			if (strcmp(every[i].id, "tour") == 0) after = strcmp(every[i + 1].id, "learnOnline") == 0;
+		expect(after, "right after Learn Logic: Guided Tour among the actions");
+	}
+	std::string onlineLabel, onlineIn;
+	const bool online = menuHas(menubar, "app.learn-online", onlineLabel, onlineIn);
+	expect(online && onlineLabel == "Learn Logic _Online…" && onlineIn == "_Help",
+	       format("Help > Learn Logic Online… is in the menu bar (\"%s\" in \"%s\")", onlineLabel.c_str(), onlineIn.c_str()));
+	expect(std::string(kLearnOnlineUrl) == "https://cedarlogic.netlify.app/learn/", std::string("it opens ") + kLearnOnlineUrl);
 
 	printf("%s\n", gFailed == 0 ? "intro-check: all passed" : format("intro-check: %d failed", gFailed).c_str());
 	return gFailed == 0 ? 0 : 1;

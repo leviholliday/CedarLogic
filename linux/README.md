@@ -80,9 +80,16 @@ without the website: `python3 linux/Tools/sync_mock.py`, then
   so a slow machine plays it slower rather than skipping ahead, and draws
   less on one whose first frames come slowly; `--intro-bench` times its
   frames). Help > Play the Intro plays it
-  again over the front window, and Settings > General > "Play the intro
-  every time CedarLogic opens" (on unless turned off) plays it, silently, at
-  every launch. Motion follows the Mac's curves
+  again over the front window. Every other launch follows Settings > General
+  > Launch screen, "When CedarLogic opens": Short intro (everyone's to begin
+  with: the drawing alone, silent, 3.55 s, its bloom crossfading straight
+  into the window, no launch panel), Full intro (silent), Classic launch
+  screen (the panel alone, as before the intro) or None (no launch screen and
+  no opening card). It was settled once from 0.3's "Play the intro every time
+  CedarLogic opens", to the short intro whatever that said (this app saved
+  the checkbox's default with every save, so a choice can't be told from it).
+  Help > Learn Logic Online... opens the website's lessons
+  (cedarlogic.netlify.app/learn/). Motion follows the Mac's curves
   (`Anim.h`) and stops when the desktop asks for no animations. Settings
   (`Prefs`) are kept in `~/.config/CedarLogic/native.ini`; circuits in
   `~/.local/share/CedarLogic/Library`.
@@ -101,7 +108,12 @@ over the canvas (a `GtkOverlay`, so the canvas keeps its width), until the
 pointer has been away from it and the strip for 400 ms (not while its menu
 is open or during a drag); Escape puts it back. The strip watches the pointer
 through a motion controller on the whole window in its capture phase, so it
-sees it over the canvas, the notes or the tab alike. Settings > Actions has
+sees it over the canvas, the notes or the tab alike, but it takes no
+presses, drags or wheel turns: those are the canvas's, there and under the
+labels' layer (drawn over the canvas, it takes no input at all), and the
+peeking tab takes clicks only over the tab itself. With a button held (a drag
+or a box on the canvas) the edge neither peeks nor slides the rail out, as
+the Mac's tracking doesn't during a drag. Settings > Actions has
 one switch, "Show the Actions panel", and "Open on hover" under it (greyed
 while the panel is off; on by default), then the Customize list: a box to
 tick for every menu command, drag by the handle (or Alt+Up/Down) to reorder,
@@ -209,23 +221,40 @@ every shape and gate style and checks each circuit's truth table. And:
   with the windows that open over it poked at and closed, and PASS/FAIL for
   each check (no crash or GTK warning, autosave and the file on disk, undo
   and redo, tabs and split view, Ctrl+Tab, Settings saved, memory, the
-  window and its circuit freed on close); exit 1 on a failure. Its settings
+  window and its circuit freed on close); exit 1 on a failure. It starts
+  with the canvas at the window's right edge under the real pointer (xdotool,
+  so the display routes the events): with the Actions panel open, folded with
+  and without Open on hover, and in focus mode, every point along the edge,
+  across the labels' band and across the canvas is the canvas's; a box drawn
+  and a part dragged leftwards from inside the hot strip work, the panel never
+  sliding out over them; the wheel there reaches the canvas; and the folded
+  tab still opens the panel. Its settings
   and Your Circuits are in a temporary folder. `linux/Tools/session-check.sh
   <cedarlogic> [actions] [seeds...]` runs it under Xvfb for each seed, again
   with `G_DEBUG=fatal-criticals`, with a time cap; CI runs seeds 1-4, and
   more on a build with AddressSanitizer
 - `cedarlogic --splash-frame <seconds> out.png [--first]` -- the launch screen
-- `cedarlogic --render-intro <dir> [first|update|every] [--behind <window.png>]` --
-  the intro, every frame at 60 fps (1280 x 800 at 2x, 365 frames), with no
-  display; CI keeps the frames at the Mac's v5 stills (0.2, 0.95, 1.7, 2.98,
-  3.2, 3.8, 4.95 and 5.8 s) and the hit (2.5-2.7 s) with the renders.
-  `CL_INTRO=first|update|every` plays that one on a normal launch,
+- `cedarlogic --render-intro <dir> [first|update|every|short] [--behind <window.png>]` --
+  the intro, every frame at 60 fps (1280 x 800 at 2x, 365 frames; the short
+  one 214), with no display; CI keeps the frames at the Mac's v5 stills (0.2,
+  0.95, 1.7, 2.98, 3.2, 3.8, 4.95 and 5.8 s) and the hit (2.5-2.7 s) with the
+  renders, and the short one's beat, bloom and crossfade.
+  `CL_INTRO=first|update|every|short` plays that one on a normal launch,
   `CL_NO_INTRO=1` never, `CL_INTRO_FREEZE=<seconds>` holds it at a moment,
   `CL_INTRO_LOG=1` says on stderr which played and whether with the sound
 - `cedarlogic --intro-check` -- the intro's rules with settings of its own:
   the timeline, which launch plays which intro, the sound (the first
-  launch's and an update's only), the every-launch setting (off for a new
-  install) and Help > Play the Intro in the actions and the menu bar
+  launch's and an update's only), "When CedarLogic opens" (Short intro for
+  a new install, settled from the old checkbox, each choice kept), the short
+  intro's timeline, and Help > Play the Intro and Learn Logic Online... in
+  the actions and the menu bar
+- `cedarlogic --menu-check <dir> <tag> [circuit.cdl]` -- every menu's text
+  read off the screen as GTK draws it, as it is and lit (the menu bar's
+  titles, each menu and submenu, the canvas's and a part's right-click menus,
+  a menu of every kind of row, a dropdown's list, a popover), at 4.5:1 or
+  better; `--settings-check` does the same for Settings' and Customize
+  Actions' buttons, boxes, dropdowns and rows lit, pressed, ticked, open and
+  chosen, and a dropdown's list on each page
 - `cedarlogic --feedback-probe` -- asks the feedback site with a wrong key
   (expects 403) and sends nothing
 - `cedarlogic --version`

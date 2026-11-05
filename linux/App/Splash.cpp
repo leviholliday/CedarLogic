@@ -528,10 +528,11 @@ struct Splash {
 		return scene ? std::min(pacer.t(), freeze) : std::min(now() - start, freeze);
 	}
 	// When it dissolves into the windows it held, and over how long.
-	double dissolveAt() const { return cutAt >= 0 ? cutAt : scene ? intro::kDissolveAt : tl.dissolveAt; }
+	// (The short intro dissolves from its bloom, with no panel: Intro.h.)
+	double dissolveAt() const { return cutAt >= 0 ? cutAt : scene ? intro::dissolveFor(intro) : tl.dissolveAt; }
 	double fadeTime() const {
 		if (cutAt >= 0) return cutFade;
-		if (scene) return composited ? intro::kFade : 0;   // (where nothing's see-through: at once)
+		if (scene) return composited ? intro::fadeFor(intro) : 0;   // (where nothing's see-through: at once)
 		return tl.fadeTime;
 	}
 };
@@ -561,12 +562,14 @@ void destroy(Splash* s) {
 // The intro's picture at t (the window's, and --intro-bench's): the intro,
 // then the panel over it, part-way into its appearance, dissolving at
 // `dissolveAt` over `fade`.
-void paintIntroFrame(cairo_t* cr, intro::Scene* scene, float w, float h, double t, double dissolveAt, double fade, bool composited) {
+void paintIntroFrame(cairo_t* cr, intro::Scene* scene, float w, float h, double t, double dissolveAt, double fade, bool composited,
+                     bool panel = true) {
 	const double shown = t < dissolveAt ? 0 : fade > 0 ? intro::easeInOut((t - dissolveAt) / fade) : 1;
 	const PointF card = intro::cardOrigin(w, h);
 	// Fading in as a whole from nothing (where the desktop composites).
 	scene->draw(cr, t, (composited ? intro::fadeInShown(t) : 1) * (1 - shown));
-	if (t >= intro::kCardIn) {
+	// (The short intro has no panel: from its bloom straight into the window.)
+	if (panel && t >= intro::kCardIn) {
 		intro::Timed timed(intro::kPanel);
 		drawPanelAfterIntro(cr, card.x, card.y, t - intro::kCardIn + intro::kSplashAt,
 		                    intro::easeInOut((t - intro::kCardIn) / intro::kCardFade) * (1 - shown), false);
@@ -642,11 +645,12 @@ void drawIntro(Splash* s, cairo_t* cr, float w, float h) {
 		// The desktop gave the window another size: laid out again for it.
 		delete s->scene;
 		s->scene = new intro::Scene(w, h, s->look, true);
+		s->scene->setShort(intro::isShort(s->intro));
 		s->scene->setTier(s->pacer.tier(), s->pacer.tierAt());
 		s->sceneW = w;
 		s->sceneH = h;
 	}
-	paintIntroFrame(cr, s->scene, w, h, s->elapsed(), s->dissolveAt(), s->fadeTime(), s->composited);
+	paintIntroFrame(cr, s->scene, w, h, s->elapsed(), s->dissolveAt(), s->fadeTime(), s->composited, !intro::isShort(s->intro));
 }
 
 gboolean drawCb(GtkWidget* w, cairo_t* cr, gpointer data) {
@@ -735,8 +739,14 @@ gboolean tickCb(GtkWidget*, GdkFrameClock* clock, gpointer data) {
 		s->then = nullptr;
 		if (f) guarded("opening the windows", [&] { f(s->thenData); });
 		if (g_splash == s && s->win) {
-			// Over them as it goes, but the keys are theirs now.
+			// Over them as it goes, but the keys are theirs now, and so are
+			// the clicks: it takes none while it fades (they reach the window under it).
 			if (s->scene) gtk_window_set_accept_focus(GTK_WINDOW(s->win), FALSE);
+			{
+				cairo_region_t* none = cairo_region_create();
+				gtk_widget_input_shape_combine_region(s->win, none);
+				cairo_region_destroy(none);
+			}
 			gtk_window_present(GTK_WINDOW(s->win));
 		}
 	}
@@ -848,6 +858,7 @@ Splash* makeSplash(intro::Trigger trigger, GtkWindow* over) {
 		}
 		s->look = intro::WireLook::current();
 		s->scene = new intro::Scene((float)w, (float)h, s->look, true);
+		s->scene->setShort(intro::isShort(s->intro));
 		s->sceneW = (float)w;
 		s->sceneH = (float)h;
 		s->freeze = intro::freezeAt();

@@ -56,6 +56,9 @@ struct Prefs {
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	bool confirmQuit = true;      // Ctrl+Q asks first
 	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
+	// Chosen in Settings (so a saved openReplaces is someone's choice): earlier
+	// builds saved "false" whether or not anyone chose it.
+	bool openReplacesSet = false;
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
 	bool checkUpdates = true;     // look for a new version now and then
@@ -109,8 +112,12 @@ struct Prefs {
 	// first launch after an update (the What's New version it introduced).
 	bool introFirstLaunchPlayed = false;
 	std::string introUpdatePlayed;
-	// Settings > General: the intro at every launch, silently (on unless turned off).
-	bool introEveryLaunch = true;
+	// Settings > General > Launch screen, "When CedarLogic opens" (Intro.h's
+	// AtLaunch: 0 the short intro, everyone's to begin with; 1 the full one;
+	// 2 the classic launch screen; 3 none). Saved as "short", "full",
+	// "classic" or "none"; settled once from 0.3's "Play the intro every time
+	// CedarLogic opens" (intro::settleAtLaunch).
+	int introAtLaunch = 0;
 	std::string seenWhatsNew;
 	// Export as Image: the grid, the name-and-result strip, the style and size.
 	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;
@@ -183,6 +190,13 @@ void wheelLeavesValuesAlone();
 // desktop doesn't say where its panels are (Wayland, and X without a window
 // manager, report the whole monitor).
 GdkRectangle usableArea(GtkWidget* near);
+// The app is on a Wayland desktop (where it can't place its windows).
+bool onWayland();
+// What of `w` takes the pointer (null: all of it; an empty region: none), in
+// its points (Style.cpp). Also for the window a GtkOverlay puts an overlay
+// child in, which otherwise takes every press over the child's whole box
+// (and the overlay's pass-through, which would, upsets the crossing events).
+void inputShape(GtkWidget* w, const cairo_region_t* region);
 
 // ---- Files -----------------------------------------------------------------------
 
@@ -238,6 +252,8 @@ void readyForKeys(GtkWidget* revealer, GtkWidget* field);
 
 // Open a URL or a file in the desktop's default app.
 void openExternally(GtkWindow* parent, const std::string& uri);
+// Help > Learn Logic Online…: the website's lessons (the Mac's AppActions.learnOnlineURL).
+constexpr const char* kLearnOnlineUrl = "https://cedarlogic.netlify.app/learn/";
 
 // ---- Staying up ------------------------------------------------------------------
 // Every place GTK calls into the app runs through guarded(): if the engine

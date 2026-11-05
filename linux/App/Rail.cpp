@@ -59,6 +59,26 @@ private:
 namespace {
 const float kLabelLayer = 320;
 const float kEdgeZone = 5;   // the rail's left edge, which folds it (or, slid out, keeps it)
+
+// Only `x` and on (to the right edge) takes the pointer: presses, drags and
+// the wheel anywhere else go through to what's under it (the canvas); an
+// empty `width` takes none at all. (A widget with a window of its own, as a
+// drawing area is, catches every press over it otherwise -- even in an
+// overlay that passes input through, which only passes over its own window,
+// not the widget's.) -1 takes the whole of it again.
+void takesPointerFrom(GtkWidget* w, int x, int width) {
+	if (width < 0) {
+		inputShape(w, nullptr);
+		return;
+	}
+	cairo_region_t* r = cairo_region_create();
+	if (width > 0) {
+		const cairo_rectangle_int_t keep = { x, 0, width, 1 << 20 };
+		cairo_region_union_rectangle(r, &keep);
+	}
+	inputShape(w, r);
+	cairo_region_destroy(r);
+}
 }  // namespace
 
 // ---- Rail ----------------------------------------------------------------------------------
@@ -72,6 +92,12 @@ Rail::Rail(CircuitWindow* window) : win(window) {
 	gtk_event_controller_set_propagation_phase(motion, GTK_PHASE_CAPTURE);
 	g_signal_connect(motion, "motion", G_CALLBACK(motionCb), this);
 	g_signal_connect(top, "leave-notify-event", G_CALLBACK(leaveCb), this);
+	presses = gtk_gesture_multi_press_new(top);
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(presses), 0);
+	gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(presses), GTK_PHASE_CAPTURE);
+	g_signal_connect(presses, "pressed", G_CALLBACK(pressedCb), this);
+	g_signal_connect(presses, "released", G_CALLBACK(releasedCb), this);
+	g_signal_connect(presses, "cancel", CL_CALLBACK(+[](GtkGesture*, GdkEventSequence*, gpointer self) { static_cast<Rail*>(self)->buttonDown = false; }), this);
 	items = actions::rail();
 }
 
@@ -80,6 +106,10 @@ Rail::~Rail() {
 	if (motion) {
 		g_signal_handlers_disconnect_by_data(motion, this);
 		g_object_unref(motion);
+	}
+	if (presses) {
+		g_signal_handlers_disconnect_by_data(presses, this);
+		g_object_unref(presses);
 	}
 	if (GtkWidget* top = GTK_WIDGET(win->window())) g_signal_handlers_disconnect_by_data(top, this);
 	if (slideImage) cairo_surface_destroy(slideImage);
@@ -101,6 +131,10 @@ GtkWidget* Rail::wrap(GtkWidget* row) {
 	gtk_widget_set_no_show_all(l, TRUE);
 	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), l);
 	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(overlay), l, TRUE);
+	// It's 320 points over the canvas, the whole height, left of the rail:
+	// every press there is the canvas's (on the Raspberry Pi and Zorin a band
+	// of the canvas took no presses or drags at all until it did).
+	takesPointerFrom(l, 0, 0);
 	floater = new RailView(this, true);
 	GtkWidget* f = floater->widget();
 	gtk_widget_set_halign(f, GTK_ALIGN_END);
@@ -132,7 +166,7 @@ int Rail::topInset() const {
 }
 
 std::string Rail::describe() const {
-	return format("strip %d, rail %d, out %d, waiting %d, dismissed %d, folded %d, floater %d", hover.overStrip, hover.overRail, hover.slidOut,
+	return (trace.empty() ? std::string() : "[" + trace + "] ") + format("strip %d, rail %d, out %d, waiting %d, dismissed %d, folded %d, floater %d", hover.overStrip, hover.overRail, hover.slidOut,
 	              hover.pending, hover.dismissed, folded(), floaterState);
 }
 
@@ -198,7 +232,17 @@ void Rail::updateFloater() {
 		gtk_widget_hide(f);
 	} else {
 		gtk_widget_set_size_request(f, (int)(want == 2 ? actions::kRailWidth : actions::kPeekWidth), -1);
+		// Peeking, it's drawn a few points over the canvas, but only the tab's
+		// own width (over the dock's tab) takes clicks: the hot strip is the
+		// canvas's for presses, drags and the wheel, as the Mac's is. Slid out,
+		// the rail is the rail.
+		if (want == 1) takesPointerFrom(f, (int)(actions::kPeekWidth - actions::kTabWidth), (int)actions::kTabWidth);
+		else takesPointerFrom(f, 0, -1);
 		gtk_widget_show(f);
+		// (Shown, it has its windows now: the shape again, for the overlay's
+		// window round it too, inputShape.)
+		if (want == 1) takesPointerFrom(f, (int)(actions::kPeekWidth - actions::kTabWidth), (int)actions::kTabWidth);
+		else takesPointerFrom(f, 0, -1);
 	}
 	if (was == 2 || want == 2) labels->redrawShadow();
 	if (want != 2 && hovered >= 0 && folded()) setHovered(-1);
@@ -278,8 +322,8 @@ void Rail::tick() {
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
 	const int r = hover.tick(now, f, hoverEnabled());
-	if (r == 1) startSlide(true);
-	else if (r == -1) startSlide(false);
+	if (r == 1) { note("slides out"); startSlide(true); }
+	else if (r == -1) { note("goes back"); startSlide(false); }
 	// Held long enough: picked up, and any movement drags it.
 	if (pressed >= 0 && !dragging && !held && now - pressAt >= actions::kHoldTime) {
 		held = true;
@@ -325,18 +369,55 @@ void Rail::motionCb(GtkEventControllerMotion*, double, double, gpointer self) {
 		y = py;
 		gw = gdk_window_get_effective_parent(gw);
 	}
+	GdkModifierType state = (GdkModifierType)0;
+	gdk_event_get_state(ev, &state);
 	gdk_event_free(ev);
 	if (!coords || gw != top) return;
+	// A button held (a drag on the canvas, a box being drawn): the edge
+	// neither peeks nor slides the rail out over it, as the Mac's tracking
+	// doesn't during a drag -- unless it's a drag on the rail itself.
+	if (!(state & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK))) r->buttonDown = false;
+	if (r->buttonDown && r->pressed < 0) {
+		// (Out already, it stays as it was until the button's let go.)
+		if (!r->hover.slidOut) { r->note("held"); guarded("the rail's edge", [&] { r->pointerGone(); }); }
+		return;
+	}
 	int ox = 0, oy = 0;
 	if (!gtk_widget_translate_coordinates(r->overlay, GTK_WIDGET(r->win->window()), 0, 0, &ox, &oy)) return;
 	guarded("the rail's edge", [&] { r->pointerAt(x - ox, y - oy); });
 }
 
+void Rail::pressedCb(GtkGestureMultiPress*, int, double, double, gpointer self) {
+	Rail* r = static_cast<Rail*>(self);
+	// A press on the rail or its tab is the rail's own (it opens, folds, runs an action).
+	GdkEvent* ev = gtk_get_current_event();
+	GtkWidget* on = ev ? gtk_get_event_widget(ev) : nullptr;
+	if (ev) gdk_event_free(ev);
+	if ((r->dock && on == r->dock->widget()) || (r->floater && on == r->floater->widget())) return;
+	r->buttonDown = true;
+	// About to slide out (or peeking) over a press on the canvas there: not now.
+	if (!r->hover.slidOut) { r->note("press"); guarded("the rail's edge", [&] { r->pointerGone(); }); }
+}
+
+void Rail::releasedCb(GtkGestureMultiPress*, int, double, double, gpointer self) { static_cast<Rail*>(self)->buttonDown = false; }
+
 gboolean Rail::leaveCb(GtkWidget* w, GdkEventCrossing* e, gpointer self) {
 	Rail* r = static_cast<Rail*>(self);
 	// Out of the window altogether (not into a part of it, or a menu's grab).
-	if (e->window == gtk_widget_get_window(w) && e->detail != GDK_NOTIFY_INFERIOR && e->mode == GDK_CROSSING_NORMAL)
-		guarded("the rail's edge", [&] { r->pointerGone(); });
+	if (e->window == gtk_widget_get_window(w) && e->detail != GDK_NOTIFY_INFERIOR && e->mode == GDK_CROSSING_NORMAL) {
+		// Only when it really has: the peeking tab coming up under the pointer
+		// at the edge can make GTK say the window was left (a "nonlinear
+		// virtual" crossing) with the pointer still in it, which put the tab
+		// back at once and the rail never slid out.
+		GdkWindow* gw = gtk_widget_get_window(w);
+		GdkSeat* seat = gdk_display_get_default_seat(gtk_widget_get_display(w));
+		GdkDevice* p = seat ? gdk_seat_get_pointer(seat) : nullptr;
+		double px = -1, py = -1;
+		if (gw && p) gdk_window_get_device_position_double(gw, p, &px, &py, nullptr);
+		const bool still = gw && px >= 0 && py >= 0 && px < gdk_window_get_width(gw) && py < gdk_window_get_height(gw);
+		r->note(format("%s the window (detail %d)", still ? "a leave, still in" : "left", (int)e->detail));
+		if (!still) guarded("the rail's edge", [&] { r->pointerGone(); });
+	}
 	return FALSE;
 }
 
@@ -346,13 +427,20 @@ void Rail::pointerAt(double x, double y) {
 	y -= inset;
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
-	hover.setStrip(f && actions::inHotStrip(x, y, W, H), now, f, hoverEnabled());
+	const bool inStrip = f && actions::inHotStrip(x, y, W, H);
+	if (inStrip != hover.overStrip) note(format("%s the strip at %.0f,%.0f of %.0fx%.0f", inStrip ? "into" : "out of", x, y, W, H));
+	hover.setStrip(inStrip, now, f, hoverEnabled());
 	hover.setRail(f && hover.slidOut && actions::onSlidRail(x, y, W, H), now, f, hoverEnabled());
 	if (hover.peek() != peekShown) {
 		peekShown = hover.peek();
 		updateFloater();
 		dock->redraw();
 	}
+}
+
+void Rail::note(const std::string& what) {
+	trace += (trace.empty() ? "" : "; ") + what;
+	if (trace.size() > 600) trace.erase(0, trace.size() - 600);
 }
 
 void Rail::pointerGone() {

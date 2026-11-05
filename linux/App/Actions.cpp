@@ -107,6 +107,8 @@ const std::vector<Item> kAll = {
 	{ "shortcuts", "Keyboard Shortcuts", "Help", "input-keyboard-symbolic", "win.shortcuts", "shortcuts", 0 },
 	{ "showMeAround", "Show Me Around", "Help", "find-location-symbolic", "win.show-me-around", nullptr, 0 },
 	{ "tour", "Learn Logic: Guided Tour", "Help", "applications-science-symbolic", "app.guided-tour", nullptr, 0 },
+	// More lessons, with live circuits, on the website (in the browser).
+	{ "learnOnline", "Learn Logic Online…", "Help", "web-browser-symbolic", "app.learn-online", nullptr, 0 },
 	{ "whatsNew", "What's New in CedarLogic", "Help", "starred-symbolic", "win.whats-new", nullptr, 0 },
 	{ "playIntro", "Play the Intro", "Help", "media-playback-start-symbolic", "app.play-intro", nullptr, 0 },
 	{ "welcome", "Welcome to CedarLogic", "Help", "face-smile-symbolic", "win.welcome", nullptr, 0 },
@@ -898,7 +900,8 @@ void showCustomize(CircuitWindow* w, const std::string& query) {
 		int minH = 0, natH = 0;
 		gtk_widget_get_preferred_height_for_width(box, 520 - 40, &minH, &natH);
 		const int over = natH + 40 - usableArea(w ? GTK_WIDGET(w->window()) : nullptr).height;
-		if (scroll && over > 0) gtk_widget_set_size_request(scroll, -1, std::max(150, 360 - over));
+		// (Down to 110 points of list: the Raspberry Pi touchscreen's 480 under Wayland, with its panel and a title bar.)
+		if (scroll && over > 0) gtk_widget_set_size_request(scroll, -1, std::max(110, 360 - over));
 	}
 	// Escape clears a search first, then closes.
 	g_signal_connect(win, "key-press-event", CL_CALLBACK(+[](GtkWidget* self, GdkEventKey* e, gpointer) -> gboolean {
@@ -970,6 +973,20 @@ int check() {
 		return out;
 	};
 	auto onOpen = [] { return prefs().actionsOn && !prefs().actionsCollapsed; };
+
+	// ---- Opening a circuit replaces the one you're in, once for everyone ----
+	launchWith(nullptr);
+	expect(prefs().openReplaces, "a new install: opening a circuit replaces the one you're in");
+	launchWith("[CedarLogic]\nopenReplaces=false\n");
+	expect(prefs().openReplaces && !prefs().openReplacesSet,
+	       "an earlier build's openReplaces=false, never chosen (no openReplacesSet): replaces, as everyone's default");
+	launchWith("[CedarLogic]\nopenReplaces=false\nopenReplacesSet=true\n");
+	expect(!prefs().openReplaces, "openReplaces=false chosen in Settings (openReplacesSet=true): kept, a new window each time");
+	relaunch();
+	expect(!prefs().openReplaces && prefs().openReplacesSet && fileText().find("openReplacesSet=true") != std::string::npos,
+	       "and still so after a save and another launch");
+	launchWith("[CedarLogic]\nopenReplaces=true\nopenReplacesSet=true\n");
+	expect(prefs().openReplaces, "openReplaces=true chosen: kept");
 	auto state = [] { return format("on %d, folded %d", prefs().actionsOn, prefs().actionsCollapsed); };
 	launchWith(nullptr);
 	expect(onOpen() && prefs().actionsHoverOpen && !prefs().showMeAroundSeen,

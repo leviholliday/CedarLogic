@@ -36,7 +36,7 @@ jobs:
     # here starts on Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm),
     # Fedora 36 and anything newer.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -46,7 +46,7 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
             curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
-            gnome-keyring dbus
+            gnome-keyring dbus weston
 
       - name: Build
         run: |
@@ -149,99 +149,16 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 linux/build/cedarlogic --actions-check
 
-      # The intro's rules (linux/App/Intro.h), as the Mac's launch-selftest: the timeline
-      # (6.07 s, the panel held 1.1 s), which launch plays which intro, the sound (the first
-      # launch's and an update's, never an every-launch one), Settings' "Play the intro every
-      # time CedarLogic opens" (on for a new install) and Help > Play the Intro (in the
-      # actions and the menu bar). Settings of its own in a temporary folder.
+      # The intro's rules (linux/App/Intro.h), as the Mac's launch-selftest: the timelines
+      # (the full intro 6.07 s, the panel held 1.1 s; the short one 3.55 s), which launch plays
+      # which intro, the sound (the first launch's and an update's, never another launch's),
+      # Settings' "When CedarLogic opens" (Short intro for a new install; settled once from
+      # 0.3's checkbox; Full intro, Classic launch screen and None kept), Help > Play the Intro
+      # and Help > Learn Logic Online... (in the actions and the menu bar). Settings of its own
+      # in a temporary folder.
       - name: Intro check
         run: |
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 linux/build/cedarlogic --intro-check
-
-      # Settings on small screens (linux/App/SettingsCheck.cpp): every page and Customize
-      # Actions on the Raspberry Pi touchscreen's 800x480, 1024x600 and 1280x720, in a light and
-      # a dark GTK theme forced on the app (GTK_THEME, so it can't swap it for its own: the
-      # worst case), with the app light and dark; on x86_64 also the Pi's PiXflat and PiXnoir in
-      # its PibotoLt font, and Ubuntu's Yaru-dark. Each window fits the screen (with room for a
-      # panel the desktop doesn't report), every page is the same width, its text reads at
-      # 4.5:1 or better, and the mouse wheel over a dropdown, number box, slider or switch
-      # scrolls the page instead of changing the setting. The whole screen is pictured each
-      # time, into renders/settings (uploaded straight away, as its own artifact).
-      - name: Settings check
-        run: |
-          mkdir -p renders/settings
-          pi=
-          if [ "$(uname -m)" = x86_64 ] &&
-             curl -fsSL -o /tmp/piboto.deb https://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
-             curl -fsSL -o /tmp/pixflat.deb https://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb &&
-             echo "ae9418e029e654e2fbe9ce33768ea5985fa91441d1f8ac2cf7e015f0f2539fad  /tmp/piboto.deb" | sha256sum -c - &&
-             echo "56e518b2321a1784b39566885df595661b99781b26e439dd09a6ba1d56858c66  /tmp/pixflat.deb" | sha256sum -c -; then
-            sudo dpkg-deb -x /tmp/piboto.deb / && sudo dpkg-deb -x /tmp/pixflat.deb / && fc-cache -f > /dev/null && pi=1
-          fi
-          yaru=
-          [ "$(uname -m)" = x86_64 ] && sudo apt-get install -y -qq yaru-theme-gtk > /dev/null 2>&1 && yaru=1
-          fails=0
-          # run <WxH> <GTK_THEME> <font or -> <light|dark>
-          run() {
-            local size=$1 theme=$2 font=$3 look=$4
-            local tag="$size-$(echo "$theme" | tr ':' '-')-app-$look"
-            local home
-            home=$(mktemp -d)
-            mkdir -p "$home/config/gtk-3.0"
-            [ "$font" = - ] || printf '[Settings]\ngtk-font-name=%s\n' "$font" > "$home/config/gtk-3.0/settings.ini"
-            if ! XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" GTK_THEME="$theme" \
-                 xvfb-run -a -s "-screen 0 ${size}x24" timeout 120 linux/build/cedarlogic --$look \
-                 --settings-check renders/settings "$tag" res/samples/practice.cdl > "renders/settings/$tag.log" 2>&1; then
-              fails=$((fails + 1))
-              echo "::error::Settings check failed: $tag"
-            fi
-            grep -E "^(FAIL|  )|settings-check:" "renders/settings/$tag.log" || true
-            rm -rf "$home"
-          }
-          if [ "$(uname -m)" = x86_64 ]; then
-            for size in 800x480 1024x600 1280x720; do
-              for theme in Adwaita Adwaita:dark; do
-                for look in light dark; do run $size $theme - $look; done
-              done
-              if [ -n "$pi" ]; then for look in light dark; do run $size PiXflat "PibotoLt 12" $look; done; fi
-            done
-            if [ -n "$pi" ]; then for look in light dark; do run 1024x600 PiXnoir "PibotoLt 12" $look; done; fi
-            if [ -n "$yaru" ]; then for look in light dark; do run 1024x600 Yaru-dark - $look; done; fi
-          else
-            for theme in Adwaita Adwaita:dark; do
-              for look in light dark; do run 800x480 $theme - $look; done
-            done
-          fi
-          ls renders/settings | head -400
-          [ "$fails" = 0 ] || { echo "::error::$fails Settings check run(s) failed"; exit 1; }
-
-      - name: Upload the Settings pictures
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: CedarLogic-Native-linux-settings-${{ matrix.arch }}
-          path: renders/settings
-          if-no-files-found: warn
-
-      # A long working session in the window (linux/App/SessionCheck.cpp): seeded
-      # random clicks, drags, keys and commands through the app's own handlers, with
-      # windows over it poked at and closed, checked all along (no crash or GTK
-      # warning, autosave, the file on disk, undo and redo, tabs and split view,
-      # memory, the window freed on close). Seeds 1-4, then again with
-      # G_DEBUG=fatal-criticals; each run capped at 7 minutes. A FAIL fails the build.
-      - name: Session check
-        if: matrix.arch == 'x86_64'
-        timeout-minutes: 30
-        run: |
-          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
-
-      - name: Upload the session logs
-        if: always() && matrix.arch == 'x86_64'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: CedarLogic-Native-linux-session-logs
-          path: session-logs
-          if-no-files-found: warn
 
       # The engine through the C interface the app uses: editing, wires,
       # simulation, truth tables, and saving without changing a circuit.
@@ -548,17 +465,29 @@ jobs:
             cp "intro-frames/frame-${f%%:*}.png" "renders/intro/intro-${f#*:}.png"
           done
           rm -rf intro-frames
+          # The short intro (every ordinary launch's, unless Settings says otherwise): 3.55 s, 213
+          # frames after the first, no panel, its bloom crossfading straight into the window; the
+          # LED lit, the beat, the bloom and the crossfade kept.
+          env -u DISPLAY -u WAYLAND_DISPLAY timeout 600 "$APPIMAGE" --render-intro intro-frames short $behind
+          test "$(ls intro-frames/frame-*.png | wc -l)" -eq 214
+          for f in 0156:2.60s 0180:3.00s 0186:3.10s 0192:3.20s 0204:3.40s 0213:3.55s; do
+            cp "intro-frames/frame-${f%%:*}.png" "renders/intro/short-${f#*:}.png"
+          done
+          rm -rf intro-frames
           # And live (CI never plays it by itself): on a virtual display, GTK's warnings
           # fatal, with settings of its own that have seen the welcome and What's New.
           #   play, skip: as at the first launch after the update (CL_INTRO=update), with the
           #     sound; its window up, then gone into the circuit window, the intro marked
           #     played; then again, skipped with a click.
-          #   every: nothing owed, "Play the intro every time CedarLogic opens" on: it plays,
-          #     silently, and the once-only keys are left as they were.
-          #   menu: nothing owed and the setting off: no intro; then Help > Play the Intro
-          #     (Alt+H, I) plays the first launch's over the circuit window, with the sound,
-          #     and goes, the window still there, nothing marked played.
-          for how in play skip every menu; do
+          #   short: nothing owed and nothing chosen ("When CedarLogic opens" is Short intro
+          #     to begin with, settled from 0.3's checkbox): the short intro, silently.
+          #   every: nothing owed, "When CedarLogic opens: Full intro": the full one, silently,
+          #     and the once-only keys are left as they were.
+          #   menu: nothing owed, "Classic launch screen": no intro (the launch screen alone);
+          #     then Help > Play the Intro (Alt+H, I) plays the first launch's over the circuit
+          #     window, with the sound, and goes, the window still there, nothing marked played.
+          #   none: nothing owed, "None": no launch screen at all, straight into the window.
+          for how in play skip short every menu none; do
             home=$(mktemp -d)
             mkdir -p "$home/config/CedarLogic"
             ini="$home/config/CedarLogic/native.ini"
@@ -566,14 +495,27 @@ jobs:
             printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\nshowMeAroundSeen=true\n' > "$ini"
             forced=update
             case $how in
-              every) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
-              menu) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=false\n' >> "$ini" ;;
+              short) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
+              every) forced=; printf 'introUpdatePlayed=0.4\nintroAtLaunch=full\n' >> "$ini" ;;
+              menu) forced=; printf 'introUpdatePlayed=0.4\nintroAtLaunch=classic\n' >> "$ini" ;;
+              none) forced=; printf 'introUpdatePlayed=0.4\nintroAtLaunch=none\n' >> "$ini" ;;
             esac
             HOW=$how xvfb-run -a -s "-screen 0 1600x1000x24" env -u CI ${forced:+CL_INTRO=$forced} CL_INTRO_LOG=1 G_DEBUG=fatal-criticals \
               XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" bash -c '
               up() { xdotool search --onlyvisible --name "$1" > /dev/null 2>&1; }
               "$APPIMAGE" > "renders/intro-live-$HOW.log" 2>&1 &
               app=$!
+              if [ "$HOW" = none ]; then
+                # Straight in: the circuit window, and never a launch screen.
+                for i in $(seq 80); do up " — CedarLogic\$" && break; up "^CedarLogic\$" && break; sleep 0.1; done
+                up "^CedarLogic\$" && { echo "a launch screen came up with None ($HOW)"; kill $app; exit 1; }
+                up " — CedarLogic\$" || { echo "no circuit window ($HOW)"; kill $app; exit 1; }
+                sleep 1
+                up "^CedarLogic\$" && { echo "a launch screen came up with None ($HOW)"; kill $app; exit 1; }
+                kill $app
+                wait $app 2> /dev/null
+                exit 0
+              fi
               if [ "$HOW" = menu ]; then
                 # The launch screen, then the circuit window, and no intro.
                 for i in $(seq 80); do up " — CedarLogic\$" && break; sleep 0.25; done
@@ -606,7 +548,10 @@ jobs:
             cat "$log"
             case $how in
               play|skip) grep -q "^introUpdatePlayed=0.4" "$ini"; grep -q "intro: update, with the sound" "$log" ;;
-              every) grep -q "intro: every, silent" "$log"; grep -q "^introEveryLaunch=true" "$ini" ;;
+              short) grep -q "intro: short, silent" "$log"; grep -q "^introAtLaunch=short" "$ini" ;;
+              every) grep -q "intro: every, silent" "$log"; grep -q "^introAtLaunch=full" "$ini" ;;
+              none) grep -q "intro: straight in: no launch screen" "$log"
+                    if grep -q "intro: [a-z]*, " "$log"; then echo "an intro played with None"; exit 1; fi ;;
               menu) grep -q "intro: first, from the menu, with the sound" "$log" ;;
             esac
             if grep -q "^introFirstLaunchPlayed=true" "$ini"; then echo "the first launch's intro was marked played ($how)"; exit 1; fi
@@ -666,6 +611,218 @@ jobs:
           name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
           path: renders
           if-no-files-found: warn
+  # The windows' checks, beside the build (each job builds the app again: two
+  # minutes, quicker than waiting for it): Settings and Customize Actions on
+  # small screens, X11 and Wayland, and every menu's text.
+  settings:
+    name: Settings and menus (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-22.04 }
+          - { arch: aarch64, os: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
+            gnome-keyring dbus weston
+
+      - name: Build
+        run: |
+          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
+          cmake --build linux/build
+
+      # Settings on small screens (linux/App/SettingsCheck.cpp): every page and Customize
+      # Actions on the Raspberry Pi touchscreen's 800x480, 1024x600 and 1280x720, in a light and
+      # a dark GTK theme forced on the app (GTK_THEME, so it can't swap it for its own: the
+      # worst case), with the app light and dark; on x86_64 also the Pi's PiXflat and PiXnoir in
+      # its PibotoLt font, and Ubuntu's Yaru-dark. Each window fits the screen (with room for a
+      # panel the desktop doesn't report), every page is the same width, its text reads at
+      # 4.5:1 or better, and the mouse wheel over a dropdown, number box, slider or switch
+      # scrolls the page instead of changing the setting. The whole screen is pictured each
+      # time, into renders/settings (uploaded straight away, as its own artifact).
+      - name: Settings check
+        run: |
+          mkdir -p renders/settings
+          pi=
+          if [ "$(uname -m)" = x86_64 ] &&
+             curl -fsSL -o /tmp/piboto.deb https://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
+             curl -fsSL -o /tmp/pixflat.deb https://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb &&
+             echo "ae9418e029e654e2fbe9ce33768ea5985fa91441d1f8ac2cf7e015f0f2539fad  /tmp/piboto.deb" | sha256sum -c - &&
+             echo "56e518b2321a1784b39566885df595661b99781b26e439dd09a6ba1d56858c66  /tmp/pixflat.deb" | sha256sum -c -; then
+            sudo dpkg-deb -x /tmp/piboto.deb / && sudo dpkg-deb -x /tmp/pixflat.deb / && fc-cache -f > /dev/null && pi=1
+          fi
+          yaru=
+          [ "$(uname -m)" = x86_64 ] && sudo apt-get install -y -qq yaru-theme-gtk > /dev/null 2>&1 && yaru=1
+          fails=0
+          # run <WxH> <GTK_THEME> <font or -> <light|dark>
+          run() {
+            local size=$1 theme=$2 font=$3 look=$4
+            local tag="$size-$(echo "$theme" | tr ':' '-')-app-$look"
+            local home
+            home=$(mktemp -d)
+            mkdir -p "$home/config/gtk-3.0"
+            [ "$font" = - ] || printf '[Settings]\ngtk-font-name=%s\n' "$font" > "$home/config/gtk-3.0/settings.ini"
+            if ! XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" GTK_THEME="$theme" \
+                 xvfb-run -a -s "-screen 0 ${size}x24" timeout 120 linux/build/cedarlogic --$look \
+                 --settings-check renders/settings "$tag" res/samples/practice.cdl > "renders/settings/$tag.log" 2>&1; then
+              fails=$((fails + 1))
+              echo "::error::Settings check failed: $tag"
+            fi
+            grep -E "^(FAIL|  )|settings-check:" "renders/settings/$tag.log" || true
+            rm -rf "$home"
+          }
+          if [ "$(uname -m)" = x86_64 ]; then
+            for size in 800x480 1024x600 1280x720; do
+              for theme in Adwaita Adwaita:dark; do
+                for look in light dark; do run $size $theme - $look; done
+              done
+              if [ -n "$pi" ]; then for look in light dark; do run $size PiXflat "PibotoLt 12" $look; done; fi
+            done
+            if [ -n "$pi" ]; then for look in light dark; do run 1024x600 PiXnoir "PibotoLt 12" $look; done; fi
+            if [ -n "$yaru" ]; then for look in light dark; do run 1024x600 Yaru-dark - $look; done; fi
+          else
+            for theme in Adwaita Adwaita:dark; do
+              for look in light dark; do run 800x480 $theme - $look; done
+            done
+          fi
+          # Under Wayland too (Raspberry Pi OS Bookworm's desktop is Wayland, where the desktop,
+          # not the app, places windows): weston with no screen, at each size. A window's place
+          # can't be read there, so the check is that all of it (its own title bar, and room for
+          # one the desktop may draw and for a panel it doesn't report) fits the screen.
+          if command -v weston > /dev/null; then
+            for size in 800x480 1024x600 1280x720; do
+              rt=$(mktemp -d); chmod 700 "$rt"
+              XDG_RUNTIME_DIR=$rt weston --backend=headless-backend.so --width=${size%x*} --height=${size#*x} \
+                --socket=wayland-cl --idle-time=0 > "renders/settings/weston-$size.log" 2>&1 &
+              wpid=$!
+              for i in $(seq 50); do [ -S "$rt/wayland-cl" ] && break; sleep 0.2; done
+              for look in light dark; do
+                tag="$size-wayland-app-$look"
+                home=$(mktemp -d)
+                if ! XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=wayland-cl GDK_BACKEND=wayland XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" \
+                     env -u DISPLAY timeout 120 linux/build/cedarlogic --$look --settings-check renders/settings "$tag" res/samples/practice.cdl \
+                     > "renders/settings/$tag.log" 2>&1; then
+                  fails=$((fails + 1))
+                  echo "::error::Settings check failed: $tag"
+                fi
+                grep -E "^(FAIL|  )|settings-check:" "renders/settings/$tag.log" || true
+                rm -rf "$home"
+              done
+              kill $wpid 2> /dev/null; wait $wpid 2> /dev/null
+              rm -rf "$rt"
+            done
+          else
+            echo "::warning::no weston here: the Wayland Settings check didn't run"
+          fi
+          ls renders/settings | head -400
+          [ "$fails" = 0 ] || { echo "::error::$fails Settings check run(s) failed"; exit 1; }
+
+      # Every menu's text, read off the screen as GTK draws it (linux/App/SettingsCheck.cpp's
+      # menuCheck), as it is and lit with the pointer on it: the menu bar's titles, each menu
+      # and its submenus, the canvas's and a part's right-click menus, a menu of every kind of
+      # row, a dropdown's list and a menu as a popover, at 4.5:1 or better; in the same themes
+      # as the Settings check (forced on the app with GTK_THEME), with the app light and dark.
+      # Pictures of the open menus go with the Settings pictures.
+      - name: Menu check
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p renders/settings
+          fails=0
+          menus() {
+            local theme=$1 font=$2 look=$3
+            local tag="menus-$(echo "$theme" | tr ':' '-')-app-$look"
+            local home
+            home=$(mktemp -d)
+            mkdir -p "$home/config/gtk-3.0"
+            [ "$font" = - ] || printf '[Settings]\ngtk-font-name=%s\n' "$font" > "$home/config/gtk-3.0/settings.ini"
+            if ! XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" GTK_THEME="$theme" \
+                 xvfb-run -a -s "-screen 0 1280x720x24" timeout 180 linux/build/cedarlogic --$look \
+                 --menu-check renders/settings "$tag" res/samples/practice.cdl > "renders/settings/$tag.log" 2>&1; then
+              fails=$((fails + 1))
+              echo "::error::Menu check failed: $tag"
+            fi
+            grep -E "^(FAIL|  )|menu-check:" "renders/settings/$tag.log" || true
+            rm -rf "$home"
+          }
+          for theme in Adwaita Adwaita:dark; do for look in light dark; do menus $theme - $look; done; done
+          if [ -d /usr/share/themes/PiXflat ]; then
+            for theme in PiXflat PiXnoir; do for look in light dark; do menus $theme "PibotoLt 12" $look; done; done
+          fi
+          if [ -d /usr/share/themes/Yaru-dark ]; then for look in light dark; do menus Yaru-dark - $look; done; fi
+          [ "$fails" = 0 ] || { echo "::error::$fails Menu check run(s) failed"; exit 1; }
+
+      - name: Upload the Settings pictures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-settings-${{ matrix.arch }}
+          path: renders/settings
+          if-no-files-found: warn
+
+  # The working session in the window, beside the build too.
+  session:
+    name: session check (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-22.04 }
+          - { arch: aarch64, os: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
+            gnome-keyring dbus weston
+
+      - name: Build
+        run: |
+          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
+          cmake --build linux/build
+
+      # A long working session in the window (linux/App/SessionCheck.cpp): seeded
+      # random clicks, drags, keys and commands through the app's own handlers, with
+      # windows over it poked at and closed, checked all along (no crash or GTK
+      # warning, autosave, the file on disk, undo and redo, tabs and split view,
+      # memory, the window freed on close). Seeds 1-4, then again with
+      # G_DEBUG=fatal-criticals; each run capped at 7 minutes. A FAIL fails the build.
+      - name: Session check
+        if: matrix.arch == 'x86_64'
+        timeout-minutes: 35
+        run: |
+          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
+
+      # On the other CPU, a short session: the checks it starts with (the canvas at the
+      # window's right edge with the real pointer, the Actions panel) and a few actions.
+      - name: Session check, short
+        if: matrix.arch != 'x86_64'
+        timeout-minutes: 15
+        run: |
+          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 20 2
+
+      - name: Upload the session logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-session-logs${{ matrix.arch != 'x86_64' && format('-{0}', matrix.arch) || '' }}
+          path: session-logs
+          if-no-files-found: warn
+
 
   # The same session with AddressSanitizer and UndefinedBehaviorSanitizer in the
   # app and the engine: memory used after it's freed, or read past its end, is
@@ -674,7 +831,7 @@ jobs:
   session-sanitizers:
     name: session check with sanitizers (x86_64)
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
@@ -682,7 +839,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
-            xvfb xauth fonts-dejavu-core fonts-liberation
+            xvfb xauth xdotool fonts-dejavu-core fonts-liberation
       - name: Build with sanitizers
         run: |
           cmake -S linux -B linux/build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCL_BUILD_TOOLS=OFF \
@@ -816,7 +973,7 @@ jobs:
   # pre-release, replaced on every push to linux/native. Its own job, after
   # both builds, so the release only ever holds a matching pair.
   publish:
-    needs: build
+    needs: [build, settings, session]
     if: github.ref == 'refs/heads/linux/native'
     runs-on: ubuntu-latest
     permissions:

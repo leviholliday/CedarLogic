@@ -67,6 +67,7 @@ public:
 	int itemCount() const { return (int)items.size(); }
 	// The hover's state, for a FAIL line.
 	std::string describe() const;
+	void clearTrace() { trace.clear(); }
 	// An item's middle, in the dock's points.
 	void itemCenter(int i, double& x, double& y) const;
 
@@ -79,6 +80,16 @@ private:
 	class RailView* floater = nullptr;
 	class RailLabels* labels = nullptr;
 	GtkEventController* motion = nullptr;
+	// Every press over the window, before what's under it: a press anywhere
+	// but the rail (the canvas, in the hot strip) keeps the edge from
+	// peeking or sliding the rail out over it until the button's up.
+	GtkGesture* presses = nullptr;
+	bool buttonDown = false;
+	// What the edge saw last (for a session check's FAIL line).
+	std::string trace;
+	void note(const std::string& what);
+	static void pressedCb(GtkGestureMultiPress*, int, double, double, gpointer self);
+	static void releasedCb(GtkGestureMultiPress*, int, double, double, gpointer self);
 	GtkWidget* menu = nullptr;
 
 	actions::FoldState fold;
