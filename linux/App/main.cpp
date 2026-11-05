@@ -28,6 +28,9 @@
 #include "SyncUI.h"
 #include "Library.h"
 #include "LibraryWindow.h"
+#include "Privacy.h"
+#include "PrivacyCheck.h"
+#include "UsageStats.h"
 #include "FindBar.h"
 #include "Toolbar.h"
 #include "MenuBar.h"
@@ -66,7 +69,8 @@ bool gSimView = false;
 // templates, tour, find; walk:N Show Me Around at stop N, walksmall:N the
 // same in a 1024x600 window, walkoff:N with the Actions panel off;
 // whatsnewpanel What's New's Actions card; settingsoff Settings > Actions
-// with the panel off).
+// with the panel off; privacy the updaters' "A small favour" sheet,
+// privacy:1 with its two switches; whatssent "See exactly what's sent").
 std::string gShow;
 // --lab-report <in.cdl> <out.pdf> [bw]: writes a lab report without a window.
 std::string gReportIn, gReportOut;
@@ -96,6 +100,8 @@ unsigned long long gSessionSeed = 1;
 std::string gSettingsCheckDir, gSettingsCheckTag;
 // --menu-check <folder> <tag>: every menu's text, as it is and lit (Settings.h).
 std::string gMenuCheckDir, gMenuCheckTag;
+// --privacy-check: the consent in real windows, clicked with the real pointer (PrivacyCheck.h).
+bool gPrivacyCheck = false;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -182,6 +188,8 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "export") top = toplevelTitled("Export as Image");
 	else if (what == "report") top = toplevelTitled("Export Lab Report");
 	else if (what == "settings" || what == "settingsoff" || what == "sync") top = settings::window();
+	else if (what == "privacy") top = privacy::askWindow();
+	else if (what == "whatssent") top = privacy::whatsSentWindow();
 	else if (what == "synccode") top = toplevelTitled("Your sync code");
 	else if (what == "synclink" || what == "syncpair") top = toplevelTitled("Link this computer");
 	else if (what == "syncconfirm") top = toplevelTitled("Link this computer?");
@@ -222,6 +230,16 @@ gboolean showCaptureCb(gpointer) {
 gboolean settingsCheckCb(gpointer) {
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
 	const int code = w ? settings::check(w, gSettingsCheckDir, gSettingsCheckTag) : 1;
+	fflush(stdout);
+	fflush(stderr);
+	_exit(code);
+	return G_SOURCE_REMOVE;
+}
+
+gboolean privacyCheckCb(gpointer) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	int code = 1;
+	guarded("the privacy check", [&] { code = privacycheck::consentCheck(w); });
 	fflush(stdout);
 	fflush(stderr);
 	_exit(code);
@@ -295,6 +313,9 @@ gboolean showCb(gpointer) {
 	else if (what == "export") w->exportImage();
 	else if (what == "report") w->exportReport();
 	else if (what == "settings") settings::show(w, page);
+	// The updaters' "A small favour" sheet (privacy:1 with its two switches), and "See exactly what's sent".
+	else if (what == "privacy") { prefs().hasSeenWelcome = true; privacy::presentSheet(w); if (page == 1) privacy::setChoosing(true); }
+	else if (what == "whatssent") privacy::showWhatsSent(w->window());
 	// The Actions rail (Rail.h's picture()), and its Customize window (:1 searched for "export").
 	else if (what == "rail") { if (w->rail()) w->rail()->picture(page); }
 	else if (what == "customize") actions::showCustomize(w, page == 1 ? "export" : "");
@@ -982,8 +1003,11 @@ void startupCb(GApplication* gapp, gpointer) {
 	// first launch ever (the slower one, with the sound).
 	prefs().load();
 	gPrimary = true;
-	// Picture and check runs: Show Me Around never starts by itself.
+	// Picture and check runs: Show Me Around never starts by itself, the
+	// privacy question is never asked by itself, and no usage stats are sent.
 	showme::setQuiet(!gScreenshot.empty());
+	privacy::quiet = !gScreenshot.empty();
+	usagestats::testRun = !gScreenshot.empty() || !gSplashFile.empty();
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
 	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) {
@@ -1187,6 +1211,7 @@ void activateCb(GApplication* gapp, gpointer) {
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
 			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
 			else if (!gMenuCheckDir.empty()) g_timeout_add(1500, menuCheckCb, app);
+			else if (gPrivacyCheck) g_timeout_add(1500, privacyCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1198,9 +1223,17 @@ void activateCb(GApplication* gapp, gpointer) {
 				return G_SOURCE_REMOVE;
 			}, app);
 		}
+		if (gScreenshot.empty()) {
+			// Crash reports and usage stats, asked once (Privacy.h): for anyone
+			// past the welcome who hasn't been, as a sheet over the circuit once
+			// it has the keys (after What's New, before Show Me Around).
+			guarded("the privacy question", [] { privacy::askWhenReady(); });
+			// Usage stats, if they're on: counted from here, sent in the background.
+			guarded("usage stats", [] { usagestats::start(); });
+		}
 		// Not seen yet: Show Me Around starts once a circuit window has the
 		// keyboard with nothing over it (after the welcome, What's New, the
-		// recovery question), never over the launch screen or the intro.
+		// recovery question, the privacy question), never over the launch screen or the intro.
 		if (gScreenshot.empty()) guarded("Show Me Around", [] { showme::startWhenReady(); });
 		return G_SOURCE_REMOVE;
 	}, gapp);
@@ -1261,6 +1294,7 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
 			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
 			else if (!gMenuCheckDir.empty()) g_timeout_add(1500, menuCheckCb, app);
+			else if (gPrivacyCheck) g_timeout_add(1500, privacyCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1272,9 +1306,17 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 				return G_SOURCE_REMOVE;
 			}, app);
 		}
+		if (gScreenshot.empty()) {
+			// Crash reports and usage stats, asked once (Privacy.h): for anyone
+			// past the welcome who hasn't been, as a sheet over the circuit once
+			// it has the keys (after What's New, before Show Me Around).
+			guarded("the privacy question", [] { privacy::askWhenReady(); });
+			// Usage stats, if they're on: counted from here, sent in the background.
+			guarded("usage stats", [] { usagestats::start(); });
+		}
 		// Not seen yet: Show Me Around starts once a circuit window has the
 		// keyboard with nothing over it (after the welcome, What's New, the
-		// recovery question), never over the launch screen or the intro.
+		// recovery question, the privacy question), never over the launch screen or the intro.
 		if (gScreenshot.empty()) guarded("Show Me Around", [] { showme::startWhenReady(); });
 		return G_SOURCE_REMOVE;
 	}, gapp);
@@ -1482,6 +1524,14 @@ int main(int argc, char** argv) {
 			if (gScreenshot.empty()) gScreenshot = gMenuCheckDir + "/unused.png";   // runs as a picture run does
 			continue;
 		}
+		// Usage stats' engine against a stand-in or the site's draft (PrivacyCheck.h): no window.
+		if (strcmp(argv[i], "--usage-check") == 0) { usagestats::testRun = true; return privacycheck::usageCheck(); }
+		if (strcmp(argv[i], "--usage-live") == 0) { usagestats::testRun = true; return privacycheck::usageLive(); }
+		if (strcmp(argv[i], "--privacy-check") == 0) {
+			gPrivacyCheck = true;
+			if (gScreenshot.empty()) gScreenshot = std::string(g_get_tmp_dir()) + "/cl-privacy-unused.png";   // runs as a picture run does
+			continue;
+		}
 		if (strcmp(argv[i], "--settings-check") == 0 && i + 2 < argc) {
 			gSettingsCheckDir = argv[++i];
 			gSettingsCheckTag = argv[++i];
@@ -1627,6 +1677,8 @@ int main(int argc, char** argv) {
 	// A launch that handed over never loaded the settings: saving its
 	// defaults would undo the running one's.
 	if (gPrimary) prefs().save();
+	// What usage stats counted this time (when they're on), written down.
+	if (gPrimary) usagestats::shutdown();
 	// Every window is closed and saved: what sync hasn't sent yet goes now (five seconds at most).
 	if (gPrimary) syncapp::quit();
 	g_object_unref(app);

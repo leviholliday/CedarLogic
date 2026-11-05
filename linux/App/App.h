@@ -143,6 +143,14 @@ struct Prefs {
 	// Help > Show Me Around (ShowMeAround.h) has been finished or skipped:
 	// until then it starts by itself.
 	bool showMeAroundSeen = false;
+	// Crash reports and usage stats (Privacy.h, docs/PRIVACY.md), asked once,
+	// as the Mac's cl.crashReports, cl.usageStats, cl.privacyAsked and
+	// cl.privacyChoice (and the Windows app's). The usage id and what's counted
+	// are in ~/.config/CedarLogic/usage.json (UsageReport.h), not here.
+	int crashReports = -1;        // -1 not chosen yet, 0 off, 1 on (kept for a build that has them)
+	bool usageStats = false;      // the switch
+	bool privacyAsked = false;
+	std::string privacyChoice;    // "yes", "no" or "custom" ("" not asked)
 
 	double wireScale() const;
 	void load();

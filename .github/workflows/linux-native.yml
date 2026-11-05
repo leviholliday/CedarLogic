@@ -39,6 +39,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: the build number is the commit count, as on the
+          # Mac and Windows (usage stats send it: docs/PRIVACY.md).
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -129,6 +133,26 @@ jobs:
           rc=0
           XDG_CONFIG_HOME="$D/config" CL_FEEDBACK_URL="http://127.0.0.1:$(cat "$D/port")" CL_FEEDBACK_KEY=check \
             timeout 120 linux/build/cedarlogic --feedback-check || rc=$?
+          kill $SERVER || true
+          exit $rc
+
+      # Usage stats (linux/App/UsageReport.h) against the Mac's stand-in for the site's
+      # /api/usage (mac/Tools/usage-check/server.py, told to expect platform linux): snapshot
+      # first, delta, ping, haveSnapshot false, 7 kept while it's down, 429, retries, DELETE
+      # (and later when offline), policy off, the caps, no Origin header, the 0600 file, and
+      # the leak scan of real reports (home folder, user and real name, host name, recent
+      # files, names, codes). One report of each kind goes into the renders. Nothing real is
+      # sent: the live draft was checked by hand once (--usage-live).
+      - name: Usage stats check
+        run: |
+          mkdir -p renders/privacy
+          D=$(mktemp -d)
+          python3 mac/Tools/usage-check/server.py "$D/port" &
+          SERVER=$!
+          for _ in $(seq 50); do [ -s "$D/port" ] && break; sleep 0.1; done
+          rc=0
+          XDG_CONFIG_HOME="$D/config" CL_USAGE_URL="http://127.0.0.1:$(cat "$D/port")" USAGE_SAMPLES="$PWD/renders/privacy/usage-samples.txt" \
+            timeout 180 linux/build/cedarlogic --usage-check || rc=$?
           kill $SERVER || true
           exit $rc
 
@@ -305,7 +329,7 @@ jobs:
           }
           again window-practice.png --light
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 whatsnew:7 help truth feedback feedback:1 feedback:2 feedback:3 feedback:4 feedback:5 switcher templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 settings:6 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu menu:1 menu:2 menu:3 menu:4 primary predict:0 predict:1 stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
+          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 whatsnew:7 help truth feedback feedback:1 feedback:2 feedback:3 feedback:4 feedback:5 switcher templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 settings:6 settings:7 welcome:5 privacy privacy:1 whatssent synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu menu:1 menu:2 menu:3 menu:4 primary predict:0 predict:1 stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
@@ -491,8 +515,9 @@ jobs:
             home=$(mktemp -d)
             mkdir -p "$home/config/CedarLogic"
             ini="$home/config/CedarLogic/native.ini"
-            # (Show Me Around seen too: these launches are about the intro, and it would start over the window.)
-            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\nshowMeAroundSeen=true\n' > "$ini"
+            # (Show Me Around seen and the privacy question answered too: these launches are about
+            # the intro, and either would come up over the window and take the keys meant for its menu.)
+            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\nshowMeAroundSeen=true\nprivacyAsked=true\nprivacyChoice=no\n' > "$ini"
             forced=update
             case $how in
               short) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
@@ -759,6 +784,40 @@ jobs:
           fi
           if [ -d /usr/share/themes/Yaru-dark ]; then for look in light dark; do menus Yaru-dark - $look; done; fi
           [ "$fails" = 0 ] || { echo "::error::$fails Menu check run(s) failed"; exit 1; }
+
+      # Crash reports' and usage stats' one consent (linux/App/PrivacyCheck.h) in real windows,
+      # clicked with the real pointer (xdotool): the Mac's consent sheet crashed on a real
+      # window, so this is never only a picture. The welcome's "A small favour" (No thanks),
+      # the updaters' sheet after What's New and before Show Me Around (Yes), Escape, Choose
+      # what to send and its switches, See exactly what's sent, asked once, each answer saved
+      # in native.ini; on a big screen and on the Raspberry Pi touchscreen's 800x480 (where
+      # they scroll). Then a lab's /etc/cedarlogic/policy.ini (a stand-in, CL_POLICY_FILE)
+      # turning both off: nobody asked, nothing counted, Settings > Privacy greyed out.
+      - name: Privacy consent check
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p renders/settings
+          fails=0
+          consent() {
+            local tag=$1 size=$2; shift 2
+            local home
+            home=$(mktemp -d)
+            if ! env NO_AT_BRIDGE=1 XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" "$@" \
+                 xvfb-run -a -s "-screen 0 ${size}x24" timeout 180 linux/build/cedarlogic --privacy-check res/samples/practice.cdl \
+                 > "renders/settings/privacy-$tag.log" 2>&1; then
+              fails=$((fails + 1))
+              echo "::error::Privacy consent check failed: $tag"
+            fi
+            grep -E "^(PASS|FAIL|privacy|     )" "renders/settings/privacy-$tag.log" || tail -20 "renders/settings/privacy-$tag.log"
+            if grep -E "(CRITICAL|WARNING) \*\*" "renders/settings/privacy-$tag.log"; then echo "::warning::GTK warnings in the privacy check ($tag)"; fi
+            rm -rf "$home"
+          }
+          consent 1600x1000 1600x1000
+          consent 800x480 800x480
+          P=$(mktemp -d)
+          printf '# A lab'"'"'s policy (the stand-in for /etc/cedarlogic/policy.ini)\n[Policy]\nDisableCrashReporting=true\nDisableUsageStats=true\n' > "$P/policy.ini"
+          consent policy 1600x1000 CL_POLICY_FILE="$P/policy.ini" CL_EXPECT_POLICY=1
+          [ "$fails" = 0 ] || { echo "::error::$fails privacy consent check run(s) failed"; exit 1; }
 
       - name: Upload the Settings pictures
         if: always()

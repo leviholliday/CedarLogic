@@ -120,6 +120,11 @@ void Prefs::load() {
 		actionsOn = a.on;
 		actionsCollapsed = a.collapsed;
 		showMeAroundSeen = existed && readBool(k, "showMeAroundSeen", false);
+		crashReports = existed ? readInt(k, "crashReports", -1, -1, 1) : -1;
+		usageStats = existed && readBool(k, "usageStats", false);
+		privacyAsked = existed && readBool(k, "privacyAsked", false);
+		privacyChoice = existed ? readString(k, "privacyChoice", "") : std::string();
+		if (privacyChoice != "yes" && privacyChoice != "no" && privacyChoice != "custom") privacyChoice.clear();
 		auto list = [&](const char* key, std::vector<std::string>& out) {
 			gsize n = 0;
 			gchar** v = existed ? g_key_file_get_string_list(k, kGroup, key, &n, nullptr) : nullptr;
@@ -357,6 +362,10 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "actionsOn04", TRUE);
 	g_key_file_set_boolean(k, kGroup, "actionsOpen04", TRUE);
 	g_key_file_set_boolean(k, kGroup, "showMeAroundSeen", showMeAroundSeen);
+	g_key_file_set_integer(k, kGroup, "crashReports", crashReports);
+	g_key_file_set_boolean(k, kGroup, "usageStats", usageStats);
+	g_key_file_set_boolean(k, kGroup, "privacyAsked", privacyAsked);
+	g_key_file_set_string(k, kGroup, "privacyChoice", privacyChoice.c_str());
 	{
 		std::vector<const gchar*> order, shown;
 		for (const std::string& a : actionsOrder) order.push_back(a.c_str());

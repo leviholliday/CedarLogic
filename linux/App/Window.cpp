@@ -1,6 +1,7 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "UsageStats.h"
 #include "Actions.h"
 #include "Rail.h"
 #include "SyncApp.h"
@@ -182,6 +183,8 @@ struct Binding {
 
 void runCommandCb(GSimpleAction*, GVariant*, gpointer data) {
 	Binding* b = static_cast<Binding*>(data);
+	// Every command, whichever way it came: counted for usage stats (when they're on: UsageStats.h).
+	guarded("usage stats", [&] { usagestats::countAction(b->command->name); });
 	guarded(b->command->name, [&] { b->command->run(b->window); });
 }
 

@@ -12,9 +12,11 @@
 class CircuitWindow;
 
 namespace settings {
-// The Actions page, and the Sync page (the last of the seven), for show().
+// The Actions page and the Sync page, for show().
 constexpr int kActionsPage = 4;
 constexpr int kSyncPage = 6;
+// Privacy: crash reports and usage stats (Privacy.h), the last of the eight.
+constexpr int kPrivacyPage = 7;
 void show(CircuitWindow* from, int page = -1);
 // The pages' parts, shared with Settings > Actions and Sync: a setting's name
 // in the label column (right-aligned, the column's 150 points, wrapping
