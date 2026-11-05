@@ -12,7 +12,9 @@ Each item is one build for one platform (sparkle:os = macos | windows | linux,
 plus cedarlogic:arch for Linux). Sparkle and WinSparkle skip items for other
 platforms; the Linux updater picks its own by arch and checks cedarlogic:sha256.
 Items are written as a whole block with a marker comment, so a re-publish of
-the same version replaces its item instead of adding a second one.
+the same version replaces its item instead of adding a second one, and a new
+build under a version already out (the native app's items are keyed by build)
+drops the older item that names the same file.
 """
 
 import html
@@ -69,10 +71,27 @@ def write_feed(path, items, title):
         f.write(FOOTER)
 
 
+URL_RE = re.compile(r'<enclosure url="([^"]+)"')
+
+
+def item_url(block):
+    m = URL_RE.search(block)
+    return m.group(1) if m else None
+
+
 def upsert(path, block_items, title):
+    """Add (or replace) items. An older item for the same file is dropped too:
+    a new build published under a version already out (0.4 beta 2, then the
+    0.4 release) replaces the release's file of that name, so the old item's
+    length and signature no longer match what the url serves, and promote
+    would copy it to everyone."""
     items = read_items(path)
     new_ids = {(k, v) for k, v, _ in block_items}
-    items = [it for it in items if (it[0], it[1]) not in new_ids]
+    new_urls = {item_url(b) for _, _, b in block_items} - {None}
+    stale = [it for it in items if (it[0], it[1]) not in new_ids and item_url(it[2]) in new_urls]
+    for k, v, _ in stale:
+        print("feeds: %s: dropping item %s %s (its file is replaced)" % (os.path.basename(path), k, v))
+    items = [it for it in items if (it[0], it[1]) not in new_ids and it not in stale]
     write_feed(path, items + block_items, title)
 
 
