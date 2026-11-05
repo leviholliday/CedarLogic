@@ -107,11 +107,26 @@ check_main_green() {   # repo commit
 	while IFS=$'\t' read -r wf st co; do
 		case "$st/$co" in
 			completed/success|completed/skipped|completed/neutral) say "  main: $wf: $co" ;;
-			completed/*) say "  main: $wf: $co"; bad=1 ;;
+			completed/*) say "  main: $wf: $co"; [ "$wf" = CI ] || bad=1 ;;   # CI's own verdict is judged below (it may have a waived job)
 			*) say "  main: $wf: still $st"; bad=1 ;;
 		esac
 	done <<<"$runs"
-	grep -q $'^CI\tcompleted\tsuccess$' <<<"$runs" || { say "  main: no green \"CI\" run"; bad=1; }
+	if ! grep -q $'^CI\tcompleted\tsuccess$' <<<"$runs"; then
+		# A named job may be waived (CL_WAIVE_JOBS="skia / Skia (macos)"; ";"-separated): the "CI" run
+		# counts as green when every job in it passed except those. For a job GitHub can't run at all
+		# (2026-11-05: "macos-14-arm64-us-default is not supported"), never for a test that failed.
+		local id notok w ok=0
+		id=$(gh run list -R "$1" --branch main --commit "$2" --workflow ci.yml --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+		if [ -n "${CL_WAIVE_JOBS:-}" ] && [ -n "$id" ]; then
+			notok=$(gh run view "$id" -R "$1" --json jobs --jq '.jobs[] | select(.conclusion != "success" and .conclusion != "skipped") | .name')
+			ok=1
+			while IFS= read -r w; do
+				[ -z "$w" ] && continue
+				case ";${CL_WAIVE_JOBS};" in *";${w};"*) say "  main: CI job \"$w\" waived (CL_WAIVE_JOBS)" ;; *) ok=0 ;; esac
+			done <<<"$notok"
+		fi
+		if [ "$ok" = 1 ]; then say "  main: \"CI\" run counts as green with the waived job(s)"; else say "  main: no green \"CI\" run"; bad=1; fi
+	fi
 	return $bad
 }
 
