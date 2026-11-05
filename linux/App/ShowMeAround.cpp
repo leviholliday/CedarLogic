@@ -484,7 +484,8 @@ void updateInputShape() {
 			cairo_region_union_rectangle(region, &card);
 			cairo_region_intersect_rectangle(region, &all);
 		}
-		gtk_widget_input_shape_combine_region(layer, region);
+		// (The overlay's window round the layer too, or it took every click in the hole.)
+		inputShape(layer, region);
 		cairo_region_destroy(region);
 	}
 }

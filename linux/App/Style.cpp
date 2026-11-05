@@ -494,6 +494,16 @@ void wheelLeavesValuesAlone() {
 
 // ---- Room on the screen ------------------------------------------------------------------
 
+void inputShape(GtkWidget* w, const cairo_region_t* region) {
+	if (w == nullptr) return;
+	gtk_widget_input_shape_combine_region(w, const_cast<cairo_region_t*>(region));
+	GdkWindow* own = gtk_widget_get_window(w);
+	GtkWidget* parent = gtk_widget_get_parent(w);
+	if (own == nullptr || parent == nullptr || !GTK_IS_OVERLAY(parent) || !gtk_widget_get_has_window(w)) return;
+	GdkWindow* around = gdk_window_get_parent(own);
+	if (around && around != gtk_widget_get_window(parent)) gdk_window_input_shape_combine_region(around, region, 0, 0);
+}
+
 bool onWayland() {
 	GdkDisplay* d = gdk_display_get_default();
 	return d && strcmp(G_OBJECT_TYPE_NAME(d), "GdkWaylandDisplay") == 0;

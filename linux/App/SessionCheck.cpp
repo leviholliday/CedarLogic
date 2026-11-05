@@ -1984,6 +1984,7 @@ struct SessionDriver {
 				RectF hole{};
 				const RectF cr0 = showme::cardRect();
 				const RectF card = rectF(cr0.left - 12, cr0.top - 12, cr0.right + 12, cr0.bottom + 12);
+				std::string seen;
 				if (showme::frame(showme::CanvasSpot, hole)) {
 					for (float fy = 0.2f; fy <= 0.8f && !holeReached; fy += 0.2f)
 						for (float fx = 0.15f; fx <= 0.85f && !holeReached; fx += 0.14f) {
@@ -1992,11 +1993,15 @@ struct SessionDriver {
 							std::string rx, ry;
 							if (!onScreen(t, px, py, rx, ry) || !xdo({ "mousemove", "--sync", rx, ry })) continue;
 							pump(40);
-							holeReached = underPointer() == canvas()->widget();
+							GtkWidget* u = underPointer();
+							holeReached = u == canvas()->widget();
+							if (!holeReached && seen.size() < 200)
+								seen += format(" %.0f,%.0f: %s;", px, py, u ? (gtk_widget_get_name(u) && *gtk_widget_get_name(u) ? gtk_widget_get_name(u) : G_OBJECT_TYPE_NAME(u)) : "nothing");
 							if (holeReached) { xdo({ "click", "1" }); pump(200); }
 						}
 				}
-				check(holeReached && showme::active(), "on the canvas's stop, a click in the lit hole (away from the card) reaches the canvas, and the walk goes on");
+				check(holeReached && showme::active(), format("on the canvas's stop, a click in the lit hole (away from the card) reaches the canvas, and the walk goes on (the hole %.0f,%.0f-%.0f,%.0f)",
+				                                              hole.left, hole.top, hole.right, hole.bottom) + seen);
 			}
 			if (!clickButton(0)) { wrong++; if (firstWrong.empty()) firstWrong = format(" (no Next on stop %d)", at); break; }
 			clicked++;

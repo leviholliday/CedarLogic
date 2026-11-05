@@ -192,6 +192,11 @@ void wheelLeavesValuesAlone();
 GdkRectangle usableArea(GtkWidget* near);
 // The app is on a Wayland desktop (where it can't place its windows).
 bool onWayland();
+// What of `w` takes the pointer (null: all of it; an empty region: none), in
+// its points (Style.cpp). Also for the window a GtkOverlay puts an overlay
+// child in, which otherwise takes every press over the child's whole box
+// (and the overlay's pass-through, which would, upsets the crossing events).
+void inputShape(GtkWidget* w, const cairo_region_t* region);
 
 // ---- Files -----------------------------------------------------------------------
 
