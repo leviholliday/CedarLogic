@@ -1747,24 +1747,28 @@ struct SessionDriver {
 			if (cl_edit_single_gate(doc(), page) == gateHere) cl_edit_delete(doc(), page);
 			c->redraw();
 			pump(100);
-			// Folded, the tab itself still takes a click (opening the panel).
+			// Folded, the tab itself still takes a click (opening the panel);
+			// with Open on hover, once it's slid out (100 ms there), a click on
+			// its edge keeps it open, as on the Mac.
 			if (su.folded && !su.focus) {
 				GtkWidget* dock = r->dockWidget();
 				const double ty = gtk_widget_get_allocated_height(dock) / 2.0;
-				std::string under = "?";
-				if (dock && pointerTo(dock, 3, ty)) {
-					pump(25);
-					GtkWidget* u = underPointer();
-					under = u == dock ? "the tab" : u == r->floaterWidget() ? "the peeking tab" : u ? G_OBJECT_TYPE_NAME(u) : "nothing";
+				std::string rx, ry, what;
+				if (!su.hover) {
+					ok = dock && onScreen(dock, 3, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
+					what = "a click on the folded tab opens the panel";
+				} else {
+					ok = dock && pointerTo(dock, 3, ty);
+					pump(600);
+					ok = ok && r->slidOut();
+					GtkWidget* f = r->floaterWidget();
+					ok = ok && f && onScreen(f, 2, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
+					what = "slid out on hover, a click on its edge keeps the panel open";
 				}
-				// Away and back in (the slide-out after 100 ms there undone), then the click at once.
-				away();
-				pump(700);
-				std::string rx, ry;
-				ok = dock && onScreen(dock, 3, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
 				pump(400);
-				check(ok && !r->folded(), "a click on the folded tab opens the panel" + in + " (under the pointer: " + under + "): " + r->describe());
+				check(ok && !r->folded(), what + in + ": " + r->describe());
 				away();
+				pump(600);
 			}
 		}
 		// As it was.
