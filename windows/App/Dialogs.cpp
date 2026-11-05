@@ -139,8 +139,9 @@ void drawButtonItem(const DRAWITEMSTRUCT* di, bool isToggle) {
 		const D2D1_RECT_F r = D2D1::RectF(1, 1, w - 1, h - 1);
 		D2D1_COLOR_F fill, ink;
 		if (primary) {
+			// (The ink for the fill as it's seen, hovered or pressed: dark on the green.)
 			fill = withAlpha(ch.accent(), down ? 0.8f : hot ? 0.92f : 1.0f);
-			ink = ch.onAccent();
+			ink = Chrome::inkOn(Chrome::over(fill, d2d(c.back)));
 		} else if (danger) {
 			fill = D2D1::ColorF(229 / 255.0f, 72 / 255.0f, 77 / 255.0f, down ? 0.26f : hot ? 0.2f : 0.13f);
 			ink = D2D1::ColorF(229 / 255.0f, 72 / 255.0f, 77 / 255.0f);
@@ -712,15 +713,18 @@ INT_PTR CALLBACK formProc(HWND d, UINT msg, WPARAM wp, LPARAM lp) {
 					// The Mac's Settings toolbar: a bar across the top, each page
 					// an icon over its name, the one showing in the accent.
 					const D2D1_COLOR_F ink = d2d(c.text);
-					rt->Clear(prefs().dark ? D2D1::ColorF(0.141f, 0.153f, 0.180f) : D2D1::ColorF(0.941f, 0.945f, 0.957f));
+					const D2D1_COLOR_F barBack = prefs().dark ? D2D1::ColorF(0.141f, 0.153f, 0.180f) : D2D1::ColorF(0.941f, 0.945f, 0.957f);
+					const D2D1_COLOR_F onTint = withAlpha(ch.accent(), prefs().dark ? 0.22f : 0.15f);
+					rt->Clear(barBack);
 					fillRect(rt, D2D1::RectF(0, h - 1, w, h), withAlpha(ink, prefs().dark ? 0.12f : 0.09f));
 					const float iw = 78, x0 = (w - iw * f->pages.size()) / 2;
 					for (size_t i = 0; i < f->pages.size(); i++) {
 						const D2D1_RECT_F r = D2D1::RectF(x0 + i * iw + 3, 7, x0 + (i + 1) * iw - 3, h - 8);
 						const bool on = (int)i == f->page, hot = (int)i == f->hotTab;
-						if (on) fillRound(rt, r, 9, withAlpha(ch.accent(), prefs().dark ? 0.22f : 0.15f));
+						if (on) fillRound(rt, r, 9, onTint);
 						else if (hot) fillRound(rt, r, 9, withAlpha(ink, 0.06f));
-						const D2D1_COLOR_F fg = on ? ch.accent() : withAlpha(ink, hot ? 0.9f : 0.72f);
+						// The page showing: in the accent, deepened to read on its tint.
+						const D2D1_COLOR_F fg = on ? ch.accentText(Chrome::over(onTint, barBack)) : withAlpha(ink, hot ? 0.9f : 0.72f);
 						if (i < f->pageIcons.size()) drawIcon(rt, f->pageIcons[i], D2D1::RectF(r.left, r.top + 5, r.right, r.top + 28), 17, fg);
 						drawText(rt, f->pages[i], D2D1::RectF(r.left - 2, r.top + 29, r.right + 2, r.bottom - 1), 11.5f, fg, TextAlign::Center, on);
 						f->tabStarts.push_back(r.left);
@@ -1489,15 +1493,18 @@ void Form::showPage(int to) {
 		DWORD style = (DWORD)GetWindowLongW(dialog, GWL_STYLE);
 		const DWORD ex = (DWORD)GetWindowLongW(dialog, GWL_EXSTYLE);
 		// Taller than the screen (a laptop at 150%): as tall as it, and the
-		// page scrolls.
-		RECT frame = { 0, 0, clientW, contentH };
+		// page scrolls; kept on the screen as it grows (formFit).
+		RECT frame = { 0, 0, 0, 0 };
 		AdjustWindowRectExForDpi(&frame, style & ~WS_VSCROLL, FALSE, ex, dpi);
-		const int frameH = (frame.bottom - frame.top) - contentH;
 		MONITORINFO mi = { sizeof mi };
 		const bool onScreen = GetMonitorInfoW(MonitorFromWindow(dialog, MONITOR_DEFAULTTONEAREST), &mi) != FALSE;
-		const int roomH = onScreen ? (int)(mi.rcWork.bottom - mi.rcWork.top) - frameH : INT_MAX;
-		const bool scrolls = contentH > roomH && roomH > scaled(120, dpi);
-		const int clientH = scrolls ? roomH : contentH;
+		RECT at;
+		GetWindowRect(dialog, &at);
+		const RECT work = onScreen ? mi.rcWork : RECT{ -100000, -100000, 100000, 100000 };
+		const FormFit fit = formFit(work, POINT{ at.left, at.top }, clientW, contentH, frame, GetSystemMetricsForDpi(SM_CXVSCROLL, dpi),
+		                            scaled(120, dpi));
+		const bool scrolls = fit.scrolls;
+		const int clientH = fit.clientH;
 		scrollY = 0;
 		scrollHeight = scrolls ? contentH : 0;
 		const DWORD want = scrolls ? (style | WS_VSCROLL) : (style & ~WS_VSCROLL);
@@ -1518,21 +1525,35 @@ void Form::showPage(int to) {
 			si.nPage = (UINT)clientH;
 			SetScrollInfo(dialog, SB_VERT, &si, FALSE);
 		}
-		RECT rc = { 0, 0, clientW, clientH };
-		AdjustWindowRectExForDpi(&rc, style & ~WS_VSCROLL, FALSE, ex, dpi);
-		const int ww = rc.right - rc.left + (scrolls ? GetSystemMetricsForDpi(SM_CXVSCROLL, dpi) : 0), wh = rc.bottom - rc.top;
-		// Kept on the screen as it grows.
-		RECT at;
-		GetWindowRect(dialog, &at);
-		int top = at.top;
-		if (onScreen && top + wh > mi.rcWork.bottom) top = std::max<int>(mi.rcWork.top, mi.rcWork.bottom - wh);
-		SetWindowPos(dialog, nullptr, at.left, top, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		const RECT& r = fit.window;
+		SetWindowPos(dialog, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 	}
 	InvalidateRect(dialog, nullptr, TRUE);
 	fade::clipTo(picture, dialog);
 }
 
 double Form::number(int field) const { return atof(fields[field].value.c_str()); }
+
+FormFit formFit(const RECT& work, POINT at, int clientW, int contentH, const RECT& frame, int scrollW, int minClientH) {
+	FormFit f;
+	const int frameW = frame.right - frame.left, frameH = frame.bottom - frame.top;
+	const int roomH = (int)(work.bottom - work.top) - frameH;
+	f.scrolls = contentH > roomH && roomH > minClientH;
+	f.clientH = f.scrolls ? roomH : contentH;
+	const int ww = clientW + frameW + (f.scrolls ? scrollW : 0), wh = f.clientH + frameH;
+	const int left = std::max<int>(work.left, std::min<int>(at.x, work.right - ww));
+	const int top = std::max<int>(work.top, std::min<int>(at.y, work.bottom - wh));
+	f.window = RECT{ left, top, left + ww, top + wh };
+	return f;
+}
+
+RECT formFrame(UINT dpi) {
+	RECT frame = { 0, 0, 0, 0 };
+	AdjustWindowRectExForDpi(&frame, WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT, FALSE, WS_EX_DLGMODALFRAME, dpi);
+	return frame;
+}
+
+Form* openPagedForm() { return g_pagedForm; }
 
 void Form::setTip(int field, const std::string& text) {
 	FormField& x = fields[field];

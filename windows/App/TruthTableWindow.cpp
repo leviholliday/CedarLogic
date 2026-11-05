@@ -543,7 +543,7 @@ private:
 			const D2D1_RECT_F done_ = D2D1::RectF(w - 22 - 90, fy, w - 22, fy + 30);
 			const bool isHot = hot == (int)hits.size();
 			fillRound(rt, done_, 15, withAlpha(accent, isHot ? 1.0f : 0.92f));
-			drawText(rt, "Done", done_, 13, D2D1::ColorF(1, 1, 1, 1), TextAlign::Center, true);
+			drawText(rt, "Done", done_, 13, Chrome::inkOn(Chrome::over(withAlpha(accent, isHot ? 1.0f : 0.92f), paper)), TextAlign::Center, true);
 			hits.push_back({ done_, [this] { done = true; } });
 		}
 

@@ -248,7 +248,7 @@ private:
 			for (size_t si = col == 0 ? 0 : half; si < (col == 0 ? half : sections.size()); si++) {
 				std::string up = sections[si];
 				for (char& c : up) c = (char)toupper((unsigned char)c);
-				drawText(rt, up, D2D1::RectF(x0, y + 6, x0 + colW, y + 24), 10.5f, accent, TextAlign::Leading, true);
+				drawText(rt, up, D2D1::RectF(x0, y + 6, x0 + colW, y + 24), 10.5f, chrome().accentText(paper), TextAlign::Leading, true);
 				y += kHeadH;
 				for (int k = 0; k < (int)shown.size(); k++) {
 					const Row& r = rows[shown[k]];

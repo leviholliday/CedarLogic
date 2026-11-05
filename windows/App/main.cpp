@@ -71,7 +71,7 @@ bool gReportBW = false;
 double gSplashAt = 0;
 std::string gSplashFile;
 bool gFirstLaunch = false;
-// --render-intro <dir> [first|update]: the intro (Intro.h), every frame at 60
+// --render-intro <dir> [first|update|every|short]: the intro (Intro.h), every frame at 60
 // fps, over a new circuit's window (dark), as PNGs in dir, and quit.
 std::string gRenderIntro;
 intro::Trigger gRenderIntroTrigger = intro::Trigger::First;
@@ -1209,8 +1209,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		if (a == "--first-launch") { gFirstLaunch = true; continue; }
 		if (a == "--render-intro" && i + 1 < argc) {
 			gRenderIntro = U(argv[++i]);
-			if (i + 1 < argc && (U(argv[i + 1]) == "first" || U(argv[i + 1]) == "update"))
-				gRenderIntroTrigger = U(argv[++i]) == "update" ? intro::Trigger::Update : intro::Trigger::First;
+			if (i + 1 < argc) {
+				const std::string v = U(argv[i + 1]);
+				if (v == "first" || v == "update" || v == "every" || v == "short") {
+					i++;
+					gRenderIntroTrigger = v == "update" ? intro::Trigger::Update : v == "every" ? intro::Trigger::Every
+					                    : v == "short" ? intro::Trigger::Short : intro::Trigger::First;
+				}
+			}
 			continue;
 		}
 		if (a == "--card-frame" && i + 1 < argc) { CircuitWindow::cardFreeze = atof(U(argv[++i]).c_str()); continue; }

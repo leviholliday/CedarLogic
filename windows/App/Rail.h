@@ -16,7 +16,11 @@
 // once; 100 ms there slides the rail out over the canvas (passing through
 // doesn't), where it stays while the pointer is on it or the strip and goes
 // 400 ms after it has left both, but not while its right-click menu is open
-// or a drag is going on. Escape puts it back. Its right-click menu: Customize
+// or a drag is going on. Escape puts it back. The strip only watches the
+// pointer (it's no window): a press there, the wheel, and a drag begun
+// there are the canvas's (the peeking tab passes them through, all but its
+// own 6 points), and while the canvas has the pointer (a drag) the rail
+// doesn't come out. Its right-click menu: Customize
 // Actions..., fold or show it, or Turn Off the Actions Panel. Show Me Around
 // (ShowMeAround.h) opens a folded panel for its stop, and it folds back after.
 
@@ -88,6 +92,7 @@ public:
 
 protected:
 	void paint(ID2D1RenderTarget* rt, float w, float h) override;
+	LRESULT hitTest(float x, float y) override;
 	void mouseMove(float x, float y) override;
 	void mouseLeave() override;
 	void mouseDown(int button, float x, float y, bool doubleClick) override;

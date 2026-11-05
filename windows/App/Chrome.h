@@ -22,9 +22,23 @@ struct Chrome {
 	D2D1_COLOR_F hairline() const;
 	D2D1_COLOR_F sash() const;
 	D2D1_COLOR_F accent() const;
-	// Text and symbols on an accent-filled button: white, or the icon's dark
-	// ink on a light accent (the green, on the dark theme).
+	// Text and symbols on an accent-filled button: the icon's dark ink, or
+	// white, whichever reads better on it, at least 4.5:1 (WCAG AA): dark
+	// ink on CedarLogic's green, light theme and dark (white on it was 3.5:1).
 	D2D1_COLOR_F onAccent() const;
+	// The same for any fill (an accent at less than full strength over what's
+	// behind it: hovered, pressed): see over().
+	static D2D1_COLOR_F inkOn(D2D1_COLOR_F fill);
+	// Text in the accent itself on `background` (a selected row's tint, a
+	// heading): the accent, deepened (light theme) or lightened (dark) just
+	// enough to read at 4.5:1.
+	D2D1_COLOR_F accentText(D2D1_COLOR_F background) const;
+	// The icon's dark ink (text on a light accent).
+	static D2D1_COLOR_F darkInk();
+	// WCAG contrast between two opaque colours (1 to 21), and `top` (with its
+	// alpha) laid over an opaque `bottom`, as Direct2D blends them.
+	static double contrast(D2D1_COLOR_F a, D2D1_COLOR_F b);
+	static D2D1_COLOR_F over(D2D1_COLOR_F top, D2D1_COLOR_F bottom);
 	// The ink at a strength (the Mac's ink.opacity(a)).
 	D2D1_COLOR_F ink(float alpha) const;
 	COLORREF gdi(const D2D1_COLOR_F& c) const;

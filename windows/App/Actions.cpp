@@ -132,6 +132,8 @@ const std::vector<Def>& all() {
 		{ "shortcuts", "Keyboard Shortcuts", "Help", 0xE765, CMD_SHORTCUTS },
 		{ "showMeAround", "Show Me Around", "Help", 0xE890, CMD_SHOW_ME_AROUND },
 		{ "tour", "Learn Logic: Guided Tour", "Help", 0xE7C1, CMD_TOUR },
+		// More lessons, with live circuits, on the website (in the browser).
+		{ "learnOnline", "Learn Logic Online…", "Help", 0xE774, CMD_LEARN_ONLINE },
 		{ "welcome", "Welcome to CedarLogic…", "Help", 0xE734, CMD_WELCOME },
 		{ "whatsNew", "What's New in CedarLogic", "Help", 0xE789, CMD_WHATS_NEW },
 		{ "playIntro", "Play the Intro", "Help", 0xE714, CMD_PLAY_INTRO },
