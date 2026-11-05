@@ -19,11 +19,18 @@
 // ways out (the lesson after it when chosen) and after What's New -- never
 // over them, never again once seen; About's mailto link; the wheel over a
 // Settings choice leaving its value. Then the
-// intro's rules (Intro.h; the Mac launch-selftest's intro checks): its
-// length, which launch plays which intro and with the sound or not, "Play
-// the intro every time CedarLogic opens" on by default (off once turned off), and Help > Play the
-// Intro in the actions and the menu bar, played over a window. One PASS or
-// FAIL line each; the exit code is 0 when all passed.
+// intro's rules (Intro.h; the Mac launch-selftest's intro checks): the full
+// and short intros' lengths, which launch plays which intro and with the
+// sound or not, "When CedarLogic opens" (Short intro to begin with, settled
+// once from the old checkbox, each choice sticking), and Help > Play the
+// Intro in the actions and the menu bar, played over a window (the short
+// one too); Help > Learn Logic Online. Then the Linux bugs, on Windows:
+// drags begun in the panel's hot strip, with the real pointer, are the
+// canvas's (folded and open, in focus mode and not), and the wheel there;
+// text on the accent reads at 4.5:1 in every owner-drawn state (dark ink on
+// CedarLogic's green), the menus being Windows' own; and Settings stays on
+// 1024 x 600 and 1280 x 720 screens at 125% and 150%. One PASS or FAIL line
+// each; the exit code is 0 when all passed.
 
 #ifndef CL_WINDOWS_RAILCHECK_H
 #define CL_WINDOWS_RAILCHECK_H

@@ -138,10 +138,16 @@ plays once.
 
 Help > Play the Intro (also in the Actions list, so it can go on the rail)
 plays it again over the front window, sound and all. Settings > General >
-Launch screen > "Play the intro every time CedarLogic opens" (off unless
-ticked) plays it on every other launch, silently. For testing,
-`CL_INTRO=first`, `update` or `every` plays that one, and `CL_NO_INTRO=1`
-turns it off.
+"When CedarLogic opens" says what every other launch does, silently: Short
+intro (to begin with, for everyone: the drawing up to the LED, "0.4" and the
+beat, then its bloom crossfades straight into the window, no launch panel,
+3.55 s), Full intro, Classic launch screen (the panel alone, as before the
+intro), or None (straight into the window, no card). The old checkbox is
+settled once: never touched, Short; turned off, Classic; turned on (when it
+began off), Full. For testing, `CL_INTRO=first`, `update`, `every` or `short`
+plays that one, and `CL_NO_INTRO=1` turns it off. Help > Learn Logic
+Online... (beside Learn Logic: Guided Tour, and in the Actions list) opens
+https://cedarlogic.netlify.app/learn/ in the browser.
 
 To try: Help > Play the Intro (the chime's bell should land as the LED
 lights, not before it); tick the setting, quit and start CedarLogic again

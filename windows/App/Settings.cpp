@@ -12,6 +12,7 @@
 #include "Alert.h"
 #include "Collections.h"
 #include "Integration.h"
+#include "Intro.h"
 #include "Shortcuts.h"
 #include "SyncApp.h"
 #include "Toolbar.h"
@@ -266,7 +267,7 @@ void paintShortcuts(ShortcutList& L, ID2D1RenderTarget* rt, float w, float h) {
 	auto heading = [&](const std::string& title) {
 		std::string up = title;
 		for (char& c : up) c = (char)toupper((unsigned char)c);
-		drawText(rt, up, D2D1::RectF(14, y + 8, w - 14, y + 24), 10.5f, accent, TextAlign::Leading, true);
+		drawText(rt, up, D2D1::RectF(14, y + 8, w - 14, y + 24), 10.5f, chrome().accentText(look.field), TextAlign::Leading, true);
 		y += 28;
 	};
 	for (const shortcuts::Action& a : shortcuts::all()) {
@@ -284,7 +285,8 @@ void paintShortcuts(ShortcutList& L, ID2D1RenderTarget* rt, float w, float h) {
 		if (rec) {
 			const float tw = textWidth("Press keys…", 12, true);
 			capsLeft = right - tw;
-			drawText(rt, "Press keys…", D2D1::RectF(capsLeft, y + 5, right, y + rowH - 5), 12, accent, TextAlign::Trailing, true);
+			drawText(rt, "Press keys…", D2D1::RectF(capsLeft, y + 5, right, y + rowH - 5), 12,
+			         chrome().accentText(Chrome::over(withAlpha(accent, prefs().dark ? 0.24f : 0.14f), look.field)), TextAlign::Trailing, true);
 		} else if (!k.valid()) {
 			capsLeft = right - textWidth("None", 12);
 			drawText(rt, "None", D2D1::RectF(capsLeft, y + 5, right, y + rowH - 5), 12, look.dim, TextAlign::Trailing);
@@ -609,16 +611,18 @@ void showPreferencesDialog(HWND parent) {
 			form.setTip(i, opensTip(after.first, after.second));
 		};
 	}
-	// The launch screen: the intro (Intro.cpp) at every launch, as the Mac's
-	// row (its words), silently.
-	FormField everyLaunch = check("Launch screen:", "Play the intro every time CedarLogic opens", p.introEveryLaunch,
-	                              "The circuit drawing itself, then the launch screen, as on the first launch, without its sound "
-	                              "(that's for the first launch and updates). Any key or click skips it. Turn it off for the launch "
-	                              "screen alone; Help > Play the Intro plays it any time.");
-	everyLaunch.tipLines = 3;
-	on[f.add(everyLaunch)] = [](Form& form, int i) {
-		prefs().introEveryLaunch = form.checked(i);
+	// The launch screen: "When CedarLogic opens" (Intro.h), as the Mac's row
+	// (its words): the short intro, the full one, the classic launch screen,
+	// or none; what each does under it.
+	std::vector<std::string> launchChoices;
+	for (int c = intro::AtShort; c <= intro::AtNone; c++) launchChoices.push_back(intro::atLaunchTitle(c));
+	const int launchAt = std::min<int>(intro::AtNone, std::max<int>(intro::AtShort, p.introAtLaunch));
+	FormField launch = choice("When CedarLogic opens:", launchChoices, launchAt, intro::atLaunchHint(launchAt));
+	launch.tipLines = 3;
+	on[f.add(launch)] = [](Form& form, int i) {
+		prefs().introAtLaunch = std::min<int>(intro::AtNone, std::max<int>(intro::AtShort, form.choice(i)));
 		prefs().save();
+		form.setTip(i, intro::atLaunchHint(prefs().introAtLaunch));
 	};
 	on[f.add(check("Quitting:", "Ask before quitting", p.confirmQuit,
 	               keyOf("quit", "Quitting") + " shows a question first: Enter quits, Escape doesn't."))] = [](Form& form, int i) {

@@ -306,7 +306,7 @@ private:
 				const float bw = textWidth(row.badge, 9, true) + 16;
 				const D2D1_RECT_F badge = D2D1::RectF(right - bw, y + 21, right, y + 41);
 				fillRound(rt, badge, 10, withAlpha(accent, 0.18f));
-				drawText(rt, row.badge, badge, 9, accent, TextAlign::Center, true);
+				drawText(rt, row.badge, badge, 9, chrome().accentText(Chrome::over(withAlpha(accent, 0.18f), look.paper())), TextAlign::Center, true);
 				right -= bw + 8;
 			}
 			drawText(rt, row.title, D2D1::RectF(textLeft, y + 12, right, y + 31), 13, look.ink(), TextAlign::Leading, true);
@@ -344,7 +344,8 @@ private:
 				fillRound(rt, b.rect, 8, look.ink(bh ? 0.12f : 0.07f));
 				strokeRound(rt, b.rect, 8, look.ink(0.10f));
 			}
-			drawText(rt, b.label, b.rect, 12.5f, b.primary ? chrome().onAccent() : look.ink(), TextAlign::Center, b.primary);
+			drawText(rt, b.label, b.rect, 12.5f, b.primary ? Chrome::inkOn(Chrome::over(withAlpha(accent, bh ? 1.0f : 0.92f), look.paper())) : look.ink(),
+			         TextAlign::Center, b.primary);
 		}
 		surface.end();
 		EndPaint(hwnd, &ps);

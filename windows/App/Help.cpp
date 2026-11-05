@@ -49,7 +49,9 @@ const std::vector<Page>& pages() {
 		    p("Down the right edge is the **Actions panel**: the commands you use most, a click each. Rest on one for its name and "
 		      "shortcut, click its left edge to fold it away, and right-click it to choose what's on it. Settings ▸ Actions turns it off or on."),
 		    tip("New here? Help ▸ Show Me Around points out where everything is in the window, in under a minute. Help ▸ Learn Logic: "
-		        "Guided Tour is a lesson: it builds a working AND circuit with you, a step at a time, in about five.") },
+		        "Guided Tour is a lesson: it builds a working AND circuit with you, a step at a time, in about five."),
+		    p("More lessons with live circuits: **Help ▸ Learn Logic Online…** opens them on the CedarLogic website "
+		      "(Learn Logic Online, under More in this list, does too).") },
 		  true },
 		{ "first", "Your First Circuit", 0xEA80, "Two switches, an AND gate and a light.",
 		  { h("1. Two switches"),
@@ -290,7 +292,7 @@ float rich(ID2D1RenderTarget* rt, const std::string& text, float x, float y, flo
 
 const wchar_t* kClass = L"CedarLogicHelp";
 const float kSide = 250, kRow = 30, kSearchH = 30;
-enum Extra { kShortcuts = 1000, kClassic, kWhatsNew, kTour, kShowMe };
+enum Extra { kShortcuts = 1000, kClassic, kWhatsNew, kTour, kShowMe, kLearnOnline };
 
 struct Row { int page = -1; int extra = 0; std::string heading; D2D1_RECT_F r{}; };
 
@@ -326,6 +328,7 @@ struct HelpWindow {
 		const More more[] = { { kShortcuts, "Keyboard Shortcuts", "keys hotkeys" },
 		                      { kShowMe, "Show Me Around", "tour walkthrough where window spotlight" },
 		                      { kTour, "Learn Logic: Guided Tour", "tutorial lesson walkthrough" },
+		                      { kLearnOnline, "Learn Logic Online", "website web lessons browser" },
 		                      { kWhatsNew, "What's New", "whats new changes release notes" },
 		                      { kClassic, "Classic Help", "old original" } };
 		bool anyMore = false;
@@ -351,6 +354,7 @@ struct HelpWindow {
 		switch (r.extra) {
 		case kShortcuts: if (from) from->showShortcuts(); break;
 		case kTour: if (from) { SetForegroundWindow(from->window()); from->run(CMD_TOUR); } break;
+		case kLearnOnline: openExternally(hwnd, kLearnOnlineUrl); break;
 		case kShowMe: if (from) { SetForegroundWindow(from->window()); from->run(CMD_SHOW_ME_AROUND); } break;
 		case kWhatsNew: if (from) { SetForegroundWindow(from->window()); from->run(CMD_WHATS_NEW); } break;
 		case kClassic: {
@@ -404,7 +408,7 @@ struct HelpWindow {
 				if (sel) fillRound(rt, r.r, 7, withAlpha(accent, dark ? 0.28f : 0.16f));
 				else if (i == hot) fillRound(rt, r.r, 7, withAlpha(ink, 0.06f));
 				const wchar_t icon = r.page >= 0 ? pages()[r.page].icon
-				                   : r.extra == kShortcuts ? 0xE765 : r.extra == kTour ? 0xE7C1 : r.extra == kWhatsNew ? 0xE734 : 0xE897;
+				                   : r.extra == kShortcuts ? 0xE765 : r.extra == kTour ? 0xE7C1 : r.extra == kLearnOnline ? 0xE774 : r.extra == kWhatsNew ? 0xE734 : 0xE897;
 				drawIcon(rt, icon, D2D1::RectF(r.r.left + 6, r.r.top, r.r.left + 30, r.r.bottom), 13, sel ? accent : withAlpha(ink, 0.7f));
 				const std::string label = r.page >= 0 ? pages()[r.page].title : r.heading;
 				drawText(rt, label, D2D1::RectF(r.r.left + 36, r.r.top + 7, r.r.right - 6, r.r.bottom), 12.5f, ink, TextAlign::Leading, sel);

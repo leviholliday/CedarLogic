@@ -134,9 +134,10 @@ CircuitWindow::CircuitWindow(CLDocument* d, const std::string& p) : doc(d), path
 	updateBanner();
 	layout();
 	// While the launch screen is up, windows wait for it (it does the
-	// introducing); otherwise the circuit comes in under its opening card.
+	// introducing); otherwise the circuit comes in under its opening card
+	// (not at a launch with "When CedarLogic opens: None": straight in).
 	if (!splash::active()) {
-		beginOpening();
+		if (!splash::straightIn()) beginOpening();
 		present();
 	}
 }
@@ -439,6 +440,7 @@ void CircuitWindow::buildMenus() {
 	// Where everything is in the window (ShowMeAround.h), then the logic lesson.
 	item(help, CMD_SHOW_ME_AROUND, "Show Me &Around");
 	item(help, CMD_TOUR, "Learn Logic: Guided &Tour");
+	item(help, CMD_LEARN_ONLINE, "Learn Logic &Online\u2026");
 	item(help, CMD_WELCOME, "&Welcome to CedarLogic\u2026");
 	item(help, CMD_WHATS_NEW, "What's &New in CedarLogic");
 	item(help, CMD_PLAY_INTRO, "&Play the Intro");
@@ -2225,6 +2227,7 @@ void CircuitWindow::run(int command) {
 	case CMD_CHECK_UPDATES: updater::checkNow(hwnd); break;
 	case CMD_TOUR: welcome::startTourOn(this); break;
 	case CMD_SHOW_ME_AROUND: showme::start(this); break;
+	case CMD_LEARN_ONLINE: openExternally(hwnd, kLearnOnlineUrl); break;
 	case CMD_WHATS_NEW: whatsnew::show(this); break;
 	case CMD_PLAY_INTRO: splash::playIntroNow(this); break;
 	case CMD_FEEDBACK: feedback::show(this); break;

@@ -16,10 +16,43 @@ D2D1_COLOR_F Chrome::panel() const { return dark ? D2D1::ColorF(0.105f, 0.115f, 
 D2D1_COLOR_F Chrome::hairline() const { return dark ? D2D1::ColorF(1, 1, 1, 0.08f) : D2D1::ColorF(0, 0, 0, 0.09f); }
 D2D1_COLOR_F Chrome::sash() const { return dark ? rgb255(40, 43, 50) : rgb255(218, 220, 224); }
 D2D1_COLOR_F Chrome::accent() const { return d2dColor(accentColor(dark)); }
-D2D1_COLOR_F Chrome::onAccent() const {
-	const D2D1_COLOR_F a = accent();
-	const float lum = 0.2126f * a.r + 0.7152f * a.g + 0.0722f * a.b;
-	return lum > 0.55f ? D2D1::ColorF(0.035f, 0.063f, 0.047f) : D2D1::ColorF(1, 1, 1);
+D2D1_COLOR_F Chrome::darkInk() { return D2D1::ColorF(0.035f, 0.063f, 0.047f); }
+
+namespace {
+double channel(float c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
+double luminance(D2D1_COLOR_F c) { return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b); }
+}  // namespace
+
+double Chrome::contrast(D2D1_COLOR_F a, D2D1_COLOR_F b) {
+	const double la = luminance(a), lb = luminance(b);
+	return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+D2D1_COLOR_F Chrome::over(D2D1_COLOR_F top, D2D1_COLOR_F bottom) {
+	const float a = std::min(1.0f, std::max(0.0f, top.a));
+	return D2D1::ColorF(top.r * a + bottom.r * (1 - a), top.g * a + bottom.g * (1 - a), top.b * a + bottom.b * (1 - a), 1);
+}
+
+D2D1_COLOR_F Chrome::inkOn(D2D1_COLOR_F fill) {
+	fill.a = 1;
+	const D2D1_COLOR_F white = D2D1::ColorF(1, 1, 1), ink = darkInk();
+	const double onWhite = contrast(white, fill), onInk = contrast(ink, fill);
+	if (std::max(onWhite, onInk) >= 4.5) return onInk >= onWhite ? ink : white;
+	// (Only a middling fill, neither: black, which reads on anything that light.)
+	return onInk >= onWhite ? D2D1::ColorF(0, 0, 0) : white;
+}
+
+D2D1_COLOR_F Chrome::onAccent() const { return inkOn(accent()); }
+
+D2D1_COLOR_F Chrome::accentText(D2D1_COLOR_F background) const {
+	background.a = 1;
+	D2D1_COLOR_F c = accent();
+	const bool lighten = luminance(background) < 0.18;
+	for (int i = 0; i < 40 && contrast(c, background) < 4.5; i++) {
+		if (lighten) c = D2D1::ColorF(c.r + (1 - c.r) * 0.08f, c.g + (1 - c.g) * 0.08f, c.b + (1 - c.b) * 0.08f);
+		else c = D2D1::ColorF(c.r * 0.92f, c.g * 0.92f, c.b * 0.92f);
+	}
+	return c;
 }
 D2D1_COLOR_F Chrome::ink(float alpha) const { return withAlpha(barInk(), alpha); }
 

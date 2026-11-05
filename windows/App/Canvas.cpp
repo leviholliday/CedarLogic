@@ -725,8 +725,10 @@ void Canvas::drawBanner(ID2D1RenderTarget* rt, float w) {
 		const D2D1_RECT_F r = D2D1::RectF(x, y0 + 6, x + bw[i], y0 + hgt - 6);
 		const bool hot = hotHit == (int)hits.size();
 		const bool primary = i == 0;
-		fillRound(rt, r, 7, primary ? withAlpha(c.accent(), hot ? 1.0f : 0.9f) : withAlpha(ink, hot ? 0.14f : 0.08f));
-		drawText(rt, buttons[i].label, r, 12, primary ? c.onAccent() : ink, TextAlign::Center, primary);
+		const D2D1_COLOR_F fill = primary ? withAlpha(c.accent(), hot ? 1.0f : 0.9f) : withAlpha(ink, hot ? 0.14f : 0.08f);
+		fillRound(rt, r, 7, fill);
+		const D2D1_COLOR_F pillBack = c.dark ? rgb255(40, 43, 50) : D2D1::ColorF(1, 1, 1);
+		drawText(rt, buttons[i].label, r, 12, primary ? Chrome::inkOn(Chrome::over(fill, pillBack)) : ink, TextAlign::Center, primary);
 		hits.push_back({ r, buttons[i].command });
 		x += bw[i] + 6;
 	}

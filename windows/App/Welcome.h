@@ -6,6 +6,7 @@
 #define CL_WINDOWS_WELCOME_H
 
 #include "App.h"
+#include "Intro.h"
 #include "ShowMeAround.h"
 #include <functional>
 #include <string>
@@ -17,6 +18,10 @@ namespace splash {
 // launch's work is done (hideSoon), then dissolves into the windows.
 void show();
 bool active();
+// "When CedarLogic opens: None" (intro::straightIn): no launch screen this
+// launch, and its windows open without their card, until it's done
+// (hideSoon).
+bool straightIn();
 void setStatus(const char* status);
 // The circuit being opened, for its "Opening ..." line.
 void setOpening(const std::string& name);
@@ -36,7 +41,7 @@ void skipIntro();
 // `over` (already on screen), dissolving back into it; nothing is held and
 // the once-only keys are left as they are. Not while the launch screen or
 // an intro is up (canPlayIntroNow).
-void playIntroNow(CircuitWindow* over);
+void playIntroNow(CircuitWindow* over, intro::Trigger trigger = intro::Trigger::First);
 bool canPlayIntroNow();
 void drawAfterIntro(ID2D1RenderTarget* rt, D2D1_POINT_2F panelAt, double t);
 void releaseIntroPicture();
