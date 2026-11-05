@@ -166,7 +166,7 @@ int Rail::topInset() const {
 }
 
 std::string Rail::describe() const {
-	return format("strip %d, rail %d, out %d, waiting %d, dismissed %d, folded %d, floater %d", hover.overStrip, hover.overRail, hover.slidOut,
+	return (trace.empty() ? std::string() : "[" + trace + "] ") + format("strip %d, rail %d, out %d, waiting %d, dismissed %d, folded %d, floater %d", hover.overStrip, hover.overRail, hover.slidOut,
 	              hover.pending, hover.dismissed, folded(), floaterState);
 }
 
@@ -335,8 +335,8 @@ void Rail::tick() {
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
 	const int r = hover.tick(now, f, hoverEnabled());
-	if (r == 1) startSlide(true);
-	else if (r == -1) startSlide(false);
+	if (r == 1) { note("slides out"); startSlide(true); }
+	else if (r == -1) { note("goes back"); startSlide(false); }
 	// Held long enough: picked up, and any movement drags it.
 	if (pressed >= 0 && !dragging && !held && now - pressAt >= actions::kHoldTime) {
 		held = true;
@@ -392,7 +392,7 @@ void Rail::motionCb(GtkEventControllerMotion*, double, double, gpointer self) {
 	if (!(state & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK))) r->buttonDown = false;
 	if (r->buttonDown && r->pressed < 0) {
 		// (Out already, it stays as it was until the button's let go.)
-		if (!r->hover.slidOut) guarded("the rail's edge", [&] { r->pointerGone(); });
+		if (!r->hover.slidOut) { r->note("held"); guarded("the rail's edge", [&] { r->pointerGone(); }); }
 		return;
 	}
 	int ox = 0, oy = 0;
@@ -409,7 +409,7 @@ void Rail::pressedCb(GtkGestureMultiPress*, int, double, double, gpointer self) 
 	if ((r->dock && on == r->dock->widget()) || (r->floater && on == r->floater->widget())) return;
 	r->buttonDown = true;
 	// About to slide out (or peeking) over a press on the canvas there: not now.
-	if (!r->hover.slidOut) guarded("the rail's edge", [&] { r->pointerGone(); });
+	if (!r->hover.slidOut) { r->note("press"); guarded("the rail's edge", [&] { r->pointerGone(); }); }
 }
 
 void Rail::releasedCb(GtkGestureMultiPress*, int, double, double, gpointer self) { static_cast<Rail*>(self)->buttonDown = false; }
@@ -418,7 +418,7 @@ gboolean Rail::leaveCb(GtkWidget* w, GdkEventCrossing* e, gpointer self) {
 	Rail* r = static_cast<Rail*>(self);
 	// Out of the window altogether (not into a part of it, or a menu's grab).
 	if (e->window == gtk_widget_get_window(w) && e->detail != GDK_NOTIFY_INFERIOR && e->mode == GDK_CROSSING_NORMAL)
-		guarded("the rail's edge", [&] { r->pointerGone(); });
+		{ r->note(format("left the window (detail %d)", (int)e->detail)); guarded("the rail's edge", [&] { r->pointerGone(); }); }
 	return FALSE;
 }
 
@@ -428,13 +428,20 @@ void Rail::pointerAt(double x, double y) {
 	y -= inset;
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
-	hover.setStrip(f && actions::inHotStrip(x, y, W, H), now, f, hoverEnabled());
+	const bool inStrip = f && actions::inHotStrip(x, y, W, H);
+	if (inStrip != hover.overStrip) note(format("%s the strip at %.0f,%.0f of %.0fx%.0f", inStrip ? "into" : "out of", x, y, W, H));
+	hover.setStrip(inStrip, now, f, hoverEnabled());
 	hover.setRail(f && hover.slidOut && actions::onSlidRail(x, y, W, H), now, f, hoverEnabled());
 	if (hover.peek() != peekShown) {
 		peekShown = hover.peek();
 		updateFloater();
 		dock->redraw();
 	}
+}
+
+void Rail::note(const std::string& what) {
+	trace += (trace.empty() ? "" : "; ") + what;
+	if (trace.size() > 600) trace.erase(0, trace.size() - 600);
 }
 
 void Rail::pointerGone() {

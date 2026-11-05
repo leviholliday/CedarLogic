@@ -1758,6 +1758,7 @@ struct SessionDriver {
 					ok = dock && onScreen(dock, 3, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
 					what = "a click on the folded tab opens the panel";
 				} else {
+					r->clearTrace();
 					ok = dock && pointerTo(dock, 3, ty);
 					pump(600);
 					ok = ok && r->slidOut();
